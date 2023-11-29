@@ -197,7 +197,11 @@ func (c *compactionPlanHandler) removeTasksByChannel(channel string) {
 func (c *compactionPlanHandler) updateTask(planID int64, opts ...compactionTaskOpt) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.plans[planID] = c.plans[planID].shadowClone(opts...)
+	plan, ok := c.plans[planID]
+	if !ok {
+		return
+	}
+	c.plans[planID] = plan.shadowClone(opts...)
 }
 
 func (c *compactionPlanHandler) enqueuePlan(signal *compactionSignal, plan *datapb.CompactionPlan) error {
