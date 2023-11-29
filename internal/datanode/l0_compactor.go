@@ -102,7 +102,7 @@ func (t *levelZeroCompactionTask) getCollection() int64 {
 }
 
 // Do nothing for levelzero compaction
-func (t *levelZeroCompactionTask) injectDone(success bool) {}
+func (t *levelZeroCompactionTask) injectDone() {}
 
 func (t *levelZeroCompactionTask) compact() (*datapb.CompactionPlanResult, error) {
 	log := log.With(zap.Int64("planID", t.plan.GetPlanID()), zap.String("type", t.plan.GetType().String()))
