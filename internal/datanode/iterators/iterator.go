@@ -71,10 +71,6 @@ func (l *LabeledRowData) GetTimestamp() uint64 {
 }
 
 func (l *LabeledRowData) GetSegmentID() typeutil.UniqueID {
-	if l.label == nil {
-		return InvalidID
-	}
-
 	return l.label.segmentID
 }
 
