@@ -3823,6 +3823,8 @@ TEST(CApiTest, SealedSegment_Update_Field_Size) {
 
 TEST(CApiTest, GrowingSegment_Load_Field_Data) {
     auto schema = std::make_shared<Schema>();
+    schema->AddField(FieldName("RowID"), FieldId(0), DataType::INT64);
+    schema->AddField(FieldName("Timestamp"), FieldId(1), DataType::INT64);
     auto str_fid = schema->AddDebugField("string", DataType::VARCHAR);
     auto vec_fid = schema->AddDebugField(
         "vector_float", DataType::VECTOR_FLOAT, DIM, "L2");
