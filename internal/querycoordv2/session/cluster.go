@@ -32,12 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/log"
-)
-
-const (
-	updateTickerDuration = 1 * time.Minute
-	segmentBufferSize    = 16
-	bufferFlushPeriod    = 500 * time.Millisecond
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 var ErrNodeNotFound = errors.New("NodeNotFound")
@@ -100,7 +95,7 @@ func (c *QueryCluster) Stop() {
 
 func (c *QueryCluster) updateLoop() {
 	defer c.wg.Done()
-	ticker := time.NewTicker(updateTickerDuration)
+	ticker := time.NewTicker(paramtable.Get().QueryCoordCfg.CheckNodeSessionInterval.GetAsDuration(time.Second))
 	defer ticker.Stop()
 	for {
 		select {
