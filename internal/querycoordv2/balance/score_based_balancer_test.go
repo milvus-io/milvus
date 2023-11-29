@@ -18,6 +18,7 @@ package balance
 import (
 	"testing"
 
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -231,6 +232,48 @@ func (suite *ScoreBasedBalancerTestSuite) TestAssignSegment() {
 				suite.ElementsMatch(c.expectPlans[i], plans)
 			}
 		})
+	}
+}
+
+func (suite *ScoreBasedBalancerTestSuite) TestAssignSegmentWithGrowing() {
+	suite.SetupSuite()
+	defer suite.TearDownTest()
+	balancer := suite.balancer
+
+	distributions := map[int64][]*meta.Segment{
+		1: {
+			{SegmentInfo: &datapb.SegmentInfo{ID: 1, NumOfRows: 20, CollectionID: 1}, Node: 1},
+		},
+		2: {
+			{SegmentInfo: &datapb.SegmentInfo{ID: 2, NumOfRows: 20, CollectionID: 1}, Node: 2},
+		},
+	}
+	for node, s := range distributions {
+		balancer.dist.SegmentDistManager.Update(node, s...)
+	}
+
+	for _, node := range lo.Keys(distributions) {
+		nodeInfo := session.NewNodeInfo(node, "127.0.0.1:0")
+		nodeInfo.UpdateStats(session.WithSegmentCnt(20))
+		nodeInfo.SetState(session.NodeStateNormal)
+		suite.balancer.nodeManager.Add(nodeInfo)
+	}
+
+	toAssign := []*meta.Segment{
+		{SegmentInfo: &datapb.SegmentInfo{ID: 3, NumOfRows: 10, CollectionID: 1}, Node: 3},
+		{SegmentInfo: &datapb.SegmentInfo{ID: 4, NumOfRows: 10, CollectionID: 1}, Node: 3},
+	}
+
+	// mock 50 growing row count in node 1, which is delegator, expect all segment assign to node 2
+	leaderView := &meta.LeaderView{
+		ID:               1,
+		CollectionID:     1,
+		NumOfGrowingRows: 50,
+	}
+	suite.balancer.dist.LeaderViewManager.Update(1, leaderView)
+	plans := balancer.AssignSegment(1, toAssign, lo.Keys(distributions))
+	for _, p := range plans {
+		suite.Equal(int64(2), p.To)
 	}
 }
 

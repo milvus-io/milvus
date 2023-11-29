@@ -337,6 +337,7 @@ func Test_BinlogParserParse(t *testing.T) {
 		"123/110/a",
 		"123/111/a",
 		"123/112/a",
+		"123/113/a",
 	}
 	chunkManager.readBuf = map[string][]byte{
 		"123/0/a":   createBinlogBuf(t, schemapb.DataType_Int64, fieldsData[106].([]int64)),
@@ -352,6 +353,7 @@ func Test_BinlogParserParse(t *testing.T) {
 		"123/110/a": createBinlogBuf(t, schemapb.DataType_BinaryVector, fieldsData[110].([][]byte)),
 		"123/111/a": createBinlogBuf(t, schemapb.DataType_FloatVector, fieldsData[111].([][]float32)),
 		"123/112/a": createBinlogBuf(t, schemapb.DataType_JSON, fieldsData[112].([][]byte)),
+		"123/113/a": createBinlogBuf(t, schemapb.DataType_Array, fieldsData[113].([]*schemapb.ScalarField)),
 	}
 
 	callTime := 0

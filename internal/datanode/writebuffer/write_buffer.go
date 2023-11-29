@@ -56,8 +56,7 @@ type WriteBuffer interface {
 }
 
 func NewWriteBuffer(channel string, metacache metacache.MetaCache, storageV2Cache *metacache.StorageV2Cache, syncMgr syncmgr.SyncManager, opts ...WriteBufferOption) (WriteBuffer, error) {
-	option := defaultWBOption()
-	option.syncPolicies = append(option.syncPolicies, GetFlushingSegmentsPolicy(metacache))
+	option := defaultWBOption(metacache)
 	for _, opt := range opts {
 		opt(option)
 	}
@@ -212,7 +211,11 @@ func (wb *writeBufferBase) getSegmentsToSync(ts typeutil.Timestamp) []int64 {
 	buffers := lo.Values(wb.buffers)
 	segments := typeutil.NewSet[int64]()
 	for _, policy := range wb.syncPolicies {
-		segments.Insert(policy(buffers, ts)...)
+		result := policy.SelectSegments(buffers, ts)
+		if len(result) > 0 {
+			log.Info("SyncPolicy selects segments", zap.Int64s("segmentIDs", result), zap.String("reason", policy.Reason()))
+			segments.Insert(result...)
+		}
 	}
 
 	return segments.Collect()

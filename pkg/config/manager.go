@@ -203,6 +203,12 @@ func (m *Manager) SetConfig(key, value string) {
 	m.overlays[formatKey(key)] = value
 }
 
+func (m *Manager) SetMapConfig(key, value string) {
+	m.Lock()
+	defer m.Unlock()
+	m.overlays[strings.ToLower(key)] = value
+}
+
 // Delete config at runtime, which has the highest priority to override all other sources
 func (m *Manager) DeleteConfig(key string) {
 	m.Lock()

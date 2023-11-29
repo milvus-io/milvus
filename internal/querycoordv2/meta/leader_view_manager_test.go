@@ -137,6 +137,10 @@ func (suite *LeaderViewManagerSuite) TestGetDist() {
 			suite.AssertChannelDist(shard, nodes)
 		}
 	}
+
+	// test get growing segments
+	segments := mgr.GetGrowingSegments(101, 1)
+	suite.Len(segments, 1)
 }
 
 func (suite *LeaderViewManagerSuite) TestGetLeader() {
@@ -156,6 +160,10 @@ func (suite *LeaderViewManagerSuite) TestGetLeader() {
 			suite.Equal(view, views[leader])
 		}
 	}
+
+	// Test GetByCollectionAndNode
+	leaders := mgr.GetByCollectionAndNode(101, 1)
+	suite.Len(leaders, 1)
 }
 
 func (suite *LeaderViewManagerSuite) AssertSegmentDist(segment int64, nodes []int64) bool {

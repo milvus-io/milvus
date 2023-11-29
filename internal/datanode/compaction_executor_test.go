@@ -83,10 +83,10 @@ func TestCompactionExecutor(t *testing.T) {
 			{expected: false, channel: "ch2", desc: "in dropped"},
 		}
 		ex := newCompactionExecutor()
-		ex.stopExecutingtaskByVChannelName("ch2")
+		ex.clearTasksByChannel("ch2")
 		for _, test := range tests {
 			t.Run(test.desc, func(t *testing.T) {
-				assert.Equal(t, test.expected, ex.channelValidateForCompaction(test.channel))
+				assert.Equal(t, test.expected, ex.isValidChannel(test.channel))
 			})
 		}
 	})
@@ -107,7 +107,7 @@ func TestCompactionExecutor(t *testing.T) {
 			found = ex.executing.Contain(mc.getPlanID())
 		}
 
-		ex.stopExecutingtaskByVChannelName("mock")
+		ex.clearTasksByChannel("mock")
 
 		select {
 		case <-mc.ctx.Done():
@@ -142,8 +142,7 @@ func (mc *mockCompactor) complete() {
 	mc.done <- struct{}{}
 }
 
-func (mc *mockCompactor) injectDone(success bool) {
-}
+func (mc *mockCompactor) injectDone() {}
 
 func (mc *mockCompactor) compact() (*datapb.CompactionPlanResult, error) {
 	if !mc.isvalid {

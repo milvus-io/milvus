@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -27,6 +28,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -39,6 +42,7 @@ var Params *paramtable.ComponentParam = paramtable.Get()
 type Client struct {
 	grpcClient grpcclient.GrpcClient[indexpb.IndexNodeClient]
 	addr       string
+	sess       *sessionutil.Session
 }
 
 // NewClient creates a new IndexNode client.
@@ -46,16 +50,24 @@ func NewClient(ctx context.Context, addr string, nodeID int64, encryption bool) 
 	if addr == "" {
 		return nil, fmt.Errorf("address is empty")
 	}
+	sess := sessionutil.NewSession(ctx)
+	if sess == nil {
+		err := fmt.Errorf("new session error, maybe can not connect to etcd")
+		log.Debug("IndexNodeClient New Etcd Session failed", zap.Error(err))
+		return nil, err
+	}
 	config := &Params.IndexNodeGrpcClientCfg
 	client := &Client{
 		addr:       addr,
 		grpcClient: grpcclient.NewClientBase[indexpb.IndexNodeClient](config, "milvus.proto.index.IndexNode"),
+		sess:       sess,
 	}
 	// node shall specify node id
 	client.grpcClient.SetRole(fmt.Sprintf("%s-%d", typeutil.IndexNodeRole, nodeID))
 	client.grpcClient.SetGetAddrFunc(client.getAddr)
 	client.grpcClient.SetNewGrpcClientFunc(client.newGrpcClient)
 	client.grpcClient.SetNodeID(nodeID)
+	client.grpcClient.SetSession(sess)
 	if encryption {
 		client.grpcClient.EnableEncryption()
 	}

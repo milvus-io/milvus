@@ -783,8 +783,8 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             cf.gen_float_field(name=df.float_field),
         ]
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
-        self.collection_wrap.init_collection(c_name, schema=schema)
-        assert len(self.collection_wrap.partitions) == ct.default_partition_num
+        self.collection_wrap.init_collection(c_name, schema=schema, num_partitions=10)
+        assert len(self.collection_wrap.partitions) == 10
 
         # import data
         t0 = time.time()
@@ -858,7 +858,6 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("dim", [13])
     @pytest.mark.parametrize("entities", [150])
     @pytest.mark.parametrize("file_nums", [10])
-    @pytest.mark.skip(reason="issue #28209")
     def test_partition_key_on_multi_numpy_files(
             self, auto_id, dim, entities, file_nums
     ):
@@ -880,7 +879,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             cf.gen_float_vec_field(name=df.vec_field, dim=dim),
         ]
         schema = cf.gen_collection_schema(fields=fields)
-        self.collection_wrap.init_collection(c_name, schema=schema)
+        self.collection_wrap.init_collection(c_name, schema=schema, num_partitions=10)
         # build index
         index_params = ct.default_index
         self.collection_wrap.create_index(
@@ -942,6 +941,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("auto_id", [True, False])
     @pytest.mark.parametrize("partition_key_field", [df.int_field, df.string_field])
+    @pytest.mark.skip("import data via csv is no longer supported")
     def test_partition_key_on_csv_file(self, auto_id, partition_key_field):
         """
         collection: auto_id, customized_id
@@ -976,8 +976,8 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             cf.gen_float_field(name=df.float_field),
         ]
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
-        self.collection_wrap.init_collection(c_name, schema=schema)
-        assert len(self.collection_wrap.partitions) == ct.default_partition_num
+        self.collection_wrap.init_collection(c_name, schema=schema, num_partitions=10)
+        assert len(self.collection_wrap.partitions) == 10
 
         # import data
         t0 = time.time()
@@ -1039,6 +1039,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("auto_id", [True, False])
     @pytest.mark.parametrize("dim", [128])
     @pytest.mark.parametrize("entities", [100])
+    @pytest.mark.skip("import data via csv is no longer supported")
     def test_float_vector_csv(self, auto_id, dim, entities):
         """
         collection: auto_id, customized_id
@@ -1122,6 +1123,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("auto_id", [True, False])
     @pytest.mark.parametrize("dim", [128])
     @pytest.mark.parametrize("entities", [2000])
+    @pytest.mark.skip("import data via csv is no longer supported")
     def test_binary_vector_csv(self, auto_id, dim, entities):
         """
         collection: auto_id, customized_id
@@ -1208,6 +1210,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("auto_id", [True, False])
     @pytest.mark.parametrize("dim", [128])
     @pytest.mark.parametrize("entities", [2000])
+    @pytest.mark.skip("import data via csv is no longer supported")
     def test_partition_csv(self, auto_id, dim, entities):
         """
         collection schema: [pk, int64, string, float_vector]
