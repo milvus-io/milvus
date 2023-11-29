@@ -29,32 +29,32 @@ func (_m *MockLoader) EXPECT() *MockLoader_Expecter {
 	return &MockLoader_Expecter{mock: &_m.Mock}
 }
 
-// Load provides a mock function with given fields: ctx, collectionID, segmentType, version, segments
-func (_m *MockLoader) Load(ctx context.Context, collectionID int64, segmentType commonpb.SegmentState, version int64, segments ...*querypb.SegmentLoadInfo) ([]Segment, error) {
+// Load provides a mock function with given fields: ctx, collection, segmentType, version, segments
+func (_m *MockLoader) Load(ctx context.Context, collection *Collection, segmentType commonpb.SegmentState, version int64, segments ...*querypb.SegmentLoadInfo) ([]Segment, error) {
 	_va := make([]interface{}, len(segments))
 	for _i := range segments {
 		_va[_i] = segments[_i]
 	}
 	var _ca []interface{}
-	_ca = append(_ca, ctx, collectionID, segmentType, version)
+	_ca = append(_ca, ctx, collection, segmentType, version)
 	_ca = append(_ca, _va...)
 	ret := _m.Called(_ca...)
 
 	var r0 []Segment
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, int64, commonpb.SegmentState, int64, ...*querypb.SegmentLoadInfo) ([]Segment, error)); ok {
-		return rf(ctx, collectionID, segmentType, version, segments...)
+	if rf, ok := ret.Get(0).(func(context.Context, *Collection, commonpb.SegmentState, int64, ...*querypb.SegmentLoadInfo) ([]Segment, error)); ok {
+		return rf(ctx, collection, segmentType, version, segments...)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, int64, commonpb.SegmentState, int64, ...*querypb.SegmentLoadInfo) []Segment); ok {
-		r0 = rf(ctx, collectionID, segmentType, version, segments...)
+	if rf, ok := ret.Get(0).(func(context.Context, *Collection, commonpb.SegmentState, int64, ...*querypb.SegmentLoadInfo) []Segment); ok {
+		r0 = rf(ctx, collection, segmentType, version, segments...)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]Segment)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, int64, commonpb.SegmentState, int64, ...*querypb.SegmentLoadInfo) error); ok {
-		r1 = rf(ctx, collectionID, segmentType, version, segments...)
+	if rf, ok := ret.Get(1).(func(context.Context, *Collection, commonpb.SegmentState, int64, ...*querypb.SegmentLoadInfo) error); ok {
+		r1 = rf(ctx, collection, segmentType, version, segments...)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -69,16 +69,16 @@ type MockLoader_Load_Call struct {
 
 // Load is a helper method to define mock.On call
 //   - ctx context.Context
-//   - collectionID int64
+//   - collection *Collection
 //   - segmentType commonpb.SegmentState
 //   - version int64
 //   - segments ...*querypb.SegmentLoadInfo
-func (_e *MockLoader_Expecter) Load(ctx interface{}, collectionID interface{}, segmentType interface{}, version interface{}, segments ...interface{}) *MockLoader_Load_Call {
+func (_e *MockLoader_Expecter) Load(ctx interface{}, collection interface{}, segmentType interface{}, version interface{}, segments ...interface{}) *MockLoader_Load_Call {
 	return &MockLoader_Load_Call{Call: _e.mock.On("Load",
-		append([]interface{}{ctx, collectionID, segmentType, version}, segments...)...)}
+		append([]interface{}{ctx, collection, segmentType, version}, segments...)...)}
 }
 
-func (_c *MockLoader_Load_Call) Run(run func(ctx context.Context, collectionID int64, segmentType commonpb.SegmentState, version int64, segments ...*querypb.SegmentLoadInfo)) *MockLoader_Load_Call {
+func (_c *MockLoader_Load_Call) Run(run func(ctx context.Context, collection *Collection, segmentType commonpb.SegmentState, version int64, segments ...*querypb.SegmentLoadInfo)) *MockLoader_Load_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		variadicArgs := make([]*querypb.SegmentLoadInfo, len(args)-4)
 		for i, a := range args[4:] {
@@ -86,7 +86,7 @@ func (_c *MockLoader_Load_Call) Run(run func(ctx context.Context, collectionID i
 				variadicArgs[i] = a.(*querypb.SegmentLoadInfo)
 			}
 		}
-		run(args[0].(context.Context), args[1].(int64), args[2].(commonpb.SegmentState), args[3].(int64), variadicArgs...)
+		run(args[0].(context.Context), args[1].(*Collection), args[2].(commonpb.SegmentState), args[3].(int64), variadicArgs...)
 	})
 	return _c
 }
@@ -96,37 +96,37 @@ func (_c *MockLoader_Load_Call) Return(_a0 []Segment, _a1 error) *MockLoader_Loa
 	return _c
 }
 
-func (_c *MockLoader_Load_Call) RunAndReturn(run func(context.Context, int64, commonpb.SegmentState, int64, ...*querypb.SegmentLoadInfo) ([]Segment, error)) *MockLoader_Load_Call {
+func (_c *MockLoader_Load_Call) RunAndReturn(run func(context.Context, *Collection, commonpb.SegmentState, int64, ...*querypb.SegmentLoadInfo) ([]Segment, error)) *MockLoader_Load_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// LoadBloomFilterSet provides a mock function with given fields: ctx, collectionID, version, infos
-func (_m *MockLoader) LoadBloomFilterSet(ctx context.Context, collectionID int64, version int64, infos ...*querypb.SegmentLoadInfo) ([]*pkoracle.BloomFilterSet, error) {
+// LoadBloomFilterSet provides a mock function with given fields: ctx, collection, version, infos
+func (_m *MockLoader) LoadBloomFilterSet(ctx context.Context, collection *Collection, version int64, infos ...*querypb.SegmentLoadInfo) ([]*pkoracle.BloomFilterSet, error) {
 	_va := make([]interface{}, len(infos))
 	for _i := range infos {
 		_va[_i] = infos[_i]
 	}
 	var _ca []interface{}
-	_ca = append(_ca, ctx, collectionID, version)
+	_ca = append(_ca, ctx, collection, version)
 	_ca = append(_ca, _va...)
 	ret := _m.Called(_ca...)
 
 	var r0 []*pkoracle.BloomFilterSet
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, int64, int64, ...*querypb.SegmentLoadInfo) ([]*pkoracle.BloomFilterSet, error)); ok {
-		return rf(ctx, collectionID, version, infos...)
+	if rf, ok := ret.Get(0).(func(context.Context, *Collection, int64, ...*querypb.SegmentLoadInfo) ([]*pkoracle.BloomFilterSet, error)); ok {
+		return rf(ctx, collection, version, infos...)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, int64, int64, ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet); ok {
-		r0 = rf(ctx, collectionID, version, infos...)
+	if rf, ok := ret.Get(0).(func(context.Context, *Collection, int64, ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet); ok {
+		r0 = rf(ctx, collection, version, infos...)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]*pkoracle.BloomFilterSet)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, int64, int64, ...*querypb.SegmentLoadInfo) error); ok {
-		r1 = rf(ctx, collectionID, version, infos...)
+	if rf, ok := ret.Get(1).(func(context.Context, *Collection, int64, ...*querypb.SegmentLoadInfo) error); ok {
+		r1 = rf(ctx, collection, version, infos...)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -141,15 +141,15 @@ type MockLoader_LoadBloomFilterSet_Call struct {
 
 // LoadBloomFilterSet is a helper method to define mock.On call
 //   - ctx context.Context
-//   - collectionID int64
+//   - collection *Collection
 //   - version int64
 //   - infos ...*querypb.SegmentLoadInfo
-func (_e *MockLoader_Expecter) LoadBloomFilterSet(ctx interface{}, collectionID interface{}, version interface{}, infos ...interface{}) *MockLoader_LoadBloomFilterSet_Call {
+func (_e *MockLoader_Expecter) LoadBloomFilterSet(ctx interface{}, collection interface{}, version interface{}, infos ...interface{}) *MockLoader_LoadBloomFilterSet_Call {
 	return &MockLoader_LoadBloomFilterSet_Call{Call: _e.mock.On("LoadBloomFilterSet",
-		append([]interface{}{ctx, collectionID, version}, infos...)...)}
+		append([]interface{}{ctx, collection, version}, infos...)...)}
 }
 
-func (_c *MockLoader_LoadBloomFilterSet_Call) Run(run func(ctx context.Context, collectionID int64, version int64, infos ...*querypb.SegmentLoadInfo)) *MockLoader_LoadBloomFilterSet_Call {
+func (_c *MockLoader_LoadBloomFilterSet_Call) Run(run func(ctx context.Context, collection *Collection, version int64, infos ...*querypb.SegmentLoadInfo)) *MockLoader_LoadBloomFilterSet_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		variadicArgs := make([]*querypb.SegmentLoadInfo, len(args)-3)
 		for i, a := range args[3:] {
@@ -157,7 +157,7 @@ func (_c *MockLoader_LoadBloomFilterSet_Call) Run(run func(ctx context.Context, 
 				variadicArgs[i] = a.(*querypb.SegmentLoadInfo)
 			}
 		}
-		run(args[0].(context.Context), args[1].(int64), args[2].(int64), variadicArgs...)
+		run(args[0].(context.Context), args[1].(*Collection), args[2].(int64), variadicArgs...)
 	})
 	return _c
 }
@@ -167,7 +167,7 @@ func (_c *MockLoader_LoadBloomFilterSet_Call) Return(_a0 []*pkoracle.BloomFilter
 	return _c
 }
 
-func (_c *MockLoader_LoadBloomFilterSet_Call) RunAndReturn(run func(context.Context, int64, int64, ...*querypb.SegmentLoadInfo) ([]*pkoracle.BloomFilterSet, error)) *MockLoader_LoadBloomFilterSet_Call {
+func (_c *MockLoader_LoadBloomFilterSet_Call) RunAndReturn(run func(context.Context, *Collection, int64, ...*querypb.SegmentLoadInfo) ([]*pkoracle.BloomFilterSet, error)) *MockLoader_LoadBloomFilterSet_Call {
 	_c.Call.Return(run)
 	return _c
 }

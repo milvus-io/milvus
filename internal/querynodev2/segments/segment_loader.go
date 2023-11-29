@@ -56,12 +56,12 @@ const (
 type Loader interface {
 	// Load loads binlogs, and spawn segments,
 	// NOTE: make sure the ref count of the corresponding collection will never go down to 0 during this
-	Load(ctx context.Context, collectionID int64, segmentType SegmentType, version int64, segments ...*querypb.SegmentLoadInfo) ([]Segment, error)
+	Load(ctx context.Context, collection *Collection, segmentType SegmentType, version int64, segments ...*querypb.SegmentLoadInfo) ([]Segment, error)
 
 	LoadDeltaLogs(ctx context.Context, segment Segment, deltaLogs []*datapb.FieldBinlog) error
 
 	// LoadBloomFilterSet loads needed statslog for RemoteSegment.
-	LoadBloomFilterSet(ctx context.Context, collectionID int64, version int64, infos ...*querypb.SegmentLoadInfo) ([]*pkoracle.BloomFilterSet, error)
+	LoadBloomFilterSet(ctx context.Context, collection *Collection, version int64, infos ...*querypb.SegmentLoadInfo) ([]*pkoracle.BloomFilterSet, error)
 
 	// LoadIndex append index for segment and remove vector binlogs.
 	LoadIndex(ctx context.Context, segment *LocalSegment, info *querypb.SegmentLoadInfo, version int64) error
@@ -151,13 +151,13 @@ type segmentLoader struct {
 var _ Loader = (*segmentLoader)(nil)
 
 func (loader *segmentLoader) Load(ctx context.Context,
-	collectionID int64,
+	collection *Collection,
 	segmentType SegmentType,
 	version int64,
 	segments ...*querypb.SegmentLoadInfo,
 ) ([]Segment, error) {
 	log := log.Ctx(ctx).With(
-		zap.Int64("collectionID", collectionID),
+		zap.Int64("collectionID", collection.ID()),
 		zap.String("segmentType", segmentType.String()),
 	)
 
@@ -200,13 +200,6 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		partitionID := info.GetPartitionID()
 		collectionID := info.GetCollectionID()
 		shard := info.GetInsertChannel()
-
-		collection := loader.manager.Collection.Get(collectionID)
-		if collection == nil {
-			err := merr.WrapErrCollectionNotFound(collectionID)
-			log.Warn("failed to get collection", zap.Error(err))
-			return nil, err
-		}
 
 		segment, err := NewSegment(
 			collection,
@@ -454,9 +447,9 @@ func (loader *segmentLoader) waitSegmentLoadDone(ctx context.Context, segmentTyp
 	return nil
 }
 
-func (loader *segmentLoader) LoadBloomFilterSet(ctx context.Context, collectionID int64, version int64, infos ...*querypb.SegmentLoadInfo) ([]*pkoracle.BloomFilterSet, error) {
+func (loader *segmentLoader) LoadBloomFilterSet(ctx context.Context, collection *Collection, version int64, infos ...*querypb.SegmentLoadInfo) ([]*pkoracle.BloomFilterSet, error) {
 	log := log.Ctx(ctx).With(
-		zap.Int64("collectionID", collectionID),
+		zap.Int64("collectionID", collection.ID()),
 		zap.Int64s("segmentIDs", lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) int64 {
 			return info.GetSegmentID()
 		})),
@@ -468,12 +461,6 @@ func (loader *segmentLoader) LoadBloomFilterSet(ctx context.Context, collectionI
 		return nil, nil
 	}
 
-	collection := loader.manager.Collection.Get(collectionID)
-	if collection == nil {
-		err := merr.WrapErrCollectionNotFound(collectionID)
-		log.Warn("failed to get collection while loading segment", zap.Error(err))
-		return nil, err
-	}
 	pkField := GetPkField(collection.Schema())
 
 	log.Info("start loading remote...", zap.Int("segmentNum", segmentNum))

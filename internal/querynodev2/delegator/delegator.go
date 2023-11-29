@@ -55,6 +55,7 @@ import (
 // ShardDelegator is the interface definition.
 type ShardDelegator interface {
 	Collection() int64
+	MetricType() string
 	Version() int64
 	GetSegmentInfo(readable bool) (sealed []SnapshotItem, growing []SegmentEntry)
 	SyncDistribution(ctx context.Context, entries ...SegmentEntry)
@@ -140,6 +141,10 @@ func (sd *shardDelegator) Start() {
 // Collection returns delegator collection id.
 func (sd *shardDelegator) Collection() int64 {
 	return sd.collectionID
+}
+
+func (sd *shardDelegator) MetricType() string {
+	return sd.collection.GetMetricType()
 }
 
 // Version returns delegator version.
@@ -647,27 +652,23 @@ func (sd *shardDelegator) Close() {
 }
 
 // NewShardDelegator creates a new ShardDelegator instance with all fields initialized.
-func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID UniqueID, channel string, version int64,
+func NewShardDelegator(ctx context.Context, collection *segments.Collection, replicaID UniqueID, channel string, version int64,
 	workerManager cluster.Manager, manager *segments.Manager, tsafeManager tsafe.Manager, loader segments.Loader,
 	factory msgstream.Factory, startTs uint64, queryHook optimizers.QueryHook,
 ) (ShardDelegator, error) {
-	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID),
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", collection.ID()),
 		zap.Int64("replicaID", replicaID),
 		zap.String("channel", channel),
 		zap.Int64("version", version),
 		zap.Uint64("startTs", startTs),
 	)
 
-	collection := manager.Collection.Get(collectionID)
-	if collection == nil {
-		return nil, fmt.Errorf("collection(%d) not found in manager", collectionID)
-	}
-
 	maxSegmentDeleteBuffer := paramtable.Get().QueryNodeCfg.MaxSegmentDeleteBuffer.GetAsInt64()
 	log.Info("Init delta cache", zap.Int64("maxSegmentCacheBuffer", maxSegmentDeleteBuffer), zap.Time("startTime", tsoutil.PhysicalTime(startTs)))
 
 	sd := &shardDelegator{
-		collectionID:    collectionID,
+		collectionID:    collection.ID(),
 		replicaID:       replicaID,
 		vchannelName:    channel,
 		version:         version,

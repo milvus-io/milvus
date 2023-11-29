@@ -52,11 +52,25 @@ func (w *LocalWorker) LoadSegments(ctx context.Context, req *querypb.LoadSegment
 		})),
 		zap.String("loadScope", req.GetLoadScope().String()),
 	)
-	w.node.manager.Collection.Put(req.GetCollectionID(), req.GetSchema(),
-		w.node.composeIndexMeta(req.GetIndexInfoList(), req.GetSchema()), req.GetLoadMeta())
+
+	var err error
+	collection := segments.NewCollection(
+		req.GetCollectionID(),
+		req.GetSchema(),
+		w.node.composeIndexMeta(
+			req.GetIndexInfoList(),
+			req.GetSchema(),
+		),
+		req.GetLoadMeta(),
+	)
+	defer func() {
+		if err != nil {
+			collection.Release()
+		}
+	}()
 	log.Info("start to load segments...")
 	loaded, err := w.node.loader.Load(ctx,
-		req.GetCollectionID(),
+		collection,
 		segments.SegmentTypeSealed,
 		req.GetVersion(),
 		req.GetInfos()...,
@@ -65,6 +79,7 @@ func (w *LocalWorker) LoadSegments(ctx context.Context, req *querypb.LoadSegment
 		return err
 	}
 
+	w.node.manager.Collection.Put(collection)
 	log.Info("load segments done...",
 		zap.Int64s("segments", lo.Map(loaded, func(s segments.Segment, _ int) int64 { return s.ID() })))
 	return err

@@ -63,7 +63,7 @@ func (suite *SearchSuite) SetupTest() {
 	suite.manager = NewManager()
 	schema := GenTestCollectionSchema("test-reduce", schemapb.DataType_Int64)
 	indexMeta := GenTestIndexMeta(suite.collectionID, schema)
-	suite.manager.Collection.Put(suite.collectionID,
+	suite.manager.Collection.Put(NewCollection(suite.collectionID,
 		schema,
 		indexMeta,
 		&querypb.LoadMetaInfo{
@@ -71,6 +71,7 @@ func (suite *SearchSuite) SetupTest() {
 			CollectionID: suite.collectionID,
 			PartitionIDs: []int64{suite.partitionID},
 		},
+	),
 	)
 	suite.collection = suite.manager.Collection.Get(suite.collectionID)
 

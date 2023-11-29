@@ -47,6 +47,7 @@ type SegmentLoaderSuite struct {
 	chunkManager storage.ChunkManager
 
 	// Data
+	collection   *Collection
 	collectionID int64
 	partitionID  int64
 	segmentID    int64
@@ -83,7 +84,7 @@ func (suite *SegmentLoaderSuite) SetupTest() {
 		CollectionID: suite.collectionID,
 		PartitionIDs: []int64{suite.partitionID},
 	}
-	suite.manager.Collection.Put(suite.collectionID, suite.schema, indexMeta, loadMeta)
+	suite.collection = NewCollection(suite.collectionID, suite.schema, indexMeta, loadMeta)
 }
 
 func (suite *SegmentLoaderSuite) TearDownTest() {
@@ -110,7 +111,7 @@ func (suite *SegmentLoaderSuite) TestLoad() {
 	)
 	suite.NoError(err)
 
-	_, err = suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, &querypb.SegmentLoadInfo{
+	_, err = suite.loader.Load(ctx, suite.collection, SegmentTypeSealed, 0, &querypb.SegmentLoadInfo{
 		SegmentID:    suite.segmentID,
 		PartitionID:  suite.partitionID,
 		CollectionID: suite.collectionID,
@@ -131,7 +132,7 @@ func (suite *SegmentLoaderSuite) TestLoad() {
 	)
 	suite.NoError(err)
 
-	_, err = suite.loader.Load(ctx, suite.collectionID, SegmentTypeGrowing, 0, &querypb.SegmentLoadInfo{
+	_, err = suite.loader.Load(ctx, suite.collection, SegmentTypeGrowing, 0, &querypb.SegmentLoadInfo{
 		SegmentID:    suite.segmentID + 1,
 		PartitionID:  suite.partitionID,
 		CollectionID: suite.collectionID,
@@ -169,7 +170,7 @@ func (suite *SegmentLoaderSuite) TestLoadMultipleSegments() {
 		})
 	}
 
-	segments, err := suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, loadInfos...)
+	segments, err := suite.loader.Load(ctx, suite.collection, SegmentTypeSealed, 0, loadInfos...)
 	suite.NoError(err)
 
 	// Won't load bloom filter with sealed segments
@@ -203,7 +204,7 @@ func (suite *SegmentLoaderSuite) TestLoadMultipleSegments() {
 		})
 	}
 
-	segments, err = suite.loader.Load(ctx, suite.collectionID, SegmentTypeGrowing, 0, loadInfos...)
+	segments, err = suite.loader.Load(ctx, suite.collection, SegmentTypeGrowing, 0, loadInfos...)
 	suite.NoError(err)
 	// Should load bloom filter with growing segments
 	for _, segment := range segments {
@@ -255,7 +256,7 @@ func (suite *SegmentLoaderSuite) TestLoadWithIndex() {
 		})
 	}
 
-	segments, err := suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, loadInfos...)
+	segments, err := suite.loader.Load(ctx, suite.collection, SegmentTypeSealed, 0, loadInfos...)
 	suite.NoError(err)
 
 	vecFields := funcutil.GetVecFieldIDs(suite.schema)
@@ -292,7 +293,7 @@ func (suite *SegmentLoaderSuite) TestLoadBloomFilter() {
 		})
 	}
 
-	bfs, err := suite.loader.LoadBloomFilterSet(ctx, suite.collectionID, 0, loadInfos...)
+	bfs, err := suite.loader.LoadBloomFilterSet(ctx, suite.collection, 0, loadInfos...)
 	suite.NoError(err)
 
 	for _, bf := range bfs {
@@ -340,7 +341,7 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogs() {
 		})
 	}
 
-	segments, err := suite.loader.Load(ctx, suite.collectionID, SegmentTypeGrowing, 0, loadInfos...)
+	segments, err := suite.loader.Load(ctx, suite.collection, SegmentTypeGrowing, 0, loadInfos...)
 	suite.NoError(err)
 
 	for _, segment := range segments {
@@ -392,7 +393,7 @@ func (suite *SegmentLoaderSuite) TestLoadDupDeltaLogs() {
 		})
 	}
 
-	segments, err := suite.loader.Load(ctx, suite.collectionID, SegmentTypeGrowing, 0, loadInfos...)
+	segments, err := suite.loader.Load(ctx, suite.collection, SegmentTypeGrowing, 0, loadInfos...)
 	suite.NoError(err)
 
 	for i, segment := range segments {
@@ -459,7 +460,7 @@ func (suite *SegmentLoaderSuite) TestLoadWithMmap() {
 	)
 	suite.NoError(err)
 
-	_, err = suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, &querypb.SegmentLoadInfo{
+	_, err = suite.loader.Load(ctx, suite.collection, SegmentTypeSealed, 0, &querypb.SegmentLoadInfo{
 		SegmentID:    suite.segmentID,
 		PartitionID:  suite.partitionID,
 		CollectionID: suite.collectionID,
@@ -514,7 +515,7 @@ func (suite *SegmentLoaderSuite) TestPatchEntryNum() {
 		}
 	}
 
-	segments, err := suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, loadInfo)
+	segments, err := suite.loader.Load(ctx, suite.collection, SegmentTypeSealed, 0, loadInfo)
 	suite.Require().NoError(err)
 	suite.Require().Equal(1, len(segments))
 
@@ -544,7 +545,7 @@ func (suite *SegmentLoaderSuite) TestRunOutMemory() {
 	)
 	suite.NoError(err)
 
-	_, err = suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, &querypb.SegmentLoadInfo{
+	_, err = suite.loader.Load(ctx, suite.collection, SegmentTypeSealed, 0, &querypb.SegmentLoadInfo{
 		SegmentID:    suite.segmentID,
 		PartitionID:  suite.partitionID,
 		CollectionID: suite.collectionID,
@@ -565,7 +566,7 @@ func (suite *SegmentLoaderSuite) TestRunOutMemory() {
 	)
 	suite.NoError(err)
 
-	_, err = suite.loader.Load(ctx, suite.collectionID, SegmentTypeGrowing, 0, &querypb.SegmentLoadInfo{
+	_, err = suite.loader.Load(ctx, suite.collection, SegmentTypeGrowing, 0, &querypb.SegmentLoadInfo{
 		SegmentID:    suite.segmentID + 1,
 		PartitionID:  suite.partitionID,
 		CollectionID: suite.collectionID,
@@ -576,7 +577,7 @@ func (suite *SegmentLoaderSuite) TestRunOutMemory() {
 	suite.Error(err)
 
 	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapDirPath.Key, "./mmap")
-	_, err = suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, &querypb.SegmentLoadInfo{
+	_, err = suite.loader.Load(ctx, suite.collection, SegmentTypeSealed, 0, &querypb.SegmentLoadInfo{
 		SegmentID:    suite.segmentID,
 		PartitionID:  suite.partitionID,
 		CollectionID: suite.collectionID,
@@ -585,7 +586,7 @@ func (suite *SegmentLoaderSuite) TestRunOutMemory() {
 		NumOfRows:    int64(msgLength),
 	})
 	suite.Error(err)
-	_, err = suite.loader.Load(ctx, suite.collectionID, SegmentTypeGrowing, 0, &querypb.SegmentLoadInfo{
+	_, err = suite.loader.Load(ctx, suite.collection, SegmentTypeGrowing, 0, &querypb.SegmentLoadInfo{
 		SegmentID:    suite.segmentID + 1,
 		PartitionID:  suite.partitionID,
 		CollectionID: suite.collectionID,
@@ -650,7 +651,7 @@ func (suite *SegmentLoaderDetailSuite) SetupTest() {
 		PartitionIDs: []int64{suite.partitionID},
 	}
 
-	collection := NewCollection(suite.collectionID, schema, indexMeta, loadMeta.GetLoadType())
+	collection := NewCollection(suite.collectionID, schema, indexMeta, loadMeta)
 	suite.collectionManager.EXPECT().Get(suite.collectionID).Return(collection).Maybe()
 }
 

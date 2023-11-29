@@ -317,7 +317,7 @@ func (sd *shardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.Segm
 
 	segmentIDs := lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) int64 { return info.GetSegmentID() })
 	log.Info("loading growing segments...", zap.Int64s("segmentIDs", segmentIDs))
-	loaded, err := sd.loader.Load(ctx, sd.collectionID, segments.SegmentTypeGrowing, version, infos...)
+	loaded, err := sd.loader.Load(ctx, sd.collection, segments.SegmentTypeGrowing, version, infos...)
 	if err != nil {
 		log.Warn("failed to load growing segment", zap.Error(err))
 		return err
@@ -390,7 +390,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 	infos := lo.Filter(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) bool {
 		return !sd.pkOracle.Exists(pkoracle.NewCandidateKey(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed), targetNodeID)
 	})
-	candidates, err := sd.loader.LoadBloomFilterSet(ctx, req.GetCollectionID(), req.GetVersion(), infos...)
+	candidates, err := sd.loader.LoadBloomFilterSet(ctx, sd.collection, req.GetVersion(), infos...)
 	if err != nil {
 		log.Warn("failed to load bloom filter set for segment", zap.Error(err))
 		return err

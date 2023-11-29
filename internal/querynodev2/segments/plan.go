@@ -43,7 +43,7 @@ type SearchPlan struct {
 func createSearchPlanByExpr(col *Collection, expr []byte, metricType string) (*SearchPlan, error) {
 	collectionPtr, ok := col.Ptr()
 	if !ok {
-		defer DeleteCollection(collectionPtr)
+		defer deleteCollection(collectionPtr)
 	}
 	var cPlan C.CSearchPlan
 	status := C.CreateSearchPlanByExpr(collectionPtr, unsafe.Pointer(&expr[0]), (C.int64_t)(len(expr)), &cPlan)
@@ -176,7 +176,7 @@ type RetrievePlan struct {
 func NewRetrievePlan(col *Collection, expr []byte, timestamp Timestamp, msgID UniqueID) (*RetrievePlan, error) {
 	collectionPtr, ok := col.Ptr()
 	if !ok {
-		defer DeleteCollection(collectionPtr)
+		defer deleteCollection(collectionPtr)
 	}
 
 	var cPlan C.CRetrievePlan

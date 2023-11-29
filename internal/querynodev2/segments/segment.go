@@ -178,7 +178,7 @@ func NewSegment(collection *Collection,
 
 	collectionPtr, ok := collection.Ptr()
 	if !ok {
-		defer DeleteCollection(collectionPtr)
+		defer deleteCollection(collectionPtr)
 	}
 
 	var segmentPtr C.CSegmentInterface

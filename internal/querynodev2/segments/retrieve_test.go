@@ -72,7 +72,8 @@ func (suite *RetrieveSuite) SetupTest() {
 	suite.manager = NewManager()
 	schema := GenTestCollectionSchema("test-reduce", schemapb.DataType_Int64)
 	indexMeta := GenTestIndexMeta(suite.collectionID, schema)
-	suite.manager.Collection.Put(suite.collectionID,
+	collection := NewCollection(
+		suite.collectionID,
 		schema,
 		indexMeta,
 		&querypb.LoadMetaInfo{
@@ -81,6 +82,7 @@ func (suite *RetrieveSuite) SetupTest() {
 			PartitionIDs: []int64{suite.partitionID},
 		},
 	)
+	suite.manager.Collection.Put(collection)
 	suite.collection = suite.manager.Collection.Get(suite.collectionID)
 
 	suite.sealed, err = NewSegment(suite.collection,

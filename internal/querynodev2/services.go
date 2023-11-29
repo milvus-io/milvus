@@ -209,26 +209,27 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		zap.String("metricType", req.GetLoadMeta().GetMetricType()),
 	)
 
+	var err error
 	// check node healthy
-	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
+	if err = node.lifetime.Add(merr.IsHealthy); err != nil {
 		return merr.Status(err), nil
 	}
 	defer node.lifetime.Done()
 
 	// check target matches
-	if err := merr.CheckTargetID(req.GetBase()); err != nil {
+	if err = merr.CheckTargetID(req.GetBase()); err != nil {
 		return merr.Status(err), nil
 	}
 
 	// check metric type
 	if req.GetLoadMeta().GetMetricType() == "" {
-		err := fmt.Errorf("empty metric type, collection = %d", req.GetCollectionID())
+		err = fmt.Errorf("empty metric type, collection = %d", req.GetCollectionID())
 		return merr.Status(err), nil
 	}
 
 	// check index
 	if len(req.GetIndexInfoList()) == 0 {
-		err := merr.WrapErrIndexNotFoundForCollection(req.GetSchema().GetName())
+		err = merr.WrapErrIndexNotFoundForCollection(req.GetSchema().GetName())
 		return merr.Status(err), nil
 	}
 
@@ -241,7 +242,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 
 	// to avoid concurrent watch/unwatch
 	if node.unsubscribingChannels.Contain(channel.GetChannelName()) {
-		err := merr.WrapErrChannelReduplicate(channel.GetChannelName(), "the other same channel is unsubscribing")
+		err = merr.WrapErrChannelReduplicate(channel.GetChannelName(), "the other same channel is unsubscribing")
 		log.Warn("failed to unsubscribe channel", zap.Error(err))
 		return merr.Status(err), nil
 	}
@@ -252,11 +253,24 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		return merr.Success(), nil
 	}
 
-	node.manager.Collection.Put(req.GetCollectionID(), req.GetSchema(),
-		node.composeIndexMeta(req.GetIndexInfoList(), req.Schema), req.GetLoadMeta())
+	collection := segments.NewCollection(
+		req.GetCollectionID(),
+		req.GetSchema(),
+		node.composeIndexMeta(
+			req.GetIndexInfoList(),
+			req.GetSchema(),
+		),
+		req.GetLoadMeta(),
+	)
+	defer func() {
+		if err != nil {
+			collection.Release()
+		}
+	}()
+
 	delegator, err := delegator.NewShardDelegator(
 		ctx,
-		req.GetCollectionID(),
+		collection,
 		req.GetReplicaID(),
 		channel.GetChannelName(),
 		req.GetVersion(),
@@ -348,6 +362,9 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		)
 		return merr.Status(err), nil
 	}
+
+	// watch channel succeeded, now we can save the collection
+	node.manager.Collection.Put(collection)
 
 	// start pipeline
 	pipeline.Start()
@@ -443,8 +460,6 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 		return merr.Status(err), nil
 	}
 
-	collection := node.manager.Collection.Put(req.GetCollectionID(), req.GetSchema(),
-		node.composeIndexMeta(req.GetIndexInfoList(), req.GetSchema()), req.GetLoadMeta())
 	// check index
 	if len(req.GetIndexInfoList()) == 0 {
 		err := merr.WrapErrIndexNotFoundForCollection(req.GetSchema().GetName())
@@ -463,7 +478,7 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 
 		req.NeedTransfer = false
 		// the segment may be not with index, so no metric type in the load request, so fill it here
-		req.LoadMeta.MetricType = collection.GetMetricType()
+		req.LoadMeta.MetricType = delegator.MetricType()
 		err := delegator.LoadSegments(ctx, req)
 		if err != nil {
 			log.Warn("delegator failed to load segments", zap.Error(err))
@@ -480,10 +495,26 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 		return node.loadIndex(ctx, req), nil
 	}
 
+	var err error
+	collection := segments.NewCollection(
+		req.GetCollectionID(),
+		req.GetSchema(),
+		node.composeIndexMeta(
+			req.GetIndexInfoList(),
+			req.GetSchema(),
+		),
+		req.GetLoadMeta(),
+	)
+	defer func() {
+		if err != nil {
+			collection.Release()
+		}
+	}()
+
 	// Actual load segment
 	log.Info("start to load segments...")
 	loaded, err := node.loader.Load(ctx,
-		req.GetCollectionID(),
+		collection,
 		segments.SegmentTypeSealed,
 		req.GetVersion(),
 		req.GetInfos()...,
@@ -492,7 +523,9 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 		return merr.Status(err), nil
 	}
 
-	log.Info("load segments done...",
+	// load done, then we can save the collection
+	node.manager.Collection.Put(collection)
+	log.Info("load segments done",
 		zap.Int64s("segments", lo.Map(loaded, func(s segments.Segment, _ int) int64 { return s.ID() })))
 
 	return merr.Success(), nil

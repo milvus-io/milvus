@@ -43,7 +43,7 @@ import (
 // WARN: DO NOT add method to get the collection
 type CollectionManager interface {
 	Get(collectionID int64) *Collection
-	Put(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo) *Collection
+	Put(collection *Collection)
 	Remove(collectionID int64)
 }
 
@@ -65,23 +65,15 @@ func (m *collectionManager) Get(collectionID int64) *Collection {
 	return m.collections[collectionID]
 }
 
-func (m *collectionManager) Put(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo) *Collection {
+func (m *collectionManager) Put(collection *Collection) {
 	m.mut.Lock()
 	defer m.mut.Unlock()
 
-	if collection, ok := m.collections[collectionID]; ok {
-		// the schema may be changed even the collection is loaded
-		collection.mu.Lock()
-		defer collection.mu.Unlock()
-		collection.schema.Store(schema)
-		return
+	if old, ok := m.collections[collection.ID()]; ok {
+		old.Release()
 	}
 
-	collection := NewCollection(collectionID, schema, meta, loadMeta.GetLoadType())
-	collection.metricType.Store(loadMeta.GetMetricType())
-	collection.AddPartition(loadMeta.GetPartitionIDs()...)
-	m.collections[collectionID] = collection
-	return collection
+	m.collections[collection.ID()] = collection
 }
 
 func (m *collectionManager) Remove(collectionID int64) {
@@ -89,7 +81,7 @@ func (m *collectionManager) Remove(collectionID int64) {
 	defer m.mut.Unlock()
 
 	if collection, ok := m.collections[collectionID]; ok {
-		DeleteCollection(collection._ptr)
+		deleteCollection(collection._ptr)
 		delete(m.collections, collectionID)
 	}
 }
@@ -162,10 +154,17 @@ func (c *Collection) Ptr() (C.CCollection, bool) {
 
 	// the collection was released after the caller retrieved it
 	if ptr == nil {
-		return newCCollection(c.schema, c.indexMeta), false
+		return newCCollection(c.schema.Load(), c.indexMeta), false
 	}
 
 	return ptr, true
+}
+
+func (c *Collection) Release() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	deleteCollection(c._ptr)
+	c._ptr = nil
 }
 
 func newCCollection(schema *schemapb.CollectionSchema, indexMeta *segcorepb.CollectionIndexMeta) C.CCollection {
@@ -189,7 +188,7 @@ func newCCollection(schema *schemapb.CollectionSchema, indexMeta *segcorepb.Coll
 }
 
 // NewCollection returns a new Collection
-func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexMeta *segcorepb.CollectionIndexMeta, loadType querypb.LoadType) *Collection {
+func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexMeta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo) *Collection {
 	/*
 		CCollection
 		NewCollection(const char* schema_proto_blob);
@@ -198,10 +197,13 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 		id:         collectionID,
 		indexMeta:  indexMeta,
 		partitions: typeutil.NewConcurrentSet[int64](),
-		loadType:   loadType,
+		loadType:   loadMeta.GetLoadType(),
+		metricType: atomic.String{},
 		schema:     atomic.Pointer[schemapb.CollectionSchema]{},
 	}
+	coll.AddPartition(loadMeta.GetPartitionIDs()...)
 	coll.schema.Store(schema)
+	coll.metricType.Store(loadMeta.GetMetricType())
 
 	return coll
 }
@@ -215,7 +217,7 @@ func NewCollectionWithoutSchema(collectionID int64, loadType querypb.LoadType) *
 }
 
 // deleteCollection delete collection and free the collection memory
-func DeleteCollection(collectionPtr C.CCollection) {
+func deleteCollection(collectionPtr C.CCollection) {
 	/*
 		void
 		deleteCollection(CCollection collection);

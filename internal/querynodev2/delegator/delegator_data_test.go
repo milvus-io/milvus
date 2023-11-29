@@ -48,6 +48,7 @@ import (
 type DelegatorDataSuite struct {
 	suite.Suite
 
+	collection    *segments.Collection
 	collectionID  int64
 	replicaID     int64
 	vchannelName  string
@@ -77,7 +78,7 @@ func (s *DelegatorDataSuite) SetupTest() {
 	s.loader = &segments.MockLoader{}
 
 	// init schema
-	s.manager.Collection.Put(s.collectionID, &schemapb.CollectionSchema{
+	s.collection = segments.NewCollection(s.collectionID, &schemapb.CollectionSchema{
 		Name: "TestCollection",
 		Fields: []*schemapb.FieldSchema{
 			{
@@ -128,11 +129,12 @@ func (s *DelegatorDataSuite) SetupTest() {
 	}, &querypb.LoadMetaInfo{
 		LoadType: querypb.LoadType_LoadCollection,
 	})
+	s.manager.Collection.Put(s.collection)
 
 	s.mq = &msgstream.MockMsgStream{}
 
 	var err error
-	s.delegator, err = NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.tsafeManager, s.loader, &msgstream.MockMqFactory{
+	s.delegator, err = NewShardDelegator(context.Background(), s.collection, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.tsafeManager, s.loader, &msgstream.MockMqFactory{
 		NewMsgStreamFunc: func(_ context.Context) (msgstream.MsgStream, error) {
 			return s.mq, nil
 		},
@@ -510,7 +512,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 
 		delegator, err := NewShardDelegator(
 			context.Background(),
-			s.collectionID,
+			s.collection,
 			s.replicaID,
 			s.vchannelName,
 			s.version,

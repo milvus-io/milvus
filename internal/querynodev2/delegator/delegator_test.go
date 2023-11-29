@@ -52,6 +52,7 @@ import (
 type DelegatorSuite struct {
 	suite.Suite
 
+	collection    *segments.Collection
 	collectionID  int64
 	partitionIDs  []int64
 	replicaID     int64
@@ -100,7 +101,7 @@ func (s *DelegatorSuite) SetupTest() {
 	}, nil)
 
 	// init schema
-	s.manager.Collection.Put(s.collectionID, &schemapb.CollectionSchema{
+	s.collection = segments.NewCollection(s.collectionID, &schemapb.CollectionSchema{
 		Name: "TestCollection",
 		Fields: []*schemapb.FieldSchema{
 			{
@@ -151,12 +152,13 @@ func (s *DelegatorSuite) SetupTest() {
 	}, &querypb.LoadMetaInfo{
 		PartitionIDs: s.partitionIDs,
 	})
+	s.manager.Collection.Put(s.collection)
 
 	s.mq = &msgstream.MockMsgStream{}
 
 	var err error
 	//	s.delegator, err = NewShardDelegator(s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.tsafeManager, s.loader)
-	s.delegator, err = NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.tsafeManager, s.loader, &msgstream.MockMqFactory{
+	s.delegator, err = NewShardDelegator(context.Background(), s.collection, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.tsafeManager, s.loader, &msgstream.MockMqFactory{
 		NewMsgStreamFunc: func(_ context.Context) (msgstream.MsgStream, error) {
 			return s.mq, nil
 		},

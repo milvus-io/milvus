@@ -338,6 +338,47 @@ func (_c *MockShardDelegator_LoadSegments_Call) RunAndReturn(run func(context.Co
 	return _c
 }
 
+// MetricType provides a mock function with given fields:
+func (_m *MockShardDelegator) MetricType() string {
+	ret := _m.Called()
+
+	var r0 string
+	if rf, ok := ret.Get(0).(func() string); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	return r0
+}
+
+// MockShardDelegator_MetricType_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'MetricType'
+type MockShardDelegator_MetricType_Call struct {
+	*mock.Call
+}
+
+// MetricType is a helper method to define mock.On call
+func (_e *MockShardDelegator_Expecter) MetricType() *MockShardDelegator_MetricType_Call {
+	return &MockShardDelegator_MetricType_Call{Call: _e.mock.On("MetricType")}
+}
+
+func (_c *MockShardDelegator_MetricType_Call) Run(run func()) *MockShardDelegator_MetricType_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockShardDelegator_MetricType_Call) Return(_a0 string) *MockShardDelegator_MetricType_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockShardDelegator_MetricType_Call) RunAndReturn(run func() string) *MockShardDelegator_MetricType_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ProcessDelete provides a mock function with given fields: deleteData, ts
 func (_m *MockShardDelegator) ProcessDelete(deleteData []*DeleteData, ts uint64) {
 	_m.Called(deleteData, ts)
