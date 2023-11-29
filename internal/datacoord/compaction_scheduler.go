@@ -143,6 +143,8 @@ func (s *CompactionScheduler) Schedule() []*compactionTask {
 }
 
 func (s *CompactionScheduler) Finish(nodeID, planID UniqueID) {
+	log := log.With(zap.Int64("planID", planID), zap.Int64("nodeID", nodeID))
+
 	s.mu.Lock()
 	if parallel, ok := s.parallelTasks[nodeID]; ok {
 		tasks := lo.Filter(parallel, func(t *compactionTask, _ int) bool {
@@ -150,10 +152,19 @@ func (s *CompactionScheduler) Finish(nodeID, planID UniqueID) {
 		})
 		s.parallelTasks[nodeID] = tasks
 		s.taskNumber.Dec()
+		log.Info("Compaction scheduler remove task from executing")
 	}
-	s.mu.Unlock()
 
-	log.Info("Compaction finished", zap.Int64("planID", planID), zap.Int64("nodeID", nodeID))
+	filterd := lo.Filter(s.queuingTasks, func(t *compactionTask, _ int) bool {
+		return t.plan.PlanID != planID
+	})
+	if len(filterd) < len(s.queuingTasks) {
+		s.queuingTasks = filterd
+		s.taskNumber.Dec()
+		log.Info("Compaction scheduler remove task from queue")
+	}
+
+	s.mu.Unlock()
 	s.LogStatus()
 }
 

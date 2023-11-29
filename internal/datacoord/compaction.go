@@ -205,6 +205,11 @@ func (c *compactionPlanHandler) removeTasksByChannel(channel string) {
 	defer c.mu.Unlock()
 	for id, task := range c.plans {
 		if task.triggerInfo.channel == channel {
+			log.Info("Compaction handler removing tasks by channel",
+				zap.String("channel", channel),
+				zap.Int64("planID", task.plan.GetPlanID()),
+				zap.Int64("node", task.dataNodeID),
+			)
 			c.scheduler.Finish(task.dataNodeID, task.plan.PlanID)
 			delete(c.plans, id)
 		}
@@ -267,15 +272,17 @@ func (c *compactionPlanHandler) RefreshPlan(task *compactionTask) {
 		})
 
 		plan.SegmentBinlogs = append(plan.SegmentBinlogs, sealedSegBinlogs...)
-		log.Info("Refresh level zero delete compactino plan", zap.Any("target segments", sealedSegBinlogs))
+		log.Info("Compaction handler refreshed level zero compaction plan", zap.Any("target segments", sealedSegBinlogs))
 		return
 	}
 
 	if plan.GetType() == datapb.CompactionType_MixCompaction {
 		for _, seg := range plan.GetSegmentBinlogs() {
-			info := c.meta.GetHealthySegment(seg.GetSegmentID())
-			seg.Deltalogs = info.GetDeltalogs()
+			if info := c.meta.GetHealthySegment(seg.GetSegmentID()); info != nil {
+				seg.Deltalogs = info.GetDeltalogs()
+			}
 		}
+		log.Info("Compaction handler refresed mix compaction plan")
 		return
 	}
 }
