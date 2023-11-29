@@ -32,8 +32,8 @@ RepeatedKeyValToMap(
         kvs) {
     std::map<string, string> mapping;
     for (auto& kv : kvs) {
-        AssertInfo(!mapping.count(kv.key()),
-                   "repeat key(" + kv.key() + ") in protobuf");
+        AssertInfo(
+            !mapping.count(kv.key()), "repeat key({}) in protobuf", kv.key());
         mapping.emplace(kv.key(), kv.value());
     }
     return mapping;

@@ -35,9 +35,9 @@ class File {
     Open(const std::string_view filepath, int flags) {
         int fd = open(filepath.data(), flags, S_IRUSR | S_IWUSR);
         AssertInfo(fd != -1,
-                   fmt::format("failed to create mmap file {}: {}",
-                               filepath,
-                               strerror(errno)));
+                   "failed to create mmap file {}: {}",
+                   filepath,
+                   strerror(errno));
         return File(fd);
     }
 

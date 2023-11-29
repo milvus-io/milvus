@@ -57,13 +57,13 @@ class BitsetView : public knowhere::BitsetView {
             return {};
         }
 
-        AssertInfo((offset & 0x7) == 0, "offset is not divisible by 8");
+        AssertInfo(
+            (offset & 0x7) == 0, "offset {} is not divisible by 8", offset);
         AssertInfo(offset + size <= this->size(),
-                   fmt::format(
-                       "index out of range, offset={}, size={}, bitset.size={}",
-                       offset,
-                       size,
-                       this->size()));
+                   "index out of range, offset={}, size={}, bitset.size={}",
+                   offset,
+                   size,
+                   this->size());
         return {data() + (offset >> 3), size};
     }
 };
