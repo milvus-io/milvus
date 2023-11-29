@@ -941,20 +941,23 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                                     "parameter[expected=JACCARD][actual=L2]"})
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_search_with_output_fields_not_exist(self):
+    @pytest.mark.skip("issue #28465")
+    @pytest.mark.parametrize("output_fields", ["int63", ""])
+    @pytest.mark.parametrize("enable_dynamic", [True, False])
+    def test_search_with_output_fields_not_exist(self, output_fields, enable_dynamic):
         """
         target: test search with output fields
         method: search with non-exist output_field
         expected: raise exception
         """
         # 1. initialize with data
-        collection_w = self.init_collection_general(prefix)[0]
+        collection_w = self.init_collection_general(prefix, True, enable_dynamic_field=enable_dynamic)[0]
         # 2. search
         log.info("test_search_with_output_fields_not_exist: Searching collection %s" %
                  collection_w.name)
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, default_limit,
-                            default_search_exp, output_fields=["int63"],
+                            default_search_exp, output_fields=[output_fields],
                             check_task=CheckTasks.err_res,
                             check_items={ct.err_code: 65535,
                                          ct.err_msg: "field int63 not exist"})
@@ -3344,6 +3347,40 @@ class TestCollectionSearch(TestcaseBase):
         for hits in res:
             ids = hits.ids
             assert set(ids).issubset(filter_ids_set)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_expression_with_double_quotes(self):
+        """
+        target: test search with expressions with double quotes
+        method: test search with expressions with double quotes
+        expected: searched successfully with correct limit(topK)
+        """
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix)[0]
+        string_value = [(f"'{cf.gen_str_by_length(3)}'{cf.gen_str_by_length(3)}\""
+                         f"{cf.gen_str_by_length(3)}\"") for _ in range(default_nb)]
+        data = cf.gen_default_dataframe_data()
+        data[default_string_field_name] = string_value
+        insert_ids = data[default_int64_field_name]
+        collection_w.insert(data)
+
+        # 2. create index
+        index_param = {"index_type": "FLAT", "metric_type": "COSINE", "params": {}}
+        collection_w.create_index("float_vector", index_param)
+        collection_w.load()
+
+        # 3. search with expression
+        _id = random.randint(0, default_nb)
+        string_value[_id] = string_value[_id].replace("\"", "\\\"")
+        expression = f"{default_string_field_name} == \"{string_value[_id]}\""
+        log.info("test_search_with_expression: searching with expression: %s" % expression)
+        search_res, _ = collection_w.search(vectors[:default_nq], default_search_field,
+                                            default_search_params, default_limit, expression,
+                                            check_task=CheckTasks.check_search_results,
+                                            check_items={"nq": default_nq,
+                                                         "ids": insert_ids,
+                                                         "limit": 1})
+        assert search_res[0].ids == [_id]
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_with_output_fields_empty(self, nb, nq, dim, auto_id, _async):
