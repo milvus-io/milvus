@@ -181,7 +181,7 @@ func (c *minioHandler) Update(objectName string, filePath string) {
 
 // update log file to minio
 func (c *minioHandler) update(objectName string, filePath string) error {
-	path := Join(c.rootPath, filePath)
+	path := join(c.rootPath, filePath)
 	_, err := c.client.FPutObject(context.Background(), c.bucketName, path, objectName, minio.PutObjectOptions{})
 	return err
 }
@@ -266,7 +266,7 @@ func getTimeRetentionFunc(retentionTime int, prefix, ext string) RetentionFunc {
 			return false
 		}
 
-		nowWallTime, _ := time.Parse(timeFormat, time.Now().Format(timeFormat))
+		nowWallTime, _ := time.Parse(timeNameFormat, time.Now().Format(timeNameFormat))
 		intervalTime := nowWallTime.Sub(fileTime)
 		return intervalTime > (time.Duration(retentionTime) * time.Hour)
 	}

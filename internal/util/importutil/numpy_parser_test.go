@@ -44,9 +44,21 @@ func createLocalChunkManager(t *testing.T) storage.ChunkManager {
 	return cm
 }
 
+func createNumpySchema() *schemapb.CollectionSchema {
+	schema := sampleSchema()
+	fields := make([]*schemapb.FieldSchema, 0)
+	for _, field := range schema.GetFields() {
+		if field.GetDataType() != schemapb.DataType_Array {
+			fields = append(fields, field)
+		}
+	}
+	schema.Fields = fields
+	return schema
+}
+
 func createNumpyParser(t *testing.T) *NumpyParser {
 	ctx := context.Background()
-	schema := sampleSchema()
+	schema := createNumpySchema()
 	idAllocator := newIDAllocator(ctx, t, nil)
 
 	cm := createLocalChunkManager(t)
@@ -660,7 +672,7 @@ func Test_NumpyParserPrepareAppendFunctions(t *testing.T) {
 	// succeed
 	appendFuncs, err := parser.prepareAppendFunctions()
 	assert.NoError(t, err)
-	assert.Equal(t, len(sampleSchema().Fields), len(appendFuncs))
+	assert.Equal(t, len(createNumpySchema().Fields), len(appendFuncs))
 
 	// schema has unsupported data type
 	schema := &schemapb.CollectionSchema{
@@ -868,7 +880,7 @@ func Test_NumpyParserSplitFieldsData(t *testing.T) {
 	})
 
 	t.Run("primary key auto-generated", func(t *testing.T) {
-		parser.collectionInfo.resetSchema(sampleSchema())
+		parser.collectionInfo.resetSchema(createNumpySchema())
 		schema := findSchema(parser.collectionInfo.Schema, schemapb.DataType_Int64)
 		schema.AutoID = true
 
@@ -982,7 +994,7 @@ func Test_NumpyParserConsume(t *testing.T) {
 	files := createSampleNumpyFiles(t, cm)
 	readers, err := parser.createReaders(files)
 	assert.NoError(t, err)
-	assert.Equal(t, len(sampleSchema().Fields), len(readers))
+	assert.Equal(t, len(createNumpySchema().Fields), len(readers))
 
 	// succeed
 	err = parser.consume(readers)
@@ -1043,7 +1055,7 @@ func Test_NumpyParserParse(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	parser.collectionInfo.resetSchema(sampleSchema())
+	parser.collectionInfo.resetSchema(createNumpySchema())
 
 	t.Run("succeed", func(t *testing.T) {
 		cm := createLocalChunkManager(t)

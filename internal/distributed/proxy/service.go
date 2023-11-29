@@ -30,6 +30,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_auth "github.com/grpc-ecosystem/go-grpc-middleware/auth"
@@ -79,6 +80,10 @@ var (
 	errInvalidToken    = status.Errorf(codes.Unauthenticated, "invalid token")
 	// registerHTTPHandlerOnce avoid register http handler multiple times
 	registerHTTPHandlerOnce sync.Once
+	// only for test
+	enableCustomInterceptor = true
+	// only for test, register internal interface to external service
+	enableRegisterProxyServer = false
 )
 
 const apiPathPrefix = "/api/v1"
@@ -232,12 +237,11 @@ func (s *Server) startExternalGrpc(grpcPort int, errChan chan error) {
 	log.Debug("Get proxy rate limiter done", zap.Int("port", grpcPort))
 
 	opts := tracer.GetInterceptorOpts()
-	grpcOpts := []grpc.ServerOption{
-		grpc.KeepaliveEnforcementPolicy(kaep),
-		grpc.KeepaliveParams(kasp),
-		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize.GetAsInt()),
-		grpc.MaxSendMsgSize(Params.ServerMaxSendSize.GetAsInt()),
-		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
+
+	var unaryServerOption grpc.ServerOption
+	if enableCustomInterceptor {
+		unaryServerOption = grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
+			accesslog.UnaryAccessLogInterceptor,
 			otelgrpc.UnaryServerInterceptor(opts...),
 			grpc_auth.UnaryServerInterceptor(proxy.AuthenticationInterceptor),
 			proxy.DatabaseInterceptor(),
@@ -245,9 +249,19 @@ func (s *Server) startExternalGrpc(grpcPort int, errChan chan error) {
 			proxy.UnaryServerInterceptor(proxy.PrivilegeInterceptor),
 			logutil.UnaryTraceLoggerInterceptor,
 			proxy.RateLimitInterceptor(limiter),
-			accesslog.UnaryAccessLoggerInterceptor,
+			accesslog.UnaryUpdateAccessInfoInterceptor,
 			proxy.KeepActiveInterceptor,
-		)),
+		))
+	} else {
+		unaryServerOption = grpc.EmptyServerOption{}
+	}
+
+	grpcOpts := []grpc.ServerOption{
+		grpc.KeepaliveEnforcementPolicy(kaep),
+		grpc.KeepaliveParams(kasp),
+		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize.GetAsInt()),
+		grpc.MaxSendMsgSize(Params.ServerMaxSendSize.GetAsInt()),
+		unaryServerOption,
 	}
 
 	if Params.TLSMode.GetAsInt() == 1 {
@@ -289,6 +303,11 @@ func (s *Server) startExternalGrpc(grpcPort int, errChan chan error) {
 		grpcOpts = append(grpcOpts, grpc.Creds(credentials.NewTLS(tlsConf)))
 	}
 	s.grpcExternalServer = grpc.NewServer(grpcOpts...)
+
+	if enableRegisterProxyServer {
+		proxypb.RegisterProxyServer(s.grpcExternalServer, s)
+	}
+
 	milvuspb.RegisterMilvusServiceServer(s.grpcExternalServer, s)
 	grpc_health_v1.RegisterHealthServer(s.grpcExternalServer, s)
 	errChan <- nil
@@ -389,7 +408,7 @@ func (s *Server) Run() error {
 		s.wg.Add(1)
 		go func() {
 			defer s.wg.Done()
-			if err := s.tcpServer.Serve(); err != nil && err != cmux.ErrServerClosed {
+			if err := s.tcpServer.Serve(); err != nil && !errors.Is(err, net.ErrClosed) {
 				log.Warn("Proxy server for tcp port failed", zap.Error(err))
 				return
 			}
@@ -650,11 +669,8 @@ func (s *Server) Stop() error {
 	go func() {
 		defer gracefulWg.Done()
 
-		if s.tcpServer != nil {
-			log.Info("Proxy stop tcp server...")
-			s.tcpServer.Close()
-		}
-
+		// try to close grpc server firstly, it has the same root listener with cmux server and
+		// http listener that tls has not been enabled.
 		if s.grpcExternalServer != nil {
 			log.Info("Proxy stop external grpc server")
 			utils.GracefulStopGRPCServer(s.grpcExternalServer)
@@ -663,6 +679,17 @@ func (s *Server) Stop() error {
 		if s.httpServer != nil {
 			log.Info("Proxy stop http server...")
 			s.httpServer.Close()
+		}
+
+		// close cmux server, it isn't a synchronized operation.
+		// Note that:
+		// 1. all listeners can be closed after closing cmux server that has the root listener, it will automatically
+		//    propagate the closure to all the listeners derived from it, but it doesn't provide a graceful shutdown
+		//    grpc server ideally.
+		// 2. avoid resource leak also need to close cmux after grpc and http listener closed.
+		if s.tcpServer != nil {
+			log.Info("Proxy stop tcp server...")
+			s.tcpServer.Close()
 		}
 
 		if s.grpcInternalServer != nil {

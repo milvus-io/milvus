@@ -100,6 +100,17 @@ var (
 			channelNameLabelName,
 		})
 
+	DataCoordCheckpointLag = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "channel_checkpoint_ts_lag_ms",
+			Help:      "channel checkpoint timestamp lag in milliseconds",
+		}, []string{
+			nodeIDLabelName,
+			channelNameLabelName,
+		})
+
 	DataCoordStoredBinlogSize = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
@@ -250,6 +261,7 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(DataCoordNumStoredRows)
 	registry.MustRegister(DataCoordNumStoredRowsCounter)
 	registry.MustRegister(DataCoordConsumeDataNodeTimeTickLag)
+	registry.MustRegister(DataCoordCheckpointLag)
 	registry.MustRegister(DataCoordStoredBinlogSize)
 	registry.MustRegister(DataCoordSegmentBinLogFileCount)
 	registry.MustRegister(DataCoordDmlChannelNum)

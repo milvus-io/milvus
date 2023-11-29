@@ -4445,17 +4445,17 @@ func (_c *MockProxy_RenameCollection_Call) RunAndReturn(run func(context.Context
 	return _c
 }
 
-// ReplicateMessage provides a mock function with given fields: ctx, req
-func (_m *MockProxy) ReplicateMessage(ctx context.Context, req *milvuspb.ReplicateMessageRequest) (*milvuspb.ReplicateMessageResponse, error) {
-	ret := _m.Called(ctx, req)
+// ReplicateMessage provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) ReplicateMessage(_a0 context.Context, _a1 *milvuspb.ReplicateMessageRequest) (*milvuspb.ReplicateMessageResponse, error) {
+	ret := _m.Called(_a0, _a1)
 
 	var r0 *milvuspb.ReplicateMessageResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ReplicateMessageRequest) (*milvuspb.ReplicateMessageResponse, error)); ok {
-		return rf(ctx, req)
+		return rf(_a0, _a1)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ReplicateMessageRequest) *milvuspb.ReplicateMessageResponse); ok {
-		r0 = rf(ctx, req)
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*milvuspb.ReplicateMessageResponse)
@@ -4463,7 +4463,7 @@ func (_m *MockProxy) ReplicateMessage(ctx context.Context, req *milvuspb.Replica
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ReplicateMessageRequest) error); ok {
-		r1 = rf(ctx, req)
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -4477,13 +4477,13 @@ type MockProxy_ReplicateMessage_Call struct {
 }
 
 // ReplicateMessage is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.ReplicateMessageRequest
-func (_e *MockProxy_Expecter) ReplicateMessage(ctx interface{}, req interface{}) *MockProxy_ReplicateMessage_Call {
-	return &MockProxy_ReplicateMessage_Call{Call: _e.mock.On("ReplicateMessage", ctx, req)}
+//   - _a0 context.Context
+//   - _a1 *milvuspb.ReplicateMessageRequest
+func (_e *MockProxy_Expecter) ReplicateMessage(_a0 interface{}, _a1 interface{}) *MockProxy_ReplicateMessage_Call {
+	return &MockProxy_ReplicateMessage_Call{Call: _e.mock.On("ReplicateMessage", _a0, _a1)}
 }
 
-func (_c *MockProxy_ReplicateMessage_Call) Run(run func(ctx context.Context, req *milvuspb.ReplicateMessageRequest)) *MockProxy_ReplicateMessage_Call {
+func (_c *MockProxy_ReplicateMessage_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.ReplicateMessageRequest)) *MockProxy_ReplicateMessage_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*milvuspb.ReplicateMessageRequest))
 	})

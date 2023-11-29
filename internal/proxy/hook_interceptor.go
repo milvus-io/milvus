@@ -89,7 +89,7 @@ func UnaryServerHookInterceptor() grpc.UnaryServerInterceptor {
 		logger.Error("hook error", zap.String("path", Params.ProxyCfg.SoPath.GetValue()), zap.Error(hookError))
 		hoo = defaultHook{}
 	}
-	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		var (
 			fullMethod = info.FullMethod
 			newCtx     context.Context
