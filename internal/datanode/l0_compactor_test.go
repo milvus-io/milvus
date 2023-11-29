@@ -60,12 +60,8 @@ func (s *LevelZeroCompactionTaskSuite) SetupTest() {
 	s.mockAlloc = allocator.NewMockAllocator(s.T())
 	s.mockBinlogIO = io.NewMockBinlogIO(s.T())
 	s.mockMeta = metacache.NewMockMetaCache(s.T())
-	s.task = &levelZeroCompactionTask{
-		ctx:       context.Background(),
-		allocator: s.mockAlloc,
-		BinlogIO:  s.mockBinlogIO,
-		metacache: s.mockMeta,
-	}
+	// plan of the task is unset
+	s.task = newLevelZeroCompactionTask(context.Background(), s.mockBinlogIO, s.mockAlloc, s.mockMeta, nil, nil)
 
 	pk2ts := map[int64]uint64{
 		1: 20000,
@@ -136,6 +132,10 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactLinear() {
 		}).Times(2)
 	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Times(2)
 
+	s.Require().Equal(plan.GetPlanID(), s.task.getPlanID())
+	s.Require().Equal(plan.GetChannel(), s.task.getChannelName())
+	s.Require().EqualValues(1, s.task.getCollection())
+
 	result, err := s.task.compact()
 	s.NoError(err)
 	s.NotNil(result)
@@ -149,6 +149,9 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactLinear() {
 
 	s.EqualValues(plan.GetPlanID(), result.GetPlanID())
 	log.Info("test segment results", zap.Any("result", result))
+
+	s.task.complete()
+	s.task.stop()
 }
 
 func (s *LevelZeroCompactionTaskSuite) TestCompactBatch() {
