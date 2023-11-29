@@ -41,6 +41,10 @@ void
 SegcoreSetKnowhereSearchThreadPoolNum(const uint32_t num_threads);
 
 void
+SegcoreSetKnowhereGpuMemoryPoolSize(const uint32_t init_size,
+                                    const uint32_t max_size);
+
+void
 SegcoreCloseGlog();
 
 int32_t

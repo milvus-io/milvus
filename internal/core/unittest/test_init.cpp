@@ -37,3 +37,9 @@ TEST(Init, KnowhereThreadPoolInit) {
 #endif
     milvus::config::KnowhereInitSearchThreadPool(8);
 }
+
+TEST(Init, KnowhereGPUMemoryPoolInit) {
+#ifdef MILVUS_GPU_VERSION
+    ASSERT_NO_THROW(milvus::config::KnowhereInitGPUMemoryPool(0, 0));
+#endif
+}
