@@ -1605,6 +1605,7 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		Doc:          "the interval(in seconds) of check querynode cluster session",
 		Export:       true,
 	}
+	p.CheckNodeSessionInterval.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
