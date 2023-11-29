@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/internal/util/importutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -4982,7 +4983,7 @@ func (node *Proxy) Connect(ctx context.Context, request *milvuspb.ConnectRequest
 	}
 
 	db := GetCurDBNameFromContextOrDefault(ctx)
-	logsToBePrinted := append(getLoggerOfClientInfo(request.GetClientInfo()), zap.String("db", db))
+	logsToBePrinted := append(connection.ZapClientInfo(request.GetClientInfo()), zap.String("db", db))
 	log := log.Ctx(ctx).With(logsToBePrinted...)
 
 	log.Info("connect received")
@@ -5027,7 +5028,7 @@ func (node *Proxy) Connect(ctx context.Context, request *milvuspb.ConnectRequest
 		Reserved:   make(map[string]string),
 	}
 
-	GetConnectionManager().register(ctx, int64(ts), request.GetClientInfo())
+	connection.GetManager().Register(ctx, int64(ts), request.GetClientInfo())
 
 	return &milvuspb.ConnectResponse{
 		Status:     merr.Success(),
@@ -5139,8 +5140,7 @@ func (node *Proxy) ListClientInfos(ctx context.Context, req *proxypb.ListClientI
 		return &proxypb.ListClientInfosResponse{Status: merr.Status(err)}, nil
 	}
 
-	clients := GetConnectionManager().list()
-
+	clients := connection.GetManager().List()
 	return &proxypb.ListClientInfosResponse{
 		Status:      merr.Success(),
 		ClientInfos: clients,
