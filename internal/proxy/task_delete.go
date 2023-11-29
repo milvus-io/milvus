@@ -50,12 +50,13 @@ type deleteTask struct {
 	lb          LBPolicy
 
 	// delete info
-	schema       *schemapb.CollectionSchema
-	ts           Timestamp
-	msgID        UniqueID
-	collectionID UniqueID
-	partitionID  UniqueID
-	count        int
+	schema           *schemapb.CollectionSchema
+	ts               Timestamp
+	msgID            UniqueID
+	collectionID     UniqueID
+	partitionID      UniqueID
+	count            int
+	partitionKeyMode bool
 }
 
 func (dt *deleteTask) TraceCtx() context.Context {
@@ -175,11 +176,11 @@ func (dt *deleteTask) PreExecute(ctx context.Context) error {
 	}
 	dt.collectionID = collID
 
-	partitionKeyMode, err := isPartitionKeyMode(ctx, dt.req.GetDbName(), dt.req.GetCollectionName())
+	dt.partitionKeyMode, err = isPartitionKeyMode(ctx, dt.req.GetDbName(), dt.req.GetCollectionName())
 	if err != nil {
 		return ErrWithLog(log, "Failed to get partition key mode", err)
 	}
-	if partitionKeyMode && len(dt.req.PartitionName) != 0 {
+	if dt.partitionKeyMode && len(dt.req.PartitionName) != 0 {
 		return errors.New("not support manually specifying the partition names if partition key mode is used")
 	}
 
@@ -262,14 +263,30 @@ func (dt *deleteTask) PostExecute(ctx context.Context) error {
 
 func (dt *deleteTask) getStreamingQueryAndDelteFunc(stream msgstream.MsgStream, plan *planpb.PlanNode) executeFunc {
 	return func(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channelIDs ...string) error {
-		partationIDs := []int64{}
-		if dt.partitionID != common.InvalidFieldID {
-			partationIDs = append(partationIDs, dt.partitionID)
+		var partitionIDs []int64
+
+		// optimize query when partitionKey on
+		if dt.partitionKeyMode {
+			expr, err := ParseExprFromPlan(plan)
+			if err != nil {
+				return err
+			}
+			partitionKeys := ParsePartitionKeys(expr)
+			hashedPartitionNames, err := assignPartitionKeys(ctx, dt.req.GetDbName(), dt.req.GetCollectionName(), partitionKeys)
+			if err != nil {
+				return err
+			}
+			partitionIDs, err = getPartitionIDs(ctx, dt.req.GetDbName(), dt.req.GetCollectionName(), hashedPartitionNames)
+			if err != nil {
+				return err
+			}
+		} else if dt.partitionID != common.InvalidFieldID {
+			partitionIDs = []int64{dt.partitionID}
 		}
 
 		log := log.Ctx(ctx).With(
 			zap.Int64("collectionID", dt.collectionID),
-			zap.Int64s("partationIDs", partationIDs),
+			zap.Int64s("partitionIDs", partitionIDs),
 			zap.Strings("channels", channelIDs),
 			zap.Int64("nodeID", nodeID))
 		// set plan
@@ -295,7 +312,7 @@ func (dt *deleteTask) getStreamingQueryAndDelteFunc(stream msgstream.MsgStream, 
 				ReqID:              paramtable.GetNodeID(),
 				DbID:               0, // TODO
 				CollectionID:       dt.collectionID,
-				PartitionIDs:       partationIDs,
+				PartitionIDs:       partitionIDs,
 				SerializedExprPlan: serializedPlan,
 				OutputFieldsId:     outputFieldIDs,
 				GuaranteeTimestamp: parseGuaranteeTsFromConsistency(dt.ts, dt.ts, commonpb.ConsistencyLevel_Bounded),
@@ -361,7 +378,7 @@ func (dt *deleteTask) simpleDelete(ctx context.Context, termExp *planpb.Expr_Ter
 	log.Debug("get primary keys from expr",
 		zap.Int64("len of primary keys", numRow),
 		zap.Int64("collectionID", dt.collectionID),
-		zap.Int64("partationID", dt.partitionID))
+		zap.Int64("partitionID", dt.partitionID))
 	err = dt.produce(ctx, stream, primaryKeys)
 	if err != nil {
 		return err
