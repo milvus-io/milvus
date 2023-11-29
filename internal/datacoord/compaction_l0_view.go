@@ -27,6 +27,15 @@ func (v *LevelZeroSegmentsView) String() string {
 		l0strings)
 }
 
+func (v *LevelZeroSegmentsView) Append(segments ...*SegmentView) {
+	if v.segments == nil {
+		v.segments = segments
+		return
+	}
+
+	v.segments = append(v.segments, segments...)
+}
+
 func (v *LevelZeroSegmentsView) GetGroupLabel() *CompactionGroupLabel {
 	if v == nil {
 		return &CompactionGroupLabel{}

@@ -231,10 +231,11 @@ func (c *compactionPlanHandler) enqueuePlan(signal *compactionSignal, plan *data
 
 func (c *compactionPlanHandler) RefreshPlan(task *compactionTask) {
 	plan := task.plan
+	log := log.With(zap.Int64("taskID", task.triggerInfo.id), zap.Int64("planID", plan.GetPlanID()))
 	if plan.GetType() == datapb.CompactionType_Level0DeleteCompaction {
 		sealedSegments := c.meta.SelectSegments(func(info *SegmentInfo) bool {
 			return info.GetCollectionID() == task.triggerInfo.collectionID &&
-				info.GetPartitionID() == task.triggerInfo.partitionID &&
+				(task.triggerInfo.partitionID == -1 || info.GetPartitionID() == task.triggerInfo.partitionID) &&
 				info.GetInsertChannel() == plan.GetChannel() &&
 				isFlushState(info.GetState()) &&
 				!info.isCompacting &&
@@ -251,6 +252,7 @@ func (c *compactionPlanHandler) RefreshPlan(task *compactionTask) {
 		})
 
 		plan.SegmentBinlogs = append(plan.SegmentBinlogs, sealedSegBinlogs...)
+		log.Info("Refresh level zero delete compactino plan", zap.Any("target segments", sealedSegBinlogs))
 		return
 	}
 
@@ -323,6 +325,10 @@ func (c *compactionPlanHandler) completeCompaction(result *datapb.CompactionPlan
 		if err := c.handleMergeCompactionResult(plan, result); err != nil {
 			return err
 		}
+	case datapb.CompactionType_Level0DeleteCompaction:
+		if err := c.handleL0CompactionResult(plan, result); err != nil {
+			return err
+		}
 	default:
 		return errors.New("unknown compaction type")
 	}
@@ -330,6 +336,23 @@ func (c *compactionPlanHandler) completeCompaction(result *datapb.CompactionPlan
 	// TODO: when to clean task list
 	UpdateCompactionSegmentSizeMetrics(result.GetSegments())
 	return nil
+}
+
+func (c *compactionPlanHandler) handleL0CompactionResult(plan *datapb.CompactionPlan, result *datapb.CompactionPlanResult) error {
+	var operators []UpdateOperator
+	for _, seg := range result.GetSegments() {
+		operators = append(operators, UpdateBinlogsOperator(seg.GetSegmentID(), nil, nil, seg.GetDeltalogs()))
+	}
+
+	levelZeroSegments := lo.Filter(plan.GetSegmentBinlogs(), func(b *datapb.CompactionSegmentBinlogs, _ int) bool {
+		return b.GetLevel() == datapb.SegmentLevel_L0
+	})
+
+	for _, seg := range levelZeroSegments {
+		operators = append(operators, UpdateStatusOperator(seg.SegmentID, commonpb.SegmentState_Dropped))
+	}
+
+	return c.meta.UpdateSegmentsInfo(operators...)
 }
 
 func (c *compactionPlanHandler) handleMergeCompactionResult(plan *datapb.CompactionPlan, result *datapb.CompactionPlanResult) error {

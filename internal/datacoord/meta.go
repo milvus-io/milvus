@@ -20,6 +20,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"math"
 	"path"
 	"sync"
 	"time"
@@ -1328,7 +1329,7 @@ func (m *meta) GetEarliestStartPositionOfGrowingSegments(label *CompactionGroupL
 			segment.GetInsertChannel() == label.Channel
 	})
 
-	var earliest *msgpb.MsgPosition
+	earliest := &msgpb.MsgPosition{Timestamp: math.MaxUint64}
 	for _, seg := range segments {
 		if earliest == nil || earliest.GetTimestamp() > seg.GetStartPosition().GetTimestamp() {
 			earliest = seg.GetStartPosition()
