@@ -819,7 +819,7 @@ message QueryImportRequest {
   int64 taskID = 3;
 }
 
-message ImportFileInfo {
+message ImportSegmentInfo {
   int64 segmentID = 1;
   int64 total_rows = 2;
   int64 imported_rows = 3;
@@ -834,7 +834,7 @@ message QueryImportResponse {
   ImportState state = 3;
   string reason = 4;
   int64 slots = 5;
-  repeated ImportFileInfo file_infos = 6;
+  repeated ImportSegmentInfo import_segments_info = 6;
 }
 
 message DropImportRequest {
