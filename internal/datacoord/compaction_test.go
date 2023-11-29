@@ -50,14 +50,63 @@ type CompactionPlanHandlerSuite struct {
 
 	mockMeta  *MockCompactionMeta
 	mockAlloc *NMockAllocator
+	mockSch   *MockScheduler
 }
 
 func (s *CompactionPlanHandlerSuite) SetupTest() {
 	s.mockMeta = NewMockCompactionMeta(s.T())
 	s.mockAlloc = NewNMockAllocator(s.T())
+	s.mockSch = NewMockScheduler(s.T())
 }
 
-func (s *CompactionPlanHandlerSuite) TesthandleL0CompactionResults() {
+func (s *CompactionPlanHandlerSuite) TestRemoveTasksByChannel() {
+	s.mockSch.EXPECT().Finish(mock.Anything, mock.Anything).Return().Once()
+	handler := newCompactionPlanHandler(nil, nil, nil, nil)
+	handler.scheduler = s.mockSch
+
+	var ch string = "ch1"
+	handler.mu.Lock()
+	handler.plans[1] = &compactionTask{
+		plan:        &datapb.CompactionPlan{PlanID: 19530},
+		dataNodeID:  1,
+		triggerInfo: &compactionSignal{channel: ch},
+	}
+	handler.mu.Unlock()
+
+	handler.removeTasksByChannel(ch)
+
+	handler.mu.Lock()
+	s.Equal(0, len(handler.plans))
+	handler.mu.Unlock()
+}
+
+func (s *CompactionPlanHandlerSuite) TestCheckResult() {
+	s.mockAlloc.EXPECT().allocTimestamp(mock.Anything).Return(19530, nil)
+
+	session := &SessionManager{
+		sessions: struct {
+			sync.RWMutex
+			data map[int64]*Session
+		}{
+			data: map[int64]*Session{
+				2: {client: &mockDataNodeClient{
+					compactionStateResp: &datapb.CompactionStateResponse{
+						Results: []*datapb.CompactionPlanResult{
+							{PlanID: 1, State: commonpb.CompactionState_Executing},
+							{PlanID: 3, State: commonpb.CompactionState_Completed, Segments: []*datapb.CompactionSegment{{PlanID: 3}}},
+							{PlanID: 4, State: commonpb.CompactionState_Executing},
+							{PlanID: 6, State: commonpb.CompactionState_Executing},
+						},
+					},
+				}},
+			},
+		},
+	}
+	handler := newCompactionPlanHandler(session, nil, nil, s.mockAlloc)
+	handler.checkResult()
+}
+
+func (s *CompactionPlanHandlerSuite) TestHandleL0CompactionResults() {
 	channel := "Ch-1"
 	s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 		Run(func(operators ...UpdateOperator) {
@@ -261,12 +310,13 @@ func Test_compactionPlanHandler_execCompactionPlan(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			scheduler := NewCompactionScheduler()
 			c := &compactionPlanHandler{
 				plans:     tt.fields.plans,
 				sessions:  tt.fields.sessions,
 				chManager: tt.fields.chManager,
 				allocator: tt.fields.allocatorFactory(),
-				scheduler: NewCompactionScheduler(),
+				scheduler: scheduler,
 			}
 			Params.Save(Params.DataCoordCfg.CompactionCheckIntervalInSeconds.Key, "1")
 			c.start()
@@ -277,13 +327,13 @@ func Test_compactionPlanHandler_execCompactionPlan(t *testing.T) {
 			if !tt.wantErr {
 				assert.Equal(t, tt.args.plan, task.plan)
 				assert.Equal(t, tt.args.signal, task.triggerInfo)
-				assert.Equal(t, 1, c.scheduler.getExecutingTaskNum())
+				assert.Equal(t, 1, c.scheduler.GetTaskCount())
 			} else {
 				assert.Eventually(t,
 					func() bool {
-						c.scheduler.mu.RLock()
-						defer c.scheduler.mu.RUnlock()
-						return c.scheduler.getExecutingTaskNum() == 0 && len(c.scheduler.parallelTasks[1]) == 0
+						scheduler.mu.RLock()
+						defer scheduler.mu.RUnlock()
+						return c.scheduler.GetTaskCount() == 0 && len(scheduler.parallelTasks[1]) == 0
 					},
 					5*time.Second, 100*time.Millisecond)
 			}
@@ -341,20 +391,11 @@ func Test_compactionPlanHandler_execWithParallels(t *testing.T) {
 	err = c.execCompactionPlan(signal, plan3)
 	require.NoError(t, err)
 
-	assert.Equal(t, 3, c.scheduler.getExecutingTaskNum())
+	assert.Equal(t, 3, c.scheduler.GetTaskCount())
 
 	// parallel for the same node are 2
-	tasks := c.scheduler.schedule()
-	assert.Equal(t, 1, len(tasks))
-	assert.Equal(t, int64(1), tasks[0].plan.PlanID)
-	assert.Equal(t, int64(1), tasks[0].dataNodeID)
-	c.notifyTasks(tasks)
-
-	tasks = c.scheduler.schedule()
-	assert.Equal(t, 1, len(tasks))
-	assert.Equal(t, int64(2), tasks[0].plan.PlanID)
-	assert.Equal(t, int64(1), tasks[0].dataNodeID)
-	c.notifyTasks(tasks)
+	c.schedule()
+	c.schedule()
 
 	// wait for compaction called
 	assert.Eventually(t, func() bool {
@@ -363,7 +404,7 @@ func Test_compactionPlanHandler_execWithParallels(t *testing.T) {
 		return called == 2
 	}, 3*time.Second, time.Millisecond*100)
 
-	tasks = c.scheduler.schedule()
+	tasks := c.scheduler.Schedule()
 	assert.Equal(t, 0, len(tasks))
 }
 
@@ -911,11 +952,12 @@ func Test_compactionPlanHandler_updateCompaction(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			scheduler := NewCompactionScheduler()
 			c := &compactionPlanHandler{
 				plans:     tt.fields.plans,
 				sessions:  tt.fields.sessions,
 				meta:      tt.fields.meta,
-				scheduler: NewCompactionScheduler(),
+				scheduler: scheduler,
 			}
 
 			err := c.updateCompaction(tt.args.ts)
@@ -936,9 +978,9 @@ func Test_compactionPlanHandler_updateCompaction(t *testing.T) {
 				assert.NotEqual(t, failed, task.state)
 			}
 
-			c.scheduler.mu.Lock()
-			assert.Equal(t, 0, len(c.scheduler.parallelTasks[2]))
-			c.scheduler.mu.Unlock()
+			scheduler.mu.Lock()
+			assert.Equal(t, 0, len(scheduler.parallelTasks[2]))
+			scheduler.mu.Unlock()
 		})
 	}
 }

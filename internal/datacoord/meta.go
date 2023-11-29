@@ -975,7 +975,6 @@ func (m *meta) PrepareCompleteCompactionMutation(plan *datapb.CompactionPlan,
 	}
 	for _, cl := range compactionLogs {
 		if segment := m.segments.GetSegment(cl.GetSegmentID()); segment != nil {
-
 			cloned := segment.Clone()
 			updateSegStateAndPrepareMetrics(cloned, commonpb.SegmentState_Dropped, metricMutation)
 			cloned.DroppedAt = uint64(time.Now().UnixNano())

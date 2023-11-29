@@ -14,6 +14,10 @@ import (
 
 type Scheduler interface {
 	Submit(t ...*compactionTask)
+	Schedule() []*compactionTask
+	Finish(nodeID, planID int64)
+	GetTaskCount() int
+	LogStatus()
 
 	// Start()
 	// Stop()
@@ -46,11 +50,11 @@ func (s *CompactionScheduler) Submit(tasks ...*compactionTask) {
 	s.mu.Unlock()
 
 	s.taskNumber.Add(int32(len(tasks)))
-	s.logStatus()
+	s.LogStatus()
 }
 
-// schedule pick 1 or 0 tasks for 1 node
-func (s *CompactionScheduler) schedule() []*compactionTask {
+// Schedule pick 1 or 0 tasks for 1 node
+func (s *CompactionScheduler) Schedule() []*compactionTask {
 	nodeTasks := make(map[int64][]*compactionTask) // nodeID
 
 	s.mu.Lock()
@@ -138,7 +142,7 @@ func (s *CompactionScheduler) schedule() []*compactionTask {
 	return lo.Values(executable)
 }
 
-func (s *CompactionScheduler) finish(nodeID, planID UniqueID) {
+func (s *CompactionScheduler) Finish(nodeID, planID UniqueID) {
 	s.mu.Lock()
 	if parallel, ok := s.parallelTasks[nodeID]; ok {
 		tasks := lo.Filter(parallel, func(t *compactionTask, _ int) bool {
@@ -150,10 +154,10 @@ func (s *CompactionScheduler) finish(nodeID, planID UniqueID) {
 	s.mu.Unlock()
 
 	log.Info("Compaction finished", zap.Int64("planID", planID), zap.Int64("nodeID", nodeID))
-	s.logStatus()
+	s.LogStatus()
 }
 
-func (s *CompactionScheduler) logStatus() {
+func (s *CompactionScheduler) LogStatus() {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	waiting := lo.Map(s.queuingTasks, func(t *compactionTask, _ int) int64 {
@@ -172,6 +176,6 @@ func (s *CompactionScheduler) logStatus() {
 	}
 }
 
-func (s *CompactionScheduler) getExecutingTaskNum() int {
+func (s *CompactionScheduler) GetTaskCount() int {
 	return int(s.taskNumber.Load())
 }

@@ -38,10 +38,10 @@ func (s *SchedulerSuite) SetupTest() {
 func (s *SchedulerSuite) TestScheduleEmpty() {
 	emptySch := NewCompactionScheduler()
 
-	tasks := emptySch.schedule()
+	tasks := emptySch.Schedule()
 	s.Empty(tasks)
 
-	s.Equal(0, emptySch.getExecutingTaskNum())
+	s.Equal(0, emptySch.GetTaskCount())
 	s.Empty(emptySch.queuingTasks)
 	s.Empty(emptySch.parallelTasks)
 }
@@ -67,13 +67,13 @@ func (s *SchedulerSuite) TestScheduleParallelTaskFull() {
 	for _, test := range tests {
 		s.Run(test.description, func() {
 			s.SetupTest()
-			s.Require().Equal(4, s.scheduler.getExecutingTaskNum())
+			s.Require().Equal(4, s.scheduler.GetTaskCount())
 
 			// submit the testing tasks
 			s.scheduler.Submit(test.tasks...)
-			s.Equal(4+len(test.tasks), s.scheduler.getExecutingTaskNum())
+			s.Equal(4+len(test.tasks), s.scheduler.GetTaskCount())
 
-			gotTasks := s.scheduler.schedule()
+			gotTasks := s.scheduler.Schedule()
 			s.Equal(test.expectedOut, lo.Map(gotTasks, func(t *compactionTask, _ int) int64 {
 				return t.plan.PlanID
 			}))
@@ -106,22 +106,22 @@ func (s *SchedulerSuite) TestScheduleNodeWith1ParallelTask() {
 	for _, test := range tests {
 		s.Run(test.description, func() {
 			s.SetupTest()
-			s.Require().Equal(4, s.scheduler.getExecutingTaskNum())
+			s.Require().Equal(4, s.scheduler.GetTaskCount())
 
 			// submit the testing tasks
 			s.scheduler.Submit(test.tasks...)
-			s.Equal(4+len(test.tasks), s.scheduler.getExecutingTaskNum())
+			s.Equal(4+len(test.tasks), s.scheduler.GetTaskCount())
 
-			gotTasks := s.scheduler.schedule()
+			gotTasks := s.scheduler.Schedule()
 			s.Equal(test.expectedOut, lo.Map(gotTasks, func(t *compactionTask, _ int) int64 {
 				return t.plan.PlanID
 			}))
 
 			// the second schedule returns empty for full paralleTasks
-			gotTasks = s.scheduler.schedule()
+			gotTasks = s.scheduler.Schedule()
 			s.Empty(gotTasks)
 
-			s.Equal(4+len(test.tasks), s.scheduler.getExecutingTaskNum())
+			s.Equal(4+len(test.tasks), s.scheduler.GetTaskCount())
 		})
 	}
 }
@@ -153,24 +153,24 @@ func (s *SchedulerSuite) TestScheduleNodeWithL0Executing() {
 	for _, test := range tests {
 		s.Run(test.description, func() {
 			s.SetupTest()
-			s.Require().Equal(4, s.scheduler.getExecutingTaskNum())
+			s.Require().Equal(4, s.scheduler.GetTaskCount())
 
 			// submit the testing tasks
 			s.scheduler.Submit(test.tasks...)
-			s.Equal(4+len(test.tasks), s.scheduler.getExecutingTaskNum())
+			s.Equal(4+len(test.tasks), s.scheduler.GetTaskCount())
 
-			gotTasks := s.scheduler.schedule()
+			gotTasks := s.scheduler.Schedule()
 			s.Equal(test.expectedOut, lo.Map(gotTasks, func(t *compactionTask, _ int) int64 {
 				return t.plan.PlanID
 			}))
 
 			// the second schedule returns empty for full paralleTasks
 			if len(gotTasks) > 0 {
-				gotTasks = s.scheduler.schedule()
+				gotTasks = s.scheduler.Schedule()
 				s.Empty(gotTasks)
 			}
 
-			s.Equal(4+len(test.tasks), s.scheduler.getExecutingTaskNum())
+			s.Equal(4+len(test.tasks), s.scheduler.GetTaskCount())
 		})
 	}
 }

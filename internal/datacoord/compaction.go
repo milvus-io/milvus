@@ -113,7 +113,7 @@ type compactionPlanHandler struct {
 	allocator allocator
 	chManager *ChannelManager
 	sessions  *SessionManager
-	scheduler *CompactionScheduler
+	scheduler Scheduler
 
 	stopCh   chan struct{}
 	stopOnce sync.Once
@@ -129,6 +129,26 @@ func newCompactionPlanHandler(sessions *SessionManager, cm *ChannelManager, meta
 		sessions:  sessions,
 		allocator: allocator,
 		scheduler: NewCompactionScheduler(),
+	}
+}
+
+func (c *compactionPlanHandler) checkResult() {
+	// deal results
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	ts, err := c.allocator.allocTimestamp(ctx)
+	if err != nil {
+		log.Warn("unable to alloc timestamp", zap.Error(err))
+	}
+	_ = c.updateCompaction(ts)
+}
+
+func (c *compactionPlanHandler) schedule() {
+	// schedule queuing tasks
+	tasks := c.scheduler.Schedule()
+	if len(tasks) > 0 {
+		c.notifyTasks(tasks)
+		c.scheduler.LogStatus()
 	}
 }
 
@@ -148,16 +168,7 @@ func (c *compactionPlanHandler) start() {
 				log.Info("compaction handler check result loop quit")
 				return
 			case <-checkResultTicker.C:
-				// deal results
-				cctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				ts, err := c.allocator.allocTimestamp(cctx)
-				if err != nil {
-					log.Warn("unable to alloc timestamp", zap.Error(err))
-					cancel()
-					continue
-				}
-				cancel()
-				_ = c.updateCompaction(ts)
+				c.checkResult()
 			}
 		}
 	}()
@@ -176,13 +187,7 @@ func (c *compactionPlanHandler) start() {
 				return
 
 			case <-scheduleTicker.C:
-				// schedule queuing tasks
-				tasks := c.scheduler.schedule()
-				c.notifyTasks(tasks)
-
-				if len(tasks) > 0 {
-					c.scheduler.logStatus()
-				}
+				c.schedule()
 			}
 		}
 	}()
@@ -200,7 +205,7 @@ func (c *compactionPlanHandler) removeTasksByChannel(channel string) {
 	defer c.mu.Unlock()
 	for id, task := range c.plans {
 		if task.triggerInfo.channel == channel {
-			c.scheduler.finish(task.dataNodeID, task.plan.PlanID)
+			c.scheduler.Finish(task.dataNodeID, task.plan.PlanID)
 			delete(c.plans, id)
 		}
 	}
@@ -209,11 +214,9 @@ func (c *compactionPlanHandler) removeTasksByChannel(channel string) {
 func (c *compactionPlanHandler) updateTask(planID int64, opts ...compactionTaskOpt) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	plan, ok := c.plans[planID]
-	if !ok {
-		return
+	if plan, ok := c.plans[planID]; ok {
+		c.plans[planID] = plan.shadowClone(opts...)
 	}
-	c.plans[planID] = plan.shadowClone(opts...)
 }
 
 func (c *compactionPlanHandler) enqueuePlan(signal *compactionSignal, plan *datapb.CompactionPlan) error {
@@ -331,7 +334,7 @@ func (c *compactionPlanHandler) completeCompaction(result *datapb.CompactionPlan
 
 	plan := c.plans[planID].plan
 	nodeID := c.plans[planID].dataNodeID
-	defer c.scheduler.finish(nodeID, plan.PlanID)
+	defer c.scheduler.Finish(nodeID, plan.PlanID)
 	switch plan.GetType() {
 	case datapb.CompactionType_MergeCompaction, datapb.CompactionType_MixCompaction:
 		if err := c.handleMergeCompactionResult(plan, result); err != nil {
@@ -472,7 +475,7 @@ func (c *compactionPlanHandler) updateCompaction(ts Timestamp) error {
 		log.Info("compaction failed", zap.Int64("planID", task.plan.PlanID), zap.Int64("nodeID", task.dataNodeID))
 		c.plans[planID] = c.plans[planID].shadowClone(setState(failed))
 		c.setSegmentsCompacting(task.plan, false)
-		c.scheduler.finish(task.dataNodeID, task.plan.PlanID)
+		c.scheduler.Finish(task.dataNodeID, task.plan.PlanID)
 	}
 
 	// Timeout tasks will be timeout and failed in DataNode
@@ -486,7 +489,7 @@ func (c *compactionPlanHandler) updateCompaction(ts Timestamp) error {
 			log.Info("compaction failed for timeout", zap.Int64("planID", task.plan.PlanID), zap.Int64("nodeID", task.dataNodeID))
 			c.plans[planID] = c.plans[planID].shadowClone(setState(failed))
 			c.setSegmentsCompacting(task.plan, false)
-			c.scheduler.finish(task.dataNodeID, task.plan.PlanID)
+			c.scheduler.Finish(task.dataNodeID, task.plan.PlanID)
 		}
 
 		// DataNode will check if plan's are timeout but not as sensitive as DataCoord,
@@ -509,7 +512,7 @@ func (c *compactionPlanHandler) isTimeout(now Timestamp, start Timestamp, timeou
 
 // isFull return true if the task pool is full
 func (c *compactionPlanHandler) isFull() bool {
-	return c.scheduler.getExecutingTaskNum() >= Params.DataCoordCfg.CompactionMaxParallelTasks.GetAsInt()
+	return c.scheduler.GetTaskCount() >= Params.DataCoordCfg.CompactionMaxParallelTasks.GetAsInt()
 }
 
 func (c *compactionPlanHandler) getTasksByState(state compactionTaskState) []*compactionTask {
