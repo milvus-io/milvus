@@ -141,7 +141,7 @@ func (t *SyncTask) Run() error {
 		actions = append(actions, metacache.UpdateState(commonpb.SegmentState_Flushed))
 	}
 
-	t.metacache.UpdateSegments(metacache.MergeSegmentAction(actions...), metacache.WithSegmentIDs(t.segmentID))
+	t.metacache.UpdateSegments(metacache.MergeSegmentAction(actions...), metacache.WithSegmentIDs(t.segment.SegmentID()))
 
 	log.Info("task done")
 	return nil

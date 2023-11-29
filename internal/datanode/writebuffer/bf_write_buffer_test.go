@@ -256,7 +256,10 @@ func (s *BFWriteBufferSuite) TestAutoSyncWithStorageV2() {
 		s.NoError(err)
 
 		seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 1000}, metacache.NewBloomFilterSet())
-		s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
+		segCompacted := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 1000}, metacache.NewBloomFilterSet())
+		metacache.CompactTo(2001)(segCompacted)
+
+		s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg, segCompacted})
 		s.metacache.EXPECT().GetSegmentByID(int64(1000)).Return(nil, false)
 		s.metacache.EXPECT().GetSegmentByID(int64(1002)).Return(seg, true)
 		s.metacache.EXPECT().GetSegmentIDsBy(mock.Anything).Return([]int64{1002})
