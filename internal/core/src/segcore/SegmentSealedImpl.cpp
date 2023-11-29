@@ -100,7 +100,6 @@ SegmentSealedImpl::LoadVecIndex(const LoadIndexInfo& info) {
                        ") than other column's row count (" +
                        std::to_string(num_rows_.value()) + ")");
     }
-    AssertInfo(!vector_indexings_.is_ready(field_id), "vec index is not ready");
     if (get_bit(field_data_ready_bitset_, field_id)) {
         fields_.erase(field_id);
         set_bit(field_data_ready_bitset_, field_id, false);
