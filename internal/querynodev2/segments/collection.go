@@ -194,6 +194,7 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 		NewCollection(const char* schema_proto_blob);
 	*/
 	coll := &Collection{
+		_ptr:       newCCollection(schema, indexMeta),
 		id:         collectionID,
 		indexMeta:  indexMeta,
 		partitions: typeutil.NewConcurrentSet[int64](),
