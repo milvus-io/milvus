@@ -261,6 +261,13 @@ func (bt *BaseTable) Save(key, value string) error {
 	return nil
 }
 
+func (bt *BaseTable) SaveGroup(group map[string]string) error {
+	for key, value := range group {
+		bt.mgr.SetMapConfig(key, value)
+	}
+	return nil
+}
+
 // Reset Config to default value
 func (bt *BaseTable) Reset(key string) error {
 	bt.mgr.ResetConfig(key)

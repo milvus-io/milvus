@@ -54,6 +54,24 @@ func (s *WriteBufferSuite) SetupTest() {
 	})
 }
 
+func (s *WriteBufferSuite) TestDefaulOption() {
+	s.Run("default BFPkOracle", func() {
+		wb, err := NewWriteBuffer(s.channelName, s.metacache, nil, s.syncMgr)
+		s.NoError(err)
+		_, ok := wb.(*bfWriteBuffer)
+		s.True(ok)
+	})
+
+	s.Run("default L0Delta policy", func() {
+		paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableLevelZeroSegment.Key, "true")
+		defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableLevelZeroSegment.Key)
+		wb, err := NewWriteBuffer(s.channelName, s.metacache, nil, s.syncMgr, WithIDAllocator(allocator.NewMockGIDAllocator()))
+		s.NoError(err)
+		_, ok := wb.(*l0WriteBuffer)
+		s.True(ok)
+	})
+}
+
 func (s *WriteBufferSuite) TestWriteBufferType() {
 	wb, err := NewWriteBuffer(s.channelName, s.metacache, nil, s.syncMgr, WithDeletePolicy(DeletePolicyBFPkOracle))
 	s.NoError(err)

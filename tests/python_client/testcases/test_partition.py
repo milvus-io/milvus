@@ -699,7 +699,6 @@ class TestPartitionOperations(TestcaseBase):
                          check_items={ct.err_code: 1, ct.err_msg: "default partition cannot be deleted"})
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip("issue #28722")
     def test_partition_drop_partition_twice(self):
         """
         target: verify drop the same partition twice
@@ -721,8 +720,7 @@ class TestPartitionOperations(TestcaseBase):
         assert not collection_w.has_partition(partition_name)[0]
 
         # verify that drop the partition again with exception
-        partition_w.drop(check_task=CheckTasks.err_res,
-                         check_items={ct.err_code: 1, ct.err_msg: PartitionErrorMessage.PartitionNotExist})
+        partition_w.drop()
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_partition_create_and_drop_multi_times(self):

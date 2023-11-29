@@ -30,7 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/requestutil"
 )
 
-func TraceLogInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+func TraceLogInterceptor(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 	switch Params.CommonCfg.TraceLogMode.GetAsInt() {
 	case 0: // none
 		return handler(ctx, req)
