@@ -20,6 +20,7 @@ import (
 // MetaWriter is the interface for SyncManager to write segment sync meta.
 type MetaWriter interface {
 	UpdateSync(*SyncTask) error
+	UpdateSyncV2(*SyncTaskV2) error
 	DropChannel(string) error
 }
 
@@ -135,12 +136,86 @@ func (b *brokerMetaWriter) UpdateSync(pack *SyncTask) error {
 	return nil
 }
 
+func (b *brokerMetaWriter) UpdateSyncV2(pack *SyncTaskV2) error {
+	checkPoints := []*datapb.CheckPoint{}
+
+	// only current segment checkpoint info,
+	segments := pack.metacache.GetSegmentsBy(metacache.WithSegmentIDs(pack.segmentID))
+	if len(segments) == 0 {
+		return merr.WrapErrSegmentNotFound(pack.segmentID)
+	}
+	segment := segments[0]
+	checkPoints = append(checkPoints, &datapb.CheckPoint{
+		SegmentID: pack.segmentID,
+		NumOfRows: segment.FlushedRows() + pack.batchSize,
+		Position:  pack.checkpoint,
+	})
+
+	startPos := lo.Map(pack.metacache.GetSegmentsBy(metacache.WithStartPosNotRecorded()), func(info *metacache.SegmentInfo, _ int) *datapb.SegmentStartPosition {
+		return &datapb.SegmentStartPosition{
+			SegmentID:     info.SegmentID(),
+			StartPosition: info.StartPosition(),
+		}
+	})
+	log.Info("SaveBinlogPath",
+		zap.Int64("SegmentID", pack.segmentID),
+		zap.Int64("CollectionID", pack.collectionID),
+		zap.Any("startPos", startPos),
+		zap.Any("checkPoints", checkPoints),
+		zap.String("vChannelName", pack.channelName),
+	)
+
+	req := &datapb.SaveBinlogPathsRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithSourceID(paramtable.GetNodeID()),
+		),
+		SegmentID:    pack.segmentID,
+		CollectionID: pack.collectionID,
+
+		CheckPoints:    checkPoints,
+		StorageVersion: pack.storageVersion,
+
+		StartPositions: startPos,
+		Flushed:        pack.isFlush,
+		Dropped:        pack.isDrop,
+		Channel:        pack.channelName,
+	}
+	err := retry.Do(context.Background(), func() error {
+		err := b.broker.SaveBinlogPaths(context.Background(), req)
+		// Segment not found during stale segment flush. Segment might get compacted already.
+		// Stop retry and still proceed to the end, ignoring this error.
+		if !pack.isFlush && errors.Is(err, merr.ErrSegmentNotFound) {
+			log.Warn("stale segment not found, could be compacted",
+				zap.Int64("segmentID", pack.segmentID))
+			log.Warn("failed to SaveBinlogPaths",
+				zap.Int64("segmentID", pack.segmentID),
+				zap.Error(err))
+			return nil
+		}
+		// meta error, datanode handles a virtual channel does not belong here
+		if errors.IsAny(err, merr.ErrSegmentNotFound, merr.ErrChannelNotFound) {
+			log.Warn("meta error found, skip sync and start to drop virtual channel", zap.String("channel", pack.channelName))
+			return nil
+		}
+
+		if err != nil {
+			return err
+		}
+
+		return nil
+	}, b.opts...)
+	if err != nil {
+		log.Warn("failed to SaveBinlogPaths",
+			zap.Int64("segmentID", pack.segmentID),
+			zap.Error(err))
+	}
+	return err
+}
+
 func (b *brokerMetaWriter) DropChannel(channelName string) error {
 	err := retry.Do(context.Background(), func() error {
 		status, err := b.broker.DropVirtualChannel(context.Background(), &datapb.DropVirtualChannelRequest{
 			Base: commonpbutil.NewMsgBase(
-				commonpbutil.WithMsgType(0), // TODO msg type
-				commonpbutil.WithMsgID(0),   // TODO msg id
 				commonpbutil.WithSourceID(paramtable.GetNodeID()),
 			),
 			ChannelName: channelName,

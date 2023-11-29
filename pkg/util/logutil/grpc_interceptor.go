@@ -18,7 +18,7 @@ const (
 )
 
 // UnaryTraceLoggerInterceptor adds a traced logger in unary rpc call ctx
-func UnaryTraceLoggerInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+func UnaryTraceLoggerInterceptor(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 	newctx := withLevelAndTrace(ctx)
 	return handler(newctx, req)
 }

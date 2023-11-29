@@ -24,9 +24,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -53,7 +55,7 @@ func TestTraceLogInterceptor(t *testing.T) {
 			DbName:         "db",
 			CollectionName: "col1",
 		}, &grpc.UnaryServerInfo{
-			FullMethod: "/milvus.proto.milvus.MilvusService/ShowCollections",
+			FullMethod: "/milvus.proto.milvus.MilvusService/CreateCollection",
 		}, handler)
 	}
 
@@ -64,7 +66,7 @@ func TestTraceLogInterceptor(t *testing.T) {
 			DbName:         "db",
 			CollectionName: "col1",
 		}, &grpc.UnaryServerInfo{
-			FullMethod: "/milvus.proto.milvus.MilvusService/ShowCollections",
+			FullMethod: "/milvus.proto.milvus.MilvusService/CreateCollection",
 		}, handler)
 	}
 
@@ -81,6 +83,52 @@ func TestTraceLogInterceptor(t *testing.T) {
 			NewPassword: "FOO123456",
 		})
 		assert.NotContains(t, strings.ToLower(fmt.Sprint(f2.Interface)), "password")
+	}
+
+	_ = paramtable.Get().Save(paramtable.Get().CommonCfg.TraceLogMode.Key, "3")
+	{
+		_, _ = TraceLogInterceptor(ctx, &milvuspb.CreateCollectionRequest{
+			DbName:         "db",
+			CollectionName: "col1",
+		}, &grpc.UnaryServerInfo{
+			FullMethod: "/milvus.proto.milvus.MilvusService/CreateCollection",
+		}, func(ctx context.Context, req interface{}) (interface{}, error) {
+			return nil, errors.New("internet error")
+		})
+	}
+	{
+		_, _ = TraceLogInterceptor(ctx, &milvuspb.CreateCollectionRequest{
+			DbName:         "db",
+			CollectionName: "col1",
+		}, &grpc.UnaryServerInfo{
+			FullMethod: "/milvus.proto.milvus.MilvusService/CreateCollection",
+		}, func(ctx context.Context, req interface{}) (interface{}, error) {
+			return &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError, Code: 500}, nil
+		})
+	}
+	{
+		_, _ = TraceLogInterceptor(ctx, &milvuspb.CreateCollectionRequest{
+			DbName:         "db",
+			CollectionName: "col1",
+		}, &grpc.UnaryServerInfo{
+			FullMethod: "/milvus.proto.milvus.MilvusService/CreateCollection",
+		}, func(ctx context.Context, req interface{}) (interface{}, error) {
+			return "foo", nil
+		})
+	}
+	{
+		_, _ = TraceLogInterceptor(ctx, &milvuspb.ShowCollectionsRequest{
+			DbName: "db",
+		}, &grpc.UnaryServerInfo{
+			FullMethod: "/milvus.proto.milvus.MilvusService/ShowCollections",
+		}, func(ctx context.Context, req interface{}) (interface{}, error) {
+			return &milvuspb.ShowCollectionsResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+				},
+				CollectionNames: []string{"col1"},
+			}, nil
+		})
 	}
 	_ = paramtable.Get().Save(paramtable.Get().CommonCfg.TraceLogMode.Key, "0")
 }

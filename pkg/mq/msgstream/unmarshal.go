@@ -69,6 +69,8 @@ func (pudf *ProtoUDFactory) NewUnmarshalDispatcher() *ProtoUnmarshalDispatcher {
 	loadCollectionMsg := LoadCollectionMsg{}
 	releaseCollectionMsg := ReleaseCollectionMsg{}
 	flushMsg := FlushMsg{}
+	loadPartitionsMsg := LoadPartitionsMsg{}
+	releasePartitionsMsg := ReleasePartitionsMsg{}
 
 	createDatabaseMsg := CreateDatabaseMsg{}
 	dropDatabaseMsg := DropDatabaseMsg{}
@@ -87,6 +89,8 @@ func (pudf *ProtoUDFactory) NewUnmarshalDispatcher() *ProtoUnmarshalDispatcher {
 	p.TempMap[commonpb.MsgType_DropIndex] = dropIndexMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_LoadCollection] = loadCollectionMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_ReleaseCollection] = releaseCollectionMsg.Unmarshal
+	p.TempMap[commonpb.MsgType_LoadPartitions] = loadPartitionsMsg.Unmarshal
+	p.TempMap[commonpb.MsgType_ReleasePartitions] = releasePartitionsMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_Flush] = flushMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_CreateDatabase] = createDatabaseMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_DropDatabase] = dropDatabaseMsg.Unmarshal

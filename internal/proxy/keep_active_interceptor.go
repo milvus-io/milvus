@@ -28,7 +28,7 @@ func getIdentifierFromContext(ctx context.Context) (int64, error) {
 	return identifier, nil
 }
 
-func KeepActiveInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp interface{}, err error) {
+func KeepActiveInterceptor(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp interface{}, err error) {
 	// We shouldn't block the normal rpc. though this may be not very accurate enough.
 	// On the other hand, too many goroutines will also influence the rpc.
 	// Not sure which way is better, since actually we already make the `keepActive` asynchronous.

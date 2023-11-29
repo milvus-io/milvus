@@ -62,7 +62,6 @@ func (u *mqStatsUpdater) send(ts Timestamp, segmentIDs []int64) error {
 		DataNodeTtMsg: msgpb.DataNodeTtMsg{
 			Base: commonpbutil.NewMsgBase(
 				commonpbutil.WithMsgType(commonpb.MsgType_DataNodeTt),
-				commonpbutil.WithMsgID(0),
 				commonpbutil.WithTimeStamp(ts),
 				commonpbutil.WithSourceID(paramtable.GetNodeID()),
 			),

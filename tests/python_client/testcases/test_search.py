@@ -343,7 +343,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                     search_params, default_limit,
                                     default_search_exp,
                                     check_task=CheckTasks.err_res,
-                                    check_items={"err_code": 65538,
+                                    check_items={"err_code": 65535,
                                                  "err_msg": "failed to search"})
 
     @pytest.mark.skip("not fixed yet")
@@ -570,17 +570,17 @@ class TestCollectionSearchInvalid(TestcaseBase):
         collection_w.create_index("float_vector", ct.default_index)
         collection_w.load()
 
-        # 2. search
+        # 2. search (subscript > max_capacity)
         expression = "int32_array[101] > 0"
-        # msg = ("failed to search: attempt #0: failed to search/query delegator 1 for channel "
-        #        "by-dev-rootcoord-dml_: fail to Search, QueryNode ID=1, reason=worker(1) query"
-        #        " failed: UnknownError: Assert \")index >= 0 && index < length_\" at /go/src/"
-        #        "github.com/milvus-io/milvus/internal/core/src/common/Array.h:454 => index out"
-        #        " of range, index=101, length=100: attempt #1: no available shard delegator "
-        #        "found: service unavailable")
         res, _ = collection_w.search(vectors[:default_nq], default_search_field,
-                            default_search_params, nb, expression)
+                                     default_search_params, nb, expression)
         assert len(res[0]) == 0
+
+        # 3. search (max_capacity > subscript > actual length of array)
+        expression = "int32_array[51] > 0"
+        res, _ = collection_w.search(vectors[:default_nq], default_search_field,
+                                     default_search_params, default_limit, expression)
+        assert len(res[0]) == default_limit
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_with_expression_invalid_array_two(self):
@@ -873,14 +873,8 @@ class TestCollectionSearchInvalid(TestcaseBase):
         collection_w.search(vectors[:default_nq], default_search_field,
                             search_params, reorder_k + 1,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 65538,
-                                         "err_msg": "failed to search: attempt #0: failed to search/query "
-                                                    "delegator 1 for channel by-dev-rootcoord-dml_12_44501"
-                                                    "8735380972010v0: fail to Search, QueryNode ID=1, reaso"
-                                                    "n=worker(1) query failed: UnknownError:  => failed to "
-                                                    "search: out of range in json: reorder_k(100) should be"
-                                                    " larger than k(101): attempt #1: no available shard de"
-                                                    "legator found: service unavailable"})
+                            check_items={"err_code": 65535,
+                                         "err_msg": "reorder_k(100) should be larger than k(101)"})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("nq", [16385])
@@ -942,24 +936,28 @@ class TestCollectionSearchInvalid(TestcaseBase):
         collection_w.search(binary_vectors[:default_nq], "binary_vector",
                             search_params, default_limit, "int64 >= 0",
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 65538, "err_msg": "metric type not match: "
-                                                                       "expected=JACCARD, actual=L2"})
+                            check_items={"err_code": 65535,
+                                         "err_msg": "metric type not match: invalid "
+                                                    "parameter[expected=JACCARD][actual=L2]"})
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_search_with_output_fields_not_exist(self):
+    @pytest.mark.skip("issue #28465")
+    @pytest.mark.parametrize("output_fields", ["int63", ""])
+    @pytest.mark.parametrize("enable_dynamic", [True, False])
+    def test_search_with_output_fields_not_exist(self, output_fields, enable_dynamic):
         """
         target: test search with output fields
         method: search with non-exist output_field
         expected: raise exception
         """
         # 1. initialize with data
-        collection_w = self.init_collection_general(prefix)[0]
+        collection_w = self.init_collection_general(prefix, True, enable_dynamic_field=enable_dynamic)[0]
         # 2. search
         log.info("test_search_with_output_fields_not_exist: Searching collection %s" %
                  collection_w.name)
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, default_limit,
-                            default_search_exp, output_fields=["int63"],
+                            default_search_exp, output_fields=[output_fields],
                             check_task=CheckTasks.err_res,
                             check_items={ct.err_code: 65535,
                                          ct.err_msg: "field int63 not exist"})
@@ -3349,6 +3347,40 @@ class TestCollectionSearch(TestcaseBase):
         for hits in res:
             ids = hits.ids
             assert set(ids).issubset(filter_ids_set)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_expression_with_double_quotes(self):
+        """
+        target: test search with expressions with double quotes
+        method: test search with expressions with double quotes
+        expected: searched successfully with correct limit(topK)
+        """
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix)[0]
+        string_value = [(f"'{cf.gen_str_by_length(3)}'{cf.gen_str_by_length(3)}\""
+                         f"{cf.gen_str_by_length(3)}\"") for _ in range(default_nb)]
+        data = cf.gen_default_dataframe_data()
+        data[default_string_field_name] = string_value
+        insert_ids = data[default_int64_field_name]
+        collection_w.insert(data)
+
+        # 2. create index
+        index_param = {"index_type": "FLAT", "metric_type": "COSINE", "params": {}}
+        collection_w.create_index("float_vector", index_param)
+        collection_w.load()
+
+        # 3. search with expression
+        _id = random.randint(0, default_nb)
+        string_value[_id] = string_value[_id].replace("\"", "\\\"")
+        expression = f"{default_string_field_name} == \"{string_value[_id]}\""
+        log.info("test_search_with_expression: searching with expression: %s" % expression)
+        search_res, _ = collection_w.search(vectors[:default_nq], default_search_field,
+                                            default_search_params, default_limit, expression,
+                                            check_task=CheckTasks.check_search_results,
+                                            check_items={"nq": default_nq,
+                                                         "ids": insert_ids,
+                                                         "limit": 1})
+        assert search_res[0].ids == [_id]
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_with_output_fields_empty(self, nb, nq, dim, auto_id, _async):
@@ -6131,8 +6163,10 @@ class TestSearchDiskann(TestcaseBase):
                             default_search_exp,
                             output_fields=output_fields,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 65538,
-                                         "err_msg": "fail to search on all shard leaders"})
+                            check_items={"err_code": 65535,
+                                         "err_msg": "search_list_size should be in range: [topk, "
+                                                    "max(200, topk * 10)], topk = 1, search_list_"
+                                                    "size = {}".format(search_list)})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("limit", [20])
@@ -6359,10 +6393,8 @@ class TestSearchDiskann(TestcaseBase):
         collection_w.load()
         default_expr = "int64 in [1, 2, 3, 4]"
         limit = 4
-        default_search_params = {
-            "metric_type": "COSINE", "params": {"nprobe": 64}}
-        vectors = [[random.random() for _ in range(dim)]
-                   for _ in range(default_nq)]
+        default_search_params = {"metric_type": "COSINE", "params": {"nprobe": 64}}
+        vectors = [[random.random() for _ in range(dim)]for _ in range(default_nq)]
         output_fields = [default_int64_field_name,
                          default_float_field_name,  default_string_field_name]
         search_res = collection_w.search(vectors[:default_nq], default_search_field,
@@ -6589,8 +6621,9 @@ class TestCollectionRangeSearch(TestcaseBase):
                             range_search_params, default_limit,
                             default_search_exp,
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1,
-                                         ct.err_msg: "metric type not match: expected=COSINE, actual=IP"})
+                            check_items={ct.err_code: 65535,
+                                         ct.err_msg: "metric type not match: "
+                                                     "invalid parameter[expected=COSINE][actual=IP]"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_range_search_only_radius(self):
@@ -6622,8 +6655,9 @@ class TestCollectionRangeSearch(TestcaseBase):
                             range_search_params, default_limit,
                             default_search_exp,
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1,
-                                         ct.err_msg: "metric type not match: expected=L2, actual=IP"})
+                            check_items={ct.err_code: 65535,
+                                         ct.err_msg: "metric type not match: invalid "
+                                                     "parameter[expected=L2][actual=IP]"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_range_search_radius_range_filter_not_in_params(self):
@@ -6655,8 +6689,9 @@ class TestCollectionRangeSearch(TestcaseBase):
                             range_search_params, default_limit,
                             default_search_exp,
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1,
-                                         ct.err_msg: "metric type not match: expected=COSINE, actual=IP"})
+                            check_items={ct.err_code: 65535,
+                                         ct.err_msg: "metric type not match: invalid "
+                                                     "parameter[expected=COSINE][actual=IP]"})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("dup_times", [1, 2])
@@ -9430,19 +9465,19 @@ class TestSearchIterator(TestcaseBase):
         """
         # 1. initialize with data
         batch_size = 100
-        collection_w = self.init_collection_general(
-            prefix, True, is_index=False)[0]
+        collection_w = self.init_collection_general(prefix, True, is_index=False)[0]
         collection_w.create_index(field_name, {"metric_type": "L2"})
         collection_w.load()
         # 2. search iterator
-        search_params = {"metric_type": "L2"}
+        search_params = {"metric_type": "L2", "params": {"radius": 35.0, "range_filter": 34.0}}
         collection_w.search_iterator(vectors[:1], field_name, search_params, batch_size,
                                      check_task=CheckTasks.check_search_iterator,
-                                     check_items={"metric_type": "L2"})
+                                     check_items={"metric_type": "L2",
+                                                  "radius": 35.0,
+                                                  "range_filter": 34.0})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("metrics", ct.float_metrics[1:])
-    def test_range_search_iterator_IP_COSINE(self, metrics):
+    def test_range_search_iterator_IP(self):
         """
         target: test iterator range search
         method: 1. search iterator
@@ -9451,15 +9486,37 @@ class TestSearchIterator(TestcaseBase):
         """
         # 1. initialize with data
         batch_size = 100
-        collection_w = self.init_collection_general(
-            prefix, True, is_index=False)[0]
-        collection_w.create_index(field_name, {"metric_type": metrics})
+        collection_w = self.init_collection_general(prefix, True, is_index=False)[0]
+        collection_w.create_index(field_name, {"metric_type": "IP"})
         collection_w.load()
         # 2. search iterator
-        search_params = {"metric_type": metrics, "params": {}}
+        search_params = {"metric_type": "IP", "params": {"radius": 0, "range_filter": 45}}
         collection_w.search_iterator(vectors[:1], field_name, search_params, batch_size,
                                      check_task=CheckTasks.check_search_iterator,
-                                     check_items={"metric_type": metrics})
+                                     check_items={"metric_type": "IP",
+                                                  "radius": 0,
+                                                  "range_filter": 45})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_range_search_iterator_COSINE(self):
+        """
+        target: test iterator range search
+        method: 1. search iterator
+                2. check the result, expect pk not repeat and meet the expr requirements
+        expected: search successfully
+        """
+        # 1. initialize with data
+        batch_size = 100
+        collection_w = self.init_collection_general(prefix, True, is_index=False)[0]
+        collection_w.create_index(field_name, {"metric_type": "COSINE"})
+        collection_w.load()
+        # 2. search iterator
+        search_params = {"metric_type": "COSINE", "params": {"radius": 0.8, "range_filter": 1}}
+        collection_w.search_iterator(vectors[:1], field_name, search_params, batch_size,
+                                     check_task=CheckTasks.check_search_iterator,
+                                     check_items={"metric_type": "COSINE",
+                                                  "radius": 0.8,
+                                                  "range_filter": 1})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_range_search_iterator_only_radius(self):
@@ -9471,15 +9528,15 @@ class TestSearchIterator(TestcaseBase):
         """
         # 1. initialize with data
         batch_size = 100
-        collection_w = self.init_collection_general(
-            prefix, True, is_index=False)[0]
+        collection_w = self.init_collection_general(prefix, True, is_index=False)[0]
         collection_w.create_index(field_name, {"metric_type": "L2"})
         collection_w.load()
         # 2. search iterator
-        search_params = {"metric_type": "L2", "params": {}}
+        search_params = {"metric_type": "L2", "params": {"radius": 35.0}}
         collection_w.search_iterator(vectors[:1], field_name, search_params, batch_size,
                                      check_task=CheckTasks.check_search_iterator,
-                                     check_items={"metric_type": "L2"})
+                                     check_items={"metric_type": "L2",
+                                                  "radius": 35.0})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.skip("issue #25145")

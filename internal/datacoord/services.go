@@ -421,6 +421,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		zap.Int64("nodeID", req.GetBase().GetSourceID()),
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.Int64("segmentID", req.GetSegmentID()),
+		zap.String("level", req.GetSegLevel().String()),
 	)
 
 	log.Info("receive SaveBinlogPaths request",
@@ -489,6 +490,9 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	// save checkpoints.
 	operators = append(operators, UpdateCheckPointOperator(segmentID, req.GetImporting(), req.GetCheckPoints()))
 
+	if Params.CommonCfg.EnableStorageV2.GetAsBool() {
+		operators = append(operators, UpdateStorageVersionOperator(segmentID, req.GetStorageVersion()))
+	}
 	// run all operator and update new segment info
 	err := s.meta.UpdateSegmentsInfo(operators...)
 	if err != nil {
@@ -499,9 +503,15 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	log.Info("flush segment with meta", zap.Any("meta", req.GetField2BinlogPaths()))
 
 	if req.GetFlushed() {
-		s.segmentManager.DropSegment(ctx, req.SegmentID)
-		s.flushCh <- req.SegmentID
+		if req.GetSegLevel() == datapb.SegmentLevel_L0 {
+			metrics.DataCoordSizeStoredL0Segment.WithLabelValues().Observe(calculateL0SegmentSize(req.GetField2StatslogPaths()))
+			metrics.DataCoordRateStoredL0Segment.WithLabelValues().Inc()
+		} else {
+			// because segmentMananger only manage growing segment
+			s.segmentManager.DropSegment(ctx, req.SegmentID)
+		}
 
+		s.flushCh <- req.SegmentID
 		if !req.Importing && Params.DataCoordCfg.EnableCompaction.GetAsBool() {
 			if segment == nil && req.GetSegLevel() == datapb.SegmentLevel_L0 {
 				err = s.compactionTrigger.triggerSingleCompaction(req.GetCollectionID(), req.GetPartitionID(),
@@ -579,8 +589,10 @@ func (s *Server) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtual
 		log.Warn("DropVChannel failed to ReleaseAndRemove", zap.String("channel", channel), zap.Error(err))
 	}
 	s.segmentManager.DropSegmentsOfChannel(ctx, channel)
+	s.compactionHandler.removeTasksByChannel(channel)
 
 	metrics.CleanupDataCoordNumStoredRows(collectionID)
+	metrics.DataCoordCheckpointLag.DeleteLabelValues(fmt.Sprint(paramtable.GetNodeID()), channel)
 
 	// no compaction triggered in Drop procedure
 	return resp, nil

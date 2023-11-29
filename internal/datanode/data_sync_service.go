@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
 	"github.com/milvus-io/milvus/internal/datanode/writebuffer"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -124,19 +125,19 @@ func (dsService *dataSyncService) close() {
 	})
 }
 
-func getMetaCacheWithTickler(initCtx context.Context, node *DataNode, info *datapb.ChannelWatchInfo, tickler *tickler, unflushed, flushed []*datapb.SegmentInfo) (metacache.MetaCache, error) {
+func getMetaCacheWithTickler(initCtx context.Context, node *DataNode, info *datapb.ChannelWatchInfo, tickler *tickler, unflushed, flushed []*datapb.SegmentInfo, storageV2Cache *metacache.StorageV2Cache) (metacache.MetaCache, error) {
 	tickler.setTotal(int32(len(unflushed) + len(flushed)))
-	return initMetaCache(initCtx, node.chunkManager, info, tickler, unflushed, flushed)
+	return initMetaCache(initCtx, storageV2Cache, node.chunkManager, info, tickler, unflushed, flushed)
 }
 
-func getMetaCacheWithEtcdTickler(initCtx context.Context, node *DataNode, info *datapb.ChannelWatchInfo, tickler *etcdTickler, unflushed, flushed []*datapb.SegmentInfo) (metacache.MetaCache, error) {
+func getMetaCacheWithEtcdTickler(initCtx context.Context, node *DataNode, info *datapb.ChannelWatchInfo, tickler *etcdTickler, unflushed, flushed []*datapb.SegmentInfo, storageV2Cache *metacache.StorageV2Cache) (metacache.MetaCache, error) {
 	tickler.watch()
 	defer tickler.stop()
 
-	return initMetaCache(initCtx, node.chunkManager, info, tickler, unflushed, flushed)
+	return initMetaCache(initCtx, storageV2Cache, node.chunkManager, info, tickler, unflushed, flushed)
 }
 
-func initMetaCache(initCtx context.Context, chunkManager storage.ChunkManager, info *datapb.ChannelWatchInfo, tickler interface{ inc() }, unflushed, flushed []*datapb.SegmentInfo) (metacache.MetaCache, error) {
+func initMetaCache(initCtx context.Context, storageV2Cache *metacache.StorageV2Cache, chunkManager storage.ChunkManager, info *datapb.ChannelWatchInfo, tickler interface{ inc() }, unflushed, flushed []*datapb.SegmentInfo) (metacache.MetaCache, error) {
 	recoverTs := info.GetVchan().GetSeekPosition().GetTimestamp()
 
 	// tickler will update addSegment progress to watchInfo
@@ -154,7 +155,13 @@ func initMetaCache(initCtx context.Context, chunkManager storage.ChunkManager, i
 			segment := item
 
 			future := getOrCreateIOPool().Submit(func() (any, error) {
-				stats, err := loadStats(initCtx, chunkManager, info.GetSchema(), segment.GetID(), segment.GetCollectionID(), segment.GetStatslogs(), recoverTs)
+				var stats []*storage.PkStatistics
+				var err error
+				if params.Params.CommonCfg.EnableStorageV2.GetAsBool() {
+					stats, err = loadStatsV2(storageV2Cache, segment, info.GetSchema())
+				} else {
+					stats, err = loadStats(initCtx, chunkManager, info.GetSchema(), segment.GetID(), segment.GetCollectionID(), segment.GetStatslogs(), recoverTs)
+				}
 				if err != nil {
 					return nil, err
 				}
@@ -186,6 +193,57 @@ func initMetaCache(initCtx context.Context, chunkManager storage.ChunkManager, i
 	})
 
 	return metacache, nil
+}
+
+func loadStatsV2(storageCache *metacache.StorageV2Cache, segment *datapb.SegmentInfo, schema *schemapb.CollectionSchema) ([]*storage.PkStatistics, error) {
+	space, err := storageCache.GetOrCreateSpace(segment.ID, writebuffer.SpaceCreatorFunc(segment.ID, schema, storageCache.ArrowSchema()))
+	if err != nil {
+		return nil, err
+	}
+
+	getResult := func(stats []*storage.PrimaryKeyStats) []*storage.PkStatistics {
+		result := make([]*storage.PkStatistics, 0, len(stats))
+		for _, stat := range stats {
+			pkStat := &storage.PkStatistics{
+				PkFilter: stat.BF,
+				MinPK:    stat.MinPk,
+				MaxPK:    stat.MaxPk,
+			}
+			result = append(result, pkStat)
+		}
+		return result
+	}
+
+	blobs := space.StatisticsBlobs()
+	deserBlobs := make([]*Blob, 0)
+	for _, b := range blobs {
+		if b.Name == storage.CompoundStatsType.LogIdx() {
+			blobData := make([]byte, b.Size)
+			_, err = space.ReadBlob(b.Name, blobData)
+			if err != nil {
+				return nil, err
+			}
+			stats, err := storage.DeserializeStatsList(&Blob{Value: blobData})
+			if err != nil {
+				return nil, err
+			}
+			return getResult(stats), nil
+		}
+	}
+
+	for _, b := range blobs {
+		blobData := make([]byte, b.Size)
+		_, err = space.ReadBlob(b.Name, blobData)
+		if err != nil {
+			return nil, err
+		}
+		deserBlobs = append(deserBlobs, &Blob{Value: blobData})
+	}
+	stats, err := storage.DeserializeStats(deserBlobs)
+	if err != nil {
+		return nil, err
+	}
+	return getResult(stats), nil
 }
 
 func loadStats(ctx context.Context, chunkManager storage.ChunkManager, schema *schemapb.CollectionSchema, segmentID int64, collectionID int64, statsBinlogs []*datapb.FieldBinlog, ts Timestamp) ([]*storage.PkStatistics, error) {
@@ -274,7 +332,7 @@ func loadStats(ctx context.Context, chunkManager storage.ChunkManager, schema *s
 	return result, nil
 }
 
-func getServiceWithChannel(initCtx context.Context, node *DataNode, info *datapb.ChannelWatchInfo, metacache metacache.MetaCache, unflushed, flushed []*datapb.SegmentInfo) (*dataSyncService, error) {
+func getServiceWithChannel(initCtx context.Context, node *DataNode, info *datapb.ChannelWatchInfo, metacache metacache.MetaCache, storageV2Cache *metacache.StorageV2Cache, unflushed, flushed []*datapb.SegmentInfo) (*dataSyncService, error) {
 	var (
 		channelName  = info.GetVchan().GetChannelName()
 		collectionID = info.GetVchan().GetCollectionID()
@@ -295,7 +353,7 @@ func getServiceWithChannel(initCtx context.Context, node *DataNode, info *datapb
 		resendTTCh = make(chan resendTTMsg, 100)
 	)
 
-	node.writeBufferManager.Register(channelName, metacache, writebuffer.WithMetaWriter(syncmgr.BrokerMetaWriter(node.broker)), writebuffer.WithIDAllocator(node.allocator))
+	node.writeBufferManager.Register(channelName, metacache, storageV2Cache, writebuffer.WithMetaWriter(syncmgr.BrokerMetaWriter(node.broker)), writebuffer.WithIDAllocator(node.allocator))
 	ctx, cancel := context.WithCancel(node.ctx)
 	ds := &dataSyncService{
 		ctx:        ctx,
@@ -391,13 +449,20 @@ func newServiceWithEtcdTickler(initCtx context.Context, node *DataNode, info *da
 		return nil, err
 	}
 
+	var storageCache *metacache.StorageV2Cache
+	if params.Params.CommonCfg.EnableStorageV2.GetAsBool() {
+		storageCache, err = metacache.NewStorageV2Cache(info.Schema)
+		if err != nil {
+			return nil, err
+		}
+	}
 	// init channel meta
-	metaCache, err := getMetaCacheWithEtcdTickler(initCtx, node, info, tickler, unflushedSegmentInfos, flushedSegmentInfos)
+	metaCache, err := getMetaCacheWithEtcdTickler(initCtx, node, info, tickler, unflushedSegmentInfos, flushedSegmentInfos, storageCache)
 	if err != nil {
 		return nil, err
 	}
 
-	return getServiceWithChannel(initCtx, node, info, metaCache, unflushedSegmentInfos, flushedSegmentInfos)
+	return getServiceWithChannel(initCtx, node, info, metaCache, storageCache, unflushedSegmentInfos, flushedSegmentInfos)
 }
 
 // newDataSyncService gets a dataSyncService, but flowgraphs are not running
@@ -415,11 +480,18 @@ func newDataSyncService(initCtx context.Context, node *DataNode, info *datapb.Ch
 		return nil, err
 	}
 
+	var storageCache *metacache.StorageV2Cache
+	if params.Params.CommonCfg.EnableStorageV2.GetAsBool() {
+		storageCache, err = metacache.NewStorageV2Cache(info.Schema)
+		if err != nil {
+			return nil, err
+		}
+	}
 	// init metaCache meta
-	metaCache, err := getMetaCacheWithTickler(initCtx, node, info, tickler, unflushedSegmentInfos, flushedSegmentInfos)
+	metaCache, err := getMetaCacheWithTickler(initCtx, node, info, tickler, unflushedSegmentInfos, flushedSegmentInfos, storageCache)
 	if err != nil {
 		return nil, err
 	}
 
-	return getServiceWithChannel(initCtx, node, info, metaCache, unflushedSegmentInfos, flushedSegmentInfos)
+	return getServiceWithChannel(initCtx, node, info, metaCache, storageCache, unflushedSegmentInfos, flushedSegmentInfos)
 }

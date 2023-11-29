@@ -133,7 +133,7 @@ class MinioChunkManager : public ChunkManager {
     Write(const std::string& filepath, void* buf, uint64_t len);
 
     virtual std::vector<std::string>
-    ListWithPrefix(const std::string& filepath);
+    ListWithPrefix(const std::string& filepath = "");
 
     virtual void
     Remove(const std::string& filepath);
@@ -200,6 +200,11 @@ class MinioChunkManager : public ChunkManager {
     InitSDKAPI(RemoteStorageType type,
                bool useIAM,
                const std::string& log_level);
+
+    // Precheck whether client is configure ready or not.
+    void
+    PreCheck(const StorageConfig& storage_config);
+
     void
     ShutdownSDKAPI();
     void

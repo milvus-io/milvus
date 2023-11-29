@@ -39,29 +39,24 @@ func TestAccessLogger_NotEnable(t *testing.T) {
 	Params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
 	Params.Save(Params.ProxyCfg.AccessLog.Enable.Key, "false")
 
-	InitAccessLogger(&Params.ProxyCfg.AccessLog, &Params.MinioCfg)
-
-	ctx := peer.NewContext(
-		context.Background(),
-		&peer.Peer{
-			Addr: &net.IPAddr{
-				IP:   net.IPv4(0, 0, 0, 0),
-				Zone: "test",
-			},
-		})
-	ctx = metadata.AppendToOutgoingContext(ctx, clientRequestIDKey, "test")
-
-	resp := &milvuspb.BoolResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    "",
-		},
-		Value: false,
-	}
+	err := initAccessLogger(&Params.ProxyCfg.AccessLog, &Params.MinioCfg)
+	assert.NoError(t, err)
 
 	rpcInfo := &grpc.UnaryServerInfo{Server: nil, FullMethod: "testMethod"}
-	ok := PrintAccessInfo(ctx, resp, nil, rpcInfo, 0)
+	accessInfo := NewGrpcAccessInfo(context.Background(), rpcInfo, nil)
+	ok := accessInfo.Write()
 	assert.False(t, ok)
+}
+
+func TestAccessLogger_InitFailed(t *testing.T) {
+	var Params paramtable.ComponentParam
+
+	Params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+	Params.Save(Params.ProxyCfg.AccessLog.Enable.Key, "true")
+	Params.SaveGroup(map[string]string{Params.ProxyCfg.AccessLog.Formatter.KeyPrefix + "testf.invaild": "invalidConfig"})
+
+	err := initAccessLogger(&Params.ProxyCfg.AccessLog, &Params.MinioCfg)
+	assert.Error(t, err)
 }
 
 func TestAccessLogger_Basic(t *testing.T) {
@@ -73,7 +68,7 @@ func TestAccessLogger_Basic(t *testing.T) {
 	Params.Save(Params.ProxyCfg.AccessLog.LocalPath.Key, testPath)
 	defer os.RemoveAll(testPath)
 
-	InitAccessLogger(&Params.ProxyCfg.AccessLog, &Params.MinioCfg)
+	initAccessLogger(&Params.ProxyCfg.AccessLog, &Params.MinioCfg)
 
 	ctx := peer.NewContext(
 		context.Background(),
@@ -85,6 +80,12 @@ func TestAccessLogger_Basic(t *testing.T) {
 		})
 	ctx = metadata.AppendToOutgoingContext(ctx, clientRequestIDKey, "test")
 
+	req := &milvuspb.QueryRequest{
+		DbName:         "test-db",
+		CollectionName: "test-collection",
+		PartitionNames: []string{"test-partition-1", "test-partition-2"},
+	}
+
 	resp := &milvuspb.BoolResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -94,7 +95,11 @@ func TestAccessLogger_Basic(t *testing.T) {
 	}
 
 	rpcInfo := &grpc.UnaryServerInfo{Server: nil, FullMethod: "testMethod"}
-	ok := PrintAccessInfo(ctx, resp, nil, rpcInfo, 0)
+
+	accessInfo := NewGrpcAccessInfo(ctx, rpcInfo, req)
+
+	accessInfo.SetResult(resp, nil)
+	ok := accessInfo.Write()
 	assert.True(t, ok)
 }
 
@@ -105,7 +110,7 @@ func TestAccessLogger_Stdout(t *testing.T) {
 	Params.Save(Params.ProxyCfg.AccessLog.Enable.Key, "true")
 	Params.Save(Params.ProxyCfg.AccessLog.Filename.Key, "")
 
-	InitAccessLogger(&Params.ProxyCfg.AccessLog, &Params.MinioCfg)
+	initAccessLogger(&Params.ProxyCfg.AccessLog, &Params.MinioCfg)
 
 	ctx := peer.NewContext(
 		context.Background(),
@@ -117,6 +122,12 @@ func TestAccessLogger_Stdout(t *testing.T) {
 		})
 	ctx = metadata.AppendToOutgoingContext(ctx, clientRequestIDKey, "test")
 
+	req := &milvuspb.QueryRequest{
+		DbName:         "test-db",
+		CollectionName: "test-collection",
+		PartitionNames: []string{"test-partition-1", "test-partition-2"},
+	}
+
 	resp := &milvuspb.BoolResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -126,7 +137,10 @@ func TestAccessLogger_Stdout(t *testing.T) {
 	}
 
 	rpcInfo := &grpc.UnaryServerInfo{Server: nil, FullMethod: "testMethod"}
-	ok := PrintAccessInfo(ctx, resp, nil, rpcInfo, 0)
+
+	accessInfo := NewGrpcAccessInfo(ctx, rpcInfo, req)
+	accessInfo.SetResult(resp, nil)
+	ok := accessInfo.Write()
 	assert.True(t, ok)
 }
 
@@ -139,11 +153,16 @@ func TestAccessLogger_WithMinio(t *testing.T) {
 	Params.Save(Params.ProxyCfg.AccessLog.Filename.Key, "test_access")
 	Params.Save(Params.ProxyCfg.AccessLog.LocalPath.Key, testPath)
 	Params.Save(Params.ProxyCfg.AccessLog.MinioEnable.Key, "true")
+	Params.Save(Params.ProxyCfg.AccessLog.CacheSize.Key, "0")
 	Params.Save(Params.ProxyCfg.AccessLog.RemotePath.Key, "access_log/")
 	Params.Save(Params.ProxyCfg.AccessLog.MaxSize.Key, "1")
 	defer os.RemoveAll(testPath)
 
-	InitAccessLogger(&Params.ProxyCfg.AccessLog, &Params.MinioCfg)
+	// test rotate before init
+	err := Rotate()
+	assert.NoError(t, err)
+
+	initAccessLogger(&Params.ProxyCfg.AccessLog, &Params.MinioCfg)
 
 	ctx := peer.NewContext(
 		context.Background(),
@@ -154,6 +173,12 @@ func TestAccessLogger_WithMinio(t *testing.T) {
 			},
 		})
 	ctx = metadata.AppendToOutgoingContext(ctx, clientRequestIDKey, "test")
+
+	req := &milvuspb.QueryRequest{
+		DbName:         "test-db",
+		CollectionName: "test-collection",
+		PartitionNames: []string{"test-partition-1", "test-partition-2"},
+	}
 
 	resp := &milvuspb.BoolResponse{
 		Status: &commonpb.Status{
@@ -164,44 +189,17 @@ func TestAccessLogger_WithMinio(t *testing.T) {
 	}
 
 	rpcInfo := &grpc.UnaryServerInfo{Server: nil, FullMethod: "testMethod"}
-	ok := PrintAccessInfo(ctx, resp, nil, rpcInfo, 0)
+
+	accessInfo := NewGrpcAccessInfo(ctx, rpcInfo, req)
+	accessInfo.SetResult(resp, nil)
+	ok := accessInfo.Write()
 	assert.True(t, ok)
 
-	W().Rotate()
-	defer W().handler.Clean()
+	Rotate()
+	defer _globalR.handler.Clean()
 
 	time.Sleep(time.Duration(1) * time.Second)
-	logfiles, err := W().handler.listAll()
+	logfiles, err := _globalR.handler.listAll()
 	assert.NoError(t, err)
 	assert.Equal(t, 1, len(logfiles))
-}
-
-func TestAccessLogger_Error(t *testing.T) {
-	var Params paramtable.ComponentParam
-
-	Params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
-	testPath := "/tmp/accesstest"
-	Params.Save(Params.ProxyCfg.AccessLog.Enable.Key, "true")
-	Params.Save(Params.ProxyCfg.AccessLog.Filename.Key, "test_access")
-	Params.Save(Params.ProxyCfg.AccessLog.LocalPath.Key, testPath)
-	defer os.RemoveAll(testPath)
-
-	InitAccessLogger(&Params.ProxyCfg.AccessLog, &Params.MinioCfg)
-
-	ctx := peer.NewContext(
-		context.Background(),
-		&peer.Peer{
-			Addr: &net.IPAddr{
-				IP:   net.IPv4(0, 0, 0, 0),
-				Zone: "test",
-			},
-		})
-
-	rpcInfo := &grpc.UnaryServerInfo{Server: nil, FullMethod: "testMethod"}
-	ok := PrintAccessInfo(ctx, nil, nil, rpcInfo, 0)
-	assert.False(t, ok)
-
-	ctx = metadata.AppendToOutgoingContext(ctx, clientRequestIDKey, "test")
-	ok = PrintAccessInfo(ctx, nil, nil, rpcInfo, 0)
-	assert.False(t, ok)
 }

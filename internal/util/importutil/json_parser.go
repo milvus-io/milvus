@@ -23,13 +23,13 @@ import (
 	"io"
 	"strings"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -115,7 +115,7 @@ func (p *JSONParser) combineDynamicRow(dynamicValues map[string]interface{}, row
 				err := desc.Decode(&mp)
 				if err != nil {
 					// invalid input
-					return errors.New("illegal value for dynamic field, not a JSON format string")
+					return merr.WrapErrImportFailed("illegal value for dynamic field, not a JSON format string")
 				}
 
 				maps.Copy(dynamicValues, mp)
@@ -124,7 +124,7 @@ func (p *JSONParser) combineDynamicRow(dynamicValues map[string]interface{}, row
 				maps.Copy(dynamicValues, mp)
 			} else {
 				// invalid input
-				return errors.New("illegal value for dynamic field, not a JSON object")
+				return merr.WrapErrImportFailed("illegal value for dynamic field, not a JSON object")
 			}
 			row[dynamicFieldID] = dynamicValues
 		}
@@ -146,7 +146,7 @@ func (p *JSONParser) verifyRow(raw interface{}) (map[storage.FieldID]interface{}
 	stringMap, ok := raw.(map[string]interface{})
 	if !ok {
 		log.Warn("JSON parser: invalid JSON format, each row should be a key-value map")
-		return nil, errors.New("invalid JSON format, each row should be a key-value map")
+		return nil, merr.WrapErrImportFailed("invalid JSON format, each row should be a key-value map")
 	}
 
 	dynamicValues := make(map[string]interface{})
@@ -157,7 +157,7 @@ func (p *JSONParser) verifyRow(raw interface{}) (map[storage.FieldID]interface{}
 		if (fieldID == p.collectionInfo.PrimaryKey.GetFieldID()) && p.collectionInfo.PrimaryKey.GetAutoID() {
 			// primary key is auto-id, no need to provide
 			log.Warn("JSON parser: the primary key is auto-generated, no need to provide", zap.String("fieldName", k))
-			return nil, fmt.Errorf("the primary key '%s' is auto-generated, no need to provide", k)
+			return nil, merr.WrapErrImportFailed(fmt.Sprintf("the primary key '%s' is auto-generated, no need to provide", k))
 		}
 
 		if ok {
@@ -168,7 +168,7 @@ func (p *JSONParser) verifyRow(raw interface{}) (map[storage.FieldID]interface{}
 		} else {
 			// no dynamic field. if user provided redundant field, return error
 			log.Warn("JSON parser: the field is not defined in collection schema", zap.String("fieldName", k))
-			return nil, fmt.Errorf("the field '%s' is not defined in collection schema", k)
+			return nil, merr.WrapErrImportFailed(fmt.Sprintf("the field '%s' is not defined in collection schema", k))
 		}
 	}
 
@@ -189,7 +189,7 @@ func (p *JSONParser) verifyRow(raw interface{}) (map[storage.FieldID]interface{}
 			if !ok {
 				// not auto-id primary key, no dynamic field,  must provide value
 				log.Warn("JSON parser: a field value is missed", zap.String("fieldName", k))
-				return nil, fmt.Errorf("value of field '%s' is missed", k)
+				return nil, merr.WrapErrImportFailed(fmt.Sprintf("value of field '%s' is missed", k))
 			}
 		}
 	}
@@ -207,7 +207,7 @@ func (p *JSONParser) verifyRow(raw interface{}) (map[storage.FieldID]interface{}
 func (p *JSONParser) ParseRows(reader *IOReader, handler JSONRowHandler) error {
 	if handler == nil || reader == nil {
 		log.Warn("JSON parse handler is nil")
-		return errors.New("JSON parse handler is nil")
+		return merr.WrapErrImportFailed("JSON parse handler is nil")
 	}
 
 	dec := json.NewDecoder(reader.r)
@@ -232,42 +232,42 @@ func (p *JSONParser) ParseRows(reader *IOReader, handler JSONRowHandler) error {
 	t, err := dec.Token()
 	if err != nil {
 		log.Warn("JSON parser: failed to decode the JSON file", zap.Error(err))
-		return fmt.Errorf("failed to decode the JSON file, error: %w", err)
+		return merr.WrapErrImportFailed(fmt.Sprintf("failed to decode the JSON file, error: %v", err))
 	}
 	if t != json.Delim('{') && t != json.Delim('[') {
 		log.Warn("JSON parser: invalid JSON format, the content should be started with '{' or '['")
-		return errors.New("invalid JSON format, the content should be started with '{' or '['")
+		return merr.WrapErrImportFailed("invalid JSON format, the content should be started with '{' or '['")
 	}
 
 	// read the first level
 	isEmpty := true
-	isOldFormat := (t == json.Delim('{'))
+	isOldFormat := t == json.Delim('{')
 	for dec.More() {
 		if isOldFormat {
 			// read the key
 			t, err := dec.Token()
 			if err != nil {
 				log.Warn("JSON parser: failed to decode the JSON file", zap.Error(err))
-				return fmt.Errorf("failed to decode the JSON file, error: %w", err)
+				return merr.WrapErrImportFailed(fmt.Sprintf("failed to decode the JSON file, error: %v", err))
 			}
 			key := t.(string)
 			keyLower := strings.ToLower(key)
 			// the root key should be RowRootNode
 			if keyLower != RowRootNode {
 				log.Warn("JSON parser: invalid JSON format, the root key is not found", zap.String("RowRootNode", RowRootNode), zap.String("key", key))
-				return fmt.Errorf("invalid JSON format, the root key should be '%s', but get '%s'", RowRootNode, key)
+				return merr.WrapErrImportFailed(fmt.Sprintf("invalid JSON format, the root key should be '%s', but get '%s'", RowRootNode, key))
 			}
 
 			// started by '['
 			t, err = dec.Token()
 			if err != nil {
 				log.Warn("JSON parser: failed to decode the JSON file", zap.Error(err))
-				return fmt.Errorf("failed to decode the JSON file, error: %w", err)
+				return merr.WrapErrImportFailed(fmt.Sprintf("failed to decode the JSON file, error: %v", err))
 			}
 
 			if t != json.Delim('[') {
 				log.Warn("JSON parser: invalid JSON format, rows list should begin with '['")
-				return errors.New("invalid JSON format, rows list should begin with '['")
+				return merr.WrapErrImportFailed("invalid JSON format, rows list should begin with '['")
 			}
 		}
 
@@ -277,7 +277,7 @@ func (p *JSONParser) ParseRows(reader *IOReader, handler JSONRowHandler) error {
 			var value interface{}
 			if err := dec.Decode(&value); err != nil {
 				log.Warn("JSON parser: failed to parse row value", zap.Error(err))
-				return fmt.Errorf("failed to parse row value, error: %w", err)
+				return merr.WrapErrImportFailed(fmt.Sprintf("failed to parse row value, error: %v", err))
 			}
 
 			row, err := p.verifyRow(value)
@@ -292,7 +292,7 @@ func (p *JSONParser) ParseRows(reader *IOReader, handler JSONRowHandler) error {
 				isEmpty = false
 				if err = handler.Handle(buf); err != nil {
 					log.Warn("JSON parser: failed to convert row value to entity", zap.Error(err))
-					return fmt.Errorf("failed to convert row value to entity, error: %w", err)
+					return merr.WrapErrImportFailed(fmt.Sprintf("failed to convert row value to entity, error: %v", err))
 				}
 
 				// clear the buffer
@@ -305,7 +305,7 @@ func (p *JSONParser) ParseRows(reader *IOReader, handler JSONRowHandler) error {
 			isEmpty = false
 			if err = handler.Handle(buf); err != nil {
 				log.Warn("JSON parser: failed to convert row value to entity", zap.Error(err))
-				return fmt.Errorf("failed to convert row value to entity, error: %w", err)
+				return merr.WrapErrImportFailed(fmt.Sprintf("failed to convert row value to entity, error: %v", err))
 			}
 		}
 
@@ -313,18 +313,18 @@ func (p *JSONParser) ParseRows(reader *IOReader, handler JSONRowHandler) error {
 		t, err = dec.Token()
 		if err != nil {
 			log.Warn("JSON parser: failed to decode the JSON file", zap.Error(err))
-			return fmt.Errorf("failed to decode the JSON file, error: %w", err)
+			return merr.WrapErrImportFailed(fmt.Sprintf("failed to decode the JSON file, error: %v", err))
 		}
 
 		if t != json.Delim(']') {
 			log.Warn("JSON parser: invalid JSON format, rows list should end with a ']'")
-			return errors.New("invalid JSON format, rows list should end with a ']'")
+			return merr.WrapErrImportFailed("invalid JSON format, rows list should end with a ']'")
 		}
 
 		// outside context might be canceled(service stop, or future enhancement for canceling import task)
 		if isCanceled(p.ctx) {
 			log.Warn("JSON parser: import task was canceled")
-			return errors.New("import task was canceled")
+			return merr.WrapErrImportFailed("import task was canceled")
 		}
 
 		// nolint

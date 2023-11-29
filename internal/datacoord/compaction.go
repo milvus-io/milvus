@@ -24,7 +24,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -32,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // TODO this num should be determined by resources of datanode, for now, we set to a fixed value for simple
@@ -54,6 +52,7 @@ type compactionPlanContext interface {
 	isFull() bool
 	// get compaction tasks by signal id
 	getCompactionTasksBySignalID(signalID int64) []*compactionTask
+	removeTasksByChannel(channel string)
 }
 
 type compactionTaskState int8
@@ -95,166 +94,18 @@ func (t *compactionTask) shadowClone(opts ...compactionTaskOpt) *compactionTask 
 var _ compactionPlanContext = (*compactionPlanHandler)(nil)
 
 type compactionPlanHandler struct {
-	plans     map[int64]*compactionTask // planID -> task
-	sessions  *SessionManager
+	mu    sync.RWMutex
+	plans map[int64]*compactionTask // planID -> task
+
 	meta      *meta
-	chManager *ChannelManager
-	mu        sync.RWMutex
 	allocator allocator
-	quit      chan struct{}
-	wg        sync.WaitGroup
-	scheduler *scheduler
-}
+	chManager *ChannelManager
+	sessions  *SessionManager
+	scheduler *CompactionScheduler
 
-type scheduler struct {
-	taskNumber    *atomic.Int32
-	queuingTasks  []*compactionTask
-	parallelTasks map[int64][]*compactionTask
-	mu            sync.RWMutex
-}
-
-func newScheduler() *scheduler {
-	return &scheduler{
-		taskNumber:    atomic.NewInt32(0),
-		queuingTasks:  make([]*compactionTask, 0),
-		parallelTasks: make(map[int64][]*compactionTask),
-	}
-}
-
-// schedule pick 1 or 0 tasks for 1 node
-func (s *scheduler) schedule() []*compactionTask {
-	nodeTasks := make(map[int64][]*compactionTask) // nodeID
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, task := range s.queuingTasks {
-		if _, ok := nodeTasks[task.dataNodeID]; !ok {
-			nodeTasks[task.dataNodeID] = make([]*compactionTask, 0)
-		}
-
-		nodeTasks[task.dataNodeID] = append(nodeTasks[task.dataNodeID], task)
-	}
-
-	executable := make(map[int64]*compactionTask)
-
-	pickPriorPolicy := func(tasks []*compactionTask, exclusiveChannels []string, executing []string) *compactionTask {
-		for _, task := range tasks {
-			if lo.Contains(exclusiveChannels, task.plan.GetChannel()) {
-				continue
-			}
-
-			if task.plan.GetType() == datapb.CompactionType_Level0DeleteCompaction {
-				// Channel of LevelZeroCompaction task with no executing compactions
-				if !lo.Contains(executing, task.plan.GetChannel()) {
-					return task
-				}
-
-				// Don't schedule any tasks for channel with LevelZeroCompaction task
-				// when there're executing compactions
-				exclusiveChannels = append(exclusiveChannels, task.plan.GetChannel())
-				continue
-			}
-
-			return task
-		}
-
-		return nil
-	}
-
-	// pick 1 or 0 task for 1 node
-	for node, tasks := range nodeTasks {
-		parallel := s.parallelTasks[node]
-		if len(parallel) >= calculateParallel() {
-			log.Info("Compaction parallel in DataNode reaches the limit", zap.Int64("nodeID", node), zap.Int("parallel", len(parallel)))
-			continue
-		}
-
-		var (
-			executing         = typeutil.NewSet[string]()
-			channelsExecPrior = typeutil.NewSet[string]()
-		)
-		for _, t := range parallel {
-			executing.Insert(t.plan.GetChannel())
-			if t.plan.GetType() == datapb.CompactionType_Level0DeleteCompaction {
-				channelsExecPrior.Insert(t.plan.GetChannel())
-			}
-		}
-
-		picked := pickPriorPolicy(tasks, channelsExecPrior.Collect(), executing.Collect())
-		if picked != nil {
-			executable[node] = picked
-		}
-	}
-
-	var pickPlans []int64
-	for node, task := range executable {
-		pickPlans = append(pickPlans, task.plan.PlanID)
-		if _, ok := s.parallelTasks[node]; !ok {
-			s.parallelTasks[node] = []*compactionTask{task}
-		} else {
-			s.parallelTasks[node] = append(s.parallelTasks[node], task)
-		}
-	}
-
-	s.queuingTasks = lo.Filter(s.queuingTasks, func(t *compactionTask, _ int) bool {
-		return !lo.Contains(pickPlans, t.plan.PlanID)
-	})
-
-	// clean parallelTasks with nodes of no running tasks
-	for node, tasks := range s.parallelTasks {
-		if len(tasks) == 0 {
-			delete(s.parallelTasks, node)
-		}
-	}
-
-	return lo.Values(executable)
-}
-
-func (s *scheduler) finish(nodeID, planID UniqueID) {
-	s.mu.Lock()
-	if parallel, ok := s.parallelTasks[nodeID]; ok {
-		tasks := lo.Filter(parallel, func(t *compactionTask, _ int) bool {
-			return t.plan.PlanID != planID
-		})
-		s.parallelTasks[nodeID] = tasks
-		s.taskNumber.Dec()
-	}
-	s.mu.Unlock()
-
-	log.Info("Compaction finished", zap.Int64("planID", planID), zap.Int64("nodeID", nodeID))
-	s.logStatus()
-}
-
-func (s *scheduler) logStatus() {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	waiting := lo.Map(s.queuingTasks, func(t *compactionTask, _ int) int64 {
-		return t.plan.PlanID
-	})
-
-	var executing []int64
-	for _, tasks := range s.parallelTasks {
-		executing = append(executing, lo.Map(tasks, func(t *compactionTask, _ int) int64 {
-			return t.plan.PlanID
-		})...)
-	}
-
-	if len(waiting) > 0 || len(executing) > 0 {
-		log.Info("Compaction scheduler status", zap.Int64s("waiting", waiting), zap.Int64s("executing", executing))
-	}
-}
-
-func (s *scheduler) submit(tasks ...*compactionTask) {
-	s.mu.Lock()
-	s.queuingTasks = append(s.queuingTasks, tasks...)
-	s.mu.Unlock()
-
-	s.taskNumber.Add(int32(len(tasks)))
-	s.logStatus()
-}
-
-func (s *scheduler) getExecutingTaskNum() int {
-	return int(s.taskNumber.Load())
+	stopCh   chan struct{}
+	stopOnce sync.Once
+	stopWg   sync.WaitGroup
 }
 
 func newCompactionPlanHandler(sessions *SessionManager, cm *ChannelManager, meta *meta, allocator allocator,
@@ -265,26 +116,24 @@ func newCompactionPlanHandler(sessions *SessionManager, cm *ChannelManager, meta
 		meta:      meta,
 		sessions:  sessions,
 		allocator: allocator,
-		scheduler: newScheduler(),
+		scheduler: NewCompactionScheduler(),
 	}
 }
 
 func (c *compactionPlanHandler) start() {
 	interval := Params.DataCoordCfg.CompactionCheckIntervalInSeconds.GetAsDuration(time.Second)
-	c.quit = make(chan struct{})
-	c.wg.Add(1)
+	c.stopCh = make(chan struct{})
+	c.stopWg.Add(2)
 
 	go func() {
-		defer c.wg.Done()
+		defer c.stopWg.Done()
 		checkResultTicker := time.NewTicker(interval)
-		scheduleTicker := time.NewTicker(200 * time.Millisecond)
-		log.Info("compaction handler start", zap.Any("check result interval", interval))
+		log.Info("Compaction handler check result loop start", zap.Any("check result interval", interval))
 		defer checkResultTicker.Stop()
-		defer scheduleTicker.Stop()
 		for {
 			select {
-			case <-c.quit:
-				log.Info("compaction handler quit")
+			case <-c.stopCh:
+				log.Info("compaction handler check result loop quit")
 				return
 			case <-checkResultTicker.C:
 				// deal results
@@ -297,6 +146,22 @@ func (c *compactionPlanHandler) start() {
 				}
 				cancel()
 				_ = c.updateCompaction(ts)
+			}
+		}
+	}()
+
+	// saperate check results and schedule goroutine so that check results doesn't
+	// influence the schedule
+	go func() {
+		defer c.stopWg.Done()
+		scheduleTicker := time.NewTicker(200 * time.Millisecond)
+		defer scheduleTicker.Stop()
+		log.Info("compaction handler start schedule")
+		for {
+			select {
+			case <-c.stopCh:
+				log.Info("Compaction handler quit schedule")
+				return
 
 			case <-scheduleTicker.C:
 				// schedule queuing tasks
@@ -312,8 +177,21 @@ func (c *compactionPlanHandler) start() {
 }
 
 func (c *compactionPlanHandler) stop() {
-	close(c.quit)
-	c.wg.Wait()
+	c.stopOnce.Do(func() {
+		close(c.stopCh)
+	})
+	c.stopWg.Wait()
+}
+
+func (c *compactionPlanHandler) removeTasksByChannel(channel string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for id, task := range c.plans {
+		if task.triggerInfo.channel == channel {
+			c.scheduler.finish(task.dataNodeID, task.plan.PlanID)
+			delete(c.plans, id)
+		}
+	}
 }
 
 func (c *compactionPlanHandler) updateTask(planID int64, opts ...compactionTaskOpt) {
@@ -342,15 +220,50 @@ func (c *compactionPlanHandler) enqueuePlan(signal *compactionSignal, plan *data
 	c.plans[plan.PlanID] = task
 	c.mu.Unlock()
 
-	c.scheduler.submit(task)
+	c.scheduler.Submit(task)
 	log.Info("Compaction plan submited")
 	return nil
+}
+
+func (c *compactionPlanHandler) RefreshPlan(task *compactionTask) {
+	plan := task.plan
+	if plan.GetType() == datapb.CompactionType_Level0DeleteCompaction {
+		sealedSegments := c.meta.SelectSegments(func(info *SegmentInfo) bool {
+			return info.GetCollectionID() == task.triggerInfo.collectionID &&
+				info.GetPartitionID() == task.triggerInfo.partitionID &&
+				info.GetInsertChannel() == plan.GetChannel() &&
+				isFlushState(info.GetState()) &&
+				!info.isCompacting &&
+				!info.GetIsImporting() &&
+				info.GetLevel() != datapb.SegmentLevel_L0 &&
+				info.GetDmlPosition().GetTimestamp() < task.triggerInfo.pos.GetTimestamp()
+		})
+
+		sealedSegBinlogs := lo.Map(sealedSegments, func(info *SegmentInfo, _ int) *datapb.CompactionSegmentBinlogs {
+			return &datapb.CompactionSegmentBinlogs{
+				SegmentID: info.GetID(),
+				Level:     datapb.SegmentLevel_L1,
+			}
+		})
+
+		plan.SegmentBinlogs = append(plan.SegmentBinlogs, sealedSegBinlogs...)
+		return
+	}
+
+	if plan.GetType() == datapb.CompactionType_MixCompaction {
+		for _, seg := range plan.GetSegmentBinlogs() {
+			info := c.meta.GetSegment(seg.GetSegmentID())
+			seg.Deltalogs = info.GetDeltalogs()
+		}
+		return
+	}
 }
 
 func (c *compactionPlanHandler) notifyTasks(tasks []*compactionTask) {
 	for _, task := range tasks {
 		// avoid closure capture iteration variable
 		innerTask := task
+		c.RefreshPlan(innerTask)
 		getOrCreateIOPool().Submit(func() (any, error) {
 			plan := innerTask.plan
 			log := log.With(zap.Int64("planID", plan.GetPlanID()), zap.Int64("nodeID", innerTask.dataNodeID))
@@ -416,38 +329,53 @@ func (c *compactionPlanHandler) completeCompaction(result *datapb.CompactionPlan
 }
 
 func (c *compactionPlanHandler) handleMergeCompactionResult(plan *datapb.CompactionPlan, result *datapb.CompactionPlanResult) error {
-	// Also prepare metric updates.
-	_, modSegments, newSegment, metricMutation, err := c.meta.PrepareCompleteCompactionMutation(plan, result)
-	if err != nil {
-		return err
-	}
 	log := log.With(zap.Int64("planID", plan.GetPlanID()))
+	if len(result.GetSegments()) == 0 || len(result.GetSegments()) > 1 {
+		// should never happen
+		log.Warn("illegal compaction results")
+		return fmt.Errorf("Illegal compaction results: %v", result)
+	}
 
-	if err := c.meta.alterMetaStoreAfterCompaction(newSegment, modSegments); err != nil {
-		log.Warn("fail to alert meta store", zap.Error(err))
-		return err
+	// Merge compaction has one and only one segment
+	newSegmentInfo := c.meta.GetHealthySegment(result.GetSegments()[0].SegmentID)
+	if newSegmentInfo != nil {
+		log.Info("meta has already been changed, skip meta change and retry sync segments")
+	} else {
+		// Also prepare metric updates.
+		_, modSegments, newSegment, metricMutation, err := c.meta.PrepareCompleteCompactionMutation(plan, result)
+		if err != nil {
+			return err
+		}
+
+		if err := c.meta.alterMetaStoreAfterCompaction(newSegment, modSegments); err != nil {
+			log.Warn("fail to alert meta store", zap.Error(err))
+			return err
+		}
+
+		// Apply metrics after successful meta update.
+		metricMutation.commit()
+
+		newSegmentInfo = newSegment
 	}
 
 	nodeID := c.plans[plan.GetPlanID()].dataNodeID
 	req := &datapb.SyncSegmentsRequest{
 		PlanID:        plan.PlanID,
-		CompactedTo:   newSegment.GetID(),
-		CompactedFrom: newSegment.GetCompactionFrom(),
-		NumOfRows:     newSegment.GetNumOfRows(),
-		StatsLogs:     newSegment.GetStatslogs(),
+		CompactedTo:   newSegmentInfo.GetID(),
+		CompactedFrom: newSegmentInfo.GetCompactionFrom(),
+		NumOfRows:     newSegmentInfo.GetNumOfRows(),
+		StatsLogs:     newSegmentInfo.GetStatslogs(),
 		ChannelName:   plan.GetChannel(),
-		PartitionId:   newSegment.GetPartitionID(),
-		CollectionId:  newSegment.GetCollectionID(),
+		PartitionId:   newSegmentInfo.GetPartitionID(),
+		CollectionId:  newSegmentInfo.GetCollectionID(),
 	}
 
 	log.Info("handleCompactionResult: syncing segments with node", zap.Int64("nodeID", nodeID))
 	if err := c.sessions.SyncSegments(nodeID, req); err != nil {
-		log.Warn("handleCompactionResult: fail to sync segments with node, reverting metastore",
+		log.Warn("handleCompactionResult: fail to sync segments with node",
 			zap.Int64("nodeID", nodeID), zap.Error(err))
 		return err
 	}
-	// Apply metrics after successful meta update.
-	metricMutation.commit()
 
 	log.Info("handleCompactionResult: success to handle merge compaction result")
 	return nil

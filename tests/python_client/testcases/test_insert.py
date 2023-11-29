@@ -1147,12 +1147,10 @@ class TestInsertAsync(TestcaseBase):
         method: insert async with invalid partition
         expected: raise exception
         """
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix))
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
         df = cf.gen_default_dataframe_data()
-        err_msg = "partition=p: partition not found"
-        future, _ = collection_w.insert(
-            data=df, partition_name="p", _async=True)
+        err_msg = "partition not found"
+        future, _ = collection_w.insert(data=df, partition_name="p", _async=True)
         future.done()
         with pytest.raises(MilvusException, match=err_msg):
             future.result()
@@ -1252,6 +1250,24 @@ class TestInsertInvalid(TestcaseBase):
                  ct.err_msg: "Primary key type must be DataType.INT64."}
         mutation_res, _ = collection_w.insert(
             data=df, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_insert_string_to_int64_pk_field(self):
+        """
+        target: test insert, with using auto id is invalid, which are not int64
+        method: create collection and insert entities in it
+        expected: raise exception
+        """
+        nb = 100
+        collection_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=collection_name)
+        df = cf.gen_default_dataframe_data(nb)
+        invalid_id = random.randint(0, nb)
+        # df[ct.default_int64_field_name][invalid_id] = "2000000"
+        df.at[invalid_id, ct.default_int64_field_name] = "2000000"
+        error = {ct.err_code: 1,
+                 ct.err_msg: "The data in the same column must be of the same type."}
+        mutation_res, _ = collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_with_invalid_partition_name(self):
@@ -2142,7 +2158,7 @@ class TestUpsertInvalid(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         data = cf.gen_default_dataframe_data(nb=2)
         partition_name = "partition1"
-        error = {ct.err_code: 15, ct.err_msg: f"partition={partition_name}: partition not found"}
+        error = {ct.err_code: 200, ct.err_msg: f"partition not found[partition={partition_name}]"}
         collection_w.upsert(data=data, partition_name=partition_name,
                             check_task=CheckTasks.err_res, check_items=error)
 

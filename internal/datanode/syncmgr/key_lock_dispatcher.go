@@ -1,11 +1,16 @@
 package syncmgr
 
 import (
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/lock"
 )
 
 type Task interface {
+	SegmentID() int64
+	Checkpoint() *msgpb.MsgPosition
+	StartPosition() *msgpb.MsgPosition
+	ChannelName() string
 	Run() error
 }
 

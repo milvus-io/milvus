@@ -21,6 +21,7 @@
 #include "index/Meta.h"
 #include "knowhere/dataset.h"
 #include "common/Types.h"
+#include "index/ScalarIndex.h"
 
 namespace milvus::index {
 template <typename T>
@@ -71,7 +72,7 @@ ScalarIndex<T>::Query(const DatasetPtr& dataset) {
 }
 
 template <>
-inline void
+void
 ScalarIndex<std::string>::BuildWithRawData(size_t n,
                                            const void* values,
                                            const Config& config) {
@@ -85,7 +86,7 @@ ScalarIndex<std::string>::BuildWithRawData(size_t n,
 }
 
 template <>
-inline void
+void
 ScalarIndex<bool>::BuildWithRawData(size_t n,
                                     const void* values,
                                     const Config& config) {
@@ -96,7 +97,7 @@ ScalarIndex<bool>::BuildWithRawData(size_t n,
 }
 
 template <>
-inline void
+void
 ScalarIndex<int8_t>::BuildWithRawData(size_t n,
                                       const void* values,
                                       const Config& config) {
@@ -105,7 +106,7 @@ ScalarIndex<int8_t>::BuildWithRawData(size_t n,
 }
 
 template <>
-inline void
+void
 ScalarIndex<int16_t>::BuildWithRawData(size_t n,
                                        const void* values,
                                        const Config& config) {
@@ -114,7 +115,7 @@ ScalarIndex<int16_t>::BuildWithRawData(size_t n,
 }
 
 template <>
-inline void
+void
 ScalarIndex<int32_t>::BuildWithRawData(size_t n,
                                        const void* values,
                                        const Config& config) {
@@ -123,7 +124,7 @@ ScalarIndex<int32_t>::BuildWithRawData(size_t n,
 }
 
 template <>
-inline void
+void
 ScalarIndex<int64_t>::BuildWithRawData(size_t n,
                                        const void* values,
                                        const Config& config) {
@@ -132,7 +133,7 @@ ScalarIndex<int64_t>::BuildWithRawData(size_t n,
 }
 
 template <>
-inline void
+void
 ScalarIndex<float>::BuildWithRawData(size_t n,
                                      const void* values,
                                      const Config& config) {
@@ -141,7 +142,7 @@ ScalarIndex<float>::BuildWithRawData(size_t n,
 }
 
 template <>
-inline void
+void
 ScalarIndex<double>::BuildWithRawData(size_t n,
                                       const void* values,
                                       const Config& config) {
@@ -149,4 +150,12 @@ ScalarIndex<double>::BuildWithRawData(size_t n,
     Build(n, data);
 }
 
+template class ScalarIndex<bool>;
+template class ScalarIndex<int8_t>;
+template class ScalarIndex<int16_t>;
+template class ScalarIndex<int32_t>;
+template class ScalarIndex<int64_t>;
+template class ScalarIndex<float>;
+template class ScalarIndex<double>;
+template class ScalarIndex<std::string>;
 }  // namespace milvus::index

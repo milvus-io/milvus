@@ -217,7 +217,7 @@ func (node *Proxy) Init() error {
 
 	node.factory.Init(Params)
 
-	accesslog.SetupAccseeLog(&Params.ProxyCfg.AccessLog, &Params.MinioCfg)
+	accesslog.InitAccessLog(&Params.ProxyCfg.AccessLog, &Params.MinioCfg)
 	log.Debug("init access log for Proxy done")
 
 	err := node.initRateCollector()
@@ -293,6 +293,7 @@ func (node *Proxy) Init() error {
 	}
 	log.Debug("init meta cache done", zap.String("role", typeutil.ProxyRole))
 
+	log.Info("init proxy done", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("Address", node.address))
 	return nil
 }
 
@@ -338,8 +339,7 @@ func (node *Proxy) sendChannelsTimeTickLoop() {
 
 				req := &internalpb.ChannelTimeTickMsg{
 					Base: commonpbutil.NewMsgBase(
-						commonpbutil.WithMsgType(commonpb.MsgType_TimeTick), // todo
-						commonpbutil.WithMsgID(0),                           // todo
+						commonpbutil.WithMsgType(commonpb.MsgType_TimeTick),
 						commonpbutil.WithSourceID(node.session.ServerID),
 					),
 					ChannelNames:     channels,

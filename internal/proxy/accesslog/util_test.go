@@ -17,92 +17,12 @@
 package accesslog
 
 import (
-	"context"
-	"net"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"go.opentelemetry.io/otel"
-	"go.uber.org/zap"
-	"google.golang.org/grpc/metadata"
-	"google.golang.org/grpc/peer"
-
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/tracer"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
-func TestGetAccessAddr(t *testing.T) {
-	ctx := context.Background()
-	addr := getAccessAddr(ctx)
-	assert.Equal(t, "Unknown", addr)
-
-	newctx := peer.NewContext(
-		ctx,
-		&peer.Peer{
-			Addr: &net.IPAddr{
-				IP:   net.IPv4(0, 0, 0, 0),
-				Zone: "test",
-			},
-		})
-
-	addr = getAccessAddr(newctx)
-	assert.Equal(t, "ip-0.0.0.0%test", addr)
-}
-
-func TestGetTraceID(t *testing.T) {
-	paramtable.Init()
-	tracer.Init()
-
-	ctx := context.Background()
-	traceID, ok := getTraceID(ctx)
-	log.Debug("traceID", zap.String("id", traceID))
-	assert.False(t, ok)
-
-	traceContext, traceSpan := otel.Tracer("proxy").Start(ctx, "demo")
-	trueTraceID := traceSpan.SpanContext().TraceID().String()
-	log.Debug("traceID", zap.String("trueTraceID", trueTraceID))
-	ID, ok := getTraceID(traceContext)
-	assert.True(t, ok)
-	assert.Equal(t, trueTraceID, ID)
-
-	ctx = metadata.AppendToOutgoingContext(ctx, clientRequestIDKey, "test")
-	ID, ok = getTraceID(ctx)
-	assert.True(t, ok)
-	assert.Equal(t, "test", ID)
-}
-
-func TestGetResponseSize(t *testing.T) {
-	resp := &milvuspb.BoolResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    "",
-		},
-		Value: false,
-	}
-
-	_, ok := getResponseSize(nil)
-	assert.False(t, ok)
-
-	_, ok = getResponseSize(resp)
-	assert.True(t, ok)
-}
-
-func TestGetErrCode(t *testing.T) {
-	resp := &milvuspb.BoolResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    "",
-		},
-		Value: false,
-	}
-
-	_, ok := getErrCode(nil)
-	assert.False(t, ok)
-
-	code, ok := getErrCode(resp)
-	assert.True(t, ok)
-	assert.Equal(t, int(commonpb.ErrorCode_UnexpectedError), code)
+func TestJoin(t *testing.T) {
+	assert.Equal(t, "a/b", join("a", "b"))
+	assert.Equal(t, "a/b", join("a/", "b"))
 }

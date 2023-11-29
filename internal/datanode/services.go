@@ -115,14 +115,12 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 
 	segmentIDs := req.GetSegmentIDs()
 	log = log.With(
+		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.String("channelName", req.GetChannelName()),
 		zap.Int64s("segmentIDs", segmentIDs),
 	)
 
-	log.Info("receiving FlushSegments request",
-		zap.Int64("collectionID", req.GetCollectionID()),
-		zap.Int64s("sealedSegments", req.GetSegmentIDs()),
-	)
+	log.Info("receiving FlushSegments request")
 
 	err := node.writeBufferManager.FlushSegments(ctx, req.GetChannelName(), segmentIDs)
 	if err != nil {
@@ -131,9 +129,7 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 	}
 
 	// Log success flushed segments.
-	log.Info("sending segments to WriteBuffer Manager",
-		zap.Int64("collectionID", req.GetCollectionID()),
-		zap.Int64s("sealedSegments", req.GetSegmentIDs()))
+	log.Info("sending segments to WriteBuffer Manager")
 
 	metrics.DataNodeFlushReqCounter.WithLabelValues(
 		fmt.Sprint(paramtable.GetNodeID()),
@@ -249,7 +245,7 @@ func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan
 		return merr.Status(merr.WrapErrChannelNotFound(req.GetChannel(), "illegel compaction plan")), nil
 	}
 
-	if !node.compactionExecutor.channelValidateForCompaction(req.GetChannel()) {
+	if !node.compactionExecutor.isValidChannel(req.GetChannel()) {
 		log.Warn("channel of compaction is marked invalid in compaction executor", zap.String("channelName", req.GetChannel()))
 		return merr.Status(merr.WrapErrChannelNotFound(req.GetChannel(), "channel is dropping")), nil
 	}
@@ -279,7 +275,7 @@ func (node *DataNode) GetCompactionState(ctx context.Context, req *datapb.Compac
 			Status: merr.Status(err),
 		}, nil
 	}
-	results := node.compactionExecutor.getAllCompactionPlanResult()
+	results := node.compactionExecutor.getAllCompactionResults()
 
 	if len(results) > 0 {
 		planIDs := lo.Map(results, func(result *datapb.CompactionPlanResult, i int) UniqueID {
@@ -314,6 +310,7 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 
 	ds, ok := node.flowgraphManager.getFlowgraphService(req.GetChannelName())
 	if !ok {
+		node.compactionExecutor.clearTasksByChannel(req.GetChannelName())
 		err := merr.WrapErrChannelNotFound(req.GetChannelName())
 		log.Warn("failed to sync segments", zap.Error(err))
 		return merr.Status(err), nil
@@ -325,10 +322,8 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 		return merr.Status(err), nil
 	}
 	bfs := metacache.NewBloomFilterSet(pks...)
-	ds.fg.Blockall()
-	defer ds.fg.Unblock()
 	ds.metacache.CompactSegments(req.GetCompactedTo(), req.GetPartitionId(), req.GetNumOfRows(), bfs, req.GetCompactedFrom()...)
-	node.compactionExecutor.injectDone(req.GetPlanID(), true)
+	node.compactionExecutor.injectDone(req.GetPlanID())
 	return merr.Success(), nil
 }
 
@@ -718,8 +713,6 @@ func saveSegmentFunc(node *DataNode, req *datapb.ImportTaskRequest, res *rootcoo
 				RowNum:       rowCount,
 				SaveBinlogPathReq: &datapb.SaveBinlogPathsRequest{
 					Base: commonpbutil.NewMsgBase(
-						commonpbutil.WithMsgType(0),
-						commonpbutil.WithMsgID(0),
 						commonpbutil.WithTimeStamp(ts),
 						commonpbutil.WithSourceID(paramtable.GetNodeID()),
 					),

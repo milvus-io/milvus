@@ -498,14 +498,14 @@ func GetMetaRootPath(rootPath string) string {
 func DefaultParams() map[string]string {
 	testPath := fmt.Sprintf("integration-test-%d", time.Now().Unix())
 	return map[string]string{
-		EtcdRootPath:  testPath,
-		MinioRootPath: testPath,
+		params.EtcdCfg.RootPath.Key:  testPath,
+		params.MinioCfg.RootPath.Key: testPath,
 		//"runtime.role": typeutil.StandaloneRole,
-		params.IntegrationTestCfg.IntegrationMode.Key: "true",
-		params.LocalStorageCfg.Path.Key:               path.Join("/tmp", testPath),
-		params.CommonCfg.StorageType.Key:              "local",
-		params.DataNodeCfg.MemoryForceSyncEnable.Key:  "false", // local execution will print too many logs
-		params.CommonCfg.GracefulStopTimeout.Key:      "10",
+		//params.IntegrationTestCfg.IntegrationMode.Key: "true",
+		params.LocalStorageCfg.Path.Key:              path.Join("/tmp", testPath),
+		params.CommonCfg.StorageType.Key:             "local",
+		params.DataNodeCfg.MemoryForceSyncEnable.Key: "false", // local execution will print too many logs
+		params.CommonCfg.GracefulStopTimeout.Key:     "10",
 	}
 }
 

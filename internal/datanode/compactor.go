@@ -56,7 +56,7 @@ type compactor interface {
 	complete()
 	// compact() (*datapb.CompactionResult, error)
 	compact() (*datapb.CompactionPlanResult, error)
-	injectDone(success bool)
+	injectDone()
 	stop()
 	getPlanID() UniqueID
 	getCollection() UniqueID
@@ -118,7 +118,7 @@ func (t *compactionTask) complete() {
 func (t *compactionTask) stop() {
 	t.cancel()
 	<-t.done
-	t.injectDone(true)
+	t.injectDone()
 }
 
 func (t *compactionTask) getPlanID() UniqueID {
@@ -629,7 +629,7 @@ func (t *compactionTask) compact() (*datapb.CompactionPlanResult, error) {
 	return planResult, nil
 }
 
-func (t *compactionTask) injectDone(success bool) {
+func (t *compactionTask) injectDone() {
 	for _, binlog := range t.plan.SegmentBinlogs {
 		t.syncMgr.Unblock(binlog.SegmentID)
 	}
