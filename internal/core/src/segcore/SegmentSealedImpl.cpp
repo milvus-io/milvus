@@ -323,8 +323,8 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
         auto data_type = field_meta.get_data_type();
 
         // Don't allow raw data and index exist at the same time
-        AssertInfo(!get_bit(index_ready_bitset_, field_id),
-                   "field data can't be loaded when indexing exists");
+        //        AssertInfo(!get_bit(index_ready_bitset_, field_id),
+        //                   "field data can't be loaded when indexing exists");
 
         std::shared_ptr<ColumnBase> column{};
         if (datatype_is_variable(data_type)) {
@@ -1071,30 +1071,11 @@ SegmentSealedImpl::fill_with_empty(FieldId field_id, int64_t count) const {
 }
 
 std::unique_ptr<DataArray>
-SegmentSealedImpl::bulk_subscript(FieldId field_id,
-                                  const int64_t* seg_offsets,
-                                  int64_t count) const {
-    auto& field_meta = schema_->operator[](field_id);
-    // if count == 0, return empty data array
-    if (count == 0) {
-        return fill_with_empty(field_id, count);
-    }
-
-    if (HasIndex(field_id)) {
-        // if field has load scalar index, reverse raw data from index
-        if (!datatype_is_vector(field_meta.get_data_type())) {
-            AssertInfo(num_chunk() == 1,
-                       "num chunk not equal to 1 for sealed segment");
-            auto index = chunk_index_impl(field_id, 0);
-            return ReverseDataFromIndex(index, seg_offsets, count, field_meta);
-        }
-
-        return get_vector(field_id, seg_offsets, count);
-    }
-
-    Assert(get_bit(field_data_ready_bitset_, field_id));
-
-    // DO NOT directly access the column byh map like: `fields_.at(field_id)->Data()`,
+SegmentSealedImpl::get_raw_data(FieldId field_id,
+                                const FieldMeta& field_meta,
+                                const int64_t* seg_offsets,
+                                int64_t count) const {
+    // DO NOT directly access the column by map like: `fields_.at(field_id)->Data()`,
     // we have to clone the shared pointer,
     // to make sure it won't get released if segment released
     auto column = fields_.at(field_id);
@@ -1235,8 +1216,37 @@ SegmentSealedImpl::bulk_subscript(FieldId field_id,
                                   field_meta.get_data_type()));
         }
     }
-
     return ret;
+}
+
+std::unique_ptr<DataArray>
+SegmentSealedImpl::bulk_subscript(FieldId field_id,
+                                  const int64_t* seg_offsets,
+                                  int64_t count) const {
+    auto& field_meta = schema_->operator[](field_id);
+    // if count == 0, return empty data array
+    if (count == 0) {
+        return fill_with_empty(field_id, count);
+    }
+
+    if (HasIndex(field_id)) {
+        // if field has load scalar index, reverse raw data from index
+        if (!datatype_is_vector(field_meta.get_data_type())) {
+            AssertInfo(num_chunk() == 1,
+                       "num chunk not equal to 1 for sealed segment");
+            auto index = chunk_index_impl(field_id, 0);
+            if (index->HasRawData()) {
+                return ReverseDataFromIndex(
+                    index, seg_offsets, count, field_meta);
+            }
+            return get_raw_data(field_id, field_meta, seg_offsets, count);
+        }
+        return get_vector(field_id, seg_offsets, count);
+    }
+
+    Assert(get_bit(field_data_ready_bitset_, field_id));
+
+    return get_raw_data(field_id, field_meta, seg_offsets, count);
 }
 
 bool
@@ -1270,6 +1280,11 @@ SegmentSealedImpl::HasRawData(int64_t field_id) const {
             auto vec_index = dynamic_cast<index::VectorIndex*>(
                 field_indexing->indexing_.get());
             return vec_index->HasRawData();
+        }
+    } else {
+        auto scalar_index = scalar_indexings_.find(fieldID);
+        if (scalar_index != scalar_indexings_.end()) {
+            return scalar_index->second->HasRawData();
         }
     }
     return true;
