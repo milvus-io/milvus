@@ -23,9 +23,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -119,7 +117,6 @@ func TestRotateLogger_SizeRotate(t *testing.T) {
 	num := 1024 * 1024
 	text := getText(num + 1)
 	_, err = logger.Write(text)
-	log.Error("write failed", zap.Error(err))
 	assert.Error(t, err)
 
 	for i := 1; i <= 2; i++ {

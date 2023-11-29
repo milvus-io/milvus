@@ -200,10 +200,32 @@ proxy:
   ginLogging: true
   maxTaskNum: 1024 # max task number of proxy task queue
   accessLog:
-    enable: false
-    filename: "" # Log filename, leave empty to use stdout.
+    enable: true
+    # Log filename, set as "" to use stdout.
+    filename: "" 
+    # define formatters for access log by names:{format: XXX, method:[XXX]}
+    formatters:
+      # "base" formatter could not set method 
+      # all method  will use "base" formatter default
+      base: 
+        # will not print access log if set as ""
+        format: "[$time_now] [ACCESS] <$user_name: $user_addr> $method_name-$method_status-$error_code [traceID: $trace_id] [timeCost: $time_cost]"
+      query: 
+        format: "[$time_now] [ACCESS] <$user_name: $user_addr> $method_status-$method_name [traceID: $trace_id] [timeCost: $time_cost] [database: $database_name] [collection: $collection_name] [partitions: $partition_name] [expr: $method_expr]"
+          # set formatter owners by method name(method was all milvus external interface)
+          # all method will use base formatter default
+          # one method only could use one formatter
+          # if set a method formatter mutiple times, will use random fomatter.
+        methods: ["Query", "Search"]
     # localPath: /tmp/milvus_accesslog // log file rootpath
-    # maxSize: 64 # max log file size of singal log file to trigger rotate.
+    # maxSize: 64 # max log file size(MB) of singal log file, mean close when time <= 0.
+    # rotatedTime: 0 # max time range of singal log file, mean close when time <= 0;
+    # maxBackups: 8 # num of reserved backups. will rotate and crate a new backup when access log file trigger maxSize or rotatedTime.
+    # cacheSize: 10240 # write cache of accesslog in Byte
+  
+    # minioEnable: false # update backups to milvus minio when minioEnable is true.
+    # remotePath: "access_log/" # file path when update backups to minio
+    # remoteMaxTime: 0 # max time range(in Hour) of backups in minio, 0 means close time retention.
   http:
     enabled: true # Whether to enable the http server
     debug_mode: false # Whether to enable http server debug mode

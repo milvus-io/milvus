@@ -941,6 +941,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("auto_id", [True, False])
     @pytest.mark.parametrize("partition_key_field", [df.int_field, df.string_field])
+    @pytest.mark.skip("import data via csv is no longer supported")
     def test_partition_key_on_csv_file(self, auto_id, partition_key_field):
         """
         collection: auto_id, customized_id
@@ -1038,6 +1039,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("auto_id", [True, False])
     @pytest.mark.parametrize("dim", [128])
     @pytest.mark.parametrize("entities", [100])
+    @pytest.mark.skip("import data via csv is no longer supported")
     def test_float_vector_csv(self, auto_id, dim, entities):
         """
         collection: auto_id, customized_id
@@ -1121,6 +1123,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("auto_id", [True, False])
     @pytest.mark.parametrize("dim", [128])
     @pytest.mark.parametrize("entities", [2000])
+    @pytest.mark.skip("import data via csv is no longer supported")
     def test_binary_vector_csv(self, auto_id, dim, entities):
         """
         collection: auto_id, customized_id
@@ -1207,6 +1210,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("auto_id", [True, False])
     @pytest.mark.parametrize("dim", [128])
     @pytest.mark.parametrize("entities", [2000])
+    @pytest.mark.skip("import data via csv is no longer supported")
     def test_partition_csv(self, auto_id, dim, entities):
         """
         collection schema: [pk, int64, string, float_vector]

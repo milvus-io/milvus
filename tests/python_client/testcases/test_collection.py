@@ -1750,6 +1750,36 @@ class TestCreateCollectionInvalid(TestcaseBase):
         self.init_collection_wrap(name=c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("invalid_name", ["中文", "español", "عربي", "हिंदी", "Русский"])
+    def test_create_schema_with_different_language(self, invalid_name):
+        """
+        target: test create collection with maximum fields
+        method: create collection with maximum field number
+        expected: raise exception
+        """
+        fields = [cf.gen_int64_field(is_primary=True), cf.gen_float_vec_field(),
+                  cf.gen_string_field(name=invalid_name)]
+        schema = cf.gen_collection_schema(fields)
+        self.init_collection_wrap(schema=schema,
+                                  check_task=CheckTasks.err_res,
+                                  check_items={ct.err_code: 1701,
+                                               ct.err_msg: "Invalid field name: %s" % invalid_name})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("invalid_name", ["中文", "español", "عربي", "हिंदी", "Русский"])
+    def test_create_collection_with_different_language(self, invalid_name):
+        """
+        target: test create collection with maximum fields
+        method: create collection with maximum field number
+        expected: raise exception
+        """
+        schema = cf.gen_default_collection_schema()
+        self.init_collection_wrap(name=invalid_name, schema=schema,
+                                  check_task=CheckTasks.err_res,
+                                  check_items={ct.err_code: 1100,
+                                               ct.err_msg: "Invalid collection name: %s" % invalid_name})
+
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("default_value", ["abc"])
     @pytest.mark.skip(reason="issue #24634")
     def test_create_collection_with_invalid_default_value_string(self, default_value):

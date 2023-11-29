@@ -43,11 +43,6 @@ func TestMinioHandler_ConnectError(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestMinioHandler_Join(t *testing.T) {
-	assert.Equal(t, "a/b", Join("a", "b"))
-	assert.Equal(t, "a/b", Join("a/", "b"))
-}
-
 func TestMinHandler_Basic(t *testing.T) {
 	var Params paramtable.ComponentParam
 	Params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
@@ -147,7 +142,7 @@ func TestMinioHandler_WithTimeRetention(t *testing.T) {
 }
 
 func createAndUpdateFile(handler *minioHandler, t time.Time, rootPath, prefix, ext string) error {
-	oldFileName := prefix + t.Format(timeFormat) + ext
+	oldFileName := prefix + t.Format(timeNameFormat) + ext
 	oldFilePath := path.Join(rootPath, oldFileName)
 	oldFileMode := os.FileMode(0o644)
 	_, err := os.OpenFile(oldFilePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, oldFileMode)
