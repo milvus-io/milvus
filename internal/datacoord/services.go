@@ -589,6 +589,7 @@ func (s *Server) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtual
 		log.Warn("DropVChannel failed to ReleaseAndRemove", zap.String("channel", channel), zap.Error(err))
 	}
 	s.segmentManager.DropSegmentsOfChannel(ctx, channel)
+	s.compactionHandler.removeTasksByChannel(channel)
 
 	metrics.CleanupDataCoordNumStoredRows(collectionID)
 	metrics.DataCoordCheckpointLag.DeleteLabelValues(fmt.Sprint(paramtable.GetNodeID()), channel)

@@ -38,6 +38,10 @@ type spyCompactionHandler struct {
 	spyChan chan *datapb.CompactionPlan
 }
 
+var _ compactionPlanContext = (*spyCompactionHandler)(nil)
+
+func (h *spyCompactionHandler) removeTasksByChannel(channel string) {}
+
 // execCompactionPlan start to execute plan and return immediately
 func (h *spyCompactionHandler) execCompactionPlan(signal *compactionSignal, plan *datapb.CompactionPlan) error {
 	h.spyChan <- plan
