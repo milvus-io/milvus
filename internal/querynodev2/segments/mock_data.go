@@ -244,6 +244,8 @@ func genVectorFieldSchema(param vecFieldParam) *schemapb.FieldSchema {
 }
 
 func GenTestCollectionSchema(collectionName string, pkType schemapb.DataType) *schemapb.CollectionSchema {
+	fieldRowID := genConstantFieldSchema(rowIDField)
+	fieldTimestamp := genConstantFieldSchema(timestampField)
 	fieldBool := genConstantFieldSchema(simpleBoolField)
 	fieldInt8 := genConstantFieldSchema(simpleInt8Field)
 	fieldInt16 := genConstantFieldSchema(simpleInt16Field)
@@ -285,6 +287,7 @@ func GenTestCollectionSchema(collectionName string, pkType schemapb.DataType) *s
 	for i, field := range schema.GetFields() {
 		field.FieldID = 100 + int64(i)
 	}
+	schema.Fields = append(schema.Fields, fieldRowID, fieldTimestamp)
 	return &schema
 }
 
@@ -656,6 +659,7 @@ func SaveBinLog(ctx context.Context,
 		msgLength,
 		schema)
 	if err != nil {
+		log.Warn("getStorageBlob return error", zap.Error(err))
 		return nil, nil, err
 	}
 
@@ -672,7 +676,6 @@ func SaveBinLog(ctx context.Context,
 		}
 
 		k := JoinIDPath(collectionID, partitionID, segmentID, fieldID)
-		// key := path.Join(defaultLocalStorage, "insert-log", k)
 		key := path.Join(chunkManager.RootPath(), "insert-log", k)
 		kvs[key] = blob.Value
 		fieldBinlog = append(fieldBinlog, &datapb.FieldBinlog{
@@ -695,7 +698,6 @@ func SaveBinLog(ctx context.Context,
 		}
 
 		k := JoinIDPath(collectionID, partitionID, segmentID, fieldID)
-		// key := path.Join(defaultLocalStorage, "stats-log", k)
 		key := path.Join(chunkManager.RootPath(), "stats-log", k)
 		kvs[key] = blob.Value[:]
 		statsBinlog = append(statsBinlog, &datapb.FieldBinlog{
@@ -715,13 +717,7 @@ func genStorageBlob(collectionID int64,
 	msgLength int,
 	schema *schemapb.CollectionSchema,
 ) ([]*storage.Blob, []*storage.Blob, error) {
-	tmpSchema := &schemapb.CollectionSchema{
-		Name:   schema.Name,
-		AutoID: schema.AutoID,
-		Fields: []*schemapb.FieldSchema{genConstantFieldSchema(rowIDField), genConstantFieldSchema(timestampField)},
-	}
-	tmpSchema.Fields = append(tmpSchema.Fields, schema.Fields...)
-	collMeta := genCollectionMeta(collectionID, partitionID, tmpSchema)
+	collMeta := genCollectionMeta(collectionID, partitionID, schema)
 	inCodec := storage.NewInsertCodecWithSchema(collMeta)
 	insertData, err := genInsertData(msgLength, schema)
 	if err != nil {
@@ -753,15 +749,6 @@ func genCollectionMeta(collectionID int64, partitionID int64, schema *schemapb.C
 func genInsertData(msgLength int, schema *schemapb.CollectionSchema) (*storage.InsertData, error) {
 	insertData := &storage.InsertData{
 		Data: make(map[int64]storage.FieldData),
-	}
-
-	// set data for rowID field
-	insertData.Data[rowIDFieldID] = &storage.Int64FieldData{
-		Data: generateInt64Array(msgLength),
-	}
-	// set data for ts field
-	insertData.Data[timestampFieldID] = &storage.Int64FieldData{
-		Data: genTimestampFieldData(msgLength),
 	}
 
 	for _, f := range schema.Fields {
@@ -829,7 +816,14 @@ func genInsertData(msgLength int, schema *schemapb.CollectionSchema) (*storage.I
 			return nil, err
 		}
 	}
-
+	// set data for rowID field
+	insertData.Data[rowIDFieldID] = &storage.Int64FieldData{
+		Data: generateInt64Array(msgLength),
+	}
+	// set data for ts field
+	insertData.Data[timestampFieldID] = &storage.Int64FieldData{
+		Data: genTimestampFieldData(msgLength),
+	}
 	return insertData, nil
 }
 
