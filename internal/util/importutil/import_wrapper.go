@@ -37,8 +37,9 @@ import (
 )
 
 const (
-	JSONFileExt  = ".json"
-	NumpyFileExt = ".npy"
+	JSONFileExt    = ".json"
+	NumpyFileExt   = ".npy"
+	ParquetFileExt = ".parquet"
 
 	// parsers read JSON/Numpy/CSV files buffer by buffer, this limitation is to define the buffer size.
 	ReadBufferSize = 16 * 1024 * 1024 // 16MB
@@ -188,7 +189,7 @@ func (p *ImportWrapper) fileValidation(filePaths []string) (bool, error) {
 		name, fileType := GetFileNameAndExt(filePath)
 
 		// only allow json file, numpy file and csv file
-		if fileType != JSONFileExt && fileType != NumpyFileExt {
+		if fileType != JSONFileExt && fileType != NumpyFileExt && fileType != ParquetFileExt {
 			log.Warn("import wrapper: unsupported file type", zap.String("filePath", filePath))
 			return false, merr.WrapErrImportFailed(fmt.Sprintf("unsupported file type: '%s'", filePath))
 		}
@@ -206,7 +207,7 @@ func (p *ImportWrapper) fileValidation(filePaths []string) (bool, error) {
 				return rowBased, merr.WrapErrImportFailed(fmt.Sprintf("unsupported file type for row-based mode: '%s'", filePath))
 			}
 		} else {
-			if fileType != NumpyFileExt {
+			if fileType != NumpyFileExt && fileType != ParquetFileExt {
 				log.Warn("import wrapper: unsupported file type for column-based mode", zap.String("filePath", filePath))
 				return rowBased, merr.WrapErrImportFailed(fmt.Sprintf("unsupported file type for column-based mode: '%s'", filePath))
 			}
@@ -292,18 +293,34 @@ func (p *ImportWrapper) Import(filePaths []string, options ImportOptions) error 
 			printFieldsDataInfo(fields, "import wrapper: prepare to flush binlog data", filePaths)
 			return p.flushFunc(fields, shardID, partitionID)
 		}
-		parser, err := NewNumpyParser(p.ctx, p.collectionInfo, p.rowIDAllocator, p.binlogSize,
-			p.chunkManager, flushFunc, p.updateProgressPercent)
-		if err != nil {
-			return err
-		}
+		_, fileType := GetFileNameAndExt(filePaths[0])
+		if fileType == NumpyFileExt {
+			parser, err := NewNumpyParser(p.ctx, p.collectionInfo, p.rowIDAllocator, p.binlogSize,
+				p.chunkManager, flushFunc, p.updateProgressPercent)
+			if err != nil {
+				return err
+			}
 
-		err = parser.Parse(filePaths)
-		if err != nil {
-			return err
-		}
+			err = parser.Parse(filePaths)
+			if err != nil {
+				return err
+			}
 
-		p.importResult.AutoIds = append(p.importResult.AutoIds, parser.IDRange()...)
+			p.importResult.AutoIds = append(p.importResult.AutoIds, parser.IDRange()...)
+		} else if fileType == ParquetFileExt {
+			parser, err := NewParquetParser(p.ctx, p.collectionInfo, p.rowIDAllocator, p.binlogSize,
+				p.chunkManager, filePaths[0], flushFunc, p.updateProgressPercent)
+			if err != nil {
+				return err
+			}
+
+			err = parser.Parse()
+			if err != nil {
+				return err
+			}
+
+			p.importResult.AutoIds = append(p.importResult.AutoIds, parser.IDRange()...)
+		}
 
 		// trigger after parse finished
 		triggerGC()

@@ -283,6 +283,20 @@ pull_request_rules:
         add:
           - ci-passed
 
+  - name: Assign the 'lgtm' and 'approved' labels following the successful testing of the 'Update Knowhere Commit'
+    conditions:
+      - or:
+          - base=master
+          - base=sql_beta
+          - base~=^2(\.\d+){1,2}$
+      - 'title~=Update Knowhere Commit'
+      - label=ci-passed
+    actions:
+      label:
+        add:
+          - lgtm
+          - approved
+
   - name: Remove ci-passed label when status for code checker or ut is not success-master
     conditions:
       - label!=manual-pass

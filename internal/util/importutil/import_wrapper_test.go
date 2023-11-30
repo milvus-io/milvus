@@ -28,6 +28,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/apache/arrow/go/v12/parquet"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"golang.org/x/exp/mmap"
@@ -142,6 +143,10 @@ func (mc *MockChunkManager) MultiRemove(ctx context.Context, filePaths []string)
 
 func (mc *MockChunkManager) RemoveWithPrefix(ctx context.Context, prefix string) error {
 	return nil
+}
+
+func (mc *MockChunkManager) NewParquetReaderAtSeeker(fileName string) (parquet.ReaderAtSeeker, error) {
+	panic("implement me")
 }
 
 type rowCounterTest struct {
