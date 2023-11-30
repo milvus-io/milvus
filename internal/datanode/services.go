@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/datanode/io"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
@@ -250,19 +251,35 @@ func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan
 		return merr.Status(merr.WrapErrChannelNotFound(req.GetChannel(), "channel is dropping")), nil
 	}
 
-	binlogIO := &binlogIO{node.chunkManager, ds.idAllocator}
-	task := newCompactionTask(
-		node.ctx,
-		binlogIO, binlogIO,
-		ds.metacache,
-		ds.syncMgr,
-		ds.idAllocator,
-		req,
-		node.chunkManager,
-	)
+	var task compactor
+	switch req.GetType() {
+	case datapb.CompactionType_Level0DeleteCompaction:
+		binlogIO := io.NewBinlogIO(node.chunkManager, getOrCreateIOPool())
+		task = newLevelZeroCompactionTask(
+			node.ctx,
+			binlogIO,
+			node.allocator,
+			ds.metacache,
+			node.syncMgr,
+			req,
+		)
+	case datapb.CompactionType_MixCompaction, datapb.CompactionType_MinorCompaction:
+		// TODO, replace this binlogIO with io.BinlogIO
+		binlogIO := &binlogIO{node.chunkManager, ds.idAllocator}
+		task = newCompactionTask(
+			node.ctx,
+			binlogIO, binlogIO,
+			ds.metacache,
+			node.syncMgr,
+			node.allocator,
+			req,
+		)
+	default:
+		log.Warn("Unknown compaction type", zap.String("type", req.GetType().String()))
+		return merr.Status(merr.WrapErrParameterInvalidMsg("Unknown compaction type: %v", req.GetType().String())), nil
+	}
 
 	node.compactionExecutor.execute(task)
-
 	return merr.Success(), nil
 }
 

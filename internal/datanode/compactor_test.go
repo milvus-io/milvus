@@ -965,7 +965,7 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 				Channel:          "channelname",
 			}
 
-			task := newCompactionTask(context.TODO(), mockbIO, mockbIO, metaCache, syncMgr, alloc, plan, nil)
+			task := newCompactionTask(context.TODO(), mockbIO, mockbIO, metaCache, syncMgr, alloc, plan)
 			result, err := task.compact()
 			assert.NoError(t, err)
 			assert.NotNil(t, result)
@@ -1103,7 +1103,7 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 			Channel:          "channelname",
 		}
 
-		task := newCompactionTask(context.TODO(), mockbIO, mockbIO, metaCache, syncMgr, alloc, plan, nil)
+		task := newCompactionTask(context.TODO(), mockbIO, mockbIO, metaCache, syncMgr, alloc, plan)
 		result, err := task.compact()
 		assert.NoError(t, err)
 		assert.NotNil(t, result)

@@ -874,6 +874,15 @@ func (data *DeleteData) Merge(other *DeleteData) {
 	other.RowCount = 0
 }
 
+func (data *DeleteData) Size() int64 {
+	var size int64
+	for _, pk := range data.Pks {
+		size += pk.Size()
+	}
+
+	return size
+}
+
 // DeleteCodec serializes and deserializes the delete data
 type DeleteCodec struct{}
 
