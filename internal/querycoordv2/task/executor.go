@@ -274,10 +274,15 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 		indexes = nil
 	}
 
+	channel := ex.targetMgr.GetDmChannel(task.CollectionID(), segment.GetInsertChannel(), meta.CurrentTarget)
+	if channel == nil {
+		channel = ex.targetMgr.GetDmChannel(task.CollectionID(), segment.GetInsertChannel(), meta.NextTarget)
+	}
+	resp.ChannelCheckpoint[segment.GetInsertChannel()] = channel.GetSeekPosition()
 	loadInfo := utils.PackSegmentLoadInfo(resp, indexes)
 
-	// Get shard leader for the given replica and segment
-	leader, ok := getShardLeader(
+	// Get shard leaderID for the given replica and segment
+	leaderID, ok := getShardLeader(
 		ex.meta.ReplicaManager,
 		ex.dist,
 		task.CollectionID(),
@@ -290,7 +295,7 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 		log.Warn(msg, zap.Error(err))
 		return err
 	}
-	log = log.With(zap.Int64("shardLeader", leader))
+	log = log.With(zap.Int64("shardLeader", leaderID))
 
 	// Get collection index info
 	indexInfo, err := ex.broker.DescribeIndex(ctx, task.CollectionID())
