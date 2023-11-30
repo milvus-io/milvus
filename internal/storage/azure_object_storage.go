@@ -101,7 +101,7 @@ func (AzureObjectStorage *AzureObjectStorage) GetObject(ctx context.Context, buc
 	if err != nil {
 		return nil, checkObjectStorageError(objectName, err)
 	}
-	return object.Body, nil
+	return NewAzureFile(object.Body), nil
 }
 
 func (AzureObjectStorage *AzureObjectStorage) PutObject(ctx context.Context, bucketName, objectName string, reader io.Reader, objectSize int64) error {

@@ -489,8 +489,8 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 	p.StorageType = ParamItem{
 		Key:          "common.storageType",
 		Version:      "2.0.0",
-		DefaultValue: "minio",
-		Doc:          "please adjust in embedded Milvus: local, available values are [local, minio, remote, opendal]]",
+		DefaultValue: "remote",
+		Doc:          "please adjust in embedded Milvus: local, available values are [local, remote, opendal], value minio is deprecated, use remote instead",
 		Export:       true,
 	}
 	p.StorageType.Init(base.mgr)
@@ -1247,6 +1247,7 @@ type queryCoordConfig struct {
 	UpdateNextTargetInterval       ParamItem `refreshable:"false"`
 	CheckNodeInReplicaInterval     ParamItem `refreshable:"false"`
 	CheckResourceGroupInterval     ParamItem `refreshable:"false"`
+	LeaderViewUpdateInterval       ParamItem `refreshable:"false"`
 	EnableRGAutoRecover            ParamItem `refreshable:"true"`
 	CheckHealthInterval            ParamItem `refreshable:"false"`
 	CheckHealthRPCTimeout          ParamItem `refreshable:"true"`
@@ -1254,6 +1255,7 @@ type queryCoordConfig struct {
 	CollectionRecoverTimesLimit    ParamItem `refreshable:"true"`
 	ObserverTaskParallel           ParamItem `refreshable:"false"`
 	CheckAutoBalanceConfigInterval ParamItem `refreshable:"false"`
+	CheckNodeSessionInterval       ParamItem `refreshable:"false"`
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -1518,6 +1520,15 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 	}
 	p.CheckResourceGroupInterval.Init(base.mgr)
 
+	p.LeaderViewUpdateInterval = ParamItem{
+		Key:          "queryCoord.leaderViewUpdateInterval",
+		Doc:          "the interval duration(in seconds) for LeaderObserver to fetch LeaderView from querynodes",
+		Version:      "2.3.4",
+		DefaultValue: "1",
+		PanicIfEmpty: true,
+	}
+	p.LeaderViewUpdateInterval.Init(base.mgr)
+
 	p.EnableRGAutoRecover = ParamItem{
 		Key:          "queryCoord.enableRGAutoRecover",
 		Version:      "2.2.3",
@@ -1585,6 +1596,16 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.CheckAutoBalanceConfigInterval.Init(base.mgr)
+
+	p.CheckNodeSessionInterval = ParamItem{
+		Key:          "queryCoord.checkNodeSessionInterval",
+		Version:      "2.3.4",
+		DefaultValue: "60",
+		PanicIfEmpty: true,
+		Doc:          "the interval(in seconds) of check querynode cluster session",
+		Export:       true,
+	}
+	p.CheckNodeSessionInterval.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
