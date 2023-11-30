@@ -335,6 +335,7 @@ func (node *QueryNode) searchChannel(ctx context.Context, req *querypb.SearchReq
 		zap.Int64("collectionID", req.Req.GetCollectionID()),
 		zap.String("channel", channel),
 		zap.String("scope", req.GetScope().String()),
+		zap.Int64("nq", req.GetReq().GetNq()),
 	)
 	traceID := trace.SpanFromContext(ctx).SpanContext().TraceID()
 
