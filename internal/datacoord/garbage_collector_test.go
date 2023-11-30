@@ -47,7 +47,9 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func Test_garbageCollector_basic(t *testing.T) {
@@ -780,13 +782,12 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 		mock.Anything,
 	).Return(nil)
 
+	channelCPs := typeutil.NewConcurrentMap[string, *msgpb.MsgPosition]()
+	channelCPs.Insert("dmlChannel", &msgpb.MsgPosition{Timestamp: 1000})
 	m := &meta{
-		catalog: catalog,
-		channelCPs: map[string]*msgpb.MsgPosition{
-			"dmlChannel": {
-				Timestamp: 1000,
-			},
-		},
+		catalog:        catalog,
+		channelCPLocks: lock.NewKeyLock[string](),
+		channelCPs:     channelCPs,
 		segments: &SegmentsInfo{
 			map[UniqueID]*SegmentInfo{
 				segID: {
