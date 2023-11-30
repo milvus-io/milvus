@@ -749,6 +749,7 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 		zap.Int64("collectionID", req.GetReq().GetCollectionID()),
 		zap.Strings("channels", req.GetDmlChannels()),
 		zap.Bool("fromShardLeader", req.GetFromShardLeader()),
+		zap.Int64("nq", req.GetReq().GetNq()),
 	)
 
 	log.Debug("Received SearchRequest",
