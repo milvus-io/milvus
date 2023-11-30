@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
@@ -225,37 +226,78 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactBatch() {
 func (s *LevelZeroCompactionTaskSuite) TestUploadByCheck() {
 	ctx := context.Background()
 
-	segments := map[int64]*storage.DeleteData{100: s.dData}
-	results := make(map[int64]*datapb.CompactionSegment)
+	s.Run("upload directly", func() {
+		s.SetupTest()
+		s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
+		s.mockMeta.EXPECT().Collection().Return(1)
+		s.mockMeta.EXPECT().GetSegmentByID(
+			mock.MatchedBy(func(ID int64) bool {
+				return ID == 100
+			}), mock.Anything).
+			Return(metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 100, PartitionID: 10}, nil), true)
 
-	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
-	s.mockMeta.EXPECT().Collection().Return(1)
-	s.mockMeta.EXPECT().GetSegmentByID(
-		mock.MatchedBy(func(ID int64) bool {
-			return ID == 100
-		}), mock.Anything).
-		Return(metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 100, PartitionID: 10}, nil), true)
+		s.mockAlloc.EXPECT().AllocOne().Return(19530, nil)
+		blobKey := metautil.JoinIDPath(1, 10, 100, 19530)
+		blobPath := path.Join(common.SegmentDeltaLogPath, blobKey)
+		s.mockBinlogIO.EXPECT().JoinFullPath(mock.Anything, mock.Anything).Return(blobPath)
+		segments := map[int64]*storage.DeleteData{100: s.dData}
+		results := make(map[int64]*datapb.CompactionSegment)
+		err := s.task.uploadByCheck(ctx, false, segments, results)
+		s.NoError(err)
+		s.Equal(1, len(results))
 
-	s.mockAlloc.EXPECT().AllocOne().Return(19530, nil)
-	blobKey := metautil.JoinIDPath(1, 10, 100, 19530)
-	blobPath := path.Join(common.SegmentDeltaLogPath, blobKey)
-	s.mockBinlogIO.EXPECT().JoinFullPath(mock.Anything, mock.Anything).Return(blobPath)
+		seg1, ok := results[100]
+		s.True(ok)
+		s.EqualValues(100, seg1.GetSegmentID())
+		s.Equal(1, len(seg1.GetDeltalogs()))
+		s.Equal(1, len(seg1.GetDeltalogs()[0].GetBinlogs()))
+	})
 
-	err := s.task.uploadByCheck(ctx, false, segments, results)
-	s.NoError(err)
-	s.Equal(1, len(results))
+	s.Run("check without upload", func() {
+		s.SetupTest()
+		segments := map[int64]*storage.DeleteData{100: s.dData}
+		results := make(map[int64]*datapb.CompactionSegment)
+		s.Require().Empty(results)
 
-	seg1, ok := results[100]
-	s.True(ok)
-	s.EqualValues(100, seg1.GetSegmentID())
-	s.Equal(1, len(seg1.GetDeltalogs()))
-	s.Equal(1, len(seg1.GetDeltalogs()[0].GetBinlogs()))
+		err := s.task.uploadByCheck(ctx, true, segments, results)
+		s.NoError(err)
+		s.Empty(results)
+	})
 
-	segments = map[int64]*storage.DeleteData{100: s.dData}
-	results = make(map[int64]*datapb.CompactionSegment)
-	err = s.task.uploadByCheck(ctx, true, segments, results)
-	s.NoError(err)
-	s.Empty(results)
+	s.Run("check with upload", func() {
+		blobKey := metautil.JoinIDPath(1, 10, 100, 19530)
+		blobPath := path.Join(common.SegmentDeltaLogPath, blobKey)
+
+		s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
+		s.mockMeta.EXPECT().Collection().Return(1)
+		s.mockMeta.EXPECT().GetSegmentByID(
+			mock.MatchedBy(func(ID int64) bool {
+				return ID == 100
+			}), mock.Anything).
+			Return(metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 100, PartitionID: 10}, nil), true)
+
+		s.mockAlloc.EXPECT().AllocOne().Return(19530, nil)
+		s.mockBinlogIO.EXPECT().JoinFullPath(mock.Anything, mock.Anything).Return(blobPath)
+
+		segments := map[int64]*storage.DeleteData{100: s.dData}
+		results := map[int64]*datapb.CompactionSegment{
+			100: {SegmentID: 100, Deltalogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogID: 1}}}}},
+		}
+		s.Require().Equal(1, len(results))
+
+		paramtable.Get().Save(paramtable.Get().DataNodeCfg.FlushDeleteBufferBytes.Key, "1")
+		defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.FlushDeleteBufferBytes.Key)
+		err := s.task.uploadByCheck(ctx, true, segments, results)
+		s.NoError(err)
+		s.NotEmpty(results)
+		s.Equal(1, len(results))
+
+		seg1, ok := results[100]
+		s.True(ok)
+		s.EqualValues(100, seg1.GetSegmentID())
+		s.Equal(1, len(seg1.GetDeltalogs()))
+		s.Equal(2, len(seg1.GetDeltalogs()[0].GetBinlogs()))
+	})
 }
 
 func (s *LevelZeroCompactionTaskSuite) TestComposeDeltalog() {
