@@ -34,6 +34,61 @@ func (_m *MockQueryCoord) EXPECT() *MockQueryCoord_Expecter {
 	return &MockQueryCoord_Expecter{mock: &_m.Mock}
 }
 
+// ActivateChecker provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryCoord) ActivateChecker(_a0 context.Context, _a1 *querypb.ActivateCheckerRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ActivateCheckerRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ActivateCheckerRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.ActivateCheckerRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockQueryCoord_ActivateChecker_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ActivateChecker'
+type MockQueryCoord_ActivateChecker_Call struct {
+	*mock.Call
+}
+
+// ActivateChecker is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *querypb.ActivateCheckerRequest
+func (_e *MockQueryCoord_Expecter) ActivateChecker(_a0 interface{}, _a1 interface{}) *MockQueryCoord_ActivateChecker_Call {
+	return &MockQueryCoord_ActivateChecker_Call{Call: _e.mock.On("ActivateChecker", _a0, _a1)}
+}
+
+func (_c *MockQueryCoord_ActivateChecker_Call) Run(run func(_a0 context.Context, _a1 *querypb.ActivateCheckerRequest)) *MockQueryCoord_ActivateChecker_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*querypb.ActivateCheckerRequest))
+	})
+	return _c
+}
+
+func (_c *MockQueryCoord_ActivateChecker_Call) Return(_a0 *commonpb.Status, _a1 error) *MockQueryCoord_ActivateChecker_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockQueryCoord_ActivateChecker_Call) RunAndReturn(run func(context.Context, *querypb.ActivateCheckerRequest) (*commonpb.Status, error)) *MockQueryCoord_ActivateChecker_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CheckHealth provides a mock function with given fields: _a0, _a1
 func (_m *MockQueryCoord) CheckHealth(_a0 context.Context, _a1 *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -140,6 +195,61 @@ func (_c *MockQueryCoord_CreateResourceGroup_Call) Return(_a0 *commonpb.Status, 
 }
 
 func (_c *MockQueryCoord_CreateResourceGroup_Call) RunAndReturn(run func(context.Context, *milvuspb.CreateResourceGroupRequest) (*commonpb.Status, error)) *MockQueryCoord_CreateResourceGroup_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DeactivateChecker provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryCoord) DeactivateChecker(_a0 context.Context, _a1 *querypb.DeactivateCheckerRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.DeactivateCheckerRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.DeactivateCheckerRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.DeactivateCheckerRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockQueryCoord_DeactivateChecker_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeactivateChecker'
+type MockQueryCoord_DeactivateChecker_Call struct {
+	*mock.Call
+}
+
+// DeactivateChecker is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *querypb.DeactivateCheckerRequest
+func (_e *MockQueryCoord_Expecter) DeactivateChecker(_a0 interface{}, _a1 interface{}) *MockQueryCoord_DeactivateChecker_Call {
+	return &MockQueryCoord_DeactivateChecker_Call{Call: _e.mock.On("DeactivateChecker", _a0, _a1)}
+}
+
+func (_c *MockQueryCoord_DeactivateChecker_Call) Run(run func(_a0 context.Context, _a1 *querypb.DeactivateCheckerRequest)) *MockQueryCoord_DeactivateChecker_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*querypb.DeactivateCheckerRequest))
+	})
+	return _c
+}
+
+func (_c *MockQueryCoord_DeactivateChecker_Call) Return(_a0 *commonpb.Status, _a1 error) *MockQueryCoord_DeactivateChecker_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockQueryCoord_DeactivateChecker_Call) RunAndReturn(run func(context.Context, *querypb.DeactivateCheckerRequest) (*commonpb.Status, error)) *MockQueryCoord_DeactivateChecker_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -731,6 +841,61 @@ func (_c *MockQueryCoord_Init_Call) Return(_a0 error) *MockQueryCoord_Init_Call 
 }
 
 func (_c *MockQueryCoord_Init_Call) RunAndReturn(run func() error) *MockQueryCoord_Init_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListCheckers provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryCoord) ListCheckers(_a0 context.Context, _a1 *querypb.ListCheckersRequest) (*querypb.ListCheckersResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *querypb.ListCheckersResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ListCheckersRequest) (*querypb.ListCheckersResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ListCheckersRequest) *querypb.ListCheckersResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*querypb.ListCheckersResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.ListCheckersRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockQueryCoord_ListCheckers_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListCheckers'
+type MockQueryCoord_ListCheckers_Call struct {
+	*mock.Call
+}
+
+// ListCheckers is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *querypb.ListCheckersRequest
+func (_e *MockQueryCoord_Expecter) ListCheckers(_a0 interface{}, _a1 interface{}) *MockQueryCoord_ListCheckers_Call {
+	return &MockQueryCoord_ListCheckers_Call{Call: _e.mock.On("ListCheckers", _a0, _a1)}
+}
+
+func (_c *MockQueryCoord_ListCheckers_Call) Run(run func(_a0 context.Context, _a1 *querypb.ListCheckersRequest)) *MockQueryCoord_ListCheckers_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*querypb.ListCheckersRequest))
+	})
+	return _c
+}
+
+func (_c *MockQueryCoord_ListCheckers_Call) Return(_a0 *querypb.ListCheckersResponse, _a1 error) *MockQueryCoord_ListCheckers_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockQueryCoord_ListCheckers_Call) RunAndReturn(run func(context.Context, *querypb.ListCheckersRequest) (*querypb.ListCheckersResponse, error)) *MockQueryCoord_ListCheckers_Call {
 	_c.Call.Return(run)
 	return _c
 }
