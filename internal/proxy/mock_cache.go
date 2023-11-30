@@ -844,6 +844,10 @@ func (_m *MockCache) RemoveDatabase(ctx context.Context, database string) {
 	_m.Called(ctx, database)
 }
 
+func (_m *MockCache) HasDatabase(ctx context.Context, database string) bool {
+	return true
+}
+
 // MockCache_RemoveDatabase_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveDatabase'
 type MockCache_RemoveDatabase_Call struct {
 	*mock.Call

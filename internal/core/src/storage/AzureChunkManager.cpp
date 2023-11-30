@@ -71,14 +71,23 @@ AzureChunkManager::AzureChunkManager(const StorageConfig& storage_config)
         azure::AzureBlobChunkManager::InitLog(storage_config.log_level,
                                               AzureLogger);
     }
-    client_ = std::make_shared<azure::AzureBlobChunkManager>(
-        storage_config.access_key_id,
-        storage_config.access_key_value,
-        storage_config.address,
-        storage_config.requestTimeoutMs == 0
-            ? DEFAULT_CHUNK_MANAGER_REQUEST_TIMEOUT_MS
-            : storage_config.requestTimeoutMs,
-        storage_config.useIAM);
+    try {
+        client_ = std::make_shared<azure::AzureBlobChunkManager>(
+            storage_config.access_key_id,
+            storage_config.access_key_value,
+            storage_config.address,
+            storage_config.requestTimeoutMs == 0
+                ? DEFAULT_CHUNK_MANAGER_REQUEST_TIMEOUT_MS
+                : storage_config.requestTimeoutMs,
+            storage_config.useIAM);
+    } catch (std::exception& err) {
+        ThrowAzureError(
+            "PreCheck",
+            err,
+            "precheck chunk manager client failed, error:{}, configuration:{}",
+            err.what(),
+            storage_config.ToString());
+    }
 }
 
 AzureChunkManager::~AzureChunkManager() {
@@ -106,14 +115,7 @@ AzureChunkManager::ListWithPrefix(const std::string& filepath) {
 
 uint64_t
 AzureChunkManager::Read(const std::string& filepath, void* buf, uint64_t size) {
-    try {
-        return GetObjectBuffer(default_bucket_name_, filepath, buf, size);
-    } catch (const std::exception& e) {
-        std::stringstream err_msg;
-        err_msg << "read object('" << default_bucket_name_ << "', '" << filepath
-                << "' fail: " << e.what();
-        throw SegcoreError(ObjectNotExist, err_msg.str());
-    }
+    return GetObjectBuffer(default_bucket_name_, filepath, buf, size);
 }
 
 void

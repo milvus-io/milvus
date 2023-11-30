@@ -79,6 +79,7 @@ AzureBlobChunkManager::AzureBlobChunkManager(
                 CreateFromConnectionString(GetConnectionString(
                     access_key_id, access_key_value, address)));
     }
+    client_->GetProperties();
 }
 
 AzureBlobChunkManager::~AzureBlobChunkManager() {

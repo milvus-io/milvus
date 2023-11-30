@@ -172,7 +172,7 @@ func printIndexes(indexes []*milvuspb.IndexDescription) []gin.H {
 
 // --------------------- insert param --------------------- //
 
-func checkAndSetData(body string, collDescResp *milvuspb.DescribeCollectionResponse) (error, []map[string]interface{}) {
+func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) (error, []map[string]interface{}) {
 	var reallyDataArray []map[string]interface{}
 	dataResult := gjson.Get(body, "data")
 	dataResultArray := dataResult.Array()
@@ -181,7 +181,7 @@ func checkAndSetData(body string, collDescResp *milvuspb.DescribeCollectionRespo
 	}
 
 	var fieldNames []string
-	for _, field := range collDescResp.Schema.Fields {
+	for _, field := range collSchema.Fields {
 		fieldNames = append(fieldNames, field.Name)
 	}
 
@@ -190,13 +190,13 @@ func checkAndSetData(body string, collDescResp *milvuspb.DescribeCollectionRespo
 		var vectorArray []float32
 		var binaryArray []byte
 		if data.Type == gjson.JSON {
-			for _, field := range collDescResp.Schema.Fields {
+			for _, field := range collSchema.Fields {
 				fieldType := field.DataType
 				fieldName := field.Name
 
 				dataString := gjson.Get(data.Raw, fieldName).String()
 
-				if field.IsPrimaryKey && collDescResp.Schema.AutoID {
+				if field.IsPrimaryKey && collSchema.AutoID {
 					if dataString != "" {
 						return merr.WrapErrParameterInvalid("", "set primary key but autoID == true"), reallyDataArray
 					}
@@ -268,7 +268,7 @@ func checkAndSetData(body string, collDescResp *milvuspb.DescribeCollectionRespo
 			}
 
 			// fill dynamic schema
-			if collDescResp.Schema.EnableDynamicField {
+			if collSchema.EnableDynamicField {
 				for mapKey, mapValue := range data.Map() {
 					if !containsString(fieldNames, mapKey) {
 						mapValueStr := mapValue.String()

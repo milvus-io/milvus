@@ -46,6 +46,9 @@ func (h *Handlers) checkDatabase(ctx context.Context, c *gin.Context, dbName str
 	if dbName == DefaultDbName {
 		return nil
 	}
+	if proxy.CheckDatabase(ctx, dbName) {
+		return nil
+	}
 	response, err := h.proxy.ListDatabases(ctx, &milvuspb.ListDatabasesRequest{})
 	if err == nil {
 		err = merr.Error(response.GetStatus())
@@ -66,7 +69,11 @@ func (h *Handlers) checkDatabase(ctx context.Context, c *gin.Context, dbName str
 	return RestRequestInterceptorErr
 }
 
-func (h *Handlers) describeCollection(ctx context.Context, c *gin.Context, dbName string, collectionName string) (*milvuspb.DescribeCollectionResponse, error) {
+func (h *Handlers) describeCollection(ctx context.Context, c *gin.Context, dbName string, collectionName string) (*schemapb.CollectionSchema, error) {
+	collSchema, err := proxy.GetCachedCollectionSchema(ctx, dbName, collectionName)
+	if err == nil {
+		return collSchema, nil
+	}
 	req := milvuspb.DescribeCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
@@ -84,7 +91,7 @@ func (h *Handlers) describeCollection(ctx context.Context, c *gin.Context, dbNam
 		log.Warn("primary filed autoID VS schema autoID", zap.String("collectionName", collectionName), zap.Bool("primary Field", primaryField.AutoID), zap.Bool("schema", response.Schema.AutoID))
 		response.Schema.AutoID = EnableAutoID
 	}
-	return response, nil
+	return response.Schema, nil
 }
 
 func (h *Handlers) hasCollection(ctx context.Context, c *gin.Context, dbName string, collectionName string) (bool, error) {
@@ -541,12 +548,12 @@ func (h *Handlers) get(c *gin.Context) {
 	username, _ := c.Get(ContextUsername)
 	ctx := proxy.NewContextWithMetadata(c, username.(string), req.DbName)
 	response, err := h.executeRestRequestInterceptor(ctx, c, req, func(reqCtx context.Context, req any) (any, error) {
-		coll, err := h.describeCollection(ctx, c, httpReq.DbName, httpReq.CollectionName)
-		if err != nil || coll == nil {
+		collSchema, err := h.describeCollection(ctx, c, httpReq.DbName, httpReq.CollectionName)
+		if err != nil || collSchema == nil {
 			return nil, RestRequestInterceptorErr
 		}
 		body, _ := c.Get(gin.BodyBytesKey)
-		filter, err := checkGetPrimaryKey(coll.Schema, gjson.Get(string(body.([]byte)), DefaultPrimaryFieldName))
+		filter, err := checkGetPrimaryKey(collSchema, gjson.Get(string(body.([]byte)), DefaultPrimaryFieldName))
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrCheckPrimaryKey),
@@ -609,15 +616,15 @@ func (h *Handlers) delete(c *gin.Context) {
 	username, _ := c.Get(ContextUsername)
 	ctx := proxy.NewContextWithMetadata(c, username.(string), req.DbName)
 	response, err := h.executeRestRequestInterceptor(ctx, c, req, func(reqCtx context.Context, req any) (any, error) {
-		coll, err := h.describeCollection(ctx, c, httpReq.DbName, httpReq.CollectionName)
-		if err != nil || coll == nil {
+		collSchema, err := h.describeCollection(ctx, c, httpReq.DbName, httpReq.CollectionName)
+		if err != nil || collSchema == nil {
 			return nil, RestRequestInterceptorErr
 		}
 		deleteReq := req.(*milvuspb.DeleteRequest)
 		deleteReq.Expr = httpReq.Filter
 		if deleteReq.Expr == "" {
 			body, _ := c.Get(gin.BodyBytesKey)
-			filter, err := checkGetPrimaryKey(coll.Schema, gjson.Get(string(body.([]byte)), DefaultPrimaryFieldName))
+			filter, err := checkGetPrimaryKey(collSchema, gjson.Get(string(body.([]byte)), DefaultPrimaryFieldName))
 			if err != nil {
 				c.JSON(http.StatusOK, gin.H{
 					HTTPReturnCode:    merr.Code(merr.ErrCheckPrimaryKey),
@@ -679,12 +686,12 @@ func (h *Handlers) insert(c *gin.Context) {
 	username, _ := c.Get(ContextUsername)
 	ctx := proxy.NewContextWithMetadata(c, username.(string), req.DbName)
 	response, err := h.executeRestRequestInterceptor(ctx, c, req, func(reqCtx context.Context, req any) (any, error) {
-		coll, err := h.describeCollection(ctx, c, httpReq.DbName, httpReq.CollectionName)
-		if err != nil || coll == nil {
+		collSchema, err := h.describeCollection(ctx, c, httpReq.DbName, httpReq.CollectionName)
+		if err != nil || collSchema == nil {
 			return nil, RestRequestInterceptorErr
 		}
 		body, _ := c.Get(gin.BodyBytesKey)
-		err, httpReq.Data = checkAndSetData(string(body.([]byte)), coll)
+		err, httpReq.Data = checkAndSetData(string(body.([]byte)), collSchema)
 		if err != nil {
 			log.Warn("high level restful api, fail to deal with insert data", zap.Any("body", body), zap.Error(err))
 			c.AbortWithStatusJSON(http.StatusOK, gin.H{
@@ -694,7 +701,7 @@ func (h *Handlers) insert(c *gin.Context) {
 			return nil, RestRequestInterceptorErr
 		}
 		insertReq := req.(*milvuspb.InsertRequest)
-		insertReq.FieldsData, err = anyToColumns(httpReq.Data, coll.Schema)
+		insertReq.FieldsData, err = anyToColumns(httpReq.Data, collSchema)
 		if err != nil {
 			log.Warn("high level restful api, fail to deal with insert data", zap.Any("data", httpReq.Data), zap.Error(err))
 			c.AbortWithStatusJSON(http.StatusOK, gin.H{
@@ -771,17 +778,17 @@ func (h *Handlers) upsert(c *gin.Context) {
 	username, _ := c.Get(ContextUsername)
 	ctx := proxy.NewContextWithMetadata(c, username.(string), req.DbName)
 	response, err := h.executeRestRequestInterceptor(ctx, c, req, func(reqCtx context.Context, req any) (any, error) {
-		coll, err := h.describeCollection(ctx, c, httpReq.DbName, httpReq.CollectionName)
-		if err != nil || coll == nil {
+		collSchema, err := h.describeCollection(ctx, c, httpReq.DbName, httpReq.CollectionName)
+		if err != nil || collSchema == nil {
 			return nil, RestRequestInterceptorErr
 		}
-		if coll.Schema.AutoID {
+		if collSchema.AutoID {
 			err := merr.WrapErrParameterInvalid("autoID: false", "autoID: true", "cannot upsert an autoID collection")
 			c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 			return nil, RestRequestInterceptorErr
 		}
 		body, _ := c.Get(gin.BodyBytesKey)
-		err, httpReq.Data = checkAndSetData(string(body.([]byte)), coll)
+		err, httpReq.Data = checkAndSetData(string(body.([]byte)), collSchema)
 		if err != nil {
 			log.Warn("high level restful api, fail to deal with upsert data", zap.Any("body", body), zap.Error(err))
 			c.AbortWithStatusJSON(http.StatusOK, gin.H{
@@ -791,7 +798,7 @@ func (h *Handlers) upsert(c *gin.Context) {
 			return nil, RestRequestInterceptorErr
 		}
 		upsertReq := req.(*milvuspb.UpsertRequest)
-		upsertReq.FieldsData, err = anyToColumns(httpReq.Data, coll.Schema)
+		upsertReq.FieldsData, err = anyToColumns(httpReq.Data, collSchema)
 		if err != nil {
 			log.Warn("high level restful api, fail to deal with upsert data", zap.Any("data", httpReq.Data), zap.Error(err))
 			c.AbortWithStatusJSON(http.StatusOK, gin.H{
