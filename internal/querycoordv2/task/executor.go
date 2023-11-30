@@ -278,8 +278,7 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 	if channel == nil {
 		channel = ex.targetMgr.GetDmChannel(task.CollectionID(), segment.GetInsertChannel(), meta.NextTarget)
 	}
-	resp.ChannelCheckpoint[segment.GetInsertChannel()] = channel.GetSeekPosition()
-	loadInfo := utils.PackSegmentLoadInfo(resp, indexes)
+	loadInfo := utils.PackSegmentLoadInfo(resp.GetInfos()[0], channel.GetSeekPosition(), indexes)
 
 	// Get shard leaderID for the given replica and segment
 	leaderID, ok := getShardLeader(

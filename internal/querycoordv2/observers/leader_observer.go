@@ -151,7 +151,12 @@ func (o *LeaderObserver) findNeedLoadedSegments(leaderView *meta.LeaderView, dis
 				log.Warn("failed to get segment info from DataCoord", zap.Error(err))
 				continue
 			}
-			loadInfo := utils.PackSegmentLoadInfo(resp, nil)
+
+			channel := o.target.GetDmChannel(s.GetCollectionID(), s.GetInsertChannel(), meta.CurrentTarget)
+			if channel == nil {
+				channel = o.target.GetDmChannel(s.GetCollectionID(), s.GetInsertChannel(), meta.NextTarget)
+			}
+			loadInfo := utils.PackSegmentLoadInfo(resp.GetInfos()[0], channel.GetSeekPosition(), nil)
 
 			log.Debug("leader observer append a segment to set",
 				zap.Int64("collectionID", leaderView.CollectionID),
