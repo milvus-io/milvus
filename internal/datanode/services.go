@@ -240,7 +240,7 @@ func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan
 		return merr.Status(err), nil
 	}
 
-	ds, ok := node.flowgraphManager.getFlowgraphService(req.GetChannel())
+	ds, ok := node.flowgraphManager.GetFlowgraphService(req.GetChannel())
 	if !ok {
 		log.Warn("illegel compaction plan, channel not in this DataNode", zap.String("channelName", req.GetChannel()))
 		return merr.Status(merr.WrapErrChannelNotFound(req.GetChannel(), "illegel compaction plan")), nil
@@ -325,7 +325,7 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 		return merr.Status(merr.WrapErrParameterInvalid(">0", "0", "compacted from segments shouldn't be empty")), nil
 	}
 
-	ds, ok := node.flowgraphManager.getFlowgraphService(req.GetChannelName())
+	ds, ok := node.flowgraphManager.GetFlowgraphService(req.GetChannelName())
 	if !ok {
 		node.compactionExecutor.clearTasksByChannel(req.GetChannelName())
 		err := merr.WrapErrChannelNotFound(req.GetChannelName())
@@ -509,7 +509,7 @@ func (node *DataNode) AddImportSegment(ctx context.Context, req *datapb.AddImpor
 	// Retry in case the channel hasn't been watched yet.
 	err := retry.Do(ctx, func() error {
 		var ok bool
-		ds, ok = node.flowgraphManager.getFlowgraphService(req.GetChannelName())
+		ds, ok = node.flowgraphManager.GetFlowgraphService(req.GetChannelName())
 		if !ok {
 			return errors.New("channel not found")
 		}
