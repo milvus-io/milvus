@@ -135,7 +135,7 @@ TEST(GrowingIndex, MissIndexMeta) {
 
     auto& config = SegcoreConfig::default_config();
     config.set_chunk_rows(1024);
-    config.set_enable_interim_segment_index(true);
+    config.set_enable_growing_segment_index(true);
     auto segment = CreateGrowingSegment(schema, nullptr);
 }
 
