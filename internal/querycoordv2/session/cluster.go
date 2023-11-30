@@ -71,7 +71,7 @@ func DefaultQueryNodeCreator(ctx context.Context, addr string, nodeID int64) (ty
 	return grpcquerynodeclient.NewClient(ctx, addr, nodeID)
 }
 
-func NewClusterImpl(nodeManager *NodeManager, queryNodeCreator QueryNodeCreator) *QueryCluster {
+func NewCluster(nodeManager *NodeManager, queryNodeCreator QueryNodeCreator) *QueryCluster {
 	c := &QueryCluster{
 		clients:     newClients(queryNodeCreator),
 		nodeManager: nodeManager,

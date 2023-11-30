@@ -83,7 +83,7 @@ func (s *CompactionPlanHandlerSuite) TestRemoveTasksByChannel() {
 func (s *CompactionPlanHandlerSuite) TestCheckResult() {
 	s.mockAlloc.EXPECT().allocTimestamp(mock.Anything).Return(19530, nil)
 
-	session := &SessionManager{
+	session := &SessionManagerImpl{
 		sessions: struct {
 			sync.RWMutex
 			data map[int64]*Session

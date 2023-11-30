@@ -248,7 +248,7 @@ func (s *Server) initQueryCoord() error {
 	}
 	// Init session
 	log.Info("init session")
-	s.cluster = session.NewClusterImpl(s.nodeMgr, s.queryNodeCreator)
+	s.cluster = session.NewCluster(s.nodeMgr, s.queryNodeCreator)
 
 	// Init schedulers
 	log.Info("init schedulers")
