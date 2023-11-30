@@ -129,3 +129,15 @@ func (m *GrpcQueryCoordClient) ListResourceGroups(ctx context.Context, req *milv
 func (m *GrpcQueryCoordClient) DescribeResourceGroup(ctx context.Context, req *querypb.DescribeResourceGroupRequest, opts ...grpc.CallOption) (*querypb.DescribeResourceGroupResponse, error) {
 	return &querypb.DescribeResourceGroupResponse{}, m.Err
 }
+
+func (m *GrpcQueryCoordClient) istCheckers(ctx context.Context, in *querypb.ListCheckersRequest, opts ...grpc.CallOption) (*querypb.ListCheckersResponse, error) {
+	return &querypb.ListCheckersResponse{}, m.Err
+}
+
+func (m *GrpcQueryCoordClient) ctivateChecker(ctx context.Context, in *querypb.ActivateCheckerRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+  return &commonpb.Status{}, m.Err
+}
+
+func (m *GrpcQueryCoordClient) eactivateChecker(ctx context.Context, in *querypb.DeactivateCheckerRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+  return &commonpb.Status{}, m.Err
+}
