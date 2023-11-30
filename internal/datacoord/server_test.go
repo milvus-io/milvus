@@ -44,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -3690,7 +3691,7 @@ func TestGetFlushAllState(t *testing.T) {
 			var err error
 			svr.meta = &meta{}
 			svr.rootCoordClient = mocks.NewMockRootCoordClient(t)
-			svr.broker = NewCoordinatorBroker(svr.rootCoordClient)
+			svr.broker = broker.NewCoordinatorBroker(svr.rootCoordClient)
 			if test.ListDatabaseFailed {
 				svr.rootCoordClient.(*mocks.MockRootCoordClient).EXPECT().ListDatabases(mock.Anything, mock.Anything).
 					Return(&milvuspb.ListDatabasesResponse{
@@ -3777,7 +3778,7 @@ func TestGetFlushAllStateWithDB(t *testing.T) {
 			var err error
 			svr.meta = &meta{}
 			svr.rootCoordClient = mocks.NewMockRootCoordClient(t)
-			svr.broker = NewCoordinatorBroker(svr.rootCoordClient)
+			svr.broker = broker.NewCoordinatorBroker(svr.rootCoordClient)
 
 			if test.DbExist {
 				svr.rootCoordClient.(*mocks.MockRootCoordClient).EXPECT().ListDatabases(mock.Anything, mock.Anything).
