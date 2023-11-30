@@ -53,6 +53,9 @@ func (wb *bfWriteBuffer) BufferData(insertMsgs []*msgstream.InsertMsg, deleteMsg
 		segments := wb.metaCache.GetSegmentsBy(metacache.WithPartitionID(delMsg.PartitionID),
 			metacache.WithSegmentState(commonpb.SegmentState_Growing, commonpb.SegmentState_Flushing, commonpb.SegmentState_Flushed))
 		for _, segment := range segments {
+			if segment.CompactTo() != 0 {
+				continue
+			}
 			var deletePks []storage.PrimaryKey
 			var deleteTss []typeutil.Timestamp
 			for idx, pk := range pks {

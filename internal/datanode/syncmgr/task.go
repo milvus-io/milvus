@@ -87,8 +87,9 @@ func (t *SyncTask) Run() error {
 	t.segment, has = t.metacache.GetSegmentByID(t.segmentID)
 	if !has {
 		log.Warn("failed to sync data, segment not found in metacache")
+		err := merr.WrapErrSegmentNotFound(t.segmentID)
 		t.handleError(err)
-		return merr.WrapErrSegmentNotFound(t.segmentID)
+		return err
 	}
 
 	if t.segment.CompactTo() == metacache.NullSegment {
@@ -141,7 +142,7 @@ func (t *SyncTask) Run() error {
 		actions = append(actions, metacache.UpdateState(commonpb.SegmentState_Flushed))
 	}
 
-	t.metacache.UpdateSegments(metacache.MergeSegmentAction(actions...), metacache.WithSegmentIDs(t.segmentID))
+	t.metacache.UpdateSegments(metacache.MergeSegmentAction(actions...), metacache.WithSegmentIDs(t.segment.SegmentID()))
 
 	log.Info("task done")
 	return nil
