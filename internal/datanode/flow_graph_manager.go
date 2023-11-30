@@ -19,8 +19,6 @@ package datanode
 import (
 	"context"
 	"fmt"
-	"sync"
-	"time"
 
 	"go.uber.org/zap"
 
@@ -28,18 +26,11 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type FlowgraphManager interface {
-	Start()
-	Stop()
-
-	// control the total memory water level by sync data.
-	controlMemWaterLevel(totalMemory uint64)
-
 	AddFlowgraph(ds *dataSyncService)
 	AddandStartWithEtcdTickler(dn *DataNode, vchan *datapb.VchannelInfo, schema *schemapb.CollectionSchema, tickler *etcdTickler) error
 	RemoveFlowgraph(channel string)
@@ -56,91 +47,12 @@ var _ FlowgraphManager = (*fgManagerImpl)(nil)
 
 type fgManagerImpl struct {
 	flowgraphs *typeutil.ConcurrentMap[string, *dataSyncService]
-
-	stopWaiter sync.WaitGroup
-	stopCh     chan struct{}
-	stopOnce   sync.Once
 }
 
 func newFlowgraphManager() *fgManagerImpl {
 	return &fgManagerImpl{
 		flowgraphs: typeutil.NewConcurrentMap[string, *dataSyncService](),
-		stopCh:     make(chan struct{}),
 	}
-}
-
-func (fm *fgManagerImpl) Start() {
-	fm.stopWaiter.Add(1)
-	ticker := time.NewTicker(3 * time.Second)
-	defer ticker.Stop()
-
-	go func() {
-		defer fm.stopWaiter.Done()
-		for {
-			select {
-			case <-fm.stopCh:
-				return
-			case <-ticker.C:
-				fm.controlMemWaterLevel(hardware.GetMemoryCount())
-			}
-		}
-	}()
-}
-
-func (fm *fgManagerImpl) Stop() {
-	fm.ClearFlowgraphs()
-	fm.stopOnce.Do(func() {
-		close(fm.stopCh)
-	})
-	fm.stopWaiter.Wait()
-}
-
-func (fm *fgManagerImpl) controlMemWaterLevel(totalMemory uint64) {
-	if !Params.DataNodeCfg.MemoryForceSyncEnable.GetAsBool() {
-		return
-	}
-	// TODO change to buffer manager
-
-	/*
-		var total int64
-		channels := make([]struct {
-			channel    string
-			bufferSize int64
-		}, 0)
-		fm.flowgraphs.Range(func(key string, value *dataSyncService) bool {
-			size := value.channel.getTotalMemorySize()
-			channels = append(channels, struct {
-				channel    string
-				bufferSize int64
-			}{key, size})
-			total += size
-			return true
-		})
-		if len(channels) == 0 {
-			return
-		}
-
-		toMB := func(mem float64) float64 {
-			return mem / 1024 / 1024
-		}
-
-		memoryWatermark := float64(totalMemory) * Params.DataNodeCfg.MemoryWatermark.GetAsFloat()
-		if float64(total) < memoryWatermark {
-			log.RatedDebug(5, "skip force sync because memory level is not high enough",
-				zap.Float64("current_total_memory_usage", toMB(float64(total))),
-				zap.Float64("current_memory_watermark", toMB(memoryWatermark)),
-				zap.Any("channel_memory_usages", channels))
-			return
-		}
-
-		sort.Slice(channels, func(i, j int) bool {
-			return channels[i].bufferSize > channels[j].bufferSize
-		})
-		if fg, ok := fm.flowgraphs.Get(channels[0].channel); ok { // sync the first channel with the largest memory usage
-			fg.channel.setIsHighMemory(true)
-			log.Info("notify flowgraph to sync",
-				zap.String("channel", channels[0].channel), zap.Int64("bufferSize", channels[0].bufferSize))
-		}*/
 }
 
 func (fm *fgManagerImpl) AddFlowgraph(ds *dataSyncService) {

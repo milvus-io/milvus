@@ -85,7 +85,7 @@ type DataNode struct {
 	cancel           context.CancelFunc
 	Role             string
 	stateCode        atomic.Value // commonpb.StateCode_Initializing
-	flowgraphManager *fgManagerImpl
+	flowgraphManager FlowgraphManager
 	eventManagerMap  *typeutil.ConcurrentMap[string, *channelEventManager]
 
 	syncMgr            syncmgr.SyncManager
@@ -382,8 +382,6 @@ func (node *DataNode) Start() error {
 		// Start node watch node
 		go node.StartWatchChannels(node.ctx)
 
-		node.flowgraphManager.Start()
-
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
 	})
 	return startErr
@@ -416,7 +414,6 @@ func (node *DataNode) Stop() error {
 	node.stopOnce.Do(func() {
 		// https://github.com/milvus-io/milvus/issues/12282
 		node.UpdateStateCode(commonpb.StateCode_Abnormal)
-		node.flowgraphManager.Stop()
 		// Delay the cancellation of ctx to ensure that the session is automatically recycled after closed the flow graph
 		node.cancel()
 

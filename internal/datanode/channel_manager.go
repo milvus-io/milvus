@@ -127,15 +127,12 @@ func (m *ChannelManager) Close() {
 			runner.Close()
 			return true
 		})
-		m.fgManager.Stop()
 		close(m.closeCh)
 		m.closeWaiter.Wait()
 	})
 }
 
 func (m *ChannelManager) Start() {
-	m.fgManager.Start()
-
 	m.closeWaiter.Add(1)
 	go func() {
 		defer m.closeWaiter.Done()
