@@ -539,7 +539,7 @@ func (t *searchTask) searchShard(ctx context.Context, nodeID int64, qn types.Que
 	if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn("QueryNode search result error",
 			zap.String("reason", result.GetStatus().GetReason()))
-		return fmt.Errorf("fail to Search, QueryNode ID=%d, reason=%s", nodeID, result.GetStatus().GetReason())
+		return errors.Wrapf(merr.Error(result.GetStatus()), "fail to search on QueryNode %d", nodeID)
 	}
 	t.resultBuf.Insert(result)
 	t.lb.UpdateCostMetrics(nodeID, result.CostAggregation)
