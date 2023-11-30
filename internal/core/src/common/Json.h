@@ -49,8 +49,7 @@ class Json {
 
     Json(const char* data, size_t len, size_t cap) : data_(data, len) {
         AssertInfo(len + simdjson::SIMDJSON_PADDING <= cap,
-                   "create json without enough memory size for "
-                   "SIMD, len={}, cap={}",
+                   "create json without enough memory size for SIMD, len={}, cap={}",
                    len,
                    cap);
     }

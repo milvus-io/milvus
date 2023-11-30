@@ -118,27 +118,28 @@ FailureCStatus(std::exception* ex) {
 
 }  // namespace milvus
 
-template <typename Str, typename... Args>
-std::string
-format(Str msg, Args&&... args) {
-    return fmt::format(msg, std::forward<Args>(args)...);
-}
-
-#define AssertInfo(expr, info, args...)                                      \
-    do {                                                                     \
-        auto _expr_res = bool(expr);                                         \
-        /* call func only when needed */                                     \
-        if (!_expr_res) {                                                    \
-            milvus::impl::EasyAssertInfo(                                    \
-                _expr_res, #expr, __FILE__, __LINE__, format(info, ##args)); \
-        }                                                                    \
+#define AssertInfo(expr, info, args...)                              \
+    do {                                                             \
+        auto _expr_res = bool(expr);                                 \
+        /* call func only when needed */                             \
+        if (!_expr_res) {                                            \
+            milvus::impl::EasyAssertInfo(_expr_res,                  \
+                                         #expr,                      \
+                                         __FILE__,                   \
+                                         __LINE__,                   \
+                                         fmt::format(info, ##args)); \
+        }                                                            \
     } while (0)
 
 #define Assert(expr) AssertInfo((expr), "")
 
-#define PanicInfo(errcode, info, args...)                                  \
-    do {                                                                   \
-        milvus::impl::EasyAssertInfo(                                      \
-            false, "", __FILE__, __LINE__, format(info, ##args), errcode); \
-        __builtin_unreachable();                                           \
+#define PanicInfo(errcode, info, args...)                       \
+    do {                                                        \
+        milvus::impl::EasyAssertInfo(false,                     \
+                                     "",                        \
+                                     __FILE__,                  \
+                                     __LINE__,                  \
+                                     fmt::format(info, ##args), \
+                                     errcode);                  \
+        __builtin_unreachable();                                \
     } while (0)
