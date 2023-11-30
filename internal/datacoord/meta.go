@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -53,12 +54,13 @@ import (
 
 type meta struct {
 	sync.RWMutex
-	ctx          context.Context
-	catalog      metastore.DataCoordCatalog
-	collections  map[UniqueID]*collectionInfo  // collection id to collection info
-	segments     *SegmentsInfo                 // segment id to segment info
-	channelCPs   map[string]*msgpb.MsgPosition // vChannel -> channel checkpoint/see position
-	chunkManager storage.ChunkManager
+	ctx            context.Context
+	catalog        metastore.DataCoordCatalog
+	collections    map[UniqueID]*collectionInfo // collection id to collection info
+	segments       *SegmentsInfo                // segment id to segment info
+	channelCPLocks *lock.KeyLock[string]
+	channelCPs     *typeutil.ConcurrentMap[string, *msgpb.MsgPosition] // vChannel -> channel checkpoint/see position	chunkManager storage.ChunkManager
+	chunkManager   storage.ChunkManager
 
 	// collectionIndexes records which indexes are on the collection
 	// collID -> indexID -> index
@@ -91,7 +93,8 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 		catalog:              catalog,
 		collections:          make(map[UniqueID]*collectionInfo),
 		segments:             NewSegmentsInfo(),
-		channelCPs:           make(map[string]*msgpb.MsgPosition),
+		channelCPLocks:       lock.NewKeyLock[string](),
+		channelCPs:           typeutil.NewConcurrentMap[string, *msgpb.MsgPosition](),
 		chunkManager:         chunkManager,
 		indexes:              make(map[UniqueID]map[UniqueID]*model.Index),
 		buildID2SegmentIndex: make(map[UniqueID]*model.SegmentIndex),
@@ -151,7 +154,7 @@ func (m *meta) reloadFromKV() error {
 	for vChannel, pos := range channelCPs {
 		// for 2.2.2 issue https://github.com/milvus-io/milvus/issues/22181
 		pos.ChannelName = vChannel
-		m.channelCPs[vChannel] = pos
+		m.channelCPs.Insert(vChannel, pos)
 	}
 
 	// load field indexes
@@ -1326,16 +1329,16 @@ func (m *meta) UpdateChannelCheckpoint(vChannel string, pos *msgpb.MsgPosition) 
 		return fmt.Errorf("channelCP is nil, vChannel=%s", vChannel)
 	}
 
-	m.Lock()
-	defer m.Unlock()
+	m.channelCPLocks.Lock(vChannel)
+	defer m.channelCPLocks.Unlock(vChannel)
 
-	oldPosition, ok := m.channelCPs[vChannel]
+	oldPosition, ok := m.channelCPs.Get(vChannel)
 	if !ok || oldPosition.Timestamp < pos.Timestamp {
 		err := m.catalog.SaveChannelCheckpoint(m.ctx, vChannel, pos)
 		if err != nil {
 			return err
 		}
-		m.channelCPs[vChannel] = pos
+		m.channelCPs.Insert(vChannel, pos)
 		ts, _ := tsoutil.ParseTS(pos.Timestamp)
 		log.Info("UpdateChannelCheckpoint done",
 			zap.String("vChannel", vChannel),
@@ -1349,22 +1352,23 @@ func (m *meta) UpdateChannelCheckpoint(vChannel string, pos *msgpb.MsgPosition) 
 }
 
 func (m *meta) GetChannelCheckpoint(vChannel string) *msgpb.MsgPosition {
-	m.RLock()
-	defer m.RUnlock()
-	if m.channelCPs[vChannel] == nil {
+	m.channelCPLocks.Lock(vChannel)
+	defer m.channelCPLocks.Unlock(vChannel)
+	v, ok := m.channelCPs.Get(vChannel)
+	if !ok {
 		return nil
 	}
-	return proto.Clone(m.channelCPs[vChannel]).(*msgpb.MsgPosition)
+	return proto.Clone(v).(*msgpb.MsgPosition)
 }
 
 func (m *meta) DropChannelCheckpoint(vChannel string) error {
-	m.Lock()
-	defer m.Unlock()
+	m.channelCPLocks.Lock(vChannel)
+	defer m.channelCPLocks.Unlock(vChannel)
 	err := m.catalog.DropChannelCheckpoint(m.ctx, vChannel)
 	if err != nil {
 		return err
 	}
-	delete(m.channelCPs, vChannel)
+	m.channelCPs.Remove(vChannel)
 	log.Debug("DropChannelCheckpoint done", zap.String("vChannel", vChannel))
 	return nil
 }
