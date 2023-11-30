@@ -24,12 +24,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
-var (
-	Params    = paramtable.Get()
+const (
 	localPath = "/tmp/milvus_test/chunkmanager/"
 )
 
