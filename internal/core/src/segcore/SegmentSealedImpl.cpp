@@ -780,8 +780,7 @@ SegmentSealedImpl::get_vector(FieldId field_id,
         }
 
         // assign to data array
-        auto dim = field_meta.get_dim();
-        auto row_bytes = field_meta.is_vector() ? dim * 4 : dim / 8;
+        auto row_bytes = field_meta.get_sizeof();
         auto buf = std::vector<char>(count * row_bytes);
         for (auto i = 0; i < count; i++) {
             AssertInfo(id_to_data_path.count(ids[i]) != 0, "id not found");
