@@ -23,13 +23,14 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/suite"
+	"google.golang.org/grpc"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/suite"
-	"google.golang.org/grpc"
 )
 
 type BrokerSuite struct {
@@ -178,7 +179,7 @@ func (s *BrokerSuite) TestShowCollections() {
 }
 
 func (s *BrokerSuite) TestListDatabases() {
-	s.Run("return_sucess", func() {
+	s.Run("return_success", func() {
 		s.SetupTest()
 
 		s.rootCoordClient.EXPECT().ListDatabases(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.ListDatabasesRequest, options ...grpc.CallOption) (*milvuspb.ListDatabasesResponse, error) {
