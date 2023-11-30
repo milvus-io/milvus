@@ -269,12 +269,12 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 			return false
 		}
 
-		binLogs := make([]string, 0)
+		binlogIDs := make([]int64, 0)
 		fieldID := ib.meta.GetFieldIDByIndexID(meta.CollectionID, meta.IndexID)
 		for _, fieldBinLog := range segment.GetBinlogs() {
 			if fieldBinLog.GetFieldID() == fieldID {
 				for _, binLog := range fieldBinLog.GetBinlogs() {
-					binLogs = append(binLogs, binLog.LogPath)
+					binlogIDs = append(binlogIDs, binLog.GetLogID())
 				}
 				break
 			}
@@ -344,7 +344,6 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 				ClusterID:           Params.CommonCfg.ClusterPrefix.GetValue(),
 				IndexFilePrefix:     path.Join(ib.chunkManager.RootPath(), common.SegmentIndexPath),
 				BuildID:             buildID,
-				DataPaths:           binLogs,
 				IndexVersion:        meta.IndexVersion + 1,
 				StorageConfig:       storageConfig,
 				IndexParams:         indexParams,
@@ -361,19 +360,24 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 				IndexStorePath:      indexStorePath,
 				Dim:                 int64(dim),
 				CurrentIndexVersion: ib.indexEngineVersionManager.GetCurrentIndexEngineVersion(),
+				DataIds:             binlogIDs,
 			}
 		} else {
 			req = &indexpb.CreateJobRequest{
 				ClusterID:           Params.CommonCfg.ClusterPrefix.GetValue(),
 				IndexFilePrefix:     path.Join(ib.chunkManager.RootPath(), common.SegmentIndexPath),
 				BuildID:             buildID,
-				DataPaths:           binLogs,
 				IndexVersion:        meta.IndexVersion + 1,
 				StorageConfig:       storageConfig,
 				IndexParams:         indexParams,
 				TypeParams:          typeParams,
 				NumRows:             meta.NumRows,
 				CurrentIndexVersion: ib.indexEngineVersionManager.GetCurrentIndexEngineVersion(),
+				DataIds:             binlogIDs,
+				CollectionID:        segment.GetCollectionID(),
+				PartitionID:         segment.GetPartitionID(),
+				SegmentID:           segment.GetID(),
+				FieldID:             fieldID,
 			}
 		}
 

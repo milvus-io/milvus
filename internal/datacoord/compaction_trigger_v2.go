@@ -92,9 +92,11 @@ func (m *CompactionTriggerManager) BuildLevelZeroCompactionPlan(view CompactionV
 	levelZeroSegs := lo.Map(view.GetSegmentsView(), func(v *SegmentView, _ int) *datapb.CompactionSegmentBinlogs {
 		s := m.meta.GetSegment(v.ID)
 		return &datapb.CompactionSegmentBinlogs{
-			SegmentID: s.GetID(),
-			Deltalogs: s.GetDeltalogs(),
-			Level:     datapb.SegmentLevel_L0,
+			SegmentID:    s.GetID(),
+			Deltalogs:    s.GetDeltalogs(),
+			Level:        datapb.SegmentLevel_L0,
+			CollectionID: s.GetCollectionID(),
+			PartitionID:  s.GetPartitionID(),
 		}
 	})
 	segmentBinlogs = append(segmentBinlogs, levelZeroSegs...)

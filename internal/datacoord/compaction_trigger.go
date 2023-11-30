@@ -753,6 +753,8 @@ func segmentsToPlan(segments []*SegmentInfo, compactTime *compactTime) *datapb.C
 			FieldBinlogs:        s.GetBinlogs(),
 			Field2StatslogPaths: s.GetStatslogs(),
 			Deltalogs:           s.GetDeltalogs(),
+			CollectionID:        s.GetCollectionID(),
+			PartitionID:         s.GetPartitionID(),
 		}
 		plan.TotalRows += s.GetNumOfRows()
 		plan.SegmentBinlogs = append(plan.SegmentBinlogs, segmentBinlogs)
