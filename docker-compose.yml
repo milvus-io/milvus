@@ -14,6 +14,8 @@ services:
     build:
       context: .
       dockerfile: build/docker/builder/cpu/${OS_NAME}/Dockerfile
+      args:
+        TARGETARCH: ${IMAGE_ARCH}
       cache_from:
         - ${IMAGE_REPO}/milvus-env:${OS_NAME}-${LATEST_DATE_VERSION}
     platform: linux/${IMAGE_ARCH}
@@ -52,6 +54,8 @@ services:
     build:
       context: .
       dockerfile: build/docker/builder/gpu/${OS_NAME}/Dockerfile
+      args:
+        TARGETARCH: ${IMAGE_ARCH}
       cache_from:
         - ${IMAGE_REPO}/milvus-env:gpu-${OS_NAME}-${LATEST_GPU_DATE_VERSION}
     # user: {{ CURRENT_ID }}

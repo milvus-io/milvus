@@ -39,6 +39,14 @@ fi
 AZURE_CMAKE_CMD="cmake -DBUILD_UNIT_TEST=${BUILD_UNITTEST} \
 -DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX} \
 ${SOURCE_DIR}"
+
+if [[ -f "/opt/vcpkg/scripts/buildsystems/vcpkg.cmake" ]]; then
+  AZURE_CMAKE_CMD="cmake -DBUILD_UNIT_TEST=${BUILD_UNITTEST} \
+  -DCMAKE_TOOLCHAIN_FILE=/opt/vcpkg/scripts/buildsystems/vcpkg.cmake \
+  -DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX} \
+  ${SOURCE_DIR}"
+fi
+
 echo ${AZURE_CMAKE_CMD}
 ${AZURE_CMAKE_CMD}
 

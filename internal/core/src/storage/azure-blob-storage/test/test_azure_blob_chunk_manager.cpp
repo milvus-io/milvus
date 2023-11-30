@@ -1,6 +1,59 @@
 #include "../AzureBlobChunkManager.h"
+#include <azure/identity/workload_identity_credential.hpp>
+#include <gtest/gtest.h>
 
 using namespace azure;
+
+void
+SetTenantId(const char* value) {
+    setenv("AZURE_TENANT_ID", value, 1);
+}
+void
+SetClientId(const char* value) {
+    setenv("AZURE_CLIENT_ID", value, 1);
+}
+void
+SetTokenFilePath(const char* value) {
+    setenv("AZURE_FEDERATED_TOKEN_FILE", value, 1);
+}
+
+std::string
+GetTenantId() {
+    return std::getenv("AZURE_TENANT_ID");
+}
+std::string
+GetClientId() {
+    return std::getenv("AZURE_CLIENT_ID");
+}
+std::string
+GetTokenFilePath() {
+    return std::getenv("AZURE_FEDERATED_TOKEN_FILE");
+}
+
+class AzureBlobChunkManagerTest : public testing::Test {
+ protected:
+    void
+    SetUp() override {
+    }
+
+    // void TearDown() override {}
+};
+
+TEST(AzureBlobChunkManagerTest, Options) {
+    SetTenantId("tenant_id");
+    SetClientId("client_id");
+    SetTokenFilePath("token_file_path");
+
+    Azure::Identity::WorkloadIdentityCredentialOptions options;
+    Azure::Identity::WorkloadIdentityCredential const cred(options);
+    EXPECT_EQ(cred.GetCredentialName(), "WorkloadIdentityCredential");
+
+    EXPECT_EQ(options.TenantId, GetTenantId());
+    EXPECT_EQ(options.TenantId, "tenant_id");
+    EXPECT_EQ(options.ClientId, GetClientId());
+    EXPECT_EQ(options.AuthorityHost, "https://login.microsoftonline.com/");
+    EXPECT_EQ(options.TokenFilePath, GetTokenFilePath());
+}
 
 void
 print(Azure::Core::Diagnostics::Logger::Level level,
@@ -10,7 +63,7 @@ print(Azure::Core::Diagnostics::Logger::Level level,
 }
 
 int
-main() {
+main0() {
     const char* containerName = "default";
     const char* blobName = "sample-blob";
     AzureBlobChunkManager::InitLog("info", print);
@@ -58,4 +111,10 @@ main() {
               << chunkManager.CreateBucket(containerName) << std::endl;
     chunkManager.DeleteBucket(containerName);
     exit(EXIT_SUCCESS);
+}
+
+int
+main(int argc, char** argv) {
+    testing::InitGoogleTest(&argc, argv);
+    return RUN_ALL_TESTS();
 }
