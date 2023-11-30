@@ -72,7 +72,7 @@ func TestFlowGraphManager(t *testing.T) {
 
 	fm := newFlowgraphManager()
 	defer func() {
-		fm.dropAll()
+		fm.ClearFlowgraphs()
 	}()
 
 	t.Run("Test addAndStart", func(t *testing.T) {
@@ -81,13 +81,13 @@ func TestFlowGraphManager(t *testing.T) {
 			CollectionID: 1,
 			ChannelName:  vchanName,
 		}
-		require.False(t, fm.exist(vchanName))
+		require.False(t, fm.HasFlowgraph(vchanName))
 
-		err := fm.addAndStartWithEtcdTickler(node, vchan, nil, genTestTickler())
+		err := fm.AddandStartWithEtcdTickler(node, vchan, nil, genTestTickler())
 		assert.NoError(t, err)
-		assert.True(t, fm.exist(vchanName))
+		assert.True(t, fm.HasFlowgraph(vchanName))
 
-		fm.dropAll()
+		fm.ClearFlowgraphs()
 	})
 
 	t.Run("Test Release", func(t *testing.T) {
@@ -96,20 +96,20 @@ func TestFlowGraphManager(t *testing.T) {
 			CollectionID: 1,
 			ChannelName:  vchanName,
 		}
-		require.False(t, fm.exist(vchanName))
+		require.False(t, fm.HasFlowgraph(vchanName))
 
-		err := fm.addAndStartWithEtcdTickler(node, vchan, nil, genTestTickler())
+		err := fm.AddandStartWithEtcdTickler(node, vchan, nil, genTestTickler())
 		assert.NoError(t, err)
-		assert.True(t, fm.exist(vchanName))
+		assert.True(t, fm.HasFlowgraph(vchanName))
 
-		fm.release(vchanName)
+		fm.RemoveFlowgraph(vchanName)
 
-		assert.False(t, fm.exist(vchanName))
-		fm.dropAll()
+		assert.False(t, fm.HasFlowgraph(vchanName))
+		fm.ClearFlowgraphs()
 	})
 
 	t.Run("Test getFlowgraphService", func(t *testing.T) {
-		fg, ok := fm.getFlowgraphService("channel-not-exist")
+		fg, ok := fm.GetFlowgraphService("channel-not-exist")
 		assert.False(t, ok)
 		assert.Nil(t, fg)
 	})
