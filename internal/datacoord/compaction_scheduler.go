@@ -155,11 +155,11 @@ func (s *CompactionScheduler) Finish(nodeID, planID UniqueID) {
 		log.Info("Compaction scheduler remove task from executing")
 	}
 
-	filterd := lo.Filter(s.queuingTasks, func(t *compactionTask, _ int) bool {
+	filtered := lo.Filter(s.queuingTasks, func(t *compactionTask, _ int) bool {
 		return t.plan.PlanID != planID
 	})
-	if len(filterd) < len(s.queuingTasks) {
-		s.queuingTasks = filterd
+	if len(filtered) < len(s.queuingTasks) {
+		s.queuingTasks = filtered
 		s.taskNumber.Dec()
 		log.Info("Compaction scheduler remove task from queue")
 	}
