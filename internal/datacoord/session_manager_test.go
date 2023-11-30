@@ -23,13 +23,13 @@ type SessionManagerSuite struct {
 
 	dn *mocks.MockDataNodeClient
 
-	m *SessionManager
+	m SessionManager
 }
 
 func (s *SessionManagerSuite) SetupTest() {
 	s.dn = mocks.NewMockDataNodeClient(s.T())
 
-	s.m = NewSessionManager(withSessionCreator(func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
+	s.m = NewSessionManagerImpl(withSessionCreator(func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
 		return s.dn, nil
 	}))
 

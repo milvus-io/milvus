@@ -21,13 +21,11 @@ import (
 	"fmt"
 	"math/rand"
 	"strconv"
-	"sync"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -1348,7 +1346,7 @@ func (s *Server) Import(ctx context.Context, req *datapb.ImportTaskRequest) (*da
 		}, nil
 	}
 
-	nodes := s.sessionManager.getLiveNodeIDs()
+	nodes := s.sessionManager.GetSessionIDs()
 	if len(nodes) == 0 {
 		log.Warn("import failed as all DataNodes are offline")
 		resp.Status = merr.Status(merr.WrapErrNodeLackAny("no live DataNode"))
@@ -1431,7 +1429,7 @@ func (s *Server) handleRPCTimetickMessage(ctx context.Context, ttMsg *msgpb.Data
 	ts := ttMsg.GetTimestamp()
 
 	// ignore to handle RPC Timetick message since it's no longer the leader
-	if !s.cluster.channelManager.Match(ttMsg.GetBase().GetSourceID(), ch) {
+	if !s.channelManager.Match(ttMsg.GetBase().GetSourceID(), ch) {
 		log.Warn("node is not matched with channel",
 			zap.String("channelName", ch),
 			zap.Int64("nodeID", ttMsg.GetBase().GetSourceID()),
@@ -1502,22 +1500,7 @@ func (s *Server) SaveImportSegment(ctx context.Context, req *datapb.SaveImportSe
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-	// Look for the DataNode that watches the channel.
-	ok, nodeID := s.channelManager.getNodeIDByChannelName(req.GetChannelName())
-	if !ok {
-		err := merr.WrapErrChannelNotFound(req.GetChannelName(), "no DataNode watches this channel")
-		log.Error("no DataNode found for channel", zap.String("channelName", req.GetChannelName()), zap.Error(err))
-		return merr.Status(err), nil
-	}
-	// Call DataNode to add the new segment to its own flow graph.
-	cli, err := s.sessionManager.getClient(ctx, nodeID)
-	if err != nil {
-		log.Error("failed to get DataNode client for SaveImportSegment",
-			zap.Int64("DataNode ID", nodeID),
-			zap.Error(err))
-		return merr.Status(err), nil
-	}
-	resp, err := cli.AddImportSegment(ctx,
+	resp, err := s.cluster.AddImportSegment(ctx,
 		&datapb.AddImportSegmentRequest{
 			Base: commonpbutil.NewMsgBase(
 				commonpbutil.WithTimeStamp(req.GetBase().GetTimestamp()),
@@ -1530,11 +1513,10 @@ func (s *Server) SaveImportSegment(ctx context.Context, req *datapb.SaveImportSe
 			RowNum:       req.GetRowNum(),
 			StatsLog:     req.GetSaveBinlogPathReq().GetField2StatslogPaths(),
 		})
-	if err := VerifyResponse(resp.GetStatus(), err); err != nil {
-		log.Error("failed to add segment", zap.Int64("DataNode ID", nodeID), zap.Error(err))
+	if err != nil {
 		return merr.Status(err), nil
 	}
-	log.Info("succeed to add segment", zap.Int64("DataNode ID", nodeID), zap.Any("add segment req", req))
+
 	// Fill in start position message ID.
 	req.SaveBinlogPathReq.StartPositions[0].StartPosition.MsgID = resp.GetChannelPos()
 
@@ -1622,42 +1604,12 @@ func (s *Server) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthReque
 		}, nil
 	}
 
-	mu := &sync.Mutex{}
-	group, ctx := errgroup.WithContext(ctx)
-	nodes := s.sessionManager.getLiveNodeIDs()
-	errReasons := make([]string, 0, len(nodes))
-
-	for _, nodeID := range nodes {
-		nodeID := nodeID
-		group.Go(func() error {
-			cli, err := s.sessionManager.getClient(ctx, nodeID)
-			if err != nil {
-				mu.Lock()
-				defer mu.Unlock()
-				errReasons = append(errReasons, fmt.Sprintf("failed to get DataNode %d: %v", nodeID, err))
-				return err
-			}
-
-			sta, err := cli.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
-			if err != nil {
-				return err
-			}
-			err = merr.AnalyzeState("DataNode", nodeID, sta)
-			if err != nil {
-				mu.Lock()
-				defer mu.Unlock()
-				errReasons = append(errReasons, err.Error())
-			}
-			return nil
-		})
+	err := s.sessionManager.CheckHealth(ctx)
+	if err != nil {
+		return &milvuspb.CheckHealthResponse{Status: merr.Success(), IsHealthy: false, Reasons: []string{err.Error()}}, nil
 	}
 
-	err := group.Wait()
-	if err != nil || len(errReasons) != 0 {
-		return &milvuspb.CheckHealthResponse{Status: merr.Success(), IsHealthy: false, Reasons: errReasons}, nil
-	}
-
-	return &milvuspb.CheckHealthResponse{Status: merr.Success(), IsHealthy: true, Reasons: errReasons}, nil
+	return &milvuspb.CheckHealthResponse{Status: merr.Success(), IsHealthy: true, Reasons: []string{}}, nil
 }
 
 func (s *Server) GcConfirm(ctx context.Context, request *datapb.GcConfirmRequest) (*datapb.GcConfirmResponse, error) {
