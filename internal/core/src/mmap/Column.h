@@ -57,9 +57,9 @@ class ColumnBase {
                                         MAP_PRIVATE | MAP_ANON,
                                         -1,
                                         0));
-        AssertInfo(
-            data_ != MAP_FAILED,
-            fmt::format("failed to create anon map, err: {}", strerror(errno)));
+        AssertInfo(data_ != MAP_FAILED,
+                   "failed to create anon map, err: {}",
+                   strerror(errno));
     }
 
     // mmap mode ctor
@@ -79,8 +79,8 @@ class ColumnBase {
                                         file.Descriptor(),
                                         0));
         AssertInfo(data_ != MAP_FAILED,
-                   fmt::format("failed to create file-backed map, err: {}",
-                               strerror(errno)));
+                   "failed to create file-backed map, err: {}",
+                   strerror(errno));
         madvise(data_, cap_size_ + padding_, MADV_WILLNEED);
     }
 
@@ -102,16 +102,16 @@ class ColumnBase {
                                         file.Descriptor(),
                                         0));
         AssertInfo(data_ != MAP_FAILED,
-                   fmt::format("failed to create file-backed map, err: {}",
-                               strerror(errno)));
+                   "failed to create file-backed map, err: {}",
+                   strerror(errno));
     }
 
     virtual ~ColumnBase() {
         if (data_ != nullptr) {
             if (munmap(data_, cap_size_ + padding_)) {
                 AssertInfo(true,
-                           fmt::format("failed to unmap variable field, err={}",
-                                       strerror(errno)));
+                           "failed to unmap variable field, err={}",
+                           strerror(errno));
             }
         }
     }
@@ -193,16 +193,15 @@ class ColumnBase {
                                             -1,
                                             0));
 
-        AssertInfo(data != MAP_FAILED,
-                   fmt::format("failed to create map: {}", strerror(errno)));
+        AssertInfo(
+            data != MAP_FAILED, "failed to create map: {}", strerror(errno));
 
         if (data_ != nullptr) {
             std::memcpy(data, data_, size_);
             if (munmap(data_, cap_size_ + padding_)) {
-                AssertInfo(
-                    false,
-                    fmt::format("failed to unmap while expanding, err={}",
-                                strerror(errno)));
+                AssertInfo(false,
+                           "failed to unmap while expanding, err={}",
+                           strerror(errno));
             }
         }
 
