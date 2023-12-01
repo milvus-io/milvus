@@ -11,6 +11,7 @@
 
 #include <gtest/gtest.h>
 
+#include "gtest/gtest-typed-test.h"
 #include "index/IndexFactory.h"
 #include "common/CDataType.h"
 #include "test_utils/indexbuilder_test_utils.h"
@@ -196,3 +197,20 @@ REGISTER_TYPED_TEST_CASE_P(TypedScalarIndexTest,
                            Reverse);
 
 INSTANTIATE_TYPED_TEST_CASE_P(ArithmeticCheck, TypedScalarIndexTest, ScalarT);
+
+template <typename T>
+class TypedScalarIndexTestV2 : public ::testing::Test {
+ protected:
+    std::shared_ptr<arrow::Schema>
+    TestSchema(int vec_size) {
+        arrow::FieldVector fields;
+        fields.push_back(arrow::field("pk", arrow::int64()));
+        fields.push_back(arrow::field("ts", arrow::int64()));
+        fields.push_back(
+            arrow::field("vec", arrow::fixed_size_binary(vec_size)));
+        return std::make_shared<arrow::Schema>(fields);
+    }
+    void
+    SetUp() override {
+    }
+};
