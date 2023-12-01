@@ -45,7 +45,7 @@ type GrpcAccessInfoSuite struct {
 	info     *GrpcAccessInfo
 }
 
-func (s *GrpcAccessInfoSuite) SetupSuite() {
+func (s *GrpcAccessInfoSuite) SetupTest() {
 	s.username = "test-user"
 	s.traceID = "test-trace"
 
@@ -128,6 +128,24 @@ func (s *GrpcAccessInfoSuite) TestSdkInfo() {
 	s.info.ctx = ctx
 	result = s.info.Get("$sdk_version")
 	s.Equal(info.SdkType+"-"+info.SdkVersion, result[0])
+}
+
+func (s *GrpcAccessInfoSuite) TestExpression() {
+	result := s.info.Get("$method_expr")
+	s.Equal(unknownString, result[0])
+
+	testExpr := "test"
+	s.info.req = &milvuspb.QueryRequest{
+		Expr: testExpr,
+	}
+	result = s.info.Get("$method_expr")
+	s.Equal(testExpr, result[0])
+
+	s.info.req = &milvuspb.SearchRequest{
+		Dsl: testExpr,
+	}
+	result = s.info.Get("$method_expr")
+	s.Equal(testExpr, result[0])
 }
 
 func TestGrpcAccssInfo(t *testing.T) {

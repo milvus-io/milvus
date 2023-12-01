@@ -256,10 +256,15 @@ func getPartitionName(i *GrpcAccessInfo) string {
 
 func getExpr(i *GrpcAccessInfo) string {
 	expr, ok := requestutil.GetExprFromRequest(i.req)
-	if !ok {
-		return unknownString
+	if ok {
+		return expr.(string)
 	}
-	return expr.(string)
+
+	dsl, ok := requestutil.GetDSLFromRequest(i.req)
+	if ok {
+		return dsl.(string)
+	}
+	return unknownString
 }
 
 func getSdkVersion(i *GrpcAccessInfo) string {
