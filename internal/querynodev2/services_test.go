@@ -160,7 +160,7 @@ func (suite *ServiceSuite) TearDownTest() {
 	})
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, resp.ErrorCode)
-	suite.node.vectorStorage.RemoveWithPrefix(ctx, suite.rootPath)
+	suite.node.chunkManager.RemoveWithPrefix(ctx, suite.rootPath)
 
 	suite.node.Stop()
 	suite.etcdClient.Close()
@@ -260,7 +260,7 @@ func (suite *ServiceSuite) TestWatchDmChannelsInt64() {
 	deltaLogs, err := segments.SaveDeltaLog(suite.collectionID,
 		suite.partitionIDs[0],
 		suite.flushedSegmentIDs[0],
-		suite.node.cacheChunkManager,
+		suite.node.chunkManager,
 	)
 	suite.NoError(err)
 
@@ -530,7 +530,7 @@ func (suite *ServiceSuite) genSegmentLoadInfos(schema *schemapb.CollectionSchema
 			suite.validSegmentIDs[i],
 			1000,
 			schema,
-			suite.node.vectorStorage,
+			suite.node.chunkManager,
 		)
 		suite.Require().NoError(err)
 
@@ -543,7 +543,7 @@ func (suite *ServiceSuite) genSegmentLoadInfos(schema *schemapb.CollectionSchema
 			1000,
 			segments.IndexFaissIVFFlat,
 			metric.L2,
-			suite.node.vectorStorage,
+			suite.node.chunkManager,
 		)
 		suite.Require().NoError(err)
 

@@ -38,31 +38,36 @@ func Do(ctx context.Context, fn func() error, opts ...Option) error {
 		opt(c)
 	}
 
-	var el error
+	var lastErr error
 
 	for i := uint(0); i < c.attempts; i++ {
 		if err := fn(); err != nil {
 			if i%4 == 0 {
-				log.Error("retry func failed", zap.Uint("retry time", i), zap.Error(err))
+				log.Warn("retry func failed", zap.Uint("retried", i), zap.Error(err))
 			}
 
-			err = errors.Wrapf(err, "attempt #%d", i)
-			el = merr.Combine(el, err)
-
 			if !IsRecoverable(err) {
-				return el
+				if errors.IsAny(err, context.Canceled, context.DeadlineExceeded) && lastErr != nil {
+					return lastErr
+				}
+				return err
 			}
 
 			deadline, ok := ctx.Deadline()
 			if ok && time.Until(deadline) < c.sleep {
 				// to avoid sleep until ctx done
-				return el
+				if errors.IsAny(err, context.Canceled, context.DeadlineExceeded) && lastErr != nil {
+					return lastErr
+				}
+				return err
 			}
+
+			lastErr = err
 
 			select {
 			case <-time.After(c.sleep):
 			case <-ctx.Done():
-				return merr.Combine(el, ctx.Err())
+				return lastErr
 			}
 
 			c.sleep *= 2
@@ -73,7 +78,7 @@ func Do(ctx context.Context, fn func() error, opts ...Option) error {
 			return nil
 		}
 	}
-	return el
+	return lastErr
 }
 
 // errUnrecoverable is error instance for unrecoverable.

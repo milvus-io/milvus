@@ -17,6 +17,12 @@ type DeltalogIteratorSuite struct {
 }
 
 func (s *DeltalogIteratorSuite) TestDeltalogIteratorIntPK() {
+	s.Run("invalid blobs", func() {
+		iter, err := NewDeltalogIterator([][]byte{}, nil)
+		s.Error(err)
+		s.Nil(iter)
+	})
+
 	testpks := []int64{1, 2, 3, 4}
 	testtss := []uint64{43757345, 43757346, 43757347, 43757348}
 
@@ -43,8 +49,8 @@ func (s *DeltalogIteratorSuite) TestDeltalogIteratorIntPK() {
 		s.NoError(err)
 
 		s.Equal(labeled.GetSegmentID(), int64(100))
-		gotpks = append(gotpks, labeled.data.(*DeltalogRow).Pk.GetValue().(int64))
-		gottss = append(gottss, labeled.data.(*DeltalogRow).Timestamp)
+		gotpks = append(gotpks, labeled.GetPk().GetValue().(int64))
+		gottss = append(gottss, labeled.GetTimestamp())
 	}
 
 	s.ElementsMatch(gotpks, testpks)

@@ -89,7 +89,7 @@ func (s *DataNodeServicesSuite) SetupTest() {
 	err := s.node.Init()
 	s.Require().NoError(err)
 
-	alloc := &allocator.MockAllocator{}
+	alloc := allocator.NewMockAllocator(s.T())
 	alloc.EXPECT().Start().Return(nil).Maybe()
 	alloc.EXPECT().Close().Maybe()
 	alloc.EXPECT().GetIDAlloactor().Return(&allocator2.IDAllocator{}).Maybe()
@@ -234,10 +234,10 @@ func (s *DataNodeServicesSuite) TestFlushSegments() {
 		FlushedSegmentIds:   []int64{},
 	}
 
-	err := s.node.flowgraphManager.addAndStartWithEtcdTickler(s.node, vchan, schema, genTestTickler())
+	err := s.node.flowgraphManager.AddandStartWithEtcdTickler(s.node, vchan, schema, genTestTickler())
 	s.Require().NoError(err)
 
-	fgservice, ok := s.node.flowgraphManager.getFlowgraphService(dmChannelName)
+	fgservice, ok := s.node.flowgraphManager.GetFlowgraphService(dmChannelName)
 	s.Require().True(ok)
 
 	metaCache := metacache.NewMockMetaCache(s.T())
@@ -422,14 +422,14 @@ func (s *DataNodeServicesSuite) TestImport() {
 		}()
 		chName1 := "fake-by-dev-rootcoord-dml-testimport-1"
 		chName2 := "fake-by-dev-rootcoord-dml-testimport-2"
-		err := s.node.flowgraphManager.addAndStartWithEtcdTickler(s.node, &datapb.VchannelInfo{
+		err := s.node.flowgraphManager.AddandStartWithEtcdTickler(s.node, &datapb.VchannelInfo{
 			CollectionID:        100,
 			ChannelName:         chName1,
 			UnflushedSegmentIds: []int64{},
 			FlushedSegmentIds:   []int64{},
 		}, nil, genTestTickler())
 		s.Require().Nil(err)
-		err = s.node.flowgraphManager.addAndStartWithEtcdTickler(s.node, &datapb.VchannelInfo{
+		err = s.node.flowgraphManager.AddandStartWithEtcdTickler(s.node, &datapb.VchannelInfo{
 			CollectionID:        100,
 			ChannelName:         chName2,
 			UnflushedSegmentIds: []int64{},
@@ -437,9 +437,9 @@ func (s *DataNodeServicesSuite) TestImport() {
 		}, nil, genTestTickler())
 		s.Require().Nil(err)
 
-		_, ok := s.node.flowgraphManager.getFlowgraphService(chName1)
+		_, ok := s.node.flowgraphManager.GetFlowgraphService(chName1)
 		s.Require().True(ok)
-		_, ok = s.node.flowgraphManager.getFlowgraphService(chName2)
+		_, ok = s.node.flowgraphManager.GetFlowgraphService(chName2)
 		s.Require().True(ok)
 
 		req := &datapb.ImportTaskRequest{
@@ -485,14 +485,14 @@ func (s *DataNodeServicesSuite) TestImport() {
 		}()
 		chName1 := "fake-by-dev-rootcoord-dml-testimport-1-badflowgraph"
 		chName2 := "fake-by-dev-rootcoord-dml-testimport-2-badflowgraph"
-		err := s.node.flowgraphManager.addAndStartWithEtcdTickler(s.node, &datapb.VchannelInfo{
+		err := s.node.flowgraphManager.AddandStartWithEtcdTickler(s.node, &datapb.VchannelInfo{
 			CollectionID:        100,
 			ChannelName:         chName1,
 			UnflushedSegmentIds: []int64{},
 			FlushedSegmentIds:   []int64{},
 		}, nil, genTestTickler())
 		s.Require().Nil(err)
-		err = s.node.flowgraphManager.addAndStartWithEtcdTickler(s.node, &datapb.VchannelInfo{
+		err = s.node.flowgraphManager.AddandStartWithEtcdTickler(s.node, &datapb.VchannelInfo{
 			CollectionID:        999, // wrong collection ID.
 			ChannelName:         chName2,
 			UnflushedSegmentIds: []int64{},
@@ -500,9 +500,9 @@ func (s *DataNodeServicesSuite) TestImport() {
 		}, nil, genTestTickler())
 		s.Require().Nil(err)
 
-		_, ok := s.node.flowgraphManager.getFlowgraphService(chName1)
+		_, ok := s.node.flowgraphManager.GetFlowgraphService(chName1)
 		s.Require().True(ok)
-		_, ok = s.node.flowgraphManager.getFlowgraphService(chName2)
+		_, ok = s.node.flowgraphManager.GetFlowgraphService(chName2)
 		s.Require().True(ok)
 
 		s.broker.EXPECT().UpdateSegmentStatistics(mock.Anything, mock.Anything).Return(nil)
@@ -612,14 +612,14 @@ func (s *DataNodeServicesSuite) TestAddImportSegment() {
 
 		chName1 := "fake-by-dev-rootcoord-dml-testaddsegment-1"
 		chName2 := "fake-by-dev-rootcoord-dml-testaddsegment-2"
-		err := s.node.flowgraphManager.addAndStartWithEtcdTickler(s.node, &datapb.VchannelInfo{
+		err := s.node.flowgraphManager.AddandStartWithEtcdTickler(s.node, &datapb.VchannelInfo{
 			CollectionID:        100,
 			ChannelName:         chName1,
 			UnflushedSegmentIds: []int64{},
 			FlushedSegmentIds:   []int64{},
 		}, schema, genTestTickler())
 		s.Require().NoError(err)
-		err = s.node.flowgraphManager.addAndStartWithEtcdTickler(s.node, &datapb.VchannelInfo{
+		err = s.node.flowgraphManager.AddandStartWithEtcdTickler(s.node, &datapb.VchannelInfo{
 			CollectionID:        100,
 			ChannelName:         chName2,
 			UnflushedSegmentIds: []int64{},
@@ -627,9 +627,9 @@ func (s *DataNodeServicesSuite) TestAddImportSegment() {
 		}, schema, genTestTickler())
 		s.Require().NoError(err)
 
-		_, ok := s.node.flowgraphManager.getFlowgraphService(chName1)
+		_, ok := s.node.flowgraphManager.GetFlowgraphService(chName1)
 		s.Assert().True(ok)
-		_, ok = s.node.flowgraphManager.getFlowgraphService(chName2)
+		_, ok = s.node.flowgraphManager.GetFlowgraphService(chName2)
 		s.Assert().True(ok)
 
 		resp, err := s.node.AddImportSegment(context.WithValue(s.ctx, ctxKey{}, ""), &datapb.AddImportSegmentRequest{
@@ -673,14 +673,14 @@ func (s *DataNodeServicesSuite) TestSyncSegments() {
 		},
 	}
 
-	err := s.node.flowgraphManager.addAndStartWithEtcdTickler(s.node, &datapb.VchannelInfo{
+	err := s.node.flowgraphManager.AddandStartWithEtcdTickler(s.node, &datapb.VchannelInfo{
 		CollectionID:        1,
 		ChannelName:         chanName,
 		UnflushedSegmentIds: []int64{},
 		FlushedSegmentIds:   []int64{100, 200, 300},
 	}, schema, genTestTickler())
 	s.Require().NoError(err)
-	fg, ok := s.node.flowgraphManager.getFlowgraphService(chanName)
+	fg, ok := s.node.flowgraphManager.GetFlowgraphService(chanName)
 	s.Assert().True(ok)
 
 	fg.metacache.AddSegment(&datapb.SegmentInfo{ID: 100, CollectionID: 1, State: commonpb.SegmentState_Flushed}, EmptyBfsFactory)

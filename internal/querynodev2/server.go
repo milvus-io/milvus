@@ -121,8 +121,7 @@ type QueryNode struct {
 	session *sessionutil.Session
 	eventCh <-chan *sessionutil.SessionEvent
 
-	cacheChunkManager storage.ChunkManager
-	vectorStorage     storage.ChunkManager
+	chunkManager storage.ChunkManager
 
 	/*
 		// Pool for search/query
@@ -283,7 +282,6 @@ func (node *QueryNode) Init() error {
 		node.factory.Init(paramtable.Get())
 
 		localRootPath := paramtable.Get().LocalStorageCfg.Path.GetValue()
-		localChunkManager := storage.NewLocalChunkManager(storage.RootPath(localRootPath))
 		localUsedSize, err := segments.GetLocalUsedSize(localRootPath)
 		if err != nil {
 			log.Warn("get local used size failed", zap.Error(err))
@@ -291,32 +289,13 @@ func (node *QueryNode) Init() error {
 			return
 		}
 		metrics.QueryNodeDiskUsedSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(float64(localUsedSize / 1024 / 1024))
-		remoteChunkManager, err := node.factory.NewPersistentStorageChunkManager(node.ctx)
-		if err != nil {
-			log.Warn("failed to init remote chunk manager", zap.Error(err))
-			initError = err
-			return
-		}
-		node.cacheChunkManager, err = storage.NewVectorChunkManager(node.ctx,
-			localChunkManager,
-			remoteChunkManager,
-			paramtable.Get().QueryNodeCfg.CacheMemoryLimit.GetAsInt64(),
-			paramtable.Get().QueryNodeCfg.CacheEnabled.GetAsBool(),
-		)
-		if err != nil {
-			log.Error("failed to init cache chunk manager", zap.Error(err))
-			initError = err
-			return
-		}
 
-		node.vectorStorage, err = node.factory.NewPersistentStorageChunkManager(node.ctx)
+		node.chunkManager, err = node.factory.NewPersistentStorageChunkManager(node.ctx)
 		if err != nil {
 			log.Error("QueryNode init vector storage failed", zap.Error(err))
 			initError = err
 			return
 		}
-
-		log.Info("queryNode try to connect etcd success", zap.String("MetaRootPath", paramtable.Get().EtcdCfg.MetaRootPath.GetValue()))
 
 		schedulePolicy := paramtable.Get().QueryNodeCfg.SchedulePolicyName.GetValue()
 		node.scheduler = tasks.NewScheduler(
@@ -353,7 +332,7 @@ func (node *QueryNode) Init() error {
 		node.subscribingChannels = typeutil.NewConcurrentSet[string]()
 		node.unsubscribingChannels = typeutil.NewConcurrentSet[string]()
 		node.manager = segments.NewManager()
-		node.loader = segments.NewLoader(node.manager, node.vectorStorage)
+		node.loader = segments.NewLoader(node.manager, node.chunkManager)
 		node.dispClient = msgdispatcher.NewClient(node.factory, typeutil.QueryNodeRole, paramtable.GetNodeID())
 		// init pipeline manager
 		node.pipelineManager = pipeline.NewManager(node.manager, node.tSafeManager, node.dispClient, node.delegators)

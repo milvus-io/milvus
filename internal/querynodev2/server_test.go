@@ -143,7 +143,6 @@ func (suite *QueryNodeSuite) TestInit_VactorChunkManagerFailed() {
 
 	// init vactor chunk manager failed
 	suite.factory.EXPECT().Init(mock.Anything).Return()
-	suite.factory.EXPECT().NewPersistentStorageChunkManager(mock.Anything).Return(suite.chunkManagerFactory.NewPersistentStorageChunkManager(context.Background())).Once()
 	suite.factory.EXPECT().NewPersistentStorageChunkManager(mock.Anything).Return(nil, errors.New("mock error")).Once()
 	err = suite.node.Init()
 	suite.Error(err)

@@ -26,6 +26,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const (
+	localPath = "/tmp/milvus_test/chunkmanager/"
+)
+
 func TestLocalCM(t *testing.T) {
 	ctx := context.Background()
 

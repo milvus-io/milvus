@@ -74,7 +74,7 @@ func (i *BinlogIterator) Next() (*LabeledRowData, error) {
 	row := &InsertRow{
 		ID:        i.data.Data[common.RowIDField].GetRow(i.pos).(int64),
 		Timestamp: uint64(i.data.Data[common.TimeStampField].GetRow(i.pos).(int64)),
-		PK:        pk,
+		Pk:        pk,
 		Value:     fields,
 	}
 	i.pos++
