@@ -73,6 +73,11 @@ func (m *collectionManager) Put(collection *Collection) {
 		old.Release()
 	}
 
+	log.Info("yah01: put collection",
+		zap.Int64("collectionID", collection.ID()),
+		zap.String("metricType", collection.GetMetricType()),
+		zap.Stack("stack"),
+	)
 	m.collections[collection.ID()] = collection
 }
 

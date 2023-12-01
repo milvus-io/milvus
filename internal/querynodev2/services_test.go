@@ -585,6 +585,7 @@ func (suite *ServiceSuite) TestLoadSegments_Int64() {
 			IndexInfoList: []*indexpb.IndexInfo{
 				{},
 			},
+			LoadMeta: &querypb.LoadMetaInfo{},
 		}
 
 		// LoadSegment
