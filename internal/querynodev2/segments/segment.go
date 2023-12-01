@@ -836,7 +836,6 @@ func (s *LocalSegment) LoadIndex(indexInfo *querypb.FieldIndexInfo, fieldType sc
 		}
 		return nil, nil
 	}).Await()
-
 	if err != nil {
 		log.Warn("failed to load index", zap.Error(err))
 		if loadIndexInfo != nil {
