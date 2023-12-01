@@ -109,7 +109,7 @@ MemFileManagerImpl::AddFileV2(const BinarySet& binary_set) {
         }
     };
 
-    auto remotePrefix = GetRemoteIndexObjectPrefix();
+    // auto remotePrefix = GetRemoteIndexObjectPrefix();
     int64_t batch_size = 0;
     for (auto iter = binary_set.binary_map_.begin();
          iter != binary_set.binary_map_.end();
@@ -124,7 +124,7 @@ MemFileManagerImpl::AddFileV2(const BinarySet& binary_set) {
 
         data_slices.emplace_back(iter->second->data.get());
         slice_sizes.emplace_back(iter->second->size);
-        slice_names.emplace_back(remotePrefix + "/" + iter->first);
+        slice_names.emplace_back(iter->first);
         batch_size += iter->second->size;
     }
 

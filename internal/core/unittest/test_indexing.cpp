@@ -23,6 +23,7 @@
 #include "arrow/type.h"
 #include "common/EasyAssert.h"
 #include "common/Types.h"
+#include "index/Index.h"
 #include "knowhere/comp/index_param.h"
 #include "nlohmann/json.hpp"
 #include "query/SearchBruteForce.h"
@@ -657,7 +658,8 @@ TEST(Indexing, SearchDiskAnnWithInvalidParam) {
 }
 #endif
 
-class IndexTestV2 : public ::testing::TestWithParam<Param> {
+class IndexTestV2
+    : public ::testing::TestWithParam<std::tuple<Param, int64_t, bool>> {
  protected:
     std::shared_ptr<arrow::Schema>
     TestSchema(int vec_size) {
@@ -737,8 +739,14 @@ class IndexTestV2 : public ::testing::TestWithParam<Param> {
         storage_config_ = get_default_local_storage_config();
 
         auto param = GetParam();
-        index_type = param.first;
-        metric_type = param.second;
+        index_type = std::get<0>(param).first;
+        metric_type = std::get<0>(param).second;
+        file_slice_size = std::get<1>(param);
+        enable_mmap = std::get<2>(param);
+        if (enable_mmap) {
+            mmap_file_path = boost::filesystem::temp_directory_path() /
+                             boost::filesystem::unique_path();
+        }
         NB = 3000;
 
         // try to reduce the test time,
@@ -792,6 +800,9 @@ class IndexTestV2 : public ::testing::TestWithParam<Param> {
     void
     TearDown() override {
         boost::filesystem::remove_all(temp_path);
+        if (enable_mmap) {
+            boost::filesystem::remove_all(mmap_file_path);
+        }
     }
 
  protected:
@@ -812,28 +823,37 @@ class IndexTestV2 : public ::testing::TestWithParam<Param> {
 
     boost::filesystem::path temp_path;
     std::shared_ptr<milvus_storage::Space> space;
+    int64_t file_slice_size = DEFAULT_INDEX_FILE_SLICE_SIZE;
+    bool enable_mmap;
+    boost::filesystem::path mmap_file_path;
 };
 
 INSTANTIATE_TEST_CASE_P(
     IndexTypeParameters,
     IndexTestV2,
-    ::testing::Values(
-        std::pair(knowhere::IndexEnum::INDEX_FAISS_IDMAP, knowhere::metric::L2),
-        std::pair(knowhere::IndexEnum::INDEX_FAISS_IVFPQ, knowhere::metric::L2),
-        std::pair(knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
-                  knowhere::metric::L2),
-        std::pair(knowhere::IndexEnum::INDEX_FAISS_IVFSQ8,
-                  knowhere::metric::L2),
-        std::pair(knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT,
-                  knowhere::metric::JACCARD),
-        std::pair(knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP,
-                  knowhere::metric::JACCARD),
+    testing::Combine(
+        ::testing::Values(
+            std::pair(knowhere::IndexEnum::INDEX_FAISS_IDMAP,
+                      knowhere::metric::L2),
+            std::pair(knowhere::IndexEnum::INDEX_FAISS_IVFPQ,
+                      knowhere::metric::L2),
+            std::pair(knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+                      knowhere::metric::L2),
+            std::pair(knowhere::IndexEnum::INDEX_FAISS_IVFSQ8,
+                      knowhere::metric::L2),
+            std::pair(knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT,
+                      knowhere::metric::JACCARD),
+            std::pair(knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP,
+                      knowhere::metric::JACCARD),
 #ifdef BUILD_DISK_ANN
-        std::pair(knowhere::IndexEnum::INDEX_DISKANN, knowhere::metric::L2),
+            std::pair(knowhere::IndexEnum::INDEX_DISKANN, knowhere::metric::L2),
 #endif
-        std::pair(knowhere::IndexEnum::INDEX_HNSW, knowhere::metric::L2)));
+            std::pair(knowhere::IndexEnum::INDEX_HNSW, knowhere::metric::L2)),
+        testing::Values(DEFAULT_INDEX_FILE_SLICE_SIZE, 5000L),
+        testing::Bool()));
 
 TEST_P(IndexTestV2, BuildAndQuery) {
+    FILE_SLICE_SIZE = file_slice_size;
     milvus::index::CreateIndexInfo create_index_info;
     create_index_info.index_type = index_type;
     create_index_info.metric_type = metric_type;
@@ -871,6 +891,9 @@ TEST_P(IndexTestV2, BuildAndQuery) {
     vec_index = dynamic_cast<milvus::index::VectorIndex*>(new_index.get());
 
     load_conf = generate_load_conf(index_type, metric_type, 0);
+    if (enable_mmap) {
+        load_conf[kMmapFilepath] = mmap_file_path.string();
+    }
     ASSERT_NO_THROW(vec_index->LoadV2(load_conf));
     EXPECT_EQ(vec_index->Count(), NB);
     EXPECT_EQ(vec_index->GetDim(), DIM);
