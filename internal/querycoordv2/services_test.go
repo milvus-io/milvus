@@ -536,7 +536,7 @@ func (suite *ServiceSuite) TestTransferNode() {
 		TargetResourceGroup: meta.DefaultResourceGroupName,
 	})
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_IllegalArgument, resp.ErrorCode)
+	suite.ErrorIs(merr.Error(resp), merr.ErrResourceGroupNotFound)
 
 	// test transfer node meet non-exist target rg
 	resp, err = server.TransferNode(ctx, &milvuspb.TransferNodeRequest{
@@ -544,7 +544,7 @@ func (suite *ServiceSuite) TestTransferNode() {
 		TargetResourceGroup: "rgggg",
 	})
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_IllegalArgument, resp.ErrorCode)
+	suite.ErrorIs(merr.Error(resp), merr.ErrResourceGroupNotFound)
 
 	err = server.meta.ResourceManager.AddResourceGroup("rg3")
 	suite.NoError(err)
@@ -772,7 +772,7 @@ func (suite *ServiceSuite) TestLoadCollectionFailed() {
 		}
 		resp, err := server.LoadCollection(ctx, req)
 		suite.NoError(err)
-		suite.Equal(commonpb.ErrorCode_IllegalArgument, resp.ErrorCode)
+		suite.ErrorIs(merr.Error(resp), merr.ErrResourceGroupNotFound)
 	}
 }
 
