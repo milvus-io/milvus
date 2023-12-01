@@ -79,10 +79,16 @@ func (s *InsertBinlogIteratorSuite) TestBinlogIterator() {
 
 			rows = append(rows, labeled.data)
 
+			label := labeled.GetLabel()
+			s.NotNil(label)
+			s.EqualValues(19530, label.segmentID)
+			s.EqualValues(19530, labeled.GetSegmentID())
+
 			insertRow, ok := labeled.data.(*InsertRow)
 			s.True(ok)
 
-			s.Equal(insertData.Data[Int64Field].GetRow(idx).(int64), insertRow.PK.GetValue().(int64))
+			s.EqualValues(insertData.Data[TimestampField].GetRow(idx).(int64), labeled.GetTimestamp())
+			s.Equal(insertData.Data[Int64Field].GetRow(idx).(int64), labeled.GetPk().GetValue().(int64))
 			s.Equal(insertData.Data[RowIDField].GetRow(idx).(int64), insertRow.ID)
 			s.Equal(insertData.Data[BoolField].GetRow(idx).(bool), insertRow.Value[BoolField].(bool))
 			s.Equal(insertData.Data[Int8Field].GetRow(idx).(int8), insertRow.Value[Int8Field].(int8))

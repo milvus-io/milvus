@@ -56,11 +56,11 @@ func (node *DataNode) getQuotaMetrics() (*metricsinfo.DataNodeQuotaMetrics, erro
 		Fgm: metricsinfo.FlowGraphMetric{
 			MinFlowGraphChannel: minFGChannel,
 			MinFlowGraphTt:      minFGTt,
-			NumFlowGraph:        node.flowgraphManager.getFlowGraphNum(),
+			NumFlowGraph:        node.flowgraphManager.GetFlowgraphCount(),
 		},
 		Effect: metricsinfo.NodeEffect{
 			NodeID:        node.GetSession().ServerID,
-			CollectionIDs: node.flowgraphManager.collections(),
+			CollectionIDs: node.flowgraphManager.GetCollectionIDs(),
 		},
 	}, nil
 }

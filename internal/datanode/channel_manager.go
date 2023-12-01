@@ -37,10 +37,11 @@ type ChannelManager struct {
 	mu sync.RWMutex
 	dn *DataNode
 
-	communicateCh     chan *opState
-	runningFlowgraphs *flowgraphManager
-	opRunners         *typeutil.ConcurrentMap[string, *opRunner] // channel -> runner
-	abnormals         *typeutil.ConcurrentMap[int64, string]     // OpID -> Channel
+	fgManager FlowgraphManager
+
+	communicateCh chan *opState
+	opRunners     *typeutil.ConcurrentMap[string, *opRunner] // channel -> runner
+	abnormals     *typeutil.ConcurrentMap[int64, string]     // OpID -> Channel
 
 	releaseFunc releaseFunc
 
@@ -52,14 +53,14 @@ type ChannelManager struct {
 func NewChannelManager(dn *DataNode) *ChannelManager {
 	fm := newFlowgraphManager()
 	cm := ChannelManager{
-		dn: dn,
+		dn:        dn,
+		fgManager: fm,
 
-		communicateCh:     make(chan *opState, 100),
-		runningFlowgraphs: fm,
-		opRunners:         typeutil.NewConcurrentMap[string, *opRunner](),
-		abnormals:         typeutil.NewConcurrentMap[int64, string](),
+		communicateCh: make(chan *opState, 100),
+		opRunners:     typeutil.NewConcurrentMap[string, *opRunner](),
+		abnormals:     typeutil.NewConcurrentMap[int64, string](),
 
-		releaseFunc: fm.release,
+		releaseFunc: fm.RemoveFlowgraph,
 
 		closeCh: make(chan struct{}),
 	}
@@ -84,7 +85,7 @@ func (m *ChannelManager) GetProgress(info *datapb.ChannelWatchInfo) *datapb.Chan
 	channel := info.GetVchan().GetChannelName()
 	switch info.GetState() {
 	case datapb.ChannelWatchState_ToWatch:
-		if m.runningFlowgraphs.existWithOpID(channel, info.GetOpID()) {
+		if m.fgManager.HasFlowgraphWithOpID(channel, info.GetOpID()) {
 			resp.State = datapb.ChannelWatchState_WatchSuccess
 			return resp
 		}
@@ -101,7 +102,7 @@ func (m *ChannelManager) GetProgress(info *datapb.ChannelWatchInfo) *datapb.Chan
 		return resp
 
 	case datapb.ChannelWatchState_ToRelease:
-		if !m.runningFlowgraphs.exist(channel) {
+		if !m.fgManager.HasFlowgraph(channel) {
 			resp.State = datapb.ChannelWatchState_ReleaseSuccess
 			return resp
 		}
@@ -126,16 +127,13 @@ func (m *ChannelManager) Close() {
 			runner.Close()
 			return true
 		})
-		m.runningFlowgraphs.close()
 		close(m.closeCh)
 		m.closeWaiter.Wait()
 	})
 }
 
 func (m *ChannelManager) Start() {
-	m.closeWaiter.Add(2)
-
-	go m.runningFlowgraphs.start(&m.closeWaiter)
+	m.closeWaiter.Add(1)
 	go func() {
 		defer m.closeWaiter.Done()
 		log.Info("DataNode ChannelManager start")
@@ -162,7 +160,7 @@ func (m *ChannelManager) handleOpState(opState *opState) {
 	switch opState.state {
 	case datapb.ChannelWatchState_WatchSuccess:
 		log.Info("Success to watch")
-		m.runningFlowgraphs.Add(opState.fg)
+		m.fgManager.AddFlowgraph(opState.fg)
 		m.finishOp(opState.opID, opState.channel)
 
 	case datapb.ChannelWatchState_WatchFailure:

@@ -16,18 +16,37 @@ var (
 
 const InvalidID int64 = -1
 
-type Row interface{}
+type Row interface {
+	GetPk() storage.PrimaryKey
+	GetTimestamp() uint64
+}
 
 type InsertRow struct {
 	ID        int64
-	PK        storage.PrimaryKey
+	Pk        storage.PrimaryKey
 	Timestamp typeutil.Timestamp
 	Value     map[storage.FieldID]interface{}
+}
+
+func (r *InsertRow) GetPk() storage.PrimaryKey {
+	return r.Pk
+}
+
+func (r *InsertRow) GetTimestamp() uint64 {
+	return r.Timestamp
 }
 
 type DeltalogRow struct {
 	Pk        storage.PrimaryKey
 	Timestamp typeutil.Timestamp
+}
+
+func (r *DeltalogRow) GetPk() storage.PrimaryKey {
+	return r.Pk
+}
+
+func (r *DeltalogRow) GetTimestamp() uint64 {
+	return r.Timestamp
 }
 
 type Label struct {
@@ -39,11 +58,19 @@ type LabeledRowData struct {
 	data  Row
 }
 
-func (l *LabeledRowData) GetSegmentID() typeutil.UniqueID {
-	if l.label == nil {
-		return InvalidID
-	}
+func (l *LabeledRowData) GetLabel() *Label {
+	return l.label
+}
 
+func (l *LabeledRowData) GetPk() storage.PrimaryKey {
+	return l.data.GetPk()
+}
+
+func (l *LabeledRowData) GetTimestamp() uint64 {
+	return l.data.GetTimestamp()
+}
+
+func (l *LabeledRowData) GetSegmentID() typeutil.UniqueID {
 	return l.label.segmentID
 }
 
