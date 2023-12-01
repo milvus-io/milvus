@@ -614,12 +614,52 @@ func (scheduler *taskScheduler) isRelated(task Task, node int64) bool {
 // return true if the task should be executed,
 // false otherwise
 func (scheduler *taskScheduler) preProcess(task Task) bool {
+	log := log.Ctx(scheduler.ctx).WithRateGroup("qcv2.taskScheduler", 1, 60).With(
+		zap.Int64("collectionID", task.CollectionID()),
+		zap.Int64("taskID", task.ID()),
+	)
 	if task.Status() != TaskStatusStarted {
 		return false
 	}
 
+	// check if new delegator is ready to release old delegator
+	checkLeaderView := func(collectionID int64, channel string, node int64) bool {
+		segmentsInTarget := scheduler.targetMgr.GetSealedSegmentsByChannel(collectionID, channel, meta.CurrentTarget)
+		leader := scheduler.distMgr.LeaderViewManager.GetLeaderShardView(node, channel)
+		if leader == nil {
+			return false
+		}
+
+		for segmentID := range segmentsInTarget {
+			if _, exist := leader.Segments[segmentID]; !exist {
+				return false
+			}
+		}
+
+		return true
+	}
+
 	actions, step := task.Actions(), task.Step()
 	for step < len(actions) && actions[step].IsFinished(scheduler.distMgr) {
+		if GetTaskType(task) == TaskTypeMove && actions[step].Type() == ActionTypeGrow {
+			var ready bool
+			switch actions[step].(type) {
+			case *ChannelAction:
+				// if balance channel task has finished grow action, block reduce action until
+				// segment distribution has been sync to new delegator, cause new delegator may
+				// causes a few time to load delta log, if reduce the old delegator in advance,
+				// new delegator can't service search and query, will got no available channel error
+				channelAction := actions[step].(*ChannelAction)
+				ready = checkLeaderView(task.CollectionID(), channelAction.Shard(), channelAction.Node())
+			default:
+				ready = true
+			}
+
+			if !ready {
+				log.RatedInfo(30, "Blocking reduce action in balance channel task")
+				break
+			}
+		}
 		task.StepUp()
 		step++
 	}
