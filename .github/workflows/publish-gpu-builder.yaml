@@ -25,7 +25,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu20.04]
-        arch: [amd64&arm64]
+        arch: [amd64]
     env:
       OS_NAME: ${{ matrix.os }}
       IMAGE_ARCH: ${{ matrix.arch }}
@@ -50,7 +50,7 @@ jobs:
         shell: bash
         run: |
           docker buildx ls
-          docker buildx build --platform linux/amd64,linux/arm64 -t milvusdb/milvus-env:gpu-${OS_NAME}-${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }} -f build/docker/builder/gpu/${OS_NAME}/Dockerfile .
+          docker buildx build milvusdb/milvus-env:gpu-${OS_NAME}-${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }} -f build/docker/builder/gpu/${OS_NAME}/Dockerfile .
       - name: Docker Build&Push
         if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
         shell: bash
@@ -58,8 +58,8 @@ jobs:
           docker buildx ls
           docker login -u ${{ secrets.DOCKERHUB_USER }} \
                        -p ${{ secrets.DOCKERHUB_TOKEN }}
-          docker buildx build --platform linux/amd64,linux/arm64 --push -t milvusdb/milvus-env:gpu-${OS_NAME}-${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }} -f build/docker/builder/gpu/${OS_NAME}/Dockerfile .
-          docker buildx build --platform linux/amd64,linux/arm64 --push -t milvusdb/milvus-env:gpu-${OS_NAME}-latest -f build/docker/builder/gpu/${OS_NAME}/Dockerfile .
+          docker buildx build --push -t milvusdb/milvus-env:gpu-${OS_NAME}-${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }} -f build/docker/builder/gpu/${OS_NAME}/Dockerfile .
+          docker buildx build --push -t milvusdb/milvus-env:gpu-${OS_NAME}-latest -f build/docker/builder/gpu/${OS_NAME}/Dockerfile .
       - name: Update Builder Image Changes
         if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus' && matrix.os == 'ubuntu20.04'
         continue-on-error: true
