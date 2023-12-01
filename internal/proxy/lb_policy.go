@@ -17,6 +17,7 @@ package proxy
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -42,6 +43,7 @@ type ChannelWorkload struct {
 	shardLeaders   []int64
 	nq             int64
 	exec           executeFunc
+	execType       string
 	retryTimes     uint
 }
 
@@ -51,6 +53,7 @@ type CollectionWorkLoad struct {
 	collectionID   int64
 	nq             int64
 	exec           executeFunc
+	execType       string
 }
 
 type LBPolicy interface {
@@ -166,9 +169,8 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 
 		client, err := lb.clientMgr.GetClient(ctx, targetNode)
 		if err != nil {
-			log.Warn("search/query channel failed, node not available",
-				zap.Int64("nodeID", targetNode),
-				zap.Error(err))
+			msg := fmt.Sprintf("%s channel failed, node not available", workload.execType)
+			log.Warn(msg, zap.Int64("nodeID", targetNode), zap.Error(err))
 			excludeNodes.Insert(targetNode)
 
 			// cancel work load which assign to the target node
@@ -179,9 +181,11 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 
 		err = workload.exec(ctx, targetNode, client, workload.channel)
 		if err != nil {
-			log.Warn("search/query channel failed",
-				zap.Int64("nodeID", targetNode),
-				zap.Error(err))
+			msg := fmt.Sprintf("%s channel failed", workload.execType)
+			log.Warn(msg, zap.Int64("nodeID", targetNode), zap.Error(err))
+			if errors.Is(err, merr.ErrChannelNotFound) {
+				globalMetaCache.DeprecateShardCache(workload.db, workload.collectionName)
+			}
 			excludeNodes.Insert(targetNode)
 			lb.balancer.CancelWorkload(targetNode, workload.nq)
 
@@ -218,6 +222,7 @@ func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad
 				shardLeaders:   nodes,
 				nq:             workload.nq,
 				exec:           workload.exec,
+				execType:       workload.execType,
 				retryTimes:     uint(len(nodes) * retryOnReplica),
 			})
 		})

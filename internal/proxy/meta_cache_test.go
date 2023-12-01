@@ -803,7 +803,7 @@ func TestMetaCache_ExpireShardLeaderCache(t *testing.T) {
 			},
 		},
 	}, nil)
-
+	globalMetaCache.DeprecateShardCache(dbName, "collection1")
 	assert.Eventually(t, func() bool {
 		nodeInfos, err := globalMetaCache.GetShards(ctx, true, dbName, "collection1", 1)
 		assert.NoError(t, err)
@@ -821,7 +821,7 @@ func TestMetaCache_ExpireShardLeaderCache(t *testing.T) {
 			},
 		},
 	}, nil)
-
+	globalMetaCache.DeprecateShardCache(dbName, "collection1")
 	assert.Eventually(t, func() bool {
 		nodeInfos, err := globalMetaCache.GetShards(ctx, true, dbName, "collection1", 1)
 		assert.NoError(t, err)
@@ -844,7 +844,7 @@ func TestMetaCache_ExpireShardLeaderCache(t *testing.T) {
 			},
 		},
 	}, nil)
-
+	globalMetaCache.DeprecateShardCache(dbName, "collection1")
 	assert.Eventually(t, func() bool {
 		nodeInfos, err := globalMetaCache.GetShards(ctx, true, dbName, "collection1", 1)
 		assert.NoError(t, err)

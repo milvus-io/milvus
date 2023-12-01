@@ -23,7 +23,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -36,7 +35,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -72,7 +70,6 @@ type Cache interface {
 	GetCollectionSchema(ctx context.Context, database, collectionName string) (*schemaInfo, error)
 	GetShards(ctx context.Context, withCache bool, database, collectionName string, collectionID int64) (map[string][]nodeInfo, error)
 	DeprecateShardCache(database, collectionName string)
-	expireShardLeaderCache(ctx context.Context)
 	RemoveCollection(ctx context.Context, database, collectionName string)
 	RemoveCollectionsByID(ctx context.Context, collectionID UniqueID) []string
 	RemovePartition(ctx context.Context, database, collectionName string, partitionName string)
@@ -277,7 +274,6 @@ func InitMetaCache(ctx context.Context, rootCoord types.RootCoordClient, queryCo
 	}
 	globalMetaCache.InitPolicyInfo(resp.PolicyInfos, resp.UserRoles)
 	log.Info("success to init meta cache", zap.Strings("policy_infos", resp.PolicyInfos))
-	globalMetaCache.expireShardLeaderCache(ctx)
 	return nil
 }
 
@@ -926,33 +922,6 @@ func (m *MetaCache) DeprecateShardCache(database, collectionName string) {
 	if ok {
 		info.deprecateLeaderCache()
 	}
-}
-
-func (m *MetaCache) expireShardLeaderCache(ctx context.Context) {
-	log := log.Ctx(ctx).WithRateGroup("proxy.expireShardLeaderCache", 1, 60)
-	go func() {
-		ticker := time.NewTicker(params.Params.ProxyCfg.ShardLeaderCacheInterval.GetAsDuration(time.Second))
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ctx.Done():
-				log.Info("stop periodically update meta cache")
-				return
-			case <-ticker.C:
-				m.mu.RLock()
-				for database, db := range m.collInfo {
-					log.RatedInfo(10, "expire all shard leader cache",
-						zap.String("database", database),
-						zap.Strings("collections", lo.Keys(db)))
-					for _, info := range db {
-						info.deprecateLeaderCache()
-					}
-				}
-				m.mu.RUnlock()
-			}
-		}
-	}()
 }
 
 func (m *MetaCache) InitPolicyInfo(info []string, userRoles []string) {

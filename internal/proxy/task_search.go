@@ -456,6 +456,7 @@ func (t *searchTask) Execute(ctx context.Context) error {
 		collectionName: t.collectionName,
 		nq:             t.Nq,
 		exec:           t.searchShard,
+		execType:       "Search",
 	})
 	if err != nil {
 		log.Warn("search execute failed", zap.Error(err))
@@ -576,15 +577,12 @@ func (t *searchTask) searchShard(ctx context.Context, nodeID int64, qn types.Que
 		log.Warn("QueryNode search return error", zap.Error(err))
 		return err
 	}
-	if result.GetStatus().GetErrorCode() == commonpb.ErrorCode_NotShardLeader {
-		log.Warn("QueryNode is not shardLeader")
-		return errInvalidShardLeaders
+
+	err = merr.Error(result.GetStatus())
+	if err != nil {
+		return err
 	}
-	if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("QueryNode search result error",
-			zap.String("reason", result.GetStatus().GetReason()))
-		return errors.Wrapf(merr.Error(result.GetStatus()), "fail to search on QueryNode %d", nodeID)
-	}
+
 	t.resultBuf.Insert(result)
 	t.lb.UpdateCostMetrics(nodeID, result.CostAggregation)
 

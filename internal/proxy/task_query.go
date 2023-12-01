@@ -416,6 +416,7 @@ func (t *queryTask) Execute(ctx context.Context) error {
 		collectionName: t.collectionName,
 		nq:             1,
 		exec:           t.queryShard,
+		execType:       "Query",
 	})
 	if err != nil {
 		log.Warn("fail to execute query", zap.Error(err))
@@ -500,20 +501,14 @@ func (t *queryTask) queryShard(ctx context.Context, nodeID int64, qn types.Query
 	result, err := qn.Query(ctx, req)
 	if err != nil {
 		log.Warn("QueryNode query return error", zap.Error(err))
-		globalMetaCache.DeprecateShardCache(t.request.GetDbName(), t.collectionName)
 		return err
 	}
-	if result.GetStatus().GetErrorCode() == commonpb.ErrorCode_NotShardLeader {
-		log.Warn("QueryNode is not shardLeader")
-		globalMetaCache.DeprecateShardCache(t.request.GetDbName(), t.collectionName)
-		return errInvalidShardLeaders
-	}
-	if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("QueryNode query result error", zap.Any("errorCode", result.GetStatus().GetErrorCode()), zap.String("reason", result.GetStatus().GetReason()))
-		return errors.Wrapf(merr.Error(result.GetStatus()), "fail to Query on QueryNode %d", nodeID)
+
+	err = merr.Error(result.GetStatus())
+	if err != nil {
+		return err
 	}
 
-	log.Debug("get query result")
 	t.resultBuf.Insert(result)
 	t.lb.UpdateCostMetrics(nodeID, result.CostAggregation)
 	return nil

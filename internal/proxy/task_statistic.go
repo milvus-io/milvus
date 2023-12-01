@@ -265,6 +265,7 @@ func (g *getStatisticsTask) getStatisticsFromQueryNode(ctx context.Context) erro
 		collectionName: g.collectionName,
 		nq:             1,
 		exec:           g.getStatisticsShard,
+		execType:       "Statistic",
 	})
 	if err != nil {
 		return errors.Wrap(err, "failed to statistic")
@@ -273,36 +274,27 @@ func (g *getStatisticsTask) getStatisticsFromQueryNode(ctx context.Context) erro
 	return nil
 }
 
-func (g *getStatisticsTask) getStatisticsShard(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string) error {
+func (g *getStatisticsTask) getStatisticsShard(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channelName string) error {
+	log := log.Ctx(g.ctx).With(
+		zap.Int64("nodeID", nodeID),
+		zap.String("channel", channelName),
+	)
 	nodeReq := proto.Clone(g.GetStatisticsRequest).(*internalpb.GetStatisticsRequest)
 	nodeReq.Base.TargetID = nodeID
 	req := &querypb.GetStatisticsRequest{
 		Req:         nodeReq,
-		DmlChannels: []string{channel},
+		DmlChannels: []string{channelName},
 		Scope:       querypb.DataScope_All,
 	}
 	result, err := qn.GetStatistics(ctx, req)
 	if err != nil {
-		log.Warn("QueryNode statistic return error",
-			zap.Int64("nodeID", nodeID),
-			zap.String("channel", channel),
-			zap.Error(err))
-		globalMetaCache.DeprecateShardCache(g.request.GetDbName(), g.collectionName)
+		log.Warn("QueryNode statistic return error", zap.Error(err))
 		return err
 	}
-	if result.GetStatus().GetErrorCode() == commonpb.ErrorCode_NotShardLeader {
-		log.Warn("QueryNode is not shardLeader",
-			zap.Int64("nodeID", nodeID),
-			zap.String("channel", channel))
-		globalMetaCache.DeprecateShardCache(g.request.GetDbName(), g.collectionName)
-		return errInvalidShardLeaders
-	}
-	if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("QueryNode statistic result error",
-			zap.Int64("nodeID", nodeID),
-			zap.String("reason", result.GetStatus().GetReason()))
-		globalMetaCache.DeprecateShardCache(g.request.GetDbName(), g.collectionName)
-		return errors.Wrapf(merr.Error(result.GetStatus()), "fail to get statistic on QueryNode ID=%d", nodeID)
+
+	err = merr.Error(result.GetStatus())
+	if err != nil {
+		return err
 	}
 	g.resultBuf.Insert(result)
 
