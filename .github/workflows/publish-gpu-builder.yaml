@@ -39,12 +39,6 @@ jobs:
           echo "::set-output name=sha_short::$(git rev-parse --short HEAD)"
       # - name: Setup upterm session
       #   uses: lhotari/action-upterm@v1
-      - name: Docker Pull
-        shell: bash
-        run: |
-          docker run --rm --privileged tonistiigi/binfmt:latest --install arm64
-          docker buildx ls
-          docker buildx create --use --name=milvus --driver docker-container
       - name: Docker Build
         if: success() && github.event_name == 'pull_request' && github.repository == 'milvus-io/milvus'
         shell: bash
