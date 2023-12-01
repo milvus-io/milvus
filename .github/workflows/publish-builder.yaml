@@ -33,8 +33,8 @@ jobs:
       - name: Maximize build space
         uses: easimon/maximize-build-space@master
         with:
-          # root-reserve-mb: 10240
-          overprovision-lvm: 'true'
+          root-reserve-mb: 20480
+          # overprovision-lvm: 'true'
           swap-size-mb: 1024
           remove-dotnet: 'true'
           remove-android: 'true'
