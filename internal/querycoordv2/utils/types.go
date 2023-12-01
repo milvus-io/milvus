@@ -73,20 +73,14 @@ func MergeMetaSegmentIntoSegmentInfo(info *querypb.SegmentInfo, segments ...*met
 // packSegmentLoadInfo packs SegmentLoadInfo for given segment,
 // packs with index if withIndex is true, this fetch indexes from IndexCoord
 func PackSegmentLoadInfo(segment *datapb.SegmentInfo, channelCheckpoint *msgpb.MsgPosition, indexes []*querypb.FieldIndexInfo) *querypb.SegmentLoadInfo {
-	var (
-		deltaPosition *msgpb.MsgPosition
-		positionSrc   string
-	)
-
-	posTime := tsoutil.PhysicalTime(deltaPosition.GetTimestamp())
+	posTime := tsoutil.PhysicalTime(channelCheckpoint.GetTimestamp())
 	tsLag := time.Since(posTime)
 	if tsLag >= 10*time.Minute {
 		log.Warn("delta position is quite stale",
 			zap.Int64("collectionID", segment.GetCollectionID()),
 			zap.Int64("segmentID", segment.GetID()),
 			zap.String("channel", segment.InsertChannel),
-			zap.String("positionSource", positionSrc),
-			zap.Uint64("posTs", deltaPosition.GetTimestamp()),
+			zap.Uint64("posTs", channelCheckpoint.GetTimestamp()),
 			zap.Time("posTime", posTime),
 			zap.Duration("tsLag", tsLag))
 	}
