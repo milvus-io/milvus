@@ -873,12 +873,13 @@ func (suite *ServiceSuite) TestLoadSegments_Failed() {
 func (suite *ServiceSuite) TestLoadSegments_Transfer() {
 	ctx := context.Background()
 	suite.Run("normal_run", func() {
-		delegator := &delegator.MockShardDelegator{}
+		delegator := delegator.NewMockShardDelegator(suite.T())
 		suite.node.delegators.Insert(suite.vchannel, delegator)
 		defer suite.node.delegators.GetAndRemove(suite.vchannel)
 
 		delegator.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).
 			Return(nil)
+		delegator.EXPECT().MetricType().Return(defaultMetricType)
 		// data
 		schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64)
 		req := &querypb.LoadSegmentsRequest{
@@ -923,11 +924,12 @@ func (suite *ServiceSuite) TestLoadSegments_Transfer() {
 	})
 
 	suite.Run("delegator_return_error", func() {
-		delegator := &delegator.MockShardDelegator{}
+		delegator := delegator.NewMockShardDelegator(suite.T())
 		suite.node.delegators.Insert(suite.vchannel, delegator)
 		defer suite.node.delegators.GetAndRemove(suite.vchannel)
 		delegator.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).
 			Return(errors.New("mocked error"))
+		delegator.EXPECT().MetricType().Return(defaultMetricType)
 		// data
 		schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64)
 		req := &querypb.LoadSegmentsRequest{
@@ -1087,12 +1089,13 @@ func (suite *ServiceSuite) TestReleaseSegments_Transfer() {
 	suite.Run("delegator_return_error", func() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		delegator := &delegator.MockShardDelegator{}
+		delegator := delegator.NewMockShardDelegator(suite.T())
 		suite.node.delegators.Insert(suite.vchannel, delegator)
 		defer suite.node.delegators.GetAndRemove(suite.vchannel)
 
 		delegator.EXPECT().ReleaseSegments(mock.Anything, mock.AnythingOfType("*querypb.ReleaseSegmentsRequest"), false).
 			Return(errors.New("mocked error"))
+		delegator.EXPECT().MetricType().Return(defaultMetricType)
 
 		req := &querypb.ReleaseSegmentsRequest{
 			Base: &commonpb.MsgBase{
@@ -1865,6 +1868,7 @@ func (suite *ServiceSuite) TestSyncDistribution_Normal() {
 			versionMatch = req.GetVersion() == segmentVersion
 			return nil
 		})
+	mockDelegator.EXPECT().MetricType().Return(defaultMetricType)
 	suite.node.delegators.Insert(testChannel, mockDelegator)
 
 	status, err = suite.node.SyncDistribution(ctx, req)
