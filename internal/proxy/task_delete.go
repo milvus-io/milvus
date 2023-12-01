@@ -223,7 +223,7 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 	log := log.Ctx(ctx)
 
 	if len(dt.req.GetExpr()) == 0 {
-		return merr.WrapErrParameterInvalid("valid expr", "empty expr", "invalid expression")
+		return merr.WrapErrParameterInvalidMsg("invalid expression, the expression can't be empty")
 	}
 
 	dt.tr = timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute delete %d", dt.ID()))

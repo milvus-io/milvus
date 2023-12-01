@@ -125,7 +125,7 @@ func (fNode *filterNode) filtrate(c *Collection, msg msgstream.TsMsg) error {
 			}
 		}
 	default:
-		return merr.WrapErrParameterInvalid("msgType is Insert or Delete", "not")
+		return merr.WrapErrParameterInvalid("Insert or Delete", msg.Type().String())
 	}
 	return nil
 }

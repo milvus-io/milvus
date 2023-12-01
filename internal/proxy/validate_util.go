@@ -251,23 +251,23 @@ func (v *validateUtil) fillWithDefaultValue(data []*schemapb.FieldData, schema *
 				}
 
 			case *schemapb.ScalarField_ArrayData:
-				log.Error("array type not support default value", zap.String("fieldSchemaName", field.GetFieldName()))
-				return merr.WrapErrParameterInvalid("not set default value", "", "array type not support default value")
+				log.Warn("array type not support default value", zap.String("fieldSchemaName", field.GetFieldName()))
+				return merr.WrapErrParameterInvalidMsg("default value not supported for array type")
 
 			case *schemapb.ScalarField_JsonData:
-				log.Error("json type not support default value", zap.String("fieldSchemaName", field.GetFieldName()))
-				return merr.WrapErrParameterInvalid("not set default value", "", "json type not support default value")
+				log.Warn("json type not support default value", zap.String("fieldSchemaName", field.GetFieldName()))
+				return merr.WrapErrParameterInvalidMsg("default value not supported for JSON type")
 
 			default:
-				panic("undefined data type " + field.Type.String())
+				return merr.WrapErrParameterInvalidMsg("unknown data type %v", field.GetType().String())
 			}
 
 		case *schemapb.FieldData_Vectors:
-			log.Error("vector not support default value", zap.String("fieldSchemaName", field.GetFieldName()))
-			return merr.WrapErrParameterInvalid("not set default value", "", "vector type not support default value")
+			log.Warn("vector not support default value", zap.String("fieldSchemaName", field.GetFieldName()))
+			return merr.WrapErrParameterInvalidMsg("default value not supported for vector type")
 
 		default:
-			panic("undefined data type " + field.Type.String())
+			return merr.WrapErrParameterInvalidMsg("unknown data type %v", field.GetType().String())
 		}
 	}
 

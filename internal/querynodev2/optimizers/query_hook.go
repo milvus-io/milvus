@@ -34,7 +34,7 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 	// plan not found
 	if serializedPlan == nil {
 		log.Warn("serialized plan not found")
-		return req, merr.WrapErrParameterInvalid("serialized search plan", "nil")
+		return req, merr.WrapErrParameterInvalidMsg("serialized plan is nil")
 	}
 
 	channelNum := req.GetTotalChannelNum()

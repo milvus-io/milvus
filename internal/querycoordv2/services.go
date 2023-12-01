@@ -351,11 +351,11 @@ func (s *Server) checkResourceGroup(collectionID int64, resourceGroups []string)
 		collectionUsedRG := s.meta.ReplicaManager.GetResourceGroupByCollection(collectionID)
 		for _, rgName := range resourceGroups {
 			if len(collectionUsedRG) > 0 && !collectionUsedRG.Contain(rgName) {
-				return merr.WrapErrParameterInvalid("created resource group(s)", rgName, "given resource group not found")
+				return merr.WrapErrResourceGroupNotFound(rgName)
 			}
 
 			if len(resourceGroups) > 1 && rgName == meta.DefaultResourceGroupName {
-				return merr.WrapErrParameterInvalid("no default resource group mixed with the other resource group(s)", rgName)
+				return merr.WrapErrParameterInvalidMsg("can't mix default resource %s group with the other resource group(s)", rgName)
 			}
 		}
 	}
@@ -379,10 +379,9 @@ func (s *Server) ReleasePartitions(ctx context.Context, req *querypb.ReleasePart
 	}
 
 	if len(req.GetPartitionIDs()) == 0 {
-		err := merr.WrapErrParameterInvalid("any parttiion", "empty partition list")
-		log.Warn("no partition to release", zap.Error(err))
+		log.Warn("no partition to release")
 		metrics.QueryCoordReleaseCount.WithLabelValues(metrics.FailLabel).Inc()
-		return merr.Status(err), nil
+		return merr.Success(), nil
 	}
 
 	tr := timerecord.NewTimeRecorder("release-partitions")
@@ -1067,17 +1066,17 @@ func (s *Server) TransferNode(ctx context.Context, req *milvuspb.TransferNodeReq
 	}
 
 	if ok := s.meta.ResourceManager.ContainResourceGroup(req.GetSourceResourceGroup()); !ok {
-		err := merr.WrapErrParameterInvalid("valid resource group", req.GetSourceResourceGroup(), "source resource group not found")
+		err := merr.WrapErrResourceGroupNotFound(req.GetSourceResourceGroup(), "source resource group not found")
 		return merr.Status(err), nil
 	}
 
 	if ok := s.meta.ResourceManager.ContainResourceGroup(req.GetTargetResourceGroup()); !ok {
-		err := merr.WrapErrParameterInvalid("valid resource group", req.GetTargetResourceGroup(), "target resource group not found")
+		err := merr.WrapErrResourceGroupNotFound(req.GetTargetResourceGroup(), "target resource group not found")
 		return merr.Status(err), nil
 	}
 
 	if req.GetNumNode() <= 0 {
-		err := merr.WrapErrParameterInvalid("NumNode > 0", fmt.Sprintf("invalid NumNode %d", req.GetNumNode()))
+		err := merr.WrapErrParameterInvalidMsg("the number of node has to be greater than 0")
 		return merr.Status(err), nil
 	}
 

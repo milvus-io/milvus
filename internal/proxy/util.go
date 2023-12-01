@@ -1173,10 +1173,9 @@ func fillFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgstr
 }
 
 func checkPrimaryFieldData(schema *schemapb.CollectionSchema, result *milvuspb.MutationResult, insertMsg *msgstream.InsertMsg, inInsert bool) (*schemapb.IDs, error) {
-	rowNums := uint32(insertMsg.NRows())
 	// TODO(dragondriver): in fact, NumRows is not trustable, we should check all input fields
 	if insertMsg.NRows() <= 0 {
-		return nil, merr.WrapErrParameterInvalid("invalid num_rows", fmt.Sprint(rowNums), "num_rows should be greater than 0")
+		return nil, merr.WrapErrParameterInvalidMsg("can't insert empty data")
 	}
 
 	if err := fillFieldsDataBySchema(schema, insertMsg); err != nil {

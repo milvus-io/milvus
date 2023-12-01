@@ -198,7 +198,7 @@ func checkAndSetData(body string, collDescResp *milvuspb.DescribeCollectionRespo
 
 				if field.IsPrimaryKey && collDescResp.Schema.AutoID {
 					if dataString != "" {
-						return merr.WrapErrParameterInvalid("", "set primary key but autoID == true"), reallyDataArray
+						return merr.WrapErrParameterInvalidMsg("set primary key but AutoID enabled"), reallyDataArray
 					}
 					continue
 				}

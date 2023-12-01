@@ -322,7 +322,7 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 	}
 
 	if len(req.GetCompactedFrom()) <= 0 {
-		return merr.Status(merr.WrapErrParameterInvalid(">0", "0", "compacted from segments shouldn't be empty")), nil
+		return merr.Status(merr.WrapErrParameterInvalidMsg("compacted from segments can't be empty")), nil
 	}
 
 	ds, ok := node.flowgraphManager.GetFlowgraphService(req.GetChannelName())

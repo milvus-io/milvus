@@ -776,7 +776,7 @@ func (h *Handlers) upsert(c *gin.Context) {
 			return nil, RestRequestInterceptorErr
 		}
 		if coll.Schema.AutoID {
-			err := merr.WrapErrParameterInvalid("autoID: false", "autoID: true", "cannot upsert an autoID collection")
+			err := merr.WrapErrParameterInvalidMsg("can't upsert with AutoID enabled")
 			c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 			return nil, RestRequestInterceptorErr
 		}

@@ -46,7 +46,7 @@ func (msg *insertNodeMsg) append(taskMsg msgstream.TsMsg) error {
 		msg.deleteMsgs = append(msg.deleteMsgs, deleteMsg)
 		collector.Rate.Add(metricsinfo.DeleteConsumeThroughput, float64(deleteMsg.Size()))
 	default:
-		return merr.WrapErrParameterInvalid("msgType is Insert or Delete", "not")
+		return merr.WrapErrParameterInvalid("Insert or Delete", taskMsg.Type().String())
 	}
 	return nil
 }
