@@ -34,6 +34,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	datanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
 	indexnodeclient "github.com/milvus-io/milvus/internal/distributed/indexnode/client"
 	rootcoordclient "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
@@ -152,7 +153,7 @@ type Server struct {
 	indexEngineVersionManager IndexEngineVersionManager
 
 	// manage ways that data coord access other coord
-	broker Broker
+	broker broker.Broker
 }
 
 // ServerHelper datacoord server injection helper
@@ -332,7 +333,7 @@ func (s *Server) initDataCoord() error {
 	}
 	log.Info("init rootcoord client done")
 
-	s.broker = NewCoordinatorBroker(s.rootCoordClient)
+	s.broker = broker.NewCoordinatorBroker(s.rootCoordClient)
 
 	storageCli, err := s.newChunkManagerFactory()
 	if err != nil {

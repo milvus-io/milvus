@@ -13,7 +13,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-package datacoord
+
+package broker
 
 import (
 	"context"
@@ -39,19 +40,21 @@ type Broker interface {
 	HasCollection(ctx context.Context, collectionID int64) (bool, error)
 }
 
-type CoordinatorBroker struct {
+type coordinatorBroker struct {
 	rootCoord types.RootCoordClient
 }
 
-func NewCoordinatorBroker(rootCoord types.RootCoordClient) *CoordinatorBroker {
-	return &CoordinatorBroker{
+func NewCoordinatorBroker(rootCoord types.RootCoordClient) *coordinatorBroker {
+	return &coordinatorBroker{
 		rootCoord: rootCoord,
 	}
 }
 
-func (b *CoordinatorBroker) DescribeCollectionInternal(ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
+func (b *coordinatorBroker) DescribeCollectionInternal(ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
+	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID))
+
 	resp, err := b.rootCoord.DescribeCollectionInternal(ctx, &milvuspb.DescribeCollectionRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection),
@@ -60,19 +63,19 @@ func (b *CoordinatorBroker) DescribeCollectionInternal(ctx context.Context, coll
 		// please do not specify the collection name alone after database feature.
 		CollectionID: collectionID,
 	})
-	if err = VerifyResponse(resp, err); err != nil {
-		log.Warn("DescribeCollectionInternal failed",
-			zap.Int64("collectionID", collectionID),
-			zap.Error(err))
+	if err := merr.CheckRPCCall(resp, err); err != nil {
+		log.Warn("DescribeCollectionInternal failed", zap.Error(err))
 		return nil, err
 	}
 
 	return resp, nil
 }
 
-func (b *CoordinatorBroker) ShowPartitionsInternal(ctx context.Context, collectionID int64) ([]int64, error) {
+func (b *coordinatorBroker) ShowPartitionsInternal(ctx context.Context, collectionID int64) ([]int64, error) {
 	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
+	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID))
+
 	resp, err := b.rootCoord.ShowPartitionsInternal(ctx, &milvuspb.ShowPartitionsRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_ShowPartitions),
@@ -81,19 +84,20 @@ func (b *CoordinatorBroker) ShowPartitionsInternal(ctx context.Context, collecti
 		// please do not specify the collection name alone after database feature.
 		CollectionID: collectionID,
 	})
-	if err = VerifyResponse(resp, err); err != nil {
+	if err := merr.CheckRPCCall(resp, err); err != nil {
 		log.Warn("ShowPartitionsInternal failed",
 			zap.Int64("collectionID", collectionID),
 			zap.Error(err))
 		return nil, err
 	}
 
-	return resp.PartitionIDs, nil
+	return resp.GetPartitionIDs(), nil
 }
 
-func (b *CoordinatorBroker) ShowCollections(ctx context.Context, dbName string) (*milvuspb.ShowCollectionsResponse, error) {
+func (b *coordinatorBroker) ShowCollections(ctx context.Context, dbName string) (*milvuspb.ShowCollectionsResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
+	log := log.Ctx(ctx).With(zap.String("dbName", dbName))
 	resp, err := b.rootCoord.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_ShowCollections),
@@ -101,7 +105,7 @@ func (b *CoordinatorBroker) ShowCollections(ctx context.Context, dbName string) 
 		DbName: dbName,
 	})
 
-	if err = VerifyResponse(resp, err); err != nil {
+	if err := merr.CheckRPCCall(resp, err); err != nil {
 		log.Warn("ShowCollections failed",
 			zap.String("dbName", dbName),
 			zap.Error(err))
@@ -111,13 +115,14 @@ func (b *CoordinatorBroker) ShowCollections(ctx context.Context, dbName string) 
 	return resp, nil
 }
 
-func (b *CoordinatorBroker) ListDatabases(ctx context.Context) (*milvuspb.ListDatabasesResponse, error) {
+func (b *coordinatorBroker) ListDatabases(ctx context.Context) (*milvuspb.ListDatabasesResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
+	log := log.Ctx(ctx)
 	resp, err := b.rootCoord.ListDatabases(ctx, &milvuspb.ListDatabasesRequest{
 		Base: commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_ListDatabases)),
 	})
-	if err = VerifyResponse(resp, err); err != nil {
+	if err := merr.CheckRPCCall(resp, err); err != nil {
 		log.Warn("failed to ListDatabases", zap.Error(err))
 		return nil, err
 	}
@@ -125,7 +130,7 @@ func (b *CoordinatorBroker) ListDatabases(ctx context.Context) (*milvuspb.ListDa
 }
 
 // HasCollection communicates with RootCoord and check whether this collection exist from the user's perspective.
-func (b *CoordinatorBroker) HasCollection(ctx context.Context, collectionID int64) (bool, error) {
+func (b *coordinatorBroker) HasCollection(ctx context.Context, collectionID int64) (bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
 	resp, err := b.rootCoord.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
@@ -138,9 +143,6 @@ func (b *CoordinatorBroker) HasCollection(ctx context.Context, collectionID int6
 	})
 	if err != nil {
 		return false, err
-	}
-	if resp == nil {
-		return false, errNilResponse
 	}
 	err = merr.Error(resp.GetStatus())
 	if errors.Is(err, merr.ErrCollectionNotFound) {
