@@ -115,6 +115,10 @@ func (i *InsertData) Append(row map[FieldID]interface{}) error {
 	return nil
 }
 
+func (i *InsertData) GetRow(idx int) map[FieldID]interface{} {
+	return nil
+}
+
 // FieldData defines field data interface
 type FieldData interface {
 	GetMemorySize() int
