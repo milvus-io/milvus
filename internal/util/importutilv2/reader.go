@@ -21,12 +21,14 @@ import (
 )
 
 type Reader interface {
-	//ReadStats()
-	//Close()
+	// ReadStats()
+	// Close()
+
 	Next(count int64) (*storage.InsertData, error)
 }
 
 type ColumnReader interface {
-	//Close()
+	// Close()
+
 	Next(count int64) (storage.FieldData, error)
 }

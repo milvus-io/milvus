@@ -23,7 +23,7 @@ import (
 
 type Filter func(row map[int64]interface{}) bool
 
-func FilterWithDelete(r *Reader) (Filter, error) {
+func FilterWithDelete(r *reader) (Filter, error) {
 	pkField, err := typeutil.GetPrimaryFieldSchema(r.schema)
 	if err != nil {
 		return nil, err
@@ -39,7 +39,7 @@ func FilterWithDelete(r *Reader) (Filter, error) {
 	}, nil
 }
 
-func FilterWithTimerange(r *Reader) Filter {
+func FilterWithTimerange(r *reader) Filter {
 	return func(row map[int64]interface{}) bool {
 		ts := row[common.TimeStampField].(int64)
 		return uint64(ts) >= r.tsBegin && uint64(ts) <= r.tsEnd

@@ -116,7 +116,11 @@ func (i *InsertData) Append(row map[FieldID]interface{}) error {
 }
 
 func (i *InsertData) GetRow(idx int) map[FieldID]interface{} {
-	return nil
+	res := make(map[FieldID]interface{})
+	for field, data := range i.Data {
+		res[field] = data.GetRow(idx)
+	}
+	return res
 }
 
 // FieldData defines field data interface

@@ -19,6 +19,7 @@ package binlog
 import (
 	"context"
 	"encoding/json"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -26,7 +27,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-type Reader struct {
+type reader struct {
 	cm     storage.ChunkManager
 	schema *schemapb.CollectionSchema
 
@@ -40,7 +41,7 @@ type Reader struct {
 	tsEnd   uint64
 }
 
-func (r *Reader) Init(paths []string) error {
+func (r *reader) Init(paths []string) error {
 	insertLogs, deltaLogs, err := r.ListBinlogs(paths)
 	if err != nil {
 		return err
@@ -61,7 +62,7 @@ func (r *Reader) Init(paths []string) error {
 	return nil
 }
 
-func (r *Reader) ReadDelta(deltaLogs *datapb.FieldBinlog) (*storage.DeleteData, error) {
+func (r *reader) ReadDelta(deltaLogs *datapb.FieldBinlog) (*storage.DeleteData, error) {
 	deleteData := storage.NewDeleteData(nil, nil)
 	for _, binlog := range deltaLogs.GetBinlogs() {
 		path := binlog.GetLogPath()
@@ -87,7 +88,7 @@ func (r *Reader) ReadDelta(deltaLogs *datapb.FieldBinlog) (*storage.DeleteData, 
 	return deleteData, nil
 }
 
-func (r *Reader) ListBinlogs(paths []string) ([]*datapb.FieldBinlog, *datapb.FieldBinlog, error) {
+func (r *reader) ListBinlogs(paths []string) ([]*datapb.FieldBinlog, *datapb.FieldBinlog, error) {
 	if len(paths) < 1 {
 		return nil, nil, merr.WrapErrImportFailed("no insert binlogs to import")
 	}
@@ -106,7 +107,7 @@ func (r *Reader) ListBinlogs(paths []string) ([]*datapb.FieldBinlog, *datapb.Fie
 	return nil, nil, nil
 }
 
-func (r *Reader) Next(count int64) (*storage.InsertData, error) {
+func (r *reader) Next(count int64) (*storage.InsertData, error) {
 	insertData, err := storage.NewInsertData(r.schema)
 	if err != nil {
 		return nil, err
@@ -147,7 +148,6 @@ func (r *Reader) Next(count int64) (*storage.InsertData, error) {
 			return nil, err
 		}
 	}
-
 	r.readIdx++
 	return res, nil
 }
