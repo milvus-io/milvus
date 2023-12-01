@@ -272,4 +272,13 @@ InvertedIndexTantivy<std::string>::Query(const DatasetPtr& dataset) {
     }
     return ScalarIndex<std::string>::Query(dataset);
 }
+
+template class InvertedIndexTantivy<bool>;
+template class InvertedIndexTantivy<int8_t>;
+template class InvertedIndexTantivy<int16_t>;
+template class InvertedIndexTantivy<int32_t>;
+template class InvertedIndexTantivy<int64_t>;
+template class InvertedIndexTantivy<float>;
+template class InvertedIndexTantivy<double>;
+template class InvertedIndexTantivy<std::string>;
 }  // namespace milvus::index

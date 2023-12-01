@@ -69,6 +69,8 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     explicit InvertedIndexTantivy(const TantivyConfig& cfg,
                                   const storage::FileManagerContext& ctx);
 
+    ~InvertedIndexTantivy();
+
     /*
      * deprecated.
      * TODO: why not remove this?
@@ -167,8 +169,6 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     const TargetBitmap
     Query(const DatasetPtr& dataset) override;
 
-    ~InvertedIndexTantivy() override;
-
  private:
     void
     finish();
@@ -189,13 +189,4 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     MemFileManagerPtr mem_file_manager_;
     DiskFileManagerPtr disk_file_manager_;
 };
-
-template class InvertedIndexTantivy<bool>;
-template class InvertedIndexTantivy<int8_t>;
-template class InvertedIndexTantivy<int16_t>;
-template class InvertedIndexTantivy<int32_t>;
-template class InvertedIndexTantivy<int64_t>;
-template class InvertedIndexTantivy<float>;
-template class InvertedIndexTantivy<double>;
-template class InvertedIndexTantivy<std::string>;
 }  // namespace milvus::index

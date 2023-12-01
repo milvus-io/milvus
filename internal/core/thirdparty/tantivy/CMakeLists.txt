@@ -13,6 +13,8 @@ set(TANTIVY_NAME "libtantivy_binding${CMAKE_SHARED_LIBRARY_SUFFIX}")
 set(LIB_FILE "${CMAKE_CURRENT_BINARY_DIR}/${TARGET_DIR}/${TANTIVY_NAME}")
 set(LIB_HEADER_FOLDER "${CMAKE_CURRENT_SOURCE_DIR}/tantivy-binding/include")
 
+# In fact, cargo was already installed on our builder environment.
+# Below settings are used to suit for first local development.
 set(HOME_VAR $ENV{HOME})
 set(PATH_VAR $ENV{PATH})
 set(ENV{PATH} ${HOME_VAR}/.cargo/bin:${PATH_VAR})
@@ -28,7 +30,7 @@ add_custom_command(OUTPUT compile_tantivy
         COMMENT "Compiling tantivy binding"
         COMMAND CARGO_TARGET_DIR=${CMAKE_CURRENT_BINARY_DIR} ${CARGO_CMD}
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tantivy-binding)
-add_custom_target(tantivy_binding_target DEPENDS compile_tantivy)
+add_custom_target(tantivy_binding_target DEPENDS compile_tantivy ls_cargo_target)
 
 set(INSTALL_COMMAND
         cp ${LIB_HEADER_FOLDER}/tantivy-binding.h ${TANTIVY_INCLUDE_DIR}/ &&
