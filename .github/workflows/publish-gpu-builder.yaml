@@ -43,17 +43,23 @@ jobs:
         if: success() && github.event_name == 'pull_request' && github.repository == 'milvus-io/milvus'
         shell: bash
         run: |
-          docker buildx ls
-          docker buildx build milvusdb/milvus-env:gpu-${OS_NAME}-${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }} -f build/docker/builder/gpu/${OS_NAME}/Dockerfile .
+          docker info
+          docker build -t milvusdb/milvus-env:gpu-${OS_NAME}-${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }} -f build/docker/builder/gpu/${OS_NAME}/Dockerfile .
       - name: Docker Build&Push
         if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
         shell: bash
         run: |
-          docker buildx ls
+          docker info
           docker login -u ${{ secrets.DOCKERHUB_USER }} \
                        -p ${{ secrets.DOCKERHUB_TOKEN }}
-          docker buildx build --push -t milvusdb/milvus-env:gpu-${OS_NAME}-${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }} -f build/docker/builder/gpu/${OS_NAME}/Dockerfile .
-          docker buildx build --push -t milvusdb/milvus-env:gpu-${OS_NAME}-latest -f build/docker/builder/gpu/${OS_NAME}/Dockerfile .
+          # Building the first image
+          docker build -t milvusdb/milvus-env:gpu-${OS_NAME}-${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }} -f build/docker/builder/gpu/${OS_NAME}/Dockerfile .
+          docker push milvusdb/milvus-env:gpu-${OS_NAME}-${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }}
+
+          # Building the second image
+          docker build -t milvusdb/milvus-env:gpu-${OS_NAME}-latest -f build/docker/builder/gpu/${OS_NAME}/Dockerfile .
+          docker push milvusdb/milvus-env:gpu-${OS_NAME}-latest
+
       - name: Update Builder Image Changes
         if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus' && matrix.os == 'ubuntu20.04'
         continue-on-error: true
