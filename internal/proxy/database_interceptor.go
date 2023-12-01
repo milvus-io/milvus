@@ -192,6 +192,9 @@ func fillDatabase(ctx context.Context, req interface{}) (context.Context, interf
 		if r.DbName == "" {
 			r.DbName = GetCurDBNameFromContextOrDefault(ctx)
 		}
+		if r.NewDBName == "" {
+			r.NewDBName = GetCurDBNameFromContextOrDefault(ctx)
+		}
 		return ctx, r
 	case *milvuspb.TransferReplicaRequest:
 		if r.DbName == "" {
