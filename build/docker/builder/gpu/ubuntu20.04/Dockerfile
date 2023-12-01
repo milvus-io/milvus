@@ -14,7 +14,7 @@ FROM nvidia/cuda:11.8.0-devel-ubuntu20.04
 ARG TARGETARCH
 
 RUN apt-get update && apt-get install -y --no-install-recommends wget curl ca-certificates gnupg2 ninja-build && \
-    wget -qO- "https://cmake.org/files/v3.24/cmake-3.24.0-linux-x86_64.tar.gz" | tar --strip-components=1 -xz -C /usr/local && \
+    wget -qO- "https://cmake.org/files/v3.27/cmake-3.27.5-linux-`uname -m`.tar.gz" | tar --strip-components=1 -xz -C /usr/local && \
     apt-get update && apt-get install -y --no-install-recommends \
     g++ gcc gfortran git make ccache libssl-dev zlib1g-dev zip unzip \
     clang-format-10 clang-tidy-10 lcov libtool m4 autoconf automake python3 python3-pip \
@@ -23,6 +23,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends wget curl ca-ce
     rm -rf /var/lib/apt/lists/*
 
 RUN pip3 install conan==1.61.0
+
+RUN mkdir /opt/vcpkg &&  \
+    wget -qO- vcpkg.tar.gz https://github.com/microsoft/vcpkg/archive/master.tar.gz | tar --strip-components=1 -xz -C /opt/vcpkg && \
+    rm -rf vcpkg.tar.gz
+
+ENV VCPKG_FORCE_SYSTEM_BINARIES 1
+
+RUN /opt/vcpkg/bootstrap-vcpkg.sh -disableMetrics && ln -s /opt/vcpkg/vcpkg /usr/local/bin/vcpkg && vcpkg version
+
+RUN vcpkg install azure-identity-cpp azure-storage-blobs-cpp gtest
 
 # Instal openblas
 # RUN wget https://github.com/xianyi/OpenBLAS/archive/v0.3.21.tar.gz && \
