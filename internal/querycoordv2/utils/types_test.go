@@ -49,26 +49,25 @@ func Test_packLoadSegmentRequest(t *testing.T) {
 		},
 	}
 
-	t.Run("test set deltaPosition from segment dmlPosition", func(t *testing.T) {
-		req := PackSegmentLoadInfo(segmentInfo, nil, nil)
+	channel := &datapb.VchannelInfo{
+		ChannelName: mockVChannel,
+		SeekPosition: &msgpb.MsgPosition{
+			ChannelName: mockPChannel,
+			Timestamp:   t2,
+		},
+	}
+
+	t.Run("test set deltaPosition from channel seek position", func(t *testing.T) {
+		req := PackSegmentLoadInfo(segmentInfo, channel.GetSeekPosition(), nil)
 		assert.NotNil(t, req.GetDeltaPosition())
 		assert.Equal(t, mockPChannel, req.GetDeltaPosition().ChannelName)
 		assert.Equal(t, t2, req.GetDeltaPosition().Timestamp)
 	})
 
-	t.Run("test set deltaPosition from segment startPosition", func(t *testing.T) {
-		segInfo := proto.Clone(segmentInfo).(*datapb.SegmentInfo)
-		segInfo.DmlPosition = nil
-		req := PackSegmentLoadInfo(segmentInfo, nil, nil)
-		assert.NotNil(t, req.GetDeltaPosition())
-		assert.Equal(t, mockPChannel, req.GetDeltaPosition().ChannelName)
-		assert.Equal(t, t1, req.GetDeltaPosition().Timestamp)
-	})
-
 	t.Run("test tsLag > 10minutes", func(t *testing.T) {
-		segInfo := proto.Clone(segmentInfo).(*datapb.SegmentInfo)
-		segInfo.DmlPosition.Timestamp = t0
-		req := PackSegmentLoadInfo(segmentInfo, nil, nil)
+		channel := proto.Clone(channel).(*datapb.VchannelInfo)
+		channel.SeekPosition.Timestamp = t0
+		req := PackSegmentLoadInfo(segmentInfo, channel.GetSeekPosition(), nil)
 		assert.NotNil(t, req.GetDeltaPosition())
 		assert.Equal(t, mockPChannel, req.GetDeltaPosition().ChannelName)
 		assert.Equal(t, t0, req.GetDeltaPosition().Timestamp)
