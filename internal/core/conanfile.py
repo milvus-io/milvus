@@ -40,6 +40,7 @@ class MilvusConan(ConanFile):
         "google-cloud-cpp/2.5.0@milvus/dev",
         "opentelemetry-cpp/1.8.1.1@milvus/dev",
         "librdkafka/1.9.1",
+        "libunwind/1.7.2",
     )
     generators = ("cmake", "cmake_find_package")
     default_options = {
