@@ -679,7 +679,7 @@ func TestChannelMeta_InterfaceMethod(t *testing.T) {
 				collectionID: 1,
 				numRows:      15,
 			}},
-			{"segment exists but not flushed", true, true, []UniqueID{1, 4}, []UniqueID{1}, &Segment{
+			{"segment exists but not flushed", true, false, []UniqueID{1, 4}, []UniqueID{1}, &Segment{
 				segmentID:    3,
 				collectionID: 1,
 				numRows:      15,

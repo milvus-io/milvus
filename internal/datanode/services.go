@@ -275,6 +275,16 @@ func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan
 		return merr.Status(merr.WrapErrChannelNotFound(req.GetChannel(), "channel is dropping")), nil
 	}
 
+	for _, segment := range req.GetSegmentBinlogs() {
+		segmentInfo := ds.channel.getSegment(segment.GetSegmentID())
+		if segmentInfo == nil || segmentInfo.getType() != datapb.SegmentType_Flushed {
+			log.Warn("compaction plan contains segment which is not flushed or missing",
+				zap.Int64("segmentID", segment.GetSegmentID()),
+			)
+			return merr.Status(merr.WrapErrSegmentNotFound(segment.GetSegmentID(), "segment in flushed state not found")), nil
+		}
+	}
+
 	binlogIO := &binlogIO{node.chunkManager, ds.idAllocator}
 	task := newCompactionTask(
 		node.ctx,
@@ -331,10 +341,12 @@ func (node *DataNode) GetCompactionState(ctx context.Context, req *datapb.Compac
 
 // SyncSegments called by DataCoord, sync the compacted segments' meta between DC and DN
 func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegmentsRequest) (*commonpb.Status, error) {
-	log.Ctx(ctx).Info("DataNode receives SyncSegments",
+	log := log.Ctx(ctx).With(
 		zap.Int64("planID", req.GetPlanID()),
-		zap.Int64("target segmentID", req.GetCompactedTo()),
-		zap.Int64s("compacted from", req.GetCompactedFrom()),
+		zap.Int64("targetSegmentID", req.GetCompactedTo()),
+		zap.Int64s("compactedFrom", req.GetCompactedFrom()),
+	)
+	log.Info("DataNode receives SyncSegments",
 		zap.Int64("numOfRows", req.GetNumOfRows()),
 	)
 
@@ -356,21 +368,24 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 	)
 
 	for _, fromSegment := range req.GetCompactedFrom() {
+		log := log.With(
+			zap.Int64("segment", fromSegment),
+		)
 		channel, err = node.flowgraphManager.getChannel(fromSegment)
 		if err != nil {
-			log.Ctx(ctx).Warn("fail to get the channel", zap.Int64("segment", fromSegment), zap.Error(err))
+			log.Warn("fail to get the channel", zap.Error(err))
 			continue
 		}
 		ds, ok = node.flowgraphManager.getFlowgraphService(channel.getChannelName(fromSegment))
 		if !ok {
-			log.Ctx(ctx).Warn("fail to find flow graph service", zap.Int64("segment", fromSegment))
+			log.Warn("fail to find flow graph service")
 			continue
 		}
 		oneSegment = fromSegment
 		break
 	}
 	if oneSegment == 0 {
-		log.Ctx(ctx).Warn("no valid segment, maybe the request is a retry")
+		log.Warn("no valid segment, maybe the request is a retry")
 		return merr.Success(), nil
 	}
 
@@ -390,7 +405,12 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 
 	ds.fg.Blockall()
 	defer ds.fg.Unblock()
-	channel.mergeFlushedSegments(ctx, targetSeg, req.GetPlanID(), req.GetCompactedFrom())
+	err = channel.mergeFlushedSegments(ctx, targetSeg, req.GetPlanID(), req.GetCompactedFrom())
+	if err != nil {
+		log.Warn("mergeFlushedSegments fail", zap.Error(err))
+		return merr.Status(err), nil
+	}
+
 	node.compactionExecutor.injectDone(req.GetPlanID(), true)
 	return merr.Success(), nil
 }

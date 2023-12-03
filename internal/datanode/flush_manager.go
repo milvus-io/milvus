@@ -849,6 +849,11 @@ func dropVirtualChannelFunc(dsService *dataSyncService, opts ...retry.Option) fl
 
 func flushNotifyFunc(dsService *dataSyncService, opts ...retry.Option) notifyMetaFunc {
 	return func(pack *segmentFlushPack) {
+		log := log.Ctx(context.Background()).With(
+			zap.Int64("segmentID", pack.segmentID),
+			zap.Int64("collectionID", dsService.collectionID),
+			zap.String("vchannel", dsService.vchannelName),
+		)
 		if pack.err != nil {
 			log.Error("flush pack with error, DataNode quit now", zap.Error(pack.err))
 			// TODO silverxia change to graceful stop datanode
@@ -883,13 +888,11 @@ func flushNotifyFunc(dsService *dataSyncService, opts ...retry.Option) notifyMet
 
 		log.Info("SaveBinlogPath",
 			zap.Int64("SegmentID", pack.segmentID),
-			zap.Int64("CollectionID", dsService.collectionID),
 			zap.Any("startPos", startPos),
 			zap.Any("checkPoints", checkPoints),
 			zap.Int("Length of Field2BinlogPaths", len(fieldInsert)),
 			zap.Int("Length of Field2Stats", len(fieldStats)),
 			zap.Int("Length of Field2Deltalogs", len(deltaInfos[0].GetBinlogs())),
-			zap.String("vChannelName", dsService.vchannelName),
 		)
 
 		req := &datapb.SaveBinlogPathsRequest{
@@ -916,16 +919,14 @@ func flushNotifyFunc(dsService *dataSyncService, opts ...retry.Option) notifyMet
 			// Segment not found during stale segment flush. Segment might get compacted already.
 			// Stop retry and still proceed to the end, ignoring this error.
 			if !pack.flushed && errors.Is(err, merr.ErrSegmentNotFound) {
-				log.Warn("stale segment not found, could be compacted",
-					zap.Int64("segmentID", pack.segmentID))
+				log.Warn("stale segment not found, could be compacted")
 				log.Warn("failed to SaveBinlogPaths",
-					zap.Int64("segmentID", pack.segmentID),
 					zap.Error(err))
 				return nil
 			}
 			// meta error, datanode handles a virtual channel does not belong here
 			if errors.IsAny(err, merr.ErrSegmentNotFound, merr.ErrChannelNotFound) {
-				log.Warn("meta error found, skip sync and start to drop virtual channel", zap.String("channel", dsService.vchannelName))
+				log.Warn("meta error found, skip sync and start to drop virtual channel")
 				return nil
 			}
 
@@ -940,7 +941,6 @@ func flushNotifyFunc(dsService *dataSyncService, opts ...retry.Option) notifyMet
 		}, opts...)
 		if err != nil {
 			log.Warn("failed to SaveBinlogPaths",
-				zap.Int64("segmentID", pack.segmentID),
 				zap.Error(err))
 			// TODO change to graceful stop
 			panic(err)
@@ -960,6 +960,7 @@ func flushNotifyFunc(dsService *dataSyncService, opts ...retry.Option) notifyMet
 		segment := dsService.channel.getSegment(req.GetSegmentID())
 		dsService.channel.updateSingleSegmentMemorySize(req.GetSegmentID())
 		segment.setSyncing(false)
-		// dsService.channel.saveBinlogPath(fieldStats)
+
+		log.Info("successfully save binlog")
 	}
 }

@@ -658,6 +658,84 @@ func (s *DataNodeServicesSuite) TestAddImportSegment() {
 	})
 }
 
+func (s *DataNodeServicesSuite) TestCompaction() {
+	chanName := "fake-by-dev-rootcoord-dml-test-syncsegments-1"
+
+	err := s.node.flowgraphManager.addAndStartWithEtcdTickler(s.node, &datapb.VchannelInfo{
+		CollectionID:        1,
+		ChannelName:         chanName,
+		UnflushedSegmentIds: []int64{},
+		FlushedSegmentIds:   []int64{100, 200, 300},
+	}, nil, genTestTickler())
+	s.Require().NoError(err)
+	fg, ok := s.node.flowgraphManager.getFlowgraphService(chanName)
+	s.Assert().True(ok)
+
+	s1 := Segment{segmentID: 100, collectionID: 1}
+	s2 := Segment{segmentID: 200, collectionID: 1}
+	s3 := Segment{segmentID: 300, collectionID: 1}
+	s4 := Segment{segmentID: 400, collectionID: 1}
+	s1.setType(datapb.SegmentType_Flushed)
+	s2.setType(datapb.SegmentType_Flushed)
+	s3.setType(datapb.SegmentType_Flushed)
+	s4.setType(datapb.SegmentType_Normal)
+	fg.channel.(*ChannelMeta).segments = map[UniqueID]*Segment{
+		s1.segmentID: &s1,
+		s2.segmentID: &s2,
+		s3.segmentID: &s3,
+		s4.segmentID: &s4,
+	}
+
+	s.Run("datanode_not_serviceable", func() {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		node := &DataNode{}
+		node.SetSession(&sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}})
+		node.stateCode.Store(commonpb.StateCode_Abnormal)
+
+		resp, err := node.Compaction(ctx, &datapb.CompactionPlan{
+			PlanID: 1000,
+		})
+		s.NoError(err)
+		s.False(merr.Ok(resp))
+	})
+
+	s.Run("channel_not_match", func() {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		node := s.node
+
+		resp, err := node.Compaction(ctx, &datapb.CompactionPlan{
+			PlanID:  1000,
+			Channel: chanName + "another",
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+				{SegmentID: s1.segmentID},
+			},
+		})
+		s.NoError(err)
+		s.False(merr.Ok(resp))
+	})
+
+	s.Run("plan_contains_growing", func() {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		node := s.node
+
+		resp, err := node.Compaction(ctx, &datapb.CompactionPlan{
+			PlanID:  1000,
+			Channel: chanName,
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+				{SegmentID: s4.segmentID},
+			},
+		})
+		s.NoError(err)
+		s.False(merr.Ok(resp))
+	})
+}
+
 func (s *DataNodeServicesSuite) TestSyncSegments() {
 	chanName := "fake-by-dev-rootcoord-dml-test-syncsegments-1"
 
