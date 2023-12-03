@@ -75,7 +75,7 @@ type Channel interface {
 	listNewSegmentsStartPositions() []*datapb.SegmentStartPosition
 	transferNewSegments(segmentIDs []UniqueID)
 	updateSegmentPKRange(segID UniqueID, ids storage.FieldData)
-	mergeFlushedSegments(ctx context.Context, seg *Segment, planID UniqueID, compactedFrom []UniqueID)
+	mergeFlushedSegments(ctx context.Context, seg *Segment, planID UniqueID, compactedFrom []UniqueID) error
 	listCompactedSegmentIDs() map[UniqueID][]UniqueID
 	listSegmentIDsToSync(ts Timestamp) []UniqueID
 
@@ -575,6 +575,10 @@ func (c *ChannelMeta) hasSegment(segID UniqueID, countFlushed bool) bool {
 	c.segMu.RLock()
 	defer c.segMu.RUnlock()
 
+	return c.hasSegmentInternal(segID, countFlushed)
+}
+
+func (c *ChannelMeta) hasSegmentInternal(segID UniqueID, countFlushed bool) bool {
 	seg, ok := c.segments[segID]
 	if !ok {
 		return false
@@ -677,7 +681,7 @@ func (c *ChannelMeta) getCollectionSchema(collID UniqueID, ts Timestamp) (*schem
 	return c.collSchema, nil
 }
 
-func (c *ChannelMeta) mergeFlushedSegments(ctx context.Context, seg *Segment, planID UniqueID, compactedFrom []UniqueID) {
+func (c *ChannelMeta) mergeFlushedSegments(ctx context.Context, seg *Segment, planID UniqueID, compactedFrom []UniqueID) error {
 	log := log.Ctx(ctx).With(
 		zap.Int64("segmentID", seg.segmentID),
 		zap.Int64("collectionID", seg.collectionID),
@@ -686,11 +690,28 @@ func (c *ChannelMeta) mergeFlushedSegments(ctx context.Context, seg *Segment, pl
 		zap.Int64("planID", planID),
 		zap.String("channelName", c.channelName))
 
+	c.segMu.Lock()
+	defer c.segMu.Unlock()
 	var inValidSegments []UniqueID
-	for _, ID := range compactedFrom {
-		// no such segments in channel or the segments are unflushed.
-		if !c.hasSegment(ID, true) || c.hasSegment(ID, false) {
-			inValidSegments = append(inValidSegments, ID)
+	for _, segID := range compactedFrom {
+		seg, ok := c.segments[segID]
+		if !ok {
+			inValidSegments = append(inValidSegments, segID)
+			continue
+		}
+
+		// compacted
+		if !seg.isValid() {
+			inValidSegments = append(inValidSegments, segID)
+			continue
+		}
+
+		if seg.notFlushed() {
+			log.Warn("segment is not flushed, skip mergeFlushedSegments",
+				zap.Int64("segmentID", segID),
+				zap.String("segType", seg.getType().String()),
+			)
+			return merr.WrapErrSegmentNotFound(segID, "segment in flush state not found")
 		}
 	}
 
@@ -700,8 +721,6 @@ func (c *ChannelMeta) mergeFlushedSegments(ctx context.Context, seg *Segment, pl
 	}
 
 	log.Info("merge flushed segments")
-	c.segMu.Lock()
-	defer c.segMu.Unlock()
 
 	for _, ID := range compactedFrom {
 		// the existent of the segments are already checked
@@ -718,6 +737,8 @@ func (c *ChannelMeta) mergeFlushedSegments(ctx context.Context, seg *Segment, pl
 		seg.setType(datapb.SegmentType_Flushed)
 		c.segments[seg.segmentID] = seg
 	}
+
+	return nil
 }
 
 // for tests only
