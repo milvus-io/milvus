@@ -20,6 +20,7 @@
 #include <pb/schema.pb.h>
 #include <vector>
 #include <string>
+#include "common/CDataType.h"
 #include "index/ScalarIndex.h"
 #include "knowhere/log.h"
 #include "Meta.h"
@@ -49,8 +50,8 @@ inline ScalarIndexSort<T>::ScalarIndexSort(
     std::shared_ptr<milvus_storage::Space> space)
     : is_built_(false), data_(), space_(space) {
     if (file_manager_context.Valid()) {
-        file_manager_ =
-            std::make_shared<storage::MemFileManagerImpl>(file_manager_context);
+        file_manager_ = std::make_shared<storage::MemFileManagerImpl>(
+            file_manager_context, space);
         AssertInfo(file_manager_ != nullptr, "create file manager failed!");
     }
 }
@@ -61,8 +62,7 @@ ScalarIndexSort<T>::BuildV2(const Config& config) {
     if (is_built_) {
         return;
     }
-    auto field_name = GetValueFromConfig<std::string>(config, "field_name");
-    AssertInfo(field_name.has_value(), "field name can not be empty");
+    auto field_name = file_manager_->GetIndexMeta().field_name;
     auto res = space_->ScanData();
     if (!res.ok()) {
         PanicInfo(S3Error, "failed to create scan iterator");
@@ -75,9 +75,9 @@ ScalarIndexSort<T>::BuildV2(const Config& config) {
         }
         auto data = rec.ValueUnsafe();
         auto total_num_rows = data->num_rows();
-        auto col_data = data->GetColumnByName(field_name.value());
-        auto field_data =
-            storage::CreateFieldData(DataType::STRING, 0, total_num_rows);
+        auto col_data = data->GetColumnByName(field_name);
+        auto field_data = storage::CreateFieldData(
+            DataType(GetDType<T>()), 0, total_num_rows);
         field_data->FillFieldData(col_data);
         field_datas.push_back(field_data);
     }
@@ -272,12 +272,16 @@ ScalarIndexSort<T>::Load(const Config& config) {
 template <typename T>
 void
 ScalarIndexSort<T>::LoadV2(const Config& config) {
-    auto index_files =
-        GetValueFromConfig<std::vector<std::string>>(config, "index_files");
-    AssertInfo(index_files.has_value(),
-               "index file paths is empty when load disk ann index");
+    auto blobs = space_->StatisticsBlobs();
+    std::vector<std::string> index_files;
+    auto prefix = file_manager_->GetRemoteIndexObjectPrefixV2();
+    for (auto& b : blobs) {
+        if (b.name.rfind(prefix, 0) == 0) {
+            index_files.push_back(b.name);
+        }
+    }
     std::map<std::string, storage::FieldDataPtr> index_datas{};
-    for (auto& file_name : index_files.value()) {
+    for (auto& file_name : index_files) {
         auto res = space_->GetBlobByteSize(file_name);
         if (!res.ok()) {
             PanicInfo(S3Error, "unable to read index blob");
@@ -290,7 +294,8 @@ ScalarIndexSort<T>::LoadV2(const Config& config) {
         }
         auto raw_index_blob =
             storage::DeserializeFileData(index_blob_data, res.value());
-        index_datas[file_name] = raw_index_blob->GetFieldData();
+        auto key = file_name.substr(file_name.find_last_of('/') + 1);
+        index_datas[key] = raw_index_blob->GetFieldData();
     }
     AssembleIndexDatas(index_datas);
     BinarySet binary_set;

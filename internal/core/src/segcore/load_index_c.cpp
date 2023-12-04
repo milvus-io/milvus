@@ -304,6 +304,15 @@ AppendIndexV3(CLoadIndexInfo c_load_index_info) {
             index_info.metric_type = index_params.at("metric_type");
         }
 
+        milvus::storage::FieldDataMeta field_meta{
+            load_index_info->collection_id,
+            load_index_info->partition_id,
+            load_index_info->segment_id,
+            load_index_info->field_id};
+        milvus::storage::IndexMeta index_meta{load_index_info->segment_id,
+                                              load_index_info->field_id,
+                                              load_index_info->index_build_id,
+                                              load_index_info->index_version};
         auto config = milvus::index::ParseConfigFromIndexParams(
             load_index_info->index_params);
 
@@ -313,9 +322,12 @@ AppendIndexV3(CLoadIndexInfo c_load_index_info) {
                                     load_index_info->index_store_version});
         AssertInfo(res.ok(), "init space failed");
         std::shared_ptr<milvus_storage::Space> space = std::move(res.value());
+
+        milvus::storage::FileManagerContext fileManagerContext(
+            field_meta, index_meta, nullptr, space);
         load_index_info->index =
             milvus::index::IndexFactory::GetInstance().CreateIndex(
-                index_info, milvus::storage::FileManagerContext(), space);
+                index_info, fileManagerContext, space);
 
         if (!load_index_info->mmap_dir_path.empty() &&
             load_index_info->index->IsMmapSupported()) {

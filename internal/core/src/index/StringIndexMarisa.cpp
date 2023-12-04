@@ -67,8 +67,7 @@ StringIndexMarisa::BuildV2(const Config& config) {
     if (built_) {
         throw std::runtime_error("index has been built");
     }
-    auto field_name = GetValueFromConfig<std::string>(config, "field_name");
-    AssertInfo(field_name.has_value(), "field name can not be empty");
+    auto field_name = file_manager_->GetIndexMeta().field_name;
     auto res = space_->ScanData();
     if (!res.ok()) {
         PanicInfo(S3Error, "failed to create scan iterator");
@@ -81,7 +80,7 @@ StringIndexMarisa::BuildV2(const Config& config) {
         }
         auto data = rec.ValueUnsafe();
         auto total_num_rows = data->num_rows();
-        auto col_data = data->GetColumnByName(field_name.value());
+        auto col_data = data->GetColumnByName(field_name);
         auto field_data =
             storage::CreateFieldData(DataType::STRING, 0, total_num_rows);
         field_data->FillFieldData(col_data);
@@ -308,12 +307,16 @@ StringIndexMarisa::Load(const Config& config) {
 
 void
 StringIndexMarisa::LoadV2(const Config& config) {
-    auto index_files =
-        GetValueFromConfig<std::vector<std::string>>(config, "index_files");
-    AssertInfo(index_files.has_value(),
-               "index file paths is empty when load index");
+    auto blobs = space_->StatisticsBlobs();
+    std::vector<std::string> index_files;
+    auto prefix = file_manager_->GetRemoteIndexObjectPrefixV2();
+    for (auto& b : blobs) {
+        if (b.name.rfind(prefix, 0) == 0) {
+            index_files.push_back(b.name);
+        }
+    }
     std::map<std::string, storage::FieldDataPtr> index_datas{};
-    for (auto& file_name : index_files.value()) {
+    for (auto& file_name : index_files) {
         auto res = space_->GetBlobByteSize(file_name);
         if (!res.ok()) {
             PanicInfo(DataFormatBroken, "unable to read index blob");
@@ -335,7 +338,8 @@ StringIndexMarisa::LoadV2(const Config& config) {
         auto deleter = [&](uint8_t*) {};  // avoid repeated deconstruction
         auto buf = std::shared_ptr<uint8_t[]>(
             (uint8_t*)const_cast<void*>(data->Data()), deleter);
-        binary_set.Append(key, buf, size);
+        auto file_name = key.substr(key.find_last_of('/') + 1);
+        binary_set.Append(file_name, buf, size);
     }
 
     LoadWithoutAssemble(binary_set, config);

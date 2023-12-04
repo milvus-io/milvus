@@ -64,7 +64,12 @@ DiskFileManagerImpl::LoadFile(const std::string& file) noexcept {
 std::string
 DiskFileManagerImpl::GetRemoteIndexPath(const std::string& file_name,
                                         int64_t slice_num) const {
-    auto remote_prefix = GetRemoteIndexObjectPrefix();
+    std::string remote_prefix;
+    if (space_ != nullptr) {
+        remote_prefix = GetRemoteIndexObjectPrefixV2();
+    } else {
+        remote_prefix = GetRemoteIndexObjectPrefix();
+    }
     return remote_prefix + "/" + file_name + "_" + std::to_string(slice_num);
 }
 
@@ -76,10 +81,10 @@ DiskFileManagerImpl::AddFileUsingSpace(
     const std::vector<int64_t>& remote_file_sizes) {
     auto local_chunk_manager =
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    auto LoadIndexFromDisk = [&](
-        const std::string& file,
-        const int64_t offset,
-        const int64_t data_size) -> std::shared_ptr<uint8_t[]> {
+    auto LoadIndexFromDisk =
+        [&](const std::string& file,
+            const int64_t offset,
+            const int64_t data_size) -> std::shared_ptr<uint8_t[]> {
         auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[data_size]);
         local_chunk_manager->Read(file, offset, buf.get(), data_size);
         return buf;
@@ -159,10 +164,10 @@ DiskFileManagerImpl::AddBatchIndexFiles(
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
 
-    auto LoadIndexFromDisk = [&](
-        const std::string& file,
-        const int64_t offset,
-        const int64_t data_size) -> std::shared_ptr<uint8_t[]> {
+    auto LoadIndexFromDisk =
+        [&](const std::string& file,
+            const int64_t offset,
+            const int64_t data_size) -> std::shared_ptr<uint8_t[]> {
         auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[data_size]);
         local_chunk_manager->Read(file, offset, buf.get(), data_size);
         return buf;

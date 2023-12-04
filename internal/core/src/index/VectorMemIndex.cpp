@@ -179,12 +179,16 @@ VectorMemIndex<T>::LoadV2(const Config& config) {
     }
 
     auto blobs = space_->StatisticsBlobs();
-    std::unordered_set<std::string> pending_index_files(blobs.size());
+    std::unordered_set<std::string> pending_index_files;
+    auto index_prefix = file_manager_->GetRemoteIndexObjectPrefixV2();
     for (auto& blob : blobs) {
-        pending_index_files.insert(blob.name);
+        if (blob.name.rfind(index_prefix, 0) == 0) {
+            pending_index_files.insert(blob.name);
+        }
     }
 
-    auto res = space_->GetBlobByteSize(std::string(INDEX_FILE_SLICE_META));
+    auto slice_meta_file = index_prefix + "/" + INDEX_FILE_SLICE_META;
+    auto res = space_->GetBlobByteSize(std::string(slice_meta_file));
     std::map<std::string, storage::FieldDataPtr> index_datas{};
 
     if (!res.ok() && !res.status().IsFileNotFound()) {
@@ -207,12 +211,11 @@ VectorMemIndex<T>::LoadV2(const Config& config) {
         return storage::DeserializeFileData(index_blob_data, res.value());
     };
     if (slice_meta_exist) {
-        pending_index_files.erase(INDEX_FILE_SLICE_META);
+        pending_index_files.erase(slice_meta_file);
         auto slice_meta_sz = res.value();
         auto slice_meta_data =
             std::shared_ptr<uint8_t[]>(new uint8_t[slice_meta_sz]);
-        auto status =
-            space_->ReadBlob(INDEX_FILE_SLICE_META, slice_meta_data.get());
+        auto status = space_->ReadBlob(slice_meta_file, slice_meta_data.get());
         if (!status.ok()) {
             PanicInfo(DataFormatBroken, "unable to read slice meta");
         }
@@ -229,7 +232,8 @@ VectorMemIndex<T>::LoadV2(const Config& config) {
             auto new_field_data =
                 milvus::storage::CreateFieldData(DataType::INT8, 1, total_len);
             for (auto i = 0; i < slice_num; ++i) {
-                std::string file_name = GenSlicedFileName(prefix, i);
+                std::string file_name =
+                    index_prefix + "/" + GenSlicedFileName(prefix, i);
                 auto raw_index_blob = read_blob(file_name);
                 new_field_data->FillFieldData(
                     raw_index_blob->GetFieldData()->Data(),
@@ -740,12 +744,16 @@ VectorMemIndex<T>::LoadFromFileV2(const Config& config) {
     auto file = File::Open(filepath.value(), O_CREAT | O_TRUNC | O_RDWR);
 
     auto blobs = space_->StatisticsBlobs();
-    std::unordered_set<std::string> pending_index_files(blobs.size());
+    std::unordered_set<std::string> pending_index_files;
+    auto index_prefix = file_manager_->GetRemoteIndexObjectPrefixV2();
     for (auto& blob : blobs) {
-        pending_index_files.insert(blob.name);
+        if (blob.name.rfind(index_prefix, 0) == 0) {
+            pending_index_files.insert(blob.name);
+        }
     }
 
-    auto res = space_->GetBlobByteSize(std::string(INDEX_FILE_SLICE_META));
+    auto slice_meta_file = index_prefix + "/" + INDEX_FILE_SLICE_META;
+    auto res = space_->GetBlobByteSize(std::string(slice_meta_file));
 
     if (!res.ok() && !res.status().IsFileNotFound()) {
         PanicInfo(DataFormatBroken, "failed to read blob");
@@ -767,12 +775,11 @@ VectorMemIndex<T>::LoadFromFileV2(const Config& config) {
         return storage::DeserializeFileData(index_blob_data, res.value());
     };
     if (slice_meta_exist) {
-        pending_index_files.erase(INDEX_FILE_SLICE_META);
+        pending_index_files.erase(slice_meta_file);
         auto slice_meta_sz = res.value();
         auto slice_meta_data =
             std::shared_ptr<uint8_t[]>(new uint8_t[slice_meta_sz]);
-        auto status =
-            space_->ReadBlob(INDEX_FILE_SLICE_META, slice_meta_data.get());
+        auto status = space_->ReadBlob(slice_meta_file, slice_meta_data.get());
         if (!status.ok()) {
             PanicInfo(DataFormatBroken, "unable to read slice meta");
         }
@@ -787,7 +794,8 @@ VectorMemIndex<T>::LoadFromFileV2(const Config& config) {
             auto total_len = static_cast<size_t>(item[TOTAL_LEN]);
 
             for (auto i = 0; i < slice_num; ++i) {
-                std::string file_name = GenSlicedFileName(prefix, i);
+                std::string file_name =
+                    index_prefix + "/" + GenSlicedFileName(prefix, i);
                 auto raw_index_blob = read_blob(file_name);
                 auto written =
                     file.Write(raw_index_blob->GetFieldData()->Data(),
