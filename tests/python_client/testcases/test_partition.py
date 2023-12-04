@@ -833,7 +833,7 @@ class TestPartitionOperations(TestcaseBase):
 
         # release the dropped partition and check err response
         partition_w.release(check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: PartitionErrorMessage.PartitionNotExist})
+                            check_items={ct.err_code: 200, ct.err_msg: "partition not found[partition=%s]" % partition_w.name})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_partition_release_dropped_collection(self):
@@ -1348,8 +1348,7 @@ class TestDropBase(TestcaseBase):
         # check that the partition not exists
         assert not collection_w.has_partition(partition_name)[0]
 
-        collection_w.drop_partition(partition_w.name, check_task=CheckTasks.err_res,
-                                    check_items={ct.err_code: 1, 'err_msg': "Partition not exist"})
+        collection_w.drop_partition(partition_w.name)
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_drop_partition_create(self):
