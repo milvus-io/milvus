@@ -742,7 +742,8 @@ class IndexTestV2
         index_type = std::get<0>(param).first;
         metric_type = std::get<0>(param).second;
         file_slice_size = std::get<1>(param);
-        enable_mmap = std::get<2>(param);
+        enable_mmap = index_type != knowhere::IndexEnum::INDEX_DISKANN &&
+                      std::get<2>(param);
         if (enable_mmap) {
             mmap_file_path = boost::filesystem::temp_directory_path() /
                              boost::filesystem::unique_path();
