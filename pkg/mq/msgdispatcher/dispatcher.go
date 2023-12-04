@@ -103,7 +103,7 @@ func NewDispatcher(ctx context.Context,
 			return nil, err
 		}
 
-		err = stream.Seek(ctx, []*Pos{position})
+		err = stream.Seek(ctx, []*Pos{position}, false)
 		if err != nil {
 			stream.Close()
 			log.Error("seek failed", zap.Error(err))

@@ -63,7 +63,9 @@ type MsgStream interface {
 
 	AsConsumer(ctx context.Context, channels []string, subName string, position mqwrapper.SubscriptionInitialPosition) error
 	Chan() <-chan *MsgPack
-	Seek(ctx context.Context, offset []*MsgPosition) error
+	// Seek consume message from the specified position
+	// includeCurrentMsg indicates whether to consume the current message, and in the milvus system, it should be always false
+	Seek(ctx context.Context, msgPositions []*MsgPosition, includeCurrentMsg bool) error
 
 	GetLatestMsgID(channel string) (MessageID, error)
 	CheckTopicValid(channel string) error
