@@ -24,7 +24,7 @@ import (
 )
 
 type Checker interface {
-	ID() checkerType
+	ID() CheckerType
 	Description() string
 	Check(ctx context.Context) []task.Task
 	IsActive() bool
