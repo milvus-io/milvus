@@ -3301,11 +3301,10 @@ class TestLoadPartition(TestcaseBase):
                                                description=description,
                                                check_task=CheckTasks.check_partition_property,
                                                check_items={"name": partition_name, "description": description,
-                                                            "is_empty": True, "num_entities": 0}
-                                               )
+                                                            "is_empty": True, "num_entities": 0})
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         partition_w.drop()
-        error = {ct.err_code: 1, ct.err_msg: 'partitionID of partitionName:%s can not be find' % partition_name}
+        error = {ct.err_code: 200, ct.err_msg: 'partition not found[partition=%s]' % partition_name}
         partition_w.load(check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -3323,8 +3322,7 @@ class TestLoadPartition(TestcaseBase):
                                                description=description,
                                                check_task=CheckTasks.check_partition_property,
                                                check_items={"name": partition_name, "description": description,
-                                                            "is_empty": True, "num_entities": 0}
-                                               )
+                                                            "is_empty": True, "num_entities": 0})
         partition_w.release()
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -3342,10 +3340,10 @@ class TestLoadPartition(TestcaseBase):
                                                description=description,
                                                check_task=CheckTasks.check_partition_property,
                                                check_items={"name": partition_name, "description": description,
-                                                            "is_empty": True, "num_entities": 0}
-                                               )
+                                                            "is_empty": True, "num_entities": 0})
         partition_w.drop()
-        error = {ct.err_code: 1, ct.err_msg: 'Partition %s not exist.' % partition_name}
+        collection_w.create_index(ct.default_float_vec_field_name)
+        error = {ct.err_code: 200, ct.err_msg: 'partition not found[partition=%s]' % partition_name}
         partition_w.load(check_task=CheckTasks.err_res, check_items=error)
         partition_w.release(check_task=CheckTasks.err_res, check_items=error)
 
@@ -3385,8 +3383,7 @@ class TestLoadPartition(TestcaseBase):
                                                description=description,
                                                check_task=CheckTasks.check_partition_property,
                                                check_items={"name": partition_name, "description": description,
-                                                            "is_empty": True, "num_entities": 0}
-                                               )
+                                                            "is_empty": True, "num_entities": 0})
         collection_w.drop()
         error = {ct.err_code: 0, ct.err_msg: "collection not found"}
         partition_w.load(check_task=CheckTasks.err_res, check_items=error)
