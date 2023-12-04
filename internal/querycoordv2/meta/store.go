@@ -21,7 +21,6 @@ import (
 	"fmt"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/samber/lo"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -216,10 +215,13 @@ func (s metaStore) ReleaseCollection(id int64) error {
 }
 
 func (s metaStore) ReleasePartition(collection int64, partitions ...int64) error {
-	keys := lo.Map(partitions, func(partition int64, _ int) string {
-		return encodePartitionLoadInfoKey(collection, partition)
-	})
-	return s.cli.MultiRemove(keys)
+	for _, partition := range partitions {
+		err := s.cli.Remove(encodePartitionLoadInfoKey(collection, partition))
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s metaStore) ReleaseReplicas(collectionID int64) error {
