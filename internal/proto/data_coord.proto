@@ -119,6 +119,13 @@ service DataNode {
   rpc FlushChannels(FlushChannelsRequest) returns(common.Status) {}
   rpc NotifyChannelOperation(ChannelOperationsRequest) returns(common.Status) {}
   rpc CheckChannelOperationProgress(ChannelWatchInfo) returns(ChannelOperationProgressResponse) {}
+
+  // import v2
+  rpc PreImport(PreImportRequest) returns(common.Status) {}
+  rpc ImportV2(ImportRequest) returns(common.Status) {}
+  rpc QueryPreImport(QueryPreImportRequest) returns(QueryPreImportResponse) {}
+  rpc QueryImport(QueryImportRequest) returns(QueryImportResponse) {}
+  rpc DropImport(DropImportRequest) returns(common.Status) {}
 }
 
 message FlushRequest {
@@ -736,4 +743,125 @@ message ChannelOperationProgressResponse {
   int64 opID = 2;
   ChannelWatchState state = 3;
   int32 progress = 4;
+}
+
+enum ImportState {
+  None = 0;
+  Pending = 1;
+  InProgress = 2;
+  Failed = 3;
+  Completed = 4;
+}
+
+message ColumnBasedFile {
+  repeated string files = 1;
+}
+
+message ImportFile {
+  oneof file {
+    string row_based_file = 1;
+    ColumnBasedFile column_based_file = 2;
+  }
+}
+
+message PreImportRequest {
+  string clusterID = 1;
+  int64 requestID = 2;
+  int64 taskID = 3;
+  int64 collectionID = 4;
+  int64 partitionID = 5;
+  schema.CollectionSchema schema = 6;
+  repeated ImportFile import_files = 7;
+}
+
+message autoIDRange {
+  int64 begin = 1;
+  int64 end = 2;
+}
+
+message ImportRequest {
+  string clusterID = 1;
+  int64 requestID = 2;
+  int64 taskID = 3;
+  int64 collectionID = 4;
+  int64 partitionID = 5;
+  schema.CollectionSchema schema = 6;
+  repeated ImportFile import_files = 7;
+  map<int64, autoIDRange> autoID_ranges = 8;
+  map<int64, string> segment_channels = 9;
+}
+
+message QueryPreImportRequest {
+  string clusterID = 1;
+  int64 requestID = 2;
+  int64 taskID = 3;
+}
+
+message ImportFileStats {
+  ImportFile import_file = 1;
+  int64 file_size = 2;
+  int64 total_rows = 3;
+  map<string, int64> channel_rows = 4;
+}
+
+message QueryPreImportResponse {
+  common.Status status = 1;
+  int64 taskID = 2;
+  ImportState state = 3;
+  string reason = 4;
+  int64 slots = 5;
+  repeated ImportFileStats file_stats = 6;
+}
+
+message QueryImportRequest {
+  string clusterID = 1;
+  int64 requestID = 2;
+  int64 taskID = 3;
+}
+
+message ImportSegmentInfo {
+  int64 segmentID = 1;
+  int64 total_rows = 2;
+  int64 imported_rows = 3;
+  repeated FieldBinlog binlogs = 4;
+  repeated FieldBinlog statslogs = 5;
+  repeated index.IndexFilePathInfo index_infos = 6;
+}
+
+message QueryImportResponse {
+  common.Status status = 1;
+  int64 taskID = 2;
+  ImportState state = 3;
+  string reason = 4;
+  int64 slots = 5;
+  repeated ImportSegmentInfo import_segments_info = 6;
+}
+
+message DropImportRequest {
+  string clusterID = 1;
+  int64 requestID = 2;
+  int64 taskID = 3;
+}
+
+message PreImportTask {
+  int64 requestID = 1;
+  int64 taskID = 2;
+  int64 collectionID = 3;
+  int64 partitionID = 4;
+  int64 nodeID = 5;
+  ImportState state = 6;
+  string reason = 7;
+  repeated ImportFileStats file_stats = 8;
+}
+
+message ImportTaskV2 {
+  int64 requestID = 1;
+  int64 taskID = 2;
+  int64 collectionID = 3;
+  int64 partitionID = 4;
+  repeated int64 segmentIDs = 5;
+  int64 nodeID = 6;
+  ImportState state = 7;
+  string reason = 8;
+  repeated ImportFile files = 9;
 }
