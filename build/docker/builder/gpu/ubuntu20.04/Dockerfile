@@ -93,5 +93,6 @@ ENV PATH=/root/.cargo/bin:$PATH
 
 RUN rustup install 1.73 && rustup default 1.73
 
+
 ENTRYPOINT [ "/tini", "--", "autouseradd", "--user", "milvus", "--", "/entrypoint.sh" ]
 CMD ["tail", "-f", "/dev/null"]
