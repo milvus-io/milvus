@@ -33,11 +33,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
-const (
-	interval   = 1 * time.Second
-	RPCTimeout = 3 * time.Second
-)
-
 // LeaderObserver is to sync the distribution with leader
 type LeaderObserver struct {
 	wg      sync.WaitGroup
@@ -79,7 +74,7 @@ func (o *LeaderObserver) Stop() {
 }
 
 func (o *LeaderObserver) schedule(ctx context.Context) {
-	ticker := time.NewTicker(interval)
+	ticker := time.NewTicker(paramtable.Get().QueryCoordCfg.LeaderViewUpdateInterval.GetAsDuration(time.Second))
 	defer ticker.Stop()
 	for {
 		select {
