@@ -158,7 +158,9 @@ func (c *compactionPlanHandler) stop() {
 func (c *compactionPlanHandler) updateTask(planID int64, opts ...compactionTaskOpt) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.plans[planID] = c.plans[planID].shadowClone(opts...)
+	if plan, ok := c.plans[planID]; ok {
+		c.plans[planID] = plan.shadowClone(opts...)
+	}
 }
 
 // execCompactionPlan start to execute plan and return immediately
