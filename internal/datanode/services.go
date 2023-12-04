@@ -235,6 +235,7 @@ func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 // Compaction handles compaction request from DataCoord
 // returns status as long as compaction task enqueued or invalid
 func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan) (*commonpb.Status, error) {
+	log := log.Ctx(ctx).With(zap.Int64("planID", req.GetPlanID()))
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		log.Warn("DataNode.Compaction failed", zap.Int64("nodeId", paramtable.GetNodeID()), zap.Error(err))
 		return merr.Status(err), nil
@@ -249,6 +250,20 @@ func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan
 	if !node.compactionExecutor.isValidChannel(req.GetChannel()) {
 		log.Warn("channel of compaction is marked invalid in compaction executor", zap.String("channelName", req.GetChannel()))
 		return merr.Status(merr.WrapErrChannelNotFound(req.GetChannel(), "channel is dropping")), nil
+	}
+
+	meta := ds.metacache
+	for _, segment := range req.GetSegmentBinlogs() {
+		if segment.GetLevel() == datapb.SegmentLevel_L0 {
+			continue
+		}
+		_, ok := meta.GetSegmentByID(segment.GetSegmentID(), metacache.WithSegmentState(commonpb.SegmentState_Flushed))
+		if !ok {
+			log.Warn("compaction plan contains segment which is not flushed",
+				zap.Int64("segmentID", segment.GetSegmentID()),
+			)
+			return merr.Status(merr.WrapErrSegmentNotFound(segment.GetSegmentID(), "segment with flushed state not found")), nil
+		}
 	}
 
 	var task compactor
