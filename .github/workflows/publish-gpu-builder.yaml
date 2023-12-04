@@ -30,6 +30,15 @@ jobs:
       OS_NAME: ${{ matrix.os }}
       IMAGE_ARCH: ${{ matrix.arch }}
     steps:
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 20480
+          # overprovision-lvm: 'true'
+          swap-size-mb: 1024
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
       - name: Checkout
         uses: actions/checkout@v2
       - name: Get version from system time after release step
