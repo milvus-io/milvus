@@ -390,7 +390,7 @@ func TestDataNode(t *testing.T) {
 			Pattern: pattern,
 		}
 
-		//test closed server
+		// test closed server
 		node := &DataNode{}
 		node.session = &sessionutil.Session{ServerID: 1}
 		node.stateCode.Store(commonpb.StateCode_Abnormal)
@@ -1033,12 +1033,11 @@ func TestWatchChannel(t *testing.T) {
 
 		err = kv.RemoveWithPrefix(fmt.Sprintf("%s/%d", Params.DataNodeCfg.ChannelWatchSubPath, Params.DataNodeCfg.GetNodeID()))
 		assert.Nil(t, err)
-		//TODO there is not way to sync Release done, use sleep for now
+		// TODO there is not way to sync Release done, use sleep for now
 		time.Sleep(100 * time.Millisecond)
 
 		exist = node.flowgraphManager.exist(ch)
 		assert.False(t, exist)
-
 	})
 
 	t.Run("handle watch info failed", func(t *testing.T) {
@@ -1256,4 +1255,96 @@ func TestDataNode_ResendSegmentStats(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	assert.Empty(t, resp.GetSegResent())
+}
+
+func TestDatanode_Compaction(t *testing.T) {
+	dmChannelName := "fake-by-dev-rootcoord-dml-test-compaction-1"
+
+	etcdCli, err := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd,
+		Params.EtcdCfg.EtcdUseSSL,
+		Params.EtcdCfg.Endpoints,
+		Params.EtcdCfg.EtcdTLSCert,
+		Params.EtcdCfg.EtcdTLSKey,
+		Params.EtcdCfg.EtcdTLSCACert,
+		Params.EtcdCfg.EtcdTLSMinVersion)
+	require.NoError(t, err)
+	node := newIDLEDataNodeMock(context.TODO(), schemapb.DataType_Int64)
+	node.SetEtcdClient(etcdCli)
+	err = node.Init()
+	assert.Nil(t, err)
+	err = node.Start()
+	assert.Nil(t, err)
+	defer func() {
+		err := node.Stop()
+		assert.Nil(t, err)
+	}()
+
+	vchan := &datapb.VchannelInfo{
+		CollectionID:        1,
+		ChannelName:         dmChannelName,
+		UnflushedSegmentIds: []int64{},
+		FlushedSegmentIds:   []int64{},
+	}
+
+	err = node.flowgraphManager.addAndStart(node, vchan, nil, genTestTickler())
+	require.Nil(t, err)
+
+	fgservice, ok := node.flowgraphManager.getFlowgraphService(dmChannelName)
+	assert.True(t, ok)
+
+	err = fgservice.channel.addSegment(addSegmentReq{
+		segType:     datapb.SegmentType_New,
+		segID:       0,
+		collID:      1,
+		partitionID: 1,
+		startPos:    &internalpb.MsgPosition{},
+		endPos:      &internalpb.MsgPosition{},
+	})
+	assert.Nil(t, err)
+
+	s1 := Segment{segmentID: 100, collectionID: 1}
+	s2 := Segment{segmentID: 200, collectionID: 1}
+	s3 := Segment{segmentID: 300, collectionID: 1}
+	s4 := Segment{segmentID: 400, collectionID: 1}
+	s1.setType(datapb.SegmentType_Flushed)
+	s2.setType(datapb.SegmentType_Flushed)
+	s3.setType(datapb.SegmentType_Flushed)
+	s4.setType(datapb.SegmentType_Normal)
+	fgservice.channel.(*ChannelMeta).segments = map[UniqueID]*Segment{
+		s1.segmentID: &s1,
+		s2.segmentID: &s2,
+		s3.segmentID: &s3,
+		s4.segmentID: &s4,
+	}
+
+	t.Run("channel_not_match", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		resp, err := node.Compaction(ctx, &datapb.CompactionPlan{
+			PlanID:  1000,
+			Channel: dmChannelName + "another",
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+				{SegmentID: s1.segmentID},
+			},
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
+	t.Run("plan_contains_growing", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		resp, err := node.Compaction(ctx, &datapb.CompactionPlan{
+			PlanID:  1000,
+			Channel: dmChannelName,
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+				{SegmentID: s4.segmentID},
+			},
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
 }

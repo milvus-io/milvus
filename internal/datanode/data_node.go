@@ -504,7 +504,6 @@ func (node *DataNode) Start() error {
 	}
 
 	chunkManager, err := node.factory.NewPersistentStorageChunkManager(node.ctx)
-
 	if err != nil {
 		return err
 	}
@@ -833,6 +832,17 @@ func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan
 		log.Warn("channel of compaction is marked invalid in compaction executor", zap.String("channel name", req.GetChannel()))
 		status.Reason = "channel marked invalid"
 		return status, nil
+	}
+
+	for _, segment := range req.GetSegmentBinlogs() {
+		segmentInfo := ds.channel.getSegment(segment.GetSegmentID())
+		if segmentInfo == nil || segmentInfo.getType() != datapb.SegmentType_Flushed {
+			log.Warn("compaction plan contains segment which is not flushed or missing",
+				zap.Int64("segmentID", segment.GetSegmentID()),
+			)
+			status.Reason = fmt.Sprintf("Segment %d is not flushed or missing", segment.GetSegmentID())
+			return status, nil
+		}
 	}
 
 	binlogIO := &binlogIO{node.chunkManager, ds.idAllocator}
@@ -1346,7 +1356,8 @@ func createBinLogsFunc(node *DataNode, req *datapb.ImportTaskRequest, schema *sc
 func saveSegmentFunc(node *DataNode, req *datapb.ImportTaskRequest, res *rootcoordpb.ImportResult, ts Timestamp) importutil.SaveSegmentFunc {
 	importTaskID := req.GetImportTask().GetTaskId()
 	return func(fieldsInsert []*datapb.FieldBinlog, fieldsStats []*datapb.FieldBinlog, segmentID int64,
-		targetChName string, rowCount int64, partID int64) error {
+		targetChName string, rowCount int64, partID int64,
+	) error {
 		logFields := []zap.Field{
 			zap.Int64("task ID", importTaskID),
 			zap.Int64("partition ID", partID),
@@ -1416,7 +1427,8 @@ func saveSegmentFunc(node *DataNode, req *datapb.ImportTaskRequest, res *rootcoo
 }
 
 func composeAssignSegmentIDRequest(rowNum int, shardID int, chNames []string,
-	collID int64, partID int64) *datapb.AssignSegmentIDRequest {
+	collID int64, partID int64,
+) *datapb.AssignSegmentIDRequest {
 	// use the first field's row count as segment row count
 	// all the fields row count are same, checked by ImportWrapper
 	// ask DataCoord to alloc a new segment
@@ -1438,8 +1450,8 @@ func composeAssignSegmentIDRequest(rowNum int, shardID int, chNames []string,
 }
 
 func createBinLogs(rowNum int, schema *schemapb.CollectionSchema, ts Timestamp,
-	fields map[storage.FieldID]storage.FieldData, node *DataNode, segmentID, colID, partID UniqueID) ([]*datapb.FieldBinlog, []*datapb.FieldBinlog, error) {
-
+	fields map[storage.FieldID]storage.FieldData, node *DataNode, segmentID, colID, partID UniqueID,
+) ([]*datapb.FieldBinlog, []*datapb.FieldBinlog, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

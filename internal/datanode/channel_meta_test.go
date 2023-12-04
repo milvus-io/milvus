@@ -200,7 +200,8 @@ func TestChannelMeta_getCollectionAndPartitionID(t *testing.T) {
 			seg.setType(test.segType)
 			channel := &ChannelMeta{
 				segments: map[UniqueID]*Segment{
-					test.segID: &seg},
+					test.segID: &seg,
+				},
 			}
 
 			collID, parID, err := channel.getCollectionAndPartitionID(test.segID)
@@ -617,39 +618,54 @@ func TestChannelMeta_InterfaceMethod(t *testing.T) {
 			outFrom         []UniqueID
 			inSeg           *Segment
 		}{
-			{"mismatch collection", false, false,
-				[]UniqueID{1, 2}, []UniqueID{},
+			{
+				"mismatch collection", false, false,
+				[]UniqueID{1, 2},
+				[]UniqueID{},
 				&Segment{
 					segmentID:    3,
 					collectionID: -1,
-				}},
-			{"no match flushed segment", true, false,
-				[]UniqueID{1, 6}, []UniqueID{1},
+				},
+			},
+			{
+				"no match flushed segment", true, false,
+				[]UniqueID{1, 6},
+				[]UniqueID{1},
 				&Segment{
 					segmentID:    3,
 					collectionID: 1,
-				}},
-			{"numRows==0", true, false,
-				[]UniqueID{1, 2}, []UniqueID{},
+				},
+			},
+			{
+				"numRows==0", true, false,
+				[]UniqueID{1, 2},
+				[]UniqueID{},
 				&Segment{
 					segmentID:    3,
 					collectionID: 1,
 					numRows:      0,
-				}},
-			{"numRows>0", true, true,
-				[]UniqueID{1, 2}, []UniqueID{1, 2},
+				},
+			},
+			{
+				"numRows>0", true, true,
+				[]UniqueID{1, 2},
+				[]UniqueID{1, 2},
 				&Segment{
 					segmentID:    3,
 					collectionID: 1,
 					numRows:      15,
-				}},
-			{"segment exists but not flushed", true, true,
-				[]UniqueID{1, 4}, []UniqueID{1},
+				},
+			},
+			{
+				"segment exists but not flushed", true, false,
+				[]UniqueID{1, 4},
+				[]UniqueID{1},
 				&Segment{
 					segmentID:    3,
 					collectionID: 1,
 					numRows:      15,
-				}},
+				},
+			},
 		}
 
 		for _, test := range tests {
@@ -697,12 +713,11 @@ func TestChannelMeta_InterfaceMethod(t *testing.T) {
 				} else {
 					assert.False(t, channel.hasSegment(3, true))
 				}
-
 			})
 		}
 	})
-
 }
+
 func TestChannelMeta_UpdatePKRange(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -759,7 +774,6 @@ func TestChannelMeta_UpdatePKRange(t *testing.T) {
 		assert.True(t, segNew.isPKExist(pk))
 		assert.True(t, segNormal.isPKExist(pk))
 	}
-
 }
 
 func TestChannelMeta_ChannelCP(t *testing.T) {
@@ -795,7 +809,8 @@ func TestChannelMeta_ChannelCP(t *testing.T) {
 	t.Run("set insertBuffer&deleteBuffer then get", func(t *testing.T) {
 		run := func(curInsertPos, curDeletePos *internalpb.MsgPosition,
 			hisInsertPoss, hisDeletePoss []*internalpb.MsgPosition,
-			ttPos, expectedPos *internalpb.MsgPosition) {
+			ttPos, expectedPos *internalpb.MsgPosition,
+		) {
 			segmentID := UniqueID(1)
 			channel := newChannel(mockVChannel, collID, nil, rc, cm)
 			channel.chunkManager = &mockDataCM{}
