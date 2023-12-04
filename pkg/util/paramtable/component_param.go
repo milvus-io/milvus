@@ -884,6 +884,7 @@ type proxyConfig struct {
 	MaxShardNum                  ParamItem `refreshable:"true"`
 	MaxDimension                 ParamItem `refreshable:"true"`
 	GinLogging                   ParamItem `refreshable:"false"`
+	GinLogSkipPaths              ParamItem `refreshable:"false"`
 	MaxUserNum                   ParamItem `refreshable:"true"`
 	MaxRoleNum                   ParamItem `refreshable:"true"`
 	MaxTaskNum                   ParamItem `refreshable:"false"`
@@ -1012,6 +1013,15 @@ please adjust in embedded Milvus: false`,
 		Export: true,
 	}
 	p.GinLogging.Init(base.mgr)
+
+	p.GinLogSkipPaths = ParamItem{
+		Key:          "proxy.ginLogSkipPaths",
+		Version:      "2.3.0",
+		DefaultValue: "/",
+		Doc:          "skip url path for gin log",
+		Export:       true,
+	}
+	p.GinLogSkipPaths.Init(base.mgr)
 
 	p.MaxUserNum = ParamItem{
 		Key:          "proxy.maxUserNum",

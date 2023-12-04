@@ -172,7 +172,11 @@ func (s *Server) registerHTTPServer() {
 
 func (s *Server) startHTTPServer(errChan chan error) {
 	defer s.wg.Done()
-	ginHandler := gin.Default()
+	ginHandler := gin.New()
+	ginLogger := gin.LoggerWithConfig(gin.LoggerConfig{
+		SkipPaths: proxy.Params.ProxyCfg.GinLogSkipPaths.GetAsStrings(),
+	})
+	ginHandler.Use(ginLogger, gin.Recovery())
 	ginHandler.Use(func(c *gin.Context) {
 		_, err := strconv.ParseBool(c.Request.Header.Get(httpserver.HTTPHeaderAllowInt64))
 		if err != nil {
