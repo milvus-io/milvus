@@ -515,7 +515,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		if !req.Importing && Params.DataCoordCfg.EnableCompaction.GetAsBool() {
 			if req.GetSegLevel() != datapb.SegmentLevel_L0 {
 				err = s.compactionTrigger.triggerSingleCompaction(segment.GetCollectionID(), segment.GetPartitionID(),
-					segmentID, segment.GetInsertChannel())
+					segmentID, segment.GetInsertChannel(), false)
 			}
 
 			if err != nil {
