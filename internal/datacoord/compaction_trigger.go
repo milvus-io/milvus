@@ -48,7 +48,7 @@ type trigger interface {
 	// triggerCompaction triggers a compaction if any compaction condition satisfy.
 	triggerCompaction() error
 	// triggerSingleCompaction triggers a compaction bundled with collection-partition-channel-segment
-	triggerSingleCompaction(collectionID, partitionID, segmentID int64, channel string) error
+	triggerSingleCompaction(collectionID, partitionID, segmentID int64, channel string, blockToSendSignal bool) error
 	// forceTriggerCompaction force to start a compaction
 	forceTriggerCompaction(collectionID int64) (UniqueID, error)
 }
@@ -219,7 +219,7 @@ func (t *compactionTrigger) triggerCompaction() error {
 }
 
 // triggerSingleCompaction triger a compaction bundled with collection-partiiton-channel-segment
-func (t *compactionTrigger) triggerSingleCompaction(collectionID, partitionID, segmentID int64, channel string) error {
+func (t *compactionTrigger) triggerSingleCompaction(collectionID, partitionID, segmentID int64, channel string, blockToSendSignal bool) error {
 	// If AutoCompaction diabled, flush request will not trigger compaction
 	if !Params.DataCoordCfg.GetEnableAutoCompaction() {
 		return nil
@@ -238,7 +238,16 @@ func (t *compactionTrigger) triggerSingleCompaction(collectionID, partitionID, s
 		segmentID:    segmentID,
 		channel:      channel,
 	}
-	t.signals <- signal
+	if blockToSendSignal {
+		t.signals <- signal
+		return nil
+	}
+	select {
+	case t.signals <- signal:
+	default:
+		log.Info("no space to send compaction signal", zap.Int64("collectionID", collectionID), zap.Int64("segmentID", segmentID), zap.String("channel", channel))
+	}
+
 	return nil
 }
 

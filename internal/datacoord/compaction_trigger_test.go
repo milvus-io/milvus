@@ -17,18 +17,18 @@
 package datacoord
 
 import (
+	"context"
 	"fmt"
 	"sort"
+	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/common"
-
-	"github.com/milvus-io/milvus/internal/util/tsoutil"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -1799,4 +1799,80 @@ func Test_getCompactTime(t *testing.T) {
 	ct, err := got.getCompactTime(now, 1)
 	assert.NoError(t, err)
 	assert.NotNil(t, ct)
+}
+
+func Test_triggerSingleCompaction(t *testing.T) {
+	originValue := Params.DataCoordCfg.EnableAutoCompaction.Load()
+	Params.DataCoordCfg.EnableAutoCompaction.Store(true)
+	defer func() {
+		if originValue == nil {
+			Params.DataCoordCfg.EnableAutoCompaction.Store(false)
+		} else {
+			Params.DataCoordCfg.EnableAutoCompaction.Store(originValue)
+		}
+	}()
+	m := &meta{segments: NewSegmentsInfo(), collections: make(map[UniqueID]*collectionInfo)}
+	got := newCompactionTrigger(m, &compactionPlanHandler{}, newMockAllocator(),
+		&SegmentReferenceManager{segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{}}, nil, &ServerHandler{
+			&Server{
+				meta: m,
+			},
+		})
+	got.signals = make(chan *compactionSignal, 1)
+	{
+		err := got.triggerSingleCompaction(1, 1, 1, "a", false)
+		assert.NoError(t, err)
+	}
+	{
+		err := got.triggerSingleCompaction(2, 2, 2, "b", false)
+		assert.NoError(t, err)
+	}
+	var i atomic.Value
+	i.Store(0)
+	check := func() {
+		for {
+			select {
+			case signal := <-got.signals:
+				x := i.Load().(int)
+				i.Store(x + 1)
+				assert.EqualValues(t, 1, signal.collectionID)
+			default:
+				return
+			}
+		}
+	}
+	check()
+	assert.Equal(t, 1, i.Load().(int))
+
+	{
+		err := got.triggerSingleCompaction(3, 3, 3, "c", true)
+		assert.NoError(t, err)
+	}
+	var j atomic.Value
+	j.Store(0)
+	go func() {
+		timeoutCtx, cancelFunc := context.WithTimeout(context.Background(), time.Second)
+		defer cancelFunc()
+		for {
+			select {
+			case signal := <-got.signals:
+				x := j.Load().(int)
+				j.Store(x + 1)
+				if x == 0 {
+					assert.EqualValues(t, 3, signal.collectionID)
+				} else if x == 1 {
+					assert.EqualValues(t, 4, signal.collectionID)
+				}
+			case <-timeoutCtx.Done():
+				return
+			}
+		}
+	}()
+	{
+		err := got.triggerSingleCompaction(4, 4, 4, "d", true)
+		assert.NoError(t, err)
+	}
+	assert.Eventually(t, func() bool {
+		return j.Load().(int) == 2
+	}, 2*time.Second, 500*time.Millisecond)
 }
