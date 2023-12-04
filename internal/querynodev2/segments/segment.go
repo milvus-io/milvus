@@ -169,21 +169,28 @@ func NewSegment(collection *Collection,
 	level datapb.SegmentLevel,
 ) (Segment, error) {
 	/*
-		CSegmentInterface
+		CNewSegmentResult
 		NewSegment(CCollection collection, uint64_t segment_id, SegmentType seg_type);
 	*/
 	if level == datapb.SegmentLevel_L0 {
 		return NewL0Segment(collection, segmentID, partitionID, collectionID, shard, segmentType, version, startPosition, deltaPosition)
 	}
-
-	var segmentPtr C.CSegmentInterface
+	var cSegType C.SegmentType
 	switch segmentType {
 	case SegmentTypeSealed:
-		segmentPtr = C.NewSegment(collection.collectionPtr, C.Sealed, C.int64_t(segmentID))
+		cSegType = C.Sealed
 	case SegmentTypeGrowing:
-		segmentPtr = C.NewSegment(collection.collectionPtr, C.Growing, C.int64_t(segmentID))
+		cSegType = C.Growing
 	default:
 		return nil, fmt.Errorf("illegal segment type %d when create segment %d", segmentType, segmentID)
+	}
+
+	result := C.NewSegment(collection.collectionPtr, cSegType, C.int64_t(segmentID))
+	status := result.status
+	segmentPtr := result.segmentPtr
+
+	if err := HandleCStatus(&status, "NewSegmentFailed"); err != nil {
+		return nil, err
 	}
 
 	log.Info("create segment",

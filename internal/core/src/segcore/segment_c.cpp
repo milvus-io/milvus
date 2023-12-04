@@ -28,30 +28,40 @@
 #include "storage/space.h"
 
 //////////////////////////////    common interfaces    //////////////////////////////
-CSegmentInterface
+CNewSegmentResult
 NewSegment(CCollection collection, SegmentType seg_type, int64_t segment_id) {
-    auto col = static_cast<milvus::segcore::Collection*>(collection);
+    try {
+        auto col = static_cast<milvus::segcore::Collection*>(collection);
 
-    std::unique_ptr<milvus::segcore::SegmentInterface> segment;
-    switch (seg_type) {
-        case Growing: {
-            auto seg = milvus::segcore::CreateGrowingSegment(
-                col->get_schema(), col->GetIndexMeta(), segment_id);
-            segment = std::move(seg);
-            break;
+        std::unique_ptr<milvus::segcore::SegmentInterface> segment;
+        switch (seg_type) {
+            case Growing: {
+                auto seg = milvus::segcore::CreateGrowingSegment(
+                    col->get_schema(), col->GetIndexMeta(), segment_id);
+                segment = std::move(seg);
+                break;
+            }
+            case Sealed:
+            case Indexing:
+                segment = milvus::segcore::CreateSealedSegment(
+                    col->get_schema(), col->GetIndexMeta(), segment_id);
+                break;
+            default:
+                LOG_SEGCORE_ERROR_ << "invalid segment type "
+                                   << static_cast<int32_t>(seg_type);
+                return CNewSegmentResult{
+                    milvus::FailureCStatus(milvus::UnexpectedError,
+                                           "invalid segment type"),
+                    nullptr};
         }
-        case Sealed:
-        case Indexing:
-            segment = milvus::segcore::CreateSealedSegment(
-                col->get_schema(), col->GetIndexMeta(), segment_id);
-            break;
-        default:
-            LOG_SEGCORE_ERROR_ << "invalid segment type "
-                               << static_cast<int32_t>(seg_type);
-            break;
-    }
 
-    return segment.release();
+        return CNewSegmentResult{
+            milvus::SuccessCStatus(),
+            segment.release(),
+        };
+    } catch (std::exception& e) {
+        return CNewSegmentResult{milvus::FailureCStatus(&e), nullptr};
+    }
 }
 
 void

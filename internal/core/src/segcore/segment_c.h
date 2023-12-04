@@ -24,12 +24,12 @@ extern "C" {
 #include "segcore/load_index_c.h"
 #include "segcore/load_field_data_c.h"
 
-typedef void* CSegmentInterface;
+// typedef void* CSegmentInterface;
 typedef void* CSearchResult;
 typedef CProto CRetrieveResult;
 
 //////////////////////////////    common interfaces    //////////////////////////////
-CSegmentInterface
+CNewSegmentResult
 NewSegment(CCollection collection, SegmentType seg_type, int64_t segment_id);
 
 void
