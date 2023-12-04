@@ -353,6 +353,13 @@ func (ob *TargetObserver) sync(ctx context.Context, replicaID int64, leaderView 
 		return false
 	}
 
+	// Get collection index info
+	indexInfo, err := ob.broker.DescribeIndex(ctx, leaderView.CollectionID)
+	if err != nil {
+		log.Warn("fail to get index info of collection", zap.Error(err))
+		return false
+	}
+
 	req := &querypb.SyncDistributionRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_SyncDistribution),
@@ -367,7 +374,8 @@ func (ob *TargetObserver) sync(ctx context.Context, replicaID int64, leaderView 
 			CollectionID: leaderView.CollectionID,
 			PartitionIDs: partitions,
 		},
-		Version: time.Now().UnixNano(),
+		Version:       time.Now().UnixNano(),
+		IndexInfoList: indexInfo,
 	}
 	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
