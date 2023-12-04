@@ -30,7 +30,7 @@ func FilterWithDelete(r *reader) (Filter, error) {
 	}
 	return func(row map[int64]interface{}) bool {
 		rowPk := row[pkField.GetFieldID()]
-		for _, pk := range r.delData.Pks {
+		for _, pk := range r.deleteData.Pks {
 			if pk.GetValue() == rowPk {
 				return false
 			}
@@ -39,9 +39,9 @@ func FilterWithDelete(r *reader) (Filter, error) {
 	}, nil
 }
 
-func FilterWithTimerange(r *reader) Filter {
+func FilterWithTimeRange(tsStart, tsEnd uint64) Filter {
 	return func(row map[int64]interface{}) bool {
 		ts := row[common.TimeStampField].(int64)
-		return uint64(ts) >= r.tsBegin && uint64(ts) <= r.tsEnd
+		return uint64(ts) >= tsStart && uint64(ts) <= tsEnd
 	}
 }

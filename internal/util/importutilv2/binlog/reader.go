@@ -17,12 +17,12 @@
 package binlog
 
 import (
-	"context"
 	"encoding/json"
+	"math"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -31,41 +31,53 @@ type reader struct {
 	cm     storage.ChunkManager
 	schema *schemapb.CollectionSchema
 
-	delData    *storage.DeleteData
-	insertLogs []*datapb.FieldBinlog
-	readIdx    int
+	deleteData *storage.DeleteData
+	insertLogs map[int64][]string // fieldID -> binlogs
 
+	readIdx int
 	filters []Filter
-
-	tsBegin uint64
-	tsEnd   uint64
 }
 
-func (r *reader) Init(paths []string) error {
-	insertLogs, deltaLogs, err := r.ListBinlogs(paths)
-	if err != nil {
-		return err
+func NewReader(cm storage.ChunkManager,
+	schema *schemapb.CollectionSchema,
+	paths []string, tsStart, tsEnd uint64) (importutilv2.Reader, error) {
+	r := &reader{
+		cm:     cm,
+		schema: schema,
 	}
-	r.delData, err = r.ReadDelta(deltaLogs)
+	err := r.Init(paths, tsStart, tsEnd)
+	if err != nil {
+		return nil, err
+	}
+	return r, nil
+}
+
+func (r *reader) Init(paths []string, tsStart, tsEnd uint64) error {
+	if tsStart != 0 || tsEnd != math.MaxUint64 {
+		r.filters = append(r.filters, FilterWithTimeRange(tsStart, tsEnd))
+	}
+	insertLogs, deltaLogs, err := listBinlogs(r.cm, paths)
 	if err != nil {
 		return err
 	}
 	r.insertLogs = insertLogs
-	isDeleted, err := FilterWithDelete(r)
-	if err != nil {
-		return err
-	}
-	r.filters = []Filter{
-		isDeleted,
-		FilterWithTimerange(r),
+	if len(deltaLogs) > 0 {
+		r.deleteData, err = r.ReadDelete(deltaLogs, tsStart, tsEnd)
+		if err != nil {
+			return err
+		}
+		deleteFilter, err := FilterWithDelete(r)
+		if err != nil {
+			return err
+		}
+		r.filters = append(r.filters, deleteFilter)
 	}
 	return nil
 }
 
-func (r *reader) ReadDelta(deltaLogs *datapb.FieldBinlog) (*storage.DeleteData, error) {
+func (r *reader) ReadDelete(deltaLogs []string, tsStart, tsEnd uint64) (*storage.DeleteData, error) {
 	deleteData := storage.NewDeleteData(nil, nil)
-	for _, binlog := range deltaLogs.GetBinlogs() {
-		path := binlog.GetLogPath()
+	for _, path := range deltaLogs {
 		reader, err := newBinlogReader(r.cm, path)
 		if err != nil {
 			return nil, err
@@ -80,7 +92,7 @@ func (r *reader) ReadDelta(deltaLogs *datapb.FieldBinlog) (*storage.DeleteData, 
 			if err != nil {
 				return nil, err
 			}
-			if dl.Ts >= r.tsBegin && dl.Ts <= r.tsEnd {
+			if dl.Ts >= tsStart && dl.Ts <= tsEnd {
 				deleteData.Append(dl.Pk, dl.Ts)
 			}
 		}
@@ -88,40 +100,21 @@ func (r *reader) ReadDelta(deltaLogs *datapb.FieldBinlog) (*storage.DeleteData, 
 	return deleteData, nil
 }
 
-func (r *reader) ListBinlogs(paths []string) ([]*datapb.FieldBinlog, *datapb.FieldBinlog, error) {
-	if len(paths) < 1 {
-		return nil, nil, merr.WrapErrImportFailed("no insert binlogs to import")
-	}
-	_, _, err := r.cm.ListWithPrefix(context.Background(), paths[0], true)
-	if err != nil {
-		return nil, nil, err
-	}
-	// TODO: parse logPaths to fieldBinlog
-	if len(paths) < 2 {
-		return nil, nil, nil
-	}
-	_, _, err = r.cm.ListWithPrefix(context.Background(), paths[1], true)
-	if err != nil {
-		return nil, nil, err
-	}
-	return nil, nil, nil
-}
-
 func (r *reader) Next(count int64) (*storage.InsertData, error) {
 	insertData, err := storage.NewInsertData(r.schema)
 	if err != nil {
 		return nil, err
 	}
-	if r.readIdx == len(r.insertLogs[0].GetBinlogs()) {
+	if r.readIdx == len(r.insertLogs[0]) {
 		return nil, nil
 	}
-	for _, fieldBinlog := range r.insertLogs {
-		field := typeutil.GetField(r.schema, fieldBinlog.GetFieldID())
+	for fieldID, binlogs := range r.insertLogs {
+		field := typeutil.GetField(r.schema, fieldID)
 		if field == nil {
-			return nil, merr.WrapErrFieldNotFound(fieldBinlog.GetFieldID())
+			return nil, merr.WrapErrFieldNotFound(fieldID)
 		}
-		path := fieldBinlog.GetBinlogs()[r.readIdx].GetLogPath()
-		cr, err := NewColumnReader(r.cm, field, path)
+		path := binlogs[r.readIdx]
+		cr, err := newColumnReader(r.cm, field, path)
 		if err != nil {
 			return nil, err
 		}
@@ -131,8 +124,19 @@ func (r *reader) Next(count int64) (*storage.InsertData, error) {
 		}
 		insertData.Data[field.GetFieldID()] = fieldData
 	}
+	insertData, err = r.Filter(insertData)
+	if err != nil {
+		return nil, err
+	}
+	r.readIdx++
+	return insertData, nil
+}
 
-	res, err := storage.NewInsertData(r.schema)
+func (r *reader) Filter(insertData *storage.InsertData) (*storage.InsertData, error) {
+	if len(r.filters) == 0 {
+		return insertData, nil
+	}
+	result, err := storage.NewInsertData(r.schema)
 	if err != nil {
 		return nil, err
 	}
@@ -143,11 +147,10 @@ func (r *reader) Next(count int64) (*storage.InsertData, error) {
 				continue
 			}
 		}
-		err = res.Append(row)
+		err = result.Append(row)
 		if err != nil {
 			return nil, err
 		}
 	}
-	r.readIdx++
-	return res, nil
+	return result, nil
 }
