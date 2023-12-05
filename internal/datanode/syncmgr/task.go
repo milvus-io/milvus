@@ -188,6 +188,8 @@ func (t *SyncTask) serializeDeleteData() error {
 	t.segmentData[blobPath] = value
 	data.LogSize = int64(len(blob.Value))
 	data.LogPath = blobPath
+	data.TimestampFrom = t.tsFrom
+	data.TimestampTo = t.tsTo
 	data.EntriesNum = t.deleteData.RowCount
 	t.appendDeltalog(data)
 
