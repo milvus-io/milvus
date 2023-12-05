@@ -15,8 +15,8 @@ impl RustArray {
         let v = vec.leak();
         RustArray {
             array: v.as_mut_ptr(),
-            len: len.try_into().expect("Integer Overflow"),
-            cap: cap.try_into().expect("Integer Overflow"),
+            len,
+            cap,
         }
     }
 }
