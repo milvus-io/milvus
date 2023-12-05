@@ -2585,6 +2585,8 @@ type dataNodeConfig struct {
 
 	// timeout for bulkinsert
 	BulkInsertTimeoutSeconds ParamItem `refreshable:"true"`
+	BulkInsertReadBufferSize ParamItem `refreshable:"true"`
+	BulkInsertMaxMemorySize  ParamItem `refreshable:"true"`
 
 	// Skip BF
 	SkipBFStatsLoad ParamItem `refreshable:"true"`
@@ -2745,6 +2747,22 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		DefaultValue: "18000",
 	}
 	p.BulkInsertTimeoutSeconds.Init(base.mgr)
+
+	p.BulkInsertReadBufferSize = ParamItem{
+		Key:          "datanode.bulkinsert.readBufferSize",
+		Version:      "2.3.4",
+		PanicIfEmpty: false,
+		DefaultValue: "16777216",
+	}
+	p.BulkInsertReadBufferSize.Init(base.mgr)
+
+	p.BulkInsertMaxMemorySize = ParamItem{
+		Key:          "datanode.bulkinsert.maxMemorySize",
+		Version:      "2.3.4",
+		PanicIfEmpty: false,
+		DefaultValue: "6442450944",
+	}
+	p.BulkInsertMaxMemorySize.Init(base.mgr)
 
 	p.ChannelWorkPoolSize = ParamItem{
 		Key:          "datanode.channel.workPoolSize",
