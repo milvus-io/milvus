@@ -29,12 +29,13 @@ type ReaderSuite struct {
 	suite.Suite
 
 	// test param
-	schema           *schemapb.CollectionSchema
-	tsField          []uint64
-	insertFieldsData map[int64][]any
-	deleteData       []any
-	tsStart          uint64
-	tsEnd            uint64
+	schema  *schemapb.CollectionSchema
+	numRows int
+
+	deleteData []any
+	tsField    []uint64
+	tsStart    uint64
+	tsEnd      uint64
 }
 
 func (suite *ReaderSuite) SetupSuite() {
@@ -47,7 +48,79 @@ func (suite *ReaderSuite) SetupTest() {
 	reader, err := NewReader(cm)
 }
 
-func (suite *ReaderSuite) TestReader() {
+func (suite *ReaderSuite) run(dt schemapb.DataType) {
+	const (
+		insertPrefix = "mock-insert-binlog-prefix"
+		deltaPrefix  = "mock-delta-binlog-prefix"
+
+		tsStart = 2000
+		tsEnd   = 5000
+	)
+	var (
+		insertBinlogs = []string{
+			"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/0/435978159903735801",
+			"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/0/435978159903735802",
+			"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/0/435978159903735803",
+			"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/1/435978159903735811",
+			"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/1/435978159903735812",
+			"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/1/435978159903735813",
+			"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/100/435978159903735821",
+			"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/100/435978159903735822",
+			"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/100/435978159903735823",
+			"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/101/435978159903735831",
+			"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/101/435978159903735832",
+			"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/101/435978159903735833",
+			"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/102/435978159903735841",
+			"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/102/435978159903735842",
+			"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/102/435978159903735843",
+		}
+		deltaLogs = []string{
+			"backup/bak1/data/delta_log/435978159196147009/435978159196147010/435978159261483009/434574382554415105",
+			"backup/bak1/data/delta_log/435978159196147009/435978159196147010/435978159261483009/434574382554415106",
+			"backup/bak1/data/delta_log/435978159196147009/435978159196147010/435978159261483009/434574382554415107",
+		}
+	)
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      100,
+				Name:         "pk",
+				IsPrimaryKey: true,
+				DataType:     schemapb.DataType_Int64,
+			},
+			{
+				FieldID:  101,
+				Name:     "vec",
+				DataType: schemapb.DataType_FloatVector,
+			},
+			{
+				FieldID:  102,
+				Name:     dt.String(),
+				DataType: dt,
+			},
+		},
+	}
+	cm := mocks.NewChunkManager(suite.T())
+	reader, err := NewReader(cm, schema, []string{insertPrefix, deltaPrefix}, tsStart, tsEnd)
+	suite.NoError(err)
+
+	cm.EXPECT().ListWithPrefix(mock.Anything, insertPrefix, mock.Anything).Return(insertBinlogs, nil, nil)
+	cm.EXPECT().ListWithPrefix(mock.Anything, deltaPrefix, mock.Anything).Return(deltaLogs, nil, nil)
+	for _, path := range insertBinlogs {
+		cm.EXPECT().Read(mock.Anything, path).Return(nil, nil)
+	}
+}
+
+func (suite *ReaderSuite) newField(dt schemapb.DataType, fieldID int64, isPK bool) *schemapb.FieldSchema {
+	return &schemapb.FieldSchema{
+		FieldID:      fieldID,
+		Name:         dt.String(),
+		IsPrimaryKey: isPK,
+		DataType:     dt,
+	}
+}
+
+func (suite *ReaderSuite) TestReadBool() {
 
 }
 
