@@ -62,12 +62,12 @@ impl IndexWriterWrapper {
         }
         let index_writer = index.writer_with_num_threads(1, 15_000_000).unwrap();
         IndexWriterWrapper {
-            field_name: field_name,
-            field: field,
-            data_type: data_type,
-            path: path,
-            index: index,
-            index_writer: index_writer,
+            field_name,
+            field,
+            data_type,
+            path,
+            index,
+            index_writer,
         }
     }
 
