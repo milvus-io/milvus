@@ -236,12 +236,12 @@ class TypedScalarIndexTestV2 : public ::testing::Test {
         arrow::NumericBuilder<typename Helper::C> scalar_builder;
         arrow::FixedSizeBinaryBuilder vec_builder(
             arrow::fixed_size_binary(vec_size));
-        auto xb_bin_data = dataset.get_col<uint8_t>(milvus::FieldId(100));
+        auto xb_data = dataset.get_col<float>(milvus::FieldId(100));
+        auto data = reinterpret_cast<char*>(xb_data.data());
         for (auto i = 0; i < nb; ++i) {
             EXPECT_TRUE(pk_builder.Append(i).ok());
             EXPECT_TRUE(ts_builder.Append(i).ok());
-            EXPECT_TRUE(
-                vec_builder.Append(xb_bin_data.data() + i * vec_size).ok());
+            EXPECT_TRUE(vec_builder.Append(data + i * vec_size).ok());
         }
         for (auto& v : scalars) {
             EXPECT_TRUE(scalar_builder.Append(v).ok());
@@ -291,9 +291,7 @@ class TypedScalarIndexTestV2 : public ::testing::Test {
         boost::filesystem::create_directory(temp_path);
 
         auto vec_size = DIM * 4;
-        auto vec_field_data_type = milvus::DataType::VECTOR_FLOAT;
         auto dataset = GenDataset(nb, knowhere::metric::L2, false);
-
         auto scalars = GenArr<T>(nb);
         space = TestSpace(vec_size, dataset, scalars);
     }
