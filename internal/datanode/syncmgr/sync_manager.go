@@ -40,7 +40,7 @@ type SyncManager interface {
 	// SyncData is the method to submit sync task.
 	SyncData(ctx context.Context, task Task) *conc.Future[error]
 	// GetEarliestPosition returns the earliest position (normally start position) of the processing sync task of provided channel.
-	GetEarliestPosition(channel string) *msgpb.MsgPosition
+	GetEarliestPosition(channel string) (int64, *msgpb.MsgPosition)
 	// Block allows caller to block tasks of provided segment id.
 	// normally used by compaction task.
 	// if levelzero delta policy is enabled, this shall be an empty operation.
@@ -88,8 +88,9 @@ func (mgr syncManager) SyncData(ctx context.Context, task Task) *conc.Future[err
 	})
 }
 
-func (mgr syncManager) GetEarliestPosition(channel string) *msgpb.MsgPosition {
+func (mgr syncManager) GetEarliestPosition(channel string) (int64, *msgpb.MsgPosition) {
 	var cp *msgpb.MsgPosition
+	var segmentID int64
 	mgr.tasks.Range(func(_ string, task Task) bool {
 		if task.StartPosition() == nil {
 			return true
@@ -97,11 +98,12 @@ func (mgr syncManager) GetEarliestPosition(channel string) *msgpb.MsgPosition {
 		if task.ChannelName() == channel {
 			if cp == nil || task.StartPosition().GetTimestamp() < cp.GetTimestamp() {
 				cp = task.StartPosition()
+				segmentID = task.SegmentID()
 			}
 		}
 		return true
 	})
-	return cp
+	return segmentID, cp
 }
 
 func (mgr syncManager) Block(segmentID int64) {
