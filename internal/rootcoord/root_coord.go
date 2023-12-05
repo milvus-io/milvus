@@ -1057,8 +1057,6 @@ func (c *Core) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequ
 	log := log.Ctx(ctx).With(zap.String("collectionName", in.GetCollectionName()),
 		zap.Uint64("ts", ts))
 
-	log.Info("received request to has collection")
-
 	t := &hasCollectionTask{
 		baseTask: newBaseTask(ctx, c),
 		Req:      in,
@@ -1084,8 +1082,6 @@ func (c *Core) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequ
 	metrics.RootCoordDDLReqCounter.WithLabelValues("HasCollection", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("HasCollection").Observe(float64(tr.ElapseSpan().Milliseconds()))
 	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("HasCollection").Observe(float64(t.queueDur.Milliseconds()))
-
-	log.Info("done to has collection", zap.Bool("exist", t.Rsp.GetValue()))
 
 	return t.Rsp, nil
 }
@@ -1145,10 +1141,6 @@ func (c *Core) describeCollectionImpl(ctx context.Context, in *milvuspb.Describe
 		zap.Uint64("ts", ts),
 		zap.Bool("allowUnavailable", allowUnavailable))
 
-	// TODO(longjiquan): log may be very frequent here.
-
-	log.Info("received request to describe collection")
-
 	t := &describeCollectionTask{
 		baseTask:         newBaseTask(ctx, c),
 		Req:              in,
@@ -1175,8 +1167,6 @@ func (c *Core) describeCollectionImpl(ctx context.Context, in *milvuspb.Describe
 	metrics.RootCoordDDLReqCounter.WithLabelValues("DescribeCollection", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("DescribeCollection").Observe(float64(tr.ElapseSpan().Milliseconds()))
 	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("DescribeCollection").Observe(float64(t.queueDur.Milliseconds()))
-
-	log.Info("done to describe collection", zap.Int64("collection_id", t.Rsp.GetCollectionID()))
 
 	return t.Rsp, nil
 }
@@ -1211,8 +1201,6 @@ func (c *Core) ShowCollections(ctx context.Context, in *milvuspb.ShowCollections
 	log := log.Ctx(ctx).With(zap.String("dbname", in.GetDbName()),
 		zap.Uint64("ts", ts))
 
-	log.Info("received request to show collections")
-
 	t := &showCollectionTask{
 		baseTask: newBaseTask(ctx, c),
 		Req:      in,
@@ -1238,8 +1226,6 @@ func (c *Core) ShowCollections(ctx context.Context, in *milvuspb.ShowCollections
 	metrics.RootCoordDDLReqCounter.WithLabelValues("ShowCollections", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("ShowCollections").Observe(float64(tr.ElapseSpan().Milliseconds()))
 	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("ShowCollections").Observe(float64(t.queueDur.Milliseconds()))
-
-	log.Info("done to show collections", zap.Int("num of collections", len(t.Rsp.GetCollectionNames()))) // maybe very large, print number instead.
 
 	return t.Rsp, nil
 }
@@ -1418,8 +1404,6 @@ func (c *Core) HasPartition(ctx context.Context, in *milvuspb.HasPartitionReques
 		zap.String("partition", in.GetPartitionName()),
 		zap.Uint64("ts", ts))
 
-	log.Info("received request to has partition")
-
 	t := &hasPartitionTask{
 		baseTask: newBaseTask(ctx, c),
 		Req:      in,
@@ -1446,8 +1430,6 @@ func (c *Core) HasPartition(ctx context.Context, in *milvuspb.HasPartitionReques
 	metrics.RootCoordDDLReqLatency.WithLabelValues("HasPartition").Observe(float64(tr.ElapseSpan().Milliseconds()))
 	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("HasPartition").Observe(float64(t.queueDur.Milliseconds()))
 
-	log.Info("done to has partition", zap.Bool("exist", t.Rsp.GetValue()))
-
 	return t.Rsp, nil
 }
 
@@ -1465,8 +1447,6 @@ func (c *Core) showPartitionsImpl(ctx context.Context, in *milvuspb.ShowPartitio
 		zap.Int64("collection_id", in.GetCollectionID()),
 		zap.Strings("partitions", in.GetPartitionNames()),
 		zap.Bool("allowUnavailable", allowUnavailable))
-
-	log.Info("received request to show partitions")
 
 	t := &showPartitionTask{
 		baseTask:         newBaseTask(ctx, c),
@@ -1496,8 +1476,6 @@ func (c *Core) showPartitionsImpl(ctx context.Context, in *milvuspb.ShowPartitio
 	metrics.RootCoordDDLReqCounter.WithLabelValues("ShowPartitions", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("ShowPartitions").Observe(float64(tr.ElapseSpan().Milliseconds()))
 	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("ShowPartitions").Observe(float64(t.queueDur.Milliseconds()))
-
-	log.Info("done to show partitions", zap.Strings("partitions", t.Rsp.GetPartitionNames()))
 
 	return t.Rsp, nil
 }
