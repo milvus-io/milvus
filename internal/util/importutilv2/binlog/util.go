@@ -23,7 +23,9 @@ import (
 	"sort"
 	"strconv"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
@@ -92,4 +94,28 @@ func listBinlogs(cm storage.ChunkManager, paths []string) (map[int64][]string, [
 		return nil, nil, err
 	}
 	return insertLogs, deltaLogs, nil
+}
+
+func verify(schema *schemapb.CollectionSchema, insertLogs map[int64][]string) error {
+	// 1. check schema fields
+	for _, field := range schema.GetFields() {
+		if _, ok := insertLogs[field.GetFieldID()]; !ok {
+			return merr.WrapErrImportFailed(fmt.Sprintf("no binlog for field:%s", field.GetName()))
+		}
+	}
+	// 2. check system fields (ts and rowID)
+	if _, ok := insertLogs[common.RowIDField]; !ok {
+		return merr.WrapErrImportFailed("no binlog for RowID field")
+	}
+	if _, ok := insertLogs[common.TimeStampField]; !ok {
+		return merr.WrapErrImportFailed("no binlog for TimestampField")
+	}
+	// 3. check file count
+	for fieldID, logs := range insertLogs {
+		if len(logs) != len(insertLogs[common.RowIDField]) {
+			return merr.WrapErrImportFailed(fmt.Sprintf("misaligned binlog count, field%d:%d, field%d:%d",
+				fieldID, len(logs), common.RowIDField, len(insertLogs[common.RowIDField])))
+		}
+	}
+	return nil
 }

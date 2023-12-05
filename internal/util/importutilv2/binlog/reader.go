@@ -60,6 +60,10 @@ func (r *reader) Init(paths []string, tsStart, tsEnd uint64) error {
 	if err != nil {
 		return err
 	}
+	err = verify(r.schema, insertLogs)
+	if err != nil {
+		return err
+	}
 	r.insertLogs = insertLogs
 	if len(deltaLogs) > 0 {
 		r.deleteData, err = r.ReadDelete(deltaLogs, tsStart, tsEnd)
