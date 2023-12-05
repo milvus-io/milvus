@@ -116,9 +116,6 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegments() {
 		PartitionID:   1,
 		InsertChannel: "test-insert-channel",
 	}
-	resp := &datapb.GetSegmentInfoResponse{
-		Infos: []*datapb.SegmentInfo{info},
-	}
 	schema := utils.CreateTestSchema()
 	suite.broker.EXPECT().DescribeCollection(mock.Anything, int64(1)).Return(&milvuspb.DescribeCollectionResponse{Schema: schema}, nil)
 	suite.broker.EXPECT().GetSegmentInfo(mock.Anything, int64(1)).Return(
@@ -137,7 +134,7 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegments() {
 	view := utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, map[int64]*meta.Segment{})
 	view.TargetVersion = observer.target.GetCollectionTargetVersion(1, meta.CurrentTarget)
 	observer.dist.LeaderViewManager.Update(2, view)
-	loadInfo := utils.PackSegmentLoadInfo(resp, nil)
+	loadInfo := utils.PackSegmentLoadInfo(info, nil, nil)
 
 	expectReqeustFunc := func(version int64) *querypb.SyncDistributionRequest {
 		return &querypb.SyncDistributionRequest{
@@ -214,9 +211,6 @@ func (suite *LeaderObserverTestSuite) TestIgnoreSyncLoadedSegments() {
 		PartitionID:   1,
 		InsertChannel: "test-insert-channel",
 	}
-	resp := &datapb.GetSegmentInfoResponse{
-		Infos: []*datapb.SegmentInfo{info},
-	}
 	suite.broker.EXPECT().GetSegmentInfo(mock.Anything, int64(1)).Return(
 		&datapb.GetSegmentInfoResponse{Infos: []*datapb.SegmentInfo{info}}, nil)
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
@@ -233,7 +227,7 @@ func (suite *LeaderObserverTestSuite) TestIgnoreSyncLoadedSegments() {
 	view := utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, map[int64]*meta.Segment{})
 	view.TargetVersion = observer.target.GetCollectionTargetVersion(1, meta.CurrentTarget)
 	observer.dist.LeaderViewManager.Update(2, view)
-	loadInfo := utils.PackSegmentLoadInfo(resp, nil)
+	loadInfo := utils.PackSegmentLoadInfo(info, nil, nil)
 
 	expectReqeustFunc := func(version int64) *querypb.SyncDistributionRequest {
 		return &querypb.SyncDistributionRequest{
@@ -348,9 +342,6 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegmentsWithReplicas() {
 		PartitionID:   1,
 		InsertChannel: "test-insert-channel",
 	}
-	resp := &datapb.GetSegmentInfoResponse{
-		Infos: []*datapb.SegmentInfo{info},
-	}
 	schema := utils.CreateTestSchema()
 	suite.broker.EXPECT().GetSegmentInfo(mock.Anything, int64(1)).Return(
 		&datapb.GetSegmentInfoResponse{Infos: []*datapb.SegmentInfo{info}}, nil)
@@ -369,7 +360,7 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegmentsWithReplicas() {
 	view2 := utils.CreateTestLeaderView(4, 1, "test-insert-channel", map[int64]int64{1: 4}, map[int64]*meta.Segment{})
 	view.TargetVersion = observer.target.GetCollectionTargetVersion(1, meta.CurrentTarget)
 	observer.dist.LeaderViewManager.Update(4, view2)
-	loadInfo := utils.PackSegmentLoadInfo(resp, nil)
+	loadInfo := utils.PackSegmentLoadInfo(info, nil, nil)
 
 	expectReqeustFunc := func(version int64) *querypb.SyncDistributionRequest {
 		return &querypb.SyncDistributionRequest{
