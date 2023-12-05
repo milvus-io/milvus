@@ -21,6 +21,8 @@ const (
 	CollectionMetaPrefixV1   = "queryCoord-collectionMeta"
 	ReplicaMetaPrefixV1      = "queryCoord-ReplicaMeta"
 	ResourceGroupPrefix      = "queryCoord-ResourceGroup"
+
+	MetaOpsBatchSize = 128
 )
 
 type Catalog struct {
@@ -195,27 +197,42 @@ func (s Catalog) ReleaseCollection(collection int64) error {
 	if err != nil {
 		return err
 	}
-	partitions := make([]*querypb.PartitionLoadInfo, 0)
+	partitionIDs := make([]int64, 0)
 	for _, v := range values {
 		info := querypb.PartitionLoadInfo{}
 		if err = proto.Unmarshal([]byte(v), &info); err != nil {
 			return err
 		}
-		partitions = append(partitions, &info)
+		partitionIDs = append(partitionIDs, (&info).GetPartitionID())
 	}
 	// remove collection and obtained partitions
-	keys := lo.Map(partitions, func(partition *querypb.PartitionLoadInfo, _ int) string {
-		return EncodePartitionLoadInfoKey(collection, partition.GetPartitionID())
-	})
-	k := EncodeCollectionLoadInfoKey(collection)
-	keys = append(keys, k)
-	return s.cli.MultiRemove(keys)
+	collectionKey := EncodeCollectionLoadInfoKey(collection)
+	err = s.cli.Remove(collectionKey)
+	if err != nil {
+		return err
+	}
+	return s.ReleasePartition(collection, partitionIDs...)
 }
 
 func (s Catalog) ReleasePartition(collection int64, partitions ...int64) error {
 	keys := lo.Map(partitions, func(partition int64, _ int) string {
 		return EncodePartitionLoadInfoKey(collection, partition)
 	})
+	if len(partitions) >= MetaOpsBatchSize {
+		index := 0
+		for index < len(partitions) {
+			endIndex := index + MetaOpsBatchSize
+			if endIndex > len(partitions) {
+				endIndex = len(partitions)
+			}
+			err := s.cli.MultiRemove(keys[index:endIndex])
+			if err != nil {
+				return err
+			}
+			index = endIndex
+		}
+		return nil
+	}
 	return s.cli.MultiRemove(keys)
 }
 
