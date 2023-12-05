@@ -19,7 +19,6 @@ package binlog
 import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/util/importutilv2"
 )
 
 type columnReader struct {
@@ -27,7 +26,7 @@ type columnReader struct {
 	fieldSchema *schemapb.FieldSchema
 }
 
-func newColumnReader(cm storage.ChunkManager, fieldSchema *schemapb.FieldSchema, path string) (importutilv2.ColumnReader, error) {
+func newColumnReader(cm storage.ChunkManager, fieldSchema *schemapb.FieldSchema, path string) (*columnReader, error) {
 	reader, err := newBinlogReader(cm, path)
 	if err != nil {
 		return nil, err

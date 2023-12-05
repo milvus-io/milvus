@@ -22,7 +22,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -40,7 +39,7 @@ type reader struct {
 
 func NewReader(cm storage.ChunkManager,
 	schema *schemapb.CollectionSchema,
-	paths []string, tsStart, tsEnd uint64) (importutilv2.Reader, error) {
+	paths []string, tsStart, tsEnd uint64) (*reader, error) {
 	r := &reader{
 		cm:     cm,
 		schema: schema,
