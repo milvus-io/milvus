@@ -1,5 +1,5 @@
 use std::ops::Bound;
-use std::ffi::{c_char, CStr, c_void};
+use std::ffi::{c_void};
 
 use tantivy::{directory::MmapDirectory, Index};
 

@@ -1,6 +1,6 @@
-use std::ffi::{c_char, CStr, c_void};
+use std::ffi::{c_char, CStr};
 
-use crate::{util::index_exist, index_writer::IndexWriterWrapper};
+use crate::{util::index_exist};
 
 #[no_mangle]
 pub extern "C" fn tantivy_index_exist(path: *const c_char) -> bool {

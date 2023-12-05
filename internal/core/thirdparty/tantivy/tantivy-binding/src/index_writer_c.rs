@@ -2,7 +2,7 @@ use core::slice;
 use std::ffi::{c_char, c_void, CStr};
 
 use crate::{
-    array::RustArray, data_type::TantivyDataType, index_writer::IndexWriterWrapper, util::{create_binding, free_binding}, index_reader::IndexReaderWrapper,
+    data_type::TantivyDataType, index_writer::IndexWriterWrapper, util::{create_binding, free_binding},
 };
 
 #[no_mangle]

@@ -1,15 +1,15 @@
 use std::ops::Bound;
 use std::str::FromStr;
 
-use futures::executor::block_on;
+
 
 use tantivy::collector::TopDocs;
 use tantivy::directory::MmapDirectory;
 use tantivy::query::{Query, RangeQuery, TermQuery, RegexQuery};
-use tantivy::schema::{Field, IndexRecordOption, Schema, TextFieldIndexing, TextOptions, INDEXED};
-use tantivy::{doc, tokenizer, Index, IndexReader, IndexWriter, ReloadPolicy, Term};
+use tantivy::schema::{Field, IndexRecordOption};
+use tantivy::{Index, IndexReader, ReloadPolicy, Term};
 
-use crate::data_type::TantivyDataType;
+
 use crate::util::make_bounds;
 
 pub struct IndexReaderWrapper {
