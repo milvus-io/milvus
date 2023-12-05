@@ -2779,7 +2779,7 @@ func (c *Core) CheckHealth(ctx context.Context, in *milvuspb.CheckHealthRequest)
 
 	mu := &sync.Mutex{}
 	group, ctx := errgroup.WithContext(ctx)
-	errReasons := make([]string, 0, len(c.proxyClientManager.proxyClient))
+	errReasons := make([]string, 0, c.proxyClientManager.GetProxyCount())
 
 	c.proxyClientManager.lock.RLock()
 	for nodeID, proxyClient := range c.proxyClientManager.proxyClient {
