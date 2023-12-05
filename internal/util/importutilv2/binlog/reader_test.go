@@ -17,6 +17,9 @@
 package binlog
 
 import (
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/stretchr/testify/mock"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -24,10 +27,28 @@ import (
 
 type ReaderSuite struct {
 	suite.Suite
+
+	// test param
+	schema           *schemapb.CollectionSchema
+	tsField          []uint64
+	insertFieldsData map[int64][]any
+	deleteData       []any
+	tsStart          uint64
+	tsEnd            uint64
+}
+
+func (suite *ReaderSuite) SetupSuite() {
+
+}
+
+func (suite *ReaderSuite) SetupTest() {
+	cm := mocks.NewChunkManager(suite.T())
+	cm.EXPECT().Read(mock.Anything, path).Return(nil, nil)
+	reader, err := NewReader(cm)
 }
 
 func (suite *ReaderSuite) TestReader() {
-	return
+
 }
 
 func TestUtil(t *testing.T) {
