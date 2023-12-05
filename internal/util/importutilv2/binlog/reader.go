@@ -39,7 +39,10 @@ type reader struct {
 
 func NewReader(cm storage.ChunkManager,
 	schema *schemapb.CollectionSchema,
-	paths []string, tsStart, tsEnd uint64) (*reader, error) {
+	paths []string,
+	tsStart,
+	tsEnd uint64,
+) (*reader, error) {
 	r := &reader{
 		cm:     cm,
 		schema: schema,

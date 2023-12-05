@@ -18,7 +18,6 @@ package importutilv2
 
 import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/binlog"
 )
@@ -38,7 +37,9 @@ type ColumnReader interface {
 
 func NewReader(cm storage.ChunkManager,
 	schema *schemapb.CollectionSchema,
-	paths []string, options Options) (Reader, error) {
+	paths []string,
+	options Options,
+) (Reader, error) {
 	if IsBackup(options) {
 		tsStart, tsEnd, err := ParseTimeRange(options)
 		if err != nil {

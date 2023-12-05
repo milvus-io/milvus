@@ -27,7 +27,7 @@ type ReaderSuite struct {
 }
 
 func (suite *ReaderSuite) TestReader() {
-
+	return
 }
 
 func TestUtil(t *testing.T) {
