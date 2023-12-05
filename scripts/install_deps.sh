@@ -46,9 +46,9 @@ function install_linux_deps() {
   fi
   # install cmake
   cmake_version=$(echo "$(cmake --version | head -1)" | grep -o '[0-9][\.][0-9]*')
-  if [ ! $cmake_version ] || [ `expr $cmake_version \>= 3.24` -eq 0 ]; then
-    echo "cmake version $cmake_version is less than 3.24, wait to installing ..."
-    wget -qO- "https://cmake.org/files/v3.24/cmake-3.24.0-linux-x86_64.tar.gz" | sudo tar --strip-components=1 -xz -C /usr/local
+  if [ ! $cmake_version ] || [ `expr $cmake_version \>= 3.26` -eq 0 ]; then
+    echo "cmake version $cmake_version is less than 3.26, wait to installing ..."
+    wget -qO- "https://cmake.org/files/v3.26/cmake-3.26.5-linux-x86_64.tar.gz" | sudo tar --strip-components=1 -xz -C /usr/local
   else
     echo "cmake version is $cmake_version"
   fi

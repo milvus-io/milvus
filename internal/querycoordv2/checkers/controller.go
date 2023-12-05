@@ -39,10 +39,10 @@ const (
 	indexCheckerName   = "index_checker"
 )
 
-type checkerType int32
+type CheckerType int32
 
 const (
-	channelChecker checkerType = iota + 1
+	channelChecker CheckerType = iota + 1
 	segmentChecker
 	balanceChecker
 	indexChecker
@@ -51,7 +51,7 @@ const (
 var (
 	checkRoundTaskNumLimit = 256
 	checkerOrder           = []string{channelCheckerName, segmentCheckerName, balanceCheckerName, indexCheckerName}
-	checkerNames           = map[checkerType]string{
+	checkerNames           = map[CheckerType]string{
 		segmentChecker: segmentCheckerName,
 		channelChecker: channelCheckerName,
 		balanceChecker: balanceCheckerName,
@@ -60,13 +60,13 @@ var (
 	errTypeNotFound = errors.New("checker type not found")
 )
 
-func (s checkerType) String() string {
+func (s CheckerType) String() string {
 	return checkerNames[s]
 }
 
 type CheckerController struct {
 	cancel         context.CancelFunc
-	manualCheckChs map[checkerType]chan struct{}
+	manualCheckChs map[CheckerType]chan struct{}
 	meta           *meta.Meta
 	dist           *meta.DistributionManager
 	targetMgr      *meta.TargetManager
@@ -75,7 +75,7 @@ type CheckerController struct {
 	balancer       balance.Balance
 
 	scheduler task.Scheduler
-	checkers  map[checkerType]Checker
+	checkers  map[CheckerType]Checker
 
 	stopOnce sync.Once
 }
@@ -91,14 +91,14 @@ func NewCheckerController(
 ) *CheckerController {
 	// CheckerController runs checkers with the order,
 	// the former checker has higher priority
-	checkers := map[checkerType]Checker{
+	checkers := map[CheckerType]Checker{
 		channelChecker: NewChannelChecker(meta, dist, targetMgr, balancer),
 		segmentChecker: NewSegmentChecker(meta, dist, targetMgr, balancer, nodeMgr),
 		balanceChecker: NewBalanceChecker(meta, balancer, nodeMgr, scheduler),
 		indexChecker:   NewIndexChecker(meta, dist, broker, nodeMgr),
 	}
 
-	manualCheckChs := map[checkerType]chan struct{}{
+	manualCheckChs := map[CheckerType]chan struct{}{
 		channelChecker: make(chan struct{}, 1),
 		segmentChecker: make(chan struct{}, 1),
 		balanceChecker: make(chan struct{}, 1),
@@ -124,7 +124,7 @@ func (controller *CheckerController) Start() {
 	}
 }
 
-func getCheckerInterval(checker checkerType) time.Duration {
+func getCheckerInterval(checker CheckerType) time.Duration {
 	switch checker {
 	case segmentChecker:
 		return Params.QueryCoordCfg.SegmentCheckInterval.GetAsDuration(time.Millisecond)
@@ -139,7 +139,7 @@ func getCheckerInterval(checker checkerType) time.Duration {
 	}
 }
 
-func (controller *CheckerController) startChecker(ctx context.Context, checker checkerType) {
+func (controller *CheckerController) startChecker(ctx context.Context, checker CheckerType) {
 	interval := getCheckerInterval(checker)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -180,7 +180,7 @@ func (controller *CheckerController) Check() {
 }
 
 // check is the real implementation of Check
-func (controller *CheckerController) check(ctx context.Context, checkType checkerType) {
+func (controller *CheckerController) check(ctx context.Context, checkType CheckerType) {
 	checker := controller.checkers[checkType]
 	tasks := checker.Check(ctx)
 
@@ -193,7 +193,7 @@ func (controller *CheckerController) check(ctx context.Context, checkType checke
 	}
 }
 
-func (controller *CheckerController) Deactivate(typ checkerType) error {
+func (controller *CheckerController) Deactivate(typ CheckerType) error {
 	for _, checker := range controller.checkers {
 		if checker.ID() == typ {
 			checker.Deactivate()
@@ -203,7 +203,7 @@ func (controller *CheckerController) Deactivate(typ checkerType) error {
 	return errTypeNotFound
 }
 
-func (controller *CheckerController) Activate(typ checkerType) error {
+func (controller *CheckerController) Activate(typ CheckerType) error {
 	for _, checker := range controller.checkers {
 		if checker.ID() == typ {
 			checker.Activate()
@@ -213,11 +213,19 @@ func (controller *CheckerController) Activate(typ checkerType) error {
 	return errTypeNotFound
 }
 
-func (controller *CheckerController) IsActive(typ checkerType) (bool, error) {
+func (controller *CheckerController) IsActive(typ CheckerType) (bool, error) {
 	for _, checker := range controller.checkers {
 		if checker.ID() == typ {
 			return checker.IsActive(), nil
 		}
 	}
 	return false, errTypeNotFound
+}
+
+func (controller *CheckerController) Checkers() []Checker {
+	checkers := make([]Checker, 0, len(controller.checkers))
+	for _, checker := range controller.checkers {
+		checkers = append(checkers, checker)
+	}
+	return checkers
 }

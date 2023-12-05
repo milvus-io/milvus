@@ -149,6 +149,15 @@ func Test_NewClient(t *testing.T) {
 
 		r27, err := client.DescribeResourceGroup(ctx, nil)
 		retCheck(retNotNil, r27, err)
+
+		r28, err := client.ListCheckers(ctx, nil)
+		retCheck(retNotNil, r28, err)
+
+		r29, err := client.ActivateChecker(ctx, nil)
+		retCheck(retNotNil, r29, err)
+
+		r30, err := client.DeactivateChecker(ctx, nil)
+		retCheck(retNotNil, r30, err)
 	}
 
 	client.grpcClient = &mock.GRPCClientBase[querypb.QueryCoordClient]{

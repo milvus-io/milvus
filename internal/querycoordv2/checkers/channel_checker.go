@@ -56,7 +56,7 @@ func NewChannelChecker(
 	}
 }
 
-func (c *ChannelChecker) ID() checkerType {
+func (c *ChannelChecker) ID() CheckerType {
 	return channelChecker
 }
 
