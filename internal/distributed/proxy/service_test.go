@@ -25,6 +25,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -34,6 +35,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
@@ -42,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/federpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	grpcproxyclient "github.com/milvus-io/milvus/internal/distributed/proxy/client"
 	"github.com/milvus-io/milvus/internal/distributed/proxy/httpserver"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -50,6 +53,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	milvusmock "github.com/milvus-io/milvus/internal/util/mock"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/uniquegenerator"
@@ -1379,4 +1383,73 @@ func TestHttpAuthenticate(t *testing.T) {
 		ctxName, _ := ctx.Get(httpserver.ContextUsername)
 		assert.Equal(t, "foo", ctxName)
 	}
+}
+
+func Test_Service_GracefulStop(t *testing.T) {
+	mockedProxy := mocks.NewMockProxy(t)
+	var count int32
+
+	mockedProxy.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Run(func(_a0 context.Context, _a1 *milvuspb.GetComponentStatesRequest) {
+		fmt.Println("rpc start")
+		time.Sleep(10 * time.Second)
+		atomic.AddInt32(&count, 1)
+		fmt.Println("rpc done")
+	}).Return(&milvuspb.ComponentStates{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}}, nil)
+
+	mockedProxy.EXPECT().Init().Return(nil)
+	mockedProxy.EXPECT().Start().Return(nil)
+	mockedProxy.EXPECT().Stop().Return(nil)
+	mockedProxy.EXPECT().Register().Return(nil)
+	mockedProxy.EXPECT().SetEtcdClient(mock.Anything).Return()
+	mockedProxy.EXPECT().GetRateLimiter().Return(nil, nil)
+	mockedProxy.EXPECT().SetDataCoordClient(mock.Anything).Return()
+	mockedProxy.EXPECT().SetRootCoordClient(mock.Anything).Return()
+	mockedProxy.EXPECT().SetQueryCoordClient(mock.Anything).Return()
+	mockedProxy.EXPECT().UpdateStateCode(mock.Anything).Return()
+	mockedProxy.EXPECT().SetAddress(mock.Anything).Return()
+
+	Params := &paramtable.Get().ProxyGrpcServerCfg
+
+	paramtable.Get().Save(Params.TLSMode.Key, "0")
+	paramtable.Get().Save(Params.Port.Key, fmt.Sprintf("%d", funcutil.GetAvailablePort()))
+	paramtable.Get().Save(Params.InternalPort.Key, fmt.Sprintf("%d", funcutil.GetAvailablePort()))
+	paramtable.Get().Save(Params.ServerPemPath.Key, "../../../configs/cert/server.pem")
+	paramtable.Get().Save(Params.ServerKeyPath.Key, "../../../configs/cert/server.key")
+	paramtable.Get().Save(proxy.Params.HTTPCfg.Enabled.Key, "true")
+	paramtable.Get().Save(proxy.Params.HTTPCfg.Port.Key, "")
+
+	ctx := context.Background()
+	enableCustomInterceptor = false
+	enableRegisterProxyServer = true
+	defer func() {
+		enableCustomInterceptor = true
+		enableRegisterProxyServer = false
+	}()
+
+	server := getServer(t)
+	assert.NotNil(t, server)
+	server.proxy = mockedProxy
+
+	err := server.Run()
+	assert.Nil(t, err)
+
+	proxyClient, err := grpcproxyclient.NewClient(ctx, fmt.Sprintf("localhost:%s", Params.Port.GetValue()), 0)
+	assert.Nil(t, err)
+
+	group := &errgroup.Group{}
+	for i := 0; i < 3; i++ {
+		group.Go(func() error {
+			_, err := proxyClient.GetComponentStates(context.TODO(), &milvuspb.GetComponentStatesRequest{})
+			return err
+		})
+	}
+
+	// waiting for all requests have been launched
+	time.Sleep(1 * time.Second)
+
+	server.Stop()
+
+	err = group.Wait()
+	assert.Nil(t, err)
+	assert.Equal(t, count, int32(3))
 }

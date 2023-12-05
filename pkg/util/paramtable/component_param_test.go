@@ -260,7 +260,7 @@ func TestComponentParam(t *testing.T) {
 		checkHealthInterval := Params.CheckHealthInterval.GetAsInt()
 		assert.Equal(t, 3000, checkHealthInterval)
 		checkHealthRPCTimeout := Params.CheckHealthRPCTimeout.GetAsInt()
-		assert.Equal(t, 100, checkHealthRPCTimeout)
+		assert.Equal(t, 2000, checkHealthRPCTimeout)
 
 		assert.Equal(t, 0.1, Params.GlobalRowCountFactor.GetAsFloat())
 		params.Save("queryCoord.globalRowCountFactor", "0.4")

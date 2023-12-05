@@ -72,8 +72,9 @@ type compactionTrigger struct {
 	forceMu           sync.Mutex
 	quit              chan struct{}
 	wg                sync.WaitGroup
-	// segRefer                     *SegmentReferenceManager
-	// indexCoord                   types.IndexCoord
+
+	indexEngineVersionManager IndexEngineVersionManager
+
 	estimateNonDiskSegmentPolicy calUpperLimitPolicy
 	estimateDiskSegmentPolicy    calUpperLimitPolicy
 	// A sloopy hack, so we can test with different segment row count without worrying that
@@ -85,17 +86,15 @@ func newCompactionTrigger(
 	meta *meta,
 	compactionHandler compactionPlanContext,
 	allocator allocator,
-	// segRefer *SegmentReferenceManager,
-	// indexCoord types.IndexCoord,
 	handler Handler,
+	indexVersionManager IndexEngineVersionManager,
 ) *compactionTrigger {
 	return &compactionTrigger{
-		meta:              meta,
-		allocator:         allocator,
-		signals:           make(chan *compactionSignal, 100),
-		compactionHandler: compactionHandler,
-		// segRefer:                     segRefer,
-		// indexCoord:                   indexCoord,
+		meta:                         meta,
+		allocator:                    allocator,
+		signals:                      make(chan *compactionSignal, 100),
+		compactionHandler:            compactionHandler,
+		indexEngineVersionManager:    indexVersionManager,
 		estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
 		estimateNonDiskSegmentPolicy: calBySchemaPolicy,
 		handler:                      handler,
@@ -906,6 +905,20 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, isDis
 			zap.Int("deleted rows", totalDeletedRows),
 			zap.Int64("delete log size", totalDeleteLogSize))
 		return true
+	}
+
+	// index version of segment lower than current version and IndexFileKeys should have value, trigger compaction
+	for _, index := range segment.segmentIndexes {
+		if index.CurrentIndexVersion < t.indexEngineVersionManager.GetCurrentIndexEngineVersion() &&
+			len(index.IndexFileKeys) > 0 {
+			log.Info("index version is too old, trigger compaction",
+				zap.Int64("segmentID", segment.ID),
+				zap.Int64("indexID", index.IndexID),
+				zap.Strings("indexFileKeys", index.IndexFileKeys),
+				zap.Int32("currentIndexVersion", index.CurrentIndexVersion),
+				zap.Int32("currentEngineVersion", t.indexEngineVersionManager.GetCurrentIndexEngineVersion()))
+			return true
+		}
 	}
 
 	return false

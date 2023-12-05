@@ -14,6 +14,8 @@ services:
     build:
       context: .
       dockerfile: build/docker/builder/cpu/${OS_NAME}/Dockerfile
+      args:
+        TARGETARCH: ${IMAGE_ARCH}
       cache_from:
         - ${IMAGE_REPO}/milvus-env:${OS_NAME}-${LATEST_DATE_VERSION}
     platform: linux/${IMAGE_ARCH}
@@ -52,6 +54,8 @@ services:
     build:
       context: .
       dockerfile: build/docker/builder/gpu/${OS_NAME}/Dockerfile
+      args:
+        TARGETARCH: ${IMAGE_ARCH}
       cache_from:
         - ${IMAGE_REPO}/milvus-env:gpu-${OS_NAME}-${LATEST_GPU_DATE_VERSION}
     # user: {{ CURRENT_ID }}
@@ -103,7 +107,7 @@ services:
     command: bin/pulsar standalone --no-functions-worker --no-stream-storage
 
   minio:
-    image: minio/minio:RELEASE.2022-03-17T06-34-49Z
+    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
     environment:
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin

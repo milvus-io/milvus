@@ -254,8 +254,21 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		node.composeIndexMeta(req.GetIndexInfoList(), req.Schema), req.GetLoadMeta())
 	collection := node.manager.Collection.Get(req.GetCollectionID())
 	collection.SetMetricType(req.GetLoadMeta().GetMetricType())
-	delegator, err := delegator.NewShardDelegator(ctx, req.GetCollectionID(), req.GetReplicaID(), channel.GetChannelName(), req.GetVersion(),
-		node.clusterManager, node.manager, node.tSafeManager, node.loader, node.factory, channel.GetSeekPosition().GetTimestamp())
+
+	delegator, err := delegator.NewShardDelegator(
+		ctx,
+		req.GetCollectionID(),
+		req.GetReplicaID(),
+		channel.GetChannelName(),
+		req.GetVersion(),
+		node.clusterManager,
+		node.manager,
+		node.tSafeManager,
+		node.loader,
+		node.factory,
+		channel.GetSeekPosition().GetTimestamp(),
+		node.queryHook,
+	)
 	if err != nil {
 		log.Warn("failed to create shard delegator", zap.Error(err))
 		return merr.Status(err), nil
@@ -424,6 +437,12 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 
 	// check target matches
 	if err := merr.CheckTargetID(req.GetBase()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	// check index
+	if len(req.GetIndexInfoList()) == 0 {
+		err := merr.WrapErrIndexNotFoundForCollection(req.GetSchema().GetName())
 		return merr.Status(err), nil
 	}
 
@@ -724,6 +743,7 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 		zap.Int64("collectionID", req.GetReq().GetCollectionID()),
 		zap.Strings("channels", req.GetDmlChannels()),
 		zap.Bool("fromShardLeader", req.GetFromShardLeader()),
+		zap.Int64("nq", req.GetReq().GetNq()),
 	)
 
 	log.Debug("Received SearchRequest",

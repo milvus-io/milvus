@@ -32,7 +32,7 @@ const ClusterKey = "Cluster"
 // rejects the request if the client's cluster differs from that of the server.
 // It is chiefly employed to tackle the `Cross-Cluster Routing` issue.
 func ClusterValidationUnaryServerInterceptor() grpc.UnaryServerInterceptor {
-	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		md, ok := metadata.FromIncomingContext(ctx)
 		if !ok {
 			return handler(ctx, req)

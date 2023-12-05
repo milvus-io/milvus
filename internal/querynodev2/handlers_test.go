@@ -21,22 +21,16 @@ import (
 	"os"
 	"testing"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
-	"github.com/milvus-io/milvus/internal/querynodev2/optimizers"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/dependency"
-	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
-	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -142,181 +136,4 @@ func (suite *HandlersSuite) TestLoadGrowingSegments() {
 
 func TestHandlersSuite(t *testing.T) {
 	suite.Run(t, new(HandlersSuite))
-}
-
-type OptimizeSearchParamSuite struct {
-	suite.Suite
-	// Data
-	collectionID   int64
-	collectionName string
-	segmentID      int64
-	channel        string
-
-	node      *QueryNode
-	delegator *delegator.MockShardDelegator
-	// Mock
-	factory *dependency.MockFactory
-}
-
-func (suite *OptimizeSearchParamSuite) SetupSuite() {
-	suite.collectionID = 111
-	suite.collectionName = "test-collection"
-	suite.segmentID = 1
-	suite.channel = "test-channel"
-
-	suite.delegator = &delegator.MockShardDelegator{}
-	suite.delegator.EXPECT().GetSegmentInfo(mock.Anything).Return([]delegator.SnapshotItem{{NodeID: 1, Segments: []delegator.SegmentEntry{{SegmentID: 100}}}}, []delegator.SegmentEntry{})
-}
-
-func (suite *OptimizeSearchParamSuite) SetupTest() {
-	suite.factory = dependency.NewMockFactory(suite.T())
-	suite.node = NewQueryNode(context.Background(), suite.factory)
-}
-
-func (suite *OptimizeSearchParamSuite) TearDownTest() {
-}
-
-func (suite *OptimizeSearchParamSuite) TestOptimizeSearchParam() {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	suite.Run("normal_run", func() {
-		mockHook := optimizers.NewMockQueryHook(suite.T())
-		mockHook.EXPECT().Run(mock.Anything).Run(func(params map[string]any) {
-			params[common.TopKKey] = int64(50)
-			params[common.SearchParamKey] = `{"param": 2}`
-		}).Return(nil)
-		suite.node.queryHook = mockHook
-		defer func() { suite.node.queryHook = nil }()
-
-		plan := &planpb.PlanNode{
-			Node: &planpb.PlanNode_VectorAnns{
-				VectorAnns: &planpb.VectorANNS{
-					QueryInfo: &planpb.QueryInfo{
-						Topk:         100,
-						SearchParams: `{"param": 1}`,
-					},
-				},
-			},
-		}
-		bs, err := proto.Marshal(plan)
-		suite.Require().NoError(err)
-
-		req, err := suite.node.optimizeSearchParams(ctx, &querypb.SearchRequest{
-			Req: &internalpb.SearchRequest{
-				SerializedExprPlan: bs,
-			},
-			TotalChannelNum: 2,
-		}, suite.delegator)
-		suite.NoError(err)
-		suite.verifyQueryInfo(req, 50, `{"param": 2}`)
-	})
-
-	suite.Run("no_hook", func() {
-		suite.node.queryHook = nil
-		plan := &planpb.PlanNode{
-			Node: &planpb.PlanNode_VectorAnns{
-				VectorAnns: &planpb.VectorANNS{
-					QueryInfo: &planpb.QueryInfo{
-						Topk:         100,
-						SearchParams: `{"param": 1}`,
-					},
-				},
-			},
-		}
-		bs, err := proto.Marshal(plan)
-		suite.Require().NoError(err)
-
-		req, err := suite.node.optimizeSearchParams(ctx, &querypb.SearchRequest{
-			Req: &internalpb.SearchRequest{
-				SerializedExprPlan: bs,
-			},
-			TotalChannelNum: 2,
-		}, suite.delegator)
-		suite.NoError(err)
-		suite.verifyQueryInfo(req, 100, `{"param": 1}`)
-	})
-
-	suite.Run("other_plannode", func() {
-		mockHook := optimizers.NewMockQueryHook(suite.T())
-		mockHook.EXPECT().Run(mock.Anything).Run(func(params map[string]any) {
-			params[common.TopKKey] = int64(50)
-			params[common.SearchParamKey] = `{"param": 2}`
-		}).Return(nil).Maybe()
-		suite.node.queryHook = mockHook
-		defer func() { suite.node.queryHook = nil }()
-
-		plan := &planpb.PlanNode{
-			Node: &planpb.PlanNode_Query{},
-		}
-		bs, err := proto.Marshal(plan)
-		suite.Require().NoError(err)
-
-		req, err := suite.node.optimizeSearchParams(ctx, &querypb.SearchRequest{
-			Req: &internalpb.SearchRequest{
-				SerializedExprPlan: bs,
-			},
-			TotalChannelNum: 2,
-		}, suite.delegator)
-		suite.NoError(err)
-		suite.Equal(bs, req.GetReq().GetSerializedExprPlan())
-	})
-
-	suite.Run("no_serialized_plan", func() {
-		mockHook := optimizers.NewMockQueryHook(suite.T())
-		suite.node.queryHook = mockHook
-		defer func() { suite.node.queryHook = nil }()
-
-		_, err := suite.node.optimizeSearchParams(ctx, &querypb.SearchRequest{
-			Req:             &internalpb.SearchRequest{},
-			TotalChannelNum: 2,
-		}, suite.delegator)
-		suite.Error(err)
-	})
-
-	suite.Run("hook_run_error", func() {
-		mockHook := optimizers.NewMockQueryHook(suite.T())
-		mockHook.EXPECT().Run(mock.Anything).Run(func(params map[string]any) {
-			params[common.TopKKey] = int64(50)
-			params[common.SearchParamKey] = `{"param": 2}`
-		}).Return(merr.WrapErrServiceInternal("mocked"))
-		suite.node.queryHook = mockHook
-		defer func() { suite.node.queryHook = nil }()
-
-		plan := &planpb.PlanNode{
-			Node: &planpb.PlanNode_VectorAnns{
-				VectorAnns: &planpb.VectorANNS{
-					QueryInfo: &planpb.QueryInfo{
-						Topk:         100,
-						SearchParams: `{"param": 1}`,
-					},
-				},
-			},
-		}
-		bs, err := proto.Marshal(plan)
-		suite.Require().NoError(err)
-
-		_, err = suite.node.optimizeSearchParams(ctx, &querypb.SearchRequest{
-			Req: &internalpb.SearchRequest{
-				SerializedExprPlan: bs,
-			},
-		}, suite.delegator)
-		suite.Error(err)
-	})
-}
-
-func (suite *OptimizeSearchParamSuite) verifyQueryInfo(req *querypb.SearchRequest, topK int64, param string) {
-	planBytes := req.GetReq().GetSerializedExprPlan()
-
-	plan := planpb.PlanNode{}
-	err := proto.Unmarshal(planBytes, &plan)
-	suite.Require().NoError(err)
-
-	queryInfo := plan.GetVectorAnns().GetQueryInfo()
-	suite.Equal(topK, queryInfo.GetTopk())
-	suite.Equal(param, queryInfo.GetSearchParams())
-}
-
-func TestOptimizeSearchParam(t *testing.T) {
-	suite.Run(t, new(OptimizeSearchParamSuite))
 }

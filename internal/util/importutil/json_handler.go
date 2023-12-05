@@ -22,13 +22,13 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -43,14 +43,14 @@ func getKeyValue(obj interface{}, fieldName string, isString bool) (string, erro
 		if value, ok := obj.(string); ok {
 			return value, nil
 		}
-		return "", fmt.Errorf("illegal value '%v' for varchar type key field '%s'", obj, fieldName)
+		return "", merr.WrapErrImportFailed(fmt.Sprintf("illegal value '%v' for varchar type key field '%s'", obj, fieldName))
 	}
 
 	// int64 type primary field, the value must be json.Number
 	if num, ok := obj.(json.Number); ok {
 		return string(num), nil
 	}
-	return "", fmt.Errorf("illegal value '%v' for int64 type key field '%s'", obj, fieldName)
+	return "", merr.WrapErrImportFailed(fmt.Sprintf("illegal value '%v' for int64 type key field '%s'", obj, fieldName))
 }
 
 // JSONRowConsumer is row-based json format consumer class
@@ -75,7 +75,7 @@ func NewJSONRowConsumer(ctx context.Context,
 ) (*JSONRowConsumer, error) {
 	if collectionInfo == nil {
 		log.Warn("JSON row consumer: collection schema is nil")
-		return nil, errors.New("collection schema is nil")
+		return nil, merr.WrapErrImportFailed("collection schema is nil")
 	}
 
 	v := &JSONRowConsumer{
@@ -92,7 +92,7 @@ func NewJSONRowConsumer(ctx context.Context,
 	err := initValidators(collectionInfo.Schema, v.validators)
 	if err != nil {
 		log.Warn("JSON row consumer: fail to initialize json row-based consumer", zap.Error(err))
-		return nil, fmt.Errorf("fail to initialize json row-based consumer, error: %w", err)
+		return nil, merr.WrapErrImportFailed(fmt.Sprintf("fail to initialize json row-based consumer, error: %v", err))
 	}
 
 	v.shardsData = make([]ShardData, 0, collectionInfo.ShardNum)
@@ -100,7 +100,7 @@ func NewJSONRowConsumer(ctx context.Context,
 		shardData := initShardData(collectionInfo.Schema, collectionInfo.PartitionIDs)
 		if shardData == nil {
 			log.Warn("JSON row consumer: fail to initialize in-memory segment data", zap.Int("shardID", i))
-			return nil, fmt.Errorf("fail to initialize in-memory segment data for shard id %d", i)
+			return nil, merr.WrapErrImportFailed(fmt.Sprintf("fail to initialize in-memory segment data for shard id %d", i))
 		}
 		v.shardsData = append(v.shardsData, shardData)
 	}
@@ -108,7 +108,7 @@ func NewJSONRowConsumer(ctx context.Context,
 	// primary key is autoid, id generator is required
 	if v.collectionInfo.PrimaryKey.GetAutoID() && idAlloc == nil {
 		log.Warn("JSON row consumer: ID allocator is nil")
-		return nil, errors.New("ID allocator is nil")
+		return nil, merr.WrapErrImportFailed("ID allocator is nil")
 	}
 
 	return v, nil
@@ -125,7 +125,7 @@ func (v *JSONRowConsumer) RowCount() int64 {
 func (v *JSONRowConsumer) Handle(rows []map[storage.FieldID]interface{}) error {
 	if v == nil || v.validators == nil || len(v.validators) == 0 {
 		log.Warn("JSON row consumer is not initialized")
-		return errors.New("JSON row consumer is not initialized")
+		return merr.WrapErrImportFailed("JSON row consumer is not initialized")
 	}
 
 	// if rows is nil, that means read to end of file, force flush all data
@@ -141,7 +141,7 @@ func (v *JSONRowConsumer) Handle(rows []map[storage.FieldID]interface{}) error {
 	err := tryFlushBlocks(v.ctx, v.shardsData, v.collectionInfo.Schema, v.callFlushFunc, v.blockSize, MaxTotalSizeInMemory, false)
 	if err != nil {
 		log.Warn("JSON row consumer: try flush data but failed", zap.Error(err))
-		return fmt.Errorf("try flush data but failed, error: %w", err)
+		return merr.WrapErrImportFailed(fmt.Sprintf("try flush data but failed, error: %v", err))
 	}
 
 	// prepare autoid, no matter int64 or varchar pk, we always generate autoid since the hidden field RowIDField requires them
@@ -152,18 +152,18 @@ func (v *JSONRowConsumer) Handle(rows []map[storage.FieldID]interface{}) error {
 	if primaryValidator.autoID {
 		if v.rowIDAllocator == nil {
 			log.Warn("JSON row consumer: primary keys is auto-generated but IDAllocator is nil")
-			return fmt.Errorf("primary keys is auto-generated but IDAllocator is nil")
+			return merr.WrapErrImportFailed("primary keys is auto-generated but IDAllocator is nil")
 		}
 		var err error
 		rowIDBegin, rowIDEnd, err = v.rowIDAllocator.Alloc(uint32(len(rows)))
 		if err != nil {
 			log.Warn("JSON row consumer: failed to generate primary keys", zap.Int("count", len(rows)), zap.Error(err))
-			return fmt.Errorf("failed to generate %d primary keys, error: %w", len(rows), err)
+			return merr.WrapErrImportFailed(fmt.Sprintf("failed to generate %d primary keys, error: %v", len(rows), err))
 		}
 		if rowIDEnd-rowIDBegin != int64(len(rows)) {
 			log.Warn("JSON row consumer: try to generate primary keys but allocated ids are not enough",
 				zap.Int("count", len(rows)), zap.Int64("generated", rowIDEnd-rowIDBegin))
-			return fmt.Errorf("try to generate %d primary keys but only %d keys were allocated", len(rows), rowIDEnd-rowIDBegin)
+			return merr.WrapErrImportFailed(fmt.Sprintf("try to generate %d primary keys but only %d keys were allocated", len(rows), rowIDEnd-rowIDBegin))
 		}
 		log.Info("JSON row consumer: auto-generate primary keys", zap.Int64("begin", rowIDBegin), zap.Int64("end", rowIDEnd))
 		if !primaryValidator.isString {
@@ -183,7 +183,7 @@ func (v *JSONRowConsumer) Handle(rows []map[storage.FieldID]interface{}) error {
 		if primaryValidator.isString {
 			if primaryValidator.autoID {
 				log.Warn("JSON row consumer: string type primary key cannot be auto-generated")
-				return errors.New("string type primary key cannot be auto-generated")
+				return merr.WrapErrImportFailed("string type primary key cannot be auto-generated")
 			}
 
 			value := row[primaryKeyID]
@@ -191,7 +191,7 @@ func (v *JSONRowConsumer) Handle(rows []map[storage.FieldID]interface{}) error {
 			if err != nil {
 				log.Warn("JSON row consumer: failed to parse primary key at the row",
 					zap.Int64("rowNumber", rowNumber), zap.Error(err))
-				return fmt.Errorf("failed to parse primary key at the row %d, error: %w", rowNumber, err)
+				return merr.WrapErrImportFailed(fmt.Sprintf("failed to parse primary key at the row %d, error: %v", rowNumber, err))
 			}
 
 			// hash to shard based on pk, hash to partition if partition key exist
@@ -215,7 +215,7 @@ func (v *JSONRowConsumer) Handle(rows []map[storage.FieldID]interface{}) error {
 				if err != nil {
 					log.Warn("JSON row consumer: failed to parse primary key at the row",
 						zap.Int64("rowNumber", rowNumber), zap.Error(err))
-					return fmt.Errorf("failed to parse primary key at the row %d, error: %w", rowNumber, err)
+					return merr.WrapErrImportFailed(fmt.Sprintf("failed to parse primary key at the row %d, error: %v", rowNumber, err))
 				}
 
 				// parse the pk from a string
@@ -223,8 +223,8 @@ func (v *JSONRowConsumer) Handle(rows []map[storage.FieldID]interface{}) error {
 				if err != nil {
 					log.Warn("JSON row consumer: failed to parse primary key at the row",
 						zap.String("value", strValue), zap.Int64("rowNumber", rowNumber), zap.Error(err))
-					return fmt.Errorf("failed to parse primary key '%s' at the row %d, error: %w",
-						strValue, rowNumber, err)
+					return merr.WrapErrImportFailed(fmt.Sprintf("failed to parse primary key '%s' at the row %d, error: %v",
+						strValue, rowNumber, err))
 				}
 			}
 
@@ -232,7 +232,7 @@ func (v *JSONRowConsumer) Handle(rows []map[storage.FieldID]interface{}) error {
 			if err != nil {
 				log.Warn("JSON row consumer: failed to hash primary key at the row",
 					zap.Int64("key", pk), zap.Int64("rowNumber", rowNumber), zap.Error(err))
-				return fmt.Errorf("failed to hash primary key %d at the row %d, error: %w", pk, rowNumber, err)
+				return merr.WrapErrImportFailed(fmt.Sprintf("failed to hash primary key %d at the row %d, error: %v", pk, rowNumber, err))
 			}
 
 			// hash to shard based on pk, hash to partition if partition key exist
@@ -259,8 +259,8 @@ func (v *JSONRowConsumer) Handle(rows []map[storage.FieldID]interface{}) error {
 			if err := validator.convertFunc(value, v.shardsData[shard][partitionID][fieldID]); err != nil {
 				log.Warn("JSON row consumer: failed to convert value for field at the row",
 					zap.String("fieldName", validator.fieldName), zap.Int64("rowNumber", rowNumber), zap.Error(err))
-				return fmt.Errorf("failed to convert value for field '%s' at the row %d,  error: %w",
-					validator.fieldName, rowNumber, err)
+				return merr.WrapErrImportFailed(fmt.Sprintf("failed to convert value for field '%s' at the row %d,  error: %v",
+					validator.fieldName, rowNumber, err))
 			}
 		}
 	}
@@ -275,7 +275,7 @@ func (v *JSONRowConsumer) Handle(rows []map[storage.FieldID]interface{}) error {
 func (v *JSONRowConsumer) hashToPartition(row map[storage.FieldID]interface{}, rowNumber int64) (int64, error) {
 	if v.collectionInfo.PartitionKey == nil {
 		if len(v.collectionInfo.PartitionIDs) != 1 {
-			return 0, fmt.Errorf("collection '%s' partition list is empty", v.collectionInfo.Schema.Name)
+			return 0, merr.WrapErrImportFailed(fmt.Sprintf("collection '%s' partition list is empty", v.collectionInfo.Schema.Name))
 		}
 		// no partition key, directly return the target partition id
 		return v.collectionInfo.PartitionIDs[0], nil
@@ -288,7 +288,7 @@ func (v *JSONRowConsumer) hashToPartition(row map[storage.FieldID]interface{}, r
 	if err != nil {
 		log.Warn("JSON row consumer: failed to parse partition key at the row",
 			zap.Int64("rowNumber", rowNumber), zap.Error(err))
-		return 0, fmt.Errorf("failed to parse partition key at the row %d, error: %w", rowNumber, err)
+		return 0, merr.WrapErrImportFailed(fmt.Sprintf("failed to parse partition key at the row %d, error: %v", rowNumber, err))
 	}
 
 	var hashValue uint32
@@ -300,15 +300,15 @@ func (v *JSONRowConsumer) hashToPartition(row map[storage.FieldID]interface{}, r
 		if err != nil {
 			log.Warn("JSON row consumer: failed to parse partition key at the row",
 				zap.String("value", strValue), zap.Int64("rowNumber", rowNumber), zap.Error(err))
-			return 0, fmt.Errorf("failed to parse partition key '%s' at the row %d, error: %w",
-				strValue, rowNumber, err)
+			return 0, merr.WrapErrImportFailed(fmt.Sprintf("failed to parse partition key '%s' at the row %d, error: %v",
+				strValue, rowNumber, err))
 		}
 
 		hashValue, err = typeutil.Hash32Int64(pk)
 		if err != nil {
 			log.Warn("JSON row consumer: failed to hash partition key at the row",
 				zap.Int64("key", pk), zap.Int64("rowNumber", rowNumber), zap.Error(err))
-			return 0, fmt.Errorf("failed to hash partition key %d at the row %d, error: %w", pk, rowNumber, err)
+			return 0, merr.WrapErrImportFailed(fmt.Sprintf("failed to hash partition key %d at the row %d, error: %v", pk, rowNumber, err))
 		}
 	}
 

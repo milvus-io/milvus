@@ -27,7 +27,6 @@ import (
 	"strconv"
 	"unicode/utf8"
 
-	"github.com/cockroachdb/errors"
 	"github.com/sbinet/npyio"
 	"github.com/sbinet/npyio/npy"
 	"go.uber.org/zap"
@@ -35,6 +34,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 var (
@@ -139,7 +139,7 @@ func convertNumpyType(typeStr string) (schemapb.DataType, error) {
 			return schemapb.DataType_VarChar, nil
 		}
 		log.Warn("Numpy adapter: the numpy file data type is not supported", zap.String("dtype", typeStr))
-		return schemapb.DataType_None, fmt.Errorf("the numpy file dtype '%s' is not supported", typeStr)
+		return schemapb.DataType_None, merr.WrapErrImportFailed(fmt.Sprintf("the numpy file dtype '%s' is not supported", typeStr))
 	}
 }
 
@@ -182,7 +182,7 @@ func stringLen(dtype string) (int, bool, error) {
 	}
 
 	log.Warn("Numpy adapter: the numpy file dtype is not varchar data type", zap.String("dtype", dtype))
-	return 0, false, fmt.Errorf("dtype '%s' of numpy file is not varchar data type", dtype)
+	return 0, false, merr.WrapErrImportFailed(fmt.Sprintf("dtype '%s' of numpy file is not varchar data type", dtype))
 }
 
 func isStringType(typeStr string) bool {
@@ -255,13 +255,13 @@ func (n *NumpyAdapter) checkCount(count int) int {
 func (n *NumpyAdapter) ReadBool(count int) ([]bool, error) {
 	if count <= 0 {
 		log.Warn("Numpy adapter: cannot read bool data with a zero or nagative count")
-		return nil, errors.New("cannot read bool data with a zero or nagative count")
+		return nil, merr.WrapErrImportFailed("cannot read bool data with a zero or nagative count")
 	}
 
 	// incorrect type
 	if n.dataType != schemapb.DataType_Bool {
 		log.Warn("Numpy adapter: numpy data is not bool type")
-		return nil, errors.New("numpy data is not bool type")
+		return nil, merr.WrapErrImportFailed("numpy data is not bool type")
 	}
 
 	// avoid read overflow
@@ -277,7 +277,7 @@ func (n *NumpyAdapter) ReadBool(count int) ([]bool, error) {
 	err := binary.Read(n.reader, n.order, &data)
 	if err != nil {
 		log.Warn("Numpy adapter: failed to read bool data", zap.Int("count", count), zap.Error(err))
-		return nil, fmt.Errorf(" failed to read bool data with count %d, error: %w", readSize, err)
+		return nil, merr.WrapErrImportFailed(fmt.Sprintf(" failed to read bool data with count %d, error: %v", readSize, err))
 	}
 
 	// update read position after successfully read
@@ -289,7 +289,7 @@ func (n *NumpyAdapter) ReadBool(count int) ([]bool, error) {
 func (n *NumpyAdapter) ReadUint8(count int) ([]uint8, error) {
 	if count <= 0 {
 		log.Warn("Numpy adapter: cannot read uint8 data with a zero or nagative count")
-		return nil, errors.New("cannot read uint8 data with a zero or nagative count")
+		return nil, merr.WrapErrImportFailed("cannot read uint8 data with a zero or nagative count")
 	}
 
 	// incorrect type
@@ -298,7 +298,7 @@ func (n *NumpyAdapter) ReadUint8(count int) ([]uint8, error) {
 	case "u1", "<u1", "|u1", "uint8":
 	default:
 		log.Warn("Numpy adapter: numpy data is not uint8 type")
-		return nil, errors.New("numpy data is not uint8 type")
+		return nil, merr.WrapErrImportFailed("numpy data is not uint8 type")
 	}
 
 	// avoid read overflow
@@ -314,7 +314,7 @@ func (n *NumpyAdapter) ReadUint8(count int) ([]uint8, error) {
 	err := binary.Read(n.reader, n.order, &data)
 	if err != nil {
 		log.Warn("Numpy adapter: failed to read uint8 data", zap.Int("count", count), zap.Error(err))
-		return nil, fmt.Errorf("failed to read uint8 data with count %d, error: %w", readSize, err)
+		return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to read uint8 data with count %d, error: %v", readSize, err))
 	}
 
 	// update read position after successfully read
@@ -326,13 +326,13 @@ func (n *NumpyAdapter) ReadUint8(count int) ([]uint8, error) {
 func (n *NumpyAdapter) ReadInt8(count int) ([]int8, error) {
 	if count <= 0 {
 		log.Warn("Numpy adapter: cannot read int8 data with a zero or nagative count")
-		return nil, errors.New("cannot read int8 data with a zero or nagative count")
+		return nil, merr.WrapErrImportFailed("cannot read int8 data with a zero or nagative count")
 	}
 
 	// incorrect type
 	if n.dataType != schemapb.DataType_Int8 {
 		log.Warn("Numpy adapter: numpy data is not int8 type")
-		return nil, errors.New("numpy data is not int8 type")
+		return nil, merr.WrapErrImportFailed("numpy data is not int8 type")
 	}
 
 	// avoid read overflow
@@ -348,7 +348,7 @@ func (n *NumpyAdapter) ReadInt8(count int) ([]int8, error) {
 	err := binary.Read(n.reader, n.order, &data)
 	if err != nil {
 		log.Warn("Numpy adapter: failed to read int8 data", zap.Int("count", count), zap.Error(err))
-		return nil, fmt.Errorf("failed to read int8 data with count %d, error: %w", readSize, err)
+		return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to read int8 data with count %d, error: %v", readSize, err))
 	}
 
 	// update read position after successfully read
@@ -360,13 +360,13 @@ func (n *NumpyAdapter) ReadInt8(count int) ([]int8, error) {
 func (n *NumpyAdapter) ReadInt16(count int) ([]int16, error) {
 	if count <= 0 {
 		log.Warn("Numpy adapter: cannot read int16 data with a zero or nagative count")
-		return nil, errors.New("cannot read int16 data with a zero or nagative count")
+		return nil, merr.WrapErrImportFailed("cannot read int16 data with a zero or nagative count")
 	}
 
 	// incorrect type
 	if n.dataType != schemapb.DataType_Int16 {
 		log.Warn("Numpy adapter: numpy data is not int16 type")
-		return nil, errors.New("numpy data is not int16 type")
+		return nil, merr.WrapErrImportFailed("numpy data is not int16 type")
 	}
 
 	// avoid read overflow
@@ -382,7 +382,7 @@ func (n *NumpyAdapter) ReadInt16(count int) ([]int16, error) {
 	err := binary.Read(n.reader, n.order, &data)
 	if err != nil {
 		log.Warn("Numpy adapter: failed to read int16 data", zap.Int("count", count), zap.Error(err))
-		return nil, fmt.Errorf("failed to read int16 data with count %d, error: %w", readSize, err)
+		return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to read int16 data with count %d, error: %v", readSize, err))
 	}
 
 	// update read position after successfully read
@@ -394,13 +394,13 @@ func (n *NumpyAdapter) ReadInt16(count int) ([]int16, error) {
 func (n *NumpyAdapter) ReadInt32(count int) ([]int32, error) {
 	if count <= 0 {
 		log.Warn("Numpy adapter: cannot read int32 data with a zero or nagative count")
-		return nil, errors.New("cannot read int32 data with a zero or nagative count")
+		return nil, merr.WrapErrImportFailed("cannot read int32 data with a zero or nagative count")
 	}
 
 	// incorrect type
 	if n.dataType != schemapb.DataType_Int32 {
 		log.Warn("Numpy adapter: numpy data is not int32 type")
-		return nil, errors.New("numpy data is not int32 type")
+		return nil, merr.WrapErrImportFailed("numpy data is not int32 type")
 	}
 
 	// avoid read overflow
@@ -416,7 +416,7 @@ func (n *NumpyAdapter) ReadInt32(count int) ([]int32, error) {
 	err := binary.Read(n.reader, n.order, &data)
 	if err != nil {
 		log.Warn("Numpy adapter: failed to read int32 data", zap.Int("count", count), zap.Error(err))
-		return nil, fmt.Errorf("failed to read int32 data with count %d, error: %w", readSize, err)
+		return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to read int32 data with count %d, error: %v", readSize, err))
 	}
 
 	// update read position after successfully read
@@ -428,13 +428,13 @@ func (n *NumpyAdapter) ReadInt32(count int) ([]int32, error) {
 func (n *NumpyAdapter) ReadInt64(count int) ([]int64, error) {
 	if count <= 0 {
 		log.Warn("Numpy adapter: cannot read int64 data with a zero or nagative count")
-		return nil, errors.New("cannot read int64 data with a zero or nagative count")
+		return nil, merr.WrapErrImportFailed("cannot read int64 data with a zero or nagative count")
 	}
 
 	// incorrect type
 	if n.dataType != schemapb.DataType_Int64 {
 		log.Warn("Numpy adapter: numpy data is not int64 type")
-		return nil, errors.New("numpy data is not int64 type")
+		return nil, merr.WrapErrImportFailed("numpy data is not int64 type")
 	}
 
 	// avoid read overflow
@@ -450,7 +450,7 @@ func (n *NumpyAdapter) ReadInt64(count int) ([]int64, error) {
 	err := binary.Read(n.reader, n.order, &data)
 	if err != nil {
 		log.Warn("Numpy adapter: failed to read int64 data", zap.Int("count", count), zap.Error(err))
-		return nil, fmt.Errorf("failed to read int64 data with count %d, error: %w", readSize, err)
+		return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to read int64 data with count %d, error: %v", readSize, err))
 	}
 
 	// update read position after successfully read
@@ -462,13 +462,13 @@ func (n *NumpyAdapter) ReadInt64(count int) ([]int64, error) {
 func (n *NumpyAdapter) ReadFloat32(count int) ([]float32, error) {
 	if count <= 0 {
 		log.Warn("Numpy adapter: cannot read float32 data with a zero or nagative count")
-		return nil, errors.New("cannot read float32 data with a zero or nagative count")
+		return nil, merr.WrapErrImportFailed("cannot read float32 data with a zero or nagative count")
 	}
 
 	// incorrect type
 	if n.dataType != schemapb.DataType_Float {
 		log.Warn("Numpy adapter: numpy data is not float32 type")
-		return nil, errors.New("numpy data is not float32 type")
+		return nil, merr.WrapErrImportFailed("numpy data is not float32 type")
 	}
 
 	// avoid read overflow
@@ -484,7 +484,7 @@ func (n *NumpyAdapter) ReadFloat32(count int) ([]float32, error) {
 	err := binary.Read(n.reader, n.order, &data)
 	if err != nil {
 		log.Warn("Numpy adapter: failed to read float32 data", zap.Int("count", count), zap.Error(err))
-		return nil, fmt.Errorf("failed to read float32 data with count %d, error: %w", readSize, err)
+		return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to read float32 data with count %d, error: %v", readSize, err))
 	}
 
 	// update read position after successfully read
@@ -496,13 +496,13 @@ func (n *NumpyAdapter) ReadFloat32(count int) ([]float32, error) {
 func (n *NumpyAdapter) ReadFloat64(count int) ([]float64, error) {
 	if count <= 0 {
 		log.Warn("Numpy adapter: cannot read float64 data with a zero or nagative count")
-		return nil, errors.New("cannot read float64 data with a zero or nagative count")
+		return nil, merr.WrapErrImportFailed("cannot read float64 data with a zero or nagative count")
 	}
 
 	// incorrect type
 	if n.dataType != schemapb.DataType_Double {
 		log.Warn("Numpy adapter: numpy data is not float64 type")
-		return nil, errors.New("numpy data is not float64 type")
+		return nil, merr.WrapErrImportFailed("numpy data is not float64 type")
 	}
 
 	// avoid read overflow
@@ -518,7 +518,7 @@ func (n *NumpyAdapter) ReadFloat64(count int) ([]float64, error) {
 	err := binary.Read(n.reader, n.order, &data)
 	if err != nil {
 		log.Warn("Numpy adapter: failed to read float64 data", zap.Int("count", count), zap.Error(err))
-		return nil, fmt.Errorf("failed to read float64 data with count %d, error: %w", readSize, err)
+		return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to read float64 data with count %d, error: %v", readSize, err))
 	}
 
 	// update read position after successfully read
@@ -530,20 +530,20 @@ func (n *NumpyAdapter) ReadFloat64(count int) ([]float64, error) {
 func (n *NumpyAdapter) ReadString(count int) ([]string, error) {
 	if count <= 0 {
 		log.Warn("Numpy adapter: cannot read varchar data with a zero or nagative count")
-		return nil, errors.New("cannot read varchar data with a zero or nagative count")
+		return nil, merr.WrapErrImportFailed("cannot read varchar data with a zero or nagative count")
 	}
 
 	// incorrect type
 	if n.dataType != schemapb.DataType_VarChar {
 		log.Warn("Numpy adapter: numpy data is not varchar type")
-		return nil, errors.New("numpy data is not varchar type")
+		return nil, merr.WrapErrImportFailed("numpy data is not varchar type")
 	}
 
 	// varchar length, this is the max length, some item is shorter than this length, but they also occupy bytes of max length
 	maxLen, utf, err := stringLen(n.npyReader.Header.Descr.Type)
 	if err != nil || maxLen <= 0 {
 		log.Warn("Numpy adapter: failed to get max length of varchar from numpy file header", zap.Int("maxLen", maxLen), zap.Error(err))
-		return nil, fmt.Errorf("failed to get max length %d of varchar from numpy file header, error: %w", maxLen, err)
+		return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to get max length %d of varchar from numpy file header, error: %v", maxLen, err))
 	}
 	// log.Info("Numpy adapter: get varchar max length from numpy file header", zap.Int("maxLen", maxLen), zap.Bool("utf", utf))
 
@@ -557,7 +557,7 @@ func (n *NumpyAdapter) ReadString(count int) ([]string, error) {
 
 	if n.reader == nil {
 		log.Warn("Numpy adapter: reader is nil")
-		return nil, errors.New("numpy reader is nil")
+		return nil, merr.WrapErrImportFailed("numpy reader is nil")
 	}
 
 	// read string one by one is not efficient, here we read strings batch by batch, each bach size is no more than 16MB
@@ -592,7 +592,7 @@ func (n *NumpyAdapter) ReadString(count int) ([]string, error) {
 			if err != nil {
 				log.Warn("Numpy adapter: failed to read utf32 bytes from numpy file",
 					zap.Int("readDone", readDone), zap.Error(err))
-				return nil, fmt.Errorf("failed to read utf32 bytes from numpy file, error: %w", err)
+				return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to read utf32 bytes from numpy file, error: %v", err))
 			}
 
 			// read string one by one from the buffer
@@ -601,7 +601,7 @@ func (n *NumpyAdapter) ReadString(count int) ([]string, error) {
 				if err != nil {
 					log.Warn("Numpy adapter: failed todecode utf32 bytes",
 						zap.Int("position", readDone+j), zap.Error(err))
-					return nil, fmt.Errorf("failed to decode utf32 bytes, error: %w", err)
+					return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to decode utf32 bytes, error: %v", err))
 				}
 
 				data = append(data, str)
@@ -613,7 +613,7 @@ func (n *NumpyAdapter) ReadString(count int) ([]string, error) {
 			if err != nil {
 				log.Warn("Numpy adapter: failed to read ascii bytes from numpy file",
 					zap.Int("readDone", readDone), zap.Error(err))
-				return nil, fmt.Errorf("failed to read ascii bytes from numpy file, error: %w", err)
+				return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to read ascii bytes from numpy file, error: %v", err))
 			}
 
 			// read string one by one from the buffer
@@ -645,7 +645,7 @@ func (n *NumpyAdapter) ReadString(count int) ([]string, error) {
 func decodeUtf32(src []byte, order binary.ByteOrder) (string, error) {
 	if len(src)%4 != 0 {
 		log.Warn("Numpy adapter: invalid utf32 bytes length, the byte array length should be multiple of 4", zap.Int("byteLen", len(src)))
-		return "", fmt.Errorf("invalid utf32 bytes length %d, the byte array length should be multiple of 4", len(src))
+		return "", merr.WrapErrImportFailed(fmt.Sprintf("invalid utf32 bytes length %d, the byte array length should be multiple of 4", len(src)))
 	}
 
 	var str string
@@ -675,7 +675,7 @@ func decodeUtf32(src []byte, order binary.ByteOrder) (string, error) {
 				res, err := decoder.Bytes(src[lowbytesPosition : lowbytesPosition+2])
 				if err != nil {
 					log.Warn("Numpy adapter: failed to decode utf32 binary bytes", zap.Error(err))
-					return "", fmt.Errorf("failed to decode utf32 binary bytes, error: %w", err)
+					return "", merr.WrapErrImportFailed(fmt.Sprintf("failed to decode utf32 binary bytes, error: %v", err))
 				}
 				str += string(res)
 			}
@@ -693,7 +693,7 @@ func decodeUtf32(src []byte, order binary.ByteOrder) (string, error) {
 			utf8.EncodeRune(utf8Code, r)
 			if r == utf8.RuneError {
 				log.Warn("Numpy adapter: failed to convert 4 bytes unicode to utf8 rune", zap.Uint32("code", x))
-				return "", fmt.Errorf("failed to convert 4 bytes unicode %d to utf8 rune", x)
+				return "", merr.WrapErrImportFailed(fmt.Sprintf("failed to convert 4 bytes unicode %d to utf8 rune", x))
 			}
 			str += string(utf8Code)
 		}

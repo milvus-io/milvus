@@ -80,14 +80,14 @@ type indexBuilder struct {
 	policy                    buildIndexPolicy
 	nodeManager               *IndexNodeManager
 	chunkManager              storage.ChunkManager
-	indexEngineVersionManager *IndexEngineVersionManager
+	indexEngineVersionManager IndexEngineVersionManager
 }
 
 func newIndexBuilder(
 	ctx context.Context,
 	metaTable *meta, nodeManager *IndexNodeManager,
 	chunkManager storage.ChunkManager,
-	indexEngineVersionManager *IndexEngineVersionManager,
+	indexEngineVersionManager IndexEngineVersionManager,
 ) *indexBuilder {
 	ctx, cancel := context.WithCancel(ctx)
 

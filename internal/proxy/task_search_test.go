@@ -2021,8 +2021,10 @@ func TestSearchTask_Requery(t *testing.T) {
 		err := qt.Requery()
 		assert.NoError(t, err)
 		assert.Len(t, qt.result.Results.FieldsData, 2)
-		assert.Equal(t, pkField, qt.result.Results.FieldsData[0].GetFieldName())
-		assert.Equal(t, vecField, qt.result.Results.FieldsData[1].GetFieldName())
+		for _, field := range qt.result.Results.FieldsData {
+			fieldName := field.GetFieldName()
+			assert.Contains(t, []string{pkField, vecField}, fieldName)
+		}
 	})
 
 	t.Run("Test no primary key", func(t *testing.T) {

@@ -63,8 +63,10 @@ var Params *paramtable.ComponentParam = paramtable.Get()
 // For reads by prefix we can customize the scan size to increase/decrease rpc calls.
 var SnapshotScanSize int
 
-// RequestTimeout is the default timeout for tikv request.
-var RequestTimeout time.Duration
+// defaultRequestTimeout is the default timeout for tikv request.
+const (
+	defaultRequestTimeout = 10 * time.Second
+)
 
 var EmptyValueByte = []byte(EmptyValueString)
 
@@ -95,15 +97,23 @@ var _ kv.MetaKv = (*txnTiKV)(nil)
 type txnTiKV struct {
 	txn      *txnkv.Client
 	rootPath string
+
+	requestTimeout time.Duration
 }
 
 // NewTiKV creates a new txnTiKV client.
-func NewTiKV(txn *txnkv.Client, rootPath string) *txnTiKV {
+func NewTiKV(txn *txnkv.Client, rootPath string, options ...Option) *txnTiKV {
 	SnapshotScanSize = Params.TiKVCfg.SnapshotScanSize.GetAsInt()
-	RequestTimeout = Params.TiKVCfg.RequestTimeout.GetAsDuration(time.Millisecond)
+
+	opt := defaultOption()
+	for _, option := range options {
+		option(opt)
+	}
+
 	kv := &txnTiKV{
-		txn:      txn,
-		rootPath: rootPath,
+		txn:            txn,
+		rootPath:       rootPath,
+		requestTimeout: opt.requestTimeout,
 	}
 	return kv
 }
@@ -131,7 +141,7 @@ func logWarnOnFailure(err *error, msg string, fields ...zap.Field) {
 func (kv *txnTiKV) Has(key string) (bool, error) {
 	start := time.Now()
 	key = path.Join(kv.rootPath, key)
-	ctx, cancel := context.WithTimeout(context.Background(), RequestTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), kv.requestTimeout)
 	defer cancel()
 
 	var loggingErr error
@@ -190,7 +200,7 @@ func (kv *txnTiKV) HasPrefix(prefix string) (bool, error) {
 func (kv *txnTiKV) Load(key string) (string, error) {
 	start := time.Now()
 	key = path.Join(kv.rootPath, key)
-	ctx, cancel := context.WithTimeout(context.Background(), RequestTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), kv.requestTimeout)
 	defer cancel()
 
 	var loggingErr error
@@ -221,7 +231,7 @@ func batchConvertFromString(prefix string, keys []string) [][]byte {
 // MultiLoad gets the values of input keys in a transaction.
 func (kv *txnTiKV) MultiLoad(keys []string) ([]string, error) {
 	start := time.Now()
-	ctx, cancel := context.WithTimeout(context.Background(), RequestTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), kv.requestTimeout)
 	defer cancel()
 
 	var loggingErr error
@@ -303,7 +313,7 @@ func (kv *txnTiKV) LoadWithPrefix(prefix string) ([]string, []string, error) {
 // Save saves the input key-value pair.
 func (kv *txnTiKV) Save(key, value string) error {
 	key = path.Join(kv.rootPath, key)
-	ctx, cancel := context.WithTimeout(context.Background(), RequestTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), kv.requestTimeout)
 	defer cancel()
 
 	var loggingErr error
@@ -316,7 +326,7 @@ func (kv *txnTiKV) Save(key, value string) error {
 // MultiSave saves the input key-value pairs in transaction manner.
 func (kv *txnTiKV) MultiSave(kvs map[string]string) error {
 	start := time.Now()
-	ctx, cancel := context.WithTimeout(context.Background(), RequestTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), kv.requestTimeout)
 	defer cancel()
 
 	var loggingErr error
@@ -358,7 +368,7 @@ func (kv *txnTiKV) MultiSave(kvs map[string]string) error {
 // Remove removes the input key.
 func (kv *txnTiKV) Remove(key string) error {
 	key = path.Join(kv.rootPath, key)
-	ctx, cancel := context.WithTimeout(context.Background(), RequestTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), kv.requestTimeout)
 	defer cancel()
 
 	var loggingErr error
@@ -371,7 +381,7 @@ func (kv *txnTiKV) Remove(key string) error {
 // MultiRemove removes the input keys in transaction manner.
 func (kv *txnTiKV) MultiRemove(keys []string) error {
 	start := time.Now()
-	ctx, cancel := context.WithTimeout(context.Background(), RequestTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), kv.requestTimeout)
 	defer cancel()
 
 	var loggingErr error
@@ -408,7 +418,7 @@ func (kv *txnTiKV) MultiRemove(keys []string) error {
 func (kv *txnTiKV) RemoveWithPrefix(prefix string) error {
 	start := time.Now()
 	prefix = path.Join(kv.rootPath, prefix)
-	ctx, cancel := context.WithTimeout(context.Background(), RequestTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), kv.requestTimeout)
 	defer cancel()
 
 	var loggingErr error
@@ -428,7 +438,7 @@ func (kv *txnTiKV) RemoveWithPrefix(prefix string) error {
 // MultiSaveAndRemove saves the key-value pairs and removes the keys in a transaction.
 func (kv *txnTiKV) MultiSaveAndRemove(saves map[string]string, removals []string, preds ...predicates.Predicate) error {
 	start := time.Now()
-	ctx, cancel := context.WithTimeout(context.Background(), RequestTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), kv.requestTimeout)
 	defer cancel()
 
 	var loggingErr error
@@ -491,7 +501,7 @@ func (kv *txnTiKV) MultiSaveAndRemove(saves map[string]string, removals []string
 // MultiSaveAndRemoveWithPrefix saves kv in @saves and removes the keys with given prefix in @removals.
 func (kv *txnTiKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string, preds ...predicates.Predicate) error {
 	start := time.Now()
-	ctx, cancel := context.WithTimeout(context.Background(), RequestTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), kv.requestTimeout)
 	defer cancel()
 
 	var loggingErr error
@@ -635,7 +645,7 @@ func (kv *txnTiKV) executeTxn(ctx context.Context, txn *transaction.KVTxn) error
 }
 
 func (kv *txnTiKV) getTiKVMeta(ctx context.Context, key string) (string, error) {
-	ctx1, cancel := context.WithTimeout(ctx, RequestTimeout)
+	ctx1, cancel := context.WithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
 
 	start := timerecord.NewTimeRecorder("getTiKVMeta")
@@ -668,7 +678,7 @@ func (kv *txnTiKV) getTiKVMeta(ctx context.Context, key string) (string, error) 
 }
 
 func (kv *txnTiKV) putTiKVMeta(ctx context.Context, key, val string) error {
-	ctx1, cancel := context.WithTimeout(ctx, RequestTimeout)
+	ctx1, cancel := context.WithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
 
 	start := timerecord.NewTimeRecorder("putTiKVMeta")
@@ -705,7 +715,7 @@ func (kv *txnTiKV) putTiKVMeta(ctx context.Context, key, val string) error {
 }
 
 func (kv *txnTiKV) removeTiKVMeta(ctx context.Context, key string) error {
-	ctx1, cancel := context.WithTimeout(ctx, RequestTimeout)
+	ctx1, cancel := context.WithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
 
 	start := timerecord.NewTimeRecorder("removeTiKVMeta")

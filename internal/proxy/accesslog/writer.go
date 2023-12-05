@@ -36,7 +36,8 @@ const megabyte = 1024 * 1024
 
 var (
 	CheckBucketRetryAttempts uint = 20
-	timeFormat                    = ".2006-01-02T15-04-05.000"
+	timeNameFormat                = ".2006-01-02T15-04-05.000"
+	timePrintFormat               = "2006/01/02 15:04:05.000 -07:00"
 )
 
 type CacheLogger struct {
@@ -106,7 +107,10 @@ func NewRotateLogger(logCfg *paramtable.AccessLogConfig, minioCfg *paramtable.Mi
 			return nil, err
 		}
 		prefix, ext := logger.prefixAndExt()
-		handler.retentionPolicy = getTimeRetentionFunc(logCfg.RemoteMaxTime.GetAsInt(), prefix, ext)
+		if logCfg.RemoteMaxTime.GetAsInt() > 0 {
+			handler.retentionPolicy = getTimeRetentionFunc(logCfg.RemoteMaxTime.GetAsInt(), prefix, ext)
+		}
+
 		logger.handler = handler
 	}
 
@@ -247,7 +251,7 @@ func (l *RotateLogger) millRunOnce() error {
 		return err
 	}
 
-	if l.maxBackups > 0 && l.maxBackups < len(files) {
+	if l.maxBackups >= 0 && l.maxBackups < len(files) {
 		for _, f := range files[l.maxBackups:] {
 			errRemove := os.Remove(path.Join(l.dir(), f.fileName))
 			if err == nil && errRemove != nil {
@@ -336,7 +340,7 @@ func (l *RotateLogger) prefixAndExt() (string, string) {
 
 func (l *RotateLogger) newBackupName() string {
 	t := time.Now()
-	timestamp := t.Format(timeFormat)
+	timestamp := t.Format(timeNameFormat)
 	prefix, ext := l.prefixAndExt()
 	return path.Join(l.dir(), prefix+timestamp+ext)
 }

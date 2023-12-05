@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator/deletebuffer"
+	"github.com/milvus-io/milvus/internal/querynodev2/optimizers"
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/querynodev2/tsafe"
@@ -106,6 +107,8 @@ type shardDelegator struct {
 	loader      segments.Loader
 	tsCond      *sync.Cond
 	latestTsafe *atomic.Uint64
+	// queryHook
+	queryHook optimizers.QueryHook
 }
 
 // getLogger returns the zap logger with pre-defined shard attributes.
@@ -226,6 +229,13 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 		zap.Int("sealedNum", sealedNum),
 		zap.Int("growingNum", len(growing)),
 	)
+
+	req, err = optimizers.OptimizeSearchParams(ctx, req, sd.queryHook, sealedNum)
+	if err != nil {
+		log.Warn("failed to optimize search params", zap.Error(err))
+		return nil, err
+	}
+
 	tasks, err := organizeSubTask(ctx, req, sealed, growing, sd, sd.modifySearchRequest)
 	if err != nil {
 		log.Warn("Search organizeSubTask failed", zap.Error(err))
@@ -636,7 +646,7 @@ func (sd *shardDelegator) Close() {
 // NewShardDelegator creates a new ShardDelegator instance with all fields initialized.
 func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID UniqueID, channel string, version int64,
 	workerManager cluster.Manager, manager *segments.Manager, tsafeManager tsafe.Manager, loader segments.Loader,
-	factory msgstream.Factory, startTs uint64,
+	factory msgstream.Factory, startTs uint64, queryHook optimizers.QueryHook,
 ) (ShardDelegator, error) {
 	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID),
 		zap.Int64("replicaID", replicaID),
@@ -669,6 +679,7 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		latestTsafe:    atomic.NewUint64(startTs),
 		loader:         loader,
 		factory:        factory,
+		queryHook:      queryHook,
 	}
 	m := sync.Mutex{}
 	sd.tsCond = sync.NewCond(&m)

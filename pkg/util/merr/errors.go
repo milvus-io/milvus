@@ -142,6 +142,9 @@ var (
 	// Do NOT export this,
 	// never allow programmer using this, keep only for converting unknown error to milvusError
 	errUnexpected = newMilvusError("unexpected error", (1<<16)-1, false)
+
+	// import
+	ErrImportFailed = newMilvusError("importing data failed", 2100, false)
 )
 
 type milvusError struct {

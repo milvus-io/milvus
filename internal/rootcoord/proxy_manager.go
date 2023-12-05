@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"path"
 	"sync"
+	"time"
 
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
@@ -29,7 +30,6 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
-	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -78,7 +78,7 @@ func (p *proxyManager) DelSessionFunc(fns ...func(*sessionutil.Session)) {
 
 // WatchProxy starts a goroutine to watch proxy session changes on etcd
 func (p *proxyManager) WatchProxy() error {
-	ctx, cancel := context.WithTimeout(p.ctx, etcdkv.RequestTimeout)
+	ctx, cancel := context.WithTimeout(p.ctx, Params.ServiceParam.EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
 
 	sessions, rev, err := p.getSessionsOnEtcd(ctx)

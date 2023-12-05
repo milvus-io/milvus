@@ -720,8 +720,7 @@ class TestPartitionOperations(TestcaseBase):
         assert not collection_w.has_partition(partition_name)[0]
 
         # verify that drop the partition again with exception
-        partition_w.drop(check_task=CheckTasks.err_res,
-                         check_items={ct.err_code: 1, ct.err_msg: PartitionErrorMessage.PartitionNotExist})
+        partition_w.drop()
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_partition_create_and_drop_multi_times(self):
@@ -834,7 +833,7 @@ class TestPartitionOperations(TestcaseBase):
 
         # release the dropped partition and check err response
         partition_w.release(check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: PartitionErrorMessage.PartitionNotExist})
+                            check_items={ct.err_code: 200, ct.err_msg: "partition not found[partition=%s]" % partition_w.name})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_partition_release_dropped_collection(self):
@@ -947,7 +946,8 @@ class TestPartitionOperations(TestcaseBase):
         # insert data to partition
         partition_w.insert(cf.gen_default_dataframe_data(),
                            check_task=CheckTasks.err_res,
-                           check_items={ct.err_code: 1, ct.err_msg: "Partition not exist"})
+                           check_items={ct.err_code: 200, 
+                           ct.err_msg: "partition not found[partition=%s]" % partition_w.name})
         # TODO: update the assert error
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1095,7 +1095,8 @@ class TestPartitionOperations(TestcaseBase):
         # insert data to partition
         partition_w.upsert(cf.gen_default_dataframe_data(),
                            check_task=CheckTasks.err_res,
-                           check_items={ct.err_code: 1, ct.err_msg: "Partition not exist"})
+                           check_items={ct.err_code: 200, 
+                                        ct.err_msg: "partition not found[partition=%s]" % partition_w.name})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_partition_upsert_mismatched_data(self):
@@ -1347,8 +1348,7 @@ class TestDropBase(TestcaseBase):
         # check that the partition not exists
         assert not collection_w.has_partition(partition_name)[0]
 
-        collection_w.drop_partition(partition_w.name, check_task=CheckTasks.err_res,
-                                    check_items={ct.err_code: 1, 'err_msg': "Partition not exist"})
+        collection_w.drop_partition(partition_w.name)
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_drop_partition_create(self):

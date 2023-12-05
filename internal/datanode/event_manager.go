@@ -84,7 +84,7 @@ func (node *DataNode) StartWatchChannels(ctx context.Context) {
 	}
 }
 
-// checkWatchedList list all nodes under [prefix]/channel/{node_id} and make sure all nodeds are watched
+// checkWatchedList list all nodes under [prefix]/channel/{node_id} and make sure all nodes are watched
 // serves the corner case for etcd connection lost and missing some events
 func (node *DataNode) checkWatchedList() error {
 	// REF MEP#7 watch path should be [prefix]/channel/{node_id}/{channel_name}

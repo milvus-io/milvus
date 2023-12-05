@@ -21,14 +21,13 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -76,22 +75,22 @@ func NewNumpyParser(ctx context.Context,
 ) (*NumpyParser, error) {
 	if collectionInfo == nil {
 		log.Warn("Numper parser: collection schema is nil")
-		return nil, errors.New("collection schema is nil")
+		return nil, merr.WrapErrImportFailed("collection schema is nil")
 	}
 
 	if idAlloc == nil {
 		log.Warn("Numper parser: id allocator is nil")
-		return nil, errors.New("id allocator is nil")
+		return nil, merr.WrapErrImportFailed("id allocator is nil")
 	}
 
 	if chunkManager == nil {
 		log.Warn("Numper parser: chunk manager pointer is nil")
-		return nil, errors.New("chunk manager pointer is nil")
+		return nil, merr.WrapErrImportFailed("chunk manager pointer is nil")
 	}
 
 	if flushFunc == nil {
 		log.Warn("Numper parser: flush function is nil")
-		return nil, errors.New("flush function is nil")
+		return nil, merr.WrapErrImportFailed("flush function is nil")
 	}
 
 	parser := &NumpyParser{
@@ -164,7 +163,7 @@ func (p *NumpyParser) validateFileNames(filePaths []string) error {
 		_, ok := requiredFieldNames[name]
 		if !ok {
 			log.Warn("Numpy parser: the file has no corresponding field in collection", zap.String("fieldName", name))
-			return fmt.Errorf("the file '%s' has no corresponding field in collection", filePath)
+			return merr.WrapErrImportFailed(fmt.Sprintf("the file '%s' has no corresponding field in collection", filePath))
 		}
 	}
 
@@ -177,7 +176,7 @@ func (p *NumpyParser) validateFileNames(filePaths []string) error {
 		_, ok := fileNames[name]
 		if !ok {
 			log.Warn("Numpy parser: there is no file corresponding to field", zap.String("fieldName", name))
-			return fmt.Errorf("there is no file corresponding to field '%s'", name)
+			return merr.WrapErrImportFailed(fmt.Sprintf("there is no file corresponding to field '%s'", name))
 		}
 	}
 
@@ -203,24 +202,24 @@ func (p *NumpyParser) createReaders(filePaths []string) ([]*NumpyColumnReader, e
 
 		if schema == nil {
 			log.Warn("Numpy parser: the field is not found in collection schema", zap.String("fileName", fileName))
-			return nil, fmt.Errorf("the field name '%s' is not found in collection schema", fileName)
+			return nil, merr.WrapErrImportFailed(fmt.Sprintf("the field name '%s' is not found in collection schema", fileName))
 		}
 
 		file, err := p.chunkManager.Reader(p.ctx, filePath)
 		if err != nil {
 			log.Warn("Numpy parser: failed to read the file", zap.String("filePath", filePath), zap.Error(err))
-			return nil, fmt.Errorf("failed to read the file '%s', error: %s", filePath, err.Error())
+			return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to read the file '%s', error: %s", filePath, err.Error()))
 		}
 
 		adapter, err := NewNumpyAdapter(file)
 		if err != nil {
 			log.Warn("Numpy parser: failed to read the file header", zap.String("filePath", filePath), zap.Error(err))
-			return nil, fmt.Errorf("failed to read the file header '%s', error: %s", filePath, err.Error())
+			return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to read the file header '%s', error: %s", filePath, err.Error()))
 		}
 
 		if file == nil || adapter == nil {
 			log.Warn("Numpy parser: failed to open file", zap.String("filePath", filePath))
-			return nil, fmt.Errorf("failed to open file '%s'", filePath)
+			return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to open file '%s'", filePath))
 		}
 
 		dim, _ := getFieldDimension(schema)
@@ -251,8 +250,8 @@ func (p *NumpyParser) createReaders(filePaths []string) ([]*NumpyColumnReader, e
 				log.Warn("Numpy parser: the row count of files are not equal",
 					zap.String("firstFile", firstReader.fieldName), zap.Int("firstRowCount", firstReader.rowCount),
 					zap.String("compareFile", compareReader.fieldName), zap.Int("compareRowCount", compareReader.rowCount))
-				return nil, fmt.Errorf("the row count(%d) of file '%s.npy' is not equal to row count(%d) of file '%s.npy'",
-					firstReader.rowCount, firstReader.fieldName, compareReader.rowCount, compareReader.fieldName)
+				return nil, merr.WrapErrImportFailed(fmt.Sprintf("the row count(%d) of file '%s.npy' is not equal to row count(%d) of file '%s.npy'",
+					firstReader.rowCount, firstReader.fieldName, compareReader.rowCount, compareReader.fieldName))
 			}
 		}
 	}
@@ -264,7 +263,7 @@ func (p *NumpyParser) createReaders(filePaths []string) ([]*NumpyColumnReader, e
 func (p *NumpyParser) validateHeader(columnReader *NumpyColumnReader) error {
 	if columnReader == nil || columnReader.reader == nil {
 		log.Warn("Numpy parser: numpy reader is nil")
-		return errors.New("numpy adapter is nil")
+		return merr.WrapErrImportFailed("numpy adapter is nil")
 	}
 
 	elementType := columnReader.reader.GetType()
@@ -273,7 +272,7 @@ func (p *NumpyParser) validateHeader(columnReader *NumpyColumnReader) error {
 	if len(shape) == 0 {
 		log.Warn("Numpy parser: the content stored in numpy file is not valid numpy array",
 			zap.String("fieldName", columnReader.fieldName))
-		return fmt.Errorf("the content stored in numpy file is not valid numpy array for field '%s'", columnReader.fieldName)
+		return merr.WrapErrImportFailed(fmt.Sprintf("the content stored in numpy file is not valid numpy array for field '%s'", columnReader.fieldName))
 	}
 	columnReader.rowCount = shape[0]
 
@@ -286,45 +285,45 @@ func (p *NumpyParser) validateHeader(columnReader *NumpyColumnReader) error {
 		if elementType != schemapb.DataType_Float && elementType != schemapb.DataType_Double {
 			log.Warn("Numpy parser: illegal data type of numpy file for float vector field", zap.Any("dataType", elementType),
 				zap.String("fieldName", columnReader.fieldName))
-			return fmt.Errorf("illegal data type %s of numpy file for float vector field '%s'", getTypeName(elementType),
-				columnReader.fieldName)
+			return merr.WrapErrImportFailed(fmt.Sprintf("illegal data type %s of numpy file for float vector field '%s'", getTypeName(elementType),
+				columnReader.fieldName))
 		}
 
 		// vector field, the shape should be 2
 		if len(shape) != 2 {
 			log.Warn("Numpy parser: illegal shape of numpy file for float vector field, shape should be 2", zap.Int("shape", len(shape)),
 				zap.String("fieldName", columnReader.fieldName))
-			return fmt.Errorf("illegal shape %d of numpy file for float vector field '%s', shape should be 2", shape,
-				columnReader.fieldName)
+			return merr.WrapErrImportFailed(fmt.Sprintf("illegal shape %d of numpy file for float vector field '%s', shape should be 2", shape,
+				columnReader.fieldName))
 		}
 
 		if shape[1] != columnReader.dimension {
 			log.Warn("Numpy parser: illegal dimension of numpy file for float vector field", zap.String("fieldName", columnReader.fieldName),
 				zap.Int("numpyDimension", shape[1]), zap.Int("fieldDimension", columnReader.dimension))
-			return fmt.Errorf("illegal dimension %d of numpy file for float vector field '%s', dimension should be %d",
-				shape[1], columnReader.fieldName, columnReader.dimension)
+			return merr.WrapErrImportFailed(fmt.Sprintf("illegal dimension %d of numpy file for float vector field '%s', dimension should be %d",
+				shape[1], columnReader.fieldName, columnReader.dimension))
 		}
 	} else if schemapb.DataType_BinaryVector == columnReader.dataType {
 		if elementType != schemapb.DataType_BinaryVector {
 			log.Warn("Numpy parser: illegal data type of numpy file for binary vector field", zap.Any("dataType", elementType),
 				zap.String("fieldName", columnReader.fieldName))
-			return fmt.Errorf("illegal data type %s of numpy file for binary vector field '%s'", getTypeName(elementType),
-				columnReader.fieldName)
+			return merr.WrapErrImportFailed(fmt.Sprintf("illegal data type %s of numpy file for binary vector field '%s'", getTypeName(elementType),
+				columnReader.fieldName))
 		}
 
 		// vector field, the shape should be 2
 		if len(shape) != 2 {
 			log.Warn("Numpy parser: illegal shape of numpy file for binary vector field, shape should be 2", zap.Int("shape", len(shape)),
 				zap.String("fieldName", columnReader.fieldName))
-			return fmt.Errorf("illegal shape %d of numpy file for binary vector field '%s', shape should be 2", shape,
-				columnReader.fieldName)
+			return merr.WrapErrImportFailed(fmt.Sprintf("illegal shape %d of numpy file for binary vector field '%s', shape should be 2", shape,
+				columnReader.fieldName))
 		}
 
 		if shape[1] != columnReader.dimension/8 {
 			log.Warn("Numpy parser: illegal dimension of numpy file for float vector field", zap.String("fieldName", columnReader.fieldName),
 				zap.Int("numpyDimension", shape[1]*8), zap.Int("fieldDimension", columnReader.dimension))
-			return fmt.Errorf("illegal dimension %d of numpy file for binary vector field '%s', dimension should be %d",
-				shape[1]*8, columnReader.fieldName, columnReader.dimension)
+			return merr.WrapErrImportFailed(fmt.Sprintf("illegal dimension %d of numpy file for binary vector field '%s', dimension should be %d",
+				shape[1]*8, columnReader.fieldName, columnReader.dimension))
 		}
 	} else {
 		// JSON field and VARCHAR field are using string type numpy
@@ -333,8 +332,8 @@ func (p *NumpyParser) validateHeader(columnReader *NumpyColumnReader) error {
 			if elementType != columnReader.dataType {
 				log.Warn("Numpy parser: illegal data type of numpy file for scalar field", zap.Any("numpyDataType", elementType),
 					zap.String("fieldName", columnReader.fieldName), zap.Any("fieldDataType", columnReader.dataType))
-				return fmt.Errorf("illegal data type %s of numpy file for scalar field '%s' with type %s",
-					getTypeName(elementType), columnReader.fieldName, getTypeName(columnReader.dataType))
+				return merr.WrapErrImportFailed(fmt.Sprintf("illegal data type %s of numpy file for scalar field '%s' with type %s",
+					getTypeName(elementType), columnReader.fieldName, getTypeName(columnReader.dataType)))
 			}
 		}
 
@@ -342,7 +341,7 @@ func (p *NumpyParser) validateHeader(columnReader *NumpyColumnReader) error {
 		if len(shape) != 1 {
 			log.Warn("Numpy parser: illegal shape of numpy file for scalar field, shape should be 1", zap.Int("shape", len(shape)),
 				zap.String("fieldName", columnReader.fieldName))
-			return fmt.Errorf("illegal shape %d of numpy file for scalar field '%s', shape should be 1", shape, columnReader.fieldName)
+			return merr.WrapErrImportFailed(fmt.Sprintf("illegal shape %d of numpy file for scalar field '%s', shape should be 1", shape, columnReader.fieldName))
 		}
 	}
 
@@ -354,12 +353,12 @@ func (p *NumpyParser) calcRowCountPerBlock() (int64, error) {
 	sizePerRecord, err := typeutil.EstimateSizePerRecord(p.collectionInfo.Schema)
 	if err != nil {
 		log.Warn("Numpy parser: failed to estimate size of each row", zap.Error(err))
-		return 0, fmt.Errorf("failed to estimate size of each row: %s", err.Error())
+		return 0, merr.WrapErrImportFailed(fmt.Sprintf("failed to estimate size of each row: %s", err.Error()))
 	}
 
 	if sizePerRecord <= 0 {
 		log.Warn("Numpy parser: failed to estimate size of each row, the collection schema might be empty")
-		return 0, fmt.Errorf("failed to estimate size of each row: the collection schema might be empty")
+		return 0, merr.WrapErrImportFailed("failed to estimate size of each row: the collection schema might be empty")
 	}
 
 	// the sizePerRecord is estimate value, if the schema contains varchar field, the value is not accurate
@@ -398,7 +397,7 @@ func (p *NumpyParser) consume(columnReaders []*NumpyColumnReader) error {
 		shardData := initShardData(p.collectionInfo.Schema, p.collectionInfo.PartitionIDs)
 		if shardData == nil {
 			log.Warn("Numper parser: failed to initialize FieldData list")
-			return fmt.Errorf("failed to initialize FieldData list")
+			return merr.WrapErrImportFailed("failed to initialize FieldData list")
 		}
 		shards = append(shards, shardData)
 	}
@@ -420,7 +419,7 @@ func (p *NumpyParser) consume(columnReaders []*NumpyColumnReader) error {
 			} else if readRowCount != fieldData.RowNum() {
 				log.Warn("Numpy parser: data block's row count mismatch", zap.Int("firstBlockRowCount", readRowCount),
 					zap.Int("thisBlockRowCount", fieldData.RowNum()), zap.Int64("rowCountPerBlock", rowCountPerBlock))
-				return fmt.Errorf("data block's row count mismatch: %d vs %d", readRowCount, fieldData.RowNum())
+				return merr.WrapErrImportFailed(fmt.Sprintf("data block's row count mismatch: %d vs %d", readRowCount, fieldData.RowNum()))
 			}
 
 			segmentData[reader.fieldID] = fieldData
@@ -434,7 +433,7 @@ func (p *NumpyParser) consume(columnReaders []*NumpyColumnReader) error {
 		updateProgress(totalRead)
 		tr.Record("readData")
 		// split data to shards
-		err = p.splitFieldsData(segmentData, shards)
+		p.autoIDRange, err = splitFieldsData(p.collectionInfo, segmentData, shards, p.rowIDAllocator)
 		if err != nil {
 			return err
 		}
@@ -458,7 +457,7 @@ func (p *NumpyParser) readData(columnReader *NumpyColumnReader, rowCount int) (s
 		data, err := columnReader.reader.ReadBool(rowCount)
 		if err != nil {
 			log.Warn("Numpy parser: failed to read bool array", zap.Error(err))
-			return nil, fmt.Errorf("failed to read bool array: %s", err.Error())
+			return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to read bool array: %s", err.Error()))
 		}
 
 		return &storage.BoolFieldData{
@@ -468,7 +467,7 @@ func (p *NumpyParser) readData(columnReader *NumpyColumnReader, rowCount int) (s
 		data, err := columnReader.reader.ReadInt8(rowCount)
 		if err != nil {
 			log.Warn("Numpy parser: failed to read int8 array", zap.Error(err))
-			return nil, fmt.Errorf("failed to read int8 array: %s", err.Error())
+			return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to read int8 array: %s", err.Error()))
 		}
 
 		return &storage.Int8FieldData{
@@ -478,7 +477,7 @@ func (p *NumpyParser) readData(columnReader *NumpyColumnReader, rowCount int) (s
 		data, err := columnReader.reader.ReadInt16(rowCount)
 		if err != nil {
 			log.Warn("Numpy parser: failed to int16 array", zap.Error(err))
-			return nil, fmt.Errorf("failed to read int16 array: %s", err.Error())
+			return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to read int16 array: %s", err.Error()))
 		}
 
 		return &storage.Int16FieldData{
@@ -488,7 +487,7 @@ func (p *NumpyParser) readData(columnReader *NumpyColumnReader, rowCount int) (s
 		data, err := columnReader.reader.ReadInt32(rowCount)
 		if err != nil {
 			log.Warn("Numpy parser: failed to read int32 array", zap.Error(err))
-			return nil, fmt.Errorf("failed to read int32 array: %s", err.Error())
+			return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to read int32 array: %s", err.Error()))
 		}
 
 		return &storage.Int32FieldData{
@@ -498,7 +497,7 @@ func (p *NumpyParser) readData(columnReader *NumpyColumnReader, rowCount int) (s
 		data, err := columnReader.reader.ReadInt64(rowCount)
 		if err != nil {
 			log.Warn("Numpy parser: failed to read int64 array", zap.Error(err))
-			return nil, fmt.Errorf("failed to read int64 array: %s", err.Error())
+			return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to read int64 array: %s", err.Error()))
 		}
 
 		return &storage.Int64FieldData{
@@ -508,13 +507,13 @@ func (p *NumpyParser) readData(columnReader *NumpyColumnReader, rowCount int) (s
 		data, err := columnReader.reader.ReadFloat32(rowCount)
 		if err != nil {
 			log.Warn("Numpy parser: failed to read float array", zap.Error(err))
-			return nil, fmt.Errorf("failed to read float array: %s", err.Error())
+			return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to read float array: %s", err.Error()))
 		}
 
 		err = typeutil.VerifyFloats32(data)
 		if err != nil {
 			log.Warn("Numpy parser: illegal value in float array", zap.Error(err))
-			return nil, fmt.Errorf("illegal value in float array: %s", err.Error())
+			return nil, merr.WrapErrImportFailed(fmt.Sprintf("illegal value in float array: %s", err.Error()))
 		}
 
 		return &storage.FloatFieldData{
@@ -524,13 +523,13 @@ func (p *NumpyParser) readData(columnReader *NumpyColumnReader, rowCount int) (s
 		data, err := columnReader.reader.ReadFloat64(rowCount)
 		if err != nil {
 			log.Warn("Numpy parser: failed to read double array", zap.Error(err))
-			return nil, fmt.Errorf("failed to read double array: %s", err.Error())
+			return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to read double array: %s", err.Error()))
 		}
 
 		err = typeutil.VerifyFloats64(data)
 		if err != nil {
 			log.Warn("Numpy parser: illegal value in double array", zap.Error(err))
-			return nil, fmt.Errorf("illegal value in double array: %s", err.Error())
+			return nil, merr.WrapErrImportFailed(fmt.Sprintf("illegal value in double array: %s", err.Error()))
 		}
 
 		return &storage.DoubleFieldData{
@@ -540,7 +539,7 @@ func (p *NumpyParser) readData(columnReader *NumpyColumnReader, rowCount int) (s
 		data, err := columnReader.reader.ReadString(rowCount)
 		if err != nil {
 			log.Warn("Numpy parser: failed to read varchar array", zap.Error(err))
-			return nil, fmt.Errorf("failed to read varchar array: %s", err.Error())
+			return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to read varchar array: %s", err.Error()))
 		}
 
 		return &storage.StringFieldData{
@@ -551,7 +550,7 @@ func (p *NumpyParser) readData(columnReader *NumpyColumnReader, rowCount int) (s
 		data, err := columnReader.reader.ReadString(rowCount)
 		if err != nil {
 			log.Warn("Numpy parser: failed to read json string array", zap.Error(err))
-			return nil, fmt.Errorf("failed to read json string array: %s", err.Error())
+			return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to read json string array: %s", err.Error()))
 		}
 
 		byteArr := make([][]byte, 0)
@@ -561,8 +560,8 @@ func (p *NumpyParser) readData(columnReader *NumpyColumnReader, rowCount int) (s
 			if err != nil {
 				log.Warn("Numpy parser: illegal string value for JSON field",
 					zap.String("value", str), zap.String("FieldName", columnReader.fieldName), zap.Error(err))
-				return nil, fmt.Errorf("failed to parse value '%v' for JSON field '%s', error: %w",
-					str, columnReader.fieldName, err)
+				return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to parse value '%v' for JSON field '%s', error: %v",
+					str, columnReader.fieldName, err))
 			}
 			byteArr = append(byteArr, []byte(str))
 		}
@@ -574,7 +573,7 @@ func (p *NumpyParser) readData(columnReader *NumpyColumnReader, rowCount int) (s
 		data, err := columnReader.reader.ReadUint8(rowCount * (columnReader.dimension / 8))
 		if err != nil {
 			log.Warn("Numpy parser: failed to read binary vector array", zap.Error(err))
-			return nil, fmt.Errorf("failed to read binary vector array: %s", err.Error())
+			return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to read binary vector array: %s", err.Error()))
 		}
 
 		return &storage.BinaryVectorFieldData{
@@ -593,27 +592,27 @@ func (p *NumpyParser) readData(columnReader *NumpyColumnReader, rowCount int) (s
 			data, err = columnReader.reader.ReadFloat32(rowCount * columnReader.dimension)
 			if err != nil {
 				log.Warn("Numpy parser: failed to read float vector array", zap.Error(err))
-				return nil, fmt.Errorf("failed to read float vector array: %s", err.Error())
+				return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to read float vector array: %s", err.Error()))
 			}
 
 			err = typeutil.VerifyFloats32(data)
 			if err != nil {
 				log.Warn("Numpy parser: illegal value in float vector array", zap.Error(err))
-				return nil, fmt.Errorf("illegal value in float vector array: %s", err.Error())
+				return nil, merr.WrapErrImportFailed(fmt.Sprintf("illegal value in float vector array: %s", err.Error()))
 			}
 		} else if elementType == schemapb.DataType_Double {
 			data = make([]float32, 0, columnReader.rowCount)
 			data64, err := columnReader.reader.ReadFloat64(rowCount * columnReader.dimension)
 			if err != nil {
 				log.Warn("Numpy parser: failed to read float vector array", zap.Error(err))
-				return nil, fmt.Errorf("failed to read float vector array: %s", err.Error())
+				return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to read float vector array: %s", err.Error()))
 			}
 
 			for _, f64 := range data64 {
 				err = typeutil.VerifyFloat(f64)
 				if err != nil {
 					log.Warn("Numpy parser: illegal value in float vector array", zap.Error(err))
-					return nil, fmt.Errorf("illegal value in float vector array: %s", err.Error())
+					return nil, merr.WrapErrImportFailed(fmt.Sprintf("illegal value in float vector array: %s", err.Error()))
 				}
 
 				data = append(data, float32(f64))
@@ -627,266 +626,7 @@ func (p *NumpyParser) readData(columnReader *NumpyColumnReader, rowCount int) (s
 	default:
 		log.Warn("Numpy parser: unsupported data type of field", zap.Any("dataType", columnReader.dataType),
 			zap.String("fieldName", columnReader.fieldName))
-		return nil, fmt.Errorf("unsupported data type %s of field '%s'", getTypeName(columnReader.dataType),
-			columnReader.fieldName)
+		return nil, merr.WrapErrImportFailed(fmt.Sprintf("unsupported data type %s of field '%s'", getTypeName(columnReader.dataType),
+			columnReader.fieldName))
 	}
-}
-
-// appendFunc defines the methods to append data to storage.FieldData
-func (p *NumpyParser) appendFunc(schema *schemapb.FieldSchema) func(src storage.FieldData, n int, target storage.FieldData) error {
-	switch schema.DataType {
-	case schemapb.DataType_Bool:
-		return func(src storage.FieldData, n int, target storage.FieldData) error {
-			arr := target.(*storage.BoolFieldData)
-			arr.Data = append(arr.Data, src.GetRow(n).(bool))
-			return nil
-		}
-	case schemapb.DataType_Float:
-		return func(src storage.FieldData, n int, target storage.FieldData) error {
-			arr := target.(*storage.FloatFieldData)
-			arr.Data = append(arr.Data, src.GetRow(n).(float32))
-			return nil
-		}
-	case schemapb.DataType_Double:
-		return func(src storage.FieldData, n int, target storage.FieldData) error {
-			arr := target.(*storage.DoubleFieldData)
-			arr.Data = append(arr.Data, src.GetRow(n).(float64))
-			return nil
-		}
-	case schemapb.DataType_Int8:
-		return func(src storage.FieldData, n int, target storage.FieldData) error {
-			arr := target.(*storage.Int8FieldData)
-			arr.Data = append(arr.Data, src.GetRow(n).(int8))
-			return nil
-		}
-	case schemapb.DataType_Int16:
-		return func(src storage.FieldData, n int, target storage.FieldData) error {
-			arr := target.(*storage.Int16FieldData)
-			arr.Data = append(arr.Data, src.GetRow(n).(int16))
-			return nil
-		}
-	case schemapb.DataType_Int32:
-		return func(src storage.FieldData, n int, target storage.FieldData) error {
-			arr := target.(*storage.Int32FieldData)
-			arr.Data = append(arr.Data, src.GetRow(n).(int32))
-			return nil
-		}
-	case schemapb.DataType_Int64:
-		return func(src storage.FieldData, n int, target storage.FieldData) error {
-			arr := target.(*storage.Int64FieldData)
-			arr.Data = append(arr.Data, src.GetRow(n).(int64))
-			return nil
-		}
-	case schemapb.DataType_BinaryVector:
-		return func(src storage.FieldData, n int, target storage.FieldData) error {
-			arr := target.(*storage.BinaryVectorFieldData)
-			arr.Data = append(arr.Data, src.GetRow(n).([]byte)...)
-			return nil
-		}
-	case schemapb.DataType_FloatVector:
-		return func(src storage.FieldData, n int, target storage.FieldData) error {
-			arr := target.(*storage.FloatVectorFieldData)
-			arr.Data = append(arr.Data, src.GetRow(n).([]float32)...)
-			return nil
-		}
-	case schemapb.DataType_String, schemapb.DataType_VarChar:
-		return func(src storage.FieldData, n int, target storage.FieldData) error {
-			arr := target.(*storage.StringFieldData)
-			arr.Data = append(arr.Data, src.GetRow(n).(string))
-			return nil
-		}
-	case schemapb.DataType_JSON:
-		return func(src storage.FieldData, n int, target storage.FieldData) error {
-			arr := target.(*storage.JSONFieldData)
-			arr.Data = append(arr.Data, src.GetRow(n).([]byte))
-			return nil
-		}
-	default:
-		return nil
-	}
-}
-
-func (p *NumpyParser) prepareAppendFunctions() (map[string]func(src storage.FieldData, n int, target storage.FieldData) error, error) {
-	appendFunctions := make(map[string]func(src storage.FieldData, n int, target storage.FieldData) error)
-	for i := 0; i < len(p.collectionInfo.Schema.Fields); i++ {
-		schema := p.collectionInfo.Schema.Fields[i]
-		appendFuncErr := p.appendFunc(schema)
-		if appendFuncErr == nil {
-			log.Warn("Numpy parser: unsupported field data type")
-			return nil, fmt.Errorf("unsupported field data type: %d", schema.GetDataType())
-		}
-		appendFunctions[schema.GetName()] = appendFuncErr
-	}
-	return appendFunctions, nil
-}
-
-// checkRowCount check row count of each field, all fields row count must be equal
-func (p *NumpyParser) checkRowCount(fieldsData BlockData) (int, error) {
-	rowCount := 0
-	rowCounter := make(map[string]int)
-	for i := 0; i < len(p.collectionInfo.Schema.Fields); i++ {
-		schema := p.collectionInfo.Schema.Fields[i]
-		if !schema.GetAutoID() {
-			v, ok := fieldsData[schema.GetFieldID()]
-			if !ok {
-				if schema.GetIsDynamic() {
-					// user might not provide numpy file for dynamic field, skip it, will auto-generate later
-					continue
-				}
-				log.Warn("Numpy parser: field not provided", zap.String("fieldName", schema.GetName()))
-				return 0, fmt.Errorf("field '%s' not provided", schema.GetName())
-			}
-			rowCounter[schema.GetName()] = v.RowNum()
-			if v.RowNum() > rowCount {
-				rowCount = v.RowNum()
-			}
-		}
-	}
-
-	for name, count := range rowCounter {
-		if count != rowCount {
-			log.Warn("Numpy parser: field row count is not equal to other fields row count", zap.String("fieldName", name),
-				zap.Int("rowCount", count), zap.Int("otherRowCount", rowCount))
-			return 0, fmt.Errorf("field '%s' row count %d is not equal to other fields row count: %d", name, count, rowCount)
-		}
-	}
-
-	return rowCount, nil
-}
-
-// splitFieldsData is to split the in-memory data(parsed from column-based files) into shards
-func (p *NumpyParser) splitFieldsData(fieldsData BlockData, shards []ShardData) error {
-	if len(fieldsData) == 0 {
-		log.Warn("Numpy parser: fields data to split is empty")
-		return fmt.Errorf("fields data to split is empty")
-	}
-
-	if len(shards) != int(p.collectionInfo.ShardNum) {
-		log.Warn("Numpy parser: block count is not equal to collection shard number", zap.Int("shardsLen", len(shards)),
-			zap.Int32("shardNum", p.collectionInfo.ShardNum))
-		return fmt.Errorf("block count %d is not equal to collection shard number %d", len(shards), p.collectionInfo.ShardNum)
-	}
-
-	rowCount, err := p.checkRowCount(fieldsData)
-	if err != nil {
-		return err
-	}
-
-	// generate auto id for primary key and rowid field
-	rowIDBegin, rowIDEnd, err := p.rowIDAllocator.Alloc(uint32(rowCount))
-	if err != nil {
-		log.Warn("Numpy parser: failed to alloc row ID", zap.Int("rowCount", rowCount), zap.Error(err))
-		return fmt.Errorf("failed to alloc %d rows ID, error: %w", rowCount, err)
-	}
-
-	rowIDField, ok := fieldsData[common.RowIDField]
-	if !ok {
-		rowIDField = &storage.Int64FieldData{
-			Data: make([]int64, 0),
-		}
-		fieldsData[common.RowIDField] = rowIDField
-	}
-	rowIDFieldArr := rowIDField.(*storage.Int64FieldData)
-	for i := rowIDBegin; i < rowIDEnd; i++ {
-		rowIDFieldArr.Data = append(rowIDFieldArr.Data, i)
-	}
-
-	// reset the primary keys, as we know, only int64 pk can be auto-generated
-	primaryKey := p.collectionInfo.PrimaryKey
-	if primaryKey.GetAutoID() {
-		log.Info("Numpy parser: generating auto-id", zap.Int("rowCount", rowCount), zap.Int64("rowIDBegin", rowIDBegin))
-		if primaryKey.GetDataType() != schemapb.DataType_Int64 {
-			log.Warn("Numpy parser: primary key field is auto-generated but the field type is not int64")
-			return fmt.Errorf("primary key field is auto-generated but the field type is not int64")
-		}
-
-		primaryDataArr := &storage.Int64FieldData{
-			Data: make([]int64, 0, rowCount),
-		}
-		for i := rowIDBegin; i < rowIDEnd; i++ {
-			primaryDataArr.Data = append(primaryDataArr.Data, i)
-		}
-
-		fieldsData[primaryKey.GetFieldID()] = primaryDataArr
-		p.autoIDRange = append(p.autoIDRange, rowIDBegin, rowIDEnd)
-	}
-
-	// if the primary key is not auto-gernerate and user doesn't provide, return error
-	primaryData, ok := fieldsData[primaryKey.GetFieldID()]
-	if !ok || primaryData.RowNum() <= 0 {
-		log.Warn("Numpy parser: primary key field is not provided", zap.String("keyName", primaryKey.GetName()))
-		return fmt.Errorf("primary key '%s' field data is not provided", primaryKey.GetName())
-	}
-
-	// prepare append functions
-	appendFunctions, err := p.prepareAppendFunctions()
-	if err != nil {
-		return err
-	}
-
-	// split data into shards
-	for i := 0; i < rowCount; i++ {
-		// hash to a shard number and partition
-		pk := primaryData.GetRow(i)
-		shard, err := pkToShard(pk, uint32(p.collectionInfo.ShardNum))
-		if err != nil {
-			return err
-		}
-
-		partitionID, err := p.hashToPartition(fieldsData, i)
-		if err != nil {
-			return err
-		}
-
-		// set rowID field
-		rowIDField := shards[shard][partitionID][common.RowIDField].(*storage.Int64FieldData)
-		rowIDField.Data = append(rowIDField.Data, rowIDFieldArr.GetRow(i).(int64))
-
-		// append row to shard
-		for k := 0; k < len(p.collectionInfo.Schema.Fields); k++ {
-			schema := p.collectionInfo.Schema.Fields[k]
-			srcData := fieldsData[schema.GetFieldID()]
-			targetData := shards[shard][partitionID][schema.GetFieldID()]
-			if srcData == nil && schema.GetIsDynamic() {
-				// user might not provide numpy file for dynamic field, skip it, will auto-generate later
-				continue
-			}
-			if srcData == nil || targetData == nil {
-				log.Warn("Numpy parser: cannot append data since source or target field data is nil",
-					zap.String("FieldName", schema.GetName()),
-					zap.Bool("sourceNil", srcData == nil), zap.Bool("targetNil", targetData == nil))
-				return fmt.Errorf("cannot append data for field '%s', possibly no any fields corresponding to this numpy file, or a required numpy file is not provided",
-					schema.GetName())
-			}
-			appendFunc := appendFunctions[schema.GetName()]
-			err := appendFunc(srcData, i, targetData)
-			if err != nil {
-				return err
-			}
-		}
-	}
-
-	return nil
-}
-
-// hashToPartition hash partition key to get an partition ID, return the first partition ID if no partition key exist
-// CollectionInfo ensures only one partition ID in the PartitionIDs if no partition key exist
-func (p *NumpyParser) hashToPartition(fieldsData BlockData, rowNumber int) (int64, error) {
-	if p.collectionInfo.PartitionKey == nil {
-		// no partition key, directly return the target partition id
-		if len(p.collectionInfo.PartitionIDs) != 1 {
-			return 0, fmt.Errorf("collection '%s' partition list is empty", p.collectionInfo.Schema.Name)
-		}
-		return p.collectionInfo.PartitionIDs[0], nil
-	}
-
-	partitionKeyID := p.collectionInfo.PartitionKey.GetFieldID()
-	fieldData := fieldsData[partitionKeyID]
-	value := fieldData.GetRow(rowNumber)
-	index, err := pkToShard(value, uint32(len(p.collectionInfo.PartitionIDs)))
-	if err != nil {
-		return 0, err
-	}
-
-	return p.collectionInfo.PartitionIDs[index], nil
 }

@@ -19,7 +19,6 @@ package flowgraph
 import (
 	"context"
 	"fmt"
-	"sync"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
@@ -49,7 +48,6 @@ type InputNode struct {
 	collectionID int64
 	dataType     string
 
-	closeOnce       sync.Once
 	closeGracefully *atomic.Bool
 }
 

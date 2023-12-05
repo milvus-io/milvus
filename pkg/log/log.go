@@ -96,7 +96,7 @@ func InitLogger(cfg *Config, opts ...zap.Option) (*zap.Logger, *ZapProperties, e
 		return nil, nil, err
 	}
 	r.Level.SetLevel(level)
-	return debugL.WithOptions(zap.IncreaseLevel(level), zap.AddCallerSkip(1)), r, nil
+	return debugL.WithOptions(zap.AddCallerSkip(1)), r, nil
 }
 
 // InitTestLogger initializes a logger for unit tests

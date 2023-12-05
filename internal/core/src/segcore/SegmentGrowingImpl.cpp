@@ -83,11 +83,14 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
                            const Timestamp* timestamps_raw,
                            const InsertData* insert_data) {
     AssertInfo(insert_data->num_rows() == num_rows,
-               "Entities_raw count not equal to insert size");
+               fmt::format("Entities_raw count {} not equal to insert size {}",
+                           num_rows,
+                           insert_data->num_rows()));
     //    AssertInfo(insert_data->fields_data_size() == schema_->size(),
     //               "num fields of insert data not equal to num of schema fields");
     // step 1: check insert data if valid
     std::unordered_map<FieldId, int64_t> field_id_to_offset;
+    field_id_to_offset.reserve(insert_data->fields_data_size());
     int64_t field_offset = 0;
     for (const auto& field : insert_data->fields_data()) {
         auto field_id = FieldId(field.field_id());
@@ -102,9 +105,14 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
     insert_record_.timestamps_.set_data_raw(
         reserved_offset, timestamps_raw, num_rows);
     insert_record_.row_ids_.set_data_raw(reserved_offset, row_ids, num_rows);
-    for (auto [field_id, field_meta] : schema_->get_fields()) {
-        AssertInfo(field_id_to_offset.count(field_id), "Cannot find field_id");
-        auto data_offset = field_id_to_offset[field_id];
+    for (auto& [field_id, field_meta] : schema_->get_fields()) {
+        if (field_id.get() < START_USER_FIELDID) {
+            continue;
+        }
+        auto it = field_id_to_offset.find(field_id);
+        AssertInfo(it != field_id_to_offset.end(),
+                   fmt::format("can't find field {}", field_id.get()));
+        auto data_offset = it->second;
         if (!indexing_record_.SyncDataWithIndex(field_id)) {
             insert_record_.get_field_data_base(field_id)->set_data_raw(
                 reserved_offset,
@@ -151,7 +159,7 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
 void
 SegmentGrowingImpl::LoadFieldData(const LoadFieldDataInfo& infos) {
     // schema don't include system field
-    AssertInfo(infos.field_infos.size() == schema_->size() + 2,
+    AssertInfo(infos.field_infos.size() == schema_->size(),
                "lost some field data when load for growing segment");
     AssertInfo(infos.field_infos.find(TimestampFieldID.get()) !=
                    infos.field_infos.end(),

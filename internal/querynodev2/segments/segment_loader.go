@@ -83,19 +83,16 @@ type Loader interface {
 type LoadResource struct {
 	MemorySize uint64
 	DiskSize   uint64
-	WorkNum    int
 }
 
 func (r *LoadResource) Add(resource LoadResource) {
 	r.MemorySize += resource.MemorySize
 	r.DiskSize += resource.DiskSize
-	r.WorkNum += resource.WorkNum
 }
 
 func (r *LoadResource) Sub(resource LoadResource) {
 	r.MemorySize -= resource.MemorySize
 	r.DiskSize -= resource.DiskSize
-	r.WorkNum -= resource.WorkNum
 }
 
 func NewLoader(
@@ -365,29 +362,13 @@ func (loader *segmentLoader) requestResource(ctx context.Context, infos ...*quer
 	}
 	diskCap := paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsUint64()
 
-	poolCap := hardware.GetCPUNum() * paramtable.Get().CommonCfg.HighPriorityThreadCoreCoefficient.GetAsInt()
-	if poolCap > 256 {
-		poolCap = 256
-	}
-	if loader.committedResource.WorkNum >= poolCap {
-		return resource, 0, merr.WrapErrServiceRequestLimitExceeded(int32(poolCap))
-	} else if loader.committedResource.MemorySize+memoryUsage >= totalMemory {
+	if loader.committedResource.MemorySize+memoryUsage >= totalMemory {
 		return resource, 0, merr.WrapErrServiceMemoryLimitExceeded(float32(loader.committedResource.MemorySize+memoryUsage), float32(totalMemory))
 	} else if loader.committedResource.DiskSize+uint64(diskUsage) >= diskCap {
 		return resource, 0, merr.WrapErrServiceDiskLimitExceeded(float32(loader.committedResource.DiskSize+uint64(diskUsage)), float32(diskCap))
 	}
 
 	concurrencyLevel := funcutil.Min(hardware.GetCPUNum(), len(infos))
-
-	for _, info := range infos {
-		for _, field := range info.GetBinlogPaths() {
-			resource.WorkNum += len(field.GetBinlogs())
-		}
-		for _, index := range info.GetIndexInfos() {
-			resource.WorkNum += len(index.IndexFilePaths)
-		}
-	}
-
 	for ; concurrencyLevel > 1; concurrencyLevel /= 2 {
 		_, _, err := loader.checkSegmentSize(ctx, infos, concurrencyLevel)
 		if err == nil {
@@ -409,8 +390,6 @@ func (loader *segmentLoader) requestResource(ctx context.Context, infos ...*quer
 	}
 	loader.committedResource.Add(resource)
 	log.Info("request resource for loading segments (unit in MiB)",
-		zap.Int("workerNum", resource.WorkNum),
-		zap.Int("committedWorkerNum", loader.committedResource.WorkNum),
 		zap.Float64("memory", toMB(resource.MemorySize)),
 		zap.Float64("committedMemory", toMB(loader.committedResource.MemorySize)),
 		zap.Float64("disk", toMB(resource.DiskSize)),

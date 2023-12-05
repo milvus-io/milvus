@@ -276,7 +276,9 @@ func (ddn *ddNode) isDropped(segID UniqueID) bool {
 	return false
 }
 
-func (ddn *ddNode) Close() {}
+func (ddn *ddNode) Close() {
+	log.Info("Flowgraph DD Node closing")
+}
 
 func newDDNode(ctx context.Context, collID UniqueID, vChannelName string, droppedSegmentIDs []UniqueID,
 	sealedSegments []*datapb.SegmentInfo, growingSegments []*datapb.SegmentInfo, compactor *compactionExecutor,

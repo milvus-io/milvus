@@ -46,7 +46,6 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
             AssertInfo(is_system,
                        "invalid system type: name(" + name.get() + "), id(" +
                            std::to_string(field_id.get()) + ")");
-            continue;
         }
 
         auto data_type = DataType(child.data_type());

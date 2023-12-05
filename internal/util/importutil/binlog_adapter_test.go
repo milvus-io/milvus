@@ -134,7 +134,7 @@ func Test_BinlogAdapterVerify(t *testing.T) {
 
 	// row id field missed
 	holder.fieldFiles = make(map[int64][]string)
-	for i := int64(102); i <= 112; i++ {
+	for i := int64(102); i <= 113; i++ {
 		holder.fieldFiles[i] = make([]string, 0)
 	}
 	err = adapter.verify(holder)
@@ -156,7 +156,7 @@ func Test_BinlogAdapterVerify(t *testing.T) {
 	assert.Error(t, err)
 
 	// succeed
-	for i := int64(102); i <= 112; i++ {
+	for i := int64(102); i <= 113; i++ {
 		holder.fieldFiles[i] = []string{
 			"a",
 		}
@@ -667,6 +667,7 @@ func Test_BinlogAdapterReadInt64PK(t *testing.T) {
 		int64(110): {"110_insertlog"},
 		int64(111): {"111_insertlog"},
 		int64(112): {"112_insertlog"},
+		int64(113): {"113_insertlog"},
 	}
 	holder.deltaFiles = []string{"deltalog"}
 	err = adapter.Read(holder)
@@ -689,6 +690,7 @@ func Test_BinlogAdapterReadInt64PK(t *testing.T) {
 		"110_insertlog": createBinlogBuf(t, schemapb.DataType_BinaryVector, fieldsData[110].([][]byte)),
 		"111_insertlog": createBinlogBuf(t, schemapb.DataType_FloatVector, fieldsData[111].([][]float32)),
 		"112_insertlog": createBinlogBuf(t, schemapb.DataType_JSON, fieldsData[112].([][]byte)),
+		"113_insertlog": createBinlogBuf(t, schemapb.DataType_Array, fieldsData[113].([]*schemapb.ScalarField)),
 		"deltalog":      createDeltalogBuf(t, deletedItems, false),
 	}
 
@@ -1013,6 +1015,79 @@ func Test_BinlogAdapterDispatch(t *testing.T) {
 		assert.Equal(t, 0, shardsData[2][partitionID][fieldID].RowNum())
 	})
 
+	t.Run("dispatch Array data", func(t *testing.T) {
+		fieldID := int64(113)
+		// row count mismatch
+		data := []*schemapb.ScalarField{
+			{
+				Data: &schemapb.ScalarField_IntData{
+					IntData: &schemapb.IntArray{
+						Data: []int32{1, 2, 3, 4, 5},
+					},
+				},
+			},
+			{
+				Data: &schemapb.ScalarField_IntData{
+					IntData: &schemapb.IntArray{
+						Data: []int32{7, 8, 9},
+					},
+				},
+			},
+			{
+				Data: &schemapb.ScalarField_IntData{
+					IntData: &schemapb.IntArray{
+						Data: []int32{10, 11},
+					},
+				},
+			},
+			{
+				Data: &schemapb.ScalarField_IntData{
+					IntData: &schemapb.IntArray{
+						Data: []int32{},
+					},
+				},
+			},
+		}
+		err = adapter.dispatchArrayToShards(data, shardsData, shardList, fieldID)
+		assert.Error(t, err)
+		for _, shardData := range shardsData {
+			assert.Equal(t, 0, shardData[partitionID][fieldID].RowNum())
+		}
+
+		// illegal shard ID
+		err = adapter.dispatchArrayToShards(data, shardsData, []int32{9, 1, 0, 2}, fieldID)
+		assert.Error(t, err)
+
+		// succeed
+		err = adapter.dispatchArrayToShards([]*schemapb.ScalarField{
+			{
+				Data: &schemapb.ScalarField_IntData{
+					IntData: &schemapb.IntArray{
+						Data: []int32{},
+					},
+				},
+			},
+			{
+				Data: &schemapb.ScalarField_IntData{
+					IntData: &schemapb.IntArray{
+						Data: []int32{},
+					},
+				},
+			},
+			{
+				Data: &schemapb.ScalarField_IntData{
+					IntData: &schemapb.IntArray{
+						Data: []int32{},
+					},
+				},
+			},
+		}, shardsData, shardList, fieldID)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, shardsData[0][partitionID][fieldID].RowNum())
+		assert.Equal(t, 1, shardsData[1][partitionID][fieldID].RowNum())
+		assert.Equal(t, 0, shardsData[2][partitionID][fieldID].RowNum())
+	})
+
 	t.Run("dispatch binary vector data", func(t *testing.T) {
 		fieldID := int64(110)
 		// row count mismatch
@@ -1184,6 +1259,10 @@ func Test_BinlogAdapterReadInsertlog(t *testing.T) {
 
 	t.Run("failed to dispatch floatvector data", func(t *testing.T) {
 		failedFunc(111, "floatvector", schemapb.DataType_FloatVector, 110, schemapb.DataType_BinaryVector)
+	})
+
+	t.Run("failed to dispatch Array data", func(t *testing.T) {
+		failedFunc(113, "array", schemapb.DataType_Array, 111, schemapb.DataType_FloatVector)
 	})
 
 	// succeed

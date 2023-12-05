@@ -321,11 +321,13 @@ func (c *Core) initKVCreator() {
 	if c.metaKVCreator == nil {
 		if Params.MetaStoreCfg.MetaStoreType.GetValue() == util.MetaStoreTypeTiKV {
 			c.metaKVCreator = func() (kv.MetaKv, error) {
-				return tikv.NewTiKV(c.tikvCli, Params.TiKVCfg.MetaRootPath.GetValue()), nil
+				return tikv.NewTiKV(c.tikvCli, Params.TiKVCfg.MetaRootPath.GetValue(),
+					tikv.WithRequestTimeout(paramtable.Get().ServiceParam.TiKVCfg.RequestTimeout.GetAsDuration(time.Millisecond))), nil
 			}
 		} else {
 			c.metaKVCreator = func() (kv.MetaKv, error) {
-				return etcdkv.NewEtcdKV(c.etcdCli, Params.EtcdCfg.MetaRootPath.GetValue()), nil
+				return etcdkv.NewEtcdKV(c.etcdCli, Params.EtcdCfg.MetaRootPath.GetValue(),
+					etcdkv.WithRequestTimeout(paramtable.Get().ServiceParam.EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond))), nil
 			}
 		}
 	}
@@ -469,6 +471,8 @@ func (c *Core) initInternal() error {
 	c.factory.Init(Params)
 	chanMap := c.meta.ListCollectionPhysicalChannels()
 	c.chanTimeTick = newTimeTickSync(c.ctx, c.session.ServerID, c.factory, chanMap)
+	log.Info("create TimeTick sync done")
+
 	c.proxyClientManager = newProxyClientManager(c.proxyCreator)
 
 	c.broker = newServerBroker(c)
@@ -484,6 +488,7 @@ func (c *Core) initInternal() error {
 	)
 	c.proxyManager.AddSessionFunc(c.chanTimeTick.addSession, c.proxyClientManager.AddProxyClient)
 	c.proxyManager.DelSessionFunc(c.chanTimeTick.delSession, c.proxyClientManager.DelProxyClient)
+	log.Info("init proxy manager done")
 
 	c.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
 
@@ -493,15 +498,18 @@ func (c *Core) initInternal() error {
 	if err := c.initImportManager(); err != nil {
 		return err
 	}
+	log.Info("init import manager done")
 
 	if err := c.initCredentials(); err != nil {
 		return err
 	}
+	log.Info("init credentials done")
 
 	if err := c.initRbac(); err != nil {
 		return err
 	}
 
+	log.Info("init rootcoord done", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("Address", c.address))
 	return nil
 }
 
@@ -671,7 +679,7 @@ func (c *Core) startInternal() error {
 			if err := c.proxyClientManager.RefreshPolicyInfoCache(c.ctx, &proxypb.RefreshPolicyInfoCacheRequest{
 				OpType: int32(typeutil.CacheRefresh),
 			}); err != nil {
-				log.Info("fail to refresh policy info cache", zap.Error(err))
+				log.RatedWarn(60, "fail to refresh policy info cache", zap.Error(err))
 				return err
 			}
 			return nil
@@ -1049,8 +1057,6 @@ func (c *Core) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequ
 	log := log.Ctx(ctx).With(zap.String("collectionName", in.GetCollectionName()),
 		zap.Uint64("ts", ts))
 
-	log.Info("received request to has collection")
-
 	t := &hasCollectionTask{
 		baseTask: newBaseTask(ctx, c),
 		Req:      in,
@@ -1076,8 +1082,6 @@ func (c *Core) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequ
 	metrics.RootCoordDDLReqCounter.WithLabelValues("HasCollection", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("HasCollection").Observe(float64(tr.ElapseSpan().Milliseconds()))
 	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("HasCollection").Observe(float64(t.queueDur.Milliseconds()))
-
-	log.Info("done to has collection", zap.Bool("exist", t.Rsp.GetValue()))
 
 	return t.Rsp, nil
 }
@@ -1137,10 +1141,6 @@ func (c *Core) describeCollectionImpl(ctx context.Context, in *milvuspb.Describe
 		zap.Uint64("ts", ts),
 		zap.Bool("allowUnavailable", allowUnavailable))
 
-	// TODO(longjiquan): log may be very frequent here.
-
-	log.Info("received request to describe collection")
-
 	t := &describeCollectionTask{
 		baseTask:         newBaseTask(ctx, c),
 		Req:              in,
@@ -1167,8 +1167,6 @@ func (c *Core) describeCollectionImpl(ctx context.Context, in *milvuspb.Describe
 	metrics.RootCoordDDLReqCounter.WithLabelValues("DescribeCollection", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("DescribeCollection").Observe(float64(tr.ElapseSpan().Milliseconds()))
 	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("DescribeCollection").Observe(float64(t.queueDur.Milliseconds()))
-
-	log.Info("done to describe collection", zap.Int64("collection_id", t.Rsp.GetCollectionID()))
 
 	return t.Rsp, nil
 }
@@ -1203,8 +1201,6 @@ func (c *Core) ShowCollections(ctx context.Context, in *milvuspb.ShowCollections
 	log := log.Ctx(ctx).With(zap.String("dbname", in.GetDbName()),
 		zap.Uint64("ts", ts))
 
-	log.Info("received request to show collections")
-
 	t := &showCollectionTask{
 		baseTask: newBaseTask(ctx, c),
 		Req:      in,
@@ -1230,8 +1226,6 @@ func (c *Core) ShowCollections(ctx context.Context, in *milvuspb.ShowCollections
 	metrics.RootCoordDDLReqCounter.WithLabelValues("ShowCollections", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("ShowCollections").Observe(float64(tr.ElapseSpan().Milliseconds()))
 	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("ShowCollections").Observe(float64(t.queueDur.Milliseconds()))
-
-	log.Info("done to show collections", zap.Int("num of collections", len(t.Rsp.GetCollectionNames()))) // maybe very large, print number instead.
 
 	return t.Rsp, nil
 }
@@ -1410,8 +1404,6 @@ func (c *Core) HasPartition(ctx context.Context, in *milvuspb.HasPartitionReques
 		zap.String("partition", in.GetPartitionName()),
 		zap.Uint64("ts", ts))
 
-	log.Info("received request to has partition")
-
 	t := &hasPartitionTask{
 		baseTask: newBaseTask(ctx, c),
 		Req:      in,
@@ -1438,8 +1430,6 @@ func (c *Core) HasPartition(ctx context.Context, in *milvuspb.HasPartitionReques
 	metrics.RootCoordDDLReqLatency.WithLabelValues("HasPartition").Observe(float64(tr.ElapseSpan().Milliseconds()))
 	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("HasPartition").Observe(float64(t.queueDur.Milliseconds()))
 
-	log.Info("done to has partition", zap.Bool("exist", t.Rsp.GetValue()))
-
 	return t.Rsp, nil
 }
 
@@ -1457,8 +1447,6 @@ func (c *Core) showPartitionsImpl(ctx context.Context, in *milvuspb.ShowPartitio
 		zap.Int64("collection_id", in.GetCollectionID()),
 		zap.Strings("partitions", in.GetPartitionNames()),
 		zap.Bool("allowUnavailable", allowUnavailable))
-
-	log.Info("received request to show partitions")
 
 	t := &showPartitionTask{
 		baseTask:         newBaseTask(ctx, c),
@@ -1488,8 +1476,6 @@ func (c *Core) showPartitionsImpl(ctx context.Context, in *milvuspb.ShowPartitio
 	metrics.RootCoordDDLReqCounter.WithLabelValues("ShowPartitions", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("ShowPartitions").Observe(float64(tr.ElapseSpan().Milliseconds()))
 	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("ShowPartitions").Observe(float64(t.queueDur.Milliseconds()))
-
-	log.Info("done to show partitions", zap.Strings("partitions", t.Rsp.GetPartitionNames()))
 
 	return t.Rsp, nil
 }
@@ -2801,6 +2787,7 @@ func (c *Core) CheckHealth(ctx context.Context, in *milvuspb.CheckHealthRequest)
 	group, ctx := errgroup.WithContext(ctx)
 	errReasons := make([]string, 0, len(c.proxyClientManager.proxyClient))
 
+	c.proxyClientManager.lock.RLock()
 	for nodeID, proxyClient := range c.proxyClientManager.proxyClient {
 		nodeID := nodeID
 		proxyClient := proxyClient
@@ -2819,6 +2806,7 @@ func (c *Core) CheckHealth(ctx context.Context, in *milvuspb.CheckHealthRequest)
 			return nil
 		})
 	}
+	c.proxyClientManager.lock.RUnlock()
 
 	err := group.Wait()
 	if err != nil || len(errReasons) != 0 {
