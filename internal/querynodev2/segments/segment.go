@@ -703,6 +703,7 @@ func (s *LocalSegment) LoadFieldData(fieldID int64, rowCount int64, field *datap
 		}
 	}
 	loadFieldDataInfo.appendMMapDirPath(paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue())
+	loadFieldDataInfo.enableMmap(fieldID, mmapEnabled)
 
 	var status C.CStatus
 	GetLoadPool().Submit(func() (any, error) {
