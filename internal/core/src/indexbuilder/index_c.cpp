@@ -9,7 +9,13 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <glog/logging.h>
+#include <memory>
 #include <string>
+#include "fmt/core.h"
+#include "indexbuilder/type_c.h"
+#include "log/Log.h"
+#include "storage/options.h"
 
 #ifdef __linux__
 #include <malloc.h>
@@ -25,6 +31,7 @@
 #include "index/Utils.h"
 #include "pb/index_cgo_msg.pb.h"
 #include "storage/Util.h"
+#include "storage/space.h"
 #include "index/Meta.h"
 
 using namespace milvus;
@@ -110,6 +117,7 @@ CreateIndex(CIndex* res_index, CBuildIndexInfo c_build_index_info) {
             build_index_info->partition_id,
             build_index_info->segment_id,
             build_index_info->field_id};
+
         milvus::storage::IndexMeta index_meta{build_index_info->segment_id,
                                               build_index_info->field_id,
                                               build_index_info->index_build_id,
@@ -134,6 +142,89 @@ CreateIndex(CIndex* res_index, CBuildIndexInfo c_build_index_info) {
         status.error_code = UnexpectedError;
         status.error_msg = strdup(e.what());
         return status;
+    }
+}
+
+CStatus
+CreateIndexV2(CIndex* res_index, CBuildIndexInfo c_build_index_info) {
+    try {
+        auto build_index_info = (BuildIndexInfo*)c_build_index_info;
+        auto field_type = build_index_info->field_type;
+        milvus::index::CreateIndexInfo index_info;
+        index_info.field_type = build_index_info->field_type;
+
+        auto& config = build_index_info->config;
+        // get index type
+        auto index_type = milvus::index::GetValueFromConfig<std::string>(
+            config, "index_type");
+        AssertInfo(index_type.has_value(), "index type is empty");
+        index_info.index_type = index_type.value();
+
+        auto engine_version = build_index_info->index_engine_version;
+        index_info.index_engine_version = engine_version;
+        config[milvus::index::INDEX_ENGINE_VERSION] =
+            std::to_string(engine_version);
+
+        // get metric type
+        if (milvus::datatype_is_vector(field_type)) {
+            auto metric_type = milvus::index::GetValueFromConfig<std::string>(
+                config, "metric_type");
+            AssertInfo(metric_type.has_value(), "metric type is empty");
+            index_info.metric_type = metric_type.value();
+        }
+
+        milvus::storage::FieldDataMeta field_meta{
+            build_index_info->collection_id,
+            build_index_info->partition_id,
+            build_index_info->segment_id,
+            build_index_info->field_id};
+        milvus::storage::IndexMeta index_meta{
+            build_index_info->segment_id,
+            build_index_info->field_id,
+            build_index_info->index_build_id,
+            build_index_info->index_version,
+            build_index_info->field_name,
+            "",
+            build_index_info->field_type,
+            build_index_info->dim,
+        };
+
+        auto store_space = milvus_storage::Space::Open(
+            build_index_info->data_store_path,
+            milvus_storage::Options{nullptr,
+                                    build_index_info->data_store_version});
+        AssertInfo(store_space.ok() && store_space.has_value(),
+                   fmt::format("create space failed: {}",
+                               store_space.status().ToString()));
+
+        auto index_space = milvus_storage::Space::Open(
+            build_index_info->index_store_path,
+            milvus_storage::Options{.schema = store_space.value()->schema()});
+        AssertInfo(index_space.ok() && index_space.has_value(),
+                   fmt::format("create space failed: {}",
+                               index_space.status().ToString()));
+
+        LOG_SEGCORE_INFO_ << "init space success";
+        auto chunk_manager = milvus::storage::CreateChunkManager(
+            build_index_info->storage_config);
+        milvus::storage::FileManagerContext fileManagerContext(
+            field_meta,
+            index_meta,
+            chunk_manager,
+            std::move(index_space.value()));
+
+        auto index =
+            milvus::indexbuilder::IndexFactory::GetInstance().CreateIndex(
+                build_index_info->field_type,
+                build_index_info->field_name,
+                config,
+                fileManagerContext,
+                std::move(store_space.value()));
+        index->BuildV2();
+        *res_index = index.release();
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
     }
 }
 
@@ -392,6 +483,31 @@ AppendBuildTypeParam(CBuildIndexInfo c_build_index_info,
 }
 
 CStatus
+AppendFieldMetaInfoV2(CBuildIndexInfo c_build_index_info,
+                      int64_t collection_id,
+                      int64_t partition_id,
+                      int64_t segment_id,
+                      int64_t field_id,
+                      const char* field_name,
+                      enum CDataType field_type,
+                      int64_t dim) {
+    try {
+        auto build_index_info = (BuildIndexInfo*)c_build_index_info;
+        build_index_info->collection_id = collection_id;
+        build_index_info->partition_id = partition_id;
+        build_index_info->segment_id = segment_id;
+        build_index_info->field_id = field_id;
+        build_index_info->field_type = milvus::DataType(field_type);
+        build_index_info->field_name = field_name;
+        build_index_info->dim = dim;
+
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+CStatus
 AppendFieldMetaInfo(CBuildIndexInfo c_build_index_info,
                     int64_t collection_id,
                     int64_t partition_id,
@@ -404,6 +520,7 @@ AppendFieldMetaInfo(CBuildIndexInfo c_build_index_info,
         build_index_info->partition_id = partition_id;
         build_index_info->segment_id = segment_id;
         build_index_info->field_id = field_id;
+
         build_index_info->field_type = milvus::DataType(field_type);
 
         auto status = CStatus();
@@ -475,6 +592,31 @@ AppendIndexEngineVersionToBuildInfo(CBuildIndexInfo c_load_index_info,
 }
 
 CStatus
+AppendIndexStorageInfo(CBuildIndexInfo c_build_index_info,
+                       const char* c_data_store_path,
+                       const char* c_index_store_path,
+                       int64_t data_store_version) {
+    try {
+        auto build_index_info = (BuildIndexInfo*)c_build_index_info;
+        std::string data_store_path(c_data_store_path),
+            index_store_path(c_index_store_path);
+        build_index_info->data_store_path = data_store_path;
+        build_index_info->index_store_path = index_store_path;
+        build_index_info->data_store_version = data_store_version;
+
+        auto status = CStatus();
+        status.error_code = Success;
+        status.error_msg = "";
+        return status;
+    } catch (std::exception& e) {
+        auto status = CStatus();
+        status.error_code = UnexpectedError;
+        status.error_msg = strdup(e.what());
+        return status;
+    }
+}
+
+CStatus
 SerializeIndexAndUpLoad(CIndex index, CBinarySet* c_binary_set) {
     auto status = CStatus();
     try {
@@ -485,6 +627,29 @@ SerializeIndexAndUpLoad(CIndex index, CBinarySet* c_binary_set) {
             reinterpret_cast<milvus::indexbuilder::IndexCreatorBase*>(index);
         auto binary =
             std::make_unique<knowhere::BinarySet>(real_index->Upload());
+        *c_binary_set = binary.release();
+        status.error_code = Success;
+        status.error_msg = "";
+    } catch (std::exception& e) {
+        status.error_code = UnexpectedError;
+        status.error_msg = strdup(e.what());
+    }
+    return status;
+}
+
+CStatus
+SerializeIndexAndUpLoadV2(CIndex index, CBinarySet* c_binary_set) {
+    auto status = CStatus();
+    try {
+        AssertInfo(
+            index,
+            "failed to serialize index to binary set, passed index was null");
+
+        auto real_index =
+            reinterpret_cast<milvus::indexbuilder::IndexCreatorBase*>(index);
+
+        auto binary =
+            std::make_unique<knowhere::BinarySet>(real_index->UploadV2());
         *c_binary_set = binary.release();
         status.error_code = Success;
         status.error_msg = "";

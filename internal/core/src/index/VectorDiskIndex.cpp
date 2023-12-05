@@ -61,6 +61,35 @@ VectorDiskAnnIndex<T>::VectorDiskAnnIndex(
 }
 
 template <typename T>
+VectorDiskAnnIndex<T>::VectorDiskAnnIndex(
+    const IndexType& index_type,
+    const MetricType& metric_type,
+    const IndexVersion& version,
+    std::shared_ptr<milvus_storage::Space> space,
+    const storage::FileManagerContext& file_manager_context)
+    : space_(space), VectorIndex(index_type, metric_type) {
+    file_manager_ = std::make_shared<storage::DiskFileManagerImpl>(
+        file_manager_context, file_manager_context.space_);
+    AssertInfo(file_manager_ != nullptr, "create file manager failed!");
+    auto local_chunk_manager =
+        storage::LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    auto local_index_path_prefix = file_manager_->GetLocalIndexObjectPrefix();
+
+    // As we have guarded dup-load in QueryNode,
+    // this assertion failed only if the Milvus rebooted in the same pod,
+    // need to remove these files then re-load the segment
+    if (local_chunk_manager->Exist(local_index_path_prefix)) {
+        local_chunk_manager->RemoveDir(local_index_path_prefix);
+    }
+    CheckCompatible(version);
+    local_chunk_manager->CreateDir(local_index_path_prefix);
+    auto diskann_index_pack =
+        knowhere::Pack(std::shared_ptr<knowhere::FileManager>(file_manager_));
+    index_ = knowhere::IndexFactory::Instance().Create(
+        GetIndexType(), version, diskann_index_pack);
+}
+
+template <typename T>
 void
 VectorDiskAnnIndex<T>::Load(const BinarySet& binary_set /* not used */,
                             const Config& config) {
@@ -87,6 +116,21 @@ VectorDiskAnnIndex<T>::Load(const Config& config) {
 }
 
 template <typename T>
+void
+VectorDiskAnnIndex<T>::LoadV2(const Config& config) {
+    knowhere::Json load_config = update_load_json(config);
+
+    file_manager_->CacheIndexToDisk();
+
+    auto stat = index_.Deserialize(knowhere::BinarySet(), load_config);
+    if (stat != knowhere::Status::success)
+        PanicInfo(ErrorCode::UnexpectedError,
+                  "failed to Deserialize index, " + KnowhereStatusString(stat));
+
+    SetDim(index_.Dim());
+}
+
+template <typename T>
 BinarySet
 VectorDiskAnnIndex<T>::Upload(const Config& config) {
     BinarySet ret;
@@ -97,6 +141,43 @@ VectorDiskAnnIndex<T>::Upload(const Config& config) {
     }
 
     return ret;
+}
+
+template <typename T>
+BinarySet
+VectorDiskAnnIndex<T>::UploadV2(const Config& config) {
+    return Upload(config);
+}
+
+template <typename T>
+void
+VectorDiskAnnIndex<T>::BuildV2(const Config& config) {
+    knowhere::Json build_config;
+    build_config.update(config);
+
+    auto local_data_path = file_manager_->CacheRawDataToDisk(space_);
+    build_config[DISK_ANN_RAW_DATA_PATH] = local_data_path;
+
+    auto local_index_path_prefix = file_manager_->GetLocalIndexObjectPrefix();
+    build_config[DISK_ANN_PREFIX_PATH] = local_index_path_prefix;
+
+    if (GetIndexType() == knowhere::IndexEnum::INDEX_DISKANN) {
+        auto num_threads = GetValueFromConfig<std::string>(
+            build_config, DISK_ANN_BUILD_THREAD_NUM);
+        AssertInfo(
+            num_threads.has_value(),
+            "param " + std::string(DISK_ANN_BUILD_THREAD_NUM) + "is empty");
+        build_config[DISK_ANN_THREADS_NUM] =
+            std::atoi(num_threads.value().c_str());
+    }
+    build_config.erase("insert_files");
+    index_.Build({}, build_config);
+
+    auto local_chunk_manager =
+        storage::LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    auto segment_id = file_manager_->GetFieldDataMeta().segment_id;
+    local_chunk_manager->RemoveDir(
+        storage::GetSegmentRawDataPathPrefix(local_chunk_manager, segment_id));
 }
 
 template <typename T>

@@ -43,6 +43,9 @@ class IndexBase {
     Load(const Config& config = {}) = 0;
 
     virtual void
+    LoadV2(const Config& config = {}) = 0;
+
+    virtual void
     BuildWithRawData(size_t n,
                      const void* values,
                      const Config& config = {}) = 0;
@@ -53,11 +56,17 @@ class IndexBase {
     virtual void
     Build(const Config& config = {}) = 0;
 
+    virtual void
+    BuildV2(const Config& Config = {}) = 0;
+
     virtual int64_t
     Count() = 0;
 
     virtual BinarySet
     Upload(const Config& config = {}) = 0;
+
+    virtual BinarySet
+    UploadV2(const Config& config = {}) = 0;
 
     bool
     IsMmapSupported() const {
