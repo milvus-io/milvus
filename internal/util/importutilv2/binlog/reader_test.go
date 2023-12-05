@@ -111,15 +111,6 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 	}
 }
 
-func (suite *ReaderSuite) newField(dt schemapb.DataType, fieldID int64, isPK bool) *schemapb.FieldSchema {
-	return &schemapb.FieldSchema{
-		FieldID:      fieldID,
-		Name:         dt.String(),
-		IsPrimaryKey: isPK,
-		DataType:     dt,
-	}
-}
-
 func (suite *ReaderSuite) TestReadBool() {
 
 }
