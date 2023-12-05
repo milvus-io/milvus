@@ -185,9 +185,8 @@ func NewSegment(collection *Collection,
 		return nil, fmt.Errorf("illegal segment type %d when create segment %d", segmentType, segmentID)
 	}
 
-	result := C.NewSegment(collection.collectionPtr, cSegType, C.int64_t(segmentID))
-	status := result.status
-	segmentPtr := result.segmentPtr
+	var newPtr C.CSegmentInterface
+	status := C.NewSegment(collection.collectionPtr, cSegType, C.int64_t(segmentID), &newPtr)
 
 	if err := HandleCStatus(&status, "NewSegmentFailed"); err != nil {
 		return nil, err
@@ -201,7 +200,7 @@ func NewSegment(collection *Collection,
 
 	segment := &LocalSegment{
 		baseSegment:        newBaseSegment(segmentID, partitionID, collectionID, shard, segmentType, version, startPosition),
-		ptr:                segmentPtr,
+		ptr:                newPtr,
 		lastDeltaTimestamp: atomic.NewUint64(0),
 		fieldIndexes:       typeutil.NewConcurrentMap[int64, *IndexedFieldInfo](),
 

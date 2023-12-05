@@ -28,8 +28,11 @@
 #include "storage/space.h"
 
 //////////////////////////////    common interfaces    //////////////////////////////
-CNewSegmentResult
-NewSegment(CCollection collection, SegmentType seg_type, int64_t segment_id) {
+CStatus
+NewSegment(CCollection collection,
+           SegmentType seg_type,
+           int64_t segment_id,
+           CSegmentInterface* newSegment) {
     try {
         auto col = static_cast<milvus::segcore::Collection*>(collection);
 
@@ -47,20 +50,15 @@ NewSegment(CCollection collection, SegmentType seg_type, int64_t segment_id) {
                     col->get_schema(), col->GetIndexMeta(), segment_id);
                 break;
             default:
-                LOG_SEGCORE_ERROR_ << "invalid segment type "
-                                   << static_cast<int32_t>(seg_type);
-                return CNewSegmentResult{
-                    milvus::FailureCStatus(milvus::UnexpectedError,
-                                           "invalid segment type"),
-                    nullptr};
+                PanicInfo(milvus::UnexpectedError,
+                          "invalid segment type: {}",
+                          seg_type);
         }
 
-        return CNewSegmentResult{
-            milvus::SuccessCStatus(),
-            segment.release(),
-        };
+        *newSegment = segment.release();
+        return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return CNewSegmentResult{milvus::FailureCStatus(&e), nullptr};
+        return milvus::FailureCStatus(&e);
     }
 }
 
