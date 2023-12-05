@@ -419,7 +419,9 @@ func (cit *createIndexTask) Execute(ctx context.Context) error {
 	if cit.result.ErrorCode != commonpb.ErrorCode_Success {
 		return errors.New(cit.result.Reason)
 	}
-	SendReplicateMessagePack(ctx, cit.replicateMsgStream, cit.req)
+	if Params.CommonCfg.ReplicateMsgEnable.GetAsBool() {
+		SendReplicateMessagePack(ctx, cit.replicateMsgStream, cit.req)
+	}
 	return nil
 }
 
@@ -777,7 +779,9 @@ func (dit *dropIndexTask) Execute(ctx context.Context) error {
 	if dit.result.ErrorCode != commonpb.ErrorCode_Success {
 		return errors.New(dit.result.Reason)
 	}
-	SendReplicateMessagePack(ctx, dit.replicateMsgStream, dit.DropIndexRequest)
+	if Params.CommonCfg.ReplicateMsgEnable.GetAsBool() {
+		SendReplicateMessagePack(ctx, dit.replicateMsgStream, dit.DropIndexRequest)
+	}
 	return nil
 }
 

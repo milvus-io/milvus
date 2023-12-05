@@ -163,6 +163,7 @@ type commonConfig struct {
 	RootCoordStatistics ParamItem `refreshable:"true"`
 	RootCoordDml        ParamItem `refreshable:"false"`
 	ReplicateMsgChannel ParamItem `refreshable:"false"`
+	ReplicateMsgEnable  ParamItem `refreshable:"false"`
 
 	QueryCoordTimeTick ParamItem `refreshable:"true"`
 
@@ -279,14 +280,22 @@ func (p *commonConfig) init(base *BaseTable) {
 	p.RootCoordDml.Init(base.mgr)
 
 	p.ReplicateMsgChannel = ParamItem{
-		Key:          "msgChannel.chanNamePrefix.replicateMsg",
+		Key:          "common.replicateMsg.channelName",
 		Version:      "2.3.2",
-		FallbackKeys: []string{"common.chanNamePrefix.replicateMsg"},
 		PanicIfEmpty: true,
 		Formatter:    chanNamePrefix,
 		Export:       true,
 	}
 	p.ReplicateMsgChannel.Init(base.mgr)
+
+	p.ReplicateMsgEnable = ParamItem{
+		Key:          "common.replicateMsg.enable",
+		Version:      "2.3.4",
+		DefaultValue: "false",
+		Doc:          "can make it able after cdc works",
+		Export:       true,
+	}
+	p.ReplicateMsgEnable.Init(base.mgr)
 
 	p.QueryCoordTimeTick = ParamItem{
 		Key:          "msgChannel.chanNamePrefix.queryTimeTick",

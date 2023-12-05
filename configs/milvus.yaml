@@ -498,7 +498,6 @@ common:
     rootCoordTimeTick: rootcoord-timetick
     rootCoordStatistics: rootcoord-statistics
     rootCoordDml: rootcoord-dml
-    replicateMsg: replicate-msg
     rootCoordDelta: rootcoord-delta
     search: search
     searchResult: searchResult
@@ -547,6 +546,10 @@ common:
   storage:
     scheme: "s3"
     enablev2: false
+  replicateMsg: 
+    enable: false # can make it able after cdc works
+    channelName: replicate-msg
+
 
   # preCreatedTopic decides whether using existed topic
   preCreatedTopic:

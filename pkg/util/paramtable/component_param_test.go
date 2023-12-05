@@ -62,6 +62,8 @@ func TestComponentParam(t *testing.T) {
 		t.Logf("default grafeful stop timeout = %d", Params.GracefulStopTimeout.GetAsInt())
 		params.Save(Params.GracefulStopTimeout.Key, "50")
 		assert.Equal(t, Params.GracefulStopTimeout.GetAsInt64(), int64(50))
+		params.Save(Params.ReplicateMsgEnable.Key, "false")
+		assert.Equal(t, Params.ReplicateMsgEnable.GetAsBool(), false)
 
 		// -- rootcoord --
 		assert.Equal(t, Params.RootCoordTimeTick.GetValue(), "by-dev-rootcoord-timetick")
