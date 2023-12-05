@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 const (
@@ -69,6 +70,7 @@ func createDeltalogBuf(t *testing.T, deleteList interface{}, varcharType bool) [
 
 func Test_BinlogAdapterNew(t *testing.T) {
 	ctx := context.Background()
+	paramtable.Init()
 
 	// nil schema
 	adapter, err := NewBinlogAdapter(ctx, nil, 1024, 2048, nil, nil, 0, math.MaxUint64)
@@ -103,10 +105,10 @@ func Test_BinlogAdapterNew(t *testing.T) {
 	assert.NoError(t, err)
 
 	// amend blockSize, blockSize should less than MaxSegmentSizeInMemory
-	adapter, err = NewBinlogAdapter(ctx, collectionInfo, MaxSegmentSizeInMemory+1, 1024, &MockChunkManager{}, flushFunc, 0, math.MaxUint64)
+	adapter, err = NewBinlogAdapter(ctx, collectionInfo, Params.DataCoordCfg.SegmentMaxSize.GetAsInt64()+1, 1024, &MockChunkManager{}, flushFunc, 0, math.MaxUint64)
 	assert.NotNil(t, adapter)
 	assert.NoError(t, err)
-	assert.Equal(t, int64(MaxSegmentSizeInMemory), adapter.blockSize)
+	assert.Equal(t, Params.DataCoordCfg.SegmentMaxSize.GetAsInt64(), adapter.blockSize)
 }
 
 func Test_BinlogAdapterVerify(t *testing.T) {

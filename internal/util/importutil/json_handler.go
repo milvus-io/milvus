@@ -130,7 +130,7 @@ func (v *JSONRowConsumer) Handle(rows []map[storage.FieldID]interface{}) error {
 
 	// if rows is nil, that means read to end of file, force flush all data
 	if rows == nil {
-		err := tryFlushBlocks(v.ctx, v.shardsData, v.collectionInfo.Schema, v.callFlushFunc, v.blockSize, MaxTotalSizeInMemory, true)
+		err := tryFlushBlocks(v.ctx, v.shardsData, v.collectionInfo.Schema, v.callFlushFunc, v.blockSize, Params.DataNodeCfg.BulkInsertMaxMemorySize.GetAsInt64(), true)
 		log.Info("JSON row consumer finished")
 		return err
 	}
@@ -138,7 +138,7 @@ func (v *JSONRowConsumer) Handle(rows []map[storage.FieldID]interface{}) error {
 	// rows is not nil, flush in necessary:
 	// 1. data block size larger than v.blockSize will be flushed
 	// 2. total data size exceeds MaxTotalSizeInMemory, the largest data block will be flushed
-	err := tryFlushBlocks(v.ctx, v.shardsData, v.collectionInfo.Schema, v.callFlushFunc, v.blockSize, MaxTotalSizeInMemory, false)
+	err := tryFlushBlocks(v.ctx, v.shardsData, v.collectionInfo.Schema, v.callFlushFunc, v.blockSize, Params.DataNodeCfg.BulkInsertMaxMemorySize.GetAsInt64(), false)
 	if err != nil {
 		log.Warn("JSON row consumer: try flush data but failed", zap.Error(err))
 		return merr.WrapErrImportFailed(fmt.Sprintf("try flush data but failed, error: %v", err))
