@@ -678,7 +678,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("dim", [128])  # 128
     @pytest.mark.parametrize("entities", [1000])  # 1000
     @pytest.mark.parametrize("file_nums", [1, 10])
-    @pytest.mark.parametrize("array_len", [0, 100])
+    @pytest.mark.parametrize("array_len", [None, 0, 100])
     def test_with_all_field_parquet(self, auto_id, dim, entities, file_nums, array_len):
         """
         collection schema 1: [pk, int64, float64, string float_vector]

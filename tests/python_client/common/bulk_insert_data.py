@@ -395,7 +395,9 @@ def gen_data_by_data_field(data_field, rows, start=0, float_vector=True, dim=128
                     [np.array([random.random() for _ in range(array_length)], dtype=np.dtype("float32"))
                      for i in range(start, rows + start)])
         elif data_field == DataField.array_string_field:
-            data = pd.Series([[gen_unique_str(str(i)) for _ in range(array_length)] for i in range(start, rows + start)])
+            data = pd.Series(
+                    [np.array([gen_unique_str(str(i)) for _ in range(array_length)], dtype=np.dtype("str"))
+                     for i in range(start, rows + start)])
     return data
 
 
