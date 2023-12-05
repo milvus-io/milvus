@@ -98,9 +98,9 @@ func (p *streamPipeline) Start() error {
 
 func (p *streamPipeline) Close() {
 	p.closeOnce.Do(func() {
+		p.dispatcher.Deregister(p.vChannel)
 		close(p.closeCh)
 		p.closeWg.Wait()
-		p.dispatcher.Deregister(p.vChannel)
 		p.pipeline.Close()
 	})
 }

@@ -396,7 +396,7 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 
 	node.unsubscribingChannels.Insert(req.GetChannelName())
 	defer node.unsubscribingChannels.Remove(req.GetChannelName())
-	delegator, ok := node.delegators.GetAndRemove(req.GetChannelName())
+	delegator, ok := node.delegators.Get(req.GetChannelName())
 	if ok {
 		// close the delegator first to block all coming query/search requests
 		delegator.Close()
@@ -404,6 +404,7 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 		node.pipelineManager.Remove(req.GetChannelName())
 		node.manager.Segment.RemoveBy(segments.WithChannel(req.GetChannelName()), segments.WithType(segments.SegmentTypeGrowing))
 		node.tSafeManager.Remove(ctx, req.GetChannelName())
+		node.delegators.Remove(req.GetChannelName())
 	}
 	log.Info("unsubscribed channel")
 	node.tryReleaseCollection(req.GetCollectionID())
