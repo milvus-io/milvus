@@ -1,4 +1,4 @@
-name: Publish Builder
+name: Publish Gpu Builder
 # TODO: do not trigger action for some document file update
 
 # This workflow is triggered on pushes or pull request to the repository.
@@ -6,26 +6,26 @@ on:
   push:
     # file paths to consider in the event. Optional; defaults to all.
     paths:
-      - 'build/docker/builder/cpu/**'
-      - '.github/workflows/publish-builder.yaml'
+      - 'build/docker/builder/gpu/**'
+      - '.github/workflows/publish-gpu-builder.yaml'
       - '!**.md'
   pull_request:
     # file paths to consider in the event. Optional; defaults to all.
     paths:
-      - 'build/docker/builder/cpu/**'
-      - '.github/workflows/publish-builder.yaml'
+      - 'build/docker/builder/gpu/**'
+      - '.github/workflows/publish-gpu-builder.yaml'
       - '!**.md'
 
 jobs:
-  publish-builder:
+  publish-gpu-builder:
     name: ${{ matrix.arch }} ${{ matrix.os }}
     runs-on: ubuntu-latest
     timeout-minutes: 500
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu20.04, amazonlinux2023]
-        arch: [amd64&arm64]
+        os: [ubuntu20.04]
+        arch: [amd64]
     env:
       OS_NAME: ${{ matrix.os }}
       IMAGE_ARCH: ${{ matrix.arch }}
@@ -48,38 +48,38 @@ jobs:
           echo "::set-output name=sha_short::$(git rev-parse --short HEAD)"
       # - name: Setup upterm session
       #   uses: lhotari/action-upterm@v1
-      - name: Docker Pull
-        shell: bash
-        run: |
-          docker run --rm --privileged tonistiigi/binfmt:latest --install arm64
-          docker buildx ls
-          docker buildx create --use --name=milvus --driver docker-container
       - name: Docker Build
         if: success() && github.event_name == 'pull_request' && github.repository == 'milvus-io/milvus'
         shell: bash
         run: |
-          docker buildx ls
-          docker buildx build --platform linux/amd64,linux/arm64 -t milvusdb/milvus-env:${OS_NAME}-${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }} -f build/docker/builder/cpu/${OS_NAME}/Dockerfile .      
+          docker info
+          docker build -t milvusdb/milvus-env:gpu-${OS_NAME}-${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }} -f build/docker/builder/gpu/${OS_NAME}/Dockerfile .
       - name: Docker Build&Push
         if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
         shell: bash
         run: |
-          docker buildx ls
+          docker info
           docker login -u ${{ secrets.DOCKERHUB_USER }} \
                        -p ${{ secrets.DOCKERHUB_TOKEN }}
-          docker buildx build --platform linux/amd64,linux/arm64 --push -t milvusdb/milvus-env:${OS_NAME}-${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }} -f build/docker/builder/cpu/${OS_NAME}/Dockerfile .
-          docker buildx build --platform linux/amd64,linux/arm64 --push -t milvusdb/milvus-env:${OS_NAME}-latest -f build/docker/builder/cpu/${OS_NAME}/Dockerfile .
+          # Building the first image
+          docker build -t milvusdb/milvus-env:gpu-${OS_NAME}-${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }} -f build/docker/builder/gpu/${OS_NAME}/Dockerfile .
+          docker push milvusdb/milvus-env:gpu-${OS_NAME}-${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }}
+
+          # Building the second image
+          docker build -t milvusdb/milvus-env:gpu-${OS_NAME}-latest -f build/docker/builder/gpu/${OS_NAME}/Dockerfile .
+          docker push milvusdb/milvus-env:gpu-${OS_NAME}-latest
+
       - name: Update Builder Image Changes
         if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus' && matrix.os == 'ubuntu20.04'
         continue-on-error: true
         shell: bash
         run: |
-          sed -i "s#^DATE_VERSION=.*#DATE_VERSION=${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }}#g" .env
-          sed -i "s#^LATEST_DATE_VERSION=.*#LATEST_DATE_VERSION=${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }}#g" .env
+          sed -i "s#^GPU_DATE_VERSION=.*#GPU_DATE_VERSION=${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }}#g" .env
+          sed -i "s#^LATEST_GPU_DATE_VERSION=.*#LATEST_GPU_DATE_VERSION=${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }}#g" .env
           git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           git add .env
-          git commit -m "Update Builder image changes"
+          git commit -m "Update Builder gpu image changes"
       - name: Create Pull Request
         id: cpr
         if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus' && matrix.os == 'ubuntu20.04'
@@ -89,11 +89,11 @@ jobs:
           token: ${{ secrets.ALL_CONTRIBUTORS_TOKEN }}
           author: ${{ github.actor }} <${{ github.actor }}@users.noreply.github.com>
           signoff: false
-          branch: update_builder_${{ github.sha }}
+          branch: update_gpu_builder_${{ github.sha }}
           delete-branch: true
-          title: '[automated] Update Builder image changes'
+          title: '[automated] Update Builder gpu image changes'
           body: |
-            Update Builder image changes
+            Update Builder gpu image changes
             See changes: https://github.com/milvus-io/milvus/commit/${{ github.sha }}
             Signed-off-by: ${{ github.actor }} ${{ github.actor }}@users.noreply.github.com
       - name: Check outputs
@@ -101,4 +101,3 @@ jobs:
         run: |
           echo "Pull Request Number - ${{ steps.cpr.outputs.pull-request-number }}"
           echo "Pull Request URL - ${{ steps.cpr.outputs.pull-request-url }}"
-

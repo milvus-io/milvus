@@ -213,7 +213,7 @@ func (suite *TargetObserverSuite) TestTriggerUpdateTarget() {
 	}, 7*time.Second, 1*time.Second)
 }
 
-func (suite *TargetObserverSuite) TearDownSuite() {
+func (suite *TargetObserverSuite) TearDownTest() {
 	suite.kv.Close()
 	suite.observer.Stop()
 }

@@ -95,7 +95,7 @@ func (s *ControllerBaseTestSuite) TestActivation() {
 	s.True(active)
 
 	invalidTyp := -1
-	_, err = s.controller.IsActive(checkerType(invalidTyp))
+	_, err = s.controller.IsActive(CheckerType(invalidTyp))
 	s.Equal(errTypeNotFound, err)
 }
 

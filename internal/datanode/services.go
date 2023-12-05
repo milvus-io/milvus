@@ -235,12 +235,13 @@ func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 // Compaction handles compaction request from DataCoord
 // returns status as long as compaction task enqueued or invalid
 func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan) (*commonpb.Status, error) {
+	log := log.Ctx(ctx).With(zap.Int64("planID", req.GetPlanID()))
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		log.Warn("DataNode.Compaction failed", zap.Int64("nodeId", paramtable.GetNodeID()), zap.Error(err))
 		return merr.Status(err), nil
 	}
 
-	ds, ok := node.flowgraphManager.getFlowgraphService(req.GetChannel())
+	ds, ok := node.flowgraphManager.GetFlowgraphService(req.GetChannel())
 	if !ok {
 		log.Warn("illegel compaction plan, channel not in this DataNode", zap.String("channelName", req.GetChannel()))
 		return merr.Status(merr.WrapErrChannelNotFound(req.GetChannel(), "illegel compaction plan")), nil
@@ -249,6 +250,20 @@ func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan
 	if !node.compactionExecutor.isValidChannel(req.GetChannel()) {
 		log.Warn("channel of compaction is marked invalid in compaction executor", zap.String("channelName", req.GetChannel()))
 		return merr.Status(merr.WrapErrChannelNotFound(req.GetChannel(), "channel is dropping")), nil
+	}
+
+	meta := ds.metacache
+	for _, segment := range req.GetSegmentBinlogs() {
+		if segment.GetLevel() == datapb.SegmentLevel_L0 {
+			continue
+		}
+		_, ok := meta.GetSegmentByID(segment.GetSegmentID(), metacache.WithSegmentState(commonpb.SegmentState_Flushed))
+		if !ok {
+			log.Warn("compaction plan contains segment which is not flushed",
+				zap.Int64("segmentID", segment.GetSegmentID()),
+			)
+			return merr.Status(merr.WrapErrSegmentNotFound(segment.GetSegmentID(), "segment with flushed state not found")), nil
+		}
 	}
 
 	var task compactor
@@ -325,7 +340,7 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 		return merr.Status(merr.WrapErrParameterInvalid(">0", "0", "compacted from segments shouldn't be empty")), nil
 	}
 
-	ds, ok := node.flowgraphManager.getFlowgraphService(req.GetChannelName())
+	ds, ok := node.flowgraphManager.GetFlowgraphService(req.GetChannelName())
 	if !ok {
 		node.compactionExecutor.clearTasksByChannel(req.GetChannelName())
 		err := merr.WrapErrChannelNotFound(req.GetChannelName())
@@ -509,7 +524,7 @@ func (node *DataNode) AddImportSegment(ctx context.Context, req *datapb.AddImpor
 	// Retry in case the channel hasn't been watched yet.
 	err := retry.Do(ctx, func() error {
 		var ok bool
-		ds, ok = node.flowgraphManager.getFlowgraphService(req.GetChannelName())
+		ds, ok = node.flowgraphManager.GetFlowgraphService(req.GetChannelName())
 		if !ok {
 			return errors.New("channel not found")
 		}
@@ -927,4 +942,24 @@ func logDupFlush(cID, segID int64) {
 	log.Info("segment is already being flushed, ignoring flush request",
 		zap.Int64("collectionID", cID),
 		zap.Int64("segmentID", segID))
+}
+
+func (node *DataNode) PreImport(ctx context.Context, req *datapb.PreImportRequest) (*commonpb.Status, error) {
+	return nil, merr.ErrServiceUnimplemented
+}
+
+func (node *DataNode) ImportV2(ctx context.Context, req *datapb.ImportRequest) (*commonpb.Status, error) {
+	return nil, merr.ErrServiceUnimplemented
+}
+
+func (node *DataNode) QueryPreImport(ctx context.Context, req *datapb.QueryPreImportRequest) (*datapb.QueryPreImportResponse, error) {
+	return nil, merr.ErrServiceUnimplemented
+}
+
+func (node *DataNode) QueryImport(ctx context.Context, req *datapb.QueryImportRequest) (*datapb.QueryImportResponse, error) {
+	return nil, merr.ErrServiceUnimplemented
+}
+
+func (node *DataNode) DropImport(ctx context.Context, req *datapb.DropImportRequest) (*commonpb.Status, error) {
+	return nil, merr.ErrServiceUnimplemented
 }

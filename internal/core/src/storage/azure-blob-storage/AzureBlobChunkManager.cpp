@@ -22,18 +22,6 @@
 namespace azure {
 
 std::string
-GetTenantId() {
-    return std::getenv("AZURE_TENANT_ID");
-}
-std::string
-GetClientId() {
-    return std::getenv("AZURE_CLIENT_ID");
-}
-std::string
-GetTokenFilePath() {
-    return std::getenv("AZURE_FEDERATED_TOKEN_FILE");
-}
-std::string
 GetConnectionString(const std::string& access_key_id,
                     const std::string& access_key_value,
                     const std::string& address) {
@@ -78,9 +66,10 @@ AzureBlobChunkManager::AzureBlobChunkManager(
     bool useIAM) {
     requestTimeoutMs_ = requestTimeoutMs;
     if (useIAM) {
+        Azure::Identity::WorkloadIdentityCredentialOptions options;
         auto workloadIdentityCredential =
             std::make_shared<Azure::Identity::WorkloadIdentityCredential>(
-                GetTenantId(), GetClientId(), GetTokenFilePath());
+                options);
         client_ = std::make_shared<Azure::Storage::Blobs::BlobServiceClient>(
             "https://" + access_key_id + ".blob." + address + "/",
             workloadIdentityCredential);
@@ -90,6 +79,7 @@ AzureBlobChunkManager::AzureBlobChunkManager(
                 CreateFromConnectionString(GetConnectionString(
                     access_key_id, access_key_value, address)));
     }
+    client_->GetProperties();
 }
 
 AzureBlobChunkManager::~AzureBlobChunkManager() {

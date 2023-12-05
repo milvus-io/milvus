@@ -159,7 +159,7 @@ func (s *ChannelManagerSuite) TestSubmitWatchAndRelease() {
 	s.Equal(datapb.ChannelWatchState_ToWatch, resp.GetState())
 
 	s.manager.handleOpState(opState)
-	s.Equal(1, s.manager.runningFlowgraphs.getFlowGraphNum())
+	s.Equal(1, s.manager.fgManager.GetFlowgraphCount())
 	s.True(s.manager.opRunners.Contain(info.GetVchan().GetChannelName()))
 	s.Equal(1, s.manager.opRunners.Len())
 
@@ -182,7 +182,7 @@ func (s *ChannelManagerSuite) TestSubmitWatchAndRelease() {
 	s.Equal(info.GetOpID(), resp.GetOpID())
 	s.Equal(datapb.ChannelWatchState_ReleaseSuccess, resp.GetState())
 
-	s.Equal(0, s.manager.runningFlowgraphs.getFlowGraphNum())
+	s.Equal(0, s.manager.fgManager.GetFlowgraphCount())
 	s.False(s.manager.opRunners.Contain(info.GetVchan().GetChannelName()))
 	s.Equal(0, s.manager.opRunners.Len())
 }

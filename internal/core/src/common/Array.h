@@ -234,10 +234,10 @@ class Array {
     template <typename T>
     T
     get_data(const int index) const {
-        AssertInfo(
-            index >= 0 && index < length_,
-            fmt::format(
-                "index out of range, index={}, length={}", index, length_));
+        AssertInfo(index >= 0 && index < length_,
+                   "index out of range, index={}, length={}",
+                   index,
+                   length_);
         if constexpr (std::is_same_v<T, std::string> ||
                       std::is_same_v<T, std::string_view>) {
             size_t element_length = (index == length_ - 1)
@@ -461,10 +461,10 @@ class ArrayView {
     template <typename T>
     T
     get_data(const int index) const {
-        AssertInfo(
-            index >= 0 && index < length_,
-            fmt::format(
-                "index out of range, index={}, length={}", index, length_));
+        AssertInfo(index >= 0 && index < length_,
+                   "index out of range, index={}, length={}",
+                   index,
+                   length_);
 
         if constexpr (std::is_same_v<T, std::string> ||
                       std::is_same_v<T, std::string_view>) {

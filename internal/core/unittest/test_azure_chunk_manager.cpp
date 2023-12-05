@@ -22,7 +22,7 @@ using namespace milvus;
 using namespace milvus::storage;
 
 StorageConfig
-get_default_storage_config() {
+get_default_storage_config(bool useIam) {
     auto endpoint = "core.windows.net";
     auto accessKey = "devstoreaccount1";
     auto accessValue =
@@ -30,7 +30,6 @@ get_default_storage_config() {
         "K1SZFPTOtr/KBHBeksoGMGw==";
     auto rootPath = "files";
     auto useSSL = false;
-    auto useIam = false;
     auto iamEndPoint = "";
     auto bucketName = "a-bucket";
 
@@ -57,7 +56,7 @@ class AzureChunkManagerTest : public testing::Test {
 
     virtual void
     SetUp() {
-        configs_ = get_default_storage_config();
+        configs_ = get_default_storage_config(false);
         chunk_manager_ = make_unique<AzureChunkManager>(configs_);
         chunk_manager_ptr_ = CreateChunkManager(configs_);
     }
@@ -67,6 +66,18 @@ class AzureChunkManagerTest : public testing::Test {
     ChunkManagerPtr chunk_manager_ptr_;
     StorageConfig configs_;
 };
+
+TEST_F(AzureChunkManagerTest, WrongConfig) {
+    StorageConfig configs = get_default_storage_config(true);
+
+    try {
+        AzureChunkManagerPtr chunk_manager =
+            make_unique<AzureChunkManager>(configs);
+        EXPECT_TRUE(false);
+    } catch (SegcoreError& e) {
+        EXPECT_TRUE(std::string(e.what()).find("precheck") != string::npos);
+    }
+}
 
 TEST_F(AzureChunkManagerTest, AzureLogger) {
     AzureLogger(Azure::Core::Diagnostics::Logger::Level::Error, "");

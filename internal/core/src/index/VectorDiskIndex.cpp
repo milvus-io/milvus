@@ -128,9 +128,8 @@ VectorDiskAnnIndex<T>::Build(const Config& config) {
         build_config[DISK_ANN_THREADS_NUM] =
             std::atoi(num_threads.value().c_str());
     }
-    knowhere::DataSet* ds_ptr = nullptr;
     build_config.erase("insert_files");
-    auto stat = index_.Build(*ds_ptr, build_config);
+    auto stat = index_.Build({}, build_config);
     if (stat != knowhere::Status::success)
         PanicInfo(ErrorCode::IndexBuildError,
                   "failed to build disk index, " + KnowhereStatusString(stat));
@@ -184,8 +183,7 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
     auto raw_data = const_cast<void*>(milvus::GetDatasetTensor(dataset));
     local_chunk_manager->Write(local_data_path, offset, raw_data, data_size);
 
-    knowhere::DataSet* ds_ptr = nullptr;
-    auto stat = index_.Build(*ds_ptr, build_config);
+    auto stat = index_.Build({}, build_config);
     if (stat != knowhere::Status::success)
         PanicInfo(ErrorCode::IndexBuildError,
                   "failed to build index, " + KnowhereStatusString(stat));

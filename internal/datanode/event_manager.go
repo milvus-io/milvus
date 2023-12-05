@@ -171,7 +171,7 @@ func (node *DataNode) handlePutEvent(watchInfo *datapb.ChannelWatchInfo, version
 
 	switch watchInfo.State {
 	case datapb.ChannelWatchState_Uncomplete, datapb.ChannelWatchState_ToWatch:
-		if err := node.flowgraphManager.addAndStartWithEtcdTickler(node, watchInfo.GetVchan(), watchInfo.GetSchema(), tickler); err != nil {
+		if err := node.flowgraphManager.AddandStartWithEtcdTickler(node, watchInfo.GetVchan(), watchInfo.GetSchema(), tickler); err != nil {
 			log.Warn("handle put event: new data sync service failed", zap.String("vChanName", vChanName), zap.Error(err))
 			watchInfo.State = datapb.ChannelWatchState_WatchFailure
 		} else {

@@ -14,28 +14,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#pragma once
+package storage
 
-#include <string>
-#include <map>
-#include <google/protobuf/text_format.h>
+import (
+	"os"
+	"testing"
 
-#include "pb/schema.pb.h"
-#include "common/EasyAssert.h"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
+)
 
-using std::string;
+var Params = paramtable.Get()
 
-namespace milvus {
-static std::map<string, string>
-RepeatedKeyValToMap(
-    const google::protobuf::RepeatedPtrField<proto::common::KeyValuePair>&
-        kvs) {
-    std::map<string, string> mapping;
-    for (auto& kv : kvs) {
-        AssertInfo(
-            !mapping.count(kv.key()), "repeat key({}) in protobuf", kv.key());
-        mapping.emplace(kv.key(), kv.value());
-    }
-    return mapping;
+func TestMain(m *testing.M) {
+	paramtable.Init()
+	exitCode := m.Run()
+	err := os.RemoveAll(localPath)
+	if err != nil {
+		return
+	}
+	os.Exit(exitCode)
 }
-}  //namespace milvus

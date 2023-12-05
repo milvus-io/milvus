@@ -61,7 +61,7 @@ func NewSegmentChecker(
 	}
 }
 
-func (c *SegmentChecker) ID() checkerType {
+func (c *SegmentChecker) ID() CheckerType {
 	return segmentChecker
 }
 
