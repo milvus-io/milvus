@@ -60,12 +60,19 @@ CStatus
 AppendIndexV2(CLoadIndexInfo c_load_index_info);
 
 CStatus
+AppendIndexV3(CLoadIndexInfo c_load_index_info);
+
+CStatus
 AppendIndexEngineVersionToLoadInfo(CLoadIndexInfo c_load_index_info,
                                    int32_t index_engine_version);
 
 CStatus
 CleanLoadedIndex(CLoadIndexInfo c_load_index_info);
 
+void
+AppendStorageInfo(CLoadIndexInfo c_load_index_info,
+                  const char* uri,
+                  int64_t version);
 #ifdef __cplusplus
 }
 #endif

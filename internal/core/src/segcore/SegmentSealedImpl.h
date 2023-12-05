@@ -50,6 +50,8 @@ class SegmentSealedImpl : public SegmentSealed {
     void
     LoadFieldData(const LoadFieldDataInfo& info) override;
     void
+    LoadFieldDataV2(const LoadFieldDataInfo& info) override;
+    void
     LoadDeletedRecord(const LoadDeletedRecordInfo& info) override;
     void
     LoadSegmentMeta(
