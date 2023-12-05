@@ -1,17 +1,10 @@
-
-
-
 use futures::executor::block_on;
-
-
-
 
 use tantivy::schema::{Field, IndexRecordOption, Schema, TextFieldIndexing, TextOptions, INDEXED};
 use tantivy::{doc, tokenizer, Index, IndexWriter};
 
 use crate::data_type::TantivyDataType;
 use crate::index_reader::IndexReaderWrapper;
-
 
 pub struct IndexWriterWrapper {
     pub field_name: String,
@@ -48,9 +41,6 @@ impl IndexWriterWrapper {
                 let text_options = TextOptions::default().set_indexing_options(text_field_indexing);
                 field = schema_builder.add_text_field(&field_name, text_options);
                 use_raw_tokenizer = true;
-            }
-            _ => {
-                panic!("not supported");
             }
         }
         let schema = schema_builder.build();

@@ -7,9 +7,7 @@
 #include <new>
 
 enum class TantivyDataType : uint8_t {
-  Text,
   Keyword,
-  U64,
   I64,
   F64,
   Bool,
