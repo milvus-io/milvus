@@ -192,26 +192,14 @@ func (s Catalog) GetResourceGroups() ([]*querypb.ResourceGroup, error) {
 }
 
 func (s Catalog) ReleaseCollection(collection int64) error {
-	// obtain partitions of this collection
-	_, values, err := s.cli.LoadWithPrefix(fmt.Sprintf("%s/%d", PartitionLoadInfoPrefix, collection))
-	if err != nil {
-		return err
-	}
-	partitionIDs := make([]int64, 0)
-	for _, v := range values {
-		info := querypb.PartitionLoadInfo{}
-		if err = proto.Unmarshal([]byte(v), &info); err != nil {
-			return err
-		}
-		partitionIDs = append(partitionIDs, (&info).GetPartitionID())
-	}
 	// remove collection and obtained partitions
 	collectionKey := EncodeCollectionLoadInfoKey(collection)
-	err = s.cli.Remove(collectionKey)
+	err := s.cli.Remove(collectionKey)
 	if err != nil {
 		return err
 	}
-	return s.ReleasePartition(collection, partitionIDs...)
+	partitionsPrefix := fmt.Sprintf("%s/%d", PartitionLoadInfoPrefix, collection)
+	return s.cli.RemoveWithPrefix(partitionsPrefix)
 }
 
 func (s Catalog) ReleasePartition(collection int64, partitions ...int64) error {
