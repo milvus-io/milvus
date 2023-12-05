@@ -122,8 +122,9 @@ type Server struct {
 	gcOpt            GcOption
 	handler          Handler
 
-	compactionTrigger trigger
-	compactionHandler compactionPlanContext
+	compactionTrigger     trigger
+	compactionHandler     compactionPlanContext
+	compactionViewManager *CompactionViewManager
 
 	metricsCacheManager *metricsinfo.MetricsCacheManager
 
@@ -401,6 +402,7 @@ func (s *Server) startDataCoord() {
 	if Params.DataCoordCfg.EnableCompaction.GetAsBool() {
 		s.compactionHandler.start()
 		s.compactionTrigger.start()
+		s.compactionViewManager.Start()
 	}
 	s.startServerLoop()
 	s.afterStart()
@@ -455,10 +457,13 @@ func (s *Server) SetIndexNodeCreator(f func(context.Context, string, int64) (typ
 
 func (s *Server) createCompactionHandler() {
 	s.compactionHandler = newCompactionPlanHandler(s.sessionManager, s.channelManager, s.meta, s.allocator)
+	triggerv2 := NewCompactionTriggerManager(s.meta, s.allocator, s.compactionHandler)
+	s.compactionViewManager = NewCompactionViewManager(s.meta, triggerv2, s.allocator)
 }
 
 func (s *Server) stopCompactionHandler() {
 	s.compactionHandler.stop()
+	s.compactionViewManager.Close()
 }
 
 func (s *Server) createCompactionTrigger() {
