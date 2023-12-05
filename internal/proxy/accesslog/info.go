@@ -30,6 +30,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/requestutil"
 )
@@ -40,22 +41,22 @@ type AccessInfo interface {
 
 type GrpcAccessInfo struct {
 	ctx    context.Context
-	info   *grpc.UnaryServerInfo
 	status *commonpb.Status
 	req    interface{}
 	resp   interface{}
 	err    error
 
-	start time.Time
-	end   time.Time
+	grpcInfo *grpc.UnaryServerInfo
+	start    time.Time
+	end      time.Time
 }
 
-func NewGrpcAccessInfo(ctx context.Context, info *grpc.UnaryServerInfo, req interface{}) *GrpcAccessInfo {
+func NewGrpcAccessInfo(ctx context.Context, grpcInfo *grpc.UnaryServerInfo, req interface{}) *GrpcAccessInfo {
 	accessInfo := &GrpcAccessInfo{
-		ctx:   ctx,
-		info:  info,
-		req:   req,
-		start: time.Now(),
+		ctx:      ctx,
+		grpcInfo: grpcInfo,
+		req:      req,
+		start:    time.Now(),
 	}
 
 	return accessInfo
@@ -137,7 +138,7 @@ func getTimeEnd(i *GrpcAccessInfo) string {
 }
 
 func getMethodName(i *GrpcAccessInfo) string {
-	_, methodName := path.Split(i.info.FullMethod)
+	_, methodName := path.Split(i.grpcInfo.FullMethod)
 	return methodName
 }
 
@@ -259,4 +260,12 @@ func getExpr(i *GrpcAccessInfo) string {
 		return unknownString
 	}
 	return expr.(string)
+}
+
+func getSdkVersion(i *GrpcAccessInfo) string {
+	clientInfo := connection.GetManager().Get(i.ctx)
+	if clientInfo == nil {
+		return unknownString
+	}
+	return clientInfo.SdkType + "-" + clientInfo.SdkVersion
 }
