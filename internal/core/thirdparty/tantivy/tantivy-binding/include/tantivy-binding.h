@@ -18,17 +18,18 @@ enum class TantivyDataType : uint8_t {
 struct RustArray {
   uint32_t *array;
   size_t len;
+  size_t cap;
 };
 
 extern "C" {
 
 void *tantivy_create_index(const char *field_name, TantivyDataType data_type, const char *path);
 
+void tantivy_free_index_writer(void *ptr);
+
 void tantivy_finish_index(void *ptr);
 
-uint32_t tantivy_index_count(void *ptr);
-
-void tantivy_free_index(void *ptr);
+void *tantivy_create_reader_for_index(void *ptr);
 
 void tantivy_index_add_int8s(void *ptr, const int8_t *array, uintptr_t len);
 
@@ -45,6 +46,16 @@ void tantivy_index_add_f64s(void *ptr, const double *array, uintptr_t len);
 void tantivy_index_add_bools(void *ptr, const bool *array, uintptr_t len);
 
 void tantivy_index_add_keyword(void *ptr, const char *s);
+
+bool tantivy_index_exist(const char *path);
+
+void free_rust_array(RustArray array);
+
+void *tantivy_load_index(const char *path);
+
+void tantivy_free_index_reader(void *ptr);
+
+uint32_t tantivy_index_count(void *ptr);
 
 RustArray tantivy_term_query_i64(void *ptr, int64_t term);
 
@@ -89,11 +100,5 @@ RustArray tantivy_range_query_keyword(void *ptr,
                                       bool ub_inclusive);
 
 RustArray tantivy_prefix_query_keyword(void *ptr, const char *prefix);
-
-bool tantivy_index_exist(const char *path);
-
-void *tantivy_load_index(const char *path);
-
-void free_rust_array(RustArray array);
 
 } // extern "C"

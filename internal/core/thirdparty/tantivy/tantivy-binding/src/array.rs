@@ -1,37 +1,30 @@
-use core::slice;
+use libc::size_t;
 
-use libc::{size_t, freeaddrinfo};
-use scopeguard::defer_on_unwind;
 
 #[repr(C)]
 pub struct RustArray {
     array: *mut u32,
     len: size_t,
+    cap: size_t,
 }
 
 impl RustArray {
     pub fn from_vec(vec: Vec<u32>) -> RustArray {
-        defer_on_unwind!({
-            ::std::process::abort();
-        });
-        let v: Box<[u32]> = vec.into_boxed_slice();
+        let len = vec.len();
+        let cap = vec.capacity();
+        let v = vec.leak();
         RustArray {
-            len: v.len().try_into().expect("Integer Overflow"),
-            array: Box::into_raw(v) as _,
+            array: v.as_mut_ptr(),
+            len: len.try_into().expect("Integer Overflow"),
+            cap: cap.try_into().expect("Integer Overflow"),
         }
     }
 }
 
 #[no_mangle]
 pub extern "C" fn free_rust_array(array: RustArray) {
-    defer_on_unwind!({
-        ::std::process::abort();
-    });
-    let RustArray { array, len } = array;
+    let RustArray { array, len , cap} = array;
     unsafe {
-        drop::<Box<[u32]>>(Box::from_raw(slice::from_raw_parts_mut(
-            array,
-            len.try_into().expect("Integer Overflow"),
-        )));
+        Vec::from_raw_parts(array, len, cap);
     }
 }
