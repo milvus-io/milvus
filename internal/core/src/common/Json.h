@@ -48,11 +48,11 @@ class Json {
     }
 
     Json(const char* data, size_t len, size_t cap) : data_(data, len) {
-        AssertInfo(len + simdjson::SIMDJSON_PADDING <= cap,
-                   fmt::format("create json without enough memory size for "
-                               "SIMD, len={}, cap={}",
-                               len,
-                               cap));
+        AssertInfo(
+            len + simdjson::SIMDJSON_PADDING <= cap,
+            "create json without enough memory size for SIMD, len={}, cap={}",
+            len,
+            cap);
     }
 
     // WARN: this is used for fast non-copy construction,
@@ -105,9 +105,9 @@ class Json {
         auto doc =
             parser.iterate(data_, data_.size() + simdjson::SIMDJSON_PADDING);
         AssertInfo(doc.error() == simdjson::SUCCESS,
-                   fmt::format("failed to parse the json {}: {}",
-                               data_,
-                               simdjson::error_message(doc.error())));
+                   "failed to parse the json {}: {}",
+                   data_,
+                   simdjson::error_message(doc.error()));
         return doc;
     }
 
@@ -119,9 +119,9 @@ class Json {
         // as we have allocated the memory with this padding
         auto doc = parser.parse(data_);
         AssertInfo(doc.error() == simdjson::SUCCESS,
-                   fmt::format("failed to parse the json {}: {}",
-                               data_,
-                               simdjson::error_message(doc.error())));
+                   "failed to parse the json {}: {}",
+                   data_,
+                   simdjson::error_message(doc.error()));
         return doc;
     }
 
