@@ -1,6 +1,9 @@
 import copy
 import os
+import time
+
 import numpy as np
+import pandas as pd
 import random
 from sklearn import preprocessing
 from common.common_func import gen_unique_str
@@ -21,6 +24,10 @@ class DataField:
     bool_field = "bool_scalar"
     float_field = "float_scalar"
     double_field = "double_scalar"
+    array_bool_field = "array_bool"
+    array_int_field = "array_int"
+    array_float_field = "array_float"
+    array_string_field = "array_string"
 
 
 class DataErrorType:
@@ -31,6 +38,8 @@ class DataErrorType:
     typo_on_bool = "typo_on_bool"
     str_on_float_scalar = "str_on_float_scalar"
     str_on_vector_field = "str_on_vector_field"
+    empty_array_field = "empty_array_field"
+    mismatch_type_array_field = "mismatch_type_array_field"
 
 
 def gen_file_prefix(is_row_based=True, auto_id=True, prefix=""):
@@ -125,6 +134,36 @@ def gen_row_based_json_file(row_file, str_pk, data_fields, float_vect,
                         f.write('"bool_scalar":' + str(random.choice(["True", "False", "TRUE", "FALSE", "0", "1"])) + '')
                     else:
                         f.write('"bool_scalar":' + str(random.choice(["true", "false"])) + '')
+                if data_field == DataField.array_bool_field:
+                    if err_type == DataErrorType.empty_array_field:
+                        f.write('"array_bool":[]')
+                    elif err_type == DataErrorType.mismatch_type_array_field:
+                        f.write('"array_bool": "mistype"')
+                    else:
+
+                        f.write('"array_bool":[' + str(random.choice(["true", "false"])) + ',' + str(random.choice(["true", "false"])) + ']')
+                if data_field == DataField.array_int_field:
+                    if err_type == DataErrorType.empty_array_field:
+                        f.write('"array_int":[]')
+                    elif err_type == DataErrorType.mismatch_type_array_field:
+                        f.write('"array_int": "mistype"')
+                    else:
+                        f.write('"array_int":[' + str(random.randint(-999999, 9999999)) + ',' + str(random.randint(-999999, 9999999)) + ']')
+                if data_field == DataField.array_float_field:
+                    if err_type == DataErrorType.empty_array_field:
+                        f.write('"array_float":[]')
+                    elif err_type == DataErrorType.mismatch_type_array_field:
+                        f.write('"array_float": "mistype"')
+                    else:
+                        f.write('"array_float":[' + str(random.random()) + ',' + str(random.random()) + ']')
+                if data_field == DataField.array_string_field:
+                    if err_type == DataErrorType.empty_array_field:
+                        f.write('"array_string":[]')
+                    elif err_type == DataErrorType.mismatch_type_array_field:
+                        f.write('"array_string": "mistype"')
+                    else:
+                        f.write('"array_string":["' + str(gen_unique_str()) + '","' + str(gen_unique_str()) + '"]')
+
                 if data_field == DataField.vec_field:
                     # vector field
                     if err_type == DataErrorType.one_entity_wrong_dim and i == wrong_row:
@@ -307,11 +346,57 @@ def gen_int_or_float_in_numpy_file(dir, data_field, rows, start=0, force=False):
                 data = [i for i in range(start, start + rows)]
             elif data_field == DataField.int_field:
                 data = [random.randint(-999999, 9999999) for _ in range(rows)]
-        # print(f"file_name: {file_name} data type: {arr.dtype}")
             arr = np.array(data)
             log.info(f"file_name: {file_name} data type: {arr.dtype} data shape: {arr.shape}")
             np.save(file, arr)
     return file_name
+
+
+def gen_vectors(float_vector, rows, dim):
+    vectors = []
+    if rows > 0:
+        if float_vector:
+            vectors = gen_float_vectors(rows, dim)
+        else:
+            vectors = gen_binary_vectors(rows, (dim // 8))
+    return vectors
+
+
+def gen_data_by_data_field(data_field, rows, start=0, float_vector=True, dim=128, array_length=None):
+    if array_length is None:
+        array_length = random.randint(0, 10)
+
+    data = []
+    if rows > 0:
+        if data_field == DataField.vec_field:
+            data = gen_vectors(float_vector=float_vector, rows=rows, dim=dim)
+        elif data_field == DataField.float_field:
+            data = [np.float32(random.random()) for _ in range(rows)]
+        elif data_field == DataField.double_field:
+            data = [np.float64(random.random()) for _ in range(rows)]
+        elif data_field == DataField.pk_field:
+            data = [np.int64(i) for i in range(start, start + rows)]
+        elif data_field == DataField.int_field:
+            data = [np.int64(random.randint(-999999, 9999999)) for _ in range(rows)]
+        elif data_field == DataField.string_field:
+            data = [gen_unique_str(str(i)) for i in range(start, rows + start)]
+        elif data_field == DataField.bool_field:
+            data = [random.choice([True, False]) for i in range(start, rows + start)]
+        elif data_field == DataField.array_bool_field:
+            data = pd.Series(
+                    [np.array([random.choice([True, False]) for _ in range(array_length)], dtype=np.dtype("bool"))
+                     for i in range(start, rows + start)])
+        elif data_field == DataField.array_int_field:
+            data = pd.Series(
+                    [np.array([random.randint(-999999, 9999999) for _ in range(array_length)], dtype=np.dtype("int64"))
+                     for i in range(start, rows + start)])
+        elif data_field == DataField.array_float_field:
+            data = pd.Series(
+                    [np.array([random.random() for _ in range(array_length)], dtype=np.dtype("float32"))
+                     for i in range(start, rows + start)])
+        elif data_field == DataField.array_string_field:
+            data = pd.Series([[gen_unique_str(str(i)) for _ in range(array_length)] for i in range(start, rows + start)])
+    return data
 
 
 def gen_file_name(is_row_based, rows, dim, auto_id, str_pk,
@@ -334,7 +419,7 @@ def gen_file_name(is_row_based, rows, dim, auto_id, str_pk,
         pk = "str_pk_"
     prefix = gen_file_prefix(is_row_based=is_row_based, auto_id=auto_id, prefix=err_type)
 
-    file_name = f"{prefix}_{pk}{vt}{field_suffix}{dim}d_{row_suffix}_{file_num}{file_type}"
+    file_name = f"{prefix}_{pk}{vt}{field_suffix}{dim}d_{row_suffix}_{file_num}_{int(time.time())}{file_type}"
     return file_name
 
 
@@ -409,6 +494,35 @@ def gen_npy_files(float_vector, rows, dim, data_fields, file_nums=1, err_type=""
                 else:
                     file_name = gen_int_or_float_in_numpy_file(dir=dir, data_field=data_field, rows=rows, start=start_uid, force=force)
                 files.append(f"{subfolder}/{file_name}")
+            start_uid += rows
+    return files
+
+
+def gen_parquet_files(float_vector, rows, dim, data_fields, file_nums=1, array_length=None, err_type=""):
+    # gen numpy files
+    files = []
+    start_uid = 0
+    if file_nums == 1:
+        all_field_data = {}
+        for data_field in data_fields:
+            data = gen_data_by_data_field(data_field=data_field, rows=rows, start=0,
+                                          float_vector=float_vector, dim=dim, array_length=array_length)
+            all_field_data[data_field] = data
+        df = pd.DataFrame(all_field_data)
+        file_name = f"data-fields-{len(data_fields)}-rows-{rows}-dim-{dim}-file-num-{file_nums}-err-{int(time.time())}.parquet"
+        df.to_parquet(f"{data_source}/{file_name}", engine='pyarrow')
+        files.append(file_name)
+    else:
+        for i in range(file_nums):
+            all_field_data = {}
+            for data_field in data_fields:
+                data = gen_data_by_data_field(data_field=data_field, rows=rows, start=0,
+                                              float_vector=float_vector, dim=dim, array_length=array_length)
+                all_field_data[data_field] = data
+            df = pd.DataFrame(all_field_data)
+            file_name = f"data-fields-{len(data_fields)}-rows-{rows}-dim-{dim}-file-num-{i}-{int(time.time())}.parquet"
+            df.to_parquet(f"{data_source}/{file_name}", engine='pyarrow')
+            files.append(file_name)
             start_uid += rows
     return files
 
@@ -522,6 +636,45 @@ def prepare_bulk_insert_numpy_files(minio_endpoint="", bucket_name="milvus-bucke
 
     copy_files_to_minio(host=minio_endpoint, r_source=data_source, files=files, bucket_name=bucket_name, force=force)
     return files
+
+
+def prepare_bulk_insert_parquet_files(minio_endpoint="", bucket_name="milvus-bucket", rows=100, dim=128, array_length=None,
+                                    data_fields=[DataField.vec_field], float_vector=True, file_nums=1, force=False):
+    """
+    Generate column based files based on params in parquet format and copy them to the minio
+    Note: each field in data_fields would be generated one parquet file.
+
+    :param rows: the number entities to be generated in the file(s)
+    :type rows: int
+
+    :param dim: dim of vector data
+    :type dim: int
+
+    :param: float_vector: generate float vectors or binary vectors
+    :type float_vector: boolean
+
+    :param: data_fields: data fields to be generated in the file(s):
+            it supports one or all of [int_pk, vectors, int, float]
+            Note: it does not automatically add pk field
+    :type data_fields: list
+
+    :param file_nums: file numbers to be generated
+        The file(s) would be  generated in data_source folder if file_nums = 1
+        The file(s) would be generated in different sub-folders if file_nums > 1
+    :type file_nums: int
+
+    :param force: re-generate the file(s) regardless existing or not
+    :type force: boolean
+
+    Return: List
+        File name list or file name with sub-folder list
+    """
+    files = gen_parquet_files(rows=rows, dim=dim, float_vector=float_vector,
+                              data_fields=data_fields, array_length=array_length,
+                              file_nums=file_nums)
+    copy_files_to_minio(host=minio_endpoint, r_source=data_source, files=files, bucket_name=bucket_name, force=force)
+    return files
+
 
 def gen_csv_file(file, float_vector, data_fields, rows, dim, start_uid):
     with open(file, "w") as f:
