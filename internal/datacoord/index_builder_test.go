@@ -666,7 +666,7 @@ func TestIndexBuilder(t *testing.T) {
 	chunkManager := &mocks.ChunkManager{}
 	chunkManager.EXPECT().RootPath().Return("root")
 
-	ib := newIndexBuilder(ctx, mt, nodeManager, chunkManager, newIndexEngineVersionManager())
+	ib := newIndexBuilder(ctx, mt, nodeManager, chunkManager, newIndexEngineVersionManager(), nil)
 
 	assert.Equal(t, 6, len(ib.tasks))
 	assert.Equal(t, indexTaskInit, ib.tasks[buildID])

@@ -102,23 +102,23 @@ message FieldIndex {
 }
 
 message SegmentIndex {
-  int64 collectionID = 1;
-  int64 partitionID = 2;
-  int64 segmentID = 3;
-  int64 num_rows = 4;
-  int64 indexID = 5;
-  int64 buildID = 6;
-  int64 nodeID = 7;
-  int64 index_version = 8;
-  common.IndexState state = 9;
-  string fail_reason = 10;
-  repeated string index_file_keys = 11;
-  bool deleted = 12;
-  uint64 create_time = 13;
-  uint64 serialize_size = 14;
-  bool write_handoff = 15;
-  int32 current_index_version = 16;
-  int64 index_store_version = 17;
+    int64 collectionID = 1;
+    int64 partitionID = 2;
+    int64 segmentID = 3;
+    int64 num_rows = 4;
+    int64 indexID = 5;
+    int64 buildID = 6;
+    int64 nodeID = 7;
+    int64 index_version = 8;
+    common.IndexState state = 9;
+    string fail_reason = 10;
+    repeated string index_file_keys = 11;
+    bool deleted = 12;
+    uint64 create_time = 13;
+    uint64 serialize_size = 14;
+    bool write_handoff = 15;
+    int32 current_index_version = 16;
+    int64 index_store_version = 17;
 }
 
 message RegisterNodeRequest {
@@ -178,17 +178,17 @@ message GetIndexInfoRequest {
 }
 
 message IndexFilePathInfo {
-  int64 segmentID = 1;
-  int64 fieldID = 2;
-  int64 indexID = 3;
-  int64 buildID = 4;
-  string index_name = 5;
-  repeated common.KeyValuePair index_params = 6;
-  repeated string index_file_paths = 7;
-  uint64 serialized_size = 8;
-  int64 index_version = 9;
-  int64 num_rows = 10;
-  int32 current_index_version = 11;
+    int64 segmentID = 1;
+    int64 fieldID = 2;
+    int64 indexID = 3;
+    int64 buildID = 4;
+    string index_name = 5;
+    repeated common.KeyValuePair index_params = 6;
+    repeated string index_file_paths = 7;
+    uint64 serialized_size = 8;
+    int64 index_version = 9;
+    int64 num_rows = 10;
+    int32 current_index_version = 11;
 }
 
 message SegmentInfo {
@@ -274,20 +274,19 @@ message CreateJobRequest {
     int64 dim = 22;
 }
 
-
 message QueryJobsRequest {
     string clusterID = 1;
     repeated int64 buildIDs = 2;
 }
 
 message IndexTaskInfo {
-  int64 buildID = 1;
-  common.IndexState state = 2;
-  repeated string index_file_keys = 3;
-  uint64 serialized_size = 4;
-  string fail_reason = 5;
-  int32 current_index_version = 6;
-  int64 index_store_version = 7;
+    int64 buildID = 1;
+    common.IndexState state = 2;
+    repeated string index_file_keys = 3;
+    uint64 serialized_size = 4;
+    string fail_reason = 5;
+    int32 current_index_version = 6;
+    int64 index_store_version = 7;
 }
 
 message QueryJobsResponse {
