@@ -42,6 +42,6 @@ set(SEGCORE_FILES
         SkipIndex.cpp)
 add_library(milvus_segcore SHARED ${SEGCORE_FILES})
 
-target_link_libraries(milvus_segcore milvus_query ${OpenMP_CXX_FLAGS})
+target_link_libraries(milvus_segcore milvus_query ${OpenMP_CXX_FLAGS} milvus-storage)
 
 install(TARGETS milvus_segcore DESTINATION "${CMAKE_INSTALL_LIBDIR}")

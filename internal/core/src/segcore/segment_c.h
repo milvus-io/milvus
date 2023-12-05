@@ -90,6 +90,10 @@ LoadFieldData(CSegmentInterface c_segment,
               CLoadFieldDataInfo load_field_data_info);
 
 CStatus
+LoadFieldDataV2(CSegmentInterface c_segment,
+                CLoadFieldDataInfo load_field_data_info);
+
+CStatus
 LoadFieldRawData(CSegmentInterface c_segment,
                  int64_t field_id,
                  const void* data,

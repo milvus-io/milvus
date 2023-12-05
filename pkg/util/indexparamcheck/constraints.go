@@ -20,10 +20,10 @@ const (
 	// DefaultMaxDim is the largest dimension supported in Milvus
 	DefaultMaxDim = 32768
 
-	HNSWMinEfConstruction = 8
-	HNSWMaxEfConstruction = 512
-	HNSWMinM              = 4
-	HNSWMaxM              = 64
+	HNSWMinEfConstruction = 1
+	HNSWMaxEfConstruction = 2147483647
+	HNSWMinM              = 1
+	HNSWMaxM              = 2048
 
 	// DIM is a constant used to represent dimension
 	DIM = common.DimKey
