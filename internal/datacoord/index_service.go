@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/samber/lo"
 )
 
 // serverID return the session serverID
@@ -205,6 +206,47 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		zap.String("IndexName", req.GetIndexName()), zap.Int64("fieldID", req.GetFieldID()),
 		zap.Int64("IndexID", indexID))
 	metrics.IndexRequestCounter.WithLabelValues(metrics.SuccessLabel).Inc()
+	return merr.Success(), nil
+}
+
+func (s *Server) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest) (*commonpb.Status, error) {
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", req.GetCollectionID()),
+		zap.String("indexName", req.GetIndexName()),
+	)
+	log.Info("receive AlterIndex request", zap.Any("params", req.GetParams()))
+
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		log.Warn(msgDataCoordIsUnhealthy(paramtable.GetNodeID()), zap.Error(err))
+		return merr.Status(err), nil
+	}
+
+	indexes := s.meta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName())
+	params := make(map[string]string)
+	for _, index := range indexes {
+		for _, param := range index.IndexParams {
+			params[param.GetKey()] = param.GetValue()
+		}
+
+		// update the index params
+		for _, param := range req.GetParams() {
+			params[param.GetKey()] = param.GetValue()
+		}
+
+		index.IndexParams = lo.MapToSlice(params, func(k string, v string) *commonpb.KeyValuePair {
+			return &commonpb.KeyValuePair{
+				Key:   k,
+				Value: v,
+			}
+		})
+	}
+
+	err := s.meta.AlterIndex(ctx, indexes...)
+	if err != nil {
+		log.Warn("failed to alter index", zap.Error(err))
+		return merr.Status(err), nil
+	}
+
 	return merr.Success(), nil
 }
 

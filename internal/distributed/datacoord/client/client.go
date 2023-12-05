@@ -564,6 +564,13 @@ func (c *Client) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 	})
 }
 
+// AlterIndex sends the alter index request to IndexCoord.
+func (c *Client) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return wrapGrpcCall(ctx, c, func(client datapb.DataCoordClient) (*commonpb.Status, error) {
+		return client.AlterIndex(ctx, req)
+	})
+}
+
 // GetIndexState gets the index states from IndexCoord.
 func (c *Client) GetIndexState(ctx context.Context, req *indexpb.GetIndexStateRequest, opts ...grpc.CallOption) (*indexpb.GetIndexStateResponse, error) {
 	return wrapGrpcCall(ctx, c, func(client datapb.DataCoordClient) (*indexpb.GetIndexStateResponse, error) {

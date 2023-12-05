@@ -650,6 +650,49 @@ func (_c *MockCache_GetUserRole_Call) RunAndReturn(run func(string) []string) *M
 	return _c
 }
 
+// HasDatabase provides a mock function with given fields: ctx, database
+func (_m *MockCache) HasDatabase(ctx context.Context, database string) bool {
+	ret := _m.Called(ctx, database)
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func(context.Context, string) bool); ok {
+		r0 = rf(ctx, database)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// MockCache_HasDatabase_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'HasDatabase'
+type MockCache_HasDatabase_Call struct {
+	*mock.Call
+}
+
+// HasDatabase is a helper method to define mock.On call
+//   - ctx context.Context
+//   - database string
+func (_e *MockCache_Expecter) HasDatabase(ctx interface{}, database interface{}) *MockCache_HasDatabase_Call {
+	return &MockCache_HasDatabase_Call{Call: _e.mock.On("HasDatabase", ctx, database)}
+}
+
+func (_c *MockCache_HasDatabase_Call) Run(run func(ctx context.Context, database string)) *MockCache_HasDatabase_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockCache_HasDatabase_Call) Return(_a0 bool) *MockCache_HasDatabase_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCache_HasDatabase_Call) RunAndReturn(run func(context.Context, string) bool) *MockCache_HasDatabase_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // InitPolicyInfo provides a mock function with given fields: info, userRoles
 func (_m *MockCache) InitPolicyInfo(info []string, userRoles []string) {
 	_m.Called(info, userRoles)
@@ -842,10 +885,6 @@ func (_c *MockCache_RemoveCredential_Call) RunAndReturn(run func(string)) *MockC
 // RemoveDatabase provides a mock function with given fields: ctx, database
 func (_m *MockCache) RemoveDatabase(ctx context.Context, database string) {
 	_m.Called(ctx, database)
-}
-
-func (_m *MockCache) HasDatabase(ctx context.Context, database string) bool {
-	return true
 }
 
 // MockCache_RemoveDatabase_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveDatabase'

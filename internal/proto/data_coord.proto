@@ -78,6 +78,7 @@ service DataCoord {
   rpc CheckHealth(milvus.CheckHealthRequest) returns (milvus.CheckHealthResponse) {}
 
   rpc CreateIndex(index.CreateIndexRequest) returns (common.Status){}
+  rpc AlterIndex(index.AlterIndexRequest) returns (common.Status){}
   // Deprecated: use DescribeIndex instead
   rpc GetIndexState(index.GetIndexStateRequest) returns (index.GetIndexStateResponse) {}
   rpc GetSegmentIndexState(index.GetSegmentIndexStateRequest) returns (index.GetSegmentIndexStateResponse) {}

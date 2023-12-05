@@ -18,6 +18,7 @@
 package datacoord
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 
@@ -208,6 +209,22 @@ func (m *meta) CreateIndex(index *model.Index) error {
 	m.updateCollectionIndex(index)
 	log.Info("meta update: CreateIndex success", zap.Int64("collectionID", index.CollectionID),
 		zap.Int64("fieldID", index.FieldID), zap.Int64("indexID", index.IndexID), zap.String("indexName", index.IndexName))
+	return nil
+}
+
+func (m *meta) AlterIndex(ctx context.Context, indexes ...*model.Index) error {
+	m.Lock()
+	defer m.Unlock()
+
+	err := m.catalog.AlterIndexes(ctx, indexes)
+	if err != nil {
+		return err
+	}
+
+	for _, index := range indexes {
+		m.updateCollectionIndex(index)
+	}
+
 	return nil
 }
 

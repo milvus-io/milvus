@@ -43,6 +43,7 @@ import (
 
 const (
 	CreateIndexTaskName           = "CreateIndexTask"
+	AlterIndexTaskName            = "AlterIndexTask"
 	DescribeIndexTaskName         = "DescribeIndexTask"
 	DropIndexTaskName             = "DropIndexTask"
 	GetIndexStateTaskName         = "GetIndexStateTask"
@@ -424,6 +425,106 @@ func (cit *createIndexTask) Execute(ctx context.Context) error {
 }
 
 func (cit *createIndexTask) PostExecute(ctx context.Context) error {
+	return nil
+}
+
+type alterIndexTask struct {
+	Condition
+	req       *milvuspb.AlterIndexRequest
+	ctx       context.Context
+	datacoord types.DataCoordClient
+	result    *commonpb.Status
+
+	replicateMsgStream msgstream.MsgStream
+
+	collectionID UniqueID
+}
+
+func (t *alterIndexTask) TraceCtx() context.Context {
+	return t.ctx
+}
+
+func (t *alterIndexTask) ID() UniqueID {
+	return t.req.GetBase().GetMsgID()
+}
+
+func (t *alterIndexTask) SetID(uid UniqueID) {
+	t.req.GetBase().MsgID = uid
+}
+
+func (t *alterIndexTask) Name() string {
+	return CreateIndexTaskName
+}
+
+func (t *alterIndexTask) Type() commonpb.MsgType {
+	return t.req.GetBase().GetMsgType()
+}
+
+func (t *alterIndexTask) BeginTs() Timestamp {
+	return t.req.GetBase().GetTimestamp()
+}
+
+func (t *alterIndexTask) EndTs() Timestamp {
+	return t.req.GetBase().GetTimestamp()
+}
+
+func (t *alterIndexTask) SetTs(ts Timestamp) {
+	t.req.Base.Timestamp = ts
+}
+
+func (t *alterIndexTask) OnEnqueue() error {
+	if t.req.Base == nil {
+		t.req.Base = commonpbutil.NewMsgBase()
+	}
+	return nil
+}
+
+func (t *alterIndexTask) PreExecute(ctx context.Context) error {
+	t.req.Base.MsgType = commonpb.MsgType_CreateIndex
+	t.req.Base.SourceID = paramtable.GetNodeID()
+
+	collName := t.req.GetCollectionName()
+
+	collID, err := globalMetaCache.GetCollectionID(ctx, t.req.GetDbName(), collName)
+	if err != nil {
+		return err
+	}
+	t.collectionID = collID
+
+	if err = validateIndexName(t.req.GetIndexName()); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (t *alterIndexTask) Execute(ctx context.Context) error {
+	log := log.Ctx(ctx).With(
+		zap.String("collection", t.req.GetCollectionName()),
+		zap.String("indexName", t.req.GetIndexName()),
+		zap.Any("params", t.req.GetExtraParams()),
+	)
+
+	log.Info("alter index")
+
+	var err error
+	req := &indexpb.AlterIndexRequest{
+		CollectionID: t.collectionID,
+		IndexName:    t.req.GetIndexName(),
+		Params:       t.req.GetExtraParams(),
+	}
+	t.result, err = t.datacoord.AlterIndex(ctx, req)
+	if err != nil {
+		return err
+	}
+	if t.result.ErrorCode != commonpb.ErrorCode_Success {
+		return errors.New(t.result.Reason)
+	}
+	SendReplicateMessagePack(ctx, t.replicateMsgStream, t.req)
+	return nil
+}
+
+func (t *alterIndexTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
