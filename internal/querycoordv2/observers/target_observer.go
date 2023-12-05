@@ -260,9 +260,10 @@ func (ob *TargetObserver) isNextTargetExpired(collectionID int64) bool {
 }
 
 func (ob *TargetObserver) updateNextTarget(collectionID int64) error {
-	log := log.With(zap.Int64("collectionID", collectionID))
+	log := log.Ctx(context.TODO()).WithRateGroup("qcv2.TargetObserver", 1, 60).
+		With(zap.Int64("collectionID", collectionID))
 
-	log.Info("observer trigger update next target")
+	log.RatedInfo(10, "observer trigger update next target")
 	err := ob.targetMgr.UpdateCollectionNextTarget(collectionID)
 	if err != nil {
 		log.Warn("failed to update next target for collection",
@@ -352,6 +353,13 @@ func (ob *TargetObserver) sync(ctx context.Context, replicaID int64, leaderView 
 		return false
 	}
 
+	// Get collection index info
+	indexInfo, err := ob.broker.DescribeIndex(ctx, collectionInfo.GetCollectionID())
+	if err != nil {
+		log.Warn("fail to get index info of collection", zap.Error(err))
+		return false
+	}
+
 	req := &querypb.SyncDistributionRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_SyncDistribution),
@@ -366,7 +374,8 @@ func (ob *TargetObserver) sync(ctx context.Context, replicaID int64, leaderView 
 			CollectionID: leaderView.CollectionID,
 			PartitionIDs: partitions,
 		},
-		Version: time.Now().UnixNano(),
+		Version:       time.Now().UnixNano(),
+		IndexInfoList: indexInfo,
 	}
 	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
@@ -433,7 +442,8 @@ func (ob *TargetObserver) checkNeedUpdateTargetVersion(ctx context.Context, lead
 }
 
 func (ob *TargetObserver) updateCurrentTarget(collectionID int64) {
-	log.Info("observer trigger update current target", zap.Int64("collectionID", collectionID))
+	log := log.Ctx(context.TODO()).WithRateGroup("qcv2.TargetObserver", 1, 60)
+	log.RatedInfo(10, "observer trigger update current target", zap.Int64("collectionID", collectionID))
 	if ob.targetMgr.UpdateCollectionCurrentTarget(collectionID) {
 		ob.mut.Lock()
 		defer ob.mut.Unlock()

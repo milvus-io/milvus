@@ -45,7 +45,7 @@ datatype_sizeof(DataType data_type, int dim = 1) {
         case DataType::VECTOR_FLOAT:
             return sizeof(float) * dim;
         case DataType::VECTOR_BINARY: {
-            AssertInfo(dim % 8 == 0, "dim=" + std::to_string(dim));
+            AssertInfo(dim % 8 == 0, "dim={}", dim);
             return dim / 8;
         }
         case DataType::VECTOR_FLOAT16: {

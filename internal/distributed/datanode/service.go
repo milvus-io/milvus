@@ -379,3 +379,23 @@ func (s *Server) NotifyChannelOperation(ctx context.Context, req *datapb.Channel
 func (s *Server) CheckChannelOperationProgress(ctx context.Context, req *datapb.ChannelWatchInfo) (*datapb.ChannelOperationProgressResponse, error) {
 	return s.datanode.CheckChannelOperationProgress(ctx, req)
 }
+
+func (s *Server) PreImport(ctx context.Context, req *datapb.PreImportRequest) (*commonpb.Status, error) {
+	return s.datanode.PreImport(ctx, req)
+}
+
+func (s *Server) ImportV2(ctx context.Context, req *datapb.ImportRequest) (*commonpb.Status, error) {
+	return s.datanode.ImportV2(ctx, req)
+}
+
+func (s *Server) QueryPreImport(ctx context.Context, req *datapb.QueryPreImportRequest) (*datapb.QueryPreImportResponse, error) {
+	return s.datanode.QueryPreImport(ctx, req)
+}
+
+func (s *Server) QueryImport(ctx context.Context, req *datapb.QueryImportRequest) (*datapb.QueryImportResponse, error) {
+	return s.datanode.QueryImport(ctx, req)
+}
+
+func (s *Server) DropImport(ctx context.Context, req *datapb.DropImportRequest) (*commonpb.Status, error) {
+	return s.datanode.DropImport(ctx, req)
+}

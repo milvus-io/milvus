@@ -24,6 +24,8 @@
 #include "pb/common.pb.h"
 #include "common/type_c.h"
 
+#include "fmt/core.h"
+
 /* Paste this on the file if you want to debug. */
 namespace milvus {
 enum ErrorCode {
@@ -116,21 +118,28 @@ FailureCStatus(std::exception* ex) {
 
 }  // namespace milvus
 
-#define AssertInfo(expr, info)                                 \
-    do {                                                       \
-        auto _expr_res = bool(expr);                           \
-        /* call func only when needed */                       \
-        if (!_expr_res) {                                      \
-            milvus::impl::EasyAssertInfo(                      \
-                _expr_res, #expr, __FILE__, __LINE__, (info)); \
-        }                                                      \
+#define AssertInfo(expr, info, args...)                              \
+    do {                                                             \
+        auto _expr_res = bool(expr);                                 \
+        /* call func only when needed */                             \
+        if (!_expr_res) {                                            \
+            milvus::impl::EasyAssertInfo(_expr_res,                  \
+                                         #expr,                      \
+                                         __FILE__,                   \
+                                         __LINE__,                   \
+                                         fmt::format(info, ##args)); \
+        }                                                            \
     } while (0)
 
 #define Assert(expr) AssertInfo((expr), "")
 
-#define PanicInfo(errcode, info)                             \
-    do {                                                     \
-        milvus::impl::EasyAssertInfo(                        \
-            false, "", __FILE__, __LINE__, (info), errcode); \
-        __builtin_unreachable();                             \
+#define PanicInfo(errcode, info, args...)                       \
+    do {                                                        \
+        milvus::impl::EasyAssertInfo(false,                     \
+                                     "",                        \
+                                     __FILE__,                  \
+                                     __LINE__,                  \
+                                     fmt::format(info, ##args), \
+                                     errcode);                  \
+        __builtin_unreachable();                                \
     } while (0)

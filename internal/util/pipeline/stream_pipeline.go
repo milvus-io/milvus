@@ -55,7 +55,11 @@ func (p *streamPipeline) work() {
 		case <-p.closeCh:
 			log.Debug("stream pipeline input closed")
 			return
-		case msg := <-p.input:
+		case msg, ok := <-p.input:
+			if !ok {
+				log.Info("stream pipeline input closed")
+				return
+			}
 			log.RatedDebug(10, "stream pipeline fetch msg", zap.Int("sum", len(msg.Msgs)))
 			p.nodes[0].inputChannel <- msg
 		}

@@ -55,7 +55,7 @@ func NewBalanceChecker(meta *meta.Meta, balancer balance.Balance, nodeMgr *sessi
 	}
 }
 
-func (b *BalanceChecker) ID() checkerType {
+func (b *BalanceChecker) ID() CheckerType {
 	return balanceChecker
 }
 

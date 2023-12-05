@@ -70,9 +70,9 @@ type MockDataNodeClient_AddImportSegment_Call struct {
 }
 
 // AddImportSegment is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *datapb.AddImportSegmentRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *datapb.AddImportSegmentRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataNodeClient_Expecter) AddImportSegment(ctx interface{}, in interface{}, opts ...interface{}) *MockDataNodeClient_AddImportSegment_Call {
 	return &MockDataNodeClient_AddImportSegment_Call{Call: _e.mock.On("AddImportSegment",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -140,9 +140,9 @@ type MockDataNodeClient_CheckChannelOperationProgress_Call struct {
 }
 
 // CheckChannelOperationProgress is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *datapb.ChannelWatchInfo
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *datapb.ChannelWatchInfo
+//  - opts ...grpc.CallOption
 func (_e *MockDataNodeClient_Expecter) CheckChannelOperationProgress(ctx interface{}, in interface{}, opts ...interface{}) *MockDataNodeClient_CheckChannelOperationProgress_Call {
 	return &MockDataNodeClient_CheckChannelOperationProgress_Call{Call: _e.mock.On("CheckChannelOperationProgress",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -251,9 +251,9 @@ type MockDataNodeClient_Compaction_Call struct {
 }
 
 // Compaction is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *datapb.CompactionPlan
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *datapb.CompactionPlan
+//  - opts ...grpc.CallOption
 func (_e *MockDataNodeClient_Expecter) Compaction(ctx interface{}, in interface{}, opts ...interface{}) *MockDataNodeClient_Compaction_Call {
 	return &MockDataNodeClient_Compaction_Call{Call: _e.mock.On("Compaction",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -278,6 +278,76 @@ func (_c *MockDataNodeClient_Compaction_Call) Return(_a0 *commonpb.Status, _a1 e
 }
 
 func (_c *MockDataNodeClient_Compaction_Call) RunAndReturn(run func(context.Context, *datapb.CompactionPlan, ...grpc.CallOption) (*commonpb.Status, error)) *MockDataNodeClient_Compaction_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DropImport provides a mock function with given fields: ctx, in, opts
+func (_m *MockDataNodeClient) DropImport(ctx context.Context, in *datapb.DropImportRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.DropImportRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.DropImportRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.DropImportRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockDataNodeClient_DropImport_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropImport'
+type MockDataNodeClient_DropImport_Call struct {
+	*mock.Call
+}
+
+// DropImport is a helper method to define mock.On call
+//  - ctx context.Context
+//  - in *datapb.DropImportRequest
+//  - opts ...grpc.CallOption
+func (_e *MockDataNodeClient_Expecter) DropImport(ctx interface{}, in interface{}, opts ...interface{}) *MockDataNodeClient_DropImport_Call {
+	return &MockDataNodeClient_DropImport_Call{Call: _e.mock.On("DropImport",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockDataNodeClient_DropImport_Call) Run(run func(ctx context.Context, in *datapb.DropImportRequest, opts ...grpc.CallOption)) *MockDataNodeClient_DropImport_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*datapb.DropImportRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockDataNodeClient_DropImport_Call) Return(_a0 *commonpb.Status, _a1 error) *MockDataNodeClient_DropImport_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDataNodeClient_DropImport_Call) RunAndReturn(run func(context.Context, *datapb.DropImportRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockDataNodeClient_DropImport_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -321,9 +391,9 @@ type MockDataNodeClient_FlushChannels_Call struct {
 }
 
 // FlushChannels is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *datapb.FlushChannelsRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *datapb.FlushChannelsRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataNodeClient_Expecter) FlushChannels(ctx interface{}, in interface{}, opts ...interface{}) *MockDataNodeClient_FlushChannels_Call {
 	return &MockDataNodeClient_FlushChannels_Call{Call: _e.mock.On("FlushChannels",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -391,9 +461,9 @@ type MockDataNodeClient_FlushSegments_Call struct {
 }
 
 // FlushSegments is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *datapb.FlushSegmentsRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *datapb.FlushSegmentsRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataNodeClient_Expecter) FlushSegments(ctx interface{}, in interface{}, opts ...interface{}) *MockDataNodeClient_FlushSegments_Call {
 	return &MockDataNodeClient_FlushSegments_Call{Call: _e.mock.On("FlushSegments",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -461,9 +531,9 @@ type MockDataNodeClient_GetCompactionState_Call struct {
 }
 
 // GetCompactionState is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *datapb.CompactionStateRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *datapb.CompactionStateRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataNodeClient_Expecter) GetCompactionState(ctx interface{}, in interface{}, opts ...interface{}) *MockDataNodeClient_GetCompactionState_Call {
 	return &MockDataNodeClient_GetCompactionState_Call{Call: _e.mock.On("GetCompactionState",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -531,9 +601,9 @@ type MockDataNodeClient_GetComponentStates_Call struct {
 }
 
 // GetComponentStates is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.GetComponentStatesRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.GetComponentStatesRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataNodeClient_Expecter) GetComponentStates(ctx interface{}, in interface{}, opts ...interface{}) *MockDataNodeClient_GetComponentStates_Call {
 	return &MockDataNodeClient_GetComponentStates_Call{Call: _e.mock.On("GetComponentStates",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -601,9 +671,9 @@ type MockDataNodeClient_GetMetrics_Call struct {
 }
 
 // GetMetrics is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.GetMetricsRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.GetMetricsRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataNodeClient_Expecter) GetMetrics(ctx interface{}, in interface{}, opts ...interface{}) *MockDataNodeClient_GetMetrics_Call {
 	return &MockDataNodeClient_GetMetrics_Call{Call: _e.mock.On("GetMetrics",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -671,9 +741,9 @@ type MockDataNodeClient_GetStatisticsChannel_Call struct {
 }
 
 // GetStatisticsChannel is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *internalpb.GetStatisticsChannelRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *internalpb.GetStatisticsChannelRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataNodeClient_Expecter) GetStatisticsChannel(ctx interface{}, in interface{}, opts ...interface{}) *MockDataNodeClient_GetStatisticsChannel_Call {
 	return &MockDataNodeClient_GetStatisticsChannel_Call{Call: _e.mock.On("GetStatisticsChannel",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -741,9 +811,9 @@ type MockDataNodeClient_Import_Call struct {
 }
 
 // Import is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *datapb.ImportTaskRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *datapb.ImportTaskRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataNodeClient_Expecter) Import(ctx interface{}, in interface{}, opts ...interface{}) *MockDataNodeClient_Import_Call {
 	return &MockDataNodeClient_Import_Call{Call: _e.mock.On("Import",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -768,6 +838,76 @@ func (_c *MockDataNodeClient_Import_Call) Return(_a0 *commonpb.Status, _a1 error
 }
 
 func (_c *MockDataNodeClient_Import_Call) RunAndReturn(run func(context.Context, *datapb.ImportTaskRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockDataNodeClient_Import_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ImportV2 provides a mock function with given fields: ctx, in, opts
+func (_m *MockDataNodeClient) ImportV2(ctx context.Context, in *datapb.ImportRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.ImportRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.ImportRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.ImportRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockDataNodeClient_ImportV2_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ImportV2'
+type MockDataNodeClient_ImportV2_Call struct {
+	*mock.Call
+}
+
+// ImportV2 is a helper method to define mock.On call
+//  - ctx context.Context
+//  - in *datapb.ImportRequest
+//  - opts ...grpc.CallOption
+func (_e *MockDataNodeClient_Expecter) ImportV2(ctx interface{}, in interface{}, opts ...interface{}) *MockDataNodeClient_ImportV2_Call {
+	return &MockDataNodeClient_ImportV2_Call{Call: _e.mock.On("ImportV2",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockDataNodeClient_ImportV2_Call) Run(run func(ctx context.Context, in *datapb.ImportRequest, opts ...grpc.CallOption)) *MockDataNodeClient_ImportV2_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*datapb.ImportRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockDataNodeClient_ImportV2_Call) Return(_a0 *commonpb.Status, _a1 error) *MockDataNodeClient_ImportV2_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDataNodeClient_ImportV2_Call) RunAndReturn(run func(context.Context, *datapb.ImportRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockDataNodeClient_ImportV2_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -811,9 +951,9 @@ type MockDataNodeClient_NotifyChannelOperation_Call struct {
 }
 
 // NotifyChannelOperation is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *datapb.ChannelOperationsRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *datapb.ChannelOperationsRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataNodeClient_Expecter) NotifyChannelOperation(ctx interface{}, in interface{}, opts ...interface{}) *MockDataNodeClient_NotifyChannelOperation_Call {
 	return &MockDataNodeClient_NotifyChannelOperation_Call{Call: _e.mock.On("NotifyChannelOperation",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -838,6 +978,216 @@ func (_c *MockDataNodeClient_NotifyChannelOperation_Call) Return(_a0 *commonpb.S
 }
 
 func (_c *MockDataNodeClient_NotifyChannelOperation_Call) RunAndReturn(run func(context.Context, *datapb.ChannelOperationsRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockDataNodeClient_NotifyChannelOperation_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// PreImport provides a mock function with given fields: ctx, in, opts
+func (_m *MockDataNodeClient) PreImport(ctx context.Context, in *datapb.PreImportRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.PreImportRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.PreImportRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.PreImportRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockDataNodeClient_PreImport_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PreImport'
+type MockDataNodeClient_PreImport_Call struct {
+	*mock.Call
+}
+
+// PreImport is a helper method to define mock.On call
+//  - ctx context.Context
+//  - in *datapb.PreImportRequest
+//  - opts ...grpc.CallOption
+func (_e *MockDataNodeClient_Expecter) PreImport(ctx interface{}, in interface{}, opts ...interface{}) *MockDataNodeClient_PreImport_Call {
+	return &MockDataNodeClient_PreImport_Call{Call: _e.mock.On("PreImport",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockDataNodeClient_PreImport_Call) Run(run func(ctx context.Context, in *datapb.PreImportRequest, opts ...grpc.CallOption)) *MockDataNodeClient_PreImport_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*datapb.PreImportRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockDataNodeClient_PreImport_Call) Return(_a0 *commonpb.Status, _a1 error) *MockDataNodeClient_PreImport_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDataNodeClient_PreImport_Call) RunAndReturn(run func(context.Context, *datapb.PreImportRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockDataNodeClient_PreImport_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// QueryImport provides a mock function with given fields: ctx, in, opts
+func (_m *MockDataNodeClient) QueryImport(ctx context.Context, in *datapb.QueryImportRequest, opts ...grpc.CallOption) (*datapb.QueryImportResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	var r0 *datapb.QueryImportResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.QueryImportRequest, ...grpc.CallOption) (*datapb.QueryImportResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.QueryImportRequest, ...grpc.CallOption) *datapb.QueryImportResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.QueryImportResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.QueryImportRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockDataNodeClient_QueryImport_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'QueryImport'
+type MockDataNodeClient_QueryImport_Call struct {
+	*mock.Call
+}
+
+// QueryImport is a helper method to define mock.On call
+//  - ctx context.Context
+//  - in *datapb.QueryImportRequest
+//  - opts ...grpc.CallOption
+func (_e *MockDataNodeClient_Expecter) QueryImport(ctx interface{}, in interface{}, opts ...interface{}) *MockDataNodeClient_QueryImport_Call {
+	return &MockDataNodeClient_QueryImport_Call{Call: _e.mock.On("QueryImport",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockDataNodeClient_QueryImport_Call) Run(run func(ctx context.Context, in *datapb.QueryImportRequest, opts ...grpc.CallOption)) *MockDataNodeClient_QueryImport_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*datapb.QueryImportRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockDataNodeClient_QueryImport_Call) Return(_a0 *datapb.QueryImportResponse, _a1 error) *MockDataNodeClient_QueryImport_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDataNodeClient_QueryImport_Call) RunAndReturn(run func(context.Context, *datapb.QueryImportRequest, ...grpc.CallOption) (*datapb.QueryImportResponse, error)) *MockDataNodeClient_QueryImport_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// QueryPreImport provides a mock function with given fields: ctx, in, opts
+func (_m *MockDataNodeClient) QueryPreImport(ctx context.Context, in *datapb.QueryPreImportRequest, opts ...grpc.CallOption) (*datapb.QueryPreImportResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	var r0 *datapb.QueryPreImportResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.QueryPreImportRequest, ...grpc.CallOption) (*datapb.QueryPreImportResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.QueryPreImportRequest, ...grpc.CallOption) *datapb.QueryPreImportResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.QueryPreImportResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.QueryPreImportRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockDataNodeClient_QueryPreImport_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'QueryPreImport'
+type MockDataNodeClient_QueryPreImport_Call struct {
+	*mock.Call
+}
+
+// QueryPreImport is a helper method to define mock.On call
+//  - ctx context.Context
+//  - in *datapb.QueryPreImportRequest
+//  - opts ...grpc.CallOption
+func (_e *MockDataNodeClient_Expecter) QueryPreImport(ctx interface{}, in interface{}, opts ...interface{}) *MockDataNodeClient_QueryPreImport_Call {
+	return &MockDataNodeClient_QueryPreImport_Call{Call: _e.mock.On("QueryPreImport",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockDataNodeClient_QueryPreImport_Call) Run(run func(ctx context.Context, in *datapb.QueryPreImportRequest, opts ...grpc.CallOption)) *MockDataNodeClient_QueryPreImport_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*datapb.QueryPreImportRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockDataNodeClient_QueryPreImport_Call) Return(_a0 *datapb.QueryPreImportResponse, _a1 error) *MockDataNodeClient_QueryPreImport_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDataNodeClient_QueryPreImport_Call) RunAndReturn(run func(context.Context, *datapb.QueryPreImportRequest, ...grpc.CallOption) (*datapb.QueryPreImportResponse, error)) *MockDataNodeClient_QueryPreImport_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -881,9 +1231,9 @@ type MockDataNodeClient_ResendSegmentStats_Call struct {
 }
 
 // ResendSegmentStats is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *datapb.ResendSegmentStatsRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *datapb.ResendSegmentStatsRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataNodeClient_Expecter) ResendSegmentStats(ctx interface{}, in interface{}, opts ...interface{}) *MockDataNodeClient_ResendSegmentStats_Call {
 	return &MockDataNodeClient_ResendSegmentStats_Call{Call: _e.mock.On("ResendSegmentStats",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -951,9 +1301,9 @@ type MockDataNodeClient_ShowConfigurations_Call struct {
 }
 
 // ShowConfigurations is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *internalpb.ShowConfigurationsRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *internalpb.ShowConfigurationsRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataNodeClient_Expecter) ShowConfigurations(ctx interface{}, in interface{}, opts ...interface{}) *MockDataNodeClient_ShowConfigurations_Call {
 	return &MockDataNodeClient_ShowConfigurations_Call{Call: _e.mock.On("ShowConfigurations",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -1021,9 +1371,9 @@ type MockDataNodeClient_SyncSegments_Call struct {
 }
 
 // SyncSegments is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *datapb.SyncSegmentsRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *datapb.SyncSegmentsRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataNodeClient_Expecter) SyncSegments(ctx interface{}, in interface{}, opts ...interface{}) *MockDataNodeClient_SyncSegments_Call {
 	return &MockDataNodeClient_SyncSegments_Call{Call: _e.mock.On("SyncSegments",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -1091,9 +1441,9 @@ type MockDataNodeClient_WatchDmChannels_Call struct {
 }
 
 // WatchDmChannels is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *datapb.WatchDmChannelsRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *datapb.WatchDmChannelsRequest
+//  - opts ...grpc.CallOption
 func (_e *MockDataNodeClient_Expecter) WatchDmChannels(ctx interface{}, in interface{}, opts ...interface{}) *MockDataNodeClient_WatchDmChannels_Call {
 	return &MockDataNodeClient_WatchDmChannels_Call{Call: _e.mock.On("WatchDmChannels",
 		append([]interface{}{ctx, in}, opts...)...)}

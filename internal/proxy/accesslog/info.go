@@ -39,11 +39,12 @@ type AccessInfo interface {
 }
 
 type GrpcAccessInfo struct {
-	ctx  context.Context
-	info *grpc.UnaryServerInfo
-	req  interface{}
-	resp interface{}
-	err  error
+	ctx    context.Context
+	info   *grpc.UnaryServerInfo
+	status *commonpb.Status
+	req    interface{}
+	resp   interface{}
+	err    error
 
 	start time.Time
 	end   time.Time
@@ -69,6 +70,19 @@ func (i *GrpcAccessInfo) SetResult(resp interface{}, err error) {
 	i.resp = resp
 	i.err = err
 	i.end = time.Now()
+
+	// extract status from response
+	baseResp, ok := i.resp.(BaseResponse)
+	if ok {
+		i.status = baseResp.GetStatus()
+		return
+	}
+
+	status, ok := i.resp.(*commonpb.Status)
+	if ok {
+		i.status = status
+		return
+	}
 }
 
 func (i *GrpcAccessInfo) Get(keys ...string) []string {
@@ -150,6 +164,11 @@ func getMethodStatus(i *GrpcAccessInfo) string {
 	if code != codes.OK && code != codes.Unknown {
 		return fmt.Sprintf("Grpc%s", code.String())
 	}
+
+	if i.status.GetCode() != 0 {
+		return "Failed"
+	}
+
 	return code.String()
 }
 
@@ -179,15 +198,8 @@ type BaseResponse interface {
 }
 
 func getErrorCode(i *GrpcAccessInfo) string {
-	baseResp, ok := i.resp.(BaseResponse)
-	if ok {
-		status := baseResp.GetStatus()
-		return fmt.Sprint(int(status.GetErrorCode()))
-	}
-
-	status, ok := i.resp.(*commonpb.Status)
-	if ok {
-		return fmt.Sprint(int(status.GetErrorCode()))
+	if i.status != nil {
+		return fmt.Sprint(i.status.GetCode())
 	}
 
 	return fmt.Sprint(merr.Code(i.err))
