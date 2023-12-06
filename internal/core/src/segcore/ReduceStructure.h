@@ -44,7 +44,7 @@ struct SearchResultPair {
 
     bool
     operator>(const SearchResultPair& other) const {
-        if (std::fabs(distance_ - other.distance_) < 0.000001f) {
+        if (std::fabs(distance_ - other.distance_) < 0.0000000119) {
             return primary_key_ < other.primary_key_;
         }
         return distance_ > other.distance_;
