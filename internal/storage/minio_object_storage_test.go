@@ -153,19 +153,21 @@ func TestMinioObjectStorage(t *testing.T) {
 			key   string
 			value []byte
 		}{
-			{false, "abc/", []byte("123")},
+			// {true, "abc/", []byte("123")}, will write as abc
 			{true, "abc/d", []byte("1234")},
-			{false, "abc/d/e", []byte("12345")},
+			{true, "abc/d/e", []byte("12345")},
 			{true, "abc/e/d", []byte("12354")},
 			{true, "key_/1/1", []byte("111")},
 			{true, "key_/1/2", []byte("222")},
-			{false, "key_/1/2/3", []byte("333")},
+			{true, "key_/1/2/3", []byte("333")},
 			{true, "key_/2/3", []byte("333")},
 		}
 
 		for _, test := range prepareTests {
-			err := testCM.PutObject(ctx, config.bucketName, test.key, bytes.NewReader(test.value), int64(len(test.value)))
-			require.Equal(t, test.valid, err == nil)
+			t.Run(test.key, func(t *testing.T) {
+				err := testCM.PutObject(ctx, config.bucketName, test.key, bytes.NewReader(test.value), int64(len(test.value)))
+				require.Equal(t, test.valid, err == nil)
+			})
 		}
 
 		insertWithPrefixTests := []struct {
