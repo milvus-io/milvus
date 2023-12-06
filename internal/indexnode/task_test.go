@@ -17,12 +17,14 @@
 package indexnode
 
 import (
-	"github.com/apache/arrow/go/v8/arrow"
+	"context"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	milvus_storage "github.com/milvus-io/milvus-storage/go/storage"
 	"github.com/milvus-io/milvus-storage/go/storage/options"
 	"github.com/milvus-io/milvus-storage/go/storage/schema"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/stretchr/testify/suite"
@@ -238,4 +240,37 @@ func (suite *IndexBuildTaskV2Suite) SetupTest() {
 		Build()
 	suite.space, err = milvus_storage.Open("file://"+tmpDir, opt)
 	suite.NoError(err)
+}
+
+func (suite *IndexBuildTaskV2Suite) TestBuildIndex() {
+	req := &indexpb.CreateJobRequest{
+		ClusterID:      Params.CommonCfg.ClusterPrefix.GetValue(),
+		BuildID:        1,
+		IndexVersion:   1,
+		IndexID:        0,
+		IndexName:      "",
+		IndexParams:    indexParams,
+		TypeParams:     []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}},
+		NumRows:        10,
+		CollectionID:   1,
+		PartitionID:    1,
+		SegmentID:      1,
+		FieldID:        3,
+		FieldName:      "vec",
+		FieldType:      schemapb.DataType_FloatVector,
+		StorePath:      suite.space.Path(),
+		StoreVersion:   suite.space.GetCurrentVersion(),
+		IndexStorePath: suite.space.Path(),
+		Dim:            4,
+	}
+
+	task := &indexBuildTaskV2{
+		indexBuildTask: &indexBuildTask{
+		  ident:     "test",
+		  ctx:       context.Background(),
+		  BuildID:   req.GetBuildID(),
+		  ClusterID: req.GetClusterID(),
+		  req:       req,
+    },
+	}
 }
