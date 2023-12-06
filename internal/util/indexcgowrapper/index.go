@@ -380,7 +380,6 @@ func (index *CgoIndex) UpLoad() (map[string]int64, error) {
 }
 
 func (index *CgoIndex) UpLoadV2() (int64, error) {
-	log.Info("[remove me] upload v2")
 	var cBinarySet C.CBinarySet
 
 	status := C.SerializeIndexAndUpLoadV2(index.indexPtr, &cBinarySet)
@@ -407,8 +406,6 @@ func (index *CgoIndex) UpLoadV2() (int64, error) {
 	version = (version << 8) + int64(buffer[2])
 	version = (version << 8) + int64(buffer[1])
 	version = (version << 8) + int64(buffer[0])
-
-	log.Info("[remove me] upload v2", zap.Int64("version", version))
 
 	runtime.SetFinalizer(index, func(index *CgoIndex) {
 		if index != nil && !index.close {

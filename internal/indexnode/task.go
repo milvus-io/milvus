@@ -162,7 +162,6 @@ func (it *indexBuildTaskV2) BuildIndex(ctx context.Context) error {
 		return err
 	}
 
-	log.Info("[remove me] store infos", zap.String("store path", it.req.StorePath), zap.Int64("store version", it.req.StoreVersion))
 	err = buildIndexInfo.AppendIndexStorageInfo(it.req.StorePath, it.req.IndexStorePath, it.req.StoreVersion)
 	if err != nil {
 		log.Ctx(ctx).Warn("append storage info failed", zap.Error(err))
@@ -204,7 +203,6 @@ func (it *indexBuildTaskV2) BuildIndex(ctx context.Context) error {
 }
 
 func (it *indexBuildTaskV2) SaveIndexFiles(ctx context.Context) error {
-	log.Info("[remove me] save index files v2")
 	gcIndex := func() {
 		if err := it.index.Delete(); err != nil {
 			log.Ctx(ctx).Error("IndexNode indexBuildTask Execute CIndexDelete failed", zap.Error(err))
@@ -216,8 +214,6 @@ func (it *indexBuildTaskV2) SaveIndexFiles(ctx context.Context) error {
 		gcIndex()
 		return err
 	}
-
-	log.Info("[remove me] save index files v2", zap.Int64("index version", version))
 
 	encodeIndexFileDur := it.tr.Record("index serialize and upload done")
 	metrics.IndexNodeEncodeIndexFileLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(encodeIndexFileDur.Seconds())
