@@ -1111,3 +1111,27 @@ func splitFieldsData(collectionInfo *CollectionInfo, fieldsData BlockData, shard
 
 	return autoIDRange, nil
 }
+
+// newChunkManagerFactoryWithImportOptions return nil if storage type and root path are empty
+func newChunkManagerFactoryWithImportOptions(opt *ImportOptions) *storage.ChunkManagerFactory {
+	if opt.StorageType == "" && opt.RootPath == "" {
+		return nil
+	}
+
+	if opt.StorageType == "local" {
+		return storage.NewChunkManagerFactory(opt.StorageType, storage.RootPath(opt.RootPath))
+	}
+
+	return storage.NewChunkManagerFactory(opt.StorageType,
+		storage.RootPath(opt.RootPath),
+		storage.Address(opt.Address),
+		storage.AccessKeyID(opt.AccessKeyID),
+		storage.SecretAccessKeyID(opt.SecretAccessKeyID),
+		storage.UseSSL(opt.UseSSL),
+		storage.BucketName(opt.BucketName),
+		storage.UseIAM(opt.UseIAM),
+		storage.CloudProvider(opt.CloudProvider),
+		storage.IAMEndpoint(opt.IamEndpoint),
+		storage.UseVirtualHost(opt.UseVirtualHost),
+		storage.Region(opt.Region))
+}

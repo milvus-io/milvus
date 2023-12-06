@@ -28,7 +28,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 const (
@@ -70,7 +69,6 @@ func createDeltalogBuf(t *testing.T, deleteList interface{}, varcharType bool, s
 
 func Test_BinlogAdapterNew(t *testing.T) {
 	ctx := context.Background()
-	paramtable.Init()
 
 	// nil schema
 	adapter, err := NewBinlogAdapter(ctx, nil, 1024, 2048, nil, nil, 0, math.MaxUint64)
@@ -615,8 +613,6 @@ func Test_BinlogAdapterShardListVarchar(t *testing.T) {
 
 func Test_BinlogAdapterReadInt64PK(t *testing.T) {
 	ctx := context.Background()
-	paramtable.Init()
-
 	chunkManager := &MockChunkManager{}
 
 	flushCounter := 0
@@ -720,8 +716,6 @@ func Test_BinlogAdapterReadInt64PK(t *testing.T) {
 
 func Test_BinlogAdapterReadVarcharPK(t *testing.T) {
 	ctx := context.Background()
-	paramtable.Init()
-
 	chunkManager := &MockChunkManager{}
 
 	flushCounter := 0

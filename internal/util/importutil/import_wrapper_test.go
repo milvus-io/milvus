@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -47,6 +48,16 @@ import (
 const (
 	TempFilesPath = "/tmp/milvus_test/import/"
 )
+
+func TestMain(m *testing.M) {
+	paramtable.Init()
+	exitCode := m.Run()
+	err := os.RemoveAll(TempFilesPath)
+	if err != nil {
+		return
+	}
+	os.Exit(exitCode)
+}
 
 type MockChunkManager struct {
 	readerErr  error
@@ -290,7 +301,7 @@ func Test_ImportWrapperRowBased(t *testing.T) {
 		wrapper.SetCallbackFunctions(assignSegmentFunc, flushFunc, saveSegmentFunc)
 		files := make([]string, 0)
 		files = append(files, filePath)
-		err = wrapper.Import(files, ImportOptions{OnlyValidate: true})
+		err = wrapper.Import(files, &ImportOptions{OnlyValidate: true})
 		assert.NoError(t, err)
 		assert.Equal(t, 0, rowCounter.rowCount)
 
@@ -316,7 +327,7 @@ func Test_ImportWrapperRowBased(t *testing.T) {
 		wrapper.SetCallbackFunctions(assignSegmentFunc, flushFunc, saveSegmentFunc)
 		files := make([]string, 0)
 		files = append(files, filePath)
-		err = wrapper.Import(files, ImportOptions{OnlyValidate: true})
+		err = wrapper.Import(files, &ImportOptions{OnlyValidate: true})
 		assert.Error(t, err)
 		assert.NotEqual(t, commonpb.ImportState_ImportPersisted, importResult.State)
 	})
@@ -325,7 +336,7 @@ func Test_ImportWrapperRowBased(t *testing.T) {
 		files := make([]string, 0)
 		files = append(files, "/dummy/dummy.json")
 		wrapper := NewImportWrapper(ctx, collectionInfo, 1, Params.DataNodeCfg.BulkInsertReadBufferSize.GetAsInt64(), idAllocator, cm, importResult, reportFunc)
-		err = wrapper.Import(files, ImportOptions{OnlyValidate: true})
+		err = wrapper.Import(files, &ImportOptions{OnlyValidate: true})
 		assert.Error(t, err)
 	})
 }
@@ -564,45 +575,45 @@ func Test_ImportWrapperFileValidation(t *testing.T) {
 
 	t.Run("unsupported file type", func(t *testing.T) {
 		files := []string{"uid.txt"}
-		rowBased, err := wrapper.fileValidation(files)
+		rowBased, err := wrapper.fileValidation(files, cm)
 		assert.Error(t, err)
 		assert.False(t, rowBased)
 	})
 
 	t.Run("duplicate files", func(t *testing.T) {
 		files := []string{"a/1.json", "b/1.json"}
-		rowBased, err := wrapper.fileValidation(files)
+		rowBased, err := wrapper.fileValidation(files, cm)
 		assert.Error(t, err)
 		assert.True(t, rowBased)
 
 		files = []string{"a/uid.npy", "uid.npy", "b/bol.npy"}
-		rowBased, err = wrapper.fileValidation(files)
+		rowBased, err = wrapper.fileValidation(files, cm)
 		assert.Error(t, err)
 		assert.False(t, rowBased)
 	})
 
 	t.Run("unsupported file for row-based", func(t *testing.T) {
 		files := []string{"a/uid.json", "b/bol.npy"}
-		rowBased, err := wrapper.fileValidation(files)
+		rowBased, err := wrapper.fileValidation(files, cm)
 		assert.Error(t, err)
 		assert.True(t, rowBased)
 	})
 
 	t.Run("unsupported file for column-based", func(t *testing.T) {
 		files := []string{"a/uid.npy", "b/bol.json"}
-		rowBased, err := wrapper.fileValidation(files)
+		rowBased, err := wrapper.fileValidation(files, cm)
 		assert.Error(t, err)
 		assert.False(t, rowBased)
 	})
 
 	t.Run("valid cases", func(t *testing.T) {
 		files := []string{"a/1.json", "b/2.json"}
-		rowBased, err := wrapper.fileValidation(files)
+		rowBased, err := wrapper.fileValidation(files, cm)
 		assert.NoError(t, err)
 		assert.True(t, rowBased)
 
 		files = []string{"a/uid.npy", "b/bol.npy"}
-		rowBased, err = wrapper.fileValidation(files)
+		rowBased, err = wrapper.fileValidation(files, cm)
 		assert.NoError(t, err)
 		assert.False(t, rowBased)
 	})
@@ -611,16 +622,16 @@ func Test_ImportWrapperFileValidation(t *testing.T) {
 		files := []string{}
 		cm.size = 0
 		wrapper = NewImportWrapper(ctx, collectionInfo, int64(segmentSize), Params.DataNodeCfg.BulkInsertReadBufferSize.GetAsInt64(), idAllocator, cm, nil, nil)
-		rowBased, err := wrapper.fileValidation(files)
+		rowBased, err := wrapper.fileValidation(files, cm)
 		assert.NoError(t, err)
 		assert.False(t, rowBased)
 	})
 
 	t.Run("file size exceed MaxFileSize limit", func(t *testing.T) {
 		files := []string{"a/1.json"}
-		cm.size = Params.CommonCfg.ImportMaxFileSize.GetAsInt64() + 1
+		cm.size = params.Params.CommonCfg.ImportMaxFileSize.GetAsInt64() + 1
 		wrapper = NewImportWrapper(ctx, collectionInfo, int64(segmentSize), Params.DataNodeCfg.BulkInsertReadBufferSize.GetAsInt64(), idAllocator, cm, nil, nil)
-		rowBased, err := wrapper.fileValidation(files)
+		rowBased, err := wrapper.fileValidation(files, cm)
 		assert.Error(t, err)
 		assert.True(t, rowBased)
 	})
@@ -628,7 +639,7 @@ func Test_ImportWrapperFileValidation(t *testing.T) {
 	t.Run("failed to get file size", func(t *testing.T) {
 		files := []string{"a/1.json"}
 		cm.sizeErr = errors.New("error")
-		rowBased, err := wrapper.fileValidation(files)
+		rowBased, err := wrapper.fileValidation(files, cm)
 		assert.Error(t, err)
 		assert.True(t, rowBased)
 	})
@@ -637,7 +648,7 @@ func Test_ImportWrapperFileValidation(t *testing.T) {
 		files := []string{"a/1.json"}
 		cm.sizeErr = nil
 		cm.size = int64(0)
-		rowBased, err := wrapper.fileValidation(files)
+		rowBased, err := wrapper.fileValidation(files, cm)
 		assert.Error(t, err)
 		assert.True(t, rowBased)
 	})
@@ -698,7 +709,11 @@ func Test_ImportWrapperReportFailRowBased(t *testing.T) {
 	wrapper.reportFunc = func(res *rootcoordpb.ImportResult) error {
 		return errors.New("mock error")
 	}
-	err = wrapper.Import(files, DefaultImportOptions())
+	opts := DefaultImportOptions()
+	opts.StorageType = "local"
+	opts.RootPath = TempFilesPath
+
+	err = wrapper.Import(files, opts)
 	assert.Error(t, err)
 	assert.Equal(t, 5, rowCounter.rowCount)
 	assert.Equal(t, commonpb.ImportState_ImportPersisted, importResult.State)
@@ -836,26 +851,39 @@ func Test_ImportWrapperDoBinlogImport(t *testing.T) {
 
 	collectionInfo, err := NewCollectionInfo(schema, int32(shardNum), []int64{1})
 	assert.NoError(t, err)
-	wrapper := NewImportWrapper(ctx, collectionInfo, int64(segmentSize), Params.DataNodeCfg.BulkInsertReadBufferSize.GetAsInt64(), idAllocator, cm, nil, nil)
+	importResult := &rootcoordpb.ImportResult{
+		Infos: []*commonpb.KeyValuePair{},
+	}
+
+	wrapper := NewImportWrapper(
+		ctx,
+		collectionInfo,
+		int64(segmentSize),
+		Params.DataNodeCfg.BulkInsertReadBufferSize.GetAsInt64(),
+		idAllocator,
+		cm,
+		importResult,
+		func(res *rootcoordpb.ImportResult) error {
+			return nil
+		})
+
 	paths := []string{
 		"/tmp",
 		"/tmp",
 	}
-	wrapper.chunkManager = nil
 
 	// failed to create new BinlogParser
-	err = wrapper.doBinlogImport(paths, 0, math.MaxUint64)
+	err = wrapper.doBinlogImport(paths, math.MaxUint64, 0, cm)
 	assert.Error(t, err)
 
 	cm.listErr = errors.New("error")
-	wrapper.chunkManager = cm
 
 	rowCounter := &rowCounterTest{}
 	assignSegmentFunc, flushFunc, saveSegmentFunc := createMockCallbackFunctions(t, rowCounter)
 	wrapper.SetCallbackFunctions(assignSegmentFunc, flushFunc, saveSegmentFunc)
 
 	// failed to call parser.Parse()
-	err = wrapper.doBinlogImport(paths, 0, math.MaxUint64)
+	err = wrapper.doBinlogImport(paths, 0, math.MaxUint64, cm)
 	assert.Error(t, err)
 
 	// Import() failed
@@ -877,7 +905,7 @@ func Test_ImportWrapperDoBinlogImport(t *testing.T) {
 	}
 
 	// succeed
-	err = wrapper.doBinlogImport(paths, 0, math.MaxUint64)
+	err = wrapper.doBinlogImport(paths, 0, math.MaxUint64, cm)
 	assert.NoError(t, err)
 }
 

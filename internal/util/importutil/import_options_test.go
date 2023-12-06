@@ -17,7 +17,6 @@
 package importutil
 
 import (
-	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -57,39 +56,108 @@ func Test_ValidateOptions(t *testing.T) {
 	}))
 }
 
-func Test_ParseTSFromOptions(t *testing.T) {
-	var tsStart uint64
-	var tsEnd uint64
-	var err error
+func TestParseImportOptions(t *testing.T) {
+	kvs := []*commonpb.KeyValuePair{
+		{Key: StartTs, Value: "12345"},
+		{Key: EndTs, Value: "67890"},
+		{Key: BackupFlag, Value: "false"},
+		{Key: StorageType, Value: "s3"},
+		{Key: Address, Value: "example.com"},
+		{Key: Bucket, Value: "my-bucket"},
+		{Key: AccessKeyID, Value: "my-access-key"},
+		{Key: SecretAccessKeyID, Value: "my-secret-key"},
+		{Key: UseSSL, Value: "true"},
+		{Key: RootPath, Value: "/path/to/files"},
+		{Key: UseIAM, Value: "false"},
+		{Key: CloudProvider, Value: "aws"},
+		{Key: IamEndpoint, Value: "iam.example.com"},
+		{Key: UseVirtualHost, Value: "true"},
+		{Key: Region, Value: "us-west-1"},
+		{Key: RequestTimeoutMs, Value: "5000"},
+	}
 
-	tsStart, tsEnd, err = ParseTSFromOptions([]*commonpb.KeyValuePair{})
-	assert.Equal(t, uint64(0), tsStart)
-	assert.Equal(t, uint64(0), math.MaxUint64-tsEnd)
+	expectedOptions := &ImportOptions{
+		TsStartPoint:      12345,
+		TsEndPoint:        67890,
+		IsBackup:          false,
+		StorageType:       "s3",
+		Address:           "example.com",
+		BucketName:        "my-bucket",
+		AccessKeyID:       "my-access-key",
+		SecretAccessKeyID: "my-secret-key",
+		UseSSL:            true,
+		RootPath:          "/path/to/files",
+		UseIAM:            false,
+		CloudProvider:     "aws",
+		IamEndpoint:       "iam.example.com",
+		UseVirtualHost:    true,
+		Region:            "us-west-1",
+		RequestTimeoutMs:  5000,
+	}
+
+	// No error
+	options, err := ParseImportOptions(kvs)
 	assert.NoError(t, err)
+	assert.Equal(t, expectedOptions, options)
 
-	tsStart, tsEnd, err = ParseTSFromOptions([]*commonpb.KeyValuePair{
-		{Key: "start_ts", Value: "0"},
-		{Key: "end_ts", Value: "0"},
-	})
-	assert.Equal(t, uint64(0), tsStart)
-	assert.Equal(t, uint64(0), tsEnd)
-	assert.NoError(t, err)
-
-	tsStart, tsEnd, err = ParseTSFromOptions([]*commonpb.KeyValuePair{
-		{Key: "start_ts", Value: "0"},
-		{Key: "end_ts", Value: "1666007457"},
-	})
-	assert.Equal(t, uint64(0), tsStart)
-	assert.Equal(t, uint64(436733858807808), tsEnd)
-	assert.NoError(t, err)
-
-	tsStart, tsEnd, err = ParseTSFromOptions([]*commonpb.KeyValuePair{
-		{Key: "start_ts", Value: "2"},
-		{Key: "end_ts", Value: "1"},
-	})
-	assert.Equal(t, uint64(0), tsStart)
-	assert.Equal(t, uint64(0), tsEnd)
+	// Error for unknown key
+	unknownKeyKvs := []*commonpb.KeyValuePair{
+		{Key: "unknown_key", Value: "value"},
+	}
+	_, err = ParseImportOptions(unknownKeyKvs)
 	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown key")
+
+	// Error for invalid value type - bool
+	invalidBoolValueKvs := []*commonpb.KeyValuePair{
+		{Key: BackupFlag, Value: "invalid"},
+	}
+	_, err = ParseImportOptions(invalidBoolValueKvs)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to convert")
+
+	invalidBoolValueKvs2 := []*commonpb.KeyValuePair{
+		{Key: UseSSL, Value: "invalid"},
+	}
+	_, err = ParseImportOptions(invalidBoolValueKvs2)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to convert")
+
+	// Error for invalid value type - uint64
+	invalidUint64ValueKvs := []*commonpb.KeyValuePair{
+		{Key: StartTs, Value: "invalid"},
+	}
+	_, err = ParseImportOptions(invalidUint64ValueKvs)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to convert")
+
+	invalidUint64ValueKvs2 := []*commonpb.KeyValuePair{
+		{Key: EndTs, Value: "invalid"},
+	}
+	_, err = ParseImportOptions(invalidUint64ValueKvs2)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to convert")
+
+	// Error for invalid value type - int64
+	invalidInt64ValueKvs := []*commonpb.KeyValuePair{
+		{Key: RequestTimeoutMs, Value: "invalid"},
+	}
+	_, err = ParseImportOptions(invalidInt64ValueKvs)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to convert")
+
+	// Empty input
+	emptyKvs := []*commonpb.KeyValuePair{}
+	_, err = ParseImportOptions(emptyKvs)
+	assert.NoError(t, err)
+
+	// Missing keys
+	missingKeysKvs := []*commonpb.KeyValuePair{
+		{Key: StartTs, Value: "12345"},
+		{Key: EndTs, Value: "67890"},
+	}
+	_, err = ParseImportOptions(missingKeysKvs)
+	assert.NoError(t, err)
 }
 
 func Test_IsBackup(t *testing.T) {
