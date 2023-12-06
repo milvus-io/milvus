@@ -12,7 +12,7 @@
 #-------------------------------------------------------------------------------
 # Using default c and cxx compiler in our build tree
 # Thirdpart cxx and c flags
-append_flags(CMAKE_CXX_FLAGS FLAGS "-O3 -fPIC -Wno-error -fopenmp")
+append_flags(CMAKE_CXX_FLAGS FLAGS "-O3 -fPIC -Wno-error -fopenmp -Wno-macro-redefined")
 
 if (NOT KNOWHERE_VERBOSE_THIRDPARTY_BUILD)
     set(EP_LOG_OPTIONS LOG_CONFIGURE 1 LOG_BUILD 1 LOG_INSTALL 1 LOG_DOWNLOAD 1)
@@ -37,6 +37,8 @@ add_subdirectory(rocksdb)
 add_subdirectory(rdkafka)
 add_subdirectory(simdjson)
 add_subdirectory(opendal)
+
+add_subdirectory(milvus-storage)
 
 if (LINUX)
     add_subdirectory(jemalloc)

@@ -67,6 +67,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     void
     LoadFieldData(const LoadFieldDataInfo& info) override;
+    void
+    LoadFieldDataV2(const LoadFieldDataInfo& info) override;
 
     std::string
     debug() const override;

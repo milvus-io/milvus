@@ -198,25 +198,26 @@ proxy:
   # Whether to produce gin logs.\n
   # please adjust in embedded Milvus: false
   ginLogging: true
+  ginLogSkipPaths: "/" # skipped url path for gin log split by comma
   maxTaskNum: 1024 # max task number of proxy task queue
   accessLog:
     enable: true
     # Log filename, set as "" to use stdout.
     filename: "" 
-    # define formatters for access log by names:{format: XXX, method:[XXX]}
+    # define formatters for access log by XXX:{format: XXX, method:[XXX,XXX]}
     formatters:
-      # "base" formatter could not set method 
-      # all method  will use "base" formatter default
+      # "base" formatter could not set methods
+      # all method will use "base" formatter default
       base: 
         # will not print access log if set as ""
-        format: "[$time_now] [ACCESS] <$user_name: $user_addr> $method_name-$method_status-$error_code [traceID: $trace_id] [timeCost: $time_cost]"
+        format: "[$time_now] [ACCESS] <$user_name: $user_addr> $method_name [status: $method_status] [code: $error_code] [msg: $error_msg] [traceID: $trace_id] [timeCost: $time_cost]"
       query: 
-        format: "[$time_now] [ACCESS] <$user_name: $user_addr> $method_status-$method_name [traceID: $trace_id] [timeCost: $time_cost] [database: $database_name] [collection: $collection_name] [partitions: $partition_name] [expr: $method_expr]"
+        format: "[$time_now] [ACCESS] <$user_name: $user_addr> $method_name [status: $method_status] [code: $error_code] [msg: $error_msg] [traceID: $trace_id] [timeCost: $time_cost] [database: $database_name] [collection: $collection_name] [partitions: $partition_name] [expr: $method_expr]"
           # set formatter owners by method name(method was all milvus external interface)
           # all method will use base formatter default
           # one method only could use one formatter
           # if set a method formatter mutiple times, will use random fomatter.
-        methods: ["Query", "Search"]
+        methods: ["Query", "Search", "Delete"]
     # localPath: /tmp/milvus_accesslog // log file rootpath
     # maxSize: 64 # max log file size(MB) of singal log file, mean close when time <= 0.
     # rotatedTime: 0 # max time range of singal log file, mean close when time <= 0;
