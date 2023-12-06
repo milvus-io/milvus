@@ -194,6 +194,10 @@ func (m *GrpcDataCoordClient) CreateIndex(ctx context.Context, req *indexpb.Crea
 	return &commonpb.Status{}, m.Err
 }
 
+func (m *GrpcDataCoordClient) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
 func (m *GrpcDataCoordClient) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }

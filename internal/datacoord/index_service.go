@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -32,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-	"github.com/samber/lo"
 )
 
 // serverID return the session serverID
