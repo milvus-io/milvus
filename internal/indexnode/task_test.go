@@ -16,6 +16,18 @@
 
 package indexnode
 
+import (
+	"github.com/apache/arrow/go/v8/arrow"
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	milvus_storage "github.com/milvus-io/milvus-storage/go/storage"
+	"github.com/milvus-io/milvus-storage/go/storage/options"
+	"github.com/milvus-io/milvus-storage/go/storage/schema"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/stretchr/testify/suite"
+)
+
 // import (
 // 	"context"
 // 	"github.com/cockroachdb/errors"
@@ -190,3 +202,40 @@ package indexnode
 // 		assert.Error(t, err)
 // 	})
 // }
+
+type IndexBuildTaskV2Suite struct {
+	suite.Suite
+	schema      *schemapb.CollectionSchema
+	arrowSchema *arrow.Schema
+	space       *milvus_storage.Space
+}
+
+func (suite *IndexBuildTaskV2Suite) SetupTest() {
+	suite.schema = &schemapb.CollectionSchema{
+		Name:        "test",
+		Description: "test",
+		AutoID:      false,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 1, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 2, Name: "ts", DataType: schemapb.DataType_Int64},
+			{FieldID: 3, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}}},
+		},
+	}
+
+	var err error
+	suite.arrowSchema, err = typeutil.ConvertToArrowSchema(suite.schema.Fields)
+	suite.NoError(err)
+
+	tmpDir := suite.T().TempDir()
+	opt := options.NewSpaceOptionBuilder().
+		SetSchema(schema.NewSchema(
+			suite.arrowSchema,
+			&schema.SchemaOptions{
+				PrimaryColumn: "pk",
+				VectorColumn:  "vec",
+				VersionColumn: common.TimeStampFieldName,
+			})).
+		Build()
+	suite.space, err = milvus_storage.Open("file://"+tmpDir, opt)
+	suite.NoError(err)
+}

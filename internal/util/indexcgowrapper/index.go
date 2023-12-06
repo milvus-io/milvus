@@ -16,7 +16,6 @@ import (
 	"unsafe"
 
 	"github.com/golang/protobuf/proto"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
