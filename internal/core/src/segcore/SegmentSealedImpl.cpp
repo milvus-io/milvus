@@ -684,7 +684,7 @@ SegmentSealedImpl::vector_search(SearchInfo& search_info,
     AssertInfo(is_system_field_ready(), "System field is not ready");
     auto field_id = search_info.field_id_;
     auto& field_meta = schema_->operator[](field_id);
-
+    std::shared_lock lck(mutex_);
     AssertInfo(field_meta.is_vector(),
                "The meta type of vector field is not vector type");
     if (get_bit(binlog_index_bitset_, field_id)) {
@@ -1449,7 +1449,9 @@ SegmentSealedImpl::generate_binlog_index(const FieldId field_id) {
                 return false;
             }
             // get binlog data and meta
-            auto row_count = num_rows_.value();
+            auto row_count = this->get_row_count();
+            AssertInfo(row_count > 0,
+                       "Not generate binlog index when row count = 0.");
             auto dim = field_meta.get_dim();
             auto vec_data = fields_.at(field_id);
             auto dataset =
@@ -1474,12 +1476,14 @@ SegmentSealedImpl::generate_binlog_index(const FieldId field_id) {
             vec_index->BuildWithDataset(dataset, build_config);
             vector_indexings_.append_field_indexing(
                 field_id, index_metric, std::move(vec_index));
-
-            vec_binlog_config_[field_id] = std::move(field_binlog_config);
-            set_bit(binlog_index_bitset_, field_id, true);
-
+            {
+                std::unique_lock lck(mutex_);
+                vec_binlog_config_[field_id] = std::move(field_binlog_config);
+                set_bit(binlog_index_bitset_, field_id, true);
+            }
             return true;
         } catch (std::exception& e) {
+            LOG_SEGCORE_INFO_ << "Can't generate binlog index, " << e.what();
             return false;
         }
     } else {
