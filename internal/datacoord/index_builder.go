@@ -305,51 +305,67 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 			}
 		}
 
-		collectionInfo, err := ib.handler.GetCollection(ib.ctx, segment.GetCollectionID())
-		if err != nil {
-			log.Info("index builder get collection info failed", zap.Int64("collectionID", segment.GetCollectionID()), zap.Error(err))
-			return false
-		}
-
-		schema := collectionInfo.Schema
-		var field *schemapb.FieldSchema
-
-		for _, f := range schema.Fields {
-			if f.FieldID == fieldID {
-				field = f
-				break
+		var req *indexpb.CreateJobRequest
+		if Params.CommonCfg.EnableStorageV2.GetAsBool() {
+			collectionInfo, err := ib.handler.GetCollection(ib.ctx, segment.GetCollectionID())
+			if err != nil {
+				log.Info("index builder get collection info failed", zap.Int64("collectionID", segment.GetCollectionID()), zap.Error(err))
+				return false
 			}
-		}
 
-		dim, _ := storage.GetDimFromParams(field.TypeParams)
-		var scheme string
-		if Params.MinioCfg.UseSSL.GetAsBool() {
-			scheme = "https"
+			schema := collectionInfo.Schema
+			var field *schemapb.FieldSchema
+
+			for _, f := range schema.Fields {
+				if f.FieldID == fieldID {
+					field = f
+					break
+				}
+			}
+
+			dim, _ := storage.GetDimFromParams(field.TypeParams)
+			var scheme string
+			if Params.MinioCfg.UseSSL.GetAsBool() {
+				scheme = "https"
+			} else {
+				scheme = "http"
+			}
+
+			req = &indexpb.CreateJobRequest{
+				ClusterID:           Params.CommonCfg.ClusterPrefix.GetValue(),
+				IndexFilePrefix:     path.Join(ib.chunkManager.RootPath(), common.SegmentIndexPath),
+				BuildID:             buildID,
+				DataPaths:           binLogs,
+				IndexVersion:        meta.IndexVersion + 1,
+				StorageConfig:       storageConfig,
+				IndexParams:         indexParams,
+				TypeParams:          typeParams,
+				NumRows:             meta.NumRows,
+				CollectionID:        segment.GetCollectionID(),
+				PartitionID:         segment.GetPartitionID(),
+				SegmentID:           segment.GetID(),
+				FieldID:             fieldID,
+				FieldName:           field.Name,
+				FieldType:           field.DataType,
+				StorePath:           fmt.Sprintf("s3://%s:%s@%s/%d?scheme=%s&endpoint_override=%s&allow_bucket_creation=true", Params.MinioCfg.AccessKeyID.GetValue(), Params.MinioCfg.SecretAccessKey.GetValue(), Params.MinioCfg.BucketName.GetValue(), segment.GetID(), scheme, Params.MinioCfg.Address.GetValue()),
+				StoreVersion:        segment.GetStorageVersion(),
+				IndexStorePath:      fmt.Sprintf("s3://%s:%s@%s/index/%d?scheme=%s&endpoint_override=%s&allow_bucket_creation=true", Params.MinioCfg.AccessKeyID.GetValue(), Params.MinioCfg.SecretAccessKey.GetValue(), Params.MinioCfg.BucketName.GetValue(), segment.GetID(), scheme, Params.MinioCfg.Address.GetValue()),
+				Dim:                 int64(dim),
+				CurrentIndexVersion: ib.indexEngineVersionManager.GetCurrentIndexEngineVersion(),
+			}
 		} else {
-			scheme = "http"
-		}
-
-		req := &indexpb.CreateJobRequest{
-			ClusterID:           Params.CommonCfg.ClusterPrefix.GetValue(),
-			IndexFilePrefix:     path.Join(ib.chunkManager.RootPath(), common.SegmentIndexPath),
-			BuildID:             buildID,
-			DataPaths:           binLogs,
-			IndexVersion:        meta.IndexVersion + 1,
-			StorageConfig:       storageConfig,
-			IndexParams:         indexParams,
-			TypeParams:          typeParams,
-			NumRows:             meta.NumRows,
-			CollectionID:        segment.GetCollectionID(),
-			PartitionID:         segment.GetPartitionID(),
-			SegmentID:           segment.GetID(),
-			FieldID:             fieldID,
-			FieldName:           field.Name,
-			FieldType:           field.DataType,
-			StorePath:           fmt.Sprintf("s3://%s:%s@%s/%d?scheme=%s&endpoint_override=%s&allow_bucket_creation=true", Params.MinioCfg.AccessKeyID.GetValue(), Params.MinioCfg.SecretAccessKey.GetValue(), Params.MinioCfg.BucketName.GetValue(), segment.GetID(), scheme, Params.MinioCfg.Address.GetValue()),
-			StoreVersion:        segment.GetStorageVersion(),
-			IndexStorePath:      fmt.Sprintf("s3://%s:%s@%s/index/%d?scheme=%s&endpoint_override=%s&allow_bucket_creation=true", Params.MinioCfg.AccessKeyID.GetValue(), Params.MinioCfg.SecretAccessKey.GetValue(), Params.MinioCfg.BucketName.GetValue(), segment.GetID(), scheme, Params.MinioCfg.Address.GetValue()),
-			Dim:                 int64(dim),
-			CurrentIndexVersion: ib.indexEngineVersionManager.GetCurrentIndexEngineVersion(),
+			req = &indexpb.CreateJobRequest{
+				ClusterID:           Params.CommonCfg.ClusterPrefix.GetValue(),
+				IndexFilePrefix:     path.Join(ib.chunkManager.RootPath(), common.SegmentIndexPath),
+				BuildID:             buildID,
+				DataPaths:           binLogs,
+				IndexVersion:        meta.IndexVersion + 1,
+				StorageConfig:       storageConfig,
+				IndexParams:         indexParams,
+				TypeParams:          typeParams,
+				NumRows:             meta.NumRows,
+				CurrentIndexVersion: ib.indexEngineVersionManager.GetCurrentIndexEngineVersion(),
+			}
 		}
 
 		if err := ib.assignTask(client, req); err != nil {
