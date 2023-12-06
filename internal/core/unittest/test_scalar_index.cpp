@@ -81,6 +81,26 @@ TYPED_TEST_P(TypedScalarIndexTest, Count) {
     }
 }
 
+TYPED_TEST_P(TypedScalarIndexTest, HasRawData) {
+    using T = TypeParam;
+    auto dtype = milvus::GetDType<T>();
+    auto index_types = GetIndexTypes<T>();
+    for (const auto& index_type : index_types) {
+        milvus::index::CreateIndexInfo create_index_info;
+        create_index_info.field_type = milvus::DataType(dtype);
+        create_index_info.index_type = index_type;
+        auto index =
+            milvus::index::IndexFactory::GetInstance().CreateScalarIndex(
+                create_index_info);
+        auto scalar_index =
+            dynamic_cast<milvus::index::ScalarIndex<T>*>(index.get());
+        auto arr = GenArr<T>(nb);
+        scalar_index->Build(nb, arr.data());
+        ASSERT_EQ(nb, scalar_index->Count());
+        ASSERT_TRUE(scalar_index->HasRawData());
+    }
+}
+
 TYPED_TEST_P(TypedScalarIndexTest, In) {
     using T = TypeParam;
     auto dtype = milvus::GetDType<T>();
@@ -200,7 +220,8 @@ REGISTER_TYPED_TEST_CASE_P(TypedScalarIndexTest,
                            NotIn,
                            Range,
                            Codec,
-                           Reverse);
+                           Reverse,
+                           HasRawData);
 
 INSTANTIATE_TYPED_TEST_CASE_P(ArithmeticCheck, TypedScalarIndexTest, ScalarT);
 
