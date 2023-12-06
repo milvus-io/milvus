@@ -67,7 +67,7 @@ func (v *LevelZeroSegmentsView) Equal(others []*SegmentView) bool {
 }
 
 // Trigger triggers all qualified LevelZeroSegments according to views
-func (v *LevelZeroSegmentsView) Trigger() CompactionView {
+func (v *LevelZeroSegmentsView) Trigger() (CompactionView, string) {
 	// Only choose segments with position less than the earliest growing segment position
 	validSegments := lo.Filter(v.segments, func(view *SegmentView, _ int) bool {
 		return view.dmlPos.GetTimestamp() < v.earliestGrowingSegmentPos.GetTimestamp()
@@ -79,11 +79,20 @@ func (v *LevelZeroSegmentsView) Trigger() CompactionView {
 
 		curDeltaSize  float64
 		curDeltaCount int
+		reason        string
 	)
 
 	for _, segView := range validSegments {
 		curDeltaSize += segView.DeltaSize
 		curDeltaCount += segView.DeltalogCount
+	}
+
+	if curDeltaSize > minDeltaSize {
+		reason = "level zero segments size reaches compaction limit"
+	}
+
+	if curDeltaCount > minDeltaCount {
+		reason = "level zero segments number reaches compaction limit"
 	}
 
 	if curDeltaSize < minDeltaSize && curDeltaCount < minDeltaCount {
@@ -94,5 +103,5 @@ func (v *LevelZeroSegmentsView) Trigger() CompactionView {
 		label:                     v.label,
 		segments:                  validSegments,
 		earliestGrowingSegmentPos: v.earliestGrowingSegmentPos,
-	}
+	}, reason
 }

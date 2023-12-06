@@ -134,7 +134,8 @@ func newCompactionPlanHandler(sessions *SessionManager, cm *ChannelManager, meta
 
 func (c *compactionPlanHandler) checkResult() {
 	// deal results
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	interval := Params.DataCoordCfg.CompactionRPCTimeout.GetAsDuration(time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), interval)
 	defer cancel()
 	ts, err := c.allocator.allocTimestamp(ctx)
 	if err != nil {
@@ -282,7 +283,7 @@ func (c *compactionPlanHandler) RefreshPlan(task *compactionTask) {
 				seg.Deltalogs = info.GetDeltalogs()
 			}
 		}
-		log.Info("Compaction handler refresed mix compaction plan")
+		log.Info("Compaction handler refreshed mix compaction plan")
 		return
 	}
 }
