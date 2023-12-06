@@ -395,25 +395,25 @@ func (m *importManager) checkFlushDone(ctx context.Context, segIDs []UniqueID) (
 	return flushed, nil
 }
 
-func (m *importManager) isRowbased(files []string) (bool, error) {
-	isRowBased := false
+func (m *importManager) isSingleFileTask(files []string) (bool, error) {
+	isSingleFile := false
 	for _, filePath := range files {
 		_, fileType := importutil.GetFileNameAndExt(filePath)
-		if fileType == importutil.JSONFileExt {
-			isRowBased = true
-		} else if isRowBased {
-			log.Error("row-based data file type must be JSON, mixed file types is not allowed", zap.Strings("files", files))
-			return isRowBased, fmt.Errorf("row-based data file type must be JSON or CSV, file type '%s' is not allowed", fileType)
+		if fileType == importutil.JSONFileExt || fileType == importutil.ParquetFileExt {
+			isSingleFile = true
+		} else if isSingleFile {
+			log.Error("row-based data file type must be JSON or Parquet, mixed file types is not allowed", zap.Strings("files", files))
+			return isSingleFile, fmt.Errorf("row-based data file type must be JSON or Parquet, file type '%s' is not allowed", fileType)
 		}
 	}
 
 	// for row_based, we only allow one file so that each invocation only generate a task
-	if isRowBased && len(files) > 1 {
-		log.Error("row-based import, only allow one JSON or CSV file each time", zap.Strings("files", files))
-		return isRowBased, fmt.Errorf("row-based import, only allow one JSON or CSV file each time")
+	if isSingleFile && len(files) > 1 {
+		log.Error("for JSON or parquet file, each task only accepts one file, not allowed to input multiple files", zap.Strings("files", files))
+		return isSingleFile, fmt.Errorf("for JSON or parquet file, each task only accepts one file, not allowed to input multiple files")
 	}
 
-	return isRowBased, nil
+	return isSingleFile, nil
 }
 
 // importJob processes the import request, generates import tasks, sends these tasks to DataCoord, and returns
@@ -448,13 +448,13 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 		capacity := cap(m.pendingTasks)
 		length := len(m.pendingTasks)
 
-		isRowBased, err := m.isRowbased(req.GetFiles())
+		isSingleFileTask, err := m.isSingleFileTask(req.GetFiles())
 		if err != nil {
 			return err
 		}
 
 		taskCount := 1
-		if isRowBased {
+		if isSingleFileTask {
 			taskCount = len(req.Files)
 		}
 
@@ -466,7 +466,7 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 		}
 
 		// convert import request to import tasks
-		if isRowBased {
+		if isSingleFileTask {
 			// For row-based importing, each file makes a task.
 			taskList := make([]int64, len(req.Files))
 			for i := 0; i < len(req.Files); i++ {

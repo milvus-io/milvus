@@ -30,10 +30,13 @@ import (
 	"github.com/apache/arrow/go/v12/parquet"
 	"github.com/apache/arrow/go/v12/parquet/pqarrow"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 // parquetSampleSchema() return a schema contains all supported data types with an int64 primary key
@@ -180,7 +183,7 @@ func parquetSampleSchema() *schemapb.CollectionSchema {
 				ElementType:  schemapb.DataType_Float,
 			},
 			{
-				FieldID:      118,
+				FieldID:      119,
 				Name:         "FieldArrayDouble",
 				IsPrimaryKey: false,
 				Description:  "int16 array",
@@ -203,12 +206,22 @@ func parquetSampleSchema() *schemapb.CollectionSchema {
 				DataType:     schemapb.DataType_JSON,
 				IsDynamic:    true,
 			},
+			{
+				FieldID:      122,
+				Name:         "FieldBinaryVector2",
+				IsPrimaryKey: false,
+				Description:  "binary_vector2",
+				DataType:     schemapb.DataType_BinaryVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "64"},
+				},
+			},
 		},
 	}
 	return schema
 }
 
-func milvusDataTypeToArrowType(dataType schemapb.DataType, dim int) arrow.DataType {
+func milvusDataTypeToArrowType(dataType schemapb.DataType, isBinary bool) arrow.DataType {
 	switch dataType {
 	case schemapb.DataType_Bool:
 		return &arrow.BooleanType{}
@@ -238,6 +251,9 @@ func milvusDataTypeToArrowType(dataType schemapb.DataType, dim int) arrow.DataTy
 			Metadata: arrow.Metadata{},
 		})
 	case schemapb.DataType_BinaryVector:
+		if isBinary {
+			return &arrow.BinaryType{}
+		}
 		return arrow.ListOfField(arrow.Field{
 			Name:     "item",
 			Type:     &arrow.Uint8Type{},
@@ -259,13 +275,12 @@ func milvusDataTypeToArrowType(dataType schemapb.DataType, dim int) arrow.DataTy
 func convertMilvusSchemaToArrowSchema(schema *schemapb.CollectionSchema) *arrow.Schema {
 	fields := make([]arrow.Field, 0)
 	for _, field := range schema.GetFields() {
-		dim, _ := getFieldDimension(field)
 		if field.GetDataType() == schemapb.DataType_Array {
 			fields = append(fields, arrow.Field{
 				Name: field.GetName(),
 				Type: arrow.ListOfField(arrow.Field{
 					Name:     "item",
-					Type:     milvusDataTypeToArrowType(field.GetElementType(), dim),
+					Type:     milvusDataTypeToArrowType(field.GetElementType(), false),
 					Nullable: true,
 					Metadata: arrow.Metadata{},
 				}),
@@ -276,7 +291,7 @@ func convertMilvusSchemaToArrowSchema(schema *schemapb.CollectionSchema) *arrow.
 		}
 		fields = append(fields, arrow.Field{
 			Name:     field.GetName(),
-			Type:     milvusDataTypeToArrowType(field.GetDataType(), dim),
+			Type:     milvusDataTypeToArrowType(field.GetDataType(), field.Name == "FieldBinaryVector2"),
 			Nullable: true,
 			Metadata: arrow.Metadata{},
 		})
@@ -284,7 +299,7 @@ func convertMilvusSchemaToArrowSchema(schema *schemapb.CollectionSchema) *arrow.
 	return arrow.NewSchema(fields, nil)
 }
 
-func buildArrayData(dataType, elementType schemapb.DataType, dim, rows, arrLen int) arrow.Array {
+func buildArrayData(dataType, elementType schemapb.DataType, dim, rows int, isBinary bool) arrow.Array {
 	mem := memory.NewGoAllocator()
 	switch dataType {
 	case schemapb.DataType_Bool:
@@ -349,6 +364,17 @@ func buildArrayData(dataType, elementType schemapb.DataType, dim, rows, arrLen i
 		builder.AppendValues(offsets, valid)
 		return builder.NewListArray()
 	case schemapb.DataType_BinaryVector:
+		if isBinary {
+			builder := array.NewBinaryBuilder(mem, &arrow.BinaryType{})
+			for i := 0; i < rows; i++ {
+				element := make([]byte, dim/8)
+				for j := 0; j < dim/8; j++ {
+					element[j] = randomString(1)[0]
+				}
+				builder.Append(element)
+			}
+			return builder.NewBinaryArray()
+		}
 		builder := array.NewListBuilder(mem, &arrow.Uint8Type{})
 		offsets := make([]int32, 0, rows)
 		valid := make([]bool, 0)
@@ -372,11 +398,10 @@ func buildArrayData(dataType, elementType schemapb.DataType, dim, rows, arrLen i
 		valid := make([]bool, 0, rows)
 		index := 0
 		for i := 0; i < rows; i++ {
-			index += arrLen
+			index += i % 10
 			offsets = append(offsets, int32(index))
 			valid = append(valid, true)
 		}
-		index += arrLen
 		switch elementType {
 		case schemapb.DataType_Bool:
 			builder := array.NewListBuilder(mem, &arrow.BooleanType{})
@@ -460,7 +485,69 @@ func writeParquet(w io.Writer, milvusSchema *schemapb.CollectionSchema, numRows 
 		columns := make([]arrow.Array, 0, len(milvusSchema.Fields))
 		for _, field := range milvusSchema.Fields {
 			dim, _ := getFieldDimension(field)
-			columnData := buildArrayData(field.DataType, field.ElementType, dim, batch, 10)
+			columnData := buildArrayData(field.DataType, field.ElementType, dim, batch, field.Name == "FieldBinaryVector2")
+			columns = append(columns, columnData)
+		}
+		recordBatch := array.NewRecord(schema, columns, int64(batch))
+		err = fw.Write(recordBatch)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func writeLessFieldParquet(w io.Writer, milvusSchema *schemapb.CollectionSchema, numRows int) error {
+	for i, field := range milvusSchema.Fields {
+		if field.GetName() == "FieldInt64" {
+			milvusSchema.Fields = append(milvusSchema.Fields[:i], milvusSchema.Fields[i+1:]...)
+			break
+		}
+	}
+	schema := convertMilvusSchemaToArrowSchema(milvusSchema)
+	fw, err := pqarrow.NewFileWriter(schema, w, parquet.NewWriterProperties(), pqarrow.DefaultWriterProps())
+	if err != nil {
+		return err
+	}
+	defer fw.Close()
+
+	batch := 1000
+	for i := 0; i <= numRows/batch; i++ {
+		columns := make([]arrow.Array, 0, len(milvusSchema.Fields))
+		for _, field := range milvusSchema.Fields {
+			dim, _ := getFieldDimension(field)
+			columnData := buildArrayData(field.DataType, field.ElementType, dim, batch, field.Name == "FieldBinaryVector2")
+			columns = append(columns, columnData)
+		}
+		recordBatch := array.NewRecord(schema, columns, int64(batch))
+		err = fw.Write(recordBatch)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writeMoreFieldParquet(w io.Writer, milvusSchema *schemapb.CollectionSchema, numRows int) error {
+	milvusSchema.Fields = append(milvusSchema.Fields, &schemapb.FieldSchema{
+		FieldID:  200,
+		Name:     "FieldMore",
+		DataType: schemapb.DataType_Int64,
+	})
+	schema := convertMilvusSchemaToArrowSchema(milvusSchema)
+	fw, err := pqarrow.NewFileWriter(schema, w, parquet.NewWriterProperties(), pqarrow.DefaultWriterProps())
+	if err != nil {
+		return err
+	}
+	defer fw.Close()
+
+	batch := 1000
+	for i := 0; i <= numRows/batch; i++ {
+		columns := make([]arrow.Array, 0, len(milvusSchema.Fields)+1)
+		for _, field := range milvusSchema.Fields {
+			dim, _ := getFieldDimension(field)
+			columnData := buildArrayData(field.DataType, field.ElementType, dim, batch, field.Name == "FieldBinaryVector2")
 			columns = append(columns, columnData)
 		}
 		recordBatch := array.NewRecord(schema, columns, int64(batch))
@@ -482,8 +569,9 @@ func randomString(length int) string {
 	return string(b)
 }
 
-func TestParquetReader(t *testing.T) {
-	filePath := "/tmp/wp.parquet"
+func TestParquetParser(t *testing.T) {
+	paramtable.Init()
+	filePath := "/tmp/parser.parquet"
 	ctx := context.Background()
 	schema := parquetSampleSchema()
 	idAllocator := newIDAllocator(ctx, t, nil)
@@ -516,6 +604,23 @@ func TestParquetReader(t *testing.T) {
 		err = parquetParser.Parse()
 		assert.NoError(t, err)
 	})
+}
+
+func TestParquetReader_Error(t *testing.T) {
+	paramtable.Init()
+	filePath := "/tmp/par_err.parquet"
+	ctx := context.Background()
+	schema := parquetSampleSchema()
+	idAllocator := newIDAllocator(ctx, t, nil)
+	defer os.Remove(filePath)
+
+	writeFile := func() {
+		wf, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE, 0o666)
+		assert.NoError(t, err)
+		err = writeParquet(wf, schema, 100)
+		assert.NoError(t, err)
+	}
+	writeFile()
 
 	t.Run("field not exist", func(t *testing.T) {
 		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
@@ -561,6 +666,26 @@ func TestParquetReader(t *testing.T) {
 		schema = parquetSampleSchema()
 	})
 
+	t.Run("list data mismatch", func(t *testing.T) {
+		schema.Fields[11].DataType = schemapb.DataType_Bool
+		schema.Fields[11].ElementType = schemapb.DataType_None
+		cm := createLocalChunkManager(t)
+		flushFunc := func(fields BlockData, shardID int, partID int64) error {
+			return nil
+		}
+		collectionInfo, err := NewCollectionInfo(schema, 2, []int64{1})
+		assert.NoError(t, err)
+
+		parquetParser, err := NewParquetParser(ctx, collectionInfo, idAllocator, 10240, cm, filePath, flushFunc, nil)
+		assert.NoError(t, err)
+		defer parquetParser.Close()
+		err = parquetParser.Parse()
+		assert.Error(t, err)
+
+		// reset schema
+		schema = parquetSampleSchema()
+	})
+
 	t.Run("data not match", func(t *testing.T) {
 		cm := createLocalChunkManager(t)
 		flushFunc := func(fields BlockData, shardID int, partID int64) error {
@@ -584,7 +709,7 @@ func TestParquetReader(t *testing.T) {
 		})
 
 		t.Run("read not int8 field", func(t *testing.T) {
-			columnReader := parquetParser.columnMap["FieldInt16"]
+			columnReader := parquetParser.columnMap["FieldBool"]
 			columnReader.dataType = schemapb.DataType_Int8
 			data, err := parquetParser.readData(columnReader, 1024)
 			assert.Error(t, err)
@@ -592,7 +717,7 @@ func TestParquetReader(t *testing.T) {
 		})
 
 		t.Run("read not int16 field", func(t *testing.T) {
-			columnReader := parquetParser.columnMap["FieldInt32"]
+			columnReader := parquetParser.columnMap["FieldBool"]
 			columnReader.dataType = schemapb.DataType_Int16
 			data, err := parquetParser.readData(columnReader, 1024)
 			assert.Error(t, err)
@@ -600,7 +725,7 @@ func TestParquetReader(t *testing.T) {
 		})
 
 		t.Run("read not int32 field", func(t *testing.T) {
-			columnReader := parquetParser.columnMap["FieldInt64"]
+			columnReader := parquetParser.columnMap["FieldBool"]
 			columnReader.dataType = schemapb.DataType_Int32
 			data, err := parquetParser.readData(columnReader, 1024)
 			assert.Error(t, err)
@@ -608,7 +733,7 @@ func TestParquetReader(t *testing.T) {
 		})
 
 		t.Run("read not int64 field", func(t *testing.T) {
-			columnReader := parquetParser.columnMap["FieldFloat"]
+			columnReader := parquetParser.columnMap["FieldBool"]
 			columnReader.dataType = schemapb.DataType_Int64
 			data, err := parquetParser.readData(columnReader, 1024)
 			assert.Error(t, err)
@@ -616,7 +741,7 @@ func TestParquetReader(t *testing.T) {
 		})
 
 		t.Run("read not float field", func(t *testing.T) {
-			columnReader := parquetParser.columnMap["FieldDouble"]
+			columnReader := parquetParser.columnMap["FieldBool"]
 			columnReader.dataType = schemapb.DataType_Float
 			data, err := parquetParser.readData(columnReader, 1024)
 			assert.Error(t, err)
@@ -643,6 +768,24 @@ func TestParquetReader(t *testing.T) {
 			columnReader := parquetParser.columnMap["FieldBool"]
 			columnReader.dataType = schemapb.DataType_Array
 			columnReader.elementType = schemapb.DataType_Bool
+			data, err := parquetParser.readData(columnReader, 1024)
+			assert.Error(t, err)
+			assert.Nil(t, data)
+		})
+
+		t.Run("read not array field", func(t *testing.T) {
+			columnReader := parquetParser.columnMap["FieldBool"]
+			columnReader.dataType = schemapb.DataType_Array
+			columnReader.elementType = schemapb.DataType_Int64
+			data, err := parquetParser.readData(columnReader, 1024)
+			assert.Error(t, err)
+			assert.Nil(t, data)
+		})
+
+		t.Run("read not array field", func(t *testing.T) {
+			columnReader := parquetParser.columnMap["FieldBool"]
+			columnReader.dataType = schemapb.DataType_Array
+			columnReader.elementType = schemapb.DataType_VarChar
 			data, err := parquetParser.readData(columnReader, 1024)
 			assert.Error(t, err)
 			assert.Nil(t, data)
@@ -728,7 +871,7 @@ func TestParquetReader(t *testing.T) {
 			assert.Nil(t, data)
 		})
 
-		t.Run("read irregular float vector", func(t *testing.T) {
+		t.Run("read irregular float vector field", func(t *testing.T) {
 			columnReader := parquetParser.columnMap["FieldArrayFloat"]
 			columnReader.dataType = schemapb.DataType_FloatVector
 			data, err := parquetParser.readData(columnReader, 1024)
@@ -736,7 +879,7 @@ func TestParquetReader(t *testing.T) {
 			assert.Nil(t, data)
 		})
 
-		t.Run("read irregular float vector", func(t *testing.T) {
+		t.Run("read irregular float vector field", func(t *testing.T) {
 			columnReader := parquetParser.columnMap["FieldArrayDouble"]
 			columnReader.dataType = schemapb.DataType_FloatVector
 			data, err := parquetParser.readData(columnReader, 1024)
@@ -745,7 +888,23 @@ func TestParquetReader(t *testing.T) {
 		})
 
 		t.Run("read not binary vector field", func(t *testing.T) {
+			columnReader := parquetParser.columnMap["FieldBool"]
+			columnReader.dataType = schemapb.DataType_BinaryVector
+			data, err := parquetParser.readData(columnReader, 1024)
+			assert.Error(t, err)
+			assert.Nil(t, data)
+		})
+
+		t.Run("read not binary vector field", func(t *testing.T) {
 			columnReader := parquetParser.columnMap["FieldArrayBool"]
+			columnReader.dataType = schemapb.DataType_BinaryVector
+			data, err := parquetParser.readData(columnReader, 1024)
+			assert.Error(t, err)
+			assert.Nil(t, data)
+		})
+
+		t.Run("read irregular binary vector field", func(t *testing.T) {
+			columnReader := parquetParser.columnMap["FieldArrayInt64"]
 			columnReader.dataType = schemapb.DataType_BinaryVector
 			data, err := parquetParser.readData(columnReader, 1024)
 			assert.Error(t, err)
@@ -808,6 +967,7 @@ func TestParquetReader(t *testing.T) {
 }
 
 func TestNewParquetParser(t *testing.T) {
+	paramtable.Init()
 	ctx := context.Background()
 	t.Run("nil collectionInfo", func(t *testing.T) {
 		parquetParser, err := NewParquetParser(ctx, nil, nil, 10240, nil, "", nil, nil)
@@ -846,106 +1006,174 @@ func TestNewParquetParser(t *testing.T) {
 		assert.Error(t, err)
 		assert.Nil(t, parquetParser)
 	})
-	//
-	//t.Run("create reader with closed file", func(t *testing.T) {
-	//	collectionInfo, err := NewCollectionInfo(parquetSampleSchema(), 2, []int64{1})
-	//	assert.NoError(t, err)
-	//
-	//	idAllocator := newIDAllocator(ctx, t, nil)
-	//	cm := createLocalChunkManager(t)
-	//	flushFunc := func(fields BlockData, shardID int, partID int64) error {
-	//		return nil
-	//	}
-	//
-	//	rf, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE, 0o666)
-	//	assert.NoError(t, err)
-	//	r := storage.NewLocalFile(rf)
-	//
-	//	parquetParser, err := NewParquetParser(ctx, collectionInfo, idAllocator, 10240, cm, filePath, flushFunc, nil)
-	//	assert.Error(t, err)
-	//	assert.Nil(t, parquetParser)
-	//})
+
+	t.Run("chunk manager reader fail", func(t *testing.T) {
+		collectionInfo, err := NewCollectionInfo(parquetSampleSchema(), 2, []int64{1})
+		assert.NoError(t, err)
+
+		idAllocator := newIDAllocator(ctx, t, nil)
+		cm := mocks.NewChunkManager(t)
+		cm.EXPECT().Reader(mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock error"))
+		flushFunc := func(fields BlockData, shardID int, partID int64) error {
+			return nil
+		}
+
+		parquetParser, err := NewParquetParser(ctx, collectionInfo, idAllocator, 10240, cm, "", flushFunc, nil)
+		assert.Error(t, err)
+		assert.Nil(t, parquetParser)
+	})
 }
 
-func TestVerifyFieldSchema(t *testing.T) {
-	ok := verifyFieldSchema(schemapb.DataType_Bool, schemapb.DataType_None, arrow.Field{Type: &arrow.BooleanType{}})
-	assert.True(t, ok)
-	ok = verifyFieldSchema(schemapb.DataType_Bool, schemapb.DataType_None, arrow.Field{Type: arrow.ListOfField(arrow.Field{Type: &arrow.BooleanType{}})})
-	assert.False(t, ok)
+func Test_convertArrowSchemaToDataType(t *testing.T) {
+	type testcase struct {
+		arrowField arrow.Field
+		dataType   schemapb.DataType
+		isArray    bool
+	}
+	testcases := []testcase{
+		{arrow.Field{Type: &arrow.BooleanType{}}, schemapb.DataType_Bool, false},
+		{arrow.Field{Type: arrow.ListOfField(arrow.Field{Type: &arrow.BooleanType{}})}, schemapb.DataType_Bool, true},
 
-	ok = verifyFieldSchema(schemapb.DataType_Int8, schemapb.DataType_None, arrow.Field{Type: &arrow.Int8Type{}})
-	assert.True(t, ok)
-	ok = verifyFieldSchema(schemapb.DataType_Int8, schemapb.DataType_None, arrow.Field{Type: arrow.ListOfField(arrow.Field{Type: &arrow.Int8Type{}})})
-	assert.False(t, ok)
+		{arrow.Field{Type: &arrow.Int8Type{}}, schemapb.DataType_Int8, false},
+		{arrow.Field{Type: arrow.ListOfField(arrow.Field{Type: &arrow.Int8Type{}})}, schemapb.DataType_Int8, true},
 
-	ok = verifyFieldSchema(schemapb.DataType_Int16, schemapb.DataType_None, arrow.Field{Type: &arrow.Int16Type{}})
-	assert.True(t, ok)
-	ok = verifyFieldSchema(schemapb.DataType_Int16, schemapb.DataType_None, arrow.Field{Type: arrow.ListOfField(arrow.Field{Type: &arrow.Int16Type{}})})
-	assert.False(t, ok)
+		{arrow.Field{Type: &arrow.Int16Type{}}, schemapb.DataType_Int16, false},
+		{arrow.Field{Type: arrow.ListOfField(arrow.Field{Type: &arrow.Int16Type{}})}, schemapb.DataType_Int16, true},
 
-	ok = verifyFieldSchema(schemapb.DataType_Int32, schemapb.DataType_None, arrow.Field{Type: &arrow.Int32Type{}})
-	assert.True(t, ok)
-	ok = verifyFieldSchema(schemapb.DataType_Int32, schemapb.DataType_None, arrow.Field{Type: arrow.ListOfField(arrow.Field{Type: &arrow.Int32Type{}})})
-	assert.False(t, ok)
+		{arrow.Field{Type: &arrow.Int32Type{}}, schemapb.DataType_Int32, false},
+		{arrow.Field{Type: arrow.ListOfField(arrow.Field{Type: &arrow.Int32Type{}})}, schemapb.DataType_Int32, true},
 
-	ok = verifyFieldSchema(schemapb.DataType_Int64, schemapb.DataType_None, arrow.Field{Type: &arrow.Int64Type{}})
-	assert.True(t, ok)
-	ok = verifyFieldSchema(schemapb.DataType_Int64, schemapb.DataType_None, arrow.Field{Type: arrow.ListOfField(arrow.Field{Type: &arrow.Int64Type{}})})
-	assert.False(t, ok)
+		{arrow.Field{Type: &arrow.Int64Type{}}, schemapb.DataType_Int64, false},
+		{arrow.Field{Type: arrow.ListOfField(arrow.Field{Type: &arrow.Int64Type{}})}, schemapb.DataType_Int64, true},
 
-	ok = verifyFieldSchema(schemapb.DataType_Float, schemapb.DataType_None, arrow.Field{Type: &arrow.Float32Type{}})
-	assert.True(t, ok)
-	ok = verifyFieldSchema(schemapb.DataType_Float, schemapb.DataType_None, arrow.Field{Type: arrow.ListOfField(arrow.Field{Type: &arrow.Float32Type{}})})
-	assert.False(t, ok)
+		{arrow.Field{Type: &arrow.Float32Type{}}, schemapb.DataType_Float, false},
+		{arrow.Field{Type: arrow.ListOfField(arrow.Field{Type: &arrow.Float32Type{}})}, schemapb.DataType_Float, true},
 
-	ok = verifyFieldSchema(schemapb.DataType_Double, schemapb.DataType_None, arrow.Field{Type: &arrow.Float64Type{}})
-	assert.True(t, ok)
-	ok = verifyFieldSchema(schemapb.DataType_Double, schemapb.DataType_None, arrow.Field{Type: arrow.ListOfField(arrow.Field{Type: &arrow.Float64Type{}})})
-	assert.False(t, ok)
+		{arrow.Field{Type: &arrow.Float64Type{}}, schemapb.DataType_Double, false},
+		{arrow.Field{Type: arrow.ListOfField(arrow.Field{Type: &arrow.Float64Type{}})}, schemapb.DataType_Double, true},
 
-	ok = verifyFieldSchema(schemapb.DataType_VarChar, schemapb.DataType_None, arrow.Field{Type: &arrow.StringType{}})
-	assert.True(t, ok)
-	ok = verifyFieldSchema(schemapb.DataType_VarChar, schemapb.DataType_None, arrow.Field{Type: arrow.ListOfField(arrow.Field{Type: &arrow.StringType{}})})
-	assert.False(t, ok)
+		{arrow.Field{Type: &arrow.StringType{}}, schemapb.DataType_VarChar, false},
+		{arrow.Field{Type: arrow.ListOfField(arrow.Field{Type: &arrow.StringType{}})}, schemapb.DataType_VarChar, true},
 
-	ok = verifyFieldSchema(schemapb.DataType_FloatVector, schemapb.DataType_None, arrow.Field{Type: arrow.ListOfField(arrow.Field{Type: &arrow.Float32Type{}})})
-	assert.True(t, ok)
-	ok = verifyFieldSchema(schemapb.DataType_FloatVector, schemapb.DataType_None, arrow.Field{Type: arrow.ListOfField(arrow.Field{Type: &arrow.Float64Type{}})})
-	assert.True(t, ok)
-	ok = verifyFieldSchema(schemapb.DataType_FloatVector, schemapb.DataType_None, arrow.Field{Type: &arrow.Float32Type{}})
-	assert.False(t, ok)
+		{arrow.Field{Type: &arrow.BinaryType{}}, schemapb.DataType_BinaryVector, false},
+		{arrow.Field{Type: arrow.ListOfField(arrow.Field{Type: &arrow.Uint8Type{}})}, schemapb.DataType_BinaryVector, true},
+		{arrow.Field{Type: &arrow.Uint8Type{}}, schemapb.DataType_None, false},
 
-	ok = verifyFieldSchema(schemapb.DataType_BinaryVector, schemapb.DataType_None, arrow.Field{Type: arrow.ListOfField(arrow.Field{Type: &arrow.Uint8Type{}})})
-	assert.True(t, ok)
-	ok = verifyFieldSchema(schemapb.DataType_BinaryVector, schemapb.DataType_None, arrow.Field{Type: &arrow.Uint8Type{}})
-	assert.False(t, ok)
+		{arrow.Field{Type: &arrow.Float16Type{}}, schemapb.DataType_None, false},
+		{arrow.Field{Type: arrow.ListOfField(arrow.Field{Type: &arrow.Float16Type{}})}, schemapb.DataType_Float16Vector, true},
 
-	ok = verifyFieldSchema(schemapb.DataType_Array, schemapb.DataType_Bool, arrow.Field{Type: arrow.ListOfField(arrow.Field{Type: &arrow.BooleanType{}})})
-	assert.True(t, ok)
+		{arrow.Field{Type: &arrow.DayTimeIntervalType{}}, schemapb.DataType_None, false},
+	}
 
-	ok = verifyFieldSchema(schemapb.DataType_Array, schemapb.DataType_Int8, arrow.Field{Type: arrow.ListOfField(arrow.Field{Type: &arrow.Int8Type{}})})
-	assert.True(t, ok)
+	for _, tt := range testcases {
+		arrowType, isList := convertArrowSchemaToDataType(tt.arrowField, false)
+		assert.Equal(t, tt.isArray, isList)
+		assert.Equal(t, tt.dataType, arrowType)
+	}
+}
 
-	ok = verifyFieldSchema(schemapb.DataType_Array, schemapb.DataType_Int16, arrow.Field{Type: arrow.ListOfField(arrow.Field{Type: &arrow.Int16Type{}})})
-	assert.True(t, ok)
+func Test_isConvertible(t *testing.T) {
+	type testcase struct {
+		arrowType schemapb.DataType
+		dataType  schemapb.DataType
+		isArray   bool
+		expect    bool
+	}
+	testcases := []testcase{
+		{schemapb.DataType_Bool, schemapb.DataType_Bool, false, true},
+		{schemapb.DataType_Bool, schemapb.DataType_Bool, true, true},
+		{schemapb.DataType_Bool, schemapb.DataType_Int8, false, false},
+		{schemapb.DataType_Bool, schemapb.DataType_Int8, true, false},
+		{schemapb.DataType_Bool, schemapb.DataType_String, false, false},
+		{schemapb.DataType_Bool, schemapb.DataType_String, true, false},
 
-	ok = verifyFieldSchema(schemapb.DataType_Array, schemapb.DataType_Int32, arrow.Field{Type: arrow.ListOfField(arrow.Field{Type: &arrow.Int32Type{}})})
-	assert.True(t, ok)
+		{schemapb.DataType_Int8, schemapb.DataType_Bool, false, false},
+		{schemapb.DataType_Int8, schemapb.DataType_String, false, false},
+		{schemapb.DataType_Int8, schemapb.DataType_JSON, false, false},
+		{schemapb.DataType_Int8, schemapb.DataType_Int8, false, true},
+		{schemapb.DataType_Int8, schemapb.DataType_Int8, true, true},
+		{schemapb.DataType_Int8, schemapb.DataType_Int16, false, true},
+		{schemapb.DataType_Int8, schemapb.DataType_Int32, false, true},
+		{schemapb.DataType_Int8, schemapb.DataType_Int64, false, true},
+		{schemapb.DataType_Int8, schemapb.DataType_Float, false, true},
+		{schemapb.DataType_Int8, schemapb.DataType_Double, false, true},
+		{schemapb.DataType_Int8, schemapb.DataType_FloatVector, false, false},
 
-	ok = verifyFieldSchema(schemapb.DataType_Array, schemapb.DataType_Int64, arrow.Field{Type: arrow.ListOfField(arrow.Field{Type: &arrow.Int64Type{}})})
-	assert.True(t, ok)
+		{schemapb.DataType_Int16, schemapb.DataType_Bool, false, false},
+		{schemapb.DataType_Int16, schemapb.DataType_String, false, false},
+		{schemapb.DataType_Int16, schemapb.DataType_JSON, false, false},
+		{schemapb.DataType_Int16, schemapb.DataType_Int8, false, false},
+		{schemapb.DataType_Int16, schemapb.DataType_Int16, false, true},
+		{schemapb.DataType_Int16, schemapb.DataType_Int32, false, true},
+		{schemapb.DataType_Int16, schemapb.DataType_Int64, false, true},
+		{schemapb.DataType_Int16, schemapb.DataType_Float, false, true},
+		{schemapb.DataType_Int16, schemapb.DataType_Double, false, true},
+		{schemapb.DataType_Int16, schemapb.DataType_FloatVector, false, false},
 
-	ok = verifyFieldSchema(schemapb.DataType_Array, schemapb.DataType_Float, arrow.Field{Type: arrow.ListOfField(arrow.Field{Type: &arrow.Float32Type{}})})
-	assert.True(t, ok)
+		{schemapb.DataType_Int32, schemapb.DataType_Bool, false, false},
+		{schemapb.DataType_Int32, schemapb.DataType_String, false, false},
+		{schemapb.DataType_Int32, schemapb.DataType_JSON, false, false},
+		{schemapb.DataType_Int32, schemapb.DataType_Int8, false, false},
+		{schemapb.DataType_Int32, schemapb.DataType_Int16, false, false},
+		{schemapb.DataType_Int32, schemapb.DataType_Int32, false, true},
+		{schemapb.DataType_Int32, schemapb.DataType_Int64, false, true},
+		{schemapb.DataType_Int32, schemapb.DataType_Float, false, true},
+		{schemapb.DataType_Int32, schemapb.DataType_Double, false, true},
+		{schemapb.DataType_Int32, schemapb.DataType_FloatVector, false, false},
 
-	ok = verifyFieldSchema(schemapb.DataType_Array, schemapb.DataType_Double, arrow.Field{Type: arrow.ListOfField(arrow.Field{Type: &arrow.Float64Type{}})})
-	assert.True(t, ok)
+		{schemapb.DataType_Int64, schemapb.DataType_Bool, false, false},
+		{schemapb.DataType_Int64, schemapb.DataType_String, false, false},
+		{schemapb.DataType_Int64, schemapb.DataType_JSON, false, false},
+		{schemapb.DataType_Int64, schemapb.DataType_Int8, false, false},
+		{schemapb.DataType_Int64, schemapb.DataType_Int16, false, false},
+		{schemapb.DataType_Int64, schemapb.DataType_Int32, false, false},
+		{schemapb.DataType_Int64, schemapb.DataType_Int64, false, true},
+		{schemapb.DataType_Int64, schemapb.DataType_Float, false, true},
+		{schemapb.DataType_Int64, schemapb.DataType_Double, false, true},
+		{schemapb.DataType_Int64, schemapb.DataType_FloatVector, false, false},
 
-	ok = verifyFieldSchema(schemapb.DataType_Array, schemapb.DataType_VarChar, arrow.Field{Type: arrow.ListOfField(arrow.Field{Type: &arrow.StringType{}})})
-	assert.True(t, ok)
+		{schemapb.DataType_Float, schemapb.DataType_Bool, false, false},
+		{schemapb.DataType_Float, schemapb.DataType_String, false, false},
+		{schemapb.DataType_Float, schemapb.DataType_JSON, false, false},
+		{schemapb.DataType_Float, schemapb.DataType_Int8, false, false},
+		{schemapb.DataType_Float, schemapb.DataType_Int16, false, false},
+		{schemapb.DataType_Float, schemapb.DataType_Int32, false, false},
+		{schemapb.DataType_Float, schemapb.DataType_Int64, false, false},
+		{schemapb.DataType_Float, schemapb.DataType_Float, false, true},
+		{schemapb.DataType_Float, schemapb.DataType_Double, false, true},
+		{schemapb.DataType_Float, schemapb.DataType_FloatVector, true, true},
 
-	ok = verifyFieldSchema(schemapb.DataType_Array, schemapb.DataType_None, arrow.Field{Type: arrow.ListOfField(arrow.Field{Type: &arrow.Int64Type{}})})
-	assert.False(t, ok)
+		{schemapb.DataType_Double, schemapb.DataType_Bool, false, false},
+		{schemapb.DataType_Double, schemapb.DataType_String, false, false},
+		{schemapb.DataType_Double, schemapb.DataType_JSON, false, false},
+		{schemapb.DataType_Double, schemapb.DataType_Int8, false, false},
+		{schemapb.DataType_Double, schemapb.DataType_Int16, false, false},
+		{schemapb.DataType_Double, schemapb.DataType_Int32, false, false},
+		{schemapb.DataType_Double, schemapb.DataType_Int64, false, false},
+		{schemapb.DataType_Double, schemapb.DataType_Float, false, false},
+		{schemapb.DataType_Double, schemapb.DataType_Double, false, true},
+		{schemapb.DataType_Double, schemapb.DataType_FloatVector, true, true},
+
+		{schemapb.DataType_VarChar, schemapb.DataType_VarChar, false, true},
+		{schemapb.DataType_VarChar, schemapb.DataType_JSON, false, true},
+		{schemapb.DataType_VarChar, schemapb.DataType_Bool, false, false},
+		{schemapb.DataType_VarChar, schemapb.DataType_Int64, false, false},
+		{schemapb.DataType_VarChar, schemapb.DataType_Float, false, false},
+		{schemapb.DataType_VarChar, schemapb.DataType_FloatVector, false, false},
+
+		{schemapb.DataType_Float16Vector, schemapb.DataType_Float16Vector, true, true},
+		{schemapb.DataType_Float16Vector, schemapb.DataType_Float16Vector, false, true},
+		{schemapb.DataType_BinaryVector, schemapb.DataType_BinaryVector, true, true},
+		{schemapb.DataType_BinaryVector, schemapb.DataType_BinaryVector, false, true},
+
+		{schemapb.DataType_JSON, schemapb.DataType_JSON, false, true},
+		{schemapb.DataType_JSON, schemapb.DataType_VarChar, false, false},
+
+		{schemapb.DataType_Array, schemapb.DataType_Array, false, false},
+	}
+	for _, tt := range testcases {
+		assert.Equal(t, tt.expect, isConvertible(tt.arrowType, tt.dataType, tt.isArray))
+	}
 }
 
 func TestCalcRowCountPerBlock(t *testing.T) {
@@ -1022,5 +1250,83 @@ func TestCalcRowCountPerBlock(t *testing.T) {
 
 		_, err = p.calcRowCountPerBlock()
 		assert.NoError(t, err)
+	})
+}
+
+func TestParquetParser_LessField(t *testing.T) {
+	paramtable.Init()
+	filePath := "/tmp/less_field.parquet"
+	ctx := context.Background()
+	schema := parquetSampleSchema()
+	idAllocator := newIDAllocator(ctx, t, nil)
+	defer os.Remove(filePath)
+
+	writeFile := func() {
+		wf, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE, 0o666)
+		assert.NoError(t, err)
+		err = writeLessFieldParquet(wf, schema, 100)
+		assert.NoError(t, err)
+	}
+	writeFile()
+
+	schema = parquetSampleSchema()
+
+	t.Run("read file", func(t *testing.T) {
+		cm := createLocalChunkManager(t)
+		flushFunc := func(fields BlockData, shardID int, partID int64) error {
+			return nil
+		}
+		collectionInfo, err := NewCollectionInfo(schema, 2, []int64{1})
+		assert.NoError(t, err)
+
+		updateProgress := func(percent int64) {
+			assert.Greater(t, percent, int64(0))
+		}
+
+		// parquet schema sizePreRecord = 5296
+		parquetParser, err := NewParquetParser(ctx, collectionInfo, idAllocator, 102400, cm, filePath, flushFunc, updateProgress)
+		assert.NoError(t, err)
+		defer parquetParser.Close()
+		err = parquetParser.Parse()
+		assert.Error(t, err)
+	})
+}
+
+func TestParquetParser_MoreField(t *testing.T) {
+	paramtable.Init()
+	filePath := "/tmp/more_field.parquet"
+	ctx := context.Background()
+	schema := parquetSampleSchema()
+	idAllocator := newIDAllocator(ctx, t, nil)
+	defer os.Remove(filePath)
+
+	writeFile := func() {
+		wf, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE, 0o666)
+		assert.NoError(t, err)
+		err = writeMoreFieldParquet(wf, schema, 100)
+		assert.NoError(t, err)
+	}
+	writeFile()
+
+	schema = parquetSampleSchema()
+
+	t.Run("read file", func(t *testing.T) {
+		cm := createLocalChunkManager(t)
+		flushFunc := func(fields BlockData, shardID int, partID int64) error {
+			return nil
+		}
+		collectionInfo, err := NewCollectionInfo(schema, 2, []int64{1})
+		assert.NoError(t, err)
+
+		updateProgress := func(percent int64) {
+			assert.Greater(t, percent, int64(0))
+		}
+
+		// parquet schema sizePreRecord = 5296
+		parquetParser, err := NewParquetParser(ctx, collectionInfo, idAllocator, 102400, cm, filePath, flushFunc, updateProgress)
+		assert.NoError(t, err)
+		defer parquetParser.Close()
+		err = parquetParser.Parse()
+		assert.Error(t, err)
 	})
 }
