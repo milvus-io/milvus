@@ -313,6 +313,7 @@ TEST(CApiTest, SegmentTest) {
     ASSERT_NE(status.error_code, Success);
     DeleteCollection(collection);
     DeleteSegment(segment);
+    free((char *)status.error_msg);
 }
 
 TEST(CApiTest, CPlan) {
