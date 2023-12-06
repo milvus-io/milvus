@@ -350,10 +350,7 @@ func TestInsertWithDynamicFields(t *testing.T) {
 	req := InsertReq{}
 	coll := generateCollectionSchema(schemapb.DataType_Int64, false)
 	var err error
-	err, req.Data = checkAndSetData(body, &milvuspb.DescribeCollectionResponse{
-		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
-		Schema: coll,
-	})
+	err, req.Data = checkAndSetData(body, coll)
 	assert.Equal(t, nil, err)
 	assert.Equal(t, int64(0), req.Data[0]["id"])
 	assert.Equal(t, int64(1), req.Data[0]["book_id"])

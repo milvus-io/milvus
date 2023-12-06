@@ -41,6 +41,9 @@ func (h *Handlers) checkDatabase(ctx context.Context, c *gin.Context, dbName str
 	if dbName == DefaultDbName {
 		return true
 	}
+	if proxy.CheckDatabase(ctx, dbName) {
+		return true
+	}
 	response, err := h.proxy.ListDatabases(ctx, &milvuspb.ListDatabasesRequest{})
 	if err == nil {
 		err = merr.Error(response.GetStatus())
@@ -61,15 +64,14 @@ func (h *Handlers) checkDatabase(ctx context.Context, c *gin.Context, dbName str
 	return false
 }
 
-func (h *Handlers) describeCollection(ctx context.Context, c *gin.Context, dbName string, collectionName string, needAuth bool) (*milvuspb.DescribeCollectionResponse, error) {
+func (h *Handlers) describeCollection(ctx context.Context, c *gin.Context, dbName string, collectionName string) (*schemapb.CollectionSchema, error) {
+	collSchema, err := proxy.GetCachedCollectionSchema(ctx, dbName, collectionName)
+	if err == nil {
+		return collSchema, nil
+	}
 	req := milvuspb.DescribeCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
-	}
-	if needAuth {
-		if err := checkAuthorization(ctx, c, &req); err != nil {
-			return nil, err
-		}
 	}
 	response, err := h.proxy.DescribeCollection(ctx, &req)
 	if err == nil {
@@ -84,7 +86,7 @@ func (h *Handlers) describeCollection(ctx context.Context, c *gin.Context, dbNam
 		log.Warn("primary filed autoID VS schema autoID", zap.String("collectionName", collectionName), zap.Bool("primary Field", primaryField.AutoID), zap.Bool("schema", response.Schema.AutoID))
 		response.Schema.AutoID = EnableAutoID
 	}
-	return response, nil
+	return response.Schema, nil
 }
 
 func (h *Handlers) hasCollection(ctx context.Context, c *gin.Context, dbName string, collectionName string) (bool, error) {
@@ -269,11 +271,22 @@ func (h *Handlers) getCollectionDetails(c *gin.Context) {
 	dbName := c.DefaultQuery(HTTPDbName, DefaultDbName)
 	username, _ := c.Get(ContextUsername)
 	ctx := proxy.NewContextWithMetadata(c, username.(string), dbName)
+	theReq := milvuspb.DescribeCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+	}
+	if err := checkAuthorization(ctx, c, &theReq); err != nil {
+		return
+	}
 	if !h.checkDatabase(ctx, c, dbName) {
 		return
 	}
-	coll, err := h.describeCollection(ctx, c, dbName, collectionName, true)
+	coll, err := h.proxy.DescribeCollection(c, &theReq)
+	if err == nil {
+		err = merr.Error(coll.GetStatus())
+	}
 	if err != nil {
+		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 		return
 	}
 	stateResp, err := h.proxy.GetLoadState(ctx, &milvuspb.GetLoadStateRequest{
@@ -483,12 +496,12 @@ func (h *Handlers) get(c *gin.Context) {
 	if !h.checkDatabase(ctx, c, req.DbName) {
 		return
 	}
-	coll, err := h.describeCollection(ctx, c, httpReq.DbName, httpReq.CollectionName, false)
+	coll, err := h.describeCollection(ctx, c, httpReq.DbName, httpReq.CollectionName)
 	if err != nil || coll == nil {
 		return
 	}
 	body, _ := c.Get(gin.BodyBytesKey)
-	filter, err := checkGetPrimaryKey(coll.Schema, gjson.Get(string(body.([]byte)), DefaultPrimaryFieldName))
+	filter, err := checkGetPrimaryKey(coll, gjson.Get(string(body.([]byte)), DefaultPrimaryFieldName))
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrCheckPrimaryKey),
@@ -550,14 +563,14 @@ func (h *Handlers) delete(c *gin.Context) {
 	if !h.checkDatabase(ctx, c, req.DbName) {
 		return
 	}
-	coll, err := h.describeCollection(ctx, c, httpReq.DbName, httpReq.CollectionName, false)
+	coll, err := h.describeCollection(ctx, c, httpReq.DbName, httpReq.CollectionName)
 	if err != nil || coll == nil {
 		return
 	}
 	req.Expr = httpReq.Filter
 	if req.Expr == "" {
 		body, _ := c.Get(gin.BodyBytesKey)
-		filter, err := checkGetPrimaryKey(coll.Schema, gjson.Get(string(body.([]byte)), DefaultPrimaryFieldName))
+		filter, err := checkGetPrimaryKey(coll, gjson.Get(string(body.([]byte)), DefaultPrimaryFieldName))
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrCheckPrimaryKey),
@@ -620,7 +633,7 @@ func (h *Handlers) insert(c *gin.Context) {
 	if !h.checkDatabase(ctx, c, req.DbName) {
 		return
 	}
-	coll, err := h.describeCollection(ctx, c, httpReq.DbName, httpReq.CollectionName, false)
+	coll, err := h.describeCollection(ctx, c, httpReq.DbName, httpReq.CollectionName)
 	if err != nil || coll == nil {
 		return
 	}
@@ -634,7 +647,7 @@ func (h *Handlers) insert(c *gin.Context) {
 		})
 		return
 	}
-	req.FieldsData, err = anyToColumns(httpReq.Data, coll.Schema)
+	req.FieldsData, err = anyToColumns(httpReq.Data, coll)
 	if err != nil {
 		log.Warn("high level restful api, fail to deal with insert data", zap.Any("data", httpReq.Data), zap.Error(err))
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{
@@ -711,11 +724,11 @@ func (h *Handlers) upsert(c *gin.Context) {
 	if !h.checkDatabase(ctx, c, req.DbName) {
 		return
 	}
-	coll, err := h.describeCollection(ctx, c, httpReq.DbName, httpReq.CollectionName, false)
+	coll, err := h.describeCollection(ctx, c, httpReq.DbName, httpReq.CollectionName)
 	if err != nil || coll == nil {
 		return
 	}
-	if coll.Schema.AutoID {
+	if coll.AutoID {
 		err := merr.WrapErrParameterInvalid("autoID: false", "autoID: true", "cannot upsert an autoID collection")
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 		return
@@ -730,7 +743,7 @@ func (h *Handlers) upsert(c *gin.Context) {
 		})
 		return
 	}
-	req.FieldsData, err = anyToColumns(httpReq.Data, coll.Schema)
+	req.FieldsData, err = anyToColumns(httpReq.Data, coll)
 	if err != nil {
 		log.Warn("high level restful api, fail to deal with upsert data", zap.Any("data", httpReq.Data), zap.Error(err))
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{

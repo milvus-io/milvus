@@ -45,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/crypto"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metric"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -1576,4 +1577,18 @@ func SendReplicateMessagePack(ctx context.Context, replicateMsgStream msgstream.
 	if msgErr != nil {
 		log.Warn("send replicate msg failed", zap.Any("pack", msgPack), zap.Error(msgErr))
 	}
+}
+
+func GetCachedCollectionSchema(ctx context.Context, dbName string, colName string) (*schemapb.CollectionSchema, error) {
+	if globalMetaCache != nil {
+		return globalMetaCache.GetCollectionSchema(ctx, dbName, colName)
+	}
+	return nil, merr.WrapErrServiceNotReady(paramtable.GetRole(), paramtable.GetNodeID(), "initialization")
+}
+
+func CheckDatabase(ctx context.Context, dbName string) bool {
+	if globalMetaCache != nil {
+		return globalMetaCache.HasDatabase(ctx, dbName)
+	}
+	return false
 }
