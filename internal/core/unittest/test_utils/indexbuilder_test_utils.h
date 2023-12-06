@@ -382,7 +382,7 @@ std::vector<ScalarTestParams>
 GenBoolParams() {
     std::vector<ScalarTestParams> ret;
     ret.emplace_back(
-        ScalarTestParams(MapParams(), {{"index_type", "inverted_index"}}));
+        ScalarTestParams(MapParams(), {{"index_type", "sort"}}));
     ret.emplace_back(ScalarTestParams(MapParams(), {{"index_type", "flat"}}));
     return ret;
 }
@@ -409,7 +409,7 @@ GenParams() {
 
     std::vector<ScalarTestParams> ret;
     ret.emplace_back(
-        ScalarTestParams(MapParams(), {{"index_type", "inverted_index"}}));
+        ScalarTestParams(MapParams(), {{"index_type", "sort"}}));
     ret.emplace_back(ScalarTestParams(MapParams(), {{"index_type", "flat"}}));
     return ret;
 }
@@ -442,13 +442,25 @@ GenDsFromPB(const google::protobuf::Message& msg) {
 template <typename T>
 inline std::vector<std::string>
 GetIndexTypes() {
-    return std::vector<std::string>{"inverted_index"};
+    return std::vector<std::string>{"sort"};
 }
 
 template <>
 inline std::vector<std::string>
 GetIndexTypes<std::string>() {
-    return std::vector<std::string>{"marisa"};
+    return std::vector<std::string>{"sort", "marisa"};
+}
+
+template <typename T>
+inline std::vector<std::string>
+GetIndexTypesV2() {
+    return std::vector<std::string>{"sort", "inverted_index"};
+}
+
+template <>
+inline std::vector<std::string>
+GetIndexTypesV2<std::string>() {
+    return std::vector<std::string>{"inverted_index", "marisa"};
 }
 
 }  // namespace

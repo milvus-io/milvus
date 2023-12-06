@@ -292,7 +292,7 @@ class TypedScalarIndexTestV2 : public ::testing::Test {
 
         auto vec_size = DIM * 4;
         auto dataset = GenDataset(nb, knowhere::metric::L2, false);
-        auto scalars = GenArr<T>(nb);
+        auto scalars = GenSortedArr<T>(nb);
         space = TestSpace(vec_size, dataset, scalars);
     }
     void
@@ -340,7 +340,7 @@ TYPED_TEST_CASE_P(TypedScalarIndexTestV2);
 TYPED_TEST_P(TypedScalarIndexTestV2, Base) {
     using T = TypeParam;
     auto dtype = milvus::GetDType<T>();
-    auto index_types = GetIndexTypes<T>();
+    auto index_types = GetIndexTypesV2<T>();
     for (const auto& index_type : index_types) {
         milvus::index::CreateIndexInfo create_index_info;
         create_index_info.field_type = milvus::DataType(dtype);

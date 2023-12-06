@@ -13,15 +13,19 @@
 #include "index/Utils.h"
 #include "common/Slice.h"
 #include "storage/LocalChunkManagerSingleton.h"
+#include "storage/Util.h"
 #include "index/InvertedIndexTantivy.h"
+#include "log/Log.h"
 
 #include <boost/filesystem.hpp>
 
 namespace milvus::index {
 template <typename T>
 InvertedIndexTantivy<T>::InvertedIndexTantivy(
-    const TantivyConfig& cfg, const storage::FileManagerContext& ctx)
-    : cfg_(cfg) {
+    const TantivyConfig& cfg,
+    const storage::FileManagerContext& ctx,
+    std::shared_ptr<milvus_storage::Space> space)
+    : cfg_(cfg), space_(space) {
     mem_file_manager_ = std::make_shared<MemFileManager>(ctx);
     disk_file_manager_ = std::make_shared<DiskFileManager>(ctx);
     auto field =
@@ -30,8 +34,12 @@ InvertedIndexTantivy<T>::InvertedIndexTantivy(
     path_ = fmt::format("/tmp/{}", prefix);
     boost::filesystem::create_directories(path_);
     d_type_ = cfg_.to_tantivy_data_type();
-    wrapper_ = std::make_shared<TantivyIndexWrapper>(
-        field.c_str(), d_type_, path_.c_str());
+    if (tantivy_index_exist(path_.c_str())) {
+        LOG_SEGCORE_INFO_ << "index " << path_ << " already exists, which should happen in loading progress";
+    } else {
+        wrapper_ = std::make_shared<TantivyIndexWrapper>(
+            field.c_str(), d_type_, path_.c_str());
+    }
 }
 
 template <typename T>
@@ -73,6 +81,12 @@ InvertedIndexTantivy<T>::Upload(const Config& config) {
     }
 
     return ret;
+}
+
+template <typename T>
+BinarySet
+InvertedIndexTantivy<T>::UploadV2(const Config& config) {
+    return Upload(config);
 }
 
 template <typename T>
@@ -164,6 +178,108 @@ InvertedIndexTantivy<T>::Build(const Config& config) {
 
 template <typename T>
 void
+InvertedIndexTantivy<T>::BuildV2(const Config& config) {
+    auto field_name = mem_file_manager_->GetIndexMeta().field_name;
+    auto res = space_->ScanData();
+    if (!res.ok()) {
+        PanicInfo(S3Error, "failed to create scan iterator");
+    }
+    auto reader = res.value();
+    std::vector<storage::FieldDataPtr> field_datas;
+    for (auto rec = reader->Next(); rec != nullptr; rec = reader->Next()) {
+        if (!rec.ok()) {
+            PanicInfo(DataFormatBroken, "failed to read data");
+        }
+        auto data = rec.ValueUnsafe();
+        auto total_num_rows = data->num_rows();
+        auto col_data = data->GetColumnByName(field_name);
+        auto field_data = storage::CreateFieldData(
+            DataType(GetDType<T>()), 0, total_num_rows);
+        field_data->FillFieldData(col_data);
+        field_datas.push_back(field_data);
+    }
+
+    switch (cfg_.data_type_) {
+        case DataType::BOOL: {
+            for (const auto& data : field_datas) {
+                auto n = data->get_num_rows();
+                wrapper_->add_data<bool>(static_cast<const bool*>(data->Data()),
+                                         n);
+            }
+            break;
+        }
+
+        case DataType::INT8: {
+            for (const auto& data : field_datas) {
+                auto n = data->get_num_rows();
+                wrapper_->add_data<int8_t>(
+                    static_cast<const int8_t*>(data->Data()), n);
+            }
+            break;
+        }
+
+        case DataType::INT16: {
+            for (const auto& data : field_datas) {
+                auto n = data->get_num_rows();
+                wrapper_->add_data<int16_t>(
+                    static_cast<const int16_t*>(data->Data()), n);
+            }
+            break;
+        }
+
+        case DataType::INT32: {
+            for (const auto& data : field_datas) {
+                auto n = data->get_num_rows();
+                wrapper_->add_data<int32_t>(
+                    static_cast<const int32_t*>(data->Data()), n);
+            }
+            break;
+        }
+
+        case DataType::INT64: {
+            for (const auto& data : field_datas) {
+                auto n = data->get_num_rows();
+                wrapper_->add_data<int64_t>(
+                    static_cast<const int64_t*>(data->Data()), n);
+            }
+            break;
+        }
+
+        case DataType::FLOAT: {
+            for (const auto& data : field_datas) {
+                auto n = data->get_num_rows();
+                wrapper_->add_data<float>(
+                    static_cast<const float*>(data->Data()), n);
+            }
+            break;
+        }
+
+        case DataType::DOUBLE: {
+            for (const auto& data : field_datas) {
+                auto n = data->get_num_rows();
+                wrapper_->add_data<double>(
+                    static_cast<const double*>(data->Data()), n);
+            }
+            break;
+        }
+
+        case DataType::VARCHAR: {
+            for (const auto& data : field_datas) {
+                auto n = data->get_num_rows();
+                wrapper_->add_data<std::string>(
+                    static_cast<const std::string*>(data->Data()), n);
+            }
+            break;
+        }
+
+        default:
+            PanicInfo(ErrorCode::NotImplemented,
+                      fmt::format("todo: not supported, {}", cfg_.data_type_));
+    }
+}
+
+template <typename T>
+void
 InvertedIndexTantivy<T>::Load(const Config& config) {
     auto index_files =
         GetValueFromConfig<std::vector<std::string>>(config, "index_files");
@@ -171,6 +287,14 @@ InvertedIndexTantivy<T>::Load(const Config& config) {
                "index file paths is empty when load disk ann index data");
     auto prefix = disk_file_manager_->GetLocalIndexObjectPrefix();
     disk_file_manager_->CacheIndexToDisk(index_files.value());
+    wrapper_ = std::make_shared<TantivyIndexWrapper>(prefix.c_str());
+}
+
+template <typename T>
+void
+InvertedIndexTantivy<T>::LoadV2(const Config& config) {
+    disk_file_manager_->CacheIndexToDisk();
+    auto prefix = disk_file_manager_->GetLocalIndexObjectPrefix();
     wrapper_ = std::make_shared<TantivyIndexWrapper>(prefix.c_str());
 }
 

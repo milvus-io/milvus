@@ -21,6 +21,7 @@ impl IndexWriterWrapper {
     }
 
     pub fn new(field_name: String, data_type: TantivyDataType, path: String) -> IndexWriterWrapper {
+        println!("path: {}", path);
         let field: Field;
         let mut schema_builder = Schema::builder();
         let mut use_raw_tokenizer = false;

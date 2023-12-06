@@ -18,45 +18,13 @@
 #include "tantivy-binding.h"
 #include "tantivy-wrapper.h"
 #include "index/StringIndex.h"
+#include "index/TantivyConfig.h"
+#include "storage/space.h"
 
 namespace milvus::index {
 
 using TantivyIndexWrapper = milvus::tantivy::TantivyIndexWrapper;
 using RustArrayWrapper = milvus::tantivy::RustArrayWrapper;
-
-struct TantivyConfig {
-    DataType data_type_;
-
-    TantivyDataType
-    to_tantivy_data_type() {
-        switch (data_type_) {
-            case DataType::BOOL: {
-                return TantivyDataType::Bool;
-            }
-
-            case DataType::INT8:
-            case DataType::INT16:
-            case DataType::INT32:
-            case DataType::INT64: {
-                return TantivyDataType::I64;
-            }
-
-            case DataType::FLOAT:
-            case DataType::DOUBLE: {
-                return TantivyDataType::F64;
-            }
-
-            case DataType::VARCHAR: {
-                return TantivyDataType::Keyword;
-            }
-
-            default:
-                PanicInfo(
-                    ErrorCode::NotImplemented,
-                    fmt::format("not implemented data type: {}", data_type_));
-        }
-    }
-};
 
 template <typename T>
 class InvertedIndexTantivy : public ScalarIndex<T> {
@@ -67,7 +35,13 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     using DiskFileManagerPtr = std::shared_ptr<DiskFileManager>;
 
     explicit InvertedIndexTantivy(const TantivyConfig& cfg,
-                                  const storage::FileManagerContext& ctx);
+                                  const storage::FileManagerContext& ctx)
+        : InvertedIndexTantivy(cfg, ctx, nullptr) {
+    }
+
+    explicit InvertedIndexTantivy(const TantivyConfig& cfg,
+                                  const storage::FileManagerContext& ctx,
+                                  std::shared_ptr<milvus_storage::Space> space);
 
     ~InvertedIndexTantivy();
 
@@ -83,6 +57,9 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     void
     Load(const Config& config = {}) override;
 
+    void
+    LoadV2(const Config& config = {}) override;
+
     /*
      * deprecated.
      * TODO: why not remove this?
@@ -96,6 +73,9 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
 
     void
     Build(const Config& config = {}) override;
+
+    void
+    BuildV2(const Config& config = {}) override;
 
     int64_t
     Count() override {
@@ -123,6 +103,9 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
 
     BinarySet
     Upload(const Config& config = {}) override;
+
+    BinarySet
+    UploadV2(const Config& config = {}) override;
 
     /*
      * deprecated, only used in small chunk index.
@@ -188,5 +171,6 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
      */
     MemFileManagerPtr mem_file_manager_;
     DiskFileManagerPtr disk_file_manager_;
+    std::shared_ptr<milvus_storage::Space> space_;
 };
 }  // namespace milvus::index
