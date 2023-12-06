@@ -381,8 +381,7 @@ GenSortedArr<std::string>(int64_t n) {
 std::vector<ScalarTestParams>
 GenBoolParams() {
     std::vector<ScalarTestParams> ret;
-    ret.emplace_back(
-        ScalarTestParams(MapParams(), {{"index_type", "sort"}}));
+    ret.emplace_back(ScalarTestParams(MapParams(), {{"index_type", "sort"}}));
     ret.emplace_back(ScalarTestParams(MapParams(), {{"index_type", "flat"}}));
     return ret;
 }
@@ -408,8 +407,7 @@ GenParams() {
     }
 
     std::vector<ScalarTestParams> ret;
-    ret.emplace_back(
-        ScalarTestParams(MapParams(), {{"index_type", "sort"}}));
+    ret.emplace_back(ScalarTestParams(MapParams(), {{"index_type", "sort"}}));
     ret.emplace_back(ScalarTestParams(MapParams(), {{"index_type", "flat"}}));
     return ret;
 }

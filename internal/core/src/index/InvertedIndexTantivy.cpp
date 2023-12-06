@@ -26,8 +26,8 @@ InvertedIndexTantivy<T>::InvertedIndexTantivy(
     const storage::FileManagerContext& ctx,
     std::shared_ptr<milvus_storage::Space> space)
     : cfg_(cfg), space_(space) {
-    mem_file_manager_ = std::make_shared<MemFileManager>(ctx);
-    disk_file_manager_ = std::make_shared<DiskFileManager>(ctx);
+    mem_file_manager_ = std::make_shared<MemFileManager>(ctx, ctx.space_);
+    disk_file_manager_ = std::make_shared<DiskFileManager>(ctx, ctx.space_);
     auto field =
         std::to_string(disk_file_manager_->GetFieldDataMeta().field_id);
     auto prefix = disk_file_manager_->GetLocalIndexObjectPrefix();
@@ -35,7 +35,9 @@ InvertedIndexTantivy<T>::InvertedIndexTantivy(
     boost::filesystem::create_directories(path_);
     d_type_ = cfg_.to_tantivy_data_type();
     if (tantivy_index_exist(path_.c_str())) {
-        LOG_SEGCORE_INFO_ << "index " << path_ << " already exists, which should happen in loading progress";
+        LOG_SEGCORE_INFO_
+            << "index " << path_
+            << " already exists, which should happen in loading progress";
     } else {
         wrapper_ = std::make_shared<TantivyIndexWrapper>(
             field.c_str(), d_type_, path_.c_str());
