@@ -16,6 +16,7 @@
 #include "knowhere/config.h"
 #include "SegcoreConfig.h"
 #include "common/QueryInfo.h"
+#include "common/type_c.h"
 
 namespace milvus::segcore {
 
@@ -27,8 +28,9 @@ enum class IndexConfigLevel {
 };
 
 class VecIndexConfig {
-    inline static const std::vector<std::string> support_index_types = {
-        knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC};
+    inline static const std::map<SegmentType, std::string> support_index_types =
+        {{SegmentType::Growing, knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC},
+         {SegmentType::Sealed, knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC}};
 
     inline static const std::map<std::string, double> index_build_ratio = {
         {knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC, 0.1}};
@@ -39,7 +41,8 @@ class VecIndexConfig {
  public:
     VecIndexConfig(const int64_t max_index_row_count,
                    const FieldIndexMeta& index_meta_,
-                   const SegcoreConfig& config);
+                   const SegcoreConfig& config,
+                   const SegmentType& segment_type);
 
     int64_t
     GetBuildThreshold() const noexcept;

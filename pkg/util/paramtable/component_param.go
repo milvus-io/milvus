@@ -1592,9 +1592,10 @@ type queryNodeConfig struct {
 	// segcore
 	KnowhereThreadPoolSize    ParamItem `refreshable:"false"`
 	ChunkRows                 ParamItem `refreshable:"false"`
-	EnableGrowingSegmentIndex ParamItem `refreshable:"false"`
-	GrowingIndexNlist         ParamItem `refreshable:"false"`
-	GrowingIndexNProbe        ParamItem `refreshable:"false"`
+	EnableInterimSegmentIndex ParamItem `refreshable:"false"`
+	InterimIndexNlist         ParamItem `refreshable:"false"`
+	InterimIndexNProbe        ParamItem `refreshable:"false"`
+	InterimIndexMemExpandRate ParamItem `refreshable:"false"`
 
 	// memory limit
 	LoadMemoryUsageFactor               ParamItem `refreshable:"true"`
@@ -1715,42 +1716,51 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 	}
 	p.ChunkRows.Init(base.mgr)
 
-	p.EnableGrowingSegmentIndex = ParamItem{
-		Key:          "queryNode.segcore.growing.enableIndex",
+	p.EnableInterimSegmentIndex = ParamItem{
+		Key:          "queryNode.segcore.interimIndex.enableIndex",
 		Version:      "2.0.0",
 		DefaultValue: "false",
-		Doc:          "Enable segment growing with index to accelerate vector search.",
+		Doc:          "Enable segment build with index to accelerate vector search when segment is in growing or binlog.",
 		Export:       true,
 	}
-	p.EnableGrowingSegmentIndex.Init(base.mgr)
+	p.EnableInterimSegmentIndex.Init(base.mgr)
 
-	p.GrowingIndexNlist = ParamItem{
-		Key:          "queryNode.segcore.growing.nlist",
+	p.InterimIndexNlist = ParamItem{
+		Key:          "queryNode.segcore.interimIndex.nlist",
 		Version:      "2.0.0",
 		DefaultValue: "128",
-		Doc:          "growing index nlist, recommend to set sqrt(chunkRows), must smaller than chunkRows/8",
+		Doc:          "temp index nlist, recommend to set sqrt(chunkRows), must smaller than chunkRows/8",
 		Export:       true,
 	}
-	p.GrowingIndexNlist.Init(base.mgr)
+	p.InterimIndexNlist.Init(base.mgr)
 
-	p.GrowingIndexNProbe = ParamItem{
-		Key:     "queryNode.segcore.growing.nprobe",
+	p.InterimIndexMemExpandRate = ParamItem{
+		Key:          "queryNode.segcore.interimIndex.memExpansionRate",
+		Version:      "2.0.0",
+		DefaultValue: "1.15",
+		Doc:          "extra memory needed by building interim index",
+		Export:       true,
+	}
+	p.InterimIndexMemExpandRate.Init(base.mgr)
+
+	p.InterimIndexNProbe = ParamItem{
+		Key:     "queryNode.segcore.interimIndex.nprobe",
 		Version: "2.0.0",
 		Formatter: func(v string) string {
-			defaultNprobe := p.GrowingIndexNlist.GetAsInt64() / 8
+			defaultNprobe := p.InterimIndexNlist.GetAsInt64() / 8
 			nprobe := getAsInt64(v)
 			if nprobe == 0 {
 				nprobe = defaultNprobe
 			}
-			if nprobe > p.GrowingIndexNlist.GetAsInt64() {
-				return p.GrowingIndexNlist.GetValue()
+			if nprobe > p.InterimIndexNlist.GetAsInt64() {
+				return p.InterimIndexNlist.GetValue()
 			}
 			return strconv.FormatInt(nprobe, 10)
 		},
 		Doc:    "nprobe to search small index, based on your accuracy requirement, must smaller than nlist",
 		Export: true,
 	}
-	p.GrowingIndexNProbe.Init(base.mgr)
+	p.InterimIndexNProbe.Init(base.mgr)
 
 	p.LoadMemoryUsageFactor = ParamItem{
 		Key:          "queryNode.loadMemoryUsageFactor",

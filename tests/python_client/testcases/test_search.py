@@ -2986,7 +2986,7 @@ class TestCollectionSearch(TestcaseBase):
                 filter_ids.append(_id)
 
         # 2. create index
-        index_param = {"index_type": "IVF_FLAT", "metric_type": "COSINE", "params": {"nlist": 100}}
+        index_param = {"index_type": "FLAT", "metric_type": "COSINE", "params": {}}
         collection_w.create_index("float_vector", index_param)
         collection_w.load()
 
@@ -7379,7 +7379,7 @@ class TestCollectionRangeSearch(TestcaseBase):
                 filter_ids.append(_id)
 
         # 2. create index
-        index_param = {"index_type": "IVF_FLAT",
+        index_param = {"index_type": "FLAT",
                        "metric_type": "L2", "params": {"nlist": 100}}
         collection_w.create_index("float_vector", index_param)
         collection_w.load()
