@@ -22,6 +22,7 @@
 #include <unordered_set>
 
 #include "boost/container/vector.hpp"
+#include "common/EasyAssert.h"
 #include "common/LoadInfo.h"
 #include "common/Types.h"
 #include "common/type_c.h"
@@ -307,6 +308,9 @@ TEST(CApiTest, SegmentTest) {
     CSegmentInterface segment;
     auto status = NewSegment(collection, Growing, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
+    CSegmentInterface a_segment;
+    status = NewSegment(collection, Invalid, -1, &a_segment);
+    ASSERT_NE(status.error_code, Success);
     DeleteCollection(collection);
     DeleteSegment(segment);
 }

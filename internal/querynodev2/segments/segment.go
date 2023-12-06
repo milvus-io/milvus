@@ -169,8 +169,8 @@ func NewSegment(collection *Collection,
 	level datapb.SegmentLevel,
 ) (Segment, error) {
 	/*
-		CNewSegmentResult
-		NewSegment(CCollection collection, uint64_t segment_id, SegmentType seg_type);
+		CStatus
+		NewSegment(CCollection collection, uint64_t segment_id, SegmentType seg_type, CSegmentInterface* newSegment);
 	*/
 	if level == datapb.SegmentLevel_L0 {
 		return NewL0Segment(collection, segmentID, partitionID, collectionID, shard, segmentType, version, startPosition, deltaPosition)
