@@ -215,6 +215,7 @@ func (it *indexBuildTaskV2) SaveIndexFiles(ctx context.Context) error {
 		return err
 	}
 
+
 	encodeIndexFileDur := it.tr.Record("index serialize and upload done")
 	metrics.IndexNodeEncodeIndexFileLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(encodeIndexFileDur.Seconds())
 
