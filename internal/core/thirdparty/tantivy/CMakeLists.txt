@@ -54,8 +54,10 @@ set_target_properties(tantivy_binding
         IMPORTED_LOCATION "${TANTIVY_LIB_DIR}/${TANTIVY_NAME}"
         INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_INSTALL_PREFIX}/include")
 
-add_compile_options(-fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address)
-add_link_options(-fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address)
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+        add_compile_options(-fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address)
+        add_link_options(-fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address)
+endif()
 
 add_executable(test_tantivy test.cpp)
 target_link_libraries(test_tantivy
