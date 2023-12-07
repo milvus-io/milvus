@@ -564,11 +564,26 @@ func (loader *segmentLoader) loadSegment(ctx context.Context,
 			}
 		}
 
+		schemaHelper, _ := typeutil.CreateSchemaHelper(collection.Schema())
+
 		log.Info("load fields...",
 			zap.Int64s("indexedFields", lo.Keys(indexedFieldInfos)),
 		)
-		if err := loader.loadFieldsIndex(ctx, collection.Schema(), segment, loadInfo.GetNumOfRows(), indexedFieldInfos); err != nil {
+		if err := loader.loadFieldsIndex(ctx, schemaHelper, segment, loadInfo.GetNumOfRows(), indexedFieldInfos); err != nil {
 			return err
+		}
+		for fieldID, info := range indexedFieldInfos {
+			field, err := schemaHelper.GetFieldFromID(fieldID)
+			if err != nil {
+				return err
+			}
+			if !typeutil.IsVectorType(field.GetDataType()) && !segment.HasRawData(fieldID) {
+				log.Info("field index doesn't include raw data, load binlog...", zap.Int64("fieldID", fieldID), zap.String("index", info.IndexInfo.GetIndexName()))
+				if err = segment.LoadFieldData(fieldID, loadInfo.GetNumOfRows(), info.FieldBinlog, true); err != nil {
+					log.Warn("load raw data failed", zap.Int64("fieldID", fieldID), zap.Error(err))
+					return err
+				}
+			}
 		}
 		if err := loader.loadSealedSegmentFields(ctx, segment, fieldBinlogs, loadInfo.GetNumOfRows()); err != nil {
 			return err
@@ -654,13 +669,11 @@ func (loader *segmentLoader) loadSealedSegmentFields(ctx context.Context, segmen
 }
 
 func (loader *segmentLoader) loadFieldsIndex(ctx context.Context,
-	schema *schemapb.CollectionSchema,
+	schemaHelper *typeutil.SchemaHelper,
 	segment *LocalSegment,
 	numRows int64,
 	indexedFieldInfos map[int64]*IndexedFieldInfo,
 ) error {
-	schemaHelper, _ := typeutil.CreateSchemaHelper(schema)
-
 	for fieldID, fieldInfo := range indexedFieldInfos {
 		indexInfo := fieldInfo.IndexInfo
 		err := loader.loadFieldIndex(ctx, segment, indexInfo)
