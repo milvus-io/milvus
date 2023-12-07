@@ -61,6 +61,12 @@ const (
 
 	IdentifierKey = "identifier"
 	HeaderDBName  = "dbName"
+
+	RoleConfigPrivileges = "privileges"
+	RoleConfigObjectType = "object_type"
+	RoleConfigObjectName = "object_name"
+	RoleConfigDBName     = "db_name"
+	RoleConfigPrivilege  = "privilege"
 )
 
 const (
@@ -70,6 +76,7 @@ const (
 
 var (
 	DefaultRoles = []string{RoleAdmin, RolePublic}
+	BuiltinRoles = []string{}
 
 	ObjectPrivileges = map[string][]string{
 		commonpb.ObjectType_Collection.String(): {

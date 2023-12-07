@@ -613,6 +613,43 @@ func (c *Core) initRbac() error {
 			return errors.Wrap(err, "failed to grant collection privilege")
 		}
 	}
+	if Params.RoleCfg.Enabled.GetAsBool() {
+		return c.initBuiltinRoles()
+	}
+	return nil
+}
+
+func (c *Core) initBuiltinRoles() error {
+	rolePrivilegesMap := Params.RoleCfg.Roles.GetAsRoleDetails()
+	for role, privilegesJSON := range rolePrivilegesMap {
+		err := c.meta.CreateRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: role})
+		if err != nil && !common.IsIgnorableError(err) {
+			log.Error("create a builtin role fail", zap.Any("error", err), zap.String("roleName", role))
+			return errors.Wrapf(err, "failed to create a builtin role: %s", role)
+		}
+		for _, privilege := range privilegesJSON[util.RoleConfigPrivileges] {
+			privilegeName := privilege[util.RoleConfigPrivilege]
+			if !util.IsAnyWord(privilege[util.RoleConfigPrivilege]) {
+				privilegeName = util.PrivilegeNameForMetastore(privilege[util.RoleConfigPrivilege])
+			}
+			err := c.meta.OperatePrivilege(util.DefaultTenant, &milvuspb.GrantEntity{
+				Role:       &milvuspb.RoleEntity{Name: role},
+				Object:     &milvuspb.ObjectEntity{Name: privilege[util.RoleConfigObjectType]},
+				ObjectName: privilege[util.RoleConfigObjectName],
+				DbName:     privilege[util.RoleConfigDBName],
+				Grantor: &milvuspb.GrantorEntity{
+					User:      &milvuspb.UserEntity{Name: util.UserRoot},
+					Privilege: &milvuspb.PrivilegeEntity{Name: privilegeName},
+				},
+			}, milvuspb.OperatePrivilegeType_Grant)
+			if err != nil && !common.IsIgnorableError(err) {
+				log.Error("grant privilege to builtin role fail", zap.Any("error", err), zap.String("roleName", role), zap.Any("privilege", privilege))
+				return errors.Wrapf(err, "failed to grant privilege: <%s, %s, %s> of db: %s to role: %s", privilege[util.RoleConfigObjectType], privilege[util.RoleConfigObjectName], privilege[util.RoleConfigPrivilege], privilege[util.RoleConfigDBName], role)
+			}
+		}
+		util.BuiltinRoles = append(util.BuiltinRoles, role)
+		log.Info("init a builtin role successfully", zap.String("roleName", role))
+	}
 	return nil
 }
 

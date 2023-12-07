@@ -2068,6 +2068,45 @@ func TestRootCoord_RBACError(t *testing.T) {
 	})
 }
 
+func TestRootCoord_BuiltinRoles(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().RoleCfg.Enabled.Key, "true")
+	paramtable.Get().Save(paramtable.Get().RoleCfg.Roles.Key, `{"db_admin": {"privileges": [{"object_type": "Global", "object_name": "*", "privilege": "CreateCollection", "db_name": "*"}]}}`)
+	t.Run("init builtin roles success", func(t *testing.T) {
+		c := newTestCore(withHealthyCode(), withInvalidMeta())
+		mockMeta := c.meta.(*mockMetaTable)
+		mockMeta.CreateRoleFunc = func(tenant string, entity *milvuspb.RoleEntity) error {
+			return nil
+		}
+		mockMeta.OperatePrivilegeFunc = func(tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error {
+			return nil
+		}
+		err := c.initBuiltinRoles()
+		assert.Equal(t, nil, err)
+	})
+	t.Run("init builtin roles fail to create role", func(t *testing.T) {
+		c := newTestCore(withHealthyCode(), withInvalidMeta())
+		mockMeta := c.meta.(*mockMetaTable)
+		mockMeta.CreateRoleFunc = func(tenant string, entity *milvuspb.RoleEntity) error {
+			return merr.ErrPrivilegeNotPermitted
+		}
+		err := c.initBuiltinRoles()
+		assert.Error(t, err)
+	})
+	t.Run("init builtin roles fail to operate privileg", func(t *testing.T) {
+		c := newTestCore(withHealthyCode(), withInvalidMeta())
+		mockMeta := c.meta.(*mockMetaTable)
+		mockMeta.CreateRoleFunc = func(tenant string, entity *milvuspb.RoleEntity) error {
+			return nil
+		}
+		mockMeta.OperatePrivilegeFunc = func(tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error {
+			return merr.ErrPrivilegeNotPermitted
+		}
+		err := c.initBuiltinRoles()
+		assert.Error(t, err)
+	})
+}
+
 func TestCore_Stop(t *testing.T) {
 	t.Run("abnormal stop before component is ready", func(t *testing.T) {
 		c := &Core{}
