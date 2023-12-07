@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -56,10 +57,24 @@ type garbageCollector struct {
 	meta    *meta
 	handler Handler
 
-	startOnce sync.Once
-	stopOnce  sync.Once
-	wg        sync.WaitGroup
-	closeCh   chan struct{}
+	startOnce  sync.Once
+	stopOnce   sync.Once
+	wg         sync.WaitGroup
+	closeCh    chan struct{}
+	cmdCh      chan gcCmd
+	pauseUntil time.Time
+}
+
+type cmdType int32
+
+const (
+	pause cmdType = iota + 1
+	resume
+)
+
+type gcCmd struct {
+	cmdType  cmdType
+	duration time.Duration
 }
 
 // newGarbageCollector create garbage collector with meta and option
@@ -71,6 +86,7 @@ func newGarbageCollector(meta *meta, handler Handler, opt GcOption) *garbageColl
 		handler: handler,
 		option:  opt,
 		closeCh: make(chan struct{}),
+		cmdCh:   make(chan gcCmd),
 	}
 }
 
@@ -88,6 +104,37 @@ func (gc *garbageCollector) start() {
 	}
 }
 
+func (gc *garbageCollector) Pause(ctx context.Context, pauseDuration time.Duration) error {
+	if !gc.option.enabled {
+		log.Info("garbage collection not enabled")
+		return nil
+	}
+	select {
+	case gc.cmdCh <- gcCmd{
+		cmdType:  pause,
+		duration: pauseDuration,
+	}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (gc *garbageCollector) Resume(ctx context.Context) error {
+	if !gc.option.enabled {
+		log.Warn("garbage collection not enabled, cannot resume")
+		return merr.WrapErrServiceUnavailable("garbage collection not enabled")
+	}
+	select {
+	case gc.cmdCh <- gcCmd{
+		cmdType: resume,
+	}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 // work contains actual looping check logic
 func (gc *garbageCollector) work() {
 	defer gc.wg.Done()
@@ -96,11 +143,24 @@ func (gc *garbageCollector) work() {
 	for {
 		select {
 		case <-ticker.C:
+			if time.Now().Before(gc.pauseUntil) {
+				log.Info("garbage collector paused", zap.Time("until", gc.pauseUntil))
+				continue
+			}
 			gc.clearEtcd()
 			gc.recycleUnusedIndexes()
 			gc.recycleUnusedSegIndexes()
 			gc.scan()
 			gc.recycleUnusedIndexFiles()
+		case cmd := <-gc.cmdCh:
+			switch cmd.cmdType {
+			case pause:
+				log.Info("garbage collection paused", zap.Duration("duration", cmd.duration))
+				gc.pauseUntil = time.Now().Add(cmd.duration)
+			case resume:
+				// reset to zero value
+				gc.pauseUntil = time.Time{}
+			}
 		case <-gc.closeCh:
 			log.Warn("garbage collector quit")
 			return
