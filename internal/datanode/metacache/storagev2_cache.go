@@ -68,4 +68,3 @@ func NewStorageV2Cache(schema *schemapb.CollectionSchema) (*StorageV2Cache, erro
 		spaces:      make(map[int64]*milvus_storage.Space),
 	}, nil
 }
-

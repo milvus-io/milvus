@@ -2,6 +2,7 @@ package typeutil
 
 import (
 	"github.com/apache/arrow/go/v12/arrow"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/util/merr"
