@@ -104,6 +104,7 @@ var (
 			partitionIDLabelName,
 			segmentStateLabelName,
 			indexCountLabelName,
+			segmentLevelLabelName,
 		})
 
 	QueryNodeNumDmlChannels = prometheus.NewGaugeVec(
@@ -380,6 +381,18 @@ var (
 			segmentStateLabelName,
 		})
 
+	QueryNodeLevelZeroSize = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "level_zero_size",
+			Help:      "level zero segments' delete records memory size, clustered by collection and state",
+		}, []string{
+			nodeIDLabelName,
+			collectionIDLabelName,
+			channelNameLabelName,
+		})
+
 	// QueryNodeConsumeCounter counts the bytes QueryNode consumed from message storage.
 	QueryNodeConsumeCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -473,6 +486,7 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeNumFlowGraphs)
 	registry.MustRegister(QueryNodeNumEntities)
 	registry.MustRegister(QueryNodeEntitiesSize)
+	registry.MustRegister(QueryNodeLevelZeroSize)
 	registry.MustRegister(QueryNodeConsumeCounter)
 	registry.MustRegister(QueryNodeExecuteCounter)
 	registry.MustRegister(QueryNodeConsumerMsgCount)
