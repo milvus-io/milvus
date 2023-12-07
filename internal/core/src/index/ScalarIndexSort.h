@@ -95,6 +95,11 @@ class ScalarIndexSort : public ScalarIndex<T> {
     BinarySet
     UploadV2(const Config& config = {}) override;
 
+    const bool
+    HasRawData() const override {
+        return true;
+    }
+
  private:
     bool
     ShouldSkip(const T lower_value, const T upper_value, const OpType op);
