@@ -37,14 +37,13 @@ set(INSTALL_COMMAND
         cp ${CMAKE_CURRENT_SOURCE_DIR}/tantivy-wrapper.h ${TANTIVY_INCLUDE_DIR}/ &&
         cp ${LIB_FILE} ${TANTIVY_LIB_DIR}/)
 add_custom_command(OUTPUT install_tantivy
-        COMMENT "Install tantivy target"
+        COMMENT "Install tantivy target ${LIB_FILE} to ${TANTIVY_LIB_DIR}"
         COMMAND ${INSTALL_COMMAND}
         )
 add_custom_target(install_tantivy_target DEPENDS install_tantivy tantivy_binding_target)
 
 add_library(tantivy_binding SHARED IMPORTED GLOBAL)
 add_dependencies(tantivy_binding
-        tantivy_binding_target
         install_tantivy_target
         )
 
