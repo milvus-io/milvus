@@ -492,8 +492,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		s.flushCh <- req.SegmentID
 
 		if !req.Importing && Params.DataCoordCfg.EnableCompaction.GetAsBool() {
-			err = s.compactionTrigger.triggerSingleCompaction(segment.GetCollectionID(), segment.GetPartitionID(),
-				segmentID, segment.GetInsertChannel())
+			err = s.compactionTrigger.triggerSingleCompaction(segment.GetCollectionID(), segment.GetPartitionID(), segmentID, segment.GetInsertChannel(), false)
 			if err != nil {
 				log.Warn("failed to trigger single compaction")
 			} else {
