@@ -8,7 +8,7 @@ endif ()
 
 set(TANTIVY_LIB_DIR "${CMAKE_INSTALL_PREFIX}/lib")
 set(TANTIVY_INCLUDE_DIR "${CMAKE_INSTALL_PREFIX}/include")
-set(TANTIVY_NAME "libtantivy_binding${CMAKE_SHARED_LIBRARY_SUFFIX}")
+set(TANTIVY_NAME "libtantivy_binding${CMAKE_STATIC_LIBRARY_SUFFIX}")
 
 set(LIB_FILE "${CMAKE_CURRENT_BINARY_DIR}/${TARGET_DIR}/${TANTIVY_NAME}")
 set(LIB_HEADER_FOLDER "${CMAKE_CURRENT_SOURCE_DIR}/tantivy-binding/include")
@@ -42,7 +42,7 @@ add_custom_command(OUTPUT install_tantivy
         )
 add_custom_target(install_tantivy_target DEPENDS install_tantivy tantivy_binding_target)
 
-add_library(tantivy_binding SHARED IMPORTED GLOBAL)
+add_library(tantivy_binding STATIC IMPORTED)
 add_dependencies(tantivy_binding
         install_tantivy_target
         )
@@ -62,4 +62,5 @@ add_executable(test_tantivy test.cpp)
 target_link_libraries(test_tantivy
         tantivy_binding
         boost_filesystem
+        dl
         )

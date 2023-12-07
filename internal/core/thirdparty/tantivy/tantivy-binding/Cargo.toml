@@ -15,4 +15,4 @@ scopeguard = "1.2"
 cbindgen = "0.26.0"
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["staticlib"]
