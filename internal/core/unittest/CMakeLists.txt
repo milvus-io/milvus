@@ -58,6 +58,7 @@ set(MILVUS_TEST_FILES
         test_plan_proto.cpp
         test_chunk_cache.cpp
         test_storage.cpp
+        test_binlog_index.cpp
         )
 
 if ( BUILD_DISK_ANN STREQUAL "ON" )

@@ -121,7 +121,7 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
                 field_meta);
         }
         //insert vector data into index
-        if (segcore_config_.get_enable_growing_segment_index()) {
+        if (segcore_config_.get_enable_interim_segment_index()) {
             indexing_record_.AppendingIndex(
                 reserved_offset,
                 num_rows,
@@ -204,7 +204,7 @@ SegmentGrowingImpl::LoadFieldData(const LoadFieldDataInfo& infos) {
             insert_record_.get_field_data_base(field_id)->set_data_raw(
                 reserved_offset, field_data);
         }
-        if (segcore_config_.get_enable_growing_segment_index()) {
+        if (segcore_config_.get_enable_interim_segment_index()) {
             auto offset = reserved_offset;
             for (auto& data : field_data) {
                 auto row_count = data->get_num_rows();

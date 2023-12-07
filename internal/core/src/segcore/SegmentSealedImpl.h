@@ -34,12 +34,16 @@
 #include "index/ScalarIndex.h"
 #include "sys/mman.h"
 #include "common/Types.h"
+#include "common/IndexMeta.h"
 
 namespace milvus::segcore {
 
 class SegmentSealedImpl : public SegmentSealed {
  public:
-    explicit SegmentSealedImpl(SchemaPtr schema, int64_t segment_id);
+    explicit SegmentSealedImpl(SchemaPtr schema,
+                               IndexMetaPtr index_meta,
+                               const SegcoreConfig& segcore_config,
+                               int64_t segment_id);
     ~SegmentSealedImpl() override;
     void
     LoadIndex(const LoadIndexInfo& info) override;
@@ -249,10 +253,14 @@ class SegmentSealedImpl : public SegmentSealed {
     void
     LoadScalarIndex(const LoadIndexInfo& info);
 
+    bool
+    generate_binlog_index(const FieldId field_id);
+
  private:
     // segment loading state
     BitsetType field_data_ready_bitset_;
     BitsetType index_ready_bitset_;
+    BitsetType binlog_index_bitset_;
     std::atomic<int> system_ready_count_ = 0;
     // segment data
 
@@ -275,11 +283,22 @@ class SegmentSealedImpl : public SegmentSealed {
     SchemaPtr schema_;
     int64_t id_;
     std::unordered_map<FieldId, std::shared_ptr<ColumnBase>> fields_;
+
+    // only useful in binlog
+    IndexMetaPtr col_index_meta_;
+    SegcoreConfig segcore_config_;
+    std::unordered_map<FieldId, std::unique_ptr<VecIndexConfig>>
+        vec_binlog_config_;
 };
 
 inline SegmentSealedPtr
-CreateSealedSegment(SchemaPtr schema, int64_t segment_id = -1) {
-    return std::make_unique<SegmentSealedImpl>(schema, segment_id);
+CreateSealedSegment(
+    SchemaPtr schema,
+    IndexMetaPtr index_meta = nullptr,
+    int64_t segment_id = -1,
+    const SegcoreConfig& segcore_config = SegcoreConfig::default_config()) {
+    return std::make_unique<SegmentSealedImpl>(
+        schema, index_meta, segcore_config, segment_id);
 }
 
 }  // namespace milvus::segcore

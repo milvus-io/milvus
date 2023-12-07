@@ -13,15 +13,15 @@
 #include "log/Log.h"
 
 namespace milvus::segcore {
-
 VecIndexConfig::VecIndexConfig(const int64_t max_index_row_cout,
                                const FieldIndexMeta& index_meta_,
-                               const SegcoreConfig& config)
+                               const SegcoreConfig& config,
+                               const SegmentType& segment_type)
     : max_index_row_count_(max_index_row_cout), config_(config) {
     origin_index_type_ = index_meta_.GetIndexType();
     metric_type_ = index_meta_.GeMetricType();
 
-    index_type_ = support_index_types[0];
+    index_type_ = support_index_types.at(segment_type);
     build_params_[knowhere::meta::METRIC_TYPE] = metric_type_;
     build_params_[knowhere::indexparam::NLIST] =
         std::to_string(config_.get_nlist());
