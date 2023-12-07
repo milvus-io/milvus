@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/types"
+	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -168,10 +169,10 @@ func TestRun(t *testing.T) {
 		assert.Error(t, err)
 		assert.EqualError(t, err, "listen tcp: address 1000000: invalid port")
 
-		svr.newDataCoordClient = func(string, *clientv3.Client) types.DataCoordClient {
+		svr.newDataCoordClient = func() types.DataCoordClient {
 			return &mockDataCoord{}
 		}
-		svr.newQueryCoordClient = func(string, *clientv3.Client) types.QueryCoordClient {
+		svr.newQueryCoordClient = func() types.QueryCoordClient {
 			return &mockQueryCoord{}
 		}
 
@@ -182,6 +183,9 @@ func TestRun(t *testing.T) {
 		randVal := rand.Int()
 		rootPath := fmt.Sprintf("/%d/test", randVal)
 		rootcoord.Params.Save("etcd.rootPath", rootPath)
+		// Need to reset global etcd to follow new path
+		// Need to reset global etcd to follow new path
+		kvfactory.CloseEtcdClient()
 
 		etcdCli, err := etcd.GetEtcdClient(
 			etcdConfig.UseEmbedEtcd.GetAsBool(),
@@ -247,7 +251,7 @@ func TestServerRun_DataCoordClientInitErr(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, server)
 
-		server.newDataCoordClient = func(string, *clientv3.Client) types.DataCoordClient {
+		server.newDataCoordClient = func() types.DataCoordClient {
 			return &mockDataCoord{}
 		}
 		assert.Panics(t, func() { server.Run() })
@@ -273,7 +277,7 @@ func TestServerRun_DataCoordClientStartErr(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, server)
 
-		server.newDataCoordClient = func(string, *clientv3.Client) types.DataCoordClient {
+		server.newDataCoordClient = func() types.DataCoordClient {
 			return &mockDataCoord{}
 		}
 		assert.Panics(t, func() { server.Run() })
@@ -299,7 +303,7 @@ func TestServerRun_QueryCoordClientInitErr(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, server)
 
-		server.newQueryCoordClient = func(string, *clientv3.Client) types.QueryCoordClient {
+		server.newQueryCoordClient = func() types.QueryCoordClient {
 			return &mockQueryCoord{initErr: errors.New("mock querycoord init error")}
 		}
 		assert.Panics(t, func() { server.Run() })
@@ -325,7 +329,7 @@ func TestServer_QueryCoordClientStartErr(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, server)
 
-		server.newQueryCoordClient = func(string, *clientv3.Client) types.QueryCoordClient {
+		server.newQueryCoordClient = func() types.QueryCoordClient {
 			return &mockQueryCoord{startErr: errors.New("mock querycoord start error")}
 		}
 		assert.Panics(t, func() { server.Run() })

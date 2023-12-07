@@ -2485,7 +2485,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 
-		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoordClient, error) {
+		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
 			return newMockRootCoordClient(), nil
 		}
 
@@ -2529,7 +2529,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 
-		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoordClient, error) {
+		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
 			return newMockRootCoordClient(), nil
 		}
 
@@ -2634,7 +2634,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 
-		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoordClient, error) {
+		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
 			return newMockRootCoordClient(), nil
 		}
 
@@ -2713,7 +2713,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 			Schema: newTestSchema(),
 		})
 
-		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoordClient, error) {
+		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
 			return newMockRootCoordClient(), nil
 		}
 
@@ -2810,7 +2810,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 
-		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoordClient, error) {
+		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
 			return newMockRootCoordClient(), nil
 		}
 
@@ -2852,7 +2852,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 
-		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoordClient, error) {
+		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
 			return newMockRootCoordClient(), nil
 		}
 
@@ -2893,7 +2893,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 
-		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoordClient, error) {
+		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
 			return newMockRootCoordClient(), nil
 		}
 
@@ -3166,7 +3166,7 @@ func TestOptions(t *testing.T) {
 	t.Run("WithRootCoordCreator", func(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
-		var crt rootCoordCreatorFunc = func(ctx context.Context, metaRoot string, etcdClient *clientv3.Client) (types.RootCoordClient, error) {
+		var crt rootCoordCreatorFunc = func(ctx context.Context) (types.RootCoordClient, error) {
 			return nil, errors.New("dummy")
 		}
 		opt := WithRootCoordCreator(crt)
@@ -4170,7 +4170,7 @@ func newTestServer(t *testing.T, receiveCh chan any, opts ...Option) *Server {
 	svr.dataNodeCreator = func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
 		return newMockDataNodeClient(0, receiveCh)
 	}
-	svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoordClient, error) {
+	svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
 		return newMockRootCoordClient(), nil
 	}
 
@@ -4224,7 +4224,7 @@ func newTestServerWithMeta(t *testing.T, receiveCh chan any, meta *meta, opts ..
 	svr.dataNodeCreator = func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
 		return newMockDataNodeClient(0, receiveCh)
 	}
-	svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoordClient, error) {
+	svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
 		return newMockRootCoordClient(), nil
 	}
 	// indexCoord := mocks.NewMockIndexCoord(t)
@@ -4281,7 +4281,7 @@ func newTestServer2(t *testing.T, receiveCh chan any, opts ...Option) *Server {
 	svr.dataNodeCreator = func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
 		return newMockDataNodeClient(0, receiveCh)
 	}
-	svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoordClient, error) {
+	svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
 		return newMockRootCoordClient(), nil
 	}
 

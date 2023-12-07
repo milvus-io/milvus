@@ -154,7 +154,7 @@ func (s *Server) init() error {
 
 	// --- Master Server Client ---
 	if s.rootCoord == nil {
-		s.rootCoord, err = rcc.NewClient(s.loopCtx, qc.Params.EtcdCfg.MetaRootPath.GetValue(), s.etcdCli)
+		s.rootCoord, err = rcc.NewClient(s.loopCtx)
 		if err != nil {
 			log.Error("QueryCoord try to new RootCoord client failed", zap.Error(err))
 			panic(err)
@@ -176,7 +176,7 @@ func (s *Server) init() error {
 
 	// --- Data service client ---
 	if s.dataCoord == nil {
-		s.dataCoord, err = dcc.NewClient(s.loopCtx, qc.Params.EtcdCfg.MetaRootPath.GetValue(), s.etcdCli)
+		s.dataCoord, err = dcc.NewClient(s.loopCtx)
 		if err != nil {
 			log.Error("QueryCoord try to new DataCoord client failed", zap.Error(err))
 			panic(err)

@@ -7,7 +7,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -102,7 +101,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 
-		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoordClient, error) {
+		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
 			return newMockRootCoordClient(), nil
 		}
 
@@ -144,7 +143,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 
-		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoordClient, error) {
+		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
 			return newMockRootCoordClient(), nil
 		}
 
@@ -252,7 +251,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 
-		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoordClient, error) {
+		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
 			return newMockRootCoordClient(), nil
 		}
 
@@ -333,7 +332,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 			Schema: newTestSchema(),
 		})
 
-		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoordClient, error) {
+		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
 			return newMockRootCoordClient(), nil
 		}
 
@@ -427,7 +426,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 
-		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoordClient, error) {
+		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
 			return newMockRootCoordClient(), nil
 		}
 
@@ -472,7 +471,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 
-		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoordClient, error) {
+		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
 			return newMockRootCoordClient(), nil
 		}
 
@@ -512,11 +511,200 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		assert.NotEqual(t, 0, resp.GetChannels()[0].GetSeekPosition().GetTimestamp())
 	})
 
+	t.Run("with failed compress", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+
+		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
+			return newMockRootCoordClient(), nil
+		}
+
+		svr.meta.AddCollection(&collectionInfo{
+			ID:     0,
+			Schema: newTestSchema(),
+		})
+
+		err := svr.meta.UpdateChannelCheckpoint("vchan1", &msgpb.MsgPosition{
+			ChannelName: "vchan1",
+			Timestamp:   0,
+			MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
+		})
+		assert.NoError(t, err)
+
+		svr.meta.AddCollection(&collectionInfo{
+			ID:     1,
+			Schema: newTestSchema(),
+		})
+
+		err = svr.meta.UpdateChannelCheckpoint("vchan2", &msgpb.MsgPosition{
+			ChannelName: "vchan2",
+			Timestamp:   0,
+			MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
+		})
+		assert.NoError(t, err)
+
+		svr.meta.AddCollection(&collectionInfo{
+			ID:     2,
+			Schema: newTestSchema(),
+		})
+
+		err = svr.meta.UpdateChannelCheckpoint("vchan3", &msgpb.MsgPosition{
+			ChannelName: "vchan3",
+			Timestamp:   0,
+			MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
+		})
+		assert.NoError(t, err)
+
+		svr.channelManager.AddNode(0)
+		ch := &channel{
+			Name:         "vchan1",
+			CollectionID: 0,
+		}
+		err = svr.channelManager.Watch(context.TODO(), ch)
+		assert.NoError(t, err)
+
+		ch = &channel{
+			Name:         "vchan2",
+			CollectionID: 1,
+		}
+		err = svr.channelManager.Watch(context.TODO(), ch)
+		assert.NoError(t, err)
+
+		ch = &channel{
+			Name:         "vchan3",
+			CollectionID: 2,
+		}
+		err = svr.channelManager.Watch(context.TODO(), ch)
+		assert.NoError(t, err)
+
+		seg := createSegment(8, 0, 0, 100, 40, "vchan1", commonpb.SegmentState_Flushed)
+		binLogPaths := make([]*datapb.Binlog, 1)
+		// miss one field
+		path := metautil.JoinIDPath(0, 0, 8, fieldID)
+		path = path + "/mock"
+		binLogPaths[0] = &datapb.Binlog{
+			EntriesNum: 10000,
+			LogPath:    path,
+		}
+
+		seg.Statslogs = append(seg.Statslogs, &datapb.FieldBinlog{
+			FieldID: fieldID,
+			Binlogs: binLogPaths,
+		})
+
+		binLogPaths2 := make([]*datapb.Binlog, 1)
+		pathCorrect := metautil.JoinIDPath(0, 0, 8, fieldID, 1)
+		binLogPaths2[0] = &datapb.Binlog{
+			EntriesNum: 10000,
+			LogPath:    pathCorrect,
+		}
+
+		seg.Binlogs = append(seg.Binlogs, &datapb.FieldBinlog{
+			FieldID: fieldID,
+			Binlogs: binLogPaths2,
+		})
+		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg))
+		assert.NoError(t, err)
+
+		// make sure collection is indexed
+		err = svr.meta.CreateIndex(&model.Index{
+			TenantID:        "",
+			CollectionID:    0,
+			FieldID:         2,
+			IndexID:         0,
+			IndexName:       "_default_idx_1",
+			IsDeleted:       false,
+			CreateTime:      0,
+			TypeParams:      nil,
+			IndexParams:     nil,
+			IsAutoIndex:     false,
+			UserIndexParams: nil,
+		})
+		assert.NoError(t, err)
+
+		svr.meta.segments.SetSegmentIndex(seg.ID, &model.SegmentIndex{
+			SegmentID:     seg.ID,
+			CollectionID:  0,
+			PartitionID:   0,
+			NumRows:       100,
+			IndexID:       0,
+			BuildID:       0,
+			NodeID:        0,
+			IndexVersion:  1,
+			IndexState:    commonpb.IndexState_Finished,
+			FailReason:    "",
+			IsDeleted:     false,
+			CreateTime:    0,
+			IndexFileKeys: nil,
+			IndexSize:     0,
+		})
+
+		req := &datapb.GetRecoveryInfoRequestV2{
+			CollectionID: 0,
+		}
+		_, err = svr.GetRecoveryInfoV2(context.TODO(), req)
+		assert.NoError(t, err)
+
+		// test bin log
+		path = metautil.JoinIDPath(0, 0, 9, fieldID)
+		path = path + "/mock"
+		binLogPaths[0] = &datapb.Binlog{
+			EntriesNum: 10000,
+			LogPath:    path,
+		}
+
+		seg2 := createSegment(9, 1, 0, 100, 40, "vchan2", commonpb.SegmentState_Flushed)
+		seg2.Binlogs = append(seg2.Binlogs, &datapb.FieldBinlog{
+			FieldID: fieldID,
+			Binlogs: binLogPaths,
+		})
+		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg2))
+		assert.NoError(t, err)
+
+		// make sure collection is indexed
+		err = svr.meta.CreateIndex(&model.Index{
+			TenantID:        "",
+			CollectionID:    1,
+			FieldID:         2,
+			IndexID:         1,
+			IndexName:       "_default_idx_2",
+			IsDeleted:       false,
+			CreateTime:      0,
+			TypeParams:      nil,
+			IndexParams:     nil,
+			IsAutoIndex:     false,
+			UserIndexParams: nil,
+		})
+		assert.NoError(t, err)
+
+		svr.meta.segments.SetSegmentIndex(seg2.ID, &model.SegmentIndex{
+			SegmentID:     seg2.ID,
+			CollectionID:  1,
+			PartitionID:   0,
+			NumRows:       100,
+			IndexID:       1,
+			BuildID:       0,
+			NodeID:        0,
+			IndexVersion:  1,
+			IndexState:    commonpb.IndexState_Finished,
+			FailReason:    "",
+			IsDeleted:     false,
+			CreateTime:    0,
+			IndexFileKeys: nil,
+			IndexSize:     0,
+		})
+		req = &datapb.GetRecoveryInfoRequestV2{
+			CollectionID: 1,
+		}
+		_, err = svr.GetRecoveryInfoV2(context.TODO(), req)
+		assert.NoError(t, err)
+	})
+
 	t.Run("with continuous compaction", func(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 
-		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoordClient, error) {
+		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
 			return newMockRootCoordClient(), nil
 		}
 

@@ -73,8 +73,8 @@ type Server struct {
 	dataCoord  types.DataCoordClient
 	queryCoord types.QueryCoordClient
 
-	newDataCoordClient  func(string, *clientv3.Client) types.DataCoordClient
-	newQueryCoordClient func(string, *clientv3.Client) types.QueryCoordClient
+	newDataCoordClient  func() types.DataCoordClient
+	newQueryCoordClient func() types.QueryCoordClient
 }
 
 func (s *Server) CreateDatabase(ctx context.Context, request *milvuspb.CreateDatabaseRequest) (*commonpb.Status, error) {
@@ -126,16 +126,16 @@ func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error)
 }
 
 func (s *Server) setClient() {
-	s.newDataCoordClient = func(etcdMetaRoot string, etcdCli *clientv3.Client) types.DataCoordClient {
-		dsClient, err := dcc.NewClient(s.ctx, etcdMetaRoot, etcdCli)
+	s.newDataCoordClient = func() types.DataCoordClient {
+		dsClient, err := dcc.NewClient(s.ctx)
 		if err != nil {
 			panic(err)
 		}
 		return dsClient
 	}
 
-	s.newQueryCoordClient = func(metaRootPath string, etcdCli *clientv3.Client) types.QueryCoordClient {
-		qsClient, err := qcc.NewClient(s.ctx, metaRootPath, etcdCli)
+	s.newQueryCoordClient = func() types.QueryCoordClient {
+		qsClient, err := qcc.NewClient(s.ctx)
 		if err != nil {
 			panic(err)
 		}
@@ -201,7 +201,7 @@ func (s *Server) init() error {
 
 	if s.newDataCoordClient != nil {
 		log.Debug("RootCoord start to create DataCoord client")
-		dataCoord := s.newDataCoordClient(rootcoord.Params.EtcdCfg.MetaRootPath.GetValue(), s.etcdCli)
+		dataCoord := s.newDataCoordClient()
 		s.dataCoord = dataCoord
 		if err := s.rootCoord.SetDataCoordClient(dataCoord); err != nil {
 			panic(err)
@@ -210,7 +210,7 @@ func (s *Server) init() error {
 
 	if s.newQueryCoordClient != nil {
 		log.Debug("RootCoord start to create QueryCoord client")
-		queryCoord := s.newQueryCoordClient(rootcoord.Params.EtcdCfg.MetaRootPath.GetValue(), s.etcdCli)
+		queryCoord := s.newQueryCoordClient()
 		s.queryCoord = queryCoord
 		if err := s.rootCoord.SetQueryCoordClient(queryCoord); err != nil {
 			panic(err)

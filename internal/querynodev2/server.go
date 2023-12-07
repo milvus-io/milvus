@@ -148,11 +148,7 @@ func NewQueryNode(ctx context.Context, factory dependency.Factory) *QueryNode {
 
 func (node *QueryNode) initSession() error {
 	minimalIndexVersion, currentIndexVersion := getIndexEngineVersion()
-	node.session = sessionutil.NewSession(node.ctx,
-		paramtable.Get().EtcdCfg.MetaRootPath.GetValue(),
-		node.etcdCli,
-		sessionutil.WithIndexEngineVersion(minimalIndexVersion, currentIndexVersion),
-	)
+	node.session = sessionutil.NewSession(node.ctx, sessionutil.WithIndexEngineVersion(minimalIndexVersion, currentIndexVersion))
 	if node.session == nil {
 		return fmt.Errorf("session is nil, the etcd client connection may have failed")
 	}

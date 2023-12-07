@@ -87,7 +87,7 @@ type dataNodeCreatorFunc func(ctx context.Context, addr string, nodeID int64) (t
 
 type indexNodeCreatorFunc func(ctx context.Context, addr string, nodeID int64) (types.IndexNodeClient, error)
 
-type rootCoordCreatorFunc func(ctx context.Context, metaRootPath string, etcdClient *clientv3.Client) (types.RootCoordClient, error)
+type rootCoordCreatorFunc func(ctx context.Context) (types.RootCoordClient, error)
 
 // makes sure Server implements `DataCoord`
 var _ types.DataCoord = (*Server)(nil)
@@ -236,8 +236,8 @@ func defaultIndexNodeCreatorFunc(ctx context.Context, addr string, nodeID int64)
 	return indexnodeclient.NewClient(ctx, addr, nodeID, Params.DataCoordCfg.WithCredential.GetAsBool())
 }
 
-func defaultRootCoordCreatorFunc(ctx context.Context, metaRootPath string, client *clientv3.Client) (types.RootCoordClient, error) {
-	return rootcoordclient.NewClient(ctx, metaRootPath, client)
+func defaultRootCoordCreatorFunc(ctx context.Context) (types.RootCoordClient, error) {
+	return rootcoordclient.NewClient(ctx)
 }
 
 // QuitSignal returns signal when server quits
@@ -282,14 +282,14 @@ func (s *Server) Register() error {
 }
 
 func (s *Server) initSession() error {
-	s.icSession = sessionutil.NewSession(s.ctx, Params.EtcdCfg.MetaRootPath.GetValue(), s.etcdCli)
+	s.icSession = sessionutil.NewSession(s.ctx)
 	if s.icSession == nil {
 		return errors.New("failed to initialize IndexCoord session")
 	}
 	s.icSession.Init(typeutil.IndexCoordRole, s.address, true, true)
 	s.icSession.SetEnableActiveStandBy(s.enableActiveStandBy)
 
-	s.session = sessionutil.NewSession(s.ctx, Params.EtcdCfg.MetaRootPath.GetValue(), s.etcdCli)
+	s.session = sessionutil.NewSession(s.ctx)
 	if s.session == nil {
 		return errors.New("failed to initialize session")
 	}
@@ -1024,7 +1024,7 @@ func (s *Server) handleFlushingSegments(ctx context.Context) {
 func (s *Server) initRootCoordClient() error {
 	var err error
 	if s.rootCoordClient == nil {
-		if s.rootCoordClient, err = s.rootCoordClientCreator(s.ctx, Params.EtcdCfg.MetaRootPath.GetValue(), s.etcdCli); err != nil {
+		if s.rootCoordClient, err = s.rootCoordClientCreator(s.ctx); err != nil {
 			return err
 		}
 	}
