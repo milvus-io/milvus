@@ -62,11 +62,6 @@ class ScalarIndex : public IndexBase {
           T upper_bound_value,
           bool ub_inclusive) = 0;
 
-    virtual bool
-    HasRawData() const {
-        return true;
-    }
-
     virtual T
     Reverse_Lookup(size_t offset) const = 0;
 

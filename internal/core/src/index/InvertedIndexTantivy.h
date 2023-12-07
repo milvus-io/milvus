@@ -130,7 +130,7 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
           T upper_bound_value,
           bool ub_inclusive) override;
 
-    bool
+    const bool
     HasRawData() const override {
         return false;
     }

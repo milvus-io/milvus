@@ -95,7 +95,7 @@ TYPED_TEST_P(TypedScalarIndexTest, HasRawData) {
                 create_index_info);
         auto scalar_index =
             dynamic_cast<milvus::index::ScalarIndex<T>*>(index.get());
-        auto arr = GenArr<T>(nb);
+        auto arr = GenSortedArr<T>(nb);
         scalar_index->Build(nb, arr.data());
         ASSERT_EQ(nb, scalar_index->Count());
         ASSERT_TRUE(scalar_index->HasRawData());
