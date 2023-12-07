@@ -293,6 +293,30 @@ func Test_NewServer(t *testing.T) {
 			assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		})
 
+		t.Run("ListCheckers", func(t *testing.T) {
+			req := &querypb.ListCheckersRequest{}
+			mqc.EXPECT().ListCheckers(mock.Anything, req).Return(&querypb.ListCheckersResponse{Status: successStatus}, nil)
+			resp, err := server.ListCheckers(ctx, req)
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		})
+
+		t.Run("ActivateChecker", func(t *testing.T) {
+			req := &querypb.ActivateCheckerRequest{}
+			mqc.EXPECT().ActivateChecker(mock.Anything, req).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil)
+			resp, err := server.ActivateChecker(ctx, req)
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+		})
+
+		t.Run("DeactivateChecker", func(t *testing.T) {
+			req := &querypb.DeactivateCheckerRequest{}
+			mqc.EXPECT().DeactivateChecker(mock.Anything, req).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil)
+			resp, err := server.DeactivateChecker(ctx, req)
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+		})
+
 		err = server.Stop()
 		assert.NoError(t, err)
 	}

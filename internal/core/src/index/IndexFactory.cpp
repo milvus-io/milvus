@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include "index/IndexFactory.h"
+#include "common/EasyAssert.h"
 #include "index/VectorMemIndex.h"
 #include "index/Utils.h"
 #include "index/Meta.h"
@@ -50,7 +51,29 @@ IndexFactory::CreateScalarIndex<std::string>(
 #if defined(__linux__) || defined(__APPLE__)
     return CreateStringIndexMarisa(file_manager_context);
 #else
-    throw std::runtime_error("unsupported platform");
+    throw SegcoreError(Unsupported, "unsupported platform");
+#endif
+}
+
+template <typename T>
+ScalarIndexPtr<T>
+IndexFactory::CreateScalarIndex(
+    const IndexType& index_type,
+    const storage::FileManagerContext& file_manager_context,
+    std::shared_ptr<milvus_storage::Space> space) {
+    return CreateScalarIndexSort<T>(file_manager_context, space);
+}
+
+template <>
+ScalarIndexPtr<std::string>
+IndexFactory::CreateScalarIndex(
+    const IndexType& index_type,
+    const storage::FileManagerContext& file_manager_context,
+    std::shared_ptr<milvus_storage::Space> space) {
+#if defined(__linux__) || defined(__APPLE__)
+    return CreateStringIndexMarisa(file_manager_context, space);
+#else
+    throw SegcoreError(Unsupported, "unsupported platform");
 #endif
 }
 
@@ -63,6 +86,19 @@ IndexFactory::CreateIndex(
     }
 
     return CreateScalarIndex(create_index_info, file_manager_context);
+}
+
+IndexBasePtr
+IndexFactory::CreateIndex(
+    const CreateIndexInfo& create_index_info,
+    const storage::FileManagerContext& file_manager_context,
+    std::shared_ptr<milvus_storage::Space> space) {
+    if (datatype_is_vector(create_index_info.field_type)) {
+        return CreateVectorIndex(
+            create_index_info, file_manager_context, space);
+    }
+
+    return CreateScalarIndex(create_index_info, file_manager_context, space);
 }
 
 IndexBasePtr
@@ -139,8 +175,87 @@ IndexFactory::CreateVectorIndex(
                                 data_type));
         }
     }
-    // return std::make_unique<VectorMemIndex>(
-    //     index_type, metric_type, version, file_manager_context);
 }
 
+IndexBasePtr
+IndexFactory::CreateScalarIndex(const CreateIndexInfo& create_index_info,
+                                const storage::FileManagerContext& file_manager,
+                                std::shared_ptr<milvus_storage::Space> space) {
+    auto data_type = create_index_info.field_type;
+    auto index_type = create_index_info.index_type;
+
+    switch (data_type) {
+        // create scalar index
+        case DataType::BOOL:
+            return CreateScalarIndex<bool>(index_type, file_manager, space);
+        case DataType::INT8:
+            return CreateScalarIndex<int8_t>(index_type, file_manager, space);
+        case DataType::INT16:
+            return CreateScalarIndex<int16_t>(index_type, file_manager, space);
+        case DataType::INT32:
+            return CreateScalarIndex<int32_t>(index_type, file_manager, space);
+        case DataType::INT64:
+            return CreateScalarIndex<int64_t>(index_type, file_manager, space);
+        case DataType::FLOAT:
+            return CreateScalarIndex<float>(index_type, file_manager, space);
+        case DataType::DOUBLE:
+            return CreateScalarIndex<double>(index_type, file_manager, space);
+
+            // create string index
+        case DataType::STRING:
+        case DataType::VARCHAR:
+            return CreateScalarIndex<std::string>(
+                index_type, file_manager, space);
+        default:
+            throw SegcoreError(
+                DataTypeInvalid,
+                fmt::format("invalid data type to build mem index: {}",
+                            data_type));
+    }
+}
+
+IndexBasePtr
+IndexFactory::CreateVectorIndex(
+    const CreateIndexInfo& create_index_info,
+    const storage::FileManagerContext& file_manager_context,
+    std::shared_ptr<milvus_storage::Space> space) {
+    auto data_type = create_index_info.field_type;
+    auto index_type = create_index_info.index_type;
+    auto metric_type = create_index_info.metric_type;
+    auto version = create_index_info.index_engine_version;
+
+    if (knowhere::UseDiskLoad(index_type, version)) {
+        switch (data_type) {
+            case DataType::VECTOR_FLOAT: {
+                return std::make_unique<VectorDiskAnnIndex<float>>(
+                    index_type,
+                    metric_type,
+                    version,
+                    space,
+                    file_manager_context);
+            }
+            default:
+                throw SegcoreError(
+                    DataTypeInvalid,
+                    fmt::format("invalid data type to build disk index: {}",
+                                data_type));
+        }
+    } else {  // create mem index
+        switch (data_type) {
+            case DataType::VECTOR_FLOAT: {
+                return std::make_unique<VectorMemIndex<float>>(
+                    create_index_info, file_manager_context, space);
+            }
+            case DataType::VECTOR_BINARY: {
+                return std::make_unique<VectorMemIndex<uint8_t>>(
+                    create_index_info, file_manager_context, space);
+            }
+            default:
+                throw SegcoreError(
+                    DataTypeInvalid,
+                    fmt::format("invalid data type to build mem index: {}",
+                                data_type));
+        }
+    }
+}
 }  // namespace milvus::index

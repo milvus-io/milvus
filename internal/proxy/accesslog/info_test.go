@@ -29,7 +29,9 @@ import (
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -63,8 +65,8 @@ func (s *GrpcAccessInfoSuite) SetupSuite() {
 	}
 
 	s.info = &GrpcAccessInfo{
-		ctx:  ctx,
-		info: serverinfo,
+		ctx:      ctx,
+		grpcInfo: serverinfo,
 	}
 }
 
@@ -106,6 +108,26 @@ func (s *GrpcAccessInfoSuite) TestDbName() {
 	}
 	result = s.info.Get("$database_name")
 	s.Equal("test", result[0])
+}
+
+func (s *GrpcAccessInfoSuite) TestSdkInfo() {
+	ctx := context.Background()
+	s.info.ctx = ctx
+	result := s.info.Get("$sdk_version")
+	s.Equal(unknownString, result[0])
+
+	identifier := 11111
+	md := metadata.MD{util.IdentifierKey: []string{fmt.Sprint(identifier)}}
+	ctx = metadata.NewIncomingContext(ctx, md)
+	info := &commonpb.ClientInfo{
+		SdkType:    "test",
+		SdkVersion: "1.0",
+	}
+	connection.GetManager().Register(ctx, int64(identifier), info)
+
+	s.info.ctx = ctx
+	result = s.info.Get("$sdk_version")
+	s.Equal(info.SdkType+"-"+info.SdkVersion, result[0])
 }
 
 func TestGrpcAccssInfo(t *testing.T) {

@@ -25,6 +25,7 @@
 #include "storage/IndexData.h"
 #include "storage/FileManager.h"
 #include "storage/ChunkManager.h"
+#include "storage/space.h"
 
 #include "common/Consts.h"
 
@@ -33,6 +34,9 @@ namespace milvus::storage {
 class DiskFileManagerImpl : public FileManagerImpl {
  public:
     explicit DiskFileManagerImpl(const FileManagerContext& fileManagerContext);
+
+    explicit DiskFileManagerImpl(const FileManagerContext& fileManagerContext,
+                                 std::shared_ptr<milvus_storage::Space> space);
 
     virtual ~DiskFileManagerImpl();
 
@@ -73,10 +77,18 @@ class DiskFileManagerImpl : public FileManagerImpl {
     void
     CacheIndexToDisk(const std::vector<std::string>& remote_files);
 
+    void
+    CacheIndexToDisk();
+
     uint64_t
     CacheBatchIndexFilesToDisk(const std::vector<std::string>& remote_files,
                                const std::string& local_file_name,
                                uint64_t local_file_init_offfset);
+
+    uint64_t
+    CacheBatchIndexFilesToDiskV2(const std::vector<std::string>& remote_files,
+                                 const std::string& local_file_name,
+                                 uint64_t local_file_init_offfset);
 
     void
     AddBatchIndexFiles(const std::string& local_file_name,
@@ -86,6 +98,15 @@ class DiskFileManagerImpl : public FileManagerImpl {
 
     std::string
     CacheRawDataToDisk(std::vector<std::string> remote_files);
+
+    std::string
+    CacheRawDataToDisk(std::shared_ptr<milvus_storage::Space> space);
+
+    virtual bool
+    AddFileUsingSpace(const std::string& local_file_name,
+                      const std::vector<int64_t>& local_file_offsets,
+                      const std::vector<std::string>& remote_files,
+                      const std::vector<int64_t>& remote_file_sizes);
 
  private:
     int64_t
@@ -105,6 +126,8 @@ class DiskFileManagerImpl : public FileManagerImpl {
 
     // remote file path
     std::map<std::string, int64_t> remote_paths_to_size_;
+
+    std::shared_ptr<milvus_storage::Space> space_;
 };
 
 using DiskANNFileManagerImplPtr = std::shared_ptr<DiskFileManagerImpl>;

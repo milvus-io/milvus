@@ -59,19 +59,29 @@ func (_c *MockSyncManager_Block_Call) RunAndReturn(run func(int64)) *MockSyncMan
 }
 
 // GetEarliestPosition provides a mock function with given fields: channel
-func (_m *MockSyncManager) GetEarliestPosition(channel string) *msgpb.MsgPosition {
+func (_m *MockSyncManager) GetEarliestPosition(channel string) (int64, *msgpb.MsgPosition) {
 	ret := _m.Called(channel)
 
-	var r0 *msgpb.MsgPosition
-	if rf, ok := ret.Get(0).(func(string) *msgpb.MsgPosition); ok {
+	var r0 int64
+	var r1 *msgpb.MsgPosition
+	if rf, ok := ret.Get(0).(func(string) (int64, *msgpb.MsgPosition)); ok {
+		return rf(channel)
+	}
+	if rf, ok := ret.Get(0).(func(string) int64); ok {
 		r0 = rf(channel)
 	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*msgpb.MsgPosition)
+		r0 = ret.Get(0).(int64)
+	}
+
+	if rf, ok := ret.Get(1).(func(string) *msgpb.MsgPosition); ok {
+		r1 = rf(channel)
+	} else {
+		if ret.Get(1) != nil {
+			r1 = ret.Get(1).(*msgpb.MsgPosition)
 		}
 	}
 
-	return r0
+	return r0, r1
 }
 
 // MockSyncManager_GetEarliestPosition_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetEarliestPosition'
@@ -92,12 +102,12 @@ func (_c *MockSyncManager_GetEarliestPosition_Call) Run(run func(channel string)
 	return _c
 }
 
-func (_c *MockSyncManager_GetEarliestPosition_Call) Return(_a0 *msgpb.MsgPosition) *MockSyncManager_GetEarliestPosition_Call {
-	_c.Call.Return(_a0)
+func (_c *MockSyncManager_GetEarliestPosition_Call) Return(_a0 int64, _a1 *msgpb.MsgPosition) *MockSyncManager_GetEarliestPosition_Call {
+	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockSyncManager_GetEarliestPosition_Call) RunAndReturn(run func(string) *msgpb.MsgPosition) *MockSyncManager_GetEarliestPosition_Call {
+func (_c *MockSyncManager_GetEarliestPosition_Call) RunAndReturn(run func(string) (int64, *msgpb.MsgPosition)) *MockSyncManager_GetEarliestPosition_Call {
 	_c.Call.Return(run)
 	return _c
 }

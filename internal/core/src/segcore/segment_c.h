@@ -24,13 +24,15 @@ extern "C" {
 #include "segcore/load_index_c.h"
 #include "segcore/load_field_data_c.h"
 
-typedef void* CSegmentInterface;
 typedef void* CSearchResult;
 typedef CProto CRetrieveResult;
 
 //////////////////////////////    common interfaces    //////////////////////////////
-CSegmentInterface
-NewSegment(CCollection collection, SegmentType seg_type, int64_t segment_id);
+CStatus
+NewSegment(CCollection collection,
+           SegmentType seg_type,
+           int64_t segment_id,
+           CSegmentInterface* newSegment);
 
 void
 DeleteSegment(CSegmentInterface c_segment);
@@ -88,6 +90,10 @@ PreInsert(CSegmentInterface c_segment, int64_t size, int64_t* offset);
 CStatus
 LoadFieldData(CSegmentInterface c_segment,
               CLoadFieldDataInfo load_field_data_info);
+
+CStatus
+LoadFieldDataV2(CSegmentInterface c_segment,
+                CLoadFieldDataInfo load_field_data_info);
 
 CStatus
 LoadFieldRawData(CSegmentInterface c_segment,

@@ -1,4 +1,4 @@
-package proxy
+package connection
 
 import (
 	"context"
@@ -12,14 +12,14 @@ import (
 func Test_getIdentifierFromContext(t *testing.T) {
 	t.Run("metadata not found", func(t *testing.T) {
 		ctx := context.TODO()
-		_, err := getIdentifierFromContext(ctx)
+		_, err := GetIdentifierFromContext(ctx)
 		assert.Error(t, err)
 	})
 
 	t.Run("no identifier", func(t *testing.T) {
 		md := metadata.New(map[string]string{})
 		ctx := metadata.NewIncomingContext(context.TODO(), md)
-		_, err := getIdentifierFromContext(ctx)
+		_, err := GetIdentifierFromContext(ctx)
 		assert.Error(t, err)
 	})
 
@@ -28,7 +28,7 @@ func Test_getIdentifierFromContext(t *testing.T) {
 			"identifier": "i-am-not-invalid-identifier",
 		})
 		ctx := metadata.NewIncomingContext(context.TODO(), md)
-		_, err := getIdentifierFromContext(ctx)
+		_, err := GetIdentifierFromContext(ctx)
 		assert.Error(t, err)
 	})
 
@@ -37,7 +37,7 @@ func Test_getIdentifierFromContext(t *testing.T) {
 			"identifier": "20230518",
 		})
 		ctx := metadata.NewIncomingContext(context.TODO(), md)
-		identifier, err := getIdentifierFromContext(ctx)
+		identifier, err := GetIdentifierFromContext(ctx)
 		assert.NoError(t, err)
 		assert.Equal(t, int64(20230518), identifier)
 	})

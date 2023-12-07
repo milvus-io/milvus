@@ -59,6 +59,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
+	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
@@ -172,7 +173,11 @@ func (s *Server) registerHTTPServer() {
 
 func (s *Server) startHTTPServer(errChan chan error) {
 	defer s.wg.Done()
-	ginHandler := gin.Default()
+	ginHandler := gin.New()
+	ginLogger := gin.LoggerWithConfig(gin.LoggerConfig{
+		SkipPaths: proxy.Params.ProxyCfg.GinLogSkipPaths.GetAsStrings(),
+	})
+	ginHandler.Use(ginLogger, gin.Recovery())
 	ginHandler.Use(func(c *gin.Context) {
 		_, err := strconv.ParseBool(c.Request.Header.Get(httpserver.HTTPHeaderAllowInt64))
 		if err != nil {
@@ -251,7 +256,7 @@ func (s *Server) startExternalGrpc(grpcPort int, errChan chan error) {
 			proxy.RateLimitInterceptor(limiter),
 			accesslog.UnaryUpdateAccessInfoInterceptor,
 			proxy.TraceLogInterceptor,
-			proxy.KeepActiveInterceptor,
+			connection.KeepActiveInterceptor,
 		))
 	} else {
 		unaryServerOption = grpc.EmptyServerOption{}

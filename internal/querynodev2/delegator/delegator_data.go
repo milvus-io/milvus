@@ -544,6 +544,15 @@ func (sd *shardDelegator) GenerateLevel0DeletionCache() {
 
 	sd.level0Mut.Lock()
 	defer sd.level0Mut.Unlock()
+	totalSize := int64(0)
+	for _, delete := range deletions {
+		totalSize += delete.Size()
+	}
+	metrics.QueryNodeLevelZeroSize.WithLabelValues(
+		fmt.Sprint(paramtable.GetNodeID()),
+		fmt.Sprint(sd.collectionID),
+		sd.vchannelName,
+	).Set(float64(totalSize))
 	sd.level0Deletions = deletions
 }
 

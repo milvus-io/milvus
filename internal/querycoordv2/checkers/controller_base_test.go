@@ -99,6 +99,11 @@ func (s *ControllerBaseTestSuite) TestActivation() {
 	s.Equal(errTypeNotFound, err)
 }
 
+func (s *ControllerBaseTestSuite) TestListCheckers() {
+	checkers := s.controller.Checkers()
+	s.Equal(4, len(checkers))
+}
+
 func TestControllerBaseTestSuite(t *testing.T) {
 	suite.Run(t, new(ControllerBaseTestSuite))
 }
