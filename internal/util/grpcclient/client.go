@@ -102,7 +102,7 @@ type ClientBase[T interface {
 	getAddrFunc   func() (string, error)
 	newGrpcClient func(cc *grpc.ClientConn) T
 
-	//grpcClient             T
+	// grpcClient             T
 	grpcClient *clientConnWrapper[T]
 	encryption bool
 	addr       atomic.String
