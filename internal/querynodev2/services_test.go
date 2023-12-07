@@ -879,7 +879,7 @@ func (suite *ServiceSuite) TestLoadSegments_Transfer() {
 
 		delegator.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).
 			Return(nil)
-		delegator.EXPECT().MetricType().Return(defaultMetricType)
+		delegator.EXPECT().MetricType().Return(defaultMetricType).Maybe()
 		// data
 		schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64)
 		req := &querypb.LoadSegmentsRequest{

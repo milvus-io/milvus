@@ -191,7 +191,7 @@ func NewSegment(collection *Collection,
 	}
 
 	var newPtr C.CSegmentInterface
-	status := C.NewSegment(collection.collectionPtr, cSegType, C.int64_t(segmentID), &newPtr)
+	status := C.NewSegment(collection._ptr, cSegType, C.int64_t(segmentID), &newPtr)
 
 	if err := HandleCStatus(&status, "NewSegmentFailed"); err != nil {
 		return nil, err
