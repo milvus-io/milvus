@@ -59,6 +59,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
+	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -250,7 +251,7 @@ func (s *Server) startExternalGrpc(grpcPort int, errChan chan error) {
 			logutil.UnaryTraceLoggerInterceptor,
 			proxy.RateLimitInterceptor(limiter),
 			accesslog.UnaryUpdateAccessInfoInterceptor,
-			proxy.KeepActiveInterceptor,
+			connection.KeepActiveInterceptor,
 		))
 	} else {
 		unaryServerOption = grpc.EmptyServerOption{}
