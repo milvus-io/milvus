@@ -75,15 +75,18 @@ var (
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.DataCoordRole,
-			Name:      "store_l0_segment_size",
+			Name:      "store_level0_segment_size",
 			Help:      "stored l0 segment size",
-		}, []string{})
+			Buckets:   buckets,
+		}, []string{
+			collectionIDLabelName,
+		})
 
 	DataCoordRateStoredL0Segment = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.DataCoordRole,
-			Name:      "store_l0_segment_rate",
+			Name:      "store_level0_segment_rate",
 			Help:      "stored l0 segment rate",
 		}, []string{})
 

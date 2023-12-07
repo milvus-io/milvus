@@ -503,7 +503,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 
 	if req.GetFlushed() {
 		if req.GetSegLevel() == datapb.SegmentLevel_L0 {
-			metrics.DataCoordSizeStoredL0Segment.WithLabelValues().Observe(calculateL0SegmentSize(req.GetField2StatslogPaths()))
+			metrics.DataCoordSizeStoredL0Segment.WithLabelValues(fmt.Sprint(req.GetCollectionID())).Observe(calculateL0SegmentSize(req.GetField2StatslogPaths()))
 			metrics.DataCoordRateStoredL0Segment.WithLabelValues().Inc()
 		} else {
 			// because segmentMananger only manage growing segment
