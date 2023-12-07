@@ -200,9 +200,9 @@ proxy:
   ginLogging: true
   maxTaskNum: 1024 # max task number of proxy task queue
   accessLog:
-    enable: true
+    enable: false
     # Log filename, set as "" to use stdout.
-    filename: "" 
+    # filename: "" 
     # define formatters for access log by XXX:{format: XXX, method:[XXX,XXX]}
     formatters:
       # "base" formatter could not set methods
