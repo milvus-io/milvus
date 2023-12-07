@@ -86,7 +86,6 @@ type GrpcClient[T GrpcComponent] interface {
 	SetGetAddrFunc(func() (string, error))
 	EnableEncryption()
 	SetNewGrpcClientFunc(func(cc *grpc.ClientConn) T)
-	GetGrpcClient(ctx context.Context) (T, error)
 	ReCall(ctx context.Context, caller func(client T) (any, error)) (any, error)
 	Call(ctx context.Context, caller func(client T) (any, error)) (any, error)
 	Close() error
