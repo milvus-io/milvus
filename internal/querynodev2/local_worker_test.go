@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -112,7 +113,9 @@ func (suite *LocalWorkerTestSuite) TestLoadSegment() {
 	// load empty
 	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64)
 	req := &querypb.LoadSegmentsRequest{
-		DstNodeID:    suite.worker.node.session.GetServerID(),
+		Base: &commonpb.MsgBase{
+			TargetID: suite.node.session.GetServerID(),
+		},
 		CollectionID: suite.collectionID,
 		Infos: lo.Map(suite.segmentIDs, func(segID int64, _ int) *querypb.SegmentLoadInfo {
 			return &querypb.SegmentLoadInfo{
@@ -130,7 +133,9 @@ func (suite *LocalWorkerTestSuite) TestLoadSegment() {
 
 func (suite *LocalWorkerTestSuite) TestReleaseSegment() {
 	req := &querypb.ReleaseSegmentsRequest{
-		NodeID:       suite.worker.node.session.GetServerID(),
+		Base: &commonpb.MsgBase{
+			TargetID: suite.node.session.GetServerID(),
+		},
 		CollectionID: suite.collectionID,
 		SegmentIDs:   suite.segmentIDs,
 	}
