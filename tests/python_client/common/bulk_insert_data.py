@@ -1,4 +1,5 @@
 import copy
+import json
 import os
 import time
 
@@ -24,6 +25,7 @@ class DataField:
     bool_field = "bool_scalar"
     float_field = "float_scalar"
     double_field = "double_scalar"
+    json_field = "json"
     array_bool_field = "array_bool"
     array_int_field = "array_int"
     array_float_field = "array_float"
@@ -134,6 +136,11 @@ def gen_row_based_json_file(row_file, str_pk, data_fields, float_vect,
                         f.write('"bool_scalar":' + str(random.choice(["True", "False", "TRUE", "FALSE", "0", "1"])) + '')
                     else:
                         f.write('"bool_scalar":' + str(random.choice(["true", "false"])) + '')
+                if data_field == DataField.json_field:
+                    data = {
+                        gen_unique_str(): random.randint(-999999, 9999999),
+                    }
+                    f.write('"json":' + json.dumps(data) + '')
                 if data_field == DataField.array_bool_field:
                     if err_type == DataErrorType.empty_array_field:
                         f.write('"array_bool":[]')
@@ -382,6 +389,10 @@ def gen_data_by_data_field(data_field, rows, start=0, float_vector=True, dim=128
             data = [gen_unique_str(str(i)) for i in range(start, rows + start)]
         elif data_field == DataField.bool_field:
             data = [random.choice([True, False]) for i in range(start, rows + start)]
+        elif data_field == DataField.json_field:
+            data = pd.Series([json.dumps({
+                gen_unique_str(): random.randint(-999999, 9999999)
+            }) for i in range(start, rows + start)], dtype=np.dtype("str"))
         elif data_field == DataField.array_bool_field:
             data = pd.Series(
                     [np.array([random.choice([True, False]) for _ in range(array_length)], dtype=np.dtype("bool"))
