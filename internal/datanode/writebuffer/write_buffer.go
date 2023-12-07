@@ -236,18 +236,19 @@ func (wb *writeBufferBase) getOrCreateBuffer(segmentID int64) *segmentBuffer {
 	return buffer
 }
 
-func (wb *writeBufferBase) yieldBuffer(segmentID int64) (*storage.InsertData, *storage.DeleteData, *msgpb.MsgPosition) {
+func (wb *writeBufferBase) yieldBuffer(segmentID int64) (*storage.InsertData, *storage.DeleteData, *TimeRange, *msgpb.MsgPosition) {
 	buffer, ok := wb.buffers[segmentID]
 	if !ok {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 
 	// remove buffer and move it to sync manager
 	delete(wb.buffers, segmentID)
 	start := buffer.EarliestPosition()
+	timeRange := buffer.GetTimeRange()
 	insert, delta := buffer.Yield()
 
-	return insert, delta, start
+	return insert, delta, timeRange, start
 }
 
 // bufferInsert transform InsertMsg into bufferred InsertData and returns primary key field data for future usage.
@@ -328,14 +329,21 @@ func SpaceCreatorFunc(segmentID int64, collSchema *schemapb.CollectionSchema, ar
 }
 
 func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) syncmgr.Task {
+	log := log.Ctx(ctx).With(
+		zap.Int64("segmentID", segmentID),
+	)
 	segmentInfo, ok := wb.metaCache.GetSegmentByID(segmentID) // wb.metaCache.GetSegmentsBy(metacache.WithSegmentIDs(segmentID))
 	if !ok {
-		log.Ctx(ctx).Warn("segment info not found in meta cache", zap.Int64("segmentID", segmentID))
+		log.Warn("segment info not found in meta cache", zap.Int64("segmentID", segmentID))
 		return nil
 	}
 	var batchSize int64
+	var tsFrom, tsTo uint64
 
-	insert, delta, startPos := wb.yieldBuffer(segmentID)
+	insert, delta, timeRange, startPos := wb.yieldBuffer(segmentID)
+	if timeRange != nil {
+		tsFrom, tsTo = timeRange.timestampMin, timeRange.timestampMax
+	}
 
 	actions := []metacache.SegmentAction{metacache.RollStats()}
 	if insert != nil {
@@ -361,6 +369,7 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) syn
 			WithChannelName(wb.channelName).
 			WithSegmentID(segmentID).
 			WithStartPosition(startPos).
+			WithTimeRange(tsFrom, tsTo).
 			WithLevel(segmentInfo.Level()).
 			WithCheckpoint(wb.checkpoint).
 			WithSchema(wb.collSchema).
@@ -386,6 +395,7 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) syn
 			WithChannelName(wb.channelName).
 			WithSegmentID(segmentID).
 			WithStartPosition(startPos).
+			WithTimeRange(tsFrom, tsTo).
 			WithLevel(segmentInfo.Level()).
 			WithCheckpoint(wb.checkpoint).
 			WithSchema(wb.collSchema).

@@ -93,6 +93,11 @@ class StringIndexMarisa : public StringIndex {
     BinarySet
     UploadV2(const Config& config = {});
 
+    const bool
+    HasRawData() const override {
+        return true;
+    }
+
  private:
     void
     fill_str_ids(size_t n, const std::string* values);

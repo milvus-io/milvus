@@ -73,6 +73,9 @@ class ScalarIndex : public IndexBase {
     virtual const TargetBitmap
     Query(const DatasetPtr& dataset);
 
+    virtual const bool
+    HasRawData() const override = 0;
+
     virtual int64_t
     Size() = 0;
 };

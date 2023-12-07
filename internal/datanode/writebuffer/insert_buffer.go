@@ -68,6 +68,13 @@ func (b *BufferBase) MinTimestamp() typeutil.Timestamp {
 	return b.startPos.GetTimestamp()
 }
 
+func (b *BufferBase) GetTimeRange() *TimeRange {
+	return &TimeRange{
+		timestampMin: b.TimestampFrom,
+		timestampMax: b.TimestampTo,
+	}
+}
+
 type InsertBuffer struct {
 	BufferBase
 	collSchema *schemapb.CollectionSchema

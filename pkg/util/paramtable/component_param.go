@@ -915,6 +915,7 @@ type proxyConfig struct {
 	MaxShardNum                  ParamItem `refreshable:"true"`
 	MaxDimension                 ParamItem `refreshable:"true"`
 	GinLogging                   ParamItem `refreshable:"false"`
+	GinLogSkipPaths              ParamItem `refreshable:"false"`
 	MaxUserNum                   ParamItem `refreshable:"true"`
 	MaxRoleNum                   ParamItem `refreshable:"true"`
 	MaxTaskNum                   ParamItem `refreshable:"false"`
@@ -1043,6 +1044,15 @@ please adjust in embedded Milvus: false`,
 		Export: true,
 	}
 	p.GinLogging.Init(base.mgr)
+
+	p.GinLogSkipPaths = ParamItem{
+		Key:          "proxy.ginLogSkipPaths",
+		Version:      "2.3.0",
+		DefaultValue: "/",
+		Doc:          "skip url path for gin log",
+		Export:       true,
+	}
+	p.GinLogSkipPaths.Init(base.mgr)
 
 	p.MaxUserNum = ParamItem{
 		Key:          "proxy.maxUserNum",
@@ -2549,6 +2559,11 @@ type dataNodeConfig struct {
 	FlowGraphMaxParallelism ParamItem `refreshable:"false"`
 	MaxParallelSyncTaskNum  ParamItem `refreshable:"false"`
 
+	// skip mode
+	FlowGraphSkipModeEnable   ParamItem `refreshable:"true"`
+	FlowGraphSkipModeSkipNum  ParamItem `refreshable:"true"`
+	FlowGraphSkipModeColdTime ParamItem `refreshable:"true"`
+
 	// segment
 	FlushInsertBufferSize  ParamItem `refreshable:"true"`
 	FlushDeleteBufferBytes ParamItem `refreshable:"true"`
@@ -2601,6 +2616,36 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.FlowGraphMaxParallelism.Init(base.mgr)
+
+	p.FlowGraphSkipModeEnable = ParamItem{
+		Key:          "datanode.dataSync.skipMode.enable",
+		Version:      "2.3.4",
+		DefaultValue: "true",
+		PanicIfEmpty: false,
+		Doc:          "Support skip some timetick message to reduce CPU usage",
+		Export:       true,
+	}
+	p.FlowGraphSkipModeEnable.Init(base.mgr)
+
+	p.FlowGraphSkipModeSkipNum = ParamItem{
+		Key:          "datanode.dataSync.skipMode.skipNum",
+		Version:      "2.3.4",
+		DefaultValue: "5",
+		PanicIfEmpty: false,
+		Doc:          "Consume one for every n records skipped",
+		Export:       true,
+	}
+	p.FlowGraphSkipModeSkipNum.Init(base.mgr)
+
+	p.FlowGraphSkipModeColdTime = ParamItem{
+		Key:          "datanode.dataSync.skipMode.coldTime",
+		Version:      "2.3.4",
+		DefaultValue: "60",
+		PanicIfEmpty: false,
+		Doc:          "Turn on skip mode after there are only timetick msg for x seconds",
+		Export:       true,
+	}
+	p.FlowGraphSkipModeColdTime.Init(base.mgr)
 
 	p.MaxParallelSyncTaskNum = ParamItem{
 		Key:          "dataNode.dataSync.maxParallelSyncTaskNum",
