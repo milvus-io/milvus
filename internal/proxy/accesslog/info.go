@@ -88,11 +88,8 @@ func (i *GrpcAccessInfo) SetResult(resp interface{}, err error) {
 
 func (i *GrpcAccessInfo) Get(keys ...string) []string {
 	result := []string{}
-	metricMap := map[string]string{}
 	for _, key := range keys {
-		if value, ok := metricMap[key]; ok {
-			result = append(result, value)
-		} else if getFunc, ok := metricFuncMap[key]; ok {
+		if getFunc, ok := metricFuncMap[key]; ok {
 			result = append(result, getFunc(i))
 		}
 	}
@@ -108,6 +105,7 @@ func (i *GrpcAccessInfo) Write() bool {
 	if !ok {
 		return false
 	}
+
 	_, err := _globalW.Write([]byte(formatter.Format(i)))
 	return err == nil
 }
