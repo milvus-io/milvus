@@ -693,6 +693,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             cf.gen_int64_field(name=df.int_field),
             cf.gen_float_field(name=df.float_field),
             cf.gen_double_field(name=df.double_field),
+            cf.gen_json_field(name=df.json_field),
             cf.gen_array_field(name=df.array_int_field, element_type=DataType.INT64),
             cf.gen_array_field(name=df.array_float_field, element_type=DataType.FLOAT),
             cf.gen_array_field(name=df.array_string_field, element_type=DataType.VARCHAR),
