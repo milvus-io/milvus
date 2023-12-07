@@ -216,6 +216,14 @@ func (o *LeaderObserver) sync(ctx context.Context, replicaID int64, leaderView *
 		log.Warn("sync distribution failed, cannot get schema of collection", zap.Error(err))
 		return false
 	}
+
+	// Get collection index info
+	indexInfo, err := o.broker.DescribeIndex(ctx, leaderView.CollectionID)
+	if err != nil {
+		log.Warn("fail to get index info of collection", zap.Error(err))
+		return false
+	}
+
 	partitions, err := utils.GetPartitions(o.meta.CollectionManager, leaderView.CollectionID)
 	if err != nil {
 		log.Warn("sync distribution failed, cannot get partitions of collection", zap.Error(err))
@@ -236,7 +244,8 @@ func (o *LeaderObserver) sync(ctx context.Context, replicaID int64, leaderView *
 			CollectionID: leaderView.CollectionID,
 			PartitionIDs: partitions,
 		},
-		Version: time.Now().UnixNano(),
+		Version:       time.Now().UnixNano(),
+		IndexInfoList: indexInfo,
 	}
 	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()

@@ -586,6 +586,7 @@ message SyncDistributionRequest {
   LoadMetaInfo load_meta = 6;
   int64 replicaID = 7;
   int64 version = 8;
+  repeated index.IndexInfo index_info_list = 9;
 }
 
 message ResourceGroup {
