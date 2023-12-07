@@ -140,7 +140,7 @@ func (s *LevelZeroSegmentsViewSuite) TestTrigger() {
 			}
 			log.Info("LevelZeroSegmentsView", zap.String("view", s.v.String()))
 
-			gotView := s.v.Trigger()
+			gotView, reason := s.v.Trigger()
 			if len(test.expectedSegs) == 0 {
 				s.Nil(gotView)
 			} else {
@@ -152,6 +152,7 @@ func (s *LevelZeroSegmentsViewSuite) TestTrigger() {
 					return v.ID
 				})
 				s.ElementsMatch(gotSegIDs, test.expectedSegs)
+				log.Info("trigger reason", zap.Any("trigger reason", reason))
 			}
 		})
 	}

@@ -96,7 +96,7 @@ func (v *LevelZeroSegmentsView) Trigger() (CompactionView, string) {
 	}
 
 	if curDeltaSize < minDeltaSize && curDeltaCount < minDeltaCount {
-		return nil
+		return nil, ""
 	}
 
 	return &LevelZeroSegmentsView{
