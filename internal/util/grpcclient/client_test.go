@@ -118,7 +118,7 @@ func TestClientBase_NodeSessionNotExist(t *testing.T) {
 
 	// test querynode/datanode/indexnode/proxy already down, but new node start up with same ip and port
 	base.grpcClientMtx.Lock()
-	base.grpcClient = &mockClient{}
+	base.grpcClient = &clientConnWrapper[*mockClient]{client: &mockClient{}}
 	base.grpcClientMtx.Unlock()
 	_, err = base.Call(ctx, func(client *mockClient) (any, error) {
 		return struct{}{}, status.Errorf(codes.Unknown, merr.ErrNodeNotMatch.Error())
@@ -127,7 +127,7 @@ func TestClientBase_NodeSessionNotExist(t *testing.T) {
 
 	// test querynode/datanode/indexnode/proxy down, return unavailable error
 	base.grpcClientMtx.Lock()
-	base.grpcClient = &mockClient{}
+	base.grpcClient = &clientConnWrapper[*mockClient]{client: &mockClient{}}
 	base.grpcClientMtx.Unlock()
 	_, err = base.Call(ctx, func(client *mockClient) (any, error) {
 		return struct{}{}, status.Errorf(codes.Unavailable, "fake error")
@@ -152,7 +152,7 @@ func testCall(t *testing.T, compressed bool) {
 	base.CompressionEnabled = compressed
 	initClient := func() {
 		base.grpcClientMtx.Lock()
-		base.grpcClient = &mockClient{}
+		base.grpcClient = &clientConnWrapper[*mockClient]{client: &mockClient{}}
 		base.grpcClientMtx.Unlock()
 	}
 	base.MaxAttempts = 1
@@ -292,7 +292,7 @@ func TestClientBase_Recall(t *testing.T) {
 	base := ClientBase[*mockClient]{}
 	initClient := func() {
 		base.grpcClientMtx.Lock()
-		base.grpcClient = &mockClient{}
+		base.grpcClient = &clientConnWrapper[*mockClient]{client: &mockClient{}}
 		base.grpcClientMtx.Unlock()
 	}
 	base.MaxAttempts = 1
@@ -354,7 +354,7 @@ func TestClientBase_Recall(t *testing.T) {
 
 func TestClientBase_CheckGrpcError(t *testing.T) {
 	base := ClientBase[*mockClient]{}
-	base.grpcClient = &mockClient{}
+	base.grpcClient = &clientConnWrapper[*mockClient]{client: &mockClient{}}
 	base.MaxAttempts = 1
 
 	ctx := context.Background()
