@@ -1313,7 +1313,7 @@ func (suite *TaskSuite) TestNoExecutor() {
 		CollectionID: suite.collection,
 		ChannelName:  Params.CommonCfg.RootCoordDml.GetValue() + "-test",
 	}
-	suite.nodeMgr.Add(session.NewNodeInfo(targetNode, "localhost"))
+
 	suite.meta.ReplicaManager.Put(
 		utils.CreateTestReplica(suite.replica, suite.collection, []int64{1, 2, 3, -1}))
 
@@ -1347,24 +1347,6 @@ func (suite *TaskSuite) TestNoExecutor() {
 	suite.AssertTaskNum(0, segmentsNum, 0, segmentsNum)
 
 	// Process tasks
-	suite.dispatchAndWait(targetNode)
-	suite.AssertTaskNum(segmentsNum, 0, 0, segmentsNum)
-
-	// Process tasks done
-	// Dist contains channels
-	view := &meta.LeaderView{
-		ID:           targetNode,
-		CollectionID: suite.collection,
-		Segments:     map[int64]*querypb.SegmentDist{},
-	}
-	for _, segment := range suite.loadSegments {
-		view.Segments[segment] = &querypb.SegmentDist{NodeID: targetNode, Version: 0}
-	}
-	distSegments := lo.Map(segments, func(info *datapb.SegmentInfo, _ int) *meta.Segment {
-		return meta.SegmentFromInfo(info)
-	})
-	suite.dist.LeaderViewManager.Update(targetNode, view)
-	suite.dist.SegmentDistManager.Update(targetNode, distSegments...)
 	suite.dispatchAndWait(targetNode)
 	suite.AssertTaskNum(0, 0, 0, 0)
 }

@@ -1218,8 +1218,10 @@ type queryCoordConfig struct {
 	// Deprecated: Since 2.2.0
 	RetryNum ParamItem `refreshable:"true"`
 	// Deprecated: Since 2.2.0
-	RetryInterval    ParamItem `refreshable:"true"`
-	TaskMergeCap     ParamItem `refreshable:"false"`
+	RetryInterval ParamItem `refreshable:"true"`
+	// Deprecated: Since 2.3.4
+	TaskMergeCap ParamItem `refreshable:"false"`
+
 	TaskExecutionCap ParamItem `refreshable:"true"`
 
 	// ---- Handoff ---
@@ -1287,7 +1289,7 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 	p.TaskMergeCap = ParamItem{
 		Key:          "queryCoord.taskMergeCap",
 		Version:      "2.2.0",
-		DefaultValue: "16",
+		DefaultValue: "1",
 		Export:       true,
 	}
 	p.TaskMergeCap.Init(base.mgr)
