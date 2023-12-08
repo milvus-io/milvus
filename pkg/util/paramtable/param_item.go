@@ -141,6 +141,10 @@ func (pi *ParamItem) GetAsJSONMap() map[string]string {
 	return getAndConvert(pi.GetValue(), funcutil.JSONToMap, nil)
 }
 
+func (pi *ParamItem) GetAsRoleDetails() map[string](map[string]([](map[string]string))) {
+	return getAndConvert(pi.GetValue(), funcutil.JSONToRoleDetails, nil)
+}
+
 type CompositeParamItem struct {
 	Items  []*ParamItem
 	Format func(map[string]string) string

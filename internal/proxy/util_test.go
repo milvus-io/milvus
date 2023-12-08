@@ -816,8 +816,13 @@ func TestValidateName(t *testing.T) {
 
 func TestIsDefaultRole(t *testing.T) {
 	assert.Equal(t, true, IsDefaultRole(util.RoleAdmin))
+	assert.Equal(t, true, IsBuiltinRole(util.RoleAdmin))
 	assert.Equal(t, true, IsDefaultRole(util.RolePublic))
+	assert.Equal(t, true, IsBuiltinRole(util.RolePublic))
 	assert.Equal(t, false, IsDefaultRole("manager"))
+	assert.Equal(t, false, IsBuiltinRole("manager"))
+	util.BuiltinRoles = append(util.BuiltinRoles, "manager")
+	assert.Equal(t, true, IsBuiltinRole("manager"))
 }
 
 func GetContext(ctx context.Context, originValue string) context.Context {
