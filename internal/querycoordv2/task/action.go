@@ -112,7 +112,8 @@ func (action *SegmentAction) IsFinished(distMgr *meta.DistributionManager) bool 
 		leaderSegmentDist := distMgr.LeaderViewManager.GetSealedSegmentDist(action.SegmentID())
 		nodeSegmentDist := distMgr.SegmentDistManager.GetSegmentDist(action.SegmentID())
 		return lo.Contains(leaderSegmentDist, action.Node()) &&
-			lo.Contains(nodeSegmentDist, action.Node())
+			lo.Contains(nodeSegmentDist, action.Node()) &&
+			action.rpcReturned.Load()
 	} else if action.Type() == ActionTypeReduce {
 		// FIXME: Now shard leader's segment view is a map of segment ID to node ID,
 		// loading segment replaces the node ID with the new one,
@@ -140,11 +141,14 @@ func (action *SegmentAction) IsFinished(distMgr *meta.DistributionManager) bool 
 
 type ChannelAction struct {
 	*BaseAction
+
+	rpcReturned *atomic.Bool
 }
 
 func NewChannelAction(nodeID UniqueID, typ ActionType, channelName string) *ChannelAction {
 	return &ChannelAction{
-		BaseAction: NewBaseAction(nodeID, typ, channelName),
+		BaseAction:  NewBaseAction(nodeID, typ, channelName),
+		rpcReturned: atomic.NewBool(false),
 	}
 }
 
@@ -157,5 +161,5 @@ func (action *ChannelAction) IsFinished(distMgr *meta.DistributionManager) bool 
 	hasNode := lo.Contains(nodes, action.Node())
 	isGrow := action.Type() == ActionTypeGrow
 
-	return hasNode == isGrow
+	return hasNode == isGrow && action.rpcReturned.Load()
 }
