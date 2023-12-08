@@ -386,6 +386,7 @@ func (node *QueryNode) searchChannel(ctx context.Context, req *querypb.SearchReq
 	if err != nil {
 		return nil, err
 	}
+	resp.ChannelIDsSearched = []string{channel}
 
 	tr.CtxElapse(ctx, fmt.Sprintf("do search with channel done , vChannel = %s, segmentIDs = %v",
 		channel,

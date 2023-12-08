@@ -23,7 +23,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -33,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/util/importutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -95,14 +93,14 @@ func (s *BulkInsertSuite) TestBulkInsert() {
 	s.Equal(showCollectionsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
 
-	err = GenerateNumpyFile(c.ChunkManager.RootPath()+"/"+"embeddings.npy", 100, schemapb.DataType_FloatVector, []*commonpb.KeyValuePair{
+	err = integration.GenerateNumpyFile(c.ChunkManager.RootPath()+"/"+"embeddings.npy", 100, schemapb.DataType_FloatVector, []*commonpb.KeyValuePair{
 		{
 			Key:   common.DimKey,
 			Value: strconv.Itoa(Dim),
 		},
 	})
 	s.NoError(err)
-	err = GenerateNumpyFile(c.ChunkManager.RootPath()+"/"+"image_path.npy", 100, schemapb.DataType_VarChar, []*commonpb.KeyValuePair{
+	err = integration.GenerateNumpyFile(c.ChunkManager.RootPath()+"/"+"image_path.npy", 100, schemapb.DataType_VarChar, []*commonpb.KeyValuePair{
 		{
 			Key:   common.MaxLengthKey,
 			Value: strconv.Itoa(65535),
@@ -215,53 +213,10 @@ func TestBulkInsert(t *testing.T) {
 	suite.Run(t, new(BulkInsertSuite))
 }
 
-func GenerateNumpyFile(filePath string, rowCount int, dType schemapb.DataType, typeParams []*commonpb.KeyValuePair) error {
-	if dType == schemapb.DataType_VarChar {
-		var data []string
-		for i := 0; i < rowCount; i++ {
-			data = append(data, "str")
-		}
-		err := importutil.CreateNumpyFile(filePath, data)
-		if err != nil {
-			log.Warn("failed to create numpy file", zap.Error(err))
-			return err
-		}
-	}
-	if dType == schemapb.DataType_FloatVector {
-		dimStr, ok := funcutil.KeyValuePair2Map(typeParams)[common.DimKey]
-		if !ok {
-			return errors.New("FloatVector field needs dim parameter")
-		}
-		dim, err := strconv.Atoi(dimStr)
-		if err != nil {
-			return err
-		}
-		// data := make([][]float32, rowCount)
-		var data [][Dim]float32
-		for i := 0; i < rowCount; i++ {
-			vec := [Dim]float32{}
-			for j := 0; j < dim; j++ {
-				vec[j] = 1.1
-			}
-			// v := reflect.Indirect(reflect.ValueOf(vec))
-			// log.Info("type", zap.Any("type", v.Kind()))
-			data = append(data, vec)
-			// v2 := reflect.Indirect(reflect.ValueOf(data))
-			// log.Info("type", zap.Any("type", v2.Kind()))
-		}
-		err = importutil.CreateNumpyFile(filePath, data)
-		if err != nil {
-			log.Warn("failed to create numpy file", zap.Error(err))
-			return err
-		}
-	}
-	return nil
-}
-
 func TestGenerateNumpyFile(t *testing.T) {
 	err := os.MkdirAll(TempFilesPath, os.ModePerm)
 	require.NoError(t, err)
-	err = GenerateNumpyFile(TempFilesPath+"embeddings.npy", 100, schemapb.DataType_FloatVector, []*commonpb.KeyValuePair{
+	err = integration.GenerateNumpyFile(TempFilesPath+"embeddings.npy", 100, schemapb.DataType_FloatVector, []*commonpb.KeyValuePair{
 		{
 			Key:   common.DimKey,
 			Value: strconv.Itoa(Dim),

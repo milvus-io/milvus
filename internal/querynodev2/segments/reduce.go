@@ -36,6 +36,7 @@ type SliceInfo struct {
 // SearchResult contains a pointer to the search result in C++ memory
 type SearchResult struct {
 	cSearchResult C.CSearchResult
+	isEmpty       C.CSearchResultEmptyFlag
 }
 
 // searchResultDataBlobs is the CSearchResultsDataBlobs in C++

@@ -20,10 +20,19 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"strconv"
 	"time"
 
+	"github.com/cockroachdb/errors"
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/util/importutil"
+	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 )
 
 func (s *MiniClusterSuite) WaitForFlush(ctx context.Context, segIDs []int64, flushTs uint64, dbName, collectionName string) {
@@ -147,6 +156,60 @@ func NewBinaryVectorFieldData(fieldName string, numRows, dim int) *schemapb.Fiel
 			},
 		},
 	}
+}
+
+func GenerateNumpyFile(filePath string, rowCount int, dType schemapb.DataType, typeParams []*commonpb.KeyValuePair) error {
+	const DIM = 128
+	if dType == schemapb.DataType_VarChar {
+		var data []string
+		for i := 0; i < rowCount; i++ {
+			data = append(data, "str")
+		}
+		err := importutil.CreateNumpyFile(filePath, data)
+		if err != nil {
+			log.Warn("failed to create numpy file", zap.Error(err))
+			return err
+		}
+	}
+	if dType == schemapb.DataType_Int64 {
+		var data []int64
+		for i := 0; i < rowCount; i++ {
+			data = append(data, int64(i))
+		}
+		err := importutil.CreateNumpyFile(filePath, data)
+		if err != nil {
+			log.Warn("failed to create numpy file", zap.Error(err))
+			return err
+		}
+	}
+	if dType == schemapb.DataType_FloatVector {
+		dimStr, ok := funcutil.KeyValuePair2Map(typeParams)[common.DimKey]
+		if !ok {
+			return errors.New("FloatVector field needs dim parameter")
+		}
+		dim, err := strconv.Atoi(dimStr)
+		if err != nil {
+			return err
+		}
+		var data [][DIM]float32
+		for i := 0; i < rowCount; i++ {
+			vec := [DIM]float32{}
+			for j := 0; j < dim; j++ {
+				vec[j] = float32(i)
+			}
+			// v := reflect.Indirect(reflect.ValueOf(vec))
+			// log.Info("type", zap.Any("type", v.Kind()))
+			data = append(data, vec)
+			// v2 := reflect.Indirect(reflect.ValueOf(data))
+			// log.Info("type", zap.Any("type", v2.Kind()))
+		}
+		err = importutil.CreateNumpyFile(filePath, data)
+		if err != nil {
+			log.Warn("failed to create numpy file", zap.Error(err))
+			return err
+		}
+	}
+	return nil
 }
 
 func GenerateInt64Array(numRows int) []int64 {

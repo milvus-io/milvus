@@ -88,11 +88,12 @@ const (
 
 // Search, Index parameter keys
 const (
-	TopKKey        = "topk"
-	SearchParamKey = "search_param"
-	SegmentNumKey  = "segment_num"
-	WithFilterKey  = "with_filter"
-	CollectionKey  = "collection"
+	TopKKey         = "topk"
+	SearchParamKey  = "search_param"
+	SegmentNumKey   = "segment_num"
+	WithFilterKey   = "with_filter"
+	WithOptimizeKey = "with_optimize"
+	CollectionKey   = "collection"
 
 	IndexParamsKey = "params"
 	IndexTypeKey   = "index_type"

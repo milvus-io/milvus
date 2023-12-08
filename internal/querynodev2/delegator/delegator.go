@@ -217,6 +217,25 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 		log.Warn("delegator failed to search, current distribution is not serviceable")
 		return nil, merr.WrapErrChannelNotAvailable(sd.vchannelName, "distribution is not servcieable")
 	}
+
+	// retry search, check the segments we need to search
+	if req.GetReq().EnsureSearchQuality {
+		index := funcutil.SliceIndex(req.GetReq().ChannelIDsSearched, sd.vchannelName)
+		searchSegments := req.GetReq().GetSealedSegmentIDsSearched()[req.GetReq().NumSegmentsPrefixSum[index]:req.GetReq().GetNumSegmentsPrefixSum()[index+1]]
+		sealedToSearch := lo.Map(sealed, func(item SnapshotItem, _ int) SnapshotItem {
+			return SnapshotItem{
+				NodeID: item.NodeID,
+				Segments: lo.Filter(item.Segments, func(seg SegmentEntry, _ int) bool {
+					return funcutil.SliceContain(searchSegments, seg.SegmentID)
+				}),
+			}
+		})
+		sealedNum := lo.SumBy(sealedToSearch, func(item SnapshotItem) int { return len(item.Segments) })
+		if sealedNum == len(searchSegments) { // the required segments found successfully, unless search all the segments
+			sealed = sealedToSearch
+		}
+	}
+
 	defer sd.distribution.Unpin(version)
 	existPartitions := sd.collection.GetPartitions()
 	growing = lo.Filter(growing, func(segment SegmentEntry, _ int) bool {

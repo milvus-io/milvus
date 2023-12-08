@@ -140,7 +140,7 @@ func (suite *SearchSuite) TestSearchSealed() {
 	searchReq, err := genSearchPlanAndRequests(suite.collection, []int64{suite.sealed.ID()}, IndexFaissIDMap, nq)
 	suite.NoError(err)
 
-	_, segments, err := SearchHistorical(ctx, suite.manager, searchReq, suite.collectionID, nil, []int64{suite.sealed.ID()})
+	_, _, segments, err := SearchHistorical(ctx, suite.manager, searchReq, suite.collectionID, nil, []int64{suite.sealed.ID()})
 	suite.NoError(err)
 	suite.manager.Segment.Unpin(segments)
 }
@@ -149,13 +149,14 @@ func (suite *SearchSuite) TestSearchGrowing() {
 	searchReq, err := genSearchPlanAndRequests(suite.collection, []int64{suite.growing.ID()}, IndexFaissIDMap, 1)
 	suite.NoError(err)
 
-	res, segments, err := SearchStreaming(context.TODO(), suite.manager, searchReq,
+	res, validSegments, segments, err := SearchStreaming(context.TODO(), suite.manager, searchReq,
 		suite.collectionID,
 		[]int64{suite.partitionID},
 		[]int64{suite.growing.ID()},
 	)
 	suite.NoError(err)
 	suite.Len(res, 1)
+	suite.Len(validSegments, 1)
 	suite.manager.Segment.Unpin(segments)
 }
 

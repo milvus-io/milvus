@@ -1478,8 +1478,9 @@ func TestTaskSearch_reduceSearchResultData(t *testing.T) {
 
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
-				reduced, err := reduceSearchResultData(context.TODO(), results, nq, topk, metric.L2, schemapb.DataType_Int64, test.offset)
+				reduced, resultNotEnough, err := reduceSearchResultData(context.TODO(), results, nq, topk, metric.L2, schemapb.DataType_Int64, test.offset)
 				assert.NoError(t, err)
+				assert.False(t, resultNotEnough)
 				assert.Equal(t, test.outData, reduced.GetResults().GetIds().GetIntId().GetData())
 				assert.Equal(t, []int64{test.limit, test.limit}, reduced.GetResults().GetTopks())
 				assert.Equal(t, test.limit, reduced.GetResults().GetTopK())
@@ -1530,8 +1531,9 @@ func TestTaskSearch_reduceSearchResultData(t *testing.T) {
 
 		for _, test := range lessThanLimitTests {
 			t.Run(test.description, func(t *testing.T) {
-				reduced, err := reduceSearchResultData(context.TODO(), results, nq, topk, metric.L2, schemapb.DataType_Int64, test.offset)
+				reduced, resultNotEnough, err := reduceSearchResultData(context.TODO(), results, nq, topk, metric.L2, schemapb.DataType_Int64, test.offset)
 				assert.NoError(t, err)
+				assert.False(t, resultNotEnough)
 				assert.Equal(t, test.outData, reduced.GetResults().GetIds().GetIntId().GetData())
 				assert.Equal(t, []int64{test.outLimit, test.outLimit}, reduced.GetResults().GetTopks())
 				assert.Equal(t, test.outLimit, reduced.GetResults().GetTopK())
@@ -1554,9 +1556,10 @@ func TestTaskSearch_reduceSearchResultData(t *testing.T) {
 			results = append(results, r)
 		}
 
-		reduced, err := reduceSearchResultData(context.TODO(), results, nq, topk, metric.L2, schemapb.DataType_Int64, 0)
+		reduced, resultNotEnough, err := reduceSearchResultData(context.TODO(), results, nq, topk, metric.L2, schemapb.DataType_Int64, 0)
 
 		assert.NoError(t, err)
+		assert.False(t, resultNotEnough)
 		assert.Equal(t, resultData, reduced.GetResults().GetIds().GetIntId().GetData())
 		assert.Equal(t, []int64{5, 5}, reduced.GetResults().GetTopks())
 		assert.Equal(t, int64(5), reduced.GetResults().GetTopK())
@@ -1581,9 +1584,10 @@ func TestTaskSearch_reduceSearchResultData(t *testing.T) {
 			results = append(results, r)
 		}
 
-		reduced, err := reduceSearchResultData(context.TODO(), results, nq, topk, metric.L2, schemapb.DataType_VarChar, 0)
+		reduced, resultNotEnough, err := reduceSearchResultData(context.TODO(), results, nq, topk, metric.L2, schemapb.DataType_VarChar, 0)
 
 		assert.NoError(t, err)
+		assert.False(t, resultNotEnough)
 		assert.Equal(t, resultData, reduced.GetResults().GetIds().GetStrId().GetData())
 		assert.Equal(t, []int64{5, 5}, reduced.GetResults().GetTopks())
 		assert.Equal(t, int64(5), reduced.GetResults().GetTopK())
@@ -1886,6 +1890,141 @@ func getSearchResultData(nq, topk int64) *schemapb.SearchResultData {
 		Topks:      []int64{},
 	}
 	return &result
+}
+
+func TestSearchTask_Research(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	const (
+		topk       = 10
+		nq         = 1
+		dim        = 128
+		rows       = 10
+		collection = "test-re-search"
+
+		pkField  = "pk"
+		vecField = "fvec"
+	)
+
+	ids1 := []int64{1, 2, 3}
+	scores1 := []float32{-1.0, -2.0, -3.0}
+
+	ids := []int64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+	scores := []float32{-1.0, -2.0, -3.0, -4.0, -5.0, -6.0, -7.0, -8.0, -9.0, -10.0}
+
+	factory := dependency.NewDefaultFactory(true)
+	node, err := NewProxy(ctx, factory)
+	assert.NoError(t, err)
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+	node.tsoAllocator = &timestampAllocator{
+		tso: newMockTimestampAllocatorInterface(),
+	}
+	scheduler, err := newTaskScheduler(ctx, node.tsoAllocator, factory)
+	assert.NoError(t, err)
+	node.sched = scheduler
+	err = node.sched.Start()
+	assert.NoError(t, err)
+	err = node.initRateCollector()
+	assert.NoError(t, err)
+	node.rootCoord = mocks.NewMockRootCoordClient(t)
+	node.queryCoord = mocks.NewMockQueryCoordClient(t)
+
+	collectionName := "col"
+	collectionID := UniqueID(0)
+	cache := NewMockCache(t)
+	cache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(collectionID, nil).Maybe()
+	cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(constructCollectionSchema(pkField, vecField, dim, collection), nil).Maybe()
+	cache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"_default": UniqueID(1)}, nil).Maybe()
+	cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionBasicInfo{}, nil).Maybe()
+	cache.EXPECT().GetShards(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(map[string][]nodeInfo{}, nil).Maybe()
+	cache.EXPECT().DeprecateShardCache(mock.Anything, mock.Anything).Return().Maybe()
+	globalMetaCache = cache
+
+	t.Run("Test normal", func(t *testing.T) {
+		resultData := genSearchResultData(nq, topk, ids, scores)
+		resultData.Topks = []int64{topk}
+		idFieldData := &schemapb.FieldData{
+			Type:      schemapb.DataType_Int64,
+			FieldName: pkField,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{
+							Data: ids,
+						},
+					},
+				},
+			},
+		}
+		resultData.FieldsData = []*schemapb.FieldData{
+			idFieldData,
+		}
+		sliceBlob, _ := proto.Marshal(resultData)
+		schema := constructCollectionSchema(pkField, vecField, dim, collection)
+		qn := mocks.NewMockQueryNodeClient(t)
+		qn.EXPECT().Search(mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, request *querypb.SearchRequest, option ...grpc.CallOption) (*internalpb.SearchResults, error) {
+				return &internalpb.SearchResults{
+					NumQueries: nq,
+					TopK:       topk,
+					SlicedBlob: sliceBlob,
+				}, nil
+			})
+
+		lb := NewMockLBPolicy(t)
+		lb.EXPECT().Execute(mock.Anything, mock.Anything).Run(func(ctx context.Context, workload CollectionWorkLoad) {
+			err = workload.exec(ctx, 0, qn)
+			assert.NoError(t, err)
+		}).Return(nil)
+		lb.EXPECT().UpdateCostMetrics(mock.Anything, mock.Anything).Return()
+		node.lbPolicy = lb
+
+		resultIDs := &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{
+				IntId: &schemapb.LongArray{
+					Data: ids1,
+				},
+			},
+		}
+
+		st := &searchTask{
+			ctx:            ctx,
+			collectionName: collectionName,
+			SearchRequest: &internalpb.SearchRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:  commonpb.MsgType_Search,
+					SourceID: paramtable.GetNodeID(),
+				},
+				Nq:   nq,
+				Topk: topk,
+			},
+			request: &milvuspb.SearchRequest{
+				CollectionName: collectionName,
+				Nq:             nq,
+				SearchParams:   getValidSearchParams(),
+			},
+			result: &milvuspb.SearchResults{
+				Results: &schemapb.SearchResultData{
+					Ids:    resultIDs,
+					Scores: scores1,
+				},
+			},
+			resultBuf: typeutil.NewConcurrentSet[*internalpb.SearchResults](),
+			schema:    schema,
+			tr:        timerecord.NewTimeRecorder("search"),
+			node:      node,
+		}
+		assert.Len(t, st.result.Results.Scores, 3)
+		fmt.Println(st.SearchRequest)
+		err := st.Research()
+		fmt.Println(st.SearchRequest)
+		assert.NoError(t, err)
+		assert.Len(t, st.result.Results.Scores, topk)
+		scoresResult := []float32{1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0}
+		assert.Equal(t, scoresResult, st.result.Results.Scores)
+		assert.Len(t, st.result.Results.FieldsData, 1)
+	})
 }
 
 func TestSearchTask_Requery(t *testing.T) {

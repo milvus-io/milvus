@@ -80,7 +80,8 @@ Search(CSegmentInterface c_segment,
        CSearchPlan c_plan,
        CPlaceholderGroup c_placeholder_group,
        CTraceContext c_trace,
-       CSearchResult* result) {
+       CSearchResult* result,
+       CSearchResultEmptyFlag* is_empty) {
     try {
         auto segment = (milvus::segcore::SegmentInterface*)c_segment;
         auto plan = (milvus::query::Plan*)c_plan;
@@ -97,6 +98,7 @@ Search(CSegmentInterface c_segment,
                 dis *= -1;
             }
         }
+        *is_empty = (search_result->unity_topK_ == 0);
         *result = search_result.release();
         span->End();
         milvus::tracer::CloseRootSpan();

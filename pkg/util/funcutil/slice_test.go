@@ -23,6 +23,39 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func Test_SliceIndex(t *testing.T) {
+	strSlice := []string{"test", "for", "SliceIndex"}
+	intSlice := []int{1, 2, 3}
+
+	cases := []struct {
+		s    any
+		item any
+		want int
+	}{
+		{strSlice, "test", 0},
+		{strSlice, "for", 1},
+		{strSlice, "SliceIndex", 2},
+		{strSlice, "tests", -1},
+		{intSlice, 1, 0},
+		{intSlice, 2, 1},
+		{intSlice, 3, 2},
+		{intSlice, 4, -1},
+	}
+
+	for _, test := range cases {
+		switch test.item.(type) {
+		case string:
+			if got := SliceIndex(test.s.([]string), test.item.(string)); got != test.want {
+				t.Errorf("SliceIndex(%v, %v) = %v", test.s, test.item, test.want)
+			}
+		case int:
+			if got := SliceIndex(test.s.([]int), test.item.(int)); got != test.want {
+				t.Errorf("SliceIndex(%v, %v) = %v", test.s, test.item, test.want)
+			}
+		}
+	}
+}
+
 func Test_SliceContain(t *testing.T) {
 	strSlice := []string{"test", "for", "SliceContain"}
 	intSlice := []int{1, 2, 3}

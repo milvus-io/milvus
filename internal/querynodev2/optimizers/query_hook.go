@@ -56,12 +56,14 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 		estSegmentNum := numSegments * int(channelNum)
 		withFilter := (plan.GetVectorAnns().GetPredicates() != nil)
 		queryInfo := plan.GetVectorAnns().GetQueryInfo()
+		withOptimize := (!req.GetReq().EnsureSearchQuality)
 		params := map[string]any{
-			common.TopKKey:        queryInfo.GetTopk(),
-			common.SearchParamKey: queryInfo.GetSearchParams(),
-			common.SegmentNumKey:  estSegmentNum,
-			common.WithFilterKey:  withFilter,
-			common.CollectionKey:  req.GetReq().GetCollectionID(),
+			common.TopKKey:         queryInfo.GetTopk(),
+			common.SearchParamKey:  queryInfo.GetSearchParams(),
+			common.SegmentNumKey:   estSegmentNum,
+			common.WithFilterKey:   withFilter,
+			common.WithOptimizeKey: withOptimize,
+			common.CollectionKey:   req.GetReq().GetCollectionID(),
 		}
 		err := queryHook.Run(params)
 		if err != nil {

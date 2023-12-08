@@ -288,6 +288,15 @@ var (
 		}, []string{
 			nodeIDLabelName,
 		})
+
+	// ProxyRetrySearchCount record the count of retry search
+	ProxyRetrySearchCount = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "retry_search_count",
+			Help:      "count of retry search",
+		}, []string{nodeIDLabelName})
 )
 
 // RegisterProxy registers Proxy metrics
@@ -331,6 +340,7 @@ func RegisterProxy(registry *prometheus.Registry) {
 
 	registry.MustRegister(ProxyWorkLoadScore)
 	registry.MustRegister(ProxyExecutingTotalNq)
+	registry.MustRegister(ProxyRetrySearchCount)
 }
 
 func CleanupCollectionMetrics(nodeID int64, collection string) {

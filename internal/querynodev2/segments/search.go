@@ -32,11 +32,12 @@ import (
 
 // searchOnSegments performs search on listed segments
 // all segment ids are validated before calling this function
-func searchSegments(ctx context.Context, segments []Segment, segType SegmentType, searchReq *SearchRequest) ([]*SearchResult, error) {
+func searchSegments(ctx context.Context, segments []Segment, segType SegmentType, searchReq *SearchRequest) ([]*SearchResult, []int64, error) {
 	var (
 		// results variables
 		resultCh = make(chan *SearchResult, len(segments))
 		errs     = make([]error, len(segments))
+		emptySeg = make([]bool, len(segments))
 		wg       sync.WaitGroup
 
 		// For log only
@@ -62,6 +63,7 @@ func searchSegments(ctx context.Context, segments []Segment, segType SegmentType
 			// record search time
 			tr := timerecord.NewTimeRecorder("searchOnSegments")
 			searchResult, err := seg.Search(ctx, searchReq)
+			emptySeg[i] = bool(searchResult.isEmpty)
 			errs[i] = err
 			resultCh <- searchResult
 			// update metrics
@@ -75,15 +77,28 @@ func searchSegments(ctx context.Context, segments []Segment, segType SegmentType
 	wg.Wait()
 	close(resultCh)
 
-	searchResults := make([]*SearchResult, 0, len(segments))
+	searchResults := make([]*SearchResult, 0)
+	emptyResults := make([]*SearchResult, 0)
 	for result := range resultCh {
-		searchResults = append(searchResults, result)
+		if bool(result.isEmpty) {
+			emptyResults = append(emptyResults, result)
+		} else {
+			searchResults = append(searchResults, result)
+		}
 	}
+	validSegments := make([]int64, 0)
+	for i, segment := range segments {
+		if !emptySeg[i] {
+			validSegments = append(validSegments, segment.ID())
+		}
+	}
+
+	DeleteSearchResults(emptyResults)
 
 	for _, err := range errs {
 		if err != nil {
 			DeleteSearchResults(searchResults)
-			return nil, err
+			return nil, nil, err
 		}
 	}
 
@@ -91,29 +106,29 @@ func searchSegments(ctx context.Context, segments []Segment, segType SegmentType
 		log.Ctx(ctx).Debug("search growing/sealed segments without indexes", zap.Int64s("segmentIDs", segmentsWithoutIndex))
 	}
 
-	return searchResults, nil
+	return searchResults, validSegments, nil
 }
 
 // search will search on the historical segments the target segments in historical.
 // if segIDs is not specified, it will search on all the historical segments speficied by partIDs.
 // if segIDs is specified, it will only search on the segments specified by the segIDs.
 // if partIDs is empty, it means all the partitions of the loaded collection or all the partitions loaded.
-func SearchHistorical(ctx context.Context, manager *Manager, searchReq *SearchRequest, collID int64, partIDs []int64, segIDs []int64) ([]*SearchResult, []Segment, error) {
+func SearchHistorical(ctx context.Context, manager *Manager, searchReq *SearchRequest, collID int64, partIDs []int64, segIDs []int64) ([]*SearchResult, []int64, []Segment, error) {
 	segments, err := validateOnHistorical(ctx, manager, collID, partIDs, segIDs)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	searchResults, err := searchSegments(ctx, segments, SegmentTypeSealed, searchReq)
-	return searchResults, segments, err
+	searchResults, validSegments, err := searchSegments(ctx, segments, SegmentTypeSealed, searchReq)
+	return searchResults, validSegments, segments, err
 }
 
 // searchStreaming will search all the target segments in streaming
 // if partIDs is empty, it means all the partitions of the loaded collection or all the partitions loaded.
-func SearchStreaming(ctx context.Context, manager *Manager, searchReq *SearchRequest, collID int64, partIDs []int64, segIDs []int64) ([]*SearchResult, []Segment, error) {
+func SearchStreaming(ctx context.Context, manager *Manager, searchReq *SearchRequest, collID int64, partIDs []int64, segIDs []int64) ([]*SearchResult, []int64, []Segment, error) {
 	segments, err := validateOnStream(ctx, manager, collID, partIDs, segIDs)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	searchResults, err := searchSegments(ctx, segments, SegmentTypeGrowing, searchReq)
-	return searchResults, segments, err
+	searchResults, validSegments, err := searchSegments(ctx, segments, SegmentTypeGrowing, searchReq)
+	return searchResults, validSegments, segments, err
 }

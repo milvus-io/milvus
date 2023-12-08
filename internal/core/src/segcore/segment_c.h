@@ -25,6 +25,7 @@ extern "C" {
 #include "segcore/load_field_data_c.h"
 
 typedef void* CSearchResult;
+typedef bool CSearchResultEmptyFlag;
 typedef CProto CRetrieveResult;
 
 //////////////////////////////    common interfaces    //////////////////////////////
@@ -45,7 +46,8 @@ Search(CSegmentInterface c_segment,
        CSearchPlan c_plan,
        CPlaceholderGroup c_placeholder_group,
        CTraceContext c_trace,
-       CSearchResult* result);
+       CSearchResult* result,
+       bool* is_empty);
 
 void
 DeleteRetrieveResult(CRetrieveResult* retrieve_result);

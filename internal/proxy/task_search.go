@@ -217,6 +217,10 @@ func getNq(req *milvuspb.SearchRequest) (int64, error) {
 func (t *searchTask) PreExecute(ctx context.Context) error {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Search-PreExecute")
 	defer sp.End()
+	// retry search, do not construct again
+	if t.SearchRequest.EnsureSearchQuality {
+		return nil
+	}
 
 	t.Base.MsgType = commonpb.MsgType_Search
 	t.Base.SourceID = paramtable.GetNodeID()
@@ -291,6 +295,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	t.SearchRequest.OutputFieldsId = outputFieldIDs
 
 	partitionNames := t.request.GetPartitionNames()
+
 	if t.request.GetDslType() == commonpb.DslType_BoolExprV1 {
 		annsField, err := funcutil.GetAttrByKeyFromRepeatedKV(AnnsFieldKey, t.request.GetSearchParams())
 		if err != nil || len(annsField) == 0 {
@@ -435,7 +440,8 @@ func (t *searchTask) Execute(ctx context.Context) error {
 		return errors.Wrap(err, "failed to search")
 	}
 
-	log.Debug("Search Execute done.",
+	log.Info("Search Execute done.",
+		zap.Int64("idd", t.ID()),
 		zap.Int64("collection", t.GetCollectionID()),
 		zap.Int64s("partitionIDs", t.GetPartitionIDs()))
 	return nil
@@ -492,8 +498,8 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 		log.Warn("failed to get primary field schema", zap.Error(err))
 		return err
 	}
-
-	t.result, err = reduceSearchResultData(ctx, validSearchResults, Nq, Topk, MetricType, primaryFieldSchema.DataType, t.offset)
+	var resultNotEnough bool
+	t.result, resultNotEnough, err = reduceSearchResultData(ctx, validSearchResults, Nq, Topk, MetricType, primaryFieldSchema.DataType, t.offset)
 	if err != nil {
 		log.Warn("failed to reduce search results", zap.Error(err))
 		return err
@@ -504,6 +510,28 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	t.result.CollectionName = t.collectionName
 	t.fillInFieldInfo()
 
+	if resultNotEnough && !t.SearchRequest.EnsureSearchQuality && Params.AutoIndexConfig.Enable.GetAsBool() {
+		numPrefixSum := 0
+		t.SearchRequest.NumSegmentsPrefixSum = append(t.SearchRequest.NumSegmentsPrefixSum, int32(numPrefixSum))
+		numSegmentsTotal := 0
+		for _, reduceResult := range toReduceResults {
+			t.SearchRequest.ChannelIDsSearched = append(t.SearchRequest.ChannelIDsSearched, reduceResult.ChannelIDsSearched...)
+			t.SearchRequest.SealedSegmentIDsSearched = append(t.SearchRequest.SealedSegmentIDsSearched, reduceResult.SealedSegmentIDsSearched...)
+			numSegmentsTotal += int(reduceResult.GetSearchedNumSegments())
+			numPrefixSum += len(reduceResult.SealedSegmentIDsSearched)
+			t.SearchRequest.NumSegmentsPrefixSum = append(t.SearchRequest.NumSegmentsPrefixSum, int32(numPrefixSum))
+		}
+		if numSegmentsTotal > len(t.SearchRequest.SealedSegmentIDsSearched) {
+			log.Warn("retry search: ", zap.Int("segments with results", len(t.SearchRequest.SealedSegmentIDsSearched)), zap.Int("total segments", numSegmentsTotal))
+			metrics.ProxyRetrySearchCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Add(1)
+
+			err := t.Research()
+			if err != nil {
+				log.Warn("failed to retry search, use the first result", zap.Error(err))
+			}
+		}
+	}
+
 	if t.requery {
 		err = t.Requery()
 		if err != nil {
@@ -512,8 +540,8 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 		}
 	}
 	t.result.Results.OutputFields = t.userOutputFields
-
-	log.Debug("Search post execute done",
+	log.Info("Search post execute done",
+		zap.Int64("id", t.ID()),
 		zap.Int64("collection", t.GetCollectionID()),
 		zap.Int64s("partitionIDs", t.GetPartitionIDs()))
 	return nil
@@ -577,6 +605,33 @@ func (t *searchTask) estimateResultSize(nq int64, topK int64) (int64, error) {
 	//	return 0, err
 	//}
 	//return int64(sizePerRecord) * nq * topK, nil
+}
+
+func (t *searchTask) Research() error {
+	newt := &searchTask{
+		ctx:              t.ctx,
+		Condition:        NewTaskCondition(t.ctx),
+		SearchRequest:    typeutil.Clone(t.SearchRequest),
+		collectionName:   t.collectionName,
+		request:          t.request,
+		schema:           t.schema,
+		offset:           t.offset,
+		userOutputFields: t.userOutputFields,
+		tr:               timerecord.NewTimeRecorder("re-search"),
+		qc:               t.node.(*Proxy).queryCoord,
+		node:             t.node,
+		lb:               t.node.(*Proxy).lbPolicy,
+	}
+	newt.SearchRequest.EnsureSearchQuality = true
+	searchResults, err := t.node.(*Proxy).search(t.ctx, newt)
+	if err != nil {
+		return err
+	}
+	if !merr.Ok(searchResults.GetStatus()) {
+		return merr.Error(searchResults.GetStatus())
+	}
+	t.result = searchResults
+	return nil
 }
 
 func (t *searchTask) Requery() error {
@@ -779,7 +834,7 @@ func selectHighestScoreIndex(subSearchResultData []*schemapb.SearchResultData, s
 	return subSearchIdx, resultDataIdx
 }
 
-func reduceSearchResultData(ctx context.Context, subSearchResultData []*schemapb.SearchResultData, nq int64, topk int64, metricType string, pkType schemapb.DataType, offset int64) (*milvuspb.SearchResults, error) {
+func reduceSearchResultData(ctx context.Context, subSearchResultData []*schemapb.SearchResultData, nq int64, topk int64, metricType string, pkType schemapb.DataType, offset int64) (*milvuspb.SearchResults, bool, error) {
 	tr := timerecord.NewTimeRecorder("reduceSearchResultData")
 	defer func() {
 		tr.CtxElapse(ctx, "done")
@@ -819,7 +874,7 @@ func reduceSearchResultData(ctx context.Context, subSearchResultData []*schemapb
 			},
 		}
 	default:
-		return nil, errors.New("unsupported pk type")
+		return nil, false, errors.New("unsupported pk type")
 	}
 
 	for i, sData := range subSearchResultData {
@@ -832,7 +887,7 @@ func reduceSearchResultData(ctx context.Context, subSearchResultData []*schemapb
 			zap.Any("length of FieldsData", len(sData.FieldsData)))
 		if err := checkSearchResultData(sData, nq, topk); err != nil {
 			log.Ctx(ctx).Warn("invalid search results", zap.Error(err))
-			return ret, err
+			return ret, false, err
 		}
 		// printSearchResultData(sData, strconv.FormatInt(int64(i), 10))
 	}
@@ -850,8 +905,9 @@ func reduceSearchResultData(ctx context.Context, subSearchResultData []*schemapb
 	}
 
 	var (
-		skipDupCnt int64
-		realTopK   int64 = -1
+		skipDupCnt      int64
+		realTopK        int64 = -1
+		resultNotEnough bool
 	)
 
 	var retSize int64
@@ -908,14 +964,16 @@ func reduceSearchResultData(ctx context.Context, subSearchResultData []*schemapb
 			// return nil, errors.New("the length (topk) between all result of query is different")
 		}
 		realTopK = j
+		if realTopK < limit {
+			resultNotEnough = true
+		}
 		ret.Results.Topks = append(ret.Results.Topks, realTopK)
 
 		// limit search result to avoid oom
 		if retSize > maxOutputSize {
-			return nil, fmt.Errorf("search results exceed the maxOutputSize Limit %d", maxOutputSize)
+			return nil, false, fmt.Errorf("search results exceed the maxOutputSize Limit %d", maxOutputSize)
 		}
 	}
-	log.Ctx(ctx).Debug("skip duplicated search result", zap.Int64("count", skipDupCnt))
 
 	if skipDupCnt > 0 {
 		log.Info("skip duplicated search result", zap.Int64("count", skipDupCnt))
@@ -927,7 +985,7 @@ func reduceSearchResultData(ctx context.Context, subSearchResultData []*schemapb
 			ret.Results.Scores[k] *= -1
 		}
 	}
-	return ret, nil
+	return ret, resultNotEnough, nil
 }
 
 func (t *searchTask) TraceCtx() context.Context {

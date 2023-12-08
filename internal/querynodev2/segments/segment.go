@@ -379,6 +379,7 @@ func (s *LocalSegment) Search(ctx context.Context, searchReq *SearchRequest) (*S
 			searchReq.cPlaceholderGroup,
 			traceCtx,
 			&searchResult.cSearchResult,
+			&searchResult.isEmpty,
 		)
 		metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
 		return nil, nil

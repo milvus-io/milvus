@@ -76,6 +76,12 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 		return nil, err
 	}
 
+	for _, result := range results {
+		searchResults.SealedSegmentIDsSearched = append(searchResults.SealedSegmentIDsSearched, result.SealedSegmentIDsSearched...)
+		searchResults.SearchedNumSegments += result.SearchedNumSegments
+		searchResults.ChannelIDsSearched = append(searchResults.ChannelIDsSearched, result.ChannelIDsSearched...)
+	}
+
 	requestCosts := lo.FilterMap(results, func(result *internalpb.SearchResults, _ int) (*internalpb.CostAggregation, bool) {
 		if paramtable.Get().QueryNodeCfg.EnableWorkerSQCostMetrics.GetAsBool() {
 			return result.GetCostAggregation(), true

@@ -1075,11 +1075,13 @@ TEST(CApiTest, SearchTest) {
     placeholderGroups.push_back(placeholderGroup);
 
     CSearchResult search_result;
-    auto res = Search(segment, plan, placeholderGroup, {}, &search_result);
+    CSearchResultEmptyFlag is_empty;
+    auto res = Search(segment, plan, placeholderGroup, {}, &search_result, &is_empty);
     ASSERT_EQ(res.error_code, Success);
 
     CSearchResult search_result2;
-    auto res2 = Search(segment, plan, placeholderGroup, {}, &search_result2);
+    CSearchResultEmptyFlag is_empty2;
+    auto res2 = Search(segment, plan, placeholderGroup, {}, &search_result2, &is_empty2);
     ASSERT_EQ(res2.error_code, Success);
 
     DeleteSearchPlan(plan);
@@ -1143,7 +1145,8 @@ TEST(CApiTest, SearchTestWithExpr) {
     dataset.timestamps_.push_back(1);
 
     CSearchResult search_result;
-    auto res = Search(segment, plan, placeholderGroup, {}, &search_result);
+    CSearchResultEmptyFlag is_empty;
+    auto res = Search(segment, plan, placeholderGroup, {}, &search_result, &is_empty);
     ASSERT_EQ(res.error_code, Success);
 
     DeleteSearchPlan(plan);
@@ -1427,7 +1430,8 @@ TEST(CApiTest, ReduceNullResult) {
         auto slice_topKs = std::vector<int64_t>{1};
         std::vector<CSearchResult> results;
         CSearchResult res;
-        status = Search(segment, plan, placeholderGroup, {}, &res);
+        CSearchResultEmptyFlag is_empty;
+        status = Search(segment, plan, placeholderGroup, {}, &res, &is_empty);
         ASSERT_EQ(status.error_code, Success);
         results.push_back(res);
         CSearchResultDataBlobs cSearchResultData;
@@ -1514,9 +1518,10 @@ TEST(CApiTest, ReduceRemoveDuplicates) {
         auto slice_topKs = std::vector<int64_t>{topK / 2, topK};
         std::vector<CSearchResult> results;
         CSearchResult res1, res2;
-        status = Search(segment, plan, placeholderGroup, {}, &res1);
+        CSearchResultEmptyFlag is_empty1, is_empty2;
+        status = Search(segment, plan, placeholderGroup, {}, &res1, &is_empty1);
         ASSERT_EQ(status.error_code, Success);
-        status = Search(segment, plan, placeholderGroup, {}, &res2);
+        status = Search(segment, plan, placeholderGroup, {}, &res2, &is_empty2);
         ASSERT_EQ(status.error_code, Success);
         results.push_back(res1);
         results.push_back(res2);
@@ -1545,11 +1550,12 @@ TEST(CApiTest, ReduceRemoveDuplicates) {
         auto slice_topKs = std::vector<int64_t>{topK / 2, topK, topK};
         std::vector<CSearchResult> results;
         CSearchResult res1, res2, res3;
-        status = Search(segment, plan, placeholderGroup, {}, &res1);
+        CSearchResultEmptyFlag is_empty1, is_empty2, is_empty3;
+        status = Search(segment, plan, placeholderGroup, {}, &res1, &is_empty1);
         ASSERT_EQ(status.error_code, Success);
-        status = Search(segment, plan, placeholderGroup, {}, &res2);
+        status = Search(segment, plan, placeholderGroup, {}, &res2, &is_empty2);
         ASSERT_EQ(status.error_code, Success);
-        status = Search(segment, plan, placeholderGroup, {}, &res3);
+        status = Search(segment, plan, placeholderGroup, {}, &res3, &is_empty3);
         ASSERT_EQ(status.error_code, Success);
         results.push_back(res1);
         results.push_back(res2);
@@ -1660,11 +1666,11 @@ testReduceSearchWithExpr(int N, int topK, int num_queries, bool filter_all = fal
     dataset.timestamps_.push_back(1);
 
     std::vector<CSearchResult> results;
-    CSearchResult res1;
-    CSearchResult res2;
-    auto res = Search(segment, plan, placeholderGroup, {}, &res1);
+    CSearchResult res1, res2;
+    CSearchResultEmptyFlag is_empty1, is_empty2;
+    auto res = Search(segment, plan, placeholderGroup, {}, &res1, &is_empty1);
     ASSERT_EQ(res.error_code, Success);
-    res = Search(segment, plan, placeholderGroup, {}, &res2);
+    res = Search(segment, plan, placeholderGroup, {}, &res2, &is_empty2);
     ASSERT_EQ(res.error_code, Success);
     results.push_back(res1);
     results.push_back(res2);
@@ -1897,8 +1903,9 @@ TEST(CApiTest, Indexing_Without_Predicate) {
     placeholderGroups.push_back(placeholderGroup);
 
     CSearchResult c_search_result_on_smallIndex;
+    CSearchResultEmptyFlag is_empty;
     auto res_before_load_index = Search(
-        segment, plan, placeholderGroup, {}, &c_search_result_on_smallIndex);
+        segment, plan, placeholderGroup, {}, &c_search_result_on_smallIndex, &is_empty);
     ASSERT_EQ(res_before_load_index.error_code, Success);
 
     // load index to segment
@@ -1958,7 +1965,8 @@ TEST(CApiTest, Indexing_Without_Predicate) {
                                        plan,
                                        placeholderGroup,
                                        {},
-                                       &c_search_result_on_bigIndex);
+                                       &c_search_result_on_bigIndex,
+                                       &is_empty);
     ASSERT_EQ(res_after_load_index.error_code, Success);
 
     auto search_result_on_raw_index_json =
@@ -2041,8 +2049,9 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
     placeholderGroups.push_back(placeholderGroup);
 
     CSearchResult c_search_result_on_smallIndex;
+    CSearchResultEmptyFlag is_empty;
     auto res_before_load_index = Search(
-        segment, plan, placeholderGroup, {}, &c_search_result_on_smallIndex);
+        segment, plan, placeholderGroup, {}, &c_search_result_on_smallIndex, &is_empty);
     ASSERT_EQ(res_before_load_index.error_code, Success);
 
     // load index to segment
@@ -2103,7 +2112,8 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
                                        plan,
                                        placeholderGroup,
                                        {},
-                                       &c_search_result_on_bigIndex);
+                                       &c_search_result_on_bigIndex,
+                                       &is_empty);
     ASSERT_EQ(res_after_load_index.error_code, Success);
 
     auto search_result_on_raw_index_json =
@@ -2215,8 +2225,9 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
     placeholderGroups.push_back(placeholderGroup);
 
     CSearchResult c_search_result_on_smallIndex;
+    CSearchResultEmptyFlag is_empty;
     auto res_before_load_index = Search(
-        segment, plan, placeholderGroup, {}, &c_search_result_on_smallIndex);
+        segment, plan, placeholderGroup, {}, &c_search_result_on_smallIndex, &is_empty);
     ASSERT_EQ(res_before_load_index.error_code, Success);
 
     // load index to segment
@@ -2277,7 +2288,8 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
                                        plan,
                                        placeholderGroup,
                                        {},
-                                       &c_search_result_on_bigIndex);
+                                       &c_search_result_on_bigIndex,
+                                       &is_empty);
     ASSERT_EQ(res_after_load_index.error_code, Success);
 
     auto search_result_on_bigIndex = (SearchResult*)c_search_result_on_bigIndex;
@@ -2391,8 +2403,9 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
     placeholderGroups.push_back(placeholderGroup);
 
     CSearchResult c_search_result_on_smallIndex;
+    CSearchResultEmptyFlag is_empty;
     auto res_before_load_index = Search(
-        segment, plan, placeholderGroup, {}, &c_search_result_on_smallIndex);
+        segment, plan, placeholderGroup, {}, &c_search_result_on_smallIndex, &is_empty);
     ASSERT_EQ(res_before_load_index.error_code, Success);
 
     // load index to segment
@@ -2453,7 +2466,8 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
                                        plan,
                                        placeholderGroup,
                                        {},
-                                       &c_search_result_on_bigIndex);
+                                       &c_search_result_on_bigIndex,
+                                       &is_empty);
     ASSERT_EQ(res_after_load_index.error_code, Success);
 
     auto search_result_on_bigIndex = (SearchResult*)c_search_result_on_bigIndex;
@@ -2559,8 +2573,9 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
     placeholderGroups.push_back(placeholderGroup);
 
     CSearchResult c_search_result_on_smallIndex;
+    CSearchResultEmptyFlag is_empty;
     auto res_before_load_index = Search(
-        segment, plan, placeholderGroup, {}, &c_search_result_on_smallIndex);
+        segment, plan, placeholderGroup, {}, &c_search_result_on_smallIndex, &is_empty);
     ASSERT_EQ(res_before_load_index.error_code, Success);
 
     // load index to segment
@@ -2621,7 +2636,8 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
                                        plan,
                                        placeholderGroup,
                                        {},
-                                       &c_search_result_on_bigIndex);
+                                       &c_search_result_on_bigIndex,
+                                       &is_empty);
     ASSERT_EQ(res_after_load_index.error_code, Success);
 
     auto search_result_on_bigIndex = (SearchResult*)c_search_result_on_bigIndex;
@@ -2728,8 +2744,9 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
     placeholderGroups.push_back(placeholderGroup);
 
     CSearchResult c_search_result_on_smallIndex;
+    CSearchResultEmptyFlag is_empty;
     auto res_before_load_index = Search(
-        segment, plan, placeholderGroup, {}, &c_search_result_on_smallIndex);
+        segment, plan, placeholderGroup, {}, &c_search_result_on_smallIndex, &is_empty);
     ASSERT_EQ(res_before_load_index.error_code, Success);
 
     // load index to segment
@@ -2790,7 +2807,8 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
                                        plan,
                                        placeholderGroup,
                                        {},
-                                       &c_search_result_on_bigIndex);
+                                       &c_search_result_on_bigIndex,
+                                       &is_empty);
     ASSERT_EQ(res_after_load_index.error_code, Success);
 
     auto search_result_on_bigIndex = (SearchResult*)c_search_result_on_bigIndex;
@@ -2902,8 +2920,9 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
     placeholderGroups.push_back(placeholderGroup);
 
     CSearchResult c_search_result_on_smallIndex;
+    CSearchResultEmptyFlag is_empty;
     auto res_before_load_index = Search(
-        segment, plan, placeholderGroup, {}, &c_search_result_on_smallIndex);
+        segment, plan, placeholderGroup, {}, &c_search_result_on_smallIndex, &is_empty);
     ASSERT_EQ(res_before_load_index.error_code, Success);
 
     // load index to segment
@@ -2965,7 +2984,8 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
                                        plan,
                                        placeholderGroup,
                                        {},
-                                       &c_search_result_on_bigIndex);
+                                       &c_search_result_on_bigIndex,
+                                       &is_empty);
     ASSERT_EQ(res_after_load_index.error_code, Success);
 
     auto search_result_on_bigIndex = (SearchResult*)c_search_result_on_bigIndex;
@@ -3077,8 +3097,9 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
     placeholderGroups.push_back(placeholderGroup);
 
     CSearchResult c_search_result_on_smallIndex;
+    CSearchResultEmptyFlag is_empty;
     auto res_before_load_index = Search(
-        segment, plan, placeholderGroup, {}, &c_search_result_on_smallIndex);
+        segment, plan, placeholderGroup, {}, &c_search_result_on_smallIndex, &is_empty);
     ASSERT_TRUE(res_before_load_index.error_code == Success)
         << res_before_load_index.error_msg;
 
@@ -3140,7 +3161,8 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
                                        plan,
                                        placeholderGroup,
                                        {},
-                                       &c_search_result_on_bigIndex);
+                                       &c_search_result_on_bigIndex,
+                                       &is_empty);
     ASSERT_EQ(res_after_load_index.error_code, Success);
 
     auto search_result_on_bigIndex = (SearchResult*)c_search_result_on_bigIndex;
@@ -3247,8 +3269,9 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
     placeholderGroups.push_back(placeholderGroup);
 
     CSearchResult c_search_result_on_smallIndex;
+    CSearchResultEmptyFlag is_empty;
     auto res_before_load_index = Search(
-        segment, plan, placeholderGroup, {}, &c_search_result_on_smallIndex);
+        segment, plan, placeholderGroup, {}, &c_search_result_on_smallIndex, &is_empty);
     ASSERT_EQ(res_before_load_index.error_code, Success);
 
     // load index to segment
@@ -3309,7 +3332,8 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
                                        plan,
                                        placeholderGroup,
                                        {},
-                                       &c_search_result_on_bigIndex);
+                                       &c_search_result_on_bigIndex,
+                                       &is_empty);
     ASSERT_EQ(res_after_load_index.error_code, Success);
 
     std::vector<CSearchResult> results;
@@ -3439,8 +3463,9 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
     Timestamp time = 10000000;
 
     CSearchResult c_search_result_on_smallIndex;
+    CSearchResultEmptyFlag is_empty;
     auto res_before_load_index = Search(
-        segment, plan, placeholderGroup, {}, &c_search_result_on_smallIndex);
+        segment, plan, placeholderGroup, {}, &c_search_result_on_smallIndex, &is_empty);
     ASSERT_EQ(res_before_load_index.error_code, Success);
 
     // load index to segment
@@ -3501,7 +3526,8 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
                                        plan,
                                        placeholderGroup,
                                        {},
-                                       &c_search_result_on_bigIndex);
+                                       &c_search_result_on_bigIndex,
+                                       &is_empty);
     ASSERT_EQ(res_after_load_index.error_code, Success);
 
     std::vector<CSearchResult> results;
@@ -3694,11 +3720,13 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
 
     CSearchResult c_search_result_on_bigIndex;
+    CSearchResultEmptyFlag is_empty;
     auto res_after_load_index = Search(sealed_segment.get(),
                                        plan,
                                        placeholderGroup,
                                        {},
-                                       &c_search_result_on_bigIndex);
+                                       &c_search_result_on_bigIndex,
+                                       &is_empty);
     ASSERT_EQ(res_after_load_index.error_code, Success);
 
     auto search_result_on_bigIndex = (SearchResult*)c_search_result_on_bigIndex;
@@ -3776,12 +3804,14 @@ TEST(CApiTest, SealedSegment_search_without_predicates) {
     std::vector<CPlaceholderGroup> placeholderGroups;
     placeholderGroups.push_back(placeholderGroup);
     CSearchResult search_result;
-    auto res = Search(segment, plan, placeholderGroup, {}, &search_result);
+    CSearchResultEmptyFlag is_empty;
+    auto res = Search(segment, plan, placeholderGroup, {}, &search_result, &is_empty);
     std::cout << res.error_msg << std::endl;
     ASSERT_EQ(res.error_code, Success);
 
     CSearchResult search_result2;
-    auto res2 = Search(segment, plan, placeholderGroup, {}, &search_result2);
+    CSearchResultEmptyFlag is_empty2;
+    auto res2 = Search(segment, plan, placeholderGroup, {}, &search_result2, &is_empty2);
     ASSERT_EQ(res2.error_code, Success);
 
     DeleteSearchPlan(plan);
@@ -3929,8 +3959,9 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     }
 
     CSearchResult c_search_result_on_bigIndex;
+    CSearchResultEmptyFlag is_empty;
     auto res_after_load_index = Search(
-        segment, plan, placeholderGroup, {}, &c_search_result_on_bigIndex);
+        segment, plan, placeholderGroup, {}, &c_search_result_on_bigIndex, &is_empty);
     ASSERT_EQ(res_after_load_index.error_code, Success);
 
     auto search_result_on_bigIndex = (SearchResult*)c_search_result_on_bigIndex;
@@ -4226,7 +4257,8 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_WHEN_IP) {
     placeholderGroups.push_back(placeholderGroup);
 
     CSearchResult search_result;
-    auto res = Search(segment, plan, placeholderGroup, {}, &search_result);
+    CSearchResultEmptyFlag is_empty;
+    auto res = Search(segment, plan, placeholderGroup, {}, &search_result, &is_empty);
     ASSERT_EQ(res.error_code, Success);
 
     DeleteSearchPlan(plan);
@@ -4289,7 +4321,8 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_IP) {
     placeholderGroups.push_back(placeholderGroup);
 
     CSearchResult search_result;
-    auto res = Search(segment, plan, placeholderGroup, {}, &search_result);
+    CSearchResultEmptyFlag is_empty;
+    auto res = Search(segment, plan, placeholderGroup, {}, &search_result, &is_empty);
     ASSERT_EQ(res.error_code, Success);
 
     DeleteSearchPlan(plan);
@@ -4352,7 +4385,8 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_WHEN_L2) {
     placeholderGroups.push_back(placeholderGroup);
 
     CSearchResult search_result;
-    auto res = Search(segment, plan, placeholderGroup, {}, &search_result);
+    CSearchResultEmptyFlag is_empty;
+    auto res = Search(segment, plan, placeholderGroup, {}, &search_result, &is_empty);
     ASSERT_EQ(res.error_code, Success);
 
     DeleteSearchPlan(plan);
@@ -4415,7 +4449,8 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_L2) {
     placeholderGroups.push_back(placeholderGroup);
 
     CSearchResult search_result;
-    auto res = Search(segment, plan, placeholderGroup, {}, &search_result);
+    CSearchResultEmptyFlag is_empty;
+    auto res = Search(segment, plan, placeholderGroup, {}, &search_result, &is_empty);
     ASSERT_EQ(res.error_code, Success);
 
     DeleteSearchPlan(plan);

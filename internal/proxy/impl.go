@@ -2557,29 +2557,7 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 	return it.result, nil
 }
 
-// Search search the most similar records of requests.
-func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
-	receiveSize := proto.Size(request)
-	metrics.ProxyReceiveBytes.WithLabelValues(
-		strconv.FormatInt(paramtable.GetNodeID(), 10),
-		metrics.SearchLabel,
-		request.GetCollectionName(),
-	).Add(float64(receiveSize))
-
-	metrics.ProxyReceivedNQ.WithLabelValues(
-		strconv.FormatInt(paramtable.GetNodeID(), 10),
-		metrics.SearchLabel,
-		request.GetCollectionName(),
-	).Add(float64(request.GetNq()))
-
-	rateCol.Add(internalpb.RateType_DQLSearch.String(), float64(request.GetNq()))
-
-	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
-		return &milvuspb.SearchResults{
-			Status: merr.Status(err),
-		}, nil
-	}
-
+func (node *Proxy) search(ctx context.Context, st *searchTask) (*milvuspb.SearchResults, error) {
 	method := "Search"
 	tr := timerecord.NewTimeRecorder(method)
 	metrics.ProxyFunctionCall.WithLabelValues(
@@ -2591,34 +2569,7 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Search")
 	defer sp.End()
 
-	if request.SearchByPrimaryKeys {
-		placeholderGroupBytes, err := node.getVectorPlaceholderGroupForSearchByPks(ctx, request)
-		if err != nil {
-			return &milvuspb.SearchResults{
-				Status: merr.Status(err),
-			}, nil
-		}
-
-		request.PlaceholderGroup = placeholderGroupBytes
-	}
-
-	qt := &searchTask{
-		ctx:       ctx,
-		Condition: NewTaskCondition(ctx),
-		SearchRequest: &internalpb.SearchRequest{
-			Base: commonpbutil.NewMsgBase(
-				commonpbutil.WithMsgType(commonpb.MsgType_Search),
-				commonpbutil.WithSourceID(paramtable.GetNodeID()),
-			),
-			ReqID: paramtable.GetNodeID(),
-		},
-		request: request,
-		tr:      timerecord.NewTimeRecorder("search"),
-		qc:      node.queryCoord,
-		node:    node,
-		lb:      node.lbPolicy,
-	}
-
+	request := st.request
 	guaranteeTs := request.GuaranteeTimestamp
 
 	log := log.Ctx(ctx).With(
@@ -2636,13 +2587,13 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 	defer func() {
 		span := tr.ElapseSpan()
 		if span >= SlowReadSpan {
-			log.Info(rpcSlow(method), zap.Int64("nq", qt.SearchRequest.GetNq()), zap.Duration("duration", span))
+			log.Info(rpcSlow(method), zap.Int64("nq", st.SearchRequest.GetNq()), zap.Duration("duration", span))
 		}
 	}()
 
 	log.Debug(rpcReceived(method))
 
-	if err := node.sched.dqQueue.Enqueue(qt); err != nil {
+	if err := node.sched.dqQueue.Enqueue(st); err != nil {
 		log.Warn(
 			rpcFailedToEnqueue(method),
 			zap.Error(err),
@@ -2662,13 +2613,13 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 
 	log.Debug(
 		rpcEnqueued(method),
-		zap.Uint64("timestamp", qt.Base.Timestamp),
+		zap.Uint64("timestamp", st.Base.Timestamp),
 	)
 
-	if err := qt.WaitToFinish(); err != nil {
+	if err := st.WaitToFinish(); err != nil {
 		log.Warn(
 			rpcFailedToWaitToFinish(method),
-			zap.Int64("nq", qt.SearchRequest.GetNq()),
+			zap.Int64("nq", st.SearchRequest.GetNq()),
 			zap.Error(err),
 		)
 
@@ -2698,7 +2649,7 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 		metrics.SuccessLabel,
 	).Inc()
 
-	metrics.ProxySearchVectors.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Add(float64(qt.result.GetResults().GetNumQueries()))
+	metrics.ProxySearchVectors.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Add(float64(st.result.GetResults().GetNumQueries()))
 
 	searchDur := tr.ElapseSpan().Milliseconds()
 	metrics.ProxySQLatency.WithLabelValues(
@@ -2712,12 +2663,66 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 		request.CollectionName,
 	).Observe(float64(searchDur))
 
-	if qt.result != nil {
-		sentSize := proto.Size(qt.result)
+	if st.result != nil {
+		sentSize := proto.Size(st.result)
 		metrics.ProxyReadReqSendBytes.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Add(float64(sentSize))
 		rateCol.Add(metricsinfo.ReadResultThroughput, float64(sentSize))
 	}
-	return qt.result, nil
+	return st.result, nil
+}
+
+// Search search the most similar records of requests.
+func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+	receiveSize := proto.Size(request)
+	metrics.ProxyReceiveBytes.WithLabelValues(
+		strconv.FormatInt(paramtable.GetNodeID(), 10),
+		metrics.SearchLabel,
+		request.GetCollectionName(),
+	).Add(float64(receiveSize))
+
+	metrics.ProxyReceivedNQ.WithLabelValues(
+		strconv.FormatInt(paramtable.GetNodeID(), 10),
+		metrics.SearchLabel,
+		request.GetCollectionName(),
+	).Add(float64(request.GetNq()))
+
+	rateCol.Add(internalpb.RateType_DQLSearch.String(), float64(request.GetNq()))
+
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &milvuspb.SearchResults{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	if request.SearchByPrimaryKeys {
+		placeholderGroupBytes, err := node.getVectorPlaceholderGroupForSearchByPks(ctx, request)
+		if err != nil {
+			return &milvuspb.SearchResults{
+				Status: merr.Status(err),
+			}, nil
+		}
+
+		request.PlaceholderGroup = placeholderGroupBytes
+	}
+
+	st := &searchTask{
+		ctx:       ctx,
+		Condition: NewTaskCondition(ctx),
+		SearchRequest: &internalpb.SearchRequest{
+			Base: commonpbutil.NewMsgBase(
+				commonpbutil.WithMsgType(commonpb.MsgType_Search),
+				commonpbutil.WithSourceID(paramtable.GetNodeID()),
+			),
+			ReqID: paramtable.GetNodeID(),
+		},
+		request: request,
+		tr:      timerecord.NewTimeRecorder("search"),
+		qc:      node.queryCoord,
+		node:    node,
+		lb:      node.lbPolicy,
+	}
+
+	return node.search(ctx, st)
 }
 
 func (node *Proxy) SearchV2(ctx context.Context, request *milvuspb.SearchRequestV2) (*milvuspb.SearchResults, error) {

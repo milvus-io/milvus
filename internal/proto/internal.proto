@@ -101,6 +101,11 @@ message SearchRequest {
   string metricType = 16;
   bool ignoreGrowing = 17; // Optional
   string username = 18;
+  // for retry search
+  bool ensure_search_quality = 19;
+  repeated int32 num_segments_prefix_sum = 20; // segments num prefix sum in each channel for retry search
+  repeated int64 sealed_segmentIDs_searched = 21;
+  repeated string channelIDs_searched = 22;
 }
 
 message SearchResults {
@@ -117,9 +122,9 @@ message SearchResults {
   bytes sliced_blob = 10;
   int64 sliced_num_count = 11;
   int64 sliced_offset = 12;
-
-  // search request cost
-  CostAggregation costAggregation = 13;
+  CostAggregation costAggregation = 13; // search request cost
+  repeated int32 num_segments_prefix_sum = 14; // segments num prefix sum in each channel for retry search
+  int32 searched_num_segments = 15; // segments num beed searched
 }
 
 message CostAggregation {

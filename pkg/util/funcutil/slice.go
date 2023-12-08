@@ -22,6 +22,16 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
+// SliceIndex returns index of item in slice s, return -1 if not exists
+func SliceIndex[T comparable](s []T, item T) int {
+	for i := range s {
+		if s[i] == item {
+			return i
+		}
+	}
+	return -1
+}
+
 // SliceContain returns true if slice s contains item.
 func SliceContain[T comparable](s []T, item T) bool {
 	for i := range s {
