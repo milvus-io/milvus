@@ -279,12 +279,17 @@ func (ob *TargetObserver) updateNextTargetTimestamp(collectionID int64) {
 }
 
 func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collectionID int64) bool {
+	log := log.Ctx(ctx).WithRateGroup("qcv2.TargetObserver", 10, 60).With(
+		zap.Int64("collectionID", collectionID),
+	)
+
 	replicaNum := ob.meta.CollectionManager.GetReplicaNumber(collectionID)
 
 	// check channel first
 	channelNames := ob.targetMgr.GetDmChannelsByCollection(collectionID, meta.NextTarget)
 	if len(channelNames) == 0 {
 		// next target is empty, no need to update
+		log.RatedInfo(10, "next target is empty, no need to update")
 		return false
 	}
 
@@ -293,6 +298,7 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 			collectionID,
 			ob.distMgr.LeaderViewManager.GetChannelDist(channel.GetChannelName()))
 		if int32(len(group)) < replicaNum {
+			log.RatedInfo(10, "channel not ready", zap.String("channelName", channel.GetChannelName()))
 			return false
 		}
 	}
@@ -304,6 +310,7 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 			collectionID,
 			ob.distMgr.LeaderViewManager.GetSealedSegmentDist(segment.GetID()))
 		if int32(len(group)) < replicaNum {
+			log.RatedInfo(10, "segment not ready", zap.Int64("segmentID", segment.GetID()))
 			return false
 		}
 	}
@@ -316,6 +323,10 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 			actions = actions[:0]
 			leaderView := ob.distMgr.LeaderViewManager.GetLeaderShardView(leaderID, ch)
 			if leaderView == nil {
+				log.RatedInfo(10, "leader view not ready",
+					zap.Int64("nodeID", leaderID),
+					zap.String("channel", ch),
+				)
 				continue
 			}
 			updateVersionAction := ob.checkNeedUpdateTargetVersion(ctx, leaderView)
