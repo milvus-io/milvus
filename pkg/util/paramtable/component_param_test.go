@@ -372,6 +372,15 @@ func TestComponentParam(t *testing.T) {
 		maxParallelism := Params.FlowGraphMaxParallelism.GetAsInt()
 		t.Logf("flowGraphMaxParallelism: %d", maxParallelism)
 
+		flowGraphSkipModeEnable := Params.FlowGraphSkipModeEnable.GetAsBool()
+		t.Logf("flowGraphSkipModeEnable: %t", flowGraphSkipModeEnable)
+
+		flowGraphSkipModeSkipNum := Params.FlowGraphSkipModeSkipNum.GetAsInt()
+		t.Logf("flowGraphSkipModeSkipNum: %d", flowGraphSkipModeSkipNum)
+
+		flowGraphSkipModeColdTime := Params.FlowGraphSkipModeColdTime.GetAsInt()
+		t.Logf("flowGraphSkipModeColdTime: %d", flowGraphSkipModeColdTime)
+
 		maxParallelSyncTaskNum := Params.MaxParallelSyncTaskNum.GetAsInt()
 		t.Logf("maxParallelSyncTaskNum: %d", maxParallelSyncTaskNum)
 
