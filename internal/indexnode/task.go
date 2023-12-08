@@ -82,7 +82,7 @@ type indexBuildTaskV2 struct {
 	*indexBuildTask
 }
 
-func (it *indexBuildTaskV2) parseFieldMetaFromBinlog(ctx context.Context) error {
+func (it *indexBuildTaskV2) parseParams(ctx context.Context) error {
 	it.collectionID = it.req.CollectionID
 	it.partitionID = it.req.PartitionID
 	it.segmentID = it.req.SegmentID
@@ -93,7 +93,7 @@ func (it *indexBuildTaskV2) parseFieldMetaFromBinlog(ctx context.Context) error 
 }
 
 func (it *indexBuildTaskV2) BuildIndex(ctx context.Context) error {
-	err := it.parseFieldMetaFromBinlog(ctx)
+	err := it.parseParams(ctx)
 	if err != nil {
 		log.Ctx(ctx).Warn("parse field meta from binlog failed", zap.Error(err))
 		return err
@@ -106,7 +106,7 @@ func (it *indexBuildTaskV2) BuildIndex(ctx context.Context) error {
 			log.Ctx(ctx).Warn("IndexNode don't support build disk index",
 				zap.String("index type", it.newIndexParams[common.IndexTypeKey]),
 				zap.Bool("enable disk", Params.IndexNodeCfg.EnableDisk.GetAsBool()))
-			return errors.New("index node don't support build disk index")
+			return merr.WrapErrIndexNotSupported("disk index")
 		}
 
 		// check load size and size of field data
@@ -127,7 +127,7 @@ func (it *indexBuildTaskV2) BuildIndex(ctx context.Context) error {
 			log.Ctx(ctx).Warn("IndexNode don't has enough disk size to build disk ann index",
 				zap.Int64("usedLocalSizeWhenBuild", usedLocalSizeWhenBuild),
 				zap.Int64("maxUsedLocalSize", maxUsedLocalSize))
-			return errors.New("index node don't has enough disk size to build disk ann index")
+			return merr.WrapErrServiceDiskLimitExceeded(float32(usedLocalSizeWhenBuild), float32(maxUsedLocalSize))
 		}
 
 		err = indexparams.SetDiskIndexBuildParams(it.newIndexParams, int64(fieldDataSize))
