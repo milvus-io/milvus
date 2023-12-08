@@ -169,21 +169,27 @@ func NewSegment(collection *Collection,
 	level datapb.SegmentLevel,
 ) (Segment, error) {
 	/*
-		CSegmentInterface
-		NewSegment(CCollection collection, uint64_t segment_id, SegmentType seg_type);
+		CStatus
+		NewSegment(CCollection collection, uint64_t segment_id, SegmentType seg_type, CSegmentInterface* newSegment);
 	*/
 	if level == datapb.SegmentLevel_L0 {
 		return NewL0Segment(collection, segmentID, partitionID, collectionID, shard, segmentType, version, startPosition, deltaPosition)
 	}
-
-	var segmentPtr C.CSegmentInterface
+	var cSegType C.SegmentType
 	switch segmentType {
 	case SegmentTypeSealed:
-		segmentPtr = C.NewSegment(collection.collectionPtr, C.Sealed, C.int64_t(segmentID))
+		cSegType = C.Sealed
 	case SegmentTypeGrowing:
-		segmentPtr = C.NewSegment(collection.collectionPtr, C.Growing, C.int64_t(segmentID))
+		cSegType = C.Growing
 	default:
 		return nil, fmt.Errorf("illegal segment type %d when create segment %d", segmentType, segmentID)
+	}
+
+	var newPtr C.CSegmentInterface
+	status := C.NewSegment(collection.collectionPtr, cSegType, C.int64_t(segmentID), &newPtr)
+
+	if err := HandleCStatus(&status, "NewSegmentFailed"); err != nil {
+		return nil, err
 	}
 
 	log.Info("create segment",
@@ -194,7 +200,7 @@ func NewSegment(collection *Collection,
 
 	segment := &LocalSegment{
 		baseSegment:        newBaseSegment(segmentID, partitionID, collectionID, shard, segmentType, version, startPosition),
-		ptr:                segmentPtr,
+		ptr:                newPtr,
 		lastDeltaTimestamp: atomic.NewUint64(0),
 		fieldIndexes:       typeutil.NewConcurrentMap[int64, *IndexedFieldInfo](),
 
@@ -703,6 +709,7 @@ func (s *LocalSegment) LoadFieldData(fieldID int64, rowCount int64, field *datap
 		}
 	}
 	loadFieldDataInfo.appendMMapDirPath(paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue())
+	loadFieldDataInfo.enableMmap(fieldID, mmapEnabled)
 
 	var status C.CStatus
 	GetLoadPool().Submit(func() (any, error) {
