@@ -112,7 +112,8 @@ func (action *SegmentAction) IsFinished(distMgr *meta.DistributionManager) bool 
 		leaderSegmentDist := distMgr.LeaderViewManager.GetSealedSegmentDist(action.SegmentID())
 		nodeSegmentDist := distMgr.SegmentDistManager.GetSegmentDist(action.SegmentID())
 		return lo.Contains(leaderSegmentDist, action.Node()) &&
-			lo.Contains(nodeSegmentDist, action.Node())
+			lo.Contains(nodeSegmentDist, action.Node()) &&
+			action.rpcReturned.Load()
 	} else if action.Type() == ActionTypeReduce {
 		// FIXME: Now shard leader's segment view is a map of segment ID to node ID,
 		// loading segment replaces the node ID with the new one,

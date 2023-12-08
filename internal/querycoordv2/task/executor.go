@@ -193,16 +193,6 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 
 	loadInfo := utils.PackSegmentLoadInfo(resp, indexes)
 
-	// Get shard leader for the given replica and segment
-	leaderID, ok := getShardLeader(ex.meta.ReplicaManager, ex.dist, task.CollectionID(), action.Node(), segment.GetInsertChannel())
-	if !ok {
-		msg := "no shard leader for the segment to execute loading"
-		err = merr.WrapErrChannelNotFound(segment.GetInsertChannel(), "shard delegator not found")
-		log.Warn(msg, zap.Error(err))
-		return err
-	}
-	log = log.With(zap.Int64("shardLeader", leaderID))
-
 	// Get collection index info
 	indexInfo, err := ex.broker.DescribeIndex(ctx, task.CollectionID())
 	if err != nil {
@@ -218,6 +208,16 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 		loadInfo,
 		indexInfo,
 	)
+
+	// Get shard leader for the given replica and segment
+	leaderID, ok := getShardLeader(ex.meta.ReplicaManager, ex.dist, task.CollectionID(), action.Node(), segment.GetInsertChannel())
+	if !ok {
+		msg := "no shard leader for the segment to execute loading"
+		err = merr.WrapErrChannelNotFound(segment.GetInsertChannel(), "shard delegator not found")
+		log.Warn(msg, zap.Error(err))
+		return err
+	}
+	log = log.With(zap.Int64("shardLeader", leaderID))
 
 	startTs := time.Now()
 	log.Info("load segments...")
