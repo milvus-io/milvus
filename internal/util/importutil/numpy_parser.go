@@ -439,7 +439,7 @@ func (p *NumpyParser) consume(columnReaders []*NumpyColumnReader) error {
 		}
 		tr.Record("splitFieldsData")
 		// when the estimated size is close to blockSize, save to binlog
-		err = tryFlushBlocks(p.ctx, shards, p.collectionInfo.Schema, p.callFlushFunc, p.blockSize, MaxTotalSizeInMemory, false)
+		err = tryFlushBlocks(p.ctx, shards, p.collectionInfo.Schema, p.callFlushFunc, p.blockSize, Params.DataNodeCfg.BulkInsertMaxMemorySize.GetAsInt64(), false)
 		if err != nil {
 			return err
 		}
@@ -447,7 +447,7 @@ func (p *NumpyParser) consume(columnReaders []*NumpyColumnReader) error {
 	}
 
 	// force flush at the end
-	return tryFlushBlocks(p.ctx, shards, p.collectionInfo.Schema, p.callFlushFunc, p.blockSize, MaxTotalSizeInMemory, true)
+	return tryFlushBlocks(p.ctx, shards, p.collectionInfo.Schema, p.callFlushFunc, p.blockSize, Params.DataNodeCfg.BulkInsertMaxMemorySize.GetAsInt64(), true)
 }
 
 // readData method reads numpy data section into a storage.FieldData
