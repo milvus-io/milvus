@@ -37,7 +37,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -190,7 +189,7 @@ func Test_ImportWrapperNew(t *testing.T) {
 	ctx := context.Background()
 	cm, err := f.NewPersistentStorageChunkManager(ctx)
 	assert.NoError(t, err)
-	wrapper := NewImportWrapper(ctx, nil, 1, ReadBufferSize, nil, cm, nil, nil)
+	wrapper := NewImportWrapper(ctx, nil, 1, Params.DataNodeCfg.BulkInsertReadBufferSize.GetAsInt64(), nil, cm, nil, nil)
 	assert.Nil(t, wrapper)
 
 	schema := &schemapb.CollectionSchema{
@@ -210,7 +209,7 @@ func Test_ImportWrapperNew(t *testing.T) {
 	})
 	collectionInfo, err := NewCollectionInfo(schema, 2, []int64{1})
 	assert.NoError(t, err)
-	wrapper = NewImportWrapper(ctx, collectionInfo, 1, ReadBufferSize, nil, cm, nil, nil)
+	wrapper = NewImportWrapper(ctx, collectionInfo, 1, Params.DataNodeCfg.BulkInsertReadBufferSize.GetAsInt64(), nil, cm, nil, nil)
 	assert.NotNil(t, wrapper)
 
 	assignSegFunc := func(shardID int, partID int64) (int64, string, error) {
@@ -287,7 +286,7 @@ func Test_ImportWrapperRowBased(t *testing.T) {
 	assert.NoError(t, err)
 
 	t.Run("success case", func(t *testing.T) {
-		wrapper := NewImportWrapper(ctx, collectionInfo, 1, ReadBufferSize, idAllocator, cm, importResult, reportFunc)
+		wrapper := NewImportWrapper(ctx, collectionInfo, 1, Params.DataNodeCfg.BulkInsertReadBufferSize.GetAsInt64(), idAllocator, cm, importResult, reportFunc)
 		wrapper.SetCallbackFunctions(assignSegmentFunc, flushFunc, saveSegmentFunc)
 		files := make([]string, 0)
 		files = append(files, filePath)
@@ -313,7 +312,7 @@ func Test_ImportWrapperRowBased(t *testing.T) {
 		assert.NoError(t, err)
 
 		importResult.State = commonpb.ImportState_ImportStarted
-		wrapper := NewImportWrapper(ctx, collectionInfo, 1, ReadBufferSize, idAllocator, cm, importResult, reportFunc)
+		wrapper := NewImportWrapper(ctx, collectionInfo, 1, Params.DataNodeCfg.BulkInsertReadBufferSize.GetAsInt64(), idAllocator, cm, importResult, reportFunc)
 		wrapper.SetCallbackFunctions(assignSegmentFunc, flushFunc, saveSegmentFunc)
 		files := make([]string, 0)
 		files = append(files, filePath)
@@ -325,7 +324,7 @@ func Test_ImportWrapperRowBased(t *testing.T) {
 	t.Run("file doesn't exist", func(t *testing.T) {
 		files := make([]string, 0)
 		files = append(files, "/dummy/dummy.json")
-		wrapper := NewImportWrapper(ctx, collectionInfo, 1, ReadBufferSize, idAllocator, cm, importResult, reportFunc)
+		wrapper := NewImportWrapper(ctx, collectionInfo, 1, Params.DataNodeCfg.BulkInsertReadBufferSize.GetAsInt64(), idAllocator, cm, importResult, reportFunc)
 		err = wrapper.Import(files, ImportOptions{OnlyValidate: true})
 		assert.Error(t, err)
 	})
@@ -368,7 +367,7 @@ func Test_ImportWrapperColumnBased_numpy(t *testing.T) {
 	files := createSampleNumpyFiles(t, cm)
 
 	t.Run("success case", func(t *testing.T) {
-		wrapper := NewImportWrapper(ctx, collectionInfo, 1, ReadBufferSize, idAllocator, cm, importResult, reportFunc)
+		wrapper := NewImportWrapper(ctx, collectionInfo, 1, Params.DataNodeCfg.BulkInsertReadBufferSize.GetAsInt64(), idAllocator, cm, importResult, reportFunc)
 		wrapper.SetCallbackFunctions(assignSegmentFunc, flushFunc, saveSegmentFunc)
 
 		err = wrapper.Import(files, DefaultImportOptions())
@@ -386,7 +385,7 @@ func Test_ImportWrapperColumnBased_numpy(t *testing.T) {
 		files[1] = filePath
 
 		importResult.State = commonpb.ImportState_ImportStarted
-		wrapper := NewImportWrapper(ctx, collectionInfo, 1, ReadBufferSize, idAllocator, cm, importResult, reportFunc)
+		wrapper := NewImportWrapper(ctx, collectionInfo, 1, Params.DataNodeCfg.BulkInsertReadBufferSize.GetAsInt64(), idAllocator, cm, importResult, reportFunc)
 		wrapper.SetCallbackFunctions(assignSegmentFunc, flushFunc, saveSegmentFunc)
 
 		err = wrapper.Import(files, DefaultImportOptions())
@@ -397,7 +396,7 @@ func Test_ImportWrapperColumnBased_numpy(t *testing.T) {
 	t.Run("file doesn't exist", func(t *testing.T) {
 		files := make([]string, 0)
 		files = append(files, "/dummy/dummy.npy")
-		wrapper := NewImportWrapper(ctx, collectionInfo, 1, ReadBufferSize, idAllocator, cm, importResult, reportFunc)
+		wrapper := NewImportWrapper(ctx, collectionInfo, 1, Params.DataNodeCfg.BulkInsertReadBufferSize.GetAsInt64(), idAllocator, cm, importResult, reportFunc)
 		err = wrapper.Import(files, DefaultImportOptions())
 		assert.Error(t, err)
 	})
@@ -517,7 +516,7 @@ func Test_ImportWrapperRowBased_perf(t *testing.T) {
 	}
 	collectionInfo, err := NewCollectionInfo(schema, int32(shardNum), []int64{1})
 	assert.NoError(t, err)
-	wrapper := NewImportWrapper(ctx, collectionInfo, int64(segmentSize), ReadBufferSize, idAllocator, cm, importResult, reportFunc)
+	wrapper := NewImportWrapper(ctx, collectionInfo, int64(segmentSize), Params.DataNodeCfg.BulkInsertReadBufferSize.GetAsInt64(), idAllocator, cm, importResult, reportFunc)
 	wrapper.SetCallbackFunctions(assignSegmentFunc, flushFunc, saveSegmentFunc)
 
 	files := make([]string, 0)
@@ -561,7 +560,7 @@ func Test_ImportWrapperFileValidation(t *testing.T) {
 
 	collectionInfo, err := NewCollectionInfo(schema, int32(shardNum), []int64{1})
 	assert.NoError(t, err)
-	wrapper := NewImportWrapper(ctx, collectionInfo, int64(segmentSize), ReadBufferSize, idAllocator, cm, nil, nil)
+	wrapper := NewImportWrapper(ctx, collectionInfo, int64(segmentSize), Params.DataNodeCfg.BulkInsertReadBufferSize.GetAsInt64(), idAllocator, cm, nil, nil)
 
 	t.Run("unsupported file type", func(t *testing.T) {
 		files := []string{"uid.txt"}
@@ -611,7 +610,7 @@ func Test_ImportWrapperFileValidation(t *testing.T) {
 	t.Run("empty file list", func(t *testing.T) {
 		files := []string{}
 		cm.size = 0
-		wrapper = NewImportWrapper(ctx, collectionInfo, int64(segmentSize), ReadBufferSize, idAllocator, cm, nil, nil)
+		wrapper = NewImportWrapper(ctx, collectionInfo, int64(segmentSize), Params.DataNodeCfg.BulkInsertReadBufferSize.GetAsInt64(), idAllocator, cm, nil, nil)
 		rowBased, err := wrapper.fileValidation(files)
 		assert.NoError(t, err)
 		assert.False(t, rowBased)
@@ -619,8 +618,8 @@ func Test_ImportWrapperFileValidation(t *testing.T) {
 
 	t.Run("file size exceed MaxFileSize limit", func(t *testing.T) {
 		files := []string{"a/1.json"}
-		cm.size = params.Params.CommonCfg.ImportMaxFileSize.GetAsInt64() + 1
-		wrapper = NewImportWrapper(ctx, collectionInfo, int64(segmentSize), ReadBufferSize, idAllocator, cm, nil, nil)
+		cm.size = Params.CommonCfg.ImportMaxFileSize.GetAsInt64() + 1
+		wrapper = NewImportWrapper(ctx, collectionInfo, int64(segmentSize), Params.DataNodeCfg.BulkInsertReadBufferSize.GetAsInt64(), idAllocator, cm, nil, nil)
 		rowBased, err := wrapper.fileValidation(files)
 		assert.Error(t, err)
 		assert.True(t, rowBased)
@@ -691,7 +690,7 @@ func Test_ImportWrapperReportFailRowBased(t *testing.T) {
 	}
 	collectionInfo, err := NewCollectionInfo(sampleSchema(), 2, []int64{1})
 	assert.NoError(t, err)
-	wrapper := NewImportWrapper(ctx, collectionInfo, 1, ReadBufferSize, idAllocator, cm, importResult, reportFunc)
+	wrapper := NewImportWrapper(ctx, collectionInfo, 1, Params.DataNodeCfg.BulkInsertReadBufferSize.GetAsInt64(), idAllocator, cm, importResult, reportFunc)
 	wrapper.SetCallbackFunctions(assignSegmentFunc, flushFunc, saveSegmentFunc)
 
 	files := []string{filePath}
@@ -738,7 +737,7 @@ func Test_ImportWrapperReportFailColumnBased_numpy(t *testing.T) {
 	}
 	collectionInfo, err := NewCollectionInfo(createNumpySchema(), 2, []int64{1})
 	assert.NoError(t, err)
-	wrapper := NewImportWrapper(ctx, collectionInfo, 1, ReadBufferSize, idAllocator, cm, importResult, reportFunc)
+	wrapper := NewImportWrapper(ctx, collectionInfo, 1, Params.DataNodeCfg.BulkInsertReadBufferSize.GetAsInt64(), idAllocator, cm, importResult, reportFunc)
 	wrapper.SetCallbackFunctions(assignSegmentFunc, flushFunc, saveSegmentFunc)
 
 	wrapper.reportImportAttempts = 2
@@ -773,7 +772,7 @@ func Test_ImportWrapperIsBinlogImport(t *testing.T) {
 
 	collectionInfo, err := NewCollectionInfo(schema, int32(shardNum), []int64{1})
 	assert.NoError(t, err)
-	wrapper := NewImportWrapper(ctx, collectionInfo, int64(segmentSize), ReadBufferSize, idAllocator, cm, nil, nil)
+	wrapper := NewImportWrapper(ctx, collectionInfo, int64(segmentSize), Params.DataNodeCfg.BulkInsertReadBufferSize.GetAsInt64(), idAllocator, cm, nil, nil)
 
 	// empty paths
 	paths := []string{}
@@ -837,7 +836,7 @@ func Test_ImportWrapperDoBinlogImport(t *testing.T) {
 
 	collectionInfo, err := NewCollectionInfo(schema, int32(shardNum), []int64{1})
 	assert.NoError(t, err)
-	wrapper := NewImportWrapper(ctx, collectionInfo, int64(segmentSize), ReadBufferSize, idAllocator, cm, nil, nil)
+	wrapper := NewImportWrapper(ctx, collectionInfo, int64(segmentSize), Params.DataNodeCfg.BulkInsertReadBufferSize.GetAsInt64(), idAllocator, cm, nil, nil)
 	paths := []string{
 		"/tmp",
 		"/tmp",
@@ -900,7 +899,7 @@ func Test_ImportWrapperReportPersisted(t *testing.T) {
 	}
 	collectionInfo, err := NewCollectionInfo(sampleSchema(), 2, []int64{1})
 	assert.NoError(t, err)
-	wrapper := NewImportWrapper(ctx, collectionInfo, int64(1024), ReadBufferSize, nil, nil, importResult, reportFunc)
+	wrapper := NewImportWrapper(ctx, collectionInfo, int64(1024), Params.DataNodeCfg.BulkInsertReadBufferSize.GetAsInt64(), nil, nil, importResult, reportFunc)
 	assert.NotNil(t, wrapper)
 
 	rowCounter := &rowCounterTest{}
@@ -943,7 +942,7 @@ func Test_ImportWrapperUpdateProgressPercent(t *testing.T) {
 
 	collectionInfo, err := NewCollectionInfo(sampleSchema(), 2, []int64{1})
 	assert.NoError(t, err)
-	wrapper := NewImportWrapper(ctx, collectionInfo, 1, ReadBufferSize, nil, nil, nil, nil)
+	wrapper := NewImportWrapper(ctx, collectionInfo, 1, Params.DataNodeCfg.BulkInsertReadBufferSize.GetAsInt64(), nil, nil, nil, nil)
 	assert.NotNil(t, wrapper)
 	assert.Equal(t, int64(0), wrapper.progressPercent)
 
@@ -982,7 +981,7 @@ func Test_ImportWrapperFlushFunc(t *testing.T) {
 	schema := sampleSchema()
 	collectionInfo, err := NewCollectionInfo(schema, 2, []int64{1})
 	assert.NoError(t, err)
-	wrapper := NewImportWrapper(ctx, collectionInfo, 1, ReadBufferSize, nil, nil, importResult, reportFunc)
+	wrapper := NewImportWrapper(ctx, collectionInfo, 1, Params.DataNodeCfg.BulkInsertReadBufferSize.GetAsInt64(), nil, nil, importResult, reportFunc)
 	assert.NotNil(t, wrapper)
 	wrapper.SetCallbackFunctions(assignSegmentFunc, flushFunc, saveSegmentFunc)
 
