@@ -429,7 +429,7 @@ func (it *indexBuildTask) parseFieldMetaFromBinlog(ctx context.Context) error {
 	it.partitionID = partitionID
 	it.segmentID = segmentID
 	for fID, value := range insertData.Data {
-		it.fieldType = indexcgowrapper.GenDataset(value).DType
+		it.fieldType = value.GetDataType()
 		it.fieldID = fID
 		break
 	}
