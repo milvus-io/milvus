@@ -198,6 +198,7 @@ proxy:
   # Whether to produce gin logs.\n
   # please adjust in embedded Milvus: false
   ginLogging: true
+  ginLogSkipPaths: "/" # skipped url path for gin log split by comma
   maxTaskNum: 1024 # max task number of proxy task queue
   accessLog:
     enable: false
