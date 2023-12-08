@@ -65,8 +65,10 @@ pushd ${ROOT_DIR}/cmake_build/thirdparty
 
 git clone --depth=1 --branch v0.43.0-rc.2 https://github.com/apache/incubator-opendal.git opendal
 cd opendal
-if command -v cargo >/dev/null 2>&1; then
+if [ command -v cargo >/dev/null 2>&1 ]; then
     echo "cargo exists"
+    rustup toolchain uninstall stable
+    rustup toolchain install stable
 else
     bash -c "curl https://sh.rustup.rs -sSf | sh -s -- -y" || { echo 'rustup install failed'; exit 1;}
     source $HOME/.cargo/env
