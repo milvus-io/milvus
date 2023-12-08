@@ -155,8 +155,8 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 	defer func() {
 		if err != nil {
 			task.Fail(err)
-			ex.removeTask(task, step)
 		}
+		ex.removeTask(task, step)
 	}()
 
 	schema, err := ex.broker.GetCollectionSchema(ctx, task.CollectionID())
