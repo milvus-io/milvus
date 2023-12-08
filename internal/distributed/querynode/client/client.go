@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -27,6 +28,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -37,6 +40,7 @@ import (
 type Client struct {
 	grpcClient grpcclient.GrpcClient[querypb.QueryNodeClient]
 	addr       string
+	sess       *sessionutil.Session
 }
 
 // NewClient creates a new QueryNode client.
@@ -44,16 +48,24 @@ func NewClient(ctx context.Context, addr string, nodeID int64) (*Client, error) 
 	if addr == "" {
 		return nil, fmt.Errorf("addr is empty")
 	}
+	sess := sessionutil.NewSession(ctx)
+	if sess == nil {
+		err := fmt.Errorf("new session error, maybe can not connect to etcd")
+		log.Debug("QueryNodeClient NewClient failed", zap.Error(err))
+		return nil, err
+	}
 	config := &paramtable.Get().QueryNodeGrpcClientCfg
 	client := &Client{
 		addr:       addr,
 		grpcClient: grpcclient.NewClientBase[querypb.QueryNodeClient](config, "milvus.proto.query.QueryNode"),
+		sess:       sess,
 	}
 	// node shall specify node id
 	client.grpcClient.SetRole(fmt.Sprintf("%s-%d", typeutil.QueryNodeRole, nodeID))
 	client.grpcClient.SetGetAddrFunc(client.getAddr)
 	client.grpcClient.SetNewGrpcClientFunc(client.newGrpcClient)
 	client.grpcClient.SetNodeID(nodeID)
+	client.grpcClient.SetSession(sess)
 
 	return client, nil
 }

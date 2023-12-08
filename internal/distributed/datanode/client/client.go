@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -27,6 +28,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -38,6 +41,7 @@ var Params *paramtable.ComponentParam = paramtable.Get()
 // Client is the grpc client for DataNode
 type Client struct {
 	grpcClient grpcclient.GrpcClient[datapb.DataNodeClient]
+	sess       *sessionutil.Session
 	addr       string
 }
 
@@ -46,16 +50,24 @@ func NewClient(ctx context.Context, addr string, nodeID int64) (*Client, error) 
 	if addr == "" {
 		return nil, fmt.Errorf("address is empty")
 	}
+	sess := sessionutil.NewSession(ctx)
+	if sess == nil {
+		err := fmt.Errorf("new session error, maybe can not connect to etcd")
+		log.Debug("DataNodeClient New Etcd Session failed", zap.Error(err))
+		return nil, err
+	}
 	config := &Params.DataNodeGrpcClientCfg
 	client := &Client{
 		addr:       addr,
 		grpcClient: grpcclient.NewClientBase[datapb.DataNodeClient](config, "milvus.proto.data.DataNode"),
+		sess:       sess,
 	}
 	// node shall specify node id
 	client.grpcClient.SetRole(fmt.Sprintf("%s-%d", typeutil.DataNodeRole, nodeID))
 	client.grpcClient.SetGetAddrFunc(client.getAddr)
 	client.grpcClient.SetNewGrpcClientFunc(client.newGrpcClient)
 	client.grpcClient.SetNodeID(nodeID)
+	client.grpcClient.SetSession(sess)
 
 	return client, nil
 }
