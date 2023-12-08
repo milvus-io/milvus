@@ -227,7 +227,7 @@ func (c *ClientBase[T]) resetConnection(wrapper *clientConnWrapper[T]) {
 	}
 	// wrapper close may block waiting pending request finish
 	go func(w *clientConnWrapper[T], addr string) {
-		c.Close()
+		w.Close()
 		log.Info("previous client closed", zap.String("role", c.role), zap.String("addr", c.addr.Load()))
 	}(c.grpcClient, c.addr.Load())
 	c.addr.Store("")
