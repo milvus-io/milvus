@@ -511,7 +511,7 @@ def gen_npy_files(float_vector, rows, dim, data_fields, file_nums=1, err_type=""
     return files
 
 
-def gen_parquet_files(float_vector, rows, dim, data_fields, file_nums=1, array_length=None, err_type=""):
+def gen_parquet_files(float_vector, rows, dim, data_fields, file_nums=1, array_length=None, err_type="", enable_dynamic_field=False):
     # gen numpy files
     files = []
     start_uid = 0
@@ -652,7 +652,7 @@ def prepare_bulk_insert_numpy_files(minio_endpoint="", bucket_name="milvus-bucke
 
 
 def prepare_bulk_insert_parquet_files(minio_endpoint="", bucket_name="milvus-bucket", rows=100, dim=128, array_length=None,
-                                    data_fields=[DataField.vec_field], float_vector=True, file_nums=1, force=False):
+                                    enable_dynamic_field=False, data_fields=[DataField.vec_field], float_vector=True, file_nums=1, force=False):
     """
     Generate column based files based on params in parquet format and copy them to the minio
     Note: each field in data_fields would be generated one parquet file.
@@ -682,7 +682,7 @@ def prepare_bulk_insert_parquet_files(minio_endpoint="", bucket_name="milvus-buc
     Return: List
         File name list or file name with sub-folder list
     """
-    files = gen_parquet_files(rows=rows, dim=dim, float_vector=float_vector,
+    files = gen_parquet_files(rows=rows, dim=dim, float_vector=float_vector, enable_dynamic_field=enable_dynamic_field,
                               data_fields=data_fields, array_length=array_length,
                               file_nums=file_nums)
     copy_files_to_minio(host=minio_endpoint, r_source=data_source, files=files, bucket_name=bucket_name, force=force)
