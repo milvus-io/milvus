@@ -680,7 +680,8 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("entities", [1000])  # 1000
     @pytest.mark.parametrize("file_nums", [1])
     @pytest.mark.parametrize("array_len", [None, 0, 100])
-    def test_with_all_field_parquet(self, auto_id, dim, entities, file_nums, array_len):
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    def test_with_all_field_parquet(self, auto_id, dim, entities, file_nums, array_len, enable_dynamic_field):
         """
         collection schema 1: [pk, int64, float64, string float_vector]
         data file: vectors.parquet and uid.parquet,
@@ -710,11 +711,12 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             data_fields=data_fields,
             file_nums=file_nums,
             array_length=array_len,
+            enable_dynamic_field=enable_dynamic_field,
             force=True,
         )
         self._connect()
         c_name = cf.gen_unique_str("bulk_insert")
-        schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
+        schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id, enable_dynamic_field=enable_dynamic_field)
         self.collection_wrap.init_collection(c_name, schema=schema)
 
         # import data
