@@ -434,9 +434,11 @@ func (data *JSONFieldData) GetDataType() schemapb.DataType   { return schemapb.D
 func (data *BinaryVectorFieldData) GetDataType() schemapb.DataType {
 	return schemapb.DataType_BinaryVector
 }
+
 func (data *FloatVectorFieldData) GetDataType() schemapb.DataType {
 	return schemapb.DataType_FloatVector
 }
+
 func (data *Float16VectorFieldData) GetDataType() schemapb.DataType {
 	return schemapb.DataType_Float16Vector
 }
