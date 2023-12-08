@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
@@ -54,7 +55,7 @@ func (s *WriteBufferSuite) SetupTest() {
 	})
 }
 
-func (s *WriteBufferSuite) TestDefaulOption() {
+func (s *WriteBufferSuite) TestDefaultOption() {
 	s.Run("default BFPkOracle", func() {
 		wb, err := NewWriteBuffer(s.channelName, s.metacache, nil, s.syncMgr)
 		s.NoError(err)
@@ -108,6 +109,153 @@ func (s *WriteBufferSuite) TestFlushSegments() {
 
 	err = wb.FlushSegments(context.Background(), []int64{segmentID})
 	s.NoError(err)
+}
+
+func (s *WriteBufferSuite) TestGetCheckpoint() {
+	s.Run("use_consume_cp", func() {
+		s.wb.checkpoint = &msgpb.MsgPosition{
+			Timestamp: 1000,
+		}
+
+		s.syncMgr.EXPECT().GetEarliestPosition(s.channelName).Return(0, nil).Once()
+
+		checkpoint := s.wb.GetCheckpoint()
+		s.EqualValues(1000, checkpoint.GetTimestamp())
+	})
+
+	s.Run("use_sync_mgr_cp", func() {
+		s.wb.checkpoint = &msgpb.MsgPosition{
+			Timestamp: 1000,
+		}
+
+		s.syncMgr.EXPECT().GetEarliestPosition(s.channelName).Return(1, &msgpb.MsgPosition{
+			Timestamp: 500,
+		}).Once()
+
+		checkpoint := s.wb.GetCheckpoint()
+		s.EqualValues(500, checkpoint.GetTimestamp())
+	})
+
+	s.Run("use_segment_buffer_min", func() {
+		s.wb.checkpoint = &msgpb.MsgPosition{
+			Timestamp: 1000,
+		}
+
+		s.syncMgr.EXPECT().GetEarliestPosition(s.channelName).Return(0, nil).Once()
+
+		buf1, err := newSegmentBuffer(2, s.collSchema)
+		s.Require().NoError(err)
+		buf1.insertBuffer.startPos = &msgpb.MsgPosition{
+			Timestamp: 440,
+		}
+		buf1.deltaBuffer.startPos = &msgpb.MsgPosition{
+			Timestamp: 400,
+		}
+		buf2, err := newSegmentBuffer(3, s.collSchema)
+		s.Require().NoError(err)
+		buf2.insertBuffer.startPos = &msgpb.MsgPosition{
+			Timestamp: 550,
+		}
+		buf2.deltaBuffer.startPos = &msgpb.MsgPosition{
+			Timestamp: 600,
+		}
+
+		s.wb.mut.Lock()
+		s.wb.buffers[2] = buf1
+		s.wb.buffers[3] = buf2
+		s.wb.mut.Unlock()
+
+		defer func() {
+			s.wb.mut.Lock()
+			defer s.wb.mut.Unlock()
+			s.wb.buffers = make(map[int64]*segmentBuffer)
+		}()
+
+		checkpoint := s.wb.GetCheckpoint()
+		s.EqualValues(400, checkpoint.GetTimestamp())
+	})
+
+	s.Run("sync_mgr_smaller", func() {
+		s.wb.checkpoint = &msgpb.MsgPosition{
+			Timestamp: 1000,
+		}
+
+		s.syncMgr.EXPECT().GetEarliestPosition(s.channelName).Return(1, &msgpb.MsgPosition{
+			Timestamp: 300,
+		}).Once()
+
+		buf1, err := newSegmentBuffer(2, s.collSchema)
+		s.Require().NoError(err)
+		buf1.insertBuffer.startPos = &msgpb.MsgPosition{
+			Timestamp: 440,
+		}
+		buf1.deltaBuffer.startPos = &msgpb.MsgPosition{
+			Timestamp: 400,
+		}
+		buf2, err := newSegmentBuffer(3, s.collSchema)
+		s.Require().NoError(err)
+		buf2.insertBuffer.startPos = &msgpb.MsgPosition{
+			Timestamp: 550,
+		}
+		buf2.deltaBuffer.startPos = &msgpb.MsgPosition{
+			Timestamp: 600,
+		}
+
+		s.wb.mut.Lock()
+		s.wb.buffers[2] = buf1
+		s.wb.buffers[3] = buf2
+		s.wb.mut.Unlock()
+
+		defer func() {
+			s.wb.mut.Lock()
+			defer s.wb.mut.Unlock()
+			s.wb.buffers = make(map[int64]*segmentBuffer)
+		}()
+
+		checkpoint := s.wb.GetCheckpoint()
+		s.EqualValues(300, checkpoint.GetTimestamp())
+	})
+
+	s.Run("segment_buffer_smaller", func() {
+		s.wb.checkpoint = &msgpb.MsgPosition{
+			Timestamp: 1000,
+		}
+
+		s.syncMgr.EXPECT().GetEarliestPosition(s.channelName).Return(1, &msgpb.MsgPosition{
+			Timestamp: 800,
+		}).Once()
+
+		buf1, err := newSegmentBuffer(2, s.collSchema)
+		s.Require().NoError(err)
+		buf1.insertBuffer.startPos = &msgpb.MsgPosition{
+			Timestamp: 440,
+		}
+		buf1.deltaBuffer.startPos = &msgpb.MsgPosition{
+			Timestamp: 400,
+		}
+		buf2, err := newSegmentBuffer(3, s.collSchema)
+		s.Require().NoError(err)
+		buf2.insertBuffer.startPos = &msgpb.MsgPosition{
+			Timestamp: 550,
+		}
+		buf2.deltaBuffer.startPos = &msgpb.MsgPosition{
+			Timestamp: 600,
+		}
+
+		s.wb.mut.Lock()
+		s.wb.buffers[2] = buf1
+		s.wb.buffers[3] = buf2
+		s.wb.mut.Unlock()
+
+		defer func() {
+			s.wb.mut.Lock()
+			defer s.wb.mut.Unlock()
+			s.wb.buffers = make(map[int64]*segmentBuffer)
+		}()
+
+		checkpoint := s.wb.GetCheckpoint()
+		s.EqualValues(400, checkpoint.GetTimestamp())
+	})
 }
 
 func TestWriteBufferBase(t *testing.T) {

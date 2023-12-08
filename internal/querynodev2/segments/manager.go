@@ -200,6 +200,7 @@ func (mgr *segmentManager) Put(segmentType SegmentType, segments ...Segment) {
 			fmt.Sprint(segment.Partition()),
 			segment.Type().String(),
 			fmt.Sprint(len(segment.Indexes())),
+			segment.Level().String(),
 		).Inc()
 		if segment.RowNum() > 0 {
 			metrics.QueryNodeNumEntities.WithLabelValues(
@@ -564,6 +565,7 @@ func remove(segment Segment) bool {
 		fmt.Sprint(segment.Partition()),
 		segment.Type().String(),
 		fmt.Sprint(len(segment.Indexes())),
+		segment.Level().String(),
 	).Dec()
 	if rowNum > 0 {
 		metrics.QueryNodeNumEntities.WithLabelValues(
