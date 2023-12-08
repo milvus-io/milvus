@@ -315,8 +315,14 @@ TEST(Query, ExecTerm) {
                                     predicates: <
                                       term_expr: <
                                         column_info: <
-                                          field_id: 101
-                                          data_type: Float
+                                          field_id: 102
+                                          data_type: Int64
+                                        >
+                                        values: <
+                                          int64_val: 1
+                                        >
+                                        values: <
+                                          int64_val: 2
                                         >
                                       >
                                     >
@@ -347,7 +353,6 @@ TEST(Query, ExecTerm) {
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
     auto sr = segment->Search(plan.get(), ph_group.get());
-    std::vector<std::vector<std::string>> results;
     int topk = 5;
     auto json = SearchResultToJson(*sr);
     ASSERT_EQ(sr->total_nq_, num_queries);
@@ -383,6 +388,7 @@ TEST(Query, ExecEmpty) {
 
     auto sr = segment->Search(plan.get(), ph_group.get());
     std::cout << SearchResultToJson(*sr);
+    ASSERT_EQ(sr->unity_topK_, 0);
 
     for (auto i : sr->seg_offsets_) {
         ASSERT_EQ(i, -1);
