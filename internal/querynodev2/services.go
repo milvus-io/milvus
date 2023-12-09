@@ -479,6 +479,9 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 
 		req.NeedTransfer = false
 		// the segment may be not with index, so no metric type in the load request, so fill it here
+		if req.GetLoadMeta() == nil {
+			req.LoadMeta = &querypb.LoadMetaInfo{}
+		}
 		req.LoadMeta.MetricType = delegator.MetricType()
 		err := delegator.LoadSegments(ctx, req)
 		if err != nil {
