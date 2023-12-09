@@ -145,8 +145,11 @@ func (ob *TargetObserver) schedule(ctx context.Context) {
 			ob.dispatcher.AddTask(ob.meta.GetAll()...)
 
 		case req := <-ob.updateChan:
+			log := log.With(zap.Int64("collectionID", req.CollectionID))
+			log.Info("manually trigger update next target")
 			err := ob.updateNextTarget(req.CollectionID)
 			if err != nil {
+				log.Warn("failed to manually update next target", zap.Error(err))
 				close(req.ReadyNotifier)
 			} else {
 				ob.mut.Lock()
@@ -154,7 +157,9 @@ func (ob *TargetObserver) schedule(ctx context.Context) {
 				ob.mut.Unlock()
 			}
 
+			log.Info("manually trigger update target done")
 			req.Notifier <- err
+			log.Info("notify manually trigger update target done")
 		}
 	}
 }
@@ -279,7 +284,11 @@ func (ob *TargetObserver) updateNextTargetTimestamp(collectionID int64) {
 }
 
 func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collectionID int64) bool {
-	log := log.Ctx(ctx).WithRateGroup("qcv2.TargetObserver", 10, 60).With(
+	log := log.Ctx(ctx).WithRateGroup(
+		"qcv2.TargetObserver",
+		10,
+		60,
+	).With(
 		zap.Int64("collectionID", collectionID),
 	)
 
