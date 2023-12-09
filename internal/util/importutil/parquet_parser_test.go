@@ -284,7 +284,7 @@ func convertMilvusSchemaToArrowSchema(schema *schemapb.CollectionSchema) *arrow.
 	return arrow.NewSchema(fields, nil)
 }
 
-func buildArrayData(dataType, elementType schemapb.DataType, dim, rows int) arrow.Array {
+func buildArrayData(dataType, elementType schemapb.DataType, dim, rows, arrLen int) arrow.Array {
 	mem := memory.NewGoAllocator()
 	switch dataType {
 	case schemapb.DataType_Bool:
@@ -372,11 +372,11 @@ func buildArrayData(dataType, elementType schemapb.DataType, dim, rows int) arro
 		valid := make([]bool, 0, rows)
 		index := 0
 		for i := 0; i < rows; i++ {
-			index += i
+			index += arrLen
 			offsets = append(offsets, int32(index))
 			valid = append(valid, true)
 		}
-		index += rows
+		index += arrLen
 		switch elementType {
 		case schemapb.DataType_Bool:
 			builder := array.NewListBuilder(mem, &arrow.BooleanType{})
@@ -449,23 +449,27 @@ func buildArrayData(dataType, elementType schemapb.DataType, dim, rows int) arro
 
 func writeParquet(w io.Writer, milvusSchema *schemapb.CollectionSchema, numRows int) error {
 	schema := convertMilvusSchemaToArrowSchema(milvusSchema)
-	columns := make([]arrow.Array, 0, len(milvusSchema.Fields))
-	for _, field := range milvusSchema.Fields {
-		dim, _ := getFieldDimension(field)
-		columnData := buildArrayData(field.DataType, field.ElementType, dim, numRows)
-		columns = append(columns, columnData)
-	}
-	recordBatch := array.NewRecord(schema, columns, int64(numRows))
 	fw, err := pqarrow.NewFileWriter(schema, w, parquet.NewWriterProperties(), pqarrow.DefaultWriterProps())
 	if err != nil {
 		return err
 	}
 	defer fw.Close()
 
-	err = fw.Write(recordBatch)
-	if err != nil {
-		return err
+	batch := 1000
+	for i := 0; i <= numRows/batch; i++ {
+		columns := make([]arrow.Array, 0, len(milvusSchema.Fields))
+		for _, field := range milvusSchema.Fields {
+			dim, _ := getFieldDimension(field)
+			columnData := buildArrayData(field.DataType, field.ElementType, dim, batch, 10)
+			columns = append(columns, columnData)
+		}
+		recordBatch := array.NewRecord(schema, columns, int64(batch))
+		err = fw.Write(recordBatch)
+		if err != nil {
+			return err
+		}
 	}
+
 	return nil
 }
 

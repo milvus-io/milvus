@@ -103,8 +103,8 @@ func NewBinlogAdapter(ctx context.Context,
 	}
 
 	// amend the segment size to avoid portential OOM risk
-	if adapter.blockSize > MaxSegmentSizeInMemory {
-		adapter.blockSize = MaxSegmentSizeInMemory
+	if adapter.blockSize > Params.DataCoordCfg.SegmentMaxSize.GetAsInt64() {
+		adapter.blockSize = Params.DataCoordCfg.SegmentMaxSize.GetAsInt64()
 	}
 
 	return adapter, nil
