@@ -899,6 +899,12 @@ func (m *MetaCache) expireShardLeaderCache(ctx context.Context) {
 }
 
 func (m *MetaCache) InitPolicyInfo(info []string, userRoles []string) {
+	defer func() {
+		err := getEnforcer().LoadPolicy()
+		if err != nil {
+			log.Error("failed to load policy after RefreshPolicyInfo", zap.Error(err))
+		}
+	}()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.unsafeInitPolicyInfo(info, userRoles)
@@ -934,6 +940,14 @@ func (m *MetaCache) GetUserRole(user string) []string {
 }
 
 func (m *MetaCache) RefreshPolicyInfo(op typeutil.CacheOp) (err error) {
+	defer func() {
+		if err == nil {
+			le := getEnforcer().LoadPolicy()
+			if le != nil {
+				log.Error("failed to load policy after RefreshPolicyInfo", zap.Error(le))
+			}
+		}
+	}()
 	if op.OpType != typeutil.CacheRefresh {
 		m.mu.Lock()
 		defer m.mu.Unlock()
@@ -941,15 +955,7 @@ func (m *MetaCache) RefreshPolicyInfo(op typeutil.CacheOp) (err error) {
 			return errors.New("empty op key")
 		}
 	}
-	defer func() {
-		if err == nil {
-			le := getEnforcer().LoadPolicy()
-			if le != nil {
-				log.Error("failed to load policy after RefreshPolicyInfo", zap.Error(le))
-			}
-			err = le
-		}
-	}()
+
 	switch op.OpType {
 	case typeutil.CacheGrantPrivilege:
 		m.privilegeInfos[op.OpKey] = struct{}{}
