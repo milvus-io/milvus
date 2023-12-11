@@ -933,7 +933,7 @@ func (m *MetaCache) GetUserRole(user string) []string {
 	return util.StringList(m.userToRoles[user])
 }
 
-func (m *MetaCache) RefreshPolicyInfo(op typeutil.CacheOp) error {
+func (m *MetaCache) RefreshPolicyInfo(op typeutil.CacheOp) (err error) {
 	if op.OpType != typeutil.CacheRefresh {
 		m.mu.Lock()
 		defer m.mu.Unlock()
@@ -941,6 +941,15 @@ func (m *MetaCache) RefreshPolicyInfo(op typeutil.CacheOp) error {
 			return errors.New("empty op key")
 		}
 	}
+	defer func() {
+		if err == nil {
+			le := getEnforcer().LoadPolicy()
+			if le != nil {
+				log.Error("failed to load policy after RefreshPolicyInfo", zap.Error(le))
+			}
+			err = le
+		}
+	}()
 	switch op.OpType {
 	case typeutil.CacheGrantPrivilege:
 		m.privilegeInfos[op.OpKey] = struct{}{}
