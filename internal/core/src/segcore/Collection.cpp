@@ -11,6 +11,8 @@
 
 #include <google/protobuf/text_format.h>
 
+#include <memory>
+
 #include "pb/schema.pb.h"
 #include "segcore/Collection.h"
 #include "log/Log.h"

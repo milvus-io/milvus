@@ -1,18 +1,36 @@
-package proxy
+package connection
 
 import (
 	"context"
 	"fmt"
 	"strconv"
 
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 )
 
-func getIdentifierFromContext(ctx context.Context) (int64, error) {
+func ZapClientInfo(info *commonpb.ClientInfo) []zap.Field {
+	fields := []zap.Field{
+		zap.String("sdk_type", info.GetSdkType()),
+		zap.String("sdk_version", info.GetSdkVersion()),
+		zap.String("local_time", info.GetLocalTime()),
+		zap.String("user", info.GetUser()),
+		zap.String("host", info.GetHost()),
+	}
+
+	for k, v := range info.GetReserved() {
+		fields = append(fields, zap.String(k, v))
+	}
+
+	return fields
+}
+
+func GetIdentifierFromContext(ctx context.Context) (int64, error) {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
 		return 0, fmt.Errorf("fail to get metadata from the context")
@@ -33,9 +51,9 @@ func KeepActiveInterceptor(ctx context.Context, req any, info *grpc.UnaryServerI
 	// On the other hand, too many goroutines will also influence the rpc.
 	// Not sure which way is better, since actually we already make the `keepActive` asynchronous.
 	go func() {
-		identifier, err := getIdentifierFromContext(ctx)
+		identifier, err := GetIdentifierFromContext(ctx)
 		if err == nil && funcutil.CheckCtxValid(ctx) {
-			GetConnectionManager().keepActive(identifier)
+			GetManager().KeepActive(identifier)
 		}
 	}()
 

@@ -135,21 +135,64 @@ func (wb *writeBufferBase) GetFlushTimestamp() uint64 {
 }
 
 func (wb *writeBufferBase) GetCheckpoint() *msgpb.MsgPosition {
+	log := log.Ctx(context.Background()).
+		With(zap.String("channel", wb.channelName)).
+		WithRateGroup(fmt.Sprintf("writebuffer_cp_%s", wb.channelName), 1, 60)
 	wb.mut.RLock()
 	defer wb.mut.RUnlock()
 
-	syncingPos := wb.syncMgr.GetEarliestPosition(wb.channelName)
+	// syncCandidate from sync manager
+	syncSegmentID, syncCandidate := wb.syncMgr.GetEarliestPosition(wb.channelName)
 
-	positions := lo.MapToSlice(wb.buffers, func(_ int64, buf *segmentBuffer) *msgpb.MsgPosition {
-		return buf.EarliestPosition()
-	})
-	positions = append(positions, syncingPos)
-
-	checkpoint := getEarliestCheckpoint(positions...)
-	// all buffer are empty
-	if checkpoint == nil {
-		return wb.checkpoint
+	type checkpointCandidate struct {
+		segmentID int64
+		position  *msgpb.MsgPosition
 	}
+	var bufferCandidate *checkpointCandidate
+
+	candidates := lo.MapToSlice(wb.buffers, func(_ int64, buf *segmentBuffer) *checkpointCandidate {
+		return &checkpointCandidate{buf.segmentID, buf.EarliestPosition()}
+	})
+	candidates = lo.Filter(candidates, func(candidate *checkpointCandidate, _ int) bool {
+		return candidate.position != nil
+	})
+
+	if len(candidates) > 0 {
+		bufferCandidate = lo.MinBy(candidates, func(a, b *checkpointCandidate) bool {
+			return a.position.GetTimestamp() < b.position.GetTimestamp()
+		})
+	}
+
+	var checkpoint *msgpb.MsgPosition
+	var segmentID int64
+	var cpSource string
+	switch {
+	case bufferCandidate == nil && syncCandidate == nil:
+		// all buffer are empty
+		log.RatedInfo(60, "checkpoint from latest consumed msg")
+		return wb.checkpoint
+	case bufferCandidate == nil && syncCandidate != nil:
+		checkpoint = syncCandidate
+		segmentID = syncSegmentID
+		cpSource = "syncManager"
+	case syncCandidate == nil && bufferCandidate != nil:
+		checkpoint = bufferCandidate.position
+		segmentID = bufferCandidate.segmentID
+		cpSource = "segmentBuffer"
+	case syncCandidate.GetTimestamp() >= bufferCandidate.position.GetTimestamp():
+		checkpoint = bufferCandidate.position
+		segmentID = bufferCandidate.segmentID
+		cpSource = "segmentBuffer"
+	case syncCandidate.GetTimestamp() < bufferCandidate.position.GetTimestamp():
+		checkpoint = syncCandidate
+		segmentID = syncSegmentID
+		cpSource = "syncManager"
+	}
+
+	log.RatedInfo(20, "checkpoint evaluated",
+		zap.String("cpSource", cpSource),
+		zap.Int64("segmentID", segmentID),
+		zap.Uint64("cpTimestamp", checkpoint.GetTimestamp()))
 	return checkpoint
 }
 
@@ -236,18 +279,19 @@ func (wb *writeBufferBase) getOrCreateBuffer(segmentID int64) *segmentBuffer {
 	return buffer
 }
 
-func (wb *writeBufferBase) yieldBuffer(segmentID int64) (*storage.InsertData, *storage.DeleteData, *msgpb.MsgPosition) {
+func (wb *writeBufferBase) yieldBuffer(segmentID int64) (*storage.InsertData, *storage.DeleteData, *TimeRange, *msgpb.MsgPosition) {
 	buffer, ok := wb.buffers[segmentID]
 	if !ok {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 
 	// remove buffer and move it to sync manager
 	delete(wb.buffers, segmentID)
 	start := buffer.EarliestPosition()
+	timeRange := buffer.GetTimeRange()
 	insert, delta := buffer.Yield()
 
-	return insert, delta, start
+	return insert, delta, timeRange, start
 }
 
 // bufferInsert transform InsertMsg into bufferred InsertData and returns primary key field data for future usage.
@@ -328,14 +372,21 @@ func SpaceCreatorFunc(segmentID int64, collSchema *schemapb.CollectionSchema, ar
 }
 
 func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) syncmgr.Task {
+	log := log.Ctx(ctx).With(
+		zap.Int64("segmentID", segmentID),
+	)
 	segmentInfo, ok := wb.metaCache.GetSegmentByID(segmentID) // wb.metaCache.GetSegmentsBy(metacache.WithSegmentIDs(segmentID))
 	if !ok {
-		log.Ctx(ctx).Warn("segment info not found in meta cache", zap.Int64("segmentID", segmentID))
+		log.Warn("segment info not found in meta cache", zap.Int64("segmentID", segmentID))
 		return nil
 	}
 	var batchSize int64
+	var tsFrom, tsTo uint64
 
-	insert, delta, startPos := wb.yieldBuffer(segmentID)
+	insert, delta, timeRange, startPos := wb.yieldBuffer(segmentID)
+	if timeRange != nil {
+		tsFrom, tsTo = timeRange.timestampMin, timeRange.timestampMax
+	}
 
 	actions := []metacache.SegmentAction{metacache.RollStats()}
 	if insert != nil {
@@ -361,6 +412,7 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) syn
 			WithChannelName(wb.channelName).
 			WithSegmentID(segmentID).
 			WithStartPosition(startPos).
+			WithTimeRange(tsFrom, tsTo).
 			WithLevel(segmentInfo.Level()).
 			WithCheckpoint(wb.checkpoint).
 			WithSchema(wb.collSchema).
@@ -386,6 +438,7 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) syn
 			WithChannelName(wb.channelName).
 			WithSegmentID(segmentID).
 			WithStartPosition(startPos).
+			WithTimeRange(tsFrom, tsTo).
 			WithLevel(segmentInfo.Level()).
 			WithCheckpoint(wb.checkpoint).
 			WithSchema(wb.collSchema).

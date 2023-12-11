@@ -73,7 +73,7 @@ func adjustBufSize(parser *JSONParser, collectionSchema *schemapb.CollectionSche
 	// for low dimensional vector, the bufSize is a large value, read more rows each time
 	bufRowCount := parser.bufRowCount
 	for {
-		if bufRowCount*sizePerRecord > ReadBufferSize {
+		if bufRowCount*sizePerRecord > Params.DataNodeCfg.BulkInsertReadBufferSize.GetAsInt() {
 			bufRowCount--
 		} else {
 			break

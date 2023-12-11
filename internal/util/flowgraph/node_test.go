@@ -56,6 +56,22 @@ func generateMsgPack() msgstream.MsgPack {
 	return msgPack
 }
 
+func generateInsertMsgPack() msgstream.MsgPack {
+	msgPack := msgstream.MsgPack{}
+	insertMsg := &msgstream.InsertMsg{
+		BaseMsg: msgstream.BaseMsg{
+			BeginTimestamp: uint64(time.Now().Unix()),
+			EndTimestamp:   uint64(time.Now().Unix() + 1),
+			HashValues:     []uint32{0},
+		},
+		InsertRequest: msgpb.InsertRequest{
+			Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_Insert},
+		},
+	}
+	msgPack.Msgs = append(msgPack.Msgs, insertMsg)
+	return msgPack
+}
+
 func TestNodeManager_Start(t *testing.T) {
 	t.Setenv("ROCKSMQ_PATH", "/tmp/MilvusTest/FlowGraph/TestNodeStart")
 	factory := dependency.NewDefaultFactory(true)

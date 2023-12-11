@@ -20,6 +20,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"math"
 	"path"
 	"sync"
 	"time"
@@ -958,30 +959,25 @@ func (m *meta) SetSegmentCompacting(segmentID UniqueID, compacting bool) {
 }
 
 // PrepareCompleteCompactionMutation returns
-// - the segment info of compactedFrom segments before compaction to revert
 // - the segment info of compactedFrom segments after compaction to alter
 // - the segment info of compactedTo segment after compaction to add
 // The compactedTo segment could contain 0 numRows
+// TODO:  too complicated
 func (m *meta) PrepareCompleteCompactionMutation(plan *datapb.CompactionPlan,
 	result *datapb.CompactionPlanResult,
-) ([]*SegmentInfo, []*SegmentInfo, *SegmentInfo, *segMetricMutation, error) {
+) ([]*SegmentInfo, *SegmentInfo, *segMetricMutation, error) {
 	log.Info("meta update: prepare for complete compaction mutation")
 	compactionLogs := plan.GetSegmentBinlogs()
 	m.Lock()
 	defer m.Unlock()
 
-	var (
-		oldSegments = make([]*SegmentInfo, 0, len(compactionLogs))
-		modSegments = make([]*SegmentInfo, 0, len(compactionLogs))
-	)
+	modSegments := make([]*SegmentInfo, 0, len(compactionLogs))
 
 	metricMutation := &segMetricMutation{
 		stateChange: make(map[string]map[string]int),
 	}
 	for _, cl := range compactionLogs {
 		if segment := m.segments.GetSegment(cl.GetSegmentID()); segment != nil {
-			oldSegments = append(oldSegments, segment.Clone())
-
 			cloned := segment.Clone()
 			updateSegStateAndPrepareMetrics(cloned, commonpb.SegmentState_Dropped, metricMutation)
 			cloned.DroppedAt = uint64(time.Now().UnixNano())
@@ -1017,10 +1013,10 @@ func (m *meta) PrepareCompleteCompactionMutation(plan *datapb.CompactionPlan,
 	// MixCompaction / MergeCompaction will generates one and only one segment
 	compactToSegment := result.GetSegments()[0]
 
-	newAddedDeltalogs := m.updateDeltalogs(originDeltalogs, deletedDeltalogs, nil)
+	newAddedDeltalogs := updateDeltalogs(originDeltalogs, deletedDeltalogs, nil)
 	copiedDeltalogs, err := m.copyDeltaFiles(newAddedDeltalogs, modSegments[0].CollectionID, modSegments[0].PartitionID, compactToSegment.GetSegmentID())
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, err
 	}
 	deltalogs := append(compactToSegment.GetDeltalogs(), copiedDeltalogs...)
 
@@ -1055,7 +1051,7 @@ func (m *meta) PrepareCompleteCompactionMutation(plan *datapb.CompactionPlan,
 		zap.Int64("new segment num of rows", segment.GetNumOfRows()),
 		zap.Any("compacted from", segment.GetCompactionFrom()))
 
-	return oldSegments, modSegments, segment, metricMutation, nil
+	return modSegments, segment, metricMutation, nil
 }
 
 func (m *meta) copyDeltaFiles(binlogs []*datapb.FieldBinlog, collectionID, partitionID, targetSegmentID int64) ([]*datapb.FieldBinlog, error) {
@@ -1174,7 +1170,7 @@ func (m *meta) updateBinlogs(origin []*datapb.FieldBinlog, removes []*datapb.Fie
 	return res
 }
 
-func (m *meta) updateDeltalogs(origin []*datapb.FieldBinlog, removes []*datapb.FieldBinlog, adds []*datapb.FieldBinlog) []*datapb.FieldBinlog {
+func updateDeltalogs(origin []*datapb.FieldBinlog, removes []*datapb.FieldBinlog, adds []*datapb.FieldBinlog) []*datapb.FieldBinlog {
 	res := make([]*datapb.FieldBinlog, 0, len(origin))
 	for _, fbl := range origin {
 		logs := make(map[string]*datapb.Binlog)
@@ -1332,7 +1328,7 @@ func (m *meta) GetEarliestStartPositionOfGrowingSegments(label *CompactionGroupL
 			segment.GetInsertChannel() == label.Channel
 	})
 
-	var earliest *msgpb.MsgPosition
+	earliest := &msgpb.MsgPosition{Timestamp: math.MaxUint64}
 	for _, seg := range segments {
 		if earliest == nil || earliest.GetTimestamp() > seg.GetStartPosition().GetTimestamp() {
 			earliest = seg.GetStartPosition()

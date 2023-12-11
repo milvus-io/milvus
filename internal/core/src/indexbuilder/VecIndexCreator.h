@@ -20,6 +20,7 @@
 #include "index/VectorIndex.h"
 #include "index/IndexInfo.h"
 #include "storage/Types.h"
+#include "storage/space.h"
 
 namespace milvus::indexbuilder {
 
@@ -32,11 +33,19 @@ class VecIndexCreator : public IndexCreatorBase {
         const storage::FileManagerContext& file_manager_context =
             storage::FileManagerContext());
 
+    VecIndexCreator(DataType data_type,
+                    const std::string& field_name,
+                    Config& config,
+                    const storage::FileManagerContext& file_manager_context,
+                    std::shared_ptr<milvus_storage::Space> space);
     void
     Build(const milvus::DatasetPtr& dataset) override;
 
     void
     Build() override;
+
+    void
+    BuildV2() override;
 
     milvus::BinarySet
     Serialize() override;
@@ -55,6 +64,9 @@ class VecIndexCreator : public IndexCreatorBase {
     BinarySet
     Upload() override;
 
+    BinarySet
+    UploadV2() override;
+
  public:
     void
     CleanLocalData();
@@ -63,6 +75,8 @@ class VecIndexCreator : public IndexCreatorBase {
     milvus::index::IndexBasePtr index_ = nullptr;
     Config config_;
     DataType data_type_;
+
+    std::shared_ptr<milvus_storage::Space> space_;
 };
 
 }  // namespace milvus::indexbuilder

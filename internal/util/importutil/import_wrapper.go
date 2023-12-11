@@ -28,10 +28,10 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
@@ -40,20 +40,6 @@ const (
 	JSONFileExt    = ".json"
 	NumpyFileExt   = ".npy"
 	ParquetFileExt = ".parquet"
-
-	// parsers read JSON/Numpy/CSV files buffer by buffer, this limitation is to define the buffer size.
-	ReadBufferSize = 16 * 1024 * 1024 // 16MB
-
-	// this limitation is to avoid this OOM risk:
-	// simetimes system segment max size is a large number, a single segment fields data might cause OOM.
-	// flush the segment when its data reach this limitation, let the compaction to compact it later.
-	MaxSegmentSizeInMemory = 512 * 1024 * 1024 // 512MB
-
-	// this limitation is to avoid this OOM risk:
-	// if the shard number is a large number, although single segment size is small, but there are lot of in-memory segments,
-	// the total memory size might cause OOM.
-	// TODO: make it configurable.
-	MaxTotalSizeInMemory = 6 * 1024 * 1024 * 1024 // 6GB
 
 	// progress percent value of persist state
 	ProgressValueForPersist = 90
@@ -66,6 +52,8 @@ const (
 	PersistTimeCost = "persist_cost"
 	ProgressPercent = "progress_percent"
 )
+
+var Params *paramtable.ComponentParam = paramtable.Get()
 
 // ReportImportAttempts is the maximum # of attempts to retry when import fails.
 var ReportImportAttempts uint = 10
@@ -126,8 +114,8 @@ func NewImportWrapper(ctx context.Context, collectionInfo *CollectionInfo, segme
 	// average binlogSize is expected to be half of the maxBinlogSize
 	// and avoid binlogSize to be a tiny value
 	binlogSize := int64(float32(maxBinlogSize) * 0.5)
-	if binlogSize < ReadBufferSize {
-		binlogSize = ReadBufferSize
+	if binlogSize < Params.DataNodeCfg.BulkInsertReadBufferSize.GetAsInt64() {
+		binlogSize = Params.DataNodeCfg.BulkInsertReadBufferSize.GetAsInt64()
 	}
 
 	wrapper := &ImportWrapper{
@@ -234,11 +222,11 @@ func (p *ImportWrapper) fileValidation(filePaths []string) (bool, error) {
 			return rowBased, merr.WrapErrImportFailed(fmt.Sprintf("the file '%s' size is zero", filePath))
 		}
 
-		if size > params.Params.CommonCfg.ImportMaxFileSize.GetAsInt64() {
+		if size > Params.CommonCfg.ImportMaxFileSize.GetAsInt64() {
 			log.Warn("import wrapper: file size exceeds the maximum size", zap.String("filePath", filePath),
-				zap.Int64("fileSize", size), zap.String("MaxFileSize", params.Params.CommonCfg.ImportMaxFileSize.GetValue()))
+				zap.Int64("fileSize", size), zap.String("MaxFileSize", Params.CommonCfg.ImportMaxFileSize.GetValue()))
 			return rowBased, merr.WrapErrImportFailed(fmt.Sprintf("the file '%s' size exceeds the maximum size: %s bytes",
-				filePath, params.Params.CommonCfg.ImportMaxFileSize.GetValue()))
+				filePath, Params.CommonCfg.ImportMaxFileSize.GetValue()))
 		}
 		totalSize += size
 	}

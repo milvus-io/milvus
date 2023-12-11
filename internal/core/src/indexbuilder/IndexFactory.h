@@ -23,6 +23,7 @@
 #include "indexbuilder/type_c.h"
 #include "storage/Types.h"
 #include "storage/FileManager.h"
+#include "storage/space.h"
 
 namespace milvus::indexbuilder {
 
@@ -68,6 +69,37 @@ class IndexFactory {
                 throw SegcoreError(
                     DataTypeInvalid,
                     fmt::format("invalid type is {}", invalid_dtype_msg));
+        }
+    }
+
+    IndexCreatorBasePtr
+    CreateIndex(DataType type,
+                const std::string& field_name,
+                Config& config,
+                const storage::FileManagerContext& file_manager_context,
+                std::shared_ptr<milvus_storage::Space> space) {
+        auto invalid_dtype_msg =
+            std::string("invalid data type: ") + std::to_string(int(type));
+
+        switch (type) {
+            case DataType::BOOL:
+            case DataType::INT8:
+            case DataType::INT16:
+            case DataType::INT32:
+            case DataType::INT64:
+            case DataType::FLOAT:
+            case DataType::DOUBLE:
+            case DataType::VARCHAR:
+            case DataType::STRING:
+                return CreateScalarIndex(
+                    type, config, file_manager_context, space);
+
+            case DataType::VECTOR_FLOAT:
+            case DataType::VECTOR_BINARY:
+                return std::make_unique<VecIndexCreator>(
+                    type, field_name, config, file_manager_context, space);
+            default:
+                throw std::invalid_argument(invalid_dtype_msg);
         }
     }
 };

@@ -48,6 +48,7 @@ var metricFuncMap = map[string]getMetricFunc{
 	"$time_start":      getTimeStart,
 	"$time_end":        getTimeEnd,
 	"$method_expr":     getExpr,
+	"$sdk_version":     getSdkVersion,
 }
 
 var BaseFormatterKey = "base"

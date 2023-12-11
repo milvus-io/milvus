@@ -79,6 +79,9 @@ struct IndexMeta {
     int64_t build_id;
     int64_t index_version;
     std::string key;
+    std::string field_name;
+    DataType field_type;
+    int64_t dim;
 };
 
 struct StorageConfig {

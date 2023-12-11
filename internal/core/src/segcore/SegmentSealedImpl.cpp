@@ -20,11 +20,13 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include "Utils.h"
 #include "Types.h"
 #include "common/Json.h"
+#include "common/LoadInfo.h"
 #include "common/EasyAssert.h"
 #include "common/Array.h"
 #include "google/protobuf/message_lite.h"
@@ -34,6 +36,7 @@
 #include "common/Types.h"
 #include "log/Log.h"
 #include "pb/schema.pb.h"
+#include "mmap/Types.h"
 #include "query/ScalarIndex.h"
 #include "query/SearchBruteForce.h"
 #include "query/SearchOnSealed.h"
@@ -221,6 +224,53 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info) {
 }
 
 void
+SegmentSealedImpl::LoadFieldDataV2(const LoadFieldDataInfo& load_info) {
+    // NOTE: lock only when data is ready to avoid starvation
+    // only one field for now, parallel load field data in golang
+    size_t num_rows = storage::GetNumRowsForLoadInfo(load_info);
+
+    for (auto& [id, info] : load_info.field_infos) {
+        AssertInfo(info.row_count > 0, "The row count of field data is 0");
+
+        auto field_id = FieldId(id);
+        auto insert_files = info.insert_files;
+        auto field_data_info =
+            FieldDataInfo(field_id.get(), num_rows, load_info.mmap_dir_path);
+
+        auto parallel_degree = static_cast<uint64_t>(
+            DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
+        field_data_info.channel->set_capacity(parallel_degree * 2);
+        auto& pool =
+            ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
+        // auto load_future = pool.Submit(
+        //     LoadFieldDatasFromRemote, insert_files, field_data_info.channel);
+
+        auto res = milvus_storage::Space::Open(
+            load_info.url,
+            milvus_storage::Options{nullptr, load_info.storage_version});
+        AssertInfo(res.ok(),
+                   fmt::format("init space failed: {}, error: {}",
+                               load_info.url,
+                               res.status().ToString()));
+        std::shared_ptr<milvus_storage::Space> space = std::move(res.value());
+        auto load_future = pool.Submit(
+            LoadFieldDatasFromRemote2, space, schema_, field_data_info);
+        LOG_SEGCORE_INFO_ << "finish submitting LoadFieldDatasFromRemote task "
+                             "to thread pool, "
+                          << "segmentID:" << this->id_
+                          << ", fieldID:" << info.field_id;
+        if (load_info.mmap_dir_path.empty() ||
+            SystemProperty::Instance().IsSystem(field_id)) {
+            LoadFieldData(field_id, field_data_info);
+        } else {
+            MapFieldData(field_id, field_data_info);
+        }
+        LOG_SEGCORE_INFO_ << "finish loading segment field, "
+                          << "segmentID:" << this->id_
+                          << ", fieldID:" << info.field_id;
+    }
+}
+void
 SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
     auto num_rows = data.row_count;
     if (SystemProperty::Instance().IsSystem(field_id)) {
@@ -273,8 +323,8 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
         auto data_type = field_meta.get_data_type();
 
         // Don't allow raw data and index exist at the same time
-        AssertInfo(!get_bit(index_ready_bitset_, field_id),
-                   "field data can't be loaded when indexing exists");
+        //        AssertInfo(!get_bit(index_ready_bitset_, field_id),
+        //                   "field data can't be loaded when indexing exists");
 
         std::shared_ptr<ColumnBase> column{};
         if (datatype_is_variable(data_type)) {
@@ -1021,30 +1071,11 @@ SegmentSealedImpl::fill_with_empty(FieldId field_id, int64_t count) const {
 }
 
 std::unique_ptr<DataArray>
-SegmentSealedImpl::bulk_subscript(FieldId field_id,
-                                  const int64_t* seg_offsets,
-                                  int64_t count) const {
-    auto& field_meta = schema_->operator[](field_id);
-    // if count == 0, return empty data array
-    if (count == 0) {
-        return fill_with_empty(field_id, count);
-    }
-
-    if (HasIndex(field_id)) {
-        // if field has load scalar index, reverse raw data from index
-        if (!datatype_is_vector(field_meta.get_data_type())) {
-            AssertInfo(num_chunk() == 1,
-                       "num chunk not equal to 1 for sealed segment");
-            auto index = chunk_index_impl(field_id, 0);
-            return ReverseDataFromIndex(index, seg_offsets, count, field_meta);
-        }
-
-        return get_vector(field_id, seg_offsets, count);
-    }
-
-    Assert(get_bit(field_data_ready_bitset_, field_id));
-
-    // DO NOT directly access the column byh map like: `fields_.at(field_id)->Data()`,
+SegmentSealedImpl::get_raw_data(FieldId field_id,
+                                const FieldMeta& field_meta,
+                                const int64_t* seg_offsets,
+                                int64_t count) const {
+    // DO NOT directly access the column by map like: `fields_.at(field_id)->Data()`,
     // we have to clone the shared pointer,
     // to make sure it won't get released if segment released
     auto column = fields_.at(field_id);
@@ -1185,8 +1216,37 @@ SegmentSealedImpl::bulk_subscript(FieldId field_id,
                                   field_meta.get_data_type()));
         }
     }
-
     return ret;
+}
+
+std::unique_ptr<DataArray>
+SegmentSealedImpl::bulk_subscript(FieldId field_id,
+                                  const int64_t* seg_offsets,
+                                  int64_t count) const {
+    auto& field_meta = schema_->operator[](field_id);
+    // if count == 0, return empty data array
+    if (count == 0) {
+        return fill_with_empty(field_id, count);
+    }
+
+    if (HasIndex(field_id)) {
+        // if field has load scalar index, reverse raw data from index
+        if (!datatype_is_vector(field_meta.get_data_type())) {
+            AssertInfo(num_chunk() == 1,
+                       "num chunk not equal to 1 for sealed segment");
+            auto index = chunk_index_impl(field_id, 0);
+            if (index->HasRawData()) {
+                return ReverseDataFromIndex(
+                    index, seg_offsets, count, field_meta);
+            }
+            return get_raw_data(field_id, field_meta, seg_offsets, count);
+        }
+        return get_vector(field_id, seg_offsets, count);
+    }
+
+    Assert(get_bit(field_data_ready_bitset_, field_id));
+
+    return get_raw_data(field_id, field_meta, seg_offsets, count);
 }
 
 bool
@@ -1220,6 +1280,11 @@ SegmentSealedImpl::HasRawData(int64_t field_id) const {
             auto vec_index = dynamic_cast<index::VectorIndex*>(
                 field_indexing->indexing_.get());
             return vec_index->HasRawData();
+        }
+    } else {
+        auto scalar_index = scalar_indexings_.find(fieldID);
+        if (scalar_index != scalar_indexings_.end()) {
+            return scalar_index->second->HasRawData();
         }
     }
     return true;
@@ -1341,7 +1406,9 @@ SegmentSealedImpl::mask_with_timestamps(BitsetType& bitset_chunk,
                "num chunk not equal to 1 for sealed segment");
     const auto& timestamps_data = insert_record_.timestamps_.get_chunk(0);
     AssertInfo(timestamps_data.size() == get_row_count(),
-               "Timestamp size not equal to row count");
+               fmt::format("Timestamp size not equal to row count: {}, {}",
+                           timestamps_data.size(),
+                           get_row_count()));
     auto range = insert_record_.timestamp_index_.get_active_range(timestamp);
 
     // range == (size_, size_) and size_ is this->timestamps_.size().
