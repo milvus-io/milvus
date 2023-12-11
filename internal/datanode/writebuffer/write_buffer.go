@@ -135,21 +135,64 @@ func (wb *writeBufferBase) GetFlushTimestamp() uint64 {
 }
 
 func (wb *writeBufferBase) GetCheckpoint() *msgpb.MsgPosition {
+	log := log.Ctx(context.Background()).
+		With(zap.String("channel", wb.channelName)).
+		WithRateGroup(fmt.Sprintf("writebuffer_cp_%s", wb.channelName), 1, 60)
 	wb.mut.RLock()
 	defer wb.mut.RUnlock()
 
-	syncingPos := wb.syncMgr.GetEarliestPosition(wb.channelName)
+	// syncCandidate from sync manager
+	syncSegmentID, syncCandidate := wb.syncMgr.GetEarliestPosition(wb.channelName)
 
-	positions := lo.MapToSlice(wb.buffers, func(_ int64, buf *segmentBuffer) *msgpb.MsgPosition {
-		return buf.EarliestPosition()
-	})
-	positions = append(positions, syncingPos)
-
-	checkpoint := getEarliestCheckpoint(positions...)
-	// all buffer are empty
-	if checkpoint == nil {
-		return wb.checkpoint
+	type checkpointCandidate struct {
+		segmentID int64
+		position  *msgpb.MsgPosition
 	}
+	var bufferCandidate *checkpointCandidate
+
+	candidates := lo.MapToSlice(wb.buffers, func(_ int64, buf *segmentBuffer) *checkpointCandidate {
+		return &checkpointCandidate{buf.segmentID, buf.EarliestPosition()}
+	})
+	candidates = lo.Filter(candidates, func(candidate *checkpointCandidate, _ int) bool {
+		return candidate.position != nil
+	})
+
+	if len(candidates) > 0 {
+		bufferCandidate = lo.MinBy(candidates, func(a, b *checkpointCandidate) bool {
+			return a.position.GetTimestamp() < b.position.GetTimestamp()
+		})
+	}
+
+	var checkpoint *msgpb.MsgPosition
+	var segmentID int64
+	var cpSource string
+	switch {
+	case bufferCandidate == nil && syncCandidate == nil:
+		// all buffer are empty
+		log.RatedInfo(60, "checkpoint from latest consumed msg")
+		return wb.checkpoint
+	case bufferCandidate == nil && syncCandidate != nil:
+		checkpoint = syncCandidate
+		segmentID = syncSegmentID
+		cpSource = "syncManager"
+	case syncCandidate == nil && bufferCandidate != nil:
+		checkpoint = bufferCandidate.position
+		segmentID = bufferCandidate.segmentID
+		cpSource = "segmentBuffer"
+	case syncCandidate.GetTimestamp() >= bufferCandidate.position.GetTimestamp():
+		checkpoint = bufferCandidate.position
+		segmentID = bufferCandidate.segmentID
+		cpSource = "segmentBuffer"
+	case syncCandidate.GetTimestamp() < bufferCandidate.position.GetTimestamp():
+		checkpoint = syncCandidate
+		segmentID = syncSegmentID
+		cpSource = "syncManager"
+	}
+
+	log.RatedInfo(20, "checkpoint evaluated",
+		zap.String("cpSource", cpSource),
+		zap.Int64("segmentID", segmentID),
+		zap.Uint64("cpTimestamp", checkpoint.GetTimestamp()))
 	return checkpoint
 }
 

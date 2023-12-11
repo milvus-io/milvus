@@ -52,6 +52,12 @@ TEST_F(StringIndexMarisaTest, Build) {
     index->Build(strs.size(), strs.data());
 }
 
+TEST_F(StringIndexMarisaTest, HasRawData) {
+    auto index = milvus::index::CreateStringIndexMarisa();
+    index->Build(nb, strs.data());
+    ASSERT_TRUE(index->HasRawData());
+}
+
 TEST_F(StringIndexMarisaTest, Count) {
     auto index = milvus::index::CreateStringIndexMarisa();
     index->Build(nb, strs.data());

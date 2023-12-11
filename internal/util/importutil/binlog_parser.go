@@ -225,7 +225,7 @@ func (p *BinlogParser) parseSegmentFiles(segmentHolder *SegmentFilesHolder) erro
 	}
 
 	adapter, err := NewBinlogAdapter(p.ctx, p.collectionInfo, p.blockSize,
-		MaxTotalSizeInMemory, p.chunkManager, p.callFlushFunc, p.tsStartPoint, p.tsEndPoint)
+		Params.DataNodeCfg.BulkInsertMaxMemorySize.GetAsInt64(), p.chunkManager, p.callFlushFunc, p.tsStartPoint, p.tsEndPoint)
 	if err != nil {
 		log.Warn("Binlog parser: failed to create binlog adapter", zap.Error(err))
 		return merr.WrapErrImportFailed(fmt.Sprintf("failed to create binlog adapter, error: %v", err))

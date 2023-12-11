@@ -19,15 +19,18 @@ package flowgraph
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -49,6 +52,10 @@ type InputNode struct {
 	dataType     string
 
 	closeGracefully *atomic.Bool
+
+	skipMode            bool
+	skipCount           int
+	lastNotTimetickTime time.Time
 }
 
 // IsInputNode returns whether Node is InputNode
@@ -129,6 +136,11 @@ func (inNode *InputNode) Operate(in []Msg) []Msg {
 	}
 
 	var spans []trace.Span
+	defer func() {
+		for _, span := range spans {
+			span.End()
+		}
+	}()
 	for _, msg := range msgPack.Msgs {
 		ctx := msg.TraceCtx()
 		if ctx == nil {
@@ -140,16 +152,39 @@ func (inNode *InputNode) Operate(in []Msg) []Msg {
 		msg.SetTraceCtx(ctx)
 	}
 
+	// skip timetick message feature
+	if inNode.role == typeutil.DataNodeRole &&
+		len(msgPack.Msgs) > 0 &&
+		paramtable.Get().DataNodeCfg.FlowGraphSkipModeEnable.GetAsBool() {
+		if msgPack.Msgs[0].Type() == commonpb.MsgType_TimeTick {
+			if inNode.skipMode {
+				// if empty timetick message and in skipMode, will skip some of the timetick messages to reduce downstream work
+				if inNode.skipCount == paramtable.Get().DataNodeCfg.FlowGraphSkipModeSkipNum.GetAsInt() {
+					inNode.skipCount = 0
+				} else {
+					inNode.skipCount = inNode.skipCount + 1
+					return []Msg{}
+				}
+			} else {
+				cd := paramtable.Get().DataNodeCfg.FlowGraphSkipModeColdTime.GetAsInt()
+				if time.Since(inNode.lastNotTimetickTime) > time.Second*time.Duration(cd) {
+					inNode.skipMode = true
+				}
+			}
+		} else {
+			// if non empty message, refresh the lastNotTimetickTime and close skip mode
+			inNode.skipMode = false
+			inNode.skipCount = 0
+			inNode.lastNotTimetickTime = time.Now()
+		}
+	}
+
 	var msgStreamMsg Msg = &MsgStreamMsg{
 		tsMessages:     msgPack.Msgs,
 		timestampMin:   msgPack.BeginTs,
 		timestampMax:   msgPack.EndTs,
 		startPositions: msgPack.StartPositions,
 		endPositions:   msgPack.EndPositions,
-	}
-
-	for _, span := range spans {
-		span.End()
 	}
 
 	return []Msg{msgStreamMsg}
@@ -162,13 +197,15 @@ func NewInputNode(input <-chan *msgstream.MsgPack, nodeName string, maxQueueLeng
 	baseNode.SetMaxParallelism(maxParallelism)
 
 	return &InputNode{
-		BaseNode:        baseNode,
-		input:           input,
-		name:            nodeName,
-		role:            role,
-		nodeID:          nodeID,
-		collectionID:    collectionID,
-		dataType:        dataType,
-		closeGracefully: atomic.NewBool(CloseImmediately),
+		BaseNode:            baseNode,
+		input:               input,
+		name:                nodeName,
+		role:                role,
+		nodeID:              nodeID,
+		collectionID:        collectionID,
+		dataType:            dataType,
+		closeGracefully:     atomic.NewBool(CloseImmediately),
+		skipCount:           0,
+		lastNotTimetickTime: time.Now(),
 	}
 }
