@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"reflect"
 	"sort"
 	"strconv"
 
@@ -47,7 +48,11 @@ func readData(reader *storage.BinlogReader, et storage.EventTypeCode) ([]any, er
 		if err != nil {
 			return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to read data, error: %v", err))
 		}
-		result = append(result, data.([]any)...)
+		listVal := reflect.ValueOf(data)
+		for i := 0; i < listVal.Len(); i++ {
+			result = append(result, listVal.Index(i).Interface())
+		}
+		//result = append(result, data.([]any)...)
 	}
 	return result, nil
 }
