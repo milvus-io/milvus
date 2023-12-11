@@ -94,7 +94,7 @@ func NewParquetParser(ctx context.Context,
 		return nil, err
 	}
 
-	fileReader, err := pqarrow.NewFileReader(reader, pqarrow.ArrowReadProperties{BatchSize: 1}, memory.DefaultAllocator)
+	fileReader, err := pqarrow.NewFileReader(reader, pqarrow.ArrowReadProperties{}, memory.DefaultAllocator)
 	if err != nil {
 		log.Warn("create arrow parquet file reader failed", zap.Error(err))
 		return nil, err
@@ -165,10 +165,22 @@ func (p *ParquetParser) createReaders() error {
 				return merr.WrapErrImportFailed(fmt.Sprintf("there is multi field of fieldName: %s", field.GetName()))
 			}
 			if !verifyFieldSchema(field.GetDataType(), field.GetElementType(), fields[0]) {
+				if fields[0].Type.ID() == arrow.LIST {
+					log.Warn("field schema is not match",
+						zap.String("fieldName", field.GetName()),
+						zap.String("collection schema", field.GetDataType().String()),
+						zap.String("file schema", fields[0].Type.Name()),
+						zap.String("collection schema element type", field.GetElementType().String()),
+						zap.String("file list element type", fields[0].Type.(*arrow.ListType).ElemField().Type.Name()))
+					return merr.WrapErrImportFailed(fmt.Sprintf("array field schema is not match of field: %s, collection field element dataType: %s, file field element dataType:%s",
+						field.GetName(), field.GetElementType().String(), fields[0].Type.(*arrow.ListType).ElemField().Type.Name()))
+				}
 				log.Warn("field schema is not match",
+					zap.String("fieldName", field.GetName()),
 					zap.String("collection schema", field.GetDataType().String()),
 					zap.String("file schema", fields[0].Type.Name()))
-				return merr.WrapErrImportFailed(fmt.Sprintf("field schema is not match, collection field dataType: %s, file field dataType:%s", field.GetDataType().String(), fields[0].Type.Name()))
+				return merr.WrapErrImportFailed(fmt.Sprintf("schema is not match of field: %s, collection field dataType: %s, file field dataType:%s",
+					field.GetName(), field.GetDataType().String(), fields[0].Type.Name()))
 			}
 			indices := schema.FieldIndices(field.GetName())
 			if len(indices) != 1 {
@@ -315,7 +327,7 @@ func (p *ParquetParser) consume() error {
 		}
 		tr.Record("splitFieldsData")
 		// when the estimated size is close to blockSize, save to binlog
-		err = tryFlushBlocks(p.ctx, shards, p.collectionInfo.Schema, p.callFlushFunc, p.blockSize, MaxTotalSizeInMemory, false)
+		err = tryFlushBlocks(p.ctx, shards, p.collectionInfo.Schema, p.callFlushFunc, p.blockSize, Params.DataNodeCfg.BulkInsertMaxMemorySize.GetAsInt64(), false)
 		if err != nil {
 			return err
 		}
@@ -323,7 +335,7 @@ func (p *ParquetParser) consume() error {
 	}
 
 	// force flush at the end
-	return tryFlushBlocks(p.ctx, shards, p.collectionInfo.Schema, p.callFlushFunc, p.blockSize, MaxTotalSizeInMemory, true)
+	return tryFlushBlocks(p.ctx, shards, p.collectionInfo.Schema, p.callFlushFunc, p.blockSize, Params.DataNodeCfg.BulkInsertMaxMemorySize.GetAsInt64(), true)
 }
 
 // readData method reads Parquet data section into a storage.FieldData
@@ -332,13 +344,13 @@ func (p *ParquetParser) readData(columnReader *ParquetColumnReader, rowCount int
 	case schemapb.DataType_Bool:
 		data, err := ReadData(columnReader, rowCount, func(chunk arrow.Array) ([]bool, error) {
 			boolReader, ok := chunk.(*array.Boolean)
-			boolData := make([]bool, 0)
 			if !ok {
 				log.Warn("the column data in parquet is not bool", zap.String("fieldName", columnReader.fieldName))
 				return nil, merr.WrapErrImportFailed(fmt.Sprintf("the column data in parquet is not bool of field: %s", columnReader.fieldName))
 			}
+			boolData := make([]bool, boolReader.Data().Len())
 			for i := 0; i < boolReader.Data().Len(); i++ {
-				boolData = append(boolData, boolReader.Value(i))
+				boolData[i] = boolReader.Value(i)
 			}
 			return boolData, nil
 		})
@@ -353,13 +365,13 @@ func (p *ParquetParser) readData(columnReader *ParquetColumnReader, rowCount int
 	case schemapb.DataType_Int8:
 		data, err := ReadData(columnReader, rowCount, func(chunk arrow.Array) ([]int8, error) {
 			int8Reader, ok := chunk.(*array.Int8)
-			int8Data := make([]int8, 0)
 			if !ok {
 				log.Warn("the column data in parquet is not int8", zap.String("fieldName", columnReader.fieldName))
 				return nil, merr.WrapErrImportFailed(fmt.Sprintf("the column data in parquet is not int8 of field: %s", columnReader.fieldName))
 			}
+			int8Data := make([]int8, int8Reader.Data().Len())
 			for i := 0; i < int8Reader.Data().Len(); i++ {
-				int8Data = append(int8Data, int8Reader.Value(i))
+				int8Data[i] = int8Reader.Value(i)
 			}
 			return int8Data, nil
 		})
@@ -374,13 +386,13 @@ func (p *ParquetParser) readData(columnReader *ParquetColumnReader, rowCount int
 	case schemapb.DataType_Int16:
 		data, err := ReadData(columnReader, rowCount, func(chunk arrow.Array) ([]int16, error) {
 			int16Reader, ok := chunk.(*array.Int16)
-			int16Data := make([]int16, 0)
 			if !ok {
 				log.Warn("the column data in parquet is not int16", zap.String("fieldName", columnReader.fieldName))
 				return nil, merr.WrapErrImportFailed(fmt.Sprintf("the column data in parquet is not int16 of field: %s", columnReader.fieldName))
 			}
+			int16Data := make([]int16, int16Reader.Data().Len())
 			for i := 0; i < int16Reader.Data().Len(); i++ {
-				int16Data = append(int16Data, int16Reader.Value(i))
+				int16Data[i] = int16Reader.Value(i)
 			}
 			return int16Data, nil
 		})
@@ -395,13 +407,13 @@ func (p *ParquetParser) readData(columnReader *ParquetColumnReader, rowCount int
 	case schemapb.DataType_Int32:
 		data, err := ReadData(columnReader, rowCount, func(chunk arrow.Array) ([]int32, error) {
 			int32Reader, ok := chunk.(*array.Int32)
-			int32Data := make([]int32, 0)
 			if !ok {
 				log.Warn("the column data in parquet is not int32", zap.String("fieldName", columnReader.fieldName))
 				return nil, merr.WrapErrImportFailed(fmt.Sprintf("the column data in parquet is not int32 of field: %s", columnReader.fieldName))
 			}
+			int32Data := make([]int32, int32Reader.Data().Len())
 			for i := 0; i < int32Reader.Data().Len(); i++ {
-				int32Data = append(int32Data, int32Reader.Value(i))
+				int32Data[i] = int32Reader.Value(i)
 			}
 			return int32Data, nil
 		})
@@ -416,13 +428,13 @@ func (p *ParquetParser) readData(columnReader *ParquetColumnReader, rowCount int
 	case schemapb.DataType_Int64:
 		data, err := ReadData(columnReader, rowCount, func(chunk arrow.Array) ([]int64, error) {
 			int64Reader, ok := chunk.(*array.Int64)
-			int64Data := make([]int64, 0)
 			if !ok {
 				log.Warn("the column data in parquet is not int64", zap.String("fieldName", columnReader.fieldName))
 				return nil, merr.WrapErrImportFailed(fmt.Sprintf("the column data in parquet is not int64 of field: %s", columnReader.fieldName))
 			}
+			int64Data := make([]int64, int64Reader.Data().Len())
 			for i := 0; i < int64Reader.Data().Len(); i++ {
-				int64Data = append(int64Data, int64Reader.Value(i))
+				int64Data[i] = int64Reader.Value(i)
 			}
 			return int64Data, nil
 		})
@@ -437,13 +449,13 @@ func (p *ParquetParser) readData(columnReader *ParquetColumnReader, rowCount int
 	case schemapb.DataType_Float:
 		data, err := ReadData(columnReader, rowCount, func(chunk arrow.Array) ([]float32, error) {
 			float32Reader, ok := chunk.(*array.Float32)
-			float32Data := make([]float32, 0)
 			if !ok {
 				log.Warn("the column data in parquet is not float", zap.String("fieldName", columnReader.fieldName))
 				return nil, merr.WrapErrImportFailed(fmt.Sprintf("the column data in parquet is not float of field: %s", columnReader.fieldName))
 			}
+			float32Data := make([]float32, float32Reader.Data().Len())
 			for i := 0; i < float32Reader.Data().Len(); i++ {
-				float32Data = append(float32Data, float32Reader.Value(i))
+				float32Data[i] = float32Reader.Value(i)
 			}
 			return float32Data, nil
 		})
@@ -464,13 +476,13 @@ func (p *ParquetParser) readData(columnReader *ParquetColumnReader, rowCount int
 	case schemapb.DataType_Double:
 		data, err := ReadData(columnReader, rowCount, func(chunk arrow.Array) ([]float64, error) {
 			float64Reader, ok := chunk.(*array.Float64)
-			float64Data := make([]float64, 0)
 			if !ok {
 				log.Warn("the column data in parquet is not double", zap.String("fieldName", columnReader.fieldName))
 				return nil, merr.WrapErrImportFailed(fmt.Sprintf("the column data in parquet is not double of field: %s", columnReader.fieldName))
 			}
+			float64Data := make([]float64, float64Reader.Data().Len())
 			for i := 0; i < float64Reader.Data().Len(); i++ {
-				float64Data = append(float64Data, float64Reader.Value(i))
+				float64Data[i] = float64Reader.Value(i)
 			}
 			return float64Data, nil
 		})
@@ -491,13 +503,13 @@ func (p *ParquetParser) readData(columnReader *ParquetColumnReader, rowCount int
 	case schemapb.DataType_VarChar, schemapb.DataType_String:
 		data, err := ReadData(columnReader, rowCount, func(chunk arrow.Array) ([]string, error) {
 			stringReader, ok := chunk.(*array.String)
-			stringData := make([]string, 0)
 			if !ok {
 				log.Warn("the column data in parquet is not string", zap.String("fieldName", columnReader.fieldName))
 				return nil, merr.WrapErrImportFailed(fmt.Sprintf("the column data in parquet is not string of field: %s", columnReader.fieldName))
 			}
+			stringData := make([]string, stringReader.Data().Len())
 			for i := 0; i < stringReader.Data().Len(); i++ {
-				stringData = append(stringData, stringReader.Value(i))
+				stringData[i] = stringReader.Value(i)
 			}
 			return stringData, nil
 		})
@@ -513,13 +525,13 @@ func (p *ParquetParser) readData(columnReader *ParquetColumnReader, rowCount int
 		// JSON field read data from string array Parquet
 		data, err := ReadData(columnReader, rowCount, func(chunk arrow.Array) ([]string, error) {
 			stringReader, ok := chunk.(*array.String)
-			stringData := make([]string, 0)
 			if !ok {
 				log.Warn("the column data in parquet is not json string", zap.String("fieldName", columnReader.fieldName))
 				return nil, merr.WrapErrImportFailed(fmt.Sprintf("the column data in parquet is not json string of field: %s", columnReader.fieldName))
 			}
+			stringData := make([]string, stringReader.Data().Len())
 			for i := 0; i < stringReader.Data().Len(); i++ {
-				stringData = append(stringData, stringReader.Value(i))
+				stringData[i] = stringReader.Value(i)
 			}
 			return stringData, nil
 		})
@@ -545,7 +557,7 @@ func (p *ParquetParser) readData(columnReader *ParquetColumnReader, rowCount int
 		}, nil
 	case schemapb.DataType_BinaryVector:
 		data, err := ReadArrayData(columnReader, rowCount, func(offsets []int32, reader arrow.Array) ([][]uint8, error) {
-			arrayData := make([][]uint8, 0)
+			arrayData := make([][]uint8, 0, len(offsets))
 			uint8Reader, ok := reader.(*array.Uint8)
 			if !ok {
 				log.Warn("the column element data of array in parquet is not binary", zap.String("fieldName", columnReader.fieldName))
@@ -553,7 +565,7 @@ func (p *ParquetParser) readData(columnReader *ParquetColumnReader, rowCount int
 			}
 			for i := 1; i < len(offsets); i++ {
 				start, end := offsets[i-1], offsets[i]
-				elementData := make([]uint8, 0)
+				elementData := make([]uint8, 0, end-start)
 				for j := start; j < end; j++ {
 					elementData = append(elementData, uint8Reader.Value(int(j)))
 				}
@@ -586,7 +598,7 @@ func (p *ParquetParser) readData(columnReader *ParquetColumnReader, rowCount int
 		rowNum := 0
 		if columnReader.columnReader.Field().Type.(*arrow.ListType).Elem().ID() == arrow.FLOAT32 {
 			arrayData, err := ReadArrayData(columnReader, rowCount, func(offsets []int32, reader arrow.Array) ([][]float32, error) {
-				arrayData := make([][]float32, 0)
+				arrayData := make([][]float32, 0, len(offsets))
 				float32Reader, ok := reader.(*array.Float32)
 				if !ok {
 					log.Warn("the column element data of array in parquet is not float", zap.String("fieldName", columnReader.fieldName))
@@ -594,7 +606,7 @@ func (p *ParquetParser) readData(columnReader *ParquetColumnReader, rowCount int
 				}
 				for i := 1; i < len(offsets); i++ {
 					start, end := offsets[i-1], offsets[i]
-					elementData := make([]float32, 0)
+					elementData := make([]float32, 0, end-start)
 					for j := start; j < end; j++ {
 						elementData = append(elementData, float32Reader.Value(int(j)))
 					}
@@ -617,7 +629,7 @@ func (p *ParquetParser) readData(columnReader *ParquetColumnReader, rowCount int
 			rowNum = len(arrayData)
 		} else if columnReader.columnReader.Field().Type.(*arrow.ListType).Elem().ID() == arrow.FLOAT64 {
 			arrayData, err := ReadArrayData(columnReader, rowCount, func(offsets []int32, reader arrow.Array) ([][]float64, error) {
-				arrayData := make([][]float64, 0)
+				arrayData := make([][]float64, 0, len(offsets))
 				float64Reader, ok := reader.(*array.Float64)
 				if !ok {
 					log.Warn("the column element data of array in parquet is not double", zap.String("fieldName", columnReader.fieldName))
@@ -625,7 +637,7 @@ func (p *ParquetParser) readData(columnReader *ParquetColumnReader, rowCount int
 				}
 				for i := 1; i < len(offsets); i++ {
 					start, end := offsets[i-1], offsets[i]
-					elementData := make([]float64, 0)
+					elementData := make([]float64, 0, end-start)
 					for j := start; j < end; j++ {
 						elementData = append(elementData, float64Reader.Value(int(j)))
 					}
@@ -671,7 +683,7 @@ func (p *ParquetParser) readData(columnReader *ParquetColumnReader, rowCount int
 		switch columnReader.elementType {
 		case schemapb.DataType_Bool:
 			boolArray, err := ReadArrayData(columnReader, rowCount, func(offsets []int32, reader arrow.Array) ([][]bool, error) {
-				arrayData := make([][]bool, 0)
+				arrayData := make([][]bool, 0, len(offsets))
 				boolReader, ok := reader.(*array.Boolean)
 				if !ok {
 					log.Warn("the column element data of array in parquet is not bool", zap.String("fieldName", columnReader.fieldName))
@@ -679,7 +691,7 @@ func (p *ParquetParser) readData(columnReader *ParquetColumnReader, rowCount int
 				}
 				for i := 1; i < len(offsets); i++ {
 					start, end := offsets[i-1], offsets[i]
-					elementData := make([]bool, 0)
+					elementData := make([]bool, 0, end-start)
 					for j := start; j < end; j++ {
 						elementData = append(elementData, boolReader.Value(int(j)))
 					}
@@ -701,7 +713,7 @@ func (p *ParquetParser) readData(columnReader *ParquetColumnReader, rowCount int
 			}
 		case schemapb.DataType_Int8:
 			int8Array, err := ReadArrayData(columnReader, rowCount, func(offsets []int32, reader arrow.Array) ([][]int32, error) {
-				arrayData := make([][]int32, 0)
+				arrayData := make([][]int32, 0, len(offsets))
 				int8Reader, ok := reader.(*array.Int8)
 				if !ok {
 					log.Warn("the column element data of array in parquet is not int8", zap.String("fieldName", columnReader.fieldName))
@@ -709,7 +721,7 @@ func (p *ParquetParser) readData(columnReader *ParquetColumnReader, rowCount int
 				}
 				for i := 1; i < len(offsets); i++ {
 					start, end := offsets[i-1], offsets[i]
-					elementData := make([]int32, 0)
+					elementData := make([]int32, 0, end-start)
 					for j := start; j < end; j++ {
 						elementData = append(elementData, int32(int8Reader.Value(int(j))))
 					}
@@ -731,7 +743,7 @@ func (p *ParquetParser) readData(columnReader *ParquetColumnReader, rowCount int
 			}
 		case schemapb.DataType_Int16:
 			int16Array, err := ReadArrayData(columnReader, rowCount, func(offsets []int32, reader arrow.Array) ([][]int32, error) {
-				arrayData := make([][]int32, 0)
+				arrayData := make([][]int32, 0, len(offsets))
 				int16Reader, ok := reader.(*array.Int16)
 				if !ok {
 					log.Warn("the column element data of array in parquet is not int16", zap.String("fieldName", columnReader.fieldName))
@@ -739,7 +751,7 @@ func (p *ParquetParser) readData(columnReader *ParquetColumnReader, rowCount int
 				}
 				for i := 1; i < len(offsets); i++ {
 					start, end := offsets[i-1], offsets[i]
-					elementData := make([]int32, 0)
+					elementData := make([]int32, 0, end-start)
 					for j := start; j < end; j++ {
 						elementData = append(elementData, int32(int16Reader.Value(int(j))))
 					}
@@ -762,7 +774,7 @@ func (p *ParquetParser) readData(columnReader *ParquetColumnReader, rowCount int
 
 		case schemapb.DataType_Int32:
 			int32Array, err := ReadArrayData(columnReader, rowCount, func(offsets []int32, reader arrow.Array) ([][]int32, error) {
-				arrayData := make([][]int32, 0)
+				arrayData := make([][]int32, 0, len(offsets))
 				int32Reader, ok := reader.(*array.Int32)
 				if !ok {
 					log.Warn("the column element data of array in parquet is not int32", zap.String("fieldName", columnReader.fieldName))
@@ -770,7 +782,7 @@ func (p *ParquetParser) readData(columnReader *ParquetColumnReader, rowCount int
 				}
 				for i := 1; i < len(offsets); i++ {
 					start, end := offsets[i-1], offsets[i]
-					elementData := make([]int32, 0)
+					elementData := make([]int32, 0, end-start)
 					for j := start; j < end; j++ {
 						elementData = append(elementData, int32Reader.Value(int(j)))
 					}
@@ -793,7 +805,7 @@ func (p *ParquetParser) readData(columnReader *ParquetColumnReader, rowCount int
 
 		case schemapb.DataType_Int64:
 			int64Array, err := ReadArrayData(columnReader, rowCount, func(offsets []int32, reader arrow.Array) ([][]int64, error) {
-				arrayData := make([][]int64, 0)
+				arrayData := make([][]int64, 0, len(offsets))
 				int64Reader, ok := reader.(*array.Int64)
 				if !ok {
 					log.Warn("the column element data of array in parquet is not int64", zap.String("fieldName", columnReader.fieldName))
@@ -801,7 +813,7 @@ func (p *ParquetParser) readData(columnReader *ParquetColumnReader, rowCount int
 				}
 				for i := 1; i < len(offsets); i++ {
 					start, end := offsets[i-1], offsets[i]
-					elementData := make([]int64, 0)
+					elementData := make([]int64, 0, end-start)
 					for j := start; j < end; j++ {
 						elementData = append(elementData, int64Reader.Value(int(j)))
 					}
@@ -824,7 +836,7 @@ func (p *ParquetParser) readData(columnReader *ParquetColumnReader, rowCount int
 
 		case schemapb.DataType_Float:
 			float32Array, err := ReadArrayData(columnReader, rowCount, func(offsets []int32, reader arrow.Array) ([][]float32, error) {
-				arrayData := make([][]float32, 0)
+				arrayData := make([][]float32, 0, len(offsets))
 				float32Reader, ok := reader.(*array.Float32)
 				if !ok {
 					log.Warn("the column element data of array in parquet is not float", zap.String("fieldName", columnReader.fieldName))
@@ -832,7 +844,7 @@ func (p *ParquetParser) readData(columnReader *ParquetColumnReader, rowCount int
 				}
 				for i := 1; i < len(offsets); i++ {
 					start, end := offsets[i-1], offsets[i]
-					elementData := make([]float32, 0)
+					elementData := make([]float32, 0, end-start)
 					for j := start; j < end; j++ {
 						elementData = append(elementData, float32Reader.Value(int(j)))
 					}
@@ -855,7 +867,7 @@ func (p *ParquetParser) readData(columnReader *ParquetColumnReader, rowCount int
 
 		case schemapb.DataType_Double:
 			float64Array, err := ReadArrayData(columnReader, rowCount, func(offsets []int32, reader arrow.Array) ([][]float64, error) {
-				arrayData := make([][]float64, 0)
+				arrayData := make([][]float64, 0, len(offsets))
 				float64Reader, ok := reader.(*array.Float64)
 				if !ok {
 					log.Warn("the column element data of array in parquet is not double", zap.String("fieldName", columnReader.fieldName))
@@ -863,7 +875,7 @@ func (p *ParquetParser) readData(columnReader *ParquetColumnReader, rowCount int
 				}
 				for i := 1; i < len(offsets); i++ {
 					start, end := offsets[i-1], offsets[i]
-					elementData := make([]float64, 0)
+					elementData := make([]float64, 0, end-start)
 					for j := start; j < end; j++ {
 						elementData = append(elementData, float64Reader.Value(int(j)))
 					}
@@ -886,7 +898,7 @@ func (p *ParquetParser) readData(columnReader *ParquetColumnReader, rowCount int
 
 		case schemapb.DataType_VarChar, schemapb.DataType_String:
 			stringArray, err := ReadArrayData(columnReader, rowCount, func(offsets []int32, reader arrow.Array) ([][]string, error) {
-				arrayData := make([][]string, 0)
+				arrayData := make([][]string, 0, len(offsets))
 				stringReader, ok := reader.(*array.String)
 				if !ok {
 					log.Warn("the column element data of array in parquet is not string", zap.String("fieldName", columnReader.fieldName))
@@ -894,7 +906,7 @@ func (p *ParquetParser) readData(columnReader *ParquetColumnReader, rowCount int
 				}
 				for i := 1; i < len(offsets); i++ {
 					start, end := offsets[i-1], offsets[i]
-					elementData := make([]string, 0)
+					elementData := make([]string, 0, end-start)
 					for j := start; j < end; j++ {
 						elementData = append(elementData, stringReader.Value(int(j)))
 					}
@@ -917,7 +929,7 @@ func (p *ParquetParser) readData(columnReader *ParquetColumnReader, rowCount int
 		default:
 			log.Warn("unsupported element type", zap.String("element type", columnReader.elementType.String()),
 				zap.String("fieldName", columnReader.fieldName))
-			return nil, merr.WrapErrImportFailed(fmt.Sprintf("unsupported data type: %s of array", columnReader.elementType.String()))
+			return nil, merr.WrapErrImportFailed(fmt.Sprintf("unsupported data type: %s of array field: %s", columnReader.elementType.String(), columnReader.fieldName))
 		}
 		return &storage.ArrayFieldData{
 			ElementType: columnReader.elementType,
@@ -927,6 +939,6 @@ func (p *ParquetParser) readData(columnReader *ParquetColumnReader, rowCount int
 		log.Warn("Parquet parser: unsupported data type of field",
 			zap.String("dataType", columnReader.dataType.String()),
 			zap.String("fieldName", columnReader.fieldName))
-		return nil, merr.WrapErrImportFailed(fmt.Sprintf("unsupported data type: %s", columnReader.elementType.String()))
+		return nil, merr.WrapErrImportFailed(fmt.Sprintf("unsupported data type: %s of field: %s", columnReader.elementType.String(), columnReader.fieldName))
 	}
 }

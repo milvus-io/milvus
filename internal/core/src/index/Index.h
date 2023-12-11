@@ -68,6 +68,9 @@ class IndexBase {
     virtual BinarySet
     UploadV2(const Config& config = {}) = 0;
 
+    virtual const bool
+    HasRawData() const = 0;
+
     bool
     IsMmapSupported() const {
         return index_type_ == knowhere::IndexEnum::INDEX_HNSW ||
