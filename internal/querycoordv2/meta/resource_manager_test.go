@@ -93,6 +93,10 @@ func (suite *ResourceManagerSuite) TestManipulateNode() {
 	err = suite.manager.AssignNode("rg1", 1)
 	suite.NoError(err)
 
+	// test add node to rg idempotent
+	err = suite.manager.AssignNode("rg1", 1)
+	suite.NoError(err)
+
 	// test add non-exist node to rg
 	err = suite.manager.AssignNode("rg1", 2)
 	suite.ErrorIs(err, merr.ErrNodeNotFound)
