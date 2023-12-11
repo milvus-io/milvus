@@ -23,9 +23,10 @@ import (
 
 	"github.com/casbin/casbin/v2/model"
 	jsonadapter "github.com/casbin/json-adapter/v2"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
-	"go.uber.org/zap"
 )
 
 // MetaCacheCasbinAdapter is the implementation of `persist.Adapter` with Cache
