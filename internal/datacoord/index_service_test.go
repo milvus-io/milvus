@@ -177,10 +177,13 @@ func TestServer_AlterIndex(t *testing.T) {
 		}
 		createTS = uint64(1000)
 		ctx      = context.Background()
-		req      = &indexpb.AlterIndex{
+		req      = &indexpb.AlterIndexRequest{
 			CollectionID: collID,
 			IndexName:    "default_idx",
-			Timestamp:    createTS,
+			Params: []*commonpb.KeyValuePair{{
+				Key:   common.MmapEnabledKey,
+				Value: "true",
+			}},
 		}
 	)
 
@@ -494,31 +497,15 @@ func TestServer_AlterIndex(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		resp, err := s.AlterIndex(ctx, req)
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
 
-		_, err := s.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{
+		describeResp, err := s.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{
 			CollectionID: collID,
 			IndexName:    "default_idx",
 			Timestamp:    createTS,
 		})
-		assert.NoError(t, err)
-
-	})
-
-	t.Run("describe after drop index", func(t *testing.T) {
-		status, err := s.DropIndex(ctx, &indexpb.DropIndexRequest{
-			CollectionID: collID,
-			PartitionIDs: nil,
-			IndexName:    "",
-			DropAll:      true,
-		})
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
-
-		resp, err := s.DescribeIndex(ctx, req)
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_IndexNotExist, resp.GetErrorCode())
+		assert.NoError(t, merr.CheckRPCCall(describeResp, err))
+		assert.True(t, common.IsMmapEnabled(describeResp.IndexInfos[0].IndexParams...))
 	})
 }
 

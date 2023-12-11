@@ -430,10 +430,11 @@ func (cit *createIndexTask) PostExecute(ctx context.Context) error {
 
 type alterIndexTask struct {
 	Condition
-	req       *milvuspb.AlterIndexRequest
-	ctx       context.Context
-	datacoord types.DataCoordClient
-	result    *commonpb.Status
+	req        *milvuspb.AlterIndexRequest
+	ctx        context.Context
+	datacoord  types.DataCoordClient
+	querycoord types.QueryCoordClient
+	result     *commonpb.Status
 
 	replicateMsgStream msgstream.MsgStream
 
@@ -485,14 +486,22 @@ func (t *alterIndexTask) PreExecute(ctx context.Context) error {
 
 	collName := t.req.GetCollectionName()
 
-	collID, err := globalMetaCache.GetCollectionID(ctx, t.req.GetDbName(), collName)
+	collection, err := globalMetaCache.GetCollectionID(ctx, t.req.GetDbName(), collName)
 	if err != nil {
 		return err
 	}
-	t.collectionID = collID
+	t.collectionID = collection
 
 	if err = validateIndexName(t.req.GetIndexName()); err != nil {
 		return err
+	}
+
+	loaded, err := isCollectionLoaded(ctx, t.querycoord, collection)
+	if err != nil {
+		return err
+	}
+	if loaded {
+		return merr.WrapErrCollectionLoaded(collName, "can't alter index on loaded collection, please release the collection first")
 	}
 
 	return nil
