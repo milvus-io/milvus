@@ -45,7 +45,14 @@ func Init() {
 		exp, err = jaeger.New(jaeger.WithCollectorEndpoint(
 			jaeger.WithEndpoint(params.TraceCfg.JaegerURL.GetValue())))
 	case "otlp":
-		exp, err = otlptracegrpc.New(context.Background(), otlptracegrpc.WithEndpoint(params.TraceCfg.OtlpEndpoint.GetValue()))
+		secure := params.TraceCfg.OtlpSecure.GetAsBool()
+		opts := []otlptracegrpc.Option{
+			otlptracegrpc.WithEndpoint(params.TraceCfg.OtlpEndpoint.GetValue()),
+		}
+		if !secure {
+			opts = append(opts, otlptracegrpc.WithInsecure())
+		}
+		exp, err = otlptracegrpc.New(context.Background(), opts...)
 	case "stdout":
 		exp, err = stdout.New()
 	default:

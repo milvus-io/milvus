@@ -203,15 +203,15 @@ proxy:
   accessLog:
     enable: false
     # Log filename, set as "" to use stdout.
-    # filename: "" 
+    # filename: ""
     # define formatters for access log by XXX:{format: XXX, method:[XXX,XXX]}
     formatters:
       # "base" formatter could not set methods
       # all method will use "base" formatter default
-      base: 
+      base:
         # will not print access log if set as ""
         format: "[$time_now] [ACCESS] <$user_name: $user_addr> $method_name [status: $method_status] [code: $error_code] [sdk: $sdk_version] [msg: $error_msg] [traceID: $trace_id] [timeCost: $time_cost]"
-      query: 
+      query:
         format: "[$time_now] [ACCESS] <$user_name: $user_addr> $method_name [status: $method_status] [code: $error_code] [sdk: $sdk_version] [msg: $error_msg] [traceID: $trace_id] [timeCost: $time_cost] [database: $database_name] [collection: $collection_name] [partitions: $partition_name] [expr: $method_expr]"
           # set formatter owners by method name(method was all milvus external interface)
           # all method will use base formatter default
@@ -223,7 +223,7 @@ proxy:
     # rotatedTime: 0 # max time range of singal log file, mean close when time <= 0;
     # maxBackups: 8 # num of reserved backups. will rotate and crate a new backup when access log file trigger maxSize or rotatedTime.
     # cacheSize: 10240 # write cache of accesslog in Byte
-  
+
     # minioEnable: false # update backups to milvus minio when minioEnable is true.
     # remotePath: "access_log/" # file path when update backups to minio
     # remoteMaxTime: 0 # max time range(in Hour) of backups in minio, 0 means close time retention.
@@ -292,7 +292,7 @@ queryNode:
       enableIndex: true
       nlist: 128 # segment index nlist
       nprobe: 16 # nprobe to search segment, based on your accuracy requirement, must smaller than nlist
-      memExpansionRate: 1.15 # the ratio of building interim index memory usage to raw data 
+      memExpansionRate: 1.15 # the ratio of building interim index memory usage to raw data
   loadMemoryUsageFactor: 1 # The multiply factor of calculating the memory usage while loading segments
   enableDisk: false # enable querynode load disk index, and search on disk index
   maxDiskUsagePercentage: 95
@@ -692,12 +692,15 @@ quotaAndLimits:
 
 trace:
   # trace exporter type, default is stdout,
-  # optional values: ['stdout', 'jaeger']
+  # optional values: ['stdout', 'jaeger', 'otlp']
   exporter: stdout
   # fraction of traceID based sampler,
   # optional values: [0, 1]
   # Fractions >= 1 will always sample. Fractions < 0 are treated as zero.
   sampleFraction: 0
+  otlp:
+    endpoint: # "127.0.0.1:4318"
+    secure: true
   jaeger:
     url: # "http://127.0.0.1:14268/api/traces"
     # when exporter is jaeger should set the jaeger's URL
