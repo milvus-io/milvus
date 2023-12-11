@@ -268,6 +268,7 @@ PROTOBUF_CONSTEXPR SearchResultData::SearchResultData(
   , /*decltype(_impl_._topks_cached_byte_size_)*/{0}
   , /*decltype(_impl_.output_fields_)*/{}
   , /*decltype(_impl_.ids_)*/nullptr
+  , /*decltype(_impl_.group_by_field_value_)*/nullptr
   , /*decltype(_impl_.num_queries_)*/int64_t{0}
   , /*decltype(_impl_.top_k_)*/int64_t{0}
   , /*decltype(_impl_._cached_size_)*/{}} {}
@@ -422,6 +423,7 @@ const uint32_t TableStruct_schema_2eproto::offsets[] PROTOBUF_SECTION_VARIABLE(p
   ::_pbi::kInvalidFieldOffsetTag,
   ::_pbi::kInvalidFieldOffsetTag,
   ::_pbi::kInvalidFieldOffsetTag,
+  ::_pbi::kInvalidFieldOffsetTag,
   PROTOBUF_FIELD_OFFSET(::milvus::proto::schema::VectorField, _impl_.data_),
   ~0u,  // no _has_bits_
   PROTOBUF_FIELD_OFFSET(::milvus::proto::schema::FieldData, _internal_metadata_),
@@ -458,6 +460,7 @@ const uint32_t TableStruct_schema_2eproto::offsets[] PROTOBUF_SECTION_VARIABLE(p
   PROTOBUF_FIELD_OFFSET(::milvus::proto::schema::SearchResultData, _impl_.ids_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::schema::SearchResultData, _impl_.topks_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::schema::SearchResultData, _impl_.output_fields_),
+  PROTOBUF_FIELD_OFFSET(::milvus::proto::schema::SearchResultData, _impl_.group_by_field_value_),
 };
 static const ::_pbi::MigrationSchema schemas[] PROTOBUF_SECTION_VARIABLE(protodesc_cold) = {
   { 0, -1, -1, sizeof(::milvus::proto::schema::FieldSchema)},
@@ -474,9 +477,9 @@ static const ::_pbi::MigrationSchema schemas[] PROTOBUF_SECTION_VARIABLE(protode
   { 94, -1, -1, sizeof(::milvus::proto::schema::ValueField)},
   { 108, -1, -1, sizeof(::milvus::proto::schema::ScalarField)},
   { 124, -1, -1, sizeof(::milvus::proto::schema::VectorField)},
-  { 135, -1, -1, sizeof(::milvus::proto::schema::FieldData)},
-  { 148, -1, -1, sizeof(::milvus::proto::schema::IDs)},
-  { 157, -1, -1, sizeof(::milvus::proto::schema::SearchResultData)},
+  { 136, -1, -1, sizeof(::milvus::proto::schema::FieldData)},
+  { 149, -1, -1, sizeof(::milvus::proto::schema::IDs)},
+  { 158, -1, -1, sizeof(::milvus::proto::schema::SearchResultData)},
 };
 
 static const ::_pb::Message* const file_default_instances[] = {
@@ -501,85 +504,89 @@ static const ::_pb::Message* const file_default_instances[] = {
 
 const char descriptor_table_protodef_schema_2eproto[] PROTOBUF_SECTION_VARIABLE(protodesc_cold) =
   "\n\014schema.proto\022\023milvus.proto.schema\032\014com"
-  "mon.proto\"\327\003\n\013FieldSchema\022\017\n\007fieldID\030\001 \001"
-  "(\003\022\014\n\004name\030\002 \001(\t\022\026\n\016is_primary_key\030\003 \001(\010"
-  "\022\023\n\013description\030\004 \001(\t\0220\n\tdata_type\030\005 \001(\016"
-  "2\035.milvus.proto.schema.DataType\0226\n\013type_"
-  "params\030\006 \003(\0132!.milvus.proto.common.KeyVa"
-  "luePair\0227\n\014index_params\030\007 \003(\0132!.milvus.p"
-  "roto.common.KeyValuePair\022\016\n\006autoID\030\010 \001(\010"
-  "\022.\n\005state\030\t \001(\0162\037.milvus.proto.schema.Fi"
-  "eldState\0223\n\014element_type\030\n \001(\0162\035.milvus."
-  "proto.schema.DataType\0226\n\rdefault_value\030\013"
-  " \001(\0132\037.milvus.proto.schema.ValueField\022\022\n"
-  "\nis_dynamic\030\014 \001(\010\022\030\n\020is_partition_key\030\r "
-  "\001(\010\"\225\001\n\020CollectionSchema\022\014\n\004name\030\001 \001(\t\022\023"
-  "\n\013description\030\002 \001(\t\022\016\n\006autoID\030\003 \001(\010\0220\n\006f"
-  "ields\030\004 \003(\0132 .milvus.proto.schema.FieldS"
-  "chema\022\034\n\024enable_dynamic_field\030\005 \001(\010\"\031\n\tB"
-  "oolArray\022\014\n\004data\030\001 \003(\010\"\030\n\010IntArray\022\014\n\004da"
-  "ta\030\001 \003(\005\"\031\n\tLongArray\022\014\n\004data\030\001 \003(\003\"\032\n\nF"
-  "loatArray\022\014\n\004data\030\001 \003(\002\"\033\n\013DoubleArray\022\014"
-  "\n\004data\030\001 \003(\001\"\032\n\nBytesArray\022\014\n\004data\030\001 \003(\014"
-  "\"\033\n\013StringArray\022\014\n\004data\030\001 \003(\t\"q\n\nArrayAr"
-  "ray\022.\n\004data\030\001 \003(\0132 .milvus.proto.schema."
-  "ScalarField\0223\n\014element_type\030\002 \001(\0162\035.milv"
-  "us.proto.schema.DataType\"\031\n\tJSONArray\022\014\n"
-  "\004data\030\001 \003(\014\"\254\001\n\nValueField\022\023\n\tbool_data\030"
-  "\001 \001(\010H\000\022\022\n\010int_data\030\002 \001(\005H\000\022\023\n\tlong_data"
-  "\030\003 \001(\003H\000\022\024\n\nfloat_data\030\004 \001(\002H\000\022\025\n\013double"
-  "_data\030\005 \001(\001H\000\022\025\n\013string_data\030\006 \001(\tH\000\022\024\n\n"
-  "bytes_data\030\007 \001(\014H\000B\006\n\004data\"\376\003\n\013ScalarFie"
-  "ld\0223\n\tbool_data\030\001 \001(\0132\036.milvus.proto.sch"
-  "ema.BoolArrayH\000\0221\n\010int_data\030\002 \001(\0132\035.milv"
-  "us.proto.schema.IntArrayH\000\0223\n\tlong_data\030"
-  "\003 \001(\0132\036.milvus.proto.schema.LongArrayH\000\022"
-  "5\n\nfloat_data\030\004 \001(\0132\037.milvus.proto.schem"
-  "a.FloatArrayH\000\0227\n\013double_data\030\005 \001(\0132 .mi"
-  "lvus.proto.schema.DoubleArrayH\000\0227\n\013strin"
-  "g_data\030\006 \001(\0132 .milvus.proto.schema.Strin"
-  "gArrayH\000\0225\n\nbytes_data\030\007 \001(\0132\037.milvus.pr"
-  "oto.schema.BytesArrayH\000\0225\n\narray_data\030\010 "
-  "\001(\0132\037.milvus.proto.schema.ArrayArrayH\000\0223"
-  "\n\tjson_data\030\t \001(\0132\036.milvus.proto.schema."
-  "JSONArrayH\000B\006\n\004data\"\216\001\n\013VectorField\022\013\n\003d"
-  "im\030\001 \001(\003\0227\n\014float_vector\030\002 \001(\0132\037.milvus."
-  "proto.schema.FloatArrayH\000\022\027\n\rbinary_vect"
-  "or\030\003 \001(\014H\000\022\030\n\016float16_vector\030\004 \001(\014H\000B\006\n\004"
-  "data\"\345\001\n\tFieldData\022+\n\004type\030\001 \001(\0162\035.milvu"
-  "s.proto.schema.DataType\022\022\n\nfield_name\030\002 "
-  "\001(\t\0223\n\007scalars\030\003 \001(\0132 .milvus.proto.sche"
-  "ma.ScalarFieldH\000\0223\n\007vectors\030\004 \001(\0132 .milv"
-  "us.proto.schema.VectorFieldH\000\022\020\n\010field_i"
-  "d\030\005 \001(\003\022\022\n\nis_dynamic\030\006 \001(\010B\007\n\005field\"w\n\003"
-  "IDs\0220\n\006int_id\030\001 \001(\0132\036.milvus.proto.schem"
-  "a.LongArrayH\000\0222\n\006str_id\030\002 \001(\0132 .milvus.p"
-  "roto.schema.StringArrayH\000B\n\n\010id_field\"\310\001"
-  "\n\020SearchResultData\022\023\n\013num_queries\030\001 \001(\003\022"
-  "\r\n\005top_k\030\002 \001(\003\0223\n\013fields_data\030\003 \003(\0132\036.mi"
-  "lvus.proto.schema.FieldData\022\016\n\006scores\030\004 "
-  "\003(\002\022%\n\003ids\030\005 \001(\0132\030.milvus.proto.schema.I"
-  "Ds\022\r\n\005topks\030\006 \003(\003\022\025\n\routput_fields\030\007 \003(\t"
-  "*\304\001\n\010DataType\022\010\n\004None\020\000\022\010\n\004Bool\020\001\022\010\n\004Int"
-  "8\020\002\022\t\n\005Int16\020\003\022\t\n\005Int32\020\004\022\t\n\005Int64\020\005\022\t\n\005"
-  "Float\020\n\022\n\n\006Double\020\013\022\n\n\006String\020\024\022\013\n\007VarCh"
-  "ar\020\025\022\t\n\005Array\020\026\022\010\n\004JSON\020\027\022\020\n\014BinaryVecto"
-  "r\020d\022\017\n\013FloatVector\020e\022\021\n\rFloat16Vector\020f*"
-  "V\n\nFieldState\022\020\n\014FieldCreated\020\000\022\021\n\rField"
-  "Creating\020\001\022\021\n\rFieldDropping\020\002\022\020\n\014FieldDr"
-  "opped\020\003Bm\n\016io.milvus.grpcB\013SchemaProtoP\001"
-  "Z4github.com/milvus-io/milvus-proto/go-a"
-  "pi/v2/schemapb\240\001\001\252\002\022Milvus.Client.Grpcb\006"
-  "proto3"
+  "mon.proto\032 google/protobuf/descriptor.pr"
+  "oto\"\327\003\n\013FieldSchema\022\017\n\007fieldID\030\001 \001(\003\022\014\n\004"
+  "name\030\002 \001(\t\022\026\n\016is_primary_key\030\003 \001(\010\022\023\n\013de"
+  "scription\030\004 \001(\t\0220\n\tdata_type\030\005 \001(\0162\035.mil"
+  "vus.proto.schema.DataType\0226\n\013type_params"
+  "\030\006 \003(\0132!.milvus.proto.common.KeyValuePai"
+  "r\0227\n\014index_params\030\007 \003(\0132!.milvus.proto.c"
+  "ommon.KeyValuePair\022\016\n\006autoID\030\010 \001(\010\022.\n\005st"
+  "ate\030\t \001(\0162\037.milvus.proto.schema.FieldSta"
+  "te\0223\n\014element_type\030\n \001(\0162\035.milvus.proto."
+  "schema.DataType\0226\n\rdefault_value\030\013 \001(\0132\037"
+  ".milvus.proto.schema.ValueField\022\022\n\nis_dy"
+  "namic\030\014 \001(\010\022\030\n\020is_partition_key\030\r \001(\010\"\231\001"
+  "\n\020CollectionSchema\022\014\n\004name\030\001 \001(\t\022\023\n\013desc"
+  "ription\030\002 \001(\t\022\022\n\006autoID\030\003 \001(\010B\002\030\001\0220\n\006fie"
+  "lds\030\004 \003(\0132 .milvus.proto.schema.FieldSch"
+  "ema\022\034\n\024enable_dynamic_field\030\005 \001(\010\"\031\n\tBoo"
+  "lArray\022\014\n\004data\030\001 \003(\010\"\030\n\010IntArray\022\014\n\004data"
+  "\030\001 \003(\005\"\031\n\tLongArray\022\014\n\004data\030\001 \003(\003\"\032\n\nFlo"
+  "atArray\022\014\n\004data\030\001 \003(\002\"\033\n\013DoubleArray\022\014\n\004"
+  "data\030\001 \003(\001\"\032\n\nBytesArray\022\014\n\004data\030\001 \003(\014\"\033"
+  "\n\013StringArray\022\014\n\004data\030\001 \003(\t\"q\n\nArrayArra"
+  "y\022.\n\004data\030\001 \003(\0132 .milvus.proto.schema.Sc"
+  "alarField\0223\n\014element_type\030\002 \001(\0162\035.milvus"
+  ".proto.schema.DataType\"\031\n\tJSONArray\022\014\n\004d"
+  "ata\030\001 \003(\014\"\254\001\n\nValueField\022\023\n\tbool_data\030\001 "
+  "\001(\010H\000\022\022\n\010int_data\030\002 \001(\005H\000\022\023\n\tlong_data\030\003"
+  " \001(\003H\000\022\024\n\nfloat_data\030\004 \001(\002H\000\022\025\n\013double_d"
+  "ata\030\005 \001(\001H\000\022\025\n\013string_data\030\006 \001(\tH\000\022\024\n\nby"
+  "tes_data\030\007 \001(\014H\000B\006\n\004data\"\376\003\n\013ScalarField"
+  "\0223\n\tbool_data\030\001 \001(\0132\036.milvus.proto.schem"
+  "a.BoolArrayH\000\0221\n\010int_data\030\002 \001(\0132\035.milvus"
+  ".proto.schema.IntArrayH\000\0223\n\tlong_data\030\003 "
+  "\001(\0132\036.milvus.proto.schema.LongArrayH\000\0225\n"
+  "\nfloat_data\030\004 \001(\0132\037.milvus.proto.schema."
+  "FloatArrayH\000\0227\n\013double_data\030\005 \001(\0132 .milv"
+  "us.proto.schema.DoubleArrayH\000\0227\n\013string_"
+  "data\030\006 \001(\0132 .milvus.proto.schema.StringA"
+  "rrayH\000\0225\n\nbytes_data\030\007 \001(\0132\037.milvus.prot"
+  "o.schema.BytesArrayH\000\0225\n\narray_data\030\010 \001("
+  "\0132\037.milvus.proto.schema.ArrayArrayH\000\0223\n\t"
+  "json_data\030\t \001(\0132\036.milvus.proto.schema.JS"
+  "ONArrayH\000B\006\n\004data\"\251\001\n\013VectorField\022\013\n\003dim"
+  "\030\001 \001(\003\0227\n\014float_vector\030\002 \001(\0132\037.milvus.pr"
+  "oto.schema.FloatArrayH\000\022\027\n\rbinary_vector"
+  "\030\003 \001(\014H\000\022\030\n\016float16_vector\030\004 \001(\014H\000\022\031\n\017bf"
+  "loat16_vector\030\005 \001(\014H\000B\006\n\004data\"\345\001\n\tFieldD"
+  "ata\022+\n\004type\030\001 \001(\0162\035.milvus.proto.schema."
+  "DataType\022\022\n\nfield_name\030\002 \001(\t\0223\n\007scalars\030"
+  "\003 \001(\0132 .milvus.proto.schema.ScalarFieldH"
+  "\000\0223\n\007vectors\030\004 \001(\0132 .milvus.proto.schema"
+  ".VectorFieldH\000\022\020\n\010field_id\030\005 \001(\003\022\022\n\nis_d"
+  "ynamic\030\006 \001(\010B\007\n\005field\"w\n\003IDs\0220\n\006int_id\030\001"
+  " \001(\0132\036.milvus.proto.schema.LongArrayH\000\0222"
+  "\n\006str_id\030\002 \001(\0132 .milvus.proto.schema.Str"
+  "ingArrayH\000B\n\n\010id_field\"\206\002\n\020SearchResultD"
+  "ata\022\023\n\013num_queries\030\001 \001(\003\022\r\n\005top_k\030\002 \001(\003\022"
+  "3\n\013fields_data\030\003 \003(\0132\036.milvus.proto.sche"
+  "ma.FieldData\022\016\n\006scores\030\004 \003(\002\022%\n\003ids\030\005 \001("
+  "\0132\030.milvus.proto.schema.IDs\022\r\n\005topks\030\006 \003"
+  "(\003\022\025\n\routput_fields\030\007 \003(\t\022<\n\024group_by_fi"
+  "eld_value\030\010 \001(\0132\036.milvus.proto.schema.Fi"
+  "eldData*\330\001\n\010DataType\022\010\n\004None\020\000\022\010\n\004Bool\020\001"
+  "\022\010\n\004Int8\020\002\022\t\n\005Int16\020\003\022\t\n\005Int32\020\004\022\t\n\005Int6"
+  "4\020\005\022\t\n\005Float\020\n\022\n\n\006Double\020\013\022\n\n\006String\020\024\022\013"
+  "\n\007VarChar\020\025\022\t\n\005Array\020\026\022\010\n\004JSON\020\027\022\020\n\014Bina"
+  "ryVector\020d\022\017\n\013FloatVector\020e\022\021\n\rFloat16Ve"
+  "ctor\020f\022\022\n\016BFloat16Vector\020g*V\n\nFieldState"
+  "\022\020\n\014FieldCreated\020\000\022\021\n\rFieldCreating\020\001\022\021\n"
+  "\rFieldDropping\020\002\022\020\n\014FieldDropped\020\003Bm\n\016io"
+  ".milvus.grpcB\013SchemaProtoP\001Z4github.com/"
+  "milvus-io/milvus-proto/go-api/v2/schemap"
+  "b\240\001\001\252\002\022Milvus.Client.Grpcb\006proto3"
   ;
-static const ::_pbi::DescriptorTable* const descriptor_table_schema_2eproto_deps[1] = {
+static const ::_pbi::DescriptorTable* const descriptor_table_schema_2eproto_deps[2] = {
   &::descriptor_table_common_2eproto,
+  &::descriptor_table_google_2fprotobuf_2fdescriptor_2eproto,
 };
 static ::_pbi::once_flag descriptor_table_schema_2eproto_once;
 const ::_pbi::DescriptorTable descriptor_table_schema_2eproto = {
-    false, false, 2806, descriptor_table_protodef_schema_2eproto,
+    false, false, 2953, descriptor_table_protodef_schema_2eproto,
     "schema.proto",
-    &descriptor_table_schema_2eproto_once, descriptor_table_schema_2eproto_deps, 1, 17,
+    &descriptor_table_schema_2eproto_once, descriptor_table_schema_2eproto_deps, 2, 17,
     schemas, file_default_instances, TableStruct_schema_2eproto::offsets,
     file_level_metadata_schema_2eproto, file_level_enum_descriptors_schema_2eproto,
     file_level_service_descriptors_schema_2eproto,
@@ -614,6 +621,7 @@ bool DataType_IsValid(int value) {
     case 100:
     case 101:
     case 102:
+    case 103:
       return true;
     default:
       return false;
@@ -1347,7 +1355,7 @@ const char* CollectionSchema::_InternalParse(const char* ptr, ::_pbi::ParseConte
         } else
           goto handle_unusual;
         continue;
-      // bool autoID = 3;
+      // bool autoID = 3 [deprecated = true];
       case 3:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 24)) {
           _impl_.autoid_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
@@ -1425,7 +1433,7 @@ uint8_t* CollectionSchema::_InternalSerialize(
         2, this->_internal_description(), target);
   }
 
-  // bool autoID = 3;
+  // bool autoID = 3 [deprecated = true];
   if (this->_internal_autoid() != 0) {
     target = stream->EnsureSpace(target);
     target = ::_pbi::WireFormatLite::WriteBoolToArray(3, this->_internal_autoid(), target);
@@ -1482,7 +1490,7 @@ size_t CollectionSchema::ByteSizeLong() const {
         this->_internal_description());
   }
 
-  // bool autoID = 3;
+  // bool autoID = 3 [deprecated = true];
   if (this->_internal_autoid() != 0) {
     total_size += 1 + 1;
   }
@@ -4464,6 +4472,10 @@ VectorField::VectorField(const VectorField& from)
       _this->_internal_set_float16_vector(from._internal_float16_vector());
       break;
     }
+    case kBfloat16Vector: {
+      _this->_internal_set_bfloat16_vector(from._internal_bfloat16_vector());
+      break;
+    }
     case DATA_NOT_SET: {
       break;
     }
@@ -4519,6 +4531,10 @@ void VectorField::clear_data() {
     }
     case kFloat16Vector: {
       _impl_.data_.float16_vector_.Destroy();
+      break;
+    }
+    case kBfloat16Vector: {
+      _impl_.data_.bfloat16_vector_.Destroy();
       break;
     }
     case DATA_NOT_SET: {
@@ -4580,6 +4596,15 @@ const char* VectorField::_InternalParse(const char* ptr, ::_pbi::ParseContext* c
         } else
           goto handle_unusual;
         continue;
+      // bytes bfloat16_vector = 5;
+      case 5:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 42)) {
+          auto str = _internal_mutable_bfloat16_vector();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
       default:
         goto handle_unusual;
     }  // switch
@@ -4634,6 +4659,12 @@ uint8_t* VectorField::_InternalSerialize(
         4, this->_internal_float16_vector(), target);
   }
 
+  // bytes bfloat16_vector = 5;
+  if (_internal_has_bfloat16_vector()) {
+    target = stream->WriteBytesMaybeAliased(
+        5, this->_internal_bfloat16_vector(), target);
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = ::_pbi::WireFormat::InternalSerializeUnknownFieldsToArray(
         _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance), target, stream);
@@ -4677,6 +4708,13 @@ size_t VectorField::ByteSizeLong() const {
           this->_internal_float16_vector());
       break;
     }
+    // bytes bfloat16_vector = 5;
+    case kBfloat16Vector: {
+      total_size += 1 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+          this->_internal_bfloat16_vector());
+      break;
+    }
     case DATA_NOT_SET: {
       break;
     }
@@ -4714,6 +4752,10 @@ void VectorField::MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PR
     }
     case kFloat16Vector: {
       _this->_internal_set_float16_vector(from._internal_float16_vector());
+      break;
+    }
+    case kBfloat16Vector: {
+      _this->_internal_set_bfloat16_vector(from._internal_bfloat16_vector());
       break;
     }
     case DATA_NOT_SET: {
@@ -5502,11 +5544,16 @@ void IDs::InternalSwap(IDs* other) {
 class SearchResultData::_Internal {
  public:
   static const ::milvus::proto::schema::IDs& ids(const SearchResultData* msg);
+  static const ::milvus::proto::schema::FieldData& group_by_field_value(const SearchResultData* msg);
 };
 
 const ::milvus::proto::schema::IDs&
 SearchResultData::_Internal::ids(const SearchResultData* msg) {
   return *msg->_impl_.ids_;
+}
+const ::milvus::proto::schema::FieldData&
+SearchResultData::_Internal::group_by_field_value(const SearchResultData* msg) {
+  return *msg->_impl_.group_by_field_value_;
 }
 SearchResultData::SearchResultData(::PROTOBUF_NAMESPACE_ID::Arena* arena,
                          bool is_message_owned)
@@ -5524,6 +5571,7 @@ SearchResultData::SearchResultData(const SearchResultData& from)
     , /*decltype(_impl_._topks_cached_byte_size_)*/{0}
     , decltype(_impl_.output_fields_){from._impl_.output_fields_}
     , decltype(_impl_.ids_){nullptr}
+    , decltype(_impl_.group_by_field_value_){nullptr}
     , decltype(_impl_.num_queries_){}
     , decltype(_impl_.top_k_){}
     , /*decltype(_impl_._cached_size_)*/{}};
@@ -5531,6 +5579,9 @@ SearchResultData::SearchResultData(const SearchResultData& from)
   _internal_metadata_.MergeFrom<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(from._internal_metadata_);
   if (from._internal_has_ids()) {
     _this->_impl_.ids_ = new ::milvus::proto::schema::IDs(*from._impl_.ids_);
+  }
+  if (from._internal_has_group_by_field_value()) {
+    _this->_impl_.group_by_field_value_ = new ::milvus::proto::schema::FieldData(*from._impl_.group_by_field_value_);
   }
   ::memcpy(&_impl_.num_queries_, &from._impl_.num_queries_,
     static_cast<size_t>(reinterpret_cast<char*>(&_impl_.top_k_) -
@@ -5549,6 +5600,7 @@ inline void SearchResultData::SharedCtor(
     , /*decltype(_impl_._topks_cached_byte_size_)*/{0}
     , decltype(_impl_.output_fields_){arena}
     , decltype(_impl_.ids_){nullptr}
+    , decltype(_impl_.group_by_field_value_){nullptr}
     , decltype(_impl_.num_queries_){int64_t{0}}
     , decltype(_impl_.top_k_){int64_t{0}}
     , /*decltype(_impl_._cached_size_)*/{}
@@ -5571,6 +5623,7 @@ inline void SearchResultData::SharedDtor() {
   _impl_.topks_.~RepeatedField();
   _impl_.output_fields_.~RepeatedPtrField();
   if (this != internal_default_instance()) delete _impl_.ids_;
+  if (this != internal_default_instance()) delete _impl_.group_by_field_value_;
 }
 
 void SearchResultData::SetCachedSize(int size) const {
@@ -5591,6 +5644,10 @@ void SearchResultData::Clear() {
     delete _impl_.ids_;
   }
   _impl_.ids_ = nullptr;
+  if (GetArenaForAllocation() == nullptr && _impl_.group_by_field_value_ != nullptr) {
+    delete _impl_.group_by_field_value_;
+  }
+  _impl_.group_by_field_value_ = nullptr;
   ::memset(&_impl_.num_queries_, 0, static_cast<size_t>(
       reinterpret_cast<char*>(&_impl_.top_k_) -
       reinterpret_cast<char*>(&_impl_.num_queries_)) + sizeof(_impl_.top_k_));
@@ -5677,6 +5734,14 @@ const char* SearchResultData::_InternalParse(const char* ptr, ::_pbi::ParseConte
         } else
           goto handle_unusual;
         continue;
+      // .milvus.proto.schema.FieldData group_by_field_value = 8;
+      case 8:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 66)) {
+          ptr = ctx->ParseMessage(_internal_mutable_group_by_field_value(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
       default:
         goto handle_unusual;
     }  // switch
@@ -5757,6 +5822,13 @@ uint8_t* SearchResultData::_InternalSerialize(
     target = stream->WriteString(7, s, target);
   }
 
+  // .milvus.proto.schema.FieldData group_by_field_value = 8;
+  if (this->_internal_has_group_by_field_value()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(8, _Internal::group_by_field_value(this),
+        _Internal::group_by_field_value(this).GetCachedSize(), target, stream);
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = ::_pbi::WireFormat::InternalSerializeUnknownFieldsToArray(
         _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance), target, stream);
@@ -5820,6 +5892,13 @@ size_t SearchResultData::ByteSizeLong() const {
         *_impl_.ids_);
   }
 
+  // .milvus.proto.schema.FieldData group_by_field_value = 8;
+  if (this->_internal_has_group_by_field_value()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+        *_impl_.group_by_field_value_);
+  }
+
   // int64 num_queries = 1;
   if (this->_internal_num_queries() != 0) {
     total_size += ::_pbi::WireFormatLite::Int64SizePlusOne(this->_internal_num_queries());
@@ -5855,6 +5934,10 @@ void SearchResultData::MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const
   if (from._internal_has_ids()) {
     _this->_internal_mutable_ids()->::milvus::proto::schema::IDs::MergeFrom(
         from._internal_ids());
+  }
+  if (from._internal_has_group_by_field_value()) {
+    _this->_internal_mutable_group_by_field_value()->::milvus::proto::schema::FieldData::MergeFrom(
+        from._internal_group_by_field_value());
   }
   if (from._internal_num_queries() != 0) {
     _this->_internal_set_num_queries(from._internal_num_queries());

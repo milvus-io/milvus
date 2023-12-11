@@ -280,6 +280,7 @@ enum PlaceholderType : int {
   BinaryVector = 100,
   FloatVector = 101,
   Float16Vector = 102,
+  BFloat16Vector = 103,
   Int64 = 5,
   VarChar = 21,
   PlaceholderType_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::min(),
@@ -287,7 +288,7 @@ enum PlaceholderType : int {
 };
 bool PlaceholderType_IsValid(int value);
 constexpr PlaceholderType PlaceholderType_MIN = None;
-constexpr PlaceholderType PlaceholderType_MAX = Float16Vector;
+constexpr PlaceholderType PlaceholderType_MAX = BFloat16Vector;
 constexpr int PlaceholderType_ARRAYSIZE = PlaceholderType_MAX + 1;
 
 const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* PlaceholderType_descriptor();
@@ -602,12 +603,17 @@ enum ObjectPrivilege : int {
   PrivilegeDropDatabase = 36,
   PrivilegeListDatabases = 37,
   PrivilegeFlushAll = 38,
+  PrivilegeCreatePartition = 39,
+  PrivilegeDropPartition = 40,
+  PrivilegeShowPartitions = 41,
+  PrivilegeHasPartition = 42,
+  PrivilegeGetFlushState = 43,
   ObjectPrivilege_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::min(),
   ObjectPrivilege_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::max()
 };
 bool ObjectPrivilege_IsValid(int value);
 constexpr ObjectPrivilege ObjectPrivilege_MIN = PrivilegeAll;
-constexpr ObjectPrivilege ObjectPrivilege_MAX = PrivilegeFlushAll;
+constexpr ObjectPrivilege ObjectPrivilege_MAX = PrivilegeGetFlushState;
 constexpr int ObjectPrivilege_ARRAYSIZE = ObjectPrivilege_MAX + 1;
 
 const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* ObjectPrivilege_descriptor();
@@ -803,8 +809,10 @@ class Status final :
 
   enum : int {
     kReasonFieldNumber = 2,
+    kDetailFieldNumber = 5,
     kErrorCodeFieldNumber = 1,
     kCodeFieldNumber = 3,
+    kRetriableFieldNumber = 4,
   };
   // string reason = 2;
   void clear_reason();
@@ -820,10 +828,24 @@ class Status final :
   std::string* _internal_mutable_reason();
   public:
 
-  // .milvus.proto.common.ErrorCode error_code = 1;
-  void clear_error_code();
-  ::milvus::proto::common::ErrorCode error_code() const;
-  void set_error_code(::milvus::proto::common::ErrorCode value);
+  // string detail = 5;
+  void clear_detail();
+  const std::string& detail() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_detail(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_detail();
+  PROTOBUF_NODISCARD std::string* release_detail();
+  void set_allocated_detail(std::string* detail);
+  private:
+  const std::string& _internal_detail() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_detail(const std::string& value);
+  std::string* _internal_mutable_detail();
+  public:
+
+  // .milvus.proto.common.ErrorCode error_code = 1 [deprecated = true];
+  PROTOBUF_DEPRECATED void clear_error_code();
+  PROTOBUF_DEPRECATED ::milvus::proto::common::ErrorCode error_code() const;
+  PROTOBUF_DEPRECATED void set_error_code(::milvus::proto::common::ErrorCode value);
   private:
   ::milvus::proto::common::ErrorCode _internal_error_code() const;
   void _internal_set_error_code(::milvus::proto::common::ErrorCode value);
@@ -838,6 +860,15 @@ class Status final :
   void _internal_set_code(int32_t value);
   public:
 
+  // bool retriable = 4;
+  void clear_retriable();
+  bool retriable() const;
+  void set_retriable(bool value);
+  private:
+  bool _internal_retriable() const;
+  void _internal_set_retriable(bool value);
+  public:
+
   // @@protoc_insertion_point(class_scope:milvus.proto.common.Status)
  private:
   class _Internal;
@@ -847,8 +878,10 @@ class Status final :
   typedef void DestructorSkippable_;
   struct Impl_ {
     ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr reason_;
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr detail_;
     int error_code_;
     int32_t code_;
+    bool retriable_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   };
   union { Impl_ _impl_; };
@@ -3508,7 +3541,7 @@ extern ::PROTOBUF_NAMESPACE_ID::internal::ExtensionIdentifier< ::PROTOBUF_NAMESP
 #endif  // __GNUC__
 // Status
 
-// .milvus.proto.common.ErrorCode error_code = 1;
+// .milvus.proto.common.ErrorCode error_code = 1 [deprecated = true];
 inline void Status::clear_error_code() {
   _impl_.error_code_ = 0;
 }
@@ -3596,6 +3629,76 @@ inline void Status::_internal_set_code(int32_t value) {
 inline void Status::set_code(int32_t value) {
   _internal_set_code(value);
   // @@protoc_insertion_point(field_set:milvus.proto.common.Status.code)
+}
+
+// bool retriable = 4;
+inline void Status::clear_retriable() {
+  _impl_.retriable_ = false;
+}
+inline bool Status::_internal_retriable() const {
+  return _impl_.retriable_;
+}
+inline bool Status::retriable() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.common.Status.retriable)
+  return _internal_retriable();
+}
+inline void Status::_internal_set_retriable(bool value) {
+  
+  _impl_.retriable_ = value;
+}
+inline void Status::set_retriable(bool value) {
+  _internal_set_retriable(value);
+  // @@protoc_insertion_point(field_set:milvus.proto.common.Status.retriable)
+}
+
+// string detail = 5;
+inline void Status::clear_detail() {
+  _impl_.detail_.ClearToEmpty();
+}
+inline const std::string& Status::detail() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.common.Status.detail)
+  return _internal_detail();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void Status::set_detail(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.detail_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:milvus.proto.common.Status.detail)
+}
+inline std::string* Status::mutable_detail() {
+  std::string* _s = _internal_mutable_detail();
+  // @@protoc_insertion_point(field_mutable:milvus.proto.common.Status.detail)
+  return _s;
+}
+inline const std::string& Status::_internal_detail() const {
+  return _impl_.detail_.Get();
+}
+inline void Status::_internal_set_detail(const std::string& value) {
+  
+  _impl_.detail_.Set(value, GetArenaForAllocation());
+}
+inline std::string* Status::_internal_mutable_detail() {
+  
+  return _impl_.detail_.Mutable(GetArenaForAllocation());
+}
+inline std::string* Status::release_detail() {
+  // @@protoc_insertion_point(field_release:milvus.proto.common.Status.detail)
+  return _impl_.detail_.Release();
+}
+inline void Status::set_allocated_detail(std::string* detail) {
+  if (detail != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.detail_.SetAllocated(detail, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.detail_.IsDefault()) {
+    _impl_.detail_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.common.Status.detail)
 }
 
 // -------------------------------------------------------------------

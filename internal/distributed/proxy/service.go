@@ -820,6 +820,11 @@ func (s *Server) CreateIndex(ctx context.Context, request *milvuspb.CreateIndexR
 	return s.proxy.CreateIndex(ctx, request)
 }
 
+func (s *Server) AlterIndex(ctx context.Context, request *milvuspb.AlterIndexRequest) (*commonpb.Status, error) {
+	// Todo
+	return nil, nil
+}
+
 // DropIndex notifies Proxy to drop index
 func (s *Server) DropIndex(ctx context.Context, request *milvuspb.DropIndexRequest) (*commonpb.Status, error) {
 	return s.proxy.DropIndex(ctx, request)
@@ -862,6 +867,11 @@ func (s *Server) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) (*
 
 func (s *Server) Search(ctx context.Context, request *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 	return s.proxy.Search(ctx, request)
+}
+
+func (s *Server) SearchV2(ctx context.Context, request *milvuspb.SearchRequestV2) (*milvuspb.SearchResults, error) {
+	// Todo
+	return nil, nil
 }
 
 func (s *Server) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*milvuspb.FlushResponse, error) {
