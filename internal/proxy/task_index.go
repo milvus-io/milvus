@@ -481,7 +481,7 @@ func (t *alterIndexTask) OnEnqueue() error {
 }
 
 func (t *alterIndexTask) PreExecute(ctx context.Context) error {
-	t.req.Base.MsgType = commonpb.MsgType_CreateIndex
+	t.req.Base.MsgType = commonpb.MsgType_AlterIndex
 	t.req.Base.SourceID = paramtable.GetNodeID()
 
 	collName := t.req.GetCollectionName()
