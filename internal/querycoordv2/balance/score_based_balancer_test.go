@@ -586,7 +586,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestStoppedBalance() {
 	for i, c := range cases {
 		suite.Run(c.name, func() {
 			if i == 0 {
-				suite.mockScheduler.Mock.On("GetNodeChannelDelta", mock.Anything).Return(0)
+				suite.mockScheduler.Mock.On("GetNodeChannelDelta", mock.Anything).Return(0).Maybe()
 			}
 			suite.SetupSuite()
 			defer suite.TearDownTest()
