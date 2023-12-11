@@ -1392,8 +1392,10 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 			// to pass segment'version, we call load segment one by one
 			action := action
 			group.Go(func() error {
-				loadMeta := req.GetLoadMeta()
-				loadMeta.MetricType = shardDelegator.MetricType()
+				if req.GetLoadMeta() == nil {
+					req.LoadMeta = &querypb.LoadMetaInfo{}
+				}
+				req.LoadMeta.MetricType = shardDelegator.MetricType()
 
 				return shardDelegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
 					Base: commonpbutil.NewMsgBase(
