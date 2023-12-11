@@ -217,7 +217,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalance() {
 			expectChannelPlans: []ChannelAssignPlan{},
 		},
 		{
-			name:        "part stopping balance",
+			name:        "part stopping balance channel",
 			nodes:       []int64{1, 2, 3},
 			segmentCnts: []int{1, 2, 2},
 			states:      []session.State{session.NodeStateNormal, session.NodeStateNormal, session.NodeStateStopping},
@@ -241,13 +241,41 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalance() {
 					{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "v3"}, Node: 3},
 				},
 			},
+			expectPlans: []SegmentAssignPlan{},
+			expectChannelPlans: []ChannelAssignPlan{
+				{Channel: &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "v3"}, Node: 3}, From: 3, To: 1, ReplicaID: 1},
+			},
+		},
+		{
+			name:        "part stopping balance segment",
+			nodes:       []int64{1, 2, 3},
+			segmentCnts: []int{1, 2, 2},
+			states:      []session.State{session.NodeStateNormal, session.NodeStateNormal, session.NodeStateStopping},
+			shouldMock:  true,
+			distributions: map[int64][]*meta.Segment{
+				1: {{SegmentInfo: &datapb.SegmentInfo{ID: 1, CollectionID: 1, NumOfRows: 10}, Node: 1}},
+				2: {
+					{SegmentInfo: &datapb.SegmentInfo{ID: 2, CollectionID: 1, NumOfRows: 20}, Node: 2},
+					{SegmentInfo: &datapb.SegmentInfo{ID: 3, CollectionID: 1, NumOfRows: 30}, Node: 2},
+				},
+				3: {
+					{SegmentInfo: &datapb.SegmentInfo{ID: 4, CollectionID: 1, NumOfRows: 10}, Node: 3},
+					{SegmentInfo: &datapb.SegmentInfo{ID: 5, CollectionID: 1, NumOfRows: 10}, Node: 3},
+				},
+			},
+			distributionChannels: map[int64][]*meta.DmChannel{
+				2: {
+					{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "v2"}, Node: 2},
+				},
+				1: {
+					{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "v3"}, Node: 1},
+				},
+			},
 			expectPlans: []SegmentAssignPlan{
 				{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 4, CollectionID: 1, NumOfRows: 10}, Node: 3}, From: 3, To: 1, ReplicaID: 1},
 				{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 5, CollectionID: 1, NumOfRows: 10}, Node: 3}, From: 3, To: 1, ReplicaID: 1},
 			},
-			expectChannelPlans: []ChannelAssignPlan{
-				{Channel: &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "v3"}, Node: 3}, From: 3, To: 1, ReplicaID: 1},
-			},
+			expectChannelPlans: []ChannelAssignPlan{},
 		},
 		{
 			name:          "balance channel",
@@ -488,17 +516,12 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalanceOnPartStopping() {
 				2: {
 					{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "v2"}, Node: 2},
 				},
-				3: {
-					{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "v3"}, Node: 3},
-				},
 			},
 			expectPlans: []SegmentAssignPlan{
 				{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 4, CollectionID: 1, NumOfRows: 10}, Node: 3}, From: 3, To: 1, ReplicaID: 1},
 				{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 5, CollectionID: 1, NumOfRows: 10}, Node: 3}, From: 3, To: 1, ReplicaID: 1},
 			},
-			expectChannelPlans: []ChannelAssignPlan{
-				{Channel: &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "v3"}, Node: 3}, From: 3, To: 1, ReplicaID: 1},
-			},
+			expectChannelPlans: []ChannelAssignPlan{},
 		},
 		{
 			name:        "not exist in next target",
@@ -619,7 +642,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalanceOutboundNodes() {
 		expectChannelPlans   []ChannelAssignPlan
 	}{
 		{
-			name:        "balance out bound nodes",
+			name:        "balance channel with outbound nodes",
 			nodes:       []int64{1, 2, 3},
 			segmentCnts: []int{1, 2, 2},
 			states:      []session.State{session.NodeStateNormal, session.NodeStateNormal, session.NodeStateNormal},
@@ -643,13 +666,41 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalanceOutboundNodes() {
 					{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "v3"}, Node: 3},
 				},
 			},
+			expectPlans: []SegmentAssignPlan{},
+			expectChannelPlans: []ChannelAssignPlan{
+				{Channel: &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "v3"}, Node: 3}, From: 3, To: 1, ReplicaID: 1},
+			},
+		},
+		{
+			name:        "balance segment with outbound node",
+			nodes:       []int64{1, 2, 3},
+			segmentCnts: []int{1, 2, 2},
+			states:      []session.State{session.NodeStateNormal, session.NodeStateNormal, session.NodeStateNormal},
+			shouldMock:  true,
+			distributions: map[int64][]*meta.Segment{
+				1: {{SegmentInfo: &datapb.SegmentInfo{ID: 1, CollectionID: 1, NumOfRows: 10}, Node: 1}},
+				2: {
+					{SegmentInfo: &datapb.SegmentInfo{ID: 2, CollectionID: 1, NumOfRows: 20}, Node: 2},
+					{SegmentInfo: &datapb.SegmentInfo{ID: 3, CollectionID: 1, NumOfRows: 30}, Node: 2},
+				},
+				3: {
+					{SegmentInfo: &datapb.SegmentInfo{ID: 4, CollectionID: 1, NumOfRows: 10}, Node: 3},
+					{SegmentInfo: &datapb.SegmentInfo{ID: 5, CollectionID: 1, NumOfRows: 10}, Node: 3},
+				},
+			},
+			distributionChannels: map[int64][]*meta.DmChannel{
+				2: {
+					{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "v2"}, Node: 2},
+				},
+				1: {
+					{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "v3"}, Node: 1},
+				},
+			},
 			expectPlans: []SegmentAssignPlan{
 				{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 4, CollectionID: 1, NumOfRows: 10}, Node: 3}, From: 3, To: 1, ReplicaID: 1},
 				{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 5, CollectionID: 1, NumOfRows: 10}, Node: 3}, From: 3, To: 1, ReplicaID: 1},
 			},
-			expectChannelPlans: []ChannelAssignPlan{
-				{Channel: &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "v3"}, Node: 3}, From: 3, To: 1, ReplicaID: 1},
-			},
+			expectChannelPlans: []ChannelAssignPlan{},
 		},
 	}
 
@@ -714,6 +765,12 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalanceOutboundNodes() {
 			segmentPlans, channelPlans := suite.getCollectionBalancePlans(balancer, 1)
 			suite.ElementsMatch(c.expectChannelPlans, channelPlans)
 			suite.ElementsMatch(c.expectPlans, segmentPlans)
+
+			// clean up distribution for next test
+			for node := range c.distributions {
+				balancer.dist.SegmentDistManager.Update(node)
+				balancer.dist.ChannelDistManager.Update(node)
+			}
 		})
 	}
 }
