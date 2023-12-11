@@ -671,6 +671,7 @@ type traceConfig struct {
 	SampleFraction ParamItem `refreshable:"false"`
 	JaegerURL      ParamItem `refreshable:"false"`
 	OtlpEndpoint   ParamItem `refreshable:"false"`
+	OtlpSecure     ParamItem `refreshable:"false"`
 }
 
 func (t *traceConfig) init(base *BaseTable) {
@@ -705,8 +706,16 @@ Fractions >= 1 will always sample. Fractions < 0 are treated as zero.`,
 	t.OtlpEndpoint = ParamItem{
 		Key:     "trace.otlp.endpoint",
 		Version: "2.3.0",
+		Doc:     "example: \"127.0.0.1:4318\"",
 	}
 	t.OtlpEndpoint.Init(base.mgr)
+
+	t.OtlpSecure = ParamItem{
+		Key:          "trace.otlp.secure",
+		Version:      "2.4.0",
+		DefaultValue: "true",
+	}
+	t.OtlpSecure.Init(base.mgr)
 }
 
 type logConfig struct {

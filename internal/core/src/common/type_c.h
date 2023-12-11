@@ -95,6 +95,7 @@ typedef struct CTraceConfig {
     int sampleFraction;
     const char* jaegerURL;
     const char* otlpEndpoint;
+    bool oltpSecure;
 
     int nodeID;
 } CTraceConfig;

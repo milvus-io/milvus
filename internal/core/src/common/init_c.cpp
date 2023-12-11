@@ -76,6 +76,7 @@ InitTrace(CTraceConfig* config) {
                                                    config->sampleFraction,
                                                    config->jaegerURL,
                                                    config->otlpEndpoint,
+                                                   config->oltpSecure,
                                                    config->nodeID};
     std::call_once(
         traceFlag,
