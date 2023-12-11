@@ -83,7 +83,7 @@ func (s *CompactionPlanHandlerSuite) TestRemoveTasksByChannel() {
 func (s *CompactionPlanHandlerSuite) TestCheckResult() {
 	s.mockAlloc.EXPECT().allocTimestamp(mock.Anything).Return(19530, nil)
 
-	session := &SessionManager{
+	session := &SessionManagerImpl{
 		sessions: struct {
 			sync.RWMutex
 			data map[int64]*Session
@@ -241,7 +241,7 @@ func (s *CompactionPlanHandlerSuite) TestRefreshL0Plan() {
 func Test_compactionPlanHandler_execCompactionPlan(t *testing.T) {
 	type fields struct {
 		plans            map[int64]*compactionTask
-		sessions         *SessionManager
+		sessions         SessionManager
 		chManager        *ChannelManager
 		allocatorFactory func() allocator
 	}
@@ -260,7 +260,7 @@ func Test_compactionPlanHandler_execCompactionPlan(t *testing.T) {
 			"test exec compaction",
 			fields{
 				plans: map[int64]*compactionTask{},
-				sessions: &SessionManager{
+				sessions: &SessionManagerImpl{
 					sessions: struct {
 						sync.RWMutex
 						data map[int64]*Session
@@ -348,7 +348,7 @@ func Test_compactionPlanHandler_execWithParallels(t *testing.T) {
 	defer paramtable.Get().Reset(Params.DataCoordCfg.CompactionCheckIntervalInSeconds.Key)
 	c := &compactionPlanHandler{
 		plans: map[int64]*compactionTask{},
-		sessions: &SessionManager{
+		sessions: &SessionManagerImpl{
 			sessions: struct {
 				sync.RWMutex
 				data map[int64]*Session
@@ -461,7 +461,7 @@ func TestCompactionPlanHandler_handleMergeCompactionResult(t *testing.T) {
 		Type: datapb.CompactionType_MergeCompaction,
 	}
 
-	sessions := &SessionManager{
+	sessions := &SessionManagerImpl{
 		sessions: struct {
 			sync.RWMutex
 			data map[int64]*Session
@@ -628,7 +628,7 @@ func TestCompactionPlanHandler_completeCompaction(t *testing.T) {
 			Type: datapb.CompactionType_MergeCompaction,
 		}
 
-		sessions := &SessionManager{
+		sessions := &SessionManagerImpl{
 			sessions: struct {
 				sync.RWMutex
 				data map[int64]*Session
@@ -722,7 +722,7 @@ func TestCompactionPlanHandler_completeCompaction(t *testing.T) {
 			Type: datapb.CompactionType_MergeCompaction,
 		}
 
-		sessions := &SessionManager{
+		sessions := &SessionManagerImpl{
 			sessions: struct {
 				sync.RWMutex
 				data map[int64]*Session
@@ -792,7 +792,7 @@ func TestCompactionPlanHandler_completeCompaction(t *testing.T) {
 func Test_compactionPlanHandler_getCompaction(t *testing.T) {
 	type fields struct {
 		plans    map[int64]*compactionTask
-		sessions *SessionManager
+		sessions SessionManager
 	}
 	type args struct {
 		planID int64
@@ -837,7 +837,7 @@ func Test_compactionPlanHandler_getCompaction(t *testing.T) {
 func Test_compactionPlanHandler_updateCompaction(t *testing.T) {
 	type fields struct {
 		plans    map[int64]*compactionTask
-		sessions *SessionManager
+		sessions SessionManager
 		meta     *meta
 	}
 	type args struct {
@@ -923,7 +923,7 @@ func Test_compactionPlanHandler_updateCompaction(t *testing.T) {
 						},
 					},
 				},
-				sessions: &SessionManager{
+				sessions: &SessionManagerImpl{
 					sessions: struct {
 						sync.RWMutex
 						data map[int64]*Session
@@ -987,7 +987,7 @@ func Test_compactionPlanHandler_updateCompaction(t *testing.T) {
 
 func Test_newCompactionPlanHandler(t *testing.T) {
 	type args struct {
-		sessions  *SessionManager
+		sessions  SessionManager
 		cm        *ChannelManager
 		meta      *meta
 		allocator allocator
@@ -1000,14 +1000,14 @@ func Test_newCompactionPlanHandler(t *testing.T) {
 		{
 			"test new handler",
 			args{
-				&SessionManager{},
+				&SessionManagerImpl{},
 				&ChannelManager{},
 				&meta{},
 				newMockAllocator(),
 			},
 			&compactionPlanHandler{
 				plans:     map[int64]*compactionTask{},
-				sessions:  &SessionManager{},
+				sessions:  &SessionManagerImpl{},
 				chManager: &ChannelManager{},
 				meta:      &meta{},
 				allocator: newMockAllocator(),
