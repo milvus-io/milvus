@@ -1890,6 +1890,7 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 	}
 
 	// expire time < Timestamp To, but index engine version is 2 which is larger than CurrentIndexVersion in segmentIndex
+	Params.Save(Params.DataCoordCfg.AutoUpgradeSegmentIndex.Key, "true")
 	couldDo = trigger.ShouldDoSingleCompaction(info4, false, &compactTime{expireTime: 300})
 	assert.True(t, couldDo)
 	// expire time < Timestamp To, and index engine version is 2 which is equal CurrentIndexVersion in segmentIndex
