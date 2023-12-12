@@ -68,7 +68,7 @@ cd opendal
 if command -v cargo >/dev/null 2>&1; then
     echo "cargo exists"
 else
-    bash -c "curl https://sh.rustup.rs -sSf | sh -s -- -y" || { echo 'rustup install failed'; exit 1;}
+    bash -c "curl https://sh.rustup.rs -sSf | sh -s -- --default-toolchain=1.73 -y" || { echo 'rustup install failed'; exit 1;}
     source $HOME/.cargo/env
 fi
 pushd bindings/c
