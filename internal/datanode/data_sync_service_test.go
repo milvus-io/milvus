@@ -358,6 +358,7 @@ func (s *DataSyncServiceSuite) SetupTest() {
 		},
 	}
 	s.node.ctx = context.Background()
+	s.node.channelCheckpointUpdater = newChannelCheckpointUpdater(s.node)
 	s.msChan = make(chan *msgstream.MsgPack)
 
 	s.factory = dependency.NewMockFactory(s.T())

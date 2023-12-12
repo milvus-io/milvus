@@ -399,6 +399,10 @@ func TestComponentParam(t *testing.T) {
 		channelWorkPoolSize := Params.ChannelWorkPoolSize.GetAsInt()
 		t.Logf("channelWorkPoolSize: %d", channelWorkPoolSize)
 		assert.Equal(t, -1, Params.ChannelWorkPoolSize.GetAsInt())
+
+		updateChannelCheckpointMaxParallel := Params.UpdateChannelCheckpointMaxParallel.GetAsInt()
+		t.Logf("updateChannelCheckpointMaxParallel: %d", updateChannelCheckpointMaxParallel)
+		assert.Equal(t, 1000, Params.UpdateChannelCheckpointMaxParallel.GetAsInt())
 	})
 
 	t.Run("test indexNodeConfig", func(t *testing.T) {
