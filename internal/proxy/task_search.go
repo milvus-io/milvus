@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"regexp"
 	"strconv"
 
 	"github.com/cockroachdb/errors"
@@ -80,27 +79,18 @@ func getPartitionIDs(ctx context.Context, dbName string, collectionName string, 
 		return nil, err
 	}
 
-	partitionsRecord := make(map[UniqueID]bool)
+	partitionsRecord := typeutil.NewSet[int64]()
 	partitionIDs = make([]UniqueID, 0, len(partitionNames))
 	for _, partitionName := range partitionNames {
-		pattern := fmt.Sprintf("^%s$", partitionName)
-		re, err := regexp.Compile(pattern)
-		if err != nil {
-			return nil, fmt.Errorf("invalid partition: %s", partitionName)
-		}
-		found := false
-		for name, pID := range partitionsMap {
-			if re.MatchString(name) {
-				if _, exist := partitionsRecord[pID]; !exist {
-					partitionIDs = append(partitionIDs, pID)
-					partitionsRecord[pID] = true
-				}
-				found = true
-			}
-		}
+		partitionID, found := partitionsMap[partitionName]
 		if !found {
-			return nil, fmt.Errorf("partition name %s not found", partitionName)
+			return nil, merr.WrapErrPartitionNotFound(partitionName)
 		}
+		if partitionsRecord.Contain(partitionID) {
+			continue
+		}
+		partitionsRecord.Insert(partitionID)
+		partitionIDs = append(partitionIDs, partitionID)
 	}
 	return partitionIDs, nil
 }
