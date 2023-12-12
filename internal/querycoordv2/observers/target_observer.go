@@ -18,6 +18,7 @@ package observers
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -145,8 +146,11 @@ func (ob *TargetObserver) schedule(ctx context.Context) {
 			ob.dispatcher.AddTask(ob.meta.GetAll()...)
 
 		case req := <-ob.updateChan:
+			log := log.With(zap.Int64("collectionID", req.CollectionID))
+			log.Info("manually trigger update next target")
 			err := ob.updateNextTarget(req.CollectionID)
 			if err != nil {
+				log.Warn("failed to manually update next target", zap.Error(err))
 				close(req.ReadyNotifier)
 			} else {
 				ob.mut.Lock()
@@ -154,7 +158,9 @@ func (ob *TargetObserver) schedule(ctx context.Context) {
 				ob.mut.Unlock()
 			}
 
+			log.Info("manually trigger update target done")
 			req.Notifier <- err
+			log.Info("notify manually trigger update target done")
 		}
 	}
 }
@@ -280,11 +286,20 @@ func (ob *TargetObserver) updateNextTargetTimestamp(collectionID int64) {
 
 func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collectionID int64) bool {
 	replicaNum := ob.meta.CollectionManager.GetReplicaNumber(collectionID)
+	log := log.Ctx(ctx).WithRateGroup(
+		fmt.Sprintf("qcv2.TargetObserver-%d", collectionID),
+		10,
+		60,
+	).With(
+		zap.Int64("collectionID", collectionID),
+		zap.Int32("replicaNum", replicaNum),
+	)
 
 	// check channel first
 	channelNames := ob.targetMgr.GetDmChannelsByCollection(collectionID, meta.NextTarget)
 	if len(channelNames) == 0 {
 		// next target is empty, no need to update
+		log.RatedInfo(10, "next target is empty, no need to update")
 		return false
 	}
 
@@ -293,6 +308,10 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 			collectionID,
 			ob.distMgr.LeaderViewManager.GetChannelDist(channel.GetChannelName()))
 		if int32(len(group)) < replicaNum {
+			log.RatedInfo(10, "channel not ready",
+				zap.Int("readyReplicaNum", len(group)),
+				zap.String("channelName", channel.GetChannelName()),
+			)
 			return false
 		}
 	}
@@ -304,6 +323,10 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 			collectionID,
 			ob.distMgr.LeaderViewManager.GetSealedSegmentDist(segment.GetID()))
 		if int32(len(group)) < replicaNum {
+			log.RatedInfo(10, "segment not ready",
+				zap.Int("readyReplicaNum", len(group)),
+				zap.Int64("segmentID", segment.GetID()),
+			)
 			return false
 		}
 	}
@@ -316,6 +339,10 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 			actions = actions[:0]
 			leaderView := ob.distMgr.LeaderViewManager.GetLeaderShardView(leaderID, ch)
 			if leaderView == nil {
+				log.RatedInfo(10, "leader view not ready",
+					zap.Int64("nodeID", leaderID),
+					zap.String("channel", ch),
+				)
 				continue
 			}
 			updateVersionAction := ob.checkNeedUpdateTargetVersion(ctx, leaderView)
