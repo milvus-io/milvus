@@ -202,6 +202,7 @@ func TestDataSyncService_Start(t *testing.T) {
 	broker.EXPECT().UpdateChannelCheckpoint(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 
 	node.broker = broker
+	node.channelCheckpointUpdater = newChannelCheckpointUpdater(node)
 
 	alloc := allocator.NewMockAllocator(t)
 	alloc.EXPECT().Alloc(mock.Anything).Call.Return(int64(22222),
@@ -380,6 +381,7 @@ func TestDataSyncService_Close(t *testing.T) {
 	broker.EXPECT().UpdateChannelCheckpoint(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 
 	node.broker = broker
+	node.channelCheckpointUpdater = newChannelCheckpointUpdater(node)
 
 	ufs := []*datapb.SegmentInfo{{
 		CollectionID:  collMeta.ID,
