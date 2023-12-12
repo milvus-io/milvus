@@ -870,6 +870,10 @@ func (s *Server) Search(ctx context.Context, request *milvuspb.SearchRequest) (*
 	return s.proxy.Search(ctx, request)
 }
 
+func (s *Server) SearchV2(ctx context.Context, request *milvuspb.SearchRequestV2) (*milvuspb.SearchResults, error) {
+	return s.proxy.SearchV2(ctx, request)
+}
+
 func (s *Server) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*milvuspb.FlushResponse, error) {
 	return s.proxy.Flush(ctx, request)
 }
