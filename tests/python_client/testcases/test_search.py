@@ -3027,8 +3027,7 @@ class TestCollectionSearch(TestcaseBase):
                                                                              enable_dynamic_field=enable_dynamic_field)[0:4]
 
         # 2. create index
-        index_param = {"index_type": "IVF_FLAT",
-                       "metric_type": "COSINE", "params": {"nlist": 100}}
+        index_param = {"index_type": "FLAT", "metric_type": "COSINE", "params": {"nlist": 100}}
         collection_w.create_index("float_vector", index_param)
         collection_w.load()
 
@@ -3051,8 +3050,7 @@ class TestCollectionSearch(TestcaseBase):
         expression = f"{default_bool_field_name} == {bool_type}"
         log.info(
             "test_search_with_expression_bool: searching with bool expression: %s" % expression)
-        vectors = [[random.random() for _ in range(dim)]
-                   for _ in range(default_nq)]
+        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
 
         search_res, _ = collection_w.search(vectors[:default_nq], default_search_field,
                                             default_search_params, nb, expression,
@@ -5087,7 +5085,7 @@ class TestSearchString(TestcaseBase):
                 filter_ids.append(_id)
 
         # 2. create index
-        index_param = {"index_type": "IVF_FLAT", "metric_type": "COSINE", "params": {"nlist": 100}}
+        index_param = {"index_type": "FLAT", "metric_type": "COSINE", "params": {"nlist": 100}}
         collection_w.create_index("float_vector", index_param)
         collection_w.load()
 
