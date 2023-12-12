@@ -1115,11 +1115,12 @@ func TestProxy(t *testing.T) {
 			CollectionName: collectionName,
 			IndexName:      indexName,
 			ExtraParams: []*commonpb.KeyValuePair{
-				&commonpb.KeyValuePair{
+				{
 					Key:   common.MmapEnabledKey,
 					Value: "true",
 				},
-			}}
+			},
+		}
 
 		resp, err := proxy.AlterIndex(ctx, req)
 		err = merr.CheckRPCCall(resp, err)
