@@ -356,6 +356,7 @@ func TestComponentParam(t *testing.T) {
 
 		assert.Equal(t, false, Params.AutoBalance.GetAsBool())
 		assert.Equal(t, 10, Params.CheckAutoBalanceConfigInterval.GetAsInt())
+		assert.Equal(t, false, Params.AutoUpgradeSegmentIndex.GetAsBool())
 	})
 
 	t.Run("test dataNodeConfig", func(t *testing.T) {

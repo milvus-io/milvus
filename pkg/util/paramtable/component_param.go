@@ -2065,6 +2065,7 @@ type dataCoordConfig struct {
 	SegmentMaxIdleTime             ParamItem `refreshable:"false"`
 	SegmentMinSizeFromIdleToSealed ParamItem `refreshable:"false"`
 	SegmentMaxBinlogFileNumber     ParamItem `refreshable:"false"`
+	AutoUpgradeSegmentIndex        ParamItem `refreshable:"true"`
 
 	// compaction
 	EnableCompaction     ParamItem `refreshable:"false"`
@@ -2479,6 +2480,16 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.CheckAutoBalanceConfigInterval.Init(base.mgr)
+
+	p.AutoUpgradeSegmentIndex = ParamItem{
+		Key:          "dataCoord.autoUpgradeSegmentIndex",
+		Version:      "2.3.4",
+		DefaultValue: "false",
+		PanicIfEmpty: true,
+		Doc:          "whether auto upgrade segment index to index engine's version",
+		Export:       true,
+	}
+	p.AutoUpgradeSegmentIndex.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

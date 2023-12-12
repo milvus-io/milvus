@@ -915,17 +915,19 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, isDis
 		return true
 	}
 
-	// index version of segment lower than current version and IndexFileKeys should have value, trigger compaction
-	for _, index := range segment.segmentIndexes {
-		if index.CurrentIndexVersion < t.indexEngineVersionManager.GetCurrentIndexEngineVersion() &&
-			len(index.IndexFileKeys) > 0 {
-			log.Info("index version is too old, trigger compaction",
-				zap.Int64("segmentID", segment.ID),
-				zap.Int64("indexID", index.IndexID),
-				zap.Strings("indexFileKeys", index.IndexFileKeys),
-				zap.Int32("currentIndexVersion", index.CurrentIndexVersion),
-				zap.Int32("currentEngineVersion", t.indexEngineVersionManager.GetCurrentIndexEngineVersion()))
-			return true
+	if Params.DataCoordCfg.AutoUpgradeSegmentIndex.GetAsBool() {
+		// index version of segment lower than current version and IndexFileKeys should have value, trigger compaction
+		for _, index := range segment.segmentIndexes {
+			if index.CurrentIndexVersion < t.indexEngineVersionManager.GetCurrentIndexEngineVersion() &&
+				len(index.IndexFileKeys) > 0 {
+				log.Info("index version is too old, trigger compaction",
+					zap.Int64("segmentID", segment.ID),
+					zap.Int64("indexID", index.IndexID),
+					zap.Strings("indexFileKeys", index.IndexFileKeys),
+					zap.Int32("currentIndexVersion", index.CurrentIndexVersion),
+					zap.Int32("currentEngineVersion", t.indexEngineVersionManager.GetCurrentIndexEngineVersion()))
+				return true
+			}
 		}
 	}
 
