@@ -61,6 +61,11 @@ type SyncTask struct {
 	statsBinlogs  map[int64]*datapb.FieldBinlog // map[int64]*datapb.Binlog
 	deltaBinlog   *datapb.FieldBinlog
 
+	binlogBlobs     map[int64]*storage.Blob
+	batchStatsBlob  *storage.Blob
+	mergedStatsBlob *storage.Blob
+	deltaBlob       *storage.Blob
+
 	segmentData map[string][]byte
 
 	writeRetryOpts []retry.Option
