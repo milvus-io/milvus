@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/milvus-io/milvus/internal/log"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -25,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/kv/mocks"
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
@@ -952,14 +952,22 @@ func Test_batchMultiSaveAndRemoveWithPrefix(t *testing.T) {
 	t.Run("normal case", func(t *testing.T) {
 		snapshot := kv.NewMockSnapshotKV()
 		snapshot.MultiSaveFunc = func(kvs map[string]string, ts typeutil.Timestamp) error {
+			log.Info("multi save", zap.Any("len", len(kvs)), zap.Any("saves", kvs))
 			return nil
 		}
 		snapshot.MultiSaveAndRemoveWithPrefixFunc = func(saves map[string]string, removals []string, ts typeutil.Timestamp) error {
+			log.Info("multi save and remove with prefix", zap.Any("len of saves", len(saves)), zap.Any("len of removals", len(removals)),
+				zap.Any("saves", saves), zap.Any("removals", removals))
 			return nil
 		}
-		saves := map[string]string{"k": "v"}
-		removals := []string{"prefix1", "prefix2"}
-		err := batchMultiSaveAndRemoveWithPrefix(snapshot, maxTxnNum, saves, removals, 0)
+		n := 400
+		saves := map[string]string{}
+		removals := make([]string, 0, n)
+		for i := 0; i < n; i++ {
+			saves[fmt.Sprintf("k%d", i)] = fmt.Sprintf("v%d", i)
+			removals = append(removals, fmt.Sprintf("k%d", i))
+		}
+		err := batchMultiSaveAndRemoveWithPrefix(snapshot, 64, saves, removals, 0)
 		assert.NoError(t, err)
 	})
 }
