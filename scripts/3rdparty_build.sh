@@ -67,6 +67,8 @@ git clone --depth=1 --branch v0.43.0-rc.2 https://github.com/apache/incubator-op
 cd opendal
 if command -v cargo >/dev/null 2>&1; then
     echo "cargo exists"
+    which cargo
+    cargo --version
     rustup toolchain uninstall stable
     rustup toolchain install stable
 else
