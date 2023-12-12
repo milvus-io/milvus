@@ -1294,6 +1294,38 @@ func TestSearch(t *testing.T) {
 			}
 		})
 	}
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().Search(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{
+		Status: &StatusSuccess,
+		Results: &schemapb.SearchResultData{
+			FieldsData: generateFieldData(),
+			Scores:     []float32{0.01, 0.04, 0.09},
+			TopK:       3,
+		},
+	}, nil).Once()
+	tt := testCase{
+		name:       "search success with params",
+		mp:         mp,
+		exceptCode: 200,
+	}
+	t.Run(tt.name, func(t *testing.T) {
+		testEngine := initHTTPServer(tt.mp, true)
+		rows := []float32{0.0, 0.0}
+		data, _ := json.Marshal(map[string]interface{}{
+			HTTPCollectionName: DefaultCollectionName,
+			"vector":           rows,
+			Params: map[string]float64{
+				ParamRadius:      0.9,
+				ParamRangeFilter: 0.1,
+			},
+		})
+		bodyReader := bytes.NewReader(data)
+		req := httptest.NewRequest(http.MethodPost, versional(VectorSearchPath), bodyReader)
+		req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
+		w := httptest.NewRecorder()
+		testEngine.ServeHTTP(w, req)
+		assert.Equal(t, tt.exceptCode, w.Code)
+	})
 }
 
 type ReturnType int
@@ -1405,12 +1437,14 @@ func TestHttpRequestFormat(t *testing.T) {
 		merr.ErrMissingRequiredParameters,
 		merr.ErrMissingRequiredParameters,
 		merr.ErrMissingRequiredParameters,
+		merr.ErrIncorrectParameterFormat,
 	}
 	requestJsons := [][]byte{
 		[]byte(`{"collectionName": {"` + DefaultCollectionName + `", "dimension": 2}`),
 		[]byte(`{"collName": "` + DefaultCollectionName + `", "dimension": 2}`),
 		[]byte(`{"collName": "` + DefaultCollectionName + `", "dim": 2}`),
 		[]byte(`{"collectionName": "` + DefaultCollectionName + `"}`),
+		[]byte(`{"collectionName": "` + DefaultCollectionName + `", "vector": [0.0, 0.0], "` + Params + `": {"` + ParamRangeFilter + `": 0.1}}`),
 	}
 	paths := [][]string{
 		{
@@ -1439,6 +1473,8 @@ func TestHttpRequestFormat(t *testing.T) {
 			versional(VectorInsertPath),
 			versional(VectorUpsertPath),
 			versional(VectorDeletePath),
+		}, {
+			versional(VectorSearchPath),
 		},
 	}
 	for i, pathArr := range paths {
