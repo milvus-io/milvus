@@ -484,7 +484,7 @@ func (c *Core) initInternal() error {
 		c.ctx,
 		c.etcdCli,
 		c.chanTimeTick.initSessions,
-		c.proxyClientManager.GetProxyClients,
+		c.proxyClientManager.AddProxyClients,
 	)
 	c.proxyManager.AddSessionFunc(c.chanTimeTick.addSession, c.proxyClientManager.AddProxyClient)
 	c.proxyManager.DelSessionFunc(c.chanTimeTick.delSession, c.proxyClientManager.DelProxyClient)
@@ -2779,10 +2779,9 @@ func (c *Core) CheckHealth(ctx context.Context, in *milvuspb.CheckHealthRequest)
 
 	mu := &sync.Mutex{}
 	group, ctx := errgroup.WithContext(ctx)
-	errReasons := make([]string, 0, len(c.proxyClientManager.proxyClient))
+	errReasons := make([]string, 0, c.proxyClientManager.GetProxyCount())
 
-	c.proxyClientManager.lock.RLock()
-	for nodeID, proxyClient := range c.proxyClientManager.proxyClient {
+	for nodeID, proxyClient := range c.proxyClientManager.GetProxyClients() {
 		nodeID := nodeID
 		proxyClient := proxyClient
 		group.Go(func() error {
@@ -2800,7 +2799,6 @@ func (c *Core) CheckHealth(ctx context.Context, in *milvuspb.CheckHealthRequest)
 			return nil
 		})
 	}
-	c.proxyClientManager.lock.RUnlock()
 
 	err := group.Wait()
 	if err != nil || len(errReasons) != 0 {
