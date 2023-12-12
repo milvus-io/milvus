@@ -47,9 +47,6 @@ type Executor struct {
 	cluster   session.Cluster
 	nodeMgr   *session.NodeManager
 
-	// Merge load segment requests
-	merger *Merger[segmentIndex, *querypb.LoadSegmentsRequest]
-
 	executingTasks   *typeutil.ConcurrentSet[string] // task index
 	executingTaskNum atomic.Int32
 }
@@ -69,19 +66,15 @@ func NewExecutor(meta *meta.Meta,
 		targetMgr: targetMgr,
 		cluster:   cluster,
 		nodeMgr:   nodeMgr,
-		merger:    NewMerger[segmentIndex, *querypb.LoadSegmentsRequest](),
 
 		executingTasks: typeutil.NewConcurrentSet[string](),
 	}
 }
 
 func (ex *Executor) Start(ctx context.Context) {
-	ex.merger.Start(ctx)
-	ex.scheduleRequests()
 }
 
 func (ex *Executor) Stop() {
-	ex.merger.Stop()
 	ex.wg.Wait()
 }
 
@@ -119,82 +112,6 @@ func (ex *Executor) Execute(task Task, step int) bool {
 	}()
 
 	return true
-}
-
-func (ex *Executor) scheduleRequests() {
-	ex.wg.Add(1)
-	go func() {
-		defer ex.wg.Done()
-		for mergeTask := range ex.merger.Chan() {
-			task := mergeTask.(*LoadSegmentsTask)
-			log.Info("get merge task, process it",
-				zap.Int64("collectionID", task.req.GetCollectionID()),
-				zap.Int64("replicaID", task.req.GetReplicaID()),
-				zap.String("shard", task.req.GetInfos()[0].GetInsertChannel()),
-				zap.Int64("nodeID", task.req.GetDstNodeID()),
-				zap.Int("taskNum", len(task.tasks)),
-			)
-			go ex.processMergeTask(mergeTask.(*LoadSegmentsTask))
-		}
-	}()
-}
-
-func (ex *Executor) processMergeTask(mergeTask *LoadSegmentsTask) {
-	startTs := time.Now()
-	task := mergeTask.tasks[0]
-	action := task.Actions()[mergeTask.steps[0]]
-
-	var err error
-	defer func() {
-		if err != nil {
-			for i := range mergeTask.tasks {
-				mergeTask.tasks[i].Fail(err)
-			}
-		}
-		for i := range mergeTask.tasks {
-			ex.removeTask(mergeTask.tasks[i], mergeTask.steps[i])
-		}
-	}()
-
-	taskIDs := make([]int64, 0, len(mergeTask.tasks))
-	segments := make([]int64, 0, len(mergeTask.tasks))
-	for _, task := range mergeTask.tasks {
-		taskIDs = append(taskIDs, task.ID())
-		segments = append(segments, task.SegmentID())
-	}
-	log := log.With(
-		zap.Int64s("taskIDs", taskIDs),
-		zap.Int64("collectionID", task.CollectionID()),
-		zap.Int64("replicaID", task.ReplicaID()),
-		zap.String("shard", task.Shard()),
-		zap.Int64s("segmentIDs", segments),
-		zap.Int64("nodeID", action.Node()),
-		zap.String("source", task.Source().String()),
-	)
-
-	// Get shard leader for the given replica and segment
-	channel := mergeTask.req.GetInfos()[0].GetInsertChannel()
-	leader, ok := getShardLeader(ex.meta.ReplicaManager, ex.dist, task.CollectionID(), action.Node(), channel)
-	if !ok {
-		err = merr.WrapErrChannelNotFound(channel, "shard delegator not found")
-		log.Warn("no shard leader for the segment to execute loading", zap.Error(task.Err()))
-		return
-	}
-
-	log.Info("load segments...")
-	status, err := ex.cluster.LoadSegments(task.Context(), leader, mergeTask.req)
-	if err != nil {
-		log.Warn("failed to load segment", zap.Error(err))
-		return
-	}
-	if !merr.Ok(status) {
-		err = merr.Error(status)
-		log.Warn("failed to load segment", zap.Error(err))
-		return
-	}
-
-	elapsed := time.Since(startTs)
-	log.Info("load segments done", zap.Duration("elapsed", elapsed))
 }
 
 func (ex *Executor) removeTask(task Task, step int) {
@@ -238,8 +155,8 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 	defer func() {
 		if err != nil {
 			task.Fail(err)
-			ex.removeTask(task, step)
 		}
+		ex.removeTask(task, step)
 	}()
 
 	schema, err := ex.broker.GetCollectionSchema(ctx, task.CollectionID())
@@ -276,16 +193,6 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 
 	loadInfo := utils.PackSegmentLoadInfo(resp, indexes)
 
-	// Get shard leader for the given replica and segment
-	leader, ok := getShardLeader(ex.meta.ReplicaManager, ex.dist, task.CollectionID(), action.Node(), segment.GetInsertChannel())
-	if !ok {
-		msg := "no shard leader for the segment to execute loading"
-		err = merr.WrapErrChannelNotFound(segment.GetInsertChannel(), "shard delegator not found")
-		log.Warn(msg, zap.Error(err))
-		return err
-	}
-	log = log.With(zap.Int64("shardLeader", leader))
-
 	// Get collection index info
 	indexInfo, err := ex.broker.DescribeIndex(ctx, task.CollectionID())
 	if err != nil {
@@ -293,10 +200,41 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 		return err
 	}
 
-	req := packLoadSegmentRequest(task, action, schema, loadMeta, loadInfo, indexInfo)
-	loadTask := NewLoadSegmentsTask(task, step, req)
-	ex.merger.Add(loadTask)
-	log.Info("load segment task committed")
+	req := packLoadSegmentRequest(
+		task,
+		action,
+		schema,
+		loadMeta,
+		loadInfo,
+		indexInfo,
+	)
+
+	// Get shard leader for the given replica and segment
+	leaderID, ok := getShardLeader(ex.meta.ReplicaManager, ex.dist, task.CollectionID(), action.Node(), segment.GetInsertChannel())
+	if !ok {
+		msg := "no shard leader for the segment to execute loading"
+		err = merr.WrapErrChannelNotFound(segment.GetInsertChannel(), "shard delegator not found")
+		log.Warn(msg, zap.Error(err))
+		return err
+	}
+	log = log.With(zap.Int64("shardLeader", leaderID))
+
+	startTs := time.Now()
+	log.Info("load segments...")
+	status, err := ex.cluster.LoadSegments(task.Context(), leaderID, req)
+	if err != nil {
+		log.Warn("failed to load segment", zap.Error(err))
+		return err
+	}
+	if !merr.Ok(status) {
+		err = merr.Error(status)
+		log.Warn("failed to load segment", zap.Error(err))
+		return err
+	}
+
+	elapsed := time.Since(startTs)
+	log.Info("load segments done", zap.Duration("elapsed", elapsed))
+
 	return nil
 }
 
