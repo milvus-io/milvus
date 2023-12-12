@@ -1827,6 +1827,7 @@ func (node *Proxy) AlterIndex(ctx context.Context, request *milvuspb.AlterIndexR
 		Condition:          NewTaskCondition(ctx),
 		req:                request,
 		datacoord:          node.dataCoord,
+		querycoord:         node.queryCoord,
 		replicateMsgStream: node.replicateMsgStream,
 	}
 
