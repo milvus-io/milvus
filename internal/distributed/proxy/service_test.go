@@ -303,6 +303,10 @@ func (m *MockProxy) Search(ctx context.Context, request *milvuspb.SearchRequest)
 	return nil, nil
 }
 
+func (m *MockProxy) SearchV2(ctx context.Context, request *milvuspb.SearchRequestV2) (*milvuspb.SearchResults, error) {
+	return nil, nil
+}
+
 func (m *MockProxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*milvuspb.FlushResponse, error) {
 	return nil, nil
 }
