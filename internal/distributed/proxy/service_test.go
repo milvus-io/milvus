@@ -263,6 +263,10 @@ func (m *MockProxy) CreateIndex(ctx context.Context, request *milvuspb.CreateInd
 	return nil, nil
 }
 
+func (m *MockProxy) AlterIndex(ctx context.Context, request *milvuspb.AlterIndexRequest) (*commonpb.Status, error) {
+	return nil, nil
+}
+
 func (m *MockProxy) DropIndex(ctx context.Context, request *milvuspb.DropIndexRequest) (*commonpb.Status, error) {
 	return nil, nil
 }
@@ -296,6 +300,10 @@ func (m *MockProxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest)
 }
 
 func (m *MockProxy) Search(ctx context.Context, request *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+	return nil, nil
+}
+
+func (m *MockProxy) SearchV2(ctx context.Context, request *milvuspb.SearchRequestV2) (*milvuspb.SearchResults, error) {
 	return nil, nil
 }
 

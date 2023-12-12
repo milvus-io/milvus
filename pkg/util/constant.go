@@ -125,6 +125,12 @@ var (
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeCreateDatabase.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDropDatabase.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeListDatabases.String()),
+
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeCreatePartition.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDropPartition.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeShowPartitions.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeHasPartition.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGetFlushState.String()),
 		},
 		commonpb.ObjectType_User.String(): {
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeUpdateUser.String()),

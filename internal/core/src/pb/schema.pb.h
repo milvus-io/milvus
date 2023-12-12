@@ -32,6 +32,7 @@
 #include <google/protobuf/generated_enum_reflection.h>
 #include <google/protobuf/unknown_field_set.h>
 #include "common.pb.h"
+#include <google/protobuf/descriptor.pb.h>
 // @@protoc_insertion_point(includes)
 #include <google/protobuf/port_def.inc>
 #define PROTOBUF_INTERNAL_EXPORT_schema_2eproto
@@ -142,12 +143,13 @@ enum DataType : int {
   BinaryVector = 100,
   FloatVector = 101,
   Float16Vector = 102,
+  BFloat16Vector = 103,
   DataType_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::min(),
   DataType_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::max()
 };
 bool DataType_IsValid(int value);
 constexpr DataType DataType_MIN = None;
-constexpr DataType DataType_MAX = Float16Vector;
+constexpr DataType DataType_MAX = BFloat16Vector;
 constexpr int DataType_ARRAYSIZE = DataType_MAX + 1;
 
 const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* DataType_descriptor();
@@ -683,10 +685,10 @@ class CollectionSchema final :
   std::string* _internal_mutable_description();
   public:
 
-  // bool autoID = 3;
-  void clear_autoid();
-  bool autoid() const;
-  void set_autoid(bool value);
+  // bool autoID = 3 [deprecated = true];
+  PROTOBUF_DEPRECATED void clear_autoid();
+  PROTOBUF_DEPRECATED bool autoid() const;
+  PROTOBUF_DEPRECATED void set_autoid(bool value);
   private:
   bool _internal_autoid() const;
   void _internal_set_autoid(bool value);
@@ -2863,6 +2865,7 @@ class VectorField final :
     kFloatVector = 2,
     kBinaryVector = 3,
     kFloat16Vector = 4,
+    kBfloat16Vector = 5,
     DATA_NOT_SET = 0,
   };
 
@@ -2948,6 +2951,7 @@ class VectorField final :
     kFloatVectorFieldNumber = 2,
     kBinaryVectorFieldNumber = 3,
     kFloat16VectorFieldNumber = 4,
+    kBfloat16VectorFieldNumber = 5,
   };
   // int64 dim = 1;
   void clear_dim();
@@ -3012,6 +3016,24 @@ class VectorField final :
   std::string* _internal_mutable_float16_vector();
   public:
 
+  // bytes bfloat16_vector = 5;
+  bool has_bfloat16_vector() const;
+  private:
+  bool _internal_has_bfloat16_vector() const;
+  public:
+  void clear_bfloat16_vector();
+  const std::string& bfloat16_vector() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_bfloat16_vector(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_bfloat16_vector();
+  PROTOBUF_NODISCARD std::string* release_bfloat16_vector();
+  void set_allocated_bfloat16_vector(std::string* bfloat16_vector);
+  private:
+  const std::string& _internal_bfloat16_vector() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_bfloat16_vector(const std::string& value);
+  std::string* _internal_mutable_bfloat16_vector();
+  public:
+
   void clear_data();
   DataCase data_case() const;
   // @@protoc_insertion_point(class_scope:milvus.proto.schema.VectorField)
@@ -3020,6 +3042,7 @@ class VectorField final :
   void set_has_float_vector();
   void set_has_binary_vector();
   void set_has_float16_vector();
+  void set_has_bfloat16_vector();
 
   inline bool has_data() const;
   inline void clear_has_data();
@@ -3035,6 +3058,7 @@ class VectorField final :
       ::milvus::proto::schema::FloatArray* float_vector_;
       ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr binary_vector_;
       ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr float16_vector_;
+      ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr bfloat16_vector_;
     } data_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
     uint32_t _oneof_case_[1];
@@ -3612,6 +3636,7 @@ class SearchResultData final :
     kTopksFieldNumber = 6,
     kOutputFieldsFieldNumber = 7,
     kIdsFieldNumber = 5,
+    kGroupByFieldValueFieldNumber = 8,
     kNumQueriesFieldNumber = 1,
     kTopKFieldNumber = 2,
   };
@@ -3719,6 +3744,24 @@ class SearchResultData final :
       ::milvus::proto::schema::IDs* ids);
   ::milvus::proto::schema::IDs* unsafe_arena_release_ids();
 
+  // .milvus.proto.schema.FieldData group_by_field_value = 8;
+  bool has_group_by_field_value() const;
+  private:
+  bool _internal_has_group_by_field_value() const;
+  public:
+  void clear_group_by_field_value();
+  const ::milvus::proto::schema::FieldData& group_by_field_value() const;
+  PROTOBUF_NODISCARD ::milvus::proto::schema::FieldData* release_group_by_field_value();
+  ::milvus::proto::schema::FieldData* mutable_group_by_field_value();
+  void set_allocated_group_by_field_value(::milvus::proto::schema::FieldData* group_by_field_value);
+  private:
+  const ::milvus::proto::schema::FieldData& _internal_group_by_field_value() const;
+  ::milvus::proto::schema::FieldData* _internal_mutable_group_by_field_value();
+  public:
+  void unsafe_arena_set_allocated_group_by_field_value(
+      ::milvus::proto::schema::FieldData* group_by_field_value);
+  ::milvus::proto::schema::FieldData* unsafe_arena_release_group_by_field_value();
+
   // int64 num_queries = 1;
   void clear_num_queries();
   int64_t num_queries() const;
@@ -3751,6 +3794,7 @@ class SearchResultData final :
     mutable std::atomic<int> _topks_cached_byte_size_;
     ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> output_fields_;
     ::milvus::proto::schema::IDs* ids_;
+    ::milvus::proto::schema::FieldData* group_by_field_value_;
     int64_t num_queries_;
     int64_t top_k_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
@@ -4297,7 +4341,7 @@ inline void CollectionSchema::set_allocated_description(std::string* description
   // @@protoc_insertion_point(field_set_allocated:milvus.proto.schema.CollectionSchema.description)
 }
 
-// bool autoID = 3;
+// bool autoID = 3 [deprecated = true];
 inline void CollectionSchema::clear_autoid() {
   _impl_.autoid_ = false;
 }
@@ -6221,6 +6265,83 @@ inline void VectorField::set_allocated_float16_vector(std::string* float16_vecto
   // @@protoc_insertion_point(field_set_allocated:milvus.proto.schema.VectorField.float16_vector)
 }
 
+// bytes bfloat16_vector = 5;
+inline bool VectorField::_internal_has_bfloat16_vector() const {
+  return data_case() == kBfloat16Vector;
+}
+inline bool VectorField::has_bfloat16_vector() const {
+  return _internal_has_bfloat16_vector();
+}
+inline void VectorField::set_has_bfloat16_vector() {
+  _impl_._oneof_case_[0] = kBfloat16Vector;
+}
+inline void VectorField::clear_bfloat16_vector() {
+  if (_internal_has_bfloat16_vector()) {
+    _impl_.data_.bfloat16_vector_.Destroy();
+    clear_has_data();
+  }
+}
+inline const std::string& VectorField::bfloat16_vector() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.schema.VectorField.bfloat16_vector)
+  return _internal_bfloat16_vector();
+}
+template <typename ArgT0, typename... ArgT>
+inline void VectorField::set_bfloat16_vector(ArgT0&& arg0, ArgT... args) {
+  if (!_internal_has_bfloat16_vector()) {
+    clear_data();
+    set_has_bfloat16_vector();
+    _impl_.data_.bfloat16_vector_.InitDefault();
+  }
+  _impl_.data_.bfloat16_vector_.SetBytes( static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:milvus.proto.schema.VectorField.bfloat16_vector)
+}
+inline std::string* VectorField::mutable_bfloat16_vector() {
+  std::string* _s = _internal_mutable_bfloat16_vector();
+  // @@protoc_insertion_point(field_mutable:milvus.proto.schema.VectorField.bfloat16_vector)
+  return _s;
+}
+inline const std::string& VectorField::_internal_bfloat16_vector() const {
+  if (_internal_has_bfloat16_vector()) {
+    return _impl_.data_.bfloat16_vector_.Get();
+  }
+  return ::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited();
+}
+inline void VectorField::_internal_set_bfloat16_vector(const std::string& value) {
+  if (!_internal_has_bfloat16_vector()) {
+    clear_data();
+    set_has_bfloat16_vector();
+    _impl_.data_.bfloat16_vector_.InitDefault();
+  }
+  _impl_.data_.bfloat16_vector_.Set(value, GetArenaForAllocation());
+}
+inline std::string* VectorField::_internal_mutable_bfloat16_vector() {
+  if (!_internal_has_bfloat16_vector()) {
+    clear_data();
+    set_has_bfloat16_vector();
+    _impl_.data_.bfloat16_vector_.InitDefault();
+  }
+  return _impl_.data_.bfloat16_vector_.Mutable(      GetArenaForAllocation());
+}
+inline std::string* VectorField::release_bfloat16_vector() {
+  // @@protoc_insertion_point(field_release:milvus.proto.schema.VectorField.bfloat16_vector)
+  if (_internal_has_bfloat16_vector()) {
+    clear_has_data();
+    return _impl_.data_.bfloat16_vector_.Release();
+  } else {
+    return nullptr;
+  }
+}
+inline void VectorField::set_allocated_bfloat16_vector(std::string* bfloat16_vector) {
+  if (has_data()) {
+    clear_data();
+  }
+  if (bfloat16_vector != nullptr) {
+    set_has_bfloat16_vector();
+    _impl_.data_.bfloat16_vector_.InitAllocated(bfloat16_vector, GetArenaForAllocation());
+  }
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.schema.VectorField.bfloat16_vector)
+}
+
 inline bool VectorField::has_data() const {
   return data_case() != DATA_NOT_SET;
 }
@@ -7003,6 +7124,96 @@ inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>*
 SearchResultData::mutable_output_fields() {
   // @@protoc_insertion_point(field_mutable_list:milvus.proto.schema.SearchResultData.output_fields)
   return &_impl_.output_fields_;
+}
+
+// .milvus.proto.schema.FieldData group_by_field_value = 8;
+inline bool SearchResultData::_internal_has_group_by_field_value() const {
+  return this != internal_default_instance() && _impl_.group_by_field_value_ != nullptr;
+}
+inline bool SearchResultData::has_group_by_field_value() const {
+  return _internal_has_group_by_field_value();
+}
+inline void SearchResultData::clear_group_by_field_value() {
+  if (GetArenaForAllocation() == nullptr && _impl_.group_by_field_value_ != nullptr) {
+    delete _impl_.group_by_field_value_;
+  }
+  _impl_.group_by_field_value_ = nullptr;
+}
+inline const ::milvus::proto::schema::FieldData& SearchResultData::_internal_group_by_field_value() const {
+  const ::milvus::proto::schema::FieldData* p = _impl_.group_by_field_value_;
+  return p != nullptr ? *p : reinterpret_cast<const ::milvus::proto::schema::FieldData&>(
+      ::milvus::proto::schema::_FieldData_default_instance_);
+}
+inline const ::milvus::proto::schema::FieldData& SearchResultData::group_by_field_value() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.schema.SearchResultData.group_by_field_value)
+  return _internal_group_by_field_value();
+}
+inline void SearchResultData::unsafe_arena_set_allocated_group_by_field_value(
+    ::milvus::proto::schema::FieldData* group_by_field_value) {
+  if (GetArenaForAllocation() == nullptr) {
+    delete reinterpret_cast<::PROTOBUF_NAMESPACE_ID::MessageLite*>(_impl_.group_by_field_value_);
+  }
+  _impl_.group_by_field_value_ = group_by_field_value;
+  if (group_by_field_value) {
+    
+  } else {
+    
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:milvus.proto.schema.SearchResultData.group_by_field_value)
+}
+inline ::milvus::proto::schema::FieldData* SearchResultData::release_group_by_field_value() {
+  
+  ::milvus::proto::schema::FieldData* temp = _impl_.group_by_field_value_;
+  _impl_.group_by_field_value_ = nullptr;
+#ifdef PROTOBUF_FORCE_COPY_IN_RELEASE
+  auto* old =  reinterpret_cast<::PROTOBUF_NAMESPACE_ID::MessageLite*>(temp);
+  temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+  if (GetArenaForAllocation() == nullptr) { delete old; }
+#else  // PROTOBUF_FORCE_COPY_IN_RELEASE
+  if (GetArenaForAllocation() != nullptr) {
+    temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+  }
+#endif  // !PROTOBUF_FORCE_COPY_IN_RELEASE
+  return temp;
+}
+inline ::milvus::proto::schema::FieldData* SearchResultData::unsafe_arena_release_group_by_field_value() {
+  // @@protoc_insertion_point(field_release:milvus.proto.schema.SearchResultData.group_by_field_value)
+  
+  ::milvus::proto::schema::FieldData* temp = _impl_.group_by_field_value_;
+  _impl_.group_by_field_value_ = nullptr;
+  return temp;
+}
+inline ::milvus::proto::schema::FieldData* SearchResultData::_internal_mutable_group_by_field_value() {
+  
+  if (_impl_.group_by_field_value_ == nullptr) {
+    auto* p = CreateMaybeMessage<::milvus::proto::schema::FieldData>(GetArenaForAllocation());
+    _impl_.group_by_field_value_ = p;
+  }
+  return _impl_.group_by_field_value_;
+}
+inline ::milvus::proto::schema::FieldData* SearchResultData::mutable_group_by_field_value() {
+  ::milvus::proto::schema::FieldData* _msg = _internal_mutable_group_by_field_value();
+  // @@protoc_insertion_point(field_mutable:milvus.proto.schema.SearchResultData.group_by_field_value)
+  return _msg;
+}
+inline void SearchResultData::set_allocated_group_by_field_value(::milvus::proto::schema::FieldData* group_by_field_value) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  if (message_arena == nullptr) {
+    delete _impl_.group_by_field_value_;
+  }
+  if (group_by_field_value) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+        ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(group_by_field_value);
+    if (message_arena != submessage_arena) {
+      group_by_field_value = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, group_by_field_value, submessage_arena);
+    }
+    
+  } else {
+    
+  }
+  _impl_.group_by_field_value_ = group_by_field_value;
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.schema.SearchResultData.group_by_field_value)
 }
 
 #ifdef __GNUC__
