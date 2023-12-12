@@ -12,6 +12,7 @@ from common.common_type import CaseLabel, CheckTasks
 from utils.util_log import test_log as log
 from common.bulk_insert_data import (
     prepare_bulk_insert_json_files,
+    prepare_bulk_insert_new_json_files,
     prepare_bulk_insert_numpy_files,
     prepare_bulk_insert_parquet_files,
     prepare_bulk_insert_csv_files,
@@ -608,7 +609,8 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("auto_id", [True, False])
     @pytest.mark.parametrize("dim", [128])  # 128
     @pytest.mark.parametrize("entities", [1000])  # 1000
-    def test_with_all_field_numpy(self, auto_id, dim, entities):
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    def test_with_all_field_json(self, auto_id, dim, entities, enable_dynamic_field):
         """
         collection schema 1: [pk, int64, float64, string float_vector]
         data file: vectors.npy and uid.npy,
@@ -617,26 +619,116 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         2. import data
         3. verify
         """
-        data_fields = [df.pk_field, df.int_field, df.float_field, df.double_field, df.vec_field]
         fields = [
             cf.gen_int64_field(name=df.pk_field, is_primary=True, auto_id=auto_id),
             cf.gen_int64_field(name=df.int_field),
             cf.gen_float_field(name=df.float_field),
             cf.gen_double_field(name=df.double_field),
+            cf.gen_json_field(name=df.json_field),
+            cf.gen_array_field(name=df.array_int_field, element_type=DataType.INT64),
+            cf.gen_array_field(name=df.array_float_field, element_type=DataType.FLOAT),
+            cf.gen_array_field(name=df.array_string_field, element_type=DataType.VARCHAR),
+            cf.gen_array_field(name=df.array_bool_field, element_type=DataType.BOOL),
             cf.gen_float_vec_field(name=df.vec_field, dim=dim),
         ]
         data_fields = [f.name for f in fields if not f.to_dict().get("auto_id", False)]
-        files = prepare_bulk_insert_numpy_files(
+        files = prepare_bulk_insert_json_files(
             minio_endpoint=self.minio_endpoint,
             bucket_name=self.bucket_name,
             rows=entities,
             dim=dim,
             data_fields=data_fields,
+            enable_dynamic_field=enable_dynamic_field,
             force=True,
         )
         self._connect()
         c_name = cf.gen_unique_str("bulk_insert")
-        schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
+        schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id, enable_dynamic_field=enable_dynamic_field)
+        self.collection_wrap.init_collection(c_name, schema=schema)
+
+        # import data
+        t0 = time.time()
+        task_id, _ = self.utility_wrap.do_bulk_insert(
+            collection_name=c_name, files=files
+        )
+        logging.info(f"bulk insert task ids:{task_id}")
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
+            task_ids=[task_id], timeout=300
+        )
+        tt = time.time() - t0
+        log.info(f"bulk insert state:{success} in {tt} with states:{states}")
+        assert success
+        num_entities = self.collection_wrap.num_entities
+        log.info(f" collection entities: {num_entities}")
+        assert num_entities == entities
+        # verify imported data is available for search
+        index_params = ct.default_index
+        self.collection_wrap.create_index(
+            field_name=df.vec_field, index_params=index_params
+        )
+        self.collection_wrap.load()
+        log.info(f"wait for load finished and be ready for search")
+        time.sleep(2)
+        # log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
+        search_data = cf.gen_vectors(1, dim)
+        search_params = ct.default_search_params
+        res, _ = self.collection_wrap.search(
+            search_data,
+            df.vec_field,
+            param=search_params,
+            limit=1,
+            output_fields=["*"],
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": 1, "limit": 1},
+        )
+        for hit in res:
+            for r in hit:
+                fields_from_search = r.fields.keys()
+                for f in fields:
+                    assert f.name in fields_from_search
+                if enable_dynamic_field:
+                    assert "name" in fields_from_search
+                    assert "address" in fields_from_search
+
+    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.parametrize("auto_id", [True])
+    @pytest.mark.parametrize("dim", [2])  # 128
+    @pytest.mark.parametrize("entities", [2])  # 1000
+    @pytest.mark.parametrize("enable_dynamic_field", [True])
+    def test_bulk_insert_all_field_with_new_json_format(self, auto_id, dim, entities, enable_dynamic_field):
+        """
+        collection schema 1: [pk, int64, float64, string float_vector]
+        data file: vectors.npy and uid.npy,
+        Steps:
+        1. create collection
+        2. import data
+        3. verify
+        """
+        fields = [
+            cf.gen_int64_field(name=df.pk_field, is_primary=True, auto_id=auto_id),
+            cf.gen_int64_field(name=df.int_field),
+            cf.gen_float_field(name=df.float_field),
+            cf.gen_double_field(name=df.double_field),
+            cf.gen_json_field(name=df.json_field),
+            cf.gen_array_field(name=df.array_int_field, element_type=DataType.INT64),
+            cf.gen_array_field(name=df.array_float_field, element_type=DataType.FLOAT),
+            cf.gen_array_field(name=df.array_string_field, element_type=DataType.VARCHAR),
+            cf.gen_array_field(name=df.array_bool_field, element_type=DataType.BOOL),
+            cf.gen_float_vec_field(name=df.vec_field, dim=dim),
+        ]
+        data_fields = [f.name for f in fields if not f.to_dict().get("auto_id", False)]
+        files = prepare_bulk_insert_new_json_files(
+            minio_endpoint=self.minio_endpoint,
+            bucket_name=self.bucket_name,
+            rows=entities,
+            dim=dim,
+            data_fields=data_fields,
+            enable_dynamic_field=enable_dynamic_field,
+            force=True,
+        )
+        self._connect()
+        c_name = cf.gen_unique_str("bulk_insert")
+        schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id, enable_dynamic_field=enable_dynamic_field)
         self.collection_wrap.init_collection(c_name, schema=schema)
 
         # import data
@@ -673,6 +765,97 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             check_task=CheckTasks.check_search_results,
             check_items={"nq": 1, "limit": 1},
         )
+        for hit in res:
+            for r in hit:
+                fields_from_search = r.fields.keys()
+                for f in fields:
+                    assert f.name in fields_from_search
+                if enable_dynamic_field:
+                    assert "name" in fields_from_search
+                    assert "address" in fields_from_search
+
+
+    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.parametrize("auto_id", [True, False])
+    @pytest.mark.parametrize("dim", [128])  # 128
+    @pytest.mark.parametrize("entities", [1000])  # 1000
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    def test_bulk_insert_all_field_with_numpy(self, auto_id, dim, entities, enable_dynamic_field):
+        """
+        collection schema 1: [pk, int64, float64, string float_vector]
+        data file: vectors.npy and uid.npy,
+        note: numpy file is not supported for array field
+        Steps:
+        1. create collection
+        2. import data
+        3. verify
+        """
+        fields = [
+            cf.gen_int64_field(name=df.pk_field, is_primary=True, auto_id=auto_id),
+            cf.gen_int64_field(name=df.int_field),
+            cf.gen_float_field(name=df.float_field),
+            cf.gen_double_field(name=df.double_field),
+            cf.gen_json_field(name=df.json_field),
+            cf.gen_float_vec_field(name=df.vec_field, dim=dim),
+        ]
+        data_fields = [f.name for f in fields if not f.to_dict().get("auto_id", False)]
+        files = prepare_bulk_insert_numpy_files(
+            minio_endpoint=self.minio_endpoint,
+            bucket_name=self.bucket_name,
+            rows=entities,
+            dim=dim,
+            data_fields=data_fields,
+            force=True,
+            enable_dynamic_field=enable_dynamic_field,
+        )
+        self._connect()
+        c_name = cf.gen_unique_str("bulk_insert")
+        schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id, enable_dynamic_field=enable_dynamic_field)
+        self.collection_wrap.init_collection(c_name, schema=schema)
+
+        # import data
+        t0 = time.time()
+        task_id, _ = self.utility_wrap.do_bulk_insert(
+            collection_name=c_name, files=files
+        )
+        logging.info(f"bulk insert task ids:{task_id}")
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
+            task_ids=[task_id], timeout=300
+        )
+        tt = time.time() - t0
+        log.info(f"bulk insert state:{success} in {tt} with states:{states}")
+        assert success
+        num_entities = self.collection_wrap.num_entities
+        log.info(f" collection entities: {num_entities}")
+        assert num_entities == entities
+        # verify imported data is available for search
+        index_params = ct.default_index
+        self.collection_wrap.create_index(
+            field_name=df.vec_field, index_params=index_params
+        )
+        self.collection_wrap.load()
+        log.info(f"wait for load finished and be ready for search")
+        time.sleep(2)
+        # log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
+        search_data = cf.gen_vectors(1, dim)
+        search_params = ct.default_search_params
+        res, _ = self.collection_wrap.search(
+            search_data,
+            df.vec_field,
+            param=search_params,
+            limit=1,
+            output_fields=["*"],
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": 1, "limit": 1},
+        )
+        for hit in res:
+            for r in hit:
+                fields_from_search = r.fields.keys()
+                for f in fields:
+                    assert f.name in fields_from_search
+                if enable_dynamic_field:
+                    assert "name" in fields_from_search
+                    assert "address" in fields_from_search
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("auto_id", [True, False])
@@ -681,7 +864,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("file_nums", [1])
     @pytest.mark.parametrize("array_len", [None, 0, 100])
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
-    def test_with_all_field_parquet(self, auto_id, dim, entities, file_nums, array_len, enable_dynamic_field):
+    def test_bulk_insert_all_field_with_parquet(self, auto_id, dim, entities, file_nums, array_len, enable_dynamic_field):
         """
         collection schema 1: [pk, int64, float64, string float_vector]
         data file: vectors.parquet and uid.parquet,
@@ -754,6 +937,14 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             check_task=CheckTasks.check_search_results,
             check_items={"nq": 1, "limit": 1},
         )
+        for hit in res:
+            for r in hit:
+                fields_from_search = r.fields.keys()
+                for f in fields:
+                    assert f.name in fields_from_search
+                if enable_dynamic_field:
+                    assert "name" in fields_from_search
+                    assert "address" in fields_from_search
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("auto_id", [True])
