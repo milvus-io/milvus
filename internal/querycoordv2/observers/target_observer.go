@@ -18,6 +18,7 @@ package observers
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -284,15 +285,15 @@ func (ob *TargetObserver) updateNextTargetTimestamp(collectionID int64) {
 }
 
 func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collectionID int64) bool {
+	replicaNum := ob.meta.CollectionManager.GetReplicaNumber(collectionID)
 	log := log.Ctx(ctx).WithRateGroup(
-		"qcv2.TargetObserver",
+		fmt.Sprintf("qcv2.TargetObserver-%d", collectionID),
 		10,
 		60,
 	).With(
 		zap.Int64("collectionID", collectionID),
+		zap.Int32("replicaNum", replicaNum),
 	)
-
-	replicaNum := ob.meta.CollectionManager.GetReplicaNumber(collectionID)
 
 	// check channel first
 	channelNames := ob.targetMgr.GetDmChannelsByCollection(collectionID, meta.NextTarget)
@@ -307,7 +308,10 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 			collectionID,
 			ob.distMgr.LeaderViewManager.GetChannelDist(channel.GetChannelName()))
 		if int32(len(group)) < replicaNum {
-			log.RatedInfo(10, "channel not ready", zap.String("channelName", channel.GetChannelName()))
+			log.RatedInfo(10, "channel not ready",
+				zap.Int("readyReplicaNum", len(group)),
+				zap.String("channelName", channel.GetChannelName()),
+			)
 			return false
 		}
 	}
@@ -319,7 +323,10 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 			collectionID,
 			ob.distMgr.LeaderViewManager.GetSealedSegmentDist(segment.GetID()))
 		if int32(len(group)) < replicaNum {
-			log.RatedInfo(10, "segment not ready", zap.Int64("segmentID", segment.GetID()))
+			log.RatedInfo(10, "segment not ready",
+				zap.Int("readyReplicaNum", len(group)),
+				zap.Int64("segmentID", segment.GetID()),
+			)
 			return false
 		}
 	}
