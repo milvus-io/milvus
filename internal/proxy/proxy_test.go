@@ -1108,6 +1108,25 @@ func TestProxy(t *testing.T) {
 	})
 
 	wg.Add(1)
+	t.Run("alter_index", func(t *testing.T) {
+		defer wg.Done()
+		req := &milvuspb.AlterIndexRequest{
+			DbName:         dbName,
+			CollectionName: collectionName,
+			IndexName:      indexName,
+			ExtraParams: []*commonpb.KeyValuePair{
+				&commonpb.KeyValuePair{
+					Key:   common.MmapEnabledKey,
+					Value: "true",
+				},
+			}}
+
+		resp, err := proxy.AlterIndex(ctx, req)
+		err = merr.CheckRPCCall(resp, err)
+		assert.NoError(t, err)
+	})
+
+	wg.Add(1)
 	t.Run("describe index", func(t *testing.T) {
 		defer wg.Done()
 		resp, err := proxy.DescribeIndex(ctx, &milvuspb.DescribeIndexRequest{
@@ -1117,8 +1136,9 @@ func TestProxy(t *testing.T) {
 			FieldName:      floatVecField,
 			IndexName:      "",
 		})
+		err = merr.CheckRPCCall(resp, err)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.True(t, common.IsMmapEnabled(resp.IndexDescriptions[0].GetParams()...))
 		indexName = resp.IndexDescriptions[0].IndexName
 	})
 
