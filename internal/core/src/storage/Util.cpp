@@ -467,7 +467,7 @@ EncodeAndUploadIndexSlice2(std::shared_ptr<milvus_storage::Space> space,
     auto status = space->WriteBolb(
         object_key, serialized_index_data.data(), serialized_index_size);
     AssertInfo(status.ok(),
-               fmt::format("write to space error: %s", status.ToString()));
+               fmt::format("write to space error: {}", status.ToString()));
     return std::make_pair(std::move(object_key), serialized_index_size);
 }
 
