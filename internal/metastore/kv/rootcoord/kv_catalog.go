@@ -1024,7 +1024,7 @@ func (kc *Catalog) ListGrant(ctx context.Context, tenant string, entity *milvusp
 	appendGrantEntity := func(v string, object string, objectName string) error {
 		dbName := ""
 		dbName, objectName = funcutil.SplitObjectName(objectName)
-		if dbName != entity.DbName {
+		if dbName != entity.DbName && dbName != util.AnyWord {
 			return nil
 		}
 		granteeIDKey := funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant, v)
@@ -1066,6 +1066,14 @@ func (kc *Catalog) ListGrant(ctx context.Context, tenant string, entity *milvusp
 				if err == nil {
 					return entities, nil
 				}
+			}
+		}
+
+		if entity.DbName != util.AnyWord {
+			granteeKey = funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, fmt.Sprintf("%s/%s/%s", entity.Role.Name, entity.Object.Name, funcutil.CombineObjectName(util.AnyWord, entity.ObjectName)))
+			v, err := kc.Txn.Load(granteeKey)
+			if err == nil {
+				_ = appendGrantEntity(v, entity.Object.Name, funcutil.CombineObjectName(util.AnyWord, entity.ObjectName))
 			}
 		}
 
