@@ -76,6 +76,28 @@ func (i *IndexNode) storeIndexFilesAndStatistic(
 	}
 }
 
+func (i *IndexNode) storeIndexFilesAndStatisticV2(
+	ClusterID string,
+	buildID UniqueID,
+	fileKeys []string,
+	serializedSize uint64,
+	statistic *indexpb.JobInfo,
+	currentIndexVersion int32,
+	indexStoreVersion int64,
+) {
+	key := taskKey{ClusterID: ClusterID, BuildID: buildID}
+	i.stateLock.Lock()
+	defer i.stateLock.Unlock()
+	if info, ok := i.tasks[key]; ok {
+		info.fileKeys = common.CloneStringList(fileKeys)
+		info.serializedSize = serializedSize
+		info.statistic = proto.Clone(statistic).(*indexpb.JobInfo)
+		info.currentIndexVersion = currentIndexVersion
+		info.indexStoreVersion = indexStoreVersion
+		return
+	}
+}
+
 func (i *IndexNode) deleteTaskInfos(ctx context.Context, keys []taskKey) []*taskInfo {
 	i.stateLock.Lock()
 	defer i.stateLock.Unlock()
