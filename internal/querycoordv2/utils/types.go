@@ -31,19 +31,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
-func SegmentBinlogs2SegmentInfo(collectionID int64, partitionID int64, segmentBinlogs *datapb.SegmentBinlogs) *datapb.SegmentInfo {
-	return &datapb.SegmentInfo{
-		ID:            segmentBinlogs.GetSegmentID(),
-		CollectionID:  collectionID,
-		PartitionID:   partitionID,
-		InsertChannel: segmentBinlogs.GetInsertChannel(),
-		NumOfRows:     segmentBinlogs.GetNumOfRows(),
-		Binlogs:       segmentBinlogs.GetFieldBinlogs(),
-		Statslogs:     segmentBinlogs.GetStatslogs(),
-		Deltalogs:     segmentBinlogs.GetDeltalogs(),
-	}
-}
-
 func MergeMetaSegmentIntoSegmentInfo(info *querypb.SegmentInfo, segments ...*meta.Segment) {
 	first := segments[0]
 	if info.GetSegmentID() == 0 {
