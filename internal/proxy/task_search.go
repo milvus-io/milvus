@@ -84,7 +84,8 @@ func getPartitionIDs(ctx context.Context, dbName string, collectionName string, 
 	for _, partitionName := range partitionNames {
 		partitionID, found := partitionsMap[partitionName]
 		if !found {
-			return nil, merr.WrapErrPartitionNotFound(partitionName)
+			// TODO change after testcase updated: return nil, merr.WrapErrPartitionNotFound(partitionName)
+			return nil, fmt.Errorf("partition name %s not found", partitionName)
 		}
 		if !partitionsRecord.Contain(partitionID) {
 			partitionsRecord.Insert(partitionID)
