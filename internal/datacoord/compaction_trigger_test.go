@@ -17,7 +17,9 @@
 package datacoord
 
 import (
+	"context"
 	"sort"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1890,6 +1892,7 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 	}
 
 	// expire time < Timestamp To, but index engine version is 2 which is larger than CurrentIndexVersion in segmentIndex
+	Params.Save(Params.DataCoordCfg.AutoUpgradeSegmentIndex.Key, "true")
 	couldDo = trigger.ShouldDoSingleCompaction(info4, false, &compactTime{expireTime: 300})
 	assert.True(t, couldDo)
 	// expire time < Timestamp To, and index engine version is 2 which is equal CurrentIndexVersion in segmentIndex
@@ -1990,6 +1993,78 @@ func Test_compactionTrigger_getCompactTime(t *testing.T) {
 	ct, err := got.getCompactTime(now, coll)
 	assert.NoError(t, err)
 	assert.NotNil(t, ct)
+}
+
+func Test_triggerSingleCompaction(t *testing.T) {
+	originValue := Params.DataCoordCfg.EnableAutoCompaction.GetValue()
+	Params.Save(Params.DataCoordCfg.EnableAutoCompaction.Key, "true")
+	defer func() {
+		Params.Save(Params.DataCoordCfg.EnableAutoCompaction.Key, originValue)
+	}()
+	m := &meta{segments: NewSegmentsInfo(), collections: make(map[UniqueID]*collectionInfo)}
+	got := newCompactionTrigger(m, &compactionPlanHandler{}, newMockAllocator(),
+		&ServerHandler{
+			&Server{
+				meta: m,
+			},
+		}, newMockVersionManager())
+	got.signals = make(chan *compactionSignal, 1)
+	{
+		err := got.triggerSingleCompaction(1, 1, 1, "a", false)
+		assert.NoError(t, err)
+	}
+	{
+		err := got.triggerSingleCompaction(2, 2, 2, "b", false)
+		assert.NoError(t, err)
+	}
+	var i atomic.Value
+	i.Store(0)
+	check := func() {
+		for {
+			select {
+			case signal := <-got.signals:
+				x := i.Load().(int)
+				i.Store(x + 1)
+				assert.EqualValues(t, 1, signal.collectionID)
+			default:
+				return
+			}
+		}
+	}
+	check()
+	assert.Equal(t, 1, i.Load().(int))
+
+	{
+		err := got.triggerSingleCompaction(3, 3, 3, "c", true)
+		assert.NoError(t, err)
+	}
+	var j atomic.Value
+	j.Store(0)
+	go func() {
+		timeoutCtx, cancelFunc := context.WithTimeout(context.Background(), time.Second)
+		defer cancelFunc()
+		for {
+			select {
+			case signal := <-got.signals:
+				x := j.Load().(int)
+				j.Store(x + 1)
+				if x == 0 {
+					assert.EqualValues(t, 3, signal.collectionID)
+				} else if x == 1 {
+					assert.EqualValues(t, 4, signal.collectionID)
+				}
+			case <-timeoutCtx.Done():
+				return
+			}
+		}
+	}()
+	{
+		err := got.triggerSingleCompaction(4, 4, 4, "d", true)
+		assert.NoError(t, err)
+	}
+	assert.Eventually(t, func() bool {
+		return j.Load().(int) == 2
+	}, 2*time.Second, 500*time.Millisecond)
 }
 
 type CompactionTriggerSuite struct {

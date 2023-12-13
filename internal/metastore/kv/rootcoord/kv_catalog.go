@@ -90,14 +90,14 @@ func batchMultiSaveAndRemoveWithPrefix(snapshot kv.SnapShotKV, maxTxnNum int, sa
 	saveFn := func(partialKvs map[string]string) error {
 		return snapshot.MultiSave(partialKvs, ts)
 	}
-	if err := etcd.SaveByBatchWithLimit(saves, maxTxnNum/2, saveFn); err != nil {
+	if err := etcd.SaveByBatchWithLimit(saves, maxTxnNum, saveFn); err != nil {
 		return err
 	}
 
 	removeFn := func(partialKeys []string) error {
 		return snapshot.MultiSaveAndRemoveWithPrefix(nil, partialKeys, ts)
 	}
-	return etcd.RemoveByBatch(removals, removeFn)
+	return etcd.RemoveByBatchWithLimit(removals, maxTxnNum, removeFn)
 }
 
 func (kc *Catalog) CreateDatabase(ctx context.Context, db *model.Database, ts typeutil.Timestamp) error {
@@ -431,6 +431,8 @@ func (kc *Catalog) DropCollection(ctx context.Context, collectionInfo *model.Col
 	// Though batchMultiSaveAndRemoveWithPrefix is not atomic enough, we can promise atomicity outside.
 	// If we found collection under dropping state, we'll know that gc is not completely on this collection.
 	// However, if we remove collection first, we cannot remove other metas.
+	// We set maxTxnNum to 64, since SnapshotKV may save both snapshot key and the original key if the original key is
+	// newest.
 	if err := batchMultiSaveAndRemoveWithPrefix(kc.Snapshot, maxTxnNum, nil, delMetakeysSnap, ts); err != nil {
 		return err
 	}

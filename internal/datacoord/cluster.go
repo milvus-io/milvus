@@ -27,18 +27,34 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 // Cluster provides interfaces to interact with datanode cluster
-type Cluster struct {
-	sessionManager *SessionManager
+type Cluster interface {
+	Startup(ctx context.Context, nodes []*NodeInfo) error
+	Register(node *NodeInfo) error
+	UnRegister(node *NodeInfo) error
+	Watch(ctx context.Context, ch string, collectionID UniqueID) error
+	Flush(ctx context.Context, nodeID int64, channel string, segments []*datapb.SegmentInfo) error
+	FlushChannels(ctx context.Context, nodeID int64, flushTs Timestamp, channels []string) error
+	Import(ctx context.Context, nodeID int64, it *datapb.ImportTaskRequest)
+	AddImportSegment(ctx context.Context, req *datapb.AddImportSegmentRequest) (*datapb.AddImportSegmentResponse, error)
+	GetSessions() []*Session
+	Close()
+}
+
+var _ Cluster = (*ClusterImpl)(nil)
+
+type ClusterImpl struct {
+	sessionManager SessionManager
 	channelManager *ChannelManager
 }
 
-// NewCluster creates a new cluster
-func NewCluster(sessionManager *SessionManager, channelManager *ChannelManager) *Cluster {
-	c := &Cluster{
+// NewClusterImpl creates a new cluster
+func NewClusterImpl(sessionManager SessionManager, channelManager *ChannelManager) *ClusterImpl {
+	c := &ClusterImpl{
 		sessionManager: sessionManager,
 		channelManager: channelManager,
 	}
@@ -47,7 +63,7 @@ func NewCluster(sessionManager *SessionManager, channelManager *ChannelManager) 
 }
 
 // Startup inits the cluster with the given data nodes.
-func (c *Cluster) Startup(ctx context.Context, nodes []*NodeInfo) error {
+func (c *ClusterImpl) Startup(ctx context.Context, nodes []*NodeInfo) error {
 	for _, node := range nodes {
 		c.sessionManager.AddSession(node)
 	}
@@ -59,27 +75,25 @@ func (c *Cluster) Startup(ctx context.Context, nodes []*NodeInfo) error {
 }
 
 // Register registers a new node in cluster
-func (c *Cluster) Register(node *NodeInfo) error {
+func (c *ClusterImpl) Register(node *NodeInfo) error {
 	c.sessionManager.AddSession(node)
 	return c.channelManager.AddNode(node.NodeID)
 }
 
 // UnRegister removes a node from cluster
-func (c *Cluster) UnRegister(node *NodeInfo) error {
+func (c *ClusterImpl) UnRegister(node *NodeInfo) error {
 	c.sessionManager.DeleteSession(node)
 	return c.channelManager.DeleteNode(node.NodeID)
 }
 
 // Watch tries to add a channel in datanode cluster
-func (c *Cluster) Watch(ctx context.Context, ch string, collectionID UniqueID) error {
+func (c *ClusterImpl) Watch(ctx context.Context, ch string, collectionID UniqueID) error {
 	return c.channelManager.Watch(ctx, &channelMeta{Name: ch, CollectionID: collectionID})
 }
 
 // Flush sends flush requests to dataNodes specified
 // which also according to channels where segments are assigned to.
-func (c *Cluster) Flush(ctx context.Context, nodeID int64, channel string,
-	segments []*datapb.SegmentInfo,
-) error {
+func (c *ClusterImpl) Flush(ctx context.Context, nodeID int64, channel string, segments []*datapb.SegmentInfo) error {
 	if !c.channelManager.Match(nodeID, channel) {
 		log.Warn("node is not matched with channel",
 			zap.String("channel", channel),
@@ -109,7 +123,7 @@ func (c *Cluster) Flush(ctx context.Context, nodeID int64, channel string,
 	return nil
 }
 
-func (c *Cluster) FlushChannels(ctx context.Context, nodeID int64, flushTs Timestamp, channels []string) error {
+func (c *ClusterImpl) FlushChannels(ctx context.Context, nodeID int64, flushTs Timestamp, channels []string) error {
 	if len(channels) == 0 {
 		return nil
 	}
@@ -133,17 +147,28 @@ func (c *Cluster) FlushChannels(ctx context.Context, nodeID int64, flushTs Times
 }
 
 // Import sends import requests to DataNodes whose ID==nodeID.
-func (c *Cluster) Import(ctx context.Context, nodeID int64, it *datapb.ImportTaskRequest) {
+func (c *ClusterImpl) Import(ctx context.Context, nodeID int64, it *datapb.ImportTaskRequest) {
 	c.sessionManager.Import(ctx, nodeID, it)
 }
 
+func (c *ClusterImpl) AddImportSegment(ctx context.Context, req *datapb.AddImportSegmentRequest) (*datapb.AddImportSegmentResponse, error) {
+	// Look for the DataNode that watches the channel.
+	ok, nodeID := c.channelManager.getNodeIDByChannelName(req.GetChannelName())
+	if !ok {
+		err := merr.WrapErrChannelNotFound(req.GetChannelName(), "no DataNode watches this channel")
+		log.Error("no DataNode found for channel", zap.String("channelName", req.GetChannelName()), zap.Error(err))
+		return nil, err
+	}
+	return c.sessionManager.AddImportSegment(ctx, nodeID, req)
+}
+
 // GetSessions returns all sessions
-func (c *Cluster) GetSessions() []*Session {
+func (c *ClusterImpl) GetSessions() []*Session {
 	return c.sessionManager.GetSessions()
 }
 
 // Close releases resources opened in Cluster
-func (c *Cluster) Close() {
+func (c *ClusterImpl) Close() {
 	c.sessionManager.Close()
 	c.channelManager.Close()
 }

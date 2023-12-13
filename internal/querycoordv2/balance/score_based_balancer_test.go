@@ -586,7 +586,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestStoppedBalance() {
 	for i, c := range cases {
 		suite.Run(c.name, func() {
 			if i == 0 {
-				suite.mockScheduler.Mock.On("GetNodeChannelDelta", mock.Anything).Return(0)
+				suite.mockScheduler.Mock.On("GetNodeChannelDelta", mock.Anything).Return(0).Maybe()
 			}
 			suite.SetupSuite()
 			defer suite.TearDownTest()
@@ -604,6 +604,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestStoppedBalance() {
 			balancer.meta.ReplicaManager.Put(utils.CreateTestReplica(c.replicaID, c.collectionID, c.nodes))
 			balancer.targetMgr.UpdateCollectionNextTarget(c.collectionID)
 			balancer.targetMgr.UpdateCollectionCurrentTarget(c.collectionID)
+			balancer.targetMgr.UpdateCollectionNextTarget(c.collectionID)
 
 			// 2. set up target for distribution for multi collections
 			for node, s := range c.distributions {

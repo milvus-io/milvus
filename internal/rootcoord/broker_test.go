@@ -227,18 +227,19 @@ func TestServerBroker_GetSegmentIndexState(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		c := newTestCore(withValidDataCoord())
-		c.dataCoord.(*mockDataCoord).GetSegmentIndexStateFunc = func(ctx context.Context, req *indexpb.GetSegmentIndexStateRequest) (*indexpb.GetSegmentIndexStateResponse, error) {
-			return &indexpb.GetSegmentIndexStateResponse{
-				Status: merr.Success(),
-				States: []*indexpb.SegmentIndexState{
-					{
-						SegmentID:  1,
-						State:      commonpb.IndexState_Finished,
-						FailReason: "",
-					},
+		mockDataCoord := mocks.NewMockDataCoordClient(t)
+		mockDataCoord.EXPECT().GetSegmentIndexState(mock.Anything, mock.Anything).Return(&indexpb.GetSegmentIndexStateResponse{
+			Status: merr.Success(),
+			States: []*indexpb.SegmentIndexState{
+				{
+					SegmentID:  1,
+					State:      commonpb.IndexState_Finished,
+					FailReason: "",
 				},
-			}, nil
-		}
+			},
+		}, nil)
+		c.dataCoord = mockDataCoord
+
 		b := newServerBroker(c)
 		ctx := context.Background()
 		states, err := b.GetSegmentIndexState(ctx, 1, "index_name", []UniqueID{1})

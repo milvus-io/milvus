@@ -40,6 +40,7 @@ class MilvusConan(ConanFile):
         "google-cloud-cpp/2.5.0@milvus/dev",
         "opentelemetry-cpp/1.8.1.1@milvus/dev",
         "librdkafka/1.9.1",
+        "abseil/20230125.3"
     )
     generators = ("cmake", "cmake_find_package")
     default_options = {
@@ -79,7 +80,8 @@ class MilvusConan(ConanFile):
             # Macos M1 cannot use jemalloc
             if self.settings.arch not in ("x86_64", "x86"):
                 del self.options["folly"].use_sse4_2
-
+            # By default abseil use static link but can not be compatible with macos X86
+            self.options["abseil"].shared = True
             self.options["arrow"].with_jemalloc = False
         if self.settings.arch == "armv8":
             self.options["openblas"].dynamic_arch = False
