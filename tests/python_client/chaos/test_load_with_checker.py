@@ -4,15 +4,15 @@ import json
 from time import sleep
 from minio import Minio
 from pymilvus import connections
-from chaos.checker import (CreateChecker,
+from chaos.checker import (CollectionCreateChecker,
                            InsertChecker,
                            FlushChecker,
                            SearchChecker,
                            QueryChecker,
-                           IndexChecker,
+                           IndexCreateChecker,
                            DeleteChecker,
                            CompactChecker,
-                           DropChecker,
+                           CollectionDropChecker,
                            LoadBalanceChecker,
                            BulkInsertChecker,
                            Op)
@@ -56,15 +56,15 @@ class TestChaos(TestChaosBase):
     def init_health_checkers(self):
         c_name = cf.gen_unique_str("Checker_")
         checkers = {
-            # Op.create: CreateChecker(collection_name=c_name),
+            # Op.create: CollectionCreateChecker(collection_name=c_name),
             # Op.insert: InsertChecker(collection_name=c_name),
             # Op.flush: FlushChecker(collection_name=c_name),
             # Op.query: QueryChecker(collection_name=c_name),
             # Op.search: SearchChecker(collection_name=c_name),
             # Op.delete: DeleteChecker(collection_name=c_name),
             # Op.compact: CompactChecker(collection_name=c_name),
-            # Op.index: IndexChecker(),
-            # Op.drop: DropChecker(),
+            # Op.index: IndexCreateChecker(),
+            # Op.drop: CollectionDropChecker(),
             # Op.bulk_insert: BulkInsertChecker(),
             Op.load_balance: LoadBalanceChecker()
         }
