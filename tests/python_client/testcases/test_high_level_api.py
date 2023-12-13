@@ -144,7 +144,8 @@ class TestHighLevelApi(TestcaseBase):
         rng = np.random.default_rng(seed=19530)
         vectors_to_search = rng.random((1, 8))
         search_params = {"metric_type": metric_type}
-        error = {ct.err_code: 65535, ct.err_msg: f"metric type not match: expected=IP, actual={metric_type}"}
+        error = {ct.err_code: 1100,
+                 ct.err_msg: f"metric type not match: invalid parameter[expected=IP][actual={metric_type}]"}
         client_w.search(client, collection_name, vectors_to_search, limit=default_limit,
                         search_params=search_params,
                         check_task=CheckTasks.err_res, check_items=error)

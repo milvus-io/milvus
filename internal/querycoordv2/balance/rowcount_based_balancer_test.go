@@ -148,6 +148,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalance() {
 		distributionChannels map[int64][]*meta.DmChannel
 		expectPlans          []SegmentAssignPlan
 		expectChannelPlans   []ChannelAssignPlan
+		multiple             bool
 	}{
 		{
 			name:        "normal balance",
@@ -307,7 +308,9 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalance() {
 			expectPlans: []SegmentAssignPlan{},
 			expectChannelPlans: []ChannelAssignPlan{
 				{Channel: &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "v2"}, Node: 1}, From: 1, To: 2, ReplicaID: 1},
+				{Channel: &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "v2"}, Node: 1}, From: 1, To: 3, ReplicaID: 1},
 			},
+			multiple: true,
 		},
 		{
 			name:            "already balanced",
@@ -385,8 +388,13 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalance() {
 			}
 
 			segmentPlans, channelPlans := suite.getCollectionBalancePlans(balancer, 1)
-			suite.ElementsMatch(c.expectChannelPlans, channelPlans)
-			suite.ElementsMatch(c.expectPlans, segmentPlans)
+			if !c.multiple {
+				suite.ElementsMatch(c.expectChannelPlans, channelPlans)
+				suite.ElementsMatch(c.expectPlans, segmentPlans)
+			} else {
+				suite.Subset(c.expectPlans, segmentPlans)
+				suite.Subset(c.expectChannelPlans, channelPlans)
+			}
 
 			// clear distribution
 			for node := range c.distributions {

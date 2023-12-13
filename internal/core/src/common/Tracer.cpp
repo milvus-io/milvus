@@ -54,6 +54,7 @@ initTelementry(TraceConfig* config) {
     } else if (config->exporter == "otlp") {
         auto opts = otlp::OtlpGrpcExporterOptions{};
         opts.endpoint = config->otlpEndpoint;
+        opts.use_ssl_credentials = config->oltpSecure;
         exporter = otlp::OtlpGrpcExporterFactory::Create(opts);
         LOG_SEGCORE_INFO_ << "init otlp exporter, endpoint:" << opts.endpoint;
     } else {

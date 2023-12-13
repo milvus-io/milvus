@@ -22,10 +22,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
@@ -43,6 +45,13 @@ type HTTPServerTestSuite struct {
 func (suite *HTTPServerTestSuite) SetupSuite() {
 	paramtable.Init()
 	ServeHTTP()
+	conn, err := net.DialTimeout("tcp", "localhost:"+DefaultListenPort, time.Second*5)
+	if err != nil {
+		time.Sleep(time.Second)
+		conn, err = net.DialTimeout("tcp", "localhost:"+DefaultListenPort, time.Second*5)
+	}
+	suite.Equal(nil, err)
+	conn.Close()
 }
 
 func (suite *HTTPServerTestSuite) TearDownSuite() {
