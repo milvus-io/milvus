@@ -167,6 +167,11 @@ func (it *indexBuildTask) Prepare(ctx context.Context) error {
 
 	for _, kvPair := range it.req.GetIndexParams() {
 		key, value := kvPair.GetKey(), kvPair.GetValue()
+		// knowhere would report error if encountered the unknown key,
+		// so skip this
+		if key == common.MmapEnabledKey {
+			continue
+		}
 		indexParams[key] = value
 	}
 	it.newTypeParams = typeParams
