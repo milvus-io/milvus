@@ -82,8 +82,6 @@ else
     bash -c "curl https://sh.rustup.rs -sSf | sh -s -- --default-toolchain=1.73 -y" || { echo 'rustup install failed'; exit 1;}
     source $HOME/.cargo/env
 fi
-rustup install 1.73
-rustup default 1.73
 pushd bindings/c
 cargo +1.73 build --release --verbose || { echo 'opendal_c build failed'; exit 1; }
 popd
