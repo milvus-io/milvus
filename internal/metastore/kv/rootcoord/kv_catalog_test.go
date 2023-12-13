@@ -2317,9 +2317,14 @@ func TestRBAC_Grant(t *testing.T) {
 		kvmock.EXPECT().Load(validGranteeKey).Call.
 			Return(func(key string) string { return crypto.MD5(key) }, nil)
 		validGranteeKey2 := funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant,
-			fmt.Sprintf("%s/%s/%s", "role1", "obj1", "foo.obj_name2"))
+			fmt.Sprintf("%s/%s/%s", "role1", "obj2", "foo.obj_name2"))
 		kvmock.EXPECT().Load(validGranteeKey2).Call.
 			Return(func(key string) string { return crypto.MD5(key) }, nil)
+		validGranteeKey3 := funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant,
+			fmt.Sprintf("%s/%s/%s", "role1", "obj3", "*.obj_name3"))
+		kvmock.EXPECT().Load(validGranteeKey3).Call.
+			Return(func(key string) string { return crypto.MD5(key) }, nil)
+
 		kvmock.EXPECT().Load(mock.Anything).Call.
 			Return("", errors.New("mock Load error"))
 
@@ -2338,7 +2343,8 @@ func TestRBAC_Grant(t *testing.T) {
 				// Mock kv_catalog.go:ListGrant:L912
 				return []string{
 					fmt.Sprintf("%s/%s", key, "obj1/obj_name1"),
-					fmt.Sprintf("%s/%s", key, "obj2/obj_name2"),
+					fmt.Sprintf("%s/%s", key, "obj2/foo.obj_name2"),
+					fmt.Sprintf("%s/%s", key, "obj3/*.obj_name3"),
 				}
 			},
 			func(key string) []string {
@@ -2347,7 +2353,8 @@ func TestRBAC_Grant(t *testing.T) {
 				}
 				return []string{
 					crypto.MD5(fmt.Sprintf("%s/%s", key, "obj1/obj_name1")),
-					crypto.MD5(fmt.Sprintf("%s/%s", key, "obj2/obj_name2")),
+					crypto.MD5(fmt.Sprintf("%s/%s", key, "obj2/foo.obj_name2")),
+					crypto.MD5(fmt.Sprintf("%s/%s", key, "obj3/*.obj_name3")),
 				}
 			},
 			nil,
@@ -2358,31 +2365,46 @@ func TestRBAC_Grant(t *testing.T) {
 
 			entity      *milvuspb.GrantEntity
 			description string
+			count       int
 		}{
-			{true, &milvuspb.GrantEntity{Role: &milvuspb.RoleEntity{Name: "role1"}}, "valid role role1 with empty entity"},
-			{false, &milvuspb.GrantEntity{Role: &milvuspb.RoleEntity{Name: invalidRole}}, "invalid role with empty entity"},
+			{true, &milvuspb.GrantEntity{Role: &milvuspb.RoleEntity{Name: "role1"}}, "valid role role1 with empty entity", 4},
+			{false, &milvuspb.GrantEntity{Role: &milvuspb.RoleEntity{Name: invalidRole}}, "invalid role with empty entity", 0},
 			{false, &milvuspb.GrantEntity{
 				Object:     &milvuspb.ObjectEntity{Name: "random"},
 				ObjectName: "random2",
 				Role:       &milvuspb.RoleEntity{Name: "role1"},
-			}, "valid role with not exist entity"},
+			}, "valid role with not exist entity", 0},
 			{true, &milvuspb.GrantEntity{
 				Object:     &milvuspb.ObjectEntity{Name: "obj1"},
 				ObjectName: "obj_name1",
 				Role:       &milvuspb.RoleEntity{Name: "role1"},
-			}, "valid role with valid entity"},
+			}, "valid role with valid entity", 2},
 			{true, &milvuspb.GrantEntity{
-				Object:     &milvuspb.ObjectEntity{Name: "obj1"},
+				Object:     &milvuspb.ObjectEntity{Name: "obj2"},
 				ObjectName: "obj_name2",
 				DbName:     "foo",
 				Role:       &milvuspb.RoleEntity{Name: "role1"},
-			}, "valid role and dbName with valid entity"},
+			}, "valid role and dbName with valid entity", 2},
 			{false, &milvuspb.GrantEntity{
-				Object:     &milvuspb.ObjectEntity{Name: "obj1"},
+				Object:     &milvuspb.ObjectEntity{Name: "obj2"},
 				ObjectName: "obj_name2",
 				DbName:     "foo2",
 				Role:       &milvuspb.RoleEntity{Name: "role1"},
-			}, "valid role and invalid dbName with valid entity"},
+			}, "valid role and invalid dbName with valid entity", 0},
+			{false, &milvuspb.GrantEntity{
+				Object:     &milvuspb.ObjectEntity{Name: "obj3"},
+				ObjectName: "obj_name3",
+				DbName:     "default",
+				Role:       &milvuspb.RoleEntity{Name: "role1"},
+			}, "valid role and dbName with default db", 2},
+			{true, &milvuspb.GrantEntity{
+				DbName: "default",
+				Role:   &milvuspb.RoleEntity{Name: "role1"},
+			}, "valid role and default dbName without object", 4},
+			{true, &milvuspb.GrantEntity{
+				DbName: "*",
+				Role:   &milvuspb.RoleEntity{Name: "role1"},
+			}, "valid role and any dbName without object", 2},
 		}
 
 		for _, test := range tests {
@@ -2399,6 +2421,7 @@ func TestRBAC_Grant(t *testing.T) {
 				} else {
 					assert.Error(t, err)
 				}
+				assert.Equal(t, test.count, len(grants))
 			})
 		}
 	})
