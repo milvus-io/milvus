@@ -598,7 +598,9 @@ func Test_NewServer(t *testing.T) {
 	})
 
 	t.Run("GcControl", func(t *testing.T) {
-		server.dataCoord = &MockDataCoord{}
+		server.dataCoord = &MockDataCoord{
+			gcControlResp: &commonpb.Status{},
+		}
 		ret, err := server.GcControl(ctx, nil)
 		assert.Nil(t, err)
 		assert.NotNil(t, ret)
