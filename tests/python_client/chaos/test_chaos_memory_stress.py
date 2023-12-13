@@ -9,7 +9,7 @@ import datetime
 from pymilvus import connections
 from base.collection_wrapper import ApiCollectionWrapper
 from base.utility_wrapper import ApiUtilityWrapper
-from chaos.checker import Op, CreateChecker, InsertFlushChecker, IndexChecker, SearchChecker, QueryChecker
+from chaos.checker import Op, CollectionCreateChecker, InsertFlushChecker, IndexCreateChecker, SearchChecker, QueryChecker
 from common.cus_resource_opts import CustomResourceOperations as CusResource
 from common import common_func as cf
 from common import common_type as ct
@@ -74,7 +74,7 @@ class TestChaosData:
         # wait memory stress
         sleep(constants.WAIT_PER_OP * 2)
 
-        # try to do release, load, query and serach in a duration time loop
+        # try to do release, load, query and search in a duration time loop
         try:
             start = time.time()
             while time.time() - start < eval(duration):
@@ -215,10 +215,10 @@ class TestChaosData:
         expected: Verify milvus operation succ rate
         """
         mic_checkers = {
-            Op.create: CreateChecker(),
+            Op.create: CollectionCreateChecker(),
             Op.insert: InsertFlushChecker(),
             Op.flush: InsertFlushChecker(flush=True),
-            Op.index: IndexChecker(),
+            Op.index: IndexCreateChecker(),
             Op.search: SearchChecker(),
             Op.query: QueryChecker()
         }
@@ -285,7 +285,7 @@ class TestMemoryStressReplica:
 
     @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/16887")
     @pytest.mark.tags(CaseLabel.L3)
-    def test_memory_stress_replicas_befor_load(self, prepare_collection):
+    def test_memory_stress_replicas_before_load(self, prepare_collection):
         """
         target: test querynode group load with insufficient memory
         method: 1.Limit querynode memory ? 2Gi
@@ -353,7 +353,7 @@ class TestMemoryStressReplica:
     def test_memory_stress_replicas_group_insufficient(self, prepare_collection, mode):
         """
         target: test apply stress memory on different number querynodes and the group failed to load,
-                bacause of the memory is insufficient
+                because of the memory is insufficient
         method: 1.Limit querynodes memory 5Gi
                 2.Create collection and insert 1000,000 entities
                 3.Apply memory stress on querynodes and it's memory is not enough to load replicas
@@ -529,7 +529,7 @@ class TestMemoryStressReplicaLoadBalance:
 
         chaos_res.delete(metadata_name=chaos_config.get('metadata', None).get('name', None))
 
-        # Verfiy auto load loadbalance
+        # Verify auto load loadbalance
         seg_info_after, _ = utility_w.get_query_segment_info(collection_w.name)
         seg_distribution_after = cf.get_segment_distribution(seg_info_after)
         segments_num_after = len(seg_distribution_after[chaos_querynode_id]["sealed"])
@@ -549,7 +549,7 @@ class TestMemoryStressReplicaLoadBalance:
         method: 1.Limit all querynodes memory 6Gi
                 2.Create and insert 1000,000 entities
                 3.Load collection with two replicas
-                4.Apply memory stress on one grooup 80%
+                4.Apply memory stress on one group 80%
         expected: Verify that load balancing across groups is not occurring
         """
         collection_w = prepare_collection
@@ -586,7 +586,7 @@ class TestMemoryStressReplicaLoadBalance:
 
         chaos_res.delete(metadata_name=chaos_config.get('metadata', None).get('name', None))
 
-        # Verfiy auto load loadbalance
+        # Verify auto load loadbalance
         seg_info_after, _ = utility_w.get_query_segment_info(collection_w.name)
         seg_distribution_before = cf.get_segment_distribution(seg_info_before)
         seg_distribution_after = cf.get_segment_distribution(seg_info_after)
