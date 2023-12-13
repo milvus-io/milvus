@@ -691,6 +691,10 @@ func (m *MockDataCoord) ReportDataNodeTtMsgs(ctx context.Context, req *datapb.Re
 	return nil, nil
 }
 
+func (m *MockDataCoord) GcControl(ctx context.Context, req *datapb.GcControlRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{}, nil
+}
+
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type MockProxy struct {
 	MockBase
