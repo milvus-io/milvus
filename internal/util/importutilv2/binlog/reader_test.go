@@ -29,6 +29,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"math/rand"
 	"strconv"
 	"testing"
 
@@ -301,7 +302,7 @@ func createFieldsData(t *testing.T, collectionSchema *schemapb.CollectionSchema,
 			for i := 0; i < rowCount; i++ {
 				vec := make([]float32, 0)
 				for k := 0; k < int(dim); k++ {
-					vec = append(vec, float32((i+k)/5))
+					vec = append(vec, rand.Float32())
 				}
 				floatVecData = append(floatVecData, vec)
 			}
