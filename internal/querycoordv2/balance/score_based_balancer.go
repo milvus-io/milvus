@@ -23,6 +23,7 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
 
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
@@ -136,7 +137,9 @@ func (b *ScoreBasedBalancer) BalanceReplica(replica *meta.Replica) ([]SegmentAss
 		segments := b.dist.SegmentDistManager.GetByCollectionAndNode(replica.GetCollectionID(), nid)
 		// Only balance segments in targets
 		segments = lo.Filter(segments, func(segment *meta.Segment, _ int) bool {
-			return b.targetMgr.GetSealedSegment(segment.GetCollectionID(), segment.GetID(), meta.CurrentTarget) != nil
+			return b.targetMgr.GetSealedSegment(segment.GetCollectionID(), segment.GetID(), meta.CurrentTarget) != nil &&
+				b.targetMgr.GetSealedSegment(segment.GetCollectionID(), segment.GetID(), meta.NextTarget) != nil &&
+				segment.GetLevel() != datapb.SegmentLevel_L0
 		})
 
 		if isStopping, err := b.nodeManager.IsStoppingNode(nid); err != nil {
@@ -189,11 +192,11 @@ func (b *ScoreBasedBalancer) BalanceReplica(replica *meta.Replica) ([]SegmentAss
 		)
 		// handle stopped nodes here, have to assign segments on stopping nodes to nodes with the smallest score
 		segmentPlans = append(segmentPlans, b.getStoppedSegmentPlan(replica, nodesSegments, stoppingNodesSegments)...)
-		channelPlans = append(channelPlans, b.genChannelPlan(replica, lo.Keys(nodesSegments), lo.Keys(stoppingNodesSegments))...)
+		channelPlans = append(channelPlans, b.genStoppingChannelPlan(replica, lo.Keys(nodesSegments), lo.Keys(stoppingNodesSegments))...)
 	} else {
 		// normal balance, find segments from largest score nodes and transfer to smallest score nodes.
 		segmentPlans = append(segmentPlans, b.getNormalSegmentPlan(replica, nodesSegments)...)
-		channelPlans = append(channelPlans, b.genChannelPlan(replica, lo.Keys(nodesSegments), nil)...)
+		channelPlans = append(channelPlans, b.genChannelPlan(replica, lo.Keys(nodesSegments))...)
 	}
 	if len(segmentPlans) != 0 || len(channelPlans) != 0 {
 		PrintCurrentReplicaDist(replica, stoppingNodesSegments, nodesSegments, b.dist.ChannelDistManager, b.dist.SegmentDistManager)

@@ -356,6 +356,7 @@ func TestComponentParam(t *testing.T) {
 
 		assert.Equal(t, false, Params.AutoBalance.GetAsBool())
 		assert.Equal(t, 10, Params.CheckAutoBalanceConfigInterval.GetAsInt())
+		assert.Equal(t, false, Params.AutoUpgradeSegmentIndex.GetAsBool())
 	})
 
 	t.Run("test dataNodeConfig", func(t *testing.T) {
@@ -398,6 +399,10 @@ func TestComponentParam(t *testing.T) {
 		channelWorkPoolSize := Params.ChannelWorkPoolSize.GetAsInt()
 		t.Logf("channelWorkPoolSize: %d", channelWorkPoolSize)
 		assert.Equal(t, -1, Params.ChannelWorkPoolSize.GetAsInt())
+
+		updateChannelCheckpointMaxParallel := Params.UpdateChannelCheckpointMaxParallel.GetAsInt()
+		t.Logf("updateChannelCheckpointMaxParallel: %d", updateChannelCheckpointMaxParallel)
+		assert.Equal(t, 1000, Params.UpdateChannelCheckpointMaxParallel.GetAsInt())
 	})
 
 	t.Run("test indexNodeConfig", func(t *testing.T) {

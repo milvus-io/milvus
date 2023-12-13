@@ -422,7 +422,7 @@ func getServiceWithChannel(initCtx context.Context, node *DataNode, info *datapb
 
 	writeNode := newWriteNode(node.ctx, node.writeBufferManager, updater, config)
 
-	ttNode, err := newTTNode(config, node.broker, node.writeBufferManager)
+	ttNode, err := newTTNode(config, node.writeBufferManager, node.channelCheckpointUpdater)
 	if err != nil {
 		return nil, err
 	}

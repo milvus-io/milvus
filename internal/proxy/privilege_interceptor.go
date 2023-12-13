@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 
 	"github.com/casbin/casbin/v2"
 	"github.com/casbin/casbin/v2/model"
-	jsonadapter "github.com/casbin/json-adapter/v2"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -43,6 +43,26 @@ m = r.sub == p.sub && globMatch(r.obj, p.obj) && globMatch(r.act, p.act) || r.su
 
 var templateModel = getPolicyModel(ModelStr)
 
+var (
+	enforcer *casbin.SyncedEnforcer
+	initOnce sync.Once
+)
+
+func getEnforcer() *casbin.SyncedEnforcer {
+	initOnce.Do(func() {
+		e, err := casbin.NewSyncedEnforcer()
+		if err != nil {
+			log.Panic("failed to create casbin enforcer", zap.Error(err))
+		}
+		casbinModel := getPolicyModel(ModelStr)
+		adapter := NewMetaCacheCasbinAdapter(func() Cache { return globalMetaCache })
+		e.InitWithModelAndAdapter(casbinModel, adapter)
+		e.AddFunction("dbMatch", DBMatchFunc)
+		enforcer = e
+	})
+	return enforcer
+}
+
 func getPolicyModel(modelString string) model.Model {
 	m, err := model.NewModelFromString(modelString)
 	if err != nil {
@@ -66,6 +86,7 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 	if !Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
 		return ctx, nil
 	}
+	log := log.Ctx(ctx)
 	log.Debug("PrivilegeInterceptor", zap.String("type", reflect.TypeOf(req).String()))
 	privilegeExt, err := funcutil.GetPrivilegeExtObj(req)
 	if err != nil {
@@ -96,26 +117,14 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 	objectNames := funcutil.GetObjectNames(req, objectNameIndexs)
 	objectPrivilege := privilegeExt.ObjectPrivilege.String()
 	dbName := GetCurDBNameFromContextOrDefault(ctx)
-	policyInfo := strings.Join(globalMetaCache.GetPrivilegeInfo(ctx), ",")
 
-	log := log.With(zap.String("username", username), zap.Strings("role_names", roleNames),
+	log = log.With(zap.String("username", username), zap.Strings("role_names", roleNames),
 		zap.String("object_type", objectType), zap.String("object_privilege", objectPrivilege),
 		zap.String("db_name", dbName),
 		zap.Int32("object_index", objectNameIndex), zap.String("object_name", objectName),
-		zap.Int32("object_indexs", objectNameIndexs), zap.Strings("object_names", objectNames),
-		zap.String("policy_info", policyInfo))
+		zap.Int32("object_indexs", objectNameIndexs), zap.Strings("object_names", objectNames))
 
-	policy := fmt.Sprintf("[%s]", policyInfo)
-	b := []byte(policy)
-	a := jsonadapter.NewAdapter(&b)
-	// the `templateModel` object isn't safe in the concurrent situation
-	casbinModel := templateModel.Copy()
-	e, err := casbin.NewEnforcer(casbinModel, a)
-	if err != nil {
-		log.Warn("NewEnforcer fail", zap.String("policy", policy), zap.Error(err))
-		return ctx, err
-	}
-	e.AddFunction("dbMatch", DBMatchFunc)
+	e := getEnforcer()
 	for _, roleName := range roleNames {
 		permitFunc := func(resName string) (bool, error) {
 			object := funcutil.PolicyForResource(dbName, objectType, resName)
@@ -158,7 +167,7 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 		}
 	}
 
-	log.Info("permission deny", zap.String("policy", policy), zap.Strings("roles", roleNames))
+	log.Info("permission deny", zap.Strings("roles", roleNames))
 	return ctx, status.Error(codes.PermissionDenied, fmt.Sprintf("%s: permission deny", objectPrivilege))
 }
 

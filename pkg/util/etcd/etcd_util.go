@@ -148,19 +148,23 @@ func SaveByBatch(kvs map[string]string, op func(partialKvs map[string]string) er
 	return SaveByBatchWithLimit(kvs, maxTxnNum, op)
 }
 
-func RemoveByBatch(removals []string, op func(partialKeys []string) error) error {
+func RemoveByBatchWithLimit(removals []string, limit int, op func(partialKeys []string) error) error {
 	if len(removals) == 0 {
 		return nil
 	}
 
-	for i := 0; i < len(removals); i = i + maxTxnNum {
-		end := min(i+maxTxnNum, len(removals))
+	for i := 0; i < len(removals); i = i + limit {
+		end := min(i+limit, len(removals))
 		batch := removals[i:end]
 		if err := op(batch); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func RemoveByBatch(removals []string, op func(partialKeys []string) error) error {
+	return RemoveByBatchWithLimit(removals, maxTxnNum, op)
 }
 
 func buildKvGroup(keys, values []string) (map[string]string, error) {

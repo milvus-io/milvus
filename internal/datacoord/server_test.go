@@ -337,7 +337,7 @@ func TestFlush(t *testing.T) {
 		svr := newTestServer(t, nil)
 		closeTestServer(t, svr)
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
-		sm := NewSessionManager()
+		sm := NewSessionManagerImpl()
 
 		datanodeClient := mocks.NewMockDataNodeClient(t)
 		datanodeClient.EXPECT().FlushChannels(mock.Anything, mock.Anything).Return(nil,
@@ -354,7 +354,7 @@ func TestFlush(t *testing.T) {
 		}}}
 
 		svr.sessionManager = sm
-		svr.cluster.sessionManager = sm
+		svr.cluster = NewClusterImpl(sm, svr.channelManager)
 
 		err := svr.channelManager.AddNode(1)
 		assert.NoError(t, err)
@@ -3235,11 +3235,11 @@ func TestOptions(t *testing.T) {
 	t.Run("WithCluster", func(t *testing.T) {
 		defer kv.RemoveWithPrefix("")
 
-		sessionManager := NewSessionManager()
+		sessionManager := NewSessionManagerImpl()
 		channelManager, err := NewChannelManager(kv, newMockHandler())
 		assert.NoError(t, err)
 
-		cluster := NewCluster(sessionManager, channelManager)
+		cluster := NewClusterImpl(sessionManager, channelManager)
 		assert.NoError(t, err)
 		opt := WithCluster(cluster)
 		assert.NotNil(t, opt)
@@ -3292,8 +3292,8 @@ func TestHandleSessionEvent(t *testing.T) {
 
 	channelManager, err := NewChannelManager(kv, newMockHandler(), withFactory(&mockPolicyFactory{}))
 	assert.NoError(t, err)
-	sessionManager := NewSessionManager()
-	cluster := NewCluster(sessionManager, channelManager)
+	sessionManager := NewSessionManagerImpl()
+	cluster := NewClusterImpl(sessionManager, channelManager)
 	assert.NoError(t, err)
 
 	err = cluster.Startup(ctx, nil)
@@ -4374,7 +4374,7 @@ func Test_CheckHealth(t *testing.T) {
 			id:    1,
 			state: commonpb.StateCode_Healthy,
 		}
-		sm := NewSessionManager()
+		sm := NewSessionManagerImpl()
 		sm.sessions = struct {
 			sync.RWMutex
 			data map[int64]*Session
@@ -4400,7 +4400,7 @@ func Test_CheckHealth(t *testing.T) {
 			id:    1,
 			state: commonpb.StateCode_Abnormal,
 		}
-		sm := NewSessionManager()
+		sm := NewSessionManagerImpl()
 		sm.sessions = struct {
 			sync.RWMutex
 			data map[int64]*Session

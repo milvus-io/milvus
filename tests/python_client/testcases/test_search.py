@@ -249,10 +249,11 @@ class TestCollectionSearchInvalid(TestcaseBase):
         log.info("test_search_param_invalid_dim: searching with invalid dim")
         wrong_dim = 129
         vectors = [[random.random() for _ in range(wrong_dim)] for _ in range(default_nq)]
+        # The error message needs to be improved.
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, default_limit, default_search_exp,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 65538,
+                            check_items={"err_code": 65535,
                                          "err_msg": 'failed to search'})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -315,6 +316,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                          "err_msg": "collection not loaded"})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("issue #29020")
     @pytest.mark.parametrize("index, params",
                              zip(ct.all_index_types[:7],
                                  ct.default_index_params[:7]))
@@ -339,14 +341,16 @@ class TestCollectionSearchInvalid(TestcaseBase):
             if index == invalid_search_param["index_type"]:
                 search_params = {"metric_type": "L2",
                                  "params": invalid_search_param["search_params"]}
+                log.info("search_params: {}".format(search_params))
                 collection_w.search(vectors[:default_nq], default_search_field,
                                     search_params, default_limit,
                                     default_search_exp,
                                     check_task=CheckTasks.err_res,
                                     check_items={"err_code": 65535,
-                                                 "err_msg": "failed to search"})
+                                                 "err_msg": "failed to search: invalid param in json:"
+                                                            " invalid json key invalid_key"})
 
-    @pytest.mark.skip("not fixed yet")
+    @pytest.mark.skip("not support now")
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("search_k", [-10, -1, 0, 10, 125])
     def test_search_param_invalid_annoy_index(self, search_k):
@@ -833,7 +837,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             search_params[0], default_limit,
                             default_search_exp,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 65538, "err_msg": "failed to search"})
+                            check_items={"err_code": 65535, "err_msg": "failed to search"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_index_partition_not_existed(self):

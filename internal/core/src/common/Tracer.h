@@ -24,6 +24,7 @@ struct TraceConfig {
     int sampleFraction;
     std::string jaegerURL;
     std::string otlpEndpoint;
+    bool oltpSecure;
 
     int nodeID;
 };

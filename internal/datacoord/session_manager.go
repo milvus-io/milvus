@@ -23,8 +23,10 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	grpcdatanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/types"
@@ -44,8 +46,29 @@ const (
 	importTimeout = 3 * time.Hour
 )
 
-// SessionManager provides the grpc interfaces of cluster
-type SessionManager struct {
+type SessionManager interface {
+	AddSession(node *NodeInfo)
+	DeleteSession(node *NodeInfo)
+	GetSessionIDs() []int64
+	GetSessions() []*Session
+
+	Flush(ctx context.Context, nodeID int64, req *datapb.FlushSegmentsRequest)
+	FlushChannels(ctx context.Context, nodeID int64, req *datapb.FlushChannelsRequest) error
+	Compaction(nodeID int64, plan *datapb.CompactionPlan) error
+	SyncSegments(nodeID int64, req *datapb.SyncSegmentsRequest) error
+	Import(ctx context.Context, nodeID int64, itr *datapb.ImportTaskRequest)
+	GetCompactionPlansResults() map[int64]*datapb.CompactionPlanResult
+	NotifyChannelOperation(ctx context.Context, nodeID int64, req *datapb.ChannelOperationsRequest) error
+	CheckChannelOperationProgress(ctx context.Context, nodeID int64, info *datapb.ChannelWatchInfo) (*datapb.ChannelOperationProgressResponse, error)
+	AddImportSegment(ctx context.Context, nodeID int64, req *datapb.AddImportSegmentRequest) (*datapb.AddImportSegmentResponse, error)
+	CheckHealth(ctx context.Context) error
+	Close()
+}
+
+var _ SessionManager = (*SessionManagerImpl)(nil)
+
+// SessionManagerImpl provides the grpc interfaces of cluster
+type SessionManagerImpl struct {
 	sessions struct {
 		sync.RWMutex
 		data map[int64]*Session
@@ -53,11 +76,11 @@ type SessionManager struct {
 	sessionCreator dataNodeCreatorFunc
 }
 
-// SessionOpt provides a way to set params in SessionManager
-type SessionOpt func(c *SessionManager)
+// SessionOpt provides a way to set params in SessionManagerImpl
+type SessionOpt func(c *SessionManagerImpl)
 
 func withSessionCreator(creator dataNodeCreatorFunc) SessionOpt {
-	return func(c *SessionManager) { c.sessionCreator = creator }
+	return func(c *SessionManagerImpl) { c.sessionCreator = creator }
 }
 
 func defaultSessionCreator() dataNodeCreatorFunc {
@@ -66,9 +89,9 @@ func defaultSessionCreator() dataNodeCreatorFunc {
 	}
 }
 
-// NewSessionManager creates a new SessionManager
-func NewSessionManager(options ...SessionOpt) *SessionManager {
-	m := &SessionManager{
+// NewSessionManagerImpl creates a new SessionManagerImpl
+func NewSessionManagerImpl(options ...SessionOpt) *SessionManagerImpl {
+	m := &SessionManagerImpl{
 		sessions: struct {
 			sync.RWMutex
 			data map[int64]*Session
@@ -82,7 +105,7 @@ func NewSessionManager(options ...SessionOpt) *SessionManager {
 }
 
 // AddSession creates a new session
-func (c *SessionManager) AddSession(node *NodeInfo) {
+func (c *SessionManagerImpl) AddSession(node *NodeInfo) {
 	c.sessions.Lock()
 	defer c.sessions.Unlock()
 
@@ -92,7 +115,7 @@ func (c *SessionManager) AddSession(node *NodeInfo) {
 }
 
 // DeleteSession removes the node session
-func (c *SessionManager) DeleteSession(node *NodeInfo) {
+func (c *SessionManagerImpl) DeleteSession(node *NodeInfo) {
 	c.sessions.Lock()
 	defer c.sessions.Unlock()
 
@@ -103,8 +126,8 @@ func (c *SessionManager) DeleteSession(node *NodeInfo) {
 	metrics.DataCoordNumDataNodes.WithLabelValues().Set(float64(len(c.sessions.data)))
 }
 
-// getLiveNodeIDs returns IDs of all live DataNodes.
-func (c *SessionManager) getLiveNodeIDs() []int64 {
+// GetSessionIDs returns IDs of all live DataNodes.
+func (c *SessionManagerImpl) GetSessionIDs() []int64 {
 	c.sessions.RLock()
 	defer c.sessions.RUnlock()
 
@@ -116,7 +139,7 @@ func (c *SessionManager) getLiveNodeIDs() []int64 {
 }
 
 // GetSessions gets all node sessions
-func (c *SessionManager) GetSessions() []*Session {
+func (c *SessionManagerImpl) GetSessions() []*Session {
 	c.sessions.RLock()
 	defer c.sessions.RUnlock()
 
@@ -127,12 +150,24 @@ func (c *SessionManager) GetSessions() []*Session {
 	return ret
 }
 
+func (c *SessionManagerImpl) getClient(ctx context.Context, nodeID int64) (types.DataNodeClient, error) {
+	c.sessions.RLock()
+	session, ok := c.sessions.data[nodeID]
+	c.sessions.RUnlock()
+
+	if !ok {
+		return nil, fmt.Errorf("can not find session of node %d", nodeID)
+	}
+
+	return session.GetOrCreateClient(ctx)
+}
+
 // Flush is a grpc interface. It will send req to nodeID asynchronously
-func (c *SessionManager) Flush(ctx context.Context, nodeID int64, req *datapb.FlushSegmentsRequest) {
+func (c *SessionManagerImpl) Flush(ctx context.Context, nodeID int64, req *datapb.FlushSegmentsRequest) {
 	go c.execFlush(ctx, nodeID, req)
 }
 
-func (c *SessionManager) execFlush(ctx context.Context, nodeID int64, req *datapb.FlushSegmentsRequest) {
+func (c *SessionManagerImpl) execFlush(ctx context.Context, nodeID int64, req *datapb.FlushSegmentsRequest) {
 	cli, err := c.getClient(ctx, nodeID)
 	if err != nil {
 		log.Warn("failed to get dataNode client", zap.Int64("dataNode ID", nodeID), zap.Error(err))
@@ -150,7 +185,7 @@ func (c *SessionManager) execFlush(ctx context.Context, nodeID int64, req *datap
 }
 
 // Compaction is a grpc interface. It will send request to DataNode with provided `nodeID` synchronously.
-func (c *SessionManager) Compaction(nodeID int64, plan *datapb.CompactionPlan) error {
+func (c *SessionManagerImpl) Compaction(nodeID int64, plan *datapb.CompactionPlan) error {
 	ctx, cancel := context.WithTimeout(context.Background(), Params.DataCoordCfg.CompactionRPCTimeout.GetAsDuration(time.Second))
 	defer cancel()
 	cli, err := c.getClient(ctx, nodeID)
@@ -170,7 +205,7 @@ func (c *SessionManager) Compaction(nodeID int64, plan *datapb.CompactionPlan) e
 }
 
 // SyncSegments is a grpc interface. It will send request to DataNode with provided `nodeID` synchronously.
-func (c *SessionManager) SyncSegments(nodeID int64, req *datapb.SyncSegmentsRequest) error {
+func (c *SessionManagerImpl) SyncSegments(nodeID int64, req *datapb.SyncSegmentsRequest) error {
 	log := log.With(
 		zap.Int64("nodeID", nodeID),
 		zap.Int64("planID", req.GetPlanID()),
@@ -205,12 +240,12 @@ func (c *SessionManager) SyncSegments(nodeID int64, req *datapb.SyncSegmentsRequ
 }
 
 // Import is a grpc interface. It will send request to DataNode with provided `nodeID` asynchronously.
-func (c *SessionManager) Import(ctx context.Context, nodeID int64, itr *datapb.ImportTaskRequest) {
+func (c *SessionManagerImpl) Import(ctx context.Context, nodeID int64, itr *datapb.ImportTaskRequest) {
 	go c.execImport(ctx, nodeID, itr)
 }
 
 // execImport gets the corresponding DataNode with its ID and calls its Import method.
-func (c *SessionManager) execImport(ctx context.Context, nodeID int64, itr *datapb.ImportTaskRequest) {
+func (c *SessionManagerImpl) execImport(ctx context.Context, nodeID int64, itr *datapb.ImportTaskRequest) {
 	cli, err := c.getClient(ctx, nodeID)
 	if err != nil {
 		log.Warn("failed to get client for import", zap.Int64("nodeID", nodeID), zap.Error(err))
@@ -227,7 +262,7 @@ func (c *SessionManager) execImport(ctx context.Context, nodeID int64, itr *data
 	log.Info("success to import", zap.Int64("node", nodeID), zap.Any("import task", itr))
 }
 
-func (c *SessionManager) GetCompactionPlansResults() map[int64]*datapb.CompactionPlanResult {
+func (c *SessionManagerImpl) GetCompactionPlansResults() map[int64]*datapb.CompactionPlanResult {
 	wg := sync.WaitGroup{}
 	ctx := context.Background()
 
@@ -273,7 +308,7 @@ func (c *SessionManager) GetCompactionPlansResults() map[int64]*datapb.Compactio
 	return rst
 }
 
-func (c *SessionManager) FlushChannels(ctx context.Context, nodeID int64, req *datapb.FlushChannelsRequest) error {
+func (c *SessionManagerImpl) FlushChannels(ctx context.Context, nodeID int64, req *datapb.FlushChannelsRequest) error {
 	log := log.Ctx(ctx).With(zap.Int64("nodeID", nodeID),
 		zap.Time("flushTs", tsoutil.PhysicalTime(req.GetFlushTs())),
 		zap.Strings("channels", req.GetChannels()))
@@ -283,18 +318,18 @@ func (c *SessionManager) FlushChannels(ctx context.Context, nodeID int64, req *d
 		return err
 	}
 
-	log.Info("SessionManager.FlushChannels start")
+	log.Info("SessionManagerImpl.FlushChannels start")
 	resp, err := cli.FlushChannels(ctx, req)
 	err = VerifyResponse(resp, err)
 	if err != nil {
-		log.Warn("SessionManager.FlushChannels failed", zap.Error(err))
+		log.Warn("SessionManagerImpl.FlushChannels failed", zap.Error(err))
 		return err
 	}
-	log.Info("SessionManager.FlushChannels successfully")
+	log.Info("SessionManagerImpl.FlushChannels successfully")
 	return nil
 }
 
-func (c *SessionManager) NotifyChannelOperation(ctx context.Context, nodeID int64, req *datapb.ChannelOperationsRequest) error {
+func (c *SessionManagerImpl) NotifyChannelOperation(ctx context.Context, nodeID int64, req *datapb.ChannelOperationsRequest) error {
 	log := log.Ctx(ctx).With(zap.Int64("nodeID", nodeID))
 	cli, err := c.getClient(ctx, nodeID)
 	if err != nil {
@@ -311,7 +346,7 @@ func (c *SessionManager) NotifyChannelOperation(ctx context.Context, nodeID int6
 	return nil
 }
 
-func (c *SessionManager) CheckChannelOperationProgress(ctx context.Context, nodeID int64, info *datapb.ChannelWatchInfo) (*datapb.ChannelOperationProgressResponse, error) {
+func (c *SessionManagerImpl) CheckChannelOperationProgress(ctx context.Context, nodeID int64, info *datapb.ChannelWatchInfo) (*datapb.ChannelOperationProgressResponse, error) {
 	log := log.With(
 		zap.Int64("nodeID", nodeID),
 		zap.String("channel", info.GetVchan().GetChannelName()),
@@ -334,20 +369,51 @@ func (c *SessionManager) CheckChannelOperationProgress(ctx context.Context, node
 	return resp, nil
 }
 
-func (c *SessionManager) getClient(ctx context.Context, nodeID int64) (types.DataNodeClient, error) {
-	c.sessions.RLock()
-	session, ok := c.sessions.data[nodeID]
-	c.sessions.RUnlock()
-
-	if !ok {
-		return nil, fmt.Errorf("can not find session of node %d", nodeID)
+func (c *SessionManagerImpl) AddImportSegment(ctx context.Context, nodeID int64, req *datapb.AddImportSegmentRequest) (*datapb.AddImportSegmentResponse, error) {
+	// Call DataNode to add the new segment to its own flow graph.
+	cli, err := c.getClient(ctx, nodeID)
+	if err != nil {
+		log.Error("failed to get DataNode client for SaveImportSegment",
+			zap.Int64("DataNode ID", nodeID),
+			zap.Error(err))
+		return nil, err
 	}
 
-	return session.GetOrCreateClient(ctx)
+	resp, err := cli.AddImportSegment(ctx, req)
+	if err := VerifyResponse(resp.GetStatus(), err); err != nil {
+		log.Error("failed to add segment", zap.Int64("nodeID", nodeID), zap.Error(err))
+		return nil, err
+	}
+	log.Info("succeed to add segment", zap.Int64("nodeID", nodeID), zap.Any("add segment req", req))
+	return resp, err
+}
+
+func (c *SessionManagerImpl) CheckHealth(ctx context.Context) error {
+	group, ctx := errgroup.WithContext(ctx)
+
+	ids := c.GetSessionIDs()
+	for _, nodeID := range ids {
+		nodeID := nodeID
+		group.Go(func() error {
+			cli, err := c.getClient(ctx, nodeID)
+			if err != nil {
+				return fmt.Errorf("failed to get DataNode %d: %v", nodeID, err)
+			}
+
+			sta, err := cli.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
+			if err != nil {
+				return err
+			}
+			err = merr.AnalyzeState("DataNode", nodeID, sta)
+			return err
+		})
+	}
+
+	return group.Wait()
 }
 
 // Close release sessions
-func (c *SessionManager) Close() {
+func (c *SessionManagerImpl) Close() {
 	c.sessions.Lock()
 	defer c.sessions.Unlock()
 

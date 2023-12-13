@@ -671,6 +671,7 @@ type traceConfig struct {
 	SampleFraction ParamItem `refreshable:"false"`
 	JaegerURL      ParamItem `refreshable:"false"`
 	OtlpEndpoint   ParamItem `refreshable:"false"`
+	OtlpSecure     ParamItem `refreshable:"false"`
 }
 
 func (t *traceConfig) init(base *BaseTable) {
@@ -705,8 +706,16 @@ Fractions >= 1 will always sample. Fractions < 0 are treated as zero.`,
 	t.OtlpEndpoint = ParamItem{
 		Key:     "trace.otlp.endpoint",
 		Version: "2.3.0",
+		Doc:     "example: \"127.0.0.1:4318\"",
 	}
 	t.OtlpEndpoint.Init(base.mgr)
+
+	t.OtlpSecure = ParamItem{
+		Key:          "trace.otlp.secure",
+		Version:      "2.4.0",
+		DefaultValue: "true",
+	}
+	t.OtlpSecure.Init(base.mgr)
 }
 
 type logConfig struct {
@@ -1218,8 +1227,10 @@ type queryCoordConfig struct {
 	// Deprecated: Since 2.2.0
 	RetryNum ParamItem `refreshable:"true"`
 	// Deprecated: Since 2.2.0
-	RetryInterval    ParamItem `refreshable:"true"`
-	TaskMergeCap     ParamItem `refreshable:"false"`
+	RetryInterval ParamItem `refreshable:"true"`
+	// Deprecated: Since 2.3.4
+	TaskMergeCap ParamItem `refreshable:"false"`
+
 	TaskExecutionCap ParamItem `refreshable:"true"`
 
 	// ---- Handoff ---
@@ -1287,7 +1298,7 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 	p.TaskMergeCap = ParamItem{
 		Key:          "queryCoord.taskMergeCap",
 		Version:      "2.2.0",
-		DefaultValue: "16",
+		DefaultValue: "1",
 		Export:       true,
 	}
 	p.TaskMergeCap.Init(base.mgr)
@@ -2094,6 +2105,7 @@ type dataCoordConfig struct {
 	SegmentMaxIdleTime             ParamItem `refreshable:"false"`
 	SegmentMinSizeFromIdleToSealed ParamItem `refreshable:"false"`
 	SegmentMaxBinlogFileNumber     ParamItem `refreshable:"false"`
+	AutoUpgradeSegmentIndex        ParamItem `refreshable:"true"`
 
 	// compaction
 	EnableCompaction     ParamItem `refreshable:"false"`
@@ -2550,6 +2562,16 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.CheckAutoBalanceConfigInterval.Init(base.mgr)
+
+	p.AutoUpgradeSegmentIndex = ParamItem{
+		Key:          "dataCoord.autoUpgradeSegmentIndex",
+		Version:      "2.3.4",
+		DefaultValue: "false",
+		PanicIfEmpty: true,
+		Doc:          "whether auto upgrade segment index to index engine's version",
+		Export:       true,
+	}
+	p.AutoUpgradeSegmentIndex.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -2598,6 +2620,8 @@ type dataNodeConfig struct {
 
 	// channel
 	ChannelWorkPoolSize ParamItem `refreshable:"true"`
+
+	UpdateChannelCheckpointMaxParallel ParamItem `refreshable:"true"`
 }
 
 func (p *dataNodeConfig) init(base *BaseTable) {
@@ -2632,7 +2656,7 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	p.FlowGraphSkipModeSkipNum = ParamItem{
 		Key:          "datanode.dataSync.skipMode.skipNum",
 		Version:      "2.3.4",
-		DefaultValue: "5",
+		DefaultValue: "4",
 		PanicIfEmpty: false,
 		Doc:          "Consume one for every n records skipped",
 		Export:       true,
@@ -2806,6 +2830,14 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		DefaultValue: "-1",
 	}
 	p.ChannelWorkPoolSize.Init(base.mgr)
+
+	p.UpdateChannelCheckpointMaxParallel = ParamItem{
+		Key:          "datanode.channel.updateChannelCheckpointMaxParallel",
+		Version:      "2.3.4",
+		PanicIfEmpty: false,
+		DefaultValue: "1000",
+	}
+	p.UpdateChannelCheckpointMaxParallel.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
