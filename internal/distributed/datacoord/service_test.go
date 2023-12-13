@@ -31,7 +31,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type MockDataCoord struct {
 	types.DataCoord
 
@@ -73,6 +73,7 @@ type MockDataCoord struct {
 	markSegmentsDroppedResp   *commonpb.Status
 	broadCastResp             *commonpb.Status
 	listSegmentsInfoResp      *datapb.ListSegmentsInfoResponse
+	gcControlResp             *commonpb.Status
 }
 
 func (m *MockDataCoord) Init() error {
@@ -247,7 +248,11 @@ func (m *MockDataCoord) ListSegmentsInfo(ctx context.Context, req *datapb.ListSe
 	return m.listSegmentsInfoResp, nil
 }
 
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+func (m *MockDataCoord) GcControl(ctx context.Context, req *datapb.GcControlRequest) (*commonpb.Status, error) {
+	return m.gcControlResp, nil
+}
+
+// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 func Test_NewServer(t *testing.T) {
 	ctx := context.Background()
 	server := NewServer(ctx, nil)
@@ -590,6 +595,13 @@ func Test_NewServer(t *testing.T) {
 		ret, err := server.CheckHealth(ctx, nil)
 		assert.Nil(t, err)
 		assert.Equal(t, true, ret.IsHealthy)
+	})
+
+	t.Run("GcControl", func(t *testing.T) {
+		server.dataCoord = &MockDataCoord{}
+		ret, err := server.GcControl(ctx, nil)
+		assert.Nil(t, err)
+		assert.NotNil(t, ret)
 	})
 
 	err := server.Stop()

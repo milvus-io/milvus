@@ -353,6 +353,8 @@ type DataCoord interface {
 	CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error)
 
 	GcConfirm(ctx context.Context, request *datapb.GcConfirmRequest) (*datapb.GcConfirmResponse, error)
+	// GcControl is the API to pause or resume datcoord garbage collection.
+	GcControl(ctx context.Context, request *datapb.GcControlRequest) (*commonpb.Status, error)
 }
 
 // DataCoordComponent defines the interface of DataCoord component.

@@ -379,6 +379,8 @@ func (node *Proxy) Start() error {
 
 	node.sendChannelsTimeTickLoop()
 
+	RegisterMgrRoute(node)
+
 	// Start callbacks
 	for _, cb := range node.startCallbacks {
 		cb()

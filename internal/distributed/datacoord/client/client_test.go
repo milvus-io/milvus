@@ -171,6 +171,9 @@ func Test_NewClient(t *testing.T) {
 
 		r33, err := client.GetRecoveryInfoV2(ctx, nil)
 		retCheck(retNotNil, r33, err)
+
+		gcCtrReq, err := client.GcControl(ctx, nil)
+		retCheck(retNotNil, gcCtrReq, err)
 	}
 
 	client.grpcClient = &mock.GRPCClientBase[datapb.DataCoordClient]{

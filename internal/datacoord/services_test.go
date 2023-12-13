@@ -554,3 +554,83 @@ func TestReportDataNodeTtMsgs(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetErrorCode())
 	})
 }
+
+func TestGcControl(t *testing.T) {
+	t.Run("with_closed_server", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		closeTestServer(t, svr)
+		resp, err := svr.GcControl(context.TODO(), &datapb.GcControlRequest{})
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetErrorCode())
+	})
+
+	t.Run("unknown_cmd", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+		resp, err := svr.GcControl(context.TODO(), &datapb.GcControlRequest{
+			Command: 0,
+		})
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
+	})
+
+	t.Run("pause", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+		resp, err := svr.GcControl(context.TODO(), &datapb.GcControlRequest{
+			Command: datapb.GcCommand_Pause,
+		})
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
+
+		resp, err = svr.GcControl(context.TODO(), &datapb.GcControlRequest{
+			Command: datapb.GcCommand_Pause,
+			Params: []*commonpb.KeyValuePair{
+				{Key: "duration", Value: "not_int"},
+			},
+		})
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
+
+		resp, err = svr.GcControl(context.TODO(), &datapb.GcControlRequest{
+			Command: datapb.GcCommand_Pause,
+			Params: []*commonpb.KeyValuePair{
+				{Key: "duration", Value: "60"},
+			},
+		})
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
+	t.Run("resume", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+		resp, err := svr.GcControl(context.TODO(), &datapb.GcControlRequest{
+			Command: datapb.GcCommand_Resume,
+		})
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
+	t.Run("timeout", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+		svr.garbageCollector.close()
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		resp, err := svr.GcControl(ctx, &datapb.GcControlRequest{
+			Command: datapb.GcCommand_Resume,
+		})
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
+
+		resp, err = svr.GcControl(ctx, &datapb.GcControlRequest{
+			Command: datapb.GcCommand_Pause,
+			Params: []*commonpb.KeyValuePair{
+				{Key: "duration", Value: "60"},
+			},
+		})
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
+	})
+}
