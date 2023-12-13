@@ -82,6 +82,7 @@ type Cache interface {
 	InitPolicyInfo(info []string, userRoles []string)
 
 	RemoveDatabase(ctx context.Context, database string)
+	HasDatabase(ctx context.Context, database string) bool
 }
 
 type collectionInfo struct {
@@ -956,4 +957,9 @@ func (m *MetaCache) RemoveDatabase(ctx context.Context, database string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.collInfo, database)
+}
+
+func (m *MetaCache) HasDatabase(ctx context.Context, database string) bool {
+	_, ok := m.collInfo[database]
+	return ok
 }

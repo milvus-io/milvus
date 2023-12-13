@@ -931,3 +931,28 @@ func TestGlobalMetaCache_ShuffleShardLeaders(t *testing.T) {
 	assert.Len(t, result["channel-1"], 3)
 	assert.Equal(t, int64(3), result["channel-1"][0].nodeID)
 }
+
+func TestMetaCache_Database(t *testing.T) {
+	ctx := context.Background()
+	rootCoord := &MockRootCoordClientInterface{}
+	queryCoord := &types.MockQueryCoord{}
+	shardMgr := newShardClientMgr()
+	err := InitMetaCache(ctx, rootCoord, queryCoord, shardMgr)
+	assert.NoError(t, err)
+	assert.Equal(t, globalMetaCache.HasDatabase(ctx, dbName), false)
+
+	queryCoord.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		CollectionIDs:       []UniqueID{1, 2},
+		InMemoryPercentages: []int64{100, 50},
+	}, nil)
+
+	_, err = globalMetaCache.GetCollectionInfo(ctx, dbName, "collection1")
+	assert.NoError(t, err)
+	_, err = GetCachedCollectionSchema(ctx, dbName, "collection1")
+	assert.NoError(t, err)
+	assert.Equal(t, globalMetaCache.HasDatabase(ctx, dbName), true)
+	assert.Equal(t, CheckDatabase(ctx, dbName), true)
+}

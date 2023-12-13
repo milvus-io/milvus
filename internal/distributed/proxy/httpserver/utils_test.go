@@ -324,14 +324,12 @@ func TestInsertWithDynamicFields(t *testing.T) {
 	body := "{\"data\": {\"id\": 0, \"book_id\": 1, \"book_intro\": [0.1, 0.2], \"word_count\": 2}}"
 	req := InsertReq{}
 	coll := generateCollectionSchema(false)
-	err := checkAndSetData(body, &milvuspb.DescribeCollectionResponse{
-		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
-		Schema: coll,
-	}, &req)
-	assert.Equal(t, err, nil)
-	assert.Equal(t, req.Data[0]["id"], int64(0))
-	assert.Equal(t, req.Data[0]["book_id"], int64(1))
-	assert.Equal(t, req.Data[0]["word_count"], int64(2))
+	var err error
+	req.Data, err = checkAndSetData(body, coll)
+	assert.Equal(t, nil, err)
+	assert.Equal(t, int64(0), req.Data[0]["id"])
+	assert.Equal(t, int64(1), req.Data[0]["book_id"])
+	assert.Equal(t, int64(2), req.Data[0]["word_count"])
 	fieldsData, err := anyToColumns(req.Data, coll)
 	assert.Equal(t, err, nil)
 	assert.Equal(t, fieldsData[len(fieldsData)-1].IsDynamic, true)

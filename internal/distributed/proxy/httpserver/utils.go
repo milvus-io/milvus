@@ -11,8 +11,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/milvus-io/milvus/pkg/util/parameterutil.go"
-
 	"github.com/gin-gonic/gin"
 	"github.com/golang/protobuf/proto"
 	"github.com/spf13/cast"
@@ -25,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/parameterutil.go"
 )
 
 func ParseUsernamePassword(c *gin.Context) (string, string, bool) {
@@ -171,16 +170,16 @@ func printIndexes(indexes []*milvuspb.IndexDescription) []gin.H {
 
 // --------------------- insert param --------------------- //
 
-func checkAndSetData(body string, collDescResp *milvuspb.DescribeCollectionResponse, req *InsertReq) error {
+func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) ([]map[string]interface{}, error) {
 	var reallyDataArray []map[string]interface{}
 	dataResult := gjson.Get(body, "data")
 	dataResultArray := dataResult.Array()
 	if len(dataResultArray) == 0 {
-		return errors.New("data is required")
+		return nil, errors.New("data is required")
 	}
 
 	var fieldNames []string
-	for _, field := range collDescResp.Schema.Fields {
+	for _, field := range collSchema.Fields {
 		fieldNames = append(fieldNames, field.Name)
 	}
 
@@ -189,15 +188,15 @@ func checkAndSetData(body string, collDescResp *milvuspb.DescribeCollectionRespo
 		var vectorArray []float32
 		var binaryArray []byte
 		if data.Type == gjson.JSON {
-			for _, field := range collDescResp.Schema.Fields {
+			for _, field := range collSchema.Fields {
 				fieldType := field.DataType
 				fieldName := field.Name
 
 				dataString := gjson.Get(data.Raw, fieldName).String()
 
-				if field.IsPrimaryKey && collDescResp.Schema.AutoID {
+				if field.IsPrimaryKey && collSchema.AutoID {
 					if dataString != "" {
-						return fmt.Errorf("fieldName %s AutoId already open, not support insert data %s", fieldName, dataString)
+						return nil, fmt.Errorf("fieldName %s AutoId already open, not support insert data %s", fieldName, dataString)
 					}
 					continue
 				}
@@ -216,31 +215,31 @@ func checkAndSetData(body string, collDescResp *milvuspb.DescribeCollectionRespo
 				case schemapb.DataType_Bool:
 					result, err := cast.ToBoolE(dataString)
 					if err != nil {
-						return fmt.Errorf("dataString %s cast to bool error: %s", dataString, err.Error())
+						return nil, fmt.Errorf("dataString %s cast to bool error: %s", dataString, err.Error())
 					}
 					reallyData[fieldName] = result
 				case schemapb.DataType_Int8:
 					result, err := cast.ToInt8E(dataString)
 					if err != nil {
-						return fmt.Errorf("dataString %s cast to int8 error: %s", dataString, err.Error())
+						return nil, fmt.Errorf("dataString %s cast to int8 error: %s", dataString, err.Error())
 					}
 					reallyData[fieldName] = result
 				case schemapb.DataType_Int16:
 					result, err := cast.ToInt16E(dataString)
 					if err != nil {
-						return fmt.Errorf("dataString %s cast to int16 error: %s", dataString, err.Error())
+						return nil, fmt.Errorf("dataString %s cast to int16 error: %s", dataString, err.Error())
 					}
 					reallyData[fieldName] = result
 				case schemapb.DataType_Int32:
 					result, err := cast.ToInt32E(dataString)
 					if err != nil {
-						return fmt.Errorf("dataString %s cast to int32 error: %s", dataString, err.Error())
+						return nil, fmt.Errorf("dataString %s cast to int32 error: %s", dataString, err.Error())
 					}
 					reallyData[fieldName] = result
 				case schemapb.DataType_Int64:
 					result, err := cast.ToInt64E(dataString)
 					if err != nil {
-						return fmt.Errorf("dataString %s cast to int64 error: %s", dataString, err.Error())
+						return nil, fmt.Errorf("dataString %s cast to int64 error: %s", dataString, err.Error())
 					}
 					reallyData[fieldName] = result
 				case schemapb.DataType_JSON:
@@ -248,13 +247,13 @@ func checkAndSetData(body string, collDescResp *milvuspb.DescribeCollectionRespo
 				case schemapb.DataType_Float:
 					result, err := cast.ToFloat32E(dataString)
 					if err != nil {
-						return fmt.Errorf("dataString %s cast to float32 error: %s", dataString, err.Error())
+						return nil, fmt.Errorf("dataString %s cast to float32 error: %s", dataString, err.Error())
 					}
 					reallyData[fieldName] = result
 				case schemapb.DataType_Double:
 					result, err := cast.ToFloat64E(dataString)
 					if err != nil {
-						return fmt.Errorf("dataString %s cast to float64 error: %s", dataString, err.Error())
+						return nil, fmt.Errorf("dataString %s cast to float64 error: %s", dataString, err.Error())
 					}
 					reallyData[fieldName] = result
 				case schemapb.DataType_VarChar:
@@ -262,12 +261,12 @@ func checkAndSetData(body string, collDescResp *milvuspb.DescribeCollectionRespo
 				case schemapb.DataType_String:
 					reallyData[fieldName] = dataString
 				default:
-					return fmt.Errorf("not support fieldName %s dataType %s", fieldName, fieldType)
+					return nil, fmt.Errorf("not support fieldName %s dataType %s", fieldName, fieldType)
 				}
 			}
 
 			// fill dynamic schema
-			if collDescResp.Schema.EnableDynamicField {
+			if collSchema.EnableDynamicField {
 				for mapKey, mapValue := range data.Map() {
 					if !containsString(fieldNames, mapKey) {
 						mapValueStr := mapValue.String()
@@ -292,11 +291,10 @@ func checkAndSetData(body string, collDescResp *milvuspb.DescribeCollectionRespo
 
 			reallyDataArray = append(reallyDataArray, reallyData)
 		} else {
-			return fmt.Errorf("dataType %s not Json", data.Type)
+			return nil, fmt.Errorf("dataType %s not Json", data.Type)
 		}
 	}
-	req.Data = reallyDataArray
-	return nil
+	return reallyDataArray, nil
 }
 
 func containsString(arr []string, s string) bool {
