@@ -27,6 +27,7 @@ import (
 
 	"github.com/minio/minio-go/v7"
 	"github.com/samber/lo"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -62,19 +63,12 @@ type garbageCollector struct {
 	wg         sync.WaitGroup
 	closeCh    chan struct{}
 	cmdCh      chan gcCmd
-	pauseUntil time.Time
+	pauseUntil atomic.Time
 }
-
-type cmdType int32
-
-const (
-	pause cmdType = iota + 1
-	resume
-)
-
 type gcCmd struct {
-	cmdType  cmdType
+	cmdType  datapb.GcCommand
 	duration time.Duration
+	done     chan struct{}
 }
 
 // newGarbageCollector create garbage collector with meta and option
@@ -109,11 +103,14 @@ func (gc *garbageCollector) Pause(ctx context.Context, pauseDuration time.Durati
 		log.Info("garbage collection not enabled")
 		return nil
 	}
+	done := make(chan struct{})
 	select {
 	case gc.cmdCh <- gcCmd{
-		cmdType:  pause,
+		cmdType:  datapb.GcCommand_Pause,
 		duration: pauseDuration,
+		done:     done,
 	}:
+		<-done
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
@@ -125,10 +122,13 @@ func (gc *garbageCollector) Resume(ctx context.Context) error {
 		log.Warn("garbage collection not enabled, cannot resume")
 		return merr.WrapErrServiceUnavailable("garbage collection not enabled")
 	}
+	done := make(chan struct{})
 	select {
 	case gc.cmdCh <- gcCmd{
-		cmdType: resume,
+		cmdType: datapb.GcCommand_Resume,
+		done:    done,
 	}:
+		<-done
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
@@ -143,8 +143,8 @@ func (gc *garbageCollector) work() {
 	for {
 		select {
 		case <-ticker.C:
-			if time.Now().Before(gc.pauseUntil) {
-				log.Info("garbage collector paused", zap.Time("until", gc.pauseUntil))
+			if time.Now().Before(gc.pauseUntil.Load()) {
+				log.Info("garbage collector paused", zap.Time("until", gc.pauseUntil.Load()))
 				continue
 			}
 			gc.clearEtcd()
@@ -154,13 +154,19 @@ func (gc *garbageCollector) work() {
 			gc.recycleUnusedIndexFiles()
 		case cmd := <-gc.cmdCh:
 			switch cmd.cmdType {
-			case pause:
-				log.Info("garbage collection paused", zap.Duration("duration", cmd.duration))
-				gc.pauseUntil = time.Now().Add(cmd.duration)
-			case resume:
+			case datapb.GcCommand_Pause:
+				pauseUntil := time.Now().Add(cmd.duration)
+				if pauseUntil.After(gc.pauseUntil.Load()) {
+					log.Info("garbage collection paused", zap.Duration("duration", cmd.duration), zap.Time("pauseUntil", pauseUntil))
+					gc.pauseUntil.Store(pauseUntil)
+				} else {
+					log.Info("new pause until before current value", zap.Duration("duration", cmd.duration), zap.Time("pauseUntil", pauseUntil), zap.Time("oldPauseUntil", gc.pauseUntil.Load()))
+				}
+			case datapb.GcCommand_Resume:
 				// reset to zero value
-				gc.pauseUntil = time.Time{}
+				gc.pauseUntil.Store(time.Time{})
 			}
+			close(cmd.done)
 		case <-gc.closeCh:
 			log.Warn("garbage collector quit")
 			return

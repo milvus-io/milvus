@@ -44,8 +44,10 @@ var (
 // Provide alias for native http package
 // avoiding import alias when using http package
 
-type ResponseWriter = http.ResponseWriter
-type Request = http.Request
+type (
+	ResponseWriter = http.ResponseWriter
+	Request        = http.Request
+)
 
 type Handler struct {
 	Path        string
