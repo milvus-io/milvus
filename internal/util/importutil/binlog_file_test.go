@@ -331,7 +331,7 @@ func Test_BinlogFileBool(t *testing.T) {
 	binlogFile.Close()
 
 	// wrong log type
-	chunkManager.readBuf["dummy"] = createDeltalogBuf(t, []int64{1}, false)
+	chunkManager.readBuf["dummy"] = createDeltalogBuf(t, []int64{1}, false, baseTimestamp)
 	err = binlogFile.Open("dummy")
 	assert.NoError(t, err)
 
@@ -388,7 +388,7 @@ func Test_BinlogFileInt8(t *testing.T) {
 	binlogFile.Close()
 
 	// wrong log type
-	chunkManager.readBuf["dummy"] = createDeltalogBuf(t, []int64{1}, false)
+	chunkManager.readBuf["dummy"] = createDeltalogBuf(t, []int64{1}, false, baseTimestamp)
 	err = binlogFile.Open("dummy")
 	assert.NoError(t, err)
 
@@ -446,7 +446,7 @@ func Test_BinlogFileInt16(t *testing.T) {
 	binlogFile.Close()
 
 	// wrong log type
-	chunkManager.readBuf["dummy"] = createDeltalogBuf(t, []int64{1}, false)
+	chunkManager.readBuf["dummy"] = createDeltalogBuf(t, []int64{1}, false, baseTimestamp)
 	err = binlogFile.Open("dummy")
 	assert.NoError(t, err)
 
@@ -503,7 +503,7 @@ func Test_BinlogFileInt32(t *testing.T) {
 	binlogFile.Close()
 
 	// wrong log type
-	chunkManager.readBuf["dummy"] = createDeltalogBuf(t, []int64{1}, false)
+	chunkManager.readBuf["dummy"] = createDeltalogBuf(t, []int64{1}, false, baseTimestamp)
 	err = binlogFile.Open("dummy")
 	assert.NoError(t, err)
 
@@ -560,7 +560,7 @@ func Test_BinlogFileInt64(t *testing.T) {
 	binlogFile.Close()
 
 	// wrong log type
-	chunkManager.readBuf["dummy"] = createDeltalogBuf(t, []int64{1}, false)
+	chunkManager.readBuf["dummy"] = createDeltalogBuf(t, []int64{1}, false, baseTimestamp)
 	err = binlogFile.Open("dummy")
 	assert.NoError(t, err)
 
@@ -617,7 +617,7 @@ func Test_BinlogFileFloat(t *testing.T) {
 	binlogFile.Close()
 
 	// wrong log type
-	chunkManager.readBuf["dummy"] = createDeltalogBuf(t, []int64{1}, false)
+	chunkManager.readBuf["dummy"] = createDeltalogBuf(t, []int64{1}, false, baseTimestamp)
 	err = binlogFile.Open("dummy")
 	assert.NoError(t, err)
 
@@ -674,7 +674,7 @@ func Test_BinlogFileDouble(t *testing.T) {
 	binlogFile.Close()
 
 	// wrong log type
-	chunkManager.readBuf["dummy"] = createDeltalogBuf(t, []int64{1}, false)
+	chunkManager.readBuf["dummy"] = createDeltalogBuf(t, []int64{1}, false, baseTimestamp)
 	err = binlogFile.Open("dummy")
 	assert.NoError(t, err)
 
@@ -778,7 +778,7 @@ func Test_BinlogFileJSON(t *testing.T) {
 	binlogFile.Close()
 
 	// wrong log type
-	chunkManager.readBuf["dummy"] = createDeltalogBuf(t, []int64{1}, false)
+	chunkManager.readBuf["dummy"] = createDeltalogBuf(t, []int64{1}, false, baseTimestamp)
 	err = binlogFile.Open("dummy")
 	assert.NoError(t, err)
 
@@ -858,7 +858,7 @@ func Test_BinlogFileArray(t *testing.T) {
 	binlogFile.Close()
 
 	// wrong log type
-	chunkManager.readBuf["dummy"] = createDeltalogBuf(t, []int64{1}, false)
+	chunkManager.readBuf["dummy"] = createDeltalogBuf(t, []int64{1}, false, baseTimestamp)
 	err = binlogFile.Open("dummy")
 	assert.NoError(t, err)
 
@@ -937,7 +937,7 @@ func Test_BinlogFileBinaryVector(t *testing.T) {
 	binlogFile.Close()
 
 	// wrong log type
-	chunkManager.readBuf["dummy"] = createDeltalogBuf(t, []int64{1}, false)
+	chunkManager.readBuf["dummy"] = createDeltalogBuf(t, []int64{1}, false, baseTimestamp)
 	err = binlogFile.Open("dummy")
 	assert.NoError(t, err)
 
@@ -1004,7 +1004,7 @@ func Test_BinlogFileFloatVector(t *testing.T) {
 	binlogFile.Close()
 
 	// wrong log type
-	chunkManager.readBuf["dummy"] = createDeltalogBuf(t, []int64{1}, false)
+	chunkManager.readBuf["dummy"] = createDeltalogBuf(t, []int64{1}, false, baseTimestamp)
 	err = binlogFile.Open("dummy")
 	assert.NoError(t, err)
 
@@ -1072,7 +1072,7 @@ func Test_BinlogFileFloat16Vector(t *testing.T) {
 	binlogFile.Close()
 
 	// wrong log type
-	chunkManager.readBuf["dummy"] = createDeltalogBuf(t, []int64{1}, false)
+	chunkManager.readBuf["dummy"] = createDeltalogBuf(t, []int64{1}, false, baseTimestamp)
 	err = binlogFile.Open("dummy")
 	assert.NoError(t, err)
 
