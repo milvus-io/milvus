@@ -25,54 +25,16 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/tikv/client-go/v2/txnkv"
-	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tikv"
 )
-
-// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-type MockRootCoord struct {
-	types.RootCoordClient
-	stopErr  error
-	stateErr commonpb.ErrorCode
-}
-
-func (m *MockRootCoord) Close() error {
-	return m.stopErr
-}
-
-func (m *MockRootCoord) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest, opt ...grpc.CallOption) (*milvuspb.ComponentStates, error) {
-	return &milvuspb.ComponentStates{
-		State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Healthy},
-		Status: &commonpb.Status{ErrorCode: m.stateErr},
-	}, nil
-}
-
-// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-type MockDataCoord struct {
-	types.DataCoordClient
-	stopErr  error
-	stateErr commonpb.ErrorCode
-}
-
-func (m *MockDataCoord) Close() error {
-	return m.stopErr
-}
-
-func (m *MockDataCoord) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest, opts ...grpc.CallOption) (*milvuspb.ComponentStates, error) {
-	return &milvuspb.ComponentStates{
-		State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Healthy},
-		Status: &commonpb.Status{ErrorCode: m.stateErr},
-	}, nil
-}
 
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 func TestMain(m *testing.M) {
@@ -96,13 +58,17 @@ func Test_NewServer(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, server)
 
-		mdc := &MockDataCoord{
-			stateErr: commonpb.ErrorCode_Success,
-		}
+		mdc := mocks.NewMockDataCoordClient(t)
+		mdc.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
+			State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Healthy},
+			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		}, nil)
 
-		mrc := &MockRootCoord{
-			stateErr: commonpb.ErrorCode_Success,
-		}
+		mrc := mocks.NewMockRootCoordClient(t)
+		mrc.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
+			State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Healthy},
+			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		}, nil)
 
 		mqc := getQueryCoord()
 		successStatus := merr.Success()
