@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"regexp"
 	"strconv"
 
 	"github.com/cockroachdb/errors"
@@ -79,20 +80,39 @@ func getPartitionIDs(ctx context.Context, dbName string, collectionName string, 
 		return nil, err
 	}
 
-	partitionsRecord := typeutil.NewSet[int64]()
-	partitionIDs = make([]UniqueID, 0, len(partitionNames))
+	useRegexp := Params.ProxyCfg.PartitionNameRegexp.GetAsBool()
+
+	partitionsSet := typeutil.NewSet[int64]()
 	for _, partitionName := range partitionNames {
-		partitionID, found := partitionsMap[partitionName]
-		if !found {
-			// TODO change after testcase updated: return nil, merr.WrapErrPartitionNotFound(partitionName)
-			return nil, fmt.Errorf("partition name %s not found", partitionName)
-		}
-		if !partitionsRecord.Contain(partitionID) {
-			partitionsRecord.Insert(partitionID)
-			partitionIDs = append(partitionIDs, partitionID)
+		if useRegexp {
+			// Legacy feature, use partition name as regexp
+			pattern := fmt.Sprintf("^%s$", partitionName)
+			re, err := regexp.Compile(pattern)
+			if err != nil {
+				return nil, fmt.Errorf("invalid partition: %s", partitionName)
+			}
+			var found bool
+			for name, pID := range partitionsMap {
+				if re.MatchString(name) {
+					partitionsSet.Insert(pID)
+					found = true
+				}
+			}
+			if !found {
+				return nil, fmt.Errorf("partition name %s not found", partitionName)
+			}
+		} else {
+			partitionID, found := partitionsMap[partitionName]
+			if !found {
+				// TODO change after testcase updated: return nil, merr.WrapErrPartitionNotFound(partitionName)
+				return nil, fmt.Errorf("partition name %s not found", partitionName)
+			}
+			if !partitionsSet.Contain(partitionID) {
+				partitionsSet.Insert(partitionID)
+			}
 		}
 	}
-	return partitionIDs, nil
+	return partitionsSet.Collect(), nil
 }
 
 // parseSearchInfo returns QueryInfo and offset
