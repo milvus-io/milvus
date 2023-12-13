@@ -19,6 +19,7 @@ package typeutil
 import (
 	"encoding/binary"
 	"fmt"
+	"github.com/cockroachdb/errors"
 	"math"
 	"reflect"
 
@@ -114,4 +115,35 @@ func SliceRemoveDuplicate(a interface{}) (ret []interface{}) {
 	}
 
 	return ret
+}
+
+func SliceToInterfaceSlice[T any](values []T) []any {
+	result := make([]any, len(values))
+	for i, v := range values {
+		result[i] = v
+	}
+	return result
+}
+
+func InterfaceSliceToSlice[T any](values []any) ([]T, error) {
+	result := make([]T, len(values))
+	for i, v := range values {
+		if _, ok := v.(T); !ok {
+			return nil, errors.New(fmt.Sprintf("type assertion failed, expect:%t, actual:%t", reflect.TypeOf(*new(T)), reflect.TypeOf(v)))
+		}
+		result[i] = v.(T)
+	}
+	return result, nil
+}
+
+func InterfaceToInterfaceSlice(slice any) ([]any, error) {
+	sliceValue := reflect.ValueOf(slice)
+	if sliceValue.Kind() != reflect.Slice {
+		return nil, errors.New(fmt.Sprintf("not a slice type, actual type:%t", reflect.TypeOf(slice)))
+	}
+	result := make([]any, sliceValue.Len())
+	for i := 0; i < sliceValue.Len(); i++ {
+		result[i] = sliceValue.Index(i).Interface()
+	}
+	return result, nil
 }

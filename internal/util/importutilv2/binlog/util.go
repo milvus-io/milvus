@@ -19,8 +19,8 @@ package binlog
 import (
 	"context"
 	"fmt"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"path"
-	"reflect"
 	"sort"
 	"strconv"
 
@@ -48,11 +48,11 @@ func readData(reader *storage.BinlogReader, et storage.EventTypeCode) ([]any, er
 		if err != nil {
 			return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to read data, error: %v", err))
 		}
-		listVal := reflect.ValueOf(data)
-		for i := 0; i < listVal.Len(); i++ {
-			result = append(result, listVal.Index(i).Interface())
+		values, err := typeutil.InterfaceToInterfaceSlice(data)
+		if err != nil {
+			return nil, merr.WrapErrImportFailed(fmt.Sprintf("error: %v", err))
 		}
-		//result = append(result, data.([]any)...)
+		result = append(result, values...)
 	}
 	return result, nil
 }

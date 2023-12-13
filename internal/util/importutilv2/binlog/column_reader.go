@@ -19,6 +19,8 @@ package binlog
 import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/samber/lo"
 )
 
 type columnReader struct {
@@ -46,17 +48,17 @@ func (r *columnReader) Next(_ int64) (storage.FieldData, error) {
 	if err != nil {
 		return nil, err
 	}
-	//if typeutil.IsVectorType(r.fieldSchema.GetDataType()) {
-	//	dim, err := typeutil.GetDim(r.fieldSchema)
-	//	if err != nil {
-	//		return nil, err
-	//	}
-	//	chunks := lo.Chunk(result, int(dim))
-	//	result = make([]any, 0, len(chunks))
-	//	for _, chunk := range chunks {
-	//		result = append(result, chunk)
-	//	}
-	//}
+	if typeutil.IsVectorType(r.fieldSchema.GetDataType()) {
+		dim, err := typeutil.GetDim(r.fieldSchema)
+		if err != nil {
+			return nil, err
+		}
+		chunks := lo.Chunk(result, int(dim))
+		result = make([]any, 0, len(chunks))
+		for _, chunk := range chunks {
+			result = append(result, chunk)
+		}
+	}
 	for _, v := range result {
 		err = fieldData.AppendRow(v)
 		if err != nil {

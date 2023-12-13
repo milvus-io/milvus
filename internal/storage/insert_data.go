@@ -19,6 +19,7 @@ package storage
 import (
 	"encoding/binary"
 	"fmt"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -396,6 +397,13 @@ func (data *BinaryVectorFieldData) AppendRow(row interface{}) error {
 }
 
 func (data *FloatVectorFieldData) AppendRow(row interface{}) error {
+	if interfaces, ok := row.([]interface{}); ok {
+		var err error
+		row, err = typeutil.InterfaceSliceToSlice[float32](interfaces)
+		if err != nil {
+			return err
+		}
+	}
 	v, ok := row.([]float32)
 	if !ok || len(v) != data.Dim {
 		return merr.WrapErrParameterInvalid("[]float32", row, "Wrong row type")

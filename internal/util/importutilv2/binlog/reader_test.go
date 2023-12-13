@@ -431,8 +431,10 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 	suite.NoError(err)
 	for fieldID, data := range insertData.Data {
 		suite.Equal(data.RowNum(), rowCount0)
+		values, err := typeutil.InterfaceToInterfaceSlice(fieldsData0[fieldID])
+		assert.NoError(suite.T(), err)
 		for i := 0; i < rowCount0; i++ {
-			expect := fieldsData0[fieldID].([]any)[i]
+			expect := values[i]
 			actual := data.GetRow(i)
 			suite.Equal(expect, actual)
 		}
@@ -441,15 +443,22 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 	suite.NoError(err)
 	for fieldID, data := range insertData.Data {
 		suite.Equal(data.RowNum(), rowCount1)
+		values, err := typeutil.InterfaceToInterfaceSlice(fieldsData1[fieldID])
+		assert.NoError(suite.T(), err)
 		for i := 0; i < rowCount1; i++ {
-			expect := fieldsData1[fieldID].([]any)[i]
+			expect := values[i]
 			actual := data.GetRow(i)
 			suite.Equal(expect, actual)
 		}
 	}
+	fmt.Println(insertData)
 }
 
-func (suite *ReaderSuite) TestReadBool() {
+func (suite *ReaderSuite) TestRead() {
+	suite.run(schemapb.DataType_Bool)
+	suite.run(schemapb.DataType_Bool)
+	suite.run(schemapb.DataType_Bool)
+	suite.run(schemapb.DataType_Bool)
 	suite.run(schemapb.DataType_Bool)
 }
 
