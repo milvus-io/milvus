@@ -761,6 +761,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             df.vec_field,
             param=search_params,
             limit=1,
+            output_fields=["*"],
             check_task=CheckTasks.check_search_results,
             check_items={"nq": 1, "limit": 1},
         )
@@ -772,7 +773,6 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                 if enable_dynamic_field:
                     assert "name" in fields_from_search
                     assert "address" in fields_from_search
-
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("auto_id", [True, False])
@@ -988,17 +988,15 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         self.collection_wrap.init_collection(c_name, schema=schema)
 
         # import data
-        t0 = time.time()
-        task_id, _ = self.utility_wrap.do_bulk_insert(
-            collection_name=c_name, files=files
+        error = {}
+        if file_nums == 0:
+            error = {ct.err_code: 1100, ct.err_msg: "import request is empty: invalid parameter"}
+        if file_nums > 1:
+            error = {ct.err_code: 65535, ct.err_msg: "for JSON or parquet file, each task only accepts one file"}
+        self.utility_wrap.do_bulk_insert(
+            collection_name=c_name, files=files,
+            check_task=CheckTasks.err_res, check_items=error
         )
-        logging.info(f"bulk insert task ids:{task_id}")
-        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=300
-        )
-        tt = time.time() - t0
-        log.info(f"bulk insert state:{success} in {tt} with states:{states}")
-        assert not success
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("auto_id", [True, False])
