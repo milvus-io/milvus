@@ -214,7 +214,7 @@ func (s *Server) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest)
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.String("indexName", req.GetIndexName()),
 	)
-	log.Info("receive AlterIndex request", zap.Any("params", req.GetParams()))
+	log.Info("received AlterIndex request", zap.Any("params", req.GetParams()))
 
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		log.Warn(msgDataCoordIsUnhealthy(paramtable.GetNodeID()), zap.Error(err))
@@ -233,7 +233,11 @@ func (s *Server) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest)
 			params[param.GetKey()] = param.GetValue()
 		}
 
-		index.IndexParams = lo.MapToSlice(params, func(k string, v string) *commonpb.KeyValuePair {
+		log.Info("prepare to alter index",
+			zap.String("indexName", index.IndexName),
+			zap.Any("params", params),
+		)
+		index.UserIndexParams = lo.MapToSlice(params, func(k string, v string) *commonpb.KeyValuePair {
 			return &commonpb.KeyValuePair{
 				Key:   k,
 				Value: v,

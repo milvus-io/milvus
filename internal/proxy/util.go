@@ -1568,6 +1568,11 @@ func SendReplicateMessagePack(ctx context.Context, replicateMsgStream msgstream.
 			BaseMsg:                  getBaseMsg(ctx, ts),
 			ReleasePartitionsRequest: *r,
 		}
+	case *milvuspb.AlterIndexRequest:
+		tsMsg = &msgstream.AlterIndexMsg{
+			BaseMsg:           getBaseMsg(ctx, ts),
+			AlterIndexRequest: *r,
+		}
 	default:
 		log.Warn("unknown request", zap.Any("request", request))
 		return

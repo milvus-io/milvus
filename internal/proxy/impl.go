@@ -1831,7 +1831,7 @@ func (node *Proxy) AlterIndex(ctx context.Context, request *milvuspb.AlterIndexR
 		replicateMsgStream: node.replicateMsgStream,
 	}
 
-	method := "CreateIndex"
+	method := "AlterIndex"
 	tr := timerecord.NewTimeRecorder(method)
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 		metrics.TotalLabel).Inc()

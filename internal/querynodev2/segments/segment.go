@@ -854,14 +854,14 @@ func (s *LocalSegment) LoadDeltaData(deltaData *storage.DeleteData) error {
 	return nil
 }
 
-func (s *LocalSegment) LoadIndex(indexInfo *querypb.FieldIndexInfo, fieldType schemapb.DataType, enableMmap bool) error {
+func (s *LocalSegment) LoadIndex(indexInfo *querypb.FieldIndexInfo, fieldType schemapb.DataType) error {
 	loadIndexInfo, err := newLoadIndexInfo()
 	defer deleteLoadIndexInfo(loadIndexInfo)
 	if err != nil {
 		return err
 	}
 
-	err = loadIndexInfo.appendLoadIndexInfo(indexInfo, s.collectionID, s.partitionID, s.segmentID, fieldType, enableMmap)
+	err = loadIndexInfo.appendLoadIndexInfo(indexInfo, s.collectionID, s.partitionID, s.segmentID, fieldType)
 	if err != nil {
 		if loadIndexInfo.cleanLocalData() != nil {
 			log.Warn("failed to clean cached data on disk after append index failed",
