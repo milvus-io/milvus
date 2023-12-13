@@ -86,11 +86,10 @@ func getPartitionIDs(ctx context.Context, dbName string, collectionName string, 
 		if !found {
 			return nil, merr.WrapErrPartitionNotFound(partitionName)
 		}
-		if partitionsRecord.Contain(partitionID) {
-			continue
+		if !partitionsRecord.Contain(partitionID) {
+			partitionsRecord.Insert(partitionID)
+			partitionIDs = append(partitionIDs, partitionID)
 		}
-		partitionsRecord.Insert(partitionID)
-		partitionIDs = append(partitionIDs, partitionID)
 	}
 	return partitionIDs, nil
 }
