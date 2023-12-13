@@ -317,7 +317,7 @@ func (sa *segIDAssigner) syncSegments() (bool, error) {
 		strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(float64(len(sa.segReqs)))
 	sa.segReqs = nil
 
-	log.Debug("syncSegments call dataCoord.AssignSegmentID", zap.String("request", req.String()))
+	log.Debug("syncSegments call dataCoord.AssignSegmentID", zap.Stringer("request", req))
 
 	resp, err := sa.dataCoord.AssignSegmentID(context.Background(), req)
 	if err != nil {

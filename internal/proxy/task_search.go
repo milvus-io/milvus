@@ -349,7 +349,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 
 		log.Debug("Proxy::searchTask::PreExecute",
 			zap.Int64s("plan.OutputFieldIds", plan.GetOutputFieldIds()),
-			zap.String("plan", plan.String())) // may be very large if large term passed.
+			zap.Stringer("plan", plan)) // may be very large if large term passed.
 	}
 
 	// translate partition name to partition ids. Use regex-pattern to match partition name.
