@@ -24,20 +24,18 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/types"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
-	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tikv"
 )
@@ -109,42 +107,6 @@ func (m *mockCore) Stop() error {
 	return fmt.Errorf("stop error")
 }
 
-type mockDataCoord struct {
-	types.DataCoordClient
-}
-
-func (m *mockDataCoord) Close() error {
-	return nil
-}
-
-func (m *mockDataCoord) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest, opts ...grpc.CallOption) (*milvuspb.ComponentStates, error) {
-	return &milvuspb.ComponentStates{
-		State: &milvuspb.ComponentInfo{
-			StateCode: commonpb.StateCode_Healthy,
-		},
-		Status: merr.Success(),
-		SubcomponentStates: []*milvuspb.ComponentInfo{
-			{
-				StateCode: commonpb.StateCode_Healthy,
-			},
-		},
-	}, nil
-}
-
-func (m *mockDataCoord) Stop() error {
-	return fmt.Errorf("stop error")
-}
-
-type mockQueryCoord struct {
-	types.QueryCoordClient
-	initErr  error
-	startErr error
-}
-
-func (m *mockQueryCoord) Close() error {
-	return fmt.Errorf("stop error")
-}
-
 func TestRun(t *testing.T) {
 	paramtable.Init()
 	parameters := []string{"tikv", "etcd"}
@@ -169,11 +131,16 @@ func TestRun(t *testing.T) {
 		assert.Error(t, err)
 		assert.EqualError(t, err, "listen tcp: address 1000000: invalid port")
 
+		mockDataCoord := mocks.NewMockDataCoordClient(t)
+		mockDataCoord.EXPECT().Close().Return(nil)
 		svr.newDataCoordClient = func() types.DataCoordClient {
-			return &mockDataCoord{}
+			return mockDataCoord
 		}
+
+		mockQueryCoord := mocks.NewMockQueryCoordClient(t)
+		mockQueryCoord.EXPECT().Close().Return(nil)
 		svr.newQueryCoordClient = func() types.QueryCoordClient {
-			return &mockQueryCoord{}
+			return mockQueryCoord
 		}
 
 		paramtable.Get().Save(rcServerConfig.Port.Key, fmt.Sprintf("%d", rand.Int()%100+10000))
@@ -251,8 +218,10 @@ func TestServerRun_DataCoordClientInitErr(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, server)
 
+		mockDataCoord := mocks.NewMockDataCoordClient(t)
+		mockDataCoord.EXPECT().Close().Return(nil)
 		server.newDataCoordClient = func() types.DataCoordClient {
-			return &mockDataCoord{}
+			return mockDataCoord
 		}
 		assert.Panics(t, func() { server.Run() })
 
@@ -277,8 +246,10 @@ func TestServerRun_DataCoordClientStartErr(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, server)
 
+		mockDataCoord := mocks.NewMockDataCoordClient(t)
+		mockDataCoord.EXPECT().Close().Return(nil)
 		server.newDataCoordClient = func() types.DataCoordClient {
-			return &mockDataCoord{}
+			return mockDataCoord
 		}
 		assert.Panics(t, func() { server.Run() })
 
@@ -303,9 +274,12 @@ func TestServerRun_QueryCoordClientInitErr(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, server)
 
+		mockQueryCoord := mocks.NewMockQueryCoordClient(t)
+		mockQueryCoord.EXPECT().Close().Return(nil)
 		server.newQueryCoordClient = func() types.QueryCoordClient {
-			return &mockQueryCoord{initErr: errors.New("mock querycoord init error")}
+			return mockQueryCoord
 		}
+
 		assert.Panics(t, func() { server.Run() })
 
 		err = server.Stop()
@@ -329,8 +303,10 @@ func TestServer_QueryCoordClientStartErr(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, server)
 
+		mockQueryCoord := mocks.NewMockQueryCoordClient(t)
+		mockQueryCoord.EXPECT().Close().Return(nil)
 		server.newQueryCoordClient = func() types.QueryCoordClient {
-			return &mockQueryCoord{startErr: errors.New("mock querycoord start error")}
+			return mockQueryCoord
 		}
 		assert.Panics(t, func() { server.Run() })
 
