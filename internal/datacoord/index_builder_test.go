@@ -27,6 +27,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -666,7 +667,7 @@ func TestIndexBuilder(t *testing.T) {
 	chunkManager := &mocks.ChunkManager{}
 	chunkManager.EXPECT().RootPath().Return("root")
 
-	ib := newIndexBuilder(ctx, mt, nodeManager, chunkManager, newIndexEngineVersionManager())
+	ib := newIndexBuilder(ctx, mt, nodeManager, chunkManager, newIndexEngineVersionManager(), nil)
 
 	assert.Equal(t, 6, len(ib.tasks))
 	assert.Equal(t, indexTaskInit, ib.tasks[buildID])
@@ -1060,4 +1061,138 @@ func TestIndexBuilder_Error(t *testing.T) {
 		assert.True(t, ok)
 		assert.Equal(t, indexTaskRetry, state)
 	})
+}
+
+func TestIndexBuilderV2(t *testing.T) {
+	var (
+		collID  = UniqueID(100)
+		partID  = UniqueID(200)
+		indexID = UniqueID(300)
+		segID   = UniqueID(500)
+		buildID = UniqueID(600)
+		nodeID  = UniqueID(700)
+	)
+
+	paramtable.Init()
+	paramtable.Get().CommonCfg.EnableStorageV2.SwapTempValue("true")
+	defer paramtable.Get().CommonCfg.EnableStorageV2.SwapTempValue("false")
+	ctx := context.Background()
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	catalog.On("CreateSegmentIndex",
+		mock.Anything,
+		mock.Anything,
+	).Return(nil)
+	catalog.On("AlterSegmentIndexes",
+		mock.Anything,
+		mock.Anything,
+	).Return(nil)
+
+	ic := mocks.NewMockIndexNodeClient(t)
+	ic.EXPECT().GetJobStats(mock.Anything, mock.Anything, mock.Anything).
+		Return(&indexpb.GetJobStatsResponse{
+			Status:           merr.Success(),
+			TotalJobNum:      1,
+			EnqueueJobNum:    0,
+			InProgressJobNum: 1,
+			TaskSlots:        1,
+			JobInfos: []*indexpb.JobInfo{
+				{
+					NumRows:   1024,
+					Dim:       128,
+					StartTime: 1,
+					EndTime:   10,
+					PodID:     1,
+				},
+			},
+		}, nil)
+	ic.EXPECT().QueryJobs(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, in *indexpb.QueryJobsRequest, option ...grpc.CallOption) (*indexpb.QueryJobsResponse, error) {
+			indexInfos := make([]*indexpb.IndexTaskInfo, 0)
+			for _, buildID := range in.BuildIDs {
+				indexInfos = append(indexInfos, &indexpb.IndexTaskInfo{
+					BuildID:       buildID,
+					State:         commonpb.IndexState_Finished,
+					IndexFileKeys: []string{"file1", "file2"},
+				})
+			}
+			return &indexpb.QueryJobsResponse{
+				Status:     merr.Success(),
+				ClusterID:  in.ClusterID,
+				IndexInfos: indexInfos,
+			}, nil
+		})
+
+	ic.EXPECT().CreateJob(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Return(merr.Success(), nil)
+
+	ic.EXPECT().DropJobs(mock.Anything, mock.Anything, mock.Anything).
+		Return(merr.Success(), nil)
+	mt := createMetaTable(catalog)
+	nodeManager := &IndexNodeManager{
+		ctx: ctx,
+		nodeClients: map[UniqueID]types.IndexNodeClient{
+			4: ic,
+		},
+	}
+	chunkManager := &mocks.ChunkManager{}
+	chunkManager.EXPECT().RootPath().Return("root")
+
+	handler := NewNMockHandler(t)
+	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{
+		ID: collID,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: fieldID, Name: "vec", TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "10"}}},
+			},
+		},
+	}, nil)
+
+	ib := newIndexBuilder(ctx, mt, nodeManager, chunkManager, newIndexEngineVersionManager(), handler)
+
+	assert.Equal(t, 6, len(ib.tasks))
+	assert.Equal(t, indexTaskInit, ib.tasks[buildID])
+	assert.Equal(t, indexTaskInProgress, ib.tasks[buildID+1])
+	// buildID+2 will be filter by isDeleted
+	assert.Equal(t, indexTaskInit, ib.tasks[buildID+3])
+	assert.Equal(t, indexTaskInProgress, ib.tasks[buildID+8])
+	assert.Equal(t, indexTaskInit, ib.tasks[buildID+9])
+	assert.Equal(t, indexTaskInit, ib.tasks[buildID+10])
+
+	ib.scheduleDuration = time.Millisecond * 500
+	ib.Start()
+
+	t.Run("enqueue", func(t *testing.T) {
+		segIdx := &model.SegmentIndex{
+			SegmentID:     segID + 10,
+			CollectionID:  collID,
+			PartitionID:   partID,
+			NumRows:       1026,
+			IndexID:       indexID,
+			BuildID:       buildID + 10,
+			NodeID:        0,
+			IndexVersion:  0,
+			IndexState:    0,
+			FailReason:    "",
+			IsDeleted:     false,
+			CreateTime:    0,
+			IndexFileKeys: nil,
+			IndexSize:     0,
+		}
+		err := ib.meta.AddSegmentIndex(segIdx)
+		assert.NoError(t, err)
+		ib.enqueue(buildID + 10)
+	})
+
+	t.Run("node down", func(t *testing.T) {
+		ib.nodeDown(nodeID)
+	})
+
+	for {
+		ib.taskMutex.RLock()
+		if len(ib.tasks) == 0 {
+			break
+		}
+		ib.taskMutex.RUnlock()
+	}
+	ib.Stop()
 }
