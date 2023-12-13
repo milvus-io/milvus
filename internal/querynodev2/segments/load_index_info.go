@@ -27,6 +27,9 @@ import "C"
 import (
 	"unsafe"
 
+	"github.com/pingcap/log"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -34,8 +37,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/pingcap/log"
-	"go.uber.org/zap"
 )
 
 // LoadIndexInfo is a wrapper of the underlying C-structure C.CLoadIndexInfo
