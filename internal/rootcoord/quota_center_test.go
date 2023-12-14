@@ -533,9 +533,8 @@ func TestQuotaCenter(t *testing.T) {
 		qc := mocks.NewMockQueryCoordClient(t)
 		p1 := mocks.NewMockProxyClient(t)
 		p1.EXPECT().SetRates(mock.Anything, mock.Anything).Return(nil, nil)
-		pcm := &proxyClientManager{proxyClient: map[int64]types.ProxyClient{
-			TestProxyID: p1,
-		}}
+		pcm := &proxyClientManager{proxyClient: typeutil.NewConcurrentMap[int64, types.ProxyClient]()}
+		pcm.proxyClient.Insert(TestProxyID, p1)
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.EXPECT().GetCollectionByID(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, merr.ErrCollectionNotFound).Maybe()
 		quotaCenter := NewQuotaCenter(pcm, qc, dc, core.tsoAllocator, meta)
