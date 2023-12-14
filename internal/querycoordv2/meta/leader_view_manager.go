@@ -25,13 +25,14 @@ import (
 )
 
 type LeaderView struct {
-	ID              int64
-	CollectionID    int64
-	Channel         string
-	Version         int64
-	Segments        map[int64]*querypb.SegmentDist
-	GrowingSegments map[int64]*Segment
-	TargetVersion   int64
+	ID               int64
+	CollectionID     int64
+	Channel          string
+	Version          int64
+	Segments         map[int64]*querypb.SegmentDist
+	GrowingSegments  map[int64]*Segment
+	TargetVersion    int64
+	NumOfGrowingRows int64
 }
 
 func (view *LeaderView) Clone() *LeaderView {
@@ -46,13 +47,14 @@ func (view *LeaderView) Clone() *LeaderView {
 	}
 
 	return &LeaderView{
-		ID:              view.ID,
-		CollectionID:    view.CollectionID,
-		Channel:         view.Channel,
-		Version:         view.Version,
-		Segments:        segments,
-		GrowingSegments: growings,
-		TargetVersion:   view.TargetVersion,
+		ID:               view.ID,
+		CollectionID:     view.CollectionID,
+		Channel:          view.Channel,
+		Version:          view.Version,
+		Segments:         segments,
+		GrowingSegments:  growings,
+		TargetVersion:    view.TargetVersion,
+		NumOfGrowingRows: view.NumOfGrowingRows,
 	}
 }
 
@@ -168,8 +170,8 @@ func (mgr *LeaderViewManager) GetLeadersByGrowingSegment(segmentID int64) *Leade
 	return nil
 }
 
-// GetGrowingSegmentDistByCollectionAndNode returns all segments of the given collection and node.
-func (mgr *LeaderViewManager) GetGrowingSegmentDistByCollectionAndNode(collectionID, nodeID int64) map[int64]*Segment {
+// GetGrowingSegments returns all segments of the given collection and node.
+func (mgr *LeaderViewManager) GetGrowingSegments(collectionID, nodeID int64) map[int64]*Segment {
 	mgr.rwmutex.RLock()
 	defer mgr.rwmutex.RUnlock()
 
@@ -207,6 +209,19 @@ func (mgr *LeaderViewManager) GetLeaderView(id int64) map[string]*LeaderView {
 	defer mgr.rwmutex.RUnlock()
 
 	return mgr.views[id]
+}
+
+func (mgr *LeaderViewManager) GetByCollectionAndNode(collection, node int64) map[string]*LeaderView {
+	mgr.rwmutex.RLock()
+	defer mgr.rwmutex.RUnlock()
+
+	ret := make(map[string]*LeaderView)
+	for _, view := range mgr.views[node] {
+		if collection == view.CollectionID {
+			ret[view.Channel] = view
+		}
+	}
+	return ret
 }
 
 func (mgr *LeaderViewManager) GetLeaderShardView(id int64, shard string) *LeaderView {

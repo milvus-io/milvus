@@ -501,6 +501,7 @@ message LeaderView {
   repeated int64 growing_segmentIDs = 4;
   map<int64, msg.MsgPosition> growing_segments = 5;
   int64 TargetVersion = 6;
+  int64 num_of_growing_rows = 7;
 }
 
 message SegmentDist {
