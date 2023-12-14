@@ -426,8 +426,14 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		return merr.Status(err), nil
 	}
 
+	var (
+		nodeID      = req.GetBase().GetSourceID()
+		channelName = req.GetChannel()
+	)
+
 	log := log.Ctx(ctx).With(
-		zap.Int64("nodeID", req.GetBase().GetSourceID()),
+		zap.Int64("nodeID", nodeID),
+		zap.String("channel", channelName),
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.Int64("segmentID", req.GetSegmentID()),
 		zap.String("level", req.GetSegLevel().String()),
@@ -436,12 +442,10 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	log.Info("receive SaveBinlogPaths request",
 		zap.Bool("isFlush", req.GetFlushed()),
 		zap.Bool("isDropped", req.GetDropped()),
+		zap.Bool("isImport", req.GetImporting()),
 		zap.Any("startPositions", req.GetStartPositions()),
 		zap.Any("checkpoints", req.GetCheckPoints()))
 
-	nodeID := req.GetBase().GetSourceID()
-	// virtual channel name
-	channelName := req.Channel
 	// for compatibility issue , if len(channelName) not exist, skip the check
 	// No need to check import channel--node matching in data import case.
 	// Also avoid to handle segment not found error if not the owner of shard
@@ -460,80 +464,75 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		return merr.Status(err), nil
 	}
 
-	// validate
-	segmentID := req.GetSegmentID()
-	segment := s.meta.GetSegment(segmentID)
 	operators := []UpdateOperator{}
-	// if L1 segment not exist
-	// return error
-	// but if L0 segment not exist
-	// will create it
-	if segment == nil {
-		if req.SegLevel != datapb.SegmentLevel_L0 {
-			err := merr.WrapErrSegmentNotFound(segmentID)
+
+	if req.GetSegLevel() == datapb.SegmentLevel_L0 {
+		operators = append(operators, CreateL0Operator(req.GetCollectionID(), req.GetPartitionID(), req.GetSegmentID(), req.GetChannel()))
+	} else {
+		segment := s.meta.GetSegment(req.GetSegmentID())
+		// validate level one segment
+		if segment == nil {
+			err := merr.WrapErrSegmentNotFound(req.GetSegmentID())
 			log.Warn("failed to get segment", zap.Error(err))
 			return merr.Status(err), nil
 		}
 
-		operators = append(operators, CreateL0Operator(req.GetCollectionID(), req.GetPartitionID(), req.GetSegmentID(), req.GetChannel()))
-	} else {
 		if segment.State == commonpb.SegmentState_Dropped {
 			log.Info("save to dropped segment, ignore this request")
 			return merr.Success(), nil
 		}
 
 		if !isSegmentHealthy(segment) {
-			err := merr.WrapErrSegmentNotFound(segmentID)
+			err := merr.WrapErrSegmentNotFound(req.GetSegmentID())
 			log.Warn("failed to get segment, the segment not healthy", zap.Error(err))
 			return merr.Status(err), nil
 		}
+
+		// Set segment state
+		if req.GetDropped() {
+			// segmentManager manages growing segments
+			s.segmentManager.DropSegment(ctx, req.GetSegmentID())
+			operators = append(operators, UpdateStatusOperator(req.GetSegmentID(), commonpb.SegmentState_Dropped))
+		} else if req.GetFlushed() {
+			s.segmentManager.DropSegment(ctx, req.GetSegmentID())
+			// set segment to SegmentState_Flushing
+			operators = append(operators, UpdateStatusOperator(req.GetSegmentID(), commonpb.SegmentState_Flushing))
+		}
 	}
 
-	if req.GetDropped() {
-		s.segmentManager.DropSegment(ctx, segmentID)
-		operators = append(operators, UpdateStatusOperator(segmentID, commonpb.SegmentState_Dropped))
-	} else if req.GetFlushed() {
-		// set segment to SegmentState_Flushing
-		operators = append(operators, UpdateStatusOperator(segmentID, commonpb.SegmentState_Flushing))
-	}
-
-	// save binlogs
-	operators = append(operators, UpdateBinlogsOperator(segmentID, req.GetField2BinlogPaths(), req.GetField2StatslogPaths(), req.GetDeltalogs()))
-
-	// save startPositions of some other segments
-	operators = append(operators, UpdateStartPosition(req.GetStartPositions()))
-
-	// save checkpoints.
-	operators = append(operators, UpdateCheckPointOperator(segmentID, req.GetImporting(), req.GetCheckPoints()))
+	// save binlogs, start positions and checkpoints
+	operators = append(operators,
+		UpdateBinlogsOperator(req.GetSegmentID(), req.GetField2BinlogPaths(), req.GetField2StatslogPaths(), req.GetDeltalogs()),
+		UpdateStartPosition(req.GetStartPositions()),
+		UpdateCheckPointOperator(req.GetSegmentID(), req.GetImporting(), req.GetCheckPoints()),
+	)
 
 	if Params.CommonCfg.EnableStorageV2.GetAsBool() {
-		operators = append(operators, UpdateStorageVersionOperator(segmentID, req.GetStorageVersion()))
+		operators = append(operators, UpdateStorageVersionOperator(req.GetSegmentID(), req.GetStorageVersion()))
 	}
-	// run all operator and update new segment info
-	err = s.meta.UpdateSegmentsInfo(operators...)
-	if err != nil {
+
+	// Update segment info in memory and meta.
+	if err := s.meta.UpdateSegmentsInfo(operators...); err != nil {
 		log.Error("save binlog and checkpoints failed", zap.Error(err))
 		return merr.Status(err), nil
 	}
 
-	log.Info("flush segment with meta", zap.Any("meta", req.GetField2BinlogPaths()))
+	if req.GetSegLevel() == datapb.SegmentLevel_L0 {
+		metrics.DataCoordSizeStoredL0Segment.WithLabelValues(fmt.Sprint(req.GetCollectionID())).Observe(calculateL0SegmentSize(req.GetField2StatslogPaths()))
+		metrics.DataCoordRateStoredL0Segment.WithLabelValues().Inc()
 
+		return merr.Success(), nil
+	}
+
+	// notify building index and compaction for "flushing/flushed" level one segment
 	if req.GetFlushed() {
-		if req.GetSegLevel() == datapb.SegmentLevel_L0 {
-			metrics.DataCoordSizeStoredL0Segment.WithLabelValues(fmt.Sprint(req.GetCollectionID())).Observe(calculateL0SegmentSize(req.GetField2StatslogPaths()))
-			metrics.DataCoordRateStoredL0Segment.WithLabelValues().Inc()
-		} else {
-			// because segmentMananger only manage growing segment
-			s.segmentManager.DropSegment(ctx, req.SegmentID)
-		}
-
+		// notify building index
 		s.flushCh <- req.SegmentID
-		if !req.Importing && Params.DataCoordCfg.EnableCompaction.GetAsBool() {
-			if req.GetSegLevel() != datapb.SegmentLevel_L0 {
-				err = s.compactionTrigger.triggerSingleCompaction(segment.GetCollectionID(), segment.GetPartitionID(),
-					segmentID, segment.GetInsertChannel(), false)
-			}
 
+		// notify compaction
+		if !req.Importing && Params.DataCoordCfg.EnableCompaction.GetAsBool() {
+			err := s.compactionTrigger.triggerSingleCompaction(req.GetCollectionID(), req.GetPartitionID(),
+				req.GetSegmentID(), req.GetChannel(), false)
 			if err != nil {
 				log.Warn("failed to trigger single compaction")
 			} else {
@@ -541,6 +540,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 			}
 		}
 	}
+
 	return merr.Success(), nil
 }
 
