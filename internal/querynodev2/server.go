@@ -394,31 +394,32 @@ func (node *QueryNode) Stop() error {
 		if err != nil {
 			log.Warn("session fail to go stopping state", zap.Error(err))
 		} else {
+			metrics.StoppingBalanceNodeNum.WithLabelValues().Set(1)
 			timeoutCh := time.After(paramtable.Get().QueryNodeCfg.GracefulStopTimeout.GetAsDuration(time.Second))
 
 		outer:
 			for (node.manager != nil && !node.manager.Segment.Empty()) ||
 				(node.pipelineManager != nil && node.pipelineManager.Num() != 0) {
+				var (
+					sealedSegments  = []segments.Segment{}
+					growingSegments = []segments.Segment{}
+					channelNum      = 0
+				)
+				if node.manager != nil {
+					sealedSegments = node.manager.Segment.GetBy(segments.WithType(segments.SegmentTypeSealed))
+					growingSegments = node.manager.Segment.GetBy(segments.WithType(segments.SegmentTypeGrowing))
+				}
+				if node.pipelineManager != nil {
+					channelNum = node.pipelineManager.Num()
+				}
+
 				select {
 				case <-timeoutCh:
-					var (
-						sealedSegments  = []segments.Segment{}
-						growingSegments = []segments.Segment{}
-						channelNum      = 0
-					)
-					if node.manager != nil {
-						sealedSegments = node.manager.Segment.GetBy(segments.WithType(segments.SegmentTypeSealed))
-						growingSegments = node.manager.Segment.GetBy(segments.WithType(segments.SegmentTypeGrowing))
-					}
-					if node.pipelineManager != nil {
-						channelNum = node.pipelineManager.Num()
-					}
-
 					log.Warn("migrate data timed out", zap.Int64("ServerID", paramtable.GetNodeID()),
-						zap.Int64s("sealedSegments", lo.Map[segments.Segment, int64](sealedSegments, func(s segments.Segment, i int) int64 {
+						zap.Int64s("sealedSegments", lo.Map(sealedSegments, func(s segments.Segment, i int) int64 {
 							return s.ID()
 						})),
-						zap.Int64s("growingSegments", lo.Map[segments.Segment, int64](growingSegments, func(t segments.Segment, i int) int64 {
+						zap.Int64s("growingSegments", lo.Map(growingSegments, func(t segments.Segment, i int) int64 {
 							return t.ID()
 						})),
 						zap.Int("channelNum", channelNum),
@@ -426,8 +427,14 @@ func (node *QueryNode) Stop() error {
 					break outer
 
 				case <-time.After(time.Second):
+					metrics.StoppingBalanceSegmentNum.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(float64(len(sealedSegments)))
+					metrics.StoppingBalanceChannelNum.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(float64(channelNum))
 				}
 			}
+
+			metrics.StoppingBalanceNodeNum.WithLabelValues().Set(0)
+			metrics.StoppingBalanceSegmentNum.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(0)
+			metrics.StoppingBalanceChannelNum.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(0)
 		}
 
 		node.UpdateStateCode(commonpb.StateCode_Abnormal)
