@@ -654,6 +654,10 @@ func (c *mockPulsarClient) TopicPartitions(topic string) ([]string, error) {
 	return nil, hackPulsarError(pulsar.ConnectError)
 }
 
+func (c *mockPulsarClient) NewTransaction(time.Duration) (pulsar.Transaction, error) {
+	return nil, hackPulsarError(pulsar.ConnectError)
+}
+
 // Close Closes the Client and free associated resources
 func (c *mockPulsarClient) Close() {
 }

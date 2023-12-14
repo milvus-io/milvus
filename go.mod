@@ -9,7 +9,7 @@ require (
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.1.0
 	github.com/aliyun/credentials-go v1.2.7
 	github.com/antlr/antlr4/runtime/Go/antlr v0.0.0-20210826220005-b48c857c3a0e
-	github.com/apache/pulsar-client-go v0.6.1-0.20210728062540-29414db801a7
+	github.com/apache/pulsar-client-go v0.11.1
 	github.com/bits-and-blooms/bloom/v3 v3.0.1
 	github.com/blang/semver/v4 v4.0.0
 	github.com/casbin/casbin/v2 v2.44.2
@@ -239,7 +239,6 @@ require (
 )
 
 replace (
-	github.com/apache/pulsar-client-go => github.com/milvus-io/pulsar-client-go v0.6.10
 	github.com/bketelsen/crypt => github.com/bketelsen/crypt v0.0.4 // Fix security alert for core-os/etcd
 	github.com/go-kit/kit => github.com/go-kit/kit v0.1.0
 	github.com/milvus-io/milvus/pkg => ./pkg
@@ -248,4 +247,4 @@ replace (
 // github.com/milvus-io/milvus-storage/go => ../milvus-storage/go
 )
 
-exclude github.com/apache/pulsar-client-go/oauth2 v0.0.0-20211108044248-fe3b7c4e445b
+// exclude github.com/apache/pulsar-client-go/oauth2 v0.0.0-20211108044248-fe3b7c4e445b

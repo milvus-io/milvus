@@ -152,16 +152,10 @@ func (pc *Consumer) Close() {
 }
 
 func (pc *Consumer) GetLatestMsgID() (mqwrapper.MessageID, error) {
-	msgID, err := pc.c.GetLastMessageID(pc.c.Name(), mqwrapper.DefaultPartitionIdx)
-	return &pulsarID{messageID: msgID}, err
+	return &pulsarID{messageID: pulsar.LatestMessageID()}, nil
 }
 
 func (pc *Consumer) CheckTopicValid(topic string) error {
-	_, err := pc.GetLatestMsgID()
-	// Pulsar creates that topic under the namespace provided in the topic name automatically
-	if err != nil {
-		return err
-	}
 	return nil
 }
 
