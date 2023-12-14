@@ -321,7 +321,7 @@ func Test_BinlogParserParse(t *testing.T) {
 
 	// progress
 	rowCount := 100
-	fieldsData := createFieldsData(sampleSchema(), rowCount)
+	fieldsData := createFieldsData(sampleSchema(), rowCount, baseTimestamp)
 	chunkManager.listResult["deltaPath"] = []string{}
 	chunkManager.listResult["insertPath"] = []string{
 		"123/0/a",

@@ -991,7 +991,7 @@ func Test_ImportWrapperFlushFunc(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	fieldsData := createFieldsData(schema, 5)
+	fieldsData := createFieldsData(schema, 5, baseTimestamp)
 	blockData := createBlockData(schema, fieldsData)
 	t.Run("fieldsData is not empty", func(t *testing.T) {
 		err = wrapper.flushFunc(blockData, shardID, partitionID)
