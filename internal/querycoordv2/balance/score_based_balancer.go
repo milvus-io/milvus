@@ -274,9 +274,7 @@ func (b *ScoreBasedBalancer) getNormalSegmentPlan(replica *meta.Replica, nodesSe
 		// TODO: segment infos inside dist manager may change in the process of making balance plan
 		fromSegments := b.dist.SegmentDistManager.GetByCollectionAndNode(replica.CollectionID, fromNode.nodeID)
 		fromSegments = lo.Filter(fromSegments, func(segment *meta.Segment, _ int) bool {
-			return b.targetMgr.GetSealedSegment(segment.GetCollectionID(), segment.GetID(), meta.CurrentTarget) != nil &&
-				b.targetMgr.GetSealedSegment(segment.GetCollectionID(), segment.GetID(), meta.NextTarget) != nil &&
-				segment.GetLevel() != datapb.SegmentLevel_L0
+			return segment.GetLevel() != datapb.SegmentLevel_L0
 		})
 		sort.Slice(fromSegments, func(i, j int) bool {
 			return fromSegments[i].GetNumOfRows() < fromSegments[j].GetNumOfRows()
