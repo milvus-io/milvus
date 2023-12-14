@@ -22,13 +22,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/samber/lo"
 	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"stathat.com/c/consistent"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -58,20 +57,6 @@ type ChannelManager struct {
 	stateTimer   *channelStateTimer
 
 	lastActiveTimestamp time.Time
-}
-
-type channel struct {
-	Name            string
-	CollectionID    UniqueID
-	StartPositions  []*commonpb.KeyDataPair
-	Schema          *schemapb.CollectionSchema
-	CreateTimestamp uint64
-}
-
-// String implement Stringer.
-func (ch *channel) String() string {
-	// schema maybe too large to print
-	return fmt.Sprintf("Name: %s, CollectionID: %d, StartPositions: %v", ch.Name, ch.CollectionID, ch.StartPositions)
 }
 
 // ChannelManagerOpt is to set optional parameters in channel manager.
@@ -251,17 +236,17 @@ func (c *ChannelManager) unwatchDroppedChannels() {
 	nodeChannels := c.store.GetChannels()
 	for _, nodeChannel := range nodeChannels {
 		for _, ch := range nodeChannel.Channels {
-			if !c.h.CheckShouldDropChannel(ch.Name) {
+			if !c.isMarkedDrop(ch.GetName()) {
 				continue
 			}
 			err := c.remove(nodeChannel.NodeID, ch)
 			if err != nil {
-				log.Warn("unable to remove channel", zap.String("channel", ch.Name), zap.Error(err))
+				log.Warn("unable to remove channel", zap.String("channel", ch.GetName()), zap.Error(err))
 				continue
 			}
-			err = c.h.FinishDropChannel(ch.Name)
+			err = c.h.FinishDropChannel(ch.GetName())
 			if err != nil {
-				log.Warn("FinishDropChannel failed when unwatchDroppedChannels", zap.String("channel", ch.Name), zap.Error(err))
+				log.Warn("FinishDropChannel failed when unwatchDroppedChannels", zap.String("channel", ch.GetName()), zap.Error(err))
 			}
 		}
 	}
@@ -352,27 +337,24 @@ func (c *ChannelManager) AddNode(nodeID int64) error {
 
 	updates := bufferedUpdates
 	// try bufferedUpdates first
-	if len(updates) <= 0 {
+	if updates == nil {
 		if !Params.DataCoordCfg.AutoBalance.GetAsBool() {
 			log.Info("auto balance disabled, skip reassignment for balance", zap.Int64("registered node", nodeID))
 			return nil
 		}
-		// if auto balance enabled, try balanceUpdates
 		updates = balanceUpdates
 	}
 
-	if len(updates) <= 0 {
+	if updates == nil {
 		log.Info("register node with no reassignment", zap.Int64("registered node", nodeID))
 		return nil
 	}
 
-	log.Info("register node",
-		zap.Int64("registered node", nodeID),
-		zap.Array("updates", updates))
+	log.Info("register node", zap.Int64("registered node", nodeID), zap.Array("updates", updates))
 
 	state := datapb.ChannelWatchState_ToRelease
 
-	for _, u := range updates {
+	for _, u := range updates.Collect() {
 		if u.Type == Delete && u.NodeID == bufferID {
 			state = datapb.ChannelWatchState_ToWatch
 			break
@@ -396,15 +378,13 @@ func (c *ChannelManager) DeleteNode(nodeID int64) error {
 	c.unsubAttempt(nodeChannelInfo)
 
 	updates := c.deregisterPolicy(c.store, nodeID)
-	log.Info("deregister node",
-		zap.Int64("nodeID", nodeID),
-		zap.Array("updates", updates))
-	if len(updates) <= 0 {
+	if updates == nil {
 		return nil
 	}
+	log.Info("deregister node", zap.Int64("nodeID", nodeID), zap.Array("updates", updates))
 
-	var channels []*channel
-	for _, op := range updates {
+	var channels []RWChannel
+	for _, op := range updates.Collect() {
 		if op.Type == Delete {
 			channels = op.Channels
 		}
@@ -412,7 +392,7 @@ func (c *ChannelManager) DeleteNode(nodeID int64) error {
 
 	chNames := make([]string, 0, len(channels))
 	for _, ch := range channels {
-		chNames = append(chNames, ch.Name)
+		chNames = append(chNames, ch.GetName())
 	}
 	log.Info("remove timers for channel of the deregistered node",
 		zap.Strings("channels", chNames), zap.Int64("nodeID", nodeID))
@@ -441,20 +421,20 @@ func (c *ChannelManager) unsubAttempt(ncInfo *NodeChannelInfo) {
 	nodeID := ncInfo.NodeID
 	for _, ch := range ncInfo.Channels {
 		// align to datanode subname, using vchannel name
-		subName := fmt.Sprintf("%s-%d-%s", Params.CommonCfg.DataNodeSubName.GetValue(), nodeID, ch.Name)
-		pchannelName := funcutil.ToPhysicalChannel(ch.Name)
+		subName := fmt.Sprintf("%s-%d-%s", Params.CommonCfg.DataNodeSubName.GetValue(), nodeID, ch.GetName())
+		pchannelName := funcutil.ToPhysicalChannel(ch.GetName())
 		msgstream.UnsubscribeChannels(c.ctx, c.msgstreamFactory, subName, []string{pchannelName})
 	}
 }
 
 // Watch tries to add the channel to cluster. Watch is a no op if the channel already exists.
-func (c *ChannelManager) Watch(ctx context.Context, ch *channel) error {
+func (c *ChannelManager) Watch(ctx context.Context, ch RWChannel) error {
 	log := log.Ctx(ctx)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	updates := c.assignPolicy(c.store, []*channel{ch})
-	if len(updates) == 0 {
+	updates := c.assignPolicy(c.store, []RWChannel{ch})
+	if updates == nil {
 		return nil
 	}
 	log.Info("try to update channel watch info with ToWatch state",
@@ -469,20 +449,6 @@ func (c *ChannelManager) Watch(ctx context.Context, ch *channel) error {
 	return err
 }
 
-// fillChannelWatchInfo updates the channel op by filling in channel watch info.
-func (c *ChannelManager) fillChannelWatchInfo(op *ChannelOp) {
-	for _, ch := range op.Channels {
-		vcInfo := c.h.GetDataVChanPositions(ch, allPartitionID)
-		info := &datapb.ChannelWatchInfo{
-			Vchan:   vcInfo,
-			StartTs: time.Now().Unix(),
-			State:   datapb.ChannelWatchState_Uncomplete,
-			Schema:  ch.Schema,
-		}
-		op.ChannelWatchInfos = append(op.ChannelWatchInfos, info)
-	}
-}
-
 // fillChannelWatchInfoWithState updates the channel op by filling in channel watch info.
 func (c *ChannelManager) fillChannelWatchInfoWithState(op *ChannelOp, state datapb.ChannelWatchState) []string {
 	channelsWithTimer := []string{}
@@ -494,16 +460,16 @@ func (c *ChannelManager) fillChannelWatchInfoWithState(op *ChannelOp, state data
 			Vchan:   vcInfo,
 			StartTs: startTs,
 			State:   state,
-			Schema:  ch.Schema,
+			Schema:  ch.GetSchema(),
 		}
 
 		// Only set timer for watchInfo not from bufferID
 		if op.NodeID != bufferID {
-			c.stateTimer.startOne(state, ch.Name, op.NodeID, checkInterval)
-			channelsWithTimer = append(channelsWithTimer, ch.Name)
+			c.stateTimer.startOne(state, ch.GetName(), op.NodeID, checkInterval)
+			channelsWithTimer = append(channelsWithTimer, ch.GetName())
 		}
 
-		op.ChannelWatchInfos = append(op.ChannelWatchInfos, info)
+		ch.UpdateWatchInfo(info)
 	}
 	return channelsWithTimer
 }
@@ -516,25 +482,49 @@ func (c *ChannelManager) GetAssignedChannels() []*NodeChannelInfo {
 	return c.store.GetNodesChannels()
 }
 
-func (c *ChannelManager) GetChannelsByCollectionID(collectionID UniqueID) []*channel {
-	channels := make([]*channel, 0)
-	for _, nodeChannels := range c.store.GetChannels() {
-		for _, channelInfo := range nodeChannels.Channels {
-			if collectionID == channelInfo.CollectionID {
-				channels = append(channels, channelInfo)
-			}
-		}
-	}
-	log.Info("get channel", zap.Any("collection", collectionID), zap.Any("channel", channels))
-	return channels
-}
-
 // GetBufferChannels gets buffer channels.
 func (c *ChannelManager) GetBufferChannels() *NodeChannelInfo {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
 	return c.store.GetBufferChannelInfo()
+}
+
+// GetNodeChannelsByCollectionID gets all node channels map of the collection
+func (c *ChannelManager) GetNodeChannelsByCollectionID(collectionID UniqueID) map[UniqueID][]string {
+	nodeChs := make(map[UniqueID][]string)
+	for _, nodeChannels := range c.GetAssignedChannels() {
+		filtered := lo.Filter(nodeChannels.Channels, func(channel RWChannel, _ int) bool {
+			return channel.GetCollectionID() == collectionID
+		})
+		channelNames := lo.Map(filtered, func(channel RWChannel, _ int) string {
+			return channel.GetName()
+		})
+
+		nodeChs[nodeChannels.NodeID] = channelNames
+	}
+	return nodeChs
+}
+
+// Get all channels belong to the collection
+func (c *ChannelManager) GetChannelsByCollectionID(collectionID UniqueID) []RWChannel {
+	channels := make([]RWChannel, 0)
+	for _, nodeChannels := range c.GetAssignedChannels() {
+		filtered := lo.Filter(nodeChannels.Channels, func(channel RWChannel, _ int) bool {
+			return channel.GetCollectionID() == collectionID
+		})
+
+		channels = append(channels, filtered...)
+	}
+	return channels
+}
+
+// Get all channel names belong to the collection
+func (c *ChannelManager) GetChannelNamesByCollectionID(collectionID UniqueID) []string {
+	channels := c.GetChannelsByCollectionID(collectionID)
+	return lo.Map(channels, func(channel RWChannel, _ int) string {
+		return channel.GetName()
+	})
 }
 
 // Match checks and returns whether the node ID and channel match.
@@ -549,7 +539,7 @@ func (c *ChannelManager) Match(nodeID int64, channel string) bool {
 	}
 
 	for _, ch := range info.Channels {
-		if ch.Name == channel {
+		if ch.GetName() == channel {
 			return true
 		}
 	}
@@ -564,7 +554,7 @@ func (c *ChannelManager) FindWatcher(channel string) (int64, error) {
 	infos := c.store.GetNodesChannels()
 	for _, info := range infos {
 		for _, channelInfo := range info.Channels {
-			if channelInfo.Name == channel {
+			if channelInfo.GetName() == channel {
 				return info.NodeID, nil
 			}
 		}
@@ -573,7 +563,7 @@ func (c *ChannelManager) FindWatcher(channel string) (int64, error) {
 	// channel in buffer
 	bufferInfo := c.store.GetBufferChannelInfo()
 	for _, channelInfo := range bufferInfo.Channels {
-		if channelInfo.Name == channel {
+		if channelInfo.GetName() == channel {
 			return bufferID, errChannelInBuffer
 		}
 	}
@@ -594,24 +584,23 @@ func (c *ChannelManager) RemoveChannel(channelName string) error {
 }
 
 // remove deletes the nodeID-channel pair from data store.
-func (c *ChannelManager) remove(nodeID int64, ch *channel) error {
-	var op ChannelOpSet
-	op.Delete(nodeID, []*channel{ch})
+func (c *ChannelManager) remove(nodeID int64, ch RWChannel) error {
+	op := NewChannelOpSet(NewDeleteOp(nodeID, ch))
 	log.Info("remove channel assignment",
 		zap.Int64("nodeID to be removed", nodeID),
-		zap.String("channelID", ch.Name),
-		zap.Int64("collectionID", ch.CollectionID))
+		zap.String("channel", ch.GetName()),
+		zap.Int64("collectionID", ch.GetCollectionID()))
 	if err := c.store.Update(op); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (c *ChannelManager) findChannel(channelName string) (int64, *channel) {
+func (c *ChannelManager) findChannel(channelName string) (int64, RWChannel) {
 	infos := c.store.GetNodesChannels()
 	for _, info := range infos {
 		for _, channelInfo := range info.Channels {
-			if channelInfo.Name == channelName {
+			if channelInfo.GetName() == channelName {
 				return info.NodeID, channelInfo
 			}
 		}
@@ -637,9 +626,9 @@ type ackEvent struct {
 	nodeID      UniqueID
 }
 
-func (c *ChannelManager) updateWithTimer(updates ChannelOpSet, state datapb.ChannelWatchState) error {
+func (c *ChannelManager) updateWithTimer(updates *ChannelOpSet, state datapb.ChannelWatchState) error {
 	channelsWithTimer := []string{}
-	for _, op := range updates {
+	for _, op := range updates.Collect() {
 		if op.Type == Add {
 			channelsWithTimer = append(channelsWithTimer, c.fillChannelWatchInfoWithState(op, state)...)
 		}
@@ -785,7 +774,7 @@ func (c *ChannelManager) Release(nodeID UniqueID, channelName string) error {
 		return fmt.Errorf("fail to find matching nodeID: %d with channelName: %s", nodeID, channelName)
 	}
 
-	toReleaseUpdates := getReleaseOp(nodeID, toReleaseChannel)
+	toReleaseUpdates := NewChannelOpSet(NewAddOp(nodeID, toReleaseChannel))
 	err := c.updateWithTimer(toReleaseUpdates, datapb.ChannelWatchState_ToRelease)
 	if err != nil {
 		log.Warn("fail to update to release with timer", zap.Array("to release updates", toReleaseUpdates))
@@ -804,7 +793,7 @@ func (c *ChannelManager) Reassign(originNodeID UniqueID, channelName string) err
 	}
 	c.mu.RUnlock()
 
-	reallocates := &NodeChannelInfo{originNodeID, []*channel{ch}}
+	reallocates := &NodeChannelInfo{originNodeID, []RWChannel{ch}}
 	isDropped := c.isMarkedDrop(channelName)
 
 	c.mu.Lock()
@@ -827,12 +816,12 @@ func (c *ChannelManager) Reassign(originNodeID UniqueID, channelName string) err
 
 	// Reassign policy won't choose the original node when a reassigning a channel.
 	updates := c.reassignPolicy(c.store, []*NodeChannelInfo{reallocates})
-	if len(updates) <= 0 {
+	if updates == nil {
 		// Skip the remove if reassign to the original node.
 		log.Warn("failed to reassign channel to other nodes, assigning to the original DataNode",
 			zap.Int64("nodeID", originNodeID),
 			zap.String("channelName", channelName))
-		updates.Add(originNodeID, []*channel{ch})
+		updates = NewChannelOpSet(NewAddOp(originNodeID, ch))
 	}
 
 	log.Info("channel manager reassigning channels",
@@ -854,12 +843,12 @@ func (c *ChannelManager) CleanupAndReassign(nodeID UniqueID, channelName string)
 	if c.msgstreamFactory == nil {
 		log.Warn("msgstream factory is not set, unable to clean up topics")
 	} else {
-		subName := fmt.Sprintf("%s-%d-%d", Params.CommonCfg.DataNodeSubName.GetValue(), nodeID, chToCleanUp.CollectionID)
+		subName := fmt.Sprintf("%s-%d-%d", Params.CommonCfg.DataNodeSubName.GetValue(), nodeID, chToCleanUp.GetCollectionID())
 		pchannelName := funcutil.ToPhysicalChannel(channelName)
 		msgstream.UnsubscribeChannels(c.ctx, c.msgstreamFactory, subName, []string{pchannelName})
 	}
 
-	reallocates := &NodeChannelInfo{nodeID, []*channel{chToCleanUp}}
+	reallocates := &NodeChannelInfo{nodeID, []RWChannel{chToCleanUp}}
 	isDropped := c.isMarkedDrop(channelName)
 
 	c.mu.Lock()
@@ -885,12 +874,12 @@ func (c *ChannelManager) CleanupAndReassign(nodeID UniqueID, channelName string)
 
 	// Reassign policy won't choose the original node when a reassigning a channel.
 	updates := c.reassignPolicy(c.store, []*NodeChannelInfo{reallocates})
-	if len(updates) <= 0 {
+	if updates == nil {
 		// Skip the remove if reassign to the original node.
 		log.Warn("failed to reassign channel to other nodes, add channel to the original node",
 			zap.Int64("node ID", nodeID),
 			zap.String("channelName", channelName))
-		updates.Add(nodeID, []*channel{chToCleanUp})
+		updates = NewChannelOpSet(NewAddOp(nodeID, chToCleanUp))
 	}
 
 	log.Info("channel manager reassigning channels",
@@ -899,8 +888,8 @@ func (c *ChannelManager) CleanupAndReassign(nodeID UniqueID, channelName string)
 	return c.updateWithTimer(updates, datapb.ChannelWatchState_ToWatch)
 }
 
-func (c *ChannelManager) getChannelByNodeAndName(nodeID UniqueID, channelName string) *channel {
-	var ret *channel
+func (c *ChannelManager) getChannelByNodeAndName(nodeID UniqueID, channelName string) RWChannel {
+	var ret RWChannel
 
 	nodeChannelInfo := c.store.GetNode(nodeID)
 	if nodeChannelInfo == nil {
@@ -908,7 +897,7 @@ func (c *ChannelManager) getChannelByNodeAndName(nodeID UniqueID, channelName st
 	}
 
 	for _, channel := range nodeChannelInfo.Channels {
-		if channel.Name == channelName {
+		if channel.GetName() == channelName {
 			ret = channel
 			break
 		}
@@ -916,10 +905,21 @@ func (c *ChannelManager) getChannelByNodeAndName(nodeID UniqueID, channelName st
 	return ret
 }
 
+func (c *ChannelManager) getCollectionIDByChannel(channel string) (bool, UniqueID) {
+	for _, nodeChannel := range c.GetAssignedChannels() {
+		for _, ch := range nodeChannel.Channels {
+			if ch.GetName() == channel {
+				return true, ch.GetCollectionID()
+			}
+		}
+	}
+	return false, 0
+}
+
 func (c *ChannelManager) getNodeIDByChannelName(chName string) (bool, UniqueID) {
 	for _, nodeChannel := range c.GetAssignedChannels() {
 		for _, ch := range nodeChannel.Channels {
-			if ch.Name == chName {
+			if ch.GetName() == chName {
 				return true, nodeChannel.NodeID
 			}
 		}
@@ -929,12 +929,6 @@ func (c *ChannelManager) getNodeIDByChannelName(chName string) (bool, UniqueID) 
 
 func (c *ChannelManager) isMarkedDrop(channelName string) bool {
 	return c.h.CheckShouldDropChannel(channelName)
-}
-
-func getReleaseOp(nodeID UniqueID, ch *channel) ChannelOpSet {
-	var op ChannelOpSet
-	op.Add(nodeID, []*channel{ch})
-	return op
 }
 
 func (c *ChannelManager) isSilent() bool {

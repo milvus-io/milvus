@@ -115,14 +115,9 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 
 	var isUnimplemented bool
 	err = retry.Do(ctx, func() error {
-		for _, channelInfo := range s.channelManager.GetAssignedChannels() {
-			nodeID := channelInfo.NodeID
-			channels := lo.Filter(channelInfo.Channels, func(channel *channel, _ int) bool {
-				return channel.CollectionID == req.GetCollectionID()
-			})
-			channelNames := lo.Map(channels, func(channel *channel, _ int) string {
-				return channel.Name
-			})
+		nodeChannels := s.channelManager.GetNodeChannelsByCollectionID(req.GetCollectionID())
+
+		for nodeID, channelNames := range nodeChannels {
 			err = s.cluster.FlushChannels(ctx, nodeID, ts, channelNames)
 			if err != nil && errors.Is(err, merr.ErrServiceUnimplemented) {
 				isUnimplemented = true
@@ -649,7 +644,7 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 	channelInfos := make([]*datapb.VchannelInfo, 0, len(channels))
 	flushedIDs := make(typeutil.UniqueSet)
 	for _, c := range channels {
-		channelInfo := s.handler.GetQueryVChanPositions(&channel{Name: c, CollectionID: collectionID}, partitionID)
+		channelInfo := s.handler.GetQueryVChanPositions(&channelMeta{Name: c, CollectionID: collectionID}, partitionID)
 		channelInfos = append(channelInfos, channelInfo)
 		log.Info("datacoord append channelInfo in GetRecoveryInfo",
 			zap.String("channel", channelInfo.GetChannelName()),
@@ -1165,7 +1160,7 @@ func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 		}, nil
 	}
 	for _, channelName := range req.GetChannelNames() {
-		ch := &channel{
+		ch := &channelMeta{
 			Name:            channelName,
 			CollectionID:    req.GetCollectionID(),
 			StartPositions:  req.GetStartPositions(),
@@ -1219,17 +1214,7 @@ func (s *Server) GetFlushState(ctx context.Context, req *datapb.GetFlushStateReq
 		}
 	}
 
-	channels := make([]string, 0)
-	for _, channelInfo := range s.channelManager.GetAssignedChannels() {
-		filtered := lo.Filter(channelInfo.Channels, func(channel *channel, _ int) bool {
-			return channel.CollectionID == req.GetCollectionID()
-		})
-		channelNames := lo.Map(filtered, func(channel *channel, _ int) string {
-			return channel.Name
-		})
-		channels = append(channels, channelNames...)
-	}
-
+	channels := s.channelManager.GetChannelNamesByCollectionID(req.GetCollectionID())
 	if len(channels) == 0 { // For compatibility with old client
 		resp.Flushed = true
 

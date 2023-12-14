@@ -770,17 +770,17 @@ func newMockHandler() *mockHandler {
 	return &mockHandler{}
 }
 
-func (h *mockHandler) GetQueryVChanPositions(channel *channel, partitionID ...UniqueID) *datapb.VchannelInfo {
+func (h *mockHandler) GetQueryVChanPositions(channel RWChannel, partitionID ...UniqueID) *datapb.VchannelInfo {
 	return &datapb.VchannelInfo{
-		CollectionID: channel.CollectionID,
-		ChannelName:  channel.Name,
+		CollectionID: channel.GetCollectionID(),
+		ChannelName:  channel.GetName(),
 	}
 }
 
-func (h *mockHandler) GetDataVChanPositions(channel *channel, partitionID UniqueID) *datapb.VchannelInfo {
+func (h *mockHandler) GetDataVChanPositions(channel RWChannel, partitionID UniqueID) *datapb.VchannelInfo {
 	return &datapb.VchannelInfo{
-		CollectionID: channel.CollectionID,
-		ChannelName:  channel.Name,
+		CollectionID: channel.GetCollectionID(),
+		ChannelName:  channel.GetName(),
 	}
 }
 

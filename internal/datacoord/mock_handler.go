@@ -162,11 +162,11 @@ func (_c *NMockHandler_GetCollection_Call) RunAndReturn(run func(context.Context
 }
 
 // GetDataVChanPositions provides a mock function with given fields: ch, partitionID
-func (_m *NMockHandler) GetDataVChanPositions(ch *channel, partitionID int64) *datapb.VchannelInfo {
+func (_m *NMockHandler) GetDataVChanPositions(ch RWChannel, partitionID int64) *datapb.VchannelInfo {
 	ret := _m.Called(ch, partitionID)
 
 	var r0 *datapb.VchannelInfo
-	if rf, ok := ret.Get(0).(func(*channel, int64) *datapb.VchannelInfo); ok {
+	if rf, ok := ret.Get(0).(func(RWChannel, int64) *datapb.VchannelInfo); ok {
 		r0 = rf(ch, partitionID)
 	} else {
 		if ret.Get(0) != nil {
@@ -183,15 +183,15 @@ type NMockHandler_GetDataVChanPositions_Call struct {
 }
 
 // GetDataVChanPositions is a helper method to define mock.On call
-//   - ch *channel
+//   - ch RWChannel
 //   - partitionID int64
 func (_e *NMockHandler_Expecter) GetDataVChanPositions(ch interface{}, partitionID interface{}) *NMockHandler_GetDataVChanPositions_Call {
 	return &NMockHandler_GetDataVChanPositions_Call{Call: _e.mock.On("GetDataVChanPositions", ch, partitionID)}
 }
 
-func (_c *NMockHandler_GetDataVChanPositions_Call) Run(run func(ch *channel, partitionID int64)) *NMockHandler_GetDataVChanPositions_Call {
+func (_c *NMockHandler_GetDataVChanPositions_Call) Run(run func(ch RWChannel, partitionID int64)) *NMockHandler_GetDataVChanPositions_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(*channel), args[1].(int64))
+		run(args[0].(RWChannel), args[1].(int64))
 	})
 	return _c
 }
@@ -201,13 +201,13 @@ func (_c *NMockHandler_GetDataVChanPositions_Call) Return(_a0 *datapb.VchannelIn
 	return _c
 }
 
-func (_c *NMockHandler_GetDataVChanPositions_Call) RunAndReturn(run func(*channel, int64) *datapb.VchannelInfo) *NMockHandler_GetDataVChanPositions_Call {
+func (_c *NMockHandler_GetDataVChanPositions_Call) RunAndReturn(run func(RWChannel, int64) *datapb.VchannelInfo) *NMockHandler_GetDataVChanPositions_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // GetQueryVChanPositions provides a mock function with given fields: ch, partitionIDs
-func (_m *NMockHandler) GetQueryVChanPositions(ch *channel, partitionIDs ...int64) *datapb.VchannelInfo {
+func (_m *NMockHandler) GetQueryVChanPositions(ch RWChannel, partitionIDs ...int64) *datapb.VchannelInfo {
 	_va := make([]interface{}, len(partitionIDs))
 	for _i := range partitionIDs {
 		_va[_i] = partitionIDs[_i]
@@ -218,7 +218,7 @@ func (_m *NMockHandler) GetQueryVChanPositions(ch *channel, partitionIDs ...int6
 	ret := _m.Called(_ca...)
 
 	var r0 *datapb.VchannelInfo
-	if rf, ok := ret.Get(0).(func(*channel, ...int64) *datapb.VchannelInfo); ok {
+	if rf, ok := ret.Get(0).(func(RWChannel, ...int64) *datapb.VchannelInfo); ok {
 		r0 = rf(ch, partitionIDs...)
 	} else {
 		if ret.Get(0) != nil {
@@ -235,14 +235,14 @@ type NMockHandler_GetQueryVChanPositions_Call struct {
 }
 
 // GetQueryVChanPositions is a helper method to define mock.On call
-//   - ch *channel
+//   - ch RWChannel
 //   - partitionIDs ...int64
 func (_e *NMockHandler_Expecter) GetQueryVChanPositions(ch interface{}, partitionIDs ...interface{}) *NMockHandler_GetQueryVChanPositions_Call {
 	return &NMockHandler_GetQueryVChanPositions_Call{Call: _e.mock.On("GetQueryVChanPositions",
 		append([]interface{}{ch}, partitionIDs...)...)}
 }
 
-func (_c *NMockHandler_GetQueryVChanPositions_Call) Run(run func(ch *channel, partitionIDs ...int64)) *NMockHandler_GetQueryVChanPositions_Call {
+func (_c *NMockHandler_GetQueryVChanPositions_Call) Run(run func(ch RWChannel, partitionIDs ...int64)) *NMockHandler_GetQueryVChanPositions_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		variadicArgs := make([]int64, len(args)-1)
 		for i, a := range args[1:] {
@@ -250,7 +250,7 @@ func (_c *NMockHandler_GetQueryVChanPositions_Call) Run(run func(ch *channel, pa
 				variadicArgs[i] = a.(int64)
 			}
 		}
-		run(args[0].(*channel), variadicArgs...)
+		run(args[0].(RWChannel), variadicArgs...)
 	})
 	return _c
 }
@@ -260,7 +260,7 @@ func (_c *NMockHandler_GetQueryVChanPositions_Call) Return(_a0 *datapb.VchannelI
 	return _c
 }
 
-func (_c *NMockHandler_GetQueryVChanPositions_Call) RunAndReturn(run func(*channel, ...int64) *datapb.VchannelInfo) *NMockHandler_GetQueryVChanPositions_Call {
+func (_c *NMockHandler_GetQueryVChanPositions_Call) RunAndReturn(run func(RWChannel, ...int64) *datapb.VchannelInfo) *NMockHandler_GetQueryVChanPositions_Call {
 	_c.Call.Return(run)
 	return _c
 }
