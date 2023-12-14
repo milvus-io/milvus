@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -2143,4 +2144,84 @@ func TestSearchTask_Requery(t *testing.T) {
 		t.Logf("err = %s", err)
 		assert.Error(t, err)
 	})
+}
+
+type GetPartitionIDsSuite struct {
+	suite.Suite
+
+	mockMetaCache *MockCache
+}
+
+func (s *GetPartitionIDsSuite) SetupTest() {
+	s.mockMetaCache = NewMockCache(s.T())
+	globalMetaCache = s.mockMetaCache
+}
+
+func (s *GetPartitionIDsSuite) TearDownTest() {
+	globalMetaCache = nil
+	Params.Reset(Params.ProxyCfg.PartitionNameRegexp.Key)
+}
+
+func (s *GetPartitionIDsSuite) TestPlainPartitionNames() {
+	Params.Save(Params.ProxyCfg.PartitionNameRegexp.Key, "false")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).
+		Return(map[string]int64{"partition_1": 100, "partition_2": 200}, nil).Once()
+
+	result, err := getPartitionIDs(ctx, "default_db", "test_collection", []string{"partition_1", "partition_2"})
+
+	s.NoError(err)
+	s.ElementsMatch([]int64{100, 200}, result)
+
+	s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).
+		Return(map[string]int64{"partition_1": 100}, nil).Once()
+
+	_, err = getPartitionIDs(ctx, "default_db", "test_collection", []string{"partition_1", "partition_2"})
+	s.Error(err)
+
+	s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).
+		Return(nil, errors.New("mocked")).Once()
+	_, err = getPartitionIDs(ctx, "default_db", "test_collection", []string{"partition_1", "partition_2"})
+	s.Error(err)
+}
+
+func (s *GetPartitionIDsSuite) TestRegexpPartitionNames() {
+	Params.Save(Params.ProxyCfg.PartitionNameRegexp.Key, "true")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).
+		Return(map[string]int64{"partition_1": 100, "partition_2": 200}, nil).Once()
+
+	result, err := getPartitionIDs(ctx, "default_db", "test_collection", []string{"partition_1", "partition_2"})
+
+	s.NoError(err)
+	s.ElementsMatch([]int64{100, 200}, result)
+
+	s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).
+		Return(map[string]int64{"partition_1": 100, "partition_2": 200}, nil).Once()
+
+	result, err = getPartitionIDs(ctx, "default_db", "test_collection", []string{"partition_.*"})
+
+	s.NoError(err)
+	s.ElementsMatch([]int64{100, 200}, result)
+
+	s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).
+		Return(map[string]int64{"partition_1": 100}, nil).Once()
+
+	_, err = getPartitionIDs(ctx, "default_db", "test_collection", []string{"partition_1", "partition_2"})
+	s.Error(err)
+
+	s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).
+		Return(nil, errors.New("mocked")).Once()
+	_, err = getPartitionIDs(ctx, "default_db", "test_collection", []string{"partition_1", "partition_2"})
+	s.Error(err)
+}
+
+func TestGetPartitionIDs(t *testing.T) {
+	suite.Run(t, new(GetPartitionIDsSuite))
 }
