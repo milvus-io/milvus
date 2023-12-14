@@ -3,10 +3,11 @@ from time import sleep
 from collections import defaultdict
 from pymilvus import connections
 from chaos.checker import (InsertChecker,
-                           FlushChecker, 
+                           UpsertChecker,
+                           FlushChecker,
                            SearchChecker,
                            QueryChecker,
-                           IndexChecker,
+                           IndexCreateChecker,
                            DeleteChecker,
                            Op)
 from utils.util_log import test_log as log
@@ -67,14 +68,15 @@ class TestOperations(TestBase):
         self.host = host
         self.port = port
         self.user = user
-        self.password = password        
+        self.password = password
 
     def init_health_checkers(self, collection_name=None):
         c_name = collection_name
         checkers = {
             Op.insert: InsertChecker(collection_name=c_name),
+            Op.upsert: UpsertChecker(collection_name=c_name),
             Op.flush: FlushChecker(collection_name=c_name),
-            Op.index: IndexChecker(collection_name=c_name),
+            Op.index: IndexCreateChecker(collection_name=c_name),
             Op.search: SearchChecker(collection_name=c_name),
             Op.query: QueryChecker(collection_name=c_name),
             Op.delete: DeleteChecker(collection_name=c_name),
