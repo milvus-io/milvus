@@ -71,7 +71,8 @@ func NewResourceGroup(capacity int) *ResourceGroup {
 // assign node to resource group
 func (rg *ResourceGroup) assignNode(id int64, deltaCapacity int) error {
 	if rg.containsNode(id) {
-		return ErrNodeAlreadyAssign
+		// add node to same rg more than once should be tolerable
+		return nil
 	}
 
 	rg.nodes.Insert(id)
@@ -213,8 +214,12 @@ func (rm *ResourceManager) assignNode(rgName string, node int64) error {
 	}
 
 	rm.checkRGNodeStatus(rgName)
-	if rm.checkNodeAssigned(node) {
-		return ErrNodeAlreadyAssign
+
+	for name, group := range rm.groups {
+		// check whether node has been assign to other rg
+		if name != rgName && group.containsNode(node) {
+			return ErrNodeAlreadyAssign
+		}
 	}
 
 	newNodes := rm.groups[rgName].GetNodes()
@@ -238,10 +243,7 @@ func (rm *ResourceManager) assignNode(rgName string, node int64) error {
 		return err
 	}
 
-	err = rm.groups[rgName].assignNode(node, deltaCapacity)
-	if err != nil {
-		return err
-	}
+	rm.groups[rgName].assignNode(node, deltaCapacity)
 
 	log.Info("add node to resource group",
 		zap.String("rgName", rgName),
@@ -249,16 +251,6 @@ func (rm *ResourceManager) assignNode(rgName string, node int64) error {
 	)
 
 	return nil
-}
-
-func (rm *ResourceManager) checkNodeAssigned(node int64) bool {
-	for _, group := range rm.groups {
-		if group.containsNode(node) {
-			return true
-		}
-	}
-
-	return false
 }
 
 func (rm *ResourceManager) UnassignNode(rgName string, node int64) error {
@@ -542,17 +534,8 @@ func (rm *ResourceManager) TransferNode(from string, to string, numNode int) ([]
 	}
 
 	for _, node := range movedNodes {
-		err := rm.groups[from].unassignNode(node, deltaFromCapacity)
-		if err != nil {
-			// interrupt transfer, unreachable logic path
-			return nil, err
-		}
-
-		err = rm.groups[to].assignNode(node, deltaToCapacity)
-		if err != nil {
-			// interrupt transfer, unreachable logic path
-			return nil, err
-		}
+		rm.groups[from].unassignNode(node, deltaFromCapacity)
+		rm.groups[to].assignNode(node, deltaToCapacity)
 
 		log.Info("transfer node",
 			zap.String("sourceRG", from),

@@ -191,13 +191,18 @@ func (b *ScoreBasedBalancer) BalanceReplica(replica *meta.Replica) ([]SegmentAss
 			zap.Any("available nodes", maps.Keys(nodesSegments)),
 		)
 		// handle stopped nodes here, have to assign segments on stopping nodes to nodes with the smallest score
-		segmentPlans = append(segmentPlans, b.getStoppedSegmentPlan(replica, nodesSegments, stoppingNodesSegments)...)
 		channelPlans = append(channelPlans, b.genStoppingChannelPlan(replica, lo.Keys(nodesSegments), lo.Keys(stoppingNodesSegments))...)
+		if len(channelPlans) == 0 {
+			segmentPlans = append(segmentPlans, b.getStoppedSegmentPlan(replica, nodesSegments, stoppingNodesSegments)...)
+		}
 	} else {
 		// normal balance, find segments from largest score nodes and transfer to smallest score nodes.
-		segmentPlans = append(segmentPlans, b.getNormalSegmentPlan(replica, nodesSegments)...)
 		channelPlans = append(channelPlans, b.genChannelPlan(replica, lo.Keys(nodesSegments))...)
+		if len(channelPlans) == 0 {
+			segmentPlans = append(segmentPlans, b.getNormalSegmentPlan(replica, nodesSegments)...)
+		}
 	}
+
 	if len(segmentPlans) != 0 || len(channelPlans) != 0 {
 		PrintCurrentReplicaDist(replica, stoppingNodesSegments, nodesSegments, b.dist.ChannelDistManager, b.dist.SegmentDistManager)
 	}
