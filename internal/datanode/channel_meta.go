@@ -18,6 +18,7 @@ package datanode
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"path"
 	"sync"
@@ -815,7 +816,9 @@ func (c *ChannelMeta) listNotFlushedSegmentIDs() []UniqueID {
 }
 
 func (c *ChannelMeta) getChannelCheckpoint(ttPos *msgpb.MsgPosition) *msgpb.MsgPosition {
-	log := log.With().WithRateGroup("ChannelMeta", 1, 60)
+	log := log.Ctx(context.Background()).
+		With(zap.String("channel", c.channelName)).
+		WithRateGroup(fmt.Sprintf("channelMetaCheckpoint-%s", c.channelName), 1, 60)
 	c.segMu.RLock()
 	defer c.segMu.RUnlock()
 	channelCP := &msgpb.MsgPosition{Timestamp: math.MaxUint64}
@@ -837,7 +840,7 @@ func (c *ChannelMeta) getChannelCheckpoint(ttPos *msgpb.MsgPosition) *msgpb.MsgP
 				channelCP = db.startPos
 			}
 		}
-		log.RatedDebug(10, "getChannelCheckpoint for segment", zap.Int64("segmentID", seg.segmentID),
+		log.RatedDebug(20, "getChannelCheckpoint for segment", zap.Int64("segmentID", seg.segmentID),
 			zap.Bool("isCurIBEmpty", seg.curInsertBuf == nil),
 			zap.Bool("isCurDBEmpty", seg.curDeleteBuf == nil),
 			zap.Int("len(hisIB)", len(seg.historyInsertBuf)),
@@ -846,6 +849,7 @@ func (c *ChannelMeta) getChannelCheckpoint(ttPos *msgpb.MsgPosition) *msgpb.MsgP
 	}
 	// 2. if no data in buffer, use the current tt as channelCP
 	if channelCP.MsgID == nil {
+		log.RatedDebug(60, "getChannelCheckpoint with latest position")
 		channelCP = ttPos
 	}
 	return channelCP
