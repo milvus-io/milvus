@@ -17,6 +17,7 @@
 package binlog
 
 import (
+	rand2 "crypto/rand"
 	"fmt"
 	"math"
 	"math/rand"
@@ -41,16 +42,30 @@ import (
 type ReaderSuite struct {
 	suite.Suite
 
-	schema    *schemapb.CollectionSchema
-	numRows   int
-	deletePKs []int64
+	schema  *schemapb.CollectionSchema
+	numRows int
+
+	pkDataType  schemapb.DataType
+	vecDataType schemapb.DataType
+
+	deletePKs []storage.PrimaryKey
 	deleteTss []int64
-	tsStart   uint64
-	tsEnd     uint64
+
+	tsStart uint64
+	tsEnd   uint64
 }
 
 func (suite *ReaderSuite) SetupSuite() {
 	paramtable.Get().Init(paramtable.NewBaseTable())
+}
+
+func (suite *ReaderSuite) SetupTest() {
+	// default suite params
+	suite.numRows = 100
+	suite.tsStart = 0
+	suite.tsEnd = math.MaxUint64
+	suite.pkDataType = schemapb.DataType_Int64
+	suite.vecDataType = schemapb.DataType_FloatVector
 }
 
 func createBinlogBuf(t *testing.T, field *schemapb.FieldSchema, data storage.FieldData) []byte {
@@ -141,11 +156,11 @@ func createBinlogBuf(t *testing.T, field *schemapb.FieldSchema, data storage.Fie
 	return buf
 }
 
-func createDeltaBuf(t *testing.T, deletePKs, deleteTss []int64) []byte {
+func createDeltaBuf(t *testing.T, deletePKs []storage.PrimaryKey, deleteTss []int64) []byte {
 	assert.Equal(t, len(deleteTss), len(deletePKs))
 	deleteData := storage.NewDeleteData(nil, nil)
 	for i := range deletePKs {
-		deleteData.Append(storage.NewInt64PrimaryKey(deletePKs[i]), uint64(deleteTss[i]))
+		deleteData.Append(deletePKs[i], uint64(deleteTss[i]))
 	}
 	deleteCodec := storage.NewDeleteCodec()
 	blob, err := deleteCodec.Serialize(1, 1, 1, deleteData)
@@ -203,31 +218,33 @@ func createInsertData(t *testing.T, schema *schemapb.CollectionSchema, rowCount 
 		case schemapb.DataType_BinaryVector:
 			dim, err := typeutil.GetDim(field)
 			assert.NoError(t, err)
-			binVecData := make([][]byte, 0)
-			for i := 0; i < rowCount; i++ {
-				vec := make([]byte, 0)
-				for k := 0; k < int(dim)/8; k++ {
-					vec = append(vec, byte(i%256))
-				}
-				binVecData = append(binVecData, vec)
+			binVecData := make([]byte, 0)
+			total := rowCount * int(dim) / 8
+			for i := 0; i < total; i++ {
+				binVecData = append(binVecData, byte(i%256))
 			}
-			insertData.Data[field.GetFieldID()] = &storage.BinaryVectorFieldData{Data: lo.Flatten(binVecData), Dim: int(dim)}
+			insertData.Data[field.GetFieldID()] = &storage.BinaryVectorFieldData{Data: binVecData, Dim: int(dim)}
 		case schemapb.DataType_FloatVector:
 			dim, err := typeutil.GetDim(field)
 			assert.NoError(t, err)
-			floatVecData := make([][]float32, 0)
-			for i := 0; i < rowCount; i++ {
-				vec := make([]float32, 0)
-				for k := 0; k < int(dim); k++ {
-					vec = append(vec, rand.Float32())
-				}
-				floatVecData = append(floatVecData, vec)
+			floatVecData := make([]float32, 0)
+			total := rowCount * int(dim)
+			for i := 0; i < total; i++ {
+				floatVecData = append(floatVecData, rand.Float32())
 			}
-			insertData.Data[field.GetFieldID()] = &storage.FloatVectorFieldData{Data: lo.Flatten(floatVecData), Dim: int(dim)}
+			insertData.Data[field.GetFieldID()] = &storage.FloatVectorFieldData{Data: floatVecData, Dim: int(dim)}
+		case schemapb.DataType_Float16Vector:
+			dim, err := typeutil.GetDim(field)
+			assert.NoError(t, err)
+			total := int64(rowCount) * dim * 2
+			float16VecData := make([]byte, total)
+			_, err = rand2.Read(float16VecData)
+			assert.NoError(t, err)
+			insertData.Data[field.GetFieldID()] = &storage.Float16VectorFieldData{Data: float16VecData, Dim: int(dim)}
 		case schemapb.DataType_String, schemapb.DataType_VarChar:
 			varcharData := make([]string, 0)
 			for i := 0; i < rowCount; i++ {
-				varcharData = append(varcharData, "no."+strconv.Itoa(i))
+				varcharData = append(varcharData, strconv.Itoa(i))
 			}
 			insertData.Data[field.GetFieldID()] = &storage.StringFieldData{Data: varcharData}
 		case schemapb.DataType_JSON:
@@ -249,7 +266,7 @@ func createInsertData(t *testing.T, schema *schemapb.CollectionSchema, rowCount 
 			}
 			insertData.Data[field.GetFieldID()] = &storage.ArrayFieldData{Data: arrayData}
 		default:
-			return nil
+			panic(fmt.Sprintf("unexpected data type: %s", field.GetDataType().String()))
 		}
 	}
 	return insertData
@@ -289,12 +306,12 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 				FieldID:      100,
 				Name:         "pk",
 				IsPrimaryKey: true,
-				DataType:     schemapb.DataType_Int64,
+				DataType:     suite.pkDataType,
 			},
 			{
 				FieldID:  101,
 				Name:     "vec",
-				DataType: schemapb.DataType_FloatVector,
+				DataType: suite.vecDataType,
 				TypeParams: []*commonpb.KeyValuePair{
 					{
 						Key:   common.DimKey,
@@ -351,7 +368,7 @@ OUTER:
 			continue
 		}
 		for j := 0; j < len(suite.deletePKs); j++ {
-			if suite.deletePKs[j] == pks.GetRow(i) && suite.deleteTss[j] > tss.Data[i] {
+			if suite.deletePKs[j].GetValue() == pks.GetRow(i) && suite.deleteTss[j] > tss.Data[i] {
 				continue OUTER
 			}
 		}
@@ -376,10 +393,7 @@ OUTER:
 	}
 }
 
-func (suite *ReaderSuite) TestRead() {
-	suite.numRows = 100
-	suite.tsStart = 0
-	suite.tsEnd = math.MaxUint64
+func (suite *ReaderSuite) TestReadScalarFields() {
 	suite.run(schemapb.DataType_Bool)
 	suite.run(schemapb.DataType_Int8)
 	suite.run(schemapb.DataType_Int16)
@@ -396,12 +410,39 @@ func (suite *ReaderSuite) TestWithTSRangeAndDelete() {
 	suite.numRows = 10
 	suite.tsStart = 2
 	suite.tsEnd = 8
-	suite.deletePKs = []int64{
-		1, 4, 6, 8,
+	suite.deletePKs = []storage.PrimaryKey{
+		storage.NewInt64PrimaryKey(1),
+		storage.NewInt64PrimaryKey(4),
+		storage.NewInt64PrimaryKey(6),
+		storage.NewInt64PrimaryKey(8),
 	}
 	suite.deleteTss = []int64{
 		8, 8, 1, 8,
 	}
+	suite.run(schemapb.DataType_Int32)
+}
+
+func (suite *ReaderSuite) TestStringPK() {
+	suite.pkDataType = schemapb.DataType_VarChar
+	suite.numRows = 10
+	suite.tsStart = 2
+	suite.tsEnd = 8
+	suite.deletePKs = []storage.PrimaryKey{
+		storage.NewVarCharPrimaryKey("1"),
+		storage.NewVarCharPrimaryKey("4"),
+		storage.NewVarCharPrimaryKey("6"),
+		storage.NewVarCharPrimaryKey("8"),
+	}
+	suite.deleteTss = []int64{
+		8, 8, 1, 8,
+	}
+	suite.run(schemapb.DataType_Int32)
+}
+
+func (suite *ReaderSuite) TestBinaryAndFloat16Vector() {
+	suite.vecDataType = schemapb.DataType_BinaryVector
+	suite.run(schemapb.DataType_Int32)
+	suite.vecDataType = schemapb.DataType_Float16Vector
 	suite.run(schemapb.DataType_Int32)
 }
 
