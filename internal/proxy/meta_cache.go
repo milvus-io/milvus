@@ -151,7 +151,6 @@ type shardLeadersReader struct {
 // Shuffle returns the shuffled shard leader list.
 func (it shardLeadersReader) Shuffle() map[string][]nodeInfo {
 	result := make(map[string][]nodeInfo)
-	rand.Seed(time.Now().UnixNano())
 	for channel, leaders := range it.leaders.shardLeaders {
 		l := len(leaders)
 		// shuffle all replica at random order
