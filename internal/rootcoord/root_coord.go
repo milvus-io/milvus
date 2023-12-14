@@ -2714,7 +2714,8 @@ func (c *Core) SelectGrant(ctx context.Context, in *milvuspb.SelectGrantRequest)
 	grantEntities, err := c.meta.SelectGrant(util.DefaultTenant, in.Entity)
 	if errors.Is(err, merr.ErrIoKeyNotFound) {
 		return &milvuspb.SelectGrantResponse{
-			Status: merr.Success(),
+			Status:   merr.Success(),
+			Entities: grantEntities,
 		}, nil
 	}
 	if err != nil {
