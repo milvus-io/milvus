@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"path"
 	"sync"
 	"time"
@@ -25,6 +26,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
@@ -81,6 +83,7 @@ type indexBuilder struct {
 	nodeManager               *IndexNodeManager
 	chunkManager              storage.ChunkManager
 	indexEngineVersionManager IndexEngineVersionManager
+	handler                   Handler
 }
 
 func newIndexBuilder(
@@ -88,6 +91,7 @@ func newIndexBuilder(
 	metaTable *meta, nodeManager *IndexNodeManager,
 	chunkManager storage.ChunkManager,
 	indexEngineVersionManager IndexEngineVersionManager,
+	handler Handler,
 ) *indexBuilder {
 	ctx, cancel := context.WithCancel(ctx)
 
@@ -101,6 +105,7 @@ func newIndexBuilder(
 		policy:                    defaultBuildIndexPolicy,
 		nodeManager:               nodeManager,
 		chunkManager:              chunkManager,
+		handler:                   handler,
 		indexEngineVersionManager: indexEngineVersionManager,
 	}
 	ib.reloadFromKV()
@@ -299,18 +304,70 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 				RequestTimeoutMs: Params.MinioCfg.RequestTimeoutMs.GetAsInt64(),
 			}
 		}
-		req := &indexpb.CreateJobRequest{
-			ClusterID:           Params.CommonCfg.ClusterPrefix.GetValue(),
-			IndexFilePrefix:     path.Join(ib.chunkManager.RootPath(), common.SegmentIndexPath),
-			BuildID:             buildID,
-			DataPaths:           binLogs,
-			IndexVersion:        meta.IndexVersion + 1,
-			StorageConfig:       storageConfig,
-			IndexParams:         indexParams,
-			TypeParams:          typeParams,
-			NumRows:             meta.NumRows,
-			CurrentIndexVersion: ib.indexEngineVersionManager.GetCurrentIndexEngineVersion(),
+
+		var req *indexpb.CreateJobRequest
+		if Params.CommonCfg.EnableStorageV2.GetAsBool() {
+			collectionInfo, err := ib.handler.GetCollection(ib.ctx, segment.GetCollectionID())
+			if err != nil {
+				log.Info("index builder get collection info failed", zap.Int64("collectionID", segment.GetCollectionID()), zap.Error(err))
+				return false
+			}
+
+			schema := collectionInfo.Schema
+			var field *schemapb.FieldSchema
+
+			for _, f := range schema.Fields {
+				if f.FieldID == fieldID {
+					field = f
+					break
+				}
+			}
+
+			dim, _ := storage.GetDimFromParams(field.TypeParams)
+			var scheme string
+			if Params.MinioCfg.UseSSL.GetAsBool() {
+				scheme = "https"
+			} else {
+				scheme = "http"
+			}
+
+			req = &indexpb.CreateJobRequest{
+				ClusterID:           Params.CommonCfg.ClusterPrefix.GetValue(),
+				IndexFilePrefix:     path.Join(ib.chunkManager.RootPath(), common.SegmentIndexPath),
+				BuildID:             buildID,
+				DataPaths:           binLogs,
+				IndexVersion:        meta.IndexVersion + 1,
+				StorageConfig:       storageConfig,
+				IndexParams:         indexParams,
+				TypeParams:          typeParams,
+				NumRows:             meta.NumRows,
+				CollectionID:        segment.GetCollectionID(),
+				PartitionID:         segment.GetPartitionID(),
+				SegmentID:           segment.GetID(),
+				FieldID:             fieldID,
+				FieldName:           field.Name,
+				FieldType:           field.DataType,
+				StorePath:           fmt.Sprintf("s3://%s:%s@%s/%d?scheme=%s&endpoint_override=%s&allow_bucket_creation=true", Params.MinioCfg.AccessKeyID.GetValue(), Params.MinioCfg.SecretAccessKey.GetValue(), Params.MinioCfg.BucketName.GetValue(), segment.GetID(), scheme, Params.MinioCfg.Address.GetValue()),
+				StoreVersion:        segment.GetStorageVersion(),
+				IndexStorePath:      fmt.Sprintf("s3://%s:%s@%s/index/%d?scheme=%s&endpoint_override=%s&allow_bucket_creation=true", Params.MinioCfg.AccessKeyID.GetValue(), Params.MinioCfg.SecretAccessKey.GetValue(), Params.MinioCfg.BucketName.GetValue(), segment.GetID(), scheme, Params.MinioCfg.Address.GetValue()),
+				Dim:                 int64(dim),
+				CurrentIndexVersion: ib.indexEngineVersionManager.GetCurrentIndexEngineVersion(),
+			}
+		} else {
+			req = &indexpb.CreateJobRequest{
+				ClusterID:           Params.CommonCfg.ClusterPrefix.GetValue(),
+				IndexFilePrefix:     path.Join(ib.chunkManager.RootPath(), common.SegmentIndexPath),
+				BuildID:             buildID,
+				DataPaths:           binLogs,
+				IndexVersion:        meta.IndexVersion + 1,
+				StorageConfig:       storageConfig,
+				IndexParams:         indexParams,
+				TypeParams:          typeParams,
+				NumRows:             meta.NumRows,
+				CurrentIndexVersion: ib.indexEngineVersionManager.GetCurrentIndexEngineVersion(),
+			}
 		}
+
 		if err := ib.assignTask(client, req); err != nil {
 			// need to release lock then reassign, so set task state to retry
 			log.Ctx(ib.ctx).Warn("index builder assign task to IndexNode failed", zap.Int64("buildID", buildID),

@@ -934,6 +934,7 @@ type proxyConfig struct {
 	CostMetricsExpireTime        ParamItem `refreshable:"true"`
 	RetryTimesOnReplica          ParamItem `refreshable:"true"`
 	RetryTimesOnHealthCheck      ParamItem `refreshable:"true"`
+	PartitionNameRegexp          ParamItem `refreshable:"true"`
 
 	AccessLog AccessLogConfig
 }
@@ -1112,7 +1113,7 @@ please adjust in embedded Milvus: false`,
 	p.AccessLog.Filename = ParamItem{
 		Key:          "proxy.accessLog.filename",
 		Version:      "2.2.0",
-		DefaultValue: "milvus_access_log.log",
+		DefaultValue: "",
 		Doc:          "Log filename, leave empty to use stdout.",
 		Export:       true,
 	}
@@ -1219,6 +1220,14 @@ please adjust in embedded Milvus: false`,
 		Doc:          "set query node unavailable on proxy when heartbeat failures reach this limit",
 	}
 	p.RetryTimesOnHealthCheck.Init(base.mgr)
+
+	p.PartitionNameRegexp = ParamItem{
+		Key:          "proxy.partitionNameRegexp",
+		Version:      "2.3.4",
+		DefaultValue: "false",
+		Doc:          "switch for whether proxy shall use partition name as regexp when searching",
+	}
+	p.PartitionNameRegexp.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

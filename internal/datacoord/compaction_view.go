@@ -17,7 +17,7 @@ type CompactionView interface {
 	GetSegmentsView() []*SegmentView
 	Append(segments ...*SegmentView)
 	String() string
-	Trigger() CompactionView
+	Trigger() (CompactionView, string)
 }
 
 type FullViews struct {
