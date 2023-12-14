@@ -88,18 +88,20 @@ func (r *reader) ReadDelete(deltaLogs []string, tsStart, tsEnd uint64) (*storage
 		if err != nil {
 			return nil, err
 		}
-		data, err := readData(reader, storage.DeleteEventType)
+		rowsSet, err := readData(reader, storage.DeleteEventType)
 		if err != nil {
 			return nil, err
 		}
-		for _, d := range data {
-			dl := &storage.DeleteLog{}
-			err = json.Unmarshal([]byte(d.(string)), dl)
-			if err != nil {
-				return nil, err
-			}
-			if dl.Ts >= tsStart && dl.Ts <= tsEnd {
-				deleteData.Append(dl.Pk, dl.Ts)
+		for _, rows := range rowsSet {
+			for _, row := range rows.([]string) {
+				dl := &storage.DeleteLog{}
+				err = json.Unmarshal([]byte(row), dl)
+				if err != nil {
+					return nil, err
+				}
+				if dl.Ts >= tsStart && dl.Ts <= tsEnd {
+					deleteData.Append(dl.Pk, dl.Ts)
+				}
 			}
 		}
 	}

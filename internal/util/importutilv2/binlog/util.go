@@ -19,7 +19,6 @@ package binlog
 import (
 	"context"
 	"fmt"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"path"
 	"sort"
 	"strconv"
@@ -31,7 +30,7 @@ import (
 )
 
 func readData(reader *storage.BinlogReader, et storage.EventTypeCode) ([]any, error) {
-	result := make([]any, 0)
+	rowsSet := make([]any, 0)
 	for {
 		event, err := reader.NextEventReader()
 		if err != nil {
@@ -44,17 +43,13 @@ func readData(reader *storage.BinlogReader, et storage.EventTypeCode) ([]any, er
 			return nil, merr.WrapErrImportFailed(fmt.Sprintf("wrong binlog type, expect:%s, actual:%s",
 				et.String(), event.TypeCode.String()))
 		}
-		data, _, err := event.PayloadReaderInterface.GetDataFromPayload()
+		rows, _, err := event.PayloadReaderInterface.GetDataFromPayload()
 		if err != nil {
 			return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to read data, error: %v", err))
 		}
-		values, err := typeutil.InterfaceToInterfaceSlice(data)
-		if err != nil {
-			return nil, merr.WrapErrImportFailed(fmt.Sprintf("error: %v", err))
-		}
-		result = append(result, values...)
+		rowsSet = append(rowsSet, rows)
 	}
-	return result, nil
+	return rowsSet, nil
 }
 
 func newBinlogReader(cm storage.ChunkManager, path string) (*storage.BinlogReader, error) {
