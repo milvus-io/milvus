@@ -506,8 +506,11 @@ func (data *JSONFieldData) AppendRows(rows interface{}) error {
 // AppendRows appends FLATTEN vectors to field data.
 func (data *BinaryVectorFieldData) AppendRows(rows interface{}) error {
 	v, ok := rows.([]byte)
-	if !ok || len(v)%(data.Dim/8) != 0 {
+	if !ok {
 		return merr.WrapErrParameterInvalid("[]byte", rows, "Wrong rows type")
+	}
+	if len(v)%(data.Dim/8) != 0 {
+		return merr.WrapErrParameterInvalid(data.Dim/8, len(v), "Wrong vector size")
 	}
 	data.Data = append(data.Data, v...)
 	return nil
@@ -519,6 +522,9 @@ func (data *FloatVectorFieldData) AppendRows(rows interface{}) error {
 	if !ok || len(v)%(data.Dim) != 0 {
 		return merr.WrapErrParameterInvalid("[]float32", rows, "Wrong rows type")
 	}
+	if len(v)%(data.Dim) != 0 {
+		return merr.WrapErrParameterInvalid(data.Dim, len(v), "Wrong vector size")
+	}
 	data.Data = append(data.Data, v...)
 	return nil
 }
@@ -528,6 +534,9 @@ func (data *Float16VectorFieldData) AppendRows(rows interface{}) error {
 	v, ok := rows.([]byte)
 	if !ok || len(v)%(data.Dim*2) != 0 {
 		return merr.WrapErrParameterInvalid("[]byte", rows, "Wrong rows type")
+	}
+	if len(v)%(data.Dim*2) != 0 {
+		return merr.WrapErrParameterInvalid(data.Dim*2, len(v), "Wrong vector size")
 	}
 	data.Data = append(data.Data, v...)
 	return nil
