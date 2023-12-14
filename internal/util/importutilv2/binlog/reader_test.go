@@ -46,10 +46,9 @@ type ReaderSuite struct {
 	schema  *schemapb.CollectionSchema
 	numRows int
 
-	deleteData []any
-	tsField    []uint64
-	tsStart    uint64
-	tsEnd      uint64
+	deleteLists [][]int64
+	tsStart     uint64
+	tsEnd       uint64
 }
 
 func (suite *ReaderSuite) SetupSuite() {
@@ -212,9 +211,9 @@ func createDeltaBuf(t *testing.T, deleteList interface{}, varcharType bool) []by
 	} else {
 		deltaData := deleteList.([]int64)
 		assert.NotNil(t, deltaData)
-		for i, id := range deltaData {
+		for _, id := range deltaData {
 			deleteData.Pks = append(deleteData.Pks, storage.NewInt64PrimaryKey(id))
-			deleteData.Tss = append(deleteData.Tss, uint64(i))
+			deleteData.Tss = append(deleteData.Tss, uint64(id))
 			deleteData.RowCount++
 		}
 	}
@@ -349,34 +348,35 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 		rowCount0 = 6
 		rowCount1 = 4
 	)
-	var (
-		insertBinlogs = map[int64][]string{
-			0: {
-				"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/0/435978159903735801",
-				"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/0/435978159903735802",
-			},
-			1: {
-				"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/1/435978159903735811",
-				"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/1/435978159903735812",
-			},
-			100: {
-				"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/100/435978159903735821",
-				"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/100/435978159903735822",
-			},
-			101: {
-				"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/101/435978159903735831",
-				"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/101/435978159903735832",
-			},
-			102: {
-				"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/102/435978159903735841",
-				"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/102/435978159903735842",
-			},
-		}
+	insertBinlogs := map[int64][]string{
+		0: {
+			"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/0/435978159903735801",
+			"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/0/435978159903735802",
+		},
+		1: {
+			"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/1/435978159903735811",
+			"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/1/435978159903735812",
+		},
+		100: {
+			"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/100/435978159903735821",
+			"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/100/435978159903735822",
+		},
+		101: {
+			"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/101/435978159903735831",
+			"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/101/435978159903735832",
+		},
+		102: {
+			"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/102/435978159903735841",
+			"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/102/435978159903735842",
+		},
+	}
+	var deltaLogs []string
+	if len(suite.deleteLists) == 2 {
 		deltaLogs = []string{
-			//"backup/bak1/data/delta_log/435978159196147009/435978159196147010/435978159261483009/434574382554415105",
-			//"backup/bak1/data/delta_log/435978159196147009/435978159196147010/435978159261483009/434574382554415106",
+			"backup/bak1/data/delta_log/435978159196147009/435978159196147010/435978159261483009/434574382554415105",
+			"backup/bak1/data/delta_log/435978159196147009/435978159196147010/435978159261483009/434574382554415106",
 		}
-	)
+	}
 	schema := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
 			{
@@ -435,9 +435,11 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 		cm.EXPECT().Read(mock.Anything, paths[1]).Return(buf1, nil)
 	}
 
-	for _, path := range deltaLogs {
-		//buf := createDeltaBuf(suite.T(), []int64{}, false)
-		cm.EXPECT().Read(mock.Anything, path).Return(nil, nil)
+	if len(suite.deleteLists) == 2 {
+		for i, path := range deltaLogs {
+			buf := createDeltaBuf(suite.T(), suite.deleteLists[i], false)
+			cm.EXPECT().Read(mock.Anything, path).Return(buf, nil)
+		}
 	}
 
 	reader, err := NewReader(cm, schema, []string{insertPrefix, deltaPrefix}, suite.tsStart, suite.tsEnd)
