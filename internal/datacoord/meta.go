@@ -1041,6 +1041,7 @@ func (m *meta) PrepareCompleteCompactionMutation(plan *datapb.CompactionPlan,
 		CreatedByCompaction: true,
 		CompactionFrom:      compactionFrom,
 		LastExpireTime:      plan.GetStartTime(),
+		Level:               datapb.SegmentLevel_L1,
 	}
 	segment := NewSegmentInfo(segmentInfo)
 	metricMutation.addNewSeg(segment.GetState(), segment.GetLevel(), segment.GetNumOfRows())
@@ -1048,6 +1049,7 @@ func (m *meta) PrepareCompleteCompactionMutation(plan *datapb.CompactionPlan,
 		zap.Int64("collectionID", segment.GetCollectionID()),
 		zap.Int64("partitionID", segment.GetPartitionID()),
 		zap.Int64("new segment ID", segment.GetID()),
+		zap.String("new segment level", segment.GetLevel().String()),
 		zap.Int64("new segment num of rows", segment.GetNumOfRows()),
 		zap.Any("compacted from", segment.GetCompactionFrom()))
 
