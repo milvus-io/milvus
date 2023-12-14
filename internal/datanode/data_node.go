@@ -273,7 +273,7 @@ func (node *DataNode) Init() error {
 		}
 
 		node.chunkManager = chunkManager
-		syncMgr, err := syncmgr.NewSyncManager(paramtable.Get().DataNodeCfg.MaxParallelSyncTaskNum.GetAsInt(),
+		syncMgr, err := syncmgr.NewSyncManager(paramtable.Get().DataNodeCfg.MaxParallelSyncMgrTasks.GetAsInt(),
 			node.chunkManager, node.allocator)
 		if err != nil {
 			initError = err

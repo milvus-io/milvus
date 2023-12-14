@@ -2589,6 +2589,7 @@ type dataNodeConfig struct {
 	FlowGraphMaxQueueLength ParamItem `refreshable:"false"`
 	FlowGraphMaxParallelism ParamItem `refreshable:"false"`
 	MaxParallelSyncTaskNum  ParamItem `refreshable:"false"`
+	MaxParallelSyncMgrTasks ParamItem `refreshable:"false"`
 
 	// skip mode
 	FlowGraphSkipModeEnable   ParamItem `refreshable:"true"`
@@ -2686,10 +2687,19 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		Key:          "dataNode.dataSync.maxParallelSyncTaskNum",
 		Version:      "2.3.0",
 		DefaultValue: "6",
-		Doc:          "Maximum number of sync tasks executed in parallel in each flush manager",
+		Doc:          "deprecated, legacy flush manager max conurrency number",
 		Export:       true,
 	}
 	p.MaxParallelSyncTaskNum.Init(base.mgr)
+
+	p.MaxParallelSyncMgrTasks = ParamItem{
+		Key:          "dataNode.dataSync.maxParallelSyncMgrTasks",
+		Version:      "2.3.4",
+		DefaultValue: "64",
+		Doc:          "The max concurrent sync task number of datanode sync mgr globally",
+		Export:       true,
+	}
+	p.MaxParallelSyncMgrTasks.Init(base.mgr)
 
 	p.FlushInsertBufferSize = ParamItem{
 		Key:          "dataNode.segment.insertBufSize",
