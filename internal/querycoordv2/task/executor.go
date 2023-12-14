@@ -22,15 +22,18 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -194,14 +197,30 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 	if channel == nil {
 		channel = ex.targetMgr.GetDmChannel(task.CollectionID(), segment.GetInsertChannel(), meta.NextTarget)
 	}
-	loadInfo := utils.PackSegmentLoadInfo(resp.GetInfos()[0], channel.GetSeekPosition(), indexes)
 
 	// Get collection index info
-	indexInfo, err := ex.broker.DescribeIndex(ctx, task.CollectionID())
+	indexInfos, err := ex.broker.DescribeIndex(ctx, task.CollectionID())
 	if err != nil {
 		log.Warn("fail to get index meta of collection")
 		return err
 	}
+	// update the field index params
+	for _, segmentIndex := range indexes {
+		index, found := lo.Find(indexInfos, func(indexInfo *indexpb.IndexInfo) bool {
+			return indexInfo.IndexID == segmentIndex.IndexID
+		})
+		if !found {
+			log.Warn("no collection index info for the given segment index", zap.String("indexName", segmentIndex.GetIndexName()))
+		}
+
+		params := funcutil.KeyValuePair2Map(segmentIndex.GetIndexParams())
+		for _, kv := range index.GetUserIndexParams() {
+			params[kv.GetKey()] = kv.GetValue()
+		}
+		segmentIndex.IndexParams = funcutil.Map2KeyValuePair(params)
+	}
+
+	loadInfo := utils.PackSegmentLoadInfo(resp.GetInfos()[0], channel.GetSeekPosition(), indexes)
 
 	req := packLoadSegmentRequest(
 		task,
@@ -210,7 +229,7 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 		collectionInfo.GetProperties(),
 		loadMeta,
 		loadInfo,
-		indexInfo,
+		indexInfos,
 	)
 
 	// Get shard leader for the given replica and segment

@@ -224,7 +224,7 @@ func (s *Server) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest)
 	indexes := s.meta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName())
 	params := make(map[string]string)
 	for _, index := range indexes {
-		for _, param := range index.IndexParams {
+		for _, param := range index.UserIndexParams {
 			params[param.GetKey()] = param.GetValue()
 		}
 
