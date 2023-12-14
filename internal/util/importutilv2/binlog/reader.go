@@ -128,8 +128,10 @@ func (r *reader) Next(count int64) (*storage.InsertData, error) {
 		}
 		fieldData, err := cr.Next(count)
 		if err != nil {
+			cr.Close()
 			return nil, err
 		}
+		cr.Close()
 		insertData.Data[field.GetFieldID()] = fieldData
 	}
 	insertData, err = r.Filter(insertData)
@@ -163,3 +165,5 @@ OUTER:
 	}
 	return result, nil
 }
+
+func (r *reader) Close() {}

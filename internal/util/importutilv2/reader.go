@@ -23,16 +23,15 @@ import (
 )
 
 type Reader interface {
-	// ReadStats()
-	// Close()
+	// ReadStats() // TODO: dyh, implement it
 
 	Next(count int64) (*storage.InsertData, error)
+	Close()
 }
 
 type ColumnReader interface {
-	// Close()
-
 	Next(count int64) (storage.FieldData, error)
+	Close()
 }
 
 func NewReader(cm storage.ChunkManager,

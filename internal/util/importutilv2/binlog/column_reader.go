@@ -54,3 +54,7 @@ func (r *columnReader) Next(_ int64) (storage.FieldData, error) {
 	}
 	return fieldData, nil
 }
+
+func (r *columnReader) Close() {
+	r.reader.Close()
+}
