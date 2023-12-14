@@ -29,7 +29,10 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"golang.org/x/exp/slices"
+	"math"
 	"math/rand"
+	"reflect"
 	"strconv"
 	"testing"
 
@@ -343,11 +346,8 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 		insertPrefix = "mock-insert-binlog-prefix"
 		deltaPrefix  = "mock-delta-binlog-prefix"
 
-		tsStart = 2000
-		tsEnd   = 8000
-
-		rowCount0 = 6000
-		rowCount1 = 4000
+		rowCount0 = 6
+		rowCount1 = 4
 	)
 	var (
 		insertBinlogs = map[int64][]string{
@@ -392,7 +392,7 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 				TypeParams: []*commonpb.KeyValuePair{
 					{
 						Key:   common.DimKey,
-						Value: "128",
+						Value: "8",
 					},
 				},
 			},
@@ -406,8 +406,23 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 	cm := mocks.NewChunkManager(suite.T())
 	typeutil.AppendSystemFields(schema)
 
-	fieldsData0 := createFieldsData(suite.T(), schema, rowCount0)
-	fieldsData1 := createFieldsData(suite.T(), schema, rowCount1)
+	fieldsData := createFieldsData(suite.T(), schema, rowCount0+rowCount1)
+	fieldsData0 := make(map[storage.FieldID]interface{})
+	fieldsData1 := make(map[storage.FieldID]interface{})
+	for fieldID, data := range fieldsData {
+		sliceValue := reflect.ValueOf(data)
+		slice0 := reflect.MakeSlice(sliceValue.Type(), rowCount0, rowCount0)
+		slice1 := reflect.MakeSlice(sliceValue.Type(), rowCount1, rowCount1)
+		for i := 0; i < sliceValue.Len(); i++ {
+			if i < rowCount0 {
+				slice0.Index(i).Set(sliceValue.Index(i))
+			} else {
+				slice1.Index(i - rowCount0).Set(sliceValue.Index(i))
+			}
+		}
+		fieldsData0[fieldID] = slice0.Interface()
+		fieldsData1[fieldID] = slice1.Interface()
+	}
 	insertLogs := lo.Flatten(lo.Values(insertBinlogs))
 
 	cm.EXPECT().ListWithPrefix(mock.Anything, insertPrefix, mock.Anything).Return(insertLogs, nil, nil)
@@ -425,41 +440,70 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 		cm.EXPECT().Read(mock.Anything, path).Return(nil, nil)
 	}
 
-	reader, err := NewReader(cm, schema, []string{insertPrefix, deltaPrefix}, tsStart, tsEnd)
+	reader, err := NewReader(cm, schema, []string{insertPrefix, deltaPrefix}, suite.tsStart, suite.tsEnd)
 	suite.NoError(err)
 	insertData, err := reader.Next(-1)
 	suite.NoError(err)
+	expectRowCount := rowCount0 - int(suite.tsStart)
 	for fieldID, data := range insertData.Data {
-		suite.Equal(data.RowNum(), rowCount0)
+		suite.Equal(expectRowCount, data.RowNum())
+		fieldDataType := typeutil.GetField(schema, fieldID).GetDataType()
 		values, err := typeutil.InterfaceToInterfaceSlice(fieldsData0[fieldID])
-		assert.NoError(suite.T(), err)
-		for i := 0; i < rowCount0; i++ {
-			expect := values[i]
+		suite.NoError(err)
+		for i := 0; i < expectRowCount; i++ {
+			expect := values[i+int(suite.tsStart)]
 			actual := data.GetRow(i)
-			suite.Equal(expect, actual)
+			if fieldDataType == schemapb.DataType_Array {
+				suite.True(slices.Equal(expect.(*schemapb.ScalarField).GetIntData().GetData(), actual.(*schemapb.ScalarField).GetIntData().GetData()))
+			} else {
+				suite.Equal(expect, actual)
+			}
 		}
 	}
+
 	insertData, err = reader.Next(-1)
 	suite.NoError(err)
+	if suite.tsEnd != math.MaxUint64 {
+		expectRowCount = int(suite.tsEnd) - rowCount0 + 1
+	} else {
+		expectRowCount = rowCount1
+	}
 	for fieldID, data := range insertData.Data {
-		suite.Equal(data.RowNum(), rowCount1)
+		suite.Equal(expectRowCount, data.RowNum())
+		fieldDataType := typeutil.GetField(schema, fieldID).GetDataType()
 		values, err := typeutil.InterfaceToInterfaceSlice(fieldsData1[fieldID])
-		assert.NoError(suite.T(), err)
-		for i := 0; i < rowCount1; i++ {
+		suite.NoError(err)
+		for i := 0; i < expectRowCount; i++ {
 			expect := values[i]
 			actual := data.GetRow(i)
-			suite.Equal(expect, actual)
+			if fieldDataType == schemapb.DataType_Array {
+				suite.True(slices.Equal(expect.(*schemapb.ScalarField).GetIntData().GetData(), actual.(*schemapb.ScalarField).GetIntData().GetData()))
+			} else {
+				suite.Equal(expect, actual)
+			}
 		}
 	}
-	fmt.Println(insertData)
 }
 
 func (suite *ReaderSuite) TestRead() {
+	suite.tsStart = 0
+	suite.tsEnd = math.MaxUint64
 	suite.run(schemapb.DataType_Bool)
-	suite.run(schemapb.DataType_Bool)
-	suite.run(schemapb.DataType_Bool)
-	suite.run(schemapb.DataType_Bool)
-	suite.run(schemapb.DataType_Bool)
+	suite.run(schemapb.DataType_Int8)
+	suite.run(schemapb.DataType_Int16)
+	suite.run(schemapb.DataType_Int32)
+	suite.run(schemapb.DataType_Int64)
+	suite.run(schemapb.DataType_Float)
+	suite.run(schemapb.DataType_Double)
+	suite.run(schemapb.DataType_VarChar)
+	suite.run(schemapb.DataType_Array)
+	suite.run(schemapb.DataType_JSON)
+}
+
+func (suite *ReaderSuite) TestWithTSRangeAndDelete() {
+	suite.tsStart = 2
+	suite.tsEnd = 8
+	suite.run(schemapb.DataType_Int32)
 }
 
 func TestUtil(t *testing.T) {

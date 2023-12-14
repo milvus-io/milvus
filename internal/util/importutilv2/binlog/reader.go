@@ -146,11 +146,12 @@ func (r *reader) Filter(insertData *storage.InsertData) (*storage.InsertData, er
 	if err != nil {
 		return nil, err
 	}
+OUTER:
 	for i := 0; i < insertData.GetRowNum(); i++ {
 		row := insertData.GetRow(i)
 		for _, filter := range r.filters {
 			if !filter(row) {
-				continue
+				continue OUTER
 			}
 		}
 		err = result.Append(row)
