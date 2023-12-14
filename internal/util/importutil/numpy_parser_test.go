@@ -824,7 +824,7 @@ func Test_NumpyParserSplitFieldsData(t *testing.T) {
 	}
 
 	t.Run("shards number mismatch", func(t *testing.T) {
-		fieldsData := createFieldsData(sampleSchema(), 0)
+		fieldsData := createFieldsData(sampleSchema(), 0, baseTimestamp)
 		shards := createShardsData(sampleSchema(), fieldsData, 1, []int64{1})
 		segmentData := genFieldsDataFunc()
 		parser.autoIDRange, err = splitFieldsData(parser.collectionInfo, segmentData, shards, parser.rowIDAllocator)
@@ -861,7 +861,7 @@ func Test_NumpyParserSplitFieldsData(t *testing.T) {
 		}
 		parser.collectionInfo.resetSchema(schema)
 		parser.collectionInfo.ShardNum = 2
-		fieldsData := createFieldsData(schema, 0)
+		fieldsData := createFieldsData(schema, 0, baseTimestamp)
 		shards := createShardsData(schema, fieldsData, 2, []int64{1})
 		parser.autoIDRange, err = splitFieldsData(parser.collectionInfo, segmentData, shards, parser.rowIDAllocator)
 		assert.Error(t, err)
@@ -871,7 +871,7 @@ func Test_NumpyParserSplitFieldsData(t *testing.T) {
 		ctx := context.Background()
 		parser.rowIDAllocator = newIDAllocator(ctx, t, errors.New("dummy error"))
 		parser.collectionInfo.resetSchema(sampleSchema())
-		fieldsData := createFieldsData(sampleSchema(), 0)
+		fieldsData := createFieldsData(sampleSchema(), 0, baseTimestamp)
 		shards := createShardsData(sampleSchema(), fieldsData, 2, []int64{1})
 		segmentData := genFieldsDataFunc()
 		parser.autoIDRange, err = splitFieldsData(parser.collectionInfo, segmentData, shards, parser.rowIDAllocator)
@@ -885,7 +885,7 @@ func Test_NumpyParserSplitFieldsData(t *testing.T) {
 		schema.AutoID = true
 
 		partitionID := int64(1)
-		fieldsData := createFieldsData(sampleSchema(), 0)
+		fieldsData := createFieldsData(sampleSchema(), 0, baseTimestamp)
 		shards := createShardsData(sampleSchema(), fieldsData, 2, []int64{partitionID})
 		segmentData := genFieldsDataFunc()
 		parser.autoIDRange, err = splitFieldsData(parser.collectionInfo, segmentData, shards, parser.rowIDAllocator)
@@ -929,7 +929,7 @@ func Test_NumpyParserSplitFieldsData(t *testing.T) {
 			},
 		}
 		parser.collectionInfo.resetSchema(schema)
-		fieldsData := createFieldsData(schema, 0)
+		fieldsData := createFieldsData(schema, 0, baseTimestamp)
 		shards := createShardsData(schema, fieldsData, 2, []int64{1})
 		segmentData := make(BlockData)
 		segmentData[101] = &storage.Int64FieldData{
@@ -1198,7 +1198,7 @@ func Test_NumpyParserHashToPartition(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, parser)
 
-	fieldsData := createFieldsData(schema, 5)
+	fieldsData := createFieldsData(schema, 5, baseTimestamp)
 	blockData := createBlockData(schema, fieldsData)
 
 	// no partition key, partition ID list greater than 1, return error

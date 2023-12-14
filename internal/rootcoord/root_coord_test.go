@@ -2036,6 +2036,39 @@ func TestRootCoord_RBACError(t *testing.T) {
 		}
 	})
 
+	t.Run("select grant success", func(t *testing.T) {
+		mockMeta := c.meta.(*mockMetaTable)
+		mockMeta.SelectRoleFunc = func(tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error) {
+			return []*milvuspb.RoleResult{
+				{
+					Role: &milvuspb.RoleEntity{Name: "foo"},
+				},
+			}, nil
+		}
+		mockMeta.SelectGrantFunc = func(tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error) {
+			return []*milvuspb.GrantEntity{
+				{
+					Role: &milvuspb.RoleEntity{Name: "foo"},
+				},
+			}, merr.ErrIoKeyNotFound
+		}
+
+		{
+			resp, err := c.SelectGrant(ctx, &milvuspb.SelectGrantRequest{Entity: &milvuspb.GrantEntity{Role: &milvuspb.RoleEntity{Name: "foo"}, Object: &milvuspb.ObjectEntity{Name: "Collection"}, ObjectName: "fir"}})
+			assert.NoError(t, err)
+			assert.Equal(t, 1, len(resp.GetEntities()))
+			assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		}
+
+		mockMeta.SelectRoleFunc = func(tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error) {
+			return nil, errors.New("mock error")
+		}
+
+		mockMeta.SelectGrantFunc = func(tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error) {
+			return nil, errors.New("mock error")
+		}
+	})
+
 	t.Run("list policy failed", func(t *testing.T) {
 		resp, err := c.ListPolicy(ctx, &internalpb.ListPolicyRequest{})
 		assert.NoError(t, err)

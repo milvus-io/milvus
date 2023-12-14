@@ -207,7 +207,7 @@ func Test_JSONRowConsumerHandleIntPK(t *testing.T) {
 		consumer.rowIDAllocator = newIDAllocator(ctx, t, errors.New("error"))
 
 		waitFlushRowCount := 10
-		fieldsData := createFieldsData(schema, waitFlushRowCount)
+		fieldsData := createFieldsData(schema, waitFlushRowCount, baseTimestamp)
 		consumer.shardsData = createShardsData(schema, fieldsData, shardNum, []int64{partitionID})
 
 		// nil input will trigger force flush, flushErrFunc returns error

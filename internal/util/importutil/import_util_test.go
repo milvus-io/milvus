@@ -240,7 +240,7 @@ func jsonNumber(value string) json.Number {
 	return json.Number(value)
 }
 
-func createFieldsData(collectionSchema *schemapb.CollectionSchema, rowCount int) map[storage.FieldID]interface{} {
+func createFieldsData(collectionSchema *schemapb.CollectionSchema, rowCount int, startTimestamp int64) map[storage.FieldID]interface{} {
 	fieldsData := make(map[storage.FieldID]interface{})
 
 	// internal fields
@@ -248,7 +248,7 @@ func createFieldsData(collectionSchema *schemapb.CollectionSchema, rowCount int)
 	timestampData := make([]int64, 0)
 	for i := 0; i < rowCount; i++ {
 		rowIDData = append(rowIDData, int64(i))
-		timestampData = append(timestampData, baseTimestamp+int64(i))
+		timestampData = append(timestampData, startTimestamp+int64(i))
 	}
 	fieldsData[0] = rowIDData
 	fieldsData[1] = timestampData
@@ -1083,7 +1083,7 @@ func Test_TryFlushBlocks(t *testing.T) {
 
 	// prepare flush data, 3 shards, each shard 10 rows
 	rowCount := 10
-	fieldsData := createFieldsData(schema, rowCount)
+	fieldsData := createFieldsData(schema, rowCount, baseTimestamp)
 	shardsData := createShardsData(schema, fieldsData, shardNum, []int64{partitionID})
 
 	t.Run("non-force flush", func(t *testing.T) {

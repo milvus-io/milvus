@@ -16,6 +16,10 @@ on:
       - '.github/workflows/publish-gpu-builder.yaml'
       - '!**.md'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   publish-gpu-builder:
     name: ${{ matrix.arch }} ${{ matrix.os }}

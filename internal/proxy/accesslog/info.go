@@ -88,11 +88,8 @@ func (i *GrpcAccessInfo) SetResult(resp interface{}, err error) {
 
 func (i *GrpcAccessInfo) Get(keys ...string) []string {
 	result := []string{}
-	metricMap := map[string]string{}
 	for _, key := range keys {
-		if value, ok := metricMap[key]; ok {
-			result = append(result, value)
-		} else if getFunc, ok := metricFuncMap[key]; ok {
+		if getFunc, ok := metricFuncMap[key]; ok {
 			result = append(result, getFunc(i))
 		}
 	}
@@ -108,6 +105,7 @@ func (i *GrpcAccessInfo) Write() bool {
 	if !ok {
 		return false
 	}
+
 	_, err := _globalW.Write([]byte(formatter.Format(i)))
 	return err == nil
 }
@@ -256,10 +254,15 @@ func getPartitionName(i *GrpcAccessInfo) string {
 
 func getExpr(i *GrpcAccessInfo) string {
 	expr, ok := requestutil.GetExprFromRequest(i.req)
-	if !ok {
-		return unknownString
+	if ok {
+		return expr.(string)
 	}
-	return expr.(string)
+
+	dsl, ok := requestutil.GetDSLFromRequest(i.req)
+	if ok {
+		return dsl.(string)
+	}
+	return unknownString
 }
 
 func getSdkVersion(i *GrpcAccessInfo) string {
