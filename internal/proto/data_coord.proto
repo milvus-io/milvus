@@ -91,6 +91,8 @@ service DataCoord {
   rpc GcConfirm(GcConfirmRequest) returns (GcConfirmResponse) {}
 
   rpc ReportDataNodeTtMsgs(ReportDataNodeTtMsgsRequest) returns (common.Status) {}
+
+  rpc GcControl(GcControlRequest) returns(common.Status){}
 }
 
 service DataNode {
@@ -864,4 +866,16 @@ message ImportTaskV2 {
   ImportState state = 7;
   string reason = 8;
   repeated ImportFile files = 9;
+}
+
+enum GcCommand {
+  _ = 0;
+  Pause = 1;
+  Resume = 2;
+}
+
+message GcControlRequest {
+  common.MsgBase base = 1;
+  GcCommand command = 2;
+  repeated common.KeyValuePair params = 3;
 }

@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/tikv/client-go/v2/txnkv"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -320,6 +321,13 @@ func Test_NewServer(t *testing.T) {
 	t.Run("GetIndexInfos", func(t *testing.T) {
 		mockDataCoord.EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(&indexpb.GetIndexInfoResponse{}, nil)
 		ret, err := server.GetIndexInfos(ctx, nil)
+		assert.NoError(t, err)
+		assert.NotNil(t, ret)
+	})
+
+	t.Run("GcControl", func(t *testing.T) {
+		mockDataCoord.EXPECT().GcControl(mock.Anything, mock.Anything).Return(&commonpb.Status{}, nil)
+		ret, err := server.GcControl(ctx, nil)
 		assert.NoError(t, err)
 		assert.NotNil(t, ret)
 	})

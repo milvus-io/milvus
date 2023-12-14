@@ -618,3 +618,9 @@ func (c *Client) ReportDataNodeTtMsgs(ctx context.Context, req *datapb.ReportDat
 		return client.ReportDataNodeTtMsgs(ctx, req)
 	})
 }
+
+func (c *Client) GcControl(ctx context.Context, req *datapb.GcControlRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return wrapGrpcCall(ctx, c, func(client datapb.DataCoordClient) (*commonpb.Status, error) {
+		return client.GcControl(ctx, req)
+	})
+}
