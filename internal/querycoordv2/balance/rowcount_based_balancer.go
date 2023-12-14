@@ -180,10 +180,21 @@ func (b *RowCountBasedBalancer) BalanceReplica(replica *meta.Replica) ([]Segment
 			zap.Any("stoppingNodes", offlineNodes),
 			zap.Any("onlineNodes", onlineNodes),
 		)
-		return b.genStoppingSegmentPlan(replica, onlineNodes, offlineNodes), b.genStoppingChannelPlan(replica, onlineNodes, offlineNodes)
+
+		channelPlans := b.genStoppingChannelPlan(replica, onlineNodes, offlineNodes)
+		if len(channelPlans) == 0 {
+			return b.genStoppingSegmentPlan(replica, onlineNodes, offlineNodes), nil
+		}
+		return nil, channelPlans
 	}
 
-	return b.genSegmentPlan(replica, onlineNodes), b.genChannelPlan(replica, onlineNodes)
+	// segment balance will count the growing row num in delegator, so it's better to balance channel first,
+	// to avoid balance segment again after balance channel
+	channelPlans := b.genChannelPlan(replica, onlineNodes)
+	if len(channelPlans) == 0 {
+		return b.genSegmentPlan(replica, onlineNodes), nil
+	}
+	return nil, channelPlans
 }
 
 func (b *RowCountBasedBalancer) genStoppingSegmentPlan(replica *meta.Replica, onlineNodes []int64, offlineNodes []int64) []SegmentAssignPlan {

@@ -191,13 +191,18 @@ func (b *ScoreBasedBalancer) BalanceReplica(replica *meta.Replica) ([]SegmentAss
 			zap.Any("available nodes", maps.Keys(nodesSegments)),
 		)
 		// handle stopped nodes here, have to assign segments on stopping nodes to nodes with the smallest score
-		segmentPlans = append(segmentPlans, b.getStoppedSegmentPlan(replica, nodesSegments, stoppingNodesSegments)...)
 		channelPlans = append(channelPlans, b.genStoppingChannelPlan(replica, lo.Keys(nodesSegments), lo.Keys(stoppingNodesSegments))...)
+		if len(channelPlans) == 0 {
+			segmentPlans = append(segmentPlans, b.getStoppedSegmentPlan(replica, nodesSegments, stoppingNodesSegments)...)
+		}
 	} else {
 		// normal balance, find segments from largest score nodes and transfer to smallest score nodes.
-		segmentPlans = append(segmentPlans, b.getNormalSegmentPlan(replica, nodesSegments)...)
 		channelPlans = append(channelPlans, b.genChannelPlan(replica, lo.Keys(nodesSegments))...)
+		if len(channelPlans) == 0 {
+			segmentPlans = append(segmentPlans, b.getNormalSegmentPlan(replica, nodesSegments)...)
+		}
 	}
+
 	if len(segmentPlans) != 0 || len(channelPlans) != 0 {
 		PrintCurrentReplicaDist(replica, stoppingNodesSegments, nodesSegments, b.dist.ChannelDistManager, b.dist.SegmentDistManager)
 	}
@@ -273,6 +278,9 @@ func (b *ScoreBasedBalancer) getNormalSegmentPlan(replica *meta.Replica, nodesSe
 		// sort the segments in asc order, try to mitigate to-from-unbalance
 		// TODO: segment infos inside dist manager may change in the process of making balance plan
 		fromSegments := b.dist.SegmentDistManager.GetByCollectionAndNode(replica.CollectionID, fromNode.nodeID)
+		fromSegments = lo.Filter(fromSegments, func(segment *meta.Segment, _ int) bool {
+			return segment.GetLevel() != datapb.SegmentLevel_L0
+		})
 		sort.Slice(fromSegments, func(i, j int) bool {
 			return fromSegments[i].GetNumOfRows() < fromSegments[j].GetNumOfRows()
 		})

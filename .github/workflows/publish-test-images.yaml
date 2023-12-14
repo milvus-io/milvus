@@ -18,6 +18,10 @@ on:
       - '.github/workflows/publish-test-images.yaml'
       - '!**.md'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   publish-pytest-images:
     name: PyTest
