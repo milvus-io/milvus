@@ -2517,7 +2517,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 type dataNodeConfig struct {
 	FlowGraphMaxQueueLength ParamItem `refreshable:"false"`
 	FlowGraphMaxParallelism ParamItem `refreshable:"false"`
-	MaxParallelSyncTaskNum  ParamItem `refreshable:"false"`
+	MaxParallelSyncTaskNum  ParamItem `refreshable:"true"`
 
 	// skip mode
 	FlowGraphSkipModeEnable   ParamItem `refreshable:"true"`

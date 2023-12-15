@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -64,5 +65,24 @@ func TestPoolWithPanic(t *testing.T) {
 
 	// make sure error returned when conceal panic
 	_, err := future.Await()
+	assert.Error(t, err)
+}
+
+func TestPoolResize(t *testing.T) {
+	cpuNum := hardware.GetCPUNum()
+
+	pool := NewPool[any](cpuNum)
+
+	assert.Equal(t, cpuNum, pool.Cap())
+
+	err := pool.Resize(cpuNum * 2)
+	assert.NoError(t, err)
+	assert.Equal(t, cpuNum*2, pool.Cap())
+
+	err = pool.Resize(0)
+	assert.Error(t, err)
+
+	pool = NewDefaultPool[any]()
+	err = pool.Resize(cpuNum * 2)
 	assert.Error(t, err)
 }
