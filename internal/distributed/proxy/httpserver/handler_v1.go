@@ -25,6 +25,9 @@ func (h *Handlers) checkDatabase(c *gin.Context, dbName string) bool {
 	if dbName == DefaultDbName {
 		return true
 	}
+	if proxy.CheckDatabase(c, dbName) {
+		return true
+	}
 	resp, err := h.proxy.ListDatabases(c, &milvuspb.ListDatabasesRequest{})
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: Code(err), HTTPReturnMessage: err.Error()})
@@ -58,15 +61,14 @@ func checkAuthorization(c *gin.Context, req interface{}) error {
 	return nil
 }
 
-func (h *Handlers) describeCollection(c *gin.Context, dbName string, collectionName string, needAuth bool) (*milvuspb.DescribeCollectionResponse, error) {
+func (h *Handlers) describeCollection(c *gin.Context, dbName string, collectionName string) (*schemapb.CollectionSchema, error) {
+	collSchema, err := proxy.GetCachedCollectionSchema(c, dbName, collectionName)
+	if err == nil {
+		return collSchema, nil
+	}
 	req := milvuspb.DescribeCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
-	}
-	if needAuth {
-		if err := checkAuthorization(c, &req); err != nil {
-			return nil, err
-		}
 	}
 	response, err := h.proxy.DescribeCollection(c, &req)
 	if err != nil {
@@ -81,7 +83,7 @@ func (h *Handlers) describeCollection(c *gin.Context, dbName string, collectionN
 		log.Warn("primary filed autoID VS schema autoID", zap.String("collectionName", collectionName), zap.Bool("primary Field", primaryField.AutoID), zap.Bool("schema", response.Schema.AutoID))
 		response.Schema.AutoID = EnableAutoID
 	}
-	return response, nil
+	return response.Schema, nil
 }
 
 func (h *Handlers) hasCollection(c *gin.Context, dbName string, collectionName string) (bool, error) {
@@ -247,11 +249,22 @@ func (h *Handlers) getCollectionDetails(c *gin.Context) {
 		return
 	}
 	dbName := c.DefaultQuery(HTTPDbName, DefaultDbName)
+	theReq := milvuspb.DescribeCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+	}
+	if err := checkAuthorization(c, &theReq); err != nil {
+		return
+	}
 	if !h.checkDatabase(c, dbName) {
 		return
 	}
-	coll, err := h.describeCollection(c, dbName, collectionName, true)
-	if err != nil || coll == nil {
+	coll, err := h.proxy.DescribeCollection(c, &theReq)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: Code(err), HTTPReturnMessage: err.Error()})
+		return
+	} else if coll.Status.ErrorCode != commonpb.ErrorCode_Success {
+		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: code(int32(coll.Status.ErrorCode)), HTTPReturnMessage: coll.Status.Reason})
 		return
 	}
 	stateResp, stateErr := h.proxy.GetLoadState(c, &milvuspb.GetLoadStateRequest{
@@ -378,11 +391,11 @@ func (h *Handlers) query(c *gin.Context) {
 	}
 	if req.OutputFields == nil {
 		req.OutputFields = []string{DefaultOutputFields}
-		coll, err := h.describeCollection(c, httpReq.DbName, httpReq.CollectionName, false)
+		coll, err := h.describeCollection(c, httpReq.DbName, httpReq.CollectionName)
 		if err != nil || coll == nil {
 			return
 		}
-		for _, field := range coll.Schema.Fields {
+		for _, field := range coll.Fields {
 			if field.DataType == schemapb.DataType_BinaryVector || field.DataType == schemapb.DataType_FloatVector {
 				req.OutputFields = append(req.OutputFields, field.Name)
 			}
@@ -430,12 +443,12 @@ func (h *Handlers) get(c *gin.Context) {
 	if !h.checkDatabase(c, req.DbName) {
 		return
 	}
-	coll, err := h.describeCollection(c, httpReq.DbName, httpReq.CollectionName, false)
+	coll, err := h.describeCollection(c, httpReq.DbName, httpReq.CollectionName)
 	if err != nil || coll == nil {
 		return
 	}
 	body, _ := c.Get(gin.BodyBytesKey)
-	filter, err := checkGetPrimaryKey(coll.Schema, gjson.Get(string(body.([]byte)), DefaultPrimaryFieldName))
+	filter, err := checkGetPrimaryKey(coll, gjson.Get(string(body.([]byte)), DefaultPrimaryFieldName))
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: Code(merr.ErrCheckPrimaryKey), HTTPReturnMessage: merr.ErrCheckPrimaryKey.Error()})
 		return
@@ -443,7 +456,7 @@ func (h *Handlers) get(c *gin.Context) {
 	req.Expr = filter
 	if req.OutputFields == nil {
 		req.OutputFields = []string{DefaultOutputFields}
-		for _, field := range coll.Schema.Fields {
+		for _, field := range coll.Fields {
 			if field.DataType == schemapb.DataType_BinaryVector || field.DataType == schemapb.DataType_FloatVector {
 				req.OutputFields = append(req.OutputFields, field.Name)
 			}
@@ -490,12 +503,12 @@ func (h *Handlers) delete(c *gin.Context) {
 	if !h.checkDatabase(c, req.DbName) {
 		return
 	}
-	coll, err := h.describeCollection(c, httpReq.DbName, httpReq.CollectionName, false)
+	coll, err := h.describeCollection(c, httpReq.DbName, httpReq.CollectionName)
 	if err != nil || coll == nil {
 		return
 	}
 	body, _ := c.Get(gin.BodyBytesKey)
-	filter, err := checkGetPrimaryKey(coll.Schema, gjson.Get(string(body.([]byte)), DefaultPrimaryFieldName))
+	filter, err := checkGetPrimaryKey(coll, gjson.Get(string(body.([]byte)), DefaultPrimaryFieldName))
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: Code(merr.ErrCheckPrimaryKey), HTTPReturnMessage: merr.ErrCheckPrimaryKey.Error()})
 		return
@@ -545,18 +558,18 @@ func (h *Handlers) insert(c *gin.Context) {
 	if !h.checkDatabase(c, req.DbName) {
 		return
 	}
-	coll, err := h.describeCollection(c, httpReq.DbName, httpReq.CollectionName, false)
+	coll, err := h.describeCollection(c, httpReq.DbName, httpReq.CollectionName)
 	if err != nil || coll == nil {
 		return
 	}
 	body, _ := c.Get(gin.BodyBytesKey)
-	err = checkAndSetData(string(body.([]byte)), coll, &httpReq)
+	httpReq.Data, err = checkAndSetData(string(body.([]byte)), coll)
 	if err != nil {
 		log.Warn("high level restful api, fail to deal with insert data", zap.Any("body", body), zap.Error(err))
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: Code(merr.ErrInvalidInsertData), HTTPReturnMessage: merr.ErrInvalidInsertData.Error()})
 		return
 	}
-	req.FieldsData, err = anyToColumns(httpReq.Data, coll.Schema)
+	req.FieldsData, err = anyToColumns(httpReq.Data, coll)
 	if err != nil {
 		log.Warn("high level restful api, fail to deal with insert data", zap.Any("data", httpReq.Data), zap.Error(err))
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: Code(merr.ErrInvalidInsertData), HTTPReturnMessage: merr.ErrInvalidInsertData.Error()})

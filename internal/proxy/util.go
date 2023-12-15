@@ -44,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 const (
@@ -1178,4 +1179,18 @@ func setMsgID(ctx context.Context,
 	}
 
 	return nil
+}
+
+func GetCachedCollectionSchema(ctx context.Context, dbName string, colName string) (*schemapb.CollectionSchema, error) {
+	if globalMetaCache != nil {
+		return globalMetaCache.GetCollectionSchema(ctx, dbName, colName)
+	}
+	return nil, merr.ErrServiceNotReady
+}
+
+func CheckDatabase(ctx context.Context, dbName string) bool {
+	if globalMetaCache != nil {
+		return globalMetaCache.HasDatabase(ctx, dbName)
+	}
+	return false
 }
