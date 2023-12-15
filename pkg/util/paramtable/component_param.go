@@ -1703,7 +1703,7 @@ type queryNodeConfig struct {
 	SchedulePolicyMaxPendingTaskPerUser   ParamItem `refreshable:"true"`
 
 	// CGOPoolSize ratio to MaxReadConcurrency
-	CGOPoolSizeRatio ParamItem `refreshable:"false"`
+	CGOPoolSizeRatio ParamItem `refreshable:"true"`
 
 	EnableWorkerSQCostMetrics ParamItem `refreshable:"true"`
 }
