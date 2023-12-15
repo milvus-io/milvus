@@ -211,6 +211,7 @@ func (c *ChannelMeta) getChannelName(segID UniqueID) string {
 // addSegment adds the segment to current channel. Segments can be added as *new*, *normal* or *flushed*.
 // Make sure to verify `channel.hasSegment(segID)` == false before calling `channel.addSegment()`.
 func (c *ChannelMeta) addSegment(ctx context.Context, req addSegmentReq) error {
+	log := log.Ctx(ctx)
 	if req.collID != c.collectionID {
 		log.Warn("failed to addSegment, collection mismatch",
 			zap.Int64("current collection ID", req.collID),

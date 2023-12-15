@@ -981,7 +981,7 @@ func (s *Server) postFlush(ctx context.Context, segmentID UniqueID) error {
 		return merr.WrapErrSegmentNotFound(segmentID, "segment not found, might be a faked segment, ignore post flush")
 	}
 	// set segment to SegmentState_Flushed
-	if err := s.meta.SetState(segmentID, commonpb.SegmentState_Flushed); err != nil {
+	if err := s.meta.SetState(ctx, segmentID, commonpb.SegmentState_Flushed); err != nil {
 		log.Error("flush segment complete failed", zap.Error(err))
 		return err
 	}

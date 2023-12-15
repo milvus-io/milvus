@@ -462,6 +462,7 @@ func (s *SegmentManager) SealAllSegments(ctx context.Context, collectionID Uniqu
 	if len(segIDs) != 0 {
 		segCandidates = segIDs
 	}
+	log := log.Ctx(ctx)
 	for _, id := range segCandidates {
 		info := s.meta.GetHealthySegment(id)
 		if info == nil {
@@ -473,14 +474,17 @@ func (s *SegmentManager) SealAllSegments(ctx context.Context, collectionID Uniqu
 		}
 		// idempotent sealed
 		if info.State == commonpb.SegmentState_Sealed {
+			log.Debug("segment has been sealed, idempotent sealed", zap.Int64("segmentID", id))
 			ret = append(ret, id)
 			continue
 		}
 		// segment can be sealed only if it is growing or if it's importing
 		if (!isImport && info.State != commonpb.SegmentState_Growing) || (isImport && info.State != commonpb.SegmentState_Importing) {
+			log.Debug("segment is not growing or importing, cannot be sealed", zap.Int64("segmentID", id))
 			continue
 		}
-		if err := s.meta.SetState(id, commonpb.SegmentState_Sealed); err != nil {
+		if err := s.meta.SetState(ctx, id, commonpb.SegmentState_Sealed); err != nil {
+			log.Debug("sealing segment encounter error", zap.Int64("segmentID", id), zap.Error(err))
 			return nil, err
 		}
 		ret = append(ret, id)
@@ -495,11 +499,11 @@ func (s *SegmentManager) GetFlushableSegments(ctx context.Context, channel strin
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	// TODO:move tryToSealSegment and dropEmptySealedSegment outside
-	if err := s.tryToSealSegment(t, channel); err != nil {
+	if err := s.tryToSealSegment(ctx, t, channel); err != nil {
 		return nil, err
 	}
 
-	s.cleanupSealedSegment(t, channel)
+	s.cleanupSealedSegment(ctx, t, channel)
 
 	ret := make([]UniqueID, 0, len(s.segments))
 	for _, id := range s.segments {
@@ -538,7 +542,7 @@ func (s *SegmentManager) ExpireAllocations(channel string, ts Timestamp) error {
 	return nil
 }
 
-func (s *SegmentManager) cleanupSealedSegment(ts Timestamp, channel string) {
+func (s *SegmentManager) cleanupSealedSegment(ctx context.Context, ts Timestamp, channel string) {
 	valids := make([]int64, 0, len(s.segments))
 	for _, id := range s.segments {
 		segment := s.meta.GetHealthySegment(id)
@@ -549,14 +553,14 @@ func (s *SegmentManager) cleanupSealedSegment(ts Timestamp, channel string) {
 
 		if isEmptySealedSegment(segment, ts) {
 			log.Info("remove empty sealed segment", zap.Int64("collection", segment.CollectionID), zap.Any("segment", id))
-			s.meta.SetState(id, commonpb.SegmentState_Dropped)
+			s.meta.SetState(ctx, id, commonpb.SegmentState_Dropped)
 			continue
 		}
 
 		// clean up importing segment since the task failed.
 		if segment.GetState() == commonpb.SegmentState_Importing && segment.GetLastExpireTime() < ts {
 			log.Info("cleanup staled importing segment", zap.Int64("collection", segment.CollectionID), zap.Int64("segment", id))
-			s.meta.SetState(id, commonpb.SegmentState_Dropped)
+			s.meta.SetState(ctx, id, commonpb.SegmentState_Dropped)
 			continue
 		}
 
@@ -570,7 +574,7 @@ func isEmptySealedSegment(segment *SegmentInfo, ts Timestamp) bool {
 }
 
 // tryToSealSegment applies segment & channel seal policies
-func (s *SegmentManager) tryToSealSegment(ts Timestamp, channel string) error {
+func (s *SegmentManager) tryToSealSegment(ctx context.Context, ts Timestamp, channel string) error {
 	channelInfo := make(map[string][]*SegmentInfo)
 	for _, id := range s.segments {
 		info := s.meta.GetHealthySegment(id)
@@ -584,7 +588,7 @@ func (s *SegmentManager) tryToSealSegment(ts Timestamp, channel string) error {
 		// change shouldSeal to segment seal policy logic
 		for _, policy := range s.segmentSealPolicies {
 			if policy(info, ts) {
-				if err := s.meta.SetState(id, commonpb.SegmentState_Sealed); err != nil {
+				if err := s.meta.SetState(ctx, id, commonpb.SegmentState_Sealed); err != nil {
 					return err
 				}
 				break
@@ -598,7 +602,7 @@ func (s *SegmentManager) tryToSealSegment(ts Timestamp, channel string) error {
 				if info.State != commonpb.SegmentState_Growing {
 					continue
 				}
-				if err := s.meta.SetState(info.GetID(), commonpb.SegmentState_Sealed); err != nil {
+				if err := s.meta.SetState(ctx, info.GetID(), commonpb.SegmentState_Sealed); err != nil {
 					return err
 				}
 			}

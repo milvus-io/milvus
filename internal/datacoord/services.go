@@ -572,7 +572,7 @@ func (s *Server) SetSegmentState(ctx context.Context, req *datapb.SetSegmentStat
 			Status: merr.Status(err),
 		}, nil
 	}
-	err := s.meta.SetState(req.GetSegmentId(), req.GetNewState())
+	err := s.meta.SetState(ctx, req.GetSegmentId(), req.GetNewState())
 	if err != nil {
 		log.Error("failed to updated segment state in dataCoord meta",
 			zap.Int64("segmentID", req.SegmentId),
@@ -1538,7 +1538,7 @@ func (s *Server) MarkSegmentsDropped(ctx context.Context, req *datapb.MarkSegmen
 	log.Info("marking segments dropped", zap.Int64s("segments", req.GetSegmentIds()))
 	var err error
 	for _, segID := range req.GetSegmentIds() {
-		if err = s.meta.SetState(segID, commonpb.SegmentState_Dropped); err != nil {
+		if err = s.meta.SetState(ctx, segID, commonpb.SegmentState_Dropped); err != nil {
 			// Fail-open.
 			log.Error("failed to set segment state as dropped", zap.Int64("segmentID", segID))
 			break

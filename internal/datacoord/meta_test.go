@@ -280,9 +280,9 @@ func TestMeta_Basic(t *testing.T) {
 		assert.EqualValues(t, 1, len(segIDs))
 		assert.Contains(t, segIDs, segID1_1)
 
-		err = meta.SetState(segID0_0, commonpb.SegmentState_Sealed)
+		err = meta.SetState(context.TODO(), segID0_0, commonpb.SegmentState_Sealed)
 		assert.NoError(t, err)
-		err = meta.SetState(segID0_0, commonpb.SegmentState_Flushed)
+		err = meta.SetState(context.TODO(), segID0_0, commonpb.SegmentState_Flushed)
 		assert.NoError(t, err)
 
 		info0_0 = meta.GetHealthySegment(segID0_0)

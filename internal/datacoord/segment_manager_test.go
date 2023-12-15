@@ -197,7 +197,7 @@ func TestLastExpireReset(t *testing.T) {
 	meta.SetCurrentRows(segmentID1, bigRows)
 	meta.SetCurrentRows(segmentID2, bigRows)
 	meta.SetCurrentRows(segmentID3, smallRows)
-	segmentManager.tryToSealSegment(expire1, channelName)
+	segmentManager.tryToSealSegment(context.TODO(), expire1, channelName)
 	assert.Equal(t, commonpb.SegmentState_Sealed, meta.GetSegment(segmentID1).GetState())
 	assert.Equal(t, commonpb.SegmentState_Sealed, meta.GetSegment(segmentID2).GetState())
 	assert.Equal(t, commonpb.SegmentState_Growing, meta.GetSegment(segmentID3).GetState())
@@ -555,7 +555,7 @@ func TestTryToSealSegment(t *testing.T) {
 
 		ts, err := segmentManager.allocator.allocTimestamp(context.Background())
 		assert.NoError(t, err)
-		err = segmentManager.tryToSealSegment(ts, "c1")
+		err = segmentManager.tryToSealSegment(context.TODO(), ts, "c1")
 		assert.NoError(t, err)
 
 		for _, seg := range segmentManager.meta.segments.segments {
@@ -580,7 +580,7 @@ func TestTryToSealSegment(t *testing.T) {
 
 		ts, err := segmentManager.allocator.allocTimestamp(context.Background())
 		assert.NoError(t, err)
-		err = segmentManager.tryToSealSegment(ts, "c1")
+		err = segmentManager.tryToSealSegment(context.TODO(), ts, "c1")
 		assert.NoError(t, err)
 
 		for _, seg := range segmentManager.meta.segments.segments {
@@ -607,7 +607,7 @@ func TestTryToSealSegment(t *testing.T) {
 
 		ts, err := segmentManager.allocator.allocTimestamp(context.Background())
 		assert.NoError(t, err)
-		err = segmentManager.tryToSealSegment(ts, "c1")
+		err = segmentManager.tryToSealSegment(context.TODO(), ts, "c1")
 		assert.NoError(t, err)
 
 		for _, seg := range segmentManager.meta.segments.segments {
@@ -635,7 +635,7 @@ func TestTryToSealSegment(t *testing.T) {
 
 		// No seal polices
 		{
-			err = segmentManager.tryToSealSegment(ts, "c1")
+			err = segmentManager.tryToSealSegment(context.TODO(), ts, "c1")
 			assert.NoError(t, err)
 			segments := segmentManager.meta.segments.segments
 			assert.Equal(t, 1, len(segments))
@@ -662,7 +662,7 @@ func TestTryToSealSegment(t *testing.T) {
 						},
 					},
 				}
-				err = segmentManager.tryToSealSegment(ts, "c1")
+				err = segmentManager.tryToSealSegment(context.TODO(), ts, "c1")
 				assert.NoError(t, err)
 				seg = segmentManager.meta.segments.segments[seg.ID]
 				assert.Equal(t, commonpb.SegmentState_Growing, seg.GetState())
@@ -692,7 +692,7 @@ func TestTryToSealSegment(t *testing.T) {
 						},
 					},
 				}
-				err = segmentManager.tryToSealSegment(ts, "c1")
+				err = segmentManager.tryToSealSegment(context.TODO(), ts, "c1")
 				assert.NoError(t, err)
 				seg = segmentManager.meta.segments.segments[seg.ID]
 				assert.Equal(t, commonpb.SegmentState_Sealed, seg.GetState())
@@ -725,7 +725,7 @@ func TestTryToSealSegment(t *testing.T) {
 
 		ts, err := segmentManager.allocator.allocTimestamp(context.Background())
 		assert.NoError(t, err)
-		err = segmentManager.tryToSealSegment(ts, "c1")
+		err = segmentManager.tryToSealSegment(context.TODO(), ts, "c1")
 		assert.Error(t, err)
 	})
 
@@ -754,7 +754,7 @@ func TestTryToSealSegment(t *testing.T) {
 
 		ts, err := segmentManager.allocator.allocTimestamp(context.Background())
 		assert.NoError(t, err)
-		err = segmentManager.tryToSealSegment(ts, "c1")
+		err = segmentManager.tryToSealSegment(context.TODO(), ts, "c1")
 		assert.Error(t, err)
 	})
 }

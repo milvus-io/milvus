@@ -369,17 +369,14 @@ func (m *meta) GetAllSegmentsUnsafe() []*SegmentInfo {
 }
 
 // SetState setting segment with provided ID state
-func (m *meta) SetState(segmentID UniqueID, targetState commonpb.SegmentState) error {
-	log.Debug("meta update: setting segment state",
-		zap.Int64("segmentID", segmentID),
-		zap.Any("target state", targetState))
+func (m *meta) SetState(ctx context.Context, segmentID UniqueID, targetState commonpb.SegmentState) error {
+	log := log.Ctx(ctx).With(zap.Int64("segmentID", segmentID), zap.Any("target state", targetState))
+	log.Debug("meta update: setting segment state")
 	m.Lock()
 	defer m.Unlock()
 	curSegInfo := m.segments.GetSegment(segmentID)
 	if curSegInfo == nil {
-		log.Warn("meta update: setting segment state - segment not found",
-			zap.Int64("segmentID", segmentID),
-			zap.Any("target state", targetState))
+		log.Warn("meta update: setting segment state - segment not found")
 		// idempotent drop
 		if targetState == commonpb.SegmentState_Dropped {
 			return nil
@@ -396,8 +393,6 @@ func (m *meta) SetState(segmentID UniqueID, targetState commonpb.SegmentState) e
 		updateSegStateAndPrepareMetrics(clonedSegment, targetState, metricMutation)
 		if err := m.catalog.AlterSegments(m.ctx, []*datapb.SegmentInfo{clonedSegment.SegmentInfo}); err != nil {
 			log.Warn("meta update: setting segment state - failed to alter segments",
-				zap.Int64("segmentID", segmentID),
-				zap.String("target state", targetState.String()),
 				zap.Error(err))
 			return err
 		}
@@ -406,9 +401,7 @@ func (m *meta) SetState(segmentID UniqueID, targetState commonpb.SegmentState) e
 		// Update in-memory meta.
 		m.segments.SetState(segmentID, targetState)
 	}
-	log.Info("meta update: setting segment state - complete",
-		zap.Int64("segmentID", segmentID),
-		zap.String("target state", targetState.String()))
+	log.Info("meta update: setting segment state - complete")
 	return nil
 }
 
