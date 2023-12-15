@@ -110,7 +110,9 @@ func checkRetention() bool {
 	return params.RocksmqCfg.RetentionSizeInMB.GetAsInt64() != -1 || params.RocksmqCfg.RetentionTimeInMinutes.GetAsInt64() != -1
 }
 
-var topicMu = sync.Map{}
+// TODO: We shouldn't use a mutex group to check if a topic is being created or not, it cause a lot of bugs.
+// Refactor it in future.
+var topicMu = typeutil.NewRemovableGroupMutex[string]()
 
 type rocksmq struct {
 	store       *gorocksdb.DB
@@ -376,7 +378,7 @@ func (rmq *rocksmq) stopRetention() {
 }
 
 // CreateTopic writes initialized messages for topic in rocksdb
-func (rmq *rocksmq) CreateTopic(topicName string) error {
+func (rmq *rocksmq) CreateTopic(topicName string) (err error) {
 	if rmq.isClosed() {
 		return errors.New(RmqNotServingErrMsg)
 	}
@@ -399,9 +401,16 @@ func (rmq *rocksmq) CreateTopic(topicName string) error {
 		return nil
 	}
 
-	if _, ok := topicMu.Load(topicName); !ok {
-		topicMu.Store(topicName, new(sync.Mutex))
-	}
+	lockGuard := topicMu.Lock(topicName)
+	defer func() {
+		if err != nil {
+			// If create topic failed, we should remove the lock.
+			// Some logic in rocksmq use these lock to check if a topic is being created or not.
+			lockGuard.UnlockAndRemove()
+		} else {
+			lockGuard.Unlock()
+		}
+	}()
 
 	// msgSizeKey -> msgSize
 	// topicIDKey -> topic creating time
@@ -426,24 +435,27 @@ func (rmq *rocksmq) CreateTopic(topicName string) error {
 }
 
 // DestroyTopic removes messages for topic in rocksmq
-func (rmq *rocksmq) DestroyTopic(topicName string) error {
+func (rmq *rocksmq) DestroyTopic(topicName string) (err error) {
 	start := time.Now()
-	ll, ok := topicMu.Load(topicName)
-	if !ok {
+	lockGuard := topicMu.LockIfExist(topicName)
+	if lockGuard == nil {
 		return fmt.Errorf("topic name = %s not exist", topicName)
 	}
-	lock, ok := ll.(*sync.Mutex)
-	if !ok {
-		return fmt.Errorf("get mutex failed, topic name = %s", topicName)
-	}
-	lock.Lock()
-	defer lock.Unlock()
+	defer func() {
+		if err == nil {
+			// If destroy topic success, we should remove the lock.
+			lockGuard.UnlockAndRemove()
+		} else {
+			lockGuard.Unlock()
+		}
+	}()
+	// TODO: Lost transaction promised here. half destroy topic can be seen by others.
 
 	rmq.consumers.Delete(topicName)
 
 	// clean the topic data it self
 	fixTopicName := topicName + "/"
-	err := rmq.kv.RemoveWithPrefix(fixTopicName)
+	err = rmq.kv.RemoveWithPrefix(fixTopicName)
 	if err != nil {
 		return err
 	}
@@ -482,7 +494,6 @@ func (rmq *rocksmq) DestroyTopic(topicName string) error {
 	}
 
 	// clean up retention info
-	topicMu.Delete(topicName)
 	rmq.retentionInfo.topicRetetionTime.GetAndRemove(topicName)
 
 	log.Debug("Rocksmq destroy topic successfully ", zap.String("topic", topicName), zap.Int64("elapsed", time.Since(start).Milliseconds()))
@@ -529,12 +540,19 @@ func (rmq *rocksmq) RegisterConsumer(consumer *Consumer) error {
 		return errors.New(RmqNotServingErrMsg)
 	}
 	start := time.Now()
+	lockGuard := topicMu.LockIfExist(consumer.Topic)
+	if lockGuard == nil {
+		return fmt.Errorf("topic name = %s not exist at RegisterConsumer", consumer.Topic)
+	}
+	defer lockGuard.Unlock()
+
 	if vals, ok := rmq.consumers.Load(consumer.Topic); ok {
 		for _, v := range vals.([]*Consumer) {
 			if v.GroupName == consumer.GroupName {
 				return nil
 			}
 		}
+		// Append operation always CopyOnWrite, so it's safe to be accessed by other method.
 		consumers := vals.([]*Consumer)
 		consumers = append(consumers, consumer)
 		rmq.consumers.Store(consumer.Topic, consumers)
@@ -570,16 +588,12 @@ func (rmq *rocksmq) DestroyConsumerGroup(topicName, groupName string) error {
 // DestroyConsumerGroup removes a consumer group from rocksdb_kv
 func (rmq *rocksmq) destroyConsumerGroupInternal(topicName, groupName string) error {
 	start := time.Now()
-	ll, ok := topicMu.Load(topicName)
-	if !ok {
+	lockGuard := topicMu.LockIfExist(topicName)
+	if lockGuard == nil {
 		return fmt.Errorf("topic name = %s not exist", topicName)
 	}
-	lock, ok := ll.(*sync.Mutex)
-	if !ok {
-		return fmt.Errorf("get mutex failed, topic name = %s", topicName)
-	}
-	lock.Lock()
-	defer lock.Unlock()
+	defer lockGuard.Unlock()
+
 	key := constructCurrentID(topicName, groupName)
 	rmq.consumersID.Delete(key)
 	if vals, ok := rmq.consumers.Load(topicName); ok {
@@ -587,8 +601,12 @@ func (rmq *rocksmq) destroyConsumerGroupInternal(topicName, groupName string) er
 		for index, v := range consumers {
 			if v.GroupName == groupName {
 				close(v.MsgMutex)
-				consumers = append(consumers[:index], consumers[index+1:]...)
-				rmq.consumers.Store(topicName, consumers)
+				// Need CopyOnWrite operation here.
+				// Operate on a copy of the slice, so that the original slice is not modified and be safe to be accessed by other method.
+				newConsumers := make([]*Consumer, 0, len(consumers)-1)
+				newConsumers = append(newConsumers, consumers[:index]...)
+				newConsumers = append(newConsumers, consumers[index+1:]...)
+				rmq.consumers.Store(topicName, newConsumers)
 				break
 			}
 		}
@@ -605,16 +623,12 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) ([]Uni
 		return nil, errors.New(RmqNotServingErrMsg)
 	}
 	start := time.Now()
-	ll, ok := topicMu.Load(topicName)
-	if !ok {
+
+	lockGuard := topicMu.LockIfExist(topicName)
+	if lockGuard == nil {
 		return []UniqueID{}, fmt.Errorf("topic name = %s not exist", topicName)
 	}
-	lock, ok := ll.(*sync.Mutex)
-	if !ok {
-		return []UniqueID{}, fmt.Errorf("get mutex failed, topic name = %s", topicName)
-	}
-	lock.Lock()
-	defer lock.Unlock()
+	defer lockGuard.Unlock()
 
 	getLockTime := time.Since(start).Milliseconds()
 
@@ -741,17 +755,11 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 		return nil, errors.New(RmqNotServingErrMsg)
 	}
 	start := time.Now()
-	ll, ok := topicMu.Load(topicName)
-	if !ok {
+	lockGuard := topicMu.LockIfExist(topicName)
+	if lockGuard == nil {
 		return nil, fmt.Errorf("topic name = %s not exist", topicName)
 	}
-
-	lock, ok := ll.(*sync.Mutex)
-	if !ok {
-		return nil, fmt.Errorf("get mutex failed, topic name = %s", topicName)
-	}
-	lock.Lock()
-	defer lock.Unlock()
+	defer lockGuard.Unlock()
 
 	currentID, ok := rmq.getCurrentID(topicName, groupName)
 	if !ok {
@@ -900,17 +908,11 @@ func (rmq *rocksmq) Seek(topicName string, groupName string, msgID UniqueID) err
 	if rmq.isClosed() {
 		return errors.New(RmqNotServingErrMsg)
 	}
-	/* Step I: Check if key exists */
-	ll, ok := topicMu.Load(topicName)
-	if !ok {
+	lockGuard := topicMu.LockIfExist(topicName)
+	if lockGuard == nil {
 		return merr.WrapErrMqTopicNotFound(topicName)
 	}
-	lock, ok := ll.(*sync.Mutex)
-	if !ok {
-		return fmt.Errorf("get mutex failed, topic name = %s", topicName)
-	}
-	lock.Lock()
-	defer lock.Unlock()
+	defer lockGuard.Unlock()
 
 	err := rmq.seek(topicName, groupName, msgID)
 	if err != nil {
@@ -927,21 +929,17 @@ func (rmq *rocksmq) ForceSeek(topicName string, groupName string, msgID UniqueID
 		return errors.New(RmqNotServingErrMsg)
 	}
 	/* Step I: Check if key exists */
-	ll, ok := topicMu.Load(topicName)
-	if !ok {
+	lockGuard := topicMu.LockIfExist(topicName)
+	if lockGuard == nil {
 		return merr.WrapErrMqTopicNotFound(topicName)
 	}
-	lock, ok := ll.(*sync.Mutex)
-	if !ok {
-		return fmt.Errorf("get mutex failed, topic name = %s", topicName)
-	}
-	lock.Lock()
-	defer lock.Unlock()
+	defer lockGuard.Unlock()
+
 	rmq.storeMu.Lock()
 	defer rmq.storeMu.Unlock()
 
 	key := constructCurrentID(topicName, groupName)
-	_, ok = rmq.consumersID.Load(key)
+	_, ok := rmq.consumersID.Load(key)
 	if !ok {
 		return fmt.Errorf("ConsumerGroup %s, channel %s not exists", groupName, topicName)
 	}
@@ -1114,8 +1112,7 @@ func (rmq *rocksmq) updateAckedInfo(topicName, groupName string, firstID UniqueI
 }
 
 func (rmq *rocksmq) CheckTopicValid(topic string) error {
-	_, ok := topicMu.Load(topic)
-	if !ok {
+	if !topicMu.Exists(topic) {
 		return merr.WrapErrMqTopicNotFound(topic, "failed to get topic")
 	}
 

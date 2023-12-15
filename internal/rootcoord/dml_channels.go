@@ -188,7 +188,8 @@ func newDmlChannels(ctx context.Context, factory msgstream.Factory, chanNamePref
 			subName := fmt.Sprintf("pre-created-topic-check-%s", name)
 			ms.AsConsumer(ctx, []string{name}, subName, mqwrapper.SubscriptionPositionUnknown)
 			// check if topic is existed
-			// kafka and rmq will err if the topic does not yet exist, pulsar will not
+			// rmq and nmq will create topic if not existed now, so it will not panic here.
+			// kafka will err if the topic does not yet exist, pulsar will not.
 			// allow topics is not empty, for the reason that when restart or upgrade, the topic is not empty
 			// if there are any message that not belong to milvus, will skip it
 			err := ms.CheckTopicValid(name)

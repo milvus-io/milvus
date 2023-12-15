@@ -85,16 +85,11 @@ func (rmq *rocksmq) produceBefore2(topicName string, messages []producerMessageB
 		return nil, errors.New(RmqNotServingErrMsg)
 	}
 	start := time.Now()
-	ll, ok := topicMu.Load(topicName)
-	if !ok {
+	lockGuard := topicMu.LockIfExist(topicName)
+	if lockGuard == nil {
 		return []UniqueID{}, fmt.Errorf("topic name = %s not exist", topicName)
 	}
-	lock, ok := ll.(*sync.Mutex)
-	if !ok {
-		return []UniqueID{}, fmt.Errorf("get mutex failed, topic name = %s", topicName)
-	}
-	lock.Lock()
-	defer lock.Unlock()
+	defer lockGuard.Unlock()
 
 	getLockTime := time.Since(start).Milliseconds()
 
@@ -221,6 +216,34 @@ func TestRocksmq_RegisterConsumer(t *testing.T) {
 		MsgMutex:  make(chan struct{}),
 	}
 	rmq.RegisterConsumer(consumer2)
+
+	// Concurrent RegisterConsumer and Produce test.
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 1000; i++ {
+			_, err := rmq.Produce(topicName, pMsgs)
+			assert.NoError(t, err)
+		}
+	}()
+
+	for j := 0; j < 100; j++ {
+		wg.Add(1)
+		go func(j int) {
+			defer wg.Done()
+			groupName := fmt.Sprintf("group_register_%d", j)
+			consumer := &Consumer{
+				Topic:     topicName,
+				GroupName: groupName,
+				MsgMutex:  make(chan struct{}),
+			}
+			err := rmq.RegisterConsumer(consumer)
+			assert.NoError(t, err)
+			rmq.DestroyConsumerGroup(topicName, consumer.GroupName)
+		}(j)
+	}
+	wg.Wait()
 }
 
 func TestRocksmq_Basic(t *testing.T) {
@@ -361,7 +384,7 @@ func TestRocksmq_Dummy(t *testing.T) {
 	assert.NoError(t, err)
 
 	channelName1 := "channel_dummy"
-	topicMu.Store(channelName1, new(sync.Mutex))
+	topicMu.Lock(channelName1).Unlock()
 	err = rmq.DestroyTopic(channelName1)
 	assert.NoError(t, err)
 
@@ -393,10 +416,10 @@ func TestRocksmq_Dummy(t *testing.T) {
 	pMsgA := ProducerMessage{Payload: []byte(msgA)}
 	pMsgs[0] = pMsgA
 
-	topicMu.Delete(channelName)
+	topicMu.Lock(channelName).UnlockAndRemove()
 	_, err = rmq.Consume(channelName, groupName1, 1)
 	assert.Error(t, err)
-	topicMu.Store(channelName, channelName)
+	topicMu.Lock(channelName).Unlock()
 	_, err = rmq.Produce(channelName, nil)
 	assert.Error(t, err)
 
@@ -1003,7 +1026,7 @@ func TestRocksmq_CheckPreTopicValid(t *testing.T) {
 	err = rmq.CreateTopic(channelName2)
 	defer rmq.DestroyTopic(channelName2)
 	assert.NoError(t, err)
-	topicMu.Store(channelName2, new(sync.Mutex))
+	topicMu.Lock(channelName2).Unlock()
 
 	pMsgs := make([]ProducerMessage, 10)
 	for i := 0; i < 10; i++ {
@@ -1023,7 +1046,7 @@ func TestRocksmq_CheckPreTopicValid(t *testing.T) {
 	defer rmq.DestroyTopic(channelName3)
 	assert.NoError(t, err)
 
-	topicMu.Store(channelName3, new(sync.Mutex))
+	topicMu.Lock(channelName3).Unlock()
 	err = rmq.CheckTopicValid(channelName3)
 	assert.NoError(t, err)
 }
@@ -1131,7 +1154,7 @@ func TestRocksmq_SeekTopicMutexError(t *testing.T) {
 	assert.NoError(t, err)
 	defer rmq.Close()
 
-	topicMu.Store("test_topic_mutix_error", nil)
+	topicMu.Lock("test_topic_mutix_error").Unlock()
 	assert.Error(t, rmq.Seek("test_topic_mutix_error", "", 0))
 	assert.Error(t, rmq.ForceSeek("test_topic_mutix_error", "", 0))
 }

@@ -73,6 +73,12 @@ func (c *client) Subscribe(options ConsumerOptions) (Consumer, error) {
 		return nil, newError(0, "Rmq server is nil")
 	}
 
+	// Create a topic in rocksmq, ignore if topic exists
+	err := c.server.CreateTopic(options.Topic)
+	if err != nil {
+		return nil, err
+	}
+
 	exist, con, err := c.server.ExistConsumerGroup(options.Topic, options.SubscriptionName)
 	if err != nil {
 		return nil, err

@@ -62,7 +62,9 @@ func initRetentionInfo(kv *rocksdbkv.RocksdbKV, db *gorocksdb.DB) (*retentionInf
 	for _, key := range topicKeys {
 		topic := key[len(TopicIDTitle):]
 		ri.topicRetetionTime.Insert(topic, time.Now().Unix())
-		topicMu.Store(topic, new(sync.Mutex))
+		// TODO: we are using a global lock here group to check if topic is exist, which is not good implementation.
+		lockGuard := topicMu.Lock(topic)
+		lockGuard.Unlock()
 	}
 	return ri, nil
 }
@@ -311,16 +313,11 @@ func (ri *retentionInfo) cleanData(topic string, pageEndID UniqueID) error {
 	ackedEndIDKey := fixedAckedTsKey + "/" + strconv.FormatInt(pageEndID+1, 10)
 	writeBatch.DeleteRange([]byte(ackedStartIDKey), []byte(ackedEndIDKey))
 
-	ll, ok := topicMu.Load(topic)
-	if !ok {
+	lockGuard := topicMu.LockIfExist(topic)
+	if lockGuard == nil {
 		return fmt.Errorf("topic name = %s not exist", topic)
 	}
-	lock, ok := ll.(*sync.Mutex)
-	if !ok {
-		return fmt.Errorf("get mutex failed, topic name = %s", topic)
-	}
-	lock.Lock()
-	defer lock.Unlock()
+	defer lockGuard.Unlock()
 
 	err := DeleteMessages(ri.db, topic, 0, pageEndID)
 	if err != nil {

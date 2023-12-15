@@ -165,7 +165,9 @@ func TestDmlChannels(t *testing.T) {
 	defer paramtable.Get().Reset(Params.CommonCfg.PreCreatedTopicEnabled.Key)
 	defer paramtable.Get().Reset(Params.CommonCfg.TopicNames.Key)
 
-	assert.Panics(t, func() { newDmlChannels(ctx, factory, dmlChanPrefix, totalDmlChannelNum) })
+	// rmq will create the consumer now, so it will not panic here.
+	ch := newDmlChannels(ctx, factory, dmlChanPrefix, totalDmlChannelNum)
+	assert.NotNil(t, ch)
 }
 
 func TestDmChannelsFailure(t *testing.T) {

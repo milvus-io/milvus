@@ -151,6 +151,7 @@ func TestClient_SubscribeError(t *testing.T) {
 	testGroupName := newConsumerName()
 
 	assert.NoError(t, err)
+	mockMQ.EXPECT().CreateTopic(testTopic).Return(nil)
 	mockMQ.EXPECT().ExistConsumerGroup(testTopic, testGroupName).Return(false, nil, nil)
 	mockMQ.EXPECT().CreateConsumerGroup(testTopic, testGroupName).Return(nil)
 	mockMQ.EXPECT().RegisterConsumer(mock.Anything).Return(nil)
