@@ -95,8 +95,9 @@ func (fg *TimeTickedFlowGraph) Start() {
 }
 
 func (fg *TimeTickedFlowGraph) Blockall() {
-	for _, v := range fg.nodeCtx {
-		v.Block()
+	// Lock with determined order to avoid deadlock.
+	for _, nodeName := range fg.nodeSequence {
+		fg.nodeCtx[nodeName].Block()
 	}
 }
 
@@ -123,8 +124,9 @@ func (fg *TimeTickedFlowGraph) TryBlockAll(ctx context.Context) bool {
 }
 
 func (fg *TimeTickedFlowGraph) Unblock() {
-	for _, v := range fg.nodeCtx {
-		v.Unblock()
+	// Unlock with reverse order.
+	for i := len(fg.nodeSequence) - 1; i >= 0; i-- {
+		fg.nodeCtx[fg.nodeSequence[i]].Unblock()
 	}
 }
 
