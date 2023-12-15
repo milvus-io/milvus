@@ -3,6 +3,7 @@ package syncmgr
 import (
 	"context"
 	"math/rand"
+	"strconv"
 	"testing"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/config"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
@@ -41,7 +43,7 @@ type SyncManagerSuite struct {
 }
 
 func (s *SyncManagerSuite) SetupSuite() {
-	paramtable.Get().Init(paramtable.NewBaseTable())
+	paramtable.Get().Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
 
 	s.collectionID = 100
 	s.partitionID = 101
@@ -155,7 +157,7 @@ func (s *SyncManagerSuite) TestSubmit() {
 	s.metacache.EXPECT().GetSegmentsBy(mock.Anything).Return([]*metacache.SegmentInfo{seg})
 	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 
-	manager, err := NewSyncManager(10, s.chunkManager, s.allocator)
+	manager, err := NewSyncManager(s.chunkManager, s.allocator)
 	s.NoError(err)
 	task := s.getSuiteSyncTask()
 	task.WithMetaWriter(BrokerMetaWriter(s.broker))
@@ -187,7 +189,7 @@ func (s *SyncManagerSuite) TestCompacted() {
 	s.metacache.EXPECT().GetSegmentsBy(mock.Anything).Return([]*metacache.SegmentInfo{seg})
 	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 
-	manager, err := NewSyncManager(10, s.chunkManager, s.allocator)
+	manager, err := NewSyncManager(s.chunkManager, s.allocator)
 	s.NoError(err)
 	task := s.getSuiteSyncTask()
 	task.WithMetaWriter(BrokerMetaWriter(s.broker))
@@ -225,7 +227,7 @@ func (s *SyncManagerSuite) TestBlock() {
 		}
 	})
 
-	manager, err := NewSyncManager(10, s.chunkManager, s.allocator)
+	manager, err := NewSyncManager(s.chunkManager, s.allocator)
 	s.NoError(err)
 
 	// block
@@ -251,6 +253,59 @@ func (s *SyncManagerSuite) TestBlock() {
 
 	manager.Unblock(s.segmentID)
 	<-sig
+}
+
+func (s *SyncManagerSuite) TestResizePool() {
+	manager, err := NewSyncManager(s.chunkManager, s.allocator)
+	s.NoError(err)
+
+	syncMgr, ok := manager.(*syncManager)
+	s.Require().True(ok)
+
+	cap := syncMgr.keyLockDispatcher.workerPool.Cap()
+	s.NotZero(cap)
+
+	params := paramtable.Get()
+	configKey := params.DataNodeCfg.MaxParallelSyncMgrTasks.Key
+
+	syncMgr.resizeHandler(&config.Event{
+		Key:        configKey,
+		Value:      "abc",
+		HasUpdated: true,
+	})
+
+	s.Equal(cap, syncMgr.keyLockDispatcher.workerPool.Cap())
+
+	syncMgr.resizeHandler(&config.Event{
+		Key:        configKey,
+		Value:      "-1",
+		HasUpdated: true,
+	})
+	s.Equal(cap, syncMgr.keyLockDispatcher.workerPool.Cap())
+
+	syncMgr.resizeHandler(&config.Event{
+		Key:        configKey,
+		Value:      strconv.FormatInt(int64(cap*2), 10),
+		HasUpdated: true,
+	})
+	s.Equal(cap*2, syncMgr.keyLockDispatcher.workerPool.Cap())
+}
+
+func (s *SyncManagerSuite) TestNewSyncManager() {
+	manager, err := NewSyncManager(s.chunkManager, s.allocator)
+	s.NoError(err)
+
+	_, ok := manager.(*syncManager)
+	s.Require().True(ok)
+
+	params := paramtable.Get()
+	configKey := params.DataNodeCfg.MaxParallelSyncMgrTasks.Key
+	defer params.Reset(configKey)
+
+	params.Save(configKey, "0")
+
+	_, err = NewSyncManager(s.chunkManager, s.allocator)
+	s.Error(err)
 }
 
 func TestSyncManager(t *testing.T) {
