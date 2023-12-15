@@ -41,6 +41,10 @@ func (m *GrpcDataCoordClient) GcConfirm(ctx context.Context, in *datapb.GcConfir
 	return &datapb.GcConfirmResponse{}, m.Err
 }
 
+func (m *GrpcDataCoordClient) GcControl(ctx context.Context, in *datapb.GcControlRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
 func (m *GrpcDataCoordClient) CheckHealth(ctx context.Context, in *milvuspb.CheckHealthRequest, opts ...grpc.CallOption) (*milvuspb.CheckHealthResponse, error) {
 	return &milvuspb.CheckHealthResponse{}, m.Err
 }
