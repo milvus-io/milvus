@@ -30,6 +30,7 @@ import (
 // TimeTickedFlowGraph flowgraph with input from tt msg stream
 type TimeTickedFlowGraph struct {
 	nodeCtx         map[NodeName]*nodeCtx
+	nodeSequence    []NodeName
 	nodeCtxManager  *nodeCtxManager
 	stopOnce        sync.Once
 	startOnce       sync.Once
@@ -46,6 +47,7 @@ func (fg *TimeTickedFlowGraph) AddNode(node Node) {
 	if node.IsInputNode() {
 		fg.nodeCtxManager = NewNodeCtxManager(&nodeCtx, fg.closeWg)
 	}
+	fg.nodeSequence = append(fg.nodeSequence, node.Name())
 }
 
 // SetEdges set directed edges from in nodes to out nodes
@@ -88,14 +90,16 @@ func (fg *TimeTickedFlowGraph) Start() {
 }
 
 func (fg *TimeTickedFlowGraph) Blockall() {
-	for _, v := range fg.nodeCtx {
-		v.Block()
+	// Lock with determined order to avoid deadlock.
+	for _, nodeName := range fg.nodeSequence {
+		fg.nodeCtx[nodeName].Block()
 	}
 }
 
 func (fg *TimeTickedFlowGraph) Unblock() {
-	for _, v := range fg.nodeCtx {
-		v.Unblock()
+	// Unlock with reverse order.
+	for i := len(fg.nodeSequence) - 1; i >= 0; i-- {
+		fg.nodeCtx[fg.nodeSequence[i]].Unblock()
 	}
 }
 
