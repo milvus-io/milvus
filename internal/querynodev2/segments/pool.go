@@ -144,5 +144,5 @@ func resizePool(pool *conc.Pool[any], newSize int, tag string) {
 		log.Warn("failed to resize pool", zap.Error(err))
 		return
 	}
-	log.Info("pool resize sucessfully")
+	log.Info("pool resize successfully")
 }
