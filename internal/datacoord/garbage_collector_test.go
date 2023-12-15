@@ -32,6 +32,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -1133,4 +1134,135 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 	assert.Nil(t, segA)
 	segB = gc.meta.GetSegment(segID + 1)
 	assert.Nil(t, segB)
+}
+
+type GarbageCollectorSuite struct {
+	suite.Suite
+
+	bucketName string
+	rootPath   string
+
+	cli     *storage.MinioChunkManager
+	inserts []string
+	stats   []string
+	delta   []string
+	others  []string
+
+	meta *meta
+}
+
+func (s *GarbageCollectorSuite) SetupTest() {
+	s.bucketName = `datacoord-ut` + strings.ToLower(funcutil.RandomString(8))
+	s.rootPath = `gc` + funcutil.RandomString(8)
+
+	var err error
+	s.cli, s.inserts, s.stats, s.delta, s.others, err = initUtOSSEnv(s.bucketName, s.rootPath, 4)
+	s.Require().NoError(err)
+
+	s.meta, err = newMemoryMeta()
+	s.Require().NoError(err)
+}
+
+func (s *GarbageCollectorSuite) TearDownTest() {
+	cleanupOSS(s.cli.Client, s.bucketName, s.rootPath)
+}
+
+func (s *GarbageCollectorSuite) TestPauseResume() {
+	s.Run("not_enabled", func() {
+		gc := newGarbageCollector(s.meta, newMockHandler(), GcOption{
+			cli:              s.cli,
+			enabled:          false,
+			checkInterval:    time.Millisecond * 10,
+			missingTolerance: time.Hour * 24,
+			dropTolerance:    time.Hour * 24,
+		})
+
+		gc.start()
+		defer gc.close()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		err := gc.Pause(ctx, time.Second)
+		s.NoError(err)
+
+		err = gc.Resume(ctx)
+		s.Error(err)
+	})
+
+	s.Run("pause_then_resume", func() {
+		gc := newGarbageCollector(s.meta, newMockHandler(), GcOption{
+			cli:              s.cli,
+			enabled:          true,
+			checkInterval:    time.Millisecond * 10,
+			missingTolerance: time.Hour * 24,
+			dropTolerance:    time.Hour * 24,
+		})
+
+		gc.start()
+		defer gc.close()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		err := gc.Pause(ctx, time.Minute)
+		s.NoError(err)
+
+		s.NotZero(gc.pauseUntil.Load())
+
+		err = gc.Resume(ctx)
+		s.NoError(err)
+
+		s.Zero(gc.pauseUntil.Load())
+	})
+
+	s.Run("pause_before_until", func() {
+		gc := newGarbageCollector(s.meta, newMockHandler(), GcOption{
+			cli:              s.cli,
+			enabled:          true,
+			checkInterval:    time.Millisecond * 10,
+			missingTolerance: time.Hour * 24,
+			dropTolerance:    time.Hour * 24,
+		})
+
+		gc.start()
+		defer gc.close()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		err := gc.Pause(ctx, time.Minute)
+		s.NoError(err)
+
+		until := gc.pauseUntil.Load()
+		s.NotZero(until)
+
+		err = gc.Pause(ctx, time.Second)
+		s.NoError(err)
+
+		second := gc.pauseUntil.Load()
+
+		s.Equal(until, second)
+	})
+
+	s.Run("pause_resume_timeout", func() {
+		gc := newGarbageCollector(s.meta, newMockHandler(), GcOption{
+			cli:              s.cli,
+			enabled:          true,
+			checkInterval:    time.Millisecond * 10,
+			missingTolerance: time.Hour * 24,
+			dropTolerance:    time.Hour * 24,
+		})
+
+		ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
+		defer cancel()
+		err := gc.Pause(ctx, time.Minute)
+		s.Error(err)
+
+		s.Zero(gc.pauseUntil.Load())
+
+		err = gc.Resume(ctx)
+		s.Error(err)
+
+		s.Zero(gc.pauseUntil.Load())
+	})
+}
+
+func TestGarbageCollector(t *testing.T) {
+	suite.Run(t, new(GarbageCollectorSuite))
 }

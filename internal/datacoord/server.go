@@ -405,6 +405,44 @@ func (s *Server) startDataCoord() {
 		s.compactionViewManager.Start()
 	}
 	s.startServerLoop()
+
+	// http.Register(&http.Handler{
+	// 	Path: "/datacoord/garbage_collection/pause",
+	// 	HandlerFunc: func(w http.ResponseWriter, req *http.Request) {
+	// 		pauseSeconds := req.URL.Query().Get("pause_seconds")
+	// 		seconds, err := strconv.ParseInt(pauseSeconds, 10, 64)
+	// 		if err != nil {
+	// 			w.WriteHeader(400)
+	// 			w.Write([]byte(fmt.Sprintf(`{"msg": "invalid pause seconds(%v)"}`, pauseSeconds)))
+	// 			return
+	// 		}
+
+	// 		err = s.garbageCollector.Pause(req.Context(), time.Duration(seconds)*time.Second)
+	// 		if err != nil {
+	// 			w.WriteHeader(500)
+	// 			w.Write([]byte(fmt.Sprintf(`{"msg": "failed to pause garbage collection, %s"}`, err.Error())))
+	// 			return
+	// 		}
+	// 		w.WriteHeader(200)
+	// 		w.Write([]byte(`{"msg": "OK"}`))
+	// 		return
+	// 	},
+	// })
+	// http.Register(&http.Handler{
+	// 	Path: "/datacoord/garbage_collection/resume",
+	// 	HandlerFunc: func(w http.ResponseWriter, req *http.Request) {
+	// 		err := s.garbageCollector.Resume(req.Context())
+	// 		if err != nil {
+	// 			w.WriteHeader(500)
+	// 			w.Write([]byte(fmt.Sprintf(`{"msg": "failed to pause garbage collection, %s"}`, err.Error())))
+	// 			return
+	// 		}
+	// 		w.WriteHeader(200)
+	// 		w.Write([]byte(`{"msg": "OK"}`))
+	// 		return
+	// 	},
+	// })
+
 	s.afterStart()
 	s.stateCode.Store(commonpb.StateCode_Healthy)
 	sessionutil.SaveServerInfo(typeutil.DataCoordRole, s.session.GetServerID())

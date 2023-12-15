@@ -5,13 +5,18 @@ import (
 	"fmt"
 	"strconv"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/config"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -57,19 +62,48 @@ type syncManager struct {
 	tasks *typeutil.ConcurrentMap[string, Task]
 }
 
-func NewSyncManager(parallelTask int, chunkManager storage.ChunkManager, allocator allocator.Interface) (SyncManager, error) {
-	if parallelTask < 1 {
-		return nil, merr.WrapErrParameterInvalid("positive parallel task number", strconv.FormatInt(int64(parallelTask), 10))
+func NewSyncManager(chunkManager storage.ChunkManager, allocator allocator.Interface) (SyncManager, error) {
+	params := paramtable.Get()
+	initPoolSize := params.DataNodeCfg.MaxParallelSyncMgrTasks.GetAsInt()
+	if initPoolSize < 1 {
+		return nil, merr.WrapErrParameterInvalid("positive parallel task number", strconv.FormatInt(int64(initPoolSize), 10))
 	}
-	return &syncManager{
-		keyLockDispatcher: newKeyLockDispatcher[int64](parallelTask),
+	dispatcher := newKeyLockDispatcher[int64](initPoolSize)
+	log.Info("sync manager initialized", zap.Int("initPoolSize", initPoolSize))
+
+	syncMgr := &syncManager{
+		keyLockDispatcher: dispatcher,
 		chunkManager:      chunkManager,
 		allocator:         allocator,
 		tasks:             typeutil.NewConcurrentMap[string, Task](),
-	}, nil
+	}
+	// setup config update watcher
+	params.Watch(params.DataNodeCfg.MaxParallelSyncMgrTasks.Key, config.NewHandler("datanode.syncmgr.poolsize", syncMgr.resizeHandler))
+
+	return syncMgr, nil
 }
 
-func (mgr syncManager) SyncData(ctx context.Context, task Task) *conc.Future[error] {
+func (mgr *syncManager) resizeHandler(evt *config.Event) {
+	if evt.HasUpdated {
+		log := log.Ctx(context.Background()).With(
+			zap.String("key", evt.Key),
+			zap.String("value", evt.Value),
+		)
+		size, err := strconv.ParseInt(evt.Value, 10, 64)
+		if err != nil {
+			log.Warn("failed to parse new datanode syncmgr pool size", zap.Error(err))
+			return
+		}
+		err = mgr.keyLockDispatcher.workerPool.Resize(int(size))
+		if err != nil {
+			log.Warn("failed to resize datanode syncmgr pool size", zap.String("key", evt.Key), zap.String("value", evt.Value), zap.Error(err))
+			return
+		}
+		log.Info("sync mgr pool size updated", zap.Int64("newSize", size))
+	}
+}
+
+func (mgr *syncManager) SyncData(ctx context.Context, task Task) *conc.Future[error] {
 	switch t := task.(type) {
 	case *SyncTask:
 		t.WithAllocator(mgr.allocator).WithChunkManager(mgr.chunkManager)
@@ -88,7 +122,7 @@ func (mgr syncManager) SyncData(ctx context.Context, task Task) *conc.Future[err
 	})
 }
 
-func (mgr syncManager) GetEarliestPosition(channel string) (int64, *msgpb.MsgPosition) {
+func (mgr *syncManager) GetEarliestPosition(channel string) (int64, *msgpb.MsgPosition) {
 	var cp *msgpb.MsgPosition
 	var segmentID int64
 	mgr.tasks.Range(func(_ string, task Task) bool {
@@ -106,10 +140,10 @@ func (mgr syncManager) GetEarliestPosition(channel string) (int64, *msgpb.MsgPos
 	return segmentID, cp
 }
 
-func (mgr syncManager) Block(segmentID int64) {
+func (mgr *syncManager) Block(segmentID int64) {
 	mgr.keyLock.Lock(segmentID)
 }
 
-func (mgr syncManager) Unblock(segmentID int64) {
+func (mgr *syncManager) Unblock(segmentID int64) {
 	mgr.keyLock.Unlock(segmentID)
 }

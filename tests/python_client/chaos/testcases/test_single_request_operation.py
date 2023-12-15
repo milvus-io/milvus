@@ -3,14 +3,15 @@ import time
 import pytest
 from time import sleep
 from pymilvus import connections
-from chaos.checker import (CreateChecker,
+from chaos.checker import (CollectionCreateChecker,
                            InsertChecker,
+                           UpsertChecker,
                            FlushChecker,
                            SearchChecker,
                            QueryChecker,
-                           IndexChecker,
+                           IndexCreateChecker,
                            DeleteChecker,
-                           DropChecker,
+                           CollectionDropChecker,
                            Op,
                            EventRecords,
                            ResultAnalyzer
@@ -61,14 +62,15 @@ class TestOperations(TestBase):
     def init_health_checkers(self, collection_name=None):
         c_name = collection_name
         checkers = {
-            Op.create: CreateChecker(collection_name=c_name),
+            Op.create: CollectionCreateChecker(collection_name=c_name),
             Op.insert: InsertChecker(collection_name=c_name),
+            Op.upsert: UpsertChecker(collection_name=c_name),
             Op.flush: FlushChecker(collection_name=c_name),
-            Op.index: IndexChecker(collection_name=c_name),
+            Op.index: IndexCreateChecker(collection_name=c_name),
             Op.search: SearchChecker(collection_name=c_name),
             Op.query: QueryChecker(collection_name=c_name),
             Op.delete: DeleteChecker(collection_name=c_name),
-            Op.drop: DropChecker(collection_name=c_name)
+            Op.drop: CollectionDropChecker(collection_name=c_name)
         }
         self.health_checkers = checkers
 
