@@ -49,9 +49,7 @@ const (
 	MaxBeamWidth  = 16
 )
 
-var (
-	configableIndexParams = typeutil.NewSet[string]()
-)
+var configableIndexParams = typeutil.NewSet[string]()
 
 func init() {
 	configableIndexParams.Insert(common.MmapEnabledKey)
