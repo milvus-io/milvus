@@ -18,6 +18,7 @@ package datanode
 
 import (
 	"fmt"
+	"math"
 	"reflect"
 	"time"
 
@@ -115,6 +116,10 @@ func (ttn *ttNode) updateChannelCP(channelPos *msgpb.MsgPosition, curTs time.Tim
 			zap.String("channel", ttn.vChannelName),
 			zap.Uint64("cpTs", channelPos.GetTimestamp()),
 			zap.Time("cpTime", channelCPTs))
+		// channelPos ts > flushTs means we could stop flush.
+		if channelPos.GetTimestamp() >= ttn.channel.getFlushTs() {
+			ttn.channel.setFlushTs(math.MaxUint64)
+		}
 		return nil
 	}
 
