@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -215,7 +216,9 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 
 		params := funcutil.KeyValuePair2Map(segmentIndex.GetIndexParams())
 		for _, kv := range index.GetUserIndexParams() {
-			params[kv.GetKey()] = kv.GetValue()
+			if indexparams.IsConfigableIndexParam(kv.GetKey()) {
+				params[kv.GetKey()] = kv.GetValue()
+			}
 		}
 		segmentIndex.IndexParams = funcutil.Map2KeyValuePair(params)
 	}

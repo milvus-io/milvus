@@ -484,6 +484,12 @@ func (t *alterIndexTask) PreExecute(ctx context.Context) error {
 	t.req.Base.MsgType = commonpb.MsgType_AlterIndex
 	t.req.Base.SourceID = paramtable.GetNodeID()
 
+	for _, param := range t.req.GetExtraParams() {
+		if !indexparams.IsConfigableIndexParam(param.GetKey()) {
+			return merr.WrapErrParameterInvalidMsg("%s is not configable index param", param.GetKey())
+		}
+	}
+
 	collName := t.req.GetCollectionName()
 
 	collection, err := globalMetaCache.GetCollectionID(ctx, t.req.GetDbName(), collName)
