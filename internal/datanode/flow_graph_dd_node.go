@@ -115,7 +115,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 	}
 
 	if load := ddn.dropMode.Load(); load != nil && load.(bool) {
-		log.Info("ddNode in dropMode",
+		log.RatedInfo(1.0, "ddNode in dropMode",
 			zap.String("vChannelName", ddn.vChannelName),
 			zap.Int64("collectionID", ddn.collectionID))
 		return []Msg{}

@@ -41,6 +41,7 @@ type ttNode struct {
 	lastUpdateTime *atomic.Time
 	broker         broker.Broker
 	cpUpdater      *channelCheckpointUpdater
+	dropMode       *atomic.Bool
 }
 
 // Name returns node name, implementing flowgraph.Node
@@ -66,6 +67,17 @@ func (ttn *ttNode) Close() {
 // Operate handles input messages, implementing flowgraph.Node
 func (ttn *ttNode) Operate(in []Msg) []Msg {
 	fgMsg := in[0].(*flowGraphMsg)
+	if fgMsg.dropCollection {
+		ttn.dropMode.Store(true)
+	}
+
+	// skip updating checkpoint for drop collection
+	// even if its the close msg
+	if ttn.dropMode.Load() {
+		log.RatedInfo(1.0, "ttnode in dropMode", zap.String("channel", ttn.vChannelName))
+		return []Msg{}
+	}
+
 	curTs, _ := tsoutil.ParseTS(fgMsg.timeRange.timestampMax)
 	if fgMsg.IsCloseMsg() {
 		if len(fgMsg.endPositions) > 0 {
@@ -122,6 +134,7 @@ func newTTNode(config *nodeConfig, broker broker.Broker, cpUpdater *channelCheck
 		lastUpdateTime: atomic.NewTime(time.Time{}), // set to Zero to update channel checkpoint immediately after fg started
 		broker:         broker,
 		cpUpdater:      cpUpdater,
+		dropMode:       atomic.NewBool(false),
 	}
 
 	return tt, nil
