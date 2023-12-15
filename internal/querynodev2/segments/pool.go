@@ -78,7 +78,6 @@ func initDynamicPool() {
 
 func initLoadPool() {
 	loadOnce.Do(func() {
-
 		pt := paramtable.Get()
 		pool := conc.NewPool[any](
 			hardware.GetCPUNum()*pt.CommonCfg.MiddlePriorityThreadCoreCoefficient.GetAsInt(),

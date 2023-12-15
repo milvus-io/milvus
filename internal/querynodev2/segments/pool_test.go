@@ -21,11 +21,12 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus/pkg/config"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestResizePools(t *testing.T) {
@@ -39,7 +40,6 @@ func TestResizePools(t *testing.T) {
 	}()
 
 	t.Run("SQPool", func(t *testing.T) {
-
 		expectedCap := int(math.Ceil(pt.QueryNodeCfg.MaxReadConcurrency.GetAsFloat() * pt.QueryNodeCfg.CGOPoolSizeRatio.GetAsFloat()))
 
 		ResizeSQPool(&config.Event{
