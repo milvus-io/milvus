@@ -101,3 +101,8 @@ internal/kv/rocksdb/cwrapper/
 
 # local file data
 **/data/*
+
+internal/proto/**/*.pb.go
+internal/core/src/pb/*.pb.h
+internal/core/src/pb/*.pb.cc
+**/legacypb/*.pb.go
