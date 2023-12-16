@@ -41,6 +41,7 @@ jobs:
     steps:
       - name: Maximize build space
         uses: easimon/maximize-build-space@master
+        if: ${{ ! startsWith(runner.name, 'self') }} # skip this step if it is self-hosted runner
         with:
           root-reserve-mb: 20480
           swap-size-mb: 1024
@@ -88,6 +89,7 @@ jobs:
     steps:
       - name: Maximize build space
         uses: easimon/maximize-build-space@master
+        if: ${{ ! startsWith(runner.name, 'self') }} # skip this step if it is self-hosted runner
         with:
           root-reserve-mb: 20480
           swap-size-mb: 1024

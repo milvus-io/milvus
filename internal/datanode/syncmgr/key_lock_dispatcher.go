@@ -20,10 +20,11 @@ type keyLockDispatcher[K comparable] struct {
 }
 
 func newKeyLockDispatcher[K comparable](maxParallel int) *keyLockDispatcher[K] {
-	return &keyLockDispatcher[K]{
-		workerPool: conc.NewPool[error](maxParallel, conc.WithPreAlloc(true)),
+	dispatcher := &keyLockDispatcher[K]{
+		workerPool: conc.NewPool[error](maxParallel, conc.WithPreAlloc(false)),
 		keyLock:    lock.NewKeyLock[K](),
 	}
+	return dispatcher
 }
 
 func (d *keyLockDispatcher[K]) Submit(key K, t Task, callbacks ...func(error)) *conc.Future[error] {

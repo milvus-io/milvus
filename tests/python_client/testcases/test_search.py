@@ -254,7 +254,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             default_search_params, default_limit, default_search_exp,
                             check_task=CheckTasks.err_res,
                             check_items={"err_code": 65535,
-                                         "err_msg": 'failed to search'})
+                                         "err_msg": 'vector dimension mismatch'})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_param_invalid_field_type(self, get_invalid_fields_type):
@@ -837,7 +837,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             search_params[0], default_limit,
                             default_search_exp,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 65535, "err_msg": "failed to search"})
+                            check_items={"err_code": 65535, "err_msg": "type must be number, but is string"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_index_partition_not_existed(self):

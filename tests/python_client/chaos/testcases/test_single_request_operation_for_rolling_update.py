@@ -6,14 +6,15 @@ from time import sleep
 
 from yaml import full_load
 from pymilvus import connections, utility
-from chaos.checker import (CreateChecker,
+from chaos.checker import (CollectionCreateChecker,
                            InsertChecker,
+                           UpsertChecker,
                            FlushChecker,
                            SearchChecker,
                            QueryChecker,
-                           IndexChecker,
+                           IndexCreateChecker,
                            DeleteChecker,
-                           DropChecker,
+                           CollectionDropChecker,
                            Op)
 from utils.util_k8s import wait_pods_ready
 from utils.util_log import test_log as log
@@ -61,14 +62,15 @@ class TestOperations(TestBase):
         schema = cf.gen_default_collection_schema(auto_id=False)
 
         checkers = {
-            Op.create: CreateChecker(collection_name=None, schema=schema),
+            Op.create: CollectionCreateChecker(collection_name=None, schema=schema),
             Op.insert: InsertChecker(collection_name=c_name, schema=schema),
+            Op.upsert: UpsertChecker(collection_name=c_name, schema=schema),
             Op.flush: FlushChecker(collection_name=c_name, schema=schema),
-            Op.index: IndexChecker(collection_name=None, schema=schema),
+            Op.index: IndexCreateChecker(collection_name=None, schema=schema),
             Op.search: SearchChecker(collection_name=c_name, schema=schema),
             Op.query: QueryChecker(collection_name=c_name, schema=schema),
             Op.delete: DeleteChecker(collection_name=c_name, schema=schema),
-            Op.drop: DropChecker(collection_name=None, schema=schema)
+            Op.drop: CollectionDropChecker(collection_name=None, schema=schema)
         }
         self.health_checkers = checkers
 
@@ -132,9 +134,9 @@ class TestOperations(TestBase):
             v.pause()
         for k, v in self.health_checkers.items():
             v.check_result()
-        for k, v in self.health_checkers.items():  
+        for k, v in self.health_checkers.items():
             log.info(f"{k} failed request: {v.fail_records}")
-        for k, v in self.health_checkers.items():  
+        for k, v in self.health_checkers.items():
             log.info(f"{k} rto: {v.get_rto()}")
         if is_check:
             assert_statistic(self.health_checkers, succ_rate_threshold=0.98)

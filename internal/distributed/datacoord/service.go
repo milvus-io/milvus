@@ -474,3 +474,7 @@ func (s *Server) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetInde
 func (s *Server) ReportDataNodeTtMsgs(ctx context.Context, req *datapb.ReportDataNodeTtMsgsRequest) (*commonpb.Status, error) {
 	return s.dataCoord.ReportDataNodeTtMsgs(ctx, req)
 }
+
+func (s *Server) GcControl(ctx context.Context, req *datapb.GcControlRequest) (*commonpb.Status, error) {
+	return s.dataCoord.GcControl(ctx, req)
+}

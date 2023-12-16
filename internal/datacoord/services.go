@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math/rand"
 	"strconv"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -1636,4 +1637,46 @@ func (s *Server) GcConfirm(ctx context.Context, request *datapb.GcConfirmRequest
 	}
 	resp.GcFinished = s.meta.GcConfirm(ctx, request.GetCollectionId(), request.GetPartitionId())
 	return resp, nil
+}
+
+func (s *Server) GcControl(ctx context.Context, request *datapb.GcControlRequest) (*commonpb.Status, error) {
+	status := &commonpb.Status{}
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	switch request.GetCommand() {
+	case datapb.GcCommand_Pause:
+		kv := lo.FindOrElse(request.GetParams(), nil, func(kv *commonpb.KeyValuePair) bool {
+			return kv.GetKey() == "duration"
+		})
+		if kv == nil {
+			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+			status.Reason = "pause duration param not found"
+			return status, nil
+		}
+		pauseSeconds, err := strconv.ParseInt(kv.GetValue(), 10, 64)
+		if err != nil {
+			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+			status.Reason = fmt.Sprintf("pause duration not valid, %s", err.Error())
+			return status, nil
+		}
+		if err := s.garbageCollector.Pause(ctx, time.Duration(pauseSeconds)*time.Second); err != nil {
+			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+			status.Reason = fmt.Sprintf("failed to pause gc, %s", err.Error())
+			return status, nil
+		}
+	case datapb.GcCommand_Resume:
+		if err := s.garbageCollector.Resume(ctx); err != nil {
+			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+			status.Reason = fmt.Sprintf("failed to pause gc, %s", err.Error())
+			return status, nil
+		}
+	default:
+		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		status.Reason = fmt.Sprintf("unknown gc command: %d", request.GetCommand())
+		return status, nil
+	}
+
+	return status, nil
 }

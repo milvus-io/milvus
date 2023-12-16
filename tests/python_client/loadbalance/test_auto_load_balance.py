@@ -1,7 +1,7 @@
 from time import sleep
 from pymilvus import connections, list_collections, utility
-from chaos.checker import (CreateChecker, InsertFlushChecker,
-                           SearchChecker, QueryChecker, IndexChecker, Op)
+from chaos.checker import (CollectionCreateChecker, InsertFlushChecker,
+                           SearchChecker, QueryChecker, IndexCreateChecker, Op)
 from common.milvus_sys import MilvusSys
 from utils.util_log import test_log as log
 from chaos import chaos_commons as cc
@@ -74,15 +74,15 @@ class TestAutoLoadBalance(object):
         conn = connections.connect("default", host=host, port=port)
         assert conn is not None
         self.health_checkers = {
-            Op.create: CreateChecker(),
+            Op.create: CollectionCreateChecker(),
             Op.insert: InsertFlushChecker(),
             Op.flush: InsertFlushChecker(flush=True),
-            Op.index: IndexChecker(),
+            Op.index: IndexCreateChecker(),
             Op.search: SearchChecker(),
             Op.query: QueryChecker()
         }
         cc.start_monitor_threads(self.health_checkers)
-        # wait  
+        # wait
         sleep(constants.WAIT_PER_OP * 10)
         all_collections = list_collections()
         for c in all_collections:

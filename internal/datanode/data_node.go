@@ -273,8 +273,7 @@ func (node *DataNode) Init() error {
 		}
 
 		node.chunkManager = chunkManager
-		syncMgr, err := syncmgr.NewSyncManager(paramtable.Get().DataNodeCfg.MaxParallelSyncTaskNum.GetAsInt(),
-			node.chunkManager, node.allocator)
+		syncMgr, err := syncmgr.NewSyncManager(node.chunkManager, node.allocator)
 		if err != nil {
 			initError = err
 			log.Error("failed to create sync manager", zap.Error(err))

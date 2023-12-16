@@ -21,6 +21,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/pkg/util/hardware"
 )
 
 func TestPool(t *testing.T) {
@@ -53,6 +55,25 @@ func TestPool(t *testing.T) {
 		assert.Equal(t, res, resDup)
 		assert.Equal(t, err, errDup)
 	}
+}
+
+func TestPoolResize(t *testing.T) {
+	cpuNum := hardware.GetCPUNum()
+
+	pool := NewPool[any](cpuNum)
+
+	assert.Equal(t, cpuNum, pool.Cap())
+
+	err := pool.Resize(cpuNum * 2)
+	assert.NoError(t, err)
+	assert.Equal(t, cpuNum*2, pool.Cap())
+
+	err = pool.Resize(0)
+	assert.Error(t, err)
+
+	pool = NewDefaultPool[any]()
+	err = pool.Resize(cpuNum * 2)
+	assert.Error(t, err)
 }
 
 func TestPoolWithPanic(t *testing.T) {
