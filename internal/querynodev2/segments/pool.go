@@ -17,12 +17,16 @@
 package segments
 
 import (
+	"context"
 	"math"
 	"runtime"
 	"sync"
 
 	"go.uber.org/atomic"
+	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/pkg/config"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -45,14 +49,17 @@ var (
 func initSQPool() {
 	sqOnce.Do(func() {
 		pt := paramtable.Get()
+		initPoolSize := int(math.Ceil(pt.QueryNodeCfg.MaxReadConcurrency.GetAsFloat() * pt.QueryNodeCfg.CGOPoolSizeRatio.GetAsFloat()))
 		pool := conc.NewPool[any](
-			int(math.Ceil(pt.QueryNodeCfg.MaxReadConcurrency.GetAsFloat()*pt.QueryNodeCfg.CGOPoolSizeRatio.GetAsFloat())),
-			conc.WithPreAlloc(true),
+			initPoolSize,
+			conc.WithPreAlloc(false), // pre alloc must be false to resize pool dynamically, use warmup to alloc worker here
 			conc.WithDisablePurge(true),
 		)
 		conc.WarmupPool(pool, runtime.LockOSThread)
-
 		sqp.Store(pool)
+
+		pt.Watch(pt.QueryNodeCfg.MaxReadConcurrency.Key, config.NewHandler("qn.sqpool.maxconc", ResizeSQPool))
+		pt.Watch(pt.QueryNodeCfg.CGOPoolSizeRatio.Key, config.NewHandler("qn.sqpool.cgopoolratio", ResizeSQPool))
 	})
 }
 
@@ -71,14 +78,17 @@ func initDynamicPool() {
 
 func initLoadPool() {
 	loadOnce.Do(func() {
+		pt := paramtable.Get()
 		pool := conc.NewPool[any](
-			hardware.GetCPUNum()*paramtable.Get().CommonCfg.MiddlePriorityThreadCoreCoefficient.GetAsInt(),
+			hardware.GetCPUNum()*pt.CommonCfg.MiddlePriorityThreadCoreCoefficient.GetAsInt(),
 			conc.WithPreAlloc(false),
 			conc.WithDisablePurge(false),
 			conc.WithPreHandler(runtime.LockOSThread), // lock os thread for cgo thread disposal
 		)
 
 		loadPool.Store(pool)
+
+		pt.Watch(pt.CommonCfg.MiddlePriorityThreadCoreCoefficient.Key, config.NewHandler("qn.loadpool.middlepriority", ResizeLoadPool))
 	})
 }
 
@@ -97,4 +107,42 @@ func GetDynamicPool() *conc.Pool[any] {
 func GetLoadPool() *conc.Pool[any] {
 	initLoadPool()
 	return loadPool.Load()
+}
+
+func ResizeSQPool(evt *config.Event) {
+	if evt.HasUpdated {
+		pt := paramtable.Get()
+		newSize := int(math.Ceil(pt.QueryNodeCfg.MaxReadConcurrency.GetAsFloat() * pt.QueryNodeCfg.CGOPoolSizeRatio.GetAsFloat()))
+		pool := GetSQPool()
+		resizePool(pool, newSize, "SQPool")
+		conc.WarmupPool(pool, runtime.LockOSThread)
+	}
+}
+
+func ResizeLoadPool(evt *config.Event) {
+	if evt.HasUpdated {
+		pt := paramtable.Get()
+		newSize := hardware.GetCPUNum() * pt.CommonCfg.MiddlePriorityThreadCoreCoefficient.GetAsInt()
+		resizePool(GetLoadPool(), newSize, "LoadPool")
+	}
+}
+
+func resizePool(pool *conc.Pool[any], newSize int, tag string) {
+	log := log.Ctx(context.Background()).
+		With(
+			zap.String("poolTag", tag),
+			zap.Int("newSize", newSize),
+		)
+
+	if newSize <= 0 {
+		log.Warn("cannot set pool size to non-positive value")
+		return
+	}
+
+	err := pool.Resize(newSize)
+	if err != nil {
+		log.Warn("failed to resize pool", zap.Error(err))
+		return
+	}
+	log.Info("pool resize successfully")
 }

@@ -2782,9 +2782,10 @@ func (c *Core) CheckHealth(ctx context.Context, in *milvuspb.CheckHealthRequest)
 	group, ctx := errgroup.WithContext(ctx)
 	errReasons := make([]string, 0, c.proxyClientManager.GetProxyCount())
 
-	for nodeID, proxyClient := range c.proxyClientManager.GetProxyClients() {
-		nodeID := nodeID
-		proxyClient := proxyClient
+	proxyClients := c.proxyClientManager.GetProxyClients()
+	proxyClients.Range(func(key int64, value types.ProxyClient) bool {
+		nodeID := key
+		proxyClient := value
 		group.Go(func() error {
 			sta, err := proxyClient.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
 			if err != nil {
@@ -2799,7 +2800,8 @@ func (c *Core) CheckHealth(ctx context.Context, in *milvuspb.CheckHealthRequest)
 			}
 			return nil
 		})
-	}
+		return true
+	})
 
 	err := group.Wait()
 	if err != nil || len(errReasons) != 0 {

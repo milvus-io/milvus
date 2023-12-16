@@ -27,6 +27,7 @@ import (
 
 	"github.com/minio/minio-go/v7"
 	"github.com/samber/lo"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -35,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -56,10 +58,17 @@ type garbageCollector struct {
 	meta    *meta
 	handler Handler
 
-	startOnce sync.Once
-	stopOnce  sync.Once
-	wg        sync.WaitGroup
-	closeCh   chan struct{}
+	startOnce  sync.Once
+	stopOnce   sync.Once
+	wg         sync.WaitGroup
+	closeCh    chan struct{}
+	cmdCh      chan gcCmd
+	pauseUntil atomic.Time
+}
+type gcCmd struct {
+	cmdType  datapb.GcCommand
+	duration time.Duration
+	done     chan struct{}
 }
 
 // newGarbageCollector create garbage collector with meta and option
@@ -71,6 +80,7 @@ func newGarbageCollector(meta *meta, handler Handler, opt GcOption) *garbageColl
 		handler: handler,
 		option:  opt,
 		closeCh: make(chan struct{}),
+		cmdCh:   make(chan gcCmd),
 	}
 }
 
@@ -88,6 +98,43 @@ func (gc *garbageCollector) start() {
 	}
 }
 
+func (gc *garbageCollector) Pause(ctx context.Context, pauseDuration time.Duration) error {
+	if !gc.option.enabled {
+		log.Info("garbage collection not enabled")
+		return nil
+	}
+	done := make(chan struct{})
+	select {
+	case gc.cmdCh <- gcCmd{
+		cmdType:  datapb.GcCommand_Pause,
+		duration: pauseDuration,
+		done:     done,
+	}:
+		<-done
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (gc *garbageCollector) Resume(ctx context.Context) error {
+	if !gc.option.enabled {
+		log.Warn("garbage collection not enabled, cannot resume")
+		return merr.WrapErrServiceUnavailable("garbage collection not enabled")
+	}
+	done := make(chan struct{})
+	select {
+	case gc.cmdCh <- gcCmd{
+		cmdType: datapb.GcCommand_Resume,
+		done:    done,
+	}:
+		<-done
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 // work contains actual looping check logic
 func (gc *garbageCollector) work() {
 	defer gc.wg.Done()
@@ -96,11 +143,30 @@ func (gc *garbageCollector) work() {
 	for {
 		select {
 		case <-ticker.C:
+			if time.Now().Before(gc.pauseUntil.Load()) {
+				log.Info("garbage collector paused", zap.Time("until", gc.pauseUntil.Load()))
+				continue
+			}
 			gc.clearEtcd()
 			gc.recycleUnusedIndexes()
 			gc.recycleUnusedSegIndexes()
 			gc.scan()
 			gc.recycleUnusedIndexFiles()
+		case cmd := <-gc.cmdCh:
+			switch cmd.cmdType {
+			case datapb.GcCommand_Pause:
+				pauseUntil := time.Now().Add(cmd.duration)
+				if pauseUntil.After(gc.pauseUntil.Load()) {
+					log.Info("garbage collection paused", zap.Duration("duration", cmd.duration), zap.Time("pauseUntil", pauseUntil))
+					gc.pauseUntil.Store(pauseUntil)
+				} else {
+					log.Info("new pause until before current value", zap.Duration("duration", cmd.duration), zap.Time("pauseUntil", pauseUntil), zap.Time("oldPauseUntil", gc.pauseUntil.Load()))
+				}
+			case datapb.GcCommand_Resume:
+				// reset to zero value
+				gc.pauseUntil.Store(time.Time{})
+			}
+			close(cmd.done)
 		case <-gc.closeCh:
 			log.Warn("garbage collector quit")
 			return

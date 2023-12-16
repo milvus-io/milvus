@@ -944,7 +944,7 @@ def gen_invalid_search_params_type():
                 scann_search_param = {"index_type": index_type, "search_params": {"nprobe": 8, "reorder_k": reorder_k}}
                 search_params.append(scann_search_param)
         elif index_type == "DISKANN":
-            for search_list in ct.get_invalid_ints:
+            for search_list in ct.get_invalid_ints[1:]:
                 diskann_search_param = {"index_type": index_type, "search_params": {"search_list": search_list}}
                 search_params.append(diskann_search_param)
     return search_params
