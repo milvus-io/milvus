@@ -78,13 +78,12 @@ func (i *InsertData) GetRowNum() int {
 	if i.Data == nil || len(i.Data) == 0 {
 		return 0
 	}
-
-	data, ok := i.Data[common.RowIDField]
-	if !ok {
-		return 0
+	var rowNum int
+	for _, data := range i.Data {
+		rowNum = data.RowNum()
+		break
 	}
-
-	return data.RowNum()
+	return rowNum
 }
 
 func (i *InsertData) GetMemorySize() int {
@@ -113,6 +112,14 @@ func (i *InsertData) Append(row map[FieldID]interface{}) error {
 	}
 
 	return nil
+}
+
+func (i *InsertData) GetRow(idx int) map[FieldID]interface{} {
+	res := make(map[FieldID]interface{})
+	for field, data := range i.Data {
+		res[field] = data.GetRow(idx)
+	}
+	return res
 }
 
 // FieldData defines field data interface
