@@ -54,5 +54,7 @@ const (
 	ParamRoundDecimal = "round_decimal"
 	ParamOffset       = "offset"
 	ParamLimit        = "limit"
+	ParamRadius       = "radius"
+	ParamRangeFilter  = "range_filter"
 	BoundedTimestamp  = 2
 )
