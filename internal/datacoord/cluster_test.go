@@ -131,10 +131,7 @@ func (suite *ClusterSuite) TestWatch() {
 func (suite *ClusterSuite) TestFlush() {
 	suite.mockChManager.EXPECT().Match(mock.Anything, mock.Anything).
 		RunAndReturn(func(nodeID int64, channel string) bool {
-			if nodeID == 1 {
-				return false
-			}
-			return true
+			return nodeID != 1
 		}).Twice()
 
 	suite.mockChManager.EXPECT().GetCollectionIDByChannel(mock.Anything).Return(true, 100).Once()

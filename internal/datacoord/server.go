@@ -116,7 +116,7 @@ type Server struct {
 	allocator        allocator
 	cluster          Cluster
 	sessionManager   SessionManager
-	channelManager   ChannelManager
+	channelManager   *ChannelManagerImpl
 	rootCoordClient  types.RootCoordClient
 	garbageCollector *garbageCollector
 	gcOpt            GcOption
