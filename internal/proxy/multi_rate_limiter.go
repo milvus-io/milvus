@@ -39,9 +39,9 @@ import (
 )
 
 var QuotaErrorString = map[commonpb.ErrorCode]string{
-	commonpb.ErrorCode_ForceDeny:            "manually force deny",
-	commonpb.ErrorCode_MemoryQuotaExhausted: "memory quota exhausted, please allocate more resources",
-	commonpb.ErrorCode_DiskQuotaExhausted:   "disk quota exhausted, please allocate more resources",
+	commonpb.ErrorCode_ForceDeny:            "the writing has been deactivated by the administrator",
+	commonpb.ErrorCode_MemoryQuotaExhausted: "memory quota exceeded, please allocate more resources",
+	commonpb.ErrorCode_DiskQuotaExhausted:   "disk quota exceeded, please allocate more resources",
 	commonpb.ErrorCode_TimeTickLongDelay:    "time tick long delay",
 }
 
@@ -84,10 +84,10 @@ func (m *MultiRateLimiter) Check(collectionID int64, rt internalpb.RateType, n i
 
 		limit, rate := limiter.limit(rt, n)
 		if rate == 0 {
-			return limiter.getError(rt)
+			return limiter.getQuotaExceededError(rt)
 		}
 		if limit {
-			return merr.WrapErrServiceRateLimit(rate)
+			return limiter.getRateLimitError(rate)
 		}
 		return nil
 	}
@@ -238,18 +238,22 @@ func (rl *rateLimiter) setRates(collectionRate *proxypb.CollectionRate) error {
 	return nil
 }
 
-func (rl *rateLimiter) getError(rt internalpb.RateType) error {
+func (rl *rateLimiter) getQuotaExceededError(rt internalpb.RateType) error {
 	switch rt {
 	case internalpb.RateType_DMLInsert, internalpb.RateType_DMLUpsert, internalpb.RateType_DMLDelete, internalpb.RateType_DMLBulkLoad:
 		if errCode, ok := rl.quotaStates.Get(milvuspb.QuotaState_DenyToWrite); ok {
-			return merr.OldCodeToMerr(errCode)
+			return merr.WrapErrServiceQuotaExceeded(GetQuotaErrorString(errCode))
 		}
 	case internalpb.RateType_DQLSearch, internalpb.RateType_DQLQuery:
 		if errCode, ok := rl.quotaStates.Get(milvuspb.QuotaState_DenyToRead); ok {
-			return merr.OldCodeToMerr(errCode)
+			return merr.WrapErrServiceQuotaExceeded(GetQuotaErrorString(errCode))
 		}
 	}
 	return nil
+}
+
+func (rl *rateLimiter) getRateLimitError(rate float64) error {
+	return merr.WrapErrServiceRateLimit(rate, "request is rejected by grpc RateLimiter middleware, please retry later")
 }
 
 // setRateGaugeByRateType sets ProxyLimiterRate metrics.
