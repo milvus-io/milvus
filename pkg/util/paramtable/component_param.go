@@ -152,6 +152,10 @@ func (p *ComponentParam) Watch(key string, watcher config.EventHandler) {
 	p.baseTable.mgr.Dispatcher.Register(key, watcher)
 }
 
+func (p *ComponentParam) Unwatch(key string, watcher config.EventHandler) {
+	p.baseTable.mgr.Dispatcher.Unregister(key, watcher)
+}
+
 func (p *ComponentParam) WatchKeyPrefix(keyPrefix string, watcher config.EventHandler) {
 	p.baseTable.mgr.Dispatcher.RegisterForKeyPrefix(keyPrefix, watcher)
 }
