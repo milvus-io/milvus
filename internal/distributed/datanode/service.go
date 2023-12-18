@@ -91,7 +91,6 @@ func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error)
 	}
 
 	s.datanode = dn.NewDataNode(s.ctx, s.factory)
-
 	return s, nil
 }
 
