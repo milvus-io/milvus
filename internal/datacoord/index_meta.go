@@ -345,6 +345,22 @@ func (m *meta) GetIndexesForCollection(collID UniqueID, indexName string) []*mod
 	return indexInfos
 }
 
+func (m *meta) GetFieldIndexes(collID, fieldID UniqueID, indexName string) []*model.Index {
+	m.RLock()
+	defer m.RUnlock()
+
+	indexInfos := make([]*model.Index, 0)
+	for _, index := range m.indexes[collID] {
+		if index.IsDeleted || index.FieldID != fieldID {
+			continue
+		}
+		if indexName == "" || indexName == index.IndexName {
+			indexInfos = append(indexInfos, model.CloneIndex(index))
+		}
+	}
+	return indexInfos
+}
+
 // MarkIndexAsDeleted will mark the corresponding index as deleted, and recycleUnusedIndexFiles will recycle these tasks.
 func (m *meta) MarkIndexAsDeleted(collID UniqueID, indexIDs []UniqueID) error {
 	log.Info("IndexCoord metaTable MarkIndexAsDeleted", zap.Int64("collectionID", collID),
