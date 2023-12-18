@@ -101,6 +101,8 @@ if __name__ == '__main__':
     logger.info(f"data size: {data_size}")
     connections.connect(host=host, port=19530, timeout=60)
     ms = MilvusSys()
+    # get collection info
+    get_collection_info(prefix="task")
     # create index for flat
     logger.info("create index for flat start")
     create_index_flat()

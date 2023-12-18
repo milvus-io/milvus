@@ -16,12 +16,18 @@ logger.add(sys.stderr, format= "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | 
 
 pymilvus_version = pymilvus.__version__
 
-all_index_types = ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ", "HNSW"]
+all_index_types = ["FLAT"]
 
-default_index_params = [{}, {"nlist": 128}, {"nlist": 128}, {"nlist": 128, "m": 16, "nbits": 8},
-                        {"M": 48, "efConstruction": 500}]
-
-index_params_map = dict(zip(all_index_types, default_index_params))
+index_params_map = {
+    "FLAT": {},
+    "IVF_FLAT": {"nlist": 128},
+    "IVF_SQ8": {"nlist": 128},
+    "IVF_PQ": {"nlist": 128, "m": 16, "nbits": 8},
+    "HNSW": {"M": 48, "efConstruction": 500},
+    "ANNOY": {"n_trees": 10},
+    "BIN_FLAT": {},
+    "BIN_IVF_FLAT": {"nlist": 128},
+}
 
 NUM_REPLICAS = 2
 
@@ -155,8 +161,18 @@ def create_index_flat():
             replica_number = 0
             logger.info(e)
         t0 = time.time()
-        c.create_index(field_name="float_vector", index_params=default_flat_index)
-        logger.info(f"create index time: {time.time() - t0:.4f}")
+        is_indexed = False
+        index_info_list = [x.to_dict() for x in c.indexes]
+        logger.info(index_info_list)
+        for index_info in index_info_list:
+            if "metric_type" in index_info.keys() or "metric_type" in index_info["index_param"]:
+                is_indexed = True
+                logger.info(f"collection {col_name} has been indexed with {index_info}")
+        if not is_indexed:
+            c.create_index(field_name="float_vector", index_params=default_flat_index)
+            logger.info(f"create index time: {time.time() - t0:.4f}")
+        else:
+            logger.info(f"collection {col_name} has been indexed")
         if replica_number > 0:
             c.load(replica_number=replica_number)
 
@@ -196,6 +212,19 @@ def create_index(prefix):
             logger.info(f"create index time: {time.time() - t0:.4f}")
         if replica_number > 0:
             c.load(replica_number=replica_number)
+
+
+def get_collection_info(prefix):
+    col_list = get_collections(prefix)
+    logger.info("get collection info...")
+    for col_name in col_list:
+        c = Collection(name=col_name)
+        logger.info(c)
+        logger.info(c.schema)
+        index_info = [x.to_dict() for x in c.indexes]
+        logger.info(index_info)
+        logger.info(c.partitions)
+        logger.info(c.num_entities)
 
 
 def release_collection(prefix):
