@@ -256,6 +256,102 @@ FindTermSSE2(const double* src, size_t vec_size, double val) {
     return false;
 }
 
+void
+print_m128i(__m128i v) {
+    alignas(16) int result[4];
+    _mm_store_si128(reinterpret_cast<__m128i*>(result), v);
+
+    for (int i = 0; i < 4; ++i) {
+        std::cout << std::hex << result[i] << " ";
+    }
+
+    std::cout << std::endl;
+}
+
+bool
+AllFalseSSE2(const bool* src, int64_t size) {
+    int num_chunk = size / 16;
+    __m128i highbit = _mm_set1_epi8(0x7F);
+    for (size_t i = 0; i < num_chunk * 16; i += 16) {
+        __m128i data =
+            _mm_loadu_si128(reinterpret_cast<const __m128i*>(src + i));
+        __m128i highbits = _mm_add_epi8(data, highbit);
+        if (_mm_movemask_epi8(highbits) != 0) {
+            return false;
+        }
+    }
+
+    for (size_t i = num_chunk * 16; i < size; ++i) {
+        if (src[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool
+AllTrueSSE2(const bool* src, int64_t size) {
+    int num_chunk = size / 16;
+    __m128i highbit = _mm_set1_epi8(0x7F);
+    for (size_t i = 0; i < num_chunk * 16; i += 16) {
+        __m128i data =
+            _mm_loadu_si128(reinterpret_cast<const __m128i*>(src + i));
+        __m128i highbits = _mm_add_epi8(data, highbit);
+        if (_mm_movemask_epi8(highbits) != 0xFFFF) {
+            return false;
+        }
+    }
+
+    for (size_t i = num_chunk * 16; i < size; ++i) {
+        if (!src[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void
+InvertBoolSSE2(bool* src, int64_t size) {
+    int num_chunk = size / 16;
+    __m128i mask = _mm_set1_epi8(0x01);
+    for (size_t i = 0; i < num_chunk * 16; i += 16) {
+        __m128i data = _mm_loadu_si128(reinterpret_cast<__m128i*>(src + i));
+        __m128i flipped = _mm_xor_si128(data, mask);
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(src + i), flipped);
+    }
+    for (size_t i = num_chunk * 16; i < size; ++i) {
+        src[i] = !src[i];
+    }
+}
+
+void
+AndBoolSSE2(bool* left, bool* right, int64_t size) {
+    int num_chunk = size / 16;
+    for (size_t i = 0; i < num_chunk * 16; i += 16) {
+        __m128i l_reg = _mm_loadu_si128(reinterpret_cast<__m128i*>(left + i));
+        __m128i r_reg = _mm_loadu_si128(reinterpret_cast<__m128i*>(right + i));
+        __m128i res = _mm_and_si128(l_reg, r_reg);
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(left + i), res);
+    }
+    for (size_t i = num_chunk * 16; i < size; ++i) {
+        left[i] &= right[i];
+    }
+}
+
+void
+OrBoolSSE2(bool* left, bool* right, int64_t size) {
+    int num_chunk = size / 16;
+    for (size_t i = 0; i < num_chunk * 16; i += 16) {
+        __m128i l_reg = _mm_loadu_si128(reinterpret_cast<__m128i*>(left + i));
+        __m128i r_reg = _mm_loadu_si128(reinterpret_cast<__m128i*>(right + i));
+        __m128i res = _mm_or_si128(l_reg, r_reg);
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(left + i), res);
+    }
+    for (size_t i = num_chunk * 16; i < size; ++i) {
+        left[i] |= right[i];
+    }
+}
+
 }  // namespace simd
 }  // namespace milvus
 

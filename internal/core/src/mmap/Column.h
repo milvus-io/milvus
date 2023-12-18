@@ -21,15 +21,15 @@
 #include <cstring>
 #include <filesystem>
 
-#include "common/FieldMeta.h"
-#include "common/Span.h"
+#include "common/Array.h"
 #include "common/EasyAssert.h"
 #include "common/File.h"
+#include "common/FieldMeta.h"
+#include "common/FieldData.h"
+#include "common/Span.h"
 #include "fmt/format.h"
 #include "log/Log.h"
 #include "mmap/Utils.h"
-#include "storage/FieldData.h"
-#include "common/Array.h"
 
 namespace milvus {
 
@@ -156,7 +156,7 @@ class ColumnBase {
     Span() const = 0;
 
     void
-    AppendBatch(const storage::FieldDataPtr& data) {
+    AppendBatch(const FieldDataPtr& data) {
         size_t required_size = size_ + data->Size();
         if (required_size > cap_size_) {
             Expand(required_size * 2 + padding_);

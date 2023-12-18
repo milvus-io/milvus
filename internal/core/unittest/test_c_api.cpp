@@ -39,6 +39,9 @@
 #include "test_utils/indexbuilder_test_utils.h"
 #include "test_utils/storage_test_utils.h"
 #include "query/generated/ExecExprVisitor.h"
+#include "expr/ITypeExpr.h"
+#include "plan/PlanNode.h"
+#include "exec/expression/Expr.h"
 
 namespace chrono = std::chrono;
 
@@ -465,16 +468,21 @@ TEST(CApiTest, MultiDeleteGrowingSegment) {
     ASSERT_EQ(del_res.error_code, Success);
 
     // retrieve pks = {1}
-    std::vector<int64_t> retrive_pks = {1};
+    std::vector<proto::plan::GenericValue> retrive_pks;
+    {
+        proto::plan::GenericValue value;
+        value.set_int64_val(1);
+        retrive_pks.push_back(value);
+    }
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
-    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(
-        milvus::query::ColumnInfo(
+    auto term_expr = std::make_shared<milvus::expr::TermFilterExpr>(
+        milvus::expr::ColumnInfo(
             FieldId(101), DataType::INT64, std::vector<std::string>()),
-        retrive_pks,
-        proto::plan::GenericValue::kInt64Val);
+        retrive_pks);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
-    plan->plan_node_->predicate_ = std::move(term_expr);
+    plan->plan_node_->filter_plannode_ =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
     std::vector<FieldId> target_field_ids{FieldId(100), FieldId(101)};
     plan->field_ids_ = target_field_ids;
     auto max_ts = dataset.timestamps_[N - 1] + 10;
@@ -490,13 +498,17 @@ TEST(CApiTest, MultiDeleteGrowingSegment) {
     DeleteRetrieveResult(&retrieve_result);
 
     // retrieve pks = {2}
-    retrive_pks = {2};
-    term_expr = std::make_unique<query::TermExprImpl<int64_t>>(
-        milvus::query::ColumnInfo(
+    {
+        proto::plan::GenericValue value;
+        value.set_int64_val(2);
+        retrive_pks.push_back(value);
+    }
+    term_expr = std::make_shared<milvus::expr::TermFilterExpr>(
+        milvus::expr::ColumnInfo(
             FieldId(101), DataType::INT64, std::vector<std::string>()),
-        retrive_pks,
-        proto::plan::GenericValue::kInt64Val);
-    plan->plan_node_->predicate_ = std::move(term_expr);
+        retrive_pks);
+    plan->plan_node_->filter_plannode_ =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
     res = CRetrieve(segment, plan.get(), {}, max_ts, &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
     suc = query_result->ParseFromArray(retrieve_result.proto_blob,
@@ -567,16 +579,22 @@ TEST(CApiTest, MultiDeleteSealedSegment) {
     ASSERT_EQ(del_res.error_code, Success);
 
     // retrieve pks = {1}
-    std::vector<int64_t> retrive_pks = {1};
+    std::vector<proto::plan::GenericValue> retrive_pks;
+    {
+        proto::plan::GenericValue value;
+        value.set_int64_val(1);
+        retrive_pks.push_back(value);
+    }
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
-    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(
-        milvus::query::ColumnInfo(
+    auto term_expr = std::make_shared<milvus::expr::TermFilterExpr>(
+        milvus::expr::ColumnInfo(
             FieldId(101), DataType::INT64, std::vector<std::string>()),
-        retrive_pks,
-        proto::plan::GenericValue::kInt64Val);
+        retrive_pks);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
-    plan->plan_node_->predicate_ = std::move(term_expr);
+
+    plan->plan_node_->filter_plannode_ =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
     std::vector<FieldId> target_field_ids{FieldId(100), FieldId(101)};
     plan->field_ids_ = target_field_ids;
     auto max_ts = dataset.timestamps_[N - 1] + 10;
@@ -592,13 +610,17 @@ TEST(CApiTest, MultiDeleteSealedSegment) {
     DeleteRetrieveResult(&retrieve_result);
 
     // retrieve pks = {2}
-    retrive_pks = {2};
-    term_expr = std::make_unique<query::TermExprImpl<int64_t>>(
-        milvus::query::ColumnInfo(
+    {
+        proto::plan::GenericValue value;
+        value.set_int64_val(2);
+        retrive_pks.push_back(value);
+    }
+    term_expr = std::make_shared<milvus::expr::TermFilterExpr>(
+        milvus::expr::ColumnInfo(
             FieldId(101), DataType::INT64, std::vector<std::string>()),
-        retrive_pks,
-        proto::plan::GenericValue::kInt64Val);
-    plan->plan_node_->predicate_ = std::move(term_expr);
+        retrive_pks);
+    plan->plan_node_->filter_plannode_ =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
     res = CRetrieve(segment, plan.get(), {}, max_ts, &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
     suc = query_result->ParseFromArray(retrieve_result.proto_blob,
@@ -674,16 +696,24 @@ TEST(CApiTest, DeleteRepeatedPksFromGrowingSegment) {
     ASSERT_EQ(res.error_code, Success);
 
     // create retrieve plan pks in {1, 2, 3}
-    std::vector<int64_t> retrive_row_ids = {1, 2, 3};
+    std::vector<proto::plan::GenericValue> retrive_row_ids;
+    {
+        for (auto v : {1, 2, 3}) {
+            proto::plan::GenericValue val;
+            val.set_int64_val(v);
+            retrive_row_ids.push_back(val);
+        }
+    }
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
-    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(
-        milvus::query::ColumnInfo(
+    auto term_expr = std::make_shared<milvus::expr::TermFilterExpr>(
+        milvus::expr::ColumnInfo(
             FieldId(101), DataType::INT64, std::vector<std::string>()),
-        retrive_row_ids,
-        proto::plan::GenericValue::kInt64Val);
+        retrive_row_ids);
+
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
-    plan->plan_node_->predicate_ = std::move(term_expr);
+    plan->plan_node_->filter_plannode_ =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
     std::vector<FieldId> target_field_ids{FieldId(100), FieldId(101)};
     plan->field_ids_ = target_field_ids;
 
@@ -747,17 +777,24 @@ TEST(CApiTest, DeleteRepeatedPksFromSealedSegment) {
     auto sealed_segment = dynamic_cast<SegmentSealed*>(segment_interface);
     SealedLoadFieldData(dataset, *sealed_segment);
 
+    std::vector<proto::plan::GenericValue> retrive_row_ids;
     // create retrieve plan pks in {1, 2, 3}
-    std::vector<int64_t> retrive_row_ids = {1, 2, 3};
+    {
+        for (auto v : {1, 2, 3}) {
+            proto::plan::GenericValue val;
+            val.set_int64_val(v);
+            retrive_row_ids.push_back(val);
+        }
+    }
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
-    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(
-        milvus::query::ColumnInfo(
+    auto term_expr = std::make_shared<milvus::expr::TermFilterExpr>(
+        milvus::expr::ColumnInfo(
             FieldId(101), DataType::INT64, std::vector<std::string>()),
-        retrive_row_ids,
-        proto::plan::GenericValue::kInt64Val);
+        retrive_row_ids);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
-    plan->plan_node_->predicate_ = std::move(term_expr);
+    plan->plan_node_->filter_plannode_ =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
     std::vector<FieldId> target_field_ids{FieldId(100), FieldId(101)};
     plan->field_ids_ = target_field_ids;
 
@@ -851,16 +888,23 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnGrowingSegment) {
     ASSERT_EQ(del_res.error_code, Success);
 
     // create retrieve plan pks in {1, 2, 3}, timestamp = 9
-    std::vector<int64_t> retrive_row_ids = {1, 2, 3};
+    std::vector<proto::plan::GenericValue> retrive_row_ids;
+    {
+        for (auto v : {1, 2, 3}) {
+            proto::plan::GenericValue val;
+            val.set_int64_val(v);
+            retrive_row_ids.push_back(val);
+        }
+    }
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
-    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(
-        milvus::query::ColumnInfo(
+    auto term_expr = std::make_shared<milvus::expr::TermFilterExpr>(
+        milvus::expr::ColumnInfo(
             FieldId(101), DataType::INT64, std::vector<std::string>()),
-        retrive_row_ids,
-        proto::plan::GenericValue::kInt64Val);
+        retrive_row_ids);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
-    plan->plan_node_->predicate_ = std::move(term_expr);
+    plan->plan_node_->filter_plannode_ =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
     std::vector<FieldId> target_field_ids{FieldId(100), FieldId(101)};
     plan->field_ids_ = target_field_ids;
 
@@ -941,16 +985,23 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnSealedSegment) {
     ASSERT_EQ(del_res.error_code, Success);
 
     // create retrieve plan pks in {1, 2, 3}, timestamp = 9
-    std::vector<int64_t> retrive_row_ids = {1, 2, 3};
+    std::vector<proto::plan::GenericValue> retrive_row_ids;
+    {
+        for (auto v : {1, 2, 3}) {
+            proto::plan::GenericValue val;
+            val.set_int64_val(v);
+            retrive_row_ids.push_back(val);
+        }
+    }
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
-    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(
-        milvus::query::ColumnInfo(
+    auto term_expr = std::make_shared<milvus::expr::TermFilterExpr>(
+        milvus::expr::ColumnInfo(
             FieldId(101), DataType::INT64, std::vector<std::string>()),
-        retrive_row_ids,
-        proto::plan::GenericValue::kInt64Val);
+        retrive_row_ids);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
-    plan->plan_node_->predicate_ = std::move(term_expr);
+    plan->plan_node_->filter_plannode_ =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
     std::vector<FieldId> target_field_ids{FieldId(100), FieldId(101)};
     plan->field_ids_ = target_field_ids;
 
@@ -1127,15 +1178,21 @@ TEST(CApiTest, RetrieveTestWithExpr) {
     ASSERT_EQ(ins_res.error_code, Success);
 
     // create retrieve plan "age in [0]"
-    std::vector<int64_t> values(1, 0);
-    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(
-        milvus::query::ColumnInfo(
+    std::vector<proto::plan::GenericValue> values;
+    {
+        for (auto v : {1, 0}) {
+            proto::plan::GenericValue val;
+            val.set_int64_val(v);
+            values.push_back(val);
+        }
+    }
+    auto term_expr = std::make_shared<milvus::expr::TermFilterExpr>(
+        milvus::expr::ColumnInfo(
             FieldId(101), DataType::INT64, std::vector<std::string>()),
-        values,
-        proto::plan::GenericValue::kInt64Val);
-
+        values);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
-    plan->plan_node_->predicate_ = std::move(term_expr);
+    plan->plan_node_->filter_plannode_ =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
     std::vector<FieldId> target_field_ids{FieldId(100), FieldId(101)};
     plan->field_ids_ = target_field_ids;
 
@@ -4017,13 +4074,16 @@ TEST(CApiTest, RetriveScalarFieldFromSealedSegmentWithIndex) {
     // create retrieve plan
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
-    std::vector<int64_t> retrive_row_ids = {age64_col[0]};
-    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(
-        milvus::query::ColumnInfo(
+    std::vector<proto::plan::GenericValue> retrive_row_ids;
+    proto::plan::GenericValue val;
+    val.set_int64_val(age64_col[0]);
+    retrive_row_ids.push_back(val);
+    auto term_expr = std::make_shared<milvus::expr::TermFilterExpr>(
+        milvus::expr::ColumnInfo(
             i64_fid, DataType::INT64, std::vector<std::string>()),
-        retrive_row_ids,
-        proto::plan::GenericValue::kInt64Val);
-    plan->plan_node_->predicate_ = std::move(term_expr);
+        retrive_row_ids);
+    plan->plan_node_->filter_plannode_ =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
     std::vector<FieldId> target_field_ids;
 
     // retrieve value

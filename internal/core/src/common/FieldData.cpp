@@ -14,15 +14,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "storage/FieldData.h"
+#include "common/FieldData.h"
+
 #include "arrow/array/array_binary.h"
+#include "common/Array.h"
 #include "common/EasyAssert.h"
+#include "common/Exception.h"
+#include "common/FieldDataInterface.h"
 #include "common/Json.h"
 #include "simdjson/padded_string.h"
-#include "common/Array.h"
-#include "FieldDataInterface.h"
 
-namespace milvus::storage {
+namespace milvus {
 
 template <typename Type, bool is_scalar>
 void
@@ -183,4 +185,33 @@ template class FieldDataImpl<int8_t, false>;
 template class FieldDataImpl<float, false>;
 template class FieldDataImpl<float16, false>;
 
-}  // namespace milvus::storage
+FieldDataPtr
+InitScalarFieldData(const DataType& type, int64_t cap_rows) {
+    switch (type) {
+        case DataType::BOOL:
+            return std::make_shared<FieldData<bool>>(type, cap_rows);
+        case DataType::INT8:
+            return std::make_shared<FieldData<int8_t>>(type, cap_rows);
+        case DataType::INT16:
+            return std::make_shared<FieldData<int16_t>>(type, cap_rows);
+        case DataType::INT32:
+            return std::make_shared<FieldData<int32_t>>(type, cap_rows);
+        case DataType::INT64:
+            return std::make_shared<FieldData<int64_t>>(type, cap_rows);
+        case DataType::FLOAT:
+            return std::make_shared<FieldData<float>>(type, cap_rows);
+        case DataType::DOUBLE:
+            return std::make_shared<FieldData<double>>(type, cap_rows);
+        case DataType::STRING:
+        case DataType::VARCHAR:
+            return std::make_shared<FieldData<std::string>>(type, cap_rows);
+        case DataType::JSON:
+            return std::make_shared<FieldData<Json>>(type, cap_rows);
+        default:
+            throw NotSupportedDataTypeException(
+                "InitScalarFieldData not support data type " +
+                datatype_name(type));
+    }
+}
+
+}  // namespace milvus

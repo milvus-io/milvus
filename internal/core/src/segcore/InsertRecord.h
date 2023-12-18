@@ -424,7 +424,7 @@ struct InsertRecord {
     }
 
     void
-    insert_pks(const std::vector<storage::FieldDataPtr>& field_datas) {
+    insert_pks(const std::vector<FieldDataPtr>& field_datas) {
         std::lock_guard lck(shared_mutex_);
         int64_t offset = 0;
         for (auto& data : field_datas) {

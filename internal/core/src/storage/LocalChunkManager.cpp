@@ -22,6 +22,7 @@
 #include <sstream>
 
 #include "common/EasyAssert.h"
+#include "common/Exception.h"
 
 #define THROWLOCALERROR(code, FUNCTION)                           \
     do {                                                          \

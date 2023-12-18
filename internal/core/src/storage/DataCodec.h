@@ -20,8 +20,8 @@
 #include <memory>
 #include <utility>
 
+#include "common/FieldData.h"
 #include "storage/Types.h"
-#include "storage/FieldData.h"
 #include "storage/PayloadStream.h"
 #include "storage/BinlogReader.h"
 

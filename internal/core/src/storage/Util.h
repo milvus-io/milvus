@@ -20,15 +20,15 @@
 #include <string>
 #include <vector>
 
-#include "storage/FieldData.h"
+#include "common/FieldData.h"
+#include "common/LoadInfo.h"
+#include "knowhere/comp/index_param.h"
+#include "parquet/schema.h"
 #include "storage/PayloadStream.h"
 #include "storage/FileManager.h"
 #include "storage/BinlogReader.h"
 #include "storage/ChunkManager.h"
 #include "storage/DataCodec.h"
-#include "knowhere/comp/index_param.h"
-#include "parquet/schema.h"
-#include "common/LoadInfo.h"
 #include "storage/Types.h"
 #include "storage/space.h"
 
@@ -161,10 +161,10 @@ CreateFieldData(const DataType& type,
 int64_t
 GetByteSizeOfFieldDatas(const std::vector<FieldDataPtr>& field_datas);
 
-std::vector<storage::FieldDataPtr>
-CollectFieldDataChannel(storage::FieldDataChannelPtr& channel);
+std::vector<FieldDataPtr>
+CollectFieldDataChannel(FieldDataChannelPtr& channel);
 
-storage::FieldDataPtr
-MergeFieldData(std::vector<storage::FieldDataPtr>& data_array);
+FieldDataPtr
+MergeFieldData(std::vector<FieldDataPtr>& data_array);
 
 }  // namespace milvus::storage
