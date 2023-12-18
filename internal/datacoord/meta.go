@@ -21,6 +21,8 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -1042,9 +1044,14 @@ func (m *meta) PrepareCompleteCompactionMutation(compactionLogs []*datapb.Compac
 func (m *meta) copyDeltaFiles(binlogs []*datapb.FieldBinlog, collectionID, partitionID, targetSegmentID int64) ([]*datapb.FieldBinlog, error) {
 	ret := make([]*datapb.FieldBinlog, 0, len(binlogs))
 	for _, fieldBinlog := range binlogs {
-		fieldBinlog = proto.Clone(fieldBinlog).(*datapb.FieldBinlog)
+		fieldBinlog = typeutil.Clone(fieldBinlog)
 		for _, binlog := range fieldBinlog.Binlogs {
-			blobKey := metautil.JoinIDPath(collectionID, partitionID, targetSegmentID, binlog.LogID)
+			logID, err := getDeltaLogID(m.chunkManager.RootPath(), binlog)
+			if err != nil {
+				log.Error("failed to get logID from binlog", zap.Int64("segmentID", targetSegmentID), zap.Stringer("binlog", binlog), zap.Error(err))
+				return nil, err
+			}
+			blobKey := metautil.JoinIDPath(collectionID, partitionID, targetSegmentID, logID)
 			blobPath := path.Join(m.chunkManager.RootPath(), common.SegmentDeltaLogPath, blobKey)
 			blob, err := m.chunkManager.Read(m.ctx, binlog.LogPath)
 			if err != nil {
@@ -1059,6 +1066,34 @@ func (m *meta) copyDeltaFiles(binlogs []*datapb.FieldBinlog, collectionID, parti
 		ret = append(ret, fieldBinlog)
 	}
 	return ret, nil
+}
+
+// getDeltaLogID is the util function to return delta logID from datapb.Binlog
+// if LogID field is filled, return field value directly.
+// otherwise, try to parse logID from LogPath.
+func getDeltaLogID(rootPath string, binlog *datapb.Binlog) (int64, error) {
+	if binlog.GetLogID() != 0 {
+		return binlog.GetLogID(), nil
+	}
+
+	path := binlog.GetLogPath()
+	// check path contains rootPath as prefix
+	if !strings.HasPrefix(path, rootPath) {
+		return 0, fmt.Errorf("path \"%s\" does not contains rootPath \"%s\"", path, rootPath)
+	}
+	p := path[len(rootPath):]
+	// remove leading "/"
+	for strings.HasPrefix(p, "/") {
+		p = p[1:]
+	}
+
+	// delta binlog path should consist of "delta_log/collID/partID/segID/logID"
+	parts := strings.Split(p, "/")
+	if len(parts) != 5 {
+		return 0, fmt.Errorf("delta log path format is not valid: %s", path)
+	}
+
+	return strconv.ParseInt(parts[4], 10, 64)
 }
 
 func (m *meta) alterMetaStoreAfterCompaction(segmentCompactTo *SegmentInfo, segmentsCompactFrom []*SegmentInfo) error {
