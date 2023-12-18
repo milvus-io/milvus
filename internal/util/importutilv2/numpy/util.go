@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/sbinet/npyio"
+	"github.com/sbinet/npyio/npy"
 	"golang.org/x/text/encoding/unicode"
 	"reflect"
 	"regexp"
@@ -164,4 +165,66 @@ func convertNumpyType(typeStr string) (schemapb.DataType, error) {
 		return schemapb.DataType_None, merr.WrapErrImportFailed(
 			fmt.Sprintf("the numpy file dtype '%s' is not supported", typeStr))
 	}
+}
+
+func wrapElementTypeError(eleType schemapb.DataType, field *schemapb.FieldSchema) error {
+	return merr.WrapErrImportFailed(fmt.Sprintf("expected element type '%s' for field '%s', got type '%T'",
+		field.GetDataType().String(), field.GetName(), eleType))
+}
+
+func wrapDimError(actualDim int, expectDim int, field *schemapb.FieldSchema) error {
+	return merr.WrapErrImportFailed(fmt.Sprintf("expected dim '%d' for %s field '%s', got dim '%d'",
+		expectDim, field.GetDataType().String(), field.GetName(), actualDim))
+}
+
+func wrapShapeError(actualShape int, expectShape int, field *schemapb.FieldSchema) error {
+	return merr.WrapErrImportFailed(fmt.Sprintf("expected shape '%d' for %s field '%s', got shape '%d'",
+		expectShape, field.GetDataType().String(), field.GetName(), actualShape))
+}
+
+func validateHeader(npyReader *npy.Reader, field *schemapb.FieldSchema, dim int) error {
+	elementType, err := convertNumpyType(npyReader.Header.Descr.Type)
+	if err != nil {
+		return err
+	}
+	shape := npyReader.Header.Descr.Shape
+
+	switch field.GetDataType() {
+	case schemapb.DataType_FloatVector:
+		if elementType != schemapb.DataType_Float && elementType != schemapb.DataType_Double {
+			return wrapElementTypeError(elementType, field)
+		}
+		if len(shape) != 2 {
+			return wrapShapeError(len(shape), 2, field)
+		}
+		if shape[1] != dim {
+			return wrapDimError(shape[1], dim, field)
+		}
+	case schemapb.DataType_BinaryVector:
+		if elementType != schemapb.DataType_BinaryVector {
+			return wrapElementTypeError(elementType, field)
+		}
+		if len(shape) != 2 {
+			return wrapShapeError(len(shape), 2, field)
+		}
+		if shape[1] != dim/8 {
+			return wrapDimError(shape[1]*8, dim, field)
+		}
+	case schemapb.DataType_VarChar, schemapb.DataType_JSON:
+		if len(shape) != 1 {
+			return wrapShapeError(len(shape), 1, field)
+		}
+	case schemapb.DataType_None, schemapb.DataType_Array,
+		schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
+		return merr.WrapErrImportFailed(fmt.Sprintf("unsupported data type: %s", field.GetDataType().String()))
+
+	default:
+		if elementType != field.GetDataType() {
+			return wrapElementTypeError(elementType, field)
+		}
+		if len(shape) != 1 {
+			return wrapShapeError(len(shape), 1, field)
+		}
+	}
+	return nil
 }

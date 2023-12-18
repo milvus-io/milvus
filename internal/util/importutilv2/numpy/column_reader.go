@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/samber/lo"
 	"github.com/sbinet/npyio"
 	"github.com/sbinet/npyio/npy"
 	"io"
@@ -45,18 +46,6 @@ func NewColumnReader(reader io.Reader, field *schemapb.FieldSchema) (*ColumnRead
 	if err != nil {
 		return nil, err
 	}
-	// TODO: dyh, validate header
-
-	//dataType, err := convertNumpyType(r.Header.Descr.Type)
-	//if err != nil {
-	//	return nil, err
-	//}
-
-	// TODO: dyh, check vector?
-	//if dataType != field.GetDataType() {
-	//	return nil, merr.WrapErrImportFailed(fmt.Sprintf("expect numpy data type '%s', got '%s'",
-	//		field.GetDataType().String(), dataType.String()))
-	//}
 
 	var dim int64
 	if typeutil.IsVectorType(field.GetDataType()) {
@@ -64,6 +53,11 @@ func NewColumnReader(reader io.Reader, field *schemapb.FieldSchema) (*ColumnRead
 		if err != nil {
 			return nil, err
 		}
+	}
+
+	err = validateHeader(r, field, int(dim))
+	if err != nil {
+		return nil, err
 	}
 
 	cr := &ColumnReader{
@@ -86,7 +80,7 @@ func ReadN[T any](reader io.Reader, order binary.ByteOrder, n int64) ([]T, error
 }
 
 func (c *ColumnReader) Next(count int64) (storage.FieldData, error) {
-	// TODO: validate shape and count
+	// TODO: validate shape with count
 	dt := c.field.GetDataType()
 	switch dt {
 	case schemapb.DataType_Bool:
@@ -138,7 +132,6 @@ func (c *ColumnReader) Next(count int64) (storage.FieldData, error) {
 		}
 		return &storage.StringFieldData{Data: data}, nil
 	case schemapb.DataType_JSON:
-		// JSON field read data from string array numpy
 		data, err := c.ReadString(count)
 		if err != nil {
 			return nil, err
@@ -149,8 +142,7 @@ func (c *ColumnReader) Next(count int64) (storage.FieldData, error) {
 			err = json.Unmarshal([]byte(str), &dummy)
 			if err != nil {
 				return nil, merr.WrapErrImportFailed(
-					fmt.Sprintf("failed to parse value '%v' for JSON field '%s', error: %v",
-						str, c.field.GetName(), err))
+					fmt.Sprintf("failed to parse value '%v' for JSON field '%s', error: %v", str, c.field.GetName(), err))
 			}
 			byteArr = append(byteArr, []byte(str))
 		}
@@ -165,9 +157,6 @@ func (c *ColumnReader) Next(count int64) (storage.FieldData, error) {
 			Dim:  int(c.dim),
 		}, nil
 	case schemapb.DataType_FloatVector:
-		// float32/float64 numpy file can be used for float vector file, 2 reasons:
-		// 1. for float vector, we support float32 and float64 numpy file because python float value is 64 bit
-		// 2. for float64 numpy file, the performance is worse than float32 numpy file
 		elementType, err := convertNumpyType(c.npyReader.Header.Descr.Type)
 		if err != nil {
 			return nil, err
@@ -192,20 +181,16 @@ func (c *ColumnReader) Next(count int64) (storage.FieldData, error) {
 			if err != nil {
 				return nil, err
 			}
-			data = make([]float32, 0, count*c.dim)
-			for _, f64 := range data64 {
-				data = append(data, float32(f64))
-			}
-		default:
-			return nil, merr.WrapErrImportFailed(
-				fmt.Sprintf("unexpected element data type '%s' for floatVecField", dt.String()))
+			data = lo.Map(data64, func(f float64, _ int) float32 {
+				return float32(f)
+			})
 		}
 		return &storage.FloatVectorFieldData{
 			Data: data,
 			Dim:  int(c.dim),
 		}, nil
 	default:
-		return nil, merr.WrapErrImportFailed(fmt.Sprintf("unexpected data type: %s", dt.String()))
+		return nil, merr.WrapErrImportFailed(fmt.Sprintf("unsupported data type: %s", dt.String()))
 	}
 }
 
@@ -228,10 +213,6 @@ func (c *ColumnReader) setByteOrder() {
 	default:
 		c.order = nativeEndian
 	}
-}
-
-func (c *ColumnReader) GetShape() []int {
-	return c.npyReader.Header.Descr.Shape
 }
 
 func (c *ColumnReader) ReadString(count int64) ([]string, error) {

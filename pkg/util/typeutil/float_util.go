@@ -51,3 +51,11 @@ func VerifyFloats64(values []float64) error {
 
 	return nil
 }
+
+func Floats64ToFloats32(values []float64) []float32 {
+	res := make([]float32, len(values))
+	for i, v := range values {
+		res[i] = float32(v)
+	}
+	return res
+}

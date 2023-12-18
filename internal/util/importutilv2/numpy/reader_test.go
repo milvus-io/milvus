@@ -17,6 +17,7 @@
 package numpy
 
 import (
+	"bytes"
 	rand2 "crypto/rand"
 	"fmt"
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -32,8 +33,8 @@ import (
 	"golang.org/x/exp/slices"
 	"io"
 	"math/rand"
-	"os"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -160,21 +161,17 @@ func createInsertData(t *testing.T, schema *schemapb.CollectionSchema, rowCount 
 	return insertData
 }
 
-func CreateReader(dataType schemapb.DataType, data interface{}) (io.Reader, error) {
-	path := fmt.Sprintf("/tmp/test_%s.npy", dataType.String())
-	f, err := os.Create(path)
+func CreateReader(data interface{}) (io.Reader, error) {
+	buf := new(bytes.Buffer)
+	err := npyio.Write(buf, data)
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
-	err = npyio.Write(f, data)
-	if err != nil {
-		return nil, err
-	}
-	return os.Open(path)
+	return strings.NewReader(buf.String()), nil
 }
 
 func (suite *ReaderSuite) run(dt schemapb.DataType) {
+	const dim = 8
 	schema := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
 			{
@@ -190,7 +187,7 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 				TypeParams: []*commonpb.KeyValuePair{
 					{
 						Key:   common.DimKey,
-						Value: "8",
+						Value: fmt.Sprintf("%d", dim),
 					},
 				},
 			},
@@ -203,48 +200,46 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 		},
 	}
 	insertData := createInsertData(suite.T(), schema, suite.numRows)
-	rows := make([]map[string]any, 0, suite.numRows)
 	fieldIDToField := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) int64 {
 		return field.GetFieldID()
 	})
-	for i := 0; i < insertData.GetRowNum(); i++ {
-		data := make(map[int64]interface{})
-		for fieldID, v := range insertData.Data {
-			dataType := fieldIDToField[fieldID].GetDataType()
-			if dataType == schemapb.DataType_Array {
-				data[fieldID] = v.GetRow(i).(*schemapb.ScalarField).GetIntData().GetData()
-			} else if dataType == schemapb.DataType_JSON {
-				data[fieldID] = string(v.GetRow(i).([]byte))
-			} else if dataType == schemapb.DataType_BinaryVector || dataType == schemapb.DataType_Float16Vector {
-				bytes := v.GetRow(i).([]byte)
-				ints := make([]int, 0, len(bytes))
-				for _, b := range bytes {
-					ints = append(ints, int(b))
-				}
-				data[fieldID] = ints
-			} else {
-				data[fieldID] = v.GetRow(i)
-			}
-		}
-		row := lo.MapKeys(data, func(_ any, fieldID int64) string {
-			return fieldIDToField[fieldID].GetName()
-		})
-		rows = append(rows, row)
-	}
 
 	readers := make(map[int64]io.Reader)
 	for fieldID, fieldData := range insertData.Data {
-		reader, err := CreateReader(fieldIDToField[fieldID].GetDataType(), fieldData.GetRows())
-		suite.NoError(err)
-		readers[fieldID] = reader
-	}
-
-	defer func() {
-		for _, field := range fieldIDToField {
-			path := fmt.Sprintf("/tmp/test_%s.npy", field.GetDataType().String())
-			os.Remove(path)
+		dataType := fieldIDToField[fieldID].GetDataType()
+		if dataType == schemapb.DataType_JSON {
+			jsonStrs := make([]string, 0, fieldData.RowNum())
+			for i := 0; i < fieldData.RowNum(); i++ {
+				row := fieldData.GetRow(i)
+				jsonStrs = append(jsonStrs, string(row.([]byte)))
+			}
+			reader, err := CreateReader(jsonStrs)
+			suite.NoError(err)
+			readers[fieldID] = reader
+		} else if dataType == schemapb.DataType_FloatVector {
+			chunked := lo.Chunk(insertData.Data[fieldID].GetRows().([]float32), dim)
+			chunkedRows := make([][dim]float32, len(chunked))
+			for i, innerSlice := range chunked {
+				copy(chunkedRows[i][:], innerSlice[:])
+			}
+			reader, err := CreateReader(chunkedRows)
+			suite.NoError(err)
+			readers[fieldID] = reader
+		} else if dataType == schemapb.DataType_BinaryVector {
+			chunked := lo.Chunk(insertData.Data[fieldID].GetRows().([]byte), dim/8)
+			chunkedRows := make([][dim / 8]byte, len(chunked))
+			for i, innerSlice := range chunked {
+				copy(chunkedRows[i][:], innerSlice[:])
+			}
+			reader, err := CreateReader(chunkedRows)
+			suite.NoError(err)
+			readers[fieldID] = reader
+		} else {
+			reader, err := CreateReader(insertData.Data[fieldID].GetRows())
+			suite.NoError(err)
+			readers[fieldID] = reader
 		}
-	}()
+	}
 
 	reader, err := NewReader(schema, readers)
 	suite.NoError(err)
@@ -275,15 +270,14 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 }
 
 func (suite *ReaderSuite) TestReadScalarFields() {
-	//suite.run(schemapb.DataType_Bool)
-	//suite.run(schemapb.DataType_Int8)
-	//suite.run(schemapb.DataType_Int16)
-	//suite.run(schemapb.DataType_Int32)
-	//suite.run(schemapb.DataType_Int64)
-	//suite.run(schemapb.DataType_Float)
-	//suite.run(schemapb.DataType_Double)
-	//suite.run(schemapb.DataType_VarChar)
-	suite.run(schemapb.DataType_Array)
+	suite.run(schemapb.DataType_Bool)
+	suite.run(schemapb.DataType_Int8)
+	suite.run(schemapb.DataType_Int16)
+	suite.run(schemapb.DataType_Int32)
+	suite.run(schemapb.DataType_Int64)
+	suite.run(schemapb.DataType_Float)
+	suite.run(schemapb.DataType_Double)
+	suite.run(schemapb.DataType_VarChar)
 	suite.run(schemapb.DataType_JSON)
 }
 
@@ -292,10 +286,8 @@ func (suite *ReaderSuite) TestStringPK() {
 	suite.run(schemapb.DataType_Int32)
 }
 
-func (suite *ReaderSuite) TestBinaryAndFloat16Vector() {
-	//suite.vecDataType = schemapb.DataType_BinaryVector
-	//suite.run(schemapb.DataType_Int32)
-	suite.vecDataType = schemapb.DataType_Float16Vector
+func (suite *ReaderSuite) TestBinaryVector() {
+	suite.vecDataType = schemapb.DataType_BinaryVector
 	suite.run(schemapb.DataType_Int32)
 }
 
