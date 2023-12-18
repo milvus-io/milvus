@@ -1066,7 +1066,7 @@ func (m *meta) copyDeltaFiles(binlogs []*datapb.FieldBinlog, collectionID, parti
 		for _, binlog := range fieldBinlog.Binlogs {
 			logID, err := getDeltaLogID(m.chunkManager.RootPath(), binlog)
 			if err != nil {
-				log.Error("failed to get logID from binlog", zap.Int64("segmentID", targetSegmentID), zap.Stringer("binlog", binlog))
+				log.Error("failed to get logID from binlog", zap.Int64("segmentID", targetSegmentID), zap.Stringer("binlog", binlog), zap.Error(err))
 				return nil, err
 			}
 			blobKey := metautil.JoinIDPath(collectionID, partitionID, targetSegmentID, logID)
