@@ -876,3 +876,16 @@ func (c *Client) ReportDataNodeTtMsgs(ctx context.Context, req *datapb.ReportDat
 	}
 	return ret.(*commonpb.Status), err
 }
+
+func (c *Client) GcControl(ctx context.Context, req *datapb.GcControlRequest) (*commonpb.Status, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataCoordClient) (any, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.GcControl(ctx, req)
+	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
+	return ret.(*commonpb.Status), err
+}

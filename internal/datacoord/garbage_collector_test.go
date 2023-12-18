@@ -96,7 +96,125 @@ func Test_garbageCollector_basic(t *testing.T) {
 			gc.close()
 		})
 	})
+}
 
+func Test_garbageCollection_PauseResume(t *testing.T) {
+	bucketName := `datacoord-ut` + strings.ToLower(funcutil.RandomString(8))
+	rootPath := `gc` + funcutil.RandomString(8)
+	//TODO change to Params
+	cli, _, _, _, _, err := initUtOSSEnv(bucketName, rootPath, 0)
+	require.NoError(t, err)
+
+	meta, err := newMemoryMeta()
+	assert.Nil(t, err)
+
+	etcdCli, err := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd,
+		Params.EtcdCfg.EtcdUseSSL,
+		Params.EtcdCfg.Endpoints,
+		Params.EtcdCfg.EtcdTLSCert,
+		Params.EtcdCfg.EtcdTLSKey,
+		Params.EtcdCfg.EtcdTLSCACert,
+		Params.EtcdCfg.EtcdTLSMinVersion)
+	assert.Nil(t, err)
+	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
+	segRefer, err := NewSegmentReferenceManager(etcdKV, nil)
+	assert.NoError(t, err)
+	assert.NotNil(t, segRefer)
+
+	indexCoord := mocks.NewIndexCoord(t)
+	t.Run("not_enabled", func(t *testing.T) {
+		gc := newGarbageCollector(meta, newMockHandler(), segRefer, indexCoord, GcOption{
+			cli:              cli,
+			enabled:          false,
+			checkInterval:    time.Millisecond * 10,
+			missingTolerance: time.Hour * 24,
+			dropTolerance:    time.Hour * 24,
+		})
+
+		gc.start()
+		defer gc.close()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		err := gc.Pause(ctx, time.Second)
+		assert.NoError(t, err)
+
+		err = gc.Resume(ctx)
+		assert.Error(t, err)
+	})
+
+	t.Run("pause_then_resume", func(t *testing.T) {
+		gc := newGarbageCollector(meta, newMockHandler(), segRefer, indexCoord, GcOption{
+			cli:              cli,
+			enabled:          true,
+			checkInterval:    time.Millisecond * 10,
+			missingTolerance: time.Hour * 24,
+			dropTolerance:    time.Hour * 24,
+		})
+
+		gc.start()
+		defer gc.close()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		err := gc.Pause(ctx, time.Minute)
+		assert.NoError(t, err)
+
+		assert.NotZero(t, gc.pauseUntil.Load())
+
+		err = gc.Resume(ctx)
+		assert.NoError(t, err)
+
+		assert.Zero(t, gc.pauseUntil.Load())
+	})
+
+	t.Run("pause_before_until", func(t *testing.T) {
+		gc := newGarbageCollector(meta, newMockHandler(), segRefer, indexCoord, GcOption{
+			cli:              cli,
+			enabled:          true,
+			checkInterval:    time.Millisecond * 10,
+			missingTolerance: time.Hour * 24,
+			dropTolerance:    time.Hour * 24,
+		})
+
+		gc.start()
+		defer gc.close()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		err := gc.Pause(ctx, time.Minute)
+		assert.NoError(t, err)
+
+		until := gc.pauseUntil.Load()
+		assert.NotZero(t, until)
+
+		err = gc.Pause(ctx, time.Second)
+		assert.NoError(t, err)
+
+		second := gc.pauseUntil.Load()
+
+		assert.Equal(t, until, second)
+	})
+
+	t.Run("pause_resume_timeout", func(t *testing.T) {
+		gc := newGarbageCollector(meta, newMockHandler(), segRefer, indexCoord, GcOption{
+			cli:              cli,
+			enabled:          true,
+			checkInterval:    time.Millisecond * 10,
+			missingTolerance: time.Hour * 24,
+			dropTolerance:    time.Hour * 24,
+		})
+
+		ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
+		defer cancel()
+		err := gc.Pause(ctx, time.Minute)
+		assert.Error(t, err)
+
+		assert.Zero(t, gc.pauseUntil.Load())
+
+		err = gc.Resume(ctx)
+		assert.Error(t, err)
+
+		assert.Zero(t, gc.pauseUntil.Load())
+	})
 }
 
 func validateMinioPrefixElements(t *testing.T, cli *minio.Client, bucketName string, prefix string, elements []string) {
