@@ -835,18 +835,6 @@ func IsDefaultRole(roleName string) bool {
 	return false
 }
 
-func IsBuiltinRole(roleName string) bool {
-	if IsDefaultRole(roleName) {
-		return true
-	}
-	for _, builtinRole := range util.BuiltinRoles {
-		if builtinRole == roleName {
-			return true
-		}
-	}
-	return false
-}
-
 func ValidateObjectName(entity string) error {
 	if util.IsAnyWord(entity) {
 		return nil

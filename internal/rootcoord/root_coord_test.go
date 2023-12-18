@@ -49,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/importutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -2088,9 +2089,10 @@ func TestRootCoord_RBACError(t *testing.T) {
 }
 
 func TestRootCoord_BuiltinRoles(t *testing.T) {
+	roleDbAdmin := "db_admin"
 	paramtable.Init()
 	paramtable.Get().Save(paramtable.Get().RoleCfg.Enabled.Key, "true")
-	paramtable.Get().Save(paramtable.Get().RoleCfg.Roles.Key, `{"db_admin": {"privileges": [{"object_type": "Global", "object_name": "*", "privilege": "CreateCollection", "db_name": "*"}]}}`)
+	paramtable.Get().Save(paramtable.Get().RoleCfg.Roles.Key, `{"`+roleDbAdmin+`": {"privileges": [{"object_type": "Global", "object_name": "*", "privilege": "CreateCollection", "db_name": "*"}]}}`)
 	t.Run("init builtin roles success", func(t *testing.T) {
 		c := newTestCore(withHealthyCode(), withInvalidMeta())
 		mockMeta := c.meta.(*mockMetaTable)
@@ -2102,6 +2104,11 @@ func TestRootCoord_BuiltinRoles(t *testing.T) {
 		}
 		err := c.initBuiltinRoles()
 		assert.Equal(t, nil, err)
+		assert.True(t, util.IsBuiltinRole(roleDbAdmin))
+		assert.False(t, util.IsBuiltinRole(util.RoleAdmin))
+		resp, err := c.DropRole(context.Background(), &milvuspb.DropRoleRequest{RoleName: roleDbAdmin})
+		assert.Equal(t, nil, err)
+		assert.Equal(t, int32(1401), resp.Code) // merr.ErrPrivilegeNotPermitted
 	})
 	t.Run("init builtin roles fail to create role", func(t *testing.T) {
 		c := newTestCore(withHealthyCode(), withInvalidMeta())
