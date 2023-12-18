@@ -25,6 +25,8 @@
 #include "sse2.h"
 #include "sse4.h"
 #include "instruction_set.h"
+#elif defined(__ARM_NEON)
+#include "neon.h"
 #endif
 
 namespace milvus {
@@ -44,6 +46,12 @@ bool use_find_term_avx512;
 #endif
 
 decltype(get_bitset_block) get_bitset_block = GetBitsetBlockRef;
+decltype(all_false) all_false = AllFalseRef;
+decltype(all_true) all_true = AllTrueRef;
+decltype(invert_bool) invert_bool = InvertBoolRef;
+decltype(and_bool) and_bool = AndBoolRef;
+decltype(or_bool) or_bool = OrBoolRef;
+
 FindTermPtr<bool> find_term_bool = FindTermRef<bool>;
 FindTermPtr<int8_t> find_term_int8 = FindTermRef<int8_t>;
 FindTermPtr<int16_t> find_term_int16 = FindTermRef<int16_t>;
@@ -161,9 +169,82 @@ find_term_hook() {
     LOG_SEGCORE_INFO_ << "find term hook simd type: " << simd_type;
 }
 
+void
+all_boolean_hook() {
+    static std::mutex hook_mutex;
+    std::lock_guard<std::mutex> lock(hook_mutex);
+    std::string simd_type = "REF";
+#if defined(__x86_64__)
+    if (use_sse2 && cpu_support_sse2()) {
+        simd_type = "SSE2";
+        all_false = AllFalseSSE2;
+        all_true = AllTrueSSE2;
+    }
+#elif defined(__ARM_NEON)
+    simd_type = "NEON";
+    all_false = AllFalseNEON;
+    all_true = AllTrueNEON;
+#endif
+    // TODO: support arm cpu
+    LOG_SEGCORE_INFO_ << "AllFalse/AllTrue hook simd type: " << simd_type;
+}
+
+void
+invert_boolean_hook() {
+    static std::mutex hook_mutex;
+    std::lock_guard<std::mutex> lock(hook_mutex);
+    std::string simd_type = "REF";
+#if defined(__x86_64__)
+    if (use_sse2 && cpu_support_sse2()) {
+        simd_type = "SSE2";
+        invert_bool = InvertBoolSSE2;
+    }
+#elif defined(__ARM_NEON)
+    simd_type = "NEON";
+    invert_bool = InvertBoolNEON;
+#endif
+    // TODO: support arm cpu
+    LOG_SEGCORE_INFO_ << "InvertBoolean hook simd type: " << simd_type;
+}
+
+void
+logical_boolean_hook() {
+    static std::mutex hook_mutex;
+    std::lock_guard<std::mutex> lock(hook_mutex);
+    std::string simd_type = "REF";
+#if defined(__x86_64__)
+    if (use_avx512 && cpu_support_avx512()) {
+        simd_type = "AVX512";
+        and_bool = AndBoolAVX512;
+        or_bool = OrBoolAVX512;
+    } else if (use_avx2 && cpu_support_avx2()) {
+        simd_type = "AVX2";
+        and_bool = AndBoolAVX2;
+        or_bool = OrBoolAVX2;
+    } else if (use_sse2 && cpu_support_sse2()) {
+        simd_type = "SSE2";
+        and_bool = AndBoolSSE2;
+        or_bool = OrBoolSSE2;
+    }
+#elif defined(__ARM_NEON)
+    simd_type = "NEON";
+    and_bool = AndBoolNEON;
+    or_bool = OrBoolNEON;
+#endif
+    // TODO: support arm cpu
+    LOG_SEGCORE_INFO_ << "InvertBoolean hook simd type: " << simd_type;
+}
+void
+boolean_hook() {
+    all_boolean_hook();
+    invert_boolean_hook();
+    logical_boolean_hook();
+}
+
 static int init_hook_ = []() {
     bitset_hook();
     find_term_hook();
+    boolean_hook();
     return 0;
 }();
 

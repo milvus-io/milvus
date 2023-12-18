@@ -20,11 +20,11 @@
 #include <optional>
 #include <memory>
 
-#include "knowhere/file_manager.h"
 #include "common/Consts.h"
+#include "knowhere/file_manager.h"
+#include "log/Log.h"
 #include "storage/ChunkManager.h"
 #include "storage/Types.h"
-#include "log/Log.h"
 #include "storage/space.h"
 
 namespace milvus::storage {

@@ -26,6 +26,7 @@ extern int64_t HIGH_PRIORITY_THREAD_CORE_COEFFICIENT;
 extern int64_t MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT;
 extern int64_t LOW_PRIORITY_THREAD_CORE_COEFFICIENT;
 extern int CPU_NUM;
+extern int64_t EXEC_EVAL_EXPR_BATCH_SIZE;
 
 void
 SetIndexSliceSize(const int64_t size);
@@ -41,5 +42,8 @@ SetLowPriorityThreadCoreCoefficient(const int64_t coefficient);
 
 void
 SetCpuNum(const int core);
+
+void
+SetDefaultExecEvalExprBatchSize(int64_t val);
 
 }  // namespace milvus

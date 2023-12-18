@@ -38,20 +38,20 @@
 #include "knowhere/factory.h"
 #include "knowhere/comp/time_recorder.h"
 #include "common/BitsetView.h"
-#include "common/Slice.h"
 #include "common/Consts.h"
+#include "common/FieldData.h"
+#include "common/File.h"
+#include "common/Slice.h"
+#include "common/Tracer.h"
 #include "common/RangeSearchHelper.h"
 #include "common/Utils.h"
 #include "log/Log.h"
 #include "mmap/Types.h"
 #include "storage/DataCodec.h"
-#include "storage/FieldData.h"
 #include "storage/MemFileManagerImpl.h"
 #include "storage/ThreadPools.h"
-#include "storage/Util.h"
-#include "common/File.h"
-#include "common/Tracer.h"
 #include "storage/space.h"
+#include "storage/Util.h"
 
 namespace milvus::index {
 
@@ -189,7 +189,7 @@ VectorMemIndex<T>::LoadV2(const Config& config) {
 
     auto slice_meta_file = index_prefix + "/" + INDEX_FILE_SLICE_META;
     auto res = space_->GetBlobByteSize(std::string(slice_meta_file));
-    std::map<std::string, storage::FieldDataPtr> index_datas{};
+    std::map<std::string, FieldDataPtr> index_datas{};
 
     if (!res.ok() && !res.status().IsFileNotFound()) {
         PanicInfo(DataFormatBroken, "failed to read blob");
@@ -289,7 +289,7 @@ VectorMemIndex<T>::Load(const Config& config) {
 
     auto parallel_degree =
         static_cast<uint64_t>(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
-    std::map<std::string, storage::FieldDataPtr> index_datas{};
+    std::map<std::string, FieldDataPtr> index_datas{};
 
     // try to read slice meta first
     std::string slice_meta_filepath;
@@ -414,7 +414,7 @@ VectorMemIndex<T>::BuildV2(const Config& config) {
     }
 
     auto reader = res.value();
-    std::vector<storage::FieldDataPtr> field_datas;
+    std::vector<FieldDataPtr> field_datas;
     for (auto rec : *reader) {
         if (!rec.ok()) {
             PanicInfo(IndexBuildError,

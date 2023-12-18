@@ -221,6 +221,9 @@ func (node *QueryNode) InitSegcore() error {
 	cCPUNum := C.int(hardware.GetCPUNum())
 	C.InitCpuNum(cCPUNum)
 
+	cExprBatchSize := C.int64_t(paramtable.Get().QueryNodeCfg.ExprEvalBatchSize.GetAsInt64())
+	C.InitDefaultExprEvalBatchSize(cExprBatchSize)
+
 	localDataRootPath := filepath.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), typeutil.QueryNodeRole)
 	initcore.InitLocalChunkManager(localDataRootPath)
 

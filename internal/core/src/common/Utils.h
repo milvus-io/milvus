@@ -192,4 +192,17 @@ is_in_disk_list(const IndexType& index_type) {
     return is_in_list<IndexType>(index_type, DISK_INDEX_LIST);
 }
 
+template <typename T>
+std::string
+Join(const std::vector<T>& items, const std::string& delimiter) {
+    std::stringstream ss;
+    for (size_t i = 0; i < items.size(); ++i) {
+        if (i > 0) {
+            ss << delimiter;
+        }
+        ss << items[i];
+    }
+    return ss.str();
+}
+
 }  // namespace milvus

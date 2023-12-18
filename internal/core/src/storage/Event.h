@@ -21,9 +21,9 @@
 #include <vector>
 #include <unordered_map>
 
+#include "common/FieldData.h"
 #include "common/Types.h"
 #include "storage/Types.h"
-#include "storage/FieldData.h"
 #include "storage/BinlogReader.h"
 
 namespace milvus::storage {

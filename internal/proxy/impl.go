@@ -1814,6 +1814,11 @@ func (node *Proxy) CreateIndex(ctx context.Context, request *milvuspb.CreateInde
 	return cit.result, nil
 }
 
+func (node *Proxy) AlterIndex(ctx context.Context, request *milvuspb.AlterIndexRequest) (*commonpb.Status, error) {
+	// Todo
+	return nil, nil
+}
+
 // DescribeIndex get the meta information of index, such as index state, index id and etc.
 func (node *Proxy) DescribeIndex(ctx context.Context, request *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
@@ -2647,6 +2652,11 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 		rateCol.Add(metricsinfo.ReadResultThroughput, float64(sentSize))
 	}
 	return qt.result, nil
+}
+
+func (node *Proxy) SearchV2(ctx context.Context, request *milvuspb.SearchRequestV2) (*milvuspb.SearchResults, error) {
+	// Todo
+	return nil, nil
 }
 
 func (node *Proxy) getVectorPlaceholderGroupForSearchByPks(ctx context.Context, request *milvuspb.SearchRequest) ([]byte, error) {
@@ -4223,7 +4233,7 @@ func (node *Proxy) DropRole(ctx context.Context, req *milvuspb.DropRoleRequest) 
 		return merr.Status(err), nil
 	}
 	if IsDefaultRole(req.RoleName) {
-		err := merr.WrapErrPrivilegeNotPermitted("the role[%s] is a default role, which can't be droped", req.GetRoleName())
+		err := merr.WrapErrPrivilegeNotPermitted("the role[%s] is a default role, which can't be dropped", req.GetRoleName())
 		return merr.Status(err), nil
 	}
 	result, err := node.rootCoord.DropRole(ctx, req)

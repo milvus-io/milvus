@@ -110,25 +110,22 @@ class BinlogIndexTest : public ::testing::TestWithParam<Param> {
         LoadFieldDataInfo row_id_info;
         FieldMeta row_id_field_meta(
             FieldName("RowID"), RowFieldID, DataType::INT64);
-        auto field_data = std::make_shared<milvus::storage::FieldData<int64_t>>(
-            DataType::INT64);
+        auto field_data =
+            std::make_shared<milvus::FieldData<int64_t>>(DataType::INT64);
         field_data->FillFieldData(dataset.row_ids_.data(), data_n);
-        auto field_data_info =
-            FieldDataInfo{RowFieldID.get(),
-                          data_n,
-                          std::vector<storage::FieldDataPtr>{field_data}};
+        auto field_data_info = FieldDataInfo{
+            RowFieldID.get(), data_n, std::vector<FieldDataPtr>{field_data}};
         segment->LoadFieldData(RowFieldID, field_data_info);
         // load ts
         LoadFieldDataInfo ts_info;
         FieldMeta ts_field_meta(
             FieldName("Timestamp"), TimestampFieldID, DataType::INT64);
-        field_data = std::make_shared<milvus::storage::FieldData<int64_t>>(
-            DataType::INT64);
+        field_data =
+            std::make_shared<milvus::FieldData<int64_t>>(DataType::INT64);
         field_data->FillFieldData(dataset.timestamps_.data(), data_n);
-        field_data_info =
-            FieldDataInfo{TimestampFieldID.get(),
-                          data_n,
-                          std::vector<storage::FieldDataPtr>{field_data}};
+        field_data_info = FieldDataInfo{TimestampFieldID.get(),
+                                        data_n,
+                                        std::vector<FieldDataPtr>{field_data}};
         segment->LoadFieldData(TimestampFieldID, field_data_info);
     }
 
@@ -138,8 +135,8 @@ class BinlogIndexTest : public ::testing::TestWithParam<Param> {
     size_t data_n = 10000;
     size_t data_d = 128;
     size_t topk = 10;
-    milvus::storage::FieldDataPtr vec_field_data = nullptr;
-    milvus::segcore::SegmentSealedPtr segment = nullptr;
+    milvus::FieldDataPtr vec_field_data = nullptr;
+    milvus::segcore::SegmentSealedUPtr segment = nullptr;
     milvus::FieldId vec_field_id;
     std::shared_ptr<float[]> vec_data;
 };
@@ -159,10 +156,8 @@ TEST_P(BinlogIndexTest, Accuracy) {
     segcore_config.set_enable_interim_segment_index(true);
     segcore_config.set_nprobe(32);
     // 1. load field data, and build binlog index for binlog data
-    auto field_data_info =
-        FieldDataInfo{vec_field_id.get(),
-                      data_n,
-                      std::vector<storage::FieldDataPtr>{vec_field_data}};
+    auto field_data_info = FieldDataInfo{
+        vec_field_id.get(), data_n, std::vector<FieldDataPtr>{vec_field_data}};
     segment->LoadFieldData(vec_field_id, field_data_info);
     //assert segment has been built binlog index
     EXPECT_TRUE(segment->HasIndex(vec_field_id));
@@ -249,10 +244,8 @@ TEST_P(BinlogIndexTest, DisableInterimIndex) {
     LoadOtherFields();
     SegcoreSetEnableTempSegmentIndex(false);
 
-    auto field_data_info =
-        FieldDataInfo{vec_field_id.get(),
-                      data_n,
-                      std::vector<storage::FieldDataPtr>{vec_field_data}};
+    auto field_data_info = FieldDataInfo{
+        vec_field_id.get(), data_n, std::vector<FieldDataPtr>{vec_field_data}};
     segment->LoadFieldData(vec_field_id, field_data_info);
 
     EXPECT_FALSE(segment->HasIndex(vec_field_id));
@@ -296,10 +289,8 @@ TEST_P(BinlogIndexTest, LoadBingLogWihIDMAP) {
     segment = CreateSealedSegment(schema, collection_index_meta);
     LoadOtherFields();
 
-    auto field_data_info =
-        FieldDataInfo{vec_field_id.get(),
-                      data_n,
-                      std::vector<storage::FieldDataPtr>{vec_field_data}};
+    auto field_data_info = FieldDataInfo{
+        vec_field_id.get(), data_n, std::vector<FieldDataPtr>{vec_field_data}};
     segment->LoadFieldData(vec_field_id, field_data_info);
 
     EXPECT_FALSE(segment->HasIndex(vec_field_id));
@@ -314,10 +305,8 @@ TEST_P(BinlogIndexTest, LoadBinlogWithoutIndexMeta) {
     segment = CreateSealedSegment(schema, collection_index_meta);
     SegcoreSetEnableTempSegmentIndex(true);
 
-    auto field_data_info =
-        FieldDataInfo{vec_field_id.get(),
-                      data_n,
-                      std::vector<storage::FieldDataPtr>{vec_field_data}};
+    auto field_data_info = FieldDataInfo{
+        vec_field_id.get(), data_n, std::vector<FieldDataPtr>{vec_field_data}};
     segment->LoadFieldData(vec_field_id, field_data_info);
 
     EXPECT_FALSE(segment->HasIndex(vec_field_id));
