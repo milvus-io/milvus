@@ -2664,7 +2664,7 @@ class TestCollectionSearch(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("partition_names",
                              [["(.*)"], ["search(.*)"]])
-    def test_search_index_partitions_fuzzy(self, nb, nq, dim, partition_names, auto_id, _async, enable_dynamic_field):
+    def test_search_index_partitions_fuzzy(self, nb, nq, dim, partition_names, auto_id, enable_dynamic_field):
         """
         target: test search from partitions
         method: search from partitions with fuzzy
@@ -2681,8 +2681,7 @@ class TestCollectionSearch(TestcaseBase):
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
         # 2. create index
         nlist = 128
-        default_index = {"index_type": "IVF_FLAT", "params": {
-            "nlist": nlist}, "metric_type": "COSINE"}
+        default_index = {"index_type": "IVF_FLAT", "params": {"nlist": nlist}, "metric_type": "COSINE"}
         collection_w.create_index("float_vector", default_index)
         collection_w.load()
         # 3. search through partitions
@@ -2697,12 +2696,10 @@ class TestCollectionSearch(TestcaseBase):
                 limit_check = par[1].num_entities
         collection_w.search(vectors[:nq], default_search_field,
                             search_params, limit, default_search_exp,
-                            partition_names, _async=_async,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": nq,
-                                         "ids": insert_ids,
-                                         "limit": limit_check,
-                                         "_async": _async})
+                            partition_names,
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 65535,
+                                         ct.err_msg: "partition name %s not found" % partition_names})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_index_partition_empty(self, nq, dim, auto_id, _async):
