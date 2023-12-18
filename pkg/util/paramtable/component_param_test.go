@@ -53,6 +53,9 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, Params.IndexSliceSize.GetAsInt64(), int64(DefaultIndexSliceSize))
 		t.Logf("knowhere index slice size = %d", Params.IndexSliceSize.GetAsInt64())
 
+		assert.Equal(t, Params.ConsistencyLevelUsedInDelete.GetValue(), DefaultConsistencyLevelUsedInDelete.String())
+		t.Logf("default ConsistencyLevelUsedInDelete = %s", Params.ConsistencyLevelUsedInDelete.GetValue())
+
 		assert.Equal(t, Params.GracefulTime.GetAsInt64(), int64(DefaultGracefulTime))
 		t.Logf("default grafeful time = %d", Params.GracefulTime.GetAsInt64())
 

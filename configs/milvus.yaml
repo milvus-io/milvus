@@ -540,6 +540,7 @@ common:
     SearchCacheBudgetGBRatio: 0.1
     LoadNumThreadRatio: 8
     BeamWidthRatio: 4
+  consistencyLevelUsedInDelete: "Bounded"
   gracefulTime: 5000 # milliseconds. it represents the interval (in ms) by which the request arrival time needs to be subtracted in the case of Bounded Consistency.
   gracefulStopTimeout: 1800 # seconds. it will force quit the server if the graceful stop process is not completed during this time.
   storageType: remote # please adjust in embedded Milvus: local, available values are [local, remote, opendal], value minio is deprecated, use remote instead
