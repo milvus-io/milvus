@@ -1022,3 +1022,70 @@ func Test_meta_GcConfirm(t *testing.T) {
 
 	assert.False(t, m.GcConfirm(context.TODO(), 100, 10000))
 }
+
+func TestGetDeltaLogID(t *testing.T) {
+	type testCase struct {
+		tag       string
+		rootPath  string
+		binlog    *datapb.Binlog
+		expectErr bool
+		expectID  int64
+	}
+
+	cases := []testCase{
+		{
+			tag:      "has_log_id",
+			rootPath: "files",
+			binlog: &datapb.Binlog{
+				LogID: 446329278451403166,
+			},
+			expectErr: false,
+			expectID:  446329278451403166,
+		},
+		{
+			tag:      "parse_normal_logPath",
+			rootPath: "files",
+			binlog: &datapb.Binlog{
+				LogPath: "files/delta_log/446329278451203130/446329278451203131/446329278451403142/446329278451403166",
+			},
+			expectErr: false,
+			expectID:  446329278451403166,
+		},
+		{
+			tag:      "invalid_rootpath_prefix",
+			rootPath: "files",
+			binlog: &datapb.Binlog{
+				LogPath: "file/delta_log/446329278451203130/446329278451203131/446329278451403142/446329278451403166",
+			},
+			expectErr: true,
+		},
+		{
+			tag:      "invalid_deltalog_path",
+			rootPath: "files",
+			binlog: &datapb.Binlog{
+				LogPath: "files/delta_log/446329278451403166",
+			},
+			expectErr: true,
+		},
+		{
+			tag:      "invalid_logID",
+			rootPath: "files",
+			binlog: &datapb.Binlog{
+				LogPath: "files/delta_log/446329278451203130/446329278451203131/446329278451403142/meta_files",
+			},
+			expectErr: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.tag, func(t *testing.T) {
+			logID, err := getDeltaLogID(tc.rootPath, tc.binlog)
+			if tc.expectErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tc.expectID, logID)
+			}
+		})
+	}
+}
