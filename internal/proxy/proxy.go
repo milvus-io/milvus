@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/util/expr"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -143,6 +144,7 @@ func NewProxy(ctx context.Context, factory dependency.Factory) (*Proxy, error) {
 		replicateStreamManager: replicateStreamManager,
 	}
 	node.UpdateStateCode(commonpb.StateCode_Abnormal)
+	expr.Register("proxy", node)
 	logutil.Logger(ctx).Debug("create a new Proxy instance", zap.Any("state", node.stateCode.Load()))
 	return node, nil
 }

@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
+	"github.com/milvus-io/milvus/pkg/util/expr"
 	"github.com/milvus-io/milvus/pkg/util/generic"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
@@ -338,6 +339,8 @@ func (mr *MilvusRoles) Run() {
 		paramtable.Init()
 	}
 
+	expr.Init()
+	expr.Register("param", paramtable.Get())
 	http.ServeHTTP()
 	setupPrometheusHTTPServer(Registry)
 
