@@ -639,6 +639,11 @@ func (_c *MockProxy_CreateIndex_Call) RunAndReturn(run func(context.Context, *mi
 	return _c
 }
 
+func (_m *MockProxy) AlterIndex(_a0 context.Context, _a1 *milvuspb.AlterIndexRequest) (*commonpb.Status, error) {
+	// Todo
+	return nil, nil
+}
+
 // CreatePartition provides a mock function with given fields: _a0, _a1
 func (_m *MockProxy) CreatePartition(_a0 context.Context, _a1 *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
 	ret := _m.Called(_a0, _a1)
@@ -4553,6 +4558,11 @@ func (_c *MockProxy_Search_Call) Return(_a0 *milvuspb.SearchResults, _a1 error) 
 func (_c *MockProxy_Search_Call) RunAndReturn(run func(context.Context, *milvuspb.SearchRequest) (*milvuspb.SearchResults, error)) *MockProxy_Search_Call {
 	_c.Call.Return(run)
 	return _c
+}
+
+func (_m *MockProxy) SearchV2(_a0 context.Context, _a1 *milvuspb.SearchRequestV2) (*milvuspb.SearchResults, error) {
+	// Todo
+	return nil, nil
 }
 
 // SelectGrant provides a mock function with given fields: _a0, _a1
