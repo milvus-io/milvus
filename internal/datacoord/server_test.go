@@ -3428,7 +3428,7 @@ func TestGetFlushState(t *testing.T) {
 			collection = int64(0)
 		)
 
-		svr.channelManager = &ChannelManager{
+		svr.channelManager = &ChannelManagerImpl{
 			store: &ChannelStore{
 				channelsInfo: map[int64]*NodeChannelInfo{
 					1: {NodeID: 1, Channels: []RWChannel{&channelMeta{Name: vchannel, CollectionID: collection}}},
@@ -3476,7 +3476,7 @@ func TestGetFlushState(t *testing.T) {
 			collection = int64(0)
 		)
 
-		svr.channelManager = &ChannelManager{
+		svr.channelManager = &ChannelManagerImpl{
 			store: &ChannelStore{
 				channelsInfo: map[int64]*NodeChannelInfo{
 					1: {NodeID: 1, Channels: []RWChannel{&channelMeta{Name: vchannel, CollectionID: collection}}},
@@ -3524,7 +3524,7 @@ func TestGetFlushState(t *testing.T) {
 			collection = int64(0)
 		)
 
-		svr.channelManager = &ChannelManager{
+		svr.channelManager = &ChannelManagerImpl{
 			store: &ChannelStore{
 				channelsInfo: map[int64]*NodeChannelInfo{
 					1: {NodeID: 1, Channels: []RWChannel{&channelMeta{Name: vchannel, CollectionID: collection}}},
@@ -3557,7 +3557,7 @@ func TestGetFlushState(t *testing.T) {
 			collection = int64(0)
 		)
 
-		svr.channelManager = &ChannelManager{
+		svr.channelManager = &ChannelManagerImpl{
 			store: &ChannelStore{
 				channelsInfo: map[int64]*NodeChannelInfo{
 					1: {NodeID: 1, Channels: []RWChannel{&channelMeta{Name: vchannel, CollectionID: collection}}},
@@ -3593,7 +3593,7 @@ func TestGetFlushState(t *testing.T) {
 			collection = int64(0)
 		)
 
-		svr.channelManager = &ChannelManager{
+		svr.channelManager = &ChannelManagerImpl{
 			store: &ChannelStore{
 				channelsInfo: map[int64]*NodeChannelInfo{
 					1: {NodeID: 1, Channels: []RWChannel{&channelMeta{Name: vchannel, CollectionID: collection}}},
