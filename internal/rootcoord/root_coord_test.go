@@ -49,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/importutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -2084,6 +2085,51 @@ func TestRootCoord_RBACError(t *testing.T) {
 		mockMeta.ListPolicyFunc = func(tenant string) ([]string, error) {
 			return []string{}, errors.New("mock error")
 		}
+	})
+}
+
+func TestRootCoord_BuiltinRoles(t *testing.T) {
+	roleDbAdmin := "db_admin"
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().RoleCfg.Enabled.Key, "true")
+	paramtable.Get().Save(paramtable.Get().RoleCfg.Roles.Key, `{"`+roleDbAdmin+`": {"privileges": [{"object_type": "Global", "object_name": "*", "privilege": "CreateCollection", "db_name": "*"}]}}`)
+	t.Run("init builtin roles success", func(t *testing.T) {
+		c := newTestCore(withHealthyCode(), withInvalidMeta())
+		mockMeta := c.meta.(*mockMetaTable)
+		mockMeta.CreateRoleFunc = func(tenant string, entity *milvuspb.RoleEntity) error {
+			return nil
+		}
+		mockMeta.OperatePrivilegeFunc = func(tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error {
+			return nil
+		}
+		err := c.initBuiltinRoles()
+		assert.Equal(t, nil, err)
+		assert.True(t, util.IsBuiltinRole(roleDbAdmin))
+		assert.False(t, util.IsBuiltinRole(util.RoleAdmin))
+		resp, err := c.DropRole(context.Background(), &milvuspb.DropRoleRequest{RoleName: roleDbAdmin})
+		assert.Equal(t, nil, err)
+		assert.Equal(t, int32(1401), resp.Code) // merr.ErrPrivilegeNotPermitted
+	})
+	t.Run("init builtin roles fail to create role", func(t *testing.T) {
+		c := newTestCore(withHealthyCode(), withInvalidMeta())
+		mockMeta := c.meta.(*mockMetaTable)
+		mockMeta.CreateRoleFunc = func(tenant string, entity *milvuspb.RoleEntity) error {
+			return merr.ErrPrivilegeNotPermitted
+		}
+		err := c.initBuiltinRoles()
+		assert.Error(t, err)
+	})
+	t.Run("init builtin roles fail to operate privileg", func(t *testing.T) {
+		c := newTestCore(withHealthyCode(), withInvalidMeta())
+		mockMeta := c.meta.(*mockMetaTable)
+		mockMeta.CreateRoleFunc = func(tenant string, entity *milvuspb.RoleEntity) error {
+			return nil
+		}
+		mockMeta.OperatePrivilegeFunc = func(tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error {
+			return merr.ErrPrivilegeNotPermitted
+		}
+		err := c.initBuiltinRoles()
+		assert.Error(t, err)
 	})
 }
 

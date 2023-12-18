@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -89,6 +90,34 @@ func JSONToMap(mStr string) (map[string]string, error) {
 
 func MapToJSON(m map[string]string) []byte {
 	// error won't happen here.
+	bs, _ := json.Marshal(m)
+	return bs
+}
+
+func JSONToRoleDetails(mStr string) (map[string](map[string]([](map[string]string))), error) {
+	buffer := make(map[string](map[string]([](map[string]string))), 0)
+	err := json.Unmarshal([]byte(mStr), &buffer)
+	if err != nil {
+		return nil, fmt.Errorf("unmarshal `builtinRoles.Roles` failed, %w", err)
+	}
+	ret := make(map[string](map[string]([](map[string]string))), 0)
+	for role, privilegesJSON := range buffer {
+		ret[role] = make(map[string]([](map[string]string)), 0)
+		privilegesArray := make([]map[string]string, 0)
+		for _, privileges := range privilegesJSON[util.RoleConfigPrivileges] {
+			privilegesArray = append(privilegesArray, map[string]string{
+				util.RoleConfigObjectType: privileges[util.RoleConfigObjectType],
+				util.RoleConfigObjectName: privileges[util.RoleConfigObjectName],
+				util.RoleConfigPrivilege:  privileges[util.RoleConfigPrivilege],
+				util.RoleConfigDBName:     privileges[util.RoleConfigDBName],
+			})
+		}
+		ret[role]["privileges"] = privilegesArray
+	}
+	return ret, nil
+}
+
+func RoleDetailsToJSON(m map[string](map[string]([](map[string]string)))) []byte {
 	bs, _ := json.Marshal(m)
 	return bs
 }
