@@ -283,8 +283,8 @@ func TestRateLimiter(t *testing.T) {
 			},
 		})
 		assert.NoError(t, err)
-		assert.ErrorIs(t, limiter.getError(internalpb.RateType_DQLQuery), merr.ErrServiceForceDeny)
-		assert.Equal(t, limiter.getError(internalpb.RateType_DMLInsert), merr.ErrServiceDiskLimitExceeded)
+		assert.Error(t, limiter.getQuotaExceededError(internalpb.RateType_DQLQuery))
+		assert.Error(t, limiter.getQuotaExceededError(internalpb.RateType_DMLInsert))
 	})
 
 	t.Run("tests refresh rate by config", func(t *testing.T) {
