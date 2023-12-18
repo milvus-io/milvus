@@ -182,3 +182,12 @@ func PrivilegeNameForMetastore(name string) string {
 func IsAnyWord(word string) bool {
 	return word == AnyWord
 }
+
+func IsBuiltinRole(roleName string) bool {
+	for _, builtinRole := range BuiltinRoles {
+		if builtinRole == roleName {
+			return true
+		}
+	}
+	return false
+}
