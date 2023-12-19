@@ -38,7 +38,6 @@ set(STORAGE_FILES
     PayloadStream.cpp
     DataCodec.cpp
     Util.cpp
-    FieldData.cpp
     PayloadReader.cpp
     PayloadWriter.cpp
     BinlogReader.cpp
@@ -65,12 +64,14 @@ if (DEFINED AZURE_BUILD_DIR)
     target_link_libraries(milvus_storage PUBLIC
             "-L${AZURE_BUILD_DIR} -lblob-chunk-manager"
             milvus_common
+            milvus-storage
             pthread
             ${CONAN_LIBS}
             )
 else ()
     target_link_libraries(milvus_storage PUBLIC
             milvus_common
+            milvus-storage
             pthread
             ${CONAN_LIBS}
             )

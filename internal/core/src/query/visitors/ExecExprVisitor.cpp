@@ -36,7 +36,7 @@
 #include "segcore/SegmentGrowingImpl.h"
 #include "simdjson/error.h"
 #include "query/PlanProto.h"
-#include "segcore/SkipIndex.h"
+#include "index/SkipIndex.h"
 #include "simd/hook.h"
 #include "index/Meta.h"
 
@@ -2280,8 +2280,16 @@ ExecExprVisitor::ExecCompareExprDispatcher(CompareExpr& expr, Op op)
                         // for case, sealed segment has loaded index for scalar field instead of raw data
                         auto& indexing = segment_.chunk_scalar_index<bool>(
                             field_id, chunk_id);
-                        return [&indexing](int i) -> const number {
-                            return indexing.Reverse_Lookup(i);
+                        if (indexing.HasRawData()) {
+                            return [&indexing](int i) -> const number {
+                                return indexing.Reverse_Lookup(i);
+                            };
+                        }
+                        auto chunk_data =
+                            segment_.chunk_data<bool>(field_id, chunk_id)
+                                .data();
+                        return [chunk_data](int i) -> const number {
+                            return chunk_data[i];
                         };
                     }
                 }
@@ -2297,8 +2305,16 @@ ExecExprVisitor::ExecCompareExprDispatcher(CompareExpr& expr, Op op)
                         // for case, sealed segment has loaded index for scalar field instead of raw data
                         auto& indexing = segment_.chunk_scalar_index<int8_t>(
                             field_id, chunk_id);
-                        return [&indexing](int i) -> const number {
-                            return indexing.Reverse_Lookup(i);
+                        if (indexing.HasRawData()) {
+                            return [&indexing](int i) -> const number {
+                                return indexing.Reverse_Lookup(i);
+                            };
+                        }
+                        auto chunk_data =
+                            segment_.chunk_data<int8_t>(field_id, chunk_id)
+                                .data();
+                        return [chunk_data](int i) -> const number {
+                            return chunk_data[i];
                         };
                     }
                 }
@@ -2314,8 +2330,16 @@ ExecExprVisitor::ExecCompareExprDispatcher(CompareExpr& expr, Op op)
                         // for case, sealed segment has loaded index for scalar field instead of raw data
                         auto& indexing = segment_.chunk_scalar_index<int16_t>(
                             field_id, chunk_id);
-                        return [&indexing](int i) -> const number {
-                            return indexing.Reverse_Lookup(i);
+                        if (indexing.HasRawData()) {
+                            return [&indexing](int i) -> const number {
+                                return indexing.Reverse_Lookup(i);
+                            };
+                        }
+                        auto chunk_data =
+                            segment_.chunk_data<int16_t>(field_id, chunk_id)
+                                .data();
+                        return [chunk_data](int i) -> const number {
+                            return chunk_data[i];
                         };
                     }
                 }
@@ -2331,8 +2355,16 @@ ExecExprVisitor::ExecCompareExprDispatcher(CompareExpr& expr, Op op)
                         // for case, sealed segment has loaded index for scalar field instead of raw data
                         auto& indexing = segment_.chunk_scalar_index<int32_t>(
                             field_id, chunk_id);
-                        return [&indexing](int i) -> const number {
-                            return indexing.Reverse_Lookup(i);
+                        if (indexing.HasRawData()) {
+                            return [&indexing](int i) -> const number {
+                                return indexing.Reverse_Lookup(i);
+                            };
+                        }
+                        auto chunk_data =
+                            segment_.chunk_data<int32_t>(field_id, chunk_id)
+                                .data();
+                        return [chunk_data](int i) -> const number {
+                            return chunk_data[i];
                         };
                     }
                 }
@@ -2348,8 +2380,16 @@ ExecExprVisitor::ExecCompareExprDispatcher(CompareExpr& expr, Op op)
                         // for case, sealed segment has loaded index for scalar field instead of raw data
                         auto& indexing = segment_.chunk_scalar_index<int64_t>(
                             field_id, chunk_id);
-                        return [&indexing](int i) -> const number {
-                            return indexing.Reverse_Lookup(i);
+                        if (indexing.HasRawData()) {
+                            return [&indexing](int i) -> const number {
+                                return indexing.Reverse_Lookup(i);
+                            };
+                        }
+                        auto chunk_data =
+                            segment_.chunk_data<int64_t>(field_id, chunk_id)
+                                .data();
+                        return [chunk_data](int i) -> const number {
+                            return chunk_data[i];
                         };
                     }
                 }
@@ -2365,8 +2405,16 @@ ExecExprVisitor::ExecCompareExprDispatcher(CompareExpr& expr, Op op)
                         // for case, sealed segment has loaded index for scalar field instead of raw data
                         auto& indexing = segment_.chunk_scalar_index<float>(
                             field_id, chunk_id);
-                        return [&indexing](int i) -> const number {
-                            return indexing.Reverse_Lookup(i);
+                        if (indexing.HasRawData()) {
+                            return [&indexing](int i) -> const number {
+                                return indexing.Reverse_Lookup(i);
+                            };
+                        }
+                        auto chunk_data =
+                            segment_.chunk_data<float>(field_id, chunk_id)
+                                .data();
+                        return [chunk_data](int i) -> const number {
+                            return chunk_data[i];
                         };
                     }
                 }
@@ -2382,8 +2430,16 @@ ExecExprVisitor::ExecCompareExprDispatcher(CompareExpr& expr, Op op)
                         // for case, sealed segment has loaded index for scalar field instead of raw data
                         auto& indexing = segment_.chunk_scalar_index<double>(
                             field_id, chunk_id);
-                        return [&indexing](int i) -> const number {
-                            return indexing.Reverse_Lookup(i);
+                        if (indexing.HasRawData()) {
+                            return [&indexing](int i) -> const number {
+                                return indexing.Reverse_Lookup(i);
+                            };
+                        }
+                        auto chunk_data =
+                            segment_.chunk_data<double>(field_id, chunk_id)
+                                .data();
+                        return [chunk_data](int i) -> const number {
+                            return chunk_data[i];
                         };
                     }
                 }
@@ -2411,8 +2467,16 @@ ExecExprVisitor::ExecCompareExprDispatcher(CompareExpr& expr, Op op)
                         auto& indexing =
                             segment_.chunk_scalar_index<std::string>(field_id,
                                                                      chunk_id);
-                        return [&indexing](int i) -> const number {
-                            return indexing.Reverse_Lookup(i);
+                        if (indexing.HasRawData()) {
+                            return [&indexing](int i) -> const number {
+                                return indexing.Reverse_Lookup(i);
+                            };
+                        }
+                        auto chunk_data =
+                            segment_.chunk_data<std::string>(field_id, chunk_id)
+                                .data();
+                        return [chunk_data](int i) -> const number {
+                            return chunk_data[i];
                         };
                     }
                 }

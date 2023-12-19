@@ -206,14 +206,14 @@ func TestDataNode(t *testing.T) {
 		}
 
 		for _, test := range testDataSyncs {
-			err = node.flowgraphManager.addAndStartWithEtcdTickler(node, &datapb.VchannelInfo{CollectionID: 1, ChannelName: test.dmChannelName}, nil, genTestTickler())
+			err = node.flowgraphManager.AddandStartWithEtcdTickler(node, &datapb.VchannelInfo{CollectionID: 1, ChannelName: test.dmChannelName}, nil, genTestTickler())
 			assert.NoError(t, err)
 			vchanNameCh <- test.dmChannelName
 		}
 
 		assert.Eventually(t, func() bool {
 			for _, test := range testDataSyncs {
-				if node.flowgraphManager.exist(test.dmChannelName) {
+				if node.flowgraphManager.HasFlowgraph(test.dmChannelName) {
 					return false
 				}
 			}

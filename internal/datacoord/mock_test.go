@@ -303,8 +303,12 @@ func (c *mockDataNodeClient) ImportV2(ctx context.Context, req *datapb.ImportReq
 	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
 }
 
-func (c *mockDataNodeClient) GetImportState(ctx context.Context, req *datapb.GetImportStateRequest, opts ...grpc.CallOption) (*datapb.GetImportStateResponse, error) {
-	return &datapb.GetImportStateResponse{Status: merr.Success()}, nil
+func (c *mockDataNodeClient) QueryPreImport(ctx context.Context, req *datapb.QueryPreImportRequest, opts ...grpc.CallOption) (*datapb.QueryPreImportResponse, error) {
+	return &datapb.QueryPreImportResponse{Status: merr.Success()}, nil
+}
+
+func (c *mockDataNodeClient) QueryImport(ctx context.Context, req *datapb.QueryImportRequest, opts ...grpc.CallOption) (*datapb.QueryImportResponse, error) {
+	return &datapb.QueryImportResponse{Status: merr.Success()}, nil
 }
 
 func (c *mockDataNodeClient) DropImport(ctx context.Context, req *datapb.DropImportRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
@@ -588,90 +592,6 @@ func (m *mockRootCoordClient) ReportImport(ctx context.Context, req *rootcoordpb
 	return merr.Success(), nil
 }
 
-type mockCompactionHandler struct {
-	methods map[string]interface{}
-}
-
-func (h *mockCompactionHandler) start() {
-	if f, ok := h.methods["start"]; ok {
-		if ff, ok := f.(func()); ok {
-			ff()
-			return
-		}
-	}
-	panic("not implemented")
-}
-
-func (h *mockCompactionHandler) stop() {
-	if f, ok := h.methods["stop"]; ok {
-		if ff, ok := f.(func()); ok {
-			ff()
-			return
-		}
-	}
-	panic("not implemented")
-}
-
-// execCompactionPlan start to execute plan and return immediately
-func (h *mockCompactionHandler) execCompactionPlan(signal *compactionSignal, plan *datapb.CompactionPlan) error {
-	if f, ok := h.methods["execCompactionPlan"]; ok {
-		if ff, ok := f.(func(signal *compactionSignal, plan *datapb.CompactionPlan) error); ok {
-			return ff(signal, plan)
-		}
-	}
-	panic("not implemented")
-}
-
-// // completeCompaction record the result of a compaction
-// func (h *mockCompactionHandler) completeCompaction(result *datapb.CompactionResult) error {
-// 	if f, ok := h.methods["completeCompaction"]; ok {
-// 		if ff, ok := f.(func(result *datapb.CompactionResult) error); ok {
-// 			return ff(result)
-// 		}
-// 	}
-// 	panic("not implemented")
-// }
-
-// getCompaction return compaction task. If planId does not exist, return nil.
-func (h *mockCompactionHandler) getCompaction(planID int64) *compactionTask {
-	if f, ok := h.methods["getCompaction"]; ok {
-		if ff, ok := f.(func(planID int64) *compactionTask); ok {
-			return ff(planID)
-		}
-	}
-	panic("not implemented")
-}
-
-// expireCompaction set the compaction state to expired
-func (h *mockCompactionHandler) updateCompaction(ts Timestamp) error {
-	if f, ok := h.methods["expireCompaction"]; ok {
-		if ff, ok := f.(func(ts Timestamp) error); ok {
-			return ff(ts)
-		}
-	}
-	panic("not implemented")
-}
-
-// isFull return true if the task pool is full
-func (h *mockCompactionHandler) isFull() bool {
-	if f, ok := h.methods["isFull"]; ok {
-		if ff, ok := f.(func() bool); ok {
-			return ff()
-		}
-	}
-	panic("not implemented")
-}
-
-// get compaction tasks by signal id
-func (h *mockCompactionHandler) getCompactionTasksBySignalID(signalID int64) []*compactionTask {
-	if f, ok := h.methods["getCompactionTasksBySignalID"]; ok {
-		if ff, ok := f.(func(signalID int64) []*compactionTask); ok {
-			return ff(signalID)
-		}
-	}
-	panic("not implemented")
-}
-
 type mockCompactionTrigger struct {
 	methods map[string]interface{}
 }
@@ -687,7 +607,7 @@ func (t *mockCompactionTrigger) triggerCompaction() error {
 }
 
 // triggerSingleCompaction trigerr a compaction bundled with collection-partiiton-channel-segment
-func (t *mockCompactionTrigger) triggerSingleCompaction(collectionID, partitionID, segmentID int64, channel string) error {
+func (t *mockCompactionTrigger) triggerSingleCompaction(collectionID, partitionID, segmentID int64, channel string, blockToSendSignal bool) error {
 	if f, ok := t.methods["triggerSingleCompaction"]; ok {
 		if ff, ok := f.(func(collectionID int64, partitionID int64, segmentID int64, channel string) error); ok {
 			return ff(collectionID, partitionID, segmentID, channel)

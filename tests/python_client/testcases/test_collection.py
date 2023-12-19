@@ -1103,7 +1103,7 @@ class TestCollectionOperation(TestcaseBase):
         fields = []
         for k, v in DataType.__members__.items():
             if v and v != DataType.UNKNOWN and v != DataType.STRING \
-            and v != DataType.VARCHAR and v != DataType.FLOAT_VECTOR and v != DataType.FLOAT16_VECTOR \
+            and v != DataType.VARCHAR and v != DataType.FLOAT_VECTOR \
             and v != DataType.BINARY_VECTOR and v != DataType.ARRAY:
                 field, _ = self.field_schema_wrap.init_field_schema(name=k.lower(), dtype=v)
                 fields.append(field)
@@ -1748,6 +1748,36 @@ class TestCreateCollectionInvalid(TestcaseBase):
         error = {ct.err_code: 65535, ct.err_msg: "maximum field's number should be limited to 64"}
         schema, _ = self.collection_schema_wrap.init_collection_schema(fields=field_schema_list)
         self.init_collection_wrap(name=c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("invalid_name", ["中文", "español", "عربي", "हिंदी", "Русский"])
+    def test_create_schema_with_different_language(self, invalid_name):
+        """
+        target: test create collection with maximum fields
+        method: create collection with maximum field number
+        expected: raise exception
+        """
+        fields = [cf.gen_int64_field(is_primary=True), cf.gen_float_vec_field(),
+                  cf.gen_string_field(name=invalid_name)]
+        schema = cf.gen_collection_schema(fields)
+        self.init_collection_wrap(schema=schema,
+                                  check_task=CheckTasks.err_res,
+                                  check_items={ct.err_code: 1701,
+                                               ct.err_msg: "Invalid field name: %s" % invalid_name})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("invalid_name", ["中文", "español", "عربي", "हिंदी", "Русский"])
+    def test_create_collection_with_different_language(self, invalid_name):
+        """
+        target: test create collection with maximum fields
+        method: create collection with maximum field number
+        expected: raise exception
+        """
+        schema = cf.gen_default_collection_schema()
+        self.init_collection_wrap(name=invalid_name, schema=schema,
+                                  check_task=CheckTasks.err_res,
+                                  check_items={ct.err_code: 1100,
+                                               ct.err_msg: "Invalid collection name: %s" % invalid_name})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("default_value", ["abc"])
@@ -3271,11 +3301,10 @@ class TestLoadPartition(TestcaseBase):
                                                description=description,
                                                check_task=CheckTasks.check_partition_property,
                                                check_items={"name": partition_name, "description": description,
-                                                            "is_empty": True, "num_entities": 0}
-                                               )
+                                                            "is_empty": True, "num_entities": 0})
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         partition_w.drop()
-        error = {ct.err_code: 1, ct.err_msg: 'partitionID of partitionName:%s can not be find' % partition_name}
+        error = {ct.err_code: 200, ct.err_msg: 'partition not found[partition=%s]' % partition_name}
         partition_w.load(check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -3293,8 +3322,7 @@ class TestLoadPartition(TestcaseBase):
                                                description=description,
                                                check_task=CheckTasks.check_partition_property,
                                                check_items={"name": partition_name, "description": description,
-                                                            "is_empty": True, "num_entities": 0}
-                                               )
+                                                            "is_empty": True, "num_entities": 0})
         partition_w.release()
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -3312,10 +3340,10 @@ class TestLoadPartition(TestcaseBase):
                                                description=description,
                                                check_task=CheckTasks.check_partition_property,
                                                check_items={"name": partition_name, "description": description,
-                                                            "is_empty": True, "num_entities": 0}
-                                               )
+                                                            "is_empty": True, "num_entities": 0})
         partition_w.drop()
-        error = {ct.err_code: 1, ct.err_msg: 'Partition %s not exist.' % partition_name}
+        collection_w.create_index(ct.default_float_vec_field_name)
+        error = {ct.err_code: 200, ct.err_msg: 'partition not found[partition=%s]' % partition_name}
         partition_w.load(check_task=CheckTasks.err_res, check_items=error)
         partition_w.release(check_task=CheckTasks.err_res, check_items=error)
 
@@ -3334,10 +3362,9 @@ class TestLoadPartition(TestcaseBase):
                                                description=description,
                                                check_task=CheckTasks.check_partition_property,
                                                check_items={"name": partition_name, "description": description,
-                                                            "is_empty": True, "num_entities": 0}
-                                               )
+                                                            "is_empty": True, "num_entities": 0})
         partition_w.drop()
-        error = {ct.err_code: 1, ct.err_msg: 'partitionID of partitionName:%s can not be find' % partition_name}
+        error = {ct.err_code: 200, ct.err_msg: 'partition not found[partition=%s]' % partition_name}
         partition_w.release(check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -3356,8 +3383,7 @@ class TestLoadPartition(TestcaseBase):
                                                description=description,
                                                check_task=CheckTasks.check_partition_property,
                                                check_items={"name": partition_name, "description": description,
-                                                            "is_empty": True, "num_entities": 0}
-                                               )
+                                                            "is_empty": True, "num_entities": 0})
         collection_w.drop()
         error = {ct.err_code: 0, ct.err_msg: "collection not found"}
         partition_w.load(check_task=CheckTasks.err_res, check_items=error)

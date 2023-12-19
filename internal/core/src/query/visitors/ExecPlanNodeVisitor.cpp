@@ -16,9 +16,12 @@
 #include "query/PlanImpl.h"
 #include "query/SubSearchResult.h"
 #include "query/generated/ExecExprVisitor.h"
+#include "query/Utils.h"
 #include "segcore/SegmentGrowing.h"
 #include "common/Json.h"
 #include "log/Log.h"
+#include "plan/PlanNode.h"
+#include "exec/Task.h"
 
 namespace milvus::query {
 
@@ -73,6 +76,63 @@ empty_search_result(int64_t num_queries, SearchInfo& search_info) {
     return final_result;
 }
 
+void
+ExecPlanNodeVisitor::ExecuteExprNodeInternal(
+    const std::shared_ptr<milvus::plan::PlanNode>& plannode,
+    const milvus::segcore::SegmentInternalInterface* segment,
+    BitsetType& bitset_holder,
+    bool& cache_offset_getted,
+    std::vector<int64_t>& cache_offset) {
+    bitset_holder.clear();
+    LOG_SEGCORE_INFO_ << "plannode:" << plannode->ToString();
+    auto plan = plan::PlanFragment(plannode);
+    // TODO: get query id from proxy
+    auto query_context = std::make_shared<milvus::exec::QueryContext>(
+        DEAFULT_QUERY_ID, segment, timestamp_);
+
+    auto task =
+        milvus::exec::Task::Create(DEFAULT_TASK_ID, plan, 0, query_context);
+    for (;;) {
+        auto result = task->Next();
+        if (!result) {
+            break;
+        }
+        auto childrens = result->childrens();
+        AssertInfo(childrens.size() == 1,
+                   "expr result vector's children size not equal one");
+        LOG_SEGCORE_DEBUG_ << "output result length:" << childrens[0]->size()
+                           << std::endl;
+        if (auto vec = std::dynamic_pointer_cast<ColumnVector>(childrens[0])) {
+            AppendOneChunk(bitset_holder,
+                           static_cast<bool*>(vec->GetRawData()),
+                           vec->size());
+        } else if (auto row =
+                       std::dynamic_pointer_cast<RowVector>(childrens[0])) {
+            auto bit_vec =
+                std::dynamic_pointer_cast<ColumnVector>(row->child(0));
+            AppendOneChunk(bitset_holder,
+                           static_cast<bool*>(bit_vec->GetRawData()),
+                           bit_vec->size());
+            if (!cache_offset_getted) {
+                // offset cache only get once because not support iterator batch
+                auto cache_offset_vec =
+                    std::dynamic_pointer_cast<ColumnVector>(row->child(1));
+                auto cache_offset_vec_ptr =
+                    (int64_t*)(cache_offset_vec->GetRawData());
+                for (size_t i = 0; i < cache_offset_vec->size(); ++i) {
+                    cache_offset.push_back(cache_offset_vec_ptr[i]);
+                }
+                cache_offset_getted = true;
+            }
+        } else {
+            PanicInfo(UnexpectedError, "expr return type not matched");
+        }
+    }
+    //    std::string s;
+    //    boost::to_string(*bitset_holder, s);
+    //    std::cout << bitset_holder->size() << " .  " << s << std::endl;
+}
+
 template <typename VectorType>
 void
 ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
@@ -98,10 +158,10 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
     }
 
     std::unique_ptr<BitsetType> bitset_holder;
-    if (node.predicate_.has_value()) {
-        bitset_holder = std::make_unique<BitsetType>(
-            ExecExprVisitor(*segment, this, active_count, timestamp_)
-                .call_child(*node.predicate_.value()));
+    if (node.filter_plannode_.has_value()) {
+        BitsetType expr_res;
+        ExecuteExprNode(node.filter_plannode_.value(), segment, expr_res);
+        bitset_holder = std::make_unique<BitsetType>(expr_res);
         bitset_holder->flip();
     } else {
         bitset_holder = std::make_unique<BitsetType>(active_count, false);
@@ -165,10 +225,16 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
         bitset_holder.resize(active_count);
     }
 
-    if (node.predicate_.has_value() && node.predicate_.value() != nullptr) {
-        bitset_holder =
-            ExecExprVisitor(*segment, this, active_count, timestamp_)
-                .call_child(*(node.predicate_.value()));
+    // This flag used to indicate whether to get offset from expr module that
+    // speeds up mvcc filter in the next interface: "timestamp_filter"
+    bool get_cache_offset = false;
+    std::vector<int64_t> cache_offsets;
+    if (node.filter_plannode_.has_value()) {
+        ExecuteExprNodeInternal(node.filter_plannode_.value(),
+                                segment,
+                                bitset_holder,
+                                get_cache_offset,
+                                cache_offsets);
         bitset_holder.flip();
     }
 
@@ -189,9 +255,8 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
     }
 
     bool false_filtered_out = false;
-    if (GetExprUsePkIndex() && IsTermExpr(node.predicate_.value().get())) {
-        segment->timestamp_filter(
-            bitset_holder, expr_cached_pk_id_offsets_, timestamp_);
+    if (get_cache_offset) {
+        segment->timestamp_filter(bitset_holder, cache_offsets, timestamp_);
     } else {
         bitset_holder.flip();
         false_filtered_out = true;

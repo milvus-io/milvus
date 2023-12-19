@@ -19,13 +19,13 @@
 #include <memory>
 #include <string>
 #include <vector>
-#include "storage/FieldData.h"
+#include "common/FieldData.h"
 
 namespace milvus {
 
 struct FieldDataInfo {
     FieldDataInfo() {
-        channel = std::make_shared<storage::FieldDataChannel>();
+        channel = std::make_shared<FieldDataChannel>();
     }
 
     FieldDataInfo(int64_t field_id,
@@ -34,12 +34,12 @@ struct FieldDataInfo {
         : field_id(field_id),
           row_count(row_count),
           mmap_dir_path(std::move(mmap_dir_path)) {
-        channel = std::make_shared<storage::FieldDataChannel>();
+        channel = std::make_shared<FieldDataChannel>();
     }
 
     FieldDataInfo(int64_t field_id,
                   size_t row_count,
-                  storage::FieldDataChannelPtr channel)
+                  FieldDataChannelPtr channel)
         : field_id(field_id),
           row_count(row_count),
           channel(std::move(channel)) {
@@ -48,7 +48,7 @@ struct FieldDataInfo {
     FieldDataInfo(int64_t field_id,
                   size_t row_count,
                   std::string mmap_dir_path,
-                  storage::FieldDataChannelPtr channel)
+                  FieldDataChannelPtr channel)
         : field_id(field_id),
           row_count(row_count),
           mmap_dir_path(std::move(mmap_dir_path)),
@@ -57,9 +57,9 @@ struct FieldDataInfo {
 
     FieldDataInfo(int64_t field_id,
                   size_t row_count,
-                  const std::vector<storage::FieldDataPtr>& batch)
+                  const std::vector<FieldDataPtr>& batch)
         : field_id(field_id), row_count(row_count) {
-        channel = std::make_shared<storage::FieldDataChannel>();
+        channel = std::make_shared<FieldDataChannel>();
         for (auto& data : batch) {
             channel->push(data);
         }
@@ -69,11 +69,11 @@ struct FieldDataInfo {
     FieldDataInfo(int64_t field_id,
                   size_t row_count,
                   std::string mmap_dir_path,
-                  const std::vector<storage::FieldDataPtr>& batch)
+                  const std::vector<FieldDataPtr>& batch)
         : field_id(field_id),
           row_count(row_count),
           mmap_dir_path(std::move(mmap_dir_path)) {
-        channel = std::make_shared<storage::FieldDataChannel>();
+        channel = std::make_shared<FieldDataChannel>();
         for (auto& data : batch) {
             channel->push(data);
         }
@@ -83,6 +83,6 @@ struct FieldDataInfo {
     int64_t field_id;
     size_t row_count;
     std::string mmap_dir_path;
-    storage::FieldDataChannelPtr channel;
+    FieldDataChannelPtr channel;
 };
 }  // namespace milvus

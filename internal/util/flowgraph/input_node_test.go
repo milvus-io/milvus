@@ -18,12 +18,18 @@ package flowgraph
 
 import (
 	"context"
+	"fmt"
+	"math/rand"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func TestInputNode(t *testing.T) {
@@ -65,4 +71,83 @@ func Test_NewInputNode(t *testing.T) {
 	assert.Equal(t, node.name, nodeName)
 	assert.Equal(t, node.maxQueueLength, maxQueueLength)
 	assert.Equal(t, node.maxParallelism, maxParallelism)
+}
+
+func Test_InputNodeSkipMode(t *testing.T) {
+	t.Setenv("ROCKSMQ_PATH", "/tmp/MilvusTest/FlowGraph/Test_InputNodeSkipMode")
+	factory := dependency.NewDefaultFactory(true)
+	paramtable.Get().Save(paramtable.Get().DataNodeCfg.FlowGraphSkipModeColdTime.Key, "3")
+	paramtable.Get().Save(paramtable.Get().DataNodeCfg.FlowGraphSkipModeSkipNum.Key, "1")
+
+	msgStream, _ := factory.NewMsgStream(context.TODO())
+	channels := []string{"cc" + fmt.Sprint(rand.Int())}
+	msgStream.AsConsumer(context.Background(), channels, "sub", mqwrapper.SubscriptionPositionEarliest)
+
+	produceStream, _ := factory.NewMsgStream(context.TODO())
+	produceStream.AsProducer(channels)
+	closeCh := make(chan struct{})
+	outputCh := make(chan bool)
+
+	nodeName := "input_node"
+	inputNode := NewInputNode(msgStream.Chan(), nodeName, 100, 100, typeutil.DataNodeRole, 0, 0, "")
+	defer inputNode.Close()
+
+	outputCount := 0
+	go func() {
+		for {
+			select {
+			case <-closeCh:
+				return
+			default:
+				output := inputNode.Operate(nil)
+				if len(output) > 0 {
+					outputCount = outputCount + 1
+				}
+				outputCh <- true
+			}
+		}
+	}()
+	defer close(closeCh)
+
+	msgPack := generateMsgPack()
+	produceStream.Produce(&msgPack)
+	log.Info("produce empty ttmsg")
+	<-outputCh
+	assert.Equal(t, 1, outputCount)
+	assert.Equal(t, false, inputNode.skipMode)
+
+	time.Sleep(3 * time.Second)
+	assert.Equal(t, false, inputNode.skipMode)
+	produceStream.Produce(&msgPack)
+	log.Info("after 3 seconds with no active msg receive, input node will turn on skip mode")
+	<-outputCh
+	assert.Equal(t, 2, outputCount)
+	assert.Equal(t, true, inputNode.skipMode)
+
+	log.Info("some ttmsg will be skipped in skip mode")
+	// this msg will be skipped
+	produceStream.Produce(&msgPack)
+	<-outputCh
+	assert.Equal(t, 2, outputCount)
+	assert.Equal(t, true, inputNode.skipMode)
+
+	// this msg will be consumed
+	produceStream.Produce(&msgPack)
+	<-outputCh
+	assert.Equal(t, 3, outputCount)
+	assert.Equal(t, true, inputNode.skipMode)
+
+	//log.Info("non empty msg will awake input node, turn off skip mode")
+	//insertMsgPack := generateInsertMsgPack()
+	//produceStream.Produce(&insertMsgPack)
+	//<-outputCh
+	//assert.Equal(t, 3, outputCount)
+	//assert.Equal(t, false, inputNode.skipMode)
+	//
+	//log.Info("empty msg will be consumed in not-skip mode")
+	//produceStream.Produce(&msgPack)
+	//<-outputCh
+	//assert.Equal(t, 4, outputCount)
+	//assert.Equal(t, false, inputNode.skipMode)
+	//close(closeCh)
 }

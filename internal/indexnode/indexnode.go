@@ -214,8 +214,7 @@ func (i *IndexNode) Init() error {
 		i.initSegcore()
 	})
 
-	log.Info("Init IndexNode finished", zap.Error(initErr))
-
+	log.Info("init index node done", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("Address", i.address))
 	return initErr
 }
 

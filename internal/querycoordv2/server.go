@@ -208,7 +208,7 @@ func (s *Server) Init() error {
 
 func (s *Server) initQueryCoord() error {
 	s.UpdateStateCode(commonpb.StateCode_Initializing)
-	log.Info("QueryCoord", zap.Any("State", commonpb.StateCode_Initializing))
+	log.Info("start init querycoord", zap.Any("State", commonpb.StateCode_Initializing))
 	// Init KV and ID allocator
 	metaType := Params.MetaStoreCfg.MetaStoreType.GetValue()
 	var idAllocatorKV kv.TxnKV
@@ -235,6 +235,7 @@ func (s *Server) initQueryCoord() error {
 	s.idAllocator = func() (int64, error) {
 		return idAllocator.AllocOne()
 	}
+	log.Info("init ID allocator done")
 
 	// Init metrics cache manager
 	s.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
@@ -306,7 +307,7 @@ func (s *Server) initQueryCoord() error {
 	// Init load status cache
 	meta.GlobalFailedLoadCache = meta.NewFailedLoadCache()
 
-	log.Info("QueryCoord init success")
+	log.Info("init querycoord done", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("Address", s.address))
 	return err
 }
 

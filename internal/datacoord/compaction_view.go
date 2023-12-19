@@ -15,8 +15,9 @@ import (
 type CompactionView interface {
 	GetGroupLabel() *CompactionGroupLabel
 	GetSegmentsView() []*SegmentView
+	Append(segments ...*SegmentView)
 	String() string
-	Trigger() CompactionView
+	Trigger() (CompactionView, string)
 }
 
 type FullViews struct {
@@ -25,7 +26,7 @@ type FullViews struct {
 
 type SegmentViewSelector func(view *SegmentView) bool
 
-func (v *FullViews) GetSegmentViewBy(collectionID UniqueID, selectors SegmentViewSelector) []*SegmentView {
+func (v *FullViews) GetSegmentViewBy(collectionID UniqueID, selector SegmentViewSelector) []*SegmentView {
 	views, ok := v.collections[collectionID]
 	if !ok {
 		return nil
@@ -34,8 +35,8 @@ func (v *FullViews) GetSegmentViewBy(collectionID UniqueID, selectors SegmentVie
 	var ret []*SegmentView
 
 	for _, view := range views {
-		if selectors(view) {
-			ret = append(ret, view)
+		if selector == nil || selector(view) {
+			ret = append(ret, view.Clone())
 		}
 	}
 
@@ -46,6 +47,10 @@ type CompactionGroupLabel struct {
 	CollectionID UniqueID
 	PartitionID  UniqueID
 	Channel      string
+}
+
+func (label *CompactionGroupLabel) Key() string {
+	return fmt.Sprintf("%d-%s", label.PartitionID, label.Channel)
 }
 
 func (label *CompactionGroupLabel) IsMinGroup() bool {
@@ -86,7 +91,24 @@ type SegmentView struct {
 	DeltalogCount int
 }
 
-func GetSegmentViews(segments ...*SegmentInfo) []*SegmentView {
+func (s *SegmentView) Clone() *SegmentView {
+	return &SegmentView{
+		ID:            s.ID,
+		label:         s.label,
+		State:         s.State,
+		Level:         s.Level,
+		startPos:      s.startPos,
+		dmlPos:        s.dmlPos,
+		Size:          s.Size,
+		ExpireSize:    s.ExpireSize,
+		DeltaSize:     s.DeltaSize,
+		BinlogCount:   s.BinlogCount,
+		StatslogCount: s.StatslogCount,
+		DeltalogCount: s.DeltalogCount,
+	}
+}
+
+func GetViewsByInfo(segments ...*SegmentInfo) []*SegmentView {
 	return lo.Map(segments, func(segment *SegmentInfo, _ int) *SegmentView {
 		return &SegmentView{
 			ID: segment.ID,
@@ -169,8 +191,4 @@ func GetBinlogSizeAsBytes(deltaBinlogs []*datapb.FieldBinlog) float64 {
 		}
 	}
 	return deltaSize
-}
-
-func buildGroupKey(partitionID UniqueID, channel string) string {
-	return fmt.Sprintf("%d-%s", partitionID, channel)
 }

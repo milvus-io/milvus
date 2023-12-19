@@ -23,29 +23,31 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
-	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
-	"google.golang.org/grpc/peer"
-	"google.golang.org/grpc/status"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/pkg/util"
+	"github.com/milvus-io/milvus/pkg/util/crypto"
 )
 
-type BaseResponse interface {
-	GetStatus() *commonpb.Status
-}
+type AccessKey struct{}
 
-func UnaryAccessLoggerInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-	starttime := time.Now()
-	resp, err := handler(ctx, req)
-	PrintAccessInfo(ctx, resp, err, info, time.Since(starttime).Milliseconds())
+func UnaryAccessLogInterceptor(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+	accessInfo := NewGrpcAccessInfo(ctx, info, req)
+	newCtx := context.WithValue(ctx, AccessKey{}, accessInfo)
+	resp, err := handler(newCtx, req)
+	accessInfo.SetResult(resp, err)
+	accessInfo.Write()
 	return resp, err
 }
 
-func Join(path1, path2 string) string {
+func UnaryUpdateAccessInfoInterceptor(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+	accessInfo := ctx.Value(AccessKey{}).(*GrpcAccessInfo)
+	accessInfo.UpdateCtx(ctx)
+	return handler(ctx, req)
+}
+
+func join(path1, path2 string) string {
 	if strings.HasSuffix(path1, "/") {
 		return path1 + path2
 	}
@@ -60,50 +62,27 @@ func timeFromName(filename, prefix, ext string) (time.Time, error) {
 		return time.Time{}, errors.New("mismatched extension")
 	}
 	ts := filename[len(prefix) : len(filename)-len(ext)]
-	return time.Parse(timeFormat, ts)
+	return time.Parse(timeNameFormat, ts)
 }
 
-func getAccessAddr(ctx context.Context) string {
-	ip, ok := peer.FromContext(ctx)
+func getCurUserFromContext(ctx context.Context) (string, error) {
+	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
-		return "Unknown"
+		return "", fmt.Errorf("fail to get md from the context")
 	}
-	return fmt.Sprintf("%s-%s", ip.Addr.Network(), ip.Addr.String())
-}
-
-func getTraceID(ctx context.Context) (id string, ok bool) {
-	meta, ok := metadata.FromOutgoingContext(ctx)
-	if ok {
-		return meta.Get(clientRequestIDKey)[0], true
+	authorization, ok := md[strings.ToLower(util.HeaderAuthorize)]
+	if !ok || len(authorization) < 1 {
+		return "", fmt.Errorf("fail to get authorization from the md, authorize:[%s]", util.HeaderAuthorize)
 	}
-
-	traceID := trace.SpanFromContext(ctx).SpanContext().TraceID()
-	return traceID.String(), traceID.IsValid()
-}
-
-func getResponseSize(resq interface{}) (int, bool) {
-	message, ok := resq.(proto.Message)
-	if !ok {
-		return 0, false
+	token := authorization[0]
+	rawToken, err := crypto.Base64Decode(token)
+	if err != nil {
+		return "", fmt.Errorf("fail to decode the token, token: %s", token)
 	}
-
-	return proto.Size(message), true
-}
-
-func getErrCode(resp interface{}) (int, bool) {
-	baseResp, ok := resp.(BaseResponse)
-	if !ok {
-		return 0, false
+	secrets := strings.SplitN(rawToken, util.CredentialSeperator, 2)
+	if len(secrets) < 2 {
+		return "", fmt.Errorf("fail to get user info from the raw token, raw token: %s", rawToken)
 	}
-
-	status := baseResp.GetStatus()
-	return int(status.GetErrorCode()), true
-}
-
-func getGrpcStatus(err error) string {
-	code := status.Code(err)
-	if code != codes.OK {
-		return fmt.Sprintf("Grpc%s", code.String())
-	}
-	return code.String()
+	username := secrets[0]
+	return username, nil
 }

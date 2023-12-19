@@ -388,8 +388,12 @@ func (s *Server) ImportV2(ctx context.Context, req *datapb.ImportRequest) (*comm
 	return s.datanode.ImportV2(ctx, req)
 }
 
-func (s *Server) GetImportState(ctx context.Context, req *datapb.GetImportStateRequest) (*datapb.GetImportStateResponse, error) {
-	return s.datanode.GetImportState(ctx, req)
+func (s *Server) QueryPreImport(ctx context.Context, req *datapb.QueryPreImportRequest) (*datapb.QueryPreImportResponse, error) {
+	return s.datanode.QueryPreImport(ctx, req)
+}
+
+func (s *Server) QueryImport(ctx context.Context, req *datapb.QueryImportRequest) (*datapb.QueryImportResponse, error) {
+	return s.datanode.QueryImport(ctx, req)
 }
 
 func (s *Server) DropImport(ctx context.Context, req *datapb.DropImportRequest) (*commonpb.Status, error) {

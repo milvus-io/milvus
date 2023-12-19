@@ -123,8 +123,7 @@ func (node *QueryNode) loadDeltaLogs(ctx context.Context, req *querypb.LoadSegme
 			continue
 		}
 
-		local := segment.(*segments.LocalSegment)
-		err := node.loader.LoadDeltaLogs(ctx, local, info.GetDeltalogs())
+		err := node.loader.LoadDeltaLogs(ctx, segment, info.GetDeltalogs())
 		if err != nil {
 			if finalErr == nil {
 				finalErr = err
@@ -335,6 +334,7 @@ func (node *QueryNode) searchChannel(ctx context.Context, req *querypb.SearchReq
 		zap.Int64("collectionID", req.Req.GetCollectionID()),
 		zap.String("channel", channel),
 		zap.String("scope", req.GetScope().String()),
+		zap.Int64("nq", req.GetReq().GetNq()),
 	)
 	traceID := trace.SpanFromContext(ctx).SpanContext().TraceID()
 

@@ -46,7 +46,7 @@ type trigger interface {
 	// triggerCompaction triggers a compaction if any compaction condition satisfy.
 	triggerCompaction() error
 	// triggerSingleCompaction triggers a compaction bundled with collection-partition-channel-segment
-	triggerSingleCompaction(collectionID, partitionID, segmentID int64, channel string) error
+	triggerSingleCompaction(collectionID, partitionID, segmentID int64, channel string, blockToSendSignal bool) error
 	// forceTriggerCompaction force to start a compaction
 	forceTriggerCompaction(collectionID int64) (UniqueID, error)
 }
@@ -119,8 +119,14 @@ func (t *compactionTrigger) start() {
 			case signal := <-t.signals:
 				switch {
 				case signal.isGlobal:
-					t.handleGlobalSignal(signal)
+					// ManualCompaction also use use handleGlobalSignal
+					// so throw err here
+					err := t.handleGlobalSignal(signal)
+					if err != nil {
+						log.Warn("unable to handleGlobalSignal", zap.Error(err))
+					}
 				default:
+					// no need to handle err in handleSignal
 					t.handleSignal(signal)
 					// shouldn't reset, otherwise a frequent flushed collection will affect other collections
 					// t.globalTrigger.Reset(Params.DataCoordCfg.GlobalCompactionInterval)
@@ -226,7 +232,7 @@ func (t *compactionTrigger) triggerCompaction() error {
 }
 
 // triggerSingleCompaction triger a compaction bundled with collection-partition-channel-segment
-func (t *compactionTrigger) triggerSingleCompaction(collectionID, partitionID, segmentID int64, channel string) error {
+func (t *compactionTrigger) triggerSingleCompaction(collectionID, partitionID, segmentID int64, channel string, blockToSendSignal bool) error {
 	// If AutoCompaction disabled, flush request will not trigger compaction
 	if !Params.DataCoordCfg.EnableAutoCompaction.GetAsBool() {
 		return nil
@@ -245,7 +251,16 @@ func (t *compactionTrigger) triggerSingleCompaction(collectionID, partitionID, s
 		segmentID:    segmentID,
 		channel:      channel,
 	}
-	t.signals <- signal
+	if blockToSendSignal {
+		t.signals <- signal
+		return nil
+	}
+	select {
+	case t.signals <- signal:
+	default:
+		log.Info("no space to send compaction signal", zap.Int64("collectionID", collectionID), zap.Int64("segmentID", segmentID), zap.String("channel", channel))
+	}
+
 	return nil
 }
 
@@ -262,7 +277,13 @@ func (t *compactionTrigger) forceTriggerCompaction(collectionID int64) (UniqueID
 		isGlobal:     true,
 		collectionID: collectionID,
 	}
-	t.handleGlobalSignal(signal)
+
+	err = t.handleGlobalSignal(signal)
+	if err != nil {
+		log.Warn("unable to handleGlobalSignal", zap.Error(err))
+		return -1, err
+	}
+
 	return id, nil
 }
 
@@ -332,34 +353,40 @@ func (t *compactionTrigger) updateSegmentMaxSize(segments []*SegmentInfo) (bool,
 	return isDiskANN, nil
 }
 
-func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) {
+func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) error {
 	t.forceMu.Lock()
 	defer t.forceMu.Unlock()
 
-	log := log.With(zap.Int64("compactionID", signal.id))
+	log := log.With(zap.Int64("compactionID", signal.id),
+		zap.Int64("signal.collectionID", signal.collectionID),
+		zap.Int64("signal.partitionID", signal.partitionID),
+		zap.Int64("signal.segmentID", signal.segmentID))
 	m := t.meta.GetSegmentsChanPart(func(segment *SegmentInfo) bool {
 		return (signal.collectionID == 0 || segment.CollectionID == signal.collectionID) &&
 			isSegmentHealthy(segment) &&
 			isFlush(segment) &&
 			!segment.isCompacting && // not compacting now
-			!segment.GetIsImporting() // not importing now
+			!segment.GetIsImporting() && // not importing now
+			segment.GetLevel() != datapb.SegmentLevel_L0 // ignore level zero segments
 	}) // m is list of chanPartSegments, which is channel-partition organized segments
 
 	if len(m) == 0 {
-		return
+		log.Info("the length of SegmentsChanPart is 0, skip to handle compaction")
+		return nil
 	}
 
 	ts, err := t.allocTs()
 	if err != nil {
-		log.Warn("allocate ts failed, skip to handle compaction",
-			zap.Int64("collectionID", signal.collectionID),
-			zap.Int64("partitionID", signal.partitionID),
-			zap.Int64("segmentID", signal.segmentID))
-		return
+		log.Warn("allocate ts failed, skip to handle compaction")
+		return err
 	}
 
 	for _, group := range m {
+		log := log.With(zap.Int64("collectionID", group.collectionID),
+			zap.Int64("partitionID", group.partitionID),
+			zap.String("channel", group.channelName))
 		if !signal.isForce && t.compactionHandler.isFull() {
+			log.Warn("compaction plan skipped due to handler full")
 			break
 		}
 		if Params.DataCoordCfg.IndexBasedCompaction.GetAsBool() {
@@ -374,20 +401,15 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) {
 
 		coll, err := t.getCollection(group.collectionID)
 		if err != nil {
-			log.Warn("get collection info failed, skip handling compaction",
-				zap.Int64("collectionID", group.collectionID),
-				zap.Int64("partitionID", group.partitionID),
-				zap.String("channel", group.channelName),
-				zap.Error(err),
-			)
-			return
+			log.Warn("get collection info failed, skip handling compaction", zap.Error(err))
+			return err
 		}
 
 		if !signal.isForce && !t.isCollectionAutoCompactionEnabled(coll) {
 			log.RatedInfo(20, "collection auto compaction disabled",
 				zap.Int64("collectionID", group.collectionID),
 			)
-			return
+			return nil
 		}
 
 		ct, err := t.getCompactTime(ts, coll)
@@ -396,7 +418,7 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) {
 				zap.Int64("collectionID", group.collectionID),
 				zap.Int64("partitionID", group.partitionID),
 				zap.String("channel", group.channelName))
-			return
+			return err
 		}
 
 		plans := t.generatePlans(group.segments, signal.isForce, isDiskIndex, ct)
@@ -442,6 +464,7 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) {
 				zap.Int64s("segmentIDs", segIDs))
 		}
 	}
+	return nil
 }
 
 // handleSignal processes segment flush caused partition-chan level compaction signal
@@ -451,6 +474,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 
 	// 1. check whether segment's binlogs should be compacted or not
 	if t.compactionHandler.isFull() {
+		log.Warn("compaction plan skipped due to handler full")
 		return
 	}
 
@@ -466,6 +490,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 	segments := t.getCandidateSegments(channel, partitionID)
 
 	if len(segments) == 0 {
+		log.Info("the length of segments is 0, skip to handle compaction")
 		return
 	}
 
@@ -780,7 +805,8 @@ func (t *compactionTrigger) getCandidateSegments(channel string, partitionID Uni
 			s.GetInsertChannel() != channel ||
 			s.GetPartitionID() != partitionID ||
 			s.isCompacting ||
-			s.GetIsImporting() {
+			s.GetIsImporting() ||
+			s.GetLevel() == datapb.SegmentLevel_L0 {
 			continue
 		}
 		res = append(res, s)
@@ -889,17 +915,19 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, isDis
 		return true
 	}
 
-	// index version of segment lower than current version and IndexFileKeys should have value, trigger compaction
-	for _, index := range segment.segmentIndexes {
-		if index.CurrentIndexVersion < t.indexEngineVersionManager.GetCurrentIndexEngineVersion() &&
-			len(index.IndexFileKeys) > 0 {
-			log.Info("index version is too old, trigger compaction",
-				zap.Int64("segmentID", segment.ID),
-				zap.Int64("indexID", index.IndexID),
-				zap.Strings("indexFileKeys", index.IndexFileKeys),
-				zap.Int32("currentIndexVersion", index.CurrentIndexVersion),
-				zap.Int32("currentEngineVersion", t.indexEngineVersionManager.GetCurrentIndexEngineVersion()))
-			return true
+	if Params.DataCoordCfg.AutoUpgradeSegmentIndex.GetAsBool() {
+		// index version of segment lower than current version and IndexFileKeys should have value, trigger compaction
+		for _, index := range segment.segmentIndexes {
+			if index.CurrentIndexVersion < t.indexEngineVersionManager.GetCurrentIndexEngineVersion() &&
+				len(index.IndexFileKeys) > 0 {
+				log.Info("index version is too old, trigger compaction",
+					zap.Int64("segmentID", segment.ID),
+					zap.Int64("indexID", index.IndexID),
+					zap.Strings("indexFileKeys", index.IndexFileKeys),
+					zap.Int32("currentIndexVersion", index.CurrentIndexVersion),
+					zap.Int32("currentEngineVersion", t.indexEngineVersionManager.GetCurrentIndexEngineVersion()))
+				return true
+			}
 		}
 	}
 

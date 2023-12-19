@@ -141,6 +141,10 @@ func (pi *ParamItem) GetAsJSONMap() map[string]string {
 	return getAndConvert(pi.GetValue(), funcutil.JSONToMap, nil)
 }
 
+func (pi *ParamItem) GetAsRoleDetails() map[string](map[string]([](map[string]string))) {
+	return getAndConvert(pi.GetValue(), funcutil.JSONToRoleDetails, nil)
+}
+
 type CompositeParamItem struct {
 	Items  []*ParamItem
 	Format func(map[string]string) string
@@ -175,6 +179,10 @@ func (pg *ParamGroup) GetValue() map[string]string {
 	}
 	values := pg.manager.GetBy(config.WithPrefix(pg.KeyPrefix), config.RemovePrefix(pg.KeyPrefix))
 	return values
+}
+
+func ParseAsStings(v string) []string {
+	return getAsStrings(v)
 }
 
 func getAsStrings(v string) []string {

@@ -39,6 +39,7 @@ type CodecIndex interface {
 	Delete() error
 	CleanLocalData() error
 	UpLoad() (map[string]int64, error)
+	UpLoadV2() (int64, error)
 }
 
 var _ CodecIndex = (*CgoIndex)(nil)
@@ -95,6 +96,21 @@ func NewCgoIndex(dtype schemapb.DataType, typeParams, indexParams map[string]str
 func CreateIndex(ctx context.Context, buildIndexInfo *BuildIndexInfo) (CodecIndex, error) {
 	var indexPtr C.CIndex
 	status := C.CreateIndex(&indexPtr, buildIndexInfo.cBuildIndexInfo)
+	if err := HandleCStatus(&status, "failed to create index"); err != nil {
+		return nil, err
+	}
+
+	index := &CgoIndex{
+		indexPtr: indexPtr,
+		close:    false,
+	}
+
+	return index, nil
+}
+
+func CreateIndexV2(ctx context.Context, buildIndexInfo *BuildIndexInfo) (CodecIndex, error) {
+	var indexPtr C.CIndex
+	status := C.CreateIndexV2(&indexPtr, buildIndexInfo.cBuildIndexInfo)
 	if err := HandleCStatus(&status, "failed to create index"); err != nil {
 		return nil, err
 	}
@@ -360,4 +376,41 @@ func (index *CgoIndex) UpLoad() (map[string]int64, error) {
 	})
 
 	return res, nil
+}
+
+func (index *CgoIndex) UpLoadV2() (int64, error) {
+	var cBinarySet C.CBinarySet
+
+	status := C.SerializeIndexAndUpLoadV2(index.indexPtr, &cBinarySet)
+	defer func() {
+		if cBinarySet != nil {
+			C.DeleteBinarySet(cBinarySet)
+		}
+	}()
+	if err := HandleCStatus(&status, "failed to serialize index and upload index"); err != nil {
+		return -1, err
+	}
+
+	buffer, err := GetBinarySetValue(cBinarySet, "index_store_version")
+	if err != nil {
+		return -1, err
+	}
+	var version int64
+
+	version = int64(buffer[7])
+	version = (version << 8) + int64(buffer[6])
+	version = (version << 8) + int64(buffer[5])
+	version = (version << 8) + int64(buffer[4])
+	version = (version << 8) + int64(buffer[3])
+	version = (version << 8) + int64(buffer[2])
+	version = (version << 8) + int64(buffer[1])
+	version = (version << 8) + int64(buffer[0])
+
+	runtime.SetFinalizer(index, func(index *CgoIndex) {
+		if index != nil && !index.close {
+			log.Error("there is leakage in index object, please check.")
+		}
+	})
+
+	return version, nil
 }

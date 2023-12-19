@@ -417,3 +417,15 @@ func (s *Server) ListResourceGroups(ctx context.Context, req *milvuspb.ListResou
 func (s *Server) DescribeResourceGroup(ctx context.Context, req *querypb.DescribeResourceGroupRequest) (*querypb.DescribeResourceGroupResponse, error) {
 	return s.queryCoord.DescribeResourceGroup(ctx, req)
 }
+
+func (s *Server) ActivateChecker(ctx context.Context, req *querypb.ActivateCheckerRequest) (*commonpb.Status, error) {
+	return s.queryCoord.ActivateChecker(ctx, req)
+}
+
+func (s *Server) DeactivateChecker(ctx context.Context, req *querypb.DeactivateCheckerRequest) (*commonpb.Status, error) {
+	return s.queryCoord.DeactivateChecker(ctx, req)
+}
+
+func (s *Server) ListCheckers(ctx context.Context, req *querypb.ListCheckersRequest) (*querypb.ListCheckersResponse, error) {
+	return s.queryCoord.ListCheckers(ctx, req)
+}

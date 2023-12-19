@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -21,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -1291,6 +1294,38 @@ func TestSearch(t *testing.T) {
 			}
 		})
 	}
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().Search(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{
+		Status: &StatusSuccess,
+		Results: &schemapb.SearchResultData{
+			FieldsData: generateFieldData(),
+			Scores:     []float32{0.01, 0.04, 0.09},
+			TopK:       3,
+		},
+	}, nil).Once()
+	tt := testCase{
+		name:       "search success with params",
+		mp:         mp,
+		exceptCode: 200,
+	}
+	t.Run(tt.name, func(t *testing.T) {
+		testEngine := initHTTPServer(tt.mp, true)
+		rows := []float32{0.0, 0.0}
+		data, _ := json.Marshal(map[string]interface{}{
+			HTTPCollectionName: DefaultCollectionName,
+			"vector":           rows,
+			Params: map[string]float64{
+				ParamRadius:      0.9,
+				ParamRangeFilter: 0.1,
+			},
+		})
+		bodyReader := bytes.NewReader(data)
+		req := httptest.NewRequest(http.MethodPost, versional(VectorSearchPath), bodyReader)
+		req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
+		w := httptest.NewRecorder()
+		testEngine.ServeHTTP(w, req)
+		assert.Equal(t, tt.exceptCode, w.Code)
+	})
 }
 
 type ReturnType int
@@ -1402,12 +1437,14 @@ func TestHttpRequestFormat(t *testing.T) {
 		merr.ErrMissingRequiredParameters,
 		merr.ErrMissingRequiredParameters,
 		merr.ErrMissingRequiredParameters,
+		merr.ErrIncorrectParameterFormat,
 	}
 	requestJsons := [][]byte{
 		[]byte(`{"collectionName": {"` + DefaultCollectionName + `", "dimension": 2}`),
 		[]byte(`{"collName": "` + DefaultCollectionName + `", "dimension": 2}`),
 		[]byte(`{"collName": "` + DefaultCollectionName + `", "dim": 2}`),
 		[]byte(`{"collectionName": "` + DefaultCollectionName + `"}`),
+		[]byte(`{"collectionName": "` + DefaultCollectionName + `", "vector": [0.0, 0.0], "` + Params + `": {"` + ParamRangeFilter + `": 0.1}}`),
 	}
 	paths := [][]string{
 		{
@@ -1436,6 +1473,8 @@ func TestHttpRequestFormat(t *testing.T) {
 			versional(VectorInsertPath),
 			versional(VectorUpsertPath),
 			versional(VectorDeletePath),
+		}, {
+			versional(VectorSearchPath),
 		},
 	}
 	for i, pathArr := range paths {
@@ -1723,69 +1762,42 @@ func wrapWithDescribeIndex(t *testing.T, mp *mocks.MockProxy, returnType int, ti
 	return mp, testCases
 }
 
-func getCollectionSchema(collectionName string) *schemapb.CollectionSchema {
-	sch := &schemapb.CollectionSchema{
-		Name:   collectionName,
-		AutoID: false,
-	}
-	sch.Fields = getFieldSchema()
-	return sch
-}
-
-func getFieldSchema() []*schemapb.FieldSchema {
-	fields := []*schemapb.FieldSchema{
-		{
-			FieldID:     0,
-			Name:        "RowID",
-			Description: "RowID field",
-			DataType:    schemapb.DataType_Int64,
-			TypeParams: []*commonpb.KeyValuePair{
-				{
-					Key:   "f0_tk1",
-					Value: "f0_tv1",
-				},
-			},
+func TestInterceptor(t *testing.T) {
+	h := Handlers{}
+	v := atomic.NewInt32(0)
+	h.interceptors = []RestRequestInterceptor{
+		func(ctx context.Context, ginCtx *gin.Context, req any, handler func(reqCtx context.Context, req any) (any, error)) (any, error) {
+			log.Info("pre1")
+			v.Add(1)
+			assert.EqualValues(t, 1, v.Load())
+			res, err := handler(ctx, req)
+			log.Info("post1")
+			v.Add(1)
+			assert.EqualValues(t, 6, v.Load())
+			return res, err
 		},
-		{
-			FieldID:     1,
-			Name:        "Timestamp",
-			Description: "Timestamp field",
-			DataType:    schemapb.DataType_Int64,
-			TypeParams: []*commonpb.KeyValuePair{
-				{
-					Key:   "f1_tk1",
-					Value: "f1_tv1",
-				},
-			},
+		func(ctx context.Context, ginCtx *gin.Context, req any, handler func(reqCtx context.Context, req any) (any, error)) (any, error) {
+			log.Info("pre2")
+			v.Add(1)
+			assert.EqualValues(t, 2, v.Load())
+			res, err := handler(ctx, req)
+			log.Info("post2")
+			v.Add(1)
+			assert.EqualValues(t, 5, v.Load())
+			return res, err
 		},
-		{
-			FieldID:     100,
-			Name:        "float_vector_field",
-			Description: "field 100",
-			DataType:    schemapb.DataType_FloatVector,
-			TypeParams: []*commonpb.KeyValuePair{
-				{
-					Key:   "dim",
-					Value: "2",
-				},
-			},
-			IndexParams: []*commonpb.KeyValuePair{
-				{
-					Key:   "indexkey",
-					Value: "indexvalue",
-				},
-			},
-		},
-		{
-			FieldID:      101,
-			Name:         "int64_field",
-			Description:  "field 106",
-			DataType:     schemapb.DataType_Int64,
-			TypeParams:   []*commonpb.KeyValuePair{},
-			IndexParams:  []*commonpb.KeyValuePair{},
-			IsPrimaryKey: true,
+		func(ctx context.Context, ginCtx *gin.Context, req any, handler func(reqCtx context.Context, req any) (any, error)) (any, error) {
+			log.Info("pre3")
+			v.Add(1)
+			assert.EqualValues(t, 3, v.Load())
+			res, err := handler(ctx, req)
+			log.Info("post3")
+			v.Add(1)
+			assert.EqualValues(t, 4, v.Load())
+			return res, err
 		},
 	}
-
-	return fields
+	_, _ = h.executeRestRequestInterceptor(context.Background(), nil, &milvuspb.CreateCollectionRequest{}, func(reqCtx context.Context, req any) (any, error) {
+		return &commonpb.Status{}, nil
+	})
 }

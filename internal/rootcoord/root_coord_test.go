@@ -37,6 +37,7 @@ import (
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	mocksutil "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -48,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/importutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -1444,23 +1446,8 @@ func TestCore_ReportImport(t *testing.T) {
 		return nil
 	}
 
-	dc := newMockDataCoord()
-	dc.GetComponentStatesFunc = func(ctx context.Context) (*milvuspb.ComponentStates, error) {
-		return &milvuspb.ComponentStates{
-			State: &milvuspb.ComponentInfo{
-				NodeID:    TestRootCoordID,
-				StateCode: commonpb.StateCode_Healthy,
-			},
-			SubcomponentStates: nil,
-			Status:             merr.Success(),
-		}, nil
-	}
-	dc.WatchChannelsFunc = func(ctx context.Context, req *datapb.WatchChannelsRequest) (*datapb.WatchChannelsResponse, error) {
-		return &datapb.WatchChannelsResponse{Status: merr.Success()}, nil
-	}
-	dc.FlushFunc = func(ctx context.Context, req *datapb.FlushRequest) (*datapb.FlushResponse, error) {
-		return &datapb.FlushResponse{Status: merr.Success()}, nil
-	}
+	dc := mocksutil.NewMockDataCoordClient(t)
+	dc.EXPECT().Flush(mock.Anything, mock.Anything).Return(&datapb.FlushResponse{Status: merr.Success()}, nil)
 
 	mockCallImportServiceErr := false
 	callImportServiceFn := func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
@@ -2050,6 +2037,39 @@ func TestRootCoord_RBACError(t *testing.T) {
 		}
 	})
 
+	t.Run("select grant success", func(t *testing.T) {
+		mockMeta := c.meta.(*mockMetaTable)
+		mockMeta.SelectRoleFunc = func(tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error) {
+			return []*milvuspb.RoleResult{
+				{
+					Role: &milvuspb.RoleEntity{Name: "foo"},
+				},
+			}, nil
+		}
+		mockMeta.SelectGrantFunc = func(tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error) {
+			return []*milvuspb.GrantEntity{
+				{
+					Role: &milvuspb.RoleEntity{Name: "foo"},
+				},
+			}, merr.ErrIoKeyNotFound
+		}
+
+		{
+			resp, err := c.SelectGrant(ctx, &milvuspb.SelectGrantRequest{Entity: &milvuspb.GrantEntity{Role: &milvuspb.RoleEntity{Name: "foo"}, Object: &milvuspb.ObjectEntity{Name: "Collection"}, ObjectName: "fir"}})
+			assert.NoError(t, err)
+			assert.Equal(t, 1, len(resp.GetEntities()))
+			assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		}
+
+		mockMeta.SelectRoleFunc = func(tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error) {
+			return nil, errors.New("mock error")
+		}
+
+		mockMeta.SelectGrantFunc = func(tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error) {
+			return nil, errors.New("mock error")
+		}
+	})
+
 	t.Run("list policy failed", func(t *testing.T) {
 		resp, err := c.ListPolicy(ctx, &internalpb.ListPolicyRequest{})
 		assert.NoError(t, err)
@@ -2065,6 +2085,51 @@ func TestRootCoord_RBACError(t *testing.T) {
 		mockMeta.ListPolicyFunc = func(tenant string) ([]string, error) {
 			return []string{}, errors.New("mock error")
 		}
+	})
+}
+
+func TestRootCoord_BuiltinRoles(t *testing.T) {
+	roleDbAdmin := "db_admin"
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().RoleCfg.Enabled.Key, "true")
+	paramtable.Get().Save(paramtable.Get().RoleCfg.Roles.Key, `{"`+roleDbAdmin+`": {"privileges": [{"object_type": "Global", "object_name": "*", "privilege": "CreateCollection", "db_name": "*"}]}}`)
+	t.Run("init builtin roles success", func(t *testing.T) {
+		c := newTestCore(withHealthyCode(), withInvalidMeta())
+		mockMeta := c.meta.(*mockMetaTable)
+		mockMeta.CreateRoleFunc = func(tenant string, entity *milvuspb.RoleEntity) error {
+			return nil
+		}
+		mockMeta.OperatePrivilegeFunc = func(tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error {
+			return nil
+		}
+		err := c.initBuiltinRoles()
+		assert.Equal(t, nil, err)
+		assert.True(t, util.IsBuiltinRole(roleDbAdmin))
+		assert.False(t, util.IsBuiltinRole(util.RoleAdmin))
+		resp, err := c.DropRole(context.Background(), &milvuspb.DropRoleRequest{RoleName: roleDbAdmin})
+		assert.Equal(t, nil, err)
+		assert.Equal(t, int32(1401), resp.Code) // merr.ErrPrivilegeNotPermitted
+	})
+	t.Run("init builtin roles fail to create role", func(t *testing.T) {
+		c := newTestCore(withHealthyCode(), withInvalidMeta())
+		mockMeta := c.meta.(*mockMetaTable)
+		mockMeta.CreateRoleFunc = func(tenant string, entity *milvuspb.RoleEntity) error {
+			return merr.ErrPrivilegeNotPermitted
+		}
+		err := c.initBuiltinRoles()
+		assert.Error(t, err)
+	})
+	t.Run("init builtin roles fail to operate privileg", func(t *testing.T) {
+		c := newTestCore(withHealthyCode(), withInvalidMeta())
+		mockMeta := c.meta.(*mockMetaTable)
+		mockMeta.CreateRoleFunc = func(tenant string, entity *milvuspb.RoleEntity) error {
+			return nil
+		}
+		mockMeta.OperatePrivilegeFunc = func(tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error {
+			return merr.ErrPrivilegeNotPermitted
+		}
+		err := c.initBuiltinRoles()
+		assert.Error(t, err)
 	})
 }
 

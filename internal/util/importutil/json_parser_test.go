@@ -112,6 +112,7 @@ func Test_JSONParserParseRows_IntPK(t *testing.T) {
 			FieldJSON:         fmt.Sprintf("{\"x\": %d}", i),
 			FieldBinaryVector: []int{(200 + i) % math.MaxUint8, 0},
 			FieldFloatVector:  []float32{float32(i) + 0.1, float32(i) + 0.2, float32(i) + 0.3, float32(i) + 0.4},
+			FieldArray:        []int32{1, 2, 3},
 		}
 		content.Rows = append(content.Rows, row)
 	}
@@ -186,6 +187,17 @@ func Test_JSONParserParseRows_IntPK(t *testing.T) {
 				fval, err := parseFloat(string(val), 64, "")
 				assert.NoError(t, err)
 				assert.InDelta(t, contenctRow.FieldFloatVector[k], float32(fval), 10e-6)
+			}
+
+			v11, ok := parsedRow[113].([]interface{})
+			assert.True(t, ok)
+			assert.Equal(t, len(contenctRow.FieldArray), len(v11))
+			for k := 0; k < len(v11); k++ {
+				val, ok := v11[k].(json.Number)
+				assert.True(t, ok)
+				ival, err := strconv.ParseInt(string(val), 0, 32)
+				assert.NoError(t, err)
+				assert.Equal(t, contenctRow.FieldArray[k], int32(ival))
 			}
 		}
 	}

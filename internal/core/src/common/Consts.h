@@ -39,6 +39,10 @@ const char INDEX_BUILD_ID_KEY[] = "indexBuildID";
 const char INDEX_ROOT_PATH[] = "index_files";
 const char RAWDATA_ROOT_PATH[] = "raw_datas";
 
+const char DEFAULT_PLANNODE_ID[] = "0";
+const char DEAFULT_QUERY_ID[] = "0";
+const char DEFAULT_TASK_ID[] = "0";
+
 const int64_t DEFAULT_FIELD_MAX_MEMORY_LIMIT = 64 << 20;  // bytes
 const int64_t DEFAULT_HIGH_PRIORITY_THREAD_CORE_COEFFICIENT = 10;
 const int64_t DEFAULT_MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT = 5;
@@ -47,6 +51,8 @@ const int64_t DEFAULT_LOW_PRIORITY_THREAD_CORE_COEFFICIENT = 1;
 const int64_t DEFAULT_INDEX_FILE_SLICE_SIZE = 4 << 20;  // bytes
 
 const int DEFAULT_CPU_NUM = 1;
+
+const int64_t DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE = 8192;
 
 constexpr const char* RADIUS = knowhere::meta::RADIUS;
 constexpr const char* RANGE_FILTER = knowhere::meta::RANGE_FILTER;

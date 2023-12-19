@@ -54,6 +54,8 @@ enum CDataType {
 };
 typedef enum CDataType CDataType;
 
+typedef void* CSegmentInterface;
+
 typedef struct CStatus {
     int error_code;
     const char* error_msg;
@@ -93,6 +95,7 @@ typedef struct CTraceConfig {
     int sampleFraction;
     const char* jaegerURL;
     const char* otlpEndpoint;
+    bool oltpSecure;
 
     int nodeID;
 } CTraceConfig;
@@ -102,6 +105,11 @@ typedef struct CTraceContext {
     const uint8_t* spanID;
     uint8_t flag;
 } CTraceContext;
+
+typedef struct CNewSegmentResult {
+    CStatus status;
+    CSegmentInterface segmentPtr;
+} CNewSegmentResult;
 #ifdef __cplusplus
 }
 

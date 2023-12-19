@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -604,4 +605,95 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		err = merr.Error(resp.GetStatus())
 		assert.ErrorIs(t, err, merr.ErrServiceNotReady)
 	})
+}
+
+type GcControlServiceSuite struct {
+	suite.Suite
+
+	server *Server
+}
+
+func (s *GcControlServiceSuite) SetupTest() {
+	s.server = newTestServer(s.T(), nil)
+}
+
+func (s *GcControlServiceSuite) TearDownTest() {
+	if s.server != nil {
+		closeTestServer(s.T(), s.server)
+	}
+}
+
+func (s *GcControlServiceSuite) TestClosedServer() {
+	closeTestServer(s.T(), s.server)
+	resp, err := s.server.GcControl(context.TODO(), &datapb.GcControlRequest{})
+	s.NoError(err)
+	s.False(merr.Ok(resp))
+	s.server = nil
+}
+
+func (s *GcControlServiceSuite) TestUnknownCmd() {
+	resp, err := s.server.GcControl(context.TODO(), &datapb.GcControlRequest{
+		Command: 0,
+	})
+	s.NoError(err)
+	s.False(merr.Ok(resp))
+}
+
+func (s *GcControlServiceSuite) TestPause() {
+	resp, err := s.server.GcControl(context.TODO(), &datapb.GcControlRequest{
+		Command: datapb.GcCommand_Pause,
+	})
+	s.Nil(err)
+	s.False(merr.Ok(resp))
+
+	resp, err = s.server.GcControl(context.TODO(), &datapb.GcControlRequest{
+		Command: datapb.GcCommand_Pause,
+		Params: []*commonpb.KeyValuePair{
+			{Key: "duration", Value: "not_int"},
+		},
+	})
+	s.Nil(err)
+	s.False(merr.Ok(resp))
+
+	resp, err = s.server.GcControl(context.TODO(), &datapb.GcControlRequest{
+		Command: datapb.GcCommand_Pause,
+		Params: []*commonpb.KeyValuePair{
+			{Key: "duration", Value: "60"},
+		},
+	})
+	s.Nil(err)
+	s.True(merr.Ok(resp))
+}
+
+func (s *GcControlServiceSuite) TestResume() {
+	resp, err := s.server.GcControl(context.TODO(), &datapb.GcControlRequest{
+		Command: datapb.GcCommand_Resume,
+	})
+	s.Nil(err)
+	s.True(merr.Ok(resp))
+}
+
+func (s *GcControlServiceSuite) TestTimeoutCtx() {
+	s.server.garbageCollector.close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	resp, err := s.server.GcControl(ctx, &datapb.GcControlRequest{
+		Command: datapb.GcCommand_Resume,
+	})
+	s.Nil(err)
+	s.False(merr.Ok(resp))
+
+	resp, err = s.server.GcControl(ctx, &datapb.GcControlRequest{
+		Command: datapb.GcCommand_Pause,
+		Params: []*commonpb.KeyValuePair{
+			{Key: "duration", Value: "60"},
+		},
+	})
+	s.Nil(err)
+	s.False(merr.Ok(resp))
+}
+
+func TestGcControlService(t *testing.T) {
+	suite.Run(t, new(GcControlServiceSuite))
 }

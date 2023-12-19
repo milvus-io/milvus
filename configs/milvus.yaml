@@ -198,12 +198,35 @@ proxy:
   # Whether to produce gin logs.\n
   # please adjust in embedded Milvus: false
   ginLogging: true
+  ginLogSkipPaths: "/" # skipped url path for gin log split by comma
   maxTaskNum: 1024 # max task number of proxy task queue
   accessLog:
     enable: false
-    filename: "" # Log filename, leave empty to use stdout.
+    # Log filename, set as "" to use stdout.
+    # filename: "" 
+    # define formatters for access log by XXX:{format: XXX, method:[XXX,XXX]}
+    formatters:
+      # "base" formatter could not set methods
+      # all method will use "base" formatter default
+      base:
+        # will not print access log if set as ""
+        format: "[$time_now] [ACCESS] <$user_name: $user_addr> $method_name [status: $method_status] [code: $error_code] [sdk: $sdk_version] [msg: $error_msg] [traceID: $trace_id] [timeCost: $time_cost]"
+      query: 
+        format: "[$time_now] [ACCESS] <$user_name: $user_addr> $method_name [status: $method_status] [code: $error_code] [sdk: $sdk_version] [msg: $error_msg] [traceID: $trace_id] [timeCost: $time_cost] [database: $database_name] [collection: $collection_name] [partitions: $partition_name] [expr: $method_expr]"
+          # set formatter owners by method name(method was all milvus external interface)
+          # all method will use base formatter default
+          # one method only could use one formatter
+          # if set a method formatter mutiple times, will use random fomatter.
+        methods: ["Query", "Search", "Delete"]
     # localPath: /tmp/milvus_accesslog // log file rootpath
-    # maxSize: 64 # max log file size of singal log file to trigger rotate.
+    # maxSize: 64 # max log file size(MB) of singal log file, mean close when time <= 0.
+    # rotatedTime: 0 # max time range of singal log file, mean close when time <= 0;
+    # maxBackups: 8 # num of reserved backups. will rotate and crate a new backup when access log file trigger maxSize or rotatedTime.
+    # cacheSize: 10240 # write cache of accesslog in Byte
+
+    # minioEnable: false # update backups to milvus minio when minioEnable is true.
+    # remotePath: "access_log/" # file path when update backups to minio
+    # remoteMaxTime: 0 # max time range(in Hour) of backups in minio, 0 means close time retention.
   http:
     enabled: true # Whether to enable the http server
     debug_mode: false # Whether to enable http server debug mode
@@ -265,10 +288,12 @@ queryNode:
     # This parameter is only useful when enable-disk = true.
     # And this value should be a number greater than 1 and less than 32.
     chunkRows: 1024 # The number of vectors in a chunk.
+    exprEvalBatchSize: 8192 # The batch size for executor get next
     interimIndex: # build a vector temperate index for growing segment or binlog to accelerate search
       enableIndex: true
       nlist: 128 # segment index nlist
       nprobe: 16 # nprobe to search segment, based on your accuracy requirement, must smaller than nlist
+      memExpansionRate: 1.15 # the ratio of building interim index memory usage to raw data
   loadMemoryUsageFactor: 1 # The multiply factor of calculating the memory usage while loading segments
   enableDisk: false # enable querynode load disk index, and search on disk index
   maxDiskUsagePercentage: 95
@@ -409,6 +434,12 @@ dataNode:
       maxQueueLength: 16 # Maximum length of task queue in flowgraph
       maxParallelism: 1024 # Maximum number of tasks executed in parallel in the flowgraph
     maxParallelSyncTaskNum: 6 # Maximum number of sync tasks executed in parallel in each flush manager
+    skipMode:
+      # when there are only timetick msg in flowgraph for a while (longer than coldTime),
+      # flowGraph will turn on skip mode to skip most timeticks to reduce cost, especially there are a lot of channels
+      enable: true
+      skipNum: 4
+      coldTime: 60
   segment:
     insertBufSize: 16777216 # Max buffer size to flush for a single segment.
     deleteBufBytes: 67108864 # Max buffer size to flush del for a single channel
@@ -434,6 +465,10 @@ dataNode:
     # if this parameter <= 0, will set it as the maximum number of CPUs that can be executing
     # suggest to set it bigger on large collection numbers to avoid blocking
     workPoolSize: -1
+    # specify the size of global work pool for channel checkpoint updating
+    # if this parameter <= 0, will set it as 1000
+    # suggest to set it bigger on large collection numbers to avoid blocking
+    updateChannelCheckpointMaxParallel: 1000
 
 # Configures the system log output.
 log:
@@ -507,7 +542,7 @@ common:
     BeamWidthRatio: 4
   gracefulTime: 5000 # milliseconds. it represents the interval (in ms) by which the request arrival time needs to be subtracted in the case of Bounded Consistency.
   gracefulStopTimeout: 1800 # seconds. it will force quit the server if the graceful stop process is not completed during this time.
-  storageType: minio # please adjust in embedded Milvus: local
+  storageType: remote # please adjust in embedded Milvus: local, available values are [local, remote, opendal], value minio is deprecated, use remote instead
   # Default value: auto
   # Valid values: [auto, avx512, avx2, avx, sse4_2]
   # This configuration is only used by querynode and indexnode, it selects CPU instruction set for Searching and Index-building.
@@ -673,12 +708,15 @@ quotaAndLimits:
 
 trace:
   # trace exporter type, default is stdout,
-  # optional values: ['stdout', 'jaeger']
+  # optional values: ['stdout', 'jaeger', 'otlp']
   exporter: stdout
   # fraction of traceID based sampler,
   # optional values: [0, 1]
   # Fractions >= 1 will always sample. Fractions < 0 are treated as zero.
   sampleFraction: 0
+  otlp:
+    endpoint: # "127.0.0.1:4318"
+    secure: true
   jaeger:
     url: # "http://127.0.0.1:14268/api/traces"
     # when exporter is jaeger should set the jaeger's URL

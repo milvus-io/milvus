@@ -62,8 +62,8 @@ type MockIndexNode_CreateJob_Call struct {
 }
 
 // CreateJob is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *indexpb.CreateJobRequest
+//  - _a0 context.Context
+//  - _a1 *indexpb.CreateJobRequest
 func (_e *MockIndexNode_Expecter) CreateJob(_a0 interface{}, _a1 interface{}) *MockIndexNode_CreateJob_Call {
 	return &MockIndexNode_CreateJob_Call{Call: _e.mock.On("CreateJob", _a0, _a1)}
 }
@@ -117,8 +117,8 @@ type MockIndexNode_DropJobs_Call struct {
 }
 
 // DropJobs is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *indexpb.DropJobsRequest
+//  - _a0 context.Context
+//  - _a1 *indexpb.DropJobsRequest
 func (_e *MockIndexNode_Expecter) DropJobs(_a0 interface{}, _a1 interface{}) *MockIndexNode_DropJobs_Call {
 	return &MockIndexNode_DropJobs_Call{Call: _e.mock.On("DropJobs", _a0, _a1)}
 }
@@ -213,8 +213,8 @@ type MockIndexNode_GetComponentStates_Call struct {
 }
 
 // GetComponentStates is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.GetComponentStatesRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.GetComponentStatesRequest
 func (_e *MockIndexNode_Expecter) GetComponentStates(_a0 interface{}, _a1 interface{}) *MockIndexNode_GetComponentStates_Call {
 	return &MockIndexNode_GetComponentStates_Call{Call: _e.mock.On("GetComponentStates", _a0, _a1)}
 }
@@ -268,8 +268,8 @@ type MockIndexNode_GetJobStats_Call struct {
 }
 
 // GetJobStats is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *indexpb.GetJobStatsRequest
+//  - _a0 context.Context
+//  - _a1 *indexpb.GetJobStatsRequest
 func (_e *MockIndexNode_Expecter) GetJobStats(_a0 interface{}, _a1 interface{}) *MockIndexNode_GetJobStats_Call {
 	return &MockIndexNode_GetJobStats_Call{Call: _e.mock.On("GetJobStats", _a0, _a1)}
 }
@@ -323,8 +323,8 @@ type MockIndexNode_GetMetrics_Call struct {
 }
 
 // GetMetrics is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.GetMetricsRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.GetMetricsRequest
 func (_e *MockIndexNode_Expecter) GetMetrics(_a0 interface{}, _a1 interface{}) *MockIndexNode_GetMetrics_Call {
 	return &MockIndexNode_GetMetrics_Call{Call: _e.mock.On("GetMetrics", _a0, _a1)}
 }
@@ -378,8 +378,8 @@ type MockIndexNode_GetStatisticsChannel_Call struct {
 }
 
 // GetStatisticsChannel is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *internalpb.GetStatisticsChannelRequest
+//  - _a0 context.Context
+//  - _a1 *internalpb.GetStatisticsChannelRequest
 func (_e *MockIndexNode_Expecter) GetStatisticsChannel(_a0 interface{}, _a1 interface{}) *MockIndexNode_GetStatisticsChannel_Call {
 	return &MockIndexNode_GetStatisticsChannel_Call{Call: _e.mock.On("GetStatisticsChannel", _a0, _a1)}
 }
@@ -474,8 +474,8 @@ type MockIndexNode_QueryJobs_Call struct {
 }
 
 // QueryJobs is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *indexpb.QueryJobsRequest
+//  - _a0 context.Context
+//  - _a1 *indexpb.QueryJobsRequest
 func (_e *MockIndexNode_Expecter) QueryJobs(_a0 interface{}, _a1 interface{}) *MockIndexNode_QueryJobs_Call {
 	return &MockIndexNode_QueryJobs_Call{Call: _e.mock.On("QueryJobs", _a0, _a1)}
 }
@@ -549,7 +549,7 @@ type MockIndexNode_SetAddress_Call struct {
 }
 
 // SetAddress is a helper method to define mock.On call
-//   - address string
+//  - address string
 func (_e *MockIndexNode_Expecter) SetAddress(address interface{}) *MockIndexNode_SetAddress_Call {
 	return &MockIndexNode_SetAddress_Call{Call: _e.mock.On("SetAddress", address)}
 }
@@ -582,7 +582,7 @@ type MockIndexNode_SetEtcdClient_Call struct {
 }
 
 // SetEtcdClient is a helper method to define mock.On call
-//   - etcdClient *clientv3.Client
+//  - etcdClient *clientv3.Client
 func (_e *MockIndexNode_Expecter) SetEtcdClient(etcdClient interface{}) *MockIndexNode_SetEtcdClient_Call {
 	return &MockIndexNode_SetEtcdClient_Call{Call: _e.mock.On("SetEtcdClient", etcdClient)}
 }
@@ -636,8 +636,8 @@ type MockIndexNode_ShowConfigurations_Call struct {
 }
 
 // ShowConfigurations is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *internalpb.ShowConfigurationsRequest
+//  - _a0 context.Context
+//  - _a1 *internalpb.ShowConfigurationsRequest
 func (_e *MockIndexNode_Expecter) ShowConfigurations(_a0 interface{}, _a1 interface{}) *MockIndexNode_ShowConfigurations_Call {
 	return &MockIndexNode_ShowConfigurations_Call{Call: _e.mock.On("ShowConfigurations", _a0, _a1)}
 }
@@ -752,7 +752,7 @@ type MockIndexNode_UpdateStateCode_Call struct {
 }
 
 // UpdateStateCode is a helper method to define mock.On call
-//   - stateCode commonpb.StateCode
+//  - stateCode commonpb.StateCode
 func (_e *MockIndexNode_Expecter) UpdateStateCode(stateCode interface{}) *MockIndexNode_UpdateStateCode_Call {
 	return &MockIndexNode_UpdateStateCode_Call{Call: _e.mock.On("UpdateStateCode", stateCode)}
 }

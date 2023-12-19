@@ -873,3 +873,11 @@ func bound(name string, value, lower, upper any) boundField {
 func (f boundField) String() string {
 	return fmt.Sprintf("%v out of range %v <= %s <= %v", f.value, f.lower, f.name, f.upper)
 }
+
+func WrapErrImportFailed(msg ...string) error {
+	err := error(ErrImportFailed)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}

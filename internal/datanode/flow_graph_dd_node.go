@@ -115,7 +115,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 	}
 
 	if load := ddn.dropMode.Load(); load != nil && load.(bool) {
-		log.Info("ddNode in dropMode",
+		log.RatedInfo(1.0, "ddNode in dropMode",
 			zap.String("vChannelName", ddn.vChannelName),
 			zap.Int64("collectionID", ddn.collectionID))
 		return []Msg{}
@@ -154,7 +154,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 				ddn.dropMode.Store(true)
 
 				log.Info("Stop compaction of vChannel", zap.String("vChannelName", ddn.vChannelName))
-				ddn.compactionExecutor.stopExecutingtaskByVChannelName(ddn.vChannelName)
+				ddn.compactionExecutor.clearTasksByChannel(ddn.vChannelName)
 				fgMsg.dropCollection = true
 
 				pChan := funcutil.ToPhysicalChannel(ddn.vChannelName)

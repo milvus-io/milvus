@@ -59,6 +59,7 @@ set(MILVUS_TEST_FILES
         test_chunk_cache.cpp
         test_binlog_index.cpp
         test_storage.cpp
+        test_exec.cpp
         )
 
 if ( BUILD_DISK_ANN STREQUAL "ON" )
@@ -80,7 +81,7 @@ endif()
 if (DEFINED AZURE_BUILD_DIR)
     set(MILVUS_TEST_FILES
                 ${MILVUS_TEST_FILES}
-                test_azure_chunk_manager.cpp
+                #test_azure_chunk_manager.cpp
                 #need update aws-sdk-cpp, see more from https://github.com/aws/aws-sdk-cpp/issues/2119
                 #test_remote_chunk_manager.cpp
                 )
@@ -113,6 +114,7 @@ if (LINUX)
             milvus_segcore
             milvus_storage
             milvus_indexbuilder
+            milvus_common
             )
     install(TARGETS index_builder_test DESTINATION unittest)
 endif()
@@ -127,6 +129,8 @@ target_link_libraries(all_tests
         milvus_storage
         milvus_indexbuilder
         pthread
+        milvus_common
+        milvus_exec
         )
 
 install(TARGETS all_tests DESTINATION unittest)

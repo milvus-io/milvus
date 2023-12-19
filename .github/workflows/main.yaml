@@ -35,6 +35,10 @@ on:
       - '!**.md'
       - '!build/ci/jenkins/**'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   Build:
     name: Build and test AMD64 Ubuntu ${{ matrix.ubuntu }}
@@ -52,8 +56,9 @@ jobs:
         
       - name: Maximize build space
         uses: easimon/maximize-build-space@master
+        if: ${{ ! startsWith(runner.name, 'self') }} # skip this step if it is self-hosted runner
         with:
-          root-reserve-mb: 10240
+          root-reserve-mb: 20480
           swap-size-mb: 1024
           remove-dotnet: 'true'
           remove-android: 'true'

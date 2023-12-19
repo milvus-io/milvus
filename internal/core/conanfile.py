@@ -12,7 +12,7 @@ class MilvusConan(ConanFile):
         "lz4/1.9.4",
         "snappy/1.1.9",
         "lzo/2.10",
-        "arrow/11.0.0",
+        "arrow/12.0.1",
         "openssl/3.1.2",
         "aws-sdk-cpp/1.9.234",
         "googleapis/cci.20221108",
@@ -36,19 +36,24 @@ class MilvusConan(ConanFile):
         "xz_utils/5.4.0",
         "prometheus-cpp/1.1.0",
         "re2/20230301",
-        "folly/2023.07.12@milvus/dev",
+        "folly/2023.10.30.05@milvus/dev",
         "google-cloud-cpp/2.5.0@milvus/dev",
         "opentelemetry-cpp/1.8.1.1@milvus/dev",
         "librdkafka/1.9.1",
+        "abseil/20230125.3"
     )
     generators = ("cmake", "cmake_find_package")
     default_options = {
+        "libevent:shared": True,
+        "double-conversion:shared": True,
+        "folly:shared": True,
         "librdkafka:shared": True,
         "librdkafka:zstd": True,
         "librdkafka:ssl": True,
         "librdkafka:sasl": True,
         "rocksdb:shared": True,
         "rocksdb:with_zstd": True,
+        "arrow:filesystem_layer": True,
         "arrow:parquet": True,
         "arrow:compute": True,
         "arrow:with_re2": True,
@@ -57,6 +62,8 @@ class MilvusConan(ConanFile):
         "arrow:with_thrift": True,
         "arrow:with_jemalloc": True,
         "arrow:shared": False,
+        "arrow:with_s3": True,
+        "aws-sdk-cpp:config": True,
         "aws-sdk-cpp:text-to-speech": False,
         "aws-sdk-cpp:transfer": False,
         "gtest:build_gmock": False,
@@ -76,7 +83,8 @@ class MilvusConan(ConanFile):
             # Macos M1 cannot use jemalloc
             if self.settings.arch not in ("x86_64", "x86"):
                 del self.options["folly"].use_sse4_2
-
+            # By default abseil use static link but can not be compatible with macos X86
+            self.options["abseil"].shared = True
             self.options["arrow"].with_jemalloc = False
         if self.settings.arch == "armv8":
             self.options["openblas"].dynamic_arch = False
@@ -85,6 +93,7 @@ class MilvusConan(ConanFile):
         if self.settings.os != "Macos":
             # MacOS does not need openblas
             self.requires("openblas/0.3.23@milvus/dev")
+            self.requires("libunwind/1.7.2")
 
     def imports(self):
         self.copy("*.dylib", "../lib", "lib")

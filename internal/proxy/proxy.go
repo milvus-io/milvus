@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
+	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -217,7 +218,7 @@ func (node *Proxy) Init() error {
 
 	node.factory.Init(Params)
 
-	accesslog.SetupAccseeLog(&Params.ProxyCfg.AccessLog, &Params.MinioCfg)
+	accesslog.InitAccessLog(&Params.ProxyCfg.AccessLog, &Params.MinioCfg)
 	log.Debug("init access log for Proxy done")
 
 	err := node.initRateCollector()
@@ -293,6 +294,7 @@ func (node *Proxy) Init() error {
 	}
 	log.Debug("init meta cache done", zap.String("role", typeutil.ProxyRole))
 
+	log.Info("init proxy done", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("Address", node.address))
 	return nil
 }
 
@@ -474,8 +476,7 @@ func (node *Proxy) Stop() error {
 	// https://github.com/milvus-io/milvus/issues/12282
 	node.UpdateStateCode(commonpb.StateCode_Abnormal)
 
-	GetConnectionManager().stop()
-
+	connection.GetManager().Stop()
 	return nil
 }
 

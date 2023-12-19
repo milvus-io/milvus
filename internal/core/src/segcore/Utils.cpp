@@ -14,14 +14,14 @@
 #include <memory>
 #include <string>
 
+#include "common/Common.h"
+#include "common/FieldData.h"
 #include "index/ScalarIndex.h"
 #include "log/Log.h"
-#include "storage/FieldData.h"
-#include "storage/RemoteChunkManagerSingleton.h"
-#include "common/Common.h"
-#include "storage/ThreadPool.h"
-#include "storage/Util.h"
 #include "mmap/Utils.h"
+#include "storage/ThreadPool.h"
+#include "storage/RemoteChunkManagerSingleton.h"
+#include "storage/Util.h"
 
 namespace milvus::segcore {
 
@@ -50,7 +50,7 @@ ParsePksFromFieldData(std::vector<PkType>& pks, const DataArray& data) {
 void
 ParsePksFromFieldData(DataType data_type,
                       std::vector<PkType>& pks,
-                      const std::vector<storage::FieldDataPtr>& datas) {
+                      const std::vector<FieldDataPtr>& datas) {
     int64_t offset = 0;
 
     for (auto& field_data : datas) {
@@ -699,11 +699,45 @@ ReverseDataFromIndex(const index::IndexBase* index,
 
     return data_array;
 }
+void
+LoadFieldDatasFromRemote2(std::shared_ptr<milvus_storage::Space> space,
+                          SchemaPtr schema,
+                          FieldDataInfo& field_data_info) {
+    // log all schema ids
+    for (auto& field : schema->get_fields()) {
+    }
+    auto res = space->ScanData();
+    if (!res.ok()) {
+        PanicInfo(S3Error, "failed to create scan iterator");
+    }
+    auto reader = res.value();
+    for (auto rec = reader->Next(); rec != nullptr; rec = reader->Next()) {
+        if (!rec.ok()) {
+            PanicInfo(DataFormatBroken, "failed to read data");
+        }
+        auto data = rec.ValueUnsafe();
+        auto total_num_rows = data->num_rows();
+        for (auto& field : schema->get_fields()) {
+            if (field.second.get_id().get() != field_data_info.field_id) {
+                continue;
+            }
+            auto col_data =
+                data->GetColumnByName(field.second.get_name().get());
+            auto field_data = storage::CreateFieldData(
+                field.second.get_data_type(),
+                field.second.is_vector() ? field.second.get_dim() : 0,
+                total_num_rows);
+            field_data->FillFieldData(col_data);
+            field_data_info.channel->push(field_data);
+        }
+    }
+    field_data_info.channel->close();
+}
 // init segcore storage config first, and create default remote chunk manager
 // segcore use default remote chunk manager to load data from minio/s3
 void
 LoadFieldDatasFromRemote(std::vector<std::string>& remote_files,
-                         storage::FieldDataChannelPtr channel) {
+                         FieldDataChannelPtr channel) {
     try {
         auto parallel_degree = static_cast<uint64_t>(
             DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);

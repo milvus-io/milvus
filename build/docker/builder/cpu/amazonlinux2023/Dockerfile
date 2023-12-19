@@ -15,7 +15,7 @@ ARG TARGETARCH
 
 RUN dnf install -y wget g++ gcc gdb libatomic libstdc++-static ninja-build git make zip unzip tar which \
     autoconf automake golang python3 python3-pip perl-FindBin texinfo \
-    pkg-config libuuid-devel libaio perl-IPC-Cmd && \
+    pkg-config libuuid-devel libaio perl-IPC-Cmd libasan && \
     rm -rf /var/cache/yum/*
 
 RUN pip3 install conan==1.61.0
@@ -23,8 +23,9 @@ RUN pip3 install conan==1.61.0
 RUN echo "target arch $TARGETARCH"
 RUN wget -qO- "https://cmake.org/files/v3.27/cmake-3.27.5-linux-`uname -m`.tar.gz" | tar --strip-components=1 -xz -C /usr/local
 
+# https://github.com/microsoft/vcpkg/pull/35084
 RUN mkdir /opt/vcpkg &&  \
-    wget -qO- vcpkg.tar.gz https://github.com/microsoft/vcpkg/archive/master.tar.gz | tar --strip-components=1 -xz -C /opt/vcpkg && \
+    wget -qO- vcpkg.tar.gz https://github.com/microsoft/vcpkg/archive/refs/tags/2023.11.20.tar.gz | tar --strip-components=1 -xz -C /opt/vcpkg && \
     rm -rf vcpkg.tar.gz
 
 ENV VCPKG_FORCE_SYSTEM_BINARIES 1
@@ -46,6 +47,11 @@ RUN mkdir -p /home/milvus/.vscode-server/extensions \
     && chmod -R 777 /home/milvus
 
 COPY --chown=0:0 build/docker/builder/entrypoint.sh /
+
+RUN curl https://sh.rustup.rs -sSf | \
+    sh -s -- --default-toolchain=1.73 -y
+
+ENV PATH=/root/.cargo/bin:$PATH
 
 ENTRYPOINT [ "/entrypoint.sh" ]
 CMD ["tail", "-f", "/dev/null"]

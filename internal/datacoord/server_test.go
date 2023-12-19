@@ -44,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -60,6 +61,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
@@ -335,7 +337,7 @@ func TestFlush(t *testing.T) {
 		svr := newTestServer(t, nil)
 		closeTestServer(t, svr)
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
-		sm := NewSessionManager()
+		sm := NewSessionManagerImpl()
 
 		datanodeClient := mocks.NewMockDataNodeClient(t)
 		datanodeClient.EXPECT().FlushChannels(mock.Anything, mock.Anything).Return(nil,
@@ -352,7 +354,7 @@ func TestFlush(t *testing.T) {
 		}}}
 
 		svr.sessionManager = sm
-		svr.cluster.sessionManager = sm
+		svr.cluster = NewClusterImpl(sm, svr.channelManager)
 
 		err := svr.channelManager.AddNode(1)
 		assert.NoError(t, err)
@@ -3063,15 +3065,10 @@ func TestGetCompactionState(t *testing.T) {
 		svr := &Server{}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
 
-		svr.compactionHandler = &mockCompactionHandler{
-			methods: map[string]interface{}{
-				"getCompactionTasksBySignalID": func(signalID int64) []*compactionTask {
-					return []*compactionTask{
-						{state: completed},
-					}
-				},
-			},
-		}
+		mockHandler := NewMockCompactionPlanContext(t)
+		mockHandler.EXPECT().getCompactionTasksBySignalID(mock.Anything).Return(
+			[]*compactionTask{{state: completed}})
+		svr.compactionHandler = mockHandler
 
 		resp, err := svr.GetCompactionState(context.Background(), &milvuspb.GetCompactionStateRequest{})
 		assert.NoError(t, err)
@@ -3082,24 +3079,21 @@ func TestGetCompactionState(t *testing.T) {
 		svr := &Server{}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
 
-		svr.compactionHandler = &mockCompactionHandler{
-			methods: map[string]interface{}{
-				"getCompactionTasksBySignalID": func(signalID int64) []*compactionTask {
-					return []*compactionTask{
-						{state: executing},
-						{state: executing},
-						{state: executing},
-						{state: completed},
-						{state: completed},
-						{state: failed, plan: &datapb.CompactionPlan{PlanID: 1}},
-						{state: timeout, plan: &datapb.CompactionPlan{PlanID: 2}},
-						{state: timeout},
-						{state: timeout},
-						{state: timeout},
-					}
-				},
-			},
-		}
+		mockHandler := NewMockCompactionPlanContext(t)
+		mockHandler.EXPECT().getCompactionTasksBySignalID(mock.Anything).Return(
+			[]*compactionTask{
+				{state: executing},
+				{state: executing},
+				{state: executing},
+				{state: completed},
+				{state: completed},
+				{state: failed, plan: &datapb.CompactionPlan{PlanID: 1}},
+				{state: timeout, plan: &datapb.CompactionPlan{PlanID: 2}},
+				{state: timeout},
+				{state: timeout},
+				{state: timeout},
+			})
+		svr.compactionHandler = mockHandler
 
 		resp, err := svr.GetCompactionState(context.Background(), &milvuspb.GetCompactionStateRequest{CompactionID: 1})
 		assert.NoError(t, err)
@@ -3187,18 +3181,15 @@ func TestGetCompactionStateWithPlans(t *testing.T) {
 		svr := &Server{}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
 
-		svr.compactionHandler = &mockCompactionHandler{
-			methods: map[string]interface{}{
-				"getCompactionTasksBySignalID": func(signalID int64) []*compactionTask {
-					return []*compactionTask{
-						{
-							triggerInfo: &compactionSignal{id: 1},
-							state:       executing,
-						},
-					}
+		mockHandler := NewMockCompactionPlanContext(t)
+		mockHandler.EXPECT().getCompactionTasksBySignalID(mock.Anything).Return(
+			[]*compactionTask{
+				{
+					triggerInfo: &compactionSignal{id: 1},
+					state:       executing,
 				},
-			},
-		}
+			})
+		svr.compactionHandler = mockHandler
 
 		resp, err := svr.GetCompactionStateWithPlans(context.TODO(), &milvuspb.GetCompactionPlansRequest{
 			CompactionID: 1,
@@ -3211,19 +3202,6 @@ func TestGetCompactionStateWithPlans(t *testing.T) {
 	t.Run("test get compaction state with closed server", func(t *testing.T) {
 		svr := &Server{}
 		svr.stateCode.Store(commonpb.StateCode_Abnormal)
-		svr.compactionHandler = &mockCompactionHandler{
-			methods: map[string]interface{}{
-				"getCompactionTasksBySignalID": func(signalID int64) []*compactionTask {
-					return []*compactionTask{
-						{
-							triggerInfo: &compactionSignal{id: 1},
-							state:       executing,
-						},
-					}
-				},
-			},
-		}
-
 		resp, err := svr.GetCompactionStateWithPlans(context.TODO(), &milvuspb.GetCompactionPlansRequest{
 			CompactionID: 1,
 		})
@@ -3257,11 +3235,11 @@ func TestOptions(t *testing.T) {
 	t.Run("WithCluster", func(t *testing.T) {
 		defer kv.RemoveWithPrefix("")
 
-		sessionManager := NewSessionManager()
+		sessionManager := NewSessionManagerImpl()
 		channelManager, err := NewChannelManager(kv, newMockHandler())
 		assert.NoError(t, err)
 
-		cluster := NewCluster(sessionManager, channelManager)
+		cluster := NewClusterImpl(sessionManager, channelManager)
 		assert.NoError(t, err)
 		opt := WithCluster(cluster)
 		assert.NotNil(t, opt)
@@ -3314,8 +3292,8 @@ func TestHandleSessionEvent(t *testing.T) {
 
 	channelManager, err := NewChannelManager(kv, newMockHandler(), withFactory(&mockPolicyFactory{}))
 	assert.NoError(t, err)
-	sessionManager := NewSessionManager()
-	cluster := NewCluster(sessionManager, channelManager)
+	sessionManager := NewSessionManagerImpl()
+	cluster := NewClusterImpl(sessionManager, channelManager)
 	assert.NoError(t, err)
 
 	err = cluster.Startup(ctx, nil)
@@ -3713,7 +3691,7 @@ func TestGetFlushAllState(t *testing.T) {
 			var err error
 			svr.meta = &meta{}
 			svr.rootCoordClient = mocks.NewMockRootCoordClient(t)
-			svr.broker = NewCoordinatorBroker(svr.rootCoordClient)
+			svr.broker = broker.NewCoordinatorBroker(svr.rootCoordClient)
 			if test.ListDatabaseFailed {
 				svr.rootCoordClient.(*mocks.MockRootCoordClient).EXPECT().ListDatabases(mock.Anything, mock.Anything).
 					Return(&milvuspb.ListDatabasesResponse{
@@ -3753,13 +3731,14 @@ func TestGetFlushAllState(t *testing.T) {
 					}, nil).Maybe()
 			}
 
-			svr.meta.channelCPs = make(map[string]*msgpb.MsgPosition)
+			svr.meta.channelCPLocks = lock.NewKeyLock[string]()
+			svr.meta.channelCPs = typeutil.NewConcurrentMap[string, *msgpb.MsgPosition]()
 			for i, ts := range test.ChannelCPs {
 				channel := vchannels[i]
-				svr.meta.channelCPs[channel] = &msgpb.MsgPosition{
+				svr.meta.channelCPs.Insert(channel, &msgpb.MsgPosition{
 					ChannelName: channel,
 					Timestamp:   ts,
-				}
+				})
 			}
 
 			resp, err := svr.GetFlushAllState(context.TODO(), &milvuspb.GetFlushAllStateRequest{FlushAllTs: test.FlushAllTs})
@@ -3799,7 +3778,7 @@ func TestGetFlushAllStateWithDB(t *testing.T) {
 			var err error
 			svr.meta = &meta{}
 			svr.rootCoordClient = mocks.NewMockRootCoordClient(t)
-			svr.broker = NewCoordinatorBroker(svr.rootCoordClient)
+			svr.broker = broker.NewCoordinatorBroker(svr.rootCoordClient)
 
 			if test.DbExist {
 				svr.rootCoordClient.(*mocks.MockRootCoordClient).EXPECT().ListDatabases(mock.Anything, mock.Anything).
@@ -3829,14 +3808,15 @@ func TestGetFlushAllStateWithDB(t *testing.T) {
 					CollectionName:      collectionName,
 				}, nil).Maybe()
 
-			svr.meta.channelCPs = make(map[string]*msgpb.MsgPosition)
+			svr.meta.channelCPLocks = lock.NewKeyLock[string]()
+			svr.meta.channelCPs = typeutil.NewConcurrentMap[string, *msgpb.MsgPosition]()
 			channelCPs := []Timestamp{100, 200}
 			for i, ts := range channelCPs {
 				channel := vchannels[i]
-				svr.meta.channelCPs[channel] = &msgpb.MsgPosition{
+				svr.meta.channelCPs.Insert(channel, &msgpb.MsgPosition{
 					ChannelName: channel,
 					Timestamp:   ts,
-				}
+				})
 			}
 
 			var resp *milvuspb.GetFlushAllStateResponse
@@ -4394,7 +4374,7 @@ func Test_CheckHealth(t *testing.T) {
 			id:    1,
 			state: commonpb.StateCode_Healthy,
 		}
-		sm := NewSessionManager()
+		sm := NewSessionManagerImpl()
 		sm.sessions = struct {
 			sync.RWMutex
 			data map[int64]*Session
@@ -4420,7 +4400,7 @@ func Test_CheckHealth(t *testing.T) {
 			id:    1,
 			state: commonpb.StateCode_Abnormal,
 		}
-		sm := NewSessionManager()
+		sm := NewSessionManagerImpl()
 		sm.sessions = struct {
 			sync.RWMutex
 			data map[int64]*Session

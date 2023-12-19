@@ -85,16 +85,17 @@ type DataNode struct {
 	cancel           context.CancelFunc
 	Role             string
 	stateCode        atomic.Value // commonpb.StateCode_Initializing
-	flowgraphManager *flowgraphManager
+	flowgraphManager FlowgraphManager
 	eventManagerMap  *typeutil.ConcurrentMap[string, *channelEventManager]
 
 	syncMgr            syncmgr.SyncManager
 	writeBufferManager writebuffer.BufferManager
 
-	clearSignal        chan string // vchannel name
-	segmentCache       *Cache
-	compactionExecutor *compactionExecutor
-	timeTickSender     *timeTickSender
+	clearSignal              chan string // vchannel name
+	segmentCache             *Cache
+	compactionExecutor       *compactionExecutor
+	timeTickSender           *timeTickSender
+	channelCheckpointUpdater *channelCheckpointUpdater
 
 	etcdCli   *clientv3.Client
 	address   string
@@ -272,8 +273,7 @@ func (node *DataNode) Init() error {
 		}
 
 		node.chunkManager = chunkManager
-		syncMgr, err := syncmgr.NewSyncManager(paramtable.Get().DataNodeCfg.MaxParallelSyncTaskNum.GetAsInt(),
-			node.chunkManager, node.allocator)
+		syncMgr, err := syncmgr.NewSyncManager(node.chunkManager, node.allocator)
 		if err != nil {
 			initError = err
 			log.Error("failed to create sync manager", zap.Error(err))
@@ -282,6 +282,10 @@ func (node *DataNode) Init() error {
 		node.syncMgr = syncMgr
 
 		node.writeBufferManager = writebuffer.NewManager(syncMgr)
+
+		node.channelCheckpointUpdater = newChannelCheckpointUpdater(node)
+
+		log.Info("init datanode done", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("Address", node.address))
 	})
 	return initError
 }
@@ -308,7 +312,7 @@ func (node *DataNode) handleChannelEvt(evt *clientv3.Event) {
 // tryToReleaseFlowgraph tries to release a flowgraph
 func (node *DataNode) tryToReleaseFlowgraph(vChanName string) {
 	log.Info("try to release flowgraph", zap.String("vChanName", vChanName))
-	node.flowgraphManager.release(vChanName)
+	node.flowgraphManager.RemoveFlowgraph(vChanName)
 }
 
 // BackGroundGC runs in background to release datanode resources
@@ -380,9 +384,6 @@ func (node *DataNode) Start() error {
 		// Start node watch node
 		go node.StartWatchChannels(node.ctx)
 
-		node.stopWaiter.Add(1)
-		go node.flowgraphManager.start(&node.stopWaiter)
-
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
 	})
 	return startErr
@@ -415,7 +416,6 @@ func (node *DataNode) Stop() error {
 	node.stopOnce.Do(func() {
 		// https://github.com/milvus-io/milvus/issues/12282
 		node.UpdateStateCode(commonpb.StateCode_Abnormal)
-		node.flowgraphManager.close()
 		// Delay the cancellation of ctx to ensure that the session is automatically recycled after closed the flow graph
 		node.cancel()
 
@@ -439,6 +439,10 @@ func (node *DataNode) Stop() error {
 
 		if node.timeTickSender != nil {
 			node.timeTickSender.Stop()
+		}
+
+		if node.channelCheckpointUpdater != nil {
+			node.channelCheckpointUpdater.close()
 		}
 
 		node.stopWaiter.Wait()

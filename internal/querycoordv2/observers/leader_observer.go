@@ -33,11 +33,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
-const (
-	interval   = 1 * time.Second
-	RPCTimeout = 3 * time.Second
-)
-
 // LeaderObserver is to sync the distribution with leader
 type LeaderObserver struct {
 	wg      sync.WaitGroup
@@ -79,7 +74,7 @@ func (o *LeaderObserver) Stop() {
 }
 
 func (o *LeaderObserver) schedule(ctx context.Context) {
-	ticker := time.NewTicker(interval)
+	ticker := time.NewTicker(paramtable.Get().QueryCoordCfg.LeaderViewUpdateInterval.GetAsDuration(time.Second))
 	defer ticker.Stop()
 	for {
 		select {
@@ -156,7 +151,12 @@ func (o *LeaderObserver) findNeedLoadedSegments(leaderView *meta.LeaderView, dis
 				log.Warn("failed to get segment info from DataCoord", zap.Error(err))
 				continue
 			}
-			loadInfo := utils.PackSegmentLoadInfo(resp, nil)
+
+			channel := o.target.GetDmChannel(s.GetCollectionID(), s.GetInsertChannel(), meta.CurrentTarget)
+			if channel == nil {
+				channel = o.target.GetDmChannel(s.GetCollectionID(), s.GetInsertChannel(), meta.NextTarget)
+			}
+			loadInfo := utils.PackSegmentLoadInfo(resp.GetInfos()[0], channel.GetSeekPosition(), nil)
 
 			log.Debug("leader observer append a segment to set",
 				zap.Int64("collectionID", leaderView.CollectionID),
@@ -221,6 +221,14 @@ func (o *LeaderObserver) sync(ctx context.Context, replicaID int64, leaderView *
 		log.Warn("failed to get collection info", zap.Error(err))
 		return false
 	}
+
+	// Get collection index info
+	indexInfo, err := o.broker.DescribeIndex(ctx, collectionInfo.CollectionID)
+	if err != nil {
+		log.Warn("fail to get index info of collection", zap.Error(err))
+		return false
+	}
+
 	partitions, err := utils.GetPartitions(o.meta.CollectionManager, leaderView.CollectionID)
 	if err != nil {
 		log.Warn("failed to get partitions", zap.Error(err))
@@ -241,7 +249,8 @@ func (o *LeaderObserver) sync(ctx context.Context, replicaID int64, leaderView *
 			CollectionID: leaderView.CollectionID,
 			PartitionIDs: partitions,
 		},
-		Version: time.Now().UnixNano(),
+		Version:       time.Now().UnixNano(),
+		IndexInfoList: indexInfo,
 	}
 	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()

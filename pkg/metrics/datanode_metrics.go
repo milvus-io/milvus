@@ -271,4 +271,9 @@ func CleanupDataNodeCollectionMetrics(nodeID int64, collectionID int64, channel 
 					collectionIDLabelName: fmt.Sprint(collectionID),
 				})
 	}
+
+	DataNodeFlowGraphBufferDataSize.Delete(prometheus.Labels{
+		nodeIDLabelName:       fmt.Sprint(nodeID),
+		collectionIDLabelName: fmt.Sprint(collectionID),
+	})
 }

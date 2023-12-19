@@ -30,6 +30,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_auth "github.com/grpc-ecosystem/go-grpc-middleware/auth"
@@ -58,6 +59,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
+	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
@@ -80,6 +82,10 @@ var (
 	errInvalidToken    = status.Errorf(codes.Unauthenticated, "invalid token")
 	// registerHTTPHandlerOnce avoid register http handler multiple times
 	registerHTTPHandlerOnce sync.Once
+	// only for test
+	enableCustomInterceptor = true
+	// only for test, register internal interface to external service
+	enableRegisterProxyServer = false
 )
 
 const apiPathPrefix = "/api/v1"
@@ -167,7 +173,11 @@ func (s *Server) registerHTTPServer() {
 
 func (s *Server) startHTTPServer(errChan chan error) {
 	defer s.wg.Done()
-	ginHandler := gin.Default()
+	ginHandler := gin.New()
+	ginLogger := gin.LoggerWithConfig(gin.LoggerConfig{
+		SkipPaths: proxy.Params.ProxyCfg.GinLogSkipPaths.GetAsStrings(),
+	})
+	ginHandler.Use(ginLogger, gin.Recovery())
 	ginHandler.Use(func(c *gin.Context) {
 		_, err := strconv.ParseBool(c.Request.Header.Get(httpserver.HTTPHeaderAllowInt64))
 		if err != nil {
@@ -187,7 +197,7 @@ func (s *Server) startHTTPServer(errChan chan error) {
 			return
 		}
 		c.Next()
-	}, authenticate, proxy.HTTPTraceLog)
+	}, authenticate)
 	app := ginHandler.Group("/v1")
 	httpserver.NewHandlers(s.proxy).RegisterRoutesToV1(app)
 	s.httpServer = &http.Server{Handler: ginHandler, ReadHeaderTimeout: time.Second}
@@ -232,12 +242,11 @@ func (s *Server) startExternalGrpc(grpcPort int, errChan chan error) {
 	log.Debug("Get proxy rate limiter done", zap.Int("port", grpcPort))
 
 	opts := tracer.GetInterceptorOpts()
-	grpcOpts := []grpc.ServerOption{
-		grpc.KeepaliveEnforcementPolicy(kaep),
-		grpc.KeepaliveParams(kasp),
-		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize.GetAsInt()),
-		grpc.MaxSendMsgSize(Params.ServerMaxSendSize.GetAsInt()),
-		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
+
+	var unaryServerOption grpc.ServerOption
+	if enableCustomInterceptor {
+		unaryServerOption = grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
+			accesslog.UnaryAccessLogInterceptor,
 			otelgrpc.UnaryServerInterceptor(opts...),
 			grpc_auth.UnaryServerInterceptor(proxy.AuthenticationInterceptor),
 			proxy.DatabaseInterceptor(),
@@ -245,10 +254,20 @@ func (s *Server) startExternalGrpc(grpcPort int, errChan chan error) {
 			proxy.UnaryServerInterceptor(proxy.PrivilegeInterceptor),
 			logutil.UnaryTraceLoggerInterceptor,
 			proxy.RateLimitInterceptor(limiter),
-			accesslog.UnaryAccessLoggerInterceptor,
+			accesslog.UnaryUpdateAccessInfoInterceptor,
 			proxy.TraceLogInterceptor,
-			proxy.KeepActiveInterceptor,
-		)),
+			connection.KeepActiveInterceptor,
+		))
+	} else {
+		unaryServerOption = grpc.EmptyServerOption{}
+	}
+
+	grpcOpts := []grpc.ServerOption{
+		grpc.KeepaliveEnforcementPolicy(kaep),
+		grpc.KeepaliveParams(kasp),
+		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize.GetAsInt()),
+		grpc.MaxSendMsgSize(Params.ServerMaxSendSize.GetAsInt()),
+		unaryServerOption,
 	}
 
 	if Params.TLSMode.GetAsInt() == 1 {
@@ -290,6 +309,11 @@ func (s *Server) startExternalGrpc(grpcPort int, errChan chan error) {
 		grpcOpts = append(grpcOpts, grpc.Creds(credentials.NewTLS(tlsConf)))
 	}
 	s.grpcExternalServer = grpc.NewServer(grpcOpts...)
+
+	if enableRegisterProxyServer {
+		proxypb.RegisterProxyServer(s.grpcExternalServer, s)
+	}
+
 	milvuspb.RegisterMilvusServiceServer(s.grpcExternalServer, s)
 	grpc_health_v1.RegisterHealthServer(s.grpcExternalServer, s)
 	errChan <- nil
@@ -390,7 +414,7 @@ func (s *Server) Run() error {
 		s.wg.Add(1)
 		go func() {
 			defer s.wg.Done()
-			if err := s.tcpServer.Serve(); err != nil && err != cmux.ErrServerClosed {
+			if err := s.tcpServer.Serve(); err != nil && !errors.Is(err, net.ErrClosed) {
 				log.Warn("Proxy server for tcp port failed", zap.Error(err))
 				return
 			}
@@ -651,11 +675,8 @@ func (s *Server) Stop() error {
 	go func() {
 		defer gracefulWg.Done()
 
-		if s.tcpServer != nil {
-			log.Info("Proxy stop tcp server...")
-			s.tcpServer.Close()
-		}
-
+		// try to close grpc server firstly, it has the same root listener with cmux server and
+		// http listener that tls has not been enabled.
 		if s.grpcExternalServer != nil {
 			log.Info("Proxy stop external grpc server")
 			utils.GracefulStopGRPCServer(s.grpcExternalServer)
@@ -664,6 +685,17 @@ func (s *Server) Stop() error {
 		if s.httpServer != nil {
 			log.Info("Proxy stop http server...")
 			s.httpServer.Close()
+		}
+
+		// close cmux server, it isn't a synchronized operation.
+		// Note that:
+		// 1. all listeners can be closed after closing cmux server that has the root listener, it will automatically
+		//    propagate the closure to all the listeners derived from it, but it doesn't provide a graceful shutdown
+		//    grpc server ideally.
+		// 2. avoid resource leak also need to close cmux after grpc and http listener closed.
+		if s.tcpServer != nil {
+			log.Info("Proxy stop tcp server...")
+			s.tcpServer.Close()
 		}
 
 		if s.grpcInternalServer != nil {
@@ -789,6 +821,11 @@ func (s *Server) CreateIndex(ctx context.Context, request *milvuspb.CreateIndexR
 	return s.proxy.CreateIndex(ctx, request)
 }
 
+func (s *Server) AlterIndex(ctx context.Context, request *milvuspb.AlterIndexRequest) (*commonpb.Status, error) {
+	// Todo
+	return nil, nil
+}
+
 // DropIndex notifies Proxy to drop index
 func (s *Server) DropIndex(ctx context.Context, request *milvuspb.DropIndexRequest) (*commonpb.Status, error) {
 	return s.proxy.DropIndex(ctx, request)
@@ -831,6 +868,11 @@ func (s *Server) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) (*
 
 func (s *Server) Search(ctx context.Context, request *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 	return s.proxy.Search(ctx, request)
+}
+
+func (s *Server) SearchV2(ctx context.Context, request *milvuspb.SearchRequestV2) (*milvuspb.SearchResults, error) {
+	// Todo
+	return nil, nil
 }
 
 func (s *Server) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*milvuspb.FlushResponse, error) {

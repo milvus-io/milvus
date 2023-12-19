@@ -471,6 +471,8 @@ func (c *Core) initInternal() error {
 	c.factory.Init(Params)
 	chanMap := c.meta.ListCollectionPhysicalChannels()
 	c.chanTimeTick = newTimeTickSync(c.ctx, c.session.ServerID, c.factory, chanMap)
+	log.Info("create TimeTick sync done")
+
 	c.proxyClientManager = newProxyClientManager(c.proxyCreator)
 
 	c.broker = newServerBroker(c)
@@ -482,10 +484,11 @@ func (c *Core) initInternal() error {
 		c.ctx,
 		c.etcdCli,
 		c.chanTimeTick.initSessions,
-		c.proxyClientManager.GetProxyClients,
+		c.proxyClientManager.AddProxyClients,
 	)
 	c.proxyManager.AddSessionFunc(c.chanTimeTick.addSession, c.proxyClientManager.AddProxyClient)
 	c.proxyManager.DelSessionFunc(c.chanTimeTick.delSession, c.proxyClientManager.DelProxyClient)
+	log.Info("init proxy manager done")
 
 	c.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
 
@@ -495,15 +498,18 @@ func (c *Core) initInternal() error {
 	if err := c.initImportManager(); err != nil {
 		return err
 	}
+	log.Info("init import manager done")
 
 	if err := c.initCredentials(); err != nil {
 		return err
 	}
+	log.Info("init credentials done")
 
 	if err := c.initRbac(); err != nil {
 		return err
 	}
 
+	log.Info("init rootcoord done", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("Address", c.address))
 	return nil
 }
 
@@ -607,6 +613,43 @@ func (c *Core) initRbac() error {
 			return errors.Wrap(err, "failed to grant collection privilege")
 		}
 	}
+	if Params.RoleCfg.Enabled.GetAsBool() {
+		return c.initBuiltinRoles()
+	}
+	return nil
+}
+
+func (c *Core) initBuiltinRoles() error {
+	rolePrivilegesMap := Params.RoleCfg.Roles.GetAsRoleDetails()
+	for role, privilegesJSON := range rolePrivilegesMap {
+		err := c.meta.CreateRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: role})
+		if err != nil && !common.IsIgnorableError(err) {
+			log.Error("create a builtin role fail", zap.Any("error", err), zap.String("roleName", role))
+			return errors.Wrapf(err, "failed to create a builtin role: %s", role)
+		}
+		for _, privilege := range privilegesJSON[util.RoleConfigPrivileges] {
+			privilegeName := privilege[util.RoleConfigPrivilege]
+			if !util.IsAnyWord(privilege[util.RoleConfigPrivilege]) {
+				privilegeName = util.PrivilegeNameForMetastore(privilege[util.RoleConfigPrivilege])
+			}
+			err := c.meta.OperatePrivilege(util.DefaultTenant, &milvuspb.GrantEntity{
+				Role:       &milvuspb.RoleEntity{Name: role},
+				Object:     &milvuspb.ObjectEntity{Name: privilege[util.RoleConfigObjectType]},
+				ObjectName: privilege[util.RoleConfigObjectName],
+				DbName:     privilege[util.RoleConfigDBName],
+				Grantor: &milvuspb.GrantorEntity{
+					User:      &milvuspb.UserEntity{Name: util.UserRoot},
+					Privilege: &milvuspb.PrivilegeEntity{Name: privilegeName},
+				},
+			}, milvuspb.OperatePrivilegeType_Grant)
+			if err != nil && !common.IsIgnorableError(err) {
+				log.Error("grant privilege to builtin role fail", zap.Any("error", err), zap.String("roleName", role), zap.Any("privilege", privilege))
+				return errors.Wrapf(err, "failed to grant privilege: <%s, %s, %s> of db: %s to role: %s", privilege[util.RoleConfigObjectType], privilege[util.RoleConfigObjectName], privilege[util.RoleConfigPrivilege], privilege[util.RoleConfigDBName], role)
+			}
+		}
+		util.BuiltinRoles = append(util.BuiltinRoles, role)
+		log.Info("init a builtin role successfully", zap.String("roleName", role))
+	}
 	return nil
 }
 
@@ -673,7 +716,7 @@ func (c *Core) startInternal() error {
 			if err := c.proxyClientManager.RefreshPolicyInfoCache(c.ctx, &proxypb.RefreshPolicyInfoCacheRequest{
 				OpType: int32(typeutil.CacheRefresh),
 			}); err != nil {
-				log.Info("fail to refresh policy info cache", zap.Error(err))
+				log.RatedWarn(60, "fail to refresh policy info cache", zap.Error(err))
 				return err
 			}
 			return nil
@@ -1050,8 +1093,6 @@ func (c *Core) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequ
 	log := log.Ctx(ctx).With(zap.String("collectionName", in.GetCollectionName()),
 		zap.Uint64("ts", ts))
 
-	log.Info("received request to has collection")
-
 	t := &hasCollectionTask{
 		baseTask: newBaseTask(ctx, c),
 		Req:      in,
@@ -1077,8 +1118,6 @@ func (c *Core) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequ
 	metrics.RootCoordDDLReqCounter.WithLabelValues("HasCollection", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("HasCollection").Observe(float64(tr.ElapseSpan().Milliseconds()))
 	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("HasCollection").Observe(float64(t.queueDur.Milliseconds()))
-
-	log.Info("done to has collection", zap.Bool("exist", t.Rsp.GetValue()))
 
 	return t.Rsp, nil
 }
@@ -1138,10 +1177,6 @@ func (c *Core) describeCollectionImpl(ctx context.Context, in *milvuspb.Describe
 		zap.Uint64("ts", ts),
 		zap.Bool("allowUnavailable", allowUnavailable))
 
-	// TODO(longjiquan): log may be very frequent here.
-
-	log.Info("received request to describe collection")
-
 	t := &describeCollectionTask{
 		baseTask:         newBaseTask(ctx, c),
 		Req:              in,
@@ -1168,8 +1203,6 @@ func (c *Core) describeCollectionImpl(ctx context.Context, in *milvuspb.Describe
 	metrics.RootCoordDDLReqCounter.WithLabelValues("DescribeCollection", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("DescribeCollection").Observe(float64(tr.ElapseSpan().Milliseconds()))
 	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("DescribeCollection").Observe(float64(t.queueDur.Milliseconds()))
-
-	log.Info("done to describe collection", zap.Int64("collection_id", t.Rsp.GetCollectionID()))
 
 	return t.Rsp, nil
 }
@@ -1204,8 +1237,6 @@ func (c *Core) ShowCollections(ctx context.Context, in *milvuspb.ShowCollections
 	log := log.Ctx(ctx).With(zap.String("dbname", in.GetDbName()),
 		zap.Uint64("ts", ts))
 
-	log.Info("received request to show collections")
-
 	t := &showCollectionTask{
 		baseTask: newBaseTask(ctx, c),
 		Req:      in,
@@ -1231,8 +1262,6 @@ func (c *Core) ShowCollections(ctx context.Context, in *milvuspb.ShowCollections
 	metrics.RootCoordDDLReqCounter.WithLabelValues("ShowCollections", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("ShowCollections").Observe(float64(tr.ElapseSpan().Milliseconds()))
 	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("ShowCollections").Observe(float64(t.queueDur.Milliseconds()))
-
-	log.Info("done to show collections", zap.Int("num of collections", len(t.Rsp.GetCollectionNames()))) // maybe very large, print number instead.
 
 	return t.Rsp, nil
 }
@@ -1410,8 +1439,6 @@ func (c *Core) HasPartition(ctx context.Context, in *milvuspb.HasPartitionReques
 		zap.String("partition", in.GetPartitionName()),
 		zap.Uint64("ts", ts))
 
-	log.Info("received request to has partition")
-
 	t := &hasPartitionTask{
 		baseTask: newBaseTask(ctx, c),
 		Req:      in,
@@ -1438,8 +1465,6 @@ func (c *Core) HasPartition(ctx context.Context, in *milvuspb.HasPartitionReques
 	metrics.RootCoordDDLReqLatency.WithLabelValues("HasPartition").Observe(float64(tr.ElapseSpan().Milliseconds()))
 	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("HasPartition").Observe(float64(t.queueDur.Milliseconds()))
 
-	log.Info("done to has partition", zap.Bool("exist", t.Rsp.GetValue()))
-
 	return t.Rsp, nil
 }
 
@@ -1457,8 +1482,6 @@ func (c *Core) showPartitionsImpl(ctx context.Context, in *milvuspb.ShowPartitio
 		zap.Int64("collection_id", in.GetCollectionID()),
 		zap.Strings("partitions", in.GetPartitionNames()),
 		zap.Bool("allowUnavailable", allowUnavailable))
-
-	log.Info("received request to show partitions")
 
 	t := &showPartitionTask{
 		baseTask:         newBaseTask(ctx, c),
@@ -1488,8 +1511,6 @@ func (c *Core) showPartitionsImpl(ctx context.Context, in *milvuspb.ShowPartitio
 	metrics.RootCoordDDLReqCounter.WithLabelValues("ShowPartitions", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("ShowPartitions").Observe(float64(tr.ElapseSpan().Milliseconds()))
 	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("ShowPartitions").Observe(float64(t.queueDur.Milliseconds()))
-
-	log.Info("done to show partitions", zap.Strings("partitions", t.Rsp.GetPartitionNames()))
 
 	return t.Rsp, nil
 }
@@ -2284,6 +2305,10 @@ func (c *Core) DropRole(ctx context.Context, in *milvuspb.DropRoleRequest) (*com
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
+	for util.IsBuiltinRole(in.GetRoleName()) {
+		err := merr.WrapErrPrivilegeNotPermitted("the role[%s] is a builtin role, which can't be dropped", in.GetRoleName())
+		return merr.Status(err), nil
+	}
 	if _, err := c.meta.SelectRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: in.RoleName}, false); err != nil {
 		errMsg := "not found the role, maybe the role isn't existed or internal system error"
 		ctxLog.Warn(errMsg, zap.Error(err))
@@ -2690,7 +2715,8 @@ func (c *Core) SelectGrant(ctx context.Context, in *milvuspb.SelectGrantRequest)
 	grantEntities, err := c.meta.SelectGrant(util.DefaultTenant, in.Entity)
 	if errors.Is(err, merr.ErrIoKeyNotFound) {
 		return &milvuspb.SelectGrantResponse{
-			Status: merr.Success(),
+			Status:   merr.Success(),
+			Entities: grantEntities,
 		}, nil
 	}
 	if err != nil {
@@ -2795,11 +2821,12 @@ func (c *Core) CheckHealth(ctx context.Context, in *milvuspb.CheckHealthRequest)
 
 	mu := &sync.Mutex{}
 	group, ctx := errgroup.WithContext(ctx)
-	errReasons := make([]string, 0, len(c.proxyClientManager.proxyClient))
+	errReasons := make([]string, 0, c.proxyClientManager.GetProxyCount())
 
-	for nodeID, proxyClient := range c.proxyClientManager.proxyClient {
-		nodeID := nodeID
-		proxyClient := proxyClient
+	proxyClients := c.proxyClientManager.GetProxyClients()
+	proxyClients.Range(func(key int64, value types.ProxyClient) bool {
+		nodeID := key
+		proxyClient := value
 		group.Go(func() error {
 			sta, err := proxyClient.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
 			if err != nil {
@@ -2814,7 +2841,8 @@ func (c *Core) CheckHealth(ctx context.Context, in *milvuspb.CheckHealthRequest)
 			}
 			return nil
 		})
-	}
+		return true
+	})
 
 	err := group.Wait()
 	if err != nil || len(errReasons) != 0 {

@@ -58,7 +58,7 @@ func NewIndexChecker(
 	}
 }
 
-func (c *IndexChecker) ID() checkerType {
+func (c *IndexChecker) ID() CheckerType {
 	return indexChecker
 }
 

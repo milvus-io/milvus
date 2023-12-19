@@ -87,10 +87,10 @@ func (suite *ClusterSuite) TestCreate() {
 		ctx, cancel := context.WithCancel(context.TODO())
 		defer cancel()
 
-		sessionManager := NewSessionManager()
+		sessionManager := NewSessionManagerImpl()
 		channelManager, err := NewChannelManager(kv, newMockHandler())
 		suite.NoError(err)
-		cluster := NewCluster(sessionManager, channelManager)
+		cluster := NewClusterImpl(sessionManager, channelManager)
 		defer cluster.Close()
 		addr := "localhost:8080"
 		info := &NodeInfo{
@@ -123,10 +123,10 @@ func (suite *ClusterSuite) TestCreate() {
 		err = kv.Save(Params.CommonCfg.DataCoordWatchSubPath.GetValue()+"/1/channel1", string(info1Data))
 		suite.NoError(err)
 
-		sessionManager := NewSessionManager()
+		sessionManager := NewSessionManagerImpl()
 		channelManager, err := NewChannelManager(kv, newMockHandler())
 		suite.NoError(err)
-		cluster := NewCluster(sessionManager, channelManager)
+		cluster := NewClusterImpl(sessionManager, channelManager)
 		defer cluster.Close()
 
 		err = cluster.Startup(ctx, []*NodeInfo{{NodeID: 1, Address: "localhost:9999"}})
@@ -156,10 +156,10 @@ func (suite *ClusterSuite) TestCreate() {
 		ctx, cancel := context.WithCancel(context.TODO())
 		defer cancel()
 
-		sessionManager := NewSessionManager()
+		sessionManager := NewSessionManagerImpl()
 		channelManager, err := NewChannelManager(kv, newMockHandler())
 		suite.NoError(err)
-		cluster := NewCluster(sessionManager, channelManager)
+		cluster := NewClusterImpl(sessionManager, channelManager)
 
 		addr := "localhost:8080"
 		info := &NodeInfo{
@@ -177,10 +177,10 @@ func (suite *ClusterSuite) TestCreate() {
 
 		cluster.Close()
 
-		sessionManager2 := NewSessionManager()
+		sessionManager2 := NewSessionManagerImpl()
 		channelManager2, err := NewChannelManager(kv, newMockHandler())
 		suite.NoError(err)
-		clusterReload := NewCluster(sessionManager2, channelManager2)
+		clusterReload := NewClusterImpl(sessionManager2, channelManager2)
 		defer clusterReload.Close()
 
 		addr = "localhost:8081"
@@ -219,10 +219,10 @@ func (suite *ClusterSuite) TestRegister() {
 		ctx, cancel := context.WithCancel(context.TODO())
 		defer cancel()
 
-		sessionManager := NewSessionManager()
+		sessionManager := NewSessionManagerImpl()
 		channelManager, err := NewChannelManager(kv, newMockHandler())
 		suite.NoError(err)
-		cluster := NewCluster(sessionManager, channelManager)
+		cluster := NewClusterImpl(sessionManager, channelManager)
 		defer cluster.Close()
 		addr := "localhost:8080"
 		err = cluster.Startup(ctx, nil)
@@ -246,7 +246,7 @@ func (suite *ClusterSuite) TestRegister() {
 		ctx, cancel := context.WithCancel(context.TODO())
 		defer cancel()
 
-		sessionManager := NewSessionManager()
+		sessionManager := NewSessionManagerImpl()
 		channelManager, err := NewChannelManager(kv, newMockHandler())
 		suite.NoError(err)
 		err = channelManager.Watch(context.TODO(), &channelMeta{
@@ -254,7 +254,7 @@ func (suite *ClusterSuite) TestRegister() {
 			CollectionID: 0,
 		})
 		suite.NoError(err)
-		cluster := NewCluster(sessionManager, channelManager)
+		cluster := NewClusterImpl(sessionManager, channelManager)
 		defer cluster.Close()
 		addr := "localhost:8080"
 		err = cluster.Startup(ctx, nil)
@@ -281,10 +281,10 @@ func (suite *ClusterSuite) TestRegister() {
 		ctx, cancel := context.WithCancel(context.TODO())
 		defer cancel()
 
-		sessionManager := NewSessionManager()
+		sessionManager := NewSessionManagerImpl()
 		channelManager, err := NewChannelManager(kv, newMockHandler())
 		suite.NoError(err)
-		cluster := NewCluster(sessionManager, channelManager)
+		cluster := NewClusterImpl(sessionManager, channelManager)
 		addr := "localhost:8080"
 		err = cluster.Startup(ctx, nil)
 		suite.NoError(err)
@@ -296,10 +296,10 @@ func (suite *ClusterSuite) TestRegister() {
 		suite.NoError(err)
 		cluster.Close()
 
-		sessionManager2 := NewSessionManager()
+		sessionManager2 := NewSessionManagerImpl()
 		channelManager2, err := NewChannelManager(kv, newMockHandler())
 		suite.NoError(err)
-		restartCluster := NewCluster(sessionManager2, channelManager2)
+		restartCluster := NewClusterImpl(sessionManager2, channelManager2)
 		defer restartCluster.Close()
 		channels := channelManager2.GetAssignedChannels()
 		suite.Empty(channels)
@@ -317,10 +317,10 @@ func (suite *ClusterSuite) TestUnregister() {
 		ctx, cancel := context.WithCancel(context.TODO())
 		defer cancel()
 
-		sessionManager := NewSessionManager()
+		sessionManager := NewSessionManagerImpl()
 		channelManager, err := NewChannelManager(kv, newMockHandler())
 		suite.NoError(err)
-		cluster := NewCluster(sessionManager, channelManager)
+		cluster := NewClusterImpl(sessionManager, channelManager)
 		defer cluster.Close()
 		addr := "localhost:8080"
 		info := &NodeInfo{
@@ -344,10 +344,10 @@ func (suite *ClusterSuite) TestUnregister() {
 		ctx, cancel := context.WithCancel(context.TODO())
 		defer cancel()
 
-		sessionManager := NewSessionManager()
+		sessionManager := NewSessionManagerImpl()
 		channelManager, err := NewChannelManager(kv, newMockHandler())
 		suite.NoError(err)
-		cluster := NewCluster(sessionManager, channelManager)
+		cluster := NewClusterImpl(sessionManager, channelManager)
 		defer cluster.Close()
 
 		nodeInfo1 := &NodeInfo{
@@ -384,10 +384,10 @@ func (suite *ClusterSuite) TestUnregister() {
 		mockSessionCreator := func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
 			return newMockDataNodeClient(1, nil)
 		}
-		sessionManager := NewSessionManager(withSessionCreator(mockSessionCreator))
+		sessionManager := NewSessionManagerImpl(withSessionCreator(mockSessionCreator))
 		channelManager, err := NewChannelManager(kv, newMockHandler())
 		suite.NoError(err)
-		cluster := NewCluster(sessionManager, channelManager)
+		cluster := NewClusterImpl(sessionManager, channelManager)
 		defer cluster.Close()
 
 		nodeInfo := &NodeInfo{
@@ -431,10 +431,10 @@ func TestWatchIfNeeded(t *testing.T) {
 		mockSessionCreator := func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
 			return newMockDataNodeClient(1, nil)
 		}
-		sessionManager := NewSessionManager(withSessionCreator(mockSessionCreator))
+		sessionManager := NewSessionManagerImpl(withSessionCreator(mockSessionCreator))
 		channelManager, err := NewChannelManager(kv, newMockHandler())
 		assert.NoError(t, err)
-		cluster := NewCluster(sessionManager, channelManager)
+		cluster := NewClusterImpl(sessionManager, channelManager)
 		defer cluster.Close()
 
 		addr := "localhost:8080"
@@ -457,10 +457,10 @@ func TestWatchIfNeeded(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		sessionManager := NewSessionManager()
+		sessionManager := NewSessionManagerImpl()
 		channelManager, err := NewChannelManager(kv, newMockHandler())
 		assert.NoError(t, err)
-		cluster := NewCluster(sessionManager, channelManager)
+		cluster := NewClusterImpl(sessionManager, channelManager)
 		defer cluster.Close()
 
 		err = cluster.Watch(ctx, "ch1", 1)
@@ -481,12 +481,12 @@ func TestConsistentHashPolicy(t *testing.T) {
 		kv.Close()
 	}()
 
-	sessionManager := NewSessionManager()
+	sessionManager := NewSessionManagerImpl()
 	chash := consistent.New()
 	factory := NewConsistentHashChannelPolicyFactory(chash)
 	channelManager, err := NewChannelManager(kv, newMockHandler(), withFactory(factory))
 	assert.NoError(t, err)
-	cluster := NewCluster(sessionManager, channelManager)
+	cluster := NewClusterImpl(sessionManager, channelManager)
 	defer cluster.Close()
 
 	hash := consistent.New()
@@ -565,10 +565,10 @@ func TestCluster_Flush(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.TODO())
 	defer cancel()
-	sessionManager := NewSessionManager()
+	sessionManager := NewSessionManagerImpl()
 	channelManager, err := NewChannelManager(kv, newMockHandler())
 	assert.NoError(t, err)
-	cluster := NewCluster(sessionManager, channelManager)
+	cluster := NewClusterImpl(sessionManager, channelManager)
 	defer cluster.Close()
 	addr := "localhost:8080"
 	info := &NodeInfo{
@@ -612,10 +612,10 @@ func TestCluster_Import(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.TODO(), 100*time.Millisecond)
 	defer cancel()
-	sessionManager := NewSessionManager()
+	sessionManager := NewSessionManagerImpl()
 	channelManager, err := NewChannelManager(kv, newMockHandler())
 	assert.NoError(t, err)
-	cluster := NewCluster(sessionManager, channelManager)
+	cluster := NewClusterImpl(sessionManager, channelManager)
 	defer cluster.Close()
 	addr := "localhost:8080"
 	info := &NodeInfo{

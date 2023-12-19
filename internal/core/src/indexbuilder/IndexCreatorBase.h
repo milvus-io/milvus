@@ -26,6 +26,9 @@ class IndexCreatorBase {
     virtual void
     Build() = 0;
 
+    virtual void
+    BuildV2() = 0;
+
     virtual milvus::BinarySet
     Serialize() = 0;
 
@@ -35,6 +38,9 @@ class IndexCreatorBase {
 
     virtual BinarySet
     Upload() = 0;
+
+    virtual BinarySet
+    UploadV2() = 0;
 };
 
 using IndexCreatorBasePtr = std::unique_ptr<IndexCreatorBase>;

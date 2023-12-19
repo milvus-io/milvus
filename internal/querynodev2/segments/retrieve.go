@@ -94,9 +94,8 @@ func retrieveOnSegmentsWithStream(ctx context.Context, segments []Segment, segTy
 		wg.Add(1)
 		go func(segment Segment, i int) {
 			defer wg.Done()
-			seg := segment.(*LocalSegment)
 			tr := timerecord.NewTimeRecorder("retrieveOnSegmentsWithStream")
-			result, err := seg.Retrieve(ctx, plan)
+			result, err := segment.Retrieve(ctx, plan)
 			if err != nil {
 				errs[i] = err
 				return

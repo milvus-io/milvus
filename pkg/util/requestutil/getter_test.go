@@ -455,3 +455,56 @@ func TestGetDSLFromRequest(t *testing.T) {
 		})
 	}
 }
+
+func TestGetStatusFromResponse(t *testing.T) {
+	type args struct {
+		resp interface{}
+	}
+	tests := []struct {
+		name  string
+		args  args
+		want  *commonpb.Status
+		want1 bool
+	}{
+		{
+			name: "describe collection response",
+			args: args{
+				resp: &milvuspb.DescribeCollectionResponse{
+					Status: &commonpb.Status{
+						ErrorCode: commonpb.ErrorCode_Success,
+					},
+				},
+			},
+			want: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+			want1: true,
+		},
+		{
+			name: "common status",
+			args: args{
+				resp: &commonpb.Status{},
+			},
+			want:  &commonpb.Status{},
+			want1: true,
+		},
+		{
+			name: "invalid response",
+			args: args{
+				resp: "foo",
+			},
+			want1: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, got1 := GetStatusFromResponse(tt.args.resp)
+			if got1 && !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("GetStatusFromResponse() got = %v, want %v", got, tt.want)
+			}
+			if got1 != tt.want1 {
+				t.Errorf("GetStatusFromResponse() got1 = %v, want %v", got1, tt.want1)
+			}
+		})
+	}
+}

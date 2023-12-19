@@ -25,12 +25,16 @@
 #include "storage/IndexData.h"
 #include "storage/FileManager.h"
 #include "storage/ChunkManager.h"
+#include "storage/space.h"
 
 namespace milvus::storage {
 
 class MemFileManagerImpl : public FileManagerImpl {
  public:
     explicit MemFileManagerImpl(const FileManagerContext& fileManagerContext);
+
+    MemFileManagerImpl(const FileManagerContext& fileManagerContext,
+                       std::shared_ptr<milvus_storage::Space> space);
 
     virtual bool
     LoadFile(const std::string& filename) noexcept;
@@ -50,7 +54,7 @@ class MemFileManagerImpl : public FileManagerImpl {
         return "MemIndexFileManagerImpl";
     }
 
-    std::map<std::string, storage::FieldDataPtr>
+    std::map<std::string, FieldDataPtr>
     LoadIndexToMemory(const std::vector<std::string>& remote_files);
 
     std::vector<FieldDataPtr>
@@ -58,6 +62,14 @@ class MemFileManagerImpl : public FileManagerImpl {
 
     bool
     AddFile(const BinarySet& binary_set);
+
+    bool
+    AddFileV2(const BinarySet& binary_set);
+
+    std::shared_ptr<milvus_storage::Space>
+    space() const {
+        return space_;
+    }
 
     std::map<std::string, int64_t>
     GetRemotePathsToFileSize() const {
@@ -67,6 +79,7 @@ class MemFileManagerImpl : public FileManagerImpl {
  private:
     // remote file path
     std::map<std::string, int64_t> remote_paths_to_size_;
+    std::shared_ptr<milvus_storage::Space> space_;
 };
 
 using MemFileManagerImplPtr = std::shared_ptr<MemFileManagerImpl>;

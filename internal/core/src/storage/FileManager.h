@@ -20,11 +20,12 @@
 #include <optional>
 #include <memory>
 
-#include "knowhere/file_manager.h"
 #include "common/Consts.h"
+#include "knowhere/file_manager.h"
+#include "log/Log.h"
 #include "storage/ChunkManager.h"
 #include "storage/Types.h"
-#include "log/Log.h"
+#include "storage/space.h"
 
 namespace milvus::storage {
 
@@ -38,6 +39,16 @@ struct FileManagerContext {
           indexMeta(indexMeta),
           chunkManagerPtr(chunkManagerPtr) {
     }
+
+    FileManagerContext(const FieldDataMeta& fieldDataMeta,
+                       const IndexMeta& indexMeta,
+                       const ChunkManagerPtr& chunkManagerPtr,
+                       std::shared_ptr<milvus_storage::Space> space)
+        : fieldDataMeta(fieldDataMeta),
+          indexMeta(indexMeta),
+          chunkManagerPtr(chunkManagerPtr),
+          space_(space) {
+    }
     bool
     Valid() const {
         return chunkManagerPtr != nullptr;
@@ -46,6 +57,7 @@ struct FileManagerContext {
     FieldDataMeta fieldDataMeta;
     IndexMeta indexMeta;
     ChunkManagerPtr chunkManagerPtr;
+    std::shared_ptr<milvus_storage::Space> space_;
 };
 
 #define FILEMANAGER_TRY try {
@@ -122,6 +134,15 @@ class FileManagerImpl : public knowhere::FileManager {
     virtual std::string
     GetRemoteIndexObjectPrefix() const {
         return rcm_->GetRootPath() + "/" + std::string(INDEX_ROOT_PATH) + "/" +
+               std::to_string(index_meta_.build_id) + "/" +
+               std::to_string(index_meta_.index_version) + "/" +
+               std::to_string(field_meta_.partition_id) + "/" +
+               std::to_string(field_meta_.segment_id);
+    }
+
+    virtual std::string
+    GetRemoteIndexObjectPrefixV2() const {
+        return std::string(INDEX_ROOT_PATH) + "/" +
                std::to_string(index_meta_.build_id) + "/" +
                std::to_string(index_meta_.index_version) + "/" +
                std::to_string(field_meta_.partition_id) + "/" +

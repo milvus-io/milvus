@@ -160,7 +160,7 @@ func (suite *ServiceSuite) TearDownTest() {
 	})
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, resp.ErrorCode)
-	suite.node.vectorStorage.RemoveWithPrefix(ctx, suite.rootPath)
+	suite.node.chunkManager.RemoveWithPrefix(ctx, suite.rootPath)
 
 	suite.node.Stop()
 	suite.etcdClient.Close()
@@ -260,7 +260,7 @@ func (suite *ServiceSuite) TestWatchDmChannelsInt64() {
 	deltaLogs, err := segments.SaveDeltaLog(suite.collectionID,
 		suite.partitionIDs[0],
 		suite.flushedSegmentIDs[0],
-		suite.node.cacheChunkManager,
+		suite.node.chunkManager,
 	)
 	suite.NoError(err)
 
@@ -502,6 +502,21 @@ func (suite *ServiceSuite) TestUnsubDmChannels_Failed() {
 	suite.Equal(commonpb.ErrorCode_NotReadyServe, status.GetErrorCode())
 }
 
+func (suite *ServiceSuite) genSegmentIndexInfos(loadInfo []*querypb.SegmentLoadInfo) []*indexpb.IndexInfo {
+	indexInfoList := make([]*indexpb.IndexInfo, 0)
+	seg0LoadInfo := loadInfo[0]
+	fieldIndexInfos := seg0LoadInfo.IndexInfos
+	for _, info := range fieldIndexInfos {
+		indexInfoList = append(indexInfoList, &indexpb.IndexInfo{
+			CollectionID: suite.collectionID,
+			FieldID:      info.GetFieldID(),
+			IndexName:    info.GetIndexName(),
+			IndexParams:  info.GetIndexParams(),
+		})
+	}
+	return indexInfoList
+}
+
 func (suite *ServiceSuite) genSegmentLoadInfos(schema *schemapb.CollectionSchema) []*querypb.SegmentLoadInfo {
 	ctx := context.Background()
 
@@ -515,7 +530,7 @@ func (suite *ServiceSuite) genSegmentLoadInfos(schema *schemapb.CollectionSchema
 			suite.validSegmentIDs[i],
 			1000,
 			schema,
-			suite.node.vectorStorage,
+			suite.node.chunkManager,
 		)
 		suite.Require().NoError(err)
 
@@ -528,7 +543,7 @@ func (suite *ServiceSuite) genSegmentLoadInfos(schema *schemapb.CollectionSchema
 			1000,
 			segments.IndexFaissIVFFlat,
 			metric.L2,
-			suite.node.vectorStorage,
+			suite.node.chunkManager,
 		)
 		suite.Require().NoError(err)
 
@@ -682,6 +697,8 @@ func (suite *ServiceSuite) TestLoadIndex_Success() {
 		info.IndexInfos = nil
 		return info
 	})
+	// generate indexinfos for setting index meta.
+	indexInfoList := suite.genSegmentIndexInfos(infos)
 	req := &querypb.LoadSegmentsRequest{
 		Base: &commonpb.MsgBase{
 			MsgID:    rand.Int63(),
@@ -693,7 +710,7 @@ func (suite *ServiceSuite) TestLoadIndex_Success() {
 		Schema:        schema,
 		NeedTransfer:  false,
 		LoadScope:     querypb.LoadScope_Full,
-		IndexInfoList: []*indexpb.IndexInfo{{}},
+		IndexInfoList: indexInfoList,
 	}
 
 	// Load segment

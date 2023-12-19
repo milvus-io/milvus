@@ -99,7 +99,7 @@ func TestWatchChannel(t *testing.T) {
 		assert.NoError(t, err)
 
 		assert.Eventually(t, func() bool {
-			exist := node.flowgraphManager.exist(ch)
+			exist := node.flowgraphManager.HasFlowgraph(ch)
 			if !exist {
 				return false
 			}
@@ -119,7 +119,7 @@ func TestWatchChannel(t *testing.T) {
 		assert.NoError(t, err)
 
 		assert.Eventually(t, func() bool {
-			exist := node.flowgraphManager.exist(ch)
+			exist := node.flowgraphManager.HasFlowgraph(ch)
 			return !exist
 		}, 3*time.Second, 100*time.Millisecond)
 	})
@@ -170,7 +170,7 @@ func TestWatchChannel(t *testing.T) {
 
 		// wait for check goroutine received 2 events
 		<-c
-		exist := node.flowgraphManager.exist(ch)
+		exist := node.flowgraphManager.HasFlowgraph(ch)
 		assert.False(t, exist)
 
 		err = kv.RemoveWithPrefix(fmt.Sprintf("%s/%d", Params.CommonCfg.DataCoordWatchSubPath.GetValue(), paramtable.GetNodeID()))
@@ -178,7 +178,7 @@ func TestWatchChannel(t *testing.T) {
 		// TODO there is not way to sync Release done, use sleep for now
 		time.Sleep(100 * time.Millisecond)
 
-		exist = node.flowgraphManager.exist(ch)
+		exist = node.flowgraphManager.HasFlowgraph(ch)
 		assert.False(t, exist)
 	})
 
@@ -189,7 +189,7 @@ func TestWatchChannel(t *testing.T) {
 
 		node.handleWatchInfo(e, "test1", []byte{23})
 
-		exist := node.flowgraphManager.exist("test1")
+		exist := node.flowgraphManager.HasFlowgraph("test1")
 		assert.False(t, exist)
 
 		info := datapb.ChannelWatchInfo{
@@ -200,7 +200,7 @@ func TestWatchChannel(t *testing.T) {
 		assert.NoError(t, err)
 		node.handleWatchInfo(e, "test2", bs)
 
-		exist = node.flowgraphManager.exist("test2")
+		exist = node.flowgraphManager.HasFlowgraph("test2")
 		assert.False(t, exist)
 
 		chPut := make(chan struct{}, 1)
@@ -238,7 +238,7 @@ func TestWatchChannel(t *testing.T) {
 		node.factory = &FailMessageStreamFactory{}
 		node.handleWatchInfo(e, ch, bs)
 		<-chPut
-		exist = node.flowgraphManager.exist(ch)
+		exist = node.flowgraphManager.HasFlowgraph(ch)
 		assert.True(t, exist)
 	})
 
@@ -275,7 +275,7 @@ func TestWatchChannel(t *testing.T) {
 
 		node.handleWatchInfo(e, ch, bs)
 		<-chPut
-		exist := node.flowgraphManager.exist("test3")
+		exist := node.flowgraphManager.HasFlowgraph("test3")
 		assert.False(t, exist)
 	})
 

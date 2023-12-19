@@ -20,6 +20,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"math"
 	"path"
 	"sync"
 	"time"
@@ -41,7 +42,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -49,12 +52,13 @@ import (
 
 type meta struct {
 	sync.RWMutex
-	ctx          context.Context
-	catalog      metastore.DataCoordCatalog
-	collections  map[UniqueID]*collectionInfo  // collection id to collection info
-	segments     *SegmentsInfo                 // segment id to segment info
-	channelCPs   map[string]*msgpb.MsgPosition // vChannel -> channel checkpoint/see position
-	chunkManager storage.ChunkManager
+	ctx            context.Context
+	catalog        metastore.DataCoordCatalog
+	collections    map[UniqueID]*collectionInfo // collection id to collection info
+	segments       *SegmentsInfo                // segment id to segment info
+	channelCPLocks *lock.KeyLock[string]
+	channelCPs     *typeutil.ConcurrentMap[string, *msgpb.MsgPosition] // vChannel -> channel checkpoint/see position
+	chunkManager   storage.ChunkManager
 
 	// collectionIndexes records which indexes are on the collection
 	// collID -> indexID -> index
@@ -87,7 +91,8 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 		catalog:              catalog,
 		collections:          make(map[UniqueID]*collectionInfo),
 		segments:             NewSegmentsInfo(),
-		channelCPs:           make(map[string]*msgpb.MsgPosition),
+		channelCPLocks:       lock.NewKeyLock[string](),
+		channelCPs:           typeutil.NewConcurrentMap[string, *msgpb.MsgPosition](),
 		chunkManager:         chunkManager,
 		indexes:              make(map[UniqueID]map[UniqueID]*model.Index),
 		buildID2SegmentIndex: make(map[UniqueID]*model.SegmentIndex),
@@ -143,7 +148,7 @@ func (m *meta) reloadFromKV() error {
 	for vChannel, pos := range channelCPs {
 		// for 2.2.2 issue https://github.com/milvus-io/milvus/issues/22181
 		pos.ChannelName = vChannel
-		m.channelCPs[vChannel] = pos
+		m.channelCPs.Insert(vChannel, pos)
 	}
 
 	// load field indexes
@@ -954,30 +959,25 @@ func (m *meta) SetSegmentCompacting(segmentID UniqueID, compacting bool) {
 }
 
 // PrepareCompleteCompactionMutation returns
-// - the segment info of compactedFrom segments before compaction to revert
 // - the segment info of compactedFrom segments after compaction to alter
 // - the segment info of compactedTo segment after compaction to add
 // The compactedTo segment could contain 0 numRows
+// TODO:  too complicated
 func (m *meta) PrepareCompleteCompactionMutation(plan *datapb.CompactionPlan,
 	result *datapb.CompactionPlanResult,
-) ([]*SegmentInfo, []*SegmentInfo, *SegmentInfo, *segMetricMutation, error) {
+) ([]*SegmentInfo, *SegmentInfo, *segMetricMutation, error) {
 	log.Info("meta update: prepare for complete compaction mutation")
 	compactionLogs := plan.GetSegmentBinlogs()
 	m.Lock()
 	defer m.Unlock()
 
-	var (
-		oldSegments = make([]*SegmentInfo, 0, len(compactionLogs))
-		modSegments = make([]*SegmentInfo, 0, len(compactionLogs))
-	)
+	modSegments := make([]*SegmentInfo, 0, len(compactionLogs))
 
 	metricMutation := &segMetricMutation{
 		stateChange: make(map[string]map[string]int),
 	}
 	for _, cl := range compactionLogs {
 		if segment := m.segments.GetSegment(cl.GetSegmentID()); segment != nil {
-			oldSegments = append(oldSegments, segment.Clone())
-
 			cloned := segment.Clone()
 			updateSegStateAndPrepareMetrics(cloned, commonpb.SegmentState_Dropped, metricMutation)
 			cloned.DroppedAt = uint64(time.Now().UnixNano())
@@ -1013,10 +1013,10 @@ func (m *meta) PrepareCompleteCompactionMutation(plan *datapb.CompactionPlan,
 	// MixCompaction / MergeCompaction will generates one and only one segment
 	compactToSegment := result.GetSegments()[0]
 
-	newAddedDeltalogs := m.updateDeltalogs(originDeltalogs, deletedDeltalogs, nil)
+	newAddedDeltalogs := updateDeltalogs(originDeltalogs, deletedDeltalogs, nil)
 	copiedDeltalogs, err := m.copyDeltaFiles(newAddedDeltalogs, modSegments[0].CollectionID, modSegments[0].PartitionID, compactToSegment.GetSegmentID())
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, err
 	}
 	deltalogs := append(compactToSegment.GetDeltalogs(), copiedDeltalogs...)
 
@@ -1041,6 +1041,7 @@ func (m *meta) PrepareCompleteCompactionMutation(plan *datapb.CompactionPlan,
 		CreatedByCompaction: true,
 		CompactionFrom:      compactionFrom,
 		LastExpireTime:      plan.GetStartTime(),
+		Level:               datapb.SegmentLevel_L1,
 	}
 	segment := NewSegmentInfo(segmentInfo)
 	metricMutation.addNewSeg(segment.GetState(), segment.GetLevel(), segment.GetNumOfRows())
@@ -1048,10 +1049,11 @@ func (m *meta) PrepareCompleteCompactionMutation(plan *datapb.CompactionPlan,
 		zap.Int64("collectionID", segment.GetCollectionID()),
 		zap.Int64("partitionID", segment.GetPartitionID()),
 		zap.Int64("new segment ID", segment.GetID()),
+		zap.String("new segment level", segment.GetLevel().String()),
 		zap.Int64("new segment num of rows", segment.GetNumOfRows()),
 		zap.Any("compacted from", segment.GetCompactionFrom()))
 
-	return oldSegments, modSegments, segment, metricMutation, nil
+	return modSegments, segment, metricMutation, nil
 }
 
 func (m *meta) copyDeltaFiles(binlogs []*datapb.FieldBinlog, collectionID, partitionID, targetSegmentID int64) ([]*datapb.FieldBinlog, error) {
@@ -1170,7 +1172,7 @@ func (m *meta) updateBinlogs(origin []*datapb.FieldBinlog, removes []*datapb.Fie
 	return res
 }
 
-func (m *meta) updateDeltalogs(origin []*datapb.FieldBinlog, removes []*datapb.FieldBinlog, adds []*datapb.FieldBinlog) []*datapb.FieldBinlog {
+func updateDeltalogs(origin []*datapb.FieldBinlog, removes []*datapb.FieldBinlog, adds []*datapb.FieldBinlog) []*datapb.FieldBinlog {
 	res := make([]*datapb.FieldBinlog, 0, len(origin))
 	for _, fbl := range origin {
 		logs := make(map[string]*datapb.Binlog)
@@ -1252,43 +1254,46 @@ func (m *meta) UpdateChannelCheckpoint(vChannel string, pos *msgpb.MsgPosition) 
 		return fmt.Errorf("channelCP is nil, vChannel=%s", vChannel)
 	}
 
-	m.Lock()
-	defer m.Unlock()
+	m.channelCPLocks.Lock(vChannel)
+	defer m.channelCPLocks.Unlock(vChannel)
 
-	oldPosition, ok := m.channelCPs[vChannel]
+	oldPosition, ok := m.channelCPs.Get(vChannel)
 	if !ok || oldPosition.Timestamp < pos.Timestamp {
 		err := m.catalog.SaveChannelCheckpoint(m.ctx, vChannel, pos)
 		if err != nil {
 			return err
 		}
-		m.channelCPs[vChannel] = pos
+		m.channelCPs.Insert(vChannel, pos)
 		ts, _ := tsoutil.ParseTS(pos.Timestamp)
 		log.Info("UpdateChannelCheckpoint done",
 			zap.String("vChannel", vChannel),
 			zap.Uint64("ts", pos.GetTimestamp()),
 			zap.ByteString("msgID", pos.GetMsgID()),
 			zap.Time("time", ts))
+		metrics.DataCoordCheckpointLag.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), vChannel).
+			Set(float64(time.Since(ts).Milliseconds()))
 	}
 	return nil
 }
 
 func (m *meta) GetChannelCheckpoint(vChannel string) *msgpb.MsgPosition {
-	m.RLock()
-	defer m.RUnlock()
-	if m.channelCPs[vChannel] == nil {
+	m.channelCPLocks.Lock(vChannel)
+	defer m.channelCPLocks.Unlock(vChannel)
+	v, ok := m.channelCPs.Get(vChannel)
+	if !ok {
 		return nil
 	}
-	return proto.Clone(m.channelCPs[vChannel]).(*msgpb.MsgPosition)
+	return proto.Clone(v).(*msgpb.MsgPosition)
 }
 
 func (m *meta) DropChannelCheckpoint(vChannel string) error {
-	m.Lock()
-	defer m.Unlock()
+	m.channelCPLocks.Lock(vChannel)
+	defer m.channelCPLocks.Unlock(vChannel)
 	err := m.catalog.DropChannelCheckpoint(m.ctx, vChannel)
 	if err != nil {
 		return err
 	}
-	delete(m.channelCPs, vChannel)
+	m.channelCPs.Remove(vChannel)
 	log.Debug("DropChannelCheckpoint done", zap.String("vChannel", vChannel))
 	return nil
 }
@@ -1325,7 +1330,7 @@ func (m *meta) GetEarliestStartPositionOfGrowingSegments(label *CompactionGroupL
 			segment.GetInsertChannel() == label.Channel
 	})
 
-	var earliest *msgpb.MsgPosition
+	earliest := &msgpb.MsgPosition{Timestamp: math.MaxUint64}
 	for _, seg := range segments {
 		if earliest == nil || earliest.GetTimestamp() > seg.GetStartPosition().GetTimestamp() {
 			earliest = seg.GetStartPosition()

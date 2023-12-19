@@ -22,6 +22,7 @@
 #include <unordered_set>
 
 #include "boost/container/vector.hpp"
+#include "common/EasyAssert.h"
 #include "common/LoadInfo.h"
 #include "common/Types.h"
 #include "common/type_c.h"
@@ -38,6 +39,9 @@
 #include "test_utils/indexbuilder_test_utils.h"
 #include "test_utils/storage_test_utils.h"
 #include "query/generated/ExecExprVisitor.h"
+#include "expr/ITypeExpr.h"
+#include "plan/PlanNode.h"
+#include "exec/expression/Expr.h"
 
 namespace chrono = std::chrono;
 
@@ -304,9 +308,15 @@ TEST(CApiTest, GetCollectionNameTest) {
 
 TEST(CApiTest, SegmentTest) {
     auto collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(collection, Growing, -1);
+    CSegmentInterface segment;
+    auto status = NewSegment(collection, Growing, -1, &segment);
+    ASSERT_EQ(status.error_code, Success);
+    CSegmentInterface a_segment;
+    status = NewSegment(collection, Invalid, -1, &a_segment);
+    ASSERT_NE(status.error_code, Success);
     DeleteCollection(collection);
     DeleteSegment(segment);
+    free((char *)status.error_msg);
 }
 
 TEST(CApiTest, CPlan) {
@@ -367,7 +377,9 @@ TEST(CApiTest, CPlan) {
 
 TEST(CApiTest, InsertTest) {
     auto c_collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(c_collection, Growing, -1);
+    CSegmentInterface segment;
+    auto status = NewSegment(c_collection, Growing, -1, &segment);
+    ASSERT_EQ(status.error_code, Success);
     auto col = (milvus::segcore::Collection*)c_collection;
 
     int N = 10000;
@@ -392,7 +404,9 @@ TEST(CApiTest, InsertTest) {
 
 TEST(CApiTest, DeleteTest) {
     auto collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(collection, Growing, -1);
+    CSegmentInterface segment;
+    auto status = NewSegment(collection, Growing, -1, &segment);
+    ASSERT_EQ(status.error_code, Success);
 
     std::vector<int64_t> delete_row_ids = {100000, 100001, 100002};
     auto ids = std::make_unique<IdArray>();
@@ -416,7 +430,9 @@ TEST(CApiTest, DeleteTest) {
 
 TEST(CApiTest, MultiDeleteGrowingSegment) {
     auto collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(collection, Growing, -1);
+    CSegmentInterface segment;
+    auto status = NewSegment(collection, Growing, -1, &segment);
+    ASSERT_EQ(status.error_code, Success);
     auto col = (milvus::segcore::Collection*)collection;
 
     int N = 10;
@@ -452,16 +468,21 @@ TEST(CApiTest, MultiDeleteGrowingSegment) {
     ASSERT_EQ(del_res.error_code, Success);
 
     // retrieve pks = {1}
-    std::vector<int64_t> retrive_pks = {1};
+    std::vector<proto::plan::GenericValue> retrive_pks;
+    {
+        proto::plan::GenericValue value;
+        value.set_int64_val(1);
+        retrive_pks.push_back(value);
+    }
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
-    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(
-        milvus::query::ColumnInfo(
+    auto term_expr = std::make_shared<milvus::expr::TermFilterExpr>(
+        milvus::expr::ColumnInfo(
             FieldId(101), DataType::INT64, std::vector<std::string>()),
-        retrive_pks,
-        proto::plan::GenericValue::kInt64Val);
+        retrive_pks);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
-    plan->plan_node_->predicate_ = std::move(term_expr);
+    plan->plan_node_->filter_plannode_ =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
     std::vector<FieldId> target_field_ids{FieldId(100), FieldId(101)};
     plan->field_ids_ = target_field_ids;
     auto max_ts = dataset.timestamps_[N - 1] + 10;
@@ -477,13 +498,17 @@ TEST(CApiTest, MultiDeleteGrowingSegment) {
     DeleteRetrieveResult(&retrieve_result);
 
     // retrieve pks = {2}
-    retrive_pks = {2};
-    term_expr = std::make_unique<query::TermExprImpl<int64_t>>(
-        milvus::query::ColumnInfo(
+    {
+        proto::plan::GenericValue value;
+        value.set_int64_val(2);
+        retrive_pks.push_back(value);
+    }
+    term_expr = std::make_shared<milvus::expr::TermFilterExpr>(
+        milvus::expr::ColumnInfo(
             FieldId(101), DataType::INT64, std::vector<std::string>()),
-        retrive_pks,
-        proto::plan::GenericValue::kInt64Val);
-    plan->plan_node_->predicate_ = std::move(term_expr);
+        retrive_pks);
+    plan->plan_node_->filter_plannode_ =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
     res = CRetrieve(segment, plan.get(), {}, max_ts, &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
     suc = query_result->ParseFromArray(retrieve_result.proto_blob,
@@ -525,7 +550,9 @@ TEST(CApiTest, MultiDeleteGrowingSegment) {
 
 TEST(CApiTest, MultiDeleteSealedSegment) {
     auto collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(collection, Sealed, -1);
+    CSegmentInterface segment;
+    auto status = NewSegment(collection, Sealed, -1, &segment);
+    ASSERT_EQ(status.error_code, Success);
     auto col = (milvus::segcore::Collection*)collection;
 
     int N = 10;
@@ -552,16 +579,22 @@ TEST(CApiTest, MultiDeleteSealedSegment) {
     ASSERT_EQ(del_res.error_code, Success);
 
     // retrieve pks = {1}
-    std::vector<int64_t> retrive_pks = {1};
+    std::vector<proto::plan::GenericValue> retrive_pks;
+    {
+        proto::plan::GenericValue value;
+        value.set_int64_val(1);
+        retrive_pks.push_back(value);
+    }
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
-    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(
-        milvus::query::ColumnInfo(
+    auto term_expr = std::make_shared<milvus::expr::TermFilterExpr>(
+        milvus::expr::ColumnInfo(
             FieldId(101), DataType::INT64, std::vector<std::string>()),
-        retrive_pks,
-        proto::plan::GenericValue::kInt64Val);
+        retrive_pks);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
-    plan->plan_node_->predicate_ = std::move(term_expr);
+
+    plan->plan_node_->filter_plannode_ =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
     std::vector<FieldId> target_field_ids{FieldId(100), FieldId(101)};
     plan->field_ids_ = target_field_ids;
     auto max_ts = dataset.timestamps_[N - 1] + 10;
@@ -577,13 +610,17 @@ TEST(CApiTest, MultiDeleteSealedSegment) {
     DeleteRetrieveResult(&retrieve_result);
 
     // retrieve pks = {2}
-    retrive_pks = {2};
-    term_expr = std::make_unique<query::TermExprImpl<int64_t>>(
-        milvus::query::ColumnInfo(
+    {
+        proto::plan::GenericValue value;
+        value.set_int64_val(2);
+        retrive_pks.push_back(value);
+    }
+    term_expr = std::make_shared<milvus::expr::TermFilterExpr>(
+        milvus::expr::ColumnInfo(
             FieldId(101), DataType::INT64, std::vector<std::string>()),
-        retrive_pks,
-        proto::plan::GenericValue::kInt64Val);
-    plan->plan_node_->predicate_ = std::move(term_expr);
+        retrive_pks);
+    plan->plan_node_->filter_plannode_ =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
     res = CRetrieve(segment, plan.get(), {}, max_ts, &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
     suc = query_result->ParseFromArray(retrieve_result.proto_blob,
@@ -625,7 +662,9 @@ TEST(CApiTest, MultiDeleteSealedSegment) {
 
 TEST(CApiTest, DeleteRepeatedPksFromGrowingSegment) {
     auto collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(collection, Growing, -1);
+    CSegmentInterface segment;
+    auto status = NewSegment(collection, Growing, -1, &segment);
+    ASSERT_EQ(status.error_code, Success);
     auto col = (milvus::segcore::Collection*)collection;
 
     int N = 10;
@@ -657,16 +696,24 @@ TEST(CApiTest, DeleteRepeatedPksFromGrowingSegment) {
     ASSERT_EQ(res.error_code, Success);
 
     // create retrieve plan pks in {1, 2, 3}
-    std::vector<int64_t> retrive_row_ids = {1, 2, 3};
+    std::vector<proto::plan::GenericValue> retrive_row_ids;
+    {
+        for (auto v : {1, 2, 3}) {
+            proto::plan::GenericValue val;
+            val.set_int64_val(v);
+            retrive_row_ids.push_back(val);
+        }
+    }
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
-    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(
-        milvus::query::ColumnInfo(
+    auto term_expr = std::make_shared<milvus::expr::TermFilterExpr>(
+        milvus::expr::ColumnInfo(
             FieldId(101), DataType::INT64, std::vector<std::string>()),
-        retrive_row_ids,
-        proto::plan::GenericValue::kInt64Val);
+        retrive_row_ids);
+
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
-    plan->plan_node_->predicate_ = std::move(term_expr);
+    plan->plan_node_->filter_plannode_ =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
     std::vector<FieldId> target_field_ids{FieldId(100), FieldId(101)};
     plan->field_ids_ = target_field_ids;
 
@@ -718,7 +765,9 @@ TEST(CApiTest, DeleteRepeatedPksFromGrowingSegment) {
 
 TEST(CApiTest, DeleteRepeatedPksFromSealedSegment) {
     auto collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(collection, Sealed, -1);
+    CSegmentInterface segment;
+    auto status = NewSegment(collection, Sealed, -1, &segment);
+    ASSERT_EQ(status.error_code, Success);
     auto col = (milvus::segcore::Collection*)collection;
 
     int N = 20;
@@ -728,17 +777,24 @@ TEST(CApiTest, DeleteRepeatedPksFromSealedSegment) {
     auto sealed_segment = dynamic_cast<SegmentSealed*>(segment_interface);
     SealedLoadFieldData(dataset, *sealed_segment);
 
+    std::vector<proto::plan::GenericValue> retrive_row_ids;
     // create retrieve plan pks in {1, 2, 3}
-    std::vector<int64_t> retrive_row_ids = {1, 2, 3};
+    {
+        for (auto v : {1, 2, 3}) {
+            proto::plan::GenericValue val;
+            val.set_int64_val(v);
+            retrive_row_ids.push_back(val);
+        }
+    }
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
-    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(
-        milvus::query::ColumnInfo(
+    auto term_expr = std::make_shared<milvus::expr::TermFilterExpr>(
+        milvus::expr::ColumnInfo(
             FieldId(101), DataType::INT64, std::vector<std::string>()),
-        retrive_row_ids,
-        proto::plan::GenericValue::kInt64Val);
+        retrive_row_ids);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
-    plan->plan_node_->predicate_ = std::move(term_expr);
+    plan->plan_node_->filter_plannode_ =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
     std::vector<FieldId> target_field_ids{FieldId(100), FieldId(101)};
     plan->field_ids_ = target_field_ids;
 
@@ -791,7 +847,9 @@ TEST(CApiTest, DeleteRepeatedPksFromSealedSegment) {
 
 TEST(CApiTest, InsertSamePkAfterDeleteOnGrowingSegment) {
     auto collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(collection, Growing, -1);
+    CSegmentInterface segment;
+    auto status = NewSegment(collection, Growing, -1, &segment);
+    ASSERT_EQ(status.error_code, Success);
     auto col = (milvus::segcore::Collection*)collection;
 
     int N = 10;
@@ -830,16 +888,23 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnGrowingSegment) {
     ASSERT_EQ(del_res.error_code, Success);
 
     // create retrieve plan pks in {1, 2, 3}, timestamp = 9
-    std::vector<int64_t> retrive_row_ids = {1, 2, 3};
+    std::vector<proto::plan::GenericValue> retrive_row_ids;
+    {
+        for (auto v : {1, 2, 3}) {
+            proto::plan::GenericValue val;
+            val.set_int64_val(v);
+            retrive_row_ids.push_back(val);
+        }
+    }
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
-    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(
-        milvus::query::ColumnInfo(
+    auto term_expr = std::make_shared<milvus::expr::TermFilterExpr>(
+        milvus::expr::ColumnInfo(
             FieldId(101), DataType::INT64, std::vector<std::string>()),
-        retrive_row_ids,
-        proto::plan::GenericValue::kInt64Val);
+        retrive_row_ids);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
-    plan->plan_node_->predicate_ = std::move(term_expr);
+    plan->plan_node_->filter_plannode_ =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
     std::vector<FieldId> target_field_ids{FieldId(100), FieldId(101)};
     plan->field_ids_ = target_field_ids;
 
@@ -888,7 +953,9 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnGrowingSegment) {
 
 TEST(CApiTest, InsertSamePkAfterDeleteOnSealedSegment) {
     auto collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(collection, Sealed, -1);
+    CSegmentInterface segment;
+    auto status = NewSegment(collection, Sealed, -1, &segment);
+    ASSERT_EQ(status.error_code, Success);
     auto col = (milvus::segcore::Collection*)collection;
 
     int N = 10;
@@ -918,16 +985,23 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnSealedSegment) {
     ASSERT_EQ(del_res.error_code, Success);
 
     // create retrieve plan pks in {1, 2, 3}, timestamp = 9
-    std::vector<int64_t> retrive_row_ids = {1, 2, 3};
+    std::vector<proto::plan::GenericValue> retrive_row_ids;
+    {
+        for (auto v : {1, 2, 3}) {
+            proto::plan::GenericValue val;
+            val.set_int64_val(v);
+            retrive_row_ids.push_back(val);
+        }
+    }
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
-    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(
-        milvus::query::ColumnInfo(
+    auto term_expr = std::make_shared<milvus::expr::TermFilterExpr>(
+        milvus::expr::ColumnInfo(
             FieldId(101), DataType::INT64, std::vector<std::string>()),
-        retrive_row_ids,
-        proto::plan::GenericValue::kInt64Val);
+        retrive_row_ids);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
-    plan->plan_node_->predicate_ = std::move(term_expr);
+    plan->plan_node_->filter_plannode_ =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
     std::vector<FieldId> target_field_ids{FieldId(100), FieldId(101)};
     plan->field_ids_ = target_field_ids;
 
@@ -950,7 +1024,9 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnSealedSegment) {
 
 TEST(CApiTest, SearchTest) {
     auto c_collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(c_collection, Growing, -1);
+    CSegmentInterface segment;
+    auto status = NewSegment(c_collection, Growing, -1, &segment);
+    ASSERT_EQ(status.error_code, Success);
     auto col = (milvus::segcore::Collection*)c_collection;
 
     int N = 10000;
@@ -986,7 +1062,7 @@ TEST(CApiTest, SearchTest) {
     auto blob = generate_query_data(num_queries);
 
     void* plan = nullptr;
-    auto status = CreateSearchPlanByExpr(
+    status = CreateSearchPlanByExpr(
         c_collection, plan_str.data(), plan_str.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
 
@@ -1016,7 +1092,9 @@ TEST(CApiTest, SearchTest) {
 
 TEST(CApiTest, SearchTestWithExpr) {
     auto c_collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(c_collection, Growing, -1);
+    CSegmentInterface segment;
+    auto status = NewSegment(c_collection, Growing, -1, &segment);
+    ASSERT_EQ(status.error_code, Success);
     auto col = (milvus::segcore::Collection*)c_collection;
 
     int N = 10000;
@@ -1050,7 +1128,7 @@ TEST(CApiTest, SearchTestWithExpr) {
 
     void* plan = nullptr;
     auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
-    auto status = CreateSearchPlanByExpr(
+    status = CreateSearchPlanByExpr(
         c_collection, binary_plan.data(), binary_plan.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
 
@@ -1077,7 +1155,9 @@ TEST(CApiTest, SearchTestWithExpr) {
 
 TEST(CApiTest, RetrieveTestWithExpr) {
     auto collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(collection, Growing, -1);
+    CSegmentInterface segment;
+    auto status = NewSegment(collection, Growing, -1, &segment);
+    ASSERT_EQ(status.error_code, Success);
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
 
@@ -1098,15 +1178,21 @@ TEST(CApiTest, RetrieveTestWithExpr) {
     ASSERT_EQ(ins_res.error_code, Success);
 
     // create retrieve plan "age in [0]"
-    std::vector<int64_t> values(1, 0);
-    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(
-        milvus::query::ColumnInfo(
+    std::vector<proto::plan::GenericValue> values;
+    {
+        for (auto v : {1, 0}) {
+            proto::plan::GenericValue val;
+            val.set_int64_val(v);
+            values.push_back(val);
+        }
+    }
+    auto term_expr = std::make_shared<milvus::expr::TermFilterExpr>(
+        milvus::expr::ColumnInfo(
             FieldId(101), DataType::INT64, std::vector<std::string>()),
-        values,
-        proto::plan::GenericValue::kInt64Val);
-
+        values);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
-    plan->plan_node_->predicate_ = std::move(term_expr);
+    plan->plan_node_->filter_plannode_ =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
     std::vector<FieldId> target_field_ids{FieldId(100), FieldId(101)};
     plan->field_ids_ = target_field_ids;
 
@@ -1123,7 +1209,9 @@ TEST(CApiTest, RetrieveTestWithExpr) {
 
 TEST(CApiTest, GetMemoryUsageInBytesTest) {
     auto collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(collection, Growing, -1);
+    CSegmentInterface segment;
+    auto status = NewSegment(collection, Growing, -1, &segment);
+    ASSERT_EQ(status.error_code, Success);
 
     auto old_memory_usage_size = GetMemoryUsageInBytes(segment);
     // std::cout << "old_memory_usage_size = " << old_memory_usage_size << std::endl;
@@ -1152,7 +1240,9 @@ TEST(CApiTest, GetMemoryUsageInBytesTest) {
 
 TEST(CApiTest, GetDeletedCountTest) {
     auto collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(collection, Growing, -1);
+    CSegmentInterface segment;
+    auto status = NewSegment(collection, Growing, -1, &segment);
+    ASSERT_EQ(status.error_code, Success);
 
     std::vector<int64_t> delete_row_ids = {100000, 100001, 100002};
     auto ids = std::make_unique<IdArray>();
@@ -1181,7 +1271,9 @@ TEST(CApiTest, GetDeletedCountTest) {
 
 TEST(CApiTest, GetRowCountTest) {
     auto collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(collection, Growing, -1);
+    CSegmentInterface segment;
+    auto status = NewSegment(collection, Growing, -1, &segment);
+    ASSERT_EQ(status.error_code, Success);
 
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
     int N = 10000;
@@ -1209,7 +1301,9 @@ TEST(CApiTest, GetRowCountTest) {
 
 TEST(CApiTest, GetRealCount) {
     auto collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(collection, Growing, -1);
+    CSegmentInterface segment;
+    auto status = NewSegment(collection, Growing, -1, &segment);
+    ASSERT_EQ(status.error_code, Success);
 
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
     int N = 10000;
@@ -1278,7 +1372,9 @@ CheckSearchResultDuplicate(const std::vector<CSearchResult>& results) {
 
 TEST(CApiTest, ReudceNullResult) {
     auto collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(collection, Growing, -1);
+    CSegmentInterface segment;
+    auto status = NewSegment(collection, Growing, -1, &segment);
+    ASSERT_EQ(status.error_code, Success);
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
     int N = 10000;
     auto dataset = DataGen(schema, N);
@@ -1312,7 +1408,7 @@ TEST(CApiTest, ReudceNullResult) {
     auto blob = generate_max_float_query_data(num_queries, num_queries / 2);
 
     void* plan = nullptr;
-    auto status = CreateSearchPlanByExpr(
+    status = CreateSearchPlanByExpr(
         collection, plan_str.data(), plan_str.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
 
@@ -1360,7 +1456,9 @@ TEST(CApiTest, ReudceNullResult) {
 
 TEST(CApiTest, ReduceRemoveDuplicates) {
     auto collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(collection, Growing, -1);
+    CSegmentInterface segment;
+    auto status = NewSegment(collection, Growing, -1, &segment);
+    ASSERT_EQ(status.error_code, Success);
 
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
     int N = 10000;
@@ -1397,7 +1495,7 @@ TEST(CApiTest, ReduceRemoveDuplicates) {
     auto blob = generate_query_data(num_queries);
 
     void* plan = nullptr;
-    auto status = CreateSearchPlanByExpr(
+    status = CreateSearchPlanByExpr(
         collection, plan_str.data(), plan_str.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
 
@@ -1486,7 +1584,9 @@ testReduceSearchWithExpr(int N, int topK, int num_queries) {
               << num_queries << ")" << std::endl;
 
     auto collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(collection, Growing, -1);
+    CSegmentInterface segment;
+    auto status = NewSegment(collection, Growing, -1, &segment);
+    ASSERT_EQ(status.error_code, Success);
 
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
     auto dataset = DataGen(schema, N);
@@ -1521,7 +1621,7 @@ testReduceSearchWithExpr(int N, int topK, int num_queries) {
     void* plan = nullptr;
     auto binary_plan =
         translate_text_plan_to_binary_plan(serialized_expr_plan.data());
-    auto status = CreateSearchPlanByExpr(
+    status = CreateSearchPlanByExpr(
         collection, binary_plan.data(), binary_plan.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
 
@@ -1710,7 +1810,9 @@ TEST(CApiTest, Indexing_Without_Predicate) {
         generate_collection_schema(knowhere::metric::L2, DIM, false);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
-    auto segment = NewSegment(collection, Growing, -1);
+    CSegmentInterface segment;
+    auto status = NewSegment(collection, Growing, -1, &segment);
+    ASSERT_EQ(status.error_code, Success);
 
     auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
@@ -1750,7 +1852,7 @@ TEST(CApiTest, Indexing_Without_Predicate) {
 
     // search on segment's small index
     void* plan = nullptr;
-    auto status = CreateSearchPlanByExpr(
+    status = CreateSearchPlanByExpr(
         collection, plan_str.data(), plan_str.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
 
@@ -1852,7 +1954,9 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
         generate_collection_schema(knowhere::metric::L2, DIM, false);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
-    auto segment = NewSegment(collection, Growing, -1);
+    CSegmentInterface segment;
+    auto status = NewSegment(collection, Growing, -1, &segment);
+    ASSERT_EQ(status.error_code, Success);
 
     auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
@@ -1892,7 +1996,7 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
     // search on segment's small index
     void* plan = nullptr;
     auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
-    auto status = CreateSearchPlanByExpr(
+    status = CreateSearchPlanByExpr(
         collection, binary_plan.data(), binary_plan.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
 
@@ -1995,7 +2099,9 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
         generate_collection_schema(knowhere::metric::L2, DIM, false);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
-    auto segment = NewSegment(collection, Growing, -1);
+    CSegmentInterface segment;
+    auto status = NewSegment(collection, Growing, -1, &segment);
+    ASSERT_EQ(status.error_code, Success);
 
     auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
@@ -2064,7 +2170,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
 
     // search on segment's small index
     void* plan = nullptr;
-    auto status = CreateSearchPlanByExpr(
+    status = CreateSearchPlanByExpr(
         collection, plan_str.data(), plan_str.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
 
@@ -2167,7 +2273,9 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
         generate_collection_schema(knowhere::metric::L2, DIM, false);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
-    auto segment = NewSegment(collection, Growing, -1);
+   CSegmentInterface segment;
+    auto status = NewSegment(collection, Growing, -1, &segment);
+    ASSERT_EQ(status.error_code, Success);
 
     auto N = 1000 * 10;
     auto dataset = DataGen(schema, N);
@@ -2238,7 +2346,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
     // search on segment's small index
     void* plan = nullptr;
     auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
-    auto status = CreateSearchPlanByExpr(
+    status = CreateSearchPlanByExpr(
         collection, binary_plan.data(), binary_plan.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
 
@@ -2341,7 +2449,9 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
         generate_collection_schema(knowhere::metric::L2, DIM, false);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
-    auto segment = NewSegment(collection, Growing, -1);
+    CSegmentInterface segment;
+    auto status = NewSegment(collection, Growing, -1, &segment);
+    ASSERT_EQ(status.error_code, Success);
 
     auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
@@ -2404,7 +2514,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
 
     // search on segment's small index
     void* plan = nullptr;
-    auto status = CreateSearchPlanByExpr(
+    status = CreateSearchPlanByExpr(
         collection, plan_str.data(), plan_str.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
 
@@ -2507,7 +2617,9 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
         generate_collection_schema(knowhere::metric::L2, DIM, false);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
-    auto segment = NewSegment(collection, Growing, -1);
+    CSegmentInterface segment;
+    auto status = NewSegment(collection, Growing, -1, &segment);
+    ASSERT_EQ(status.error_code, Success);
 
     auto N = 1000 * 10;
     auto dataset = DataGen(schema, N);
@@ -2571,7 +2683,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
     // search on segment's small index
     void* plan = nullptr;
     auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
-    auto status = CreateSearchPlanByExpr(
+    status = CreateSearchPlanByExpr(
         collection, binary_plan.data(), binary_plan.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
 
@@ -2674,7 +2786,9 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
         generate_collection_schema(knowhere::metric::JACCARD, DIM, true);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
-    auto segment = NewSegment(collection, Growing, -1);
+    CSegmentInterface segment;
+    auto status = NewSegment(collection, Growing, -1, &segment);
+    ASSERT_EQ(status.error_code, Success);
 
     auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
@@ -2743,7 +2857,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
 
     // search on segment's small index
     void* plan = nullptr;
-    auto status = CreateSearchPlanByExpr(
+    status = CreateSearchPlanByExpr(
         collection, plan_str.data(), plan_str.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
 
@@ -2847,7 +2961,9 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
         generate_collection_schema(knowhere::metric::JACCARD, DIM, true);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
-    auto segment = NewSegment(collection, Growing, -1);
+    CSegmentInterface segment;
+    auto status = NewSegment(collection, Growing, -1, &segment);
+    ASSERT_EQ(status.error_code, Success);
 
     auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
@@ -2916,7 +3032,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
     // search on segment's small index
     void* plan = nullptr;
     auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
-    auto status = CreateSearchPlanByExpr(
+    status = CreateSearchPlanByExpr(
         collection, binary_plan.data(), binary_plan.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
 
@@ -3020,7 +3136,9 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
         generate_collection_schema(knowhere::metric::JACCARD, DIM, true);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
-    auto segment = NewSegment(collection, Growing, -1);
+    CSegmentInterface segment;
+    auto status = NewSegment(collection, Growing, -1, &segment);
+    ASSERT_EQ(status.error_code, Success);
 
     auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
@@ -3084,7 +3202,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
 
     // search on segment's small index
     void* plan = nullptr;
-    auto status = CreateSearchPlanByExpr(
+    status = CreateSearchPlanByExpr(
         collection, plan_str.data(), plan_str.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
 
@@ -3209,7 +3327,9 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
         generate_collection_schema(knowhere::metric::JACCARD, DIM, true);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
-    auto segment = NewSegment(collection, Growing, -1);
+    CSegmentInterface segment;
+    auto status = NewSegment(collection, Growing, -1, &segment);
+    ASSERT_EQ(status.error_code, Success);
 
     auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
@@ -3273,7 +3393,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
     // search on segment's small index
     void* plan = nullptr;
     auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
-    auto status = CreateSearchPlanByExpr(
+    status = CreateSearchPlanByExpr(
         collection, binary_plan.data(), binary_plan.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
 
@@ -3390,7 +3510,9 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
 
 TEST(CApiTest, SealedSegmentTest) {
     auto collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(collection, Sealed, -1);
+    CSegmentInterface segment;
+    auto status = NewSegment(collection, Sealed, -1, &segment);
+    ASSERT_EQ(status.error_code, Success);
 
     int N = 1000;
     std::default_random_engine e(67);
@@ -3414,7 +3536,9 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
         generate_collection_schema(knowhere::metric::L2, DIM, false);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
-    auto segment = NewSegment(collection, Sealed, -1);
+    CSegmentInterface segment;
+    auto status = NewSegment(collection, Sealed, -1, &segment);
+    ASSERT_EQ(status.error_code, Success);
 
     auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
@@ -3472,7 +3596,7 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
 
     // search on segment's small index
     void* plan = nullptr;
-    auto status = CreateSearchPlanByExpr(
+    status = CreateSearchPlanByExpr(
         collection, plan_str.data(), plan_str.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
 
@@ -3565,7 +3689,9 @@ TEST(CApiTest, SealedSegment_search_without_predicates) {
         generate_collection_schema(knowhere::metric::L2, DIM, false);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
-    auto segment = NewSegment(collection, Sealed, -1);
+    CSegmentInterface segment;
+    auto status = NewSegment(collection, Sealed, -1, &segment);
+    ASSERT_EQ(status.error_code, Success);
 
     auto N = ROW_COUNT;
     uint64_t ts_offset = 1000;
@@ -3590,7 +3716,7 @@ TEST(CApiTest, SealedSegment_search_without_predicates) {
         >)";
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
 
-    auto status = LoadFieldRawData(segment, 100, vec_data.data(), N);
+    status = LoadFieldRawData(segment, 100, vec_data.data(), N);
     ASSERT_EQ(status.error_code, Success);
 
     status = LoadFieldRawData(segment, 101, counter_col.data(), N);
@@ -3641,7 +3767,9 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
         generate_collection_schema(knowhere::metric::L2, DIM, false);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
-    auto segment = NewSegment(collection, Sealed, -1);
+    CSegmentInterface segment;
+    auto status = NewSegment(collection, Sealed, -1, &segment);
+    ASSERT_EQ(status.error_code, Success);
 
     auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
@@ -3699,7 +3827,7 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     // search on segment's small index
     void* plan = nullptr;
     auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
-    auto status = CreateSearchPlanByExpr(
+    status = CreateSearchPlanByExpr(
         collection, binary_plan.data(), binary_plan.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
 
@@ -3823,6 +3951,8 @@ TEST(CApiTest, SealedSegment_Update_Field_Size) {
 
 TEST(CApiTest, GrowingSegment_Load_Field_Data) {
     auto schema = std::make_shared<Schema>();
+    schema->AddField(FieldName("RowID"), FieldId(0), DataType::INT64);
+    schema->AddField(FieldName("Timestamp"), FieldId(1), DataType::INT64);
     auto str_fid = schema->AddDebugField("string", DataType::VARCHAR);
     auto vec_fid = schema->AddDebugField(
         "vector_float", DataType::VECTOR_FLOAT, DIM, "L2");
@@ -3944,13 +4074,16 @@ TEST(CApiTest, RetriveScalarFieldFromSealedSegmentWithIndex) {
     // create retrieve plan
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
-    std::vector<int64_t> retrive_row_ids = {age64_col[0]};
-    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(
-        milvus::query::ColumnInfo(
+    std::vector<proto::plan::GenericValue> retrive_row_ids;
+    proto::plan::GenericValue val;
+    val.set_int64_val(age64_col[0]);
+    retrive_row_ids.push_back(val);
+    auto term_expr = std::make_shared<milvus::expr::TermFilterExpr>(
+        milvus::expr::ColumnInfo(
             i64_fid, DataType::INT64, std::vector<std::string>()),
-        retrive_row_ids,
-        proto::plan::GenericValue::kInt64Val);
-    plan->plan_node_->predicate_ = std::move(term_expr);
+        retrive_row_ids);
+    plan->plan_node_->filter_plannode_ =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
     std::vector<FieldId> target_field_ids;
 
     // retrieve value
@@ -4010,7 +4143,9 @@ TEST(CApiTest, RetriveScalarFieldFromSealedSegmentWithIndex) {
 
 TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_WHEN_IP) {
     auto c_collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(c_collection, Growing, -1);
+    CSegmentInterface segment;
+    auto status = NewSegment(c_collection, Growing, -1, &segment);
+    ASSERT_EQ(status.error_code, Success);
     auto col = (milvus::segcore::Collection*)c_collection;
 
     int N = 10000;
@@ -4046,7 +4181,7 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_WHEN_IP) {
     auto blob = generate_query_data(num_queries);
 
     void* plan = nullptr;
-    auto status = CreateSearchPlanByExpr(
+    status = CreateSearchPlanByExpr(
         c_collection, plan_str.data(), plan_str.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
 
@@ -4071,7 +4206,9 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_WHEN_IP) {
 
 TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_IP) {
     auto c_collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(c_collection, Growing, -1);
+    CSegmentInterface segment;
+    auto status = NewSegment(c_collection, Growing, -1, &segment);
+    ASSERT_EQ(status.error_code, Success);
     auto col = (milvus::segcore::Collection*)c_collection;
 
     int N = 10000;
@@ -4107,7 +4244,7 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_IP) {
     auto blob = generate_query_data(num_queries);
 
     void* plan = nullptr;
-    auto status = CreateSearchPlanByExpr(
+    status = CreateSearchPlanByExpr(
         c_collection, plan_str.data(), plan_str.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
 
@@ -4132,7 +4269,9 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_IP) {
 
 TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_WHEN_L2) {
     auto c_collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(c_collection, Growing, -1);
+    CSegmentInterface segment;
+    auto status = NewSegment(c_collection, Growing, -1, &segment);
+    ASSERT_EQ(status.error_code, Success);
     auto col = (milvus::segcore::Collection*)c_collection;
 
     int N = 10000;
@@ -4168,7 +4307,7 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_WHEN_L2) {
     auto blob = generate_query_data(num_queries);
 
     void* plan = nullptr;
-    auto status = CreateSearchPlanByExpr(
+    status = CreateSearchPlanByExpr(
         c_collection, plan_str.data(), plan_str.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
 
@@ -4193,7 +4332,9 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_WHEN_L2) {
 
 TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_L2) {
     auto c_collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(c_collection, Growing, -1);
+    CSegmentInterface segment;
+    auto status = NewSegment(c_collection, Growing, -1, &segment);
+    ASSERT_EQ(status.error_code, Success);
     auto col = (milvus::segcore::Collection*)c_collection;
 
     int N = 10000;
@@ -4229,7 +4370,7 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_L2) {
     auto blob = generate_query_data(num_queries);
 
     void* plan = nullptr;
-    auto status = CreateSearchPlanByExpr(
+    status = CreateSearchPlanByExpr(
         c_collection, plan_str.data(), plan_str.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
 

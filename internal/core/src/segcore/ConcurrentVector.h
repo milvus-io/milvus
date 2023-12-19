@@ -25,13 +25,13 @@
 #include <utility>
 #include <vector>
 
+#include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
+#include "common/FieldData.h"
 #include "common/Json.h"
 #include "common/Span.h"
 #include "common/Types.h"
 #include "common/Utils.h"
-#include "common/EasyAssert.h"
-#include "storage/FieldData.h"
 
 namespace milvus::segcore {
 
@@ -103,7 +103,7 @@ class VectorBase {
 
     virtual void
     set_data_raw(ssize_t element_offset,
-                 const std::vector<storage::FieldDataPtr>& data) = 0;
+                 const std::vector<FieldDataPtr>& data) = 0;
 
     void
     set_data_raw(ssize_t element_offset,
@@ -112,7 +112,7 @@ class VectorBase {
                  const FieldMeta& field_meta);
 
     virtual void
-    fill_chunk_data(const std::vector<storage::FieldDataPtr>& data) = 0;
+    fill_chunk_data(const std::vector<FieldDataPtr>& data) = 0;
 
     virtual SpanBase
     get_span_base(int64_t chunk_id) const = 0;
@@ -197,7 +197,7 @@ class ConcurrentVectorImpl : public VectorBase {
     }
 
     void
-    fill_chunk_data(const std::vector<storage::FieldDataPtr>& datas)
+    fill_chunk_data(const std::vector<FieldDataPtr>& datas)
         override {  // used only for sealed segment
         AssertInfo(chunks_.size() == 0, "no empty concurrent vector");
 
@@ -217,7 +217,7 @@ class ConcurrentVectorImpl : public VectorBase {
 
     void
     set_data_raw(ssize_t element_offset,
-                 const std::vector<storage::FieldDataPtr>& datas) override {
+                 const std::vector<FieldDataPtr>& datas) override {
         for (auto& field_data : datas) {
             auto num_rows = field_data->get_num_rows();
             set_data_raw(element_offset, field_data->Data(), num_rows);

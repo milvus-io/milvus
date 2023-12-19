@@ -25,7 +25,7 @@
 #include "common/Tracer.h"
 #include "log/Log.h"
 
-std::once_flag flag1, flag2, flag3, flag4, flag5;
+std::once_flag flag1, flag2, flag3, flag4, flag5, flag6;
 std::once_flag traceFlag;
 
 void
@@ -71,11 +71,20 @@ InitCpuNum(const int value) {
 }
 
 void
+InitDefaultExprEvalBatchSize(int64_t val) {
+    std::call_once(
+        flag6,
+        [](int val) { milvus::SetDefaultExecEvalExprBatchSize(val); },
+        val);
+}
+
+void
 InitTrace(CTraceConfig* config) {
     auto traceConfig = milvus::tracer::TraceConfig{config->exporter,
                                                    config->sampleFraction,
                                                    config->jaegerURL,
                                                    config->otlpEndpoint,
+                                                   config->oltpSecure,
                                                    config->nodeID};
     std::call_once(
         traceFlag,

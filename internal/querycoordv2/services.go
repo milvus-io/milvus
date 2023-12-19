@@ -830,11 +830,11 @@ func (s *Server) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasReque
 }
 
 func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeadersRequest) (*querypb.GetShardLeadersResponse, error) {
-	log := log.Ctx(ctx).With(
+	log := log.Ctx(ctx).WithRateGroup("qcv2.GetShardLeaders", 1, 60).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
 	)
 
-	log.Info("get shard leaders request received")
+	log.RatedInfo(10, "get shard leaders request received")
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		msg := "failed to get shard leaders"
 		log.Warn(msg, zap.Error(err))

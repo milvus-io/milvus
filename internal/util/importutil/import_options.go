@@ -21,10 +21,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
@@ -81,7 +80,7 @@ func ValidateOptions(options []*commonpb.KeyValuePair) error {
 		}
 	}
 	if startTs > endTs {
-		return errors.New("start_ts shouldn't be larger than end_ts")
+		return merr.WrapErrImportFailed("start_ts shouldn't be larger than end_ts")
 	}
 	return nil
 }

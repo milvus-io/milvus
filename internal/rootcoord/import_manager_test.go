@@ -1079,48 +1079,28 @@ func TestImportManager_rearrangeTasks(t *testing.T) {
 	assert.Equal(t, int64(100), tasks[2].GetId())
 }
 
-func TestImportManager_isRowbased(t *testing.T) {
+func TestImportManager_isSingleFileTask(t *testing.T) {
 	mgr := &importManager{}
 
 	files := []string{"1.json"}
-	rb, err := mgr.isRowbased(files)
+	rb, err := mgr.isSingleFileTask(files)
 	assert.NoError(t, err)
 	assert.True(t, rb)
 
 	files = []string{"1.json", "2.json"}
-	rb, err = mgr.isRowbased(files)
+	rb, err = mgr.isSingleFileTask(files)
 	assert.Error(t, err)
 	assert.True(t, rb)
 
 	files = []string{"1.json", "2.npy"}
-	rb, err = mgr.isRowbased(files)
+	rb, err = mgr.isSingleFileTask(files)
 	assert.Error(t, err)
 	assert.True(t, rb)
 
 	files = []string{"1.npy", "2.npy"}
-	rb, err = mgr.isRowbased(files)
+	rb, err = mgr.isSingleFileTask(files)
 	assert.NoError(t, err)
 	assert.False(t, rb)
-
-	files = []string{"1.csv"}
-	rb, err = mgr.isRowbased(files)
-	assert.NoError(t, err)
-	assert.True(t, rb)
-
-	files = []string{"1.csv", "2.csv"}
-	rb, err = mgr.isRowbased(files)
-	assert.Error(t, err)
-	assert.True(t, rb)
-
-	files = []string{"1.csv", "2.json"}
-	rb, err = mgr.isRowbased(files)
-	assert.Error(t, err)
-	assert.True(t, rb)
-
-	files = []string{"1.csv", "2.npy"}
-	rb, err = mgr.isRowbased(files)
-	assert.Error(t, err)
-	assert.True(t, rb)
 }
 
 func TestImportManager_mergeArray(t *testing.T) {

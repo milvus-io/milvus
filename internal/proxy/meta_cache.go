@@ -84,6 +84,7 @@ type Cache interface {
 	InitPolicyInfo(info []string, userRoles []string)
 
 	RemoveDatabase(ctx context.Context, database string)
+	HasDatabase(ctx context.Context, database string) bool
 }
 
 type collectionBasicInfo struct {
@@ -150,7 +151,6 @@ type shardLeadersReader struct {
 // Shuffle returns the shuffled shard leader list.
 func (it shardLeadersReader) Shuffle() map[string][]nodeInfo {
 	result := make(map[string][]nodeInfo)
-	rand.Seed(time.Now().UnixNano())
 	for channel, leaders := range it.leaders.shardLeaders {
 		l := len(leaders)
 		// shuffle all replica at random order
@@ -898,6 +898,12 @@ func (m *MetaCache) expireShardLeaderCache(ctx context.Context) {
 }
 
 func (m *MetaCache) InitPolicyInfo(info []string, userRoles []string) {
+	defer func() {
+		err := getEnforcer().LoadPolicy()
+		if err != nil {
+			log.Error("failed to load policy after RefreshPolicyInfo", zap.Error(err))
+		}
+	}()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.unsafeInitPolicyInfo(info, userRoles)
@@ -932,7 +938,15 @@ func (m *MetaCache) GetUserRole(user string) []string {
 	return util.StringList(m.userToRoles[user])
 }
 
-func (m *MetaCache) RefreshPolicyInfo(op typeutil.CacheOp) error {
+func (m *MetaCache) RefreshPolicyInfo(op typeutil.CacheOp) (err error) {
+	defer func() {
+		if err == nil {
+			le := getEnforcer().LoadPolicy()
+			if le != nil {
+				log.Error("failed to load policy after RefreshPolicyInfo", zap.Error(le))
+			}
+		}
+	}()
 	if op.OpType != typeutil.CacheRefresh {
 		m.mu.Lock()
 		defer m.mu.Unlock()
@@ -940,6 +954,7 @@ func (m *MetaCache) RefreshPolicyInfo(op typeutil.CacheOp) error {
 			return errors.New("empty op key")
 		}
 	}
+
 	switch op.OpType {
 	case typeutil.CacheGrantPrivilege:
 		m.privilegeInfos[op.OpKey] = struct{}{}
@@ -990,4 +1005,9 @@ func (m *MetaCache) RemoveDatabase(ctx context.Context, database string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.collInfo, database)
+}
+
+func (m *MetaCache) HasDatabase(ctx context.Context, database string) bool {
+	_, ok := m.collInfo[database]
+	return ok
 }

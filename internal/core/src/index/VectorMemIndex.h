@@ -21,9 +21,12 @@
 #include <string>
 #include <vector>
 #include <boost/dynamic_bitset.hpp>
+#include "common/Types.h"
 #include "knowhere/factory.h"
 #include "index/VectorIndex.h"
 #include "storage/MemFileManagerImpl.h"
+#include "storage/space.h"
+#include "index/IndexInfo.h"
 
 namespace milvus::index {
 
@@ -37,6 +40,9 @@ class VectorMemIndex : public VectorIndex {
         const storage::FileManagerContext& file_manager_context =
             storage::FileManagerContext());
 
+    explicit VectorMemIndex(const CreateIndexInfo& create_index_info,
+                            const storage::FileManagerContext& file_manager,
+                            std::shared_ptr<milvus_storage::Space> space);
     BinarySet
     Serialize(const Config& config) override;
 
@@ -47,11 +53,17 @@ class VectorMemIndex : public VectorIndex {
     Load(const Config& config = {}) override;
 
     void
+    LoadV2(const Config& config = {}) override;
+
+    void
     BuildWithDataset(const DatasetPtr& dataset,
                      const Config& config = {}) override;
 
     void
     Build(const Config& config = {}) override;
+
+    void
+    BuildV2(const Config& config = {}) override;
 
     void
     AddWithDataset(const DatasetPtr& dataset, const Config& config) override;
@@ -75,6 +87,9 @@ class VectorMemIndex : public VectorIndex {
     BinarySet
     Upload(const Config& config = {}) override;
 
+    BinarySet
+    UploadV2(const Config& config = {}) override;
+
  protected:
     virtual void
     LoadWithoutAssemble(const BinarySet& binary_set, const Config& config);
@@ -83,10 +98,16 @@ class VectorMemIndex : public VectorIndex {
     void
     LoadFromFile(const Config& config);
 
+    void
+    LoadFromFileV2(const Config& config);
+
  protected:
     Config config_;
     knowhere::Index<knowhere::IndexNode> index_;
     std::shared_ptr<storage::MemFileManagerImpl> file_manager_;
+    std::shared_ptr<milvus_storage::Space> space_;
+
+    CreateIndexInfo create_index_info_;
 };
 
 template <typename T>

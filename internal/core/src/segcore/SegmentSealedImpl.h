@@ -50,6 +50,8 @@ class SegmentSealedImpl : public SegmentSealed {
     void
     LoadFieldData(const LoadFieldDataInfo& info) override;
     void
+    LoadFieldDataV2(const LoadFieldDataInfo& info) override;
+    void
     LoadDeletedRecord(const LoadDeletedRecordInfo& info) override;
     void
     LoadSegmentMeta(
@@ -205,6 +207,12 @@ class SegmentSealedImpl : public SegmentSealed {
     std::unique_ptr<DataArray>
     fill_with_empty(FieldId field_id, int64_t count) const;
 
+    std::unique_ptr<DataArray>
+    get_raw_data(FieldId field_id,
+                 const FieldMeta& field_meta,
+                 const int64_t* seg_offsets,
+                 int64_t count) const;
+
     void
     update_row_count(int64_t row_count) {
         // if (row_count_opt_.has_value()) {
@@ -291,7 +299,7 @@ class SegmentSealedImpl : public SegmentSealed {
         vec_binlog_config_;
 };
 
-inline SegmentSealedPtr
+inline SegmentSealedUPtr
 CreateSealedSegment(
     SchemaPtr schema,
     IndexMetaPtr index_meta = nullptr,

@@ -31,19 +31,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
-func SegmentBinlogs2SegmentInfo(collectionID int64, partitionID int64, segmentBinlogs *datapb.SegmentBinlogs) *datapb.SegmentInfo {
-	return &datapb.SegmentInfo{
-		ID:            segmentBinlogs.GetSegmentID(),
-		CollectionID:  collectionID,
-		PartitionID:   partitionID,
-		InsertChannel: segmentBinlogs.GetInsertChannel(),
-		NumOfRows:     segmentBinlogs.GetNumOfRows(),
-		Binlogs:       segmentBinlogs.GetFieldBinlogs(),
-		Statslogs:     segmentBinlogs.GetStatslogs(),
-		Deltalogs:     segmentBinlogs.GetDeltalogs(),
-	}
-}
-
 func MergeMetaSegmentIntoSegmentInfo(info *querypb.SegmentInfo, segments ...*meta.Segment) {
 	first := segments[0]
 	if info.GetSegmentID() == 0 {
@@ -72,34 +59,15 @@ func MergeMetaSegmentIntoSegmentInfo(info *querypb.SegmentInfo, segments ...*met
 
 // packSegmentLoadInfo packs SegmentLoadInfo for given segment,
 // packs with index if withIndex is true, this fetch indexes from IndexCoord
-func PackSegmentLoadInfo(resp *datapb.GetSegmentInfoResponse, indexes []*querypb.FieldIndexInfo) *querypb.SegmentLoadInfo {
-	var (
-		deltaPosition *msgpb.MsgPosition
-		positionSrc   string
-	)
-
-	segment := resp.GetInfos()[0]
-
-	if resp.GetChannelCheckpoint() != nil && resp.ChannelCheckpoint[segment.InsertChannel] != nil {
-		deltaPosition = resp.ChannelCheckpoint[segment.InsertChannel]
-		positionSrc = "channelCheckpoint"
-	} else if segment.GetDmlPosition() != nil {
-		deltaPosition = segment.GetDmlPosition()
-		positionSrc = "segmentDMLPos"
-	} else {
-		deltaPosition = segment.GetStartPosition()
-		positionSrc = "segmentStartPos"
-	}
-
-	posTime := tsoutil.PhysicalTime(deltaPosition.GetTimestamp())
+func PackSegmentLoadInfo(segment *datapb.SegmentInfo, channelCheckpoint *msgpb.MsgPosition, indexes []*querypb.FieldIndexInfo) *querypb.SegmentLoadInfo {
+	posTime := tsoutil.PhysicalTime(channelCheckpoint.GetTimestamp())
 	tsLag := time.Since(posTime)
 	if tsLag >= 10*time.Minute {
 		log.Warn("delta position is quite stale",
 			zap.Int64("collectionID", segment.GetCollectionID()),
 			zap.Int64("segmentID", segment.GetID()),
 			zap.String("channel", segment.InsertChannel),
-			zap.String("positionSource", positionSrc),
-			zap.Uint64("posTs", deltaPosition.GetTimestamp()),
+			zap.Uint64("posTs", channelCheckpoint.GetTimestamp()),
 			zap.Time("posTime", posTime),
 			zap.Duration("tsLag", tsLag))
 	}
@@ -114,7 +82,7 @@ func PackSegmentLoadInfo(resp *datapb.GetSegmentInfoResponse, indexes []*querypb
 		InsertChannel: segment.InsertChannel,
 		IndexInfos:    indexes,
 		StartPosition: segment.GetStartPosition(),
-		DeltaPosition: deltaPosition,
+		DeltaPosition: channelCheckpoint,
 		Level:         segment.GetLevel(),
 	}
 	loadInfo.SegmentSize = calculateSegmentSize(loadInfo)

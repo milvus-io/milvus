@@ -17,9 +17,9 @@ type CompactionViewManager struct {
 	view      *FullViews
 	viewGuard sync.RWMutex
 
-	meta         *meta
-	eventManager TriggerManager
-	allocator    allocator
+	meta      *meta
+	trigger   TriggerManager
+	allocator allocator
 
 	closeSig chan struct{}
 	closeWg  sync.WaitGroup
@@ -30,10 +30,10 @@ func NewCompactionViewManager(meta *meta, trigger TriggerManager, allocator allo
 		view: &FullViews{
 			collections: make(map[int64][]*SegmentView),
 		},
-		meta:         meta,
-		eventManager: trigger,
-		allocator:    allocator,
-		closeSig:     make(chan struct{}),
+		meta:      meta,
+		trigger:   trigger,
+		allocator: allocator,
+		closeSig:  make(chan struct{}),
 	}
 }
 
@@ -58,6 +58,8 @@ func (m *CompactionViewManager) checkLoop() {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
+	log.Info("Compaction view manager start")
+
 	for {
 		select {
 		case <-m.closeSig:
@@ -79,10 +81,12 @@ func (m *CompactionViewManager) Check() {
 	ctx := context.TODO()
 	taskID, err := m.allocator.allocID(ctx)
 	if err != nil {
-		log.Warn("CompactionViewManager check loop failed, unable to allocate taskID",
+		log.Warn("CompactionViewManager check failed, unable to allocate taskID",
 			zap.Error(err))
 		return
 	}
+
+	log := log.With(zap.Int64("taskID", taskID))
 
 	m.viewGuard.Lock()
 	defer m.viewGuard.Unlock()
@@ -93,86 +97,71 @@ func (m *CompactionViewManager) Check() {
 	latestCollIDs := lo.Keys(latestCollSegs)
 	viewCollIDs := lo.Keys(m.view.collections)
 
-	diffAdd, diffRemove := lo.Difference(latestCollIDs, viewCollIDs)
-
+	_, diffRemove := lo.Difference(latestCollIDs, viewCollIDs)
 	for _, collID := range diffRemove {
 		delete(m.view.collections, collID)
 	}
 
+	// TODO: update all segments views. For now, just update Level Zero Segments
 	for collID, segments := range latestCollSegs {
 		levelZeroSegments := lo.Filter(segments, func(info *SegmentInfo, _ int) bool {
 			return info.GetLevel() == datapb.SegmentLevel_L0
 		})
 
-		// For new collection, TODO: update all segments
-		// - for now, just update Level Zero Segments
-		if lo.Contains(diffAdd, collID) {
-			m.view.collections[collID] = GetSegmentViews(levelZeroSegments...)
+		latestL0Segments := GetViewsByInfo(levelZeroSegments...)
+		changedL0Views := m.getChangedLevelZeroViews(collID, latestL0Segments)
+		if len(changedL0Views) == 0 {
 			continue
 		}
 
-		latestLevelZeroViews, signals := m.GetLatestLevelZeroSegmentWithSignals(collID, levelZeroSegments)
-		if len(latestLevelZeroViews) != 0 {
-			m.view.collections[collID] = latestLevelZeroViews
-		}
+		log.Info("Refresh compaction level zero views",
+			zap.Int64("collectionID", collID),
+			zap.Strings("views", lo.Map(changedL0Views, func(view CompactionView, _ int) string {
+				return view.String()
+			})))
 
-		events[TriggerTypeLevelZeroView] = signals
+		m.view.collections[collID] = latestL0Segments
+		events[TriggerTypeLevelZeroView] = changedL0Views
 	}
 
 	for eType, views := range events {
-		m.eventManager.Notify(taskID, eType, views)
+		m.trigger.Notify(taskID, eType, views)
 	}
 }
 
-func (m *CompactionViewManager) GetLatestLevelZeroSegmentWithSignals(collID UniqueID, LevelZeroSegments []*SegmentInfo) ([]*SegmentView, []CompactionView) {
-	partChanView := m.BuildLevelZeroSegmentsView(collID, LevelZeroSegments)
+func (m *CompactionViewManager) getChangedLevelZeroViews(collID UniqueID, LevelZeroViews []*SegmentView) []CompactionView {
+	latestViews := m.groupL0ViewsByPartChan(collID, LevelZeroViews)
+	cachedViews := m.view.GetSegmentViewBy(collID, func(v *SegmentView) bool {
+		return v.Level == datapb.SegmentLevel_L0
+	})
 
 	var signals []CompactionView
-	var needUpdate bool = false
-
-	for _, latestView := range partChanView {
-		views := m.view.GetSegmentViewBy(collID, func(v *SegmentView) bool {
-			return v.label.PartitionID == latestView.label.PartitionID &&
-				v.label.Channel == latestView.label.Channel
+	for _, latestView := range latestViews {
+		views := lo.Filter(cachedViews, func(v *SegmentView, _ int) bool {
+			return v.label.Equal(latestView.GetGroupLabel())
 		})
 
 		if !latestView.Equal(views) {
-			needUpdate = true
 			signals = append(signals, latestView)
 		}
 	}
-
-	if needUpdate {
-		var allViews []*SegmentView
-		for _, latestView := range partChanView {
-			allViews = append(allViews, latestView.segments...)
-		}
-		return allViews, signals
-	}
-
-	return nil, signals
+	return signals
 }
 
-func (m *CompactionViewManager) BuildLevelZeroSegmentsView(collectionID UniqueID, levelZeroSegments []*SegmentInfo) []*LevelZeroSegmentsView {
-	partChanView := make(map[string]*LevelZeroSegmentsView) // "part-chan"  to earliestStartPosition
-
-	for _, seg := range levelZeroSegments {
-		key := buildGroupKey(seg.PartitionID, seg.InsertChannel)
+func (m *CompactionViewManager) groupL0ViewsByPartChan(collectionID UniqueID, levelZeroSegments []*SegmentView) map[string]*LevelZeroSegmentsView {
+	partChanView := make(map[string]*LevelZeroSegmentsView) // "part-chan" as key
+	for _, view := range levelZeroSegments {
+		key := view.label.Key()
 		if _, ok := partChanView[key]; !ok {
-			label := &CompactionGroupLabel{
-				CollectionID: collectionID,
-				PartitionID:  seg.PartitionID,
-				Channel:      seg.InsertChannel,
-			}
 			partChanView[key] = &LevelZeroSegmentsView{
-				label:                     label,
-				segments:                  []*SegmentView{},
-				earliestGrowingSegmentPos: m.meta.GetEarliestStartPositionOfGrowingSegments(label),
+				label:                     view.label,
+				segments:                  []*SegmentView{view},
+				earliestGrowingSegmentPos: m.meta.GetEarliestStartPositionOfGrowingSegments(view.label),
 			}
+		} else {
+			partChanView[key].Append(view)
 		}
-
-		partChanView[key].segments = append(partChanView[key].segments, GetSegmentViews(seg)[0])
 	}
 
-	return lo.Values(partChanView)
+	return partChanView
 }

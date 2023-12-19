@@ -27,6 +27,7 @@ int64_t MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT =
 int64_t LOW_PRIORITY_THREAD_CORE_COEFFICIENT =
     DEFAULT_LOW_PRIORITY_THREAD_CORE_COEFFICIENT;
 int CPU_NUM = DEFAULT_CPU_NUM;
+int64_t EXEC_EVAL_EXPR_BATCH_SIZE = DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE;
 
 void
 SetIndexSliceSize(const int64_t size) {
@@ -54,6 +55,13 @@ SetLowPriorityThreadCoreCoefficient(const int64_t coefficient) {
     LOW_PRIORITY_THREAD_CORE_COEFFICIENT = coefficient;
     LOG_SEGCORE_INFO_ << "set low priority thread pool core coefficient: "
                       << LOW_PRIORITY_THREAD_CORE_COEFFICIENT;
+}
+
+void
+SetDefaultExecEvalExprBatchSize(int64_t val) {
+    EXEC_EVAL_EXPR_BATCH_SIZE = val;
+    LOG_SEGCORE_INFO_ << "set default expr eval batch size: "
+                      << EXEC_EVAL_EXPR_BATCH_SIZE;
 }
 
 void

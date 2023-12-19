@@ -257,9 +257,15 @@ func (c *Client) ImportV2(ctx context.Context, req *datapb.ImportRequest, opts .
 	})
 }
 
-func (c *Client) GetImportState(ctx context.Context, req *datapb.GetImportStateRequest, opts ...grpc.CallOption) (*datapb.GetImportStateResponse, error) {
-	return wrapGrpcCall(ctx, c, func(client datapb.DataNodeClient) (*datapb.GetImportStateResponse, error) {
-		return client.GetImportState(ctx, req)
+func (c *Client) QueryPreImport(ctx context.Context, req *datapb.QueryPreImportRequest, opts ...grpc.CallOption) (*datapb.QueryPreImportResponse, error) {
+	return wrapGrpcCall(ctx, c, func(client datapb.DataNodeClient) (*datapb.QueryPreImportResponse, error) {
+		return client.QueryPreImport(ctx, req)
+	})
+}
+
+func (c *Client) QueryImport(ctx context.Context, req *datapb.QueryImportRequest, opts ...grpc.CallOption) (*datapb.QueryImportResponse, error) {
+	return wrapGrpcCall(ctx, c, func(client datapb.DataNodeClient) (*datapb.QueryImportResponse, error) {
+		return client.QueryImport(ctx, req)
 	})
 }
 

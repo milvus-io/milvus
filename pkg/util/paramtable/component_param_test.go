@@ -280,6 +280,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 10000, Params.IndexCheckInterval.GetAsInt())
 		assert.Equal(t, 3, Params.CollectionRecoverTimesLimit.GetAsInt())
 		assert.Equal(t, false, Params.AutoBalance.GetAsBool())
+		assert.Equal(t, true, Params.AutoBalanceChannel.GetAsBool())
 		assert.Equal(t, 10, Params.CheckAutoBalanceConfigInterval.GetAsInt())
 	})
 
@@ -356,6 +357,7 @@ func TestComponentParam(t *testing.T) {
 
 		assert.Equal(t, false, Params.AutoBalance.GetAsBool())
 		assert.Equal(t, 10, Params.CheckAutoBalanceConfigInterval.GetAsInt())
+		assert.Equal(t, false, Params.AutoUpgradeSegmentIndex.GetAsBool())
 	})
 
 	t.Run("test dataNodeConfig", func(t *testing.T) {
@@ -371,6 +373,15 @@ func TestComponentParam(t *testing.T) {
 
 		maxParallelism := Params.FlowGraphMaxParallelism.GetAsInt()
 		t.Logf("flowGraphMaxParallelism: %d", maxParallelism)
+
+		flowGraphSkipModeEnable := Params.FlowGraphSkipModeEnable.GetAsBool()
+		t.Logf("flowGraphSkipModeEnable: %t", flowGraphSkipModeEnable)
+
+		flowGraphSkipModeSkipNum := Params.FlowGraphSkipModeSkipNum.GetAsInt()
+		t.Logf("flowGraphSkipModeSkipNum: %d", flowGraphSkipModeSkipNum)
+
+		flowGraphSkipModeColdTime := Params.FlowGraphSkipModeColdTime.GetAsInt()
+		t.Logf("flowGraphSkipModeColdTime: %d", flowGraphSkipModeColdTime)
 
 		maxParallelSyncTaskNum := Params.MaxParallelSyncTaskNum.GetAsInt()
 		t.Logf("maxParallelSyncTaskNum: %d", maxParallelSyncTaskNum)
@@ -389,6 +400,10 @@ func TestComponentParam(t *testing.T) {
 		channelWorkPoolSize := Params.ChannelWorkPoolSize.GetAsInt()
 		t.Logf("channelWorkPoolSize: %d", channelWorkPoolSize)
 		assert.Equal(t, -1, Params.ChannelWorkPoolSize.GetAsInt())
+
+		updateChannelCheckpointMaxParallel := Params.UpdateChannelCheckpointMaxParallel.GetAsInt()
+		t.Logf("updateChannelCheckpointMaxParallel: %d", updateChannelCheckpointMaxParallel)
+		assert.Equal(t, 1000, Params.UpdateChannelCheckpointMaxParallel.GetAsInt())
 	})
 
 	t.Run("test indexNodeConfig", func(t *testing.T) {

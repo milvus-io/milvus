@@ -25,15 +25,16 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -112,6 +113,11 @@ func initBlockData(collectionSchema *schemapb.CollectionSchema) BlockData {
 			blockData[schema.GetFieldID()] = &storage.JSONFieldData{
 				Data: make([][]byte, 0),
 			}
+		case schemapb.DataType_Array:
+			blockData[schema.GetFieldID()] = &storage.ArrayFieldData{
+				Data:        make([]*schemapb.ScalarField, 0),
+				ElementType: schema.GetElementType(),
+			}
 		default:
 			log.Warn("Import util: unsupported data type", zap.String("DataType", getTypeName(schema.DataType)))
 			return nil
@@ -137,12 +143,12 @@ func initShardData(collectionSchema *schemapb.CollectionSchema, partitionIDs []i
 func parseFloat(s string, bitsize int, fieldName string) (float64, error) {
 	value, err := strconv.ParseFloat(s, bitsize)
 	if err != nil {
-		return 0, fmt.Errorf("failed to parse value '%s' for field '%s', error: %w", s, fieldName, err)
+		return 0, merr.WrapErrImportFailed(fmt.Sprintf("failed to parse value '%s' for field '%s', error: %v", s, fieldName, err))
 	}
 
 	err = typeutil.VerifyFloat(value)
 	if err != nil {
-		return 0, fmt.Errorf("illegal value '%s' for field '%s', error: %w", s, fieldName, err)
+		return 0, merr.WrapErrImportFailed(fmt.Sprintf("illegal value '%s' for field '%s', error: %v", s, fieldName, err))
 	}
 
 	return value, nil
@@ -162,7 +168,7 @@ type Validator struct {
 // initValidators constructs valiator methods and data conversion methods
 func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[storage.FieldID]*Validator) error {
 	if collectionSchema == nil {
-		return errors.New("collection schema is nil")
+		return merr.WrapErrImportFailed("collection schema is nil")
 	}
 
 	for i := 0; i < len(collectionSchema.Fields); i++ {
@@ -181,7 +187,7 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 				if value, ok := obj.(bool); ok {
 					field.(*storage.BoolFieldData).Data = append(field.(*storage.BoolFieldData).Data, value)
 				} else {
-					return fmt.Errorf("illegal value '%v' for bool type field '%s'", obj, schema.GetName())
+					return merr.WrapErrImportFailed(fmt.Sprintf("illegal value '%v' for bool type field '%s'", obj, schema.GetName()))
 				}
 
 				return nil
@@ -195,7 +201,7 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 					}
 					field.(*storage.FloatFieldData).Data = append(field.(*storage.FloatFieldData).Data, float32(value))
 				} else {
-					return fmt.Errorf("illegal value '%v' for float type field '%s'", obj, schema.GetName())
+					return merr.WrapErrImportFailed(fmt.Sprintf("illegal value '%v' for float type field '%s'", obj, schema.GetName()))
 				}
 
 				return nil
@@ -209,7 +215,7 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 					}
 					field.(*storage.DoubleFieldData).Data = append(field.(*storage.DoubleFieldData).Data, value)
 				} else {
-					return fmt.Errorf("illegal value '%v' for double type field '%s'", obj, schema.GetName())
+					return merr.WrapErrImportFailed(fmt.Sprintf("illegal value '%v' for double type field '%s'", obj, schema.GetName()))
 				}
 				return nil
 			}
@@ -218,11 +224,11 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 				if num, ok := obj.(json.Number); ok {
 					value, err := strconv.ParseInt(string(num), 0, 8)
 					if err != nil {
-						return fmt.Errorf("failed to parse value '%v' for int8 field '%s', error: %w", num, schema.GetName(), err)
+						return merr.WrapErrImportFailed(fmt.Sprintf("failed to parse value '%v' for int8 field '%s', error: %v", num, schema.GetName(), err))
 					}
 					field.(*storage.Int8FieldData).Data = append(field.(*storage.Int8FieldData).Data, int8(value))
 				} else {
-					return fmt.Errorf("illegal value '%v' for int8 type field '%s'", obj, schema.GetName())
+					return merr.WrapErrImportFailed(fmt.Sprintf("illegal value '%v' for int8 type field '%s'", obj, schema.GetName()))
 				}
 				return nil
 			}
@@ -231,11 +237,11 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 				if num, ok := obj.(json.Number); ok {
 					value, err := strconv.ParseInt(string(num), 0, 16)
 					if err != nil {
-						return fmt.Errorf("failed to parse value '%v' for int16 field '%s', error: %w", num, schema.GetName(), err)
+						return merr.WrapErrImportFailed(fmt.Sprintf("failed to parse value '%v' for int16 field '%s', error: %v", num, schema.GetName(), err))
 					}
 					field.(*storage.Int16FieldData).Data = append(field.(*storage.Int16FieldData).Data, int16(value))
 				} else {
-					return fmt.Errorf("illegal value '%v' for int16 type field '%s'", obj, schema.GetName())
+					return merr.WrapErrImportFailed(fmt.Sprintf("illegal value '%v' for int16 type field '%s'", obj, schema.GetName()))
 				}
 				return nil
 			}
@@ -244,11 +250,11 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 				if num, ok := obj.(json.Number); ok {
 					value, err := strconv.ParseInt(string(num), 0, 32)
 					if err != nil {
-						return fmt.Errorf("failed to parse value '%v' for int32 field '%s', error: %w", num, schema.GetName(), err)
+						return merr.WrapErrImportFailed(fmt.Sprintf("failed to parse value '%v' for int32 field '%s', error: %v", num, schema.GetName(), err))
 					}
 					field.(*storage.Int32FieldData).Data = append(field.(*storage.Int32FieldData).Data, int32(value))
 				} else {
-					return fmt.Errorf("illegal value '%v' for int32 type field '%s'", obj, schema.GetName())
+					return merr.WrapErrImportFailed(fmt.Sprintf("illegal value '%v' for int32 type field '%s'", obj, schema.GetName()))
 				}
 				return nil
 			}
@@ -257,11 +263,11 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 				if num, ok := obj.(json.Number); ok {
 					value, err := strconv.ParseInt(string(num), 0, 64)
 					if err != nil {
-						return fmt.Errorf("failed to parse value '%v' for int64 field '%s', error: %w", num, schema.GetName(), err)
+						return merr.WrapErrImportFailed(fmt.Sprintf("failed to parse value '%v' for int64 field '%s', error: %v", num, schema.GetName(), err))
 					}
 					field.(*storage.Int64FieldData).Data = append(field.(*storage.Int64FieldData).Data, value)
 				} else {
-					return fmt.Errorf("illegal value '%v' for int64 type field '%s'", obj, schema.GetName())
+					return merr.WrapErrImportFailed(fmt.Sprintf("illegal value '%v' for int64 type field '%s'", obj, schema.GetName()))
 				}
 				return nil
 			}
@@ -275,22 +281,22 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 			validators[schema.GetFieldID()].convertFunc = func(obj interface{}, field storage.FieldData) error {
 				arr, ok := obj.([]interface{})
 				if !ok {
-					return fmt.Errorf("'%v' is not an array for binary vector field '%s'", obj, schema.GetName())
+					return merr.WrapErrImportFailed(fmt.Sprintf("'%v' is not an array for binary vector field '%s'", obj, schema.GetName()))
 				}
 				// we use uint8 to represent binary vector in json file, each uint8 value represents 8 dimensions.
 				if len(arr)*8 != dim {
-					return fmt.Errorf("bit size %d doesn't equal to vector dimension %d of field '%s'", len(arr)*8, dim, schema.GetName())
+					return merr.WrapErrImportFailed(fmt.Sprintf("bit size %d doesn't equal to vector dimension %d of field '%s'", len(arr)*8, dim, schema.GetName()))
 				}
 
 				for i := 0; i < len(arr); i++ {
 					if num, ok := arr[i].(json.Number); ok {
 						value, err := strconv.ParseUint(string(num), 0, 8)
 						if err != nil {
-							return fmt.Errorf("failed to parse value '%v' for binary vector field '%s', error: %w", num, schema.GetName(), err)
+							return merr.WrapErrImportFailed(fmt.Sprintf("failed to parse value '%v' for binary vector field '%s', error: %v", num, schema.GetName(), err))
 						}
 						field.(*storage.BinaryVectorFieldData).Data = append(field.(*storage.BinaryVectorFieldData).Data, byte(value))
 					} else {
-						return fmt.Errorf("illegal value '%v' for binary vector field '%s'", obj, schema.GetName())
+						return merr.WrapErrImportFailed(fmt.Sprintf("illegal value '%v' for binary vector field '%s'", obj, schema.GetName()))
 					}
 				}
 
@@ -306,10 +312,10 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 			validators[schema.GetFieldID()].convertFunc = func(obj interface{}, field storage.FieldData) error {
 				arr, ok := obj.([]interface{})
 				if !ok {
-					return fmt.Errorf("'%v' is not an array for float vector field '%s'", obj, schema.GetName())
+					return merr.WrapErrImportFailed(fmt.Sprintf("'%v' is not an array for float vector field '%s'", obj, schema.GetName()))
 				}
 				if len(arr) != dim {
-					return fmt.Errorf("array size %d doesn't equal to vector dimension %d of field '%s'", len(arr), dim, schema.GetName())
+					return merr.WrapErrImportFailed(fmt.Sprintf("array size %d doesn't equal to vector dimension %d of field '%s'", len(arr), dim, schema.GetName()))
 				}
 
 				for i := 0; i < len(arr); i++ {
@@ -320,7 +326,7 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 						}
 						field.(*storage.FloatVectorFieldData).Data = append(field.(*storage.FloatVectorFieldData).Data, float32(value))
 					} else {
-						return fmt.Errorf("illegal value '%v' for float vector field '%s'", obj, schema.GetName())
+						return merr.WrapErrImportFailed(fmt.Sprintf("illegal value '%v' for float vector field '%s'", obj, schema.GetName()))
 					}
 				}
 
@@ -333,7 +339,7 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 				if value, ok := obj.(string); ok {
 					field.(*storage.StringFieldData).Data = append(field.(*storage.StringFieldData).Data, value)
 				} else {
-					return fmt.Errorf("illegal value '%v' for varchar type field '%s'", obj, schema.GetName())
+					return merr.WrapErrImportFailed(fmt.Sprintf("illegal value '%v' for varchar type field '%s'", obj, schema.GetName()))
 				}
 				return nil
 			}
@@ -345,25 +351,194 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 					var dummy interface{}
 					err := json.Unmarshal([]byte(value), &dummy)
 					if err != nil {
-						return fmt.Errorf("failed to parse value '%v' for JSON field '%s', error: %w", value, schema.GetName(), err)
+						return merr.WrapErrImportFailed(fmt.Sprintf("failed to parse value '%v' for JSON field '%s', error: %v", value, schema.GetName(), err))
 					}
 					field.(*storage.JSONFieldData).Data = append(field.(*storage.JSONFieldData).Data, []byte(value))
 				} else if mp, ok := obj.(map[string]interface{}); ok {
 					bs, err := json.Marshal(mp)
 					if err != nil {
-						return fmt.Errorf("failed to parse value for JSON field '%s', error: %w", schema.GetName(), err)
+						return merr.WrapErrImportFailed(fmt.Sprintf("failed to parse value for JSON field '%s', error: %v", schema.GetName(), err))
 					}
 					field.(*storage.JSONFieldData).Data = append(field.(*storage.JSONFieldData).Data, bs)
 				} else {
-					return fmt.Errorf("illegal value '%v' for JSON type field '%s'", obj, schema.GetName())
+					return merr.WrapErrImportFailed(fmt.Sprintf("illegal value '%v' for JSON type field '%s'", obj, schema.GetName()))
 				}
 				return nil
 			}
+		case schemapb.DataType_Array:
+			validators[schema.GetFieldID()].convertFunc = func(obj interface{}, field storage.FieldData) error {
+				arr, ok := obj.([]interface{})
+				if !ok {
+					return merr.WrapErrImportFailed(fmt.Sprintf("'%v' is not an array for array field '%s'", obj, schema.GetName()))
+				}
+				return getArrayElementData(schema, arr, field)
+			}
 		default:
-			return fmt.Errorf("unsupport data type: %s", getTypeName(collectionSchema.Fields[i].DataType))
+			return merr.WrapErrImportFailed(fmt.Sprintf("unsupport data type: %s", getTypeName(collectionSchema.Fields[i].DataType)))
 		}
 	}
 
+	return nil
+}
+
+func getArrayElementData(schema *schemapb.FieldSchema, arr []interface{}, field storage.FieldData) error {
+	switch schema.GetElementType() {
+	case schemapb.DataType_Bool:
+		boolData := make([]bool, 0)
+		for i := 0; i < len(arr); i++ {
+			if value, ok := arr[i].(bool); ok {
+				boolData = append(boolData, value)
+			} else {
+				return merr.WrapErrImportFailed(fmt.Sprintf("illegal value '%v' for bool array field '%s'", arr, schema.GetName()))
+			}
+		}
+		field.(*storage.ArrayFieldData).Data = append(field.(*storage.ArrayFieldData).Data, &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_BoolData{
+				BoolData: &schemapb.BoolArray{
+					Data: boolData,
+				},
+			},
+		})
+	case schemapb.DataType_Int8:
+		int8Data := make([]int32, 0)
+		for i := 0; i < len(arr); i++ {
+			if num, ok := arr[i].(json.Number); ok {
+				value, err := strconv.ParseInt(string(num), 0, 8)
+				if err != nil {
+					return err
+				}
+				int8Data = append(int8Data, int32(value))
+			} else {
+				return merr.WrapErrImportFailed(fmt.Sprintf("illegal value '%v' for int array field '%s'", arr, schema.GetName()))
+			}
+		}
+		field.(*storage.ArrayFieldData).Data = append(field.(*storage.ArrayFieldData).Data, &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_IntData{
+				IntData: &schemapb.IntArray{
+					Data: int8Data,
+				},
+			},
+		})
+
+	case schemapb.DataType_Int16:
+		int16Data := make([]int32, 0)
+		for i := 0; i < len(arr); i++ {
+			if num, ok := arr[i].(json.Number); ok {
+				value, err := strconv.ParseInt(string(num), 0, 16)
+				if err != nil {
+					return err
+				}
+				int16Data = append(int16Data, int32(value))
+			} else {
+				return merr.WrapErrImportFailed(fmt.Sprintf("illegal value '%v' for int array field '%s'", arr, schema.GetName()))
+			}
+		}
+		field.(*storage.ArrayFieldData).Data = append(field.(*storage.ArrayFieldData).Data, &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_IntData{
+				IntData: &schemapb.IntArray{
+					Data: int16Data,
+				},
+			},
+		})
+	case schemapb.DataType_Int32:
+		intData := make([]int32, 0)
+		for i := 0; i < len(arr); i++ {
+			if num, ok := arr[i].(json.Number); ok {
+				value, err := strconv.ParseInt(string(num), 0, 32)
+				if err != nil {
+					return err
+				}
+				intData = append(intData, int32(value))
+			} else {
+				return merr.WrapErrImportFailed(fmt.Sprintf("illegal value '%v' for int array field '%s'", arr, schema.GetName()))
+			}
+		}
+		field.(*storage.ArrayFieldData).Data = append(field.(*storage.ArrayFieldData).Data, &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_IntData{
+				IntData: &schemapb.IntArray{
+					Data: intData,
+				},
+			},
+		})
+	case schemapb.DataType_Int64:
+		longData := make([]int64, 0)
+		for i := 0; i < len(arr); i++ {
+			if num, ok := arr[i].(json.Number); ok {
+				value, err := strconv.ParseInt(string(num), 0, 64)
+				if err != nil {
+					return err
+				}
+				longData = append(longData, value)
+			} else {
+				return merr.WrapErrImportFailed(fmt.Sprintf("illegal value '%v' for long array field '%s'", arr, schema.GetName()))
+			}
+		}
+		field.(*storage.ArrayFieldData).Data = append(field.(*storage.ArrayFieldData).Data, &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_LongData{
+				LongData: &schemapb.LongArray{
+					Data: longData,
+				},
+			},
+		})
+	case schemapb.DataType_Float:
+		floatData := make([]float32, 0)
+		for i := 0; i < len(arr); i++ {
+			if num, ok := arr[i].(json.Number); ok {
+				value, err := parseFloat(string(num), 32, schema.GetName())
+				if err != nil {
+					return err
+				}
+				floatData = append(floatData, float32(value))
+			} else {
+				return merr.WrapErrImportFailed(fmt.Sprintf("illegal value '%v' for float array field '%s'", arr, schema.GetName()))
+			}
+		}
+		field.(*storage.ArrayFieldData).Data = append(field.(*storage.ArrayFieldData).Data, &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_FloatData{
+				FloatData: &schemapb.FloatArray{
+					Data: floatData,
+				},
+			},
+		})
+	case schemapb.DataType_Double:
+		doubleData := make([]float64, 0)
+		for i := 0; i < len(arr); i++ {
+			if num, ok := arr[i].(json.Number); ok {
+				value, err := parseFloat(string(num), 32, schema.GetName())
+				if err != nil {
+					return err
+				}
+				doubleData = append(doubleData, value)
+			} else {
+				return merr.WrapErrImportFailed(fmt.Sprintf("illegal value '%v' for double array field '%s'", arr, schema.GetName()))
+			}
+		}
+		field.(*storage.ArrayFieldData).Data = append(field.(*storage.ArrayFieldData).Data, &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_DoubleData{
+				DoubleData: &schemapb.DoubleArray{
+					Data: doubleData,
+				},
+			},
+		})
+	case schemapb.DataType_String, schemapb.DataType_VarChar:
+		stringFieldData := &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_StringData{
+				StringData: &schemapb.StringArray{
+					Data: make([]string, 0),
+				},
+			},
+		}
+		for i := 0; i < len(arr); i++ {
+			if str, ok := arr[i].(string); ok {
+				stringFieldData.GetStringData().Data = append(stringFieldData.GetStringData().Data, str)
+			} else {
+				return merr.WrapErrImportFailed(fmt.Sprintf("illegal value '%v' for string array field '%s'", arr, schema.GetName()))
+			}
+		}
+		field.(*storage.ArrayFieldData).Data = append(field.(*storage.ArrayFieldData).Data, stringFieldData)
+	default:
+		return merr.WrapErrImportFailed(fmt.Sprintf("unsupport element type: %v", getTypeName(schema.GetElementType())))
+	}
 	return nil
 }
 
@@ -395,13 +570,13 @@ func getFieldDimension(schema *schemapb.FieldSchema) (int, error) {
 		if key == common.DimKey {
 			dim, err := strconv.Atoi(value)
 			if err != nil {
-				return 0, fmt.Errorf("illegal vector dimension '%s' for field '%s', error: %w", value, schema.GetName(), err)
+				return 0, merr.WrapErrImportFailed(fmt.Sprintf("illegal vector dimension '%s' for field '%s', error: %v", value, schema.GetName(), err))
 			}
 			return dim, nil
 		}
 	}
 
-	return 0, fmt.Errorf("vector dimension is not defined for field '%s'", schema.GetName())
+	return 0, merr.WrapErrImportFailed(fmt.Sprintf("vector dimension is not defined for field '%s'", schema.GetName()))
 }
 
 // triggerGC triggers golang gc to return all free memory back to the underlying system at once,
@@ -426,7 +601,7 @@ func fillDynamicData(blockData BlockData, collectionSchema *schemapb.CollectionS
 	}
 
 	if dynamicFieldID < 0 {
-		return fmt.Errorf("the collection schema is dynamic but dynamic field is not found")
+		return merr.WrapErrImportFailed("the collection schema is dynamic but dynamic field is not found")
 	}
 
 	rowCount := 0
@@ -483,7 +658,7 @@ func tryFlushBlocks(ctx context.Context,
 		// outside context might be canceled(service stop, or future enhancement for canceling import task)
 		if isCanceled(ctx) {
 			log.Warn("Import util: import task was canceled")
-			return errors.New("import task was canceled")
+			return merr.WrapErrImportFailed("import task was canceled")
 		}
 
 		shardData := shardsData[i]
@@ -491,7 +666,7 @@ func tryFlushBlocks(ctx context.Context,
 			err := fillDynamicData(blockData, collectionSchema)
 			if err != nil {
 				log.Warn("Import util: failed to fill dynamic field", zap.Error(err))
-				return fmt.Errorf("failed to fill dynamic field, error: %w", err)
+				return merr.WrapErrImportFailed(fmt.Sprintf("failed to fill dynamic field, error: %v", err))
 			}
 
 			// Note: even rowCount is 0, the size is still non-zero
@@ -509,7 +684,7 @@ func tryFlushBlocks(ctx context.Context,
 				if err != nil {
 					log.Warn("Import util: failed to force flush block data", zap.Int("shardID", i),
 						zap.Int64("partitionID", partitionID), zap.Error(err))
-					return fmt.Errorf("failed to force flush block data for shard id %d to partition %d, error: %w", i, partitionID, err)
+					return merr.WrapErrImportFailed(fmt.Sprintf("failed to force flush block data for shard id %d to partition %d, error: %v", i, partitionID, err))
 				}
 				log.Info("Import util: force flush", zap.Int("rowCount", rowCount), zap.Int("size", size),
 					zap.Int("shardID", i), zap.Int64("partitionID", partitionID))
@@ -517,7 +692,7 @@ func tryFlushBlocks(ctx context.Context,
 				shardData[partitionID] = initBlockData(collectionSchema)
 				if shardData[partitionID] == nil {
 					log.Warn("Import util: failed to initialize FieldData list", zap.Int("shardID", i), zap.Int64("partitionID", partitionID))
-					return fmt.Errorf("failed to initialize FieldData list for shard id %d to partition %d", i, partitionID)
+					return merr.WrapErrImportFailed(fmt.Sprintf("failed to initialize FieldData list for shard id %d to partition %d", i, partitionID))
 				}
 				continue
 			}
@@ -530,7 +705,7 @@ func tryFlushBlocks(ctx context.Context,
 				if err != nil {
 					log.Warn("Import util: failed to flush block data", zap.Int("shardID", i),
 						zap.Int64("partitionID", partitionID), zap.Error(err))
-					return fmt.Errorf("failed to flush block data for shard id %d to partition %d, error: %w", i, partitionID, err)
+					return merr.WrapErrImportFailed(fmt.Sprintf("failed to flush block data for shard id %d to partition %d, error: %v", i, partitionID, err))
 				}
 				log.Info("Import util: block size exceed limit and flush", zap.Int("rowCount", rowCount), zap.Int("size", size),
 					zap.Int("shardID", i), zap.Int64("partitionID", partitionID), zap.Int64("blockSize", blockSize))
@@ -538,7 +713,7 @@ func tryFlushBlocks(ctx context.Context,
 				shardData[partitionID] = initBlockData(collectionSchema)
 				if shardData[partitionID] == nil {
 					log.Warn("Import util: failed to initialize FieldData list", zap.Int("shardID", i), zap.Int64("partitionID", partitionID))
-					return fmt.Errorf("failed to initialize FieldData list for shard id %d to partition %d", i, partitionID)
+					return merr.WrapErrImportFailed(fmt.Sprintf("failed to initialize FieldData list for shard id %d to partition %d", i, partitionID))
 				}
 				continue
 			}
@@ -559,14 +734,14 @@ func tryFlushBlocks(ctx context.Context,
 		// outside context might be canceled(service stop, or future enhancement for canceling import task)
 		if isCanceled(ctx) {
 			log.Warn("Import util: import task was canceled")
-			return errors.New("import task was canceled")
+			return merr.WrapErrImportFailed("import task was canceled")
 		}
 
 		blockData := shardsData[biggestItem][biggestPartition]
 		err := fillDynamicData(blockData, collectionSchema)
 		if err != nil {
 			log.Warn("Import util: failed to fill dynamic field", zap.Error(err))
-			return fmt.Errorf("failed to fill dynamic field, error: %w", err)
+			return merr.WrapErrImportFailed(fmt.Sprintf("failed to fill dynamic field, error: %v", err))
 		}
 
 		// Note: even rowCount is 0, the size is still non-zero
@@ -583,8 +758,8 @@ func tryFlushBlocks(ctx context.Context,
 			if err != nil {
 				log.Warn("Import util: failed to flush biggest block data", zap.Int("shardID", biggestItem),
 					zap.Int64("partitionID", biggestPartition))
-				return fmt.Errorf("failed to flush biggest block data for shard id %d to partition %d, error: %w",
-					biggestItem, biggestPartition, err)
+				return merr.WrapErrImportFailed(fmt.Sprintf("failed to flush biggest block data for shard id %d to partition %d, error: %v",
+					biggestItem, biggestPartition, err))
 			}
 			log.Info("Import util: total size exceed limit and flush", zap.Int("rowCount", rowCount),
 				zap.Int("size", size), zap.Int("totalSize", totalSize), zap.Int("shardID", biggestItem))
@@ -593,7 +768,7 @@ func tryFlushBlocks(ctx context.Context,
 			if shardsData[biggestItem][biggestPartition] == nil {
 				log.Warn("Import util: failed to initialize FieldData list", zap.Int("shardID", biggestItem),
 					zap.Int64("partitionID", biggestPartition))
-				return fmt.Errorf("failed to initialize FieldData list for shard id %d to partition %d", biggestItem, biggestPartition)
+				return merr.WrapErrImportFailed(fmt.Sprintf("failed to initialize FieldData list for shard id %d to partition %d", biggestItem, biggestPartition))
 			}
 		}
 	}
@@ -641,8 +816,8 @@ func pkToShard(pk interface{}, shardNum uint32) (uint32, error) {
 	} else {
 		intPK, ok := pk.(int64)
 		if !ok {
-			log.Warn("Numpy parser: primary key field must be int64 or varchar")
-			return 0, fmt.Errorf("primary key field must be int64 or varchar")
+			log.Warn("parser: primary key field must be int64 or varchar")
+			return 0, merr.WrapErrImportFailed("primary key field must be int64 or varchar")
 		}
 		hash, _ := typeutil.Hash32Int64(intPK)
 		shard = hash % shardNum
@@ -653,7 +828,7 @@ func pkToShard(pk interface{}, shardNum uint32) (uint32, error) {
 
 func UpdateKVInfo(infos *[]*commonpb.KeyValuePair, k string, v string) error {
 	if infos == nil {
-		return errors.New("Import util: kv array pointer is nil")
+		return merr.WrapErrImportFailed("Import util: kv array pointer is nil")
 	}
 
 	found := false
@@ -668,4 +843,271 @@ func UpdateKVInfo(infos *[]*commonpb.KeyValuePair, k string, v string) error {
 	}
 
 	return nil
+}
+
+// appendFunc defines the methods to append data to storage.FieldData
+func appendFunc(schema *schemapb.FieldSchema) func(src storage.FieldData, n int, target storage.FieldData) error {
+	switch schema.DataType {
+	case schemapb.DataType_Bool:
+		return func(src storage.FieldData, n int, target storage.FieldData) error {
+			arr := target.(*storage.BoolFieldData)
+			arr.Data = append(arr.Data, src.GetRow(n).(bool))
+			return nil
+		}
+	case schemapb.DataType_Float:
+		return func(src storage.FieldData, n int, target storage.FieldData) error {
+			arr := target.(*storage.FloatFieldData)
+			arr.Data = append(arr.Data, src.GetRow(n).(float32))
+			return nil
+		}
+	case schemapb.DataType_Double:
+		return func(src storage.FieldData, n int, target storage.FieldData) error {
+			arr := target.(*storage.DoubleFieldData)
+			arr.Data = append(arr.Data, src.GetRow(n).(float64))
+			return nil
+		}
+	case schemapb.DataType_Int8:
+		return func(src storage.FieldData, n int, target storage.FieldData) error {
+			arr := target.(*storage.Int8FieldData)
+			arr.Data = append(arr.Data, src.GetRow(n).(int8))
+			return nil
+		}
+	case schemapb.DataType_Int16:
+		return func(src storage.FieldData, n int, target storage.FieldData) error {
+			arr := target.(*storage.Int16FieldData)
+			arr.Data = append(arr.Data, src.GetRow(n).(int16))
+			return nil
+		}
+	case schemapb.DataType_Int32:
+		return func(src storage.FieldData, n int, target storage.FieldData) error {
+			arr := target.(*storage.Int32FieldData)
+			arr.Data = append(arr.Data, src.GetRow(n).(int32))
+			return nil
+		}
+	case schemapb.DataType_Int64:
+		return func(src storage.FieldData, n int, target storage.FieldData) error {
+			arr := target.(*storage.Int64FieldData)
+			arr.Data = append(arr.Data, src.GetRow(n).(int64))
+			return nil
+		}
+	case schemapb.DataType_BinaryVector:
+		return func(src storage.FieldData, n int, target storage.FieldData) error {
+			arr := target.(*storage.BinaryVectorFieldData)
+			arr.Data = append(arr.Data, src.GetRow(n).([]byte)...)
+			return nil
+		}
+	case schemapb.DataType_FloatVector:
+		return func(src storage.FieldData, n int, target storage.FieldData) error {
+			arr := target.(*storage.FloatVectorFieldData)
+			arr.Data = append(arr.Data, src.GetRow(n).([]float32)...)
+			return nil
+		}
+	case schemapb.DataType_String, schemapb.DataType_VarChar:
+		return func(src storage.FieldData, n int, target storage.FieldData) error {
+			arr := target.(*storage.StringFieldData)
+			arr.Data = append(arr.Data, src.GetRow(n).(string))
+			return nil
+		}
+	case schemapb.DataType_JSON:
+		return func(src storage.FieldData, n int, target storage.FieldData) error {
+			arr := target.(*storage.JSONFieldData)
+			arr.Data = append(arr.Data, src.GetRow(n).([]byte))
+			return nil
+		}
+	case schemapb.DataType_Array:
+		return func(src storage.FieldData, n int, target storage.FieldData) error {
+			arr := target.(*storage.ArrayFieldData)
+			arr.Data = append(arr.Data, src.GetRow(n).(*schemapb.ScalarField))
+			return nil
+		}
+
+	default:
+		return nil
+	}
+}
+
+func prepareAppendFunctions(collectionInfo *CollectionInfo) (map[string]func(src storage.FieldData, n int, target storage.FieldData) error, error) {
+	appendFunctions := make(map[string]func(src storage.FieldData, n int, target storage.FieldData) error)
+	for i := 0; i < len(collectionInfo.Schema.Fields); i++ {
+		schema := collectionInfo.Schema.Fields[i]
+		appendFuncErr := appendFunc(schema)
+		if appendFuncErr == nil {
+			log.Warn("parser: unsupported field data type")
+			return nil, fmt.Errorf("unsupported field data type: %d", schema.GetDataType())
+		}
+		appendFunctions[schema.GetName()] = appendFuncErr
+	}
+	return appendFunctions, nil
+}
+
+// checkRowCount check row count of each field, all fields row count must be equal
+func checkRowCount(collectionInfo *CollectionInfo, fieldsData BlockData) (int, error) {
+	rowCount := 0
+	rowCounter := make(map[string]int)
+	for i := 0; i < len(collectionInfo.Schema.Fields); i++ {
+		schema := collectionInfo.Schema.Fields[i]
+		if !schema.GetAutoID() {
+			v, ok := fieldsData[schema.GetFieldID()]
+			if !ok {
+				if schema.GetIsDynamic() {
+					// user might not provide numpy file for dynamic field, skip it, will auto-generate later
+					continue
+				}
+				log.Warn("field not provided", zap.String("fieldName", schema.GetName()))
+				return 0, fmt.Errorf("field '%s' not provided", schema.GetName())
+			}
+			rowCounter[schema.GetName()] = v.RowNum()
+			if v.RowNum() > rowCount {
+				rowCount = v.RowNum()
+			}
+		}
+	}
+
+	for name, count := range rowCounter {
+		if count != rowCount {
+			log.Warn("field row count is not equal to other fields row count", zap.String("fieldName", name),
+				zap.Int("rowCount", count), zap.Int("otherRowCount", rowCount))
+			return 0, fmt.Errorf("field '%s' row count %d is not equal to other fields row count: %d", name, count, rowCount)
+		}
+	}
+
+	return rowCount, nil
+}
+
+// hashToPartition hash partition key to get an partition ID, return the first partition ID if no partition key exist
+// CollectionInfo ensures only one partition ID in the PartitionIDs if no partition key exist
+func hashToPartition(collectionInfo *CollectionInfo, fieldsData BlockData, rowNumber int) (int64, error) {
+	if collectionInfo.PartitionKey == nil {
+		// no partition key, directly return the target partition id
+		if len(collectionInfo.PartitionIDs) != 1 {
+			return 0, fmt.Errorf("collection '%s' partition list is empty", collectionInfo.Schema.Name)
+		}
+		return collectionInfo.PartitionIDs[0], nil
+	}
+
+	partitionKeyID := collectionInfo.PartitionKey.GetFieldID()
+	fieldData := fieldsData[partitionKeyID]
+	value := fieldData.GetRow(rowNumber)
+	index, err := pkToShard(value, uint32(len(collectionInfo.PartitionIDs)))
+	if err != nil {
+		return 0, err
+	}
+
+	return collectionInfo.PartitionIDs[index], nil
+}
+
+// splitFieldsData is to split the in-memory data(parsed from column-based files) into shards
+func splitFieldsData(collectionInfo *CollectionInfo, fieldsData BlockData, shards []ShardData, rowIDAllocator *allocator.IDAllocator) ([]int64, error) {
+	if len(fieldsData) == 0 {
+		log.Warn("fields data to split is empty")
+		return nil, fmt.Errorf("fields data to split is empty")
+	}
+
+	if len(shards) != int(collectionInfo.ShardNum) {
+		log.Warn("block count is not equal to collection shard number", zap.Int("shardsLen", len(shards)),
+			zap.Int32("shardNum", collectionInfo.ShardNum))
+		return nil, fmt.Errorf("block count %d is not equal to collection shard number %d", len(shards), collectionInfo.ShardNum)
+	}
+
+	rowCount, err := checkRowCount(collectionInfo, fieldsData)
+	if err != nil {
+		return nil, err
+	}
+
+	// generate auto id for primary key and rowid field
+	rowIDBegin, rowIDEnd, err := rowIDAllocator.Alloc(uint32(rowCount))
+	if err != nil {
+		log.Warn("failed to alloc row ID", zap.Int("rowCount", rowCount), zap.Error(err))
+		return nil, fmt.Errorf("failed to alloc %d rows ID, error: %w", rowCount, err)
+	}
+
+	rowIDField, ok := fieldsData[common.RowIDField]
+	if !ok {
+		rowIDField = &storage.Int64FieldData{
+			Data: make([]int64, 0),
+		}
+		fieldsData[common.RowIDField] = rowIDField
+	}
+	rowIDFieldArr := rowIDField.(*storage.Int64FieldData)
+	for i := rowIDBegin; i < rowIDEnd; i++ {
+		rowIDFieldArr.Data = append(rowIDFieldArr.Data, i)
+	}
+
+	// reset the primary keys, as we know, only int64 pk can be auto-generated
+	primaryKey := collectionInfo.PrimaryKey
+	autoIDRange := make([]int64, 0)
+	if primaryKey.GetAutoID() {
+		log.Info("generating auto-id", zap.Int("rowCount", rowCount), zap.Int64("rowIDBegin", rowIDBegin))
+		if primaryKey.GetDataType() != schemapb.DataType_Int64 {
+			log.Warn("primary key field is auto-generated but the field type is not int64")
+			return nil, fmt.Errorf("primary key field is auto-generated but the field type is not int64")
+		}
+
+		primaryDataArr := &storage.Int64FieldData{
+			Data: make([]int64, 0, rowCount),
+		}
+		for i := rowIDBegin; i < rowIDEnd; i++ {
+			primaryDataArr.Data = append(primaryDataArr.Data, i)
+		}
+
+		fieldsData[primaryKey.GetFieldID()] = primaryDataArr
+		autoIDRange = append(autoIDRange, rowIDBegin, rowIDEnd)
+	}
+
+	// if the primary key is not auto-gernerate and user doesn't provide, return error
+	primaryData, ok := fieldsData[primaryKey.GetFieldID()]
+	if !ok || primaryData.RowNum() <= 0 {
+		log.Warn("primary key field is not provided", zap.String("keyName", primaryKey.GetName()))
+		return nil, fmt.Errorf("primary key '%s' field data is not provided", primaryKey.GetName())
+	}
+
+	// prepare append functions
+	appendFunctions, err := prepareAppendFunctions(collectionInfo)
+	if err != nil {
+		return nil, err
+	}
+
+	// split data into shards
+	for i := 0; i < rowCount; i++ {
+		// hash to a shard number and partition
+		pk := primaryData.GetRow(i)
+		shard, err := pkToShard(pk, uint32(collectionInfo.ShardNum))
+		if err != nil {
+			return nil, err
+		}
+
+		partitionID, err := hashToPartition(collectionInfo, fieldsData, i)
+		if err != nil {
+			return nil, err
+		}
+
+		// set rowID field
+		rowIDField := shards[shard][partitionID][common.RowIDField].(*storage.Int64FieldData)
+		rowIDField.Data = append(rowIDField.Data, rowIDFieldArr.GetRow(i).(int64))
+
+		// append row to shard
+		for k := 0; k < len(collectionInfo.Schema.Fields); k++ {
+			schema := collectionInfo.Schema.Fields[k]
+			srcData := fieldsData[schema.GetFieldID()]
+			targetData := shards[shard][partitionID][schema.GetFieldID()]
+			if srcData == nil && schema.GetIsDynamic() {
+				// user might not provide numpy file for dynamic field, skip it, will auto-generate later
+				continue
+			}
+			if srcData == nil || targetData == nil {
+				log.Warn("cannot append data since source or target field data is nil",
+					zap.String("FieldName", schema.GetName()),
+					zap.Bool("sourceNil", srcData == nil), zap.Bool("targetNil", targetData == nil))
+				return nil, fmt.Errorf("cannot append data for field '%s', possibly no any fields corresponding to this numpy file, or a required numpy file is not provided",
+					schema.GetName())
+			}
+			appendFunc := appendFunctions[schema.GetName()]
+			err := appendFunc(srcData, i, targetData)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	return autoIDRange, nil
 }

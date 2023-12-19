@@ -20,7 +20,7 @@ func Test_GetPrivilegeExtObj(t *testing.T) {
 	assert.Equal(t, commonpb.ObjectPrivilege_PrivilegeLoad, privilegeExt.ObjectPrivilege)
 	assert.Equal(t, int32(3), privilegeExt.ObjectNameIndex)
 
-	request2 := &milvuspb.CreatePartitionRequest{}
+	request2 := &milvuspb.GetPartitionStatisticsRequest{}
 	_, err = GetPrivilegeExtObj(request2)
 	assert.Error(t, err)
 }

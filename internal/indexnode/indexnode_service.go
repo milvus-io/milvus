@@ -91,18 +91,37 @@ func (i *IndexNode) CreateJob(ctx context.Context, req *indexpb.CreateJobRequest
 		metrics.IndexNodeBuildIndexTaskCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
-	task := &indexBuildTask{
-		ident:          fmt.Sprintf("%s/%d", req.ClusterID, req.BuildID),
-		ctx:            taskCtx,
-		cancel:         taskCancel,
-		BuildID:        req.GetBuildID(),
-		ClusterID:      req.GetClusterID(),
-		node:           i,
-		req:            req,
-		cm:             cm,
-		nodeID:         i.GetNodeID(),
-		tr:             timerecord.NewTimeRecorder(fmt.Sprintf("IndexBuildID: %d, ClusterID: %s", req.BuildID, req.ClusterID)),
-		serializedSize: 0,
+	var task task
+	if Params.CommonCfg.EnableStorageV2.GetAsBool() {
+		task = &indexBuildTaskV2{
+			indexBuildTask: &indexBuildTask{
+				ident:          fmt.Sprintf("%s/%d", req.ClusterID, req.BuildID),
+				ctx:            taskCtx,
+				cancel:         taskCancel,
+				BuildID:        req.GetBuildID(),
+				ClusterID:      req.GetClusterID(),
+				node:           i,
+				req:            req,
+				cm:             cm,
+				nodeID:         i.GetNodeID(),
+				tr:             timerecord.NewTimeRecorder(fmt.Sprintf("IndexBuildID: %d, ClusterID: %s", req.BuildID, req.ClusterID)),
+				serializedSize: 0,
+			},
+		}
+	} else {
+		task = &indexBuildTask{
+			ident:          fmt.Sprintf("%s/%d", req.ClusterID, req.BuildID),
+			ctx:            taskCtx,
+			cancel:         taskCancel,
+			BuildID:        req.GetBuildID(),
+			ClusterID:      req.GetClusterID(),
+			node:           i,
+			req:            req,
+			cm:             cm,
+			nodeID:         i.GetNodeID(),
+			tr:             timerecord.NewTimeRecorder(fmt.Sprintf("IndexBuildID: %d, ClusterID: %s", req.BuildID, req.ClusterID)),
+			serializedSize: 0,
+		}
 	}
 	ret := merr.Success()
 	if err := i.sched.IndexBuildQueue.Enqueue(task); err != nil {
@@ -138,6 +157,7 @@ func (i *IndexNode) QueryJobs(ctx context.Context, req *indexpb.QueryJobsRequest
 				serializedSize:      info.serializedSize,
 				failReason:          info.failReason,
 				currentIndexVersion: info.currentIndexVersion,
+				indexStoreVersion:   info.indexStoreVersion,
 			}
 		}
 	})
@@ -159,6 +179,7 @@ func (i *IndexNode) QueryJobs(ctx context.Context, req *indexpb.QueryJobsRequest
 			ret.IndexInfos[i].SerializedSize = info.serializedSize
 			ret.IndexInfos[i].FailReason = info.failReason
 			ret.IndexInfos[i].CurrentIndexVersion = info.currentIndexVersion
+			ret.IndexInfos[i].IndexStoreVersion = info.indexStoreVersion
 			log.RatedDebug(5, "querying index build task",
 				zap.Int64("indexBuildID", buildID),
 				zap.String("state", info.state.String()),

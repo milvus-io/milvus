@@ -96,12 +96,12 @@ func (d *taskDispatcher[K]) schedule(ctx context.Context) {
 		case <-d.notifyCh:
 			d.tasks.Range(func(k K, submitted bool) bool {
 				if !submitted {
+					d.tasks.Insert(k, true)
 					d.pool.Submit(func() (any, error) {
 						d.taskRunner(ctx, k)
 						d.tasks.Remove(k)
 						return struct{}{}, nil
 					})
-					d.tasks.Insert(k, true)
 				}
 				return true
 			})

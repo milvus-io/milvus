@@ -166,6 +166,7 @@ func (mcm *MinioChunkManager) Exist(ctx context.Context, filePath string) (bool,
 
 // Read reads the minio storage data if exists.
 func (mcm *MinioChunkManager) Read(ctx context.Context, filePath string) ([]byte, error) {
+	start := time.Now()
 	object, err := mcm.getMinioObject(ctx, mcm.bucketName, filePath, minio.GetObjectOptions{})
 	if err != nil {
 		log.Warn("failed to get object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
@@ -196,6 +197,7 @@ func (mcm *MinioChunkManager) Read(ctx context.Context, filePath string) ([]byte
 		return nil, err
 	}
 	metrics.PersistentDataKvSize.WithLabelValues(metrics.DataGetLabel).Observe(float64(objectInfo.Size))
+	metrics.PersistentDataRequestLatency.WithLabelValues(metrics.DataGetLabel).Observe(float64(time.Since(start).Milliseconds()))
 	return data, nil
 }
 
@@ -236,6 +238,7 @@ func (mcm *MinioChunkManager) ReadAt(ctx context.Context, filePath string, off i
 		return nil, io.EOF
 	}
 
+	start := time.Now()
 	opts := minio.GetObjectOptions{}
 	err := opts.SetRange(off, off+length-1)
 	if err != nil {
@@ -257,6 +260,7 @@ func (mcm *MinioChunkManager) ReadAt(ctx context.Context, filePath string, off i
 		return nil, err
 	}
 	metrics.PersistentDataKvSize.WithLabelValues(metrics.DataGetLabel).Observe(float64(length))
+	metrics.PersistentDataRequestLatency.WithLabelValues(metrics.DataGetLabel).Observe(float64(time.Since(start).Milliseconds()))
 	return data, nil
 }
 

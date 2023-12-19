@@ -63,16 +63,27 @@ popd
 
 pushd ${ROOT_DIR}/cmake_build/thirdparty
 
-git clone --depth=1 --branch v0.42.0 https://github.com/apache/incubator-opendal.git opendal
+git clone --depth=1 --branch v0.43.0-rc.2 https://github.com/apache/incubator-opendal.git opendal
 cd opendal
 if command -v cargo >/dev/null 2>&1; then
     echo "cargo exists"
+    unameOut="$(uname -s)"
+    case "${unameOut}" in
+        Darwin*)
+          echo "running on mac os, reinstall rust 1.73"
+          # github will install rust 1.74 by default.
+          # https://github.com/actions/runner-images/blob/main/images/macos/macos-12-Readme.md
+          rustup install 1.73
+          rustup default 1.73;;
+        *)
+          echo "not running on mac os, no need to reinstall rust";;
+    esac
 else
-    bash -c "curl https://sh.rustup.rs -sSf | sh -s -- -y" || { echo 'rustup install failed'; exit 1;}
+    bash -c "curl https://sh.rustup.rs -sSf | sh -s -- --default-toolchain=1.73 -y" || { echo 'rustup install failed'; exit 1;}
     source $HOME/.cargo/env
 fi
 pushd bindings/c
-cargo build --release --verbose || { echo 'opendal_c build failed'; exit 1; }
+cargo +1.73 build --release --verbose || { echo 'opendal_c build failed'; exit 1; }
 popd
 mkdir -p ${ROOT_DIR}/internal/core/output/lib
 mkdir -p ${ROOT_DIR}/internal/core/output/include

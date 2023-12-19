@@ -80,29 +80,39 @@ func getPartitionIDs(ctx context.Context, dbName string, collectionName string, 
 		return nil, err
 	}
 
-	partitionsRecord := make(map[UniqueID]bool)
-	partitionIDs = make([]UniqueID, 0, len(partitionNames))
+	useRegexp := Params.ProxyCfg.PartitionNameRegexp.GetAsBool()
+
+	partitionsSet := typeutil.NewSet[int64]()
 	for _, partitionName := range partitionNames {
-		pattern := fmt.Sprintf("^%s$", partitionName)
-		re, err := regexp.Compile(pattern)
-		if err != nil {
-			return nil, fmt.Errorf("invalid partition: %s", partitionName)
-		}
-		found := false
-		for name, pID := range partitionsMap {
-			if re.MatchString(name) {
-				if _, exist := partitionsRecord[pID]; !exist {
-					partitionIDs = append(partitionIDs, pID)
-					partitionsRecord[pID] = true
+		if useRegexp {
+			// Legacy feature, use partition name as regexp
+			pattern := fmt.Sprintf("^%s$", partitionName)
+			re, err := regexp.Compile(pattern)
+			if err != nil {
+				return nil, fmt.Errorf("invalid partition: %s", partitionName)
+			}
+			var found bool
+			for name, pID := range partitionsMap {
+				if re.MatchString(name) {
+					partitionsSet.Insert(pID)
+					found = true
 				}
-				found = true
+			}
+			if !found {
+				return nil, fmt.Errorf("partition name %s not found", partitionName)
+			}
+		} else {
+			partitionID, found := partitionsMap[partitionName]
+			if !found {
+				// TODO change after testcase updated: return nil, merr.WrapErrPartitionNotFound(partitionName)
+				return nil, fmt.Errorf("partition name %s not found", partitionName)
+			}
+			if !partitionsSet.Contain(partitionID) {
+				partitionsSet.Insert(partitionID)
 			}
 		}
-		if !found {
-			return nil, fmt.Errorf("partition name %s not found", partitionName)
-		}
 	}
-	return partitionIDs, nil
+	return partitionsSet.Collect(), nil
 }
 
 // parseSearchInfo returns QueryInfo and offset
@@ -210,7 +220,6 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 
 	t.Base.MsgType = commonpb.MsgType_Search
 	t.Base.SourceID = paramtable.GetNodeID()
-	log := log.Ctx(ctx)
 
 	collectionName := t.request.CollectionName
 	t.collectionName = collectionName
@@ -218,6 +227,8 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	if err != nil { // err is not nil if collection not exists
 		return err
 	}
+
+	log := log.Ctx(ctx).With(zap.Int64("collID", collID), zap.String("collName", collectionName))
 
 	t.SearchRequest.DbID = 0 // todo
 	t.SearchRequest.CollectionID = collID
@@ -270,6 +281,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		return fmt.Errorf("%s [%d] is invalid, %w", NQKey, nq, err)
 	}
 	t.SearchRequest.Nq = nq
+	log = log.With(zap.Int64("nq", nq))
 
 	outputFieldIDs, err := getOutputFieldIDs(t.schema, t.request.GetOutputFields())
 	if err != nil {
@@ -347,7 +359,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 
 		log.Debug("Proxy::searchTask::PreExecute",
 			zap.Int64s("plan.OutputFieldIds", plan.GetOutputFieldIds()),
-			zap.String("plan", plan.String())) // may be very large if large term passed.
+			zap.Stringer("plan", plan)) // may be very large if large term passed.
 	}
 
 	// translate partition name to partition ids. Use regex-pattern to match partition name.
@@ -404,7 +416,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 func (t *searchTask) Execute(ctx context.Context) error {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Search-Execute")
 	defer sp.End()
-	log := log.Ctx(ctx)
+	log := log.Ctx(ctx).With(zap.Int64("nq", t.SearchRequest.GetNq()))
 
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute search %d", t.ID()))
 	defer tr.CtxElapse(ctx, "done")
@@ -437,7 +449,7 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	defer func() {
 		tr.CtxElapse(ctx, "done")
 	}()
-	log := log.Ctx(ctx)
+	log := log.Ctx(ctx).With(zap.Int64("nq", t.SearchRequest.GetNq()))
 
 	var (
 		Nq         = t.SearchRequest.GetNq()
@@ -537,7 +549,7 @@ func (t *searchTask) searchShard(ctx context.Context, nodeID int64, qn types.Que
 	if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn("QueryNode search result error",
 			zap.String("reason", result.GetStatus().GetReason()))
-		return fmt.Errorf("fail to Search, QueryNode ID=%d, reason=%s", nodeID, result.GetStatus().GetReason())
+		return errors.Wrapf(merr.Error(result.GetStatus()), "fail to search on QueryNode %d", nodeID)
 	}
 	t.resultBuf.Insert(result)
 	t.lb.UpdateCostMetrics(nodeID, result.CostAggregation)

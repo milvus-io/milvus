@@ -33,7 +33,7 @@
 #include "pb/schema.pb.h"
 #include "pb/segcore.pb.h"
 #include "index/IndexInfo.h"
-#include "SkipIndex.h"
+#include "index/SkipIndex.h"
 #include "mmap/Column.h"
 
 namespace milvus::segcore {
@@ -99,6 +99,9 @@ class SegmentInterface {
 
     virtual void
     LoadFieldData(const LoadFieldDataInfo& info) = 0;
+
+    virtual void
+    LoadFieldDataV2(const LoadFieldDataInfo& info) = 0;
 
     virtual int64_t
     get_segment_id() const = 0;

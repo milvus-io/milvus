@@ -54,9 +54,8 @@ type iterator = storage.Iterator
 
 type compactor interface {
 	complete()
-	// compact() (*datapb.CompactionResult, error)
 	compact() (*datapb.CompactionPlanResult, error)
-	injectDone(success bool)
+	injectDone()
 	stop()
 	getPlanID() UniqueID
 	getCollection() UniqueID
@@ -79,9 +78,8 @@ type compactionTask struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	done         chan struct{}
-	tr           *timerecord.TimeRecorder
-	chunkManager storage.ChunkManager
+	done chan struct{}
+	tr   *timerecord.TimeRecorder
 }
 
 func newCompactionTask(
@@ -92,22 +90,20 @@ func newCompactionTask(
 	syncMgr syncmgr.SyncManager,
 	alloc allocator.Allocator,
 	plan *datapb.CompactionPlan,
-	chunkManager storage.ChunkManager,
 ) *compactionTask {
 	ctx1, cancel := context.WithCancel(ctx)
 	return &compactionTask{
 		ctx:    ctx1,
 		cancel: cancel,
 
-		downloader:   dl,
-		uploader:     ul,
-		syncMgr:      syncMgr,
-		metaCache:    metaCache,
-		Allocator:    alloc,
-		plan:         plan,
-		tr:           timerecord.NewTimeRecorder("compactionTask"),
-		chunkManager: chunkManager,
-		done:         make(chan struct{}, 1),
+		downloader: dl,
+		uploader:   ul,
+		syncMgr:    syncMgr,
+		metaCache:  metaCache,
+		Allocator:  alloc,
+		plan:       plan,
+		tr:         timerecord.NewTimeRecorder("levelone compaction"),
+		done:       make(chan struct{}, 1),
 	}
 }
 
@@ -118,7 +114,7 @@ func (t *compactionTask) complete() {
 func (t *compactionTask) stop() {
 	t.cancel()
 	<-t.done
-	t.injectDone(true)
+	t.injectDone()
 }
 
 func (t *compactionTask) getPlanID() UniqueID {
@@ -629,7 +625,7 @@ func (t *compactionTask) compact() (*datapb.CompactionPlanResult, error) {
 	return planResult, nil
 }
 
-func (t *compactionTask) injectDone(success bool) {
+func (t *compactionTask) injectDone() {
 	for _, binlog := range t.plan.SegmentBinlogs {
 		t.syncMgr.Unblock(binlog.SegmentID)
 	}

@@ -46,6 +46,12 @@ service QueryCoord {
   rpc TransferReplica(TransferReplicaRequest) returns (common.Status) {}
   rpc ListResourceGroups(milvus.ListResourceGroupsRequest) returns (milvus.ListResourceGroupsResponse) {}
   rpc DescribeResourceGroup(DescribeResourceGroupRequest) returns (DescribeResourceGroupResponse) {}
+
+
+  // ops interfaces
+  rpc ListCheckers(ListCheckersRequest) returns (ListCheckersResponse) {}
+  rpc ActivateChecker(ActivateCheckerRequest) returns (common.Status) {}
+  rpc DeactivateChecker(DeactivateCheckerRequest) returns (common.Status) {}
 }
 
 service QueryNode {
@@ -502,6 +508,7 @@ message LeaderView {
   repeated int64 growing_segmentIDs = 4;
   map<int64, msg.MsgPosition> growing_segments = 5;
   int64 TargetVersion = 6;
+  int64 num_of_growing_rows = 7;
 }
 
 message SegmentDist {
@@ -587,6 +594,7 @@ message SyncDistributionRequest {
   LoadMetaInfo load_meta = 6;
   int64 replicaID = 7;
   int64 version = 8;
+  repeated index.IndexInfo index_info_list = 9;
 }
 
 message ResourceGroup {
@@ -634,3 +642,31 @@ message DeleteRequest {
   schema.IDs primary_keys = 6;
   repeated uint64 timestamps = 7; 
 }
+
+message ActivateCheckerRequest {
+  common.MsgBase base = 1;
+  int32 checkerID = 2;
+}
+
+message DeactivateCheckerRequest {
+  common.MsgBase base = 1;
+  int32 checkerID = 2;
+}
+
+message ListCheckersRequest {
+  common.MsgBase base = 1;
+  repeated int32 checkerIDs = 2;
+}
+
+message ListCheckersResponse {
+  common.Status status = 1;
+  repeated CheckerInfo checkerInfos = 2;
+}
+  
+message CheckerInfo {
+  int32 id = 1;
+  string desc = 2;
+  bool activated = 3;
+  bool found = 4;
+}
+

@@ -28,6 +28,10 @@ if (${CMAKE_SYSTEM_PROCESSOR} STREQUAL "x86_64")
     set_source_files_properties(avx512.cpp PROPERTIES COMPILE_FLAGS "-mavx512f  -mavx512dq -mavx512bw")
 elseif (${CMAKE_SYSTEM_PROCESSOR} MATCHES "arm*")
     # TODO: add arm cpu simd
+    message ("simd using arm mode")
+    list(APPEND MILVUS_SIMD_SRCS
+                neon.cpp
+    )
 endif()
 
 add_library(milvus_simd ${MILVUS_SIMD_SRCS})

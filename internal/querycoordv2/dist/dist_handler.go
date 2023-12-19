@@ -197,13 +197,14 @@ func (dh *distHandler) updateLeaderView(resp *querypb.GetDataDistributionRespons
 		}
 
 		view := &meta.LeaderView{
-			ID:              resp.GetNodeID(),
-			CollectionID:    lview.GetCollection(),
-			Channel:         lview.GetChannel(),
-			Version:         version,
-			Segments:        lview.GetSegmentDist(),
-			GrowingSegments: segments,
-			TargetVersion:   lview.TargetVersion,
+			ID:               resp.GetNodeID(),
+			CollectionID:     lview.GetCollection(),
+			Channel:          lview.GetChannel(),
+			Version:          version,
+			Segments:         lview.GetSegmentDist(),
+			GrowingSegments:  segments,
+			TargetVersion:    lview.TargetVersion,
+			NumOfGrowingRows: lview.GetNumOfGrowingRows(),
 		}
 		updates = append(updates, view)
 	}

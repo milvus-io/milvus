@@ -28,13 +28,14 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 const (
 	baseTimestamp = 43757345
 )
 
-func createDeltalogBuf(t *testing.T, deleteList interface{}, varcharType bool) []byte {
+func createDeltalogBuf(t *testing.T, deleteList interface{}, varcharType bool, startTimestamp uint64) []byte {
 	deleteData := &storage.DeleteData{
 		Pks:      make([]storage.PrimaryKey, 0),
 		Tss:      make([]storage.Timestamp, 0),
@@ -46,7 +47,7 @@ func createDeltalogBuf(t *testing.T, deleteList interface{}, varcharType bool) [
 		assert.NotNil(t, deltaData)
 		for i, id := range deltaData {
 			deleteData.Pks = append(deleteData.Pks, storage.NewVarCharPrimaryKey(id))
-			deleteData.Tss = append(deleteData.Tss, baseTimestamp+uint64(i))
+			deleteData.Tss = append(deleteData.Tss, startTimestamp+uint64(i))
 			deleteData.RowCount++
 		}
 	} else {
@@ -54,7 +55,7 @@ func createDeltalogBuf(t *testing.T, deleteList interface{}, varcharType bool) [
 		assert.NotNil(t, deltaData)
 		for i, id := range deltaData {
 			deleteData.Pks = append(deleteData.Pks, storage.NewInt64PrimaryKey(id))
-			deleteData.Tss = append(deleteData.Tss, baseTimestamp+uint64(i))
+			deleteData.Tss = append(deleteData.Tss, startTimestamp+uint64(i))
 			deleteData.RowCount++
 		}
 	}
@@ -69,6 +70,7 @@ func createDeltalogBuf(t *testing.T, deleteList interface{}, varcharType bool) [
 
 func Test_BinlogAdapterNew(t *testing.T) {
 	ctx := context.Background()
+	paramtable.Init()
 
 	// nil schema
 	adapter, err := NewBinlogAdapter(ctx, nil, 1024, 2048, nil, nil, 0, math.MaxUint64)
@@ -103,10 +105,10 @@ func Test_BinlogAdapterNew(t *testing.T) {
 	assert.NoError(t, err)
 
 	// amend blockSize, blockSize should less than MaxSegmentSizeInMemory
-	adapter, err = NewBinlogAdapter(ctx, collectionInfo, MaxSegmentSizeInMemory+1, 1024, &MockChunkManager{}, flushFunc, 0, math.MaxUint64)
+	adapter, err = NewBinlogAdapter(ctx, collectionInfo, Params.DataCoordCfg.SegmentMaxSize.GetAsInt64()+1, 1024, &MockChunkManager{}, flushFunc, 0, math.MaxUint64)
 	assert.NotNil(t, adapter)
 	assert.NoError(t, err)
-	assert.Equal(t, int64(MaxSegmentSizeInMemory), adapter.blockSize)
+	assert.Equal(t, Params.DataCoordCfg.SegmentMaxSize.GetAsInt64(), adapter.blockSize)
 }
 
 func Test_BinlogAdapterVerify(t *testing.T) {
@@ -134,7 +136,7 @@ func Test_BinlogAdapterVerify(t *testing.T) {
 
 	// row id field missed
 	holder.fieldFiles = make(map[int64][]string)
-	for i := int64(102); i <= 112; i++ {
+	for i := int64(102); i <= 113; i++ {
 		holder.fieldFiles[i] = make([]string, 0)
 	}
 	err = adapter.verify(holder)
@@ -156,7 +158,7 @@ func Test_BinlogAdapterVerify(t *testing.T) {
 	assert.Error(t, err)
 
 	// succeed
-	for i := int64(102); i <= 112; i++ {
+	for i := int64(102); i <= 113; i++ {
 		holder.fieldFiles[i] = []string{
 			"a",
 		}
@@ -169,7 +171,7 @@ func Test_BinlogAdapterReadDeltalog(t *testing.T) {
 	ctx := context.Background()
 
 	deleteItems := []int64{1001, 1002, 1003}
-	buf := createDeltalogBuf(t, deleteItems, false)
+	buf := createDeltalogBuf(t, deleteItems, false, baseTimestamp)
 	chunkManager := &MockChunkManager{
 		readBuf: map[string][]byte{
 			"dummy": buf,
@@ -210,7 +212,7 @@ func Test_BinlogAdapterDecodeDeleteLogs(t *testing.T) {
 	ctx := context.Background()
 
 	deleteItems := []int64{1001, 1002, 1003, 1004, 1005}
-	buf := createDeltalogBuf(t, deleteItems, false)
+	buf := createDeltalogBuf(t, deleteItems, false, baseTimestamp)
 	chunkManager := &MockChunkManager{
 		readBuf: map[string][]byte{
 			"dummy": buf,
@@ -242,7 +244,7 @@ func Test_BinlogAdapterDecodeDeleteLogs(t *testing.T) {
 
 	// wrong data type of delta log
 	chunkManager.readBuf = map[string][]byte{
-		"dummy": createDeltalogBuf(t, []string{"1001", "1002"}, true),
+		"dummy": createDeltalogBuf(t, []string{"1001", "1002"}, true, baseTimestamp),
 	}
 
 	adapter, err = NewBinlogAdapter(ctx, collectionInfo, 1024, 2048, chunkManager, flushFunc, 0, math.MaxUint64)
@@ -315,7 +317,7 @@ func Test_BinlogAdapterReadDeltalogs(t *testing.T) {
 	ctx := context.Background()
 
 	deleteItems := []int64{1001, 1002, 1003, 1004, 1005}
-	buf := createDeltalogBuf(t, deleteItems, false)
+	buf := createDeltalogBuf(t, deleteItems, false, baseTimestamp)
 	chunkManager := &MockChunkManager{
 		readBuf: map[string][]byte{
 			"dummy": buf,
@@ -372,7 +374,7 @@ func Test_BinlogAdapterReadDeltalogs(t *testing.T) {
 		collectionInfo.resetSchema(schema)
 
 		chunkManager.readBuf = map[string][]byte{
-			"dummy": createDeltalogBuf(t, []string{"1001", "1002"}, true),
+			"dummy": createDeltalogBuf(t, []string{"1001", "1002"}, true, baseTimestamp),
 		}
 
 		adapter, err = NewBinlogAdapter(ctx, collectionInfo, 1024, 2048, chunkManager, flushFunc, 0, math.MaxUint64)
@@ -460,7 +462,7 @@ func Test_BinlogAdapterReadTimestamp(t *testing.T) {
 
 	// succeed
 	rowCount := 10
-	fieldsData := createFieldsData(sampleSchema(), rowCount)
+	fieldsData := createFieldsData(sampleSchema(), rowCount, baseTimestamp)
 	chunkManager.readBuf["dummy"] = createBinlogBuf(t, schemapb.DataType_Int64, fieldsData[106].([]int64))
 	ts, err = adapter.readTimestamp("dummy")
 	assert.NoError(t, err)
@@ -500,7 +502,7 @@ func Test_BinlogAdapterReadPrimaryKeys(t *testing.T) {
 
 	// wrong primary key type
 	rowCount := 10
-	fieldsData := createFieldsData(sampleSchema(), rowCount)
+	fieldsData := createFieldsData(sampleSchema(), rowCount, baseTimestamp)
 	chunkManager.readBuf["dummy"] = createBinlogBuf(t, schemapb.DataType_Bool, fieldsData[102].([]bool))
 
 	adapter.collectionInfo.PrimaryKey.DataType = schemapb.DataType_Bool
@@ -543,7 +545,7 @@ func Test_BinlogAdapterShardListInt64(t *testing.T) {
 	assert.NotNil(t, adapter)
 	assert.NoError(t, err)
 
-	fieldsData := createFieldsData(sampleSchema(), 0)
+	fieldsData := createFieldsData(sampleSchema(), 0, baseTimestamp)
 	shardsData := createShardsData(sampleSchema(), fieldsData, shardNum, []int64{1})
 
 	// wrong input
@@ -585,7 +587,7 @@ func Test_BinlogAdapterShardListVarchar(t *testing.T) {
 	assert.NotNil(t, adapter)
 	assert.NoError(t, err)
 
-	fieldsData := createFieldsData(strKeySchema(), 0)
+	fieldsData := createFieldsData(strKeySchema(), 0, baseTimestamp)
 	shardsData := createShardsData(strKeySchema(), fieldsData, shardNum, []int64{1})
 	// wrong input
 	shardList, err := adapter.getShardingListByPrimaryVarchar([]string{"1"}, []int64{1, 2}, shardsData, map[string]uint64{})
@@ -613,6 +615,7 @@ func Test_BinlogAdapterShardListVarchar(t *testing.T) {
 
 func Test_BinlogAdapterReadInt64PK(t *testing.T) {
 	ctx := context.Background()
+	paramtable.Init()
 
 	chunkManager := &MockChunkManager{}
 
@@ -667,6 +670,7 @@ func Test_BinlogAdapterReadInt64PK(t *testing.T) {
 		int64(110): {"110_insertlog"},
 		int64(111): {"111_insertlog"},
 		int64(112): {"112_insertlog"},
+		int64(113): {"113_insertlog"},
 	}
 	holder.deltaFiles = []string{"deltalog"}
 	err = adapter.Read(holder)
@@ -674,7 +678,7 @@ func Test_BinlogAdapterReadInt64PK(t *testing.T) {
 
 	// prepare binlog data
 	rowCount := 1000
-	fieldsData := createFieldsData(sampleSchema(), rowCount)
+	fieldsData := createFieldsData(sampleSchema(), rowCount, baseTimestamp)
 	deletedItems := []int64{41, 51, 100, 400, 600}
 
 	chunkManager.readBuf = map[string][]byte{
@@ -689,7 +693,8 @@ func Test_BinlogAdapterReadInt64PK(t *testing.T) {
 		"110_insertlog": createBinlogBuf(t, schemapb.DataType_BinaryVector, fieldsData[110].([][]byte)),
 		"111_insertlog": createBinlogBuf(t, schemapb.DataType_FloatVector, fieldsData[111].([][]float32)),
 		"112_insertlog": createBinlogBuf(t, schemapb.DataType_JSON, fieldsData[112].([][]byte)),
-		"deltalog":      createDeltalogBuf(t, deletedItems, false),
+		"113_insertlog": createBinlogBuf(t, schemapb.DataType_Array, fieldsData[113].([]*schemapb.ScalarField)),
+		"deltalog":      createDeltalogBuf(t, deletedItems, false, baseTimestamp+300),
 	}
 
 	// failed to read primary keys
@@ -704,15 +709,18 @@ func Test_BinlogAdapterReadInt64PK(t *testing.T) {
 	// succeed flush
 	chunkManager.readBuf["1_insertlog"] = createBinlogBuf(t, schemapb.DataType_Int64, fieldsData[1].([]int64))
 
-	adapter.tsEndPoint = baseTimestamp + uint64(499) // 4 entities deleted, 500 entities excluded
+	// as we createDeltalogBuf with baseTimestamp+300. deletedata pk = {41, 51, 100, 400, 600} ts = {341, 351, 400, 700, 900}
+	// ts = {341, 351, 400} < 499 will be deleted
+	adapter.tsEndPoint = baseTimestamp + uint64(499) // 3 entities deleted, 500 entities excluded
 	err = adapter.Read(holder)
 	assert.NoError(t, err)
 	assert.Equal(t, shardNum, int32(flushCounter))
-	assert.Equal(t, rowCount-4-500, flushRowCount)
+	assert.Equal(t, rowCount-3-500, flushRowCount)
 }
 
 func Test_BinlogAdapterReadVarcharPK(t *testing.T) {
 	ctx := context.Background()
+	paramtable.Init()
 
 	chunkManager := &MockChunkManager{}
 
@@ -784,7 +792,7 @@ func Test_BinlogAdapterReadVarcharPK(t *testing.T) {
 		"104_insertlog": createBinlogBuf(t, schemapb.DataType_VarChar, varcharData),
 		"105_insertlog": createBinlogBuf(t, schemapb.DataType_Bool, boolData),
 		"106_insertlog": createBinlogBuf(t, schemapb.DataType_FloatVector, floatVecData),
-		"deltalog":      createDeltalogBuf(t, deletedItems, true),
+		"deltalog":      createDeltalogBuf(t, deletedItems, true, baseTimestamp+300),
 	}
 
 	// succeed
@@ -796,7 +804,7 @@ func Test_BinlogAdapterReadVarcharPK(t *testing.T) {
 	assert.NotNil(t, adapter)
 	assert.NoError(t, err)
 
-	adapter.tsEndPoint = baseTimestamp + uint64(499) // 3 entities deleted, 500 entities excluded, the "999" is excluded, so totally 502 entities skipped
+	adapter.tsEndPoint = baseTimestamp + uint64(499) // 2 entities deleted, 500 entities excluded, the "999" is excluded, so totally 502 entities skipped
 	err = adapter.Read(holder)
 	assert.NoError(t, err)
 	assert.Equal(t, shardNum, int32(flushCounter))
@@ -819,7 +827,7 @@ func Test_BinlogAdapterDispatch(t *testing.T) {
 
 	// prepare empty in-memory segments data
 	partitionID := int64(1)
-	fieldsData := createFieldsData(sampleSchema(), 0)
+	fieldsData := createFieldsData(sampleSchema(), 0, baseTimestamp)
 	shardsData := createShardsData(sampleSchema(), fieldsData, shardNum, []int64{partitionID})
 
 	shardList := []int32{0, -1, 1}
@@ -1013,6 +1021,79 @@ func Test_BinlogAdapterDispatch(t *testing.T) {
 		assert.Equal(t, 0, shardsData[2][partitionID][fieldID].RowNum())
 	})
 
+	t.Run("dispatch Array data", func(t *testing.T) {
+		fieldID := int64(113)
+		// row count mismatch
+		data := []*schemapb.ScalarField{
+			{
+				Data: &schemapb.ScalarField_IntData{
+					IntData: &schemapb.IntArray{
+						Data: []int32{1, 2, 3, 4, 5},
+					},
+				},
+			},
+			{
+				Data: &schemapb.ScalarField_IntData{
+					IntData: &schemapb.IntArray{
+						Data: []int32{7, 8, 9},
+					},
+				},
+			},
+			{
+				Data: &schemapb.ScalarField_IntData{
+					IntData: &schemapb.IntArray{
+						Data: []int32{10, 11},
+					},
+				},
+			},
+			{
+				Data: &schemapb.ScalarField_IntData{
+					IntData: &schemapb.IntArray{
+						Data: []int32{},
+					},
+				},
+			},
+		}
+		err = adapter.dispatchArrayToShards(data, shardsData, shardList, fieldID)
+		assert.Error(t, err)
+		for _, shardData := range shardsData {
+			assert.Equal(t, 0, shardData[partitionID][fieldID].RowNum())
+		}
+
+		// illegal shard ID
+		err = adapter.dispatchArrayToShards(data, shardsData, []int32{9, 1, 0, 2}, fieldID)
+		assert.Error(t, err)
+
+		// succeed
+		err = adapter.dispatchArrayToShards([]*schemapb.ScalarField{
+			{
+				Data: &schemapb.ScalarField_IntData{
+					IntData: &schemapb.IntArray{
+						Data: []int32{},
+					},
+				},
+			},
+			{
+				Data: &schemapb.ScalarField_IntData{
+					IntData: &schemapb.IntArray{
+						Data: []int32{},
+					},
+				},
+			},
+			{
+				Data: &schemapb.ScalarField_IntData{
+					IntData: &schemapb.IntArray{
+						Data: []int32{},
+					},
+				},
+			},
+		}, shardsData, shardList, fieldID)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, shardsData[0][partitionID][fieldID].RowNum())
+		assert.Equal(t, 1, shardsData[1][partitionID][fieldID].RowNum())
+		assert.Equal(t, 0, shardsData[2][partitionID][fieldID].RowNum())
+	})
+
 	t.Run("dispatch binary vector data", func(t *testing.T) {
 		fieldID := int64(110)
 		// row count mismatch
@@ -1069,7 +1150,7 @@ func Test_BinlogAdapterVerifyField(t *testing.T) {
 
 	shardNum := int32(2)
 	partitionID := int64(1)
-	fieldsData := createFieldsData(sampleSchema(), 0)
+	fieldsData := createFieldsData(sampleSchema(), 0, baseTimestamp)
 	shardsData := createShardsData(sampleSchema(), fieldsData, shardNum, []int64{partitionID})
 
 	flushFunc := func(fields BlockData, shardID int, partID int64) error {
@@ -1096,7 +1177,7 @@ func Test_BinlogAdapterReadInsertlog(t *testing.T) {
 
 	shardNum := int32(2)
 	partitionID := int64(1)
-	fieldsData := createFieldsData(sampleSchema(), 0)
+	fieldsData := createFieldsData(sampleSchema(), 0, baseTimestamp)
 	shardsData := createShardsData(sampleSchema(), fieldsData, shardNum, []int64{partitionID})
 
 	flushFunc := func(fields BlockData, shardID int, partID int64) error {
@@ -1128,7 +1209,7 @@ func Test_BinlogAdapterReadInsertlog(t *testing.T) {
 
 	// prepare binlog data
 	rowCount := 3
-	fieldsData = createFieldsData(sampleSchema(), rowCount)
+	fieldsData = createFieldsData(sampleSchema(), rowCount, baseTimestamp)
 
 	failedFunc := func(fieldID int64, fieldName string, fieldType schemapb.DataType, wrongField int64, wrongType schemapb.DataType) {
 		// row count mismatch
@@ -1184,6 +1265,10 @@ func Test_BinlogAdapterReadInsertlog(t *testing.T) {
 
 	t.Run("failed to dispatch floatvector data", func(t *testing.T) {
 		failedFunc(111, "floatvector", schemapb.DataType_FloatVector, 110, schemapb.DataType_BinaryVector)
+	})
+
+	t.Run("failed to dispatch Array data", func(t *testing.T) {
+		failedFunc(113, "array", schemapb.DataType_Array, 111, schemapb.DataType_FloatVector)
 	})
 
 	// succeed

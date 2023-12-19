@@ -140,6 +140,22 @@ func GetDSLFromRequest(req interface{}) (any, bool) {
 	return getter.GetDsl(), true
 }
 
+type StatusGetter interface {
+	GetStatus() *commonpb.Status
+}
+
+func GetStatusFromResponse(resp interface{}) (*commonpb.Status, bool) {
+	status, ok := resp.(*commonpb.Status)
+	if ok {
+		return status, true
+	}
+	getter, ok := resp.(StatusGetter)
+	if !ok {
+		return nil, false
+	}
+	return getter.GetStatus(), true
+}
+
 var TraceLogBaseInfoFuncMap = map[string]func(interface{}) (any, bool){
 	"collection_name": GetCollectionNameFromRequest,
 	"db_name":         GetDbNameFromRequest,

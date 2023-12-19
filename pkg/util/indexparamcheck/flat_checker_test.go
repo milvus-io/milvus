@@ -62,3 +62,40 @@ func Test_flatChecker_CheckTrain(t *testing.T) {
 		}
 	}
 }
+
+func Test_flatChecker_StaticCheck(t *testing.T) {
+	cases := []struct {
+		params   map[string]string
+		errIsNil bool
+	}{
+		{
+			// metrics not found.
+			params:   map[string]string{},
+			errIsNil: false,
+		},
+		{
+			// invalid metric.
+			params: map[string]string{
+				Metric: metric.HAMMING,
+			},
+			errIsNil: false,
+		},
+		{
+			// normal case.
+			params: map[string]string{
+				Metric: metric.L2,
+			},
+			errIsNil: true,
+		},
+	}
+
+	c := newFlatChecker()
+	for _, test := range cases {
+		err := c.StaticCheck(test.params)
+		if test.errIsNil {
+			assert.NoError(t, err)
+		} else {
+			assert.Error(t, err)
+		}
+	}
+}

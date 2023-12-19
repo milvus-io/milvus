@@ -726,20 +726,14 @@ func TestMeta_PrepareCompleteCompactionMutation(t *testing.T) {
 	inCompactionResult := &datapb.CompactionPlanResult{
 		Segments: []*datapb.CompactionSegment{inSegment},
 	}
-	beforeCompact, afterCompact, newSegment, metricMutation, err := m.PrepareCompleteCompactionMutation(plan, inCompactionResult)
+	afterCompact, newSegment, metricMutation, err := m.PrepareCompleteCompactionMutation(plan, inCompactionResult)
 	assert.NoError(t, err)
-	assert.NotNil(t, beforeCompact)
 	assert.NotNil(t, afterCompact)
 	assert.NotNil(t, newSegment)
-	assert.Equal(t, 3, len(metricMutation.stateChange[datapb.SegmentLevel_Legacy.String()]))
+	assert.Equal(t, 2, len(metricMutation.stateChange[datapb.SegmentLevel_Legacy.String()]))
+	assert.Equal(t, 1, len(metricMutation.stateChange[datapb.SegmentLevel_L1.String()]))
 	assert.Equal(t, int64(0), metricMutation.rowCountChange)
 	assert.Equal(t, int64(2), metricMutation.rowCountAccChange)
-
-	require.Equal(t, 2, len(beforeCompact))
-	assert.Equal(t, commonpb.SegmentState_Flushed, beforeCompact[0].GetState())
-	assert.Equal(t, commonpb.SegmentState_Flushed, beforeCompact[1].GetState())
-	assert.Zero(t, beforeCompact[0].GetDroppedAt())
-	assert.Zero(t, beforeCompact[1].GetDroppedAt())
 
 	require.Equal(t, 2, len(afterCompact))
 	assert.Equal(t, commonpb.SegmentState_Dropped, afterCompact[0].GetState())

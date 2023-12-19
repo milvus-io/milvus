@@ -23,11 +23,13 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
 
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -92,16 +94,30 @@ func (b *ScoreBasedBalancer) convertToNodeItems(collectionID int64, nodeIDs []in
 }
 
 func (b *ScoreBasedBalancer) calculatePriority(collectionID, nodeID int64) int {
-	globalSegments := b.dist.SegmentDistManager.GetByNode(nodeID)
 	rowCount := 0
+	// calculate global sealed segment row count
+	globalSegments := b.dist.SegmentDistManager.GetByNode(nodeID)
 	for _, s := range globalSegments {
 		rowCount += int(s.GetNumOfRows())
 	}
 
-	collectionSegments := b.dist.SegmentDistManager.GetByCollectionAndNode(collectionID, nodeID)
+	// calculate global growing segment row count
+	views := b.dist.GetLeaderView(nodeID)
+	for _, view := range views {
+		rowCount += int(view.NumOfGrowingRows)
+	}
+
 	collectionRowCount := 0
+	// calculate collection sealed segment row count
+	collectionSegments := b.dist.SegmentDistManager.GetByCollectionAndNode(collectionID, nodeID)
 	for _, s := range collectionSegments {
 		collectionRowCount += int(s.GetNumOfRows())
+	}
+
+	// calculate collection growing segment row count
+	collectionViews := b.dist.LeaderViewManager.GetByCollectionAndNode(collectionID, nodeID)
+	for _, view := range collectionViews {
+		collectionRowCount += int(view.NumOfGrowingRows)
 	}
 	return collectionRowCount + int(float64(rowCount)*
 		params.Params.QueryCoordCfg.GlobalRowCountFactor.GetAsFloat())
@@ -122,7 +138,9 @@ func (b *ScoreBasedBalancer) BalanceReplica(replica *meta.Replica) ([]SegmentAss
 		segments := b.dist.SegmentDistManager.GetByCollectionAndNode(replica.GetCollectionID(), nid)
 		// Only balance segments in targets
 		segments = lo.Filter(segments, func(segment *meta.Segment, _ int) bool {
-			return b.targetMgr.GetSealedSegment(segment.GetCollectionID(), segment.GetID(), meta.CurrentTarget) != nil
+			return b.targetMgr.GetSealedSegment(segment.GetCollectionID(), segment.GetID(), meta.CurrentTarget) != nil &&
+				b.targetMgr.GetSealedSegment(segment.GetCollectionID(), segment.GetID(), meta.NextTarget) != nil &&
+				segment.GetLevel() != datapb.SegmentLevel_L0
 		})
 
 		if isStopping, err := b.nodeManager.IsStoppingNode(nid); err != nil {
@@ -174,13 +192,20 @@ func (b *ScoreBasedBalancer) BalanceReplica(replica *meta.Replica) ([]SegmentAss
 			zap.Any("available nodes", maps.Keys(nodesSegments)),
 		)
 		// handle stopped nodes here, have to assign segments on stopping nodes to nodes with the smallest score
-		segmentPlans = append(segmentPlans, b.getStoppedSegmentPlan(replica, nodesSegments, stoppingNodesSegments)...)
-		channelPlans = append(channelPlans, b.genChannelPlan(replica, lo.Keys(nodesSegments), lo.Keys(stoppingNodesSegments))...)
+		channelPlans = append(channelPlans, b.genStoppingChannelPlan(replica, lo.Keys(nodesSegments), lo.Keys(stoppingNodesSegments))...)
+		if len(channelPlans) == 0 {
+			segmentPlans = append(segmentPlans, b.genStoppingSegmentPlan(replica, nodesSegments, stoppingNodesSegments)...)
+		}
 	} else {
-		// normal balance, find segments from largest score nodes and transfer to smallest score nodes.
-		segmentPlans = append(segmentPlans, b.getNormalSegmentPlan(replica, nodesSegments)...)
-		channelPlans = append(channelPlans, b.genChannelPlan(replica, lo.Keys(nodesSegments), nil)...)
+		if paramtable.Get().QueryCoordCfg.AutoBalanceChannel.GetAsBool() {
+			channelPlans = append(channelPlans, b.genChannelPlan(replica, lo.Keys(nodesSegments))...)
+		}
+
+		if len(channelPlans) == 0 {
+			segmentPlans = append(segmentPlans, b.genSegmentPlan(replica, nodesSegments)...)
+		}
 	}
+
 	if len(segmentPlans) != 0 || len(channelPlans) != 0 {
 		PrintCurrentReplicaDist(replica, stoppingNodesSegments, nodesSegments, b.dist.ChannelDistManager, b.dist.SegmentDistManager)
 	}
@@ -188,7 +213,7 @@ func (b *ScoreBasedBalancer) BalanceReplica(replica *meta.Replica) ([]SegmentAss
 	return segmentPlans, channelPlans
 }
 
-func (b *ScoreBasedBalancer) getStoppedSegmentPlan(replica *meta.Replica, nodesSegments map[int64][]*meta.Segment, stoppingNodesSegments map[int64][]*meta.Segment) []SegmentAssignPlan {
+func (b *ScoreBasedBalancer) genStoppingSegmentPlan(replica *meta.Replica, nodesSegments map[int64][]*meta.Segment, stoppingNodesSegments map[int64][]*meta.Segment) []SegmentAssignPlan {
 	segmentPlans := make([]SegmentAssignPlan, 0)
 	// generate candidates
 	nodeItems := b.convertToNodeItems(replica.GetCollectionID(), lo.Keys(nodesSegments))
@@ -231,7 +256,7 @@ func (b *ScoreBasedBalancer) getStoppedSegmentPlan(replica *meta.Replica, nodesS
 	return segmentPlans
 }
 
-func (b *ScoreBasedBalancer) getNormalSegmentPlan(replica *meta.Replica, nodesSegments map[int64][]*meta.Segment) []SegmentAssignPlan {
+func (b *ScoreBasedBalancer) genSegmentPlan(replica *meta.Replica, nodesSegments map[int64][]*meta.Segment) []SegmentAssignPlan {
 	segmentPlans := make([]SegmentAssignPlan, 0)
 
 	// generate candidates
@@ -256,6 +281,9 @@ func (b *ScoreBasedBalancer) getNormalSegmentPlan(replica *meta.Replica, nodesSe
 		// sort the segments in asc order, try to mitigate to-from-unbalance
 		// TODO: segment infos inside dist manager may change in the process of making balance plan
 		fromSegments := b.dist.SegmentDistManager.GetByCollectionAndNode(replica.CollectionID, fromNode.nodeID)
+		fromSegments = lo.Filter(fromSegments, func(segment *meta.Segment, _ int) bool {
+			return segment.GetLevel() != datapb.SegmentLevel_L0
+		})
 		sort.Slice(fromSegments, func(i, j int) bool {
 			return fromSegments[i].GetNumOfRows() < fromSegments[j].GetNumOfRows()
 		})

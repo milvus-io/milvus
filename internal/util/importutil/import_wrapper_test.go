@@ -28,6 +28,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/apache/arrow/go/v12/parquet"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"golang.org/x/exp/mmap"
@@ -36,7 +37,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -144,6 +144,10 @@ func (mc *MockChunkManager) RemoveWithPrefix(ctx context.Context, prefix string)
 	return nil
 }
 
+func (mc *MockChunkManager) NewParquetReaderAtSeeker(fileName string) (parquet.ReaderAtSeeker, error) {
+	panic("implement me")
+}
+
 type rowCounterTest struct {
 	rowCount int
 	callTime int
@@ -185,7 +189,7 @@ func Test_ImportWrapperNew(t *testing.T) {
 	ctx := context.Background()
 	cm, err := f.NewPersistentStorageChunkManager(ctx)
 	assert.NoError(t, err)
-	wrapper := NewImportWrapper(ctx, nil, 1, ReadBufferSize, nil, cm, nil, nil)
+	wrapper := NewImportWrapper(ctx, nil, 1, Params.DataNodeCfg.BulkInsertReadBufferSize.GetAsInt64(), nil, cm, nil, nil)
 	assert.Nil(t, wrapper)
 
 	schema := &schemapb.CollectionSchema{
@@ -205,7 +209,7 @@ func Test_ImportWrapperNew(t *testing.T) {
 	})
 	collectionInfo, err := NewCollectionInfo(schema, 2, []int64{1})
 	assert.NoError(t, err)
-	wrapper = NewImportWrapper(ctx, collectionInfo, 1, ReadBufferSize, nil, cm, nil, nil)
+	wrapper = NewImportWrapper(ctx, collectionInfo, 1, Params.DataNodeCfg.BulkInsertReadBufferSize.GetAsInt64(), nil, cm, nil, nil)
 	assert.NotNil(t, wrapper)
 
 	assignSegFunc := func(shardID int, partID int64) (int64, string, error) {
@@ -250,11 +254,11 @@ func Test_ImportWrapperRowBased(t *testing.T) {
 
 	content := []byte(`{
 		"rows":[
-			{"FieldBool": true, "FieldInt8": 10, "FieldInt16": 101, "FieldInt32": 1001, "FieldInt64": 10001, "FieldFloat": 3.14, "FieldDouble": 1.56, "FieldString": "hello world", "FieldJSON": {"x": 2}, "FieldBinaryVector": [254, 0], "FieldFloatVector": [1.1, 1.2, 1.3, 1.4], "FieldJSON": {"a": 7, "b": true}},
-			{"FieldBool": false, "FieldInt8": 11, "FieldInt16": 102, "FieldInt32": 1002, "FieldInt64": 10002, "FieldFloat": 3.15, "FieldDouble": 2.56, "FieldString": "hello world", "FieldJSON": "{\"k\": 2.5}", "FieldBinaryVector": [253, 0], "FieldFloatVector": [2.1, 2.2, 2.3, 2.4], "FieldJSON": {"a": 8, "b": 2}},
-			{"FieldBool": true, "FieldInt8": 12, "FieldInt16": 103, "FieldInt32": 1003, "FieldInt64": 10003, "FieldFloat": 3.16, "FieldDouble": 3.56, "FieldString": "hello world", "FieldJSON": {"y": "hello"}, "FieldBinaryVector": [252, 0], "FieldFloatVector": [3.1, 3.2, 3.3, 3.4], "FieldJSON": {"a": 9, "b": false}},
-			{"FieldBool": false, "FieldInt8": 13, "FieldInt16": 104, "FieldInt32": 1004, "FieldInt64": 10004, "FieldFloat": 3.17, "FieldDouble": 4.56, "FieldString": "hello world", "FieldJSON": "{}", "FieldBinaryVector": [251, 0], "FieldFloatVector": [4.1, 4.2, 4.3, 4.4], "FieldJSON": {"a": 10, "b": 2.15}},
-			{"FieldBool": true, "FieldInt8": 14, "FieldInt16": 105, "FieldInt32": 1005, "FieldInt64": 10005, "FieldFloat": 3.18, "FieldDouble": 5.56, "FieldString": "hello world", "FieldJSON": "{\"x\": true}", "FieldBinaryVector": [250, 0], "FieldFloatVector": [5.1, 5.2, 5.3, 5.4], "FieldJSON": {"a": 11, "b": "s"}}
+			{"FieldBool": true, "FieldInt8": 10, "FieldInt16": 101, "FieldInt32": 1001, "FieldInt64": 10001, "FieldFloat": 3.14, "FieldDouble": 1.56, "FieldString": "hello world", "FieldJSON": {"x": 2}, "FieldBinaryVector": [254, 0], "FieldFloatVector": [1.1, 1.2, 1.3, 1.4], "FieldJSON": {"a": 7, "b": true}, "FieldArray": [1, 2, 3, 4]},
+			{"FieldBool": false, "FieldInt8": 11, "FieldInt16": 102, "FieldInt32": 1002, "FieldInt64": 10002, "FieldFloat": 3.15, "FieldDouble": 2.56, "FieldString": "hello world", "FieldJSON": "{\"k\": 2.5}", "FieldBinaryVector": [253, 0], "FieldFloatVector": [2.1, 2.2, 2.3, 2.4], "FieldJSON": {"a": 8, "b": 2}, "FieldArray": [5, 6, 7, 8]},
+			{"FieldBool": true, "FieldInt8": 12, "FieldInt16": 103, "FieldInt32": 1003, "FieldInt64": 10003, "FieldFloat": 3.16, "FieldDouble": 3.56, "FieldString": "hello world", "FieldJSON": {"y": "hello"}, "FieldBinaryVector": [252, 0], "FieldFloatVector": [3.1, 3.2, 3.3, 3.4], "FieldJSON": {"a": 9, "b": false}, "FieldArray": [11, 22, 33, 44]},
+			{"FieldBool": false, "FieldInt8": 13, "FieldInt16": 104, "FieldInt32": 1004, "FieldInt64": 10004, "FieldFloat": 3.17, "FieldDouble": 4.56, "FieldString": "hello world", "FieldJSON": "{}", "FieldBinaryVector": [251, 0], "FieldFloatVector": [4.1, 4.2, 4.3, 4.4], "FieldJSON": {"a": 10, "b": 2.15}, "FieldArray": [10, 12, 13, 14]},
+			{"FieldBool": true, "FieldInt8": 14, "FieldInt16": 105, "FieldInt32": 1005, "FieldInt64": 10005, "FieldFloat": 3.18, "FieldDouble": 5.56, "FieldString": "hello world", "FieldJSON": "{\"x\": true}", "FieldBinaryVector": [250, 0], "FieldFloatVector": [5.1, 5.2, 5.3, 5.4], "FieldJSON": {"a": 11, "b": "s"}, "FieldArray": [21, 22, 23, 24]}
 		]
 	}`)
 
@@ -282,7 +286,7 @@ func Test_ImportWrapperRowBased(t *testing.T) {
 	assert.NoError(t, err)
 
 	t.Run("success case", func(t *testing.T) {
-		wrapper := NewImportWrapper(ctx, collectionInfo, 1, ReadBufferSize, idAllocator, cm, importResult, reportFunc)
+		wrapper := NewImportWrapper(ctx, collectionInfo, 1, Params.DataNodeCfg.BulkInsertReadBufferSize.GetAsInt64(), idAllocator, cm, importResult, reportFunc)
 		wrapper.SetCallbackFunctions(assignSegmentFunc, flushFunc, saveSegmentFunc)
 		files := make([]string, 0)
 		files = append(files, filePath)
@@ -308,7 +312,7 @@ func Test_ImportWrapperRowBased(t *testing.T) {
 		assert.NoError(t, err)
 
 		importResult.State = commonpb.ImportState_ImportStarted
-		wrapper := NewImportWrapper(ctx, collectionInfo, 1, ReadBufferSize, idAllocator, cm, importResult, reportFunc)
+		wrapper := NewImportWrapper(ctx, collectionInfo, 1, Params.DataNodeCfg.BulkInsertReadBufferSize.GetAsInt64(), idAllocator, cm, importResult, reportFunc)
 		wrapper.SetCallbackFunctions(assignSegmentFunc, flushFunc, saveSegmentFunc)
 		files := make([]string, 0)
 		files = append(files, filePath)
@@ -320,94 +324,7 @@ func Test_ImportWrapperRowBased(t *testing.T) {
 	t.Run("file doesn't exist", func(t *testing.T) {
 		files := make([]string, 0)
 		files = append(files, "/dummy/dummy.json")
-		wrapper := NewImportWrapper(ctx, collectionInfo, 1, ReadBufferSize, idAllocator, cm, importResult, reportFunc)
-		err = wrapper.Import(files, ImportOptions{OnlyValidate: true})
-		assert.Error(t, err)
-	})
-}
-
-func Test_ImportWrapperRowBased_CSV(t *testing.T) {
-	err := os.MkdirAll(TempFilesPath, os.ModePerm)
-	assert.NoError(t, err)
-	defer os.RemoveAll(TempFilesPath)
-	paramtable.Init()
-
-	// NewDefaultFactory() use "/tmp/milvus" as default root path, and cannot specify root path
-	// NewChunkManagerFactory() can specify the root path
-	f := storage.NewChunkManagerFactory("local", storage.RootPath(TempFilesPath))
-	ctx := context.Background()
-	cm, err := f.NewPersistentStorageChunkManager(ctx)
-	assert.NoError(t, err)
-	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
-
-	idAllocator := newIDAllocator(ctx, t, nil)
-	content := []byte(
-		`FieldBool,FieldInt8,FieldInt16,FieldInt32,FieldInt64,FieldFloat,FieldDouble,FieldString,FieldJSON,FieldBinaryVector,FieldFloatVector
-	true,10,101,1001,10001,3.14,1.56,No.0,"{""x"": 0}","[200,0]","[0.1,0.2,0.3,0.4]"
-	false,11,102,1002,10002,3.15,1.57,No.1,"{""x"": 1}","[201,0]","[0.1,0.2,0.3,0.4]"
-	true,12,103,1003,10003,3.16,1.58,No.2,"{""x"": 2}","[202,0]","[0.1,0.2,0.3,0.4]"`)
-
-	filePath := TempFilesPath + "rows_1.csv"
-	err = cm.Write(ctx, filePath, content)
-	assert.NoError(t, err)
-	rowCounter := &rowCounterTest{}
-	assignSegmentFunc, flushFunc, saveSegmentFunc := createMockCallbackFunctions(t, rowCounter)
-	importResult := &rootcoordpb.ImportResult{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
-		TaskId:     1,
-		DatanodeId: 1,
-		State:      commonpb.ImportState_ImportStarted,
-		Segments:   make([]int64, 0),
-		AutoIds:    make([]int64, 0),
-		RowCount:   0,
-	}
-
-	reportFunc := func(res *rootcoordpb.ImportResult) error {
-		return nil
-	}
-	collectionInfo, err := NewCollectionInfo(sampleSchema(), 2, []int64{1})
-	assert.NoError(t, err)
-
-	t.Run("success case", func(t *testing.T) {
-		wrapper := NewImportWrapper(ctx, collectionInfo, 1, ReadBufferSize, idAllocator, cm, importResult, reportFunc)
-		wrapper.SetCallbackFunctions(assignSegmentFunc, flushFunc, saveSegmentFunc)
-		files := make([]string, 0)
-		files = append(files, filePath)
-		err = wrapper.Import(files, ImportOptions{OnlyValidate: true})
-		assert.NoError(t, err)
-		assert.Equal(t, 0, rowCounter.rowCount)
-
-		err = wrapper.Import(files, DefaultImportOptions())
-		assert.NoError(t, err)
-		assert.Equal(t, 3, rowCounter.rowCount)
-		assert.Equal(t, commonpb.ImportState_ImportPersisted, importResult.State)
-	})
-
-	t.Run("parse error", func(t *testing.T) {
-		content := []byte(
-			`FieldBool,FieldInt8,FieldInt16,FieldInt32,FieldInt64,FieldFloat,FieldDouble,FieldString,FieldJSON,FieldBinaryVector,FieldFloatVector
-		true,false,103,1003,10003,3.16,1.58,No.2,"{""x"": 2}","[202,0]","[0.1,0.2,0.3,0.4]"`)
-
-		filePath = TempFilesPath + "rows_2.csv"
-		err = cm.Write(ctx, filePath, content)
-		assert.NoError(t, err)
-
-		importResult.State = commonpb.ImportState_ImportStarted
-		wrapper := NewImportWrapper(ctx, collectionInfo, 1, ReadBufferSize, idAllocator, cm, importResult, reportFunc)
-		wrapper.SetCallbackFunctions(assignSegmentFunc, flushFunc, saveSegmentFunc)
-		files := make([]string, 0)
-		files = append(files, filePath)
-		err = wrapper.Import(files, ImportOptions{OnlyValidate: true})
-		assert.Error(t, err)
-		assert.NotEqual(t, commonpb.ImportState_ImportPersisted, importResult.State)
-	})
-
-	t.Run("file doesn't exist", func(t *testing.T) {
-		files := make([]string, 0)
-		files = append(files, "/dummy/dummy.csv")
-		wrapper := NewImportWrapper(ctx, collectionInfo, 1, ReadBufferSize, idAllocator, cm, importResult, reportFunc)
+		wrapper := NewImportWrapper(ctx, collectionInfo, 1, Params.DataNodeCfg.BulkInsertReadBufferSize.GetAsInt64(), idAllocator, cm, importResult, reportFunc)
 		err = wrapper.Import(files, ImportOptions{OnlyValidate: true})
 		assert.Error(t, err)
 	})
@@ -443,13 +360,14 @@ func Test_ImportWrapperColumnBased_numpy(t *testing.T) {
 	reportFunc := func(res *rootcoordpb.ImportResult) error {
 		return nil
 	}
-	collectionInfo, err := NewCollectionInfo(sampleSchema(), 2, []int64{1})
+	schema := createNumpySchema()
+	collectionInfo, err := NewCollectionInfo(schema, 2, []int64{1})
 	assert.NoError(t, err)
 
 	files := createSampleNumpyFiles(t, cm)
 
 	t.Run("success case", func(t *testing.T) {
-		wrapper := NewImportWrapper(ctx, collectionInfo, 1, ReadBufferSize, idAllocator, cm, importResult, reportFunc)
+		wrapper := NewImportWrapper(ctx, collectionInfo, 1, Params.DataNodeCfg.BulkInsertReadBufferSize.GetAsInt64(), idAllocator, cm, importResult, reportFunc)
 		wrapper.SetCallbackFunctions(assignSegmentFunc, flushFunc, saveSegmentFunc)
 
 		err = wrapper.Import(files, DefaultImportOptions())
@@ -467,7 +385,7 @@ func Test_ImportWrapperColumnBased_numpy(t *testing.T) {
 		files[1] = filePath
 
 		importResult.State = commonpb.ImportState_ImportStarted
-		wrapper := NewImportWrapper(ctx, collectionInfo, 1, ReadBufferSize, idAllocator, cm, importResult, reportFunc)
+		wrapper := NewImportWrapper(ctx, collectionInfo, 1, Params.DataNodeCfg.BulkInsertReadBufferSize.GetAsInt64(), idAllocator, cm, importResult, reportFunc)
 		wrapper.SetCallbackFunctions(assignSegmentFunc, flushFunc, saveSegmentFunc)
 
 		err = wrapper.Import(files, DefaultImportOptions())
@@ -478,7 +396,7 @@ func Test_ImportWrapperColumnBased_numpy(t *testing.T) {
 	t.Run("file doesn't exist", func(t *testing.T) {
 		files := make([]string, 0)
 		files = append(files, "/dummy/dummy.npy")
-		wrapper := NewImportWrapper(ctx, collectionInfo, 1, ReadBufferSize, idAllocator, cm, importResult, reportFunc)
+		wrapper := NewImportWrapper(ctx, collectionInfo, 1, Params.DataNodeCfg.BulkInsertReadBufferSize.GetAsInt64(), idAllocator, cm, importResult, reportFunc)
 		err = wrapper.Import(files, DefaultImportOptions())
 		assert.Error(t, err)
 	})
@@ -598,7 +516,7 @@ func Test_ImportWrapperRowBased_perf(t *testing.T) {
 	}
 	collectionInfo, err := NewCollectionInfo(schema, int32(shardNum), []int64{1})
 	assert.NoError(t, err)
-	wrapper := NewImportWrapper(ctx, collectionInfo, int64(segmentSize), ReadBufferSize, idAllocator, cm, importResult, reportFunc)
+	wrapper := NewImportWrapper(ctx, collectionInfo, int64(segmentSize), Params.DataNodeCfg.BulkInsertReadBufferSize.GetAsInt64(), idAllocator, cm, importResult, reportFunc)
 	wrapper.SetCallbackFunctions(assignSegmentFunc, flushFunc, saveSegmentFunc)
 
 	files := make([]string, 0)
@@ -642,7 +560,7 @@ func Test_ImportWrapperFileValidation(t *testing.T) {
 
 	collectionInfo, err := NewCollectionInfo(schema, int32(shardNum), []int64{1})
 	assert.NoError(t, err)
-	wrapper := NewImportWrapper(ctx, collectionInfo, int64(segmentSize), ReadBufferSize, idAllocator, cm, nil, nil)
+	wrapper := NewImportWrapper(ctx, collectionInfo, int64(segmentSize), Params.DataNodeCfg.BulkInsertReadBufferSize.GetAsInt64(), idAllocator, cm, nil, nil)
 
 	t.Run("unsupported file type", func(t *testing.T) {
 		files := []string{"uid.txt"}
@@ -692,7 +610,7 @@ func Test_ImportWrapperFileValidation(t *testing.T) {
 	t.Run("empty file list", func(t *testing.T) {
 		files := []string{}
 		cm.size = 0
-		wrapper = NewImportWrapper(ctx, collectionInfo, int64(segmentSize), ReadBufferSize, idAllocator, cm, nil, nil)
+		wrapper = NewImportWrapper(ctx, collectionInfo, int64(segmentSize), Params.DataNodeCfg.BulkInsertReadBufferSize.GetAsInt64(), idAllocator, cm, nil, nil)
 		rowBased, err := wrapper.fileValidation(files)
 		assert.NoError(t, err)
 		assert.False(t, rowBased)
@@ -700,8 +618,8 @@ func Test_ImportWrapperFileValidation(t *testing.T) {
 
 	t.Run("file size exceed MaxFileSize limit", func(t *testing.T) {
 		files := []string{"a/1.json"}
-		cm.size = params.Params.CommonCfg.ImportMaxFileSize.GetAsInt64() + 1
-		wrapper = NewImportWrapper(ctx, collectionInfo, int64(segmentSize), ReadBufferSize, idAllocator, cm, nil, nil)
+		cm.size = Params.CommonCfg.ImportMaxFileSize.GetAsInt64() + 1
+		wrapper = NewImportWrapper(ctx, collectionInfo, int64(segmentSize), Params.DataNodeCfg.BulkInsertReadBufferSize.GetAsInt64(), idAllocator, cm, nil, nil)
 		rowBased, err := wrapper.fileValidation(files)
 		assert.Error(t, err)
 		assert.True(t, rowBased)
@@ -741,11 +659,11 @@ func Test_ImportWrapperReportFailRowBased(t *testing.T) {
 
 	content := []byte(`{
 		"rows":[
-			{"FieldBool": true, "FieldInt8": 10, "FieldInt16": 101, "FieldInt32": 1001, "FieldInt64": 10001, "FieldFloat": 3.14, "FieldDouble": 1.56, "FieldString": "hello world", "FieldJSON": "{\"x\": \"aaa\"}", "FieldBinaryVector": [254, 0], "FieldFloatVector": [1.1, 1.2, 1.3, 1.4], "FieldJSON": {"a": 9, "b": false}},
-			{"FieldBool": false, "FieldInt8": 11, "FieldInt16": 102, "FieldInt32": 1002, "FieldInt64": 10002, "FieldFloat": 3.15, "FieldDouble": 2.56, "FieldString": "hello world", "FieldJSON": "{}", "FieldBinaryVector": [253, 0], "FieldFloatVector": [2.1, 2.2, 2.3, 2.4], "FieldJSON": {"a": 9, "b": false}},
-			{"FieldBool": true, "FieldInt8": 12, "FieldInt16": 103, "FieldInt32": 1003, "FieldInt64": 10003, "FieldFloat": 3.16, "FieldDouble": 3.56, "FieldString": "hello world", "FieldJSON": "{\"x\": 2, \"y\": 5}", "FieldBinaryVector": [252, 0], "FieldFloatVector": [3.1, 3.2, 3.3, 3.4], "FieldJSON": {"a": 9, "b": false}},
-			{"FieldBool": false, "FieldInt8": 13, "FieldInt16": 104, "FieldInt32": 1004, "FieldInt64": 10004, "FieldFloat": 3.17, "FieldDouble": 4.56, "FieldString": "hello world", "FieldJSON": "{\"x\": true}", "FieldBinaryVector": [251, 0], "FieldFloatVector": [4.1, 4.2, 4.3, 4.4], "FieldJSON": {"a": 9, "b": false}},
-			{"FieldBool": true, "FieldInt8": 14, "FieldInt16": 105, "FieldInt32": 1005, "FieldInt64": 10005, "FieldFloat": 3.18, "FieldDouble": 5.56, "FieldString": "hello world", "FieldJSON": "{}", "FieldBinaryVector": [250, 0], "FieldFloatVector": [5.1, 5.2, 5.3, 5.4], "FieldJSON": {"a": 9, "b": false}}
+			{"FieldBool": true, "FieldInt8": 10, "FieldInt16": 101, "FieldInt32": 1001, "FieldInt64": 10001, "FieldFloat": 3.14, "FieldDouble": 1.56, "FieldString": "hello world", "FieldJSON": "{\"x\": \"aaa\"}", "FieldBinaryVector": [254, 0], "FieldFloatVector": [1.1, 1.2, 1.3, 1.4], "FieldJSON": {"a": 9, "b": false}, "FieldArray": [1, 2, 3, 4]},
+			{"FieldBool": false, "FieldInt8": 11, "FieldInt16": 102, "FieldInt32": 1002, "FieldInt64": 10002, "FieldFloat": 3.15, "FieldDouble": 2.56, "FieldString": "hello world", "FieldJSON": "{}", "FieldBinaryVector": [253, 0], "FieldFloatVector": [2.1, 2.2, 2.3, 2.4], "FieldJSON": {"a": 9, "b": false}, "FieldArray": [1, 2, 3, 4]},
+			{"FieldBool": true, "FieldInt8": 12, "FieldInt16": 103, "FieldInt32": 1003, "FieldInt64": 10003, "FieldFloat": 3.16, "FieldDouble": 3.56, "FieldString": "hello world", "FieldJSON": "{\"x\": 2, \"y\": 5}", "FieldBinaryVector": [252, 0], "FieldFloatVector": [3.1, 3.2, 3.3, 3.4], "FieldJSON": {"a": 9, "b": false}, "FieldArray": [1, 2, 3, 4]},
+			{"FieldBool": false, "FieldInt8": 13, "FieldInt16": 104, "FieldInt32": 1004, "FieldInt64": 10004, "FieldFloat": 3.17, "FieldDouble": 4.56, "FieldString": "hello world", "FieldJSON": "{\"x\": true}", "FieldBinaryVector": [251, 0], "FieldFloatVector": [4.1, 4.2, 4.3, 4.4], "FieldJSON": {"a": 9, "b": false}, "FieldArray": [1, 2, 3, 4]},
+			{"FieldBool": true, "FieldInt8": 14, "FieldInt16": 105, "FieldInt32": 1005, "FieldInt64": 10005, "FieldFloat": 3.18, "FieldDouble": 5.56, "FieldString": "hello world", "FieldJSON": "{}", "FieldBinaryVector": [250, 0], "FieldFloatVector": [5.1, 5.2, 5.3, 5.4], "FieldJSON": {"a": 9, "b": false}, "FieldArray": [1, 2, 3, 4]}
 		]
 	}`)
 
@@ -772,7 +690,7 @@ func Test_ImportWrapperReportFailRowBased(t *testing.T) {
 	}
 	collectionInfo, err := NewCollectionInfo(sampleSchema(), 2, []int64{1})
 	assert.NoError(t, err)
-	wrapper := NewImportWrapper(ctx, collectionInfo, 1, ReadBufferSize, idAllocator, cm, importResult, reportFunc)
+	wrapper := NewImportWrapper(ctx, collectionInfo, 1, Params.DataNodeCfg.BulkInsertReadBufferSize.GetAsInt64(), idAllocator, cm, importResult, reportFunc)
 	wrapper.SetCallbackFunctions(assignSegmentFunc, flushFunc, saveSegmentFunc)
 
 	files := []string{filePath}
@@ -817,9 +735,9 @@ func Test_ImportWrapperReportFailColumnBased_numpy(t *testing.T) {
 	reportFunc := func(res *rootcoordpb.ImportResult) error {
 		return nil
 	}
-	collectionInfo, err := NewCollectionInfo(sampleSchema(), 2, []int64{1})
+	collectionInfo, err := NewCollectionInfo(createNumpySchema(), 2, []int64{1})
 	assert.NoError(t, err)
-	wrapper := NewImportWrapper(ctx, collectionInfo, 1, ReadBufferSize, idAllocator, cm, importResult, reportFunc)
+	wrapper := NewImportWrapper(ctx, collectionInfo, 1, Params.DataNodeCfg.BulkInsertReadBufferSize.GetAsInt64(), idAllocator, cm, importResult, reportFunc)
 	wrapper.SetCallbackFunctions(assignSegmentFunc, flushFunc, saveSegmentFunc)
 
 	wrapper.reportImportAttempts = 2
@@ -854,7 +772,7 @@ func Test_ImportWrapperIsBinlogImport(t *testing.T) {
 
 	collectionInfo, err := NewCollectionInfo(schema, int32(shardNum), []int64{1})
 	assert.NoError(t, err)
-	wrapper := NewImportWrapper(ctx, collectionInfo, int64(segmentSize), ReadBufferSize, idAllocator, cm, nil, nil)
+	wrapper := NewImportWrapper(ctx, collectionInfo, int64(segmentSize), Params.DataNodeCfg.BulkInsertReadBufferSize.GetAsInt64(), idAllocator, cm, nil, nil)
 
 	// empty paths
 	paths := []string{}
@@ -918,7 +836,7 @@ func Test_ImportWrapperDoBinlogImport(t *testing.T) {
 
 	collectionInfo, err := NewCollectionInfo(schema, int32(shardNum), []int64{1})
 	assert.NoError(t, err)
-	wrapper := NewImportWrapper(ctx, collectionInfo, int64(segmentSize), ReadBufferSize, idAllocator, cm, nil, nil)
+	wrapper := NewImportWrapper(ctx, collectionInfo, int64(segmentSize), Params.DataNodeCfg.BulkInsertReadBufferSize.GetAsInt64(), idAllocator, cm, nil, nil)
 	paths := []string{
 		"/tmp",
 		"/tmp",
@@ -981,7 +899,7 @@ func Test_ImportWrapperReportPersisted(t *testing.T) {
 	}
 	collectionInfo, err := NewCollectionInfo(sampleSchema(), 2, []int64{1})
 	assert.NoError(t, err)
-	wrapper := NewImportWrapper(ctx, collectionInfo, int64(1024), ReadBufferSize, nil, nil, importResult, reportFunc)
+	wrapper := NewImportWrapper(ctx, collectionInfo, int64(1024), Params.DataNodeCfg.BulkInsertReadBufferSize.GetAsInt64(), nil, nil, importResult, reportFunc)
 	assert.NotNil(t, wrapper)
 
 	rowCounter := &rowCounterTest{}
@@ -1024,7 +942,7 @@ func Test_ImportWrapperUpdateProgressPercent(t *testing.T) {
 
 	collectionInfo, err := NewCollectionInfo(sampleSchema(), 2, []int64{1})
 	assert.NoError(t, err)
-	wrapper := NewImportWrapper(ctx, collectionInfo, 1, ReadBufferSize, nil, nil, nil, nil)
+	wrapper := NewImportWrapper(ctx, collectionInfo, 1, Params.DataNodeCfg.BulkInsertReadBufferSize.GetAsInt64(), nil, nil, nil, nil)
 	assert.NotNil(t, wrapper)
 	assert.Equal(t, int64(0), wrapper.progressPercent)
 
@@ -1063,7 +981,7 @@ func Test_ImportWrapperFlushFunc(t *testing.T) {
 	schema := sampleSchema()
 	collectionInfo, err := NewCollectionInfo(schema, 2, []int64{1})
 	assert.NoError(t, err)
-	wrapper := NewImportWrapper(ctx, collectionInfo, 1, ReadBufferSize, nil, nil, importResult, reportFunc)
+	wrapper := NewImportWrapper(ctx, collectionInfo, 1, Params.DataNodeCfg.BulkInsertReadBufferSize.GetAsInt64(), nil, nil, importResult, reportFunc)
 	assert.NotNil(t, wrapper)
 	wrapper.SetCallbackFunctions(assignSegmentFunc, flushFunc, saveSegmentFunc)
 
@@ -1073,7 +991,7 @@ func Test_ImportWrapperFlushFunc(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	fieldsData := createFieldsData(schema, 5)
+	fieldsData := createFieldsData(schema, 5, baseTimestamp)
 	blockData := createBlockData(schema, fieldsData)
 	t.Run("fieldsData is not empty", func(t *testing.T) {
 		err = wrapper.flushFunc(blockData, shardID, partitionID)

@@ -1,6 +1,7 @@
 package httpserver
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/gin-gonic/gin"
@@ -10,9 +11,12 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 )
 
+type RestRequestInterceptor func(ctx context.Context, ginCtx *gin.Context, req any, handler func(reqCtx context.Context, req any) (any, error)) (any, error)
+
 // Handlers handles http requests
 type Handlers struct {
-	proxy types.ProxyComponent
+	proxy        types.ProxyComponent
+	interceptors []RestRequestInterceptor
 }
 
 // NewHandlers creates a new Handlers

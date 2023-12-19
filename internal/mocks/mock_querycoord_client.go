@@ -31,6 +31,76 @@ func (_m *MockQueryCoordClient) EXPECT() *MockQueryCoordClient_Expecter {
 	return &MockQueryCoordClient_Expecter{mock: &_m.Mock}
 }
 
+// ActivateChecker provides a mock function with given fields: ctx, in, opts
+func (_m *MockQueryCoordClient) ActivateChecker(ctx context.Context, in *querypb.ActivateCheckerRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ActivateCheckerRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ActivateCheckerRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.ActivateCheckerRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockQueryCoordClient_ActivateChecker_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ActivateChecker'
+type MockQueryCoordClient_ActivateChecker_Call struct {
+	*mock.Call
+}
+
+// ActivateChecker is a helper method to define mock.On call
+//  - ctx context.Context
+//  - in *querypb.ActivateCheckerRequest
+//  - opts ...grpc.CallOption
+func (_e *MockQueryCoordClient_Expecter) ActivateChecker(ctx interface{}, in interface{}, opts ...interface{}) *MockQueryCoordClient_ActivateChecker_Call {
+	return &MockQueryCoordClient_ActivateChecker_Call{Call: _e.mock.On("ActivateChecker",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockQueryCoordClient_ActivateChecker_Call) Run(run func(ctx context.Context, in *querypb.ActivateCheckerRequest, opts ...grpc.CallOption)) *MockQueryCoordClient_ActivateChecker_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*querypb.ActivateCheckerRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockQueryCoordClient_ActivateChecker_Call) Return(_a0 *commonpb.Status, _a1 error) *MockQueryCoordClient_ActivateChecker_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockQueryCoordClient_ActivateChecker_Call) RunAndReturn(run func(context.Context, *querypb.ActivateCheckerRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockQueryCoordClient_ActivateChecker_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CheckHealth provides a mock function with given fields: ctx, in, opts
 func (_m *MockQueryCoordClient) CheckHealth(ctx context.Context, in *milvuspb.CheckHealthRequest, opts ...grpc.CallOption) (*milvuspb.CheckHealthResponse, error) {
 	_va := make([]interface{}, len(opts))
@@ -70,9 +140,9 @@ type MockQueryCoordClient_CheckHealth_Call struct {
 }
 
 // CheckHealth is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.CheckHealthRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.CheckHealthRequest
+//  - opts ...grpc.CallOption
 func (_e *MockQueryCoordClient_Expecter) CheckHealth(ctx interface{}, in interface{}, opts ...interface{}) *MockQueryCoordClient_CheckHealth_Call {
 	return &MockQueryCoordClient_CheckHealth_Call{Call: _e.mock.On("CheckHealth",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -181,9 +251,9 @@ type MockQueryCoordClient_CreateResourceGroup_Call struct {
 }
 
 // CreateResourceGroup is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.CreateResourceGroupRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.CreateResourceGroupRequest
+//  - opts ...grpc.CallOption
 func (_e *MockQueryCoordClient_Expecter) CreateResourceGroup(ctx interface{}, in interface{}, opts ...interface{}) *MockQueryCoordClient_CreateResourceGroup_Call {
 	return &MockQueryCoordClient_CreateResourceGroup_Call{Call: _e.mock.On("CreateResourceGroup",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -208,6 +278,76 @@ func (_c *MockQueryCoordClient_CreateResourceGroup_Call) Return(_a0 *commonpb.St
 }
 
 func (_c *MockQueryCoordClient_CreateResourceGroup_Call) RunAndReturn(run func(context.Context, *milvuspb.CreateResourceGroupRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockQueryCoordClient_CreateResourceGroup_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DeactivateChecker provides a mock function with given fields: ctx, in, opts
+func (_m *MockQueryCoordClient) DeactivateChecker(ctx context.Context, in *querypb.DeactivateCheckerRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.DeactivateCheckerRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.DeactivateCheckerRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.DeactivateCheckerRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockQueryCoordClient_DeactivateChecker_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeactivateChecker'
+type MockQueryCoordClient_DeactivateChecker_Call struct {
+	*mock.Call
+}
+
+// DeactivateChecker is a helper method to define mock.On call
+//  - ctx context.Context
+//  - in *querypb.DeactivateCheckerRequest
+//  - opts ...grpc.CallOption
+func (_e *MockQueryCoordClient_Expecter) DeactivateChecker(ctx interface{}, in interface{}, opts ...interface{}) *MockQueryCoordClient_DeactivateChecker_Call {
+	return &MockQueryCoordClient_DeactivateChecker_Call{Call: _e.mock.On("DeactivateChecker",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockQueryCoordClient_DeactivateChecker_Call) Run(run func(ctx context.Context, in *querypb.DeactivateCheckerRequest, opts ...grpc.CallOption)) *MockQueryCoordClient_DeactivateChecker_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*querypb.DeactivateCheckerRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockQueryCoordClient_DeactivateChecker_Call) Return(_a0 *commonpb.Status, _a1 error) *MockQueryCoordClient_DeactivateChecker_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockQueryCoordClient_DeactivateChecker_Call) RunAndReturn(run func(context.Context, *querypb.DeactivateCheckerRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockQueryCoordClient_DeactivateChecker_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -251,9 +391,9 @@ type MockQueryCoordClient_DescribeResourceGroup_Call struct {
 }
 
 // DescribeResourceGroup is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *querypb.DescribeResourceGroupRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *querypb.DescribeResourceGroupRequest
+//  - opts ...grpc.CallOption
 func (_e *MockQueryCoordClient_Expecter) DescribeResourceGroup(ctx interface{}, in interface{}, opts ...interface{}) *MockQueryCoordClient_DescribeResourceGroup_Call {
 	return &MockQueryCoordClient_DescribeResourceGroup_Call{Call: _e.mock.On("DescribeResourceGroup",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -321,9 +461,9 @@ type MockQueryCoordClient_DropResourceGroup_Call struct {
 }
 
 // DropResourceGroup is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.DropResourceGroupRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.DropResourceGroupRequest
+//  - opts ...grpc.CallOption
 func (_e *MockQueryCoordClient_Expecter) DropResourceGroup(ctx interface{}, in interface{}, opts ...interface{}) *MockQueryCoordClient_DropResourceGroup_Call {
 	return &MockQueryCoordClient_DropResourceGroup_Call{Call: _e.mock.On("DropResourceGroup",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -391,9 +531,9 @@ type MockQueryCoordClient_GetComponentStates_Call struct {
 }
 
 // GetComponentStates is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.GetComponentStatesRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.GetComponentStatesRequest
+//  - opts ...grpc.CallOption
 func (_e *MockQueryCoordClient_Expecter) GetComponentStates(ctx interface{}, in interface{}, opts ...interface{}) *MockQueryCoordClient_GetComponentStates_Call {
 	return &MockQueryCoordClient_GetComponentStates_Call{Call: _e.mock.On("GetComponentStates",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -461,9 +601,9 @@ type MockQueryCoordClient_GetMetrics_Call struct {
 }
 
 // GetMetrics is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.GetMetricsRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.GetMetricsRequest
+//  - opts ...grpc.CallOption
 func (_e *MockQueryCoordClient_Expecter) GetMetrics(ctx interface{}, in interface{}, opts ...interface{}) *MockQueryCoordClient_GetMetrics_Call {
 	return &MockQueryCoordClient_GetMetrics_Call{Call: _e.mock.On("GetMetrics",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -531,9 +671,9 @@ type MockQueryCoordClient_GetPartitionStates_Call struct {
 }
 
 // GetPartitionStates is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *querypb.GetPartitionStatesRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *querypb.GetPartitionStatesRequest
+//  - opts ...grpc.CallOption
 func (_e *MockQueryCoordClient_Expecter) GetPartitionStates(ctx interface{}, in interface{}, opts ...interface{}) *MockQueryCoordClient_GetPartitionStates_Call {
 	return &MockQueryCoordClient_GetPartitionStates_Call{Call: _e.mock.On("GetPartitionStates",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -601,9 +741,9 @@ type MockQueryCoordClient_GetReplicas_Call struct {
 }
 
 // GetReplicas is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.GetReplicasRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.GetReplicasRequest
+//  - opts ...grpc.CallOption
 func (_e *MockQueryCoordClient_Expecter) GetReplicas(ctx interface{}, in interface{}, opts ...interface{}) *MockQueryCoordClient_GetReplicas_Call {
 	return &MockQueryCoordClient_GetReplicas_Call{Call: _e.mock.On("GetReplicas",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -671,9 +811,9 @@ type MockQueryCoordClient_GetSegmentInfo_Call struct {
 }
 
 // GetSegmentInfo is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *querypb.GetSegmentInfoRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *querypb.GetSegmentInfoRequest
+//  - opts ...grpc.CallOption
 func (_e *MockQueryCoordClient_Expecter) GetSegmentInfo(ctx interface{}, in interface{}, opts ...interface{}) *MockQueryCoordClient_GetSegmentInfo_Call {
 	return &MockQueryCoordClient_GetSegmentInfo_Call{Call: _e.mock.On("GetSegmentInfo",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -741,9 +881,9 @@ type MockQueryCoordClient_GetShardLeaders_Call struct {
 }
 
 // GetShardLeaders is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *querypb.GetShardLeadersRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *querypb.GetShardLeadersRequest
+//  - opts ...grpc.CallOption
 func (_e *MockQueryCoordClient_Expecter) GetShardLeaders(ctx interface{}, in interface{}, opts ...interface{}) *MockQueryCoordClient_GetShardLeaders_Call {
 	return &MockQueryCoordClient_GetShardLeaders_Call{Call: _e.mock.On("GetShardLeaders",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -811,9 +951,9 @@ type MockQueryCoordClient_GetStatisticsChannel_Call struct {
 }
 
 // GetStatisticsChannel is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *internalpb.GetStatisticsChannelRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *internalpb.GetStatisticsChannelRequest
+//  - opts ...grpc.CallOption
 func (_e *MockQueryCoordClient_Expecter) GetStatisticsChannel(ctx interface{}, in interface{}, opts ...interface{}) *MockQueryCoordClient_GetStatisticsChannel_Call {
 	return &MockQueryCoordClient_GetStatisticsChannel_Call{Call: _e.mock.On("GetStatisticsChannel",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -881,9 +1021,9 @@ type MockQueryCoordClient_GetTimeTickChannel_Call struct {
 }
 
 // GetTimeTickChannel is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *internalpb.GetTimeTickChannelRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *internalpb.GetTimeTickChannelRequest
+//  - opts ...grpc.CallOption
 func (_e *MockQueryCoordClient_Expecter) GetTimeTickChannel(ctx interface{}, in interface{}, opts ...interface{}) *MockQueryCoordClient_GetTimeTickChannel_Call {
 	return &MockQueryCoordClient_GetTimeTickChannel_Call{Call: _e.mock.On("GetTimeTickChannel",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -908,6 +1048,76 @@ func (_c *MockQueryCoordClient_GetTimeTickChannel_Call) Return(_a0 *milvuspb.Str
 }
 
 func (_c *MockQueryCoordClient_GetTimeTickChannel_Call) RunAndReturn(run func(context.Context, *internalpb.GetTimeTickChannelRequest, ...grpc.CallOption) (*milvuspb.StringResponse, error)) *MockQueryCoordClient_GetTimeTickChannel_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListCheckers provides a mock function with given fields: ctx, in, opts
+func (_m *MockQueryCoordClient) ListCheckers(ctx context.Context, in *querypb.ListCheckersRequest, opts ...grpc.CallOption) (*querypb.ListCheckersResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	var r0 *querypb.ListCheckersResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ListCheckersRequest, ...grpc.CallOption) (*querypb.ListCheckersResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ListCheckersRequest, ...grpc.CallOption) *querypb.ListCheckersResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*querypb.ListCheckersResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.ListCheckersRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockQueryCoordClient_ListCheckers_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListCheckers'
+type MockQueryCoordClient_ListCheckers_Call struct {
+	*mock.Call
+}
+
+// ListCheckers is a helper method to define mock.On call
+//  - ctx context.Context
+//  - in *querypb.ListCheckersRequest
+//  - opts ...grpc.CallOption
+func (_e *MockQueryCoordClient_Expecter) ListCheckers(ctx interface{}, in interface{}, opts ...interface{}) *MockQueryCoordClient_ListCheckers_Call {
+	return &MockQueryCoordClient_ListCheckers_Call{Call: _e.mock.On("ListCheckers",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockQueryCoordClient_ListCheckers_Call) Run(run func(ctx context.Context, in *querypb.ListCheckersRequest, opts ...grpc.CallOption)) *MockQueryCoordClient_ListCheckers_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*querypb.ListCheckersRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockQueryCoordClient_ListCheckers_Call) Return(_a0 *querypb.ListCheckersResponse, _a1 error) *MockQueryCoordClient_ListCheckers_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockQueryCoordClient_ListCheckers_Call) RunAndReturn(run func(context.Context, *querypb.ListCheckersRequest, ...grpc.CallOption) (*querypb.ListCheckersResponse, error)) *MockQueryCoordClient_ListCheckers_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -951,9 +1161,9 @@ type MockQueryCoordClient_ListResourceGroups_Call struct {
 }
 
 // ListResourceGroups is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.ListResourceGroupsRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.ListResourceGroupsRequest
+//  - opts ...grpc.CallOption
 func (_e *MockQueryCoordClient_Expecter) ListResourceGroups(ctx interface{}, in interface{}, opts ...interface{}) *MockQueryCoordClient_ListResourceGroups_Call {
 	return &MockQueryCoordClient_ListResourceGroups_Call{Call: _e.mock.On("ListResourceGroups",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -1021,9 +1231,9 @@ type MockQueryCoordClient_LoadBalance_Call struct {
 }
 
 // LoadBalance is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *querypb.LoadBalanceRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *querypb.LoadBalanceRequest
+//  - opts ...grpc.CallOption
 func (_e *MockQueryCoordClient_Expecter) LoadBalance(ctx interface{}, in interface{}, opts ...interface{}) *MockQueryCoordClient_LoadBalance_Call {
 	return &MockQueryCoordClient_LoadBalance_Call{Call: _e.mock.On("LoadBalance",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -1091,9 +1301,9 @@ type MockQueryCoordClient_LoadCollection_Call struct {
 }
 
 // LoadCollection is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *querypb.LoadCollectionRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *querypb.LoadCollectionRequest
+//  - opts ...grpc.CallOption
 func (_e *MockQueryCoordClient_Expecter) LoadCollection(ctx interface{}, in interface{}, opts ...interface{}) *MockQueryCoordClient_LoadCollection_Call {
 	return &MockQueryCoordClient_LoadCollection_Call{Call: _e.mock.On("LoadCollection",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -1161,9 +1371,9 @@ type MockQueryCoordClient_LoadPartitions_Call struct {
 }
 
 // LoadPartitions is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *querypb.LoadPartitionsRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *querypb.LoadPartitionsRequest
+//  - opts ...grpc.CallOption
 func (_e *MockQueryCoordClient_Expecter) LoadPartitions(ctx interface{}, in interface{}, opts ...interface{}) *MockQueryCoordClient_LoadPartitions_Call {
 	return &MockQueryCoordClient_LoadPartitions_Call{Call: _e.mock.On("LoadPartitions",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -1231,9 +1441,9 @@ type MockQueryCoordClient_ReleaseCollection_Call struct {
 }
 
 // ReleaseCollection is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *querypb.ReleaseCollectionRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *querypb.ReleaseCollectionRequest
+//  - opts ...grpc.CallOption
 func (_e *MockQueryCoordClient_Expecter) ReleaseCollection(ctx interface{}, in interface{}, opts ...interface{}) *MockQueryCoordClient_ReleaseCollection_Call {
 	return &MockQueryCoordClient_ReleaseCollection_Call{Call: _e.mock.On("ReleaseCollection",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -1301,9 +1511,9 @@ type MockQueryCoordClient_ReleasePartitions_Call struct {
 }
 
 // ReleasePartitions is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *querypb.ReleasePartitionsRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *querypb.ReleasePartitionsRequest
+//  - opts ...grpc.CallOption
 func (_e *MockQueryCoordClient_Expecter) ReleasePartitions(ctx interface{}, in interface{}, opts ...interface{}) *MockQueryCoordClient_ReleasePartitions_Call {
 	return &MockQueryCoordClient_ReleasePartitions_Call{Call: _e.mock.On("ReleasePartitions",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -1371,9 +1581,9 @@ type MockQueryCoordClient_ShowCollections_Call struct {
 }
 
 // ShowCollections is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *querypb.ShowCollectionsRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *querypb.ShowCollectionsRequest
+//  - opts ...grpc.CallOption
 func (_e *MockQueryCoordClient_Expecter) ShowCollections(ctx interface{}, in interface{}, opts ...interface{}) *MockQueryCoordClient_ShowCollections_Call {
 	return &MockQueryCoordClient_ShowCollections_Call{Call: _e.mock.On("ShowCollections",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -1441,9 +1651,9 @@ type MockQueryCoordClient_ShowConfigurations_Call struct {
 }
 
 // ShowConfigurations is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *internalpb.ShowConfigurationsRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *internalpb.ShowConfigurationsRequest
+//  - opts ...grpc.CallOption
 func (_e *MockQueryCoordClient_Expecter) ShowConfigurations(ctx interface{}, in interface{}, opts ...interface{}) *MockQueryCoordClient_ShowConfigurations_Call {
 	return &MockQueryCoordClient_ShowConfigurations_Call{Call: _e.mock.On("ShowConfigurations",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -1511,9 +1721,9 @@ type MockQueryCoordClient_ShowPartitions_Call struct {
 }
 
 // ShowPartitions is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *querypb.ShowPartitionsRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *querypb.ShowPartitionsRequest
+//  - opts ...grpc.CallOption
 func (_e *MockQueryCoordClient_Expecter) ShowPartitions(ctx interface{}, in interface{}, opts ...interface{}) *MockQueryCoordClient_ShowPartitions_Call {
 	return &MockQueryCoordClient_ShowPartitions_Call{Call: _e.mock.On("ShowPartitions",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -1581,9 +1791,9 @@ type MockQueryCoordClient_SyncNewCreatedPartition_Call struct {
 }
 
 // SyncNewCreatedPartition is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *querypb.SyncNewCreatedPartitionRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *querypb.SyncNewCreatedPartitionRequest
+//  - opts ...grpc.CallOption
 func (_e *MockQueryCoordClient_Expecter) SyncNewCreatedPartition(ctx interface{}, in interface{}, opts ...interface{}) *MockQueryCoordClient_SyncNewCreatedPartition_Call {
 	return &MockQueryCoordClient_SyncNewCreatedPartition_Call{Call: _e.mock.On("SyncNewCreatedPartition",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -1651,9 +1861,9 @@ type MockQueryCoordClient_TransferNode_Call struct {
 }
 
 // TransferNode is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.TransferNodeRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.TransferNodeRequest
+//  - opts ...grpc.CallOption
 func (_e *MockQueryCoordClient_Expecter) TransferNode(ctx interface{}, in interface{}, opts ...interface{}) *MockQueryCoordClient_TransferNode_Call {
 	return &MockQueryCoordClient_TransferNode_Call{Call: _e.mock.On("TransferNode",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -1721,9 +1931,9 @@ type MockQueryCoordClient_TransferReplica_Call struct {
 }
 
 // TransferReplica is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *querypb.TransferReplicaRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *querypb.TransferReplicaRequest
+//  - opts ...grpc.CallOption
 func (_e *MockQueryCoordClient_Expecter) TransferReplica(ctx interface{}, in interface{}, opts ...interface{}) *MockQueryCoordClient_TransferReplica_Call {
 	return &MockQueryCoordClient_TransferReplica_Call{Call: _e.mock.On("TransferReplica",
 		append([]interface{}{ctx, in}, opts...)...)}

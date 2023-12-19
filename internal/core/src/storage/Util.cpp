@@ -15,26 +15,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "storage/Util.h"
 #include <memory>
+
 #include "arrow/array/builder_binary.h"
 #include "arrow/type_fwd.h"
-#include "common/EasyAssert.h"
-#include "common/Consts.h"
 #include "fmt/format.h"
-#include "storage/ChunkManager.h"
+#include "log/Log.h"
+
+#include "common/Consts.h"
+#include "common/EasyAssert.h"
+#include "common/FieldData.h"
+#include "common/FieldDataInterface.h"
 #ifdef AZURE_BUILD_DIR
 #include "storage/AzureChunkManager.h"
 #endif
-#include "storage/FieldData.h"
+#include "storage/ChunkManager.h"
+#include "storage/DiskFileManagerImpl.h"
 #include "storage/InsertData.h"
-#include "storage/FieldDataInterface.h"
-#include "storage/ThreadPools.h"
 #include "storage/LocalChunkManager.h"
+#include "storage/MemFileManagerImpl.h"
 #include "storage/MinioChunkManager.h"
 #include "storage/OpenDALChunkManager.h"
-#include "storage/MemFileManagerImpl.h"
-#include "storage/DiskFileManagerImpl.h"
+#include "storage/Types.h"
+#include "storage/ThreadPools.h"
+#include "storage/Util.h"
 
 namespace milvus::storage {
 
@@ -413,6 +417,22 @@ DownloadAndDecodeRemoteFile(ChunkManager* chunk_manager,
     return DeserializeFileData(buf, fileSize);
 }
 
+std::unique_ptr<DataCodec>
+DownloadAndDecodeRemoteFileV2(std::shared_ptr<milvus_storage::Space> space,
+                              const std::string& file) {
+    auto fileSize = space->GetBlobByteSize(file);
+    if (!fileSize.ok()) {
+        PanicInfo(FileReadFailed, fileSize.status().ToString());
+    }
+    auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[fileSize.value()]);
+    auto status = space->ReadBlob(file, buf.get());
+    if (!status.ok()) {
+        PanicInfo(FileReadFailed, status.ToString());
+    }
+
+    return DeserializeFileData(buf, fileSize.value());
+}
+
 std::pair<std::string, size_t>
 EncodeAndUploadIndexSlice(ChunkManager* chunk_manager,
                           uint8_t* buf,
@@ -429,6 +449,27 @@ EncodeAndUploadIndexSlice(ChunkManager* chunk_manager,
     auto serialized_index_size = serialized_index_data.size();
     chunk_manager->Write(
         object_key, serialized_index_data.data(), serialized_index_size);
+    return std::make_pair(std::move(object_key), serialized_index_size);
+}
+
+std::pair<std::string, size_t>
+EncodeAndUploadIndexSlice2(std::shared_ptr<milvus_storage::Space> space,
+                           uint8_t* buf,
+                           int64_t batch_size,
+                           IndexMeta index_meta,
+                           FieldDataMeta field_meta,
+                           std::string object_key) {
+    auto field_data = CreateFieldData(DataType::INT8);
+    field_data->FillFieldData(buf, batch_size);
+    auto indexData = std::make_shared<IndexData>(field_data);
+    indexData->set_index_meta(index_meta);
+    indexData->SetFieldDataMeta(field_meta);
+    auto serialized_index_data = indexData->serialize_to_remote_file();
+    auto serialized_index_size = serialized_index_data.size();
+    auto status = space->WriteBolb(
+        object_key, serialized_index_data.data(), serialized_index_size);
+    AssertInfo(status.ok(),
+               fmt::format("write to space error: %s", status.ToString()));
     return std::make_pair(std::move(object_key), serialized_index_size);
 }
 
@@ -470,6 +511,25 @@ GetObjectData(ChunkManager* remote_chunk_manager,
     return datas;
 }
 
+std::vector<FieldDataPtr>
+GetObjectData(std::shared_ptr<milvus_storage::Space> space,
+              const std::vector<std::string>& remote_files) {
+    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH);
+    std::vector<std::future<std::unique_ptr<DataCodec>>> futures;
+    for (auto& file : remote_files) {
+        futures.emplace_back(
+            pool.Submit(DownloadAndDecodeRemoteFileV2, space, file));
+    }
+
+    std::vector<FieldDataPtr> datas;
+    for (int i = 0; i < futures.size(); ++i) {
+        auto res = futures[i].get();
+        datas.emplace_back(res->GetFieldData());
+    }
+    ReleaseArrowUnused();
+    return datas;
+}
+
 std::map<std::string, int64_t>
 PutIndexData(ChunkManager* remote_chunk_manager,
              const std::vector<const uint8_t*>& data_slices,
@@ -487,6 +547,40 @@ PutIndexData(ChunkManager* remote_chunk_manager,
     for (int64_t i = 0; i < data_slices.size(); ++i) {
         futures.push_back(pool.Submit(EncodeAndUploadIndexSlice,
                                       remote_chunk_manager,
+                                      const_cast<uint8_t*>(data_slices[i]),
+                                      slice_sizes[i],
+                                      index_meta,
+                                      field_meta,
+                                      slice_names[i]));
+    }
+
+    std::map<std::string, int64_t> remote_paths_to_size;
+    for (auto& future : futures) {
+        auto res = future.get();
+        remote_paths_to_size[res.first] = res.second;
+    }
+
+    ReleaseArrowUnused();
+    return remote_paths_to_size;
+}
+
+std::map<std::string, int64_t>
+PutIndexData(std::shared_ptr<milvus_storage::Space> space,
+             const std::vector<const uint8_t*>& data_slices,
+             const std::vector<int64_t>& slice_sizes,
+             const std::vector<std::string>& slice_names,
+             FieldDataMeta& field_meta,
+             IndexMeta& index_meta) {
+    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
+    std::vector<std::future<std::pair<std::string, size_t>>> futures;
+    AssertInfo(data_slices.size() == slice_sizes.size(),
+               "inconsistent size of data slices with slice sizes!");
+    AssertInfo(data_slices.size() == slice_names.size(),
+               "inconsistent size of data slices with slice names!");
+
+    for (int64_t i = 0; i < data_slices.size(); ++i) {
+        futures.push_back(pool.Submit(EncodeAndUploadIndexSlice2,
+                                      space,
                                       const_cast<uint8_t*>(data_slices[i]),
                                       slice_sizes[i],
                                       index_meta,
@@ -635,18 +729,18 @@ GetByteSizeOfFieldDatas(const std::vector<FieldDataPtr>& field_datas) {
     return result;
 }
 
-std::vector<storage::FieldDataPtr>
-CollectFieldDataChannel(storage::FieldDataChannelPtr& channel) {
-    std::vector<storage::FieldDataPtr> result;
-    storage::FieldDataPtr field_data;
+std::vector<FieldDataPtr>
+CollectFieldDataChannel(FieldDataChannelPtr& channel) {
+    std::vector<FieldDataPtr> result;
+    FieldDataPtr field_data;
     while (channel->pop(field_data)) {
         result.push_back(field_data);
     }
     return result;
 }
 
-storage::FieldDataPtr
-MergeFieldData(std::vector<storage::FieldDataPtr>& data_array) {
+FieldDataPtr
+MergeFieldData(std::vector<FieldDataPtr>& data_array) {
     if (data_array.size() == 0) {
         return nullptr;
     }

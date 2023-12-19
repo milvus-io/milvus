@@ -111,9 +111,9 @@ type MockProxyClient_GetComponentStates_Call struct {
 }
 
 // GetComponentStates is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.GetComponentStatesRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.GetComponentStatesRequest
+//  - opts ...grpc.CallOption
 func (_e *MockProxyClient_Expecter) GetComponentStates(ctx interface{}, in interface{}, opts ...interface{}) *MockProxyClient_GetComponentStates_Call {
 	return &MockProxyClient_GetComponentStates_Call{Call: _e.mock.On("GetComponentStates",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -181,9 +181,9 @@ type MockProxyClient_GetDdChannel_Call struct {
 }
 
 // GetDdChannel is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *internalpb.GetDdChannelRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *internalpb.GetDdChannelRequest
+//  - opts ...grpc.CallOption
 func (_e *MockProxyClient_Expecter) GetDdChannel(ctx interface{}, in interface{}, opts ...interface{}) *MockProxyClient_GetDdChannel_Call {
 	return &MockProxyClient_GetDdChannel_Call{Call: _e.mock.On("GetDdChannel",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -251,9 +251,9 @@ type MockProxyClient_GetProxyMetrics_Call struct {
 }
 
 // GetProxyMetrics is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.GetMetricsRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.GetMetricsRequest
+//  - opts ...grpc.CallOption
 func (_e *MockProxyClient_Expecter) GetProxyMetrics(ctx interface{}, in interface{}, opts ...interface{}) *MockProxyClient_GetProxyMetrics_Call {
 	return &MockProxyClient_GetProxyMetrics_Call{Call: _e.mock.On("GetProxyMetrics",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -321,9 +321,9 @@ type MockProxyClient_GetStatisticsChannel_Call struct {
 }
 
 // GetStatisticsChannel is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *internalpb.GetStatisticsChannelRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *internalpb.GetStatisticsChannelRequest
+//  - opts ...grpc.CallOption
 func (_e *MockProxyClient_Expecter) GetStatisticsChannel(ctx interface{}, in interface{}, opts ...interface{}) *MockProxyClient_GetStatisticsChannel_Call {
 	return &MockProxyClient_GetStatisticsChannel_Call{Call: _e.mock.On("GetStatisticsChannel",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -391,9 +391,9 @@ type MockProxyClient_InvalidateCollectionMetaCache_Call struct {
 }
 
 // InvalidateCollectionMetaCache is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *proxypb.InvalidateCollMetaCacheRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *proxypb.InvalidateCollMetaCacheRequest
+//  - opts ...grpc.CallOption
 func (_e *MockProxyClient_Expecter) InvalidateCollectionMetaCache(ctx interface{}, in interface{}, opts ...interface{}) *MockProxyClient_InvalidateCollectionMetaCache_Call {
 	return &MockProxyClient_InvalidateCollectionMetaCache_Call{Call: _e.mock.On("InvalidateCollectionMetaCache",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -461,9 +461,9 @@ type MockProxyClient_InvalidateCredentialCache_Call struct {
 }
 
 // InvalidateCredentialCache is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *proxypb.InvalidateCredCacheRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *proxypb.InvalidateCredCacheRequest
+//  - opts ...grpc.CallOption
 func (_e *MockProxyClient_Expecter) InvalidateCredentialCache(ctx interface{}, in interface{}, opts ...interface{}) *MockProxyClient_InvalidateCredentialCache_Call {
 	return &MockProxyClient_InvalidateCredentialCache_Call{Call: _e.mock.On("InvalidateCredentialCache",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -531,9 +531,9 @@ type MockProxyClient_ListClientInfos_Call struct {
 }
 
 // ListClientInfos is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *proxypb.ListClientInfosRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *proxypb.ListClientInfosRequest
+//  - opts ...grpc.CallOption
 func (_e *MockProxyClient_Expecter) ListClientInfos(ctx interface{}, in interface{}, opts ...interface{}) *MockProxyClient_ListClientInfos_Call {
 	return &MockProxyClient_ListClientInfos_Call{Call: _e.mock.On("ListClientInfos",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -601,9 +601,9 @@ type MockProxyClient_RefreshPolicyInfoCache_Call struct {
 }
 
 // RefreshPolicyInfoCache is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *proxypb.RefreshPolicyInfoCacheRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *proxypb.RefreshPolicyInfoCacheRequest
+//  - opts ...grpc.CallOption
 func (_e *MockProxyClient_Expecter) RefreshPolicyInfoCache(ctx interface{}, in interface{}, opts ...interface{}) *MockProxyClient_RefreshPolicyInfoCache_Call {
 	return &MockProxyClient_RefreshPolicyInfoCache_Call{Call: _e.mock.On("RefreshPolicyInfoCache",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -671,9 +671,9 @@ type MockProxyClient_SetRates_Call struct {
 }
 
 // SetRates is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *proxypb.SetRatesRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *proxypb.SetRatesRequest
+//  - opts ...grpc.CallOption
 func (_e *MockProxyClient_Expecter) SetRates(ctx interface{}, in interface{}, opts ...interface{}) *MockProxyClient_SetRates_Call {
 	return &MockProxyClient_SetRates_Call{Call: _e.mock.On("SetRates",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -741,9 +741,9 @@ type MockProxyClient_UpdateCredentialCache_Call struct {
 }
 
 // UpdateCredentialCache is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *proxypb.UpdateCredCacheRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *proxypb.UpdateCredCacheRequest
+//  - opts ...grpc.CallOption
 func (_e *MockProxyClient_Expecter) UpdateCredentialCache(ctx interface{}, in interface{}, opts ...interface{}) *MockProxyClient_UpdateCredentialCache_Call {
 	return &MockProxyClient_UpdateCredentialCache_Call{Call: _e.mock.On("UpdateCredentialCache",
 		append([]interface{}{ctx, in}, opts...)...)}

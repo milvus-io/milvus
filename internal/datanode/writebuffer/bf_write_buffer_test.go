@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -176,7 +177,7 @@ func (s *BFWriteBufferSuite) TestAutoSync() {
 	s.Run("normal_auto_sync", func() {
 		wb, err := NewBFWriteBuffer(s.channelName, s.metacache, nil, s.syncMgr, &writeBufferOption{
 			syncPolicies: []SyncPolicy{
-				SyncFullBuffer,
+				GetFullBufferPolicy(),
 				GetSyncStaleBufferPolicy(paramtable.Get().DataNodeCfg.SyncPeriod.GetAsDuration(time.Second)),
 				GetFlushingSegmentsPolicy(s.metacache),
 			},
@@ -206,7 +207,7 @@ func (s *BFWriteBufferSuite) TestBufferDataWithStorageV2() {
 	params.Params.CommonCfg.EnableStorageV2.SwapTempValue("true")
 	params.Params.CommonCfg.StorageScheme.SwapTempValue("file")
 	tmpDir := s.T().TempDir()
-	arrowSchema, err := metacache.ConvertToArrowSchema(s.collSchema.Fields)
+	arrowSchema, err := typeutil.ConvertToArrowSchema(s.collSchema.Fields)
 	s.Require().NoError(err)
 	space, err := milvus_storage.Open(fmt.Sprintf("file:///%s", tmpDir), options.NewSpaceOptionBuilder().
 		SetSchema(schema.NewSchema(arrowSchema, &schema.SchemaOptions{
@@ -235,7 +236,7 @@ func (s *BFWriteBufferSuite) TestAutoSyncWithStorageV2() {
 	params.Params.CommonCfg.EnableStorageV2.SwapTempValue("true")
 	paramtable.Get().Save(paramtable.Get().DataNodeCfg.FlushInsertBufferSize.Key, "1")
 	tmpDir := s.T().TempDir()
-	arrowSchema, err := metacache.ConvertToArrowSchema(s.collSchema.Fields)
+	arrowSchema, err := typeutil.ConvertToArrowSchema(s.collSchema.Fields)
 	s.Require().NoError(err)
 
 	space, err := milvus_storage.Open(fmt.Sprintf("file:///%s", tmpDir), options.NewSpaceOptionBuilder().
@@ -248,7 +249,7 @@ func (s *BFWriteBufferSuite) TestAutoSyncWithStorageV2() {
 	s.Run("normal_auto_sync", func() {
 		wb, err := NewBFWriteBuffer(s.channelName, s.metacache, s.storageV2Cache, s.syncMgr, &writeBufferOption{
 			syncPolicies: []SyncPolicy{
-				SyncFullBuffer,
+				GetFullBufferPolicy(),
 				GetSyncStaleBufferPolicy(paramtable.Get().DataNodeCfg.SyncPeriod.GetAsDuration(time.Second)),
 				GetFlushingSegmentsPolicy(s.metacache),
 			},
@@ -256,7 +257,10 @@ func (s *BFWriteBufferSuite) TestAutoSyncWithStorageV2() {
 		s.NoError(err)
 
 		seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 1000}, metacache.NewBloomFilterSet())
-		s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
+		segCompacted := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 1000}, metacache.NewBloomFilterSet())
+		metacache.CompactTo(2001)(segCompacted)
+
+		s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg, segCompacted})
 		s.metacache.EXPECT().GetSegmentByID(int64(1000)).Return(nil, false)
 		s.metacache.EXPECT().GetSegmentByID(int64(1002)).Return(seg, true)
 		s.metacache.EXPECT().GetSegmentIDsBy(mock.Anything).Return([]int64{1002})

@@ -1252,6 +1252,24 @@ class TestInsertInvalid(TestcaseBase):
             data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
+    def test_insert_string_to_int64_pk_field(self):
+        """
+        target: test insert, with using auto id is invalid, which are not int64
+        method: create collection and insert entities in it
+        expected: raise exception
+        """
+        nb = 100
+        collection_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=collection_name)
+        df = cf.gen_default_dataframe_data(nb)
+        invalid_id = random.randint(0, nb)
+        # df[ct.default_int64_field_name][invalid_id] = "2000000"
+        df.at[invalid_id, ct.default_int64_field_name] = "2000000"
+        error = {ct.err_code: 1,
+                 ct.err_msg: "The data in the same column must be of the same type."}
+        mutation_res, _ = collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
     def test_insert_with_invalid_partition_name(self):
         """
         target: test insert with invalid scenario

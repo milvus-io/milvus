@@ -17,27 +17,19 @@
 package datanode
 
 import (
-	"context"
 	"fmt"
 	"reflect"
-	"sync"
 	"time"
 
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/internal/datanode/broker"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/datanode/writebuffer"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
-)
-
-const (
-	updateChanCPInterval = 1 * time.Minute
-	updateChanCPTimeout  = 10 * time.Second
 )
 
 // make sure ttNode implements flowgraph.Node
@@ -49,18 +41,8 @@ type ttNode struct {
 	metacache          metacache.MetaCache
 	writeBufferManager writebuffer.BufferManager
 	lastUpdateTime     *atomic.Time
-	broker             broker.Broker
-
-	updateCPLock  sync.Mutex
-	notifyChannel chan checkPoint
-	closeChannel  chan struct{}
-	closeOnce     sync.Once
-	closeWg       sync.WaitGroup
-}
-
-type checkPoint struct {
-	curTs time.Time
-	pos   *msgpb.MsgPosition
+	cpUpdater          *channelCheckpointUpdater
+	dropMode           *atomic.Bool
 }
 
 // Name returns node name, implementing flowgraph.Node
@@ -81,15 +63,22 @@ func (ttn *ttNode) IsValidInMsg(in []Msg) bool {
 }
 
 func (ttn *ttNode) Close() {
-	ttn.closeOnce.Do(func() {
-		close(ttn.closeChannel)
-		ttn.closeWg.Wait()
-	})
 }
 
 // Operate handles input messages, implementing flowgraph.Node
 func (ttn *ttNode) Operate(in []Msg) []Msg {
 	fgMsg := in[0].(*flowGraphMsg)
+	if fgMsg.dropCollection {
+		ttn.dropMode.Store(true)
+	}
+
+	// skip updating checkpoint for drop collection
+	// even if its the close msg
+	if ttn.dropMode.Load() {
+		log.RatedInfo(1.0, "ttnode in dropMode", zap.String("channel", ttn.vChannelName))
+		return []Msg{}
+	}
+
 	curTs, _ := tsoutil.ParseTS(fgMsg.timeRange.timestampMax)
 	if fgMsg.IsCloseMsg() {
 		if len(fgMsg.endPositions) > 0 {
@@ -113,10 +102,7 @@ func (ttn *ttNode) Operate(in []Msg) []Msg {
 		return []Msg{}
 	}
 	nonBlockingNotify := func() {
-		select {
-		case ttn.notifyChannel <- checkPoint{curTs, channelPos}:
-		default:
-		}
+		ttn.updateChannelCP(channelPos, curTs)
 	}
 
 	if needUpdate || curTs.Sub(ttn.lastUpdateTime.Load()) >= updateChanCPInterval {
@@ -128,31 +114,22 @@ func (ttn *ttNode) Operate(in []Msg) []Msg {
 }
 
 func (ttn *ttNode) updateChannelCP(channelPos *msgpb.MsgPosition, curTs time.Time) error {
-	ttn.updateCPLock.Lock()
-	defer ttn.updateCPLock.Unlock()
-
-	channelCPTs, _ := tsoutil.ParseTS(channelPos.GetTimestamp())
-	// TODO, change to ETCD operation, avoid datacoord operation
-	ctx, cancel := context.WithTimeout(context.Background(), updateChanCPTimeout)
-	defer cancel()
-
-	err := ttn.broker.UpdateChannelCheckpoint(ctx, ttn.vChannelName, channelPos)
-	if err != nil {
-		return err
+	callBack := func() error {
+		channelCPTs, _ := tsoutil.ParseTS(channelPos.GetTimestamp())
+		ttn.lastUpdateTime.Store(curTs)
+		ttn.writeBufferManager.NotifyCheckpointUpdated(ttn.vChannelName, channelPos.GetTimestamp())
+		log.Debug("UpdateChannelCheckpoint success",
+			zap.String("channel", ttn.vChannelName),
+			zap.Uint64("cpTs", channelPos.GetTimestamp()),
+			zap.Time("cpTime", channelCPTs))
+		return nil
 	}
 
-	ttn.lastUpdateTime.Store(curTs)
-
-	ttn.writeBufferManager.NotifyCheckpointUpdated(ttn.vChannelName, channelPos.GetTimestamp())
-
-	log.Info("UpdateChannelCheckpoint success",
-		zap.String("channel", ttn.vChannelName),
-		zap.Uint64("cpTs", channelPos.GetTimestamp()),
-		zap.Time("cpTime", channelCPTs))
-	return nil
+	err := ttn.cpUpdater.updateChannelCP(channelPos, callBack)
+	return err
 }
 
-func newTTNode(config *nodeConfig, broker broker.Broker, wbManager writebuffer.BufferManager) (*ttNode, error) {
+func newTTNode(config *nodeConfig, wbManager writebuffer.BufferManager, cpUpdater *channelCheckpointUpdater) (*ttNode, error) {
 	baseNode := BaseNode{}
 	baseNode.SetMaxQueueLength(Params.DataNodeCfg.FlowGraphMaxQueueLength.GetAsInt32())
 	baseNode.SetMaxParallelism(Params.DataNodeCfg.FlowGraphMaxParallelism.GetAsInt32())
@@ -163,26 +140,9 @@ func newTTNode(config *nodeConfig, broker broker.Broker, wbManager writebuffer.B
 		metacache:          config.metacache,
 		writeBufferManager: wbManager,
 		lastUpdateTime:     atomic.NewTime(time.Time{}), // set to Zero to update channel checkpoint immediately after fg started
-		broker:             broker,
-		notifyChannel:      make(chan checkPoint, 1),
-		closeChannel:       make(chan struct{}),
-		closeWg:            sync.WaitGroup{},
+		cpUpdater:          cpUpdater,
+		dropMode:           atomic.NewBool(false),
 	}
-
-	// check point updater
-	tt.closeWg.Add(1)
-	go func() {
-		defer tt.closeWg.Done()
-		for {
-			select {
-			case <-tt.closeChannel:
-				log.Info("ttNode updater exited", zap.String("channel", tt.vChannelName))
-				return
-			case cp := <-tt.notifyChannel:
-				tt.updateChannelCP(cp.pos, cp.curTs)
-			}
-		}
-	}()
 
 	return tt, nil
 }

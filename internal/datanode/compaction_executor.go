@@ -63,11 +63,11 @@ func (c *compactionExecutor) toCompleteState(task compactor) {
 	c.executing.GetAndRemove(task.getPlanID())
 }
 
-func (c *compactionExecutor) injectDone(planID UniqueID, success bool) {
+func (c *compactionExecutor) injectDone(planID UniqueID) {
 	c.completed.GetAndRemove(planID)
 	task, loaded := c.completedCompactor.GetAndRemove(planID)
 	if loaded {
-		task.injectDone(success)
+		task.injectDone()
 	}
 }
 
@@ -116,34 +116,37 @@ func (c *compactionExecutor) stopTask(planID UniqueID) {
 	}
 }
 
-func (c *compactionExecutor) channelValidateForCompaction(vChannelName string) bool {
+func (c *compactionExecutor) isValidChannel(channel string) bool {
 	// if vchannel marked dropped, compaction should not proceed
-	return !c.dropped.Contain(vChannelName)
+	return !c.dropped.Contain(channel)
 }
 
-func (c *compactionExecutor) stopExecutingtaskByVChannelName(vChannelName string) {
-	c.dropped.Insert(vChannelName)
+func (c *compactionExecutor) clearTasksByChannel(channel string) {
+	c.dropped.Insert(channel)
+
+	// stop executing tasks of channel
 	c.executing.Range(func(planID int64, task compactor) bool {
-		if task.getChannelName() == vChannelName {
+		if task.getChannelName() == channel {
 			c.stopTask(planID)
 		}
 		return true
 	})
 
-	// remove all completed plans for vChannelName
+	// remove all completed plans of channel
 	c.completed.Range(func(planID int64, result *datapb.CompactionPlanResult) bool {
-		if result.GetChannel() == vChannelName {
-			c.injectDone(planID, true)
+		if result.GetChannel() == channel {
+			c.injectDone(planID)
 			log.Info("remove compaction results for dropped channel",
-				zap.String("channel", vChannelName),
+				zap.String("channel", channel),
 				zap.Int64("planID", planID))
 		}
 		return true
 	})
 }
 
-func (c *compactionExecutor) getAllCompactionPlanResult() []*datapb.CompactionPlanResult {
+func (c *compactionExecutor) getAllCompactionResults() []*datapb.CompactionPlanResult {
 	results := make([]*datapb.CompactionPlanResult, 0)
+	// get executing results
 	c.executing.Range(func(planID int64, task compactor) bool {
 		results = append(results, &datapb.CompactionPlanResult{
 			State:  commonpb.CompactionState_Executing,
@@ -152,6 +155,7 @@ func (c *compactionExecutor) getAllCompactionPlanResult() []*datapb.CompactionPl
 		return true
 	})
 
+	// get completed results
 	c.completed.Range(func(planID int64, result *datapb.CompactionPlanResult) bool {
 		results = append(results, result)
 		return true

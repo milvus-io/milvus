@@ -69,6 +69,7 @@ type ComponentParam struct {
 	IndexNodeCfg  indexNodeConfig
 	HTTPCfg       httpConfig
 	LogCfg        logConfig
+	RoleCfg       roleConfig
 
 	RootCoordGrpcServerCfg  GrpcServerConfig
 	ProxyGrpcServerCfg      GrpcServerConfig
@@ -116,6 +117,7 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.IndexNodeCfg.init(bt)
 	p.HTTPCfg.init(bt)
 	p.LogCfg.init(bt)
+	p.RoleCfg.init(bt)
 
 	p.RootCoordGrpcServerCfg.Init("rootCoord", bt)
 	p.ProxyGrpcServerCfg.Init("proxy", bt)
@@ -489,8 +491,8 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 	p.StorageType = ParamItem{
 		Key:          "common.storageType",
 		Version:      "2.0.0",
-		DefaultValue: "minio",
-		Doc:          "please adjust in embedded Milvus: local, available values are [local, minio, remote, opendal]]",
+		DefaultValue: "remote",
+		Doc:          "please adjust in embedded Milvus: local, available values are [local, remote, opendal], value minio is deprecated, use remote instead",
 		Export:       true,
 	}
 	p.StorageType.Init(base.mgr)
@@ -671,6 +673,7 @@ type traceConfig struct {
 	SampleFraction ParamItem `refreshable:"false"`
 	JaegerURL      ParamItem `refreshable:"false"`
 	OtlpEndpoint   ParamItem `refreshable:"false"`
+	OtlpSecure     ParamItem `refreshable:"false"`
 }
 
 func (t *traceConfig) init(base *BaseTable) {
@@ -705,8 +708,16 @@ Fractions >= 1 will always sample. Fractions < 0 are treated as zero.`,
 	t.OtlpEndpoint = ParamItem{
 		Key:     "trace.otlp.endpoint",
 		Version: "2.3.0",
+		Doc:     "example: \"127.0.0.1:4318\"",
 	}
 	t.OtlpEndpoint.Init(base.mgr)
+
+	t.OtlpSecure = ParamItem{
+		Key:          "trace.otlp.secure",
+		Version:      "2.4.0",
+		DefaultValue: "true",
+	}
+	t.OtlpSecure.Init(base.mgr)
 }
 
 type logConfig struct {
@@ -887,16 +898,17 @@ func (p *rootCoordConfig) init(base *BaseTable) {
 // /////////////////////////////////////////////////////////////////////////////
 // --- proxy ---
 type AccessLogConfig struct {
-	Enable        ParamItem `refreshable:"false"`
-	MinioEnable   ParamItem `refreshable:"false"`
-	LocalPath     ParamItem `refreshable:"false"`
-	Filename      ParamItem `refreshable:"false"`
-	MaxSize       ParamItem `refreshable:"false"`
-	CacheSize     ParamItem `refreshable:"false"`
-	RotatedTime   ParamItem `refreshable:"false"`
-	MaxBackups    ParamItem `refreshable:"false"`
-	RemotePath    ParamItem `refreshable:"false"`
-	RemoteMaxTime ParamItem `refreshable:"false"`
+	Enable        ParamItem  `refreshable:"false"`
+	MinioEnable   ParamItem  `refreshable:"false"`
+	LocalPath     ParamItem  `refreshable:"false"`
+	Filename      ParamItem  `refreshable:"false"`
+	MaxSize       ParamItem  `refreshable:"false"`
+	CacheSize     ParamItem  `refreshable:"false"`
+	RotatedTime   ParamItem  `refreshable:"false"`
+	MaxBackups    ParamItem  `refreshable:"false"`
+	RemotePath    ParamItem  `refreshable:"false"`
+	RemoteMaxTime ParamItem  `refreshable:"false"`
+	Formatter     ParamGroup `refreshable:"false"`
 }
 
 type proxyConfig struct {
@@ -914,16 +926,19 @@ type proxyConfig struct {
 	MaxShardNum                  ParamItem `refreshable:"true"`
 	MaxDimension                 ParamItem `refreshable:"true"`
 	GinLogging                   ParamItem `refreshable:"false"`
+	GinLogSkipPaths              ParamItem `refreshable:"false"`
 	MaxUserNum                   ParamItem `refreshable:"true"`
 	MaxRoleNum                   ParamItem `refreshable:"true"`
 	MaxTaskNum                   ParamItem `refreshable:"false"`
-	AccessLog                    AccessLogConfig
 	ShardLeaderCacheInterval     ParamItem `refreshable:"false"`
 	ReplicaSelectionPolicy       ParamItem `refreshable:"false"`
 	CheckQueryNodeHealthInterval ParamItem `refreshable:"false"`
 	CostMetricsExpireTime        ParamItem `refreshable:"true"`
 	RetryTimesOnReplica          ParamItem `refreshable:"true"`
 	RetryTimesOnHealthCheck      ParamItem `refreshable:"true"`
+	PartitionNameRegexp          ParamItem `refreshable:"true"`
+
+	AccessLog AccessLogConfig
 }
 
 func (p *proxyConfig) init(base *BaseTable) {
@@ -1042,6 +1057,15 @@ please adjust in embedded Milvus: false`,
 	}
 	p.GinLogging.Init(base.mgr)
 
+	p.GinLogSkipPaths = ParamItem{
+		Key:          "proxy.ginLogSkipPaths",
+		Version:      "2.3.0",
+		DefaultValue: "/",
+		Doc:          "skip url path for gin log",
+		Export:       true,
+	}
+	p.GinLogSkipPaths.Init(base.mgr)
+
 	p.MaxUserNum = ParamItem{
 		Key:          "proxy.maxUserNum",
 		DefaultValue: "100",
@@ -1091,7 +1115,7 @@ please adjust in embedded Milvus: false`,
 	p.AccessLog.Filename = ParamItem{
 		Key:          "proxy.accessLog.filename",
 		Version:      "2.2.0",
-		DefaultValue: "milvus_access_log.log",
+		DefaultValue: "",
 		Doc:          "Log filename, leave empty to use stdout.",
 		Export:       true,
 	}
@@ -1106,7 +1130,7 @@ please adjust in embedded Milvus: false`,
 	p.AccessLog.MaxSize.Init(base.mgr)
 
 	p.AccessLog.CacheSize = ParamItem{
-		Key:          "proxy.accessLog.maxSize",
+		Key:          "proxy.accessLog.cacheSize",
 		Version:      "2.3.2",
 		DefaultValue: "10240",
 		Doc:          "Size of log of memory cache, in B",
@@ -1140,10 +1164,16 @@ please adjust in embedded Milvus: false`,
 	p.AccessLog.RemoteMaxTime = ParamItem{
 		Key:          "proxy.accessLog.remoteMaxTime",
 		Version:      "2.2.0",
-		DefaultValue: "168",
+		DefaultValue: "0",
 		Doc:          "Max time for log file in minIO, in hours",
 	}
 	p.AccessLog.RemoteMaxTime.Init(base.mgr)
+
+	p.AccessLog.Formatter = ParamGroup{
+		KeyPrefix: "proxy.accessLog.formatters.",
+		Version:   "2.3.4",
+	}
+	p.AccessLog.Formatter.Init(base.mgr)
 
 	p.ShardLeaderCacheInterval = ParamItem{
 		Key:          "proxy.shardLeaderCacheInterval",
@@ -1192,6 +1222,14 @@ please adjust in embedded Milvus: false`,
 		Doc:          "set query node unavailable on proxy when heartbeat failures reach this limit",
 	}
 	p.RetryTimesOnHealthCheck.Init(base.mgr)
+
+	p.PartitionNameRegexp = ParamItem{
+		Key:          "proxy.partitionNameRegexp",
+		Version:      "2.3.4",
+		DefaultValue: "false",
+		Doc:          "switch for whether proxy shall use partition name as regexp when searching",
+	}
+	p.PartitionNameRegexp.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -1200,8 +1238,10 @@ type queryCoordConfig struct {
 	// Deprecated: Since 2.2.0
 	RetryNum ParamItem `refreshable:"true"`
 	// Deprecated: Since 2.2.0
-	RetryInterval    ParamItem `refreshable:"true"`
-	TaskMergeCap     ParamItem `refreshable:"false"`
+	RetryInterval ParamItem `refreshable:"true"`
+	// Deprecated: Since 2.3.4
+	TaskMergeCap ParamItem `refreshable:"false"`
+
 	TaskExecutionCap ParamItem `refreshable:"true"`
 
 	// ---- Handoff ---
@@ -1210,6 +1250,7 @@ type queryCoordConfig struct {
 
 	// ---- Balance ---
 	AutoBalance                         ParamItem `refreshable:"true"`
+	AutoBalanceChannel                  ParamItem `refreshable:"true"`
 	Balancer                            ParamItem `refreshable:"true"`
 	GlobalRowCountFactor                ParamItem `refreshable:"true"`
 	ScoreUnbalanceTolerationFactor      ParamItem `refreshable:"true"`
@@ -1239,6 +1280,7 @@ type queryCoordConfig struct {
 	UpdateNextTargetInterval       ParamItem `refreshable:"false"`
 	CheckNodeInReplicaInterval     ParamItem `refreshable:"false"`
 	CheckResourceGroupInterval     ParamItem `refreshable:"false"`
+	LeaderViewUpdateInterval       ParamItem `refreshable:"false"`
 	EnableRGAutoRecover            ParamItem `refreshable:"true"`
 	CheckHealthInterval            ParamItem `refreshable:"false"`
 	CheckHealthRPCTimeout          ParamItem `refreshable:"true"`
@@ -1246,6 +1288,7 @@ type queryCoordConfig struct {
 	CollectionRecoverTimesLimit    ParamItem `refreshable:"true"`
 	ObserverTaskParallel           ParamItem `refreshable:"false"`
 	CheckAutoBalanceConfigInterval ParamItem `refreshable:"false"`
+	CheckNodeSessionInterval       ParamItem `refreshable:"false"`
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -1267,7 +1310,7 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 	p.TaskMergeCap = ParamItem{
 		Key:          "queryCoord.taskMergeCap",
 		Version:      "2.2.0",
-		DefaultValue: "16",
+		DefaultValue: "1",
 		Export:       true,
 	}
 	p.TaskMergeCap.Init(base.mgr)
@@ -1299,6 +1342,16 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.AutoBalance.Init(base.mgr)
+
+	p.AutoBalanceChannel = ParamItem{
+		Key:          "queryCoord.autoBalanceChannel",
+		Version:      "2.3.4",
+		DefaultValue: "true",
+		PanicIfEmpty: true,
+		Doc:          "Enable auto balance channel",
+		Export:       true,
+	}
+	p.AutoBalanceChannel.Init(base.mgr)
 
 	p.Balancer = ParamItem{
 		Key:          "queryCoord.balancer",
@@ -1510,6 +1563,15 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 	}
 	p.CheckResourceGroupInterval.Init(base.mgr)
 
+	p.LeaderViewUpdateInterval = ParamItem{
+		Key:          "queryCoord.leaderViewUpdateInterval",
+		Doc:          "the interval duration(in seconds) for LeaderObserver to fetch LeaderView from querynodes",
+		Version:      "2.3.4",
+		DefaultValue: "1",
+		PanicIfEmpty: true,
+	}
+	p.LeaderViewUpdateInterval.Init(base.mgr)
+
 	p.EnableRGAutoRecover = ParamItem{
 		Key:          "queryCoord.enableRGAutoRecover",
 		Version:      "2.2.3",
@@ -1577,6 +1639,16 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.CheckAutoBalanceConfigInterval.Init(base.mgr)
+
+	p.CheckNodeSessionInterval = ParamItem{
+		Key:          "queryCoord.checkNodeSessionInterval",
+		Version:      "2.3.4",
+		DefaultValue: "60",
+		PanicIfEmpty: true,
+		Doc:          "the interval(in seconds) of check querynode cluster session",
+		Export:       true,
+	}
+	p.CheckNodeSessionInterval.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -1592,11 +1664,12 @@ type queryNodeConfig struct {
 	StatsPublishInterval ParamItem `refreshable:"true"`
 
 	// segcore
-	KnowhereThreadPoolSize ParamItem `refreshable:"false"`
-	ChunkRows              ParamItem `refreshable:"false"`
-	EnableTempSegmentIndex ParamItem `refreshable:"false"`
-	InterimIndexNlist      ParamItem `refreshable:"false"`
-	InterimIndexNProbe     ParamItem `refreshable:"false"`
+	KnowhereThreadPoolSize    ParamItem `refreshable:"false"`
+	ChunkRows                 ParamItem `refreshable:"false"`
+	EnableTempSegmentIndex    ParamItem `refreshable:"false"`
+	InterimIndexNlist         ParamItem `refreshable:"false"`
+	InterimIndexNProbe        ParamItem `refreshable:"false"`
+	InterimIndexMemExpandRate ParamItem `refreshable:"false"`
 
 	// memory limit
 	LoadMemoryUsageFactor               ParamItem `refreshable:"true"`
@@ -1643,9 +1716,11 @@ type queryNodeConfig struct {
 	SchedulePolicyMaxPendingTaskPerUser   ParamItem `refreshable:"true"`
 
 	// CGOPoolSize ratio to MaxReadConcurrency
-	CGOPoolSizeRatio ParamItem `refreshable:"false"`
+	CGOPoolSizeRatio ParamItem `refreshable:"true"`
 
 	EnableWorkerSQCostMetrics ParamItem `refreshable:"true"`
+
+	ExprEvalBatchSize ParamItem `refreshable:"false"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -1734,6 +1809,15 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.InterimIndexNlist.Init(base.mgr)
+
+	p.InterimIndexMemExpandRate = ParamItem{
+		Key:          "queryNode.segcore.interimIndex.memExpansionRate",
+		Version:      "2.0.0",
+		DefaultValue: "1.15",
+		Doc:          "extra memory needed by building interim index",
+		Export:       true,
+	}
+	p.InterimIndexMemExpandRate.Init(base.mgr)
 
 	p.InterimIndexNProbe = ParamItem{
 		Key:     "queryNode.segcore.interimIndex.nprobe",
@@ -2024,6 +2108,15 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Doc:          "whether use worker's cost to measure delegator's workload",
 	}
 	p.EnableWorkerSQCostMetrics.Init(base.mgr)
+
+	p.ExprEvalBatchSize = ParamItem{
+		Key:          "queryNode.segcore.exprEvalBatchSize",
+		Version:      "2.3.4",
+		DefaultValue: "8192",
+		Doc:          "expr eval batch size for getnext interface",
+	}
+
+	p.ExprEvalBatchSize.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -2045,6 +2138,7 @@ type dataCoordConfig struct {
 	SegmentMaxIdleTime             ParamItem `refreshable:"false"`
 	SegmentMinSizeFromIdleToSealed ParamItem `refreshable:"false"`
 	SegmentMaxBinlogFileNumber     ParamItem `refreshable:"false"`
+	AutoUpgradeSegmentIndex        ParamItem `refreshable:"true"`
 
 	// compaction
 	EnableCompaction     ParamItem `refreshable:"false"`
@@ -2501,6 +2595,16 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.CheckAutoBalanceConfigInterval.Init(base.mgr)
+
+	p.AutoUpgradeSegmentIndex = ParamItem{
+		Key:          "dataCoord.autoUpgradeSegmentIndex",
+		Version:      "2.3.4",
+		DefaultValue: "false",
+		PanicIfEmpty: true,
+		Doc:          "whether auto upgrade segment index to index engine's version",
+		Export:       true,
+	}
+	p.AutoUpgradeSegmentIndex.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -2509,13 +2613,18 @@ type dataNodeConfig struct {
 	FlowGraphMaxQueueLength ParamItem `refreshable:"false"`
 	FlowGraphMaxParallelism ParamItem `refreshable:"false"`
 	MaxParallelSyncTaskNum  ParamItem `refreshable:"false"`
+	MaxParallelSyncMgrTasks ParamItem `refreshable:"true"`
+
+	// skip mode
+	FlowGraphSkipModeEnable   ParamItem `refreshable:"true"`
+	FlowGraphSkipModeSkipNum  ParamItem `refreshable:"true"`
+	FlowGraphSkipModeColdTime ParamItem `refreshable:"true"`
 
 	// segment
 	FlushInsertBufferSize  ParamItem `refreshable:"true"`
 	FlushDeleteBufferBytes ParamItem `refreshable:"true"`
 	BinLogMaxSize          ParamItem `refreshable:"true"`
 	SyncPeriod             ParamItem `refreshable:"true"`
-	DeltaPolicy            ParamItem `refreshable:"false"`
 
 	// watchEvent
 	WatchEventTicklerInterval ParamItem `refreshable:"false"`
@@ -2537,12 +2646,16 @@ type dataNodeConfig struct {
 
 	// timeout for bulkinsert
 	BulkInsertTimeoutSeconds ParamItem `refreshable:"true"`
+	BulkInsertReadBufferSize ParamItem `refreshable:"true"`
+	BulkInsertMaxMemorySize  ParamItem `refreshable:"true"`
 
 	// Skip BF
 	SkipBFStatsLoad ParamItem `refreshable:"true"`
 
 	// channel
 	ChannelWorkPoolSize ParamItem `refreshable:"true"`
+
+	UpdateChannelCheckpointMaxParallel ParamItem `refreshable:"true"`
 }
 
 func (p *dataNodeConfig) init(base *BaseTable) {
@@ -2564,14 +2677,53 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	}
 	p.FlowGraphMaxParallelism.Init(base.mgr)
 
+	p.FlowGraphSkipModeEnable = ParamItem{
+		Key:          "datanode.dataSync.skipMode.enable",
+		Version:      "2.3.4",
+		DefaultValue: "true",
+		PanicIfEmpty: false,
+		Doc:          "Support skip some timetick message to reduce CPU usage",
+		Export:       true,
+	}
+	p.FlowGraphSkipModeEnable.Init(base.mgr)
+
+	p.FlowGraphSkipModeSkipNum = ParamItem{
+		Key:          "datanode.dataSync.skipMode.skipNum",
+		Version:      "2.3.4",
+		DefaultValue: "4",
+		PanicIfEmpty: false,
+		Doc:          "Consume one for every n records skipped",
+		Export:       true,
+	}
+	p.FlowGraphSkipModeSkipNum.Init(base.mgr)
+
+	p.FlowGraphSkipModeColdTime = ParamItem{
+		Key:          "datanode.dataSync.skipMode.coldTime",
+		Version:      "2.3.4",
+		DefaultValue: "60",
+		PanicIfEmpty: false,
+		Doc:          "Turn on skip mode after there are only timetick msg for x seconds",
+		Export:       true,
+	}
+	p.FlowGraphSkipModeColdTime.Init(base.mgr)
+
 	p.MaxParallelSyncTaskNum = ParamItem{
 		Key:          "dataNode.dataSync.maxParallelSyncTaskNum",
 		Version:      "2.3.0",
 		DefaultValue: "6",
-		Doc:          "Maximum number of sync tasks executed in parallel in each flush manager",
+		Doc:          "deprecated, legacy flush manager max conurrency number",
 		Export:       true,
 	}
 	p.MaxParallelSyncTaskNum.Init(base.mgr)
+
+	p.MaxParallelSyncMgrTasks = ParamItem{
+		Key:          "dataNode.dataSync.maxParallelSyncMgrTasks",
+		Version:      "2.3.4",
+		DefaultValue: "64",
+		Doc:          "The max concurrent sync task number of datanode sync mgr globally",
+		Export:       true,
+	}
+	p.MaxParallelSyncMgrTasks.Init(base.mgr)
 
 	p.FlushInsertBufferSize = ParamItem{
 		Key:          "dataNode.segment.insertBufSize",
@@ -2645,15 +2797,6 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	}
 	p.SyncPeriod.Init(base.mgr)
 
-	p.DeltaPolicy = ParamItem{
-		Key:          "dataNode.segment.deltaPolicy",
-		Version:      "2.3.4",
-		DefaultValue: "bloom_filter_pkoracle",
-		Doc:          "the delta policy current datanode using",
-		Export:       true,
-	}
-	p.DeltaPolicy.Init(base.mgr)
-
 	p.WatchEventTicklerInterval = ParamItem{
 		Key:          "datanode.segment.watchEventTicklerInterval",
 		Version:      "2.2.3",
@@ -2707,6 +2850,22 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	}
 	p.BulkInsertTimeoutSeconds.Init(base.mgr)
 
+	p.BulkInsertReadBufferSize = ParamItem{
+		Key:          "datanode.bulkinsert.readBufferSize",
+		Version:      "2.3.4",
+		PanicIfEmpty: false,
+		DefaultValue: "16777216",
+	}
+	p.BulkInsertReadBufferSize.Init(base.mgr)
+
+	p.BulkInsertMaxMemorySize = ParamItem{
+		Key:          "datanode.bulkinsert.maxMemorySize",
+		Version:      "2.3.4",
+		PanicIfEmpty: false,
+		DefaultValue: "6442450944",
+	}
+	p.BulkInsertMaxMemorySize.Init(base.mgr)
+
 	p.ChannelWorkPoolSize = ParamItem{
 		Key:          "datanode.channel.workPoolSize",
 		Version:      "2.3.2",
@@ -2714,6 +2873,14 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		DefaultValue: "-1",
 	}
 	p.ChannelWorkPoolSize.Init(base.mgr)
+
+	p.UpdateChannelCheckpointMaxParallel = ParamItem{
+		Key:          "datanode.channel.updateChannelCheckpointMaxParallel",
+		Version:      "2.3.4",
+		PanicIfEmpty: false,
+		DefaultValue: "1000",
+	}
+	p.UpdateChannelCheckpointMaxParallel.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -2801,6 +2968,10 @@ func (p *integrationTestConfig) init(base *BaseTable) {
 
 func (params *ComponentParam) Save(key string, value string) error {
 	return params.baseTable.Save(key, value)
+}
+
+func (params *ComponentParam) SaveGroup(group map[string]string) error {
+	return params.baseTable.SaveGroup(group)
 }
 
 func (params *ComponentParam) Remove(key string) error {

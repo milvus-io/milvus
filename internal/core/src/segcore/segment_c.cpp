@@ -10,47 +10,57 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "segcore/segment_c.h"
+
 #include <memory>
 
+#include "common/FieldData.h"
 #include "common/LoadInfo.h"
 #include "common/Types.h"
 #include "common/Tracer.h"
 #include "common/type_c.h"
 #include "google/protobuf/text_format.h"
 #include "log/Log.h"
+#include "mmap/Types.h"
 #include "segcore/Collection.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegmentSealedImpl.h"
 #include "segcore/Utils.h"
-#include "storage/FieldData.h"
 #include "storage/Util.h"
-#include "mmap/Types.h"
+#include "storage/space.h"
 
 //////////////////////////////    common interfaces    //////////////////////////////
-CSegmentInterface
-NewSegment(CCollection collection, SegmentType seg_type, int64_t segment_id) {
-    auto col = static_cast<milvus::segcore::Collection*>(collection);
+CStatus
+NewSegment(CCollection collection,
+           SegmentType seg_type,
+           int64_t segment_id,
+           CSegmentInterface* newSegment) {
+    try {
+        auto col = static_cast<milvus::segcore::Collection*>(collection);
 
-    std::unique_ptr<milvus::segcore::SegmentInterface> segment;
-    switch (seg_type) {
-        case Growing: {
-            auto seg = milvus::segcore::CreateGrowingSegment(
-                col->get_schema(), col->GetIndexMeta(), segment_id);
-            segment = std::move(seg);
-            break;
+        std::unique_ptr<milvus::segcore::SegmentInterface> segment;
+        switch (seg_type) {
+            case Growing: {
+                auto seg = milvus::segcore::CreateGrowingSegment(
+                    col->get_schema(), col->GetIndexMeta(), segment_id);
+                segment = std::move(seg);
+                break;
+            }
+            case Sealed:
+            case Indexing:
+                segment = milvus::segcore::CreateSealedSegment(
+                    col->get_schema(), col->GetIndexMeta(), segment_id);
+                break;
+            default:
+                PanicInfo(milvus::UnexpectedError,
+                          "invalid segment type: {}",
+                          seg_type);
         }
-        case Sealed:
-        case Indexing:
-            segment = milvus::segcore::CreateSealedSegment(
-                col->get_schema(), col->GetIndexMeta(), segment_id);
-            break;
-        default:
-            LOG_SEGCORE_ERROR_ << "invalid segment type "
-                               << static_cast<int32_t>(seg_type);
-            break;
-    }
 
-    return segment.release();
+        *newSegment = segment.release();
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
 }
 
 void
@@ -242,6 +252,20 @@ LoadFieldData(CSegmentInterface c_segment,
     }
 }
 
+CStatus
+LoadFieldDataV2(CSegmentInterface c_segment,
+                CLoadFieldDataInfo c_load_field_data_info) {
+    try {
+        auto segment =
+            reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
+        AssertInfo(segment != nullptr, "segment conversion failed");
+        auto load_info = (LoadFieldDataInfo*)c_load_field_data_info;
+        segment->LoadFieldDataV2(*load_info);
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
 // just for test
 CStatus
 LoadFieldRawData(CSegmentInterface c_segment,
@@ -269,8 +293,8 @@ LoadFieldRawData(CSegmentInterface c_segment,
         }
         auto field_data = milvus::storage::CreateFieldData(data_type, dim);
         field_data->FillFieldData(data, row_count);
-        milvus::storage::FieldDataChannelPtr channel =
-            std::make_shared<milvus::storage::FieldDataChannel>();
+        milvus::FieldDataChannelPtr channel =
+            std::make_shared<milvus::FieldDataChannel>();
         channel->push(field_data);
         channel->close();
         auto field_data_info = milvus::FieldDataInfo(

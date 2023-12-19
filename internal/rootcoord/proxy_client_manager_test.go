@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type proxyMock struct {
@@ -95,7 +96,7 @@ func (p *proxyMock) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.Ref
 	return merr.Success(), nil
 }
 
-func TestProxyClientManager_GetProxyClients(t *testing.T) {
+func TestProxyClientManager_AddProxyClients(t *testing.T) {
 	paramtable.Init()
 
 	core, err := NewCore(context.Background(), nil)
@@ -125,7 +126,7 @@ func TestProxyClientManager_GetProxyClients(t *testing.T) {
 	}
 
 	sessions := []*sessionutil.Session{session}
-	pcm.GetProxyClients(sessions)
+	pcm.AddProxyClients(sessions)
 }
 
 func TestProxyClientManager_AddProxyClient(t *testing.T) {
@@ -164,7 +165,7 @@ func TestProxyClientManager_AddProxyClient(t *testing.T) {
 func TestProxyClientManager_InvalidateCollectionMetaCache(t *testing.T) {
 	t.Run("empty proxy list", func(t *testing.T) {
 		ctx := context.Background()
-		pcm := &proxyClientManager{proxyClient: map[int64]types.ProxyClient{}}
+		pcm := &proxyClientManager{proxyClient: typeutil.NewConcurrentMap[int64, types.ProxyClient]()}
 		err := pcm.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{})
 		assert.NoError(t, err)
 	})
@@ -175,9 +176,8 @@ func TestProxyClientManager_InvalidateCollectionMetaCache(t *testing.T) {
 		p1.InvalidateCollectionMetaCacheFunc = func(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
 			return merr.Success(), errors.New("error mock InvalidateCollectionMetaCache")
 		}
-		pcm := &proxyClientManager{proxyClient: map[int64]types.ProxyClient{
-			TestProxyID: p1,
-		}}
+		pcm := &proxyClientManager{proxyClient: typeutil.NewConcurrentMap[int64, types.ProxyClient]()}
+		pcm.proxyClient.Insert(TestProxyID, p1)
 		err := pcm.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{})
 		assert.Error(t, err)
 	})
@@ -189,9 +189,8 @@ func TestProxyClientManager_InvalidateCollectionMetaCache(t *testing.T) {
 		p1.InvalidateCollectionMetaCacheFunc = func(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
 			return merr.Status(mockErr), nil
 		}
-		pcm := &proxyClientManager{proxyClient: map[int64]types.ProxyClient{
-			TestProxyID: p1,
-		}}
+		pcm := &proxyClientManager{proxyClient: typeutil.NewConcurrentMap[int64, types.ProxyClient]()}
+		pcm.proxyClient.Insert(TestProxyID, p1)
 		err := pcm.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{})
 		assert.Error(t, err)
 	})
@@ -202,9 +201,8 @@ func TestProxyClientManager_InvalidateCollectionMetaCache(t *testing.T) {
 		p1.InvalidateCollectionMetaCacheFunc = func(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
 			return nil, merr.ErrNodeNotFound
 		}
-		pcm := &proxyClientManager{proxyClient: map[int64]types.ProxyClient{
-			TestProxyID: p1,
-		}}
+		pcm := &proxyClientManager{proxyClient: typeutil.NewConcurrentMap[int64, types.ProxyClient]()}
+		pcm.proxyClient.Insert(TestProxyID, p1)
 
 		err := pcm.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{})
 		assert.NoError(t, err)
@@ -216,9 +214,8 @@ func TestProxyClientManager_InvalidateCollectionMetaCache(t *testing.T) {
 		p1.InvalidateCollectionMetaCacheFunc = func(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
 			return merr.Success(), nil
 		}
-		pcm := &proxyClientManager{proxyClient: map[int64]types.ProxyClient{
-			TestProxyID: p1,
-		}}
+		pcm := &proxyClientManager{proxyClient: typeutil.NewConcurrentMap[int64, types.ProxyClient]()}
+		pcm.proxyClient.Insert(TestProxyID, p1)
 		err := pcm.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{})
 		assert.NoError(t, err)
 	})
@@ -227,7 +224,7 @@ func TestProxyClientManager_InvalidateCollectionMetaCache(t *testing.T) {
 func TestProxyClientManager_InvalidateCredentialCache(t *testing.T) {
 	t.Run("empty proxy list", func(t *testing.T) {
 		ctx := context.Background()
-		pcm := &proxyClientManager{proxyClient: map[int64]types.ProxyClient{}}
+		pcm := &proxyClientManager{proxyClient: typeutil.NewConcurrentMap[int64, types.ProxyClient]()}
 		err := pcm.InvalidateCredentialCache(ctx, &proxypb.InvalidateCredCacheRequest{})
 		assert.NoError(t, err)
 	})
@@ -238,9 +235,8 @@ func TestProxyClientManager_InvalidateCredentialCache(t *testing.T) {
 		p1.InvalidateCredentialCacheFunc = func(ctx context.Context, request *proxypb.InvalidateCredCacheRequest) (*commonpb.Status, error) {
 			return merr.Success(), errors.New("error mock InvalidateCredentialCache")
 		}
-		pcm := &proxyClientManager{proxyClient: map[int64]types.ProxyClient{
-			TestProxyID: p1,
-		}}
+		pcm := &proxyClientManager{proxyClient: typeutil.NewConcurrentMap[int64, types.ProxyClient]()}
+		pcm.proxyClient.Insert(TestProxyID, p1)
 		err := pcm.InvalidateCredentialCache(ctx, &proxypb.InvalidateCredCacheRequest{})
 		assert.Error(t, err)
 	})
@@ -252,9 +248,8 @@ func TestProxyClientManager_InvalidateCredentialCache(t *testing.T) {
 		p1.InvalidateCredentialCacheFunc = func(ctx context.Context, request *proxypb.InvalidateCredCacheRequest) (*commonpb.Status, error) {
 			return merr.Status(mockErr), nil
 		}
-		pcm := &proxyClientManager{proxyClient: map[int64]types.ProxyClient{
-			TestProxyID: p1,
-		}}
+		pcm := &proxyClientManager{proxyClient: typeutil.NewConcurrentMap[int64, types.ProxyClient]()}
+		pcm.proxyClient.Insert(TestProxyID, p1)
 		err := pcm.InvalidateCredentialCache(ctx, &proxypb.InvalidateCredCacheRequest{})
 		assert.Error(t, err)
 	})
@@ -265,9 +260,8 @@ func TestProxyClientManager_InvalidateCredentialCache(t *testing.T) {
 		p1.InvalidateCredentialCacheFunc = func(ctx context.Context, request *proxypb.InvalidateCredCacheRequest) (*commonpb.Status, error) {
 			return merr.Success(), nil
 		}
-		pcm := &proxyClientManager{proxyClient: map[int64]types.ProxyClient{
-			TestProxyID: p1,
-		}}
+		pcm := &proxyClientManager{proxyClient: typeutil.NewConcurrentMap[int64, types.ProxyClient]()}
+		pcm.proxyClient.Insert(TestProxyID, p1)
 		err := pcm.InvalidateCredentialCache(ctx, &proxypb.InvalidateCredCacheRequest{})
 		assert.NoError(t, err)
 	})
@@ -276,7 +270,7 @@ func TestProxyClientManager_InvalidateCredentialCache(t *testing.T) {
 func TestProxyClientManager_RefreshPolicyInfoCache(t *testing.T) {
 	t.Run("empty proxy list", func(t *testing.T) {
 		ctx := context.Background()
-		pcm := &proxyClientManager{proxyClient: map[int64]types.ProxyClient{}}
+		pcm := &proxyClientManager{proxyClient: typeutil.NewConcurrentMap[int64, types.ProxyClient]()}
 		err := pcm.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{})
 		assert.NoError(t, err)
 	})
@@ -287,9 +281,8 @@ func TestProxyClientManager_RefreshPolicyInfoCache(t *testing.T) {
 		p1.RefreshPolicyInfoCacheFunc = func(ctx context.Context, request *proxypb.RefreshPolicyInfoCacheRequest) (*commonpb.Status, error) {
 			return merr.Success(), errors.New("error mock RefreshPolicyInfoCache")
 		}
-		pcm := &proxyClientManager{proxyClient: map[int64]types.ProxyClient{
-			TestProxyID: p1,
-		}}
+		pcm := &proxyClientManager{proxyClient: typeutil.NewConcurrentMap[int64, types.ProxyClient]()}
+		pcm.proxyClient.Insert(TestProxyID, p1)
 		err := pcm.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{})
 		assert.Error(t, err)
 	})
@@ -301,9 +294,8 @@ func TestProxyClientManager_RefreshPolicyInfoCache(t *testing.T) {
 		p1.RefreshPolicyInfoCacheFunc = func(ctx context.Context, request *proxypb.RefreshPolicyInfoCacheRequest) (*commonpb.Status, error) {
 			return merr.Status(mockErr), nil
 		}
-		pcm := &proxyClientManager{proxyClient: map[int64]types.ProxyClient{
-			TestProxyID: p1,
-		}}
+		pcm := &proxyClientManager{proxyClient: typeutil.NewConcurrentMap[int64, types.ProxyClient]()}
+		pcm.proxyClient.Insert(TestProxyID, p1)
 		err := pcm.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{})
 		assert.Error(t, err)
 	})
@@ -314,9 +306,8 @@ func TestProxyClientManager_RefreshPolicyInfoCache(t *testing.T) {
 		p1.RefreshPolicyInfoCacheFunc = func(ctx context.Context, request *proxypb.RefreshPolicyInfoCacheRequest) (*commonpb.Status, error) {
 			return merr.Success(), nil
 		}
-		pcm := &proxyClientManager{proxyClient: map[int64]types.ProxyClient{
-			TestProxyID: p1,
-		}}
+		pcm := &proxyClientManager{proxyClient: typeutil.NewConcurrentMap[int64, types.ProxyClient]()}
+		pcm.proxyClient.Insert(TestProxyID, p1)
 		err := pcm.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{})
 		assert.NoError(t, err)
 	})

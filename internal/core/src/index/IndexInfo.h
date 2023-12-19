@@ -13,7 +13,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 #pragma once
 
 #include "common/Types.h"
@@ -25,6 +24,8 @@ struct CreateIndexInfo {
     IndexType index_type;
     MetricType metric_type;
     IndexVersion index_engine_version;
+    std::string field_name;
+    int64_t dim;
 };
 
 }  // namespace milvus::index
