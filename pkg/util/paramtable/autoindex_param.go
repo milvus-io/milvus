@@ -37,6 +37,11 @@ type autoIndexConfig struct {
 	AutoIndexTypeName     ParamItem  `refreshable:"true"`
 	AutoIndexSearchConfig ParamItem  `refreshable:"true"`
 	AutoIndexTuningConfig ParamGroup `refreshable:"true"`
+
+	ScalarAutoIndexEnable  ParamItem `refreshable:"true"`
+	ScalarAutoIndexParams  ParamItem `refreshable:"true"`
+	ScalarNumericIndexType ParamItem `refreshable:"true"`
+	ScalarVarcharIndexType ParamItem `refreshable:"true"`
 }
 
 func (p *autoIndexConfig) init(base *BaseTable) {
@@ -98,6 +103,45 @@ func (p *autoIndexConfig) init(base *BaseTable) {
 	p.AutoIndexTuningConfig.Init(base.mgr)
 
 	p.panicIfNotValidAndSetDefaultMetricType(base.mgr)
+
+	p.ScalarAutoIndexEnable = ParamItem{
+		Key:          "scalarAutoIndex.enable",
+		Version:      "2.3.4",
+		DefaultValue: "false",
+		PanicIfEmpty: true,
+	}
+	p.ScalarAutoIndexEnable.Init(base.mgr)
+
+	p.ScalarAutoIndexParams = ParamItem{
+		Key:          "scalarAutoIndex.params.build",
+		Version:      "2.3.4",
+		DefaultValue: `{"numeric": "STL_SORT","varchar": "Trie"}`,
+	}
+	p.ScalarAutoIndexParams.Init(base.mgr)
+
+	p.ScalarNumericIndexType = ParamItem{
+		Version: "2.3.4",
+		Formatter: func(v string) string {
+			m := p.ScalarAutoIndexParams.GetAsJSONMap()
+			if m == nil {
+				return ""
+			}
+			return m["numeric"]
+		},
+	}
+	p.ScalarNumericIndexType.Init(base.mgr)
+
+	p.ScalarVarcharIndexType = ParamItem{
+		Version: "2.3.4",
+		Formatter: func(v string) string {
+			m := p.ScalarAutoIndexParams.GetAsJSONMap()
+			if m == nil {
+				return ""
+			}
+			return m["varchar"]
+		},
+	}
+	p.ScalarVarcharIndexType.Init(base.mgr)
 }
 
 func (p *autoIndexConfig) panicIfNotValidAndSetDefaultMetricType(mgr *config.Manager) {
