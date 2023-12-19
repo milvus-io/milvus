@@ -100,7 +100,7 @@ func (f *PmsFactory) NewMsgStream(ctx context.Context) (MsgStream, error) {
 	if err != nil {
 		return nil, err
 	}
-	return NewMqMsgStream(ctx, f.ReceiveBufSize, f.MQBufSize, pulsarClient, f.dispatcherFactory.NewUnmarshalDispatcher())
+	return NewMqMsgStream(context.Background(), f.ReceiveBufSize, f.MQBufSize, pulsarClient, f.dispatcherFactory.NewUnmarshalDispatcher())
 }
 
 // NewTtMsgStream is used to generate a new TtMsgstream object
@@ -127,7 +127,8 @@ func (f *PmsFactory) NewTtMsgStream(ctx context.Context) (MsgStream, error) {
 	if err != nil {
 		return nil, err
 	}
-	return NewMqTtMsgStream(ctx, f.ReceiveBufSize, f.MQBufSize, pulsarClient, f.dispatcherFactory.NewUnmarshalDispatcher())
+
+	return NewMqTtMsgStream(context.Background(), f.ReceiveBufSize, f.MQBufSize, pulsarClient, f.dispatcherFactory.NewUnmarshalDispatcher())
 }
 
 func (f *PmsFactory) getAuthentication() (pulsar.Authentication, error) {
@@ -187,7 +188,7 @@ func (f *KmsFactory) NewMsgStream(ctx context.Context) (MsgStream, error) {
 	if err != nil {
 		return nil, err
 	}
-	return NewMqMsgStream(ctx, f.ReceiveBufSize, f.MQBufSize, kafkaClient, f.dispatcherFactory.NewUnmarshalDispatcher())
+	return NewMqMsgStream(context.Background(), f.ReceiveBufSize, f.MQBufSize, kafkaClient, f.dispatcherFactory.NewUnmarshalDispatcher())
 }
 
 func (f *KmsFactory) NewTtMsgStream(ctx context.Context) (MsgStream, error) {
@@ -195,7 +196,7 @@ func (f *KmsFactory) NewTtMsgStream(ctx context.Context) (MsgStream, error) {
 	if err != nil {
 		return nil, err
 	}
-	return NewMqTtMsgStream(ctx, f.ReceiveBufSize, f.MQBufSize, kafkaClient, f.dispatcherFactory.NewUnmarshalDispatcher())
+	return NewMqTtMsgStream(context.Background(), f.ReceiveBufSize, f.MQBufSize, kafkaClient, f.dispatcherFactory.NewUnmarshalDispatcher())
 }
 
 func (f *KmsFactory) NewMsgStreamDisposer(ctx context.Context) func([]string, string) error {
