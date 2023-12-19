@@ -17,6 +17,7 @@ set(INDEX_FILES
         VectorDiskIndex.cpp
         ScalarIndex.cpp
         ScalarIndexSort.cpp
+        SkipIndex.cpp
         )
 
 milvus_add_pkg_config("milvus_index")

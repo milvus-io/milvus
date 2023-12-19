@@ -36,7 +36,7 @@
 #include "segcore/SegmentGrowingImpl.h"
 #include "simdjson/error.h"
 #include "query/PlanProto.h"
-#include "segcore/SkipIndex.h"
+#include "index/SkipIndex.h"
 #include "simd/hook.h"
 #include "index/Meta.h"
 
