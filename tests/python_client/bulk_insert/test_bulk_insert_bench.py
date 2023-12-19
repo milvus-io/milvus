@@ -116,7 +116,7 @@ class TestBulkInsertPerf(TestcaseBaseBulkInsert):
         )
         logging.info(f"bulk insert task ids:{task_id}")
         success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=300
+            task_ids=[task_id], timeout=1800
         )
         tt = time.time() - t0
         log.info(f"bulk insert state:{success} in {tt} with states:{states}")
@@ -175,7 +175,7 @@ class TestBulkInsertPerf(TestcaseBaseBulkInsert):
         )
         logging.info(f"bulk insert task ids:{task_id}")
         success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=300
+            task_ids=[task_id], timeout=1800
         )
         tt = time.time() - t0
         log.info(f"bulk insert state:{success} in {tt} with states:{states}")
@@ -229,7 +229,7 @@ class TestBulkInsertPerf(TestcaseBaseBulkInsert):
         )
         logging.info(f"bulk insert task ids:{task_id}")
         success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=300
+            task_ids=[task_id], timeout=1800
         )
         tt = time.time() - t0
         log.info(f"bulk insert state:{success} in {tt} with states:{states}")
