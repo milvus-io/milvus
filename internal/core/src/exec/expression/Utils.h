@@ -100,8 +100,8 @@ CompareTwoJsonArray(T arr1, const proto::plan::Array& arr2) {
             }
             default:
                 PanicInfo(DataTypeInvalid,
-                          fmt::format("unsupported data type {}",
-                                      arr2.array(i).val_case()));
+                          "unsupported data type {}",
+                          arr2.array(i).val_case());
         }
         i++;
     }
@@ -143,8 +143,8 @@ GetValueFromProtoInternal(const milvus::proto::plan::GenericValue& value_proto,
         return static_cast<T>(value_proto);
     } else {
         PanicInfo(Unsupported,
-                  fmt::format("unsupported generic value {}",
-                              value_proto.DebugString()));
+                  "unsupported generic value {}",
+                  value_proto.DebugString());
     }
 }
 

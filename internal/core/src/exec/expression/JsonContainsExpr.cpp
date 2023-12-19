@@ -34,8 +34,8 @@ PhyJsonContainsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         }
         default:
             PanicInfo(DataTypeInvalid,
-                      fmt::format("unsupported data type: {}",
-                                  expr_->column_.data_type_));
+                      "unsupported data type: {}",
+                      expr_->column_.data_type_);
     }
 }
 
@@ -86,8 +86,8 @@ PhyJsonContainsFilterExpr::EvalJsonContainsForDataSegment() {
                         }
                         default:
                             PanicInfo(DataTypeInvalid,
-                                      fmt::format("unsupported data type:{}",
-                                                  val_type));
+                                      "unsupported data type:{}",
+                                      val_type);
                     }
                 } else {
                     return ExecJsonContainsWithDiffType();
@@ -137,8 +137,8 @@ PhyJsonContainsFilterExpr::EvalJsonContainsForDataSegment() {
                         }
                         default:
                             PanicInfo(DataTypeInvalid,
-                                      fmt::format("unsupported data type:{}",
-                                                  val_type));
+                                      "unsupported data type:{}",
+                                      val_type);
                     }
                 } else {
                     return ExecJsonContainsAllWithDiffType();
@@ -148,9 +148,8 @@ PhyJsonContainsFilterExpr::EvalJsonContainsForDataSegment() {
         }
         default:
             PanicInfo(ExprInvalid,
-                      fmt::format("unsupported json contains type {}",
-                                  proto::plan::JSONContainsExpr_JSONOp_Name(
-                                      expr_->op_)));
+                      "unsupported json contains type {}",
+                      proto::plan::JSONContainsExpr_JSONOp_Name(expr_->op_));
     }
 }
 
@@ -196,10 +195,10 @@ PhyJsonContainsFilterExpr::ExecArrayContains() {
     int64_t processed_size = ProcessDataChunks<milvus::ArrayView>(
         execute_sub_batch, std::nullptr_t{}, res, elements);
     AssertInfo(processed_size == real_batch_size,
-               fmt::format("internal error: expr processed rows {} not equal "
-                           "expect batch size {}",
-                           processed_size,
-                           real_batch_size));
+               "internal error: expr processed rows {} not equal "
+               "expect batch size {}",
+               processed_size,
+               real_batch_size);
     return res_vec;
 }
 
@@ -253,10 +252,10 @@ PhyJsonContainsFilterExpr::ExecJsonContains() {
     int64_t processed_size = ProcessDataChunks<Json>(
         execute_sub_batch, std::nullptr_t{}, res, pointer, elements);
     AssertInfo(processed_size == real_batch_size,
-               fmt::format("internal error: expr processed rows {} not equal "
-                           "expect batch size {}",
-                           processed_size,
-                           real_batch_size));
+               "internal error: expr processed rows {} not equal "
+               "expect batch size {}",
+               processed_size,
+               real_batch_size);
     return res_vec;
 }
 
@@ -314,10 +313,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArray() {
     int64_t processed_size = ProcessDataChunks<milvus::Json>(
         execute_sub_batch, std::nullptr_t{}, res, pointer, elements);
     AssertInfo(processed_size == real_batch_size,
-               fmt::format("internal error: expr processed rows {} not equal "
-                           "expect batch size {}",
-                           processed_size,
-                           real_batch_size));
+               "internal error: expr processed rows {} not equal "
+               "expect batch size {}",
+               processed_size,
+               real_batch_size);
     return res_vec;
 }
 
@@ -366,10 +365,10 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAll() {
     int64_t processed_size = ProcessDataChunks<milvus::ArrayView>(
         execute_sub_batch, std::nullptr_t{}, res, elements);
     AssertInfo(processed_size == real_batch_size,
-               fmt::format("internal error: expr processed rows {} not equal "
-                           "expect batch size {}",
-                           processed_size,
-                           real_batch_size));
+               "internal error: expr processed rows {} not equal "
+               "expect batch size {}",
+               processed_size,
+               real_batch_size);
     return res_vec;
 }
 
@@ -426,10 +425,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAll() {
     int64_t processed_size = ProcessDataChunks<Json>(
         execute_sub_batch, std::nullptr_t{}, res, pointer, elements);
     AssertInfo(processed_size == real_batch_size,
-               fmt::format("internal error: expr processed rows {} not equal "
-                           "expect batch size {}",
-                           processed_size,
-                           real_batch_size));
+               "internal error: expr processed rows {} not equal "
+               "expect batch size {}",
+               processed_size,
+               real_batch_size);
     return res_vec;
 }
 
@@ -551,10 +550,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffType() {
                                                      elements,
                                                      elements_index);
     AssertInfo(processed_size == real_batch_size,
-               fmt::format("internal error: expr processed rows {} not equal "
-                           "expect batch size {}",
-                           processed_size,
-                           real_batch_size));
+               "internal error: expr processed rows {} not equal "
+               "expect batch size {}",
+               processed_size,
+               real_batch_size);
     return res_vec;
 }
 
@@ -617,10 +616,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArray() {
     int64_t processed_size = ProcessDataChunks<Json>(
         execute_sub_batch, std::nullptr_t{}, res, pointer, elements);
     AssertInfo(processed_size == real_batch_size,
-               fmt::format("internal error: expr processed rows {} not equal "
-                           "expect batch size {}",
-                           processed_size,
-                           real_batch_size));
+               "internal error: expr processed rows {} not equal "
+               "expect batch size {}",
+               processed_size,
+               real_batch_size);
     return res_vec;
 }
 
@@ -729,10 +728,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffType() {
     int64_t processed_size = ProcessDataChunks<Json>(
         execute_sub_batch, std::nullptr_t{}, res, pointer, elements);
     AssertInfo(processed_size == real_batch_size,
-               fmt::format("internal error: expr processed rows {} not equal "
-                           "expect batch size {}",
-                           processed_size,
-                           real_batch_size));
+               "internal error: expr processed rows {} not equal "
+               "expect batch size {}",
+               processed_size,
+               real_batch_size);
     return res_vec;
 }
 

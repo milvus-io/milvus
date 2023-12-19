@@ -409,8 +409,8 @@ VectorMemIndex<T>::BuildV2(const Config& config) {
     auto res = space_->ScanData();
     if (!res.ok()) {
         PanicInfo(IndexBuildError,
-                  fmt::format("failed to create scan iterator: {}",
-                              res.status().ToString()));
+                  "failed to create scan iterator: {}",
+                  res.status().ToString());
     }
 
     auto reader = res.value();
@@ -418,8 +418,8 @@ VectorMemIndex<T>::BuildV2(const Config& config) {
     for (auto rec : *reader) {
         if (!rec.ok()) {
             PanicInfo(IndexBuildError,
-                      fmt::format("failed to read data: {}",
-                                  rec.status().ToString()));
+                      "failed to read data: {}",
+                      rec.status().ToString());
         }
         auto data = rec.ValueUnsafe();
         if (data == nullptr) {
@@ -538,9 +538,8 @@ VectorMemIndex<T>::Query(const DatasetPtr dataset,
             milvus::tracer::AddEvent("finish_knowhere_index_range_search");
             if (!res.has_value()) {
                 PanicInfo(ErrorCode::UnexpectedError,
-                          fmt::format("failed to range search: {}: {}",
-                                      KnowhereStatusString(res.error()),
-                                      res.what()));
+                          "failed to range search: {}: {}",
+                          KnowhereStatusString(res.error(), res.what()));
             }
             auto result = ReGenRangeSearchResult(
                 res.value(), topk, num_queries, GetMetricType());
@@ -552,9 +551,8 @@ VectorMemIndex<T>::Query(const DatasetPtr dataset,
             milvus::tracer::AddEvent("finish_knowhere_index_search");
             if (!res.has_value()) {
                 PanicInfo(ErrorCode::UnexpectedError,
-                          fmt::format("failed to search: {}: {}",
-                                      KnowhereStatusString(res.error()),
-                                      res.what()));
+                          "failed to search: {}: {}",
+                          KnowhereStatusString(res.error(), res.what()));
             }
             return res.value();
         }
@@ -717,8 +715,8 @@ VectorMemIndex<T>::LoadFromFile(const Config& config) {
     auto stat = index_.DeserializeFromFile(filepath.value(), conf);
     if (stat != knowhere::Status::success) {
         PanicInfo(ErrorCode::UnexpectedError,
-                  fmt::format("failed to Deserialize index: {}",
-                              KnowhereStatusString(stat)));
+                  "failed to Deserialize index: {}",
+                  KnowhereStatusString(stat));
     }
 
     auto dim = index_.Dim();
@@ -726,9 +724,9 @@ VectorMemIndex<T>::LoadFromFile(const Config& config) {
 
     auto ok = unlink(filepath->data());
     AssertInfo(ok == 0,
-               fmt::format("failed to unlink mmap index file {}: {}",
-                           filepath.value(),
-                           strerror(errno)));
+               "failed to unlink mmap index file {}: {}",
+               filepath.value(),
+               strerror(errno));
     LOG_SEGCORE_INFO_ << "load vector index done";
 }
 
@@ -821,8 +819,8 @@ VectorMemIndex<T>::LoadFromFileV2(const Config& config) {
     auto stat = index_.DeserializeFromFile(filepath.value(), conf);
     if (stat != knowhere::Status::success) {
         PanicInfo(DataFormatBroken,
-                  fmt::format("failed to Deserialize index: {}",
-                              KnowhereStatusString(stat)));
+                  "failed to Deserialize index: {}",
+                  KnowhereStatusString(stat));
     }
 
     auto dim = index_.Dim();
@@ -830,9 +828,9 @@ VectorMemIndex<T>::LoadFromFileV2(const Config& config) {
 
     auto ok = unlink(filepath->data());
     AssertInfo(ok == 0,
-               fmt::format("failed to unlink mmap index file {}: {}",
-                           filepath.value(),
-                           strerror(errno)));
+               "failed to unlink mmap index file {}: {}",
+               filepath.value(),
+               strerror(errno));
     LOG_SEGCORE_INFO_ << "load vector index done";
 }
 template class VectorMemIndex<float>;
