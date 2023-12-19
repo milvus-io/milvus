@@ -21,15 +21,17 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"io"
+	"unicode/utf8"
+
+	"github.com/samber/lo"
+	"github.com/sbinet/npyio"
+	"github.com/sbinet/npyio/npy"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-	"github.com/samber/lo"
-	"github.com/sbinet/npyio"
-	"github.com/sbinet/npyio/npy"
-	"io"
-	"unicode/utf8"
 )
 
 type ColumnReader struct {

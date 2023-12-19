@@ -19,15 +19,17 @@ package numpy
 import (
 	"encoding/binary"
 	"fmt"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/sbinet/npyio"
-	"github.com/sbinet/npyio/npy"
-	"golang.org/x/text/encoding/unicode"
 	"reflect"
 	"regexp"
 	"strconv"
 	"unicode/utf8"
+
+	"github.com/sbinet/npyio"
+	"github.com/sbinet/npyio/npy"
+	"golang.org/x/text/encoding/unicode"
+
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 var (

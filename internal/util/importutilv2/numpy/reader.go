@@ -17,10 +17,12 @@
 package numpy
 
 import (
+	"io"
+
+	"github.com/samber/lo"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/samber/lo"
-	"io"
 )
 
 type Reader struct {
