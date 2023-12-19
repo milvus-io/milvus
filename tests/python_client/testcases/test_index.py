@@ -113,7 +113,7 @@ class TestIndexParams(TestcaseBase):
             msg = "invalid index type"
         self.index_wrap.init_index(collection_w.collection, default_field_name, index_params,
                                    check_task=CheckTasks.err_res,
-                                   check_items={ct.err_code: 65535, ct.err_msg: msg})
+                                   check_items={ct.err_code: 1100, ct.err_msg: msg})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_index_type_not_supported(self):
@@ -1167,7 +1167,7 @@ class TestNewIndexBinary(TestcaseBase):
         binary_index_params = {'index_type': 'BIN_IVF_FLAT', 'metric_type': 'L2', 'params': {'nlist': 64}}
         collection_w.create_index(default_binary_vec_field_name, binary_index_params,
                                   index_name=binary_field_name, check_task=CheckTasks.err_res,
-                                  check_items={ct.err_code: 65535,
+                                  check_items={ct.err_code: 1100,
                                                ct.err_msg: "metric type not found or not supported, supported: "
                                                            "[HAMMING JACCARD SUBSTRUCTURE SUPERSTRUCTURE]"})
 
@@ -1329,7 +1329,7 @@ class TestIndexInvalid(TestcaseBase):
         index_annoy = {"index_type": "ANNOY", "params": {"n_trees": n_trees}, "metric_type": "L2"}
         collection_w.create_index("float_vector", index_annoy,
                                   check_task=CheckTasks.err_res,
-                                  check_items={"err_code": 65535,
+                                  check_items={"err_code": 1100,
                                                "err_msg": "invalid index type: ANNOY"})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1341,10 +1341,11 @@ class TestIndexInvalid(TestcaseBase):
         """
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True,
                                                                       dim=ct.default_dim, is_index=False)[0:4]
+        # create index on JSON/Array field is not supported
         collection_w.create_index(ct.default_json_field_name, index_params=ct.default_flat_index,
                                   check_task=CheckTasks.err_res,
-                                  check_items={ct.err_code: 1,
-                                               ct.err_msg: "create index on json field is not supported"})
+                                  check_items={ct.err_code: 1100,
+                                               ct.err_msg: "create index on JSON field is not supported"})
 
 
 @pytest.mark.tags(CaseLabel.GPU)
@@ -1868,7 +1869,7 @@ class TestIndexDiskann(TestcaseBase):
         collection_w.insert(data=df)
         collection_w.create_index(default_binary_vec_field_name, ct.default_diskann_index, index_name=binary_field_name,
                                   check_task=CheckTasks.err_res,
-                                  check_items={ct.err_code: 65535,
+                                  check_items={ct.err_code: 1100,
                                                ct.err_msg: "float or float16 vector are only supported"})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2006,7 +2007,7 @@ class TestScaNNIndex(TestcaseBase):
         """
         collection_w = self.init_collection_general(prefix, is_index=False)[0]
         index_params = {"index_type": "SCANN", "metric_type": "L2", "params": {"nlist": nlist}}
-        error = {ct.err_code: 65535, ct.err_msg: "nlist out of range: [1, 65536]"}
+        error = {ct.err_code: 1100, ct.err_msg: "nlist out of range: [1, 65536]"}
         collection_w.create_index(default_field_name, index_params,
                                   check_task=CheckTasks.err_res, check_items=error)
 
@@ -2020,7 +2021,7 @@ class TestScaNNIndex(TestcaseBase):
         """
         collection_w = self.init_collection_general(prefix, is_index=False, dim=dim)[0]
         index_params = {"index_type": "SCANN", "metric_type": "L2", "params": {"nlist": 1024}}
-        error = {ct.err_code: 65535,
+        error = {ct.err_code: 1100,
                  ct.err_msg: f"dimension must be able to be divided by 2, dimension: {dim}"}
         collection_w.create_index(default_field_name, index_params,
                                   check_task=CheckTasks.err_res, check_items=error)

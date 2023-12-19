@@ -141,28 +141,27 @@ func (cit *createIndexTask) parseIndexParams() error {
 			indexParamsMap[kv.Key] = kv.Value
 		}
 	}
+
+	specifyIndexType, exist := indexParamsMap[common.IndexTypeKey]
+	if exist && specifyIndexType != "" {
+		_, err := indexparamcheck.GetIndexCheckerMgrInstance().GetChecker(specifyIndexType)
+		if err != nil {
+			log.Warn("Failed to get index checker", zap.String(common.IndexTypeKey, specifyIndexType))
+			return merr.WrapErrParameterInvalid("valid index", fmt.Sprintf("invalid index type: %s", specifyIndexType))
+		}
+	}
+
 	if !isVecIndex {
 		specifyIndexType, exist := indexParamsMap[common.IndexTypeKey]
-		if cit.fieldSchema.DataType == schemapb.DataType_VarChar {
-			if !exist {
-				indexParamsMap[common.IndexTypeKey] = DefaultStringIndexType
+		if Params.AutoIndexConfig.ScalarAutoIndexEnable.GetAsBool() || specifyIndexType == AutoIndexName || !exist {
+			if typeutil.IsArithmetic(cit.fieldSchema.DataType) {
+				indexParamsMap[common.IndexTypeKey] = Params.AutoIndexConfig.ScalarNumericIndexType.GetValue()
+			} else if typeutil.IsStringType(cit.fieldSchema.DataType) {
+				indexParamsMap[common.IndexTypeKey] = Params.AutoIndexConfig.ScalarVarcharIndexType.GetValue()
+			} else {
+				return merr.WrapErrParameterInvalid("supported field",
+					fmt.Sprintf("create index on %s field is not supported", cit.fieldSchema.DataType.String()))
 			}
-
-			if exist && !validateStringIndexType(specifyIndexType) {
-				return merr.WrapErrParameterInvalid(DefaultStringIndexType, specifyIndexType, "index type not match")
-			}
-		} else if typeutil.IsArithmetic(cit.fieldSchema.DataType) {
-			if !exist {
-				indexParamsMap[common.IndexTypeKey] = DefaultArithmeticIndexType
-			}
-
-			if exist && !validateArithmeticIndexType(specifyIndexType) {
-				return merr.WrapErrParameterInvalid(DefaultArithmeticIndexType, specifyIndexType, "index type not match")
-			}
-		} else {
-			return merr.WrapErrParameterInvalid("supported field",
-				fmt.Sprintf("create index on %s field", cit.fieldSchema.DataType.String()),
-				"create index on json field is not supported")
 		}
 	}
 
@@ -248,12 +247,13 @@ func (cit *createIndexTask) parseIndexParams() error {
 				return err
 			}
 		}
-
-		err := checkTrain(cit.fieldSchema, indexParamsMap)
-		if err != nil {
-			return err
-		}
 	}
+
+	err := checkTrain(cit.fieldSchema, indexParamsMap)
+	if err != nil {
+		return merr.WrapErrParameterInvalid("valid index params", "invalid index params", err.Error())
+	}
+
 	typeParams := cit.fieldSchema.GetTypeParams()
 	typeParamsMap := make(map[string]string)
 	for _, pair := range typeParams {
@@ -327,15 +327,6 @@ func fillDimension(field *schemapb.FieldSchema, indexParams map[string]string) e
 
 func checkTrain(field *schemapb.FieldSchema, indexParams map[string]string) error {
 	indexType := indexParams[common.IndexTypeKey]
-	// skip params check of non-vector field.
-	vecDataTypes := []schemapb.DataType{
-		schemapb.DataType_FloatVector,
-		schemapb.DataType_BinaryVector,
-		schemapb.DataType_Float16Vector,
-	}
-	if !funcutil.SliceContain(vecDataTypes, field.GetDataType()) {
-		return indexparamcheck.CheckIndexValid(field.GetDataType(), indexType, indexParams)
-	}
 
 	checker, err := indexparamcheck.GetIndexCheckerMgrInstance().GetChecker(indexType)
 	if err != nil {

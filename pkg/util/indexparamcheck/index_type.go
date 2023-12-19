@@ -27,4 +27,9 @@ const (
 	IndexFaissBinIvfFlat IndexType = "BIN_IVF_FLAT"
 	IndexHNSW            IndexType = "HNSW"
 	IndexDISKANN         IndexType = "DISKANN"
+
+	IndexSTLSORT IndexType = "STL_SORT"
+	IndexTrie    IndexType = "Trie"
+
+	AutoIndex IndexType = "AUTOINDEX"
 )
