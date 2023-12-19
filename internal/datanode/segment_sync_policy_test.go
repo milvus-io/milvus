@@ -31,6 +31,8 @@ import (
 func TestSyncPeriodically(t *testing.T) {
 	t0 := time.Now()
 
+	maxTime := time.Duration(1.2 * float64(Params.DataNodeCfg.SyncPeriod.GetAsDuration(time.Second)))
+	minTime := time.Duration(0.5 * float64(Params.DataNodeCfg.SyncPeriod.GetAsDuration(time.Second)))
 	tests := []struct {
 		testName      string
 		bufferTs      time.Time
@@ -39,8 +41,8 @@ func TestSyncPeriodically(t *testing.T) {
 		shouldSyncNum int
 	}{
 		{"test buffer empty", t0, t0.Add(Params.DataNodeCfg.SyncPeriod.GetAsDuration(time.Second)), true, 0},
-		{"test buffer not empty and stale", t0, t0.Add(Params.DataNodeCfg.SyncPeriod.GetAsDuration(time.Second)), false, 1},
-		{"test buffer not empty and not stale", t0, t0.Add(Params.DataNodeCfg.SyncPeriod.GetAsDuration(time.Second) / 2), false, 0},
+		{"test buffer not empty and stale", t0, t0.Add(maxTime), false, 1},
+		{"test buffer not empty and not stale", t0, t0.Add(minTime), false, 0},
 	}
 
 	for _, test := range tests {
