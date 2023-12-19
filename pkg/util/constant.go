@@ -61,6 +61,12 @@ const (
 
 	IdentifierKey = "identifier"
 	HeaderDBName  = "dbName"
+
+	RoleConfigPrivileges = "privileges"
+	RoleConfigObjectType = "object_type"
+	RoleConfigObjectName = "object_name"
+	RoleConfigDBName     = "db_name"
+	RoleConfigPrivilege  = "privilege"
 )
 
 const (
@@ -70,6 +76,7 @@ const (
 
 var (
 	DefaultRoles = []string{RoleAdmin, RolePublic}
+	BuiltinRoles = []string{}
 
 	ObjectPrivileges = map[string][]string{
 		commonpb.ObjectType_Collection.String(): {
@@ -118,6 +125,12 @@ var (
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeCreateDatabase.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDropDatabase.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeListDatabases.String()),
+
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeCreatePartition.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDropPartition.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeShowPartitions.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeHasPartition.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGetFlushState.String()),
 		},
 		commonpb.ObjectType_User.String(): {
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeUpdateUser.String()),
@@ -168,4 +181,13 @@ func PrivilegeNameForMetastore(name string) string {
 
 func IsAnyWord(word string) bool {
 	return word == AnyWord
+}
+
+func IsBuiltinRole(roleName string) bool {
+	for _, builtinRole := range BuiltinRoles {
+		if builtinRole == roleName {
+			return true
+		}
+	}
+	return false
 }

@@ -25,11 +25,11 @@
 #include "storage/ThreadPools.h"
 
 using milvus::DataType;
+using milvus::storage::FieldDataMeta;
+using milvus::FieldDataPtr;
 using milvus::FieldId;
 using milvus::segcore::GeneratedData;
 using milvus::storage::ChunkManagerPtr;
-using milvus::storage::FieldDataMeta;
-using milvus::storage::FieldDataPtr;
 using milvus::storage::InsertData;
 using milvus::storage::StorageConfig;
 
@@ -75,15 +75,15 @@ PrepareInsertBinlog(int64_t collection_id,
     };
 
     {
-        auto field_data = std::make_shared<milvus::storage::FieldData<int64_t>>(
-            DataType::INT64);
+        auto field_data =
+            std::make_shared<milvus::FieldData<int64_t>>(DataType::INT64);
         field_data->FillFieldData(dataset.row_ids_.data(), row_count);
         auto path = prefix + "/" + std::to_string(RowFieldID.get());
         SaveFieldData(field_data, path, RowFieldID.get());
     }
     {
-        auto field_data = std::make_shared<milvus::storage::FieldData<int64_t>>(
-            DataType::INT64);
+        auto field_data =
+            std::make_shared<milvus::FieldData<int64_t>>(DataType::INT64);
         field_data->FillFieldData(dataset.timestamps_.data(), row_count);
         auto path = prefix + "/" + std::to_string(TimestampFieldID.get());
         SaveFieldData(field_data, path, TimestampFieldID.get());

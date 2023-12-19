@@ -30,7 +30,7 @@ ifdef USE_ASAN
 	use_asan =${USE_ASAN}
 endif
 
-use_dynamic_simd = OFF
+use_dynamic_simd = ON
 ifdef USE_DYNAMIC_SIMD
 	use_dynamic_simd = ${USE_DYNAMIC_SIMD}
 endif

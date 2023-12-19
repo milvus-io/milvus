@@ -19,7 +19,6 @@ package proxy
 import (
 	"context"
 	"fmt"
-	"strconv"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
@@ -400,7 +399,7 @@ func (cit *createIndexTask) Execute(ctx context.Context) error {
 	)
 
 	if cit.req.GetIndexName() == "" {
-		cit.req.IndexName = Params.CommonCfg.DefaultIndexName.GetValue() + "_" + strconv.FormatInt(cit.fieldSchema.GetFieldID(), 10)
+		cit.req.IndexName = cit.fieldSchema.GetName()
 	}
 	var err error
 	req := &indexpb.CreateIndexRequest{

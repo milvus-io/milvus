@@ -16,6 +16,11 @@
 
 #pragma once
 
+#include <map>
+#include <memory>
+#include <string>
+#include <vector>
+
 #include <aws/core/Aws.h>
 #include <aws/core/http/HttpClientFactory.h>
 #include <aws/core/http/HttpRequest.h>
@@ -25,6 +30,7 @@
 #include <aws/core/http/standard/StandardHttpRequest.h>
 #include <aws/core/utils/logging/FormattedLogSystem.h>
 #include <aws/s3/S3Client.h>
+#include <fmt/core.h>
 #include <google/cloud/credentials.h>
 #include <google/cloud/internal/oauth2_credentials.h>
 #include <google/cloud/internal/oauth2_google_credentials.h>
@@ -32,13 +38,8 @@
 #include <google/cloud/storage/oauth2/google_credentials.h>
 #include <google/cloud/status_or.h>
 
-#include <map>
-#include <memory>
-#include <string>
-#include <vector>
-#include <fmt/core.h>
-
 #include "common/EasyAssert.h"
+#include "common/Exception.h"
 #include "storage/ChunkManager.h"
 #include "storage/Types.h"
 

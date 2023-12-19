@@ -19,8 +19,8 @@
 #include <memory>
 #include <parquet/arrow/reader.h>
 
+#include "common/FieldData.h"
 #include "storage/PayloadStream.h"
-#include "storage/FieldData.h"
 
 namespace milvus::storage {
 

@@ -54,7 +54,7 @@ class MemFileManagerImpl : public FileManagerImpl {
         return "MemIndexFileManagerImpl";
     }
 
-    std::map<std::string, storage::FieldDataPtr>
+    std::map<std::string, FieldDataPtr>
     LoadIndexToMemory(const std::vector<std::string>& remote_files);
 
     std::vector<FieldDataPtr>

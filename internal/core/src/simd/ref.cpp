@@ -29,5 +29,46 @@ GetBitsetBlockRef(const bool* src) {
     return val;
 }
 
+bool
+AllTrueRef(const bool* src, int64_t size) {
+    for (size_t i = 0; i < size; ++i) {
+        if (!src[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool
+AllFalseRef(const bool* src, int64_t size) {
+    for (size_t i = 0; i < size; ++i) {
+        if (src[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void
+InvertBoolRef(bool* src, int64_t size) {
+    for (size_t i = 0; i < size; ++i) {
+        src[i] = !src[i];
+    }
+}
+
+void
+AndBoolRef(bool* left, bool* right, int64_t size) {
+    for (size_t i = 0; i < size; ++i) {
+        left[i] &= right[i];
+    }
+}
+
+void
+OrBoolRef(bool* left, bool* right, int64_t size) {
+    for (size_t i = 0; i < size; ++i) {
+        left[i] |= right[i];
+    }
+}
+
 }  // namespace simd
 }  // namespace milvus

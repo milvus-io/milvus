@@ -69,6 +69,7 @@ type ComponentParam struct {
 	IndexNodeCfg  indexNodeConfig
 	HTTPCfg       httpConfig
 	LogCfg        logConfig
+	RoleCfg       roleConfig
 
 	RootCoordGrpcServerCfg  GrpcServerConfig
 	ProxyGrpcServerCfg      GrpcServerConfig
@@ -116,6 +117,7 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.IndexNodeCfg.init(bt)
 	p.HTTPCfg.init(bt)
 	p.LogCfg.init(bt)
+	p.RoleCfg.init(bt)
 
 	p.RootCoordGrpcServerCfg.Init("rootCoord", bt)
 	p.ProxyGrpcServerCfg.Init("proxy", bt)
@@ -1248,6 +1250,7 @@ type queryCoordConfig struct {
 
 	// ---- Balance ---
 	AutoBalance                         ParamItem `refreshable:"true"`
+	AutoBalanceChannel                  ParamItem `refreshable:"true"`
 	Balancer                            ParamItem `refreshable:"true"`
 	GlobalRowCountFactor                ParamItem `refreshable:"true"`
 	ScoreUnbalanceTolerationFactor      ParamItem `refreshable:"true"`
@@ -1339,6 +1342,16 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.AutoBalance.Init(base.mgr)
+
+	p.AutoBalanceChannel = ParamItem{
+		Key:          "queryCoord.autoBalanceChannel",
+		Version:      "2.3.4",
+		DefaultValue: "true",
+		PanicIfEmpty: true,
+		Doc:          "Enable auto balance channel",
+		Export:       true,
+	}
+	p.AutoBalanceChannel.Init(base.mgr)
 
 	p.Balancer = ParamItem{
 		Key:          "queryCoord.balancer",
@@ -1703,9 +1716,11 @@ type queryNodeConfig struct {
 	SchedulePolicyMaxPendingTaskPerUser   ParamItem `refreshable:"true"`
 
 	// CGOPoolSize ratio to MaxReadConcurrency
-	CGOPoolSizeRatio ParamItem `refreshable:"false"`
+	CGOPoolSizeRatio ParamItem `refreshable:"true"`
 
 	EnableWorkerSQCostMetrics ParamItem `refreshable:"true"`
+
+	ExprEvalBatchSize ParamItem `refreshable:"false"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -2093,6 +2108,15 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Doc:          "whether use worker's cost to measure delegator's workload",
 	}
 	p.EnableWorkerSQCostMetrics.Init(base.mgr)
+
+	p.ExprEvalBatchSize = ParamItem{
+		Key:          "queryNode.segcore.exprEvalBatchSize",
+		Version:      "2.3.4",
+		DefaultValue: "8192",
+		Doc:          "expr eval batch size for getnext interface",
+	}
+
+	p.ExprEvalBatchSize.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

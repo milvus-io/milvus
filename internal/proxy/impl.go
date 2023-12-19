@@ -4300,7 +4300,7 @@ func (node *Proxy) DropRole(ctx context.Context, req *milvuspb.DropRoleRequest) 
 		return merr.Status(err), nil
 	}
 	if IsDefaultRole(req.RoleName) {
-		err := merr.WrapErrPrivilegeNotPermitted("the role[%s] is a default role, which can't be droped", req.GetRoleName())
+		err := merr.WrapErrPrivilegeNotPermitted("the role[%s] is a default role, which can't be dropped", req.GetRoleName())
 		return merr.Status(err), nil
 	}
 	result, err := node.rootCoord.DropRole(ctx, req)

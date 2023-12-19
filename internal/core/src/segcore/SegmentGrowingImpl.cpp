@@ -21,6 +21,7 @@
 
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
+#include "common/FieldData.h"
 #include "common/Types.h"
 #include "fmt/format.h"
 #include "log/Log.h"
@@ -29,7 +30,6 @@
 #include "query/SearchOnSealed.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/Utils.h"
-#include "storage/FieldData.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/Util.h"
 #include "storage/ThreadPools.h"
@@ -58,8 +58,12 @@ SegmentGrowingImpl::mask_with_delete(BitsetType& bitset,
         return;
     }
     auto& delete_bitset = *bitmap_holder->bitmap_ptr;
-    AssertInfo(delete_bitset.size() == bitset.size(),
-               "Deleted bitmap size not equal to filtered bitmap size");
+    AssertInfo(
+        delete_bitset.size() == bitset.size(),
+        fmt::format(
+            "Deleted bitmap size:{} not equal to filtered bitmap size:{}",
+            delete_bitset.size(),
+            bitset.size()));
     bitset |= delete_bitset;
 }
 
@@ -177,12 +181,12 @@ SegmentGrowingImpl::LoadFieldData(const LoadFieldDataInfo& infos) {
     for (auto& [id, info] : infos.field_infos) {
         auto field_id = FieldId(id);
         auto insert_files = info.insert_files;
-        auto channel = std::make_shared<storage::FieldDataChannel>();
+        auto channel = std::make_shared<FieldDataChannel>();
         auto& pool =
             ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
         auto load_future =
             pool.Submit(LoadFieldDatasFromRemote, insert_files, channel);
-        auto field_data = CollectFieldDataChannel(channel);
+        auto field_data = storage::CollectFieldDataChannel(channel);
         if (field_id == TimestampFieldID) {
             // step 2: sort timestamp
             // query node already guarantees that the timestamp is ordered, avoid field data copy in c++
@@ -263,7 +267,8 @@ SegmentGrowingImpl::LoadFieldDataV2(const LoadFieldDataInfo& infos) {
         std::shared_ptr<milvus_storage::Space> space = std::move(res.value());
         auto load_future = pool.Submit(
             LoadFieldDatasFromRemote2, space, schema_, field_data_info);
-        auto field_data = CollectFieldDataChannel(field_data_info.channel);
+        auto field_data =
+            milvus::storage::CollectFieldDataChannel(field_data_info.channel);
         if (field_id == TimestampFieldID) {
             // step 2: sort timestamp
             // query node already guarantees that the timestamp is ordered, avoid field data copy in c++

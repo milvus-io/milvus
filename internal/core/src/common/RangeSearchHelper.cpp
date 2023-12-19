@@ -82,7 +82,6 @@ ReGenRangeSearchResult(DatasetPtr data_set,
     }
 
     // The subscript of p_id and p_dist
-#pragma omp parallel for
     for (int i = 0; i < nq; i++) {
         std::priority_queue<ResultPair, std::vector<ResultPair>, decltype(cmp)>
             pq(cmp);
