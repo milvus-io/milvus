@@ -147,7 +147,8 @@ VectorMemIndex<T>::Serialize(const Config& config) {
     auto stat = index_.Serialize(ret);
     if (stat != knowhere::Status::success)
         PanicInfo(ErrorCode::UnexpectedError,
-                  "failed to serialize index, " + KnowhereStatusString(stat));
+                  "failed to serialize index: {}",
+                  KnowhereStatusString(stat));
     Disassemble(ret);
 
     return ret;
@@ -160,7 +161,8 @@ VectorMemIndex<T>::LoadWithoutAssemble(const BinarySet& binary_set,
     auto stat = index_.Deserialize(binary_set, config);
     if (stat != knowhere::Status::success)
         PanicInfo(ErrorCode::UnexpectedError,
-                  "failed to Deserialize index, " + KnowhereStatusString(stat));
+                  "failed to Deserialize index: {}",
+                  KnowhereStatusString(stat));
     SetDim(index_.Dim());
 }
 
@@ -539,7 +541,8 @@ VectorMemIndex<T>::Query(const DatasetPtr dataset,
             if (!res.has_value()) {
                 PanicInfo(ErrorCode::UnexpectedError,
                           "failed to range search: {}: {}",
-                          KnowhereStatusString(res.error(), res.what()));
+                          KnowhereStatusString(res.error()),
+                          res.what());
             }
             auto result = ReGenRangeSearchResult(
                 res.value(), topk, num_queries, GetMetricType());
@@ -552,7 +555,8 @@ VectorMemIndex<T>::Query(const DatasetPtr dataset,
             if (!res.has_value()) {
                 PanicInfo(ErrorCode::UnexpectedError,
                           "failed to search: {}: {}",
-                          KnowhereStatusString(res.error(), res.what()));
+                          KnowhereStatusString(res.error()),
+                          res.what());
             }
             return res.value();
         }
