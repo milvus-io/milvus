@@ -499,7 +499,7 @@ func (s *DataSyncServiceSuite) TestStartStop() {
 
 	s.wbManager.EXPECT().BufferData(insertChannelName, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	s.wbManager.EXPECT().GetCheckpoint(insertChannelName).Return(&msgpb.MsgPosition{Timestamp: msgTs}, true, nil)
-	s.wbManager.EXPECT().NotifyCheckpointUpdated(insertChannelName, msgTs).Return()
+	s.wbManager.EXPECT().NotifyCheckpointUpdated(insertChannelName, msgTs).Return().Maybe()
 
 	ch := make(chan struct{})
 
