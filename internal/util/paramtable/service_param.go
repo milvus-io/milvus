@@ -73,6 +73,7 @@ type EtcdConfig struct {
 
 	// --- ETCD ---
 	Endpoints         []string
+	RootPath          string
 	MetaRootPath      string
 	KvRootPath        string
 	EtcdLogLevel      string
@@ -103,6 +104,8 @@ func (p *EtcdConfig) LoadCfgToMemory() {
 	} else {
 		p.initEndpoints()
 	}
+
+	p.initRootPath()
 	p.initMetaRootPath()
 	p.initKvRootPath()
 	p.initEtcdLogLevel()
@@ -138,6 +141,14 @@ func (p *EtcdConfig) initEndpoints() {
 		panic(err)
 	}
 	p.Endpoints = strings.Split(endpoints, ",")
+}
+
+func (p *EtcdConfig) initRootPath() {
+	rootPath, err := p.Base.Load("etcd.rootPath")
+	if err != nil {
+		panic(err)
+	}
+	p.RootPath = rootPath
 }
 
 func (p *EtcdConfig) initMetaRootPath() {

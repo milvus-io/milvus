@@ -58,6 +58,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/expr"
 )
 
 // make sure IndexCoord implements types.IndexCoord
@@ -129,6 +130,7 @@ func NewIndexCoord(ctx context.Context, factory dependency.Factory) (*IndexCoord
 		indexGCLock:         sync.RWMutex{},
 	}
 	i.UpdateStateCode(commonpb.StateCode_Abnormal)
+	expr.Register("indexcoord", i)
 	return i, nil
 }
 

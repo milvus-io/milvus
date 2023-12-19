@@ -57,6 +57,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 
+	"github.com/milvus-io/milvus/pkg/expr"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
@@ -123,6 +124,7 @@ func NewIndexNode(ctx context.Context, factory dependency.Factory) (*IndexNode, 
 	}
 
 	b.sched = sc
+	expr.Register("indexnode", b)
 	return b, nil
 }
 

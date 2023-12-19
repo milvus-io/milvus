@@ -47,6 +47,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/expr"
 )
 
 // UniqueID is alias of typeutil.UniqueID
@@ -124,6 +125,7 @@ func NewProxy(ctx context.Context, factory dependency.Factory) (*Proxy, error) {
 		multiRateLimiter: NewMultiRateLimiter(),
 	}
 	node.UpdateStateCode(commonpb.StateCode_Abnormal)
+	expr.Register("proxy", node)
 	logutil.Logger(ctx).Debug("create a new Proxy instance", zap.Any("state", node.stateCode.Load()))
 	return node, nil
 }
