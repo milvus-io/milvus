@@ -183,6 +183,39 @@ FindTermAVX512(const double* src, size_t vec_size, double val) {
     }
     return false;
 }
+
+void
+AndBoolAVX512(bool* left, bool* right, int64_t size) {
+    int num_chunk = size / 64;
+    for (size_t i = 0; i < num_chunk * 64; i += 64) {
+        __m512i l_reg =
+            _mm512_loadu_si512(reinterpret_cast<__m512i*>(left + i));
+        __m512i r_reg =
+            _mm512_loadu_si512(reinterpret_cast<__m512i*>(right + i));
+        __m512i res = _mm512_and_si512(l_reg, r_reg);
+        _mm512_storeu_si512(reinterpret_cast<__m512i*>(left + i), res);
+    }
+    for (size_t i = num_chunk * 64; i < size; ++i) {
+        left[i] &= right[i];
+    }
+}
+
+void
+OrBoolAVX512(bool* left, bool* right, int64_t size) {
+    int num_chunk = size / 64;
+    for (size_t i = 0; i < num_chunk * 64; i += 64) {
+        __m512i l_reg =
+            _mm512_loadu_si512(reinterpret_cast<__m512i*>(left + i));
+        __m512i r_reg =
+            _mm512_loadu_si512(reinterpret_cast<__m512i*>(right + i));
+        __m512i res = _mm512_or_si512(l_reg, r_reg);
+        _mm512_storeu_si512(reinterpret_cast<__m512i*>(left + i), res);
+    }
+    for (size_t i = num_chunk * 64; i < size; ++i) {
+        left[i] |= right[i];
+    }
+}
+
 }  // namespace simd
 }  // namespace milvus
 #endif

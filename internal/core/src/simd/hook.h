@@ -19,6 +19,11 @@ namespace milvus {
 namespace simd {
 
 extern BitsetBlockType (*get_bitset_block)(const bool* src);
+extern bool (*all_false)(const bool* src, int64_t size);
+extern bool (*all_true)(const bool* src, int64_t size);
+extern void (*invert_bool)(bool* src, int64_t size);
+extern void (*and_bool)(bool* left, bool* right, int64_t size);
+extern void (*or_bool)(bool* left, bool* right, int64_t size);
 
 template <typename T>
 using FindTermPtr = bool (*)(const T* src, size_t size, T val);
@@ -62,6 +67,18 @@ bitset_hook();
 
 void
 find_term_hook();
+
+void
+boolean_hook();
+
+void
+all_boolean_hook();
+
+void
+invert_boolean_hook();
+
+void
+logical_boolean_hook();
 
 template <typename T>
 bool

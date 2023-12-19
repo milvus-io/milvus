@@ -18,11 +18,11 @@
 #include <memory>
 #include <unordered_map>
 
-#include "log/Log.h"
-#include "storage/FieldData.h"
-#include "storage/FileManager.h"
-#include "storage/Util.h"
 #include "common/Common.h"
+#include "common/FieldData.h"
+#include "log/Log.h"
+#include "storage/Util.h"
+#include "storage/FileManager.h"
 
 namespace milvus::storage {
 
@@ -140,10 +140,10 @@ MemFileManagerImpl::LoadFile(const std::string& filename) noexcept {
     return true;
 }
 
-std::map<std::string, storage::FieldDataPtr>
+std::map<std::string, FieldDataPtr>
 MemFileManagerImpl::LoadIndexToMemory(
     const std::vector<std::string>& remote_files) {
-    std::map<std::string, storage::FieldDataPtr> file_to_index_data;
+    std::map<std::string, FieldDataPtr> file_to_index_data;
     auto parallel_degree =
         static_cast<uint64_t>(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
     std::vector<std::string> batch_files;

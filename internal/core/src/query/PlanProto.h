@@ -18,6 +18,7 @@
 #include "PlanNode.h"
 #include "common/Schema.h"
 #include "pb/plan.pb.h"
+#include "plan/PlanNode.h"
 
 namespace milvus::query {
 
@@ -71,6 +72,40 @@ class ProtoParser {
 
     std::unique_ptr<RetrievePlan>
     CreateRetrievePlan(const proto::plan::PlanNode& plan_node_proto);
+
+    expr::TypedExprPtr
+    ParseUnaryRangeExprs(const proto::plan::UnaryRangeExpr& expr_pb);
+
+    expr::TypedExprPtr
+    ParseExprs(const proto::plan::Expr& expr_pb);
+
+    expr::TypedExprPtr
+    ParseBinaryArithOpEvalRangeExprs(
+        const proto::plan::BinaryArithOpEvalRangeExpr& expr_pb);
+
+    expr::TypedExprPtr
+    ParseBinaryRangeExprs(const proto::plan::BinaryRangeExpr& expr_pb);
+
+    expr::TypedExprPtr
+    ParseCompareExprs(const proto::plan::CompareExpr& expr_pb);
+
+    expr::TypedExprPtr
+    ParseTermExprs(const proto::plan::TermExpr& expr_pb);
+
+    expr::TypedExprPtr
+    ParseUnaryExprs(const proto::plan::UnaryExpr& expr_pb);
+
+    expr::TypedExprPtr
+    ParseBinaryExprs(const proto::plan::BinaryExpr& expr_pb);
+
+    expr::TypedExprPtr
+    ParseExistExprs(const proto::plan::ExistsExpr& expr_pb);
+
+    expr::TypedExprPtr
+    ParseJsonContainsExprs(const proto::plan::JSONContainsExpr& expr_pb);
+
+    expr::TypedExprPtr
+    CreateAlwaysTrueExprs();
 
  private:
     const Schema& schema;

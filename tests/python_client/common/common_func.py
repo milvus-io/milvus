@@ -98,8 +98,6 @@ def gen_json_field(name=ct.default_json_field_name, description=ct.default_desc,
 
 def gen_array_field(name=ct.default_array_field_name, element_type=DataType.INT64, max_capacity=ct.default_max_capacity,
                     description=ct.default_desc, is_primary=False, **kwargs):
-    if element_type == DataType.VARCHAR:
-        kwargs['max_length'] = ct.default_length
 
     array_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.ARRAY,
                                                                element_type=element_type, max_capacity=max_capacity,

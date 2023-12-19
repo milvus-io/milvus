@@ -324,12 +324,13 @@ TEST(StringExpr, Term) {
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
-    ExecExprVisitor visitor(
-        *seg_promote, seg_promote->get_row_count(), MAX_TIMESTAMP);
     for (const auto& [_, term] : terms) {
         auto plan_proto = GenTermPlan(fvec_meta, str_meta, term);
         auto plan = ProtoParser(*schema).CreatePlan(*plan_proto);
-        auto final = visitor.call_child(*plan->plan_node_->predicate_.value());
+        query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
+        BitsetType final;
+        visitor.ExecuteExprNode(
+            plan->plan_node_->filter_plannode_.value(), seg_promote, final);
         EXPECT_EQ(final.size(), N * num_iters);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -437,12 +438,13 @@ TEST(StringExpr, Compare) {
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
-    ExecExprVisitor visitor(
-        *seg_promote, seg_promote->get_row_count(), MAX_TIMESTAMP);
     for (const auto& [op, ref_func] : testcases) {
         auto plan_proto = gen_compare_plan(op);
         auto plan = ProtoParser(*schema).CreatePlan(*plan_proto);
-        auto final = visitor.call_child(*plan->plan_node_->predicate_.value());
+        query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
+        BitsetType final;
+        visitor.ExecuteExprNode(
+            plan->plan_node_->filter_plannode_.value(), seg_promote, final);
         EXPECT_EQ(final.size(), N * num_iters);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -533,12 +535,13 @@ TEST(StringExpr, UnaryRange) {
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
-    ExecExprVisitor visitor(
-        *seg_promote, seg_promote->get_row_count(), MAX_TIMESTAMP);
     for (const auto& [op, value, ref_func] : testcases) {
         auto plan_proto = gen_unary_range_plan(op, value);
         auto plan = ProtoParser(*schema).CreatePlan(*plan_proto);
-        auto final = visitor.call_child(*plan->plan_node_->predicate_.value());
+        query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
+        BitsetType final;
+        visitor.ExecuteExprNode(
+            plan->plan_node_->filter_plannode_.value(), seg_promote, final);
         EXPECT_EQ(final.size(), N * num_iters);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -645,14 +648,15 @@ TEST(StringExpr, BinaryRange) {
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
-    ExecExprVisitor visitor(
-        *seg_promote, seg_promote->get_row_count(), MAX_TIMESTAMP);
     for (const auto& [lb_inclusive, ub_inclusive, lb, ub, ref_func] :
          testcases) {
         auto plan_proto =
             gen_binary_range_plan(lb_inclusive, ub_inclusive, lb, ub);
         auto plan = ProtoParser(*schema).CreatePlan(*plan_proto);
-        auto final = visitor.call_child(*plan->plan_node_->predicate_.value());
+        query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
+        BitsetType final;
+        visitor.ExecuteExprNode(
+            plan->plan_node_->filter_plannode_.value(), seg_promote, final);
         EXPECT_EQ(final.size(), N * num_iters);
 
         for (int i = 0; i < N * num_iters; ++i) {

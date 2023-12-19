@@ -36,7 +36,7 @@ class MilvusConan(ConanFile):
         "xz_utils/5.4.0",
         "prometheus-cpp/1.1.0",
         "re2/20230301",
-        "folly/2023.10.30.04@milvus/dev",
+        "folly/2023.10.30.05@milvus/dev",
         "google-cloud-cpp/2.5.0@milvus/dev",
         "opentelemetry-cpp/1.8.1.1@milvus/dev",
         "librdkafka/1.9.1",
@@ -44,6 +44,9 @@ class MilvusConan(ConanFile):
     )
     generators = ("cmake", "cmake_find_package")
     default_options = {
+        "libevent:shared": True,
+        "double-conversion:shared": True,
+        "folly:shared": True,
         "librdkafka:shared": True,
         "librdkafka:zstd": True,
         "librdkafka:ssl": True,

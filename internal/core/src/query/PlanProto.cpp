@@ -185,6 +185,12 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
         }
     }();
 
+    auto expr_parser = [&]() -> plan::PlanNodePtr {
+        auto expr = ParseExprs(anns_proto.predicates());
+        return std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                      expr);
+    };
+
     auto& query_info_proto = anns_proto.query_info();
 
     SearchInfo search_info;
@@ -210,6 +216,9 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
     }();
     plan_node->placeholder_tag_ = anns_proto.placeholder_tag();
     plan_node->predicate_ = std::move(expr_opt);
+    if (anns_proto.has_predicates()) {
+        plan_node->filter_plannode_ = std::move(expr_parser());
+    }
     plan_node->search_info_ = std::move(search_info);
     return plan_node;
 }
@@ -227,7 +236,13 @@ ProtoParser::RetrievePlanNodeFromProto(
             auto expr_opt = [&]() -> ExprPtr {
                 return ParseExpr(predicate_proto);
             }();
+            auto expr_parser = [&]() -> plan::PlanNodePtr {
+                auto expr = ParseExprs(predicate_proto);
+                return std::make_shared<plan::FilterBitsNode>(
+                    DEFAULT_PLANNODE_ID, expr);
+            }();
             node->predicate_ = std::move(expr_opt);
+            node->filter_plannode_ = std::move(expr_parser);
         } else {
             auto& query = plan_node_proto.query();
             if (query.has_predicates()) {
@@ -235,7 +250,13 @@ ProtoParser::RetrievePlanNodeFromProto(
                 auto expr_opt = [&]() -> ExprPtr {
                     return ParseExpr(predicate_proto);
                 }();
+                auto expr_parser = [&]() -> plan::PlanNodePtr {
+                    auto expr = ParseExprs(predicate_proto);
+                    return std::make_shared<plan::FilterBitsNode>(
+                        DEFAULT_PLANNODE_ID, expr);
+                }();
                 node->predicate_ = std::move(expr_opt);
+                node->filter_plannode_ = std::move(expr_parser);
             }
             node->is_count_ = query.is_count();
             node->limit_ = query.limit();
@@ -282,6 +303,16 @@ ProtoParser::CreateRetrievePlan(const proto::plan::PlanNode& plan_node_proto) {
         retrieve_plan->field_ids_.push_back(field_id);
     }
     return retrieve_plan;
+}
+
+expr::TypedExprPtr
+ProtoParser::ParseUnaryRangeExprs(const proto::plan::UnaryRangeExpr& expr_pb) {
+    auto& column_info = expr_pb.column_info();
+    auto field_id = FieldId(column_info.field_id());
+    auto data_type = schema[field_id].get_data_type();
+    Assert(data_type == static_cast<DataType>(column_info.data_type()));
+    return std::make_shared<milvus::expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(column_info), expr_pb.op(), expr_pb.value());
 }
 
 ExprPtr
@@ -350,6 +381,21 @@ ProtoParser::ParseUnaryRangeExpr(const proto::plan::UnaryRangeExpr& expr_pb) {
         }
     }();
     return result;
+}
+
+expr::TypedExprPtr
+ProtoParser::ParseBinaryRangeExprs(
+    const proto::plan::BinaryRangeExpr& expr_pb) {
+    auto& columnInfo = expr_pb.column_info();
+    auto field_id = FieldId(columnInfo.field_id());
+    auto data_type = schema[field_id].get_data_type();
+    Assert(data_type == (DataType)columnInfo.data_type());
+    return std::make_shared<expr::BinaryRangeFilterExpr>(
+        columnInfo,
+        expr_pb.lower_value(),
+        expr_pb.upper_value(),
+        expr_pb.lower_inclusive(),
+        expr_pb.upper_inclusive());
 }
 
 ExprPtr
@@ -436,6 +482,27 @@ ProtoParser::ParseBinaryRangeExpr(const proto::plan::BinaryRangeExpr& expr_pb) {
     return result;
 }
 
+expr::TypedExprPtr
+ProtoParser::ParseCompareExprs(const proto::plan::CompareExpr& expr_pb) {
+    auto& left_column_info = expr_pb.left_column_info();
+    auto left_field_id = FieldId(left_column_info.field_id());
+    auto left_data_type = schema[left_field_id].get_data_type();
+    Assert(left_data_type ==
+           static_cast<DataType>(left_column_info.data_type()));
+
+    auto& right_column_info = expr_pb.right_column_info();
+    auto right_field_id = FieldId(right_column_info.field_id());
+    auto right_data_type = schema[right_field_id].get_data_type();
+    Assert(right_data_type ==
+           static_cast<DataType>(right_column_info.data_type()));
+
+    return std::make_shared<expr::CompareExpr>(left_field_id,
+                                               right_field_id,
+                                               left_data_type,
+                                               right_data_type,
+                                               expr_pb.op());
+}
+
 ExprPtr
 ProtoParser::ParseCompareExpr(const proto::plan::CompareExpr& expr_pb) {
     auto& left_column_info = expr_pb.left_column_info();
@@ -459,6 +526,20 @@ ProtoParser::ParseCompareExpr(const proto::plan::CompareExpr& expr_pb) {
         result->op_type_ = static_cast<OpType>(expr_pb.op());
         return result;
     }();
+}
+
+expr::TypedExprPtr
+ProtoParser::ParseTermExprs(const proto::plan::TermExpr& expr_pb) {
+    auto& columnInfo = expr_pb.column_info();
+    auto field_id = FieldId(columnInfo.field_id());
+    auto data_type = schema[field_id].get_data_type();
+    Assert(data_type == (DataType)columnInfo.data_type());
+    std::vector<::milvus::proto::plan::GenericValue> values;
+    for (size_t i = 0; i < expr_pb.values_size(); i++) {
+        values.emplace_back(expr_pb.values(i));
+    }
+    return std::make_shared<expr::TermFilterExpr>(
+        columnInfo, values, expr_pb.is_in_field());
 }
 
 ExprPtr
@@ -568,12 +649,28 @@ ProtoParser::ParseUnaryExpr(const proto::plan::UnaryExpr& expr_pb) {
     return std::make_unique<LogicalUnaryExpr>(op, expr);
 }
 
+expr::TypedExprPtr
+ProtoParser::ParseUnaryExprs(const proto::plan::UnaryExpr& expr_pb) {
+    auto op = static_cast<expr::LogicalUnaryExpr::OpType>(expr_pb.op());
+    Assert(op == expr::LogicalUnaryExpr::OpType::LogicalNot);
+    auto child_expr = this->ParseExprs(expr_pb.child());
+    return std::make_shared<expr::LogicalUnaryExpr>(op, child_expr);
+}
+
 ExprPtr
 ProtoParser::ParseBinaryExpr(const proto::plan::BinaryExpr& expr_pb) {
     auto op = static_cast<LogicalBinaryExpr::OpType>(expr_pb.op());
     auto left_expr = this->ParseExpr(expr_pb.left());
     auto right_expr = this->ParseExpr(expr_pb.right());
     return std::make_unique<LogicalBinaryExpr>(op, left_expr, right_expr);
+}
+
+expr::TypedExprPtr
+ProtoParser::ParseBinaryExprs(const proto::plan::BinaryExpr& expr_pb) {
+    auto op = static_cast<expr::LogicalBinaryExpr::OpType>(expr_pb.op());
+    auto left_expr = this->ParseExprs(expr_pb.left());
+    auto right_expr = this->ParseExprs(expr_pb.right());
+    return std::make_shared<expr::LogicalBinaryExpr>(op, left_expr, right_expr);
 }
 
 ExprPtr
@@ -642,9 +739,33 @@ ProtoParser::ParseBinaryArithOpEvalRangeExpr(
     return result;
 }
 
+expr::TypedExprPtr
+ProtoParser::ParseBinaryArithOpEvalRangeExprs(
+    const proto::plan::BinaryArithOpEvalRangeExpr& expr_pb) {
+    auto& column_info = expr_pb.column_info();
+    auto field_id = FieldId(column_info.field_id());
+    auto data_type = schema[field_id].get_data_type();
+    Assert(data_type == static_cast<DataType>(column_info.data_type()));
+    return std::make_shared<expr::BinaryArithOpEvalRangeExpr>(
+        column_info,
+        expr_pb.op(),
+        expr_pb.arith_op(),
+        expr_pb.value(),
+        expr_pb.right_operand());
+}
+
 std::unique_ptr<ExistsExprImpl>
 ExtractExistsExprImpl(const proto::plan::ExistsExpr& expr_proto) {
     return std::make_unique<ExistsExprImpl>(expr_proto.info());
+}
+
+expr::TypedExprPtr
+ProtoParser::ParseExistExprs(const proto::plan::ExistsExpr& expr_pb) {
+    auto& column_info = expr_pb.info();
+    auto field_id = FieldId(column_info.field_id());
+    auto data_type = schema[field_id].get_data_type();
+    Assert(data_type == static_cast<DataType>(column_info.data_type()));
+    return std::make_shared<expr::ExistsExpr>(column_info);
 }
 
 ExprPtr
@@ -718,6 +839,24 @@ ExtractJsonContainsExprImpl(const proto::plan::JSONContainsExpr& expr_proto) {
         val_case);
 }
 
+expr::TypedExprPtr
+ProtoParser::ParseJsonContainsExprs(
+    const proto::plan::JSONContainsExpr& expr_pb) {
+    auto& columnInfo = expr_pb.column_info();
+    auto field_id = FieldId(columnInfo.field_id());
+    auto data_type = schema[field_id].get_data_type();
+    Assert(data_type == (DataType)columnInfo.data_type());
+    std::vector<::milvus::proto::plan::GenericValue> values;
+    for (size_t i = 0; i < expr_pb.elements_size(); i++) {
+        values.emplace_back(expr_pb.elements(i));
+    }
+    return std::make_shared<expr::JsonContainsExpr>(
+        columnInfo,
+        expr_pb.op(),
+        expr_pb.elements_same_type(),
+        std::move(values));
+}
+
 ExprPtr
 ProtoParser::ParseJsonContainsExpr(
     const proto::plan::JSONContainsExpr& expr_pb) {
@@ -753,6 +892,55 @@ ProtoParser::ParseJsonContainsExpr(
         return ExtractJsonContainsExprImpl<proto::plan::GenericValue>(expr_pb);
     }();
     return result;
+}
+
+expr::TypedExprPtr
+ProtoParser::CreateAlwaysTrueExprs() {
+    return std::make_shared<expr::AlwaysTrueExpr>();
+}
+
+expr::TypedExprPtr
+ProtoParser::ParseExprs(const proto::plan::Expr& expr_pb) {
+    using ppe = proto::plan::Expr;
+    switch (expr_pb.expr_case()) {
+        case ppe::kUnaryRangeExpr: {
+            return ParseUnaryRangeExprs(expr_pb.unary_range_expr());
+        }
+        case ppe::kBinaryExpr: {
+            return ParseBinaryExprs(expr_pb.binary_expr());
+        }
+        case ppe::kUnaryExpr: {
+            return ParseUnaryExprs(expr_pb.unary_expr());
+        }
+        case ppe::kTermExpr: {
+            return ParseTermExprs(expr_pb.term_expr());
+        }
+        case ppe::kBinaryRangeExpr: {
+            return ParseBinaryRangeExprs(expr_pb.binary_range_expr());
+        }
+        case ppe::kCompareExpr: {
+            return ParseCompareExprs(expr_pb.compare_expr());
+        }
+        case ppe::kBinaryArithOpEvalRangeExpr: {
+            return ParseBinaryArithOpEvalRangeExprs(
+                expr_pb.binary_arith_op_eval_range_expr());
+        }
+        case ppe::kExistsExpr: {
+            return ParseExistExprs(expr_pb.exists_expr());
+        }
+        case ppe::kAlwaysTrueExpr: {
+            return CreateAlwaysTrueExprs();
+        }
+        case ppe::kJsonContainsExpr: {
+            return ParseJsonContainsExprs(expr_pb.json_contains_expr());
+        }
+        default: {
+            std::string s;
+            google::protobuf::TextFormat::PrintToString(expr_pb, &s);
+            PanicInfo(ExprInvalid,
+                      std::string("unsupported expr proto node: ") + s);
+        }
+    }
 }
 
 ExprPtr
