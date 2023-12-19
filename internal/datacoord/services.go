@@ -588,7 +588,7 @@ func (s *Server) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtual
 	s.compactionHandler.removeTasksByChannel(channel)
 
 	metrics.CleanupDataCoordNumStoredRows(collectionID)
-	metrics.DataCoordCheckpointLag.DeleteLabelValues(fmt.Sprint(paramtable.GetNodeID()), channel)
+	metrics.DataCoordCheckpointUnixSeconds.DeleteLabelValues(fmt.Sprint(paramtable.GetNodeID()), channel)
 
 	// no compaction triggered in Drop procedure
 	return resp, nil
