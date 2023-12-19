@@ -60,6 +60,13 @@ func (mgr *indexCheckerMgrImpl) registerIndexChecker() {
 	// WAND doesn't have more index params than sparse inverted index, thus
 	// using the same checker.
 	mgr.checkers[IndexSparseWand] = newSparseInvertedIndexChecker()
+	mgr.checkers[IndexINVERTED] = newINVERTEDChecker()
+	mgr.checkers[IndexSTLSORT] = newSTLSORTChecker()
+	mgr.checkers["Asceneding"] = newSTLSORTChecker()
+	mgr.checkers[IndexTRIE] = newTRIEChecker()
+	mgr.checkers[IndexTrie] = newTRIEChecker()
+	mgr.checkers["marisa-trie"] = newTRIEChecker()
+	mgr.checkers[AutoIndex] = newAUTOINDEXChecker()
 }
 
 func newIndexCheckerMgr() *indexCheckerMgrImpl {
