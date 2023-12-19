@@ -594,6 +594,8 @@ def gen_new_json_files(float_vector, rows, dim, data_fields, file_nums=1, array_
             file_name = f"data-fields-{len(data_fields)}-rows-{total_rows}-dim-{dim}-file-num-{i}-{int(time.time())}.json"
             with open(f"{data_source}/{file_name}", "w") as f:
                 json.dump(all_data, f)
+            batch_file_size = os.path.getsize(f"{data_source}/{file_name}")
+            log.info(f"file_size with rows {total_rows} for {file_name}: {batch_file_size/1024/1024/1024} GB")
         files.append(file_name)
         start_uid += rows
     return files
@@ -630,7 +632,6 @@ def gen_npy_files(float_vector, rows, dim, data_fields, file_size=None, file_num
             # calculate the rows to be generated
             total_batch = int(file_size*1024*1024*1024/batch_file_size)
             total_rows = total_batch * rows
-            log.info(f"total_rows: {total_rows}")
             new_files = []
             for f in files:
                 arr = np.load(f"{data_source}/{f}")
@@ -640,6 +641,10 @@ def gen_npy_files(float_vector, rows, dim, data_fields, file_size=None, file_num
                 log.info(f"file_name: {file_name} data type: {all_arr.dtype} data shape: {all_arr.shape}")
                 new_files.append(file_name)
             files = new_files
+            batch_file_size = 0
+            for file_name in files:
+                batch_file_size += os.path.getsize(f"{data_source}/{file_name}")
+            log.info(f"file_size with rows {total_rows} for {files}: {batch_file_size/1024/1024/1024} GB")
 
     else:
         for i in range(file_nums):
@@ -694,11 +699,12 @@ def gen_parquet_files(float_vector, rows, dim, data_fields, file_size=None, file
             # calculate the rows to be generated
             total_batch = int(file_size*1024*1024*1024/batch_file_size)
             total_rows = total_batch * rows
-            log.info(f"total_rows: {total_rows}")
             all_df = pd.concat([df for _ in range(total_batch)], axis=0, ignore_index=True)
             file_name = f"data-fields-{len(data_fields)}-rows-{total_rows}-dim-{dim}-file-num-{file_nums}-error-{err_type}-{int(time.time())}.parquet"
             log.info(f"all df: \n {all_df}")
             all_df.to_parquet(f"{data_source}/{file_name}", engine='pyarrow')
+            batch_file_size = os.path.getsize(f"{data_source}/{file_name}")
+            log.info(f"file_size with rows {total_rows} for {file_name}: {batch_file_size/1024/1024} MB")
         files.append(file_name)
     else:
         for i in range(file_nums):
