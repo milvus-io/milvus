@@ -24,6 +24,7 @@ if [[ "$OSTYPE" == "linux-gnu"* ]]; then
   else
     echo "WARN: Cannot find $LIBJEMALLOC"
   fi
+  export LD_LIBRARY_PATH=$PWD/internal/core/output/lib/:$LD_LIBRARY_PATH
 fi
 
 echo "Starting rootcoord..."
