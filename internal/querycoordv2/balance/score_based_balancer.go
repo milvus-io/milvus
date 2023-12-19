@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -193,13 +194,15 @@ func (b *ScoreBasedBalancer) BalanceReplica(replica *meta.Replica) ([]SegmentAss
 		// handle stopped nodes here, have to assign segments on stopping nodes to nodes with the smallest score
 		channelPlans = append(channelPlans, b.genStoppingChannelPlan(replica, lo.Keys(nodesSegments), lo.Keys(stoppingNodesSegments))...)
 		if len(channelPlans) == 0 {
-			segmentPlans = append(segmentPlans, b.getStoppedSegmentPlan(replica, nodesSegments, stoppingNodesSegments)...)
+			segmentPlans = append(segmentPlans, b.genStoppingSegmentPlan(replica, nodesSegments, stoppingNodesSegments)...)
 		}
 	} else {
-		// normal balance, find segments from largest score nodes and transfer to smallest score nodes.
-		channelPlans = append(channelPlans, b.genChannelPlan(replica, lo.Keys(nodesSegments))...)
+		if paramtable.Get().QueryCoordCfg.AutoBalanceChannel.GetAsBool() {
+			channelPlans = append(channelPlans, b.genChannelPlan(replica, lo.Keys(nodesSegments))...)
+		}
+
 		if len(channelPlans) == 0 {
-			segmentPlans = append(segmentPlans, b.getNormalSegmentPlan(replica, nodesSegments)...)
+			segmentPlans = append(segmentPlans, b.genSegmentPlan(replica, nodesSegments)...)
 		}
 	}
 
@@ -210,7 +213,7 @@ func (b *ScoreBasedBalancer) BalanceReplica(replica *meta.Replica) ([]SegmentAss
 	return segmentPlans, channelPlans
 }
 
-func (b *ScoreBasedBalancer) getStoppedSegmentPlan(replica *meta.Replica, nodesSegments map[int64][]*meta.Segment, stoppingNodesSegments map[int64][]*meta.Segment) []SegmentAssignPlan {
+func (b *ScoreBasedBalancer) genStoppingSegmentPlan(replica *meta.Replica, nodesSegments map[int64][]*meta.Segment, stoppingNodesSegments map[int64][]*meta.Segment) []SegmentAssignPlan {
 	segmentPlans := make([]SegmentAssignPlan, 0)
 	// generate candidates
 	nodeItems := b.convertToNodeItems(replica.GetCollectionID(), lo.Keys(nodesSegments))
@@ -253,7 +256,7 @@ func (b *ScoreBasedBalancer) getStoppedSegmentPlan(replica *meta.Replica, nodesS
 	return segmentPlans
 }
 
-func (b *ScoreBasedBalancer) getNormalSegmentPlan(replica *meta.Replica, nodesSegments map[int64][]*meta.Segment) []SegmentAssignPlan {
+func (b *ScoreBasedBalancer) genSegmentPlan(replica *meta.Replica, nodesSegments map[int64][]*meta.Segment) []SegmentAssignPlan {
 	segmentPlans := make([]SegmentAssignPlan, 0)
 
 	// generate candidates

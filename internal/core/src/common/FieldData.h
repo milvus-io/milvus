@@ -21,10 +21,10 @@
 
 #include <oneapi/tbb/concurrent_queue.h>
 
-#include "storage/FieldDataInterface.h"
+#include "common/FieldDataInterface.h"
 #include "common/Channel.h"
 
-namespace milvus::storage {
+namespace milvus {
 
 template <typename Type>
 class FieldData : public FieldDataImpl<Type, true> {
@@ -33,6 +33,11 @@ class FieldData : public FieldDataImpl<Type, true> {
     explicit FieldData(DataType data_type, int64_t buffered_num_rows = 0)
         : FieldDataImpl<Type, true>::FieldDataImpl(
               1, data_type, buffered_num_rows) {
+    }
+    static_assert(IsScalar<Type> || std::is_same_v<Type, PkType>);
+    explicit FieldData(DataType data_type, FixedVector<Type>&& inner_data)
+        : FieldDataImpl<Type, true>::FieldDataImpl(
+              1, data_type, std::move(inner_data)) {
     }
 };
 
@@ -106,7 +111,10 @@ class FieldData<Float16Vector> : public FieldDataImpl<float16, false> {
 };
 
 using FieldDataPtr = std::shared_ptr<FieldDataBase>;
-using FieldDataChannel = Channel<storage::FieldDataPtr>;
+using FieldDataChannel = Channel<FieldDataPtr>;
 using FieldDataChannelPtr = std::shared_ptr<FieldDataChannel>;
 
-}  // namespace milvus::storage
+FieldDataPtr
+InitScalarFieldData(const DataType& type, int64_t cap_rows);
+
+}  // namespace milvus

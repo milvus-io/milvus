@@ -58,5 +58,17 @@ template <>
 bool
 FindTermAVX2(const double* src, size_t vec_size, double val);
 
+bool
+AllFalseAVX2(const bool* src, int64_t size);
+
+bool
+AllTrueAVX2(const bool* src, int64_t size);
+
+void
+AndBoolAVX2(bool* left, bool* right, int64_t size);
+
+void
+OrBoolAVX2(bool* left, bool* right, int64_t size);
+
 }  // namespace simd
 }  // namespace milvus

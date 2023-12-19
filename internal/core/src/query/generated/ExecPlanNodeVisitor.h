@@ -19,6 +19,7 @@
 #include "PlanNodeVisitor.h"
 
 namespace milvus::query {
+
 class ExecPlanNodeVisitor : public PlanNodeVisitor {
  public:
     void
@@ -94,6 +95,24 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
     bool
     GetExprUsePkIndex() {
         return expr_use_pk_index_;
+    }
+
+    void
+    ExecuteExprNodeInternal(
+        const std::shared_ptr<milvus::plan::PlanNode>& plannode,
+        const milvus::segcore::SegmentInternalInterface* segment,
+        BitsetType& result,
+        bool& cache_offset_getted,
+        std::vector<int64_t>& cache_offset);
+
+    void
+    ExecuteExprNode(const std::shared_ptr<milvus::plan::PlanNode>& plannode,
+                    const milvus::segcore::SegmentInternalInterface* segment,
+                    BitsetType& result) {
+        bool get_cache_offset;
+        std::vector<int64_t> cache_offsets;
+        ExecuteExprNodeInternal(
+            plannode, segment, result, get_cache_offset, cache_offsets);
     }
 
  private:

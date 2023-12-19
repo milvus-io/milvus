@@ -14,14 +14,14 @@
 #include <memory>
 #include <string>
 
+#include "common/Common.h"
+#include "common/FieldData.h"
 #include "index/ScalarIndex.h"
 #include "log/Log.h"
-#include "storage/FieldData.h"
-#include "storage/RemoteChunkManagerSingleton.h"
-#include "common/Common.h"
-#include "storage/ThreadPool.h"
-#include "storage/Util.h"
 #include "mmap/Utils.h"
+#include "storage/ThreadPool.h"
+#include "storage/RemoteChunkManagerSingleton.h"
+#include "storage/Util.h"
 
 namespace milvus::segcore {
 
@@ -50,7 +50,7 @@ ParsePksFromFieldData(std::vector<PkType>& pks, const DataArray& data) {
 void
 ParsePksFromFieldData(DataType data_type,
                       std::vector<PkType>& pks,
-                      const std::vector<storage::FieldDataPtr>& datas) {
+                      const std::vector<FieldDataPtr>& datas) {
     int64_t offset = 0;
 
     for (auto& field_data : datas) {
@@ -737,7 +737,7 @@ LoadFieldDatasFromRemote2(std::shared_ptr<milvus_storage::Space> space,
 // segcore use default remote chunk manager to load data from minio/s3
 void
 LoadFieldDatasFromRemote(std::vector<std::string>& remote_files,
-                         storage::FieldDataChannelPtr channel) {
+                         FieldDataChannelPtr channel) {
     try {
         auto parallel_degree = static_cast<uint64_t>(
             DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);

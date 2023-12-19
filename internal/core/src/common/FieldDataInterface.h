@@ -33,7 +33,7 @@
 #include "common/EasyAssert.h"
 #include "common/Array.h"
 
-namespace milvus::storage {
+namespace milvus {
 
 using DataType = milvus::DataType;
 
@@ -49,8 +49,8 @@ class FieldDataBase {
     virtual void
     FillFieldData(const std::shared_ptr<arrow::Array> array) = 0;
 
-    virtual const void*
-    Data() const = 0;
+    virtual void*
+    Data() = 0;
 
     virtual const void*
     RawValue(ssize_t offset) const = 0;
@@ -109,6 +109,12 @@ class FieldDataImpl : public FieldDataBase {
         field_data_.resize(num_rows_ * dim_);
     }
 
+    explicit FieldDataImpl(size_t dim, DataType type, Chunk&& field_data)
+        : FieldDataBase(type), dim_(is_scalar ? 1 : dim) {
+        field_data_ = std::move(field_data);
+        num_rows_ = field_data.size() / dim;
+    }
+
     void
     FillFieldData(const void* source, ssize_t element_count) override;
 
@@ -126,8 +132,8 @@ class FieldDataImpl : public FieldDataBase {
         return "FieldDataImpl";
     }
 
-    const void*
-    Data() const override {
+    void*
+    Data() override {
         return field_data_.data();
     }
 
@@ -332,4 +338,4 @@ class FieldDataArrayImpl : public FieldDataImpl<Array, true> {
     }
 };
 
-}  // namespace milvus::storage
+}  // namespace milvus

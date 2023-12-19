@@ -33,7 +33,7 @@
 #include "pb/schema.pb.h"
 #include "pb/segcore.pb.h"
 #include "index/IndexInfo.h"
-#include "SkipIndex.h"
+#include "index/SkipIndex.h"
 #include "mmap/Column.h"
 
 namespace milvus::segcore {

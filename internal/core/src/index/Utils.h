@@ -28,9 +28,9 @@
 #include <string>
 
 #include "common/Types.h"
+#include "common/FieldData.h"
 #include "index/IndexInfo.h"
 #include "storage/Types.h"
-#include "storage/FieldData.h"
 
 namespace milvus::index {
 
@@ -114,12 +114,11 @@ ParseConfigFromIndexParams(
     const std::map<std::string, std::string>& index_params);
 
 void
-AssembleIndexDatas(std::map<std::string, storage::FieldDataPtr>& index_datas);
+AssembleIndexDatas(std::map<std::string, FieldDataPtr>& index_datas);
 
 void
-AssembleIndexDatas(
-    std::map<std::string, storage::FieldDataChannelPtr>& index_datas,
-    std::unordered_map<std::string, storage::FieldDataPtr>& result);
+AssembleIndexDatas(std::map<std::string, FieldDataChannelPtr>& index_datas,
+                   std::unordered_map<std::string, FieldDataPtr>& result);
 
 // On Linux, read() (and similar system calls) will transfer at most 0x7ffff000 (2,147,479,552) bytes once
 void

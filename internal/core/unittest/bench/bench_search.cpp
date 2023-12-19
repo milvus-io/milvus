@@ -31,7 +31,7 @@ const auto schema = []() {
     return schema;
 }();
 
-const auto plan = [] {
+const auto search_plan = [] {
     const char* raw_plan = R"(vector_anns: <
                                 field_id: 100
                                 query_info: <
@@ -50,8 +50,8 @@ const auto plan = [] {
 auto ph_group = [] {
     auto num_queries = 10;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, 1024);
-    auto ph_group =
-        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+    auto ph_group = ParsePlaceholderGroup(search_plan.get(),
+                                          ph_group_raw.SerializeAsString());
     return ph_group;
 }();
 
@@ -91,7 +91,7 @@ Search_GrowingIndex(benchmark::State& state) {
                     dataset_.raw_);
 
     for (auto _ : state) {
-        auto qr = segment->Search(plan.get(), ph_group.get());
+        auto qr = segment->Search(search_plan.get(), ph_group.get());
     }
 }
 
@@ -124,7 +124,7 @@ Search_Sealed(benchmark::State& state) {
         segment->LoadIndex(info);
     }
     for (auto _ : state) {
-        auto qr = segment->Search(plan.get(), ph_group.get());
+        auto qr = segment->Search(search_plan.get(), ph_group.get());
     }
 }
 

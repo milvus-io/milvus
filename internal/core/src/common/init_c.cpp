@@ -25,7 +25,7 @@
 #include "common/Tracer.h"
 #include "log/Log.h"
 
-std::once_flag flag1, flag2, flag3, flag4, flag5;
+std::once_flag flag1, flag2, flag3, flag4, flag5, flag6;
 std::once_flag traceFlag;
 
 void
@@ -68,6 +68,14 @@ void
 InitCpuNum(const int value) {
     std::call_once(
         flag3, [](int value) { milvus::SetCpuNum(value); }, value);
+}
+
+void
+InitDefaultExprEvalBatchSize(int64_t val) {
+    std::call_once(
+        flag6,
+        [](int val) { milvus::SetDefaultExecEvalExprBatchSize(val); },
+        val);
 }
 
 void

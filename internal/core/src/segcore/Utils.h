@@ -20,13 +20,13 @@
 #include <utility>
 #include <vector>
 
+#include "common/FieldData.h"
 #include "common/QueryResult.h"
 // #include "common/Schema.h"
 #include "common/Types.h"
+#include "index/Index.h"
 #include "segcore/DeletedRecord.h"
 #include "segcore/InsertRecord.h"
-#include "index/Index.h"
-#include "storage/FieldData.h"
 #include "storage/space.h"
 
 namespace milvus::segcore {
@@ -37,7 +37,7 @@ ParsePksFromFieldData(std::vector<PkType>& pks, const DataArray& data);
 void
 ParsePksFromFieldData(DataType data_type,
                       std::vector<PkType>& pks,
-                      const std::vector<storage::FieldDataPtr>& datas);
+                      const std::vector<FieldDataPtr>& datas);
 
 void
 ParsePksFromIDs(std::vector<PkType>& pks,
@@ -159,7 +159,7 @@ ReverseDataFromIndex(const index::IndexBase* index,
 
 void
 LoadFieldDatasFromRemote(std::vector<std::string>& remote_files,
-                         storage::FieldDataChannelPtr channel);
+                         FieldDataChannelPtr channel);
 
 void
 LoadFieldDatasFromRemote2(std::shared_ptr<milvus_storage::Space> space,

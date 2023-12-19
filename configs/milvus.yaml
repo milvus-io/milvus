@@ -288,6 +288,7 @@ queryNode:
     # This parameter is only useful when enable-disk = true.
     # And this value should be a number greater than 1 and less than 32.
     chunkRows: 1024 # The number of vectors in a chunk.
+    exprEvalBatchSize: 8192 # The batch size for executor get next
     interimIndex: # build a vector temperate index for growing segment or binlog to accelerate search
       enableIndex: true
       nlist: 128 # segment index nlist

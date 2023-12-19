@@ -33,6 +33,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/pkg/util"
 )
 
 func Test_CheckGrpcReady(t *testing.T) {
@@ -87,6 +88,25 @@ func Test_ParseIndexParamsMap(t *testing.T) {
 	invalidStr := "invalid string"
 	_, err = JSONToMap(invalidStr)
 	assert.NotEqual(t, err, nil)
+}
+
+func Test_ParseBuiltinRolesMap(t *testing.T) {
+	t.Run("correct format", func(t *testing.T) {
+		builtinRoles := `{"db_admin": {"privileges": [{"object_type": "Global", "object_name": "*", "privilege": "CreateCollection", "db_name": "*"}]}}`
+		rolePrivilegesMap, err := JSONToRoleDetails(builtinRoles)
+		assert.Nil(t, err)
+		for role, privilegesJSON := range rolePrivilegesMap {
+			assert.Contains(t, []string{"db_admin", "db_rw", "db_ro"}, role)
+			for _, privileges := range privilegesJSON[util.RoleConfigPrivileges] {
+				assert.Equal(t, privileges[util.RoleConfigObjectType], "Global")
+			}
+		}
+	})
+	t.Run("wrong format", func(t *testing.T) {
+		builtinRoles := `{"db_admin": {"privileges": [{"object_type": "Global", "object_name": "*", "privilege": "CreateCollection", "db_name": "*"}]}`
+		_, err := JSONToRoleDetails(builtinRoles)
+		assert.NotNil(t, err)
+	})
 }
 
 func TestGetAttrByKeyFromRepeatedKV(t *testing.T) {

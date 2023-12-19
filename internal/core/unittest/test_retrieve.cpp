@@ -17,6 +17,8 @@
 #include "query/ExprImpl.h"
 #include "segcore/ScalarIndex.h"
 #include "test_utils/DataGen.h"
+#include "exec/expression/Expr.h"
+#include "plan/PlanNode.h"
 
 using namespace milvus;
 using namespace milvus::segcore;
@@ -72,17 +74,21 @@ TEST(Retrieve, AutoID) {
     auto i64_col = dataset.get_col<int64_t>(fid_64);
 
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
-    std::vector<int64_t> values;
-    for (int i = 0; i < req_size; ++i) {
-        values.emplace_back(i64_col[choose(i)]);
+    std::vector<proto::plan::GenericValue> values;
+    {
+        for (int i = 0; i < req_size; ++i) {
+            proto::plan::GenericValue val;
+            val.set_int64_val(i64_col[choose(i)]);
+            values.push_back(val);
+        }
     }
-    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(
-        milvus::query::ColumnInfo(
+    auto term_expr = std::make_shared<milvus::expr::TermFilterExpr>(
+        milvus::expr::ColumnInfo(
             fid_64, DataType::INT64, std::vector<std::string>()),
-        values,
-        proto::plan::GenericValue::kInt64Val);
+        values);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
-    plan->plan_node_->predicate_ = std::move(term_expr);
+    plan->plan_node_->filter_plannode_ =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
     std::vector<FieldId> target_fields_id{fid_64, fid_vec};
     plan->field_ids_ = target_fields_id;
 
@@ -128,17 +134,21 @@ TEST(Retrieve, AutoID2) {
     auto i64_col = dataset.get_col<int64_t>(fid_64);
 
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
-    std::vector<int64_t> values;
-    for (int i = 0; i < req_size; ++i) {
-        values.emplace_back(i64_col[choose(i)]);
+    std::vector<proto::plan::GenericValue> values;
+    {
+        for (int i = 0; i < req_size; ++i) {
+            proto::plan::GenericValue val;
+            val.set_int64_val(i64_col[choose(i)]);
+            values.push_back(val);
+        }
     }
-    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(
-        milvus::query::ColumnInfo(
+    auto term_expr = std::make_shared<milvus::expr::TermFilterExpr>(
+        milvus::expr::ColumnInfo(
             fid_64, DataType::INT64, std::vector<std::string>()),
-        values,
-        proto::plan::GenericValue::kInt64Val);
+        values);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
-    plan->plan_node_->predicate_ = std::move(term_expr);
+    plan->plan_node_->filter_plannode_ =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
     std::vector<FieldId> target_offsets{fid_64, fid_vec};
     plan->field_ids_ = target_offsets;
 
@@ -180,19 +190,25 @@ TEST(Retrieve, NotExist) {
     auto i64_col = dataset.get_col<int64_t>(fid_64);
 
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
-    std::vector<int64_t> values;
-    for (int i = 0; i < req_size; ++i) {
-        values.emplace_back(i64_col[choose(i)]);
-        values.emplace_back(choose2(i));
+    std::vector<proto::plan::GenericValue> values;
+    {
+        for (int i = 0; i < req_size; ++i) {
+            proto::plan::GenericValue val1;
+            val1.set_int64_val(i64_col[choose(i)]);
+            values.push_back(val1);
+            proto::plan::GenericValue val2;
+            val2.set_int64_val(choose2(i));
+            values.push_back(val2);
+        }
     }
 
-    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(
-        milvus::query::ColumnInfo(
+    auto term_expr = std::make_shared<milvus::expr::TermFilterExpr>(
+        milvus::expr::ColumnInfo(
             fid_64, DataType::INT64, std::vector<std::string>()),
-        values,
-        proto::plan::GenericValue::kInt64Val);
+        values);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
-    plan->plan_node_->predicate_ = std::move(term_expr);
+    plan->plan_node_->filter_plannode_ =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
     std::vector<FieldId> target_offsets{fid_64, fid_vec};
     plan->field_ids_ = target_offsets;
 
@@ -230,17 +246,21 @@ TEST(Retrieve, Empty) {
     auto segment = CreateSealedSegment(schema);
 
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
-    std::vector<int64_t> values;
-    for (int i = 0; i < req_size; ++i) {
-        values.emplace_back(choose(i));
+    std::vector<proto::plan::GenericValue> values;
+    {
+        for (int i = 0; i < req_size; ++i) {
+            proto::plan::GenericValue val;
+            val.set_int64_val(choose(i));
+            values.push_back(val);
+        }
     }
-    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(
-        milvus::query::ColumnInfo(
+    auto term_expr = std::make_shared<milvus::expr::TermFilterExpr>(
+        milvus::expr::ColumnInfo(
             fid_64, DataType::INT64, std::vector<std::string>()),
-        values,
-        proto::plan::GenericValue::kInt64Val);
+        values);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
-    plan->plan_node_->predicate_ = std::move(term_expr);
+    plan->plan_node_->filter_plannode_ =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
     std::vector<FieldId> target_offsets{fid_64, fid_vec};
     plan->field_ids_ = target_offsets;
 
@@ -270,14 +290,16 @@ TEST(Retrieve, Limit) {
     SealedLoadFieldData(dataset, *segment);
 
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
-    auto term_expr = std::make_unique<query::UnaryRangeExprImpl<int64_t>>(
-        milvus::query::ColumnInfo(
+    proto::plan::GenericValue unary_val;
+    unary_val.set_int64_val(0);
+    auto expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        milvus::expr::ColumnInfo(
             fid_64, DataType::INT64, std::vector<std::string>()),
         OpType::GreaterEqual,
-        0,
-        proto::plan::GenericValue::kInt64Val);
+        unary_val);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
-    plan->plan_node_->predicate_ = std::move(term_expr);
+    plan->plan_node_->filter_plannode_ =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
 
     // test query results exceed the limit size
     std::vector<FieldId> target_fields{TimestampFieldID, fid_64, fid_vec};
@@ -310,16 +332,17 @@ TEST(Retrieve, FillEntry) {
     auto dataset = DataGen(schema, N, 42);
     auto segment = CreateSealedSegment(schema);
     SealedLoadFieldData(dataset, *segment);
-
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
-    auto term_expr = std::make_unique<query::UnaryRangeExprImpl<int64_t>>(
-        milvus::query::ColumnInfo(
+    proto::plan::GenericValue unary_val;
+    unary_val.set_int64_val(0);
+    auto expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        milvus::expr::ColumnInfo(
             fid_64, DataType::INT64, std::vector<std::string>()),
         OpType::GreaterEqual,
-        0,
-        proto::plan::GenericValue::kInt64Val);
+        unary_val);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
-    plan->plan_node_->predicate_ = std::move(term_expr);
+    plan->plan_node_->filter_plannode_ =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
 
     // test query results exceed the limit size
     std::vector<FieldId> target_fields{TimestampFieldID,
@@ -356,17 +379,22 @@ TEST(Retrieve, LargeTimestamp) {
     auto i64_col = dataset.get_col<int64_t>(fid_64);
 
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
-    std::vector<int64_t> values;
-    for (int i = 0; i < req_size; ++i) {
-        values.emplace_back(i64_col[choose(i)]);
+    std::vector<proto::plan::GenericValue> values;
+    {
+        for (int i = 0; i < req_size; ++i) {
+            proto::plan::GenericValue val;
+            val.set_int64_val(i64_col[choose(i)]);
+            values.push_back(val);
+        }
     }
-    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(
-        milvus::query::ColumnInfo(
+    auto term_expr = std::make_shared<milvus::expr::TermFilterExpr>(
+        milvus::expr::ColumnInfo(
             fid_64, DataType::INT64, std::vector<std::string>()),
-        values,
-        proto::plan::GenericValue::kInt64Val);
+        values);
+    ;
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
-    plan->plan_node_->predicate_ = std::move(term_expr);
+    plan->plan_node_->filter_plannode_ =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
     std::vector<FieldId> target_offsets{fid_64, fid_vec};
     plan->field_ids_ = target_offsets;
 
@@ -420,17 +448,21 @@ TEST(Retrieve, Delete) {
     for (int i = 0; i < req_size; ++i) {
         timestamps.emplace_back(ts_col[choose(i)]);
     }
-    std::vector<int64_t> values;
-    for (int i = 0; i < req_size; ++i) {
-        values.emplace_back(i64_col[choose(i)]);
+    std::vector<proto::plan::GenericValue> values;
+    {
+        for (int i = 0; i < req_size; ++i) {
+            proto::plan::GenericValue val;
+            val.set_int64_val(i64_col[choose(i)]);
+            values.push_back(val);
+        }
     }
-    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(
-        milvus::query::ColumnInfo(
+    auto term_expr = std::make_shared<milvus::expr::TermFilterExpr>(
+        milvus::expr::ColumnInfo(
             fid_64, DataType::INT64, std::vector<std::string>()),
-        values,
-        proto::plan::GenericValue::kInt64Val);
+        values);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
-    plan->plan_node_->predicate_ = std::move(term_expr);
+    plan->plan_node_->filter_plannode_ =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
     std::vector<FieldId> target_offsets{fid_ts, fid_64, fid_vec};
     plan->field_ids_ = target_offsets;
 

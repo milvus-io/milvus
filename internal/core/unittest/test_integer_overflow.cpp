@@ -615,8 +615,6 @@ binary_arith_op_eval_range_expr: <
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
-    ExecExprVisitor visitor(
-        *seg_promote, seg_promote->get_row_count(), MAX_TIMESTAMP);
     for (auto [clause, ref_func] : testcases) {
         auto loc = raw_plan_tmp.find("@@@@");
         auto raw_plan = raw_plan_tmp;
@@ -624,7 +622,10 @@ binary_arith_op_eval_range_expr: <
         auto plan_str = translate_text_plan_to_binary_plan(raw_plan.c_str());
         auto plan =
             CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
-        auto final = visitor.call_child(*plan->plan_node_->predicate_.value());
+        query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
+        BitsetType final;
+        visitor.ExecuteExprNode(
+            plan->plan_node_->filter_plannode_.value(), seg_promote, final);
         EXPECT_EQ(final.size(), N * num_iters);
 
         for (int i = 0; i < N * num_iters; ++i) {
