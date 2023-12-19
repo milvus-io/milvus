@@ -631,12 +631,12 @@ func parsePartitionsInfo(infos []*partitionInfo) *partitionInfos {
 		partitionName := info.name
 		splits := strings.Split(partitionName, "_")
 		if len(splits) < 2 {
-			log.Debug("partition group not in partitionKey pattern", zap.String("partitionName", partitionName))
+			log.Info("partition group not in partitionKey pattern", zap.String("partitionName", partitionName))
 			return result
 		}
 		index, err := strconv.ParseInt(splits[len(splits)-1], 10, 64)
 		if err != nil {
-			log.Debug("partition group not in partitionKey pattern", zap.String("parititonName", partitionName), zap.Error(err))
+			log.Info("partition group not in partitionKey pattern", zap.String("parititonName", partitionName), zap.Error(err))
 			return result
 		}
 		partitionNames[index] = partitionName
