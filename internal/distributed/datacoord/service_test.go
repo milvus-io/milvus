@@ -292,7 +292,7 @@ func (m *MockDataCoord) DropIndex(ctx context.Context, req *indexpb.DropIndexReq
 }
 
 func (m *MockDataCoord) GcControl(ctx context.Context, req *datapb.GcControlRequest) (*commonpb.Status, error) {
-	return m.gcControl, m.err
+	return m.gcControlResp, m.err
 }
 
 func Test_NewServer(t *testing.T) {
@@ -687,7 +687,6 @@ func Test_NewServer(t *testing.T) {
 			ret, err := server.GcControl(ctx, nil)
 			assert.NoError(t, err)
 			assert.NotNil(t, ret)
-
 		})
 
 		err := server.Stop()

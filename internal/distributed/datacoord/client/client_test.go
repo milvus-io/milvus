@@ -204,6 +204,9 @@ func Test_NewClient(t *testing.T) {
 
 		r41, err := client.GetIndexStatistics(ctx, nil)
 		retCheck(retNotNil, r41, err)
+
+		gcCtrReq, err := client.GcControl(ctx, nil)
+		retCheck(retNotNil, gcCtrReq, err)
 	}
 
 	client.grpcClient = &mock.GRPCClientBase[datapb.DataCoordClient]{
@@ -252,41 +255,4 @@ func Test_NewClient(t *testing.T) {
 
 	err = client.Close()
 	assert.NoError(t, err)
-}
-
-func Test_GcControl(t *testing.T) {
-	paramtable.Init()
-
-	ctx := context.Background()
-	client, err := NewClient(ctx)
-	assert.NoError(t, err)
-	assert.NotNil(t, client)
-	defer client.Close()
-
-	mockProxy := mocks.NewMockDataCoordClient(t)
-	mockGrpcClient := mocks.NewMockGrpcClient[datapb.DataCoordClient](t)
-	mockGrpcClient.EXPECT().Close().Return(nil)
-	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
-		return f(mockProxy)
-	})
-	client.grpcClient = mockGrpcClient
-
-	// test success
-	mockProxy.EXPECT().GcControl(mock.Anything, mock.Anything).Return(merr.Success(), nil)
-	_, err = client.GcControl(ctx, &datapb.GcControlRequest{})
-	assert.Nil(t, err)
-
-	// test return error code
-	mockProxy.ExpectedCalls = nil
-	mockProxy.EXPECT().GcControl(mock.Anything, mock.Anything).Return(merr.Status(err), nil)
-
-	_, err = client.GcControl(ctx, &datapb.GcControlRequest{})
-	assert.Nil(t, err)
-
-	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
-	defer cancel()
-	time.Sleep(20 * time.Millisecond)
-	_, err = client.GcControl(ctx, &datapb.GcControlRequest{})
-	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
