@@ -23,6 +23,7 @@ RUN pip3 install conan==1.61.0
 RUN echo "target arch $TARGETARCH"
 RUN wget -qO- "https://cmake.org/files/v3.24/cmake-3.24.4-linux-`uname -m`.tar.gz" | tar --strip-components=1 -xz -C /usr/local
 
+# https://github.com/actions/runner-images/blob/main/images/macos/macos-12-Readme.md
 RUN mkdir /opt/vcpkg &&  \
     wget -qO- vcpkg.tar.gz https://github.com/microsoft/vcpkg/archive/refs/tags/2023.11.20.tar.gz | tar --strip-components=1 -xz -C /opt/vcpkg && \
     rm -rf vcpkg.tar.gz
