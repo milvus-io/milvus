@@ -84,6 +84,7 @@ type MockDataCoord struct {
 	getIndexBuildProgressResp *indexpb.GetIndexBuildProgressResponse
 	getSegmentIndexStateResp  *indexpb.GetSegmentIndexStateResponse
 	getIndexInfosResp         *indexpb.GetIndexInfoResponse
+	gcControlResp             *commonpb.Status
 }
 
 func (m *MockDataCoord) Init() error {
@@ -288,6 +289,10 @@ func (m *MockDataCoord) GetSegmentIndexState(ctx context.Context, req *indexpb.G
 
 func (m *MockDataCoord) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
 	return m.dropIndexResp, m.err
+}
+
+func (m *MockDataCoord) GcControl(ctx context.Context, req *datapb.GcControlRequest) (*commonpb.Status, error) {
+	return m.gcControl, m.err
 }
 
 func Test_NewServer(t *testing.T) {
@@ -673,6 +678,16 @@ func Test_NewServer(t *testing.T) {
 			ret, err := server.GetIndexInfos(ctx, nil)
 			assert.NoError(t, err)
 			assert.NotNil(t, ret)
+		})
+
+		t.Run("GcControl", func(t *testing.T) {
+			server.dataCoord = &MockDataCoord{
+				gcControlResp: &commonpb.Status{},
+			}
+			ret, err := server.GcControl(ctx, nil)
+			assert.NoError(t, err)
+			assert.NotNil(t, ret)
+
 		})
 
 		err := server.Stop()

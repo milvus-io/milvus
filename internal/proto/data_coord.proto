@@ -91,6 +91,8 @@ service DataCoord {
   rpc GcConfirm(GcConfirmRequest) returns (GcConfirmResponse) {}
 
   rpc ReportDataNodeTtMsgs(ReportDataNodeTtMsgsRequest) returns (common.Status) {}
+
+  rpc GcControl(GcControlRequest) returns(common.Status){}
 }
 
 service DataNode {
@@ -726,4 +728,15 @@ message ChannelOperationProgressResponse {
   int64 opID = 2;
   ChannelWatchState state = 3;
   int32 progress = 4;
+}
+enum GcCommand {
+  _ = 0;
+  Pause = 1;
+  Resume = 2;
+}
+
+message GcControlRequest {
+  common.MsgBase base = 1;
+  GcCommand command = 2;
+  repeated common.KeyValuePair params = 3;
 }

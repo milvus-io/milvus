@@ -395,6 +395,7 @@ func (s *Server) startDataCoord() {
 		s.compactionTrigger.start()
 	}
 	s.startServerLoop()
+
 	s.afterStart()
 	s.stateCode.Store(commonpb.StateCode_Healthy)
 	sessionutil.SaveServerInfo(typeutil.DataCoordRole, s.session.GetServerID())
