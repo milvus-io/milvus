@@ -37,8 +37,7 @@ type deleteTask struct {
 	ctx context.Context
 	tr  *timerecord.TimeRecorder
 
-	req    *milvuspb.DeleteRequest
-	result *milvuspb.MutationResult
+	req *milvuspb.DeleteRequest
 
 	// channel
 	chMgr     channelsMgr
@@ -46,16 +45,20 @@ type deleteTask struct {
 	pChannels []pChan
 	vChannels []vChan
 
-	idAllocator *allocator.IDAllocator
-	lb          LBPolicy
+	idAllocator allocator.Interface
 
 	// delete info
-	schema       *schemapb.CollectionSchema
-	ts           Timestamp
-	msgID        UniqueID
-	collectionID UniqueID
-	partitionID  UniqueID
-	count        int
+	primaryKeys      *schemapb.IDs
+	collectionID     UniqueID
+	partitionID      UniqueID
+	partitionKeyMode bool
+
+	// set by scheduler
+	ts    Timestamp
+	msgID UniqueID
+
+	// result
+	count int64
 }
 
 func (dt *deleteTask) TraceCtx() context.Context {
@@ -111,6 +114,414 @@ func (dt *deleteTask) getChannels() []pChan {
 	return dt.pChannels
 }
 
+func (dt *deleteTask) PreExecute(ctx context.Context) error {
+	return nil
+}
+
+func (dt *deleteTask) Execute(ctx context.Context) (err error) {
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Delete-Execute")
+	defer sp.End()
+	// log := log.Ctx(ctx)
+
+	if len(dt.req.GetExpr()) == 0 {
+		return merr.WrapErrParameterInvalid("valid expr", "empty expr", "invalid expression")
+	}
+
+	dt.tr = timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute delete %d", dt.ID()))
+	stream, err := dt.chMgr.getOrCreateDmlStream(dt.collectionID)
+	if err != nil {
+		return err
+	}
+
+	hashValues := typeutil.HashPK2Channels(dt.primaryKeys, dt.vChannels)
+	// repack delete msg by dmChannel
+	result := make(map[uint32]msgstream.TsMsg)
+	numRows := int64(0)
+	for index, key := range hashValues {
+		vchannel := dt.vChannels[key]
+		_, ok := result[key]
+		if !ok {
+			deleteMsg, err := dt.newDeleteMsg(ctx)
+			if err != nil {
+				return err
+			}
+			deleteMsg.ShardName = vchannel
+			result[key] = deleteMsg
+		}
+		curMsg := result[key].(*msgstream.DeleteMsg)
+		curMsg.HashValues = append(curMsg.HashValues, hashValues[index])
+		curMsg.Timestamps = append(curMsg.Timestamps, dt.ts)
+
+		typeutil.AppendIDs(curMsg.PrimaryKeys, dt.primaryKeys, index)
+		curMsg.NumRows++
+		numRows++
+	}
+
+	// send delete request to log broker
+	msgPack := &msgstream.MsgPack{
+		BeginTs: dt.BeginTs(),
+		EndTs:   dt.EndTs(),
+	}
+
+	for _, msg := range result {
+		if msg != nil {
+			msgPack.Msgs = append(msgPack.Msgs, msg)
+		}
+	}
+
+	log.Debug("send delete request to virtual channels",
+		zap.String("collectionName", dt.req.GetCollectionName()),
+		zap.Int64("collectionID", dt.collectionID),
+		zap.Strings("virtual_channels", dt.vChannels),
+		zap.Int64("taskID", dt.ID()),
+		zap.Duration("prepare duration", dt.tr.RecordSpan()))
+
+	err = stream.Produce(msgPack)
+	if err != nil {
+		return err
+	}
+	dt.count += numRows
+	return nil
+}
+
+func (dt *deleteTask) PostExecute(ctx context.Context) error {
+	return nil
+}
+
+func (dt *deleteTask) newDeleteMsg(ctx context.Context) (*msgstream.DeleteMsg, error) {
+	msgid, err := dt.idAllocator.AllocOne()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to allocate MsgID of delete")
+	}
+	sliceRequest := msgpb.DeleteRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_Delete),
+			// msgid of delete msg must be set
+			// or it will be seen as duplicated msg in mq
+			commonpbutil.WithMsgID(msgid),
+			commonpbutil.WithTimeStamp(dt.ts),
+			commonpbutil.WithSourceID(paramtable.GetNodeID()),
+		),
+		CollectionID:   dt.collectionID,
+		PartitionID:    dt.partitionID,
+		CollectionName: dt.req.GetCollectionName(),
+		PartitionName:  dt.req.GetPartitionName(),
+		PrimaryKeys:    &schemapb.IDs{},
+	}
+	return &msgstream.DeleteMsg{
+		BaseMsg: msgstream.BaseMsg{
+			Ctx: ctx,
+		},
+		DeleteRequest: sliceRequest,
+	}, nil
+}
+
+type deleteRunner struct {
+	req    *milvuspb.DeleteRequest
+	result *milvuspb.MutationResult
+
+	// channel
+	chMgr     channelsMgr
+	chTicker  channelsTimeTicker
+	vChannels []vChan
+
+	idAllocator     allocator.Interface
+	tsoAllocatorIns tsoAllocator
+
+	// delete info
+	schema           *schemapb.CollectionSchema
+	collectionID     UniqueID
+	partitionID      UniqueID
+	partitionKeyMode bool
+
+	// for query
+	msgID int64
+	lb    LBPolicy
+	err   error
+
+	// task queue
+	queue *dmTaskQueue
+	tasks chan *deleteTask
+}
+
+func (dr *deleteRunner) Init(ctx context.Context) error {
+	log := log.Ctx(ctx)
+	var err error
+
+	collName := dr.req.GetCollectionName()
+	if err := validateCollectionName(collName); err != nil {
+		return ErrWithLog(log, "Invalid collection name", err)
+	}
+	dr.collectionID, err = globalMetaCache.GetCollectionID(ctx, dr.req.GetDbName(), collName)
+	if err != nil {
+		return ErrWithLog(log, "Failed to get collection id", err)
+	}
+
+	dr.schema, err = globalMetaCache.GetCollectionSchema(ctx, dr.req.GetDbName(), collName)
+	if err != nil {
+		return ErrWithLog(log, "Failed to get collection schema", err)
+	}
+
+	dr.partitionKeyMode = hasParitionKeyModeField(dr.schema)
+	// get prititionIDs of delete
+	dr.partitionID = common.InvalidPartitionID
+	if len(dr.req.PartitionName) > 0 {
+		if dr.partitionKeyMode {
+			return errors.New("not support manually specifying the partition names if partition key mode is used")
+		}
+
+		partName := dr.req.GetPartitionName()
+		if err := validatePartitionTag(partName, true); err != nil {
+			return ErrWithLog(log, "Invalid partition name", err)
+		}
+		partID, err := globalMetaCache.GetPartitionID(ctx, dr.req.GetDbName(), collName, partName)
+		if err != nil {
+			return ErrWithLog(log, "Failed to get partition id", err)
+		}
+		dr.partitionID = partID
+	}
+
+	// hash primary keys to channels
+	channelNames, err := dr.chMgr.getVChannels(dr.collectionID)
+	if err != nil {
+		return ErrWithLog(log, "Failed to get primary keys from expr", err)
+	}
+	dr.vChannels = channelNames
+
+	dr.result = &milvuspb.MutationResult{
+		Status: merr.Success(),
+		IDs: &schemapb.IDs{
+			IdField: nil,
+		},
+	}
+	return nil
+}
+
+func (dr *deleteRunner) Run(ctx context.Context) error {
+	plan, err := planparserv2.CreateRetrievePlan(dr.schema, dr.req.Expr)
+	if err != nil {
+		return fmt.Errorf("failed to create expr plan, expr = %s", dr.req.GetExpr())
+	}
+
+	isSimple, termExp := getExpr(plan)
+	if isSimple {
+		// if could get delete.primaryKeys from delete expr
+		err := dr.simpleDelete(ctx, termExp)
+		if err != nil {
+			return err
+		}
+	} else {
+		// if get complex delete expr
+		// need query from querynode before delete
+		err = dr.complexDelete(ctx, plan)
+		if err != nil {
+			log.Warn("complex delete failed,but delete some data", zap.Int64("count", dr.result.DeleteCnt), zap.String("expr", dr.req.GetExpr()))
+			return err
+		}
+	}
+	return nil
+}
+
+func (dr *deleteRunner) produce(ctx context.Context, primaryKeys *schemapb.IDs) (*deleteTask, error) {
+	task := &deleteTask{
+		ctx:              ctx,
+		Condition:        NewTaskCondition(ctx),
+		req:              dr.req,
+		idAllocator:      dr.idAllocator,
+		chMgr:            dr.chMgr,
+		chTicker:         dr.chTicker,
+		collectionID:     dr.collectionID,
+		partitionID:      dr.partitionID,
+		partitionKeyMode: dr.partitionKeyMode,
+		vChannels:        dr.vChannels,
+		primaryKeys:      primaryKeys,
+	}
+
+	if err := dr.queue.Enqueue(task); err != nil {
+		log.Error("Failed to enqueue delete task: " + err.Error())
+		return nil, err
+	}
+
+	return task, nil
+}
+
+func (dr *deleteRunner) getStreamingQueryAndDelteFunc(plan *planpb.PlanNode) executeFunc {
+	return func(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channelIDs ...string) error {
+		var partitionIDs []int64
+
+		// optimize query when partitionKey on
+		if dr.partitionKeyMode {
+			expr, err := ParseExprFromPlan(plan)
+			if err != nil {
+				return err
+			}
+			partitionKeys := ParsePartitionKeys(expr)
+			hashedPartitionNames, err := assignPartitionKeys(ctx, dr.req.GetDbName(), dr.req.GetCollectionName(), partitionKeys)
+			if err != nil {
+				return err
+			}
+			partitionIDs, err = getPartitionIDs(ctx, dr.req.GetDbName(), dr.req.GetCollectionName(), hashedPartitionNames)
+			if err != nil {
+				return err
+			}
+		} else if dr.partitionID != common.InvalidFieldID {
+			partitionIDs = []int64{dr.partitionID}
+		}
+
+		log := log.Ctx(ctx).With(
+			zap.Int64("collectionID", dr.collectionID),
+			zap.Int64s("partitionIDs", partitionIDs),
+			zap.Strings("channels", channelIDs),
+			zap.Int64("nodeID", nodeID))
+
+		ctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		// set plan
+		_, outputFieldIDs := translatePkOutputFields(dr.schema)
+		outputFieldIDs = append(outputFieldIDs, common.TimeStampField)
+		plan.OutputFieldIds = outputFieldIDs
+
+		ts, err := dr.tsoAllocatorIns.AllocOne(ctx)
+		if err != nil {
+			return err
+		}
+
+		dr.msgID, err = dr.idAllocator.AllocOne()
+		if err != nil {
+			return err
+		}
+
+		serializedPlan, err := proto.Marshal(plan)
+		if err != nil {
+			return err
+		}
+
+		queryReq := &querypb.QueryRequest{
+			Req: &internalpb.RetrieveRequest{
+				Base: commonpbutil.NewMsgBase(
+					commonpbutil.WithMsgType(commonpb.MsgType_Retrieve),
+					commonpbutil.WithMsgID(dr.msgID),
+					commonpbutil.WithSourceID(paramtable.GetNodeID()),
+					commonpbutil.WithTargetID(nodeID),
+				),
+				MvccTimestamp:      ts,
+				ReqID:              paramtable.GetNodeID(),
+				DbID:               0, // TODO
+				CollectionID:       dr.collectionID,
+				PartitionIDs:       partitionIDs,
+				SerializedExprPlan: serializedPlan,
+				OutputFieldsId:     outputFieldIDs,
+				GuaranteeTimestamp: parseGuaranteeTsFromConsistency(ts, ts, commonpb.ConsistencyLevel_Bounded),
+			},
+			DmlChannels: channelIDs,
+			Scope:       querypb.DataScope_All,
+		}
+
+		log.Debug("start query for delete", zap.Int64("msgID", dr.msgID))
+		client, err := qn.QueryStream(ctx, queryReq)
+		if err != nil {
+			log.Warn("query stream for delete create failed", zap.Error(err))
+			return err
+		}
+
+		dr.tasks = make(chan *deleteTask, 256)
+		go dr.receiveQueryResult(ctx, client)
+		// wait all task finish
+		for task := range dr.tasks {
+			err := task.WaitToFinish()
+			if err != nil {
+				return err
+			}
+			dr.result.DeleteCnt += task.count
+		}
+
+		// query or produce task failed
+		if dr.err != nil {
+			return dr.err
+		}
+		return nil
+	}
+}
+
+func (dr *deleteRunner) receiveQueryResult(ctx context.Context, client querypb.QueryNode_QueryStreamClient) {
+	defer func() {
+		close(dr.tasks)
+	}()
+
+	for {
+		result, err := client.Recv()
+		if err != nil {
+			if err == io.EOF {
+				log.Debug("query stream for delete finished", zap.Int64("msgID", dr.msgID))
+				return
+			}
+			dr.err = err
+			return
+		}
+
+		err = merr.Error(result.GetStatus())
+		if err != nil {
+			dr.err = err
+			log.Warn("query stream for delete get error status", zap.Int64("msgID", dr.msgID), zap.Error(err))
+			return
+		}
+
+		task, err := dr.produce(ctx, result.GetIds())
+		if err != nil {
+			dr.err = err
+			log.Warn("produce delete task failed", zap.Error(err))
+			return
+		}
+
+		dr.tasks <- task
+	}
+}
+
+func (dr *deleteRunner) complexDelete(ctx context.Context, plan *planpb.PlanNode) error {
+	rc := timerecord.NewTimeRecorder("QueryStreamDelete")
+
+	err := dr.lb.Execute(ctx, CollectionWorkLoad{
+		db:             dr.req.GetDbName(),
+		collectionName: dr.req.GetCollectionName(),
+		collectionID:   dr.collectionID,
+		nq:             1,
+		exec:           dr.getStreamingQueryAndDelteFunc(plan),
+	})
+	if err != nil {
+		log.Warn("fail to execute complex delete",
+			zap.Int64("deleteCnt", dr.result.DeleteCnt),
+			zap.Duration("interval", rc.ElapseSpan()),
+			zap.Error(err))
+		return err
+	}
+	log.Info("complex delete finished", zap.Int64("deleteCnt", dr.result.DeleteCnt), zap.Duration("interval", rc.ElapseSpan()))
+	return nil
+}
+
+func (dr *deleteRunner) simpleDelete(ctx context.Context, termExp *planpb.Expr_TermExpr) error {
+	primaryKeys, numRow, err := getPrimaryKeysFromExpr(dr.schema, termExp)
+	if err != nil {
+		log.Info("Failed to get primary keys from expr", zap.Error(err))
+		return err
+	}
+	log.Debug("get primary keys from expr",
+		zap.Int64("len of primary keys", numRow),
+		zap.Int64("collectionID", dr.collectionID),
+		zap.Int64("partitionID", dr.partitionID))
+
+	task, err := dr.produce(ctx, primaryKeys)
+	if err != nil {
+		log.Warn("produce delete task failed")
+		return err
+	}
+
+	err = task.WaitToFinish()
+	if err == nil {
+		dr.result.DeleteCnt += task.count
+	}
+	return err
+}
+
 func getExpr(plan *planpb.PlanNode) (bool, *planpb.Expr_TermExpr) {
 	// simple delete request need expr with "pk in [a, b]"
 	termExpr, ok := plan.Node.(*planpb.PlanNode_Query).Query.Predicates.Expr.(*planpb.Expr_TermExpr)
@@ -153,298 +564,4 @@ func getPrimaryKeysFromExpr(schema *schemapb.CollectionSchema, termExpr *planpb.
 	}
 
 	return res, rowNum, nil
-}
-
-func (dt *deleteTask) PreExecute(ctx context.Context) error {
-	dt.result = &milvuspb.MutationResult{
-		Status: merr.Success(),
-		IDs: &schemapb.IDs{
-			IdField: nil,
-		},
-		Timestamp: dt.BeginTs(),
-	}
-
-	log := log.Ctx(ctx)
-	collName := dt.req.GetCollectionName()
-	if err := validateCollectionName(collName); err != nil {
-		return ErrWithLog(log, "Invalid collection name", err)
-	}
-	collID, err := globalMetaCache.GetCollectionID(ctx, dt.req.GetDbName(), collName)
-	if err != nil {
-		return ErrWithLog(log, "Failed to get collection id", err)
-	}
-	dt.collectionID = collID
-
-	partitionKeyMode, err := isPartitionKeyMode(ctx, dt.req.GetDbName(), dt.req.GetCollectionName())
-	if err != nil {
-		return ErrWithLog(log, "Failed to get partition key mode", err)
-	}
-	if partitionKeyMode && len(dt.req.PartitionName) != 0 {
-		return errors.New("not support manually specifying the partition names if partition key mode is used")
-	}
-
-	// If partitionName is not empty, partitionID will be set.
-	if len(dt.req.PartitionName) > 0 {
-		partName := dt.req.GetPartitionName()
-		if err := validatePartitionTag(partName, true); err != nil {
-			return ErrWithLog(log, "Invalid partition name", err)
-		}
-		partID, err := globalMetaCache.GetPartitionID(ctx, dt.req.GetDbName(), collName, partName)
-		if err != nil {
-			return ErrWithLog(log, "Failed to get partition id", err)
-		}
-		dt.partitionID = partID
-	} else {
-		dt.partitionID = common.InvalidPartitionID
-	}
-
-	schema, err := globalMetaCache.GetCollectionSchema(ctx, dt.req.GetDbName(), collName)
-	if err != nil {
-		return ErrWithLog(log, "Failed to get collection schema", err)
-	}
-	dt.schema = schema
-
-	// hash primary keys to channels
-	channelNames, err := dt.chMgr.getVChannels(dt.collectionID)
-	if err != nil {
-		return ErrWithLog(log, "Failed to get primary keys from expr", err)
-	}
-	dt.vChannels = channelNames
-
-	log.Debug("pre delete done", zap.Int64("collection_id", dt.collectionID))
-
-	return nil
-}
-
-func (dt *deleteTask) Execute(ctx context.Context) (err error) {
-	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Delete-Execute")
-	defer sp.End()
-	log := log.Ctx(ctx)
-
-	if len(dt.req.GetExpr()) == 0 {
-		return merr.WrapErrParameterInvalid("valid expr", "empty expr", "invalid expression")
-	}
-
-	dt.tr = timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute delete %d", dt.ID()))
-	stream, err := dt.chMgr.getOrCreateDmlStream(dt.collectionID)
-	if err != nil {
-		return err
-	}
-
-	plan, err := planparserv2.CreateRetrievePlan(dt.schema, dt.req.Expr)
-	if err != nil {
-		return fmt.Errorf("failed to create expr plan, expr = %s", dt.req.GetExpr())
-	}
-
-	isSimple, termExp := getExpr(plan)
-	if isSimple {
-		// if could get delete.primaryKeys from delete expr
-		err := dt.simpleDelete(ctx, termExp, stream)
-		if err != nil {
-			return err
-		}
-	} else {
-		// if get complex delete expr
-		// need query from querynode before delete
-		err = dt.complexDelete(ctx, plan, stream)
-		if err != nil {
-			log.Warn("complex delete failed,but delete some data", zap.Int("count", dt.count), zap.String("expr", dt.req.GetExpr()))
-			return err
-		}
-	}
-
-	return nil
-}
-
-func (dt *deleteTask) PostExecute(ctx context.Context) error {
-	return nil
-}
-
-func (dt *deleteTask) getStreamingQueryAndDelteFunc(stream msgstream.MsgStream, plan *planpb.PlanNode) executeFunc {
-	return func(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channelIDs ...string) error {
-		partationIDs := []int64{}
-		if dt.partitionID != common.InvalidFieldID {
-			partationIDs = append(partationIDs, dt.partitionID)
-		}
-
-		log := log.Ctx(ctx).With(
-			zap.Int64("collectionID", dt.collectionID),
-			zap.Int64s("partationIDs", partationIDs),
-			zap.Strings("channels", channelIDs),
-			zap.Int64("nodeID", nodeID))
-		// set plan
-		_, outputFieldIDs := translatePkOutputFields(dt.schema)
-		outputFieldIDs = append(outputFieldIDs, common.TimeStampField)
-		plan.OutputFieldIds = outputFieldIDs
-		log.Debug("start query for delete")
-
-		serializedPlan, err := proto.Marshal(plan)
-		if err != nil {
-			return err
-		}
-
-		queryReq := &querypb.QueryRequest{
-			Req: &internalpb.RetrieveRequest{
-				Base: commonpbutil.NewMsgBase(
-					commonpbutil.WithMsgType(commonpb.MsgType_Retrieve),
-					commonpbutil.WithMsgID(dt.msgID),
-					commonpbutil.WithSourceID(paramtable.GetNodeID()),
-					commonpbutil.WithTargetID(nodeID),
-				),
-				MvccTimestamp:      dt.ts,
-				ReqID:              paramtable.GetNodeID(),
-				DbID:               0, // TODO
-				CollectionID:       dt.collectionID,
-				PartitionIDs:       partationIDs,
-				SerializedExprPlan: serializedPlan,
-				OutputFieldsId:     outputFieldIDs,
-				GuaranteeTimestamp: parseGuaranteeTsFromConsistency(dt.ts, dt.ts, getConsistencyLevelFromConfig()),
-			},
-			DmlChannels: channelIDs,
-			Scope:       querypb.DataScope_All,
-		}
-
-		rc := timerecord.NewTimeRecorder("QueryStreamDelete")
-		client, err := qn.QueryStream(ctx, queryReq)
-		if err != nil {
-			log.Warn("query stream for delete create failed", zap.Error(err))
-			return err
-		}
-
-		for {
-			result, err := client.Recv()
-			if err != nil {
-				if err == io.EOF {
-					log.Debug("query stream for delete finished", zap.Int64("msgID", dt.msgID), zap.Duration("duration", rc.ElapseSpan()))
-					return nil
-				}
-				return err
-			}
-
-			err = merr.Error(result.GetStatus())
-			if err != nil {
-				log.Warn("query stream for delete get error status", zap.Int64("msgID", dt.msgID), zap.Error(err))
-				return err
-			}
-
-			err = dt.produce(ctx, stream, result.GetIds())
-			if err != nil {
-				log.Warn("query stream for delete produce result failed", zap.Int64("msgID", dt.msgID), zap.Error(err))
-				return err
-			}
-		}
-	}
-}
-
-func (dt *deleteTask) complexDelete(ctx context.Context, plan *planpb.PlanNode, stream msgstream.MsgStream) error {
-	err := dt.lb.Execute(ctx, CollectionWorkLoad{
-		db:             dt.req.GetDbName(),
-		collectionName: dt.req.GetCollectionName(),
-		collectionID:   dt.collectionID,
-		nq:             1,
-		exec:           dt.getStreamingQueryAndDelteFunc(stream, plan),
-	})
-	if err != nil {
-		log.Warn("fail to get or create dml stream", zap.Error(err))
-		return err
-	}
-
-	return nil
-}
-
-func (dt *deleteTask) simpleDelete(ctx context.Context, termExp *planpb.Expr_TermExpr, stream msgstream.MsgStream) error {
-	primaryKeys, numRow, err := getPrimaryKeysFromExpr(dt.schema, termExp)
-	if err != nil {
-		log.Info("Failed to get primary keys from expr", zap.Error(err))
-		return err
-	}
-	log.Debug("get primary keys from expr",
-		zap.Int64("len of primary keys", numRow),
-		zap.Int64("collectionID", dt.collectionID),
-		zap.Int64("partationID", dt.partitionID))
-	err = dt.produce(ctx, stream, primaryKeys)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func (dt *deleteTask) produce(ctx context.Context, stream msgstream.MsgStream, primaryKeys *schemapb.IDs) error {
-	hashValues := typeutil.HashPK2Channels(primaryKeys, dt.vChannels)
-	// repack delete msg by dmChannel
-	result := make(map[uint32]msgstream.TsMsg)
-	numRows := int64(0)
-	for index, key := range hashValues {
-		vchannel := dt.vChannels[key]
-		_, ok := result[key]
-		if !ok {
-			deleteMsg, err := dt.newDeleteMsg(ctx)
-			if err != nil {
-				return err
-			}
-			deleteMsg.ShardName = vchannel
-			result[key] = deleteMsg
-		}
-		curMsg := result[key].(*msgstream.DeleteMsg)
-		curMsg.HashValues = append(curMsg.HashValues, hashValues[index])
-		curMsg.Timestamps = append(curMsg.Timestamps, dt.ts)
-
-		typeutil.AppendIDs(curMsg.PrimaryKeys, primaryKeys, index)
-		curMsg.NumRows++
-		numRows++
-	}
-
-	// send delete request to log broker
-	msgPack := &msgstream.MsgPack{
-		BeginTs: dt.BeginTs(),
-		EndTs:   dt.EndTs(),
-	}
-
-	for _, msg := range result {
-		if msg != nil {
-			msgPack.Msgs = append(msgPack.Msgs, msg)
-		}
-	}
-
-	log.Debug("send delete request to virtual channels",
-		zap.String("collectionName", dt.req.GetCollectionName()),
-		zap.Int64("collectionID", dt.collectionID),
-		zap.Strings("virtual_channels", dt.vChannels),
-		zap.Int64("taskID", dt.ID()),
-		zap.Duration("prepare duration", dt.tr.RecordSpan()))
-
-	err := stream.Produce(msgPack)
-	if err != nil {
-		return err
-	}
-	dt.result.DeleteCnt += numRows
-	return nil
-}
-
-func (dt *deleteTask) newDeleteMsg(ctx context.Context) (*msgstream.DeleteMsg, error) {
-	msgid, err := dt.idAllocator.AllocOne()
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to allocate MsgID of delete")
-	}
-	sliceRequest := msgpb.DeleteRequest{
-		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithMsgType(commonpb.MsgType_Delete),
-			// msgid of delete msg must be set
-			// or it will be seen as duplicated msg in mq
-			commonpbutil.WithMsgID(msgid),
-			commonpbutil.WithTimeStamp(dt.ts),
-			commonpbutil.WithSourceID(paramtable.GetNodeID()),
-		),
-		CollectionID:   dt.collectionID,
-		PartitionID:    dt.partitionID,
-		CollectionName: dt.req.GetCollectionName(),
-		PartitionName:  dt.req.GetPartitionName(),
-		PrimaryKeys:    &schemapb.IDs{},
-	}
-	return &msgstream.DeleteMsg{
-		BaseMsg: msgstream.BaseMsg{
-			Ctx: ctx,
-		},
-		DeleteRequest: sliceRequest,
-	}, nil
 }
