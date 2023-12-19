@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"go.uber.org/zap"
 
 	"github.com/samber/lo"
 
@@ -30,37 +31,33 @@ const (
 	fakeNodeID = -1
 )
 
-type importProcessor struct {
+type ImportProcessor struct {
 	ctx       context.Context
 	manager   ImportTaskManager
 	sm        *SegmentManager
 	allocator *alloc.IDAllocator
 	meta      *meta
-	cluster   *Cluster
+	cluster   Cluster
 }
 
-func (s *importProcessor) process() {
-	tasks := s.manager.GetBy()
+func (p *ImportProcessor) process() {
+	tasks := p.manager.GetBy()
 	for _, task := range tasks {
-		switch task.State() {
+		switch task.GetState() {
 		case datapb.ImportState_Pending:
-			s.processPending(task)
-		case datapb.ImportState_Preparing:
-			s.processPreparing(task)
-		case datapb.ImportState_InProgress:
-			s.processInProgress(task)
+			p.processPending(task)
 		case datapb.ImportState_Failed, datapb.ImportState_Completed:
-			s.processCompletedOrFailed(task)
+			p.processCompletedOrFailed(task)
 		}
 	}
 }
 
-func (s *importProcessor) getIdleNode() int64 {
-	nodeIDs := lo.Map(s.cluster.GetSessions(), func(s *Session, _ int) int64 {
+func (p *ImportProcessor) getIdleNode() int64 {
+	nodeIDs := lo.Map(p.cluster.GetSessions(), func(s *Session, _ int) int64 {
 		return s.info.NodeID
 	})
 	for _, nodeID := range nodeIDs {
-		resp, err := s.cluster.GetImportState(nodeID, &datapb.GetImportStateRequest{})
+		resp, err := p.cluster.QueryImport(context.TODO(), nodeID, &datapb.QueryImportRequest{})
 		if err != nil {
 			log.Warn("")
 			continue
@@ -69,82 +66,63 @@ func (s *importProcessor) getIdleNode() int64 {
 			return nodeID
 		}
 	}
-	return -1
+	return fakeNodeID
 }
 
-func (s *importProcessor) processPending(task ImportTask) {
-	nodeID := s.getIdleNode()
-	req := AssemblePreImportRequest(task)
-	err := s.cluster.PreImport(nodeID, req)
-	if err != nil {
-		log.Warn("")
+func (p *ImportProcessor) processPending(task ImportTask) {
+	nodeID := p.getIdleNode()
+	if nodeID == fakeNodeID {
+		log.Warn("no datanode can be scheduled", zap.Int64("taskID", task.GetTaskID()))
 		return
 	}
-	err = s.manager.Update(task.ID(), UpdateState(datapb.ImportState_Preparing))
-	if err != nil {
-		log.Warn("")
-	}
-}
-
-func (s *importProcessor) processPreparing(task ImportTask) {
-	if !IsPreImportDone(task) {
-		return
-	}
-	nodeID := s.getIdleNode()
-	req, err := AssembleImportRequest(task, s.sm, s.allocator)
-	if err != nil {
-		log.Warn("")
-		return
-	}
-	err = s.cluster.ImportV2(nodeID, req)
-	if err != nil {
-		log.Warn("")
-		return
-	}
-	err = s.manager.Update(task.ID(), UpdateState(datapb.ImportState_InProgress))
-	if err != nil {
-		log.Warn("")
-	}
-}
-
-func (s *importProcessor) processInProgress(task ImportTask) {
-	if !IsImportDone(task) {
-		return
-	}
-	for _, segmentID := range task.SegmentIDs() {
-		err := AddImportSegment(s.cluster, s.meta, segmentID)
+	switch task.GetType() {
+	case PreImportTaskType:
+		req := AssemblePreImportRequest(task, p.meta)
+		err := p.cluster.PreImport(context.TODO(), nodeID, req)
 		if err != nil {
 			log.Warn("")
 			return
 		}
-	}
-	for _, segmentID := range task.SegmentIDs() {
-		err := s.meta.UnsetIsImporting(segmentID)
+		err = p.manager.Update(task.GetTaskID(),
+			UpdateState(datapb.ImportState_InProgress),
+			UpdateNodeID(nodeID))
+		if err != nil {
+			log.Warn("")
+		}
+	case ImportTaskType:
+		req, err := AssembleImportRequest(task, p.sm, p.meta, p.allocator)
 		if err != nil {
 			log.Warn("")
 			return
 		}
-	}
-	err := s.manager.Update(task.ID(), UpdateState(datapb.ImportState_Completed))
-	if err != nil {
-		log.Warn("")
+		err = p.cluster.ImportV2(context.TODO(), nodeID, req)
+		if err != nil {
+			log.Warn("")
+			return
+		}
+		err = p.manager.Update(task.GetTaskID(),
+			UpdateState(datapb.ImportState_InProgress),
+			UpdateNodeID(nodeID))
+		if err != nil {
+			log.Warn("")
+		}
 	}
 }
 
-func (s *importProcessor) processCompletedOrFailed(task ImportTask) {
-	if task.NodeID() == fakeNodeID {
+func (p *ImportProcessor) processCompletedOrFailed(task ImportTask) {
+	if task.GetNodeID() == fakeNodeID {
 		return
 	}
 	req := &datapb.DropImportRequest{
-		RequestID: task.ReqID(),
-		TaskID:    task.ID(),
+		RequestID: task.GetRequestID(),
+		TaskID:    task.GetTaskID(),
 	}
-	err := s.cluster.DropImport(task.NodeID(), req)
+	err := p.cluster.DropImport(context.TODO(), task.GetNodeID(), req)
 	if err != nil {
 		log.Warn("")
 		return
 	}
-	err = s.manager.Update(task.ID(), UpdateNodeID(fakeNodeID))
+	err = p.manager.Update(task.GetTaskID(), UpdateNodeID(fakeNodeID))
 	if err != nil {
 		log.Warn("")
 	}

@@ -19,16 +19,34 @@ package datacoord
 import (
 	"github.com/golang/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+)
+
+type TaskType int
+
+const (
+	PreImportTaskType TaskType = iota
+	ImportTaskType
 )
 
 type ImportTaskFilter func(task ImportTask) bool
 
+func WithType(taskType TaskType) ImportTaskFilter {
+	return func(task ImportTask) bool {
+		return task.GetType() == taskType
+	}
+}
+
+func WithReq(reqID int64) ImportTaskFilter {
+	return func(task ImportTask) bool {
+		return task.GetRequestID() == reqID
+	}
+}
+
 func WithStates(states ...datapb.ImportState) ImportTaskFilter {
 	return func(task ImportTask) bool {
 		for _, state := range states {
-			if task.State() == state {
+			if task.GetState() == state {
 				return true
 			}
 		}
@@ -36,23 +54,17 @@ func WithStates(states ...datapb.ImportState) ImportTaskFilter {
 	}
 }
 
-func WithRequestID(reqID int64) ImportTaskFilter {
-	return func(task ImportTask) bool {
-		return task.ReqID() == reqID
-	}
-}
-
 type UpdateAction func(task ImportTask)
 
 func UpdateState(state datapb.ImportState) UpdateAction {
 	return func(t ImportTask) {
-		t.(*importTask).ImportTaskV2.State = state
-	}
-}
+		switch t.GetType() {
+		case PreImportTaskType:
+			t.(*preImportTask).PreImportTask.State = state
+		case ImportTaskType:
+			t.(*importTask).ImportTaskV2.State = state
+		}
 
-func UpdateFileInfo(infos []*datapb.ImportFileInfo) UpdateAction {
-	return func(t ImportTask) {
-		t.(*importTask).ImportTaskV2.FileInfos = infos
 	}
 }
 
@@ -62,63 +74,50 @@ func UpdateNodeID(nodeID int64) UpdateAction {
 	}
 }
 
+func UpdateFileStats(fileStats []*datapb.ImportFileStats) UpdateAction {
+	return func(task ImportTask) {
+		if t, ok := task.(*preImportTask); ok {
+			t.FileStats = fileStats
+		}
+	}
+}
+
 type ImportTask interface {
-	ID() int64
-	ReqID() int64
-	NodeID() int64
-	CollectionID() int64
-	PartitionID() int64
-	SegmentIDs() []int64
-	State() datapb.ImportState
-	Schema() *schemapb.CollectionSchema
-	FileInfos() []*datapb.ImportFileInfo
+	GetRequestID() int64
+	GetTaskID() int64
+	GetCollectionID() int64
+	GetPartitionID() int64
+	GetNodeID() int64
+	GetType() TaskType
+	GetState() datapb.ImportState
+	GetFileStats() []*datapb.ImportFileStats
 	Clone() ImportTask
+}
+
+type preImportTask struct {
+	*datapb.PreImportTask
+}
+
+func (p *preImportTask) GetType() TaskType {
+	return PreImportTaskType
+}
+
+func (p *preImportTask) Clone() ImportTask {
+	return &preImportTask{
+		PreImportTask: proto.Clone(p.PreImportTask).(*datapb.PreImportTask),
+	}
 }
 
 type importTask struct {
 	*datapb.ImportTaskV2
-	schema *schemapb.CollectionSchema
 }
 
-func (t *importTask) ID() int64 {
-	return t.GetTaskID()
-}
-
-func (t *importTask) ReqID() int64 {
-	return t.GetRequestID()
-}
-
-func (t *importTask) NodeID() int64 {
-	return t.GetNodeID()
-}
-
-func (t *importTask) CollectionID() int64 {
-	return t.GetCollectionID()
-}
-
-func (t *importTask) PartitionID() int64 {
-	return t.GetPartitionID()
-}
-
-func (t *importTask) SegmentIDs() []int64 {
-	return t.GetSegmentIDs()
-}
-
-func (t *importTask) State() datapb.ImportState {
-	return t.GetState()
-}
-
-func (t *importTask) Schema() *schemapb.CollectionSchema {
-	return t.schema
-}
-
-func (t *importTask) FileInfos() []*datapb.ImportFileInfo {
-	return t.GetFileInfos()
+func (t *importTask) GetType() TaskType {
+	return ImportTaskType
 }
 
 func (t *importTask) Clone() ImportTask {
 	return &importTask{
 		ImportTaskV2: proto.Clone(t.ImportTaskV2).(*datapb.ImportTaskV2),
-		schema:       t.Schema(),
 	}
 }

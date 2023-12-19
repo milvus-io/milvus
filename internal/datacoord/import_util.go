@@ -18,94 +18,73 @@ package datacoord
 
 import (
 	"context"
+	"github.com/samber/lo"
 	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	alloc "github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
-func IsPreImportDone(task ImportTask) bool {
-	for _, info := range task.FileInfos() {
-		if len(info.GetFileSize()) != len(info.GetFileName()) {
-			return false
-		}
-		if info.GetTotalRows() < 0 {
-			return false
-		}
-	}
-	return true
-}
-
-func IsImportDone(task ImportTask) bool {
-	for _, info := range task.FileInfos() {
-		if info.GetImportedRows() != info.GetTotalRows() {
-			return false
-		}
-	}
-	return true
-}
-
-func AssemblePreImportRequest(task ImportTask) *datapb.PreImportRequest {
+func AssemblePreImportRequest(task ImportTask, meta *meta) *datapb.PreImportRequest {
+	collection := meta.GetCollection(task.GetCollectionID())
+	importFiles := lo.Map(task.(*preImportTask).GetFileStats(),
+		func(fileStats *datapb.ImportFileStats, _ int) *datapb.ImportFile {
+			return fileStats.GetImportFile()
+		})
 	return &datapb.PreImportRequest{
-		RequestID:    task.ReqID(),
-		TaskID:       task.ID(),
-		CollectionID: task.CollectionID(),
-		PartitionID:  task.PartitionID(),
-		Schema:       task.Schema(),
-		FileInfos:    task.FileInfos(),
+		RequestID:    task.GetRequestID(),
+		TaskID:       task.GetTaskID(),
+		CollectionID: task.GetCollectionID(),
+		PartitionID:  task.GetPartitionID(),
+		Schema:       collection.Schema,
+		ImportFiles:  importFiles,
 	}
 }
 
-func AssembleImportRequest(task ImportTask, manager *SegmentManager, idAlloc *alloc.IDAllocator) (*datapb.ImportRequest, error) {
-	segmentInfos := make([]*datapb.SegmentInfo, 0)
-	autoIDs := make([]int64, 0)                                              // TODO: check if enable
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second) // TODO: move to config
+func AssembleImportRequest(task ImportTask, manager *SegmentManager, meta *meta, idAlloc *alloc.IDAllocator) (*datapb.ImportRequest, error) {
+	collection := meta.GetCollection(task.GetCollectionID())
+	segmentAutoIDRanges := make(map[int64]*datapb.AutoIDRange) // TODO: dyh, check if enable
+	segmentChannels := make(map[int64]string)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second) // TODO: dyh, move to config
 	defer cancel()
-	for _, info := range task.FileInfos() {
-		for vchannel, rows := range info.GetChannelRows() {
+	for _, file := range task.GetFileStats() {
+		for vchannel, rows := range file.GetChannelRows() {
 			for rows > 0 {
-				segmentInfo, err := manager.openNewSegment(ctx, task.CollectionID(), task.PartitionID(), vchannel, commonpb.SegmentState_Importing, datapb.SegmentLevel_L1)
+				segmentInfo, err := manager.openNewSegment(ctx, task.GetCollectionID(),
+					task.GetPartitionID(), vchannel, commonpb.SegmentState_Importing, datapb.SegmentLevel_L1)
 				if err != nil {
-					return nil, err
+					return nil, err // TODO: dyh, txn?
 				}
 				rows -= segmentInfo.GetMaxRowNum()
 				idBegin, idEnd, err := idAlloc.Alloc(uint32(segmentInfo.GetMaxRowNum()))
 				if err != nil {
 					return nil, err
 				}
-				segmentInfos = append(segmentInfos, segmentInfo.SegmentInfo)
-				autoIDs = append(autoIDs, idBegin, idEnd)
+				segmentAutoIDRanges[segmentInfo.ID] = &datapb.AutoIDRange{Begin: idBegin, End: idEnd}
+				segmentChannels[segmentInfo.ID] = segmentInfo.InsertChannel
 			}
 		}
 	}
+	importFiles := lo.Map(task.GetFileStats(), func(fileStat *datapb.ImportFileStats, _ int) *datapb.ImportFile {
+		return fileStat.GetImportFile()
+	})
 	return &datapb.ImportRequest{
-		RequestID:    task.ReqID(),
-		TaskID:       task.ID(),
-		CollectionID: task.CollectionID(),
-		PartitionID:  task.PartitionID(),
-		Schema:       task.Schema(),
-		SegmentInfos: segmentInfos,
-		AutoIDs:      autoIDs,
-		FileInfos:    task.FileInfos(),
+		RequestID:       task.GetRequestID(),
+		TaskID:          task.GetTaskID(),
+		CollectionID:    task.GetCollectionID(),
+		PartitionID:     task.GetPartitionID(),
+		Schema:          collection.Schema,
+		ImportFiles:     importFiles,
+		AutoIDRanges:    segmentAutoIDRanges,
+		SegmentChannels: segmentChannels,
 	}, nil
 }
 
-func AddImportSegment(cluster *Cluster, meta *meta, segmentID int64) error {
+func AddImportSegment(cluster Cluster, meta *meta, segmentID int64) error {
 	segment := meta.GetSegment(segmentID)
-	ok, nodeID := cluster.channelManager.getNodeIDByChannelName(segment.GetInsertChannel())
-	if !ok {
-		return merr.WrapErrChannelNotFound(segment.GetInsertChannel(), "no DataNode watches this channel")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second) // TODO: move to config
-	defer cancel()
-	cli, err := cluster.sessionManager.getClient(ctx, nodeID)
-	if err != nil {
-		return err
-	}
 	req := &datapb.AddImportSegmentRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
@@ -117,6 +96,6 @@ func AddImportSegment(cluster *Cluster, meta *meta, segmentID int64) error {
 		RowNum:       segment.GetNumOfRows(),
 		StatsLog:     segment.GetStatslogs(),
 	}
-	_, err = cli.AddImportSegment(ctx, req) // TODO: handle resp
+	_, err := cluster.AddImportSegment(context.TODO(), req) // TODO: handle resp
 	return err
 }

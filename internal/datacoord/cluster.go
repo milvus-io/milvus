@@ -19,16 +19,14 @@ package datacoord
 import (
 	"context"
 	"fmt"
-
-	"github.com/samber/lo"
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/samber/lo"
+	"go.uber.org/zap"
 )
 
 // Cluster provides interfaces to interact with datanode cluster
@@ -41,6 +39,11 @@ type Cluster interface {
 	FlushChannels(ctx context.Context, nodeID int64, flushTs Timestamp, channels []string) error
 	Import(ctx context.Context, nodeID int64, it *datapb.ImportTaskRequest)
 	AddImportSegment(ctx context.Context, req *datapb.AddImportSegmentRequest) (*datapb.AddImportSegmentResponse, error)
+	PreImport(ctx context.Context, nodeID int64, in *datapb.PreImportRequest) error
+	ImportV2(ctx context.Context, nodeID int64, in *datapb.ImportRequest) error
+	QueryPreImport(ctx context.Context, nodeID int64, in *datapb.QueryPreImportRequest) (*datapb.QueryPreImportResponse, error)
+	QueryImport(ctx context.Context, nodeID int64, in *datapb.QueryImportRequest) (*datapb.QueryImportResponse, error)
+	DropImport(ctx context.Context, nodeID int64, in *datapb.DropImportRequest) error
 	GetSessions() []*Session
 	Close()
 }
@@ -160,6 +163,26 @@ func (c *ClusterImpl) AddImportSegment(ctx context.Context, req *datapb.AddImpor
 		return nil, err
 	}
 	return c.sessionManager.AddImportSegment(ctx, nodeID, req)
+}
+
+func (c *ClusterImpl) PreImport(ctx context.Context, nodeID int64, in *datapb.PreImportRequest) error {
+	return merr.ErrServiceUnimplemented
+}
+
+func (c *ClusterImpl) ImportV2(ctx context.Context, nodeID int64, in *datapb.ImportRequest) error {
+	return merr.ErrServiceUnimplemented
+}
+
+func (c *ClusterImpl) QueryPreImport(ctx context.Context, nodeID int64, in *datapb.QueryPreImportRequest) (*datapb.QueryPreImportResponse, error) {
+	return nil, merr.ErrServiceUnimplemented
+}
+
+func (c *ClusterImpl) QueryImport(ctx context.Context, nodeID int64, in *datapb.QueryImportRequest) (*datapb.QueryImportResponse, error) {
+	return nil, merr.ErrServiceUnimplemented
+}
+
+func (c *ClusterImpl) DropImport(ctx context.Context, nodeID int64, in *datapb.DropImportRequest) error {
+	return merr.ErrServiceUnimplemented
 }
 
 // GetSessions returns all sessions

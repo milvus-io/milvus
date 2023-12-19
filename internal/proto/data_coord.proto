@@ -865,7 +865,7 @@ message ImportTaskV2 {
   int64 nodeID = 6;
   ImportState state = 7;
   string reason = 8;
-  repeated ImportFile files = 9;
+  repeated ImportFileStats file_stats = 9;
 }
 
 enum GcCommand {

@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"github.com/cockroachdb/errors"
 	"path"
 	"strconv"
 	"strings"
@@ -700,21 +701,47 @@ func (kc *Catalog) DropSegmentIndex(ctx context.Context, collID, partID, segID, 
 	return nil
 }
 
-func (kc *Catalog) SaveImportTask(task *datapb.ImportTaskV2) error {
-	key := buildImportTaskKey(task.GetTaskID())
-	value, err := proto.Marshal(task)
-	if err != nil {
-		return err
+func (kc *Catalog) SaveImportTask(task any) error {
+	switch t := task.(type) {
+	case *datapb.PreImportTask:
+		key := buildPreImportTaskKey(t.GetTaskID())
+		value, err := proto.Marshal(t)
+		if err != nil {
+			return err
+		}
+		return kc.MetaKv.Save(key, string(value))
+	case *datapb.ImportTaskV2:
+		key := buildImportTaskKey(t.GetTaskID())
+		value, err := proto.Marshal(t)
+		if err != nil {
+			return err
+		}
+		return kc.MetaKv.Save(key, string(value))
+	default:
+		return errors.New(fmt.Sprintf("unrecognized task type %t", t))
 	}
-	return kc.MetaKv.Save(key, string(value))
 }
 
-func (kc *Catalog) ListImportTasks() ([]*datapb.ImportTaskV2, error) {
-	_, values, err := kc.MetaKv.LoadWithPrefix(ImportTaskPrefix)
+func (kc *Catalog) ListImportTasks() ([]any, error) {
+	tasks := make([]any, 0)
+
+	_, values, err := kc.MetaKv.LoadWithPrefix(PreImportTaskPrefix)
 	if err != nil {
 		return nil, err
 	}
-	tasks := make([]*datapb.ImportTaskV2, 0)
+	for _, value := range values {
+		task := &datapb.PreImportTask{}
+		err = proto.Unmarshal([]byte(value), task)
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, task)
+	}
+
+	_, values, err = kc.MetaKv.LoadWithPrefix(ImportTaskPrefix)
+	if err != nil {
+		return nil, err
+	}
 	for _, value := range values {
 		task := &datapb.ImportTaskV2{}
 		err = proto.Unmarshal([]byte(value), task)
@@ -727,8 +754,9 @@ func (kc *Catalog) ListImportTasks() ([]*datapb.ImportTaskV2, error) {
 }
 
 func (kc *Catalog) DropImportTask(taskID int64) error {
-	key := buildImportTaskKey(taskID)
-	return kc.MetaKv.Remove(key)
+	key1 := buildPreImportTaskKey(taskID)
+	key2 := buildImportTaskKey(taskID)
+	return kc.MetaKv.MultiRemove([]string{key1, key2})
 }
 
 const allPartitionID = -1

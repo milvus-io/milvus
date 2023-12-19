@@ -44,7 +44,7 @@ func (m *importTaskManager) Add(task ImportTask) error {
 	if err != nil {
 		return err
 	}
-	m.tasks[task.ID()] = task
+	m.tasks[task.GetTaskID()] = task
 	return nil
 }
 

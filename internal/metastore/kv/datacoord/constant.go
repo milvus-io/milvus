@@ -25,6 +25,7 @@ const (
 	ChannelRemovePrefix       = MetaPrefix + "/channel-removal"
 	ChannelCheckpointPrefix   = MetaPrefix + "/channel-cp"
 	ImportTaskPrefix          = MetaPrefix + "/import-task"
+	PreImportTaskPrefix       = MetaPrefix + "/preimport-task"
 
 	NonRemoveFlagTomestone = "non-removed"
 	RemoveFlagTomestone    = "removed"
