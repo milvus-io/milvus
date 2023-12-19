@@ -636,7 +636,7 @@ func parsePartitionsInfo(infos []*partitionInfo) *partitionInfos {
 		}
 		index, err := strconv.ParseInt(splits[len(splits)-1], 10, 64)
 		if err != nil {
-			log.Debug("partition group not in partitionKey pattern", zap.String("parititonName", partitionName))
+			log.Debug("partition group not in partitionKey pattern", zap.String("parititonName", partitionName), zap.Error(err))
 			return result
 		}
 		partitionNames[index] = partitionName
@@ -649,7 +649,7 @@ func parsePartitionsInfo(infos []*partitionInfo) *partitionInfos {
 func (m *MetaCache) updatePartitions(partitions *milvuspb.ShowPartitionsResponse, database, collectionName string) error {
 	// check partitionID, createdTimestamp and utcstamp has sam element numbers
 	if len(partitions.PartitionNames) != len(partitions.CreatedTimestamps) || len(partitions.PartitionNames) != len(partitions.CreatedUtcTimestamps) {
-		return errors.New("partition names and timestamps number is not aligned, response " + partitions.String())
+		return merr.WrapErrParameterInvalidMsg("partition names and timestamps number is not aligned, response: %s", partitions.String())
 	}
 
 	_, dbOk := m.collInfo[database]
@@ -660,11 +660,6 @@ func (m *MetaCache) updatePartitions(partitions *milvuspb.ShowPartitionsResponse
 	_, ok := m.collInfo[database][collectionName]
 	if !ok {
 		m.collInfo[database][collectionName] = &collectionInfo{}
-	}
-
-	// check partitionID, createdTimestamp and utcstamp has sam element numbers
-	if len(partitions.PartitionNames) != len(partitions.CreatedTimestamps) || len(partitions.PartitionNames) != len(partitions.CreatedUtcTimestamps) {
-		return errors.New("partition names and timestamps number is not aligned, response " + partitions.String())
 	}
 
 	infos := lo.Map(partitions.GetPartitionIDs(), func(partitionID int64, idx int) *partitionInfo {
