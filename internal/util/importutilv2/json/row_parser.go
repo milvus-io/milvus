@@ -47,6 +47,9 @@ func NewRowParser(schema *schemapb.CollectionSchema) (RowParser, error) {
 		return nil, err
 	}
 	dim, err := typeutil.GetDim(vecField)
+	if err != nil {
+		return nil, err
+	}
 	return &rowParser{
 		dim:      int(dim),
 		id2Field: id2Field,
