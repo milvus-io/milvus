@@ -278,7 +278,7 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(DataCoordNumStoredRows)
 	registry.MustRegister(DataCoordNumStoredRowsCounter)
 	registry.MustRegister(DataCoordConsumeDataNodeTimeTickLag)
-	registry.MustRegister(DataCoordCheckpointLag)
+	registry.MustRegister(DataCoordCheckpointUnixSeconds)
 	registry.MustRegister(DataCoordStoredBinlogSize)
 	registry.MustRegister(DataCoordSegmentBinLogFileCount)
 	registry.MustRegister(DataCoordDmlChannelNum)
