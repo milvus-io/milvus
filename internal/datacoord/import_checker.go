@@ -22,11 +22,14 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/samber/lo"
+	"go.uber.org/zap"
 )
 
 type importChecker struct {
 	manager   ImportTaskManager
 	allocator *alloc.IDAllocator
+	sm        *SegmentManager
 	meta      *meta
 	cluster   Cluster
 }
@@ -42,6 +45,95 @@ func (c *importChecker) checkErr(task ImportTask, err error) {
 	err = c.manager.Update(task.GetTaskID(), UpdateState(datapb.ImportState_Pending))
 	if err != nil {
 		log.Warn("")
+	}
+}
+
+func (c *importChecker) getIdleNode() int64 {
+	nodeIDs := lo.Map(c.cluster.GetSessions(), func(s *Session, _ int) int64 {
+		return s.info.NodeID
+	})
+	for _, nodeID := range nodeIDs {
+		resp, err := c.cluster.QueryImport(context.TODO(), nodeID, &datapb.QueryImportRequest{})
+		if err != nil {
+			log.Warn("")
+			continue
+		}
+		if resp.GetSlots() > 0 {
+			return nodeID
+		}
+	}
+	return fakeNodeID
+}
+
+func (c *importChecker) checkPendingPreImport() {
+	tasks := c.manager.GetBy(WithType(PreImportTaskType), WithStates(datapb.ImportState_Pending))
+	for _, task := range tasks {
+		nodeID := c.getIdleNode()
+		if nodeID == fakeNodeID {
+			log.Warn("no datanode can be scheduled", zap.Int64("taskID", task.GetTaskID()))
+			return
+		}
+		req := AssemblePreImportRequest(task, c.meta)
+		err := c.cluster.PreImport(context.TODO(), nodeID, req)
+		if err != nil {
+			log.Warn("")
+			return
+		}
+		err = c.manager.Update(task.GetTaskID(),
+			UpdateState(datapb.ImportState_InProgress),
+			UpdateNodeID(nodeID))
+		if err != nil {
+			log.Warn("")
+		}
+	}
+}
+
+func (c *importChecker) checkPendingImport() {
+	tasks := c.manager.GetBy(WithType(ImportTaskType), WithStates(datapb.ImportState_Pending))
+	for _, task := range tasks {
+		nodeID := c.getIdleNode()
+		if nodeID == fakeNodeID {
+			log.Warn("no datanode can be scheduled", zap.Int64("taskID", task.GetTaskID()))
+			return
+		}
+		req, err := AssembleImportRequest(task, c.sm, c.meta, c.allocator)
+		if err != nil {
+			log.Warn("")
+			return
+		}
+		err = c.cluster.ImportV2(context.TODO(), nodeID, req)
+		if err != nil {
+			log.Warn("")
+			return
+		}
+		err = c.manager.Update(task.GetTaskID(),
+			UpdateState(datapb.ImportState_InProgress),
+			UpdateNodeID(nodeID))
+		if err != nil {
+			log.Warn("")
+		}
+	}
+}
+
+func (c *importChecker) checkCompletedOrFailed() {
+	tasks := c.manager.GetBy(WithStates(datapb.ImportState_Completed, datapb.ImportState_Failed))
+	for _, task := range tasks {
+		if task.GetNodeID() == fakeNodeID {
+			return
+		}
+		req := &datapb.DropImportRequest{
+			RequestID: task.GetRequestID(),
+			TaskID:    task.GetTaskID(),
+		}
+		err := c.cluster.DropImport(context.TODO(), task.GetNodeID(), req)
+		if err != nil {
+			log.Warn("")
+			return
+		}
+		err = c.manager.Update(task.GetTaskID(), UpdateNodeID(fakeNodeID))
+		if err != nil {
+			log.Warn("")
+		}
 	}
 }
 
