@@ -107,7 +107,8 @@ BruteForceSearch(const dataset::SearchDataset& dataset,
         if (!res.has_value()) {
             PanicInfo(KnowhereError,
                       "failed to range search: {}: {}",
-                      KnowhereStatusString(res.error(), res.what()));
+                      KnowhereStatusString(res.error()),
+                      res.what());
         }
         auto result =
             ReGenRangeSearchResult(res.value(), topk, nq, dataset.metric_type);
