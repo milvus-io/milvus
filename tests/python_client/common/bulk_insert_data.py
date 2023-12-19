@@ -568,22 +568,38 @@ def gen_dict_data_by_data_field(data_fields, rows, start=0, float_vector=True, d
     return data
 
 
-def gen_new_json_files(float_vector, rows, dim, data_fields, file_nums=1, array_length=None, err_type="", enable_dynamic_field=False):
+def gen_new_json_files(float_vector, rows, dim, data_fields, file_nums=1, array_length=None, file_size=None, err_type="", enable_dynamic_field=False):
     files = []
+    if file_size is not None:
+        rows = 5000
     start_uid = 0
     for i in range(file_nums):
         file_name = f"data-fields-{len(data_fields)}-rows-{rows}-dim-{dim}-file-num-{i}-{int(time.time())}.json"
         file = f"{data_source}/{file_name}"
         data = gen_dict_data_by_data_field(data_fields=data_fields, rows=rows, start=start_uid, float_vector=float_vector, dim=dim, array_length=array_length, enable_dynamic_field=enable_dynamic_field)
-        log.info(f"data: {data}")
+        # log.info(f"data: {data}")
         with open(file, "w") as f:
             json.dump(data, f)
+        # get the file size
+        if file_size is not None:
+            batch_file_size = os.path.getsize(f"{data_source}/{file_name}")
+            log.info(f"file_size with rows {rows} for {file_name}: {batch_file_size/1024/1024} MB")
+            # calculate the rows to be generated
+            total_batch = int(file_size*1024*1024*1024/batch_file_size)
+            total_rows = total_batch * rows
+            log.info(f"total_rows: {total_rows}")
+            all_data = []
+            for _ in range(total_batch):
+                all_data += data
+            file_name = f"data-fields-{len(data_fields)}-rows-{total_rows}-dim-{dim}-file-num-{i}-{int(time.time())}.json"
+            with open(f"{data_source}/{file_name}", "w") as f:
+                json.dump(all_data, f)
         files.append(file_name)
         start_uid += rows
     return files
 
 
-def gen_npy_files(float_vector, rows, dim, data_fields, file_nums=1, err_type="", force=False, enable_dynamic_field=False):
+def gen_npy_files(float_vector, rows, dim, data_fields, file_size=None, file_nums=1, err_type="", force=False, enable_dynamic_field=False):
     # gen numpy files
     files = []
     start_uid = 0
@@ -606,6 +622,25 @@ def gen_npy_files(float_vector, rows, dim, data_fields, file_nums=1, err_type=""
         if enable_dynamic_field:
             file_name = gen_dynamic_field_in_numpy_file(dir=data_source, rows=rows, force=force)
             files.append(file_name)
+        if file_size is not None:
+            batch_file_size = 0
+            for file_name in files:
+                batch_file_size += os.path.getsize(f"{data_source}/{file_name}")
+            log.info(f"file_size with rows {rows} for {files}: {batch_file_size/1024/1024} MB")
+            # calculate the rows to be generated
+            total_batch = int(file_size*1024*1024*1024/batch_file_size)
+            total_rows = total_batch * rows
+            log.info(f"total_rows: {total_rows}")
+            new_files = []
+            for f in files:
+                arr = np.load(f"{data_source}/{f}")
+                all_arr = np.concatenate([arr for _ in range(total_batch)], axis=0)
+                file_name = f
+                np.save(f"{data_source}/{file_name}", all_arr)
+                log.info(f"file_name: {file_name} data type: {all_arr.dtype} data shape: {all_arr.shape}")
+                new_files.append(file_name)
+            files = new_files
+
     else:
         for i in range(file_nums):
             subfolder = gen_subfolder(root=data_source, dim=dim, rows=rows, file_num=i)
@@ -630,11 +665,14 @@ def gen_dynamic_field_data_in_parquet_file(rows, start=0):
     return data
 
 
-def gen_parquet_files(float_vector, rows, dim, data_fields, file_nums=1, array_length=None, err_type="", enable_dynamic_field=False):
+def gen_parquet_files(float_vector, rows, dim, data_fields, file_size=None, file_nums=1, array_length=None, err_type="", enable_dynamic_field=False):
     # gen numpy files
     if err_type == "":
         err_type = "none"
     files = []
+    #  generate 5000 entities and check the file size, then calculate the rows to be generated
+    if file_size is not None:
+        rows = 5000
     start_uid = 0
     if file_nums == 1:
         all_field_data = {}
@@ -648,6 +686,19 @@ def gen_parquet_files(float_vector, rows, dim, data_fields, file_nums=1, array_l
         log.info(f"df: \n{df}")
         file_name = f"data-fields-{len(data_fields)}-rows-{rows}-dim-{dim}-file-num-{file_nums}-error-{err_type}-{int(time.time())}.parquet"
         df.to_parquet(f"{data_source}/{file_name}", engine='pyarrow')
+
+        # get the file size
+        if file_size is not None:
+            batch_file_size = os.path.getsize(f"{data_source}/{file_name}")
+            log.info(f"file_size with rows {rows} for {file_name}: {batch_file_size/1024/1024} MB")
+            # calculate the rows to be generated
+            total_batch = int(file_size*1024*1024*1024/batch_file_size)
+            total_rows = total_batch * rows
+            log.info(f"total_rows: {total_rows}")
+            all_df = pd.concat([df for _ in range(total_batch)], axis=0, ignore_index=True)
+            file_name = f"data-fields-{len(data_fields)}-rows-{total_rows}-dim-{dim}-file-num-{file_nums}-error-{err_type}-{int(time.time())}.parquet"
+            log.info(f"all df: \n {all_df}")
+            all_df.to_parquet(f"{data_source}/{file_name}", engine='pyarrow')
         files.append(file_name)
     else:
         for i in range(file_nums):
@@ -740,18 +791,18 @@ def prepare_bulk_insert_json_files(minio_endpoint="", bucket_name="milvus-bucket
 
 
 def prepare_bulk_insert_new_json_files(minio_endpoint="", bucket_name="milvus-bucket",
-                                    rows=100, dim=128, float_vector=True,
+                                    rows=100, dim=128, float_vector=True, file_size=None,
                                     data_fields=[], file_nums=1, enable_dynamic_field=False,
                                     err_type="", force=False, **kwargs):
 
     log.info(f"data_fields: {data_fields}")
-    files = gen_new_json_files(float_vector=float_vector, rows=rows, dim=dim,  data_fields=data_fields, file_nums=file_nums, err_type=err_type, enable_dynamic_field=enable_dynamic_field, **kwargs)
+    files = gen_new_json_files(float_vector=float_vector, rows=rows, dim=dim,  data_fields=data_fields, file_nums=file_nums, file_size=file_size, err_type=err_type, enable_dynamic_field=enable_dynamic_field, **kwargs)
 
     copy_files_to_minio(host=minio_endpoint, r_source=data_source, files=files, bucket_name=bucket_name, force=force)
     return files
 
 
-def prepare_bulk_insert_numpy_files(minio_endpoint="", bucket_name="milvus-bucket", rows=100, dim=128, enable_dynamic_field=False,
+def prepare_bulk_insert_numpy_files(minio_endpoint="", bucket_name="milvus-bucket", rows=100, dim=128, enable_dynamic_field=False, file_size=None,
                                     data_fields=[DataField.vec_field], float_vector=True, file_nums=1, force=False):
     """
     Generate column based files based on params in numpy format and copy them to the minio
@@ -782,7 +833,7 @@ def prepare_bulk_insert_numpy_files(minio_endpoint="", bucket_name="milvus-bucke
     Return: List
         File name list or file name with sub-folder list
     """
-    files = gen_npy_files(rows=rows, dim=dim, float_vector=float_vector,
+    files = gen_npy_files(rows=rows, dim=dim, float_vector=float_vector, file_size=file_size,
                           data_fields=data_fields, enable_dynamic_field=enable_dynamic_field,
                           file_nums=file_nums, force=force)
 
@@ -790,7 +841,7 @@ def prepare_bulk_insert_numpy_files(minio_endpoint="", bucket_name="milvus-bucke
     return files
 
 
-def prepare_bulk_insert_parquet_files(minio_endpoint="", bucket_name="milvus-bucket", rows=100, dim=128, array_length=None,
+def prepare_bulk_insert_parquet_files(minio_endpoint="", bucket_name="milvus-bucket", rows=100, dim=128, array_length=None, file_size=None,
                                     enable_dynamic_field=False, data_fields=[DataField.vec_field], float_vector=True, file_nums=1, force=False):
     """
     Generate column based files based on params in parquet format and copy them to the minio
@@ -822,7 +873,7 @@ def prepare_bulk_insert_parquet_files(minio_endpoint="", bucket_name="milvus-buc
         File name list or file name with sub-folder list
     """
     files = gen_parquet_files(rows=rows, dim=dim, float_vector=float_vector, enable_dynamic_field=enable_dynamic_field,
-                              data_fields=data_fields, array_length=array_length,
+                              data_fields=data_fields, array_length=array_length, file_size=file_size,
                               file_nums=file_nums)
     copy_files_to_minio(host=minio_endpoint, r_source=data_source, files=files, bucket_name=bucket_name, force=force)
     return files
