@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -26,11 +27,15 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	mockkv "github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -49,7 +54,6 @@ func TestServer_CreateIndex(t *testing.T) {
 		collID  = UniqueID(1)
 		fieldID = UniqueID(10)
 		// indexID    = UniqueID(100)
-		indexName  = "default_idx"
 		typeParams = []*commonpb.KeyValuePair{
 			{
 				Key:   common.DimKey,
@@ -65,7 +69,7 @@ func TestServer_CreateIndex(t *testing.T) {
 		req = &indexpb.CreateIndexRequest{
 			CollectionID:    collID,
 			FieldID:         fieldID,
-			IndexName:       indexName,
+			IndexName:       "",
 			TypeParams:      typeParams,
 			IndexParams:     indexParams,
 			Timestamp:       100,
@@ -83,6 +87,16 @@ func TestServer_CreateIndex(t *testing.T) {
 	s := &Server{
 		meta: &meta{
 			catalog: catalog,
+			collections: map[UniqueID]*collectionInfo{
+				collID: {
+					ID: collID,
+
+					Partitions:     nil,
+					StartPositions: nil,
+					Properties:     nil,
+					CreatedAt:      0,
+				},
+			},
 			indexes: map[UniqueID]map[UniqueID]*model.Index{},
 		},
 		allocator:       newMockAllocator(),
@@ -90,7 +104,76 @@ func TestServer_CreateIndex(t *testing.T) {
 	}
 
 	s.stateCode.Store(commonpb.StateCode_Healthy)
+
+	b := mocks.NewMockRootCoordClient(t)
+
+	t.Run("get field name failed", func(t *testing.T) {
+		b.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock error"))
+		s.broker = broker.NewCoordinatorBroker(b)
+		resp, err := s.CreateIndex(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
+		assert.Equal(t, "mock error", resp.GetReason())
+	})
+
+	b.ExpectedCalls = nil
+	b.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		Status: &commonpb.Status{
+			ErrorCode: 0,
+			Reason:    "",
+			Code:      0,
+			Retriable: false,
+			Detail:    "",
+		},
+		Schema: &schemapb.CollectionSchema{
+			Name:        "test_index",
+			Description: "test index",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:        0,
+					Name:           "pk",
+					IsPrimaryKey:   false,
+					Description:    "",
+					DataType:       schemapb.DataType_Int64,
+					TypeParams:     nil,
+					IndexParams:    nil,
+					AutoID:         false,
+					State:          0,
+					ElementType:    0,
+					DefaultValue:   nil,
+					IsDynamic:      false,
+					IsPartitionKey: false,
+				},
+				{
+					FieldID:        fieldID,
+					Name:           "FieldFloatVector",
+					IsPrimaryKey:   false,
+					Description:    "",
+					DataType:       schemapb.DataType_FloatVector,
+					TypeParams:     nil,
+					IndexParams:    nil,
+					AutoID:         false,
+					State:          0,
+					ElementType:    0,
+					DefaultValue:   nil,
+					IsDynamic:      false,
+					IsPartitionKey: false,
+				},
+			},
+			EnableDynamicField: false,
+		},
+		CollectionID: collID,
+	}, nil)
+
 	t.Run("success", func(t *testing.T) {
+		resp, err := s.CreateIndex(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
+	t.Run("success with index exist", func(t *testing.T) {
+		req.IndexName = ""
 		resp, err := s.CreateIndex(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
@@ -103,6 +186,7 @@ func TestServer_CreateIndex(t *testing.T) {
 		assert.ErrorIs(t, merr.Error(resp), merr.ErrServiceNotReady)
 	})
 
+	req.IndexName = "FieldFloatVector"
 	t.Run("index not consistent", func(t *testing.T) {
 		s.stateCode.Store(commonpb.StateCode_Healthy)
 		req.FieldID++
