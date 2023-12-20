@@ -288,6 +288,10 @@ func (c *ChannelMeta) listSegmentIDsToSync(ts Timestamp) []UniqueID {
 		if !seg.isValid() {
 			continue
 		}
+		// ignore all segments under syncing
+		if seg.isSyncing() {
+			continue
+		}
 		validSegs = append(validSegs, seg)
 	}
 

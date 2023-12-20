@@ -18,6 +18,7 @@ package datanode
 
 import (
 	"math"
+	"math/rand"
 	"sort"
 	"time"
 
@@ -40,7 +41,15 @@ func syncPeriodically() segmentSyncPolicy {
 		for _, seg := range segments {
 			endPosTime := tsoutil.PhysicalTime(ts)
 			minBufferTime := tsoutil.PhysicalTime(seg.minBufferTs())
-			shouldSync := endPosTime.Sub(minBufferTime) >= Params.DataNodeCfg.SyncPeriod.GetAsDuration(time.Second)
+			baseSyncPeriod := Params.DataNodeCfg.SyncPeriod.GetAsDuration(time.Second)
+
+			// jitter to avoid all flush at the same time
+			jitter := time.Duration(rand.Float64() * 0.1 * float64(baseSyncPeriod))
+
+			// Calculate the sync period with jitter
+			syncPeriodWithJitter := baseSyncPeriod + jitter
+			// Determine if the segment should be synced
+			shouldSync := endPosTime.Sub(minBufferTime) >= syncPeriodWithJitter
 			if shouldSync {
 				segmentsToSync = append(segmentsToSync, seg.segmentID)
 			}

@@ -687,6 +687,7 @@ func (t *flushBufferInsertTask) flushInsertData() error {
 				metrics.DataNodeFlushedSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.InsertLabel).Add(float64(len(d)))
 			}
 		}
+		log.Warn("failed to flush insert data", zap.Error(err))
 		return err
 	}
 	return nil
@@ -710,6 +711,7 @@ func (t *flushBufferDeleteTask) flushDeleteData() error {
 				metrics.DataNodeFlushedSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.DeleteLabel).Add(float64(len(d)))
 			}
 		}
+		log.Warn("failed to flush delete data", zap.Error(err))
 		return err
 	}
 	return nil
