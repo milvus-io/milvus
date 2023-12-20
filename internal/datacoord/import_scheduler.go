@@ -17,7 +17,6 @@
 package datacoord
 
 import (
-	"context"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"go.uber.org/zap"
 	"sync"
@@ -61,6 +60,7 @@ func NewImportScheduler(meta *meta,
 }
 
 func (s *ImportScheduler) Start() {
+	log.Info("start import scheduler")
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -108,13 +108,13 @@ func (s *ImportScheduler) checkErr(task ImportTask, err error) {
 	if !merr.IsRetryableErr(err) {
 		err = s.manager.Update(task.GetTaskID(), UpdateState(datapb.ImportState_Failed))
 		if err != nil {
-			log.Warn("")
+			log.Warn("failed to update import task state to failed", WrapLogFields(task, err)...)
 		}
 		return
 	}
 	err = s.manager.Update(task.GetTaskID(), UpdateState(datapb.ImportState_Pending))
 	if err != nil {
-		log.Warn("")
+		log.Warn("failed to update import task state to pending", WrapLogFields(task, err)...)
 	}
 }
 
@@ -123,9 +123,9 @@ func (s *ImportScheduler) getIdleNode() int64 {
 		return s.info.NodeID
 	})
 	for _, nodeID := range nodeIDs {
-		resp, err := s.cluster.QueryImport(context.TODO(), nodeID, &datapb.QueryImportRequest{})
+		resp, err := s.cluster.QueryImport(nodeID, &datapb.QueryImportRequest{})
 		if err != nil {
-			log.Warn("")
+			log.Warn("query import failed", zap.Error(err))
 			continue
 		}
 		if resp.GetSlots() > 0 {
@@ -138,44 +138,44 @@ func (s *ImportScheduler) getIdleNode() int64 {
 func (s *ImportScheduler) processPendingPreImport(task ImportTask) {
 	nodeID := s.getIdleNode()
 	if nodeID == fakeNodeID {
-		log.Warn("no datanode can be scheduled", zap.Int64("taskID", task.GetTaskID()))
+		log.Warn("no datanode can be scheduled", WrapLogFields(task, nil)...)
 		return
 	}
 	req := AssemblePreImportRequest(task, s.meta)
-	err := s.cluster.PreImport(context.TODO(), nodeID, req)
+	err := s.cluster.PreImport(nodeID, req)
 	if err != nil {
-		log.Warn("")
+		log.Warn("preimport failed", WrapLogFields(task, err)...)
 		return
 	}
 	err = s.manager.Update(task.GetTaskID(),
 		UpdateState(datapb.ImportState_InProgress),
 		UpdateNodeID(nodeID))
 	if err != nil {
-		log.Warn("")
+		log.Warn("update import task failed", WrapLogFields(task, err)...)
 	}
 }
 
 func (s *ImportScheduler) processPendingImport(task ImportTask) {
 	nodeID := s.getIdleNode()
 	if nodeID == fakeNodeID {
-		log.Warn("no datanode can be scheduled", zap.Int64("taskID", task.GetTaskID()))
+		log.Warn("no datanode can be scheduled", WrapLogFields(task, nil)...)
 		return
 	}
 	req, err := AssembleImportRequest(task, s.sm, s.meta, s.allocator)
 	if err != nil {
-		log.Warn("")
+		log.Warn("assemble import request failed", WrapLogFields(task, err)...)
 		return
 	}
-	err = s.cluster.ImportV2(context.TODO(), nodeID, req)
+	err = s.cluster.ImportV2(nodeID, req)
 	if err != nil {
-		log.Warn("")
+		log.Warn("import failed", WrapLogFields(task, err)...)
 		return
 	}
 	err = s.manager.Update(task.GetTaskID(),
 		UpdateState(datapb.ImportState_InProgress),
 		UpdateNodeID(nodeID))
 	if err != nil {
-		log.Warn("")
+		log.Warn("update import task failed", WrapLogFields(task, err)...)
 	}
 }
 
@@ -184,9 +184,9 @@ func (s *ImportScheduler) processInProgressPreImport(task ImportTask) {
 		RequestID: task.GetRequestID(),
 		TaskID:    task.GetTaskID(),
 	}
-	resp, err := s.cluster.QueryPreImport(context.TODO(), task.GetNodeID(), req)
+	resp, err := s.cluster.QueryPreImport(task.GetNodeID(), req)
 	if err != nil {
-		log.Warn("")
+		log.Warn("query preimport failed", WrapLogFields(task, err)...)
 		s.checkErr(task, err)
 		return
 	}
@@ -197,7 +197,7 @@ func (s *ImportScheduler) processInProgressPreImport(task ImportTask) {
 	// TODO: check if rows changed to save meta op
 	err = s.manager.Update(task.GetTaskID(), actions...)
 	if err != nil {
-		log.Warn("")
+		log.Warn("update import task failed", WrapLogFields(task, err)...)
 		return
 	}
 }
@@ -207,9 +207,9 @@ func (s *ImportScheduler) processInProgressImport(task ImportTask) {
 		RequestID: task.GetRequestID(),
 		TaskID:    task.GetTaskID(),
 	}
-	resp, err := s.cluster.QueryImport(context.TODO(), task.GetNodeID(), req)
+	resp, err := s.cluster.QueryImport(task.GetNodeID(), req)
 	if err != nil {
-		log.Warn("")
+		log.Warn("query import failed", WrapLogFields(task, err)...)
 		s.checkErr(task, err)
 		return
 	}
@@ -217,7 +217,7 @@ func (s *ImportScheduler) processInProgressImport(task ImportTask) {
 		operator := UpdateBinlogsOperator(info.GetSegmentID(), info.GetBinlogs(), info.GetStatslogs(), nil)
 		err = s.meta.UpdateSegmentsInfo(operator)
 		if err != nil {
-			log.Warn("")
+			log.Warn("update import segment info failed", WrapLogFields(task, err)...)
 			continue
 		}
 		s.meta.SetCurrentRows(info.GetSegmentID(), info.GetImportedRows())
@@ -225,7 +225,7 @@ func (s *ImportScheduler) processInProgressImport(task ImportTask) {
 	if resp.GetState() == datapb.ImportState_Completed {
 		err = s.manager.Update(task.GetTaskID(), UpdateState(datapb.ImportState_Completed))
 		if err != nil {
-			log.Warn("")
+			log.Warn("update import task failed", WrapLogFields(task, err)...)
 		}
 	}
 }
@@ -238,13 +238,13 @@ func (s *ImportScheduler) processCompletedOrFailed(task ImportTask) {
 		RequestID: task.GetRequestID(),
 		TaskID:    task.GetTaskID(),
 	}
-	err := s.cluster.DropImport(context.TODO(), task.GetNodeID(), req)
+	err := s.cluster.DropImport(task.GetNodeID(), req)
 	if err != nil {
-		log.Warn("")
+		log.Warn("drop import failed", WrapLogFields(task, err)...)
 		return
 	}
 	err = s.manager.Update(task.GetTaskID(), UpdateNodeID(fakeNodeID))
 	if err != nil {
-		log.Warn("")
+		log.Warn("update import task failed", WrapLogFields(task, err)...)
 	}
 }

@@ -17,11 +17,11 @@
 package datacoord
 
 import (
-	"context"
 	alloc "github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/samber/lo"
+	"go.uber.org/zap"
 	"sync"
 	"time"
 )
@@ -50,14 +50,16 @@ func NewImportChecker(meta *meta,
 }
 
 func (c *ImportChecker) Start() {
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
+	log.Info("start import checker")
+	checkTicker := time.NewTicker(5 * time.Second)
+	defer checkTicker.Stop()
+	logTicker := time.NewTicker(30 * time.Second)
 	for {
 		select {
 		case <-c.closeChan:
 			log.Info("import checker exited")
 			return
-		case <-ticker.C:
+		case <-checkTicker.C:
 			tasks := c.manager.GetBy()
 			tasksByReq := lo.GroupBy(tasks, func(t ImportTask) int64 {
 				return t.GetRequestID()
@@ -66,6 +68,8 @@ func (c *ImportChecker) Start() {
 				c.checkPreImportState(requestID)
 				c.checkImportState(requestID)
 			}
+		case <-logTicker.C:
+			c.LogStats()
 		}
 	}
 }
@@ -74,6 +78,23 @@ func (c *ImportChecker) Close() {
 	c.closeOnce.Do(func() {
 		close(c.closeChan)
 	})
+}
+
+func (c *ImportChecker) LogStats() {
+	logFunc := func(tasks []ImportTask, taskType TaskType) {
+		byState := lo.GroupBy(tasks, func(t ImportTask) datapb.ImportState {
+			return t.GetState()
+		})
+		log.Info("import task stats", zap.String("type", taskType.String()),
+			zap.Int("pending", len(byState[datapb.ImportState_Pending])),
+			zap.Int("inProgress", len(byState[datapb.ImportState_InProgress])),
+			zap.Int("completed", len(byState[datapb.ImportState_Completed])),
+			zap.Int("failed", len(byState[datapb.ImportState_Failed])))
+	}
+	tasks := c.manager.GetBy(WithType(PreImportTaskType))
+	logFunc(tasks, PreImportTaskType)
+	tasks = c.manager.GetBy(WithType(ImportTaskType))
+	logFunc(tasks, ImportTaskType)
 }
 
 func (c *ImportChecker) checkPreImportState(requestID int64) {
@@ -88,24 +109,24 @@ func (c *ImportChecker) checkPreImportState(requestID int64) {
 		return // all imported are generated
 	}
 	for _, t := range importTasks { // happens only when txn failed
-		err := c.cluster.DropImport(context.TODO(), t.GetNodeID(), &datapb.DropImportRequest{
+		err := c.cluster.DropImport(t.GetNodeID(), &datapb.DropImportRequest{
 			TaskID:    t.GetTaskID(),
 			RequestID: t.GetRequestID(),
 		})
 		if err != nil {
-			log.Warn("")
+			log.Warn("drop import failed", WrapLogFields(t, err)...)
 			return
 		}
 		err = c.manager.Remove(t.GetTaskID())
 		if err != nil {
-			log.Warn("")
+			log.Warn("remove import task failed", WrapLogFields(t, err)...)
 			return
 		}
 	}
 	for _, t := range tasks {
 		task, err := AssembleImportTask(t, c.allocator)
 		if err != nil {
-			log.Warn("")
+			log.Warn("assemble import task failed", WrapLogFields(t, err)...)
 			return
 		}
 		err = c.manager.Add(task)
@@ -113,6 +134,7 @@ func (c *ImportChecker) checkPreImportState(requestID int64) {
 			log.Warn("")
 			return
 		}
+		log.Info("add new import task", WrapLogFields(t, nil)...)
 	}
 }
 
@@ -131,12 +153,12 @@ func (c *ImportChecker) checkImportState(requestID int64) {
 		for _, segmentID := range segmentIDs {
 			err := AddImportSegment(c.cluster, c.meta, segmentID)
 			if err != nil {
-				log.Warn("")
+				log.Warn("add import segment failed", WrapLogFields(task, err)...)
 				return
 			}
 			err = c.meta.UnsetIsImporting(segmentID)
 			if err != nil {
-				log.Warn("")
+				log.Warn("unset importing flag failed", WrapLogFields(task, err)...)
 				return
 			}
 		}

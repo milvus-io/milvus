@@ -24,9 +24,18 @@ import (
 type TaskType int
 
 const (
-	PreImportTaskType TaskType = iota
-	ImportTaskType
+	PreImportTaskType TaskType = 0
+	ImportTaskType             = 1
 )
+
+var ImportTaskTypeName = map[TaskType]string{
+	0: "PreImportTask",
+	1: "ImportTask",
+}
+
+func (t TaskType) String() string {
+	return ImportTaskTypeName[t]
+}
 
 type ImportTaskFilter func(task ImportTask) bool
 

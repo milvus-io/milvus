@@ -39,11 +39,11 @@ type Cluster interface {
 	FlushChannels(ctx context.Context, nodeID int64, flushTs Timestamp, channels []string) error
 	Import(ctx context.Context, nodeID int64, it *datapb.ImportTaskRequest)
 	AddImportSegment(ctx context.Context, req *datapb.AddImportSegmentRequest) (*datapb.AddImportSegmentResponse, error)
-	PreImport(ctx context.Context, nodeID int64, in *datapb.PreImportRequest) error
-	ImportV2(ctx context.Context, nodeID int64, in *datapb.ImportRequest) error
-	QueryPreImport(ctx context.Context, nodeID int64, in *datapb.QueryPreImportRequest) (*datapb.QueryPreImportResponse, error)
-	QueryImport(ctx context.Context, nodeID int64, in *datapb.QueryImportRequest) (*datapb.QueryImportResponse, error)
-	DropImport(ctx context.Context, nodeID int64, in *datapb.DropImportRequest) error
+	PreImport(nodeID int64, in *datapb.PreImportRequest) error
+	ImportV2(nodeID int64, in *datapb.ImportRequest) error
+	QueryPreImport(nodeID int64, in *datapb.QueryPreImportRequest) (*datapb.QueryPreImportResponse, error)
+	QueryImport(nodeID int64, in *datapb.QueryImportRequest) (*datapb.QueryImportResponse, error)
+	DropImport(nodeID int64, in *datapb.DropImportRequest) error
 	GetSessions() []*Session
 	Close()
 }
@@ -165,23 +165,23 @@ func (c *ClusterImpl) AddImportSegment(ctx context.Context, req *datapb.AddImpor
 	return c.sessionManager.AddImportSegment(ctx, nodeID, req)
 }
 
-func (c *ClusterImpl) PreImport(ctx context.Context, nodeID int64, in *datapb.PreImportRequest) error {
+func (c *ClusterImpl) PreImport(nodeID int64, in *datapb.PreImportRequest) error {
 	return merr.ErrServiceUnimplemented
 }
 
-func (c *ClusterImpl) ImportV2(ctx context.Context, nodeID int64, in *datapb.ImportRequest) error {
+func (c *ClusterImpl) ImportV2(nodeID int64, in *datapb.ImportRequest) error {
 	return merr.ErrServiceUnimplemented
 }
 
-func (c *ClusterImpl) QueryPreImport(ctx context.Context, nodeID int64, in *datapb.QueryPreImportRequest) (*datapb.QueryPreImportResponse, error) {
+func (c *ClusterImpl) QueryPreImport(nodeID int64, in *datapb.QueryPreImportRequest) (*datapb.QueryPreImportResponse, error) {
 	return nil, merr.ErrServiceUnimplemented
 }
 
-func (c *ClusterImpl) QueryImport(ctx context.Context, nodeID int64, in *datapb.QueryImportRequest) (*datapb.QueryImportResponse, error) {
+func (c *ClusterImpl) QueryImport(nodeID int64, in *datapb.QueryImportRequest) (*datapb.QueryImportResponse, error) {
 	return nil, merr.ErrServiceUnimplemented
 }
 
-func (c *ClusterImpl) DropImport(ctx context.Context, nodeID int64, in *datapb.DropImportRequest) error {
+func (c *ClusterImpl) DropImport(nodeID int64, in *datapb.DropImportRequest) error {
 	return merr.ErrServiceUnimplemented
 }
 

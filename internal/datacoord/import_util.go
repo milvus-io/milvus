@@ -24,7 +24,25 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/samber/lo"
+	"go.uber.org/zap"
+	"time"
 )
+
+func WrapLogFields(task ImportTask, err error) []zap.Field {
+	fields := []zap.Field{
+		zap.Int64("taskID", task.GetTaskID()),
+		zap.Int64("requestID", task.GetRequestID()),
+		zap.Int64("collectionID", task.GetCollectionID()),
+		zap.Int64("partitionID", task.GetPartitionID()),
+		zap.Int64("nodeID", task.GetNodeID()),
+		zap.String("state", task.GetState().String()),
+		zap.String("type", task.GetType().String()),
+	}
+	if err != nil {
+		fields = append(fields, zap.Error(err))
+	}
+	return fields
+}
 
 func AssemblePreImportRequest(task ImportTask, meta *meta) *datapb.PreImportRequest {
 	collection := meta.GetCollection(task.GetCollectionID())
@@ -109,7 +127,9 @@ func AddImportSegment(cluster Cluster, meta *meta, segmentID int64) error {
 		RowNum:       segment.GetNumOfRows(),
 		StatsLog:     segment.GetStatslogs(),
 	}
-	_, err := cluster.AddImportSegment(context.TODO(), req) // TODO: handle resp
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second) // TODO: config
+	defer cancel()
+	_, err := cluster.AddImportSegment(ctx, req) // TODO: handle resp
 	return err
 }
 
