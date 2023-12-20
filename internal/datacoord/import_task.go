@@ -18,7 +18,6 @@ package datacoord
 
 import (
 	"github.com/golang/protobuf/proto"
-
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 )
 

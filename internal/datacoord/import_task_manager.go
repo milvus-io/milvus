@@ -17,6 +17,7 @@
 package datacoord
 
 import (
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -35,6 +36,26 @@ type importTaskManager struct {
 	tasks map[int64]ImportTask
 
 	catalog metastore.DataCoordCatalog
+}
+
+func NewImportTaskManager(catalog metastore.DataCoordCatalog) (ImportTaskManager, error) {
+	restoredTasks, err := catalog.ListImportTasks()
+	if err != nil {
+		return nil, err
+	}
+	tasks := make(map[int64]ImportTask)
+	for _, t := range restoredTasks {
+		switch task := t.(type) {
+		case *datapb.PreImportTask:
+			tasks[task.GetTaskID()] = &preImportTask{task}
+		case *datapb.ImportTaskV2:
+			tasks[task.GetTaskID()] = &importTask{task}
+		}
+	}
+	return &importTaskManager{
+		tasks:   tasks,
+		catalog: catalog,
+	}, nil
 }
 
 func (m *importTaskManager) Add(task ImportTask) error {

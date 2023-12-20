@@ -21,16 +21,62 @@ import (
 	alloc "github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/samber/lo"
+	"sync"
+	"time"
 )
 
-type ImportStatusChecker struct {
-	manager   ImportTaskManager
-	allocator *alloc.IDAllocator
+type ImportChecker struct {
 	meta      *meta
 	cluster   Cluster
+	allocator *alloc.IDAllocator
+	manager   ImportTaskManager
+
+	closeOnce sync.Once
+	closeChan chan struct{}
 }
 
-func (c *ImportStatusChecker) checkPreImportState(requestID int64) {
+func NewImportChecker(meta *meta,
+	cluster Cluster,
+	allocator *alloc.IDAllocator,
+	manager ImportTaskManager) *ImportChecker {
+	return &ImportChecker{
+		meta:      meta,
+		cluster:   cluster,
+		allocator: allocator,
+		manager:   manager,
+		closeChan: make(chan struct{}),
+	}
+}
+
+func (c *ImportChecker) Start() {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.closeChan:
+			log.Info("import checker exited")
+			return
+		case <-ticker.C:
+			tasks := c.manager.GetBy()
+			tasksByReq := lo.GroupBy(tasks, func(t ImportTask) int64 {
+				return t.GetRequestID()
+			})
+			for requestID := range tasksByReq {
+				c.checkPreImportState(requestID)
+				c.checkImportState(requestID)
+			}
+		}
+	}
+}
+
+func (c *ImportChecker) Close() {
+	c.closeOnce.Do(func() {
+		close(c.closeChan)
+	})
+}
+
+func (c *ImportChecker) checkPreImportState(requestID int64) {
 	tasks := c.manager.GetBy(WithType(PreImportTaskType), WithReq(requestID))
 	for _, t := range tasks {
 		if t.GetState() != datapb.ImportState_Completed {
@@ -70,7 +116,7 @@ func (c *ImportStatusChecker) checkPreImportState(requestID int64) {
 	}
 }
 
-func (c *ImportStatusChecker) checkImportState(requestID int64) {
+func (c *ImportChecker) checkImportState(requestID int64) {
 	tasks := c.manager.GetBy(WithType(ImportTaskType), WithReq(requestID))
 	for _, t := range tasks {
 		if t.GetState() != datapb.ImportState_Completed {
