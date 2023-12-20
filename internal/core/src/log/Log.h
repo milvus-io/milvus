@@ -79,12 +79,14 @@
            __FUNCTION__,       \
            GetThreadName().c_str())
 
-#define LOG_SERVER_TRACE_ DLOG(INFO) << SERVER_MODULE_FUNCTION
-#define LOG_SERVER_DEBUG_ DLOG(INFO) << SERVER_MODULE_FUNCTION
-#define LOG_SERVER_INFO_ LOG(INFO) << SERVER_MODULE_FUNCTION
-#define LOG_SERVER_WARNING_ LOG(WARNING) << SERVER_MODULE_FUNCTION
-#define LOG_SERVER_ERROR_ LOG(ERROR) << SERVER_MODULE_FUNCTION
-#define LOG_SERVER_FATAL_ LOG(FATAL) << SERVER_MODULE_FUNCTION
+#define LOG_INFO(args...) \
+    DLOG(INFO) << SERVER_MODULE_FUNCTION << fmt::format(#args)
+#define LOG_WARN(args...) \
+    DLOG(WARNING) << SERVER_MODULE_FUNCTION << fmt::format(#args)
+#define LOG_ERROR(args...) \
+    DLOG(ERROR) << SERVER_MODULE_FUNCTION << fmt::format(#args)
+#define LOG_FATAL(args...) \
+    DLOG(FATAL) << SERVER_MODULE_FUNCTION << fmt::format(#args)
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
