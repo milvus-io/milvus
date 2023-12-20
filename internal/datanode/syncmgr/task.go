@@ -2,6 +2,7 @@ package syncmgr
 
 import (
 	"context"
+	"fmt"
 	"path"
 	"strconv"
 
@@ -18,9 +19,12 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -62,6 +66,8 @@ type SyncTask struct {
 	writeRetryOpts []retry.Option
 
 	failureCallback func(err error)
+
+	tr *timerecord.TimeRecorder
 }
 
 func (t *SyncTask) getLogger() *log.MLogger {
@@ -73,13 +79,21 @@ func (t *SyncTask) getLogger() *log.MLogger {
 	)
 }
 
-func (t *SyncTask) handleError(err error) {
+func (t *SyncTask) handleError(err error, metricSegLevel string) {
 	if t.failureCallback != nil {
 		t.failureCallback(err)
+	}
+
+	metrics.DataNodeFlushBufferCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.FailLabel, metricSegLevel).Inc()
+	if !t.isFlush {
+		metrics.DataNodeAutoFlushBufferCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.FailLabel, metricSegLevel).Inc()
 	}
 }
 
 func (t *SyncTask) Run() error {
+	t.tr = timerecord.NewTimeRecorder("syncTask")
+	var metricSegLevel string = t.level.String()
+
 	log := t.getLogger()
 	var err error
 	var has bool
@@ -88,7 +102,7 @@ func (t *SyncTask) Run() error {
 	if !has {
 		log.Warn("failed to sync data, segment not found in metacache")
 		err := merr.WrapErrSegmentNotFound(t.segmentID)
-		t.handleError(err)
+		t.handleError(err, metricSegLevel)
 		return err
 	}
 
@@ -107,29 +121,35 @@ func (t *SyncTask) Run() error {
 	err = t.serializeInsertData()
 	if err != nil {
 		log.Warn("failed to serialize insert data", zap.Error(err))
-		t.handleError(err)
+		t.handleError(err, metricSegLevel)
 		return err
 	}
 
 	err = t.serializeDeleteData()
 	if err != nil {
 		log.Warn("failed to serialize delete data", zap.Error(err))
-		t.handleError(err)
+		t.handleError(err, metricSegLevel)
 		return err
 	}
+
+	size := t.deleteData.Size() + int64(t.insertData.GetMemorySize())
+	metrics.DataNodeFlushedSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.AllLabel, metricSegLevel).Add(float64(size))
+	metrics.DataNodeEncodeBufferLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(t.tr.RecordSpan().Milliseconds()))
 
 	err = t.writeLogs()
 	if err != nil {
 		log.Warn("failed to save serialized data into storage", zap.Error(err))
-		t.handleError(err)
+		t.handleError(err, metricSegLevel)
 		return err
 	}
+
+	metrics.DataNodeSave2StorageLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(t.tr.RecordSpan().Milliseconds()))
 
 	if t.metaWriter != nil {
 		err = t.writeMeta()
 		if err != nil {
 			log.Warn("failed to save serialized data into storage", zap.Error(err))
-			t.handleError(err)
+			t.handleError(err, metricSegLevel)
 			return err
 		}
 	}
@@ -145,6 +165,11 @@ func (t *SyncTask) Run() error {
 	t.metacache.UpdateSegments(metacache.MergeSegmentAction(actions...), metacache.WithSegmentIDs(t.segment.SegmentID()))
 
 	log.Info("task done")
+
+	if !t.isFlush {
+		metrics.DataNodeAutoFlushBufferCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SuccessLabel, metricSegLevel).Inc()
+	}
+	metrics.DataNodeFlushBufferCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SuccessLabel, metricSegLevel).Inc()
 	return nil
 }
 
