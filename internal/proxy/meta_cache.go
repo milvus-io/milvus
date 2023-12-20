@@ -20,6 +20,8 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -64,6 +66,8 @@ type Cache interface {
 	GetPartitions(ctx context.Context, database, collectionName string) (map[string]typeutil.UniqueID, error)
 	// GetPartitionInfo get partition's info.
 	GetPartitionInfo(ctx context.Context, database, collectionName string, partitionName string) (*partitionInfo, error)
+	// GetPartitionsIndex returns a partition names in partition key indexed order.
+	GetPartitionsIndex(ctx context.Context, database, collectionName string) ([]string, error)
 	// GetCollectionSchema get collection's schema.
 	GetCollectionSchema(ctx context.Context, database, collectionName string) (*schemapb.CollectionSchema, error)
 	GetShards(ctx context.Context, withCache bool, database, collectionName string, collectionID int64) (map[string][]nodeInfo, error)
@@ -92,18 +96,34 @@ type collectionBasicInfo struct {
 	createdTimestamp    uint64
 	createdUtcTimestamp uint64
 	consistencyLevel    commonpb.ConsistencyLevel
-	partInfo            map[string]*partitionInfo
 }
 
 type collectionInfo struct {
-	collID              typeutil.UniqueID
-	schema              *schemapb.CollectionSchema
-	partInfo            map[string]*partitionInfo
+	collID typeutil.UniqueID
+	schema *schemapb.CollectionSchema
+	// partInfo            map[string]*partitionInfo
+	partInfo            *partitionInfos
 	leaderMutex         sync.RWMutex
 	shardLeaders        *shardLeaders
 	createdTimestamp    uint64
 	createdUtcTimestamp uint64
 	consistencyLevel    commonpb.ConsistencyLevel
+}
+
+// partitionInfos contains the cached collection partition informations.
+type partitionInfos struct {
+	partitionInfos        []*partitionInfo
+	name2Info             map[string]*partitionInfo // map[int64]*partitionInfo
+	name2ID               map[string]int64          // map[int64]*partitionInfo
+	indexedPartitionNames []string
+}
+
+// partitionInfo single model for partition information.
+type partitionInfo struct {
+	name                string
+	partitionID         typeutil.UniqueID
+	createdTimestamp    uint64
+	createdUtcTimestamp uint64
 }
 
 // getBasicInfo get a basic info by deep copy.
@@ -114,12 +134,8 @@ func (info *collectionInfo) getBasicInfo() *collectionBasicInfo {
 		createdTimestamp:    info.createdTimestamp,
 		createdUtcTimestamp: info.createdUtcTimestamp,
 		consistencyLevel:    info.consistencyLevel,
-		partInfo:            make(map[string]*partitionInfo, len(info.partInfo)),
 	}
-	for s, info := range info.partInfo {
-		info2 := *info
-		basicInfo.partInfo[s] = &info2
-	}
+
 	return basicInfo
 }
 
@@ -178,12 +194,6 @@ func (sl *shardLeaders) GetReader() shardLeadersReader {
 		leaders: sl,
 		idx:     idx,
 	}
-}
-
-type partitionInfo struct {
-	partitionID         typeutil.UniqueID
-	createdTimestamp    uint64
-	createdUtcTimestamp uint64
 }
 
 // make sure MetaCache implements Cache.
@@ -451,66 +461,41 @@ func (m *MetaCache) GetPartitionID(ctx context.Context, database, collectionName
 }
 
 func (m *MetaCache) GetPartitions(ctx context.Context, database, collectionName string) (map[string]typeutil.UniqueID, error) {
-	_, err := m.GetCollectionID(ctx, database, collectionName)
+	partitions, err := m.getPartitionInfos(ctx, database, collectionName)
 	if err != nil {
 		return nil, err
 	}
 
-	method := "GetPartitions"
-	m.mu.RLock()
-
-	var collInfo *collectionInfo
-	var ok bool
-	db, dbOk := m.collInfo[database]
-	if dbOk {
-		collInfo, ok = db[collectionName]
-	}
-
-	if !ok {
-		m.mu.RUnlock()
-		return nil, fmt.Errorf("can't find collection name %s:%s", database, collectionName)
-	}
-
-	if collInfo.partInfo == nil || len(collInfo.partInfo) == 0 {
-		tr := timerecord.NewTimeRecorder("UpdateCache")
-		metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method, metrics.CacheMissLabel).Inc()
-		m.mu.RUnlock()
-
-		partitions, err := m.showPartitions(ctx, database, collectionName)
-		if err != nil {
-			return nil, err
-		}
-
-		m.mu.Lock()
-		defer m.mu.Unlock()
-
-		err = m.updatePartitions(partitions, database, collectionName)
-		if err != nil {
-			return nil, err
-		}
-		metrics.ProxyUpdateCacheLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-		log.Debug("proxy", zap.Any("GetPartitions:partitions after update", partitions), zap.String("collectionName", collectionName))
-		ret := make(map[string]typeutil.UniqueID)
-		partInfo := m.collInfo[database][collectionName].partInfo
-		for k, v := range partInfo {
-			ret[k] = v.partitionID
-		}
-		return ret, nil
-	}
-
-	defer m.mu.RUnlock()
-	metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method, metrics.CacheHitLabel).Inc()
-
-	ret := make(map[string]typeutil.UniqueID)
-	partInfo := collInfo.partInfo
-	for k, v := range partInfo {
-		ret[k] = v.partitionID
-	}
-
-	return ret, nil
+	return partitions.name2ID, nil
 }
 
 func (m *MetaCache) GetPartitionInfo(ctx context.Context, database, collectionName string, partitionName string) (*partitionInfo, error) {
+	partitions, err := m.getPartitionInfos(ctx, database, collectionName)
+	if err != nil {
+		return nil, err
+	}
+
+	info, ok := partitions.name2Info[partitionName]
+	if !ok {
+		return nil, merr.WrapErrPartitionNotFound(partitionName)
+	}
+	return info, nil
+}
+
+func (m *MetaCache) GetPartitionsIndex(ctx context.Context, database, collectionName string) ([]string, error) {
+	partitions, err := m.getPartitionInfos(ctx, database, collectionName)
+	if err != nil {
+		return nil, err
+	}
+
+	if partitions.indexedPartitionNames == nil {
+		return nil, merr.WrapErrServiceInternal("partitions not in partition key naming pattern")
+	}
+
+	return partitions.indexedPartitionNames, nil
+}
+
+func (m *MetaCache) getPartitionInfos(ctx context.Context, database, collectionName string) (*partitionInfos, error) {
 	_, err := m.GetCollectionID(ctx, database, collectionName)
 	if err != nil {
 		return nil, err
@@ -529,12 +514,11 @@ func (m *MetaCache) GetPartitionInfo(ctx context.Context, database, collectionNa
 		return nil, fmt.Errorf("can't find collection name %s:%s", database, collectionName)
 	}
 
-	var partInfo *partitionInfo
-	partInfo, ok = collInfo.partInfo[partitionName]
+	partitionInfos := collInfo.partInfo
 	m.mu.RUnlock()
 
 	method := "GetPartitionInfo"
-	if !ok {
+	if partitionInfos == nil {
 		tr := timerecord.NewTimeRecorder("UpdateCache")
 		metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method, metrics.CacheMissLabel).Inc()
 		partitions, err := m.showPartitions(ctx, database, collectionName)
@@ -549,18 +533,11 @@ func (m *MetaCache) GetPartitionInfo(ctx context.Context, database, collectionNa
 			return nil, err
 		}
 		metrics.ProxyUpdateCacheLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-		log.Debug("proxy", zap.Any("GetPartitionID:partitions after update", partitions), zap.String("collectionName", collectionName))
-		partInfo, ok = m.collInfo[database][collectionName].partInfo[partitionName]
-		if !ok {
-			return nil, merr.WrapErrPartitionNotFound(partitionName)
-		}
+		partitionInfos = m.collInfo[database][collectionName].partInfo
+		return partitionInfos, nil
 	}
 	metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method, metrics.CacheHitLabel).Inc()
-	return &partitionInfo{
-		partitionID:         partInfo.partitionID,
-		createdTimestamp:    partInfo.createdTimestamp,
-		createdUtcTimestamp: partInfo.createdUtcTimestamp,
-	}, nil
+	return partitionInfos, nil
 }
 
 // Get the collection information from rootcoord.
@@ -631,7 +608,50 @@ func (m *MetaCache) showPartitions(ctx context.Context, dbName string, collectio
 	return partitions, nil
 }
 
+// parsePartitionsInfo parse partitionInfo list to partitionInfos struct.
+// prepare all name to id & info map
+// try parse partition names to partitionKey index.
+func parsePartitionsInfo(infos []*partitionInfo) *partitionInfos {
+	name2ID := lo.SliceToMap(infos, func(info *partitionInfo) (string, int64) {
+		return info.name, info.partitionID
+	})
+	name2Info := lo.SliceToMap(infos, func(info *partitionInfo) (string, *partitionInfo) {
+		return info.name, info
+	})
+
+	result := &partitionInfos{
+		partitionInfos: infos,
+		name2ID:        name2ID,
+		name2Info:      name2Info,
+	}
+
+	// Make sure the order of the partition names got every time is the same
+	partitionNames := make([]string, len(infos))
+	for _, info := range infos {
+		partitionName := info.name
+		splits := strings.Split(partitionName, "_")
+		if len(splits) < 2 {
+			log.Info("partition group not in partitionKey pattern", zap.String("partitionName", partitionName))
+			return result
+		}
+		index, err := strconv.ParseInt(splits[len(splits)-1], 10, 64)
+		if err != nil {
+			log.Info("partition group not in partitionKey pattern", zap.String("parititonName", partitionName), zap.Error(err))
+			return result
+		}
+		partitionNames[index] = partitionName
+	}
+
+	result.indexedPartitionNames = partitionNames
+	return result
+}
+
 func (m *MetaCache) updatePartitions(partitions *milvuspb.ShowPartitionsResponse, database, collectionName string) error {
+	// check partitionID, createdTimestamp and utcstamp has sam element numbers
+	if len(partitions.PartitionNames) != len(partitions.CreatedTimestamps) || len(partitions.PartitionNames) != len(partitions.CreatedUtcTimestamps) {
+		return merr.WrapErrParameterInvalidMsg("partition names and timestamps number is not aligned, response: %s", partitions.String())
+	}
+
 	_, dbOk := m.collInfo[database]
 	if !dbOk {
 		m.collInfo[database] = make(map[string]*collectionInfo)
@@ -639,30 +659,19 @@ func (m *MetaCache) updatePartitions(partitions *milvuspb.ShowPartitionsResponse
 
 	_, ok := m.collInfo[database][collectionName]
 	if !ok {
-		m.collInfo[database][collectionName] = &collectionInfo{
-			partInfo: map[string]*partitionInfo{},
-		}
-	}
-	partInfo := m.collInfo[database][collectionName].partInfo
-	if partInfo == nil {
-		partInfo = map[string]*partitionInfo{}
+		m.collInfo[database][collectionName] = &collectionInfo{}
 	}
 
-	// check partitionID, createdTimestamp and utcstamp has sam element numbers
-	if len(partitions.PartitionNames) != len(partitions.CreatedTimestamps) || len(partitions.PartitionNames) != len(partitions.CreatedUtcTimestamps) {
-		return errors.New("partition names and timestamps number is not aligned, response " + partitions.String())
-	}
-
-	for i := 0; i < len(partitions.PartitionIDs); i++ {
-		if _, ok := partInfo[partitions.PartitionNames[i]]; !ok {
-			partInfo[partitions.PartitionNames[i]] = &partitionInfo{
-				partitionID:         partitions.PartitionIDs[i],
-				createdTimestamp:    partitions.CreatedTimestamps[i],
-				createdUtcTimestamp: partitions.CreatedUtcTimestamps[i],
-			}
+	infos := lo.Map(partitions.GetPartitionIDs(), func(partitionID int64, idx int) *partitionInfo {
+		return &partitionInfo{
+			name:                partitions.PartitionNames[idx],
+			partitionID:         partitions.PartitionIDs[idx],
+			createdTimestamp:    partitions.CreatedTimestamps[idx],
+			createdUtcTimestamp: partitions.CreatedUtcTimestamps[idx],
 		}
-	}
-	m.collInfo[database][collectionName].partInfo = partInfo
+	})
+
+	m.collInfo[database][collectionName].partInfo = parsePartitionsInfo(infos)
 	return nil
 }
 
@@ -709,7 +718,11 @@ func (m *MetaCache) RemovePartition(ctx context.Context, database, collectionNam
 	if partInfo == nil {
 		return
 	}
-	delete(partInfo, partitionName)
+	filteredInfos := lo.Filter(partInfo.partitionInfos, func(info *partitionInfo, idx int) bool {
+		return info.name != partitionName
+	})
+
+	m.collInfo[database][collectionName].partInfo = parsePartitionsInfo(filteredInfos)
 }
 
 // GetCredentialInfo returns the credential related to provided username
