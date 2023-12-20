@@ -45,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/crypto"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metric"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -765,6 +766,19 @@ func ValidatePassword(password string) error {
 
 func ReplaceID2Name(oldStr string, id int64, name string) string {
 	return strings.ReplaceAll(oldStr, strconv.FormatInt(id, 10), name)
+}
+
+func getConsistencyLevelFromConfig() commonpb.ConsistencyLevel {
+	value := Params.CommonCfg.ConsistencyLevelUsedInDelete.GetValue()
+	trimed := strings.TrimSpace(value)
+	lowered := strings.ToLower(trimed)
+	for consistencyLevel := range commonpb.ConsistencyLevel_value {
+		if lowered == strings.ToLower(consistencyLevel) {
+			return commonpb.ConsistencyLevel(commonpb.ConsistencyLevel_value[consistencyLevel])
+		}
+	}
+	// not found, use default.
+	return paramtable.DefaultConsistencyLevelUsedInDelete
 }
 
 func parseGuaranteeTsFromConsistency(ts, tMax typeutil.Timestamp, consistency commonpb.ConsistencyLevel) typeutil.Timestamp {

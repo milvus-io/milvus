@@ -2087,3 +2087,17 @@ func TestSendReplicateMessagePack(t *testing.T) {
 		SendReplicateMessagePack(ctx, mockStream, &milvuspb.DropIndexRequest{})
 	})
 }
+
+func Test_getConsistencyLevelFromConfig(t *testing.T) {
+	paramtable.Init()
+	original := Params.CommonCfg.ConsistencyLevelUsedInDelete.GetValue()
+	defer func() {
+		Params.CommonCfg.ConsistencyLevelUsedInDelete.SwapTempValue(original)
+	}()
+	for consistencyLevel := range commonpb.ConsistencyLevel_value {
+		Params.CommonCfg.ConsistencyLevelUsedInDelete.SwapTempValue(consistencyLevel)
+		assert.Equal(t, commonpb.ConsistencyLevel(commonpb.ConsistencyLevel_value[consistencyLevel]), getConsistencyLevelFromConfig())
+	}
+	Params.CommonCfg.ConsistencyLevelUsedInDelete.SwapTempValue("invalid")
+	assert.Equal(t, paramtable.DefaultConsistencyLevelUsedInDelete, getConsistencyLevelFromConfig())
+}
