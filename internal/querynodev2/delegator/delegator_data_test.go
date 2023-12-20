@@ -57,7 +57,7 @@ type DelegatorDataSuite struct {
 	loader        *segments.MockLoader
 	mq            *msgstream.MockMsgStream
 
-	delegator ShardDelegator
+	delegator *shardDelegator
 }
 
 func (s *DelegatorDataSuite) SetupSuite() {
@@ -130,13 +130,15 @@ func (s *DelegatorDataSuite) SetupTest() {
 
 	s.mq = &msgstream.MockMsgStream{}
 
-	var err error
-	s.delegator, err = NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.tsafeManager, s.loader, &msgstream.MockMqFactory{
+	delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.tsafeManager, s.loader, &msgstream.MockMqFactory{
 		NewMsgStreamFunc: func(_ context.Context) (msgstream.MsgStream, error) {
 			return s.mq, nil
 		},
 	}, 10000, nil)
 	s.Require().NoError(err)
+	sd, ok := delegator.(*shardDelegator)
+	s.Require().True(ok)
+	s.delegator = sd
 }
 
 func (s *DelegatorDataSuite) TestProcessInsert() {
@@ -328,6 +330,20 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 			RowCount:    1,
 		},
 	}, 10)
+	s.True(s.delegator.distribution.Serviceable())
+
+	// test worker return segment not loaded
+	worker1.ExpectedCalls = nil
+	worker1.EXPECT().Delete(mock.Anything, mock.Anything).Return(merr.ErrSegmentNotLoaded)
+	s.delegator.ProcessDelete([]*DeleteData{
+		{
+			PartitionID: 500,
+			PrimaryKeys: []storage.PrimaryKey{storage.NewInt64PrimaryKey(10)},
+			Timestamps:  []uint64{10},
+			RowCount:    1,
+		},
+	}, 10)
+	s.True(s.delegator.distribution.Serviceable(), "segment not loaded shall not trigger offline")
 
 	// test worker offline
 	worker1.ExpectedCalls = nil
@@ -340,6 +356,8 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 			RowCount:    1,
 		},
 	}, 10)
+
+	s.False(s.delegator.distribution.Serviceable())
 }
 
 func (s *DelegatorDataSuite) TestLoadSegments() {
