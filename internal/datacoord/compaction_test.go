@@ -968,3 +968,34 @@ func getFieldBinlogPathsWithEntry(id int64, entry int64, paths ...string) *datap
 	}
 	return l
 }
+
+func TestCompactionPlanHandler_Clean(t *testing.T) {
+	startTime := tsoutil.ComposeTSByTime(time.Now(), 0)
+	cleanTime := tsoutil.ComposeTSByTime(time.Now().Add(-2*time.Hour), 0)
+
+	c := &compactionPlanHandler{
+		plans: map[int64]*compactionTask{
+			1: {
+				state: executing,
+			},
+			2: {
+				state: pipelining,
+			},
+			3: {
+				state: completed,
+				plan: &datapb.CompactionPlan{
+					StartTime: startTime,
+				},
+			},
+			4: {
+				state: completed,
+				plan: &datapb.CompactionPlan{
+					StartTime: cleanTime,
+				},
+			},
+		},
+	}
+
+	c.Clean()
+	assert.Len(t, c.plans, 3)
+}
