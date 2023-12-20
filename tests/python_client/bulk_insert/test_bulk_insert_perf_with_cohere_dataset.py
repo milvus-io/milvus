@@ -74,10 +74,12 @@ class TestBUlkInsertPerf(TestBulkInsertBase):
         fields_name = ["id", "title", "text", "url", "wiki_id", "views", "paragraph_id", "langs", "emb"]
         files = []
         if file_type == "json":
-            files = ["json-train-00000-of-00252.json"]
+            files = ["train-00000-of-00252.json"]
         if file_type == "npy":
             for field_name in fields_name:
                 files.append(f"{field_name}.npy")
+        if file_type == "parquet":
+            files = ["train-00000-of-00252.parquet"]
         checkers = {
             Op.bulk_insert: BulkInsertChecker(collection_name=c_name, use_one_collection=False, schema=schema,
                                               files=files, insert_data=False)
