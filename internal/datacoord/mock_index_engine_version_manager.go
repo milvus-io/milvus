@@ -31,7 +31,7 @@ type MockVersionManager_AddNode_Call struct {
 }
 
 // AddNode is a helper method to define mock.On call
-//   - session *sessionutil.Session
+//  - session *sessionutil.Session
 func (_e *MockVersionManager_Expecter) AddNode(session interface{}) *MockVersionManager_AddNode_Call {
 	return &MockVersionManager_AddNode_Call{Call: _e.mock.On("AddNode", session)}
 }
@@ -146,7 +146,7 @@ type MockVersionManager_RemoveNode_Call struct {
 }
 
 // RemoveNode is a helper method to define mock.On call
-//   - session *sessionutil.Session
+//  - session *sessionutil.Session
 func (_e *MockVersionManager_Expecter) RemoveNode(session interface{}) *MockVersionManager_RemoveNode_Call {
 	return &MockVersionManager_RemoveNode_Call{Call: _e.mock.On("RemoveNode", session)}
 }
@@ -179,7 +179,7 @@ type MockVersionManager_Startup_Call struct {
 }
 
 // Startup is a helper method to define mock.On call
-//   - sessions map[string]*sessionutil.Session
+//  - sessions map[string]*sessionutil.Session
 func (_e *MockVersionManager_Expecter) Startup(sessions interface{}) *MockVersionManager_Startup_Call {
 	return &MockVersionManager_Startup_Call{Call: _e.mock.On("Startup", sessions)}
 }
@@ -212,7 +212,7 @@ type MockVersionManager_Update_Call struct {
 }
 
 // Update is a helper method to define mock.On call
-//   - session *sessionutil.Session
+//  - session *sessionutil.Session
 func (_e *MockVersionManager_Expecter) Update(session interface{}) *MockVersionManager_Update_Call {
 	return &MockVersionManager_Update_Call{Call: _e.mock.On("Update", session)}
 }

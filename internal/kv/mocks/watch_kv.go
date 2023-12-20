@@ -85,9 +85,9 @@ type WatchKV_CompareVersionAndSwap_Call struct {
 }
 
 // CompareVersionAndSwap is a helper method to define mock.On call
-//   - key string
-//   - version int64
-//   - target string
+//  - key string
+//  - version int64
+//  - target string
 func (_e *WatchKV_Expecter) CompareVersionAndSwap(key interface{}, version interface{}, target interface{}) *WatchKV_CompareVersionAndSwap_Call {
 	return &WatchKV_CompareVersionAndSwap_Call{Call: _e.mock.On("CompareVersionAndSwap", key, version, target)}
 }
@@ -129,7 +129,7 @@ type WatchKV_GetPath_Call struct {
 }
 
 // GetPath is a helper method to define mock.On call
-//   - key string
+//  - key string
 func (_e *WatchKV_Expecter) GetPath(key interface{}) *WatchKV_GetPath_Call {
 	return &WatchKV_GetPath_Call{Call: _e.mock.On("GetPath", key)}
 }
@@ -181,7 +181,7 @@ type WatchKV_Has_Call struct {
 }
 
 // Has is a helper method to define mock.On call
-//   - key string
+//  - key string
 func (_e *WatchKV_Expecter) Has(key interface{}) *WatchKV_Has_Call {
 	return &WatchKV_Has_Call{Call: _e.mock.On("Has", key)}
 }
@@ -233,7 +233,7 @@ type WatchKV_HasPrefix_Call struct {
 }
 
 // HasPrefix is a helper method to define mock.On call
-//   - prefix string
+//  - prefix string
 func (_e *WatchKV_Expecter) HasPrefix(prefix interface{}) *WatchKV_HasPrefix_Call {
 	return &WatchKV_HasPrefix_Call{Call: _e.mock.On("HasPrefix", prefix)}
 }
@@ -285,7 +285,7 @@ type WatchKV_Load_Call struct {
 }
 
 // Load is a helper method to define mock.On call
-//   - key string
+//  - key string
 func (_e *WatchKV_Expecter) Load(key interface{}) *WatchKV_Load_Call {
 	return &WatchKV_Load_Call{Call: _e.mock.On("Load", key)}
 }
@@ -348,7 +348,7 @@ type WatchKV_LoadWithPrefix_Call struct {
 }
 
 // LoadWithPrefix is a helper method to define mock.On call
-//   - key string
+//  - key string
 func (_e *WatchKV_Expecter) LoadWithPrefix(key interface{}) *WatchKV_LoadWithPrefix_Call {
 	return &WatchKV_LoadWithPrefix_Call{Call: _e.mock.On("LoadWithPrefix", key)}
 }
@@ -402,7 +402,7 @@ type WatchKV_MultiLoad_Call struct {
 }
 
 // MultiLoad is a helper method to define mock.On call
-//   - keys []string
+//  - keys []string
 func (_e *WatchKV_Expecter) MultiLoad(keys interface{}) *WatchKV_MultiLoad_Call {
 	return &WatchKV_MultiLoad_Call{Call: _e.mock.On("MultiLoad", keys)}
 }
@@ -444,7 +444,7 @@ type WatchKV_MultiRemove_Call struct {
 }
 
 // MultiRemove is a helper method to define mock.On call
-//   - keys []string
+//  - keys []string
 func (_e *WatchKV_Expecter) MultiRemove(keys interface{}) *WatchKV_MultiRemove_Call {
 	return &WatchKV_MultiRemove_Call{Call: _e.mock.On("MultiRemove", keys)}
 }
@@ -486,7 +486,7 @@ type WatchKV_MultiSave_Call struct {
 }
 
 // MultiSave is a helper method to define mock.On call
-//   - kvs map[string]string
+//  - kvs map[string]string
 func (_e *WatchKV_Expecter) MultiSave(kvs interface{}) *WatchKV_MultiSave_Call {
 	return &WatchKV_MultiSave_Call{Call: _e.mock.On("MultiSave", kvs)}
 }
@@ -535,9 +535,9 @@ type WatchKV_MultiSaveAndRemove_Call struct {
 }
 
 // MultiSaveAndRemove is a helper method to define mock.On call
-//   - saves map[string]string
-//   - removals []string
-//   - preds ...predicates.Predicate
+//  - saves map[string]string
+//  - removals []string
+//  - preds ...predicates.Predicate
 func (_e *WatchKV_Expecter) MultiSaveAndRemove(saves interface{}, removals interface{}, preds ...interface{}) *WatchKV_MultiSaveAndRemove_Call {
 	return &WatchKV_MultiSaveAndRemove_Call{Call: _e.mock.On("MultiSaveAndRemove",
 		append([]interface{}{saves, removals}, preds...)...)}
@@ -593,9 +593,9 @@ type WatchKV_MultiSaveAndRemoveWithPrefix_Call struct {
 }
 
 // MultiSaveAndRemoveWithPrefix is a helper method to define mock.On call
-//   - saves map[string]string
-//   - removals []string
-//   - preds ...predicates.Predicate
+//  - saves map[string]string
+//  - removals []string
+//  - preds ...predicates.Predicate
 func (_e *WatchKV_Expecter) MultiSaveAndRemoveWithPrefix(saves interface{}, removals interface{}, preds ...interface{}) *WatchKV_MultiSaveAndRemoveWithPrefix_Call {
 	return &WatchKV_MultiSaveAndRemoveWithPrefix_Call{Call: _e.mock.On("MultiSaveAndRemoveWithPrefix",
 		append([]interface{}{saves, removals}, preds...)...)}
@@ -644,7 +644,7 @@ type WatchKV_Remove_Call struct {
 }
 
 // Remove is a helper method to define mock.On call
-//   - key string
+//  - key string
 func (_e *WatchKV_Expecter) Remove(key interface{}) *WatchKV_Remove_Call {
 	return &WatchKV_Remove_Call{Call: _e.mock.On("Remove", key)}
 }
@@ -686,7 +686,7 @@ type WatchKV_RemoveWithPrefix_Call struct {
 }
 
 // RemoveWithPrefix is a helper method to define mock.On call
-//   - key string
+//  - key string
 func (_e *WatchKV_Expecter) RemoveWithPrefix(key interface{}) *WatchKV_RemoveWithPrefix_Call {
 	return &WatchKV_RemoveWithPrefix_Call{Call: _e.mock.On("RemoveWithPrefix", key)}
 }
@@ -728,8 +728,8 @@ type WatchKV_Save_Call struct {
 }
 
 // Save is a helper method to define mock.On call
-//   - key string
-//   - value string
+//  - key string
+//  - value string
 func (_e *WatchKV_Expecter) Save(key interface{}, value interface{}) *WatchKV_Save_Call {
 	return &WatchKV_Save_Call{Call: _e.mock.On("Save", key, value)}
 }
@@ -771,9 +771,9 @@ type WatchKV_WalkWithPrefix_Call struct {
 }
 
 // WalkWithPrefix is a helper method to define mock.On call
-//   - prefix string
-//   - paginationSize int
-//   - fn func([]byte , []byte) error
+//  - prefix string
+//  - paginationSize int
+//  - fn func([]byte , []byte) error
 func (_e *WatchKV_Expecter) WalkWithPrefix(prefix interface{}, paginationSize interface{}, fn interface{}) *WatchKV_WalkWithPrefix_Call {
 	return &WatchKV_WalkWithPrefix_Call{Call: _e.mock.On("WalkWithPrefix", prefix, paginationSize, fn)}
 }
@@ -817,7 +817,7 @@ type WatchKV_Watch_Call struct {
 }
 
 // Watch is a helper method to define mock.On call
-//   - key string
+//  - key string
 func (_e *WatchKV_Expecter) Watch(key interface{}) *WatchKV_Watch_Call {
 	return &WatchKV_Watch_Call{Call: _e.mock.On("Watch", key)}
 }
@@ -861,7 +861,7 @@ type WatchKV_WatchWithPrefix_Call struct {
 }
 
 // WatchWithPrefix is a helper method to define mock.On call
-//   - key string
+//  - key string
 func (_e *WatchKV_Expecter) WatchWithPrefix(key interface{}) *WatchKV_WatchWithPrefix_Call {
 	return &WatchKV_WatchWithPrefix_Call{Call: _e.mock.On("WatchWithPrefix", key)}
 }
@@ -905,8 +905,8 @@ type WatchKV_WatchWithRevision_Call struct {
 }
 
 // WatchWithRevision is a helper method to define mock.On call
-//   - key string
-//   - revision int64
+//  - key string
+//  - revision int64
 func (_e *WatchKV_Expecter) WatchWithRevision(key interface{}, revision interface{}) *WatchKV_WatchWithRevision_Call {
 	return &WatchKV_WatchWithRevision_Call{Call: _e.mock.On("WatchWithRevision", key, revision)}
 }

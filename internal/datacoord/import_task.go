@@ -72,20 +72,27 @@ func UpdateState(state datapb.ImportState) UpdateAction {
 		case ImportTaskType:
 			t.(*importTask).ImportTaskV2.State = state
 		}
-
 	}
 }
 
 func UpdateNodeID(nodeID int64) UpdateAction {
 	return func(t ImportTask) {
-		t.(*importTask).ImportTaskV2.NodeID = nodeID
+		switch t.GetType() {
+		case PreImportTaskType:
+			t.(*preImportTask).PreImportTask.NodeID = nodeID
+		case ImportTaskType:
+			t.(*importTask).ImportTaskV2.NodeID = nodeID
+		}
 	}
 }
 
 func UpdateFileStats(fileStats []*datapb.ImportFileStats) UpdateAction {
-	return func(task ImportTask) {
-		if t, ok := task.(*preImportTask); ok {
-			t.FileStats = fileStats
+	return func(t ImportTask) {
+		switch t.GetType() {
+		case PreImportTaskType:
+			t.(*preImportTask).PreImportTask.FileStats = fileStats
+		case ImportTaskType:
+			t.(*importTask).ImportTaskV2.FileStats = fileStats
 		}
 	}
 }

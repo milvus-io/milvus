@@ -513,61 +513,6 @@ func (_c *MockDataNode_GetComponentStates_Call) RunAndReturn(run func(context.Co
 	return _c
 }
 
-// GetImportState provides a mock function with given fields: _a0, _a1
-func (_m *MockDataNode) GetImportState(_a0 context.Context, _a1 *datapb.GetImportStateRequest) (*datapb.GetImportStateResponse, error) {
-	ret := _m.Called(_a0, _a1)
-
-	var r0 *datapb.GetImportStateResponse
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *datapb.GetImportStateRequest) (*datapb.GetImportStateResponse, error)); ok {
-		return rf(_a0, _a1)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, *datapb.GetImportStateRequest) *datapb.GetImportStateResponse); ok {
-		r0 = rf(_a0, _a1)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*datapb.GetImportStateResponse)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context, *datapb.GetImportStateRequest) error); ok {
-		r1 = rf(_a0, _a1)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// MockDataNode_GetImportState_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetImportState'
-type MockDataNode_GetImportState_Call struct {
-	*mock.Call
-}
-
-// GetImportState is a helper method to define mock.On call
-//  - _a0 context.Context
-//  - _a1 *datapb.GetImportStateRequest
-func (_e *MockDataNode_Expecter) GetImportState(_a0 interface{}, _a1 interface{}) *MockDataNode_GetImportState_Call {
-	return &MockDataNode_GetImportState_Call{Call: _e.mock.On("GetImportState", _a0, _a1)}
-}
-
-func (_c *MockDataNode_GetImportState_Call) Run(run func(_a0 context.Context, _a1 *datapb.GetImportStateRequest)) *MockDataNode_GetImportState_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*datapb.GetImportStateRequest))
-	})
-	return _c
-}
-
-func (_c *MockDataNode_GetImportState_Call) Return(_a0 *datapb.GetImportStateResponse, _a1 error) *MockDataNode_GetImportState_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *MockDataNode_GetImportState_Call) RunAndReturn(run func(context.Context, *datapb.GetImportStateRequest) (*datapb.GetImportStateResponse, error)) *MockDataNode_GetImportState_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // GetMetrics provides a mock function with given fields: _a0, _a1
 func (_m *MockDataNode) GetMetrics(_a0 context.Context, _a1 *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -976,6 +921,116 @@ func (_c *MockDataNode_PreImport_Call) Return(_a0 *commonpb.Status, _a1 error) *
 }
 
 func (_c *MockDataNode_PreImport_Call) RunAndReturn(run func(context.Context, *datapb.PreImportRequest) (*commonpb.Status, error)) *MockDataNode_PreImport_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// QueryImport provides a mock function with given fields: _a0, _a1
+func (_m *MockDataNode) QueryImport(_a0 context.Context, _a1 *datapb.QueryImportRequest) (*datapb.QueryImportResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *datapb.QueryImportResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.QueryImportRequest) (*datapb.QueryImportResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.QueryImportRequest) *datapb.QueryImportResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.QueryImportResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.QueryImportRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockDataNode_QueryImport_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'QueryImport'
+type MockDataNode_QueryImport_Call struct {
+	*mock.Call
+}
+
+// QueryImport is a helper method to define mock.On call
+//  - _a0 context.Context
+//  - _a1 *datapb.QueryImportRequest
+func (_e *MockDataNode_Expecter) QueryImport(_a0 interface{}, _a1 interface{}) *MockDataNode_QueryImport_Call {
+	return &MockDataNode_QueryImport_Call{Call: _e.mock.On("QueryImport", _a0, _a1)}
+}
+
+func (_c *MockDataNode_QueryImport_Call) Run(run func(_a0 context.Context, _a1 *datapb.QueryImportRequest)) *MockDataNode_QueryImport_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.QueryImportRequest))
+	})
+	return _c
+}
+
+func (_c *MockDataNode_QueryImport_Call) Return(_a0 *datapb.QueryImportResponse, _a1 error) *MockDataNode_QueryImport_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDataNode_QueryImport_Call) RunAndReturn(run func(context.Context, *datapb.QueryImportRequest) (*datapb.QueryImportResponse, error)) *MockDataNode_QueryImport_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// QueryPreImport provides a mock function with given fields: _a0, _a1
+func (_m *MockDataNode) QueryPreImport(_a0 context.Context, _a1 *datapb.QueryPreImportRequest) (*datapb.QueryPreImportResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *datapb.QueryPreImportResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.QueryPreImportRequest) (*datapb.QueryPreImportResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.QueryPreImportRequest) *datapb.QueryPreImportResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.QueryPreImportResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.QueryPreImportRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockDataNode_QueryPreImport_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'QueryPreImport'
+type MockDataNode_QueryPreImport_Call struct {
+	*mock.Call
+}
+
+// QueryPreImport is a helper method to define mock.On call
+//  - _a0 context.Context
+//  - _a1 *datapb.QueryPreImportRequest
+func (_e *MockDataNode_Expecter) QueryPreImport(_a0 interface{}, _a1 interface{}) *MockDataNode_QueryPreImport_Call {
+	return &MockDataNode_QueryPreImport_Call{Call: _e.mock.On("QueryPreImport", _a0, _a1)}
+}
+
+func (_c *MockDataNode_QueryPreImport_Call) Run(run func(_a0 context.Context, _a1 *datapb.QueryPreImportRequest)) *MockDataNode_QueryPreImport_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.QueryPreImportRequest))
+	})
+	return _c
+}
+
+func (_c *MockDataNode_QueryPreImport_Call) Return(_a0 *datapb.QueryPreImportResponse, _a1 error) *MockDataNode_QueryPreImport_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDataNode_QueryPreImport_Call) RunAndReturn(run func(context.Context, *datapb.QueryPreImportRequest) (*datapb.QueryPreImportResponse, error)) *MockDataNode_QueryPreImport_Call {
 	_c.Call.Return(run)
 	return _c
 }

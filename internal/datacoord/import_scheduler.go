@@ -38,7 +38,7 @@ type ImportScheduler struct {
 	cluster   Cluster
 	allocator *alloc.IDAllocator
 	sm        *SegmentManager
-	manager   ImportTaskManager
+	imeta     ImportMeta
 
 	closeOnce sync.Once
 	closeChan chan struct{}
@@ -48,13 +48,13 @@ func NewImportScheduler(meta *meta,
 	cluster Cluster,
 	allocator *alloc.IDAllocator,
 	sm *SegmentManager,
-	manager ImportTaskManager) *ImportScheduler {
+	imeta ImportMeta) *ImportScheduler {
 	return &ImportScheduler{
 		meta:      meta,
 		cluster:   cluster,
 		allocator: allocator,
 		sm:        sm,
-		manager:   manager,
+		imeta:     imeta,
 		closeChan: make(chan struct{}),
 	}
 }
@@ -81,7 +81,7 @@ func (s *ImportScheduler) Close() {
 }
 
 func (s *ImportScheduler) process() {
-	tasks := s.manager.GetBy()
+	tasks := s.imeta.GetBy()
 	for _, task := range tasks {
 		switch task.GetState() {
 		case datapb.ImportState_Pending:
@@ -106,13 +106,13 @@ func (s *ImportScheduler) process() {
 
 func (s *ImportScheduler) checkErr(task ImportTask, err error) {
 	if !merr.IsRetryableErr(err) {
-		err = s.manager.Update(task.GetTaskID(), UpdateState(datapb.ImportState_Failed))
+		err = s.imeta.Update(task.GetTaskID(), UpdateState(datapb.ImportState_Failed))
 		if err != nil {
 			log.Warn("failed to update import task state to failed", WrapLogFields(task, err)...)
 		}
 		return
 	}
-	err = s.manager.Update(task.GetTaskID(), UpdateState(datapb.ImportState_Pending))
+	err = s.imeta.Update(task.GetTaskID(), UpdateState(datapb.ImportState_Pending))
 	if err != nil {
 		log.Warn("failed to update import task state to pending", WrapLogFields(task, err)...)
 	}
@@ -147,7 +147,7 @@ func (s *ImportScheduler) processPendingPreImport(task ImportTask) {
 		log.Warn("preimport failed", WrapLogFields(task, err)...)
 		return
 	}
-	err = s.manager.Update(task.GetTaskID(),
+	err = s.imeta.Update(task.GetTaskID(),
 		UpdateState(datapb.ImportState_InProgress),
 		UpdateNodeID(nodeID))
 	if err != nil {
@@ -171,7 +171,7 @@ func (s *ImportScheduler) processPendingImport(task ImportTask) {
 		log.Warn("import failed", WrapLogFields(task, err)...)
 		return
 	}
-	err = s.manager.Update(task.GetTaskID(),
+	err = s.imeta.Update(task.GetTaskID(),
 		UpdateState(datapb.ImportState_InProgress),
 		UpdateNodeID(nodeID))
 	if err != nil {
@@ -195,7 +195,7 @@ func (s *ImportScheduler) processInProgressPreImport(task ImportTask) {
 		actions = append(actions, UpdateState(datapb.ImportState_Completed))
 	}
 	// TODO: check if rows changed to save meta op
-	err = s.manager.Update(task.GetTaskID(), actions...)
+	err = s.imeta.Update(task.GetTaskID(), actions...)
 	if err != nil {
 		log.Warn("update import task failed", WrapLogFields(task, err)...)
 		return
@@ -223,7 +223,7 @@ func (s *ImportScheduler) processInProgressImport(task ImportTask) {
 		s.meta.SetCurrentRows(info.GetSegmentID(), info.GetImportedRows())
 	}
 	if resp.GetState() == datapb.ImportState_Completed {
-		err = s.manager.Update(task.GetTaskID(), UpdateState(datapb.ImportState_Completed))
+		err = s.imeta.Update(task.GetTaskID(), UpdateState(datapb.ImportState_Completed))
 		if err != nil {
 			log.Warn("update import task failed", WrapLogFields(task, err)...)
 		}
@@ -243,7 +243,7 @@ func (s *ImportScheduler) processCompletedOrFailed(task ImportTask) {
 		log.Warn("drop import failed", WrapLogFields(task, err)...)
 		return
 	}
-	err = s.manager.Update(task.GetTaskID(), UpdateNodeID(fakeNodeID))
+	err = s.imeta.Update(task.GetTaskID(), UpdateNodeID(fakeNodeID))
 	if err != nil {
 		log.Warn("update import task failed", WrapLogFields(task, err)...)
 	}

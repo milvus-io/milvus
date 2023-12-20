@@ -30,7 +30,7 @@ type ImportChecker struct {
 	meta      *meta
 	cluster   Cluster
 	allocator *alloc.IDAllocator
-	manager   ImportTaskManager
+	imeta     ImportMeta
 
 	closeOnce sync.Once
 	closeChan chan struct{}
@@ -39,12 +39,12 @@ type ImportChecker struct {
 func NewImportChecker(meta *meta,
 	cluster Cluster,
 	allocator *alloc.IDAllocator,
-	manager ImportTaskManager) *ImportChecker {
+	imeta ImportMeta) *ImportChecker {
 	return &ImportChecker{
 		meta:      meta,
 		cluster:   cluster,
 		allocator: allocator,
-		manager:   manager,
+		imeta:     imeta,
 		closeChan: make(chan struct{}),
 	}
 }
@@ -60,7 +60,7 @@ func (c *ImportChecker) Start() {
 			log.Info("import checker exited")
 			return
 		case <-checkTicker.C:
-			tasks := c.manager.GetBy()
+			tasks := c.imeta.GetBy()
 			tasksByReq := lo.GroupBy(tasks, func(t ImportTask) int64 {
 				return t.GetRequestID()
 			})
@@ -91,20 +91,20 @@ func (c *ImportChecker) LogStats() {
 			zap.Int("completed", len(byState[datapb.ImportState_Completed])),
 			zap.Int("failed", len(byState[datapb.ImportState_Failed])))
 	}
-	tasks := c.manager.GetBy(WithType(PreImportTaskType))
+	tasks := c.imeta.GetBy(WithType(PreImportTaskType))
 	logFunc(tasks, PreImportTaskType)
-	tasks = c.manager.GetBy(WithType(ImportTaskType))
+	tasks = c.imeta.GetBy(WithType(ImportTaskType))
 	logFunc(tasks, ImportTaskType)
 }
 
 func (c *ImportChecker) checkPreImportState(requestID int64) {
-	tasks := c.manager.GetBy(WithType(PreImportTaskType), WithReq(requestID))
+	tasks := c.imeta.GetBy(WithType(PreImportTaskType), WithReq(requestID))
 	for _, t := range tasks {
 		if t.GetState() != datapb.ImportState_Completed {
 			return
 		}
 	}
-	importTasks := c.manager.GetBy(WithType(ImportTaskType), WithReq(requestID))
+	importTasks := c.imeta.GetBy(WithType(ImportTaskType), WithReq(requestID))
 	if len(importTasks) == len(tasks) {
 		return // all imported are generated
 	}
@@ -117,7 +117,7 @@ func (c *ImportChecker) checkPreImportState(requestID int64) {
 			log.Warn("drop import failed", WrapLogFields(t, err)...)
 			return
 		}
-		err = c.manager.Remove(t.GetTaskID())
+		err = c.imeta.Remove(t.GetTaskID())
 		if err != nil {
 			log.Warn("remove import task failed", WrapLogFields(t, err)...)
 			return
@@ -129,7 +129,7 @@ func (c *ImportChecker) checkPreImportState(requestID int64) {
 			log.Warn("assemble import task failed", WrapLogFields(t, err)...)
 			return
 		}
-		err = c.manager.Add(task)
+		err = c.imeta.Add(task)
 		if err != nil {
 			log.Warn("")
 			return
@@ -139,7 +139,7 @@ func (c *ImportChecker) checkPreImportState(requestID int64) {
 }
 
 func (c *ImportChecker) checkImportState(requestID int64) {
-	tasks := c.manager.GetBy(WithType(ImportTaskType), WithReq(requestID))
+	tasks := c.imeta.GetBy(WithType(ImportTaskType), WithReq(requestID))
 	for _, t := range tasks {
 		if t.GetState() != datapb.ImportState_Completed {
 			return

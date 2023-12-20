@@ -28,8 +28,8 @@ type MockScheduler_Finish_Call struct {
 }
 
 // Finish is a helper method to define mock.On call
-//   - nodeID int64
-//   - planID int64
+//  - nodeID int64
+//  - planID int64
 func (_e *MockScheduler_Expecter) Finish(nodeID interface{}, planID interface{}) *MockScheduler_Finish_Call {
 	return &MockScheduler_Finish_Call{Call: _e.mock.On("Finish", nodeID, planID)}
 }
@@ -184,7 +184,7 @@ type MockScheduler_Submit_Call struct {
 }
 
 // Submit is a helper method to define mock.On call
-//   - t ...*compactionTask
+//  - t ...*compactionTask
 func (_e *MockScheduler_Expecter) Submit(t ...interface{}) *MockScheduler_Submit_Call {
 	return &MockScheduler_Submit_Call{Call: _e.mock.On("Submit",
 		append([]interface{}{}, t...)...)}

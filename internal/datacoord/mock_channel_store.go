@@ -28,7 +28,7 @@ type MockRWChannelStore_Add_Call struct {
 }
 
 // Add is a helper method to define mock.On call
-//   - nodeID int64
+//  - nodeID int64
 func (_e *MockRWChannelStore_Expecter) Add(nodeID interface{}) *MockRWChannelStore_Add_Call {
 	return &MockRWChannelStore_Add_Call{Call: _e.mock.On("Add", nodeID)}
 }
@@ -82,7 +82,7 @@ type MockRWChannelStore_Delete_Call struct {
 }
 
 // Delete is a helper method to define mock.On call
-//   - nodeID int64
+//  - nodeID int64
 func (_e *MockRWChannelStore_Expecter) Delete(nodeID interface{}) *MockRWChannelStore_Delete_Call {
 	return &MockRWChannelStore_Delete_Call{Call: _e.mock.On("Delete", nodeID)}
 }
@@ -212,7 +212,7 @@ type MockRWChannelStore_GetNode_Call struct {
 }
 
 // GetNode is a helper method to define mock.On call
-//   - nodeID int64
+//  - nodeID int64
 func (_e *MockRWChannelStore_Expecter) GetNode(nodeID interface{}) *MockRWChannelStore_GetNode_Call {
 	return &MockRWChannelStore_GetNode_Call{Call: _e.mock.On("GetNode", nodeID)}
 }
@@ -254,7 +254,7 @@ type MockRWChannelStore_GetNodeChannelCount_Call struct {
 }
 
 // GetNodeChannelCount is a helper method to define mock.On call
-//   - nodeID int64
+//  - nodeID int64
 func (_e *MockRWChannelStore_Expecter) GetNodeChannelCount(nodeID interface{}) *MockRWChannelStore_GetNodeChannelCount_Call {
 	return &MockRWChannelStore_GetNodeChannelCount_Call{Call: _e.mock.On("GetNodeChannelCount", nodeID)}
 }
@@ -423,7 +423,7 @@ type MockRWChannelStore_Update_Call struct {
 }
 
 // Update is a helper method to define mock.On call
-//   - op *ChannelOpSet
+//  - op *ChannelOpSet
 func (_e *MockRWChannelStore_Expecter) Update(op interface{}) *MockRWChannelStore_Update_Call {
 	return &MockRWChannelStore_Update_Call{Call: _e.mock.On("Update", op)}
 }

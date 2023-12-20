@@ -61,8 +61,8 @@ type MockQueryNodeServer_Delete_Call struct {
 }
 
 // Delete is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *querypb.DeleteRequest
+//  - _a0 context.Context
+//  - _a1 *querypb.DeleteRequest
 func (_e *MockQueryNodeServer_Expecter) Delete(_a0 interface{}, _a1 interface{}) *MockQueryNodeServer_Delete_Call {
 	return &MockQueryNodeServer_Delete_Call{Call: _e.mock.On("Delete", _a0, _a1)}
 }
@@ -116,8 +116,8 @@ type MockQueryNodeServer_GetComponentStates_Call struct {
 }
 
 // GetComponentStates is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.GetComponentStatesRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.GetComponentStatesRequest
 func (_e *MockQueryNodeServer_Expecter) GetComponentStates(_a0 interface{}, _a1 interface{}) *MockQueryNodeServer_GetComponentStates_Call {
 	return &MockQueryNodeServer_GetComponentStates_Call{Call: _e.mock.On("GetComponentStates", _a0, _a1)}
 }
@@ -171,8 +171,8 @@ type MockQueryNodeServer_GetDataDistribution_Call struct {
 }
 
 // GetDataDistribution is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *querypb.GetDataDistributionRequest
+//  - _a0 context.Context
+//  - _a1 *querypb.GetDataDistributionRequest
 func (_e *MockQueryNodeServer_Expecter) GetDataDistribution(_a0 interface{}, _a1 interface{}) *MockQueryNodeServer_GetDataDistribution_Call {
 	return &MockQueryNodeServer_GetDataDistribution_Call{Call: _e.mock.On("GetDataDistribution", _a0, _a1)}
 }
@@ -226,8 +226,8 @@ type MockQueryNodeServer_GetMetrics_Call struct {
 }
 
 // GetMetrics is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.GetMetricsRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.GetMetricsRequest
 func (_e *MockQueryNodeServer_Expecter) GetMetrics(_a0 interface{}, _a1 interface{}) *MockQueryNodeServer_GetMetrics_Call {
 	return &MockQueryNodeServer_GetMetrics_Call{Call: _e.mock.On("GetMetrics", _a0, _a1)}
 }
@@ -281,8 +281,8 @@ type MockQueryNodeServer_GetSegmentInfo_Call struct {
 }
 
 // GetSegmentInfo is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *querypb.GetSegmentInfoRequest
+//  - _a0 context.Context
+//  - _a1 *querypb.GetSegmentInfoRequest
 func (_e *MockQueryNodeServer_Expecter) GetSegmentInfo(_a0 interface{}, _a1 interface{}) *MockQueryNodeServer_GetSegmentInfo_Call {
 	return &MockQueryNodeServer_GetSegmentInfo_Call{Call: _e.mock.On("GetSegmentInfo", _a0, _a1)}
 }
@@ -336,8 +336,8 @@ type MockQueryNodeServer_GetStatistics_Call struct {
 }
 
 // GetStatistics is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *querypb.GetStatisticsRequest
+//  - _a0 context.Context
+//  - _a1 *querypb.GetStatisticsRequest
 func (_e *MockQueryNodeServer_Expecter) GetStatistics(_a0 interface{}, _a1 interface{}) *MockQueryNodeServer_GetStatistics_Call {
 	return &MockQueryNodeServer_GetStatistics_Call{Call: _e.mock.On("GetStatistics", _a0, _a1)}
 }
@@ -391,8 +391,8 @@ type MockQueryNodeServer_GetStatisticsChannel_Call struct {
 }
 
 // GetStatisticsChannel is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *internalpb.GetStatisticsChannelRequest
+//  - _a0 context.Context
+//  - _a1 *internalpb.GetStatisticsChannelRequest
 func (_e *MockQueryNodeServer_Expecter) GetStatisticsChannel(_a0 interface{}, _a1 interface{}) *MockQueryNodeServer_GetStatisticsChannel_Call {
 	return &MockQueryNodeServer_GetStatisticsChannel_Call{Call: _e.mock.On("GetStatisticsChannel", _a0, _a1)}
 }
@@ -446,8 +446,8 @@ type MockQueryNodeServer_GetTimeTickChannel_Call struct {
 }
 
 // GetTimeTickChannel is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *internalpb.GetTimeTickChannelRequest
+//  - _a0 context.Context
+//  - _a1 *internalpb.GetTimeTickChannelRequest
 func (_e *MockQueryNodeServer_Expecter) GetTimeTickChannel(_a0 interface{}, _a1 interface{}) *MockQueryNodeServer_GetTimeTickChannel_Call {
 	return &MockQueryNodeServer_GetTimeTickChannel_Call{Call: _e.mock.On("GetTimeTickChannel", _a0, _a1)}
 }
@@ -501,8 +501,8 @@ type MockQueryNodeServer_LoadPartitions_Call struct {
 }
 
 // LoadPartitions is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *querypb.LoadPartitionsRequest
+//  - _a0 context.Context
+//  - _a1 *querypb.LoadPartitionsRequest
 func (_e *MockQueryNodeServer_Expecter) LoadPartitions(_a0 interface{}, _a1 interface{}) *MockQueryNodeServer_LoadPartitions_Call {
 	return &MockQueryNodeServer_LoadPartitions_Call{Call: _e.mock.On("LoadPartitions", _a0, _a1)}
 }
@@ -556,8 +556,8 @@ type MockQueryNodeServer_LoadSegments_Call struct {
 }
 
 // LoadSegments is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *querypb.LoadSegmentsRequest
+//  - _a0 context.Context
+//  - _a1 *querypb.LoadSegmentsRequest
 func (_e *MockQueryNodeServer_Expecter) LoadSegments(_a0 interface{}, _a1 interface{}) *MockQueryNodeServer_LoadSegments_Call {
 	return &MockQueryNodeServer_LoadSegments_Call{Call: _e.mock.On("LoadSegments", _a0, _a1)}
 }
@@ -611,8 +611,8 @@ type MockQueryNodeServer_Query_Call struct {
 }
 
 // Query is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *querypb.QueryRequest
+//  - _a0 context.Context
+//  - _a1 *querypb.QueryRequest
 func (_e *MockQueryNodeServer_Expecter) Query(_a0 interface{}, _a1 interface{}) *MockQueryNodeServer_Query_Call {
 	return &MockQueryNodeServer_Query_Call{Call: _e.mock.On("Query", _a0, _a1)}
 }
@@ -666,8 +666,8 @@ type MockQueryNodeServer_QuerySegments_Call struct {
 }
 
 // QuerySegments is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *querypb.QueryRequest
+//  - _a0 context.Context
+//  - _a1 *querypb.QueryRequest
 func (_e *MockQueryNodeServer_Expecter) QuerySegments(_a0 interface{}, _a1 interface{}) *MockQueryNodeServer_QuerySegments_Call {
 	return &MockQueryNodeServer_QuerySegments_Call{Call: _e.mock.On("QuerySegments", _a0, _a1)}
 }
@@ -709,8 +709,8 @@ type MockQueryNodeServer_QueryStream_Call struct {
 }
 
 // QueryStream is a helper method to define mock.On call
-//   - _a0 *querypb.QueryRequest
-//   - _a1 querypb.QueryNode_QueryStreamServer
+//  - _a0 *querypb.QueryRequest
+//  - _a1 querypb.QueryNode_QueryStreamServer
 func (_e *MockQueryNodeServer_Expecter) QueryStream(_a0 interface{}, _a1 interface{}) *MockQueryNodeServer_QueryStream_Call {
 	return &MockQueryNodeServer_QueryStream_Call{Call: _e.mock.On("QueryStream", _a0, _a1)}
 }
@@ -752,8 +752,8 @@ type MockQueryNodeServer_QueryStreamSegments_Call struct {
 }
 
 // QueryStreamSegments is a helper method to define mock.On call
-//   - _a0 *querypb.QueryRequest
-//   - _a1 querypb.QueryNode_QueryStreamSegmentsServer
+//  - _a0 *querypb.QueryRequest
+//  - _a1 querypb.QueryNode_QueryStreamSegmentsServer
 func (_e *MockQueryNodeServer_Expecter) QueryStreamSegments(_a0 interface{}, _a1 interface{}) *MockQueryNodeServer_QueryStreamSegments_Call {
 	return &MockQueryNodeServer_QueryStreamSegments_Call{Call: _e.mock.On("QueryStreamSegments", _a0, _a1)}
 }
@@ -807,8 +807,8 @@ type MockQueryNodeServer_ReleaseCollection_Call struct {
 }
 
 // ReleaseCollection is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *querypb.ReleaseCollectionRequest
+//  - _a0 context.Context
+//  - _a1 *querypb.ReleaseCollectionRequest
 func (_e *MockQueryNodeServer_Expecter) ReleaseCollection(_a0 interface{}, _a1 interface{}) *MockQueryNodeServer_ReleaseCollection_Call {
 	return &MockQueryNodeServer_ReleaseCollection_Call{Call: _e.mock.On("ReleaseCollection", _a0, _a1)}
 }
@@ -862,8 +862,8 @@ type MockQueryNodeServer_ReleasePartitions_Call struct {
 }
 
 // ReleasePartitions is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *querypb.ReleasePartitionsRequest
+//  - _a0 context.Context
+//  - _a1 *querypb.ReleasePartitionsRequest
 func (_e *MockQueryNodeServer_Expecter) ReleasePartitions(_a0 interface{}, _a1 interface{}) *MockQueryNodeServer_ReleasePartitions_Call {
 	return &MockQueryNodeServer_ReleasePartitions_Call{Call: _e.mock.On("ReleasePartitions", _a0, _a1)}
 }
@@ -917,8 +917,8 @@ type MockQueryNodeServer_ReleaseSegments_Call struct {
 }
 
 // ReleaseSegments is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *querypb.ReleaseSegmentsRequest
+//  - _a0 context.Context
+//  - _a1 *querypb.ReleaseSegmentsRequest
 func (_e *MockQueryNodeServer_Expecter) ReleaseSegments(_a0 interface{}, _a1 interface{}) *MockQueryNodeServer_ReleaseSegments_Call {
 	return &MockQueryNodeServer_ReleaseSegments_Call{Call: _e.mock.On("ReleaseSegments", _a0, _a1)}
 }
@@ -972,8 +972,8 @@ type MockQueryNodeServer_Search_Call struct {
 }
 
 // Search is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *querypb.SearchRequest
+//  - _a0 context.Context
+//  - _a1 *querypb.SearchRequest
 func (_e *MockQueryNodeServer_Expecter) Search(_a0 interface{}, _a1 interface{}) *MockQueryNodeServer_Search_Call {
 	return &MockQueryNodeServer_Search_Call{Call: _e.mock.On("Search", _a0, _a1)}
 }
@@ -1027,8 +1027,8 @@ type MockQueryNodeServer_SearchSegments_Call struct {
 }
 
 // SearchSegments is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *querypb.SearchRequest
+//  - _a0 context.Context
+//  - _a1 *querypb.SearchRequest
 func (_e *MockQueryNodeServer_Expecter) SearchSegments(_a0 interface{}, _a1 interface{}) *MockQueryNodeServer_SearchSegments_Call {
 	return &MockQueryNodeServer_SearchSegments_Call{Call: _e.mock.On("SearchSegments", _a0, _a1)}
 }
@@ -1082,8 +1082,8 @@ type MockQueryNodeServer_ShowConfigurations_Call struct {
 }
 
 // ShowConfigurations is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *internalpb.ShowConfigurationsRequest
+//  - _a0 context.Context
+//  - _a1 *internalpb.ShowConfigurationsRequest
 func (_e *MockQueryNodeServer_Expecter) ShowConfigurations(_a0 interface{}, _a1 interface{}) *MockQueryNodeServer_ShowConfigurations_Call {
 	return &MockQueryNodeServer_ShowConfigurations_Call{Call: _e.mock.On("ShowConfigurations", _a0, _a1)}
 }
@@ -1137,8 +1137,8 @@ type MockQueryNodeServer_SyncDistribution_Call struct {
 }
 
 // SyncDistribution is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *querypb.SyncDistributionRequest
+//  - _a0 context.Context
+//  - _a1 *querypb.SyncDistributionRequest
 func (_e *MockQueryNodeServer_Expecter) SyncDistribution(_a0 interface{}, _a1 interface{}) *MockQueryNodeServer_SyncDistribution_Call {
 	return &MockQueryNodeServer_SyncDistribution_Call{Call: _e.mock.On("SyncDistribution", _a0, _a1)}
 }
@@ -1192,8 +1192,8 @@ type MockQueryNodeServer_SyncReplicaSegments_Call struct {
 }
 
 // SyncReplicaSegments is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *querypb.SyncReplicaSegmentsRequest
+//  - _a0 context.Context
+//  - _a1 *querypb.SyncReplicaSegmentsRequest
 func (_e *MockQueryNodeServer_Expecter) SyncReplicaSegments(_a0 interface{}, _a1 interface{}) *MockQueryNodeServer_SyncReplicaSegments_Call {
 	return &MockQueryNodeServer_SyncReplicaSegments_Call{Call: _e.mock.On("SyncReplicaSegments", _a0, _a1)}
 }
@@ -1247,8 +1247,8 @@ type MockQueryNodeServer_UnsubDmChannel_Call struct {
 }
 
 // UnsubDmChannel is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *querypb.UnsubDmChannelRequest
+//  - _a0 context.Context
+//  - _a1 *querypb.UnsubDmChannelRequest
 func (_e *MockQueryNodeServer_Expecter) UnsubDmChannel(_a0 interface{}, _a1 interface{}) *MockQueryNodeServer_UnsubDmChannel_Call {
 	return &MockQueryNodeServer_UnsubDmChannel_Call{Call: _e.mock.On("UnsubDmChannel", _a0, _a1)}
 }
@@ -1302,8 +1302,8 @@ type MockQueryNodeServer_WatchDmChannels_Call struct {
 }
 
 // WatchDmChannels is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *querypb.WatchDmChannelsRequest
+//  - _a0 context.Context
+//  - _a1 *querypb.WatchDmChannelsRequest
 func (_e *MockQueryNodeServer_Expecter) WatchDmChannels(_a0 interface{}, _a1 interface{}) *MockQueryNodeServer_WatchDmChannels_Call {
 	return &MockQueryNodeServer_WatchDmChannels_Call{Call: _e.mock.On("WatchDmChannels", _a0, _a1)}
 }

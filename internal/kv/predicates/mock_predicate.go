@@ -37,7 +37,7 @@ type MockPredicate_IsTrue_Call struct {
 }
 
 // IsTrue is a helper method to define mock.On call
-//   - _a0 interface{}
+//  - _a0 interface{}
 func (_e *MockPredicate_Expecter) IsTrue(_a0 interface{}) *MockPredicate_IsTrue_Call {
 	return &MockPredicate_IsTrue_Call{Call: _e.mock.On("IsTrue", _a0)}
 }

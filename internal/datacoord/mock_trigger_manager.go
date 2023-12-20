@@ -28,9 +28,9 @@ type MockTriggerManager_Notify_Call struct {
 }
 
 // Notify is a helper method to define mock.On call
-//   - _a0 int64
-//   - _a1 CompactionTriggerType
-//   - _a2 []CompactionView
+//  - _a0 int64
+//  - _a1 CompactionTriggerType
+//  - _a2 []CompactionView
 func (_e *MockTriggerManager_Expecter) Notify(_a0 interface{}, _a1 interface{}, _a2 interface{}) *MockTriggerManager_Notify_Call {
 	return &MockTriggerManager_Notify_Call{Call: _e.mock.On("Notify", _a0, _a1, _a2)}
 }

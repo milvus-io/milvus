@@ -23,7 +23,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 )
 
-type ImportTaskManager interface {
+type ImportMeta interface {
 	Add(task ImportTask) error
 	Update(taskID int64, actions ...UpdateAction) error
 	Get(taskID int64) ImportTask
@@ -31,14 +31,14 @@ type ImportTaskManager interface {
 	Remove(taskID int64) error
 }
 
-type importTaskManager struct {
+type importMeta struct {
 	mu    sync.RWMutex // guards tasks
 	tasks map[int64]ImportTask
 
 	catalog metastore.DataCoordCatalog
 }
 
-func NewImportTaskManager(catalog metastore.DataCoordCatalog) (ImportTaskManager, error) {
+func NewImportMeta(catalog metastore.DataCoordCatalog) (ImportMeta, error) {
 	restoredTasks, err := catalog.ListImportTasks()
 	if err != nil {
 		return nil, err
@@ -52,24 +52,33 @@ func NewImportTaskManager(catalog metastore.DataCoordCatalog) (ImportTaskManager
 			tasks[task.GetTaskID()] = &importTask{task}
 		}
 	}
-	return &importTaskManager{
+	return &importMeta{
 		tasks:   tasks,
 		catalog: catalog,
 	}, nil
 }
 
-func (m *importTaskManager) Add(task ImportTask) error {
+func (m *importMeta) Add(task ImportTask) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	err := m.catalog.SaveImportTask(task.(*importTask).ImportTaskV2)
-	if err != nil {
-		return err
+	switch task.GetType() {
+	case PreImportTaskType:
+		err := m.catalog.SaveImportTask(task.(*preImportTask).PreImportTask)
+		if err != nil {
+			return err
+		}
+		m.tasks[task.GetTaskID()] = task
+	case ImportTaskType:
+		err := m.catalog.SaveImportTask(task.(*importTask).ImportTaskV2)
+		if err != nil {
+			return err
+		}
+		m.tasks[task.GetTaskID()] = task
 	}
-	m.tasks[task.GetTaskID()] = task
 	return nil
 }
 
-func (m *importTaskManager) Update(taskID int64, actions ...UpdateAction) error {
+func (m *importMeta) Update(taskID int64, actions ...UpdateAction) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if task, ok := m.tasks[taskID]; ok {
@@ -77,30 +86,40 @@ func (m *importTaskManager) Update(taskID int64, actions ...UpdateAction) error 
 		for _, action := range actions {
 			action(updatedTask)
 		}
-		err := m.catalog.SaveImportTask(updatedTask.(*importTask).ImportTaskV2)
-		if err != nil {
-			return err
+		switch updatedTask.GetType() {
+		case PreImportTaskType:
+			err := m.catalog.SaveImportTask(updatedTask.(*preImportTask).PreImportTask)
+			if err != nil {
+				return err
+			}
+			m.tasks[updatedTask.GetTaskID()] = updatedTask
+		case ImportTaskType:
+			err := m.catalog.SaveImportTask(updatedTask.(*importTask).ImportTaskV2)
+			if err != nil {
+				return err
+			}
+			m.tasks[updatedTask.GetTaskID()] = updatedTask
 		}
-		m.tasks[taskID] = updatedTask
 	}
 
 	return nil
 }
 
-func (m *importTaskManager) Get(taskID int64) ImportTask {
+func (m *importMeta) Get(taskID int64) ImportTask {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.tasks[taskID]
 }
 
-func (m *importTaskManager) GetBy(filters ...ImportTaskFilter) []ImportTask {
+func (m *importMeta) GetBy(filters ...ImportTaskFilter) []ImportTask {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	ret := make([]ImportTask, 0)
+OUTER:
 	for _, task := range m.tasks {
 		for _, f := range filters {
 			if !f(task) {
-				continue
+				continue OUTER
 			}
 		}
 		ret = append(ret, task)
@@ -108,7 +127,7 @@ func (m *importTaskManager) GetBy(filters ...ImportTaskFilter) []ImportTask {
 	return ret
 }
 
-func (m *importTaskManager) Remove(taskID int64) error {
+func (m *importMeta) Remove(taskID int64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, ok := m.tasks[taskID]; ok {

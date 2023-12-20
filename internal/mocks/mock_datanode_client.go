@@ -632,76 +632,6 @@ func (_c *MockDataNodeClient_GetComponentStates_Call) RunAndReturn(run func(cont
 	return _c
 }
 
-// GetImportState provides a mock function with given fields: ctx, in, opts
-func (_m *MockDataNodeClient) GetImportState(ctx context.Context, in *datapb.GetImportStateRequest, opts ...grpc.CallOption) (*datapb.GetImportStateResponse, error) {
-	_va := make([]interface{}, len(opts))
-	for _i := range opts {
-		_va[_i] = opts[_i]
-	}
-	var _ca []interface{}
-	_ca = append(_ca, ctx, in)
-	_ca = append(_ca, _va...)
-	ret := _m.Called(_ca...)
-
-	var r0 *datapb.GetImportStateResponse
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *datapb.GetImportStateRequest, ...grpc.CallOption) (*datapb.GetImportStateResponse, error)); ok {
-		return rf(ctx, in, opts...)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, *datapb.GetImportStateRequest, ...grpc.CallOption) *datapb.GetImportStateResponse); ok {
-		r0 = rf(ctx, in, opts...)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*datapb.GetImportStateResponse)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context, *datapb.GetImportStateRequest, ...grpc.CallOption) error); ok {
-		r1 = rf(ctx, in, opts...)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// MockDataNodeClient_GetImportState_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetImportState'
-type MockDataNodeClient_GetImportState_Call struct {
-	*mock.Call
-}
-
-// GetImportState is a helper method to define mock.On call
-//  - ctx context.Context
-//  - in *datapb.GetImportStateRequest
-//  - opts ...grpc.CallOption
-func (_e *MockDataNodeClient_Expecter) GetImportState(ctx interface{}, in interface{}, opts ...interface{}) *MockDataNodeClient_GetImportState_Call {
-	return &MockDataNodeClient_GetImportState_Call{Call: _e.mock.On("GetImportState",
-		append([]interface{}{ctx, in}, opts...)...)}
-}
-
-func (_c *MockDataNodeClient_GetImportState_Call) Run(run func(ctx context.Context, in *datapb.GetImportStateRequest, opts ...grpc.CallOption)) *MockDataNodeClient_GetImportState_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		variadicArgs := make([]grpc.CallOption, len(args)-2)
-		for i, a := range args[2:] {
-			if a != nil {
-				variadicArgs[i] = a.(grpc.CallOption)
-			}
-		}
-		run(args[0].(context.Context), args[1].(*datapb.GetImportStateRequest), variadicArgs...)
-	})
-	return _c
-}
-
-func (_c *MockDataNodeClient_GetImportState_Call) Return(_a0 *datapb.GetImportStateResponse, _a1 error) *MockDataNodeClient_GetImportState_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *MockDataNodeClient_GetImportState_Call) RunAndReturn(run func(context.Context, *datapb.GetImportStateRequest, ...grpc.CallOption) (*datapb.GetImportStateResponse, error)) *MockDataNodeClient_GetImportState_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // GetMetrics provides a mock function with given fields: ctx, in, opts
 func (_m *MockDataNodeClient) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest, opts ...grpc.CallOption) (*milvuspb.GetMetricsResponse, error) {
 	_va := make([]interface{}, len(opts))
@@ -1118,6 +1048,146 @@ func (_c *MockDataNodeClient_PreImport_Call) Return(_a0 *commonpb.Status, _a1 er
 }
 
 func (_c *MockDataNodeClient_PreImport_Call) RunAndReturn(run func(context.Context, *datapb.PreImportRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockDataNodeClient_PreImport_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// QueryImport provides a mock function with given fields: ctx, in, opts
+func (_m *MockDataNodeClient) QueryImport(ctx context.Context, in *datapb.QueryImportRequest, opts ...grpc.CallOption) (*datapb.QueryImportResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	var r0 *datapb.QueryImportResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.QueryImportRequest, ...grpc.CallOption) (*datapb.QueryImportResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.QueryImportRequest, ...grpc.CallOption) *datapb.QueryImportResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.QueryImportResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.QueryImportRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockDataNodeClient_QueryImport_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'QueryImport'
+type MockDataNodeClient_QueryImport_Call struct {
+	*mock.Call
+}
+
+// QueryImport is a helper method to define mock.On call
+//  - ctx context.Context
+//  - in *datapb.QueryImportRequest
+//  - opts ...grpc.CallOption
+func (_e *MockDataNodeClient_Expecter) QueryImport(ctx interface{}, in interface{}, opts ...interface{}) *MockDataNodeClient_QueryImport_Call {
+	return &MockDataNodeClient_QueryImport_Call{Call: _e.mock.On("QueryImport",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockDataNodeClient_QueryImport_Call) Run(run func(ctx context.Context, in *datapb.QueryImportRequest, opts ...grpc.CallOption)) *MockDataNodeClient_QueryImport_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*datapb.QueryImportRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockDataNodeClient_QueryImport_Call) Return(_a0 *datapb.QueryImportResponse, _a1 error) *MockDataNodeClient_QueryImport_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDataNodeClient_QueryImport_Call) RunAndReturn(run func(context.Context, *datapb.QueryImportRequest, ...grpc.CallOption) (*datapb.QueryImportResponse, error)) *MockDataNodeClient_QueryImport_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// QueryPreImport provides a mock function with given fields: ctx, in, opts
+func (_m *MockDataNodeClient) QueryPreImport(ctx context.Context, in *datapb.QueryPreImportRequest, opts ...grpc.CallOption) (*datapb.QueryPreImportResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	var r0 *datapb.QueryPreImportResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.QueryPreImportRequest, ...grpc.CallOption) (*datapb.QueryPreImportResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.QueryPreImportRequest, ...grpc.CallOption) *datapb.QueryPreImportResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.QueryPreImportResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.QueryPreImportRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockDataNodeClient_QueryPreImport_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'QueryPreImport'
+type MockDataNodeClient_QueryPreImport_Call struct {
+	*mock.Call
+}
+
+// QueryPreImport is a helper method to define mock.On call
+//  - ctx context.Context
+//  - in *datapb.QueryPreImportRequest
+//  - opts ...grpc.CallOption
+func (_e *MockDataNodeClient_Expecter) QueryPreImport(ctx interface{}, in interface{}, opts ...interface{}) *MockDataNodeClient_QueryPreImport_Call {
+	return &MockDataNodeClient_QueryPreImport_Call{Call: _e.mock.On("QueryPreImport",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockDataNodeClient_QueryPreImport_Call) Run(run func(ctx context.Context, in *datapb.QueryPreImportRequest, opts ...grpc.CallOption)) *MockDataNodeClient_QueryPreImport_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*datapb.QueryPreImportRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockDataNodeClient_QueryPreImport_Call) Return(_a0 *datapb.QueryPreImportResponse, _a1 error) *MockDataNodeClient_QueryPreImport_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDataNodeClient_QueryPreImport_Call) RunAndReturn(run func(context.Context, *datapb.QueryPreImportRequest, ...grpc.CallOption) (*datapb.QueryPreImportResponse, error)) *MockDataNodeClient_QueryPreImport_Call {
 	_c.Call.Return(run)
 	return _c
 }

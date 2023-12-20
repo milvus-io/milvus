@@ -59,8 +59,8 @@ type MockGrpcClient_Call_Call[T grpcclient.GrpcComponent] struct {
 }
 
 // Call is a helper method to define mock.On call
-//   - ctx context.Context
-//   - caller func(T)(interface{} , error)
+//  - ctx context.Context
+//  - caller func(T)(interface{} , error)
 func (_e *MockGrpcClient_Expecter[T]) Call(ctx interface{}, caller interface{}) *MockGrpcClient_Call_Call[T] {
 	return &MockGrpcClient_Call_Call[T]{Call: _e.mock.On("Call", ctx, caller)}
 }
@@ -269,8 +269,8 @@ type MockGrpcClient_ReCall_Call[T grpcclient.GrpcComponent] struct {
 }
 
 // ReCall is a helper method to define mock.On call
-//   - ctx context.Context
-//   - caller func(T)(interface{} , error)
+//  - ctx context.Context
+//  - caller func(T)(interface{} , error)
 func (_e *MockGrpcClient_Expecter[T]) ReCall(ctx interface{}, caller interface{}) *MockGrpcClient_ReCall_Call[T] {
 	return &MockGrpcClient_ReCall_Call[T]{Call: _e.mock.On("ReCall", ctx, caller)}
 }
@@ -303,7 +303,7 @@ type MockGrpcClient_SetGetAddrFunc_Call[T grpcclient.GrpcComponent] struct {
 }
 
 // SetGetAddrFunc is a helper method to define mock.On call
-//   - _a0 func()(string , error)
+//  - _a0 func()(string , error)
 func (_e *MockGrpcClient_Expecter[T]) SetGetAddrFunc(_a0 interface{}) *MockGrpcClient_SetGetAddrFunc_Call[T] {
 	return &MockGrpcClient_SetGetAddrFunc_Call[T]{Call: _e.mock.On("SetGetAddrFunc", _a0)}
 }
@@ -336,7 +336,7 @@ type MockGrpcClient_SetNewGrpcClientFunc_Call[T grpcclient.GrpcComponent] struct
 }
 
 // SetNewGrpcClientFunc is a helper method to define mock.On call
-//   - _a0 func(*grpc.ClientConn) T
+//  - _a0 func(*grpc.ClientConn) T
 func (_e *MockGrpcClient_Expecter[T]) SetNewGrpcClientFunc(_a0 interface{}) *MockGrpcClient_SetNewGrpcClientFunc_Call[T] {
 	return &MockGrpcClient_SetNewGrpcClientFunc_Call[T]{Call: _e.mock.On("SetNewGrpcClientFunc", _a0)}
 }
@@ -369,7 +369,7 @@ type MockGrpcClient_SetNodeID_Call[T grpcclient.GrpcComponent] struct {
 }
 
 // SetNodeID is a helper method to define mock.On call
-//   - _a0 int64
+//  - _a0 int64
 func (_e *MockGrpcClient_Expecter[T]) SetNodeID(_a0 interface{}) *MockGrpcClient_SetNodeID_Call[T] {
 	return &MockGrpcClient_SetNodeID_Call[T]{Call: _e.mock.On("SetNodeID", _a0)}
 }
@@ -402,7 +402,7 @@ type MockGrpcClient_SetRole_Call[T grpcclient.GrpcComponent] struct {
 }
 
 // SetRole is a helper method to define mock.On call
-//   - _a0 string
+//  - _a0 string
 func (_e *MockGrpcClient_Expecter[T]) SetRole(_a0 interface{}) *MockGrpcClient_SetRole_Call[T] {
 	return &MockGrpcClient_SetRole_Call[T]{Call: _e.mock.On("SetRole", _a0)}
 }
@@ -435,7 +435,7 @@ type MockGrpcClient_SetSession_Call[T grpcclient.GrpcComponent] struct {
 }
 
 // SetSession is a helper method to define mock.On call
-//   - sess *sessionutil.Session
+//  - sess *sessionutil.Session
 func (_e *MockGrpcClient_Expecter[T]) SetSession(sess interface{}) *MockGrpcClient_SetSession_Call[T] {
 	return &MockGrpcClient_SetSession_Call[T]{Call: _e.mock.On("SetSession", sess)}
 }

@@ -101,17 +101,12 @@ func (m *GrpcDataNodeClient) ImportV2(ctx context.Context, req *datapb.ImportReq
 	return &commonpb.Status{}, m.Err
 }
 
-<<<<<<< HEAD
-func (m *GrpcDataNodeClient) GetImportState(ctx context.Context, req *datapb.GetImportStateRequest, opts ...grpc.CallOption) (*datapb.GetImportStateResponse, error) {
-	return &datapb.GetImportStateResponse{}, m.Err
-=======
 func (m *GrpcDataNodeClient) QueryPreImport(ctx context.Context, req *datapb.QueryPreImportRequest, opts ...grpc.CallOption) (*datapb.QueryPreImportResponse, error) {
 	return &datapb.QueryPreImportResponse{}, m.Err
 }
 
 func (m *GrpcDataNodeClient) QueryImport(ctx context.Context, req *datapb.QueryImportRequest, opts ...grpc.CallOption) (*datapb.QueryImportResponse, error) {
 	return &datapb.QueryImportResponse{}, m.Err
->>>>>>> bfca0a79269a246661154b0830715469056738fe
 }
 
 func (m *GrpcDataNodeClient) DropImport(ctx context.Context, req *datapb.DropImportRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {

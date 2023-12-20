@@ -42,7 +42,7 @@ type MockCompactionMeta_GetHealthySegment_Call struct {
 }
 
 // GetHealthySegment is a helper method to define mock.On call
-//   - segID int64
+//  - segID int64
 func (_e *MockCompactionMeta_Expecter) GetHealthySegment(segID interface{}) *MockCompactionMeta_GetHealthySegment_Call {
 	return &MockCompactionMeta_GetHealthySegment_Call{Call: _e.mock.On("GetHealthySegment", segID)}
 }
@@ -114,8 +114,8 @@ type MockCompactionMeta_PrepareCompleteCompactionMutation_Call struct {
 }
 
 // PrepareCompleteCompactionMutation is a helper method to define mock.On call
-//   - plan *datapb.CompactionPlan
-//   - result *datapb.CompactionPlanResult
+//  - plan *datapb.CompactionPlan
+//  - result *datapb.CompactionPlanResult
 func (_e *MockCompactionMeta_Expecter) PrepareCompleteCompactionMutation(plan interface{}, result interface{}) *MockCompactionMeta_PrepareCompleteCompactionMutation_Call {
 	return &MockCompactionMeta_PrepareCompleteCompactionMutation_Call{Call: _e.mock.On("PrepareCompleteCompactionMutation", plan, result)}
 }
@@ -159,7 +159,7 @@ type MockCompactionMeta_SelectSegments_Call struct {
 }
 
 // SelectSegments is a helper method to define mock.On call
-//   - selector SegmentInfoSelector
+//  - selector SegmentInfoSelector
 func (_e *MockCompactionMeta_Expecter) SelectSegments(selector interface{}) *MockCompactionMeta_SelectSegments_Call {
 	return &MockCompactionMeta_SelectSegments_Call{Call: _e.mock.On("SelectSegments", selector)}
 }
@@ -192,8 +192,8 @@ type MockCompactionMeta_SetSegmentCompacting_Call struct {
 }
 
 // SetSegmentCompacting is a helper method to define mock.On call
-//   - segmentID int64
-//   - compacting bool
+//  - segmentID int64
+//  - compacting bool
 func (_e *MockCompactionMeta_Expecter) SetSegmentCompacting(segmentID interface{}, compacting interface{}) *MockCompactionMeta_SetSegmentCompacting_Call {
 	return &MockCompactionMeta_SetSegmentCompacting_Call{Call: _e.mock.On("SetSegmentCompacting", segmentID, compacting)}
 }
@@ -241,7 +241,7 @@ type MockCompactionMeta_UpdateSegmentsInfo_Call struct {
 }
 
 // UpdateSegmentsInfo is a helper method to define mock.On call
-//   - operators ...UpdateOperator
+//  - operators ...UpdateOperator
 func (_e *MockCompactionMeta_Expecter) UpdateSegmentsInfo(operators ...interface{}) *MockCompactionMeta_UpdateSegmentsInfo_Call {
 	return &MockCompactionMeta_UpdateSegmentsInfo_Call{Call: _e.mock.On("UpdateSegmentsInfo",
 		append([]interface{}{}, operators...)...)}
@@ -290,8 +290,8 @@ type MockCompactionMeta_alterMetaStoreAfterCompaction_Call struct {
 }
 
 // alterMetaStoreAfterCompaction is a helper method to define mock.On call
-//   - segmentCompactTo *SegmentInfo
-//   - segmentsCompactFrom []*SegmentInfo
+//  - segmentCompactTo *SegmentInfo
+//  - segmentsCompactFrom []*SegmentInfo
 func (_e *MockCompactionMeta_Expecter) alterMetaStoreAfterCompaction(segmentCompactTo interface{}, segmentsCompactFrom interface{}) *MockCompactionMeta_alterMetaStoreAfterCompaction_Call {
 	return &MockCompactionMeta_alterMetaStoreAfterCompaction_Call{Call: _e.mock.On("alterMetaStoreAfterCompaction", segmentCompactTo, segmentsCompactFrom)}
 }

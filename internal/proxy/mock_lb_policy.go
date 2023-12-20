@@ -74,8 +74,8 @@ type MockLBPolicy_Execute_Call struct {
 }
 
 // Execute is a helper method to define mock.On call
-//   - ctx context.Context
-//   - workload CollectionWorkLoad
+//  - ctx context.Context
+//  - workload CollectionWorkLoad
 func (_e *MockLBPolicy_Expecter) Execute(ctx interface{}, workload interface{}) *MockLBPolicy_Execute_Call {
 	return &MockLBPolicy_Execute_Call{Call: _e.mock.On("Execute", ctx, workload)}
 }
@@ -117,8 +117,8 @@ type MockLBPolicy_ExecuteWithRetry_Call struct {
 }
 
 // ExecuteWithRetry is a helper method to define mock.On call
-//   - ctx context.Context
-//   - workload ChannelWorkload
+//  - ctx context.Context
+//  - workload ChannelWorkload
 func (_e *MockLBPolicy_Expecter) ExecuteWithRetry(ctx interface{}, workload interface{}) *MockLBPolicy_ExecuteWithRetry_Call {
 	return &MockLBPolicy_ExecuteWithRetry_Call{Call: _e.mock.On("ExecuteWithRetry", ctx, workload)}
 }
@@ -151,7 +151,7 @@ type MockLBPolicy_Start_Call struct {
 }
 
 // Start is a helper method to define mock.On call
-//   - ctx context.Context
+//  - ctx context.Context
 func (_e *MockLBPolicy_Expecter) Start(ctx interface{}) *MockLBPolicy_Start_Call {
 	return &MockLBPolicy_Start_Call{Call: _e.mock.On("Start", ctx)}
 }
@@ -184,8 +184,8 @@ type MockLBPolicy_UpdateCostMetrics_Call struct {
 }
 
 // UpdateCostMetrics is a helper method to define mock.On call
-//   - node int64
-//   - cost *internalpb.CostAggregation
+//  - node int64
+//  - cost *internalpb.CostAggregation
 func (_e *MockLBPolicy_Expecter) UpdateCostMetrics(node interface{}, cost interface{}) *MockLBPolicy_UpdateCostMetrics_Call {
 	return &MockLBPolicy_UpdateCostMetrics_Call{Call: _e.mock.On("UpdateCostMetrics", node, cost)}
 }

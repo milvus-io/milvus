@@ -52,7 +52,7 @@ type MockChannelsMgr_getChannels_Call struct {
 }
 
 // getChannels is a helper method to define mock.On call
-//   - collectionID int64
+//  - collectionID int64
 func (_e *MockChannelsMgr_Expecter) getChannels(collectionID interface{}) *MockChannelsMgr_getChannels_Call {
 	return &MockChannelsMgr_getChannels_Call{Call: _e.mock.On("getChannels", collectionID)}
 }
@@ -106,7 +106,7 @@ type MockChannelsMgr_getOrCreateDmlStream_Call struct {
 }
 
 // getOrCreateDmlStream is a helper method to define mock.On call
-//   - collectionID int64
+//  - collectionID int64
 func (_e *MockChannelsMgr_Expecter) getOrCreateDmlStream(collectionID interface{}) *MockChannelsMgr_getOrCreateDmlStream_Call {
 	return &MockChannelsMgr_getOrCreateDmlStream_Call{Call: _e.mock.On("getOrCreateDmlStream", collectionID)}
 }
@@ -160,7 +160,7 @@ type MockChannelsMgr_getVChannels_Call struct {
 }
 
 // getVChannels is a helper method to define mock.On call
-//   - collectionID int64
+//  - collectionID int64
 func (_e *MockChannelsMgr_Expecter) getVChannels(collectionID interface{}) *MockChannelsMgr_getVChannels_Call {
 	return &MockChannelsMgr_getVChannels_Call{Call: _e.mock.On("getVChannels", collectionID)}
 }
@@ -225,7 +225,7 @@ type MockChannelsMgr_removeDMLStream_Call struct {
 }
 
 // removeDMLStream is a helper method to define mock.On call
-//   - collectionID int64
+//  - collectionID int64
 func (_e *MockChannelsMgr_Expecter) removeDMLStream(collectionID interface{}) *MockChannelsMgr_removeDMLStream_Call {
 	return &MockChannelsMgr_removeDMLStream_Call{Call: _e.mock.On("removeDMLStream", collectionID)}
 }

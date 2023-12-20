@@ -85,7 +85,7 @@ type MockSession_ForceActiveStandby_Call struct {
 }
 
 // ForceActiveStandby is a helper method to define mock.On call
-//   - activateFunc func() error
+//  - activateFunc func() error
 func (_e *MockSession_Expecter) ForceActiveStandby(activateFunc interface{}) *MockSession_ForceActiveStandby_Call {
 	return &MockSession_ForceActiveStandby_Call{Call: _e.mock.On("ForceActiveStandby", activateFunc)}
 }
@@ -228,7 +228,7 @@ type MockSession_GetSessions_Call struct {
 }
 
 // GetSessions is a helper method to define mock.On call
-//   - prefix string
+//  - prefix string
 func (_e *MockSession_Expecter) GetSessions(prefix interface{}) *MockSession_GetSessions_Call {
 	return &MockSession_GetSessions_Call{Call: _e.mock.On("GetSessions", prefix)}
 }
@@ -289,8 +289,8 @@ type MockSession_GetSessionsWithVersionRange_Call struct {
 }
 
 // GetSessionsWithVersionRange is a helper method to define mock.On call
-//   - prefix string
-//   - r semver.Range
+//  - prefix string
+//  - r semver.Range
 func (_e *MockSession_Expecter) GetSessionsWithVersionRange(prefix interface{}, r interface{}) *MockSession_GetSessionsWithVersionRange_Call {
 	return &MockSession_GetSessionsWithVersionRange_Call{Call: _e.mock.On("GetSessionsWithVersionRange", prefix, r)}
 }
@@ -364,10 +364,10 @@ type MockSession_Init_Call struct {
 }
 
 // Init is a helper method to define mock.On call
-//   - serverName string
-//   - address string
-//   - exclusive bool
-//   - triggerKill bool
+//  - serverName string
+//  - address string
+//  - exclusive bool
+//  - triggerKill bool
 func (_e *MockSession_Expecter) Init(serverName interface{}, address interface{}, exclusive interface{}, triggerKill interface{}) *MockSession_Init_Call {
 	return &MockSession_Init_Call{Call: _e.mock.On("Init", serverName, address, exclusive, triggerKill)}
 }
@@ -441,8 +441,8 @@ type MockSession_LivenessCheck_Call struct {
 }
 
 // LivenessCheck is a helper method to define mock.On call
-//   - ctx context.Context
-//   - callback func()
+//  - ctx context.Context
+//  - callback func()
 func (_e *MockSession_Expecter) LivenessCheck(ctx interface{}, callback interface{}) *MockSession_LivenessCheck_Call {
 	return &MockSession_LivenessCheck_Call{Call: _e.mock.On("LivenessCheck", ctx, callback)}
 }
@@ -537,7 +537,7 @@ type MockSession_ProcessActiveStandBy_Call struct {
 }
 
 // ProcessActiveStandBy is a helper method to define mock.On call
-//   - activateFunc func() error
+//  - activateFunc func() error
 func (_e *MockSession_Expecter) ProcessActiveStandBy(activateFunc interface{}) *MockSession_ProcessActiveStandBy_Call {
 	return &MockSession_ProcessActiveStandBy_Call{Call: _e.mock.On("ProcessActiveStandBy", activateFunc)}
 }
@@ -643,7 +643,7 @@ type MockSession_Revoke_Call struct {
 }
 
 // Revoke is a helper method to define mock.On call
-//   - timeout time.Duration
+//  - timeout time.Duration
 func (_e *MockSession_Expecter) Revoke(timeout interface{}) *MockSession_Revoke_Call {
 	return &MockSession_Revoke_Call{Call: _e.mock.On("Revoke", timeout)}
 }
@@ -676,7 +676,7 @@ type MockSession_SetDisconnected_Call struct {
 }
 
 // SetDisconnected is a helper method to define mock.On call
-//   - b bool
+//  - b bool
 func (_e *MockSession_Expecter) SetDisconnected(b interface{}) *MockSession_SetDisconnected_Call {
 	return &MockSession_SetDisconnected_Call{Call: _e.mock.On("SetDisconnected", b)}
 }
@@ -709,7 +709,7 @@ type MockSession_SetEnableActiveStandBy_Call struct {
 }
 
 // SetEnableActiveStandBy is a helper method to define mock.On call
-//   - enable bool
+//  - enable bool
 func (_e *MockSession_Expecter) SetEnableActiveStandBy(enable interface{}) *MockSession_SetEnableActiveStandBy_Call {
 	return &MockSession_SetEnableActiveStandBy_Call{Call: _e.mock.On("SetEnableActiveStandBy", enable)}
 }
@@ -824,7 +824,7 @@ type MockSession_UnmarshalJSON_Call struct {
 }
 
 // UnmarshalJSON is a helper method to define mock.On call
-//   - data []byte
+//  - data []byte
 func (_e *MockSession_Expecter) UnmarshalJSON(data interface{}) *MockSession_UnmarshalJSON_Call {
 	return &MockSession_UnmarshalJSON_Call{Call: _e.mock.On("UnmarshalJSON", data)}
 }
@@ -857,7 +857,7 @@ type MockSession_UpdateRegistered_Call struct {
 }
 
 // UpdateRegistered is a helper method to define mock.On call
-//   - b bool
+//  - b bool
 func (_e *MockSession_Expecter) UpdateRegistered(b interface{}) *MockSession_UpdateRegistered_Call {
 	return &MockSession_UpdateRegistered_Call{Call: _e.mock.On("UpdateRegistered", b)}
 }
@@ -901,9 +901,9 @@ type MockSession_WatchServices_Call struct {
 }
 
 // WatchServices is a helper method to define mock.On call
-//   - prefix string
-//   - revision int64
-//   - rewatch Rewatch
+//  - prefix string
+//  - revision int64
+//  - rewatch Rewatch
 func (_e *MockSession_Expecter) WatchServices(prefix interface{}, revision interface{}, rewatch interface{}) *MockSession_WatchServices_Call {
 	return &MockSession_WatchServices_Call{Call: _e.mock.On("WatchServices", prefix, revision, rewatch)}
 }
@@ -947,10 +947,10 @@ type MockSession_WatchServicesWithVersionRange_Call struct {
 }
 
 // WatchServicesWithVersionRange is a helper method to define mock.On call
-//   - prefix string
-//   - r semver.Range
-//   - revision int64
-//   - rewatch Rewatch
+//  - prefix string
+//  - r semver.Range
+//  - revision int64
+//  - rewatch Rewatch
 func (_e *MockSession_Expecter) WatchServicesWithVersionRange(prefix interface{}, r interface{}, revision interface{}, rewatch interface{}) *MockSession_WatchServicesWithVersionRange_Call {
 	return &MockSession_WatchServicesWithVersionRange_Call{Call: _e.mock.On("WatchServicesWithVersionRange", prefix, r, revision, rewatch)}
 }
