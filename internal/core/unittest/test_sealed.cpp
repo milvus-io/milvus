@@ -373,7 +373,7 @@ TEST(Sealed, with_predicate_filter_all) {
     hnsw_sealed_segment->LoadIndex(hnsw_load_info);
 
     auto sr2 = hnsw_sealed_segment->Search(plan.get(), ph_group.get());
-    EXPECT_EQ(sr->unity_topK_, 0);
+    EXPECT_EQ(sr2->unity_topK_, 0);
     EXPECT_EQ(sr2->get_total_result_count(), 0);
 }
 
