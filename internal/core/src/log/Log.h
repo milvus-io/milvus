@@ -80,13 +80,13 @@
            GetThreadName().c_str())
 
 #define LOG_INFO(args...) \
-    DLOG(INFO) << SERVER_MODULE_FUNCTION << fmt::format(#args)
+    DLOG(INFO) << SERVER_MODULE_FUNCTION << fmt::format(args)
 #define LOG_WARN(args...) \
-    DLOG(WARNING) << SERVER_MODULE_FUNCTION << fmt::format(#args)
+    DLOG(WARNING) << SERVER_MODULE_FUNCTION << fmt::format(args)
 #define LOG_ERROR(args...) \
-    DLOG(ERROR) << SERVER_MODULE_FUNCTION << fmt::format(#args)
+    DLOG(ERROR) << SERVER_MODULE_FUNCTION << fmt::format(args)
 #define LOG_FATAL(args...) \
-    DLOG(FATAL) << SERVER_MODULE_FUNCTION << fmt::format(#args)
+    DLOG(FATAL) << SERVER_MODULE_FUNCTION << fmt::format(args)
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
