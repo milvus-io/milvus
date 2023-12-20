@@ -175,14 +175,22 @@ func (bt *BaseTable) initConfigsFromRemote() {
 	if etcdConfig.UseEmbedEtcd.GetAsBool() && !etcd.HasServer() {
 		return
 	}
+
 	info := &config.EtcdInfo{
-		UseEmbed:        etcdConfig.UseEmbedEtcd.GetAsBool(),
-		UseSSL:          etcdConfig.EtcdUseSSL.GetAsBool(),
-		Endpoints:       etcdConfig.Endpoints.GetAsStrings(),
-		CertFile:        etcdConfig.EtcdTLSCert.GetValue(),
-		KeyFile:         etcdConfig.EtcdTLSKey.GetValue(),
-		CaCertFile:      etcdConfig.EtcdTLSCACert.GetValue(),
-		MinVersion:      etcdConfig.EtcdTLSMinVersion.GetValue(),
+		EtcdConfig: etcd.EtcdConfig{
+			UseEmbed:             etcdConfig.UseEmbedEtcd.GetAsBool(),
+			UseSSL:               etcdConfig.EtcdUseSSL.GetAsBool(),
+			Endpoints:            etcdConfig.Endpoints.GetAsStrings(),
+			CertFile:             etcdConfig.EtcdTLSCert.GetValue(),
+			KeyFile:              etcdConfig.EtcdTLSKey.GetValue(),
+			CaCertFile:           etcdConfig.EtcdTLSCACert.GetValue(),
+			MinVersion:           etcdConfig.EtcdTLSMinVersion.GetValue(),
+			MaxRetries:           etcdConfig.GrpcMaxRetries.GetAsInt64(),
+			PerRetryTimeout:      etcdConfig.GrpcPerRetryTimeout.GetAsDuration(time.Millisecond),
+			DialTimeout:          etcdConfig.GrpcDialTimeout.GetAsDuration(time.Millisecond),
+			DialKeepAliveTime:    etcdConfig.GrpcDialKeepAliveTime.GetAsDuration(time.Millisecond),
+			DialKeepAliveTimeout: etcdConfig.GrpcDialKeepAliveTimeout.GetAsDuration(time.Millisecond),
+		},
 		KeyPrefix:       etcdConfig.RootPath.GetValue(),
 		RefreshInterval: time.Duration(refreshInterval) * time.Second,
 	}

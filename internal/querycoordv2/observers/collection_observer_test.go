@@ -170,16 +170,18 @@ func (suite *CollectionObserverSuite) SetupTest() {
 	suite.idAllocator = RandomIncrementIDAllocator()
 	log.Debug("create embedded etcd KV...")
 	config := GenerateEtcdConfig()
-	client, err := etcd.GetEtcdClient(
-		config.UseEmbedEtcd.GetAsBool(),
-		config.EtcdUseSSL.GetAsBool(),
-		config.Endpoints.GetAsStrings(),
-		config.EtcdTLSCert.GetValue(),
-		config.EtcdTLSKey.GetValue(),
-		config.EtcdTLSCACert.GetValue(),
-		config.EtcdTLSMinVersion.GetValue())
+	etcdInfo := &etcd.EtcdConfig{
+		UseEmbed:   config.UseEmbedEtcd.GetAsBool(),
+		UseSSL:     config.EtcdUseSSL.GetAsBool(),
+		Endpoints:  config.Endpoints.GetAsStrings(),
+		CertFile:   config.EtcdTLSCert.GetValue(),
+		KeyFile:    config.EtcdTLSKey.GetValue(),
+		CaCertFile: config.EtcdTLSCACert.GetValue(),
+		MinVersion: config.EtcdTLSMinVersion.GetValue(),
+	}
+	etcdCli, err := etcd.GetEtcdClient(etcdInfo)
 	suite.Require().NoError(err)
-	suite.kv = etcdkv.NewEtcdKV(client, Params.EtcdCfg.MetaRootPath.GetValue()+"-"+RandomMetaRootPath())
+	suite.kv = etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath.GetValue()+"-"+RandomMetaRootPath())
 	suite.Require().NoError(err)
 	log.Debug("create meta store...")
 	suite.store = querycoord.NewCatalog(suite.kv)

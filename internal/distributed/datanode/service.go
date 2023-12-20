@@ -220,7 +220,7 @@ func (s *Server) Stop() error {
 
 // init initializes Datanode's grpc service.
 func (s *Server) init() error {
-	etcdConfig := &paramtable.Get().EtcdCfg
+	config := &paramtable.Get().EtcdCfg
 	Params := &paramtable.Get().DataNodeGrpcServerCfg
 	ctx := context.Background()
 	if !funcutil.CheckPortAvailable(Params.Port.GetAsInt()) {
@@ -228,14 +228,21 @@ func (s *Server) init() error {
 		log.Warn("DataNode found available port during init", zap.Int("port", Params.Port.GetAsInt()))
 	}
 
-	etcdCli, err := etcd.GetEtcdClient(
-		etcdConfig.UseEmbedEtcd.GetAsBool(),
-		etcdConfig.EtcdUseSSL.GetAsBool(),
-		etcdConfig.Endpoints.GetAsStrings(),
-		etcdConfig.EtcdTLSCert.GetValue(),
-		etcdConfig.EtcdTLSKey.GetValue(),
-		etcdConfig.EtcdTLSCACert.GetValue(),
-		etcdConfig.EtcdTLSMinVersion.GetValue())
+	etcdInfo := &etcd.EtcdConfig{
+		UseEmbed:             config.UseEmbedEtcd.GetAsBool(),
+		UseSSL:               config.EtcdUseSSL.GetAsBool(),
+		Endpoints:            config.Endpoints.GetAsStrings(),
+		CertFile:             config.EtcdTLSCert.GetValue(),
+		KeyFile:              config.EtcdTLSKey.GetValue(),
+		CaCertFile:           config.EtcdTLSCACert.GetValue(),
+		MinVersion:           config.EtcdTLSMinVersion.GetValue(),
+		MaxRetries:           config.GrpcMaxRetries.GetAsInt64(),
+		PerRetryTimeout:      config.GrpcPerRetryTimeout.GetAsDuration(time.Millisecond),
+		DialTimeout:          config.GrpcDialTimeout.GetAsDuration(time.Millisecond),
+		DialKeepAliveTime:    config.GrpcDialKeepAliveTime.GetAsDuration(time.Millisecond),
+		DialKeepAliveTimeout: config.GrpcDialKeepAliveTimeout.GetAsDuration(time.Millisecond),
+	}
+	etcdCli, err := etcd.GetEtcdClient(etcdInfo)
 	if err != nil {
 		log.Error("failed to connect to etcd", zap.Error(err))
 		return err

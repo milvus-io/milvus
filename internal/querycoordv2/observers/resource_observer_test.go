@@ -58,16 +58,18 @@ func (suite *ResourceObserverSuite) SetupSuite() {
 func (suite *ResourceObserverSuite) SetupTest() {
 	var err error
 	config := GenerateEtcdConfig()
-	cli, err := etcd.GetEtcdClient(
-		config.UseEmbedEtcd.GetAsBool(),
-		config.EtcdUseSSL.GetAsBool(),
-		config.Endpoints.GetAsStrings(),
-		config.EtcdTLSCert.GetValue(),
-		config.EtcdTLSKey.GetValue(),
-		config.EtcdTLSCACert.GetValue(),
-		config.EtcdTLSMinVersion.GetValue())
+	etcdInfo := &etcd.EtcdConfig{
+		UseEmbed:   config.UseEmbedEtcd.GetAsBool(),
+		UseSSL:     config.EtcdUseSSL.GetAsBool(),
+		Endpoints:  config.Endpoints.GetAsStrings(),
+		CertFile:   config.EtcdTLSCert.GetValue(),
+		KeyFile:    config.EtcdTLSKey.GetValue(),
+		CaCertFile: config.EtcdTLSCACert.GetValue(),
+		MinVersion: config.EtcdTLSMinVersion.GetValue(),
+	}
+	etcdCli, err := etcd.GetEtcdClient(etcdInfo)
 	suite.Require().NoError(err)
-	suite.kv = etcdKV.NewEtcdKV(cli, config.MetaRootPath.GetValue())
+	suite.kv = etcdKV.NewEtcdKV(etcdCli, config.MetaRootPath.GetValue())
 
 	// meta
 	suite.store = mocks.NewQueryCoordCatalog(suite.T())

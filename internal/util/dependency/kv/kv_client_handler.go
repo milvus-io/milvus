@@ -3,6 +3,7 @@ package kvfactory
 import (
 	"fmt"
 	"sync"
+	"time"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 
@@ -61,13 +62,20 @@ func getEtcdAndPath() (*clientv3.Client, string) {
 
 // Function that calls the Etcd constructor
 func createEtcdClient() (*clientv3.Client, error) {
-	cfg := &paramtable.Get().ServiceParam
-	return etcd.GetEtcdClient(
-		cfg.EtcdCfg.UseEmbedEtcd.GetAsBool(),
-		cfg.EtcdCfg.EtcdUseSSL.GetAsBool(),
-		cfg.EtcdCfg.Endpoints.GetAsStrings(),
-		cfg.EtcdCfg.EtcdTLSCert.GetValue(),
-		cfg.EtcdCfg.EtcdTLSKey.GetValue(),
-		cfg.EtcdCfg.EtcdTLSCACert.GetValue(),
-		cfg.EtcdCfg.EtcdTLSMinVersion.GetValue())
+	config := &paramtable.Get().EtcdCfg
+	etcdInfo := &etcd.EtcdConfig{
+		UseEmbed:             config.UseEmbedEtcd.GetAsBool(),
+		UseSSL:               config.EtcdUseSSL.GetAsBool(),
+		Endpoints:            config.Endpoints.GetAsStrings(),
+		CertFile:             config.EtcdTLSCert.GetValue(),
+		KeyFile:              config.EtcdTLSKey.GetValue(),
+		CaCertFile:           config.EtcdTLSCACert.GetValue(),
+		MinVersion:           config.EtcdTLSMinVersion.GetValue(),
+		MaxRetries:           config.GrpcMaxRetries.GetAsInt64(),
+		PerRetryTimeout:      config.GrpcPerRetryTimeout.GetAsDuration(time.Millisecond),
+		DialTimeout:          config.GrpcDialTimeout.GetAsDuration(time.Millisecond),
+		DialKeepAliveTime:    config.GrpcDialKeepAliveTime.GetAsDuration(time.Millisecond),
+		DialKeepAliveTimeout: config.GrpcDialKeepAliveTimeout.GetAsDuration(time.Millisecond),
+	}
+	return etcd.GetEtcdClient(etcdInfo)
 }

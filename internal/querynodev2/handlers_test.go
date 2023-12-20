@@ -72,14 +72,17 @@ func (suite *HandlersSuite) SetupTest() {
 	// new node
 	suite.node = NewQueryNode(context.Background(), suite.factory)
 	// init etcd
-	suite.etcd, err = etcd.GetEtcdClient(
-		suite.params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
-		suite.params.EtcdCfg.EtcdUseSSL.GetAsBool(),
-		suite.params.EtcdCfg.Endpoints.GetAsStrings(),
-		suite.params.EtcdCfg.EtcdTLSCert.GetValue(),
-		suite.params.EtcdCfg.EtcdTLSKey.GetValue(),
-		suite.params.EtcdCfg.EtcdTLSCACert.GetValue(),
-		suite.params.EtcdCfg.EtcdTLSMinVersion.GetValue())
+	config := &suite.params.EtcdCfg
+	etcdInfo := &etcd.EtcdConfig{
+		UseEmbed:   config.UseEmbedEtcd.GetAsBool(),
+		UseSSL:     config.EtcdUseSSL.GetAsBool(),
+		Endpoints:  config.Endpoints.GetAsStrings(),
+		CertFile:   config.EtcdTLSCert.GetValue(),
+		KeyFile:    config.EtcdTLSKey.GetValue(),
+		CaCertFile: config.EtcdTLSCACert.GetValue(),
+		MinVersion: config.EtcdTLSMinVersion.GetValue(),
+	}
+	suite.etcd, err = etcd.GetEtcdClient(etcdInfo)
 	suite.NoError(err)
 }
 

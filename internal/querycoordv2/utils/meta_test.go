@@ -38,15 +38,18 @@ import (
 func TestSpawnReplicasWithRG(t *testing.T) {
 	paramtable.Init()
 	config := GenerateEtcdConfig()
-	cli, _ := etcd.GetEtcdClient(
-		config.UseEmbedEtcd.GetAsBool(),
-		config.EtcdUseSSL.GetAsBool(),
-		config.Endpoints.GetAsStrings(),
-		config.EtcdTLSCert.GetValue(),
-		config.EtcdTLSKey.GetValue(),
-		config.EtcdTLSCACert.GetValue(),
-		config.EtcdTLSMinVersion.GetValue())
-	kv := etcdKV.NewEtcdKV(cli, config.MetaRootPath.GetValue())
+	etcdInfo := &etcd.EtcdConfig{
+		UseEmbed:   config.UseEmbedEtcd.GetAsBool(),
+		UseSSL:     config.EtcdUseSSL.GetAsBool(),
+		Endpoints:  config.Endpoints.GetAsStrings(),
+		CertFile:   config.EtcdTLSCert.GetValue(),
+		KeyFile:    config.EtcdTLSKey.GetValue(),
+		CaCertFile: config.EtcdTLSCACert.GetValue(),
+		MinVersion: config.EtcdTLSMinVersion.GetValue(),
+	}
+	etcdCli, err := etcd.GetEtcdClient(etcdInfo)
+	assert.NoError(t, err)
+	kv := etcdKV.NewEtcdKV(etcdCli, config.MetaRootPath.GetValue())
 
 	store := querycoord.NewCatalog(kv)
 	nodeMgr := session.NewNodeManager()

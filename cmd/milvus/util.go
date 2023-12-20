@@ -210,7 +210,7 @@ func CleanSession(metaPath string, etcdEndpoints []string, sessionSuffix []strin
 		return nil
 	}
 
-	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
+	etcdCli, err := etcd.GetRemoteEtcdClient(&etcd.EtcdConfig{Endpoints: etcdEndpoints})
 	if err != nil {
 		return err
 	}

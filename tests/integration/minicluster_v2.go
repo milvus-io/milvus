@@ -99,22 +99,29 @@ func StartMiniClusterV2(ctx context.Context, opts ...OptionV2) (*MiniClusterV2, 
 		params.Save(k, v)
 	}
 	// setup etcd client
-	etcdConfig := &paramtable.Get().EtcdCfg
-	etcdCli, err := etcd.GetEtcdClient(
-		etcdConfig.UseEmbedEtcd.GetAsBool(),
-		etcdConfig.EtcdUseSSL.GetAsBool(),
-		etcdConfig.Endpoints.GetAsStrings(),
-		etcdConfig.EtcdTLSCert.GetValue(),
-		etcdConfig.EtcdTLSKey.GetValue(),
-		etcdConfig.EtcdTLSCACert.GetValue(),
-		etcdConfig.EtcdTLSMinVersion.GetValue())
+	config := &paramtable.Get().EtcdCfg
+	etcdInfo := &etcd.EtcdConfig{
+		UseEmbed:             config.UseEmbedEtcd.GetAsBool(),
+		UseSSL:               config.EtcdUseSSL.GetAsBool(),
+		Endpoints:            config.Endpoints.GetAsStrings(),
+		CertFile:             config.EtcdTLSCert.GetValue(),
+		KeyFile:              config.EtcdTLSKey.GetValue(),
+		CaCertFile:           config.EtcdTLSCACert.GetValue(),
+		MinVersion:           config.EtcdTLSMinVersion.GetValue(),
+		MaxRetries:           config.GrpcMaxRetries.GetAsInt64(),
+		PerRetryTimeout:      config.GrpcPerRetryTimeout.GetAsDuration(time.Millisecond),
+		DialTimeout:          config.GrpcDialTimeout.GetAsDuration(time.Millisecond),
+		DialKeepAliveTime:    config.GrpcDialKeepAliveTime.GetAsDuration(time.Millisecond),
+		DialKeepAliveTimeout: config.GrpcDialKeepAliveTimeout.GetAsDuration(time.Millisecond),
+	}
+	etcdCli, err := etcd.GetEtcdClient(etcdInfo)
 	if err != nil {
 		return nil, err
 	}
 	cluster.EtcdCli = etcdCli
 
 	cluster.MetaWatcher = &EtcdMetaWatcher{
-		rootPath: etcdConfig.RootPath.GetValue(),
+		rootPath: config.RootPath.GetValue(),
 		etcdCli:  cluster.EtcdCli,
 	}
 

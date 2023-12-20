@@ -62,6 +62,12 @@ func TestServiceParam(t *testing.T) {
 		t.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.StandaloneDeployMode)
 		t.Setenv("etcd.use.embed", "false")
 		SParams.init(bt)
+
+		assert.Equal(t, Params.GrpcMaxRetries.GetAsInt(), 100)
+		assert.Equal(t, Params.GrpcPerRetryTimeout.GetAsInt(), 10000)
+		assert.Equal(t, Params.GrpcDialTimeout.GetAsInt(), 5000)
+		assert.Equal(t, Params.GrpcDialKeepAliveTime.GetAsInt(), 5000)
+		assert.Equal(t, Params.GrpcDialKeepAliveTimeout.GetAsInt(), 5000)
 	})
 
 	t.Run("test tikvConfig", func(t *testing.T) {

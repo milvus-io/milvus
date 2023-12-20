@@ -53,14 +53,22 @@ func NewWatchKVFactory(rootPath string, etcdCfg *paramtable.EtcdConfig) (kv.Watc
 		}
 		return watchKv, err
 	}
-	client, err := etcd.GetEtcdClient(
-		etcdCfg.UseEmbedEtcd.GetAsBool(),
-		etcdCfg.EtcdUseSSL.GetAsBool(),
-		etcdCfg.Endpoints.GetAsStrings(),
-		etcdCfg.EtcdTLSCert.GetValue(),
-		etcdCfg.EtcdTLSKey.GetValue(),
-		etcdCfg.EtcdTLSCACert.GetValue(),
-		etcdCfg.EtcdTLSMinVersion.GetValue())
+
+	etcdInfo := &etcd.EtcdConfig{
+		UseEmbed:             etcdCfg.UseEmbedEtcd.GetAsBool(),
+		UseSSL:               etcdCfg.EtcdUseSSL.GetAsBool(),
+		Endpoints:            etcdCfg.Endpoints.GetAsStrings(),
+		CertFile:             etcdCfg.EtcdTLSCert.GetValue(),
+		KeyFile:              etcdCfg.EtcdTLSKey.GetValue(),
+		CaCertFile:           etcdCfg.EtcdTLSCACert.GetValue(),
+		MinVersion:           etcdCfg.EtcdTLSMinVersion.GetValue(),
+		MaxRetries:           etcdCfg.GrpcMaxRetries.GetAsInt64(),
+		PerRetryTimeout:      etcdCfg.GrpcPerRetryTimeout.GetAsDuration(time.Millisecond),
+		DialTimeout:          etcdCfg.GrpcDialTimeout.GetAsDuration(time.Millisecond),
+		DialKeepAliveTime:    etcdCfg.GrpcDialKeepAliveTime.GetAsDuration(time.Millisecond),
+		DialKeepAliveTimeout: etcdCfg.GrpcDialKeepAliveTimeout.GetAsDuration(time.Millisecond),
+	}
+	client, err := etcd.GetEtcdClient(etcdInfo)
 	if err != nil {
 		return nil, err
 	}

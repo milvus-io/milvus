@@ -36,14 +36,17 @@ import (
 func TestProxyManager(t *testing.T) {
 	paramtable.Init()
 
-	etcdCli, err := etcd.GetEtcdClient(
-		paramtable.Get().EtcdCfg.UseEmbedEtcd.GetAsBool(),
-		paramtable.Get().EtcdCfg.EtcdUseSSL.GetAsBool(),
-		paramtable.Get().EtcdCfg.Endpoints.GetAsStrings(),
-		paramtable.Get().EtcdCfg.EtcdTLSCert.GetValue(),
-		paramtable.Get().EtcdCfg.EtcdTLSKey.GetValue(),
-		paramtable.Get().EtcdCfg.EtcdTLSCACert.GetValue(),
-		paramtable.Get().EtcdCfg.EtcdTLSMinVersion.GetValue())
+	config := &Params.EtcdCfg
+	etcdInfo := &etcd.EtcdConfig{
+		UseEmbed:   config.UseEmbedEtcd.GetAsBool(),
+		UseSSL:     config.EtcdUseSSL.GetAsBool(),
+		Endpoints:  config.Endpoints.GetAsStrings(),
+		CertFile:   config.EtcdTLSCert.GetValue(),
+		KeyFile:    config.EtcdTLSKey.GetValue(),
+		CaCertFile: config.EtcdTLSCACert.GetValue(),
+		MinVersion: config.EtcdTLSMinVersion.GetValue(),
+	}
+	etcdCli, err := etcd.GetEtcdClient(etcdInfo)
 	assert.NoError(t, err)
 	defer etcdCli.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -112,14 +115,17 @@ func TestProxyManager(t *testing.T) {
 func TestProxyManager_ErrCompacted(t *testing.T) {
 	paramtable.Init()
 
-	etcdCli, err := etcd.GetEtcdClient(
-		paramtable.Get().EtcdCfg.UseEmbedEtcd.GetAsBool(),
-		paramtable.Get().EtcdCfg.EtcdUseSSL.GetAsBool(),
-		paramtable.Get().EtcdCfg.Endpoints.GetAsStrings(),
-		paramtable.Get().EtcdCfg.EtcdTLSCert.GetValue(),
-		paramtable.Get().EtcdCfg.EtcdTLSKey.GetValue(),
-		paramtable.Get().EtcdCfg.EtcdTLSCACert.GetValue(),
-		paramtable.Get().EtcdCfg.EtcdTLSMinVersion.GetValue())
+	config := &Params.EtcdCfg
+	etcdInfo := &etcd.EtcdConfig{
+		UseEmbed:   config.UseEmbedEtcd.GetAsBool(),
+		UseSSL:     config.EtcdUseSSL.GetAsBool(),
+		Endpoints:  config.Endpoints.GetAsStrings(),
+		CertFile:   config.EtcdTLSCert.GetValue(),
+		KeyFile:    config.EtcdTLSKey.GetValue(),
+		CaCertFile: config.EtcdTLSCACert.GetValue(),
+		MinVersion: config.EtcdTLSMinVersion.GetValue(),
+	}
+	etcdCli, err := etcd.GetEtcdClient(etcdInfo)
 	assert.NoError(t, err)
 	defer etcdCli.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)

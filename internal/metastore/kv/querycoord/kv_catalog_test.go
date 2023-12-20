@@ -26,17 +26,19 @@ func (suite *CatalogTestSuite) SetupSuite() {
 }
 
 func (suite *CatalogTestSuite) SetupTest() {
-	config := GenerateEtcdConfig()
-	cli, err := etcd.GetEtcdClient(
-		config.UseEmbedEtcd.GetAsBool(),
-		config.EtcdUseSSL.GetAsBool(),
-		config.Endpoints.GetAsStrings(),
-		config.EtcdTLSCert.GetValue(),
-		config.EtcdTLSKey.GetValue(),
-		config.EtcdTLSCACert.GetValue(),
-		config.EtcdTLSMinVersion.GetValue())
+	cfg := GenerateEtcdConfig()
+	etcdInfo := &etcd.EtcdConfig{
+		UseEmbed:   cfg.UseEmbedEtcd.GetAsBool(),
+		UseSSL:     cfg.EtcdUseSSL.GetAsBool(),
+		Endpoints:  cfg.Endpoints.GetAsStrings(),
+		CertFile:   cfg.EtcdTLSCert.GetValue(),
+		KeyFile:    cfg.EtcdTLSKey.GetValue(),
+		CaCertFile: cfg.EtcdTLSCACert.GetValue(),
+		MinVersion: cfg.EtcdTLSMinVersion.GetValue(),
+	}
+	cli, err := etcd.GetEtcdClient(etcdInfo)
 	suite.Require().NoError(err)
-	suite.kv = etcdkv.NewEtcdKV(cli, config.MetaRootPath.GetValue())
+	suite.kv = etcdkv.NewEtcdKV(cli, cfg.MetaRootPath.GetValue())
 	suite.catalog = NewCatalog(suite.kv)
 }
 

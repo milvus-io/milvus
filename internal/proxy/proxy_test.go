@@ -218,14 +218,17 @@ func runIndexNode(ctx context.Context, localMsg bool, alias string) *grpcindexno
 			panic(err)
 		}
 		wg.Done()
-		etcd, err := etcd.GetEtcdClient(
-			Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
-			Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
-			Params.EtcdCfg.Endpoints.GetAsStrings(),
-			Params.EtcdCfg.EtcdTLSCert.GetValue(),
-			Params.EtcdCfg.EtcdTLSKey.GetValue(),
-			Params.EtcdCfg.EtcdTLSCACert.GetValue(),
-			Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
+		cfg := &paramtable.Get().EtcdCfg
+		etcdInfo := &etcd.EtcdConfig{
+			UseEmbed:   cfg.UseEmbedEtcd.GetAsBool(),
+			UseSSL:     cfg.EtcdUseSSL.GetAsBool(),
+			Endpoints:  cfg.Endpoints.GetAsStrings(),
+			CertFile:   cfg.EtcdTLSCert.GetValue(),
+			KeyFile:    cfg.EtcdTLSKey.GetValue(),
+			CaCertFile: cfg.EtcdTLSCACert.GetValue(),
+			MinVersion: cfg.EtcdTLSMinVersion.GetValue(),
+		}
+		etcd, err := etcd.GetEtcdClient(etcdInfo)
 		if err != nil {
 			panic(err)
 		}
@@ -428,17 +431,20 @@ func TestProxy(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, proxy)
 
-	etcdcli, err := etcd.GetEtcdClient(
-		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
-		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
-		Params.EtcdCfg.Endpoints.GetAsStrings(),
-		Params.EtcdCfg.EtcdTLSCert.GetValue(),
-		Params.EtcdCfg.EtcdTLSKey.GetValue(),
-		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
-		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
-	defer etcdcli.Close()
+	cfg := &paramtable.Get().EtcdCfg
+	etcdInfo := &etcd.EtcdConfig{
+		UseEmbed:   cfg.UseEmbedEtcd.GetAsBool(),
+		UseSSL:     cfg.EtcdUseSSL.GetAsBool(),
+		Endpoints:  cfg.Endpoints.GetAsStrings(),
+		CertFile:   cfg.EtcdTLSCert.GetValue(),
+		KeyFile:    cfg.EtcdTLSKey.GetValue(),
+		CaCertFile: cfg.EtcdTLSCACert.GetValue(),
+		MinVersion: cfg.EtcdTLSMinVersion.GetValue(),
+	}
+	etcdCli, err := etcd.GetEtcdClient(etcdInfo)
+	defer etcdCli.Close()
 	assert.NoError(t, err)
-	proxy.SetEtcdClient(etcdcli)
+	proxy.SetEtcdClient(etcdCli)
 
 	testServer := newProxyTestServer(proxy)
 	wg.Add(1)

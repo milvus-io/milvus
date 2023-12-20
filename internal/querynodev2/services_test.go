@@ -124,14 +124,17 @@ func (suite *ServiceSuite) SetupTest() {
 	var err error
 	suite.node = NewQueryNode(ctx, suite.factory)
 	// init etcd
-	suite.etcdClient, err = etcd.GetEtcdClient(
-		paramtable.Get().EtcdCfg.UseEmbedEtcd.GetAsBool(),
-		paramtable.Get().EtcdCfg.EtcdUseSSL.GetAsBool(),
-		paramtable.Get().EtcdCfg.Endpoints.GetAsStrings(),
-		paramtable.Get().EtcdCfg.EtcdTLSCert.GetValue(),
-		paramtable.Get().EtcdCfg.EtcdTLSKey.GetValue(),
-		paramtable.Get().EtcdCfg.EtcdTLSCACert.GetValue(),
-		paramtable.Get().EtcdCfg.EtcdTLSMinVersion.GetValue())
+	config := &paramtable.Get().EtcdCfg
+	etcdInfo := &etcd.EtcdConfig{
+		UseEmbed:   config.UseEmbedEtcd.GetAsBool(),
+		UseSSL:     config.EtcdUseSSL.GetAsBool(),
+		Endpoints:  config.Endpoints.GetAsStrings(),
+		CertFile:   config.EtcdTLSCert.GetValue(),
+		KeyFile:    config.EtcdTLSKey.GetValue(),
+		CaCertFile: config.EtcdTLSCACert.GetValue(),
+		MinVersion: config.EtcdTLSMinVersion.GetValue(),
+	}
+	suite.etcdClient, err = etcd.GetEtcdClient(etcdInfo)
 	suite.NoError(err)
 	suite.node.SetEtcdClient(suite.etcdClient)
 	// init node

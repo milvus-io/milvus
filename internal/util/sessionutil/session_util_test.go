@@ -44,7 +44,7 @@ func TestGetServerIDConcurrently(t *testing.T) {
 	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
 
 	etcdEndpoints := strings.Split(endpoints, ",")
-	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
+	etcdCli, err := etcd.GetRemoteEtcdClient(&etcd.EtcdConfig{Endpoints: etcdEndpoints})
 	require.NoError(t, err)
 	defer etcdCli.Close()
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, metaRoot)
@@ -87,7 +87,7 @@ func TestInit(t *testing.T) {
 	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
 
 	etcdEndpoints := strings.Split(endpoints, ",")
-	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
+	etcdCli, err := etcd.GetRemoteEtcdClient(&etcd.EtcdConfig{Endpoints: etcdEndpoints})
 	require.NoError(t, err)
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, metaRoot)
 	err = etcdKV.RemoveWithPrefix("")
@@ -115,7 +115,7 @@ func TestInitNoArgs(t *testing.T) {
 	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
 
 	etcdEndpoints := strings.Split(endpoints, ",")
-	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
+	etcdCli, err := etcd.GetRemoteEtcdClient(&etcd.EtcdConfig{Endpoints: etcdEndpoints})
 	require.NoError(t, err)
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, metaRoot)
 	err = etcdKV.RemoveWithPrefix("")
@@ -142,7 +142,7 @@ func TestUpdateSessions(t *testing.T) {
 	endpoints := params.EtcdCfg.Endpoints.GetValue()
 	etcdEndpoints := strings.Split(endpoints, ",")
 	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
-	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
+	etcdCli, err := etcd.GetRemoteEtcdClient(&etcd.EtcdConfig{Endpoints: etcdEndpoints})
 	require.NoError(t, err)
 	defer etcdCli.Close()
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, "")
@@ -163,7 +163,7 @@ func TestUpdateSessions(t *testing.T) {
 	sList := []*Session{}
 
 	getIDFunc := func() {
-		etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
+		etcdCli, err := etcd.GetRemoteEtcdClient(&etcd.EtcdConfig{Endpoints: etcdEndpoints})
 		require.NoError(t, err)
 		singleS := NewSessionWithEtcd(ctx, metaRoot, etcdCli, WithResueNodeID(false))
 		singleS.Init("test", "testAddr", false, false)
@@ -220,7 +220,7 @@ func TestSessionLivenessCheck(t *testing.T) {
 	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
 
 	etcdEndpoints := strings.Split(endpoints, ",")
-	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
+	etcdCli, err := etcd.GetRemoteEtcdClient(&etcd.EtcdConfig{Endpoints: etcdEndpoints})
 	require.NoError(t, err)
 	s := NewSessionWithEtcd(context.Background(), metaRoot, etcdCli)
 	s.Register()
@@ -283,7 +283,7 @@ func TestWatcherHandleWatchResp(t *testing.T) {
 	etcdEndpoints := strings.Split(endpoints, ",")
 	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
 
-	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
+	etcdCli, err := etcd.GetRemoteEtcdClient(&etcd.EtcdConfig{Endpoints: etcdEndpoints})
 	require.NoError(t, err)
 	defer etcdCli.Close()
 
@@ -637,7 +637,7 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 	metaRoot := fmt.Sprintf("%d/%s1", rand.Int(), DefaultServiceRoot)
 
 	etcdEndpoints := strings.Split(endpoints, ",")
-	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
+	etcdCli, err := etcd.GetRemoteEtcdClient(&etcd.EtcdConfig{Endpoints: etcdEndpoints})
 	require.NoError(t, err)
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, metaRoot)
 	err = etcdKV.RemoveWithPrefix("")
@@ -784,7 +784,7 @@ func TestIntegrationMode(t *testing.T) {
 	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
 
 	etcdEndpoints := strings.Split(endpoints, ",")
-	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
+	etcdCli, err := etcd.GetRemoteEtcdClient(&etcd.EtcdConfig{Endpoints: etcdEndpoints})
 	require.NoError(t, err)
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, metaRoot)
 	err = etcdKV.RemoveWithPrefix("")

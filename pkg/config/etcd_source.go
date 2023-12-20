@@ -47,14 +47,8 @@ type EtcdSource struct {
 
 func NewEtcdSource(etcdInfo *EtcdInfo) (*EtcdSource, error) {
 	log.Debug("init etcd source", zap.Any("etcdInfo", etcdInfo))
-	etcdCli, err := etcd.GetEtcdClient(
-		etcdInfo.UseEmbed,
-		etcdInfo.UseSSL,
-		etcdInfo.Endpoints,
-		etcdInfo.CertFile,
-		etcdInfo.KeyFile,
-		etcdInfo.CaCertFile,
-		etcdInfo.MinVersion)
+	// todo: pass grpc config here
+	etcdCli, err := etcd.GetEtcdClient(&etcdInfo.EtcdConfig)
 	if err != nil {
 		return nil, err
 	}

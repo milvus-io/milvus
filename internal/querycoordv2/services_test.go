@@ -126,17 +126,19 @@ func (suite *ServiceSuite) SetupSuite() {
 }
 
 func (suite *ServiceSuite) SetupTest() {
-	config := params.GenerateEtcdConfig()
-	cli, err := etcd.GetEtcdClient(
-		config.UseEmbedEtcd.GetAsBool(),
-		config.EtcdUseSSL.GetAsBool(),
-		config.Endpoints.GetAsStrings(),
-		config.EtcdTLSCert.GetValue(),
-		config.EtcdTLSKey.GetValue(),
-		config.EtcdTLSCACert.GetValue(),
-		config.EtcdTLSMinVersion.GetValue())
+	cfg := params.GenerateEtcdConfig()
+	etcdInfo := &etcd.EtcdConfig{
+		UseEmbed:   cfg.UseEmbedEtcd.GetAsBool(),
+		UseSSL:     cfg.EtcdUseSSL.GetAsBool(),
+		Endpoints:  cfg.Endpoints.GetAsStrings(),
+		CertFile:   cfg.EtcdTLSCert.GetValue(),
+		KeyFile:    cfg.EtcdTLSKey.GetValue(),
+		CaCertFile: cfg.EtcdTLSCACert.GetValue(),
+		MinVersion: cfg.EtcdTLSMinVersion.GetValue(),
+	}
+	etcdCli, err := etcd.GetEtcdClient(etcdInfo)
 	suite.Require().NoError(err)
-	suite.kv = etcdkv.NewEtcdKV(cli, config.MetaRootPath.GetValue())
+	suite.kv = etcdkv.NewEtcdKV(etcdCli, cfg.MetaRootPath.GetValue())
 
 	suite.store = querycoord.NewCatalog(suite.kv)
 	suite.dist = meta.NewDistributionManager()
@@ -176,7 +178,7 @@ func (suite *ServiceSuite) SetupTest() {
 	suite.server = &Server{
 		kv:                  suite.kv,
 		store:               suite.store,
-		session:             sessionutil.NewSessionWithEtcd(context.Background(), Params.EtcdCfg.MetaRootPath.GetValue(), cli),
+		session:             sessionutil.NewSessionWithEtcd(context.Background(), Params.EtcdCfg.MetaRootPath.GetValue(), etcdCli),
 		metricsCacheManager: metricsinfo.NewMetricsCacheManager(),
 		dist:                suite.dist,
 		meta:                suite.meta,

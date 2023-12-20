@@ -25,58 +25,89 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	grpc_retry "github.com/grpc-ecosystem/go-grpc-middleware/retry"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus/pkg/log"
 )
 
 var maxTxnNum = 128
 
+type EtcdConfig struct {
+	UseEmbed   bool
+	UseSSL     bool
+	Endpoints  []string
+	CertFile   string
+	KeyFile    string
+	CaCertFile string
+	MinVersion string
+
+	MaxRetries           int64
+	PerRetryTimeout      time.Duration
+	DialTimeout          time.Duration
+	DialKeepAliveTime    time.Duration
+	DialKeepAliveTimeout time.Duration
+}
+
 // GetEtcdClient returns etcd client
-func GetEtcdClient(
-	useEmbedEtcd bool,
-	useSSL bool,
-	endpoints []string,
-	certFile string,
-	keyFile string,
-	caCertFile string,
-	minVersion string,
-) (*clientv3.Client, error) {
+func GetEtcdClient(etcdInfo *EtcdConfig) (*clientv3.Client, error) {
 	log.Info("create etcd client",
-		zap.Bool("useEmbedEtcd", useEmbedEtcd),
-		zap.Bool("useSSL", useSSL),
-		zap.Any("endpoints", endpoints),
-		zap.String("minVersion", minVersion))
-	if useEmbedEtcd {
+		zap.Bool("useEmbedEtcd", etcdInfo.UseEmbed),
+		zap.Bool("useSSL", etcdInfo.UseSSL),
+		zap.Any("endpoints", etcdInfo.Endpoints),
+		zap.String("minVersion", etcdInfo.MinVersion))
+	if etcdInfo.UseEmbed {
 		return GetEmbedEtcdClient()
 	}
-	if useSSL {
-		return GetRemoteEtcdSSLClient(endpoints, certFile, keyFile, caCertFile, minVersion)
+	if etcdInfo.UseSSL {
+		return GetRemoteEtcdSSLClient(etcdInfo)
 	}
-	return GetRemoteEtcdClient(endpoints)
+	return GetRemoteEtcdClient(etcdInfo)
 }
 
 // GetRemoteEtcdClient returns client of remote etcd by given endpoints
-func GetRemoteEtcdClient(endpoints []string) (*clientv3.Client, error) {
+func GetRemoteEtcdClient(etcdInfo *EtcdConfig) (*clientv3.Client, error) {
+	dialOptions := []grpc.DialOption{}
+
+	dialOptions = append(dialOptions, grpc.WithUnaryInterceptor(
+		grpc_retry.UnaryClientInterceptor(
+			grpc_retry.WithMax(uint(etcdInfo.MaxRetries)),
+			grpc_retry.WithPerRetryTimeout(etcdInfo.PerRetryTimeout),
+		),
+	))
 	return clientv3.New(clientv3.Config{
-		Endpoints:   endpoints,
-		DialTimeout: 5 * time.Second,
+		Endpoints:            etcdInfo.Endpoints,
+		DialTimeout:          etcdInfo.DialTimeout,
+		DialKeepAliveTime:    etcdInfo.DialKeepAliveTime,
+		DialKeepAliveTimeout: etcdInfo.DialKeepAliveTimeout,
+		DialOptions:          dialOptions,
 	})
 }
 
-func GetRemoteEtcdSSLClient(endpoints []string, certFile string, keyFile string, caCertFile string, minVersion string) (*clientv3.Client, error) {
+func GetRemoteEtcdSSLClient(etcdInfo *EtcdConfig) (*clientv3.Client, error) {
 	var cfg clientv3.Config
-	cfg.Endpoints = endpoints
-	cfg.DialTimeout = 5 * time.Second
-	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	cfg.Endpoints = etcdInfo.Endpoints
+	dialOptions := []grpc.DialOption{}
+	dialOptions = append(dialOptions, grpc.WithUnaryInterceptor(
+		grpc_retry.UnaryClientInterceptor(
+			grpc_retry.WithMax(uint(etcdInfo.MaxRetries)),
+			grpc_retry.WithPerRetryTimeout(etcdInfo.PerRetryTimeout),
+		),
+	))
+	cfg.DialOptions = dialOptions
+	cfg.DialTimeout = etcdInfo.DialTimeout
+	cfg.DialKeepAliveTime = etcdInfo.DialKeepAliveTime
+	cfg.DialKeepAliveTimeout = etcdInfo.DialKeepAliveTimeout
+	cert, err := tls.LoadX509KeyPair(etcdInfo.CertFile, etcdInfo.KeyFile)
 	if err != nil {
 		return nil, errors.Wrap(err, "load etcd cert key pair error")
 	}
-	caCert, err := os.ReadFile(caCertFile)
+	caCert, err := os.ReadFile(etcdInfo.CaCertFile)
 	if err != nil {
-		return nil, errors.Wrapf(err, "load etcd CACert file error, filename = %s", caCertFile)
+		return nil, errors.Wrapf(err, "load etcd CACert file error, filename = %s", etcdInfo.CaCertFile)
 	}
 
 	caCertPool := x509.NewCertPool()
@@ -88,7 +119,7 @@ func GetRemoteEtcdSSLClient(endpoints []string, certFile string, keyFile string,
 		},
 		RootCAs: caCertPool,
 	}
-	switch minVersion {
+	switch etcdInfo.MinVersion {
 	case "1.0":
 		cfg.TLS.MinVersion = tls.VersionTLS10
 	case "1.1":
@@ -102,7 +133,7 @@ func GetRemoteEtcdSSLClient(endpoints []string, certFile string, keyFile string,
 	}
 
 	if cfg.TLS.MinVersion == 0 {
-		return nil, errors.Errorf("unknown TLS version,%s", minVersion)
+		return nil, errors.Errorf("unknown TLS version,%s", etcdInfo.MinVersion)
 	}
 
 	return clientv3.New(cfg)

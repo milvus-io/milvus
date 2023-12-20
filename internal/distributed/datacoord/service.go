@@ -88,16 +88,23 @@ var getTiKVClient = tikv.GetTiKVClient
 
 func (s *Server) init() error {
 	params := paramtable.Get()
-	etcdConfig := &params.EtcdCfg
 
-	etcdCli, err := etcd.GetEtcdClient(
-		etcdConfig.UseEmbedEtcd.GetAsBool(),
-		etcdConfig.EtcdUseSSL.GetAsBool(),
-		etcdConfig.Endpoints.GetAsStrings(),
-		etcdConfig.EtcdTLSCert.GetValue(),
-		etcdConfig.EtcdTLSKey.GetValue(),
-		etcdConfig.EtcdTLSCACert.GetValue(),
-		etcdConfig.EtcdTLSMinVersion.GetValue())
+	config := &params.EtcdCfg
+	etcdInfo := &etcd.EtcdConfig{
+		UseEmbed:             config.UseEmbedEtcd.GetAsBool(),
+		UseSSL:               config.EtcdUseSSL.GetAsBool(),
+		Endpoints:            config.Endpoints.GetAsStrings(),
+		CertFile:             config.EtcdTLSCert.GetValue(),
+		KeyFile:              config.EtcdTLSKey.GetValue(),
+		CaCertFile:           config.EtcdTLSCACert.GetValue(),
+		MinVersion:           config.EtcdTLSMinVersion.GetValue(),
+		MaxRetries:           config.GrpcMaxRetries.GetAsInt64(),
+		PerRetryTimeout:      config.GrpcPerRetryTimeout.GetAsDuration(time.Millisecond),
+		DialTimeout:          config.GrpcDialTimeout.GetAsDuration(time.Millisecond),
+		DialKeepAliveTime:    config.GrpcDialKeepAliveTime.GetAsDuration(time.Millisecond),
+		DialKeepAliveTimeout: config.GrpcDialKeepAliveTimeout.GetAsDuration(time.Millisecond),
+	}
+	etcdCli, err := etcd.GetEtcdClient(etcdInfo)
 	if err != nil {
 		log.Debug("DataCoord connect to etcd failed", zap.Error(err))
 		return err

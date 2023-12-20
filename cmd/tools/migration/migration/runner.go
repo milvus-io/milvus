@@ -68,16 +68,24 @@ func (r *Runner) WatchSessions() {
 }
 
 func (r *Runner) initEtcdCli() {
-	cli, err := etcd.GetEtcdClient(
-		r.cfg.EtcdCfg.UseEmbedEtcd.GetAsBool(),
-		r.cfg.EtcdCfg.EtcdUseSSL.GetAsBool(),
-		r.cfg.EtcdCfg.Endpoints.GetAsStrings(),
-		r.cfg.EtcdCfg.EtcdTLSCert.GetValue(),
-		r.cfg.EtcdCfg.EtcdTLSKey.GetValue(),
-		r.cfg.EtcdCfg.EtcdTLSCACert.GetValue(),
-		r.cfg.EtcdCfg.EtcdTLSMinVersion.GetValue())
+	config := r.cfg.EtcdCfg
+	etcdInfo := &etcd.EtcdConfig{
+		UseEmbed:             config.UseEmbedEtcd.GetAsBool(),
+		UseSSL:               config.EtcdUseSSL.GetAsBool(),
+		Endpoints:            config.Endpoints.GetAsStrings(),
+		CertFile:             config.EtcdTLSCert.GetValue(),
+		KeyFile:              config.EtcdTLSKey.GetValue(),
+		CaCertFile:           config.EtcdTLSCACert.GetValue(),
+		MinVersion:           config.EtcdTLSMinVersion.GetValue(),
+		MaxRetries:           config.GrpcMaxRetries.GetAsInt64(),
+		PerRetryTimeout:      config.GrpcPerRetryTimeout.GetAsDuration(time.Millisecond),
+		DialTimeout:          config.GrpcDialTimeout.GetAsDuration(time.Millisecond),
+		DialKeepAliveTime:    config.GrpcDialKeepAliveTime.GetAsDuration(time.Millisecond),
+		DialKeepAliveTimeout: config.GrpcDialKeepAliveTimeout.GetAsDuration(time.Millisecond),
+	}
+	etcdCli, err := etcd.GetEtcdClient(etcdInfo)
 	console.AbnormalExitIf(err, r.backupFinished.Load())
-	r.etcdCli = cli
+	r.etcdCli = etcdCli
 }
 
 func (r *Runner) init() {

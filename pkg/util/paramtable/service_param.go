@@ -107,6 +107,13 @@ type EtcdConfig struct {
 	UseEmbedEtcd ParamItem `refreshable:"false"`
 	ConfigPath   ParamItem `refreshable:"false"`
 	DataDir      ParamItem `refreshable:"false"`
+
+	// --- internal grpc connection ---
+	GrpcMaxRetries           ParamItem `refreshable:"false"`
+	GrpcPerRetryTimeout      ParamItem `refreshable:"false"`
+	GrpcDialTimeout          ParamItem `refreshable:"false"`
+	GrpcDialKeepAliveTime    ParamItem `refreshable:"false"`
+	GrpcDialKeepAliveTimeout ParamItem `refreshable:"false"`
 }
 
 func (p *EtcdConfig) Init(base *BaseTable) {
@@ -261,12 +268,58 @@ We recommend using version 1.2 and above.`,
 
 	p.RequestTimeout = ParamItem{
 		Key:          "etcd.requestTimeout",
-		DefaultValue: "10000",
+		DefaultValue: "30000",
 		Version:      "2.3.4",
 		Doc:          `Etcd operation timeout in milliseconds`,
 		Export:       true,
 	}
 	p.RequestTimeout.Init(base.mgr)
+
+	p.GrpcMaxRetries = ParamItem{
+		Key:          "etcd.grpc.maxRetries",
+		DefaultValue: "100",
+		Version:      "2.3.4",
+		Doc:          `grpc request max retry times in grpc`,
+		Export:       true,
+	}
+	p.GrpcMaxRetries.Init(base.mgr)
+
+	p.GrpcPerRetryTimeout = ParamItem{
+		Key:          "etcd.grpc.perRetryTimeout",
+		DefaultValue: "10000",
+		Version:      "2.3.4",
+		Doc:          `grpc request timeout for each retry, in milliseconds`,
+		Export:       true,
+	}
+	p.GrpcPerRetryTimeout.Init(base.mgr)
+
+	p.GrpcDialTimeout = ParamItem{
+		Key:          "etcd.grpc.dialKeepaLiveTimeout",
+		DefaultValue: "5000",
+		Version:      "2.3.4",
+		Doc:          `the timeout for failing to establish a connection`,
+		Export:       true,
+	}
+	p.GrpcDialTimeout.Init(base.mgr)
+
+	p.GrpcDialKeepAliveTime = ParamItem{
+		Key:          "etcd.grpc.dialKeepaLiveTime",
+		DefaultValue: "5000",
+		Version:      "2.3.4",
+		Doc:          `the time after which client pings the server to see if transport is alive, in milliseconds`,
+		Export:       true,
+	}
+	p.GrpcDialKeepAliveTime.Init(base.mgr)
+
+	p.GrpcDialKeepAliveTimeout = ParamItem{
+		Key:          "etcd.grpc.dialKeepaLiveTimeout",
+		DefaultValue: "5000",
+		Version:      "2.3.4",
+		Doc: `the time that the client waits for a response for the keep-alive probe. 
+		If the response is not received in this time, the connection is closed, in milliseconds`,
+		Export: true,
+	}
+	p.GrpcDialKeepAliveTimeout.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

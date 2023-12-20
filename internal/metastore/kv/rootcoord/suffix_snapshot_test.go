@@ -278,14 +278,17 @@ func Test_SuffixSnapshotLoad(t *testing.T) {
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 	sep := "_ts"
 
-	etcdCli, err := etcd.GetEtcdClient(
-		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
-		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
-		Params.EtcdCfg.Endpoints.GetAsStrings(),
-		Params.EtcdCfg.EtcdTLSCert.GetValue(),
-		Params.EtcdCfg.EtcdTLSKey.GetValue(),
-		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
-		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
+	cfg := &paramtable.Get().EtcdCfg
+	etcdInfo := &etcd.EtcdConfig{
+		UseEmbed:   cfg.UseEmbedEtcd.GetAsBool(),
+		UseSSL:     cfg.EtcdUseSSL.GetAsBool(),
+		Endpoints:  cfg.Endpoints.GetAsStrings(),
+		CertFile:   cfg.EtcdTLSCert.GetValue(),
+		KeyFile:    cfg.EtcdTLSKey.GetValue(),
+		CaCertFile: cfg.EtcdTLSCACert.GetValue(),
+		MinVersion: cfg.EtcdTLSMinVersion.GetValue(),
+	}
+	etcdCli, err := etcd.GetEtcdClient(etcdInfo)
 	require.Nil(t, err)
 	defer etcdCli.Close()
 	etcdkv := etcdkv.NewEtcdKV(etcdCli, rootPath)
@@ -333,14 +336,17 @@ func Test_SuffixSnapshotMultiSave(t *testing.T) {
 
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 	sep := "_ts"
-	etcdCli, err := etcd.GetEtcdClient(
-		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
-		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
-		Params.EtcdCfg.Endpoints.GetAsStrings(),
-		Params.EtcdCfg.EtcdTLSCert.GetValue(),
-		Params.EtcdCfg.EtcdTLSKey.GetValue(),
-		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
-		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
+	cfg := &paramtable.Get().EtcdCfg
+	etcdInfo := &etcd.EtcdConfig{
+		UseEmbed:   cfg.UseEmbedEtcd.GetAsBool(),
+		UseSSL:     cfg.EtcdUseSSL.GetAsBool(),
+		Endpoints:  cfg.Endpoints.GetAsStrings(),
+		CertFile:   cfg.EtcdTLSCert.GetValue(),
+		KeyFile:    cfg.EtcdTLSKey.GetValue(),
+		CaCertFile: cfg.EtcdTLSCACert.GetValue(),
+		MinVersion: cfg.EtcdTLSMinVersion.GetValue(),
+	}
+	etcdCli, err := etcd.GetEtcdClient(etcdInfo)
 	require.Nil(t, err)
 	defer etcdCli.Close()
 	etcdkv := etcdkv.NewEtcdKV(etcdCli, rootPath)
@@ -413,14 +419,17 @@ func Test_SuffixSnapshotRemoveExpiredKvs(t *testing.T) {
 	rootPath := fmt.Sprintf("/test/meta/remove-expired-test-%d", randVal)
 	sep := "_ts"
 
-	etcdCli, err := etcd.GetEtcdClient(
-		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
-		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
-		Params.EtcdCfg.Endpoints.GetAsStrings(),
-		Params.EtcdCfg.EtcdTLSCert.GetValue(),
-		Params.EtcdCfg.EtcdTLSKey.GetValue(),
-		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
-		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
+	cfg := &paramtable.Get().EtcdCfg
+	etcdInfo := &etcd.EtcdConfig{
+		UseEmbed:   cfg.UseEmbedEtcd.GetAsBool(),
+		UseSSL:     cfg.EtcdUseSSL.GetAsBool(),
+		Endpoints:  cfg.Endpoints.GetAsStrings(),
+		CertFile:   cfg.EtcdTLSCert.GetValue(),
+		KeyFile:    cfg.EtcdTLSKey.GetValue(),
+		CaCertFile: cfg.EtcdTLSCACert.GetValue(),
+		MinVersion: cfg.EtcdTLSMinVersion.GetValue(),
+	}
+	etcdCli, err := etcd.GetEtcdClient(etcdInfo)
 	assert.NoError(t, err)
 	defer etcdCli.Close()
 	etcdkv := etcdkv.NewEtcdKV(etcdCli, rootPath)
@@ -588,14 +597,17 @@ func Test_SuffixSnapshotMultiSaveAndRemoveWithPrefix(t *testing.T) {
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 	sep := "_ts"
 
-	etcdCli, err := etcd.GetEtcdClient(
-		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
-		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
-		Params.EtcdCfg.Endpoints.GetAsStrings(),
-		Params.EtcdCfg.EtcdTLSCert.GetValue(),
-		Params.EtcdCfg.EtcdTLSKey.GetValue(),
-		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
-		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
+	cfg := &paramtable.Get().EtcdCfg
+	etcdInfo := &etcd.EtcdConfig{
+		UseEmbed:   cfg.UseEmbedEtcd.GetAsBool(),
+		UseSSL:     cfg.EtcdUseSSL.GetAsBool(),
+		Endpoints:  cfg.Endpoints.GetAsStrings(),
+		CertFile:   cfg.EtcdTLSCert.GetValue(),
+		KeyFile:    cfg.EtcdTLSKey.GetValue(),
+		CaCertFile: cfg.EtcdTLSCACert.GetValue(),
+		MinVersion: cfg.EtcdTLSMinVersion.GetValue(),
+	}
+	etcdCli, err := etcd.GetEtcdClient(etcdInfo)
 	require.Nil(t, err)
 	defer etcdCli.Close()
 	etcdkv := etcdkv.NewEtcdKV(etcdCli, rootPath)
@@ -680,14 +692,17 @@ func TestSuffixSnapshot_LoadWithPrefix(t *testing.T) {
 	rootPath := fmt.Sprintf("/test/meta/loadWithPrefix-test-%d", randVal)
 	sep := "_ts"
 
-	etcdCli, err := etcd.GetEtcdClient(
-		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
-		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
-		Params.EtcdCfg.Endpoints.GetAsStrings(),
-		Params.EtcdCfg.EtcdTLSCert.GetValue(),
-		Params.EtcdCfg.EtcdTLSKey.GetValue(),
-		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
-		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
+	cfg := &paramtable.Get().EtcdCfg
+	etcdInfo := &etcd.EtcdConfig{
+		UseEmbed:   cfg.UseEmbedEtcd.GetAsBool(),
+		UseSSL:     cfg.EtcdUseSSL.GetAsBool(),
+		Endpoints:  cfg.Endpoints.GetAsStrings(),
+		CertFile:   cfg.EtcdTLSCert.GetValue(),
+		KeyFile:    cfg.EtcdTLSKey.GetValue(),
+		CaCertFile: cfg.EtcdTLSCACert.GetValue(),
+		MinVersion: cfg.EtcdTLSMinVersion.GetValue(),
+	}
+	etcdCli, err := etcd.GetEtcdClient(etcdInfo)
 	assert.NoError(t, err)
 	defer etcdCli.Close()
 	etcdkv := etcdkv.NewEtcdKV(etcdCli, rootPath)

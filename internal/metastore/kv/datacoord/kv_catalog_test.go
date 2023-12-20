@@ -1108,14 +1108,17 @@ func TestCatalog_Compress(t *testing.T) {
 
 func BenchmarkCatalog_List1000Segments(b *testing.B) {
 	paramtable.Init()
-	etcdCli, err := etcd.GetEtcdClient(
-		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
-		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
-		Params.EtcdCfg.Endpoints.GetAsStrings(),
-		Params.EtcdCfg.EtcdTLSCert.GetValue(),
-		Params.EtcdCfg.EtcdTLSKey.GetValue(),
-		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
-		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
+	cfg := &paramtable.Get().EtcdCfg
+	etcdInfo := &etcd.EtcdConfig{
+		UseEmbed:   cfg.UseEmbedEtcd.GetAsBool(),
+		UseSSL:     cfg.EtcdUseSSL.GetAsBool(),
+		Endpoints:  cfg.Endpoints.GetAsStrings(),
+		CertFile:   cfg.EtcdTLSCert.GetValue(),
+		KeyFile:    cfg.EtcdTLSKey.GetValue(),
+		CaCertFile: cfg.EtcdTLSCACert.GetValue(),
+		MinVersion: cfg.EtcdTLSMinVersion.GetValue(),
+	}
+	etcdCli, err := etcd.GetEtcdClient(etcdInfo)
 	if err != nil {
 		log.Fatal(err)
 	}

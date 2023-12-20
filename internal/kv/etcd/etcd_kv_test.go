@@ -54,14 +54,17 @@ type EtcdKVSuite struct {
 }
 
 func (s *EtcdKVSuite) SetupSuite() {
-	etcdCli, err := etcd.GetEtcdClient(
-		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
-		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
-		Params.EtcdCfg.Endpoints.GetAsStrings(),
-		Params.EtcdCfg.EtcdTLSCert.GetValue(),
-		Params.EtcdCfg.EtcdTLSKey.GetValue(),
-		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
-		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
+	etcdConfig := &Params.EtcdCfg
+	etcdInfo := &etcd.EtcdConfig{
+		UseEmbed:   etcdConfig.UseEmbedEtcd.GetAsBool(),
+		UseSSL:     etcdConfig.EtcdUseSSL.GetAsBool(),
+		Endpoints:  etcdConfig.Endpoints.GetAsStrings(),
+		CertFile:   etcdConfig.EtcdTLSCert.GetValue(),
+		KeyFile:    etcdConfig.EtcdTLSKey.GetValue(),
+		CaCertFile: etcdConfig.EtcdTLSCACert.GetValue(),
+		MinVersion: etcdConfig.EtcdTLSMinVersion.GetValue(),
+	}
+	etcdCli, err := etcd.GetEtcdClient(etcdInfo)
 	s.Require().NoError(err)
 
 	s.etcdCli = etcdCli
@@ -706,16 +709,19 @@ func TestEtcdKV(t *testing.T) {
 }
 
 func Test_WalkWithPagination(t *testing.T) {
-	etcdCli, err := etcd.GetEtcdClient(
-		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
-		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
-		Params.EtcdCfg.Endpoints.GetAsStrings(),
-		Params.EtcdCfg.EtcdTLSCert.GetValue(),
-		Params.EtcdCfg.EtcdTLSKey.GetValue(),
-		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
-		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
-	defer etcdCli.Close()
+	etcdConfig := &Params.EtcdCfg
+	etcdInfo := &etcd.EtcdConfig{
+		UseEmbed:   etcdConfig.UseEmbedEtcd.GetAsBool(),
+		UseSSL:     etcdConfig.EtcdUseSSL.GetAsBool(),
+		Endpoints:  etcdConfig.Endpoints.GetAsStrings(),
+		CertFile:   etcdConfig.EtcdTLSCert.GetValue(),
+		KeyFile:    etcdConfig.EtcdTLSKey.GetValue(),
+		CaCertFile: etcdConfig.EtcdTLSCACert.GetValue(),
+		MinVersion: etcdConfig.EtcdTLSMinVersion.GetValue(),
+	}
+	etcdCli, err := etcd.GetEtcdClient(etcdInfo)
 	assert.NoError(t, err)
+	defer etcdCli.Close()
 
 	rootPath := "/etcd/test/root/pagination"
 	etcdKV := NewEtcdKV(etcdCli, rootPath)
@@ -832,16 +838,19 @@ func TestCheckTnxStringValueSizeAndWarn(t *testing.T) {
 }
 
 func TestHas(t *testing.T) {
-	etcdCli, err := etcd.GetEtcdClient(
-		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
-		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
-		Params.EtcdCfg.Endpoints.GetAsStrings(),
-		Params.EtcdCfg.EtcdTLSCert.GetValue(),
-		Params.EtcdCfg.EtcdTLSKey.GetValue(),
-		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
-		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
-	defer etcdCli.Close()
+	etcdConfig := &Params.EtcdCfg
+	etcdInfo := &etcd.EtcdConfig{
+		UseEmbed:   etcdConfig.UseEmbedEtcd.GetAsBool(),
+		UseSSL:     etcdConfig.EtcdUseSSL.GetAsBool(),
+		Endpoints:  etcdConfig.Endpoints.GetAsStrings(),
+		CertFile:   etcdConfig.EtcdTLSCert.GetValue(),
+		KeyFile:    etcdConfig.EtcdTLSKey.GetValue(),
+		CaCertFile: etcdConfig.EtcdTLSCACert.GetValue(),
+		MinVersion: etcdConfig.EtcdTLSMinVersion.GetValue(),
+	}
+	etcdCli, err := etcd.GetEtcdClient(etcdInfo)
 	assert.NoError(t, err)
+	defer etcdCli.Close()
 	rootPath := "/etcd/test/root/has"
 	kv := NewEtcdKV(etcdCli, rootPath)
 	err = kv.RemoveWithPrefix("")
@@ -870,16 +879,19 @@ func TestHas(t *testing.T) {
 }
 
 func TestHasPrefix(t *testing.T) {
-	etcdCli, err := etcd.GetEtcdClient(
-		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
-		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
-		Params.EtcdCfg.Endpoints.GetAsStrings(),
-		Params.EtcdCfg.EtcdTLSCert.GetValue(),
-		Params.EtcdCfg.EtcdTLSKey.GetValue(),
-		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
-		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
-	defer etcdCli.Close()
+	etcdConfig := &Params.EtcdCfg
+	etcdInfo := &etcd.EtcdConfig{
+		UseEmbed:   etcdConfig.UseEmbedEtcd.GetAsBool(),
+		UseSSL:     etcdConfig.EtcdUseSSL.GetAsBool(),
+		Endpoints:  etcdConfig.Endpoints.GetAsStrings(),
+		CertFile:   etcdConfig.EtcdTLSCert.GetValue(),
+		KeyFile:    etcdConfig.EtcdTLSKey.GetValue(),
+		CaCertFile: etcdConfig.EtcdTLSCACert.GetValue(),
+		MinVersion: etcdConfig.EtcdTLSMinVersion.GetValue(),
+	}
+	etcdCli, err := etcd.GetEtcdClient(etcdInfo)
 	assert.NoError(t, err)
+	defer etcdCli.Close()
 	rootPath := "/etcd/test/root/hasprefix"
 	kv := NewEtcdKV(etcdCli, rootPath)
 	err = kv.RemoveWithPrefix("")

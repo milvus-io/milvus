@@ -154,14 +154,16 @@ func TestRun(t *testing.T) {
 		// Need to reset global etcd to follow new path
 		kvfactory.CloseEtcdClient()
 
-		etcdCli, err := etcd.GetEtcdClient(
-			etcdConfig.UseEmbedEtcd.GetAsBool(),
-			etcdConfig.EtcdUseSSL.GetAsBool(),
-			etcdConfig.Endpoints.GetAsStrings(),
-			etcdConfig.EtcdTLSCert.GetValue(),
-			etcdConfig.EtcdTLSKey.GetValue(),
-			etcdConfig.EtcdTLSCACert.GetValue(),
-			etcdConfig.EtcdTLSMinVersion.GetValue())
+		etcdInfo := &etcd.EtcdConfig{
+			UseEmbed:   etcdConfig.UseEmbedEtcd.GetAsBool(),
+			UseSSL:     etcdConfig.EtcdUseSSL.GetAsBool(),
+			Endpoints:  etcdConfig.Endpoints.GetAsStrings(),
+			CertFile:   etcdConfig.EtcdTLSCert.GetValue(),
+			KeyFile:    etcdConfig.EtcdTLSKey.GetValue(),
+			CaCertFile: etcdConfig.EtcdTLSCACert.GetValue(),
+			MinVersion: etcdConfig.EtcdTLSMinVersion.GetValue(),
+		}
+		etcdCli, err := etcd.GetEtcdClient(etcdInfo)
 		assert.NoError(t, err)
 		sessKey := path.Join(rootcoord.Params.EtcdCfg.MetaRootPath.GetValue(), sessionutil.DefaultServiceRoot)
 		_, err = etcdCli.Delete(ctx, sessKey, clientv3.WithPrefix())

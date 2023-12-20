@@ -441,14 +441,21 @@ func (s *Server) init() error {
 	serviceName := fmt.Sprintf("Proxy ip: %s, port: %d", Params.IP, Params.Port.GetAsInt())
 	log.Debug("init Proxy's tracer done", zap.String("service name", serviceName))
 
-	etcdCli, err := etcd.GetEtcdClient(
-		etcdConfig.UseEmbedEtcd.GetAsBool(),
-		etcdConfig.EtcdUseSSL.GetAsBool(),
-		etcdConfig.Endpoints.GetAsStrings(),
-		etcdConfig.EtcdTLSCert.GetValue(),
-		etcdConfig.EtcdTLSKey.GetValue(),
-		etcdConfig.EtcdTLSCACert.GetValue(),
-		etcdConfig.EtcdTLSMinVersion.GetValue())
+	etcdInfo := &etcd.EtcdConfig{
+		UseEmbed:             etcdConfig.UseEmbedEtcd.GetAsBool(),
+		UseSSL:               etcdConfig.EtcdUseSSL.GetAsBool(),
+		Endpoints:            etcdConfig.Endpoints.GetAsStrings(),
+		CertFile:             etcdConfig.EtcdTLSCert.GetValue(),
+		KeyFile:              etcdConfig.EtcdTLSKey.GetValue(),
+		CaCertFile:           etcdConfig.EtcdTLSCACert.GetValue(),
+		MinVersion:           etcdConfig.EtcdTLSMinVersion.GetValue(),
+		MaxRetries:           etcdConfig.GrpcMaxRetries.GetAsInt64(),
+		PerRetryTimeout:      etcdConfig.GrpcPerRetryTimeout.GetAsDuration(time.Millisecond),
+		DialTimeout:          etcdConfig.GrpcDialTimeout.GetAsDuration(time.Millisecond),
+		DialKeepAliveTime:    etcdConfig.GrpcDialKeepAliveTime.GetAsDuration(time.Millisecond),
+		DialKeepAliveTimeout: etcdConfig.GrpcDialKeepAliveTimeout.GetAsDuration(time.Millisecond),
+	}
+	etcdCli, err := etcd.GetEtcdClient(etcdInfo)
 	if err != nil {
 		log.Debug("Proxy connect to etcd failed", zap.Error(err))
 		return err

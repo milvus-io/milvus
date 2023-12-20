@@ -149,6 +149,7 @@ func StartMiniCluster(ctx context.Context, opts ...Option) (cluster *MiniCluster
 		params.Save(k, v)
 	}
 	paramtable.GetBaseTable().UpdateSourceOptions(config.WithEtcdSource(&config.EtcdInfo{
+		EtcdConfig:      etcd.EtcdConfig{},
 		KeyPrefix:       cluster.params[EtcdRootPath],
 		RefreshInterval: 2 * time.Second,
 	}))
@@ -170,14 +171,22 @@ func StartMiniCluster(ctx context.Context, opts ...Option) (cluster *MiniCluster
 
 	if cluster.EtcdCli == nil {
 		var etcdCli *clientv3.Client
-		etcdCli, err = etcd.GetEtcdClient(
-			params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
-			params.EtcdCfg.EtcdUseSSL.GetAsBool(),
-			params.EtcdCfg.Endpoints.GetAsStrings(),
-			params.EtcdCfg.EtcdTLSCert.GetValue(),
-			params.EtcdCfg.EtcdTLSKey.GetValue(),
-			params.EtcdCfg.EtcdTLSCACert.GetValue(),
-			params.EtcdCfg.EtcdTLSMinVersion.GetValue())
+		config := &params.EtcdCfg
+		etcdInfo := &etcd.EtcdConfig{
+			UseEmbed:             config.UseEmbedEtcd.GetAsBool(),
+			UseSSL:               config.EtcdUseSSL.GetAsBool(),
+			Endpoints:            config.Endpoints.GetAsStrings(),
+			CertFile:             config.EtcdTLSCert.GetValue(),
+			KeyFile:              config.EtcdTLSKey.GetValue(),
+			CaCertFile:           config.EtcdTLSCACert.GetValue(),
+			MinVersion:           config.EtcdTLSMinVersion.GetValue(),
+			MaxRetries:           config.GrpcMaxRetries.GetAsInt64(),
+			PerRetryTimeout:      config.GrpcPerRetryTimeout.GetAsDuration(time.Millisecond),
+			DialTimeout:          config.GrpcDialTimeout.GetAsDuration(time.Millisecond),
+			DialKeepAliveTime:    config.GrpcDialKeepAliveTime.GetAsDuration(time.Millisecond),
+			DialKeepAliveTimeout: config.GrpcDialKeepAliveTimeout.GetAsDuration(time.Millisecond),
+		}
+		etcdCli, err := etcd.GetEtcdClient(etcdInfo)
 		if err != nil {
 			return nil, err
 		}
