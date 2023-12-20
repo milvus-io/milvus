@@ -34,7 +34,7 @@ namespace milvus {
 inline size_t
 GetDataSize(const std::vector<FieldDataPtr>& datas) {
     size_t total_size{0};
-    for (auto data : datas) {
+    for (const auto& data : datas) {
         total_size += data->Size();
     }
 
@@ -42,7 +42,7 @@ GetDataSize(const std::vector<FieldDataPtr>& datas) {
 }
 
 inline void*
-FillField(DataType data_type, const FieldDataPtr data, void* dst) {
+FillField(DataType data_type, const FieldDataPtr& data, void* dst) {
     char* dest = reinterpret_cast<char*>(dst);
     if (datatype_is_variable(data_type)) {
         switch (data_type) {

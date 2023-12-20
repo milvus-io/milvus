@@ -78,7 +78,7 @@ class BlockingState {
                   ContinueFuture&& future,
                   Operator* op,
                   BlockingReason reason)
-        : driver_(std::move(driver_)),
+        : driver_(std::move(driver)),
           future_(std::move(future)),
           operator_(op),
           reason_(reason) {
