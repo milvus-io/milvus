@@ -22,6 +22,7 @@ import (
 	"github.com/shirou/gopsutil/v3/disk"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/config"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
@@ -31,6 +32,7 @@ import (
 const (
 	// DefaultIndexSliceSize defines the default slice size of index file when serializing.
 	DefaultIndexSliceSize                      = 16
+	DefaultConsistencyLevelUsedInDelete        = commonpb.ConsistencyLevel_Bounded
 	DefaultGracefulTime                        = 5000 // ms
 	DefaultGracefulStopTimeout                 = 1800 // s
 	DefaultHighPriorityThreadCoreCoefficient   = 10
@@ -195,6 +197,7 @@ type commonConfig struct {
 	SearchCacheBudgetGBRatio            ParamItem `refreshable:"true"`
 	LoadNumThreadRatio                  ParamItem `refreshable:"true"`
 	BeamWidthRatio                      ParamItem `refreshable:"true"`
+	ConsistencyLevelUsedInDelete        ParamItem `refreshable:"true"`
 	GracefulTime                        ParamItem `refreshable:"true"`
 	GracefulStopTimeout                 ParamItem `refreshable:"true"`
 
@@ -464,6 +467,15 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Export:       true,
 	}
 	p.BeamWidthRatio.Init(base.mgr)
+
+	p.ConsistencyLevelUsedInDelete = ParamItem{
+		Key:          "common.consistencyLevelUsedInDelete",
+		Version:      "2.0.0",
+		DefaultValue: DefaultConsistencyLevelUsedInDelete.String(),
+		Doc:          "Consistency level used in delete by expression",
+		Export:       true,
+	}
+	p.ConsistencyLevelUsedInDelete.Init(base.mgr)
 
 	p.GracefulTime = ParamItem{
 		Key:          "common.gracefulTime",
