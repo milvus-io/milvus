@@ -1381,7 +1381,13 @@ SegmentSealedImpl::generate_binlog_index(const FieldId field_id) {
             // get binlog data and meta
             auto row_count = num_rows_.value();
             auto dim = field_meta.get_dim();
-            auto vec_data = fields_.at(field_id);
+            std::shared_ptr<ColumnBase> vec_data{};
+            {
+                // field should be exists.
+                // otherwise, out_of_range exception is thrown by fields_.at
+                std::shared_lock lck(mutex_);
+                vec_data = fields_.at(field_id);
+            }
             auto dataset =
                 knowhere::GenDataSet(row_count, dim, (void*)vec_data->Data());
             dataset->SetIsOwner(false);
