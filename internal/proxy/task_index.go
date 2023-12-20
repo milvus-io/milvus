@@ -397,9 +397,6 @@ func (cit *createIndexTask) Execute(ctx context.Context) error {
 		zap.Any("newExtraParams", cit.newExtraParams),
 	)
 
-	if cit.req.GetIndexName() == "" {
-		cit.req.IndexName = cit.fieldSchema.GetName()
-	}
 	var err error
 	req := &indexpb.CreateIndexRequest{
 		CollectionID:    cit.collectionID,
@@ -851,10 +848,6 @@ func (gibpt *getIndexBuildProgressTask) Execute(ctx context.Context) error {
 		return err
 	}
 	gibpt.collectionID = collectionID
-
-	if gibpt.IndexName == "" {
-		gibpt.IndexName = Params.CommonCfg.DefaultIndexName.GetValue()
-	}
 
 	resp, err := gibpt.dataCoord.GetIndexBuildProgress(ctx, &indexpb.GetIndexBuildProgressRequest{
 		CollectionID: collectionID,

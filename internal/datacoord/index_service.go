@@ -132,6 +132,20 @@ func (s *Server) createIndexForSegmentLoop(ctx context.Context) {
 	}
 }
 
+func (s *Server) getFieldNameByID(ctx context.Context, collID, fieldID int64) (string, error) {
+	resp, err := s.broker.DescribeCollectionInternal(ctx, collID)
+	if err != nil {
+		return "", err
+	}
+
+	for _, field := range resp.GetSchema().GetFields() {
+		if field.FieldID == fieldID {
+			return field.Name, nil
+		}
+	}
+	return "", nil
+}
+
 // CreateIndex create an index on collection.
 // Index building is asynchronous, so when an index building request comes, an IndexID is assigned to the task and
 // will get all flushed segments from DataCoord and record tasks with these segments. The background process
@@ -151,6 +165,20 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		return merr.Status(err), nil
 	}
 	metrics.IndexRequestCounter.WithLabelValues(metrics.TotalLabel).Inc()
+
+	if req.GetIndexName() == "" {
+		indexes := s.meta.GetFieldIndexes(req.GetCollectionID(), req.GetFieldID(), req.GetIndexName())
+		if len(indexes) == 0 {
+			fieldName, err := s.getFieldNameByID(ctx, req.GetCollectionID(), req.GetFieldID())
+			if err != nil {
+				log.Warn("get field name from schema failed", zap.Int64("fieldID", req.GetFieldID()))
+				return merr.Status(err), nil
+			}
+			req.IndexName = fieldName
+		} else if len(indexes) == 1 {
+			req.IndexName = indexes[0].IndexName
+		}
+	}
 
 	indexID, err := s.meta.CanCreateIndex(req)
 	if err != nil {

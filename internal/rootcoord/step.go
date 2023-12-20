@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"github.com/milvus-io/milvus/internal/util/proxyutil"
 )
 
 type stepPriority int
@@ -170,7 +171,7 @@ type expireCacheStep struct {
 	collectionNames []string
 	collectionID    UniqueID
 	ts              Timestamp
-	opts            []expireCacheOpt
+	opts            []proxyutil.ExpireCacheOpt
 }
 
 func (s *expireCacheStep) Execute(ctx context.Context) ([]nestedStep, error) {
