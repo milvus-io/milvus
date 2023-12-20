@@ -86,8 +86,8 @@ type MockShardClientManager_GetClient_Call struct {
 }
 
 // GetClient is a helper method to define mock.On call
-//  - ctx context.Context
-//  - nodeID int64
+//   - ctx context.Context
+//   - nodeID int64
 func (_e *MockShardClientManager_Expecter) GetClient(ctx interface{}, nodeID interface{}) *MockShardClientManager_GetClient_Call {
 	return &MockShardClientManager_GetClient_Call{Call: _e.mock.On("GetClient", ctx, nodeID)}
 }
@@ -120,7 +120,7 @@ type MockShardClientManager_SetClientCreatorFunc_Call struct {
 }
 
 // SetClientCreatorFunc is a helper method to define mock.On call
-//  - creator queryNodeCreatorFunc
+//   - creator queryNodeCreatorFunc
 func (_e *MockShardClientManager_Expecter) SetClientCreatorFunc(creator interface{}) *MockShardClientManager_SetClientCreatorFunc_Call {
 	return &MockShardClientManager_SetClientCreatorFunc_Call{Call: _e.mock.On("SetClientCreatorFunc", creator)}
 }
@@ -162,8 +162,8 @@ type MockShardClientManager_UpdateShardLeaders_Call struct {
 }
 
 // UpdateShardLeaders is a helper method to define mock.On call
-//  - oldLeaders map[string][]nodeInfo
-//  - newLeaders map[string][]nodeInfo
+//   - oldLeaders map[string][]nodeInfo
+//   - newLeaders map[string][]nodeInfo
 func (_e *MockShardClientManager_Expecter) UpdateShardLeaders(oldLeaders interface{}, newLeaders interface{}) *MockShardClientManager_UpdateShardLeaders_Call {
 	return &MockShardClientManager_UpdateShardLeaders_Call{Call: _e.mock.On("UpdateShardLeaders", oldLeaders, newLeaders)}
 }

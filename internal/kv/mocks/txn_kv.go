@@ -82,7 +82,7 @@ type TxnKV_Has_Call struct {
 }
 
 // Has is a helper method to define mock.On call
-//  - key string
+//   - key string
 func (_e *TxnKV_Expecter) Has(key interface{}) *TxnKV_Has_Call {
 	return &TxnKV_Has_Call{Call: _e.mock.On("Has", key)}
 }
@@ -134,7 +134,7 @@ type TxnKV_HasPrefix_Call struct {
 }
 
 // HasPrefix is a helper method to define mock.On call
-//  - prefix string
+//   - prefix string
 func (_e *TxnKV_Expecter) HasPrefix(prefix interface{}) *TxnKV_HasPrefix_Call {
 	return &TxnKV_HasPrefix_Call{Call: _e.mock.On("HasPrefix", prefix)}
 }
@@ -186,7 +186,7 @@ type TxnKV_Load_Call struct {
 }
 
 // Load is a helper method to define mock.On call
-//  - key string
+//   - key string
 func (_e *TxnKV_Expecter) Load(key interface{}) *TxnKV_Load_Call {
 	return &TxnKV_Load_Call{Call: _e.mock.On("Load", key)}
 }
@@ -249,7 +249,7 @@ type TxnKV_LoadWithPrefix_Call struct {
 }
 
 // LoadWithPrefix is a helper method to define mock.On call
-//  - key string
+//   - key string
 func (_e *TxnKV_Expecter) LoadWithPrefix(key interface{}) *TxnKV_LoadWithPrefix_Call {
 	return &TxnKV_LoadWithPrefix_Call{Call: _e.mock.On("LoadWithPrefix", key)}
 }
@@ -303,7 +303,7 @@ type TxnKV_MultiLoad_Call struct {
 }
 
 // MultiLoad is a helper method to define mock.On call
-//  - keys []string
+//   - keys []string
 func (_e *TxnKV_Expecter) MultiLoad(keys interface{}) *TxnKV_MultiLoad_Call {
 	return &TxnKV_MultiLoad_Call{Call: _e.mock.On("MultiLoad", keys)}
 }
@@ -345,7 +345,7 @@ type TxnKV_MultiRemove_Call struct {
 }
 
 // MultiRemove is a helper method to define mock.On call
-//  - keys []string
+//   - keys []string
 func (_e *TxnKV_Expecter) MultiRemove(keys interface{}) *TxnKV_MultiRemove_Call {
 	return &TxnKV_MultiRemove_Call{Call: _e.mock.On("MultiRemove", keys)}
 }
@@ -387,7 +387,7 @@ type TxnKV_MultiSave_Call struct {
 }
 
 // MultiSave is a helper method to define mock.On call
-//  - kvs map[string]string
+//   - kvs map[string]string
 func (_e *TxnKV_Expecter) MultiSave(kvs interface{}) *TxnKV_MultiSave_Call {
 	return &TxnKV_MultiSave_Call{Call: _e.mock.On("MultiSave", kvs)}
 }
@@ -436,9 +436,9 @@ type TxnKV_MultiSaveAndRemove_Call struct {
 }
 
 // MultiSaveAndRemove is a helper method to define mock.On call
-//  - saves map[string]string
-//  - removals []string
-//  - preds ...predicates.Predicate
+//   - saves map[string]string
+//   - removals []string
+//   - preds ...predicates.Predicate
 func (_e *TxnKV_Expecter) MultiSaveAndRemove(saves interface{}, removals interface{}, preds ...interface{}) *TxnKV_MultiSaveAndRemove_Call {
 	return &TxnKV_MultiSaveAndRemove_Call{Call: _e.mock.On("MultiSaveAndRemove",
 		append([]interface{}{saves, removals}, preds...)...)}
@@ -494,9 +494,9 @@ type TxnKV_MultiSaveAndRemoveWithPrefix_Call struct {
 }
 
 // MultiSaveAndRemoveWithPrefix is a helper method to define mock.On call
-//  - saves map[string]string
-//  - removals []string
-//  - preds ...predicates.Predicate
+//   - saves map[string]string
+//   - removals []string
+//   - preds ...predicates.Predicate
 func (_e *TxnKV_Expecter) MultiSaveAndRemoveWithPrefix(saves interface{}, removals interface{}, preds ...interface{}) *TxnKV_MultiSaveAndRemoveWithPrefix_Call {
 	return &TxnKV_MultiSaveAndRemoveWithPrefix_Call{Call: _e.mock.On("MultiSaveAndRemoveWithPrefix",
 		append([]interface{}{saves, removals}, preds...)...)}
@@ -545,7 +545,7 @@ type TxnKV_Remove_Call struct {
 }
 
 // Remove is a helper method to define mock.On call
-//  - key string
+//   - key string
 func (_e *TxnKV_Expecter) Remove(key interface{}) *TxnKV_Remove_Call {
 	return &TxnKV_Remove_Call{Call: _e.mock.On("Remove", key)}
 }
@@ -587,7 +587,7 @@ type TxnKV_RemoveWithPrefix_Call struct {
 }
 
 // RemoveWithPrefix is a helper method to define mock.On call
-//  - key string
+//   - key string
 func (_e *TxnKV_Expecter) RemoveWithPrefix(key interface{}) *TxnKV_RemoveWithPrefix_Call {
 	return &TxnKV_RemoveWithPrefix_Call{Call: _e.mock.On("RemoveWithPrefix", key)}
 }
@@ -629,8 +629,8 @@ type TxnKV_Save_Call struct {
 }
 
 // Save is a helper method to define mock.On call
-//  - key string
-//  - value string
+//   - key string
+//   - value string
 func (_e *TxnKV_Expecter) Save(key interface{}, value interface{}) *TxnKV_Save_Call {
 	return &TxnKV_Save_Call{Call: _e.mock.On("Save", key, value)}
 }

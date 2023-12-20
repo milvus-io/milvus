@@ -37,7 +37,7 @@ type MockFactory_Init_Call struct {
 }
 
 // Init is a helper method to define mock.On call
-//  - p *paramtable.ComponentParam
+//   - p *paramtable.ComponentParam
 func (_e *MockFactory_Expecter) Init(p interface{}) *MockFactory_Init_Call {
 	return &MockFactory_Init_Call{Call: _e.mock.On("Init", p)}
 }
@@ -91,7 +91,7 @@ type MockFactory_NewMsgStream_Call struct {
 }
 
 // NewMsgStream is a helper method to define mock.On call
-//  - ctx context.Context
+//   - ctx context.Context
 func (_e *MockFactory_Expecter) NewMsgStream(ctx interface{}) *MockFactory_NewMsgStream_Call {
 	return &MockFactory_NewMsgStream_Call{Call: _e.mock.On("NewMsgStream", ctx)}
 }
@@ -135,7 +135,7 @@ type MockFactory_NewMsgStreamDisposer_Call struct {
 }
 
 // NewMsgStreamDisposer is a helper method to define mock.On call
-//  - ctx context.Context
+//   - ctx context.Context
 func (_e *MockFactory_Expecter) NewMsgStreamDisposer(ctx interface{}) *MockFactory_NewMsgStreamDisposer_Call {
 	return &MockFactory_NewMsgStreamDisposer_Call{Call: _e.mock.On("NewMsgStreamDisposer", ctx)}
 }
@@ -189,7 +189,7 @@ type MockFactory_NewPersistentStorageChunkManager_Call struct {
 }
 
 // NewPersistentStorageChunkManager is a helper method to define mock.On call
-//  - ctx context.Context
+//   - ctx context.Context
 func (_e *MockFactory_Expecter) NewPersistentStorageChunkManager(ctx interface{}) *MockFactory_NewPersistentStorageChunkManager_Call {
 	return &MockFactory_NewPersistentStorageChunkManager_Call{Call: _e.mock.On("NewPersistentStorageChunkManager", ctx)}
 }
@@ -243,7 +243,7 @@ type MockFactory_NewTtMsgStream_Call struct {
 }
 
 // NewTtMsgStream is a helper method to define mock.On call
-//  - ctx context.Context
+//   - ctx context.Context
 func (_e *MockFactory_Expecter) NewTtMsgStream(ctx interface{}) *MockFactory_NewTtMsgStream_Call {
 	return &MockFactory_NewTtMsgStream_Call{Call: _e.mock.On("NewTtMsgStream", ctx)}
 }

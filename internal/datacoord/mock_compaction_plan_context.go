@@ -40,8 +40,8 @@ type MockCompactionPlanContext_execCompactionPlan_Call struct {
 }
 
 // execCompactionPlan is a helper method to define mock.On call
-//  - signal *compactionSignal
-//  - plan *datapb.CompactionPlan
+//   - signal *compactionSignal
+//   - plan *datapb.CompactionPlan
 func (_e *MockCompactionPlanContext_Expecter) execCompactionPlan(signal interface{}, plan interface{}) *MockCompactionPlanContext_execCompactionPlan_Call {
 	return &MockCompactionPlanContext_execCompactionPlan_Call{Call: _e.mock.On("execCompactionPlan", signal, plan)}
 }
@@ -85,7 +85,7 @@ type MockCompactionPlanContext_getCompaction_Call struct {
 }
 
 // getCompaction is a helper method to define mock.On call
-//  - planID int64
+//   - planID int64
 func (_e *MockCompactionPlanContext_Expecter) getCompaction(planID interface{}) *MockCompactionPlanContext_getCompaction_Call {
 	return &MockCompactionPlanContext_getCompaction_Call{Call: _e.mock.On("getCompaction", planID)}
 }
@@ -129,7 +129,7 @@ type MockCompactionPlanContext_getCompactionTasksBySignalID_Call struct {
 }
 
 // getCompactionTasksBySignalID is a helper method to define mock.On call
-//  - signalID int64
+//   - signalID int64
 func (_e *MockCompactionPlanContext_Expecter) getCompactionTasksBySignalID(signalID interface{}) *MockCompactionPlanContext_getCompactionTasksBySignalID_Call {
 	return &MockCompactionPlanContext_getCompactionTasksBySignalID_Call{Call: _e.mock.On("getCompactionTasksBySignalID", signalID)}
 }
@@ -203,7 +203,7 @@ type MockCompactionPlanContext_removeTasksByChannel_Call struct {
 }
 
 // removeTasksByChannel is a helper method to define mock.On call
-//  - channel string
+//   - channel string
 func (_e *MockCompactionPlanContext_Expecter) removeTasksByChannel(channel interface{}) *MockCompactionPlanContext_removeTasksByChannel_Call {
 	return &MockCompactionPlanContext_removeTasksByChannel_Call{Call: _e.mock.On("removeTasksByChannel", channel)}
 }
@@ -309,7 +309,7 @@ type MockCompactionPlanContext_updateCompaction_Call struct {
 }
 
 // updateCompaction is a helper method to define mock.On call
-//  - ts uint64
+//   - ts uint64
 func (_e *MockCompactionPlanContext_Expecter) updateCompaction(ts interface{}) *MockCompactionPlanContext_updateCompaction_Call {
 	return &MockCompactionPlanContext_updateCompaction_Call{Call: _e.mock.On("updateCompaction", ts)}
 }

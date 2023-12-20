@@ -252,7 +252,7 @@ type QueryCoordCatalog_ReleaseCollection_Call struct {
 }
 
 // ReleaseCollection is a helper method to define mock.On call
-//  - collection int64
+//   - collection int64
 func (_e *QueryCoordCatalog_Expecter) ReleaseCollection(collection interface{}) *QueryCoordCatalog_ReleaseCollection_Call {
 	return &QueryCoordCatalog_ReleaseCollection_Call{Call: _e.mock.On("ReleaseCollection", collection)}
 }
@@ -301,8 +301,8 @@ type QueryCoordCatalog_ReleasePartition_Call struct {
 }
 
 // ReleasePartition is a helper method to define mock.On call
-//  - collection int64
-//  - partitions ...int64
+//   - collection int64
+//   - partitions ...int64
 func (_e *QueryCoordCatalog_Expecter) ReleasePartition(collection interface{}, partitions ...interface{}) *QueryCoordCatalog_ReleasePartition_Call {
 	return &QueryCoordCatalog_ReleasePartition_Call{Call: _e.mock.On("ReleasePartition",
 		append([]interface{}{collection}, partitions...)...)}
@@ -351,8 +351,8 @@ type QueryCoordCatalog_ReleaseReplica_Call struct {
 }
 
 // ReleaseReplica is a helper method to define mock.On call
-//  - collection int64
-//  - replica int64
+//   - collection int64
+//   - replica int64
 func (_e *QueryCoordCatalog_Expecter) ReleaseReplica(collection interface{}, replica interface{}) *QueryCoordCatalog_ReleaseReplica_Call {
 	return &QueryCoordCatalog_ReleaseReplica_Call{Call: _e.mock.On("ReleaseReplica", collection, replica)}
 }
@@ -394,7 +394,7 @@ type QueryCoordCatalog_ReleaseReplicas_Call struct {
 }
 
 // ReleaseReplicas is a helper method to define mock.On call
-//  - collectionID int64
+//   - collectionID int64
 func (_e *QueryCoordCatalog_Expecter) ReleaseReplicas(collectionID interface{}) *QueryCoordCatalog_ReleaseReplicas_Call {
 	return &QueryCoordCatalog_ReleaseReplicas_Call{Call: _e.mock.On("ReleaseReplicas", collectionID)}
 }
@@ -436,7 +436,7 @@ type QueryCoordCatalog_RemoveResourceGroup_Call struct {
 }
 
 // RemoveResourceGroup is a helper method to define mock.On call
-//  - rgName string
+//   - rgName string
 func (_e *QueryCoordCatalog_Expecter) RemoveResourceGroup(rgName interface{}) *QueryCoordCatalog_RemoveResourceGroup_Call {
 	return &QueryCoordCatalog_RemoveResourceGroup_Call{Call: _e.mock.On("RemoveResourceGroup", rgName)}
 }
@@ -485,8 +485,8 @@ type QueryCoordCatalog_SaveCollection_Call struct {
 }
 
 // SaveCollection is a helper method to define mock.On call
-//  - collection *querypb.CollectionLoadInfo
-//  - partitions ...*querypb.PartitionLoadInfo
+//   - collection *querypb.CollectionLoadInfo
+//   - partitions ...*querypb.PartitionLoadInfo
 func (_e *QueryCoordCatalog_Expecter) SaveCollection(collection interface{}, partitions ...interface{}) *QueryCoordCatalog_SaveCollection_Call {
 	return &QueryCoordCatalog_SaveCollection_Call{Call: _e.mock.On("SaveCollection",
 		append([]interface{}{collection}, partitions...)...)}
@@ -541,7 +541,7 @@ type QueryCoordCatalog_SavePartition_Call struct {
 }
 
 // SavePartition is a helper method to define mock.On call
-//  - info ...*querypb.PartitionLoadInfo
+//   - info ...*querypb.PartitionLoadInfo
 func (_e *QueryCoordCatalog_Expecter) SavePartition(info ...interface{}) *QueryCoordCatalog_SavePartition_Call {
 	return &QueryCoordCatalog_SavePartition_Call{Call: _e.mock.On("SavePartition",
 		append([]interface{}{}, info...)...)}
@@ -590,7 +590,7 @@ type QueryCoordCatalog_SaveReplica_Call struct {
 }
 
 // SaveReplica is a helper method to define mock.On call
-//  - replica *querypb.Replica
+//   - replica *querypb.Replica
 func (_e *QueryCoordCatalog_Expecter) SaveReplica(replica interface{}) *QueryCoordCatalog_SaveReplica_Call {
 	return &QueryCoordCatalog_SaveReplica_Call{Call: _e.mock.On("SaveReplica", replica)}
 }
@@ -638,7 +638,7 @@ type QueryCoordCatalog_SaveResourceGroup_Call struct {
 }
 
 // SaveResourceGroup is a helper method to define mock.On call
-//  - rgs ...*querypb.ResourceGroup
+//   - rgs ...*querypb.ResourceGroup
 func (_e *QueryCoordCatalog_Expecter) SaveResourceGroup(rgs ...interface{}) *QueryCoordCatalog_SaveResourceGroup_Call {
 	return &QueryCoordCatalog_SaveResourceGroup_Call{Call: _e.mock.On("SaveResourceGroup",
 		append([]interface{}{}, rgs...)...)}

@@ -46,11 +46,11 @@ type MockBufferManager_BufferData_Call struct {
 }
 
 // BufferData is a helper method to define mock.On call
-//  - channel string
-//  - insertMsgs []*msgstream.InsertMsg
-//  - deleteMsgs []*msgstream.DeleteMsg
-//  - startPos *msgpb.MsgPosition
-//  - endPos *msgpb.MsgPosition
+//   - channel string
+//   - insertMsgs []*msgstream.InsertMsg
+//   - deleteMsgs []*msgstream.DeleteMsg
+//   - startPos *msgpb.MsgPosition
+//   - endPos *msgpb.MsgPosition
 func (_e *MockBufferManager_Expecter) BufferData(channel interface{}, insertMsgs interface{}, deleteMsgs interface{}, startPos interface{}, endPos interface{}) *MockBufferManager_BufferData_Call {
 	return &MockBufferManager_BufferData_Call{Call: _e.mock.On("BufferData", channel, insertMsgs, deleteMsgs, startPos, endPos)}
 }
@@ -83,7 +83,7 @@ type MockBufferManager_DropChannel_Call struct {
 }
 
 // DropChannel is a helper method to define mock.On call
-//  - channel string
+//   - channel string
 func (_e *MockBufferManager_Expecter) DropChannel(channel interface{}) *MockBufferManager_DropChannel_Call {
 	return &MockBufferManager_DropChannel_Call{Call: _e.mock.On("DropChannel", channel)}
 }
@@ -125,9 +125,9 @@ type MockBufferManager_FlushChannel_Call struct {
 }
 
 // FlushChannel is a helper method to define mock.On call
-//  - ctx context.Context
-//  - channel string
-//  - flushTs uint64
+//   - ctx context.Context
+//   - channel string
+//   - flushTs uint64
 func (_e *MockBufferManager_Expecter) FlushChannel(ctx interface{}, channel interface{}, flushTs interface{}) *MockBufferManager_FlushChannel_Call {
 	return &MockBufferManager_FlushChannel_Call{Call: _e.mock.On("FlushChannel", ctx, channel, flushTs)}
 }
@@ -169,9 +169,9 @@ type MockBufferManager_FlushSegments_Call struct {
 }
 
 // FlushSegments is a helper method to define mock.On call
-//  - ctx context.Context
-//  - channel string
-//  - segmentIDs []int64
+//   - ctx context.Context
+//   - channel string
+//   - segmentIDs []int64
 func (_e *MockBufferManager_Expecter) FlushSegments(ctx interface{}, channel interface{}, segmentIDs interface{}) *MockBufferManager_FlushSegments_Call {
 	return &MockBufferManager_FlushSegments_Call{Call: _e.mock.On("FlushSegments", ctx, channel, segmentIDs)}
 }
@@ -232,7 +232,7 @@ type MockBufferManager_GetCheckpoint_Call struct {
 }
 
 // GetCheckpoint is a helper method to define mock.On call
-//  - channel string
+//   - channel string
 func (_e *MockBufferManager_Expecter) GetCheckpoint(channel interface{}) *MockBufferManager_GetCheckpoint_Call {
 	return &MockBufferManager_GetCheckpoint_Call{Call: _e.mock.On("GetCheckpoint", channel)}
 }
@@ -265,8 +265,8 @@ type MockBufferManager_NotifyCheckpointUpdated_Call struct {
 }
 
 // NotifyCheckpointUpdated is a helper method to define mock.On call
-//  - channel string
-//  - ts uint64
+//   - channel string
+//   - ts uint64
 func (_e *MockBufferManager_Expecter) NotifyCheckpointUpdated(channel interface{}, ts interface{}) *MockBufferManager_NotifyCheckpointUpdated_Call {
 	return &MockBufferManager_NotifyCheckpointUpdated_Call{Call: _e.mock.On("NotifyCheckpointUpdated", channel, ts)}
 }
@@ -315,10 +315,10 @@ type MockBufferManager_Register_Call struct {
 }
 
 // Register is a helper method to define mock.On call
-//  - channel string
-//  - _a1 metacache.MetaCache
-//  - storageV2Cache *metacache.StorageV2Cache
-//  - opts ...WriteBufferOption
+//   - channel string
+//   - _a1 metacache.MetaCache
+//   - storageV2Cache *metacache.StorageV2Cache
+//   - opts ...WriteBufferOption
 func (_e *MockBufferManager_Expecter) Register(channel interface{}, _a1 interface{}, storageV2Cache interface{}, opts ...interface{}) *MockBufferManager_Register_Call {
 	return &MockBufferManager_Register_Call{Call: _e.mock.On("Register",
 		append([]interface{}{channel, _a1, storageV2Cache}, opts...)...)}
@@ -358,7 +358,7 @@ type MockBufferManager_RemoveChannel_Call struct {
 }
 
 // RemoveChannel is a helper method to define mock.On call
-//  - channel string
+//   - channel string
 func (_e *MockBufferManager_Expecter) RemoveChannel(channel interface{}) *MockBufferManager_RemoveChannel_Call {
 	return &MockBufferManager_RemoveChannel_Call{Call: _e.mock.On("RemoveChannel", channel)}
 }

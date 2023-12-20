@@ -37,7 +37,7 @@ type MockQueryHook_DeleteTuningConfig_Call struct {
 }
 
 // DeleteTuningConfig is a helper method to define mock.On call
-//  - _a0 string
+//   - _a0 string
 func (_e *MockQueryHook_Expecter) DeleteTuningConfig(_a0 interface{}) *MockQueryHook_DeleteTuningConfig_Call {
 	return &MockQueryHook_DeleteTuningConfig_Call{Call: _e.mock.On("DeleteTuningConfig", _a0)}
 }
@@ -79,7 +79,7 @@ type MockQueryHook_Init_Call struct {
 }
 
 // Init is a helper method to define mock.On call
-//  - _a0 string
+//   - _a0 string
 func (_e *MockQueryHook_Expecter) Init(_a0 interface{}) *MockQueryHook_Init_Call {
 	return &MockQueryHook_Init_Call{Call: _e.mock.On("Init", _a0)}
 }
@@ -121,7 +121,7 @@ type MockQueryHook_InitTuningConfig_Call struct {
 }
 
 // InitTuningConfig is a helper method to define mock.On call
-//  - _a0 map[string]string
+//   - _a0 map[string]string
 func (_e *MockQueryHook_Expecter) InitTuningConfig(_a0 interface{}) *MockQueryHook_InitTuningConfig_Call {
 	return &MockQueryHook_InitTuningConfig_Call{Call: _e.mock.On("InitTuningConfig", _a0)}
 }
@@ -163,7 +163,7 @@ type MockQueryHook_Run_Call struct {
 }
 
 // Run is a helper method to define mock.On call
-//  - _a0 map[string]interface{}
+//   - _a0 map[string]interface{}
 func (_e *MockQueryHook_Expecter) Run(_a0 interface{}) *MockQueryHook_Run_Call {
 	return &MockQueryHook_Run_Call{Call: _e.mock.On("Run", _a0)}
 }

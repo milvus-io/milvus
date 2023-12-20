@@ -47,8 +47,8 @@ type SnapShotKV_Load_Call struct {
 }
 
 // Load is a helper method to define mock.On call
-//  - key string
-//  - ts uint64
+//   - key string
+//   - ts uint64
 func (_e *SnapShotKV_Expecter) Load(key interface{}, ts interface{}) *SnapShotKV_Load_Call {
 	return &SnapShotKV_Load_Call{Call: _e.mock.On("Load", key, ts)}
 }
@@ -111,8 +111,8 @@ type SnapShotKV_LoadWithPrefix_Call struct {
 }
 
 // LoadWithPrefix is a helper method to define mock.On call
-//  - key string
-//  - ts uint64
+//   - key string
+//   - ts uint64
 func (_e *SnapShotKV_Expecter) LoadWithPrefix(key interface{}, ts interface{}) *SnapShotKV_LoadWithPrefix_Call {
 	return &SnapShotKV_LoadWithPrefix_Call{Call: _e.mock.On("LoadWithPrefix", key, ts)}
 }
@@ -154,8 +154,8 @@ type SnapShotKV_MultiSave_Call struct {
 }
 
 // MultiSave is a helper method to define mock.On call
-//  - kvs map[string]string
-//  - ts uint64
+//   - kvs map[string]string
+//   - ts uint64
 func (_e *SnapShotKV_Expecter) MultiSave(kvs interface{}, ts interface{}) *SnapShotKV_MultiSave_Call {
 	return &SnapShotKV_MultiSave_Call{Call: _e.mock.On("MultiSave", kvs, ts)}
 }
@@ -197,9 +197,9 @@ type SnapShotKV_MultiSaveAndRemoveWithPrefix_Call struct {
 }
 
 // MultiSaveAndRemoveWithPrefix is a helper method to define mock.On call
-//  - saves map[string]string
-//  - removals []string
-//  - ts uint64
+//   - saves map[string]string
+//   - removals []string
+//   - ts uint64
 func (_e *SnapShotKV_Expecter) MultiSaveAndRemoveWithPrefix(saves interface{}, removals interface{}, ts interface{}) *SnapShotKV_MultiSaveAndRemoveWithPrefix_Call {
 	return &SnapShotKV_MultiSaveAndRemoveWithPrefix_Call{Call: _e.mock.On("MultiSaveAndRemoveWithPrefix", saves, removals, ts)}
 }
@@ -241,9 +241,9 @@ type SnapShotKV_Save_Call struct {
 }
 
 // Save is a helper method to define mock.On call
-//  - key string
-//  - value string
-//  - ts uint64
+//   - key string
+//   - value string
+//   - ts uint64
 func (_e *SnapShotKV_Expecter) Save(key interface{}, value interface{}, ts interface{}) *SnapShotKV_Save_Call {
 	return &SnapShotKV_Save_Call{Call: _e.mock.On("Save", key, value, ts)}
 }

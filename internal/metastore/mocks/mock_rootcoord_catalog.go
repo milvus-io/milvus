@@ -46,9 +46,9 @@ type RootCoordCatalog_AlterAlias_Call struct {
 }
 
 // AlterAlias is a helper method to define mock.On call
-//  - ctx context.Context
-//  - alias *model.Alias
-//  - ts uint64
+//   - ctx context.Context
+//   - alias *model.Alias
+//   - ts uint64
 func (_e *RootCoordCatalog_Expecter) AlterAlias(ctx interface{}, alias interface{}, ts interface{}) *RootCoordCatalog_AlterAlias_Call {
 	return &RootCoordCatalog_AlterAlias_Call{Call: _e.mock.On("AlterAlias", ctx, alias, ts)}
 }
@@ -90,11 +90,11 @@ type RootCoordCatalog_AlterCollection_Call struct {
 }
 
 // AlterCollection is a helper method to define mock.On call
-//  - ctx context.Context
-//  - oldColl *model.Collection
-//  - newColl *model.Collection
-//  - alterType metastore.AlterType
-//  - ts uint64
+//   - ctx context.Context
+//   - oldColl *model.Collection
+//   - newColl *model.Collection
+//   - alterType metastore.AlterType
+//   - ts uint64
 func (_e *RootCoordCatalog_Expecter) AlterCollection(ctx interface{}, oldColl interface{}, newColl interface{}, alterType interface{}, ts interface{}) *RootCoordCatalog_AlterCollection_Call {
 	return &RootCoordCatalog_AlterCollection_Call{Call: _e.mock.On("AlterCollection", ctx, oldColl, newColl, alterType, ts)}
 }
@@ -136,8 +136,8 @@ type RootCoordCatalog_AlterCredential_Call struct {
 }
 
 // AlterCredential is a helper method to define mock.On call
-//  - ctx context.Context
-//  - credential *model.Credential
+//   - ctx context.Context
+//   - credential *model.Credential
 func (_e *RootCoordCatalog_Expecter) AlterCredential(ctx interface{}, credential interface{}) *RootCoordCatalog_AlterCredential_Call {
 	return &RootCoordCatalog_AlterCredential_Call{Call: _e.mock.On("AlterCredential", ctx, credential)}
 }
@@ -179,10 +179,10 @@ type RootCoordCatalog_AlterGrant_Call struct {
 }
 
 // AlterGrant is a helper method to define mock.On call
-//  - ctx context.Context
-//  - tenant string
-//  - entity *milvuspb.GrantEntity
-//  - operateType milvuspb.OperatePrivilegeType
+//   - ctx context.Context
+//   - tenant string
+//   - entity *milvuspb.GrantEntity
+//   - operateType milvuspb.OperatePrivilegeType
 func (_e *RootCoordCatalog_Expecter) AlterGrant(ctx interface{}, tenant interface{}, entity interface{}, operateType interface{}) *RootCoordCatalog_AlterGrant_Call {
 	return &RootCoordCatalog_AlterGrant_Call{Call: _e.mock.On("AlterGrant", ctx, tenant, entity, operateType)}
 }
@@ -224,12 +224,12 @@ type RootCoordCatalog_AlterPartition_Call struct {
 }
 
 // AlterPartition is a helper method to define mock.On call
-//  - ctx context.Context
-//  - dbID int64
-//  - oldPart *model.Partition
-//  - newPart *model.Partition
-//  - alterType metastore.AlterType
-//  - ts uint64
+//   - ctx context.Context
+//   - dbID int64
+//   - oldPart *model.Partition
+//   - newPart *model.Partition
+//   - alterType metastore.AlterType
+//   - ts uint64
 func (_e *RootCoordCatalog_Expecter) AlterPartition(ctx interface{}, dbID interface{}, oldPart interface{}, newPart interface{}, alterType interface{}, ts interface{}) *RootCoordCatalog_AlterPartition_Call {
 	return &RootCoordCatalog_AlterPartition_Call{Call: _e.mock.On("AlterPartition", ctx, dbID, oldPart, newPart, alterType, ts)}
 }
@@ -271,11 +271,11 @@ type RootCoordCatalog_AlterUserRole_Call struct {
 }
 
 // AlterUserRole is a helper method to define mock.On call
-//  - ctx context.Context
-//  - tenant string
-//  - userEntity *milvuspb.UserEntity
-//  - roleEntity *milvuspb.RoleEntity
-//  - operateType milvuspb.OperateUserRoleType
+//   - ctx context.Context
+//   - tenant string
+//   - userEntity *milvuspb.UserEntity
+//   - roleEntity *milvuspb.RoleEntity
+//   - operateType milvuspb.OperateUserRoleType
 func (_e *RootCoordCatalog_Expecter) AlterUserRole(ctx interface{}, tenant interface{}, userEntity interface{}, roleEntity interface{}, operateType interface{}) *RootCoordCatalog_AlterUserRole_Call {
 	return &RootCoordCatalog_AlterUserRole_Call{Call: _e.mock.On("AlterUserRole", ctx, tenant, userEntity, roleEntity, operateType)}
 }
@@ -349,10 +349,10 @@ type RootCoordCatalog_CollectionExists_Call struct {
 }
 
 // CollectionExists is a helper method to define mock.On call
-//  - ctx context.Context
-//  - dbID int64
-//  - collectionID int64
-//  - ts uint64
+//   - ctx context.Context
+//   - dbID int64
+//   - collectionID int64
+//   - ts uint64
 func (_e *RootCoordCatalog_Expecter) CollectionExists(ctx interface{}, dbID interface{}, collectionID interface{}, ts interface{}) *RootCoordCatalog_CollectionExists_Call {
 	return &RootCoordCatalog_CollectionExists_Call{Call: _e.mock.On("CollectionExists", ctx, dbID, collectionID, ts)}
 }
@@ -394,9 +394,9 @@ type RootCoordCatalog_CreateAlias_Call struct {
 }
 
 // CreateAlias is a helper method to define mock.On call
-//  - ctx context.Context
-//  - alias *model.Alias
-//  - ts uint64
+//   - ctx context.Context
+//   - alias *model.Alias
+//   - ts uint64
 func (_e *RootCoordCatalog_Expecter) CreateAlias(ctx interface{}, alias interface{}, ts interface{}) *RootCoordCatalog_CreateAlias_Call {
 	return &RootCoordCatalog_CreateAlias_Call{Call: _e.mock.On("CreateAlias", ctx, alias, ts)}
 }
@@ -438,9 +438,9 @@ type RootCoordCatalog_CreateCollection_Call struct {
 }
 
 // CreateCollection is a helper method to define mock.On call
-//  - ctx context.Context
-//  - collectionInfo *model.Collection
-//  - ts uint64
+//   - ctx context.Context
+//   - collectionInfo *model.Collection
+//   - ts uint64
 func (_e *RootCoordCatalog_Expecter) CreateCollection(ctx interface{}, collectionInfo interface{}, ts interface{}) *RootCoordCatalog_CreateCollection_Call {
 	return &RootCoordCatalog_CreateCollection_Call{Call: _e.mock.On("CreateCollection", ctx, collectionInfo, ts)}
 }
@@ -482,8 +482,8 @@ type RootCoordCatalog_CreateCredential_Call struct {
 }
 
 // CreateCredential is a helper method to define mock.On call
-//  - ctx context.Context
-//  - credential *model.Credential
+//   - ctx context.Context
+//   - credential *model.Credential
 func (_e *RootCoordCatalog_Expecter) CreateCredential(ctx interface{}, credential interface{}) *RootCoordCatalog_CreateCredential_Call {
 	return &RootCoordCatalog_CreateCredential_Call{Call: _e.mock.On("CreateCredential", ctx, credential)}
 }
@@ -525,9 +525,9 @@ type RootCoordCatalog_CreateDatabase_Call struct {
 }
 
 // CreateDatabase is a helper method to define mock.On call
-//  - ctx context.Context
-//  - db *model.Database
-//  - ts uint64
+//   - ctx context.Context
+//   - db *model.Database
+//   - ts uint64
 func (_e *RootCoordCatalog_Expecter) CreateDatabase(ctx interface{}, db interface{}, ts interface{}) *RootCoordCatalog_CreateDatabase_Call {
 	return &RootCoordCatalog_CreateDatabase_Call{Call: _e.mock.On("CreateDatabase", ctx, db, ts)}
 }
@@ -569,10 +569,10 @@ type RootCoordCatalog_CreatePartition_Call struct {
 }
 
 // CreatePartition is a helper method to define mock.On call
-//  - ctx context.Context
-//  - dbID int64
-//  - partition *model.Partition
-//  - ts uint64
+//   - ctx context.Context
+//   - dbID int64
+//   - partition *model.Partition
+//   - ts uint64
 func (_e *RootCoordCatalog_Expecter) CreatePartition(ctx interface{}, dbID interface{}, partition interface{}, ts interface{}) *RootCoordCatalog_CreatePartition_Call {
 	return &RootCoordCatalog_CreatePartition_Call{Call: _e.mock.On("CreatePartition", ctx, dbID, partition, ts)}
 }
@@ -614,9 +614,9 @@ type RootCoordCatalog_CreateRole_Call struct {
 }
 
 // CreateRole is a helper method to define mock.On call
-//  - ctx context.Context
-//  - tenant string
-//  - entity *milvuspb.RoleEntity
+//   - ctx context.Context
+//   - tenant string
+//   - entity *milvuspb.RoleEntity
 func (_e *RootCoordCatalog_Expecter) CreateRole(ctx interface{}, tenant interface{}, entity interface{}) *RootCoordCatalog_CreateRole_Call {
 	return &RootCoordCatalog_CreateRole_Call{Call: _e.mock.On("CreateRole", ctx, tenant, entity)}
 }
@@ -658,9 +658,9 @@ type RootCoordCatalog_DeleteGrant_Call struct {
 }
 
 // DeleteGrant is a helper method to define mock.On call
-//  - ctx context.Context
-//  - tenant string
-//  - role *milvuspb.RoleEntity
+//   - ctx context.Context
+//   - tenant string
+//   - role *milvuspb.RoleEntity
 func (_e *RootCoordCatalog_Expecter) DeleteGrant(ctx interface{}, tenant interface{}, role interface{}) *RootCoordCatalog_DeleteGrant_Call {
 	return &RootCoordCatalog_DeleteGrant_Call{Call: _e.mock.On("DeleteGrant", ctx, tenant, role)}
 }
@@ -702,10 +702,10 @@ type RootCoordCatalog_DropAlias_Call struct {
 }
 
 // DropAlias is a helper method to define mock.On call
-//  - ctx context.Context
-//  - dbID int64
-//  - alias string
-//  - ts uint64
+//   - ctx context.Context
+//   - dbID int64
+//   - alias string
+//   - ts uint64
 func (_e *RootCoordCatalog_Expecter) DropAlias(ctx interface{}, dbID interface{}, alias interface{}, ts interface{}) *RootCoordCatalog_DropAlias_Call {
 	return &RootCoordCatalog_DropAlias_Call{Call: _e.mock.On("DropAlias", ctx, dbID, alias, ts)}
 }
@@ -747,9 +747,9 @@ type RootCoordCatalog_DropCollection_Call struct {
 }
 
 // DropCollection is a helper method to define mock.On call
-//  - ctx context.Context
-//  - collectionInfo *model.Collection
-//  - ts uint64
+//   - ctx context.Context
+//   - collectionInfo *model.Collection
+//   - ts uint64
 func (_e *RootCoordCatalog_Expecter) DropCollection(ctx interface{}, collectionInfo interface{}, ts interface{}) *RootCoordCatalog_DropCollection_Call {
 	return &RootCoordCatalog_DropCollection_Call{Call: _e.mock.On("DropCollection", ctx, collectionInfo, ts)}
 }
@@ -791,8 +791,8 @@ type RootCoordCatalog_DropCredential_Call struct {
 }
 
 // DropCredential is a helper method to define mock.On call
-//  - ctx context.Context
-//  - username string
+//   - ctx context.Context
+//   - username string
 func (_e *RootCoordCatalog_Expecter) DropCredential(ctx interface{}, username interface{}) *RootCoordCatalog_DropCredential_Call {
 	return &RootCoordCatalog_DropCredential_Call{Call: _e.mock.On("DropCredential", ctx, username)}
 }
@@ -834,9 +834,9 @@ type RootCoordCatalog_DropDatabase_Call struct {
 }
 
 // DropDatabase is a helper method to define mock.On call
-//  - ctx context.Context
-//  - dbID int64
-//  - ts uint64
+//   - ctx context.Context
+//   - dbID int64
+//   - ts uint64
 func (_e *RootCoordCatalog_Expecter) DropDatabase(ctx interface{}, dbID interface{}, ts interface{}) *RootCoordCatalog_DropDatabase_Call {
 	return &RootCoordCatalog_DropDatabase_Call{Call: _e.mock.On("DropDatabase", ctx, dbID, ts)}
 }
@@ -878,11 +878,11 @@ type RootCoordCatalog_DropPartition_Call struct {
 }
 
 // DropPartition is a helper method to define mock.On call
-//  - ctx context.Context
-//  - dbID int64
-//  - collectionID int64
-//  - partitionID int64
-//  - ts uint64
+//   - ctx context.Context
+//   - dbID int64
+//   - collectionID int64
+//   - partitionID int64
+//   - ts uint64
 func (_e *RootCoordCatalog_Expecter) DropPartition(ctx interface{}, dbID interface{}, collectionID interface{}, partitionID interface{}, ts interface{}) *RootCoordCatalog_DropPartition_Call {
 	return &RootCoordCatalog_DropPartition_Call{Call: _e.mock.On("DropPartition", ctx, dbID, collectionID, partitionID, ts)}
 }
@@ -924,9 +924,9 @@ type RootCoordCatalog_DropRole_Call struct {
 }
 
 // DropRole is a helper method to define mock.On call
-//  - ctx context.Context
-//  - tenant string
-//  - roleName string
+//   - ctx context.Context
+//   - tenant string
+//   - roleName string
 func (_e *RootCoordCatalog_Expecter) DropRole(ctx interface{}, tenant interface{}, roleName interface{}) *RootCoordCatalog_DropRole_Call {
 	return &RootCoordCatalog_DropRole_Call{Call: _e.mock.On("DropRole", ctx, tenant, roleName)}
 }
@@ -980,10 +980,10 @@ type RootCoordCatalog_GetCollectionByID_Call struct {
 }
 
 // GetCollectionByID is a helper method to define mock.On call
-//  - ctx context.Context
-//  - dbID int64
-//  - ts uint64
-//  - collectionID int64
+//   - ctx context.Context
+//   - dbID int64
+//   - ts uint64
+//   - collectionID int64
 func (_e *RootCoordCatalog_Expecter) GetCollectionByID(ctx interface{}, dbID interface{}, ts interface{}, collectionID interface{}) *RootCoordCatalog_GetCollectionByID_Call {
 	return &RootCoordCatalog_GetCollectionByID_Call{Call: _e.mock.On("GetCollectionByID", ctx, dbID, ts, collectionID)}
 }
@@ -1037,10 +1037,10 @@ type RootCoordCatalog_GetCollectionByName_Call struct {
 }
 
 // GetCollectionByName is a helper method to define mock.On call
-//  - ctx context.Context
-//  - dbID int64
-//  - collectionName string
-//  - ts uint64
+//   - ctx context.Context
+//   - dbID int64
+//   - collectionName string
+//   - ts uint64
 func (_e *RootCoordCatalog_Expecter) GetCollectionByName(ctx interface{}, dbID interface{}, collectionName interface{}, ts interface{}) *RootCoordCatalog_GetCollectionByName_Call {
 	return &RootCoordCatalog_GetCollectionByName_Call{Call: _e.mock.On("GetCollectionByName", ctx, dbID, collectionName, ts)}
 }
@@ -1094,8 +1094,8 @@ type RootCoordCatalog_GetCredential_Call struct {
 }
 
 // GetCredential is a helper method to define mock.On call
-//  - ctx context.Context
-//  - username string
+//   - ctx context.Context
+//   - username string
 func (_e *RootCoordCatalog_Expecter) GetCredential(ctx interface{}, username interface{}) *RootCoordCatalog_GetCredential_Call {
 	return &RootCoordCatalog_GetCredential_Call{Call: _e.mock.On("GetCredential", ctx, username)}
 }
@@ -1149,9 +1149,9 @@ type RootCoordCatalog_ListAliases_Call struct {
 }
 
 // ListAliases is a helper method to define mock.On call
-//  - ctx context.Context
-//  - dbID int64
-//  - ts uint64
+//   - ctx context.Context
+//   - dbID int64
+//   - ts uint64
 func (_e *RootCoordCatalog_Expecter) ListAliases(ctx interface{}, dbID interface{}, ts interface{}) *RootCoordCatalog_ListAliases_Call {
 	return &RootCoordCatalog_ListAliases_Call{Call: _e.mock.On("ListAliases", ctx, dbID, ts)}
 }
@@ -1205,9 +1205,9 @@ type RootCoordCatalog_ListCollections_Call struct {
 }
 
 // ListCollections is a helper method to define mock.On call
-//  - ctx context.Context
-//  - dbID int64
-//  - ts uint64
+//   - ctx context.Context
+//   - dbID int64
+//   - ts uint64
 func (_e *RootCoordCatalog_Expecter) ListCollections(ctx interface{}, dbID interface{}, ts interface{}) *RootCoordCatalog_ListCollections_Call {
 	return &RootCoordCatalog_ListCollections_Call{Call: _e.mock.On("ListCollections", ctx, dbID, ts)}
 }
@@ -1261,7 +1261,7 @@ type RootCoordCatalog_ListCredentials_Call struct {
 }
 
 // ListCredentials is a helper method to define mock.On call
-//  - ctx context.Context
+//   - ctx context.Context
 func (_e *RootCoordCatalog_Expecter) ListCredentials(ctx interface{}) *RootCoordCatalog_ListCredentials_Call {
 	return &RootCoordCatalog_ListCredentials_Call{Call: _e.mock.On("ListCredentials", ctx)}
 }
@@ -1315,8 +1315,8 @@ type RootCoordCatalog_ListDatabases_Call struct {
 }
 
 // ListDatabases is a helper method to define mock.On call
-//  - ctx context.Context
-//  - ts uint64
+//   - ctx context.Context
+//   - ts uint64
 func (_e *RootCoordCatalog_Expecter) ListDatabases(ctx interface{}, ts interface{}) *RootCoordCatalog_ListDatabases_Call {
 	return &RootCoordCatalog_ListDatabases_Call{Call: _e.mock.On("ListDatabases", ctx, ts)}
 }
@@ -1370,9 +1370,9 @@ type RootCoordCatalog_ListGrant_Call struct {
 }
 
 // ListGrant is a helper method to define mock.On call
-//  - ctx context.Context
-//  - tenant string
-//  - entity *milvuspb.GrantEntity
+//   - ctx context.Context
+//   - tenant string
+//   - entity *milvuspb.GrantEntity
 func (_e *RootCoordCatalog_Expecter) ListGrant(ctx interface{}, tenant interface{}, entity interface{}) *RootCoordCatalog_ListGrant_Call {
 	return &RootCoordCatalog_ListGrant_Call{Call: _e.mock.On("ListGrant", ctx, tenant, entity)}
 }
@@ -1426,8 +1426,8 @@ type RootCoordCatalog_ListPolicy_Call struct {
 }
 
 // ListPolicy is a helper method to define mock.On call
-//  - ctx context.Context
-//  - tenant string
+//   - ctx context.Context
+//   - tenant string
 func (_e *RootCoordCatalog_Expecter) ListPolicy(ctx interface{}, tenant interface{}) *RootCoordCatalog_ListPolicy_Call {
 	return &RootCoordCatalog_ListPolicy_Call{Call: _e.mock.On("ListPolicy", ctx, tenant)}
 }
@@ -1481,10 +1481,10 @@ type RootCoordCatalog_ListRole_Call struct {
 }
 
 // ListRole is a helper method to define mock.On call
-//  - ctx context.Context
-//  - tenant string
-//  - entity *milvuspb.RoleEntity
-//  - includeUserInfo bool
+//   - ctx context.Context
+//   - tenant string
+//   - entity *milvuspb.RoleEntity
+//   - includeUserInfo bool
 func (_e *RootCoordCatalog_Expecter) ListRole(ctx interface{}, tenant interface{}, entity interface{}, includeUserInfo interface{}) *RootCoordCatalog_ListRole_Call {
 	return &RootCoordCatalog_ListRole_Call{Call: _e.mock.On("ListRole", ctx, tenant, entity, includeUserInfo)}
 }
@@ -1538,10 +1538,10 @@ type RootCoordCatalog_ListUser_Call struct {
 }
 
 // ListUser is a helper method to define mock.On call
-//  - ctx context.Context
-//  - tenant string
-//  - entity *milvuspb.UserEntity
-//  - includeRoleInfo bool
+//   - ctx context.Context
+//   - tenant string
+//   - entity *milvuspb.UserEntity
+//   - includeRoleInfo bool
 func (_e *RootCoordCatalog_Expecter) ListUser(ctx interface{}, tenant interface{}, entity interface{}, includeRoleInfo interface{}) *RootCoordCatalog_ListUser_Call {
 	return &RootCoordCatalog_ListUser_Call{Call: _e.mock.On("ListUser", ctx, tenant, entity, includeRoleInfo)}
 }
@@ -1595,8 +1595,8 @@ type RootCoordCatalog_ListUserRole_Call struct {
 }
 
 // ListUserRole is a helper method to define mock.On call
-//  - ctx context.Context
-//  - tenant string
+//   - ctx context.Context
+//   - tenant string
 func (_e *RootCoordCatalog_Expecter) ListUserRole(ctx interface{}, tenant interface{}) *RootCoordCatalog_ListUserRole_Call {
 	return &RootCoordCatalog_ListUserRole_Call{Call: _e.mock.On("ListUserRole", ctx, tenant)}
 }

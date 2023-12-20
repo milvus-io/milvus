@@ -42,9 +42,9 @@ type MockMetaCache_AddSegment_Call struct {
 }
 
 // AddSegment is a helper method to define mock.On call
-//  - segInfo *datapb.SegmentInfo
-//  - factory PkStatsFactory
-//  - actions ...SegmentAction
+//   - segInfo *datapb.SegmentInfo
+//   - factory PkStatsFactory
+//   - actions ...SegmentAction
 func (_e *MockMetaCache_Expecter) AddSegment(segInfo interface{}, factory interface{}, actions ...interface{}) *MockMetaCache_AddSegment_Call {
 	return &MockMetaCache_AddSegment_Call{Call: _e.mock.On("AddSegment",
 		append([]interface{}{segInfo, factory}, actions...)...)}
@@ -132,11 +132,11 @@ type MockMetaCache_CompactSegments_Call struct {
 }
 
 // CompactSegments is a helper method to define mock.On call
-//  - newSegmentID int64
-//  - partitionID int64
-//  - numRows int64
-//  - bfs *BloomFilterSet
-//  - oldSegmentIDs ...int64
+//   - newSegmentID int64
+//   - partitionID int64
+//   - numRows int64
+//   - bfs *BloomFilterSet
+//   - oldSegmentIDs ...int64
 func (_e *MockMetaCache_Expecter) CompactSegments(newSegmentID interface{}, partitionID interface{}, numRows interface{}, bfs interface{}, oldSegmentIDs ...interface{}) *MockMetaCache_CompactSegments_Call {
 	return &MockMetaCache_CompactSegments_Call{Call: _e.mock.On("CompactSegments",
 		append([]interface{}{newSegmentID, partitionID, numRows, bfs}, oldSegmentIDs...)...)}
@@ -204,8 +204,8 @@ type MockMetaCache_GetSegmentByID_Call struct {
 }
 
 // GetSegmentByID is a helper method to define mock.On call
-//  - id int64
-//  - filters ...SegmentFilter
+//   - id int64
+//   - filters ...SegmentFilter
 func (_e *MockMetaCache_Expecter) GetSegmentByID(id interface{}, filters ...interface{}) *MockMetaCache_GetSegmentByID_Call {
 	return &MockMetaCache_GetSegmentByID_Call{Call: _e.mock.On("GetSegmentByID",
 		append([]interface{}{id}, filters...)...)}
@@ -262,7 +262,7 @@ type MockMetaCache_GetSegmentIDsBy_Call struct {
 }
 
 // GetSegmentIDsBy is a helper method to define mock.On call
-//  - filters ...SegmentFilter
+//   - filters ...SegmentFilter
 func (_e *MockMetaCache_Expecter) GetSegmentIDsBy(filters ...interface{}) *MockMetaCache_GetSegmentIDsBy_Call {
 	return &MockMetaCache_GetSegmentIDsBy_Call{Call: _e.mock.On("GetSegmentIDsBy",
 		append([]interface{}{}, filters...)...)}
@@ -319,7 +319,7 @@ type MockMetaCache_GetSegmentsBy_Call struct {
 }
 
 // GetSegmentsBy is a helper method to define mock.On call
-//  - filters ...SegmentFilter
+//   - filters ...SegmentFilter
 func (_e *MockMetaCache_Expecter) GetSegmentsBy(filters ...interface{}) *MockMetaCache_GetSegmentsBy_Call {
 	return &MockMetaCache_GetSegmentsBy_Call{Call: _e.mock.On("GetSegmentsBy",
 		append([]interface{}{}, filters...)...)}
@@ -387,8 +387,8 @@ type MockMetaCache_PredictSegments_Call struct {
 }
 
 // PredictSegments is a helper method to define mock.On call
-//  - pk storage.PrimaryKey
-//  - filters ...SegmentFilter
+//   - pk storage.PrimaryKey
+//   - filters ...SegmentFilter
 func (_e *MockMetaCache_Expecter) PredictSegments(pk interface{}, filters ...interface{}) *MockMetaCache_PredictSegments_Call {
 	return &MockMetaCache_PredictSegments_Call{Call: _e.mock.On("PredictSegments",
 		append([]interface{}{pk}, filters...)...)}
@@ -445,7 +445,7 @@ type MockMetaCache_RemoveSegments_Call struct {
 }
 
 // RemoveSegments is a helper method to define mock.On call
-//  - filters ...SegmentFilter
+//   - filters ...SegmentFilter
 func (_e *MockMetaCache_Expecter) RemoveSegments(filters ...interface{}) *MockMetaCache_RemoveSegments_Call {
 	return &MockMetaCache_RemoveSegments_Call{Call: _e.mock.On("RemoveSegments",
 		append([]interface{}{}, filters...)...)}
@@ -535,8 +535,8 @@ type MockMetaCache_UpdateSegments_Call struct {
 }
 
 // UpdateSegments is a helper method to define mock.On call
-//  - action SegmentAction
-//  - filters ...SegmentFilter
+//   - action SegmentAction
+//   - filters ...SegmentFilter
 func (_e *MockMetaCache_Expecter) UpdateSegments(action interface{}, filters ...interface{}) *MockMetaCache_UpdateSegments_Call {
 	return &MockMetaCache_UpdateSegments_Call{Call: _e.mock.On("UpdateSegments",
 		append([]interface{}{action}, filters...)...)}

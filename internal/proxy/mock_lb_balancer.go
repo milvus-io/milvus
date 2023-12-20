@@ -33,8 +33,8 @@ type MockLBBalancer_CancelWorkload_Call struct {
 }
 
 // CancelWorkload is a helper method to define mock.On call
-//  - node int64
-//  - nq int64
+//   - node int64
+//   - nq int64
 func (_e *MockLBBalancer_Expecter) CancelWorkload(node interface{}, nq interface{}) *MockLBBalancer_CancelWorkload_Call {
 	return &MockLBBalancer_CancelWorkload_Call{Call: _e.mock.On("CancelWorkload", node, nq)}
 }
@@ -118,9 +118,9 @@ type MockLBBalancer_SelectNode_Call struct {
 }
 
 // SelectNode is a helper method to define mock.On call
-//  - ctx context.Context
-//  - availableNodes []int64
-//  - nq int64
+//   - ctx context.Context
+//   - availableNodes []int64
+//   - nq int64
 func (_e *MockLBBalancer_Expecter) SelectNode(ctx interface{}, availableNodes interface{}, nq interface{}) *MockLBBalancer_SelectNode_Call {
 	return &MockLBBalancer_SelectNode_Call{Call: _e.mock.On("SelectNode", ctx, availableNodes, nq)}
 }
@@ -153,7 +153,7 @@ type MockLBBalancer_Start_Call struct {
 }
 
 // Start is a helper method to define mock.On call
-//  - ctx context.Context
+//   - ctx context.Context
 func (_e *MockLBBalancer_Expecter) Start(ctx interface{}) *MockLBBalancer_Start_Call {
 	return &MockLBBalancer_Start_Call{Call: _e.mock.On("Start", ctx)}
 }
@@ -186,8 +186,8 @@ type MockLBBalancer_UpdateCostMetrics_Call struct {
 }
 
 // UpdateCostMetrics is a helper method to define mock.On call
-//  - node int64
-//  - cost *internalpb.CostAggregation
+//   - node int64
+//   - cost *internalpb.CostAggregation
 func (_e *MockLBBalancer_Expecter) UpdateCostMetrics(node interface{}, cost interface{}) *MockLBBalancer_UpdateCostMetrics_Call {
 	return &MockLBBalancer_UpdateCostMetrics_Call{Call: _e.mock.On("UpdateCostMetrics", node, cost)}
 }

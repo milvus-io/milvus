@@ -53,8 +53,8 @@ type MockBinlogIO_Download_Call struct {
 }
 
 // Download is a helper method to define mock.On call
-//  - ctx context.Context
-//  - paths []string
+//   - ctx context.Context
+//   - paths []string
 func (_e *MockBinlogIO_Expecter) Download(ctx interface{}, paths interface{}) *MockBinlogIO_Download_Call {
 	return &MockBinlogIO_Download_Call{Call: _e.mock.On("Download", ctx, paths)}
 }
@@ -102,7 +102,7 @@ type MockBinlogIO_JoinFullPath_Call struct {
 }
 
 // JoinFullPath is a helper method to define mock.On call
-//  - paths ...string
+//   - paths ...string
 func (_e *MockBinlogIO_Expecter) JoinFullPath(paths ...interface{}) *MockBinlogIO_JoinFullPath_Call {
 	return &MockBinlogIO_JoinFullPath_Call{Call: _e.mock.On("JoinFullPath",
 		append([]interface{}{}, paths...)...)}
@@ -151,8 +151,8 @@ type MockBinlogIO_Upload_Call struct {
 }
 
 // Upload is a helper method to define mock.On call
-//  - ctx context.Context
-//  - kvs map[string][]byte
+//   - ctx context.Context
+//   - kvs map[string][]byte
 func (_e *MockBinlogIO_Expecter) Upload(ctx interface{}, kvs interface{}) *MockBinlogIO_Upload_Call {
 	return &MockBinlogIO_Upload_Call{Call: _e.mock.On("Upload", ctx, kvs)}
 }

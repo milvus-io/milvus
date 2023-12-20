@@ -111,9 +111,9 @@ type MockIndexNodeClient_CreateJob_Call struct {
 }
 
 // CreateJob is a helper method to define mock.On call
-//  - ctx context.Context
-//  - in *indexpb.CreateJobRequest
-//  - opts ...grpc.CallOption
+//   - ctx context.Context
+//   - in *indexpb.CreateJobRequest
+//   - opts ...grpc.CallOption
 func (_e *MockIndexNodeClient_Expecter) CreateJob(ctx interface{}, in interface{}, opts ...interface{}) *MockIndexNodeClient_CreateJob_Call {
 	return &MockIndexNodeClient_CreateJob_Call{Call: _e.mock.On("CreateJob",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -181,9 +181,9 @@ type MockIndexNodeClient_DropJobs_Call struct {
 }
 
 // DropJobs is a helper method to define mock.On call
-//  - ctx context.Context
-//  - in *indexpb.DropJobsRequest
-//  - opts ...grpc.CallOption
+//   - ctx context.Context
+//   - in *indexpb.DropJobsRequest
+//   - opts ...grpc.CallOption
 func (_e *MockIndexNodeClient_Expecter) DropJobs(ctx interface{}, in interface{}, opts ...interface{}) *MockIndexNodeClient_DropJobs_Call {
 	return &MockIndexNodeClient_DropJobs_Call{Call: _e.mock.On("DropJobs",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -251,9 +251,9 @@ type MockIndexNodeClient_GetComponentStates_Call struct {
 }
 
 // GetComponentStates is a helper method to define mock.On call
-//  - ctx context.Context
-//  - in *milvuspb.GetComponentStatesRequest
-//  - opts ...grpc.CallOption
+//   - ctx context.Context
+//   - in *milvuspb.GetComponentStatesRequest
+//   - opts ...grpc.CallOption
 func (_e *MockIndexNodeClient_Expecter) GetComponentStates(ctx interface{}, in interface{}, opts ...interface{}) *MockIndexNodeClient_GetComponentStates_Call {
 	return &MockIndexNodeClient_GetComponentStates_Call{Call: _e.mock.On("GetComponentStates",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -321,9 +321,9 @@ type MockIndexNodeClient_GetJobStats_Call struct {
 }
 
 // GetJobStats is a helper method to define mock.On call
-//  - ctx context.Context
-//  - in *indexpb.GetJobStatsRequest
-//  - opts ...grpc.CallOption
+//   - ctx context.Context
+//   - in *indexpb.GetJobStatsRequest
+//   - opts ...grpc.CallOption
 func (_e *MockIndexNodeClient_Expecter) GetJobStats(ctx interface{}, in interface{}, opts ...interface{}) *MockIndexNodeClient_GetJobStats_Call {
 	return &MockIndexNodeClient_GetJobStats_Call{Call: _e.mock.On("GetJobStats",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -391,9 +391,9 @@ type MockIndexNodeClient_GetMetrics_Call struct {
 }
 
 // GetMetrics is a helper method to define mock.On call
-//  - ctx context.Context
-//  - in *milvuspb.GetMetricsRequest
-//  - opts ...grpc.CallOption
+//   - ctx context.Context
+//   - in *milvuspb.GetMetricsRequest
+//   - opts ...grpc.CallOption
 func (_e *MockIndexNodeClient_Expecter) GetMetrics(ctx interface{}, in interface{}, opts ...interface{}) *MockIndexNodeClient_GetMetrics_Call {
 	return &MockIndexNodeClient_GetMetrics_Call{Call: _e.mock.On("GetMetrics",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -461,9 +461,9 @@ type MockIndexNodeClient_GetStatisticsChannel_Call struct {
 }
 
 // GetStatisticsChannel is a helper method to define mock.On call
-//  - ctx context.Context
-//  - in *internalpb.GetStatisticsChannelRequest
-//  - opts ...grpc.CallOption
+//   - ctx context.Context
+//   - in *internalpb.GetStatisticsChannelRequest
+//   - opts ...grpc.CallOption
 func (_e *MockIndexNodeClient_Expecter) GetStatisticsChannel(ctx interface{}, in interface{}, opts ...interface{}) *MockIndexNodeClient_GetStatisticsChannel_Call {
 	return &MockIndexNodeClient_GetStatisticsChannel_Call{Call: _e.mock.On("GetStatisticsChannel",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -531,9 +531,9 @@ type MockIndexNodeClient_QueryJobs_Call struct {
 }
 
 // QueryJobs is a helper method to define mock.On call
-//  - ctx context.Context
-//  - in *indexpb.QueryJobsRequest
-//  - opts ...grpc.CallOption
+//   - ctx context.Context
+//   - in *indexpb.QueryJobsRequest
+//   - opts ...grpc.CallOption
 func (_e *MockIndexNodeClient_Expecter) QueryJobs(ctx interface{}, in interface{}, opts ...interface{}) *MockIndexNodeClient_QueryJobs_Call {
 	return &MockIndexNodeClient_QueryJobs_Call{Call: _e.mock.On("QueryJobs",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -601,9 +601,9 @@ type MockIndexNodeClient_ShowConfigurations_Call struct {
 }
 
 // ShowConfigurations is a helper method to define mock.On call
-//  - ctx context.Context
-//  - in *internalpb.ShowConfigurationsRequest
-//  - opts ...grpc.CallOption
+//   - ctx context.Context
+//   - in *internalpb.ShowConfigurationsRequest
+//   - opts ...grpc.CallOption
 func (_e *MockIndexNodeClient_Expecter) ShowConfigurations(ctx interface{}, in interface{}, opts ...interface{}) *MockIndexNodeClient_ShowConfigurations_Call {
 	return &MockIndexNodeClient_ShowConfigurations_Call{Call: _e.mock.On("ShowConfigurations",
 		append([]interface{}{ctx, in}, opts...)...)}

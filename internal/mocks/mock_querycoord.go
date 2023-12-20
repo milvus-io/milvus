@@ -66,8 +66,8 @@ type MockQueryCoord_ActivateChecker_Call struct {
 }
 
 // ActivateChecker is a helper method to define mock.On call
-//  - _a0 context.Context
-//  - _a1 *querypb.ActivateCheckerRequest
+//   - _a0 context.Context
+//   - _a1 *querypb.ActivateCheckerRequest
 func (_e *MockQueryCoord_Expecter) ActivateChecker(_a0 interface{}, _a1 interface{}) *MockQueryCoord_ActivateChecker_Call {
 	return &MockQueryCoord_ActivateChecker_Call{Call: _e.mock.On("ActivateChecker", _a0, _a1)}
 }
@@ -121,8 +121,8 @@ type MockQueryCoord_CheckHealth_Call struct {
 }
 
 // CheckHealth is a helper method to define mock.On call
-//  - _a0 context.Context
-//  - _a1 *milvuspb.CheckHealthRequest
+//   - _a0 context.Context
+//   - _a1 *milvuspb.CheckHealthRequest
 func (_e *MockQueryCoord_Expecter) CheckHealth(_a0 interface{}, _a1 interface{}) *MockQueryCoord_CheckHealth_Call {
 	return &MockQueryCoord_CheckHealth_Call{Call: _e.mock.On("CheckHealth", _a0, _a1)}
 }
@@ -176,8 +176,8 @@ type MockQueryCoord_CreateResourceGroup_Call struct {
 }
 
 // CreateResourceGroup is a helper method to define mock.On call
-//  - _a0 context.Context
-//  - _a1 *milvuspb.CreateResourceGroupRequest
+//   - _a0 context.Context
+//   - _a1 *milvuspb.CreateResourceGroupRequest
 func (_e *MockQueryCoord_Expecter) CreateResourceGroup(_a0 interface{}, _a1 interface{}) *MockQueryCoord_CreateResourceGroup_Call {
 	return &MockQueryCoord_CreateResourceGroup_Call{Call: _e.mock.On("CreateResourceGroup", _a0, _a1)}
 }
@@ -231,8 +231,8 @@ type MockQueryCoord_DeactivateChecker_Call struct {
 }
 
 // DeactivateChecker is a helper method to define mock.On call
-//  - _a0 context.Context
-//  - _a1 *querypb.DeactivateCheckerRequest
+//   - _a0 context.Context
+//   - _a1 *querypb.DeactivateCheckerRequest
 func (_e *MockQueryCoord_Expecter) DeactivateChecker(_a0 interface{}, _a1 interface{}) *MockQueryCoord_DeactivateChecker_Call {
 	return &MockQueryCoord_DeactivateChecker_Call{Call: _e.mock.On("DeactivateChecker", _a0, _a1)}
 }
@@ -286,8 +286,8 @@ type MockQueryCoord_DescribeResourceGroup_Call struct {
 }
 
 // DescribeResourceGroup is a helper method to define mock.On call
-//  - _a0 context.Context
-//  - _a1 *querypb.DescribeResourceGroupRequest
+//   - _a0 context.Context
+//   - _a1 *querypb.DescribeResourceGroupRequest
 func (_e *MockQueryCoord_Expecter) DescribeResourceGroup(_a0 interface{}, _a1 interface{}) *MockQueryCoord_DescribeResourceGroup_Call {
 	return &MockQueryCoord_DescribeResourceGroup_Call{Call: _e.mock.On("DescribeResourceGroup", _a0, _a1)}
 }
@@ -341,8 +341,8 @@ type MockQueryCoord_DropResourceGroup_Call struct {
 }
 
 // DropResourceGroup is a helper method to define mock.On call
-//  - _a0 context.Context
-//  - _a1 *milvuspb.DropResourceGroupRequest
+//   - _a0 context.Context
+//   - _a1 *milvuspb.DropResourceGroupRequest
 func (_e *MockQueryCoord_Expecter) DropResourceGroup(_a0 interface{}, _a1 interface{}) *MockQueryCoord_DropResourceGroup_Call {
 	return &MockQueryCoord_DropResourceGroup_Call{Call: _e.mock.On("DropResourceGroup", _a0, _a1)}
 }
@@ -396,8 +396,8 @@ type MockQueryCoord_GetComponentStates_Call struct {
 }
 
 // GetComponentStates is a helper method to define mock.On call
-//  - _a0 context.Context
-//  - _a1 *milvuspb.GetComponentStatesRequest
+//   - _a0 context.Context
+//   - _a1 *milvuspb.GetComponentStatesRequest
 func (_e *MockQueryCoord_Expecter) GetComponentStates(_a0 interface{}, _a1 interface{}) *MockQueryCoord_GetComponentStates_Call {
 	return &MockQueryCoord_GetComponentStates_Call{Call: _e.mock.On("GetComponentStates", _a0, _a1)}
 }
@@ -451,8 +451,8 @@ type MockQueryCoord_GetMetrics_Call struct {
 }
 
 // GetMetrics is a helper method to define mock.On call
-//  - _a0 context.Context
-//  - _a1 *milvuspb.GetMetricsRequest
+//   - _a0 context.Context
+//   - _a1 *milvuspb.GetMetricsRequest
 func (_e *MockQueryCoord_Expecter) GetMetrics(_a0 interface{}, _a1 interface{}) *MockQueryCoord_GetMetrics_Call {
 	return &MockQueryCoord_GetMetrics_Call{Call: _e.mock.On("GetMetrics", _a0, _a1)}
 }
@@ -506,8 +506,8 @@ type MockQueryCoord_GetPartitionStates_Call struct {
 }
 
 // GetPartitionStates is a helper method to define mock.On call
-//  - _a0 context.Context
-//  - _a1 *querypb.GetPartitionStatesRequest
+//   - _a0 context.Context
+//   - _a1 *querypb.GetPartitionStatesRequest
 func (_e *MockQueryCoord_Expecter) GetPartitionStates(_a0 interface{}, _a1 interface{}) *MockQueryCoord_GetPartitionStates_Call {
 	return &MockQueryCoord_GetPartitionStates_Call{Call: _e.mock.On("GetPartitionStates", _a0, _a1)}
 }
@@ -561,8 +561,8 @@ type MockQueryCoord_GetReplicas_Call struct {
 }
 
 // GetReplicas is a helper method to define mock.On call
-//  - _a0 context.Context
-//  - _a1 *milvuspb.GetReplicasRequest
+//   - _a0 context.Context
+//   - _a1 *milvuspb.GetReplicasRequest
 func (_e *MockQueryCoord_Expecter) GetReplicas(_a0 interface{}, _a1 interface{}) *MockQueryCoord_GetReplicas_Call {
 	return &MockQueryCoord_GetReplicas_Call{Call: _e.mock.On("GetReplicas", _a0, _a1)}
 }
@@ -616,8 +616,8 @@ type MockQueryCoord_GetSegmentInfo_Call struct {
 }
 
 // GetSegmentInfo is a helper method to define mock.On call
-//  - _a0 context.Context
-//  - _a1 *querypb.GetSegmentInfoRequest
+//   - _a0 context.Context
+//   - _a1 *querypb.GetSegmentInfoRequest
 func (_e *MockQueryCoord_Expecter) GetSegmentInfo(_a0 interface{}, _a1 interface{}) *MockQueryCoord_GetSegmentInfo_Call {
 	return &MockQueryCoord_GetSegmentInfo_Call{Call: _e.mock.On("GetSegmentInfo", _a0, _a1)}
 }
@@ -671,8 +671,8 @@ type MockQueryCoord_GetShardLeaders_Call struct {
 }
 
 // GetShardLeaders is a helper method to define mock.On call
-//  - _a0 context.Context
-//  - _a1 *querypb.GetShardLeadersRequest
+//   - _a0 context.Context
+//   - _a1 *querypb.GetShardLeadersRequest
 func (_e *MockQueryCoord_Expecter) GetShardLeaders(_a0 interface{}, _a1 interface{}) *MockQueryCoord_GetShardLeaders_Call {
 	return &MockQueryCoord_GetShardLeaders_Call{Call: _e.mock.On("GetShardLeaders", _a0, _a1)}
 }
@@ -726,8 +726,8 @@ type MockQueryCoord_GetStatisticsChannel_Call struct {
 }
 
 // GetStatisticsChannel is a helper method to define mock.On call
-//  - _a0 context.Context
-//  - _a1 *internalpb.GetStatisticsChannelRequest
+//   - _a0 context.Context
+//   - _a1 *internalpb.GetStatisticsChannelRequest
 func (_e *MockQueryCoord_Expecter) GetStatisticsChannel(_a0 interface{}, _a1 interface{}) *MockQueryCoord_GetStatisticsChannel_Call {
 	return &MockQueryCoord_GetStatisticsChannel_Call{Call: _e.mock.On("GetStatisticsChannel", _a0, _a1)}
 }
@@ -781,8 +781,8 @@ type MockQueryCoord_GetTimeTickChannel_Call struct {
 }
 
 // GetTimeTickChannel is a helper method to define mock.On call
-//  - _a0 context.Context
-//  - _a1 *internalpb.GetTimeTickChannelRequest
+//   - _a0 context.Context
+//   - _a1 *internalpb.GetTimeTickChannelRequest
 func (_e *MockQueryCoord_Expecter) GetTimeTickChannel(_a0 interface{}, _a1 interface{}) *MockQueryCoord_GetTimeTickChannel_Call {
 	return &MockQueryCoord_GetTimeTickChannel_Call{Call: _e.mock.On("GetTimeTickChannel", _a0, _a1)}
 }
@@ -877,8 +877,8 @@ type MockQueryCoord_ListCheckers_Call struct {
 }
 
 // ListCheckers is a helper method to define mock.On call
-//  - _a0 context.Context
-//  - _a1 *querypb.ListCheckersRequest
+//   - _a0 context.Context
+//   - _a1 *querypb.ListCheckersRequest
 func (_e *MockQueryCoord_Expecter) ListCheckers(_a0 interface{}, _a1 interface{}) *MockQueryCoord_ListCheckers_Call {
 	return &MockQueryCoord_ListCheckers_Call{Call: _e.mock.On("ListCheckers", _a0, _a1)}
 }
@@ -932,8 +932,8 @@ type MockQueryCoord_ListResourceGroups_Call struct {
 }
 
 // ListResourceGroups is a helper method to define mock.On call
-//  - _a0 context.Context
-//  - _a1 *milvuspb.ListResourceGroupsRequest
+//   - _a0 context.Context
+//   - _a1 *milvuspb.ListResourceGroupsRequest
 func (_e *MockQueryCoord_Expecter) ListResourceGroups(_a0 interface{}, _a1 interface{}) *MockQueryCoord_ListResourceGroups_Call {
 	return &MockQueryCoord_ListResourceGroups_Call{Call: _e.mock.On("ListResourceGroups", _a0, _a1)}
 }
@@ -987,8 +987,8 @@ type MockQueryCoord_LoadBalance_Call struct {
 }
 
 // LoadBalance is a helper method to define mock.On call
-//  - _a0 context.Context
-//  - _a1 *querypb.LoadBalanceRequest
+//   - _a0 context.Context
+//   - _a1 *querypb.LoadBalanceRequest
 func (_e *MockQueryCoord_Expecter) LoadBalance(_a0 interface{}, _a1 interface{}) *MockQueryCoord_LoadBalance_Call {
 	return &MockQueryCoord_LoadBalance_Call{Call: _e.mock.On("LoadBalance", _a0, _a1)}
 }
@@ -1042,8 +1042,8 @@ type MockQueryCoord_LoadCollection_Call struct {
 }
 
 // LoadCollection is a helper method to define mock.On call
-//  - _a0 context.Context
-//  - _a1 *querypb.LoadCollectionRequest
+//   - _a0 context.Context
+//   - _a1 *querypb.LoadCollectionRequest
 func (_e *MockQueryCoord_Expecter) LoadCollection(_a0 interface{}, _a1 interface{}) *MockQueryCoord_LoadCollection_Call {
 	return &MockQueryCoord_LoadCollection_Call{Call: _e.mock.On("LoadCollection", _a0, _a1)}
 }
@@ -1097,8 +1097,8 @@ type MockQueryCoord_LoadPartitions_Call struct {
 }
 
 // LoadPartitions is a helper method to define mock.On call
-//  - _a0 context.Context
-//  - _a1 *querypb.LoadPartitionsRequest
+//   - _a0 context.Context
+//   - _a1 *querypb.LoadPartitionsRequest
 func (_e *MockQueryCoord_Expecter) LoadPartitions(_a0 interface{}, _a1 interface{}) *MockQueryCoord_LoadPartitions_Call {
 	return &MockQueryCoord_LoadPartitions_Call{Call: _e.mock.On("LoadPartitions", _a0, _a1)}
 }
@@ -1193,8 +1193,8 @@ type MockQueryCoord_ReleaseCollection_Call struct {
 }
 
 // ReleaseCollection is a helper method to define mock.On call
-//  - _a0 context.Context
-//  - _a1 *querypb.ReleaseCollectionRequest
+//   - _a0 context.Context
+//   - _a1 *querypb.ReleaseCollectionRequest
 func (_e *MockQueryCoord_Expecter) ReleaseCollection(_a0 interface{}, _a1 interface{}) *MockQueryCoord_ReleaseCollection_Call {
 	return &MockQueryCoord_ReleaseCollection_Call{Call: _e.mock.On("ReleaseCollection", _a0, _a1)}
 }
@@ -1248,8 +1248,8 @@ type MockQueryCoord_ReleasePartitions_Call struct {
 }
 
 // ReleasePartitions is a helper method to define mock.On call
-//  - _a0 context.Context
-//  - _a1 *querypb.ReleasePartitionsRequest
+//   - _a0 context.Context
+//   - _a1 *querypb.ReleasePartitionsRequest
 func (_e *MockQueryCoord_Expecter) ReleasePartitions(_a0 interface{}, _a1 interface{}) *MockQueryCoord_ReleasePartitions_Call {
 	return &MockQueryCoord_ReleasePartitions_Call{Call: _e.mock.On("ReleasePartitions", _a0, _a1)}
 }
@@ -1282,7 +1282,7 @@ type MockQueryCoord_SetAddress_Call struct {
 }
 
 // SetAddress is a helper method to define mock.On call
-//  - address string
+//   - address string
 func (_e *MockQueryCoord_Expecter) SetAddress(address interface{}) *MockQueryCoord_SetAddress_Call {
 	return &MockQueryCoord_SetAddress_Call{Call: _e.mock.On("SetAddress", address)}
 }
@@ -1324,7 +1324,7 @@ type MockQueryCoord_SetDataCoordClient_Call struct {
 }
 
 // SetDataCoordClient is a helper method to define mock.On call
-//  - dataCoord types.DataCoordClient
+//   - dataCoord types.DataCoordClient
 func (_e *MockQueryCoord_Expecter) SetDataCoordClient(dataCoord interface{}) *MockQueryCoord_SetDataCoordClient_Call {
 	return &MockQueryCoord_SetDataCoordClient_Call{Call: _e.mock.On("SetDataCoordClient", dataCoord)}
 }
@@ -1357,7 +1357,7 @@ type MockQueryCoord_SetEtcdClient_Call struct {
 }
 
 // SetEtcdClient is a helper method to define mock.On call
-//  - etcdClient *clientv3.Client
+//   - etcdClient *clientv3.Client
 func (_e *MockQueryCoord_Expecter) SetEtcdClient(etcdClient interface{}) *MockQueryCoord_SetEtcdClient_Call {
 	return &MockQueryCoord_SetEtcdClient_Call{Call: _e.mock.On("SetEtcdClient", etcdClient)}
 }
@@ -1390,7 +1390,7 @@ type MockQueryCoord_SetQueryNodeCreator_Call struct {
 }
 
 // SetQueryNodeCreator is a helper method to define mock.On call
-//  - _a0 func(context.Context , string , int64)(types.QueryNodeClient , error)
+//   - _a0 func(context.Context , string , int64)(types.QueryNodeClient , error)
 func (_e *MockQueryCoord_Expecter) SetQueryNodeCreator(_a0 interface{}) *MockQueryCoord_SetQueryNodeCreator_Call {
 	return &MockQueryCoord_SetQueryNodeCreator_Call{Call: _e.mock.On("SetQueryNodeCreator", _a0)}
 }
@@ -1432,7 +1432,7 @@ type MockQueryCoord_SetRootCoordClient_Call struct {
 }
 
 // SetRootCoordClient is a helper method to define mock.On call
-//  - rootCoord types.RootCoordClient
+//   - rootCoord types.RootCoordClient
 func (_e *MockQueryCoord_Expecter) SetRootCoordClient(rootCoord interface{}) *MockQueryCoord_SetRootCoordClient_Call {
 	return &MockQueryCoord_SetRootCoordClient_Call{Call: _e.mock.On("SetRootCoordClient", rootCoord)}
 }
@@ -1465,7 +1465,7 @@ type MockQueryCoord_SetTiKVClient_Call struct {
 }
 
 // SetTiKVClient is a helper method to define mock.On call
-//  - client *txnkv.Client
+//   - client *txnkv.Client
 func (_e *MockQueryCoord_Expecter) SetTiKVClient(client interface{}) *MockQueryCoord_SetTiKVClient_Call {
 	return &MockQueryCoord_SetTiKVClient_Call{Call: _e.mock.On("SetTiKVClient", client)}
 }
@@ -1519,8 +1519,8 @@ type MockQueryCoord_ShowCollections_Call struct {
 }
 
 // ShowCollections is a helper method to define mock.On call
-//  - _a0 context.Context
-//  - _a1 *querypb.ShowCollectionsRequest
+//   - _a0 context.Context
+//   - _a1 *querypb.ShowCollectionsRequest
 func (_e *MockQueryCoord_Expecter) ShowCollections(_a0 interface{}, _a1 interface{}) *MockQueryCoord_ShowCollections_Call {
 	return &MockQueryCoord_ShowCollections_Call{Call: _e.mock.On("ShowCollections", _a0, _a1)}
 }
@@ -1574,8 +1574,8 @@ type MockQueryCoord_ShowConfigurations_Call struct {
 }
 
 // ShowConfigurations is a helper method to define mock.On call
-//  - _a0 context.Context
-//  - _a1 *internalpb.ShowConfigurationsRequest
+//   - _a0 context.Context
+//   - _a1 *internalpb.ShowConfigurationsRequest
 func (_e *MockQueryCoord_Expecter) ShowConfigurations(_a0 interface{}, _a1 interface{}) *MockQueryCoord_ShowConfigurations_Call {
 	return &MockQueryCoord_ShowConfigurations_Call{Call: _e.mock.On("ShowConfigurations", _a0, _a1)}
 }
@@ -1629,8 +1629,8 @@ type MockQueryCoord_ShowPartitions_Call struct {
 }
 
 // ShowPartitions is a helper method to define mock.On call
-//  - _a0 context.Context
-//  - _a1 *querypb.ShowPartitionsRequest
+//   - _a0 context.Context
+//   - _a1 *querypb.ShowPartitionsRequest
 func (_e *MockQueryCoord_Expecter) ShowPartitions(_a0 interface{}, _a1 interface{}) *MockQueryCoord_ShowPartitions_Call {
 	return &MockQueryCoord_ShowPartitions_Call{Call: _e.mock.On("ShowPartitions", _a0, _a1)}
 }
@@ -1766,8 +1766,8 @@ type MockQueryCoord_SyncNewCreatedPartition_Call struct {
 }
 
 // SyncNewCreatedPartition is a helper method to define mock.On call
-//  - _a0 context.Context
-//  - _a1 *querypb.SyncNewCreatedPartitionRequest
+//   - _a0 context.Context
+//   - _a1 *querypb.SyncNewCreatedPartitionRequest
 func (_e *MockQueryCoord_Expecter) SyncNewCreatedPartition(_a0 interface{}, _a1 interface{}) *MockQueryCoord_SyncNewCreatedPartition_Call {
 	return &MockQueryCoord_SyncNewCreatedPartition_Call{Call: _e.mock.On("SyncNewCreatedPartition", _a0, _a1)}
 }
@@ -1821,8 +1821,8 @@ type MockQueryCoord_TransferNode_Call struct {
 }
 
 // TransferNode is a helper method to define mock.On call
-//  - _a0 context.Context
-//  - _a1 *milvuspb.TransferNodeRequest
+//   - _a0 context.Context
+//   - _a1 *milvuspb.TransferNodeRequest
 func (_e *MockQueryCoord_Expecter) TransferNode(_a0 interface{}, _a1 interface{}) *MockQueryCoord_TransferNode_Call {
 	return &MockQueryCoord_TransferNode_Call{Call: _e.mock.On("TransferNode", _a0, _a1)}
 }
@@ -1876,8 +1876,8 @@ type MockQueryCoord_TransferReplica_Call struct {
 }
 
 // TransferReplica is a helper method to define mock.On call
-//  - _a0 context.Context
-//  - _a1 *querypb.TransferReplicaRequest
+//   - _a0 context.Context
+//   - _a1 *querypb.TransferReplicaRequest
 func (_e *MockQueryCoord_Expecter) TransferReplica(_a0 interface{}, _a1 interface{}) *MockQueryCoord_TransferReplica_Call {
 	return &MockQueryCoord_TransferReplica_Call{Call: _e.mock.On("TransferReplica", _a0, _a1)}
 }
@@ -1910,7 +1910,7 @@ type MockQueryCoord_UpdateStateCode_Call struct {
 }
 
 // UpdateStateCode is a helper method to define mock.On call
-//  - stateCode commonpb.StateCode
+//   - stateCode commonpb.StateCode
 func (_e *MockQueryCoord_Expecter) UpdateStateCode(stateCode interface{}) *MockQueryCoord_UpdateStateCode_Call {
 	return &MockQueryCoord_UpdateStateCode_Call{Call: _e.mock.On("UpdateStateCode", stateCode)}
 }

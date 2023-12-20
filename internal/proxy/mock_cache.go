@@ -37,8 +37,8 @@ type MockCache_DeprecateShardCache_Call struct {
 }
 
 // DeprecateShardCache is a helper method to define mock.On call
-//  - database string
-//  - collectionName string
+//   - database string
+//   - collectionName string
 func (_e *MockCache_Expecter) DeprecateShardCache(database interface{}, collectionName interface{}) *MockCache_DeprecateShardCache_Call {
 	return &MockCache_DeprecateShardCache_Call{Call: _e.mock.On("DeprecateShardCache", database, collectionName)}
 }
@@ -90,9 +90,9 @@ type MockCache_GetCollectionID_Call struct {
 }
 
 // GetCollectionID is a helper method to define mock.On call
-//  - ctx context.Context
-//  - database string
-//  - collectionName string
+//   - ctx context.Context
+//   - database string
+//   - collectionName string
 func (_e *MockCache_Expecter) GetCollectionID(ctx interface{}, database interface{}, collectionName interface{}) *MockCache_GetCollectionID_Call {
 	return &MockCache_GetCollectionID_Call{Call: _e.mock.On("GetCollectionID", ctx, database, collectionName)}
 }
@@ -146,10 +146,10 @@ type MockCache_GetCollectionInfo_Call struct {
 }
 
 // GetCollectionInfo is a helper method to define mock.On call
-//  - ctx context.Context
-//  - database string
-//  - collectionName string
-//  - collectionID int64
+//   - ctx context.Context
+//   - database string
+//   - collectionName string
+//   - collectionID int64
 func (_e *MockCache_Expecter) GetCollectionInfo(ctx interface{}, database interface{}, collectionName interface{}, collectionID interface{}) *MockCache_GetCollectionInfo_Call {
 	return &MockCache_GetCollectionInfo_Call{Call: _e.mock.On("GetCollectionInfo", ctx, database, collectionName, collectionID)}
 }
@@ -201,9 +201,9 @@ type MockCache_GetCollectionName_Call struct {
 }
 
 // GetCollectionName is a helper method to define mock.On call
-//  - ctx context.Context
-//  - database string
-//  - collectionID int64
+//   - ctx context.Context
+//   - database string
+//   - collectionID int64
 func (_e *MockCache_Expecter) GetCollectionName(ctx interface{}, database interface{}, collectionID interface{}) *MockCache_GetCollectionName_Call {
 	return &MockCache_GetCollectionName_Call{Call: _e.mock.On("GetCollectionName", ctx, database, collectionID)}
 }
@@ -257,9 +257,9 @@ type MockCache_GetCollectionSchema_Call struct {
 }
 
 // GetCollectionSchema is a helper method to define mock.On call
-//  - ctx context.Context
-//  - database string
-//  - collectionName string
+//   - ctx context.Context
+//   - database string
+//   - collectionName string
 func (_e *MockCache_Expecter) GetCollectionSchema(ctx interface{}, database interface{}, collectionName interface{}) *MockCache_GetCollectionSchema_Call {
 	return &MockCache_GetCollectionSchema_Call{Call: _e.mock.On("GetCollectionSchema", ctx, database, collectionName)}
 }
@@ -313,8 +313,8 @@ type MockCache_GetCredentialInfo_Call struct {
 }
 
 // GetCredentialInfo is a helper method to define mock.On call
-//  - ctx context.Context
-//  - username string
+//   - ctx context.Context
+//   - username string
 func (_e *MockCache_Expecter) GetCredentialInfo(ctx interface{}, username interface{}) *MockCache_GetCredentialInfo_Call {
 	return &MockCache_GetCredentialInfo_Call{Call: _e.mock.On("GetCredentialInfo", ctx, username)}
 }
@@ -366,10 +366,10 @@ type MockCache_GetPartitionID_Call struct {
 }
 
 // GetPartitionID is a helper method to define mock.On call
-//  - ctx context.Context
-//  - database string
-//  - collectionName string
-//  - partitionName string
+//   - ctx context.Context
+//   - database string
+//   - collectionName string
+//   - partitionName string
 func (_e *MockCache_Expecter) GetPartitionID(ctx interface{}, database interface{}, collectionName interface{}, partitionName interface{}) *MockCache_GetPartitionID_Call {
 	return &MockCache_GetPartitionID_Call{Call: _e.mock.On("GetPartitionID", ctx, database, collectionName, partitionName)}
 }
@@ -423,10 +423,10 @@ type MockCache_GetPartitionInfo_Call struct {
 }
 
 // GetPartitionInfo is a helper method to define mock.On call
-//  - ctx context.Context
-//  - database string
-//  - collectionName string
-//  - partitionName string
+//   - ctx context.Context
+//   - database string
+//   - collectionName string
+//   - partitionName string
 func (_e *MockCache_Expecter) GetPartitionInfo(ctx interface{}, database interface{}, collectionName interface{}, partitionName interface{}) *MockCache_GetPartitionInfo_Call {
 	return &MockCache_GetPartitionInfo_Call{Call: _e.mock.On("GetPartitionInfo", ctx, database, collectionName, partitionName)}
 }
@@ -480,9 +480,9 @@ type MockCache_GetPartitions_Call struct {
 }
 
 // GetPartitions is a helper method to define mock.On call
-//  - ctx context.Context
-//  - database string
-//  - collectionName string
+//   - ctx context.Context
+//   - database string
+//   - collectionName string
 func (_e *MockCache_Expecter) GetPartitions(ctx interface{}, database interface{}, collectionName interface{}) *MockCache_GetPartitions_Call {
 	return &MockCache_GetPartitions_Call{Call: _e.mock.On("GetPartitions", ctx, database, collectionName)}
 }
@@ -536,9 +536,9 @@ type MockCache_GetPartitionsIndex_Call struct {
 }
 
 // GetPartitionsIndex is a helper method to define mock.On call
-//  - ctx context.Context
-//  - database string
-//  - collectionName string
+//   - ctx context.Context
+//   - database string
+//   - collectionName string
 func (_e *MockCache_Expecter) GetPartitionsIndex(ctx interface{}, database interface{}, collectionName interface{}) *MockCache_GetPartitionsIndex_Call {
 	return &MockCache_GetPartitionsIndex_Call{Call: _e.mock.On("GetPartitionsIndex", ctx, database, collectionName)}
 }
@@ -582,7 +582,7 @@ type MockCache_GetPrivilegeInfo_Call struct {
 }
 
 // GetPrivilegeInfo is a helper method to define mock.On call
-//  - ctx context.Context
+//   - ctx context.Context
 func (_e *MockCache_Expecter) GetPrivilegeInfo(ctx interface{}) *MockCache_GetPrivilegeInfo_Call {
 	return &MockCache_GetPrivilegeInfo_Call{Call: _e.mock.On("GetPrivilegeInfo", ctx)}
 }
@@ -636,11 +636,11 @@ type MockCache_GetShards_Call struct {
 }
 
 // GetShards is a helper method to define mock.On call
-//  - ctx context.Context
-//  - withCache bool
-//  - database string
-//  - collectionName string
-//  - collectionID int64
+//   - ctx context.Context
+//   - withCache bool
+//   - database string
+//   - collectionName string
+//   - collectionID int64
 func (_e *MockCache_Expecter) GetShards(ctx interface{}, withCache interface{}, database interface{}, collectionName interface{}, collectionID interface{}) *MockCache_GetShards_Call {
 	return &MockCache_GetShards_Call{Call: _e.mock.On("GetShards", ctx, withCache, database, collectionName, collectionID)}
 }
@@ -684,7 +684,7 @@ type MockCache_GetUserRole_Call struct {
 }
 
 // GetUserRole is a helper method to define mock.On call
-//  - username string
+//   - username string
 func (_e *MockCache_Expecter) GetUserRole(username interface{}) *MockCache_GetUserRole_Call {
 	return &MockCache_GetUserRole_Call{Call: _e.mock.On("GetUserRole", username)}
 }
@@ -726,8 +726,8 @@ type MockCache_HasDatabase_Call struct {
 }
 
 // HasDatabase is a helper method to define mock.On call
-//  - ctx context.Context
-//  - database string
+//   - ctx context.Context
+//   - database string
 func (_e *MockCache_Expecter) HasDatabase(ctx interface{}, database interface{}) *MockCache_HasDatabase_Call {
 	return &MockCache_HasDatabase_Call{Call: _e.mock.On("HasDatabase", ctx, database)}
 }
@@ -760,8 +760,8 @@ type MockCache_InitPolicyInfo_Call struct {
 }
 
 // InitPolicyInfo is a helper method to define mock.On call
-//  - info []string
-//  - userRoles []string
+//   - info []string
+//   - userRoles []string
 func (_e *MockCache_Expecter) InitPolicyInfo(info interface{}, userRoles interface{}) *MockCache_InitPolicyInfo_Call {
 	return &MockCache_InitPolicyInfo_Call{Call: _e.mock.On("InitPolicyInfo", info, userRoles)}
 }
@@ -803,7 +803,7 @@ type MockCache_RefreshPolicyInfo_Call struct {
 }
 
 // RefreshPolicyInfo is a helper method to define mock.On call
-//  - op typeutil.CacheOp
+//   - op typeutil.CacheOp
 func (_e *MockCache_Expecter) RefreshPolicyInfo(op interface{}) *MockCache_RefreshPolicyInfo_Call {
 	return &MockCache_RefreshPolicyInfo_Call{Call: _e.mock.On("RefreshPolicyInfo", op)}
 }
@@ -836,9 +836,9 @@ type MockCache_RemoveCollection_Call struct {
 }
 
 // RemoveCollection is a helper method to define mock.On call
-//  - ctx context.Context
-//  - database string
-//  - collectionName string
+//   - ctx context.Context
+//   - database string
+//   - collectionName string
 func (_e *MockCache_Expecter) RemoveCollection(ctx interface{}, database interface{}, collectionName interface{}) *MockCache_RemoveCollection_Call {
 	return &MockCache_RemoveCollection_Call{Call: _e.mock.On("RemoveCollection", ctx, database, collectionName)}
 }
@@ -882,8 +882,8 @@ type MockCache_RemoveCollectionsByID_Call struct {
 }
 
 // RemoveCollectionsByID is a helper method to define mock.On call
-//  - ctx context.Context
-//  - collectionID int64
+//   - ctx context.Context
+//   - collectionID int64
 func (_e *MockCache_Expecter) RemoveCollectionsByID(ctx interface{}, collectionID interface{}) *MockCache_RemoveCollectionsByID_Call {
 	return &MockCache_RemoveCollectionsByID_Call{Call: _e.mock.On("RemoveCollectionsByID", ctx, collectionID)}
 }
@@ -916,7 +916,7 @@ type MockCache_RemoveCredential_Call struct {
 }
 
 // RemoveCredential is a helper method to define mock.On call
-//  - username string
+//   - username string
 func (_e *MockCache_Expecter) RemoveCredential(username interface{}) *MockCache_RemoveCredential_Call {
 	return &MockCache_RemoveCredential_Call{Call: _e.mock.On("RemoveCredential", username)}
 }
@@ -949,8 +949,8 @@ type MockCache_RemoveDatabase_Call struct {
 }
 
 // RemoveDatabase is a helper method to define mock.On call
-//  - ctx context.Context
-//  - database string
+//   - ctx context.Context
+//   - database string
 func (_e *MockCache_Expecter) RemoveDatabase(ctx interface{}, database interface{}) *MockCache_RemoveDatabase_Call {
 	return &MockCache_RemoveDatabase_Call{Call: _e.mock.On("RemoveDatabase", ctx, database)}
 }
@@ -983,10 +983,10 @@ type MockCache_RemovePartition_Call struct {
 }
 
 // RemovePartition is a helper method to define mock.On call
-//  - ctx context.Context
-//  - database string
-//  - collectionName string
-//  - partitionName string
+//   - ctx context.Context
+//   - database string
+//   - collectionName string
+//   - partitionName string
 func (_e *MockCache_Expecter) RemovePartition(ctx interface{}, database interface{}, collectionName interface{}, partitionName interface{}) *MockCache_RemovePartition_Call {
 	return &MockCache_RemovePartition_Call{Call: _e.mock.On("RemovePartition", ctx, database, collectionName, partitionName)}
 }
@@ -1019,7 +1019,7 @@ type MockCache_UpdateCredential_Call struct {
 }
 
 // UpdateCredential is a helper method to define mock.On call
-//  - credInfo *internalpb.CredentialInfo
+//   - credInfo *internalpb.CredentialInfo
 func (_e *MockCache_Expecter) UpdateCredential(credInfo interface{}) *MockCache_UpdateCredential_Call {
 	return &MockCache_UpdateCredential_Call{Call: _e.mock.On("UpdateCredential", credInfo)}
 }
@@ -1052,7 +1052,7 @@ type MockCache_expireShardLeaderCache_Call struct {
 }
 
 // expireShardLeaderCache is a helper method to define mock.On call
-//  - ctx context.Context
+//   - ctx context.Context
 func (_e *MockCache_Expecter) expireShardLeaderCache(ctx interface{}) *MockCache_expireShardLeaderCache_Call {
 	return &MockCache_expireShardLeaderCache_Call{Call: _e.mock.On("expireShardLeaderCache", ctx)}
 }

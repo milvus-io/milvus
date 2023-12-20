@@ -44,10 +44,10 @@ type MockWriteBuffer_BufferData_Call struct {
 }
 
 // BufferData is a helper method to define mock.On call
-//  - insertMsgs []*msgstream.InsertMsg
-//  - deleteMsgs []*msgstream.DeleteMsg
-//  - startPos *msgpb.MsgPosition
-//  - endPos *msgpb.MsgPosition
+//   - insertMsgs []*msgstream.InsertMsg
+//   - deleteMsgs []*msgstream.DeleteMsg
+//   - startPos *msgpb.MsgPosition
+//   - endPos *msgpb.MsgPosition
 func (_e *MockWriteBuffer_Expecter) BufferData(insertMsgs interface{}, deleteMsgs interface{}, startPos interface{}, endPos interface{}) *MockWriteBuffer_BufferData_Call {
 	return &MockWriteBuffer_BufferData_Call{Call: _e.mock.On("BufferData", insertMsgs, deleteMsgs, startPos, endPos)}
 }
@@ -80,7 +80,7 @@ type MockWriteBuffer_Close_Call struct {
 }
 
 // Close is a helper method to define mock.On call
-//  - drop bool
+//   - drop bool
 func (_e *MockWriteBuffer_Expecter) Close(drop interface{}) *MockWriteBuffer_Close_Call {
 	return &MockWriteBuffer_Close_Call{Call: _e.mock.On("Close", drop)}
 }
@@ -122,8 +122,8 @@ type MockWriteBuffer_FlushSegments_Call struct {
 }
 
 // FlushSegments is a helper method to define mock.On call
-//  - ctx context.Context
-//  - segmentIDs []int64
+//   - ctx context.Context
+//   - segmentIDs []int64
 func (_e *MockWriteBuffer_Expecter) FlushSegments(ctx interface{}, segmentIDs interface{}) *MockWriteBuffer_FlushSegments_Call {
 	return &MockWriteBuffer_FlushSegments_Call{Call: _e.mock.On("FlushSegments", ctx, segmentIDs)}
 }
@@ -249,7 +249,7 @@ type MockWriteBuffer_HasSegment_Call struct {
 }
 
 // HasSegment is a helper method to define mock.On call
-//  - segmentID int64
+//   - segmentID int64
 func (_e *MockWriteBuffer_Expecter) HasSegment(segmentID interface{}) *MockWriteBuffer_HasSegment_Call {
 	return &MockWriteBuffer_HasSegment_Call{Call: _e.mock.On("HasSegment", segmentID)}
 }
@@ -282,7 +282,7 @@ type MockWriteBuffer_SetFlushTimestamp_Call struct {
 }
 
 // SetFlushTimestamp is a helper method to define mock.On call
-//  - flushTs uint64
+//   - flushTs uint64
 func (_e *MockWriteBuffer_Expecter) SetFlushTimestamp(flushTs interface{}) *MockWriteBuffer_SetFlushTimestamp_Call {
 	return &MockWriteBuffer_SetFlushTimestamp_Call{Call: _e.mock.On("SetFlushTimestamp", flushTs)}
 }

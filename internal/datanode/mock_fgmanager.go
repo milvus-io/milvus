@@ -33,7 +33,7 @@ type MockFlowgraphManager_AddFlowgraph_Call struct {
 }
 
 // AddFlowgraph is a helper method to define mock.On call
-//  - ds *dataSyncService
+//   - ds *dataSyncService
 func (_e *MockFlowgraphManager_Expecter) AddFlowgraph(ds interface{}) *MockFlowgraphManager_AddFlowgraph_Call {
 	return &MockFlowgraphManager_AddFlowgraph_Call{Call: _e.mock.On("AddFlowgraph", ds)}
 }
@@ -75,10 +75,10 @@ type MockFlowgraphManager_AddandStartWithEtcdTickler_Call struct {
 }
 
 // AddandStartWithEtcdTickler is a helper method to define mock.On call
-//  - dn *DataNode
-//  - vchan *datapb.VchannelInfo
-//  - schema *schemapb.CollectionSchema
-//  - tickler *etcdTickler
+//   - dn *DataNode
+//   - vchan *datapb.VchannelInfo
+//   - schema *schemapb.CollectionSchema
+//   - tickler *etcdTickler
 func (_e *MockFlowgraphManager_Expecter) AddandStartWithEtcdTickler(dn interface{}, vchan interface{}, schema interface{}, tickler interface{}) *MockFlowgraphManager_AddandStartWithEtcdTickler_Call {
 	return &MockFlowgraphManager_AddandStartWithEtcdTickler_Call{Call: _e.mock.On("AddandStartWithEtcdTickler", dn, vchan, schema, tickler)}
 }
@@ -248,7 +248,7 @@ type MockFlowgraphManager_GetFlowgraphService_Call struct {
 }
 
 // GetFlowgraphService is a helper method to define mock.On call
-//  - channel string
+//   - channel string
 func (_e *MockFlowgraphManager_Expecter) GetFlowgraphService(channel interface{}) *MockFlowgraphManager_GetFlowgraphService_Call {
 	return &MockFlowgraphManager_GetFlowgraphService_Call{Call: _e.mock.On("GetFlowgraphService", channel)}
 }
@@ -290,7 +290,7 @@ type MockFlowgraphManager_HasFlowgraph_Call struct {
 }
 
 // HasFlowgraph is a helper method to define mock.On call
-//  - channel string
+//   - channel string
 func (_e *MockFlowgraphManager_Expecter) HasFlowgraph(channel interface{}) *MockFlowgraphManager_HasFlowgraph_Call {
 	return &MockFlowgraphManager_HasFlowgraph_Call{Call: _e.mock.On("HasFlowgraph", channel)}
 }
@@ -332,8 +332,8 @@ type MockFlowgraphManager_HasFlowgraphWithOpID_Call struct {
 }
 
 // HasFlowgraphWithOpID is a helper method to define mock.On call
-//  - channel string
-//  - opID int64
+//   - channel string
+//   - opID int64
 func (_e *MockFlowgraphManager_Expecter) HasFlowgraphWithOpID(channel interface{}, opID interface{}) *MockFlowgraphManager_HasFlowgraphWithOpID_Call {
 	return &MockFlowgraphManager_HasFlowgraphWithOpID_Call{Call: _e.mock.On("HasFlowgraphWithOpID", channel, opID)}
 }
@@ -366,7 +366,7 @@ type MockFlowgraphManager_RemoveFlowgraph_Call struct {
 }
 
 // RemoveFlowgraph is a helper method to define mock.On call
-//  - channel string
+//   - channel string
 func (_e *MockFlowgraphManager_Expecter) RemoveFlowgraph(channel interface{}) *MockFlowgraphManager_RemoveFlowgraph_Call {
 	return &MockFlowgraphManager_RemoveFlowgraph_Call{Call: _e.mock.On("RemoveFlowgraph", channel)}
 }
@@ -384,6 +384,103 @@ func (_c *MockFlowgraphManager_RemoveFlowgraph_Call) Return() *MockFlowgraphMana
 }
 
 func (_c *MockFlowgraphManager_RemoveFlowgraph_Call) RunAndReturn(run func(string)) *MockFlowgraphManager_RemoveFlowgraph_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// Start provides a mock function with given fields:
+func (_m *MockFlowgraphManager) Start() {
+	_m.Called()
+}
+
+// MockFlowgraphManager_Start_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Start'
+type MockFlowgraphManager_Start_Call struct {
+	*mock.Call
+}
+
+// Start is a helper method to define mock.On call
+func (_e *MockFlowgraphManager_Expecter) Start() *MockFlowgraphManager_Start_Call {
+	return &MockFlowgraphManager_Start_Call{Call: _e.mock.On("Start")}
+}
+
+func (_c *MockFlowgraphManager_Start_Call) Run(run func()) *MockFlowgraphManager_Start_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockFlowgraphManager_Start_Call) Return() *MockFlowgraphManager_Start_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockFlowgraphManager_Start_Call) RunAndReturn(run func()) *MockFlowgraphManager_Start_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// Stop provides a mock function with given fields:
+func (_m *MockFlowgraphManager) Stop() {
+	_m.Called()
+}
+
+// MockFlowgraphManager_Stop_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Stop'
+type MockFlowgraphManager_Stop_Call struct {
+	*mock.Call
+}
+
+// Stop is a helper method to define mock.On call
+func (_e *MockFlowgraphManager_Expecter) Stop() *MockFlowgraphManager_Stop_Call {
+	return &MockFlowgraphManager_Stop_Call{Call: _e.mock.On("Stop")}
+}
+
+func (_c *MockFlowgraphManager_Stop_Call) Run(run func()) *MockFlowgraphManager_Stop_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockFlowgraphManager_Stop_Call) Return() *MockFlowgraphManager_Stop_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockFlowgraphManager_Stop_Call) RunAndReturn(run func()) *MockFlowgraphManager_Stop_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// controlMemWaterLevel provides a mock function with given fields: totalMemory
+func (_m *MockFlowgraphManager) controlMemWaterLevel(totalMemory uint64) {
+	_m.Called(totalMemory)
+}
+
+// MockFlowgraphManager_controlMemWaterLevel_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'controlMemWaterLevel'
+type MockFlowgraphManager_controlMemWaterLevel_Call struct {
+	*mock.Call
+}
+
+// controlMemWaterLevel is a helper method to define mock.On call
+//   - totalMemory uint64
+func (_e *MockFlowgraphManager_Expecter) controlMemWaterLevel(totalMemory interface{}) *MockFlowgraphManager_controlMemWaterLevel_Call {
+	return &MockFlowgraphManager_controlMemWaterLevel_Call{Call: _e.mock.On("controlMemWaterLevel", totalMemory)}
+}
+
+func (_c *MockFlowgraphManager_controlMemWaterLevel_Call) Run(run func(totalMemory uint64)) *MockFlowgraphManager_controlMemWaterLevel_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(uint64))
+	})
+	return _c
+}
+
+func (_c *MockFlowgraphManager_controlMemWaterLevel_Call) Return() *MockFlowgraphManager_controlMemWaterLevel_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockFlowgraphManager_controlMemWaterLevel_Call) RunAndReturn(run func(uint64)) *MockFlowgraphManager_controlMemWaterLevel_Call {
 	_c.Call.Return(run)
 	return _c
 }

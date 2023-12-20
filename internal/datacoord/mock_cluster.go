@@ -54,8 +54,8 @@ type MockCluster_AddImportSegment_Call struct {
 }
 
 // AddImportSegment is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *datapb.AddImportSegmentRequest
+//   - ctx context.Context
+//   - req *datapb.AddImportSegmentRequest
 func (_e *MockCluster_Expecter) AddImportSegment(ctx interface{}, req interface{}) *MockCluster_AddImportSegment_Call {
 	return &MockCluster_AddImportSegment_Call{Call: _e.mock.On("AddImportSegment", ctx, req)}
 }
@@ -109,49 +109,6 @@ func (_c *MockCluster_Close_Call) RunAndReturn(run func()) *MockCluster_Close_Ca
 	return _c
 }
 
-// DropImport provides a mock function with given fields: nodeID, in
-func (_m *MockCluster) DropImport(nodeID int64, in *datapb.DropImportRequest) error {
-	ret := _m.Called(nodeID, in)
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(int64, *datapb.DropImportRequest) error); ok {
-		r0 = rf(nodeID, in)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// MockCluster_DropImport_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropImport'
-type MockCluster_DropImport_Call struct {
-	*mock.Call
-}
-
-// DropImport is a helper method to define mock.On call
-//  - nodeID int64
-//  - in *datapb.DropImportRequest
-func (_e *MockCluster_Expecter) DropImport(nodeID interface{}, in interface{}) *MockCluster_DropImport_Call {
-	return &MockCluster_DropImport_Call{Call: _e.mock.On("DropImport", nodeID, in)}
-}
-
-func (_c *MockCluster_DropImport_Call) Run(run func(nodeID int64, in *datapb.DropImportRequest)) *MockCluster_DropImport_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(*datapb.DropImportRequest))
-	})
-	return _c
-}
-
-func (_c *MockCluster_DropImport_Call) Return(_a0 error) *MockCluster_DropImport_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockCluster_DropImport_Call) RunAndReturn(run func(int64, *datapb.DropImportRequest) error) *MockCluster_DropImport_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // Flush provides a mock function with given fields: ctx, nodeID, channel, segments
 func (_m *MockCluster) Flush(ctx context.Context, nodeID int64, channel string, segments []*datapb.SegmentInfo) error {
 	ret := _m.Called(ctx, nodeID, channel, segments)
@@ -172,10 +129,10 @@ type MockCluster_Flush_Call struct {
 }
 
 // Flush is a helper method to define mock.On call
-//  - ctx context.Context
-//  - nodeID int64
-//  - channel string
-//  - segments []*datapb.SegmentInfo
+//   - ctx context.Context
+//   - nodeID int64
+//   - channel string
+//   - segments []*datapb.SegmentInfo
 func (_e *MockCluster_Expecter) Flush(ctx interface{}, nodeID interface{}, channel interface{}, segments interface{}) *MockCluster_Flush_Call {
 	return &MockCluster_Flush_Call{Call: _e.mock.On("Flush", ctx, nodeID, channel, segments)}
 }
@@ -217,10 +174,10 @@ type MockCluster_FlushChannels_Call struct {
 }
 
 // FlushChannels is a helper method to define mock.On call
-//  - ctx context.Context
-//  - nodeID int64
-//  - flushTs uint64
-//  - channels []string
+//   - ctx context.Context
+//   - nodeID int64
+//   - flushTs uint64
+//   - channels []string
 func (_e *MockCluster_Expecter) FlushChannels(ctx interface{}, nodeID interface{}, flushTs interface{}, channels interface{}) *MockCluster_FlushChannels_Call {
 	return &MockCluster_FlushChannels_Call{Call: _e.mock.On("FlushChannels", ctx, nodeID, flushTs, channels)}
 }
@@ -296,9 +253,9 @@ type MockCluster_Import_Call struct {
 }
 
 // Import is a helper method to define mock.On call
-//  - ctx context.Context
-//  - nodeID int64
-//  - it *datapb.ImportTaskRequest
+//   - ctx context.Context
+//   - nodeID int64
+//   - it *datapb.ImportTaskRequest
 func (_e *MockCluster_Expecter) Import(ctx interface{}, nodeID interface{}, it interface{}) *MockCluster_Import_Call {
 	return &MockCluster_Import_Call{Call: _e.mock.On("Import", ctx, nodeID, it)}
 }
@@ -316,202 +273,6 @@ func (_c *MockCluster_Import_Call) Return() *MockCluster_Import_Call {
 }
 
 func (_c *MockCluster_Import_Call) RunAndReturn(run func(context.Context, int64, *datapb.ImportTaskRequest)) *MockCluster_Import_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// ImportV2 provides a mock function with given fields: nodeID, in
-func (_m *MockCluster) ImportV2(nodeID int64, in *datapb.ImportRequest) error {
-	ret := _m.Called(nodeID, in)
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(int64, *datapb.ImportRequest) error); ok {
-		r0 = rf(nodeID, in)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// MockCluster_ImportV2_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ImportV2'
-type MockCluster_ImportV2_Call struct {
-	*mock.Call
-}
-
-// ImportV2 is a helper method to define mock.On call
-//  - nodeID int64
-//  - in *datapb.ImportRequest
-func (_e *MockCluster_Expecter) ImportV2(nodeID interface{}, in interface{}) *MockCluster_ImportV2_Call {
-	return &MockCluster_ImportV2_Call{Call: _e.mock.On("ImportV2", nodeID, in)}
-}
-
-func (_c *MockCluster_ImportV2_Call) Run(run func(nodeID int64, in *datapb.ImportRequest)) *MockCluster_ImportV2_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(*datapb.ImportRequest))
-	})
-	return _c
-}
-
-func (_c *MockCluster_ImportV2_Call) Return(_a0 error) *MockCluster_ImportV2_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockCluster_ImportV2_Call) RunAndReturn(run func(int64, *datapb.ImportRequest) error) *MockCluster_ImportV2_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// PreImport provides a mock function with given fields: nodeID, in
-func (_m *MockCluster) PreImport(nodeID int64, in *datapb.PreImportRequest) error {
-	ret := _m.Called(nodeID, in)
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(int64, *datapb.PreImportRequest) error); ok {
-		r0 = rf(nodeID, in)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// MockCluster_PreImport_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PreImport'
-type MockCluster_PreImport_Call struct {
-	*mock.Call
-}
-
-// PreImport is a helper method to define mock.On call
-//  - nodeID int64
-//  - in *datapb.PreImportRequest
-func (_e *MockCluster_Expecter) PreImport(nodeID interface{}, in interface{}) *MockCluster_PreImport_Call {
-	return &MockCluster_PreImport_Call{Call: _e.mock.On("PreImport", nodeID, in)}
-}
-
-func (_c *MockCluster_PreImport_Call) Run(run func(nodeID int64, in *datapb.PreImportRequest)) *MockCluster_PreImport_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(*datapb.PreImportRequest))
-	})
-	return _c
-}
-
-func (_c *MockCluster_PreImport_Call) Return(_a0 error) *MockCluster_PreImport_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockCluster_PreImport_Call) RunAndReturn(run func(int64, *datapb.PreImportRequest) error) *MockCluster_PreImport_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// QueryImport provides a mock function with given fields: nodeID, in
-func (_m *MockCluster) QueryImport(nodeID int64, in *datapb.QueryImportRequest) (*datapb.QueryImportResponse, error) {
-	ret := _m.Called(nodeID, in)
-
-	var r0 *datapb.QueryImportResponse
-	var r1 error
-	if rf, ok := ret.Get(0).(func(int64, *datapb.QueryImportRequest) (*datapb.QueryImportResponse, error)); ok {
-		return rf(nodeID, in)
-	}
-	if rf, ok := ret.Get(0).(func(int64, *datapb.QueryImportRequest) *datapb.QueryImportResponse); ok {
-		r0 = rf(nodeID, in)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*datapb.QueryImportResponse)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(int64, *datapb.QueryImportRequest) error); ok {
-		r1 = rf(nodeID, in)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// MockCluster_QueryImport_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'QueryImport'
-type MockCluster_QueryImport_Call struct {
-	*mock.Call
-}
-
-// QueryImport is a helper method to define mock.On call
-//  - nodeID int64
-//  - in *datapb.QueryImportRequest
-func (_e *MockCluster_Expecter) QueryImport(nodeID interface{}, in interface{}) *MockCluster_QueryImport_Call {
-	return &MockCluster_QueryImport_Call{Call: _e.mock.On("QueryImport", nodeID, in)}
-}
-
-func (_c *MockCluster_QueryImport_Call) Run(run func(nodeID int64, in *datapb.QueryImportRequest)) *MockCluster_QueryImport_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(*datapb.QueryImportRequest))
-	})
-	return _c
-}
-
-func (_c *MockCluster_QueryImport_Call) Return(_a0 *datapb.QueryImportResponse, _a1 error) *MockCluster_QueryImport_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *MockCluster_QueryImport_Call) RunAndReturn(run func(int64, *datapb.QueryImportRequest) (*datapb.QueryImportResponse, error)) *MockCluster_QueryImport_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// QueryPreImport provides a mock function with given fields: nodeID, in
-func (_m *MockCluster) QueryPreImport(nodeID int64, in *datapb.QueryPreImportRequest) (*datapb.QueryPreImportResponse, error) {
-	ret := _m.Called(nodeID, in)
-
-	var r0 *datapb.QueryPreImportResponse
-	var r1 error
-	if rf, ok := ret.Get(0).(func(int64, *datapb.QueryPreImportRequest) (*datapb.QueryPreImportResponse, error)); ok {
-		return rf(nodeID, in)
-	}
-	if rf, ok := ret.Get(0).(func(int64, *datapb.QueryPreImportRequest) *datapb.QueryPreImportResponse); ok {
-		r0 = rf(nodeID, in)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*datapb.QueryPreImportResponse)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(int64, *datapb.QueryPreImportRequest) error); ok {
-		r1 = rf(nodeID, in)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// MockCluster_QueryPreImport_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'QueryPreImport'
-type MockCluster_QueryPreImport_Call struct {
-	*mock.Call
-}
-
-// QueryPreImport is a helper method to define mock.On call
-//  - nodeID int64
-//  - in *datapb.QueryPreImportRequest
-func (_e *MockCluster_Expecter) QueryPreImport(nodeID interface{}, in interface{}) *MockCluster_QueryPreImport_Call {
-	return &MockCluster_QueryPreImport_Call{Call: _e.mock.On("QueryPreImport", nodeID, in)}
-}
-
-func (_c *MockCluster_QueryPreImport_Call) Run(run func(nodeID int64, in *datapb.QueryPreImportRequest)) *MockCluster_QueryPreImport_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(*datapb.QueryPreImportRequest))
-	})
-	return _c
-}
-
-func (_c *MockCluster_QueryPreImport_Call) Return(_a0 *datapb.QueryPreImportResponse, _a1 error) *MockCluster_QueryPreImport_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *MockCluster_QueryPreImport_Call) RunAndReturn(run func(int64, *datapb.QueryPreImportRequest) (*datapb.QueryPreImportResponse, error)) *MockCluster_QueryPreImport_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -536,7 +297,7 @@ type MockCluster_Register_Call struct {
 }
 
 // Register is a helper method to define mock.On call
-//  - node *NodeInfo
+//   - node *NodeInfo
 func (_e *MockCluster_Expecter) Register(node interface{}) *MockCluster_Register_Call {
 	return &MockCluster_Register_Call{Call: _e.mock.On("Register", node)}
 }
@@ -578,8 +339,8 @@ type MockCluster_Startup_Call struct {
 }
 
 // Startup is a helper method to define mock.On call
-//  - ctx context.Context
-//  - nodes []*NodeInfo
+//   - ctx context.Context
+//   - nodes []*NodeInfo
 func (_e *MockCluster_Expecter) Startup(ctx interface{}, nodes interface{}) *MockCluster_Startup_Call {
 	return &MockCluster_Startup_Call{Call: _e.mock.On("Startup", ctx, nodes)}
 }
@@ -621,7 +382,7 @@ type MockCluster_UnRegister_Call struct {
 }
 
 // UnRegister is a helper method to define mock.On call
-//  - node *NodeInfo
+//   - node *NodeInfo
 func (_e *MockCluster_Expecter) UnRegister(node interface{}) *MockCluster_UnRegister_Call {
 	return &MockCluster_UnRegister_Call{Call: _e.mock.On("UnRegister", node)}
 }
@@ -663,9 +424,9 @@ type MockCluster_Watch_Call struct {
 }
 
 // Watch is a helper method to define mock.On call
-//  - ctx context.Context
-//  - ch string
-//  - collectionID int64
+//   - ctx context.Context
+//   - ch string
+//   - collectionID int64
 func (_e *MockCluster_Expecter) Watch(ctx interface{}, ch interface{}, collectionID interface{}) *MockCluster_Watch_Call {
 	return &MockCluster_Watch_Call{Call: _e.mock.On("Watch", ctx, ch, collectionID)}
 }
