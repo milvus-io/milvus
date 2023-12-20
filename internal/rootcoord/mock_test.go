@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -385,9 +386,7 @@ func newTestCore(opts ...Opt) *Core {
 
 func withValidProxyManager() Opt {
 	return func(c *Core) {
-		c.proxyClientManager = &proxyClientManager{
-			proxyClient: typeutil.NewConcurrentMap[int64, types.ProxyClient](),
-		}
+		c.proxyClientManager = proxyutil.NewProxyClientManager(proxyutil.DefaultProxyCreator)
 		p := newMockProxy()
 		p.InvalidateCollectionMetaCacheFunc = func(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
 			return merr.Success(), nil
@@ -398,15 +397,14 @@ func withValidProxyManager() Opt {
 				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 			}, nil
 		}
-		c.proxyClientManager.proxyClient.Insert(TestProxyID, p)
+		clients := c.proxyClientManager.GetProxyClients()
+		clients.Insert(TestProxyID, p)
 	}
 }
 
 func withInvalidProxyManager() Opt {
 	return func(c *Core) {
-		c.proxyClientManager = &proxyClientManager{
-			proxyClient: typeutil.NewConcurrentMap[int64, types.ProxyClient](),
-		}
+		c.proxyClientManager = proxyutil.NewProxyClientManager(proxyutil.DefaultProxyCreator)
 		p := newMockProxy()
 		p.InvalidateCollectionMetaCacheFunc = func(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
 			return merr.Success(), errors.New("error mock InvalidateCollectionMetaCache")
@@ -417,7 +415,8 @@ func withInvalidProxyManager() Opt {
 				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 			}, nil
 		}
-		c.proxyClientManager.proxyClient.Insert(TestProxyID, p)
+		clients := c.proxyClientManager.GetProxyClients()
+		clients.Insert(TestProxyID, p)
 	}
 }
 

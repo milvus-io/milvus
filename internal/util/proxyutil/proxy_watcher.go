@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package rootcoord
+package proxyutil
 
 import (
 	"context"
@@ -32,56 +32,62 @@ import (
 
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-// proxyManager manages proxy connected to the rootcoord
-type proxyManager struct {
-	ctx              context.Context
-	cancel           context.CancelFunc
+type ProxyWatcherInterface interface {
+	AddSessionFunc(fns ...func(*sessionutil.Session))
+	DelSessionFunc(fns ...func(*sessionutil.Session))
+
+	WatchProxy(ctx context.Context) error
+	Stop()
+}
+
+// ProxyWatcher manages proxy clients
+type ProxyWatcher struct {
 	wg               errgroup.Group
 	lock             sync.Mutex
 	etcdCli          *clientv3.Client
 	initSessionsFunc []func([]*sessionutil.Session)
 	addSessionsFunc  []func(*sessionutil.Session)
 	delSessionsFunc  []func(*sessionutil.Session)
+
+	closeCh chan struct{}
 }
 
-// newProxyManager helper function to create a proxyManager
-// etcdEndpoints is the address list of etcd
+// NewProxyWatcher helper function to create a proxyWatcher
 // fns are the custom getSessions function list
-func newProxyManager(ctx context.Context, client *clientv3.Client, fns ...func([]*sessionutil.Session)) *proxyManager {
-	ctx, cancel := context.WithCancel(ctx)
-	p := &proxyManager{
-		ctx:     ctx,
-		cancel:  cancel,
+func NewProxyWatcher(client *clientv3.Client, fns ...func([]*sessionutil.Session)) *ProxyWatcher {
+	p := &ProxyWatcher{
 		lock:    sync.Mutex{},
 		etcdCli: client,
+		closeCh: make(chan struct{}),
 	}
 	p.initSessionsFunc = append(p.initSessionsFunc, fns...)
 	return p
 }
 
 // AddSessionFunc adds functions to addSessions function list
-func (p *proxyManager) AddSessionFunc(fns ...func(*sessionutil.Session)) {
+func (p *ProxyWatcher) AddSessionFunc(fns ...func(*sessionutil.Session)) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	p.addSessionsFunc = append(p.addSessionsFunc, fns...)
 }
 
 // DelSessionFunc add functions to delSessions function list
-func (p *proxyManager) DelSessionFunc(fns ...func(*sessionutil.Session)) {
+func (p *ProxyWatcher) DelSessionFunc(fns ...func(*sessionutil.Session)) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	p.delSessionsFunc = append(p.delSessionsFunc, fns...)
 }
 
 // WatchProxy starts a goroutine to watch proxy session changes on etcd
-func (p *proxyManager) WatchProxy() error {
-	ctx, cancel := context.WithTimeout(p.ctx, Params.ServiceParam.EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond))
+func (p *ProxyWatcher) WatchProxy(ctx context.Context) error {
+	childCtx, cancel := context.WithTimeout(ctx, paramtable.Get().ServiceParam.EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
 
-	sessions, rev, err := p.getSessionsOnEtcd(ctx)
+	sessions, rev, err := p.getSessionsOnEtcd(childCtx)
 	if err != nil {
 		return err
 	}
@@ -92,8 +98,8 @@ func (p *proxyManager) WatchProxy() error {
 	}
 
 	eventCh := p.etcdCli.Watch(
-		p.ctx,
-		path.Join(Params.EtcdCfg.MetaRootPath.GetValue(), sessionutil.DefaultServiceRoot, typeutil.ProxyRole),
+		ctx,
+		path.Join(paramtable.Get().EtcdCfg.MetaRootPath.GetValue(), sessionutil.DefaultServiceRoot, typeutil.ProxyRole),
 		clientv3.WithPrefix(),
 		clientv3.WithCreatedNotify(),
 		clientv3.WithPrevKV(),
@@ -101,20 +107,24 @@ func (p *proxyManager) WatchProxy() error {
 	)
 
 	p.wg.Go(func() error {
-		p.startWatchEtcd(p.ctx, eventCh)
+		p.startWatchEtcd(ctx, eventCh)
 		return nil
 	})
 	return nil
 }
 
-func (p *proxyManager) startWatchEtcd(ctx context.Context, eventCh clientv3.WatchChan) {
+func (p *ProxyWatcher) startWatchEtcd(ctx context.Context, eventCh clientv3.WatchChan) {
 	log.Info("start to watch etcd")
 	for {
 		select {
 		case <-ctx.Done():
 			log.Warn("stop watching etcd loop")
 			return
-			// TODO @xiaocai2333: watch proxy by session WatchService.
+
+		case <-p.closeCh:
+			log.Warn("stop watching etcd loop")
+			return
+
 		case event, ok := <-eventCh:
 			if !ok {
 				log.Warn("stop watching etcd loop due to closed etcd event channel")
@@ -122,7 +132,7 @@ func (p *proxyManager) startWatchEtcd(ctx context.Context, eventCh clientv3.Watc
 			}
 			if err := event.Err(); err != nil {
 				if err == v3rpc.ErrCompacted {
-					err2 := p.WatchProxy()
+					err2 := p.WatchProxy(ctx)
 					if err2 != nil {
 						log.Error("re watch proxy fails when etcd has a compaction error",
 							zap.Error(err), zap.Error(err2))
@@ -149,7 +159,7 @@ func (p *proxyManager) startWatchEtcd(ctx context.Context, eventCh clientv3.Watc
 	}
 }
 
-func (p *proxyManager) handlePutEvent(e *clientv3.Event) error {
+func (p *ProxyWatcher) handlePutEvent(e *clientv3.Event) error {
 	session, err := p.parseSession(e.Kv.Value)
 	if err != nil {
 		return err
@@ -161,7 +171,7 @@ func (p *proxyManager) handlePutEvent(e *clientv3.Event) error {
 	return nil
 }
 
-func (p *proxyManager) handleDeleteEvent(e *clientv3.Event) error {
+func (p *ProxyWatcher) handleDeleteEvent(e *clientv3.Event) error {
 	session, err := p.parseSession(e.PrevKv.Value)
 	if err != nil {
 		return err
@@ -173,7 +183,7 @@ func (p *proxyManager) handleDeleteEvent(e *clientv3.Event) error {
 	return nil
 }
 
-func (p *proxyManager) parseSession(value []byte) (*sessionutil.Session, error) {
+func (p *ProxyWatcher) parseSession(value []byte) (*sessionutil.Session, error) {
 	session := new(sessionutil.Session)
 	err := json.Unmarshal(value, session)
 	if err != nil {
@@ -182,10 +192,10 @@ func (p *proxyManager) parseSession(value []byte) (*sessionutil.Session, error) 
 	return session, nil
 }
 
-func (p *proxyManager) getSessionsOnEtcd(ctx context.Context) ([]*sessionutil.Session, int64, error) {
+func (p *ProxyWatcher) getSessionsOnEtcd(ctx context.Context) ([]*sessionutil.Session, int64, error) {
 	resp, err := p.etcdCli.Get(
 		ctx,
-		path.Join(Params.EtcdCfg.MetaRootPath.GetValue(), sessionutil.DefaultServiceRoot, typeutil.ProxyRole),
+		path.Join(paramtable.Get().EtcdCfg.MetaRootPath.GetValue(), sessionutil.DefaultServiceRoot, typeutil.ProxyRole),
 		clientv3.WithPrefix(),
 		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend),
 	)
@@ -206,8 +216,8 @@ func (p *proxyManager) getSessionsOnEtcd(ctx context.Context) ([]*sessionutil.Se
 	return sessions, resp.Header.Revision, nil
 }
 
-// Stop stops the proxyManager
-func (p *proxyManager) Stop() {
-	p.cancel()
+// Stop stops the ProxyManager
+func (p *ProxyWatcher) Stop() {
+	close(p.closeCh)
 	p.wg.Wait()
 }

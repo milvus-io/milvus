@@ -23,15 +23,16 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
+	"github.com/milvus-io/milvus/internal/util/proxyutil"
 )
 
 func Test_expireCacheConfig_apply(t *testing.T) {
-	c := defaultExpireCacheConfig()
+	c := proxyutil.DefaultExpireCacheConfig()
 	req := &proxypb.InvalidateCollMetaCacheRequest{}
-	c.apply(req)
+	c.Apply(req)
 	assert.Nil(t, req.GetBase())
-	opt := expireCacheWithDropFlag()
+	opt := proxyutil.ExpireCacheWithDropFlag()
 	opt(&c)
-	c.apply(req)
+	c.Apply(req)
 	assert.Equal(t, commonpb.MsgType_DropCollection, req.GetBase().GetMsgType())
 }

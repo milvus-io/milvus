@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -86,7 +87,7 @@ type collectionStates = map[milvuspb.QuotaState]commonpb.ErrorCode
 // If necessary, user can also manually force to deny RW requests.
 type QuotaCenter struct {
 	// clients
-	proxies    *proxyClientManager
+	proxies    proxyutil.ProxyClientManagerInterface
 	queryCoord types.QueryCoordClient
 	dataCoord  types.DataCoordClient
 	meta       IMetaTable
@@ -113,7 +114,7 @@ type QuotaCenter struct {
 }
 
 // NewQuotaCenter returns a new QuotaCenter.
-func NewQuotaCenter(proxies *proxyClientManager, queryCoord types.QueryCoordClient, dataCoord types.DataCoordClient, tsoAllocator tso.Allocator, meta IMetaTable) *QuotaCenter {
+func NewQuotaCenter(proxies proxyutil.ProxyClientManagerInterface, queryCoord types.QueryCoordClient, dataCoord types.DataCoordClient, tsoAllocator tso.Allocator, meta IMetaTable) *QuotaCenter {
 	return &QuotaCenter{
 		proxies:             proxies,
 		queryCoord:          queryCoord,
