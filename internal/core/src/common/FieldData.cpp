@@ -48,9 +48,9 @@ template <typename ArrayType, arrow::Type::type ArrayDataType>
 std::pair<const void*, int64_t>
 GetDataInfoFromArray(const std::shared_ptr<arrow::Array> array) {
     AssertInfo(array->type()->id() == ArrayDataType,
-               fmt::format("inconsistent data type, expected {}, actual {}",
-                           ArrayDataType,
-                           array->type()->id()));
+               "inconsistent data type, expected {}, actual {}",
+               ArrayDataType,
+               array->type()->id());
     auto typed_array = std::dynamic_pointer_cast<ArrayType>(array);
     auto element_count = array->length();
 

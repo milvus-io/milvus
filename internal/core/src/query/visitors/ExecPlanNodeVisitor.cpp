@@ -65,14 +65,8 @@ class ExecPlanNodeVisitor : PlanNodeVisitor {
 static SearchResult
 empty_search_result(int64_t num_queries, SearchInfo& search_info) {
     SearchResult final_result;
-    SubSearchResult result(num_queries,
-                           search_info.topk_,
-                           search_info.metric_type_,
-                           search_info.round_decimal_);
     final_result.total_nq_ = num_queries;
-    final_result.unity_topK_ = search_info.topk_;
-    final_result.seg_offsets_ = std::move(result.mutable_seg_offsets());
-    final_result.distances_ = std::move(result.mutable_distances());
+    final_result.unity_topK_ = 0;  // no result
     return final_result;
 }
 

@@ -110,8 +110,8 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         }
         default:
             PanicInfo(DataTypeInvalid,
-                      fmt::format("unsupported data type: {}",
-                                  expr_->column_.data_type_));
+                      "unsupported data type: {}",
+                      expr_->column_.data_type_);
     }
 }
 
@@ -202,10 +202,10 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForIndex() {
         };
     auto res = ProcessIndexChunks<T>(execute_sub_batch, val1, val2);
     AssertInfo(res.size() == real_batch_size,
-               fmt::format("internal error: expr processed rows {} not equal "
-                           "expect batch size {}",
-                           res.size(),
-                           real_batch_size));
+               "internal error: expr processed rows {} not equal "
+               "expect batch size {}",
+               res.size(),
+               real_batch_size);
     return std::make_shared<ColumnVector>(std::move(res));
 }
 
@@ -277,10 +277,10 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData() {
     int64_t processed_size = ProcessDataChunks<T>(
         execute_sub_batch, skip_index_func, res, val1, val2);
     AssertInfo(processed_size == real_batch_size,
-               fmt::format("internal error: expr processed rows {} not equal "
-                           "expect batch size {}",
-                           processed_size,
-                           real_batch_size));
+               "internal error: expr processed rows {} not equal "
+               "expect batch size {}",
+               processed_size,
+               real_batch_size);
     return res_vec;
 }
 
@@ -327,10 +327,10 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJson() {
     int64_t processed_size = ProcessDataChunks<milvus::Json>(
         execute_sub_batch, std::nullptr_t{}, res, val1, val2);
     AssertInfo(processed_size == real_batch_size,
-               fmt::format("internal error: expr processed rows {} not equal "
-                           "expect batch size {}",
-                           processed_size,
-                           real_batch_size));
+               "internal error: expr processed rows {} not equal "
+               "expect batch size {}",
+               processed_size,
+               real_batch_size);
     return res_vec;
 }
 
@@ -381,10 +381,10 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForArray() {
     int64_t processed_size = ProcessDataChunks<milvus::ArrayView>(
         execute_sub_batch, std::nullptr_t{}, res, val1, val2, index);
     AssertInfo(processed_size == real_batch_size,
-               fmt::format("internal error: expr processed rows {} not equal "
-                           "expect batch size {}",
-                           processed_size,
-                           real_batch_size));
+               "internal error: expr processed rows {} not equal "
+               "expect batch size {}",
+               processed_size,
+               real_batch_size);
     return res_vec;
 }
 

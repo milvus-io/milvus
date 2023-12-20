@@ -66,8 +66,8 @@ FillField(DataType data_type, const FieldDataPtr data, void* dst) {
                 break;
             }
             default:
-                PanicInfo(DataTypeInvalid,
-                          fmt::format("not supported data type {}", data_type));
+                PanicInfo(
+                    DataTypeInvalid, "not supported data type {}", data_type);
         }
     } else {
         memcpy(dst, data->Data(), data->Size());
@@ -126,8 +126,8 @@ WriteFieldData(File& file,
             }
             default:
                 PanicInfo(DataTypeInvalid,
-                          fmt::format("not supported data type {}",
-                                      datatype_name(data_type)));
+                          "not supported data type {}",
+                          datatype_name(data_type));
         }
     } else {
         total_written += file.Write(data->Data(), data->Size());

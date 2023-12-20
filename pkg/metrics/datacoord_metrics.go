@@ -75,15 +75,18 @@ var (
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.DataCoordRole,
-			Name:      "store_l0_segment_size",
+			Name:      "store_level0_segment_size",
 			Help:      "stored l0 segment size",
-		}, []string{})
+			Buckets:   buckets,
+		}, []string{
+			collectionIDLabelName,
+		})
 
 	DataCoordRateStoredL0Segment = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.DataCoordRole,
-			Name:      "store_l0_segment_rate",
+			Name:      "store_level0_segment_rate",
 			Help:      "stored l0 segment rate",
 		}, []string{})
 
@@ -117,12 +120,12 @@ var (
 			channelNameLabelName,
 		})
 
-	DataCoordCheckpointLag = prometheus.NewGaugeVec(
+	DataCoordCheckpointUnixSeconds = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.DataCoordRole,
-			Name:      "channel_checkpoint_ts_lag_ms",
-			Help:      "channel checkpoint timestamp lag in milliseconds",
+			Name:      "channel_checkpoint_unix_seconds",
+			Help:      "channel checkpoint timestamp in unix seconds",
 		}, []string{
 			nodeIDLabelName,
 			channelNameLabelName,
@@ -278,7 +281,7 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(DataCoordNumStoredRows)
 	registry.MustRegister(DataCoordNumStoredRowsCounter)
 	registry.MustRegister(DataCoordConsumeDataNodeTimeTickLag)
-	registry.MustRegister(DataCoordCheckpointLag)
+	registry.MustRegister(DataCoordCheckpointUnixSeconds)
 	registry.MustRegister(DataCoordStoredBinlogSize)
 	registry.MustRegister(DataCoordSegmentBinLogFileCount)
 	registry.MustRegister(DataCoordDmlChannelNum)

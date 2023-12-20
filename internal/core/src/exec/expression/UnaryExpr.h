@@ -122,9 +122,9 @@ struct UnaryElementFuncForArray {
                 UnaryArrayCompare(milvus::query::Match(array_data, val, op));
             } else {
                 PanicInfo(OpTypeInvalid,
-                          fmt::format("unsupported op_type:{} for "
-                                      "UnaryElementFuncForArray",
-                                      op));
+                          "unsupported op_type:{} for "
+                          "UnaryElementFuncForArray",
+                          op);
             }
         }
     }
