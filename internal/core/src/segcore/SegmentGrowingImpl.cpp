@@ -192,8 +192,8 @@ SegmentGrowingImpl::LoadFieldData(const LoadFieldDataInfo& infos) {
         auto load_future =
             pool.Submit(LoadFieldDatasFromRemote, insert_files, channel);
 
-        LOG_INFO("segment {} submits load field {} task to thread pool" this
-                     ->get_segment_id(),
+        LOG_INFO("segment {} submits load field {} task to thread pool",
+                 this->get_segment_id(),
                  field_id.get());
         auto field_data = storage::CollectFieldDataChannel(channel);
         if (field_id == TimestampFieldID) {

@@ -211,8 +211,8 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info) {
         auto load_future = pool.Submit(
             LoadFieldDatasFromRemote, insert_files, field_data_info.channel);
 
-        LOG_INFO("segment {} submits load field {} task to thread pool" this
-                     ->get_segment_id(),
+        LOG_INFO("segment {} submits load field {} task to thread pool",
+                 this->get_segment_id(),
                  field_id.get());
         if (!info.enable_mmap ||
             SystemProperty::Instance().IsSystem(field_id)) {
