@@ -18,14 +18,12 @@ package datacoord
 
 import (
 	"context"
-	"github.com/samber/lo"
-	"time"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	alloc "github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/samber/lo"
 )
 
 func AssemblePreImportRequest(task ImportTask, meta *meta) *datapb.PreImportRequest {
@@ -46,25 +44,23 @@ func AssemblePreImportRequest(task ImportTask, meta *meta) *datapb.PreImportRequ
 
 func AssembleImportRequest(task ImportTask, manager *SegmentManager, meta *meta, idAlloc *alloc.IDAllocator) (*datapb.ImportRequest, error) {
 	collection := meta.GetCollection(task.GetCollectionID())
-	segmentAutoIDRanges := make(map[int64]*datapb.AutoIDRange) // TODO: dyh, check if enable
+	segmentAutoIDRanges := make(map[int64]*datapb.AutoIDRange)
 	segmentChannels := make(map[int64]string)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second) // TODO: dyh, move to config
-	defer cancel()
 	for _, file := range task.GetFileStats() {
 		for vchannel, rows := range file.GetChannelRows() {
 			for rows > 0 {
-				segmentInfo, err := manager.openNewSegment(ctx, task.GetCollectionID(),
+				segmentInfo, err := manager.openNewSegment(context.TODO(), task.GetCollectionID(),
 					task.GetPartitionID(), vchannel, commonpb.SegmentState_Importing, datapb.SegmentLevel_L1)
 				if err != nil {
-					return nil, err // TODO: dyh, txn?
+					return nil, err
 				}
-				rows -= segmentInfo.GetMaxRowNum()
 				idBegin, idEnd, err := idAlloc.Alloc(uint32(segmentInfo.GetMaxRowNum()))
 				if err != nil {
 					return nil, err
 				}
 				segmentAutoIDRanges[segmentInfo.ID] = &datapb.AutoIDRange{Begin: idBegin, End: idEnd}
 				segmentChannels[segmentInfo.ID] = segmentInfo.InsertChannel
+				rows -= segmentInfo.GetMaxRowNum()
 			}
 		}
 	}
@@ -83,6 +79,23 @@ func AssembleImportRequest(task ImportTask, manager *SegmentManager, meta *meta,
 	}, nil
 }
 
+func AssembleImportTask(task ImportTask, allocator *alloc.IDAllocator) (*importTask, error) {
+	taskID, err := allocator.AllocOne()
+	if err != nil {
+		return nil, err
+	}
+	return &importTask{
+		&datapb.ImportTaskV2{
+			RequestID:    task.GetRequestID(),
+			TaskID:       taskID,
+			CollectionID: task.GetCollectionID(),
+			PartitionID:  task.GetPartitionID(),
+			State:        datapb.ImportState_Pending,
+			FileStats:    task.GetFileStats(),
+		},
+	}, nil
+}
+
 func AddImportSegment(cluster Cluster, meta *meta, segmentID int64) error {
 	segment := meta.GetSegment(segmentID)
 	req := &datapb.AddImportSegmentRequest{
@@ -98,4 +111,20 @@ func AddImportSegment(cluster Cluster, meta *meta, segmentID int64) error {
 	}
 	_, err := cluster.AddImportSegment(context.TODO(), req) // TODO: handle resp
 	return err
+}
+
+func AreAllTasksFinished(tasks []ImportTask, meta *meta) bool {
+	for _, task := range tasks {
+		if task.GetState() != datapb.ImportState_Completed {
+			return false
+		}
+		segmentIDs := task.(*importTask).GetSegmentIDs()
+		for _, segmentID := range segmentIDs {
+			segment := meta.GetSegment(segmentID)
+			if segment.GetIsImporting() {
+				return false
+			}
+		}
+	}
+	return true
 }
