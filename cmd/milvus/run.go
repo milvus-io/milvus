@@ -64,8 +64,8 @@ func (c *run) printBanner(w io.Writer) {
 func (c *run) printHardwareInfo(w io.Writer) {
 	totalMem := hardware.GetMemoryCount()
 	usedMem := hardware.GetUsedMemoryCount()
-	fmt.Fprintln(w, fmt.Sprintf("TotalMem: %d", totalMem))
-	fmt.Fprintln(w, fmt.Sprintf("UsedMem: %d", usedMem))
+	fmt.Fprintf(w, "TotalMem: %d\n", totalMem)
+	fmt.Fprintf(w, "UsedMem: %d\n", usedMem)
 	fmt.Fprintln(w)
 }
 
