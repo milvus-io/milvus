@@ -2126,6 +2126,7 @@ type dataCoordConfig struct {
 	WatchTimeoutInterval         ParamItem `refreshable:"false"`
 	ChannelBalanceSilentDuration ParamItem `refreshable:"true"`
 	ChannelBalanceInterval       ParamItem `refreshable:"true"`
+	ChannelCheckInterval         ParamItem `refreshable:"true"`
 	ChannelOperationRPCTimeout   ParamItem `refreshable:"true"`
 
 	// --- SEGMENTS ---
@@ -2214,6 +2215,15 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.ChannelBalanceInterval.Init(base.mgr)
+
+	p.ChannelCheckInterval = ParamItem{
+		Key:          "dataCoord.channel.checkInterval",
+		Version:      "2.4.0",
+		DefaultValue: "10",
+		Doc:          "The interval in seconds with which the channel manager advances channel states",
+		Export:       true,
+	}
+	p.ChannelCheckInterval.Init(base.mgr)
 
 	p.ChannelOperationRPCTimeout = ParamItem{
 		Key:          "dataCoord.channel.notifyChannelOperationTimeout",
