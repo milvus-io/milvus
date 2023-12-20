@@ -616,6 +616,7 @@ func TestDeleteTask_Execute(t *testing.T) {
 	partitionMaps["test_0"] = 1
 	partitionMaps["test_1"] = 2
 	partitionMaps["test_2"] = 3
+	indexedPartitions := []string{"test_0", "test_1", "test_2"}
 
 	t.Run("complex delete with partitionKey mode success", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
@@ -631,6 +632,8 @@ func TestDeleteTask_Execute(t *testing.T) {
 			partitionMaps, nil)
 		mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(
 			schema, nil)
+		mockCache.EXPECT().GetPartitionsIndex(mock.Anything, mock.Anything, mock.Anything).
+			Return(indexedPartitions, nil)
 		globalMetaCache = mockCache
 		defer func() { globalMetaCache = nil }()
 
@@ -729,6 +732,7 @@ func TestDeleteTask_StreamingQueryAndDelteFunc(t *testing.T) {
 	partitionMaps["test_0"] = 1
 	partitionMaps["test_1"] = 2
 	partitionMaps["test_2"] = 3
+	indexedPartitions := []string{"test_0", "test_1", "test_2"}
 	t.Run("partitionKey mode parse plan failed", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -785,8 +789,8 @@ func TestDeleteTask_StreamingQueryAndDelteFunc(t *testing.T) {
 		qn := mocks.NewMockQueryNodeClient(t)
 
 		mockCache := NewMockCache(t)
-		mockCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(
-			nil, fmt.Errorf("mock error"))
+		mockCache.EXPECT().GetPartitionsIndex(mock.Anything, mock.Anything, mock.Anything).
+			Return(nil, fmt.Errorf("mock error"))
 		globalMetaCache = mockCache
 		defer func() { globalMetaCache = nil }()
 
@@ -823,8 +827,8 @@ func TestDeleteTask_StreamingQueryAndDelteFunc(t *testing.T) {
 		qn := mocks.NewMockQueryNodeClient(t)
 
 		mockCache := NewMockCache(t)
-		mockCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(
-			partitionMaps, nil).Once()
+		mockCache.EXPECT().GetPartitionsIndex(mock.Anything, mock.Anything, mock.Anything).
+			Return(indexedPartitions, nil)
 		mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(
 			schema, nil)
 		mockCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(

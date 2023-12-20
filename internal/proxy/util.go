@@ -1444,7 +1444,7 @@ func assignChannelsByPK(pks *schemapb.IDs, channelNames []string, insertMsg *msg
 }
 
 func assignPartitionKeys(ctx context.Context, dbName string, collName string, keys []*planpb.GenericValue) ([]string, error) {
-	partitionNames, err := getDefaultPartitionNames(ctx, dbName, collName)
+	partitionNames, err := globalMetaCache.GetPartitionsIndex(ctx, dbName, collName)
 	if err != nil {
 		return nil, err
 	}
