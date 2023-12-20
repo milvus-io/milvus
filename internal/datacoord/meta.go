@@ -489,7 +489,7 @@ func CreateL0Operator(collectionID, partitionID, segmentID int64, channel string
 
 func UpdateStorageVersionOperator(segmentID int64, version int64) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
-		segment := modPack.meta.GetSegment(segmentID)
+		segment := modPack.Get(segmentID)
 		if segment == nil {
 			log.Info("meta update: update storage version - segment not found",
 				zap.Int64("segmentID", segmentID))

@@ -345,7 +345,11 @@ func (node *QueryNode) Init() error {
 		node.subscribingChannels = typeutil.NewConcurrentSet[string]()
 		node.unsubscribingChannels = typeutil.NewConcurrentSet[string]()
 		node.manager = segments.NewManager()
-		node.loader = segments.NewLoader(node.manager, node.chunkManager)
+		if paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool() {
+			node.loader = segments.NewLoaderV2(node.manager, node.chunkManager)
+		} else {
+			node.loader = segments.NewLoader(node.manager, node.chunkManager)
+		}
 		node.dispClient = msgdispatcher.NewClient(node.factory, typeutil.QueryNodeRole, paramtable.GetNodeID())
 		// init pipeline manager
 		node.pipelineManager = pipeline.NewManager(node.manager, node.tSafeManager, node.dispClient, node.delegators)

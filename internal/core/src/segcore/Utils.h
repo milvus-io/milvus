@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <bits/ranges_util.h>
 #include <unordered_map>
 #include <exception>
 #include <memory>
@@ -25,6 +26,7 @@
 // #include "common/Schema.h"
 #include "common/Types.h"
 #include "index/Index.h"
+#include "log/Log.h"
 #include "segcore/DeletedRecord.h"
 #include "segcore/InsertRecord.h"
 #include "storage/space.h"

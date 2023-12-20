@@ -97,7 +97,7 @@ func (s *storageV2Serializer) EncodeBuffer(ctx context.Context, pack *SyncPack) 
 			return nil, err
 		}
 
-		task.batchStatsBlob = batchStatsBlob
+		task.statsBlob = batchStatsBlob
 		s.metacache.UpdateSegments(metacache.RollStats(singlePKStats), metacache.WithSegmentIDs(pack.segmentID))
 	}
 
@@ -155,7 +155,7 @@ func (s *storageV2Serializer) serializeInsertData(pack *SyncPack) (array.RecordR
 	builder := array.NewRecordBuilder(memory.DefaultAllocator, s.arrowSchema)
 	defer builder.Release()
 
-	if err := buildRecord(builder, pack.insertData, s.schema.GetFields()); err != nil {
+	if err := iTypeutil.BuildRecord(builder, pack.insertData, s.schema.GetFields()); err != nil {
 		return nil, err
 	}
 
@@ -221,13 +221,11 @@ func (s *storageV2Serializer) serializeDeltaData(pack *SyncPack) (array.RecordRe
 
 func SpaceCreatorFunc(segmentID int64, collSchema *schemapb.CollectionSchema, arrowSchema *arrow.Schema) func() (*milvus_storage.Space, error) {
 	return func() (*milvus_storage.Space, error) {
-		url := fmt.Sprintf("%s://%s:%s@%s/%d?endpoint_override=%s",
-			params.Params.CommonCfg.StorageScheme.GetValue(),
-			params.Params.MinioCfg.AccessKeyID.GetValue(),
-			params.Params.MinioCfg.SecretAccessKey.GetValue(),
-			params.Params.MinioCfg.BucketName.GetValue(),
-			segmentID,
-			params.Params.MinioCfg.Address.GetValue())
+		url, err := iTypeutil.GetStorageURI(params.Params.CommonCfg.StorageScheme.GetValue(), params.Params.CommonCfg.StoragePathPrefix.GetValue(), segmentID)
+		if err != nil {
+			return nil, err
+		}
+		log.Info("xxxx", zap.Any("url", url))
 
 		pkSchema, err := typeutil.GetPrimaryFieldSchema(collSchema)
 		if err != nil {
