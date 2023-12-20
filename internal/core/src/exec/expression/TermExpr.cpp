@@ -82,8 +82,7 @@ PhyTermFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                     result = ExecVisitorImplTemplateJson<std::string>();
                     break;
                 default:
-                    PanicInfo(DataTypeInvalid,
-                              fmt::format("unknown data type: {}", type));
+                    PanicInfo(DataTypeInvalid, "unknown data type: {}", type);
             }
             break;
         }
@@ -107,15 +106,14 @@ PhyTermFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                     result = ExecVisitorImplTemplateArray<std::string>();
                     break;
                 default:
-                    PanicInfo(DataTypeInvalid,
-                              fmt::format("unknown data type: {}", type));
+                    PanicInfo(DataTypeInvalid, "unknown data type: {}", type);
             }
             break;
         }
         default:
             PanicInfo(DataTypeInvalid,
-                      fmt::format("unsupported data type: {}",
-                                  expr_->column_.data_type_));
+                      "unsupported data type: {}",
+                      expr_->column_.data_type_);
     }
 }
 
@@ -138,8 +136,7 @@ PhyTermFilterExpr::InitPkCacheOffset() {
             break;
         }
         default: {
-            PanicInfo(DataTypeInvalid,
-                      fmt::format("unsupported data type {}", pk_type_));
+            PanicInfo(DataTypeInvalid, "unsupported data type {}", pk_type_);
         }
     }
 
@@ -244,10 +241,10 @@ PhyTermFilterExpr::ExecTermArrayVariableInField() {
     int64_t processed_size = ProcessDataChunks<milvus::ArrayView>(
         execute_sub_batch, std::nullptr_t{}, res, target_val);
     AssertInfo(processed_size == real_batch_size,
-               fmt::format("internal error: expr processed rows {} not equal "
-                           "expect batch size {}",
-                           processed_size,
-                           real_batch_size));
+               "internal error: expr processed rows {} not equal "
+               "expect batch size {}",
+               processed_size,
+               real_batch_size);
     return res_vec;
 }
 
@@ -305,10 +302,10 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable() {
     int64_t processed_size = ProcessDataChunks<milvus::ArrayView>(
         execute_sub_batch, std::nullptr_t{}, res, index, term_set);
     AssertInfo(processed_size == real_batch_size,
-               fmt::format("internal error: expr processed rows {} not equal "
-                           "expect batch size {}",
-                           processed_size,
-                           real_batch_size));
+               "internal error: expr processed rows {} not equal "
+               "expect batch size {}",
+               processed_size,
+               real_batch_size);
     return res_vec;
 }
 
@@ -358,10 +355,10 @@ PhyTermFilterExpr::ExecTermJsonVariableInField() {
     int64_t processed_size = ProcessDataChunks<milvus::Json>(
         execute_sub_batch, std::nullptr_t{}, res, pointer, val);
     AssertInfo(processed_size == real_batch_size,
-               fmt::format("internal error: expr processed rows {} not equal "
-                           "expect batch size {}",
-                           processed_size,
-                           real_batch_size));
+               "internal error: expr processed rows {} not equal "
+               "expect batch size {}",
+               processed_size,
+               real_batch_size);
     return res_vec;
 }
 
@@ -421,10 +418,10 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable() {
     int64_t processed_size = ProcessDataChunks<milvus::Json>(
         execute_sub_batch, std::nullptr_t{}, res, pointer, term_set);
     AssertInfo(processed_size == real_batch_size,
-               fmt::format("internal error: expr processed rows {} not equal "
-                           "expect batch size {}",
-                           processed_size,
-                           real_batch_size));
+               "internal error: expr processed rows {} not equal "
+               "expect batch size {}",
+               processed_size,
+               real_batch_size);
     return res_vec;
 }
 
@@ -468,10 +465,10 @@ PhyTermFilterExpr::ExecVisitorImplForIndex() {
     };
     auto res = ProcessIndexChunks<T>(execute_sub_batch, vals);
     AssertInfo(res.size() == real_batch_size,
-               fmt::format("internal error: expr processed rows {} not equal "
-                           "expect batch size {}",
-                           res.size(),
-                           real_batch_size));
+               "internal error: expr processed rows {} not equal "
+               "expect batch size {}",
+               res.size(),
+               real_batch_size);
     return std::make_shared<ColumnVector>(std::move(res));
 }
 
@@ -529,10 +526,10 @@ PhyTermFilterExpr::ExecVisitorImplForData() {
     int64_t processed_size = ProcessDataChunks<T>(
         execute_sub_batch, std::nullptr_t{}, res, vals_set);
     AssertInfo(processed_size == real_batch_size,
-               fmt::format("internal error: expr processed rows {} not equal "
-                           "expect batch size {}",
-                           processed_size,
-                           real_batch_size));
+               "internal error: expr processed rows {} not equal "
+               "expect batch size {}",
+               processed_size,
+               real_batch_size);
     return res_vec;
 }
 

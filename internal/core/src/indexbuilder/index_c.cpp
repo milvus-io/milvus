@@ -194,15 +194,15 @@ CreateIndexV2(CIndex* res_index, CBuildIndexInfo c_build_index_info) {
             milvus_storage::Options{nullptr,
                                     build_index_info->data_store_version});
         AssertInfo(store_space.ok() && store_space.has_value(),
-                   fmt::format("create space failed: {}",
-                               store_space.status().ToString()));
+                   "create space failed: {}",
+                   store_space.status().ToString());
 
         auto index_space = milvus_storage::Space::Open(
             build_index_info->index_store_path,
             milvus_storage::Options{.schema = store_space.value()->schema()});
         AssertInfo(index_space.ok() && index_space.has_value(),
-                   fmt::format("create space failed: {}",
-                               index_space.status().ToString()));
+                   "create space failed: {}",
+                   index_space.status().ToString());
 
         LOG_SEGCORE_INFO_ << "init space success";
         auto chunk_manager = milvus::storage::CreateChunkManager(

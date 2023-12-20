@@ -96,8 +96,8 @@ PhyBinaryArithOpEvalRangeExpr::Eval(EvalCtx& context, VectorPtr& result) {
         }
         default:
             PanicInfo(DataTypeInvalid,
-                      fmt::format("unsupported data type: {}",
-                                  expr_->column_.data_type_));
+                      "unsupported data type: {}",
+                      expr_->column_.data_type_);
     }
 }
 
@@ -262,9 +262,9 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson() {
             }
             default:
                 PanicInfo(OpTypeInvalid,
-                          fmt::format("unsupported operator type for binary "
-                                      "arithmetic eval expr: {}",
-                                      op_type));
+                          "unsupported operator type for binary "
+                          "arithmetic eval expr: {}",
+                          op_type);
         }
     };
     int64_t processed_size = ProcessDataChunks<milvus::Json>(execute_sub_batch,
@@ -274,10 +274,10 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson() {
                                                              right_operand,
                                                              pointer);
     AssertInfo(processed_size == real_batch_size,
-               fmt::format("internal error: expr processed rows {} not equal "
-                           "expect batch size {}",
-                           processed_size,
-                           real_batch_size));
+               "internal error: expr processed rows {} not equal "
+               "expect batch size {}",
+               processed_size,
+               real_batch_size);
     return res_vec;
 }
 
@@ -415,19 +415,19 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray() {
             }
             default:
                 PanicInfo(OpTypeInvalid,
-                          fmt::format("unsupported operator type for binary "
-                                      "arithmetic eval expr: {}",
-                                      op_type));
+                          "unsupported operator type for binary "
+                          "arithmetic eval expr: {}",
+                          op_type);
         }
     };
 
     int64_t processed_size = ProcessDataChunks<milvus::ArrayView>(
         execute_sub_batch, std::nullptr_t{}, res, value, right_operand, index);
     AssertInfo(processed_size == real_batch_size,
-               fmt::format("internal error: expr processed rows {} not equal "
-                           "expect batch size {}",
-                           processed_size,
-                           real_batch_size));
+               "internal error: expr processed rows {} not equal "
+               "expect batch size {}",
+               processed_size,
+               real_batch_size);
     return res_vec;
 }
 
@@ -581,18 +581,18 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForIndex() {
             }
             default:
                 PanicInfo(OpTypeInvalid,
-                          fmt::format("unsupported operator type for binary "
-                                      "arithmetic eval expr: {}",
-                                      op_type));
+                          "unsupported operator type for binary "
+                          "arithmetic eval expr: {}",
+                          op_type);
         }
         return res;
     };
     auto res = ProcessIndexChunks<T>(execute_sub_batch, value, right_operand);
     AssertInfo(res.size() == real_batch_size,
-               fmt::format("internal error: expr processed rows {} not equal "
-                           "expect batch size {}",
-                           res.size(),
-                           real_batch_size));
+               "internal error: expr processed rows {} not equal "
+               "expect batch size {}",
+               res.size(),
+               real_batch_size);
     return std::make_shared<ColumnVector>(std::move(res));
 }
 
@@ -729,18 +729,18 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData() {
             }
             default:
                 PanicInfo(OpTypeInvalid,
-                          fmt::format("unsupported operator type for binary "
-                                      "arithmetic eval expr: {}",
-                                      op_type));
+                          "unsupported operator type for binary "
+                          "arithmetic eval expr: {}",
+                          op_type);
         }
     };
     int64_t processed_size = ProcessDataChunks<T>(
         execute_sub_batch, std::nullptr_t{}, res, value, right_operand);
     AssertInfo(processed_size == real_batch_size,
-               fmt::format("internal error: expr processed rows {} not equal "
-                           "expect batch size {}",
-                           processed_size,
-                           real_batch_size));
+               "internal error: expr processed rows {} not equal "
+               "expect batch size {}",
+               processed_size,
+               real_batch_size);
     return res_vec;
 }
 

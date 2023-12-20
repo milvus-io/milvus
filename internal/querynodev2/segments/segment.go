@@ -186,9 +186,12 @@ func NewSegment(collection *Collection,
 	}
 
 	var newPtr C.CSegmentInterface
-	status := C.NewSegment(collection.collectionPtr, cSegType, C.int64_t(segmentID), &newPtr)
-
-	if err := HandleCStatus(&status, "NewSegmentFailed"); err != nil {
+	_, err := GetDynamicPool().Submit(func() (any, error) {
+		status := C.NewSegment(collection.collectionPtr, cSegType, C.int64_t(segmentID), &newPtr)
+		err := HandleCStatus(&status, "NewSegmentFailed")
+		return nil, err
+	}).Await()
+	if err != nil {
 		return nil, err
 	}
 
