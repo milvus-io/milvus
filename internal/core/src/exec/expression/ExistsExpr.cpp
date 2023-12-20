@@ -33,8 +33,8 @@ PhyExistsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         }
         default:
             PanicInfo(DataTypeInvalid,
-                      fmt::format("unsupported data type: {}",
-                                  expr_->column_.data_type_));
+                      "unsupported data type: {}",
+                      expr_->column_.data_type_);
     }
 }
 
@@ -61,10 +61,10 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegment() {
     int64_t processed_size = ProcessDataChunks<Json>(
         execute_sub_batch, std::nullptr_t{}, res, pointer);
     AssertInfo(processed_size == real_batch_size,
-               fmt::format("internal error: expr processed rows {} not equal "
-                           "expect batch size {}",
-                           processed_size,
-                           real_batch_size));
+               "internal error: expr processed rows {} not equal "
+               "expect batch size {}",
+               processed_size,
+               real_batch_size);
     return res_vec;
 }
 

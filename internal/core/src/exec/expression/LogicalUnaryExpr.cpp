@@ -23,8 +23,8 @@ namespace exec {
 void
 PhyLogicalUnaryExpr::Eval(EvalCtx& context, VectorPtr& result) {
     AssertInfo(inputs_.size() == 1,
-               fmt::format("logical unary expr must has one input, but now {}",
-                           inputs_.size()));
+               "logical unary expr must has one input, but now {}",
+               inputs_.size());
 
     inputs_[0]->Eval(context, result);
     if (expr_->op_type_ == milvus::expr::LogicalUnaryExpr::OpType::LogicalNot) {
