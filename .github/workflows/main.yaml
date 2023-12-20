@@ -47,7 +47,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        ubuntu: [20.04]
+        ubuntu: [latest]
     env:
       UBUNTU: ${{ matrix.ubuntu }}
     steps:
@@ -122,7 +122,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        ubuntu: [20.04]
+        ubuntu: [latest]
     env:
       UBUNTU: ${{ matrix.ubuntu }}
     steps:
@@ -166,7 +166,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        ubuntu: [20.04]
+        ubuntu: [latest]
     env:
       UBUNTU: ${{ matrix.ubuntu }}
     steps:
@@ -210,7 +210,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        ubuntu: [20.04]
+        ubuntu: [latest]
     env:
       UBUNTU: ${{ matrix.ubuntu }}
     steps:
