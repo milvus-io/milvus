@@ -1370,7 +1370,7 @@ CheckSearchResultDuplicate(const std::vector<CSearchResult>& results) {
     }
 }
 
-TEST(CApiTest, ReudceNullResult) {
+TEST(CApiTest, ReduceNullResult) {
     auto collection = NewCollection(get_default_schema_config());
     CSegmentInterface segment;
     auto status = NewSegment(collection, Growing, -1, &segment);
@@ -1579,7 +1579,7 @@ TEST(CApiTest, ReduceRemoveDuplicates) {
 }
 
 void
-testReduceSearchWithExpr(int N, int topK, int num_queries) {
+testReduceSearchWithExpr(int N, int topK, int num_queries, bool filter_all = false) {
     std::cerr << "testReduceSearchWithExpr(" << N << ", " << topK << ", "
               << num_queries << ")" << std::endl;
 
@@ -1615,6 +1615,30 @@ testReduceSearchWithExpr(int N, int topK, int num_queries) {
                                             output_field_ids: 100)") %
                topK;
 
+    // construct the predicate that filter out all data
+    if (filter_all) {
+        fmt = boost::format(R"(vector_anns: <
+                                            field_id: 100
+                                            predicates: <
+                                                unary_range_expr: <
+                                                    column_info: <
+                                                    field_id: 101
+                                                    data_type: Int64
+                                                    >
+                                                    op: GreaterThan
+                                                    value: <
+                                                    int64_val: %2%
+                                                    >
+                                                >
+                                            >
+                                            query_info: <
+                                                topk: %1%
+                                                metric_type: "L2"
+                                                search_params: "{\"nprobe\": 10}"
+                                            >
+                                            placeholder_tag: "$0">
+                                            output_field_ids: 100)") %topK %N;
+    }
     auto serialized_expr_plan = fmt.str();
     auto blob = generate_query_data(num_queries);
 
@@ -1687,6 +1711,9 @@ testReduceSearchWithExpr(int N, int topK, int num_queries) {
         ASSERT_EQ(search_result_data.topks().size(), slice_nqs[i]);
         for (auto real_topk : search_result_data.topks()) {
             ASSERT_LE(real_topk, slice_topKs[i]);
+            if (filter_all) {
+                ASSERT_EQ(real_topk, 0);
+            }
         }
     }
 
@@ -1706,6 +1733,11 @@ TEST(CApiTest, ReduceSearchWithExpr) {
     testReduceSearchWithExpr(100, 10, 10);
     testReduceSearchWithExpr(10000, 1, 1);
     testReduceSearchWithExpr(10000, 10, 10);
+}
+
+TEST(CApiTest, ReduceSearchWithExprFilterAll) {
+    testReduceSearchWithExpr(2, 1, 1, true);
+    testReduceSearchWithExpr(2, 10, 10, true);
 }
 
 TEST(CApiTest, LoadIndexInfo) {
