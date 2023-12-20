@@ -1270,8 +1270,8 @@ func (m *meta) UpdateChannelCheckpoint(vChannel string, pos *msgpb.MsgPosition) 
 			zap.Uint64("ts", pos.GetTimestamp()),
 			zap.ByteString("msgID", pos.GetMsgID()),
 			zap.Time("time", ts))
-		metrics.DataCoordCheckpointLag.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), vChannel).
-			Set(float64(time.Since(ts).Milliseconds()))
+		metrics.DataCoordCheckpointUnixSeconds.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), vChannel).
+			Set(float64(ts.Unix()))
 	}
 	return nil
 }
