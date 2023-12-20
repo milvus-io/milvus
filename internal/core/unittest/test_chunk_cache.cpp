@@ -76,8 +76,8 @@ TEST(ChunkCacheTest, Read) {
 
     auto actual = (float*)column->Data();
     for (auto i = 0; i < N; i++) {
-        AssertInfo(data[i] == actual[i],
-                   fmt::format("expect {}, actual {}", data[i], actual[i]));
+        AssertInfo(
+            data[i] == actual[i], "expect {}, actual {}", data[i], actual[i]);
     }
 
     cc->Remove(file_name);
@@ -143,7 +143,9 @@ TEST(ChunkCacheTest, TestMultithreads) {
         auto actual = (float*)column->Data();
         for (auto i = 0; i < N; i++) {
             AssertInfo(data[i] == actual[i],
-                       fmt::format("expect {}, actual {}", data[i], actual[i]));
+                       "expect {}, actual {}",
+                       data[i],
+                       actual[i]);
         }
     };
     std::vector<std::thread> pool;

@@ -157,8 +157,7 @@ AddPayloadToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder,
             break;
         }
         default: {
-            PanicInfo(DataTypeInvalid,
-                      fmt::format("unsupported data type {}", data_type));
+            PanicInfo(DataTypeInvalid, "unsupported data type {}", data_type);
         }
     }
 }
@@ -341,8 +340,7 @@ GetDimensionFromFileMetaData(const parquet::ColumnDescriptor* schema,
             return schema->type_length() / sizeof(float16);
         }
         default:
-            PanicInfo(DataTypeInvalid,
-                      fmt::format("unsupported data type {}", data_type));
+            PanicInfo(DataTypeInvalid, "unsupported data type {}", data_type);
     }
 }
 
@@ -367,8 +365,7 @@ GetDimensionFromArrowArray(std::shared_ptr<arrow::Array> data,
             return array->byte_width() * 8;
         }
         default:
-            PanicInfo(DataTypeInvalid,
-                      fmt::format("unsupported data type {}", data_type));
+            PanicInfo(DataTypeInvalid, "unsupported data type {}", data_type);
     }
 }
 
@@ -611,8 +608,8 @@ CreateChunkManager(const StorageConfig& storage_config) {
 
         default: {
             PanicInfo(ConfigInvalid,
-                      fmt::format("unsupported storage_config.storage_type {}",
-                                  fmt::underlying(storage_type)));
+                      "unsupported storage_config.storage_type {}",
+                      fmt::underlying(storage_type));
         }
     }
 }

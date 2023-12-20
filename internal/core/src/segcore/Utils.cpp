@@ -41,8 +41,7 @@ ParsePksFromFieldData(std::vector<PkType>& pks, const DataArray& data) {
             break;
         }
         default: {
-            PanicInfo(DataTypeInvalid,
-                      fmt::format("unsupported PK {}", data_type));
+            PanicInfo(DataTypeInvalid, "unsupported PK {}", data_type);
         }
     }
 }
@@ -71,8 +70,7 @@ ParsePksFromFieldData(DataType data_type,
                 break;
             }
             default: {
-                PanicInfo(DataTypeInvalid,
-                          fmt::format("unsupported PK {}", data_type));
+                PanicInfo(DataTypeInvalid, "unsupported PK {}", data_type);
             }
         }
         offset += row_count;
@@ -96,8 +94,7 @@ ParsePksFromIDs(std::vector<PkType>& pks,
             break;
         }
         default: {
-            PanicInfo(DataTypeInvalid,
-                      fmt::format("unsupported PK {}", data_type));
+            PanicInfo(DataTypeInvalid, "unsupported PK {}", data_type);
         }
     }
 }
@@ -112,8 +109,7 @@ GetSizeOfIdArray(const IdArray& data) {
         return data.str_id().data_size();
     }
 
-    PanicInfo(DataTypeInvalid,
-              fmt::format("unsupported id {}", data.descriptor()->name()));
+    PanicInfo(DataTypeInvalid, "unsupported id {}", data.descriptor()->name());
 }
 
 int64_t
@@ -289,8 +285,7 @@ CreateScalarDataArray(int64_t count, const FieldMeta& field_meta) {
             break;
         }
         default: {
-            PanicInfo(DataTypeInvalid,
-                      fmt::format("unsupported datatype {}", data_type));
+            PanicInfo(DataTypeInvalid, "unsupported datatype {}", data_type);
         }
     }
 
@@ -330,8 +325,7 @@ CreateVectorDataArray(int64_t count, const FieldMeta& field_meta) {
             break;
         }
         default: {
-            PanicInfo(DataTypeInvalid,
-                      fmt::format("unsupported datatype {}", data_type));
+            PanicInfo(DataTypeInvalid, "unsupported datatype {}", data_type);
         }
     }
     return data_array;
@@ -418,8 +412,7 @@ CreateScalarDataArrayFrom(const void* data_raw,
             break;
         }
         default: {
-            PanicInfo(DataTypeInvalid,
-                      fmt::format("unsupported datatype {}", data_type));
+            PanicInfo(DataTypeInvalid, "unsupported datatype {}", data_type);
         }
     }
 
@@ -464,8 +457,7 @@ CreateVectorDataArrayFrom(const void* data_raw,
             break;
         }
         default: {
-            PanicInfo(DataTypeInvalid,
-                      fmt::format("unsupported datatype {}", data_type));
+            PanicInfo(DataTypeInvalid, "unsupported datatype {}", data_type);
         }
     }
     return data_array;
@@ -519,8 +511,8 @@ MergeDataArray(
                 auto obj = vector_array->mutable_binary_vector();
                 obj->assign(data + src_offset * num_bytes, num_bytes);
             } else {
-                PanicInfo(DataTypeInvalid,
-                          fmt::format("unsupported datatype {}", data_type));
+                PanicInfo(
+                    DataTypeInvalid, "unsupported datatype {}", data_type);
             }
             continue;
         }
@@ -580,8 +572,8 @@ MergeDataArray(
                 break;
             }
             default: {
-                PanicInfo(DataTypeInvalid,
-                          fmt::format("unsupported datatype {}", data_type));
+                PanicInfo(
+                    DataTypeInvalid, "unsupported datatype {}", data_type);
             }
         }
     }
@@ -692,8 +684,7 @@ ReverseDataFromIndex(const index::IndexBase* index,
             break;
         }
         default: {
-            PanicInfo(DataTypeInvalid,
-                      fmt::format("unsupported datatype {}", data_type));
+            PanicInfo(DataTypeInvalid, "unsupported datatype {}", data_type);
         }
     }
 

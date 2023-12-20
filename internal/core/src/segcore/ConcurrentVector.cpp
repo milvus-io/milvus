@@ -99,8 +99,8 @@ VectorBase::set_data_raw(ssize_t element_offset,
         }
         default: {
             PanicInfo(DataTypeInvalid,
-                      fmt::format("unsupported datatype {}",
-                                  field_meta.get_data_type()));
+                      "unsupported datatype {}",
+                      field_meta.get_data_type());
         }
     }
 }

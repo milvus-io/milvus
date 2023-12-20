@@ -91,8 +91,7 @@ ShowExprVisitor::visit(LogicalBinaryExpr& expr) {
             case OpType::LogicalXor:
                 return "LogicalXor";
             default:
-                PanicInfo(OpTypeInvalid,
-                          fmt::format("unsupported operation {}", op));
+                PanicInfo(OpTypeInvalid, "unsupported operation {}", op);
         }
     }(expr.op_type_);
 

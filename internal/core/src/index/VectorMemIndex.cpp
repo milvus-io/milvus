@@ -312,9 +312,9 @@ VectorMemIndex::Query(const DatasetPtr dataset,
             milvus::tracer::AddEvent("finish_knowhere_index_range_search");
             if (!res.has_value()) {
                 PanicInfo(ErrorCode::UnexpectedError,
-                          fmt::format("failed to range search: {}: {}",
-                                      KnowhereStatusString(res.error()),
-                                      res.what()));
+                          "failed to range search: {}: {}",
+                          KnowhereStatusString(res.error()),
+                          res.what());
             }
             auto result = ReGenRangeSearchResult(
                 res.value(), topk, num_queries, GetMetricType());
@@ -326,9 +326,9 @@ VectorMemIndex::Query(const DatasetPtr dataset,
             milvus::tracer::AddEvent("finish_knowhere_index_search");
             if (!res.has_value()) {
                 PanicInfo(ErrorCode::UnexpectedError,
-                          fmt::format("failed to search: {}: {}",
-                                      KnowhereStatusString(res.error()),
-                                      res.what()));
+                          "failed to search: {}: {}",
+                          KnowhereStatusString(res.error()),
+                          res.what());
             }
             return res.value();
         }
@@ -487,8 +487,8 @@ VectorMemIndex::LoadFromFile(const Config& config) {
     auto stat = index_.DeserializeFromFile(filepath.value(), conf);
     if (stat != knowhere::Status::success) {
         PanicInfo(ErrorCode::UnexpectedError,
-                  fmt::format("failed to Deserialize index: {}",
-                              KnowhereStatusString(stat)));
+                  "failed to Deserialize index: {}",
+                  KnowhereStatusString(stat));
     }
 
     auto dim = index_.Dim();
@@ -496,9 +496,9 @@ VectorMemIndex::LoadFromFile(const Config& config) {
 
     auto ok = unlink(filepath->data());
     AssertInfo(ok == 0,
-               fmt::format("failed to unlink mmap index file {}: {}",
-                           filepath.value(),
-                           strerror(errno)));
+               "failed to unlink mmap index file {}: {}",
+               filepath.value(),
+               strerror(errno));
     LOG_SEGCORE_INFO_ << "load vector index done";
 }
 

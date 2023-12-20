@@ -37,8 +37,7 @@ InsertData::Serialize(StorageType medium) {
         case StorageType::LocalDisk:
             return serialize_to_local_file();
         default:
-            PanicInfo(DataFormatBroken,
-                      fmt::format("unsupported medium type {}", medium));
+            PanicInfo(DataFormatBroken, "unsupported medium type {}", medium);
     }
 }
 
