@@ -265,7 +265,7 @@ func (sd *shardDelegator) applyDelete(ctx context.Context, nodeID int64, worker 
 				if errors.Is(err, merr.ErrNodeNotFound) {
 					log.Warn("try to delete data on non-exist node")
 					return retry.Unrecoverable(err)
-				} else if errors.Is(err, merr.ErrSegmentNotFound) {
+				} else if errors.IsAny(err, merr.ErrSegmentNotFound, merr.ErrSegmentNotLoaded) {
 					log.Warn("try to delete data of released segment")
 					return nil
 				} else if err != nil {
