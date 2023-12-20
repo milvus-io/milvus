@@ -116,7 +116,7 @@ func (m *meta) reloadFromKV() error {
 	numStoredRows := int64(0)
 	for _, segment := range segments {
 		m.segments.SetSegment(segment.ID, NewSegmentInfo(segment))
-		metrics.DataCoordNumSegments.WithLabelValues(segment.State.String(), segment.GetLevel().String()).Inc()
+		metrics.DataCoordNumSegments.WithLabelValues(segment.GetState().String(), segment.GetLevel().String()).Inc()
 		if segment.State == commonpb.SegmentState_Flushed {
 			numStoredRows += segment.NumOfRows
 
@@ -481,6 +481,7 @@ func CreateL0Operator(collectionID, partitionID, segmentID int64, channel string
 					Level:         datapb.SegmentLevel_L0,
 				},
 			}
+			modPack.metricMutation.addNewSeg(commonpb.SegmentState_Growing, datapb.SegmentLevel_L0, 0)
 		}
 		return true
 	}
