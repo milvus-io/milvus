@@ -29,11 +29,11 @@
 #include "common/EasyAssert.h"
 #include "common/File.h"
 #include "common/FieldMeta.h"
-#include "common/FieldData.h"
 #include "common/Span.h"
 #include "fmt/format.h"
 #include "log/Log.h"
 #include "mmap/Utils.h"
+#include "storage/FieldData.h"
 
 namespace milvus {
 
