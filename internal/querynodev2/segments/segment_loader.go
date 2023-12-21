@@ -972,10 +972,12 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 		zap.Int("concurrency", concurrency),
 		zap.Float64("committedMemSize", toMB(loader.committedResource.MemorySize)),
 		zap.Float64("memUsage", toMB(memUsage)),
+		zap.Float64("memoryCap", toMB(totalMem)),
 		zap.Float64("committedDiskSize", toMB(loader.committedResource.DiskSize)),
 		zap.Float64("diskUsage", toMB(diskUsage)),
 		zap.Float64("predictMemUsage", toMB(predictMemUsage)),
 		zap.Float64("predictDiskUsage", toMB(predictDiskUsage)),
+		zap.Float64("diskCap", toMB(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsUint64())),
 		zap.Bool("mmapEnabled", mmapEnabled),
 	)
 

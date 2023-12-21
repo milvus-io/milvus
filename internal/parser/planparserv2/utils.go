@@ -432,9 +432,8 @@ func HandleCompare(op int, left, right *ExprWithType) (*planpb.Expr, error) {
 		return handleCompareRightValue(op, right, valueExpr)
 	} else if valueExpr := right.expr.GetValueExpr(); valueExpr != nil {
 		return handleCompareRightValue(cmpOp, left, valueExpr)
-	} else {
-		return handleCompare(cmpOp, left, right)
 	}
+	return handleCompare(cmpOp, left, right)
 }
 
 func isEmptyExpression(s string) bool {
