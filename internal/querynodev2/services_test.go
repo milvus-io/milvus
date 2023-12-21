@@ -149,12 +149,12 @@ func (suite *ServiceSuite) TearDownTest() {
 	resp, err := suite.node.ReleaseSegments(ctx, &querypb.ReleaseSegmentsRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:  commonpb.MsgType_ReleaseSegments,
-			TargetID: suite.node.session.ServerID,
+			TargetID: suite.node.session.GetServerID(),
 		},
 		CollectionID: suite.collectionID,
 		PartitionIDs: suite.partitionIDs,
 		SegmentIDs:   suite.validSegmentIDs,
-		NodeID:       suite.node.session.ServerID,
+		NodeID:       suite.node.session.GetServerID(),
 		Scope:        querypb.DataScope_All,
 		Shard:        suite.vchannel,
 	})
@@ -206,7 +206,7 @@ func (suite *ServiceSuite) TestGetStatistics_Normal() {
 			Base: &commonpb.MsgBase{
 				MsgType:  commonpb.MsgType_WatchDmChannels,
 				MsgID:    rand.Int63(),
-				TargetID: suite.node.session.ServerID,
+				TargetID: suite.node.session.GetServerID(),
 			},
 			CollectionID: suite.collectionID,
 			PartitionIDs: []int64{},
@@ -231,7 +231,7 @@ func (suite *ServiceSuite) TestGetStatistics_Failed() {
 			Base: &commonpb.MsgBase{
 				MsgType:  commonpb.MsgType_WatchDmChannels,
 				MsgID:    rand.Int63(),
-				TargetID: suite.node.session.ServerID,
+				TargetID: suite.node.session.GetServerID(),
 			},
 			CollectionID: suite.collectionID,
 			PartitionIDs: []int64{},
@@ -261,9 +261,9 @@ func (suite *ServiceSuite) TestWatchDmChannelsInt64() {
 		Base: &commonpb.MsgBase{
 			MsgType:  commonpb.MsgType_WatchDmChannels,
 			MsgID:    rand.Int63(),
-			TargetID: suite.node.session.ServerID,
+			TargetID: suite.node.session.GetServerID(),
 		},
-		NodeID:       suite.node.session.ServerID,
+		NodeID:       suite.node.session.GetServerID(),
 		CollectionID: suite.collectionID,
 		PartitionIDs: suite.partitionIDs,
 		Infos: []*datapb.VchannelInfo{
@@ -313,9 +313,9 @@ func (suite *ServiceSuite) TestWatchDmChannelsVarchar() {
 		Base: &commonpb.MsgBase{
 			MsgType:  commonpb.MsgType_WatchDmChannels,
 			MsgID:    rand.Int63(),
-			TargetID: suite.node.session.ServerID,
+			TargetID: suite.node.session.GetServerID(),
 		},
-		NodeID:       suite.node.session.ServerID,
+		NodeID:       suite.node.session.GetServerID(),
 		CollectionID: suite.collectionID,
 		PartitionIDs: suite.partitionIDs,
 		Infos: []*datapb.VchannelInfo{
@@ -365,9 +365,9 @@ func (suite *ServiceSuite) TestWatchDmChannels_Failed() {
 		Base: &commonpb.MsgBase{
 			MsgType:  commonpb.MsgType_WatchDmChannels,
 			MsgID:    rand.Int63(),
-			TargetID: suite.node.session.ServerID,
+			TargetID: suite.node.session.GetServerID(),
 		},
-		NodeID:       suite.node.session.ServerID,
+		NodeID:       suite.node.session.GetServerID(),
 		CollectionID: suite.collectionID,
 		PartitionIDs: suite.partitionIDs,
 		Infos: []*datapb.VchannelInfo{
@@ -443,9 +443,9 @@ func (suite *ServiceSuite) TestUnsubDmChannels_Normal() {
 		Base: &commonpb.MsgBase{
 			MsgType:  commonpb.MsgType_UnsubDmChannel,
 			MsgID:    rand.Int63(),
-			TargetID: suite.node.session.ServerID,
+			TargetID: suite.node.session.GetServerID(),
 		},
-		NodeID:       suite.node.session.ServerID,
+		NodeID:       suite.node.session.GetServerID(),
 		CollectionID: suite.collectionID,
 		ChannelName:  suite.vchannel,
 	}
@@ -465,9 +465,9 @@ func (suite *ServiceSuite) TestUnsubDmChannels_Failed() {
 		Base: &commonpb.MsgBase{
 			MsgType:  commonpb.MsgType_UnsubDmChannel,
 			MsgID:    rand.Int63(),
-			TargetID: suite.node.session.ServerID,
+			TargetID: suite.node.session.GetServerID(),
 		},
-		NodeID:       suite.node.session.ServerID,
+		NodeID:       suite.node.session.GetServerID(),
 		CollectionID: suite.collectionID,
 		ChannelName:  suite.vchannel,
 	}
@@ -557,10 +557,10 @@ func (suite *ServiceSuite) TestLoadSegments_Int64() {
 		req := &querypb.LoadSegmentsRequest{
 			Base: &commonpb.MsgBase{
 				MsgID:    rand.Int63(),
-				TargetID: suite.node.session.ServerID,
+				TargetID: suite.node.session.GetServerID(),
 			},
 			CollectionID:   suite.collectionID,
-			DstNodeID:      suite.node.session.ServerID,
+			DstNodeID:      suite.node.session.GetServerID(),
 			Infos:          []*querypb.SegmentLoadInfo{info},
 			Schema:         schema,
 			DeltaPositions: []*msgpb.MsgPosition{{Timestamp: 20000}},
@@ -595,10 +595,10 @@ func (suite *ServiceSuite) TestLoadSegments_VarChar() {
 		req := &querypb.LoadSegmentsRequest{
 			Base: &commonpb.MsgBase{
 				MsgID:    rand.Int63(),
-				TargetID: suite.node.session.ServerID,
+				TargetID: suite.node.session.GetServerID(),
 			},
 			CollectionID:   suite.collectionID,
-			DstNodeID:      suite.node.session.ServerID,
+			DstNodeID:      suite.node.session.GetServerID(),
 			Infos:          []*querypb.SegmentLoadInfo{info},
 			Schema:         schema,
 			DeltaPositions: []*msgpb.MsgPosition{{Timestamp: 20000}},
@@ -622,10 +622,10 @@ func (suite *ServiceSuite) TestLoadDeltaInt64() {
 	req := &querypb.LoadSegmentsRequest{
 		Base: &commonpb.MsgBase{
 			MsgID:    rand.Int63(),
-			TargetID: suite.node.session.ServerID,
+			TargetID: suite.node.session.GetServerID(),
 		},
 		CollectionID:  suite.collectionID,
-		DstNodeID:     suite.node.session.ServerID,
+		DstNodeID:     suite.node.session.GetServerID(),
 		Infos:         suite.genSegmentLoadInfos(schema),
 		Schema:        schema,
 		NeedTransfer:  true,
@@ -647,10 +647,10 @@ func (suite *ServiceSuite) TestLoadDeltaVarchar() {
 	req := &querypb.LoadSegmentsRequest{
 		Base: &commonpb.MsgBase{
 			MsgID:    rand.Int63(),
-			TargetID: suite.node.session.ServerID,
+			TargetID: suite.node.session.GetServerID(),
 		},
 		CollectionID:  suite.collectionID,
-		DstNodeID:     suite.node.session.ServerID,
+		DstNodeID:     suite.node.session.GetServerID(),
 		Infos:         suite.genSegmentLoadInfos(schema),
 		Schema:        schema,
 		NeedTransfer:  true,
@@ -685,10 +685,10 @@ func (suite *ServiceSuite) TestLoadIndex_Success() {
 	req := &querypb.LoadSegmentsRequest{
 		Base: &commonpb.MsgBase{
 			MsgID:    rand.Int63(),
-			TargetID: suite.node.session.ServerID,
+			TargetID: suite.node.session.GetServerID(),
 		},
 		CollectionID:  suite.collectionID,
-		DstNodeID:     suite.node.session.ServerID,
+		DstNodeID:     suite.node.session.GetServerID(),
 		Infos:         rawInfo,
 		Schema:        schema,
 		NeedTransfer:  false,
@@ -710,10 +710,10 @@ func (suite *ServiceSuite) TestLoadIndex_Success() {
 	req = &querypb.LoadSegmentsRequest{
 		Base: &commonpb.MsgBase{
 			MsgID:    rand.Int63(),
-			TargetID: suite.node.session.ServerID,
+			TargetID: suite.node.session.GetServerID(),
 		},
 		CollectionID:  suite.collectionID,
-		DstNodeID:     suite.node.session.ServerID,
+		DstNodeID:     suite.node.session.GetServerID(),
 		Infos:         infos,
 		Schema:        schema,
 		NeedTransfer:  false,
@@ -755,10 +755,10 @@ func (suite *ServiceSuite) TestLoadIndex_Failed() {
 		req := &querypb.LoadSegmentsRequest{
 			Base: &commonpb.MsgBase{
 				MsgID:    rand.Int63(),
-				TargetID: suite.node.session.ServerID,
+				TargetID: suite.node.session.GetServerID(),
 			},
 			CollectionID:  suite.collectionID,
-			DstNodeID:     suite.node.session.ServerID,
+			DstNodeID:     suite.node.session.GetServerID(),
 			Infos:         rawInfo,
 			Schema:        schema,
 			NeedTransfer:  false,
@@ -788,10 +788,10 @@ func (suite *ServiceSuite) TestLoadIndex_Failed() {
 		req := &querypb.LoadSegmentsRequest{
 			Base: &commonpb.MsgBase{
 				MsgID:    rand.Int63(),
-				TargetID: suite.node.session.ServerID,
+				TargetID: suite.node.session.GetServerID(),
 			},
 			CollectionID:  suite.collectionID,
-			DstNodeID:     suite.node.session.ServerID,
+			DstNodeID:     suite.node.session.GetServerID(),
 			Infos:         infos,
 			Schema:        schema,
 			NeedTransfer:  false,
@@ -813,10 +813,10 @@ func (suite *ServiceSuite) TestLoadSegments_Failed() {
 	req := &querypb.LoadSegmentsRequest{
 		Base: &commonpb.MsgBase{
 			MsgID:    rand.Int63(),
-			TargetID: suite.node.session.ServerID,
+			TargetID: suite.node.session.GetServerID(),
 		},
 		CollectionID: suite.collectionID,
-		DstNodeID:    suite.node.session.ServerID,
+		DstNodeID:    suite.node.session.GetServerID(),
 		Infos:        suite.genSegmentLoadInfos(schema),
 		Schema:       schema,
 		NeedTransfer: true,
@@ -865,10 +865,10 @@ func (suite *ServiceSuite) TestLoadSegments_Transfer() {
 		req := &querypb.LoadSegmentsRequest{
 			Base: &commonpb.MsgBase{
 				MsgID:    rand.Int63(),
-				TargetID: suite.node.session.ServerID,
+				TargetID: suite.node.session.GetServerID(),
 			},
 			CollectionID:  suite.collectionID,
-			DstNodeID:     suite.node.session.ServerID,
+			DstNodeID:     suite.node.session.GetServerID(),
 			Infos:         suite.genSegmentLoadInfos(schema),
 			Schema:        schema,
 			NeedTransfer:  true,
@@ -887,10 +887,10 @@ func (suite *ServiceSuite) TestLoadSegments_Transfer() {
 		req := &querypb.LoadSegmentsRequest{
 			Base: &commonpb.MsgBase{
 				MsgID:    rand.Int63(),
-				TargetID: suite.node.session.ServerID,
+				TargetID: suite.node.session.GetServerID(),
 			},
 			CollectionID:  suite.collectionID,
-			DstNodeID:     suite.node.session.ServerID,
+			DstNodeID:     suite.node.session.GetServerID(),
 			Infos:         suite.genSegmentLoadInfos(schema),
 			Schema:        schema,
 			NeedTransfer:  true,
@@ -914,10 +914,10 @@ func (suite *ServiceSuite) TestLoadSegments_Transfer() {
 		req := &querypb.LoadSegmentsRequest{
 			Base: &commonpb.MsgBase{
 				MsgID:    rand.Int63(),
-				TargetID: suite.node.session.ServerID,
+				TargetID: suite.node.session.GetServerID(),
 			},
 			CollectionID:  suite.collectionID,
-			DstNodeID:     suite.node.session.ServerID,
+			DstNodeID:     suite.node.session.GetServerID(),
 			Infos:         suite.genSegmentLoadInfos(schema),
 			Schema:        schema,
 			NeedTransfer:  true,
@@ -985,7 +985,7 @@ func (suite *ServiceSuite) TestReleaseSegments_Normal() {
 	req := &querypb.ReleaseSegmentsRequest{
 		Base: &commonpb.MsgBase{
 			MsgID:    rand.Int63(),
-			TargetID: suite.node.session.ServerID,
+			TargetID: suite.node.session.GetServerID(),
 		},
 		CollectionID: suite.collectionID,
 		SegmentIDs:   suite.validSegmentIDs,
@@ -1003,7 +1003,7 @@ func (suite *ServiceSuite) TestReleaseSegments_Failed() {
 	req := &querypb.ReleaseSegmentsRequest{
 		Base: &commonpb.MsgBase{
 			MsgID:    rand.Int63(),
-			TargetID: suite.node.session.ServerID,
+			TargetID: suite.node.session.GetServerID(),
 		},
 		CollectionID: suite.collectionID,
 		SegmentIDs:   suite.validSegmentIDs,
@@ -1029,7 +1029,7 @@ func (suite *ServiceSuite) TestReleaseSegments_Transfer() {
 		req := &querypb.ReleaseSegmentsRequest{
 			Base: &commonpb.MsgBase{
 				MsgID:    rand.Int63(),
-				TargetID: suite.node.session.ServerID,
+				TargetID: suite.node.session.GetServerID(),
 			},
 			Shard:        suite.vchannel,
 			CollectionID: suite.collectionID,
@@ -1051,7 +1051,7 @@ func (suite *ServiceSuite) TestReleaseSegments_Transfer() {
 		req := &querypb.ReleaseSegmentsRequest{
 			Base: &commonpb.MsgBase{
 				MsgID:    rand.Int63(),
-				TargetID: suite.node.session.ServerID,
+				TargetID: suite.node.session.GetServerID(),
 			},
 			Shard:        suite.vchannel,
 			CollectionID: suite.collectionID,
@@ -1078,7 +1078,7 @@ func (suite *ServiceSuite) TestReleaseSegments_Transfer() {
 		req := &querypb.ReleaseSegmentsRequest{
 			Base: &commonpb.MsgBase{
 				MsgID:    rand.Int63(),
-				TargetID: suite.node.session.ServerID,
+				TargetID: suite.node.session.GetServerID(),
 			},
 			Shard:        suite.vchannel,
 			CollectionID: suite.collectionID,
@@ -1141,7 +1141,7 @@ func (suite *ServiceSuite) genCSearchRequest(nq int64, indexType string, schema 
 		Base: &commonpb.MsgBase{
 			MsgType:  commonpb.MsgType_Search,
 			MsgID:    rand.Int63(),
-			TargetID: suite.node.session.ServerID,
+			TargetID: suite.node.session.GetServerID(),
 		},
 		CollectionID:       suite.collectionID,
 		PartitionIDs:       suite.partitionIDs,
@@ -1343,7 +1343,7 @@ func (suite *ServiceSuite) genCQueryRequest(nq int64, indexType string, schema *
 		Base: &commonpb.MsgBase{
 			MsgType:  commonpb.MsgType_Retrieve,
 			MsgID:    rand.Int63(),
-			TargetID: suite.node.session.ServerID,
+			TargetID: suite.node.session.GetServerID(),
 		},
 		CollectionID: suite.collectionID,
 		PartitionIDs: suite.partitionIDs,
@@ -1652,7 +1652,7 @@ func (suite *ServiceSuite) TestShowConfigurations_Normal() {
 	req := &internalpb.ShowConfigurationsRequest{
 		Base: &commonpb.MsgBase{
 			MsgID:    rand.Int63(),
-			TargetID: suite.node.session.ServerID,
+			TargetID: suite.node.session.GetServerID(),
 		},
 		Pattern: "Cache.enabled",
 	}
@@ -1668,7 +1668,7 @@ func (suite *ServiceSuite) TestShowConfigurations_Failed() {
 	req := &internalpb.ShowConfigurationsRequest{
 		Base: &commonpb.MsgBase{
 			MsgID:    rand.Int63(),
-			TargetID: suite.node.session.ServerID,
+			TargetID: suite.node.session.GetServerID(),
 		},
 		Pattern: "Cache.enabled",
 	}
@@ -1690,7 +1690,7 @@ func (suite *ServiceSuite) TestGetMetric_Normal() {
 	req := &milvuspb.GetMetricsRequest{
 		Base: &commonpb.MsgBase{
 			MsgID:    rand.Int63(),
-			TargetID: suite.node.session.ServerID,
+			TargetID: suite.node.session.GetServerID(),
 		},
 		Request: string(mReq),
 	}
@@ -1711,7 +1711,7 @@ func (suite *ServiceSuite) TestGetMetric_Failed() {
 	req := &milvuspb.GetMetricsRequest{
 		Base: &commonpb.MsgBase{
 			MsgID:    rand.Int63(),
-			TargetID: suite.node.session.ServerID,
+			TargetID: suite.node.session.GetServerID(),
 		},
 		Request: string(mReq),
 	}
@@ -1742,7 +1742,7 @@ func (suite *ServiceSuite) TestGetDataDistribution_Normal() {
 	req := &querypb.GetDataDistributionRequest{
 		Base: &commonpb.MsgBase{
 			MsgID:    rand.Int63(),
-			TargetID: suite.node.session.ServerID,
+			TargetID: suite.node.session.GetServerID(),
 		},
 	}
 
@@ -1756,7 +1756,7 @@ func (suite *ServiceSuite) TestGetDataDistribution_Failed() {
 	req := &querypb.GetDataDistributionRequest{
 		Base: &commonpb.MsgBase{
 			MsgID:    rand.Int63(),
-			TargetID: suite.node.session.ServerID,
+			TargetID: suite.node.session.GetServerID(),
 		},
 	}
 
@@ -1784,7 +1784,7 @@ func (suite *ServiceSuite) TestSyncDistribution_Normal() {
 	req := &querypb.SyncDistributionRequest{
 		Base: &commonpb.MsgBase{
 			MsgID:    rand.Int63(),
-			TargetID: suite.node.session.ServerID,
+			TargetID: suite.node.session.GetServerID(),
 		},
 		CollectionID: suite.collectionID,
 		Channel:      suite.vchannel,
@@ -1869,7 +1869,7 @@ func (suite *ServiceSuite) TestSyncDistribution_ReleaseResultCheck() {
 	req := &querypb.SyncDistributionRequest{
 		Base: &commonpb.MsgBase{
 			MsgID:    rand.Int63(),
-			TargetID: suite.node.session.ServerID,
+			TargetID: suite.node.session.GetServerID(),
 		},
 		CollectionID: suite.collectionID,
 		Channel:      suite.vchannel,
@@ -1915,7 +1915,7 @@ func (suite *ServiceSuite) TestSyncDistribution_Failed() {
 	req := &querypb.SyncDistributionRequest{
 		Base: &commonpb.MsgBase{
 			MsgID:    rand.Int63(),
-			TargetID: suite.node.session.ServerID,
+			TargetID: suite.node.session.GetServerID(),
 		},
 		CollectionID: suite.collectionID,
 		Channel:      suite.vchannel,
@@ -1943,7 +1943,7 @@ func (suite *ServiceSuite) TestDelete_Int64() {
 	req := &querypb.DeleteRequest{
 		Base: &commonpb.MsgBase{
 			MsgID:    rand.Int63(),
-			TargetID: suite.node.session.ServerID,
+			TargetID: suite.node.session.GetServerID(),
 		},
 		CollectionId: suite.collectionID,
 		PartitionId:  suite.partitionIDs[0],
@@ -1974,7 +1974,7 @@ func (suite *ServiceSuite) TestDelete_VarChar() {
 	req := &querypb.DeleteRequest{
 		Base: &commonpb.MsgBase{
 			MsgID:    rand.Int63(),
-			TargetID: suite.node.session.ServerID,
+			TargetID: suite.node.session.GetServerID(),
 		},
 		CollectionId: suite.collectionID,
 		PartitionId:  suite.partitionIDs[0],
@@ -2005,7 +2005,7 @@ func (suite *ServiceSuite) TestDelete_Failed() {
 	req := &querypb.DeleteRequest{
 		Base: &commonpb.MsgBase{
 			MsgID:    rand.Int63(),
-			TargetID: suite.node.session.ServerID,
+			TargetID: suite.node.session.GetServerID(),
 		},
 		CollectionId: suite.collectionID,
 		PartitionId:  suite.partitionIDs[0],
@@ -2041,7 +2041,7 @@ func (suite *ServiceSuite) TestLoadPartition() {
 	req := &querypb.LoadPartitionsRequest{
 		Base: &commonpb.MsgBase{
 			MsgID:    rand.Int63(),
-			TargetID: suite.node.session.ServerID,
+			TargetID: suite.node.session.GetServerID(),
 		},
 		CollectionID: suite.collectionID,
 		PartitionIDs: suite.partitionIDs,
