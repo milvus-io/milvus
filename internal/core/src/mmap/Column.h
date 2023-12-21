@@ -15,11 +15,15 @@
 // limitations under the License.
 #pragma once
 
+#include <folly/io/IOBuf.h>
 #include <sys/mman.h>
 #include <algorithm>
 #include <cstddef>
 #include <cstring>
 #include <filesystem>
+#include <queue>
+#include <string>
+#include <vector>
 
 #include "common/FieldMeta.h"
 #include "common/Span.h"
@@ -170,7 +174,7 @@ class ColumnBase {
     }
 
     // Append one row
-    void
+    virtual void
     Append(const char* data, size_t size) {
         size_t required_size = size_ + size;
         if (required_size > cap_size_) {
@@ -296,9 +300,10 @@ class VariableColumn : public ColumnBase {
     }
 
     void
-    Append(const char* data, size_t size) {
+    Append(const char* data, size_t size) override {
         indices_.emplace_back(size_);
-        ColumnBase::Append(data, size);
+        size_ += size;
+        load_buf_.emplace(data, size);
     }
 
     void
@@ -307,6 +312,19 @@ class VariableColumn : public ColumnBase {
             indices_ = std::move(indices);
         }
         num_rows_ = indices_.size();
+
+        size_t total_size = size_;
+        size_ = 0;
+        Expand(total_size);
+
+        while (!load_buf_.empty()) {
+            auto data = std::move(load_buf_.front());
+            load_buf_.pop();
+
+            std::copy_n(data.data(), data.lenght(), data_ + size_);
+            size_ += data.length();
+        }
+
         ConstructViews();
     }
 
@@ -322,6 +340,9 @@ class VariableColumn : public ColumnBase {
     }
 
  private:
+    // loading states
+    std::queue<std::string> load_buf_{};
+
     std::vector<uint64_t> indices_{};
 
     // Compatible with current Span type
