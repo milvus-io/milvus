@@ -260,7 +260,6 @@ func TestMetaCache_GetBasicCollectionInfo(t *testing.T) {
 		_ = info.consistencyLevel
 		_ = info.createdTimestamp
 		_ = info.createdUtcTimestamp
-		_ = info.partInfo
 	}()
 	go func() {
 		defer wg.Done()
@@ -270,7 +269,6 @@ func TestMetaCache_GetBasicCollectionInfo(t *testing.T) {
 		_ = info.consistencyLevel
 		_ = info.createdTimestamp
 		_ = info.createdUtcTimestamp
-		_ = info.partInfo
 	}()
 	wg.Wait()
 }
