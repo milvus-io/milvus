@@ -61,15 +61,14 @@ struct FileManagerContext {
 };
 
 #define FILEMANAGER_TRY try {
-#define FILEMANAGER_CATCH                                                 \
-    }                                                                     \
-    catch (SegcoreError & e) {                                            \
-        LOG_ERROR("SegcoreError: code {}", e).get_error_code() \
-                           << ", " << e.what();                           \
-        return false;                                                     \
-    }                                                                     \
-    catch (std::exception & e) {                                          \
-        LOG_ERROR("Exception:{}", e).what();                   \
+#define FILEMANAGER_CATCH                                                   \
+    }                                                                       \
+    catch (SegcoreError & e) {                                              \
+        LOG_ERROR("SegcoreError:{} code {}", e.what(), e.get_error_code()); \
+        return false;                                                       \
+    }                                                                       \
+    catch (std::exception & e) {                                            \
+        LOG_ERROR("Exception:{}", e).what();                                \
         return false;
 #define FILEMANAGER_END }
 

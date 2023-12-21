@@ -58,8 +58,7 @@ LogLevelToConsoleString(Azure::Core::Diagnostics::Logger::Level logLevel) {
 void
 AzureLogger(Azure::Core::Diagnostics::Logger::Level level,
             std::string const& msg) {
-    LOG_INFO("[AZURE LOG] [{}", LogLevelToConsoleString)(level)
-                      << "] " << msg;
+    LOG_INFO("[AZURE LOG] [{}] {}", LogLevelToConsoleString(level), msg);
 }
 
 AzureChunkManager::AzureChunkManager(const StorageConfig& storage_config)

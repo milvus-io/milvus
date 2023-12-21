@@ -78,7 +78,7 @@ ExecPlanNodeVisitor::ExecuteExprNodeInternal(
     bool& cache_offset_getted,
     std::vector<int64_t>& cache_offset) {
     bitset_holder.clear();
-    LOG_DEBUG("plannode: {}", plannode->ToString());
+    LOG_INFO("plannode: {}", plannode->ToString());
     auto plan = plan::PlanFragment(plannode);
     // TODO: get query id from proxy
     auto query_context = std::make_shared<milvus::exec::QueryContext>(
