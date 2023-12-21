@@ -52,7 +52,6 @@ class ColumnBase {
         }
 
         cap_size_ = field_meta.get_sizeof() * reserve;
-        auto data_type = field_meta.get_data_type();
 
         // use anon mapping so we are able to free these memory with munmap only
         data_ = static_cast<char*>(mmap(nullptr,
@@ -174,7 +173,7 @@ class ColumnBase {
     }
 
     // Append one row
-    virtual void
+    void
     Append(const char* data, size_t size) {
         size_t required_size = size_ + size;
         if (required_size > cap_size_) {
@@ -208,230 +207,234 @@ class ColumnBase {
                     fmt::format("failed to unmap while expanding, err={}",
                                 strerror(errno)));
             }
-        }
 
-        data_ = data;
-        cap_size_ = new_size;
-    }
+            char* data_{nullptr};
+            // capacity in bytes
+            size_t cap_size_{0};
+            size_t padding_{0};
+            const size_t type_size_{1};
+            size_t num_rows_{0};
 
-    char* data_{nullptr};
-    // capacity in bytes
-    size_t cap_size_{0};
-    size_t padding_{0};
-    const size_t type_size_{1};
-    size_t num_rows_{0};
+            // length in bytes
+            size_t size_{0};
+        };
 
-    // length in bytes
-    size_t size_{0};
-};
+        class Column : public ColumnBase {
+         public:
+            // memory mode ctor
+            Column(size_t cap, const FieldMeta& field_meta)
+                : ColumnBase(cap, field_meta) {
+            }
 
-class Column : public ColumnBase {
- public:
-    // memory mode ctor
-    Column(size_t cap, const FieldMeta& field_meta)
-        : ColumnBase(cap, field_meta) {
-    }
+            // mmap mode ctor
+            Column(const File& file, size_t size, const FieldMeta& field_meta)
+                : ColumnBase(file, size, field_meta) {
+            }
 
-    // mmap mode ctor
-    Column(const File& file, size_t size, const FieldMeta& field_meta)
-        : ColumnBase(file, size, field_meta) {
-    }
+            // mmap mode ctor
+            Column(const File& file, size_t size, int dim, DataType data_type)
+                : ColumnBase(file, size, dim, data_type) {
+            }
 
-    // mmap mode ctor
-    Column(const File& file, size_t size, int dim, DataType data_type)
-        : ColumnBase(file, size, dim, data_type) {
-    }
+            Column(Column&& column) noexcept : ColumnBase(std::move(column)) {
+            }
 
-    Column(Column&& column) noexcept : ColumnBase(std::move(column)) {
-    }
+            ~Column() override = default;
 
-    ~Column() override = default;
+            SpanBase
+            Span() const override {
+                return SpanBase(data_, num_rows_, cap_size_ / num_rows_);
+            }
+        };
 
-    SpanBase
-    Span() const override {
-        return SpanBase(data_, num_rows_, cap_size_ / num_rows_);
-    }
-};
+        template <typename T>
+        class VariableColumn : public ColumnBase {
+         public:
+            using ViewType = std::conditional_t<std::is_same_v<T, std::string>,
+                                                std::string_view,
+                                                T>;
 
-template <typename T>
-class VariableColumn : public ColumnBase {
- public:
-    using ViewType =
-        std::conditional_t<std::is_same_v<T, std::string>, std::string_view, T>;
+            // memory mode ctor
+            VariableColumn(size_t cap, const FieldMeta& field_meta)
+                : ColumnBase(cap, field_meta) {
+            }
 
-    // memory mode ctor
-    VariableColumn(size_t cap, const FieldMeta& field_meta)
-        : ColumnBase(cap, field_meta) {
-    }
+            // mmap mode ctor
+            VariableColumn(const File& file,
+                           size_t size,
+                           const FieldMeta& field_meta)
+                : ColumnBase(file, size, field_meta) {
+            }
 
-    // mmap mode ctor
-    VariableColumn(const File& file, size_t size, const FieldMeta& field_meta)
-        : ColumnBase(file, size, field_meta) {
-    }
+            VariableColumn(VariableColumn&& column) noexcept
+                : ColumnBase(std::move(column)),
+                  indices_(std::move(column.indices_)),
+                  views_(std::move(column.views_)) {
+            }
 
-    VariableColumn(VariableColumn&& column) noexcept
-        : ColumnBase(std::move(column)),
-          indices_(std::move(column.indices_)),
-          views_(std::move(column.views_)) {
-    }
+            ~VariableColumn() override = default;
 
-    ~VariableColumn() override = default;
+            SpanBase
+            Span() const override {
+                return SpanBase(views_.data(), views_.size(), sizeof(ViewType));
+            }
 
-    SpanBase
-    Span() const override {
-        return SpanBase(views_.data(), views_.size(), sizeof(ViewType));
-    }
+            [[nodiscard]] const std::vector<ViewType>&
+            Views() const {
+                return views_;
+            }
 
-    [[nodiscard]] const std::vector<ViewType>&
-    Views() const {
-        return views_;
-    }
+            ViewType
+            operator[](const int i) const {
+                return views_[i];
+            }
 
-    ViewType
-    operator[](const int i) const {
-        return views_[i];
-    }
+            std::string_view
+            RawAt(const int i) const {
+                size_t len = (i == indices_.size() - 1)
+                                 ? size_ - indices_.back()
+                                 : indices_[i + 1] - indices_[i];
+                return std::string_view(data_ + indices_[i], len);
+            }
 
-    std::string_view
-    RawAt(const int i) const {
-        size_t len = (i == indices_.size() - 1) ? size_ - indices_.back()
-                                                : indices_[i + 1] - indices_[i];
-        return std::string_view(data_ + indices_[i], len);
-    }
+            void
+            Append(const char* data, size_t size) {
+                indices_.emplace_back(size_);
+                size_ += size;
+                load_buf_.emplace(data, size);
+            }
 
-    void
-    Append(const char* data, size_t size) override {
-        indices_.emplace_back(size_);
-        size_ += size;
-        load_buf_.emplace(data, size);
-    }
+            void
+            Seal(std::vector<uint64_t> indices = {}) {
+                if (!indices.empty()) {
+                    indices_ = std::move(indices);
+                }
+                num_rows_ = indices_.size();
 
-    void
-    Seal(std::vector<uint64_t> indices = {}) {
-        if (!indices.empty()) {
-            indices_ = std::move(indices);
-        }
-        num_rows_ = indices_.size();
+                size_t total_size = size_;
+                size_ = 0;
+                Expand(total_size);
 
-        size_t total_size = size_;
-        size_ = 0;
-        Expand(total_size);
+                while (!load_buf_.empty()) {
+                    auto data = std::move(load_buf_.front());
+                    load_buf_.pop();
 
-        while (!load_buf_.empty()) {
-            auto data = std::move(load_buf_.front());
-            load_buf_.pop();
+                    std::copy_n(data.data(), data.length(), data_ + size_);
+                    size_ += data.length();
+                }
 
-            std::copy_n(data.data(), data.length(), data_ + size_);
-            size_ += data.length();
-        }
+                ConstructViews();
+            }
 
-        ConstructViews();
-    }
+         protected:
+            void
+            ConstructViews() {
+                views_.reserve(indices_.size());
+                for (size_t i = 0; i < indices_.size() - 1; i++) {
+                    views_.emplace_back(data_ + indices_[i],
+                                        indices_[i + 1] - indices_[i]);
+                }
+                views_.emplace_back(data_ + indices_.back(),
+                                    size_ - indices_.back());
+            }
 
- protected:
-    void
-    ConstructViews() {
-        views_.reserve(indices_.size());
-        for (size_t i = 0; i < indices_.size() - 1; i++) {
-            views_.emplace_back(data_ + indices_[i],
-                                indices_[i + 1] - indices_[i]);
-        }
-        views_.emplace_back(data_ + indices_.back(), size_ - indices_.back());
-    }
+         private:
+            // loading states
+            std::queue<std::string> load_buf_{};
 
- private:
-    // loading states
-    std::queue<std::string> load_buf_{};
+            std::vector<uint64_t> indices_{};
 
-    std::vector<uint64_t> indices_{};
+            // Compatible with current Span type
+            std::vector<ViewType> views_{};
+        };
 
-    // Compatible with current Span type
-    std::vector<ViewType> views_{};
-};
+        class ArrayColumn : public ColumnBase {
+         public:
+            // memory mode ctor
+            ArrayColumn(size_t num_rows, const FieldMeta& field_meta)
+                : ColumnBase(num_rows, field_meta),
+                  element_type_(field_meta.get_element_type()) {
+            }
 
-class ArrayColumn : public ColumnBase {
- public:
-    // memory mode ctor
-    ArrayColumn(size_t num_rows, const FieldMeta& field_meta)
-        : ColumnBase(num_rows, field_meta),
-          element_type_(field_meta.get_element_type()) {
-    }
+            // mmap mode ctor
+            ArrayColumn(const File& file,
+                        size_t size,
+                        const FieldMeta& field_meta)
+                : ColumnBase(file, size, field_meta),
+                  element_type_(field_meta.get_element_type()) {
+            }
 
-    // mmap mode ctor
-    ArrayColumn(const File& file, size_t size, const FieldMeta& field_meta)
-        : ColumnBase(file, size, field_meta),
-          element_type_(field_meta.get_element_type()) {
-    }
+            ArrayColumn(ArrayColumn&& column) noexcept
+                : ColumnBase(std::move(column)),
+                  indices_(std::move(column.indices_)),
+                  views_(std::move(column.views_)),
+                  element_type_(column.element_type_) {
+            }
 
-    ArrayColumn(ArrayColumn&& column) noexcept
-        : ColumnBase(std::move(column)),
-          indices_(std::move(column.indices_)),
-          views_(std::move(column.views_)),
-          element_type_(column.element_type_) {
-    }
+            ~ArrayColumn() override = default;
 
-    ~ArrayColumn() override = default;
+            SpanBase
+            Span() const override {
+                return SpanBase(
+                    views_.data(), views_.size(), sizeof(ArrayView));
+            }
 
-    SpanBase
-    Span() const override {
-        return SpanBase(views_.data(), views_.size(), sizeof(ArrayView));
-    }
+            [[nodiscard]] const std::vector<ArrayView>&
+            Views() const {
+                return views_;
+            }
 
-    [[nodiscard]] const std::vector<ArrayView>&
-    Views() const {
-        return views_;
-    }
+            ArrayView
+            operator[](const int i) const {
+                return views_[i];
+            }
 
-    ArrayView
-    operator[](const int i) const {
-        return views_[i];
-    }
+            ScalarArray
+            RawAt(const int i) const {
+                return views_[i].output_data();
+            }
 
-    ScalarArray
-    RawAt(const int i) const {
-        return views_[i].output_data();
-    }
+            void
+            Append(const Array& array) {
+                indices_.emplace_back(size_);
+                element_indices_.emplace_back(array.get_offsets());
+                ColumnBase::Append(static_cast<const char*>(array.data()),
+                                   array.byte_size());
+            }
 
-    void
-    Append(const Array& array) {
-        indices_.emplace_back(size_);
-        element_indices_.emplace_back(array.get_offsets());
-        ColumnBase::Append(static_cast<const char*>(array.data()),
-                           array.byte_size());
-    }
+            void
+            Seal(std::vector<uint64_t>&& indices = {},
+                 std::vector<std::vector<uint64_t>>&& element_indices = {}) {
+                if (!indices.empty()) {
+                    indices_ = std::move(indices);
+                    element_indices_ = std::move(element_indices);
+                }
+                ConstructViews();
+            }
 
-    void
-    Seal(std::vector<uint64_t>&& indices = {},
-         std::vector<std::vector<uint64_t>>&& element_indices = {}) {
-        if (!indices.empty()) {
-            indices_ = std::move(indices);
-            element_indices_ = std::move(element_indices);
-        }
-        ConstructViews();
-    }
+         protected:
+            void
+            ConstructViews() {
+                views_.reserve(indices_.size());
+                for (size_t i = 0; i < indices_.size() - 1; i++) {
+                    views_.emplace_back(data_ + indices_[i],
+                                        indices_[i + 1] - indices_[i],
+                                        element_type_,
+                                        std::move(element_indices_[i]));
+                }
+                views_.emplace_back(
+                    data_ + indices_.back(),
+                    size_ - indices_.back(),
+                    element_type_,
+                    std::move(element_indices_[indices_.size() - 1]));
+                element_indices_.clear();
+            }
 
- protected:
-    void
-    ConstructViews() {
-        views_.reserve(indices_.size());
-        for (size_t i = 0; i < indices_.size() - 1; i++) {
-            views_.emplace_back(data_ + indices_[i],
-                                indices_[i + 1] - indices_[i],
-                                element_type_,
-                                std::move(element_indices_[i]));
-        }
-        views_.emplace_back(data_ + indices_.back(),
-                            size_ - indices_.back(),
-                            element_type_,
-                            std::move(element_indices_[indices_.size() - 1]));
-        element_indices_.clear();
-    }
-
- private:
-    std::vector<uint64_t> indices_{};
-    std::vector<std::vector<uint64_t>> element_indices_{};
-    // Compatible with current Span type
-    std::vector<ArrayView> views_{};
-    DataType element_type_;
-};
-}  // namespace milvus
+         private:
+            std::vector<uint64_t> indices_{};
+            std::vector<std::vector<uint64_t>> element_indices_{};
+            // Compatible with current Span type
+            std::vector<ArrayView> views_{};
+            DataType element_type_;
+        };
+    }  // namespace milvus
