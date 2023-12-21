@@ -1039,7 +1039,7 @@ func SelectMinPK[T ResultWithID](results []T, cursors []int64, stopForBest bool,
 				// under this case
 				continue
 			}
-			if stopForBest && GetSizeOfIDs(results[i].GetIds()) >= int(realLimit) {
+			if stopForBest {
 				// if one query unit(shard or segment) has more than realLimit results, and it has run out of
 				// all results in this round, then we have to stop select since there may be further the latest result
 				// in the following result of current query unit
