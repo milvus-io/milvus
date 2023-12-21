@@ -166,8 +166,8 @@ SegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
             }
             default: {
                 PanicInfo(DataTypeInvalid,
-                          fmt::format("unsupported primary key type {}",
-                                      field_meta.get_data_type()));
+                          "unsupported primary key type {}",
+                          field_meta.get_data_type());
             }
         }
     }
@@ -337,8 +337,8 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                     break;
                 }
                 default: {
-                    PanicInfo(DataTypeInvalid,
-                              fmt::format("unsupported data type", data_type));
+                    PanicInfo(
+                        DataTypeInvalid, "unsupported data type", data_type);
                 }
             }
 
@@ -354,11 +354,11 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
         }
 
         AssertInfo(column->NumRows() == num_rows,
-                   fmt::format("data lost while loading column {}: loaded "
-                               "num rows {} but expected {}",
-                               data.field_id,
-                               column->NumRows(),
-                               num_rows));
+                   "data lost while loading column {}: loaded "
+                   "num rows {} but expected {}",
+                   data.field_id,
+                   column->NumRows(),
+                   num_rows);
 
         {
             std::unique_lock lck(mutex_);
@@ -469,8 +469,8 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
                 break;
             }
             default: {
-                PanicInfo(DataTypeInvalid,
-                          fmt::format("unsupported data type {}", data_type));
+                PanicInfo(
+                    DataTypeInvalid, "unsupported data type {}", data_type);
             }
         }
     } else {
@@ -484,9 +484,9 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
 
     auto ok = unlink(filepath.c_str());
     AssertInfo(ok == 0,
-               fmt::format("failed to unlink mmap data file {}, err: {}",
-                           filepath.c_str(),
-                           strerror(errno)));
+               "failed to unlink mmap data file {}, err: {}",
+               filepath.c_str(),
+               strerror(errno));
 
     // set pks to offset
     if (schema_->get_primary_field_id() == field_id) {
@@ -690,9 +690,9 @@ SegmentSealedImpl::GetFieldDataPath(FieldId field_id, int64_t offset) const {
     auto data_path = std::string();
     auto it = field_data_info_.field_infos.find(field_id.get());
     AssertInfo(it != field_data_info_.field_infos.end(),
-               fmt::format("cannot find binlog file for field: {}, seg: {}",
-                           field_id.get(),
-                           id_));
+               "cannot find binlog file for field: {}, seg: {}",
+               field_id.get(),
+               id_);
     auto field_info = it->second;
 
     for (auto i = 0; i < field_info.insert_files.size(); i++) {
@@ -787,9 +787,9 @@ SegmentSealedImpl::get_vector(FieldId field_id,
                        "column not found");
             const auto& column = path_to_column.at(data_path);
             AssertInfo(offset_in_binlog * row_bytes < column->ByteSize(),
-                       fmt::format("column idx out of range, idx: {}, size: {}",
-                                   offset_in_binlog * row_bytes,
-                                   column->ByteSize()));
+                       "column idx out of range, idx: {}, size: {}",
+                       offset_in_binlog * row_bytes,
+                       column->ByteSize());
             auto vector = &column->Data()[offset_in_binlog * row_bytes];
             std::memcpy(buf.data() + i * row_bytes, vector, row_bytes);
         }
@@ -930,8 +930,7 @@ SegmentSealedImpl::bulk_subscript(SystemFieldType system_type,
                 static_cast<int64_t*>(output));
             break;
         default:
-            PanicInfo(DataTypeInvalid,
-                      fmt::format("unknown subscript fields", system_type));
+            PanicInfo(DataTypeInvalid, "unknown subscript fields", system_type);
     }
 }
 
@@ -1178,8 +1177,8 @@ SegmentSealedImpl::bulk_subscript(FieldId field_id,
 
         default: {
             PanicInfo(DataTypeInvalid,
-                      fmt::format("unsupported data type {}",
-                                  field_meta.get_data_type()));
+                      "unsupported data type {}",
+                      field_meta.get_data_type());
         }
     }
 
@@ -1251,8 +1250,8 @@ SegmentSealedImpl::search_ids(const IdArray& id_array,
                     break;
                 }
                 default: {
-                    PanicInfo(DataTypeInvalid,
-                              fmt::format("unsupported type {}", data_type));
+                    PanicInfo(
+                        DataTypeInvalid, "unsupported type {}", data_type);
                 }
             }
             res_offsets.push_back(offset);

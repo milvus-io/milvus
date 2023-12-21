@@ -253,8 +253,8 @@ CreateIndex(const FieldMeta& field_meta,
                                                          segcore_config);
         } else {
             PanicInfo(DataTypeInvalid,
-                      fmt::format("unsupported vector type in index: {}",
-                                  field_meta.get_data_type()));
+                      "unsupported vector type in index: {}",
+                      field_meta.get_data_type());
         }
     }
     switch (field_meta.get_data_type()) {
@@ -284,8 +284,8 @@ CreateIndex(const FieldMeta& field_meta,
                 field_meta, segcore_config);
         default:
             PanicInfo(DataTypeInvalid,
-                      fmt::format("unsupported scalar type in index: {}",
-                                  field_meta.get_data_type()));
+                      "unsupported scalar type in index: {}",
+                      field_meta.get_data_type());
     }
 }
 

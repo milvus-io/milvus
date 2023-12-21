@@ -1261,8 +1261,8 @@ TEST(Sealed, GetVectorFromChunkCache) {
         for (size_t j = 0; j < dim; ++j) {
             auto expect = fakevec[id * dim + j];
             auto actual = vector[i * dim + j];
-            AssertInfo(expect == actual,
-                       fmt::format("expect {}, actual {}", expect, actual));
+            AssertInfo(
+                expect == actual, "expect {}, actual {}", expect, actual);
         }
     }
 

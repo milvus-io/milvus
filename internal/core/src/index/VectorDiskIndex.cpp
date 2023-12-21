@@ -246,9 +246,9 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
 
             if (!res.has_value()) {
                 PanicInfo(ErrorCode::UnexpectedError,
-                          fmt::format("failed to range search: {}: {}",
-                                      KnowhereStatusString(res.error()),
-                                      res.what()));
+                          "failed to range search: {}: {}",
+                          KnowhereStatusString(res.error()),
+                          res.what());
             }
             return ReGenRangeSearchResult(
                 res.value(), topk, num_queries, GetMetricType());
@@ -256,9 +256,9 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
             auto res = index_.Search(*dataset, search_config, bitset);
             if (!res.has_value()) {
                 PanicInfo(ErrorCode::UnexpectedError,
-                          fmt::format("failed to search: {}: {}",
-                                      KnowhereStatusString(res.error()),
-                                      res.what()));
+                          "failed to search: {}: {}",
+                          KnowhereStatusString(res.error()),
+                          res.what());
             }
             return res.value();
         }
@@ -301,9 +301,9 @@ VectorDiskAnnIndex<T>::GetVector(const DatasetPtr dataset) const {
     auto res = index_.GetVectorByIds(*dataset);
     if (!res.has_value()) {
         PanicInfo(ErrorCode::UnexpectedError,
-                  fmt::format("failed to get vector: {}: {}",
-                              KnowhereStatusString(res.error()),
-                              res.what()));
+                  "failed to get vector: {}: {}",
+                  KnowhereStatusString(res.error()),
+                  res.what());
     }
     auto index_type = GetIndexType();
     auto tensor = res.value()->GetTensor();

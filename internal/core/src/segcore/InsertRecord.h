@@ -295,8 +295,8 @@ struct InsertRecord {
                     }
                     default: {
                         PanicInfo(DataTypeInvalid,
-                                  fmt::format("unsupported pk type",
-                                              field_meta.get_data_type()));
+                                  "unsupported pk type",
+                                  field_meta.get_data_type());
                     }
                 }
             }
@@ -317,8 +317,8 @@ struct InsertRecord {
                     continue;
                 } else {
                     PanicInfo(DataTypeInvalid,
-                              fmt::format("unsupported vector type",
-                                          field_meta.get_data_type()));
+                              "unsupported vector type",
+                              field_meta.get_data_type());
                 }
             }
             switch (field_meta.get_data_type()) {
@@ -365,8 +365,8 @@ struct InsertRecord {
                 }
                 default: {
                     PanicInfo(DataTypeInvalid,
-                              fmt::format("unsupported scalar type",
-                                          field_meta.get_data_type()));
+                              "unsupported scalar type",
+                              field_meta.get_data_type());
                 }
             }
         }
@@ -417,8 +417,8 @@ struct InsertRecord {
             }
             default: {
                 PanicInfo(DataTypeInvalid,
-                          fmt::format("unsupported primary key data type",
-                                      data_type));
+                          "unsupported primary key data type",
+                          data_type);
             }
         }
     }
@@ -449,8 +449,8 @@ struct InsertRecord {
                 }
                 default: {
                     PanicInfo(DataTypeInvalid,
-                              fmt::format("unsupported primary key data type",
-                                          data_type));
+                              "unsupported primary key data type",
+                              data_type);
                 }
             }
         }

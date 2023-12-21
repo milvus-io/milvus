@@ -83,9 +83,9 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
                            const Timestamp* timestamps_raw,
                            const InsertData* insert_data) {
     AssertInfo(insert_data->num_rows() == num_rows,
-               fmt::format("Entities_raw count {} not equal to insert size {}",
-                           num_rows,
-                           insert_data->num_rows()));
+               "Entities_raw count {} not equal to insert size {}",
+               num_rows,
+               insert_data->num_rows());
     //    AssertInfo(insert_data->fields_data_size() == schema_->size(),
     //               "num fields of insert data not equal to num of schema fields");
     // step 1: check insert data if valid
@@ -111,7 +111,8 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
         }
         auto it = field_id_to_offset.find(field_id);
         AssertInfo(it != field_id_to_offset.end(),
-                   fmt::format("can't find field {}", field_id.get()));
+                   "can't find field {}",
+                   field_id.get());
         auto data_offset = it->second;
         if (!indexing_record_.SyncDataWithIndex(field_id)) {
             insert_record_.get_field_data_base(field_id)->set_data_raw(
@@ -641,8 +642,8 @@ SegmentGrowingImpl::search_ids(const IdArray& id_array,
                     break;
                 }
                 default: {
-                    PanicInfo(DataTypeInvalid,
-                              fmt::format("unsupported type {}", data_type));
+                    PanicInfo(
+                        DataTypeInvalid, "unsupported type {}", data_type);
                 }
             }
             res_offsets.push_back(offset);

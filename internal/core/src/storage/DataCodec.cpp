@@ -111,8 +111,8 @@ DeserializeFileData(const std::shared_ptr<uint8_t[]> input_data,
             return DeserializeLocalFileData(binlog_reader);
         }
         default:
-            PanicInfo(DataFormatBroken,
-                      fmt::format("unsupported medium type {}", medium_type));
+            PanicInfo(
+                DataFormatBroken, "unsupported medium type {}", medium_type);
     }
 }
 

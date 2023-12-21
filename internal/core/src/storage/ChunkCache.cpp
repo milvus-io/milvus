@@ -35,9 +35,9 @@ ChunkCache::Read(const std::string& filepath) {
                 column->ByteSize(),
                 read_ahead_policy_);
     AssertInfo(ok == 0,
-               fmt::format("failed to madvise to the data file {}, err: {}",
-                           path.c_str(),
-                           strerror(errno)));
+               "failed to madvise to the data file {}, err: {}",
+               path.c_str(),
+               strerror(errno));
 
     columns_.emplace(path, column);
     return column;
@@ -62,9 +62,9 @@ ChunkCache::Prefetch(const std::string& filepath) {
                 column->ByteSize(),
                 read_ahead_policy_);
     AssertInfo(ok == 0,
-               fmt::format("failed to madvise to the data file {}, err: {}",
-                           path.c_str(),
-                           strerror(errno)));
+               "failed to madvise to the data file {}, err: {}",
+               path.c_str(),
+               strerror(errno));
 }
 
 std::shared_ptr<ColumnBase>
@@ -86,12 +86,12 @@ ChunkCache::Mmap(const std::filesystem::path& path,
     std::vector<std::vector<uint64_t>> element_indices{};
     auto written = WriteFieldData(file, data_type, field_data, element_indices);
     AssertInfo(written == data_size,
-               fmt::format("failed to write data file {}, written "
-                           "{} but total {}, err: {}",
-                           path.c_str(),
-                           written,
-                           data_size,
-                           strerror(errno)));
+               "failed to write data file {}, written "
+               "{} but total {}, err: {}",
+               path.c_str(),
+               written,
+               data_size,
+               strerror(errno));
 
     std::shared_ptr<ColumnBase> column{};
 
@@ -104,9 +104,9 @@ ChunkCache::Mmap(const std::filesystem::path& path,
     // unlink
     auto ok = unlink(path.c_str());
     AssertInfo(ok == 0,
-               fmt::format("failed to unlink mmap data file {}, err: {}",
-                           path.c_str(),
-                           strerror(errno)));
+               "failed to unlink mmap data file {}, err: {}",
+               path.c_str(),
+               strerror(errno));
 
     return column;
 }

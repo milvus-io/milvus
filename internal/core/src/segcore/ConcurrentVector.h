@@ -53,8 +53,9 @@ class ThreadSafeVector {
     const Type&
     operator[](int64_t index) const {
         AssertInfo(index < size_,
-                   fmt::format(
-                       "index out of range, index={}, size_={}", index, size_));
+                   "index out of range, index={}, size_={}",
+                   index,
+                   size_);
         std::shared_lock lck(mutex_);
         return vec_[index];
     }
@@ -62,8 +63,9 @@ class ThreadSafeVector {
     Type&
     operator[](int64_t index) {
         AssertInfo(index < size_,
-                   fmt::format(
-                       "index out of range, index={}, size_={}", index, size_));
+                   "index out of range, index={}, size_={}",
+                   index,
+                   size_);
         std::shared_lock lck(mutex_);
         return vec_[index];
     }
@@ -298,8 +300,7 @@ class ConcurrentVectorImpl : public VectorBase {
 
     const Type&
     operator[](ssize_t element_index) const {
-        AssertInfo(Dim == 1,
-                   fmt::format("The value of Dim is not 1, Dim={}", Dim));
+        AssertInfo(Dim == 1, "The value of Dim is not 1, Dim={}", Dim);
         auto chunk_id = element_index / size_per_chunk_;
         auto chunk_offset = element_index % size_per_chunk_;
         return get_chunk(chunk_id)[chunk_offset];
@@ -382,8 +383,7 @@ class ConcurrentVector<BinaryVector>
  public:
     explicit ConcurrentVector(int64_t dim, int64_t size_per_chunk)
         : ConcurrentVectorImpl(dim / 8, size_per_chunk) {
-        AssertInfo(dim % 8 == 0,
-                   fmt::format("dim is not a multiple of 8, dim={}", dim));
+        AssertInfo(dim % 8 == 0, "dim is not a multiple of 8, dim={}", dim);
     }
 };
 
