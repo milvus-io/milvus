@@ -1954,9 +1954,11 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 			ctx:         ctx,
 			chMgr:       chMgr,
 			chTicker:    ticker,
+			vChannels:   []string{"test-channel"},
 			primaryKeys: &schemapb.IDs{
 				IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{"milvus", "test"}}},
 			},
+			collectionID: collectionID,
 		}
 
 		assert.NoError(t, task.OnEnqueue())
@@ -3376,13 +3378,12 @@ func TestPartitionKey(t *testing.T) {
 			primaryKeys: &schemapb.IDs{
 				IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{0, 1}}},
 			},
-			idAllocator: idAllocator,
-			chMgr:       chMgr,
-			chTicker:    ticker,
+			idAllocator:  idAllocator,
+			chMgr:        chMgr,
+			chTicker:     ticker,
+			collectionID: collectionID,
+			vChannels:    []string{"test-channel"},
 		}
-		// don't support specify partition name if use partition key
-		dt.req.PartitionName = partitionNames[0]
-		assert.Error(t, dt.PreExecute(ctx))
 
 		dt.req.PartitionName = ""
 		assert.NoError(t, dt.PreExecute(ctx))
