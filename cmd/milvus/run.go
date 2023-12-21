@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/util/hardware"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -44,6 +45,7 @@ func (c *run) execute(args []string, flags *flag.FlagSet) {
 
 	c.printBanner(flags.Output())
 	c.injectVariablesToEnv()
+	c.printHardwareInfo(flags.Output())
 	lock, err := createPidFile(flags.Output(), filename, runtimeDir)
 	if err != nil {
 		panic(err)
@@ -64,6 +66,14 @@ func (c *run) printBanner(w io.Writer) {
 	fmt.Fprintln(w, "Built:     "+BuildTime)
 	fmt.Fprintln(w, "GitCommit: "+GitCommit)
 	fmt.Fprintln(w, "GoVersion: "+GoVersion)
+	fmt.Fprintln(w)
+}
+
+func (c *run) printHardwareInfo(w io.Writer) {
+	totalMem := hardware.GetMemoryCount()
+	usedMem := hardware.GetUsedMemoryCount()
+	fmt.Fprintf(w, "TotalMem: %d\n", totalMem)
+	fmt.Fprintf(w, "UsedMem: %d\n", usedMem)
 	fmt.Fprintln(w)
 }
 
