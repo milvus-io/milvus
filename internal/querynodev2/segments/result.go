@@ -282,8 +282,8 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 	var retSize int64
 	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
 	for j := 0; j < loopEnd; {
-		sel := typeutil.SelectMinPK(validRetrieveResults, cursors, param.mergeStopForBest, param.limit)
-		if sel == -1 {
+		sel, drainOneResult := typeutil.SelectMinPK(validRetrieveResults, cursors)
+		if sel == -1 || (param.mergeStopForBest && drainOneResult) {
 			break
 		}
 
@@ -386,8 +386,8 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 	var retSize int64
 	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
 	for j := 0; j < loopEnd; j++ {
-		sel := typeutil.SelectMinPK(validRetrieveResults, cursors, param.mergeStopForBest, param.limit)
-		if sel == -1 {
+		sel, drainOneResult := typeutil.SelectMinPK(validRetrieveResults, cursors)
+		if sel == -1 || (param.mergeStopForBest && drainOneResult) {
 			break
 		}
 
