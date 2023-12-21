@@ -389,6 +389,7 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) syn
 		return nil
 	}
 	var batchSize int64
+	var totalMemSize float64
 	var tsFrom, tsTo uint64
 
 	insert, delta, timeRange, startPos := wb.yieldBuffer(segmentID)
@@ -399,6 +400,10 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) syn
 	actions := []metacache.SegmentAction{metacache.RollStats()}
 	if insert != nil {
 		batchSize = int64(insert.GetRowNum())
+		totalMemSize += float64(insert.GetMemorySize())
+	}
+	if delta != nil {
+		totalMemSize += float64(delta.Size())
 	}
 	actions = append(actions, metacache.StartSyncing(batchSize))
 	wb.metaCache.UpdateSegments(metacache.MergeSegmentAction(actions...), metacache.WithSegmentIDs(segmentID))
@@ -463,8 +468,7 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) syn
 		syncTask = task
 	}
 
-	totalSize := float64(insert.GetMemorySize()) + float64(delta.Size())
-	metrics.DataNodeFlowGraphBufferDataSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), fmt.Sprint(wb.collectionID)).Sub(totalSize)
+	metrics.DataNodeFlowGraphBufferDataSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), fmt.Sprint(wb.collectionID)).Sub(totalMemSize)
 
 	return syncTask
 }
