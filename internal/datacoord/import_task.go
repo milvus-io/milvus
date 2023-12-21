@@ -97,6 +97,14 @@ func UpdateFileStats(fileStats []*datapb.ImportFileStats) UpdateAction {
 	}
 }
 
+func UpdateSegmentIDs(segmentIDs []int64) UpdateAction {
+	return func(task ImportTask) {
+		if it, ok := task.(*importTask); ok {
+			it.ImportTaskV2.SegmentIDs = segmentIDs
+		}
+	}
+}
+
 type ImportTask interface {
 	GetRequestID() int64
 	GetTaskID() int64

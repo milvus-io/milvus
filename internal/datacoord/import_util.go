@@ -59,7 +59,7 @@ func AssemblePreImportRequest(task ImportTask, meta *meta) *datapb.PreImportRequ
 	}
 }
 
-func AssembleImportRequest(task ImportTask, manager *SegmentManager, meta *meta, alloc allocator) (*datapb.ImportRequest, error) {
+func AssembleImportRequest(task ImportTask, manager *SegmentManager, meta *meta, alloc allocator, imeta ImportMeta) (*datapb.ImportRequest, error) {
 	collection := meta.GetCollection(task.GetCollectionID())
 	segmentAutoIDRanges := make(map[int64]*datapb.AutoIDRange)
 	segmentChannels := make(map[int64]string)
@@ -80,6 +80,10 @@ func AssembleImportRequest(task ImportTask, manager *SegmentManager, meta *meta,
 				rows -= segmentInfo.GetMaxRowNum()
 			}
 		}
+	}
+	err := imeta.Update(task.GetTaskID(), UpdateSegmentIDs(lo.Keys(segmentChannels)))
+	if err != nil {
+		return nil, err
 	}
 	importFiles := lo.Map(task.GetFileStats(), func(fileStat *datapb.ImportFileStats, _ int) *datapb.ImportFile {
 		return fileStat.GetImportFile()

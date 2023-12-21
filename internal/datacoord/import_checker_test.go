@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"math/rand"
 	"testing"
 )
 
@@ -30,6 +31,20 @@ func TestImportChecker(t *testing.T) {
 	catalog.EXPECT().ListImportTasks().Return(nil, nil)
 	catalog.EXPECT().SaveImportTask(mock.Anything).Return(nil)
 	catalog.EXPECT().DropImportTask(mock.Anything).Return(nil)
+	catalog.EXPECT().ListSegments(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
+
+	cluster := NewMockCluster(t)
+	cluster.EXPECT().DropImport(mock.Anything, mock.Anything).Return(nil)
+	cluster.EXPECT().AddImportSegment(mock.Anything, mock.Anything).Return(nil, nil)
+
+	alloc := NewNMockAllocator(t)
+	alloc.EXPECT().allocID(mock.Anything).RunAndReturn(func(ctx context.Context) (int64, error) {
+		return rand.Int63(), nil
+	})
 
 	imeta, err := NewImportMeta(catalog)
 	assert.NoError(t, err)
@@ -48,7 +63,7 @@ func TestImportChecker(t *testing.T) {
 		PreImportTask: &datapb.PreImportTask{
 			RequestID: 0,
 			TaskID:    2,
-			State:     datapb.ImportState_Pending,
+			State:     datapb.ImportState_Completed,
 		},
 	}
 	err = imeta.Add(pit2)
@@ -58,7 +73,7 @@ func TestImportChecker(t *testing.T) {
 		PreImportTask: &datapb.PreImportTask{
 			RequestID: 0,
 			TaskID:    3,
-			State:     datapb.ImportState_Pending,
+			State:     datapb.ImportState_Completed,
 		},
 	}
 	err = imeta.Add(pit3)
@@ -68,7 +83,7 @@ func TestImportChecker(t *testing.T) {
 		ImportTaskV2: &datapb.ImportTaskV2{
 			RequestID: 0,
 			TaskID:    4,
-			State:     datapb.ImportState_Pending,
+			State:     datapb.ImportState_Completed,
 		},
 	}
 	err = imeta.Add(it1)
@@ -78,18 +93,67 @@ func TestImportChecker(t *testing.T) {
 		ImportTaskV2: &datapb.ImportTaskV2{
 			RequestID: 0,
 			TaskID:    5,
-			State:     datapb.ImportState_Pending,
+			State:     datapb.ImportState_Completed,
 		},
 	}
 	err = imeta.Add(it2)
 	assert.NoError(t, err)
-
 	tasks := imeta.GetBy(WithReq(0))
 	assert.Equal(t, 5, len(tasks))
 
 	meta, err := newMeta(context.TODO(), catalog, nil)
 	assert.Nil(t, err)
-	cluster := NewMockCluster(t)
-	alloc := NewNMockAllocator(t)
 	checker := NewImportChecker(meta, cluster, alloc, imeta)
+
+	// preimport tasks are not fully completed
+	checker.checkPreImportState(0)
+	tasks = imeta.GetBy(WithReq(0))
+	assert.Equal(t, 5, len(tasks))
+
+	// preimport tasks are all completed, should generate import tasks
+	err = imeta.Update(1, UpdateState(datapb.ImportState_Completed))
+	assert.NoError(t, err)
+	checker.checkPreImportState(0)
+	tasks = imeta.GetBy(WithReq(0))
+	assert.Equal(t, 6, len(tasks))
+	tasks = imeta.GetBy(WithReq(0), WithType(ImportTaskType))
+	assert.Equal(t, 3, len(tasks))
+	for _, task := range tasks {
+		assert.Equal(t, datapb.ImportState_Pending, task.GetState())
+	}
+
+	// import tasks are not fully completed
+	tasks = imeta.GetBy(WithReq(0), WithType(ImportTaskType))
+	assert.Equal(t, 3, len(tasks))
+	checker.checkImportState(0)
+	for _, task := range tasks {
+		assert.Equal(t, 0, len(task.(*importTask).GetSegmentIDs()))
+	}
+
+	// import tasks are all completed
+	tasks = imeta.GetBy(WithReq(0), WithType(ImportTaskType))
+	assert.Equal(t, 3, len(tasks))
+	for _, task := range tasks {
+		err = imeta.Update(task.GetTaskID(), UpdateState(datapb.ImportState_Completed))
+		assert.NoError(t, err)
+		segmentID := task.GetTaskID()
+		err = meta.AddSegment(context.TODO(), &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:          segmentID,
+				IsImporting: true,
+			},
+		})
+		assert.NoError(t, err)
+		err = imeta.Update(task.GetTaskID(), UpdateSegmentIDs([]int64{segmentID}))
+		assert.NoError(t, err)
+	}
+	checker.checkImportState(0)
+	tasks = imeta.GetBy(WithReq(0), WithType(ImportTaskType))
+	assert.Equal(t, 3, len(tasks))
+	for _, task := range tasks {
+		for _, segmentID := range task.(*importTask).GetSegmentIDs() {
+			segment := meta.GetSegment(segmentID)
+			assert.False(t, segment.GetIsImporting())
+		}
+	}
 }

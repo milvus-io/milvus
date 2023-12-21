@@ -160,7 +160,7 @@ func (s *ImportScheduler) processPendingImport(task ImportTask) {
 		log.Warn("no datanode can be scheduled", WrapLogFields(task, nil)...)
 		return
 	}
-	req, err := AssembleImportRequest(task, s.sm, s.meta, s.alloc)
+	req, err := AssembleImportRequest(task, s.sm, s.meta, s.alloc, s.imeta)
 	if err != nil {
 		log.Warn("assemble import request failed", WrapLogFields(task, err)...)
 		return
