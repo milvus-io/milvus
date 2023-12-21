@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
@@ -30,6 +31,7 @@ import (
 type allocator interface {
 	allocTimestamp(context.Context) (Timestamp, error)
 	allocID(context.Context) (UniqueID, error)
+	allocN(n int64) (UniqueID, UniqueID, error)
 }
 
 // make sure rootCoordAllocator implements allocator interface
@@ -78,4 +80,23 @@ func (alloc *rootCoordAllocator) allocID(ctx context.Context) (UniqueID, error) 
 	}
 
 	return resp.ID, nil
+}
+
+// allocID allocates an `UniqueID` from RootCoord, invoking AllocID grpc
+func (alloc *rootCoordAllocator) allocN(n int64) (UniqueID, UniqueID, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	resp, err := alloc.AllocID(ctx, &rootcoordpb.AllocIDRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_RequestID),
+			commonpbutil.WithSourceID(paramtable.GetNodeID()),
+		),
+		Count: uint32(n),
+	})
+
+	if err = VerifyResponse(resp, err); err != nil {
+		return 0, 0, err
+	}
+	start, count := resp.GetID(), resp.GetCount()
+	return start, start + int64(count), nil
 }

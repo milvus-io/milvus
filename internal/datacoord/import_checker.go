@@ -17,7 +17,6 @@
 package datacoord
 
 import (
-	alloc "github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/samber/lo"
@@ -27,10 +26,10 @@ import (
 )
 
 type ImportChecker struct {
-	meta      *meta
-	cluster   Cluster
-	allocator *alloc.IDAllocator
-	imeta     ImportMeta
+	meta    *meta
+	cluster Cluster
+	alloc   allocator
+	imeta   ImportMeta
 
 	closeOnce sync.Once
 	closeChan chan struct{}
@@ -38,12 +37,12 @@ type ImportChecker struct {
 
 func NewImportChecker(meta *meta,
 	cluster Cluster,
-	allocator *alloc.IDAllocator,
+	alloc allocator,
 	imeta ImportMeta) *ImportChecker {
 	return &ImportChecker{
 		meta:      meta,
 		cluster:   cluster,
-		allocator: allocator,
+		alloc:     alloc,
 		imeta:     imeta,
 		closeChan: make(chan struct{}),
 	}
@@ -124,7 +123,7 @@ func (c *ImportChecker) checkPreImportState(requestID int64) {
 		}
 	}
 	for _, t := range tasks {
-		task, err := AssembleImportTask(t, c.allocator)
+		task, err := AssembleImportTask(t, c.alloc)
 		if err != nil {
 			log.Warn("assemble import task failed", WrapLogFields(t, err)...)
 			return

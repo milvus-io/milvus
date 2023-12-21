@@ -24,7 +24,6 @@ import (
 
 	"github.com/samber/lo"
 
-	alloc "github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 )
@@ -34,11 +33,11 @@ const (
 )
 
 type ImportScheduler struct {
-	meta      *meta
-	cluster   Cluster
-	allocator *alloc.IDAllocator
-	sm        *SegmentManager
-	imeta     ImportMeta
+	meta    *meta
+	cluster Cluster
+	alloc   allocator
+	sm      *SegmentManager
+	imeta   ImportMeta
 
 	closeOnce sync.Once
 	closeChan chan struct{}
@@ -46,13 +45,13 @@ type ImportScheduler struct {
 
 func NewImportScheduler(meta *meta,
 	cluster Cluster,
-	allocator *alloc.IDAllocator,
+	alloc allocator,
 	sm *SegmentManager,
 	imeta ImportMeta) *ImportScheduler {
 	return &ImportScheduler{
 		meta:      meta,
 		cluster:   cluster,
-		allocator: allocator,
+		alloc:     alloc,
 		sm:        sm,
 		imeta:     imeta,
 		closeChan: make(chan struct{}),
@@ -161,7 +160,7 @@ func (s *ImportScheduler) processPendingImport(task ImportTask) {
 		log.Warn("no datanode can be scheduled", WrapLogFields(task, nil)...)
 		return
 	}
-	req, err := AssembleImportRequest(task, s.sm, s.meta, s.allocator)
+	req, err := AssembleImportRequest(task, s.sm, s.meta, s.alloc)
 	if err != nil {
 		log.Warn("assemble import request failed", WrapLogFields(task, err)...)
 		return

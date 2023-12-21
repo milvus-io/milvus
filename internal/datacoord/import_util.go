@@ -19,7 +19,6 @@ package datacoord
 import (
 	"context"
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	alloc "github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -60,7 +59,7 @@ func AssemblePreImportRequest(task ImportTask, meta *meta) *datapb.PreImportRequ
 	}
 }
 
-func AssembleImportRequest(task ImportTask, manager *SegmentManager, meta *meta, idAlloc *alloc.IDAllocator) (*datapb.ImportRequest, error) {
+func AssembleImportRequest(task ImportTask, manager *SegmentManager, meta *meta, alloc allocator) (*datapb.ImportRequest, error) {
 	collection := meta.GetCollection(task.GetCollectionID())
 	segmentAutoIDRanges := make(map[int64]*datapb.AutoIDRange)
 	segmentChannels := make(map[int64]string)
@@ -72,7 +71,7 @@ func AssembleImportRequest(task ImportTask, manager *SegmentManager, meta *meta,
 				if err != nil {
 					return nil, err
 				}
-				idBegin, idEnd, err := idAlloc.Alloc(uint32(segmentInfo.GetMaxRowNum()))
+				idBegin, idEnd, err := alloc.allocN(segmentInfo.GetMaxRowNum())
 				if err != nil {
 					return nil, err
 				}
@@ -97,8 +96,10 @@ func AssembleImportRequest(task ImportTask, manager *SegmentManager, meta *meta,
 	}, nil
 }
 
-func AssembleImportTask(task ImportTask, allocator *alloc.IDAllocator) (*importTask, error) {
-	taskID, err := allocator.AllocOne()
+func AssembleImportTask(task ImportTask, alloc allocator) (*importTask, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	taskID, err := alloc.allocID(ctx)
 	if err != nil {
 		return nil, err
 	}
