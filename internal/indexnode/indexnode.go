@@ -53,6 +53,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/expr"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -126,6 +127,7 @@ func NewIndexNode(ctx context.Context, factory dependency.Factory) *IndexNode {
 	sc := NewTaskScheduler(b.loopCtx)
 
 	b.sched = sc
+	expr.Register("indexnode", b)
 	return b
 }
 
