@@ -68,7 +68,7 @@ struct FileManagerContext {
         return false;                                                       \
     }                                                                       \
     catch (std::exception & e) {                                            \
-        LOG_ERROR("Exception:{}", e).what();                                \
+        LOG_ERROR("Exception:{}", e.what());                                \
         return false;
 #define FILEMANAGER_END }
 
