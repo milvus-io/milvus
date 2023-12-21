@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/apache/arrow/go/v12/arrow"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
@@ -13,16 +12,12 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	milvus_storage "github.com/milvus-io/milvus-storage/go/storage"
-	"github.com/milvus-io/milvus-storage/go/storage/options"
-	"github.com/milvus-io/milvus-storage/go/storage/schema"
 	"github.com/milvus-io/milvus/internal/datanode/broker"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -65,9 +60,9 @@ func NewWriteBuffer(channel string, metacache metacache.MetaCache, storageV2Cach
 
 	switch option.deletePolicy {
 	case DeletePolicyBFPkOracle:
-		return NewBFWriteBuffer(channel, metacache, nil, syncMgr, option)
+		return NewBFWriteBuffer(channel, metacache, storageV2Cache, syncMgr, option)
 	case DeletePolicyL0Delta:
-		return NewL0WriteBuffer(channel, metacache, nil, syncMgr, option)
+		return NewL0WriteBuffer(channel, metacache, storageV2Cache, syncMgr, option)
 	default:
 		return nil, merr.WrapErrParameterInvalid("valid delete policy config", option.deletePolicy)
 	}
@@ -85,7 +80,9 @@ type writeBufferBase struct {
 	metaCache  metacache.MetaCache
 	syncMgr    syncmgr.SyncManager
 	broker     broker.Broker
-	buffers    map[int64]*segmentBuffer // segmentID => segmentBuffer
+	serializer syncmgr.Serializer
+
+	buffers map[int64]*segmentBuffer // segmentID => segmentBuffer
 
 	syncPolicies   []SyncPolicy
 	checkpoint     *msgpb.MsgPosition
@@ -94,10 +91,28 @@ type writeBufferBase struct {
 	storagev2Cache *metacache.StorageV2Cache
 }
 
-func newWriteBufferBase(channel string, metacache metacache.MetaCache, storageV2Cache *metacache.StorageV2Cache, syncMgr syncmgr.SyncManager, option *writeBufferOption) *writeBufferBase {
+func newWriteBufferBase(channel string, metacache metacache.MetaCache, storageV2Cache *metacache.StorageV2Cache, syncMgr syncmgr.SyncManager, option *writeBufferOption) (*writeBufferBase, error) {
 	flushTs := atomic.NewUint64(nonFlushTS)
 	flushTsPolicy := GetFlushTsPolicy(flushTs, metacache)
 	option.syncPolicies = append(option.syncPolicies, flushTsPolicy)
+
+	var serializer syncmgr.Serializer
+	var err error
+	if params.Params.CommonCfg.EnableStorageV2.GetAsBool() {
+		serializer, err = syncmgr.NewStorageV2Serializer(
+			storageV2Cache,
+			metacache,
+			option.metaWriter,
+		)
+	} else {
+		serializer, err = syncmgr.NewStorageSerializer(
+			metacache,
+			option.metaWriter,
+		)
+	}
+	if err != nil {
+		return nil, err
+	}
 
 	return &writeBufferBase{
 		channelName:    channel,
@@ -107,10 +122,11 @@ func newWriteBufferBase(channel string, metacache metacache.MetaCache, storageV2
 		metaWriter:     option.metaWriter,
 		buffers:        make(map[int64]*segmentBuffer),
 		metaCache:      metacache,
+		serializer:     serializer,
 		syncPolicies:   option.syncPolicies,
 		flushTimestamp: flushTs,
 		storagev2Cache: storageV2Cache,
-	}
+	}, nil
 }
 
 func (wb *writeBufferBase) HasSegment(segmentID int64) bool {
@@ -238,8 +254,9 @@ func (wb *writeBufferBase) flushSegments(ctx context.Context, segmentIDs []int64
 
 func (wb *writeBufferBase) syncSegments(ctx context.Context, segmentIDs []int64) {
 	for _, segmentID := range segmentIDs {
-		syncTask := wb.getSyncTask(ctx, segmentID)
-		if syncTask == nil {
+		syncTask, err := wb.getSyncTask(ctx, segmentID)
+		if err != nil {
+			// TODO check err type
 			// segment info not found
 			log.Ctx(ctx).Warn("segment not found in meta", zap.Int64("segmentID", segmentID))
 			continue
@@ -344,49 +361,14 @@ func (wb *writeBufferBase) bufferDelete(segmentID int64, pks []storage.PrimaryKe
 	return nil
 }
 
-func SpaceCreatorFunc(segmentID int64, collSchema *schemapb.CollectionSchema, arrowSchema *arrow.Schema) func() (*milvus_storage.Space, error) {
-	return func() (*milvus_storage.Space, error) {
-		url := fmt.Sprintf("%s://%s:%s@%s/%d?endpoint_override=%s",
-			params.Params.CommonCfg.StorageScheme.GetValue(),
-			params.Params.MinioCfg.AccessKeyID.GetValue(),
-			params.Params.MinioCfg.SecretAccessKey.GetValue(),
-			params.Params.MinioCfg.BucketName.GetValue(),
-			segmentID,
-			params.Params.MinioCfg.Address.GetValue())
-
-		pkSchema, err := typeutil.GetPrimaryFieldSchema(collSchema)
-		if err != nil {
-			return nil, err
-		}
-		vecSchema, err := typeutil.GetVectorFieldSchema(collSchema)
-		if err != nil {
-			return nil, err
-		}
-		space, err := milvus_storage.Open(
-			url,
-			options.NewSpaceOptionBuilder().
-				SetSchema(schema.NewSchema(
-					arrowSchema,
-					&schema.SchemaOptions{
-						PrimaryColumn: pkSchema.Name,
-						VectorColumn:  vecSchema.Name,
-						VersionColumn: common.TimeStampFieldName,
-					},
-				)).
-				Build(),
-		)
-		return space, err
-	}
-}
-
-func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) syncmgr.Task {
+func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (syncmgr.Task, error) {
 	log := log.Ctx(ctx).With(
 		zap.Int64("segmentID", segmentID),
 	)
 	segmentInfo, ok := wb.metaCache.GetSegmentByID(segmentID) // wb.metaCache.GetSegmentsBy(metacache.WithSegmentIDs(segmentID))
 	if !ok {
 		log.Warn("segment info not found in meta cache", zap.Int64("segmentID", segmentID))
-		return nil
+		return nil, merr.WrapErrSegmentNotFound(segmentID)
 	}
 	var batchSize int64
 	var totalMemSize float64
@@ -397,7 +379,7 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) syn
 		tsFrom, tsTo = timeRange.timestampMin, timeRange.timestampMax
 	}
 
-	actions := []metacache.SegmentAction{metacache.RollStats()}
+	actions := []metacache.SegmentAction{}
 	if insert != nil {
 		batchSize = int64(insert.GetRowNum())
 		totalMemSize += float64(insert.GetMemorySize())
@@ -408,69 +390,26 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) syn
 	actions = append(actions, metacache.StartSyncing(batchSize))
 	wb.metaCache.UpdateSegments(metacache.MergeSegmentAction(actions...), metacache.WithSegmentIDs(segmentID))
 
-	var syncTask syncmgr.Task
-	if params.Params.CommonCfg.EnableStorageV2.GetAsBool() {
-		arrowSchema := wb.storagev2Cache.ArrowSchema()
-		space, err := wb.storagev2Cache.GetOrCreateSpace(segmentID, SpaceCreatorFunc(segmentID, wb.collSchema, arrowSchema))
-		if err != nil {
-			log.Warn("failed to get or create space", zap.Error(err))
-			return nil
-		}
+	pack := &syncmgr.SyncPack{}
+	pack.WithInsertData(insert).
+		WithDeleteData(delta).
+		WithCollectionID(wb.collectionID).
+		WithPartitionID(segmentInfo.PartitionID()).
+		WithChannelName(wb.channelName).
+		WithSegmentID(segmentID).
+		WithStartPosition(startPos).
+		WithTimeRange(tsFrom, tsTo).
+		WithLevel(segmentInfo.Level()).
+		WithCheckpoint(wb.checkpoint).
+		WithBatchSize(batchSize)
 
-		task := syncmgr.NewSyncTaskV2().
-			WithInsertData(insert).
-			WithDeleteData(delta).
-			WithCollectionID(wb.collectionID).
-			WithPartitionID(segmentInfo.PartitionID()).
-			WithChannelName(wb.channelName).
-			WithSegmentID(segmentID).
-			WithStartPosition(startPos).
-			WithTimeRange(tsFrom, tsTo).
-			WithLevel(segmentInfo.Level()).
-			WithCheckpoint(wb.checkpoint).
-			WithSchema(wb.collSchema).
-			WithBatchSize(batchSize).
-			WithMetaCache(wb.metaCache).
-			WithMetaWriter(wb.metaWriter).
-			WithArrowSchema(arrowSchema).
-			WithSpace(space).
-			WithFailureCallback(func(err error) {
-				// TODO could change to unsub channel in the future
-				panic(err)
-			})
-		if segmentInfo.State() == commonpb.SegmentState_Flushing {
-			task.WithFlush()
-		}
-		syncTask = task
-	} else {
-		task := syncmgr.NewSyncTask().
-			WithInsertData(insert).
-			WithDeleteData(delta).
-			WithCollectionID(wb.collectionID).
-			WithPartitionID(segmentInfo.PartitionID()).
-			WithChannelName(wb.channelName).
-			WithSegmentID(segmentID).
-			WithStartPosition(startPos).
-			WithTimeRange(tsFrom, tsTo).
-			WithLevel(segmentInfo.Level()).
-			WithCheckpoint(wb.checkpoint).
-			WithSchema(wb.collSchema).
-			WithBatchSize(batchSize).
-			WithMetaCache(wb.metaCache).
-			WithMetaWriter(wb.metaWriter).
-			WithFailureCallback(func(err error) {
-				// TODO could change to unsub channel in the future
-				panic(err)
-			})
-		if segmentInfo.State() == commonpb.SegmentState_Flushing {
-			task.WithFlush()
-		}
-		syncTask = task
+	if segmentInfo.State() == commonpb.SegmentState_Flushing {
+		pack.WithFlush()
 	}
 
 	metrics.DataNodeFlowGraphBufferDataSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), fmt.Sprint(wb.collectionID)).Sub(totalMemSize)
 
-	return syncTask
+	return wb.serializer.EncodeBuffer(ctx, pack)
 }
 
 func (wb *writeBufferBase) Close(drop bool) {
@@ -483,8 +422,9 @@ func (wb *writeBufferBase) Close(drop bool) {
 
 	var futures []*conc.Future[error]
 	for id := range wb.buffers {
-		syncTask := wb.getSyncTask(context.Background(), id)
-		if syncTask == nil {
+		syncTask, err := wb.getSyncTask(context.Background(), id)
+		if err != nil {
+			// TODO
 			continue
 		}
 		switch t := syncTask.(type) {

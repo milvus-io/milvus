@@ -39,10 +39,13 @@ type storageV1Serializer struct {
 	inCodec  *storage.InsertCodec
 	delCodec *storage.DeleteCodec
 
-	metacache metacache.MetaCache
+	metacache  metacache.MetaCache
+	metaWriter MetaWriter
 }
 
-func NewStorageSerializer(collectionID int64, schema *schemapb.CollectionSchema, metacache metacache.MetaCache) (*storageV1Serializer, error) {
+func NewStorageSerializer(metacache metacache.MetaCache, metaWriter MetaWriter) (*storageV1Serializer, error) {
+	collectionID := metacache.Collection()
+	schema := metacache.Schema()
 	pkField := lo.FindOrElse(schema.GetFields(), nil, func(field *schemapb.FieldSchema) bool { return field.GetIsPrimaryKey() })
 	if pkField == nil {
 		return nil, merr.WrapErrServiceInternal("cannot find pk field")
@@ -57,18 +60,20 @@ func NewStorageSerializer(collectionID int64, schema *schemapb.CollectionSchema,
 		schema:       schema,
 		pkField:      pkField,
 
-		inCodec:   inCodec,
-		delCodec:  storage.NewDeleteCodec(),
-		metacache: metacache,
+		inCodec:    inCodec,
+		delCodec:   storage.NewDeleteCodec(),
+		metacache:  metacache,
+		metaWriter: metaWriter,
 	}, nil
 }
 
 func (s *storageV1Serializer) EncodeBuffer(ctx context.Context, pack *SyncPack) (Task, error) {
-	task := &SyncTask{}
+	task := NewSyncTask()
 
 	log := log.Ctx(ctx).With(
 		zap.Int64("segmentID", pack.segmentID),
 		zap.Int64("collectionID", pack.collectionID),
+		zap.String("channel", pack.channelName),
 	)
 
 	if pack.insertData != nil {
@@ -112,7 +117,27 @@ func (s *storageV1Serializer) EncodeBuffer(ctx context.Context, pack *SyncPack) 
 		task.WithDrop()
 	}
 
+	s.setTaskMeta(task, pack)
 	return task, nil
+}
+
+func (s *storageV1Serializer) setTaskMeta(task *SyncTask, pack *SyncPack) {
+	task.collectionID = pack.collectionID
+	task.partitionID = pack.partitionID
+	task.channelName = pack.channelName
+	task.segmentID = pack.segmentID
+	task.batchSize = pack.batchSize
+	task.startPosition = pack.startPosition
+	task.checkpoint = pack.checkpoint
+	task.level = pack.level
+	task.tsFrom = pack.tsFrom
+	task.tsTo = pack.tsTo
+	task.metaWriter = s.metaWriter
+	task.metacache = s.metacache
+	task.WithFailureCallback(func(err error) {
+		// TODO could change to unsub channel in the future
+		panic(err)
+	})
 }
 
 func (s *storageV1Serializer) serializeBinlog(ctx context.Context, pack *SyncPack) (map[int64]*storage.Blob, error) {

@@ -20,6 +20,7 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -33,6 +34,8 @@ type Serializer interface {
 
 // SyncPack is the struct contains buffer sync data.
 type SyncPack struct {
+	metacache  metacache.MetaCache
+	metawriter MetaWriter
 	// data
 	insertData *storage.InsertData
 	deltaData  *storage.DeleteData

@@ -1,12 +1,26 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package syncmgr
 
 import (
 	"context"
 	"fmt"
 	"path"
-	"strconv"
 
-	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -15,7 +29,6 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -32,15 +45,13 @@ type SyncTask struct {
 	chunkManager storage.ChunkManager
 	allocator    allocator.Interface
 
-	insertData *storage.InsertData
-	deleteData *storage.DeleteData
-
 	segment       *metacache.SegmentInfo
 	collectionID  int64
 	partitionID   int64
 	segmentID     int64
 	channelName   string
 	schema        *schemapb.CollectionSchema
+	pkField       *schemapb.FieldSchema
 	startPosition *msgpb.MsgPosition
 	checkpoint    *msgpb.MsgPosition
 	// batchSize is the row number of this sync task,
@@ -61,10 +72,12 @@ type SyncTask struct {
 	statsBinlogs  map[int64]*datapb.FieldBinlog // map[int64]*datapb.Binlog
 	deltaBinlog   *datapb.FieldBinlog
 
-	binlogBlobs     map[int64]*storage.Blob
+	binlogBlobs     map[int64]*storage.Blob // fieldID => blob
+	binlogMemsize   map[int64]int64         // memory size
 	batchStatsBlob  *storage.Blob
 	mergedStatsBlob *storage.Blob
 	deltaBlob       *storage.Blob
+	deltaRowCount   int64
 
 	segmentData map[string][]byte
 
@@ -95,14 +108,18 @@ func (t *SyncTask) handleError(err error, metricSegLevel string) {
 	}
 }
 
-func (t *SyncTask) Run() error {
+func (t *SyncTask) Run() (err error) {
 	t.tr = timerecord.NewTimeRecorder("syncTask")
 	var metricSegLevel string = t.level.String()
 
 	log := t.getLogger()
-	var err error
-	var has bool
+	defer func() {
+		if err != nil {
+			t.handleError(err)
+		}
+	}()
 
+	var has bool
 	t.segment, has = t.metacache.GetSegmentByID(t.segmentID)
 	if !has {
 		log.Warn("failed to sync data, segment not found in metacache")
@@ -123,17 +140,25 @@ func (t *SyncTask) Run() error {
 		t.segmentID = t.segment.CompactTo()
 	}
 
-	err = t.serializeInsertData()
+	err = t.processInsertBlobs()
 	if err != nil {
-		log.Warn("failed to serialize insert data", zap.Error(err))
-		t.handleError(err, metricSegLevel)
+		log.Warn("failed to process insert blobs", zap.Error(err))
 		return err
 	}
 
-	err = t.serializeDeleteData()
+	err = t.processStatsBlob()
+	if err != nil {
+		log.Warn("failed to serialize insert data", zap.Error(err))
+		t.handleError(err, metricSegLevel)
+		log.Warn("failed to process stats blobs", zap.Error(err))
+		return err
+	}
+
+	err = t.processDeltaBlob()
 	if err != nil {
 		log.Warn("failed to serialize delete data", zap.Error(err))
 		t.handleError(err, metricSegLevel)
+		log.Warn("failed to process delta blobs", zap.Error(err))
 		return err
 	}
 
@@ -185,86 +210,18 @@ func (t *SyncTask) Run() error {
 	return nil
 }
 
-func (t *SyncTask) serializeInsertData() error {
-	err := t.serializeBinlog()
-	if err != nil {
-		return err
-	}
-
-	err = t.serializePkStatsLog()
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (t *SyncTask) serializeDeleteData() error {
-	if t.deleteData == nil {
+func (t *SyncTask) processInsertBlobs() error {
+	if len(t.binlogBlobs) == 0 {
 		return nil
 	}
 
-	delCodec := storage.NewDeleteCodec()
-	blob, err := delCodec.Serialize(t.collectionID, t.partitionID, t.segmentID, t.deleteData)
+	logidx, _, err := t.allocator.Alloc(uint32(len(t.binlogBlobs)))
 	if err != nil {
 		return err
 	}
 
-	logID, err := t.allocator.AllocOne()
-	if err != nil {
-		log.Error("failed to alloc ID", zap.Error(err))
-		return err
-	}
-
-	value := blob.GetValue()
-	data := &datapb.Binlog{}
-
-	blobKey := metautil.JoinIDPath(t.collectionID, t.partitionID, t.segmentID, logID)
-	blobPath := path.Join(t.chunkManager.RootPath(), common.SegmentDeltaLogPath, blobKey)
-
-	t.segmentData[blobPath] = value
-	data.LogSize = int64(len(blob.Value))
-	data.LogPath = blobPath
-	data.TimestampFrom = t.tsFrom
-	data.TimestampTo = t.tsTo
-	data.EntriesNum = t.deleteData.RowCount
-	t.appendDeltalog(data)
-
-	return nil
-}
-
-func (t *SyncTask) serializeBinlog() error {
-	if t.insertData == nil {
-		return nil
-	}
-
-	// get memory size of buffer data
-	memSize := make(map[int64]int)
-	for fieldID, fieldData := range t.insertData.Data {
-		memSize[fieldID] = fieldData.GetMemorySize()
-	}
-
-	inCodec := t.getInCodec()
-
-	blobs, err := inCodec.Serialize(t.partitionID, t.segmentID, t.insertData)
-	if err != nil {
-		return err
-	}
-
-	logidx, _, err := t.allocator.Alloc(uint32(len(blobs)))
-	if err != nil {
-		return err
-	}
-
-	for _, blob := range blobs {
-		fieldID, err := strconv.ParseInt(blob.GetKey(), 10, 64)
-		if err != nil {
-			log.Error("Flush failed ... cannot parse string to fieldID ..", zap.Error(err))
-			return err
-		}
-
+	for fieldID, blob := range t.binlogBlobs {
 		k := metautil.JoinIDPath(t.collectionID, t.partitionID, t.segmentID, fieldID, logidx)
-		// [rootPath]/[insert_log]/key
 		key := path.Join(t.chunkManager.RootPath(), common.SegmentInsertLogPath, k)
 		t.segmentData[key] = blob.GetValue()
 		t.appendBinlog(fieldID, &datapb.Binlog{
@@ -272,65 +229,50 @@ func (t *SyncTask) serializeBinlog() error {
 			TimestampFrom: t.tsFrom,
 			TimestampTo:   t.tsTo,
 			LogPath:       key,
-			LogSize:       int64(memSize[fieldID]),
+			LogSize:       int64(t.binlogMemsize[fieldID]),
 		})
-
-		logidx += 1
+		logidx++
 	}
 	return nil
 }
 
-func (t *SyncTask) convertInsertData2PkStats(pkFieldID int64, dataType schemapb.DataType) (*storage.PrimaryKeyStats, int64) {
-	pkFieldData := t.insertData.Data[pkFieldID]
-
-	rowNum := int64(pkFieldData.RowNum())
-
-	stats, err := storage.NewPrimaryKeyStats(pkFieldID, int64(dataType), rowNum)
-	if err != nil {
-		return nil, 0
+func (t *SyncTask) processStatsBlob() error {
+	if t.batchStatsBlob != nil {
+		logidx, err := t.allocator.AllocOne()
+		if err != nil {
+			return err
+		}
+		t.convertBlob2StatsBinlog(t.batchStatsBlob, t.pkField.GetFieldID(), logidx, t.batchSize)
 	}
-	stats.UpdateByMsgs(pkFieldData)
-	return stats, rowNum
-}
-
-func (t *SyncTask) serializeSinglePkStats(fieldID int64, stats *storage.PrimaryKeyStats, rowNum int64) error {
-	blob, err := t.getInCodec().SerializePkStats(stats, rowNum)
-	if err != nil {
-		return err
+	if t.mergedStatsBlob != nil {
+		totalRowNum := t.segment.NumOfRows()
+		t.convertBlob2StatsBinlog(t.mergedStatsBlob, t.pkField.GetFieldID(), int64(storage.CompoundStatsType), totalRowNum)
 	}
-
-	logidx, err := t.allocator.AllocOne()
-	if err != nil {
-		return err
-	}
-	t.convertBlob2StatsBinlog(blob, fieldID, logidx, rowNum)
-
 	return nil
 }
 
-func (t *SyncTask) serializeMergedPkStats(fieldID int64, pkType schemapb.DataType) error {
-	segments := t.metacache.GetSegmentsBy(metacache.WithSegmentIDs(t.segmentID))
-	var statsList []*storage.PrimaryKeyStats
-	var totalRowNum int64
-	for _, segment := range segments {
-		totalRowNum += segment.NumOfRows()
-		statsList = append(statsList, lo.Map(segment.GetHistory(), func(pks *storage.PkStatistics, _ int) *storage.PrimaryKeyStats {
-			return &storage.PrimaryKeyStats{
-				FieldID: fieldID,
-				MaxPk:   pks.MaxPK,
-				MinPk:   pks.MinPK,
-				BF:      pks.PkFilter,
-				PkType:  int64(pkType),
-			}
-		})...)
-	}
+func (t *SyncTask) processDeltaBlob() error {
+	if t.deltaBlob != nil {
+		logID, err := t.allocator.AllocOne()
+		if err != nil {
+			log.Error("failed to alloc ID", zap.Error(err))
+			return err
+		}
 
-	blob, err := t.getInCodec().SerializePkStatsList(statsList, totalRowNum)
-	if err != nil {
-		return err
-	}
-	t.convertBlob2StatsBinlog(blob, fieldID, int64(storage.CompoundStatsType), totalRowNum)
+		value := t.deltaBlob.GetValue()
+		data := &datapb.Binlog{}
 
+		blobKey := metautil.JoinIDPath(t.collectionID, t.partitionID, t.segmentID, logID)
+		blobPath := path.Join(t.chunkManager.RootPath(), common.SegmentDeltaLogPath, blobKey)
+
+		t.segmentData[blobPath] = value
+		data.LogSize = int64(len(t.deltaBlob.Value))
+		data.LogPath = blobPath
+		data.TimestampFrom = t.tsFrom
+		data.TimestampTo = t.tsTo
+		data.EntriesNum = t.deltaRowCount
+		t.appendDeltalog(data)
+	}
 	return nil
 }
 
@@ -347,30 +289,6 @@ func (t *SyncTask) convertBlob2StatsBinlog(blob *storage.Blob, fieldID, logID in
 		LogPath:       key,
 		LogSize:       int64(len(value)),
 	})
-}
-
-func (t *SyncTask) serializePkStatsLog() error {
-	pkField := lo.FindOrElse(t.schema.GetFields(), nil, func(field *schemapb.FieldSchema) bool { return field.GetIsPrimaryKey() })
-	if pkField == nil {
-		return merr.WrapErrServiceInternal("cannot find pk field")
-	}
-	fieldID := pkField.GetFieldID()
-	if t.insertData != nil {
-		stats, rowNum := t.convertInsertData2PkStats(fieldID, pkField.GetDataType())
-		if stats != nil && rowNum > 0 {
-			err := t.serializeSinglePkStats(fieldID, stats, rowNum)
-			if err != nil {
-				return err
-			}
-		}
-	}
-
-	// skip statslog for empty segment
-	// DO NOT use level check here since Level zero segment may contain insert data in the future
-	if t.isFlush && t.segment.NumOfRows() > 0 {
-		return t.serializeMergedPkStats(fieldID, pkField.GetDataType())
-	}
-	return nil
 }
 
 func (t *SyncTask) appendBinlog(fieldID int64, binlog *datapb.Binlog) {
@@ -410,15 +328,6 @@ func (t *SyncTask) writeLogs() error {
 // writeMeta updates segments via meta writer in option.
 func (t *SyncTask) writeMeta() error {
 	return t.metaWriter.UpdateSync(t)
-}
-
-func (t *SyncTask) getInCodec() *storage.InsertCodec {
-	meta := &etcdpb.CollectionMeta{
-		Schema: t.schema,
-		ID:     t.collectionID,
-	}
-
-	return storage.NewInsertCodecWithSchema(meta)
 }
 
 func (t *SyncTask) SegmentID() int64 {

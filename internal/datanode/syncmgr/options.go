@@ -9,6 +9,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/samber/lo"
 )
 
 func NewSyncTask() *SyncTask {
@@ -18,6 +19,7 @@ func NewSyncTask() *SyncTask {
 		statsBinlogs:  make(map[int64]*datapb.FieldBinlog),
 		deltaBinlog:   &datapb.FieldBinlog{},
 		segmentData:   make(map[string][]byte),
+		binlogBlobs:   make(map[int64]*storage.Blob),
 	}
 }
 
@@ -28,16 +30,6 @@ func (t *SyncTask) WithChunkManager(cm storage.ChunkManager) *SyncTask {
 
 func (t *SyncTask) WithAllocator(allocator allocator.Interface) *SyncTask {
 	t.allocator = allocator
-	return t
-}
-
-func (t *SyncTask) WithInsertData(insertData *storage.InsertData) *SyncTask {
-	t.insertData = insertData
-	return t
-}
-
-func (t *SyncTask) WithDeleteData(deleteData *storage.DeleteData) *SyncTask {
-	t.deleteData = deleteData
 	return t
 }
 
@@ -73,6 +65,9 @@ func (t *SyncTask) WithChannelName(chanName string) *SyncTask {
 
 func (t *SyncTask) WithSchema(schema *schemapb.CollectionSchema) *SyncTask {
 	t.schema = schema
+	t.pkField = lo.FindOrElse(schema.GetFields(), nil, func(field *schemapb.FieldSchema) bool {
+		return field.GetIsPrimaryKey()
+	})
 	return t
 }
 

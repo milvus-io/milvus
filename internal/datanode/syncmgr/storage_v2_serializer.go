@@ -18,6 +18,7 @@ package syncmgr
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/apache/arrow/go/v12/arrow"
 	"github.com/apache/arrow/go/v12/arrow/array"
@@ -26,43 +27,55 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	milvus_storage "github.com/milvus-io/milvus-storage/go/storage"
+	"github.com/milvus-io/milvus-storage/go/storage/options"
+	"github.com/milvus-io/milvus-storage/go/storage/schema"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
+	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/storage"
+	iTypeutil "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type storageV2Serializer struct {
 	*storageV1Serializer
 
-	arrowSchema *arrow.Schema
-	inCodec     *storage.InsertCodec
-	metacache   metacache.MetaCache
+	arrowSchema    *arrow.Schema
+	storageV2Cache *metacache.StorageV2Cache
+	inCodec        *storage.InsertCodec
+	metacache      metacache.MetaCache
 }
 
-func NewStorageV2Serializer(collectionID int64,
-	schema *schemapb.CollectionSchema,
-	arrowSchema *arrow.Schema,
-	space *milvus_storage.Space,
-	storageVersion int64,
+func NewStorageV2Serializer(
+	storageV2Cache *metacache.StorageV2Cache,
 	metacache metacache.MetaCache,
+	metaWriter MetaWriter,
 ) (*storageV2Serializer, error) {
-	v1Serializer, err := NewStorageSerializer(collectionID, schema, metacache)
+	v1Serializer, err := NewStorageSerializer(metacache, metaWriter)
 	if err != nil {
 		return nil, err
 	}
 
 	return &storageV2Serializer{
 		storageV1Serializer: v1Serializer,
-		arrowSchema:         arrowSchema,
+		storageV2Cache:      storageV2Cache,
+		arrowSchema:         storageV2Cache.ArrowSchema(),
 		metacache:           metacache,
 	}, nil
 }
 
 func (s *storageV2Serializer) EncodeBuffer(ctx context.Context, pack *SyncPack) (Task, error) {
-	task := &SyncTaskV2{}
+	task := NewSyncTaskV2()
 
+	space, err := s.storageV2Cache.GetOrCreateSpace(pack.segmentID, SpaceCreatorFunc(pack.segmentID, s.schema, s.arrowSchema))
+	if err != nil {
+		log.Warn("failed to get or create space", zap.Error(err))
+		return nil, err
+	}
+
+	task.space = space
 	if pack.insertData != nil {
 		insertReader, err := s.serializeInsertData(pack)
 		if err != nil {
@@ -102,7 +115,31 @@ func (s *storageV2Serializer) EncodeBuffer(ctx context.Context, pack *SyncPack) 
 		task.deleteReader = deltaReader
 	}
 
+	if pack.isDrop {
+		task.WithDrop()
+	}
+
+	s.setTaskMeta(task, pack)
 	return task, nil
+}
+
+func (s *storageV2Serializer) setTaskMeta(task *SyncTaskV2, pack *SyncPack) {
+	task.collectionID = pack.collectionID
+	task.partitionID = pack.partitionID
+	task.channelName = pack.channelName
+	task.segmentID = pack.segmentID
+	task.batchSize = pack.batchSize
+	task.startPosition = pack.startPosition
+	task.checkpoint = pack.checkpoint
+	task.level = pack.level
+	task.tsFrom = pack.tsFrom
+	task.tsTo = pack.tsTo
+	task.metaWriter = s.metaWriter
+	task.metacache = s.metacache
+	task.WithFailureCallback(func(err error) {
+		// TODO could change to unsub channel in the future
+		panic(err)
+	})
 }
 
 func (s *storageV2Serializer) serializeInsertData(pack *SyncPack) (array.RecordReader, error) {
@@ -134,7 +171,7 @@ func (s *storageV2Serializer) serializeDeltaData(pack *SyncPack) (array.RecordRe
 	}
 	fields = append(fields, s.pkField, tsField)
 
-	deltaArrowSchema, err := metacache.ConvertToArrowSchema(fields)
+	deltaArrowSchema, err := iTypeutil.ConvertToArrowSchema(fields)
 	if err != nil {
 		return nil, err
 	}
@@ -157,12 +194,13 @@ func (s *storageV2Serializer) serializeDeltaData(pack *SyncPack) (array.RecordRe
 		return nil, merr.WrapErrParameterInvalidMsg("unexpected pk type %v", s.pkField.GetDataType())
 	}
 
-	rec := builder.NewRecord()
-	defer rec.Release()
-
 	for _, ts := range pack.deltaData.Tss {
 		builder.Field(1).(*array.Int64Builder).Append(int64(ts))
 	}
+
+	rec := builder.NewRecord()
+	defer rec.Release()
+
 	reader, err := array.NewRecordReader(deltaArrowSchema, []arrow.Record{rec})
 	if err != nil {
 		return nil, err
@@ -170,4 +208,39 @@ func (s *storageV2Serializer) serializeDeltaData(pack *SyncPack) (array.RecordRe
 	reader.Retain()
 
 	return reader, nil
+}
+
+func SpaceCreatorFunc(segmentID int64, collSchema *schemapb.CollectionSchema, arrowSchema *arrow.Schema) func() (*milvus_storage.Space, error) {
+	return func() (*milvus_storage.Space, error) {
+		url := fmt.Sprintf("%s://%s:%s@%s/%d?endpoint_override=%s",
+			params.Params.CommonCfg.StorageScheme.GetValue(),
+			params.Params.MinioCfg.AccessKeyID.GetValue(),
+			params.Params.MinioCfg.SecretAccessKey.GetValue(),
+			params.Params.MinioCfg.BucketName.GetValue(),
+			segmentID,
+			params.Params.MinioCfg.Address.GetValue())
+
+		pkSchema, err := typeutil.GetPrimaryFieldSchema(collSchema)
+		if err != nil {
+			return nil, err
+		}
+		vecSchema, err := typeutil.GetVectorFieldSchema(collSchema)
+		if err != nil {
+			return nil, err
+		}
+		space, err := milvus_storage.Open(
+			url,
+			options.NewSpaceOptionBuilder().
+				SetSchema(schema.NewSchema(
+					arrowSchema,
+					&schema.SchemaOptions{
+						PrimaryColumn: pkSchema.Name,
+						VectorColumn:  vecSchema.Name,
+						VersionColumn: common.TimeStampFieldName,
+					},
+				)).
+				Build(),
+		)
+		return space, err
+	}
 }

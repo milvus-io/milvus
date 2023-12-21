@@ -105,7 +105,7 @@ func UpdateBufferedRows(bufferedRows int64) SegmentAction {
 
 func RollStats(newStats ...*storage.PrimaryKeyStats) SegmentAction {
 	return func(info *SegmentInfo) {
-		info.bfs.Roll()
+		info.bfs.Roll(newStats...)
 	}
 }
 
