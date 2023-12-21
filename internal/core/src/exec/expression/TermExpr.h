@@ -84,6 +84,10 @@ class PhyTermFilterExpr : public SegmentExpr {
     void
     InitPkCacheOffset();
 
+    template <typename T>
+    bool
+    CanSkipSegment();
+
     VectorPtr
     ExecPkTermImpl();
 
