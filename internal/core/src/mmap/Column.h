@@ -320,7 +320,7 @@ class VariableColumn : public ColumnBase {
             auto data = std::move(load_buf_.front());
             load_buf_.pop();
 
-            std::copy_n(data.data(), data.lenght(), data_ + size_);
+            std::copy_n(data.data(), data.length(), data_ + size_);
             size_ += data.length();
         }
 
