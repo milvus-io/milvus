@@ -117,11 +117,35 @@ PhyTermFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     }
 }
 
+template <typename T>
+bool
+PhyTermFilterExpr::CanSkipSegment() {
+    const auto& skip_index = segment_->GetSkipIndex();
+    T min, max;
+    for (auto i = 0; i < expr_->vals_.size(); i++) {
+        auto val = GetValueFromProto<T>(expr_->vals_[i]);
+        max = i == 0 ? val : std::max(val, max);
+        min = i == 0 ? val : std::min(val, min);
+    }
+    // using skip index to help skipping this segment
+    if (segment_->type() == SegmentType::Sealed &&
+        skip_index.CanSkipBinaryRange<T>(field_id_, 0, min, max, true, true)) {
+        cached_bits_.resize(num_rows_, false);
+        cached_offsets_ = std::make_shared<ColumnVector>(DataType::INT64, 0);
+        cached_offsets_inited_ = true;
+        return true;
+    }
+    return false;
+}
+
 void
 PhyTermFilterExpr::InitPkCacheOffset() {
     auto id_array = std::make_unique<IdArray>();
     switch (pk_type_) {
         case DataType::INT64: {
+            if (CanSkipSegment<int64_t>()) {
+                return;
+            }
             auto dst_ids = id_array->mutable_int_id();
             for (const auto& id : expr_->vals_) {
                 dst_ids->add_data(GetValueFromProto<int64_t>(id));
@@ -129,6 +153,9 @@ PhyTermFilterExpr::InitPkCacheOffset() {
             break;
         }
         case DataType::VARCHAR: {
+            if (CanSkipSegment<std::string>()) {
+                return;
+            }
             auto dst_ids = id_array->mutable_str_id();
             for (const auto& id : expr_->vals_) {
                 dst_ids->add_data(GetValueFromProto<std::string>(id));
@@ -142,7 +169,7 @@ PhyTermFilterExpr::InitPkCacheOffset() {
 
     auto [uids, seg_offsets] =
         segment_->search_ids(*id_array, query_timestamp_);
-    cached_bits_.resize(num_rows_);
+    cached_bits_.resize(num_rows_, false);
     cached_offsets_ =
         std::make_shared<ColumnVector>(DataType::INT64, seg_offsets.size());
     int64_t* cached_offsets_ptr = (int64_t*)cached_offsets_->GetRawData();
@@ -164,7 +191,6 @@ PhyTermFilterExpr::ExecPkTermImpl() {
     auto real_batch_size = current_data_chunk_pos_ + batch_size_ >= num_rows_
                                ? num_rows_ - current_data_chunk_pos_
                                : batch_size_;
-    current_data_chunk_pos_ += real_batch_size;
 
     if (real_batch_size == 0) {
         return nullptr;
@@ -175,7 +201,7 @@ PhyTermFilterExpr::ExecPkTermImpl() {
     bool* res = (bool*)res_vec->GetRawData();
 
     for (size_t i = 0; i < real_batch_size; ++i) {
-        res[i] = cached_bits_[i];
+        res[i] = cached_bits_[current_data_chunk_pos_++];
     }
 
     std::vector<VectorPtr> vecs{res_vec, cached_offsets_};

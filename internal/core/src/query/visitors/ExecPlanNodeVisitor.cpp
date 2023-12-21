@@ -111,6 +111,13 @@ ExecPlanNodeVisitor::ExecuteExprNodeInternal(
                 // offset cache only get once because not support iterator batch
                 auto cache_offset_vec =
                     std::dynamic_pointer_cast<ColumnVector>(row->child(1));
+                // If get empty cached offsets. mean no record hits in this segment
+                // no need to get next batch.
+                if (cache_offset_vec->size() == 0) {
+                    auto active_count = segment->get_active_count(timestamp_);
+                    bitset_holder.resize(active_count);
+                    break;
+                }
                 auto cache_offset_vec_ptr =
                     (int64_t*)(cache_offset_vec->GetRawData());
                 for (size_t i = 0; i < cache_offset_vec->size(); ++i) {
