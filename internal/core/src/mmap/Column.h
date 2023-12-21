@@ -61,9 +61,9 @@ class ColumnBase {
                                         -1,
                                         0));
         AssertInfo(data_ != MAP_FAILED,
-                   "failed to create anon map: {}, map_size={}",
-                   strerror(errno),
-                   cap_size_ + padding_);
+                   fmt::format("failed to create anon map: {}, map_size={}",
+                               strerror(errno),
+                               cap_size_ + padding_));
     }
 
     // mmap mode ctor
@@ -83,8 +83,8 @@ class ColumnBase {
                                         file.Descriptor(),
                                         0));
         AssertInfo(data_ != MAP_FAILED,
-                   "failed to create file-backed map, err: {}",
-                   strerror(errno));
+                   fmt::format("failed to create file-backed map, err: {}",
+                               strerror(errno)));
         madvise(data_, cap_size_ + padding_, MADV_WILLNEED);
     }
 
@@ -106,16 +106,16 @@ class ColumnBase {
                                         file.Descriptor(),
                                         0));
         AssertInfo(data_ != MAP_FAILED,
-                   "failed to create file-backed map, err: {}",
-                   strerror(errno));
+                   fmt::format("failed to create file-backed map, err: {}",
+                               strerror(errno)));
     }
 
     virtual ~ColumnBase() {
         if (data_ != nullptr) {
             if (munmap(data_, cap_size_ + padding_)) {
                 AssertInfo(true,
-                           "failed to unmap variable field, err={}",
-                           strerror(errno));
+                           fmt::format("failed to unmap variable field, err={}",
+                                       strerror(errno)));
             }
         }
     }
@@ -160,7 +160,7 @@ class ColumnBase {
     Span() const = 0;
 
     void
-    AppendBatch(const FieldDataPtr& data) {
+    AppendBatch(const storage::FieldDataPtr& data) {
         size_t required_size = size_ + data->Size();
         if (required_size > cap_size_) {
             Expand(required_size * 2 + padding_);
@@ -202,18 +202,19 @@ class ColumnBase {
                                             0));
 
         AssertInfo(data != MAP_FAILED,
-                   "failed to expand map: {}, new_map_size={}",
-                   strerror(errno),
-                   new_size + padding_);
+                   fmt::format("failed to expand map: {}, new_map_size={}",
+                               strerror(errno),
+                               new_size + padding_));
 
         if (data_ != nullptr) {
             std::memcpy(data, data_, size_);
             if (munmap(data_, cap_size_ + padding_)) {
                 AssertInfo(
                     false,
-                    "failed to unmap while expanding: {}, old_map_size={}",
-                    strerror(errno),
-                    cap_size_ + padding_);
+                    fmt::format(
+                        "failed to unmap while expanding: {}, old_map_size={}",
+                        strerror(errno),
+                        cap_size_ + padding_));
             }
         }
 
