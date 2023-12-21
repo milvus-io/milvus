@@ -52,7 +52,6 @@ class ColumnBase {
         }
 
         cap_size_ = field_meta.get_sizeof() * reserve;
-        auto data_type = field_meta.get_data_type();
 
         // use anon mapping so we are able to free these memory with munmap only
         data_ = static_cast<char*>(mmap(nullptr,
@@ -62,8 +61,9 @@ class ColumnBase {
                                         -1,
                                         0));
         AssertInfo(data_ != MAP_FAILED,
-                   "failed to create anon map, err: {}",
-                   strerror(errno));
+                   "failed to create anon map: {}, map_size={}",
+                   strerror(errno),
+                   cap_size_ + padding_);
     }
 
     // mmap mode ctor
@@ -174,7 +174,7 @@ class ColumnBase {
     }
 
     // Append one row
-    virtual void
+    void
     Append(const char* data, size_t size) {
         size_t required_size = size_ + size;
         if (required_size > cap_size_) {
@@ -197,15 +197,19 @@ class ColumnBase {
                                             -1,
                                             0));
 
-        AssertInfo(
-            data != MAP_FAILED, "failed to create map: {}", strerror(errno));
+        AssertInfo(data != MAP_FAILED,
+                   "failed to expand map: {}, new_map_size={}",
+                   strerror(errno),
+                   new_size + padding_);
 
         if (data_ != nullptr) {
             std::memcpy(data, data_, size_);
             if (munmap(data_, cap_size_ + padding_)) {
-                AssertInfo(false,
-                           "failed to unmap while expanding, err={}",
-                           strerror(errno));
+                AssertInfo(
+                    false,
+                    "failed to unmap while expanding: {}, old_map_size={}",
+                    strerror(errno),
+                    cap_size_ + padding_);
             }
         }
 
@@ -299,7 +303,7 @@ class VariableColumn : public ColumnBase {
     }
 
     void
-    Append(const char* data, size_t size) override {
+    Append(const char* data, size_t size) {
         indices_.emplace_back(size_);
         size_ += size;
         load_buf_.emplace(data, size);
