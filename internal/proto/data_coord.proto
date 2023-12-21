@@ -321,6 +321,7 @@ message SegmentInfo {
   // so segments with Legacy level shall be treated as L1 segment
   SegmentLevel level = 20;
   int64 storage_version = 21;
+  schema.ClusteringInfo clustering_info = 22;
 }
 
 message SegmentStartPosition {
@@ -344,6 +345,7 @@ message SaveBinlogPathsRequest {
   SegmentLevel seg_level =13;
   int64 partitionID =14; // report partitionID for create L0 segment
   int64 storageVersion = 15;
+  schema.ClusteringInfo clustering_info = 16; // cluster info if have
 }
 
 message CheckPoint {
@@ -603,6 +605,7 @@ message ImportTask {
   repeated string files = 7;                 // file paths to be imported
   repeated common.KeyValuePair infos = 8;    // extra information about the task, bucket, etc.
   string database_name = 16;                 // Database name
+  schema.ClusteringInfo clustering_info = 17;
 }
 
 message ImportTaskState {
@@ -630,6 +633,7 @@ message ImportTaskInfo {
   repeated common.KeyValuePair infos = 14;      // extra information about the task, bucket, etc.
   int64 start_ts = 15;                          // Timestamp when the import task is sent to datanode to execute.
   string database_name = 16;                    // Database name
+  schema.ClusteringInfo clustering_info = 17;
 }
 
 message ImportTaskResponse {

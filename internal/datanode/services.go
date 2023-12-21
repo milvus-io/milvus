@@ -762,7 +762,8 @@ func saveSegmentFunc(node *DataNode, req *datapb.ImportTaskRequest, res *rootcoo
 							SegmentID: segmentID,
 						},
 					},
-					Importing: true,
+					Importing:      true,
+					ClusteringInfo: req.GetImportTask().GetClusteringInfo(),
 				},
 			})
 			// Only retrying when DataCoord is unhealthy or err != nil, otherwise return immediately.
