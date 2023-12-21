@@ -114,8 +114,8 @@ type Server struct {
 	meta             *meta
 	segmentManager   Manager
 	allocator        allocator
-	cluster          *Cluster
-	sessionManager   *SessionManager
+	cluster          Cluster
+	sessionManager   SessionManager
 	channelManager   *ChannelManager
 	rootCoordClient  types.RootCoordClient
 	garbageCollector *garbageCollector
@@ -185,7 +185,7 @@ func WithServerHelper(helper ServerHelper) Option {
 }
 
 // WithCluster returns an `Option` setting Cluster with provided parameter
-func WithCluster(cluster *Cluster) Option {
+func WithCluster(cluster Cluster) Option {
 	return func(svr *Server) {
 		svr.cluster = cluster
 	}
@@ -425,8 +425,8 @@ func (s *Server) initCluster() error {
 	if err != nil {
 		return err
 	}
-	s.sessionManager = NewSessionManager(withSessionCreator(s.dataNodeCreator))
-	s.cluster = NewCluster(s.sessionManager, s.channelManager)
+	s.sessionManager = NewSessionManagerImpl(withSessionCreator(s.dataNodeCreator))
+	s.cluster = NewClusterImpl(s.sessionManager, s.channelManager)
 	return nil
 }
 
@@ -701,7 +701,7 @@ func (s *Server) handleTimetickMessage(ctx context.Context, ttMsg *msgstream.Dat
 		log.RatedWarn(60.0, "time tick lag behind for more than 1 minutes", zap.String("channel", ch), zap.Time("timetick", physical))
 	}
 	// ignore report from a different node
-	if !s.cluster.channelManager.Match(ttMsg.GetBase().GetSourceID(), ch) {
+	if !s.channelManager.Match(ttMsg.GetBase().GetSourceID(), ch) {
 		log.Warn("node is not matched with channel", zap.String("channel", ch), zap.Int64("nodeID", ttMsg.GetBase().GetSourceID()))
 		return nil
 	}

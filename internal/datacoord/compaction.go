@@ -93,7 +93,7 @@ var _ compactionPlanContext = (*compactionPlanHandler)(nil)
 
 type compactionPlanHandler struct {
 	plans            map[int64]*compactionTask // planID -> task
-	sessions         *SessionManager
+	sessions         SessionManager
 	meta             *meta
 	chManager        *ChannelManager
 	mu               sync.RWMutex
@@ -106,7 +106,7 @@ type compactionPlanHandler struct {
 	parallelCh map[int64]chan struct{}
 }
 
-func newCompactionPlanHandler(sessions *SessionManager, cm *ChannelManager, meta *meta,
+func newCompactionPlanHandler(sessions SessionManager, cm *ChannelManager, meta *meta,
 	allocator allocator, flush chan UniqueID,
 ) *compactionPlanHandler {
 	return &compactionPlanHandler{

@@ -434,6 +434,8 @@ generate-mockery-datacoord: getdeps
 	$(INSTALL_PATH)/mockery --name=RWChannelStore --dir=internal/datacoord --filename=mock_channel_store.go --output=internal/datacoord  --structname=MockRWChannelStore --with-expecter --inpackage
 	$(INSTALL_PATH)/mockery --name=IndexEngineVersionManager --dir=internal/datacoord --filename=mock_index_engine_version_manager.go --output=internal/datacoord  --structname=MockVersionManager --with-expecter --inpackage
 	$(INSTALL_PATH)/mockery --name=TriggerManager --dir=internal/datacoord --filename=mock_trigger_manager.go --output=internal/datacoord  --structname=MockTriggerManager --with-expecter --inpackage
+	$(INSTALL_PATH)/mockery --name=Cluster --dir=internal/datacoord --filename=mock_cluster.go --output=internal/datacoord  --structname=MockCluster --with-expecter --inpackage
+	$(INSTALL_PATH)/mockery --name=SessionManager --dir=internal/datacoord --filename=mock_session_manager.go --output=internal/datacoord  --structname=MockSessionManager --with-expecter --inpackage
 	$(INSTALL_PATH)/mockery --name=compactionPlanContext --dir=internal/datacoord --filename=mock_compaction_plan_context.go --output=internal/datacoord  --structname=MockCompactionPlanContext --with-expecter --inpackage
 
 generate-mockery-datanode: getdeps
