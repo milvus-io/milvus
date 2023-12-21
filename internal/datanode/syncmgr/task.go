@@ -132,9 +132,16 @@ func (t *SyncTask) Run() error {
 		return err
 	}
 
-	size := t.deleteData.Size() + int64(t.insertData.GetMemorySize())
-	metrics.DataNodeFlushedSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.AllLabel, metricSegLevel).Add(float64(size))
-	metrics.DataNodeEncodeBufferLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(t.tr.RecordSpan().Milliseconds()))
+	var totalSize float64 = 0
+	if t.deleteData != nil {
+		totalSize += float64(t.deleteData.Size())
+	}
+
+	if t.insertData != nil {
+		totalSize += float64(t.insertData.GetMemorySize())
+	}
+	metrics.DataNodeFlushedSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.AllLabel, metricSegLevel).Add(totalSize)
+	metrics.DataNodeEncodeBufferLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metricSegLevel).Observe(float64(t.tr.RecordSpan().Milliseconds()))
 
 	err = t.writeLogs()
 	if err != nil {
@@ -143,7 +150,7 @@ func (t *SyncTask) Run() error {
 		return err
 	}
 
-	metrics.DataNodeSave2StorageLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(t.tr.RecordSpan().Milliseconds()))
+	metrics.DataNodeSave2StorageLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metricSegLevel).Observe(float64(t.tr.RecordSpan().Milliseconds()))
 
 	if t.metaWriter != nil {
 		err = t.writeMeta()
