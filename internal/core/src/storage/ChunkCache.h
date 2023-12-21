@@ -36,7 +36,7 @@ class ChunkCache {
                                "willneed, dontneed`",
                                read_ahead_policy));
         read_ahead_policy_ = iter->second;
-        LOG_SEGCORE_INFO_ << "Init ChunkCache with prefix: " << path_prefix_
+        LOG_INFO("Init ChunkCache with prefix: {}", path_prefix_)
                           << ", read_ahead_policy: " << read_ahead_policy;
     }
 

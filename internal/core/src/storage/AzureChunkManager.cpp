@@ -58,7 +58,7 @@ LogLevelToConsoleString(Azure::Core::Diagnostics::Logger::Level logLevel) {
 void
 AzureLogger(Azure::Core::Diagnostics::Logger::Level level,
             std::string const& msg) {
-    LOG_SEGCORE_INFO_ << "[AZURE LOG] [" << LogLevelToConsoleString(level)
+    LOG_INFO("[AZURE LOG] [{}", LogLevelToConsoleString)(level)
                       << "] " << msg;
 }
 

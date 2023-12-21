@@ -140,7 +140,6 @@ Task::Next(ContinueFuture* future) {
                "Task has already finished processing.");
 
     if (driver_factories_.empty()) {
-        LOG_SEGCORE_WARNING_ << "create driver...";
         AssertInfo(
             consumer_supplier_ == nullptr,
             "Single-threaded execution doesn't support delivering results to a "
@@ -165,7 +164,6 @@ Task::Next(ContinueFuture* future) {
         CreateDriversLocked(self, kUngroupedGroupId, drivers);
 
         drivers_ = std::move(drivers);
-        LOG_SEGCORE_WARNING_ << "create driver done";
     }
 
     const auto num_drivers = drivers_.size();
@@ -191,9 +189,7 @@ Task::Next(ContinueFuture* future) {
 
             std::shared_ptr<BlockingState> blocking_state;
 
-            LOG_SEGCORE_WARNING_ << "driver fetch next result...";
             auto result = drivers_[i]->Next(blocking_state);
-            LOG_SEGCORE_WARNING_ << "driver fetch next result done";
 
             if (result) {
                 return result;

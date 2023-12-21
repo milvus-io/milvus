@@ -46,7 +46,7 @@ class ThreadPool {
         if (max_threads_size_ > 256) {
             max_threads_size_ = 256;
         }
-        LOG_SEGCORE_INFO_ << "Init thread pool:" << name_
+        LOG_INFO("Init thread pool:{}", name_)
                           << " with min worker num:" << min_threads_size_
                           << " and max worker num:" << max_threads_size_;
         Init();
