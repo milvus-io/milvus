@@ -19,11 +19,11 @@ package datacoord
 import (
 	"context"
 	"fmt"
-	"github.com/cockroachdb/errors"
 	"path"
 	"strconv"
 	"strings"
 
+	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 	"golang.org/x/exp/maps"

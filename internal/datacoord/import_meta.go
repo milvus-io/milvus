@@ -17,10 +17,10 @@
 package datacoord
 
 import (
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 )
 
 type ImportMeta interface {

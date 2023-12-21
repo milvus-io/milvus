@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"github.com/golang/protobuf/proto"
+
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 )
 
@@ -25,7 +26,7 @@ type TaskType int
 
 const (
 	PreImportTaskType TaskType = 0
-	ImportTaskType             = 1
+	ImportTaskType    TaskType = 1
 )
 
 var ImportTaskTypeName = map[TaskType]string{

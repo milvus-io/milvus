@@ -18,13 +18,15 @@ package datacoord
 
 import (
 	"context"
+	"time"
+
+	"github.com/samber/lo"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/samber/lo"
-	"go.uber.org/zap"
-	"time"
 )
 
 func WrapLogFields(task ImportTask, err error) []zap.Field {

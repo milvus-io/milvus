@@ -17,12 +17,14 @@
 package datacoord
 
 import (
+	"testing"
+
 	"github.com/cockroachdb/errors"
-	"github.com/milvus-io/milvus/internal/metastore/mocks"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"testing"
+
+	"github.com/milvus-io/milvus/internal/metastore/mocks"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 )
 
 func TestImportMeta_Restore(t *testing.T) {

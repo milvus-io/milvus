@@ -17,12 +17,14 @@
 package datacoord
 
 import (
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/samber/lo"
-	"go.uber.org/zap"
 	"sync"
 	"time"
+
+	"github.com/samber/lo"
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
 type ImportChecker struct {
@@ -38,7 +40,8 @@ type ImportChecker struct {
 func NewImportChecker(meta *meta,
 	cluster Cluster,
 	alloc allocator,
-	imeta ImportMeta) *ImportChecker {
+	imeta ImportMeta,
+) *ImportChecker {
 	return &ImportChecker{
 		meta:      meta,
 		cluster:   cluster,

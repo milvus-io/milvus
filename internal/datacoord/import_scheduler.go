@@ -17,15 +17,15 @@
 package datacoord
 
 import (
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"go.uber.org/zap"
 	"sync"
 	"time"
 
 	"github.com/samber/lo"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 const (
@@ -47,7 +47,8 @@ func NewImportScheduler(meta *meta,
 	cluster Cluster,
 	alloc allocator,
 	sm *SegmentManager,
-	imeta ImportMeta) *ImportScheduler {
+	imeta ImportMeta,
+) *ImportScheduler {
 	return &ImportScheduler{
 		meta:      meta,
 		cluster:   cluster,
