@@ -106,8 +106,10 @@ type ClientBase[T interface {
 	encryption bool
 	addr       atomic.String
 	// conn                   *grpc.ClientConn
-	grpcClientMtx          sync.RWMutex
-	role                   string
+	grpcClientMtx sync.RWMutex
+	role          string
+	isNode        bool // pre-calculated is node flag
+
 	ClientMaxSendSize      int
 	ClientMaxRecvSize      int
 	CompressionEnabled     bool
@@ -159,6 +161,12 @@ func NewClientBase[T interface {
 // SetRole sets role of client
 func (c *ClientBase[T]) SetRole(role string) {
 	c.role = role
+	if strings.HasPrefix(role, typeutil.DataNodeRole) ||
+		strings.HasPrefix(role, typeutil.IndexNodeRole) ||
+		strings.HasPrefix(role, typeutil.QueryNodeRole) ||
+		strings.HasPrefix(role, typeutil.ProxyRole) {
+		c.isNode = true
+	}
 }
 
 // GetRole returns role of client
@@ -417,8 +425,7 @@ func (c *ClientBase[T]) checkGrpcErr(ctx context.Context, err error) (needRetry,
 }
 
 func (c *ClientBase[T]) checkNodeSessionExist(ctx context.Context) (bool, error) {
-	switch c.GetRole() {
-	case typeutil.DataNodeRole, typeutil.IndexNodeRole, typeutil.QueryNodeRole, typeutil.ProxyRole:
+	if c.isNode {
 		err := c.verifySession(ctx)
 		if errors.Is(err, merr.ErrNodeNotFound) {
 			log.Warn("failed to verify node session", zap.Error(err))

@@ -40,7 +40,7 @@ type limiterMock struct {
 
 func (l *limiterMock) Check(collection int64, rt internalpb.RateType, n int) error {
 	if l.rate == 0 {
-		return merr.ErrServiceForceDeny
+		return merr.ErrServiceQuotaExceeded
 	}
 	if l.limit {
 		return merr.ErrServiceRateLimit
@@ -167,23 +167,23 @@ func TestRateLimitInterceptor(t *testing.T) {
 
 	t.Run("test getFailedResponse", func(t *testing.T) {
 		testGetFailedResponse := func(req interface{}, rt internalpb.RateType, err error, fullMethod string) {
-			rsp := getFailedResponse(req, rt, err, fullMethod)
+			rsp := getFailedResponse(req, err)
 			assert.NotNil(t, rsp)
 		}
 
-		testGetFailedResponse(&milvuspb.DeleteRequest{}, internalpb.RateType_DMLDelete, merr.ErrServiceForceDeny, "delete")
-		testGetFailedResponse(&milvuspb.UpsertRequest{}, internalpb.RateType_DMLUpsert, merr.ErrServiceForceDeny, "upsert")
+		testGetFailedResponse(&milvuspb.DeleteRequest{}, internalpb.RateType_DMLDelete, merr.ErrServiceQuotaExceeded, "delete")
+		testGetFailedResponse(&milvuspb.UpsertRequest{}, internalpb.RateType_DMLUpsert, merr.ErrServiceQuotaExceeded, "upsert")
 		testGetFailedResponse(&milvuspb.ImportRequest{}, internalpb.RateType_DMLBulkLoad, merr.ErrServiceMemoryLimitExceeded, "import")
 		testGetFailedResponse(&milvuspb.SearchRequest{}, internalpb.RateType_DQLSearch, merr.ErrServiceDiskLimitExceeded, "search")
-		testGetFailedResponse(&milvuspb.QueryRequest{}, internalpb.RateType_DQLQuery, merr.ErrServiceForceDeny, "query")
+		testGetFailedResponse(&milvuspb.QueryRequest{}, internalpb.RateType_DQLQuery, merr.ErrServiceQuotaExceeded, "query")
 		testGetFailedResponse(&milvuspb.CreateCollectionRequest{}, internalpb.RateType_DDLCollection, merr.ErrServiceRateLimit, "createCollection")
 		testGetFailedResponse(&milvuspb.FlushRequest{}, internalpb.RateType_DDLFlush, merr.ErrServiceRateLimit, "flush")
 		testGetFailedResponse(&milvuspb.ManualCompactionRequest{}, internalpb.RateType_DDLCompaction, merr.ErrServiceRateLimit, "compaction")
 
 		// test illegal
-		rsp := getFailedResponse(&milvuspb.SearchResults{}, internalpb.RateType_DQLSearch, merr.OldCodeToMerr(commonpb.ErrorCode_UnexpectedError), "method")
+		rsp := getFailedResponse(&milvuspb.SearchResults{}, merr.OldCodeToMerr(commonpb.ErrorCode_UnexpectedError))
 		assert.Nil(t, rsp)
-		rsp = getFailedResponse(nil, internalpb.RateType_DQLSearch, merr.OldCodeToMerr(commonpb.ErrorCode_UnexpectedError), "method")
+		rsp = getFailedResponse(nil, merr.OldCodeToMerr(commonpb.ErrorCode_UnexpectedError))
 		assert.Nil(t, rsp)
 	})
 
