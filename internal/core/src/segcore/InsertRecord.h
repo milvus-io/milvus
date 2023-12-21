@@ -117,8 +117,9 @@ class OffsetOrderedMap : public OffsetMap {
                         bool false_filtered_out) const {
         int64_t hit_num = 0;  // avoid counting the number everytime.
         int64_t cnt = bitset.count();
+        auto size = bitset.size();
         if (!false_filtered_out) {
-            cnt = bitset.size() - bitset.count();
+            cnt = size - bitset.count();
         }
         limit = std::min(limit, cnt);
         std::vector<int64_t> seg_offsets;
@@ -126,6 +127,11 @@ class OffsetOrderedMap : public OffsetMap {
         for (auto it = map_.begin(); hit_num < limit && it != map_.end();
              it++) {
             for (auto seg_offset : it->second) {
+                if (seg_offset >= size) {
+                    // Frequently concurrent insert/query will cause this case.
+                    continue;
+                }
+
                 if (!(bitset[seg_offset] ^ false_filtered_out)) {
                     seg_offsets.push_back(seg_offset);
                     hit_num++;
@@ -221,6 +227,7 @@ class OffsetOrderedArray : public OffsetMap {
                         bool false_filtered_out) const {
         int64_t hit_num = 0;  // avoid counting the number everytime.
         int64_t cnt = bitset.count();
+        auto size = bitset.size();
         if (!false_filtered_out) {
             cnt = bitset.size() - bitset.count();
         }
@@ -229,8 +236,14 @@ class OffsetOrderedArray : public OffsetMap {
         seg_offsets.reserve(limit);
         for (auto it = array_.begin(); hit_num < limit && it != array_.end();
              it++) {
-            if (!(bitset[it->second] ^ false_filtered_out)) {
-                seg_offsets.push_back(it->second);
+            auto seg_offset = it->second;
+            if (seg_offset >= size) {
+                // In fact, this case won't happend on sealed segments.
+                continue;
+            }
+
+            if (!(bitset[seg_offset] ^ false_filtered_out)) {
+                seg_offsets.push_back(seg_offset);
                 hit_num++;
             }
         }
