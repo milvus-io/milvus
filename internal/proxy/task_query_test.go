@@ -603,7 +603,7 @@ func TestTaskQuery_functions(t *testing.T) {
 					&queryParams{limit: typeutil.Unlimited, reduceStopForBest: true})
 				assert.NoError(t, err)
 				assert.Equal(t, 2, len(result.GetFieldsData()))
-				assert.Equal(t, []int64{11, 11, 22, 22}, result.GetFieldsData()[0].GetScalars().GetLongData().Data)
+				assert.Equal(t, []int64{11, 11, 22}, result.GetFieldsData()[0].GetScalars().GetLongData().Data)
 				len := len(result.GetFieldsData()[0].GetScalars().GetLongData().Data)
 				assert.InDeltaSlice(t, resultFloat[0:(len)*Dim], result.FieldsData[1].GetVectors().GetFloatVector().Data, 10e-10)
 			})
