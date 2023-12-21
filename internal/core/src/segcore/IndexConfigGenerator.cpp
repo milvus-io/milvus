@@ -34,38 +34,43 @@ VecIndexConfig::VecIndexConfig(const int64_t max_index_row_cout,
         origin_index_type_,
         index_type_,
         metric_type_);
+}
 
-    int64_t VecIndexConfig::GetBuildThreshold() const noexcept {
-        assert(VecIndexConfig::index_build_ratio.count(index_type_));
-        auto ratio = VecIndexConfig::index_build_ratio.at(index_type_);
-        assert(ratio >= 0.0 && ratio < 1.0);
-        return std::max(int64_t(max_index_row_count_ * ratio),
-                        config_.get_nlist() * 39);
-    }
+int64_t
+VecIndexConfig::GetBuildThreshold() const noexcept {
+    assert(VecIndexConfig::index_build_ratio.count(index_type_));
+    auto ratio = VecIndexConfig::index_build_ratio.at(index_type_);
+    assert(ratio >= 0.0 && ratio < 1.0);
+    return std::max(int64_t(max_index_row_count_ * ratio),
+                    config_.get_nlist() * 39);
+}
 
-    knowhere::IndexType VecIndexConfig::GetIndexType() noexcept {
-        return index_type_;
-    }
+knowhere::IndexType
+VecIndexConfig::GetIndexType() noexcept {
+    return index_type_;
+}
 
-    knowhere::MetricType VecIndexConfig::GetMetricType() noexcept {
-        return metric_type_;
-    }
+knowhere::MetricType
+VecIndexConfig::GetMetricType() noexcept {
+    return metric_type_;
+}
 
-    knowhere::Json VecIndexConfig::GetBuildBaseParams() {
-        return build_params_;
-    }
+knowhere::Json
+VecIndexConfig::GetBuildBaseParams() {
+    return build_params_;
+}
 
-    SearchInfo VecIndexConfig::GetSearchConf(const SearchInfo& searchInfo) {
-        SearchInfo searchParam(searchInfo);
-        searchParam.metric_type_ = metric_type_;
-        searchParam.search_params_ = search_params_;
-        for (auto& key : maintain_params) {
-            if (searchInfo.search_params_.contains(key)) {
-                searchParam.search_params_[key] =
-                    searchInfo.search_params_[key];
-            }
+SearchInfo
+VecIndexConfig::GetSearchConf(const SearchInfo& searchInfo) {
+    SearchInfo searchParam(searchInfo);
+    searchParam.metric_type_ = metric_type_;
+    searchParam.search_params_ = search_params_;
+    for (auto& key : maintain_params) {
+        if (searchInfo.search_params_.contains(key)) {
+            searchParam.search_params_[key] = searchInfo.search_params_[key];
         }
-        return searchParam;
     }
+    return searchParam;
+}
 
 }  // namespace milvus::segcore
