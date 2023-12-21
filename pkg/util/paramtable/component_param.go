@@ -1784,10 +1784,10 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 	p.ChunkRows = ParamItem{
 		Key:          "queryNode.segcore.chunkRows",
 		Version:      "2.0.0",
-		DefaultValue: "1024",
+		DefaultValue: "128",
 		Formatter: func(v string) string {
-			if getAsInt(v) < 1024 {
-				return "1024"
+			if getAsInt(v) < 128 {
+				return "128"
 			}
 			return v
 		},
