@@ -189,6 +189,10 @@ class ColumnBase {
     // only for memory mode, not mmap
     void
     Expand(size_t new_size) {
+        if (new_size == 0) {
+            return;
+        }
+
         auto data = static_cast<char*>(mmap(nullptr,
                                             new_size + padding_,
                                             PROT_READ | PROT_WRITE,
