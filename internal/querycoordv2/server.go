@@ -52,6 +52,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -109,10 +110,11 @@ type Server struct {
 	checkerController *checkers.CheckerController
 
 	// Observers
-	collectionObserver *observers.CollectionObserver
-	targetObserver     *observers.TargetObserver
-	replicaObserver    *observers.ReplicaObserver
-	resourceObserver   *observers.ResourceObserver
+	collectionObserver  *observers.CollectionObserver
+	targetObserver      *observers.TargetObserver
+	replicaObserver     *observers.ReplicaObserver
+	resourceObserver    *observers.ResourceObserver
+	leaderCacheObserver *observers.LeaderCacheObserver
 
 	balancer    balance.Balance
 	balancerMap map[string]balance.Balance
@@ -123,6 +125,11 @@ type Server struct {
 
 	nodeUpEventChan chan int64
 	notifyNodeUp    chan struct{}
+
+	// proxy client manager
+	proxyCreator       proxyutil.ProxyCreator
+	proxyWatcher       proxyutil.ProxyWatcherInterface
+	proxyClientManager proxyutil.ProxyClientManagerInterface
 }
 
 func NewQueryCoord(ctx context.Context) (*Server, error) {
@@ -255,6 +262,16 @@ func (s *Server) initQueryCoord() error {
 		s.nodeMgr,
 	)
 
+	// init proxy client manager
+	s.proxyClientManager = proxyutil.NewProxyClientManager(proxyutil.DefaultProxyCreator)
+	s.proxyWatcher = proxyutil.NewProxyWatcher(
+		s.etcdCli,
+		s.proxyClientManager.AddProxyClients,
+	)
+	s.proxyWatcher.AddSessionFunc(s.proxyClientManager.AddProxyClient)
+	s.proxyWatcher.DelSessionFunc(s.proxyClientManager.DelProxyClient)
+	log.Info("init proxy manager done")
+
 	// Init heartbeat
 	log.Info("init dist controller")
 	s.distController = dist.NewDistController(
@@ -376,6 +393,14 @@ func (s *Server) initObserver() {
 	)
 
 	s.resourceObserver = observers.NewResourceObserver(s.meta)
+
+	s.leaderCacheObserver = observers.NewLeaderCacheObserver(
+		s.meta,
+		s.dist,
+		s.targetMgr,
+		s.nodeMgr,
+		s.proxyClientManager,
+	)
 }
 
 func (s *Server) afterStart() {}
@@ -416,6 +441,10 @@ func (s *Server) startQueryCoord() error {
 	// check whether old node exist, if yes suspend auto balance until all old nodes down
 	s.updateBalanceConfigLoop(s.ctx)
 
+	if err := s.proxyWatcher.WatchProxy(s.ctx); err != nil {
+		log.Warn("querycoord failed to watch proxy", zap.Error(err))
+	}
+
 	// Recover dist, to avoid generate too much task when dist not ready after restart
 	s.distController.SyncAll(s.ctx)
 
@@ -437,6 +466,7 @@ func (s *Server) startServerLoop() {
 	s.targetObserver.Start()
 	s.replicaObserver.Start()
 	s.resourceObserver.Start()
+	s.leaderCacheObserver.Start(s.ctx)
 
 	log.Info("start task scheduler...")
 	s.taskScheduler.Start()
@@ -485,6 +515,9 @@ func (s *Server) Stop() error {
 	}
 	if s.resourceObserver != nil {
 		s.resourceObserver.Stop()
+	}
+	if s.leaderCacheObserver != nil {
+		s.leaderCacheObserver.Stop()
 	}
 
 	if s.distController != nil {

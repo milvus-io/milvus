@@ -422,6 +422,49 @@ func (_c *MockProxyClientManager_InvalidateCredentialCache_Call) RunAndReturn(ru
 	return _c
 }
 
+// InvalidateShardLeaderCache provides a mock function with given fields: ctx, request
+func (_m *MockProxyClientManager) InvalidateShardLeaderCache(ctx context.Context, request *proxypb.InvalidateShardLeaderCacheRequest) error {
+	ret := _m.Called(ctx, request)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *proxypb.InvalidateShardLeaderCacheRequest) error); ok {
+		r0 = rf(ctx, request)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockProxyClientManager_InvalidateShardLeaderCache_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'InvalidateShardLeaderCache'
+type MockProxyClientManager_InvalidateShardLeaderCache_Call struct {
+	*mock.Call
+}
+
+// InvalidateShardLeaderCache is a helper method to define mock.On call
+//   - ctx context.Context
+//   - request *proxypb.InvalidateShardLeaderCacheRequest
+func (_e *MockProxyClientManager_Expecter) InvalidateShardLeaderCache(ctx interface{}, request interface{}) *MockProxyClientManager_InvalidateShardLeaderCache_Call {
+	return &MockProxyClientManager_InvalidateShardLeaderCache_Call{Call: _e.mock.On("InvalidateShardLeaderCache", ctx, request)}
+}
+
+func (_c *MockProxyClientManager_InvalidateShardLeaderCache_Call) Run(run func(ctx context.Context, request *proxypb.InvalidateShardLeaderCacheRequest)) *MockProxyClientManager_InvalidateShardLeaderCache_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*proxypb.InvalidateShardLeaderCacheRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxyClientManager_InvalidateShardLeaderCache_Call) Return(_a0 error) *MockProxyClientManager_InvalidateShardLeaderCache_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockProxyClientManager_InvalidateShardLeaderCache_Call) RunAndReturn(run func(context.Context, *proxypb.InvalidateShardLeaderCacheRequest) error) *MockProxyClientManager_InvalidateShardLeaderCache_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // RefreshPolicyInfoCache provides a mock function with given fields: ctx, req
 func (_m *MockProxyClientManager) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.RefreshPolicyInfoCacheRequest) error {
 	ret := _m.Called(ctx, req)

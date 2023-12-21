@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package checkers
+package utils
 
 import (
 	"testing"
@@ -45,7 +45,7 @@ func (suite *UtilTestSuite) setNodeAvailable(nodes ...int64) {
 	}
 }
 
-func (suite *UtilTestSuite) TestCheckLeaderAvaliable() {
+func (suite *UtilTestSuite) TestCheckLeaderAvailable() {
 	leadview := &meta.LeaderView{
 		ID:       1,
 		Channel:  "test",
@@ -53,7 +53,7 @@ func (suite *UtilTestSuite) TestCheckLeaderAvaliable() {
 	}
 
 	suite.setNodeAvailable(1, 2)
-	err := CheckLeaderAvaliable(suite.nodeMgr, leadview, map[int64]*datapb.SegmentInfo{
+	err := CheckLeaderAvailable(suite.nodeMgr, leadview, map[int64]*datapb.SegmentInfo{
 		2: {
 			ID:            2,
 			InsertChannel: "test",
@@ -62,7 +62,7 @@ func (suite *UtilTestSuite) TestCheckLeaderAvaliable() {
 	suite.NoError(err)
 }
 
-func (suite *UtilTestSuite) TestCheckLeaderAvaliableFailed() {
+func (suite *UtilTestSuite) TestCheckLeaderAvailableFailed() {
 	suite.Run("leader not available", func() {
 		leadview := &meta.LeaderView{
 			ID:       1,
@@ -71,7 +71,7 @@ func (suite *UtilTestSuite) TestCheckLeaderAvaliableFailed() {
 		}
 		// leader nodeID=1 not available
 		suite.setNodeAvailable(2)
-		err := CheckLeaderAvaliable(suite.nodeMgr, leadview, map[int64]*datapb.SegmentInfo{
+		err := CheckLeaderAvailable(suite.nodeMgr, leadview, map[int64]*datapb.SegmentInfo{
 			2: {
 				ID:            2,
 				InsertChannel: "test",
@@ -89,7 +89,7 @@ func (suite *UtilTestSuite) TestCheckLeaderAvaliableFailed() {
 		}
 		// leader nodeID=2 not available
 		suite.setNodeAvailable(1)
-		err := CheckLeaderAvaliable(suite.nodeMgr, leadview, map[int64]*datapb.SegmentInfo{
+		err := CheckLeaderAvailable(suite.nodeMgr, leadview, map[int64]*datapb.SegmentInfo{
 			2: {
 				ID:            2,
 				InsertChannel: "test",
@@ -106,7 +106,7 @@ func (suite *UtilTestSuite) TestCheckLeaderAvaliableFailed() {
 			Segments: map[int64]*querypb.SegmentDist{2: {NodeID: 2}},
 		}
 		suite.setNodeAvailable(1, 2)
-		err := CheckLeaderAvaliable(suite.nodeMgr, leadview, map[int64]*datapb.SegmentInfo{
+		err := CheckLeaderAvailable(suite.nodeMgr, leadview, map[int64]*datapb.SegmentInfo{
 			// target segmentID=1 not in leadView
 			1: {
 				ID:            1,

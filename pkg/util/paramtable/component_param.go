@@ -1435,6 +1435,8 @@ type queryCoordConfig struct {
 	CheckAutoBalanceConfigInterval ParamItem `refreshable:"false"`
 	CheckNodeSessionInterval       ParamItem `refreshable:"false"`
 	GracefulStopTimeout            ParamItem `refreshable:"true"`
+
+	ShardLeaderCacheInterval ParamItem `refreshable:"true"`
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -1902,6 +1904,13 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.GracefulStopTimeout.Init(base.mgr)
+	p.ShardLeaderCacheInterval = ParamItem{
+		Key:          "proxy.shardLeaderCacheInterval",
+		Version:      "2.3.6",
+		DefaultValue: "3",
+		Doc:          "time interval to update shard leader cache, in seconds",
+	}
+	p.ShardLeaderCacheInterval.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

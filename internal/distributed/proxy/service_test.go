@@ -229,6 +229,12 @@ func Test_NewServer(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("InvalidateShardLeaderCache", func(t *testing.T) {
+		mockProxy.EXPECT().InvalidateShardLeaderCache(mock.Anything, mock.Anything).Return(nil, nil)
+		_, err := server.InvalidateShardLeaderCache(ctx, nil)
+		assert.NoError(t, err)
+	})
+
 	t.Run("CreateCollection", func(t *testing.T) {
 		mockProxy.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(nil, nil)
 		_, err := server.CreateCollection(ctx, nil)

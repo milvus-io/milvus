@@ -1207,3 +1207,7 @@ func (s *Server) AllocTimestamp(ctx context.Context, req *milvuspb.AllocTimestam
 func (s *Server) ReplicateMessage(ctx context.Context, req *milvuspb.ReplicateMessageRequest) (*milvuspb.ReplicateMessageResponse, error) {
 	return s.proxy.ReplicateMessage(ctx, req)
 }
+
+func (s *Server) InvalidateShardLeaderCache(ctx context.Context, req *proxypb.InvalidateShardLeaderCacheRequest) (*commonpb.Status, error) {
+	return s.proxy.InvalidateShardLeaderCache(ctx, req)
+}
