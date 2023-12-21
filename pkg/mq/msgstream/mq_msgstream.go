@@ -28,6 +28,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
+	uatomic "go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -43,8 +44,8 @@ import (
 )
 
 var (
-	_           MsgStream = (*mqMsgStream)(nil)
-	streamCount atomic.Int64
+	_             MsgStream = (*mqMsgStream)(nil)
+	streamCounter uatomic.Int64
 )
 
 type mqMsgStream struct {
@@ -102,7 +103,7 @@ func NewMqMsgStream(ctx context.Context,
 	}
 	ctxLog := log.Ctx(ctx)
 	stream.enableProduce.Store(paramtable.Get().CommonCfg.TTMsgEnabled.GetAsBool())
-	stream.configEvent = config.NewHandler("enable send tt msg "+fmt.Sprint(streamCount.Add(1)), func(event *config.Event) {
+	stream.configEvent = config.NewHandler("enable send tt msg "+fmt.Sprint(streamCounter.Inc()), func(event *config.Event) {
 		value, err := strconv.ParseBool(event.Value)
 		if err != nil {
 			ctxLog.Warn("Failed to parse bool value", zap.String("v", event.Value), zap.Error(err))
