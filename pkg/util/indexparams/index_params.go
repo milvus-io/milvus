@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 const (
@@ -47,6 +48,16 @@ const (
 	MaxLoadThread = 64
 	MaxBeamWidth  = 16
 )
+
+var configableIndexParams = typeutil.NewSet[string]()
+
+func init() {
+	configableIndexParams.Insert(common.MmapEnabledKey)
+}
+
+func IsConfigableIndexParam(key string) bool {
+	return configableIndexParams.Contain(key)
+}
 
 func getRowDataSizeOfFloatVector(numRows int64, dim int64) int64 {
 	var floatValue float32

@@ -49,6 +49,7 @@ var (
 	ErrCollectionNotLoaded        = newMilvusError("collection not loaded", 101, false)
 	ErrCollectionNumLimitExceeded = newMilvusError("exceeded the limit number of collections", 102, false)
 	ErrCollectionNotFullyLoaded   = newMilvusError("collection not fully loaded", 103, true)
+	ErrCollectionLoaded           = newMilvusError("collection already loaded", 104, false)
 
 	// Partition related
 	ErrPartitionNotFound       = newMilvusError("partition not found", 200, false)
