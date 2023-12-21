@@ -221,13 +221,12 @@ AppendIndexV2(CLoadIndexInfo c_load_index_info) {
 
         LOG_INFO(
             "[collection={}][segment={}][field={}][enable_mmap={}] load index "
-            "{} with params {}",
+            "{}",
             load_index_info->collection_id,
             load_index_info->segment_id,
             load_index_info->field_id,
             load_index_info->enable_mmap,
-            load_index_info->index_id,
-            index_params);
+            load_index_info->index_id);
 
         // get index type
         AssertInfo(index_params.find("index_type") != index_params.end(),
