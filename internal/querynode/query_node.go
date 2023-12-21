@@ -63,6 +63,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/expr"
 )
 
 // make sure QueryNode implements types.QueryNode
@@ -195,6 +196,7 @@ func NewQueryNode(ctx context.Context, factory dependency.Factory) *QueryNode {
 	queryNode.tSafeReplica = newTSafeReplica()
 	queryNode.scheduler = newTaskScheduler(ctx1, queryNode.tSafeReplica)
 	queryNode.UpdateStateCode(commonpb.StateCode_Abnormal)
+	expr.Register("querynode", queryNode)
 
 	return queryNode
 }

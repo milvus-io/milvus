@@ -67,6 +67,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/expr"
 )
 
 const (
@@ -146,6 +147,7 @@ func NewDataNode(ctx context.Context, factory dependency.Factory) *DataNode {
 		reportImportRetryTimes: 10,
 	}
 	node.UpdateStateCode(commonpb.StateCode_Abnormal)
+	expr.Register("datanode", node)
 	return node
 }
 

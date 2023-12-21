@@ -126,9 +126,13 @@ var _ allocator = (*MockAllocator)(nil)
 
 type MockAllocator struct {
 	cnt int64
+	err error
 }
 
 func (m *MockAllocator) allocTimestamp(ctx context.Context) (Timestamp, error) {
+	if m.err != nil {
+		return 0, m.err
+	}
 	val := atomic.AddInt64(&m.cnt, 1)
 	return Timestamp(val), nil
 }

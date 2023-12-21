@@ -134,18 +134,61 @@ func (c *compactionPlanHandler) start() {
 				log.Info("compaction handler quit")
 				return
 			case <-ticker.C:
-				cctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				ts, err := c.allocator.allocTimestamp(cctx)
+				ts, err := c.GetCurrentTS()
 				if err != nil {
-					log.Warn("unable to alloc timestamp", zap.Error(err))
-					cancel()
+					log.Warn("unable to get current timestamp", zap.Error(err))
 					continue
 				}
-				cancel()
 				_ = c.updateCompaction(ts)
 			}
 		}
 	}()
+
+	go func() {
+		cleanTicker := time.NewTicker(30 * time.Minute)
+		defer cleanTicker.Stop()
+		for {
+			select {
+			case <-c.quit:
+				log.Info("Compaction handler quit clean")
+				return
+			case <-cleanTicker.C:
+				c.Clean()
+			}
+		}
+	}()
+}
+
+func (c *compactionPlanHandler) Clean() {
+	current, err := c.GetCurrentTS()
+	if err != nil {
+		log.Warn("fail to get current ts when clean", zap.Error(err))
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	for id, task := range c.plans {
+		if task.state == executing || task.state == pipelining {
+			continue
+		}
+		// after timeout + 1h, the plan will be cleaned
+		if c.isTimeout(current, task.plan.GetStartTime(), task.plan.GetTimeoutInSeconds()+60*60) {
+			delete(c.plans, id)
+		}
+	}
+}
+
+func (c *compactionPlanHandler) GetCurrentTS() (Timestamp, error) {
+	interval := time.Duration(Params.DataCoordCfg.CompactionRPCTimeout) * time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), interval)
+	defer cancel()
+	ts, err := c.allocator.allocTimestamp(ctx)
+	if err != nil {
+		log.Warn("unable to alloc timestamp", zap.Error(err))
+		return 0, err
+	}
+	return ts, nil
 }
 
 func (c *compactionPlanHandler) stop() {

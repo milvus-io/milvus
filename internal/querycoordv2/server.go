@@ -58,6 +58,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/expr"
 )
 
 // Only for re-export
@@ -129,6 +130,7 @@ func NewQueryCoord(ctx context.Context, factory dependency.Factory) (*Server, er
 		notifyNodeUp:    make(chan struct{}),
 	}
 	server.UpdateStateCode(commonpb.StateCode_Abnormal)
+	expr.Register("querycoord", server)
 	return server, nil
 }
 

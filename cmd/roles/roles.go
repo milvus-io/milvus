@@ -49,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/expr"
 )
 
 var Params paramtable.ComponentParam
@@ -293,12 +294,12 @@ func (mr *MilvusRoles) Run() {
 	local := mr.LocalMode
 	alias := mr.Alias
 
+	Params.Init()
 	// only standalone enable localMsg
 	if local {
 		if err := os.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.StandaloneDeployMode); err != nil {
 			log.Error("Failed to set deploy mode: ", zap.Error(err))
 		}
-		Params.Init()
 
 		if rocksPath := Params.RocksmqPath(); rocksPath != "" {
 			if err := rocksmqimpl.InitRocksMQ(rocksPath); err != nil {
@@ -323,6 +324,8 @@ func (mr *MilvusRoles) Run() {
 		}
 	}
 
+	expr.Init(Params.EtcdCfg.RootPath)
+	expr.Register("param", Params)
 	management.ServeHTTP()
 
 	if os.Getenv(metricsinfo.DeployModeEnvKey) == metricsinfo.StandaloneDeployMode {

@@ -67,6 +67,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/expr"
 )
 
 // UniqueID is an alias of typeutil.UniqueID.
@@ -163,6 +164,7 @@ func NewCore(c context.Context, factory dependency.Factory) (*Core, error) {
 		}
 		return cli, nil
 	}
+	expr.Register("rootcoord", core)
 
 	return core, nil
 }

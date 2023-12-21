@@ -24,6 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/management/healthz"
+	"github.com/milvus-io/milvus/pkg/expr"
 	"go.uber.org/zap"
 )
 
@@ -48,6 +49,21 @@ func registerDefaults() {
 	Register(&HTTPHandler{
 		Path:    HealthzRouterPath,
 		Handler: healthz.Handler(),
+	})
+	Register(&HTTPHandler{
+		Path: ExprPath,
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			code := req.URL.Query().Get("code")
+			auth := req.URL.Query().Get("auth")
+			output, err := expr.Exec(code, auth)
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				w.Write([]byte(fmt.Sprintf(`{"msg": "failed to execute expression, %s"}`, err.Error())))
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(fmt.Sprintf(`{"output": "%s"}`, output)))
+		}),
 	})
 }
 

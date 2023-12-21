@@ -21,3 +21,6 @@ const HealthzRouterPath = "/healthz"
 
 // LogLevelRouterPath is path for Get and Update log level at runtime.
 const LogLevelRouterPath = "/log/level"
+
+// ExprPath is path for expression.
+const ExprPath = "/expr"
