@@ -303,10 +303,10 @@ func (dr *deleteRunner) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to create expr plan, expr = %s", dr.req.GetExpr())
 	}
 
-	isSimple, termExp := getExpr(plan)
+	isSimple, pk, numRow := getPrimaryKeysFromPlan(dr.schema, plan)
 	if isSimple {
 		// if could get delete.primaryKeys from delete expr
-		err := dr.simpleDelete(ctx, termExp)
+		err := dr.simpleDelete(ctx, pk, numRow)
 		if err != nil {
 			return err
 		}
@@ -498,18 +498,13 @@ func (dr *deleteRunner) complexDelete(ctx context.Context, plan *planpb.PlanNode
 	return nil
 }
 
-func (dr *deleteRunner) simpleDelete(ctx context.Context, termExp *planpb.Expr_TermExpr) error {
-	primaryKeys, numRow, err := getPrimaryKeysFromExpr(dr.schema, termExp)
-	if err != nil {
-		log.Info("Failed to get primary keys from expr", zap.Error(err))
-		return err
-	}
+func (dr *deleteRunner) simpleDelete(ctx context.Context, pk *schemapb.IDs, numRow int64) error {
 	log.Debug("get primary keys from expr",
 		zap.Int64("len of primary keys", numRow),
 		zap.Int64("collectionID", dr.collectionID),
 		zap.Int64("partitionID", dr.partitionID))
 
-	task, err := dr.produce(ctx, primaryKeys)
+	task, err := dr.produce(ctx, pk)
 	if err != nil {
 		log.Warn("produce delete task failed")
 		return err
@@ -522,20 +517,61 @@ func (dr *deleteRunner) simpleDelete(ctx context.Context, termExp *planpb.Expr_T
 	return err
 }
 
-func getExpr(plan *planpb.PlanNode) (bool, *planpb.Expr_TermExpr) {
+func getPrimaryKeysFromPlan(schema *schemapb.CollectionSchema, plan *planpb.PlanNode) (bool, *schemapb.IDs, int64) {
 	// simple delete request need expr with "pk in [a, b]"
 	termExpr, ok := plan.Node.(*planpb.PlanNode_Query).Query.Predicates.Expr.(*planpb.Expr_TermExpr)
-	if !ok {
-		return false, nil
+	if ok {
+		if !termExpr.TermExpr.GetColumnInfo().GetIsPrimaryKey() {
+			return false, nil, 0
+		}
+
+		ids, rowNum, err := getPrimaryKeysFromTermExpr(schema, termExpr)
+		if err != nil {
+			return false, nil, 0
+		}
+		return true, ids, rowNum
 	}
 
-	if !termExpr.TermExpr.GetColumnInfo().GetIsPrimaryKey() {
-		return false, nil
+	// simple delete if expr with "pk == a"
+	unaryRangeExpr, ok := plan.Node.(*planpb.PlanNode_Query).Query.Predicates.Expr.(*planpb.Expr_UnaryRangeExpr)
+	if ok {
+		if unaryRangeExpr.UnaryRangeExpr.GetOp() != planpb.OpType_Equal || !unaryRangeExpr.UnaryRangeExpr.GetColumnInfo().GetIsPrimaryKey() {
+			return false, nil, 0
+		}
+
+		ids, err := getPrimaryKeysFromUnaryRangeExpr(schema, unaryRangeExpr)
+		if err != nil {
+			return false, nil, 0
+		}
+		return true, ids, 1
 	}
-	return true, termExpr
+
+	return false, nil, 0
 }
 
-func getPrimaryKeysFromExpr(schema *schemapb.CollectionSchema, termExpr *planpb.Expr_TermExpr) (res *schemapb.IDs, rowNum int64, err error) {
+func getPrimaryKeysFromUnaryRangeExpr(schema *schemapb.CollectionSchema, unaryRangeExpr *planpb.Expr_UnaryRangeExpr) (res *schemapb.IDs, err error) {
+	res = &schemapb.IDs{}
+	switch unaryRangeExpr.UnaryRangeExpr.GetColumnInfo().GetDataType() {
+	case schemapb.DataType_Int64:
+		res.IdField = &schemapb.IDs_IntId{
+			IntId: &schemapb.LongArray{
+				Data: []int64{unaryRangeExpr.UnaryRangeExpr.GetValue().GetInt64Val()},
+			},
+		}
+	case schemapb.DataType_VarChar:
+		res.IdField = &schemapb.IDs_StrId{
+			StrId: &schemapb.StringArray{
+				Data: []string{unaryRangeExpr.UnaryRangeExpr.GetValue().GetStringVal()},
+			},
+		}
+	default:
+		return res, fmt.Errorf("invalid field data type specifyed in simple delete expr")
+	}
+
+	return res, nil
+}
+
+func getPrimaryKeysFromTermExpr(schema *schemapb.CollectionSchema, termExpr *planpb.Expr_TermExpr) (res *schemapb.IDs, rowNum int64, err error) {
 	res = &schemapb.IDs{}
 	rowNum = int64(len(termExpr.TermExpr.Values))
 	switch termExpr.TermExpr.ColumnInfo.GetDataType() {
@@ -560,7 +596,7 @@ func getPrimaryKeysFromExpr(schema *schemapb.CollectionSchema, termExpr *planpb.
 			},
 		}
 	default:
-		return res, 0, fmt.Errorf("invalid field data type specifyed in delete expr")
+		return res, 0, fmt.Errorf("invalid field data type specifyed in simple delete expr")
 	}
 
 	return res, rowNum, nil
