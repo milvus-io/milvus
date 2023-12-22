@@ -24,3 +24,6 @@ const LogLevelRouterPath = "/log/level"
 
 // EventLogRouterPath is path for eventlog control.
 const EventLogRouterPath = "/eventlog"
+
+// ExprPath is path for expression.
+const ExprPath = "/expr"
