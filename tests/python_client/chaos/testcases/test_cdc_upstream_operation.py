@@ -1,5 +1,3 @@
-import time
-
 import pytest
 from time import sleep
 from pymilvus import connections, db
@@ -27,7 +25,7 @@ from chaos.checker import (
     ResultAnalyzer
 )
 from utils.util_log import test_log as log
-from utils.util_k8s import wait_pods_ready, get_milvus_instance_name
+from utils.util_k8s import get_milvus_instance_name
 from chaos import chaos_commons as cc
 from common.common_type import CaseLabel
 from common.milvus_sys import MilvusSys
@@ -54,7 +52,6 @@ class TestOperations(TestBase):
     @pytest.fixture(scope="function", autouse=True)
     def connection(self, host, port, user, password, milvus_ns, database_name):
         if user and password:
-            # log.info(f"connect to {host}:{port} with user {user} and password {password}")
             connections.connect('default', host=host, port=port, user=user, password=password, secure=True)
         else:
             connections.connect('default', host=host, port=port)
@@ -117,21 +114,15 @@ class TestOperations(TestBase):
         request_duration = eval(request_duration)
         for i in range(10):
             sleep(request_duration // 10)
-            # add an event so that the chaos can start to apply
-            if i == 3:
-                event_records.insert("init_chaos", "ready")
             for k, v in self.health_checkers.items():
                 v.check_result()
         if is_check:
             assert_statistic(self.health_checkers, succ_rate_threshold=0.98)
             assert_expectations()
-        # wait all pod ready
-        wait_pods_ready(self.milvus_ns, f"app.kubernetes.io/instance={self.release_name}")
-        time.sleep(60)
         cc.check_thread_status(tasks)
         for k, v in self.health_checkers.items():
             v.pause()
         ra = ResultAnalyzer()
         ra.get_stage_success_rate()
         ra.show_result_table()
-        log.info("*********************Chaos Test Completed**********************")
+        log.info("*********************Load Test Completed**********************")
