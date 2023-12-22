@@ -95,8 +95,8 @@ func (s *StorageV2SerializerSuite) SetupTest() {
 	s.Require().NoError(err)
 	s.storageCache = storageCache
 
-	s.mockCache.EXPECT().Collection().Return(s.collectionID).Once()
-	s.mockCache.EXPECT().Schema().Return(s.schema).Once()
+	s.mockCache.EXPECT().Collection().Return(s.collectionID)
+	s.mockCache.EXPECT().Schema().Return(s.schema)
 
 	s.serializer, err = NewStorageV2Serializer(storageCache, s.mockCache, s.mockMetaWriter)
 	s.Require().NoError(err)
@@ -352,9 +352,10 @@ func (s *StorageV2SerializerSuite) TestSerializeDelete() {
 }
 
 func (s *StorageV2SerializerSuite) TestBadSchema() {
-	s.mockCache.EXPECT().Collection().Return(s.collectionID).Once()
-	s.mockCache.EXPECT().Schema().Return(&schemapb.CollectionSchema{}).Once()
-	_, err := NewStorageV2Serializer(s.storageCache, s.mockCache, s.mockMetaWriter)
+	mockCache := metacache.NewMockMetaCache(s.T())
+	mockCache.EXPECT().Collection().Return(s.collectionID).Once()
+	mockCache.EXPECT().Schema().Return(&schemapb.CollectionSchema{}).Once()
+	_, err := NewStorageV2Serializer(s.storageCache, mockCache, s.mockMetaWriter)
 	s.Error(err)
 }
 

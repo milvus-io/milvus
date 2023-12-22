@@ -182,8 +182,8 @@ func (s *SyncTaskSuiteV2) getSuiteSyncTask() *SyncTaskV2 {
 	storageCache, err := metacache.NewStorageV2Cache(s.schema)
 	s.Require().NoError(err)
 
-	s.metacache.EXPECT().Collection().Return(s.collectionID).Once()
-	s.metacache.EXPECT().Schema().Return(s.schema).Once()
+	s.metacache.EXPECT().Collection().Return(s.collectionID)
+	s.metacache.EXPECT().Schema().Return(s.schema)
 	serializer, err := NewStorageV2Serializer(storageCache, s.metacache, nil)
 	s.Require().NoError(err)
 	task, err := serializer.EncodeBuffer(context.Background(), pack)
