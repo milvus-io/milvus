@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <memory>
 #include <mutex>
+#include <shared_mutex>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -70,11 +71,15 @@ class OffsetOrderedMap : public OffsetMap {
  public:
     bool
     contain(const PkType& pk) const override {
+        std::shared_lock<std::shared_mutex> lck(mtx_);
+
         return map_.find(std::get<T>(pk)) != map_.end();
     }
 
     std::vector<int64_t>
     find(const PkType& pk) const override {
+        std::shared_lock<std::shared_mutex> lck(mtx_);
+
         auto offset_vector = map_.find(std::get<T>(pk));
         return offset_vector != map_.end() ? offset_vector->second
                                            : std::vector<int64_t>();
@@ -82,6 +87,8 @@ class OffsetOrderedMap : public OffsetMap {
 
     void
     insert(const PkType& pk, int64_t offset) override {
+        std::unique_lock<std::shared_mutex> lck(mtx_);
+
         map_[std::get<T>(pk)].emplace_back(offset);
     }
 
@@ -94,6 +101,8 @@ class OffsetOrderedMap : public OffsetMap {
 
     bool
     empty() const override {
+        std::shared_lock<std::shared_mutex> lck(mtx_);
+
         return map_.empty();
     }
 
@@ -104,6 +113,8 @@ class OffsetOrderedMap : public OffsetMap {
         if (limit == Unlimited || limit == NoLimit) {
             limit = map_.size();
         }
+
+        std::shared_lock<std::shared_mutex> lck(mtx_);
 
         // TODO: we can't retrieve pk by offset very conveniently.
         //      Selectivity should be done outside.
@@ -147,6 +158,7 @@ class OffsetOrderedMap : public OffsetMap {
  private:
     using OrderedMap = std::map<T, std::vector<int64_t>, std::less<>>;
     OrderedMap map_;
+    mutable std::shared_mutex mtx_;
 };
 
 template <typename T>
