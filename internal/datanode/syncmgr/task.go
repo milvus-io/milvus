@@ -110,12 +110,12 @@ func (t *SyncTask) handleError(err error, metricSegLevel string) {
 
 func (t *SyncTask) Run() (err error) {
 	t.tr = timerecord.NewTimeRecorder("syncTask")
-	var metricSegLevel string = t.level.String()
+	metricSegLevel := t.level.String()
 
 	log := t.getLogger()
 	defer func() {
 		if err != nil {
-			t.handleError(err)
+			t.handleError(err, metricSegLevel)
 		}
 	}()
 
@@ -162,16 +162,17 @@ func (t *SyncTask) Run() (err error) {
 		return err
 	}
 
-	var totalSize float64 = 0
-	if t.deleteData != nil {
-		totalSize += float64(t.deleteData.Size())
-	}
+	/*
+		var totalSize float64 = 0
+		if t.deleteData != nil {
+			totalSize += float64(t.deleteData.Size())
+		}
 
-	if t.insertData != nil {
-		totalSize += float64(t.insertData.GetMemorySize())
-	}
-	metrics.DataNodeFlushedSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.AllLabel, metricSegLevel).Add(totalSize)
-	metrics.DataNodeEncodeBufferLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metricSegLevel).Observe(float64(t.tr.RecordSpan().Milliseconds()))
+		if t.insertData != nil {
+			totalSize += float64(t.insertData.GetMemorySize())
+		}
+		metrics.DataNodeFlushedSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.AllLabel, metricSegLevel).Add(totalSize)
+		metrics.DataNodeEncodeBufferLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metricSegLevel).Observe(float64(t.tr.RecordSpan().Milliseconds()))*/
 
 	err = t.writeLogs()
 	if err != nil {
@@ -229,7 +230,7 @@ func (t *SyncTask) processInsertBlobs() error {
 			TimestampFrom: t.tsFrom,
 			TimestampTo:   t.tsTo,
 			LogPath:       key,
-			LogSize:       int64(t.binlogMemsize[fieldID]),
+			LogSize:       t.binlogMemsize[fieldID],
 		})
 		logidx++
 	}

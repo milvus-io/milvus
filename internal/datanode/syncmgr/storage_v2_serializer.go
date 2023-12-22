@@ -124,22 +124,22 @@ func (s *storageV2Serializer) EncodeBuffer(ctx context.Context, pack *SyncPack) 
 }
 
 func (s *storageV2Serializer) setTaskMeta(task *SyncTaskV2, pack *SyncPack) {
-	task.collectionID = pack.collectionID
-	task.partitionID = pack.partitionID
-	task.channelName = pack.channelName
-	task.segmentID = pack.segmentID
-	task.batchSize = pack.batchSize
-	task.startPosition = pack.startPosition
-	task.checkpoint = pack.checkpoint
-	task.level = pack.level
-	task.tsFrom = pack.tsFrom
-	task.tsTo = pack.tsTo
-	task.metaWriter = s.metaWriter
-	task.metacache = s.metacache
-	task.WithFailureCallback(func(err error) {
-		// TODO could change to unsub channel in the future
-		panic(err)
-	})
+	task.WithCollectionID(pack.collectionID).
+		WithPartitionID(pack.partitionID).
+		WithChannelName(pack.channelName).
+		WithSegmentID(pack.segmentID).
+		WithBatchSize(pack.batchSize).
+		WithSchema(s.metacache.Schema()).
+		WithStartPosition(pack.startPosition).
+		WithCheckpoint(pack.checkpoint).
+		WithLevel(pack.level).
+		WithTimeRange(pack.tsFrom, pack.tsTo).
+		WithMetaCache(s.metacache).
+		WithMetaWriter(s.metaWriter).
+		WithFailureCallback(func(err error) {
+			// TODO could change to unsub channel in the future
+			panic(err)
+		})
 }
 
 func (s *storageV2Serializer) serializeInsertData(pack *SyncPack) (array.RecordReader, error) {

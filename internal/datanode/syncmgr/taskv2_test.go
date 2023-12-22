@@ -26,6 +26,10 @@ import (
 	"github.com/apache/arrow/go/v12/arrow"
 	"github.com/apache/arrow/go/v12/arrow/array"
 	"github.com/apache/arrow/go/v12/arrow/memory"
+	"github.com/samber/lo"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/suite"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -38,13 +42,9 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	iTypeutil "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
-	"github.com/samber/lo"
-	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/suite"
 )
 
 type SyncTaskSuiteV2 struct {
@@ -94,7 +94,7 @@ func (s *SyncTaskSuiteV2) SetupSuite() {
 		},
 	}
 
-	arrowSchema, err := iTypeutil.ConvertToArrowSchema(s.schema.Fields)
+	arrowSchema, err := typeutil.ConvertToArrowSchema(s.schema.Fields)
 	s.NoError(err)
 	s.arrowSchema = arrowSchema
 }
