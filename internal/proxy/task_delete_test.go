@@ -26,7 +26,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
-func Test_GetExpr(t *testing.T) {
+func Test_getPrimaryKeysFromPlan(t *testing.T) {
 	schema := &schemapb.CollectionSchema{
 		Name:        "test_delete",
 		Description: "",
@@ -50,24 +50,56 @@ func Test_GetExpr(t *testing.T) {
 		expr := "pk < 4"
 		plan, err := planparserv2.CreateRetrievePlan(schema, expr)
 		assert.NoError(t, err)
-		isSimple, _ := getExpr(plan)
+		isSimple, _, _ := getPrimaryKeysFromPlan(schema, plan)
 		assert.False(t, isSimple)
 	})
 
 	t.Run("delete with no-pk field expr", func(t *testing.T) {
-		expr := "non_pk in [1, 2, 3]"
+		expr := "non_pk == 1"
 		plan, err := planparserv2.CreateRetrievePlan(schema, expr)
 		assert.NoError(t, err)
-		isSimple, _ := getExpr(plan)
+		isSimple, _, _ := getPrimaryKeysFromPlan(schema, plan)
 		assert.False(t, isSimple)
 	})
 
-	t.Run("delete with simple expr", func(t *testing.T) {
+	t.Run("delete with simple term expr", func(t *testing.T) {
 		expr := "pk in [1, 2, 3]"
 		plan, err := planparserv2.CreateRetrievePlan(schema, expr)
 		assert.NoError(t, err)
-		isSimple, _ := getExpr(plan)
+		isSimple, _, rowNum := getPrimaryKeysFromPlan(schema, plan)
 		assert.True(t, isSimple)
+		assert.Equal(t, int64(3), rowNum)
+	})
+
+	t.Run("delete failed with simple term expr", func(t *testing.T) {
+		expr := "pk in [1, 2, 3]"
+		plan, err := planparserv2.CreateRetrievePlan(schema, expr)
+		assert.NoError(t, err)
+		termExpr := plan.Node.(*planpb.PlanNode_Query).Query.Predicates.Expr.(*planpb.Expr_TermExpr)
+		termExpr.TermExpr.ColumnInfo.DataType = -1
+
+		isSimple, _, _ := getPrimaryKeysFromPlan(schema, plan)
+		assert.False(t, isSimple)
+	})
+
+	t.Run("delete with simple equal expr", func(t *testing.T) {
+		expr := "pk == 1"
+		plan, err := planparserv2.CreateRetrievePlan(schema, expr)
+		assert.NoError(t, err)
+		isSimple, _, rowNum := getPrimaryKeysFromPlan(schema, plan)
+		assert.True(t, isSimple)
+		assert.Equal(t, int64(1), rowNum)
+	})
+
+	t.Run("delete failed with simple equal expr", func(t *testing.T) {
+		expr := "pk == 1"
+		plan, err := planparserv2.CreateRetrievePlan(schema, expr)
+		assert.NoError(t, err)
+		unaryRangeExpr := plan.Node.(*planpb.PlanNode_Query).Query.Predicates.Expr.(*planpb.Expr_UnaryRangeExpr)
+		unaryRangeExpr.UnaryRangeExpr.ColumnInfo.DataType = -1
+
+		isSimple, _, _ := getPrimaryKeysFromPlan(schema, plan)
+		assert.False(t, isSimple)
 	})
 }
 
@@ -387,52 +419,6 @@ func TestDeleteRunner_Init(t *testing.T) {
 
 		globalMetaCache = cache
 		assert.Error(t, dr.Init(context.Background()))
-	})
-}
-
-func TestDeleteRunner_simpleDelete(t *testing.T) {
-	collectionName := "test_delete"
-	collectionID := int64(111)
-	partitionID := int64(222)
-
-	schema := &schemapb.CollectionSchema{
-		Name:        collectionName,
-		Description: "",
-		AutoID:      false,
-		Fields: []*schemapb.FieldSchema{
-			{
-				FieldID:      common.StartOfUserFieldID,
-				Name:         "pk",
-				IsPrimaryKey: true,
-				DataType:     schemapb.DataType_Int64,
-			},
-			{
-				FieldID:      common.StartOfUserFieldID + 1,
-				Name:         "non_pk",
-				IsPrimaryKey: false,
-				DataType:     schemapb.DataType_Int64,
-			},
-		},
-	}
-	t.Run("get PK failed", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-
-		expr := &planpb.Expr_TermExpr{
-			TermExpr: &planpb.TermExpr{
-				ColumnInfo: &planpb.ColumnInfo{
-					DataType: schemapb.DataType_BinaryVector,
-				},
-			},
-		}
-
-		tr := deleteRunner{
-			collectionID: collectionID,
-			partitionID:  partitionID,
-			schema:       schema,
-		}
-		err := tr.simpleDelete(ctx, expr)
-		assert.Error(t, err)
 	})
 }
 
