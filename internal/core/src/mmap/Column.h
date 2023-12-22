@@ -318,18 +318,22 @@ class VariableColumn : public ColumnBase {
         if (!indices.empty()) {
             indices_ = std::move(indices);
         }
-        num_rows_ = indices_.size();
 
-        size_t total_size = size_;
-        size_ = 0;
-        Expand(total_size);
+        // for variable length memory mode only
+        if (data_ == nullptr) {
+            num_rows_ = indices_.size();
 
-        while (!load_buf_.empty()) {
-            auto data = std::move(load_buf_.front());
-            load_buf_.pop();
+            size_t total_size = size_;
+            size_ = 0;
+            Expand(total_size);
 
-            std::copy_n(data.data(), data.length(), data_ + size_);
-            size_ += data.length();
+            while (!load_buf_.empty()) {
+                auto data = std::move(load_buf_.front());
+                load_buf_.pop();
+
+                std::copy_n(data.data(), data.length(), data_ + size_);
+                size_ += data.length();
+            }
         }
 
         ConstructViews();
