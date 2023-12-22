@@ -64,6 +64,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
+	"github.com/milvus-io/milvus/pkg/util/expr"
 	"github.com/milvus-io/milvus/pkg/util/gc"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/lifetime"
@@ -142,6 +143,7 @@ func NewQueryNode(ctx context.Context, factory dependency.Factory) *QueryNode {
 	}
 
 	node.tSafeManager = tsafe.NewTSafeReplica()
+	expr.Register("querynode", node)
 	return node
 }
 
