@@ -199,6 +199,12 @@ build-3rdparty:
 	@echo "Build 3rdparty ..."
 	@(env bash $(PWD)/scripts/3rdparty_build.sh)
 
+generated-proto-without-cpp: download-milvus-proto
+	@echo "Generate proto ..."
+	@mkdir -p ${GOPATH}/bin
+	@which protoc-gen-go 1>/dev/null || (echo "Installing protoc-gen-go" && cd /tmp && go install github.com/golang/protobuf/protoc-gen-go@v1.3.2)
+	@(env bash $(PWD)/scripts/generate_proto.sh)
+
 generated-proto: download-milvus-proto build-3rdparty
 	@echo "Generate proto ..."
 	@mkdir -p ${GOPATH}/bin
