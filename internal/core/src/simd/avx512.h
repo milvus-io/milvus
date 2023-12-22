@@ -61,5 +61,53 @@ AndBoolAVX512(bool* left, bool* right, int64_t size);
 void
 OrBoolAVX512(bool* left, bool* right, int64_t size);
 
+template <typename T>
+void
+EqualValAVX512(const T* src, size_t size, T val, bool* res);
+
+template <typename T>
+void
+LessValAVX512(const T* src, size_t size, T val, bool* res);
+
+template <typename T>
+void
+GreaterValAVX512(const T* src, size_t size, T val, bool* res);
+
+template <typename T>
+void
+NotEqualValAVX512(const T* src, size_t size, T val, bool* res);
+
+template <typename T>
+void
+LessEqualValAVX512(const T* src, size_t size, T val, bool* res);
+
+template <typename T>
+void
+GreaterEqualValAVX512(const T* src, size_t size, T val, bool* res);
+
+template <typename T>
+void
+EqualColumnAVX512(const T* left, const T* right, size_t size, bool* res);
+
+template <typename T>
+void
+LessColumnAVX512(const T* left, const T* right, size_t size, bool* res);
+
+template <typename T>
+void
+LessEqualColumnAVX512(const T* left, const T* right, size_t size, bool* res);
+
+template <typename T>
+void
+GreaterColumnAVX512(const T* left, const T* right, size_t size, bool* res);
+
+template <typename T>
+void
+GreaterEqualColumnAVX512(const T* left, const T* right, size_t size, bool* res);
+
+template <typename T>
+void
+NotEqualColumnAVX512(const T* left, const T* right, size_t size, bool* res);
+
 }  // namespace simd
 }  // namespace milvus

@@ -24,6 +24,7 @@
 #include "common/Vector.h"
 #include "exec/expression/Expr.h"
 #include "segcore/SegmentInterface.h"
+#include "simd/interface.h"
 
 namespace milvus {
 namespace exec {
@@ -41,7 +42,7 @@ using ChunkDataAccessor = std::function<const number(int)>;
 template <typename T, typename U, proto::plan::OpType op>
 struct CompareElementFunc {
     void
-    operator()(const T* left, const U* right, size_t size, bool* res) {
+    operator_base(const T* left, const U* right, size_t size, bool* res) {
         for (int i = 0; i < size; ++i) {
             if constexpr (op == proto::plan::OpType::Equal) {
                 res[i] = left[i] == right[i];
@@ -62,6 +63,24 @@ struct CompareElementFunc {
                                 op));
             }
         }
+    }
+
+    void
+    operator()(const T* left, const U* right, size_t size, bool* res) {
+#if defined(USE_DYNAMIC_SIMD)
+        if constexpr (std::is_same_v<T, U>) {
+            milvus::simd::compare_col_func<T>(
+                static_cast<milvus::simd::CompareType>(op),
+                left,
+                right,
+                size,
+                res);
+        } else {
+            operator_base(left, right, size, res);
+        }
+#else
+        operator_base(left, right, size, res);
+#endif
     }
 };
 

@@ -29,11 +29,12 @@ GetBitsetBlockAVX2(const bool* src) {
         // BitsetBlockType has 64 bits
         __m256i highbit = _mm256_set1_epi8(0x7F);
         uint32_t tmp[8];
-        for (size_t i = 0; i < 2; i += 1) {
-            __m256i boolvec = _mm256_loadu_si256((__m256i*)&src[i * 32]);
-            __m256i highbits = _mm256_add_epi8(boolvec, highbit);
-            tmp[i] = _mm256_movemask_epi8(highbits);
-        }
+        __m256i boolvec = _mm256_loadu_si256((__m256i*)(src));
+        __m256i highbits = _mm256_add_epi8(boolvec, highbit);
+        tmp[0] = _mm256_movemask_epi8(highbits);
+        boolvec = _mm256_loadu_si256((__m256i*)(src + 32));
+        highbits = _mm256_add_epi8(boolvec, highbit);
+        tmp[1] = _mm256_movemask_epi8(highbits);
 
         __m256i tmpvec = _mm256_loadu_si256((__m256i*)tmp);
         BitsetBlockType res[4];
@@ -65,9 +66,9 @@ FindTermAVX2(const bool* src, size_t vec_size, bool val) {
     __m256i ymm_data;
     size_t num_chunks = vec_size / 32;
 
-    for (size_t i = 0; i < num_chunks; i++) {
+    for (size_t i = 0; i < 32 * num_chunks; i += 32) {
         ymm_data =
-            _mm256_loadu_si256(reinterpret_cast<const __m256i*>(src + 32 * i));
+            _mm256_loadu_si256(reinterpret_cast<const __m256i*>(src + i));
         __m256i ymm_match = _mm256_cmpeq_epi8(ymm_data, ymm_target);
         int mask = _mm256_movemask_epi8(ymm_match);
         if (mask != 0) {
@@ -90,9 +91,9 @@ FindTermAVX2(const int8_t* src, size_t vec_size, int8_t val) {
     __m256i ymm_data;
     size_t num_chunks = vec_size / 32;
 
-    for (size_t i = 0; i < num_chunks; i++) {
+    for (size_t i = 0; i < 32 * num_chunks; i += 32) {
         ymm_data =
-            _mm256_loadu_si256(reinterpret_cast<const __m256i*>(src + 32 * i));
+            _mm256_loadu_si256(reinterpret_cast<const __m256i*>(src + i));
         __m256i ymm_match = _mm256_cmpeq_epi8(ymm_data, ymm_target);
         int mask = _mm256_movemask_epi8(ymm_match);
         if (mask != 0) {
@@ -114,10 +115,9 @@ FindTermAVX2(const int16_t* src, size_t vec_size, int16_t val) {
     __m256i ymm_target = _mm256_set1_epi16(val);
     __m256i ymm_data;
     size_t num_chunks = vec_size / 16;
-    size_t remaining_size = vec_size % 16;
-    for (size_t i = 0; i < num_chunks; i++) {
+    for (size_t i = 0; i < 16 * num_chunks; i += 16) {
         ymm_data =
-            _mm256_loadu_si256(reinterpret_cast<const __m256i*>(src + 16 * i));
+            _mm256_loadu_si256(reinterpret_cast<const __m256i*>(src + i));
         __m256i ymm_match = _mm256_cmpeq_epi16(ymm_data, ymm_target);
         int mask = _mm256_movemask_epi8(ymm_match);
         if (mask != 0) {
@@ -141,9 +141,9 @@ FindTermAVX2(const int32_t* src, size_t vec_size, int32_t val) {
     size_t num_chunks = vec_size / 8;
     size_t remaining_size = vec_size % 8;
 
-    for (size_t i = 0; i < num_chunks; i++) {
+    for (size_t i = 0; i < 8 * num_chunks; i += 8) {
         ymm_data =
-            _mm256_loadu_si256(reinterpret_cast<const __m256i*>(src + 8 * i));
+            _mm256_loadu_si256(reinterpret_cast<const __m256i*>(src + i));
         __m256i ymm_match = _mm256_cmpeq_epi32(ymm_data, ymm_target);
         int mask = _mm256_movemask_epi8(ymm_match);
         if (mask != 0) {
@@ -163,11 +163,10 @@ FindTermAVX2(const int64_t* src, size_t vec_size, int64_t val) {
     __m256i ymm_target = _mm256_set1_epi64x(val);
     __m256i ymm_data;
     size_t num_chunks = vec_size / 4;
-    size_t remaining_size = vec_size % 4;
 
-    for (size_t i = 0; i < num_chunks; i++) {
+    for (size_t i = 0; i < 4 * num_chunks; i += 4) {
         ymm_data =
-            _mm256_loadu_si256(reinterpret_cast<const __m256i*>(src + 4 * i));
+            _mm256_loadu_si256(reinterpret_cast<const __m256i*>(src + i));
         __m256i ymm_match = _mm256_cmpeq_epi64(ymm_data, ymm_target);
         int mask = _mm256_movemask_epi8(ymm_match);
         if (mask != 0) {
@@ -190,8 +189,8 @@ FindTermAVX2(const float* src, size_t vec_size, float val) {
     __m256 ymm_data;
     size_t num_chunks = vec_size / 8;
 
-    for (size_t i = 0; i < num_chunks; i++) {
-        ymm_data = _mm256_loadu_ps(src + 8 * i);
+    for (size_t i = 0; i < 8 * num_chunks; i += 8) {
+        ymm_data = _mm256_loadu_ps(src + i);
         __m256 ymm_match = _mm256_cmp_ps(ymm_data, ymm_target, _CMP_EQ_OQ);
         int mask = _mm256_movemask_ps(ymm_match);
         if (mask != 0) {
@@ -214,8 +213,8 @@ FindTermAVX2(const double* src, size_t vec_size, double val) {
     __m256d ymm_data;
     size_t num_chunks = vec_size / 4;
 
-    for (size_t i = 0; i < num_chunks; i++) {
-        ymm_data = _mm256_loadu_pd(src + 8 * i);
+    for (size_t i = 0; i < 4 * num_chunks; i += 4) {
+        ymm_data = _mm256_loadu_pd(src + i);
         __m256d ymm_match = _mm256_cmp_pd(ymm_data, ymm_target, _CMP_EQ_OQ);
         int mask = _mm256_movemask_pd(ymm_match);
         if (mask != 0) {
