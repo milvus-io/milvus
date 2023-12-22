@@ -124,7 +124,7 @@ func newCompactionPlanHandler(sessions *SessionManager, cm *ChannelManager, meta
 func (c *compactionPlanHandler) start() {
 	interval := Params.DataCoordCfg.CompactionCheckIntervalInSeconds.GetAsDuration(time.Second)
 	c.quit = make(chan struct{})
-	c.wg.Add(1)
+	c.wg.Add(2)
 
 	go func() {
 		defer c.wg.Done()
@@ -136,18 +136,58 @@ func (c *compactionPlanHandler) start() {
 				log.Info("compaction handler quit")
 				return
 			case <-ticker.C:
-				cctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				ts, err := c.allocator.allocTimestamp(cctx)
+				ts, err := c.GetCurrentTS()
 				if err != nil {
-					log.Warn("unable to alloc timestamp", zap.Error(err))
-					cancel()
+					log.Warn("unable to get current timestamp", zap.Error(err))
 					continue
 				}
-				cancel()
 				_ = c.updateCompaction(ts)
 			}
 		}
 	}()
+
+	go func() {
+		defer c.wg.Done()
+		cleanTicker := time.NewTicker(30 * time.Minute)
+		defer cleanTicker.Stop()
+		for {
+			select {
+			case <-c.quit:
+				log.Info("Compaction handler quit clean")
+				return
+			case <-cleanTicker.C:
+				c.Clean()
+			}
+		}
+	}()
+}
+
+func (c *compactionPlanHandler) Clean() {
+	current := tsoutil.GetCurrentTime()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	for id, task := range c.plans {
+		if task.state == executing || task.state == pipelining {
+			continue
+		}
+		// after timeout + 1h, the plan will be cleaned
+		if c.isTimeout(current, task.plan.GetStartTime(), task.plan.GetTimeoutInSeconds()+60*60) {
+			delete(c.plans, id)
+		}
+	}
+}
+
+func (c *compactionPlanHandler) GetCurrentTS() (Timestamp, error) {
+	interval := Params.DataCoordCfg.CompactionRPCTimeout.GetAsDuration(time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), interval)
+	defer cancel()
+	ts, err := c.allocator.allocTimestamp(ctx)
+	if err != nil {
+		log.Warn("unable to alloc timestamp", zap.Error(err))
+		return 0, err
+	}
+	return ts, nil
 }
 
 func (c *compactionPlanHandler) stop() {
@@ -238,7 +278,8 @@ func (c *compactionPlanHandler) completeCompaction(result *datapb.CompactionResu
 	default:
 		return errors.New("unknown compaction type")
 	}
-	c.plans[planID] = c.plans[planID].shadowClone(setState(completed), setResult(result))
+	metrics.DataCoordCompactedSegmentSize.WithLabelValues().Observe(float64(getCompactedSegmentSize(result)))
+	c.plans[planID] = c.plans[planID].shadowClone(setState(completed), setResult(result), cleanLogPath())
 	c.executingTaskNum--
 	if c.plans[planID].plan.GetType() == datapb.CompactionType_MergeCompaction ||
 		c.plans[planID].plan.GetType() == datapb.CompactionType_MixCompaction {
@@ -248,8 +289,6 @@ func (c *compactionPlanHandler) completeCompaction(result *datapb.CompactionResu
 
 	nodeID := c.plans[planID].dataNodeID
 	c.releaseQueue(nodeID)
-
-	metrics.DataCoordCompactedSegmentSize.WithLabelValues().Observe(float64(getCompactedSegmentSize(result)))
 	return nil
 }
 
@@ -453,6 +492,23 @@ func setStartTime(startTime uint64) compactionTaskOpt {
 func setResult(result *datapb.CompactionResult) compactionTaskOpt {
 	return func(task *compactionTask) {
 		task.result = result
+	}
+}
+
+func cleanLogPath() compactionTaskOpt {
+	return func(task *compactionTask) {
+		if task.plan.GetSegmentBinlogs() != nil {
+			for _, binlogs := range task.plan.GetSegmentBinlogs() {
+				binlogs.FieldBinlogs = nil
+				binlogs.Deltalogs = nil
+				binlogs.Field2StatslogPaths = nil
+			}
+		}
+		if task.result != nil {
+			task.result.InsertLogs = nil
+			task.result.Deltalogs = nil
+			task.result.Field2StatslogPaths = nil
+		}
 	}
 }
 
