@@ -31,6 +31,7 @@ def pytest_addoption(parser):
     parser.addoption("--handler", action="store", default="GRPC", help="handler of request")
     parser.addoption("--tag", action="store", default="all", help="only run tests matching the tag.")
     parser.addoption('--dry_run', action='store_true', default=False, help="")
+    parser.addoption('--database_name', action='store', default="default", help="name of database")
     parser.addoption('--partition_name', action='store', default="partition_name", help="name of partition")
     parser.addoption('--connect_name', action='store', default="connect_name", help="name of connect")
     parser.addoption('--descriptions', action='store', default="partition_des", help="descriptions of partition")
@@ -114,6 +115,11 @@ def dry_run(request):
 @pytest.fixture
 def connect_name(request):
     return request.config.getoption("--connect_name")
+
+
+@pytest.fixture
+def database_name(request):
+    return request.config.getoption("--database_name")
 
 
 @pytest.fixture
