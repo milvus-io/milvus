@@ -207,6 +207,11 @@ class Driver : public std::enable_shared_from_this<Driver> {
     Init(std::unique_ptr<DriverContext> driver_ctx,
          std::vector<std::unique_ptr<Operator>> operators);
 
+    void
+    CloseByTask() {
+        Close();
+    }
+
  private:
     Driver() = default;
 
