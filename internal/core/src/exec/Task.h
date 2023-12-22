@@ -149,8 +149,7 @@ class Task : public std::enable_shared_from_this<Task> {
     }
 
     void
-    Terminate(TaskState state) {
-    }
+    Terminate(TaskState state);
 
     std::exception_ptr
     error() const {
@@ -165,6 +164,11 @@ class Task : public std::enable_shared_from_this<Task> {
         }
 
         num_finished_drivers_++;
+    }
+
+    void
+    RequestCancel() {
+        Terminate(TaskState::kCanceled);
     }
 
  private:

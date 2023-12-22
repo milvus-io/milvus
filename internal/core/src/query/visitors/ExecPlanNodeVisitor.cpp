@@ -116,6 +116,7 @@ ExecPlanNodeVisitor::ExecuteExprNodeInternal(
                 if (cache_offset_vec->size() == 0) {
                     auto active_count = segment->get_active_count(timestamp_);
                     bitset_holder.resize(active_count);
+                    task->RequestCancel();
                     break;
                 }
                 auto cache_offset_vec_ptr =
