@@ -75,11 +75,11 @@ func NewImportSegmentInfo(syncTask *syncmgr.SyncTask, task *ImportTask) (*datapb
 
 func InitHashedData(channels []string, partitions []int64, schema *schemapb.CollectionSchema) (HashedData, error) {
 	var err error
-	res := make(HashedData)
+	res := make(HashedData, len(channels))
 	for i := range channels {
-		res[int64(i)] = make(map[int64]*storage.InsertData)
-		for _, partition := range partitions {
-			res[int64(i)][partition], err = storage.NewInsertData(schema)
+		res[i] = make([]*storage.InsertData, len(partitions))
+		for j := range partitions {
+			res[i][j], err = storage.NewInsertData(schema)
 			if err != nil {
 				return nil, err
 			}

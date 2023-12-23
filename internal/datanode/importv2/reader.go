@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 )
 
+//go:generate mockery --name=Reader --structname=MockReader --output=./  --filename=mock_reader.go --with-expecter --inpackage
 type Reader interface {
 	ReadStats() (*datapb.ImportFileStats, error)
 	Next(count int64) (*storage.InsertData, error)

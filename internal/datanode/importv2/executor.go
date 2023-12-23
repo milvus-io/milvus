@@ -33,7 +33,7 @@ import (
 	"time"
 )
 
-type HashedData map[int64]map[int64]*storage.InsertData // vchannel -> (partitionID -> InsertData)
+type HashedData [][]*storage.InsertData // vchannel -> (partitionID -> InsertData)
 
 type Executor interface {
 	Start()
@@ -128,13 +128,7 @@ func (e *executor) PreImport(task Task) {
 		wg.Go(func() error {
 			reader := NewReader(e.cm, task.GetSchema(), file)
 			defer reader.Close()
-			stat, err := reader.ReadStats()
-			if err != nil {
-				e.handleErr(task, err, "read stats failed")
-				return err
-			}
-			e.manager.Update(task.GetTaskID(), UpdateFileStat(i, stat))
-			return nil
+			return e.readFileStat(reader, task, i)
 		})
 	}
 	err := wg.Wait()
@@ -143,6 +137,16 @@ func (e *executor) PreImport(task Task) {
 		return
 	}
 	e.manager.Update(task.GetTaskID(), UpdateState(datapb.ImportState_Completed))
+}
+
+func (e *executor) readFileStat(reader Reader, task Task, fileIdx int) error {
+	stat, err := reader.ReadStats()
+	if err != nil {
+		e.handleErr(task, err, "read stats failed")
+		return err
+	}
+	e.manager.Update(task.GetTaskID(), UpdateFileStat(fileIdx, stat))
+	return nil
 }
 
 func (e *executor) Import(task Task) {
@@ -154,19 +158,20 @@ func (e *executor) Import(task Task) {
 	}
 
 	for _, fileInfo := range task.(*ImportTask).req.GetFilesInfo() {
-		err = e.importFile(count, task, fileInfo)
+		reader := NewReader(e.cm, task.GetSchema(), fileInfo.GetImportFile())
+		err = e.importFile(reader, count, task, fileInfo)
 		if err != nil {
 			e.handleErr(task, err, fmt.Sprintf("do import failed, file: %s",
 				fileInfo.GetImportFile().String()))
+			reader.Close()
 			return
 		}
+		reader.Close()
 	}
 	e.manager.Update(task.GetTaskID(), UpdateState(datapb.ImportState_Completed))
 }
 
-func (e *executor) importFile(count int64, task Task, fileInfo *datapb.ImportFileRequestInfo) error {
-	reader := NewReader(e.cm, task.GetSchema(), fileInfo.GetImportFile())
-	defer reader.Close()
+func (e *executor) importFile(reader Reader, count int64, task Task, fileInfo *datapb.ImportFileRequestInfo) error {
 	for {
 		data, err := reader.Next(count)
 		if err != nil {
@@ -202,7 +207,7 @@ func (e *executor) Hash(task *ImportTask, insertData *storage.InsertData) (Hashe
 	if err != nil {
 		return nil, err
 	}
-	for i := 0; i < insertData.GetRowNum(); i++ {
+	for i := 0; i < insertData.GetRowNum(); i++ { // TODO: dyh, gen auto id if enable
 		row := insertData.GetRow(i)
 		pk := row[pkField.GetFieldID()]
 		p1 := fn(pk, vchannelNum)
@@ -220,7 +225,8 @@ func (e *executor) Sync(task *ImportTask, hashedData HashedData, fileInfo *datap
 	syncTasks := make([]*syncmgr.SyncTask, 0)
 	for channelIdx, datas := range hashedData {
 		channel := task.vchannels[channelIdx]
-		for partitionID, data := range datas {
+		for partitionIdx, data := range datas {
+			partitionID := task.partitions[partitionIdx]
 			segmentID := PickSegment(task, fileInfo, channel, partitionID)
 			syncTask := NewSyncTask(task, segmentID, partitionID, channel, data)
 			future := e.syncMgr.SyncData(context.TODO(), syncTask)
