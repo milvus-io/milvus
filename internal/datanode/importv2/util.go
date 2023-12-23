@@ -19,11 +19,13 @@ package importv2
 import (
 	"fmt"
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"github.com/samber/lo"
 )
 
@@ -84,26 +86,19 @@ func AddSegment(metaCache metacache.MetaCache, vchannel string, segID, partID, c
 	}
 }
 
-func InitMetaCaches(req *datapb.ImportRequest) map[string]metacache.MetaCache {
-	metaCaches := make(map[string]metacache.MetaCache)
-	channels := make(map[string]struct{})
-	for _, fileInfo := range req.GetFilesInfo() {
-		for _, info := range fileInfo.GetSegmentsInfo() {
-			channels[info.GetVchannel()] = struct{}{}
-		}
+func hashFunc(pkDataType schemapb.DataType) (func(pk interface{}, shardNum int64) int64, error) {
+	switch pkDataType {
+	case schemapb.DataType_Int64:
+		return func(pk interface{}, shardNum int64) int64 {
+			hash, _ := typeutil.Hash32Int64(pk.(int64))
+			return int64(hash) % shardNum
+		}, nil
+	case schemapb.DataType_VarChar:
+		return func(pk interface{}, shardNum int64) int64 {
+			hash := typeutil.HashString2Uint32(pk.(string)) // TODO: use HashString?
+			return int64(hash) % shardNum
+		}, nil
+	default:
+		return nil, merr.WrapErrImportFailed(fmt.Sprintf("unexpected pk type %s", pkDataType.String()))
 	}
-	for _, channel := range lo.Keys(channels) {
-		info := &datapb.ChannelWatchInfo{
-			Vchan: &datapb.VchannelInfo{
-				CollectionID: req.GetCollectionID(),
-				ChannelName:  channel,
-			},
-			Schema: req.GetSchema(),
-		}
-		metaCache := metacache.NewMetaCache(info, func(segment *datapb.SegmentInfo) *metacache.BloomFilterSet {
-			return metacache.NewBloomFilterSet()
-		})
-		metaCaches[channel] = metaCache
-	}
-	return metaCaches
 }

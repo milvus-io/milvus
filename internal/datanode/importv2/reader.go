@@ -34,7 +34,3 @@ func NewReader(cm storage.ChunkManager,
 ) Reader {
 	return nil
 }
-
-type Handler interface {
-	Hash(*storage.InsertData) map[string]map[int64]*storage.InsertData // vchannel -> {partitionID -> InsertData}
-}

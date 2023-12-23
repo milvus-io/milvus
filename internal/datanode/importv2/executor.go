@@ -41,7 +41,6 @@ type Executor interface {
 
 type executor struct {
 	manager TaskManager
-	handler Handler
 	syncMgr syncmgr.SyncManager
 	cm      storage.ChunkManager
 
@@ -51,10 +50,9 @@ type executor struct {
 	closeChan chan struct{}
 }
 
-func NewExecutor(manager TaskManager, handler Handler, syncMgr syncmgr.SyncManager, cm storage.ChunkManager) Executor {
+func NewExecutor(manager TaskManager, syncMgr syncmgr.SyncManager, cm storage.ChunkManager) Executor {
 	return &executor{
 		manager:   manager,
-		handler:   handler,
 		syncMgr:   syncMgr,
 		cm:        cm,
 		closeChan: make(chan struct{}),
@@ -177,13 +175,18 @@ func (e *executor) doImportOnFile(count int64, task Task, reader Reader, fileInf
 	if readRows == 0 {
 		return 0, nil
 	}
-	hashedData := e.handler.Hash(insertData)
+	iTask := task.(*ImportTask)
+	hashedData, err := e.Hash(iTask, insertData)
+	if err != nil {
+		return 0, err
+	}
 	futures := make([]*conc.Future[error], 0)
 	syncTasks := make([]*syncmgr.SyncTask, 0)
-	for vchannel, datas := range hashedData {
+	for channelIdx, datas := range hashedData {
+		channel := iTask.vchannels[channelIdx]
 		for partitionID, data := range datas {
-			segmentID := PickSegment(task, fileInfo, vchannel, partitionID)
-			syncTask := NewSyncTask(task.(*ImportTask), segmentID, partitionID, vchannel, data)
+			segmentID := PickSegment(task, fileInfo, channel, partitionID)
+			syncTask := NewSyncTask(iTask, segmentID, partitionID, channel, data)
 			future := e.syncMgr.SyncData(context.TODO(), syncTask)
 			futures = append(futures, future)
 			syncTasks = append(syncTasks, syncTask)
@@ -210,4 +213,40 @@ func (e *executor) doImportOnFile(count int64, task Task, reader Reader, fileInf
 		e.manager.Update(task.GetTaskID(), UpdateSegmentInfo(segmentInfo))
 	}
 	return readRows, nil
+}
+
+func (e *executor) Hash(task *ImportTask, insertData *storage.InsertData) (map[int64]map[int64]*storage.InsertData, error) {
+	var err error
+	// vchannel -> (partitionID -> InsertData)
+	res := make(map[int64]map[int64]*storage.InsertData)
+	for i := range task.vchannels {
+		res[int64(i)] = make(map[int64]*storage.InsertData)
+		for _, partition := range task.partitions {
+			res[int64(i)][partition], err = storage.NewInsertData(task.GetSchema())
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	pkField, err := typeutil.GetPrimaryFieldSchema(task.GetSchema())
+	if err != nil {
+		return nil, err
+	}
+	vchannelNum := int64(len(task.vchannels))
+	partitionNum := int64(len(task.partitions))
+	fn, err := hashFunc(pkField.GetDataType())
+	if err != nil {
+		return nil, err
+	}
+	for i := 0; i < insertData.GetRowNum(); i++ {
+		row := insertData.GetRow(i)
+		pk := row[pkField.GetFieldID()]
+		p1 := fn(pk, vchannelNum)
+		p2 := fn(pk, partitionNum)
+		err = res[p1][p2].Append(row)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return res, nil
 }

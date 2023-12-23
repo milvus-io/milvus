@@ -156,21 +156,52 @@ type ImportTask struct {
 	schema       *schemapb.CollectionSchema
 	segmentsInfo []*datapb.ImportSegmentInfo
 	req          *datapb.ImportRequest
+	vchannels    []string
+	partitions   []int64
 	metaCaches   map[string]metacache.MetaCache
 }
 
 func NewImportTask(req *datapb.ImportRequest) Task {
-	return &ImportTask{
+	task := &ImportTask{
 		ImportTaskV2: &datapb.ImportTaskV2{
 			RequestID:    req.GetRequestID(),
 			TaskID:       req.GetTaskID(),
 			CollectionID: req.GetCollectionID(),
 			State:        datapb.ImportState_Pending,
 		},
-		schema:     req.GetSchema(),
-		req:        req,
-		metaCaches: InitMetaCaches(req),
+		schema: req.GetSchema(),
+		req:    req,
 	}
+	task.Init(req)
+	return task
+}
+
+func (t *ImportTask) Init(req *datapb.ImportRequest) {
+	metaCaches := make(map[string]metacache.MetaCache)
+	channels := make(map[string]struct{})
+	partitions := make(map[int64]struct{})
+	for _, fileInfo := range req.GetFilesInfo() {
+		for _, info := range fileInfo.GetSegmentsInfo() {
+			channels[info.GetVchannel()] = struct{}{}
+			partitions[info.GetPartitionID()] = struct{}{}
+		}
+	}
+	for _, channel := range lo.Keys(channels) {
+		info := &datapb.ChannelWatchInfo{
+			Vchan: &datapb.VchannelInfo{
+				CollectionID: req.GetCollectionID(),
+				ChannelName:  channel,
+			},
+			Schema: req.GetSchema(),
+		}
+		metaCache := metacache.NewMetaCache(info, func(segment *datapb.SegmentInfo) *metacache.BloomFilterSet {
+			return metacache.NewBloomFilterSet()
+		})
+		metaCaches[channel] = metaCache
+	}
+	t.vchannels = lo.Keys(channels)
+	t.partitions = lo.Keys(partitions)
+	t.metaCaches = metaCaches
 }
 
 func (t *ImportTask) GetType() TaskType {
