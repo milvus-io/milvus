@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -39,10 +38,9 @@ type Executor interface {
 }
 
 type executor struct {
-	metaCache metacache.MetaCache
-	manager   TaskManager
-	handler   Handler
-	cm        storage.ChunkManager
+	manager TaskManager
+	handler Handler
+	cm      storage.ChunkManager
 }
 
 func (e *executor) estimateReadRows(schema *schemapb.CollectionSchema) (int64, error) {
@@ -132,8 +130,7 @@ func (e *executor) doImportOnFile(count int64, task Task, fileInfo *datapb.Impor
 	for vchannel, datas := range hashedData {
 		for partitionID, data := range datas {
 			segmentID := PickSegment(task, fileInfo, vchannel, partitionID)
-			AddSegment(e.metaCache, vchannel, segmentID, partitionID, task.GetCollectionID())
-			syncTask := NewSyncTask(segmentID, partitionID, task.GetCollectionID(), vchannel, data)
+			syncTask := NewSyncTask(task.(*ImportTask), segmentID, partitionID, vchannel, data)
 			future := e.handler.SyncData(context.TODO(), syncTask)
 			futures = append(futures, future)
 			syncTasks = append(syncTasks, syncTask)
@@ -146,7 +143,8 @@ func (e *executor) doImportOnFile(count int64, task Task, fileInfo *datapb.Impor
 	for _, syncTask := range syncTasks {
 		segmentID := syncTask.SegmentID()
 		insertBinlogs, statsBinlog, _ := syncTask.Binlogs()
-		segment, ok := e.metaCache.GetSegmentByID(segmentID)
+		metaCache := task.(*ImportTask).metaCaches[syncTask.ChannelName()]
+		segment, ok := metaCache.GetSegmentByID(segmentID)
 		if !ok {
 			return 0, merr.WrapErrSegmentNotFound(segmentID, "import failed")
 		}

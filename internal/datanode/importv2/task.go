@@ -19,6 +19,7 @@ package importv2
 import (
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -189,6 +190,7 @@ type ImportTask struct {
 	schema       *schemapb.CollectionSchema
 	segmentsInfo []*datapb.ImportSegmentInfo
 	req          *datapb.ImportRequest
+	metaCaches   map[string]metacache.MetaCache
 }
 
 func NewImportTask(req *datapb.ImportRequest) Task {
@@ -199,8 +201,9 @@ func NewImportTask(req *datapb.ImportRequest) Task {
 			CollectionID: req.GetCollectionID(),
 			State:        datapb.ImportState_Pending,
 		},
-		schema: req.GetSchema(),
-		req:    req,
+		schema:     req.GetSchema(),
+		req:        req,
+		metaCaches: InitMetaCaches(req),
 	}
 }
 

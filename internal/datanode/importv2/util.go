@@ -31,10 +31,13 @@ func WrapNoTaskError(taskID int64, taskType TaskType) error {
 	return merr.WrapErrImportFailed(fmt.Sprintf("cannot find %s with id %d", taskType.String(), taskID))
 }
 
-func NewSyncTask(segmentID int64, partitionID int64, collectionID int64, vchannel string, insertData *storage.InsertData) *syncmgr.SyncTask {
+func NewSyncTask(task *ImportTask, segmentID, partitionID int64, vchannel string, insertData *storage.InsertData) *syncmgr.SyncTask {
+	metaCache := task.metaCaches[vchannel]
+	AddSegment(metaCache, vchannel, segmentID, partitionID, task.GetCollectionID())
+
 	synTask := syncmgr.NewSyncTask().
 		WithInsertData(insertData).
-		WithCollectionID(collectionID).
+		WithCollectionID(task.GetCollectionID()).
 		WithPartitionID(partitionID).
 		WithChannelName(vchannel).
 		WithSegmentID(segmentID).
@@ -44,7 +47,7 @@ func NewSyncTask(segmentID int64, partitionID int64, collectionID int64, vchanne
 		//WithCheckpoint(wb.checkpoint).
 		//WithSchema(task.GetSchema()).
 		//WithBatchSize(batchSize).
-		//WithMetaCache(wb.metaCache).
+		WithMetaCache(metaCache).
 		//WithMetaWriter(wb.metaWriter).
 		WithFailureCallback(func(err error) {
 			// TODO
@@ -79,4 +82,28 @@ func AddSegment(metaCache metacache.MetaCache, vchannel string, segID, partID, c
 			return bfs
 		}, metacache.UpdateImporting(true))
 	}
+}
+
+func InitMetaCaches(req *datapb.ImportRequest) map[string]metacache.MetaCache {
+	metaCaches := make(map[string]metacache.MetaCache)
+	channels := make(map[string]struct{})
+	for _, fileInfo := range req.GetFilesInfo() {
+		for _, info := range fileInfo.GetSegmentsInfo() {
+			channels[info.GetVchannel()] = struct{}{}
+		}
+	}
+	for _, channel := range lo.Keys(channels) {
+		info := &datapb.ChannelWatchInfo{
+			Vchan: &datapb.VchannelInfo{
+				CollectionID: req.GetCollectionID(),
+				ChannelName:  channel,
+			},
+			Schema: req.GetSchema(),
+		}
+		metaCache := metacache.NewMetaCache(info, func(segment *datapb.SegmentInfo) *metacache.BloomFilterSet {
+			return metacache.NewBloomFilterSet()
+		})
+		metaCaches[channel] = metaCache
+	}
+	return metaCaches
 }
