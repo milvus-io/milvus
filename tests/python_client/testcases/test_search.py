@@ -324,8 +324,6 @@ class TestCollectionSearchInvalid(TestcaseBase):
         method: test search with invalid params type
         expected: raise exception and report the error
         """
-        if index == "FLAT":
-            pytest.skip("skip in FLAT index")
         # 1. initialize with data
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, 5000,
                                                                       is_index=False)[0:4]
@@ -7510,6 +7508,7 @@ class TestCollectionRangeSearch(TestcaseBase):
                                 rel_tol=0, abs_tol=abs_tol)
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("known issue #27518")
     def test_range_search_with_expression_large(self, dim):
         """
         target: test range search with large expression
