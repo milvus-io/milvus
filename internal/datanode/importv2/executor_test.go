@@ -17,24 +17,31 @@
 package importv2
 
 import (
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/stretchr/testify/suite"
+	"testing"
 )
 
-type Reader interface {
-	ReadStats() (*datapb.ImportFileStats, error)
-	Next(count int64) (*storage.InsertData, error)
-	Close()
+type ExecutorSuite struct {
+	suite.Suite
+
+	collectionID int64
+	executor     Executor
 }
 
-func NewReader(cm storage.ChunkManager,
-	schema *schemapb.CollectionSchema,
-	importFile *datapb.ImportFile,
-) Reader {
-	return nil
+func (s *ExecutorSuite) SetupTest() {
+	s.collectionID = 1
+	//manager := NewTaskManager()
+	//s.executor = NewExecutor(manager)
 }
 
-type Handler interface {
-	Hash(*storage.InsertData) map[string]map[int64]*storage.InsertData // vchannel -> {partitionID -> InsertData}
+func (s *ExecutorSuite) TestRunPreImportTask() {
+
+}
+
+func (s *ExecutorSuite) TestRunImportTask() {
+
+}
+
+func TestExecutor(t *testing.T) {
+	suite.Run(t, new(ExecutorSuite))
 }

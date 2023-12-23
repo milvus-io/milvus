@@ -42,6 +42,7 @@ type Executor interface {
 type executor struct {
 	manager TaskManager
 	handler Handler
+	syncMgr syncmgr.SyncManager
 	cm      storage.ChunkManager
 
 	// TODO: dyh, add thread pool
@@ -50,10 +51,11 @@ type executor struct {
 	closeChan chan struct{}
 }
 
-func NewExecutor(manager TaskManager, handler Handler, cm storage.ChunkManager) Executor {
+func NewExecutor(manager TaskManager, handler Handler, syncMgr syncmgr.SyncManager, cm storage.ChunkManager) Executor {
 	return &executor{
 		manager:   manager,
 		handler:   handler,
+		syncMgr:   syncMgr,
 		cm:        cm,
 		closeChan: make(chan struct{}),
 	}
@@ -76,9 +78,9 @@ func (e *executor) Start() {
 				wg.Go(func() error {
 					switch task.GetType() {
 					case PreImportTaskType:
-						e.runPreImportTask(task)
+						e.RunPreImportTask(task)
 					case ImportTaskType:
-						e.runImportTask(task)
+						e.RunImportTask(task)
 					}
 					return nil
 				})
@@ -113,7 +115,7 @@ func (e *executor) handleErr(task Task, err error, msg string) {
 	e.manager.Update(task.GetTaskID(), UpdateState(datapb.ImportState_Failed), UpdateReason(err.Error()))
 }
 
-func (e *executor) runPreImportTask(task Task) {
+func (e *executor) RunPreImportTask(task Task) {
 	e.manager.Update(task.GetTaskID(), UpdateState(datapb.ImportState_InProgress))
 	files := lo.Map(task.(*PreImportTask).GetFileStats(), func(fileStat *datapb.ImportFileStats, _ int) *datapb.ImportFile {
 		return fileStat.GetImportFile()
@@ -142,7 +144,7 @@ func (e *executor) runPreImportTask(task Task) {
 	e.manager.Update(task.GetTaskID(), UpdateState(datapb.ImportState_Completed))
 }
 
-func (e *executor) runImportTask(task Task) {
+func (e *executor) RunImportTask(task Task) {
 	e.manager.Update(task.GetTaskID(), UpdateState(datapb.ImportState_InProgress))
 	count, err := e.estimateReadRows(task.GetSchema())
 	if err != nil {
@@ -151,9 +153,10 @@ func (e *executor) runImportTask(task Task) {
 	}
 	for _, fileInfo := range task.(*ImportTask).req.GetFilesInfo() {
 		for {
-			rows, err := e.doImportOnFile(count, task, fileInfo)
+			reader := NewReader(e.cm, task.GetSchema(), fileInfo.GetImportFile())
+			rows, err := e.doImportOnFile(count, task, reader, fileInfo)
 			if err != nil {
-				e.handleErr(task, err, fmt.Sprintf("do import on file %s failed"))
+				e.handleErr(task, err, fmt.Sprintf("do import failed, file: %s", fileInfo.GetImportFile().String()))
 				return
 			}
 			if rows == 0 {
@@ -164,8 +167,7 @@ func (e *executor) runImportTask(task Task) {
 	e.manager.Update(task.GetTaskID(), UpdateState(datapb.ImportState_Completed))
 }
 
-func (e *executor) doImportOnFile(count int64, task Task, fileInfo *datapb.ImportFileRequestInfo) (int, error) {
-	reader := NewReader(e.cm, task.GetSchema(), fileInfo.GetImportFile())
+func (e *executor) doImportOnFile(count int64, task Task, reader Reader, fileInfo *datapb.ImportFileRequestInfo) (int, error) {
 	insertData, err := reader.Next(count)
 	if err != nil {
 		e.handleErr(task, err, fmt.Sprintf(""))
@@ -182,7 +184,7 @@ func (e *executor) doImportOnFile(count int64, task Task, fileInfo *datapb.Impor
 		for partitionID, data := range datas {
 			segmentID := PickSegment(task, fileInfo, vchannel, partitionID)
 			syncTask := NewSyncTask(task.(*ImportTask), segmentID, partitionID, vchannel, data)
-			future := e.handler.SyncData(context.TODO(), syncTask)
+			future := e.syncMgr.SyncData(context.TODO(), syncTask)
 			futures = append(futures, future)
 			syncTasks = append(syncTasks, syncTask)
 		}

@@ -43,18 +43,6 @@ func (t TaskType) String() string {
 
 type TaskFilter func(task Task) bool
 
-func WithType(taskType TaskType) TaskFilter {
-	return func(task Task) bool {
-		return task.GetType() == taskType
-	}
-}
-
-func WithReq(reqID int64) TaskFilter {
-	return func(task Task) bool {
-		return task.GetRequestID() == reqID
-	}
-}
-
 func WithStates(states ...datapb.ImportState) TaskFilter {
 	return func(task Task) bool {
 		for _, state := range states {
@@ -90,32 +78,10 @@ func UpdateReason(reason string) UpdateAction {
 	}
 }
 
-func UpdateFileStats(fileStats []*datapb.ImportFileStats) UpdateAction {
-	return func(t Task) {
-		switch t.GetType() {
-		case PreImportTaskType:
-			t.(*PreImportTask).PreImportTask.FileStats = fileStats
-		case ImportTaskType:
-			t.(*ImportTask).ImportTaskV2.FileStats = fileStats
-		}
-	}
-}
-
 func UpdateFileStat(idx int, fileStat *datapb.ImportFileStats) UpdateAction {
-	return func(t Task) {
-		switch t.GetType() {
-		case PreImportTaskType:
-			t.(*PreImportTask).PreImportTask.FileStats[idx] = fileStat
-		case ImportTaskType:
-			t.(*ImportTask).ImportTaskV2.FileStats[idx] = fileStat
-		}
-	}
-}
-
-func UpdateSegmentIDs(segmentIDs []int64) UpdateAction {
 	return func(task Task) {
-		if it, ok := task.(*ImportTask); ok {
-			it.ImportTaskV2.SegmentIDs = segmentIDs
+		if it, ok := task.(*PreImportTask); ok {
+			it.PreImportTask.FileStats[idx] = fileStat
 		}
 	}
 }
