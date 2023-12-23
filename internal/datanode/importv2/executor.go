@@ -30,6 +30,8 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
+	"sync"
+	"time"
 )
 
 type Executor interface {
@@ -41,6 +43,55 @@ type executor struct {
 	manager TaskManager
 	handler Handler
 	cm      storage.ChunkManager
+
+	// TODO: dyh, add thread pool
+
+	closeOnce sync.Once
+	closeChan chan struct{}
+}
+
+func NewExecutor(manager TaskManager, handler Handler, cm storage.ChunkManager) Executor {
+	return &executor{
+		manager:   manager,
+		handler:   handler,
+		cm:        cm,
+		closeChan: make(chan struct{}),
+	}
+}
+
+func (e *executor) Start() {
+	log.Info("start import executor")
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-e.closeChan:
+			log.Info("import executor exited")
+			return
+		case <-ticker.C:
+			tasks := e.manager.GetBy(WithStates(datapb.ImportState_Pending))
+			wg, _ := errgroup.WithContext(context.Background())
+			for _, task := range tasks {
+				task := task
+				wg.Go(func() error {
+					switch task.GetType() {
+					case PreImportTaskType:
+						e.runPreImportTask(task)
+					case ImportTaskType:
+						e.runImportTask(task)
+					}
+					return nil
+				})
+			}
+			_ = wg.Wait()
+		}
+	}
+}
+
+func (e *executor) Close() {
+	e.closeOnce.Do(func() {
+		close(e.closeChan)
+	})
 }
 
 func (e *executor) estimateReadRows(schema *schemapb.CollectionSchema) (int64, error) {
