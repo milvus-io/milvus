@@ -57,6 +57,37 @@ func NewSyncTask(task *ImportTask, segmentID, partitionID int64, vchannel string
 	return synTask
 }
 
+func NewImportSegmentInfo(syncTask *syncmgr.SyncTask, task *ImportTask) (*datapb.ImportSegmentInfo, error) {
+	segmentID := syncTask.SegmentID()
+	insertBinlogs, statsBinlog, _ := syncTask.Binlogs()
+	metaCache := task.metaCaches[syncTask.ChannelName()]
+	segment, ok := metaCache.GetSegmentByID(segmentID)
+	if !ok {
+		return nil, merr.WrapErrSegmentNotFound(segmentID, "import failed")
+	}
+	return &datapb.ImportSegmentInfo{
+		SegmentID:    segmentID,
+		ImportedRows: segment.FlushedRows(),
+		Binlogs:      lo.Values(insertBinlogs),
+		Statslogs:    lo.Values(statsBinlog),
+	}, nil
+}
+
+func InitHashedData(channels []string, partitions []int64, schema *schemapb.CollectionSchema) (HashedData, error) {
+	var err error
+	res := make(HashedData)
+	for i := range channels {
+		res[int64(i)] = make(map[int64]*storage.InsertData)
+		for _, partition := range partitions {
+			res[int64(i)][partition], err = storage.NewInsertData(schema)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	return res, nil
+}
+
 func PickSegment(task Task, fileInfo *datapb.ImportFileRequestInfo, vchannel string, partitionID int64) int64 {
 	infos := task.(*ImportTask).GetSegmentsInfo()
 	targets := lo.FilterMap(fileInfo.GetSegmentsInfo(), func(info *datapb.ImportSegmentRequestInfo, _ int) (int64, bool) {
@@ -86,7 +117,7 @@ func AddSegment(metaCache metacache.MetaCache, vchannel string, segID, partID, c
 	}
 }
 
-func hashFunc(pkDataType schemapb.DataType) (func(pk interface{}, shardNum int64) int64, error) {
+func HashFunc(pkDataType schemapb.DataType) (func(pk interface{}, shardNum int64) int64, error) {
 	switch pkDataType {
 	case schemapb.DataType_Int64:
 		return func(pk interface{}, shardNum int64) int64 {

@@ -25,7 +25,6 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/conc"
-	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -33,6 +32,8 @@ import (
 	"sync"
 	"time"
 )
+
+type HashedData map[int64]map[int64]*storage.InsertData // vchannel -> (partitionID -> InsertData)
 
 type Executor interface {
 	Start()
@@ -76,9 +77,9 @@ func (e *executor) Start() {
 				wg.Go(func() error {
 					switch task.GetType() {
 					case PreImportTaskType:
-						e.RunPreImportTask(task)
+						e.PreImport(task)
 					case ImportTaskType:
-						e.RunImportTask(task)
+						e.Import(task)
 					}
 					return nil
 				})
@@ -113,7 +114,7 @@ func (e *executor) handleErr(task Task, err error, msg string) {
 	e.manager.Update(task.GetTaskID(), UpdateState(datapb.ImportState_Failed), UpdateReason(err.Error()))
 }
 
-func (e *executor) RunPreImportTask(task Task) {
+func (e *executor) PreImport(task Task) {
 	e.manager.Update(task.GetTaskID(), UpdateState(datapb.ImportState_InProgress))
 	files := lo.Map(task.(*PreImportTask).GetFileStats(), func(fileStat *datapb.ImportFileStats, _ int) *datapb.ImportFile {
 		return fileStat.GetImportFile()
@@ -142,91 +143,50 @@ func (e *executor) RunPreImportTask(task Task) {
 	e.manager.Update(task.GetTaskID(), UpdateState(datapb.ImportState_Completed))
 }
 
-func (e *executor) RunImportTask(task Task) {
+func (e *executor) Import(task Task) {
 	e.manager.Update(task.GetTaskID(), UpdateState(datapb.ImportState_InProgress))
 	count, err := e.estimateReadRows(task.GetSchema())
 	if err != nil {
 		e.handleErr(task, err, fmt.Sprintf("estimate rows size failed"))
 		return
 	}
+
 	for _, fileInfo := range task.(*ImportTask).req.GetFilesInfo() {
-		for {
-			reader := NewReader(e.cm, task.GetSchema(), fileInfo.GetImportFile())
-			rows, err := e.doImportOnFile(count, task, reader, fileInfo)
-			if err != nil {
-				e.handleErr(task, err, fmt.Sprintf("do import failed, file: %s", fileInfo.GetImportFile().String()))
-				return
-			}
-			if rows == 0 {
-				break
-			}
+		err = e.doImportOnFile(count, task, fileInfo)
+		if err != nil {
+			e.handleErr(task, err, fmt.Sprintf("do import failed, file: %s", fileInfo.GetImportFile().String()))
+			return
 		}
 	}
 	e.manager.Update(task.GetTaskID(), UpdateState(datapb.ImportState_Completed))
 }
 
-func (e *executor) doImportOnFile(count int64, task Task, reader Reader, fileInfo *datapb.ImportFileRequestInfo) (int, error) {
-	insertData, err := reader.Next(count)
-	if err != nil {
-		e.handleErr(task, err, fmt.Sprintf(""))
-		return 0, err
-	}
-	readRows := insertData.GetRowNum()
-	if readRows == 0 {
-		return 0, nil
-	}
-	iTask := task.(*ImportTask)
-	hashedData, err := e.Hash(iTask, insertData)
-	if err != nil {
-		return 0, err
-	}
-	futures := make([]*conc.Future[error], 0)
-	syncTasks := make([]*syncmgr.SyncTask, 0)
-	for channelIdx, datas := range hashedData {
-		channel := iTask.vchannels[channelIdx]
-		for partitionID, data := range datas {
-			segmentID := PickSegment(task, fileInfo, channel, partitionID)
-			syncTask := NewSyncTask(iTask, segmentID, partitionID, channel, data)
-			future := e.syncMgr.SyncData(context.TODO(), syncTask)
-			futures = append(futures, future)
-			syncTasks = append(syncTasks, syncTask)
+func (e *executor) doImportOnFile(count int64, task Task, fileInfo *datapb.ImportFileRequestInfo) error {
+	for {
+		reader := NewReader(e.cm, task.GetSchema(), fileInfo.GetImportFile())
+		insertData, err := reader.Next(count)
+		if err != nil {
+			return err
+		}
+		if insertData.GetRowNum() == 0 {
+			return nil
+		}
+		iTask := task.(*ImportTask)
+		hashedData, err := e.Hash(iTask, insertData)
+		if err != nil {
+			return err
+		}
+		err = e.Sync(iTask, hashedData, fileInfo)
+		if err != nil {
+			return err
 		}
 	}
-	err = conc.AwaitAll(futures...) // TODO: dyh, return futures and syncTasks to increase concurrence
-	if err != nil {
-		return 0, err
-	}
-	for _, syncTask := range syncTasks {
-		segmentID := syncTask.SegmentID()
-		insertBinlogs, statsBinlog, _ := syncTask.Binlogs()
-		metaCache := task.(*ImportTask).metaCaches[syncTask.ChannelName()]
-		segment, ok := metaCache.GetSegmentByID(segmentID)
-		if !ok {
-			return 0, merr.WrapErrSegmentNotFound(segmentID, "import failed")
-		}
-		segmentInfo := &datapb.ImportSegmentInfo{
-			SegmentID:    segmentID,
-			ImportedRows: segment.FlushedRows(),
-			Binlogs:      lo.Values(insertBinlogs),
-			Statslogs:    lo.Values(statsBinlog),
-		}
-		e.manager.Update(task.GetTaskID(), UpdateSegmentInfo(segmentInfo))
-	}
-	return readRows, nil
 }
 
-func (e *executor) Hash(task *ImportTask, insertData *storage.InsertData) (map[int64]map[int64]*storage.InsertData, error) {
-	var err error
-	// vchannel -> (partitionID -> InsertData)
-	res := make(map[int64]map[int64]*storage.InsertData)
-	for i := range task.vchannels {
-		res[int64(i)] = make(map[int64]*storage.InsertData)
-		for _, partition := range task.partitions {
-			res[int64(i)][partition], err = storage.NewInsertData(task.GetSchema())
-			if err != nil {
-				return nil, err
-			}
-		}
+func (e *executor) Hash(task *ImportTask, insertData *storage.InsertData) (HashedData, error) {
+	res, err := InitHashedData(task.vchannels, task.partitions, task.GetSchema())
+	if err != nil {
+		return nil, err
 	}
 	pkField, err := typeutil.GetPrimaryFieldSchema(task.GetSchema())
 	if err != nil {
@@ -234,7 +194,7 @@ func (e *executor) Hash(task *ImportTask, insertData *storage.InsertData) (map[i
 	}
 	vchannelNum := int64(len(task.vchannels))
 	partitionNum := int64(len(task.partitions))
-	fn, err := hashFunc(pkField.GetDataType())
+	fn, err := HashFunc(pkField.GetDataType())
 	if err != nil {
 		return nil, err
 	}
@@ -249,4 +209,31 @@ func (e *executor) Hash(task *ImportTask, insertData *storage.InsertData) (map[i
 		}
 	}
 	return res, nil
+}
+
+func (e *executor) Sync(task *ImportTask, hashedData HashedData, fileInfo *datapb.ImportFileRequestInfo) error {
+	futures := make([]*conc.Future[error], 0)
+	syncTasks := make([]*syncmgr.SyncTask, 0)
+	for channelIdx, datas := range hashedData {
+		channel := task.vchannels[channelIdx]
+		for partitionID, data := range datas {
+			segmentID := PickSegment(task, fileInfo, channel, partitionID)
+			syncTask := NewSyncTask(task, segmentID, partitionID, channel, data)
+			future := e.syncMgr.SyncData(context.TODO(), syncTask)
+			futures = append(futures, future)
+			syncTasks = append(syncTasks, syncTask)
+		}
+	}
+	err := conc.AwaitAll(futures...) // TODO: dyh, return futures and syncTasks to increase concurrence
+	if err != nil {
+		return err
+	}
+	for _, syncTask := range syncTasks {
+		segmentInfo, err := NewImportSegmentInfo(syncTask, task)
+		if err != nil {
+			return err
+		}
+		e.manager.Update(task.GetTaskID(), UpdateSegmentInfo(segmentInfo))
+	}
+	return nil
 }
