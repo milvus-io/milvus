@@ -116,9 +116,10 @@ func (e *executor) handleErr(task Task, err error, msg string) {
 
 func (e *executor) PreImport(task Task) {
 	e.manager.Update(task.GetTaskID(), UpdateState(datapb.ImportState_InProgress))
-	files := lo.Map(task.(*PreImportTask).GetFileStats(), func(fileStat *datapb.ImportFileStats, _ int) *datapb.ImportFile {
-		return fileStat.GetImportFile()
-	})
+	files := lo.Map(task.(*PreImportTask).GetFileStats(),
+		func(fileStat *datapb.ImportFileStats, _ int) *datapb.ImportFile {
+			return fileStat.GetImportFile()
+		})
 
 	wg, _ := errgroup.WithContext(context.TODO()) // TODO: dyh, set timeout
 	for i, file := range files {
@@ -126,6 +127,7 @@ func (e *executor) PreImport(task Task) {
 		file := file
 		wg.Go(func() error {
 			reader := NewReader(e.cm, task.GetSchema(), file)
+			defer reader.Close()
 			stat, err := reader.ReadStats()
 			if err != nil {
 				e.handleErr(task, err, "read stats failed")
@@ -152,27 +154,29 @@ func (e *executor) Import(task Task) {
 	}
 
 	for _, fileInfo := range task.(*ImportTask).req.GetFilesInfo() {
-		err = e.doImportOnFile(count, task, fileInfo)
+		err = e.importFile(count, task, fileInfo)
 		if err != nil {
-			e.handleErr(task, err, fmt.Sprintf("do import failed, file: %s", fileInfo.GetImportFile().String()))
+			e.handleErr(task, err, fmt.Sprintf("do import failed, file: %s",
+				fileInfo.GetImportFile().String()))
 			return
 		}
 	}
 	e.manager.Update(task.GetTaskID(), UpdateState(datapb.ImportState_Completed))
 }
 
-func (e *executor) doImportOnFile(count int64, task Task, fileInfo *datapb.ImportFileRequestInfo) error {
+func (e *executor) importFile(count int64, task Task, fileInfo *datapb.ImportFileRequestInfo) error {
+	reader := NewReader(e.cm, task.GetSchema(), fileInfo.GetImportFile())
+	defer reader.Close()
 	for {
-		reader := NewReader(e.cm, task.GetSchema(), fileInfo.GetImportFile())
-		insertData, err := reader.Next(count)
+		data, err := reader.Next(count)
 		if err != nil {
 			return err
 		}
-		if insertData.GetRowNum() == 0 {
+		if data.GetRowNum() == 0 {
 			return nil
 		}
 		iTask := task.(*ImportTask)
-		hashedData, err := e.Hash(iTask, insertData)
+		hashedData, err := e.Hash(iTask, data)
 		if err != nil {
 			return err
 		}

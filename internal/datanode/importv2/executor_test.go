@@ -17,6 +17,7 @@
 package importv2
 
 import (
+	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
 	"github.com/stretchr/testify/suite"
 	"testing"
 )
@@ -30,8 +31,11 @@ type ExecutorSuite struct {
 
 func (s *ExecutorSuite) SetupTest() {
 	s.collectionID = 1
-	//manager := NewTaskManager()
-	//s.executor = NewExecutor(manager)
+	manager := NewTaskManager()
+
+	syncMgr := syncmgr.NewMockSyncManager(s.T())
+
+	s.executor = NewExecutor(manager, syncMgr, nil)
 }
 
 func (s *ExecutorSuite) TestRunPreImportTask() {
