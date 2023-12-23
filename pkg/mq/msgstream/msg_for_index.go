@@ -86,6 +86,68 @@ func (it *CreateIndexMsg) Size() int {
 	return proto.Size(&it.CreateIndexRequest)
 }
 
+// AlterIndexMsg is a message pack that contains create index request
+type AlterIndexMsg struct {
+	BaseMsg
+	milvuspb.AlterIndexRequest
+}
+
+// interface implementation validation
+var _ TsMsg = &AlterIndexMsg{}
+
+// ID returns the ID of this message pack
+func (it *AlterIndexMsg) ID() UniqueID {
+	return it.Base.MsgID
+}
+
+// SetID set the ID of this message pack
+func (it *AlterIndexMsg) SetID(id UniqueID) {
+	it.Base.MsgID = id
+}
+
+// Type returns the type of this message pack
+func (it *AlterIndexMsg) Type() MsgType {
+	return it.Base.MsgType
+}
+
+// SourceID indicates which component generated this message
+func (it *AlterIndexMsg) SourceID() int64 {
+	return it.Base.SourceID
+}
+
+// Marshal is used to serialize a message pack to byte array
+func (it *AlterIndexMsg) Marshal(input TsMsg) (MarshalType, error) {
+	AlterIndexMsg := input.(*AlterIndexMsg)
+	AlterIndexRequest := &AlterIndexMsg.AlterIndexRequest
+	mb, err := proto.Marshal(AlterIndexRequest)
+	if err != nil {
+		return nil, err
+	}
+	return mb, nil
+}
+
+// Unmarshal is used to deserialize a message pack from byte array
+func (it *AlterIndexMsg) Unmarshal(input MarshalType) (TsMsg, error) {
+	alterIndexRequest := milvuspb.AlterIndexRequest{}
+	in, err := convertToByteArray(input)
+	if err != nil {
+		return nil, err
+	}
+	err = proto.Unmarshal(in, &alterIndexRequest)
+	if err != nil {
+		return nil, err
+	}
+	alterIndexMsg := &AlterIndexMsg{AlterIndexRequest: alterIndexRequest}
+	alterIndexMsg.BeginTimestamp = alterIndexMsg.GetBase().GetTimestamp()
+	alterIndexMsg.EndTimestamp = alterIndexMsg.GetBase().GetTimestamp()
+
+	return alterIndexMsg, nil
+}
+
+func (it *AlterIndexMsg) Size() int {
+	return proto.Size(&it.AlterIndexRequest)
+}
+
 // DropIndexMsg is a message pack that contains drop index request
 type DropIndexMsg struct {
 	BaseMsg

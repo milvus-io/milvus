@@ -64,6 +64,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
+	"github.com/milvus-io/milvus/pkg/util/expr"
 	"github.com/milvus-io/milvus/pkg/util/gc"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/lifetime"
@@ -142,6 +143,7 @@ func NewQueryNode(ctx context.Context, factory dependency.Factory) *QueryNode {
 	}
 
 	node.tSafeManager = tsafe.NewTSafeReplica()
+	expr.Register("querynode", node)
 	return node
 }
 
@@ -234,7 +236,11 @@ func (node *QueryNode) InitSegcore() error {
 
 	mmapDirPath := paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue()
 	if len(mmapDirPath) == 0 {
-		mmapDirPath = paramtable.Get().LocalStorageCfg.Path.GetValue()
+		paramtable.Get().Save(
+			paramtable.Get().QueryNodeCfg.MmapDirPath.Key,
+			path.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), "mmap"),
+		)
+		mmapDirPath = paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue()
 	}
 	chunkCachePath := path.Join(mmapDirPath, "chunk_cache")
 	policy := paramtable.Get().QueryNodeCfg.ReadAheadPolicy.GetValue()

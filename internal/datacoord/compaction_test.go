@@ -81,8 +81,6 @@ func (s *CompactionPlanHandlerSuite) TestRemoveTasksByChannel() {
 }
 
 func (s *CompactionPlanHandlerSuite) TestCheckResult() {
-	s.mockAlloc.EXPECT().allocTimestamp(mock.Anything).Return(19530, nil)
-
 	session := &SessionManagerImpl{
 		sessions: struct {
 			sync.RWMutex
@@ -102,8 +100,48 @@ func (s *CompactionPlanHandlerSuite) TestCheckResult() {
 			},
 		},
 	}
-	handler := newCompactionPlanHandler(session, nil, nil, s.mockAlloc)
-	handler.checkResult()
+	{
+		s.mockAlloc.EXPECT().allocTimestamp(mock.Anything).Return(0, errors.New("mock")).Once()
+		handler := newCompactionPlanHandler(session, nil, nil, s.mockAlloc)
+		handler.checkResult()
+	}
+
+	{
+		s.mockAlloc.EXPECT().allocTimestamp(mock.Anything).Return(19530, nil).Once()
+		handler := newCompactionPlanHandler(session, nil, nil, s.mockAlloc)
+		handler.checkResult()
+	}
+}
+
+func (s *CompactionPlanHandlerSuite) TestClean() {
+	startTime := tsoutil.ComposeTSByTime(time.Now(), 0)
+	cleanTime := tsoutil.ComposeTSByTime(time.Now().Add(-2*time.Hour), 0)
+	c := &compactionPlanHandler{
+		allocator: s.mockAlloc,
+		plans: map[int64]*compactionTask{
+			1: {
+				state: executing,
+			},
+			2: {
+				state: pipelining,
+			},
+			3: {
+				state: completed,
+				plan: &datapb.CompactionPlan{
+					StartTime: startTime,
+				},
+			},
+			4: {
+				state: completed,
+				plan: &datapb.CompactionPlan{
+					StartTime: cleanTime,
+				},
+			},
+		},
+	}
+
+	c.Clean()
+	s.Len(c.plans, 3)
 }
 
 func (s *CompactionPlanHandlerSuite) TestHandleL0CompactionResults() {
@@ -679,6 +717,9 @@ func TestCompactionPlanHandler_completeCompaction(t *testing.T) {
 
 		err := c.completeCompaction(&compactionResult)
 		assert.NoError(t, err)
+		assert.Nil(t, compactionResult.GetSegments()[0].GetInsertLogs())
+		assert.Nil(t, compactionResult.GetSegments()[0].GetField2StatslogPaths())
+		assert.Nil(t, compactionResult.GetSegments()[0].GetDeltalogs())
 	})
 
 	t.Run("test empty result merge compaction task", func(t *testing.T) {

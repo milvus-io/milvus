@@ -24,9 +24,11 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -324,6 +326,11 @@ func (wb *writeBufferBase) bufferInsert(insertMsgs []*msgstream.InsertMsg, start
 		segmentPKData[segmentID] = pkData
 		wb.metaCache.UpdateSegments(metacache.UpdateBufferedRows(segBuf.insertBuffer.rows),
 			metacache.WithSegmentIDs(segmentID))
+
+		totalSize := lo.SumBy(pkData, func(iData storage.FieldData) float64 {
+			return float64(iData.GetMemorySize())
+		})
+		metrics.DataNodeFlowGraphBufferDataSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), fmt.Sprint(wb.collectionID)).Add(totalSize)
 	}
 
 	return segmentPKData, nil
@@ -332,7 +339,8 @@ func (wb *writeBufferBase) bufferInsert(insertMsgs []*msgstream.InsertMsg, start
 // bufferDelete buffers DeleteMsg into DeleteData.
 func (wb *writeBufferBase) bufferDelete(segmentID int64, pks []storage.PrimaryKey, tss []typeutil.Timestamp, startPos, endPos *msgpb.MsgPosition) error {
 	segBuf := wb.getOrCreateBuffer(segmentID)
-	segBuf.deltaBuffer.Buffer(pks, tss, startPos, endPos)
+	bufSize := segBuf.deltaBuffer.Buffer(pks, tss, startPos, endPos)
+	metrics.DataNodeFlowGraphBufferDataSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), fmt.Sprint(wb.collectionID)).Add(float64(bufSize))
 	return nil
 }
 
@@ -381,6 +389,7 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) syn
 		return nil
 	}
 	var batchSize int64
+	var totalMemSize float64
 	var tsFrom, tsTo uint64
 
 	insert, delta, timeRange, startPos := wb.yieldBuffer(segmentID)
@@ -391,6 +400,10 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) syn
 	actions := []metacache.SegmentAction{metacache.RollStats()}
 	if insert != nil {
 		batchSize = int64(insert.GetRowNum())
+		totalMemSize += float64(insert.GetMemorySize())
+	}
+	if delta != nil {
+		totalMemSize += float64(delta.Size())
 	}
 	actions = append(actions, metacache.StartSyncing(batchSize))
 	wb.metaCache.UpdateSegments(metacache.MergeSegmentAction(actions...), metacache.WithSegmentIDs(segmentID))
@@ -454,6 +467,8 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) syn
 		}
 		syncTask = task
 	}
+
+	metrics.DataNodeFlowGraphBufferDataSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), fmt.Sprint(wb.collectionID)).Sub(totalMemSize)
 
 	return syncTask
 }

@@ -129,6 +129,13 @@ Task::CreateDriversLocked(std::shared_ptr<Task>& self,
     }
 }
 
+void
+Task::Terminate(TaskState state) {
+    for (auto& driver : drivers_) {
+        driver->CloseByTask();
+    }
+}
+
 RowVectorPtr
 Task::Next(ContinueFuture* future) {
     // NOTE: Task::Next is single-threaded execution

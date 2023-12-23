@@ -7597,6 +7597,7 @@ class TestCollectionRangeSearch(TestcaseBase):
                                 rel_tol=0, abs_tol=abs_tol)
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("known issue #27518")
     def test_range_search_with_expression_large(self, dim):
         """
         target: test range search with large expression

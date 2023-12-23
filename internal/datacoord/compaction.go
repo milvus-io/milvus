@@ -134,14 +134,24 @@ func newCompactionPlanHandler(sessions SessionManager, cm *ChannelManager, meta 
 
 func (c *compactionPlanHandler) checkResult() {
 	// deal results
+	ts, err := c.GetCurrentTS()
+	if err != nil {
+		log.Warn("fail to check result", zap.Error(err))
+		return
+	}
+	_ = c.updateCompaction(ts)
+}
+
+func (c *compactionPlanHandler) GetCurrentTS() (Timestamp, error) {
 	interval := Params.DataCoordCfg.CompactionRPCTimeout.GetAsDuration(time.Second)
 	ctx, cancel := context.WithTimeout(context.Background(), interval)
 	defer cancel()
 	ts, err := c.allocator.allocTimestamp(ctx)
 	if err != nil {
 		log.Warn("unable to alloc timestamp", zap.Error(err))
+		return 0, err
 	}
-	_ = c.updateCompaction(ts)
+	return ts, nil
 }
 
 func (c *compactionPlanHandler) schedule() {
@@ -156,7 +166,7 @@ func (c *compactionPlanHandler) schedule() {
 func (c *compactionPlanHandler) start() {
 	interval := Params.DataCoordCfg.CompactionCheckIntervalInSeconds.GetAsDuration(time.Second)
 	c.stopCh = make(chan struct{})
-	c.stopWg.Add(2)
+	c.stopWg.Add(3)
 
 	go func() {
 		defer c.stopWg.Done()
@@ -192,6 +202,37 @@ func (c *compactionPlanHandler) start() {
 			}
 		}
 	}()
+
+	go func() {
+		defer c.stopWg.Done()
+		cleanTicker := time.NewTicker(30 * time.Minute)
+		defer cleanTicker.Stop()
+		for {
+			select {
+			case <-c.stopCh:
+				log.Info("Compaction handler quit clean")
+				return
+			case <-cleanTicker.C:
+				c.Clean()
+			}
+		}
+	}()
+}
+
+func (c *compactionPlanHandler) Clean() {
+	current := tsoutil.GetCurrentTime()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	for id, task := range c.plans {
+		if task.state == executing || task.state == pipelining {
+			continue
+		}
+		// after timeout + 1h, the plan will be cleaned
+		if c.isTimeout(current, task.plan.GetStartTime(), task.plan.GetTimeoutInSeconds()+60*60) {
+			delete(c.plans, id)
+		}
+	}
 }
 
 func (c *compactionPlanHandler) stop() {
@@ -355,9 +396,8 @@ func (c *compactionPlanHandler) completeCompaction(result *datapb.CompactionPlan
 	default:
 		return errors.New("unknown compaction type")
 	}
-	c.plans[planID] = c.plans[planID].shadowClone(setState(completed), setResult(result))
-	// TODO: when to clean task list
 	UpdateCompactionSegmentSizeMetrics(result.GetSegments())
+	c.plans[planID] = c.plans[planID].shadowClone(setState(completed), setResult(result), cleanLogPath())
 	return nil
 }
 
@@ -571,6 +611,26 @@ func setStartTime(startTime uint64) compactionTaskOpt {
 func setResult(result *datapb.CompactionPlanResult) compactionTaskOpt {
 	return func(task *compactionTask) {
 		task.result = result
+	}
+}
+
+// cleanLogPath clean the log info in the compactionTask object for avoiding the memory leak
+func cleanLogPath() compactionTaskOpt {
+	return func(task *compactionTask) {
+		if task.plan.GetSegmentBinlogs() != nil {
+			for _, binlogs := range task.plan.GetSegmentBinlogs() {
+				binlogs.FieldBinlogs = nil
+				binlogs.Field2StatslogPaths = nil
+				binlogs.Deltalogs = nil
+			}
+		}
+		if task.result.GetSegments() != nil {
+			for _, segment := range task.result.GetSegments() {
+				segment.InsertLogs = nil
+				segment.Deltalogs = nil
+				segment.Field2StatslogPaths = nil
+			}
+		}
 	}
 }
 
