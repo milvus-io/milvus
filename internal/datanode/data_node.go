@@ -22,6 +22,7 @@ package datanode
 import (
 	"context"
 	"fmt"
+	"github.com/milvus-io/milvus/internal/datanode/importv2"
 	"io"
 	"math/rand"
 	"os"
@@ -90,6 +91,7 @@ type DataNode struct {
 
 	syncMgr            syncmgr.SyncManager
 	writeBufferManager writebuffer.BufferManager
+	importManager      importv2.Manager
 
 	clearSignal              chan string // vchannel name
 	segmentCache             *Cache

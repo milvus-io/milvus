@@ -781,16 +781,25 @@ message autoIDRange {
   int64 end = 2;
 }
 
+message ImportSegmentRequestInfo {
+  int64 segmentID = 1;
+  int64 partitionID = 2;
+  string vchannel = 3;
+  autoIDRange autoID_ranges = 4;
+}
+
+message ImportFileRequestInfo {
+  ImportFile import_file = 1;
+  repeated ImportSegmentRequestInfo segments_info = 2;
+}
+
 message ImportRequest {
   string clusterID = 1;
   int64 requestID = 2;
   int64 taskID = 3;
   int64 collectionID = 4;
-  int64 partitionID = 5;
-  schema.CollectionSchema schema = 6;
-  repeated ImportFile import_files = 7;
-  map<int64, autoIDRange> autoID_ranges = 8;
-  map<int64, string> segment_channels = 9;
+  schema.CollectionSchema schema = 5;
+  repeated ImportFileRequestInfo files_info = 6;
 }
 
 message QueryPreImportRequest {
@@ -823,11 +832,10 @@ message QueryImportRequest {
 
 message ImportSegmentInfo {
   int64 segmentID = 1;
-  int64 total_rows = 2;
-  int64 imported_rows = 3;
-  repeated FieldBinlog binlogs = 4;
-  repeated FieldBinlog statslogs = 5;
-  repeated index.IndexFilePathInfo index_infos = 6;
+  int64 imported_rows = 2;
+  repeated FieldBinlog binlogs = 3;
+  repeated FieldBinlog statslogs = 4;
+  repeated index.IndexFilePathInfo index_infos = 5;
 }
 
 message QueryImportResponse {
@@ -865,7 +873,7 @@ message ImportTaskV2 {
   int64 nodeID = 6;
   ImportState state = 7;
   string reason = 8;
-  repeated ImportFile files = 9;
+  repeated ImportFileStats file_stats = 9;
 }
 
 enum GcCommand {
