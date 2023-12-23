@@ -2016,9 +2016,7 @@ func TestSearchTask_Research(t *testing.T) {
 			node:      node,
 		}
 		assert.Len(t, st.result.Results.Scores, 3)
-		fmt.Println(st.SearchRequest)
 		err := st.Research()
-		fmt.Println(st.SearchRequest)
 		assert.NoError(t, err)
 		assert.Len(t, st.result.Results.Scores, topk)
 		scoresResult := []float32{1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0}

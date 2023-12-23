@@ -356,7 +356,7 @@ TEST(Query, ExecTerm) {
     int topk = 5;
     auto json = SearchResultToJson(*sr);
     ASSERT_EQ(sr->total_nq_, num_queries);
-    // ASSERT_EQ(sr->unity_topK_, topk);
+    ASSERT_EQ(sr->unity_topK_, topk);
 }
 
 TEST(Query, ExecEmpty) {

@@ -63,7 +63,9 @@ func searchSegments(ctx context.Context, segments []Segment, segType SegmentType
 			// record search time
 			tr := timerecord.NewTimeRecorder("searchOnSegments")
 			searchResult, err := seg.Search(ctx, searchReq)
-			emptySeg[i] = bool(searchResult.isEmpty)
+			if err == nil {
+				emptySeg[i] = bool(searchResult.isEmpty)
+			}
 			errs[i] = err
 			resultCh <- searchResult
 			// update metrics
@@ -80,7 +82,7 @@ func searchSegments(ctx context.Context, segments []Segment, segType SegmentType
 	searchResults := make([]*SearchResult, 0)
 	emptyResults := make([]*SearchResult, 0)
 	for result := range resultCh {
-		if bool(result.isEmpty) {
+		if result == nil || bool(result.isEmpty) {
 			emptyResults = append(emptyResults, result)
 		} else {
 			searchResults = append(searchResults, result)

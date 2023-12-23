@@ -217,10 +217,6 @@ func getNq(req *milvuspb.SearchRequest) (int64, error) {
 func (t *searchTask) PreExecute(ctx context.Context) error {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Search-PreExecute")
 	defer sp.End()
-	// retry search, do not construct again
-	if t.SearchRequest.EnsureSearchQuality {
-		return nil
-	}
 
 	t.Base.MsgType = commonpb.MsgType_Search
 	t.Base.SourceID = paramtable.GetNodeID()
@@ -295,8 +291,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	t.SearchRequest.OutputFieldsId = outputFieldIDs
 
 	partitionNames := t.request.GetPartitionNames()
-
-	if t.request.GetDslType() == commonpb.DslType_BoolExprV1 {
+	if t.request.GetDslType() == commonpb.DslType_BoolExprV1 && t.SearchRequest.EnsureSearchQuality && t.SearchRequest.SerializedExprPlan != nil {
 		annsField, err := funcutil.GetAttrByKeyFromRepeatedKV(AnnsFieldKey, t.request.GetSearchParams())
 		if err != nil || len(annsField) == 0 {
 			if enableMultipleVectorFields {
@@ -440,7 +435,7 @@ func (t *searchTask) Execute(ctx context.Context) error {
 		return errors.Wrap(err, "failed to search")
 	}
 
-	log.Info("Search Execute done.",
+	log.Debug("Search Execute done.",
 		zap.Int64("idd", t.ID()),
 		zap.Int64("collection", t.GetCollectionID()),
 		zap.Int64s("partitionIDs", t.GetPartitionIDs()))
@@ -609,18 +604,14 @@ func (t *searchTask) estimateResultSize(nq int64, topK int64) (int64, error) {
 
 func (t *searchTask) Research() error {
 	newt := &searchTask{
-		ctx:              t.ctx,
-		Condition:        NewTaskCondition(t.ctx),
-		SearchRequest:    typeutil.Clone(t.SearchRequest),
-		collectionName:   t.collectionName,
-		request:          t.request,
-		schema:           t.schema,
-		offset:           t.offset,
-		userOutputFields: t.userOutputFields,
-		tr:               timerecord.NewTimeRecorder("re-search"),
-		qc:               t.node.(*Proxy).queryCoord,
-		node:             t.node,
-		lb:               t.node.(*Proxy).lbPolicy,
+		ctx:           t.ctx,
+		Condition:     NewTaskCondition(t.ctx),
+		SearchRequest: typeutil.Clone(t.SearchRequest),
+		request:       t.request,
+		tr:            timerecord.NewTimeRecorder("re-search"),
+		qc:            t.node.(*Proxy).queryCoord,
+		node:          t.node,
+		lb:            t.node.(*Proxy).lbPolicy,
 	}
 	newt.SearchRequest.EnsureSearchQuality = true
 	searchResults, err := t.node.(*Proxy).search(t.ctx, newt)
