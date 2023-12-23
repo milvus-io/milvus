@@ -775,7 +775,7 @@ LoadFieldDatasFromRemote(std::vector<std::string>& remote_files,
 
         channel->close();
     } catch (std::exception e) {
-        LOG_SEGCORE_INFO_ << "failed to load data from remote: " << e.what();
+        LOG_INFO("failed to load data from remote: {}", e.what());
         channel->close(std::move(e));
     }
 }
