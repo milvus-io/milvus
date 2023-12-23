@@ -23,6 +23,10 @@ class ApiCollectionSchemaWrapper:
         return self.collection_schema.primary_field if self.collection_schema else None
 
     @property
+    def partition_key_field(self):
+        return self.collection_schema.partition_key_field if self.collection_schema else None
+
+    @property
     def fields(self):
         return self.collection_schema.fields if self.collection_schema else None
 
@@ -33,6 +37,25 @@ class ApiCollectionSchemaWrapper:
     @property
     def auto_id(self):
         return self.collection_schema.auto_id if self.collection_schema else None
+
+    @property
+    def enable_dynamic_field(self):
+        return self.collection_schema.enable_dynamic_field if self.collection_schema else None
+
+    @property
+    def to_dict(self):
+        return self.collection_schema.to_dict if self.collection_schema else None
+
+    @property
+    def verify(self):
+        return self.collection_schema.verify if self.collection_schema else None
+
+    def add_field(self, field_name, datatype, check_task=None, check_items=None, **kwargs):
+        func_name = sys._getframe().f_code.co_name
+        response, is_succ = api_request([self.collection_schema.add_field, field_name, datatype], **kwargs)
+        check_result = ResponseChecker(response, func_name, check_task, check_items,
+                                       field_name=field_name, datatype=datatype, **kwargs).run()
+        return response, check_result
 
 
 class ApiFieldSchemaWrapper:
