@@ -47,8 +47,8 @@ class ThreadPool {
             max_threads_size_ = 256;
         }
         LOG_INFO("Init thread pool:{}", name_)
-                          << " with min worker num:" << min_threads_size_
-                          << " and max worker num:" << max_threads_size_;
+            << " with min worker num:" << min_threads_size_
+            << " and max worker num:" << max_threads_size_;
         Init();
     }
 
