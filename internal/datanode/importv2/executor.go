@@ -19,6 +19,13 @@ package importv2
 import (
 	"context"
 	"fmt"
+	"sync"
+	"time"
+
+	"github.com/samber/lo"
+	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -26,11 +33,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-	"github.com/samber/lo"
-	"go.uber.org/zap"
-	"golang.org/x/sync/errgroup"
-	"sync"
-	"time"
 )
 
 type HashedData [][]*storage.InsertData // vchannel -> (partitionID -> InsertData)
@@ -153,7 +155,7 @@ func (e *executor) Import(task Task) {
 	e.manager.Update(task.GetTaskID(), UpdateState(datapb.ImportState_InProgress))
 	count, err := e.estimateReadRows(task.GetSchema())
 	if err != nil {
-		e.handleErr(task, err, fmt.Sprintf("estimate rows size failed"))
+		e.handleErr(task, err, "estimate rows size failed")
 		return
 	}
 

@@ -18,6 +18,9 @@ package importv2
 
 import (
 	"fmt"
+
+	"github.com/samber/lo"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
@@ -26,7 +29,6 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-	"github.com/samber/lo"
 )
 
 func WrapNoTaskError(taskID int64, taskType TaskType) error {
@@ -43,17 +45,18 @@ func NewSyncTask(task *ImportTask, segmentID, partitionID int64, vchannel string
 		WithPartitionID(partitionID).
 		WithChannelName(vchannel).
 		WithSegmentID(segmentID).
-		//WithStartPosition(startPos).
-		//WithTimeRange(tsFrom, tsTo).
-		//WithLevel(segmentInfo.Level()).
-		//WithCheckpoint(wb.checkpoint).
-		//WithSchema(task.GetSchema()).
-		//WithBatchSize(batchSize).
-		WithMetaCache(metaCache).
-		//WithMetaWriter(wb.metaWriter).
-		WithFailureCallback(func(err error) {
-			// TODO
-		})
+		WithMetaCache(metaCache)
+
+	// TODO: dyh, fix these
+	// WithStartPosition(startPos).
+	// WithTimeRange(tsFrom, tsTo).
+	// WithLevel(segmentInfo.Level()).
+	// WithCheckpoint(wb.checkpoint).
+	// WithSchema(task.GetSchema()).
+	// WithBatchSize(batchSize).
+	// WithMetaWriter(wb.metaWriter).
+	// WithFailureCallback()
+
 	return synTask
 }
 

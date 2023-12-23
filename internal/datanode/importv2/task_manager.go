@@ -92,7 +92,5 @@ OUTER:
 func (m *taskManager) Remove(taskID int64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, ok := m.tasks[taskID]; ok {
-		delete(m.tasks, taskID)
-	}
+	delete(m.tasks, taskID)
 }

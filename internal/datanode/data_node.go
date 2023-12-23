@@ -22,7 +22,6 @@ package datanode
 import (
 	"context"
 	"fmt"
-	"github.com/milvus-io/milvus/internal/datanode/importv2"
 	"io"
 	"math/rand"
 	"os"
@@ -38,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/broker"
+	"github.com/milvus-io/milvus/internal/datanode/importv2"
 	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
 	"github.com/milvus-io/milvus/internal/datanode/writebuffer"
 	"github.com/milvus-io/milvus/internal/kv"

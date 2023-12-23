@@ -17,9 +17,11 @@
 package importv2
 
 import (
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/stretchr/testify/assert"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 )
 
 func TestImportManager(t *testing.T) {
