@@ -241,7 +241,6 @@ type deleteRunner struct {
 
 	// task queue
 	queue *dmTaskQueue
-	tasks chan *deleteTask
 }
 
 func (dr *deleteRunner) Init(ctx context.Context) error {
@@ -374,8 +373,6 @@ func (dr *deleteRunner) getStreamingQueryAndDelteFunc(plan *planpb.PlanNode) exe
 			zap.Strings("channels", channelIDs),
 			zap.Int64("nodeID", nodeID))
 
-		ctx, cancel := context.WithCancel(ctx)
-		defer cancel()
 		// set plan
 		_, outputFieldIDs := translatePkOutputFields(dr.schema)
 		outputFieldIDs = append(outputFieldIDs, common.TimeStampField)
@@ -417,6 +414,8 @@ func (dr *deleteRunner) getStreamingQueryAndDelteFunc(plan *planpb.PlanNode) exe
 			Scope:       querypb.DataScope_All,
 		}
 
+		ctx, cancel := context.WithCancel(ctx)
+		defer cancel()
 		log.Debug("start query for delete", zap.Int64("msgID", dr.msgID))
 		client, err := qn.QueryStream(ctx, queryReq)
 		if err != nil {
@@ -424,10 +423,10 @@ func (dr *deleteRunner) getStreamingQueryAndDelteFunc(plan *planpb.PlanNode) exe
 			return err
 		}
 
-		dr.tasks = make(chan *deleteTask, 256)
-		go dr.receiveQueryResult(ctx, client)
+		taskCh := make(chan *deleteTask, 256)
+		go dr.receiveQueryResult(ctx, client, taskCh)
 		// wait all task finish
-		for task := range dr.tasks {
+		for task := range taskCh {
 			err := task.WaitToFinish()
 			if err != nil {
 				return err
@@ -443,9 +442,9 @@ func (dr *deleteRunner) getStreamingQueryAndDelteFunc(plan *planpb.PlanNode) exe
 	}
 }
 
-func (dr *deleteRunner) receiveQueryResult(ctx context.Context, client querypb.QueryNode_QueryStreamClient) {
+func (dr *deleteRunner) receiveQueryResult(ctx context.Context, client querypb.QueryNode_QueryStreamClient, taskCh chan *deleteTask) {
 	defer func() {
-		close(dr.tasks)
+		close(taskCh)
 	}()
 
 	for {
@@ -473,7 +472,7 @@ func (dr *deleteRunner) receiveQueryResult(ctx context.Context, client querypb.Q
 			return
 		}
 
-		dr.tasks <- task
+		taskCh <- task
 	}
 }
 
