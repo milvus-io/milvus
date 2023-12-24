@@ -236,6 +236,7 @@ type deleteRunner struct {
 
 	// for query
 	msgID int64
+	ts    uint64
 	lb    LBPolicy
 	err   error
 
@@ -378,16 +379,6 @@ func (dr *deleteRunner) getStreamingQueryAndDelteFunc(plan *planpb.PlanNode) exe
 		outputFieldIDs = append(outputFieldIDs, common.TimeStampField)
 		plan.OutputFieldIds = outputFieldIDs
 
-		ts, err := dr.tsoAllocatorIns.AllocOne(ctx)
-		if err != nil {
-			return err
-		}
-
-		dr.msgID, err = dr.idAllocator.AllocOne()
-		if err != nil {
-			return err
-		}
-
 		serializedPlan, err := proto.Marshal(plan)
 		if err != nil {
 			return err
@@ -401,14 +392,14 @@ func (dr *deleteRunner) getStreamingQueryAndDelteFunc(plan *planpb.PlanNode) exe
 					commonpbutil.WithSourceID(paramtable.GetNodeID()),
 					commonpbutil.WithTargetID(nodeID),
 				),
-				MvccTimestamp:      ts,
+				MvccTimestamp:      dr.ts,
 				ReqID:              paramtable.GetNodeID(),
 				DbID:               0, // TODO
 				CollectionID:       dr.collectionID,
 				PartitionIDs:       partitionIDs,
 				SerializedExprPlan: serializedPlan,
 				OutputFieldsId:     outputFieldIDs,
-				GuaranteeTimestamp: parseGuaranteeTsFromConsistency(ts, ts, dr.req.ConsistencyLevel),
+				GuaranteeTimestamp: parseGuaranteeTsFromConsistency(dr.ts, dr.ts, dr.req.ConsistencyLevel),
 			},
 			DmlChannels: channelIDs,
 			Scope:       querypb.DataScope_All,
@@ -478,8 +469,19 @@ func (dr *deleteRunner) receiveQueryResult(ctx context.Context, client querypb.Q
 
 func (dr *deleteRunner) complexDelete(ctx context.Context, plan *planpb.PlanNode) error {
 	rc := timerecord.NewTimeRecorder("QueryStreamDelete")
+	var err error
 
-	err := dr.lb.Execute(ctx, CollectionWorkLoad{
+	dr.msgID, err = dr.idAllocator.AllocOne()
+	if err != nil {
+		return err
+	}
+
+	dr.ts, err = dr.tsoAllocatorIns.AllocOne(ctx)
+	if err != nil {
+		return err
+	}
+
+	err = dr.lb.Execute(ctx, CollectionWorkLoad{
 		db:             dr.req.GetDbName(),
 		collectionName: dr.req.GetCollectionName(),
 		collectionID:   dr.collectionID,
