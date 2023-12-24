@@ -291,7 +291,8 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	t.SearchRequest.OutputFieldsId = outputFieldIDs
 
 	partitionNames := t.request.GetPartitionNames()
-	if t.request.GetDslType() == commonpb.DslType_BoolExprV1 && t.SearchRequest.EnsureSearchQuality && t.SearchRequest.SerializedExprPlan != nil {
+	// only when plan != nil and EnsureSearchQuality is on, which means we are going to retry search, do not construct plan again
+	if t.request.GetDslType() == commonpb.DslType_BoolExprV1 && (!t.SearchRequest.EnsureSearchQuality || t.SearchRequest.SerializedExprPlan == nil) {
 		annsField, err := funcutil.GetAttrByKeyFromRepeatedKV(AnnsFieldKey, t.request.GetSearchParams())
 		if err != nil || len(annsField) == 0 {
 			if enableMultipleVectorFields {
