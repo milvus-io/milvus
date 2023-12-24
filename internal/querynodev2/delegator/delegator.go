@@ -181,6 +181,47 @@ func (sd *shardDelegator) modifyQueryRequest(req *querypb.QueryRequest, scope qu
 	return nodeReq
 }
 
+func (sd *shardDelegator) selectSegmentsToSearch(ctx context.Context, req *querypb.SearchRequest, sealed []SnapshotItem, sealedNum int) ([]SnapshotItem, int) {
+	log := sd.getLogger(ctx)
+	// only happen when retry search, filter out empty segments
+	// just use all segments to search when empty segments are not found
+	if req.GetReq().GetEnsureSearchQuality() {
+		index := funcutil.SliceIndex(req.GetReq().GetChannelIDsSearched(), sd.vchannelName)
+		// not found
+		if index < 0 {
+			log.Debug("channel not found")
+			return sealed, sealedNum
+		}
+		if index+1 >= len(req.GetReq().GetEmptySegmentsPrefixSum()) {
+			log.Debug("empty segments num prefix sum wrong")
+			return sealed, sealedNum
+		}
+		startIndex := req.GetReq().GetEmptySegmentsPrefixSum()[index]
+		endIndex := req.GetReq().GetEmptySegmentsPrefixSum()[index+1]
+		if !((startIndex >= 0 && startIndex < int32(len(req.GetReq().GetEmptySegmentIDsSearched()))) &&
+			(endIndex > 0 && endIndex <= int32(len(req.GetReq().GetEmptySegmentIDsSearched()))) &&
+			(startIndex < endIndex)) {
+			log.Debug("empty segment start end index wrong")
+			return sealed, sealedNum
+		}
+		emptySegments := req.GetReq().GetEmptySegmentIDsSearched()[startIndex:endIndex]
+		sealedToSearch := lo.Map(sealed, func(item SnapshotItem, _ int) SnapshotItem {
+			return SnapshotItem{
+				NodeID: item.NodeID,
+				Segments: lo.Filter(item.Segments, func(seg SegmentEntry, _ int) bool {
+					return !funcutil.SliceContain(emptySegments, seg.SegmentID)
+				}),
+			}
+		})
+		sealedNumToSearch := lo.SumBy(sealedToSearch, func(item SnapshotItem) int { return len(item.Segments) })
+		if sealedNumToSearch+len(emptySegments) == sealedNum { // the required segments found successfully, unless search all the segments
+			fmt.Println(sealedNumToSearch)
+			return sealedToSearch, sealedNumToSearch
+		}
+	}
+	return sealed, sealedNum
+}
+
 // Search preforms search operation on shard.
 func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest) ([]*internalpb.SearchResults, error) {
 	log := sd.getLogger(ctx)
@@ -218,24 +259,6 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 		return nil, merr.WrapErrChannelNotAvailable(sd.vchannelName, "distribution is not servcieable")
 	}
 
-	// retry search, check the segments we need to search
-	if req.GetReq().EnsureSearchQuality {
-		index := funcutil.SliceIndex(req.GetReq().ChannelIDsSearched, sd.vchannelName)
-		searchSegments := req.GetReq().GetSealedSegmentIDsSearched()[req.GetReq().NumSegmentsPrefixSum[index]:req.GetReq().GetNumSegmentsPrefixSum()[index+1]]
-		sealedToSearch := lo.Map(sealed, func(item SnapshotItem, _ int) SnapshotItem {
-			return SnapshotItem{
-				NodeID: item.NodeID,
-				Segments: lo.Filter(item.Segments, func(seg SegmentEntry, _ int) bool {
-					return funcutil.SliceContain(searchSegments, seg.SegmentID)
-				}),
-			}
-		})
-		sealedNum := lo.SumBy(sealedToSearch, func(item SnapshotItem) int { return len(item.Segments) })
-		if sealedNum == len(searchSegments) { // the required segments found successfully, unless search all the segments
-			sealed = sealedToSearch
-		}
-	}
-
 	defer sd.distribution.Unpin(version)
 	existPartitions := sd.collection.GetPartitions()
 	growing = lo.Filter(growing, func(segment SegmentEntry, _ int) bool {
@@ -247,6 +270,8 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 	}
 
 	sealedNum := lo.SumBy(sealed, func(item SnapshotItem) int { return len(item.Segments) })
+
+	sealed, sealedNum = sd.selectSegmentsToSearch(ctx, req, sealed, sealedNum)
 	log.Debug("search segments...",
 		zap.Int("sealedNum", sealedNum),
 		zap.Int("growingNum", len(growing)),

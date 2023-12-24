@@ -508,17 +508,17 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 
 	if resultNotEnough && !t.SearchRequest.EnsureSearchQuality && Params.AutoIndexConfig.Enable.GetAsBool() {
 		numPrefixSum := 0
-		t.SearchRequest.NumSegmentsPrefixSum = append(t.SearchRequest.NumSegmentsPrefixSum, int32(numPrefixSum))
+		t.SearchRequest.EmptySegmentsPrefixSum = append(t.SearchRequest.EmptySegmentsPrefixSum, int32(numPrefixSum))
 		numSegmentsTotal := 0
 		for _, reduceResult := range toReduceResults {
 			t.SearchRequest.ChannelIDsSearched = append(t.SearchRequest.ChannelIDsSearched, reduceResult.ChannelIDsSearched...)
-			t.SearchRequest.SealedSegmentIDsSearched = append(t.SearchRequest.SealedSegmentIDsSearched, reduceResult.SealedSegmentIDsSearched...)
+			t.SearchRequest.EmptySegmentIDsSearched = append(t.SearchRequest.EmptySegmentIDsSearched, reduceResult.EmptySegmentIDsSearched...)
 			numSegmentsTotal += int(reduceResult.GetSearchedNumSegments())
-			numPrefixSum += len(reduceResult.SealedSegmentIDsSearched)
-			t.SearchRequest.NumSegmentsPrefixSum = append(t.SearchRequest.NumSegmentsPrefixSum, int32(numPrefixSum))
+			numPrefixSum += len(reduceResult.EmptySegmentIDsSearched)
+			t.SearchRequest.EmptySegmentsPrefixSum = append(t.SearchRequest.EmptySegmentsPrefixSum, int32(numPrefixSum))
 		}
-		if numSegmentsTotal > len(t.SearchRequest.SealedSegmentIDsSearched) {
-			log.Warn("retry search: ", zap.Int("segments with results", len(t.SearchRequest.SealedSegmentIDsSearched)), zap.Int("total segments", numSegmentsTotal))
+		if numPrefixSum > 0 {
+			log.Warn("retry search: ", zap.Int("segments without results", len(t.SearchRequest.EmptySegmentIDsSearched)), zap.Int("total segments", numSegmentsTotal))
 			metrics.ProxyRetrySearchCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Add(1)
 
 			err := t.Research()
@@ -536,8 +536,7 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 		}
 	}
 	t.result.Results.OutputFields = t.userOutputFields
-	log.Info("Search post execute done",
-		zap.Int64("id", t.ID()),
+	log.Debug("Search post execute done",
 		zap.Int64("collection", t.GetCollectionID()),
 		zap.Int64s("partitionIDs", t.GetPartitionIDs()))
 	return nil

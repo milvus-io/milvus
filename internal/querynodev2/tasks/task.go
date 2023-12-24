@@ -127,10 +127,10 @@ func (t *SearchTask) Execute() error {
 	var (
 		results          []*segments.SearchResult
 		searchedSegments []segments.Segment
-		validSegmentIds  []int64
+		emptySegmentIds  []int64
 	)
 	if req.GetScope() == querypb.DataScope_Historical {
-		results, validSegmentIds, searchedSegments, err = segments.SearchHistorical(
+		results, emptySegmentIds, searchedSegments, err = segments.SearchHistorical(
 			t.ctx,
 			t.segmentManager,
 			searchReq,
@@ -139,7 +139,7 @@ func (t *SearchTask) Execute() error {
 			req.GetSegmentIDs(),
 		)
 	} else if req.GetScope() == querypb.DataScope_Streaming {
-		results, validSegmentIds, searchedSegments, err = segments.SearchStreaming(
+		results, emptySegmentIds, searchedSegments, err = segments.SearchStreaming(
 			t.ctx,
 			t.segmentManager,
 			searchReq,
@@ -232,8 +232,8 @@ func (t *SearchTask) Execute() error {
 			},
 		}
 
-		if !t.req.GetReq().EnsureSearchQuality {
-			t.result.SealedSegmentIDsSearched = validSegmentIds
+		if !t.req.GetReq().GetEnsureSearchQuality() && req.GetScope() == querypb.DataScope_Historical {
+			t.result.EmptySegmentIDsSearched = emptySegmentIds
 			t.result.SearchedNumSegments = int32(len(searchedSegments))
 		}
 	}

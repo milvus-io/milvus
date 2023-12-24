@@ -298,18 +298,74 @@ func (s *DelegatorSuite) TestSearch() {
 		s.NoError(err)
 		s.Equal(3, len(results))
 
+		// retry search
 		results, err = s.delegator.Search(ctx, &querypb.SearchRequest{
 			Req: &internalpb.SearchRequest{
-				Base:                     commonpbutil.NewMsgBase(),
-				EnsureSearchQuality:      true,
-				SealedSegmentIDsSearched: []int64{1000, 1001},
-				NumSegmentsPrefixSum:     []int32{0, 2},
-				ChannelIDsSearched:       []string{s.vchannelName},
+				Base:                    commonpbutil.NewMsgBase(),
+				EnsureSearchQuality:     true,
+				EmptySegmentIDsSearched: []int64{1002, 1003},
+				EmptySegmentsPrefixSum:  []int32{0, 2},
+				ChannelIDsSearched:      []string{s.vchannelName},
 			},
 			DmlChannels: []string{s.vchannelName},
 		})
 		s.NoError(err)
 		s.Equal(2, len(results))
+
+		// empty segments not found
+		results, err = s.delegator.Search(ctx, &querypb.SearchRequest{
+			Req: &internalpb.SearchRequest{
+				Base:                    commonpbutil.NewMsgBase(),
+				EnsureSearchQuality:     true,
+				EmptySegmentIDsSearched: []int64{1002, 1003, 1009},
+				EmptySegmentsPrefixSum:  []int32{0, 3},
+				ChannelIDsSearched:      []string{s.vchannelName},
+			},
+			DmlChannels: []string{s.vchannelName},
+		})
+		s.NoError(err)
+		s.Equal(3, len(results))
+
+		// no channel in searchRequest
+		results, err = s.delegator.Search(ctx, &querypb.SearchRequest{
+			Req: &internalpb.SearchRequest{
+				Base:                    commonpbutil.NewMsgBase(),
+				EnsureSearchQuality:     true,
+				EmptySegmentIDsSearched: []int64{1002, 1003},
+				EmptySegmentsPrefixSum:  []int32{0, 2},
+			},
+			DmlChannels: []string{s.vchannelName},
+		})
+		s.NoError(err)
+		s.Equal(3, len(results))
+
+		// id and prefix sum not match
+		results, err = s.delegator.Search(ctx, &querypb.SearchRequest{
+			Req: &internalpb.SearchRequest{
+				Base:                    commonpbutil.NewMsgBase(),
+				EnsureSearchQuality:     true,
+				EmptySegmentIDsSearched: []int64{1002},
+				EmptySegmentsPrefixSum:  []int32{0, 2},
+				ChannelIDsSearched:      []string{s.vchannelName},
+			},
+			DmlChannels: []string{s.vchannelName},
+		})
+		s.NoError(err)
+		s.Equal(3, len(results))
+
+		// prefix sum wrong
+		results, err = s.delegator.Search(ctx, &querypb.SearchRequest{
+			Req: &internalpb.SearchRequest{
+				Base:                    commonpbutil.NewMsgBase(),
+				EnsureSearchQuality:     true,
+				EmptySegmentIDsSearched: []int64{1002, 1003},
+				EmptySegmentsPrefixSum:  []int32{0},
+				ChannelIDsSearched:      []string{s.vchannelName},
+			},
+			DmlChannels: []string{s.vchannelName},
+		})
+		s.NoError(err)
+		s.Equal(3, len(results))
 	})
 
 	s.Run("partition_not_loaded", func() {

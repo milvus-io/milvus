@@ -88,10 +88,10 @@ func searchSegments(ctx context.Context, segments []Segment, segType SegmentType
 			searchResults = append(searchResults, result)
 		}
 	}
-	validSegments := make([]int64, 0)
+	emptySegmentIds := make([]int64, 0)
 	for i, segment := range segments {
-		if !emptySeg[i] {
-			validSegments = append(validSegments, segment.ID())
+		if emptySeg[i] {
+			emptySegmentIds = append(emptySegmentIds, segment.ID())
 		}
 	}
 
@@ -108,7 +108,7 @@ func searchSegments(ctx context.Context, segments []Segment, segType SegmentType
 		log.Ctx(ctx).Debug("search growing/sealed segments without indexes", zap.Int64s("segmentIDs", segmentsWithoutIndex))
 	}
 
-	return searchResults, validSegments, nil
+	return searchResults, emptySegmentIds, nil
 }
 
 // search will search on the historical segments the target segments in historical.
@@ -120,8 +120,8 @@ func SearchHistorical(ctx context.Context, manager *Manager, searchReq *SearchRe
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	searchResults, validSegments, err := searchSegments(ctx, segments, SegmentTypeSealed, searchReq)
-	return searchResults, validSegments, segments, err
+	searchResults, emptySegmentIds, err := searchSegments(ctx, segments, SegmentTypeSealed, searchReq)
+	return searchResults, emptySegmentIds, segments, err
 }
 
 // searchStreaming will search all the target segments in streaming
@@ -131,6 +131,6 @@ func SearchStreaming(ctx context.Context, manager *Manager, searchReq *SearchReq
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	searchResults, validSegments, err := searchSegments(ctx, segments, SegmentTypeGrowing, searchReq)
-	return searchResults, validSegments, segments, err
+	searchResults, emptySegmentIds, err := searchSegments(ctx, segments, SegmentTypeGrowing, searchReq)
+	return searchResults, emptySegmentIds, segments, err
 }

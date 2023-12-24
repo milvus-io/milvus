@@ -1419,6 +1419,8 @@ func TestTaskSearch_reduceSearchResultData(t *testing.T) {
 		{50, 49, 48, 47, 46, 45, 44, 43, 42, 41},
 	}
 
+	data2 := []int64{10, 10, 10, 10, 10, 10, 10, 10, 10, 10}
+
 	score := [][]float32{
 		{10, 9, 8, 7, 6, 5, 4, 3, 2, 1},
 		{20, 19, 18, 17, 16, 15, 14, 13, 12, 11},
@@ -1426,6 +1428,8 @@ func TestTaskSearch_reduceSearchResultData(t *testing.T) {
 		{40, 39, 38, 37, 36, 35, 34, 33, 32, 31},
 		{50, 49, 48, 47, 46, 45, 44, 43, 42, 41},
 	}
+
+	score2 := []float32{10, 10, 10, 10, 10, 10, 10, 10, 10, 10}
 
 	resultScore := []float32{-50, -49, -48, -47, -46, -45, -44, -43, -42, -41}
 
@@ -1466,6 +1470,8 @@ func TestTaskSearch_reduceSearchResultData(t *testing.T) {
 		}
 
 		var results []*schemapb.SearchResultData
+
+		var dupResults []*schemapb.SearchResultData
 		for i := range data {
 			r := getSearchResultData(nq, topk)
 
@@ -1474,6 +1480,16 @@ func TestTaskSearch_reduceSearchResultData(t *testing.T) {
 			r.Topks = []int64{5, 5}
 
 			results = append(results, r)
+		}
+
+		for range data {
+			r := getSearchResultData(nq, topk)
+			// duplicate id
+			r.Ids.IdField = &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: data2}}
+			r.Scores = score2
+			r.Topks = []int64{5, 5}
+
+			dupResults = append(dupResults, r)
 		}
 
 		for _, test := range tests {
@@ -1485,6 +1501,23 @@ func TestTaskSearch_reduceSearchResultData(t *testing.T) {
 				assert.Equal(t, []int64{test.limit, test.limit}, reduced.GetResults().GetTopks())
 				assert.Equal(t, test.limit, reduced.GetResults().GetTopK())
 				assert.InDeltaSlice(t, test.outScore, reduced.GetResults().GetScores(), 10e-8)
+			})
+		}
+
+		// result not enough test
+		for _, test := range tests {
+			t.Run(test.description, func(t *testing.T) {
+				reduced, resultNotEnough, err := reduceSearchResultData(context.TODO(), dupResults, nq, topk, metric.L2, schemapb.DataType_Int64, test.offset)
+				assert.NoError(t, err)
+				if test.limit == 1 {
+					assert.False(t, resultNotEnough)
+				} else {
+					assert.True(t, resultNotEnough)
+				}
+				assert.Equal(t, []int64{data2[0], data2[0]}, reduced.GetResults().GetIds().GetIntId().GetData())
+				assert.Equal(t, []int64{int64(1), int64(1)}, reduced.GetResults().GetTopks())
+				assert.Equal(t, int64(1), reduced.GetResults().GetTopK())
+				assert.InDeltaSlice(t, []float32{float32(-1) * score[0][0], float32(-1) * score[0][0]}, reduced.GetResults().GetScores(), 10e-8)
 			})
 		}
 
@@ -2022,6 +2055,45 @@ func TestSearchTask_Research(t *testing.T) {
 		scoresResult := []float32{1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0}
 		assert.Equal(t, scoresResult, st.result.Results.Scores)
 		assert.Len(t, st.result.Results.FieldsData, 1)
+	})
+
+	t.Run("Test research failed", func(t *testing.T) {
+		schema := constructCollectionSchema(pkField, vecField, dim, collection)
+		qn := mocks.NewMockQueryNodeClient(t)
+		qn.EXPECT().Search(mock.Anything, mock.Anything).
+			Return(nil, fmt.Errorf("mock err 1"))
+
+		lb := NewMockLBPolicy(t)
+		lb.EXPECT().Execute(mock.Anything, mock.Anything).Run(func(ctx context.Context, workload CollectionWorkLoad) {
+			_ = workload.exec(ctx, 0, qn)
+		}).Return(fmt.Errorf("mock err 1"))
+		node.lbPolicy = lb
+
+		st := &searchTask{
+			ctx:            ctx,
+			collectionName: collectionName,
+			SearchRequest: &internalpb.SearchRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:  commonpb.MsgType_Search,
+					SourceID: paramtable.GetNodeID(),
+				},
+				Nq:   nq,
+				Topk: topk,
+			},
+			request: &milvuspb.SearchRequest{
+				CollectionName: collectionName,
+				Nq:             nq,
+				SearchParams:   getValidSearchParams(),
+			},
+			resultBuf: typeutil.NewConcurrentSet[*internalpb.SearchResults](),
+			schema:    schema,
+			tr:        timerecord.NewTimeRecorder("search"),
+			node:      node,
+		}
+
+		err := st.Research()
+		t.Logf("err = %s", err)
+		assert.Error(t, err)
 	})
 }
 

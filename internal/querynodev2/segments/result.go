@@ -77,7 +77,7 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 	}
 
 	for _, result := range results {
-		searchResults.SealedSegmentIDsSearched = append(searchResults.SealedSegmentIDsSearched, result.SealedSegmentIDsSearched...)
+		searchResults.EmptySegmentIDsSearched = append(searchResults.EmptySegmentIDsSearched, result.EmptySegmentIDsSearched...)
 		searchResults.SearchedNumSegments += result.SearchedNumSegments
 		searchResults.ChannelIDsSearched = append(searchResults.ChannelIDsSearched, result.ChannelIDsSearched...)
 	}
