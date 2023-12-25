@@ -112,6 +112,14 @@ func (job *LoadCollectionJob) Execute() error {
 	log := log.Ctx(job.ctx).With(zap.Int64("collectionID", req.GetCollectionID()))
 	meta.GlobalFailedLoadCache.Remove(req.GetCollectionID())
 
+	// get the index
+	indexes, err := job.broker.DescribeIndex(job.ctx, req.GetCollectionID())
+	if err != nil {
+		msg := "failed to get indexes from DataCoord"
+		log.Warn(msg, zap.Error(err))
+		return err
+	}
+
 	// 1. Fetch target partitions
 	partitionIDs, err := job.broker.GetPartitions(job.ctx, req.GetCollectionID())
 	if err != nil {
@@ -188,6 +196,7 @@ func (job *LoadCollectionJob) Execute() error {
 			LoadType:      querypb.LoadType_LoadCollection,
 		},
 		CreatedAt: time.Now(),
+		Indexes:   indexes,
 	}
 	job.undo.IsNewCollection = true
 	err = job.meta.CollectionManager.PutCollection(collection, partitions...)
@@ -292,6 +301,14 @@ func (job *LoadPartitionJob) Execute() error {
 	)
 	meta.GlobalFailedLoadCache.Remove(req.GetCollectionID())
 
+	// get the index
+	indexes, err := job.broker.DescribeIndex(job.ctx, req.GetCollectionID())
+	if err != nil {
+		msg := "failed to get indexes from DataCoord"
+		log.Warn(msg, zap.Error(err))
+		return err
+	}
+
 	// 1. Fetch target partitions
 	loadedPartitionIDs := lo.Map(job.meta.CollectionManager.GetPartitionsByCollection(req.GetCollectionID()),
 		func(partition *meta.Partition, _ int) int64 {
@@ -307,7 +324,6 @@ func (job *LoadPartitionJob) Execute() error {
 	job.undo.LackPartitions = lackPartitionIDs
 	log.Info("find partitions to load", zap.Int64s("partitions", lackPartitionIDs))
 
-	var err error
 	if !job.meta.CollectionManager.Exist(req.GetCollectionID()) {
 		// Clear stale replicas, https://github.com/milvus-io/milvus/issues/20444
 		err = job.meta.ReplicaManager.RemoveCollection(req.GetCollectionID())
@@ -363,6 +379,7 @@ func (job *LoadPartitionJob) Execute() error {
 				FieldIndexID:  req.GetFieldIndexID(),
 				LoadType:      querypb.LoadType_LoadPartition,
 			},
+			Indexes:   indexes,
 			CreatedAt: time.Now(),
 		}
 		err = job.meta.CollectionManager.PutCollection(collection, partitions...)

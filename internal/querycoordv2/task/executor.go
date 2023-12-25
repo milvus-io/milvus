@@ -167,6 +167,11 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 		log.Warn("failed to get collection info", zap.Error(err))
 		return err
 	}
+	collection := ex.meta.CollectionManager.GetCollection(task.CollectionID())
+	if collection == nil {
+		log.Warn("collection not loaded", zap.Int64("collectionID", task.CollectionID()))
+		return merr.WrapErrCollectionLoaded(collectionInfo.GetCollectionName())
+	}
 	partitions, err := utils.GetPartitions(ex.meta.CollectionManager, task.CollectionID())
 	if err != nil {
 		log.Warn("failed to get partitions of collection", zap.Error(err))
@@ -201,15 +206,9 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 		indexes = nil
 	}
 
-	// Get collection index info
-	indexInfos, err := ex.broker.DescribeIndex(ctx, task.CollectionID())
-	if err != nil {
-		log.Warn("fail to get index meta of collection")
-		return err
-	}
 	// update the field index params
 	for _, segmentIndex := range indexes {
-		index, found := lo.Find(indexInfos, func(indexInfo *indexpb.IndexInfo) bool {
+		index, found := lo.Find(collection.Indexes, func(indexInfo *indexpb.IndexInfo) bool {
 			return indexInfo.IndexID == segmentIndex.IndexID
 		})
 		if !found {
@@ -234,7 +233,7 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 		collectionInfo.GetProperties(),
 		loadMeta,
 		loadInfo,
-		indexInfos,
+		collection.Indexes,
 	)
 
 	// Get shard leader for the given replica and segment
@@ -360,17 +359,17 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 		log.Warn("failed to get collection info")
 		return err
 	}
+	collection := ex.meta.CollectionManager.GetCollection(task.CollectionID())
+	if collection == nil {
+		log.Warn("collection not loaded", zap.Int64("collectionID", task.CollectionID()))
+		return merr.WrapErrCollectionLoaded(collectionInfo.GetCollectionName())
+	}
 	partitions, err := utils.GetPartitions(ex.meta.CollectionManager, task.CollectionID())
 	if err != nil {
 		log.Warn("failed to get partitions of collection")
 		return err
 	}
-	indexInfo, err := ex.broker.DescribeIndex(ctx, task.CollectionID())
-	if err != nil {
-		log.Warn("fail to get index meta of collection")
-		return err
-	}
-	metricType, err := getMetricType(indexInfo, collectionInfo.GetSchema())
+	metricType, err := getMetricType(collection.Indexes, collectionInfo.GetSchema())
 	if err != nil {
 		log.Warn("failed to get metric type", zap.Error(err))
 		return err
@@ -394,7 +393,7 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 		collectionInfo.GetSchema(),
 		loadMeta,
 		dmChannel,
-		indexInfo,
+		collection.Indexes,
 	)
 	err = fillSubChannelRequest(ctx, req, ex.broker)
 	if err != nil {
