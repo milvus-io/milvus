@@ -54,11 +54,11 @@ var _ Cluster = (*ClusterImpl)(nil)
 
 type ClusterImpl struct {
 	sessionManager SessionManager
-	channelManager *ChannelManager
+	channelManager ChannelManager
 }
 
 // NewClusterImpl creates a new cluster
-func NewClusterImpl(sessionManager SessionManager, channelManager *ChannelManager) *ClusterImpl {
+func NewClusterImpl(sessionManager SessionManager, channelManager ChannelManager) *ClusterImpl {
 	c := &ClusterImpl{
 		sessionManager: sessionManager,
 		channelManager: channelManager,
@@ -72,10 +72,9 @@ func (c *ClusterImpl) Startup(ctx context.Context, nodes []*NodeInfo) error {
 	for _, node := range nodes {
 		c.sessionManager.AddSession(node)
 	}
-	currs := make([]int64, 0, len(nodes))
-	for _, node := range nodes {
-		currs = append(currs, node.NodeID)
-	}
+	currs := lo.Map(nodes, func(info *NodeInfo, _ int) int64 {
+		return info.NodeID
+	})
 	return c.channelManager.Startup(ctx, currs)
 }
 
@@ -107,7 +106,7 @@ func (c *ClusterImpl) Flush(ctx context.Context, nodeID int64, channel string, s
 		return fmt.Errorf("channel %s is not watched on node %d", channel, nodeID)
 	}
 
-	_, collID := c.channelManager.getCollectionIDByChannel(channel)
+	_, collID := c.channelManager.GetCollectionIDByChannel(channel)
 
 	getSegmentID := func(segment *datapb.SegmentInfo, _ int) int64 {
 		return segment.GetID()
@@ -158,7 +157,7 @@ func (c *ClusterImpl) Import(ctx context.Context, nodeID int64, it *datapb.Impor
 
 func (c *ClusterImpl) AddImportSegment(ctx context.Context, req *datapb.AddImportSegmentRequest) (*datapb.AddImportSegmentResponse, error) {
 	// Look for the DataNode that watches the channel.
-	ok, nodeID := c.channelManager.getNodeIDByChannelName(req.GetChannelName())
+	ok, nodeID := c.channelManager.GetNodeIDByChannelName(req.GetChannelName())
 	if !ok {
 		err := merr.WrapErrChannelNotFound(req.GetChannelName(), "no DataNode watches this channel")
 		log.Error("no DataNode found for channel", zap.String("channelName", req.GetChannelName()), zap.Error(err))

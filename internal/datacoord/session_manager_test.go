@@ -11,7 +11,9 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/testutils"
 )
 
 func TestSessionManagerSuite(t *testing.T) {
@@ -19,7 +21,7 @@ func TestSessionManagerSuite(t *testing.T) {
 }
 
 type SessionManagerSuite struct {
-	suite.Suite
+	testutils.PromMetricsSuite
 
 	dn *mocks.MockDataNodeClient
 
@@ -34,6 +36,7 @@ func (s *SessionManagerSuite) SetupTest() {
 	}))
 
 	s.m.AddSession(&NodeInfo{1000, "addr-1"})
+	s.MetricsEqual(metrics.DataCoordNumDataNodes, 1)
 }
 
 func (s *SessionManagerSuite) TestNotifyChannelOperation() {
