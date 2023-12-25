@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"github.com/golang/protobuf/proto"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 )
@@ -89,11 +90,8 @@ func UpdateNodeID(nodeID int64) UpdateAction {
 
 func UpdateFileStats(fileStats []*datapb.ImportFileStats) UpdateAction {
 	return func(t ImportTask) {
-		switch t.GetType() {
-		case PreImportTaskType:
-			t.(*preImportTask).PreImportTask.FileStats = fileStats
-		case ImportTaskType:
-			t.(*importTask).ImportTaskV2.FileStats = fileStats
+		if task, ok := t.(*preImportTask); ok {
+			task.PreImportTask.FileStats = fileStats
 		}
 	}
 }
@@ -110,20 +108,25 @@ type ImportTask interface {
 	GetRequestID() int64
 	GetTaskID() int64
 	GetCollectionID() int64
-	GetPartitionID() int64
 	GetNodeID() int64
 	GetType() TaskType
 	GetState() datapb.ImportState
+	GetSchema() *schemapb.CollectionSchema
 	GetFileStats() []*datapb.ImportFileStats
 	Clone() ImportTask
 }
 
 type preImportTask struct {
 	*datapb.PreImportTask
+	schema *schemapb.CollectionSchema
 }
 
 func (p *preImportTask) GetType() TaskType {
 	return PreImportTaskType
+}
+
+func (p *preImportTask) GetSchema() *schemapb.CollectionSchema {
+	return p.schema
 }
 
 func (p *preImportTask) Clone() ImportTask {
@@ -134,10 +137,15 @@ func (p *preImportTask) Clone() ImportTask {
 
 type importTask struct {
 	*datapb.ImportTaskV2
+	schema *schemapb.CollectionSchema
 }
 
 func (t *importTask) GetType() TaskType {
 	return ImportTaskType
+}
+
+func (t *importTask) GetSchema() *schemapb.CollectionSchema {
+	return t.schema
 }
 
 func (t *importTask) Clone() ImportTask {

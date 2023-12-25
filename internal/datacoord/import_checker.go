@@ -108,7 +108,7 @@ func (c *ImportChecker) checkPreImportState(requestID int64) {
 	}
 	importTasks := c.imeta.GetBy(WithType(ImportTaskType), WithReq(requestID))
 	if len(importTasks) == len(tasks) {
-		return // all imported are generated
+		return // all imported are generated // TODO: fix it
 	}
 	for _, t := range importTasks { // happens only when txn failed
 		err := c.cluster.DropImport(t.GetNodeID(), &datapb.DropImportRequest{
@@ -125,15 +125,15 @@ func (c *ImportChecker) checkPreImportState(requestID int64) {
 			return
 		}
 	}
-	for _, t := range tasks {
-		task, err := AssembleImportTask(t, c.alloc)
+	newTasks, err := AssembleImportTasks(tasks, c.alloc)
+	if err != nil {
+		log.Warn("assemble import tasks failed", zap.Error(err))
+		return
+	}
+	for _, t := range newTasks {
+		err = c.imeta.Add(t)
 		if err != nil {
-			log.Warn("assemble import task failed", WrapLogFields(t, err)...)
-			return
-		}
-		err = c.imeta.Add(task)
-		if err != nil {
-			log.Warn("")
+			log.Warn("add new import task failed", WrapLogFields(t, nil)...)
 			return
 		}
 		log.Info("add new import task", WrapLogFields(t, nil)...)

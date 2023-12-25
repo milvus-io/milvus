@@ -29,7 +29,7 @@ import (
 )
 
 const (
-	fakeNodeID = -1
+	NullNodeID = -1
 )
 
 type ImportScheduler struct {
@@ -132,16 +132,16 @@ func (s *ImportScheduler) getIdleNode() int64 {
 			return nodeID
 		}
 	}
-	return fakeNodeID
+	return NullNodeID
 }
 
 func (s *ImportScheduler) processPendingPreImport(task ImportTask) {
 	nodeID := s.getIdleNode()
-	if nodeID == fakeNodeID {
+	if nodeID == NullNodeID {
 		log.Warn("no datanode can be scheduled", WrapLogFields(task, nil)...)
 		return
 	}
-	req := AssemblePreImportRequest(task, s.meta)
+	req := AssemblePreImportRequest(task)
 	err := s.cluster.PreImport(nodeID, req)
 	if err != nil {
 		log.Warn("preimport failed", WrapLogFields(task, err)...)
@@ -157,11 +157,11 @@ func (s *ImportScheduler) processPendingPreImport(task ImportTask) {
 
 func (s *ImportScheduler) processPendingImport(task ImportTask) {
 	nodeID := s.getIdleNode()
-	if nodeID == fakeNodeID {
+	if nodeID == NullNodeID {
 		log.Warn("no datanode can be scheduled", WrapLogFields(task, nil)...)
 		return
 	}
-	req, err := AssembleImportRequest(task, s.sm, s.meta, s.alloc, s.imeta)
+	req, err := AssembleImportRequest(task, s.sm, s.alloc, s.imeta)
 	if err != nil {
 		log.Warn("assemble import request failed", WrapLogFields(task, err)...)
 		return
@@ -231,7 +231,7 @@ func (s *ImportScheduler) processInProgressImport(task ImportTask) {
 }
 
 func (s *ImportScheduler) processCompletedOrFailed(task ImportTask) {
-	if task.GetNodeID() == fakeNodeID {
+	if task.GetNodeID() == NullNodeID {
 		return
 	}
 	req := &datapb.DropImportRequest{
@@ -243,7 +243,7 @@ func (s *ImportScheduler) processCompletedOrFailed(task ImportTask) {
 		log.Warn("drop import failed", WrapLogFields(task, err)...)
 		return
 	}
-	err = s.imeta.Update(task.GetTaskID(), UpdateNodeID(fakeNodeID))
+	err = s.imeta.Update(task.GetTaskID(), UpdateNodeID(NullNodeID))
 	if err != nil {
 		log.Warn("update import task failed", WrapLogFields(task, err)...)
 	}

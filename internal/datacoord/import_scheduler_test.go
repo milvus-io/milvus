@@ -111,7 +111,7 @@ func (s *ImportSchedulerSuite) TestProcessPreImport() {
 	s.cluster.EXPECT().DropImport(mock.Anything, mock.Anything).Return(nil)
 	s.scheduler.process()
 	task = s.imeta.Get(task.GetTaskID())
-	s.Equal(int64(fakeNodeID), task.GetNodeID())
+	s.Equal(int64(NullNodeID), task.GetNodeID())
 }
 
 func (s *ImportSchedulerSuite) TestProcessImport() {
@@ -124,8 +124,12 @@ func (s *ImportSchedulerSuite) TestProcessImport() {
 			State:        datapb.ImportState_Pending,
 			FileStats: []*datapb.ImportFileStats{
 				{
-					ChannelRows: map[string]int64{
-						"channel1": 100,
+					HashedRows: map[string]*datapb.PartitionRows{
+						"channel1": {
+							PartitionRows: map[int64]int64{
+								int64(2): 100,
+							},
+						},
 					},
 				},
 			},
@@ -170,7 +174,6 @@ func (s *ImportSchedulerSuite) TestProcessImport() {
 		ImportSegmentsInfo: []*datapb.ImportSegmentInfo{
 			{
 				SegmentID:    segmentID,
-				TotalRows:    100,
 				ImportedRows: 100,
 			},
 		},
@@ -183,7 +186,7 @@ func (s *ImportSchedulerSuite) TestProcessImport() {
 	s.cluster.EXPECT().DropImport(mock.Anything, mock.Anything).Return(nil)
 	s.scheduler.process()
 	task = s.imeta.Get(task.GetTaskID())
-	s.Equal(int64(fakeNodeID), task.GetNodeID())
+	s.Equal(int64(NullNodeID), task.GetNodeID())
 }
 
 func TestImportScheduler(t *testing.T) {
