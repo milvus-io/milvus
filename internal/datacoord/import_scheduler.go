@@ -36,7 +36,6 @@ type ImportScheduler struct {
 	meta    *meta
 	cluster Cluster
 	alloc   allocator
-	sm      *SegmentManager
 	imeta   ImportMeta
 
 	closeOnce sync.Once
@@ -46,14 +45,12 @@ type ImportScheduler struct {
 func NewImportScheduler(meta *meta,
 	cluster Cluster,
 	alloc allocator,
-	sm *SegmentManager,
 	imeta ImportMeta,
 ) *ImportScheduler {
 	return &ImportScheduler{
 		meta:      meta,
 		cluster:   cluster,
 		alloc:     alloc,
-		sm:        sm,
 		imeta:     imeta,
 		closeChan: make(chan struct{}),
 	}
@@ -161,7 +158,7 @@ func (s *ImportScheduler) processPendingImport(task ImportTask) {
 		log.Warn("no datanode can be scheduled", WrapLogFields(task, nil)...)
 		return
 	}
-	req, err := AssembleImportRequest(task, s.sm, s.alloc, s.imeta)
+	req, err := AssembleImportRequest(task, s.meta, s.alloc)
 	if err != nil {
 		log.Warn("assemble import request failed", WrapLogFields(task, err)...)
 		return

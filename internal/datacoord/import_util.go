@@ -18,6 +18,8 @@ package datacoord
 
 import (
 	"context"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"sort"
 	"time"
 
@@ -62,7 +64,7 @@ func AssemblePreImportRequest(task ImportTask) *datapb.PreImportRequest {
 	}
 }
 
-func AssembleImportRequest(task ImportTask, manager *SegmentManager, alloc allocator, imeta ImportMeta) (*datapb.ImportRequest, error) {
+func AssignSegments(task ImportTask, manager *SegmentManager) ([]int64, error) {
 	// merge hashed rows
 	hashedRows := make(map[string]map[int64]int64) // vchannel->(partitionID->rows)
 	for _, file := range task.GetFileStats() {
@@ -77,7 +79,7 @@ func AssembleImportRequest(task ImportTask, manager *SegmentManager, alloc alloc
 	}
 
 	// alloc new segments
-	segmentsInfo := make([]*datapb.ImportSegmentRequestInfo, 0)
+	segments := make([]int64, 0)
 	for vchannel, partitionRows := range hashedRows {
 		for partitionID, rows := range partitionRows {
 			for rows > 0 {
@@ -86,26 +88,31 @@ func AssembleImportRequest(task ImportTask, manager *SegmentManager, alloc alloc
 				if err != nil {
 					return nil, err
 				}
-				idBegin, idEnd, err := alloc.allocN(segmentInfo.GetMaxRowNum())
-				if err != nil {
-					return nil, err
-				}
-				segmentsInfo = append(segmentsInfo, &datapb.ImportSegmentRequestInfo{
-					SegmentID:    segmentInfo.GetID(),
-					PartitionID:  partitionID,
-					Vchannel:     vchannel,
-					AutoIDRanges: &datapb.AutoIDRange{Begin: idBegin, End: idEnd},
-				})
+				segments = append(segments, segmentInfo.GetID())
 				rows -= segmentInfo.GetMaxRowNum()
 			}
 		}
 	}
-	err := imeta.Update(task.GetTaskID(), UpdateSegmentIDs(lo.Map(segmentsInfo,
-		func(info *datapb.ImportSegmentRequestInfo, _ int) int64 {
-			return info.GetSegmentID()
-		})))
-	if err != nil {
-		return nil, err
+	return segments, nil
+}
+
+func AssembleImportRequest(task ImportTask, meta *meta, alloc allocator) (*datapb.ImportRequest, error) {
+	segmentsInfo := make([]*datapb.ImportSegmentRequestInfo, 0)
+	for _, segmentID := range task.(*importTask).GetSegmentIDs() {
+		segment := meta.GetSegment(segmentID)
+		if segment == nil {
+			return nil, merr.WrapErrSegmentNotFound(segmentID, "assemble import request failed")
+		}
+		idBegin, idEnd, err := alloc.allocN(segment.GetMaxRowNum())
+		if err != nil {
+			return nil, err
+		}
+		segmentsInfo = append(segmentsInfo, &datapb.ImportSegmentRequestInfo{
+			SegmentID:    segment.GetID(),
+			PartitionID:  segment.GetPartitionID(),
+			Vchannel:     segment.GetInsertChannel(),
+			AutoIDRanges: &datapb.AutoIDRange{Begin: idBegin, End: idEnd},
+		})
 	}
 	importFiles := lo.Map(task.GetFileStats(), func(fileStat *datapb.ImportFileStats, _ int) *datapb.ImportFile {
 		return fileStat.GetImportFile()
@@ -120,61 +127,74 @@ func AssembleImportRequest(task ImportTask, manager *SegmentManager, alloc alloc
 	}, nil
 }
 
-func AssembleImportTasks(preimportTasks []ImportTask, alloc allocator) ([]ImportTask, error) {
-	if len(preimportTasks) == 0 {
+func RegroupImportFiles(tasks []ImportTask) ([][]*datapb.ImportFileStats, error) {
+	if len(tasks) == 0 {
 		return nil, nil
 	}
-	pt := preimportTasks[0].(*preImportTask)
-	files := lo.FlatMap(preimportTasks, func(t ImportTask, _ int) []*datapb.ImportFileStats {
+	pt := tasks[0].(*preImportTask)
+	files := lo.FlatMap(tasks, func(t ImportTask, _ int) []*datapb.ImportFileStats {
 		return t.(*preImportTask).GetFileStats()
 	})
 	maxRowsPerSegment, err := calBySchemaPolicy(pt.GetSchema())
 	if err != nil {
 		return nil, err
 	}
-	chunkMaxRows := maxRowsPerSegment * len(pt.GetPartitionIDs()) * len(pt.GetVchannels())
+	maxRowsPerFileGroup := maxRowsPerSegment * len(pt.GetPartitionIDs()) * len(pt.GetVchannels())
 
-	chunks := make([][]*datapb.ImportFileStats, 0)
-	currentChunk := make([]*datapb.ImportFileStats, 0)
+	fileGroups := make([][]*datapb.ImportFileStats, 0)
+	currentGroup := make([]*datapb.ImportFileStats, 0)
 	currentSum := 0
 	sort.Slice(files, func(i, j int) bool {
 		return files[i].GetTotalRows() < files[j].GetTotalRows()
 	})
 	for _, file := range files {
 		rows := int(file.GetTotalRows())
-		if rows > chunkMaxRows {
-			chunks = append(chunks, []*datapb.ImportFileStats{file})
-		} else if currentSum+rows <= chunkMaxRows {
-			currentChunk = append(currentChunk, file)
+		if rows > maxRowsPerFileGroup {
+			fileGroups = append(fileGroups, []*datapb.ImportFileStats{file})
+		} else if currentSum+rows <= maxRowsPerFileGroup {
+			currentGroup = append(currentGroup, file)
 			currentSum += rows
 		} else {
-			chunks = append(chunks, currentChunk)
-			currentChunk = []*datapb.ImportFileStats{file}
+			fileGroups = append(fileGroups, currentGroup)
+			currentGroup = []*datapb.ImportFileStats{file}
 			currentSum = rows
 		}
 	}
-	if len(currentChunk) > 0 {
-		chunks = append(chunks, currentChunk)
+	if len(currentGroup) > 0 {
+		fileGroups = append(fileGroups, currentGroup)
 	}
+	return fileGroups, nil
+}
 
-	idBegin, _, err := alloc.allocN(int64(len(chunks)))
+func AssembleImportTasks(fileGroups [][]*datapb.ImportFileStats,
+	requestID int64,
+	collectionID int64,
+	schema *schemapb.CollectionSchema,
+	manager *SegmentManager,
+	alloc allocator,
+) ([]ImportTask, error) {
+	idBegin, _, err := alloc.allocN(int64(len(fileGroups)))
 	if err != nil {
 		return nil, err
 	}
-	tasks := make([]ImportTask, 0, len(chunks))
-	for i, chunk := range chunks {
+	tasks := make([]ImportTask, 0, len(fileGroups))
+	for i, group := range fileGroups {
 		task := &importTask{
 			ImportTaskV2: &datapb.ImportTaskV2{
-				RequestID:    pt.GetRequestID(),
+				RequestID:    requestID,
 				TaskID:       idBegin + int64(i),
-				CollectionID: pt.GetCollectionID(),
-				SegmentIDs:   nil,
+				CollectionID: collectionID,
 				NodeID:       NullNodeID,
 				State:        datapb.ImportState_Pending,
-				FileStats:    chunk,
+				FileStats:    group,
 			},
-			schema: pt.GetSchema(),
+			schema: schema,
 		}
+		segments, err := AssignSegments(task, manager)
+		if err != nil {
+			return nil, err
+		}
+		task.SegmentIDs = segments
 		tasks = append(tasks, task)
 	}
 	return tasks, nil

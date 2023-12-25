@@ -63,9 +63,7 @@ func (s *ImportSchedulerSuite) SetupTest() {
 	})
 	s.imeta, err = NewImportMeta(s.catalog)
 	s.NoError(err)
-	sm, err := newSegmentManager(s.meta, s.alloc)
-	s.NoError(err)
-	s.scheduler = NewImportScheduler(s.meta, s.cluster, s.alloc, sm, s.imeta)
+	s.scheduler = NewImportScheduler(s.meta, s.cluster, s.alloc, s.imeta)
 }
 
 func (s *ImportSchedulerSuite) TestProcessPreImport() {

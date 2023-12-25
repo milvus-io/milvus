@@ -31,6 +31,7 @@ type ImportChecker struct {
 	meta    *meta
 	cluster Cluster
 	alloc   allocator
+	sm      *SegmentManager
 	imeta   ImportMeta
 
 	closeOnce sync.Once
@@ -101,14 +102,22 @@ func (c *ImportChecker) LogStats() {
 
 func (c *ImportChecker) checkPreImportState(requestID int64) {
 	tasks := c.imeta.GetBy(WithType(PreImportTaskType), WithReq(requestID))
+	if len(tasks) == 0 {
+		return
+	}
 	for _, t := range tasks {
 		if t.GetState() != datapb.ImportState_Completed {
 			return
 		}
 	}
 	importTasks := c.imeta.GetBy(WithType(ImportTaskType), WithReq(requestID))
-	if len(importTasks) == len(tasks) {
-		return // all imported are generated // TODO: fix it
+	groups, err := RegroupImportFiles(tasks)
+	if err != nil {
+		log.Warn("regroup import files failed", zap.Int64("reqID", requestID))
+		return
+	}
+	if len(importTasks) == len(groups) {
+		return // all imported are generated
 	}
 	for _, t := range importTasks { // happens only when txn failed
 		err := c.cluster.DropImport(t.GetNodeID(), &datapb.DropImportRequest{
@@ -119,13 +128,21 @@ func (c *ImportChecker) checkPreImportState(requestID int64) {
 			log.Warn("drop import failed", WrapLogFields(t, err)...)
 			return
 		}
+		for _, segment := range t.(*importTask).GetSegmentIDs() {
+			err = c.meta.DropSegment(segment)
+			if err != nil {
+				log.Warn("drop segment failed", WrapLogFields(t, err)...)
+				return
+			}
+		}
 		err = c.imeta.Remove(t.GetTaskID())
 		if err != nil {
 			log.Warn("remove import task failed", WrapLogFields(t, err)...)
 			return
 		}
 	}
-	newTasks, err := AssembleImportTasks(tasks, c.alloc)
+	pt := tasks[0].(*preImportTask)
+	newTasks, err := AssembleImportTasks(groups, pt.GetRequestID(), pt.GetCollectionID(), pt.GetSchema(), c.sm, c.alloc)
 	if err != nil {
 		log.Warn("assemble import tasks failed", zap.Error(err))
 		return
