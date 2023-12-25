@@ -59,7 +59,7 @@ func AssemblePreImportRequest(task ImportTask) *datapb.PreImportRequest {
 		CollectionID: task.GetCollectionID(),
 		PartitionIDs: pt.GetPartitionIDs(),
 		Vchannels:    pt.GetVchannels(),
-		Schema:       pt.GetSchema(),
+		Schema:       task.GetSchema(),
 		ImportFiles:  importFiles,
 	}
 }
@@ -166,7 +166,7 @@ func RegroupImportFiles(tasks []ImportTask) ([][]*datapb.ImportFileStats, error)
 	return fileGroups, nil
 }
 
-func AssembleImportTasks(fileGroups [][]*datapb.ImportFileStats,
+func NewImportTasks(fileGroups [][]*datapb.ImportFileStats,
 	requestID int64,
 	collectionID int64,
 	schema *schemapb.CollectionSchema,

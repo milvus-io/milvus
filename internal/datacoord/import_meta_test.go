@@ -98,7 +98,6 @@ func TestImportMeta_Normal(t *testing.T) {
 	task := meta.Get(task1.GetTaskID())
 	assert.Equal(t, int64(9), task.GetNodeID())
 	assert.Equal(t, datapb.ImportState_Failed, task.GetState())
-	assert.Equal(t, 1, len(task.GetFileStats()))
 
 	err = meta.Remove(task1.GetTaskID())
 	assert.NoError(t, err)

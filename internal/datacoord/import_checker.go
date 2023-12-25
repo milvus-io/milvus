@@ -142,7 +142,7 @@ func (c *ImportChecker) checkPreImportState(requestID int64) {
 		}
 	}
 	pt := tasks[0].(*preImportTask)
-	newTasks, err := AssembleImportTasks(groups, pt.GetRequestID(), pt.GetCollectionID(), pt.GetSchema(), c.sm, c.alloc)
+	newTasks, err := NewImportTasks(groups, pt.GetRequestID(), pt.GetCollectionID(), pt.GetSchema(), c.sm, c.alloc)
 	if err != nil {
 		log.Warn("assemble import tasks failed", zap.Error(err))
 		return

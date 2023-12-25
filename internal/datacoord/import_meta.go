@@ -47,9 +47,9 @@ func NewImportMeta(catalog metastore.DataCoordCatalog) (ImportMeta, error) {
 	for _, t := range restoredTasks {
 		switch task := t.(type) {
 		case *datapb.PreImportTask:
-			tasks[task.GetTaskID()] = &preImportTask{task}
+			tasks[task.GetTaskID()] = &preImportTask{PreImportTask: task} // TODO: dyh, resolve empty schema
 		case *datapb.ImportTaskV2:
-			tasks[task.GetTaskID()] = &importTask{task}
+			tasks[task.GetTaskID()] = &importTask{ImportTaskV2: task}
 		}
 	}
 	return &importMeta{
