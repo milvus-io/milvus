@@ -23,7 +23,6 @@ import (
 )
 
 type Reader interface {
-	ReadPKs() (storage.FieldData, error)
 	Next(count int64) (*storage.InsertData, error)
 	Close()
 }
