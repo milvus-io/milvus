@@ -297,7 +297,7 @@ We recommend using version 1.2 and above.`,
 		Key:          "etcd.grpc.dialKeepaLiveTimeout",
 		DefaultValue: "5000",
 		Version:      "2.3.4",
-		Doc:          `the timeout for failing to establish a connection`,
+		Doc:          `the timeout for failing to establish a connection, in milliseconds`,
 		Export:       true,
 	}
 	p.GrpcDialTimeout.Init(base.mgr)
