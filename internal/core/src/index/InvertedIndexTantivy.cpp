@@ -10,12 +10,12 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "tantivy-binding.h"
-#include "index/Utils.h"
 #include "common/Slice.h"
 #include "storage/LocalChunkManagerSingleton.h"
-#include "storage/Util.h"
 #include "index/InvertedIndexTantivy.h"
 #include "log/Log.h"
+#include "index/Utils.h"
+#include "storage/Util.h"
 
 #include <boost/filesystem.hpp>
 
@@ -35,9 +35,7 @@ InvertedIndexTantivy<T>::InvertedIndexTantivy(
     boost::filesystem::create_directories(path_);
     d_type_ = cfg_.to_tantivy_data_type();
     if (tantivy_index_exist(path_.c_str())) {
-        LOG_SEGCORE_INFO_
-            << "index " << path_
-            << " already exists, which should happen in loading progress";
+        LOG_INFO("index {} already exists, which should happen in loading progress", path_);
     } else {
         wrapper_ = std::make_shared<TantivyIndexWrapper>(
             field.c_str(), d_type_, path_.c_str());
@@ -187,7 +185,7 @@ InvertedIndexTantivy<T>::BuildV2(const Config& config) {
         PanicInfo(S3Error, "failed to create scan iterator");
     }
     auto reader = res.value();
-    std::vector<storage::FieldDataPtr> field_datas;
+    std::vector<FieldDataPtr> field_datas;
     for (auto rec = reader->Next(); rec != nullptr; rec = reader->Next()) {
         if (!rec.ok()) {
             PanicInfo(DataFormatBroken, "failed to read data");
