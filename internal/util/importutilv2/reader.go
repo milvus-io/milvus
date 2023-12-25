@@ -23,8 +23,7 @@ import (
 )
 
 type Reader interface {
-	// ReadStats() // TODO: dyh, implement it
-
+	ReadPKs() (storage.FieldData, error)
 	Next(count int64) (*storage.InsertData, error)
 	Close()
 }

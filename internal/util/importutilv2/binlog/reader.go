@@ -108,6 +108,35 @@ func (r *reader) ReadDelete(deltaLogs []string, tsStart, tsEnd uint64) (*storage
 	return deleteData, nil
 }
 
+func (r *reader) ReadPKs() (storage.FieldData, error) {
+	pkField, err := typeutil.GetPrimaryFieldSchema(r.schema)
+	if err != nil {
+		return nil, err
+	}
+	pks, err := storage.NewFieldData(pkField.GetDataType(), pkField)
+	if err != nil {
+		return nil, err
+	}
+	paths := r.insertLogs[pkField.GetFieldID()]
+	for _, path := range paths {
+		cr, err := newColumnReader(r.cm, pkField, path)
+		if err != nil {
+			return nil, err
+		}
+		fieldData, err := cr.Next(math.MaxInt64)
+		if err != nil {
+			cr.Close()
+			return nil, err
+		}
+		cr.Close()
+		err = pks.AppendRows(fieldData)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return pks, nil
+}
+
 func (r *reader) Next(count int64) (*storage.InsertData, error) {
 	insertData, err := storage.NewInsertData(r.schema)
 	if err != nil {
