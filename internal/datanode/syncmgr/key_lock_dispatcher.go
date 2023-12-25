@@ -37,6 +37,7 @@ func (d *keyLockDispatcher[K]) Submit(key K, t Task, callbacks ...func(error)) *
 		for _, callback := range callbacks {
 			callback(err)
 		}
+
 		return err, nil
 	})
 }

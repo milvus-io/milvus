@@ -78,8 +78,8 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                     result = ExecRangeVisitorImplJson<proto::plan::Array>();
                     break;
                 default:
-                    PanicInfo(DataTypeInvalid,
-                              fmt::format("unknown data type: {}", val_type));
+                    PanicInfo(
+                        DataTypeInvalid, "unknown data type: {}", val_type);
             }
             break;
         }
@@ -102,15 +102,15 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                     result = ExecRangeVisitorImplArray<proto::plan::Array>();
                     break;
                 default:
-                    PanicInfo(DataTypeInvalid,
-                              fmt::format("unknown data type: {}", val_type));
+                    PanicInfo(
+                        DataTypeInvalid, "unknown data type: {}", val_type);
             }
             break;
         }
         default:
             PanicInfo(DataTypeInvalid,
-                      fmt::format("unsupported data type: {}",
-                                  expr_->column_.data_type_));
+                      "unsupported data type: {}",
+                      expr_->column_.data_type_);
     }
 }
 
@@ -189,10 +189,10 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray() {
     int64_t processed_size = ProcessDataChunks<milvus::ArrayView>(
         execute_sub_batch, std::nullptr_t{}, res, val, index);
     AssertInfo(processed_size == real_batch_size,
-               fmt::format("internal error: expr processed rows {} not equal "
-                           "expect batch size {}",
-                           processed_size,
-                           real_batch_size));
+               "internal error: expr processed rows {} not equal "
+               "expect batch size {}",
+               processed_size,
+               real_batch_size);
     return res_vec;
 }
 
@@ -343,10 +343,10 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson() {
     int64_t processed_size = ProcessDataChunks<milvus::Json>(
         execute_sub_batch, std::nullptr_t{}, res, val);
     AssertInfo(processed_size == real_batch_size,
-               fmt::format("internal error: expr processed rows {} not equal "
-                           "expect batch size {}",
-                           processed_size,
-                           real_batch_size));
+               "internal error: expr processed rows {} not equal "
+               "expect batch size {}",
+               processed_size,
+               real_batch_size);
     return res_vec;
 }
 
@@ -425,10 +425,10 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForIndex() {
     auto val = GetValueFromProto<IndexInnerType>(expr_->val_);
     auto res = ProcessIndexChunks<T>(execute_sub_batch, val);
     AssertInfo(res.size() == real_batch_size,
-               fmt::format("internal error: expr processed rows {} not equal "
-                           "expect batch size {}",
-                           res.size(),
-                           real_batch_size));
+               "internal error: expr processed rows {} not equal "
+               "expect batch size {}",
+               res.size(),
+               real_batch_size);
     return std::make_shared<ColumnVector>(std::move(res));
 }
 
@@ -498,8 +498,8 @@ PhyUnaryRangeFilterExpr::PreCheckOverflow() {
                 }
                 default: {
                     PanicInfo(OpTypeInvalid,
-                              fmt::format("unsupported range node {}",
-                                          expr_->op_type_));
+                              "unsupported range node {}",
+                              expr_->op_type_);
                 }
             }
         }
@@ -582,10 +582,10 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData() {
     int64_t processed_size =
         ProcessDataChunks<T>(execute_sub_batch, skip_index_func, res, val);
     AssertInfo(processed_size == real_batch_size,
-               fmt::format("internal error: expr processed rows {} not equal "
-                           "expect batch size {}",
-                           processed_size,
-                           real_batch_size));
+               "internal error: expr processed rows {} not equal "
+               "expect batch size {}",
+               processed_size,
+               real_batch_size);
     return res_vec;
 }
 

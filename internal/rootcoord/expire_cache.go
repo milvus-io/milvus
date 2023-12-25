@@ -19,40 +19,14 @@ package rootcoord
 import (
 	"context"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
+	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-type expireCacheConfig struct {
-	withDropFlag bool
-}
-
-func (c expireCacheConfig) apply(req *proxypb.InvalidateCollMetaCacheRequest) {
-	if !c.withDropFlag {
-		return
-	}
-	if req.GetBase() == nil {
-		req.Base = commonpbutil.NewMsgBase()
-	}
-	req.Base.MsgType = commonpb.MsgType_DropCollection
-}
-
-func defaultExpireCacheConfig() expireCacheConfig {
-	return expireCacheConfig{withDropFlag: false}
-}
-
-type expireCacheOpt func(c *expireCacheConfig)
-
-func expireCacheWithDropFlag() expireCacheOpt {
-	return func(c *expireCacheConfig) {
-		c.withDropFlag = true
-	}
-}
-
 // ExpireMetaCache will call invalidate collection meta cache
-func (c *Core) ExpireMetaCache(ctx context.Context, dbName string, collNames []string, collectionID UniqueID, ts typeutil.Timestamp, opts ...expireCacheOpt) error {
+func (c *Core) ExpireMetaCache(ctx context.Context, dbName string, collNames []string, collectionID UniqueID, ts typeutil.Timestamp, opts ...proxyutil.ExpireCacheOpt) error {
 	// if collectionID is specified, invalidate all the collection meta cache with the specified collectionID and return
 	if collectionID != InvalidCollectionID {
 		req := proxypb.InvalidateCollMetaCacheRequest{

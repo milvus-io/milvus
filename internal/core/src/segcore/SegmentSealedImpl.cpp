@@ -198,8 +198,11 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info) {
         auto field_data_info =
             FieldDataInfo(field_id.get(), num_rows, load_info.mmap_dir_path);
 
-        LOG_SEGCORE_INFO_ << "start to load field data " << id << " of segment "
-                          << this->id_;
+        LOG_INFO("segment {} loads field {} with num_rows {}",
+                 this->get_segment_id(),
+                 field_id.get(),
+                 num_rows);
+
         auto parallel_degree = static_cast<uint64_t>(
             DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
         field_data_info.channel->set_capacity(parallel_degree * 2);
@@ -207,19 +210,19 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info) {
             ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
         auto load_future = pool.Submit(
             LoadFieldDatasFromRemote, insert_files, field_data_info.channel);
-        LOG_SEGCORE_INFO_ << "finish submitting LoadFieldDatasFromRemote task "
-                             "to thread pool, "
-                          << "segmentID:" << this->id_
-                          << ", fieldID:" << info.field_id;
+
+        LOG_INFO("segment {} submits load field {} task to thread pool",
+                 this->get_segment_id(),
+                 field_id.get());
         if (!info.enable_mmap ||
             SystemProperty::Instance().IsSystem(field_id)) {
             LoadFieldData(field_id, field_data_info);
         } else {
             MapFieldData(field_id, field_data_info);
         }
-        LOG_SEGCORE_INFO_ << "finish loading segment field, "
-                          << "segmentID:" << this->id_
-                          << ", fieldID:" << info.field_id;
+        LOG_INFO("segment {} loads field {} done",
+                 this->get_segment_id(),
+                 field_id.get());
     }
 }
 
@@ -236,6 +239,11 @@ SegmentSealedImpl::LoadFieldDataV2(const LoadFieldDataInfo& load_info) {
         auto insert_files = info.insert_files;
         auto field_data_info =
             FieldDataInfo(field_id.get(), num_rows, load_info.mmap_dir_path);
+
+        LOG_INFO("segment {} loads field {} with num_rows {}",
+                 this->get_segment_id(),
+                 field_id.get(),
+                 num_rows);
 
         auto parallel_degree = static_cast<uint64_t>(
             DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
@@ -255,19 +263,18 @@ SegmentSealedImpl::LoadFieldDataV2(const LoadFieldDataInfo& load_info) {
         std::shared_ptr<milvus_storage::Space> space = std::move(res.value());
         auto load_future = pool.Submit(
             LoadFieldDatasFromRemote2, space, schema_, field_data_info);
-        LOG_SEGCORE_INFO_ << "finish submitting LoadFieldDatasFromRemote task "
-                             "to thread pool, "
-                          << "segmentID:" << this->id_
-                          << ", fieldID:" << info.field_id;
+        LOG_INFO("segment {} submits load field {} task to thread pool",
+                 this->get_segment_id(),
+                 field_id.get());
         if (load_info.mmap_dir_path.empty() ||
             SystemProperty::Instance().IsSystem(field_id)) {
             LoadFieldData(field_id, field_data_info);
         } else {
             MapFieldData(field_id, field_data_info);
         }
-        LOG_SEGCORE_INFO_ << "finish loading segment field, "
-                          << "segmentID:" << this->id_
-                          << ", fieldID:" << info.field_id;
+        LOG_INFO("segment {} loads field {} done",
+                 this->get_segment_id(),
+                 field_id.get());
     }
 }
 void
@@ -1455,7 +1462,13 @@ SegmentSealedImpl::generate_binlog_index(const FieldId field_id) {
             // get binlog data and meta
             auto row_count = num_rows_.value();
             auto dim = field_meta.get_dim();
-            auto vec_data = fields_.at(field_id);
+            std::shared_ptr<ColumnBase> vec_data{};
+            {
+                // field should be exists.
+                // otherwise, out_of_range exception is thrown by fields_.at
+                std::shared_lock lck(mutex_);
+                vec_data = fields_.at(field_id);
+            }
             auto dataset =
                 knowhere::GenDataSet(row_count, dim, (void*)vec_data->Data());
             dataset->SetIsOwner(false);

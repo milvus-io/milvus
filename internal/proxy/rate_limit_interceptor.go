@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
 	"google.golang.org/grpc"
 
@@ -41,7 +40,7 @@ func RateLimitInterceptor(limiter types.Limiter) grpc.UnaryServerInterceptor {
 
 		err = limiter.Check(collectionID, rt, n)
 		if err != nil {
-			rsp := getFailedResponse(req, rt, err, info.FullMethod)
+			rsp := getFailedResponse(req, err)
 			if rsp != nil {
 				return rsp, nil
 			}
@@ -121,26 +120,8 @@ func failedMutationResult(err error) *milvuspb.MutationResult {
 	}
 }
 
-func wrapQuotaError(rt internalpb.RateType, err error, fullMethod string) error {
-	if errors.Is(err, merr.ErrServiceRateLimit) {
-		return errors.Wrapf(err, "request %s is rejected by grpc RateLimiter middleware, please retry later", fullMethod)
-	}
-
-	// deny to write/read
-	var op string
-	switch rt {
-	case internalpb.RateType_DMLInsert, internalpb.RateType_DMLUpsert, internalpb.RateType_DMLDelete, internalpb.RateType_DMLBulkLoad:
-		op = "write"
-	case internalpb.RateType_DQLSearch, internalpb.RateType_DQLQuery:
-		op = "read"
-	}
-
-	return merr.WrapErrServiceForceDeny(op, err, fullMethod)
-}
-
 // getFailedResponse returns failed response.
-func getFailedResponse(req any, rt internalpb.RateType, err error, fullMethod string) any {
-	err = wrapQuotaError(rt, err, fullMethod)
+func getFailedResponse(req any, err error) any {
 	switch req.(type) {
 	case *milvuspb.InsertRequest, *milvuspb.DeleteRequest, *milvuspb.UpsertRequest:
 		return failedMutationResult(err)

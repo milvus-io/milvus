@@ -82,8 +82,7 @@ PhyTermFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                     result = ExecVisitorImplTemplateJson<std::string>();
                     break;
                 default:
-                    PanicInfo(DataTypeInvalid,
-                              fmt::format("unknown data type: {}", type));
+                    PanicInfo(DataTypeInvalid, "unknown data type: {}", type);
             }
             break;
         }
@@ -107,16 +106,36 @@ PhyTermFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                     result = ExecVisitorImplTemplateArray<std::string>();
                     break;
                 default:
-                    PanicInfo(DataTypeInvalid,
-                              fmt::format("unknown data type: {}", type));
+                    PanicInfo(DataTypeInvalid, "unknown data type: {}", type);
             }
             break;
         }
         default:
             PanicInfo(DataTypeInvalid,
-                      fmt::format("unsupported data type: {}",
-                                  expr_->column_.data_type_));
+                      "unsupported data type: {}",
+                      expr_->column_.data_type_);
     }
+}
+
+template <typename T>
+bool
+PhyTermFilterExpr::CanSkipSegment() {
+    const auto& skip_index = segment_->GetSkipIndex();
+    T min, max;
+    for (auto i = 0; i < expr_->vals_.size(); i++) {
+        auto val = GetValueFromProto<T>(expr_->vals_[i]);
+        max = i == 0 ? val : std::max(val, max);
+        min = i == 0 ? val : std::min(val, min);
+    }
+    // using skip index to help skipping this segment
+    if (segment_->type() == SegmentType::Sealed &&
+        skip_index.CanSkipBinaryRange<T>(field_id_, 0, min, max, true, true)) {
+        cached_bits_.resize(num_rows_, false);
+        cached_offsets_ = std::make_shared<ColumnVector>(DataType::INT64, 0);
+        cached_offsets_inited_ = true;
+        return true;
+    }
+    return false;
 }
 
 void
@@ -124,6 +143,9 @@ PhyTermFilterExpr::InitPkCacheOffset() {
     auto id_array = std::make_unique<IdArray>();
     switch (pk_type_) {
         case DataType::INT64: {
+            if (CanSkipSegment<int64_t>()) {
+                return;
+            }
             auto dst_ids = id_array->mutable_int_id();
             for (const auto& id : expr_->vals_) {
                 dst_ids->add_data(GetValueFromProto<int64_t>(id));
@@ -131,6 +153,9 @@ PhyTermFilterExpr::InitPkCacheOffset() {
             break;
         }
         case DataType::VARCHAR: {
+            if (CanSkipSegment<std::string>()) {
+                return;
+            }
             auto dst_ids = id_array->mutable_str_id();
             for (const auto& id : expr_->vals_) {
                 dst_ids->add_data(GetValueFromProto<std::string>(id));
@@ -138,14 +163,13 @@ PhyTermFilterExpr::InitPkCacheOffset() {
             break;
         }
         default: {
-            PanicInfo(DataTypeInvalid,
-                      fmt::format("unsupported data type {}", pk_type_));
+            PanicInfo(DataTypeInvalid, "unsupported data type {}", pk_type_);
         }
     }
 
     auto [uids, seg_offsets] =
         segment_->search_ids(*id_array, query_timestamp_);
-    cached_bits_.resize(num_rows_);
+    cached_bits_.resize(num_rows_, false);
     cached_offsets_ =
         std::make_shared<ColumnVector>(DataType::INT64, seg_offsets.size());
     int64_t* cached_offsets_ptr = (int64_t*)cached_offsets_->GetRawData();
@@ -167,7 +191,6 @@ PhyTermFilterExpr::ExecPkTermImpl() {
     auto real_batch_size = current_data_chunk_pos_ + batch_size_ >= num_rows_
                                ? num_rows_ - current_data_chunk_pos_
                                : batch_size_;
-    current_data_chunk_pos_ += real_batch_size;
 
     if (real_batch_size == 0) {
         return nullptr;
@@ -178,7 +201,7 @@ PhyTermFilterExpr::ExecPkTermImpl() {
     bool* res = (bool*)res_vec->GetRawData();
 
     for (size_t i = 0; i < real_batch_size; ++i) {
-        res[i] = cached_bits_[i];
+        res[i] = cached_bits_[current_data_chunk_pos_++];
     }
 
     std::vector<VectorPtr> vecs{res_vec, cached_offsets_};
@@ -244,10 +267,10 @@ PhyTermFilterExpr::ExecTermArrayVariableInField() {
     int64_t processed_size = ProcessDataChunks<milvus::ArrayView>(
         execute_sub_batch, std::nullptr_t{}, res, target_val);
     AssertInfo(processed_size == real_batch_size,
-               fmt::format("internal error: expr processed rows {} not equal "
-                           "expect batch size {}",
-                           processed_size,
-                           real_batch_size));
+               "internal error: expr processed rows {} not equal "
+               "expect batch size {}",
+               processed_size,
+               real_batch_size);
     return res_vec;
 }
 
@@ -305,10 +328,10 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable() {
     int64_t processed_size = ProcessDataChunks<milvus::ArrayView>(
         execute_sub_batch, std::nullptr_t{}, res, index, term_set);
     AssertInfo(processed_size == real_batch_size,
-               fmt::format("internal error: expr processed rows {} not equal "
-                           "expect batch size {}",
-                           processed_size,
-                           real_batch_size));
+               "internal error: expr processed rows {} not equal "
+               "expect batch size {}",
+               processed_size,
+               real_batch_size);
     return res_vec;
 }
 
@@ -358,10 +381,10 @@ PhyTermFilterExpr::ExecTermJsonVariableInField() {
     int64_t processed_size = ProcessDataChunks<milvus::Json>(
         execute_sub_batch, std::nullptr_t{}, res, pointer, val);
     AssertInfo(processed_size == real_batch_size,
-               fmt::format("internal error: expr processed rows {} not equal "
-                           "expect batch size {}",
-                           processed_size,
-                           real_batch_size));
+               "internal error: expr processed rows {} not equal "
+               "expect batch size {}",
+               processed_size,
+               real_batch_size);
     return res_vec;
 }
 
@@ -421,10 +444,10 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable() {
     int64_t processed_size = ProcessDataChunks<milvus::Json>(
         execute_sub_batch, std::nullptr_t{}, res, pointer, term_set);
     AssertInfo(processed_size == real_batch_size,
-               fmt::format("internal error: expr processed rows {} not equal "
-                           "expect batch size {}",
-                           processed_size,
-                           real_batch_size));
+               "internal error: expr processed rows {} not equal "
+               "expect batch size {}",
+               processed_size,
+               real_batch_size);
     return res_vec;
 }
 
@@ -468,10 +491,10 @@ PhyTermFilterExpr::ExecVisitorImplForIndex() {
     };
     auto res = ProcessIndexChunks<T>(execute_sub_batch, vals);
     AssertInfo(res.size() == real_batch_size,
-               fmt::format("internal error: expr processed rows {} not equal "
-                           "expect batch size {}",
-                           res.size(),
-                           real_batch_size));
+               "internal error: expr processed rows {} not equal "
+               "expect batch size {}",
+               res.size(),
+               real_batch_size);
     return std::make_shared<ColumnVector>(std::move(res));
 }
 
@@ -529,10 +552,10 @@ PhyTermFilterExpr::ExecVisitorImplForData() {
     int64_t processed_size = ProcessDataChunks<T>(
         execute_sub_batch, std::nullptr_t{}, res, vals_set);
     AssertInfo(processed_size == real_batch_size,
-               fmt::format("internal error: expr processed rows {} not equal "
-                           "expect batch size {}",
-                           processed_size,
-                           real_batch_size));
+               "internal error: expr processed rows {} not equal "
+               "expect batch size {}",
+               processed_size,
+               real_batch_size);
     return res_vec;
 }
 

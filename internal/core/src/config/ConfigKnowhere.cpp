@@ -68,7 +68,7 @@ KnowhereSetSimdType(const char* value) {
     try {
         return knowhere::KnowhereConfig::SetSimdType(simd_type);
     } catch (std::exception& e) {
-        LOG_SERVER_ERROR_ << e.what();
+        LOG_ERROR(e.what());
         PanicInfo(ConfigInvalid, e.what());
     }
 }

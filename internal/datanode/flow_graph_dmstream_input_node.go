@@ -69,7 +69,7 @@ func newDmInputNode(initCtx context.Context, dispatcherClient msgdispatcher.Clie
 		Params.DataNodeCfg.FlowGraphMaxQueueLength.GetAsInt32(),
 		Params.DataNodeCfg.FlowGraphMaxParallelism.GetAsInt32(),
 		typeutil.DataNodeRole,
-		paramtable.GetNodeID(),
+		dmNodeConfig.serverID,
 		dmNodeConfig.collectionID,
 		metrics.AllLabel,
 	)

@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package rootcoord
+package proxyutil
 
 import (
 	"context"
@@ -37,19 +37,19 @@ func TestProxyManager(t *testing.T) {
 	paramtable.Init()
 
 	etcdCli, err := etcd.GetEtcdClient(
-		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
-		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
-		Params.EtcdCfg.Endpoints.GetAsStrings(),
-		Params.EtcdCfg.EtcdTLSCert.GetValue(),
-		Params.EtcdCfg.EtcdTLSKey.GetValue(),
-		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
-		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
+		paramtable.Get().EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		paramtable.Get().EtcdCfg.EtcdUseSSL.GetAsBool(),
+		paramtable.Get().EtcdCfg.Endpoints.GetAsStrings(),
+		paramtable.Get().EtcdCfg.EtcdTLSCert.GetValue(),
+		paramtable.Get().EtcdCfg.EtcdTLSKey.GetValue(),
+		paramtable.Get().EtcdCfg.EtcdTLSCACert.GetValue(),
+		paramtable.Get().EtcdCfg.EtcdTLSMinVersion.GetValue())
 	assert.NoError(t, err)
 	defer etcdCli.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	sessKey := path.Join(Params.EtcdCfg.MetaRootPath.GetValue(), sessionutil.DefaultServiceRoot)
+	sessKey := path.Join(paramtable.Get().EtcdCfg.MetaRootPath.GetValue(), sessionutil.DefaultServiceRoot)
 	etcdCli.Delete(ctx, sessKey, clientv3.WithPrefix())
 	defer etcdCli.Delete(ctx, sessKey, clientv3.WithPrefix())
 	s1 := sessionutil.Session{
@@ -76,7 +76,7 @@ func TestProxyManager(t *testing.T) {
 		assert.Equal(t, int64(99), sess[1].ServerID)
 		t.Log("get sessions", sess[0], sess[1])
 	}
-	pm := newProxyManager(ctx, etcdCli, f1)
+	pm := NewProxyWatcher(etcdCli, f1)
 	assert.NoError(t, err)
 	fa := func(sess *sessionutil.Session) {
 		assert.Equal(t, int64(101), sess.ServerID)
@@ -89,7 +89,7 @@ func TestProxyManager(t *testing.T) {
 	pm.AddSessionFunc(fa)
 	pm.DelSessionFunc(fd)
 
-	err = pm.WatchProxy()
+	err = pm.WatchProxy(ctx)
 	assert.NoError(t, err)
 	t.Log("======== start watch proxy ==========")
 
@@ -113,27 +113,27 @@ func TestProxyManager_ErrCompacted(t *testing.T) {
 	paramtable.Init()
 
 	etcdCli, err := etcd.GetEtcdClient(
-		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
-		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
-		Params.EtcdCfg.Endpoints.GetAsStrings(),
-		Params.EtcdCfg.EtcdTLSCert.GetValue(),
-		Params.EtcdCfg.EtcdTLSKey.GetValue(),
-		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
-		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
+		paramtable.Get().EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		paramtable.Get().EtcdCfg.EtcdUseSSL.GetAsBool(),
+		paramtable.Get().EtcdCfg.Endpoints.GetAsStrings(),
+		paramtable.Get().EtcdCfg.EtcdTLSCert.GetValue(),
+		paramtable.Get().EtcdCfg.EtcdTLSKey.GetValue(),
+		paramtable.Get().EtcdCfg.EtcdTLSCACert.GetValue(),
+		paramtable.Get().EtcdCfg.EtcdTLSMinVersion.GetValue())
 	assert.NoError(t, err)
 	defer etcdCli.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
-	sessKey := path.Join(Params.EtcdCfg.MetaRootPath.GetValue(), sessionutil.DefaultServiceRoot)
+	sessKey := path.Join(paramtable.Get().EtcdCfg.MetaRootPath.GetValue(), sessionutil.DefaultServiceRoot)
 	f1 := func(sess []*sessionutil.Session) {
 		t.Log("get sessions num", len(sess))
 	}
-	pm := newProxyManager(ctx, etcdCli, f1)
+	pm := NewProxyWatcher(etcdCli, f1)
 
 	eventCh := pm.etcdCli.Watch(
-		pm.ctx,
-		path.Join(Params.EtcdCfg.MetaRootPath.GetValue(), sessionutil.DefaultServiceRoot, typeutil.ProxyRole),
+		ctx,
+		path.Join(paramtable.Get().EtcdCfg.MetaRootPath.GetValue(), sessionutil.DefaultServiceRoot, typeutil.ProxyRole),
 		clientv3.WithPrefix(),
 		clientv3.WithCreatedNotify(),
 		clientv3.WithPrevKV(),
@@ -152,7 +152,7 @@ func TestProxyManager_ErrCompacted(t *testing.T) {
 	etcdCli.Compact(ctx, 10)
 
 	assert.Panics(t, func() {
-		pm.startWatchEtcd(pm.ctx, eventCh)
+		pm.startWatchEtcd(ctx, eventCh)
 	})
 
 	for i := 1; i < 10; i++ {

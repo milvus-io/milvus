@@ -31,7 +31,7 @@ ThreadPool::Init() {
 
 void
 ThreadPool::ShutDown() {
-    LOG_SEGCORE_INFO_ << "Start shutting down " << name_;
+    LOG_INFO("Start shutting down {}", name_);
     {
         std::lock_guard<std::mutex> lock(mutex_);
         shutdown_ = true;
@@ -42,7 +42,7 @@ ThreadPool::ShutDown() {
             thread.second.join();
         }
     }
-    LOG_SEGCORE_INFO_ << "Finish shutting down " << name_;
+    LOG_INFO("Finish shutting down {}", name_);
 }
 
 void

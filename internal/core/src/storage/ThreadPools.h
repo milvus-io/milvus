@@ -48,11 +48,10 @@ class ThreadPools {
         coefficient_map[HIGH] = HIGH_PRIORITY_THREAD_CORE_COEFFICIENT;
         coefficient_map[MIDDLE] = MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT;
         coefficient_map[LOW] = LOW_PRIORITY_THREAD_CORE_COEFFICIENT;
-        LOG_SEGCORE_INFO_ << "Init ThreadPools, high_priority_co:"
-                          << HIGH_PRIORITY_THREAD_CORE_COEFFICIENT
-                          << ", middle:"
-                          << MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT
-                          << ", low:" << LOW_PRIORITY_THREAD_CORE_COEFFICIENT;
+        LOG_INFO("Init ThreadPools, high_priority_co={}, middle={}, low={}",
+                 HIGH_PRIORITY_THREAD_CORE_COEFFICIENT,
+                 MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT,
+                 LOW_PRIORITY_THREAD_CORE_COEFFICIENT);
     }
     void
     ShutDown();

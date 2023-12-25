@@ -223,6 +223,14 @@ class ApiUtilityWrapper:
                                        partition_names=partition_names, using=using).run()
         return res, check_result
 
+    def load_state(self, collection_name, partition_names=None, using="default", check_task=None, check_items=None):
+        func_name = sys._getframe().f_code.co_name
+        res, is_succ = api_request([self.ut.load_state, collection_name, partition_names, using])
+        check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ,
+                                       collection_name=collection_name, partition_names=partition_names,
+                                       using=using).run()
+        return res, check_result
+
     def wait_for_loading_complete(self, collection_name, partition_names=None, timeout=None, using="default",
                                   check_task=None, check_items=None):
         timeout = TIMEOUT if timeout is None else timeout
@@ -531,3 +539,16 @@ class ApiUtilityWrapper:
                                        using=using, timeout=timeout, **kwargs).run()
         return res, check_result
 
+    def get_server_type(self, using="default", check_task=None, check_items=None, **kwargs):
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.ut.get_server_type, using], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check,
+                                       using=using, **kwargs).run()
+        return res, check_result
+
+    def list_indexes(self, collection_name, using="default", timeout=None, check_task=None, check_items=None, **kwargs):
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.ut.list_indexes, collection_name, using, timeout], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check,
+                                       collection_name=collection_name, using=using, timeout=timeout, **kwargs).run()
+        return res, check_result

@@ -153,10 +153,16 @@ func oldCode(code int32) commonpb.ErrorCode {
 	case ErrServiceMemoryLimitExceeded.code():
 		return commonpb.ErrorCode_InsufficientMemoryToLoad
 
+	case ErrServiceDiskLimitExceeded.code():
+		return commonpb.ErrorCode_DiskQuotaExhausted
+
+	case ErrServiceTimeTickLongDelay.code():
+		return commonpb.ErrorCode_TimeTickLongDelay
+
 	case ErrServiceRateLimit.code():
 		return commonpb.ErrorCode_RateLimit
 
-	case ErrServiceForceDeny.code():
+	case ErrServiceQuotaExceeded.code():
 		return commonpb.ErrorCode_ForceDeny
 
 	case ErrIndexNotFound.code():
@@ -193,11 +199,14 @@ func OldCodeToMerr(code commonpb.ErrorCode) error {
 	case commonpb.ErrorCode_DiskQuotaExhausted:
 		return ErrServiceDiskLimitExceeded
 
+	case commonpb.ErrorCode_TimeTickLongDelay:
+		return ErrServiceTimeTickLongDelay
+
 	case commonpb.ErrorCode_RateLimit:
 		return ErrServiceRateLimit
 
 	case commonpb.ErrorCode_ForceDeny:
-		return ErrServiceForceDeny
+		return ErrServiceQuotaExceeded
 
 	case commonpb.ErrorCode_IndexNotExist:
 		return ErrIndexNotFound
@@ -358,16 +367,20 @@ func WrapErrServiceDiskLimitExceeded(predict, limit float32, msg ...string) erro
 	return err
 }
 
-func WrapErrServiceRateLimit(rate float64) error {
-	return wrapFields(ErrServiceRateLimit, value("rate", rate))
+func WrapErrServiceRateLimit(rate float64, msg ...string) error {
+	err := wrapFields(ErrServiceRateLimit, value("rate", rate))
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
 }
 
-func WrapErrServiceForceDeny(op string, reason error, method string) error {
-	return wrapFieldsWithDesc(ErrServiceForceDeny,
-		reason.Error(),
-		value("op", op),
-		value("req", method),
-	)
+func WrapErrServiceQuotaExceeded(reason string, msg ...string) error {
+	err := wrapFields(ErrServiceQuotaExceeded, value("reason", reason))
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
 }
 
 func WrapErrServiceUnimplemented(grpcErr error) error {
@@ -439,6 +452,15 @@ func WrapErrCollectionNotFullyLoaded(collection any, msg ...string) error {
 	err := wrapFields(ErrCollectionNotFullyLoaded, value("collection", collection))
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
+
+func WrapErrCollectionLoaded(collection string, msgAndArgs ...any) error {
+	err := wrapFields(ErrCollectionLoaded, value("collection", collection))
+	if len(msgAndArgs) > 0 {
+		msg := msgAndArgs[0].(string)
+		err = errors.Wrapf(err, msg, msgAndArgs[1:]...)
 	}
 	return err
 }

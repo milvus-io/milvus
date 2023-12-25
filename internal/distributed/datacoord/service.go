@@ -436,6 +436,10 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 	return s.dataCoord.CreateIndex(ctx, req)
 }
 
+func (s *Server) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest) (*commonpb.Status, error) {
+	return s.dataCoord.AlterIndex(ctx, req)
+}
+
 // GetIndexState gets the index states from DataCoord.
 // Deprecated: use DescribeIndex instead
 func (s *Server) GetIndexState(ctx context.Context, req *indexpb.GetIndexStateRequest) (*indexpb.GetIndexStateResponse, error) {

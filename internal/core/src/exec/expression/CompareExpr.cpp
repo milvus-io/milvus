@@ -104,8 +104,7 @@ PhyCompareFilterExpr::GetChunkData(DataType data_type,
             return GetChunkData<std::string>(field_id, chunk_id, data_barrier);
         }
         default:
-            PanicInfo(DataTypeInvalid,
-                      fmt::format("unsupported data type: {}", data_type));
+            PanicInfo(DataTypeInvalid, "unsupported data type: {}", data_type);
     }
 }
 
@@ -194,8 +193,7 @@ PhyCompareFilterExpr::ExecCompareExprDispatcherForHybridSegment() {
             // case OpType::PostfixMatch: {
             // }
         default: {
-            PanicInfo(OpTypeInvalid,
-                      fmt::format("unsupported optype: {}", expr_->op_type_));
+            PanicInfo(OpTypeInvalid, "unsupported optype: {}", expr_->op_type_);
         }
     }
 }
@@ -308,10 +306,10 @@ PhyCompareFilterExpr::ExecCompareRightType() {
     int64_t processed_size =
         ProcessBothDataChunks<T, U>(execute_sub_batch, res);
     AssertInfo(processed_size == real_batch_size,
-               fmt::format("internal error: expr processed rows {} not equal "
-                           "expect batch size {}",
-                           processed_size,
-                           real_batch_size));
+               "internal error: expr processed rows {} not equal "
+               "expect batch size {}",
+               processed_size,
+               real_batch_size);
     return res_vec;
 };
 

@@ -114,7 +114,7 @@ bitset_hook() {
     }
 #endif
     // TODO: support arm cpu
-    LOG_SEGCORE_INFO_ << "bitset hook simd type: " << simd_type;
+    LOG_INFO("bitset hook simd type: {}", simd_type);
 }
 
 void
@@ -166,7 +166,7 @@ find_term_hook() {
     }
 #endif
     // TODO: support arm cpu
-    LOG_SEGCORE_INFO_ << "find term hook simd type: " << simd_type;
+    LOG_INFO("find term hook simd type: {}", simd_type);
 }
 
 void
@@ -186,7 +186,7 @@ all_boolean_hook() {
     all_true = AllTrueNEON;
 #endif
     // TODO: support arm cpu
-    LOG_SEGCORE_INFO_ << "AllFalse/AllTrue hook simd type: " << simd_type;
+    LOG_INFO("AllFalse/AllTrue hook simd type: {}", simd_type);
 }
 
 void
@@ -204,7 +204,7 @@ invert_boolean_hook() {
     invert_bool = InvertBoolNEON;
 #endif
     // TODO: support arm cpu
-    LOG_SEGCORE_INFO_ << "InvertBoolean hook simd type: " << simd_type;
+    LOG_INFO("InvertBoolean hook simd type: {}", simd_type);
 }
 
 void
@@ -232,7 +232,7 @@ logical_boolean_hook() {
     or_bool = OrBoolNEON;
 #endif
     // TODO: support arm cpu
-    LOG_SEGCORE_INFO_ << "InvertBoolean hook simd type: " << simd_type;
+    LOG_INFO("InvertBoolean hook simd type: {}", simd_type);
 }
 void
 boolean_hook() {

@@ -27,8 +27,12 @@ import "C"
 import (
 	"unsafe"
 
+	"github.com/pingcap/log"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/indexparams"
@@ -56,9 +60,14 @@ func deleteLoadIndexInfo(info *LoadIndexInfo) {
 	C.DeleteLoadIndexInfo(info.cLoadIndexInfo)
 }
 
-func (li *LoadIndexInfo) appendLoadIndexInfo(indexInfo *querypb.FieldIndexInfo, collectionID int64, partitionID int64, segmentID int64, fieldType schemapb.DataType, enableMmap bool) error {
+func (li *LoadIndexInfo) appendLoadIndexInfo(indexInfo *querypb.FieldIndexInfo, collectionID int64, partitionID int64, segmentID int64, fieldType schemapb.DataType) error {
 	fieldID := indexInfo.FieldID
 	indexPaths := indexInfo.IndexFilePaths
+
+	indexParams := funcutil.KeyValuePair2Map(indexInfo.IndexParams)
+	enableMmap := indexParams[common.MmapEnabledKey] == "true"
+	// as Knowhere reports error if encounter a unknown param, we need to delete it
+	delete(indexParams, common.MmapEnabledKey)
 
 	mmapDirPath := paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue()
 	err := li.appendFieldInfo(collectionID, partitionID, segmentID, fieldID, fieldType, enableMmap, mmapDirPath)
@@ -72,7 +81,6 @@ func (li *LoadIndexInfo) appendLoadIndexInfo(indexInfo *querypb.FieldIndexInfo, 
 	}
 
 	// some build params also exist in indexParams, which are useless during loading process
-	indexParams := funcutil.KeyValuePair2Map(indexInfo.IndexParams)
 	if indexParams["index_type"] == indexparamcheck.IndexDISKANN {
 		err = indexparams.SetDiskIndexLoadParams(paramtable.Get(), indexParams, indexInfo.GetNumRows())
 		if err != nil {
@@ -85,6 +93,7 @@ func (li *LoadIndexInfo) appendLoadIndexInfo(indexInfo *querypb.FieldIndexInfo, 
 		return err
 	}
 
+	log.Info("load with index params", zap.Any("indexParams", indexParams))
 	for key, value := range indexParams {
 		err = li.appendIndexParam(key, value)
 		if err != nil {

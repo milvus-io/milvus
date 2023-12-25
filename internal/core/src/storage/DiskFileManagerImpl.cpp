@@ -108,7 +108,7 @@ DiskFileManagerImpl::AddFile(const std::string& file) noexcept {
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     FILEMANAGER_TRY
     if (!local_chunk_manager->Exist(file)) {
-        LOG_SEGCORE_ERROR_ << "local file: " << file << " does not exist ";
+        LOG_ERROR("local file {} not exists", file);
         return false;
     }
 
@@ -550,7 +550,7 @@ DiskFileManagerImpl::IsExisted(const std::string& file) noexcept {
     try {
         isExist = local_chunk_manager->Exist(file);
     } catch (std::exception& e) {
-        // LOG_SEGCORE_DEBUG_ << "Exception:" << e.what();
+        // LOG_DEBUG("Exception:{}", e).what();
         return std::nullopt;
     }
     return isExist;

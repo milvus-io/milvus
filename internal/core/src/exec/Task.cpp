@@ -19,6 +19,7 @@
 #include <boost/lexical_cast.hpp>
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
+#include "log/Log.h"
 
 namespace milvus {
 namespace exec {
@@ -125,6 +126,13 @@ Task::CreateDriversLocked(std::shared_ptr<Task>& self,
                                : 0;
                 }));
         }
+    }
+}
+
+void
+Task::Terminate(TaskState state) {
+    for (auto& driver : drivers_) {
+        driver->CloseByTask();
     }
 }
 

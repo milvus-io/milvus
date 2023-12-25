@@ -28,7 +28,7 @@ func (f *CommonFactory) NewMsgStream(ctx context.Context) (ms MsgStream, err err
 	if err != nil {
 		return nil, err
 	}
-	return NewMqMsgStream(ctx, f.ReceiveBufSize, f.MQBufSize, cli, f.DispatcherFactory.NewUnmarshalDispatcher())
+	return NewMqMsgStream(context.Background(), f.ReceiveBufSize, f.MQBufSize, cli, f.DispatcherFactory.NewUnmarshalDispatcher())
 }
 
 // NewTtMsgStream is used to generate a new TtMsgstream object
@@ -38,7 +38,7 @@ func (f *CommonFactory) NewTtMsgStream(ctx context.Context) (ms MsgStream, err e
 	if err != nil {
 		return nil, err
 	}
-	return NewMqTtMsgStream(ctx, f.ReceiveBufSize, f.MQBufSize, cli, f.DispatcherFactory.NewUnmarshalDispatcher())
+	return NewMqTtMsgStream(context.Background(), f.ReceiveBufSize, f.MQBufSize, cli, f.DispatcherFactory.NewUnmarshalDispatcher())
 }
 
 // NewMsgStreamDisposer returns a function that can be used to dispose of a message stream.

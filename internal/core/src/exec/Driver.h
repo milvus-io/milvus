@@ -78,7 +78,7 @@ class BlockingState {
                   ContinueFuture&& future,
                   Operator* op,
                   BlockingReason reason)
-        : driver_(std::move(driver_)),
+        : driver_(std::move(driver)),
           future_(std::move(future)),
           operator_(op),
           reason_(reason) {
@@ -206,6 +206,11 @@ class Driver : public std::enable_shared_from_this<Driver> {
     void
     Init(std::unique_ptr<DriverContext> driver_ctx,
          std::vector<std::unique_ptr<Operator>> operators);
+
+    void
+    CloseByTask() {
+        Close();
+    }
 
  private:
     Driver() = default;
