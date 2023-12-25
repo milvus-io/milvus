@@ -29,6 +29,7 @@ import (
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
+	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -80,28 +81,28 @@ func (suite *ControllerBaseTestSuite) SetupTest() {
 }
 
 func (s *ControllerBaseTestSuite) TestActivation() {
-	active, err := s.controller.IsActive(segmentChecker)
+	active, err := s.controller.IsActive(utils.SegmentChecker)
 	s.NoError(err)
 	s.True(active)
-	err = s.controller.Deactivate(segmentChecker)
+	err = s.controller.Deactivate(utils.SegmentChecker)
 	s.NoError(err)
-	active, err = s.controller.IsActive(segmentChecker)
+	active, err = s.controller.IsActive(utils.SegmentChecker)
 	s.NoError(err)
 	s.False(active)
-	err = s.controller.Activate(segmentChecker)
+	err = s.controller.Activate(utils.SegmentChecker)
 	s.NoError(err)
-	active, err = s.controller.IsActive(segmentChecker)
+	active, err = s.controller.IsActive(utils.SegmentChecker)
 	s.NoError(err)
 	s.True(active)
 
 	invalidTyp := -1
-	_, err = s.controller.IsActive(CheckerType(invalidTyp))
+	_, err = s.controller.IsActive(utils.CheckerType(invalidTyp))
 	s.Equal(errTypeNotFound, err)
 }
 
 func (s *ControllerBaseTestSuite) TestListCheckers() {
 	checkers := s.controller.Checkers()
-	s.Equal(4, len(checkers))
+	s.Equal(5, len(checkers))
 }
 
 func TestControllerBaseTestSuite(t *testing.T) {

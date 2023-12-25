@@ -29,44 +29,15 @@ import (
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
+	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/log"
 )
 
-const (
-	segmentCheckerName = "segment_checker"
-	channelCheckerName = "channel_checker"
-	balanceCheckerName = "balance_checker"
-	indexCheckerName   = "index_checker"
-)
-
-type CheckerType int32
-
-const (
-	channelChecker CheckerType = iota + 1
-	segmentChecker
-	balanceChecker
-	indexChecker
-)
-
-var (
-	checkRoundTaskNumLimit = 256
-	checkerOrder           = []string{channelCheckerName, segmentCheckerName, balanceCheckerName, indexCheckerName}
-	checkerNames           = map[CheckerType]string{
-		segmentChecker: segmentCheckerName,
-		channelChecker: channelCheckerName,
-		balanceChecker: balanceCheckerName,
-		indexChecker:   indexCheckerName,
-	}
-	errTypeNotFound = errors.New("checker type not found")
-)
-
-func (s CheckerType) String() string {
-	return checkerNames[s]
-}
+var errTypeNotFound = errors.New("checker type not found")
 
 type CheckerController struct {
 	cancel         context.CancelFunc
-	manualCheckChs map[CheckerType]chan struct{}
+	manualCheckChs map[utils.CheckerType]chan struct{}
 	meta           *meta.Meta
 	dist           *meta.DistributionManager
 	targetMgr      *meta.TargetManager
@@ -75,7 +46,7 @@ type CheckerController struct {
 	balancer       balance.Balance
 
 	scheduler task.Scheduler
-	checkers  map[CheckerType]Checker
+	checkers  map[utils.CheckerType]Checker
 
 	stopOnce sync.Once
 }
@@ -91,17 +62,18 @@ func NewCheckerController(
 ) *CheckerController {
 	// CheckerController runs checkers with the order,
 	// the former checker has higher priority
-	checkers := map[CheckerType]Checker{
-		channelChecker: NewChannelChecker(meta, dist, targetMgr, balancer),
-		segmentChecker: NewSegmentChecker(meta, dist, targetMgr, balancer, nodeMgr),
-		balanceChecker: NewBalanceChecker(meta, balancer, nodeMgr, scheduler),
-		indexChecker:   NewIndexChecker(meta, dist, broker, nodeMgr),
+	checkers := map[utils.CheckerType]Checker{
+		utils.ChannelChecker: NewChannelChecker(meta, dist, targetMgr, balancer),
+		utils.SegmentChecker: NewSegmentChecker(meta, dist, targetMgr, balancer, nodeMgr),
+		utils.BalanceChecker: NewBalanceChecker(meta, balancer, nodeMgr, scheduler),
+		utils.IndexChecker:   NewIndexChecker(meta, dist, broker, nodeMgr),
+		utils.LeaderChecker:  NewLeaderChecker(meta, dist, targetMgr, nodeMgr),
 	}
 
-	manualCheckChs := map[CheckerType]chan struct{}{
-		channelChecker: make(chan struct{}, 1),
-		segmentChecker: make(chan struct{}, 1),
-		balanceChecker: make(chan struct{}, 1),
+	manualCheckChs := map[utils.CheckerType]chan struct{}{
+		utils.ChannelChecker: make(chan struct{}, 1),
+		utils.SegmentChecker: make(chan struct{}, 1),
+		utils.BalanceChecker: make(chan struct{}, 1),
 	}
 
 	return &CheckerController{
@@ -124,22 +96,24 @@ func (controller *CheckerController) Start() {
 	}
 }
 
-func getCheckerInterval(checker CheckerType) time.Duration {
+func getCheckerInterval(checker utils.CheckerType) time.Duration {
 	switch checker {
-	case segmentChecker:
+	case utils.SegmentChecker:
 		return Params.QueryCoordCfg.SegmentCheckInterval.GetAsDuration(time.Millisecond)
-	case channelChecker:
+	case utils.ChannelChecker:
 		return Params.QueryCoordCfg.ChannelCheckInterval.GetAsDuration(time.Millisecond)
-	case balanceChecker:
+	case utils.BalanceChecker:
 		return Params.QueryCoordCfg.BalanceCheckInterval.GetAsDuration(time.Millisecond)
-	case indexChecker:
+	case utils.IndexChecker:
 		return Params.QueryCoordCfg.IndexCheckInterval.GetAsDuration(time.Millisecond)
+	case utils.LeaderChecker:
+		return Params.QueryCoordCfg.LeaderViewUpdateInterval.GetAsDuration(time.Millisecond)
 	default:
 		return Params.QueryCoordCfg.CheckInterval.GetAsDuration(time.Millisecond)
 	}
 }
 
-func (controller *CheckerController) startChecker(ctx context.Context, checker CheckerType) {
+func (controller *CheckerController) startChecker(ctx context.Context, checker utils.CheckerType) {
 	interval := getCheckerInterval(checker)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -180,7 +154,7 @@ func (controller *CheckerController) Check() {
 }
 
 // check is the real implementation of Check
-func (controller *CheckerController) check(ctx context.Context, checkType CheckerType) {
+func (controller *CheckerController) check(ctx context.Context, checkType utils.CheckerType) {
 	checker := controller.checkers[checkType]
 	tasks := checker.Check(ctx)
 
@@ -193,7 +167,7 @@ func (controller *CheckerController) check(ctx context.Context, checkType Checke
 	}
 }
 
-func (controller *CheckerController) Deactivate(typ CheckerType) error {
+func (controller *CheckerController) Deactivate(typ utils.CheckerType) error {
 	for _, checker := range controller.checkers {
 		if checker.ID() == typ {
 			checker.Deactivate()
@@ -203,7 +177,7 @@ func (controller *CheckerController) Deactivate(typ CheckerType) error {
 	return errTypeNotFound
 }
 
-func (controller *CheckerController) Activate(typ CheckerType) error {
+func (controller *CheckerController) Activate(typ utils.CheckerType) error {
 	for _, checker := range controller.checkers {
 		if checker.ID() == typ {
 			checker.Activate()
@@ -213,7 +187,7 @@ func (controller *CheckerController) Activate(typ CheckerType) error {
 	return errTypeNotFound
 }
 
-func (controller *CheckerController) IsActive(typ CheckerType) (bool, error) {
+func (controller *CheckerController) IsActive(typ utils.CheckerType) (bool, error) {
 	for _, checker := range controller.checkers {
 		if checker.ID() == typ {
 			return checker.IsActive(), nil
