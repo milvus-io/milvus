@@ -60,6 +60,30 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 			TotalChannelNum: 2,
 		}, suite.queryHook, 2)
 		suite.NoError(err)
+		suite.False(req.GetReq().GetEnsureSearchQuality())
+		suite.verifyQueryInfo(req, 50, `{"param": 2}`)
+
+		plan = &planpb.PlanNode{
+			Node: &planpb.PlanNode_VectorAnns{
+				VectorAnns: &planpb.VectorANNS{
+					QueryInfo: &planpb.QueryInfo{
+						Topk:         50,
+						SearchParams: `{"param": 1}`,
+					},
+				},
+			},
+		}
+		bs, err = proto.Marshal(plan)
+		suite.Require().NoError(err)
+
+		req, err = OptimizeSearchParams(ctx, &querypb.SearchRequest{
+			Req: &internalpb.SearchRequest{
+				SerializedExprPlan: bs,
+			},
+			TotalChannelNum: 2,
+		}, suite.queryHook, 2)
+		suite.NoError(err)
+		suite.True(req.GetReq().GetEnsureSearchQuality())
 		suite.verifyQueryInfo(req, 50, `{"param": 2}`)
 	})
 

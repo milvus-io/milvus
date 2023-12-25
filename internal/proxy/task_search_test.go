@@ -1943,6 +1943,14 @@ func TestSearchTask_Research(t *testing.T) {
 	ids1 := []int64{1, 2, 3}
 	scores1 := []float32{-1.0, -2.0, -3.0}
 
+	resultIDs := &schemapb.IDs{
+		IdField: &schemapb.IDs_IntId{
+			IntId: &schemapb.LongArray{
+				Data: ids1,
+			},
+		},
+	}
+
 	ids := []int64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
 	scores := []float32{-1.0, -2.0, -3.0, -4.0, -5.0, -6.0, -7.0, -8.0, -9.0, -10.0}
 
@@ -1993,6 +2001,7 @@ func TestSearchTask_Research(t *testing.T) {
 		resultData.FieldsData = []*schemapb.FieldData{
 			idFieldData,
 		}
+
 		sliceBlob, _ := proto.Marshal(resultData)
 		schema := constructCollectionSchema(pkField, vecField, dim, collection)
 		qn := mocks.NewMockQueryNodeClient(t)
@@ -2012,14 +2021,6 @@ func TestSearchTask_Research(t *testing.T) {
 		}).Return(nil)
 		lb.EXPECT().UpdateCostMetrics(mock.Anything, mock.Anything).Return()
 		node.lbPolicy = lb
-
-		resultIDs := &schemapb.IDs{
-			IdField: &schemapb.IDs_IntId{
-				IntId: &schemapb.LongArray{
-					Data: ids1,
-				},
-			},
-		}
 
 		st := &searchTask{
 			ctx:            ctx,
@@ -2051,6 +2052,7 @@ func TestSearchTask_Research(t *testing.T) {
 		assert.Len(t, st.result.Results.Scores, 3)
 		err := st.Research()
 		assert.NoError(t, err)
+		// research and get new result
 		assert.Len(t, st.result.Results.Scores, topk)
 		scoresResult := []float32{1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0}
 		assert.Equal(t, scoresResult, st.result.Results.Scores)
@@ -2085,6 +2087,12 @@ func TestSearchTask_Research(t *testing.T) {
 				Nq:             nq,
 				SearchParams:   getValidSearchParams(),
 			},
+			result: &milvuspb.SearchResults{
+				Results: &schemapb.SearchResultData{
+					Ids:    resultIDs,
+					Scores: scores1,
+				},
+			},
 			resultBuf: typeutil.NewConcurrentSet[*internalpb.SearchResults](),
 			schema:    schema,
 			tr:        timerecord.NewTimeRecorder("search"),
@@ -2094,6 +2102,9 @@ func TestSearchTask_Research(t *testing.T) {
 		err := st.Research()
 		t.Logf("err = %s", err)
 		assert.Error(t, err)
+		// original result
+		assert.Len(t, st.result.Results.Scores, 3)
+		assert.Equal(t, scores1, st.result.Results.Scores)
 	})
 }
 

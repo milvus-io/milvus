@@ -232,6 +232,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 
 	t.SearchRequest.DbID = 0 // todo
 	t.SearchRequest.CollectionID = collID
+	t.SearchRequest.EnsureSearchQuality = (t.SearchRequest.EnsureSearchQuality || !Params.AutoIndexConfig.EnableOptimize.GetAsBool())
 	t.schema, err = globalMetaCache.GetCollectionSchema(ctx, t.request.GetDbName(), collectionName)
 	if err != nil {
 		log.Warn("get collection schema failed", zap.Error(err))
@@ -292,7 +293,8 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 
 	partitionNames := t.request.GetPartitionNames()
 	// only when plan != nil and EnsureSearchQuality is on, which means we are going to retry search, do not construct plan again
-	if t.request.GetDslType() == commonpb.DslType_BoolExprV1 && (!t.SearchRequest.EnsureSearchQuality || t.SearchRequest.SerializedExprPlan == nil) {
+	if t.request.GetDslType() == commonpb.DslType_BoolExprV1 &&
+		(!t.SearchRequest.GetEnsureSearchQuality() || t.SearchRequest.GetSerializedExprPlan() == nil) {
 		annsField, err := funcutil.GetAttrByKeyFromRepeatedKV(AnnsFieldKey, t.request.GetSearchParams())
 		if err != nil || len(annsField) == 0 {
 			if enableMultipleVectorFields {
