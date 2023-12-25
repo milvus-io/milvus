@@ -1680,3 +1680,84 @@ func (s *Server) GcControl(ctx context.Context, request *datapb.GcControlRequest
 
 	return status, nil
 }
+
+func (s *Server) ImportV2(ctx context.Context, in *datapb.ImportRequestV2) (*commonpb.Status, error) {
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	const FilesPerPreImportTask = 2 // TODO: dyh, move to config
+	fileGroups := lo.Chunk(in.GetFiles(), FilesPerPreImportTask)
+	idStart, _, err := s.allocator.allocN(int64(len(fileGroups)) + 1)
+	if err != nil {
+		return merr.Status(merr.WrapErrImportFailed(fmt.Sprint("alloc request id failed, err=%w", err))), nil
+	}
+
+	for i, files := range fileGroups {
+		fileStats := lo.Map(files, func(f *datapb.ImportFile, _ int) *datapb.ImportFileStats {
+			return &datapb.ImportFileStats{
+				ImportFile: f,
+			}
+		})
+		task := &preImportTask{
+			PreImportTask: &datapb.PreImportTask{
+				RequestID:    idStart,
+				TaskID:       idStart + int64(i) + 1,
+				CollectionID: in.GetCollectionID(),
+				PartitionIDs: in.GetPartitionIDs(),
+				Vchannels:    in.GetChannelNames(),
+				State:        datapb.ImportState_Pending,
+				FileStats:    fileStats,
+			},
+			schema: in.GetSchema(), // TODO: dyh, move to preimport task
+		}
+		err = s.importMeta.Add(task)
+		if err != nil {
+			return merr.Status(merr.WrapErrImportFailed(fmt.Sprint("add preimport task failed, err=%w", err))), nil
+		}
+	}
+	return merr.Success(), nil
+}
+
+func (s *Server) GetImportProgress(ctx context.Context, in *datapb.GetImportProgressRequest) (*datapb.GetImportProgressResponse, error) {
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return &datapb.GetImportProgressResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	resp := &datapb.GetImportProgressResponse{
+		Status: merr.Success(),
+	}
+	requestID, err := strconv.ParseInt(in.GetRequestID(), 10, 64)
+	if err != nil {
+		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprint("parse request id failed, err=%w", err)))
+		return resp, nil
+	}
+	progress, state, reason := GetImportProgress(requestID, s.importMeta, s.meta)
+	resp.State = state
+	resp.Reason = reason
+	resp.Progress = progress
+	return resp, nil
+}
+
+func (s *Server) ListImports(ctx context.Context, in *datapb.ListImportsRequest) (*datapb.ListImportsResponse, error) {
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return &datapb.ListImportsResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	resp := &datapb.ListImportsResponse{
+		Status: merr.Success(),
+	}
+	tasks := s.importMeta.GetBy()
+	res := lo.KeyBy(tasks, func(t ImportTask) int64 {
+		return t.GetRequestID()
+	})
+	requests := lo.Map(lo.Keys(res), func(requestID int64, _ int) string {
+		return fmt.Sprintf("%d", requestID)
+	})
+	resp.RequestIDs = requests
+	return resp, nil
+}

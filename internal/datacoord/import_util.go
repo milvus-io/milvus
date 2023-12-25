@@ -234,3 +234,61 @@ func AreAllTasksFinished(tasks []ImportTask, meta *meta) bool {
 	}
 	return true
 }
+
+func GetImportProgress(requestID int64, imeta ImportMeta, meta *meta) (int64, datapb.ImportState, string) {
+	tasks := imeta.GetBy(WithReq(requestID), WithType(PreImportTaskType))
+	var (
+		preparingProgress float32
+		preImportProgress float32
+		importProgress    float32
+	)
+	for _, task := range tasks {
+		switch task.GetState() {
+		case datapb.ImportState_Failed:
+			return 0, datapb.ImportState_Failed, task.GetReason()
+		case datapb.ImportState_InProgress:
+			preparingProgress += 100 / float32(len(tasks))
+		case datapb.ImportState_Completed:
+			preImportProgress += 100 / float32(len(tasks))
+		}
+	}
+	tasks = imeta.GetBy(WithReq(requestID), WithType(ImportTaskType))
+	var (
+		unsetImportStateSegments int
+		totalSegments            int
+	)
+	for _, task := range tasks {
+		switch task.GetState() {
+		case datapb.ImportState_Failed:
+			return 0, datapb.ImportState_Failed, task.GetReason()
+		case datapb.ImportState_InProgress:
+			preparingProgress += 100 / float32(len(tasks))
+			segmentIDs := task.(*importTask).GetSegmentIDs()
+			var (
+				importedRows int64
+				totalRows    int64
+			)
+			for _, segmentID := range segmentIDs {
+				segment := meta.GetSegment(segmentID)
+				if segment == nil {
+					return 0, datapb.ImportState_Failed, merr.WrapErrSegmentNotFound(segmentID).Error()
+				}
+				importedRows += segment.currRows
+				totalRows += segment.GetMaxRowNum()
+				totalSegments++
+				if !segment.GetIsImporting() {
+					unsetImportStateSegments++
+				}
+			}
+			importProgress += (float32(importedRows) / float32(totalRows)) * 100 / float32(len(tasks))
+		case datapb.ImportState_Completed:
+			importProgress += 100 / float32(len(tasks))
+		}
+	}
+	unsetImportStateProgress := 100 * float32(unsetImportStateSegments) / float32(totalSegments)
+	progress := preparingProgress*0.1 + preImportProgress*0.4 + importProgress*0.4 + unsetImportStateProgress*0.1
+	if progress == 100 {
+		return 100, datapb.ImportState_Completed, ""
+	}
+	return int64(progress), datapb.ImportState_InProgress, ""
+}

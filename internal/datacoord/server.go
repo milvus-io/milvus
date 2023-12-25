@@ -122,6 +122,7 @@ type Server struct {
 	garbageCollector *garbageCollector
 	gcOpt            GcOption
 	handler          Handler
+	importMeta       ImportMeta
 
 	compactionTrigger     trigger
 	compactionHandler     compactionPlanContext

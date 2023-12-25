@@ -111,6 +111,7 @@ type ImportTask interface {
 	GetNodeID() int64
 	GetType() TaskType
 	GetState() datapb.ImportState
+	GetReason() string
 	GetSchema() *schemapb.CollectionSchema
 	GetFileStats() []*datapb.ImportFileStats
 	Clone() ImportTask
