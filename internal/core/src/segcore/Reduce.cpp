@@ -123,9 +123,13 @@ ReduceHelper::FillPrimaryKey() {
     // get primary keys for duplicates removal
     uint32_t valid_index = 0;
     for (auto& search_result : search_results_) {
+        // skip when results num is 0
+        if (search_result->unity_topK_ == 0) {
+            continue;
+        }
         FilterInvalidSearchResult(search_result);
-        LOG_SEGCORE_DEBUG_ << "the size of search result"
-                           << search_result->seg_offsets_.size();
+        LOG_DEBUG("the size of search result: {}",
+                  search_result->seg_offsets_.size());
         if (search_result->get_total_result_count() > 0) {
             auto segment =
                 static_cast<SegmentInterface*>(search_result->segment_);
@@ -268,8 +272,7 @@ ReduceHelper::ReduceResultData() {
         }
     }
     if (skip_dup_cnt > 0) {
-        LOG_SEGCORE_DEBUG_ << "skip duplicated search result, count = "
-                           << skip_dup_cnt;
+        LOG_DEBUG("skip duplicated search result, count = {}", skip_dup_cnt);
     }
 }
 

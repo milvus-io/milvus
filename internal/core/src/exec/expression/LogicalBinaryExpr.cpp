@@ -22,8 +22,8 @@ namespace exec {
 void
 PhyLogicalBinaryExpr::Eval(EvalCtx& context, VectorPtr& result) {
     AssertInfo(inputs_.size() == 2,
-               fmt::format("logical binary expr must has two input, but now {}",
-                           inputs_.size()));
+               "logical binary expr must has two input, but now {}",
+               inputs_.size());
     VectorPtr left;
     inputs_[0]->Eval(context, left);
     VectorPtr right;
@@ -41,8 +41,8 @@ PhyLogicalBinaryExpr::Eval(EvalCtx& context, VectorPtr& result) {
         func(ldata, rdata, size);
     } else {
         PanicInfo(OpTypeInvalid,
-                  fmt::format("unsupported logical operator: {}",
-                              expr_->GetOpTypeString()));
+                  "unsupported logical operator: {}",
+                  expr_->GetOpTypeString());
     }
     result = std::move(left);
 }

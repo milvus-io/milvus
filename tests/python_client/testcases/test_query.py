@@ -874,60 +874,68 @@ class TestQueryParams(TestcaseBase):
         expected: succeed
         """
         # 1. initialize with data
+        nb = ct.default_nb
+        pk_field = ct.default_int64_field_name
         collection_w = self.init_collection_general(prefix, enable_dynamic_field=True)[0]
 
         # 2. insert data
         array = cf.gen_default_rows_data(with_json=False)
-        limit = 10
-        for i in range(ct.default_nb):
-            array[i]["listInt"] = [m for m in range(i, i + limit)]  # test for int
-            array[i]["listStr"] = [str(m) for m in range(i, i + limit)]  # test for string
-            array[i]["listFlt"] = [m * 1.0 for m in range(i, i + limit)]  # test for float
-            array[i]["listBool"] = [bool(i % 2)]  # test for bool
-            array[i]["listList"] = [[i, str(i + 1)], [i * 1.0, i + 1]]  # test for list
-            array[i]["listMix"] = [i, i * 1.1, str(i), bool(i % 2), [i, str(i)]]  # test for mixed data
+        limit = random.randint(10, 20)
+        int_data = [[m for m in range(i, i + limit)] for i in range(nb)]
+        str_data = [[str(m) for m in range(i, i + limit)] for i in range(nb)]
+        flt_data = [[m * 1.0 for m in range(i, i + limit)] for i in range(nb)]
+        bool_data = [[bool(i % 2)] for i in range(nb)]
+        list_data = [[[i, str(i + 1)], [i * 1.0, i + 1]] for i in range(nb)]
+        mix_data = [[i, i * 1.1, str(i), bool(i % 2), [i, str(i)]] for i in range(nb)]
+        for i in range(nb):
+            array[i]["listInt"] = int_data[i]  # test for int
+            array[i]["listStr"] = str_data[i]  # test for string
+            array[i]["listFlt"] = flt_data[i]  # test for float
+            array[i]["listBool"] = bool_data[i]  # test for bool
+            array[i]["listList"] = list_data[i]  # test for list
+            array[i]["listMix"] = mix_data[i]  # test for mixed data
 
         collection_w.insert(array)
 
         # 3. query
         collection_w.load()
 
+        _id = random.randint(limit, nb - limit)
         # test for int
-        _id = random.randint(limit, ct.default_nb - limit)
         ids = [i for i in range(_id, _id + limit)]
         expression = f"{expr_prefix}(listInt, {ids})"
         res = collection_w.query(expression)[0]
-        assert len(res) == 2 * limit - 1
+        assert [entity[pk_field] for entity in res] == cf.assert_json_contains(expression, int_data)
 
         # test for string
         ids = [str(_id), str(_id + 1), str(_id + 2)]
         expression = f"{expr_prefix}(listStr, {ids})"
         res = collection_w.query(expression)[0]
-        assert len(res) == limit + len(ids) - 1
+        assert [entity[pk_field] for entity in res] == cf.assert_json_contains(expression, str_data)
 
         # test for float
         ids = [_id * 1.0]
         expression = f"{expr_prefix}(listFlt, {ids})"
-        res = collection_w.query(expression, output_fields=["count(*)"])[0]
-        assert res[0]["count(*)"] == limit
+        res = collection_w.query(expression)[0]
+        assert [entity[pk_field] for entity in res] == cf.assert_json_contains(expression, flt_data)
 
         # test for bool
         ids = [True]
         expression = f"{expr_prefix}(listBool, {ids})"
         res = collection_w.query(expression)[0]
-        assert len(res) == ct.default_nb // 2
+        assert [entity[pk_field] for entity in res] == cf.assert_json_contains(expression, bool_data)
 
         # test for list
         ids = [[_id, str(_id + 1)]]
         expression = f"{expr_prefix}(listList, {ids})"
-        res = collection_w.query(expression)[0]
-        assert len(res) == 1
+        res = collection_w.query(expression, output_fields=["count(*)"])[0]
+        assert res[0]["count(*)"] == 1
 
         # test for mixed data
-        ids = [_id * 1.1, bool(_id % 2)]
+        ids = [str(_id)]
         expression = f"{expr_prefix}(listMix, {ids})"
-        res = collection_w.query(expression)[0]
-        assert len(res) == ct.default_nb // 2
+        res = collection_w.query(expression, output_fields=["count(*)"])[0]
+        assert res[0]["count(*)"] == 1
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("expr_prefix", ["json_contains_any", "json_contains_all"])

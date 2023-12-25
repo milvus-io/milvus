@@ -65,7 +65,7 @@ SegcoreSetKnowhereSearchThreadPoolNum(const uint32_t num_threads) {
 // return value must be freed by the caller
 extern "C" char*
 SegcoreSetSimdType(const char* value) {
-    LOG_SEGCORE_DEBUG_ << "set config simd_type: " << value;
+    LOG_DEBUG("set config simd_type: {}", value);
     auto real_type = milvus::config::KnowhereSetSimdType(value);
     char* ret = reinterpret_cast<char*>(malloc(real_type.length() + 1));
     memcpy(ret, real_type.c_str(), real_type.length());

@@ -95,8 +95,7 @@ datatype_name(DataType data_type) {
             return "vector_float16";
         }
         default: {
-            PanicInfo(DataTypeInvalid,
-                      fmt::format("Unsupported DataType({})", data_type));
+            PanicInfo(DataTypeInvalid, "Unsupported DataType({})", data_type);
         }
     }
 }
@@ -219,7 +218,7 @@ class FieldMeta {
         : name_(name),
           id_(id),
           type_(type),
-          vector_info_(VectorInfo{dim, metric_type}) {
+          vector_info_(VectorInfo{dim, std::move(metric_type)}) {
         Assert(datatype_is_vector(type_));
     }
 

@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -132,6 +133,20 @@ func (s *Server) createIndexForSegmentLoop(ctx context.Context) {
 	}
 }
 
+func (s *Server) getFieldNameByID(ctx context.Context, collID, fieldID int64) (string, error) {
+	resp, err := s.broker.DescribeCollectionInternal(ctx, collID)
+	if err != nil {
+		return "", err
+	}
+
+	for _, field := range resp.GetSchema().GetFields() {
+		if field.FieldID == fieldID {
+			return field.Name, nil
+		}
+	}
+	return "", nil
+}
+
 // CreateIndex create an index on collection.
 // Index building is asynchronous, so when an index building request comes, an IndexID is assigned to the task and
 // will get all flushed segments from DataCoord and record tasks with these segments. The background process
@@ -151,6 +166,20 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		return merr.Status(err), nil
 	}
 	metrics.IndexRequestCounter.WithLabelValues(metrics.TotalLabel).Inc()
+
+	if req.GetIndexName() == "" {
+		indexes := s.meta.GetFieldIndexes(req.GetCollectionID(), req.GetFieldID(), req.GetIndexName())
+		if len(indexes) == 0 {
+			fieldName, err := s.getFieldNameByID(ctx, req.GetCollectionID(), req.GetFieldID())
+			if err != nil {
+				log.Warn("get field name from schema failed", zap.Int64("fieldID", req.GetFieldID()))
+				return merr.Status(err), nil
+			}
+			req.IndexName = fieldName
+		} else if len(indexes) == 1 {
+			req.IndexName = indexes[0].IndexName
+		}
+	}
 
 	indexID, err := s.meta.CanCreateIndex(req)
 	if err != nil {
@@ -205,6 +234,51 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		zap.String("IndexName", req.GetIndexName()), zap.Int64("fieldID", req.GetFieldID()),
 		zap.Int64("IndexID", indexID))
 	metrics.IndexRequestCounter.WithLabelValues(metrics.SuccessLabel).Inc()
+	return merr.Success(), nil
+}
+
+func (s *Server) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest) (*commonpb.Status, error) {
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", req.GetCollectionID()),
+		zap.String("indexName", req.GetIndexName()),
+	)
+	log.Info("received AlterIndex request", zap.Any("params", req.GetParams()))
+
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		log.Warn(msgDataCoordIsUnhealthy(paramtable.GetNodeID()), zap.Error(err))
+		return merr.Status(err), nil
+	}
+
+	indexes := s.meta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName())
+	params := make(map[string]string)
+	for _, index := range indexes {
+		for _, param := range index.UserIndexParams {
+			params[param.GetKey()] = param.GetValue()
+		}
+
+		// update the index params
+		for _, param := range req.GetParams() {
+			params[param.GetKey()] = param.GetValue()
+		}
+
+		log.Info("prepare to alter index",
+			zap.String("indexName", index.IndexName),
+			zap.Any("params", params),
+		)
+		index.UserIndexParams = lo.MapToSlice(params, func(k string, v string) *commonpb.KeyValuePair {
+			return &commonpb.KeyValuePair{
+				Key:   k,
+				Value: v,
+			}
+		})
+	}
+
+	err := s.meta.AlterIndex(ctx, indexes...)
+	if err != nil {
+		log.Warn("failed to alter index", zap.Error(err))
+		return merr.Status(err), nil
+	}
+
 	return merr.Success(), nil
 }
 

@@ -115,16 +115,6 @@ func (inNode *InputNode) Operate(in []Msg) []Msg {
 
 	inNode.lastMsg = msgPack
 	sub := tsoutil.SubByNow(msgPack.EndTs)
-	if inNode.role == typeutil.QueryNodeRole {
-		metrics.QueryNodeConsumerMsgCount.
-			WithLabelValues(fmt.Sprint(inNode.nodeID), inNode.dataType, fmt.Sprint(inNode.collectionID)).
-			Inc()
-
-		metrics.QueryNodeConsumeTimeTickLag.
-			WithLabelValues(fmt.Sprint(inNode.nodeID), inNode.dataType, fmt.Sprint(inNode.collectionID)).
-			Set(float64(sub))
-	}
-
 	if inNode.role == typeutil.DataNodeRole {
 		metrics.DataNodeConsumeMsgCount.
 			WithLabelValues(fmt.Sprint(inNode.nodeID), inNode.dataType, fmt.Sprint(inNode.collectionID)).

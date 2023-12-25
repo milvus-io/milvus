@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -79,7 +80,7 @@ func (t *dropCollectionTask) Execute(ctx context.Context) error {
 		collectionNames: append(aliases, collMeta.Name),
 		collectionID:    collMeta.CollectionID,
 		ts:              ts,
-		opts:            []expireCacheOpt{expireCacheWithDropFlag()},
+		opts:            []proxyutil.ExpireCacheOpt{proxyutil.ExpireCacheWithDropFlag()},
 	})
 	redoTask.AddSyncStep(&changeCollectionStateStep{
 		baseStep:     baseStep{core: t.core},

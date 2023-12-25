@@ -40,9 +40,9 @@ class MilvusPromise : public folly::Promise<T> {
 
     ~MilvusPromise() {
         if (!this->isFulfilled()) {
-            LOG_SEGCORE_WARNING_
-                << "PROMISE: Unfulfilled promise is being deleted. Context: "
-                << context_;
+            LOG_WARN(
+                "PROMISE: Unfulfilled promise is being deleted. Context: {}",
+                context_);
         }
     }
 

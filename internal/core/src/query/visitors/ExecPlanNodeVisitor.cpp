@@ -65,14 +65,8 @@ class ExecPlanNodeVisitor : PlanNodeVisitor {
 static SearchResult
 empty_search_result(int64_t num_queries, SearchInfo& search_info) {
     SearchResult final_result;
-    SubSearchResult result(num_queries,
-                           search_info.topk_,
-                           search_info.metric_type_,
-                           search_info.round_decimal_);
     final_result.total_nq_ = num_queries;
-    final_result.unity_topK_ = search_info.topk_;
-    final_result.seg_offsets_ = std::move(result.mutable_seg_offsets());
-    final_result.distances_ = std::move(result.mutable_distances());
+    final_result.unity_topK_ = 0;  // no result
     return final_result;
 }
 
@@ -84,7 +78,7 @@ ExecPlanNodeVisitor::ExecuteExprNodeInternal(
     bool& cache_offset_getted,
     std::vector<int64_t>& cache_offset) {
     bitset_holder.clear();
-    LOG_SEGCORE_INFO_ << "plannode:" << plannode->ToString();
+    LOG_INFO("plannode: {}", plannode->ToString());
     auto plan = plan::PlanFragment(plannode);
     // TODO: get query id from proxy
     auto query_context = std::make_shared<milvus::exec::QueryContext>(
@@ -100,8 +94,7 @@ ExecPlanNodeVisitor::ExecuteExprNodeInternal(
         auto childrens = result->childrens();
         AssertInfo(childrens.size() == 1,
                    "expr result vector's children size not equal one");
-        LOG_SEGCORE_DEBUG_ << "output result length:" << childrens[0]->size()
-                           << std::endl;
+        LOG_DEBUG("output result length:{}", childrens[0]->size());
         if (auto vec = std::dynamic_pointer_cast<ColumnVector>(childrens[0])) {
             AppendOneChunk(bitset_holder,
                            static_cast<bool*>(vec->GetRawData()),
@@ -117,6 +110,14 @@ ExecPlanNodeVisitor::ExecuteExprNodeInternal(
                 // offset cache only get once because not support iterator batch
                 auto cache_offset_vec =
                     std::dynamic_pointer_cast<ColumnVector>(row->child(1));
+                // If get empty cached offsets. mean no record hits in this segment
+                // no need to get next batch.
+                if (cache_offset_vec->size() == 0) {
+                    auto active_count = segment->get_active_count(timestamp_);
+                    bitset_holder.resize(active_count);
+                    task->RequestCancel();
+                    break;
+                }
                 auto cache_offset_vec_ptr =
                     (int64_t*)(cache_offset_vec->GetRawData());
                 for (size_t i = 0; i < cache_offset_vec->size(); ++i) {

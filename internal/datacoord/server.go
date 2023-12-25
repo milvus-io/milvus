@@ -52,6 +52,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/pkg/util"
+	"github.com/milvus-io/milvus/pkg/util/expr"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -116,7 +117,7 @@ type Server struct {
 	allocator        allocator
 	cluster          Cluster
 	sessionManager   SessionManager
-	channelManager   *ChannelManager
+	channelManager   *ChannelManagerImpl
 	rootCoordClient  types.RootCoordClient
 	garbageCollector *garbageCollector
 	gcOpt            GcOption
@@ -227,6 +228,7 @@ func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Optio
 	for _, opt := range opts {
 		opt(s)
 	}
+	expr.Register("datacoord", s)
 	return s
 }
 

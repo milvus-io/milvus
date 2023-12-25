@@ -91,12 +91,13 @@ OpenDALChunkManager::OpenDALChunkManager(const StorageConfig& storage_config)
     }
     op_ptr_ = op.op;
     opendal_operator_options_free(op_options_);
-    LOG_SEGCORE_INFO_ << "init OpenDALChunkManager with parameter[storage: '"
-                      << storageType << ", " << storage_config.cloud_provider
-                      << "', endpoint: '" << storage_config.address
-                      << "', default_bucket_name:'"
-                      << storage_config.bucket_name << "', use_secure:'"
-                      << std::boolalpha << storage_config.useSSL << "']";
+    LOG_INFO(
+        "init OpenDALChunkManager with "
+        "parameter[endpoint={}][bucket_name={}][root_path={}][use_secure={}]",
+        storage_config.address,
+        storage_config.bucket_name,
+        storage_config.root_path,
+        storage_config.useSSL);
 }
 
 OpenDALChunkManager::~OpenDALChunkManager() {

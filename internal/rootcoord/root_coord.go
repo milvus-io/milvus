@@ -51,6 +51,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/importutil"
+	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	tsoutil2 "github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -59,6 +60,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
+	"github.com/milvus-io/milvus/pkg/util/expr"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -101,9 +103,9 @@ type Core struct {
 
 	metaKVCreator metaKVCreator
 
-	proxyCreator       proxyCreator
-	proxyManager       *proxyManager
-	proxyClientManager *proxyClientManager
+	proxyCreator       proxyutil.ProxyCreator
+	proxyWatcher       *proxyutil.ProxyWatcher
+	proxyClientManager proxyutil.ProxyClientManagerInterface
 
 	metricsCacheManager *metricsinfo.MetricsCacheManager
 
@@ -144,8 +146,9 @@ func NewCore(c context.Context, factory dependency.Factory) (*Core, error) {
 	}
 
 	core.UpdateStateCode(commonpb.StateCode_Abnormal)
-	core.SetProxyCreator(DefaultProxyCreator)
+	core.SetProxyCreator(proxyutil.DefaultProxyCreator)
 
+	expr.Register("rootcoord", core)
 	return core, nil
 }
 
@@ -473,21 +476,20 @@ func (c *Core) initInternal() error {
 	c.chanTimeTick = newTimeTickSync(c.ctx, c.session.ServerID, c.factory, chanMap)
 	log.Info("create TimeTick sync done")
 
-	c.proxyClientManager = newProxyClientManager(c.proxyCreator)
+	c.proxyClientManager = proxyutil.NewProxyClientManager(c.proxyCreator)
 
 	c.broker = newServerBroker(c)
 	c.ddlTsLockManager = newDdlTsLockManager(c.tsoAllocator)
 	c.garbageCollector = newBgGarbageCollector(c)
 	c.stepExecutor = newBgStepExecutor(c.ctx)
 
-	c.proxyManager = newProxyManager(
-		c.ctx,
+	c.proxyWatcher = proxyutil.NewProxyWatcher(
 		c.etcdCli,
 		c.chanTimeTick.initSessions,
 		c.proxyClientManager.AddProxyClients,
 	)
-	c.proxyManager.AddSessionFunc(c.chanTimeTick.addSession, c.proxyClientManager.AddProxyClient)
-	c.proxyManager.DelSessionFunc(c.chanTimeTick.delSession, c.proxyClientManager.DelProxyClient)
+	c.proxyWatcher.AddSessionFunc(c.chanTimeTick.addSession, c.proxyClientManager.AddProxyClient)
+	c.proxyWatcher.DelSessionFunc(c.chanTimeTick.delSession, c.proxyClientManager.DelProxyClient)
 	log.Info("init proxy manager done")
 
 	c.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
@@ -694,7 +696,7 @@ func (c *Core) restore(ctx context.Context) error {
 }
 
 func (c *Core) startInternal() error {
-	if err := c.proxyManager.WatchProxy(); err != nil {
+	if err := c.proxyWatcher.WatchProxy(c.ctx); err != nil {
 		log.Fatal("rootcoord failed to watch proxy", zap.Error(err))
 		// you can not just stuck here,
 		panic(err)
@@ -789,8 +791,8 @@ func (c *Core) Stop() error {
 	c.UpdateStateCode(commonpb.StateCode_Abnormal)
 	c.stopExecutor()
 	c.stopScheduler()
-	if c.proxyManager != nil {
-		c.proxyManager.Stop()
+	if c.proxyWatcher != nil {
+		c.proxyWatcher.Stop()
 	}
 	c.cancelIfNotNil()
 	if c.quotaCenter != nil {

@@ -84,6 +84,8 @@ func (c *metaCacheImpl) init(vchannel *datapb.VchannelInfo, factory PkStatsFacto
 	}
 
 	for _, seg := range vchannel.UnflushedSegments {
+		// segment state could be sealed for growing segment if flush request processed before datanode watch
+		seg.State = commonpb.SegmentState_Growing
 		c.segmentInfos[seg.GetID()] = NewSegmentInfo(seg, factory(seg))
 	}
 }
