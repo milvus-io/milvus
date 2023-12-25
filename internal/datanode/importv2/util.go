@@ -136,3 +136,17 @@ func HashFunc(pkDataType schemapb.DataType) (func(pk interface{}, shardNum int64
 		return nil, merr.WrapErrImportFailed(fmt.Sprintf("unexpected pk type %s", pkDataType.String()))
 	}
 }
+
+func CheckRowsEqual(data *storage.InsertData) error {
+	if len(data.Data) == 0 {
+		return nil
+	}
+	rows := lo.Values(data.Data)[0].RowNum()
+	for _, d := range data.Data {
+		if d.RowNum() != rows {
+			return merr.WrapErrImportFailed(
+				fmt.Sprintf("imported rows are not aligned, rows(%d) vs rows(%d)", rows, d.RowNum()))
+		}
+	}
+	return nil
+}

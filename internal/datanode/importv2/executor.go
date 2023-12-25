@@ -142,7 +142,8 @@ func (e *executor) readFileStat(reader Reader, task Task, fileIdx int) error {
 	if err != nil {
 		return err
 	}
-	total := 0
+
+	totalRows := 0
 	hashedRows := make(map[string]*datapb.PartitionRows)
 	for {
 		data, err := reader.Next(count)
@@ -152,8 +153,11 @@ func (e *executor) readFileStat(reader Reader, task Task, fileIdx int) error {
 		if data.GetRowNum() == 0 {
 			break
 		}
-		// TODO: check rows alignment here
-		total += data.GetRowNum()
+		err = CheckRowsEqual(data)
+		if err != nil {
+			return err
+		}
+		totalRows += data.GetRowNum()
 		hashedDatas, err := e.Hash(task, data)
 		if err != nil {
 			return err
@@ -171,8 +175,9 @@ func (e *executor) readFileStat(reader Reader, task Task, fileIdx int) error {
 			}
 		}
 	}
+
 	stat := &datapb.ImportFileStats{
-		TotalRows:  int64(total),
+		TotalRows:  int64(totalRows),
 		HashedRows: hashedRows,
 	}
 	e.manager.Update(task.GetTaskID(), UpdateFileStat(fileIdx, stat))
