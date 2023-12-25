@@ -280,7 +280,7 @@ func Test_compactionPlanHandler_execCompactionPlan(t *testing.T) {
 	type fields struct {
 		plans            map[int64]*compactionTask
 		sessions         SessionManager
-		chManager        *ChannelManager
+		chManager        *ChannelManagerImpl
 		allocatorFactory func() allocator
 	}
 	type args struct {
@@ -308,7 +308,7 @@ func Test_compactionPlanHandler_execCompactionPlan(t *testing.T) {
 						},
 					},
 				},
-				chManager: &ChannelManager{
+				chManager: &ChannelManagerImpl{
 					store: &ChannelStore{
 						channelsInfo: map[int64]*NodeChannelInfo{
 							1: {NodeID: 1, Channels: []RWChannel{&channelMeta{Name: "ch1"}}},
@@ -328,7 +328,7 @@ func Test_compactionPlanHandler_execCompactionPlan(t *testing.T) {
 			"test exec compaction failed",
 			fields{
 				plans: map[int64]*compactionTask{},
-				chManager: &ChannelManager{
+				chManager: &ChannelManagerImpl{
 					store: &ChannelStore{
 						channelsInfo: map[int64]*NodeChannelInfo{
 							1:        {NodeID: 1, Channels: []RWChannel{}},
@@ -396,7 +396,7 @@ func Test_compactionPlanHandler_execWithParallels(t *testing.T) {
 				},
 			},
 		},
-		chManager: &ChannelManager{
+		chManager: &ChannelManagerImpl{
 			store: &ChannelStore{
 				channelsInfo: map[int64]*NodeChannelInfo{
 					1: {NodeID: 1, Channels: []RWChannel{&channelMeta{Name: "ch1"}}},
@@ -1029,7 +1029,7 @@ func Test_compactionPlanHandler_updateCompaction(t *testing.T) {
 func Test_newCompactionPlanHandler(t *testing.T) {
 	type args struct {
 		sessions  SessionManager
-		cm        *ChannelManager
+		cm        *ChannelManagerImpl
 		meta      *meta
 		allocator allocator
 	}
@@ -1042,14 +1042,14 @@ func Test_newCompactionPlanHandler(t *testing.T) {
 			"test new handler",
 			args{
 				&SessionManagerImpl{},
-				&ChannelManager{},
+				&ChannelManagerImpl{},
 				&meta{},
 				newMockAllocator(),
 			},
 			&compactionPlanHandler{
 				plans:     map[int64]*compactionTask{},
 				sessions:  &SessionManagerImpl{},
-				chManager: &ChannelManager{},
+				chManager: &ChannelManagerImpl{},
 				meta:      &meta{},
 				allocator: newMockAllocator(),
 				scheduler: NewCompactionScheduler(),
