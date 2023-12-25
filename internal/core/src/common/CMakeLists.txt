@@ -22,6 +22,7 @@ set(COMMON_SRC
         Tracer.cpp
         IndexMeta.cpp
         EasyAssert.cpp
+        FieldData.cpp
 )
 
 add_library(milvus_common SHARED ${COMMON_SRC})

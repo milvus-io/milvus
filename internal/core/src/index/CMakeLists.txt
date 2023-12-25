@@ -17,6 +17,7 @@ set(INDEX_FILES
         VectorDiskIndex.cpp
         ScalarIndex.cpp
         ScalarIndexSort.cpp
+        SkipIndex.cpp
         InvertedIndexTantivy.cpp
         )
 

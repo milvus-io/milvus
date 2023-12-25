@@ -39,7 +39,7 @@ GetBitsetBlockAVX2(const bool* src) {
         BitsetBlockType res[4];
         _mm256_storeu_si256((__m256i*)res, tmpvec);
         return res[0];
-        // __m128i tmpvec = _mm_loadu_si64(tmp);
+        // __m256i tmpvec = _mm_loadu_si64(tmp);
         // BitsetBlockType res;
         // _mm_storeu_si64(&res, tmpvec);
         // return res;
@@ -229,6 +229,80 @@ FindTermAVX2(const double* src, size_t vec_size, double val) {
         }
     }
     return false;
+}
+
+bool
+AllFalseAVX2(const bool* src, int64_t size) {
+    int num_chunk = size / 32;
+    __m256i highbit = _mm256_set1_epi8(0x7F);
+    for (size_t i = 0; i < num_chunk * 16; i += 16) {
+        __m256i data =
+            _mm256_loadu_si256(reinterpret_cast<const __m256i*>(src + i));
+        __m256i highbits = _mm256_add_epi8(data, highbit);
+        if (_mm256_movemask_epi8(highbits) != 0) {
+            return false;
+        }
+    }
+
+    for (size_t i = num_chunk * 16; i < size; ++i) {
+        if (src[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool
+AllTrueAVX2(const bool* src, int64_t size) {
+    int num_chunk = size / 16;
+    __m256i highbit = _mm256_set1_epi8(0x7F);
+    for (size_t i = 0; i < num_chunk * 16; i += 16) {
+        __m256i data =
+            _mm256_loadu_si256(reinterpret_cast<const __m256i*>(src + i));
+        __m256i highbits = _mm256_add_epi8(data, highbit);
+        if (_mm256_movemask_epi8(highbits) != 0xFFFF) {
+            return false;
+        }
+    }
+
+    for (size_t i = num_chunk * 16; i < size; ++i) {
+        if (!src[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void
+AndBoolAVX2(bool* left, bool* right, int64_t size) {
+    int num_chunk = size / 32;
+    for (size_t i = 0; i < num_chunk * 32; i += 32) {
+        __m256i l_reg =
+            _mm256_loadu_si256(reinterpret_cast<__m256i*>(left + i));
+        __m256i r_reg =
+            _mm256_loadu_si256(reinterpret_cast<__m256i*>(right + i));
+        __m256i res = _mm256_and_si256(l_reg, r_reg);
+        _mm256_storeu_si256(reinterpret_cast<__m256i*>(left + i), res);
+    }
+    for (size_t i = num_chunk * 32; i < size; ++i) {
+        left[i] &= right[i];
+    }
+}
+
+void
+OrBoolAVX2(bool* left, bool* right, int64_t size) {
+    int num_chunk = size / 32;
+    for (size_t i = 0; i < num_chunk * 32; i += 32) {
+        __m256i l_reg =
+            _mm256_loadu_si256(reinterpret_cast<__m256i*>(left + i));
+        __m256i r_reg =
+            _mm256_loadu_si256(reinterpret_cast<__m256i*>(right + i));
+        __m256i res = _mm256_or_si256(l_reg, r_reg);
+        _mm256_storeu_si256(reinterpret_cast<__m256i*>(left + i), res);
+    }
+    for (size_t i = num_chunk * 32; i < size; ++i) {
+        left[i] |= right[i];
+    }
 }
 
 }  // namespace simd

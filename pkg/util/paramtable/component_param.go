@@ -69,6 +69,7 @@ type ComponentParam struct {
 	IndexNodeCfg  indexNodeConfig
 	HTTPCfg       httpConfig
 	LogCfg        logConfig
+	RoleCfg       roleConfig
 
 	RootCoordGrpcServerCfg  GrpcServerConfig
 	ProxyGrpcServerCfg      GrpcServerConfig
@@ -116,6 +117,7 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.IndexNodeCfg.init(bt)
 	p.HTTPCfg.init(bt)
 	p.LogCfg.init(bt)
+	p.RoleCfg.init(bt)
 
 	p.RootCoordGrpcServerCfg.Init("rootCoord", bt)
 	p.ProxyGrpcServerCfg.Init("proxy", bt)
@@ -148,6 +150,10 @@ func (p *ComponentParam) GetAll() map[string]string {
 
 func (p *ComponentParam) Watch(key string, watcher config.EventHandler) {
 	p.baseTable.mgr.Dispatcher.Register(key, watcher)
+}
+
+func (p *ComponentParam) Unwatch(key string, watcher config.EventHandler) {
+	p.baseTable.mgr.Dispatcher.Unregister(key, watcher)
 }
 
 func (p *ComponentParam) WatchKeyPrefix(keyPrefix string, watcher config.EventHandler) {
@@ -934,6 +940,7 @@ type proxyConfig struct {
 	CostMetricsExpireTime        ParamItem `refreshable:"true"`
 	RetryTimesOnReplica          ParamItem `refreshable:"true"`
 	RetryTimesOnHealthCheck      ParamItem `refreshable:"true"`
+	PartitionNameRegexp          ParamItem `refreshable:"true"`
 
 	AccessLog AccessLogConfig
 }
@@ -1112,7 +1119,7 @@ please adjust in embedded Milvus: false`,
 	p.AccessLog.Filename = ParamItem{
 		Key:          "proxy.accessLog.filename",
 		Version:      "2.2.0",
-		DefaultValue: "milvus_access_log.log",
+		DefaultValue: "",
 		Doc:          "Log filename, leave empty to use stdout.",
 		Export:       true,
 	}
@@ -1219,6 +1226,14 @@ please adjust in embedded Milvus: false`,
 		Doc:          "set query node unavailable on proxy when heartbeat failures reach this limit",
 	}
 	p.RetryTimesOnHealthCheck.Init(base.mgr)
+
+	p.PartitionNameRegexp = ParamItem{
+		Key:          "proxy.partitionNameRegexp",
+		Version:      "2.3.4",
+		DefaultValue: "false",
+		Doc:          "switch for whether proxy shall use partition name as regexp when searching",
+	}
+	p.PartitionNameRegexp.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -1239,6 +1254,7 @@ type queryCoordConfig struct {
 
 	// ---- Balance ---
 	AutoBalance                         ParamItem `refreshable:"true"`
+	AutoBalanceChannel                  ParamItem `refreshable:"true"`
 	Balancer                            ParamItem `refreshable:"true"`
 	GlobalRowCountFactor                ParamItem `refreshable:"true"`
 	ScoreUnbalanceTolerationFactor      ParamItem `refreshable:"true"`
@@ -1330,6 +1346,16 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.AutoBalance.Init(base.mgr)
+
+	p.AutoBalanceChannel = ParamItem{
+		Key:          "queryCoord.autoBalanceChannel",
+		Version:      "2.3.4",
+		DefaultValue: "true",
+		PanicIfEmpty: true,
+		Doc:          "Enable auto balance channel",
+		Export:       true,
+	}
+	p.AutoBalanceChannel.Init(base.mgr)
 
 	p.Balancer = ParamItem{
 		Key:          "queryCoord.balancer",
@@ -1694,9 +1720,11 @@ type queryNodeConfig struct {
 	SchedulePolicyMaxPendingTaskPerUser   ParamItem `refreshable:"true"`
 
 	// CGOPoolSize ratio to MaxReadConcurrency
-	CGOPoolSizeRatio ParamItem `refreshable:"false"`
+	CGOPoolSizeRatio ParamItem `refreshable:"true"`
 
 	EnableWorkerSQCostMetrics ParamItem `refreshable:"true"`
+
+	ExprEvalBatchSize ParamItem `refreshable:"false"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -2084,6 +2112,15 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Doc:          "whether use worker's cost to measure delegator's workload",
 	}
 	p.EnableWorkerSQCostMetrics.Init(base.mgr)
+
+	p.ExprEvalBatchSize = ParamItem{
+		Key:          "queryNode.segcore.exprEvalBatchSize",
+		Version:      "2.3.4",
+		DefaultValue: "8192",
+		Doc:          "expr eval batch size for getnext interface",
+	}
+
+	p.ExprEvalBatchSize.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -2093,6 +2130,7 @@ type dataCoordConfig struct {
 	WatchTimeoutInterval         ParamItem `refreshable:"false"`
 	ChannelBalanceSilentDuration ParamItem `refreshable:"true"`
 	ChannelBalanceInterval       ParamItem `refreshable:"true"`
+	ChannelCheckInterval         ParamItem `refreshable:"true"`
 	ChannelOperationRPCTimeout   ParamItem `refreshable:"true"`
 
 	// --- SEGMENTS ---
@@ -2181,6 +2219,15 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.ChannelBalanceInterval.Init(base.mgr)
+
+	p.ChannelCheckInterval = ParamItem{
+		Key:          "dataCoord.channel.checkInterval",
+		Version:      "2.4.0",
+		DefaultValue: "10",
+		Doc:          "The interval in seconds with which the channel manager advances channel states",
+		Export:       true,
+	}
+	p.ChannelCheckInterval.Init(base.mgr)
 
 	p.ChannelOperationRPCTimeout = ParamItem{
 		Key:          "dataCoord.channel.notifyChannelOperationTimeout",
@@ -2580,6 +2627,7 @@ type dataNodeConfig struct {
 	FlowGraphMaxQueueLength ParamItem `refreshable:"false"`
 	FlowGraphMaxParallelism ParamItem `refreshable:"false"`
 	MaxParallelSyncTaskNum  ParamItem `refreshable:"false"`
+	MaxParallelSyncMgrTasks ParamItem `refreshable:"true"`
 
 	// skip mode
 	FlowGraphSkipModeEnable   ParamItem `refreshable:"true"`
@@ -2677,10 +2725,19 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		Key:          "dataNode.dataSync.maxParallelSyncTaskNum",
 		Version:      "2.3.0",
 		DefaultValue: "6",
-		Doc:          "Maximum number of sync tasks executed in parallel in each flush manager",
+		Doc:          "deprecated, legacy flush manager max conurrency number",
 		Export:       true,
 	}
 	p.MaxParallelSyncTaskNum.Init(base.mgr)
+
+	p.MaxParallelSyncMgrTasks = ParamItem{
+		Key:          "dataNode.dataSync.maxParallelSyncMgrTasks",
+		Version:      "2.3.4",
+		DefaultValue: "64",
+		Doc:          "The max concurrent sync task number of datanode sync mgr globally",
+		Export:       true,
+	}
+	p.MaxParallelSyncMgrTasks.Init(base.mgr)
 
 	p.FlushInsertBufferSize = ParamItem{
 		Key:          "dataNode.segment.insertBufSize",

@@ -1284,3 +1284,55 @@ func TestMeta_DeleteTask_Error(t *testing.T) {
 		assert.Error(t, err)
 	})
 }
+
+func TestMeta_GetFieldIndexes(t *testing.T) {
+	m := &meta{
+		indexes: map[UniqueID]map[UniqueID]*model.Index{
+			collID: {
+				indexID: {
+					TenantID:        "",
+					CollectionID:    collID,
+					FieldID:         fieldID,
+					IndexID:         indexID,
+					IndexName:       indexName,
+					IsDeleted:       true,
+					CreateTime:      0,
+					TypeParams:      nil,
+					IndexParams:     nil,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
+				},
+				indexID + 1: {
+					TenantID:        "",
+					CollectionID:    collID,
+					FieldID:         fieldID,
+					IndexID:         indexID + 1,
+					IndexName:       indexName,
+					IsDeleted:       false,
+					CreateTime:      0,
+					TypeParams:      nil,
+					IndexParams:     nil,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
+				},
+				indexID + 2: {
+					TenantID:        "",
+					CollectionID:    collID,
+					FieldID:         fieldID + 2,
+					IndexID:         indexID + 2,
+					IndexName:       indexName + "2",
+					IsDeleted:       false,
+					CreateTime:      0,
+					TypeParams:      nil,
+					IndexParams:     nil,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
+				},
+			},
+		},
+	}
+
+	indexes := m.GetFieldIndexes(collID, fieldID, "")
+	assert.Equal(t, 1, len(indexes))
+	assert.Equal(t, indexName, indexes[0].IndexName)
+}

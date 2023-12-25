@@ -305,14 +305,20 @@ func (p *BinlogAdapter) readDeltalogs(segmentHolder *SegmentFilesHolder) (map[in
 	if primaryKey.GetDataType() == schemapb.DataType_Int64 {
 		deletedIDDict := make(map[int64]uint64)
 		for _, deleteLog := range deleteLogs {
-			deletedIDDict[deleteLog.Pk.GetValue().(int64)] = deleteLog.Ts
+			_, exist := deletedIDDict[deleteLog.Pk.GetValue().(int64)]
+			if !exist || deleteLog.Ts > deletedIDDict[deleteLog.Pk.GetValue().(int64)] {
+				deletedIDDict[deleteLog.Pk.GetValue().(int64)] = deleteLog.Ts
+			}
 		}
 		log.Info("Binlog adapter: count of deleted entities", zap.Int("deletedCount", len(deletedIDDict)))
 		return deletedIDDict, nil, nil
 	} else if primaryKey.GetDataType() == schemapb.DataType_VarChar {
 		deletedIDDict := make(map[string]uint64)
 		for _, deleteLog := range deleteLogs {
-			deletedIDDict[deleteLog.Pk.GetValue().(string)] = deleteLog.Ts
+			_, exist := deletedIDDict[deleteLog.Pk.GetValue().(string)]
+			if !exist || deleteLog.Ts > deletedIDDict[deleteLog.Pk.GetValue().(string)] {
+				deletedIDDict[deleteLog.Pk.GetValue().(string)] = deleteLog.Ts
+			}
 		}
 		log.Info("Binlog adapter: count of deleted entities", zap.Int("deletedCount", len(deletedIDDict)))
 		return nil, deletedIDDict, nil
@@ -530,9 +536,10 @@ func (p *BinlogAdapter) getShardingListByPrimaryInt64(primaryKeys []int64,
 			continue
 		}
 
-		_, deleted := intDeletedList[key]
+		deleteTs, deleted := intDeletedList[key]
 		// if the key exists in intDeletedList, that means this entity has been deleted
-		if deleted {
+		// only skip entity when delete happen after insert
+		if deleted && deleteTs > uint64(ts) {
 			shardList = append(shardList, -1) // this entity has been deleted, set shardID = -1 and skip this entity
 			actualDeleted++
 		} else {
@@ -584,9 +591,10 @@ func (p *BinlogAdapter) getShardingListByPrimaryVarchar(primaryKeys []string,
 			continue
 		}
 
-		_, deleted := strDeletedList[key]
+		deleteTs, deleted := strDeletedList[key]
 		// if exists in strDeletedList, that means this entity has been deleted
-		if deleted {
+		// only skip entity when delete happen after insert
+		if deleted && deleteTs > uint64(ts) {
 			shardList = append(shardList, -1) // this entity has been deleted, set shardID = -1 and skip this entity
 			actualDeleted++
 		} else {

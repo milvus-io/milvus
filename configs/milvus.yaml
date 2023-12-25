@@ -201,18 +201,18 @@ proxy:
   ginLogSkipPaths: "/" # skipped url path for gin log split by comma
   maxTaskNum: 1024 # max task number of proxy task queue
   accessLog:
-    enable: true
+    enable: false
     # Log filename, set as "" to use stdout.
-    filename: ""
+    # filename: "" 
     # define formatters for access log by XXX:{format: XXX, method:[XXX,XXX]}
     formatters:
       # "base" formatter could not set methods
       # all method will use "base" formatter default
       base:
         # will not print access log if set as ""
-        format: "[$time_now] [ACCESS] <$user_name: $user_addr> $method_name [status: $method_status] [code: $error_code] [msg: $error_msg] [traceID: $trace_id] [timeCost: $time_cost]"
-      query:
-        format: "[$time_now] [ACCESS] <$user_name: $user_addr> $method_name [status: $method_status] [code: $error_code] [msg: $error_msg] [traceID: $trace_id] [timeCost: $time_cost] [database: $database_name] [collection: $collection_name] [partitions: $partition_name] [expr: $method_expr]"
+        format: "[$time_now] [ACCESS] <$user_name: $user_addr> $method_name [status: $method_status] [code: $error_code] [sdk: $sdk_version] [msg: $error_msg] [traceID: $trace_id] [timeCost: $time_cost]"
+      query: 
+        format: "[$time_now] [ACCESS] <$user_name: $user_addr> $method_name [status: $method_status] [code: $error_code] [sdk: $sdk_version] [msg: $error_msg] [traceID: $trace_id] [timeCost: $time_cost] [database: $database_name] [collection: $collection_name] [partitions: $partition_name] [expr: $method_expr]"
           # set formatter owners by method name(method was all milvus external interface)
           # all method will use base formatter default
           # one method only could use one formatter
@@ -288,6 +288,7 @@ queryNode:
     # This parameter is only useful when enable-disk = true.
     # And this value should be a number greater than 1 and less than 32.
     chunkRows: 1024 # The number of vectors in a chunk.
+    exprEvalBatchSize: 8192 # The batch size for executor get next
     interimIndex: # build a vector temperate index for growing segment or binlog to accelerate search
       enableIndex: true
       nlist: 128 # segment index nlist

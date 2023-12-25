@@ -168,7 +168,7 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 	}
 
 	log.Info("permission deny", zap.Strings("roles", roleNames))
-	return ctx, status.Error(codes.PermissionDenied, fmt.Sprintf("%s: permission deny", objectPrivilege))
+	return ctx, status.Error(codes.PermissionDenied, fmt.Sprintf("%s: permission deny to %s", objectPrivilege, username))
 }
 
 // isCurUserObject Determine whether it is an Object of type User that operates on its own user information,

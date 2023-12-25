@@ -54,13 +54,12 @@ func (m *CompactionTriggerManager) Notify(taskID UniqueID, eventType CompactionT
 	for _, view := range views {
 		switch eventType {
 		case TriggerTypeLevelZeroView:
-			log.Info("Start to trigger a level zero compaction")
-			outView := view.Trigger()
+			log.Debug("Start to trigger a level zero compaction")
+			outView, reason := view.Trigger()
 			if outView == nil {
 				continue
 			}
 
-			log.Info("Finish trigger out view, build level zero compaction plan", zap.String("out view", outView.String()))
 			plan := m.BuildLevelZeroCompactionPlan(outView)
 			if plan == nil {
 				continue
@@ -79,7 +78,11 @@ func (m *CompactionTriggerManager) Notify(taskID UniqueID, eventType CompactionT
 			// TODO, remove handler, use scheduler
 			// m.scheduler.Submit(plan)
 			m.handler.execCompactionPlan(signal, plan)
-			log.Info("Finish to trigger a LevelZeroCompaction plan", zap.String("output view", outView.String()))
+			log.Info("Finish to trigger a LevelZeroCompaction plan",
+				zap.Int64("planID", plan.GetPlanID()),
+				zap.String("type", plan.GetType().String()),
+				zap.String("reason", reason),
+				zap.String("output view", outView.String()))
 		}
 	}
 }

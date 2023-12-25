@@ -48,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
+	"github.com/milvus-io/milvus/pkg/util/expr"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -144,6 +145,7 @@ func NewDataNode(ctx context.Context, factory dependency.Factory) *DataNode {
 		reportImportRetryTimes: 10,
 	}
 	node.UpdateStateCode(commonpb.StateCode_Abnormal)
+	expr.Register("datanode", node)
 	return node
 }
 
@@ -273,8 +275,7 @@ func (node *DataNode) Init() error {
 		}
 
 		node.chunkManager = chunkManager
-		syncMgr, err := syncmgr.NewSyncManager(paramtable.Get().DataNodeCfg.MaxParallelSyncTaskNum.GetAsInt(),
-			node.chunkManager, node.allocator)
+		syncMgr, err := syncmgr.NewSyncManager(node.chunkManager, node.allocator)
 		if err != nil {
 			initError = err
 			log.Error("failed to create sync manager", zap.Error(err))

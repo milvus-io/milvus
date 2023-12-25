@@ -16,6 +16,10 @@ on:
       - '.github/workflows/publish-gpu-builder.yaml'
       - '!**.md'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   publish-gpu-builder:
     name: ${{ matrix.arch }} ${{ matrix.os }}
@@ -32,6 +36,7 @@ jobs:
     steps:
       - name: Maximize build space
         uses: easimon/maximize-build-space@master
+        if: ${{ ! startsWith(runner.name, 'self') }} # skip this step if it is self-hosted runner
         with:
           root-reserve-mb: 20480
           # overprovision-lvm: 'true'

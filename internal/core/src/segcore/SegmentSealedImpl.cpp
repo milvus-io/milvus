@@ -33,6 +33,7 @@
 #include "mmap/Column.h"
 #include "common/Consts.h"
 #include "common/FieldMeta.h"
+#include "common/FieldData.h"
 #include "common/Types.h"
 #include "log/Log.h"
 #include "pb/schema.pb.h"
@@ -40,7 +41,6 @@
 #include "query/ScalarIndex.h"
 #include "query/SearchBruteForce.h"
 #include "query/SearchOnSealed.h"
-#include "storage/FieldData.h"
 #include "storage/Util.h"
 #include "storage/ThreadPools.h"
 #include "storage/ChunkCacheSingleton.h"
@@ -198,8 +198,11 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info) {
         auto field_data_info =
             FieldDataInfo(field_id.get(), num_rows, load_info.mmap_dir_path);
 
-        LOG_SEGCORE_INFO_ << "start to load field data " << id << " of segment "
-                          << this->id_;
+        LOG_INFO("segment {} loads field {} with num_rows {}",
+                 this->get_segment_id(),
+                 field_id.get(),
+                 num_rows);
+
         auto parallel_degree = static_cast<uint64_t>(
             DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
         field_data_info.channel->set_capacity(parallel_degree * 2);
@@ -207,19 +210,19 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info) {
             ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
         auto load_future = pool.Submit(
             LoadFieldDatasFromRemote, insert_files, field_data_info.channel);
-        LOG_SEGCORE_INFO_ << "finish submitting LoadFieldDatasFromRemote task "
-                             "to thread pool, "
-                          << "segmentID:" << this->id_
-                          << ", fieldID:" << info.field_id;
+
+        LOG_INFO("segment {} submits load field {} task to thread pool",
+                 this->get_segment_id(),
+                 field_id.get());
         if (!info.enable_mmap ||
             SystemProperty::Instance().IsSystem(field_id)) {
             LoadFieldData(field_id, field_data_info);
         } else {
             MapFieldData(field_id, field_data_info);
         }
-        LOG_SEGCORE_INFO_ << "finish loading segment field, "
-                          << "segmentID:" << this->id_
-                          << ", fieldID:" << info.field_id;
+        LOG_INFO("segment {} loads field {} done",
+                 this->get_segment_id(),
+                 field_id.get());
     }
 }
 
@@ -236,6 +239,11 @@ SegmentSealedImpl::LoadFieldDataV2(const LoadFieldDataInfo& load_info) {
         auto insert_files = info.insert_files;
         auto field_data_info =
             FieldDataInfo(field_id.get(), num_rows, load_info.mmap_dir_path);
+
+        LOG_INFO("segment {} loads field {} with num_rows {}",
+                 this->get_segment_id(),
+                 field_id.get(),
+                 num_rows);
 
         auto parallel_degree = static_cast<uint64_t>(
             DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
@@ -255,19 +263,18 @@ SegmentSealedImpl::LoadFieldDataV2(const LoadFieldDataInfo& load_info) {
         std::shared_ptr<milvus_storage::Space> space = std::move(res.value());
         auto load_future = pool.Submit(
             LoadFieldDatasFromRemote2, space, schema_, field_data_info);
-        LOG_SEGCORE_INFO_ << "finish submitting LoadFieldDatasFromRemote task "
-                             "to thread pool, "
-                          << "segmentID:" << this->id_
-                          << ", fieldID:" << info.field_id;
+        LOG_INFO("segment {} submits load field {} task to thread pool",
+                 this->get_segment_id(),
+                 field_id.get());
         if (load_info.mmap_dir_path.empty() ||
             SystemProperty::Instance().IsSystem(field_id)) {
             LoadFieldData(field_id, field_data_info);
         } else {
             MapFieldData(field_id, field_data_info);
         }
-        LOG_SEGCORE_INFO_ << "finish loading segment field, "
-                          << "segmentID:" << this->id_
-                          << ", fieldID:" << info.field_id;
+        LOG_INFO("segment {} loads field {} done",
+                 this->get_segment_id(),
+                 field_id.get());
     }
 }
 void
@@ -279,7 +286,7 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
         if (system_field_type == SystemFieldType::Timestamp) {
             std::vector<Timestamp> timestamps(num_rows);
             int64_t offset = 0;
-            auto field_data = CollectFieldDataChannel(data.channel);
+            auto field_data = storage::CollectFieldDataChannel(data.channel);
             for (auto& data : field_data) {
                 int64_t row_count = data->get_num_rows();
                 std::copy_n(static_cast<const Timestamp*>(data->Data()),
@@ -307,7 +314,7 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
             AssertInfo(system_field_type == SystemFieldType::RowId,
                        "System field type of id column is not RowId");
 
-            auto field_data = CollectFieldDataChannel(data.channel);
+            auto field_data = storage::CollectFieldDataChannel(data.channel);
 
             // write data under lock
             std::unique_lock lck(mutex_);
@@ -335,7 +342,7 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                     auto var_column =
                         std::make_shared<VariableColumn<std::string>>(
                             num_rows, field_meta);
-                    storage::FieldDataPtr field_data;
+                    FieldDataPtr field_data;
                     while (data.channel->pop(field_data)) {
                         for (auto i = 0; i < field_data->get_num_rows(); i++) {
                             auto str = static_cast<const std::string*>(
@@ -354,7 +361,7 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                     auto var_column =
                         std::make_shared<VariableColumn<milvus::Json>>(
                             num_rows, field_meta);
-                    storage::FieldDataPtr field_data;
+                    FieldDataPtr field_data;
                     while (data.channel->pop(field_data)) {
                         for (auto i = 0; i < field_data->get_num_rows(); i++) {
                             auto padded_string =
@@ -374,7 +381,7 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                 case milvus::DataType::ARRAY: {
                     auto var_column =
                         std::make_shared<ArrayColumn>(num_rows, field_meta);
-                    storage::FieldDataPtr field_data;
+                    FieldDataPtr field_data;
                     while (data.channel->pop(field_data)) {
                         for (auto i = 0; i < field_data->get_num_rows(); i++) {
                             auto rawValue = field_data->RawValue(i);
@@ -398,7 +405,7 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                 field_id, num_rows, field_data_size);
         } else {
             column = std::make_shared<Column>(num_rows, field_meta);
-            storage::FieldDataPtr field_data;
+            FieldDataPtr field_data;
             while (data.channel->pop(field_data)) {
                 column->AppendBatch(field_data);
             }
@@ -469,7 +476,7 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
     auto data_size = 0;
     std::vector<uint64_t> indices{};
     std::vector<std::vector<uint64_t>> element_indices{};
-    storage::FieldDataPtr field_data;
+    FieldDataPtr field_data;
     while (data.channel->pop(field_data)) {
         data_size += field_data->Size();
         auto written =
@@ -669,8 +676,12 @@ SegmentSealedImpl::mask_with_delete(BitsetType& bitset,
         return;
     }
     auto& delete_bitset = *bitmap_holder->bitmap_ptr;
-    AssertInfo(delete_bitset.size() == bitset.size(),
-               "Deleted bitmap size not equal to filtered bitmap size");
+    AssertInfo(
+        delete_bitset.size() == bitset.size(),
+        fmt::format(
+            "Deleted bitmap size:{} not equal to filtered bitmap size:{}",
+            delete_bitset.size(),
+            bitset.size()));
     bitset |= delete_bitset;
 }
 
@@ -1451,7 +1462,13 @@ SegmentSealedImpl::generate_binlog_index(const FieldId field_id) {
             // get binlog data and meta
             auto row_count = num_rows_.value();
             auto dim = field_meta.get_dim();
-            auto vec_data = fields_.at(field_id);
+            std::shared_ptr<ColumnBase> vec_data{};
+            {
+                // field should be exists.
+                // otherwise, out_of_range exception is thrown by fields_.at
+                std::shared_lock lck(mutex_);
+                vec_data = fields_.at(field_id);
+            }
             auto dataset =
                 knowhere::GenDataSet(row_count, dim, (void*)vec_data->Data());
             dataset->SetIsOwner(false);

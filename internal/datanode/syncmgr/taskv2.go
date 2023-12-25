@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -238,7 +239,7 @@ func (t *SyncTaskV2) serializeDeleteData() error {
 	}
 	fields = append(fields, tsField)
 
-	schema, err := metacache.ConvertToArrowSchema(fields)
+	schema, err := typeutil2.ConvertToArrowSchema(fields)
 	if err != nil {
 		return err
 	}

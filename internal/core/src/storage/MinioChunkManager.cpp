@@ -14,6 +14,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "storage/MinioChunkManager.h"
+
 #include <fstream>
 #include <aws/core/auth/AWSCredentials.h>
 #include <aws/core/auth/AWSCredentialsProviderChain.h>
@@ -28,7 +30,6 @@
 #include <aws/s3/model/ListObjectsRequest.h>
 #include <aws/s3/model/PutObjectRequest.h>
 
-#include "storage/MinioChunkManager.h"
 #include "storage/AliyunSTSClient.h"
 #include "storage/AliyunCredentialsProvider.h"
 #include "storage/prometheus_client.h"
@@ -83,7 +84,7 @@ ConvertFromAwsString(const Aws::String& aws_str) {
 
 void
 AwsLogger::ProcessFormattedStatement(Aws::String&& statement) {
-    LOG_SEGCORE_INFO_ << "[AWS LOG] " << statement;
+    LOG_INFO("[AWS LOG] {}", statement);
 }
 
 void
@@ -112,7 +113,7 @@ MinioChunkManager::InitSDKAPI(RemoteStorageType type,
                     GOOGLE_CLIENT_FACTORY_ALLOCATION_TAG, credentials);
             };
         }
-        LOG_SEGCORE_INFO_ << "init aws with log level:" << log_level_str;
+        LOG_INFO("init aws with log level:{}", log_level_str);
         auto get_aws_log_level = [](const std::string& level_str) {
             Aws::Utils::Logging::LogLevel level =
                 Aws::Utils::Logging::LogLevel::Off;
@@ -155,7 +156,7 @@ MinioChunkManager::InitSDKAPIDefault(const std::string& log_level_str) {
         sigemptyset(&psa.sa_mask);
         sigaddset(&psa.sa_mask, SIGPIPE);
         sigaction(SIGPIPE, &psa, 0);
-        LOG_SEGCORE_INFO_ << "init aws with log level:" << log_level_str;
+        LOG_INFO("init aws with log level:{}", log_level_str);
         auto get_aws_log_level = [](const std::string& level_str) {
             Aws::Utils::Logging::LogLevel level =
                 Aws::Utils::Logging::LogLevel::Off;
@@ -219,8 +220,8 @@ MinioChunkManager::BuildS3Client(
 
 void
 MinioChunkManager::PreCheck(const StorageConfig& config) {
-    LOG_SEGCORE_INFO_ << "start to precheck chunk manager with configuration:"
-                      << config.ToString();
+    LOG_INFO("start to precheck chunk manager with configuration: {}",
+             config.ToString());
     try {
         // Just test connection not check real list, avoid cost resource.
         ListWithPrefix("justforconnectioncheck");
@@ -231,7 +232,7 @@ MinioChunkManager::PreCheck(const StorageConfig& config) {
             "configuration:{}",
             e.what(),
             config.ToString());
-        LOG_SEGCORE_ERROR_ << err_message;
+        LOG_ERROR(err_message);
         throw SegcoreError(S3Error, err_message);
     } catch (std::exception& e) {
         throw e;
@@ -345,11 +346,13 @@ MinioChunkManager::MinioChunkManager(const StorageConfig& storage_config)
 
     PreCheck(storage_config);
 
-    LOG_SEGCORE_INFO_ << "init MinioChunkManager with parameter[endpoint: '"
-                      << storage_config.address << "', default_bucket_name:'"
-                      << storage_config.bucket_name << "', root_path:'"
-                      << storage_config.root_path << "', use_secure:'"
-                      << std::boolalpha << storage_config.useSSL << "']";
+    LOG_INFO(
+        "init MinioChunkManager with "
+        "parameter[endpoint={}][bucket_name={}][root_path={}][use_secure={}]",
+        storage_config.address,
+        storage_config.bucket_name,
+        storage_config.root_path,
+        storage_config.useSSL);
 }
 
 MinioChunkManager::~MinioChunkManager() {

@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/http/healthz"
 	"github.com/milvus-io/milvus/pkg/eventlog"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/expr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -39,6 +40,14 @@ const (
 var (
 	metricsServer *http.ServeMux
 	server        *http.Server
+)
+
+// Provide alias for native http package
+// avoiding import alias when using http package
+
+type (
+	ResponseWriter = http.ResponseWriter
+	Request        = http.Request
 )
 
 type Handler struct {
@@ -61,6 +70,21 @@ func registerDefaults() {
 	Register(&Handler{
 		Path:    EventLogRouterPath,
 		Handler: eventlog.Handler(),
+	})
+	Register(&Handler{
+		Path: ExprPath,
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			code := req.URL.Query().Get("code")
+			auth := req.URL.Query().Get("auth")
+			output, err := expr.Exec(code, auth)
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				w.Write([]byte(fmt.Sprintf(`{"msg": "failed to execute expression, %s"}`, err.Error())))
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(fmt.Sprintf(`{"output": "%s"}`, output)))
+		}),
 	})
 }
 

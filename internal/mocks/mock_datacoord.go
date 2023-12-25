@@ -36,6 +36,61 @@ func (_m *MockDataCoord) EXPECT() *MockDataCoord_Expecter {
 	return &MockDataCoord_Expecter{mock: &_m.Mock}
 }
 
+// AlterIndex provides a mock function with given fields: _a0, _a1
+func (_m *MockDataCoord) AlterIndex(_a0 context.Context, _a1 *indexpb.AlterIndexRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *indexpb.AlterIndexRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *indexpb.AlterIndexRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *indexpb.AlterIndexRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockDataCoord_AlterIndex_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AlterIndex'
+type MockDataCoord_AlterIndex_Call struct {
+	*mock.Call
+}
+
+// AlterIndex is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *indexpb.AlterIndexRequest
+func (_e *MockDataCoord_Expecter) AlterIndex(_a0 interface{}, _a1 interface{}) *MockDataCoord_AlterIndex_Call {
+	return &MockDataCoord_AlterIndex_Call{Call: _e.mock.On("AlterIndex", _a0, _a1)}
+}
+
+func (_c *MockDataCoord_AlterIndex_Call) Run(run func(_a0 context.Context, _a1 *indexpb.AlterIndexRequest)) *MockDataCoord_AlterIndex_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*indexpb.AlterIndexRequest))
+	})
+	return _c
+}
+
+func (_c *MockDataCoord_AlterIndex_Call) Return(_a0 *commonpb.Status, _a1 error) *MockDataCoord_AlterIndex_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDataCoord_AlterIndex_Call) RunAndReturn(run func(context.Context, *indexpb.AlterIndexRequest) (*commonpb.Status, error)) *MockDataCoord_AlterIndex_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // AssignSegmentID provides a mock function with given fields: _a0, _a1
 func (_m *MockDataCoord) AssignSegmentID(_a0 context.Context, _a1 *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -527,6 +582,61 @@ func (_c *MockDataCoord_GcConfirm_Call) Return(_a0 *datapb.GcConfirmResponse, _a
 }
 
 func (_c *MockDataCoord_GcConfirm_Call) RunAndReturn(run func(context.Context, *datapb.GcConfirmRequest) (*datapb.GcConfirmResponse, error)) *MockDataCoord_GcConfirm_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GcControl provides a mock function with given fields: _a0, _a1
+func (_m *MockDataCoord) GcControl(_a0 context.Context, _a1 *datapb.GcControlRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.GcControlRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.GcControlRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.GcControlRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockDataCoord_GcControl_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GcControl'
+type MockDataCoord_GcControl_Call struct {
+	*mock.Call
+}
+
+// GcControl is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *datapb.GcControlRequest
+func (_e *MockDataCoord_Expecter) GcControl(_a0 interface{}, _a1 interface{}) *MockDataCoord_GcControl_Call {
+	return &MockDataCoord_GcControl_Call{Call: _e.mock.On("GcControl", _a0, _a1)}
+}
+
+func (_c *MockDataCoord_GcControl_Call) Run(run func(_a0 context.Context, _a1 *datapb.GcControlRequest)) *MockDataCoord_GcControl_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.GcControlRequest))
+	})
+	return _c
+}
+
+func (_c *MockDataCoord_GcControl_Call) Return(_a0 *commonpb.Status, _a1 error) *MockDataCoord_GcControl_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDataCoord_GcControl_Call) RunAndReturn(run func(context.Context, *datapb.GcControlRequest) (*commonpb.Status, error)) *MockDataCoord_GcControl_Call {
 	_c.Call.Return(run)
 	return _c
 }

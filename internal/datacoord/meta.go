@@ -116,7 +116,7 @@ func (m *meta) reloadFromKV() error {
 	numStoredRows := int64(0)
 	for _, segment := range segments {
 		m.segments.SetSegment(segment.ID, NewSegmentInfo(segment))
-		metrics.DataCoordNumSegments.WithLabelValues(segment.State.String(), segment.GetLevel().String()).Inc()
+		metrics.DataCoordNumSegments.WithLabelValues(segment.GetState().String(), segment.GetLevel().String()).Inc()
 		if segment.State == commonpb.SegmentState_Flushed {
 			numStoredRows += segment.NumOfRows
 
@@ -481,6 +481,7 @@ func CreateL0Operator(collectionID, partitionID, segmentID int64, channel string
 					Level:         datapb.SegmentLevel_L0,
 				},
 			}
+			modPack.metricMutation.addNewSeg(commonpb.SegmentState_Growing, datapb.SegmentLevel_L0, 0)
 		}
 		return true
 	}
@@ -1041,6 +1042,7 @@ func (m *meta) PrepareCompleteCompactionMutation(plan *datapb.CompactionPlan,
 		CreatedByCompaction: true,
 		CompactionFrom:      compactionFrom,
 		LastExpireTime:      plan.GetStartTime(),
+		Level:               datapb.SegmentLevel_L1,
 	}
 	segment := NewSegmentInfo(segmentInfo)
 	metricMutation.addNewSeg(segment.GetState(), segment.GetLevel(), segment.GetNumOfRows())
@@ -1048,6 +1050,7 @@ func (m *meta) PrepareCompleteCompactionMutation(plan *datapb.CompactionPlan,
 		zap.Int64("collectionID", segment.GetCollectionID()),
 		zap.Int64("partitionID", segment.GetPartitionID()),
 		zap.Int64("new segment ID", segment.GetID()),
+		zap.String("new segment level", segment.GetLevel().String()),
 		zap.Int64("new segment num of rows", segment.GetNumOfRows()),
 		zap.Any("compacted from", segment.GetCompactionFrom()))
 
@@ -1268,8 +1271,8 @@ func (m *meta) UpdateChannelCheckpoint(vChannel string, pos *msgpb.MsgPosition) 
 			zap.Uint64("ts", pos.GetTimestamp()),
 			zap.ByteString("msgID", pos.GetMsgID()),
 			zap.Time("time", ts))
-		metrics.DataCoordCheckpointLag.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), vChannel).
-			Set(float64(time.Since(ts).Milliseconds()))
+		metrics.DataCoordCheckpointUnixSeconds.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), vChannel).
+			Set(float64(ts.Unix()))
 	}
 	return nil
 }

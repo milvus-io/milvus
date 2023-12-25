@@ -862,6 +862,24 @@ func (h *Handlers) search(c *gin.Context) {
 	params := map[string]interface{}{ // auto generated mapping
 		"level": int(commonpb.ConsistencyLevel_Bounded),
 	}
+	if httpReq.Params != nil {
+		radius, radiusOk := httpReq.Params[ParamRadius]
+		rangeFilter, rangeFilterOk := httpReq.Params[ParamRangeFilter]
+		if rangeFilterOk {
+			if !radiusOk {
+				log.Warn("high level restful api, search params invalid, because only " + ParamRangeFilter)
+				c.AbortWithStatusJSON(http.StatusOK, gin.H{
+					HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
+					HTTPReturnMessage: merr.ErrIncorrectParameterFormat.Error() + ", error: invalid search params",
+				})
+				return
+			}
+			params[ParamRangeFilter] = rangeFilter
+		}
+		if radiusOk {
+			params[ParamRadius] = radius
+		}
+	}
 	bs, _ := json.Marshal(params)
 	searchParams := []*commonpb.KeyValuePair{
 		{Key: common.TopKKey, Value: strconv.FormatInt(int64(httpReq.Limit), 10)},

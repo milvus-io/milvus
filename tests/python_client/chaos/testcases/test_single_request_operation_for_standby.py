@@ -2,12 +2,12 @@ import pytest
 import threading
 from time import sleep
 from pymilvus import connections
-from chaos.checker import (CreateChecker,
+from chaos.checker import (CollectionCreateChecker,
                            InsertChecker,
                            FlushChecker,
                            SearchChecker,
                            QueryChecker,
-                           IndexChecker,
+                           IndexCreateChecker,
                            DeleteChecker,
                            Op)
 from utils.util_log import test_log as log
@@ -60,10 +60,10 @@ class TestOperations(TestBase):
     def init_health_checkers(self, collection_name=None):
         c_name = collection_name
         checkers = {
-            Op.create: CreateChecker(collection_name=c_name),
+            Op.create: CollectionCreateChecker(collection_name=c_name),
             Op.insert: InsertChecker(collection_name=c_name),
             Op.flush: FlushChecker(collection_name=c_name),
-            Op.index: IndexChecker(collection_name=c_name),
+            Op.index: IndexCreateChecker(collection_name=c_name),
             Op.search: SearchChecker(collection_name=c_name),
             Op.query: QueryChecker(collection_name=c_name),
             Op.delete: DeleteChecker(collection_name=c_name),

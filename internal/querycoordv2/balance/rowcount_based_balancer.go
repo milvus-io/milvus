@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type RowCountBasedBalancer struct {
@@ -175,15 +176,31 @@ func (b *RowCountBasedBalancer) BalanceReplica(replica *meta.Replica) ([]Segment
 		return nil, nil
 	}
 
-	if len(offlineNodes) > 0 {
-		log.Info("Balance for stopping nodes",
-			zap.Any("stoppingNodes", offlineNodes),
-			zap.Any("onlineNodes", onlineNodes),
+	segmentPlans, channelPlans := make([]SegmentAssignPlan, 0), make([]ChannelAssignPlan, 0)
+	if len(offlineNodes) != 0 {
+		log.Info("Handle stopping nodes",
+			zap.Int64("collection", replica.CollectionID),
+			zap.Int64("replica id", replica.Replica.GetID()),
+			zap.String("replica group", replica.Replica.GetResourceGroup()),
+			zap.Any("stopping nodes", offlineNodes),
+			zap.Any("available nodes", onlineNodes),
 		)
-		return b.genStoppingSegmentPlan(replica, onlineNodes, offlineNodes), b.genStoppingChannelPlan(replica, onlineNodes, offlineNodes)
+		// handle stopped nodes here, have to assign segments on stopping nodes to nodes with the smallest score
+		channelPlans = append(channelPlans, b.genStoppingChannelPlan(replica, onlineNodes, offlineNodes)...)
+		if len(channelPlans) == 0 {
+			segmentPlans = append(segmentPlans, b.genStoppingSegmentPlan(replica, onlineNodes, offlineNodes)...)
+		}
+	} else {
+		if paramtable.Get().QueryCoordCfg.AutoBalanceChannel.GetAsBool() {
+			channelPlans = append(channelPlans, b.genChannelPlan(replica, onlineNodes)...)
+		}
+
+		if len(channelPlans) == 0 {
+			segmentPlans = append(segmentPlans, b.genSegmentPlan(replica, onlineNodes)...)
+		}
 	}
 
-	return b.genSegmentPlan(replica, onlineNodes), b.genChannelPlan(replica, onlineNodes)
+	return segmentPlans, channelPlans
 }
 
 func (b *RowCountBasedBalancer) genStoppingSegmentPlan(replica *meta.Replica, onlineNodes []int64, offlineNodes []int64) []SegmentAssignPlan {

@@ -160,8 +160,9 @@ func NewIndexBuildTaskQueue(sched *TaskScheduler) *IndexTaskQueue {
 		unissuedTasks: list.New(),
 		activeTasks:   make(map[string]task),
 		maxTaskNum:    1024,
-		utBufChan:     make(chan int, 1024),
-		sched:         sched,
+
+		utBufChan: make(chan int, 1024),
+		sched:     sched,
 	}
 }
 

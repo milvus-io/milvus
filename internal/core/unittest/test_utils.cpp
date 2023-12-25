@@ -16,10 +16,11 @@
 #include <boost/uuid/uuid_generators.hpp>
 
 #include "common/EasyAssert.h"
+#include "common/Types.h"
 #include "common/Utils.h"
+#include "common/Exception.h"
 #include "query/Utils.h"
 #include "test_utils/DataGen.h"
-#include "common/Types.h"
 
 TEST(Util, StringMatch) {
     using namespace milvus;

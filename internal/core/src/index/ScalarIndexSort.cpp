@@ -68,7 +68,7 @@ ScalarIndexSort<T>::BuildV2(const Config& config) {
         PanicInfo(S3Error, "failed to create scan iterator");
     }
     auto reader = res.value();
-    std::vector<storage::FieldDataPtr> field_datas;
+    std::vector<FieldDataPtr> field_datas;
     for (auto rec = reader->Next(); rec != nullptr; rec = reader->Next()) {
         if (!rec.ok()) {
             PanicInfo(DataFormatBroken, "failed to read data");
@@ -82,7 +82,7 @@ ScalarIndexSort<T>::BuildV2(const Config& config) {
         field_datas.push_back(field_data);
     }
     int64_t total_num_rows = 0;
-    for (auto data : field_datas) {
+    for (const auto& data : field_datas) {
         total_num_rows += data->get_num_rows();
     }
     if (total_num_rows == 0) {
@@ -92,7 +92,7 @@ ScalarIndexSort<T>::BuildV2(const Config& config) {
 
     data_.reserve(total_num_rows);
     int64_t offset = 0;
-    for (auto data : field_datas) {
+    for (const auto& data : field_datas) {
         auto slice_num = data->get_num_rows();
         for (size_t i = 0; i < slice_num; ++i) {
             auto value = reinterpret_cast<const T*>(data->RawValue(i));
@@ -122,7 +122,7 @@ ScalarIndexSort<T>::Build(const Config& config) {
         file_manager_->CacheRawDataToMemory(insert_files.value());
 
     int64_t total_num_rows = 0;
-    for (auto data : field_datas) {
+    for (const auto& data : field_datas) {
         total_num_rows += data->get_num_rows();
     }
     if (total_num_rows == 0) {
@@ -132,7 +132,7 @@ ScalarIndexSort<T>::Build(const Config& config) {
 
     data_.reserve(total_num_rows);
     int64_t offset = 0;
-    for (auto data : field_datas) {
+    for (const auto& data : field_datas) {
         auto slice_num = data->get_num_rows();
         for (size_t i = 0; i < slice_num; ++i) {
             auto value = reinterpret_cast<const T*>(data->RawValue(i));
@@ -280,7 +280,7 @@ ScalarIndexSort<T>::LoadV2(const Config& config) {
             index_files.push_back(b.name);
         }
     }
-    std::map<std::string, storage::FieldDataPtr> index_datas{};
+    std::map<std::string, FieldDataPtr> index_datas{};
     for (auto& file_name : index_files) {
         auto res = space_->GetBlobByteSize(file_name);
         if (!res.ok()) {

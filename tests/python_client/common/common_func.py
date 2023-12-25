@@ -98,6 +98,7 @@ def gen_json_field(name=ct.default_json_field_name, description=ct.default_desc,
 
 def gen_array_field(name=ct.default_array_field_name, element_type=DataType.INT64, max_capacity=ct.default_max_capacity,
                     description=ct.default_desc, is_primary=False, **kwargs):
+
     array_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.ARRAY,
                                                                element_type=element_type, max_capacity=max_capacity,
                                                                description=description, is_primary=is_primary, **kwargs)
@@ -477,7 +478,7 @@ def gen_dataframe_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0, w
     if not random_primary_key:
         int64_values = pd.Series(data=[i for i in range(start, start + nb)])
     else:
-        int64_values = pd.Series(data=random.sample(range(start, start + nb), nb)) 
+        int64_values = pd.Series(data=random.sample(range(start, start + nb), nb))
     int32_values = pd.Series(data=[np.int32(i) for i in range(start, start + nb)], dtype="int32")
     int16_values = pd.Series(data=[np.int16(i) for i in range(start, start + nb)], dtype="int16")
     int8_values = pd.Series(data=[np.int8(i) for i in range(start, start + nb)], dtype="int8")
@@ -941,7 +942,7 @@ def gen_invalid_search_params_type():
                 scann_search_param = {"index_type": index_type, "search_params": {"nprobe": 8, "reorder_k": reorder_k}}
                 search_params.append(scann_search_param)
         elif index_type == "DISKANN":
-            for search_list in ct.get_invalid_ints:
+            for search_list in ct.get_invalid_ints[1:]:
                 diskann_search_param = {"index_type": index_type, "search_params": {"search_list": search_list}}
                 search_params.append(diskann_search_param)
     return search_params
@@ -985,7 +986,7 @@ def gen_search_param(index_type, metric_type="L2"):
         log.error("Invalid index_type.")
         raise Exception("Invalid index_type.")
     log.debug(search_params)
-    
+
     return search_params
 
 

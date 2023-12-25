@@ -32,9 +32,9 @@
 namespace milvus {
 
 inline size_t
-GetDataSize(const std::vector<storage::FieldDataPtr>& datas) {
+GetDataSize(const std::vector<FieldDataPtr>& datas) {
     size_t total_size{0};
-    for (auto data : datas) {
+    for (const auto& data : datas) {
         total_size += data->Size();
     }
 
@@ -42,7 +42,7 @@ GetDataSize(const std::vector<storage::FieldDataPtr>& datas) {
 }
 
 inline void*
-FillField(DataType data_type, const storage::FieldDataPtr data, void* dst) {
+FillField(DataType data_type, const FieldDataPtr& data, void* dst) {
     char* dest = reinterpret_cast<char*>(dst);
     if (datatype_is_variable(data_type)) {
         switch (data_type) {
@@ -66,8 +66,8 @@ FillField(DataType data_type, const storage::FieldDataPtr data, void* dst) {
                 break;
             }
             default:
-                PanicInfo(DataTypeInvalid,
-                          fmt::format("not supported data type {}", data_type));
+                PanicInfo(
+                    DataTypeInvalid, "not supported data type {}", data_type);
         }
     } else {
         memcpy(dst, data->Data(), data->Size());
@@ -80,7 +80,7 @@ FillField(DataType data_type, const storage::FieldDataPtr data, void* dst) {
 inline size_t
 WriteFieldData(File& file,
                DataType data_type,
-               const storage::FieldDataPtr& data,
+               const FieldDataPtr& data,
                std::vector<std::vector<uint64_t>>& element_indices) {
     size_t total_written{0};
     if (datatype_is_variable(data_type)) {
@@ -126,8 +126,8 @@ WriteFieldData(File& file,
             }
             default:
                 PanicInfo(DataTypeInvalid,
-                          fmt::format("not supported data type {}",
-                                      datatype_name(data_type)));
+                          "not supported data type {}",
+                          datatype_name(data_type));
         }
     } else {
         total_written += file.Write(data->Data(), data->Size());

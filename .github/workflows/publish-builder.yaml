@@ -16,6 +16,10 @@ on:
       - '.github/workflows/publish-builder.yaml'
       - '!**.md'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   publish-builder:
     name: ${{ matrix.arch }} ${{ matrix.os }}
@@ -32,6 +36,7 @@ jobs:
     steps:
       - name: Maximize build space
         uses: easimon/maximize-build-space@master
+        if: ${{ ! startsWith(runner.name, 'self') }} # skip this step if it is self-hosted runner
         with:
           root-reserve-mb: 20480
           # overprovision-lvm: 'true'
@@ -53,7 +58,16 @@ jobs:
         run: |
           docker run --rm --privileged tonistiigi/binfmt:latest --install arm64
           docker buildx ls
-          docker buildx create --use --name=milvus --driver docker-container
+
+          # Check if the builder named "milvus" exists
+          if docker buildx ls | grep -q "milvus"; then
+              echo "Builder 'milvus' already exists. Skipping creation."
+          else
+              # Create the builder named "milvus"
+              echo "Creating builder named 'milvus'..."
+              docker buildx create --use --name=milvus --driver docker-container
+              echo "'milvus' builder created."
+          fi
       - name: Docker Build
         if: success() && github.event_name == 'pull_request' && github.repository == 'milvus-io/milvus'
         shell: bash

@@ -15,28 +15,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "storage/Util.h"
 #include <memory>
+
 #include "arrow/array/builder_binary.h"
 #include "arrow/type_fwd.h"
-#include "common/EasyAssert.h"
-#include "common/Consts.h"
 #include "fmt/format.h"
 #include "log/Log.h"
-#include "storage/ChunkManager.h"
+
+#include "common/Consts.h"
+#include "common/EasyAssert.h"
+#include "common/FieldData.h"
+#include "common/FieldDataInterface.h"
 #ifdef AZURE_BUILD_DIR
 #include "storage/AzureChunkManager.h"
 #endif
-#include "storage/FieldData.h"
+#include "storage/ChunkManager.h"
+#include "storage/DiskFileManagerImpl.h"
 #include "storage/InsertData.h"
-#include "storage/FieldDataInterface.h"
-#include "storage/ThreadPools.h"
 #include "storage/LocalChunkManager.h"
+#include "storage/MemFileManagerImpl.h"
 #include "storage/MinioChunkManager.h"
 #include "storage/OpenDALChunkManager.h"
-#include "storage/MemFileManagerImpl.h"
-#include "storage/DiskFileManagerImpl.h"
 #include "storage/Types.h"
+#include "storage/ThreadPools.h"
+#include "storage/Util.h"
 
 namespace milvus::storage {
 
@@ -467,7 +469,7 @@ EncodeAndUploadIndexSlice2(std::shared_ptr<milvus_storage::Space> space,
     auto status = space->WriteBolb(
         object_key, serialized_index_data.data(), serialized_index_size);
     AssertInfo(status.ok(),
-               fmt::format("write to space error: %s", status.ToString()));
+               fmt::format("write to space error: {}", status.ToString()));
     return std::make_pair(std::move(object_key), serialized_index_size);
 }
 
@@ -727,18 +729,18 @@ GetByteSizeOfFieldDatas(const std::vector<FieldDataPtr>& field_datas) {
     return result;
 }
 
-std::vector<storage::FieldDataPtr>
-CollectFieldDataChannel(storage::FieldDataChannelPtr& channel) {
-    std::vector<storage::FieldDataPtr> result;
-    storage::FieldDataPtr field_data;
+std::vector<FieldDataPtr>
+CollectFieldDataChannel(FieldDataChannelPtr& channel) {
+    std::vector<FieldDataPtr> result;
+    FieldDataPtr field_data;
     while (channel->pop(field_data)) {
         result.push_back(field_data);
     }
     return result;
 }
 
-storage::FieldDataPtr
-MergeFieldData(std::vector<storage::FieldDataPtr>& data_array) {
+FieldDataPtr
+MergeFieldData(std::vector<FieldDataPtr>& data_array) {
     if (data_array.size() == 0) {
         return nullptr;
     }

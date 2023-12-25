@@ -15,21 +15,25 @@
 // limitations under the License.
 #pragma once
 
+#include <folly/io/IOBuf.h>
 #include <sys/mman.h>
 #include <algorithm>
 #include <cstddef>
 #include <cstring>
 #include <filesystem>
+#include <queue>
+#include <string>
+#include <vector>
 
-#include "common/FieldMeta.h"
-#include "common/Span.h"
+#include "common/Array.h"
 #include "common/EasyAssert.h"
 #include "common/File.h"
+#include "common/FieldMeta.h"
+#include "common/FieldData.h"
+#include "common/Span.h"
 #include "fmt/format.h"
 #include "log/Log.h"
 #include "mmap/Utils.h"
-#include "storage/FieldData.h"
-#include "common/Array.h"
 
 namespace milvus {
 
@@ -48,7 +52,6 @@ class ColumnBase {
         }
 
         cap_size_ = field_meta.get_sizeof() * reserve;
-        auto data_type = field_meta.get_data_type();
 
         // use anon mapping so we are able to free these memory with munmap only
         data_ = static_cast<char*>(mmap(nullptr,
@@ -58,8 +61,9 @@ class ColumnBase {
                                         -1,
                                         0));
         AssertInfo(data_ != MAP_FAILED,
-                   "failed to create anon map, err: {}",
-                   strerror(errno));
+                   "failed to create anon map: {}, map_size={}",
+                   strerror(errno),
+                   cap_size_ + padding_);
     }
 
     // mmap mode ctor
@@ -156,7 +160,7 @@ class ColumnBase {
     Span() const = 0;
 
     void
-    AppendBatch(const storage::FieldDataPtr& data) {
+    AppendBatch(const FieldDataPtr& data) {
         size_t required_size = size_ + data->Size();
         if (required_size > cap_size_) {
             Expand(required_size * 2 + padding_);
@@ -186,6 +190,10 @@ class ColumnBase {
     // only for memory mode, not mmap
     void
     Expand(size_t new_size) {
+        if (new_size == 0) {
+            return;
+        }
+
         auto data = static_cast<char*>(mmap(nullptr,
                                             new_size + padding_,
                                             PROT_READ | PROT_WRITE,
@@ -193,15 +201,19 @@ class ColumnBase {
                                             -1,
                                             0));
 
-        AssertInfo(
-            data != MAP_FAILED, "failed to create map: {}", strerror(errno));
+        AssertInfo(data != MAP_FAILED,
+                   "failed to expand map: {}, new_map_size={}",
+                   strerror(errno),
+                   new_size + padding_);
 
         if (data_ != nullptr) {
             std::memcpy(data, data_, size_);
             if (munmap(data_, cap_size_ + padding_)) {
-                AssertInfo(false,
-                           "failed to unmap while expanding, err={}",
-                           strerror(errno));
+                AssertInfo(
+                    false,
+                    "failed to unmap while expanding: {}, old_map_size={}",
+                    strerror(errno),
+                    cap_size_ + padding_);
             }
         }
 
@@ -297,7 +309,8 @@ class VariableColumn : public ColumnBase {
     void
     Append(const char* data, size_t size) {
         indices_.emplace_back(size_);
-        ColumnBase::Append(data, size);
+        size_ += size;
+        load_buf_.emplace(data, size);
     }
 
     void
@@ -305,7 +318,24 @@ class VariableColumn : public ColumnBase {
         if (!indices.empty()) {
             indices_ = std::move(indices);
         }
-        num_rows_ = indices_.size();
+
+        // for variable length column in memory mode only
+        if (data_ == nullptr) {
+            num_rows_ = indices_.size();
+
+            size_t total_size = size_;
+            size_ = 0;
+            Expand(total_size);
+
+            while (!load_buf_.empty()) {
+                auto data = std::move(load_buf_.front());
+                load_buf_.pop();
+
+                std::copy_n(data.data(), data.length(), data_ + size_);
+                size_ += data.length();
+            }
+        }
+
         ConstructViews();
     }
 
@@ -321,6 +351,9 @@ class VariableColumn : public ColumnBase {
     }
 
  private:
+    // loading states
+    std::queue<std::string> load_buf_{};
+
     std::vector<uint64_t> indices_{};
 
     // Compatible with current Span type

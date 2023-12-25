@@ -6,8 +6,8 @@ import json
 from time import sleep
 
 from pymilvus import connections
-from chaos.checker import (CreateChecker, InsertChecker, FlushChecker,
-                           SearchChecker, QueryChecker, IndexChecker, DeleteChecker, Op)
+from chaos.checker import (CollectionCreateChecker, InsertChecker, FlushChecker,
+                           SearchChecker, QueryChecker, IndexCreateChecker, DeleteChecker, Op)
 from common.cus_resource_opts import CustomResourceOperations as CusResource
 from utils.util_log import test_log as log
 from utils.util_k8s import wait_pods_ready, get_pod_list
@@ -20,11 +20,11 @@ from delayed_assert import assert_expectations
 
 
 def check_cluster_nodes(chaos_config):
-    # if all pods will be effected, the expect is all fail. 
+    # if all pods will be effected, the expect is all fail.
     # Even though the replicas is greater than 1, it can not provide HA, so cluster_nodes is set as 1 for this situation.
     if "all" in chaos_config["metadata"]["name"]:
         return 1
-    
+
     selector = findkeys(chaos_config, "selector")
     selector = list(selector)
     log.info(f"chaos target selector: {selector}")
@@ -93,7 +93,7 @@ class TestChaos(TestChaosBase):
     def connection(self, host, port):
         connections.add_connection(default={"host": host, "port": port})
         connections.connect(alias='default')
-        
+
         if connections.has_connection("default") is False:
             raise Exception("no connections")
         self.host = host
@@ -102,10 +102,10 @@ class TestChaos(TestChaosBase):
     @pytest.fixture(scope="function", autouse=True)
     def init_health_checkers(self):
         checkers = {
-            Op.create: CreateChecker(),
+            Op.create: CollectionCreateChecker(),
             Op.insert: InsertChecker(),
             Op.flush: FlushChecker(),
-            Op.index: IndexChecker(),
+            Op.index: IndexCreateChecker(),
             Op.search: SearchChecker(),
             Op.query: QueryChecker(),
             Op.delete: DeleteChecker()

@@ -51,6 +51,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/importutil"
+	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	tsoutil2 "github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -59,6 +60,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
+	"github.com/milvus-io/milvus/pkg/util/expr"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -101,9 +103,9 @@ type Core struct {
 
 	metaKVCreator metaKVCreator
 
-	proxyCreator       proxyCreator
-	proxyManager       *proxyManager
-	proxyClientManager *proxyClientManager
+	proxyCreator       proxyutil.ProxyCreator
+	proxyWatcher       *proxyutil.ProxyWatcher
+	proxyClientManager proxyutil.ProxyClientManagerInterface
 
 	metricsCacheManager *metricsinfo.MetricsCacheManager
 
@@ -144,8 +146,9 @@ func NewCore(c context.Context, factory dependency.Factory) (*Core, error) {
 	}
 
 	core.UpdateStateCode(commonpb.StateCode_Abnormal)
-	core.SetProxyCreator(DefaultProxyCreator)
+	core.SetProxyCreator(proxyutil.DefaultProxyCreator)
 
+	expr.Register("rootcoord", core)
 	return core, nil
 }
 
@@ -473,21 +476,20 @@ func (c *Core) initInternal() error {
 	c.chanTimeTick = newTimeTickSync(c.ctx, c.session.ServerID, c.factory, chanMap)
 	log.Info("create TimeTick sync done")
 
-	c.proxyClientManager = newProxyClientManager(c.proxyCreator)
+	c.proxyClientManager = proxyutil.NewProxyClientManager(c.proxyCreator)
 
 	c.broker = newServerBroker(c)
 	c.ddlTsLockManager = newDdlTsLockManager(c.tsoAllocator)
 	c.garbageCollector = newBgGarbageCollector(c)
 	c.stepExecutor = newBgStepExecutor(c.ctx)
 
-	c.proxyManager = newProxyManager(
-		c.ctx,
+	c.proxyWatcher = proxyutil.NewProxyWatcher(
 		c.etcdCli,
 		c.chanTimeTick.initSessions,
 		c.proxyClientManager.AddProxyClients,
 	)
-	c.proxyManager.AddSessionFunc(c.chanTimeTick.addSession, c.proxyClientManager.AddProxyClient)
-	c.proxyManager.DelSessionFunc(c.chanTimeTick.delSession, c.proxyClientManager.DelProxyClient)
+	c.proxyWatcher.AddSessionFunc(c.chanTimeTick.addSession, c.proxyClientManager.AddProxyClient)
+	c.proxyWatcher.DelSessionFunc(c.chanTimeTick.delSession, c.proxyClientManager.DelProxyClient)
 	log.Info("init proxy manager done")
 
 	c.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
@@ -613,6 +615,43 @@ func (c *Core) initRbac() error {
 			return errors.Wrap(err, "failed to grant collection privilege")
 		}
 	}
+	if Params.RoleCfg.Enabled.GetAsBool() {
+		return c.initBuiltinRoles()
+	}
+	return nil
+}
+
+func (c *Core) initBuiltinRoles() error {
+	rolePrivilegesMap := Params.RoleCfg.Roles.GetAsRoleDetails()
+	for role, privilegesJSON := range rolePrivilegesMap {
+		err := c.meta.CreateRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: role})
+		if err != nil && !common.IsIgnorableError(err) {
+			log.Error("create a builtin role fail", zap.Any("error", err), zap.String("roleName", role))
+			return errors.Wrapf(err, "failed to create a builtin role: %s", role)
+		}
+		for _, privilege := range privilegesJSON[util.RoleConfigPrivileges] {
+			privilegeName := privilege[util.RoleConfigPrivilege]
+			if !util.IsAnyWord(privilege[util.RoleConfigPrivilege]) {
+				privilegeName = util.PrivilegeNameForMetastore(privilege[util.RoleConfigPrivilege])
+			}
+			err := c.meta.OperatePrivilege(util.DefaultTenant, &milvuspb.GrantEntity{
+				Role:       &milvuspb.RoleEntity{Name: role},
+				Object:     &milvuspb.ObjectEntity{Name: privilege[util.RoleConfigObjectType]},
+				ObjectName: privilege[util.RoleConfigObjectName],
+				DbName:     privilege[util.RoleConfigDBName],
+				Grantor: &milvuspb.GrantorEntity{
+					User:      &milvuspb.UserEntity{Name: util.UserRoot},
+					Privilege: &milvuspb.PrivilegeEntity{Name: privilegeName},
+				},
+			}, milvuspb.OperatePrivilegeType_Grant)
+			if err != nil && !common.IsIgnorableError(err) {
+				log.Error("grant privilege to builtin role fail", zap.Any("error", err), zap.String("roleName", role), zap.Any("privilege", privilege))
+				return errors.Wrapf(err, "failed to grant privilege: <%s, %s, %s> of db: %s to role: %s", privilege[util.RoleConfigObjectType], privilege[util.RoleConfigObjectName], privilege[util.RoleConfigPrivilege], privilege[util.RoleConfigDBName], role)
+			}
+		}
+		util.BuiltinRoles = append(util.BuiltinRoles, role)
+		log.Info("init a builtin role successfully", zap.String("roleName", role))
+	}
 	return nil
 }
 
@@ -657,7 +696,7 @@ func (c *Core) restore(ctx context.Context) error {
 }
 
 func (c *Core) startInternal() error {
-	if err := c.proxyManager.WatchProxy(); err != nil {
+	if err := c.proxyWatcher.WatchProxy(c.ctx); err != nil {
 		log.Fatal("rootcoord failed to watch proxy", zap.Error(err))
 		// you can not just stuck here,
 		panic(err)
@@ -752,8 +791,8 @@ func (c *Core) Stop() error {
 	c.UpdateStateCode(commonpb.StateCode_Abnormal)
 	c.stopExecutor()
 	c.stopScheduler()
-	if c.proxyManager != nil {
-		c.proxyManager.Stop()
+	if c.proxyWatcher != nil {
+		c.proxyWatcher.Stop()
 	}
 	c.cancelIfNotNil()
 	if c.quotaCenter != nil {
@@ -2268,6 +2307,10 @@ func (c *Core) DropRole(ctx context.Context, in *milvuspb.DropRoleRequest) (*com
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
+	for util.IsBuiltinRole(in.GetRoleName()) {
+		err := merr.WrapErrPrivilegeNotPermitted("the role[%s] is a builtin role, which can't be dropped", in.GetRoleName())
+		return merr.Status(err), nil
+	}
 	if _, err := c.meta.SelectRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: in.RoleName}, false); err != nil {
 		errMsg := "not found the role, maybe the role isn't existed or internal system error"
 		ctxLog.Warn(errMsg, zap.Error(err))
@@ -2674,7 +2717,8 @@ func (c *Core) SelectGrant(ctx context.Context, in *milvuspb.SelectGrantRequest)
 	grantEntities, err := c.meta.SelectGrant(util.DefaultTenant, in.Entity)
 	if errors.Is(err, merr.ErrIoKeyNotFound) {
 		return &milvuspb.SelectGrantResponse{
-			Status: merr.Success(),
+			Status:   merr.Success(),
+			Entities: grantEntities,
 		}, nil
 	}
 	if err != nil {
@@ -2781,9 +2825,10 @@ func (c *Core) CheckHealth(ctx context.Context, in *milvuspb.CheckHealthRequest)
 	group, ctx := errgroup.WithContext(ctx)
 	errReasons := make([]string, 0, c.proxyClientManager.GetProxyCount())
 
-	for nodeID, proxyClient := range c.proxyClientManager.GetProxyClients() {
-		nodeID := nodeID
-		proxyClient := proxyClient
+	proxyClients := c.proxyClientManager.GetProxyClients()
+	proxyClients.Range(func(key int64, value types.ProxyClient) bool {
+		nodeID := key
+		proxyClient := value
 		group.Go(func() error {
 			sta, err := proxyClient.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
 			if err != nil {
@@ -2798,7 +2843,8 @@ func (c *Core) CheckHealth(ctx context.Context, in *milvuspb.CheckHealthRequest)
 			}
 			return nil
 		})
-	}
+		return true
+	})
 
 	err := group.Wait()
 	if err != nil || len(errReasons) != 0 {

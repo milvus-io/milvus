@@ -31,13 +31,14 @@ class ChunkCache {
         : path_prefix_(std::move(path)), cm_(cm) {
         auto iter = ReadAheadPolicy_Map.find(read_ahead_policy);
         AssertInfo(iter != ReadAheadPolicy_Map.end(),
-                   fmt::format("unrecognized read ahead policy: {}, "
-                               "should be one of `normal, random, sequential, "
-                               "willneed, dontneed`",
-                               read_ahead_policy));
+                   "unrecognized read ahead policy: {}, "
+                   "should be one of `normal, random, sequential, "
+                   "willneed, dontneed`",
+                   read_ahead_policy);
         read_ahead_policy_ = iter->second;
-        LOG_SEGCORE_INFO_ << "Init ChunkCache with prefix: " << path_prefix_
-                          << ", read_ahead_policy: " << read_ahead_policy;
+        LOG_INFO("Init ChunkCache with prefix: {}, read_ahead_policy: {}",
+                 path_prefix_,
+                 read_ahead_policy);
     }
 
     ~ChunkCache() = default;

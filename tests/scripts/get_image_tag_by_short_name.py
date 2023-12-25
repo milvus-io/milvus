@@ -12,7 +12,7 @@ def get_image_tag_by_short_name(repository, tag, arch):
     # latest means the tag is a release build
         # latest -> v$version
     splits = tag.split("-")
-    prefix = splits[0] if len(splits) > 1 else "v"
+    prefix = f"{splits[0]}-" if len(splits) > 1 else "v"
     url = f"https://hub.docker.com/v2/repositories/{repository}/tags?name={prefix}&ordering=last_updated"
     response = requests.get(url)
     data = response.json()

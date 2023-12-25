@@ -299,7 +299,7 @@ class SegmentSealedImpl : public SegmentSealed {
         vec_binlog_config_;
 };
 
-inline SegmentSealedPtr
+inline SegmentSealedUPtr
 CreateSealedSegment(
     SchemaPtr schema,
     IndexMetaPtr index_meta = nullptr,

@@ -36,7 +36,7 @@
 #include "segcore/SegmentGrowingImpl.h"
 #include "simdjson/error.h"
 #include "query/PlanProto.h"
-#include "segcore/SkipIndex.h"
+#include "index/SkipIndex.h"
 #include "simd/hook.h"
 #include "index/Meta.h"
 
@@ -124,8 +124,7 @@ ExecExprVisitor::visit(LogicalUnaryExpr& expr) {
             break;
         }
         default: {
-            PanicInfo(OpTypeInvalid,
-                      fmt::format("Invalid Unary Op {}", expr.op_type_));
+            PanicInfo(OpTypeInvalid, "Invalid Unary Op {}", expr.op_type_);
         }
     }
     AssertInfo(res.size() == row_count_,
@@ -172,8 +171,7 @@ ExecExprVisitor::visit(LogicalBinaryExpr& expr) {
             break;
         }
         default: {
-            PanicInfo(OpTypeInvalid,
-                      fmt::format("Invalid Binary Op {}", expr.op_type_));
+            PanicInfo(OpTypeInvalid, "Invalid Binary Op {}", expr.op_type_);
         }
     }
     AssertInfo(res.size() == row_count_,
@@ -503,8 +501,7 @@ ExecExprVisitor::ExecUnaryRangeVisitorDispatcherImpl(UnaryRangeExpr& expr_raw)
         }
         // TODO: PostfixMatch
         default: {
-            PanicInfo(OpTypeInvalid,
-                      fmt::format("unsupported range node {}", op));
+            PanicInfo(OpTypeInvalid, "unsupported range node {}", op);
         }
     }
 }
@@ -617,8 +614,8 @@ CompareTwoJsonArray(T arr1, const proto::plan::Array& arr2) {
             }
             default:
                 PanicInfo(DataTypeInvalid,
-                          fmt::format("unsupported data type {}",
-                                      arr2.array(i).val_case()));
+                          "unsupported data type {}",
+                          arr2.array(i).val_case());
         }
         i++;
     }
@@ -761,8 +758,7 @@ ExecExprVisitor::ExecUnaryRangeVisitorDispatcherJson(UnaryRangeExpr& expr_raw)
         }
         // TODO: PostfixMatch
         default: {
-            PanicInfo(OpTypeInvalid,
-                      fmt::format("unsupported range node {}", op));
+            PanicInfo(OpTypeInvalid, "unsupported range node {}", op);
         }
     }
 }
@@ -897,8 +893,7 @@ ExecExprVisitor::ExecUnaryRangeVisitorDispatcherArray(UnaryRangeExpr& expr_raw)
         }
         // TODO: PostfixMatch
         default: {
-            PanicInfo(OpTypeInvalid,
-                      fmt::format("unsupported range node {}", op));
+            PanicInfo(OpTypeInvalid, "unsupported range node {}", op);
         }
     }
 }
@@ -1874,8 +1869,8 @@ ExecExprVisitor::visit(UnaryRangeExpr& expr) {
         }
         default:
             PanicInfo(DataTypeInvalid,
-                      fmt::format("unsupported data type: {}",
-                                  expr.column_.data_type));
+                      "unsupported data type: {}",
+                      expr.column_.data_type);
     }
     AssertInfo(res.size() == row_count_,
                "[ExecExprVisitor]Size of results not equal row count");
@@ -1963,8 +1958,8 @@ ExecExprVisitor::visit(BinaryArithOpEvalRangeExpr& expr) {
         }
         default:
             PanicInfo(DataTypeInvalid,
-                      fmt::format("unsupported data type: {}",
-                                  expr.column_.data_type));
+                      "unsupported data type: {}",
+                      expr.column_.data_type);
     }
     AssertInfo(res.size() == row_count_,
                "[ExecExprVisitor]Size of results not equal row count");
@@ -2064,8 +2059,8 @@ ExecExprVisitor::visit(BinaryRangeExpr& expr) {
         }
         default:
             PanicInfo(DataTypeInvalid,
-                      fmt::format("unsupported data type: {}",
-                                  expr.column_.data_type));
+                      "unsupported data type: {}",
+                      expr.column_.data_type);
     }
     AssertInfo(res.size() == row_count_,
                "[ExecExprVisitor]Size of results not equal row count");
@@ -2481,8 +2476,8 @@ ExecExprVisitor::ExecCompareExprDispatcher(CompareExpr& expr, Op op)
                     }
                 }
                 default:
-                    PanicInfo(DataTypeInvalid,
-                              fmt::format("unsupported data type {}", type));
+                    PanicInfo(
+                        DataTypeInvalid, "unsupported data type {}", type);
             }
         };
         auto left = getChunkData(
@@ -2550,8 +2545,7 @@ ExecExprVisitor::visit(CompareExpr& expr) {
             // case OpType::PostfixMatch: {
             // }
         default: {
-            PanicInfo(OpTypeInvalid,
-                      fmt::format("unsupported optype {}", expr.op_type_));
+            PanicInfo(OpTypeInvalid, "unsupported optype {}", expr.op_type_);
         }
     }
     AssertInfo(res.size() == row_count_,
@@ -2958,8 +2952,8 @@ ExecExprVisitor::visit(TermExpr& expr) {
                     break;
                 default:
                     PanicInfo(DataTypeInvalid,
-                              fmt::format("unsupported data type {}",
-                                          expr.val_case_));
+                              "unsupported data type {}",
+                              expr.val_case_);
             }
             break;
         }
@@ -2989,8 +2983,8 @@ ExecExprVisitor::visit(TermExpr& expr) {
         }
         default:
             PanicInfo(DataTypeInvalid,
-                      fmt::format("unsupported data type {}",
-                                  expr.column_.data_type));
+                      "unsupported data type {}",
+                      expr.column_.data_type);
     }
     AssertInfo(res.size() == row_count_,
                "[ExecExprVisitor]Size of results not equal row count");
@@ -3025,8 +3019,8 @@ ExecExprVisitor::visit(ExistsExpr& expr) {
         }
         default:
             PanicInfo(DataTypeInvalid,
-                      fmt::format("unsupported data type {}",
-                                  expr.column_.data_type));
+                      "unsupported data type {}",
+                      expr.column_.data_type);
     }
     AssertInfo(res.size() == row_count_,
                "[ExecExprVisitor]Size of results not equal row count");
@@ -3223,8 +3217,8 @@ ExecExprVisitor::ExecJsonContainsWithDiffType(JsonContainsExpr& expr_raw)
                     }
                     default:
                         PanicInfo(DataTypeInvalid,
-                                  fmt::format("unsupported data type {}",
-                                              element.val_case()));
+                                  "unsupported data type {}",
+                                  element.val_case());
                 }
             }
         }
@@ -3449,8 +3443,8 @@ ExecExprVisitor::ExecJsonContainsAllWithDiffType(JsonContainsExpr& expr_raw)
                         }
                         default:
                             PanicInfo(DataTypeInvalid,
-                                      fmt::format("unsupported data type {}",
-                                                  element.val_case()));
+                                      "unsupported data type {}",
+                                      element.val_case());
                     }
                     if (tmp_elements_index.size() == 0) {
                         return true;
@@ -3502,8 +3496,8 @@ ExecExprVisitor::visit(JsonContainsExpr& expr) {
                     }
                     default:
                         PanicInfo(DataTypeInvalid,
-                                  fmt::format("unsupported data type {}",
-                                              expr.val_case_));
+                                  "unsupported data type {}",
+                                  expr.val_case_);
                 }
             } else {
                 if (expr.same_type_) {
@@ -3530,8 +3524,8 @@ ExecExprVisitor::visit(JsonContainsExpr& expr) {
                         }
                         default:
                             PanicInfo(Unsupported,
-                                      fmt::format("unsupported value type {}",
-                                                  expr.val_case_));
+                                      "unsupported value type {}",
+                                      expr.val_case_);
                     }
                 } else {
                     res = ExecJsonContainsWithDiffType(expr);
@@ -3560,8 +3554,8 @@ ExecExprVisitor::visit(JsonContainsExpr& expr) {
                     }
                     default:
                         PanicInfo(DataTypeInvalid,
-                                  fmt::format("unsupported data type {}",
-                                              expr.val_case_));
+                                  "unsupported data type {}",
+                                  expr.val_case_);
                 }
             } else {
                 if (expr.same_type_) {
@@ -3601,8 +3595,8 @@ ExecExprVisitor::visit(JsonContainsExpr& expr) {
         }
         default:
             PanicInfo(DataTypeInvalid,
-                      fmt::format("unsupported json contains type {}",
-                                  expr.val_case_));
+                      "unsupported json contains type {}",
+                      expr.val_case_);
     }
     AssertInfo(res.size() == row_count_,
                "[ExecExprVisitor]Size of results not equal row count");

@@ -20,6 +20,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include "glog/logging.h"
+#include "fmt/core.h"
 
 // namespace milvus {
 
@@ -53,12 +54,10 @@
            __FUNCTION__,        \
            GetThreadName().c_str())
 
-#define LOG_SEGCORE_TRACE_ DLOG(INFO) << SEGCORE_MODULE_FUNCTION
-#define LOG_SEGCORE_DEBUG_ DLOG(INFO) << SEGCORE_MODULE_FUNCTION
-#define LOG_SEGCORE_INFO_ LOG(INFO) << SEGCORE_MODULE_FUNCTION
-#define LOG_SEGCORE_WARNING_ LOG(WARNING) << SEGCORE_MODULE_FUNCTION
-#define LOG_SEGCORE_ERROR_ LOG(ERROR) << SEGCORE_MODULE_FUNCTION
-#define LOG_SEGCORE_FATAL_ LOG(FATAL) << SEGCORE_MODULE_FUNCTION
+// GLOG has no debug and trace level,
+// Using VLOG to implement it.
+#define GLOG_DEBUG 5
+#define GLOG_TRACE 6
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 #define SERVER_MODULE_NAME "SERVER"
@@ -74,12 +73,16 @@
            __FUNCTION__,       \
            GetThreadName().c_str())
 
-#define LOG_SERVER_TRACE_ DLOG(INFO) << SERVER_MODULE_FUNCTION
-#define LOG_SERVER_DEBUG_ DLOG(INFO) << SERVER_MODULE_FUNCTION
-#define LOG_SERVER_INFO_ LOG(INFO) << SERVER_MODULE_FUNCTION
-#define LOG_SERVER_WARNING_ LOG(WARNING) << SERVER_MODULE_FUNCTION
-#define LOG_SERVER_ERROR_ LOG(ERROR) << SERVER_MODULE_FUNCTION
-#define LOG_SERVER_FATAL_ LOG(FATAL) << SERVER_MODULE_FUNCTION
+#define LOG_DEBUG(args...) \
+    VLOG(GLOG_DEBUG) << SERVER_MODULE_FUNCTION << fmt::format(args)
+#define LOG_INFO(args...) \
+    LOG(INFO) << SERVER_MODULE_FUNCTION << fmt::format(args)
+#define LOG_WARN(args...) \
+    LOG(WARNING) << SERVER_MODULE_FUNCTION << fmt::format(args)
+#define LOG_ERROR(args...) \
+    LOG(ERROR) << SERVER_MODULE_FUNCTION << fmt::format(args)
+#define LOG_FATAL(args...) \
+    LOG(FATAL) << SERVER_MODULE_FUNCTION << fmt::format(args)
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 

@@ -1679,6 +1679,53 @@ class TestUtilityBase(TestcaseBase):
         b_alias, _ = self.utility_wrap.list_aliases(b_name)
         assert a_name in b_alias
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_list_indexes(self):
+        """
+        target: test utility.list_indexes
+        method: create 2 collections and list indexes
+        expected: raise no exception
+        """
+        # 1. create 2 collections
+        string_field = ct.default_string_field_name
+        collection_w1 = self.init_collection_general(prefix, True)[0]
+        collection_w2 = self.init_collection_general(prefix, True, is_index=False)[0]
+        collection_w2.create_index(string_field)
+
+        # 2. list indexes
+        res1, _ = self.utility_wrap.list_indexes(collection_w1.name)
+        assert res1 == [ct.default_float_vec_field_name]
+        res2, _ = self.utility_wrap.list_indexes(collection_w2.name)
+        assert res2 == [string_field]
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_get_server_type(self):
+        """
+        target: test utility.get_server_type
+        method: get_server_type
+        expected: raise no exception
+        """
+        self._connect()
+        res, _ = self.utility_wrap.get_server_type()
+        assert res == "milvus"
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_load_state(self):
+        """
+        target: test utility.load_state
+        method: load_state
+        expected: raise no exception
+        """
+        collection_w = self.init_collection_general(prefix, True, partition_num=1)[0]
+        res1, _ = self.utility_wrap.load_state(collection_w.name)
+        assert str(res1) == "Loaded"
+        collection_w.release()
+        res2, _ = self.utility_wrap.load_state(collection_w.name)
+        assert str(res2) == "NotLoad"
+        collection_w.load(partition_names=[ct.default_partition_name])
+        res3, _ = self.utility_wrap.load_state(collection_w.name)
+        assert str(res3) == "Loaded"
+
 
 class TestUtilityAdvanced(TestcaseBase):
     """ Test case of index interface """

@@ -6,7 +6,9 @@ set -euo pipefail
 toplevel=$(dirname "$(cd "$(dirname "${0}")"; pwd)")
 
 if [[ -f "$toplevel/.env" ]]; then
-  export $(cat $toplevel/.env | xargs)
+    set -a  # automatically export all variables from .env
+    source $toplevel/.env
+    set +a  # stop automatically exporting
 fi
 
 pushd "${toplevel}"

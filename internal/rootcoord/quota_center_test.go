@@ -33,7 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
-	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
@@ -51,7 +51,8 @@ func TestQuotaCenter(t *testing.T) {
 	assert.NoError(t, err)
 	core.tsoAllocator = newMockTsoAllocator()
 
-	pcm := newProxyClientManager(core.proxyCreator)
+	pcm := proxyutil.NewMockProxyClientManager(t)
+	pcm.EXPECT().GetProxyMetrics(mock.Anything).Return(nil, nil).Maybe()
 
 	dc := mocks.NewMockDataCoordClient(t)
 	dc.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
@@ -531,11 +532,8 @@ func TestQuotaCenter(t *testing.T) {
 
 	t.Run("test setRates", func(t *testing.T) {
 		qc := mocks.NewMockQueryCoordClient(t)
-		p1 := mocks.NewMockProxyClient(t)
-		p1.EXPECT().SetRates(mock.Anything, mock.Anything).Return(nil, nil)
-		pcm := &proxyClientManager{proxyClient: map[int64]types.ProxyClient{
-			TestProxyID: p1,
-		}}
+		pcm.EXPECT().GetProxyCount().Return(1)
+		pcm.EXPECT().SetRates(mock.Anything, mock.Anything).Return(nil)
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.EXPECT().GetCollectionByID(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, merr.ErrCollectionNotFound).Maybe()
 		quotaCenter := NewQuotaCenter(pcm, qc, dc, core.tsoAllocator, meta)

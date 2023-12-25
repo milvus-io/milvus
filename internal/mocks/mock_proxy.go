@@ -199,6 +199,61 @@ func (_c *MockProxy_AlterCollection_Call) RunAndReturn(run func(context.Context,
 	return _c
 }
 
+// AlterIndex provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) AlterIndex(_a0 context.Context, _a1 *milvuspb.AlterIndexRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AlterIndexRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AlterIndexRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.AlterIndexRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_AlterIndex_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AlterIndex'
+type MockProxy_AlterIndex_Call struct {
+	*mock.Call
+}
+
+// AlterIndex is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.AlterIndexRequest
+func (_e *MockProxy_Expecter) AlterIndex(_a0 interface{}, _a1 interface{}) *MockProxy_AlterIndex_Call {
+	return &MockProxy_AlterIndex_Call{Call: _e.mock.On("AlterIndex", _a0, _a1)}
+}
+
+func (_c *MockProxy_AlterIndex_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.AlterIndexRequest)) *MockProxy_AlterIndex_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.AlterIndexRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_AlterIndex_Call) Return(_a0 *commonpb.Status, _a1 error) *MockProxy_AlterIndex_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_AlterIndex_Call) RunAndReturn(run func(context.Context, *milvuspb.AlterIndexRequest) (*commonpb.Status, error)) *MockProxy_AlterIndex_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CalcDistance provides a mock function with given fields: _a0, _a1
 func (_m *MockProxy) CalcDistance(_a0 context.Context, _a1 *milvuspb.CalcDistanceRequest) (*milvuspb.CalcDistanceResults, error) {
 	ret := _m.Called(_a0, _a1)
@@ -4551,6 +4606,61 @@ func (_c *MockProxy_Search_Call) Return(_a0 *milvuspb.SearchResults, _a1 error) 
 }
 
 func (_c *MockProxy_Search_Call) RunAndReturn(run func(context.Context, *milvuspb.SearchRequest) (*milvuspb.SearchResults, error)) *MockProxy_Search_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SearchV2 provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) SearchV2(_a0 context.Context, _a1 *milvuspb.SearchRequestV2) (*milvuspb.SearchResults, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *milvuspb.SearchResults
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.SearchRequestV2) (*milvuspb.SearchResults, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.SearchRequestV2) *milvuspb.SearchResults); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.SearchResults)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.SearchRequestV2) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_SearchV2_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SearchV2'
+type MockProxy_SearchV2_Call struct {
+	*mock.Call
+}
+
+// SearchV2 is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.SearchRequestV2
+func (_e *MockProxy_Expecter) SearchV2(_a0 interface{}, _a1 interface{}) *MockProxy_SearchV2_Call {
+	return &MockProxy_SearchV2_Call{Call: _e.mock.On("SearchV2", _a0, _a1)}
+}
+
+func (_c *MockProxy_SearchV2_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.SearchRequestV2)) *MockProxy_SearchV2_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.SearchRequestV2))
+	})
+	return _c
+}
+
+func (_c *MockProxy_SearchV2_Call) Return(_a0 *milvuspb.SearchResults, _a1 error) *MockProxy_SearchV2_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_SearchV2_Call) RunAndReturn(run func(context.Context, *milvuspb.SearchRequestV2) (*milvuspb.SearchResults, error)) *MockProxy_SearchV2_Call {
 	_c.Call.Return(run)
 	return _c
 }
