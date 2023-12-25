@@ -137,8 +137,7 @@ VectorFieldIndexing::AppendSegmentIndex(int64_t reserved_offset,
         try {
             index_->BuildWithDataset(dataset, conf);
         } catch (SegcoreError& error) {
-            LOG_SEGCORE_ERROR_ << " growing index build error : "
-                               << error.what();
+            LOG_ERROR("growing index build error: {}", error.what());
             return;
         }
         index_cur_.fetch_add(vec_num);

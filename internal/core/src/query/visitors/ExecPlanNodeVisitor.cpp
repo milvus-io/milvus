@@ -78,7 +78,7 @@ ExecPlanNodeVisitor::ExecuteExprNodeInternal(
     bool& cache_offset_getted,
     std::vector<int64_t>& cache_offset) {
     bitset_holder.clear();
-    LOG_SEGCORE_INFO_ << "plannode:" << plannode->ToString();
+    LOG_INFO("plannode: {}", plannode->ToString());
     auto plan = plan::PlanFragment(plannode);
     // TODO: get query id from proxy
     auto query_context = std::make_shared<milvus::exec::QueryContext>(
@@ -94,8 +94,7 @@ ExecPlanNodeVisitor::ExecuteExprNodeInternal(
         auto childrens = result->childrens();
         AssertInfo(childrens.size() == 1,
                    "expr result vector's children size not equal one");
-        LOG_SEGCORE_DEBUG_ << "output result length:" << childrens[0]->size()
-                           << std::endl;
+        LOG_DEBUG("output result length:{}", childrens[0]->size());
         if (auto vec = std::dynamic_pointer_cast<ColumnVector>(childrens[0])) {
             AppendOneChunk(bitset_holder,
                            static_cast<bool*>(vec->GetRawData()),

@@ -50,15 +50,15 @@ initTelementry(TraceConfig* config) {
         opts.transport_format = jaeger::TransportFormat::kThriftHttp;
         opts.endpoint = config->jaegerURL;
         exporter = jaeger::JaegerExporterFactory::Create(opts);
-        LOG_SEGCORE_INFO_ << "init jaeger exporter, endpoint:" << opts.endpoint;
+        LOG_INFO("init jaeger exporter, endpoint:", opts.endpoint);
     } else if (config->exporter == "otlp") {
         auto opts = otlp::OtlpGrpcExporterOptions{};
         opts.endpoint = config->otlpEndpoint;
         opts.use_ssl_credentials = config->oltpSecure;
         exporter = otlp::OtlpGrpcExporterFactory::Create(opts);
-        LOG_SEGCORE_INFO_ << "init otlp exporter, endpoint:" << opts.endpoint;
+        LOG_INFO("init otlp exporter, endpoint:", opts.endpoint);
     } else {
-        LOG_SEGCORE_INFO_ << "Empty Trace";
+        LOG_INFO("Empty Trace");
         enable_trace = false;
     }
     if (enable_trace) {

@@ -30,7 +30,7 @@ Collection::Collection(const std::string_view schema_proto) {
     auto suc = google::protobuf::TextFormat::ParseFromString(
         std::string(schema_proto), &collection_schema);
     if (!suc) {
-        LOG_SEGCORE_WARNING_ << "unmarshal schema string failed";
+        LOG_WARN("unmarshal schema string failed");
     }
     collection_name_ = collection_schema.name();
     schema_ = Schema::ParseFrom(collection_schema);
@@ -41,7 +41,7 @@ Collection::Collection(const void* schema_proto, const int64_t length) {
     milvus::proto::schema::CollectionSchema collection_schema;
     auto suc = collection_schema.ParseFromArray(schema_proto, length);
     if (!suc) {
-        LOG_SEGCORE_WARNING_ << "unmarshal schema string failed";
+        LOG_WARN("unmarshal schema string failed");
     }
 
     collection_name_ = collection_schema.name();
@@ -56,12 +56,12 @@ Collection::parseIndexMeta(const void* index_proto, const int64_t length) {
     auto suc = indexMeta.ParseFromArray(index_proto, length);
 
     if (!suc) {
-        LOG_SEGCORE_ERROR_ << "unmarshal index meta string failed";
+        LOG_ERROR("unmarshal index meta string failed");
         return;
     }
 
     index_meta_ = std::make_shared<CollectionIndexMeta>(indexMeta);
-    LOG_SEGCORE_INFO_ << "index meta info : " << index_meta_->ToString();
+    LOG_INFO("index meta info: {}", index_meta_->ToString());
 }
 
 }  // namespace milvus::segcore

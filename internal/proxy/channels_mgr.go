@@ -19,7 +19,6 @@ package proxy
 import (
 	"context"
 	"fmt"
-	"runtime"
 	"strconv"
 	"sync"
 
@@ -187,10 +186,6 @@ func createStream(factory msgstream.Factory, pchans []pChan, repack repackFuncTy
 	if repack != nil {
 		stream.SetRepackFunc(repack)
 	}
-	runtime.SetFinalizer(stream, func(stream msgstream.MsgStream) {
-		stream.Close()
-	})
-
 	return stream, nil
 }
 
