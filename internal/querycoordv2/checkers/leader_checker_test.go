@@ -42,8 +42,9 @@ type LeaderCheckerTestSuite struct {
 	checker *LeaderChecker
 	kv      kv.MetaKv
 
-	meta   *meta.Meta
-	broker *meta.MockBroker
+	meta    *meta.Meta
+	broker  *meta.MockBroker
+	nodeMgr *session.NodeManager
 }
 
 func (suite *LeaderCheckerTestSuite) SetupSuite() {
@@ -67,13 +68,13 @@ func (suite *LeaderCheckerTestSuite) SetupTest() {
 	// meta
 	store := querycoord.NewCatalog(suite.kv)
 	idAllocator := RandomIncrementIDAllocator()
-	nodeMgr := session.NewNodeManager()
-	suite.meta = meta.NewMeta(idAllocator, store, nodeMgr)
+	suite.nodeMgr = session.NewNodeManager()
+	suite.meta = meta.NewMeta(idAllocator, store, suite.nodeMgr)
 	suite.broker = meta.NewMockBroker(suite.T())
 
 	distManager := meta.NewDistributionManager()
 	targetManager := meta.NewTargetManager(suite.broker, suite.meta)
-	suite.checker = NewLeaderChecker(suite.meta, distManager, targetManager, nodeMgr)
+	suite.checker = NewLeaderChecker(suite.meta, distManager, targetManager, suite.nodeMgr)
 }
 
 func (suite *LeaderCheckerTestSuite) TearDownTest() {
@@ -184,8 +185,7 @@ func (suite *LeaderCheckerTestSuite) TestIgnoreBalancedSegment() {
 	observer.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 1, 1, 1, "test-insert-channel"))
 	observer.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
 
-	// The leader view saw the segment on new node,
-	// but another nodes not yet
+	// dist with older version and leader view with newer version
 	leaderView := utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, map[int64]*meta.Segment{})
 	leaderView.Segments[1] = &querypb.SegmentDist{
 		NodeID:  2,
@@ -193,8 +193,23 @@ func (suite *LeaderCheckerTestSuite) TestIgnoreBalancedSegment() {
 	}
 	leaderView.TargetVersion = observer.target.GetCollectionTargetVersion(1, meta.CurrentTarget)
 	observer.dist.LeaderViewManager.Update(2, leaderView)
+
+	// test querynode-1 and querynode-2 exist
+	suite.nodeMgr.Add(session.NewNodeInfo(1, "localhost"))
+	suite.nodeMgr.Add(session.NewNodeInfo(2, "localhost"))
 	tasks := suite.checker.Check(context.TODO())
 	suite.Len(tasks, 0)
+
+	// test querynode-2 crash
+	suite.nodeMgr.Remove(2)
+	tasks = suite.checker.Check(context.TODO())
+	suite.Len(tasks, 1)
+	suite.Equal(tasks[0].Source(), utils.LeaderChecker)
+	suite.Len(tasks[0].Actions(), 1)
+	suite.Equal(tasks[0].Actions()[0].Type(), task.ActionTypeGrow)
+	suite.Equal(tasks[0].Actions()[0].Node(), int64(1))
+	suite.Equal(tasks[0].Actions()[0].(*task.SegmentAction).SegmentID(), int64(1))
+	suite.Equal(tasks[0].Priority(), task.TaskPriorityHigh)
 }
 
 func (suite *LeaderCheckerTestSuite) TestSyncLoadedSegmentsWithReplicas() {

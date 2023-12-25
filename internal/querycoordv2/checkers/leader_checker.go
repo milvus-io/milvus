@@ -77,7 +77,7 @@ func (c *LeaderChecker) Check(ctx context.Context) []task.Task {
 	for _, collectionID := range collectionIDs {
 		collection := c.meta.CollectionManager.GetCollection(collectionID)
 		if collection == nil {
-			log.Warn("collection released during check index", zap.Int64("collection", collectionID))
+			log.Warn("collection released during check leader", zap.Int64("collection", collectionID))
 			continue
 		}
 
@@ -105,6 +105,12 @@ func (c *LeaderChecker) Check(ctx context.Context) []task.Task {
 }
 
 func (c *LeaderChecker) findNeedLoadedSegments(ctx context.Context, replica int64, leaderView *meta.LeaderView, dist []*meta.Segment) []task.Task {
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", leaderView.CollectionID),
+		zap.Int64("replica", replica),
+		zap.String("channel", leaderView.Channel),
+		zap.Int64("leaderViewID", leaderView.ID),
+	)
 	ret := make([]task.Task, 0)
 	dist = utils.FindMaxVersionSegments(dist)
 	for _, s := range dist {
@@ -117,7 +123,14 @@ func (c *LeaderChecker) findNeedLoadedSegments(ctx context.Context, replica int6
 			continue
 		}
 
-		if !ok || version.GetVersion() < s.Version { // Leader misses this segment
+		leaderWithOldVersion := version.GetVersion() < s.Version
+		// leader has newer version, but the query node which loaded the newer version has been shutdown
+		leaderWithDirtyVersion := version.GetVersion() > s.Version && c.nodeMgr.Get(version.GetNodeID()) == nil
+
+		if !ok || leaderWithOldVersion || leaderWithDirtyVersion {
+			log.Debug("leader checker append a segment to set",
+				zap.Int64("segmentID", s.GetID()),
+				zap.Int64("nodeID", s.Node))
 			action := task.NewSegmentActionWithScope(s.Node, task.ActionTypeGrow, s.GetInsertChannel(), s.GetID(), querypb.DataScope_Historical)
 			t, err := task.NewSegmentTask(
 				ctx,
@@ -129,9 +142,7 @@ func (c *LeaderChecker) findNeedLoadedSegments(ctx context.Context, replica int6
 			)
 			if err != nil {
 				log.Warn("create segment update task failed",
-					zap.Int64("collection", s.GetCollectionID()),
-					zap.Int64("replica", replica),
-					zap.String("channel", s.GetInsertChannel()),
+					zap.Int64("segmentID", s.GetID()),
 					zap.Int64("node", s.Node),
 					zap.Error(err),
 				)
@@ -147,6 +158,13 @@ func (c *LeaderChecker) findNeedLoadedSegments(ctx context.Context, replica int6
 }
 
 func (c *LeaderChecker) findNeedRemovedSegments(ctx context.Context, replica int64, leaderView *meta.LeaderView, dists []*meta.Segment) []task.Task {
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", leaderView.CollectionID),
+		zap.Int64("replica", replica),
+		zap.String("channel", leaderView.Channel),
+		zap.Int64("leaderViewID", leaderView.ID),
+	)
+
 	ret := make([]task.Task, 0)
 	distMap := make(map[int64]struct{})
 	for _, s := range dists {
@@ -161,9 +179,6 @@ func (c *LeaderChecker) findNeedRemovedSegments(ctx context.Context, replica int
 			continue
 		}
 		log.Debug("leader checker append a segment to remove",
-			zap.Int64("collectionID", leaderView.CollectionID),
-			zap.String("channel", leaderView.Channel),
-			zap.Int64("leaderViewID", leaderView.ID),
 			zap.Int64("segmentID", sid),
 			zap.Int64("nodeID", s.NodeID))
 
@@ -178,12 +193,9 @@ func (c *LeaderChecker) findNeedRemovedSegments(ctx context.Context, replica int
 		)
 		if err != nil {
 			log.Warn("create segment reduce task failed",
-				zap.Int64("collection", leaderView.CollectionID),
-				zap.Int64("replica", replica),
-				zap.String("channel", leaderView.Channel),
-				zap.Int64("from", leaderView.ID),
-				zap.Error(err),
-			)
+				zap.Int64("segmentID", sid),
+				zap.Int64("nodeID", s.NodeID),
+				zap.Error(err))
 			continue
 		}
 
