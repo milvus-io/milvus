@@ -98,7 +98,7 @@ type shardDelegator struct {
 	tsafeManager   tsafe.Manager
 	pkOracle       pkoracle.PkOracle
 	// L0 delete buffer
-	deleteMut    sync.Mutex
+	deleteMut    sync.RWMutex
 	deleteBuffer deletebuffer.DeleteBuffer[*deletebuffer.Item]
 	// dispatcherClient msgdispatcher.Client
 	factory msgstream.Factory

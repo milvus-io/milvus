@@ -433,8 +433,8 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 		return candidate.ID(), candidate
 	})
 
-	sd.deleteMut.Lock()
-	defer sd.deleteMut.Unlock()
+	sd.deleteMut.RLock()
+	defer sd.deleteMut.RUnlock()
 	// apply buffered delete for new segments
 	// no goroutines here since qnv2 has no load merging logic
 	for _, info := range infos {
