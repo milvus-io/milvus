@@ -81,7 +81,8 @@ func UpdateReason(reason string) UpdateAction {
 func UpdateFileStat(idx int, fileStat *datapb.ImportFileStats) UpdateAction {
 	return func(task Task) {
 		if it, ok := task.(*PreImportTask); ok {
-			it.PreImportTask.FileStats[idx] = fileStat
+			it.PreImportTask.FileStats[idx].TotalRows = fileStat.GetTotalRows()
+			it.PreImportTask.FileStats[idx].HashedRows = fileStat.GetHashedRows()
 		}
 	}
 }
@@ -106,6 +107,8 @@ type Task interface {
 	GetRequestID() int64
 	GetTaskID() int64
 	GetCollectionID() int64
+	GetPartitionIDs() []int64
+	GetVchannels() []string
 	GetType() TaskType
 	GetState() datapb.ImportState
 	GetReason() string
@@ -211,6 +214,14 @@ func (t *ImportTask) Clone() Task {
 	return &ImportTask{
 		ImportTaskV2: proto.Clone(t.ImportTaskV2).(*datapb.ImportTaskV2),
 	}
+}
+
+func (t *ImportTask) GetPartitionIDs() []int64 {
+	return t.partitions
+}
+
+func (t *ImportTask) GetVchannels() []string {
+	return t.vchannels
 }
 
 func (t *ImportTask) GetSchema() *schemapb.CollectionSchema {

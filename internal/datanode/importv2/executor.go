@@ -123,29 +123,57 @@ func (e *executor) PreImport(task Task) {
 			return fileStat.GetImportFile()
 		})
 
-	wg, _ := errgroup.WithContext(context.TODO()) // TODO: dyh, set timeout
 	for i, file := range files {
-		i := i
-		file := file
-		wg.Go(func() error {
-			reader := NewReader(e.cm, task.GetSchema(), file)
-			defer reader.Close()
-			return e.readFileStat(reader, task, i)
-		})
+		reader := NewReader(e.cm, task.GetSchema(), file)
+		err := e.readFileStat(reader, task, i)
+		if err != nil {
+			e.handleErr(task, err, "preimport failed")
+			reader.Close()
+			return
+		}
+		reader.Close()
 	}
-	err := wg.Wait()
-	if err != nil {
-		e.handleErr(task, err, "preimport failed")
-		return
-	}
+
 	e.manager.Update(task.GetTaskID(), UpdateState(datapb.ImportState_Completed))
 }
 
 func (e *executor) readFileStat(reader Reader, task Task, fileIdx int) error {
-	stat, err := reader.ReadStats()
+	count, err := e.estimateReadRows(task.GetSchema())
 	if err != nil {
-		e.handleErr(task, err, "read stats failed")
 		return err
+	}
+	total := 0
+	hashedRows := make(map[string]*datapb.PartitionRows)
+	for {
+		data, err := reader.Next(count)
+		if err != nil {
+			return err
+		}
+		if data.GetRowNum() == 0 {
+			break
+		}
+		// TODO: check rows alignment here
+		total += data.GetRowNum()
+		hashedDatas, err := e.Hash(task, data)
+		if err != nil {
+			return err
+		}
+		for channelIdx, hd := range hashedDatas {
+			channel := task.GetVchannels()[channelIdx]
+			for partitionIdx, d := range hd {
+				partitionID := task.GetPartitionIDs()[partitionIdx]
+				if hashedRows[channel] == nil {
+					hashedRows[channel] = &datapb.PartitionRows{
+						PartitionRows: make(map[int64]int64),
+					}
+				}
+				hashedRows[channel].PartitionRows[partitionID] = int64(d.GetRowNum())
+			}
+		}
+	}
+	stat := &datapb.ImportFileStats{
+		TotalRows:  int64(total),
+		HashedRows: hashedRows,
 	}
 	e.manager.Update(task.GetTaskID(), UpdateFileStat(fileIdx, stat))
 	return nil
@@ -194,8 +222,8 @@ func (e *executor) importFile(reader Reader, count int64, task Task, segments []
 	}
 }
 
-func (e *executor) Hash(task *ImportTask, insertData *storage.InsertData) (HashedData, error) {
-	res, err := InitHashedData(task.vchannels, task.partitions, task.GetSchema())
+func (e *executor) Hash(task Task, insertData *storage.InsertData) (HashedData, error) {
+	res, err := InitHashedData(task.GetVchannels(), task.GetPartitionIDs(), task.GetSchema())
 	if err != nil {
 		return nil, err
 	}
@@ -203,8 +231,8 @@ func (e *executor) Hash(task *ImportTask, insertData *storage.InsertData) (Hashe
 	if err != nil {
 		return nil, err
 	}
-	vchannelNum := int64(len(task.vchannels))
-	partitionNum := int64(len(task.partitions))
+	vchannelNum := int64(len(task.GetVchannels()))
+	partitionNum := int64(len(task.GetPartitionIDs()))
 	fn, err := HashFunc(pkField.GetDataType())
 	if err != nil {
 		return nil, err
