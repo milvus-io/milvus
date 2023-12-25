@@ -159,12 +159,12 @@ func (e *executor) Import(task Task) {
 		return
 	}
 
-	for _, fileInfo := range task.(*ImportTask).req.GetFilesInfo() {
-		reader := NewReader(e.cm, task.GetSchema(), fileInfo.GetImportFile())
-		err = e.importFile(reader, count, task, fileInfo)
+	req := task.(*ImportTask).req
+	for _, file := range req.GetFiles() {
+		reader := NewReader(e.cm, task.GetSchema(), file)
+		err = e.importFile(reader, count, task, req.GetSegmentsInfo())
 		if err != nil {
-			e.handleErr(task, err, fmt.Sprintf("do import failed, file: %s",
-				fileInfo.GetImportFile().String()))
+			e.handleErr(task, err, fmt.Sprintf("do import failed, file: %s", file.String()))
 			reader.Close()
 			return
 		}
@@ -173,7 +173,7 @@ func (e *executor) Import(task Task) {
 	e.manager.Update(task.GetTaskID(), UpdateState(datapb.ImportState_Completed))
 }
 
-func (e *executor) importFile(reader Reader, count int64, task Task, fileInfo *datapb.ImportFileRequestInfo) error {
+func (e *executor) importFile(reader Reader, count int64, task Task, segments []*datapb.ImportSegmentRequestInfo) error {
 	for {
 		data, err := reader.Next(count)
 		if err != nil {
@@ -187,7 +187,7 @@ func (e *executor) importFile(reader Reader, count int64, task Task, fileInfo *d
 		if err != nil {
 			return err
 		}
-		err = e.Sync(iTask, hashedData, fileInfo)
+		err = e.Sync(iTask, hashedData, segments)
 		if err != nil {
 			return err
 		}
@@ -222,14 +222,14 @@ func (e *executor) Hash(task *ImportTask, insertData *storage.InsertData) (Hashe
 	return res, nil
 }
 
-func (e *executor) Sync(task *ImportTask, hashedData HashedData, fileInfo *datapb.ImportFileRequestInfo) error {
+func (e *executor) Sync(task *ImportTask, hashedData HashedData, segments []*datapb.ImportSegmentRequestInfo) error {
 	futures := make([]*conc.Future[error], 0)
 	syncTasks := make([]*syncmgr.SyncTask, 0)
 	for channelIdx, datas := range hashedData {
 		channel := task.vchannels[channelIdx]
 		for partitionIdx, data := range datas {
 			partitionID := task.partitions[partitionIdx]
-			segmentID := PickSegment(task, fileInfo, channel, partitionID)
+			segmentID := PickSegment(task, segments, channel, partitionID)
 			syncTask := NewSyncTask(task, segmentID, partitionID, channel, data)
 			future := e.syncMgr.SyncData(context.TODO(), syncTask)
 			futures = append(futures, future)

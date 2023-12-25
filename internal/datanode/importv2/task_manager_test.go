@@ -31,7 +31,6 @@ func TestImportManager(t *testing.T) {
 			RequestID:    1,
 			TaskID:       2,
 			CollectionID: 3,
-			PartitionID:  4,
 			SegmentIDs:   []int64{5, 6},
 			NodeID:       7,
 			State:        datapb.ImportState_Pending,

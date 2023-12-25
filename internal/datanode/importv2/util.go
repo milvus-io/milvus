@@ -91,9 +91,9 @@ func InitHashedData(channels []string, partitions []int64, schema *schemapb.Coll
 	return res, nil
 }
 
-func PickSegment(task Task, fileInfo *datapb.ImportFileRequestInfo, vchannel string, partitionID int64) int64 {
+func PickSegment(task Task, segments []*datapb.ImportSegmentRequestInfo, vchannel string, partitionID int64) int64 {
 	infos := task.(*ImportTask).GetSegmentsInfo()
-	targets := lo.FilterMap(fileInfo.GetSegmentsInfo(), func(info *datapb.ImportSegmentRequestInfo, _ int) (int64, bool) {
+	targets := lo.FilterMap(segments, func(info *datapb.ImportSegmentRequestInfo, _ int) (int64, bool) {
 		return info.GetSegmentID(), info.GetVchannel() == vchannel && info.GetPartitionID() == partitionID
 	})
 	infos = lo.Filter(infos, func(info *datapb.ImportSegmentInfo, _ int) bool {

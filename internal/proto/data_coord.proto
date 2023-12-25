@@ -772,9 +772,10 @@ message PreImportRequest {
   int64 requestID = 2;
   int64 taskID = 3;
   int64 collectionID = 4;
-  int64 partitionID = 5;
-  schema.CollectionSchema schema = 6;
-  repeated ImportFile import_files = 7;
+  repeated int64 partitionIDs = 5;
+  repeated string vchannels = 6;
+  schema.CollectionSchema schema = 7;
+  repeated ImportFile import_files = 8;
 }
 
 message autoIDRange {
@@ -789,18 +790,14 @@ message ImportSegmentRequestInfo {
   autoIDRange autoID_ranges = 4;
 }
 
-message ImportFileRequestInfo {
-  ImportFile import_file = 1;
-  repeated ImportSegmentRequestInfo segments_info = 2;
-}
-
 message ImportRequest {
   string clusterID = 1;
   int64 requestID = 2;
   int64 taskID = 3;
   int64 collectionID = 4;
   schema.CollectionSchema schema = 5;
-  repeated ImportFileRequestInfo files_info = 6;
+  repeated ImportFile files = 6;
+  repeated ImportSegmentRequestInfo segments_info = 7;
 }
 
 message QueryPreImportRequest {
@@ -809,11 +806,15 @@ message QueryPreImportRequest {
   int64 taskID = 3;
 }
 
+message PartitionRows {
+  map<int64, int64> partition_rows = 1;
+}
+
 message ImportFileStats {
   ImportFile import_file = 1;
   int64 file_size = 2;
   int64 total_rows = 3;
-  map<string, int64> channel_rows = 4;
+  map<string, PartitionRows> hashed_rows = 4;
 }
 
 message QueryPreImportResponse {
@@ -858,23 +859,23 @@ message PreImportTask {
   int64 requestID = 1;
   int64 taskID = 2;
   int64 collectionID = 3;
-  int64 partitionID = 4;
-  int64 nodeID = 5;
-  ImportState state = 6;
-  string reason = 7;
-  repeated ImportFileStats file_stats = 8;
+  repeated int64 partitionIDs = 4;
+  repeated string vchannels = 5;
+  int64 nodeID = 6;
+  ImportState state = 7;
+  string reason = 8;
+  repeated ImportFileStats file_stats = 9;
 }
 
 message ImportTaskV2 {
   int64 requestID = 1;
   int64 taskID = 2;
   int64 collectionID = 3;
-  int64 partitionID = 4;
-  repeated int64 segmentIDs = 5;
-  int64 nodeID = 6;
-  ImportState state = 7;
-  string reason = 8;
-  repeated ImportFileStats file_stats = 9;
+  repeated int64 segmentIDs = 4;
+  int64 nodeID = 5;
+  ImportState state = 6;
+  string reason = 7;
+  repeated ImportFileStats file_stats = 8;
 }
 
 enum GcCommand {

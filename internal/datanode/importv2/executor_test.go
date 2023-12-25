@@ -197,19 +197,23 @@ func (s *ExecutorSuite) TestExecutor_ReadFileStats() {
 		},
 	}
 	s.reader.EXPECT().ReadStats().Return(&datapb.ImportFileStats{
-		ImportFile:           importFile,
-		FileSize:             1024,
-		TotalRows:            int64(s.numRows),
-		ChannelRows:          map[string]int64{"v0": int64(s.numRows / 2), "v1": int64(s.numRows / 2)},
-		XXX_NoUnkeyedLiteral: struct{}{},
-		XXX_unrecognized:     nil,
-		XXX_sizecache:        0,
+		ImportFile: importFile,
+		FileSize:   1024,
+		TotalRows:  int64(s.numRows),
+		HashedRows: map[string]*datapb.PartitionRows{
+			"v0": {
+				PartitionRows: map[int64]int64{0: int64(s.numRows / 2)},
+			},
+			"v1": {
+				PartitionRows: map[int64]int64{0: int64(s.numRows / 2)},
+			},
+		},
 	}, nil)
 	preimportReq := &datapb.PreImportRequest{
 		RequestID:    1,
 		TaskID:       2,
 		CollectionID: 3,
-		PartitionID:  4,
+		PartitionIDs: []int64{4},
 		Schema:       s.schema,
 		ImportFiles:  []*datapb.ImportFile{importFile},
 	}
@@ -240,31 +244,29 @@ func (s *ExecutorSuite) TestImportFile() {
 		TaskID:       11,
 		CollectionID: 12,
 		Schema:       s.schema,
-		FilesInfo: []*datapb.ImportFileRequestInfo{
+		Files: []*datapb.ImportFile{
 			{
-				ImportFile: &datapb.ImportFile{
-					File: &datapb.ImportFile_RowBasedFile{
-						RowBasedFile: "dummy.json",
-					},
+				File: &datapb.ImportFile_RowBasedFile{
+					RowBasedFile: "dummy.json",
 				},
-				SegmentsInfo: []*datapb.ImportSegmentRequestInfo{
-					{
-						SegmentID:   13,
-						PartitionID: 14,
-						Vchannel:    "v0",
-					},
-					{
-						SegmentID:   15,
-						PartitionID: 16,
-						Vchannel:    "v1",
-					},
-				},
+			},
+		},
+		SegmentsInfo: []*datapb.ImportSegmentRequestInfo{
+			{
+				SegmentID:   13,
+				PartitionID: 14,
+				Vchannel:    "v0",
+			},
+			{
+				SegmentID:   15,
+				PartitionID: 16,
+				Vchannel:    "v1",
 			},
 		},
 	}
 	importTask := NewImportTask(importReq)
 	s.manager.Add(importTask)
-	err := s.executor.importFile(s.reader, int64(s.numRows), importTask, importTask.(*ImportTask).req.GetFilesInfo()[0])
+	err := s.executor.importFile(s.reader, int64(s.numRows), importTask, importTask.(*ImportTask).req.GetSegmentsInfo())
 	s.NoError(err)
 }
 

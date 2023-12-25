@@ -129,7 +129,8 @@ func NewPreImportTask(req *datapb.PreImportRequest) Task {
 			RequestID:    req.GetRequestID(),
 			TaskID:       req.GetTaskID(),
 			CollectionID: req.GetCollectionID(),
-			PartitionID:  req.GetPartitionID(),
+			PartitionIDs: req.GetPartitionIDs(),
+			Vchannels:    req.GetVchannels(),
 			State:        datapb.ImportState_Pending,
 			FileStats:    fileStats,
 		},
@@ -180,11 +181,9 @@ func (t *ImportTask) Init(req *datapb.ImportRequest) {
 	metaCaches := make(map[string]metacache.MetaCache)
 	channels := make(map[string]struct{})
 	partitions := make(map[int64]struct{})
-	for _, fileInfo := range req.GetFilesInfo() {
-		for _, info := range fileInfo.GetSegmentsInfo() {
-			channels[info.GetVchannel()] = struct{}{}
-			partitions[info.GetPartitionID()] = struct{}{}
-		}
+	for _, info := range req.GetSegmentsInfo() {
+		channels[info.GetVchannel()] = struct{}{}
+		partitions[info.GetPartitionID()] = struct{}{}
 	}
 	for _, channel := range lo.Keys(channels) {
 		info := &datapb.ChannelWatchInfo{
