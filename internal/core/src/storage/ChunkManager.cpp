@@ -99,11 +99,13 @@ AwsChunkManager::AwsChunkManager(const StorageConfig& storage_config) {
 
     PreCheck(storage_config);
 
-    LOG_SEGCORE_INFO_ << "init AwsChunkManager with parameter[endpoint: '"
-                      << storage_config.address << "', default_bucket_name:'"
-                      << storage_config.bucket_name << "', root_path:'"
-                      << storage_config.root_path << "', use_secure:'"
-                      << std::boolalpha << storage_config.useSSL << "']";
+    LOG_INFO(
+        "init AwsChunkManager with "
+        "parameter[endpoint={}][bucket_name={}][root_path={}][use_secure={}]",
+        storage_config.address,
+        storage_config.bucket_name,
+        storage_config.root_path,
+        storage_config.useSSL);
 }
 
 GcpChunkManager::GcpChunkManager(const StorageConfig& storage_config) {
@@ -135,11 +137,13 @@ GcpChunkManager::GcpChunkManager(const StorageConfig& storage_config) {
 
     PreCheck(storage_config);
 
-    LOG_SEGCORE_INFO_ << "init GcpChunkManager with parameter[endpoint: '"
-                      << storage_config.address << "', default_bucket_name:'"
-                      << storage_config.bucket_name << "', root_path:'"
-                      << storage_config.root_path << "', use_secure:'"
-                      << std::boolalpha << storage_config.useSSL << "']";
+    LOG_INFO(
+        "init GcpChunkManager with "
+        "parameter[endpoint={}][bucket_name={}][root_path={}][use_secure={}]",
+        storage_config.address,
+        storage_config.bucket_name,
+        storage_config.root_path,
+        storage_config.useSSL);
 }
 
 AliyunChunkManager::AliyunChunkManager(const StorageConfig& storage_config) {
@@ -175,11 +179,13 @@ AliyunChunkManager::AliyunChunkManager(const StorageConfig& storage_config) {
 
     PreCheck(storage_config);
 
-    LOG_SEGCORE_INFO_ << "init AliyunChunkManager with parameter[endpoint: '"
-                      << storage_config.address << "', default_bucket_name:'"
-                      << storage_config.bucket_name << "', root_path:'"
-                      << storage_config.root_path << "', use_secure:'"
-                      << std::boolalpha << storage_config.useSSL << "']";
+    LOG_INFO(
+        "init AliyunChunkManager with "
+        "parameter[endpoint={}][bucket_name={}][root_path={}][use_secure={}]",
+        storage_config.address,
+        storage_config.bucket_name,
+        storage_config.root_path,
+        storage_config.useSSL);
 }
 
 }  // namespace milvus::storage

@@ -252,8 +252,7 @@ class IndexingRecord {
                 }
 
                 if (index_meta_ == nullptr) {
-                    LOG_SEGCORE_INFO_
-                        << "miss index meta for growing interim index";
+                    LOG_INFO("miss index meta for growing interim index");
                     continue;
                 }
                 //Small-Index enabled, create index for vector field only

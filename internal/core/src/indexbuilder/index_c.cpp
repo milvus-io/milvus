@@ -204,7 +204,7 @@ CreateIndexV2(CIndex* res_index, CBuildIndexInfo c_build_index_info) {
                    "create space failed: {}",
                    index_space.status().ToString());
 
-        LOG_SEGCORE_INFO_ << "init space success";
+        LOG_INFO("init space success");
         auto chunk_manager = milvus::storage::CreateChunkManager(
             build_index_info->storage_config);
         milvus::storage::FileManagerContext fileManagerContext(

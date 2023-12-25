@@ -58,11 +58,7 @@ PayloadReader::init(std::shared_ptr<arrow::io::BufferReader> input) {
 
     int64_t column_index = 0;
     auto file_meta = arrow_reader->parquet_reader()->metadata();
-    // LOG_SEGCORE_INFO_ << "serialized parquet metadata, num row group  " <<
-    // std::to_string(file_meta->num_row_groups())
-    //                   << ", num column " << std::to_string(file_meta->num_columns()) << ", num rows "
-    //                   << std::to_string(file_meta->num_rows()) << ", type width "
-    //                   << std::to_string(file_meta->schema()->Column(column_index)->type_length());
+
     dim_ = datatype_is_vector(column_type_)
                ? GetDimensionFromFileMetaData(
                      file_meta->schema()->Column(column_index), column_type_)
@@ -81,7 +77,7 @@ PayloadReader::init(std::shared_ptr<arrow::io::BufferReader> input) {
         field_data_->FillFieldData(array);
     }
     AssertInfo(field_data_->IsFull(), "field data hasn't been filled done");
-    // LOG_SEGCORE_INFO_ << "Peak arrow memory pool size " << pool->max_memory();
+    // LOG_INFO("Peak arrow memory pool size {}", pool)->max_memory();
 }
 
 }  // namespace milvus::storage
