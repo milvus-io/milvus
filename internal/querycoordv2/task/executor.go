@@ -191,7 +191,12 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 		indexes = nil
 	}
 
-	loadInfo := utils.PackSegmentLoadInfo(resp, indexes)
+	channel := ex.targetMgr.GetDmChannel(task.CollectionID(), segment.GetInsertChannel(), meta.NextTarget)
+	if channel == nil {
+		channel = ex.targetMgr.GetDmChannel(task.CollectionID(), segment.GetInsertChannel(), meta.CurrentTarget)
+	}
+
+	loadInfo := utils.PackSegmentLoadInfo(resp, channel.GetSeekPosition(), indexes)
 
 	// Get collection index info
 	indexInfo, err := ex.broker.DescribeIndex(ctx, task.CollectionID())

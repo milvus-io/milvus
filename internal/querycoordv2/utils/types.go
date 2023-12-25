@@ -72,34 +72,17 @@ func MergeMetaSegmentIntoSegmentInfo(info *querypb.SegmentInfo, segments ...*met
 
 // packSegmentLoadInfo packs SegmentLoadInfo for given segment,
 // packs with index if withIndex is true, this fetch indexes from IndexCoord
-func PackSegmentLoadInfo(resp *datapb.GetSegmentInfoResponse, indexes []*querypb.FieldIndexInfo) *querypb.SegmentLoadInfo {
-	var (
-		deltaPosition *msgpb.MsgPosition
-		positionSrc   string
-	)
-
+func PackSegmentLoadInfo(resp *datapb.GetSegmentInfoResponse, checkpoint *msgpb.MsgPosition, indexes []*querypb.FieldIndexInfo) *querypb.SegmentLoadInfo {
 	segment := resp.GetInfos()[0]
 
-	if resp.GetChannelCheckpoint() != nil && resp.ChannelCheckpoint[segment.InsertChannel] != nil {
-		deltaPosition = resp.ChannelCheckpoint[segment.InsertChannel]
-		positionSrc = "channelCheckpoint"
-	} else if segment.GetDmlPosition() != nil {
-		deltaPosition = segment.GetDmlPosition()
-		positionSrc = "segmentDMLPos"
-	} else {
-		deltaPosition = segment.GetStartPosition()
-		positionSrc = "segmentStartPos"
-	}
-
-	posTime := tsoutil.PhysicalTime(deltaPosition.GetTimestamp())
+	posTime := tsoutil.PhysicalTime(checkpoint.GetTimestamp())
 	tsLag := time.Since(posTime)
 	if tsLag >= 10*time.Minute {
 		log.Warn("delta position is quite stale",
 			zap.Int64("collectionID", segment.GetCollectionID()),
 			zap.Int64("segmentID", segment.GetID()),
 			zap.String("channel", segment.InsertChannel),
-			zap.String("positionSource", positionSrc),
-			zap.Uint64("posTs", deltaPosition.GetTimestamp()),
+			zap.Uint64("posTs", checkpoint.GetTimestamp()),
 			zap.Time("posTime", posTime),
 			zap.Duration("tsLag", tsLag))
 	}
@@ -114,7 +97,7 @@ func PackSegmentLoadInfo(resp *datapb.GetSegmentInfoResponse, indexes []*querypb
 		InsertChannel: segment.InsertChannel,
 		IndexInfos:    indexes,
 		StartPosition: segment.GetStartPosition(),
-		DeltaPosition: deltaPosition,
+		DeltaPosition: checkpoint,
 	}
 	loadInfo.SegmentSize = calculateSegmentSize(loadInfo)
 	return loadInfo
