@@ -214,7 +214,7 @@ func (sd *shardDelegator) ProcessDelete(deleteData []*DeleteData, ts uint64) {
 				// delete will be processed after loaded again
 				return nil
 			}
-			offlineSegments.Upsert(sd.applyDelete(ctx, entry.NodeID, worker, delRecords, entry.Segments)...)
+			offlineSegments.Upsert(sd.applyDelete(ctx, entry.NodeID, worker, delRecords, entry.Segments, querypb.DataScope_Historical)...)
 			return nil
 		})
 	}
@@ -229,7 +229,7 @@ func (sd *shardDelegator) ProcessDelete(deleteData []*DeleteData, ts uint64) {
 				// panic here, local worker shall not have error
 				panic(err)
 			}
-			offlineSegments.Upsert(sd.applyDelete(ctx, paramtable.GetNodeID(), worker, delRecords, growing)...)
+			offlineSegments.Upsert(sd.applyDelete(ctx, paramtable.GetNodeID(), worker, delRecords, growing, querypb.DataScope_Streaming)...)
 			return nil
 		})
 	}
@@ -249,7 +249,7 @@ func (sd *shardDelegator) ProcessDelete(deleteData []*DeleteData, ts uint64) {
 }
 
 // applyDelete handles delete record and apply them to corresponding workers.
-func (sd *shardDelegator) applyDelete(ctx context.Context, nodeID int64, worker cluster.Worker, delRecords map[int64]DeleteData, entries []SegmentEntry) []int64 {
+func (sd *shardDelegator) applyDelete(ctx context.Context, nodeID int64, worker cluster.Worker, delRecords map[int64]DeleteData, entries []SegmentEntry, scope querypb.DataScope) []int64 {
 	var offlineSegments []int64
 	log := sd.getLogger(ctx)
 	for _, segmentEntry := range entries {
@@ -273,6 +273,7 @@ func (sd *shardDelegator) applyDelete(ctx context.Context, nodeID int64, worker 
 					SegmentId:    segmentEntry.SegmentID,
 					PrimaryKeys:  storage.ParsePrimaryKeys2IDs(delRecord.PrimaryKeys),
 					Timestamps:   delRecord.Timestamps,
+					Scope:        scope,
 				})
 				if errors.Is(err, merr.ErrNodeNotFound) {
 					log.Warn("try to delete data on non-exist node")
