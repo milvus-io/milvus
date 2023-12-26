@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"github.com/golang/protobuf/proto"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -53,7 +54,7 @@ func WithReq(reqID int64) ImportTaskFilter {
 	}
 }
 
-func WithStates(states ...datapb.ImportState) ImportTaskFilter {
+func WithStates(states ...milvuspb.ImportState) ImportTaskFilter {
 	return func(task ImportTask) bool {
 		for _, state := range states {
 			if task.GetState() == state {
@@ -66,7 +67,7 @@ func WithStates(states ...datapb.ImportState) ImportTaskFilter {
 
 type UpdateAction func(task ImportTask)
 
-func UpdateState(state datapb.ImportState) UpdateAction {
+func UpdateState(state milvuspb.ImportState) UpdateAction {
 	return func(t ImportTask) {
 		switch t.GetType() {
 		case PreImportTaskType:
@@ -110,7 +111,7 @@ type ImportTask interface {
 	GetCollectionID() int64
 	GetNodeID() int64
 	GetType() TaskType
-	GetState() datapb.ImportState
+	GetState() milvuspb.ImportState
 	GetReason() string
 	GetSchema() *schemapb.CollectionSchema
 	GetFileStats() []*datapb.ImportFileStats

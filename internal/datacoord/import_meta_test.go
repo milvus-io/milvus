@@ -17,6 +17,7 @@
 package datacoord
 
 import (
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -67,7 +68,7 @@ func TestImportMeta_Normal(t *testing.T) {
 			CollectionID: 3,
 			SegmentIDs:   []int64{5, 6},
 			NodeID:       7,
-			State:        datapb.ImportState_Pending,
+			State:        milvuspb.ImportState_Pending,
 		},
 	}
 	err = meta.Add(task1)
@@ -79,25 +80,25 @@ func TestImportMeta_Normal(t *testing.T) {
 
 	task2 := task1.Clone()
 	task2.(*importTask).TaskID = 8
-	task2.(*importTask).State = datapb.ImportState_Completed
+	task2.(*importTask).State = milvuspb.ImportState_Completed
 	err = meta.Add(task2)
 	assert.NoError(t, err)
 
 	tasks := meta.GetBy(WithReq(task1.GetRequestID()))
 	assert.Equal(t, 2, len(tasks))
-	tasks = meta.GetBy(WithType(ImportTaskType), WithStates(datapb.ImportState_Completed))
+	tasks = meta.GetBy(WithType(ImportTaskType), WithStates(milvuspb.ImportState_Completed))
 	assert.Equal(t, 1, len(tasks))
 	assert.Equal(t, task2.GetTaskID(), tasks[0].GetTaskID())
 
 	err = meta.Update(task1.GetTaskID(), UpdateNodeID(9),
-		UpdateState(datapb.ImportState_Failed),
+		UpdateState(milvuspb.ImportState_Failed),
 		UpdateFileStats([]*datapb.ImportFileStats{{
 			FileSize: 100,
 		}}))
 	assert.NoError(t, err)
 	task := meta.Get(task1.GetTaskID())
 	assert.Equal(t, int64(9), task.GetNodeID())
-	assert.Equal(t, datapb.ImportState_Failed, task.GetState())
+	assert.Equal(t, milvuspb.ImportState_Failed, task.GetState())
 
 	err = meta.Remove(task1.GetTaskID())
 	assert.NoError(t, err)
@@ -126,7 +127,7 @@ func TestImportMeta_Failed(t *testing.T) {
 			CollectionID: 3,
 			SegmentIDs:   []int64{5, 6},
 			NodeID:       7,
-			State:        datapb.ImportState_Pending,
+			State:        milvuspb.ImportState_Pending,
 		},
 	}
 	err = meta.Add(task1)

@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"sort"
@@ -49,7 +50,7 @@ func WrapLogFields(task ImportTask, err error) []zap.Field {
 
 func AssemblePreImportRequest(task ImportTask) *datapb.PreImportRequest {
 	importFiles := lo.Map(task.(*preImportTask).GetFileStats(),
-		func(fileStats *datapb.ImportFileStats, _ int) *datapb.ImportFile {
+		func(fileStats *datapb.ImportFileStats, _ int) *milvuspb.ImportFile {
 			return fileStats.GetImportFile()
 		})
 	pt := task.(*preImportTask)
@@ -114,7 +115,7 @@ func AssembleImportRequest(task ImportTask, meta *meta, alloc allocator) (*datap
 			AutoIDRanges: &datapb.AutoIDRange{Begin: idBegin, End: idEnd},
 		})
 	}
-	importFiles := lo.Map(task.GetFileStats(), func(fileStat *datapb.ImportFileStats, _ int) *datapb.ImportFile {
+	importFiles := lo.Map(task.GetFileStats(), func(fileStat *datapb.ImportFileStats, _ int) *milvuspb.ImportFile {
 		return fileStat.GetImportFile()
 	})
 	return &datapb.ImportRequest{
@@ -185,7 +186,7 @@ func NewImportTasks(fileGroups [][]*datapb.ImportFileStats,
 				TaskID:       idBegin + int64(i),
 				CollectionID: collectionID,
 				NodeID:       NullNodeID,
-				State:        datapb.ImportState_Pending,
+				State:        milvuspb.ImportState_Pending,
 				FileStats:    group,
 			},
 			schema: schema,
@@ -221,7 +222,7 @@ func AddImportSegment(cluster Cluster, meta *meta, segmentID int64) error {
 
 func AreAllTasksFinished(tasks []ImportTask, meta *meta) bool {
 	for _, task := range tasks {
-		if task.GetState() != datapb.ImportState_Completed {
+		if task.GetState() != milvuspb.ImportState_Completed {
 			return false
 		}
 		segmentIDs := task.(*importTask).GetSegmentIDs()
@@ -235,7 +236,7 @@ func AreAllTasksFinished(tasks []ImportTask, meta *meta) bool {
 	return true
 }
 
-func GetImportProgress(requestID int64, imeta ImportMeta, meta *meta) (int64, datapb.ImportState, string) {
+func GetImportProgress(requestID int64, imeta ImportMeta, meta *meta) (int64, milvuspb.ImportState, string) {
 	tasks := imeta.GetBy(WithReq(requestID), WithType(PreImportTaskType))
 	var (
 		preparingProgress float32
@@ -244,11 +245,11 @@ func GetImportProgress(requestID int64, imeta ImportMeta, meta *meta) (int64, da
 	)
 	for _, task := range tasks {
 		switch task.GetState() {
-		case datapb.ImportState_Failed:
-			return 0, datapb.ImportState_Failed, task.GetReason()
-		case datapb.ImportState_InProgress:
+		case milvuspb.ImportState_Failed:
+			return 0, milvuspb.ImportState_Failed, task.GetReason()
+		case milvuspb.ImportState_InProgress:
 			preparingProgress += 100 / float32(len(tasks))
-		case datapb.ImportState_Completed:
+		case milvuspb.ImportState_Completed:
 			preImportProgress += 100 / float32(len(tasks))
 		}
 	}
@@ -259,9 +260,9 @@ func GetImportProgress(requestID int64, imeta ImportMeta, meta *meta) (int64, da
 	)
 	for _, task := range tasks {
 		switch task.GetState() {
-		case datapb.ImportState_Failed:
-			return 0, datapb.ImportState_Failed, task.GetReason()
-		case datapb.ImportState_InProgress:
+		case milvuspb.ImportState_Failed:
+			return 0, milvuspb.ImportState_Failed, task.GetReason()
+		case milvuspb.ImportState_InProgress:
 			preparingProgress += 100 / float32(len(tasks))
 			segmentIDs := task.(*importTask).GetSegmentIDs()
 			var (
@@ -271,7 +272,7 @@ func GetImportProgress(requestID int64, imeta ImportMeta, meta *meta) (int64, da
 			for _, segmentID := range segmentIDs {
 				segment := meta.GetSegment(segmentID)
 				if segment == nil {
-					return 0, datapb.ImportState_Failed, merr.WrapErrSegmentNotFound(segmentID).Error()
+					return 0, milvuspb.ImportState_Failed, merr.WrapErrSegmentNotFound(segmentID).Error()
 				}
 				importedRows += segment.currRows
 				totalRows += segment.GetMaxRowNum()
@@ -281,14 +282,14 @@ func GetImportProgress(requestID int64, imeta ImportMeta, meta *meta) (int64, da
 				}
 			}
 			importProgress += (float32(importedRows) / float32(totalRows)) * 100 / float32(len(tasks))
-		case datapb.ImportState_Completed:
+		case milvuspb.ImportState_Completed:
 			importProgress += 100 / float32(len(tasks))
 		}
 	}
 	unsetImportStateProgress := 100 * float32(unsetImportStateSegments) / float32(totalSegments)
 	progress := preparingProgress*0.1 + preImportProgress*0.4 + importProgress*0.4 + unsetImportStateProgress*0.1
 	if progress == 100 {
-		return 100, datapb.ImportState_Completed, ""
+		return 100, milvuspb.ImportState_Completed, ""
 	}
-	return int64(progress), datapb.ImportState_InProgress, ""
+	return int64(progress), milvuspb.ImportState_InProgress, ""
 }

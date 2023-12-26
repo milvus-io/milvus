@@ -17,6 +17,7 @@
 package datacoord
 
 import (
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"sync"
 	"time"
 
@@ -81,21 +82,21 @@ func (s *ImportScheduler) process() {
 	tasks := s.imeta.GetBy()
 	for _, task := range tasks {
 		switch task.GetState() {
-		case datapb.ImportState_Pending:
+		case milvuspb.ImportState_Pending:
 			switch task.GetType() {
 			case PreImportTaskType:
 				s.processPendingPreImport(task)
 			case ImportTaskType:
 				s.processPendingImport(task)
 			}
-		case datapb.ImportState_InProgress:
+		case milvuspb.ImportState_InProgress:
 			switch task.GetType() {
 			case PreImportTaskType:
 				s.processInProgressPreImport(task)
 			case ImportTaskType:
 				s.processInProgressImport(task)
 			}
-		case datapb.ImportState_Failed, datapb.ImportState_Completed:
+		case milvuspb.ImportState_Failed, milvuspb.ImportState_Completed:
 			s.processCompletedOrFailed(task)
 		}
 	}
@@ -103,13 +104,13 @@ func (s *ImportScheduler) process() {
 
 func (s *ImportScheduler) checkErr(task ImportTask, err error) {
 	if !merr.IsRetryableErr(err) {
-		err = s.imeta.Update(task.GetTaskID(), UpdateState(datapb.ImportState_Failed))
+		err = s.imeta.Update(task.GetTaskID(), UpdateState(milvuspb.ImportState_Failed))
 		if err != nil {
 			log.Warn("failed to update import task state to failed", WrapLogFields(task, err)...)
 		}
 		return
 	}
-	err = s.imeta.Update(task.GetTaskID(), UpdateState(datapb.ImportState_Pending))
+	err = s.imeta.Update(task.GetTaskID(), UpdateState(milvuspb.ImportState_Pending))
 	if err != nil {
 		log.Warn("failed to update import task state to pending", WrapLogFields(task, err)...)
 	}
@@ -145,7 +146,7 @@ func (s *ImportScheduler) processPendingPreImport(task ImportTask) {
 		return
 	}
 	err = s.imeta.Update(task.GetTaskID(),
-		UpdateState(datapb.ImportState_InProgress),
+		UpdateState(milvuspb.ImportState_InProgress),
 		UpdateNodeID(nodeID))
 	if err != nil {
 		log.Warn("update import task failed", WrapLogFields(task, err)...)
@@ -169,7 +170,7 @@ func (s *ImportScheduler) processPendingImport(task ImportTask) {
 		return
 	}
 	err = s.imeta.Update(task.GetTaskID(),
-		UpdateState(datapb.ImportState_InProgress),
+		UpdateState(milvuspb.ImportState_InProgress),
 		UpdateNodeID(nodeID))
 	if err != nil {
 		log.Warn("update import task failed", WrapLogFields(task, err)...)
@@ -188,8 +189,8 @@ func (s *ImportScheduler) processInProgressPreImport(task ImportTask) {
 		return
 	}
 	actions := []UpdateAction{UpdateFileStats(resp.GetFileStats())}
-	if resp.GetState() == datapb.ImportState_Completed {
-		actions = append(actions, UpdateState(datapb.ImportState_Completed))
+	if resp.GetState() == milvuspb.ImportState_Completed {
+		actions = append(actions, UpdateState(milvuspb.ImportState_Completed))
 	}
 	// TODO: check if rows changed to save meta op
 	err = s.imeta.Update(task.GetTaskID(), actions...)
@@ -219,8 +220,8 @@ func (s *ImportScheduler) processInProgressImport(task ImportTask) {
 		}
 		s.meta.SetCurrentRows(info.GetSegmentID(), info.GetImportedRows())
 	}
-	if resp.GetState() == datapb.ImportState_Completed {
-		err = s.imeta.Update(task.GetTaskID(), UpdateState(datapb.ImportState_Completed))
+	if resp.GetState() == milvuspb.ImportState_Completed {
+		err = s.imeta.Update(task.GetTaskID(), UpdateState(milvuspb.ImportState_Completed))
 		if err != nil {
 			log.Warn("update import task failed", WrapLogFields(task, err)...)
 		}

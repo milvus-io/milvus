@@ -632,20 +632,20 @@ func (c *Client) GcControl(ctx context.Context, req *datapb.GcControlRequest, op
 	})
 }
 
-func (c *Client) ImportV2(ctx context.Context, in *datapb.ImportRequestV2) (*commonpb.Status, error) {
+func (c *Client) ImportV2(ctx context.Context, in *datapb.ImportRequestInternal, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return wrapGrpcCall(ctx, c, func(client datapb.DataCoordClient) (*commonpb.Status, error) {
 		return client.ImportV2(ctx, in)
 	})
 }
 
-func (c *Client) GetImportProgress(ctx context.Context, in *datapb.GetImportProgressRequest) (*datapb.GetImportProgressResponse, error) {
-	return wrapGrpcCall(ctx, c, func(client datapb.DataCoordClient) (*datapb.GetImportProgressResponse, error) {
+func (c *Client) GetImportProgress(ctx context.Context, in *milvuspb.GetImportProgressRequest, opts ...grpc.CallOption) (*milvuspb.GetImportProgressResponse, error) {
+	return wrapGrpcCall(ctx, c, func(client datapb.DataCoordClient) (*milvuspb.GetImportProgressResponse, error) {
 		return client.GetImportProgress(ctx, in)
 	})
 }
 
-func (c *Client) ListImports(ctx context.Context, in *datapb.ListImportsRequest) (*datapb.ListImportsResponse, error) {
-	return wrapGrpcCall(ctx, c, func(client datapb.DataCoordClient) (*datapb.ListImportsResponse, error) {
+func (c *Client) ListImports(ctx context.Context, in *milvuspb.ListImportsRequest, opts ...grpc.CallOption) (*milvuspb.ListImportsResponse, error) {
+	return wrapGrpcCall(ctx, c, func(client datapb.DataCoordClient) (*milvuspb.ListImportsResponse, error) {
 		return client.ListImports(ctx, in)
 	})
 }

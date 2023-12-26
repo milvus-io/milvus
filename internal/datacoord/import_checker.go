@@ -17,6 +17,7 @@
 package datacoord
 
 import (
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"sync"
 	"time"
 
@@ -85,14 +86,14 @@ func (c *ImportChecker) Close() {
 
 func (c *ImportChecker) LogStats() {
 	logFunc := func(tasks []ImportTask, taskType TaskType) {
-		byState := lo.GroupBy(tasks, func(t ImportTask) datapb.ImportState {
+		byState := lo.GroupBy(tasks, func(t ImportTask) milvuspb.ImportState {
 			return t.GetState()
 		})
 		log.Info("import task stats", zap.String("type", taskType.String()),
-			zap.Int("pending", len(byState[datapb.ImportState_Pending])),
-			zap.Int("inProgress", len(byState[datapb.ImportState_InProgress])),
-			zap.Int("completed", len(byState[datapb.ImportState_Completed])),
-			zap.Int("failed", len(byState[datapb.ImportState_Failed])))
+			zap.Int("pending", len(byState[milvuspb.ImportState_Pending])),
+			zap.Int("inProgress", len(byState[milvuspb.ImportState_InProgress])),
+			zap.Int("completed", len(byState[milvuspb.ImportState_Completed])),
+			zap.Int("failed", len(byState[milvuspb.ImportState_Failed])))
 	}
 	tasks := c.imeta.GetBy(WithType(PreImportTaskType))
 	logFunc(tasks, PreImportTaskType)
@@ -106,7 +107,7 @@ func (c *ImportChecker) checkPreImportState(requestID int64) {
 		return
 	}
 	for _, t := range tasks {
-		if t.GetState() != datapb.ImportState_Completed {
+		if t.GetState() != milvuspb.ImportState_Completed {
 			return
 		}
 	}
@@ -160,7 +161,7 @@ func (c *ImportChecker) checkPreImportState(requestID int64) {
 func (c *ImportChecker) checkImportState(requestID int64) {
 	tasks := c.imeta.GetBy(WithType(ImportTaskType), WithReq(requestID))
 	for _, t := range tasks {
-		if t.GetState() != datapb.ImportState_Completed {
+		if t.GetState() != milvuspb.ImportState_Completed {
 			return
 		}
 	}

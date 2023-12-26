@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"math/rand"
 	"testing"
 
@@ -55,7 +56,7 @@ func TestImportChecker(t *testing.T) {
 		PreImportTask: &datapb.PreImportTask{
 			RequestID: 0,
 			TaskID:    1,
-			State:     datapb.ImportState_Pending,
+			State:     milvuspb.ImportState_Pending,
 		},
 	}
 	err = imeta.Add(pit1)
@@ -65,7 +66,7 @@ func TestImportChecker(t *testing.T) {
 		PreImportTask: &datapb.PreImportTask{
 			RequestID: 0,
 			TaskID:    2,
-			State:     datapb.ImportState_Completed,
+			State:     milvuspb.ImportState_Completed,
 		},
 	}
 	err = imeta.Add(pit2)
@@ -75,7 +76,7 @@ func TestImportChecker(t *testing.T) {
 		PreImportTask: &datapb.PreImportTask{
 			RequestID: 0,
 			TaskID:    3,
-			State:     datapb.ImportState_Completed,
+			State:     milvuspb.ImportState_Completed,
 		},
 	}
 	err = imeta.Add(pit3)
@@ -85,7 +86,7 @@ func TestImportChecker(t *testing.T) {
 		ImportTaskV2: &datapb.ImportTaskV2{
 			RequestID: 0,
 			TaskID:    4,
-			State:     datapb.ImportState_Completed,
+			State:     milvuspb.ImportState_Completed,
 		},
 	}
 	err = imeta.Add(it1)
@@ -95,7 +96,7 @@ func TestImportChecker(t *testing.T) {
 		ImportTaskV2: &datapb.ImportTaskV2{
 			RequestID: 0,
 			TaskID:    5,
-			State:     datapb.ImportState_Completed,
+			State:     milvuspb.ImportState_Completed,
 		},
 	}
 	err = imeta.Add(it2)
@@ -113,7 +114,7 @@ func TestImportChecker(t *testing.T) {
 	assert.Equal(t, 5, len(tasks))
 
 	// preimport tasks are all completed, should generate import tasks
-	err = imeta.Update(1, UpdateState(datapb.ImportState_Completed))
+	err = imeta.Update(1, UpdateState(milvuspb.ImportState_Completed))
 	assert.NoError(t, err)
 	checker.checkPreImportState(0)
 	tasks = imeta.GetBy(WithReq(0))
@@ -121,7 +122,7 @@ func TestImportChecker(t *testing.T) {
 	tasks = imeta.GetBy(WithReq(0), WithType(ImportTaskType))
 	assert.Equal(t, 3, len(tasks))
 	for _, task := range tasks {
-		assert.Equal(t, datapb.ImportState_Pending, task.GetState())
+		assert.Equal(t, milvuspb.ImportState_Pending, task.GetState())
 	}
 
 	// import tasks are not fully completed
@@ -136,7 +137,7 @@ func TestImportChecker(t *testing.T) {
 	tasks = imeta.GetBy(WithReq(0), WithType(ImportTaskType))
 	assert.Equal(t, 3, len(tasks))
 	for _, task := range tasks {
-		err = imeta.Update(task.GetTaskID(), UpdateState(datapb.ImportState_Completed))
+		err = imeta.Update(task.GetTaskID(), UpdateState(milvuspb.ImportState_Completed))
 		assert.NoError(t, err)
 		segmentID := task.GetTaskID()
 		err = meta.AddSegment(context.TODO(), &SegmentInfo{

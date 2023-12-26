@@ -1681,7 +1681,7 @@ func (s *Server) GcControl(ctx context.Context, request *datapb.GcControlRequest
 	return status, nil
 }
 
-func (s *Server) ImportV2(ctx context.Context, in *datapb.ImportRequestV2) (*commonpb.Status, error) {
+func (s *Server) ImportV2(ctx context.Context, in *datapb.ImportRequestInternal) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
@@ -1694,7 +1694,7 @@ func (s *Server) ImportV2(ctx context.Context, in *datapb.ImportRequestV2) (*com
 	}
 
 	for i, files := range fileGroups {
-		fileStats := lo.Map(files, func(f *datapb.ImportFile, _ int) *datapb.ImportFileStats {
+		fileStats := lo.Map(files, func(f *milvuspb.ImportFile, _ int) *datapb.ImportFileStats {
 			return &datapb.ImportFileStats{
 				ImportFile: f,
 			}
@@ -1706,7 +1706,7 @@ func (s *Server) ImportV2(ctx context.Context, in *datapb.ImportRequestV2) (*com
 				CollectionID: in.GetCollectionID(),
 				PartitionIDs: in.GetPartitionIDs(),
 				Vchannels:    in.GetChannelNames(),
-				State:        datapb.ImportState_Pending,
+				State:        milvuspb.ImportState_Pending,
 				FileStats:    fileStats,
 			},
 			schema: in.GetSchema(), // TODO: dyh, move to preimport task
@@ -1719,14 +1719,14 @@ func (s *Server) ImportV2(ctx context.Context, in *datapb.ImportRequestV2) (*com
 	return merr.Success(), nil
 }
 
-func (s *Server) GetImportProgress(ctx context.Context, in *datapb.GetImportProgressRequest) (*datapb.GetImportProgressResponse, error) {
+func (s *Server) GetImportProgress(ctx context.Context, in *milvuspb.GetImportProgressRequest) (*milvuspb.GetImportProgressResponse, error) {
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
-		return &datapb.GetImportProgressResponse{
+		return &milvuspb.GetImportProgressResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
 
-	resp := &datapb.GetImportProgressResponse{
+	resp := &milvuspb.GetImportProgressResponse{
 		Status: merr.Success(),
 	}
 	requestID, err := strconv.ParseInt(in.GetRequestID(), 10, 64)
@@ -1741,14 +1741,14 @@ func (s *Server) GetImportProgress(ctx context.Context, in *datapb.GetImportProg
 	return resp, nil
 }
 
-func (s *Server) ListImports(ctx context.Context, in *datapb.ListImportsRequest) (*datapb.ListImportsResponse, error) {
+func (s *Server) ListImports(ctx context.Context, in *milvuspb.ListImportsRequest) (*milvuspb.ListImportsResponse, error) {
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
-		return &datapb.ListImportsResponse{
+		return &milvuspb.ListImportsResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
 
-	resp := &datapb.ListImportsResponse{
+	resp := &milvuspb.ListImportsResponse{
 		Status: merr.Success(),
 	}
 	tasks := s.importMeta.GetBy()

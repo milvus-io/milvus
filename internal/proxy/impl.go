@@ -5248,3 +5248,72 @@ func (node *Proxy) GetVersion(ctx context.Context, request *milvuspb.GetVersionR
 		Status: merr.Success(),
 	}, nil
 }
+
+func (node *Proxy) ImportV2(ctx context.Context, req *milvuspb.ImportRequestV2) (*commonpb.Status, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+	collectionID, err := globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
+	if err != nil {
+		return merr.Status(err), nil
+	}
+	schema, err := globalMetaCache.GetCollectionSchema(ctx, req.GetDbName(), req.GetCollectionName())
+	if err != nil {
+		return merr.Status(err), nil
+	}
+	channels, err := node.chMgr.getVChannels(collectionID)
+	if err != nil {
+		return merr.Status(err), nil
+	}
+
+	hasPartitionKey := typeutil.HasPartitionKey(schema)
+	if req.GetPartitionName() != "" && hasPartitionKey {
+		return merr.Status(merr.WrapErrImportFailed("specify partition name is not allowed in partitionKey mode")), nil
+	}
+
+	var partitionIDs []int64
+	if req.GetPartitionName() == "" && hasPartitionKey {
+		partitions, err := globalMetaCache.GetPartitions(ctx, req.GetDbName(), req.GetCollectionName())
+		if err != nil {
+			return merr.Status(err), nil
+		}
+		partitionIDs = lo.Values(partitions)
+	} else {
+		partitionName := req.GetPartitionName()
+		if req.GetPartitionName() == "" {
+			partitionName = Params.CommonCfg.DefaultPartitionName.GetValue()
+		}
+		partitionID, err := globalMetaCache.GetPartitionID(ctx, req.GetDbName(), req.GetCollectionName(), partitionName)
+		if err != nil {
+			return merr.Status(err), nil
+		}
+		partitionIDs = []UniqueID{partitionID}
+	}
+	importRequest := &datapb.ImportRequestInternal{
+		CollectionID: collectionID,
+		PartitionIDs: partitionIDs,
+		ChannelNames: channels,
+		Schema:       schema,
+		Files:        req.GetFiles(),
+		Options:      req.GetOptions(),
+	}
+	return node.dataCoord.ImportV2(ctx, importRequest)
+}
+
+func (node *Proxy) GetImportProgress(ctx context.Context, req *milvuspb.GetImportProgressRequest) (*milvuspb.GetImportProgressResponse, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &milvuspb.GetImportProgressResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+	return node.dataCoord.GetImportProgress(ctx, req)
+}
+
+func (node *Proxy) ListImports(ctx context.Context, req *milvuspb.ListImportsRequest) (*milvuspb.ListImportsResponse, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &milvuspb.ListImportsResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+	return node.dataCoord.ListImports(ctx, req)
+}
