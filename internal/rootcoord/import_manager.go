@@ -32,6 +32,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
@@ -203,13 +204,14 @@ func (m *importManager) sendOutTasks(ctx context.Context) error {
 		task := m.pendingTasks[0]
 		// TODO: Use ImportTaskInfo directly.
 		it := &datapb.ImportTask{
-			CollectionId: task.GetCollectionId(),
-			PartitionId:  task.GetPartitionId(),
-			ChannelNames: task.GetChannelNames(),
-			TaskId:       task.GetId(),
-			Files:        task.GetFiles(),
-			Infos:        task.GetInfos(),
-			DatabaseName: task.GetDatabaseName(),
+			CollectionId:   task.GetCollectionId(),
+			PartitionId:    task.GetPartitionId(),
+			ChannelNames:   task.GetChannelNames(),
+			TaskId:         task.GetId(),
+			Files:          task.GetFiles(),
+			Infos:          task.GetInfos(),
+			DatabaseName:   task.GetDatabaseName(),
+			ClusteringInfo: task.GetClusteringInfo(),
 		}
 
 		// Get all busy dataNodes for reference.
@@ -465,6 +467,12 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 			return err
 		}
 
+		clusteringInfo := &schemapb.ClusteringInfo{}
+		err = proto.Unmarshal(req.GetClusteringInfo(), clusteringInfo)
+		if err != nil {
+			log.Error("failed to Unmarshal clustering info", zap.Error(err))
+			return err
+		}
 		// convert import request to import tasks
 		if isSingleFileTask {
 			// For row-based importing, each file makes a task.
@@ -485,8 +493,9 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 					State: &datapb.ImportTaskState{
 						StateCode: commonpb.ImportState_ImportPending,
 					},
-					Infos:        req.Options,
-					DatabaseName: req.GetDbName(),
+					Infos:          req.Options,
+					DatabaseName:   req.GetDbName(),
+					ClusteringInfo: clusteringInfo,
 				}
 
 				// Here no need to check error returned by setCollectionPartitionName(),
@@ -524,8 +533,9 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 				State: &datapb.ImportTaskState{
 					StateCode: commonpb.ImportState_ImportPending,
 				},
-				Infos:        req.Options,
-				DatabaseName: req.GetDbName(),
+				Infos:          req.Options,
+				DatabaseName:   req.GetDbName(),
+				ClusteringInfo: clusteringInfo,
 			}
 			// Here no need to check error returned by setCollectionPartitionName(),
 			// since here we always return task list to client no matter something missed.
@@ -1079,6 +1089,7 @@ func cloneImportTaskInfo(taskInfo *datapb.ImportTaskInfo) *datapb.ImportTaskInfo
 		PartitionName:  taskInfo.GetPartitionName(),
 		Infos:          taskInfo.GetInfos(),
 		StartTs:        taskInfo.GetStartTs(),
+		ClusteringInfo: taskInfo.GetClusteringInfo(),
 	}
 	return cloned
 }
