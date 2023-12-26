@@ -83,20 +83,18 @@ func (c *LeaderChecker) Check(ctx context.Context) []task.Task {
 
 		replicas := c.meta.ReplicaManager.GetByCollection(collectionID)
 		for _, replica := range replicas {
-			leaders := c.dist.ChannelDistManager.GetShardLeadersByReplica(replica)
-			for ch, leaderID := range leaders {
-				if ok, _ := c.nodeMgr.IsStoppingNode(leaderID); ok {
+			for _, node := range replica.GetNodes() {
+				if ok, _ := c.nodeMgr.IsStoppingNode(node); ok {
 					// no need to correct leader's view which is loaded on stopping node
 					continue
 				}
 
-				leaderView := c.dist.LeaderViewManager.GetLeaderShardView(leaderID, ch)
-				if leaderView == nil {
-					continue
+				leaderViews := c.dist.LeaderViewManager.GetByCollectionAndNode(replica.GetCollectionID(), node)
+				for ch, leaderView := range leaderViews {
+					dist := c.dist.SegmentDistManager.GetByShardWithReplica(ch, replica)
+					tasks = append(tasks, c.findNeedLoadedSegments(ctx, replica.ID, leaderView, dist)...)
+					tasks = append(tasks, c.findNeedRemovedSegments(ctx, replica.ID, leaderView, dist)...)
 				}
-				dist := c.dist.SegmentDistManager.GetByShardWithReplica(ch, replica)
-				tasks = append(tasks, c.findNeedLoadedSegments(ctx, replica.ID, leaderView, dist)...)
-				tasks = append(tasks, c.findNeedRemovedSegments(ctx, replica.ID, leaderView, dist)...)
 			}
 		}
 	}
