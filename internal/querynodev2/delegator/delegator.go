@@ -101,7 +101,7 @@ type shardDelegator struct {
 	level0Mut       sync.RWMutex
 	level0Deletions map[int64]*storage.DeleteData // partitionID -> deletions
 	// stream delete buffer
-	deleteMut    sync.Mutex
+	deleteMut    sync.RWMutex
 	deleteBuffer deletebuffer.DeleteBuffer[*deletebuffer.Item]
 	// dispatcherClient msgdispatcher.Client
 	factory msgstream.Factory

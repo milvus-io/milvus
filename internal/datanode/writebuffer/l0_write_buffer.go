@@ -32,10 +32,14 @@ func NewL0WriteBuffer(channel string, metacache metacache.MetaCache, storageV2Ca
 	if option.idAllocator == nil {
 		return nil, merr.WrapErrServiceInternal("id allocator is nil when creating l0 write buffer")
 	}
+	base, err := newWriteBufferBase(channel, metacache, storageV2Cache, syncMgr, option)
+	if err != nil {
+		return nil, err
+	}
 	return &l0WriteBuffer{
 		l0Segments:      make(map[int64]int64),
 		l0partition:     make(map[int64]int64),
-		writeBufferBase: newWriteBufferBase(channel, metacache, storageV2Cache, syncMgr, option),
+		writeBufferBase: base,
 		syncMgr:         syncMgr,
 		idAllocator:     option.idAllocator,
 	}, nil
