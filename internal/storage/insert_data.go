@@ -78,13 +78,11 @@ func (i *InsertData) GetRowNum() int {
 	if i == nil || i.Data == nil || len(i.Data) == 0 {
 		return 0
 	}
-
 	var rowNum int
 	for _, data := range i.Data {
 		rowNum = data.RowNum()
 		break
 	}
-
 	return rowNum
 }
 

@@ -804,6 +804,16 @@ func GetPartitionKeyFieldSchema(schema *schemapb.CollectionSchema) (*schemapb.Fi
 	return nil, errors.New("partition key field is not found")
 }
 
+// GetDynamicField returns the dynamic field if it exists.
+func GetDynamicField(schema *schemapb.CollectionSchema) (*schemapb.FieldSchema, error) {
+	for _, fieldSchema := range schema.GetFields() {
+		if fieldSchema.GetIsDynamic() {
+			return fieldSchema, nil
+		}
+	}
+	return nil, errors.New("no dynamic field")
+}
+
 // HasPartitionKey check if a collection schema has PartitionKey field
 func HasPartitionKey(schema *schemapb.CollectionSchema) bool {
 	for _, fieldSchema := range schema.Fields {
