@@ -1950,6 +1950,7 @@ func (suite *ServiceSuite) TestDelete_Int64() {
 		SegmentId:    suite.validSegmentIDs[0],
 		VchannelName: suite.vchannel,
 		Timestamps:   []uint64{0},
+		Scope:        querypb.DataScope_Historical,
 	}
 
 	// type int
@@ -2023,9 +2024,15 @@ func (suite *ServiceSuite) TestDelete_Failed() {
 		},
 	}
 
+	// segment not found
+	req.Scope = querypb.DataScope_Streaming
+	status, err := suite.node.Delete(ctx, req)
+	suite.NoError(err)
+	suite.False(merr.Ok(status))
+
 	// target not match
 	req.Base.TargetID = -1
-	status, err := suite.node.Delete(ctx, req)
+	status, err = suite.node.Delete(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_NodeIDNotMatch, status.GetErrorCode())
 

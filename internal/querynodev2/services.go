@@ -1420,6 +1420,7 @@ func (node *QueryNode) Delete(ctx context.Context, req *querypb.DeleteRequest) (
 		zap.Int64("collectionID", req.GetCollectionId()),
 		zap.String("channel", req.GetVchannelName()),
 		zap.Int64("segmentID", req.GetSegmentId()),
+		zap.String("scope", req.GetScope().String()),
 	)
 
 	// check node healthy
@@ -1439,7 +1440,19 @@ func (node *QueryNode) Delete(ctx context.Context, req *querypb.DeleteRequest) (
 		zap.Uint64s("tss", req.GetTimestamps()),
 	)
 
-	segments := node.manager.Segment.GetBy(segments.WithID(req.GetSegmentId()))
+	filters := []segments.SegmentFilter{
+		segments.WithID(req.GetSegmentId()),
+	}
+
+	// do not add filter for Unknown & All scope, for backward cap
+	switch req.GetScope() {
+	case querypb.DataScope_Historical:
+		filters = append(filters, segments.WithType(segments.SegmentTypeSealed))
+	case querypb.DataScope_Streaming:
+		filters = append(filters, segments.WithType(segments.SegmentTypeGrowing))
+	}
+
+	segments := node.manager.Segment.GetBy(filters...)
 	if len(segments) == 0 {
 		err := merr.WrapErrSegmentNotFound(req.GetSegmentId())
 		log.Warn("segment not found for delete")
