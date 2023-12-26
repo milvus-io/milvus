@@ -78,6 +78,7 @@ func (collection *Collection) Clone() *Collection {
 	return &Collection{
 		CollectionLoadInfo: proto.Clone(collection.CollectionLoadInfo).(*querypb.CollectionLoadInfo),
 		LoadPercentage:     collection.LoadPercentage,
+		Indexes:            collection.Indexes,
 		CreatedAt:          collection.CreatedAt,
 		UpdatedAt:          collection.UpdatedAt,
 		refreshNotifier:    collection.refreshNotifier,
