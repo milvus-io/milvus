@@ -244,7 +244,7 @@ proxy:
 # Related configuration of queryCoord, used to manage topology and load balancing for the query nodes, and handoff from growing segments to sealed segments.
 queryCoord:
   autoHandoff: true # Enable auto handoff
-  autoBalance: false # Enable auto balance
+  autoBalance: true # Enable auto balance
   balancer: ScoreBasedBalancer # Balancer to use
   globalRowCountFactor: 0.1 # expert parameters, only used by scoreBasedBalancer
   scoreUnbalanceTolerationFactor: 0.05 # expert parameters, only used by scoreBasedBalancer
