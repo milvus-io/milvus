@@ -18,13 +18,13 @@ package datacoord
 
 import (
 	"context"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"testing"
 
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 )

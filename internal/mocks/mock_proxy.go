@@ -66,8 +66,8 @@ type MockProxy_AllocTimestamp_Call struct {
 }
 
 // AllocTimestamp is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.AllocTimestampRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.AllocTimestampRequest
 func (_e *MockProxy_Expecter) AllocTimestamp(_a0 interface{}, _a1 interface{}) *MockProxy_AllocTimestamp_Call {
 	return &MockProxy_AllocTimestamp_Call{Call: _e.mock.On("AllocTimestamp", _a0, _a1)}
 }
@@ -121,8 +121,8 @@ type MockProxy_AlterAlias_Call struct {
 }
 
 // AlterAlias is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.AlterAliasRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.AlterAliasRequest
 func (_e *MockProxy_Expecter) AlterAlias(_a0 interface{}, _a1 interface{}) *MockProxy_AlterAlias_Call {
 	return &MockProxy_AlterAlias_Call{Call: _e.mock.On("AlterAlias", _a0, _a1)}
 }
@@ -176,8 +176,8 @@ type MockProxy_AlterCollection_Call struct {
 }
 
 // AlterCollection is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.AlterCollectionRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.AlterCollectionRequest
 func (_e *MockProxy_Expecter) AlterCollection(_a0 interface{}, _a1 interface{}) *MockProxy_AlterCollection_Call {
 	return &MockProxy_AlterCollection_Call{Call: _e.mock.On("AlterCollection", _a0, _a1)}
 }
@@ -231,8 +231,8 @@ type MockProxy_AlterIndex_Call struct {
 }
 
 // AlterIndex is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.AlterIndexRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.AlterIndexRequest
 func (_e *MockProxy_Expecter) AlterIndex(_a0 interface{}, _a1 interface{}) *MockProxy_AlterIndex_Call {
 	return &MockProxy_AlterIndex_Call{Call: _e.mock.On("AlterIndex", _a0, _a1)}
 }
@@ -286,8 +286,8 @@ type MockProxy_CalcDistance_Call struct {
 }
 
 // CalcDistance is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.CalcDistanceRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.CalcDistanceRequest
 func (_e *MockProxy_Expecter) CalcDistance(_a0 interface{}, _a1 interface{}) *MockProxy_CalcDistance_Call {
 	return &MockProxy_CalcDistance_Call{Call: _e.mock.On("CalcDistance", _a0, _a1)}
 }
@@ -341,8 +341,8 @@ type MockProxy_CheckHealth_Call struct {
 }
 
 // CheckHealth is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.CheckHealthRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.CheckHealthRequest
 func (_e *MockProxy_Expecter) CheckHealth(_a0 interface{}, _a1 interface{}) *MockProxy_CheckHealth_Call {
 	return &MockProxy_CheckHealth_Call{Call: _e.mock.On("CheckHealth", _a0, _a1)}
 }
@@ -396,8 +396,8 @@ type MockProxy_Connect_Call struct {
 }
 
 // Connect is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.ConnectRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.ConnectRequest
 func (_e *MockProxy_Expecter) Connect(_a0 interface{}, _a1 interface{}) *MockProxy_Connect_Call {
 	return &MockProxy_Connect_Call{Call: _e.mock.On("Connect", _a0, _a1)}
 }
@@ -451,8 +451,8 @@ type MockProxy_CreateAlias_Call struct {
 }
 
 // CreateAlias is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.CreateAliasRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.CreateAliasRequest
 func (_e *MockProxy_Expecter) CreateAlias(_a0 interface{}, _a1 interface{}) *MockProxy_CreateAlias_Call {
 	return &MockProxy_CreateAlias_Call{Call: _e.mock.On("CreateAlias", _a0, _a1)}
 }
@@ -506,8 +506,8 @@ type MockProxy_CreateCollection_Call struct {
 }
 
 // CreateCollection is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.CreateCollectionRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.CreateCollectionRequest
 func (_e *MockProxy_Expecter) CreateCollection(_a0 interface{}, _a1 interface{}) *MockProxy_CreateCollection_Call {
 	return &MockProxy_CreateCollection_Call{Call: _e.mock.On("CreateCollection", _a0, _a1)}
 }
@@ -561,8 +561,8 @@ type MockProxy_CreateCredential_Call struct {
 }
 
 // CreateCredential is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.CreateCredentialRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.CreateCredentialRequest
 func (_e *MockProxy_Expecter) CreateCredential(_a0 interface{}, _a1 interface{}) *MockProxy_CreateCredential_Call {
 	return &MockProxy_CreateCredential_Call{Call: _e.mock.On("CreateCredential", _a0, _a1)}
 }
@@ -616,8 +616,8 @@ type MockProxy_CreateDatabase_Call struct {
 }
 
 // CreateDatabase is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.CreateDatabaseRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.CreateDatabaseRequest
 func (_e *MockProxy_Expecter) CreateDatabase(_a0 interface{}, _a1 interface{}) *MockProxy_CreateDatabase_Call {
 	return &MockProxy_CreateDatabase_Call{Call: _e.mock.On("CreateDatabase", _a0, _a1)}
 }
@@ -671,8 +671,8 @@ type MockProxy_CreateIndex_Call struct {
 }
 
 // CreateIndex is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.CreateIndexRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.CreateIndexRequest
 func (_e *MockProxy_Expecter) CreateIndex(_a0 interface{}, _a1 interface{}) *MockProxy_CreateIndex_Call {
 	return &MockProxy_CreateIndex_Call{Call: _e.mock.On("CreateIndex", _a0, _a1)}
 }
@@ -726,8 +726,8 @@ type MockProxy_CreatePartition_Call struct {
 }
 
 // CreatePartition is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.CreatePartitionRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.CreatePartitionRequest
 func (_e *MockProxy_Expecter) CreatePartition(_a0 interface{}, _a1 interface{}) *MockProxy_CreatePartition_Call {
 	return &MockProxy_CreatePartition_Call{Call: _e.mock.On("CreatePartition", _a0, _a1)}
 }
@@ -781,8 +781,8 @@ type MockProxy_CreateResourceGroup_Call struct {
 }
 
 // CreateResourceGroup is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.CreateResourceGroupRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.CreateResourceGroupRequest
 func (_e *MockProxy_Expecter) CreateResourceGroup(_a0 interface{}, _a1 interface{}) *MockProxy_CreateResourceGroup_Call {
 	return &MockProxy_CreateResourceGroup_Call{Call: _e.mock.On("CreateResourceGroup", _a0, _a1)}
 }
@@ -836,8 +836,8 @@ type MockProxy_CreateRole_Call struct {
 }
 
 // CreateRole is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.CreateRoleRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.CreateRoleRequest
 func (_e *MockProxy_Expecter) CreateRole(_a0 interface{}, _a1 interface{}) *MockProxy_CreateRole_Call {
 	return &MockProxy_CreateRole_Call{Call: _e.mock.On("CreateRole", _a0, _a1)}
 }
@@ -891,8 +891,8 @@ type MockProxy_Delete_Call struct {
 }
 
 // Delete is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.DeleteRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.DeleteRequest
 func (_e *MockProxy_Expecter) Delete(_a0 interface{}, _a1 interface{}) *MockProxy_Delete_Call {
 	return &MockProxy_Delete_Call{Call: _e.mock.On("Delete", _a0, _a1)}
 }
@@ -946,8 +946,8 @@ type MockProxy_DeleteCredential_Call struct {
 }
 
 // DeleteCredential is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.DeleteCredentialRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.DeleteCredentialRequest
 func (_e *MockProxy_Expecter) DeleteCredential(_a0 interface{}, _a1 interface{}) *MockProxy_DeleteCredential_Call {
 	return &MockProxy_DeleteCredential_Call{Call: _e.mock.On("DeleteCredential", _a0, _a1)}
 }
@@ -1001,8 +1001,8 @@ type MockProxy_DescribeAlias_Call struct {
 }
 
 // DescribeAlias is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.DescribeAliasRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.DescribeAliasRequest
 func (_e *MockProxy_Expecter) DescribeAlias(_a0 interface{}, _a1 interface{}) *MockProxy_DescribeAlias_Call {
 	return &MockProxy_DescribeAlias_Call{Call: _e.mock.On("DescribeAlias", _a0, _a1)}
 }
@@ -1056,8 +1056,8 @@ type MockProxy_DescribeCollection_Call struct {
 }
 
 // DescribeCollection is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.DescribeCollectionRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.DescribeCollectionRequest
 func (_e *MockProxy_Expecter) DescribeCollection(_a0 interface{}, _a1 interface{}) *MockProxy_DescribeCollection_Call {
 	return &MockProxy_DescribeCollection_Call{Call: _e.mock.On("DescribeCollection", _a0, _a1)}
 }
@@ -1111,8 +1111,8 @@ type MockProxy_DescribeIndex_Call struct {
 }
 
 // DescribeIndex is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.DescribeIndexRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.DescribeIndexRequest
 func (_e *MockProxy_Expecter) DescribeIndex(_a0 interface{}, _a1 interface{}) *MockProxy_DescribeIndex_Call {
 	return &MockProxy_DescribeIndex_Call{Call: _e.mock.On("DescribeIndex", _a0, _a1)}
 }
@@ -1166,8 +1166,8 @@ type MockProxy_DescribeResourceGroup_Call struct {
 }
 
 // DescribeResourceGroup is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.DescribeResourceGroupRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.DescribeResourceGroupRequest
 func (_e *MockProxy_Expecter) DescribeResourceGroup(_a0 interface{}, _a1 interface{}) *MockProxy_DescribeResourceGroup_Call {
 	return &MockProxy_DescribeResourceGroup_Call{Call: _e.mock.On("DescribeResourceGroup", _a0, _a1)}
 }
@@ -1221,8 +1221,8 @@ type MockProxy_DescribeSegmentIndexData_Call struct {
 }
 
 // DescribeSegmentIndexData is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *federpb.DescribeSegmentIndexDataRequest
+//  - _a0 context.Context
+//  - _a1 *federpb.DescribeSegmentIndexDataRequest
 func (_e *MockProxy_Expecter) DescribeSegmentIndexData(_a0 interface{}, _a1 interface{}) *MockProxy_DescribeSegmentIndexData_Call {
 	return &MockProxy_DescribeSegmentIndexData_Call{Call: _e.mock.On("DescribeSegmentIndexData", _a0, _a1)}
 }
@@ -1276,8 +1276,8 @@ type MockProxy_DropAlias_Call struct {
 }
 
 // DropAlias is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.DropAliasRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.DropAliasRequest
 func (_e *MockProxy_Expecter) DropAlias(_a0 interface{}, _a1 interface{}) *MockProxy_DropAlias_Call {
 	return &MockProxy_DropAlias_Call{Call: _e.mock.On("DropAlias", _a0, _a1)}
 }
@@ -1331,8 +1331,8 @@ type MockProxy_DropCollection_Call struct {
 }
 
 // DropCollection is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.DropCollectionRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.DropCollectionRequest
 func (_e *MockProxy_Expecter) DropCollection(_a0 interface{}, _a1 interface{}) *MockProxy_DropCollection_Call {
 	return &MockProxy_DropCollection_Call{Call: _e.mock.On("DropCollection", _a0, _a1)}
 }
@@ -1386,8 +1386,8 @@ type MockProxy_DropDatabase_Call struct {
 }
 
 // DropDatabase is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.DropDatabaseRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.DropDatabaseRequest
 func (_e *MockProxy_Expecter) DropDatabase(_a0 interface{}, _a1 interface{}) *MockProxy_DropDatabase_Call {
 	return &MockProxy_DropDatabase_Call{Call: _e.mock.On("DropDatabase", _a0, _a1)}
 }
@@ -1441,8 +1441,8 @@ type MockProxy_DropIndex_Call struct {
 }
 
 // DropIndex is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.DropIndexRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.DropIndexRequest
 func (_e *MockProxy_Expecter) DropIndex(_a0 interface{}, _a1 interface{}) *MockProxy_DropIndex_Call {
 	return &MockProxy_DropIndex_Call{Call: _e.mock.On("DropIndex", _a0, _a1)}
 }
@@ -1496,8 +1496,8 @@ type MockProxy_DropPartition_Call struct {
 }
 
 // DropPartition is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.DropPartitionRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.DropPartitionRequest
 func (_e *MockProxy_Expecter) DropPartition(_a0 interface{}, _a1 interface{}) *MockProxy_DropPartition_Call {
 	return &MockProxy_DropPartition_Call{Call: _e.mock.On("DropPartition", _a0, _a1)}
 }
@@ -1551,8 +1551,8 @@ type MockProxy_DropResourceGroup_Call struct {
 }
 
 // DropResourceGroup is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.DropResourceGroupRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.DropResourceGroupRequest
 func (_e *MockProxy_Expecter) DropResourceGroup(_a0 interface{}, _a1 interface{}) *MockProxy_DropResourceGroup_Call {
 	return &MockProxy_DropResourceGroup_Call{Call: _e.mock.On("DropResourceGroup", _a0, _a1)}
 }
@@ -1606,8 +1606,8 @@ type MockProxy_DropRole_Call struct {
 }
 
 // DropRole is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.DropRoleRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.DropRoleRequest
 func (_e *MockProxy_Expecter) DropRole(_a0 interface{}, _a1 interface{}) *MockProxy_DropRole_Call {
 	return &MockProxy_DropRole_Call{Call: _e.mock.On("DropRole", _a0, _a1)}
 }
@@ -1661,8 +1661,8 @@ type MockProxy_Dummy_Call struct {
 }
 
 // Dummy is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.DummyRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.DummyRequest
 func (_e *MockProxy_Expecter) Dummy(_a0 interface{}, _a1 interface{}) *MockProxy_Dummy_Call {
 	return &MockProxy_Dummy_Call{Call: _e.mock.On("Dummy", _a0, _a1)}
 }
@@ -1716,8 +1716,8 @@ type MockProxy_Flush_Call struct {
 }
 
 // Flush is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.FlushRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.FlushRequest
 func (_e *MockProxy_Expecter) Flush(_a0 interface{}, _a1 interface{}) *MockProxy_Flush_Call {
 	return &MockProxy_Flush_Call{Call: _e.mock.On("Flush", _a0, _a1)}
 }
@@ -1771,8 +1771,8 @@ type MockProxy_FlushAll_Call struct {
 }
 
 // FlushAll is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.FlushAllRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.FlushAllRequest
 func (_e *MockProxy_Expecter) FlushAll(_a0 interface{}, _a1 interface{}) *MockProxy_FlushAll_Call {
 	return &MockProxy_FlushAll_Call{Call: _e.mock.On("FlushAll", _a0, _a1)}
 }
@@ -1867,8 +1867,8 @@ type MockProxy_GetCollectionStatistics_Call struct {
 }
 
 // GetCollectionStatistics is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.GetCollectionStatisticsRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.GetCollectionStatisticsRequest
 func (_e *MockProxy_Expecter) GetCollectionStatistics(_a0 interface{}, _a1 interface{}) *MockProxy_GetCollectionStatistics_Call {
 	return &MockProxy_GetCollectionStatistics_Call{Call: _e.mock.On("GetCollectionStatistics", _a0, _a1)}
 }
@@ -1922,8 +1922,8 @@ type MockProxy_GetCompactionState_Call struct {
 }
 
 // GetCompactionState is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.GetCompactionStateRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.GetCompactionStateRequest
 func (_e *MockProxy_Expecter) GetCompactionState(_a0 interface{}, _a1 interface{}) *MockProxy_GetCompactionState_Call {
 	return &MockProxy_GetCompactionState_Call{Call: _e.mock.On("GetCompactionState", _a0, _a1)}
 }
@@ -1977,8 +1977,8 @@ type MockProxy_GetCompactionStateWithPlans_Call struct {
 }
 
 // GetCompactionStateWithPlans is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.GetCompactionPlansRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.GetCompactionPlansRequest
 func (_e *MockProxy_Expecter) GetCompactionStateWithPlans(_a0 interface{}, _a1 interface{}) *MockProxy_GetCompactionStateWithPlans_Call {
 	return &MockProxy_GetCompactionStateWithPlans_Call{Call: _e.mock.On("GetCompactionStateWithPlans", _a0, _a1)}
 }
@@ -2032,8 +2032,8 @@ type MockProxy_GetComponentStates_Call struct {
 }
 
 // GetComponentStates is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.GetComponentStatesRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.GetComponentStatesRequest
 func (_e *MockProxy_Expecter) GetComponentStates(_a0 interface{}, _a1 interface{}) *MockProxy_GetComponentStates_Call {
 	return &MockProxy_GetComponentStates_Call{Call: _e.mock.On("GetComponentStates", _a0, _a1)}
 }
@@ -2087,8 +2087,8 @@ type MockProxy_GetDdChannel_Call struct {
 }
 
 // GetDdChannel is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *internalpb.GetDdChannelRequest
+//  - _a0 context.Context
+//  - _a1 *internalpb.GetDdChannelRequest
 func (_e *MockProxy_Expecter) GetDdChannel(_a0 interface{}, _a1 interface{}) *MockProxy_GetDdChannel_Call {
 	return &MockProxy_GetDdChannel_Call{Call: _e.mock.On("GetDdChannel", _a0, _a1)}
 }
@@ -2142,8 +2142,8 @@ type MockProxy_GetFlushAllState_Call struct {
 }
 
 // GetFlushAllState is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.GetFlushAllStateRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.GetFlushAllStateRequest
 func (_e *MockProxy_Expecter) GetFlushAllState(_a0 interface{}, _a1 interface{}) *MockProxy_GetFlushAllState_Call {
 	return &MockProxy_GetFlushAllState_Call{Call: _e.mock.On("GetFlushAllState", _a0, _a1)}
 }
@@ -2197,8 +2197,8 @@ type MockProxy_GetFlushState_Call struct {
 }
 
 // GetFlushState is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.GetFlushStateRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.GetFlushStateRequest
 func (_e *MockProxy_Expecter) GetFlushState(_a0 interface{}, _a1 interface{}) *MockProxy_GetFlushState_Call {
 	return &MockProxy_GetFlushState_Call{Call: _e.mock.On("GetFlushState", _a0, _a1)}
 }
@@ -2216,6 +2216,61 @@ func (_c *MockProxy_GetFlushState_Call) Return(_a0 *milvuspb.GetFlushStateRespon
 }
 
 func (_c *MockProxy_GetFlushState_Call) RunAndReturn(run func(context.Context, *milvuspb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error)) *MockProxy_GetFlushState_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetImportProgress provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) GetImportProgress(_a0 context.Context, _a1 *milvuspb.GetImportProgressRequest) (*milvuspb.GetImportProgressResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *milvuspb.GetImportProgressResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetImportProgressRequest) (*milvuspb.GetImportProgressResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetImportProgressRequest) *milvuspb.GetImportProgressResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.GetImportProgressResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetImportProgressRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_GetImportProgress_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetImportProgress'
+type MockProxy_GetImportProgress_Call struct {
+	*mock.Call
+}
+
+// GetImportProgress is a helper method to define mock.On call
+//  - _a0 context.Context
+//  - _a1 *milvuspb.GetImportProgressRequest
+func (_e *MockProxy_Expecter) GetImportProgress(_a0 interface{}, _a1 interface{}) *MockProxy_GetImportProgress_Call {
+	return &MockProxy_GetImportProgress_Call{Call: _e.mock.On("GetImportProgress", _a0, _a1)}
+}
+
+func (_c *MockProxy_GetImportProgress_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.GetImportProgressRequest)) *MockProxy_GetImportProgress_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.GetImportProgressRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_GetImportProgress_Call) Return(_a0 *milvuspb.GetImportProgressResponse, _a1 error) *MockProxy_GetImportProgress_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_GetImportProgress_Call) RunAndReturn(run func(context.Context, *milvuspb.GetImportProgressRequest) (*milvuspb.GetImportProgressResponse, error)) *MockProxy_GetImportProgress_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -2252,8 +2307,8 @@ type MockProxy_GetImportState_Call struct {
 }
 
 // GetImportState is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.GetImportStateRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.GetImportStateRequest
 func (_e *MockProxy_Expecter) GetImportState(_a0 interface{}, _a1 interface{}) *MockProxy_GetImportState_Call {
 	return &MockProxy_GetImportState_Call{Call: _e.mock.On("GetImportState", _a0, _a1)}
 }
@@ -2307,8 +2362,8 @@ type MockProxy_GetIndexBuildProgress_Call struct {
 }
 
 // GetIndexBuildProgress is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.GetIndexBuildProgressRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.GetIndexBuildProgressRequest
 func (_e *MockProxy_Expecter) GetIndexBuildProgress(_a0 interface{}, _a1 interface{}) *MockProxy_GetIndexBuildProgress_Call {
 	return &MockProxy_GetIndexBuildProgress_Call{Call: _e.mock.On("GetIndexBuildProgress", _a0, _a1)}
 }
@@ -2362,8 +2417,8 @@ type MockProxy_GetIndexState_Call struct {
 }
 
 // GetIndexState is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.GetIndexStateRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.GetIndexStateRequest
 func (_e *MockProxy_Expecter) GetIndexState(_a0 interface{}, _a1 interface{}) *MockProxy_GetIndexState_Call {
 	return &MockProxy_GetIndexState_Call{Call: _e.mock.On("GetIndexState", _a0, _a1)}
 }
@@ -2417,8 +2472,8 @@ type MockProxy_GetIndexStatistics_Call struct {
 }
 
 // GetIndexStatistics is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.GetIndexStatisticsRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.GetIndexStatisticsRequest
 func (_e *MockProxy_Expecter) GetIndexStatistics(_a0 interface{}, _a1 interface{}) *MockProxy_GetIndexStatistics_Call {
 	return &MockProxy_GetIndexStatistics_Call{Call: _e.mock.On("GetIndexStatistics", _a0, _a1)}
 }
@@ -2472,8 +2527,8 @@ type MockProxy_GetLoadState_Call struct {
 }
 
 // GetLoadState is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.GetLoadStateRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.GetLoadStateRequest
 func (_e *MockProxy_Expecter) GetLoadState(_a0 interface{}, _a1 interface{}) *MockProxy_GetLoadState_Call {
 	return &MockProxy_GetLoadState_Call{Call: _e.mock.On("GetLoadState", _a0, _a1)}
 }
@@ -2527,8 +2582,8 @@ type MockProxy_GetLoadingProgress_Call struct {
 }
 
 // GetLoadingProgress is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.GetLoadingProgressRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.GetLoadingProgressRequest
 func (_e *MockProxy_Expecter) GetLoadingProgress(_a0 interface{}, _a1 interface{}) *MockProxy_GetLoadingProgress_Call {
 	return &MockProxy_GetLoadingProgress_Call{Call: _e.mock.On("GetLoadingProgress", _a0, _a1)}
 }
@@ -2582,8 +2637,8 @@ type MockProxy_GetMetrics_Call struct {
 }
 
 // GetMetrics is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.GetMetricsRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.GetMetricsRequest
 func (_e *MockProxy_Expecter) GetMetrics(_a0 interface{}, _a1 interface{}) *MockProxy_GetMetrics_Call {
 	return &MockProxy_GetMetrics_Call{Call: _e.mock.On("GetMetrics", _a0, _a1)}
 }
@@ -2637,8 +2692,8 @@ type MockProxy_GetPartitionStatistics_Call struct {
 }
 
 // GetPartitionStatistics is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.GetPartitionStatisticsRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.GetPartitionStatisticsRequest
 func (_e *MockProxy_Expecter) GetPartitionStatistics(_a0 interface{}, _a1 interface{}) *MockProxy_GetPartitionStatistics_Call {
 	return &MockProxy_GetPartitionStatistics_Call{Call: _e.mock.On("GetPartitionStatistics", _a0, _a1)}
 }
@@ -2692,8 +2747,8 @@ type MockProxy_GetPersistentSegmentInfo_Call struct {
 }
 
 // GetPersistentSegmentInfo is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.GetPersistentSegmentInfoRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.GetPersistentSegmentInfoRequest
 func (_e *MockProxy_Expecter) GetPersistentSegmentInfo(_a0 interface{}, _a1 interface{}) *MockProxy_GetPersistentSegmentInfo_Call {
 	return &MockProxy_GetPersistentSegmentInfo_Call{Call: _e.mock.On("GetPersistentSegmentInfo", _a0, _a1)}
 }
@@ -2747,8 +2802,8 @@ type MockProxy_GetProxyMetrics_Call struct {
 }
 
 // GetProxyMetrics is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.GetMetricsRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.GetMetricsRequest
 func (_e *MockProxy_Expecter) GetProxyMetrics(_a0 interface{}, _a1 interface{}) *MockProxy_GetProxyMetrics_Call {
 	return &MockProxy_GetProxyMetrics_Call{Call: _e.mock.On("GetProxyMetrics", _a0, _a1)}
 }
@@ -2802,8 +2857,8 @@ type MockProxy_GetQuerySegmentInfo_Call struct {
 }
 
 // GetQuerySegmentInfo is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.GetQuerySegmentInfoRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.GetQuerySegmentInfoRequest
 func (_e *MockProxy_Expecter) GetQuerySegmentInfo(_a0 interface{}, _a1 interface{}) *MockProxy_GetQuerySegmentInfo_Call {
 	return &MockProxy_GetQuerySegmentInfo_Call{Call: _e.mock.On("GetQuerySegmentInfo", _a0, _a1)}
 }
@@ -2910,8 +2965,8 @@ type MockProxy_GetReplicas_Call struct {
 }
 
 // GetReplicas is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.GetReplicasRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.GetReplicasRequest
 func (_e *MockProxy_Expecter) GetReplicas(_a0 interface{}, _a1 interface{}) *MockProxy_GetReplicas_Call {
 	return &MockProxy_GetReplicas_Call{Call: _e.mock.On("GetReplicas", _a0, _a1)}
 }
@@ -2965,8 +3020,8 @@ type MockProxy_GetStatisticsChannel_Call struct {
 }
 
 // GetStatisticsChannel is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *internalpb.GetStatisticsChannelRequest
+//  - _a0 context.Context
+//  - _a1 *internalpb.GetStatisticsChannelRequest
 func (_e *MockProxy_Expecter) GetStatisticsChannel(_a0 interface{}, _a1 interface{}) *MockProxy_GetStatisticsChannel_Call {
 	return &MockProxy_GetStatisticsChannel_Call{Call: _e.mock.On("GetStatisticsChannel", _a0, _a1)}
 }
@@ -3020,8 +3075,8 @@ type MockProxy_GetVersion_Call struct {
 }
 
 // GetVersion is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.GetVersionRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.GetVersionRequest
 func (_e *MockProxy_Expecter) GetVersion(_a0 interface{}, _a1 interface{}) *MockProxy_GetVersion_Call {
 	return &MockProxy_GetVersion_Call{Call: _e.mock.On("GetVersion", _a0, _a1)}
 }
@@ -3075,8 +3130,8 @@ type MockProxy_HasCollection_Call struct {
 }
 
 // HasCollection is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.HasCollectionRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.HasCollectionRequest
 func (_e *MockProxy_Expecter) HasCollection(_a0 interface{}, _a1 interface{}) *MockProxy_HasCollection_Call {
 	return &MockProxy_HasCollection_Call{Call: _e.mock.On("HasCollection", _a0, _a1)}
 }
@@ -3130,8 +3185,8 @@ type MockProxy_HasPartition_Call struct {
 }
 
 // HasPartition is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.HasPartitionRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.HasPartitionRequest
 func (_e *MockProxy_Expecter) HasPartition(_a0 interface{}, _a1 interface{}) *MockProxy_HasPartition_Call {
 	return &MockProxy_HasPartition_Call{Call: _e.mock.On("HasPartition", _a0, _a1)}
 }
@@ -3185,8 +3240,8 @@ type MockProxy_Import_Call struct {
 }
 
 // Import is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.ImportRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.ImportRequest
 func (_e *MockProxy_Expecter) Import(_a0 interface{}, _a1 interface{}) *MockProxy_Import_Call {
 	return &MockProxy_Import_Call{Call: _e.mock.On("Import", _a0, _a1)}
 }
@@ -3204,6 +3259,61 @@ func (_c *MockProxy_Import_Call) Return(_a0 *milvuspb.ImportResponse, _a1 error)
 }
 
 func (_c *MockProxy_Import_Call) RunAndReturn(run func(context.Context, *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error)) *MockProxy_Import_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ImportV2 provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) ImportV2(_a0 context.Context, _a1 *milvuspb.ImportRequestV2) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ImportRequestV2) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ImportRequestV2) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ImportRequestV2) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_ImportV2_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ImportV2'
+type MockProxy_ImportV2_Call struct {
+	*mock.Call
+}
+
+// ImportV2 is a helper method to define mock.On call
+//  - _a0 context.Context
+//  - _a1 *milvuspb.ImportRequestV2
+func (_e *MockProxy_Expecter) ImportV2(_a0 interface{}, _a1 interface{}) *MockProxy_ImportV2_Call {
+	return &MockProxy_ImportV2_Call{Call: _e.mock.On("ImportV2", _a0, _a1)}
+}
+
+func (_c *MockProxy_ImportV2_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.ImportRequestV2)) *MockProxy_ImportV2_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.ImportRequestV2))
+	})
+	return _c
+}
+
+func (_c *MockProxy_ImportV2_Call) Return(_a0 *commonpb.Status, _a1 error) *MockProxy_ImportV2_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_ImportV2_Call) RunAndReturn(run func(context.Context, *milvuspb.ImportRequestV2) (*commonpb.Status, error)) *MockProxy_ImportV2_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -3281,8 +3391,8 @@ type MockProxy_Insert_Call struct {
 }
 
 // Insert is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.InsertRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.InsertRequest
 func (_e *MockProxy_Expecter) Insert(_a0 interface{}, _a1 interface{}) *MockProxy_Insert_Call {
 	return &MockProxy_Insert_Call{Call: _e.mock.On("Insert", _a0, _a1)}
 }
@@ -3336,8 +3446,8 @@ type MockProxy_InvalidateCollectionMetaCache_Call struct {
 }
 
 // InvalidateCollectionMetaCache is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *proxypb.InvalidateCollMetaCacheRequest
+//  - _a0 context.Context
+//  - _a1 *proxypb.InvalidateCollMetaCacheRequest
 func (_e *MockProxy_Expecter) InvalidateCollectionMetaCache(_a0 interface{}, _a1 interface{}) *MockProxy_InvalidateCollectionMetaCache_Call {
 	return &MockProxy_InvalidateCollectionMetaCache_Call{Call: _e.mock.On("InvalidateCollectionMetaCache", _a0, _a1)}
 }
@@ -3391,8 +3501,8 @@ type MockProxy_InvalidateCredentialCache_Call struct {
 }
 
 // InvalidateCredentialCache is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *proxypb.InvalidateCredCacheRequest
+//  - _a0 context.Context
+//  - _a1 *proxypb.InvalidateCredCacheRequest
 func (_e *MockProxy_Expecter) InvalidateCredentialCache(_a0 interface{}, _a1 interface{}) *MockProxy_InvalidateCredentialCache_Call {
 	return &MockProxy_InvalidateCredentialCache_Call{Call: _e.mock.On("InvalidateCredentialCache", _a0, _a1)}
 }
@@ -3446,8 +3556,8 @@ type MockProxy_ListAliases_Call struct {
 }
 
 // ListAliases is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.ListAliasesRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.ListAliasesRequest
 func (_e *MockProxy_Expecter) ListAliases(_a0 interface{}, _a1 interface{}) *MockProxy_ListAliases_Call {
 	return &MockProxy_ListAliases_Call{Call: _e.mock.On("ListAliases", _a0, _a1)}
 }
@@ -3501,8 +3611,8 @@ type MockProxy_ListClientInfos_Call struct {
 }
 
 // ListClientInfos is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *proxypb.ListClientInfosRequest
+//  - _a0 context.Context
+//  - _a1 *proxypb.ListClientInfosRequest
 func (_e *MockProxy_Expecter) ListClientInfos(_a0 interface{}, _a1 interface{}) *MockProxy_ListClientInfos_Call {
 	return &MockProxy_ListClientInfos_Call{Call: _e.mock.On("ListClientInfos", _a0, _a1)}
 }
@@ -3556,8 +3666,8 @@ type MockProxy_ListCredUsers_Call struct {
 }
 
 // ListCredUsers is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.ListCredUsersRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.ListCredUsersRequest
 func (_e *MockProxy_Expecter) ListCredUsers(_a0 interface{}, _a1 interface{}) *MockProxy_ListCredUsers_Call {
 	return &MockProxy_ListCredUsers_Call{Call: _e.mock.On("ListCredUsers", _a0, _a1)}
 }
@@ -3611,8 +3721,8 @@ type MockProxy_ListDatabases_Call struct {
 }
 
 // ListDatabases is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.ListDatabasesRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.ListDatabasesRequest
 func (_e *MockProxy_Expecter) ListDatabases(_a0 interface{}, _a1 interface{}) *MockProxy_ListDatabases_Call {
 	return &MockProxy_ListDatabases_Call{Call: _e.mock.On("ListDatabases", _a0, _a1)}
 }
@@ -3666,8 +3776,8 @@ type MockProxy_ListImportTasks_Call struct {
 }
 
 // ListImportTasks is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.ListImportTasksRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.ListImportTasksRequest
 func (_e *MockProxy_Expecter) ListImportTasks(_a0 interface{}, _a1 interface{}) *MockProxy_ListImportTasks_Call {
 	return &MockProxy_ListImportTasks_Call{Call: _e.mock.On("ListImportTasks", _a0, _a1)}
 }
@@ -3685,6 +3795,61 @@ func (_c *MockProxy_ListImportTasks_Call) Return(_a0 *milvuspb.ListImportTasksRe
 }
 
 func (_c *MockProxy_ListImportTasks_Call) RunAndReturn(run func(context.Context, *milvuspb.ListImportTasksRequest) (*milvuspb.ListImportTasksResponse, error)) *MockProxy_ListImportTasks_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListImports provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) ListImports(_a0 context.Context, _a1 *milvuspb.ListImportsRequest) (*milvuspb.ListImportsResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *milvuspb.ListImportsResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListImportsRequest) (*milvuspb.ListImportsResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListImportsRequest) *milvuspb.ListImportsResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.ListImportsResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ListImportsRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_ListImports_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListImports'
+type MockProxy_ListImports_Call struct {
+	*mock.Call
+}
+
+// ListImports is a helper method to define mock.On call
+//  - _a0 context.Context
+//  - _a1 *milvuspb.ListImportsRequest
+func (_e *MockProxy_Expecter) ListImports(_a0 interface{}, _a1 interface{}) *MockProxy_ListImports_Call {
+	return &MockProxy_ListImports_Call{Call: _e.mock.On("ListImports", _a0, _a1)}
+}
+
+func (_c *MockProxy_ListImports_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.ListImportsRequest)) *MockProxy_ListImports_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.ListImportsRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_ListImports_Call) Return(_a0 *milvuspb.ListImportsResponse, _a1 error) *MockProxy_ListImports_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_ListImports_Call) RunAndReturn(run func(context.Context, *milvuspb.ListImportsRequest) (*milvuspb.ListImportsResponse, error)) *MockProxy_ListImports_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -3721,8 +3886,8 @@ type MockProxy_ListIndexedSegment_Call struct {
 }
 
 // ListIndexedSegment is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *federpb.ListIndexedSegmentRequest
+//  - _a0 context.Context
+//  - _a1 *federpb.ListIndexedSegmentRequest
 func (_e *MockProxy_Expecter) ListIndexedSegment(_a0 interface{}, _a1 interface{}) *MockProxy_ListIndexedSegment_Call {
 	return &MockProxy_ListIndexedSegment_Call{Call: _e.mock.On("ListIndexedSegment", _a0, _a1)}
 }
@@ -3776,8 +3941,8 @@ type MockProxy_ListResourceGroups_Call struct {
 }
 
 // ListResourceGroups is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.ListResourceGroupsRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.ListResourceGroupsRequest
 func (_e *MockProxy_Expecter) ListResourceGroups(_a0 interface{}, _a1 interface{}) *MockProxy_ListResourceGroups_Call {
 	return &MockProxy_ListResourceGroups_Call{Call: _e.mock.On("ListResourceGroups", _a0, _a1)}
 }
@@ -3831,8 +3996,8 @@ type MockProxy_LoadBalance_Call struct {
 }
 
 // LoadBalance is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.LoadBalanceRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.LoadBalanceRequest
 func (_e *MockProxy_Expecter) LoadBalance(_a0 interface{}, _a1 interface{}) *MockProxy_LoadBalance_Call {
 	return &MockProxy_LoadBalance_Call{Call: _e.mock.On("LoadBalance", _a0, _a1)}
 }
@@ -3886,8 +4051,8 @@ type MockProxy_LoadCollection_Call struct {
 }
 
 // LoadCollection is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.LoadCollectionRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.LoadCollectionRequest
 func (_e *MockProxy_Expecter) LoadCollection(_a0 interface{}, _a1 interface{}) *MockProxy_LoadCollection_Call {
 	return &MockProxy_LoadCollection_Call{Call: _e.mock.On("LoadCollection", _a0, _a1)}
 }
@@ -3941,8 +4106,8 @@ type MockProxy_LoadPartitions_Call struct {
 }
 
 // LoadPartitions is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.LoadPartitionsRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.LoadPartitionsRequest
 func (_e *MockProxy_Expecter) LoadPartitions(_a0 interface{}, _a1 interface{}) *MockProxy_LoadPartitions_Call {
 	return &MockProxy_LoadPartitions_Call{Call: _e.mock.On("LoadPartitions", _a0, _a1)}
 }
@@ -3996,8 +4161,8 @@ type MockProxy_ManualCompaction_Call struct {
 }
 
 // ManualCompaction is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.ManualCompactionRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.ManualCompactionRequest
 func (_e *MockProxy_Expecter) ManualCompaction(_a0 interface{}, _a1 interface{}) *MockProxy_ManualCompaction_Call {
 	return &MockProxy_ManualCompaction_Call{Call: _e.mock.On("ManualCompaction", _a0, _a1)}
 }
@@ -4051,8 +4216,8 @@ type MockProxy_OperatePrivilege_Call struct {
 }
 
 // OperatePrivilege is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.OperatePrivilegeRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.OperatePrivilegeRequest
 func (_e *MockProxy_Expecter) OperatePrivilege(_a0 interface{}, _a1 interface{}) *MockProxy_OperatePrivilege_Call {
 	return &MockProxy_OperatePrivilege_Call{Call: _e.mock.On("OperatePrivilege", _a0, _a1)}
 }
@@ -4106,8 +4271,8 @@ type MockProxy_OperateUserRole_Call struct {
 }
 
 // OperateUserRole is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.OperateUserRoleRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.OperateUserRoleRequest
 func (_e *MockProxy_Expecter) OperateUserRole(_a0 interface{}, _a1 interface{}) *MockProxy_OperateUserRole_Call {
 	return &MockProxy_OperateUserRole_Call{Call: _e.mock.On("OperateUserRole", _a0, _a1)}
 }
@@ -4161,8 +4326,8 @@ type MockProxy_Query_Call struct {
 }
 
 // Query is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.QueryRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.QueryRequest
 func (_e *MockProxy_Expecter) Query(_a0 interface{}, _a1 interface{}) *MockProxy_Query_Call {
 	return &MockProxy_Query_Call{Call: _e.mock.On("Query", _a0, _a1)}
 }
@@ -4216,8 +4381,8 @@ type MockProxy_RefreshPolicyInfoCache_Call struct {
 }
 
 // RefreshPolicyInfoCache is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *proxypb.RefreshPolicyInfoCacheRequest
+//  - _a0 context.Context
+//  - _a1 *proxypb.RefreshPolicyInfoCacheRequest
 func (_e *MockProxy_Expecter) RefreshPolicyInfoCache(_a0 interface{}, _a1 interface{}) *MockProxy_RefreshPolicyInfoCache_Call {
 	return &MockProxy_RefreshPolicyInfoCache_Call{Call: _e.mock.On("RefreshPolicyInfoCache", _a0, _a1)}
 }
@@ -4312,8 +4477,8 @@ type MockProxy_RegisterLink_Call struct {
 }
 
 // RegisterLink is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.RegisterLinkRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.RegisterLinkRequest
 func (_e *MockProxy_Expecter) RegisterLink(_a0 interface{}, _a1 interface{}) *MockProxy_RegisterLink_Call {
 	return &MockProxy_RegisterLink_Call{Call: _e.mock.On("RegisterLink", _a0, _a1)}
 }
@@ -4367,8 +4532,8 @@ type MockProxy_ReleaseCollection_Call struct {
 }
 
 // ReleaseCollection is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.ReleaseCollectionRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.ReleaseCollectionRequest
 func (_e *MockProxy_Expecter) ReleaseCollection(_a0 interface{}, _a1 interface{}) *MockProxy_ReleaseCollection_Call {
 	return &MockProxy_ReleaseCollection_Call{Call: _e.mock.On("ReleaseCollection", _a0, _a1)}
 }
@@ -4422,8 +4587,8 @@ type MockProxy_ReleasePartitions_Call struct {
 }
 
 // ReleasePartitions is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.ReleasePartitionsRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.ReleasePartitionsRequest
 func (_e *MockProxy_Expecter) ReleasePartitions(_a0 interface{}, _a1 interface{}) *MockProxy_ReleasePartitions_Call {
 	return &MockProxy_ReleasePartitions_Call{Call: _e.mock.On("ReleasePartitions", _a0, _a1)}
 }
@@ -4477,8 +4642,8 @@ type MockProxy_RenameCollection_Call struct {
 }
 
 // RenameCollection is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.RenameCollectionRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.RenameCollectionRequest
 func (_e *MockProxy_Expecter) RenameCollection(_a0 interface{}, _a1 interface{}) *MockProxy_RenameCollection_Call {
 	return &MockProxy_RenameCollection_Call{Call: _e.mock.On("RenameCollection", _a0, _a1)}
 }
@@ -4532,8 +4697,8 @@ type MockProxy_ReplicateMessage_Call struct {
 }
 
 // ReplicateMessage is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.ReplicateMessageRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.ReplicateMessageRequest
 func (_e *MockProxy_Expecter) ReplicateMessage(_a0 interface{}, _a1 interface{}) *MockProxy_ReplicateMessage_Call {
 	return &MockProxy_ReplicateMessage_Call{Call: _e.mock.On("ReplicateMessage", _a0, _a1)}
 }
@@ -4587,8 +4752,8 @@ type MockProxy_Search_Call struct {
 }
 
 // Search is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.SearchRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.SearchRequest
 func (_e *MockProxy_Expecter) Search(_a0 interface{}, _a1 interface{}) *MockProxy_Search_Call {
 	return &MockProxy_Search_Call{Call: _e.mock.On("Search", _a0, _a1)}
 }
@@ -4642,8 +4807,8 @@ type MockProxy_SearchV2_Call struct {
 }
 
 // SearchV2 is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.SearchRequestV2
+//  - _a0 context.Context
+//  - _a1 *milvuspb.SearchRequestV2
 func (_e *MockProxy_Expecter) SearchV2(_a0 interface{}, _a1 interface{}) *MockProxy_SearchV2_Call {
 	return &MockProxy_SearchV2_Call{Call: _e.mock.On("SearchV2", _a0, _a1)}
 }
@@ -4697,8 +4862,8 @@ type MockProxy_SelectGrant_Call struct {
 }
 
 // SelectGrant is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.SelectGrantRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.SelectGrantRequest
 func (_e *MockProxy_Expecter) SelectGrant(_a0 interface{}, _a1 interface{}) *MockProxy_SelectGrant_Call {
 	return &MockProxy_SelectGrant_Call{Call: _e.mock.On("SelectGrant", _a0, _a1)}
 }
@@ -4752,8 +4917,8 @@ type MockProxy_SelectRole_Call struct {
 }
 
 // SelectRole is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.SelectRoleRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.SelectRoleRequest
 func (_e *MockProxy_Expecter) SelectRole(_a0 interface{}, _a1 interface{}) *MockProxy_SelectRole_Call {
 	return &MockProxy_SelectRole_Call{Call: _e.mock.On("SelectRole", _a0, _a1)}
 }
@@ -4807,8 +4972,8 @@ type MockProxy_SelectUser_Call struct {
 }
 
 // SelectUser is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.SelectUserRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.SelectUserRequest
 func (_e *MockProxy_Expecter) SelectUser(_a0 interface{}, _a1 interface{}) *MockProxy_SelectUser_Call {
 	return &MockProxy_SelectUser_Call{Call: _e.mock.On("SelectUser", _a0, _a1)}
 }
@@ -4841,7 +5006,7 @@ type MockProxy_SetAddress_Call struct {
 }
 
 // SetAddress is a helper method to define mock.On call
-//   - address string
+//  - address string
 func (_e *MockProxy_Expecter) SetAddress(address interface{}) *MockProxy_SetAddress_Call {
 	return &MockProxy_SetAddress_Call{Call: _e.mock.On("SetAddress", address)}
 }
@@ -4874,7 +5039,7 @@ type MockProxy_SetDataCoordClient_Call struct {
 }
 
 // SetDataCoordClient is a helper method to define mock.On call
-//   - dataCoord types.DataCoordClient
+//  - dataCoord types.DataCoordClient
 func (_e *MockProxy_Expecter) SetDataCoordClient(dataCoord interface{}) *MockProxy_SetDataCoordClient_Call {
 	return &MockProxy_SetDataCoordClient_Call{Call: _e.mock.On("SetDataCoordClient", dataCoord)}
 }
@@ -4907,7 +5072,7 @@ type MockProxy_SetEtcdClient_Call struct {
 }
 
 // SetEtcdClient is a helper method to define mock.On call
-//   - etcdClient *clientv3.Client
+//  - etcdClient *clientv3.Client
 func (_e *MockProxy_Expecter) SetEtcdClient(etcdClient interface{}) *MockProxy_SetEtcdClient_Call {
 	return &MockProxy_SetEtcdClient_Call{Call: _e.mock.On("SetEtcdClient", etcdClient)}
 }
@@ -4940,7 +5105,7 @@ type MockProxy_SetQueryCoordClient_Call struct {
 }
 
 // SetQueryCoordClient is a helper method to define mock.On call
-//   - queryCoord types.QueryCoordClient
+//  - queryCoord types.QueryCoordClient
 func (_e *MockProxy_Expecter) SetQueryCoordClient(queryCoord interface{}) *MockProxy_SetQueryCoordClient_Call {
 	return &MockProxy_SetQueryCoordClient_Call{Call: _e.mock.On("SetQueryCoordClient", queryCoord)}
 }
@@ -4973,7 +5138,7 @@ type MockProxy_SetQueryNodeCreator_Call struct {
 }
 
 // SetQueryNodeCreator is a helper method to define mock.On call
-//   - _a0 func(context.Context , string , int64)(types.QueryNodeClient , error)
+//  - _a0 func(context.Context , string , int64)(types.QueryNodeClient , error)
 func (_e *MockProxy_Expecter) SetQueryNodeCreator(_a0 interface{}) *MockProxy_SetQueryNodeCreator_Call {
 	return &MockProxy_SetQueryNodeCreator_Call{Call: _e.mock.On("SetQueryNodeCreator", _a0)}
 }
@@ -5027,8 +5192,8 @@ type MockProxy_SetRates_Call struct {
 }
 
 // SetRates is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *proxypb.SetRatesRequest
+//  - _a0 context.Context
+//  - _a1 *proxypb.SetRatesRequest
 func (_e *MockProxy_Expecter) SetRates(_a0 interface{}, _a1 interface{}) *MockProxy_SetRates_Call {
 	return &MockProxy_SetRates_Call{Call: _e.mock.On("SetRates", _a0, _a1)}
 }
@@ -5061,7 +5226,7 @@ type MockProxy_SetRootCoordClient_Call struct {
 }
 
 // SetRootCoordClient is a helper method to define mock.On call
-//   - rootCoord types.RootCoordClient
+//  - rootCoord types.RootCoordClient
 func (_e *MockProxy_Expecter) SetRootCoordClient(rootCoord interface{}) *MockProxy_SetRootCoordClient_Call {
 	return &MockProxy_SetRootCoordClient_Call{Call: _e.mock.On("SetRootCoordClient", rootCoord)}
 }
@@ -5115,8 +5280,8 @@ type MockProxy_ShowCollections_Call struct {
 }
 
 // ShowCollections is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.ShowCollectionsRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.ShowCollectionsRequest
 func (_e *MockProxy_Expecter) ShowCollections(_a0 interface{}, _a1 interface{}) *MockProxy_ShowCollections_Call {
 	return &MockProxy_ShowCollections_Call{Call: _e.mock.On("ShowCollections", _a0, _a1)}
 }
@@ -5170,8 +5335,8 @@ type MockProxy_ShowPartitions_Call struct {
 }
 
 // ShowPartitions is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.ShowPartitionsRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.ShowPartitionsRequest
 func (_e *MockProxy_Expecter) ShowPartitions(_a0 interface{}, _a1 interface{}) *MockProxy_ShowPartitions_Call {
 	return &MockProxy_ShowPartitions_Call{Call: _e.mock.On("ShowPartitions", _a0, _a1)}
 }
@@ -5307,8 +5472,8 @@ type MockProxy_TransferNode_Call struct {
 }
 
 // TransferNode is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.TransferNodeRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.TransferNodeRequest
 func (_e *MockProxy_Expecter) TransferNode(_a0 interface{}, _a1 interface{}) *MockProxy_TransferNode_Call {
 	return &MockProxy_TransferNode_Call{Call: _e.mock.On("TransferNode", _a0, _a1)}
 }
@@ -5362,8 +5527,8 @@ type MockProxy_TransferReplica_Call struct {
 }
 
 // TransferReplica is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.TransferReplicaRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.TransferReplicaRequest
 func (_e *MockProxy_Expecter) TransferReplica(_a0 interface{}, _a1 interface{}) *MockProxy_TransferReplica_Call {
 	return &MockProxy_TransferReplica_Call{Call: _e.mock.On("TransferReplica", _a0, _a1)}
 }
@@ -5417,8 +5582,8 @@ type MockProxy_UpdateCredential_Call struct {
 }
 
 // UpdateCredential is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.UpdateCredentialRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.UpdateCredentialRequest
 func (_e *MockProxy_Expecter) UpdateCredential(_a0 interface{}, _a1 interface{}) *MockProxy_UpdateCredential_Call {
 	return &MockProxy_UpdateCredential_Call{Call: _e.mock.On("UpdateCredential", _a0, _a1)}
 }
@@ -5472,8 +5637,8 @@ type MockProxy_UpdateCredentialCache_Call struct {
 }
 
 // UpdateCredentialCache is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *proxypb.UpdateCredCacheRequest
+//  - _a0 context.Context
+//  - _a1 *proxypb.UpdateCredCacheRequest
 func (_e *MockProxy_Expecter) UpdateCredentialCache(_a0 interface{}, _a1 interface{}) *MockProxy_UpdateCredentialCache_Call {
 	return &MockProxy_UpdateCredentialCache_Call{Call: _e.mock.On("UpdateCredentialCache", _a0, _a1)}
 }
@@ -5506,7 +5671,7 @@ type MockProxy_UpdateStateCode_Call struct {
 }
 
 // UpdateStateCode is a helper method to define mock.On call
-//   - stateCode commonpb.StateCode
+//  - stateCode commonpb.StateCode
 func (_e *MockProxy_Expecter) UpdateStateCode(stateCode interface{}) *MockProxy_UpdateStateCode_Call {
 	return &MockProxy_UpdateStateCode_Call{Call: _e.mock.On("UpdateStateCode", stateCode)}
 }
@@ -5560,8 +5725,8 @@ type MockProxy_Upsert_Call struct {
 }
 
 // Upsert is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.UpsertRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.UpsertRequest
 func (_e *MockProxy_Expecter) Upsert(_a0 interface{}, _a1 interface{}) *MockProxy_Upsert_Call {
 	return &MockProxy_Upsert_Call{Call: _e.mock.On("Upsert", _a0, _a1)}
 }
