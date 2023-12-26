@@ -978,7 +978,7 @@ func (node *DataNode) QueryImport(ctx context.Context, req *datapb.QueryImportRe
 	// query slot
 	const maxParallelImportTaskNum = 10 // TODO: dyh, make it configurable
 	if req.GetTaskID() == 0 && req.GetRequestID() == 0 {
-		tasks := node.importManager.GetBy(importv2.WithStates(datapb.ImportState_Pending, datapb.ImportState_InProgress))
+		tasks := node.importManager.GetBy(importv2.WithStates(milvuspb.ImportState_Pending, milvuspb.ImportState_InProgress))
 		return &datapb.QueryImportResponse{
 			Status: status,
 			Slots:  int64(maxParallelImportTaskNum - len(tasks)),

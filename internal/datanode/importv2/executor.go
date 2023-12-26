@@ -26,6 +26,7 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -72,7 +73,7 @@ func (e *executor) Start() {
 			log.Info("import executor exited")
 			return
 		case <-ticker.C:
-			tasks := e.manager.GetBy(WithStates(datapb.ImportState_Pending))
+			tasks := e.manager.GetBy(WithStates(milvuspb.ImportState_Pending))
 			wg, _ := errgroup.WithContext(context.Background())
 			for _, task := range tasks {
 				task := task
@@ -113,13 +114,13 @@ func (e *executor) handleErr(task Task, err error, msg string) {
 		zap.String("state", task.GetState().String()),
 		zap.String("type", task.GetType().String()),
 		zap.Error(err))
-	e.manager.Update(task.GetTaskID(), UpdateState(datapb.ImportState_Failed), UpdateReason(err.Error()))
+	e.manager.Update(task.GetTaskID(), UpdateState(milvuspb.ImportState_Failed), UpdateReason(err.Error()))
 }
 
 func (e *executor) PreImport(task Task) {
-	e.manager.Update(task.GetTaskID(), UpdateState(datapb.ImportState_InProgress))
+	e.manager.Update(task.GetTaskID(), UpdateState(milvuspb.ImportState_InProgress))
 	files := lo.Map(task.(*PreImportTask).GetFileStats(),
-		func(fileStat *datapb.ImportFileStats, _ int) *datapb.ImportFile {
+		func(fileStat *datapb.ImportFileStats, _ int) *milvuspb.ImportFile {
 			return fileStat.GetImportFile()
 		})
 
@@ -134,7 +135,7 @@ func (e *executor) PreImport(task Task) {
 		reader.Close()
 	}
 
-	e.manager.Update(task.GetTaskID(), UpdateState(datapb.ImportState_Completed))
+	e.manager.Update(task.GetTaskID(), UpdateState(milvuspb.ImportState_Completed))
 }
 
 func (e *executor) readFileStat(reader Reader, task Task, fileIdx int) error {
@@ -185,7 +186,7 @@ func (e *executor) readFileStat(reader Reader, task Task, fileIdx int) error {
 }
 
 func (e *executor) Import(task Task) {
-	e.manager.Update(task.GetTaskID(), UpdateState(datapb.ImportState_InProgress))
+	e.manager.Update(task.GetTaskID(), UpdateState(milvuspb.ImportState_InProgress))
 	count, err := e.estimateReadRows(task.GetSchema())
 	if err != nil {
 		e.handleErr(task, err, "estimate rows size failed")
@@ -203,7 +204,7 @@ func (e *executor) Import(task Task) {
 		}
 		reader.Close()
 	}
-	e.manager.Update(task.GetTaskID(), UpdateState(datapb.ImportState_Completed))
+	e.manager.Update(task.GetTaskID(), UpdateState(milvuspb.ImportState_Completed))
 }
 
 func (e *executor) importFile(reader Reader, count int64, task Task, segments []*datapb.ImportSegmentRequestInfo) error {

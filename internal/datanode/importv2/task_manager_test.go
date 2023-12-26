@@ -21,6 +21,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 )
 
@@ -33,7 +34,7 @@ func TestImportManager(t *testing.T) {
 			CollectionID: 3,
 			SegmentIDs:   []int64{5, 6},
 			NodeID:       7,
-			State:        datapb.ImportState_Pending,
+			State:        milvuspb.ImportState_Pending,
 		},
 	}
 	manager.Add(task1)
@@ -43,18 +44,18 @@ func TestImportManager(t *testing.T) {
 
 	task2 := task1.Clone()
 	task2.(*ImportTask).TaskID = 8
-	task2.(*ImportTask).State = datapb.ImportState_Completed
+	task2.(*ImportTask).State = milvuspb.ImportState_Completed
 	manager.Add(task2)
 
 	tasks := manager.GetBy()
 	assert.Equal(t, 2, len(tasks))
-	tasks = manager.GetBy(WithStates(datapb.ImportState_Completed))
+	tasks = manager.GetBy(WithStates(milvuspb.ImportState_Completed))
 	assert.Equal(t, 1, len(tasks))
 	assert.Equal(t, task2.GetTaskID(), tasks[0].GetTaskID())
 
-	manager.Update(task1.GetTaskID(), UpdateState(datapb.ImportState_Failed))
+	manager.Update(task1.GetTaskID(), UpdateState(milvuspb.ImportState_Failed))
 	task := manager.Get(task1.GetTaskID())
-	assert.Equal(t, datapb.ImportState_Failed, task.GetState())
+	assert.Equal(t, milvuspb.ImportState_Failed, task.GetState())
 
 	manager.Remove(task1.GetTaskID())
 	tasks = manager.GetBy()

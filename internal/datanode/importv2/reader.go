@@ -17,8 +17,8 @@
 package importv2
 
 import (
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 )
 
@@ -30,7 +30,7 @@ type Reader interface {
 
 func NewReader(cm storage.ChunkManager,
 	schema *schemapb.CollectionSchema,
-	importFile *datapb.ImportFile,
+	importFile *milvuspb.ImportFile,
 ) Reader {
 	return nil
 }

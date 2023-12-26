@@ -30,6 +30,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -191,8 +192,8 @@ func createInsertData(t *testing.T, schema *schemapb.CollectionSchema, rowCount 
 }
 
 func (s *ExecutorSuite) TestExecutor_ReadFileStats() {
-	importFile := &datapb.ImportFile{
-		File: &datapb.ImportFile_RowBasedFile{
+	importFile := &milvuspb.ImportFile{
+		File: &milvuspb.ImportFile_RowBasedFile{
 			RowBasedFile: "dummy.json",
 		},
 	}
@@ -215,7 +216,7 @@ func (s *ExecutorSuite) TestExecutor_ReadFileStats() {
 		CollectionID: 3,
 		PartitionIDs: []int64{4},
 		Schema:       s.schema,
-		ImportFiles:  []*datapb.ImportFile{importFile},
+		ImportFiles:  []*milvuspb.ImportFile{importFile},
 	}
 	preimportTask := NewPreImportTask(preimportReq)
 	s.manager.Add(preimportTask)
@@ -244,9 +245,9 @@ func (s *ExecutorSuite) TestImportFile() {
 		TaskID:       11,
 		CollectionID: 12,
 		Schema:       s.schema,
-		Files: []*datapb.ImportFile{
+		Files: []*milvuspb.ImportFile{
 			{
-				File: &datapb.ImportFile_RowBasedFile{
+				File: &milvuspb.ImportFile_RowBasedFile{
 					RowBasedFile: "dummy.json",
 				},
 			},

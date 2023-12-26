@@ -129,7 +129,7 @@ func HashFunc(pkDataType schemapb.DataType) (func(pk interface{}, shardNum int64
 		}, nil
 	case schemapb.DataType_VarChar:
 		return func(pk interface{}, shardNum int64) int64 {
-			hash := typeutil.HashString2Uint32(pk.(string)) // TODO: use HashString?
+			hash := typeutil.HashString2Uint32(pk.(string)) // TODO: dyh, use HashString?
 			return int64(hash) % shardNum
 		}, nil
 	default:
