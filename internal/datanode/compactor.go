@@ -855,7 +855,7 @@ func interface2FieldData(schemaDataType schemapb.DataType, content []interface{}
 
 	case schemapb.DataType_Array:
 		data := &storage.ArrayFieldData{
-			Data: make([]*schemapb.ScalarField, len(content)),
+			Data: make([]*schemapb.ScalarField, 0, len(content)),
 		}
 
 		if len(content) > 0 {
