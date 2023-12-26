@@ -167,7 +167,7 @@ func getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, 
 		}, nil
 	}
 	hardwareInfos := metricsinfo.HardwareMetrics{
-		IP:           node.session.Address,
+		IP:           node.session.GetAddress(),
 		CPUCoreCount: hardware.GetCPUNum(),
 		CPUCoreUsage: hardware.GetCPUUsage(),
 		Memory:       totalMem,
@@ -185,7 +185,7 @@ func getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, 
 			CreatedTime:   paramtable.GetCreateTime().String(),
 			UpdatedTime:   paramtable.GetUpdateTime().String(),
 			Type:          typeutil.QueryNodeRole,
-			ID:            node.session.ServerID,
+			ID:            node.session.GetServerID(),
 		},
 		SystemConfigurations: metricsinfo.QueryNodeConfiguration{
 			SimdType: paramtable.Get().CommonCfg.SimdType.GetValue(),

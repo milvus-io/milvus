@@ -442,6 +442,30 @@ var (
 		}, []string{
 			nodeIDLabelName,
 		})
+
+	StoppingBalanceNodeNum = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "stopping_balance_node_num",
+			Help:      "the number of node which executing stopping balance",
+		}, []string{})
+
+	StoppingBalanceChannelNum = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "stopping_balance_channel_num",
+			Help:      "the number of channel which executing stopping balance",
+		}, []string{nodeIDLabelName})
+
+	StoppingBalanceSegmentNum = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "stopping_balance_segment_num",
+			Help:      "the number of segment which executing stopping balance",
+		}, []string{nodeIDLabelName})
 )
 
 // RegisterQueryNode registers QueryNode metrics
@@ -483,6 +507,9 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeDiskUsedSize)
 	registry.MustRegister(QueryNodeProcessCost)
 	registry.MustRegister(QueryNodeWaitProcessingMsgCount)
+	registry.MustRegister(StoppingBalanceNodeNum)
+	registry.MustRegister(StoppingBalanceChannelNum)
+	registry.MustRegister(StoppingBalanceSegmentNum)
 }
 
 func CleanupQueryNodeCollectionMetrics(nodeID int64, collectionID int64) {

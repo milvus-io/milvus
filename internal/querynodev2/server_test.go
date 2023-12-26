@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -108,7 +109,6 @@ func (suite *QueryNodeSuite) TestBasic() {
 	suite.True(suite.node.lifetime.GetState() == commonpb.StateCode_Healthy)
 
 	// register node to etcd
-	suite.node.session.TriggerKill = false
 	err = suite.node.Register()
 	suite.NoError(err)
 
@@ -217,6 +217,10 @@ func (suite *QueryNodeSuite) TestStop() {
 	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.GracefulStopTimeout.Key, "2")
 
 	suite.node.manager = segments.NewManager()
+	mockSession := sessionutil.NewMockSession(suite.T())
+	mockSession.EXPECT().GoingStop().Return(nil)
+	mockSession.EXPECT().Stop()
+	suite.node.session = mockSession
 
 	schema := segments.GenTestCollectionSchema("test_stop", schemapb.DataType_Int64)
 	collection := segments.NewCollection(1, schema, nil, querypb.LoadType_LoadCollection)
