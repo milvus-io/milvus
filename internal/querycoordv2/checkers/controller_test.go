@@ -111,6 +111,8 @@ func (suite *CheckerControllerSuite) TestBasic() {
 	}
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		channels, segments, nil)
+	suite.broker.EXPECT().DescribeIndex(mock.Anything, int64(1)).Return(
+		nil, nil)
 	suite.targetManager.UpdateCollectionNextTarget(int64(1))
 
 	// set dist

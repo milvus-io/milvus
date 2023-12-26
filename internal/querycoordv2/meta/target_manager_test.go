@@ -31,6 +31,7 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
@@ -135,6 +136,7 @@ func (suite *TargetManagerSuite) SetupTest() {
 			}
 		}
 		suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collection).Return(dmChannels, allSegments, nil)
+		suite.broker.EXPECT().DescribeIndex(mock.Anything, collection).Return([]*indexpb.IndexInfo{}, nil)
 
 		suite.meta.PutCollection(&Collection{
 			CollectionLoadInfo: &querypb.CollectionLoadInfo{
@@ -231,6 +233,7 @@ func (suite *TargetManagerSuite) TestUpdateNextTarget() {
 	}
 
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(nextTargetChannels, nextTargetSegments, nil)
+	suite.broker.EXPECT().DescribeIndex(mock.Anything, collectionID).Return([]*indexpb.IndexInfo{}, nil)
 	suite.mgr.UpdateCollectionNextTarget(collectionID)
 	suite.assertSegments([]int64{11, 12}, suite.mgr.GetSealedSegmentsByCollection(collectionID, NextTarget))
 	suite.assertChannels([]string{"channel-1", "channel-2"}, suite.mgr.GetDmChannelsByCollection(collectionID, NextTarget))
@@ -243,6 +246,7 @@ func (suite *TargetManagerSuite) TestUpdateNextTarget() {
 		nil, nil, merr.WrapErrServiceUnimplemented(status.Errorf(codes.Unimplemented, "fake not found")))
 	suite.broker.EXPECT().GetPartitions(mock.Anything, mock.Anything).Return([]int64{1}, nil)
 	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, collectionID, int64(1)).Return(nextTargetChannels, nextTargetBinlogs, nil)
+	suite.broker.EXPECT().DescribeIndex(mock.Anything, collectionID).Return([]*indexpb.IndexInfo{}, nil)
 	err := suite.mgr.UpdateCollectionNextTarget(collectionID)
 	suite.NoError(err)
 
@@ -250,6 +254,7 @@ func (suite *TargetManagerSuite) TestUpdateNextTarget() {
 	// test getRecoveryInfoV2 failed , then retry getRecoveryInfoV2 succeed
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(nil, nil, errors.New("fake error")).Times(1)
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(nextTargetChannels, nextTargetSegments, nil)
+	suite.broker.EXPECT().DescribeIndex(mock.Anything, collectionID).Return([]*indexpb.IndexInfo{}, nil)
 	err = suite.mgr.UpdateCollectionNextTarget(collectionID)
 	suite.NoError(err)
 
@@ -406,6 +411,7 @@ func (suite *TargetManagerSuite) TestGetSegmentByChannel() {
 	}
 
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(nextTargetChannels, nextTargetSegments, nil)
+	suite.broker.EXPECT().DescribeIndex(mock.Anything, collectionID).Return([]*indexpb.IndexInfo{}, nil)
 	suite.mgr.UpdateCollectionNextTarget(collectionID)
 	suite.Len(suite.mgr.GetSealedSegmentsByCollection(collectionID, NextTarget), 2)
 	suite.Len(suite.mgr.GetSealedSegmentsByChannel(collectionID, "channel-1", NextTarget), 1)

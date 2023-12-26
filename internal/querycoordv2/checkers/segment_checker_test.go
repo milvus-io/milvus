@@ -29,6 +29,7 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
@@ -132,6 +133,8 @@ func (suite *SegmentCheckerTestSuite) TestLoadSegments() {
 
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		channels, segments, nil)
+	suite.broker.EXPECT().DescribeIndex(mock.Anything, int64(1)).Return(
+		[]*indexpb.IndexInfo{}, nil)
 	checker.targetMgr.UpdateCollectionNextTarget(int64(1))
 
 	// set dist
@@ -188,6 +191,8 @@ func (suite *SegmentCheckerTestSuite) TestSkipCheckReplica() {
 	}
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		channels, segments, nil)
+	suite.broker.EXPECT().DescribeIndex(mock.Anything, int64(1)).Return(
+		[]*indexpb.IndexInfo{}, nil)
 	checker.targetMgr.UpdateCollectionNextTarget(int64(1))
 
 	// set dist
@@ -216,6 +221,8 @@ func (suite *SegmentCheckerTestSuite) TestReleaseSegments() {
 	}
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		channels, nil, nil)
+	suite.broker.EXPECT().DescribeIndex(mock.Anything, int64(1)).Return(
+		[]*indexpb.IndexInfo{}, nil)
 	checker.targetMgr.UpdateCollectionNextTarget(int64(1))
 
 	// set dist
@@ -257,6 +264,8 @@ func (suite *SegmentCheckerTestSuite) TestReleaseRepeatedSegments() {
 	}
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		channels, segments, nil)
+	suite.broker.EXPECT().DescribeIndex(mock.Anything, int64(1)).Return(
+		[]*indexpb.IndexInfo{}, nil)
 	checker.targetMgr.UpdateCollectionNextTarget(int64(1))
 
 	// set dist
@@ -304,6 +313,8 @@ func (suite *SegmentCheckerTestSuite) TestSkipReleaseSealedSegments() {
 	segments := []*datapb.SegmentInfo{}
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		channels, segments, nil)
+	suite.broker.EXPECT().DescribeIndex(mock.Anything, int64(1)).Return(
+		[]*indexpb.IndexInfo{}, nil)
 	checker.targetMgr.UpdateCollectionNextTarget(collectionID)
 	checker.targetMgr.UpdateCollectionCurrentTarget(collectionID)
 	readableVersion := checker.targetMgr.GetCollectionTargetVersion(collectionID, meta.CurrentTarget)
@@ -360,6 +371,8 @@ func (suite *SegmentCheckerTestSuite) TestReleaseGrowingSegments() {
 	}
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		channels, segments, nil)
+	suite.broker.EXPECT().DescribeIndex(mock.Anything, int64(1)).Return(
+		[]*indexpb.IndexInfo{}, nil)
 	checker.targetMgr.UpdateCollectionNextTarget(int64(1))
 	checker.targetMgr.UpdateCollectionCurrentTarget(int64(1))
 
@@ -419,6 +432,8 @@ func (suite *SegmentCheckerTestSuite) TestSkipReleaseGrowingSegments() {
 	}
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		channels, segments, nil)
+	suite.broker.EXPECT().DescribeIndex(mock.Anything, int64(1)).Return(
+		[]*indexpb.IndexInfo{}, nil)
 	checker.targetMgr.UpdateCollectionNextTarget(int64(1))
 	checker.targetMgr.UpdateCollectionCurrentTarget(int64(1))
 

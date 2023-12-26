@@ -373,10 +373,8 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 	// Milvus forbids dropping index after collection loaded,
 	// so the next target won't miss any index in current target,
 	// always fetch the next target index first
-	collectionIndexes := ex.targetMgr.GetIndexes(task.CollectionID(), meta.NextTarget)
-	if collectionIndexes == nil {
-		collectionIndexes = ex.targetMgr.GetIndexes(task.CollectionID(), meta.CurrentTarget)
-	}
+	collectionIndexes := ex.targetMgr.GetIndexes(task.CollectionID(), meta.NextTargetFirst)
+
 	metricType, err := getMetricType(collectionIndexes, collectionInfo.GetSchema())
 	if err != nil {
 		log.Warn("failed to get metric type", zap.Error(err))

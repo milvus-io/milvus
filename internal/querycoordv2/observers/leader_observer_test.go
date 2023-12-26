@@ -18,7 +18,6 @@ package observers
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
@@ -120,8 +119,6 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegments() {
 	suite.broker.EXPECT().DescribeCollection(mock.Anything, int64(1)).Return(&milvuspb.DescribeCollectionResponse{Schema: schema}, nil)
 	suite.broker.EXPECT().GetSegmentInfo(mock.Anything, int64(1)).Return(
 		&datapb.GetSegmentInfoResponse{Infos: []*datapb.SegmentInfo{info}}, nil)
-	// will cause sync failed once
-	suite.broker.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock error")).Once()
 	suite.broker.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return([]*indexpb.IndexInfo{
 		{IndexName: "test"},
 	}, nil)
@@ -297,6 +294,8 @@ func (suite *LeaderObserverTestSuite) TestIgnoreBalancedSegment() {
 
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		channels, segments, nil)
+	suite.broker.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(
+		[]*indexpb.IndexInfo{}, nil)
 	observer.target.UpdateCollectionNextTarget(int64(1))
 	observer.target.UpdateCollectionCurrentTarget(1)
 	observer.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 1, 1, 1, "test-insert-channel"))

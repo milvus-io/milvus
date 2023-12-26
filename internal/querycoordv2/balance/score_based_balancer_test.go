@@ -26,6 +26,7 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
@@ -67,6 +68,7 @@ func (suite *ScoreBasedBalancerTestSuite) SetupTest() {
 	idAllocator := RandomIncrementIDAllocator()
 	nodeManager := session.NewNodeManager()
 	testMeta := meta.NewMeta(idAllocator, store, nodeManager)
+	suite.broker.EXPECT().DescribeIndex(mock.Anything, int64(1)).Return([]*indexpb.IndexInfo{}, nil).Maybe()
 	testTarget := meta.NewTargetManager(suite.broker, testMeta)
 
 	distManager := meta.NewDistributionManager()
@@ -454,6 +456,8 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceMultiRound() {
 		collection := utils.CreateTestCollection(balanceCase.collectionIDs[i], int32(balanceCase.replicaIDs[i]))
 		suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, balanceCase.collectionIDs[i]).Return(
 			nil, balanceCase.collectionsSegments[i], nil)
+		suite.broker.EXPECT().DescribeIndex(mock.Anything, balanceCase.collectionIDs[i]).Return(
+			nil, nil)
 
 		collection.LoadPercentage = 100
 		collection.Status = querypb.LoadStatus_Loaded

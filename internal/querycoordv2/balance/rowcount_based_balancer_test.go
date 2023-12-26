@@ -28,6 +28,7 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
@@ -76,6 +77,7 @@ func (suite *RowCountBasedBalancerTestSuite) SetupTest() {
 	suite.balancer = NewRowCountBasedBalancer(suite.mockScheduler, nodeManager, distManager, testMeta, testTarget)
 
 	suite.broker.EXPECT().GetPartitions(mock.Anything, int64(1)).Return([]int64{1}, nil).Maybe()
+	suite.broker.EXPECT().DescribeIndex(mock.Anything, int64(1)).Return([]*indexpb.IndexInfo{}, nil).Maybe()
 }
 
 func (suite *RowCountBasedBalancerTestSuite) TearDownTest() {
@@ -388,6 +390,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalance() {
 				},
 			}
 			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(nil, segments, nil)
+			suite.broker.EXPECT().DescribeIndex(mock.Anything, int64(1)).Return([]*indexpb.IndexInfo{}, nil).Maybe()
 			collection := utils.CreateTestCollection(1, 1)
 			collection.LoadPercentage = 100
 			collection.Status = querypb.LoadStatus_Loaded
@@ -397,6 +400,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalance() {
 			balancer.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, append(c.nodes, c.notExistedNodes...)))
 			suite.broker.ExpectedCalls = nil
 			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(nil, segments, nil)
+			suite.broker.EXPECT().DescribeIndex(mock.Anything, int64(1)).Return([]*indexpb.IndexInfo{}, nil).Maybe()
 			balancer.targetMgr.UpdateCollectionNextTarget(int64(1))
 			balancer.targetMgr.UpdateCollectionCurrentTarget(1)
 			balancer.targetMgr.UpdateCollectionNextTarget(int64(1))
@@ -606,6 +610,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalanceOnPartStopping() {
 			balancer.targetMgr.UpdateCollectionCurrentTarget(1)
 			suite.broker.ExpectedCalls = nil
 			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(nil, c.segmentInNext, nil)
+			suite.broker.EXPECT().DescribeIndex(mock.Anything, int64(1)).Return([]*indexpb.IndexInfo{}, nil).Maybe()
 			balancer.targetMgr.UpdateCollectionNextTarget(int64(1))
 			suite.mockScheduler.Mock.On("GetNodeChannelDelta", mock.Anything).Return(0).Maybe()
 			for node, s := range c.distributions {
@@ -966,6 +971,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestDisableBalanceChannel() {
 			balancer.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, append(c.nodes, c.notExistedNodes...)))
 			suite.broker.ExpectedCalls = nil
 			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(nil, segments, nil)
+			suite.broker.EXPECT().DescribeIndex(mock.Anything, int64(1)).Return([]*indexpb.IndexInfo{}, nil).Maybe()
 			balancer.targetMgr.UpdateCollectionNextTarget(int64(1))
 			balancer.targetMgr.UpdateCollectionCurrentTarget(1)
 			balancer.targetMgr.UpdateCollectionNextTarget(int64(1))
