@@ -22,6 +22,7 @@ import (
 	"github.com/bits-and-blooms/bloom/v3"
 
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type BloomFilterSet struct {
@@ -57,7 +58,8 @@ func (bfs *BloomFilterSet) UpdatePKRange(ids storage.FieldData) error {
 
 	if bfs.current == nil {
 		bfs.current = &storage.PkStatistics{
-			PkFilter: bloom.NewWithEstimates(storage.BloomFilterSize, storage.MaxBloomFalsePositive),
+			PkFilter: bloom.NewWithEstimates(paramtable.Get().CommonCfg.BloomFilterSize.GetAsUint(),
+				paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat()),
 		}
 	}
 

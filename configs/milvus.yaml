@@ -580,6 +580,8 @@ common:
       warn: 1000 # minimum milliseconds for printing durations in warn level
   ttMsgEnabled: true # Whether the instance disable sending ts messages
   traceLogMode: 0 # trace request info, 0: none, 1: simple request info, like collection/partition/database name, 2: request detail
+  bloomFilterSize: 100000
+  maxBloomFalsePositive: 0.05
 
 # QuotaConfig, configurations of Milvus quota and limits.
 # By default, we enable:
