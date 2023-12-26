@@ -613,7 +613,7 @@ func (t *compactionTask) compact() (*datapb.CompactionPlanResult, error) {
 	)
 
 	log.Info("compact overall elapse", zap.Duration("elapse", time.Since(compactStart)))
-	metrics.DataNodeCompactionLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(t.tr.ElapseSpan().Milliseconds()))
+	metrics.DataNodeCompactionLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), t.plan.GetType().String()).Observe(float64(t.tr.ElapseSpan().Milliseconds()))
 	metrics.DataNodeCompactionLatencyInQueue.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(durInQueue.Milliseconds()))
 
 	planResult := &datapb.CompactionPlanResult{
