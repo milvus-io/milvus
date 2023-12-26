@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/broker"
+	"github.com/milvus-io/milvus/internal/datanode/importv2"
 	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
 	"github.com/milvus-io/milvus/internal/datanode/writebuffer"
 	"github.com/milvus-io/milvus/internal/kv"
@@ -91,6 +92,7 @@ type DataNode struct {
 
 	syncMgr            syncmgr.SyncManager
 	writeBufferManager writebuffer.BufferManager
+	importManager      importv2.Manager
 
 	clearSignal              chan string // vchannel name
 	segmentCache             *Cache

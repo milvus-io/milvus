@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/datanode/importv2"
 	"github.com/milvus-io/milvus/internal/datanode/io"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -945,21 +946,60 @@ func logDupFlush(cID, segID int64) {
 }
 
 func (node *DataNode) PreImport(ctx context.Context, req *datapb.PreImportRequest) (*commonpb.Status, error) {
-	return nil, merr.ErrServiceUnimplemented
+	task := importv2.NewPreImportTask(req)
+	node.importManager.Add(task)
+	return merr.Success(), nil
 }
 
 func (node *DataNode) ImportV2(ctx context.Context, req *datapb.ImportRequest) (*commonpb.Status, error) {
-	return nil, merr.ErrServiceUnimplemented
+	task := importv2.NewImportTask(req)
+	node.importManager.Add(task)
+	return merr.Success(), nil
 }
 
 func (node *DataNode) QueryPreImport(ctx context.Context, req *datapb.QueryPreImportRequest) (*datapb.QueryPreImportResponse, error) {
-	return nil, merr.ErrServiceUnimplemented
+	status := merr.Success()
+	task := node.importManager.Get(req.GetTaskID())
+	if task == nil || task.GetType() != importv2.PreImportTaskType {
+		status = merr.Status(importv2.WrapNoTaskError(req.GetTaskID(), importv2.PreImportTaskType))
+	}
+	return &datapb.QueryPreImportResponse{
+		Status:    status,
+		TaskID:    task.GetTaskID(),
+		State:     task.GetState(),
+		Reason:    task.GetReason(),
+		FileStats: task.(*importv2.PreImportTask).GetFileStats(),
+	}, nil
 }
 
 func (node *DataNode) QueryImport(ctx context.Context, req *datapb.QueryImportRequest) (*datapb.QueryImportResponse, error) {
-	return nil, merr.ErrServiceUnimplemented
+	status := merr.Success()
+
+	// query slot
+	const maxParallelImportTaskNum = 10 // TODO: dyh, make it configurable
+	if req.GetTaskID() == 0 && req.GetRequestID() == 0 {
+		tasks := node.importManager.GetBy(importv2.WithStates(milvuspb.ImportState_Pending, milvuspb.ImportState_InProgress))
+		return &datapb.QueryImportResponse{
+			Status: status,
+			Slots:  int64(maxParallelImportTaskNum - len(tasks)),
+		}, nil
+	}
+
+	// query import
+	task := node.importManager.Get(req.GetTaskID())
+	if task == nil || task.GetType() != importv2.ImportTaskType {
+		status = merr.Status(importv2.WrapNoTaskError(req.GetTaskID(), importv2.ImportTaskType))
+	}
+	return &datapb.QueryImportResponse{
+		Status:             status,
+		TaskID:             task.GetTaskID(),
+		State:              task.GetState(),
+		Reason:             task.GetReason(),
+		ImportSegmentsInfo: task.(*importv2.ImportTask).GetSegmentsInfo(),
+	}, nil
 }
 
 func (node *DataNode) DropImport(ctx context.Context, req *datapb.DropImportRequest) (*commonpb.Status, error) {
-	return nil, merr.ErrServiceUnimplemented
+	node.importManager.Remove(req.GetTaskID())
+	return merr.Success(), nil
 }
