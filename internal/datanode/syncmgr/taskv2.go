@@ -19,12 +19,9 @@ package syncmgr
 import (
 	"context"
 	"math"
-	"strconv"
 
 	"github.com/apache/arrow/go/v12/arrow"
 	"github.com/apache/arrow/go/v12/arrow/array"
-	"github.com/apache/arrow/go/v12/arrow/memory"
-	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -36,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
-	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -75,34 +71,18 @@ func (t *SyncTaskV2) Run() error {
 	log := t.getLogger()
 	var err error
 
-	infos := t.metacache.GetSegmentsBy(metacache.WithSegmentIDs(t.segmentID))
-	if len(infos) == 0 {
+	segment, ok := t.metacache.GetSegmentByID(t.segmentID)
+	if !ok {
 		log.Warn("failed to sync data, segment not found in metacache")
 		t.handleError(err)
 		return merr.WrapErrSegmentNotFound(t.segmentID)
 	}
 
-	segment := infos[0]
 	if segment.CompactTo() > 0 {
 		log.Info("syncing segment compacted, update segment id", zap.Int64("compactTo", segment.CompactTo()))
 		// update sync task segment id
 		// it's ok to use compactTo segmentID here, since there shall be no insert for compacted segment
 		t.segmentID = segment.CompactTo()
-	}
-
-	if err = t.serializeInsertData(); err != nil {
-		t.handleError(err)
-		return err
-	}
-
-	if err = t.serializeStatsData(); err != nil {
-		t.handleError(err)
-		return err
-	}
-
-	if err = t.serializeDeleteData(); err != nil {
-		t.handleError(err)
-		return err
 	}
 
 	if err = t.writeSpace(); err != nil {
@@ -128,156 +108,6 @@ func (t *SyncTaskV2) Run() error {
 	return nil
 }
 
-func (t *SyncTaskV2) serializeInsertData() error {
-	if t.insertData == nil {
-		return nil
-	}
-
-	b := array.NewRecordBuilder(memory.DefaultAllocator, t.arrowSchema)
-	defer b.Release()
-
-	if err := buildRecord(b, t.insertData, t.schema.Fields); err != nil {
-		return err
-	}
-
-	rec := b.NewRecord()
-	defer rec.Release()
-
-	itr, err := array.NewRecordReader(t.arrowSchema, []arrow.Record{rec})
-	if err != nil {
-		return err
-	}
-	itr.Retain()
-	t.reader = itr
-	return nil
-}
-
-func (t *SyncTaskV2) serializeStatsData() error {
-	if t.insertData == nil {
-		return nil
-	}
-
-	pkField := lo.FindOrElse(t.schema.GetFields(), nil, func(field *schemapb.FieldSchema) bool { return field.GetIsPrimaryKey() })
-	if pkField == nil {
-		return merr.WrapErrServiceInternal("cannot find pk field")
-	}
-	fieldID := pkField.GetFieldID()
-
-	stats, rowNum := t.convertInsertData2PkStats(fieldID, pkField.GetDataType())
-
-	// not flush and not insert data
-	if !t.isFlush && stats == nil {
-		return nil
-	}
-	if t.isFlush {
-		return t.serializeMergedPkStats(fieldID, pkField.GetDataType(), stats, rowNum)
-	}
-
-	return t.serializeSinglePkStats(fieldID, stats, rowNum)
-}
-
-func (t *SyncTaskV2) serializeMergedPkStats(fieldID int64, pkType schemapb.DataType, stats *storage.PrimaryKeyStats, rowNum int64) error {
-	segments := t.metacache.GetSegmentsBy(metacache.WithSegmentIDs(t.segmentID))
-	var statsList []*storage.PrimaryKeyStats
-	var oldRowNum int64
-	for _, segment := range segments {
-		oldRowNum += segment.NumOfRows()
-		statsList = append(statsList, lo.Map(segment.GetHistory(), func(pks *storage.PkStatistics, _ int) *storage.PrimaryKeyStats {
-			return &storage.PrimaryKeyStats{
-				FieldID: fieldID,
-				MaxPk:   pks.MaxPK,
-				MinPk:   pks.MinPK,
-				BF:      pks.PkFilter,
-				PkType:  int64(pkType),
-			}
-		})...)
-	}
-	if stats != nil {
-		statsList = append(statsList, stats)
-	}
-
-	blob, err := t.getInCodec().SerializePkStatsList(statsList, oldRowNum+rowNum)
-	if err != nil {
-		return err
-	}
-	blob.Key = strconv.Itoa(int(storage.CompoundStatsType))
-	t.statsBlob = blob
-	return nil
-}
-
-func (t *SyncTaskV2) serializeSinglePkStats(fieldID int64, stats *storage.PrimaryKeyStats, rowNum int64) error {
-	blob, err := t.getInCodec().SerializePkStats(stats, rowNum)
-	if err != nil {
-		return err
-	}
-
-	logidx, err := t.allocator.AllocOne()
-	if err != nil {
-		return err
-	}
-
-	blob.Key = strconv.Itoa(int(logidx))
-	t.statsBlob = blob
-	return nil
-}
-
-func (t *SyncTaskV2) serializeDeleteData() error {
-	if t.deleteData == nil {
-		return nil
-	}
-
-	fields := make([]*schemapb.FieldSchema, 0)
-	pkField := lo.FindOrElse(t.schema.GetFields(), nil, func(field *schemapb.FieldSchema) bool { return field.GetIsPrimaryKey() })
-	if pkField == nil {
-		return merr.WrapErrServiceInternal("cannot find pk field")
-	}
-	fields = append(fields, pkField)
-	tsField := &schemapb.FieldSchema{
-		FieldID:  common.TimeStampField,
-		Name:     common.TimeStampFieldName,
-		DataType: schemapb.DataType_Int64,
-	}
-	fields = append(fields, tsField)
-
-	schema, err := typeutil2.ConvertToArrowSchema(fields)
-	if err != nil {
-		return err
-	}
-
-	b := array.NewRecordBuilder(memory.DefaultAllocator, schema)
-	defer b.Release()
-
-	switch pkField.DataType {
-	case schemapb.DataType_Int64:
-		pb := b.Field(0).(*array.Int64Builder)
-		for _, pk := range t.deleteData.Pks {
-			pb.Append(pk.GetValue().(int64))
-		}
-	case schemapb.DataType_VarChar:
-		pb := b.Field(0).(*array.StringBuilder)
-		for _, pk := range t.deleteData.Pks {
-			pb.Append(pk.GetValue().(string))
-		}
-	default:
-		return merr.WrapErrParameterInvalidMsg("unexpected pk type %v", pkField.DataType)
-	}
-
-	for _, ts := range t.deleteData.Tss {
-		b.Field(1).(*array.Int64Builder).Append(int64(ts))
-	}
-
-	rec := b.NewRecord()
-	defer rec.Release()
-
-	reader, err := array.NewRecordReader(schema, []arrow.Record{rec})
-	if err != nil {
-		return err
-	}
-
-	t.deleteReader = reader
-	return nil
-}
-
 func (t *SyncTaskV2) writeSpace() error {
 	defer func() {
 		if t.reader != nil {
@@ -288,37 +118,6 @@ func (t *SyncTaskV2) writeSpace() error {
 		}
 	}()
 
-	// url := fmt.Sprintf("s3://%s:%s@%s/%d?endpoint_override=%s",
-	// 	params.Params.MinioCfg.AccessKeyID.GetValue(),
-	// 	params.Params.MinioCfg.SecretAccessKey.GetValue(),
-	// 	params.Params.MinioCfg.BucketName.GetValue(),
-	// 	t.segmentID,
-	// 	params.Params.MinioCfg.Address.GetValue())
-
-	// pkSchema, err := typeutil.GetPrimaryFieldSchema(t.schema)
-	// if err != nil {
-	// 	return err
-	// }
-	// vecSchema, err := typeutil.GetVectorFieldSchema(t.schema)
-	// if err != nil {
-	// 	return err
-	// }
-	// space, err := milvus_storage.Open(
-	// 	url,
-	// 	options.NewSpaceOptionBuilder().
-	// 		SetSchema(schema.NewSchema(
-	// 			t.arrowSchema,
-	// 			&schema.SchemaOptions{
-	// 				PrimaryColumn: pkSchema.Name,
-	// 				VectorColumn:  vecSchema.Name,
-	// 				VersionColumn: common.TimeStampFieldName,
-	// 			},
-	// 		)).
-	// 		Build(),
-	// )
-	// if err != nil {
-	// 	return err
-	// }
 	txn := t.space.NewTransaction()
 	if t.reader != nil {
 		txn.Write(t.reader, &options.DefaultWriteOptions)
@@ -480,16 +279,6 @@ func (t *SyncTaskV2) WithChunkManager(cm storage.ChunkManager) *SyncTaskV2 {
 
 func (t *SyncTaskV2) WithAllocator(allocator allocator.Interface) *SyncTaskV2 {
 	t.allocator = allocator
-	return t
-}
-
-func (t *SyncTaskV2) WithInsertData(insertData *storage.InsertData) *SyncTaskV2 {
-	t.insertData = insertData
-	return t
-}
-
-func (t *SyncTaskV2) WithDeleteData(deleteData *storage.DeleteData) *SyncTaskV2 {
-	t.deleteData = deleteData
 	return t
 }
 

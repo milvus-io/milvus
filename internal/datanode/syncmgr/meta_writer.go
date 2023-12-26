@@ -48,12 +48,11 @@ func (b *brokerMetaWriter) UpdateSync(pack *SyncTask) error {
 		deltaFieldBinlogs = append(deltaFieldBinlogs, pack.deltaBinlog)
 	}
 
-	// only current segment checkpoint info,
-	segments := pack.metacache.GetSegmentsBy(metacache.WithSegmentIDs(pack.segmentID))
-	if len(segments) == 0 {
+	// only current segment checkpoint info
+	segment, ok := pack.metacache.GetSegmentByID(pack.segmentID)
+	if !ok {
 		return merr.WrapErrSegmentNotFound(pack.segmentID)
 	}
-	segment := segments[0]
 	checkPoints = append(checkPoints, &datapb.CheckPoint{
 		SegmentID: pack.segmentID,
 		NumOfRows: segment.FlushedRows() + pack.batchSize,
@@ -140,11 +139,10 @@ func (b *brokerMetaWriter) UpdateSyncV2(pack *SyncTaskV2) error {
 	checkPoints := []*datapb.CheckPoint{}
 
 	// only current segment checkpoint info,
-	segments := pack.metacache.GetSegmentsBy(metacache.WithSegmentIDs(pack.segmentID))
-	if len(segments) == 0 {
+	segment, ok := pack.metacache.GetSegmentByID(pack.segmentID)
+	if !ok {
 		return merr.WrapErrSegmentNotFound(pack.segmentID)
 	}
-	segment := segments[0]
 	checkPoints = append(checkPoints, &datapb.CheckPoint{
 		SegmentID: pack.segmentID,
 		NumOfRows: segment.FlushedRows() + pack.batchSize,

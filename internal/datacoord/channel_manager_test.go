@@ -596,7 +596,7 @@ func TestChannelManager(t *testing.T) {
 	})
 
 	t.Run("test Reassign-channel not found", func(t *testing.T) {
-		var chManager *ChannelManager
+		var chManager *ChannelManagerImpl
 		var err error
 		handler := NewNMockHandler(t)
 		handler.EXPECT().
@@ -621,7 +621,7 @@ func TestChannelManager(t *testing.T) {
 	})
 
 	t.Run("test CleanupAndReassign-channel not found", func(t *testing.T) {
-		var chManager *ChannelManager
+		var chManager *ChannelManagerImpl
 		var err error
 		handler := NewNMockHandler(t)
 		handler.EXPECT().
@@ -1174,7 +1174,7 @@ func TestChannelManager_RemoveChannel(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c := &ChannelManager{
+			c := &ChannelManagerImpl{
 				store: tt.fields.store,
 			}
 			err := c.RemoveChannel(tt.args.channelName)
@@ -1186,7 +1186,7 @@ func TestChannelManager_RemoveChannel(t *testing.T) {
 }
 
 func TestChannelManager_HelperFunc(t *testing.T) {
-	c := &ChannelManager{}
+	c := &ChannelManagerImpl{}
 	t.Run("test getOldOnlines", func(t *testing.T) {
 		tests := []struct {
 			nodes  []int64

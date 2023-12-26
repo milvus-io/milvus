@@ -20,12 +20,13 @@ import (
 
 type WriteBufferSuite struct {
 	suite.Suite
-	collID      int64
-	channelName string
-	collSchema  *schemapb.CollectionSchema
-	wb          *writeBufferBase
-	syncMgr     *syncmgr.MockSyncManager
-	metacache   *metacache.MockMetaCache
+	collID       int64
+	channelName  string
+	collSchema   *schemapb.CollectionSchema
+	wb           *writeBufferBase
+	syncMgr      *syncmgr.MockSyncManager
+	metacache    *metacache.MockMetaCache
+	storageCache *metacache.StorageV2Cache
 }
 
 func (s *WriteBufferSuite) SetupSuite() {
@@ -44,20 +45,24 @@ func (s *WriteBufferSuite) SetupSuite() {
 }
 
 func (s *WriteBufferSuite) SetupTest() {
+	storageCache, err := metacache.NewStorageV2Cache(s.collSchema)
+	s.Require().NoError(err)
+	s.storageCache = storageCache
 	s.syncMgr = syncmgr.NewMockSyncManager(s.T())
 	s.metacache = metacache.NewMockMetaCache(s.T())
 	s.metacache.EXPECT().Schema().Return(s.collSchema).Maybe()
 	s.metacache.EXPECT().Collection().Return(s.collID).Maybe()
-	s.wb = newWriteBufferBase(s.channelName, s.metacache, nil, s.syncMgr, &writeBufferOption{
+	s.wb, err = newWriteBufferBase(s.channelName, s.metacache, storageCache, s.syncMgr, &writeBufferOption{
 		pkStatsFactory: func(vchannel *datapb.SegmentInfo) *metacache.BloomFilterSet {
 			return metacache.NewBloomFilterSet()
 		},
 	})
+	s.Require().NoError(err)
 }
 
 func (s *WriteBufferSuite) TestDefaultOption() {
 	s.Run("default BFPkOracle", func() {
-		wb, err := NewWriteBuffer(s.channelName, s.metacache, nil, s.syncMgr)
+		wb, err := NewWriteBuffer(s.channelName, s.metacache, s.storageCache, s.syncMgr)
 		s.NoError(err)
 		_, ok := wb.(*bfWriteBuffer)
 		s.True(ok)
@@ -66,7 +71,7 @@ func (s *WriteBufferSuite) TestDefaultOption() {
 	s.Run("default L0Delta policy", func() {
 		paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableLevelZeroSegment.Key, "true")
 		defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableLevelZeroSegment.Key)
-		wb, err := NewWriteBuffer(s.channelName, s.metacache, nil, s.syncMgr, WithIDAllocator(allocator.NewMockGIDAllocator()))
+		wb, err := NewWriteBuffer(s.channelName, s.metacache, s.storageCache, s.syncMgr, WithIDAllocator(allocator.NewMockGIDAllocator()))
 		s.NoError(err)
 		_, ok := wb.(*l0WriteBuffer)
 		s.True(ok)
@@ -74,18 +79,18 @@ func (s *WriteBufferSuite) TestDefaultOption() {
 }
 
 func (s *WriteBufferSuite) TestWriteBufferType() {
-	wb, err := NewWriteBuffer(s.channelName, s.metacache, nil, s.syncMgr, WithDeletePolicy(DeletePolicyBFPkOracle))
+	wb, err := NewWriteBuffer(s.channelName, s.metacache, s.storageCache, s.syncMgr, WithDeletePolicy(DeletePolicyBFPkOracle))
 	s.NoError(err)
 
 	_, ok := wb.(*bfWriteBuffer)
 	s.True(ok)
 
-	wb, err = NewWriteBuffer(s.channelName, s.metacache, nil, s.syncMgr, WithDeletePolicy(DeletePolicyL0Delta), WithIDAllocator(allocator.NewMockGIDAllocator()))
+	wb, err = NewWriteBuffer(s.channelName, s.metacache, s.storageCache, s.syncMgr, WithDeletePolicy(DeletePolicyL0Delta), WithIDAllocator(allocator.NewMockGIDAllocator()))
 	s.NoError(err)
 	_, ok = wb.(*l0WriteBuffer)
 	s.True(ok)
 
-	_, err = NewWriteBuffer(s.channelName, s.metacache, nil, s.syncMgr, WithDeletePolicy(""))
+	_, err = NewWriteBuffer(s.channelName, s.metacache, s.storageCache, s.syncMgr, WithDeletePolicy(""))
 	s.Error(err)
 }
 
@@ -102,9 +107,9 @@ func (s *WriteBufferSuite) TestHasSegment() {
 func (s *WriteBufferSuite) TestFlushSegments() {
 	segmentID := int64(1001)
 
-	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything, mock.Anything)
+	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything, mock.Anything).Return()
 
-	wb, err := NewWriteBuffer(s.channelName, s.metacache, nil, s.syncMgr, WithDeletePolicy(DeletePolicyBFPkOracle))
+	wb, err := NewWriteBuffer(s.channelName, s.metacache, s.storageCache, s.syncMgr, WithDeletePolicy(DeletePolicyBFPkOracle))
 	s.NoError(err)
 
 	err = wb.FlushSegments(context.Background(), []int64{segmentID})

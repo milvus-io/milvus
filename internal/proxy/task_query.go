@@ -546,16 +546,14 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 	idSet := make(map[interface{}]struct{})
 	cursors := make([]int64, len(validRetrieveResults))
 
-	realLimit := typeutil.Unlimited
 	if queryParams != nil && queryParams.limit != typeutil.Unlimited {
-		realLimit = queryParams.limit
 		if !queryParams.reduceStopForBest {
 			loopEnd = int(queryParams.limit)
 		}
 		if queryParams.offset > 0 {
 			for i := int64(0); i < queryParams.offset; i++ {
-				sel := typeutil.SelectMinPK(validRetrieveResults, cursors, queryParams.reduceStopForBest, realLimit)
-				if sel == -1 {
+				sel, drainOneResult := typeutil.SelectMinPK(validRetrieveResults, cursors)
+				if sel == -1 || (queryParams.reduceStopForBest && drainOneResult) {
 					return ret, nil
 				}
 				cursors[sel]++
@@ -570,8 +568,8 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 	var retSize int64
 	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
 	for j := 0; j < loopEnd; j++ {
-		sel := typeutil.SelectMinPK(validRetrieveResults, cursors, reduceStopForBest, realLimit)
-		if sel == -1 {
+		sel, drainOneResult := typeutil.SelectMinPK(validRetrieveResults, cursors)
+		if sel == -1 || (reduceStopForBest && drainOneResult) {
 			break
 		}
 
