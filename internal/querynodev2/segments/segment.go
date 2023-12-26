@@ -357,7 +357,10 @@ func (s *LocalSegment) Search(ctx context.Context, searchReq *SearchRequest) (*S
 		metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
 		return nil, nil
 	}).Await()
-	if err := HandleCStatus(&status, "Search failed"); err != nil {
+	if err := HandleCStatus(&status, "Search failed",
+		zap.Int64("collectionID", s.Collection()),
+		zap.Int64("segmentID", s.ID()),
+		zap.String("segmentType", s.typ.String())); err != nil {
 		return nil, err
 	}
 	log.Debug("search segment done")
@@ -409,7 +412,12 @@ func (s *LocalSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segco
 		return nil, nil
 	}).Await()
 
-	if err := HandleCStatus(&status, "Retrieve failed"); err != nil {
+	if err := HandleCStatus(&status, "Retrieve failed",
+		zap.Int64("collectionID", s.Collection()),
+		zap.Int64("partitionID", s.Partition()),
+		zap.Int64("segmentID", s.ID()),
+		zap.Int64("msgID", plan.msgID),
+		zap.String("segmentType", s.typ.String())); err != nil {
 		return nil, err
 	}
 
@@ -630,7 +638,10 @@ func (s *LocalSegment) LoadMultiFieldData(rowCount int64, fields []*datapb.Field
 		status = C.LoadFieldData(s.ptr, loadFieldDataInfo.cLoadFieldDataInfo)
 		return nil, nil
 	}).Await()
-	if err := HandleCStatus(&status, "LoadMultiFieldData failed"); err != nil {
+	if err := HandleCStatus(&status, "LoadMultiFieldData failed",
+		zap.Int64("collectionID", s.Collection()),
+		zap.Int64("partitionID", s.Partition()),
+		zap.Int64("segmentID", s.ID())); err != nil {
 		return err
 	}
 
@@ -683,7 +694,11 @@ func (s *LocalSegment) LoadFieldData(fieldID int64, rowCount int64, field *datap
 		status = C.LoadFieldData(s.ptr, loadFieldDataInfo.cLoadFieldDataInfo)
 		return nil, nil
 	}).Await()
-	if err := HandleCStatus(&status, "LoadFieldData failed"); err != nil {
+	if err := HandleCStatus(&status, "LoadFieldData failed",
+		zap.Int64("collectionID", s.Collection()),
+		zap.Int64("partitionID", s.Partition()),
+		zap.Int64("segmentID", s.ID()),
+		zap.Int64("fieldID", fieldID)); err != nil {
 		return err
 	}
 
@@ -733,7 +748,10 @@ func (s *LocalSegment) AddFieldDataInfo(rowCount int64, fields []*datapb.FieldBi
 		status = C.AddFieldDataInfoForSealed(s.ptr, loadFieldDataInfo.cLoadFieldDataInfo)
 		return nil, nil
 	}).Await()
-	if err := HandleCStatus(&status, "AddFieldDataInfo failed"); err != nil {
+	if err := HandleCStatus(&status, "AddFieldDataInfo failed",
+		zap.Int64("collectionID", s.Collection()),
+		zap.Int64("partitionID", s.Partition()),
+		zap.Int64("segmentID", s.ID())); err != nil {
 		return err
 	}
 
@@ -806,7 +824,10 @@ func (s *LocalSegment) LoadDeltaData(deltaData *storage.DeleteData) error {
 		return nil, nil
 	}).Await()
 
-	if err := HandleCStatus(&status, "LoadDeletedRecord failed"); err != nil {
+	if err := HandleCStatus(&status, "LoadDeletedRecord failed",
+		zap.Int64("collectionID", s.Collection()),
+		zap.Int64("partitionID", s.Partition()),
+		zap.Int64("segmentID", s.ID())); err != nil {
 		return err
 	}
 
@@ -862,7 +883,11 @@ func (s *LocalSegment) LoadIndexInfo(indexInfo *querypb.FieldIndexInfo, info *Lo
 		return nil, nil
 	}).Await()
 
-	if err := HandleCStatus(&status, "UpdateSealedSegmentIndex failed"); err != nil {
+	if err := HandleCStatus(&status, "UpdateSealedSegmentIndex failed",
+		zap.Int64("collectionID", s.Collection()),
+		zap.Int64("partitionID", s.Partition()),
+		zap.Int64("segmentID", s.ID()),
+		zap.Int64("fieldID", indexInfo.FieldID)); err != nil {
 		return err
 	}
 	log.Info("updateSegmentIndex done")
