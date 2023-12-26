@@ -8,6 +8,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
 	"go.opentelemetry.io/otel"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -238,6 +239,7 @@ type deleteRunner struct {
 	msgID int64
 	ts    uint64
 	lb    LBPolicy
+	count atomic.Int64
 	err   error
 
 	// task queue
@@ -345,6 +347,8 @@ func (dr *deleteRunner) produce(ctx context.Context, primaryKeys *schemapb.IDs) 
 	return task, nil
 }
 
+// getStreamingQueryAndDelteFunc return query function used by LBPolicy
+// make sure it concurrent safe
 func (dr *deleteRunner) getStreamingQueryAndDelteFunc(plan *planpb.PlanNode) executeFunc {
 	return func(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channelIDs ...string) error {
 		var partitionIDs []int64
@@ -422,7 +426,7 @@ func (dr *deleteRunner) getStreamingQueryAndDelteFunc(plan *planpb.PlanNode) exe
 			if err != nil {
 				return err
 			}
-			dr.result.DeleteCnt += task.count
+			dr.count.Add(task.count)
 		}
 
 		// query or produce task failed
@@ -488,14 +492,16 @@ func (dr *deleteRunner) complexDelete(ctx context.Context, plan *planpb.PlanNode
 		nq:             1,
 		exec:           dr.getStreamingQueryAndDelteFunc(plan),
 	})
+	dr.result.DeleteCnt = dr.count.Load()
 	if err != nil {
 		log.Warn("fail to execute complex delete",
-			zap.Int64("deleteCnt", dr.result.DeleteCnt),
+			zap.Int64("deleteCnt", dr.result.GetDeleteCnt()),
 			zap.Duration("interval", rc.ElapseSpan()),
 			zap.Error(err))
 		return err
 	}
-	log.Info("complex delete finished", zap.Int64("deleteCnt", dr.result.DeleteCnt), zap.Duration("interval", rc.ElapseSpan()))
+
+	log.Info("complex delete finished", zap.Int64("deleteCnt", dr.result.GetDeleteCnt()), zap.Duration("interval", rc.ElapseSpan()))
 	return nil
 }
 
@@ -513,7 +519,7 @@ func (dr *deleteRunner) simpleDelete(ctx context.Context, pk *schemapb.IDs, numR
 
 	err = task.WaitToFinish()
 	if err == nil {
-		dr.result.DeleteCnt += task.count
+		dr.result.DeleteCnt = task.count
 	}
 	return err
 }
