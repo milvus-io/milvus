@@ -18,6 +18,7 @@ package proxy
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -251,6 +252,43 @@ func Test_singleTypeChannelsMgr_createMsgStream(t *testing.T) {
 		assert.NotNil(t, stream)
 	})
 
+	t.Run("concurrent create", func(t *testing.T) {
+		factory := newMockMsgStreamFactory()
+		factory.f = func(ctx context.Context) (msgstream.MsgStream, error) {
+			return newMockMsgStream(), nil
+		}
+		stopCh := make(chan struct{})
+		readyCh := make(chan struct{})
+		m := &singleTypeChannelsMgr{
+			infos: make(map[UniqueID]streamInfos),
+			getChannelsFunc: func(collectionID UniqueID) (channelInfos, error) {
+				close(readyCh)
+				<-stopCh
+				return channelInfos{vchans: []string{"111", "222"}, pchans: []string{"111"}}, nil
+			},
+			msgStreamFactory: factory,
+			repackFunc:       nil,
+		}
+
+		firstStream := streamInfos{stream: newMockMsgStream()}
+		wg := sync.WaitGroup{}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			stream, err := m.createMsgStream(100)
+			assert.NoError(t, err)
+			assert.NotNil(t, stream)
+		}()
+		// make sure create msg stream has run at getchannels
+		<-readyCh
+		// mock create stream for same collection in same time.
+		m.mu.Lock()
+		m.infos[100] = firstStream
+		m.mu.Unlock()
+
+		close(stopCh)
+		wg.Wait()
+	})
 	t.Run("failed to get channels", func(t *testing.T) {
 		m := &singleTypeChannelsMgr{
 			getChannelsFunc: func(collectionID UniqueID) (channelInfos, error) {
