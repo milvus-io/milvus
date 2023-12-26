@@ -18,8 +18,12 @@ type bfWriteBuffer struct {
 }
 
 func NewBFWriteBuffer(channel string, metacache metacache.MetaCache, storageV2Cache *metacache.StorageV2Cache, syncMgr syncmgr.SyncManager, option *writeBufferOption) (WriteBuffer, error) {
+	base, err := newWriteBufferBase(channel, metacache, storageV2Cache, syncMgr, option)
+	if err != nil {
+		return nil, err
+	}
 	return &bfWriteBuffer{
-		writeBufferBase: newWriteBufferBase(channel, metacache, storageV2Cache, syncMgr, option),
+		writeBufferBase: base,
 		syncMgr:         syncMgr,
 	}, nil
 }

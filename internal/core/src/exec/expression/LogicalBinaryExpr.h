@@ -40,8 +40,7 @@ struct LogicalElementFunc {
         } else if constexpr (op == LogicalOpType::Or) {
             milvus::simd::or_bool(left, right, n);
         } else {
-            PanicInfo(OpTypeInvalid,
-                      fmt::format("unsupported logical operator: {}", op));
+            PanicInfo(OpTypeInvalid, "unsupported logical operator: {}", op);
         }
 #else
         for (size_t i = 0; i < n; ++i) {
@@ -50,8 +49,8 @@ struct LogicalElementFunc {
             } else if constexpr (op == LogicalOpType::Or) {
                 left[i] |= right[i];
             } else {
-                PanicInfo(OpTypeInvalid,
-                          fmt::format("unsupported logical operator: {}", op));
+                PanicInfo(
+                    OpTypeInvalid, "unsupported logical operator: {}", op);
             }
         }
 #endif

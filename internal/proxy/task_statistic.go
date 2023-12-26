@@ -320,6 +320,10 @@ func checkFullLoaded(ctx context.Context, qc types.QueryCoordClient, dbName stri
 	if err != nil {
 		return nil, nil, fmt.Errorf("GetCollectionInfo failed, dbName = %s, collectionName = %s,collectionID = %d, err = %s", dbName, collectionName, collectionID, err)
 	}
+	partitionInfos, err := globalMetaCache.GetPartitions(ctx, dbName, collectionName)
+	if err != nil {
+		return nil, nil, fmt.Errorf("GetPartitions failed, dbName = %s, collectionName = %s,collectionID = %d, err = %s", dbName, collectionName, collectionID, err)
+	}
 
 	// If request to search partitions
 	if len(searchPartitionIDs) > 0 {
@@ -372,11 +376,12 @@ func checkFullLoaded(ctx context.Context, qc types.QueryCoordClient, dbName stri
 		}
 	}
 
-	for _, partInfo := range info.partInfo {
-		if _, ok := loadedMap[partInfo.partitionID]; !ok {
-			unloadPartitionIDs = append(unloadPartitionIDs, partInfo.partitionID)
+	for _, partitionID := range partitionInfos {
+		if _, ok := loadedMap[partitionID]; !ok {
+			unloadPartitionIDs = append(unloadPartitionIDs, partitionID)
 		}
 	}
+
 	return loadedPartitionIDs, unloadPartitionIDs, nil
 }
 

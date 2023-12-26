@@ -98,6 +98,7 @@ func TestClientBase_NodeSessionNotExist(t *testing.T) {
 	base := ClientBase[*mockClient]{
 		maxCancelError: 10,
 		MaxAttempts:    3,
+		isNode:         true,
 	}
 	base.SetGetAddrFunc(func() (string, error) {
 		return "", errors.New("mocked address error")
@@ -148,6 +149,7 @@ func testCall(t *testing.T, compressed bool) {
 	base := ClientBase[*mockClient]{
 		maxCancelError: 10,
 		MaxAttempts:    3,
+		isNode:         true,
 	}
 	base.CompressionEnabled = compressed
 	initClient := func() {

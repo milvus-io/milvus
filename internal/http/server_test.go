@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/http/healthz"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/expr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -190,6 +191,31 @@ func (suite *HTTPServerTestSuite) TestPprofHandler() {
 			fmt.Println(err.Error())
 		}
 	}
+}
+
+func (suite *HTTPServerTestSuite) TestExprHandler() {
+	expr.Init()
+	expr.Register("foo", "hello")
+	suite.Run("fail", func() {
+		url := "http://localhost:" + DefaultListenPort + ExprPath + "?code=foo"
+		client := http.Client{}
+		req, _ := http.NewRequest(http.MethodGet, url, nil)
+		resp, err := client.Do(req)
+		suite.Nil(err)
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+		suite.True(strings.Contains(string(body), "failed to execute"))
+	})
+	suite.Run("success", func() {
+		url := "http://localhost:" + DefaultListenPort + ExprPath + "?auth=by-dev&code=foo"
+		client := http.Client{}
+		req, _ := http.NewRequest(http.MethodGet, url, nil)
+		resp, err := client.Do(req)
+		suite.Nil(err)
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+		suite.True(strings.Contains(string(body), "hello"))
+	})
 }
 
 func TestHTTPServerSuite(t *testing.T) {

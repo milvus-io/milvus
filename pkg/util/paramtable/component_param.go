@@ -58,6 +58,7 @@ type ComponentParam struct {
 	CommonCfg       commonConfig
 	QuotaConfig     quotaConfig
 	AutoIndexConfig autoIndexConfig
+	GpuConfig       gpuConfig
 	TraceCfg        traceConfig
 
 	RootCoordCfg  rootCoordConfig
@@ -118,6 +119,7 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.HTTPCfg.init(bt)
 	p.LogCfg.init(bt)
 	p.RoleCfg.init(bt)
+	p.GpuConfig.init(bt)
 
 	p.RootCoordGrpcServerCfg.Init("rootCoord", bt)
 	p.ProxyGrpcServerCfg.Init("proxy", bt)
@@ -150,6 +152,10 @@ func (p *ComponentParam) GetAll() map[string]string {
 
 func (p *ComponentParam) Watch(key string, watcher config.EventHandler) {
 	p.baseTable.mgr.Dispatcher.Register(key, watcher)
+}
+
+func (p *ComponentParam) Unwatch(key string, watcher config.EventHandler) {
+	p.baseTable.mgr.Dispatcher.Unregister(key, watcher)
 }
 
 func (p *ComponentParam) WatchKeyPrefix(keyPrefix string, watcher config.EventHandler) {
@@ -668,6 +674,29 @@ like the old password verification when updating the credential`,
 	p.TraceLogMode.Init(base.mgr)
 }
 
+type gpuConfig struct {
+	InitSize ParamItem `refreshable:"false"`
+	MaxSize  ParamItem `refreshable:"false"`
+}
+
+func (t *gpuConfig) init(base *BaseTable) {
+	t.InitSize = ParamItem{
+		Key:     "gpu.initMemSize",
+		Version: "2.3.4",
+		Doc:     `Gpu Memory Pool init size`,
+		Export:  true,
+	}
+	t.InitSize.Init(base.mgr)
+
+	t.MaxSize = ParamItem{
+		Key:     "gpu.maxMemSize",
+		Version: "2.3.4",
+		Doc:     `Gpu Memory Pool Max size`,
+		Export:  true,
+	}
+	t.MaxSize.Init(base.mgr)
+}
+
 type traceConfig struct {
 	Exporter       ParamItem `refreshable:"false"`
 	SampleFraction ParamItem `refreshable:"false"`
@@ -1106,9 +1135,10 @@ please adjust in embedded Milvus: false`,
 	p.AccessLog.MinioEnable.Init(base.mgr)
 
 	p.AccessLog.LocalPath = ParamItem{
-		Key:     "proxy.accessLog.localPath",
-		Version: "2.2.0",
-		Export:  true,
+		Key:          "proxy.accessLog.localPath",
+		Version:      "2.2.0",
+		DefaultValue: "/tmp/milvus_access",
+		Export:       true,
 	}
 	p.AccessLog.LocalPath.Init(base.mgr)
 
@@ -2126,6 +2156,7 @@ type dataCoordConfig struct {
 	WatchTimeoutInterval         ParamItem `refreshable:"false"`
 	ChannelBalanceSilentDuration ParamItem `refreshable:"true"`
 	ChannelBalanceInterval       ParamItem `refreshable:"true"`
+	ChannelCheckInterval         ParamItem `refreshable:"true"`
 	ChannelOperationRPCTimeout   ParamItem `refreshable:"true"`
 
 	// --- SEGMENTS ---
@@ -2214,6 +2245,15 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.ChannelBalanceInterval.Init(base.mgr)
+
+	p.ChannelCheckInterval = ParamItem{
+		Key:          "dataCoord.channel.checkInterval",
+		Version:      "2.4.0",
+		DefaultValue: "10",
+		Doc:          "The interval in seconds with which the channel manager advances channel states",
+		Export:       true,
+	}
+	p.ChannelCheckInterval.Init(base.mgr)
 
 	p.ChannelOperationRPCTimeout = ParamItem{
 		Key:          "dataCoord.channel.notifyChannelOperationTimeout",

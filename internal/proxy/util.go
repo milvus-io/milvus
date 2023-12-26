@@ -1427,7 +1427,7 @@ func assignChannelsByPK(pks *schemapb.IDs, channelNames []string, insertMsg *msg
 }
 
 func assignPartitionKeys(ctx context.Context, dbName string, collName string, keys []*planpb.GenericValue) ([]string, error) {
-	partitionNames, err := getDefaultPartitionNames(ctx, dbName, collName)
+	partitionNames, err := globalMetaCache.GetPartitionsIndex(ctx, dbName, collName)
 	if err != nil {
 		return nil, err
 	}
@@ -1567,6 +1567,11 @@ func SendReplicateMessagePack(ctx context.Context, replicateMsgStream msgstream.
 		tsMsg = &msgstream.ReleasePartitionsMsg{
 			BaseMsg:                  getBaseMsg(ctx, ts),
 			ReleasePartitionsRequest: *r,
+		}
+	case *milvuspb.AlterIndexRequest:
+		tsMsg = &msgstream.AlterIndexMsg{
+			BaseMsg:           getBaseMsg(ctx, ts),
+			AlterIndexRequest: *r,
 		}
 	default:
 		log.Warn("unknown request", zap.Any("request", request))

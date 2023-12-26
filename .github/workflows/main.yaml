@@ -93,13 +93,13 @@ jobs:
           echo "Set CCache hash to ${CORE_HASH}"
       - name: Cache CCache Volumes
         # uses: actions/cache@v3
-        uses: pat-s/always-upload-cache@v3
+        uses: actions/cache@v3
         with:
           path: .docker/amd64-ubuntu${{ matrix.ubuntu }}-ccache
           key: ubuntu${{ matrix.ubuntu }}-ccache-${{ env.corehash }}
           restore-keys: ubuntu${{ matrix.ubuntu }}-ccache-
       - name: Cache Conan Packages
-        uses: pat-s/always-upload-cache@v3
+        uses: actions/cache@v3
         with:
           path: .docker/amd64-ubuntu${{ matrix.ubuntu }}-conan
           key: ubuntu${{ matrix.ubuntu }}-conan-${{ hashFiles('internal/core/conanfile.*') }}
@@ -134,7 +134,7 @@ jobs:
           unzip code.zip
           rm code.zip
       - name: Cache Conan Packages
-        uses: pat-s/always-upload-cache@v3
+        uses: actions/cache@v3
         with:
           path: .docker/amd64-ubuntu${{ matrix.ubuntu }}-conan
           key: ubuntu${{ matrix.ubuntu }}-conan-${{ hashFiles('internal/core/conanfile.*') }}

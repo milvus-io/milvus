@@ -29,10 +29,11 @@ VecIndexConfig::VecIndexConfig(const int64_t max_index_row_cout,
         std::max((int)(config_.get_chunk_rows() / config_.get_nlist()), 48));
     search_params_[knowhere::indexparam::NPROBE] =
         std::to_string(config_.get_nprobe());
-    LOG_SEGCORE_INFO_ << " VecIndexConfig: "
-                      << " origin_index_type_:" << origin_index_type_
-                      << " index_type_: " << index_type_
-                      << " metric_type_: " << metric_type_;
+    LOG_INFO(
+        "VecIndexConfig: origin_index_type={}, index_type={}, metric_type={}",
+        origin_index_type_,
+        index_type_,
+        metric_type_);
 }
 
 int64_t

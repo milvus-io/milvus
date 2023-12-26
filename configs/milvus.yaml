@@ -724,3 +724,7 @@ trace:
 autoIndex:
   params:
     build: '{"M": 18,"efConstruction": 240,"index_type": "HNSW", "metric_type": "IP"}'
+
+gpu:
+  initMemSize: 0
+  maxMemSize: 0

@@ -147,7 +147,8 @@ VectorMemIndex<T>::Serialize(const Config& config) {
     auto stat = index_.Serialize(ret);
     if (stat != knowhere::Status::success)
         PanicInfo(ErrorCode::UnexpectedError,
-                  "failed to serialize index, " + KnowhereStatusString(stat));
+                  "failed to serialize index: {}",
+                  KnowhereStatusString(stat));
     Disassemble(ret);
 
     return ret;
@@ -160,7 +161,8 @@ VectorMemIndex<T>::LoadWithoutAssemble(const BinarySet& binary_set,
     auto stat = index_.Deserialize(binary_set, config);
     if (stat != knowhere::Status::success)
         PanicInfo(ErrorCode::UnexpectedError,
-                  "failed to Deserialize index, " + KnowhereStatusString(stat));
+                  "failed to Deserialize index: {}",
+                  KnowhereStatusString(stat));
     SetDim(index_.Dim());
 }
 
@@ -253,10 +255,10 @@ VectorMemIndex<T>::LoadV2(const Config& config) {
             index_datas.insert({file_name, raw_index_blob->GetFieldData()});
         }
     }
-    LOG_SEGCORE_INFO_ << "construct binary set...";
+    LOG_INFO("construct binary set...");
     BinarySet binary_set;
     for (auto& [key, data] : index_datas) {
-        LOG_SEGCORE_INFO_ << "add index data to binary set: " << key;
+        LOG_INFO("add index data to binary set: {}", key);
         auto size = data->Size();
         auto deleter = [&](uint8_t*) {};  // avoid repeated deconstruction
         auto buf = std::shared_ptr<uint8_t[]>(
@@ -265,9 +267,9 @@ VectorMemIndex<T>::LoadV2(const Config& config) {
         binary_set.Append(file_name, buf, size);
     }
 
-    LOG_SEGCORE_INFO_ << "load index into Knowhere...";
+    LOG_INFO("load index into Knowhere...");
     LoadWithoutAssemble(binary_set, config);
-    LOG_SEGCORE_INFO_ << "load vector index done";
+    LOG_INFO("load vector index done");
 }
 
 template <typename T>
@@ -285,7 +287,7 @@ VectorMemIndex<T>::Load(const Config& config) {
     std::unordered_set<std::string> pending_index_files(index_files->begin(),
                                                         index_files->end());
 
-    LOG_SEGCORE_INFO_ << "load index files: " << index_files.value().size();
+    LOG_INFO("load index files: {}", index_files.value().size());
 
     auto parallel_degree =
         static_cast<uint64_t>(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
@@ -302,8 +304,7 @@ VectorMemIndex<T>::Load(const Config& config) {
         }
     }
 
-    LOG_SEGCORE_INFO_ << "load with slice meta: "
-                      << !slice_meta_filepath.empty();
+    LOG_INFO("load with slice meta: {}", !slice_meta_filepath.empty());
 
     if (!slice_meta_filepath
              .empty()) {  // load with the slice meta info, then we can load batch by batch
@@ -366,10 +367,10 @@ VectorMemIndex<T>::Load(const Config& config) {
         }
     }
 
-    LOG_SEGCORE_INFO_ << "construct binary set...";
+    LOG_INFO("construct binary set...");
     BinarySet binary_set;
     for (auto& [key, data] : index_datas) {
-        LOG_SEGCORE_INFO_ << "add index data to binary set: " << key;
+        LOG_INFO("add index data to binary set: {}", key);
         auto size = data->Size();
         auto deleter = [&](uint8_t*) {};  // avoid repeated deconstruction
         auto buf = std::shared_ptr<uint8_t[]>(
@@ -377,9 +378,9 @@ VectorMemIndex<T>::Load(const Config& config) {
         binary_set.Append(key, buf, size);
     }
 
-    LOG_SEGCORE_INFO_ << "load index into Knowhere...";
+    LOG_INFO("load index into Knowhere...");
     LoadWithoutAssemble(binary_set, config);
-    LOG_SEGCORE_INFO_ << "load vector index done";
+    LOG_INFO("load vector index done");
 }
 
 template <typename T>
@@ -409,8 +410,8 @@ VectorMemIndex<T>::BuildV2(const Config& config) {
     auto res = space_->ScanData();
     if (!res.ok()) {
         PanicInfo(IndexBuildError,
-                  fmt::format("failed to create scan iterator: {}",
-                              res.status().ToString()));
+                  "failed to create scan iterator: {}",
+                  res.status().ToString());
     }
 
     auto reader = res.value();
@@ -418,8 +419,8 @@ VectorMemIndex<T>::BuildV2(const Config& config) {
     for (auto rec : *reader) {
         if (!rec.ok()) {
             PanicInfo(IndexBuildError,
-                      fmt::format("failed to read data: {}",
-                                  rec.status().ToString()));
+                      "failed to read data: {}",
+                      rec.status().ToString());
         }
         auto data = rec.ValueUnsafe();
         if (data == nullptr) {
@@ -538,9 +539,9 @@ VectorMemIndex<T>::Query(const DatasetPtr dataset,
             milvus::tracer::AddEvent("finish_knowhere_index_range_search");
             if (!res.has_value()) {
                 PanicInfo(ErrorCode::UnexpectedError,
-                          fmt::format("failed to range search: {}: {}",
-                                      KnowhereStatusString(res.error()),
-                                      res.what()));
+                          "failed to range search: {}: {}",
+                          KnowhereStatusString(res.error()),
+                          res.what());
             }
             auto result = ReGenRangeSearchResult(
                 res.value(), topk, num_queries, GetMetricType());
@@ -552,9 +553,9 @@ VectorMemIndex<T>::Query(const DatasetPtr dataset,
             milvus::tracer::AddEvent("finish_knowhere_index_search");
             if (!res.has_value()) {
                 PanicInfo(ErrorCode::UnexpectedError,
-                          fmt::format("failed to search: {}: {}",
-                                      KnowhereStatusString(res.error()),
-                                      res.what()));
+                          "failed to search: {}: {}",
+                          KnowhereStatusString(res.error()),
+                          res.what());
             }
             return res.value();
         }
@@ -633,7 +634,7 @@ VectorMemIndex<T>::LoadFromFile(const Config& config) {
     std::unordered_set<std::string> pending_index_files(index_files->begin(),
                                                         index_files->end());
 
-    LOG_SEGCORE_INFO_ << "load index files: " << index_files.value().size();
+    LOG_INFO("load index files: {}", index_files.value().size());
 
     auto parallel_degree =
         static_cast<uint64_t>(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
@@ -649,8 +650,7 @@ VectorMemIndex<T>::LoadFromFile(const Config& config) {
         }
     }
 
-    LOG_SEGCORE_INFO_ << "load with slice meta: "
-                      << !slice_meta_filepath.empty();
+    LOG_INFO("load with slice meta: {}", !slice_meta_filepath.empty());
 
     if (!slice_meta_filepath
              .empty()) {  // load with the slice meta info, then we can load batch by batch
@@ -710,15 +710,15 @@ VectorMemIndex<T>::LoadFromFile(const Config& config) {
     }
     file.Close();
 
-    LOG_SEGCORE_INFO_ << "load index into Knowhere...";
+    LOG_INFO("load index into Knowhere...");
     auto conf = config;
     conf.erase(kMmapFilepath);
     conf[kEnableMmap] = true;
     auto stat = index_.DeserializeFromFile(filepath.value(), conf);
     if (stat != knowhere::Status::success) {
         PanicInfo(ErrorCode::UnexpectedError,
-                  fmt::format("failed to Deserialize index: {}",
-                              KnowhereStatusString(stat)));
+                  "failed to Deserialize index: {}",
+                  KnowhereStatusString(stat));
     }
 
     auto dim = index_.Dim();
@@ -726,10 +726,10 @@ VectorMemIndex<T>::LoadFromFile(const Config& config) {
 
     auto ok = unlink(filepath->data());
     AssertInfo(ok == 0,
-               fmt::format("failed to unlink mmap index file {}: {}",
-                           filepath.value(),
-                           strerror(errno)));
-    LOG_SEGCORE_INFO_ << "load vector index done";
+               "failed to unlink mmap index file {}: {}",
+               filepath.value(),
+               strerror(errno));
+    LOG_INFO("load vector index done");
 }
 
 template <typename T>
@@ -814,15 +814,15 @@ VectorMemIndex<T>::LoadFromFileV2(const Config& config) {
     }
     file.Close();
 
-    LOG_SEGCORE_INFO_ << "load index into Knowhere...";
+    LOG_INFO("load index into Knowhere...");
     auto conf = config;
     conf.erase(kMmapFilepath);
     conf[kEnableMmap] = true;
     auto stat = index_.DeserializeFromFile(filepath.value(), conf);
     if (stat != knowhere::Status::success) {
         PanicInfo(DataFormatBroken,
-                  fmt::format("failed to Deserialize index: {}",
-                              KnowhereStatusString(stat)));
+                  "failed to Deserialize index: {}",
+                  KnowhereStatusString(stat));
     }
 
     auto dim = index_.Dim();
@@ -830,10 +830,10 @@ VectorMemIndex<T>::LoadFromFileV2(const Config& config) {
 
     auto ok = unlink(filepath->data());
     AssertInfo(ok == 0,
-               fmt::format("failed to unlink mmap index file {}: {}",
-                           filepath.value(),
-                           strerror(errno)));
-    LOG_SEGCORE_INFO_ << "load vector index done";
+               "failed to unlink mmap index file {}: {}",
+               filepath.value(),
+               strerror(errno));
+    LOG_INFO("load vector index done");
 }
 template class VectorMemIndex<float>;
 template class VectorMemIndex<uint8_t>;

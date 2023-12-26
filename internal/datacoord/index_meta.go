@@ -18,6 +18,7 @@
 package datacoord
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 
@@ -211,6 +212,22 @@ func (m *meta) CreateIndex(index *model.Index) error {
 	return nil
 }
 
+func (m *meta) AlterIndex(ctx context.Context, indexes ...*model.Index) error {
+	m.Lock()
+	defer m.Unlock()
+
+	err := m.catalog.AlterIndexes(ctx, indexes)
+	if err != nil {
+		return err
+	}
+
+	for _, index := range indexes {
+		m.updateCollectionIndex(index)
+	}
+
+	return nil
+}
+
 // AddSegmentIndex adds the index meta corresponding the indexBuildID to meta table.
 func (m *meta) AddSegmentIndex(segIndex *model.SegmentIndex) error {
 	m.Lock()
@@ -336,6 +353,22 @@ func (m *meta) GetIndexesForCollection(collID UniqueID, indexName string) []*mod
 	indexInfos := make([]*model.Index, 0)
 	for _, index := range m.indexes[collID] {
 		if index.IsDeleted {
+			continue
+		}
+		if indexName == "" || indexName == index.IndexName {
+			indexInfos = append(indexInfos, model.CloneIndex(index))
+		}
+	}
+	return indexInfos
+}
+
+func (m *meta) GetFieldIndexes(collID, fieldID UniqueID, indexName string) []*model.Index {
+	m.RLock()
+	defer m.RUnlock()
+
+	indexInfos := make([]*model.Index, 0)
+	for _, index := range m.indexes[collID] {
+		if index.IsDeleted || index.FieldID != fieldID {
 			continue
 		}
 		if indexName == "" || indexName == index.IndexName {

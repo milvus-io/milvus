@@ -38,6 +38,8 @@ func (s *ManagerSuite) SetupSuite() {
 	s.collSchema = &schemapb.CollectionSchema{
 		Name: "test_collection",
 		Fields: []*schemapb.FieldSchema{
+			{FieldID: common.RowIDField, DataType: schemapb.DataType_Int64, Name: common.RowIDFieldName},
+			{FieldID: common.TimeStampField, DataType: schemapb.DataType_Int64, Name: common.TimeStampFieldName},
 			{
 				FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true,
 			},
@@ -69,10 +71,13 @@ func (s *ManagerSuite) SetupTest() {
 func (s *ManagerSuite) TestRegister() {
 	manager := s.manager
 
-	err := manager.Register(s.channelName, s.metacache, nil, WithIDAllocator(s.allocator))
+	storageCache, err := metacache.NewStorageV2Cache(s.collSchema)
+	s.Require().NoError(err)
+
+	err = manager.Register(s.channelName, s.metacache, storageCache, WithIDAllocator(s.allocator))
 	s.NoError(err)
 
-	err = manager.Register(s.channelName, s.metacache, nil, WithIDAllocator(s.allocator))
+	err = manager.Register(s.channelName, s.metacache, storageCache, WithIDAllocator(s.allocator))
 	s.Error(err)
 	s.ErrorIs(err, merr.ErrChannelReduplicate)
 }
@@ -176,7 +181,9 @@ func (s *ManagerSuite) TestRemoveChannel() {
 	})
 
 	s.Run("remove_channel", func() {
-		err := manager.Register(s.channelName, s.metacache, nil, WithIDAllocator(s.allocator))
+		storageCache, err := metacache.NewStorageV2Cache(s.collSchema)
+		s.Require().NoError(err)
+		err = manager.Register(s.channelName, s.metacache, storageCache, WithIDAllocator(s.allocator))
 		s.Require().NoError(err)
 
 		s.NotPanics(func() {

@@ -37,4 +37,7 @@ GetMinimalIndexVersion();
 int32_t
 GetCurrentIndexVersion();
 
+void
+KnowhereInitGPUMemoryPool(const uint32_t init_size, const uint32_t max_size);
+
 }  // namespace milvus::config

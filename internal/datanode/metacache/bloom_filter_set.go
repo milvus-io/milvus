@@ -20,6 +20,7 @@ import (
 	"sync"
 
 	"github.com/bits-and-blooms/bloom/v3"
+	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus/internal/storage"
 )
@@ -64,13 +65,18 @@ func (bfs *BloomFilterSet) UpdatePKRange(ids storage.FieldData) error {
 	return bfs.current.UpdatePKRange(ids)
 }
 
-func (bfs *BloomFilterSet) Roll() {
+func (bfs *BloomFilterSet) Roll(newStats ...*storage.PrimaryKeyStats) {
 	bfs.mut.Lock()
 	defer bfs.mut.Unlock()
 
-	if bfs.current != nil {
-		bfs.history = append(bfs.history, bfs.current)
-		bfs.current = nil
+	if len(newStats) > 0 {
+		bfs.history = append(bfs.history, lo.Map(newStats, func(stats *storage.PrimaryKeyStats, _ int) *storage.PkStatistics {
+			return &storage.PkStatistics{
+				PkFilter: stats.BF,
+				MaxPK:    stats.MaxPk,
+				MinPK:    stats.MinPk,
+			}
+		})...)
 	}
 }
 

@@ -188,7 +188,11 @@ func (loader *segmentLoader) Load(ctx context.Context,
 	newSegments := typeutil.NewConcurrentMap[int64, Segment]()
 	loaded := typeutil.NewConcurrentMap[int64, Segment]()
 	defer func() {
-		newSegments.Range(func(_ int64, s Segment) bool {
+		newSegments.Range(func(segmentID int64, s Segment) bool {
+			log.Warn("release new segment created due to load failure",
+				zap.Int64("segmentID", segmentID),
+				zap.Error(err),
+			)
 			s.Release()
 			return true
 		})
@@ -727,7 +731,7 @@ func (loader *segmentLoader) loadFieldIndex(ctx context.Context, segment *LocalS
 		return merr.WrapErrCollectionNotLoaded(segment.Collection(), "failed to load field index")
 	}
 
-	return segment.LoadIndex(indexInfo, fieldType, common.IsFieldMmapEnabled(collection.Schema(), indexInfo.GetFieldID()))
+	return segment.LoadIndex(indexInfo, fieldType)
 }
 
 func (loader *segmentLoader) loadBloomFilter(ctx context.Context, segmentID int64, bfs *pkoracle.BloomFilterSet,

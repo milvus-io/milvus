@@ -1424,6 +1424,29 @@ class TestInsertInvalid(TestcaseBase):
         collection_w.insert(data, check_task=CheckTasks.err_res,
                             check_items={ct.err_code: 1, ct.err_msg: "Field varchar don't match in entities[0]"})
 
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_insert_with_nan_value(self):
+        """
+        target: test insert with nan value
+        method: insert with nan value: None, float('nan'), np.NAN/np.nan, float('inf')
+        expected: raise exception
+        """
+        vector_field = ct.default_float_vec_field_name
+        collection_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=collection_name)
+        data = cf.gen_default_dataframe_data()
+        data[vector_field][0][0] = None
+        error = {ct.err_code: 1, ct.err_msg: "The data in the same column must be of the same type."}
+        collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
+        data[vector_field][0][0] = float('nan')
+        error = {ct.err_code: 65535, ct.err_msg: "value 'NaN' is not a number or infinity"}
+        collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
+        data[vector_field][0][0] = np.NAN
+        collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
+        data[vector_field][0][0] = float('inf')
+        error = {ct.err_code: 65535, ct.err_msg: "value '+Inf' is not a number or infinity"}
+        collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
+
 
 class TestInsertInvalidBinary(TestcaseBase):
     """

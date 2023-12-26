@@ -10,33 +10,19 @@ import "milvus.proto";
 import "schema.proto";
 
 service IndexCoord {
-    rpc GetComponentStates(milvus.GetComponentStatesRequest)
-        returns (milvus.ComponentStates) {
-    }
-    rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest)
-        returns (milvus.StringResponse) {
-    }
-    rpc CreateIndex(CreateIndexRequest) returns (common.Status) {
-    }
-    // Deprecated: use DescribeIndex instead
-    rpc GetIndexState(GetIndexStateRequest) returns (GetIndexStateResponse) {
-    }
-    rpc GetSegmentIndexState(GetSegmentIndexStateRequest)
-        returns (GetSegmentIndexStateResponse) {
-    }
-    rpc GetIndexInfos(GetIndexInfoRequest) returns (GetIndexInfoResponse) {
-    }
-    rpc DropIndex(DropIndexRequest) returns (common.Status) {
-    }
-    rpc DescribeIndex(DescribeIndexRequest) returns (DescribeIndexResponse) {
-    }
-    rpc GetIndexStatistics(GetIndexStatisticsRequest)
-        returns (GetIndexStatisticsResponse) {
-    }
-    // Deprecated: use DescribeIndex instead
-    rpc GetIndexBuildProgress(GetIndexBuildProgressRequest)
-        returns (GetIndexBuildProgressResponse) {
-    }
+  rpc GetComponentStates(milvus.GetComponentStatesRequest) returns (milvus.ComponentStates) {}
+  rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest) returns(milvus.StringResponse){}
+  rpc CreateIndex(CreateIndexRequest) returns (common.Status){}
+  rpc AlterIndex(AlterIndexRequest) returns (common.Status){}
+  // Deprecated: use DescribeIndex instead
+  rpc GetIndexState(GetIndexStateRequest) returns (GetIndexStateResponse) {}
+  rpc GetSegmentIndexState(GetSegmentIndexStateRequest) returns (GetSegmentIndexStateResponse) {}
+  rpc GetIndexInfos(GetIndexInfoRequest) returns (GetIndexInfoResponse){}
+  rpc DropIndex(DropIndexRequest) returns (common.Status) {}
+  rpc DescribeIndex(DescribeIndexRequest) returns (DescribeIndexResponse) {}
+  rpc GetIndexStatistics(GetIndexStatisticsRequest) returns (GetIndexStatisticsResponse) {}
+  // Deprecated: use DescribeIndex instead
+  rpc GetIndexBuildProgress(GetIndexBuildProgressRequest) returns (GetIndexBuildProgressResponse) {}
 
     rpc ShowConfigurations(internal.ShowConfigurationsRequest)
         returns (internal.ShowConfigurationsResponse) {
@@ -169,6 +155,12 @@ message CreateIndexRequest {
     uint64 timestamp = 6;
     bool is_auto_index = 7;
     repeated common.KeyValuePair user_index_params = 8;
+}
+
+message AlterIndexRequest {
+  int64 collectionID = 1;
+  string index_name = 2;
+  repeated common.KeyValuePair params = 3;
 }
 
 message GetIndexInfoRequest {

@@ -277,7 +277,7 @@ func (sd *shardDelegator) applyDelete(ctx context.Context, nodeID int64, worker 
 				if errors.Is(err, merr.ErrNodeNotFound) {
 					log.Warn("try to delete data on non-exist node")
 					return retry.Unrecoverable(err)
-				} else if errors.Is(err, merr.ErrSegmentNotFound) {
+				} else if errors.IsAny(err, merr.ErrSegmentNotFound, merr.ErrSegmentNotLoaded) {
 					log.Warn("try to delete data of released segment")
 					return nil
 				} else if err != nil {
@@ -570,8 +570,8 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 		return candidate.ID(), candidate
 	})
 
-	sd.deleteMut.Lock()
-	defer sd.deleteMut.Unlock()
+	sd.deleteMut.RLock()
+	defer sd.deleteMut.RUnlock()
 	// apply buffered delete for new segments
 	// no goroutines here since qnv2 has no load merging logic
 	for _, info := range infos {

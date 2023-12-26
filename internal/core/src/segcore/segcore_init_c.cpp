@@ -62,10 +62,16 @@ SegcoreSetKnowhereSearchThreadPoolNum(const uint32_t num_threads) {
     milvus::config::KnowhereInitSearchThreadPool(num_threads);
 }
 
+extern "C" void
+SegcoreSetKnowhereGpuMemoryPoolSize(const uint32_t init_size,
+                                    const uint32_t max_size) {
+    milvus::config::KnowhereInitGPUMemoryPool(init_size, max_size);
+}
+
 // return value must be freed by the caller
 extern "C" char*
 SegcoreSetSimdType(const char* value) {
-    LOG_SEGCORE_DEBUG_ << "set config simd_type: " << value;
+    LOG_DEBUG("set config simd_type: {}", value);
     auto real_type = milvus::config::KnowhereSetSimdType(value);
     char* ret = reinterpret_cast<char*>(malloc(real_type.length() + 1));
     memcpy(ret, real_type.c_str(), real_type.length());

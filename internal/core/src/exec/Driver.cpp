@@ -152,7 +152,7 @@ Driver::Next(std::shared_ptr<BlockingState>& blocking_state) {
             operator->get_operator_type(),                                     \
             operator->get_plannode_id(),                                       \
             e.what());                                                         \
-        LOG_SEGCORE_ERROR_ << err_msg;                                         \
+        LOG_ERROR(err_msg);                                                    \
         throw ExecOperatorException(err_msg);                                  \
     } catch (std::exception & e) {                                             \
         throw ExecOperatorException(                                           \

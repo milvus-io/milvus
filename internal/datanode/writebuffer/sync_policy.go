@@ -1,6 +1,7 @@
 package writebuffer
 
 import (
+	"math/rand"
 	"time"
 
 	"github.com/samber/lo"
@@ -60,8 +61,8 @@ func GetSyncStaleBufferPolicy(staleDuration time.Duration) SyncPolicy {
 		return lo.FilterMap(buffers, func(buf *segmentBuffer, _ int) (int64, bool) {
 			minTs := buf.MinTimestamp()
 			start := tsoutil.PhysicalTime(minTs)
-
-			return buf.segmentID, current.Sub(start) > staleDuration
+			jitter := time.Duration(rand.Float64() * 0.1 * float64(staleDuration))
+			return buf.segmentID, current.Sub(start) > staleDuration+jitter
 		})
 	}, "buffer stale")
 }

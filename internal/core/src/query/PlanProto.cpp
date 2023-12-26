@@ -474,8 +474,8 @@ ProtoParser::ParseBinaryRangeExpr(const proto::plan::BinaryRangeExpr& expr_pb) {
             }
 
             default: {
-                PanicInfo(DataTypeInvalid,
-                          fmt::format("unsupported data type {}", data_type));
+                PanicInfo(
+                    DataTypeInvalid, "unsupported data type {}", data_type);
             }
         }
     }();
@@ -633,8 +633,8 @@ ProtoParser::ParseTermExpr(const proto::plan::TermExpr& expr_pb) {
                 }
             }
             default: {
-                PanicInfo(DataTypeInvalid,
-                          fmt::format("unsupported data type {}", data_type));
+                PanicInfo(
+                    DataTypeInvalid, "unsupported data type {}", data_type);
             }
         }
     }();
@@ -710,9 +710,8 @@ ProtoParser::ParseBinaryArithOpEvalRangeExpr(
                             field_id, data_type, expr_pb);
                     default:
                         PanicInfo(DataTypeInvalid,
-                                  fmt::format(
-                                      "unsupported data type {} in expression",
-                                      expr_pb.value().val_case()));
+                                  "unsupported data type {} in expression",
+                                  expr_pb.value().val_case());
                 }
             }
             case DataType::ARRAY: {
@@ -725,14 +724,13 @@ ProtoParser::ParseBinaryArithOpEvalRangeExpr(
                             field_id, data_type, expr_pb);
                     default:
                         PanicInfo(DataTypeInvalid,
-                                  fmt::format(
-                                      "unsupported data type {} in expression",
-                                      expr_pb.value().val_case()));
+                                  "unsupported data type {} in expression",
+                                  expr_pb.value().val_case());
                 }
             }
             default: {
-                PanicInfo(DataTypeInvalid,
-                          fmt::format("unsupported data type {}", data_type));
+                PanicInfo(
+                    DataTypeInvalid, "unsupported data type {}", data_type);
             }
         }
     }();
@@ -781,8 +779,8 @@ ProtoParser::ParseExistExpr(const proto::plan::ExistsExpr& expr_pb) {
                 return ExtractExistsExprImpl(expr_pb);
             }
             default: {
-                PanicInfo(DataTypeInvalid,
-                          fmt::format("unsupported data type {}", data_type));
+                PanicInfo(
+                    DataTypeInvalid, "unsupported data type {}", data_type);
             }
         }
     }();
@@ -981,8 +979,7 @@ ProtoParser::ParseExpr(const proto::plan::Expr& expr_pb) {
         default: {
             std::string s;
             google::protobuf::TextFormat::PrintToString(expr_pb, &s);
-            PanicInfo(ExprInvalid,
-                      fmt::format("unsupported expr proto node: {}", s));
+            PanicInfo(ExprInvalid, "unsupported expr proto node: {}", s);
         }
     }
 }

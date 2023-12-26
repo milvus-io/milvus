@@ -196,7 +196,7 @@ func initMetaCache(initCtx context.Context, storageV2Cache *metacache.StorageV2C
 }
 
 func loadStatsV2(storageCache *metacache.StorageV2Cache, segment *datapb.SegmentInfo, schema *schemapb.CollectionSchema) ([]*storage.PkStatistics, error) {
-	space, err := storageCache.GetOrCreateSpace(segment.ID, writebuffer.SpaceCreatorFunc(segment.ID, schema, storageCache.ArrowSchema()))
+	space, err := storageCache.GetOrCreateSpace(segment.ID, syncmgr.SpaceCreatorFunc(segment.ID, schema, storageCache.ArrowSchema()))
 	if err != nil {
 		return nil, err
 	}

@@ -68,7 +68,7 @@ KnowhereSetSimdType(const char* value) {
     try {
         return knowhere::KnowhereConfig::SetSimdType(simd_type);
     } catch (std::exception& e) {
-        LOG_SERVER_ERROR_ << e.what();
+        LOG_ERROR(e.what());
         PanicInfo(ConfigInvalid, e.what());
     }
 }
@@ -86,6 +86,16 @@ KnowhereInitSearchThreadPool(const uint32_t num_threads) {
                   "Failed to set aio context pool with num_threads " +
                       std::to_string(num_threads));
     }
+}
+
+void
+KnowhereInitGPUMemoryPool(const uint32_t init_size, const uint32_t max_size) {
+    if (init_size == 0 && max_size == 0) {
+        knowhere::KnowhereConfig::SetRaftMemPool();
+        return;
+    }
+    knowhere::KnowhereConfig::SetRaftMemPool(size_t{init_size},
+                                             size_t{max_size});
 }
 
 int32_t

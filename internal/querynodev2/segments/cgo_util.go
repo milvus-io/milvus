@@ -40,7 +40,7 @@ import (
 )
 
 // HandleCStatus deals with the error returned from CGO
-func HandleCStatus(status *C.CStatus, extraInfo string) error {
+func HandleCStatus(status *C.CStatus, extraInfo string, fields ...zap.Field) error {
 	if status.error_code == 0 {
 		return nil
 	}
@@ -55,7 +55,7 @@ func HandleCStatus(status *C.CStatus, extraInfo string) error {
 	finalMsg := fmt.Sprintf("%s: %s", errorName, errorMsg)
 	logMsg := fmt.Sprintf("%s, segcore error: %s\n", extraInfo, finalMsg)
 	log := log.With().WithOptions(zap.AddCallerSkip(1))
-	log.Warn(logMsg)
+	log.Warn(logMsg, fields...)
 	return errors.New(finalMsg)
 }
 
