@@ -188,9 +188,9 @@ func (m *CollectionManager) Recover(broker Broker) error {
 
 // upgradeRecover recovers from old version <= 2.2.x for compatibility.
 func (m *CollectionManager) upgradeRecover(broker Broker) error {
+	// for loaded collection from 2.2, it only save a old version CollectionLoadInfo without LoadType.
+	// we should update the CollectionLoadInfo and save all PartitionLoadInfo to meta store
 	for _, collection := range m.GetAllCollections() {
-		// It's a workaround to check if it is old CollectionLoadInfo because there's no
-		// loadType in old version, maybe we should use version instead.
 		if collection.GetLoadType() == querypb.LoadType_UnKnownType {
 			partitionIDs, err := broker.GetPartitions(context.Background(), collection.GetCollectionID())
 			if err != nil {
@@ -212,8 +212,18 @@ func (m *CollectionManager) upgradeRecover(broker Broker) error {
 			if err != nil {
 				return err
 			}
+
+			newInfo := collection.Clone()
+			newInfo.LoadType = querypb.LoadType_LoadCollection
+			err = m.putCollection(true, newInfo)
+			if err != nil {
+				return err
+			}
 		}
 	}
+
+	// for loaded partition from 2.2, it only save load PartitionLoadInfo.
+	// we should save it's CollectionLoadInfo to meta store
 	for _, partition := range m.GetAllPartitions() {
 		// In old version, collection would NOT be stored if the partition existed.
 		if _, ok := m.collections[partition.GetCollectionID()]; !ok {
