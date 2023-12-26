@@ -58,6 +58,7 @@ type ComponentParam struct {
 	CommonCfg       commonConfig
 	QuotaConfig     quotaConfig
 	AutoIndexConfig autoIndexConfig
+	GpuConfig       gpuConfig
 	TraceCfg        traceConfig
 
 	RootCoordCfg  rootCoordConfig
@@ -118,6 +119,7 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.HTTPCfg.init(bt)
 	p.LogCfg.init(bt)
 	p.RoleCfg.init(bt)
+	p.GpuConfig.init(bt)
 
 	p.RootCoordGrpcServerCfg.Init("rootCoord", bt)
 	p.ProxyGrpcServerCfg.Init("proxy", bt)
@@ -670,6 +672,29 @@ like the old password verification when updating the credential`,
 		Doc:          "trace request info",
 	}
 	p.TraceLogMode.Init(base.mgr)
+}
+
+type gpuConfig struct {
+	InitSize ParamItem `refreshable:"false"`
+	MaxSize  ParamItem `refreshable:"false"`
+}
+
+func (t *gpuConfig) init(base *BaseTable) {
+	t.InitSize = ParamItem{
+		Key:     "gpu.initMemSize",
+		Version: "2.3.4",
+		Doc:     `Gpu Memory Pool init size`,
+		Export:  true,
+	}
+	t.InitSize.Init(base.mgr)
+
+	t.MaxSize = ParamItem{
+		Key:     "gpu.maxMemSize",
+		Version: "2.3.4",
+		Doc:     `Gpu Memory Pool Max size`,
+		Export:  true,
+	}
+	t.MaxSize.Init(base.mgr)
 }
 
 type traceConfig struct {
