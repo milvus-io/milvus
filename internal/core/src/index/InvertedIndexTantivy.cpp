@@ -35,7 +35,9 @@ InvertedIndexTantivy<T>::InvertedIndexTantivy(
     boost::filesystem::create_directories(path_);
     d_type_ = cfg_.to_tantivy_data_type();
     if (tantivy_index_exist(path_.c_str())) {
-        LOG_INFO("index {} already exists, which should happen in loading progress", path_);
+        LOG_INFO(
+            "index {} already exists, which should happen in loading progress",
+            path_);
     } else {
         wrapper_ = std::make_shared<TantivyIndexWrapper>(
             field.c_str(), d_type_, path_.c_str());
