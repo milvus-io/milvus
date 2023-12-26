@@ -1674,8 +1674,10 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 			primaryKeys: &schemapb.IDs{
 				IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{0, 1}}},
 			},
-			chMgr:    chMgr,
-			chTicker: ticker,
+			chMgr:        chMgr,
+			chTicker:     ticker,
+			collectionID: collectionID,
+			vChannels:    []string{"test-ch"},
 		}
 
 		assert.NoError(t, task.OnEnqueue())

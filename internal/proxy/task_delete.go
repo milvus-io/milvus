@@ -411,7 +411,7 @@ func (dr *deleteRunner) getStreamingQueryAndDelteFunc(plan *planpb.PlanNode) exe
 				PartitionIDs:       partitionIDs,
 				SerializedExprPlan: serializedPlan,
 				OutputFieldsId:     outputFieldIDs,
-				GuaranteeTimestamp: parseGuaranteeTsFromConsistency(ts, ts, commonpb.ConsistencyLevel_Strong),
+				GuaranteeTimestamp: parseGuaranteeTsFromConsistency(ts, ts, dr.req.ConsistencyLevel),
 			},
 			DmlChannels: channelIDs,
 			Scope:       querypb.DataScope_All,
