@@ -2397,20 +2397,19 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 		metrics.TotalLabel).Inc()
-	dt := &deleteTask{
-		ctx:         ctx,
-		Condition:   NewTaskCondition(ctx),
-		req:         request,
-		idAllocator: node.rowIDAllocator,
-		chMgr:       node.chMgr,
-		chTicker:    node.chTicker,
-		lb:          node.lbPolicy,
+
+	dr := &deleteRunner{
+		req:             request,
+		idAllocator:     node.rowIDAllocator,
+		tsoAllocatorIns: node.tsoAllocator,
+		chMgr:           node.chMgr,
+		chTicker:        node.chTicker,
+		queue:           node.sched.dmQueue,
+		lb:              node.lbPolicy,
 	}
 
-	log.Debug("Enqueue delete request in Proxy")
-
-	// MsgID will be set by Enqueue()
-	if err := node.sched.dmQueue.Enqueue(dt); err != nil {
+	log.Debug("init delete runner in Proxy")
+	if err := dr.Init(ctx); err != nil {
 		log.Error("Failed to enqueue delete task: " + err.Error())
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 			metrics.AbandonLabel).Inc()
@@ -2420,25 +2419,26 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 		}, nil
 	}
 
-	log.Debug("Detail of delete request in Proxy")
+	log.Debug("Run delete in Proxy")
 
-	if err := dt.WaitToFinish(); err != nil {
-		log.Error("Failed to execute delete task in task scheduler: " + err.Error())
+	if err := dr.Run(ctx); err != nil {
+		log.Error("Failed to enqueue delete task: " + err.Error())
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
-			metrics.FailLabel).Inc()
+			metrics.AbandonLabel).Inc()
+
 		return &milvuspb.MutationResult{
 			Status: merr.Status(err),
 		}, nil
 	}
 
-	receiveSize := proto.Size(dt.req)
+	receiveSize := proto.Size(dr.req)
 	rateCol.Add(internalpb.RateType_DMLDelete.String(), float64(receiveSize))
 
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 		metrics.SuccessLabel).Inc()
 	metrics.ProxyMutationLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.DeleteLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	metrics.ProxyCollectionMutationLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.DeleteLabel, request.CollectionName).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return dt.result, nil
+	return dr.result, nil
 }
 
 // Upsert upsert records into collection.
