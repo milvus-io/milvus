@@ -1,6 +1,23 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package syncmgr
 
 import (
+	"fmt"
 	"math/rand"
 	"testing"
 	"time"
@@ -43,11 +60,10 @@ type SyncTaskSuite struct {
 func (s *SyncTaskSuite) SetupSuite() {
 	paramtable.Get().Init(paramtable.NewBaseTable())
 
-	s.collectionID = 100
-	s.partitionID = 101
-	s.segmentID = 1001
-	s.channelName = "by-dev-rootcoord-dml_0_100v0"
-
+	s.collectionID = rand.Int63n(100) + 1000
+	s.partitionID = rand.Int63n(100) + 2000
+	s.segmentID = rand.Int63n(1000) + 10000
+	s.channelName = fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID)
 	s.schema = &schemapb.CollectionSchema{
 		Name: "sync_task_test_col",
 		Fields: []*schemapb.FieldSchema{
@@ -171,7 +187,7 @@ func (s *SyncTaskSuite) TestRunNormal() {
 	s.metacache.EXPECT().GetSegmentsBy(mock.Anything).Return([]*metacache.SegmentInfo{seg})
 	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 
-	s.Run("without_insert_delete", func() {
+	s.Run("without_data", func() {
 		task := s.getSuiteSyncTask()
 		task.WithMetaWriter(BrokerMetaWriter(s.broker))
 		task.WithTimeRange(50, 100)
@@ -187,7 +203,6 @@ func (s *SyncTaskSuite) TestRunNormal() {
 
 	s.Run("with_insert_delete_cp", func() {
 		task := s.getSuiteSyncTask()
-		task.WithInsertData(s.getInsertBuffer()).WithDeleteData(s.getDeleteBuffer())
 		task.WithTimeRange(50, 100)
 		task.WithMetaWriter(BrokerMetaWriter(s.broker))
 		task.WithCheckpoint(&msgpb.MsgPosition{
@@ -195,47 +210,55 @@ func (s *SyncTaskSuite) TestRunNormal() {
 			MsgID:       []byte{1, 2, 3, 4},
 			Timestamp:   100,
 		})
+		task.binlogBlobs[100] = &storage.Blob{
+			Key:   "100",
+			Value: []byte("test_data"),
+		}
 
 		err := task.Run()
 		s.NoError(err)
 	})
 
-	s.Run("with_insert_delete_flush", func() {
+	s.Run("with_statslog", func() {
 		task := s.getSuiteSyncTask()
-		task.WithInsertData(s.getInsertBuffer()).WithDeleteData(s.getDeleteBuffer())
-		task.WithFlush()
-		task.WithDrop()
+		task.WithTimeRange(50, 100)
 		task.WithMetaWriter(BrokerMetaWriter(s.broker))
 		task.WithCheckpoint(&msgpb.MsgPosition{
 			ChannelName: s.channelName,
 			MsgID:       []byte{1, 2, 3, 4},
 			Timestamp:   100,
 		})
+		task.WithFlush()
+		task.batchStatsBlob = &storage.Blob{
+			Key:   "100",
+			Value: []byte("test_data"),
+		}
+		task.mergedStatsBlob = &storage.Blob{
+			Key:   "1",
+			Value: []byte("test_data"),
+		}
 
 		err := task.Run()
 		s.NoError(err)
 	})
 
-	s.Run("with_zero_numrow_insertdata", func() {
+	s.Run("with_delta_data", func() {
 		task := s.getSuiteSyncTask()
-		task.WithInsertData(s.getEmptyInsertBuffer())
-		task.WithFlush()
-		task.WithDrop()
+		task.WithTimeRange(50, 100)
 		task.WithMetaWriter(BrokerMetaWriter(s.broker))
 		task.WithCheckpoint(&msgpb.MsgPosition{
 			ChannelName: s.channelName,
 			MsgID:       []byte{1, 2, 3, 4},
 			Timestamp:   100,
 		})
+		task.WithDrop()
+		task.deltaBlob = &storage.Blob{
+			Key:   "100",
+			Value: []byte("test_data"),
+		}
 
 		err := task.Run()
-		s.Error(err)
-
-		err = task.serializePkStatsLog()
 		s.NoError(err)
-		stats, rowNum := task.convertInsertData2PkStats(100, schemapb.DataType_Int64)
-		s.Nil(stats)
-		s.Zero(rowNum)
 	})
 }
 
@@ -249,7 +272,10 @@ func (s *SyncTaskSuite) TestRunL0Segment() {
 
 	s.Run("pure_delete_l0_flush", func() {
 		task := s.getSuiteSyncTask()
-		task.WithDeleteData(s.getDeleteBuffer())
+		task.deltaBlob = &storage.Blob{
+			Key:   "100",
+			Value: []byte("test_data"),
+		}
 		task.WithTimeRange(50, 100)
 		task.WithMetaWriter(BrokerMetaWriter(s.broker))
 		task.WithCheckpoint(&msgpb.MsgPosition{
@@ -306,7 +332,6 @@ func (s *SyncTaskSuite) TestRunError() {
 		flag := false
 		handler := func(_ error) { flag = true }
 		task := s.getSuiteSyncTask().WithFailureCallback(handler)
-		task.WithInsertData(s.getEmptyInsertBuffer())
 
 		err := task.Run()
 
@@ -318,29 +343,22 @@ func (s *SyncTaskSuite) TestRunError() {
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, metacache.NewBloomFilterSet())
 	metacache.UpdateNumOfRows(1000)(seg)
 	s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
-	s.Run("serialize_insert_fail", func() {
-		flag := false
-		handler := func(_ error) { flag = true }
-		task := s.getSuiteSyncTask().WithFailureCallback(handler)
-		task.WithInsertData(s.getEmptyInsertBuffer())
+	s.metacache.EXPECT().GetSegmentsBy(mock.Anything).Return([]*metacache.SegmentInfo{seg})
+
+	s.Run("metawrite_fail", func() {
+		s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(errors.New("mocked"))
+
+		task := s.getSuiteSyncTask()
+		task.WithMetaWriter(BrokerMetaWriter(s.broker, retry.Attempts(1)))
+		task.WithTimeRange(50, 100)
+		task.WithCheckpoint(&msgpb.MsgPosition{
+			ChannelName: s.channelName,
+			MsgID:       []byte{1, 2, 3, 4},
+			Timestamp:   100,
+		})
 
 		err := task.Run()
-
 		s.Error(err)
-		s.True(flag)
-	})
-
-	s.Run("serailize_delete_fail", func() {
-		flag := false
-		handler := func(_ error) { flag = true }
-		task := s.getSuiteSyncTask().WithFailureCallback(handler)
-
-		task.WithDeleteData(s.getDeleteBufferZeroTs())
-
-		err := task.Run()
-
-		s.Error(err)
-		s.True(flag)
 	})
 
 	s.Run("chunk_manager_save_fail", func() {
@@ -348,10 +366,13 @@ func (s *SyncTaskSuite) TestRunError() {
 		handler := func(_ error) { flag = true }
 		s.chunkManager.ExpectedCalls = nil
 		s.chunkManager.EXPECT().RootPath().Return("files")
-		s.chunkManager.EXPECT().MultiWrite(mock.Anything, mock.Anything).Return(errors.New("mocked"))
+		s.chunkManager.EXPECT().MultiWrite(mock.Anything, mock.Anything).Return(retry.Unrecoverable(errors.New("mocked")))
 		task := s.getSuiteSyncTask().WithFailureCallback(handler)
+		task.binlogBlobs[100] = &storage.Blob{
+			Key:   "100",
+			Value: []byte("test_data"),
+		}
 
-		task.WithInsertData(s.getInsertBuffer()).WithDeleteData(s.getDeleteBuffer())
 		task.WithWriteRetryOptions(retry.Attempts(1))
 
 		err := task.Run()

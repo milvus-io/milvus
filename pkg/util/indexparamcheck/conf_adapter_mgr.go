@@ -45,6 +45,7 @@ func (mgr *indexCheckerMgrImpl) GetChecker(indexType string) (IndexChecker, erro
 func (mgr *indexCheckerMgrImpl) registerIndexChecker() {
 	mgr.checkers[IndexRaftIvfFlat] = newIVFBaseChecker()
 	mgr.checkers[IndexRaftIvfPQ] = newRaftIVFPQChecker()
+	mgr.checkers[IndexRaftCagra] = newCagraChecker()
 	mgr.checkers[IndexFaissIDMap] = newFlatChecker()
 	mgr.checkers[IndexFaissIvfFlat] = newIVFBaseChecker()
 	mgr.checkers[IndexFaissIvfPQ] = newIVFPQChecker()
