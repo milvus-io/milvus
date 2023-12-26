@@ -78,7 +78,9 @@ func (s *BloomFilterSetSuite) TestRoll() {
 	err := s.bfs.UpdatePKRange(s.GetFieldData(ids))
 	s.NoError(err)
 
-	s.bfs.Roll()
+	newEntry := &storage.PrimaryKeyStats{}
+
+	s.bfs.Roll(newEntry)
 
 	history = s.bfs.GetHistory()
 	s.Equal(1, len(history), "history shall have one entry after roll with current data")

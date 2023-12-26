@@ -63,6 +63,10 @@ func (s *BFWriteBufferSuite) SetupSuite() {
 			},
 		},
 	}
+
+	storageCache, err := metacache.NewStorageV2Cache(s.collSchema)
+	s.Require().NoError(err)
+	s.storageV2Cache = storageCache
 }
 
 func (s *BFWriteBufferSuite) composeInsertMsg(segmentID int64, rowCount int, dim int) ([]int64, *msgstream.InsertMsg) {
@@ -154,7 +158,9 @@ func (s *BFWriteBufferSuite) SetupTest() {
 }
 
 func (s *BFWriteBufferSuite) TestBufferData() {
-	wb, err := NewBFWriteBuffer(s.channelName, s.metacache, nil, s.syncMgr, &writeBufferOption{})
+	storageCache, err := metacache.NewStorageV2Cache(s.collSchema)
+	s.Require().NoError(err)
+	wb, err := NewBFWriteBuffer(s.channelName, s.metacache, storageCache, s.syncMgr, &writeBufferOption{})
 	s.NoError(err)
 
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 1000}, metacache.NewBloomFilterSet())
@@ -205,6 +211,7 @@ func (s *BFWriteBufferSuite) TestAutoSync() {
 
 func (s *BFWriteBufferSuite) TestBufferDataWithStorageV2() {
 	params.Params.CommonCfg.EnableStorageV2.SwapTempValue("true")
+	defer params.Params.Reset(params.Params.CommonCfg.EnableStorageV2.Key)
 	params.Params.CommonCfg.StorageScheme.SwapTempValue("file")
 	tmpDir := s.T().TempDir()
 	arrowSchema, err := typeutil.ConvertToArrowSchema(s.collSchema.Fields)
@@ -277,6 +284,14 @@ func (s *BFWriteBufferSuite) TestAutoSyncWithStorageV2() {
 		err = wb.BufferData([]*msgstream.InsertMsg{msg}, []*msgstream.DeleteMsg{delMsg}, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})
 		s.NoError(err)
 	})
+}
+
+func (s *BFWriteBufferSuite) TestCreateFailure() {
+	metacache := metacache.NewMockMetaCache(s.T())
+	metacache.EXPECT().Collection().Return(s.collID)
+	metacache.EXPECT().Schema().Return(&schemapb.CollectionSchema{})
+	_, err := NewBFWriteBuffer(s.channelName, metacache, s.storageV2Cache, s.syncMgr, &writeBufferOption{})
+	s.Error(err)
 }
 
 func TestBFWriteBuffer(t *testing.T) {
