@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -47,6 +48,8 @@ type GcOption struct {
 	checkInterval    time.Duration        // each interval
 	missingTolerance time.Duration        // key missing in meta tolerance time
 	dropTolerance    time.Duration        // dropped segment related key tolerance time
+
+	removeLogPool *conc.Pool[struct{}]
 }
 
 // garbageCollector handles garbage files in object storage
@@ -66,6 +69,7 @@ type garbageCollector struct {
 func newGarbageCollector(meta *meta, handler Handler, opt GcOption) *garbageCollector {
 	log.Info("GC with option", zap.Bool("enabled", opt.enabled), zap.Duration("interval", opt.checkInterval),
 		zap.Duration("missingTolerance", opt.missingTolerance), zap.Duration("dropTolerance", opt.dropTolerance))
+	opt.removeLogPool = conc.NewPool[struct{}](Params.DataCoordCfg.GCRemoveConcurrent.GetAsInt(), conc.WithExpiryDuration(time.Minute))
 	return &garbageCollector{
 		meta:    meta,
 		handler: handler,
@@ -287,6 +291,7 @@ func (gc *garbageCollector) clearEtcd() {
 		return dropIDs[i] < dropIDs[j]
 	})
 
+	log.Info("start to GC segments", zap.Int("drop_num", len(dropIDs)))
 	for _, segmentID := range dropIDs {
 		segment, ok := drops[segmentID]
 		if !ok {
@@ -300,7 +305,10 @@ func (gc *garbageCollector) clearEtcd() {
 		}
 
 		logs := getLogs(segment)
-		log.Info("GC segment", zap.Int64("segmentID", segment.GetID()))
+		log.Info("GC segment", zap.Int64("segmentID", segment.GetID()),
+			zap.Int("insert_logs", len(segment.GetBinlogs())),
+			zap.Int("delta_logs", len(segment.GetDeltalogs())),
+			zap.Int("stats_logs", len(segment.GetStatslogs())))
 		if gc.removeLogs(logs) {
 			err := gc.meta.DropSegment(segment.GetID())
 			if err != nil {
@@ -343,22 +351,39 @@ func getLogs(sinfo *SegmentInfo) []*datapb.Binlog {
 func (gc *garbageCollector) removeLogs(logs []*datapb.Binlog) bool {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	delFlag := true
+	var w sync.WaitGroup
+	w.Add(len(logs))
 	for _, l := range logs {
-		err := gc.option.cli.Remove(ctx, l.GetLogPath())
-		if err != nil {
-			switch err.(type) {
-			case minio.ErrorResponse:
-				errResp := minio.ToErrorResponse(err)
-				if errResp.Code != "" && errResp.Code != "NoSuchKey" {
-					delFlag = false
-				}
+		tmpLog := l
+		gc.option.removeLogPool.Submit(func() (struct{}, error) {
+			defer w.Done()
+			select {
+			case <-ctx.Done():
+				return struct{}{}, nil
 			default:
-				delFlag = false
+				err := gc.option.cli.Remove(ctx, tmpLog.GetLogPath())
+				if err != nil {
+					switch err.(type) {
+					case minio.ErrorResponse:
+						errResp := minio.ToErrorResponse(err)
+						if errResp.Code != "" && errResp.Code != "NoSuchKey" {
+							cancel()
+						}
+					default:
+						cancel()
+					}
+				}
+				return struct{}{}, nil
 			}
-		}
+		})
 	}
-	return delFlag
+	w.Wait()
+	select {
+	case <-ctx.Done():
+		return false
+	default:
+		return true
+	}
 }
 
 func (gc *garbageCollector) recycleUnusedIndexes() {
