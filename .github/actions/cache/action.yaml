@@ -14,6 +14,7 @@ runs:
         run: |
           echo "corehash=${CORE_HASH}" >> $GITHUB_ENV
           echo "Set CCache hash to ${CORE_HASH}"
+        shell: bash
       - name: Cache CCache Volumes
         uses: actions/cache@v3
         with:
