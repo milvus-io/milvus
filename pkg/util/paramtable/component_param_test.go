@@ -298,7 +298,7 @@ func TestComponentParam(t *testing.T) {
 
 		// test query side config
 		chunkRows := Params.ChunkRows.GetAsInt64()
-		assert.Equal(t, int64(1024), chunkRows)
+		assert.Equal(t, int64(128), chunkRows)
 
 		nlist := Params.InterimIndexNlist.GetAsInt64()
 		assert.Equal(t, int64(128), nlist)
@@ -339,7 +339,7 @@ func TestComponentParam(t *testing.T) {
 		params.Remove("queryNode.segcore.growing.nprobe")
 		params.Save("queryNode.segcore.chunkRows", "64")
 		chunkRows = Params.ChunkRows.GetAsInt64()
-		assert.Equal(t, int64(1024), chunkRows)
+		assert.Equal(t, int64(128), chunkRows)
 
 		params.Save("queryNode.gracefulStopTimeout", "100")
 		gracefulStopTimeout := &Params.GracefulStopTimeout
