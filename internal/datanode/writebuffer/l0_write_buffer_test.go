@@ -25,12 +25,13 @@ import (
 
 type L0WriteBufferSuite struct {
 	suite.Suite
-	channelName string
-	collID      int64
-	collSchema  *schemapb.CollectionSchema
-	syncMgr     *syncmgr.MockSyncManager
-	metacache   *metacache.MockMetaCache
-	allocator   *allocator.MockGIDAllocator
+	channelName  string
+	collID       int64
+	collSchema   *schemapb.CollectionSchema
+	syncMgr      *syncmgr.MockSyncManager
+	metacache    *metacache.MockMetaCache
+	allocator    *allocator.MockGIDAllocator
+	storageCache *metacache.StorageV2Cache
 }
 
 func (s *L0WriteBufferSuite) SetupSuite() {
@@ -57,6 +58,10 @@ func (s *L0WriteBufferSuite) SetupSuite() {
 		},
 	}
 	s.channelName = "by-dev-rootcoord-dml_0v0"
+
+	storageCache, err := metacache.NewStorageV2Cache(s.collSchema)
+	s.Require().NoError(err)
+	s.storageCache = storageCache
 }
 
 func (s *L0WriteBufferSuite) composeInsertMsg(segmentID int64, rowCount int, dim int) ([]int64, *msgstream.InsertMsg) {
@@ -146,7 +151,7 @@ func (s *L0WriteBufferSuite) SetupTest() {
 }
 
 func (s *L0WriteBufferSuite) TestBufferData() {
-	wb, err := NewL0WriteBuffer(s.channelName, s.metacache, nil, s.syncMgr, &writeBufferOption{
+	wb, err := NewL0WriteBuffer(s.channelName, s.metacache, s.storageCache, s.syncMgr, &writeBufferOption{
 		idAllocator: s.allocator,
 	})
 	s.NoError(err)
@@ -163,6 +168,16 @@ func (s *L0WriteBufferSuite) TestBufferData() {
 
 	err = wb.BufferData([]*msgstream.InsertMsg{msg}, []*msgstream.DeleteMsg{delMsg}, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})
 	s.NoError(err)
+}
+
+func (s *L0WriteBufferSuite) TestCreateFailure() {
+	metacache := metacache.NewMockMetaCache(s.T())
+	metacache.EXPECT().Collection().Return(s.collID)
+	metacache.EXPECT().Schema().Return(&schemapb.CollectionSchema{})
+	_, err := NewL0WriteBuffer(s.channelName, metacache, s.storageCache, s.syncMgr, &writeBufferOption{
+		idAllocator: s.allocator,
+	})
+	s.Error(err)
 }
 
 func TestL0WriteBuffer(t *testing.T) {

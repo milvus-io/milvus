@@ -17,6 +17,7 @@
 package syncmgr
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"testing"
@@ -28,7 +29,6 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -43,7 +43,6 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
@@ -167,19 +166,33 @@ func (s *SyncTaskSuiteV2) getDeleteBufferZeroTs() *storage.DeleteData {
 }
 
 func (s *SyncTaskSuiteV2) getSuiteSyncTask() *SyncTaskV2 {
-	log.Info("space", zap.Any("space", s.space))
-	task := NewSyncTaskV2().
-		WithArrowSchema(s.arrowSchema).
-		WithSpace(s.space).
-		WithCollectionID(s.collectionID).
+	pack := &SyncPack{}
+
+	pack.WithCollectionID(s.collectionID).
 		WithPartitionID(s.partitionID).
 		WithSegmentID(s.segmentID).
 		WithChannelName(s.channelName).
-		WithSchema(s.schema).
-		WithAllocator(s.allocator).
-		WithMetaCache(s.metacache)
+		WithCheckpoint(&msgpb.MsgPosition{
+			Timestamp:   1000,
+			ChannelName: s.channelName,
+		})
+	pack.WithInsertData(s.getInsertBuffer()).WithBatchSize(10)
+	pack.WithDeleteData(s.getDeleteBuffer())
 
-	return task
+	storageCache, err := metacache.NewStorageV2Cache(s.schema)
+	s.Require().NoError(err)
+
+	s.metacache.EXPECT().Collection().Return(s.collectionID)
+	s.metacache.EXPECT().Schema().Return(s.schema)
+	serializer, err := NewStorageV2Serializer(storageCache, s.metacache, nil)
+	s.Require().NoError(err)
+	task, err := serializer.EncodeBuffer(context.Background(), pack)
+	s.Require().NoError(err)
+	taskV2, ok := task.(*SyncTaskV2)
+	s.Require().True(ok)
+	taskV2.WithMetaCache(s.metacache)
+
+	return taskV2
 }
 
 func (s *SyncTaskSuiteV2) TestRunNormal() {
@@ -202,6 +215,7 @@ func (s *SyncTaskSuiteV2) TestRunNormal() {
 	bfs.UpdatePKRange(fd)
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs)
 	metacache.UpdateNumOfRows(1000)(seg)
+	s.metacache.EXPECT().GetSegmentByID(mock.Anything).Return(seg, true)
 	s.metacache.EXPECT().GetSegmentsBy(mock.Anything).Return([]*metacache.SegmentInfo{seg})
 	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 
@@ -221,24 +235,7 @@ func (s *SyncTaskSuiteV2) TestRunNormal() {
 
 	s.Run("with_insert_delete_cp", func() {
 		task := s.getSuiteSyncTask()
-		task.WithInsertData(s.getInsertBuffer()).WithDeleteData(s.getDeleteBuffer())
 		task.WithTimeRange(50, 100)
-		task.WithMetaWriter(BrokerMetaWriter(s.broker))
-		task.WithCheckpoint(&msgpb.MsgPosition{
-			ChannelName: s.channelName,
-			MsgID:       []byte{1, 2, 3, 4},
-			Timestamp:   100,
-		})
-
-		err := task.Run()
-		s.NoError(err)
-	})
-
-	s.Run("with_insert_delete_flush", func() {
-		task := s.getSuiteSyncTask()
-		task.WithInsertData(s.getInsertBuffer()).WithDeleteData(s.getDeleteBuffer())
-		task.WithFlush()
-		task.WithDrop()
 		task.WithMetaWriter(BrokerMetaWriter(s.broker))
 		task.WithCheckpoint(&msgpb.MsgPosition{
 			ChannelName: s.channelName,
