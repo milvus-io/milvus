@@ -8,7 +8,7 @@ inputs:
 runs:
   using: "composite"
   steps: 
-      - name: 'Generate CCache Hash'
+      - name: Generate CCache Hash
         env:
           CORE_HASH: ${{ hashFiles( 'internal/core/**/*.cpp', 'internal/core/**/*.cc', 'internal/core/**/*.c', 'internal/core/**/*.h', 'internal/core/**/*.hpp', 'internal/core/**/CMakeLists.txt') }}
         run: |
