@@ -228,6 +228,9 @@ type commonConfig struct {
 	LockSlowLogWarnThreshold ParamItem `refreshable:"true"`
 
 	TTMsgEnabled ParamItem `refreshable:"true"`
+
+	BloomFilterSize       ParamItem `refreshable:"true"`
+	MaxBloomFalsePositive ParamItem `refreshable:"true"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -651,6 +654,22 @@ like the old password verification when updating the credential`,
 		Doc:          "Whether the instance disable sending ts messages",
 	}
 	p.TTMsgEnabled.Init(base.mgr)
+
+	p.BloomFilterSize = ParamItem{
+		Key:          "common.bloomFilterSize",
+		Version:      "2.3.2",
+		DefaultValue: "100000",
+		Doc:          "bloom filter initial size",
+	}
+	p.BloomFilterSize.Init(base.mgr)
+
+	p.MaxBloomFalsePositive = ParamItem{
+		Key:          "common.maxBloomFalsePositive",
+		Version:      "2.3.2",
+		DefaultValue: "0.05",
+		Doc:          "max false positive rate for bloom filter",
+	}
+	p.MaxBloomFalsePositive.Init(base.mgr)
 }
 
 type traceConfig struct {

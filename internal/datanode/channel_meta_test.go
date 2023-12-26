@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 var channelMetaNodeTestDir = "/tmp/milvus_test/channel_meta"
@@ -64,7 +65,8 @@ func (kv *mockDataCM) MultiRead(ctx context.Context, keys []string) ([][]byte, e
 		FieldID: common.RowIDField,
 		Min:     0,
 		Max:     10,
-		BF:      bloom.NewWithEstimates(storage.BloomFilterSize, storage.MaxBloomFalsePositive),
+		BF: bloom.NewWithEstimates(paramtable.Get().CommonCfg.BloomFilterSize.GetAsUint(),
+			paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat()),
 	}
 	buffer, _ := json.Marshal(stats)
 	return [][]byte{buffer}, nil
