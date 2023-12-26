@@ -35,6 +35,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/pkg/config"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	pulsarwrapper "github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper/pulsar"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -94,6 +95,20 @@ func consumer(ctx context.Context, mq MsgStream) *MsgPack {
 			return nil
 		}
 	}
+}
+
+func TestStream_ConfigEvent(t *testing.T) {
+	pulsarAddress := getPulsarAddress()
+	factory := ProtoUDFactory{}
+	pulsarClient, err := pulsarwrapper.NewClient(DefaultPulsarTenant, DefaultPulsarNamespace, pulsar.ClientOptions{URL: pulsarAddress})
+	assert.NoError(t, err)
+	stream, err := NewMqMsgStream(context.Background(), 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
+	assert.NoError(t, err)
+	stream.configEvent.OnEvent(&config.Event{Value: "false"})
+	stream.configEvent.OnEvent(&config.Event{Value: "????"})
+	assert.False(t, stream.isEnabledProduce())
+	stream.configEvent.OnEvent(&config.Event{Value: "true"})
+	assert.True(t, stream.isEnabledProduce())
 }
 
 func TestStream_PulsarMsgStream_Insert(t *testing.T) {
