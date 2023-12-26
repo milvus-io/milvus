@@ -28,7 +28,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/metastore"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/eventlog"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -41,7 +40,6 @@ import (
 type Collection struct {
 	*querypb.CollectionLoadInfo
 	LoadPercentage int32
-	Indexes        []*indexpb.IndexInfo
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 
@@ -78,7 +76,6 @@ func (collection *Collection) Clone() *Collection {
 	return &Collection{
 		CollectionLoadInfo: proto.Clone(collection.CollectionLoadInfo).(*querypb.CollectionLoadInfo),
 		LoadPercentage:     collection.LoadPercentage,
-		Indexes:            collection.Indexes,
 		CreatedAt:          collection.CreatedAt,
 		UpdatedAt:          collection.UpdatedAt,
 		refreshNotifier:    collection.refreshNotifier,

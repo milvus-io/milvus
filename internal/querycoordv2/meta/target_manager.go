@@ -25,6 +25,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -97,30 +98,28 @@ func (mgr *TargetManager) UpdateCollectionNextTarget(collectionID int64) error {
 	partitionIDs := lo.Map(partitions, func(partition *Partition, i int) int64 {
 		return partition.PartitionID
 	})
-	allocatedTarget := NewCollectionTarget(nil, nil)
 	mgr.rwMutex.Unlock()
 
 	log := log.With(zap.Int64("collectionID", collectionID),
 		zap.Int64s("PartitionIDs", partitionIDs))
-	segments, channels, err := mgr.PullNextTargetV2(mgr.broker, collectionID, partitionIDs...)
+	target, err := mgr.PullNextTargetV2(mgr.broker, collectionID, partitionIDs...)
 	if err != nil {
 		log.Warn("failed to get next targets for collection", zap.Error(err))
 		return err
 	}
 
-	if len(segments) == 0 && len(channels) == 0 {
+	if len(target.dmChannels) == 0 && len(target.segments) == 0 {
 		log.Debug("skip empty next targets for collection")
 		return nil
 	}
-	allocatedTarget.segments = segments
-	allocatedTarget.dmChannels = channels
 
 	mgr.rwMutex.Lock()
 	defer mgr.rwMutex.Unlock()
-	mgr.next.updateCollectionTarget(collectionID, allocatedTarget)
+	mgr.next.updateCollectionTarget(collectionID, target)
 	log.Debug("finish to update next targets for collection",
-		zap.Int64s("segments", allocatedTarget.GetAllSegmentIDs()),
-		zap.Strings("channels", allocatedTarget.GetAllDmChannelNames()))
+		zap.Int64s("segments", target.GetAllSegmentIDs()),
+		zap.Strings("channels", target.GetAllDmChannelNames()),
+	)
 
 	return nil
 }
@@ -176,18 +175,18 @@ func (mgr *TargetManager) PullNextTargetV1(broker Broker, collectionID int64, ch
 	return segments, dmChannels, nil
 }
 
-func (mgr *TargetManager) PullNextTargetV2(broker Broker, collectionID int64, chosenPartitionIDs ...int64) (map[int64]*datapb.SegmentInfo, map[string]*DmChannel, error) {
+func (mgr *TargetManager) PullNextTargetV2(broker Broker, collectionID int64, chosenPartitionIDs ...int64) (*CollectionTarget, error) {
 	log.Debug("start to pull next targets for collection",
 		zap.Int64("collectionID", collectionID),
 		zap.Int64s("chosenPartitionIDs", chosenPartitionIDs))
 
 	if len(chosenPartitionIDs) == 0 {
-		return nil, nil, nil
+		return nil, nil
 	}
 
 	channelInfos := make(map[string][]*datapb.VchannelInfo)
 	segments := make(map[int64]*datapb.SegmentInfo, 0)
-	dmChannels := make(map[string]*DmChannel)
+	channels := make(map[string]*DmChannel)
 
 	getRecoveryInfo := func() error {
 		var err error
@@ -196,7 +195,7 @@ func (mgr *TargetManager) PullNextTargetV2(broker Broker, collectionID int64, ch
 		if err != nil {
 			// if meet rpc error, for compatibility with previous versions, try pull next target v1
 			if errors.Is(err, merr.ErrServiceUnimplemented) {
-				segments, dmChannels, err = mgr.PullNextTargetV1(broker, collectionID, chosenPartitionIDs...)
+				segments, channels, err = mgr.PullNextTargetV1(broker, collectionID, chosenPartitionIDs...)
 				return err
 			}
 
@@ -216,17 +215,22 @@ func (mgr *TargetManager) PullNextTargetV2(broker Broker, collectionID int64, ch
 
 		for _, infos := range channelInfos {
 			merged := mgr.mergeDmChannelInfo(infos)
-			dmChannels[merged.GetChannelName()] = merged
+			channels[merged.GetChannelName()] = merged
 		}
 		return nil
 	}
 
 	err := retry.Do(context.TODO(), getRecoveryInfo, retry.Attempts(10))
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	return segments, dmChannels, nil
+	indexes, err := broker.DescribeIndex(context.Background(), collectionID)
+	if err != nil {
+		return nil, err
+	}
+
+	return NewCollectionTarget(segments, channels, indexes), nil
 }
 
 func (mgr *TargetManager) mergeDmChannelInfo(infos []*datapb.VchannelInfo) *DmChannel {
@@ -316,7 +320,7 @@ func (mgr *TargetManager) removePartitionFromCollectionTarget(oldTarget *Collect
 		channels[channel.GetChannelName()] = channel
 	}
 
-	return NewCollectionTarget(segments, channels)
+	return NewCollectionTarget(segments, channels, oldTarget.GetAllIndexes())
 }
 
 func (mgr *TargetManager) getCollectionTarget(scope TargetScope, collectionID int64) *CollectionTarget {
@@ -505,6 +509,17 @@ func (mgr *TargetManager) GetCollectionTargetVersion(collectionID int64, scope T
 		return 0
 	}
 	return collectionTarget.GetTargetVersion()
+}
+
+func (mgr *TargetManager) GetIndexes(collectionID int64, scope TargetScope) []*indexpb.IndexInfo {
+	mgr.rwMutex.RLock()
+	defer mgr.rwMutex.RUnlock()
+	collectionTarget := mgr.getCollectionTarget(scope, collectionID)
+
+	if collectionTarget == nil {
+		return nil
+	}
+	return collectionTarget.GetAllIndexes()
 }
 
 func (mgr *TargetManager) IsCurrentTargetExist(collectionID int64) bool {

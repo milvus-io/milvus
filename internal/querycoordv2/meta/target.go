@@ -22,19 +22,22 @@ import (
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 )
 
 // CollectionTarget collection target is immutable,
 type CollectionTarget struct {
 	segments   map[int64]*datapb.SegmentInfo
 	dmChannels map[string]*DmChannel
+	indexes    []*indexpb.IndexInfo
 	version    int64
 }
 
-func NewCollectionTarget(segments map[int64]*datapb.SegmentInfo, dmChannels map[string]*DmChannel) *CollectionTarget {
+func NewCollectionTarget(segments map[int64]*datapb.SegmentInfo, dmChannels map[string]*DmChannel, indexes []*indexpb.IndexInfo) *CollectionTarget {
 	return &CollectionTarget{
 		segments:   segments,
 		dmChannels: dmChannels,
+		indexes:    indexes,
 		version:    time.Now().UnixNano(),
 	}
 }
@@ -57,6 +60,10 @@ func (p *CollectionTarget) GetAllSegmentIDs() []int64 {
 
 func (p *CollectionTarget) GetAllDmChannelNames() []string {
 	return lo.Keys(p.dmChannels)
+}
+
+func (p *CollectionTarget) GetAllIndexes() []*indexpb.IndexInfo {
+	return p.indexes
 }
 
 func (p *CollectionTarget) IsEmpty() bool {

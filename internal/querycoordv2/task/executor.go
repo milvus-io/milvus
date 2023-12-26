@@ -206,9 +206,14 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 		indexes = nil
 	}
 
+	// Milvus forbids dropping index after collection loaded,
+	// so the next target won't miss any index in current target,
+	// always fetch the next target index first
+	collectionIndexes := ex.targetMgr.GetIndexes(task.CollectionID(), meta.NextTargetFirst)
+
 	// update the field index params
 	for _, segmentIndex := range indexes {
-		index, found := lo.Find(collection.Indexes, func(indexInfo *indexpb.IndexInfo) bool {
+		index, found := lo.Find(collectionIndexes, func(indexInfo *indexpb.IndexInfo) bool {
 			return indexInfo.IndexID == segmentIndex.IndexID
 		})
 		if !found {
@@ -233,7 +238,7 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 		collectionInfo.GetProperties(),
 		loadMeta,
 		loadInfo,
-		collection.Indexes,
+		collectionIndexes,
 	)
 
 	// Get shard leader for the given replica and segment
@@ -359,17 +364,20 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 		log.Warn("failed to get collection info")
 		return err
 	}
-	collection := ex.meta.CollectionManager.GetCollection(task.CollectionID())
-	if collection == nil {
-		log.Warn("collection not loaded", zap.Int64("collectionID", task.CollectionID()))
-		return merr.WrapErrCollectionLoaded(collectionInfo.GetCollectionName())
-	}
 	partitions, err := utils.GetPartitions(ex.meta.CollectionManager, task.CollectionID())
 	if err != nil {
 		log.Warn("failed to get partitions of collection")
 		return err
 	}
-	metricType, err := getMetricType(collection.Indexes, collectionInfo.GetSchema())
+
+	// Milvus forbids dropping index after collection loaded,
+	// so the next target won't miss any index in current target,
+	// always fetch the next target index first
+	collectionIndexes := ex.targetMgr.GetIndexes(task.CollectionID(), meta.NextTarget)
+	if collectionIndexes == nil {
+		collectionIndexes = ex.targetMgr.GetIndexes(task.CollectionID(), meta.CurrentTarget)
+	}
+	metricType, err := getMetricType(collectionIndexes, collectionInfo.GetSchema())
 	if err != nil {
 		log.Warn("failed to get metric type", zap.Error(err))
 		return err
@@ -393,7 +401,7 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 		collectionInfo.GetSchema(),
 		loadMeta,
 		dmChannel,
-		collection.Indexes,
+		collectionIndexes,
 	)
 	err = fillSubChannelRequest(ctx, req, ex.broker)
 	if err != nil {
