@@ -110,11 +110,11 @@ class OffsetOrderedMap : public OffsetMap {
     find_first(int64_t limit,
                const BitsetType& bitset,
                bool false_filtered_out) const override {
+        std::shared_lock<std::shared_mutex> lck(mtx_);
+
         if (limit == Unlimited || limit == NoLimit) {
             limit = map_.size();
         }
-
-        std::shared_lock<std::shared_mutex> lck(mtx_);
 
         // TODO: we can't retrieve pk by offset very conveniently.
         //      Selectivity should be done outside.
@@ -241,7 +241,7 @@ class OffsetOrderedArray : public OffsetMap {
         int64_t cnt = bitset.count();
         auto size = bitset.size();
         if (!false_filtered_out) {
-            cnt = bitset.size() - bitset.count();
+            cnt = size - bitset.count();
         }
         limit = std::min(limit, cnt);
         std::vector<int64_t> seg_offsets;
