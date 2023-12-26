@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	coordMocks "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/dist"
@@ -515,6 +516,7 @@ func (suite *ServerSuite) expectGetRecoverInfoByMockDataCoord(collection int64, 
 		Channels: vChannels,
 		Segments: segmentInfos,
 	}, nil).Maybe()
+	dataCoord.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(&indexpb.DescribeIndexResponse{}, nil).Maybe()
 }
 
 func (suite *ServerSuite) updateCollectionStatus(collectionID int64, status querypb.LoadStatus) {
