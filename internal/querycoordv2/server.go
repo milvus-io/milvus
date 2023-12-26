@@ -395,9 +395,7 @@ func (s *Server) initObserver() {
 	s.resourceObserver = observers.NewResourceObserver(s.meta)
 }
 
-func (s *Server) afterStart() {
-	s.updateBalanceConfigLoop(s.ctx)
-}
+func (s *Server) afterStart() {}
 
 func (s *Server) Start() error {
 	if !s.enableActiveStandBy {
@@ -431,6 +429,9 @@ func (s *Server) startQueryCoord() error {
 	s.wg.Add(2)
 	go s.handleNodeUpLoop()
 	go s.watchNodes(revision)
+
+	// check whether old node exist, if yes suspend auto balance until all old nodes down
+	s.updateBalanceConfigLoop(s.ctx)
 
 	// Recover dist, to avoid generate too much task when dist not ready after restart
 	s.distController.SyncAll(s.ctx)
@@ -839,11 +840,12 @@ func (s *Server) updateBalanceConfig() bool {
 
 	if len(sessions) == 0 {
 		// only balance channel when all query node's version >= 2.3.0
-		Params.Save(Params.QueryCoordCfg.AutoBalance.Key, "true")
+		Params.Reset(Params.QueryCoordCfg.AutoBalance.Key)
 		log.Info("all old query node down, enable auto balance!")
 		return true
 	}
 
+	Params.Save(Params.QueryCoordCfg.AutoBalance.Key, "false")
 	log.RatedDebug(10, "old query node exist", zap.Strings("sessions", lo.Keys(sessions)))
 	return false
 }
