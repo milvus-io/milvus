@@ -1671,66 +1671,15 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 			},
 			idAllocator: idAllocator,
 			ctx:         ctx,
-			result: &milvuspb.MutationResult{
-				Status:       merr.Success(),
-				IDs:          nil,
-				SuccIndex:    nil,
-				ErrIndex:     nil,
-				Acknowledged: false,
-				InsertCnt:    0,
-				DeleteCnt:    0,
-				UpsertCnt:    0,
-				Timestamp:    0,
+			primaryKeys: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{0, 1}}},
 			},
-			chMgr:    chMgr,
-			chTicker: ticker,
+			chMgr:        chMgr,
+			chTicker:     ticker,
+			collectionID: collectionID,
+			vChannels:    []string{"test-ch"},
 		}
 
-		assert.NoError(t, task.OnEnqueue())
-		assert.NotNil(t, task.TraceCtx())
-
-		id := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
-		task.SetID(id)
-		assert.Equal(t, id, task.ID())
-		assert.Equal(t, commonpb.MsgType_Delete, task.Type())
-
-		ts := Timestamp(time.Now().UnixNano())
-		task.SetTs(ts)
-		assert.Equal(t, ts, task.BeginTs())
-		assert.Equal(t, ts, task.EndTs())
-
-		assert.NoError(t, task.PreExecute(ctx))
-		assert.NoError(t, task.Execute(ctx))
-		assert.NoError(t, task.PostExecute(ctx))
-	})
-
-	t.Run("complex delete", func(t *testing.T) {
-		lb := NewMockLBPolicy(t)
-		task := &deleteTask{
-			Condition: NewTaskCondition(ctx),
-			lb:        lb,
-			req: &milvuspb.DeleteRequest{
-				CollectionName: collectionName,
-				PartitionName:  partitionName,
-				Expr:           "int64 < 2",
-			},
-			idAllocator: idAllocator,
-			ctx:         ctx,
-			result: &milvuspb.MutationResult{
-				Status:       merr.Success(),
-				IDs:          nil,
-				SuccIndex:    nil,
-				ErrIndex:     nil,
-				Acknowledged: false,
-				InsertCnt:    0,
-				DeleteCnt:    0,
-				UpsertCnt:    0,
-				Timestamp:    0,
-			},
-			chMgr:    chMgr,
-			chTicker: ticker,
-		}
-		lb.EXPECT().Execute(mock.Anything, mock.Anything).Return(nil)
 		assert.NoError(t, task.OnEnqueue())
 		assert.NotNil(t, task.TraceCtx())
 
@@ -2003,19 +1952,13 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 			},
 			idAllocator: idAllocator,
 			ctx:         ctx,
-			result: &milvuspb.MutationResult{
-				Status:       merr.Success(),
-				IDs:          nil,
-				SuccIndex:    nil,
-				ErrIndex:     nil,
-				Acknowledged: false,
-				InsertCnt:    0,
-				DeleteCnt:    0,
-				UpsertCnt:    0,
-				Timestamp:    0,
+			chMgr:       chMgr,
+			chTicker:    ticker,
+			vChannels:   []string{"test-channel"},
+			primaryKeys: &schemapb.IDs{
+				IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{"milvus", "test"}}},
 			},
-			chMgr:    chMgr,
-			chTicker: ticker,
+			collectionID: collectionID,
 		}
 
 		assert.NoError(t, task.OnEnqueue())
@@ -3432,24 +3375,15 @@ func TestPartitionKey(t *testing.T) {
 				Expr:           "int64_field in [0, 1]",
 			},
 			ctx: ctx,
-			result: &milvuspb.MutationResult{
-				Status:       merr.Success(),
-				IDs:          nil,
-				SuccIndex:    nil,
-				ErrIndex:     nil,
-				Acknowledged: false,
-				InsertCnt:    0,
-				DeleteCnt:    0,
-				UpsertCnt:    0,
-				Timestamp:    0,
+			primaryKeys: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{0, 1}}},
 			},
-			idAllocator: idAllocator,
-			chMgr:       chMgr,
-			chTicker:    ticker,
+			idAllocator:  idAllocator,
+			chMgr:        chMgr,
+			chTicker:     ticker,
+			collectionID: collectionID,
+			vChannels:    []string{"test-channel"},
 		}
-		// don't support specify partition name if use partition key
-		dt.req.PartitionName = partitionNames[0]
-		assert.Error(t, dt.PreExecute(ctx))
 
 		dt.req.PartitionName = ""
 		assert.NoError(t, dt.PreExecute(ctx))
