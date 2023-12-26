@@ -11,9 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 // QueryHook is the interface for search/query parameter optimizer.
@@ -72,7 +70,7 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 			log.Warn("failed to execute queryHook", zap.Error(err))
 			return nil, merr.WrapErrServiceUnavailable(err.Error(), "queryHook execution failed")
 		}
-		if params[common.TopKKey].(int64) == queryInfo.GetTopk() {
+		if params[common.TopKKey].(int64) == queryInfo.GetTopk() && !withFilter {
 			req.GetReq().EnsureSearchQuality = true
 		}
 		queryInfo.Topk = params[common.TopKKey].(int64)
@@ -84,7 +82,6 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 		}
 		req.Req.SerializedExprPlan = serializedExprPlan
 		log.Debug("optimized search params done", zap.Any("queryInfo", queryInfo))
-		metrics.QueryNodeEstimateNumSegments.WithLabelValues(fmt.Sprint(paramtable.GetNodeID(), req.GetReq().GetCollectionID())).Observe(float64(estSegmentNum))
 	default:
 		log.Warn("not supported node type", zap.String("nodeType", fmt.Sprintf("%T", plan.GetNode())))
 	}

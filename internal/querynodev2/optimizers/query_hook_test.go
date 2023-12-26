@@ -62,8 +62,17 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 		suite.NoError(err)
 		suite.False(req.GetReq().GetEnsureSearchQuality())
 		suite.verifyQueryInfo(req, 50, `{"param": 2}`)
+	})
 
-		plan = &planpb.PlanNode{
+	suite.Run("normal_run2", func() {
+		mockHook := NewMockQueryHook(suite.T())
+		mockHook.EXPECT().Run(mock.Anything).Run(func(params map[string]any) {
+			params[common.TopKKey] = int64(50)
+			params[common.SearchParamKey] = `{"param": 2}`
+		}).Return(nil)
+		suite.queryHook = mockHook
+		defer func() { suite.queryHook = nil }()
+		plan := &planpb.PlanNode{
 			Node: &planpb.PlanNode_VectorAnns{
 				VectorAnns: &planpb.VectorANNS{
 					QueryInfo: &planpb.QueryInfo{
@@ -73,10 +82,10 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 				},
 			},
 		}
-		bs, err = proto.Marshal(plan)
+		bs, err := proto.Marshal(plan)
 		suite.Require().NoError(err)
 
-		req, err = OptimizeSearchParams(ctx, &querypb.SearchRequest{
+		req, err := OptimizeSearchParams(ctx, &querypb.SearchRequest{
 			Req: &internalpb.SearchRequest{
 				SerializedExprPlan: bs,
 			},
