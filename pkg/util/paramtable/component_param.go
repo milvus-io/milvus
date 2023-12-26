@@ -1091,9 +1091,10 @@ please adjust in embedded Milvus: false`,
 	p.AccessLog.MinioEnable.Init(base.mgr)
 
 	p.AccessLog.LocalPath = ParamItem{
-		Key:     "proxy.accessLog.localPath",
-		Version: "2.2.0",
-		Export:  true,
+		Key:          "proxy.accessLog.localPath",
+		Version:      "2.2.0",
+		DefaultValue: "/tmp/milvus_access",
+		Export:       true,
 	}
 	p.AccessLog.LocalPath.Init(base.mgr)
 
