@@ -300,6 +300,21 @@ MinioChunkManager::BuildGoogleCloudClient(
     }
 }
 
+void
+MinioChunkManager::BuildHuaweiCloudClient(
+    const StorageConfig& storage_config,
+    const Aws::Client::ClientConfiguration& config) {
+    if (storage_config.useIAM) {
+        // Using S3 client instead of huawei client because of compatible protocol
+        client_ = std::make_shared<Aws::S3::S3Client>(
+            config,
+            Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never,
+            storage_config.useVirtualHost);
+    } else {
+        BuildAccessKeyClient(storage_config, config);
+    }
+}
+
 MinioChunkManager::MinioChunkManager(const StorageConfig& storage_config)
     : default_bucket_name_(storage_config.bucket_name) {
     remote_root_path_ = storage_config.root_path;
@@ -308,6 +323,8 @@ MinioChunkManager::MinioChunkManager(const StorageConfig& storage_config)
         storageType = RemoteStorageType::GOOGLE_CLOUD;
     } else if (storage_config.address.find("aliyun") != std::string::npos) {
         storageType = RemoteStorageType::ALIYUN_CLOUD;
+    } else if (storage_config.address.find("huawei") != std::string::npos) {
+        storageType = RemoteStorageType::HUAWEI_CLOUD;
     } else {
         storageType = RemoteStorageType::S3;
     }
@@ -342,6 +359,8 @@ MinioChunkManager::MinioChunkManager(const StorageConfig& storage_config)
         BuildAliyunCloudClient(storage_config, config);
     } else if (storageType == RemoteStorageType::GOOGLE_CLOUD) {
         BuildGoogleCloudClient(storage_config, config);
+    } else if (storageType == RemoteStorageType::HUAWEI_CLOUD) {
+        BuildHuaweiCloudClient(storage_config, config);
     }
 
     PreCheck(storage_config);

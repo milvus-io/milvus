@@ -214,6 +214,9 @@ func TestMinioObjectStorage(t *testing.T) {
 		config.cloudProvider = "gcp"
 		_, err = newMinioObjectStorageWithConfig(ctx, &config)
 		assert.NoError(t, err)
+		config.cloudProvider = "hwc"
+		_, err = newMinioObjectStorageWithConfig(ctx, &config)
+		assert.NoError(t, err)
 		config.cloudProvider = cloudProvider
 	})
 }

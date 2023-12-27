@@ -50,6 +50,8 @@ OpenDALChunkManager::OpenDALChunkManager(const StorageConfig& storage_config)
         storageType = "gcs";
     } else if (storage_config.cloud_provider == "aliyun") {
         storageType = "oss";
+    } else if (storage_config.cloud_provider == "hwc") {
+        storageType = "obs";
     } else if (storage_config.cloud_provider == "azure") {
         storageType = "azblob";
     } else {

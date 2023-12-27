@@ -62,7 +62,7 @@ func newMinioClient(ctx context.Context, c *config) (*minio.Client, error) {
 		if !c.useIAM {
 			creds = credentials.NewStaticV2(c.accessKeyID, c.secretAccessKeyID, "")
 		}
-	default: // aws, minio
+	default: // aws, hwc, minio
 		matchedDefault = true
 	}
 
@@ -90,7 +90,7 @@ func newMinioClient(ctx context.Context, c *config) (*minio.Client, error) {
 	}
 
 	if matchedDefault {
-		// aws, minio
+		// aws, hwc, minio
 		if c.useIAM {
 			creds = credentials.NewIAM("")
 		} else {

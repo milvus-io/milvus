@@ -41,6 +41,7 @@ const (
 	CloudProviderGCP    = "gcp"
 	CloudProviderAWS    = "aws"
 	CloudProviderAliyun = "aliyun"
+	CloudProviderHWC    = "hwc"
 
 	CloudProviderAzure = "azure"
 )

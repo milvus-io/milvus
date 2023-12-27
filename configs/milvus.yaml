@@ -77,12 +77,14 @@ minio:
   # gcp: https://cloud.google.com/storage/docs/access-control/iam
   # aliyun (ack): https://www.alibabacloud.com/help/en/container-service-for-kubernetes/latest/use-rrsa-to-enforce-access-control
   # aliyun (ecs): https://www.alibabacloud.com/help/en/elastic-compute-service/latest/attach-an-instance-ram-role
+  # hwc (huaweicloud): https://www.huaweicloud.com/product/iam.html
   useIAM: false
-  # Cloud Provider of S3. Supports: "aws", "gcp", "aliyun".
+  # Cloud Provider of S3. Supports: "aws", "gcp", "aliyun", "hwc".
   # You can use "aws" for other cloud provider supports S3 API with signature v4, e.g.: minio
   # You can use "gcp" for other cloud provider supports S3 API with signature v2
   # You can use "aliyun" for other cloud provider uses virtual host style bucket
-  # When useIAM enabled, only "aws", "gcp", "aliyun" is supported for now
+  # You can use "hwc" for other cloud provider supports S3 API with signature v4
+  # When useIAM enabled, only "aws", "gcp", "aliyun", "hwc" is supported for now
   cloudProvider: aws
   # Custom endpoint for fetch IAM role credentials. when useIAM is true & cloudProvider is "aws".
   # Leave it empty if you want to use AWS default endpoint

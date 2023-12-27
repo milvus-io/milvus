@@ -188,4 +188,32 @@ AliyunChunkManager::AliyunChunkManager(const StorageConfig& storage_config) {
         storage_config.useSSL);
 }
 
+HwcChunkManager::HwcChunkManager(const StorageConfig& storage_config) {
+    default_bucket_name_ = storage_config.bucket_name;
+    remote_root_path_ = storage_config.root_path;
+
+    InitSDKAPIDefault(storage_config.log_level);
+
+    Aws::Client::ClientConfiguration config = generateConfig(storage_config);
+    if (storage_config.useIAM) {
+        // Using S3 client instead of huaweicloud client because of compatible protocol
+        client_ = std::make_shared<Aws::S3::S3Client>(
+            config,
+            Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never,
+            storage_config.useVirtualHost);
+    } else {
+        BuildAccessKeyClient(storage_config, config);
+    }
+
+    PreCheck(storage_config);
+
+    LOG_INFO(
+        "init HwcChunkManager with "
+        "parameter[endpoint={}][bucket_name={}][root_path={}][use_secure={}]",
+        storage_config.address,
+        storage_config.bucket_name,
+        storage_config.root_path,
+        storage_config.useSSL);
+}
+
 }  // namespace milvus::storage

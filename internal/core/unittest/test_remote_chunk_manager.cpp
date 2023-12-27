@@ -82,6 +82,10 @@ TEST_F(RemoteChunkManagerTest, BasicFunctions) {
     the_chunk_manager_ = CreateChunkManager(configs_);
     EXPECT_TRUE(the_chunk_manager_->GetName() == "AliyunChunkManager");
 
+    configs_.cloud_provider = "hwc";
+    the_chunk_manager_ = CreateChunkManager(configs_);
+    EXPECT_TRUE(the_chunk_manager_->GetName() == "HwcChunkManager");
+
 #ifdef AZURE_BUILD_DIR
     configs_.cloud_provider = "azure";
     the_chunk_manager_ = CreateChunkManager(configs_);

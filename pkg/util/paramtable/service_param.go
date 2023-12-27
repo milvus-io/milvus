@@ -1053,7 +1053,8 @@ For more information, refer to
 aws: https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_use.html
 gcp: https://cloud.google.com/storage/docs/access-control/iam
 aliyun (ack): https://www.alibabacloud.com/help/en/container-service-for-kubernetes/latest/use-rrsa-to-enforce-access-control
-aliyun (ecs): https://www.alibabacloud.com/help/en/elastic-compute-service/latest/attach-an-instance-ram-role`,
+aliyun (ecs): https://www.alibabacloud.com/help/en/elastic-compute-service/latest/attach-an-instance-ram-role
+hwc (huaweicloud): https://www.huaweicloud.com/product/iam.html`,
 		Export: true,
 	}
 	p.UseIAM.Init(base.mgr)
@@ -1062,11 +1063,11 @@ aliyun (ecs): https://www.alibabacloud.com/help/en/elastic-compute-service/lates
 		Key:          "minio.cloudProvider",
 		DefaultValue: DefaultMinioCloudProvider,
 		Version:      "2.2.0",
-		Doc: `Cloud Provider of S3. Supports: "aws", "gcp", "aliyun".
+		Doc: `Cloud Provider of S3. Supports: "aws", "gcp", "aliyun", "hwc".
 You can use "aws" for other cloud provider supports S3 API with signature v4, e.g.: minio
 You can use "gcp" for other cloud provider supports S3 API with signature v2
 You can use "aliyun" for other cloud provider uses virtual host style bucket
-When useIAM enabled, only "aws", "gcp", "aliyun" is supported for now`,
+When useIAM enabled, only "aws", "gcp", "aliyun", "hwc" is supported for now`,
 		Export: true,
 	}
 	p.CloudProvider.Init(base.mgr)

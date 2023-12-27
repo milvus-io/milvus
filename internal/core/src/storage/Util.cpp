@@ -54,13 +54,15 @@ enum class CloudProviderType : int8_t {
     GCP = 2,
     ALIYUN = 3,
     AZURE = 4,
+    HWC = 5,
 };
 
 std::map<std::string, CloudProviderType> CloudProviderType_Map = {
     {"aws", CloudProviderType::AWS},
     {"gcp", CloudProviderType::GCP},
     {"aliyun", CloudProviderType::ALIYUN},
-    {"azure", CloudProviderType::AZURE}};
+    {"azure", CloudProviderType::AZURE},
+    {"hwc", CloudProviderType::HWC}};
 
 std::map<std::string, int> ReadAheadPolicy_Map = {
     {"normal", MADV_NORMAL},
@@ -655,6 +657,9 @@ CreateChunkManager(const StorageConfig& storage_config) {
                 }
                 case CloudProviderType::ALIYUN: {
                     return std::make_shared<AliyunChunkManager>(storage_config);
+                }
+                case CloudProviderType::HWC: {
+                    return std::make_shared<HwcChunkManager>(storage_config);
                 }
 #ifdef AZURE_BUILD_DIR
                 case CloudProviderType::AZURE: {
