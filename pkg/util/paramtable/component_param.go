@@ -1322,7 +1322,7 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 	p.AutoBalance = ParamItem{
 		Key:          "queryCoord.autoBalance",
 		Version:      "2.0.0",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		PanicIfEmpty: true,
 		Doc:          "Enable auto balance",
 		Export:       true,
@@ -2512,7 +2512,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	p.AutoBalance = ParamItem{
 		Key:          "dataCoord.autoBalance",
 		Version:      "2.3.3",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		PanicIfEmpty: true,
 		Doc:          "Enable auto balance",
 		Export:       true,

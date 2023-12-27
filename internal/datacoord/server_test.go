@@ -4754,8 +4754,10 @@ func TestUpdateAutoBalanceConfigLoop(t *testing.T) {
 		server.session = mockSession
 
 		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
+		wg := &sync.WaitGroup{}
+		wg.Add(1)
 		go func() {
+			defer wg.Done()
 			time.Sleep(1500 * time.Millisecond)
 			server.updateBalanceConfigLoop(ctx)
 		}()
@@ -4763,6 +4765,9 @@ func TestUpdateAutoBalanceConfigLoop(t *testing.T) {
 		assert.Eventually(t, func() bool {
 			return !Params.DataCoordCfg.AutoBalance.GetAsBool()
 		}, 3*time.Second, 1*time.Second)
+
+		cancel()
+		wg.Wait()
 	})
 
 	t.Run("test all old node down", func(t *testing.T) {
@@ -4774,11 +4779,18 @@ func TestUpdateAutoBalanceConfigLoop(t *testing.T) {
 		server.session = mockSession
 
 		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-		go server.updateBalanceConfigLoop(ctx)
+		wg := &sync.WaitGroup{}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			server.updateBalanceConfigLoop(ctx)
+		}()
 		// all old data node down, enable auto balance
 		assert.Eventually(t, func() bool {
 			return Params.DataCoordCfg.AutoBalance.GetAsBool()
 		}, 3*time.Second, 1*time.Second)
+
+		cancel()
+		wg.Wait()
 	})
 }
