@@ -26,6 +26,7 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
@@ -40,6 +41,24 @@ const retryWatchInterval = 20 * time.Second
 func (node *DataNode) startWatchChannelsAtBackground(ctx context.Context) {
 	node.stopWaiter.Add(1)
 	go node.StartWatchChannels(ctx)
+
+// handleChannelEvt handles event from kv watch event
+func (node *DataNode) handleChannelEvt(evt *clientv3.Event) {
+	var e *event
+	switch evt.Type {
+	case clientv3.EventTypePut: // datacoord shall put channels needs to be watched here
+		e = &event{
+			eventType: putEventType,
+			version:   evt.Kv.Version,
+		}
+
+	case clientv3.EventTypeDelete:
+		e = &event{
+			eventType: deleteEventType,
+			version:   evt.Kv.Version,
+		}
+	}
+	node.handleWatchInfo(e, string(evt.Kv.Key), evt.Kv.Value)
 }
 
 // StartWatchChannels start loop to watch channel allocation status via kv(etcd for now)

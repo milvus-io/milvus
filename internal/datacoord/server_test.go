@@ -1090,10 +1090,13 @@ func TestDropVirtualChannel(t *testing.T) {
 		svr.meta.AddSegment(context.TODO(), NewSegmentInfo(os))
 
 		ctx := context.Background()
-		err := svr.channelManager.AddNode(0)
-		require.Nil(t, err)
-		err = svr.channelManager.Watch(ctx, &channelMeta{Name: "ch1", CollectionID: 0})
-		require.Nil(t, err)
+		// err := svr.channelManager.AddNode(0)
+		// require.Nil(t, err)
+		// err = svr.channelManager.Watch(ctx, &channelMeta{Name: "ch1", CollectionID: 0})
+		// require.Nil(t, err)
+		mockChManager := NewMockChannelManager(t)
+		mockChManager.EXPECT().Match(mock.Anything, mock.Anything).Return(true).Once()
+		svr.channelManager = mockChManager
 
 		req := &datapb.DropVirtualChannelRequest{
 			Base: &commonpb.MsgBase{
@@ -1164,8 +1167,8 @@ func TestDropVirtualChannel(t *testing.T) {
 
 		<-spyCh
 
-		err = svr.channelManager.Watch(ctx, &channelMeta{Name: "ch1", CollectionID: 0})
-		require.Nil(t, err)
+		// err = svr.channelManager.Watch(ctx, &channelMeta{Name: "ch1", CollectionID: 0})
+		// require.Nil(t, err)
 
 		// resend
 		resp, err = svr.DropVirtualChannel(ctx, req)
@@ -1176,10 +1179,13 @@ func TestDropVirtualChannel(t *testing.T) {
 	t.Run("with channel not matched", func(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
-		err := svr.channelManager.AddNode(0)
-		require.Nil(t, err)
-		err = svr.channelManager.Watch(context.TODO(), &channelMeta{Name: "ch1", CollectionID: 0})
-		require.Nil(t, err)
+		// err := svr.channelManager.AddNode(0)
+		// require.Nil(t, err)
+		// err = svr.channelManager.Watch(context.TODO(), &channelMeta{Name: "ch1", CollectionID: 0})
+		// require.Nil(t, err)
+		mockChManager := NewMockChannelManager(t)
+		mockChManager.EXPECT().Match(mock.Anything, mock.Anything).Return(false).Once()
+		svr.channelManager = mockChManager
 
 		resp, err := svr.DropVirtualChannel(context.Background(), &datapb.DropVirtualChannelRequest{
 			ChannelName: "ch2",
@@ -2206,10 +2212,13 @@ func TestGetRecoveryInfo(t *testing.T) {
 		})
 		assert.NoError(t, err)
 
-		err = svr.channelManager.AddNode(0)
-		assert.NoError(t, err)
-		err = svr.channelManager.Watch(context.TODO(), &channelMeta{Name: "vchan1", CollectionID: 0})
-		assert.NoError(t, err)
+		// err = svr.channelManager.AddNode(0)
+		// assert.NoError(t, err)
+		// err = svr.channelManager.Watch(context.TODO(), &channelMeta{Name: "vchan1", CollectionID: 0})
+		// assert.NoError(t, err)
+		mockChManager := NewMockChannelManager(t)
+		mockChManager.EXPECT().Match(mock.Anything, mock.Anything).Return(true).Once()
+		svr.channelManager = mockChManager
 
 		sResp, err := svr.SaveBinlogPaths(context.TODO(), binlogReq)
 		assert.NoError(t, err)
@@ -2594,7 +2603,7 @@ func TestOptions(t *testing.T) {
 		defer kv.RemoveWithPrefix("")
 
 		sessionManager := NewSessionManagerImpl()
-		channelManager, err := NewChannelManager(kv, newMockHandler())
+		channelManager, err := NewChannelManagerV2(kv, newMockHandler(), sessionManager, newMockAllocator())
 		assert.NoError(t, err)
 
 		cluster := NewClusterImpl(sessionManager, channelManager)
@@ -2648,9 +2657,10 @@ func TestHandleSessionEvent(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.TODO())
 	defer cancel()
 
-	channelManager, err := NewChannelManager(kv, newMockHandler(), withFactory(&mockPolicyFactory{}))
-	assert.NoError(t, err)
 	sessionManager := NewSessionManagerImpl()
+	channelManager, err := NewChannelManagerV2(kv, newMockHandler(), sessionManager, newMockAllocator(), withFactoryV2(&mockPolicyFactory{}))
+	assert.NoError(t, err)
+
 	cluster := NewClusterImpl(sessionManager, channelManager)
 	assert.NoError(t, err)
 
@@ -3600,6 +3610,7 @@ func TestDataNodeTtChannel(t *testing.T) {
 		}
 		err = svr.cluster.Register(info)
 		assert.NoError(t, err)
+		svr.cluster.Watch(context.TODO(), getChannel("ch-1", 0))
 
 		resp, err := svr.AssignSegmentID(context.TODO(), &datapb.AssignSegmentIDRequest{
 			NodeID:   0,
@@ -3666,6 +3677,8 @@ func TestDataNodeTtChannel(t *testing.T) {
 			NodeID:  0,
 		}
 		err = svr.cluster.Register(info)
+		svr.cluster.Watch(context.TODO(), getChannel("ch-1", 0))
+		svr.cluster.Watch(context.TODO(), getChannel("ch-2", 0))
 		assert.NoError(t, err)
 		resp, err := svr.AssignSegmentID(context.TODO(), &datapb.AssignSegmentIDRequest{
 			NodeID:   0,
@@ -3747,6 +3760,7 @@ func TestDataNodeTtChannel(t *testing.T) {
 			Address: "localhost:7777",
 		}
 		err = svr.cluster.Register(node)
+		svr.cluster.Watch(context.TODO(), getChannel("ch-1", 0))
 		assert.NoError(t, err)
 
 		resp, err := svr.AssignSegmentID(context.TODO(), &datapb.AssignSegmentIDRequest{

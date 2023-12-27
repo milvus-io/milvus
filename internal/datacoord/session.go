@@ -30,8 +30,9 @@ var errDisposed = errors.New("client is disposed")
 
 // NodeInfo contains node base info
 type NodeInfo struct {
-	NodeID  int64
-	Address string
+	NodeID   int64
+	Address  string
+	IsLegacy bool
 }
 
 // Session contains session info of a node

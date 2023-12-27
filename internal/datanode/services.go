@@ -373,6 +373,7 @@ func (node *DataNode) NotifyChannelOperation(ctx context.Context, req *datapb.Ch
 
 func (node *DataNode) CheckChannelOperationProgress(ctx context.Context, req *datapb.ChannelWatchInfo) (*datapb.ChannelOperationProgressResponse, error) {
 	log := log.Ctx(ctx).With(
+		zap.Int64("opID", req.GetOpID()),
 		zap.String("channel", req.GetVchan().GetChannelName()),
 		zap.String("operation", req.GetState().String()),
 	)
@@ -384,7 +385,10 @@ func (node *DataNode) CheckChannelOperationProgress(ctx context.Context, req *da
 			Status: merr.Status(err),
 		}, nil
 	}
-	return node.channelManager.GetProgress(req), nil
+
+	resp := node.channelManager.GetProgress(req)
+	log.Info("DataNode ChannelOperationProgress", zap.String("Current state", resp.GetState().String()))
+	return resp, nil
 }
 
 func (node *DataNode) FlushChannels(ctx context.Context, req *datapb.FlushChannelsRequest) (*commonpb.Status, error) {

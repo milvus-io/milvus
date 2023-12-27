@@ -334,6 +334,7 @@ func getServiceWithChannel(initCtx context.Context, node *DataNode, info *datapb
 		channelName  = info.GetVchan().GetChannelName()
 		collectionID = info.GetVchan().GetCollectionID()
 	)
+	log := log.With(zap.String("channel", channelName), zap.Int64("opID", info.GetOpID()))
 
 	config := &nodeConfig{
 		msFactory: node.factory,
@@ -384,6 +385,7 @@ func getServiceWithChannel(initCtx context.Context, node *DataNode, info *datapb
 	}
 
 	// init flowgraph
+	log.Info("New dataSyncService init flowgraph")
 	fg := flowgraph.NewTimeTickedFlowGraph(node.ctx)
 	dmStreamNode, err := newDmInputNode(initCtx, node.dispClient, info.GetVchan().GetSeekPosition(), config)
 	if err != nil {
@@ -469,7 +471,6 @@ func newServiceWithEtcdTickler(initCtx context.Context, node *DataNode, info *da
 // newDataSyncService gets a dataSyncService, but flowgraphs are not running
 // initCtx is used to init the dataSyncService only, if initCtx.Canceled or initCtx.Timeout
 // newDataSyncService stops and returns the initCtx.Err()
-// NOTE: compactiable for event manager
 func newDataSyncService(initCtx context.Context, node *DataNode, info *datapb.ChannelWatchInfo, tickler *tickler) (*dataSyncService, error) {
 	// recover segment checkpoints
 	unflushedSegmentInfos, err := node.broker.GetSegmentInfo(initCtx, info.GetVchan().GetUnflushedSegmentIds())

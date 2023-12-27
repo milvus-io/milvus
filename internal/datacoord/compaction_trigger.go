@@ -415,7 +415,7 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) error {
 	}) // m is list of chanPartSegments, which is channel-partition organized segments
 
 	if len(m) == 0 {
-		log.Info("the length of SegmentsChanPart is 0, skip to handle compaction")
+		log.RatedInfo(20, "the length of SegmentsChanPart is 0, skip to handle compaction")
 		return nil
 	}
 

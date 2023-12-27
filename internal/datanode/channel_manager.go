@@ -58,16 +58,15 @@ type ChannelManagerImpl struct {
 }
 
 func NewChannelManager(dn *DataNode) *ChannelManagerImpl {
-	fm := newFlowgraphManager()
 	cm := ChannelManagerImpl{
 		dn:        dn,
-		fgManager: fm,
+		fgManager: dn.flowgraphManager,
 
 		communicateCh: make(chan *opState, 100),
 		opRunners:     typeutil.NewConcurrentMap[string, *opRunner](),
 		abnormals:     typeutil.NewConcurrentMap[int64, string](),
 
-		releaseFunc: fm.RemoveFlowgraph,
+		releaseFunc: dn.flowgraphManager.RemoveFlowgraph,
 
 		closeCh: make(chan struct{}),
 	}
@@ -179,13 +178,11 @@ func (m *ChannelManagerImpl) handleOpState(opState *opState) {
 	case datapb.ChannelWatchState_ReleaseSuccess:
 		log.Info("Success to release")
 		m.finishOp(opState.opID, opState.channel)
-		m.destoryRunner(opState.channel)
 
 	case datapb.ChannelWatchState_ReleaseFailure:
 		log.Info("Fail to release, add channel to abnormal lists")
 		m.abnormals.Insert(opState.opID, opState.channel)
 		m.finishOp(opState.opID, opState.channel)
-		m.destoryRunner(opState.channel)
 	}
 }
 
@@ -197,15 +194,10 @@ func (m *ChannelManagerImpl) getOrCreateRunner(channel string) *opRunner {
 	return runner
 }
 
-func (m *ChannelManagerImpl) destoryRunner(channel string) {
-	if runner, loaded := m.opRunners.GetAndRemove(channel); loaded {
-		runner.Close()
-	}
-}
-
 func (m *ChannelManagerImpl) finishOp(opID int64, channel string) {
-	if runner, loaded := m.opRunners.Get(channel); loaded {
+	if runner, loaded := m.opRunners.GetAndRemove(channel); loaded {
 		runner.FinishOp(opID)
+		runner.Close()
 	}
 }
 
@@ -314,13 +306,13 @@ func (r *opRunner) watchWithTimer(info *datapb.ChannelWatchInfo) *opState {
 
 	r.guard.Lock()
 	opInfo, ok := r.allOps[info.GetOpID()]
+	r.guard.Unlock()
 	if !ok {
 		opState.state = datapb.ChannelWatchState_WatchFailure
 		return opState
 	}
 	tickler := newTickler()
 	opInfo.tickler = tickler
-	r.guard.Unlock()
 
 	var (
 		successSig = make(chan struct{}, 1)

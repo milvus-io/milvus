@@ -143,9 +143,8 @@ func NewDataNode(ctx context.Context, factory dependency.Factory, serverID int64
 		segmentCache:       newCache(),
 		compactionExecutor: newCompactionExecutor(),
 
-		eventManager:     NewEventManager(),
-		flowgraphManager: newFlowgraphManager(),
-		clearSignal:      make(chan string, 100),
+		eventManager: NewEventManager(),
+		clearSignal:  make(chan string, 100),
 
 		reportImportRetryTimes: 10,
 	}
@@ -289,29 +288,15 @@ func (node *DataNode) Init() error {
 		node.importManager = importv2.NewManager(node.syncMgr, node.chunkManager)
 
 		node.channelCheckpointUpdater = newChannelCheckpointUpdater(node)
+		node.flowgraphManager = newFlowgraphManager()
+
+		if paramtable.Get().DataCoordCfg.EnableBalanceChannelWithRPC.GetAsBool() {
+			node.channelManager = NewChannelManager(node)
+		}
 
 		log.Info("init datanode done", zap.Int64("nodeID", node.GetNodeID()), zap.String("Address", node.address))
 	})
 	return initError
-}
-
-// handleChannelEvt handles event from kv watch event
-func (node *DataNode) handleChannelEvt(evt *clientv3.Event) {
-	var e *event
-	switch evt.Type {
-	case clientv3.EventTypePut: // datacoord shall put channels needs to be watched here
-		e = &event{
-			eventType: putEventType,
-			version:   evt.Kv.Version,
-		}
-
-	case clientv3.EventTypeDelete:
-		e = &event{
-			eventType: deleteEventType,
-			version:   evt.Kv.Version,
-		}
-	}
-	node.handleWatchInfo(e, string(evt.Kv.Key), evt.Kv.Value)
 }
 
 // tryToReleaseFlowgraph tries to release a flowgraph
@@ -392,8 +377,12 @@ func (node *DataNode) Start() error {
 
 		go node.channelCheckpointUpdater.start()
 
-		// Start node watch node
-		node.startWatchChannelsAtBackground(node.ctx)
+		if paramtable.Get().DataCoordCfg.EnableBalanceChannelWithRPC.GetAsBool() {
+			node.channelManager.Start()
+		} else {
+			// Start node watch node
+			node.startWatchChannelsAtBackground(node.ctx)
+		}
 
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
 	})
@@ -427,6 +416,9 @@ func (node *DataNode) Stop() error {
 	node.stopOnce.Do(func() {
 		// https://github.com/milvus-io/milvus/issues/12282
 		node.UpdateStateCode(commonpb.StateCode_Abnormal)
+		if node.channelManager != nil {
+			node.channelManager.Close()
+		}
 
 		node.eventManager.CloseAll()
 
@@ -459,6 +451,7 @@ func (node *DataNode) Stop() error {
 			node.importManager.Close()
 		}
 
+		// Delay the cancellation of ctx to ensure that the session is automatically recycled after closed the flow graph
 		node.cancel()
 		node.stopWaiter.Wait()
 	})
