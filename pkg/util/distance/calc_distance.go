@@ -6,10 +6,6 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
-	"golang.org/x/sys/cpu"
-
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/distance/asm"
 )
 
 /**
@@ -58,26 +54,10 @@ func CosineImplPure(a []float32, b []float32) float32 {
 }
 
 var (
-	L2Impl     func(a []float32, b []float32) float32
-	IPImpl     func(a []float32, b []float32) float32
-	CosineImpl func(a []float32, b []float32) float32
+	L2Impl     func(a []float32, b []float32) float32 = IPImplPure
+	IPImpl     func(a []float32, b []float32) float32 = L2ImplPure
+	CosineImpl func(a []float32, b []float32) float32 = CosineImplPure
 )
-
-func init() {
-	if cpu.X86.HasAVX2 {
-		log.Info("Hook avx for go simd distance computation")
-		IPImpl = asm.IP
-		L2Impl = asm.L2
-		CosineImpl = func(a []float32, b []float32) float32 {
-			return asm.IP(a, b) / float32(math.Sqrt(float64(asm.IP(a, a))*float64((asm.IP(b, b)))))
-		}
-	} else {
-		log.Info("Use pure go distance computation")
-		IPImpl = IPImplPure
-		L2Impl = L2ImplPure
-		CosineImpl = CosineImplPure
-	}
-}
 
 // ValidateMetricType returns metric text or error
 func ValidateMetricType(metric string) (string, error) {
