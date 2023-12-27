@@ -66,15 +66,17 @@ class PhyTermFilterExpr : public SegmentExpr {
         const std::shared_ptr<const milvus::expr::TermFilterExpr>& expr,
         const std::string& name,
         const segcore::SegmentInternalInterface* segment,
-        Timestamp query_timestamp,
+        int64_t active_count,
+        milvus::Timestamp timestamp,
         int64_t batch_size)
         : SegmentExpr(std::move(input),
                       name,
                       segment,
                       expr->column_.field_id_,
-                      query_timestamp,
+                      active_count,
                       batch_size),
-          expr_(expr) {
+          expr_(expr),
+          query_timestamp_(timestamp) {
     }
 
     void
@@ -129,6 +131,7 @@ class PhyTermFilterExpr : public SegmentExpr {
 
  private:
     std::shared_ptr<const milvus::expr::TermFilterExpr> expr_;
+    milvus::Timestamp query_timestamp_;
     // If expr is like "pk in (..)", can use pk index to optimize
     bool cached_offsets_inited_{false};
     ColumnVectorPtr cached_offsets_;
