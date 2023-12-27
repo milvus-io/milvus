@@ -670,7 +670,7 @@ def gen_dynamic_field_data_in_parquet_file(rows, start=0):
     return data
 
 
-def gen_parquet_files(float_vector, rows, dim, data_fields, file_size=None, file_nums=1, array_length=None, err_type="", enable_dynamic_field=False):
+def gen_parquet_files(float_vector, rows, dim, data_fields, file_size=None, row_group_size=None, file_nums=1, array_length=None, err_type="", enable_dynamic_field=False):
     # gen numpy files
     if err_type == "":
         err_type = "none"
@@ -690,8 +690,10 @@ def gen_parquet_files(float_vector, rows, dim, data_fields, file_size=None, file
         df = pd.DataFrame(all_field_data)
         log.info(f"df: \n{df}")
         file_name = f"data-fields-{len(data_fields)}-rows-{rows}-dim-{dim}-file-num-{file_nums}-error-{err_type}-{int(time.time())}.parquet"
-        df.to_parquet(f"{data_source}/{file_name}", engine='pyarrow')
-
+        if row_group_size is not None:
+            df.to_parquet(f"{data_source}/{file_name}", engine='pyarrow', row_group_size=row_group_size)
+        else:
+            df.to_parquet(f"{data_source}/{file_name}", engine='pyarrow')
         # get the file size
         if file_size is not None:
             batch_file_size = os.path.getsize(f"{data_source}/{file_name}")
@@ -702,7 +704,10 @@ def gen_parquet_files(float_vector, rows, dim, data_fields, file_size=None, file
             all_df = pd.concat([df for _ in range(total_batch)], axis=0, ignore_index=True)
             file_name = f"data-fields-{len(data_fields)}-rows-{total_rows}-dim-{dim}-file-num-{file_nums}-error-{err_type}-{int(time.time())}.parquet"
             log.info(f"all df: \n {all_df}")
-            all_df.to_parquet(f"{data_source}/{file_name}", engine='pyarrow')
+            if row_group_size is not None:
+                all_df.to_parquet(f"{data_source}/{file_name}", engine='pyarrow', row_group_size=row_group_size)
+            else:
+                all_df.to_parquet(f"{data_source}/{file_name}", engine='pyarrow')
             batch_file_size = os.path.getsize(f"{data_source}/{file_name}")
             log.info(f"file_size with rows {total_rows} for {file_name}: {batch_file_size/1024/1024} MB")
         files.append(file_name)
@@ -717,7 +722,10 @@ def gen_parquet_files(float_vector, rows, dim, data_fields, file_size=None, file
                 all_field_data["$meta"] = gen_dynamic_field_data_in_parquet_file(rows=rows, start=0)
             df = pd.DataFrame(all_field_data)
             file_name = f"data-fields-{len(data_fields)}-rows-{rows}-dim-{dim}-file-num-{i}-error-{err_type}-{int(time.time())}.parquet"
-            df.to_parquet(f"{data_source}/{file_name}", engine='pyarrow')
+            if row_group_size is not None:
+                df.to_parquet(f"{data_source}/{file_name}", engine='pyarrow', row_group_size=row_group_size)
+            else:
+                df.to_parquet(f"{data_source}/{file_name}", engine='pyarrow')
             files.append(file_name)
             start_uid += rows
     return files
@@ -847,7 +855,7 @@ def prepare_bulk_insert_numpy_files(minio_endpoint="", bucket_name="milvus-bucke
     return files
 
 
-def prepare_bulk_insert_parquet_files(minio_endpoint="", bucket_name="milvus-bucket", rows=100, dim=128, array_length=None, file_size=None,
+def prepare_bulk_insert_parquet_files(minio_endpoint="", bucket_name="milvus-bucket", rows=100, dim=128, array_length=None, file_size=None, row_group_size=None,
                                     enable_dynamic_field=False, data_fields=[DataField.vec_field], float_vector=True, file_nums=1, force=False):
     """
     Generate column based files based on params in parquet format and copy them to the minio
@@ -879,7 +887,7 @@ def prepare_bulk_insert_parquet_files(minio_endpoint="", bucket_name="milvus-buc
         File name list or file name with sub-folder list
     """
     files = gen_parquet_files(rows=rows, dim=dim, float_vector=float_vector, enable_dynamic_field=enable_dynamic_field,
-                              data_fields=data_fields, array_length=array_length, file_size=file_size,
+                              data_fields=data_fields, array_length=array_length, file_size=file_size, row_group_size=row_group_size,
                               file_nums=file_nums)
     copy_files_to_minio(host=minio_endpoint, r_source=data_source, files=files, bucket_name=bucket_name, force=force)
     return files

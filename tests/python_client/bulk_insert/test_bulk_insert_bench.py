@@ -83,7 +83,7 @@ class TestBulkInsertPerf(TestcaseBaseBulkInsert):
             cf.gen_json_field(name=df.json_field),
             cf.gen_array_field(name=df.array_int_field, element_type=DataType.INT64),
             cf.gen_array_field(name=df.array_float_field, element_type=DataType.FLOAT),
-            cf.gen_array_field(name=df.array_string_field, element_type=DataType.VARCHAR),
+            cf.gen_array_field(name=df.array_string_field, element_type=DataType.VARCHAR, max_length=200),
             cf.gen_array_field(name=df.array_bool_field, element_type=DataType.BOOL),
             cf.gen_float_vec_field(name=df.vec_field, dim=dim),
         ]
@@ -95,6 +95,7 @@ class TestBulkInsertPerf(TestcaseBaseBulkInsert):
             dim=dim,
             data_fields=data_fields,
             file_size=file_size,
+            row_group_size=None,
             file_nums=file_nums,
             array_length=array_len,
             enable_dynamic_field=enable_dynamic_field,
@@ -142,7 +143,7 @@ class TestBulkInsertPerf(TestcaseBaseBulkInsert):
             cf.gen_json_field(name=df.json_field),
             cf.gen_array_field(name=df.array_int_field, element_type=DataType.INT64),
             cf.gen_array_field(name=df.array_float_field, element_type=DataType.FLOAT),
-            cf.gen_array_field(name=df.array_string_field, element_type=DataType.VARCHAR),
+            cf.gen_array_field(name=df.array_string_field, element_type=DataType.VARCHAR, max_length=200),
             cf.gen_array_field(name=df.array_bool_field, element_type=DataType.BOOL),
             cf.gen_float_vec_field(name=df.vec_field, dim=dim),
         ]
