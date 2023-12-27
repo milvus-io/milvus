@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <memory>
 #include <mutex>
+#include <shared_mutex>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -70,11 +71,15 @@ class OffsetOrderedMap : public OffsetMap {
  public:
     bool
     contain(const PkType& pk) const override {
+        std::shared_lock<std::shared_mutex> lck(mtx_);
+
         return map_.find(std::get<T>(pk)) != map_.end();
     }
 
     std::vector<int64_t>
     find(const PkType& pk) const override {
+        std::shared_lock<std::shared_mutex> lck(mtx_);
+
         auto offset_vector = map_.find(std::get<T>(pk));
         return offset_vector != map_.end() ? offset_vector->second
                                            : std::vector<int64_t>();
@@ -82,6 +87,8 @@ class OffsetOrderedMap : public OffsetMap {
 
     void
     insert(const PkType& pk, int64_t offset) override {
+        std::unique_lock<std::shared_mutex> lck(mtx_);
+
         map_[std::get<T>(pk)].emplace_back(offset);
     }
 
@@ -94,6 +101,8 @@ class OffsetOrderedMap : public OffsetMap {
 
     bool
     empty() const override {
+        std::shared_lock<std::shared_mutex> lck(mtx_);
+
         return map_.empty();
     }
 
@@ -101,6 +110,8 @@ class OffsetOrderedMap : public OffsetMap {
     find_first(int64_t limit,
                const BitsetType& bitset,
                bool false_filtered_out) const override {
+        std::shared_lock<std::shared_mutex> lck(mtx_);
+
         if (limit == Unlimited || limit == NoLimit) {
             limit = map_.size();
         }
@@ -117,8 +128,9 @@ class OffsetOrderedMap : public OffsetMap {
                         bool false_filtered_out) const {
         int64_t hit_num = 0;  // avoid counting the number everytime.
         int64_t cnt = bitset.count();
+        auto size = bitset.size();
         if (!false_filtered_out) {
-            cnt = bitset.size() - bitset.count();
+            cnt = size - bitset.count();
         }
         limit = std::min(limit, cnt);
         std::vector<int64_t> seg_offsets;
@@ -126,6 +138,11 @@ class OffsetOrderedMap : public OffsetMap {
         for (auto it = map_.begin(); hit_num < limit && it != map_.end();
              it++) {
             for (auto seg_offset : it->second) {
+                if (seg_offset >= size) {
+                    // Frequently concurrent insert/query will cause this case.
+                    continue;
+                }
+
                 if (!(bitset[seg_offset] ^ false_filtered_out)) {
                     seg_offsets.push_back(seg_offset);
                     hit_num++;
@@ -141,6 +158,7 @@ class OffsetOrderedMap : public OffsetMap {
  private:
     using OrderedMap = std::map<T, std::vector<int64_t>, std::less<>>;
     OrderedMap map_;
+    mutable std::shared_mutex mtx_;
 };
 
 template <typename T>
@@ -221,16 +239,23 @@ class OffsetOrderedArray : public OffsetMap {
                         bool false_filtered_out) const {
         int64_t hit_num = 0;  // avoid counting the number everytime.
         int64_t cnt = bitset.count();
+        auto size = bitset.size();
         if (!false_filtered_out) {
-            cnt = bitset.size() - bitset.count();
+            cnt = size - bitset.count();
         }
         limit = std::min(limit, cnt);
         std::vector<int64_t> seg_offsets;
         seg_offsets.reserve(limit);
         for (auto it = array_.begin(); hit_num < limit && it != array_.end();
              it++) {
-            if (!(bitset[it->second] ^ false_filtered_out)) {
-                seg_offsets.push_back(it->second);
+            auto seg_offset = it->second;
+            if (seg_offset >= size) {
+                // In fact, this case won't happend on sealed segments.
+                continue;
+            }
+
+            if (!(bitset[seg_offset] ^ false_filtered_out)) {
+                seg_offsets.push_back(seg_offset);
                 hit_num++;
             }
         }

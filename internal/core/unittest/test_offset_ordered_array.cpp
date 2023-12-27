@@ -94,6 +94,20 @@ TYPED_TEST_P(TypedOffsetOrderedArrayTest, find_first) {
         ASSERT_TRUE(data[offsets[i - 1]] <= data[offsets[i]]);
     }
 
+    // corner case, segment offset exceeds the size of bitset.
+    BitsetType all_minus_1(num - 1);
+    all_minus_1.set();
+    offsets = this->map_.find_first(num / 2, all_minus_1, true);
+    ASSERT_EQ(num / 2, offsets.size());
+    for (int i = 1; i < offsets.size(); i++) {
+        ASSERT_TRUE(data[offsets[i - 1]] <= data[offsets[i]]);
+    }
+    offsets = this->map_.find_first(Unlimited, all_minus_1, true);
+    ASSERT_EQ(all_minus_1.size(), offsets.size());
+    for (int i = 1; i < offsets.size(); i++) {
+        ASSERT_TRUE(data[offsets[i - 1]] <= data[offsets[i]]);
+    }
+
     // none is satisfied.
     BitsetType none(num);
     none.reset();
