@@ -21,6 +21,8 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -41,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
@@ -1081,7 +1084,12 @@ func (m *meta) copyDeltaFiles(binlogs []*datapb.FieldBinlog, collectionID, parti
 	for _, fieldBinlog := range binlogs {
 		fieldBinlog = proto.Clone(fieldBinlog).(*datapb.FieldBinlog)
 		for _, binlog := range fieldBinlog.Binlogs {
-			blobKey := metautil.JoinIDPath(collectionID, partitionID, targetSegmentID, binlog.LogID)
+			logID, err := getDeltaLogID(m.chunkManager.RootPath(), binlog)
+			if err != nil {
+				log.Error("failed to get logID from binlog", zap.Int64("segmentID", targetSegmentID), zap.Stringer("binlog", binlog), zap.Error(err))
+				return nil, err
+			}
+			blobKey := metautil.JoinIDPath(collectionID, partitionID, targetSegmentID, logID)
 			blobPath := path.Join(m.chunkManager.RootPath(), common.SegmentDeltaLogPath, blobKey)
 			blob, err := m.chunkManager.Read(m.ctx, binlog.LogPath)
 			if err != nil {
@@ -1096,6 +1104,34 @@ func (m *meta) copyDeltaFiles(binlogs []*datapb.FieldBinlog, collectionID, parti
 		ret = append(ret, fieldBinlog)
 	}
 	return ret, nil
+}
+
+// getDeltaLogID is the util function to return delta logID from datapb.Binlog
+// if LogID field is filled, return field value directly.
+// otherwise, try to parse logID from LogPath.
+func getDeltaLogID(rootPath string, binlog *datapb.Binlog) (int64, error) {
+	if binlog.GetLogID() != 0 {
+		return binlog.GetLogID(), nil
+	}
+
+	path := binlog.GetLogPath()
+	// check path contains rootPath as prefix
+	if !strings.HasPrefix(path, rootPath) {
+		return 0, fmt.Errorf("path \"%s\" does not contains rootPath \"%s\"", path, rootPath)
+	}
+	p := path[len(rootPath):]
+	// remove leading "/"
+	for strings.HasPrefix(p, "/") {
+		p = p[1:]
+	}
+
+	// delta binlog path should consist of "delta_log/collID/partID/segID/logID"
+	parts := strings.Split(p, "/")
+	if len(parts) != 5 {
+		return 0, merr.WrapErrParameterInvalid("valid delta log path", path)
+	}
+
+	return strconv.ParseInt(parts[4], 10, 64)
 }
 
 func (m *meta) alterMetaStoreAfterCompaction(segmentCompactTo *SegmentInfo, segmentsCompactFrom []*SegmentInfo) error {
