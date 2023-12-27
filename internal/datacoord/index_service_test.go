@@ -755,7 +755,7 @@ func TestServer_GetIndexState(t *testing.T) {
 		}},
 	}
 
-	t.Run("index state is node", func(t *testing.T) {
+	t.Run("index state is none", func(t *testing.T) {
 		resp, err := s.GetIndexState(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
@@ -766,7 +766,6 @@ func TestServer_GetIndexState(t *testing.T) {
 		s.meta.indexes[collID][indexID+1] = &model.Index{
 			TenantID:        "",
 			CollectionID:    collID,
-			FieldID:         fieldID,
 			IndexID:         indexID + 1,
 			IndexName:       "default_idx_1",
 			IsDeleted:       false,
@@ -1833,7 +1832,7 @@ func TestServer_DropIndex(t *testing.T) {
 					indexID + 3: {
 						TenantID:        "",
 						CollectionID:    collID,
-						FieldID:         fieldID + 3,
+						FieldID:         fieldID,
 						IndexID:         indexID + 3,
 						IndexName:       indexName + "_3",
 						IsDeleted:       false,
@@ -1847,7 +1846,7 @@ func TestServer_DropIndex(t *testing.T) {
 					indexID + 4: {
 						TenantID:        "",
 						CollectionID:    collID,
-						FieldID:         fieldID + 4,
+						FieldID:         fieldID,
 						IndexID:         indexID + 4,
 						IndexName:       indexName + "_4",
 						IsDeleted:       false,

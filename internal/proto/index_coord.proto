@@ -139,6 +139,7 @@ message SegmentIndexState {
     int64 segmentID = 1;
     common.IndexState state = 2;
     string fail_reason = 3;
+    string index_name = 4;
 }
 
 message GetSegmentIndexStateResponse {
