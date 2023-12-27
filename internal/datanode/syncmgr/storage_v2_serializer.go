@@ -225,7 +225,6 @@ func SpaceCreatorFunc(segmentID int64, collSchema *schemapb.CollectionSchema, ar
 		if err != nil {
 			return nil, err
 		}
-		log.Info("xxxx", zap.Any("url", url))
 
 		pkSchema, err := typeutil.GetPrimaryFieldSchema(collSchema)
 		if err != nil {
