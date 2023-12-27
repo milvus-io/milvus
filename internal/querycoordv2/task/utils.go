@@ -186,7 +186,6 @@ func fillSubChannelRequest(
 	segmentIDs := typeutil.NewUniqueSet()
 	for _, vchannel := range req.GetInfos() {
 		segmentIDs.Insert(vchannel.GetFlushedSegmentIds()...)
-		segmentIDs.Insert(vchannel.GetUnflushedSegmentIds()...)
 	}
 
 	if segmentIDs.Len() == 0 {
