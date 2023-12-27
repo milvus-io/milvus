@@ -201,7 +201,11 @@ func (loader *segmentLoader) Load(ctx context.Context,
 	newSegments := typeutil.NewConcurrentMap[int64, *LocalSegment]()
 	loaded := typeutil.NewConcurrentMap[int64, *LocalSegment]()
 	defer func() {
-		newSegments.Range(func(_ int64, s *LocalSegment) bool {
+		newSegments.Range(func(segmentID int64, s *LocalSegment) bool {
+			log.Warn("release new segment created due to load failure",
+				zap.Int64("segmentID", segmentID),
+				zap.Error(err),
+			)
 			s.Release()
 			return true
 		})
