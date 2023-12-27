@@ -80,6 +80,7 @@ func (t *QueryTask) Execute() error {
 	tr := timerecord.NewTimeRecorderWithTrace(t.ctx, "QueryTask")
 
 	retrievePlan, err := segments.NewRetrievePlan(
+		t.ctx,
 		t.collection,
 		t.req.Req.GetSerializedExprPlan(),
 		t.req.Req.GetMvccTimestamp(),

@@ -235,7 +235,7 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 			ms.EXPECT().Partition().Return(info.GetPartitionID())
 			ms.EXPECT().Indexes().Return(nil)
 			ms.EXPECT().RowNum().Return(info.GetNumOfRows())
-			ms.EXPECT().Delete(mock.Anything, mock.Anything).Return(nil)
+			ms.EXPECT().Delete(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 			ms.EXPECT().MayPkExist(mock.Anything).Call.Return(func(pk storage.PrimaryKey) bool {
 				return pk.EQ(storage.NewInt64PrimaryKey(10))
 			})
@@ -557,8 +557,8 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 
 		mockErr := merr.WrapErrServiceInternal("mock")
 
-		growing0.EXPECT().Delete(mock.Anything, mock.Anything).Return(nil)
-		growing1.EXPECT().Delete(mock.Anything, mock.Anything).Return(mockErr)
+		growing0.EXPECT().Delete(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		growing1.EXPECT().Delete(mock.Anything, mock.Anything, mock.Anything).Return(mockErr)
 
 		s.loader.EXPECT().Load(
 			mock.Anything,
@@ -768,7 +768,7 @@ func (s *DelegatorDataSuite) TestReleaseSegment() {
 			ms.EXPECT().Collection().Return(info.GetCollectionID())
 			ms.EXPECT().Indexes().Return(nil)
 			ms.EXPECT().RowNum().Return(info.GetNumOfRows())
-			ms.EXPECT().Delete(mock.Anything, mock.Anything).Return(nil)
+			ms.EXPECT().Delete(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 			ms.EXPECT().MayPkExist(mock.Anything).Call.Return(func(pk storage.PrimaryKey) bool {
 				return pk.EQ(storage.NewInt64PrimaryKey(10))
 			})
