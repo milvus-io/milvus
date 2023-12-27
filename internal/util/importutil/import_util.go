@@ -1024,7 +1024,7 @@ func splitFieldsData(collectionInfo *CollectionInfo, fieldsData BlockData, shard
 	rowIDField, ok := fieldsData[common.RowIDField]
 	if !ok {
 		rowIDField = &storage.Int64FieldData{
-			Data: make([]int64, 0),
+			Data: make([]int64, 0, rowCount),
 		}
 		fieldsData[common.RowIDField] = rowIDField
 	}
