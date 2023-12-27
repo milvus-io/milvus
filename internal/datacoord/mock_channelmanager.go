@@ -189,49 +189,6 @@ func (_c *MockChannelManager_FindWatcher_Call) RunAndReturn(run func(string) (in
 	return _c
 }
 
-// GetBufferChannels provides a mock function with given fields:
-func (_m *MockChannelManager) GetBufferChannels() *NodeChannelInfo {
-	ret := _m.Called()
-
-	var r0 *NodeChannelInfo
-	if rf, ok := ret.Get(0).(func() *NodeChannelInfo); ok {
-		r0 = rf()
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*NodeChannelInfo)
-		}
-	}
-
-	return r0
-}
-
-// MockChannelManager_GetBufferChannels_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetBufferChannels'
-type MockChannelManager_GetBufferChannels_Call struct {
-	*mock.Call
-}
-
-// GetBufferChannels is a helper method to define mock.On call
-func (_e *MockChannelManager_Expecter) GetBufferChannels() *MockChannelManager_GetBufferChannels_Call {
-	return &MockChannelManager_GetBufferChannels_Call{Call: _e.mock.On("GetBufferChannels")}
-}
-
-func (_c *MockChannelManager_GetBufferChannels_Call) Run(run func()) *MockChannelManager_GetBufferChannels_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run()
-	})
-	return _c
-}
-
-func (_c *MockChannelManager_GetBufferChannels_Call) Return(_a0 *NodeChannelInfo) *MockChannelManager_GetBufferChannels_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockChannelManager_GetBufferChannels_Call) RunAndReturn(run func() *NodeChannelInfo) *MockChannelManager_GetBufferChannels_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // GetChannelsByCollectionID provides a mock function with given fields: collectionID
 func (_m *MockChannelManager) GetChannelsByCollectionID(collectionID int64) []RWChannel {
 	ret := _m.Called(collectionID)
