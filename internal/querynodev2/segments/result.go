@@ -49,6 +49,12 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 		return results[0], nil
 	}
 
+	channelsMvcc := make(map[string]uint64)
+	for _, r := range results {
+		for ch, ts := range r.GetChannelsMvcc() {
+			channelsMvcc[ch] = ts
+		}
+	}
 	log := log.Ctx(ctx)
 
 	searchResultData, err := DecodeSearchResults(results)
@@ -88,7 +94,7 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 		return nil, false
 	})
 	searchResults.CostAggregation = mergeRequestCost(requestCosts)
-
+	searchResults.ChannelsMvcc = channelsMvcc
 	return searchResults, nil
 }
 

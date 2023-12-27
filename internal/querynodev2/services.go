@@ -656,8 +656,13 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 		zap.String("channel", channel),
 		zap.String("scope", req.GetScope().String()),
 	)
-
-	resp := &internalpb.SearchResults{}
+	channelsMvcc := make(map[string]uint64)
+	for _, ch := range req.GetDmlChannels() {
+		channelsMvcc[ch] = req.GetReq().GetMvccTimestamp()
+	}
+	resp := &internalpb.SearchResults{
+		ChannelsMvcc: channelsMvcc,
+	}
 	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
 		resp.Status = merr.Status(err)
 		return resp, nil
@@ -733,7 +738,8 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 
 	log.Debug("Received SearchRequest",
 		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
-		zap.Uint64("guaranteeTimestamp", req.GetReq().GetGuaranteeTimestamp()))
+		zap.Uint64("guaranteeTimestamp", req.GetReq().GetGuaranteeTimestamp()),
+		zap.Uint64("mvccTimestamp", req.GetReq().GetMvccTimestamp()))
 
 	tr := timerecord.NewTimeRecorderWithTrace(ctx, "SearchRequest")
 
@@ -763,6 +769,7 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 
 	toReduceResults := make([]*internalpb.SearchResults, len(req.GetDmlChannels()))
 	runningGp, runningCtx := errgroup.WithContext(ctx)
+
 	for i, ch := range req.GetDmlChannels() {
 		ch := ch
 		req := &querypb.SearchRequest{

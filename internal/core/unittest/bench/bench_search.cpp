@@ -90,8 +90,10 @@ Search_GrowingIndex(benchmark::State& state) {
                     dataset_.timestamps_.data(),
                     dataset_.raw_);
 
+    Timestamp ts = 10000000;
+
     for (auto _ : state) {
-        auto qr = segment->Search(search_plan.get(), ph_group.get());
+        auto qr = segment->Search(search_plan.get(), ph_group.get(), ts);
     }
 }
 
@@ -114,7 +116,8 @@ Search_Sealed(benchmark::State& state) {
     } else if (choice == 1) {
         // hnsw
         auto vec = dataset_.get_col<float>(milvus::FieldId(100));
-        auto indexing = GenVecIndexing(N, dim, vec.data(), knowhere::IndexEnum::INDEX_HNSW);
+        auto indexing =
+            GenVecIndexing(N, dim, vec.data(), knowhere::IndexEnum::INDEX_HNSW);
         segcore::LoadIndexInfo info;
         info.index = std::move(indexing);
         info.field_id = (*schema)[FieldName("fakevec")].get_id().get();
@@ -123,8 +126,11 @@ Search_Sealed(benchmark::State& state) {
         segment->DropFieldData(milvus::FieldId(100));
         segment->LoadIndex(info);
     }
+
+    Timestamp ts = 10000000;
+
     for (auto _ : state) {
-        auto qr = segment->Search(search_plan.get(), ph_group.get());
+        auto qr = segment->Search(search_plan.get(), ph_group.get(), ts);
     }
 }
 
