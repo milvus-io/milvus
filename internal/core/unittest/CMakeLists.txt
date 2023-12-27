@@ -54,6 +54,7 @@ set(MILVUS_TEST_FILES
         test_integer_overflow.cpp
         test_offset_ordered_map.cpp
         test_offset_ordered_array.cpp
+        test_ordered_deleted_record.cpp
         test_always_true_expr.cpp
         test_plan_proto.cpp
         test_chunk_cache.cpp

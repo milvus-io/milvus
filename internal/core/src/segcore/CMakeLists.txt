@@ -31,6 +31,7 @@ set(SEGCORE_FILES
         reduce_c.cpp
         load_index_c.cpp
         load_field_data_c.cpp
+        OrderedDeletedRecord.cpp
         SegmentInterface.cpp
         SegcoreConfig.cpp
         IndexConfigGenerator.cpp

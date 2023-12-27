@@ -86,24 +86,20 @@ struct DeletedRecord {
         std::lock_guard lck(buffer_mutex_);
 
         auto size = pks.size();
-        ssize_t divide_point = 0;
-        auto n = n_.load();
-        // Truncate the overlapping prefix
-        if (n > 0) {
-            auto last = timestamps_[n - 1];
-            divide_point =
-                std::lower_bound(timestamps, timestamps + size, last + 1) -
-                timestamps;
-        }
-
-        // All these delete records have been applied
-        if (divide_point == size) {
+        if (size == 0) {
             return;
         }
 
-        size -= divide_point;
-        pks_.set_data_raw(n, pks.data() + divide_point, size);
-        timestamps_.set_data_raw(n, timestamps + divide_point, size);
+        auto n = n_.load();
+        if (n > 0) {
+            auto last = timestamps_[n - 1];
+            AssertInfo(timestamps[0] >= last,
+                       "[should not happend] delete record with older "
+                       "timestamp occured");
+        }
+
+        pks_.set_data_raw(n, pks.data(), size);
+        timestamps_.set_data_raw(n, timestamps, size);
         n_ += size;
     }
 
