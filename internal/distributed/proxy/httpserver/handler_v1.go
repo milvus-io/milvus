@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proxy"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -27,22 +28,69 @@ import (
 var RestRequestInterceptorErr = errors.New("interceptor error placeholder")
 
 func checkAuthorization(ctx context.Context, c *gin.Context, req interface{}) error {
-	if proxy.Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
-		username, ok := c.Get(ContextUsername)
-		if !ok || username.(string) == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: merr.Code(merr.ErrNeedAuthenticate), HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
-			return RestRequestInterceptorErr
-		}
-		_, authErr := proxy.PrivilegeInterceptor(ctx, req)
-		if authErr != nil {
-			c.JSON(http.StatusForbidden, gin.H{HTTPReturnCode: merr.Code(authErr), HTTPReturnMessage: authErr.Error()})
-			return RestRequestInterceptorErr
-		}
+	username, ok := c.Get(ContextUsername)
+	if !ok || username.(string) == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: merr.Code(merr.ErrNeedAuthenticate), HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
+		return RestRequestInterceptorErr
 	}
+	_, authErr := proxy.PrivilegeInterceptor(ctx, req)
+	if authErr != nil {
+		c.JSON(http.StatusForbidden, gin.H{HTTPReturnCode: merr.Code(authErr), HTTPReturnMessage: authErr.Error()})
+		return RestRequestInterceptorErr
+	}
+
 	return nil
 }
 
-func (h *Handlers) checkDatabase(ctx context.Context, c *gin.Context, dbName string) error {
+type RestRequestInterceptor func(ctx context.Context, ginCtx *gin.Context, req any, handler func(reqCtx context.Context, req any) (any, error)) (any, error)
+
+// HandlersV1 handles http requests
+type HandlersV1 struct {
+	proxy        types.ProxyComponent
+	interceptors []RestRequestInterceptor
+}
+
+// NewHandlers creates a new HandlersV1
+func NewHandlersV1(proxyComponent types.ProxyComponent) *HandlersV1 {
+	h := &HandlersV1{
+		proxy:        proxyComponent,
+		interceptors: []RestRequestInterceptor{},
+	}
+	if proxy.Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
+		h.interceptors = append(h.interceptors,
+			// authorization
+			func(ctx context.Context, ginCtx *gin.Context, req any, handler func(reqCtx context.Context, req any) (any, error)) (any, error) {
+				err := checkAuthorization(ctx, ginCtx, req)
+				if err != nil {
+					return nil, err
+				}
+				return handler(ctx, req)
+			})
+	}
+	h.interceptors = append(h.interceptors,
+		// check database
+		func(ctx context.Context, ginCtx *gin.Context, req any, handler func(reqCtx context.Context, req any) (any, error)) (any, error) {
+			value, ok := requestutil.GetDbNameFromRequest(req)
+			if !ok {
+				return handler(ctx, req)
+			}
+			err := h.checkDatabase(ctx, ginCtx, value.(string))
+			if err != nil {
+				return nil, err
+			}
+			return handler(ctx, req)
+		})
+	h.interceptors = append(h.interceptors,
+		// trace request
+		func(ctx context.Context, ginCtx *gin.Context, req any, handler func(reqCtx context.Context, req any) (any, error)) (any, error) {
+			return proxy.TraceLogInterceptor(ctx, req, &grpc.UnaryServerInfo{
+				FullMethod: ginCtx.Request.URL.Path,
+			}, handler)
+		})
+	return h
+}
+
+func (h *HandlersV1) checkDatabase(ctx context.Context, c *gin.Context, dbName string) error {
 	if dbName == DefaultDbName {
 		return nil
 	}
@@ -69,7 +117,7 @@ func (h *Handlers) checkDatabase(ctx context.Context, c *gin.Context, dbName str
 	return RestRequestInterceptorErr
 }
 
-func (h *Handlers) describeCollection(ctx context.Context, c *gin.Context, dbName string, collectionName string) (*schemapb.CollectionSchema, error) {
+func (h *HandlersV1) describeCollection(ctx context.Context, c *gin.Context, dbName string, collectionName string) (*schemapb.CollectionSchema, error) {
 	collSchema, err := proxy.GetCachedCollectionSchema(ctx, dbName, collectionName)
 	if err == nil {
 		return collSchema, nil
@@ -94,7 +142,7 @@ func (h *Handlers) describeCollection(ctx context.Context, c *gin.Context, dbNam
 	return response.Schema, nil
 }
 
-func (h *Handlers) hasCollection(ctx context.Context, c *gin.Context, dbName string, collectionName string) (bool, error) {
+func (h *HandlersV1) hasCollection(ctx context.Context, c *gin.Context, dbName string, collectionName string) (bool, error) {
 	req := milvuspb.HasCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
@@ -110,8 +158,7 @@ func (h *Handlers) hasCollection(ctx context.Context, c *gin.Context, dbName str
 	return response.Value, nil
 }
 
-func (h *Handlers) RegisterRoutesToV1(router gin.IRouter) {
-	h.registerRestRequestInterceptor()
+func (h *HandlersV1) RegisterRoutesToV1(router gin.IRouter) {
 	router.GET(VectorCollectionsPath, h.listCollections)
 	router.POST(VectorCollectionsCreatePath, h.createCollection)
 	router.GET(VectorCollectionsDescribePath, h.getCollectionDetails)
@@ -124,38 +171,7 @@ func (h *Handlers) RegisterRoutesToV1(router gin.IRouter) {
 	router.POST(VectorSearchPath, h.search)
 }
 
-func (h *Handlers) registerRestRequestInterceptor() {
-	h.interceptors = []RestRequestInterceptor{
-		// authorization
-		func(ctx context.Context, ginCtx *gin.Context, req any, handler func(reqCtx context.Context, req any) (any, error)) (any, error) {
-			err := checkAuthorization(ctx, ginCtx, req)
-			if err != nil {
-				return nil, err
-			}
-			return handler(ctx, req)
-		},
-		// check database
-		func(ctx context.Context, ginCtx *gin.Context, req any, handler func(reqCtx context.Context, req any) (any, error)) (any, error) {
-			value, ok := requestutil.GetDbNameFromRequest(req)
-			if !ok {
-				return handler(ctx, req)
-			}
-			err := h.checkDatabase(ctx, ginCtx, value.(string))
-			if err != nil {
-				return nil, err
-			}
-			return handler(ctx, req)
-		},
-		// trace request
-		func(ctx context.Context, ginCtx *gin.Context, req any, handler func(reqCtx context.Context, req any) (any, error)) (any, error) {
-			return proxy.TraceLogInterceptor(ctx, req, &grpc.UnaryServerInfo{
-				FullMethod: ginCtx.Request.URL.Path,
-			}, handler)
-		},
-	}
-}
-
-func (h *Handlers) executeRestRequestInterceptor(ctx context.Context,
+func (h *HandlersV1) executeRestRequestInterceptor(ctx context.Context,
 	ginCtx *gin.Context,
 	req any, handler func(reqCtx context.Context, req any) (any, error),
 ) (any, error) {
@@ -170,7 +186,7 @@ func (h *Handlers) executeRestRequestInterceptor(ctx context.Context,
 	return f(ctx, req)
 }
 
-func (h *Handlers) listCollections(c *gin.Context) {
+func (h *HandlersV1) listCollections(c *gin.Context) {
 	dbName := c.DefaultQuery(HTTPDbName, DefaultDbName)
 	req := &milvuspb.ShowCollectionsRequest{
 		DbName: dbName,
@@ -201,14 +217,14 @@ func (h *Handlers) listCollections(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: collections})
 }
 
-func (h *Handlers) createCollection(c *gin.Context) {
+func (h *HandlersV1) createCollection(c *gin.Context) {
 	httpReq := CreateCollectionReq{
 		DbName:       DefaultDbName,
 		MetricType:   DefaultMetricType,
 		PrimaryField: DefaultPrimaryFieldName,
 		VectorField:  DefaultVectorFieldName,
 	}
-	if err := c.ShouldBindBodyWith(&httpReq, binding.JSON); err != nil {
+	if err := c.ShouldBindWith(&httpReq, binding.JSON); err != nil {
 		log.Warn("high level restful api, the parameter of create collection is incorrect", zap.Any("request", httpReq), zap.Error(err))
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
@@ -310,7 +326,7 @@ func (h *Handlers) createCollection(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: gin.H{}})
 }
 
-func (h *Handlers) getCollectionDetails(c *gin.Context) {
+func (h *HandlersV1) getCollectionDetails(c *gin.Context) {
 	collectionName := c.Query(HTTPCollectionName)
 	if collectionName == "" {
 		log.Warn("high level restful api, desc collection require parameter: [collectionName], but miss")
@@ -400,11 +416,11 @@ func (h *Handlers) getCollectionDetails(c *gin.Context) {
 	}})
 }
 
-func (h *Handlers) dropCollection(c *gin.Context) {
+func (h *HandlersV1) dropCollection(c *gin.Context) {
 	httpReq := DropCollectionReq{
 		DbName: DefaultDbName,
 	}
-	if err := c.ShouldBindBodyWith(&httpReq, binding.JSON); err != nil {
+	if err := c.ShouldBindWith(&httpReq, binding.JSON); err != nil {
 		log.Warn("high level restful api, the parameter of drop collection is incorrect", zap.Any("request", httpReq), zap.Error(err))
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
@@ -453,13 +469,13 @@ func (h *Handlers) dropCollection(c *gin.Context) {
 	}
 }
 
-func (h *Handlers) query(c *gin.Context) {
+func (h *HandlersV1) query(c *gin.Context) {
 	httpReq := QueryReq{
 		DbName:       DefaultDbName,
 		Limit:        100,
 		OutputFields: []string{DefaultOutputFields},
 	}
-	if err := c.ShouldBindBodyWith(&httpReq, binding.JSON); err != nil {
+	if err := c.ShouldBindWith(&httpReq, binding.JSON); err != nil {
 		log.Warn("high level restful api, the parameter of query is incorrect", zap.Any("request", httpReq), zap.Error(err))
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
@@ -518,7 +534,7 @@ func (h *Handlers) query(c *gin.Context) {
 	}
 }
 
-func (h *Handlers) get(c *gin.Context) {
+func (h *HandlersV1) get(c *gin.Context) {
 	httpReq := GetReq{
 		DbName:       DefaultDbName,
 		OutputFields: []string{DefaultOutputFields},
@@ -589,7 +605,7 @@ func (h *Handlers) get(c *gin.Context) {
 	}
 }
 
-func (h *Handlers) delete(c *gin.Context) {
+func (h *HandlersV1) delete(c *gin.Context) {
 	httpReq := DeleteReq{
 		DbName: DefaultDbName,
 	}
@@ -649,7 +665,7 @@ func (h *Handlers) delete(c *gin.Context) {
 	}
 }
 
-func (h *Handlers) insert(c *gin.Context) {
+func (h *HandlersV1) insert(c *gin.Context) {
 	httpReq := InsertReq{
 		DbName: DefaultDbName,
 	}
@@ -741,7 +757,7 @@ func (h *Handlers) insert(c *gin.Context) {
 	}
 }
 
-func (h *Handlers) upsert(c *gin.Context) {
+func (h *HandlersV1) upsert(c *gin.Context) {
 	httpReq := UpsertReq{
 		DbName: DefaultDbName,
 	}
@@ -838,12 +854,12 @@ func (h *Handlers) upsert(c *gin.Context) {
 	}
 }
 
-func (h *Handlers) search(c *gin.Context) {
+func (h *HandlersV1) search(c *gin.Context) {
 	httpReq := SearchReq{
 		DbName: DefaultDbName,
 		Limit:  100,
 	}
-	if err := c.ShouldBindBodyWith(&httpReq, binding.JSON); err != nil {
+	if err := c.ShouldBindWith(&httpReq, binding.JSON); err != nil {
 		log.Warn("high level restful api, the parameter of search is incorrect", zap.Any("request", httpReq), zap.Error(err))
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),

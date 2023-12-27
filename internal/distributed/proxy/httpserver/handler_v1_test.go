@@ -86,7 +86,7 @@ func versional(path string) string {
 }
 
 func initHTTPServer(proxy types.ProxyComponent, needAuth bool) *gin.Engine {
-	h := NewHandlers(proxy)
+	h := NewHandlersV1(proxy)
 	ginHandler := gin.Default()
 	ginHandler.Use(func(c *gin.Context) {
 		_, err := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
@@ -101,7 +101,7 @@ func initHTTPServer(proxy types.ProxyComponent, needAuth bool) *gin.Engine {
 		c.Next()
 	})
 	app := ginHandler.Group(URIPrefixV1, genAuthMiddleWare(needAuth))
-	NewHandlers(h.proxy).RegisterRoutesToV1(app)
+	NewHandlersV1(h.proxy).RegisterRoutesToV1(app)
 	return ginHandler
 }
 
@@ -1763,7 +1763,7 @@ func wrapWithDescribeIndex(t *testing.T, mp *mocks.MockProxy, returnType int, ti
 }
 
 func TestInterceptor(t *testing.T) {
-	h := Handlers{}
+	h := HandlersV1{}
 	v := atomic.NewInt32(0)
 	h.interceptors = []RestRequestInterceptor{
 		func(ctx context.Context, ginCtx *gin.Context, req any, handler func(reqCtx context.Context, req any) (any, error)) (any, error) {
