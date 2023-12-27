@@ -1,6 +1,7 @@
 package segments
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -40,6 +41,7 @@ func (s *ManagerSuite) SetupTest() {
 	for i, id := range s.segmentIDs {
 		schema := GenTestCollectionSchema("manager-suite", schemapb.DataType_Int64)
 		segment, err := NewSegment(
+			context.Background(),
 			NewCollection(s.collectionIDs[i], schema, GenTestIndexMeta(s.collectionIDs[i], schema), querypb.LoadType_LoadCollection),
 			id,
 			s.partitionIDs[i],

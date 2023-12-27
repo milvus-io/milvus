@@ -73,7 +73,8 @@ func (suite *SearchSuite) SetupTest() {
 	)
 	suite.collection = suite.manager.Collection.Get(suite.collectionID)
 
-	suite.sealed, err = NewSegment(suite.collection,
+	suite.sealed, err = NewSegment(ctx,
+		suite.collection,
 		suite.segmentID,
 		suite.partitionID,
 		suite.collectionID,
@@ -95,11 +96,12 @@ func (suite *SearchSuite) SetupTest() {
 	)
 	suite.Require().NoError(err)
 	for _, binlog := range binlogs {
-		err = suite.sealed.LoadFieldData(binlog.FieldID, int64(msgLength), binlog)
+		err = suite.sealed.LoadFieldData(ctx, binlog.FieldID, int64(msgLength), binlog)
 		suite.Require().NoError(err)
 	}
 
-	suite.growing, err = NewSegment(suite.collection,
+	suite.growing, err = NewSegment(ctx,
+		suite.collection,
 		suite.segmentID+1,
 		suite.partitionID,
 		suite.collectionID,
@@ -115,7 +117,7 @@ func (suite *SearchSuite) SetupTest() {
 	suite.Require().NoError(err)
 	insertRecord, err := storage.TransferInsertMsgToInsertRecord(suite.collection.Schema(), insertMsg)
 	suite.Require().NoError(err)
-	suite.growing.Insert(insertMsg.RowIDs, insertMsg.Timestamps, insertRecord)
+	suite.growing.Insert(ctx, insertMsg.RowIDs, insertMsg.Timestamps, insertRecord)
 
 	suite.manager.Segment.Put(SegmentTypeSealed, suite.sealed)
 	suite.manager.Segment.Put(SegmentTypeGrowing, suite.growing)

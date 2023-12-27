@@ -224,7 +224,19 @@ func (loader *segmentLoader) Load(ctx context.Context,
 			log.Warn("failed to get collection", zap.Error(err))
 			return nil, err
 		}
-		segment, err := NewSegment(collection, segmentID, partitionID, collectionID, shard, segmentType, version, info.GetStartPosition(), info.GetDeltaPosition())
+
+		segment, err := NewSegment(
+			ctx,
+			collection,
+			segmentID,
+			partitionID,
+			collectionID,
+			shard,
+			segmentType,
+			version,
+			info.GetStartPosition(),
+			info.GetDeltaPosition(),
+		)
 		if err != nil {
 			log.Warn("load segment failed when create new segment",
 				zap.Int64("partitionID", partitionID),
@@ -360,7 +372,7 @@ func (loader *segmentLoader) requestResource(ctx context.Context, infos ...*quer
 	memoryUsage := hardware.GetUsedMemoryCount()
 	totalMemory := hardware.GetMemoryCount()
 
-	diskUsage, err := GetLocalUsedSize(paramtable.Get().LocalStorageCfg.Path.GetValue())
+	diskUsage, err := GetLocalUsedSize(ctx, paramtable.Get().LocalStorageCfg.Path.GetValue())
 	if err != nil {
 		return resource, 0, errors.Wrap(err, "get local used size failed")
 	}
@@ -578,7 +590,7 @@ func (loader *segmentLoader) loadSegment(ctx context.Context,
 		if err := loader.loadSealedSegmentFields(ctx, segment, fieldBinlogs, loadInfo.GetNumOfRows()); err != nil {
 			return err
 		}
-		if err := segment.AddFieldDataInfo(loadInfo.GetNumOfRows(), loadInfo.GetBinlogPaths()); err != nil {
+		if err := segment.AddFieldDataInfo(ctx, loadInfo.GetNumOfRows(), loadInfo.GetBinlogPaths()); err != nil {
 			return err
 		}
 		// https://github.com/milvus-io/milvus/23654
@@ -587,7 +599,7 @@ func (loader *segmentLoader) loadSegment(ctx context.Context,
 			return err
 		}
 	} else {
-		if err := segment.LoadMultiFieldData(loadInfo.GetNumOfRows(), loadInfo.BinlogPaths); err != nil {
+		if err := segment.LoadMultiFieldData(ctx, loadInfo.GetNumOfRows(), loadInfo.BinlogPaths); err != nil {
 			return err
 		}
 	}
@@ -632,7 +644,11 @@ func (loader *segmentLoader) loadSealedSegmentFields(ctx context.Context, segmen
 		fieldBinLog := field
 		fieldID := field.FieldID
 		runningGroup.Go(func() error {
-			return segment.LoadFieldData(fieldID, rowCount, fieldBinLog)
+			return segment.LoadFieldData(ctx,
+				fieldID,
+				rowCount,
+				fieldBinLog,
+			)
 		})
 	}
 	err := runningGroup.Wait()
@@ -680,7 +696,7 @@ func (loader *segmentLoader) loadFieldsIndex(ctx context.Context,
 			return err
 		}
 		if typeutil.IsVariableDataType(field.GetDataType()) {
-			err = segment.UpdateFieldRawDataSize(numRows, fieldInfo.FieldBinlog)
+			err = segment.UpdateFieldRawDataSize(ctx, numRows, fieldInfo.FieldBinlog)
 			if err != nil {
 				return err
 			}
@@ -706,7 +722,7 @@ func (loader *segmentLoader) loadFieldIndex(ctx context.Context, segment *LocalS
 		return err
 	}
 
-	return segment.LoadIndex(indexInfo, fieldType)
+	return segment.LoadIndex(ctx, indexInfo, fieldType)
 }
 
 func (loader *segmentLoader) loadBloomFilter(ctx context.Context, segmentID int64, bfs *pkoracle.BloomFilterSet,
@@ -760,6 +776,9 @@ func (loader *segmentLoader) loadBloomFilter(ctx context.Context, segmentID int6
 }
 
 func (loader *segmentLoader) LoadDeltaLogs(ctx context.Context, segment *LocalSegment, deltaLogs []*datapb.FieldBinlog) error {
+	log := log.Ctx(ctx).With(
+		zap.Int64("segmentID", segment.ID()),
+	)
 	dCodec := storage.DeleteCodec{}
 	var blobs []*storage.Blob
 	for _, deltaLog := range deltaLogs {
@@ -789,7 +808,7 @@ func (loader *segmentLoader) LoadDeltaLogs(ctx context.Context, segment *LocalSe
 		return err
 	}
 
-	err = segment.LoadDeltaData(deltaData)
+	err = segment.LoadDeltaData(ctx, deltaData)
 	if err != nil {
 		return err
 	}
@@ -906,7 +925,7 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 		return 0, 0, errors.New("get memory failed when checkSegmentSize")
 	}
 
-	localDiskUsage, err := GetLocalUsedSize(paramtable.Get().LocalStorageCfg.Path.GetValue())
+	localDiskUsage, err := GetLocalUsedSize(ctx, paramtable.Get().LocalStorageCfg.Path.GetValue())
 	if err != nil {
 		return 0, 0, errors.Wrap(err, "get local used size failed")
 	}

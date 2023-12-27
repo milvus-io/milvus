@@ -1461,7 +1461,7 @@ func (node *QueryNode) Delete(ctx context.Context, req *querypb.DeleteRequest) (
 
 	pks := storage.ParseIDs2PrimaryKeys(req.GetPrimaryKeys())
 	for _, segment := range segments {
-		err := segment.Delete(pks, req.GetTimestamps())
+		err := segment.Delete(ctx, pks, req.GetTimestamps())
 		if err != nil {
 			log.Warn("segment delete failed", zap.Error(err))
 			return merr.Status(err), nil

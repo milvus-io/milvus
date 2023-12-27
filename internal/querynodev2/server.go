@@ -286,7 +286,7 @@ func (node *QueryNode) Init() error {
 
 		localRootPath := paramtable.Get().LocalStorageCfg.Path.GetValue()
 		localChunkManager := storage.NewLocalChunkManager(storage.RootPath(localRootPath))
-		localUsedSize, err := segments.GetLocalUsedSize(localRootPath)
+		localUsedSize, err := segments.GetLocalUsedSize(node.ctx, localRootPath)
 		if err != nil {
 			log.Warn("get local used size failed", zap.Error(err))
 			initError = err

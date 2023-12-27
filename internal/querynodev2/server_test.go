@@ -224,7 +224,7 @@ func (suite *QueryNodeSuite) TestStop() {
 
 	schema := segments.GenTestCollectionSchema("test_stop", schemapb.DataType_Int64)
 	collection := segments.NewCollection(1, schema, nil, querypb.LoadType_LoadCollection)
-	segment, err := segments.NewSegment(collection, 100, 10, 1, "test_stop_channel", segments.SegmentTypeSealed, 1, nil, nil)
+	segment, err := segments.NewSegment(context.Background(), collection, 100, 10, 1, "test_stop_channel", segments.SegmentTypeSealed, 1, nil, nil)
 	suite.NoError(err)
 	suite.node.manager.Segment.Put(segments.SegmentTypeSealed, segment)
 	err = suite.node.Stop()
