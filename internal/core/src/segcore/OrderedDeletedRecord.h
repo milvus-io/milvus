@@ -21,11 +21,16 @@ class OrderedDeletedRecord {
     OrderedDeletedRecord() = default;
 
  public:
+    // It may cost a lot of time when the segment was searched first time.
     DeletedRecord&
-    get_or_generate();
+    get_deleted_record();
 
     int64_t
     get_deleted_count() const;
+
+    // commit should be called after load is done.
+    void
+    commit();
 
     void
     load(const std::vector<PkType>& pks, const Timestamp* timestamps);

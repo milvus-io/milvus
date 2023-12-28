@@ -40,7 +40,8 @@ EasyAssertInfo(bool value,
                std::string_view filename,
                int lineno,
                std::string_view extra_info,
-               ErrorCode error_code) {
+               ErrorCode error_code,
+               bool crash) {
     // enable error code
     if (!value) {
         std::string info;
@@ -54,6 +55,9 @@ EasyAssertInfo(bool value,
             info += " => " + std::string(extra_info);
         }
         std::cout << info << std::endl;
+        if (crash) {
+            exit(-1);
+        }
         throw SegcoreError(error_code, std::string(info));
     }
 }

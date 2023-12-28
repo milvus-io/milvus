@@ -24,6 +24,7 @@
 
 #include "ConcurrentVector.h"
 #include "DeletedRecord.h"
+#include "OrderedDeletedRecord.h"
 #include "ScalarIndex.h"
 #include "SealedIndexingRecord.h"
 #include "SegmentSealed.h"
@@ -246,7 +247,7 @@ class SegmentSealedImpl : public SegmentSealed {
 
     const DeletedRecord&
     get_deleted_record() const {
-        return deleted_record_;
+        return deleted_record_.get_deleted_record();
     }
 
     std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
@@ -284,7 +285,7 @@ class SegmentSealedImpl : public SegmentSealed {
     InsertRecord<true> insert_record_;
 
     // deleted pks
-    mutable DeletedRecord deleted_record_;
+    mutable OrderedDeletedRecord deleted_record_;
 
     LoadFieldDataInfo field_data_info_;
 

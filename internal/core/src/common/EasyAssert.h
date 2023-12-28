@@ -67,7 +67,8 @@ EasyAssertInfo(bool value,
                std::string_view filename,
                int lineno,
                std::string_view extra_info,
-               ErrorCode error_code = ErrorCode::UnexpectedError);
+               ErrorCode error_code = ErrorCode::UnexpectedError,
+               bool crash = false);
 
 }  // namespace impl
 
@@ -143,3 +144,20 @@ FailureCStatus(std::exception* ex) {
                                      errcode);                  \
         __builtin_unreachable();                                \
     } while (0)
+
+#define ExitInfo(expr, info, args...)                                \
+    do {                                                             \
+        auto _expr_res = bool(expr);                                 \
+        /* call func only when needed */                             \
+        if (!_expr_res) {                                            \
+            milvus::impl::EasyAssertInfo(_expr_res,                  \
+                                         #expr,                      \
+                                         __FILE__,                   \
+                                         __LINE__,                   \
+                                         fmt::format(info, ##args),  \
+                                         ErrorCode::UnexpectedError, \
+                                         true);                      \
+        }                                                            \
+    } while (0)
+
+#define Exit(expr) ExitInfo((expr), "")

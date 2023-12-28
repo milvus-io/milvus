@@ -575,7 +575,11 @@ SegmentSealedImpl::LoadDeletedRecord(const LoadDeletedRecordInfo& info) {
     auto timestamps = reinterpret_cast<const Timestamp*>(info.timestamps);
 
     // step 2: fill pks and timestamps
-    deleted_record_.push(pks, timestamps);
+    deleted_record_.load(pks, timestamps);
+
+    // step 3: switch unordered records to ordered. TODO: export this method
+    // outside if `LoadDeletedRecord` will be called more than once.
+    deleted_record_.commit();
 }
 
 void
@@ -653,7 +657,7 @@ SegmentSealedImpl::get_row_count() const {
 int64_t
 SegmentSealedImpl::get_deleted_count() const {
     std::shared_lock lck(mutex_);
-    return deleted_record_.size();
+    return deleted_record_.get_deleted_count();
 }
 
 const Schema&
@@ -665,13 +669,17 @@ void
 SegmentSealedImpl::mask_with_delete(BitsetType& bitset,
                                     int64_t ins_barrier,
                                     Timestamp timestamp) const {
-    auto del_barrier = get_barrier(get_deleted_record(), timestamp);
+    auto& final_deleted_record = deleted_record_.get_deleted_record();
+    auto del_barrier = get_barrier(final_deleted_record, timestamp);
     if (del_barrier == 0) {
         return;
     }
 
-    auto bitmap_holder = get_deleted_bitmap(
-        del_barrier, ins_barrier, deleted_record_, insert_record_, timestamp);
+    auto bitmap_holder = get_deleted_bitmap(del_barrier,
+                                            ins_barrier,
+                                            final_deleted_record,
+                                            insert_record_,
+                                            timestamp);
     if (!bitmap_holder || !bitmap_holder->bitmap_ptr) {
         return;
     }
