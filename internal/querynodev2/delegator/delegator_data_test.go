@@ -246,7 +246,8 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 		Call.Return(func(ctx context.Context, collectionID int64, version int64, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
 		return lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *pkoracle.BloomFilterSet {
 			bfs := pkoracle.NewBloomFilterSet(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed)
-			bf := bloom.NewWithEstimates(storage.BloomFilterSize, storage.MaxBloomFalsePositive)
+			bf := bloom.NewWithEstimates(paramtable.Get().CommonCfg.BloomFilterSize.GetAsUint(),
+				paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat())
 			pks := &storage.PkStatistics{
 				PkFilter: bf,
 			}
@@ -428,7 +429,8 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 			Call.Return(func(ctx context.Context, collectionID int64, version int64, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
 			return lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *pkoracle.BloomFilterSet {
 				bfs := pkoracle.NewBloomFilterSet(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed)
-				bf := bloom.NewWithEstimates(storage.BloomFilterSize, storage.MaxBloomFalsePositive)
+				bf := bloom.NewWithEstimates(paramtable.Get().CommonCfg.BloomFilterSize.GetAsUint(),
+					paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat())
 				pks := &storage.PkStatistics{
 					PkFilter: bf,
 				}
@@ -583,7 +585,8 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 			Call.Return(func(ctx context.Context, collectionID int64, version int64, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
 			return lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *pkoracle.BloomFilterSet {
 				bfs := pkoracle.NewBloomFilterSet(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed)
-				bf := bloom.NewWithEstimates(storage.BloomFilterSize, storage.MaxBloomFalsePositive)
+				bf := bloom.NewWithEstimates(paramtable.Get().CommonCfg.BloomFilterSize.GetAsUint(),
+					paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat())
 				pks := &storage.PkStatistics{
 					PkFilter: bf,
 				}
@@ -779,7 +782,8 @@ func (s *DelegatorDataSuite) TestReleaseSegment() {
 		Call.Return(func(ctx context.Context, collectionID int64, version int64, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
 		return lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *pkoracle.BloomFilterSet {
 			bfs := pkoracle.NewBloomFilterSet(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed)
-			bf := bloom.NewWithEstimates(storage.BloomFilterSize, storage.MaxBloomFalsePositive)
+			bf := bloom.NewWithEstimates(paramtable.Get().CommonCfg.BloomFilterSize.GetAsUint(),
+				paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat())
 			pks := &storage.PkStatistics{
 				PkFilter: bf,
 			}
