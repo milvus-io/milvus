@@ -176,17 +176,18 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 		task.CollectionID(),
 		partitions...,
 	)
+
+	// get channel first, in case of target updated after segment info fetched
+	channel := ex.targetMgr.GetDmChannel(task.CollectionID(), task.shard, meta.NextTargetFirst)
+	if channel == nil {
+		return merr.WrapErrChannelNotAvailable(task.shard)
+	}
 	resp, err := ex.broker.GetSegmentInfo(ctx, task.SegmentID())
 	if err != nil || len(resp.GetInfos()) == 0 {
 		log.Warn("failed to get segment info from DataCoord", zap.Error(err))
 		return err
 	}
 	segment := resp.GetInfos()[0]
-	// get channel first, in case of target updated after segment info fetched
-	channel := ex.targetMgr.GetDmChannel(task.CollectionID(), segment.GetInsertChannel(), meta.NextTargetFirst)
-	if channel == nil {
-		return merr.WrapErrChannelNotAvailable(segment.GetInsertChannel())
-	}
 
 	indexes, err := ex.broker.GetIndexInfo(ctx, task.CollectionID(), segment.GetID())
 	if err != nil {
