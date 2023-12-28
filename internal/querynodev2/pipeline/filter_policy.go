@@ -54,11 +54,11 @@ func InsertOutOfTarget(n *filterNode, c *Collection, msg *InsertMsg) error {
 }
 
 func InsertExcluded(n *filterNode, c *Collection, msg *InsertMsg) error {
-	segInfo, ok := n.excludedSegments.Get(msg.SegmentID)
+	ts, ok := n.excludedSegments.Get(msg.SegmentID)
 	if !ok {
 		return nil
 	}
-	if msg.EndTimestamp <= segInfo.GetDmlPosition().GetTimestamp() {
+	if msg.EndTimestamp <= ts {
 		m := fmt.Sprintf("Segment excluded, id: %d", msg.GetSegmentID())
 		return merr.WrapErrSegmentLack(msg.GetSegmentID(), m)
 	}
