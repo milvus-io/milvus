@@ -83,36 +83,10 @@ jobs:
                        -p ${{ secrets.DOCKERHUB_TOKEN }}
           docker buildx build --platform linux/amd64,linux/arm64 --push -t milvusdb/milvus-env:${OS_NAME}-${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }} -f build/docker/builder/cpu/${OS_NAME}/Dockerfile .
           docker buildx build --platform linux/amd64,linux/arm64 --push -t milvusdb/milvus-env:${OS_NAME}-latest -f build/docker/builder/cpu/${OS_NAME}/Dockerfile .
-      - name: Update Builder Image Changes
+      - name: Bump Builder Version
+        uses: ./.github/actions/bump-builder-version
         if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus' && matrix.os == 'ubuntu20.04'
-        continue-on-error: true
-        shell: bash
-        run: |
-          sed -i "s#^DATE_VERSION=.*#DATE_VERSION=${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }}#g" .env
-          sed -i "s#^LATEST_DATE_VERSION=.*#LATEST_DATE_VERSION=${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }}#g" .env
-          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
-          git add .env
-          git commit -m "Update Builder image changes"
-      - name: Create Pull Request
-        id: cpr
-        if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus' && matrix.os == 'ubuntu20.04'
-        continue-on-error: true
-        uses: peter-evans/create-pull-request@v3
         with:
+          tag: "${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }}"
+          type: cpu
           token: ${{ secrets.ALL_CONTRIBUTORS_TOKEN }}
-          author: ${{ github.actor }} <${{ github.actor }}@users.noreply.github.com>
-          signoff: false
-          branch: update_builder_${{ github.sha }}
-          delete-branch: true
-          title: '[automated] Update Builder image changes'
-          body: |
-            Update Builder image changes
-            See changes: https://github.com/milvus-io/milvus/commit/${{ github.sha }}
-            Signed-off-by: ${{ github.actor }} ${{ github.actor }}@users.noreply.github.com
-      - name: Check outputs
-        if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus' && matrix.os == 'ubuntu20.04'
-        run: |
-          echo "Pull Request Number - ${{ steps.cpr.outputs.pull-request-number }}"
-          echo "Pull Request URL - ${{ steps.cpr.outputs.pull-request-url }}"
-
