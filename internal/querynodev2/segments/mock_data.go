@@ -1141,7 +1141,7 @@ func genHNSWDSL(schema *schemapb.CollectionSchema, ef int, topK int64, roundDeci
             >`, nil
 }
 
-func checkSearchResult(nq int64, plan *SearchPlan, searchResult *SearchResult) error {
+func checkSearchResult(ctx context.Context, nq int64, plan *SearchPlan, searchResult *SearchResult) error {
 	searchResults := make([]*SearchResult, 0)
 	searchResults = append(searchResults, searchResult)
 
@@ -1150,13 +1150,13 @@ func checkSearchResult(nq int64, plan *SearchPlan, searchResult *SearchResult) e
 	sliceTopKs := []int64{topK, topK / 2, topK, topK, topK / 2}
 	sInfo := ParseSliceInfo(sliceNQs, sliceTopKs, nq)
 
-	res, err := ReduceSearchResultsAndFillData(plan, searchResults, 1, sInfo.SliceNQs, sInfo.SliceTopKs)
+	res, err := ReduceSearchResultsAndFillData(ctx, plan, searchResults, 1, sInfo.SliceNQs, sInfo.SliceTopKs)
 	if err != nil {
 		return err
 	}
 
 	for i := 0; i < len(sInfo.SliceNQs); i++ {
-		blob, err := GetSearchResultDataBlob(res, i)
+		blob, err := GetSearchResultDataBlob(ctx, res, i)
 		if err != nil {
 			return err
 		}
@@ -1199,7 +1199,7 @@ func genSearchPlanAndRequests(collection *Collection, segments []int64, indexTyp
 		FromShardLeader: true,
 		Scope:           querypb.DataScope_Historical,
 	}
-	return NewSearchRequest(collection, queryReq, queryReq.Req.GetPlaceholderGroup())
+	return NewSearchRequest(context.Background(), collection, queryReq, queryReq.Req.GetPlaceholderGroup())
 }
 
 func genInsertMsg(collection *Collection, partitionID, segment int64, numRows int) (*msgstream.InsertMsg, error) {
@@ -1301,7 +1301,7 @@ func genSimpleRetrievePlan(collection *Collection) (*RetrievePlan, error) {
 		return nil, err
 	}
 
-	plan, err2 := NewRetrievePlan(collection, planBytes, timestamp, 100)
+	plan, err2 := NewRetrievePlan(context.Background(), collection, planBytes, timestamp, 100)
 	return plan, err2
 }
 

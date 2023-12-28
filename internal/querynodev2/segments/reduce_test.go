@@ -71,7 +71,8 @@ func (suite *ReduceSuite) SetupTest() {
 		GenTestIndexMeta(suite.collectionID, schema),
 		querypb.LoadType_LoadCollection,
 	)
-	suite.segment, err = NewSegment(suite.collection,
+	suite.segment, err = NewSegment(ctx,
+		suite.collection,
 		suite.segmentID,
 		suite.partitionID,
 		suite.collectionID,
@@ -93,7 +94,7 @@ func (suite *ReduceSuite) SetupTest() {
 	)
 	suite.Require().NoError(err)
 	for _, binlog := range binlogs {
-		err = suite.segment.LoadFieldData(binlog.FieldID, int64(msgLength), binlog)
+		err = suite.segment.LoadFieldData(ctx, binlog.FieldID, int64(msgLength), binlog)
 		suite.Require().NoError(err)
 	}
 }
@@ -162,29 +163,29 @@ func (suite *ReduceSuite) TestReduceAllFunc() {
 	proto.UnmarshalText(planStr, &planpb)
 	serializedPlan, err := proto.Marshal(&planpb)
 	suite.NoError(err)
-	plan, err := createSearchPlanByExpr(suite.collection, serializedPlan, "")
+	plan, err := createSearchPlanByExpr(context.Background(), suite.collection, serializedPlan, "")
 	suite.NoError(err)
-	searchReq, err := parseSearchRequest(plan, placeGroupByte)
+	searchReq, err := parseSearchRequest(context.Background(), plan, placeGroupByte)
 	suite.NoError(err)
 	defer searchReq.Delete()
 
 	searchResult, err := suite.segment.Search(context.Background(), searchReq)
 	suite.NoError(err)
 
-	err = checkSearchResult(nq, plan, searchResult)
+	err = checkSearchResult(context.Background(), nq, plan, searchResult)
 	suite.NoError(err)
 }
 
 func (suite *ReduceSuite) TestReduceInvalid() {
 	plan := &SearchPlan{}
-	_, err := ReduceSearchResultsAndFillData(plan, nil, 1, nil, nil)
+	_, err := ReduceSearchResultsAndFillData(context.Background(), plan, nil, 1, nil, nil)
 	suite.Error(err)
 
 	searchReq, err := genSearchPlanAndRequests(suite.collection, []int64{suite.segmentID}, IndexHNSW, 10)
 	suite.NoError(err)
 	searchResults := make([]*SearchResult, 0)
 	searchResults = append(searchResults, nil)
-	_, err = ReduceSearchResultsAndFillData(searchReq.plan, searchResults, 1, []int64{10}, []int64{10})
+	_, err = ReduceSearchResultsAndFillData(context.Background(), searchReq.plan, searchResults, 1, []int64{10}, []int64{10})
 	suite.Error(err)
 }
 

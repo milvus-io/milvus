@@ -23,6 +23,7 @@ package segments
 import "C"
 
 import (
+	"context"
 	"unsafe"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -32,11 +33,11 @@ type LoadFieldDataInfo struct {
 	cLoadFieldDataInfo C.CLoadFieldDataInfo
 }
 
-func newLoadFieldDataInfo() (*LoadFieldDataInfo, error) {
+func newLoadFieldDataInfo(ctx context.Context) (*LoadFieldDataInfo, error) {
 	var cLoadFieldDataInfo C.CLoadFieldDataInfo
 
 	status := C.NewLoadFieldDataInfo(&cLoadFieldDataInfo)
-	if err := HandleCStatus(&status, "newLoadFieldDataInfo failed"); err != nil {
+	if err := HandleCStatus(ctx, &status, "newLoadFieldDataInfo failed"); err != nil {
 		return nil, err
 	}
 	return &LoadFieldDataInfo{cLoadFieldDataInfo: cLoadFieldDataInfo}, nil
@@ -46,22 +47,22 @@ func deleteFieldDataInfo(info *LoadFieldDataInfo) {
 	C.DeleteLoadFieldDataInfo(info.cLoadFieldDataInfo)
 }
 
-func (ld *LoadFieldDataInfo) appendLoadFieldInfo(fieldID int64, rowCount int64) error {
+func (ld *LoadFieldDataInfo) appendLoadFieldInfo(ctx context.Context, fieldID int64, rowCount int64) error {
 	cFieldID := C.int64_t(fieldID)
 	cRowCount := C.int64_t(rowCount)
 
 	status := C.AppendLoadFieldInfo(ld.cLoadFieldDataInfo, cFieldID, cRowCount)
-	return HandleCStatus(&status, "appendLoadFieldInfo failed")
+	return HandleCStatus(ctx, &status, "appendLoadFieldInfo failed")
 }
 
-func (ld *LoadFieldDataInfo) appendLoadFieldDataPath(fieldID int64, binlog *datapb.Binlog) error {
+func (ld *LoadFieldDataInfo) appendLoadFieldDataPath(ctx context.Context, fieldID int64, binlog *datapb.Binlog) error {
 	cFieldID := C.int64_t(fieldID)
 	cEntriesNum := C.int64_t(binlog.GetEntriesNum())
 	cFile := C.CString(binlog.GetLogPath())
 	defer C.free(unsafe.Pointer(cFile))
 
 	status := C.AppendLoadFieldDataPath(ld.cLoadFieldDataInfo, cFieldID, cEntriesNum, cFile)
-	return HandleCStatus(&status, "appendLoadFieldDataPath failed")
+	return HandleCStatus(ctx, &status, "appendLoadFieldDataPath failed")
 }
 
 func (ld *LoadFieldDataInfo) appendMMapDirPath(dir string) {

@@ -85,7 +85,7 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 		growing := sd.segmentManager.GetGrowing(segmentID)
 		if growing == nil {
 			var err error
-			growing, err = segments.NewSegment(sd.collection, segmentID, insertData.PartitionID, sd.collectionID, sd.vchannelName,
+			growing, err = segments.NewSegment(context.Background(), sd.collection, segmentID, insertData.PartitionID, sd.collectionID, sd.vchannelName,
 				segments.SegmentTypeGrowing, 0, insertData.StartPosition, insertData.StartPosition)
 			if err != nil {
 				log.Error("failed to create new segment",
@@ -95,7 +95,7 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 			}
 		}
 
-		err := growing.Insert(insertData.RowIDs, insertData.Timestamps, insertData.InsertRecord)
+		err := growing.Insert(context.Background(), insertData.RowIDs, insertData.Timestamps, insertData.InsertRecord)
 		if err != nil {
 			log.Error("failed to insert data into growing segment",
 				zap.Int64("segmentID", segmentID),

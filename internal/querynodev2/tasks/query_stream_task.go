@@ -48,6 +48,7 @@ func (t *QueryStreamTask) PreExecute() error {
 
 func (t *QueryStreamTask) Execute() error {
 	retrievePlan, err := segments.NewRetrievePlan(
+		t.ctx,
 		t.collection,
 		t.req.Req.GetSerializedExprPlan(),
 		t.req.Req.GetMvccTimestamp(),

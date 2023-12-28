@@ -52,8 +52,8 @@ type Segment interface {
 	Indexes() []*IndexedFieldInfo
 
 	// Modification related
-	Insert(rowIDs []int64, timestamps []typeutil.Timestamp, record *segcorepb.InsertRecord) error
-	Delete(primaryKeys []storage.PrimaryKey, timestamps []typeutil.Timestamp) error
+	Insert(ctx context.Context, rowIDs []int64, timestamps []typeutil.Timestamp, record *segcorepb.InsertRecord) error
+	Delete(ctx context.Context, primaryKeys []storage.PrimaryKey, timestamps []typeutil.Timestamp) error
 	LastDeltaTimestamp() uint64
 
 	// Bloom filter related
