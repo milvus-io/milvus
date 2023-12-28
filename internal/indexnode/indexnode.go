@@ -230,7 +230,7 @@ func (i *IndexNode) Start() error {
 		startErr = i.sched.Start()
 
 		i.UpdateStateCode(commonpb.StateCode_Healthy)
-		log.Info("IndexNode", zap.Any("State", i.lifetime.GetState().String()))
+		log.Info("IndexNode", zap.String("State", i.lifetime.GetState().String()))
 	})
 
 	log.Info("IndexNode start finished", zap.Error(startErr))

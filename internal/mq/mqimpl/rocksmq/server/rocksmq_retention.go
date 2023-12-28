@@ -143,8 +143,8 @@ func (ri *retentionInfo) expiredCleanUp(topic string) error {
 	}
 	// Quick Path, No page to check
 	if totalAckedSize == 0 {
-		log.Debug("All messages are not expired, skip retention because no ack", zap.Any("topic", topic),
-			zap.Any("time taken", time.Since(start).Milliseconds()))
+		log.Debug("All messages are not expired, skip retention because no ack", zap.String("topic", topic),
+			zap.Int64("time taken", time.Since(start).Milliseconds()))
 		return nil
 	}
 	pageReadOpts := gorocksdb.NewDefaultReadOptions()
@@ -232,13 +232,13 @@ func (ri *retentionInfo) expiredCleanUp(topic string) error {
 	}
 
 	if pageEndID == 0 {
-		log.Debug("All messages are not expired, skip retention", zap.Any("topic", topic), zap.Any("time taken", time.Since(start).Milliseconds()))
+		log.Debug("All messages are not expired, skip retention", zap.String("topic", topic), zap.Int64("time taken", time.Since(start).Milliseconds()))
 		return nil
 	}
 	expireTime := time.Since(start).Milliseconds()
-	log.Debug("Expired check by message size: ", zap.Any("topic", topic),
-		zap.Any("pageEndID", pageEndID), zap.Any("deletedAckedSize", deletedAckedSize),
-		zap.Any("pageCleaned", pageCleaned), zap.Any("time taken", expireTime))
+	log.Debug("Expired check by message size: ", zap.String("topic", topic),
+		zap.Int64("pageEndID", pageEndID), zap.Int64("deletedAckedSize", deletedAckedSize),
+		zap.Int64("pageCleaned", pageCleaned), zap.Int64("time taken", expireTime))
 	return ri.cleanData(topic, pageEndID)
 }
 

@@ -118,7 +118,7 @@ func newMinioClient(ctx context.Context, c *config) (*minio.Client, error) {
 		}
 		if !bucketExists {
 			if c.createBucket {
-				log.Info("blob bucket not exist, create bucket.", zap.Any("bucket name", c.bucketName))
+				log.Info("blob bucket not exist, create bucket.", zap.String("bucket name", c.bucketName))
 				err := minIOClient.MakeBucket(ctx, c.bucketName, minio.MakeBucketOptions{})
 				if err != nil {
 					log.Warn("failed to create blob bucket", zap.String("bucket", c.bucketName), zap.Error(err))

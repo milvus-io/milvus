@@ -267,7 +267,7 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 				assert.Equal(t, 12, len(kvs))
 
 				log.Debug("test paths",
-					zap.Any("kvs no.", len(kvs)),
+					zap.Int("kvs no.", len(kvs)),
 					zap.String("insert paths field0", pin[common.TimeStampField].GetBinlogs()[0].GetLogPath()))
 			})
 		}
