@@ -64,7 +64,11 @@ const (
 	ReduceSegments = "segments"
 	ReduceShards   = "shards"
 
-	compactionTypeLabel      = "compaction_type"
+	Pending   = "pending"
+	Executing = "executing"
+	Done      = "done"
+
+	compactionTypeLabelName  = "compaction_type"
 	nodeIDLabelName          = "node_id"
 	statusLabelName          = "status"
 	indexTaskStatusLabelName = "index_task_status"
