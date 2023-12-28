@@ -27,30 +27,38 @@
 #include "mmap/Types.h"
 
 //////////////////////////////    common interfaces    //////////////////////////////
-CSegmentInterface
-NewSegment(CCollection collection, SegmentType seg_type, int64_t segment_id) {
-    auto col = static_cast<milvus::segcore::Collection*>(collection);
+CStatus
+NewSegment(CCollection collection,
+           SegmentType seg_type,
+           int64_t segment_id,
+           CSegmentInterface* newSegment) {
+    try {
+        auto col = static_cast<milvus::segcore::Collection*>(collection);
 
-    std::unique_ptr<milvus::segcore::SegmentInterface> segment;
-    switch (seg_type) {
-        case Growing: {
-            auto seg = milvus::segcore::CreateGrowingSegment(
-                col->get_schema(), col->GetIndexMeta(), segment_id);
-            segment = std::move(seg);
-            break;
+        std::unique_ptr<milvus::segcore::SegmentInterface> segment;
+        switch (seg_type) {
+            case Growing: {
+                auto seg = milvus::segcore::CreateGrowingSegment(
+                    col->get_schema(), col->GetIndexMeta(), segment_id);
+                segment = std::move(seg);
+                break;
+            }
+            case Sealed:
+            case Indexing:
+                segment = milvus::segcore::CreateSealedSegment(
+                    col->get_schema(), col->GetIndexMeta(), segment_id);
+                break;
+            default:
+                PanicInfo(milvus::UnexpectedError,
+                          "invalid segment type: {}",
+                          static_cast<int>(seg_type));
         }
-        case Sealed:
-        case Indexing:
-            segment = milvus::segcore::CreateSealedSegment(
-                col->get_schema(), col->GetIndexMeta(), segment_id);
-            break;
-        default:
-            LOG_SEGCORE_ERROR_ << "invalid segment type "
-                               << static_cast<int32_t>(seg_type);
-            break;
-    }
 
-    return segment.release();
+        *newSegment = segment.release();
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
 }
 
 void

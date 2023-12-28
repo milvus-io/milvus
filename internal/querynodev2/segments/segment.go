@@ -163,22 +163,26 @@ func NewSegment(ctx context.Context,
 ) (*LocalSegment, error) {
 	log := log.Ctx(ctx)
 	/*
-		CSegmentInterface
-		NewSegment(CCollection collection, uint64_t segment_id, SegmentType seg_type);
+		CStatus
+		NewSegment(CCollection collection, uint64_t segment_id, SegmentType seg_type, CSegmentInterface* newSegment);
 	*/
-	var segmentPtr C.CSegmentInterface
-	_, err := GetDynamicPool().Submit(func() (any, error) {
-		switch segmentType {
-		case SegmentTypeSealed:
-			segmentPtr = C.NewSegment(collection.collectionPtr, C.Sealed, C.int64_t(segmentID))
-		case SegmentTypeGrowing:
-			segmentPtr = C.NewSegment(collection.collectionPtr, C.Growing, C.int64_t(segmentID))
-		default:
-			return nil, fmt.Errorf("illegal segment type %d when create segment %d", segmentType, segmentID)
-		}
-		return nil, nil
-	}).Await()
-	if err != nil {
+	var cSegType C.SegmentType
+	switch segmentType {
+	case SegmentTypeSealed:
+		cSegType = C.Sealed
+	case SegmentTypeGrowing:
+		cSegType = C.Growing
+	default:
+		return nil, fmt.Errorf("illegal segment type %d when create segment %d", segmentType, segmentID)
+	}
+
+	var newPtr C.CSegmentInterface
+	status := C.NewSegment(collection.collectionPtr, cSegType, C.int64_t(segmentID), &newPtr)
+
+	if err := HandleCStatus(ctx, &status, "NewSegmentFailed",
+		zap.Int64("collectionID", collectionID),
+		zap.Int64("partitionID", partitionID),
+		zap.Int64("segmentID", segmentID)); err != nil {
 		return nil, err
 	}
 
@@ -190,7 +194,7 @@ func NewSegment(ctx context.Context,
 
 	segment := &LocalSegment{
 		baseSegment:        newBaseSegment(segmentID, partitionID, collectionID, shard, segmentType, version, startPosition),
-		ptr:                segmentPtr,
+		ptr:                newPtr,
 		lastDeltaTimestamp: atomic.NewUint64(0),
 		fieldIndexes:       typeutil.NewConcurrentMap[int64, *IndexedFieldInfo](),
 	}
