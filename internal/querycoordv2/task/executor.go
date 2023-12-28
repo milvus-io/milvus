@@ -182,6 +182,12 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 		return err
 	}
 	segment := resp.GetInfos()[0]
+	// get channel first, in case of target updated after segment info fetched
+	channel := ex.targetMgr.GetDmChannel(task.CollectionID(), segment.GetInsertChannel(), meta.NextTargetFirst)
+	if channel == nil {
+		return merr.WrapErrChannelNotAvailable(segment.GetInsertChannel())
+	}
+
 	indexes, err := ex.broker.GetIndexInfo(ctx, task.CollectionID(), segment.GetID())
 	if err != nil {
 		if !errors.Is(err, merr.ErrIndexNotFound) {
@@ -189,11 +195,6 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 			return err
 		}
 		indexes = nil
-	}
-
-	channel := ex.targetMgr.GetDmChannel(task.CollectionID(), segment.GetInsertChannel(), meta.NextTarget)
-	if channel == nil {
-		channel = ex.targetMgr.GetDmChannel(task.CollectionID(), segment.GetInsertChannel(), meta.CurrentTarget)
 	}
 
 	loadInfo := utils.PackSegmentLoadInfo(resp, channel.GetSeekPosition(), indexes)
