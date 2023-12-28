@@ -300,18 +300,15 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		}
 	}()
 
-	flushedSet := typeutil.NewSet(channel.GetFlushedSegmentIds()...)
-	infos := lo.Map(lo.Values(req.GetSegmentInfos()), func(info *datapb.SegmentInfo, _ int) *datapb.SegmentInfo {
-		if flushedSet.Contain(info.GetID()) {
-			// for flushed segments, exclude all insert data
-			info = typeutil.Clone(info)
-			info.DmlPosition = &msgpb.MsgPosition{
+	flushedSegments := lo.Map(channel.GetFlushedSegmentIds(), func(id int64, _ int) *datapb.SegmentInfo {
+		return &datapb.SegmentInfo{
+			ID: id,
+			DmlPosition: &msgpb.MsgPosition{
 				Timestamp: typeutil.MaxTimestamp,
-			}
+			},
 		}
-		return info
 	})
-	pipeline.ExcludedSegments(infos...)
+	pipeline.ExcludedSegments(flushedSegments...)
 	for _, channelInfo := range req.GetInfos() {
 		droppedInfos := lo.Map(channelInfo.GetDroppedSegmentIds(), func(id int64, _ int) *datapb.SegmentInfo {
 			return &datapb.SegmentInfo{
