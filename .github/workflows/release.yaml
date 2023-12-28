@@ -1,0 +1,23 @@
+
+name: release
+
+on:
+  workflow_dispatch:
+
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: bump builder version
+        uses: ./.github/actions/bump-builder-version@master
+        with:
+          tag: "hello-cpu-world"
+          type: cpu
+      - name: bump builder version
+        uses: ./.github/actions/bump-builder-version@master
+        with:
+          tag: "hello-gpu-world"
+          type: gpu
