@@ -56,7 +56,7 @@ const (
 	boundedTS = 2
 
 	// enableMultipleVectorFields indicates whether to enable multiple vector fields.
-	enableMultipleVectorFields = false
+	enableMultipleVectorFields = true
 
 	defaultMaxVarCharLength = 65535
 

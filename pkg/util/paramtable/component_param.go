@@ -952,6 +952,7 @@ type proxyConfig struct {
 	MinPasswordLength            ParamItem `refreshable:"true"`
 	MaxPasswordLength            ParamItem `refreshable:"true"`
 	MaxFieldNum                  ParamItem `refreshable:"true"`
+	MaxVectorFieldNum            ParamItem `refreshable:"true"`
 	MaxShardNum                  ParamItem `refreshable:"true"`
 	MaxDimension                 ParamItem `refreshable:"true"`
 	GinLogging                   ParamItem `refreshable:"false"`
@@ -1046,6 +1047,22 @@ So adjust at your risk!`,
 		Export: true,
 	}
 	p.MaxFieldNum.Init(base.mgr)
+
+	p.MaxVectorFieldNum = ParamItem{
+		Key:          "proxy.maxVectorFieldNum",
+		Version:      "2.4.0",
+		DefaultValue: "4",
+		Formatter: func(v string) string {
+			if getAsInt(v) > 10 {
+				return "10"
+			}
+			return v
+		},
+		PanicIfEmpty: true,
+		Doc:          "Maximum number of vector fields in a collection.",
+		Export:       true,
+	}
+	p.MaxVectorFieldNum.Init(base.mgr)
 
 	p.MaxShardNum = ParamItem{
 		Key:          "proxy.maxShardNum",
