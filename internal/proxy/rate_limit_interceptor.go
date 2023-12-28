@@ -36,12 +36,12 @@ import (
 // RateLimitInterceptor returns a new unary server interceptors that performs request rate limiting.
 func RateLimitInterceptor(limiter types.Limiter) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-		collectionID, rt, n, err := getRequestInfo(req)
+		collectionIDs, rt, n, err := getRequestInfo(req)
 		if err != nil {
 			return handler(ctx, req)
 		}
 
-		err = limiter.Check(collectionID, rt, n)
+		err = limiter.Check(collectionIDs, rt, n)
 		nodeID := strconv.FormatInt(paramtable.GetNodeID(), 10)
 		metrics.ProxyRateLimitReqCount.WithLabelValues(nodeID, rt.String(), metrics.TotalLabel).Inc()
 		if err != nil {
@@ -57,66 +57,71 @@ func RateLimitInterceptor(limiter types.Limiter) grpc.UnaryServerInterceptor {
 }
 
 // getRequestInfo returns collection name and rateType of request and return tokens needed.
-func getRequestInfo(req interface{}) (int64, internalpb.RateType, int, error) {
+func getRequestInfo(req interface{}) ([]int64, internalpb.RateType, int, error) {
 	switch r := req.(type) {
 	case *milvuspb.InsertRequest:
 		collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetDbName(), r.GetCollectionName())
-		return collectionID, internalpb.RateType_DMLInsert, proto.Size(r), nil
+		return []int64{collectionID}, internalpb.RateType_DMLInsert, proto.Size(r), nil
 	case *milvuspb.UpsertRequest:
 		collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetDbName(), r.GetCollectionName())
-		return collectionID, internalpb.RateType_DMLUpsert, proto.Size(r), nil
+		return []int64{collectionID}, internalpb.RateType_DMLUpsert, proto.Size(r), nil
 	case *milvuspb.DeleteRequest:
 		collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetDbName(), r.GetCollectionName())
-		return collectionID, internalpb.RateType_DMLDelete, proto.Size(r), nil
+		return []int64{collectionID}, internalpb.RateType_DMLDelete, proto.Size(r), nil
 	case *milvuspb.ImportRequest:
 		collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetDbName(), r.GetCollectionName())
-		return collectionID, internalpb.RateType_DMLBulkLoad, proto.Size(r), nil
+		return []int64{collectionID}, internalpb.RateType_DMLBulkLoad, proto.Size(r), nil
 	case *milvuspb.SearchRequest:
 		collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetDbName(), r.GetCollectionName())
-		return collectionID, internalpb.RateType_DQLSearch, int(r.GetNq()), nil
+		return []int64{collectionID}, internalpb.RateType_DQLSearch, int(r.GetNq()), nil
 	case *milvuspb.QueryRequest:
 		collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetDbName(), r.GetCollectionName())
-		return collectionID, internalpb.RateType_DQLQuery, 1, nil // think of the query request's nq as 1
+		return []int64{collectionID}, internalpb.RateType_DQLQuery, 1, nil // think of the query request's nq as 1
 	case *milvuspb.CreateCollectionRequest:
 		collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetDbName(), r.GetCollectionName())
-		return collectionID, internalpb.RateType_DDLCollection, 1, nil
+		return []int64{collectionID}, internalpb.RateType_DDLCollection, 1, nil
 	case *milvuspb.DropCollectionRequest:
 		collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetDbName(), r.GetCollectionName())
-		return collectionID, internalpb.RateType_DDLCollection, 1, nil
+		return []int64{collectionID}, internalpb.RateType_DDLCollection, 1, nil
 	case *milvuspb.LoadCollectionRequest:
 		collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetDbName(), r.GetCollectionName())
-		return collectionID, internalpb.RateType_DDLCollection, 1, nil
+		return []int64{collectionID}, internalpb.RateType_DDLCollection, 1, nil
 	case *milvuspb.ReleaseCollectionRequest:
 		collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetDbName(), r.GetCollectionName())
-		return collectionID, internalpb.RateType_DDLCollection, 1, nil
+		return []int64{collectionID}, internalpb.RateType_DDLCollection, 1, nil
 	case *milvuspb.CreatePartitionRequest:
 		collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetDbName(), r.GetCollectionName())
-		return collectionID, internalpb.RateType_DDLPartition, 1, nil
+		return []int64{collectionID}, internalpb.RateType_DDLPartition, 1, nil
 	case *milvuspb.DropPartitionRequest:
 		collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetDbName(), r.GetCollectionName())
-		return collectionID, internalpb.RateType_DDLPartition, 1, nil
+		return []int64{collectionID}, internalpb.RateType_DDLPartition, 1, nil
 	case *milvuspb.LoadPartitionsRequest:
 		collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetDbName(), r.GetCollectionName())
-		return collectionID, internalpb.RateType_DDLPartition, 1, nil
+		return []int64{collectionID}, internalpb.RateType_DDLPartition, 1, nil
 	case *milvuspb.ReleasePartitionsRequest:
 		collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetDbName(), r.GetCollectionName())
-		return collectionID, internalpb.RateType_DDLPartition, 1, nil
+		return []int64{collectionID}, internalpb.RateType_DDLPartition, 1, nil
 	case *milvuspb.CreateIndexRequest:
 		collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetDbName(), r.GetCollectionName())
-		return collectionID, internalpb.RateType_DDLIndex, 1, nil
+		return []int64{collectionID}, internalpb.RateType_DDLIndex, 1, nil
 	case *milvuspb.DropIndexRequest:
 		collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetDbName(), r.GetCollectionName())
-		return collectionID, internalpb.RateType_DDLIndex, 1, nil
+		return []int64{collectionID}, internalpb.RateType_DDLIndex, 1, nil
 	case *milvuspb.FlushRequest:
-		return 0, internalpb.RateType_DDLFlush, 1, nil
+		collectionIDs := make([]int64, 0, len(r.GetCollectionNames()))
+		for _, collectionName := range r.GetCollectionNames() {
+			collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetDbName(), collectionName)
+			collectionIDs = append(collectionIDs, collectionID)
+		}
+		return collectionIDs, internalpb.RateType_DDLFlush, 1, nil
 	case *milvuspb.ManualCompactionRequest:
-		return 0, internalpb.RateType_DDLCompaction, 1, nil
+		return nil, internalpb.RateType_DDLCompaction, 1, nil
 		// TODO: support more request
 	default:
 		if req == nil {
-			return 0, 0, 0, fmt.Errorf("null request")
+			return nil, 0, 0, fmt.Errorf("null request")
 		}
-		return 0, 0, 0, fmt.Errorf("unsupported request type %s", reflect.TypeOf(req).Name())
+		return nil, 0, 0, fmt.Errorf("unsupported request type %s", reflect.TypeOf(req).Name())
 	}
 }
 
