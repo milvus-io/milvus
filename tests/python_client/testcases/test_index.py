@@ -244,8 +244,8 @@ class TestIndexOperation(TestcaseBase):
         collection_w.create_index(ct.default_int64_field_name, {})
         collection_w.load(check_task=CheckTasks.err_res,
                           check_items={ct.err_code: 65535,
-                                       ct.err_msg: f"there is no vector index on collection: {collection_w.name}, "
-                                                   f"please create index firstly"})
+                                       ct.err_msg: f"there is no vector index on field: [float_vector], "
+                                                   f"please create index firstly: collection={collection_w.name}: index not found"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_index_create_on_array_field(self):

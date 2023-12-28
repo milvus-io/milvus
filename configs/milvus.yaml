@@ -193,6 +193,7 @@ proxy:
   # As of today (2.2.0 and after) it is strongly DISCOURAGED to set maxFieldNum >= 64.
   # So adjust at your risk!
   maxFieldNum: 64
+  maxVectorFieldNum: 4 # Maximum number of vector fields in a collection, (0, 10].
   maxShardNum: 16 # Maximum number of shards in a collection
   maxDimension: 32768 # Maximum dimension of a vector
   # Whether to produce gin logs.\n

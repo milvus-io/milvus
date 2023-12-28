@@ -139,6 +139,8 @@ func TestComponentParam(t *testing.T) {
 
 		t.Logf("MaxFieldNum: %d", Params.MaxFieldNum.GetAsInt64())
 
+		t.Logf("MaxVectorFieldNum: %d", Params.MaxVectorFieldNum.GetAsInt64())
+
 		t.Logf("MaxShardNum: %d", Params.MaxShardNum.GetAsInt64())
 
 		t.Logf("MaxDimension: %d", Params.MaxDimension.GetAsInt64())

@@ -294,14 +294,16 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	if t.request.GetDslType() == commonpb.DslType_BoolExprV1 {
 		annsField, err := funcutil.GetAttrByKeyFromRepeatedKV(AnnsFieldKey, t.request.GetSearchParams())
 		if err != nil || len(annsField) == 0 {
-			if enableMultipleVectorFields {
-				return errors.New(AnnsFieldKey + " not found in search_params")
-			}
-			vecFieldSchema, err2 := typeutil.GetVectorFieldSchema(t.schema)
-			if err2 != nil {
+			vecFields := typeutil.GetVectorFieldSchemas(t.schema)
+			if len(vecFields) == 0 {
 				return errors.New(AnnsFieldKey + " not found in schema")
 			}
-			annsField = vecFieldSchema.Name
+
+			if enableMultipleVectorFields && len(vecFields) > 1 {
+				return errors.New("multiple anns_fields exist, please specify a anns_field in search_params")
+			}
+
+			annsField = vecFields[0].Name
 		}
 		queryInfo, offset, err := parseSearchInfo(t.request.GetSearchParams())
 		if err != nil {
