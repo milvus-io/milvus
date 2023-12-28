@@ -335,7 +335,7 @@ func (wb *writeBufferBase) bufferInsert(insertMsgs []*msgstream.InsertMsg, start
 
 		segBuf := wb.getOrCreateBuffer(segmentID)
 
-		pkData, err := segBuf.insertBuffer.Buffer(msgs, startPos, endPos)
+		pkData, totalMemSize, err := segBuf.insertBuffer.Buffer(msgs, startPos, endPos)
 		if err != nil {
 			log.Warn("failed to buffer insert data", zap.Int64("segmentID", segmentID), zap.Error(err))
 			return nil, err
@@ -344,10 +344,7 @@ func (wb *writeBufferBase) bufferInsert(insertMsgs []*msgstream.InsertMsg, start
 		wb.metaCache.UpdateSegments(metacache.UpdateBufferedRows(segBuf.insertBuffer.rows),
 			metacache.WithSegmentIDs(segmentID))
 
-		totalSize := lo.SumBy(pkData, func(iData storage.FieldData) float64 {
-			return float64(iData.GetMemorySize())
-		})
-		metrics.DataNodeFlowGraphBufferDataSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), fmt.Sprint(wb.collectionID)).Add(totalSize)
+		metrics.DataNodeFlowGraphBufferDataSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), fmt.Sprint(wb.collectionID)).Add(float64(totalMemSize))
 	}
 
 	return segmentPKData, nil
@@ -371,7 +368,7 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (sy
 		return nil, merr.WrapErrSegmentNotFound(segmentID)
 	}
 	var batchSize int64
-	var totalMemSize float64
+	var totalMemSize float64 = 0
 	var tsFrom, tsTo uint64
 
 	insert, delta, timeRange, startPos := wb.yieldBuffer(segmentID)
@@ -387,6 +384,7 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (sy
 	if delta != nil {
 		totalMemSize += float64(delta.Size())
 	}
+
 	actions = append(actions, metacache.StartSyncing(batchSize))
 	wb.metaCache.UpdateSegments(metacache.MergeSegmentAction(actions...), metacache.WithSegmentIDs(segmentID))
 
