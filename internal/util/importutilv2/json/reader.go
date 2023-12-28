@@ -19,11 +19,10 @@ package json
 import (
 	"encoding/json"
 	"fmt"
-	"io"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"io"
 )
 
 type Row = map[storage.FieldID]any
@@ -110,4 +109,8 @@ func (j *reader) Next(count int64) (*storage.InsertData, error) {
 	}
 
 	return insertData, nil
+}
+
+func (j *reader) Close() {
+
 }

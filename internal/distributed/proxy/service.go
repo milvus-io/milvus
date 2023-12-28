@@ -1172,7 +1172,7 @@ func (s *Server) ReplicateMessage(ctx context.Context, req *milvuspb.ReplicateMe
 	return s.proxy.ReplicateMessage(ctx, req)
 }
 
-func (s *Server) ImportV2(ctx context.Context, req *milvuspb.ImportRequestV2) (*commonpb.Status, error) {
+func (s *Server) ImportV2(ctx context.Context, req *milvuspb.ImportRequestV2) (*milvuspb.ImportResponseV2, error) {
 	return s.proxy.ImportV2(ctx, req)
 }
 

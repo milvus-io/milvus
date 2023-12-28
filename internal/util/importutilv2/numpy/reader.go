@@ -62,3 +62,7 @@ func (r *Reader) Next(count int64) (*storage.InsertData, error) {
 	}
 	return insertData, nil
 }
+
+func (r *Reader) Close() {
+
+}

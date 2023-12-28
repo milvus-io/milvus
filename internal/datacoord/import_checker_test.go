@@ -106,7 +106,7 @@ func TestImportChecker(t *testing.T) {
 
 	meta, err := newMeta(context.TODO(), catalog, nil)
 	assert.Nil(t, err)
-	checker := NewImportChecker(meta, cluster, alloc, imeta)
+	checker := NewImportChecker(meta, cluster, alloc, nil, imeta).(*importChecker) // TODO: dyh, fix sm
 
 	// preimport tasks are not fully completed
 	checker.checkPreImportState(0)
@@ -146,8 +146,6 @@ func TestImportChecker(t *testing.T) {
 				IsImporting: true,
 			},
 		})
-		assert.NoError(t, err)
-		err = imeta.Update(task.GetTaskID(), UpdateSegmentIDs([]int64{segmentID}))
 		assert.NoError(t, err)
 	}
 	checker.checkImportState(0)

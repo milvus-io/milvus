@@ -41,6 +41,8 @@ type ColumnReader struct {
 
 	dim   int64
 	field *schemapb.FieldSchema
+
+	readPosition int
 }
 
 func NewColumnReader(reader io.Reader, field *schemapb.FieldSchema) (*ColumnReader, error) {
@@ -81,8 +83,26 @@ func ReadN[T any](reader io.Reader, order binary.ByteOrder, n int64) ([]T, error
 	return data, nil
 }
 
-func (c *ColumnReader) Next(count int64) (storage.FieldData, error) {
-	// TODO: validate shape with count
+func (c *ColumnReader) getCount(count int64) int64 {
+	shape := c.npyReader.Header.Descr.Shape
+	if len(shape) == 0 {
+		return 0
+	}
+	total := 1
+	for i := 0; i < len(shape); i++ {
+		total *= shape[i]
+	}
+	if total == 0 {
+		return 0
+	}
+	if int(count) > (total - c.readPosition) {
+		return int64(total - c.readPosition)
+	}
+	return count
+}
+
+func (c *ColumnReader) Next(count int64) (res storage.FieldData, resErr error) {
+	count = c.getCount(count)
 	dt := c.field.GetDataType()
 	switch dt {
 	case schemapb.DataType_Bool:
@@ -90,45 +110,53 @@ func (c *ColumnReader) Next(count int64) (storage.FieldData, error) {
 		if err != nil {
 			return nil, err
 		}
+		c.readPosition += int(count)
 		return &storage.BoolFieldData{Data: data}, nil
 	case schemapb.DataType_Int8:
 		data, err := ReadN[int8](c.reader, c.order, count)
 		if err != nil {
 			return nil, err
 		}
+		c.readPosition += int(count)
 		return &storage.Int8FieldData{Data: data}, nil
 	case schemapb.DataType_Int16:
 		data, err := ReadN[int16](c.reader, c.order, count)
 		if err != nil {
 			return nil, err
 		}
+		c.readPosition += int(count)
 		return &storage.Int16FieldData{Data: data}, nil
 	case schemapb.DataType_Int32:
 		data, err := ReadN[int32](c.reader, c.order, count)
 		if err != nil {
 			return nil, err
 		}
+		c.readPosition += int(count)
 		return &storage.Int32FieldData{Data: data}, nil
 	case schemapb.DataType_Int64:
 		data, err := ReadN[int64](c.reader, c.order, count)
 		if err != nil {
 			return nil, err
 		}
+		c.readPosition += int(count)
 		return &storage.Int64FieldData{Data: data}, nil
 	case schemapb.DataType_Float:
 		data, err := ReadN[float32](c.reader, c.order, count)
 		if err != nil {
 			return nil, err
 		}
+		c.readPosition += int(count)
 		return &storage.FloatFieldData{Data: data}, nil
 	case schemapb.DataType_Double:
 		data, err := ReadN[float64](c.reader, c.order, count)
 		if err != nil {
 			return nil, err
 		}
+		c.readPosition += int(count)
 		return &storage.DoubleFieldData{Data: data}, nil
 	case schemapb.DataType_VarChar:
 		data, err := c.ReadString(count)
+		c.readPosition += int(count)
 		if err != nil {
 			return nil, err
 		}
@@ -148,12 +176,14 @@ func (c *ColumnReader) Next(count int64) (storage.FieldData, error) {
 			}
 			byteArr = append(byteArr, []byte(str))
 		}
+		c.readPosition += int(count)
 		return &storage.JSONFieldData{Data: byteArr}, nil
 	case schemapb.DataType_BinaryVector:
-		data, err := ReadN[uint8](c.reader, c.order, count*(c.dim/8))
+		data, err := ReadN[uint8](c.reader, c.order, count)
 		if err != nil {
 			return nil, err
 		}
+		c.readPosition += int(count)
 		return &storage.BinaryVectorFieldData{
 			Data: data,
 			Dim:  int(c.dim),
@@ -166,7 +196,7 @@ func (c *ColumnReader) Next(count int64) (storage.FieldData, error) {
 		var data []float32
 		switch elementType {
 		case schemapb.DataType_Float:
-			data, err = ReadN[float32](c.reader, c.order, count*c.dim)
+			data, err = ReadN[float32](c.reader, c.order, count)
 			if err != nil {
 				return nil, err
 			}
@@ -175,7 +205,7 @@ func (c *ColumnReader) Next(count int64) (storage.FieldData, error) {
 				return nil, nil
 			}
 		case schemapb.DataType_Double:
-			data64, err := ReadN[float64](c.reader, c.order, count*c.dim)
+			data64, err := ReadN[float64](c.reader, c.order, count)
 			if err != nil {
 				return nil, err
 			}
@@ -187,6 +217,7 @@ func (c *ColumnReader) Next(count int64) (storage.FieldData, error) {
 				return float32(f)
 			})
 		}
+		c.readPosition += int(count)
 		return &storage.FloatVectorFieldData{
 			Data: data,
 			Dim:  int(c.dim),

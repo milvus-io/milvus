@@ -483,7 +483,7 @@ func (s *Server) GcControl(ctx context.Context, req *datapb.GcControlRequest) (*
 	return s.dataCoord.GcControl(ctx, req)
 }
 
-func (s *Server) ImportV2(ctx context.Context, in *datapb.ImportRequestInternal) (*commonpb.Status, error) {
+func (s *Server) ImportV2(ctx context.Context, in *datapb.ImportRequestInternal) (*milvuspb.ImportResponseV2, error) {
 	return s.dataCoord.ImportV2(ctx, in)
 }
 

@@ -17,12 +17,14 @@
 package importv2
 
 import (
+	"context"
 	"fmt"
+	"github.com/milvus-io/milvus/internal/querycoordv2/params"
+	"github.com/milvus-io/milvus/pkg/common"
 
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -35,34 +37,41 @@ func WrapNoTaskError(taskID int64, taskType TaskType) error {
 	return merr.WrapErrImportFailed(fmt.Sprintf("cannot find %s with id %d", taskType.String(), taskID))
 }
 
-func NewSyncTask(task *ImportTask, segmentID, partitionID int64, vchannel string, insertData *storage.InsertData) *syncmgr.SyncTask {
+func NewSyncTask(task *ImportTask, segmentID, partitionID int64, vchannel string, insertData *storage.InsertData) (syncmgr.Task, error) {
 	metaCache := task.metaCaches[vchannel]
 	AddSegment(metaCache, vchannel, segmentID, partitionID, task.GetCollectionID())
 
-	synTask := syncmgr.NewSyncTask().
-		WithInsertData(insertData).
+	var serializer syncmgr.Serializer
+	var err error
+	if params.Params.CommonCfg.EnableStorageV2.GetAsBool() {
+		serializer, err = syncmgr.NewStorageV2Serializer(
+			nil, // TODO: dyh, resolve storage v2
+			metaCache,
+			nil,
+		)
+	} else {
+		serializer, err = syncmgr.NewStorageSerializer(
+			metaCache,
+			nil,
+		)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	syncPack := &syncmgr.SyncPack{}
+	syncPack.WithInsertData(insertData).
 		WithCollectionID(task.GetCollectionID()).
 		WithPartitionID(partitionID).
 		WithChannelName(vchannel).
-		WithSegmentID(segmentID).
-		WithMetaCache(metaCache)
+		WithSegmentID(segmentID)
 
-	// TODO: dyh, fix these
-	// WithStartPosition(startPos).
-	// WithTimeRange(tsFrom, tsTo).
-	// WithLevel(segmentInfo.Level()).
-	// WithCheckpoint(wb.checkpoint).
-	// WithSchema(task.GetSchema()).
-	// WithBatchSize(batchSize).
-	// WithMetaWriter(wb.metaWriter).
-	// WithFailureCallback()
-
-	return synTask
+	return serializer.EncodeBuffer(context.Background(), syncPack) // TODO: dyh, resolve context
 }
 
-func NewImportSegmentInfo(syncTask *syncmgr.SyncTask, task *ImportTask) (*datapb.ImportSegmentInfo, error) {
+func NewImportSegmentInfo(syncTask syncmgr.Task, task *ImportTask) (*datapb.ImportSegmentInfo, error) {
 	segmentID := syncTask.SegmentID()
-	insertBinlogs, statsBinlog, _ := syncTask.Binlogs()
+	insertBinlogs, statsBinlog, _ := syncTask.(*syncmgr.SyncTask).Binlogs()
 	metaCache := task.metaCaches[syncTask.ChannelName()]
 	segment, ok := metaCache.GetSegmentByID(segmentID)
 	if !ok {
@@ -76,33 +85,20 @@ func NewImportSegmentInfo(syncTask *syncmgr.SyncTask, task *ImportTask) (*datapb
 	}, nil
 }
 
-func InitHashedData(channels []string, partitions []int64, schema *schemapb.CollectionSchema) (HashedData, error) {
-	var err error
-	res := make(HashedData, len(channels))
-	for i := range channels {
-		res[i] = make([]*storage.InsertData, len(partitions))
-		for j := range partitions {
-			res[i][j], err = storage.NewInsertData(schema)
-			if err != nil {
-				return nil, err
-			}
-		}
-	}
-	return res, nil
-}
+func PickSegment(task *ImportTask, vchannel string, partitionID int64) int64 {
+	requestSegments := task.req.GetRequestSegments()
+	targets := lo.Filter(lo.Values(requestSegments), func(info *datapb.ImportRequestSegment, _ int) bool {
+		return info.GetVchannel() == vchannel && info.GetPartitionID() == partitionID
+	})
 
-func PickSegment(task Task, segments []*datapb.ImportSegmentRequestInfo, vchannel string, partitionID int64) int64 {
-	infos := task.(*ImportTask).GetSegmentsInfo()
-	targets := lo.FilterMap(segments, func(info *datapb.ImportSegmentRequestInfo, _ int) (int64, bool) {
-		return info.GetSegmentID(), info.GetVchannel() == vchannel && info.GetPartitionID() == partitionID
+	importedSegments := lo.KeyBy(task.GetSegmentsInfo(), func(segment *datapb.ImportSegmentInfo) int64 {
+		return segment.GetSegmentID()
 	})
-	infos = lo.Filter(infos, func(info *datapb.ImportSegmentInfo, _ int) bool {
-		return lo.Contains(targets, info.GetSegmentID())
+
+	minSegment := lo.MinBy(targets, func(seg1 *datapb.ImportRequestSegment, seg2 *datapb.ImportRequestSegment) bool {
+		return importedSegments[seg1.GetSegmentID()].GetImportedRows() < importedSegments[seg2.GetSegmentID()].GetImportedRows()
 	})
-	segment := lo.MinBy(infos, func(seg1 *datapb.ImportSegmentInfo, seg2 *datapb.ImportSegmentInfo) bool {
-		return seg1.GetImportedRows() < seg2.GetImportedRows()
-	})
-	return segment.GetSegmentID()
+	return minSegment.GetSegmentID()
 }
 
 func AddSegment(metaCache metacache.MetaCache, vchannel string, segID, partID, collID int64) {
@@ -120,23 +116,6 @@ func AddSegment(metaCache metacache.MetaCache, vchannel string, segID, partID, c
 	}
 }
 
-func HashFunc(pkDataType schemapb.DataType) (func(pk interface{}, shardNum int64) int64, error) {
-	switch pkDataType {
-	case schemapb.DataType_Int64:
-		return func(pk interface{}, shardNum int64) int64 {
-			hash, _ := typeutil.Hash32Int64(pk.(int64))
-			return int64(hash) % shardNum
-		}, nil
-	case schemapb.DataType_VarChar:
-		return func(pk interface{}, shardNum int64) int64 {
-			hash := typeutil.HashString2Uint32(pk.(string)) // TODO: dyh, use HashString?
-			return int64(hash) % shardNum
-		}, nil
-	default:
-		return nil, merr.WrapErrImportFailed(fmt.Sprintf("unexpected pk type %s", pkDataType.String()))
-	}
-}
-
 func CheckRowsEqual(data *storage.InsertData) error {
 	if len(data.Data) == 0 {
 		return nil
@@ -149,4 +128,38 @@ func CheckRowsEqual(data *storage.InsertData) error {
 		}
 	}
 	return nil
+}
+
+func AppendSystemFieldsData(task *ImportTask, data *storage.InsertData) error {
+	idRange := task.req.GetAutoIDRange()
+	pkField, err := typeutil.GetPrimaryFieldSchema(task.GetSchema())
+	if err != nil {
+		return err
+	}
+	rowNum := GetInsertDataRowNum(data)
+	ids := make([]int64, rowNum)
+	for i := 0; i < rowNum; i++ {
+		ids[i] = idRange.GetBegin() + int64(i)
+	}
+	idRange.Begin += int64(rowNum)
+	if pkField.GetAutoID() {
+		data.Data[pkField.GetFieldID()] = &storage.Int64FieldData{Data: ids}
+	}
+	data.Data[common.RowIDField] = &storage.Int64FieldData{Data: ids}
+	tss := make([]int64, rowNum)
+	ts := int64(task.req.GetTs())
+	for i := 0; i < rowNum; i++ {
+		tss[i] = ts
+	}
+	data.Data[common.TimeStampField] = &storage.Int64FieldData{Data: tss}
+	return nil
+}
+
+func GetInsertDataRowNum(data *storage.InsertData) int {
+	for _, fd := range data.Data {
+		if fd.RowNum() != 0 {
+			return fd.RowNum()
+		}
+	}
+	return 0
 }

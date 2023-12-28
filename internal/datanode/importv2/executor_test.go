@@ -20,6 +20,7 @@ import (
 	"context"
 	rand2 "crypto/rand"
 	"fmt"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"math/rand"
 	"strconv"
 	"sync"
@@ -46,7 +47,7 @@ type ExecutorSuite struct {
 	numRows int
 	schema  *schemapb.CollectionSchema
 
-	reader   *MockReader
+	reader   *importutilv2.MockReader
 	syncMgr  *syncmgr.MockSyncManager
 	manager  TaskManager
 	executor *executor
@@ -83,7 +84,7 @@ func (s *ExecutorSuite) SetupTest() {
 
 	s.manager = NewTaskManager()
 	s.syncMgr = syncmgr.NewMockSyncManager(s.T())
-	s.reader = NewMockReader(s.T())
+	s.reader = importutilv2.NewMockReader(s.T())
 	s.executor = NewExecutor(s.manager, s.syncMgr, nil).(*executor)
 }
 
@@ -191,25 +192,21 @@ func createInsertData(t *testing.T, schema *schemapb.CollectionSchema, rowCount 
 	return insertData
 }
 
-func (s *ExecutorSuite) TestExecutor_ReadFileStats() {
+func (s *ExecutorSuite) TestExecutor_ReadFileStat() {
 	importFile := &milvuspb.ImportFile{
 		File: &milvuspb.ImportFile_RowBasedFile{
 			RowBasedFile: "dummy.json",
 		},
 	}
-	s.reader.EXPECT().ReadStats().Return(&datapb.ImportFileStats{
-		ImportFile: importFile,
-		FileSize:   1024,
-		TotalRows:  int64(s.numRows),
-		HashedRows: map[string]*datapb.PartitionRows{
-			"v0": {
-				PartitionRows: map[int64]int64{0: int64(s.numRows / 2)},
-			},
-			"v1": {
-				PartitionRows: map[int64]int64{0: int64(s.numRows / 2)},
-			},
-		},
-	}, nil)
+	var once sync.Once
+	data := createInsertData(s.T(), s.schema, s.numRows)
+	s.reader.EXPECT().Next(mock.Anything).RunAndReturn(func(i int64) (*storage.InsertData, error) {
+		var res *storage.InsertData
+		once.Do(func() {
+			res = data
+		})
+		return res, nil
+	})
 	preimportReq := &datapb.PreImportRequest{
 		RequestID:    1,
 		TaskID:       2,
@@ -252,13 +249,13 @@ func (s *ExecutorSuite) TestImportFile() {
 				},
 			},
 		},
-		SegmentsInfo: []*datapb.ImportSegmentRequestInfo{
-			{
+		RequestSegments: map[int64]*datapb.ImportRequestSegment{
+			13: {
 				SegmentID:   13,
 				PartitionID: 14,
 				Vchannel:    "v0",
 			},
-			{
+			15: {
 				SegmentID:   15,
 				PartitionID: 16,
 				Vchannel:    "v1",
@@ -267,7 +264,7 @@ func (s *ExecutorSuite) TestImportFile() {
 	}
 	importTask := NewImportTask(importReq)
 	s.manager.Add(importTask)
-	err := s.executor.importFile(s.reader, int64(s.numRows), importTask, importTask.(*ImportTask).req.GetSegmentsInfo())
+	err := s.executor.importFile(s.reader, int64(s.numRows), importTask)
 	s.NoError(err)
 }
 

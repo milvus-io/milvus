@@ -33,7 +33,12 @@ const (
 	NullNodeID = -1
 )
 
-type ImportScheduler struct {
+type ImportScheduler interface {
+	Start()
+	Close()
+}
+
+type importScheduler struct {
 	meta    *meta
 	cluster Cluster
 	alloc   allocator
@@ -47,8 +52,8 @@ func NewImportScheduler(meta *meta,
 	cluster Cluster,
 	alloc allocator,
 	imeta ImportMeta,
-) *ImportScheduler {
-	return &ImportScheduler{
+) ImportScheduler {
+	return &importScheduler{
 		meta:      meta,
 		cluster:   cluster,
 		alloc:     alloc,
@@ -57,7 +62,7 @@ func NewImportScheduler(meta *meta,
 	}
 }
 
-func (s *ImportScheduler) Start() {
+func (s *importScheduler) Start() {
 	log.Info("start import scheduler")
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
@@ -72,13 +77,13 @@ func (s *ImportScheduler) Start() {
 	}
 }
 
-func (s *ImportScheduler) Close() {
+func (s *importScheduler) Close() {
 	s.closeOnce.Do(func() {
 		close(s.closeChan)
 	})
 }
 
-func (s *ImportScheduler) process() {
+func (s *importScheduler) process() {
 	tasks := s.imeta.GetBy()
 	for _, task := range tasks {
 		switch task.GetState() {
@@ -102,9 +107,9 @@ func (s *ImportScheduler) process() {
 	}
 }
 
-func (s *ImportScheduler) checkErr(task ImportTask, err error) {
+func (s *importScheduler) checkErr(task ImportTask, err error) {
 	if !merr.IsRetryableErr(err) {
-		err = s.imeta.Update(task.GetTaskID(), UpdateState(milvuspb.ImportState_Failed))
+		err = s.imeta.Update(task.GetTaskID(), UpdateState(milvuspb.ImportState_Failed), UpdateReason(err.Error()))
 		if err != nil {
 			log.Warn("failed to update import task state to failed", WrapLogFields(task, err)...)
 		}
@@ -116,7 +121,7 @@ func (s *ImportScheduler) checkErr(task ImportTask, err error) {
 	}
 }
 
-func (s *ImportScheduler) getIdleNode() int64 {
+func (s *importScheduler) getIdleNode() int64 {
 	nodeIDs := lo.Map(s.cluster.GetSessions(), func(s *Session, _ int) int64 {
 		return s.info.NodeID
 	})
@@ -133,12 +138,13 @@ func (s *ImportScheduler) getIdleNode() int64 {
 	return NullNodeID
 }
 
-func (s *ImportScheduler) processPendingPreImport(task ImportTask) {
+func (s *importScheduler) processPendingPreImport(task ImportTask) {
 	nodeID := s.getIdleNode()
 	if nodeID == NullNodeID {
 		log.Warn("no datanode can be scheduled", WrapLogFields(task, nil)...)
 		return
 	}
+	log.Info("processing pending preimport task...", WrapLogFields(task, nil)...)
 	req := AssemblePreImportRequest(task)
 	err := s.cluster.PreImport(nodeID, req)
 	if err != nil {
@@ -151,14 +157,16 @@ func (s *ImportScheduler) processPendingPreImport(task ImportTask) {
 	if err != nil {
 		log.Warn("update import task failed", WrapLogFields(task, err)...)
 	}
+	log.Info("process pending preimport task done", WrapLogFields(task, nil)...)
 }
 
-func (s *ImportScheduler) processPendingImport(task ImportTask) {
+func (s *importScheduler) processPendingImport(task ImportTask) {
 	nodeID := s.getIdleNode()
 	if nodeID == NullNodeID {
 		log.Warn("no datanode can be scheduled", WrapLogFields(task, nil)...)
 		return
 	}
+	log.Info("processing pending import task...", WrapLogFields(task, nil)...)
 	req, err := AssembleImportRequest(task, s.meta, s.alloc)
 	if err != nil {
 		log.Warn("assemble import request failed", WrapLogFields(task, err)...)
@@ -175,9 +183,10 @@ func (s *ImportScheduler) processPendingImport(task ImportTask) {
 	if err != nil {
 		log.Warn("update import task failed", WrapLogFields(task, err)...)
 	}
+	log.Info("processing pending import task done", WrapLogFields(task, nil)...)
 }
 
-func (s *ImportScheduler) processInProgressPreImport(task ImportTask) {
+func (s *importScheduler) processInProgressPreImport(task ImportTask) {
 	req := &datapb.QueryPreImportRequest{
 		RequestID: task.GetRequestID(),
 		TaskID:    task.GetTaskID(),
@@ -191,6 +200,8 @@ func (s *ImportScheduler) processInProgressPreImport(task ImportTask) {
 	actions := []UpdateAction{UpdateFileStats(resp.GetFileStats())}
 	if resp.GetState() == milvuspb.ImportState_Completed {
 		actions = append(actions, UpdateState(milvuspb.ImportState_Completed))
+	} else if resp.GetState() == milvuspb.ImportState_Failed {
+		actions = append(actions, UpdateState(milvuspb.ImportState_Failed), UpdateReason(resp.GetReason()))
 	}
 	// TODO: check if rows changed to save meta op
 	err = s.imeta.Update(task.GetTaskID(), actions...)
@@ -198,9 +209,13 @@ func (s *ImportScheduler) processInProgressPreImport(task ImportTask) {
 		log.Warn("update import task failed", WrapLogFields(task, err)...)
 		return
 	}
+	log.Info("query preimport done",
+		zap.Int64("request", task.GetRequestID()),
+		zap.Int64("taskID", task.GetTaskID()),
+		zap.String("state", resp.GetState().String()))
 }
 
-func (s *ImportScheduler) processInProgressImport(task ImportTask) {
+func (s *importScheduler) processInProgressImport(task ImportTask) {
 	req := &datapb.QueryImportRequest{
 		RequestID: task.GetRequestID(),
 		TaskID:    task.GetTaskID(),
@@ -226,9 +241,19 @@ func (s *ImportScheduler) processInProgressImport(task ImportTask) {
 			log.Warn("update import task failed", WrapLogFields(task, err)...)
 		}
 	}
+	if resp.GetState() == milvuspb.ImportState_Failed {
+		err = s.imeta.Update(task.GetTaskID(), UpdateState(milvuspb.ImportState_Failed), UpdateReason(resp.GetReason()))
+		if err != nil {
+			log.Warn("update import task failed", WrapLogFields(task, err)...)
+		}
+	}
+	log.Info("query import done",
+		zap.Int64("request", task.GetRequestID()),
+		zap.Int64("taskID", task.GetTaskID()),
+		zap.String("state", resp.GetState().String()))
 }
 
-func (s *ImportScheduler) processCompletedOrFailed(task ImportTask) {
+func (s *importScheduler) processCompletedOrFailed(task ImportTask) {
 	if task.GetNodeID() == NullNodeID {
 		return
 	}

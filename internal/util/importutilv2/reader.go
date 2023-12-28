@@ -17,11 +17,17 @@
 package importutilv2
 
 import (
+	"context"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/binlog"
+	"github.com/milvus-io/milvus/internal/util/importutilv2/json"
+	"github.com/milvus-io/milvus/internal/util/importutilv2/numpy"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
+//go:generate mockery --name=Reader --structname=MockReader --output=./  --filename=mock_reader.go --with-expecter --inpackage
 type Reader interface {
 	Next(count int64) (*storage.InsertData, error)
 	Close()
@@ -34,16 +40,41 @@ type ColumnReader interface {
 
 func NewReader(cm storage.ChunkManager,
 	schema *schemapb.CollectionSchema,
-	paths []string,
+	importFile *milvuspb.ImportFile,
 	options Options,
 ) (Reader, error) {
+	//schema, err := GetSchemaWithoutAutoID(schema)
+	//if err != nil {
+	//	return nil, err
+	//}
 	if IsBackup(options) {
 		tsStart, tsEnd, err := ParseTimeRange(options)
 		if err != nil {
 			return nil, err
 		}
+		paths := importFile.GetColumnBasedFile().GetFiles()
 		return binlog.NewReader(cm, schema, paths, tsStart, tsEnd)
 	}
 
-	return nil, nil
+	fileType, paths, err := GetFileTypeAndPaths(importFile)
+	if err != nil {
+		return nil, err
+	}
+	switch fileType {
+	case JSON:
+		reader, err := cm.Reader(context.Background(), paths[0])
+		if err != nil {
+			return nil, WrapReadFileError(paths[0], err)
+		}
+		return json.NewReader(reader, schema)
+	case Numpy:
+		readers, err := CreateReaders(paths, cm, schema)
+		if err != nil {
+			return nil, err
+		}
+		return numpy.NewReader(schema, readers)
+	case Parquet:
+		return nil, merr.ErrServiceUnimplemented
+	}
+	return nil, merr.WrapErrImportFailed("unexpected import file")
 }

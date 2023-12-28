@@ -2017,19 +2017,19 @@ func (_c *MockDataCoord_Import_Call) RunAndReturn(run func(context.Context, *dat
 }
 
 // ImportV2 provides a mock function with given fields: _a0, _a1
-func (_m *MockDataCoord) ImportV2(_a0 context.Context, _a1 *datapb.ImportRequestInternal) (*commonpb.Status, error) {
+func (_m *MockDataCoord) ImportV2(_a0 context.Context, _a1 *datapb.ImportRequestInternal) (*milvuspb.ImportResponseV2, error) {
 	ret := _m.Called(_a0, _a1)
 
-	var r0 *commonpb.Status
+	var r0 *milvuspb.ImportResponseV2
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *datapb.ImportRequestInternal) (*commonpb.Status, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.ImportRequestInternal) (*milvuspb.ImportResponseV2, error)); ok {
 		return rf(_a0, _a1)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *datapb.ImportRequestInternal) *commonpb.Status); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.ImportRequestInternal) *milvuspb.ImportResponseV2); ok {
 		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*commonpb.Status)
+			r0 = ret.Get(0).(*milvuspb.ImportResponseV2)
 		}
 	}
 
@@ -2061,12 +2061,12 @@ func (_c *MockDataCoord_ImportV2_Call) Run(run func(_a0 context.Context, _a1 *da
 	return _c
 }
 
-func (_c *MockDataCoord_ImportV2_Call) Return(_a0 *commonpb.Status, _a1 error) *MockDataCoord_ImportV2_Call {
+func (_c *MockDataCoord_ImportV2_Call) Return(_a0 *milvuspb.ImportResponseV2, _a1 error) *MockDataCoord_ImportV2_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockDataCoord_ImportV2_Call) RunAndReturn(run func(context.Context, *datapb.ImportRequestInternal) (*commonpb.Status, error)) *MockDataCoord_ImportV2_Call {
+func (_c *MockDataCoord_ImportV2_Call) RunAndReturn(run func(context.Context, *datapb.ImportRequestInternal) (*milvuspb.ImportResponseV2, error)) *MockDataCoord_ImportV2_Call {
 	_c.Call.Return(run)
 	return _c
 }

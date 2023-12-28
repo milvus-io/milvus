@@ -123,6 +123,8 @@ type Server struct {
 	gcOpt            GcOption
 	handler          Handler
 	importMeta       ImportMeta
+	importScheduler  ImportScheduler
+	importChecker    ImportChecker
 
 	compactionTrigger     trigger
 	compactionHandler     compactionPlanContext
@@ -378,6 +380,13 @@ func (s *Server) initDataCoord() error {
 
 	s.initGarbageCollection(storageCli)
 	s.initIndexBuilder(storageCli)
+
+	s.importMeta, err = NewImportMeta(s.meta.catalog)
+	if err != nil {
+		return err
+	}
+	s.importScheduler = NewImportScheduler(s.meta, s.cluster, s.allocator, s.importMeta)
+	s.importChecker = NewImportChecker(s.meta, s.cluster, s.allocator, s.segmentManager, s.importMeta)
 
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
 
@@ -658,6 +667,8 @@ func (s *Server) startServerLoop() {
 	s.startWatchService(s.serverLoopCtx)
 	s.startFlushLoop(s.serverLoopCtx)
 	s.startIndexService(s.serverLoopCtx)
+	go s.importScheduler.Start()
+	go s.importChecker.Start()
 	s.garbageCollector.start()
 }
 
@@ -1091,6 +1102,8 @@ func (s *Server) Stop() error {
 	s.cluster.Close()
 	s.garbageCollector.close()
 	s.stopServerLoop()
+	s.importScheduler.Close()
+	s.importChecker.Close()
 
 	if Params.DataCoordCfg.EnableCompaction.GetAsBool() {
 		s.stopCompactionTrigger()

@@ -5249,33 +5249,41 @@ func (node *Proxy) GetVersion(ctx context.Context, request *milvuspb.GetVersionR
 	}, nil
 }
 
-func (node *Proxy) ImportV2(ctx context.Context, req *milvuspb.ImportRequestV2) (*commonpb.Status, error) {
+func (node *Proxy) ImportV2(ctx context.Context, req *milvuspb.ImportRequestV2) (*milvuspb.ImportResponseV2, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
-		return merr.Status(err), nil
+		return &milvuspb.ImportResponseV2{Status: merr.Status(err)}, nil
+	}
+	resp := &milvuspb.ImportResponseV2{
+		Status: merr.Success(),
 	}
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
-		return merr.Status(err), nil
+		resp.Status = merr.Status(err)
+		return resp, nil
 	}
 	schema, err := globalMetaCache.GetCollectionSchema(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
-		return merr.Status(err), nil
+		resp.Status = merr.Status(err)
+		return resp, nil
 	}
 	channels, err := node.chMgr.getVChannels(collectionID)
 	if err != nil {
-		return merr.Status(err), nil
+		resp.Status = merr.Status(err)
+		return resp, nil
 	}
 
 	hasPartitionKey := typeutil.HasPartitionKey(schema)
 	if req.GetPartitionName() != "" && hasPartitionKey {
-		return merr.Status(merr.WrapErrImportFailed("specify partition name is not allowed in partitionKey mode")), nil
+		resp.Status = merr.Status(merr.WrapErrImportFailed("specify partition name is not allowed in partitionKey mode"))
+		return resp, nil
 	}
 
 	var partitionIDs []int64
 	if req.GetPartitionName() == "" && hasPartitionKey {
 		partitions, err := globalMetaCache.GetPartitions(ctx, req.GetDbName(), req.GetCollectionName())
 		if err != nil {
-			return merr.Status(err), nil
+			resp.Status = merr.Status(err)
+			return resp, nil
 		}
 		partitionIDs = lo.Values(partitions)
 	} else {
@@ -5285,7 +5293,8 @@ func (node *Proxy) ImportV2(ctx context.Context, req *milvuspb.ImportRequestV2) 
 		}
 		partitionID, err := globalMetaCache.GetPartitionID(ctx, req.GetDbName(), req.GetCollectionName(), partitionName)
 		if err != nil {
-			return merr.Status(err), nil
+			resp.Status = merr.Status(err)
+			return resp, nil
 		}
 		partitionIDs = []UniqueID{partitionID}
 	}

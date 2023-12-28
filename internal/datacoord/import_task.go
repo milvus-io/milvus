@@ -78,6 +78,17 @@ func UpdateState(state milvuspb.ImportState) UpdateAction {
 	}
 }
 
+func UpdateReason(reason string) UpdateAction {
+	return func(t ImportTask) {
+		switch t.GetType() {
+		case PreImportTaskType:
+			t.(*preImportTask).PreImportTask.Reason = reason
+		case ImportTaskType:
+			t.(*importTask).ImportTaskV2.Reason = reason
+		}
+	}
+}
+
 func UpdateNodeID(nodeID int64) UpdateAction {
 	return func(t ImportTask) {
 		switch t.GetType() {
@@ -93,14 +104,6 @@ func UpdateFileStats(fileStats []*datapb.ImportFileStats) UpdateAction {
 	return func(t ImportTask) {
 		if task, ok := t.(*preImportTask); ok {
 			task.PreImportTask.FileStats = fileStats
-		}
-	}
-}
-
-func UpdateSegmentIDs(segmentIDs []int64) UpdateAction {
-	return func(task ImportTask) {
-		if it, ok := task.(*importTask); ok {
-			it.ImportTaskV2.SegmentIDs = segmentIDs
 		}
 	}
 }
@@ -134,6 +137,7 @@ func (p *preImportTask) GetSchema() *schemapb.CollectionSchema {
 func (p *preImportTask) Clone() ImportTask {
 	return &preImportTask{
 		PreImportTask: proto.Clone(p.PreImportTask).(*datapb.PreImportTask),
+		schema:        p.schema,
 	}
 }
 
@@ -153,5 +157,6 @@ func (t *importTask) GetSchema() *schemapb.CollectionSchema {
 func (t *importTask) Clone() ImportTask {
 	return &importTask{
 		ImportTaskV2: proto.Clone(t.ImportTaskV2).(*datapb.ImportTaskV2),
+		schema:       t.schema,
 	}
 }

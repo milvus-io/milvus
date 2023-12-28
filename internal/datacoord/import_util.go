@@ -18,13 +18,13 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"time"
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -65,7 +65,7 @@ func AssemblePreImportRequest(task ImportTask) *datapb.PreImportRequest {
 	}
 }
 
-func AssignSegments(task ImportTask, manager *SegmentManager) ([]int64, error) {
+func AssignSegments(task ImportTask, manager Manager) ([]int64, error) {
 	// merge hashed rows
 	hashedRows := make(map[string]map[int64]int64) // vchannel->(partitionID->rows)
 	for _, file := range task.GetFileStats() {
@@ -79,13 +79,18 @@ func AssignSegments(task ImportTask, manager *SegmentManager) ([]int64, error) {
 		}
 	}
 
+	maxRowsPerSegment, err := calBySchemaPolicy(task.GetSchema())
+	if err != nil {
+		return nil, err
+	}
+
 	// alloc new segments
 	segments := make([]int64, 0)
 	for vchannel, partitionRows := range hashedRows {
 		for partitionID, rows := range partitionRows {
 			for rows > 0 {
-				segmentInfo, err := manager.openNewSegment(context.TODO(), task.GetCollectionID(), // TODO: dyh, fix context
-					partitionID, vchannel, commonpb.SegmentState_Importing, datapb.SegmentLevel_L1)
+				segmentInfo, err := manager.AddImportSegment(context.TODO(), task.GetCollectionID(), // TODO: dyh, fix context
+					partitionID, vchannel, maxRowsPerSegment)
 				if err != nil {
 					return nil, err
 				}
@@ -98,33 +103,48 @@ func AssignSegments(task ImportTask, manager *SegmentManager) ([]int64, error) {
 }
 
 func AssembleImportRequest(task ImportTask, meta *meta, alloc allocator) (*datapb.ImportRequest, error) {
-	segmentsInfo := make([]*datapb.ImportSegmentRequestInfo, 0)
+	requestSegments := make(map[int64]*datapb.ImportRequestSegment, 0)
 	for _, segmentID := range task.(*importTask).GetSegmentIDs() {
 		segment := meta.GetSegment(segmentID)
 		if segment == nil {
 			return nil, merr.WrapErrSegmentNotFound(segmentID, "assemble import request failed")
 		}
-		idBegin, idEnd, err := alloc.allocN(segment.GetMaxRowNum())
-		if err != nil {
-			return nil, err
+		//idBegin, idEnd, err := alloc.allocN(segment.GetMaxRowNum())
+		//if err != nil {
+		//	return nil, err
+		//}
+		//ts, err := alloc.allocTimestamp(context.Background()) // TODO: dyh, resolve context
+		requestSegments[segmentID] = &datapb.ImportRequestSegment{
+			SegmentID:   segment.GetID(),
+			PartitionID: segment.GetPartitionID(),
+			Vchannel:    segment.GetInsertChannel(),
+			//Ts:           ts,
+			//AutoIDRanges: &datapb.AutoIDRange{Begin: idBegin, End: idEnd},
 		}
-		segmentsInfo = append(segmentsInfo, &datapb.ImportSegmentRequestInfo{
-			SegmentID:    segment.GetID(),
-			PartitionID:  segment.GetPartitionID(),
-			Vchannel:     segment.GetInsertChannel(),
-			AutoIDRanges: &datapb.AutoIDRange{Begin: idBegin, End: idEnd},
-		})
+	}
+	ts, err := alloc.allocTimestamp(context.Background()) // TODO: dyh, resolve context
+	if err != nil {
+		return nil, err
+	}
+	totalRows := lo.SumBy(task.GetFileStats(), func(stat *datapb.ImportFileStats) int64 {
+		return stat.GetTotalRows()
+	})
+	idBegin, idEnd, err := alloc.allocN(totalRows)
+	if err != nil {
+		return nil, err
 	}
 	importFiles := lo.Map(task.GetFileStats(), func(fileStat *datapb.ImportFileStats, _ int) *milvuspb.ImportFile {
 		return fileStat.GetImportFile()
 	})
 	return &datapb.ImportRequest{
-		RequestID:    task.GetRequestID(),
-		TaskID:       task.GetTaskID(),
-		CollectionID: task.GetCollectionID(),
-		Schema:       task.GetSchema(),
-		Files:        importFiles,
-		SegmentsInfo: segmentsInfo,
+		RequestID:       task.GetRequestID(),
+		TaskID:          task.GetTaskID(),
+		CollectionID:    task.GetCollectionID(),
+		Schema:          task.GetSchema(),
+		Files:           importFiles,
+		Ts:              ts,
+		AutoIDRange:     &datapb.AutoIDRange{Begin: idBegin, End: idEnd},
+		RequestSegments: requestSegments,
 	}, nil
 }
 
@@ -171,7 +191,7 @@ func NewImportTasks(fileGroups [][]*datapb.ImportFileStats,
 	requestID int64,
 	collectionID int64,
 	schema *schemapb.CollectionSchema,
-	manager *SegmentManager,
+	manager Manager,
 	alloc allocator,
 ) ([]ImportTask, error) {
 	idBegin, _, err := alloc.allocN(int64(len(fileGroups)))
@@ -236,32 +256,41 @@ func AreAllTasksFinished(tasks []ImportTask, meta *meta) bool {
 	return true
 }
 
+var count = 10
+
 func GetImportProgress(requestID int64, imeta ImportMeta, meta *meta) (int64, milvuspb.ImportState, string) {
+	if count == 0 {
+		fmt.Println(count)
+	}
+	count--
 	tasks := imeta.GetBy(WithReq(requestID), WithType(PreImportTaskType))
 	var (
-		preparingProgress float32
-		preImportProgress float32
-		importProgress    float32
+		preparingProgress float32 = 100
+		preImportProgress float32 = 0
+		importProgress    float32 = 0
 	)
+	totalTaskNum := len(imeta.GetBy(WithReq(requestID)))
 	for _, task := range tasks {
 		switch task.GetState() {
 		case milvuspb.ImportState_Failed:
 			return 0, milvuspb.ImportState_Failed, task.GetReason()
-		case milvuspb.ImportState_InProgress:
-			preparingProgress += 100 / float32(len(tasks))
+		case milvuspb.ImportState_Pending:
+			preparingProgress -= 100 / float32(totalTaskNum)
 		case milvuspb.ImportState_Completed:
 			preImportProgress += 100 / float32(len(tasks))
 		}
 	}
 	tasks = imeta.GetBy(WithReq(requestID), WithType(ImportTaskType))
 	var (
-		unsetImportStateSegments int
-		totalSegments            int
+		unsetImportStateSegments int = 0
+		totalSegments            int = 0
 	)
 	for _, task := range tasks {
 		switch task.GetState() {
 		case milvuspb.ImportState_Failed:
 			return 0, milvuspb.ImportState_Failed, task.GetReason()
+		case milvuspb.ImportState_Pending:
+			preparingProgress -= 100 / float32(totalTaskNum)
 		case milvuspb.ImportState_InProgress:
 			preparingProgress += 100 / float32(len(tasks))
 			segmentIDs := task.(*importTask).GetSegmentIDs()
@@ -283,6 +312,17 @@ func GetImportProgress(requestID int64, imeta ImportMeta, meta *meta) (int64, mi
 			}
 			importProgress += (float32(importedRows) / float32(totalRows)) * 100 / float32(len(tasks))
 		case milvuspb.ImportState_Completed:
+			segmentIDs := task.(*importTask).GetSegmentIDs()
+			for _, segmentID := range segmentIDs {
+				segment := meta.GetSegment(segmentID)
+				if segment == nil {
+					return 0, milvuspb.ImportState_Failed, merr.WrapErrSegmentNotFound(segmentID).Error()
+				}
+				totalSegments++
+				if !segment.GetIsImporting() {
+					unsetImportStateSegments++
+				}
+			}
 			importProgress += 100 / float32(len(tasks))
 		}
 	}

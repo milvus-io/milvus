@@ -16,7 +16,21 @@
 
 package importv2
 
-type Manager interface {
+import (
+	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
+	"github.com/milvus-io/milvus/internal/storage"
+)
+
+type Manager struct {
 	TaskManager
 	Executor
+}
+
+func NewManager(syncMgr syncmgr.SyncManager, cm storage.ChunkManager) *Manager {
+	tm := NewTaskManager()
+	e := NewExecutor(tm, syncMgr, cm)
+	return &Manager{
+		TaskManager: tm,
+		Executor:    e,
+	}
 }

@@ -73,6 +73,7 @@ type Manager interface {
 	// allocSegmentForImport allocates one segment allocation for bulk insert.
 	// TODO: Remove this method and AllocSegment() above instead.
 	allocSegmentForImport(ctx context.Context, collectionID, partitionID UniqueID, channelName string, requestRows int64, taskID int64) (*Allocation, error)
+	AddImportSegment(ctx context.Context, collectionID UniqueID, partitionID UniqueID, channelName string, maxNumOfRows int) (*SegmentInfo, error)
 	// DropSegment drops the segment from manager.
 	DropSegment(ctx context.Context, segmentID UniqueID)
 	// SealAllSegments seals all segments of collection with collectionID and return sealed segments.
@@ -376,6 +377,45 @@ func (s *SegmentManager) genExpireTs(ctx context.Context, isImported bool) (Time
 	}
 	expireTs := tsoutil.ComposeTS(expirePhysicalTs.UnixNano()/int64(time.Millisecond), int64(logicalTs))
 	return expireTs, nil
+}
+
+func (s *SegmentManager) AddImportSegment(ctx context.Context, collectionID UniqueID,
+	partitionID UniqueID, channelName string, maxNumOfRows int,
+) (*SegmentInfo, error) {
+	log := log.Ctx(ctx)
+	ctx, sp := otel.Tracer(typeutil.DataCoordRole).Start(ctx, "open-Segment")
+	defer sp.End()
+	id, err := s.allocator.allocID(ctx)
+	if err != nil {
+		log.Error("failed to open new segment while allocID", zap.Error(err))
+		return nil, err
+	}
+
+	segmentInfo := &datapb.SegmentInfo{
+		ID:             id,
+		CollectionID:   collectionID,
+		PartitionID:    partitionID,
+		InsertChannel:  channelName,
+		NumOfRows:      0,
+		State:          commonpb.SegmentState_Importing,
+		MaxRowNum:      int64(maxNumOfRows),
+		Level:          datapb.SegmentLevel_L1,
+		LastExpireTime: 0,
+	}
+	segmentInfo.IsImporting = true
+	segment := NewSegmentInfo(segmentInfo)
+	if err := s.meta.AddSegment(ctx, segment); err != nil {
+		log.Error("failed to add import segment", zap.Error(err))
+		return nil, err
+	}
+	s.segments = append(s.segments, id)
+	log.Info("add import segment done",
+		zap.Int64("CollectionID", segmentInfo.CollectionID),
+		zap.Int64("SegmentID", segmentInfo.ID),
+		zap.Int("Rows", maxNumOfRows),
+		zap.String("Channel", segmentInfo.InsertChannel))
+
+	return segment, nil
 }
 
 func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID UniqueID, partitionID UniqueID,

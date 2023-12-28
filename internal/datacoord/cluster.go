@@ -167,23 +167,23 @@ func (c *ClusterImpl) AddImportSegment(ctx context.Context, req *datapb.AddImpor
 }
 
 func (c *ClusterImpl) PreImport(nodeID int64, in *datapb.PreImportRequest) error {
-	return merr.ErrServiceUnimplemented
+	return c.sessionManager.PreImport(nodeID, in)
 }
 
 func (c *ClusterImpl) ImportV2(nodeID int64, in *datapb.ImportRequest) error {
-	return merr.ErrServiceUnimplemented
+	return c.sessionManager.ImportV2(nodeID, in)
 }
 
 func (c *ClusterImpl) QueryPreImport(nodeID int64, in *datapb.QueryPreImportRequest) (*datapb.QueryPreImportResponse, error) {
-	return nil, merr.ErrServiceUnimplemented
+	return c.sessionManager.QueryPreImport(nodeID, in)
 }
 
 func (c *ClusterImpl) QueryImport(nodeID int64, in *datapb.QueryImportRequest) (*datapb.QueryImportResponse, error) {
-	return nil, merr.ErrServiceUnimplemented
+	return c.sessionManager.QueryImport(nodeID, in)
 }
 
 func (c *ClusterImpl) DropImport(nodeID int64, in *datapb.DropImportRequest) error {
-	return merr.ErrServiceUnimplemented
+	return c.sessionManager.DropImport(nodeID, in)
 }
 
 // GetSessions returns all sessions

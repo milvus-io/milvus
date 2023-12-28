@@ -2595,7 +2595,7 @@ func (_c *MockDataCoordClient_Import_Call) RunAndReturn(run func(context.Context
 }
 
 // ImportV2 provides a mock function with given fields: ctx, in, opts
-func (_m *MockDataCoordClient) ImportV2(ctx context.Context, in *datapb.ImportRequestInternal, opts ...grpc.CallOption) (*commonpb.Status, error) {
+func (_m *MockDataCoordClient) ImportV2(ctx context.Context, in *datapb.ImportRequestInternal, opts ...grpc.CallOption) (*milvuspb.ImportResponseV2, error) {
 	_va := make([]interface{}, len(opts))
 	for _i := range opts {
 		_va[_i] = opts[_i]
@@ -2605,16 +2605,16 @@ func (_m *MockDataCoordClient) ImportV2(ctx context.Context, in *datapb.ImportRe
 	_ca = append(_ca, _va...)
 	ret := _m.Called(_ca...)
 
-	var r0 *commonpb.Status
+	var r0 *milvuspb.ImportResponseV2
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *datapb.ImportRequestInternal, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.ImportRequestInternal, ...grpc.CallOption) (*milvuspb.ImportResponseV2, error)); ok {
 		return rf(ctx, in, opts...)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *datapb.ImportRequestInternal, ...grpc.CallOption) *commonpb.Status); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.ImportRequestInternal, ...grpc.CallOption) *milvuspb.ImportResponseV2); ok {
 		r0 = rf(ctx, in, opts...)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*commonpb.Status)
+			r0 = ret.Get(0).(*milvuspb.ImportResponseV2)
 		}
 	}
 
@@ -2654,12 +2654,12 @@ func (_c *MockDataCoordClient_ImportV2_Call) Run(run func(ctx context.Context, i
 	return _c
 }
 
-func (_c *MockDataCoordClient_ImportV2_Call) Return(_a0 *commonpb.Status, _a1 error) *MockDataCoordClient_ImportV2_Call {
+func (_c *MockDataCoordClient_ImportV2_Call) Return(_a0 *milvuspb.ImportResponseV2, _a1 error) *MockDataCoordClient_ImportV2_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockDataCoordClient_ImportV2_Call) RunAndReturn(run func(context.Context, *datapb.ImportRequestInternal, ...grpc.CallOption) (*commonpb.Status, error)) *MockDataCoordClient_ImportV2_Call {
+func (_c *MockDataCoordClient_ImportV2_Call) RunAndReturn(run func(context.Context, *datapb.ImportRequestInternal, ...grpc.CallOption) (*milvuspb.ImportResponseV2, error)) *MockDataCoordClient_ImportV2_Call {
 	_c.Call.Return(run)
 	return _c
 }

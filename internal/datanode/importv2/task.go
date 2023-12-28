@@ -185,7 +185,7 @@ func (t *ImportTask) Init(req *datapb.ImportRequest) {
 	metaCaches := make(map[string]metacache.MetaCache)
 	channels := make(map[string]struct{})
 	partitions := make(map[int64]struct{})
-	for _, info := range req.GetSegmentsInfo() {
+	for _, info := range req.GetRequestSegments() {
 		channels[info.GetVchannel()] = struct{}{}
 		partitions[info.GetPartitionID()] = struct{}{}
 	}

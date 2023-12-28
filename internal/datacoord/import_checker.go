@@ -28,11 +28,16 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 )
 
-type ImportChecker struct {
+type ImportChecker interface {
+	Start()
+	Close()
+}
+
+type importChecker struct {
 	meta    *meta
 	cluster Cluster
 	alloc   allocator
-	sm      *SegmentManager
+	sm      Manager
 	imeta   ImportMeta
 
 	closeOnce sync.Once
@@ -42,18 +47,20 @@ type ImportChecker struct {
 func NewImportChecker(meta *meta,
 	cluster Cluster,
 	alloc allocator,
+	sm Manager,
 	imeta ImportMeta,
-) *ImportChecker {
-	return &ImportChecker{
+) ImportChecker {
+	return &importChecker{
 		meta:      meta,
 		cluster:   cluster,
 		alloc:     alloc,
+		sm:        sm,
 		imeta:     imeta,
 		closeChan: make(chan struct{}),
 	}
 }
 
-func (c *ImportChecker) Start() {
+func (c *importChecker) Start() {
 	log.Info("start import checker")
 	checkTicker := time.NewTicker(5 * time.Second)
 	defer checkTicker.Stop()
@@ -78,13 +85,13 @@ func (c *ImportChecker) Start() {
 	}
 }
 
-func (c *ImportChecker) Close() {
+func (c *importChecker) Close() {
 	c.closeOnce.Do(func() {
 		close(c.closeChan)
 	})
 }
 
-func (c *ImportChecker) LogStats() {
+func (c *importChecker) LogStats() {
 	logFunc := func(tasks []ImportTask, taskType TaskType) {
 		byState := lo.GroupBy(tasks, func(t ImportTask) milvuspb.ImportState {
 			return t.GetState()
@@ -101,7 +108,7 @@ func (c *ImportChecker) LogStats() {
 	logFunc(tasks, ImportTaskType)
 }
 
-func (c *ImportChecker) checkPreImportState(requestID int64) {
+func (c *importChecker) checkPreImportState(requestID int64) {
 	tasks := c.imeta.GetBy(WithType(PreImportTaskType), WithReq(requestID))
 	if len(tasks) == 0 {
 		return
@@ -111,12 +118,12 @@ func (c *ImportChecker) checkPreImportState(requestID int64) {
 			return
 		}
 	}
-	importTasks := c.imeta.GetBy(WithType(ImportTaskType), WithReq(requestID))
 	groups, err := RegroupImportFiles(tasks)
 	if err != nil {
 		log.Warn("regroup import files failed", zap.Int64("reqID", requestID))
 		return
 	}
+	importTasks := c.imeta.GetBy(WithType(ImportTaskType), WithReq(requestID))
 	if len(importTasks) == len(groups) {
 		return // all imported are generated
 	}
@@ -158,7 +165,7 @@ func (c *ImportChecker) checkPreImportState(requestID int64) {
 	}
 }
 
-func (c *ImportChecker) checkImportState(requestID int64) {
+func (c *importChecker) checkImportState(requestID int64) {
 	tasks := c.imeta.GetBy(WithType(ImportTaskType), WithReq(requestID))
 	for _, t := range tasks {
 		if t.GetState() != milvuspb.ImportState_Completed {

@@ -96,7 +96,7 @@ service DataCoord {
   rpc GcControl(GcControlRequest) returns(common.Status){}
 
   // importV2
-  rpc ImportV2(ImportRequestInternal) returns(common.Status){}
+  rpc ImportV2(ImportRequestInternal) returns(milvus.ImportResponseV2){}
   rpc GetImportProgress(milvus.GetImportProgressRequest) returns(milvus.GetImportProgressResponse){}
   rpc ListImports(milvus.ListImportsRequest) returns(milvus.ListImportsResponse){}
 }
@@ -778,11 +778,12 @@ message autoIDRange {
   int64 end = 2;
 }
 
-message ImportSegmentRequestInfo {
+message ImportRequestSegment {
   int64 segmentID = 1;
   int64 partitionID = 2;
   string vchannel = 3;
-  autoIDRange autoID_ranges = 4;
+  uint64 ts = 4;
+  autoIDRange autoID_ranges = 5;
 }
 
 message ImportRequest {
@@ -792,7 +793,9 @@ message ImportRequest {
   int64 collectionID = 4;
   schema.CollectionSchema schema = 5;
   repeated milvus.ImportFile files = 6;
-  repeated ImportSegmentRequestInfo segments_info = 7;
+  uint64 ts = 7;
+  autoIDRange autoID_range = 8;
+  map<int64, ImportRequestSegment> request_segments = 9;
 }
 
 message QueryPreImportRequest {

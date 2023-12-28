@@ -1681,16 +1681,29 @@ func (s *Server) GcControl(ctx context.Context, request *datapb.GcControlRequest
 	return status, nil
 }
 
-func (s *Server) ImportV2(ctx context.Context, in *datapb.ImportRequestInternal) (*commonpb.Status, error) {
+func (s *Server) ImportV2(ctx context.Context, in *datapb.ImportRequestInternal) (*milvuspb.ImportResponseV2, error) {
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
-		return merr.Status(err), nil
+		return &milvuspb.ImportResponseV2{
+			Status: merr.Status(err),
+		}, nil
 	}
+
+	resp := &milvuspb.ImportResponseV2{
+		Status: merr.Success(),
+	}
+
+	log := log.With(zap.Int64("collection", in.GetCollectionID()),
+		zap.Int64s("partitions", in.GetPartitionIDs()),
+		zap.Strings("channels", in.GetChannelNames()),
+		zap.Any("files", in.GetFiles()))
+	log.Info("receive import request")
 
 	const FilesPerPreImportTask = 2 // TODO: dyh, move to config
 	fileGroups := lo.Chunk(in.GetFiles(), FilesPerPreImportTask)
 	idStart, _, err := s.allocator.allocN(int64(len(fileGroups)) + 1)
 	if err != nil {
-		return merr.Status(merr.WrapErrImportFailed(fmt.Sprint("alloc request id failed, err=%w", err))), nil
+		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprint("alloc request id failed, err=%w", err)))
+		return resp, nil
 	}
 
 	for i, files := range fileGroups {
@@ -1713,13 +1726,17 @@ func (s *Server) ImportV2(ctx context.Context, in *datapb.ImportRequestInternal)
 		}
 		err = s.importMeta.Add(task)
 		if err != nil {
-			return merr.Status(merr.WrapErrImportFailed(fmt.Sprint("add preimport task failed, err=%w", err))), nil
+			resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprint("add preimport task failed, err=%w", err)))
+			return resp, nil
 		}
 	}
-	return merr.Success(), nil
+	resp.RequestID = fmt.Sprint(idStart)
+	log.Info("import done")
+	return resp, nil
 }
 
 func (s *Server) GetImportProgress(ctx context.Context, in *milvuspb.GetImportProgressRequest) (*milvuspb.GetImportProgressResponse, error) {
+	log := log.With(zap.String("requestID", in.GetRequestID()))
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &milvuspb.GetImportProgressResponse{
 			Status: merr.Status(err),
@@ -1738,6 +1755,7 @@ func (s *Server) GetImportProgress(ctx context.Context, in *milvuspb.GetImportPr
 	resp.State = state
 	resp.Reason = reason
 	resp.Progress = progress
+	log.Info("GetImportProgress done", zap.Any("resp", resp))
 	return resp, nil
 }
 

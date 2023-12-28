@@ -39,7 +39,7 @@ type ImportSchedulerSuite struct {
 	cluster   *MockCluster
 	meta      *meta
 	imeta     ImportMeta
-	scheduler *ImportScheduler
+	scheduler *importScheduler
 }
 
 func (s *ImportSchedulerSuite) SetupTest() {
@@ -64,7 +64,7 @@ func (s *ImportSchedulerSuite) SetupTest() {
 	})
 	s.imeta, err = NewImportMeta(s.catalog)
 	s.NoError(err)
-	s.scheduler = NewImportScheduler(s.meta, s.cluster, s.alloc, s.imeta)
+	s.scheduler = NewImportScheduler(s.meta, s.cluster, s.alloc, s.imeta).(*importScheduler)
 }
 
 func (s *ImportSchedulerSuite) TestProcessPreImport() {
