@@ -179,7 +179,10 @@ func NewSegment(ctx context.Context,
 	var newPtr C.CSegmentInterface
 	status := C.NewSegment(collection.collectionPtr, cSegType, C.int64_t(segmentID), &newPtr)
 
-	if err := HandleCStatus(ctx, &status, "NewSegmentFailed"); err != nil {
+	if err := HandleCStatus(ctx, &status, "NewSegmentFailed",
+		zap.Int64("collectionID", collectionID),
+		zap.Int64("partitionID", partitionID),
+		zap.Int64("segmentID", segmentID)); err != nil {
 		return nil, err
 	}
 
