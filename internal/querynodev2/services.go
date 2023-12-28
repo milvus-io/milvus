@@ -32,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -300,25 +299,21 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		}
 	}()
 
-	flushedSegments := lo.Map(channel.GetFlushedSegmentIds(), func(id int64, _ int) *datapb.SegmentInfo {
-		return &datapb.SegmentInfo{
-			ID: id,
-			DmlPosition: &msgpb.MsgPosition{
-				Timestamp: typeutil.MaxTimestamp,
-			},
-		}
+	growingInfo := lo.SliceToMap(channel.GetUnflushedSegmentIds(), func(id int64) (int64, uint64) {
+		info := req.GetSegmentInfos()[id]
+		return id, info.GetDmlPosition().GetTimestamp()
 	})
-	pipeline.ExcludedSegments(flushedSegments...)
+	pipeline.ExcludedSegments(growingInfo)
+
+	flushedInfo := lo.SliceToMap(channel.GetFlushedSegmentIds(), func(id int64) (int64, uint64) {
+		return id, typeutil.MaxTimestamp
+	})
+	pipeline.ExcludedSegments(flushedInfo)
 	for _, channelInfo := range req.GetInfos() {
-		droppedInfos := lo.Map(channelInfo.GetDroppedSegmentIds(), func(id int64, _ int) *datapb.SegmentInfo {
-			return &datapb.SegmentInfo{
-				ID: id,
-				DmlPosition: &msgpb.MsgPosition{
-					Timestamp: typeutil.MaxTimestamp,
-				},
-			}
+		droppedInfos := lo.SliceToMap(channelInfo.GetDroppedSegmentIds(), func(id int64) (int64, uint64) {
+			return id, typeutil.MaxTimestamp
 		})
-		pipeline.ExcludedSegments(droppedInfos...)
+		pipeline.ExcludedSegments(droppedInfos)
 	}
 
 	err = loadGrowingSegments(ctx, delegator, req)
@@ -568,15 +563,10 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, req *querypb.Release
 		// in case of consumed it's growing segment again
 		pipeline := node.pipelineManager.Get(req.GetShard())
 		if pipeline != nil {
-			droppedInfos := lo.Map(req.GetSegmentIDs(), func(id int64, _ int) *datapb.SegmentInfo {
-				return &datapb.SegmentInfo{
-					ID: id,
-					DmlPosition: &msgpb.MsgPosition{
-						Timestamp: typeutil.MaxTimestamp,
-					},
-				}
+			droppedInfos := lo.SliceToMap(req.GetSegmentIDs(), func(id int64) (int64, uint64) {
+				return id, typeutil.MaxTimestamp
 			})
-			pipeline.ExcludedSegments(droppedInfos...)
+			pipeline.ExcludedSegments(droppedInfos)
 		}
 
 		req.NeedTransfer = false
@@ -1376,15 +1366,11 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 			log.Info("sync action", zap.Int64("TargetVersion", action.GetTargetVersion()))
 			pipeline := node.pipelineManager.Get(req.GetChannel())
 			if pipeline != nil {
-				droppedInfos := lo.Map(action.GetDroppedInTarget(), func(id int64, _ int) *datapb.SegmentInfo {
-					return &datapb.SegmentInfo{
-						ID: id,
-						DmlPosition: &msgpb.MsgPosition{
-							Timestamp: typeutil.MaxTimestamp,
-						},
-					}
+				droppedInfos := lo.SliceToMap(action.GetDroppedInTarget(), func(id int64) (int64, uint64) {
+					return id, typeutil.MaxTimestamp
 				})
-				pipeline.ExcludedSegments(droppedInfos...)
+
+				pipeline.ExcludedSegments(droppedInfos)
 			}
 			shardDelegator.SyncTargetVersion(action.GetTargetVersion(), action.GetGrowingInTarget(),
 				action.GetSealedInTarget(), action.GetDroppedInTarget())
