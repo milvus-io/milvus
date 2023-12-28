@@ -23,7 +23,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	base "github.com/milvus-io/milvus/internal/util/pipeline"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -39,7 +38,7 @@ type filterNode struct {
 	*BaseNode
 	collectionID     UniqueID
 	manager          *DataManager
-	excludedSegments *typeutil.ConcurrentMap[int64, *datapb.SegmentInfo]
+	excludedSegments *typeutil.ConcurrentMap[int64, uint64]
 	channel          string
 	InsertMsgPolicys []InsertMsgFilter
 	DeleteMsgPolicys []DeleteMsgFilter
@@ -134,7 +133,7 @@ func newFilterNode(
 	collectionID int64,
 	channel string,
 	manager *DataManager,
-	excludedSegments *typeutil.ConcurrentMap[int64, *datapb.SegmentInfo],
+	excludedSegments *typeutil.ConcurrentMap[int64, uint64],
 	maxQueueLength int32,
 ) *filterNode {
 	return &filterNode{
