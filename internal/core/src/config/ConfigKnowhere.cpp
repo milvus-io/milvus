@@ -93,9 +93,16 @@ KnowhereInitGPUMemoryPool(const uint32_t init_size, const uint32_t max_size) {
     if (init_size == 0 && max_size == 0) {
         knowhere::KnowhereConfig::SetRaftMemPool();
         return;
+    } else if (init_size > max_size) {
+        PanicInfo(ConfigInvalid,
+                  "Error Gpu memory pool params: init_size {} can't not large "
+                  "than max_size {}.",
+                  init_size,
+                  max_size);
+    } else {
+        knowhere::KnowhereConfig::SetRaftMemPool(size_t{init_size},
+                                                 size_t{max_size});
     }
-    knowhere::KnowhereConfig::SetRaftMemPool(size_t{init_size},
-                                             size_t{max_size});
 }
 
 int32_t

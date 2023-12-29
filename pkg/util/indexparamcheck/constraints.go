@@ -50,9 +50,10 @@ var (
 	BinIDMapMetrics           = []string{metric.HAMMING, metric.JACCARD, metric.SUBSTRUCTURE, metric.SUPERSTRUCTURE} // const
 	BinIvfMetrics             = []string{metric.HAMMING, metric.JACCARD}                                             // const
 	HnswMetrics               = []string{metric.L2, metric.IP, metric.COSINE, metric.HAMMING, metric.JACCARD}        // const
-	CagraMetrics              = []string{metric.L2}                                                                  // const
-	supportDimPerSubQuantizer = []int{32, 28, 24, 20, 16, 12, 10, 8, 6, 4, 3, 2, 1}                                  // const
-	supportSubQuantizer       = []int{96, 64, 56, 48, 40, 32, 28, 24, 20, 16, 12, 8, 4, 3, 2, 1}                     // const
+	RaftMetrics               = []string{metric.L2, metric.IP}
+	CagraMetrics              = []string{metric.L2}                                              // const
+	supportDimPerSubQuantizer = []int{32, 28, 24, 20, 16, 12, 10, 8, 6, 4, 3, 2, 1}              // const
+	supportSubQuantizer       = []int{96, 64, 56, 48, 40, 32, 28, 24, 20, 16, 12, 8, 4, 3, 2, 1} // const
 )
 
 const (
