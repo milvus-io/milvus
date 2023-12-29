@@ -2716,6 +2716,7 @@ type dataNodeConfig struct {
 	MemoryForceSyncSegmentNum ParamItem `refreshable:"true"`
 	MemoryWatermark           ParamItem `refreshable:"true"`
 
+	// deprecated
 	DataNodeTimeTickByRPC ParamItem `refreshable:"false"`
 	// DataNode send timetick interval per collection
 	DataNodeTimeTickInterval ParamItem `refreshable:"false"`

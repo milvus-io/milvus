@@ -18,7 +18,6 @@ package datanode
 
 import (
 	"context"
-	"fmt"
 	"path"
 	"sync"
 	"time"
@@ -36,11 +35,9 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/conc"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -402,25 +399,7 @@ func getServiceWithChannel(initCtx context.Context, node *DataNode, info *datapb
 		return nil, err
 	}
 
-	var updater statsUpdater
-	if Params.DataNodeCfg.DataNodeTimeTickByRPC.GetAsBool() {
-		updater = ds.timetickSender
-	} else {
-		m, err := config.msFactory.NewMsgStream(ctx)
-		if err != nil {
-			return nil, err
-		}
-
-		m.AsProducer([]string{Params.CommonCfg.DataCoordTimeTick.GetValue()})
-		metrics.DataNodeNumProducers.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Inc()
-		log.Info("datanode AsProducer", zap.String("TimeTickChannelName", Params.CommonCfg.DataCoordTimeTick.GetValue()))
-
-		m.EnableProduce(true)
-
-		updater = newMqStatsUpdater(config, m)
-	}
-
-	writeNode := newWriteNode(node.ctx, node.writeBufferManager, updater, config)
+	writeNode := newWriteNode(node.ctx, node.writeBufferManager, ds.timetickSender, config)
 
 	ttNode, err := newTTNode(config, node.writeBufferManager, node.channelCheckpointUpdater)
 	if err != nil {

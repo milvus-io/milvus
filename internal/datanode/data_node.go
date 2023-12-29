@@ -377,11 +377,9 @@ func (node *DataNode) Start() error {
 
 		go node.compactionExecutor.start(node.ctx)
 
-		if Params.DataNodeCfg.DataNodeTimeTickByRPC.GetAsBool() {
-			node.timeTickSender = newTimeTickSender(node.broker, node.session.ServerID,
-				retry.Attempts(20), retry.Sleep(time.Millisecond*100))
-			node.timeTickSender.start()
-		}
+		node.timeTickSender = newTimeTickSender(node.broker, node.session.ServerID,
+			retry.Attempts(20), retry.Sleep(time.Millisecond*100))
+		node.timeTickSender.start()
 
 		node.stopWaiter.Add(1)
 		// Start node watch node
