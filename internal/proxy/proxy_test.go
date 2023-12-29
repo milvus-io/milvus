@@ -1218,11 +1218,11 @@ func TestProxy(t *testing.T) {
 			DbName:         dbName,
 			CollectionName: collectionName,
 			FieldName:      floatVecField,
-			IndexName:      indexName,
+			IndexName:      floatIndexName,
 		})
+		err = merr.CheckRPCCall(resp, err)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-		indexName = resp.IndexDescriptions[0].IndexName
 	})
 
 	wg.Add(1)
