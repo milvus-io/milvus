@@ -145,7 +145,7 @@ test_run() {
 
     {
         Config config;
-        config["index_type"] = "inverted_index";
+        config["index_type"] = INVERTED_INDEX_TYPE;
         config["insert_files"] = std::vector<std::string>{log_path};
 
         auto index = indexbuilder::IndexFactory::GetInstance().CreateIndex(
@@ -160,7 +160,7 @@ test_run() {
 
     {
         index::CreateIndexInfo index_info{};
-        index_info.index_type = "inverted_index";
+        index_info.index_type = INVERTED_INDEX_TYPE;
         index_info.field_type = dtype;
 
         Config config;
@@ -346,7 +346,7 @@ test_string() {
 
     {
         Config config;
-        config["index_type"] = "inverted_index";
+        config["index_type"] = INVERTED_INDEX_TYPE;
         config["insert_files"] = std::vector<std::string>{log_path};
 
         auto index = indexbuilder::IndexFactory::GetInstance().CreateIndex(
@@ -361,7 +361,7 @@ test_string() {
 
     {
         index::CreateIndexInfo index_info{};
-        index_info.index_type = "inverted_index";
+        index_info.index_type = INVERTED_INDEX_TYPE;
         index_info.field_type = dtype;
 
         Config config;

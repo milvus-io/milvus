@@ -18,6 +18,7 @@
 #include <google/protobuf/text_format.h>
 
 #include "DataGen.h"
+#include "index/Meta.h"
 #include "index/ScalarIndex.h"
 #include "index/StringIndex.h"
 #include "index/Utils.h"
@@ -452,13 +453,13 @@ GetIndexTypes<std::string>() {
 template <typename T>
 inline std::vector<std::string>
 GetIndexTypesV2() {
-    return std::vector<std::string>{"sort", "inverted_index"};
+    return std::vector<std::string>{"sort", INVERTED_INDEX_TYPE};
 }
 
 template <>
 inline std::vector<std::string>
 GetIndexTypesV2<std::string>() {
-    return std::vector<std::string>{"inverted_index", "marisa"};
+    return std::vector<std::string>{INVERTED_INDEX_TYPE, "marisa"};
 }
 
 }  // namespace

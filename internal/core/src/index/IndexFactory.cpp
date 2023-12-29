@@ -35,7 +35,7 @@ IndexFactory::CreateScalarIndex(
     const IndexType& index_type,
     const storage::FileManagerContext& file_manager_context,
     DataType d_type) {
-    if (index_type == "inverted_index") {
+    if (index_type == INVERTED_INDEX_TYPE) {
         TantivyConfig cfg;
         cfg.data_type_ = d_type;
         return std::make_unique<InvertedIndexTantivy<T>>(cfg,
@@ -58,7 +58,7 @@ IndexFactory::CreateScalarIndex(
     const storage::FileManagerContext& file_manager_context,
     DataType d_type) {
 #if defined(__linux__) || defined(__APPLE__)
-    if (index_type == "inverted_index") {
+    if (index_type == INVERTED_INDEX_TYPE) {
         TantivyConfig cfg;
         cfg.data_type_ = d_type;
         return std::make_unique<InvertedIndexTantivy<std::string>>(
@@ -77,7 +77,7 @@ IndexFactory::CreateScalarIndex(
     const storage::FileManagerContext& file_manager_context,
     std::shared_ptr<milvus_storage::Space> space,
     DataType d_type) {
-    if (index_type == "inverted_index") {
+    if (index_type == INVERTED_INDEX_TYPE) {
         TantivyConfig cfg;
         cfg.data_type_ = d_type;
         return std::make_unique<InvertedIndexTantivy<T>>(
@@ -94,7 +94,7 @@ IndexFactory::CreateScalarIndex(
     std::shared_ptr<milvus_storage::Space> space,
     DataType d_type) {
 #if defined(__linux__) || defined(__APPLE__)
-    if (index_type == "inverted_index") {
+    if (index_type == INVERTED_INDEX_TYPE) {
         TantivyConfig cfg;
         cfg.data_type_ = d_type;
         return std::make_unique<InvertedIndexTantivy<std::string>>(

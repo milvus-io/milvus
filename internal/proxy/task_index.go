@@ -161,7 +161,12 @@ func (cit *createIndexTask) parseIndexParams() error {
 				return merr.WrapErrParameterInvalid(DefaultArithmeticIndexType, specifyIndexType, "index type not match")
 			}
 		} else if typeutil.IsBoolType(cit.fieldSchema.DataType) {
-			// TODO: should we check something?
+			if !exist {
+				return merr.WrapErrParameterInvalidMsg("no index type specified")
+			}
+			if specifyIndexType != InvertedIndexType {
+				return merr.WrapErrParameterInvalidMsg("index type (%s) not supported for boolean, supported: %s", specifyIndexType, InvertedIndexType)
+			}
 		} else {
 			return merr.WrapErrParameterInvalid("supported field",
 				fmt.Sprintf("create index on %s field", cit.fieldSchema.DataType.String()),
