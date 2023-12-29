@@ -14,7 +14,7 @@ Run following script to start the full integration test:
 ```bash
 cd [milvus-folder]
 make milvus # milvus needs to be compiled to make cpp build ready
-./scripts/run_intergration_test.sh
+./scripts/run_integration_test.sh
 ```
 
 If you want to run single test case, you could execute command like this example

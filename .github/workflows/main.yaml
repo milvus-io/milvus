@@ -210,8 +210,8 @@ jobs:
       - name: IntegrationTest
         run: |
           chmod +x build/builder.sh
-          chmod +x scripts/run_intergration_test.sh
-          ./build/builder.sh /bin/bash -c ./scripts/run_intergration_test.sh
+          chmod +x scripts/run_integration_test.sh
+          ./build/builder.sh /bin/bash -c ./scripts/run_integration_test.sh
       - name: Archive result
         uses: actions/upload-artifact@v4
         with:
