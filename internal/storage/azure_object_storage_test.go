@@ -216,3 +216,194 @@ func TestAzureObjectStorage(t *testing.T) {
 		os.Setenv("AZURE_STORAGE_CONNECTION_STRING", connectionString)
 	})
 }
+
+func TestReadFile(t *testing.T) {
+	ctx := context.Background()
+	bucketName := Params.MinioCfg.BucketName.GetValue()
+	c := &config{
+		bucketName:    bucketName,
+		createBucket:  true,
+		useIAM:        false,
+		cloudProvider: "azure",
+	}
+	rcm, err := NewRemoteChunkManager(ctx, c)
+
+	t.Run("Read", func(t *testing.T) {
+		filePath := "test-Read"
+		data := []byte("Test data for Read.")
+
+		err = rcm.Write(ctx, filePath, data)
+		assert.NoError(t, err)
+		defer rcm.Remove(ctx, filePath)
+
+		reader, err := rcm.Reader(ctx, filePath)
+		assert.NoError(t, err)
+
+		buffer := make([]byte, 4)
+		n, err := reader.Read(buffer)
+		assert.NoError(t, err)
+		assert.Equal(t, 4, n)
+		assert.Equal(t, "Test", string(buffer))
+
+		buffer = make([]byte, 6)
+		n, err = reader.Read(buffer)
+		assert.NoError(t, err)
+		assert.Equal(t, 6, n)
+		assert.Equal(t, " data ", string(buffer))
+
+		buffer = make([]byte, 40)
+		n, err = reader.Read(buffer)
+		assert.Error(t, err)
+		assert.Equal(t, 9, n)
+		assert.Equal(t, "for Read.", string(buffer[:9]))
+	})
+
+	t.Run("ReadAt", func(t *testing.T) {
+		filePath := "test-ReadAt"
+		data := []byte("Test data for ReadAt.")
+
+		err = rcm.Write(ctx, filePath, data)
+		assert.NoError(t, err)
+		defer rcm.Remove(ctx, filePath)
+
+		reader, err := rcm.Reader(ctx, filePath)
+		assert.NoError(t, err)
+
+		buffer := make([]byte, 4)
+		n, err := reader.ReadAt(buffer, 5)
+		assert.NoError(t, err)
+		assert.Equal(t, 4, n)
+		assert.Equal(t, "data", string(buffer))
+
+		buffer = make([]byte, 4)
+		n, err = reader.Read(buffer)
+		assert.NoError(t, err)
+		assert.Equal(t, 4, n)
+		assert.Equal(t, "Test", string(buffer))
+
+		buffer = make([]byte, 4)
+		n, err = reader.ReadAt(buffer, 20)
+		assert.Error(t, err)
+		assert.Equal(t, 1, n)
+		assert.Equal(t, ".", string(buffer[:1]))
+
+		buffer = make([]byte, 4)
+		n, err = reader.ReadAt(buffer, 25)
+		assert.Error(t, err)
+		assert.Equal(t, 0, n)
+	})
+
+	t.Run("Seek start", func(t *testing.T) {
+		filePath := "test-SeekStart"
+		data := []byte("Test data for Seek start.")
+
+		err = rcm.Write(ctx, filePath, data)
+		assert.NoError(t, err)
+		defer rcm.Remove(ctx, filePath)
+
+		reader, err := rcm.Reader(ctx, filePath)
+		assert.NoError(t, err)
+
+		offset, err := reader.Seek(10, io.SeekStart)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(10), offset)
+
+		buffer := make([]byte, 4)
+		n, err := reader.Read(buffer)
+		assert.NoError(t, err)
+		assert.Equal(t, 4, n)
+		assert.Equal(t, "for ", string(buffer))
+
+		offset, err = reader.Seek(40, io.SeekStart)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(40), offset)
+
+		buffer = make([]byte, 4)
+		n, err = reader.Read(buffer)
+		assert.Error(t, err)
+		assert.Equal(t, 0, n)
+	})
+
+	t.Run("Seek current", func(t *testing.T) {
+		filePath := "test-SeekStart"
+		data := []byte("Test data for Seek current.")
+
+		err = rcm.Write(ctx, filePath, data)
+		assert.NoError(t, err)
+		defer rcm.Remove(ctx, filePath)
+
+		reader, err := rcm.Reader(ctx, filePath)
+		assert.NoError(t, err)
+
+		buffer := make([]byte, 4)
+		n, err := reader.Read(buffer)
+		assert.NoError(t, err)
+		assert.Equal(t, 4, n)
+		assert.Equal(t, "Test", string(buffer))
+
+		offset, err := reader.Seek(10, io.SeekCurrent)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(14), offset)
+
+		buffer = make([]byte, 4)
+		n, err = reader.Read(buffer)
+		assert.NoError(t, err)
+		assert.Equal(t, 4, n)
+		assert.Equal(t, "Seek", string(buffer))
+
+		offset, err = reader.Seek(40, io.SeekCurrent)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(58), offset)
+
+		buffer = make([]byte, 4)
+		n, err = reader.Read(buffer)
+		assert.Error(t, err)
+		assert.Equal(t, 0, n)
+	})
+
+	t.Run("Seek end", func(t *testing.T) {
+		filePath := "test-SeekEnd"
+		data := []byte("Test data for Seek end.")
+
+		err = rcm.Write(ctx, filePath, data)
+		assert.NoError(t, err)
+		defer rcm.Remove(ctx, filePath)
+
+		reader, err := rcm.Reader(ctx, filePath)
+		assert.NoError(t, err)
+
+		buffer := make([]byte, 4)
+		n, err := reader.Read(buffer)
+		assert.NoError(t, err)
+		assert.Equal(t, 4, n)
+		assert.Equal(t, "Test", string(buffer))
+
+		offset, err := reader.Seek(10, io.SeekEnd)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(33), offset)
+
+		buffer = make([]byte, 4)
+		n, err = reader.Read(buffer)
+		assert.Error(t, err)
+		assert.Equal(t, 0, n)
+
+		offset, err = reader.Seek(10, 3)
+		assert.Error(t, err)
+		assert.Equal(t, int64(0), offset)
+	})
+
+	t.Run("Close", func(t *testing.T) {
+		filePath := "test-Close"
+		data := []byte("Test data for Close.")
+
+		err = rcm.Write(ctx, filePath, data)
+		assert.NoError(t, err)
+		defer rcm.Remove(ctx, filePath)
+
+		reader, err := rcm.Reader(ctx, filePath)
+		assert.NoError(t, err)
+
+		err = reader.Close()
+		assert.NoError(t, err)
+	})
+}
