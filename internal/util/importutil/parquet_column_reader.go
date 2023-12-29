@@ -208,7 +208,7 @@ func ReadBoolArrayData(pcr *ParquetColumnReader, count int64) ([][]bool, error) 
 		offsets := listReader.Offsets()
 		for i := 1; i < len(offsets); i++ {
 			start, end := offsets[i-1], offsets[i]
-			elementData := make([]bool, 0)
+			elementData := make([]bool, 0, end-start)
 			for j := start; j < end; j++ {
 				elementData = append(elementData, boolReader.Value(int(j)))
 			}
@@ -306,7 +306,7 @@ func ReadStringArrayData(pcr *ParquetColumnReader, count int64) ([][]string, err
 		offsets := listReader.Offsets()
 		for i := 1; i < len(offsets); i++ {
 			start, end := offsets[i-1], offsets[i]
-			elementData := make([]string, 0)
+			elementData := make([]string, 0, end-start)
 			for j := start; j < end; j++ {
 				elementData = append(elementData, stringReader.Value(int(j)))
 			}
