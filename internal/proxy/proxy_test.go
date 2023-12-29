@@ -1211,6 +1211,21 @@ func TestProxy(t *testing.T) {
 	})
 
 	wg.Add(1)
+	t.Run("describe index with indexName", func(t *testing.T) {
+		defer wg.Done()
+		resp, err := proxy.DescribeIndex(ctx, &milvuspb.DescribeIndexRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+			FieldName:      floatVecField,
+			IndexName:      indexName,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		indexName = resp.IndexDescriptions[0].IndexName
+	})
+
+	wg.Add(1)
 	t.Run("get index statistics", func(t *testing.T) {
 		defer wg.Done()
 		resp, err := proxy.GetIndexStatistics(ctx, &milvuspb.GetIndexStatisticsRequest{
