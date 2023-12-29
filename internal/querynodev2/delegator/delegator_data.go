@@ -88,6 +88,7 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 		if growing == nil {
 			var err error
 			growing, err = segments.NewSegment(
+				context.Background(),
 				sd.collection,
 				segmentID,
 				insertData.PartitionID,
@@ -107,7 +108,7 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 			}
 		}
 
-		err := growing.Insert(insertData.RowIDs, insertData.Timestamps, insertData.InsertRecord)
+		err := growing.Insert(context.Background(), insertData.RowIDs, insertData.Timestamps, insertData.InsertRecord)
 		if err != nil {
 			log.Error("failed to insert data into growing segment",
 				zap.Int64("segmentID", segmentID),
@@ -214,7 +215,7 @@ func (sd *shardDelegator) ProcessDelete(deleteData []*DeleteData, ts uint64) {
 				// delete will be processed after loaded again
 				return nil
 			}
-			offlineSegments.Upsert(sd.applyDelete(ctx, entry.NodeID, worker, delRecords, entry.Segments)...)
+			offlineSegments.Upsert(sd.applyDelete(ctx, entry.NodeID, worker, delRecords, entry.Segments, querypb.DataScope_Historical)...)
 			return nil
 		})
 	}
@@ -229,7 +230,7 @@ func (sd *shardDelegator) ProcessDelete(deleteData []*DeleteData, ts uint64) {
 				// panic here, local worker shall not have error
 				panic(err)
 			}
-			offlineSegments.Upsert(sd.applyDelete(ctx, paramtable.GetNodeID(), worker, delRecords, growing)...)
+			offlineSegments.Upsert(sd.applyDelete(ctx, paramtable.GetNodeID(), worker, delRecords, growing, querypb.DataScope_Streaming)...)
 			return nil
 		})
 	}
@@ -249,7 +250,7 @@ func (sd *shardDelegator) ProcessDelete(deleteData []*DeleteData, ts uint64) {
 }
 
 // applyDelete handles delete record and apply them to corresponding workers.
-func (sd *shardDelegator) applyDelete(ctx context.Context, nodeID int64, worker cluster.Worker, delRecords map[int64]DeleteData, entries []SegmentEntry) []int64 {
+func (sd *shardDelegator) applyDelete(ctx context.Context, nodeID int64, worker cluster.Worker, delRecords map[int64]DeleteData, entries []SegmentEntry, scope querypb.DataScope) []int64 {
 	var offlineSegments []int64
 	log := sd.getLogger(ctx)
 	for _, segmentEntry := range entries {
@@ -273,6 +274,7 @@ func (sd *shardDelegator) applyDelete(ctx context.Context, nodeID int64, worker 
 					SegmentId:    segmentEntry.SegmentID,
 					PrimaryKeys:  storage.ParsePrimaryKeys2IDs(delRecord.PrimaryKeys),
 					Timestamps:   delRecord.Timestamps,
+					Scope:        scope,
 				})
 				if errors.Is(err, merr.ErrNodeNotFound) {
 					log.Warn("try to delete data on non-exist node")
@@ -333,7 +335,7 @@ func (sd *shardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.Segm
 		}
 
 		log.Info("forwarding L0 delete records...", zap.Int("deletionCount", len(deletedPks)))
-		err = segment.Delete(deletedPks, deletedTss)
+		err = segment.Delete(ctx, deletedPks, deletedTss)
 		if err != nil {
 			log.Warn("failed to forward L0 deletions to growing segment",
 				zap.Error(err),

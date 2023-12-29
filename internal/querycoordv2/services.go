@@ -881,9 +881,8 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 		log := log.With(zap.String("channel", channel.GetChannelName()))
 
 		leaders := s.dist.LeaderViewManager.GetLeadersByShard(channel.GetChannelName())
-		leaders = filterDupLeaders(s.meta.ReplicaManager, leaders)
-		ids := make([]int64, 0, len(leaders))
-		addrs := make([]string, 0, len(leaders))
+
+		readableLeaders := make(map[int64]*meta.LeaderView)
 
 		var channelErr error
 		if len(leaders) == 0 {
@@ -944,17 +943,25 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 				continue
 			}
 
-			ids = append(ids, info.ID())
-			addrs = append(addrs, info.Addr())
+			readableLeaders[leader.ID] = leader
 		}
 
-		if len(ids) == 0 {
+		if len(readableLeaders) == 0 {
 			msg := fmt.Sprintf("channel %s is not available in any replica", channel.GetChannelName())
 			log.Warn(msg, zap.Error(channelErr))
 			resp.Status = merr.Status(
 				errors.Wrap(merr.WrapErrChannelNotAvailable(channel.GetChannelName()), channelErr.Error()))
 			resp.Shards = nil
 			return resp, nil
+		}
+
+		readableLeaders = filterDupLeaders(s.meta.ReplicaManager, readableLeaders)
+		ids := make([]int64, 0, len(leaders))
+		addrs := make([]string, 0, len(leaders))
+		for _, leader := range readableLeaders {
+			info := s.nodeMgr.Get(leader.ID)
+			ids = append(ids, info.ID())
+			addrs = append(addrs, info.Addr())
 		}
 
 		resp.Shards = append(resp.Shards, &querypb.ShardLeadersList{

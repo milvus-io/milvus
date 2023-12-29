@@ -152,26 +152,24 @@ func (o *LeaderObserver) findNeedLoadedSegments(leaderView *meta.LeaderView, dis
 				continue
 			}
 
-			channel := o.target.GetDmChannel(s.GetCollectionID(), s.GetInsertChannel(), meta.CurrentTarget)
-			if channel == nil {
-				channel = o.target.GetDmChannel(s.GetCollectionID(), s.GetInsertChannel(), meta.NextTarget)
-			}
-			loadInfo := utils.PackSegmentLoadInfo(resp.GetInfos()[0], channel.GetSeekPosition(), nil)
+			if channel := o.target.GetDmChannel(s.GetCollectionID(), s.GetInsertChannel(), meta.CurrentTargetFirst); channel != nil {
+				loadInfo := utils.PackSegmentLoadInfo(resp.GetInfos()[0], channel.GetSeekPosition(), nil)
 
-			log.Debug("leader observer append a segment to set",
-				zap.Int64("collectionID", leaderView.CollectionID),
-				zap.String("channel", leaderView.Channel),
-				zap.Int64("leaderViewID", leaderView.ID),
-				zap.Int64("segmentID", s.GetID()),
-				zap.Int64("nodeID", s.Node))
-			ret = append(ret, &querypb.SyncAction{
-				Type:        querypb.SyncType_Set,
-				PartitionID: s.GetPartitionID(),
-				SegmentID:   s.GetID(),
-				NodeID:      s.Node,
-				Version:     s.Version,
-				Info:        loadInfo,
-			})
+				log.Debug("leader observer append a segment to set",
+					zap.Int64("collectionID", leaderView.CollectionID),
+					zap.String("channel", leaderView.Channel),
+					zap.Int64("leaderViewID", leaderView.ID),
+					zap.Int64("segmentID", s.GetID()),
+					zap.Int64("nodeID", s.Node))
+				ret = append(ret, &querypb.SyncAction{
+					Type:        querypb.SyncType_Set,
+					PartitionID: s.GetPartitionID(),
+					SegmentID:   s.GetID(),
+					NodeID:      s.Node,
+					Version:     s.Version,
+					Info:        loadInfo,
+				})
+			}
 		}
 	}
 	return ret

@@ -52,9 +52,5 @@ func Init(opts ...Option) (*Manager, error) {
 }
 
 func formatKey(key string) string {
-	ret := strings.ToLower(key)
-	ret = strings.ReplaceAll(ret, "/", "")
-	ret = strings.ReplaceAll(ret, "_", "")
-	ret = strings.ReplaceAll(ret, ".", "")
-	return ret
+	return strings.NewReplacer("/", "", "_", "", ".", "").Replace(strings.ToLower(key))
 }

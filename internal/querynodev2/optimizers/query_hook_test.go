@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type QueryHookSuite struct {
@@ -30,6 +31,8 @@ func (suite *QueryHookSuite) TearDownTest() {
 func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().AutoIndexConfig.EnableOptimize.Key, "true")
 
 	suite.Run("normal_run", func() {
 		mockHook := NewMockQueryHook(suite.T())

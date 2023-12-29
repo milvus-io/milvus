@@ -540,7 +540,7 @@ Attu 提供了好用的图形化界面，帮助您更好的管理数据和Milvus
 - [Youtube](https://www.youtube.com/channel/UCMCo_F7pKjMHBlfyxwOPw-g)
 - Zilliz 技术交流微信群
 
-<img src="https://assets.zilliz.com/wechat_2abac21f5a.png" alt="Wechat QR Code">
+<img src="https://assets.zilliz.com/wechat_2abac21f5a.png?v=1" alt="Wechat QR Code">
 
 ## 加入我们
 

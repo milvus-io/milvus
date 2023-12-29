@@ -56,7 +56,7 @@ const (
 	boundedTS = 2
 
 	// enableMultipleVectorFields indicates whether to enable multiple vector fields.
-	enableMultipleVectorFields = false
+	enableMultipleVectorFields = true
 
 	defaultMaxVarCharLength = 65535
 
@@ -220,7 +220,6 @@ func validatePartitionTag(partitionTag string, strictCheck bool) error {
 		msg := invalidMsg + "Partition name should not be empty."
 		return errors.New(msg)
 	}
-
 	if len(partitionTag) > Params.ProxyCfg.MaxNameLength.GetAsInt() {
 		msg := invalidMsg + "The length of a partition name must be less than " + Params.ProxyCfg.MaxNameLength.GetValue() + " characters."
 		return errors.New(msg)
@@ -1365,6 +1364,15 @@ func isPartitionKeyMode(ctx context.Context, dbName string, colName string) (boo
 	}
 
 	return false, nil
+}
+
+func hasParitionKeyModeField(schema *schemapb.CollectionSchema) bool {
+	for _, fieldSchema := range schema.GetFields() {
+		if fieldSchema.IsPartitionKey {
+			return true
+		}
+	}
+	return false
 }
 
 // getDefaultPartitionNames only used in partition key mode

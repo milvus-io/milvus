@@ -21,6 +21,7 @@ import (
 	"math/rand"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -375,12 +376,20 @@ func (suite *ServerSuite) TestUpdateAutoBalanceConfigLoop() {
 		mockSession.EXPECT().GetSessionsWithVersionRange(mock.Anything, mock.Anything).Return(oldSessions, 0, nil).Maybe()
 
 		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-		go server.updateBalanceConfigLoop(ctx)
+		wg := &sync.WaitGroup{}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			time.Sleep(1500 * time.Millisecond)
+			server.updateBalanceConfigLoop(ctx)
+		}()
 		// old query node exist, disable auto balance
 		suite.Eventually(func() bool {
 			return !Params.QueryCoordCfg.AutoBalance.GetAsBool()
 		}, 5*time.Second, 1*time.Second)
+
+		cancel()
+		wg.Wait()
 	})
 
 	suite.Run("all old node down", func() {
@@ -392,12 +401,20 @@ func (suite *ServerSuite) TestUpdateAutoBalanceConfigLoop() {
 		mockSession.EXPECT().GetSessionsWithVersionRange(mock.Anything, mock.Anything).Return(nil, 0, nil).Maybe()
 
 		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-		go server.updateBalanceConfigLoop(ctx)
+		wg := &sync.WaitGroup{}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			time.Sleep(1500 * time.Millisecond)
+			server.updateBalanceConfigLoop(ctx)
+		}()
 		// all old query node down, enable auto balance
 		suite.Eventually(func() bool {
 			return Params.QueryCoordCfg.AutoBalance.GetAsBool()
 		}, 5*time.Second, 1*time.Second)
+
+		cancel()
+		wg.Wait()
 	})
 }
 

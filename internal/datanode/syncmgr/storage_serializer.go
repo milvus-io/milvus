@@ -18,6 +18,7 @@ package syncmgr
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 
 	"github.com/samber/lo"
@@ -28,7 +29,10 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
 type storageV1Serializer struct {
@@ -69,6 +73,8 @@ func NewStorageSerializer(metacache metacache.MetaCache, metaWriter MetaWriter) 
 
 func (s *storageV1Serializer) EncodeBuffer(ctx context.Context, pack *SyncPack) (Task, error) {
 	task := NewSyncTask()
+	tr := timerecord.NewTimeRecorder("storage_serializer")
+	metricSegLevel := pack.level.String()
 
 	log := log.Ctx(ctx).With(
 		zap.Int64("segmentID", pack.segmentID),
@@ -125,6 +131,8 @@ func (s *storageV1Serializer) EncodeBuffer(ctx context.Context, pack *SyncPack) 
 	}
 
 	s.setTaskMeta(task, pack)
+
+	metrics.DataNodeEncodeBufferLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metricSegLevel).Observe(float64(tr.RecordSpan().Milliseconds()))
 	return task, nil
 }
 
