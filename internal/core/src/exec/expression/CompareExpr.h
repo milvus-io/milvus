@@ -115,6 +115,26 @@ class PhyCompareFilterExpr : public Expr {
     void
     Eval(EvalCtx& context, VectorPtr& result) override;
 
+    void
+    MoveCursor() override {
+        int64_t processed_rows = 0;
+        for (int64_t chunk_id = current_chunk_id_; chunk_id < num_chunk_;
+             ++chunk_id) {
+            auto chunk_size = chunk_id == num_chunk_ - 1
+                                  ? active_count_ - chunk_id * size_per_chunk_
+                                  : size_per_chunk_;
+
+            for (int i = chunk_id == current_chunk_id_ ? current_chunk_pos_ : 0;
+                 i < chunk_size;
+                 ++i) {
+                if (++processed_rows >= batch_size_) {
+                    current_chunk_id_ = chunk_id;
+                    current_chunk_pos_ = i + 1;
+                }
+            }
+        }
+    }
+
  private:
     int64_t
     GetNextBatchSize();
