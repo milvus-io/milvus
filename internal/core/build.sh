@@ -162,7 +162,10 @@ CMAKE_CMD="cmake \
 ${SCRIPTS_DIR}"
 echo ${CMAKE_CMD}
 ${CMAKE_CMD}
-
+if [ $? -ne 0 ]; then
+    echo "ERROR! cmake failed"
+    exit 1
+fi
 
 if [[ ${RUN_CPPLINT} == "ON" ]]; then
   # cpplint check

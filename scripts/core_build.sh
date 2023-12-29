@@ -251,6 +251,10 @@ CMAKE_CMD=${CMAKE_CMD}"${CPP_SRC_DIR}"
 echo "CC $CC"
 echo ${CMAKE_CMD}
 ${CMAKE_CMD} -G "${CMAKE_GENERATOR}"
+if [ $? -ne 0 ]; then
+    echo "ERROR! cmake failed"
+    exit 1
+fi
 
 set
 
