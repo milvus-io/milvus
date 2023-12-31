@@ -186,7 +186,12 @@ if [ -z "$BUILD_WITHOUT_AZURE" ]; then
   pushd ${AZURE_BUILD_DIR}
   env bash ${ROOT_DIR}/scripts/azure_build.sh -p ${INSTALL_PREFIX} -s ${ROOT_DIR}/internal/core/src/storage/azure-blob-storage -t ${BUILD_UNITTEST}
   if [ ! -e libblob-chunk-manager* ]; then
+    echo "build blob-chunk-manager fail..."
     cat vcpkg-bootstrap.log
+    exit 1
+  fi
+  if [ ! -e ${INSTALL_PREFIX}/lib/libblob-chunk-manager* ]; then
+    echo "install blob-chunk-manager fail..."
     exit 1
   fi
   popd
