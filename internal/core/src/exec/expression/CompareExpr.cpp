@@ -32,8 +32,9 @@ PhyCompareFilterExpr::GetNextBatchSize() {
         segment_->type() == SegmentType::Growing
             ? current_chunk_id_ * size_per_chunk_ + current_chunk_pos_
             : current_chunk_pos_;
-    return current_rows + batch_size_ >= num_rows_ ? num_rows_ - current_rows
-                                                   : batch_size_;
+    return current_rows + batch_size_ >= active_count_
+               ? active_count_ - current_rows
+               : batch_size_;
 }
 
 template <typename T>
@@ -127,7 +128,7 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op) {
     for (int64_t chunk_id = current_chunk_id_; chunk_id < num_chunk_;
          ++chunk_id) {
         auto chunk_size = chunk_id == num_chunk_ - 1
-                              ? num_rows_ - chunk_id * size_per_chunk_
+                              ? active_count_ - chunk_id * size_per_chunk_
                               : size_per_chunk_;
         auto left = GetChunkData(expr_->left_data_type_,
                                  expr_->left_field_id_,

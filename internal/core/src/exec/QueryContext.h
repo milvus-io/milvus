@@ -174,6 +174,7 @@ class QueryContext : public Context {
  public:
     QueryContext(const std::string& query_id,
                  const milvus::segcore::SegmentInternalInterface* segment,
+                 int64_t active_count,
                  milvus::Timestamp timestamp,
                  std::shared_ptr<QueryConfig> query_config =
                      std::make_shared<QueryConfig>(),
@@ -183,6 +184,7 @@ class QueryContext : public Context {
         : Context(ContextScope::QUERY),
           query_id_(query_id),
           segment_(segment),
+          active_count_(active_count),
           query_timestamp_(timestamp),
           query_config_(query_config),
           executor_(executor) {
@@ -218,6 +220,11 @@ class QueryContext : public Context {
         return query_timestamp_;
     }
 
+    int64_t
+    get_active_count() {
+        return active_count_;
+    }
+
  private:
     folly::Executor* executor_;
     //folly::Executor::KeepAlive<> executor_keepalive_;
@@ -227,6 +234,8 @@ class QueryContext : public Context {
 
     // current segment that query execute in
     const milvus::segcore::SegmentInternalInterface* segment_;
+    // num rows for current query
+    int64_t active_count_;
     // timestamp this query generate
     milvus::Timestamp query_timestamp_;
 };

@@ -74,15 +74,19 @@ void
 ExecPlanNodeVisitor::ExecuteExprNodeInternal(
     const std::shared_ptr<milvus::plan::PlanNode>& plannode,
     const milvus::segcore::SegmentInternalInterface* segment,
+    int64_t active_count,
     BitsetType& bitset_holder,
     bool& cache_offset_getted,
     std::vector<int64_t>& cache_offset) {
     bitset_holder.clear();
-    LOG_INFO("plannode: {}", plannode->ToString());
+    LOG_INFO("plannode: {}, active_count: {}, timestamp: {}",
+             plannode->ToString(),
+             active_count,
+             timestamp_);
     auto plan = plan::PlanFragment(plannode);
     // TODO: get query id from proxy
     auto query_context = std::make_shared<milvus::exec::QueryContext>(
-        DEAFULT_QUERY_ID, segment, timestamp_);
+        DEAFULT_QUERY_ID, segment, active_count, timestamp_);
 
     auto task =
         milvus::exec::Task::Create(DEFAULT_TASK_ID, plan, 0, query_context);
@@ -113,7 +117,6 @@ ExecPlanNodeVisitor::ExecuteExprNodeInternal(
                 // If get empty cached offsets. mean no record hits in this segment
                 // no need to get next batch.
                 if (cache_offset_vec->size() == 0) {
-                    auto active_count = segment->get_active_count(timestamp_);
                     bitset_holder.resize(active_count);
                     task->RequestCancel();
                     break;
@@ -161,7 +164,8 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
     std::unique_ptr<BitsetType> bitset_holder;
     if (node.filter_plannode_.has_value()) {
         BitsetType expr_res;
-        ExecuteExprNode(node.filter_plannode_.value(), segment, expr_res);
+        ExecuteExprNode(
+            node.filter_plannode_.value(), segment, active_count, expr_res);
         bitset_holder = std::make_unique<BitsetType>(expr_res);
         bitset_holder->flip();
     } else {
@@ -233,6 +237,7 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
     if (node.filter_plannode_.has_value()) {
         ExecuteExprNodeInternal(node.filter_plannode_.value(),
                                 segment,
+                                active_count,
                                 bitset_holder,
                                 get_cache_offset,
                                 cache_offsets);
