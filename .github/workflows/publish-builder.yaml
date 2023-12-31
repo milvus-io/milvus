@@ -53,21 +53,12 @@ jobs:
           echo "::set-output name=sha_short::$(git rev-parse --short HEAD)"
       # - name: Setup upterm session
       #   uses: lhotari/action-upterm@v1
-      - name: Docker Pull
-        shell: bash
-        run: |
-          docker run --rm --privileged tonistiigi/binfmt:latest --install arm64
-          docker buildx ls
-
-          # Check if the builder named "milvus" exists
-          if docker buildx ls | grep -q "milvus"; then
-              echo "Builder 'milvus' already exists. Skipping creation."
-          else
-              # Create the builder named "milvus"
-              echo "Creating builder named 'milvus'..."
-              docker buildx create --use --name=milvus --driver docker-container
-              echo "'milvus' builder created."
-          fi
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
       - name: Docker Build
         if: success() && github.event_name == 'pull_request' && github.repository == 'milvus-io/milvus'
         shell: bash
