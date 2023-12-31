@@ -37,6 +37,7 @@ add_subdirectory(rocksdb)
 add_subdirectory(rdkafka)
 add_subdirectory(simdjson)
 add_subdirectory(opendal)
+add_subdirectory(tantivy)
 
 add_subdirectory(milvus-storage)
 

@@ -67,6 +67,8 @@ const (
 
 	// DefaultStringIndexType name of default index type for varChar/string field
 	DefaultStringIndexType = "Trie"
+
+	InvertedIndexType = "INVERTED"
 )
 
 var logger = log.L().WithOptions(zap.Fields(zap.String("role", typeutil.ProxyRole)))
@@ -247,12 +249,12 @@ func validatePartitionTag(partitionTag string, strictCheck bool) error {
 
 func validateStringIndexType(indexType string) bool {
 	// compatible with the index type marisa-trie of attu versions prior to 2.3.0
-	return indexType == DefaultStringIndexType || indexType == "marisa-trie"
+	return indexType == DefaultStringIndexType || indexType == "marisa-trie" || indexType == InvertedIndexType
 }
 
 func validateArithmeticIndexType(indexType string) bool {
 	// compatible with the index type Asceneding of attu versions prior to 2.3.0
-	return indexType == DefaultArithmeticIndexType || indexType == "Asceneding"
+	return indexType == DefaultArithmeticIndexType || indexType == "Asceneding" || indexType == InvertedIndexType
 }
 
 func validateFieldName(fieldName string) error {
