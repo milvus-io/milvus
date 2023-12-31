@@ -37,6 +37,8 @@ type TargetScope = int32
 const (
 	CurrentTarget TargetScope = iota + 1
 	NextTarget
+	CurrentTargetFirst
+	NextTargetFirst
 )
 
 type TargetManager struct {
@@ -317,12 +319,24 @@ func (mgr *TargetManager) removePartitionFromCollectionTarget(oldTarget *Collect
 	return NewCollectionTarget(segments, channels)
 }
 
-func (mgr *TargetManager) getTarget(scope TargetScope) *target {
-	if scope == CurrentTarget {
-		return mgr.current
+func (mgr *TargetManager) getCollectionTarget(scope TargetScope, collectionID int64) *CollectionTarget {
+	switch scope {
+	case CurrentTarget:
+		return mgr.current.collectionTargetMap[collectionID]
+	case NextTarget:
+		return mgr.next.collectionTargetMap[collectionID]
+	case CurrentTargetFirst:
+		if current := mgr.current.collectionTargetMap[collectionID]; current != nil {
+			return current
+		}
+		return mgr.next.collectionTargetMap[collectionID]
+	case NextTargetFirst:
+		if next := mgr.next.collectionTargetMap[collectionID]; next != nil {
+			return next
+		}
+		return mgr.current.collectionTargetMap[collectionID]
 	}
-
-	return mgr.next
+	return nil
 }
 
 func (mgr *TargetManager) GetGrowingSegmentsByCollection(collectionID int64,
@@ -331,8 +345,7 @@ func (mgr *TargetManager) GetGrowingSegmentsByCollection(collectionID int64,
 	mgr.rwMutex.RLock()
 	defer mgr.rwMutex.RUnlock()
 
-	targetMap := mgr.getTarget(scope)
-	collectionTarget := targetMap.getCollectionTarget(collectionID)
+	collectionTarget := mgr.getCollectionTarget(scope, collectionID)
 
 	if collectionTarget == nil {
 		return nil
@@ -353,8 +366,7 @@ func (mgr *TargetManager) GetGrowingSegmentsByChannel(collectionID int64,
 	mgr.rwMutex.RLock()
 	defer mgr.rwMutex.RUnlock()
 
-	targetMap := mgr.getTarget(scope)
-	collectionTarget := targetMap.getCollectionTarget(collectionID)
+	collectionTarget := mgr.getCollectionTarget(scope, collectionID)
 
 	if collectionTarget == nil {
 		return nil
@@ -376,8 +388,7 @@ func (mgr *TargetManager) GetSealedSegmentsByCollection(collectionID int64,
 	mgr.rwMutex.RLock()
 	defer mgr.rwMutex.RUnlock()
 
-	targetMap := mgr.getTarget(scope)
-	collectionTarget := targetMap.getCollectionTarget(collectionID)
+	collectionTarget := mgr.getCollectionTarget(scope, collectionID)
 
 	if collectionTarget == nil {
 		return nil
@@ -392,9 +403,7 @@ func (mgr *TargetManager) GetSealedSegmentsByChannel(collectionID int64,
 	mgr.rwMutex.RLock()
 	defer mgr.rwMutex.RUnlock()
 
-	targetMap := mgr.getTarget(scope)
-	collectionTarget := targetMap.getCollectionTarget(collectionID)
-
+	collectionTarget := mgr.getCollectionTarget(scope, collectionID)
 	if collectionTarget == nil {
 		return nil
 	}
@@ -416,8 +425,7 @@ func (mgr *TargetManager) GetDroppedSegmentsByChannel(collectionID int64,
 	mgr.rwMutex.RLock()
 	defer mgr.rwMutex.RUnlock()
 
-	targetMap := mgr.getTarget(scope)
-	collectionTarget := targetMap.getCollectionTarget(collectionID)
+	collectionTarget := mgr.getCollectionTarget(scope, collectionID)
 
 	if collectionTarget == nil {
 		return nil
@@ -437,8 +445,7 @@ func (mgr *TargetManager) GetSealedSegmentsByPartition(collectionID int64,
 	mgr.rwMutex.RLock()
 	defer mgr.rwMutex.RUnlock()
 
-	targetMap := mgr.getTarget(scope)
-	collectionTarget := targetMap.getCollectionTarget(collectionID)
+	collectionTarget := mgr.getCollectionTarget(scope, collectionID)
 
 	if collectionTarget == nil {
 		return nil
@@ -458,8 +465,7 @@ func (mgr *TargetManager) GetDmChannelsByCollection(collectionID int64, scope Ta
 	mgr.rwMutex.RLock()
 	defer mgr.rwMutex.RUnlock()
 
-	targetMap := mgr.getTarget(scope)
-	collectionTarget := targetMap.getCollectionTarget(collectionID)
+	collectionTarget := mgr.getCollectionTarget(scope, collectionID)
 
 	if collectionTarget == nil {
 		return nil
@@ -471,8 +477,7 @@ func (mgr *TargetManager) GetDmChannel(collectionID int64, channel string, scope
 	mgr.rwMutex.RLock()
 	defer mgr.rwMutex.RUnlock()
 
-	targetMap := mgr.getTarget(scope)
-	collectionTarget := targetMap.getCollectionTarget(collectionID)
+	collectionTarget := mgr.getCollectionTarget(scope, collectionID)
 
 	if collectionTarget == nil {
 		return nil
@@ -483,8 +488,7 @@ func (mgr *TargetManager) GetDmChannel(collectionID int64, channel string, scope
 func (mgr *TargetManager) GetSealedSegment(collectionID int64, id int64, scope TargetScope) *datapb.SegmentInfo {
 	mgr.rwMutex.RLock()
 	defer mgr.rwMutex.RUnlock()
-	targetMap := mgr.getTarget(scope)
-	collectionTarget := targetMap.getCollectionTarget(collectionID)
+	collectionTarget := mgr.getCollectionTarget(scope, collectionID)
 
 	if collectionTarget == nil {
 		return nil
@@ -495,8 +499,7 @@ func (mgr *TargetManager) GetSealedSegment(collectionID int64, id int64, scope T
 func (mgr *TargetManager) GetCollectionTargetVersion(collectionID int64, scope TargetScope) int64 {
 	mgr.rwMutex.RLock()
 	defer mgr.rwMutex.RUnlock()
-	targetMap := mgr.getTarget(scope)
-	collectionTarget := targetMap.getCollectionTarget(collectionID)
+	collectionTarget := mgr.getCollectionTarget(scope, collectionID)
 
 	if collectionTarget == nil {
 		return 0

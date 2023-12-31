@@ -512,8 +512,10 @@ TEST(Expr, TestRange) {
             CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
         query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
         BitsetType final;
-        visitor.ExecuteExprNode(
-            plan->plan_node_->filter_plannode_.value(), seg_promote, final);
+        visitor.ExecuteExprNode(plan->plan_node_->filter_plannode_.value(),
+                                seg_promote,
+                                N * num_iters,
+                                final);
         EXPECT_EQ(final.size(), N * num_iters);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -602,7 +604,7 @@ TEST(Expr, TestBinaryRangeJSON) {
         plan.filter_plannode_ =
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
         visitor.ExecuteExprNode(
-            plan.filter_plannode_.value(), seg_promote, final);
+            plan.filter_plannode_.value(), seg_promote, N * num_iters, final);
         EXPECT_EQ(final.size(), N * num_iters);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -680,7 +682,7 @@ TEST(Expr, TestExistsJson) {
         plan.filter_plannode_ =
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
         visitor.ExecuteExprNode(
-            plan.filter_plannode_.value(), seg_promote, final);
+            plan.filter_plannode_.value(), seg_promote, N * num_iters, final);
         EXPECT_EQ(final.size(), N * num_iters);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -822,7 +824,7 @@ TEST(Expr, TestUnaryRangeJson) {
             BitsetType final;
             auto plan = std::make_shared<plan::FilterBitsNode>(
                 DEFAULT_PLANNODE_ID, expr);
-            visitor.ExecuteExprNode(plan, seg_promote, final);
+            visitor.ExecuteExprNode(plan, seg_promote, N * num_iters, final);
             EXPECT_EQ(final.size(), N * num_iters);
             EXPECT_EQ(final.size(), N * num_iters);
 
@@ -885,7 +887,7 @@ TEST(Expr, TestUnaryRangeJson) {
             BitsetType final;
             auto plan = std::make_shared<plan::FilterBitsNode>(
                 DEFAULT_PLANNODE_ID, expr);
-            visitor.ExecuteExprNode(plan, seg_promote, final);
+            visitor.ExecuteExprNode(plan, seg_promote, N * num_iters, final);
             EXPECT_EQ(final.size(), N * num_iters);
 
             for (int i = 0; i < N * num_iters; ++i) {
@@ -958,7 +960,7 @@ TEST(Expr, TestTermJson) {
         BitsetType final;
         auto plan =
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
-        visitor.ExecuteExprNode(plan, seg_promote, final);
+        visitor.ExecuteExprNode(plan, seg_promote, N * num_iters, final);
         EXPECT_EQ(final.size(), N * num_iters);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -1083,8 +1085,10 @@ TEST(Expr, TestTerm) {
         auto plan =
             CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
         BitsetType final;
-        visitor.ExecuteExprNode(
-            plan->plan_node_->filter_plannode_.value(), seg_promote, final);
+        visitor.ExecuteExprNode(plan->plan_node_->filter_plannode_.value(),
+                                seg_promote,
+                                N * num_iters,
+                                final);
         EXPECT_EQ(final.size(), N * num_iters);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -1199,8 +1203,10 @@ TEST(Expr, TestCompare) {
         auto plan =
             CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
         BitsetType final;
-        visitor.ExecuteExprNode(
-            plan->plan_node_->filter_plannode_.value(), seg_promote, final);
+        visitor.ExecuteExprNode(plan->plan_node_->filter_plannode_.value(),
+                                seg_promote,
+                                N * num_iters,
+                                final);
         EXPECT_EQ(final.size(), N * num_iters);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -1300,7 +1306,7 @@ TEST(Expr, TestCompareWithScalarIndex) {
         // std::cout << ShowPlanNodeVisitor().call_child(*plan->plan_node_) << std::endl;
         BitsetType final;
         visitor.ExecuteExprNode(
-            plan->plan_node_->filter_plannode_.value(), seg.get(), final);
+            plan->plan_node_->filter_plannode_.value(), seg.get(), N, final);
         EXPECT_EQ(final.size(), N);
 
         for (int i = 0; i < N; ++i) {
@@ -1444,25 +1450,25 @@ TEST(Expr, TestCompareExpr) {
     BitsetType final;
     auto plan =
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
-    visitor.ExecuteExprNode(plan, seg.get(), final);
+    visitor.ExecuteExprNode(plan, seg.get(), N, final);
     expr = build_expr(DataType::INT8);
     plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
-    visitor.ExecuteExprNode(plan, seg.get(), final);
+    visitor.ExecuteExprNode(plan, seg.get(), N, final);
     expr = build_expr(DataType::INT16);
     plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
-    visitor.ExecuteExprNode(plan, seg.get(), final);
+    visitor.ExecuteExprNode(plan, seg.get(), N, final);
     expr = build_expr(DataType::INT32);
     plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
-    visitor.ExecuteExprNode(plan, seg.get(), final);
+    visitor.ExecuteExprNode(plan, seg.get(), N, final);
     expr = build_expr(DataType::INT64);
     plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
-    visitor.ExecuteExprNode(plan, seg.get(), final);
+    visitor.ExecuteExprNode(plan, seg.get(), N, final);
     expr = build_expr(DataType::FLOAT);
     plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
-    visitor.ExecuteExprNode(plan, seg.get(), final);
+    visitor.ExecuteExprNode(plan, seg.get(), N, final);
     expr = build_expr(DataType::DOUBLE);
     plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
-    visitor.ExecuteExprNode(plan, seg.get(), final);
+    visitor.ExecuteExprNode(plan, seg.get(), N, final);
     std::cout << "end compare test" << std::endl;
 }
 
@@ -1773,7 +1779,7 @@ TEST(Expr, test_term_pk) {
     BitsetType final;
     auto plan =
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
-    visitor.ExecuteExprNode(plan, seg.get(), final);
+    visitor.ExecuteExprNode(plan, seg.get(), N, final);
     EXPECT_EQ(final.size(), N);
     for (int i = 0; i < 10; ++i) {
         EXPECT_EQ(final[i], true);
@@ -1790,7 +1796,7 @@ TEST(Expr, test_term_pk) {
     expr = std::make_shared<expr::TermFilterExpr>(
         expr::ColumnInfo(int64_fid, DataType::INT64), retrieve_ints);
     plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
-    visitor.ExecuteExprNode(plan, seg.get(), final);
+    visitor.ExecuteExprNode(plan, seg.get(), N, final);
     EXPECT_EQ(final.size(), N);
     for (int i = 0; i < N; ++i) {
         EXPECT_EQ(final[i], false);
@@ -1840,7 +1846,7 @@ TEST(Expr, TestSealedSegmentGetBatchSize) {
         EXEC_EVAL_EXPR_BATCH_SIZE = batch_size;
         auto plan = plan::PlanFragment(plan_node);
         auto query_context = std::make_shared<milvus::exec::QueryContext>(
-            "query id", seg.get(), MAX_TIMESTAMP);
+            "query id", seg.get(), N, MAX_TIMESTAMP);
 
         auto task =
             milvus::exec::Task::Create("task_expr", plan, 0, query_context);
@@ -1899,7 +1905,7 @@ TEST(Expr, TestGrowingSegmentGetBatchSize) {
         EXEC_EVAL_EXPR_BATCH_SIZE = batch_size;
         auto plan = plan::PlanFragment(plan_node);
         auto query_context = std::make_shared<milvus::exec::QueryContext>(
-            "query id", seg.get(), MAX_TIMESTAMP);
+            "query id", seg.get(), N, MAX_TIMESTAMP);
 
         auto task =
             milvus::exec::Task::Create("task_expr", plan, 0, query_context);
@@ -1987,7 +1993,7 @@ TEST(Expr, TestUnaryBenchTest) {
         int64_t all_cost = 0;
         for (int i = 0; i < 10; i++) {
             auto start = std::chrono::steady_clock::now();
-            visitor.ExecuteExprNode(plan, seg.get(), final);
+            visitor.ExecuteExprNode(plan, seg.get(), N, final);
             all_cost += std::chrono::duration_cast<std::chrono::microseconds>(
                             std::chrono::steady_clock::now() - start)
                             .count();
@@ -2071,7 +2077,7 @@ TEST(Expr, TestBinaryRangeBenchTest) {
         int64_t all_cost = 0;
         for (int i = 0; i < 10; i++) {
             auto start = std::chrono::steady_clock::now();
-            visitor.ExecuteExprNode(plan, seg.get(), final);
+            visitor.ExecuteExprNode(plan, seg.get(), N, final);
             all_cost += std::chrono::duration_cast<std::chrono::microseconds>(
                             std::chrono::steady_clock::now() - start)
                             .count();
@@ -2149,7 +2155,7 @@ TEST(Expr, TestLogicalUnaryBenchTest) {
         int64_t all_cost = 0;
         for (int i = 0; i < 50; i++) {
             auto start = std::chrono::steady_clock::now();
-            visitor.ExecuteExprNode(plan, seg.get(), final);
+            visitor.ExecuteExprNode(plan, seg.get(), N, final);
             all_cost += std::chrono::duration_cast<std::chrono::microseconds>(
                             std::chrono::steady_clock::now() - start)
                             .count();
@@ -2237,7 +2243,7 @@ TEST(Expr, TestBinaryLogicalBenchTest) {
         int64_t all_cost = 0;
         for (int i = 0; i < 50; i++) {
             auto start = std::chrono::steady_clock::now();
-            visitor.ExecuteExprNode(plan, seg.get(), final);
+            visitor.ExecuteExprNode(plan, seg.get(), N, final);
             all_cost += std::chrono::duration_cast<std::chrono::microseconds>(
                             std::chrono::steady_clock::now() - start)
                             .count();
@@ -2321,7 +2327,7 @@ TEST(Expr, TestBinaryArithOpEvalRangeBenchExpr) {
         int64_t all_cost = 0;
         for (int i = 0; i < 50; i++) {
             auto start = std::chrono::steady_clock::now();
-            visitor.ExecuteExprNode(plan, seg.get(), final);
+            visitor.ExecuteExprNode(plan, seg.get(), N, final);
             all_cost += std::chrono::duration_cast<std::chrono::microseconds>(
                             std::chrono::steady_clock::now() - start)
                             .count();
@@ -2398,7 +2404,7 @@ TEST(Expr, TestCompareExprBenchTest) {
         int64_t all_cost = 0;
         for (int i = 0; i < 10; i++) {
             auto start = std::chrono::steady_clock::now();
-            visitor.ExecuteExprNode(plan, seg.get(), final);
+            visitor.ExecuteExprNode(plan, seg.get(), N, final);
             all_cost += std::chrono::duration_cast<std::chrono::microseconds>(
                             std::chrono::steady_clock::now() - start)
                             .count();
@@ -2563,7 +2569,7 @@ TEST(Expr, TestRefactorExprs) {
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
         std::cout << "start test" << std::endl;
         auto start = std::chrono::steady_clock::now();
-        visitor.ExecuteExprNode(plan, seg.get(), final);
+        visitor.ExecuteExprNode(plan, seg.get(), N, final);
         std::cout << n << "cost: "
                   << std::chrono::duration_cast<std::chrono::microseconds>(
                          std::chrono::steady_clock::now() - start)
@@ -2668,7 +2674,7 @@ TEST(Expr, TestCompareWithScalarIndexMaris) {
         //         std::cout << ShowPlanNodeVisitor().call_child(*plan->plan_node_) << std::endl;
         BitsetType final;
         visitor.ExecuteExprNode(
-            plan->plan_node_->filter_plannode_.value(), seg.get(), final);
+            plan->plan_node_->filter_plannode_.value(), seg.get(), N, final);
         EXPECT_EQ(final.size(), N);
 
         for (int i = 0; i < N; ++i) {
@@ -3018,8 +3024,10 @@ TEST(Expr, TestBinaryArithOpEvalRange) {
         auto plan =
             CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
         BitsetType final;
-        visitor.ExecuteExprNode(
-            plan->plan_node_->filter_plannode_.value(), seg_promote, final);
+        visitor.ExecuteExprNode(plan->plan_node_->filter_plannode_.value(),
+                                seg_promote,
+                                N * num_iters,
+                                final);
         EXPECT_EQ(final.size(), N * num_iters);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -3125,7 +3133,7 @@ TEST(Expr, TestBinaryArithOpEvalRangeJSON) {
         BitsetType final;
         auto plan =
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
-        visitor.ExecuteExprNode(plan, seg_promote, final);
+        visitor.ExecuteExprNode(plan, seg_promote, N * num_iters, final);
         EXPECT_EQ(final.size(), N * num_iters);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -3218,7 +3226,7 @@ TEST(Expr, TestBinaryArithOpEvalRangeJSONFloat) {
         BitsetType final;
         auto plan =
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
-        visitor.ExecuteExprNode(plan, seg_promote, final);
+        visitor.ExecuteExprNode(plan, seg_promote, N * num_iters, final);
         EXPECT_EQ(final.size(), N * num_iters);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -3260,7 +3268,7 @@ TEST(Expr, TestBinaryArithOpEvalRangeJSONFloat) {
         BitsetType final;
         auto plan =
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
-        visitor.ExecuteExprNode(plan, seg_promote, final);
+        visitor.ExecuteExprNode(plan, seg_promote, N * num_iters, final);
         EXPECT_EQ(final.size(), N * num_iters);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -3562,7 +3570,7 @@ TEST(Expr, TestBinaryArithOpEvalRangeWithScalarSortIndex) {
 
         BitsetType final;
         visitor.ExecuteExprNode(
-            plan->plan_node_->filter_plannode_.value(), seg_promote, final);
+            plan->plan_node_->filter_plannode_.value(), seg_promote, N, final);
         EXPECT_EQ(final.size(), N);
 
         for (int i = 0; i < N; ++i) {
@@ -3762,8 +3770,10 @@ TEST(Expr, TestUnaryRangeWithJSON) {
             *schema, unary_plan.data(), unary_plan.size());
 
         BitsetType final;
-        visitor.ExecuteExprNode(
-            plan->plan_node_->filter_plannode_.value(), seg_promote, final);
+        visitor.ExecuteExprNode(plan->plan_node_->filter_plannode_.value(),
+                                seg_promote,
+                                N * num_iters,
+                                final);
         EXPECT_EQ(final.size(), N * num_iters);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -3941,8 +3951,10 @@ TEST(Expr, TestTermWithJSON) {
             *schema, unary_plan.data(), unary_plan.size());
 
         BitsetType final;
-        visitor.ExecuteExprNode(
-            plan->plan_node_->filter_plannode_.value(), seg_promote, final);
+        visitor.ExecuteExprNode(plan->plan_node_->filter_plannode_.value(),
+                                seg_promote,
+                                N * num_iters,
+                                final);
         EXPECT_EQ(final.size(), N * num_iters);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -4094,8 +4106,10 @@ TEST(Expr, TestExistsWithJSON) {
             *schema, unary_plan.data(), unary_plan.size());
 
         BitsetType final;
-        visitor.ExecuteExprNode(
-            plan->plan_node_->filter_plannode_.value(), seg_promote, final);
+        visitor.ExecuteExprNode(plan->plan_node_->filter_plannode_.value(),
+                                seg_promote,
+                                N * num_iters,
+                                final);
         EXPECT_EQ(final.size(), N * num_iters);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -4194,7 +4208,7 @@ TEST(Expr, TestTermInFieldJson) {
         auto plan =
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
         auto start = std::chrono::steady_clock::now();
-        visitor.ExecuteExprNode(plan, seg_promote, final);
+        visitor.ExecuteExprNode(plan, seg_promote, N * num_iters, final);
         // std::cout << "cost"
         //           << std::chrono::duration_cast<std::chrono::microseconds>(
         //                  std::chrono::steady_clock::now() - start)
@@ -4242,7 +4256,7 @@ TEST(Expr, TestTermInFieldJson) {
         auto plan =
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
         auto start = std::chrono::steady_clock::now();
-        visitor.ExecuteExprNode(plan, seg_promote, final);
+        visitor.ExecuteExprNode(plan, seg_promote, N * num_iters, final);
         std::cout << "cost"
                   << std::chrono::duration_cast<std::chrono::microseconds>(
                          std::chrono::steady_clock::now() - start)
@@ -4290,7 +4304,7 @@ TEST(Expr, TestTermInFieldJson) {
         auto plan =
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
         auto start = std::chrono::steady_clock::now();
-        visitor.ExecuteExprNode(plan, seg_promote, final);
+        visitor.ExecuteExprNode(plan, seg_promote, N * num_iters, final);
         std::cout << "cost"
                   << std::chrono::duration_cast<std::chrono::microseconds>(
                          std::chrono::steady_clock::now() - start)
@@ -4338,7 +4352,7 @@ TEST(Expr, TestTermInFieldJson) {
         auto plan =
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
         auto start = std::chrono::steady_clock::now();
-        visitor.ExecuteExprNode(plan, seg_promote, final);
+        visitor.ExecuteExprNode(plan, seg_promote, N * num_iters, final);
         std::cout << "cost"
                   << std::chrono::duration_cast<std::chrono::microseconds>(
                          std::chrono::steady_clock::now() - start)
@@ -4562,7 +4576,7 @@ TEST(Expr, TestJsonContainsAny) {
         auto plan =
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
         auto start = std::chrono::steady_clock::now();
-        visitor.ExecuteExprNode(plan, seg_promote, final);
+        visitor.ExecuteExprNode(plan, seg_promote, N * num_iters, final);
         std::cout << "cost"
                   << std::chrono::duration_cast<std::chrono::microseconds>(
                          std::chrono::steady_clock::now() - start)
@@ -4611,7 +4625,7 @@ TEST(Expr, TestJsonContainsAny) {
         auto plan =
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
         auto start = std::chrono::steady_clock::now();
-        visitor.ExecuteExprNode(plan, seg_promote, final);
+        visitor.ExecuteExprNode(plan, seg_promote, N * num_iters, final);
         std::cout << "cost"
                   << std::chrono::duration_cast<std::chrono::microseconds>(
                          std::chrono::steady_clock::now() - start)
@@ -4660,7 +4674,7 @@ TEST(Expr, TestJsonContainsAny) {
         auto plan =
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
         auto start = std::chrono::steady_clock::now();
-        visitor.ExecuteExprNode(plan, seg_promote, final);
+        visitor.ExecuteExprNode(plan, seg_promote, N * num_iters, final);
         std::cout << "cost"
                   << std::chrono::duration_cast<std::chrono::microseconds>(
                          std::chrono::steady_clock::now() - start)
@@ -4709,7 +4723,7 @@ TEST(Expr, TestJsonContainsAny) {
         auto plan =
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
         auto start = std::chrono::steady_clock::now();
-        visitor.ExecuteExprNode(plan, seg_promote, final);
+        visitor.ExecuteExprNode(plan, seg_promote, N * num_iters, final);
         std::cout << "cost"
                   << std::chrono::duration_cast<std::chrono::microseconds>(
                          std::chrono::steady_clock::now() - start)
@@ -4791,7 +4805,7 @@ TEST(Expr, TestJsonContainsAll) {
         auto plan =
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
         auto start = std::chrono::steady_clock::now();
-        visitor.ExecuteExprNode(plan, seg_promote, final);
+        visitor.ExecuteExprNode(plan, seg_promote, N * num_iters, final);
         std::cout << "cost"
                   << std::chrono::duration_cast<std::chrono::microseconds>(
                          std::chrono::steady_clock::now() - start)
@@ -4847,7 +4861,7 @@ TEST(Expr, TestJsonContainsAll) {
         auto plan =
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
         auto start = std::chrono::steady_clock::now();
-        visitor.ExecuteExprNode(plan, seg_promote, final);
+        visitor.ExecuteExprNode(plan, seg_promote, N * num_iters, final);
         std::cout << "cost"
                   << std::chrono::duration_cast<std::chrono::microseconds>(
                          std::chrono::steady_clock::now() - start)
@@ -4903,7 +4917,7 @@ TEST(Expr, TestJsonContainsAll) {
         auto plan =
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
         auto start = std::chrono::steady_clock::now();
-        visitor.ExecuteExprNode(plan, seg_promote, final);
+        visitor.ExecuteExprNode(plan, seg_promote, N * num_iters, final);
         std::cout << "cost"
                   << std::chrono::duration_cast<std::chrono::microseconds>(
                          std::chrono::steady_clock::now() - start)
@@ -4957,7 +4971,7 @@ TEST(Expr, TestJsonContainsAll) {
         auto plan =
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
         auto start = std::chrono::steady_clock::now();
-        visitor.ExecuteExprNode(plan, seg_promote, final);
+        visitor.ExecuteExprNode(plan, seg_promote, N * num_iters, final);
         std::cout << "cost"
                   << std::chrono::duration_cast<std::chrono::microseconds>(
                          std::chrono::steady_clock::now() - start)
@@ -5067,7 +5081,7 @@ TEST(Expr, TestJsonContainsArray) {
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
         BitsetType final;
         auto start = std::chrono::steady_clock::now();
-        visitor.ExecuteExprNode(plan, seg_promote, final);
+        visitor.ExecuteExprNode(plan, seg_promote, N * num_iters, final);
         std::cout << "cost"
                   << std::chrono::duration_cast<std::chrono::microseconds>(
                          std::chrono::steady_clock::now() - start)
@@ -5100,7 +5114,7 @@ TEST(Expr, TestJsonContainsArray) {
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
         BitsetType final;
         auto start = std::chrono::steady_clock::now();
-        visitor.ExecuteExprNode(plan, seg_promote, final);
+        visitor.ExecuteExprNode(plan, seg_promote, N * num_iters, final);
         std::cout << "cost"
                   << std::chrono::duration_cast<std::chrono::microseconds>(
                          std::chrono::steady_clock::now() - start)
@@ -5152,7 +5166,7 @@ TEST(Expr, TestJsonContainsArray) {
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
         BitsetType final;
         auto start = std::chrono::steady_clock::now();
-        visitor.ExecuteExprNode(plan, seg_promote, final);
+        visitor.ExecuteExprNode(plan, seg_promote, N * num_iters, final);
         std::cout << "cost"
                   << std::chrono::duration_cast<std::chrono::microseconds>(
                          std::chrono::steady_clock::now() - start)
@@ -5181,7 +5195,7 @@ TEST(Expr, TestJsonContainsArray) {
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
         BitsetType final;
         auto start = std::chrono::steady_clock::now();
-        visitor.ExecuteExprNode(plan, seg_promote, final);
+        visitor.ExecuteExprNode(plan, seg_promote, N * num_iters, final);
         std::cout << "cost"
                   << std::chrono::duration_cast<std::chrono::microseconds>(
                          std::chrono::steady_clock::now() - start)
@@ -5235,7 +5249,7 @@ TEST(Expr, TestJsonContainsArray) {
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
         BitsetType final;
         auto start = std::chrono::steady_clock::now();
-        visitor.ExecuteExprNode(plan, seg_promote, final);
+        visitor.ExecuteExprNode(plan, seg_promote, N * num_iters, final);
         std::cout << "cost"
                   << std::chrono::duration_cast<std::chrono::microseconds>(
                          std::chrono::steady_clock::now() - start)
@@ -5265,7 +5279,7 @@ TEST(Expr, TestJsonContainsArray) {
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
         BitsetType final;
         auto start = std::chrono::steady_clock::now();
-        visitor.ExecuteExprNode(plan, seg_promote, final);
+        visitor.ExecuteExprNode(plan, seg_promote, N * num_iters, final);
         std::cout << "cost"
                   << std::chrono::duration_cast<std::chrono::microseconds>(
                          std::chrono::steady_clock::now() - start)
@@ -5375,7 +5389,7 @@ TEST(Expr, TestJsonContainsDiffTypeArray) {
         auto plan =
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
         auto start = std::chrono::steady_clock::now();
-        visitor.ExecuteExprNode(plan, seg_promote, final);
+        visitor.ExecuteExprNode(plan, seg_promote, N * num_iters, final);
         std::cout << "cost"
                   << std::chrono::duration_cast<std::chrono::microseconds>(
                          std::chrono::steady_clock::now() - start)
@@ -5402,7 +5416,7 @@ TEST(Expr, TestJsonContainsDiffTypeArray) {
         auto plan =
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
         auto start = std::chrono::steady_clock::now();
-        visitor.ExecuteExprNode(plan, seg_promote, final);
+        visitor.ExecuteExprNode(plan, seg_promote, N * num_iters, final);
         std::cout << "cost"
                   << std::chrono::duration_cast<std::chrono::microseconds>(
                          std::chrono::steady_clock::now() - start)
@@ -5487,7 +5501,7 @@ TEST(Expr, TestJsonContainsDiffType) {
         auto plan =
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
         auto start = std::chrono::steady_clock::now();
-        visitor.ExecuteExprNode(plan, seg_promote, final);
+        visitor.ExecuteExprNode(plan, seg_promote, N * num_iters, final);
         std::cout << "cost"
                   << std::chrono::duration_cast<std::chrono::microseconds>(
                          std::chrono::steady_clock::now() - start)
@@ -5513,7 +5527,7 @@ TEST(Expr, TestJsonContainsDiffType) {
         auto plan =
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
         auto start = std::chrono::steady_clock::now();
-        visitor.ExecuteExprNode(plan, seg_promote, final);
+        visitor.ExecuteExprNode(plan, seg_promote, N * num_iters, final);
         std::cout << "cost"
                   << std::chrono::duration_cast<std::chrono::microseconds>(
                          std::chrono::steady_clock::now() - start)

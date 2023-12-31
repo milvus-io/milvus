@@ -94,7 +94,7 @@ func (s *DelegatorSuite) SetupTest() {
 			ms.EXPECT().Collection().Return(info.GetCollectionID())
 			ms.EXPECT().Indexes().Return(nil)
 			ms.EXPECT().RowNum().Return(info.GetNumOfRows())
-			ms.EXPECT().Delete(mock.Anything, mock.Anything).Return(nil)
+			ms.EXPECT().Delete(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 			return ms
 		})
 	}, nil)

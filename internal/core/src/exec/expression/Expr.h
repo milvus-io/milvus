@@ -83,14 +83,13 @@ class SegmentExpr : public Expr {
                 const std::string& name,
                 const segcore::SegmentInternalInterface* segment,
                 const FieldId& field_id,
-                Timestamp query_timestamp,
+                int64_t active_count,
                 int64_t batch_size)
         : Expr(DataType::BOOL, std::move(input), name),
           segment_(segment),
           field_id_(field_id),
-          query_timestamp_(query_timestamp),
+          active_count_(active_count),
           batch_size_(batch_size) {
-        num_rows_ = segment_->get_active_count(query_timestamp_);
         size_per_chunk_ = segment_->size_per_chunk();
         AssertInfo(
             batch_size_ > 0,
@@ -115,7 +114,7 @@ class SegmentExpr : public Expr {
         if (is_index_mode_) {
             num_index_chunk_ = segment_->num_chunk_index(field_id_);
         } else {
-            num_data_chunk_ = segment_->num_chunk_data(field_id_);
+            num_data_chunk_ = upper_div(active_count_, size_per_chunk_);
         }
     }
 
@@ -126,8 +125,8 @@ class SegmentExpr : public Expr {
         auto current_chunk_pos =
             is_index_mode_ ? current_index_chunk_pos_ : current_data_chunk_pos_;
         auto current_rows = current_chunk * size_per_chunk_ + current_chunk_pos;
-        return current_rows + batch_size_ >= num_rows_
-                   ? num_rows_ - current_rows
+        return current_rows + batch_size_ >= active_count_
+                   ? active_count_ - current_rows
                    : batch_size_;
     }
 
@@ -143,11 +142,14 @@ class SegmentExpr : public Expr {
         for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
             auto data_pos =
                 (i == current_data_chunk_) ? current_data_chunk_pos_ : 0;
-            auto size = (i == (num_data_chunk_ - 1))
-                            ? (segment_->type() == SegmentType::Growing
-                                   ? num_rows_ % size_per_chunk_ - data_pos
-                                   : num_rows_ - data_pos)
-                            : size_per_chunk_ - data_pos;
+            auto size =
+                (i == (num_data_chunk_ - 1))
+                    ? (segment_->type() == SegmentType::Growing
+                           ? (active_count_ % size_per_chunk_ == 0
+                                  ? size_per_chunk_ - data_pos
+                                  : active_count_ % size_per_chunk_ - data_pos)
+                           : active_count_ - data_pos)
+                    : size_per_chunk_ - data_pos;
 
             size = std::min(size, batch_size_ - processed_size);
 
@@ -229,7 +231,6 @@ class SegmentExpr : public Expr {
     const FieldId field_id_;
     bool is_pk_field_{false};
     DataType pk_type_;
-    Timestamp query_timestamp_;
     int64_t batch_size_;
 
     // State indicate position that expr computing at
@@ -237,7 +238,7 @@ class SegmentExpr : public Expr {
     bool is_index_mode_{false};
     bool is_data_mode_{false};
 
-    int64_t num_rows_{0};
+    int64_t active_count_{0};
     int64_t num_data_chunk_{0};
     int64_t num_index_chunk_{0};
     int64_t current_data_chunk_{0};

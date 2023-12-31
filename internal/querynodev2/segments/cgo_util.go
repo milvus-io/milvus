@@ -27,20 +27,20 @@ package segments
 import "C"
 
 import (
-	"fmt"
+	"context"
 	"unsafe"
 
-	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/cgoconverter"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 // HandleCStatus deals with the error returned from CGO
-func HandleCStatus(status *C.CStatus, extraInfo string, fields ...zap.Field) error {
+func HandleCStatus(ctx context.Context, status *C.CStatus, extraInfo string, fields ...zap.Field) error {
 	if status.error_code == 0 {
 		return nil
 	}
@@ -52,11 +52,11 @@ func HandleCStatus(status *C.CStatus, extraInfo string, fields ...zap.Field) err
 	errorMsg := C.GoString(status.error_msg)
 	defer C.free(unsafe.Pointer(status.error_msg))
 
-	finalMsg := fmt.Sprintf("%s: %s", errorName, errorMsg)
-	logMsg := fmt.Sprintf("%s, segcore error: %s\n", extraInfo, finalMsg)
-	log := log.With().WithOptions(zap.AddCallerSkip(1))
-	log.Warn(logMsg, fields...)
-	return errors.New(finalMsg)
+	log.Ctx(ctx).With(fields...).
+		WithOptions(zap.AddCallerSkip(1)) // Add caller stack to show HandleCStatus caller
+
+	log.Warn("CStatus returns err", zap.String("errorName", errorName), zap.String("errorMsg", errorMsg))
+	return merr.WrapErrServiceInternal(errorName, errorMsg)
 }
 
 // HandleCProto deal with the result proto returned from CGO
@@ -84,14 +84,14 @@ func GetCProtoBlob(cProto *C.CProto) []byte {
 	return blob
 }
 
-func GetLocalUsedSize(path string) (int64, error) {
+func GetLocalUsedSize(ctx context.Context, path string) (int64, error) {
 	var availableSize int64
 	cSize := (*C.int64_t)(&availableSize)
 	cPath := C.CString(path)
 	defer C.free(unsafe.Pointer(cPath))
 
 	status := C.GetLocalUsedSize(cPath, cSize)
-	err := HandleCStatus(&status, "get local used size failed")
+	err := HandleCStatus(ctx, &status, "get local used size failed")
 	if err != nil {
 		return 0, err
 	}

@@ -403,7 +403,8 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (sy
 		WithCheckpoint(wb.checkpoint).
 		WithBatchSize(batchSize)
 
-	if segmentInfo.State() == commonpb.SegmentState_Flushing {
+	if segmentInfo.State() == commonpb.SegmentState_Flushing ||
+		segmentInfo.Level() == datapb.SegmentLevel_L0 { // Level zero segment will always be sync as flushed
 		pack.WithFlush()
 	}
 

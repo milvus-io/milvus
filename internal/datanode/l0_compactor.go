@@ -18,6 +18,7 @@ package datanode
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/samber/lo"
@@ -33,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
@@ -227,6 +229,8 @@ func (t *levelZeroCompactionTask) compact() (*datapb.CompactionPlanResult, error
 		Channel:  t.plan.GetChannel(),
 	}
 
+	metrics.DataNodeCompactionLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), t.plan.GetType().String()).
+		Observe(float64(t.tr.ElapseSpan().Milliseconds()))
 	log.Info("L0 compaction finished", zap.Duration("elapse", t.tr.ElapseSpan()))
 
 	return result, nil

@@ -353,6 +353,9 @@ func (s *Server) initDataCoord() error {
 
 	s.handler = newServerHandler(s)
 
+	// check whether old node exist, if yes suspend auto balance until all old nodes down
+	s.updateBalanceConfigLoop(s.ctx)
+
 	if err = s.initCluster(); err != nil {
 		return err
 	}
@@ -460,9 +463,7 @@ func (s *Server) startDataCoord() {
 	sessionutil.SaveServerInfo(typeutil.DataCoordRole, s.session.GetServerID())
 }
 
-func (s *Server) afterStart() {
-	s.updateBalanceConfigLoop(s.ctx)
-}
+func (s *Server) afterStart() {}
 
 func (s *Server) initCluster() error {
 	if s.cluster != nil {
@@ -1223,11 +1224,12 @@ func (s *Server) updateBalanceConfig() bool {
 
 	if len(sessions) == 0 {
 		// only balance channel when all data node's version > 2.3.0
-		Params.Save(Params.DataCoordCfg.AutoBalance.Key, "true")
+		Params.Reset(Params.DataCoordCfg.AutoBalance.Key)
 		log.Info("all old data node down, enable auto balance!")
 		return true
 	}
 
+	Params.Save(Params.DataCoordCfg.AutoBalance.Key, "false")
 	log.RatedDebug(10, "old data node exist", zap.Strings("sessions", lo.Keys(sessions)))
 	return false
 }

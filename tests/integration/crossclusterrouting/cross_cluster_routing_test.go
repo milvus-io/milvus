@@ -27,6 +27,7 @@ import (
 
 	"github.com/stretchr/testify/suite"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -48,7 +49,9 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -61,8 +64,9 @@ type CrossClusterRoutingSuite struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	factory dependency.Factory
-	client  *clientv3.Client
+	factory      dependency.Factory
+	ChunkManager storage.ChunkManager
+	client       *clientv3.Client
 
 	// clients
 	rootCoordClient  *grpcrootcoordclient.Client
@@ -91,6 +95,9 @@ func (s *CrossClusterRoutingSuite) SetupSuite() {
 
 	paramtable.Get().Save("grpc.client.maxMaxAttempts", "1")
 	s.factory = dependency.NewDefaultFactory(true)
+	chunkManager, err := s.factory.NewPersistentStorageChunkManager(s.ctx)
+	s.NoError(err)
+	s.ChunkManager = chunkManager
 }
 
 func (s *CrossClusterRoutingSuite) TearDownSuite() {
@@ -188,6 +195,15 @@ func (s *CrossClusterRoutingSuite) TearDownTest() {
 	s.NoError(err)
 	err = s.indexNode.Stop()
 	s.NoError(err)
+	if s.ChunkManager == nil {
+		chunkManager, err := s.factory.NewPersistentStorageChunkManager(s.ctx)
+		if err != nil {
+			log.Warn("fail to create chunk manager to clean test data", zap.Error(err))
+		} else {
+			s.ChunkManager = chunkManager
+		}
+	}
+	s.ChunkManager.RemoveWithPrefix(s.ctx, s.ChunkManager.RootPath())
 	s.cancel()
 }
 

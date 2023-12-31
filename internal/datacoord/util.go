@@ -25,12 +25,12 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // Response response interface for verification
@@ -71,9 +71,8 @@ func FilterInIndexedSegments(handler Handler, mt *meta, segments ...*SegmentInfo
 
 	segmentMap := make(map[int64]*SegmentInfo)
 	collectionSegments := make(map[int64][]int64)
-	// TODO(yah01): This can't handle the case of multiple vector fields exist,
-	// modify it if we support multiple vector fields.
-	vecFieldID := make(map[int64]int64)
+
+	vecFieldIDs := make(map[int64][]int64)
 	for _, segment := range segments {
 		collectionID := segment.GetCollectionID()
 		segmentMap[segment.GetID()] = segment
@@ -88,11 +87,8 @@ func FilterInIndexedSegments(handler Handler, mt *meta, segments ...*SegmentInfo
 			continue
 		}
 		for _, field := range coll.Schema.GetFields() {
-			if field.GetDataType() == schemapb.DataType_BinaryVector ||
-				field.GetDataType() == schemapb.DataType_FloatVector ||
-				field.GetDataType() == schemapb.DataType_Float16Vector {
-				vecFieldID[collection] = field.GetFieldID()
-				break
+			if typeutil.IsVectorType(field.GetDataType()) {
+				vecFieldIDs[collection] = append(vecFieldIDs[collection], field.GetFieldID())
 			}
 		}
 	}
@@ -102,8 +98,15 @@ func FilterInIndexedSegments(handler Handler, mt *meta, segments ...*SegmentInfo
 		if !isFlushState(segment.GetState()) && segment.GetState() != commonpb.SegmentState_Dropped {
 			continue
 		}
-		segmentState := mt.GetSegmentIndexStateOnField(segment.GetCollectionID(), segment.GetID(), vecFieldID[segment.GetCollectionID()])
-		if segmentState.state == commonpb.IndexState_Finished {
+
+		hasUnindexedVecField := false
+		for _, fieldID := range vecFieldIDs[segment.GetCollectionID()] {
+			segmentIndexState := mt.GetSegmentIndexStateOnField(segment.GetCollectionID(), segment.GetID(), fieldID)
+			if segmentIndexState.State != commonpb.IndexState_Finished {
+				hasUnindexedVecField = true
+			}
+		}
+		if !hasUnindexedVecField {
 			indexedSegments = append(indexedSegments, segment)
 		}
 	}

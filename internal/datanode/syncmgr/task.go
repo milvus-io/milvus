@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"path"
 
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -162,24 +163,22 @@ func (t *SyncTask) Run() (err error) {
 		return err
 	}
 
-	/*
-		var totalSize float64 = 0
-		if t.deleteData != nil {
-			totalSize += float64(t.deleteData.Size())
-		}
-
-		if t.insertData != nil {
-			totalSize += float64(t.insertData.GetMemorySize())
-		}
-		metrics.DataNodeFlushedSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.AllLabel, metricSegLevel).Add(totalSize)
-		metrics.DataNodeEncodeBufferLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metricSegLevel).Observe(float64(t.tr.RecordSpan().Milliseconds()))*/
-
 	err = t.writeLogs()
 	if err != nil {
 		log.Warn("failed to save serialized data into storage", zap.Error(err))
 		t.handleError(err, metricSegLevel)
 		return err
 	}
+
+	var totalSize float64
+	totalSize += lo.SumBy(lo.Values(t.binlogMemsize), func(fieldSize int64) float64 {
+		return float64(fieldSize)
+	})
+	if t.deltaBlob != nil {
+		totalSize += float64(len(t.deltaBlob.Value))
+	}
+
+	metrics.DataNodeFlushedSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.AllLabel, metricSegLevel).Add(totalSize)
 
 	metrics.DataNodeSave2StorageLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metricSegLevel).Observe(float64(t.tr.RecordSpan().Milliseconds()))
 

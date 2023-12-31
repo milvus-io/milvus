@@ -337,7 +337,7 @@ func (s *Server) GetSegmentIndexState(ctx context.Context, req *indexpb.GetSegme
 	)
 	log.Info("receive GetSegmentIndexState",
 		zap.String("IndexName", req.GetIndexName()),
-		zap.Int64s("fieldID", req.GetSegmentIDs()),
+		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
 	)
 
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
@@ -360,12 +360,10 @@ func (s *Server) GetSegmentIndexState(ctx context.Context, req *indexpb.GetSegme
 		}, nil
 	}
 	for _, segID := range req.GetSegmentIDs() {
-		state := s.meta.GetSegmentIndexState(req.GetCollectionID(), segID)
-		ret.States = append(ret.States, &indexpb.SegmentIndexState{
-			SegmentID:  segID,
-			State:      state.state,
-			FailReason: state.failReason,
-		})
+		for indexID := range indexID2CreateTs {
+			state := s.meta.GetSegmentIndexState(req.GetCollectionID(), segID, indexID)
+			ret.States = append(ret.States, state)
+		}
 	}
 	log.Info("GetSegmentIndexState successfully", zap.String("indexName", req.GetIndexName()))
 	return ret, nil
