@@ -50,6 +50,14 @@ services:
       timeout: 20s
       retries: 3
 
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite
+    volumes:
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/azurite:/opt/azurite
+    command: azurite-blob --blobHost 0.0.0.0
+    ports:
+      - "10000:10000"
+
   jaeger:
     image: jaegertracing/all-in-one:latest
     ports:
