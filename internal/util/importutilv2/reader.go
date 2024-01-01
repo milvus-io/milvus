@@ -18,6 +18,7 @@ package importutilv2
 
 import (
 	"context"
+	"fmt"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -47,6 +48,7 @@ func NewReader(cm storage.ChunkManager,
 	//if err != nil {
 	//	return nil, err
 	//}
+	fmt.Println("dyh debug, new reader", importFile)
 	if IsBackup(options) {
 		tsStart, tsEnd, err := ParseTimeRange(options)
 		if err != nil {
@@ -66,6 +68,15 @@ func NewReader(cm storage.ChunkManager,
 		if err != nil {
 			return nil, WrapReadFileError(paths[0], err)
 		}
+		//reader2, err := cm.Reader(context.Background(), paths[0])
+		//if err != nil {
+		//	return nil, WrapReadFileError(paths[0], err)
+		//}
+		//bytesss, err := io.ReadAll(reader2)
+		//if err != nil {
+		//	panic(err)
+		//}
+		//fmt.Println(">>>>>>>>>>>>>>>>>>>>>>>", string(bytesss))
 		return json.NewReader(reader, schema)
 	case Numpy:
 		readers, err := CreateReaders(paths, cm, schema)

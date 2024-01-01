@@ -130,6 +130,7 @@ type FieldData interface {
 	GetRows() any
 	AppendRow(row interface{}) error
 	AppendRows(rows interface{}) error
+	GetDataType() schemapb.DataType
 }
 
 func NewFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema) (FieldData, error) {
@@ -207,7 +208,8 @@ func NewFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema)
 		}, nil
 	case schemapb.DataType_String, schemapb.DataType_VarChar:
 		return &StringFieldData{
-			Data: make([]string, 0),
+			Data:     make([]string, 0),
+			DataType: dataType,
 		}, nil
 	default:
 		return nil, fmt.Errorf("Unexpected schema data type: %d", dataType)
@@ -236,7 +238,8 @@ type DoubleFieldData struct {
 	Data []float64
 }
 type StringFieldData struct {
-	Data []string
+	Data     []string
+	DataType schemapb.DataType
 }
 type ArrayFieldData struct {
 	ElementType schemapb.DataType
@@ -568,6 +571,29 @@ func (data *DoubleFieldData) GetMemorySize() int        { return binary.Size(dat
 func (data *BinaryVectorFieldData) GetMemorySize() int  { return binary.Size(data.Data) + 4 }
 func (data *FloatVectorFieldData) GetMemorySize() int   { return binary.Size(data.Data) + 4 }
 func (data *Float16VectorFieldData) GetMemorySize() int { return binary.Size(data.Data) + 4 }
+
+// GetDataType implements FieldData.GetDataType
+func (data *BoolFieldData) GetDataType() schemapb.DataType   { return schemapb.DataType_Bool }
+func (data *Int8FieldData) GetDataType() schemapb.DataType   { return schemapb.DataType_Int8 }
+func (data *Int16FieldData) GetDataType() schemapb.DataType  { return schemapb.DataType_Int16 }
+func (data *Int32FieldData) GetDataType() schemapb.DataType  { return schemapb.DataType_Int32 }
+func (data *Int64FieldData) GetDataType() schemapb.DataType  { return schemapb.DataType_Int64 }
+func (data *FloatFieldData) GetDataType() schemapb.DataType  { return schemapb.DataType_Float }
+func (data *DoubleFieldData) GetDataType() schemapb.DataType { return schemapb.DataType_Double }
+func (data *StringFieldData) GetDataType() schemapb.DataType { return data.DataType }
+func (data *ArrayFieldData) GetDataType() schemapb.DataType  { return schemapb.DataType_Array }
+func (data *JSONFieldData) GetDataType() schemapb.DataType   { return schemapb.DataType_JSON }
+func (data *BinaryVectorFieldData) GetDataType() schemapb.DataType {
+	return schemapb.DataType_BinaryVector
+}
+
+func (data *FloatVectorFieldData) GetDataType() schemapb.DataType {
+	return schemapb.DataType_FloatVector
+}
+
+func (data *Float16VectorFieldData) GetDataType() schemapb.DataType {
+	return schemapb.DataType_Float16Vector
+}
 
 // why not binary.Size(data) directly? binary.Size(data) return -1
 // binary.Size returns how many bytes Write would generate to encode the value v, which

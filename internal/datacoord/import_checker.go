@@ -17,6 +17,7 @@
 package datacoord
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -188,6 +189,11 @@ func (c *importChecker) checkImportState(requestID int64) {
 				log.Warn("unset importing flag failed", WrapLogFields(task, err)...)
 				return
 			}
+		}
+		// accelerate building index
+		_, err := c.sm.SealAllSegments(context.Background(), task.GetCollectionID(), segmentIDs, true)
+		if err != nil {
+			log.Warn("seal imported segments failed", WrapLogFields(task, err)...)
 		}
 	}
 }

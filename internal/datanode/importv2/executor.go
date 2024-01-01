@@ -161,6 +161,10 @@ func (e *executor) readFileStat(reader importutilv2.Reader, task Task, fileIdx i
 		if err != nil {
 			return err
 		}
+		err = FillDynamicData(data, task.GetSchema())
+		if err != nil {
+			return err
+		}
 		rowsCount, err := GetHashedRowsCount(task, data)
 		if err != nil {
 			return err
@@ -214,6 +218,10 @@ func (e *executor) Import(task Task) {
 func (e *executor) importFile(reader importutilv2.Reader, count int64, task Task) error {
 	for {
 		data, err := reader.Next(count)
+		if err != nil {
+			return err
+		}
+		err = FillDynamicData(data, task.GetSchema())
 		if err != nil {
 			return err
 		}

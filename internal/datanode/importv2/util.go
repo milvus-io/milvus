@@ -19,6 +19,7 @@ package importv2
 import (
 	"context"
 	"fmt"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/pkg/common"
 
@@ -116,15 +117,25 @@ func AddSegment(metaCache metacache.MetaCache, vchannel string, segID, partID, c
 	}
 }
 
-func CheckRowsEqual(data *storage.InsertData) error {
+func CheckRowsEqual(schema *schemapb.CollectionSchema, data *storage.InsertData) error {
 	if len(data.Data) == 0 {
 		return nil
 	}
-	rows := lo.Values(data.Data)[0].RowNum()
-	for _, d := range data.Data {
+	fields := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) int64 {
+		return field.GetFieldID()
+	})
+
+	var field int64
+	var rows int
+	for fieldID, d := range data.Data {
+		field, rows = fieldID, d.RowNum()
+		break
+	}
+	for fieldID, d := range data.Data {
 		if d.RowNum() != rows {
 			return merr.WrapErrImportFailed(
-				fmt.Sprintf("imported rows are not aligned, rows(%d) vs rows(%d)", rows, d.RowNum()))
+				fmt.Sprintf("imported rows are not aligned, field '%s' with '%d' rows, field '%s' with '%d' rows",
+					fields[field].GetName(), rows, fields[fieldID].GetName(), d.RowNum()))
 		}
 	}
 	return nil
@@ -136,7 +147,7 @@ func AppendSystemFieldsData(task *ImportTask, data *storage.InsertData) error {
 	if err != nil {
 		return err
 	}
-	rowNum := GetInsertDataRowNum(data)
+	rowNum := GetInsertDataRowNum(data, task.GetSchema())
 	ids := make([]int64, rowNum)
 	for i := 0; i < rowNum; i++ {
 		ids[i] = idRange.GetBegin() + int64(i)
@@ -155,11 +166,43 @@ func AppendSystemFieldsData(task *ImportTask, data *storage.InsertData) error {
 	return nil
 }
 
-func GetInsertDataRowNum(data *storage.InsertData) int {
-	for _, fd := range data.Data {
+func GetInsertDataRowNum(data *storage.InsertData, schema *schemapb.CollectionSchema) int {
+	fields := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) int64 {
+		return field.GetFieldID()
+	})
+	for fieldID, fd := range data.Data {
+		if fields[fieldID].GetIsDynamic() {
+			continue
+		}
 		if fd.RowNum() != 0 {
 			return fd.RowNum()
 		}
 	}
 	return 0
+}
+
+func FillDynamicData(data *storage.InsertData, schema *schemapb.CollectionSchema) error {
+	if !schema.GetEnableDynamicField() {
+		return nil
+	}
+	dynamicField, err := typeutil.GetDynamicField(schema)
+	if err != nil {
+		return nil
+	}
+	rowNum := GetInsertDataRowNum(data, schema)
+	dynamicData := data.Data[dynamicField.GetFieldID()]
+	if dynamicData.RowNum() >= rowNum {
+		return nil
+	}
+	jsonFD := dynamicData.(*storage.JSONFieldData)
+	bs := []byte("{}")
+	count := rowNum - dynamicData.RowNum()
+	fmt.Println("dyh debug, FillDynamicData 2", " rowNum:", rowNum, " dynamicData.RowNum():", dynamicData.RowNum(),
+		" count:", count)
+	for i := 0; i < count; i++ {
+		jsonFD.Data = append(jsonFD.Data, bs)
+	}
+	data.Data[dynamicField.GetFieldID()] = dynamicData
+	fmt.Println("dyh debug, FillDynamicData 2", data.Data[dynamicField.GetFieldID()].RowNum())
+	return nil
 }

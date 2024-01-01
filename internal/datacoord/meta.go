@@ -254,6 +254,7 @@ func (m *meta) GetNumRowsOfCollection(collectionID UniqueID) int64 {
 	var ret int64
 	segments := m.segments.GetSegments()
 	for _, segment := range segments {
+		fmt.Println("................*", segment.SegmentInfo)
 		if isSegmentHealthy(segment) && segment.GetCollectionID() == collectionID {
 			ret += segment.GetNumOfRows()
 		}
@@ -599,6 +600,27 @@ func UpdateCheckPointOperator(segmentID int64, importing bool, checkpoints []*da
 				zap.Int64("segment bin log row count (correct)", count))
 			segment.NumOfRows = count
 		}
+		return true
+	}
+}
+
+func UpdateNumOfRows(segmentID int64, rows int64) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			log.Warn("meta update: update NumOfRows failed - segment not found",
+				zap.Int64("segmentID", segmentID))
+			return false
+		}
+		segment.NumOfRows = rows
+		count := segmentutil.CalcRowCountFromBinLog(segment.SegmentInfo)
+		if count != segment.currRows && count > 0 {
+			log.Info("reported inconsistent with bin log row count",
+				zap.Int64("rows (wrong)", segment.currRows),
+				zap.Int64("segment bin log row count (correct)", count))
+			segment.NumOfRows = count
+		}
+		fmt.Println("dyh debug, updateNumOfRows, count:", count)
 		return true
 	}
 }

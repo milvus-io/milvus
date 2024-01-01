@@ -17,6 +17,7 @@
 package datacoord
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -197,6 +198,7 @@ func (s *importScheduler) processInProgressPreImport(task ImportTask) {
 		s.checkErr(task, err)
 		return
 	}
+	fmt.Println("dyh debug, file stats", resp.GetFileStats())
 	actions := []UpdateAction{UpdateFileStats(resp.GetFileStats())}
 	if resp.GetState() == milvuspb.ImportState_Completed {
 		actions = append(actions, UpdateState(milvuspb.ImportState_Completed))
@@ -227,13 +229,13 @@ func (s *importScheduler) processInProgressImport(task ImportTask) {
 		return
 	}
 	for _, info := range resp.GetImportSegmentsInfo() {
-		operator := UpdateBinlogsOperator(info.GetSegmentID(), info.GetBinlogs(), info.GetStatslogs(), nil)
-		err = s.meta.UpdateSegmentsInfo(operator)
+		op1 := UpdateBinlogsOperator(info.GetSegmentID(), info.GetBinlogs(), info.GetStatslogs(), nil)
+		op2 := UpdateNumOfRows(info.GetSegmentID(), info.GetImportedRows())
+		err = s.meta.UpdateSegmentsInfo(op1, op2)
 		if err != nil {
 			log.Warn("update import segment info failed", WrapLogFields(task, err)...)
 			continue
 		}
-		s.meta.SetCurrentRows(info.GetSegmentID(), info.GetImportedRows())
 	}
 	if resp.GetState() == milvuspb.ImportState_Completed {
 		err = s.imeta.Update(task.GetTaskID(), UpdateState(milvuspb.ImportState_Completed))

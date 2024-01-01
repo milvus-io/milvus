@@ -83,7 +83,7 @@ func GetHashedRowsCount(task Task, insertData *storage.InsertData) (map[string]*
 		return nil, err
 	}
 
-	rowNum := GetInsertDataRowNum(insertData)
+	rowNum := GetInsertDataRowNum(insertData, task.GetSchema())
 	pkField, err := typeutil.GetPrimaryFieldSchema(task.GetSchema())
 	if err != nil {
 		return nil, err
@@ -108,7 +108,7 @@ func GetHashedRowsCount(task Task, insertData *storage.InsertData) (map[string]*
 		}
 	}
 
-	err = CheckRowsEqual(insertData)
+	err = CheckRowsEqual(task.GetSchema(), insertData)
 	if err != nil {
 		return nil, err
 	}

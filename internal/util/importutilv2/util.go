@@ -102,7 +102,7 @@ func CreateReaders(paths []string,
 		return name, path
 	})
 	for _, field := range schema.GetFields() {
-		if (field.GetIsPrimaryKey() && field.GetAutoID()) || field.GetIsDynamic() {
+		if field.GetIsPrimaryKey() && field.GetAutoID() {
 			continue
 		}
 		if _, ok := nameToPath[field.GetName()]; !ok {

@@ -23,6 +23,11 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"io"
+	"strings"
+)
+
+const (
+	RowRootNode = "rows"
 )
 
 type Row = map[storage.FieldID]any
@@ -30,6 +35,8 @@ type Row = map[storage.FieldID]any
 type reader struct {
 	dec    *json.Decoder
 	schema *schemapb.CollectionSchema
+
+	isOldFormat bool
 
 	validator Validator
 	parser    RowParser
@@ -69,7 +76,8 @@ func (j *reader) Init() error {
 	if t != json.Delim('{') && t != json.Delim('[') {
 		return merr.WrapErrImportFailed("invalid JSON format, the content should be started with '{' or '['")
 	}
-	_ = j.dec.More()
+	//_ = j.dec.More()
+	j.isOldFormat = t == json.Delim('{')
 	return nil
 }
 
@@ -77,6 +85,32 @@ func (j *reader) Next(count int64) (*storage.InsertData, error) {
 	insertData, err := storage.NewInsertData(j.schema)
 	if err != nil {
 		return nil, err
+	}
+	if !j.dec.More() {
+		return insertData, nil
+	}
+	if j.isOldFormat {
+		// read the key
+		t, err := j.dec.Token()
+		if err != nil {
+			return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to decode the JSON file, error: %v", err))
+		}
+		key := t.(string)
+		keyLower := strings.ToLower(key)
+		// the root key should be RowRootNode
+		if keyLower != RowRootNode {
+			return nil, merr.WrapErrImportFailed(fmt.Sprintf("invalid JSON format, the root key should be '%s', but get '%s'", RowRootNode, key))
+		}
+
+		// started by '['
+		t, err = j.dec.Token()
+		if err != nil {
+			return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to decode the JSON file, error: %v", err))
+		}
+
+		if t != json.Delim('[') {
+			return nil, merr.WrapErrImportFailed("invalid JSON format, rows list should begin with '['")
+		}
 	}
 	for j.dec.More() && count > 0 {
 		var value any

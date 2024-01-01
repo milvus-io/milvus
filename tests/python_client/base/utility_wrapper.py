@@ -112,15 +112,17 @@ class ApiUtilityWrapper:
         else:
             task_timeout = TIMEOUT
         log.info(f"wait bulk load timeout is {task_timeout}")
-        while True:
-            state, progress = utility.get_bulk_insert_state(task_ids[0], task_timeout, using, **kwargs)
-            if state == 4 and progress == 100:
-                print(f"wait for bulk load tasks completed successfully")
-                break
-            if state == 3:
-                raise Exception(str(state))
-            time.sleep(2)
-            print(f"waiting for bulk load tasks... state={state}, progress={progress}")
+        for task_id in task_ids:
+            while True:
+                state, progress = utility.get_bulk_insert_state(task_id, task_timeout, using, **kwargs)
+                if state == 4 and progress == 100:
+                    print(f"wait for bulk load tasks completed successfully")
+                    break
+                if state == 3:
+                    raise Exception(str(state))
+                time.sleep(2)
+                print(f"waiting for bulk load tasks... state={state}, progress={progress}")
+        return True, 4
 
     # def wait_for_bulk_insert_tasks_completed(self, task_ids, target_state=BulkInsertState.ImportCompleted,
     #                                          timeout=None, using="default", **kwargs):

@@ -5274,7 +5274,7 @@ func (node *Proxy) ImportV2(ctx context.Context, req *milvuspb.ImportRequestV2) 
 
 	hasPartitionKey := typeutil.HasPartitionKey(schema)
 	if req.GetPartitionName() != "" && hasPartitionKey {
-		resp.Status = merr.Status(merr.WrapErrImportFailed("specify partition name is not allowed in partitionKey mode"))
+		resp.Status = merr.Status(merr.WrapErrImportFailed("not allow to set partition name for collection with partition key"))
 		return resp, nil
 	}
 

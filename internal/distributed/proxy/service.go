@@ -125,10 +125,6 @@ func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error)
 }
 
 func authenticate(c *gin.Context) {
-	c.Set(httpserver.ContextUsername, "")
-	if !proxy.Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
-		return
-	}
 	username, password, ok := httpserver.ParseUsernamePassword(c)
 	if ok {
 		if proxy.PasswordVerify(c, username, password) {
@@ -178,15 +174,15 @@ func (s *Server) startHTTPServer(errChan chan error) {
 		SkipPaths: proxy.Params.ProxyCfg.GinLogSkipPaths.GetAsStrings(),
 	})
 	ginHandler.Use(ginLogger, gin.Recovery())
+	httpHeaderAllowInt64 := "false"
+	httpParams := &paramtable.Get().HTTPCfg
+	if httpParams.AcceptTypeAllowInt64.GetAsBool() {
+		httpHeaderAllowInt64 = "true"
+	}
 	ginHandler.Use(func(c *gin.Context) {
 		_, err := strconv.ParseBool(c.Request.Header.Get(httpserver.HTTPHeaderAllowInt64))
 		if err != nil {
-			httpParams := &paramtable.Get().HTTPCfg
-			if httpParams.AcceptTypeAllowInt64.GetAsBool() {
-				c.Request.Header.Set(httpserver.HTTPHeaderAllowInt64, "true")
-			} else {
-				c.Request.Header.Set(httpserver.HTTPHeaderAllowInt64, "false")
-			}
+			c.Request.Header.Set(httpserver.HTTPHeaderAllowInt64, httpHeaderAllowInt64)
 		}
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
@@ -197,9 +193,15 @@ func (s *Server) startHTTPServer(errChan chan error) {
 			return
 		}
 		c.Next()
-	}, authenticate)
+	})
+	ginHandler.Use(func(c *gin.Context) {
+		c.Set(httpserver.ContextUsername, "")
+	})
+	if proxy.Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
+		ginHandler.Use(authenticate)
+	}
 	app := ginHandler.Group("/v1")
-	httpserver.NewHandlers(s.proxy).RegisterRoutesToV1(app)
+	httpserver.NewHandlersV1(s.proxy).RegisterRoutesToV1(app)
 	s.httpServer = &http.Server{Handler: ginHandler, ReadHeaderTimeout: time.Second}
 	errChan <- nil
 	if err := s.httpServer.Serve(s.httpListener); err != nil && err != cmux.ErrServerClosed {

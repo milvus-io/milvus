@@ -18,7 +18,6 @@ package datacoord
 
 import (
 	"context"
-	"fmt"
 	"sort"
 	"time"
 
@@ -256,13 +255,7 @@ func AreAllTasksFinished(tasks []ImportTask, meta *meta) bool {
 	return true
 }
 
-var count = 10
-
 func GetImportProgress(requestID int64, imeta ImportMeta, meta *meta) (int64, milvuspb.ImportState, string) {
-	if count == 0 {
-		fmt.Println(count)
-	}
-	count--
 	tasks := imeta.GetBy(WithReq(requestID), WithType(PreImportTaskType))
 	var (
 		preparingProgress float32 = 100

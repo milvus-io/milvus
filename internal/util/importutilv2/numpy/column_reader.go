@@ -51,7 +51,7 @@ func NewColumnReader(reader io.Reader, field *schemapb.FieldSchema) (*ColumnRead
 		return nil, err
 	}
 
-	var dim int64
+	var dim int64 = 1
 	if typeutil.IsVectorType(field.GetDataType()) {
 		dim, err = typeutil.GetDim(field)
 		if err != nil {
@@ -96,13 +96,15 @@ func (c *ColumnReader) getCount(count int64) int64 {
 		return 0
 	}
 	if int(count) > (total - c.readPosition) {
+		fmt.Println("dyh debug get count 1, shape=", shape, ", total=", total, ", rp=", c.readPosition, ", count=", count)
 		return int64(total - c.readPosition)
 	}
+	fmt.Println("dyh debug get count 2, shape=", shape, ", total=", total, ", rp=", c.readPosition, ", count=", count)
 	return count
 }
 
 func (c *ColumnReader) Next(count int64) (res storage.FieldData, resErr error) {
-	count = c.getCount(count)
+	count = c.getCount(count * c.dim)
 	dt := c.field.GetDataType()
 	switch dt {
 	case schemapb.DataType_Bool:
@@ -218,6 +220,7 @@ func (c *ColumnReader) Next(count int64) (res storage.FieldData, resErr error) {
 			})
 		}
 		c.readPosition += int(count)
+		fmt.Println("dyh debug, read vector, count=", count, ", len(data)=", len(data))
 		return &storage.FloatVectorFieldData{
 			Data: data,
 			Dim:  int(c.dim),

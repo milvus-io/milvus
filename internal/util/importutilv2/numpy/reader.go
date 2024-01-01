@@ -17,6 +17,7 @@
 package numpy
 
 import (
+	"fmt"
 	"io"
 
 	"github.com/samber/lo"
@@ -34,6 +35,7 @@ func NewReader(schema *schemapb.CollectionSchema, readers map[int64]io.Reader) (
 	fields := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) int64 {
 		return field.GetFieldID()
 	})
+	fmt.Println("dyh debug, schema", schema)
 	crs := make(map[int64]*ColumnReader)
 	for fieldID, r := range readers {
 		cr, err := NewColumnReader(r, fields[fieldID])

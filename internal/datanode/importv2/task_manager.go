@@ -53,17 +53,16 @@ func (m *taskManager) Add(task Task) {
 func (m *taskManager) Update(taskID int64, actions ...UpdateAction) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if task, ok := m.tasks[taskID]; ok {
-		updatedTask := task.Clone()
+	if _, ok := m.tasks[taskID]; ok {
 		for _, action := range actions {
-			action(updatedTask)
+			action(m.tasks[taskID])
 		}
-		switch updatedTask.GetType() {
-		case PreImportTaskType:
-			m.tasks[updatedTask.GetTaskID()] = updatedTask
-		case ImportTaskType:
-			m.tasks[updatedTask.GetTaskID()] = updatedTask
-		}
+		//switch updatedTask.GetType() {
+		//case PreImportTaskType:
+		//	m.tasks[updatedTask.GetTaskID()] = updatedTask
+		//case ImportTaskType:
+		//	m.tasks[updatedTask.GetTaskID()] = updatedTask
+		//}
 	}
 }
 

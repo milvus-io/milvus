@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"sync"
 	"time"
 
@@ -390,6 +391,20 @@ func (s *SegmentManager) AddImportSegment(ctx context.Context, collectionID Uniq
 		log.Error("failed to open new segment while allocID", zap.Error(err))
 		return nil, err
 	}
+	ts, err := s.allocator.allocTimestamp(ctx)
+	if err != nil {
+		return nil, err
+	}
+	position := &msgpb.MsgPosition{
+		ChannelName: channelName,
+		MsgID:       nil,
+		Timestamp:   ts,
+	}
+
+	expireTs, err := s.genExpireTs(ctx, true)
+	if err != nil {
+		return nil, err
+	}
 
 	segmentInfo := &datapb.SegmentInfo{
 		ID:             id,
@@ -397,10 +412,12 @@ func (s *SegmentManager) AddImportSegment(ctx context.Context, collectionID Uniq
 		PartitionID:    partitionID,
 		InsertChannel:  channelName,
 		NumOfRows:      0,
-		State:          commonpb.SegmentState_Importing,
+		State:          commonpb.SegmentState_Flushed,
 		MaxRowNum:      int64(maxNumOfRows),
 		Level:          datapb.SegmentLevel_L1,
-		LastExpireTime: 0,
+		LastExpireTime: expireTs,
+		StartPosition:  position,
+		DmlPosition:    position,
 	}
 	segmentInfo.IsImporting = true
 	segment := NewSegmentInfo(segmentInfo)
