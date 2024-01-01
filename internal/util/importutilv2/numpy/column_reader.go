@@ -230,6 +230,10 @@ func (c *ColumnReader) Next(count int64) (res storage.FieldData, resErr error) {
 	}
 }
 
+func (c *ColumnReader) Close() {
+
+}
+
 // setByteOrder sets BigEndian/LittleEndian, the logic of this method is copied from npyio lib
 func (c *ColumnReader) setByteOrder() {
 	var nativeEndian binary.ByteOrder

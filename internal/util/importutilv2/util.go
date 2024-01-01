@@ -19,12 +19,10 @@ package importutilv2
 import (
 	"context"
 	"fmt"
-	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"github.com/samber/lo"
 	"io"
 	"path/filepath"
@@ -53,8 +51,8 @@ func (f FileType) String() string {
 	return FileTypeName[int(f)]
 }
 
-func WrapIllegalFileTypeError(file string) error {
-	return merr.WrapErrImportFailed(fmt.Sprintf("unrecognized file type with name %s", file))
+func WrapIllegalFileTypeError(file string, format string) error {
+	return merr.WrapErrImportFailed(fmt.Sprintf("unrecognized file '%s' type for %s import", file, format))
 }
 
 func WrapReadFileError(file string, err error) error {
@@ -66,7 +64,7 @@ func GetFileTypeAndPaths(file *milvuspb.ImportFile) (FileType, []string, error) 
 	case *milvuspb.ImportFile_RowBasedFile:
 		filePath := file.GetRowBasedFile()
 		if filepath.Ext(filePath) != JSONFileExt {
-			return 0, nil, WrapIllegalFileTypeError(filePath)
+			return 0, nil, WrapIllegalFileTypeError(filePath, "row-based")
 		}
 		return JSON, []string{filePath}, nil
 	case *milvuspb.ImportFile_ColumnBasedFile:
@@ -84,14 +82,17 @@ func GetFileTypeAndPaths(file *milvuspb.ImportFile) (FileType, []string, error) 
 		if ext == NumpyFileExt {
 			return Numpy, paths, nil
 		} else if ext == ParquetFileExt {
+			if len(paths) != 1 {
+				return 0, nil, merr.WrapErrImportFailed("only 1 file is allowed for parquet importing")
+			}
 			return Parquet, paths, nil
 		}
-		return 0, nil, WrapIllegalFileTypeError(paths[0])
+		return 0, nil, WrapIllegalFileTypeError(paths[0], "column-based")
 	}
 	return 0, nil, merr.WrapErrImportFailed("unexpect file type when import")
 }
 
-func CreateReaders(paths []string,
+func CreateReaders(paths []string, // TODO: dyh, move it to numpy
 	cm storage.ChunkManager,
 	schema *schemapb.CollectionSchema,
 ) (map[int64]io.Reader, error) {
@@ -115,19 +116,4 @@ func CreateReaders(paths []string,
 		readers[field.GetFieldID()] = reader
 	}
 	return readers, nil
-}
-
-func GetSchemaWithoutAutoID(schema *schemapb.CollectionSchema) (*schemapb.CollectionSchema, error) {
-	pkField, err := typeutil.GetPrimaryFieldSchema(schema)
-	if err != nil {
-		return nil, err
-	}
-	if !pkField.GetAutoID() {
-		return schema, nil
-	}
-	newSchema := proto.Clone(schema).(*schemapb.CollectionSchema)
-	newSchema.Fields = lo.Filter(newSchema.GetFields(), func(field *schemapb.FieldSchema, _ int) bool {
-		return field.GetFieldID() != pkField.GetFieldID()
-	})
-	return newSchema, nil
 }

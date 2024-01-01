@@ -214,7 +214,8 @@ func (s *importScheduler) processInProgressPreImport(task ImportTask) {
 	log.Info("query preimport done",
 		zap.Int64("request", task.GetRequestID()),
 		zap.Int64("taskID", task.GetTaskID()),
-		zap.String("state", resp.GetState().String()))
+		zap.String("state", resp.GetState().String()),
+		zap.String("reason", resp.GetReason()))
 }
 
 func (s *importScheduler) processInProgressImport(task ImportTask) {

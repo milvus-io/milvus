@@ -66,5 +66,7 @@ func (r *Reader) Next(count int64) (*storage.InsertData, error) {
 }
 
 func (r *Reader) Close() {
-
+	for _, cr := range r.crs {
+		cr.Close()
+	}
 }

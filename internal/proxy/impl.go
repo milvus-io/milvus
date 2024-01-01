@@ -5298,6 +5298,16 @@ func (node *Proxy) ImportV2(ctx context.Context, req *milvuspb.ImportRequestV2) 
 		}
 		partitionIDs = []UniqueID{partitionID}
 	}
+	if len(req.GetFiles()) == 0 {
+		resp.Status = merr.Status(merr.WrapErrImportFailed("import request is empty"))
+		return resp, nil
+	}
+	for _, file := range req.GetFiles() {
+		switch file.GetFile() {
+		case *milvuspb.ImportFile_RowBasedFile:
+
+		}
+	}
 	importRequest := &datapb.ImportRequestInternal{
 		CollectionID: collectionID,
 		PartitionIDs: partitionIDs,

@@ -18,13 +18,13 @@ package importutilv2
 
 import (
 	"context"
-	"fmt"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/binlog"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/json"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/numpy"
+	"github.com/milvus-io/milvus/internal/util/importutilv2/parquet"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
@@ -44,11 +44,6 @@ func NewReader(cm storage.ChunkManager,
 	importFile *milvuspb.ImportFile,
 	options Options,
 ) (Reader, error) {
-	//schema, err := GetSchemaWithoutAutoID(schema)
-	//if err != nil {
-	//	return nil, err
-	//}
-	fmt.Println("dyh debug, new reader", importFile)
 	if IsBackup(options) {
 		tsStart, tsEnd, err := ParseTimeRange(options)
 		if err != nil {
@@ -64,7 +59,7 @@ func NewReader(cm storage.ChunkManager,
 	}
 	switch fileType {
 	case JSON:
-		reader, err := cm.Reader(context.Background(), paths[0])
+		reader, err := cm.Reader(context.Background(), paths[0]) // TODO: dyh, resolve context
 		if err != nil {
 			return nil, WrapReadFileError(paths[0], err)
 		}
@@ -85,7 +80,11 @@ func NewReader(cm storage.ChunkManager,
 		}
 		return numpy.NewReader(schema, readers)
 	case Parquet:
-		return nil, merr.ErrServiceUnimplemented
+		cmReader, err := cm.Reader(context.Background(), paths[0]) // TODO: dyh, resolve context
+		if err != nil {
+			return nil, err
+		}
+		return parquet.NewReader(schema, cmReader)
 	}
 	return nil, merr.WrapErrImportFailed("unexpected import file")
 }

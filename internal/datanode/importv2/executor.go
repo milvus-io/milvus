@@ -122,7 +122,8 @@ func (e *executor) PreImport(task Task) {
 	log := log.With(zap.Int64("taskID", task.GetTaskID()),
 		zap.Int64("requestID", task.GetRequestID()),
 		zap.Int64("collectionID", task.GetCollectionID()),
-		zap.String("type", task.GetType().String()))
+		zap.String("type", task.GetType().String()),
+		zap.Any("schema", task.GetSchema()))
 	e.manager.Update(task.GetTaskID(), UpdateState(milvuspb.ImportState_InProgress))
 	files := lo.Map(task.(*PreImportTask).GetFileStats(),
 		func(fileStat *datapb.ImportFileStats, _ int) *milvuspb.ImportFile {
@@ -145,7 +146,8 @@ func (e *executor) PreImport(task Task) {
 	}
 
 	e.manager.Update(task.GetTaskID(), UpdateState(milvuspb.ImportState_Completed))
-	log.Info("preimport done", zap.String("state", task.GetState().String()))
+	log.Info("preimport done", zap.String("state", task.GetState().String()),
+		zap.Any("fileStats", task.(*PreImportTask).GetFileStats()))
 }
 
 func (e *executor) readFileStat(reader importutilv2.Reader, task Task, fileIdx int) error {
@@ -188,7 +190,8 @@ func (e *executor) Import(task Task) {
 	log := log.With(zap.Int64("taskID", task.GetTaskID()),
 		zap.Int64("requestID", task.GetRequestID()),
 		zap.Int64("collectionID", task.GetCollectionID()),
-		zap.String("type", task.GetType().String()))
+		zap.String("type", task.GetType().String()),
+		zap.Any("schema", task.GetSchema()))
 	e.manager.Update(task.GetTaskID(), UpdateState(milvuspb.ImportState_InProgress))
 	count, err := e.estimateReadRows(task.GetSchema())
 	if err != nil {
