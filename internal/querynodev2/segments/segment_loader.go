@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
@@ -797,22 +798,36 @@ func (loader *segmentLoader) LoadDeltaLogs(ctx context.Context, segment Segment,
 	)
 	dCodec := storage.DeleteCodec{}
 	var blobs []*storage.Blob
+	var mtx sync.Mutex
+	var futures []*conc.Future[any]
 	for _, deltaLog := range deltaLogs {
 		for _, bLog := range deltaLog.GetBinlogs() {
+			bLog := bLog
 			// the segment has applied the delta logs, skip it
 			if bLog.GetTimestampTo() > 0 && // this field may be missed in legacy versions
 				bLog.GetTimestampTo() < segment.LastDeltaTimestamp() {
 				continue
 			}
-			value, err := loader.cm.Read(ctx, bLog.GetLogPath())
-			if err != nil {
-				return err
-			}
-			blob := &storage.Blob{
-				Key:   bLog.GetLogPath(),
-				Value: value,
-			}
-			blobs = append(blobs, blob)
+			future := GetLoadPool().Submit(func() (any, error) {
+				value, err := loader.cm.Read(ctx, bLog.GetLogPath())
+				if err != nil {
+					return nil, err
+				}
+				blob := &storage.Blob{
+					Key:   bLog.GetLogPath(),
+					Value: value,
+				}
+				mtx.Lock()
+				blobs = append(blobs, blob)
+				mtx.Unlock()
+				return nil, nil
+			})
+			futures = append(futures, future)
+		}
+	}
+	for _, future := range futures {
+		if _, err := future.Await(); err != nil {
+			return err
 		}
 	}
 	if len(blobs) == 0 {
