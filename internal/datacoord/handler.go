@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/retry"
@@ -124,12 +125,13 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 		unIndexedIDs = make(typeutil.UniqueSet)
 		droppedIDs   = make(typeutil.UniqueSet)
 		growingIDs   = make(typeutil.UniqueSet)
+		levelZeroIDs = make(typeutil.UniqueSet)
 	)
 
 	validPartitions := lo.Filter(partitionIDs, func(partitionID int64, _ int) bool { return partitionID > allPartitionID })
 	partitionSet := typeutil.NewUniqueSet(validPartitions...)
 	for _, s := range segments {
-		if (partitionSet.Len() > 0 && !partitionSet.Contain(s.PartitionID)) ||
+		if (partitionSet.Len() > 0 && !partitionSet.Contain(s.PartitionID) && s.GetPartitionID() != common.InvalidPartitionID) ||
 			(s.GetStartPosition() == nil && s.GetDmlPosition() == nil) {
 			continue
 		}
@@ -143,6 +145,8 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 			droppedIDs.Insert(s.GetID())
 		case !isFlushState(s.GetState()):
 			growingIDs.Insert(s.GetID())
+		case s.GetLevel() == datapb.SegmentLevel_L0:
+			levelZeroIDs.Insert(s.GetID())
 		case indexed.Contain(s.GetID()):
 			indexedIDs.Insert(s.GetID())
 		case s.GetNumOfRows() < Params.DataCoordCfg.MinSegmentNumRowsToEnableIndex.GetAsInt64(): // treat small flushed segment as indexed
@@ -209,6 +213,7 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 		FlushedSegmentIds:   indexedIDs.Collect(),
 		UnflushedSegmentIds: growingIDs.Collect(),
 		DroppedSegmentIds:   droppedIDs.Collect(),
+		LevelZeroSegmentIds: levelZeroIDs.Collect(),
 	}
 }
 
