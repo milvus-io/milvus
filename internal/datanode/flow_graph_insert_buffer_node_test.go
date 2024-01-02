@@ -701,8 +701,6 @@ func TestInsertBufferNodeRollBF(t *testing.T) {
 		assert.Equal(t, datapb.SegmentType_New, seg.getType())
 		assert.Equal(t, int64(1), seg.numRows)
 		assert.Equal(t, uint64(100), seg.startPos.GetTimestamp())
-		// because this is the origincal
-		assert.True(t, seg.currentStat.PkFilter.Cap() > uint(1000000))
 
 		inMsg.startPositions = []*msgpb.MsgPosition{{Timestamp: 200}}
 		inMsg.endPositions = []*msgpb.MsgPosition{{Timestamp: 234}}

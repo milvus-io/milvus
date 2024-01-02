@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 var _ Candidate = (*BloomFilterSet)(nil)
@@ -80,7 +81,8 @@ func (s *BloomFilterSet) UpdateBloomFilter(pks []storage.PrimaryKey) {
 
 	if s.currentStat == nil {
 		s.currentStat = &storage.PkStatistics{
-			PkFilter: bloom.NewWithEstimates(storage.BloomFilterSize, storage.MaxBloomFalsePositive),
+			PkFilter: bloom.NewWithEstimates(paramtable.Get().CommonCfg.BloomFilterSize.GetAsUint(),
+				paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat()),
 		}
 	}
 
@@ -115,7 +117,8 @@ func (s *BloomFilterSet) AddHistoricalStats(stats *storage.PkStatistics) {
 func (s *BloomFilterSet) initCurrentStat() {
 	if s.currentStat == nil {
 		s.currentStat = &storage.PkStatistics{
-			PkFilter: bloom.NewWithEstimates(storage.BloomFilterSize, storage.MaxBloomFalsePositive),
+			PkFilter: bloom.NewWithEstimates(paramtable.Get().CommonCfg.BloomFilterSize.GetAsUint(),
+				paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat()),
 		}
 	}
 }

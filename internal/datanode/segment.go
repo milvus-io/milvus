@@ -155,7 +155,8 @@ func (s *Segment) getHistoricalStats(pkField *schemapb.FieldSchema) ([]*storage.
 func (s *Segment) InitCurrentStat() {
 	if s.currentStat == nil {
 		s.currentStat = &storage.PkStatistics{
-			PkFilter: bloom.NewWithEstimates(storage.BloomFilterSize, storage.MaxBloomFalsePositive),
+			PkFilter: bloom.NewWithEstimates(paramtable.Get().CommonCfg.BloomFilterSize.GetAsUint(),
+				paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat()),
 		}
 	}
 }
