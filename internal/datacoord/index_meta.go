@@ -24,6 +24,7 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -271,77 +272,73 @@ func (m *meta) GetIndexIDByName(collID int64, indexName string) map[int64]uint64
 	return indexID2CreateTs
 }
 
-type IndexState struct {
-	state      commonpb.IndexState
-	failReason string
-}
-
-func (m *meta) GetSegmentIndexState(collID, segmentID UniqueID) IndexState {
+func (m *meta) GetSegmentIndexState(collID, segmentID UniqueID, indexID UniqueID) *indexpb.SegmentIndexState {
 	m.RLock()
 	defer m.RUnlock()
 
-	state := IndexState{
-		state:      commonpb.IndexState_IndexStateNone,
-		failReason: "",
+	state := &indexpb.SegmentIndexState{
+		SegmentID:  segmentID,
+		State:      commonpb.IndexState_IndexStateNone,
+		FailReason: "",
 	}
 	fieldIndexes, ok := m.indexes[collID]
 	if !ok {
-		state.failReason = fmt.Sprintf("collection not exist with ID: %d", collID)
+		state.FailReason = fmt.Sprintf("collection not exist with ID: %d", collID)
 		return state
 	}
 	segment := m.segments.GetSegment(segmentID)
-	if segment != nil {
-		for indexID, index := range fieldIndexes {
-			if !index.IsDeleted {
-				if segIdx, ok := segment.segmentIndexes[indexID]; ok {
-					if segIdx.IndexState != commonpb.IndexState_Finished {
-						state.state = segIdx.IndexState
-						state.failReason = segIdx.FailReason
-						break
-					}
-					state.state = commonpb.IndexState_Finished
-					continue
-				}
-				state.state = commonpb.IndexState_Unissued
-				break
-			}
-		}
+	if segment == nil {
+		state.FailReason = fmt.Sprintf("segment is not exist with ID: %d", segmentID)
 		return state
 	}
-	state.failReason = fmt.Sprintf("segment is not exist with ID: %d", segmentID)
+
+	if index, ok := fieldIndexes[indexID]; ok && !index.IsDeleted {
+		if segIdx, ok := segment.segmentIndexes[indexID]; ok {
+			state.IndexName = index.IndexName
+			state.State = segIdx.IndexState
+			state.FailReason = segIdx.FailReason
+			return state
+		}
+		state.State = commonpb.IndexState_Unissued
+		return state
+	}
+
+	state.FailReason = fmt.Sprintf("there is no index on indexID: %d", indexID)
 	return state
 }
 
-func (m *meta) GetSegmentIndexStateOnField(collID, segmentID, fieldID UniqueID) IndexState {
+func (m *meta) GetSegmentIndexStateOnField(collID, segmentID, fieldID UniqueID) *indexpb.SegmentIndexState {
 	m.RLock()
 	defer m.RUnlock()
 
-	state := IndexState{
-		state:      commonpb.IndexState_IndexStateNone,
-		failReason: "",
+	state := &indexpb.SegmentIndexState{
+		SegmentID:  segmentID,
+		State:      commonpb.IndexState_IndexStateNone,
+		FailReason: "",
 	}
 	fieldIndexes, ok := m.indexes[collID]
 	if !ok {
-		state.failReason = fmt.Sprintf("collection not exist with ID: %d", collID)
+		state.FailReason = fmt.Sprintf("collection not exist with ID: %d", collID)
 		return state
 	}
 	segment := m.segments.GetSegment(segmentID)
-	if segment != nil {
-		for indexID, index := range fieldIndexes {
-			if index.FieldID == fieldID && !index.IsDeleted {
-				if segIdx, ok := segment.segmentIndexes[indexID]; ok {
-					state.state = segIdx.IndexState
-					state.failReason = segIdx.FailReason
-					return state
-				}
-				state.state = commonpb.IndexState_Unissued
-				return state
-			}
-		}
-		state.failReason = fmt.Sprintf("there is no index on fieldID: %d", fieldID)
+	if segment == nil {
+		state.FailReason = fmt.Sprintf("segment is not exist with ID: %d", segmentID)
 		return state
 	}
-	state.failReason = fmt.Sprintf("segment is not exist with ID: %d", segmentID)
+	for indexID, index := range fieldIndexes {
+		if index.FieldID == fieldID && !index.IsDeleted {
+			if segIdx, ok := segment.segmentIndexes[indexID]; ok {
+				state.IndexName = index.IndexName
+				state.State = segIdx.IndexState
+				state.FailReason = segIdx.FailReason
+				return state
+			}
+			state.State = commonpb.IndexState_Unissued
+			return state
+		}
+	}
+	state.FailReason = fmt.Sprintf("there is no index on fieldID: %d", fieldID)
 	return state
 }
 
@@ -716,7 +713,7 @@ func (m *meta) GetHasUnindexTaskSegments() []*SegmentInfo {
 	m.RLock()
 	defer m.RUnlock()
 	segments := m.segments.GetSegments()
-	var ret []*SegmentInfo
+	unindexedSegments := make(map[int64]*SegmentInfo)
 	for _, segment := range segments {
 		if !isFlush(segment) {
 			continue
@@ -724,12 +721,13 @@ func (m *meta) GetHasUnindexTaskSegments() []*SegmentInfo {
 		if fieldIndexes, ok := m.indexes[segment.CollectionID]; ok {
 			for _, index := range fieldIndexes {
 				if _, ok := segment.segmentIndexes[index.IndexID]; !index.IsDeleted && !ok {
-					ret = append(ret, segment)
+					unindexedSegments[segment.GetID()] = segment
 				}
 			}
 		}
 	}
-	return ret
+
+	return lo.MapToSlice(unindexedSegments, func(_ int64, segment *SegmentInfo) *SegmentInfo { return segment })
 }
 
 func (m *meta) GetMetasByNodeID(nodeID UniqueID) []*model.SegmentIndex {

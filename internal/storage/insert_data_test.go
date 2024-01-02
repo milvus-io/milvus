@@ -147,6 +147,14 @@ func (s *InsertDataSuite) TestMemorySize() {
 	s.Equal(s.iDataTwoRows.Data[Float16VectorField].GetMemorySize(), 20)
 }
 
+func (s *InsertDataSuite) TestGetDataType() {
+	for _, field := range s.schema.GetFields() {
+		fieldData, ok := s.iDataOneRow.Data[field.GetFieldID()]
+		s.True(ok)
+		s.Equal(field.GetDataType(), fieldData.GetDataType())
+	}
+}
+
 func (s *InsertDataSuite) SetupTest() {
 	var err error
 	s.iDataEmpty, err = NewInsertData(s.schema)

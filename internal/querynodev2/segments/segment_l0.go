@@ -131,15 +131,15 @@ func (s *L0Segment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segcorep
 	return nil, nil
 }
 
-func (s *L0Segment) Insert(rowIDs []int64, timestamps []typeutil.Timestamp, record *segcorepb.InsertRecord) error {
+func (s *L0Segment) Insert(ctx context.Context, rowIDs []int64, timestamps []typeutil.Timestamp, record *segcorepb.InsertRecord) error {
 	return merr.WrapErrIoFailedReason("insert not supported for L0 segment")
 }
 
-func (s *L0Segment) Delete(primaryKeys []storage.PrimaryKey, timestamps []typeutil.Timestamp) error {
+func (s *L0Segment) Delete(ctx context.Context, primaryKeys []storage.PrimaryKey, timestamps []typeutil.Timestamp) error {
 	return merr.WrapErrIoFailedReason("delete not supported for L0 segment")
 }
 
-func (s *L0Segment) LoadDeltaData(deltaData *storage.DeleteData) error {
+func (s *L0Segment) LoadDeltaData(ctx context.Context, deltaData *storage.DeleteData) error {
 	s.dataGuard.Lock()
 	defer s.dataGuard.Unlock()
 

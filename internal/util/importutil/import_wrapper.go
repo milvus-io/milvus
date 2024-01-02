@@ -301,6 +301,7 @@ func (p *ImportWrapper) Import(filePaths []string, options ImportOptions) error 
 			if err != nil {
 				return err
 			}
+			defer parser.Close()
 
 			err = parser.Parse()
 			if err != nil {

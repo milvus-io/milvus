@@ -72,22 +72,21 @@ class PhyCompareFilterExpr : public Expr {
         const std::shared_ptr<const milvus::expr::CompareExpr>& expr,
         const std::string& name,
         const segcore::SegmentInternalInterface* segment,
-        Timestamp query_timestamp,
+        int64_t active_count,
         int64_t batch_size)
         : Expr(DataType::BOOL, std::move(input), name),
           left_field_(expr->left_field_id_),
           right_field_(expr->right_field_id_),
           segment_(segment),
-          query_timestamp_(query_timestamp),
+          active_count_(active_count),
           batch_size_(batch_size),
           expr_(expr) {
         is_left_indexed_ = segment_->HasIndex(left_field_);
         is_right_indexed_ = segment_->HasIndex(right_field_);
-        num_rows_ = segment_->get_active_count(query_timestamp_);
+        size_per_chunk_ = segment_->size_per_chunk();
         num_chunk_ = is_left_indexed_
                          ? segment_->num_chunk_index(expr_->left_field_id_)
-                         : segment_->num_chunk_data(expr_->left_field_id_);
-        size_per_chunk_ = segment_->size_per_chunk();
+                         : upper_div(active_count_, size_per_chunk_);
         AssertInfo(
             batch_size_ > 0,
             fmt::format("expr batch size should greater than zero, but now: {}",
@@ -117,11 +116,14 @@ class PhyCompareFilterExpr : public Expr {
             auto left_chunk = segment_->chunk_data<T>(left_field_, i);
             auto right_chunk = segment_->chunk_data<U>(right_field_, i);
             auto data_pos = (i == current_chunk_id_) ? current_chunk_pos_ : 0;
-            auto size = (i == (num_chunk_ - 1))
-                            ? (segment_->type() == SegmentType::Growing
-                                   ? num_rows_ % size_per_chunk_ - data_pos
-                                   : num_rows_ - data_pos)
-                            : size_per_chunk_ - data_pos;
+            auto size =
+                (i == (num_chunk_ - 1))
+                    ? (segment_->type() == SegmentType::Growing
+                           ? (active_count_ % size_per_chunk_ == 0
+                                  ? size_per_chunk_ - data_pos
+                                  : active_count_ % size_per_chunk_ - data_pos)
+                           : active_count_ - data_pos)
+                    : size_per_chunk_ - data_pos;
 
             if (processed_size + size >= batch_size_) {
                 size = batch_size_ - processed_size;
@@ -171,14 +173,13 @@ class PhyCompareFilterExpr : public Expr {
     const FieldId right_field_;
     bool is_left_indexed_;
     bool is_right_indexed_;
-    int64_t num_rows_{0};
+    int64_t active_count_{0};
     int64_t num_chunk_{0};
     int64_t current_chunk_id_{0};
     int64_t current_chunk_pos_{0};
     int64_t size_per_chunk_{0};
 
     const segcore::SegmentInternalInterface* segment_;
-    Timestamp query_timestamp_;
     int64_t batch_size_;
     std::shared_ptr<const milvus::expr::CompareExpr> expr_;
 };

@@ -641,6 +641,7 @@ message DeleteRequest {
   int64 segment_id = 5;
   schema.IDs primary_keys = 6;
   repeated uint64 timestamps = 7; 
+  DataScope scope = 8;
 }
 
 message ActivateCheckerRequest {

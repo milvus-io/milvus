@@ -55,7 +55,7 @@ TEST(Expr, AlwaysTrue) {
     BitsetType final;
     std::shared_ptr<milvus::plan::PlanNode> plan =
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
-    visitor.ExecuteExprNode(plan, seg_promote, final);
+    visitor.ExecuteExprNode(plan, seg_promote, N * num_iters, final);
     EXPECT_EQ(final.size(), N * num_iters);
 
     for (int i = 0; i < N * num_iters; ++i) {

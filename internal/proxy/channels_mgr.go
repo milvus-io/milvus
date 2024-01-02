@@ -235,6 +235,8 @@ func (mgr *singleTypeChannelsMgr) createMsgStream(collectionID UniqueID) (msgstr
 			zap.Strings("physical_channels", channelInfos.pchans))
 		mgr.infos[collectionID] = streamInfos{channelInfos: channelInfos, stream: stream}
 		incPChansMetrics(channelInfos.pchans)
+	} else {
+		stream.Close()
 	}
 
 	return mgr.infos[collectionID].stream, nil

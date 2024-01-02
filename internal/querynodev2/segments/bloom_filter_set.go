@@ -26,6 +26,7 @@ import (
 	storage "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type bloomFilterSet struct {
@@ -94,6 +95,7 @@ func (s *bloomFilterSet) AddHistoricalStats(stats *storage.PkStatistics) {
 // Note: invoker shall acquire statsMutex lock first.
 func (s *bloomFilterSet) initCurrentStat() {
 	s.currentStat = &storage.PkStatistics{
-		PkFilter: bloom.NewWithEstimates(storage.BloomFilterSize, storage.MaxBloomFalsePositive),
+		PkFilter: bloom.NewWithEstimates(paramtable.Get().CommonCfg.BloomFilterSize.GetAsUint(),
+			paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat()),
 	}
 }

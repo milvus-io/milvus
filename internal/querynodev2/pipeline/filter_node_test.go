@@ -22,8 +22,6 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -40,7 +38,7 @@ type FilterNodeSuite struct {
 	channel      string
 
 	validSegmentIDs    []int64
-	excludedSegments   *typeutil.ConcurrentMap[int64, *datapb.SegmentInfo]
+	excludedSegments   *typeutil.ConcurrentMap[int64, uint64]
 	excludedSegmentIDs []int64
 	insertSegmentIDs   []int64
 	deleteSegmentSum   int
@@ -64,13 +62,9 @@ func (suite *FilterNodeSuite) SetupSuite() {
 	suite.errSegmentID = 7
 
 	// init excludedSegment
-	suite.excludedSegments = typeutil.NewConcurrentMap[int64, *datapb.SegmentInfo]()
+	suite.excludedSegments = typeutil.NewConcurrentMap[int64, uint64]()
 	for _, id := range suite.excludedSegmentIDs {
-		suite.excludedSegments.Insert(id, &datapb.SegmentInfo{
-			DmlPosition: &msgpb.MsgPosition{
-				Timestamp: 1,
-			},
-		})
+		suite.excludedSegments.Insert(id, 1)
 	}
 }
 

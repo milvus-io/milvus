@@ -17,6 +17,7 @@
 package segments
 
 import (
+	"context"
 	"testing"
 
 	"github.com/golang/protobuf/proto"
@@ -57,7 +58,7 @@ func (suite *PlanSuite) TestPlanCreateByExpr() {
 	expr, err := proto.Marshal(planNode)
 	suite.NoError(err)
 
-	_, err = createSearchPlanByExpr(suite.collection, expr, "")
+	_, err = createSearchPlanByExpr(context.Background(), suite.collection, expr, "")
 	suite.Error(err)
 }
 
@@ -66,13 +67,13 @@ func (suite *PlanSuite) TestPlanFail() {
 		id: -1,
 	}
 
-	_, err := createSearchPlanByExpr(collection, nil, "")
+	_, err := createSearchPlanByExpr(context.Background(), collection, nil, "")
 	suite.Error(err)
 }
 
 func (suite *PlanSuite) TestQueryPlanCollectionReleased() {
 	collection := &Collection{id: suite.collectionID}
-	_, err := NewRetrievePlan(collection, nil, 0, 0)
+	_, err := NewRetrievePlan(context.Background(), collection, nil, 0, 0)
 	suite.Error(err)
 }
 

@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 // QueryHook is the interface for search/query parameter optimizer.
@@ -57,11 +58,12 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 		withFilter := (plan.GetVectorAnns().GetPredicates() != nil)
 		queryInfo := plan.GetVectorAnns().GetQueryInfo()
 		params := map[string]any{
-			common.TopKKey:        queryInfo.GetTopk(),
-			common.SearchParamKey: queryInfo.GetSearchParams(),
-			common.SegmentNumKey:  estSegmentNum,
-			common.WithFilterKey:  withFilter,
-			common.CollectionKey:  req.GetReq().GetCollectionID(),
+			common.TopKKey:         queryInfo.GetTopk(),
+			common.SearchParamKey:  queryInfo.GetSearchParams(),
+			common.SegmentNumKey:   estSegmentNum,
+			common.WithFilterKey:   withFilter,
+			common.WithOptimizeKey: paramtable.Get().AutoIndexConfig.EnableOptimize.GetAsBool(),
+			common.CollectionKey:   req.GetReq().GetCollectionID(),
 		}
 		err := queryHook.Run(params)
 		if err != nil {

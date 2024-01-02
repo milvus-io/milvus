@@ -1,6 +1,7 @@
 package datacoord
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/samber/lo"
@@ -9,13 +10,14 @@ import (
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type Scheduler interface {
 	Submit(t ...*compactionTask)
 	Schedule() []*compactionTask
-	Finish(nodeID, planID int64)
+	Finish(nodeID int64, plan *datapb.CompactionPlan)
 	GetTaskCount() int
 	LogStatus()
 
@@ -50,6 +52,10 @@ func (s *CompactionScheduler) Submit(tasks ...*compactionTask) {
 	s.mu.Unlock()
 
 	s.taskNumber.Add(int32(len(tasks)))
+	lo.ForEach(tasks, func(t *compactionTask, _ int) {
+		metrics.DataCoordCompactionTaskNum.
+			WithLabelValues(fmt.Sprint(t.dataNodeID), t.plan.GetType().String(), metrics.Pending).Inc()
+	})
 	s.LogStatus()
 }
 
@@ -126,6 +132,10 @@ func (s *CompactionScheduler) Schedule() []*compactionTask {
 		} else {
 			s.parallelTasks[node] = append(s.parallelTasks[node], task)
 		}
+		metrics.DataCoordCompactionTaskNum.
+			WithLabelValues(fmt.Sprint(node), task.plan.GetType().String(), metrics.Executing).Inc()
+		metrics.DataCoordCompactionTaskNum.
+			WithLabelValues(fmt.Sprint(node), task.plan.GetType().String(), metrics.Pending).Dec()
 	}
 
 	s.queuingTasks = lo.Filter(s.queuingTasks, func(t *compactionTask, _ int) bool {
@@ -142,7 +152,8 @@ func (s *CompactionScheduler) Schedule() []*compactionTask {
 	return lo.Values(executable)
 }
 
-func (s *CompactionScheduler) Finish(nodeID, planID UniqueID) {
+func (s *CompactionScheduler) Finish(nodeID UniqueID, plan *datapb.CompactionPlan) {
+	planID := plan.GetPlanID()
 	log := log.With(zap.Int64("planID", planID), zap.Int64("nodeID", nodeID))
 
 	s.mu.Lock()
@@ -152,6 +163,10 @@ func (s *CompactionScheduler) Finish(nodeID, planID UniqueID) {
 		})
 		s.parallelTasks[nodeID] = tasks
 		s.taskNumber.Dec()
+		metrics.DataCoordCompactionTaskNum.
+			WithLabelValues(fmt.Sprint(nodeID), plan.GetType().String(), metrics.Executing).Dec()
+		metrics.DataCoordCompactionTaskNum.
+			WithLabelValues(fmt.Sprint(nodeID), plan.GetType().String(), metrics.Done).Inc()
 		log.Info("Compaction scheduler remove task from executing")
 	}
 
@@ -161,6 +176,10 @@ func (s *CompactionScheduler) Finish(nodeID, planID UniqueID) {
 	if len(filtered) < len(s.queuingTasks) {
 		s.queuingTasks = filtered
 		s.taskNumber.Dec()
+		metrics.DataCoordCompactionTaskNum.
+			WithLabelValues(fmt.Sprint(nodeID), plan.GetType().String(), metrics.Pending).Dec()
+		metrics.DataCoordCompactionTaskNum.
+			WithLabelValues(fmt.Sprint(nodeID), plan.GetType().String(), metrics.Done).Inc()
 		log.Info("Compaction scheduler remove task from queue")
 	}
 

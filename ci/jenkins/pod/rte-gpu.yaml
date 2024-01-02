@@ -18,6 +18,10 @@ spec:
       value: 240
     - name: COMPOSE_HTTP_TIMEOUT
       value: 240
+    - name: NODE_NAME
+      valueFrom:
+        fieldRef:
+          fieldPath: spec.nodeName
     tty: true
     securityContext:
       privileged: true

@@ -474,7 +474,7 @@ func buildArrayData(dataType, elementType schemapb.DataType, dim, rows int, isBi
 
 func writeParquet(w io.Writer, milvusSchema *schemapb.CollectionSchema, numRows int) error {
 	schema := convertMilvusSchemaToArrowSchema(milvusSchema)
-	fw, err := pqarrow.NewFileWriter(schema, w, parquet.NewWriterProperties(), pqarrow.DefaultWriterProps())
+	fw, err := pqarrow.NewFileWriter(schema, w, parquet.NewWriterProperties(parquet.WithMaxRowGroupLength(1000)), pqarrow.DefaultWriterProps())
 	if err != nil {
 		return err
 	}

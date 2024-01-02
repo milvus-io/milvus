@@ -130,7 +130,7 @@ PhyTermFilterExpr::CanSkipSegment() {
     // using skip index to help skipping this segment
     if (segment_->type() == SegmentType::Sealed &&
         skip_index.CanSkipBinaryRange<T>(field_id_, 0, min, max, true, true)) {
-        cached_bits_.resize(num_rows_, false);
+        cached_bits_.resize(active_count_, false);
         cached_offsets_ = std::make_shared<ColumnVector>(DataType::INT64, 0);
         cached_offsets_inited_ = true;
         return true;
@@ -169,7 +169,7 @@ PhyTermFilterExpr::InitPkCacheOffset() {
 
     auto [uids, seg_offsets] =
         segment_->search_ids(*id_array, query_timestamp_);
-    cached_bits_.resize(num_rows_, false);
+    cached_bits_.resize(active_count_, false);
     cached_offsets_ =
         std::make_shared<ColumnVector>(DataType::INT64, seg_offsets.size());
     int64_t* cached_offsets_ptr = (int64_t*)cached_offsets_->GetRawData();
@@ -188,9 +188,10 @@ PhyTermFilterExpr::ExecPkTermImpl() {
         InitPkCacheOffset();
     }
 
-    auto real_batch_size = current_data_chunk_pos_ + batch_size_ >= num_rows_
-                               ? num_rows_ - current_data_chunk_pos_
-                               : batch_size_;
+    auto real_batch_size =
+        current_data_chunk_pos_ + batch_size_ >= active_count_
+            ? active_count_ - current_data_chunk_pos_
+            : batch_size_;
 
     if (real_batch_size == 0) {
         return nullptr;

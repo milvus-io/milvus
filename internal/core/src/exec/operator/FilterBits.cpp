@@ -32,8 +32,7 @@ FilterBits::FilterBits(
     std::vector<expr::TypedExprPtr> filters;
     filters.emplace_back(filter->filter());
     exprs_ = std::make_unique<ExprSet>(filters, exec_context);
-    need_process_rows_ = query_context->get_segment()->get_active_count(
-        query_context->get_query_timestamp());
+    need_process_rows_ = query_context->get_active_count();
     num_processed_rows_ = 0;
 }
 

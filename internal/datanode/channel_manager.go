@@ -33,7 +33,14 @@ import (
 
 type releaseFunc func(channel string)
 
-type ChannelManager struct {
+type ChannelManager interface {
+	Submit(info *datapb.ChannelWatchInfo) error
+	GetProgress(info *datapb.ChannelWatchInfo) *datapb.ChannelOperationProgressResponse
+	Close()
+	Start()
+}
+
+type ChannelManagerImpl struct {
 	mu sync.RWMutex
 	dn *DataNode
 
@@ -50,9 +57,9 @@ type ChannelManager struct {
 	closeWaiter sync.WaitGroup
 }
 
-func NewChannelManager(dn *DataNode) *ChannelManager {
+func NewChannelManager(dn *DataNode) *ChannelManagerImpl {
 	fm := newFlowgraphManager()
-	cm := ChannelManager{
+	cm := ChannelManagerImpl{
 		dn:        dn,
 		fgManager: fm,
 
@@ -68,13 +75,13 @@ func NewChannelManager(dn *DataNode) *ChannelManager {
 	return &cm
 }
 
-func (m *ChannelManager) Submit(info *datapb.ChannelWatchInfo) error {
+func (m *ChannelManagerImpl) Submit(info *datapb.ChannelWatchInfo) error {
 	channel := info.GetVchan().GetChannelName()
 	runner := m.getOrCreateRunner(channel)
 	return runner.Enqueue(info)
 }
 
-func (m *ChannelManager) GetProgress(info *datapb.ChannelWatchInfo) *datapb.ChannelOperationProgressResponse {
+func (m *ChannelManagerImpl) GetProgress(info *datapb.ChannelWatchInfo) *datapb.ChannelOperationProgressResponse {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	resp := &datapb.ChannelOperationProgressResponse{
@@ -85,8 +92,10 @@ func (m *ChannelManager) GetProgress(info *datapb.ChannelWatchInfo) *datapb.Chan
 	channel := info.GetVchan().GetChannelName()
 	switch info.GetState() {
 	case datapb.ChannelWatchState_ToWatch:
+		// running flowgraph means watch success
 		if m.fgManager.HasFlowgraphWithOpID(channel, info.GetOpID()) {
 			resp.State = datapb.ChannelWatchState_WatchSuccess
+			resp.Progress = 100
 			return resp
 		}
 
@@ -121,7 +130,7 @@ func (m *ChannelManager) GetProgress(info *datapb.ChannelWatchInfo) *datapb.Chan
 	}
 }
 
-func (m *ChannelManager) Close() {
+func (m *ChannelManagerImpl) Close() {
 	m.closeOnce.Do(func() {
 		m.opRunners.Range(func(channel string, runner *opRunner) bool {
 			runner.Close()
@@ -132,7 +141,7 @@ func (m *ChannelManager) Close() {
 	})
 }
 
-func (m *ChannelManager) Start() {
+func (m *ChannelManagerImpl) Start() {
 	m.closeWaiter.Add(1)
 	go func() {
 		defer m.closeWaiter.Done()
@@ -149,7 +158,7 @@ func (m *ChannelManager) Start() {
 	}()
 }
 
-func (m *ChannelManager) handleOpState(opState *opState) {
+func (m *ChannelManagerImpl) handleOpState(opState *opState) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	log := log.With(
@@ -180,7 +189,7 @@ func (m *ChannelManager) handleOpState(opState *opState) {
 	}
 }
 
-func (m *ChannelManager) getOrCreateRunner(channel string) *opRunner {
+func (m *ChannelManagerImpl) getOrCreateRunner(channel string) *opRunner {
 	runner, loaded := m.opRunners.GetOrInsert(channel, NewOpRunner(channel, m.dn, m.releaseFunc, m.communicateCh))
 	if !loaded {
 		runner.Start()
@@ -188,13 +197,13 @@ func (m *ChannelManager) getOrCreateRunner(channel string) *opRunner {
 	return runner
 }
 
-func (m *ChannelManager) destoryRunner(channel string) {
+func (m *ChannelManagerImpl) destoryRunner(channel string) {
 	if runner, loaded := m.opRunners.GetAndRemove(channel); loaded {
 		runner.Close()
 	}
 }
 
-func (m *ChannelManager) finishOp(opID int64, channel string) {
+func (m *ChannelManagerImpl) finishOp(opID int64, channel string) {
 	if runner, loaded := m.opRunners.Get(channel); loaded {
 		runner.FinishOp(opID)
 	}
@@ -328,22 +337,24 @@ func (r *opRunner) watchWithTimer(info *datapb.ChannelWatchInfo) *opState {
 		timer := time.NewTimer(watchTimeout)
 		defer timer.Stop()
 
-		log.Info("Start timer for ToWatch operation", zap.Duration("timeout", watchTimeout))
+		log := log.With(zap.Duration("timeout", watchTimeout))
+		log.Info("Start timer for ToWatch operation")
 		for {
 			select {
 			case <-timer.C:
 				// watch timeout
 				tickler.close()
 				cancel()
-				log.Info("Stop timer for ToWatch operation timeout", zap.Duration("timeout", watchTimeout))
+				log.Info("Stop timer for ToWatch operation timeout")
 				return
 
 			case <-tickler.progressSig:
+				log.Info("Reset timer for tickler updated")
 				timer.Reset(watchTimeout)
 
 			case <-successSig:
 				// watch success
-				log.Info("Stop timer for ToWatch operation succeeded", zap.Duration("timeout", watchTimeout))
+				log.Info("Stop timer for ToWatch operation succeeded")
 				return
 			}
 		}

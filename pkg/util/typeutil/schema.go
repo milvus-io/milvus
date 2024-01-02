@@ -782,6 +782,18 @@ func GetVectorFieldSchema(schema *schemapb.CollectionSchema) (*schemapb.FieldSch
 	return nil, errors.New("vector field is not found")
 }
 
+// GetVectorFieldSchemas get vector fields schema from collection schema.
+func GetVectorFieldSchemas(schema *schemapb.CollectionSchema) []*schemapb.FieldSchema {
+	ret := make([]*schemapb.FieldSchema, 0)
+	for _, fieldSchema := range schema.Fields {
+		if IsVectorType(fieldSchema.DataType) {
+			ret = append(ret, fieldSchema)
+		}
+	}
+
+	return ret
+}
+
 // GetPrimaryFieldSchema get primary field schema from collection schema
 func GetPrimaryFieldSchema(schema *schemapb.CollectionSchema) (*schemapb.FieldSchema, error) {
 	for _, fieldSchema := range schema.Fields {

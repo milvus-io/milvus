@@ -54,9 +54,9 @@ type Segment interface {
 	HasRawData(fieldID int64) bool
 
 	// Modification related
-	Insert(rowIDs []int64, timestamps []typeutil.Timestamp, record *segcorepb.InsertRecord) error
-	Delete(primaryKeys []storage.PrimaryKey, timestamps []typeutil.Timestamp) error
-	LoadDeltaData(deltaData *storage.DeleteData) error
+	Insert(ctx context.Context, rowIDs []int64, timestamps []typeutil.Timestamp, record *segcorepb.InsertRecord) error
+	Delete(ctx context.Context, primaryKeys []storage.PrimaryKey, timestamps []typeutil.Timestamp) error
+	LoadDeltaData(ctx context.Context, deltaData *storage.DeleteData) error
 	LastDeltaTimestamp() uint64
 	Release()
 
