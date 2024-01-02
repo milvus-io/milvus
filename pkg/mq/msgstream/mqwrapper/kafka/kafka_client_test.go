@@ -348,12 +348,6 @@ func withMechanism(v string) kafkaCfgOption {
 	}
 }
 
-func withProtocol(v string) kafkaCfgOption {
-	return func(cfg *paramtable.KafkaConfig) {
-		initParamItem(&cfg.SecurityProtocol, v)
-	}
-}
-
 func createKafkaConfig(opts ...kafkaCfgOption) *paramtable.KafkaConfig {
 	cfg := &paramtable.KafkaConfig{}
 	for _, opt := range opts {
@@ -375,7 +369,7 @@ func TestKafkaClient_NewKafkaClientInstanceWithConfig(t *testing.T) {
 	consumerConfig := make(map[string]string)
 	consumerConfig["client.id"] = "dc"
 
-	config := createKafkaConfig(withAddr("addr"), withUsername("username"), withPasswd("password"), withMechanism("sasl"), withProtocol("plain"))
+	config := createKafkaConfig(withAddr("addr"), withUsername("username"), withPasswd("password"), withMechanism("PLAIN"))
 	config.ConsumerExtraConfig = paramtable.ParamGroup{GetFunc: func() map[string]string { return consumerConfig }}
 	config.ProducerExtraConfig = paramtable.ParamGroup{GetFunc: func() map[string]string { return producerConfig }}
 

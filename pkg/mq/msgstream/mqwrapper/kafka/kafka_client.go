@@ -68,27 +68,37 @@ func NewKafkaClientInstanceWithConfig(ctx context.Context, config *paramtable.Ka
 		// kafkaConfig.SetKey("socket.connection.setup.timeout.ms", strconv.FormatInt(timeout, 10))
 	}
 
-	if (config.SaslUsername.GetValue() == "" && config.SaslPassword.GetValue() != "") ||
-		(config.SaslUsername.GetValue() != "" && config.SaslPassword.GetValue() == "") {
-		panic("enable security mode need config username and password at the same time!")
-	}
+	kafkaConfig.SetKey("security.protocol", "PLAINTEXT")
 
-	if config.SecurityProtocol.GetValue() != "" {
-		kafkaConfig.SetKey("security.protocol", config.SecurityProtocol.GetValue())
-	}
-
-	if config.SaslUsername.GetValue() != "" && config.SaslPassword.GetValue() != "" {
+	// sasl settings
+	if config.SaslEnabled.GetAsBool() {
+		if config.SaslUsername.GetValue() == "" || config.SaslPassword.GetValue() == "" {
+			panic("username and password cannot be empty when sasl enabled!")
+		}
 		kafkaConfig.SetKey("sasl.mechanisms", config.SaslMechanisms.GetValue())
 		kafkaConfig.SetKey("sasl.username", config.SaslUsername.GetValue())
 		kafkaConfig.SetKey("sasl.password", config.SaslPassword.GetValue())
+		kafkaConfig.SetKey("security.protocol", "SASL_PLAINTEXT")
 	}
 
+	// ssl settings
 	if config.KafkaUseSSL.GetAsBool() {
 		kafkaConfig.SetKey("ssl.certificate.location", config.KafkaTLSCert.GetValue())
 		kafkaConfig.SetKey("ssl.key.location", config.KafkaTLSKey.GetValue())
 		kafkaConfig.SetKey("ssl.ca.location", config.KafkaTLSCACert.GetValue())
 		if config.KafkaTLSKeyPassword.GetValue() != "" {
 			kafkaConfig.SetKey("ssl.key.password", config.KafkaTLSKeyPassword.GetValue())
+		}
+		if config.KafkaTLSHostNameVerify.GetAsBool() {
+			kafkaConfig.SetKey("ssl.endpoint.identification.algorithm", "https")
+		} else {
+			kafkaConfig.SetKey("ssl.endpoint.identification.algorithm", "none")
+		}
+
+		if config.SaslEnabled.GetAsBool() {
+			kafkaConfig.SetKey("security.protocol", "SASL_SSL")
+		} else {
+			kafkaConfig.SetKey("security.protocol", "SSL")
 		}
 	}
 

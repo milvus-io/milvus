@@ -679,19 +679,20 @@ func (p *PulsarConfig) Init(base *BaseTable) {
 
 // --- kafka ---
 type KafkaConfig struct {
-	Address             ParamItem  `refreshable:"false"`
-	SaslUsername        ParamItem  `refreshable:"false"`
-	SaslPassword        ParamItem  `refreshable:"false"`
-	SaslMechanisms      ParamItem  `refreshable:"false"`
-	SecurityProtocol    ParamItem  `refreshable:"false"`
-	KafkaUseSSL         ParamItem  `refreshable:"false"`
-	KafkaTLSCert        ParamItem  `refreshable:"false"`
-	KafkaTLSKey         ParamItem  `refreshable:"false"`
-	KafkaTLSCACert      ParamItem  `refreshable:"false"`
-	KafkaTLSKeyPassword ParamItem  `refreshable:"false"`
-	ConsumerExtraConfig ParamGroup `refreshable:"false"`
-	ProducerExtraConfig ParamGroup `refreshable:"false"`
-	ReadTimeout         ParamItem  `refreshable:"true"`
+	Address                ParamItem  `refreshable:"false"`
+	SaslEnabled            ParamItem  `refreshable:"false"`
+	SaslUsername           ParamItem  `refreshable:"false"`
+	SaslPassword           ParamItem  `refreshable:"false"`
+	SaslMechanisms         ParamItem  `refreshable:"false"`
+	KafkaUseSSL            ParamItem  `refreshable:"false"`
+	KafkaTLSCert           ParamItem  `refreshable:"false"`
+	KafkaTLSKey            ParamItem  `refreshable:"false"`
+	KafkaTLSCACert         ParamItem  `refreshable:"false"`
+	KafkaTLSKeyPassword    ParamItem  `refreshable:"false"`
+	KafkaTLSHostNameVerify ParamItem  `refreshable:"false"`
+	ConsumerExtraConfig    ParamGroup `refreshable:"false"`
+	ProducerExtraConfig    ParamGroup `refreshable:"false"`
+	ReadTimeout            ParamItem  `refreshable:"true"`
 }
 
 func (k *KafkaConfig) Init(base *BaseTable) {
@@ -704,8 +705,16 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 	}
 	k.Address.Init(base.mgr)
 
+	k.SaslEnabled = ParamItem{
+		Key:          "kafka.sasl.enabled",
+		DefaultValue: "false",
+		Version:      "2.1.0",
+		Export:       true,
+	}
+	k.SaslEnabled.Init(base.mgr)
+
 	k.SaslUsername = ParamItem{
-		Key:          "kafka.saslUsername",
+		Key:          "kafka.sasl.username",
 		DefaultValue: "",
 		Version:      "2.1.0",
 		Export:       true,
@@ -713,7 +722,7 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 	k.SaslUsername.Init(base.mgr)
 
 	k.SaslPassword = ParamItem{
-		Key:          "kafka.saslPassword",
+		Key:          "kafka.sasl.password",
 		DefaultValue: "",
 		Version:      "2.1.0",
 		Export:       true,
@@ -721,20 +730,12 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 	k.SaslPassword.Init(base.mgr)
 
 	k.SaslMechanisms = ParamItem{
-		Key:          "kafka.saslMechanisms",
-		DefaultValue: "",
+		Key:          "kafka.sasl.mechanisms",
+		DefaultValue: "PLAIN",
 		Version:      "2.1.0",
 		Export:       true,
 	}
 	k.SaslMechanisms.Init(base.mgr)
-
-	k.SecurityProtocol = ParamItem{
-		Key:          "kafka.securityProtocol",
-		DefaultValue: "",
-		Version:      "2.1.0",
-		Export:       true,
-	}
-	k.SecurityProtocol.Init(base.mgr)
 
 	k.KafkaUseSSL = ParamItem{
 		Key:          "kafka.ssl.enabled",
@@ -776,6 +777,14 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 		Export:  true,
 	}
 	k.KafkaTLSKeyPassword.Init(base.mgr)
+
+	k.KafkaTLSHostNameVerify = ParamItem{
+		Key:          "kafka.ssl.tlsHostnameVerify",
+		DefaultValue: "false",
+		Version:      "2.1.0",
+		Export:       true,
+	}
+	k.KafkaTLSHostNameVerify.Init(base.mgr)
 
 	k.ConsumerExtraConfig = ParamGroup{
 		KeyPrefix: "kafka.consumer.",
