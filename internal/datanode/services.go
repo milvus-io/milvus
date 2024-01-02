@@ -970,23 +970,61 @@ func logDupFlush(cID, segID int64) {
 }
 
 func (node *DataNode) PreImport(ctx context.Context, req *datapb.PreImportRequest) (*commonpb.Status, error) {
+	log := log.Ctx(ctx).With(zap.Int64("taskID", req.GetTaskID()),
+		zap.Int64("requestID", req.GetRequestID()),
+		zap.Int64("collectionID", req.GetCollectionID()),
+		zap.Int64s("partitionIDs", req.GetPartitionIDs()),
+		zap.Strings("vchannels", req.GetVchannels()),
+		zap.Any("files", req.GetImportFiles()))
+
+	log.Info("receive preimport request")
+
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
 	task := importv2.NewPreImportTask(req)
 	node.importManager.Add(task)
+
+	log.Info("preimport done")
 	return merr.Success(), nil
 }
 
 func (node *DataNode) ImportV2(ctx context.Context, req *datapb.ImportRequest) (*commonpb.Status, error) {
+	log := log.Ctx(ctx).With(zap.Int64("taskID", req.GetTaskID()),
+		zap.Int64("requestID", req.GetRequestID()),
+		zap.Int64("collectionID", req.GetCollectionID()),
+		zap.Any("segments", req.GetRequestSegments()),
+		zap.Any("files", req.GetFiles()))
+
+	log.Info("receive import request")
+
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
 	task := importv2.NewImportTask(req)
 	node.importManager.Add(task)
+
+	log.Info("import done")
 	return merr.Success(), nil
 }
 
 func (node *DataNode) QueryPreImport(ctx context.Context, req *datapb.QueryPreImportRequest) (*datapb.QueryPreImportResponse, error) {
+	log := log.Ctx(ctx).With(zap.Int64("taskID", req.GetTaskID()),
+		zap.Int64("requestID", req.GetRequestID()))
+
+	log.Info("receive QueryPreImport request")
+
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &datapb.QueryPreImportResponse{Status: merr.Status(err)}, nil
+	}
 	status := merr.Success()
 	task := node.importManager.Get(req.GetTaskID())
 	if task == nil || task.GetType() != importv2.PreImportTaskType {
 		status = merr.Status(importv2.WrapNoTaskError(req.GetTaskID(), importv2.PreImportTaskType))
 	}
+	log.Info("query preimport done", zap.String("state", task.GetState().String()),
+		zap.String("reason", task.GetReason()))
 	return &datapb.QueryPreImportResponse{
 		Status:    status,
 		TaskID:    task.GetTaskID(),
@@ -997,12 +1035,19 @@ func (node *DataNode) QueryPreImport(ctx context.Context, req *datapb.QueryPreIm
 }
 
 func (node *DataNode) QueryImport(ctx context.Context, req *datapb.QueryImportRequest) (*datapb.QueryImportResponse, error) {
+	log := log.Ctx(ctx).With(zap.Int64("taskID", req.GetTaskID()),
+		zap.Int64("requestID", req.GetRequestID()))
+
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &datapb.QueryImportResponse{Status: merr.Status(err)}, nil
+	}
+
 	status := merr.Success()
 
 	// query slot
 	const maxParallelImportTaskNum = 10 // TODO: dyh, make it configurable
 	if req.GetTaskID() == 0 && req.GetRequestID() == 0 {
-		tasks := node.importManager.GetBy(importv2.WithStates(milvuspb.ImportState_Pending, milvuspb.ImportState_InProgress))
+		tasks := node.importManager.GetBy(importv2.WithStates(internalpb.ImportState_Pending, internalpb.ImportState_InProgress))
 		return &datapb.QueryImportResponse{
 			Status: status,
 			Slots:  int64(maxParallelImportTaskNum - len(tasks)),
@@ -1014,6 +1059,8 @@ func (node *DataNode) QueryImport(ctx context.Context, req *datapb.QueryImportRe
 	if task == nil || task.GetType() != importv2.ImportTaskType {
 		status = merr.Status(importv2.WrapNoTaskError(req.GetTaskID(), importv2.ImportTaskType))
 	}
+	log.Info("query import done", zap.String("state", task.GetState().String()),
+		zap.String("reason", task.GetReason()))
 	return &datapb.QueryImportResponse{
 		Status:             status,
 		TaskID:             task.GetTaskID(),
@@ -1024,6 +1071,18 @@ func (node *DataNode) QueryImport(ctx context.Context, req *datapb.QueryImportRe
 }
 
 func (node *DataNode) DropImport(ctx context.Context, req *datapb.DropImportRequest) (*commonpb.Status, error) {
+	log := log.Ctx(ctx).With(zap.Int64("taskID", req.GetTaskID()),
+		zap.Int64("requestID", req.GetRequestID()))
+
+	log.Info("receive DropImport request")
+
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
 	node.importManager.Remove(req.GetTaskID())
+
+	log.Info("drop import done")
+
 	return merr.Success(), nil
 }

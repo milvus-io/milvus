@@ -17,10 +17,11 @@
 package importv2
 
 import (
-	"github.com/golang/protobuf/proto"
+	"fmt"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"github.com/samber/lo"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -44,7 +45,7 @@ func (t TaskType) String() string {
 
 type TaskFilter func(task Task) bool
 
-func WithStates(states ...milvuspb.ImportState) TaskFilter {
+func WithStates(states ...internalpb.ImportState) TaskFilter {
 	return func(task Task) bool {
 		for _, state := range states {
 			if task.GetState() == state {
@@ -57,7 +58,7 @@ func WithStates(states ...milvuspb.ImportState) TaskFilter {
 
 type UpdateAction func(task Task)
 
-func UpdateState(state milvuspb.ImportState) UpdateAction {
+func UpdateState(state internalpb.ImportState) UpdateAction {
 	return func(t Task) {
 		switch t.GetType() {
 		case PreImportTaskType:
@@ -91,15 +92,15 @@ func UpdateFileStat(idx int, fileStat *datapb.ImportFileStats) UpdateAction {
 func UpdateSegmentInfo(info *datapb.ImportSegmentInfo) UpdateAction {
 	return func(task Task) {
 		if it, ok := task.(*ImportTask); ok {
-			for i := range it.segmentsInfo {
-				if it.segmentsInfo[i].GetSegmentID() == info.GetSegmentID() {
-					it.segmentsInfo[i].ImportedRows += info.GetImportedRows()
-					it.segmentsInfo[i].Binlogs = append(it.segmentsInfo[i].Binlogs, info.GetBinlogs()...)
-					it.segmentsInfo[i].Statslogs = append(it.segmentsInfo[i].Statslogs, info.GetStatslogs()...)
-					return
-				}
+			segment := info.GetSegmentID()
+			if _, ok = it.segmentsInfo[segment]; ok {
+				it.segmentsInfo[segment].ImportedRows += info.GetImportedRows()
+				it.segmentsInfo[segment].Binlogs = append(it.segmentsInfo[segment].Binlogs, info.GetBinlogs()...)
+				it.segmentsInfo[segment].Statslogs = append(it.segmentsInfo[segment].Statslogs, info.GetStatslogs()...)
+				return
 			}
-			it.segmentsInfo = append(it.segmentsInfo, info)
+			fmt.Println("dyh debug updateSegmentInfo,", info)
+			it.segmentsInfo[segment] = info
 		}
 	}
 }
@@ -111,10 +112,10 @@ type Task interface {
 	GetPartitionIDs() []int64
 	GetVchannels() []string
 	GetType() TaskType
-	GetState() milvuspb.ImportState
+	GetState() internalpb.ImportState
 	GetReason() string
 	GetSchema() *schemapb.CollectionSchema
-	Clone() Task
+	//Clone() Task
 }
 
 type PreImportTask struct {
@@ -123,7 +124,7 @@ type PreImportTask struct {
 }
 
 func NewPreImportTask(req *datapb.PreImportRequest) Task {
-	fileStats := lo.Map(req.GetImportFiles(), func(file *milvuspb.ImportFile, _ int) *datapb.ImportFileStats {
+	fileStats := lo.Map(req.GetImportFiles(), func(file *internalpb.ImportFile, _ int) *datapb.ImportFileStats {
 		return &datapb.ImportFileStats{
 			ImportFile: file,
 		}
@@ -135,7 +136,7 @@ func NewPreImportTask(req *datapb.PreImportRequest) Task {
 			CollectionID: req.GetCollectionID(),
 			PartitionIDs: req.GetPartitionIDs(),
 			Vchannels:    req.GetVchannels(),
-			State:        milvuspb.ImportState_Pending,
+			State:        internalpb.ImportState_Pending,
 			FileStats:    fileStats,
 		},
 		schema: req.GetSchema(),
@@ -146,11 +147,11 @@ func (p *PreImportTask) GetType() TaskType {
 	return PreImportTaskType
 }
 
-func (p *PreImportTask) Clone() Task {
-	return &PreImportTask{
-		PreImportTask: proto.Clone(p.PreImportTask).(*datapb.PreImportTask),
-	}
-}
+//func (p *PreImportTask) Clone() Task {
+//	return &PreImportTask{
+//		PreImportTask: proto.Clone(p.PreImportTask).(*datapb.PreImportTask),
+//	}
+//}
 
 func (p *PreImportTask) GetSchema() *schemapb.CollectionSchema {
 	return p.schema
@@ -159,7 +160,7 @@ func (p *PreImportTask) GetSchema() *schemapb.CollectionSchema {
 type ImportTask struct {
 	*datapb.ImportTaskV2
 	schema       *schemapb.CollectionSchema
-	segmentsInfo []*datapb.ImportSegmentInfo
+	segmentsInfo map[int64]*datapb.ImportSegmentInfo
 	req          *datapb.ImportRequest
 	vchannels    []string
 	partitions   []int64
@@ -172,10 +173,11 @@ func NewImportTask(req *datapb.ImportRequest) Task {
 			RequestID:    req.GetRequestID(),
 			TaskID:       req.GetTaskID(),
 			CollectionID: req.GetCollectionID(),
-			State:        milvuspb.ImportState_Pending,
+			State:        internalpb.ImportState_Pending,
 		},
-		schema: req.GetSchema(),
-		req:    req,
+		schema:       req.GetSchema(),
+		segmentsInfo: make(map[int64]*datapb.ImportSegmentInfo),
+		req:          req,
 	}
 	task.Init(req)
 	return task
@@ -185,17 +187,18 @@ func (t *ImportTask) Init(req *datapb.ImportRequest) {
 	metaCaches := make(map[string]metacache.MetaCache)
 	channels := make(map[string]struct{})
 	partitions := make(map[int64]struct{})
-	for _, info := range req.GetSegmentsInfo() {
+	for _, info := range req.GetRequestSegments() {
 		channels[info.GetVchannel()] = struct{}{}
 		partitions[info.GetPartitionID()] = struct{}{}
 	}
+	schema := typeutil.AppendSystemFields(req.GetSchema())
 	for _, channel := range lo.Keys(channels) {
 		info := &datapb.ChannelWatchInfo{
 			Vchan: &datapb.VchannelInfo{
 				CollectionID: req.GetCollectionID(),
 				ChannelName:  channel,
 			},
-			Schema: req.GetSchema(),
+			Schema: schema,
 		}
 		metaCache := metacache.NewMetaCache(info, func(segment *datapb.SegmentInfo) *metacache.BloomFilterSet {
 			return metacache.NewBloomFilterSet()
@@ -211,11 +214,17 @@ func (t *ImportTask) GetType() TaskType {
 	return ImportTaskType
 }
 
-func (t *ImportTask) Clone() Task {
-	return &ImportTask{
-		ImportTaskV2: proto.Clone(t.ImportTaskV2).(*datapb.ImportTaskV2),
-	}
-}
+//func (t *ImportTask) Clone() Task {
+//	return &ImportTask{
+//		ImportTaskV2: proto.Clone(t.ImportTaskV2).(*datapb.ImportTaskV2),
+//		schema:       t.schema,
+//		segmentsInfo: t.segmentsInfo,
+//		req:          t.req,
+//		vchannels:    t.vchannels,
+//		partitions:   t.partitions,
+//		metaCaches:   t.metaCaches,
+//	}
+//}
 
 func (t *ImportTask) GetPartitionIDs() []int64 {
 	return t.partitions
@@ -230,5 +239,5 @@ func (t *ImportTask) GetSchema() *schemapb.CollectionSchema {
 }
 
 func (t *ImportTask) GetSegmentsInfo() []*datapb.ImportSegmentInfo {
-	return t.segmentsInfo
+	return lo.Values(t.segmentsInfo)
 }
