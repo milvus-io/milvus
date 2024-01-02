@@ -1771,6 +1771,7 @@ type queryNodeConfig struct {
 
 	// delete buffer
 	MaxSegmentDeleteBuffer ParamItem `refreshable:"false"`
+	DeleteBufferBlockSize  ParamItem `refreshable:"false`
 
 	// loader
 	IoPoolSize ParamItem `refreshable:"false"`
@@ -2120,6 +2121,13 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		DefaultValue: "10000000",
 	}
 	p.MaxSegmentDeleteBuffer.Init(base.mgr)
+
+	p.DeleteBufferBlockSize = ParamItem{
+		Key:          "queryNode.deleteBufferBlockSize",
+		Version:      "2.3.5",
+		Doc:          "delegator delete buffer block size when using list delete buffer",
+		DefaultValue: "1048576", // 1MB
+	}
 
 	p.IoPoolSize = ParamItem{
 		Key:          "queryNode.ioPoolSize",
