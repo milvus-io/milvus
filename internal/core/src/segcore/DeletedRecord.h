@@ -93,9 +93,11 @@ struct DeletedRecord {
         auto n = n_.load();
         if (n > 0) {
             auto last = timestamps_[n - 1];
-            ExitInfo(timestamps[0] >= last,
-                     "[should not happend] delete record with older "
-                     "timestamp occured");
+            // ExitInfo(timestamps[0] >= last,
+            AssertInfo(timestamps[0] >= last,
+                     "[should not happen] delete record with older "
+                     "timestamp {} occured, last timestamp: {}",
+                     timestamps[0], last);
         }
 
         pks_.set_data_raw(n, pks.data(), size);
