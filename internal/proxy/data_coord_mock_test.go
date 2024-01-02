@@ -268,6 +268,9 @@ func (coord *DataCoordMock) DropIndex(ctx context.Context, req *indexpb.DropInde
 }
 
 func (coord *DataCoordMock) GetIndexState(ctx context.Context, req *indexpb.GetIndexStateRequest, opts ...grpc.CallOption) (*indexpb.GetIndexStateResponse, error) {
+	if coord.GetIndexStateFunc != nil {
+		return coord.GetIndexStateFunc(ctx, req, opts...)
+	}
 	return &indexpb.GetIndexStateResponse{
 		Status:     merr.Success(),
 		State:      commonpb.IndexState_Finished,
@@ -291,6 +294,9 @@ func (coord *DataCoordMock) GetIndexInfos(ctx context.Context, req *indexpb.GetI
 
 // DescribeIndex describe the index info of the collection.
 func (coord *DataCoordMock) DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRequest, opts ...grpc.CallOption) (*indexpb.DescribeIndexResponse, error) {
+	if coord.DescribeIndexFunc != nil {
+		return coord.DescribeIndexFunc(ctx, req, opts...)
+	}
 	return &indexpb.DescribeIndexResponse{
 		Status:     merr.Success(),
 		IndexInfos: nil,

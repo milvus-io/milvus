@@ -35,7 +35,7 @@ type ChannelManagerSuite struct {
 	suite.Suite
 
 	node    *DataNode
-	manager *ChannelManager
+	manager *ChannelManagerImpl
 }
 
 func (s *ChannelManagerSuite) SetupTest() {

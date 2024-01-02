@@ -18,6 +18,7 @@
 #include <google/protobuf/text_format.h>
 
 #include "DataGen.h"
+#include "index/Meta.h"
 #include "index/ScalarIndex.h"
 #include "index/StringIndex.h"
 #include "index/Utils.h"
@@ -348,7 +349,7 @@ template <typename T,
           typename = typename std::enable_if_t<std::is_arithmetic_v<T> ||
                                                std::is_same_v<T, std::string>>>
 inline std::vector<T>
-GenArr(int64_t n) {
+GenSortedArr(int64_t n) {
     auto max_i8 = std::numeric_limits<int8_t>::max() - 1;
     std::vector<T> arr;
     arr.resize(n);
@@ -374,15 +375,14 @@ GenStrArr(int64_t n) {
 
 template <>
 inline std::vector<std::string>
-GenArr<std::string>(int64_t n) {
+GenSortedArr<std::string>(int64_t n) {
     return GenStrArr(n);
 }
 
 std::vector<ScalarTestParams>
 GenBoolParams() {
     std::vector<ScalarTestParams> ret;
-    ret.emplace_back(
-        ScalarTestParams(MapParams(), {{"index_type", "inverted_index"}}));
+    ret.emplace_back(ScalarTestParams(MapParams(), {{"index_type", "sort"}}));
     ret.emplace_back(ScalarTestParams(MapParams(), {{"index_type", "flat"}}));
     return ret;
 }
@@ -408,8 +408,7 @@ GenParams() {
     }
 
     std::vector<ScalarTestParams> ret;
-    ret.emplace_back(
-        ScalarTestParams(MapParams(), {{"index_type", "inverted_index"}}));
+    ret.emplace_back(ScalarTestParams(MapParams(), {{"index_type", "sort"}}));
     ret.emplace_back(ScalarTestParams(MapParams(), {{"index_type", "flat"}}));
     return ret;
 }
@@ -442,13 +441,25 @@ GenDsFromPB(const google::protobuf::Message& msg) {
 template <typename T>
 inline std::vector<std::string>
 GetIndexTypes() {
-    return std::vector<std::string>{"inverted_index"};
+    return std::vector<std::string>{"sort"};
 }
 
 template <>
 inline std::vector<std::string>
 GetIndexTypes<std::string>() {
-    return std::vector<std::string>{"marisa"};
+    return std::vector<std::string>{"sort", "marisa"};
+}
+
+template <typename T>
+inline std::vector<std::string>
+GetIndexTypesV2() {
+    return std::vector<std::string>{"sort", milvus::index::INVERTED_INDEX_TYPE};
+}
+
+template <>
+inline std::vector<std::string>
+GetIndexTypesV2<std::string>() {
+    return std::vector<std::string>{milvus::index::INVERTED_INDEX_TYPE, "marisa"};
 }
 
 }  // namespace

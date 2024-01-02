@@ -35,7 +35,10 @@ import (
 	iTypeutil "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -68,6 +71,8 @@ func NewStorageV2Serializer(
 
 func (s *storageV2Serializer) EncodeBuffer(ctx context.Context, pack *SyncPack) (Task, error) {
 	task := NewSyncTaskV2()
+	tr := timerecord.NewTimeRecorder("storage_serializer_v2")
+	metricSegLevel := pack.level.String()
 
 	space, err := s.storageV2Cache.GetOrCreateSpace(pack.segmentID, SpaceCreatorFunc(pack.segmentID, s.schema, s.arrowSchema))
 	if err != nil {
@@ -120,6 +125,7 @@ func (s *storageV2Serializer) EncodeBuffer(ctx context.Context, pack *SyncPack) 
 	}
 
 	s.setTaskMeta(task, pack)
+	metrics.DataNodeEncodeBufferLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metricSegLevel).Observe(float64(tr.RecordSpan().Milliseconds()))
 	return task, nil
 }
 

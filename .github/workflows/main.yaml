@@ -42,7 +42,7 @@ concurrency:
 jobs:
   Build:
     name: Build and test AMD64 Ubuntu ${{ matrix.ubuntu }}
-    runs-on: ubuntu-${{ matrix.ubuntu }}
+    runs-on: ubuntu-latest
     timeout-minutes: 180
     strategy:
       fail-fast: false
@@ -69,7 +69,7 @@ jobs:
           fetch-depth: 0
       - name: 'Check Changed files'
         id: changed-files-cpp
-        uses: tj-actions/changed-files@v35
+        uses: tj-actions/changed-files@v41
         with:
           since_last_remote_commit: 'true'
           files: |
@@ -85,39 +85,27 @@ jobs:
         run: |
           echo "useasan=ON" >> $GITHUB_ENV
           echo "Setup USE_ASAN to true since cpp file(s) changed"
-      - name: 'Generate CCache Hash'
-        env:
-          CORE_HASH: ${{ hashFiles( 'internal/core/**/*.cpp', 'internal/core/**/*.cc', 'internal/core/**/*.c', 'internal/core/**/*.h', 'internal/core/**/*.hpp', 'internal/core/**/CMakeLists.txt', 'internal/core/conanfile.py') }}
-        run: |
-          echo "corehash=${CORE_HASH}" >> $GITHUB_ENV
-          echo "Set CCache hash to ${CORE_HASH}"
-      - name: Cache CCache Volumes
-        # uses: actions/cache@v3
-        uses: actions/cache@v3
+      - name: Download Caches
+        uses: ./.github/actions/cache
         with:
-          path: .docker/amd64-ubuntu${{ matrix.ubuntu }}-ccache
-          key: ubuntu${{ matrix.ubuntu }}-ccache-${{ env.corehash }}
-          restore-keys: ubuntu${{ matrix.ubuntu }}-ccache-
-      - name: Cache Conan Packages
-        uses: actions/cache@v3
-        with:
-          path: .docker/amd64-ubuntu${{ matrix.ubuntu }}-conan
-          key: ubuntu${{ matrix.ubuntu }}-conan-${{ hashFiles('internal/core/conanfile.*') }}
-          restore-keys: ubuntu${{ matrix.ubuntu }}-conan-
+          os: 'ubuntu20.04'
+          kind: 'cpp'
       - name: Build
         run: |
           ./build/builder.sh /bin/bash -c "make USE_ASAN=${{env.useasan}} build-cpp-with-coverage"
-      - run: |
-          zip -r code.zip . -x "./.docker/*" -x "./cmake_build/thirdparty/*"
-      - name: Archive code
-        uses: actions/upload-artifact@v3
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
         with:
           name: code
-          path: code.zip
+          compression-level: 0 # no compression
+          path: |
+            **/*
+            !./.docker/**
+            !./cmake_build/thirdparty/**
   UT-Cpp:
     name: UT for Cpp
     needs: Build
-    runs-on: ubuntu-${{ matrix.ubuntu }}
+    runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -126,19 +114,15 @@ jobs:
     env:
       UBUNTU: ${{ matrix.ubuntu }}
     steps:
-      - name: Download code
-        uses: actions/download-artifact@v3.0.1
+      - name: Download Artifact
+        uses: actions/download-artifact@v4.1.0
         with:
           name: code
-      - run: |
-          unzip code.zip
-          rm code.zip
-      - name: Cache Conan Packages
-        uses: actions/cache@v3
+      - name: Download Caches
+        uses: ./.github/actions/cache
         with:
-          path: .docker/amd64-ubuntu${{ matrix.ubuntu }}-conan
-          key: ubuntu${{ matrix.ubuntu }}-conan-${{ hashFiles('internal/core/conanfile.*') }}
-          restore-keys: ubuntu${{ matrix.ubuntu }}-conan-
+          os: 'ubuntu20.04'
+          kind: 'cpp'
       - name: Start Service
         shell: bash
         run: |
@@ -150,7 +134,7 @@ jobs:
           chmod +x internal/core/output/unittest/*
           ./build/builder.sh /bin/bash -c ./scripts/run_cpp_codecov.sh
       - name: Archive result
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: cpp-result
           path: |
@@ -161,7 +145,7 @@ jobs:
   UT-Go:
     name: UT for Go
     needs: Build
-    runs-on: ubuntu-${{ matrix.ubuntu }}
+    runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -170,19 +154,15 @@ jobs:
     env:
       UBUNTU: ${{ matrix.ubuntu }}
     steps:
-      - name: Download code
-        uses: actions/download-artifact@v3.0.1
+      - name: Download Artifact
+        uses: actions/download-artifact@v4.1.0
         with:
           name: code
-      - run: |
-          unzip code.zip
-          rm code.zip
-      - name: Cache Go Mod Volumes
-        uses: actions/cache@v3
+      - name: Download Caches
+        uses: ./.github/actions/cache
         with:
-          path: .docker/amd64-ubuntu${{ matrix.ubuntu }}-go-mod
-          key: ubuntu${{ matrix.ubuntu }}-go-mod-${{ hashFiles('**/go.sum') }}
-          restore-keys: ubuntu${{ matrix.ubuntu }}-go-mod-
+          os: 'ubuntu20.04'
+          kind: 'go'
       - name: Start Service
         shell: bash
         run: |
@@ -193,7 +173,7 @@ jobs:
           chmod +x scripts/run_go_codecov.sh
           ./build/builder.sh /bin/bash -c ./scripts/run_go_codecov.sh
       - name: Archive result
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: go-result
           path: |
@@ -205,7 +185,7 @@ jobs:
   integration-test:
     name: Integration Test
     needs: Build
-    runs-on: ubuntu-${{ matrix.ubuntu }}
+    runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -214,19 +194,15 @@ jobs:
     env:
       UBUNTU: ${{ matrix.ubuntu }}
     steps:
-      - name: Download code
-        uses: actions/download-artifact@v3.0.1
+      - name: Download Artifact
+        uses: actions/download-artifact@v4.1.0
         with:
           name: code
-      - run: |
-          unzip code.zip
-          rm code.zip
-      - name: Cache Go Mod Volumes
-        uses: actions/cache@v3
+      - name: Download Caches
+        uses: ./.github/actions/cache
         with:
-          path: .docker/amd64-ubuntu${{ matrix.ubuntu }}-go-mod
-          key: ubuntu${{ matrix.ubuntu }}-go-mod-${{ hashFiles('**/go.sum') }}
-          restore-keys: ubuntu${{ matrix.ubuntu }}-go-mod-
+          os: 'ubuntu20.04'
+          kind: 'go'
       - name: Start Service
         shell: bash
         run: |
@@ -237,7 +213,7 @@ jobs:
           chmod +x scripts/run_intergration_test.sh
           ./build/builder.sh /bin/bash -c ./scripts/run_intergration_test.sh
       - name: Archive result
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: it-result
           path: |
@@ -251,15 +227,15 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Download Cpp code coverage results
-        uses: actions/download-artifact@v3.0.1
+        uses: actions/download-artifact@v4.1.0
         with:
           name: cpp-result
       - name: Download Go code coverage results
-        uses: actions/download-artifact@v3.0.1
+        uses: actions/download-artifact@v4.1.0
         with:
           name: go-result
       - name: Download Integration Test coverage results
-        uses: actions/download-artifact@v3.0.1
+        uses: actions/download-artifact@v4.1.0
         with:
           name: it-result
       - name: Display structure of code coverage results

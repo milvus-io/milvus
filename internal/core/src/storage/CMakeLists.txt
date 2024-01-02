@@ -63,6 +63,7 @@ add_library(milvus_storage SHARED ${STORAGE_FILES})
 if (DEFINED AZURE_BUILD_DIR)
     target_link_libraries(milvus_storage PUBLIC
             "-L${AZURE_BUILD_DIR} -lblob-chunk-manager"
+            blob-chunk-manager
             milvus_common
             milvus-storage
             pthread

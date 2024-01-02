@@ -456,7 +456,7 @@ class TestCollectionParams(TestcaseBase):
         """
         target: test collection with multi float vectors
         method: create collection with two float-vec fields
-        expected: raise exception (not supported yet)
+        expected: Collection created successfully
         """
         # 1. connect
         self._connect()
@@ -465,25 +465,24 @@ class TestCollectionParams(TestcaseBase):
         fields = [cf.gen_int64_field(is_primary=True), cf.gen_float_field(),
                   cf.gen_float_vec_field(dim=default_dim), cf.gen_float_vec_field(name="tmp", dim=default_dim)]
         schema = cf.gen_collection_schema(fields=fields)
-        err_msg = "multiple vector fields is not supported"
         self.collection_wrap.init_collection(c_name, schema=schema,
-                                             check_task=CheckTasks.err_res,
-                                             check_items={"err_code": 1, "err_msg": err_msg})
+                                             check_task=CheckTasks.check_collection_property,
+                                             check_items={exp_name: c_name, exp_schema: schema})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_collection_mix_vectors(self):
         """
         target: test collection with mix vectors
         method: create with float and binary vec
-        expected: raise exception
+        expected: Collection created successfully
         """
         self._connect()
         c_name = cf.gen_unique_str(prefix)
         fields = [cf.gen_int64_field(is_primary=True), cf.gen_float_vec_field(), cf.gen_binary_vec_field()]
         schema = cf.gen_collection_schema(fields=fields, auto_id=True)
-        err_msg = "multiple vector fields is not supported"
-        self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res,
-                                             check_items={"err_code": 1, "err_msg": err_msg})
+        self.collection_wrap.init_collection(c_name, schema=schema,
+                                             check_task=CheckTasks.check_collection_property,
+                                             check_items={exp_name: c_name, exp_schema: schema})
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_collection_without_vectors(self):

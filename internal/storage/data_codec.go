@@ -606,6 +606,7 @@ func (insertCodec *InsertCodec) DeserializeInto(fieldBinlogs []*Blob, rowNum int
 				stringFieldData := insertData.Data[fieldID].(*StringFieldData)
 
 				stringFieldData.Data = append(stringFieldData.Data, stringPayload...)
+				stringFieldData.DataType = dataType
 				totalLength += len(stringPayload)
 				insertData.Data[fieldID] = stringFieldData
 

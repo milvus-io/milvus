@@ -226,6 +226,10 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 		return fmt.Errorf("maximum field's number should be limited to %d", Params.ProxyCfg.MaxFieldNum.GetAsInt())
 	}
 
+	if len(typeutil.GetVectorFieldSchemas(t.schema)) > Params.ProxyCfg.MaxVectorFieldNum.GetAsInt() {
+		return fmt.Errorf("maximum vector field's number should be limited to %d", Params.ProxyCfg.MaxVectorFieldNum.GetAsInt())
+	}
+
 	// validate collection name
 	if err := validateCollectionName(t.schema.Name); err != nil {
 		return err
@@ -1456,19 +1460,24 @@ func (t *loadCollectionTask) Execute(ctx context.Context) (err error) {
 		return err
 	}
 
-	hasVecIndex := false
+	// not support multiple indexes on one field
 	fieldIndexIDs := make(map[int64]int64)
 	for _, index := range indexResponse.IndexInfos {
 		fieldIndexIDs[index.FieldID] = index.IndexID
-		for _, field := range collSchema.Fields {
-			if index.FieldID == field.FieldID && (field.DataType == schemapb.DataType_FloatVector || field.DataType == schemapb.DataType_BinaryVector || field.DataType == schemapb.DataType_Float16Vector) {
-				hasVecIndex = true
+	}
+
+	unindexedVecFields := make([]string, 0)
+	for _, field := range collSchema.GetFields() {
+		if isVectorType(field.GetDataType()) {
+			if _, ok := fieldIndexIDs[field.GetFieldID()]; !ok {
+				unindexedVecFields = append(unindexedVecFields, field.GetName())
 			}
 		}
 	}
-	if !hasVecIndex {
-		errMsg := fmt.Sprintf("there is no vector index on collection: %s, please create index firstly", t.LoadCollectionRequest.CollectionName)
-		log.Error(errMsg)
+
+	if len(unindexedVecFields) != 0 {
+		errMsg := fmt.Sprintf("there is no vector index on field: %v, please create index firstly", unindexedVecFields)
+		log.Debug(errMsg)
 		return errors.New(errMsg)
 	}
 	request := &querypb.LoadCollectionRequest{

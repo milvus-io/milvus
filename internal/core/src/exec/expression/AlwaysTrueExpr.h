@@ -34,12 +34,12 @@ class PhyAlwaysTrueExpr : public Expr {
         const std::shared_ptr<const milvus::expr::AlwaysTrueExpr>& expr,
         const std::string& name,
         const segcore::SegmentInternalInterface* segment,
-        Timestamp query_timestamp,
+        int64_t active_count,
         int64_t batch_size)
         : Expr(DataType::BOOL, std::move(input), name),
           expr_(expr),
+          active_count_(active_count),
           batch_size_(batch_size) {
-        num_rows_ = segment->get_active_count(query_timestamp);
     }
 
     void
@@ -47,7 +47,7 @@ class PhyAlwaysTrueExpr : public Expr {
 
  private:
     std::shared_ptr<const milvus::expr::AlwaysTrueExpr> expr_;
-    int64_t num_rows_;
+    int64_t active_count_;
     int64_t current_pos_{0};
     int64_t batch_size_;
 };

@@ -213,6 +213,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		}
 
 		segment, err := NewSegment(
+			ctx,
 			collection,
 			segmentID,
 			partitionID,
@@ -366,7 +367,7 @@ func (loader *segmentLoader) requestResource(ctx context.Context, infos ...*quer
 	memoryUsage := hardware.GetUsedMemoryCount()
 	totalMemory := hardware.GetMemoryCount()
 
-	diskUsage, err := GetLocalUsedSize(paramtable.Get().LocalStorageCfg.Path.GetValue())
+	diskUsage, err := GetLocalUsedSize(ctx, paramtable.Get().LocalStorageCfg.Path.GetValue())
 	if err != nil {
 		return resource, 0, errors.Wrap(err, "get local used size failed")
 	}
@@ -583,7 +584,7 @@ func (loader *segmentLoader) loadSegment(ctx context.Context,
 			}
 			if !typeutil.IsVectorType(field.GetDataType()) && !segment.HasRawData(fieldID) {
 				log.Info("field index doesn't include raw data, load binlog...", zap.Int64("fieldID", fieldID), zap.String("index", info.IndexInfo.GetIndexName()))
-				if err = segment.LoadFieldData(fieldID, loadInfo.GetNumOfRows(), info.FieldBinlog, true); err != nil {
+				if err = segment.LoadFieldData(ctx, fieldID, loadInfo.GetNumOfRows(), info.FieldBinlog, true); err != nil {
 					log.Warn("load raw data failed", zap.Int64("fieldID", fieldID), zap.Error(err))
 					return err
 				}
@@ -592,7 +593,7 @@ func (loader *segmentLoader) loadSegment(ctx context.Context,
 		if err := loader.loadSealedSegmentFields(ctx, segment, fieldBinlogs, loadInfo.GetNumOfRows()); err != nil {
 			return err
 		}
-		if err := segment.AddFieldDataInfo(loadInfo.GetNumOfRows(), loadInfo.GetBinlogPaths()); err != nil {
+		if err := segment.AddFieldDataInfo(ctx, loadInfo.GetNumOfRows(), loadInfo.GetBinlogPaths()); err != nil {
 			return err
 		}
 		// https://github.com/milvus-io/milvus/23654
@@ -601,7 +602,7 @@ func (loader *segmentLoader) loadSegment(ctx context.Context,
 			return err
 		}
 	} else {
-		if err := segment.LoadMultiFieldData(loadInfo.GetNumOfRows(), loadInfo.BinlogPaths); err != nil {
+		if err := segment.LoadMultiFieldData(ctx, loadInfo.GetNumOfRows(), loadInfo.BinlogPaths); err != nil {
 			return err
 		}
 	}
@@ -651,7 +652,8 @@ func (loader *segmentLoader) loadSealedSegmentFields(ctx context.Context, segmen
 		fieldBinLog := field
 		fieldID := field.FieldID
 		runningGroup.Go(func() error {
-			return segment.LoadFieldData(fieldID,
+			return segment.LoadFieldData(ctx,
+				fieldID,
 				rowCount,
 				fieldBinLog,
 				common.IsFieldMmapEnabled(collection.Schema(), fieldID),
@@ -701,7 +703,7 @@ func (loader *segmentLoader) loadFieldsIndex(ctx context.Context,
 			return err
 		}
 		if typeutil.IsVariableDataType(field.GetDataType()) {
-			err = segment.UpdateFieldRawDataSize(numRows, fieldInfo.FieldBinlog)
+			err = segment.UpdateFieldRawDataSize(ctx, numRows, fieldInfo.FieldBinlog)
 			if err != nil {
 				return err
 			}
@@ -731,7 +733,7 @@ func (loader *segmentLoader) loadFieldIndex(ctx context.Context, segment *LocalS
 		return merr.WrapErrCollectionNotLoaded(segment.Collection(), "failed to load field index")
 	}
 
-	return segment.LoadIndex(indexInfo, fieldType)
+	return segment.LoadIndex(ctx, indexInfo, fieldType)
 }
 
 func (loader *segmentLoader) loadBloomFilter(ctx context.Context, segmentID int64, bfs *pkoracle.BloomFilterSet,
@@ -785,7 +787,7 @@ func (loader *segmentLoader) loadBloomFilter(ctx context.Context, segmentID int6
 }
 
 func (loader *segmentLoader) LoadDeltaLogs(ctx context.Context, segment Segment, deltaLogs []*datapb.FieldBinlog) error {
-	log := log.With(
+	log := log.Ctx(ctx).With(
 		zap.Int64("segmentID", segment.ID()),
 	)
 	dCodec := storage.DeleteCodec{}
@@ -817,7 +819,7 @@ func (loader *segmentLoader) LoadDeltaLogs(ctx context.Context, segment Segment,
 		return err
 	}
 
-	err = segment.LoadDeltaData(deltaData)
+	err = segment.LoadDeltaData(ctx, deltaData)
 	if err != nil {
 		return err
 	}
@@ -936,7 +938,7 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 		return 0, 0, errors.New("get memory failed when checkSegmentSize")
 	}
 
-	localDiskUsage, err := GetLocalUsedSize(paramtable.Get().LocalStorageCfg.Path.GetValue())
+	localDiskUsage, err := GetLocalUsedSize(ctx, paramtable.Get().LocalStorageCfg.Path.GetValue())
 	if err != nil {
 		return 0, 0, errors.Wrap(err, "get local used size failed")
 	}
