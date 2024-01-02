@@ -15,8 +15,6 @@
 
 #include "index/Index.h"
 #include "index/ScalarIndex.h"
-
-#define private public
 #include "index/StringIndexMarisa.h"
 
 #include "index/IndexFactory.h"
@@ -28,6 +26,8 @@
 constexpr int64_t nb = 100;
 namespace schemapb = milvus::proto::schema;
 
+namespace milvus {
+namespace index {
 class StringIndexBaseTest : public ::testing::Test {
  protected:
     void
@@ -431,7 +431,7 @@ class StringIndexMarisaTestV2 : public StringIndexBaseTest {
 
         auto vec_size = DIM * 4;
         auto vec_field_data_type = milvus::DataType::VECTOR_FLOAT;
-        auto dataset = GenDataset(nb, knowhere::metric::L2, false);
+        auto dataset = ::GenDataset(nb, knowhere::metric::L2, false);
 
         space = TestSpace(vec_size, dataset, strs);
     }
@@ -460,3 +460,6 @@ TEST_F(StringIndexMarisaTestV2, Base) {
     new_index->LoadV2();
     ASSERT_EQ(strs.size(), index->Count());
 }
+
+}  // namespace index
+}  // namespace milvus
