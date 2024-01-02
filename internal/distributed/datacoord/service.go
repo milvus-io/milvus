@@ -483,14 +483,14 @@ func (s *Server) GcControl(ctx context.Context, req *datapb.GcControlRequest) (*
 	return s.dataCoord.GcControl(ctx, req)
 }
 
-func (s *Server) ImportV2(ctx context.Context, in *datapb.ImportRequestInternal) (*milvuspb.ImportResponseV2, error) {
+func (s *Server) ImportV2(ctx context.Context, in *datapb.ImportRequestInternal) (*internalpb.ImportResponse, error) {
 	return s.dataCoord.ImportV2(ctx, in)
 }
 
-func (s *Server) GetImportProgress(ctx context.Context, in *milvuspb.GetImportProgressRequest) (*milvuspb.GetImportProgressResponse, error) {
+func (s *Server) GetImportProgress(ctx context.Context, in *internalpb.GetImportProgressRequest) (*internalpb.GetImportProgressResponse, error) {
 	return s.dataCoord.GetImportProgress(ctx, in)
 }
 
-func (s *Server) ListImports(ctx context.Context, in *milvuspb.ListImportsRequest) (*milvuspb.ListImportsResponse, error) {
+func (s *Server) ListImports(ctx context.Context, in *internalpb.ListImportsRequest) (*internalpb.ListImportsResponse, error) {
 	return s.dataCoord.ListImports(ctx, in)
 }

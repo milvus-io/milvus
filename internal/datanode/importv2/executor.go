@@ -19,6 +19,7 @@ package importv2
 import (
 	"context"
 	"fmt"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"sync"
 	"time"
@@ -27,7 +28,6 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -74,7 +74,7 @@ func (e *executor) Start() {
 			log.Info("import executor exited")
 			return
 		case <-ticker.C:
-			tasks := e.manager.GetBy(WithStates(milvuspb.ImportState_Pending))
+			tasks := e.manager.GetBy(WithStates(internalpb.ImportState_Pending))
 			wg, _ := errgroup.WithContext(context.Background())
 			for _, task := range tasks {
 				task := task
@@ -115,7 +115,7 @@ func (e *executor) handleErr(task Task, err error, msg string) {
 		zap.String("state", task.GetState().String()),
 		zap.String("type", task.GetType().String()),
 		zap.Error(err))
-	e.manager.Update(task.GetTaskID(), UpdateState(milvuspb.ImportState_Failed), UpdateReason(err.Error()))
+	e.manager.Update(task.GetTaskID(), UpdateState(internalpb.ImportState_Failed), UpdateReason(err.Error()))
 }
 
 func (e *executor) PreImport(task Task) {
@@ -124,9 +124,9 @@ func (e *executor) PreImport(task Task) {
 		zap.Int64("collectionID", task.GetCollectionID()),
 		zap.String("type", task.GetType().String()),
 		zap.Any("schema", task.GetSchema()))
-	e.manager.Update(task.GetTaskID(), UpdateState(milvuspb.ImportState_InProgress))
+	e.manager.Update(task.GetTaskID(), UpdateState(internalpb.ImportState_InProgress))
 	files := lo.Map(task.(*PreImportTask).GetFileStats(),
-		func(fileStat *datapb.ImportFileStats, _ int) *milvuspb.ImportFile {
+		func(fileStat *datapb.ImportFileStats, _ int) *internalpb.ImportFile {
 			return fileStat.GetImportFile()
 		})
 
@@ -145,7 +145,7 @@ func (e *executor) PreImport(task Task) {
 		reader.Close()
 	}
 
-	e.manager.Update(task.GetTaskID(), UpdateState(milvuspb.ImportState_Completed))
+	e.manager.Update(task.GetTaskID(), UpdateState(internalpb.ImportState_Completed))
 	log.Info("preimport done", zap.String("state", task.GetState().String()),
 		zap.Any("fileStats", task.(*PreImportTask).GetFileStats()))
 }
@@ -192,7 +192,7 @@ func (e *executor) Import(task Task) {
 		zap.Int64("collectionID", task.GetCollectionID()),
 		zap.String("type", task.GetType().String()),
 		zap.Any("schema", task.GetSchema()))
-	e.manager.Update(task.GetTaskID(), UpdateState(milvuspb.ImportState_InProgress))
+	e.manager.Update(task.GetTaskID(), UpdateState(internalpb.ImportState_InProgress))
 	count, err := e.estimateReadRows(task.GetSchema())
 	if err != nil {
 		e.handleErr(task, err, "estimate rows size failed")
@@ -214,7 +214,7 @@ func (e *executor) Import(task Task) {
 		}
 		reader.Close()
 	}
-	e.manager.Update(task.GetTaskID(), UpdateState(milvuspb.ImportState_Completed))
+	e.manager.Update(task.GetTaskID(), UpdateState(internalpb.ImportState_Completed))
 	log.Info("import done")
 }
 

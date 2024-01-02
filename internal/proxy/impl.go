@@ -5249,11 +5249,11 @@ func (node *Proxy) GetVersion(ctx context.Context, request *milvuspb.GetVersionR
 	}, nil
 }
 
-func (node *Proxy) ImportV2(ctx context.Context, req *milvuspb.ImportRequestV2) (*milvuspb.ImportResponseV2, error) {
+func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) (*internalpb.ImportResponse, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
-		return &milvuspb.ImportResponseV2{Status: merr.Status(err)}, nil
+		return &internalpb.ImportResponse{Status: merr.Status(err)}, nil
 	}
-	resp := &milvuspb.ImportResponseV2{
+	resp := &internalpb.ImportResponse{
 		Status: merr.Success(),
 	}
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
@@ -5302,12 +5302,13 @@ func (node *Proxy) ImportV2(ctx context.Context, req *milvuspb.ImportRequestV2) 
 		resp.Status = merr.Status(merr.WrapErrImportFailed("import request is empty"))
 		return resp, nil
 	}
-	for _, file := range req.GetFiles() {
-		switch file.GetFile() {
-		case *milvuspb.ImportFile_RowBasedFile:
-
-		}
-	}
+	// TODO: check if files are empty
+	//for _, file := range req.GetFiles() {
+	//	switch file.GetFile() {
+	//	case *internalpb.ImportFile_RowBasedFile:
+	//
+	//	}
+	//}
 	importRequest := &datapb.ImportRequestInternal{
 		CollectionID: collectionID,
 		PartitionIDs: partitionIDs,
@@ -5319,18 +5320,18 @@ func (node *Proxy) ImportV2(ctx context.Context, req *milvuspb.ImportRequestV2) 
 	return node.dataCoord.ImportV2(ctx, importRequest)
 }
 
-func (node *Proxy) GetImportProgress(ctx context.Context, req *milvuspb.GetImportProgressRequest) (*milvuspb.GetImportProgressResponse, error) {
+func (node *Proxy) GetImportProgress(ctx context.Context, req *internalpb.GetImportProgressRequest) (*internalpb.GetImportProgressResponse, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
-		return &milvuspb.GetImportProgressResponse{
+		return &internalpb.GetImportProgressResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
 	return node.dataCoord.GetImportProgress(ctx, req)
 }
 
-func (node *Proxy) ListImports(ctx context.Context, req *milvuspb.ListImportsRequest) (*milvuspb.ListImportsResponse, error) {
+func (node *Proxy) ListImports(ctx context.Context, req *internalpb.ListImportsRequest) (*internalpb.ListImportsResponse, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
-		return &milvuspb.ListImportsResponse{
+		return &internalpb.ListImportsResponse{
 			Status: merr.Status(err),
 		}, nil
 	}

@@ -20,6 +20,7 @@ import (
 	"context"
 	rand2 "crypto/rand"
 	"fmt"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"math/rand"
 	"strconv"
@@ -31,7 +32,6 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -193,8 +193,8 @@ func createInsertData(t *testing.T, schema *schemapb.CollectionSchema, rowCount 
 }
 
 func (s *ExecutorSuite) TestExecutor_ReadFileStat() {
-	importFile := &milvuspb.ImportFile{
-		File: &milvuspb.ImportFile_RowBasedFile{
+	importFile := &internalpb.ImportFile{
+		File: &internalpb.ImportFile_RowBasedFile{
 			RowBasedFile: "dummy.json",
 		},
 	}
@@ -213,7 +213,7 @@ func (s *ExecutorSuite) TestExecutor_ReadFileStat() {
 		CollectionID: 3,
 		PartitionIDs: []int64{4},
 		Schema:       s.schema,
-		ImportFiles:  []*milvuspb.ImportFile{importFile},
+		ImportFiles:  []*internalpb.ImportFile{importFile},
 	}
 	preimportTask := NewPreImportTask(preimportReq)
 	s.manager.Add(preimportTask)
@@ -242,9 +242,9 @@ func (s *ExecutorSuite) TestImportFile() {
 		TaskID:       11,
 		CollectionID: 12,
 		Schema:       s.schema,
-		Files: []*milvuspb.ImportFile{
+		Files: []*internalpb.ImportFile{
 			{
-				File: &milvuspb.ImportFile_RowBasedFile{
+				File: &internalpb.ImportFile_RowBasedFile{
 					RowBasedFile: "dummy.json",
 				},
 			},

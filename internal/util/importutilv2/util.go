@@ -19,8 +19,8 @@ package importutilv2
 import (
 	"context"
 	"fmt"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/samber/lo"
@@ -59,15 +59,15 @@ func WrapReadFileError(file string, err error) error {
 	return merr.WrapErrImportFailed(fmt.Sprintf("failed to read the file '%s', error: %s", file, err.Error()))
 }
 
-func GetFileTypeAndPaths(file *milvuspb.ImportFile) (FileType, []string, error) {
+func GetFileTypeAndPaths(file *internalpb.ImportFile) (FileType, []string, error) {
 	switch file.GetFile().(type) {
-	case *milvuspb.ImportFile_RowBasedFile:
+	case *internalpb.ImportFile_RowBasedFile:
 		filePath := file.GetRowBasedFile()
 		if filepath.Ext(filePath) != JSONFileExt {
 			return 0, nil, WrapIllegalFileTypeError(filePath, "row-based")
 		}
 		return JSON, []string{filePath}, nil
-	case *milvuspb.ImportFile_ColumnBasedFile:
+	case *internalpb.ImportFile_ColumnBasedFile:
 		paths := file.GetColumnBasedFile().GetFiles()
 		if len(paths) == 0 {
 			return 0, nil, merr.WrapErrImportFailed("no file to import")

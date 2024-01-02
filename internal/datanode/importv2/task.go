@@ -18,10 +18,10 @@ package importv2
 
 import (
 	"fmt"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"github.com/samber/lo"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -45,7 +45,7 @@ func (t TaskType) String() string {
 
 type TaskFilter func(task Task) bool
 
-func WithStates(states ...milvuspb.ImportState) TaskFilter {
+func WithStates(states ...internalpb.ImportState) TaskFilter {
 	return func(task Task) bool {
 		for _, state := range states {
 			if task.GetState() == state {
@@ -58,7 +58,7 @@ func WithStates(states ...milvuspb.ImportState) TaskFilter {
 
 type UpdateAction func(task Task)
 
-func UpdateState(state milvuspb.ImportState) UpdateAction {
+func UpdateState(state internalpb.ImportState) UpdateAction {
 	return func(t Task) {
 		switch t.GetType() {
 		case PreImportTaskType:
@@ -112,7 +112,7 @@ type Task interface {
 	GetPartitionIDs() []int64
 	GetVchannels() []string
 	GetType() TaskType
-	GetState() milvuspb.ImportState
+	GetState() internalpb.ImportState
 	GetReason() string
 	GetSchema() *schemapb.CollectionSchema
 	//Clone() Task
@@ -124,7 +124,7 @@ type PreImportTask struct {
 }
 
 func NewPreImportTask(req *datapb.PreImportRequest) Task {
-	fileStats := lo.Map(req.GetImportFiles(), func(file *milvuspb.ImportFile, _ int) *datapb.ImportFileStats {
+	fileStats := lo.Map(req.GetImportFiles(), func(file *internalpb.ImportFile, _ int) *datapb.ImportFileStats {
 		return &datapb.ImportFileStats{
 			ImportFile: file,
 		}
@@ -136,7 +136,7 @@ func NewPreImportTask(req *datapb.PreImportRequest) Task {
 			CollectionID: req.GetCollectionID(),
 			PartitionIDs: req.GetPartitionIDs(),
 			Vchannels:    req.GetVchannels(),
-			State:        milvuspb.ImportState_Pending,
+			State:        internalpb.ImportState_Pending,
 			FileStats:    fileStats,
 		},
 		schema: req.GetSchema(),
@@ -173,7 +173,7 @@ func NewImportTask(req *datapb.ImportRequest) Task {
 			RequestID:    req.GetRequestID(),
 			TaskID:       req.GetTaskID(),
 			CollectionID: req.GetCollectionID(),
-			State:        milvuspb.ImportState_Pending,
+			State:        internalpb.ImportState_Pending,
 		},
 		schema:       req.GetSchema(),
 		segmentsInfo: make(map[int64]*datapb.ImportSegmentInfo),

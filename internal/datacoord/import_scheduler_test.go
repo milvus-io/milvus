@@ -18,13 +18,13 @@ package datacoord
 
 import (
 	"context"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"testing"
 
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 )
@@ -74,7 +74,7 @@ func (s *ImportSchedulerSuite) TestProcessPreImport() {
 			RequestID:    0,
 			TaskID:       1,
 			CollectionID: s.collectionID,
-			State:        milvuspb.ImportState_Pending,
+			State:        internalpb.ImportState_Pending,
 		},
 	}
 	err := s.imeta.Add(task)
@@ -95,16 +95,16 @@ func (s *ImportSchedulerSuite) TestProcessPreImport() {
 	})
 	s.scheduler.process()
 	task = s.imeta.Get(task.GetTaskID())
-	s.Equal(milvuspb.ImportState_InProgress, task.GetState())
+	s.Equal(internalpb.ImportState_InProgress, task.GetState())
 	s.Equal(int64(nodeID), task.GetNodeID())
 
 	// inProgress -> completed
 	s.cluster.EXPECT().QueryPreImport(mock.Anything, mock.Anything).Return(&datapb.QueryPreImportResponse{
-		State: milvuspb.ImportState_Completed,
+		State: internalpb.ImportState_Completed,
 	}, nil)
 	s.scheduler.process()
 	task = s.imeta.Get(task.GetTaskID())
-	s.Equal(milvuspb.ImportState_Completed, task.GetState())
+	s.Equal(internalpb.ImportState_Completed, task.GetState())
 
 	// drop import task
 	s.cluster.EXPECT().DropImport(mock.Anything, mock.Anything).Return(nil)
@@ -120,7 +120,7 @@ func (s *ImportSchedulerSuite) TestProcessImport() {
 			RequestID:    0,
 			TaskID:       1,
 			CollectionID: s.collectionID,
-			State:        milvuspb.ImportState_Pending,
+			State:        internalpb.ImportState_Pending,
 			FileStats: []*datapb.ImportFileStats{
 				{
 					HashedRows: map[string]*datapb.PartitionRows{
@@ -158,7 +158,7 @@ func (s *ImportSchedulerSuite) TestProcessImport() {
 	})
 	s.scheduler.process()
 	task = s.imeta.Get(task.GetTaskID())
-	s.Equal(milvuspb.ImportState_InProgress, task.GetState())
+	s.Equal(internalpb.ImportState_InProgress, task.GetState())
 	s.Equal(int64(nodeID), task.GetNodeID())
 	s.Equal(1, len(task.(*importTask).GetSegmentIDs()))
 	s.Equal(int64(segmentID), task.(*importTask).GetSegmentIDs()[0])
@@ -169,7 +169,7 @@ func (s *ImportSchedulerSuite) TestProcessImport() {
 		return call.Method != "QueryImport"
 	})
 	s.cluster.EXPECT().QueryImport(mock.Anything, mock.Anything).Return(&datapb.QueryImportResponse{
-		State: milvuspb.ImportState_Completed,
+		State: internalpb.ImportState_Completed,
 		ImportSegmentsInfo: []*datapb.ImportSegmentInfo{
 			{
 				SegmentID:    segmentID,
@@ -179,7 +179,7 @@ func (s *ImportSchedulerSuite) TestProcessImport() {
 	}, nil)
 	s.scheduler.process()
 	task = s.imeta.Get(task.GetTaskID())
-	s.Equal(milvuspb.ImportState_Completed, task.GetState())
+	s.Equal(internalpb.ImportState_Completed, task.GetState())
 
 	// drop import task
 	s.cluster.EXPECT().DropImport(mock.Anything, mock.Anything).Return(nil)

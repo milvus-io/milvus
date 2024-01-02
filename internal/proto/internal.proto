@@ -247,3 +247,59 @@ message Rate {
   RateType rt = 1;
   double r = 2;
 }
+
+enum ImportState {
+  None = 0;
+  Pending = 1;
+  InProgress = 2;
+  Failed = 3;
+  Completed = 4;
+}
+
+message ColumnBasedFile {
+  repeated string files = 1;
+}
+
+message ImportFile {
+  oneof file {
+    string row_based_file = 1;
+    ColumnBasedFile column_based_file = 2;
+  }
+}
+
+message ImportRequest {
+  string db_name = 1;
+  string collection_name = 2;
+  string partition_name = 3;
+  repeated ImportFile files = 4;
+  repeated common.KeyValuePair options = 5;
+  bytes clustering_info = 6;
+}
+
+message ImportResponse {
+  common.Status status = 1;
+  string requestID = 2;
+}
+
+message GetImportProgressRequest {
+  string requestID = 1;
+}
+
+message GetImportProgressResponse {
+  common.Status status = 1;
+  ImportState state = 2;
+  string reason = 3;
+  int64 progress = 4;
+}
+
+message ListImportsRequest {
+
+}
+
+message ListImportsResponse {
+  common.Status status = 1;
+  repeated string requestIDs = 2;
+  repeated ImportState state = 3;
+  repeated string reason = 4;
+  repeated int64 progress = 5;
+}

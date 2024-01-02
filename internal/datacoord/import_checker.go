@@ -18,13 +18,13 @@ package datacoord
 
 import (
 	"context"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"sync"
 	"time"
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 )
@@ -94,14 +94,14 @@ func (c *importChecker) Close() {
 
 func (c *importChecker) LogStats() {
 	logFunc := func(tasks []ImportTask, taskType TaskType) {
-		byState := lo.GroupBy(tasks, func(t ImportTask) milvuspb.ImportState {
+		byState := lo.GroupBy(tasks, func(t ImportTask) internalpb.ImportState {
 			return t.GetState()
 		})
 		log.Info("import task stats", zap.String("type", taskType.String()),
-			zap.Int("pending", len(byState[milvuspb.ImportState_Pending])),
-			zap.Int("inProgress", len(byState[milvuspb.ImportState_InProgress])),
-			zap.Int("completed", len(byState[milvuspb.ImportState_Completed])),
-			zap.Int("failed", len(byState[milvuspb.ImportState_Failed])))
+			zap.Int("pending", len(byState[internalpb.ImportState_Pending])),
+			zap.Int("inProgress", len(byState[internalpb.ImportState_InProgress])),
+			zap.Int("completed", len(byState[internalpb.ImportState_Completed])),
+			zap.Int("failed", len(byState[internalpb.ImportState_Failed])))
 	}
 	tasks := c.imeta.GetBy(WithType(PreImportTaskType))
 	logFunc(tasks, PreImportTaskType)
@@ -115,7 +115,7 @@ func (c *importChecker) checkPreImportState(requestID int64) {
 		return
 	}
 	for _, t := range tasks {
-		if t.GetState() != milvuspb.ImportState_Completed {
+		if t.GetState() != internalpb.ImportState_Completed {
 			return
 		}
 	}
@@ -169,7 +169,7 @@ func (c *importChecker) checkPreImportState(requestID int64) {
 func (c *importChecker) checkImportState(requestID int64) {
 	tasks := c.imeta.GetBy(WithType(ImportTaskType), WithReq(requestID))
 	for _, t := range tasks {
-		if t.GetState() != milvuspb.ImportState_Completed {
+		if t.GetState() != internalpb.ImportState_Completed {
 			return
 		}
 	}
