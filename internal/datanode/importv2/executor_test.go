@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/conc"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -53,6 +54,10 @@ type ExecutorSuite struct {
 	executor *executor
 }
 
+func (s *ExecutorSuite) SetupSuite() {
+	paramtable.Init()
+}
+
 func (s *ExecutorSuite) SetupTest() {
 	s.numRows = 100
 	s.schema = &schemapb.CollectionSchema{
@@ -62,6 +67,9 @@ func (s *ExecutorSuite) SetupTest() {
 				Name:         "pk",
 				IsPrimaryKey: true,
 				DataType:     schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.MaxLengthKey, Value: "128"},
+				},
 			},
 			{
 				FieldID:  101,
@@ -201,7 +209,8 @@ func (s *ExecutorSuite) TestExecutor_ReadFileStat() {
 	var once sync.Once
 	data := createInsertData(s.T(), s.schema, s.numRows)
 	s.reader.EXPECT().Next(mock.Anything).RunAndReturn(func(i int64) (*storage.InsertData, error) {
-		var res *storage.InsertData
+		res, err := storage.NewInsertData(s.schema)
+		s.NoError(err)
 		once.Do(func() {
 			res = data
 		})
@@ -212,6 +221,7 @@ func (s *ExecutorSuite) TestExecutor_ReadFileStat() {
 		TaskID:       2,
 		CollectionID: 3,
 		PartitionIDs: []int64{4},
+		Vchannels:    []string{"ch-0"},
 		Schema:       s.schema,
 		ImportFiles:  []*internalpb.ImportFile{importFile},
 	}
@@ -231,7 +241,8 @@ func (s *ExecutorSuite) TestImportFile() {
 	var once sync.Once
 	data := createInsertData(s.T(), s.schema, s.numRows)
 	s.reader.EXPECT().Next(mock.Anything).RunAndReturn(func(i int64) (*storage.InsertData, error) {
-		var res *storage.InsertData
+		res, err := storage.NewInsertData(s.schema)
+		s.NoError(err)
 		once.Do(func() {
 			res = data
 		})
@@ -249,16 +260,16 @@ func (s *ExecutorSuite) TestImportFile() {
 				},
 			},
 		},
+		Ts: 1000,
+		AutoIDRange: &datapb.AutoIDRange{
+			Begin: 0,
+			End:   int64(s.numRows),
+		},
 		RequestSegments: map[int64]*datapb.ImportRequestSegment{
 			13: {
 				SegmentID:   13,
 				PartitionID: 14,
 				Vchannel:    "v0",
-			},
-			15: {
-				SegmentID:   15,
-				PartitionID: 16,
-				Vchannel:    "v1",
 			},
 		},
 	}

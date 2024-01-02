@@ -42,9 +42,16 @@ func TestImportManager(t *testing.T) {
 	res := manager.Get(task1.GetTaskID())
 	assert.Equal(t, task1, res)
 
-	task2 := task1
-	task2.TaskID = 8
-	task2.State = internalpb.ImportState_Completed
+	task2 := &ImportTask{
+		ImportTaskV2: &datapb.ImportTaskV2{
+			RequestID:    1,
+			TaskID:       8,
+			CollectionID: 3,
+			SegmentIDs:   []int64{5, 6},
+			NodeID:       7,
+			State:        internalpb.ImportState_Completed,
+		},
+	}
 	manager.Add(task2)
 
 	tasks := manager.GetBy()
