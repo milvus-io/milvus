@@ -157,7 +157,8 @@ type LocalSegment struct {
 	fieldIndexes       *typeutil.ConcurrentMap[int64, *IndexedFieldInfo]
 }
 
-func NewSegment(collection *Collection,
+func NewSegment(ctx context.Context,
+	collection *Collection,
 	segmentID int64,
 	partitionID int64,
 	collectionID int64,
@@ -168,6 +169,7 @@ func NewSegment(collection *Collection,
 	deltaPosition *msgpb.MsgPosition,
 	level datapb.SegmentLevel,
 ) (Segment, error) {
+	log := log.Ctx(ctx)
 	/*
 		CStatus
 		NewSegment(CCollection collection, uint64_t segment_id, SegmentType seg_type, CSegmentInterface* newSegment);
@@ -188,7 +190,11 @@ func NewSegment(collection *Collection,
 	var newPtr C.CSegmentInterface
 	_, err := GetDynamicPool().Submit(func() (any, error) {
 		status := C.NewSegment(collection.collectionPtr, cSegType, C.int64_t(segmentID), &newPtr)
-		err := HandleCStatus(&status, "NewSegmentFailed")
+		err := HandleCStatus(ctx, &status, "NewSegmentFailed",
+			zap.Int64("collectionID", collectionID),
+			zap.Int64("partitionID", partitionID),
+			zap.Int64("segmentID", segmentID),
+			zap.String("segmentType", segmentType.String()))
 		return nil, err
 	}).Await()
 	if err != nil {
@@ -383,7 +389,10 @@ func (s *LocalSegment) Search(ctx context.Context, searchReq *SearchRequest) (*S
 		metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
 		return nil, nil
 	}).Await()
-	if err := HandleCStatus(&status, "Search failed"); err != nil {
+	if err := HandleCStatus(ctx, &status, "Search failed",
+		zap.Int64("collectionID", s.Collection()),
+		zap.Int64("segmentID", s.ID()),
+		zap.String("segmentType", s.typ.String())); err != nil {
 		return nil, err
 	}
 	log.Debug("search segment done")
@@ -435,7 +444,12 @@ func (s *LocalSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segco
 		return nil, nil
 	}).Await()
 
-	if err := HandleCStatus(&status, "Retrieve failed"); err != nil {
+	if err := HandleCStatus(ctx, &status, "Retrieve failed",
+		zap.Int64("collectionID", s.Collection()),
+		zap.Int64("partitionID", s.Partition()),
+		zap.Int64("segmentID", s.ID()),
+		zap.Int64("msgID", plan.msgID),
+		zap.String("segmentType", s.typ.String())); err != nil {
 		return nil, err
 	}
 
@@ -467,7 +481,7 @@ func (s *LocalSegment) GetFieldDataPath(index *IndexedFieldInfo, offset int64) (
 }
 
 // -------------------------------------------------------------------------------------- interfaces for growing segment
-func (s *LocalSegment) preInsert(numOfRecords int) (int64, error) {
+func (s *LocalSegment) preInsert(ctx context.Context, numOfRecords int) (int64, error) {
 	/*
 		long int
 		PreInsert(CSegmentInterface c_segment, long int size);
@@ -480,13 +494,13 @@ func (s *LocalSegment) preInsert(numOfRecords int) (int64, error) {
 		status = C.PreInsert(s.ptr, C.int64_t(int64(numOfRecords)), cOffset)
 		return nil, nil
 	}).Await()
-	if err := HandleCStatus(&status, "PreInsert failed"); err != nil {
+	if err := HandleCStatus(ctx, &status, "PreInsert failed"); err != nil {
 		return 0, err
 	}
 	return offset, nil
 }
 
-func (s *LocalSegment) Insert(rowIDs []int64, timestamps []typeutil.Timestamp, record *segcorepb.InsertRecord) error {
+func (s *LocalSegment) Insert(ctx context.Context, rowIDs []int64, timestamps []typeutil.Timestamp, record *segcorepb.InsertRecord) error {
 	if s.Type() != SegmentTypeGrowing {
 		return fmt.Errorf("unexpected segmentType when segmentInsert, segmentType = %s", s.typ.String())
 	}
@@ -498,7 +512,7 @@ func (s *LocalSegment) Insert(rowIDs []int64, timestamps []typeutil.Timestamp, r
 		return merr.WrapErrSegmentNotLoaded(s.segmentID, "segment released")
 	}
 
-	offset, err := s.preInsert(len(rowIDs))
+	offset, err := s.preInsert(ctx, len(rowIDs))
 	if err != nil {
 		return err
 	}
@@ -527,7 +541,7 @@ func (s *LocalSegment) Insert(rowIDs []int64, timestamps []typeutil.Timestamp, r
 		)
 		return nil, nil
 	}).Await()
-	if err := HandleCStatus(&status, "Insert failed"); err != nil {
+	if err := HandleCStatus(ctx, &status, "Insert failed"); err != nil {
 		return err
 	}
 
@@ -544,7 +558,7 @@ func (s *LocalSegment) Insert(rowIDs []int64, timestamps []typeutil.Timestamp, r
 	return nil
 }
 
-func (s *LocalSegment) Delete(primaryKeys []storage.PrimaryKey, timestamps []typeutil.Timestamp) error {
+func (s *LocalSegment) Delete(ctx context.Context, primaryKeys []storage.PrimaryKey, timestamps []typeutil.Timestamp) error {
 	/*
 		CStatus
 		Delete(CSegmentInterface c_segment,
@@ -612,7 +626,7 @@ func (s *LocalSegment) Delete(primaryKeys []storage.PrimaryKey, timestamps []typ
 		return nil, nil
 	}).Await()
 
-	if err := HandleCStatus(&status, "Delete failed"); err != nil {
+	if err := HandleCStatus(ctx, &status, "Delete failed"); err != nil {
 		return err
 	}
 
@@ -623,7 +637,7 @@ func (s *LocalSegment) Delete(primaryKeys []storage.PrimaryKey, timestamps []typ
 }
 
 // -------------------------------------------------------------------------------------- interfaces for sealed segment
-func (s *LocalSegment) LoadMultiFieldData(rowCount int64, fields []*datapb.FieldBinlog) error {
+func (s *LocalSegment) LoadMultiFieldData(ctx context.Context, rowCount int64, fields []*datapb.FieldBinlog) error {
 	s.ptrLock.RLock()
 	defer s.ptrLock.RUnlock()
 
@@ -631,13 +645,13 @@ func (s *LocalSegment) LoadMultiFieldData(rowCount int64, fields []*datapb.Field
 		return merr.WrapErrSegmentNotLoaded(s.segmentID, "segment released")
 	}
 
-	log := log.With(
+	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", s.Collection()),
 		zap.Int64("partitionID", s.Partition()),
 		zap.Int64("segmentID", s.ID()),
 	)
 
-	loadFieldDataInfo, err := newLoadFieldDataInfo()
+	loadFieldDataInfo, err := newLoadFieldDataInfo(ctx)
 	defer deleteFieldDataInfo(loadFieldDataInfo)
 	if err != nil {
 		return err
@@ -645,13 +659,13 @@ func (s *LocalSegment) LoadMultiFieldData(rowCount int64, fields []*datapb.Field
 
 	for _, field := range fields {
 		fieldID := field.FieldID
-		err = loadFieldDataInfo.appendLoadFieldInfo(fieldID, rowCount)
+		err = loadFieldDataInfo.appendLoadFieldInfo(ctx, fieldID, rowCount)
 		if err != nil {
 			return err
 		}
 
 		for _, binlog := range field.Binlogs {
-			err = loadFieldDataInfo.appendLoadFieldDataPath(fieldID, binlog)
+			err = loadFieldDataInfo.appendLoadFieldDataPath(ctx, fieldID, binlog)
 			if err != nil {
 				return err
 			}
@@ -665,7 +679,10 @@ func (s *LocalSegment) LoadMultiFieldData(rowCount int64, fields []*datapb.Field
 		status = C.LoadFieldData(s.ptr, loadFieldDataInfo.cLoadFieldDataInfo)
 		return nil, nil
 	}).Await()
-	if err := HandleCStatus(&status, "LoadMultiFieldData failed"); err != nil {
+	if err := HandleCStatus(ctx, &status, "LoadMultiFieldData failed",
+		zap.Int64("collectionID", s.Collection()),
+		zap.Int64("partitionID", s.Partition()),
+		zap.Int64("segmentID", s.ID())); err != nil {
 		return err
 	}
 
@@ -677,7 +694,7 @@ func (s *LocalSegment) LoadMultiFieldData(rowCount int64, fields []*datapb.Field
 	return nil
 }
 
-func (s *LocalSegment) LoadFieldData(fieldID int64, rowCount int64, field *datapb.FieldBinlog, mmapEnabled bool) error {
+func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCount int64, field *datapb.FieldBinlog, mmapEnabled bool) error {
 	s.ptrLock.RLock()
 	defer s.ptrLock.RUnlock()
 
@@ -685,7 +702,7 @@ func (s *LocalSegment) LoadFieldData(fieldID int64, rowCount int64, field *datap
 		return merr.WrapErrSegmentNotLoaded(s.segmentID, "segment released")
 	}
 
-	log := log.With(
+	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", s.Collection()),
 		zap.Int64("partitionID", s.Partition()),
 		zap.Int64("segmentID", s.ID()),
@@ -694,19 +711,19 @@ func (s *LocalSegment) LoadFieldData(fieldID int64, rowCount int64, field *datap
 	)
 	log.Info("start loading field data for field")
 
-	loadFieldDataInfo, err := newLoadFieldDataInfo()
+	loadFieldDataInfo, err := newLoadFieldDataInfo(ctx)
 	defer deleteFieldDataInfo(loadFieldDataInfo)
 	if err != nil {
 		return err
 	}
 
-	err = loadFieldDataInfo.appendLoadFieldInfo(fieldID, rowCount)
+	err = loadFieldDataInfo.appendLoadFieldInfo(ctx, fieldID, rowCount)
 	if err != nil {
 		return err
 	}
 
 	for _, binlog := range field.Binlogs {
-		err = loadFieldDataInfo.appendLoadFieldDataPath(fieldID, binlog)
+		err = loadFieldDataInfo.appendLoadFieldDataPath(ctx, fieldID, binlog)
 		if err != nil {
 			return err
 		}
@@ -720,7 +737,11 @@ func (s *LocalSegment) LoadFieldData(fieldID int64, rowCount int64, field *datap
 		status = C.LoadFieldData(s.ptr, loadFieldDataInfo.cLoadFieldDataInfo)
 		return nil, nil
 	}).Await()
-	if err := HandleCStatus(&status, "LoadFieldData failed"); err != nil {
+	if err := HandleCStatus(ctx, &status, "LoadFieldData failed",
+		zap.Int64("collectionID", s.Collection()),
+		zap.Int64("partitionID", s.Partition()),
+		zap.Int64("segmentID", s.ID()),
+		zap.Int64("fieldID", fieldID)); err != nil {
 		return err
 	}
 
@@ -730,7 +751,7 @@ func (s *LocalSegment) LoadFieldData(fieldID int64, rowCount int64, field *datap
 	return nil
 }
 
-func (s *LocalSegment) AddFieldDataInfo(rowCount int64, fields []*datapb.FieldBinlog) error {
+func (s *LocalSegment) AddFieldDataInfo(ctx context.Context, rowCount int64, fields []*datapb.FieldBinlog) error {
 	s.ptrLock.RLock()
 	defer s.ptrLock.RUnlock()
 
@@ -738,14 +759,14 @@ func (s *LocalSegment) AddFieldDataInfo(rowCount int64, fields []*datapb.FieldBi
 		return merr.WrapErrSegmentNotLoaded(s.segmentID, "segment released")
 	}
 
-	log := log.With(
+	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", s.Collection()),
 		zap.Int64("partitionID", s.Partition()),
 		zap.Int64("segmentID", s.ID()),
 		zap.Int64("row count", rowCount),
 	)
 
-	loadFieldDataInfo, err := newLoadFieldDataInfo()
+	loadFieldDataInfo, err := newLoadFieldDataInfo(ctx)
 	defer deleteFieldDataInfo(loadFieldDataInfo)
 	if err != nil {
 		return err
@@ -753,13 +774,13 @@ func (s *LocalSegment) AddFieldDataInfo(rowCount int64, fields []*datapb.FieldBi
 
 	for _, field := range fields {
 		fieldID := field.FieldID
-		err = loadFieldDataInfo.appendLoadFieldInfo(fieldID, rowCount)
+		err = loadFieldDataInfo.appendLoadFieldInfo(ctx, fieldID, rowCount)
 		if err != nil {
 			return err
 		}
 
 		for _, binlog := range field.Binlogs {
-			err = loadFieldDataInfo.appendLoadFieldDataPath(fieldID, binlog)
+			err = loadFieldDataInfo.appendLoadFieldDataPath(ctx, fieldID, binlog)
 			if err != nil {
 				return err
 			}
@@ -771,7 +792,10 @@ func (s *LocalSegment) AddFieldDataInfo(rowCount int64, fields []*datapb.FieldBi
 		status = C.AddFieldDataInfoForSealed(s.ptr, loadFieldDataInfo.cLoadFieldDataInfo)
 		return nil, nil
 	}).Await()
-	if err := HandleCStatus(&status, "AddFieldDataInfo failed"); err != nil {
+	if err := HandleCStatus(ctx, &status, "AddFieldDataInfo failed",
+		zap.Int64("collectionID", s.Collection()),
+		zap.Int64("partitionID", s.Partition()),
+		zap.Int64("segmentID", s.ID())); err != nil {
 		return err
 	}
 
@@ -779,7 +803,7 @@ func (s *LocalSegment) AddFieldDataInfo(rowCount int64, fields []*datapb.FieldBi
 	return nil
 }
 
-func (s *LocalSegment) LoadDeltaData(deltaData *storage.DeleteData) error {
+func (s *LocalSegment) LoadDeltaData(ctx context.Context, deltaData *storage.DeleteData) error {
 	pks, tss := deltaData.Pks, deltaData.Tss
 	rowNum := deltaData.RowCount
 
@@ -790,7 +814,7 @@ func (s *LocalSegment) LoadDeltaData(deltaData *storage.DeleteData) error {
 		return merr.WrapErrSegmentNotLoaded(s.segmentID, "segment released")
 	}
 
-	log := log.With(
+	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", s.Collection()),
 		zap.Int64("partitionID", s.Partition()),
 		zap.Int64("segmentID", s.ID()),
@@ -844,7 +868,10 @@ func (s *LocalSegment) LoadDeltaData(deltaData *storage.DeleteData) error {
 		return nil, nil
 	}).Await()
 
-	if err := HandleCStatus(&status, "LoadDeletedRecord failed"); err != nil {
+	if err := HandleCStatus(ctx, &status, "LoadDeletedRecord failed",
+		zap.Int64("collectionID", s.Collection()),
+		zap.Int64("partitionID", s.Partition()),
+		zap.Int64("segmentID", s.ID())); err != nil {
 		return err
 	}
 
@@ -857,16 +884,16 @@ func (s *LocalSegment) LoadDeltaData(deltaData *storage.DeleteData) error {
 	return nil
 }
 
-func (s *LocalSegment) LoadIndex(indexInfo *querypb.FieldIndexInfo, fieldType schemapb.DataType) error {
-	loadIndexInfo, err := newLoadIndexInfo()
+func (s *LocalSegment) LoadIndex(ctx context.Context, indexInfo *querypb.FieldIndexInfo, fieldType schemapb.DataType) error {
+	loadIndexInfo, err := newLoadIndexInfo(ctx)
 	defer deleteLoadIndexInfo(loadIndexInfo)
 	if err != nil {
 		return err
 	}
 
-	err = loadIndexInfo.appendLoadIndexInfo(indexInfo, s.collectionID, s.partitionID, s.segmentID, fieldType)
+	err = loadIndexInfo.appendLoadIndexInfo(ctx, indexInfo, s.collectionID, s.partitionID, s.segmentID, fieldType)
 	if err != nil {
-		if loadIndexInfo.cleanLocalData() != nil {
+		if loadIndexInfo.cleanLocalData(ctx) != nil {
 			log.Warn("failed to clean cached data on disk after append index failed",
 				zap.Int64("buildID", indexInfo.BuildID),
 				zap.Int64("index version", indexInfo.IndexVersion))
@@ -878,10 +905,10 @@ func (s *LocalSegment) LoadIndex(indexInfo *querypb.FieldIndexInfo, fieldType sc
 		return errors.New(errMsg)
 	}
 
-	return s.LoadIndexInfo(indexInfo, loadIndexInfo)
+	return s.LoadIndexInfo(ctx, indexInfo, loadIndexInfo)
 }
 
-func (s *LocalSegment) LoadIndexInfo(indexInfo *querypb.FieldIndexInfo, info *LoadIndexInfo) error {
+func (s *LocalSegment) LoadIndexInfo(ctx context.Context, indexInfo *querypb.FieldIndexInfo, info *LoadIndexInfo) error {
 	log := log.With(
 		zap.Int64("collectionID", s.Collection()),
 		zap.Int64("partitionID", s.Partition()),
@@ -901,7 +928,11 @@ func (s *LocalSegment) LoadIndexInfo(indexInfo *querypb.FieldIndexInfo, info *Lo
 		return nil, nil
 	}).Await()
 
-	if err := HandleCStatus(&status, "UpdateSealedSegmentIndex failed"); err != nil {
+	if err := HandleCStatus(ctx, &status, "UpdateSealedSegmentIndex failed",
+		zap.Int64("collectionID", s.Collection()),
+		zap.Int64("partitionID", s.Partition()),
+		zap.Int64("segmentID", s.ID()),
+		zap.Int64("fieldID", indexInfo.FieldID)); err != nil {
 		return err
 	}
 	log.Info("updateSegmentIndex done")
@@ -909,7 +940,7 @@ func (s *LocalSegment) LoadIndexInfo(indexInfo *querypb.FieldIndexInfo, info *Lo
 	return nil
 }
 
-func (s *LocalSegment) UpdateFieldRawDataSize(numRows int64, fieldBinlog *datapb.FieldBinlog) error {
+func (s *LocalSegment) UpdateFieldRawDataSize(ctx context.Context, numRows int64, fieldBinlog *datapb.FieldBinlog) error {
 	var status C.CStatus
 	fieldID := fieldBinlog.FieldID
 	fieldDataSize := int64(0)
@@ -921,7 +952,7 @@ func (s *LocalSegment) UpdateFieldRawDataSize(numRows int64, fieldBinlog *datapb
 		return nil, nil
 	}).Await()
 
-	if err := HandleCStatus(&status, "updateFieldRawDataSize failed"); err != nil {
+	if err := HandleCStatus(ctx, &status, "updateFieldRawDataSize failed"); err != nil {
 		return err
 	}
 

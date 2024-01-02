@@ -36,6 +36,7 @@ constexpr const char* METRIC_TYPE = "metric_type";
 // scalar index type
 constexpr const char* ASCENDING_SORT = "STL_SORT";
 constexpr const char* MARISA_TRIE = "Trie";
+constexpr const char* INVERTED_INDEX_TYPE = "INVERTED";
 
 // index meta
 constexpr const char* COLLECTION_ID = "collection_id";

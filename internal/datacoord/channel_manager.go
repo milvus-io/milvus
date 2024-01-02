@@ -26,7 +26,6 @@ import (
 	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
-	"stathat.com/c/consistent"
 
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -83,10 +82,6 @@ type ChannelManagerOpt func(c *ChannelManagerImpl)
 
 func withFactory(f ChannelPolicyFactory) ChannelManagerOpt {
 	return func(c *ChannelManagerImpl) { c.factory = f }
-}
-
-func defaultFactory(hash *consistent.Consistent) ChannelPolicyFactory {
-	return NewConsistentHashChannelPolicyFactory(hash)
 }
 
 func withMsgstreamFactory(f msgstream.Factory) ChannelManagerOpt {

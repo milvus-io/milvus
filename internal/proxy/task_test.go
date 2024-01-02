@@ -682,10 +682,36 @@ func TestCreateCollectionTask(t *testing.T) {
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 
+		// too many vector fields
+		schema = proto.Clone(schemaBackup).(*schemapb.CollectionSchema)
+		schema.Fields = append(schema.Fields, schema.Fields[0])
+		for i := 0; i < Params.ProxyCfg.MaxVectorFieldNum.GetAsInt(); i++ {
+			schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+				FieldID:      101,
+				Name:         floatVecField + "_" + strconv.Itoa(i),
+				IsPrimaryKey: false,
+				Description:  "",
+				DataType:     schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.DimKey,
+						Value: strconv.Itoa(testVecDim),
+					},
+				},
+				IndexParams: nil,
+				AutoID:      false,
+			})
+		}
+		tooManyVectorFieldsSchema, err := proto.Marshal(schema)
+		assert.NoError(t, err)
+		task.CreateCollectionRequest.Schema = tooManyVectorFieldsSchema
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+
 		task.CreateCollectionRequest = reqBackup
 
 		// validateCollectionName
-
+		schema = proto.Clone(schemaBackup).(*schemapb.CollectionSchema)
 		schema.Name = " " // empty
 		emptyNameSchema, err := proto.Marshal(schema)
 		assert.NoError(t, err)
@@ -1671,66 +1697,15 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 			},
 			idAllocator: idAllocator,
 			ctx:         ctx,
-			result: &milvuspb.MutationResult{
-				Status:       merr.Success(),
-				IDs:          nil,
-				SuccIndex:    nil,
-				ErrIndex:     nil,
-				Acknowledged: false,
-				InsertCnt:    0,
-				DeleteCnt:    0,
-				UpsertCnt:    0,
-				Timestamp:    0,
+			primaryKeys: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{0, 1}}},
 			},
-			chMgr:    chMgr,
-			chTicker: ticker,
+			chMgr:        chMgr,
+			chTicker:     ticker,
+			collectionID: collectionID,
+			vChannels:    []string{"test-ch"},
 		}
 
-		assert.NoError(t, task.OnEnqueue())
-		assert.NotNil(t, task.TraceCtx())
-
-		id := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
-		task.SetID(id)
-		assert.Equal(t, id, task.ID())
-		assert.Equal(t, commonpb.MsgType_Delete, task.Type())
-
-		ts := Timestamp(time.Now().UnixNano())
-		task.SetTs(ts)
-		assert.Equal(t, ts, task.BeginTs())
-		assert.Equal(t, ts, task.EndTs())
-
-		assert.NoError(t, task.PreExecute(ctx))
-		assert.NoError(t, task.Execute(ctx))
-		assert.NoError(t, task.PostExecute(ctx))
-	})
-
-	t.Run("complex delete", func(t *testing.T) {
-		lb := NewMockLBPolicy(t)
-		task := &deleteTask{
-			Condition: NewTaskCondition(ctx),
-			lb:        lb,
-			req: &milvuspb.DeleteRequest{
-				CollectionName: collectionName,
-				PartitionName:  partitionName,
-				Expr:           "int64 < 2",
-			},
-			idAllocator: idAllocator,
-			ctx:         ctx,
-			result: &milvuspb.MutationResult{
-				Status:       merr.Success(),
-				IDs:          nil,
-				SuccIndex:    nil,
-				ErrIndex:     nil,
-				Acknowledged: false,
-				InsertCnt:    0,
-				DeleteCnt:    0,
-				UpsertCnt:    0,
-				Timestamp:    0,
-			},
-			chMgr:    chMgr,
-			chTicker: ticker,
-		}
-		lb.EXPECT().Execute(mock.Anything, mock.Anything).Return(nil)
 		assert.NoError(t, task.OnEnqueue())
 		assert.NotNil(t, task.TraceCtx())
 
@@ -2003,19 +1978,13 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 			},
 			idAllocator: idAllocator,
 			ctx:         ctx,
-			result: &milvuspb.MutationResult{
-				Status:       merr.Success(),
-				IDs:          nil,
-				SuccIndex:    nil,
-				ErrIndex:     nil,
-				Acknowledged: false,
-				InsertCnt:    0,
-				DeleteCnt:    0,
-				UpsertCnt:    0,
-				Timestamp:    0,
+			chMgr:       chMgr,
+			chTicker:    ticker,
+			vChannels:   []string{"test-channel"},
+			primaryKeys: &schemapb.IDs{
+				IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{"milvus", "test"}}},
 			},
-			chMgr:    chMgr,
-			chTicker: ticker,
+			collectionID: collectionID,
 		}
 
 		assert.NoError(t, task.OnEnqueue())
@@ -2590,6 +2559,42 @@ func Test_loadCollectionTask_Execute(t *testing.T) {
 					{
 						CollectionID:         collectionID,
 						FieldID:              100,
+						IndexName:            indexName,
+						IndexID:              indexID,
+						TypeParams:           nil,
+						IndexParams:          nil,
+						IndexedRows:          1025,
+						TotalRows:            1025,
+						State:                commonpb.IndexState_Finished,
+						IndexStateFailReason: "",
+						IsAutoIndex:          false,
+						UserIndexParams:      nil,
+					},
+				},
+			}, nil
+		}
+
+		err := lct.Execute(ctx)
+		assert.Error(t, err)
+	})
+
+	t.Run("not all vector fields with index", func(t *testing.T) {
+		vecFields := make([]*schemapb.FieldSchema, 0)
+		for _, field := range newTestSchema().GetFields() {
+			if isVectorType(field.GetDataType()) {
+				vecFields = append(vecFields, field)
+			}
+		}
+
+		assert.GreaterOrEqual(t, len(vecFields), 2)
+
+		dc.DescribeIndexFunc = func(ctx context.Context, request *indexpb.DescribeIndexRequest, opts ...grpc.CallOption) (*indexpb.DescribeIndexResponse, error) {
+			return &indexpb.DescribeIndexResponse{
+				Status: merr.Success(),
+				IndexInfos: []*indexpb.IndexInfo{
+					{
+						CollectionID:         collectionID,
+						FieldID:              vecFields[0].FieldID,
 						IndexName:            indexName,
 						IndexID:              indexID,
 						TypeParams:           nil,
@@ -3432,24 +3437,15 @@ func TestPartitionKey(t *testing.T) {
 				Expr:           "int64_field in [0, 1]",
 			},
 			ctx: ctx,
-			result: &milvuspb.MutationResult{
-				Status:       merr.Success(),
-				IDs:          nil,
-				SuccIndex:    nil,
-				ErrIndex:     nil,
-				Acknowledged: false,
-				InsertCnt:    0,
-				DeleteCnt:    0,
-				UpsertCnt:    0,
-				Timestamp:    0,
+			primaryKeys: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{0, 1}}},
 			},
-			idAllocator: idAllocator,
-			chMgr:       chMgr,
-			chTicker:    ticker,
+			idAllocator:  idAllocator,
+			chMgr:        chMgr,
+			chTicker:     ticker,
+			collectionID: collectionID,
+			vChannels:    []string{"test-channel"},
 		}
-		// don't support specify partition name if use partition key
-		dt.req.PartitionName = partitionNames[0]
-		assert.Error(t, dt.PreExecute(ctx))
 
 		dt.req.PartitionName = ""
 		assert.NoError(t, dt.PreExecute(ctx))

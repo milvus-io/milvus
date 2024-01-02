@@ -21,8 +21,8 @@ namespace exec {
 
 void
 PhyAlwaysTrueExpr::Eval(EvalCtx& context, VectorPtr& result) {
-    int64_t real_batch_size = current_pos_ + batch_size_ >= num_rows_
-                                  ? num_rows_ - current_pos_
+    int64_t real_batch_size = current_pos_ + batch_size_ >= active_count_
+                                  ? active_count_ - current_pos_
                                   : batch_size_;
 
     if (real_batch_size == 0) {

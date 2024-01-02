@@ -171,13 +171,13 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
             expr,
         const std::string& name,
         const segcore::SegmentInternalInterface* segment,
-        Timestamp query_timestamp,
+        int64_t active_count,
         int64_t batch_size)
         : SegmentExpr(std::move(input),
                       name,
                       segment,
                       expr->column_.field_id_,
-                      query_timestamp,
+                      active_count,
                       batch_size),
           expr_(expr) {
     }

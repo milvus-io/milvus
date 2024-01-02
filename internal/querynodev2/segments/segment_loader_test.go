@@ -142,6 +142,40 @@ func (suite *SegmentLoaderSuite) TestLoad() {
 	suite.NoError(err)
 }
 
+func (suite *SegmentLoaderSuite) TestLoadFail() {
+	ctx := context.Background()
+
+	msgLength := 4
+
+	// Load sealed
+	binlogs, statsLogs, err := SaveBinLog(ctx,
+		suite.collectionID,
+		suite.partitionID,
+		suite.segmentID,
+		msgLength,
+		suite.schema,
+		suite.chunkManager,
+	)
+	suite.NoError(err)
+
+	// make file & binlog mismatch
+	for _, binlog := range binlogs {
+		for _, log := range binlog.GetBinlogs() {
+			log.LogPath = log.LogPath + "-suffix"
+		}
+	}
+
+	_, err = suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, &querypb.SegmentLoadInfo{
+		SegmentID:    suite.segmentID,
+		PartitionID:  suite.partitionID,
+		CollectionID: suite.collectionID,
+		BinlogPaths:  binlogs,
+		Statslogs:    statsLogs,
+		NumOfRows:    int64(msgLength),
+	})
+	suite.Error(err)
+}
+
 func (suite *SegmentLoaderSuite) TestLoadMultipleSegments() {
 	ctx := context.Background()
 	loadInfos := make([]*querypb.SegmentLoadInfo, 0, suite.segmentNum)

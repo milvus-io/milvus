@@ -782,6 +782,18 @@ func GetVectorFieldSchema(schema *schemapb.CollectionSchema) (*schemapb.FieldSch
 	return nil, errors.New("vector field is not found")
 }
 
+// GetVectorFieldSchemas get vector fields schema from collection schema.
+func GetVectorFieldSchemas(schema *schemapb.CollectionSchema) []*schemapb.FieldSchema {
+	ret := make([]*schemapb.FieldSchema, 0)
+	for _, fieldSchema := range schema.Fields {
+		if IsVectorType(fieldSchema.DataType) {
+			ret = append(ret, fieldSchema)
+		}
+	}
+
+	return ret
+}
+
 // GetPrimaryFieldSchema get primary field schema from collection schema
 func GetPrimaryFieldSchema(schema *schemapb.CollectionSchema) (*schemapb.FieldSchema, error) {
 	for _, fieldSchema := range schema.Fields {
@@ -1022,29 +1034,18 @@ type ResultWithID interface {
 }
 
 // SelectMinPK select the index of the minPK in results T of the cursors.
-func SelectMinPK[T ResultWithID](results []T, cursors []int64, stopForBest bool, realLimit int64) int {
+func SelectMinPK[T ResultWithID](results []T, cursors []int64) (int, bool) {
 	var (
-		sel            = -1
-		minIntPK int64 = math.MaxInt64
+		sel               = -1
+		drainResult       = false
+		minIntPK    int64 = math.MaxInt64
 
 		firstStr = true
 		minStrPK string
 	)
-
 	for i, cursor := range cursors {
 		if int(cursor) >= GetSizeOfIDs(results[i].GetIds()) {
-			if realLimit == Unlimited {
-				// if there is no limit set and all possible results of one query unit(shard or segment)
-				// has drained all possible results without any leftover, so it's safe to continue the selection
-				// under this case
-				continue
-			}
-			if stopForBest && GetSizeOfIDs(results[i].GetIds()) >= int(realLimit) {
-				// if one query unit(shard or segment) has more than realLimit results, and it has run out of
-				// all results in this round, then we have to stop select since there may be further the latest result
-				// in the following result of current query unit
-				return -1
-			}
+			drainResult = true
 			continue
 		}
 
@@ -1066,5 +1067,5 @@ func SelectMinPK[T ResultWithID](results []T, cursors []int64, stopForBest bool,
 		}
 	}
 
-	return sel
+	return sel, drainResult
 }

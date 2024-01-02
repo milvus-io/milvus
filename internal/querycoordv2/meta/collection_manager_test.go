@@ -501,6 +501,11 @@ func (suite *CollectionManagerSuite) TestUpgradeRecover() {
 	err := mgr.Recover(suite.broker)
 	suite.NoError(err)
 	suite.checkLoadResult()
+
+	for i, collection := range suite.collections {
+		newColl := mgr.GetCollection(collection)
+		suite.Equal(suite.loadTypes[i], newColl.GetLoadType())
+	}
 }
 
 func (suite *CollectionManagerSuite) loadAll() {

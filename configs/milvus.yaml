@@ -193,6 +193,7 @@ proxy:
   # As of today (2.2.0 and after) it is strongly DISCOURAGED to set maxFieldNum >= 64.
   # So adjust at your risk!
   maxFieldNum: 64
+  maxVectorFieldNum: 4 # Maximum number of vector fields in a collection, (0, 10].
   maxShardNum: 16 # Maximum number of shards in a collection
   maxDimension: 32768 # Maximum dimension of a vector
   # Whether to produce gin logs.\n
@@ -244,7 +245,7 @@ proxy:
 # Related configuration of queryCoord, used to manage topology and load balancing for the query nodes, and handoff from growing segments to sealed segments.
 queryCoord:
   autoHandoff: true # Enable auto handoff
-  autoBalance: false # Enable auto balance
+  autoBalance: true # Enable auto balance
   balancer: ScoreBasedBalancer # Balancer to use
   globalRowCountFactor: 0.1 # expert parameters, only used by scoreBasedBalancer
   scoreUnbalanceTolerationFactor: 0.05 # expert parameters, only used by scoreBasedBalancer
@@ -287,7 +288,7 @@ queryNode:
     # Use more threads to make better use of SSD throughput in disk index.
     # This parameter is only useful when enable-disk = true.
     # And this value should be a number greater than 1 and less than 32.
-    chunkRows: 1024 # The number of vectors in a chunk.
+    chunkRows: 128 # The number of vectors in a chunk.
     exprEvalBatchSize: 8192 # The batch size for executor get next
     interimIndex: # build a vector temperate index for growing segment or binlog to accelerate search
       enableIndex: true
@@ -580,6 +581,8 @@ common:
       warn: 1000 # minimum milliseconds for printing durations in warn level
   ttMsgEnabled: true # Whether the instance disable sending ts messages
   traceLogMode: 0 # trace request info, 0: none, 1: simple request info, like collection/partition/database name, 2: request detail
+  bloomFilterSize: 100000
+  maxBloomFalsePositive: 0.05
 
 # QuotaConfig, configurations of Milvus quota and limits.
 # By default, we enable:
@@ -724,3 +727,7 @@ trace:
 autoIndex:
   params:
     build: '{"M": 18,"efConstruction": 240,"index_type": "HNSW", "metric_type": "IP"}'
+
+gpu:
+  initMemSize: 0
+  maxMemSize: 0

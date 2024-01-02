@@ -23,6 +23,7 @@ import (
 
 	"github.com/apache/arrow/go/v12/arrow"
 	"github.com/apache/arrow/go/v12/arrow/memory"
+	"github.com/apache/arrow/go/v12/parquet"
 	"github.com/apache/arrow/go/v12/parquet/file"
 	"github.com/apache/arrow/go/v12/parquet/pqarrow"
 	"go.uber.org/zap"
@@ -87,11 +88,15 @@ func NewParquetParser(ctx context.Context,
 		return nil, err
 	}
 
-	reader, err := file.NewParquetReader(cmReader)
+	reader, err := file.NewParquetReader(cmReader, file.WithReadProps(&parquet.ReaderProperties{
+		BufferSize:            32 * 1024 * 1024,
+		BufferedStreamEnabled: true,
+	}))
 	if err != nil {
 		log.Warn("create parquet reader failed", zap.Error(err))
 		return nil, err
 	}
+	log.Info("create file reader done!", zap.Int("row group num", reader.NumRowGroups()), zap.Int64("num rows", reader.NumRows()))
 
 	fileReader, err := pqarrow.NewFileReader(reader, pqarrow.ArrowReadProperties{}, memory.DefaultAllocator)
 	if err != nil {
@@ -544,7 +549,7 @@ func (p *ParquetParser) readData(columnReader *ParquetColumnReader, rowCount int
 			Dim:  columnReader.dimension,
 		}, nil
 	case schemapb.DataType_Array:
-		data := make([]*schemapb.ScalarField, 0)
+		data := make([]*schemapb.ScalarField, 0, rowCount)
 		switch columnReader.elementType {
 		case schemapb.DataType_Bool:
 			boolArray, err := ReadBoolArrayData(columnReader, rowCount)

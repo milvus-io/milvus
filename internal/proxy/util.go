@@ -56,7 +56,7 @@ const (
 	boundedTS = 2
 
 	// enableMultipleVectorFields indicates whether to enable multiple vector fields.
-	enableMultipleVectorFields = false
+	enableMultipleVectorFields = true
 
 	defaultMaxVarCharLength = 65535
 
@@ -67,6 +67,8 @@ const (
 
 	// DefaultStringIndexType name of default index type for varChar/string field
 	DefaultStringIndexType = "Trie"
+
+	InvertedIndexType = "INVERTED"
 )
 
 var logger = log.L().WithOptions(zap.Fields(zap.String("role", typeutil.ProxyRole)))
@@ -220,7 +222,6 @@ func validatePartitionTag(partitionTag string, strictCheck bool) error {
 		msg := invalidMsg + "Partition name should not be empty."
 		return errors.New(msg)
 	}
-
 	if len(partitionTag) > Params.ProxyCfg.MaxNameLength.GetAsInt() {
 		msg := invalidMsg + "The length of a partition name must be less than " + Params.ProxyCfg.MaxNameLength.GetValue() + " characters."
 		return errors.New(msg)
@@ -248,12 +249,12 @@ func validatePartitionTag(partitionTag string, strictCheck bool) error {
 
 func validateStringIndexType(indexType string) bool {
 	// compatible with the index type marisa-trie of attu versions prior to 2.3.0
-	return indexType == DefaultStringIndexType || indexType == "marisa-trie"
+	return indexType == DefaultStringIndexType || indexType == "marisa-trie" || indexType == InvertedIndexType
 }
 
 func validateArithmeticIndexType(indexType string) bool {
 	// compatible with the index type Asceneding of attu versions prior to 2.3.0
-	return indexType == DefaultArithmeticIndexType || indexType == "Asceneding"
+	return indexType == DefaultArithmeticIndexType || indexType == "Asceneding" || indexType == InvertedIndexType
 }
 
 func validateFieldName(fieldName string) error {
@@ -1365,6 +1366,15 @@ func isPartitionKeyMode(ctx context.Context, dbName string, colName string) (boo
 	}
 
 	return false, nil
+}
+
+func hasParitionKeyModeField(schema *schemapb.CollectionSchema) bool {
+	for _, fieldSchema := range schema.GetFields() {
+		if fieldSchema.IsPartitionKey {
+			return true
+		}
+	}
+	return false
 }
 
 // getDefaultPartitionNames only used in partition key mode

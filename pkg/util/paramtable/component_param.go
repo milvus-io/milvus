@@ -58,6 +58,7 @@ type ComponentParam struct {
 	CommonCfg       commonConfig
 	QuotaConfig     quotaConfig
 	AutoIndexConfig autoIndexConfig
+	GpuConfig       gpuConfig
 	TraceCfg        traceConfig
 
 	RootCoordCfg  rootCoordConfig
@@ -118,6 +119,7 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.HTTPCfg.init(bt)
 	p.LogCfg.init(bt)
 	p.RoleCfg.init(bt)
+	p.GpuConfig.init(bt)
 
 	p.RootCoordGrpcServerCfg.Init("rootCoord", bt)
 	p.ProxyGrpcServerCfg.Init("proxy", bt)
@@ -228,6 +230,9 @@ type commonConfig struct {
 	EnableStorageV2 ParamItem `refreshable:"false"`
 	TTMsgEnabled    ParamItem `refreshable:"true"`
 	TraceLogMode    ParamItem `refreshable:"true"`
+
+	BloomFilterSize       ParamItem `refreshable:"true"`
+	MaxBloomFalsePositive ParamItem `refreshable:"true"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -670,6 +675,45 @@ like the old password verification when updating the credential`,
 		Doc:          "trace request info",
 	}
 	p.TraceLogMode.Init(base.mgr)
+
+	p.BloomFilterSize = ParamItem{
+		Key:          "common.bloomFilterSize",
+		Version:      "2.3.2",
+		DefaultValue: "100000",
+		Doc:          "bloom filter initial size",
+	}
+	p.BloomFilterSize.Init(base.mgr)
+
+	p.MaxBloomFalsePositive = ParamItem{
+		Key:          "common.maxBloomFalsePositive",
+		Version:      "2.3.2",
+		DefaultValue: "0.05",
+		Doc:          "max false positive rate for bloom filter",
+	}
+	p.MaxBloomFalsePositive.Init(base.mgr)
+}
+
+type gpuConfig struct {
+	InitSize ParamItem `refreshable:"false"`
+	MaxSize  ParamItem `refreshable:"false"`
+}
+
+func (t *gpuConfig) init(base *BaseTable) {
+	t.InitSize = ParamItem{
+		Key:     "gpu.initMemSize",
+		Version: "2.3.4",
+		Doc:     `Gpu Memory Pool init size`,
+		Export:  true,
+	}
+	t.InitSize.Init(base.mgr)
+
+	t.MaxSize = ParamItem{
+		Key:     "gpu.maxMemSize",
+		Version: "2.3.4",
+		Doc:     `Gpu Memory Pool Max size`,
+		Export:  true,
+	}
+	t.MaxSize.Init(base.mgr)
 }
 
 type traceConfig struct {
@@ -927,6 +971,7 @@ type proxyConfig struct {
 	MinPasswordLength            ParamItem `refreshable:"true"`
 	MaxPasswordLength            ParamItem `refreshable:"true"`
 	MaxFieldNum                  ParamItem `refreshable:"true"`
+	MaxVectorFieldNum            ParamItem `refreshable:"true"`
 	MaxShardNum                  ParamItem `refreshable:"true"`
 	MaxDimension                 ParamItem `refreshable:"true"`
 	GinLogging                   ParamItem `refreshable:"false"`
@@ -1022,6 +1067,22 @@ So adjust at your risk!`,
 	}
 	p.MaxFieldNum.Init(base.mgr)
 
+	p.MaxVectorFieldNum = ParamItem{
+		Key:          "proxy.maxVectorFieldNum",
+		Version:      "2.4.0",
+		DefaultValue: "4",
+		Formatter: func(v string) string {
+			if getAsInt(v) > 10 {
+				return "10"
+			}
+			return v
+		},
+		PanicIfEmpty: true,
+		Doc:          "Maximum number of vector fields in a collection.",
+		Export:       true,
+	}
+	p.MaxVectorFieldNum.Init(base.mgr)
+
 	p.MaxShardNum = ParamItem{
 		Key:          "proxy.maxShardNum",
 		DefaultValue: "16",
@@ -1110,9 +1171,10 @@ please adjust in embedded Milvus: false`,
 	p.AccessLog.MinioEnable.Init(base.mgr)
 
 	p.AccessLog.LocalPath = ParamItem{
-		Key:     "proxy.accessLog.localPath",
-		Version: "2.2.0",
-		Export:  true,
+		Key:          "proxy.accessLog.localPath",
+		Version:      "2.2.0",
+		DefaultValue: "/tmp/milvus_access",
+		Export:       true,
 	}
 	p.AccessLog.LocalPath.Init(base.mgr)
 
@@ -1340,7 +1402,7 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 	p.AutoBalance = ParamItem{
 		Key:          "queryCoord.autoBalance",
 		Version:      "2.0.0",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		PanicIfEmpty: true,
 		Doc:          "Enable auto balance",
 		Export:       true,
@@ -1784,10 +1846,10 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 	p.ChunkRows = ParamItem{
 		Key:          "queryNode.segcore.chunkRows",
 		Version:      "2.0.0",
-		DefaultValue: "1024",
+		DefaultValue: "128",
 		Formatter: func(v string) string {
-			if getAsInt(v) < 1024 {
-				return "1024"
+			if getAsInt(v) < 128 {
+				return "128"
 			}
 			return v
 		},
@@ -2593,7 +2655,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	p.AutoBalance = ParamItem{
 		Key:          "dataCoord.autoBalance",
 		Version:      "2.3.3",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		PanicIfEmpty: true,
 		Doc:          "Enable auto balance",
 		Export:       true,

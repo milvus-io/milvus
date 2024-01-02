@@ -25,6 +25,7 @@ package segments
 import "C"
 
 import (
+	"context"
 	"fmt"
 )
 
@@ -70,7 +71,7 @@ func ParseSliceInfo(originNQs []int64, originTopKs []int64, nqPerSlice int64) *S
 	return sInfo
 }
 
-func ReduceSearchResultsAndFillData(plan *SearchPlan, searchResults []*SearchResult,
+func ReduceSearchResultsAndFillData(ctx context.Context, plan *SearchPlan, searchResults []*SearchResult,
 	numSegments int64, sliceNQs []int64, sliceTopKs []int64,
 ) (searchResultDataBlobs, error) {
 	if plan.cSearchPlan == nil {
@@ -100,16 +101,16 @@ func ReduceSearchResultsAndFillData(plan *SearchPlan, searchResults []*SearchRes
 	var cSearchResultDataBlobs searchResultDataBlobs
 	status := C.ReduceSearchResultsAndFillData(&cSearchResultDataBlobs, plan.cSearchPlan, cSearchResultPtr,
 		cNumSegments, cSliceNQSPtr, cSliceTopKSPtr, cNumSlices)
-	if err := HandleCStatus(&status, "ReduceSearchResultsAndFillData failed"); err != nil {
+	if err := HandleCStatus(ctx, &status, "ReduceSearchResultsAndFillData failed"); err != nil {
 		return nil, err
 	}
 	return cSearchResultDataBlobs, nil
 }
 
-func GetSearchResultDataBlob(cSearchResultDataBlobs searchResultDataBlobs, blobIndex int) ([]byte, error) {
+func GetSearchResultDataBlob(ctx context.Context, cSearchResultDataBlobs searchResultDataBlobs, blobIndex int) ([]byte, error) {
 	var blob C.CProto
 	status := C.GetSearchResultDataBlob(&blob, cSearchResultDataBlobs, C.int32_t(blobIndex))
-	if err := HandleCStatus(&status, "marshal failed"); err != nil {
+	if err := HandleCStatus(ctx, &status, "marshal failed"); err != nil {
 		return nil, err
 	}
 	return GetCProtoBlob(&blob), nil

@@ -23,6 +23,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type BloomFilterSetSuite struct {
@@ -31,6 +32,7 @@ type BloomFilterSetSuite struct {
 }
 
 func (s *BloomFilterSetSuite) SetupTest() {
+	paramtable.Init()
 	s.bfs = NewBloomFilterSet()
 }
 
@@ -56,7 +58,6 @@ func (s *BloomFilterSetSuite) GetFieldData(ids []int64) storage.FieldData {
 
 func (s *BloomFilterSetSuite) TestWriteRead() {
 	ids := []int64{1, 2, 3, 4, 5}
-
 	for _, id := range ids {
 		s.False(s.bfs.PkExists(storage.NewInt64PrimaryKey(id)), "pk shall not exist before update")
 	}
@@ -78,7 +79,9 @@ func (s *BloomFilterSetSuite) TestRoll() {
 	err := s.bfs.UpdatePKRange(s.GetFieldData(ids))
 	s.NoError(err)
 
-	s.bfs.Roll()
+	newEntry := &storage.PrimaryKeyStats{}
+
+	s.bfs.Roll(newEntry)
 
 	history = s.bfs.GetHistory()
 	s.Equal(1, len(history), "history shall have one entry after roll with current data")

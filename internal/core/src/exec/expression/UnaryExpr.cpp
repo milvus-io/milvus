@@ -439,9 +439,10 @@ PhyUnaryRangeFilterExpr::PreCheckOverflow() {
         int64_t val = GetValueFromProto<int64_t>(expr_->val_);
 
         if (milvus::query::out_of_range<T>(val)) {
-            int64_t batch_size = overflow_check_pos_ + batch_size_ >= num_rows_
-                                     ? num_rows_ - overflow_check_pos_
-                                     : batch_size_;
+            int64_t batch_size =
+                overflow_check_pos_ + batch_size_ >= active_count_
+                    ? active_count_ - overflow_check_pos_
+                    : batch_size_;
             overflow_check_pos_ += batch_size;
             if (cached_overflow_res_ != nullptr &&
                 cached_overflow_res_->size() == batch_size) {
@@ -583,9 +584,14 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData() {
         ProcessDataChunks<T>(execute_sub_batch, skip_index_func, res, val);
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "
-               "expect batch size {}",
+               "expect batch size {}, related params[active_count:{}, "
+               "current_data_chunk:{}, num_data_chunk:{}, current_data_pos:{}]",
                processed_size,
-               real_batch_size);
+               real_batch_size,
+               active_count_,
+               current_data_chunk_,
+               num_data_chunk_,
+               current_data_chunk_pos_);
     return res_vec;
 }
 
