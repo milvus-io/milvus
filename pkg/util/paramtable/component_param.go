@@ -1771,7 +1771,7 @@ type queryNodeConfig struct {
 
 	// delete buffer
 	MaxSegmentDeleteBuffer ParamItem `refreshable:"false"`
-	DeleteBufferBlockSize  ParamItem `refreshable:"false`
+	DeleteBufferBlockSize  ParamItem `refreshable:"false"`
 
 	// loader
 	IoPoolSize ParamItem `refreshable:"false"`
