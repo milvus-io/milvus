@@ -57,12 +57,6 @@ func (m *taskManager) Update(taskID int64, actions ...UpdateAction) {
 		for _, action := range actions {
 			action(m.tasks[taskID])
 		}
-		//switch updatedTask.GetType() {
-		//case PreImportTaskType:
-		//	m.tasks[updatedTask.GetTaskID()] = updatedTask
-		//case ImportTaskType:
-		//	m.tasks[updatedTask.GetTaskID()] = updatedTask
-		//}
 	}
 }
 

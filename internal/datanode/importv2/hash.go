@@ -88,7 +88,7 @@ func GetHashedRowsCount(task Task, insertData *storage.InsertData) (map[string]*
 	if err != nil {
 		return nil, err
 	}
-	if pkField.GetAutoID() { // TODO: dyh, fix it, find better way
+	if pkField.GetAutoID() { // TODO: dyh, fix it, find a better way
 		// gen fake auto id for preimport
 		if insertData.Data[pkField.GetFieldID()] == nil || insertData.Data[pkField.GetFieldID()].RowNum() == 0 {
 			switch pkField.GetDataType() {

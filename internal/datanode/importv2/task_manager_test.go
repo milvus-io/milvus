@@ -42,7 +42,6 @@ func TestImportManager(t *testing.T) {
 	res := manager.Get(task1.GetTaskID())
 	assert.Equal(t, task1, res)
 
-	//task2 := task1.Clone()
 	task2 := task1
 	task2.TaskID = 8
 	task2.State = internalpb.ImportState_Completed

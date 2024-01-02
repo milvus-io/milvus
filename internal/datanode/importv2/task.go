@@ -17,7 +17,6 @@
 package importv2
 
 import (
-	"fmt"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"github.com/samber/lo"
@@ -99,7 +98,6 @@ func UpdateSegmentInfo(info *datapb.ImportSegmentInfo) UpdateAction {
 				it.segmentsInfo[segment].Statslogs = append(it.segmentsInfo[segment].Statslogs, info.GetStatslogs()...)
 				return
 			}
-			fmt.Println("dyh debug updateSegmentInfo,", info)
 			it.segmentsInfo[segment] = info
 		}
 	}
@@ -115,7 +113,6 @@ type Task interface {
 	GetState() internalpb.ImportState
 	GetReason() string
 	GetSchema() *schemapb.CollectionSchema
-	//Clone() Task
 }
 
 type PreImportTask struct {
@@ -146,12 +143,6 @@ func NewPreImportTask(req *datapb.PreImportRequest) Task {
 func (p *PreImportTask) GetType() TaskType {
 	return PreImportTaskType
 }
-
-//func (p *PreImportTask) Clone() Task {
-//	return &PreImportTask{
-//		PreImportTask: proto.Clone(p.PreImportTask).(*datapb.PreImportTask),
-//	}
-//}
 
 func (p *PreImportTask) GetSchema() *schemapb.CollectionSchema {
 	return p.schema
@@ -213,18 +204,6 @@ func (t *ImportTask) Init(req *datapb.ImportRequest) {
 func (t *ImportTask) GetType() TaskType {
 	return ImportTaskType
 }
-
-//func (t *ImportTask) Clone() Task {
-//	return &ImportTask{
-//		ImportTaskV2: proto.Clone(t.ImportTaskV2).(*datapb.ImportTaskV2),
-//		schema:       t.schema,
-//		segmentsInfo: t.segmentsInfo,
-//		req:          t.req,
-//		vchannels:    t.vchannels,
-//		partitions:   t.partitions,
-//		metaCaches:   t.metaCaches,
-//	}
-//}
 
 func (t *ImportTask) GetPartitionIDs() []int64 {
 	return t.partitions
