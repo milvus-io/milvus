@@ -45,14 +45,14 @@ IndexFactory::CreateScalarIndex(
 }
 
 // template <>
-// inline ScalarIndexPtr<bool>
+// ScalarIndexPtr<bool>
 // IndexFactory::CreateScalarIndex(const IndexType& index_type) {
 //    return CreateBoolIndex();
 //}
 //
 
 template <>
-inline ScalarIndexPtr<std::string>
+ScalarIndexPtr<std::string>
 IndexFactory::CreateScalarIndex(
     const IndexType& index_type,
     const storage::FileManagerContext& file_manager_context,
