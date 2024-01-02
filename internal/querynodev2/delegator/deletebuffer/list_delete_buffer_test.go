@@ -95,16 +95,16 @@ func (s *ListDeleteBufferSuite) TestTryDiscard() {
 
 	s.Equal(2, len(buffer.ListAfter(10)))
 
-	buffer.TryDiscard(20)
+	buffer.TryDiscard(10)
 	s.Equal(2, len(buffer.ListAfter(10)), "equal ts shall not discard block")
 
-	buffer.TryDiscard(21)
-	s.Equal(2, len(buffer.ListAfter(10)), "future ts shall not discard any block")
+	buffer.TryDiscard(9)
+	s.Equal(2, len(buffer.ListAfter(10)), "history ts shall not discard any block")
 
-	buffer.TryDiscard(19)
+	buffer.TryDiscard(20)
 	s.Equal(1, len(buffer.ListAfter(10)), "first block shall be discarded")
 
-	buffer.TryDiscard(19)
+	buffer.TryDiscard(20)
 	s.Equal(1, len(buffer.ListAfter(10)), "discard will not happen if there is only one block")
 }
 

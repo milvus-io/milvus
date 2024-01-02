@@ -76,18 +76,19 @@ func (b *listDeleteBuffer[T]) TryDiscard(ts uint64) {
 	if len(b.list) == 1 {
 		return
 	}
-	var target int
-	for idx, block := range b.list {
-		// find first block completely behind ts
-		if block.headTs > ts {
-			target = idx
+	var nextHead int
+	for idx := len(b.list) - 1; idx >= 0; idx-- {
+		block := b.list[idx]
+		if block.headTs <= ts {
+			nextHead = idx
 			break
 		}
 	}
-	if target > 0 {
-		for idx := 0; idx < target; idx++ {
+
+	if nextHead > 0 {
+		for idx := 0; idx < nextHead; idx++ {
 			b.list[idx] = nil
 		}
-		b.list = b.list[target:]
+		b.list = b.list[nextHead:]
 	}
 }
