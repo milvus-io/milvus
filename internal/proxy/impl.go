@@ -2424,7 +2424,7 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 	if err := dr.Run(ctx); err != nil {
 		log.Error("Failed to enqueue delete task: " + err.Error())
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
-			metrics.AbandonLabel).Inc()
+			metrics.FailLabel).Inc()
 
 		return &milvuspb.MutationResult{
 			Status: merr.Status(err),
