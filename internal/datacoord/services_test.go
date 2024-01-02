@@ -8,6 +8,9 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	grpcStatus "google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -16,9 +19,299 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 )
+
+type ServerSuite struct {
+	suite.Suite
+
+	testServer *Server
+	mockChMgr  *MockChannelManager
+}
+
+func (s *ServerSuite) SetupTest() {
+	s.testServer = newTestServer(s.T(), nil)
+	if s.testServer.channelManager != nil {
+		s.testServer.channelManager.Close()
+	}
+
+	s.mockChMgr = NewMockChannelManager(s.T())
+	s.testServer.channelManager = s.mockChMgr
+	if s.mockChMgr != nil {
+		s.mockChMgr.EXPECT().Close().Maybe()
+	}
+}
+
+func (s *ServerSuite) TearDownTest() {
+	if s.testServer != nil {
+		log.Info("tear down tests", zap.String("test name", s.T().Name()))
+		closeTestServer(s.T(), s.testServer)
+	}
+}
+
+func TestServerSuite(t *testing.T) {
+	suite.Run(t, new(ServerSuite))
+}
+
+func (s *ServerSuite) TestFlush() {
+	s.TearDownTest()
+	req := &datapb.FlushRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_Flush,
+			MsgID:     0,
+			Timestamp: 0,
+			SourceID:  0,
+		},
+		DbID:         0,
+		CollectionID: 0,
+	}
+
+	s.Run("normal case", func() {
+		s.SetupTest()
+		defer s.TearDownTest()
+		s.mockChMgr.EXPECT().GetNodeChannelsByCollectionID(mock.Anything).Return(map[int64][]string{
+			1: {"channel-1"},
+		})
+
+		mockCluster := NewMockCluster(s.T())
+		mockCluster.EXPECT().FlushChannels(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return(nil)
+		mockCluster.EXPECT().Close().Maybe()
+		s.testServer.cluster = mockCluster
+
+		schema := newTestSchema()
+		s.testServer.meta.AddCollection(&collectionInfo{ID: 0, Schema: schema, Partitions: []int64{}})
+		allocations, err := s.testServer.segmentManager.AllocSegment(context.TODO(), 0, 1, "channel-1", 1)
+		s.NoError(err)
+		s.EqualValues(1, len(allocations))
+		expireTs := allocations[0].ExpireTime
+		segID := allocations[0].SegmentID
+
+		resp, err := s.testServer.Flush(context.TODO(), req)
+		s.NoError(err)
+		s.EqualValues(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+
+		s.testServer.meta.SetCurrentRows(segID, 1)
+		ids, err := s.testServer.segmentManager.GetFlushableSegments(context.TODO(), "channel-1", expireTs)
+		s.NoError(err)
+		s.EqualValues(1, len(ids))
+		s.EqualValues(segID, ids[0])
+	})
+
+	s.Run("bulkload segment", func() {
+		s.SetupTest()
+		defer s.TearDownTest()
+		s.mockChMgr.EXPECT().GetNodeChannelsByCollectionID(mock.Anything).Return(map[int64][]string{
+			1: {"channel-1"},
+		}).Twice()
+
+		mockCluster := NewMockCluster(s.T())
+		mockCluster.EXPECT().FlushChannels(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return(nil).Twice()
+		mockCluster.EXPECT().Close().Maybe()
+		s.testServer.cluster = mockCluster
+
+		schema := newTestSchema()
+		s.testServer.meta.AddCollection(&collectionInfo{ID: 0, Schema: schema, Partitions: []int64{}})
+
+		allocations, err := s.testServer.segmentManager.allocSegmentForImport(context.TODO(), 0, 1, "channel-1", 1, 100)
+		s.NoError(err)
+		expireTs := allocations.ExpireTime
+		segID := allocations.SegmentID
+
+		resp, err := s.testServer.Flush(context.TODO(), req)
+		s.NoError(err)
+		s.EqualValues(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		s.EqualValues(0, len(resp.SegmentIDs))
+		// should not flush anything since this is a normal flush
+		s.testServer.meta.SetCurrentRows(segID, 1)
+		ids, err := s.testServer.segmentManager.GetFlushableSegments(context.TODO(), "channel-1", expireTs)
+		s.NoError(err)
+		s.EqualValues(0, len(ids))
+
+		req := &datapb.FlushRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_Flush,
+				MsgID:     0,
+				Timestamp: 0,
+				SourceID:  0,
+			},
+			DbID:         0,
+			CollectionID: 0,
+			IsImport:     true,
+		}
+
+		resp, err = s.testServer.Flush(context.TODO(), req)
+		s.NoError(err)
+		s.EqualValues(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		s.EqualValues(1, len(resp.SegmentIDs))
+
+		ids, err = s.testServer.segmentManager.GetFlushableSegments(context.TODO(), "channel-1", expireTs)
+		s.NoError(err)
+		s.EqualValues(1, len(ids))
+		s.EqualValues(segID, ids[0])
+	})
+
+	s.Run("closed server", func() {
+		s.SetupTest()
+		s.TearDownTest()
+
+		resp, err := s.testServer.Flush(context.Background(), req)
+		s.NoError(err)
+		s.ErrorIs(merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
+	})
+
+	s.Run("test rolling upgrade", func() {
+		s.SetupTest()
+		defer s.TearDownTest()
+
+		mockCluster := NewMockCluster(s.T())
+		mockCluster.EXPECT().FlushChannels(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return(merr.WrapErrServiceUnimplemented(grpcStatus.Error(codes.Unimplemented, "mock grpc unimplemented error")))
+		mockCluster.EXPECT().Close().Maybe()
+		s.testServer.cluster = mockCluster
+		s.mockChMgr.EXPECT().GetNodeChannelsByCollectionID(mock.Anything).Return(map[int64][]string{
+			1: {"channel-1"},
+		}).Once()
+
+		resp, err := s.testServer.Flush(context.TODO(), req)
+		s.NoError(err)
+		s.EqualValues(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		s.Equal(Timestamp(0), resp.GetFlushTs())
+	})
+}
+
+func (s *ServerSuite) TestGetSegmentInfoChannel() {
+	resp, err := s.testServer.GetSegmentInfoChannel(context.TODO(), nil)
+	s.NoError(err)
+	s.EqualValues(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	s.EqualValues(Params.CommonCfg.DataCoordSegmentInfo.GetValue(), resp.Value)
+}
+
+func (s *ServerSuite) TestAssignSegmentID() {
+	s.TearDownTest()
+	const collID = 100
+	const collIDInvalid = 101
+	const partID = 0
+	const channel0 = "channel0"
+
+	s.Run("assign segment normally", func() {
+		s.SetupTest()
+		defer s.TearDownTest()
+
+		schema := newTestSchema()
+		s.testServer.meta.AddCollection(&collectionInfo{
+			ID:         collID,
+			Schema:     schema,
+			Partitions: []int64{},
+		})
+		req := &datapb.SegmentIDRequest{
+			Count:        1000,
+			ChannelName:  channel0,
+			CollectionID: collID,
+			PartitionID:  partID,
+		}
+
+		resp, err := s.testServer.AssignSegmentID(context.TODO(), &datapb.AssignSegmentIDRequest{
+			NodeID:            0,
+			PeerRole:          "",
+			SegmentIDRequests: []*datapb.SegmentIDRequest{req},
+		})
+		s.NoError(err)
+		s.EqualValues(1, len(resp.SegIDAssignments))
+		assign := resp.SegIDAssignments[0]
+		s.EqualValues(commonpb.ErrorCode_Success, assign.GetStatus().GetErrorCode())
+		s.EqualValues(collID, assign.CollectionID)
+		s.EqualValues(partID, assign.PartitionID)
+		s.EqualValues(channel0, assign.ChannelName)
+		s.EqualValues(1000, assign.Count)
+	})
+
+	s.Run("assign segment for bulkload", func() {
+		s.SetupTest()
+		defer s.TearDownTest()
+
+		schema := newTestSchema()
+		s.testServer.meta.AddCollection(&collectionInfo{
+			ID:         collID,
+			Schema:     schema,
+			Partitions: []int64{},
+		})
+		req := &datapb.SegmentIDRequest{
+			Count:        1000,
+			ChannelName:  channel0,
+			CollectionID: collID,
+			PartitionID:  partID,
+			IsImport:     true,
+		}
+
+		resp, err := s.testServer.AssignSegmentID(context.TODO(), &datapb.AssignSegmentIDRequest{
+			NodeID:            0,
+			PeerRole:          "",
+			SegmentIDRequests: []*datapb.SegmentIDRequest{req},
+		})
+		s.NoError(err)
+		s.EqualValues(1, len(resp.SegIDAssignments))
+		assign := resp.SegIDAssignments[0]
+		s.EqualValues(commonpb.ErrorCode_Success, assign.GetStatus().GetErrorCode())
+		s.EqualValues(collID, assign.CollectionID)
+		s.EqualValues(partID, assign.PartitionID)
+		s.EqualValues(channel0, assign.ChannelName)
+		s.EqualValues(1000, assign.Count)
+	})
+
+	s.Run("with closed server", func() {
+		s.SetupTest()
+		s.TearDownTest()
+
+		req := &datapb.SegmentIDRequest{
+			Count:        100,
+			ChannelName:  channel0,
+			CollectionID: collID,
+			PartitionID:  partID,
+		}
+		resp, err := s.testServer.AssignSegmentID(context.Background(), &datapb.AssignSegmentIDRequest{
+			NodeID:            0,
+			PeerRole:          "",
+			SegmentIDRequests: []*datapb.SegmentIDRequest{req},
+		})
+		s.NoError(err)
+		s.ErrorIs(merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
+	})
+
+	s.Run("assign segment with invalid collection", func() {
+		s.SetupTest()
+		defer s.TearDownTest()
+
+		s.testServer.rootCoordClient = &mockRootCoord{
+			RootCoordClient: s.testServer.rootCoordClient,
+			collID:          collID,
+		}
+
+		schema := newTestSchema()
+		s.testServer.meta.AddCollection(&collectionInfo{
+			ID:         collID,
+			Schema:     schema,
+			Partitions: []int64{},
+		})
+		req := &datapb.SegmentIDRequest{
+			Count:        1000,
+			ChannelName:  channel0,
+			CollectionID: collIDInvalid,
+			PartitionID:  partID,
+		}
+
+		resp, err := s.testServer.AssignSegmentID(context.TODO(), &datapb.AssignSegmentIDRequest{
+			NodeID:            0,
+			PeerRole:          "",
+			SegmentIDRequests: []*datapb.SegmentIDRequest{req},
+		})
+		s.NoError(err)
+		s.EqualValues(0, len(resp.SegIDAssignments))
+	})
+}
 
 func TestBroadcastAlteredCollection(t *testing.T) {
 	t.Run("test server is closed", func(t *testing.T) {
