@@ -85,7 +85,7 @@ func GenDataset(data storage.FieldData) *Dataset {
 		}
 	case *storage.StringFieldData:
 		return &Dataset{
-			DType: schemapb.DataType_String,
+			DType: schemapb.DataType_VarChar,
 			Data: map[string]interface{}{
 				keyRawArr: f.Data,
 			},

@@ -19,7 +19,6 @@ package pipeline
 import (
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	base "github.com/milvus-io/milvus/internal/util/pipeline"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -32,23 +31,23 @@ import (
 // pipeline used for querynode
 type Pipeline interface {
 	base.StreamPipeline
-	ExcludedSegments(segInfos ...*datapb.SegmentInfo)
+	ExcludedSegments(info map[int64]uint64)
 }
 
 type pipeline struct {
 	base.StreamPipeline
 
-	excludedSegments *typeutil.ConcurrentMap[int64, *datapb.SegmentInfo]
+	excludedSegments *typeutil.ConcurrentMap[int64, uint64]
 	collectionID     UniqueID
 }
 
-func (p *pipeline) ExcludedSegments(segInfos ...*datapb.SegmentInfo) {
-	for _, segInfo := range segInfos {
+func (p *pipeline) ExcludedSegments(excludeInfo map[int64]uint64) { //(segInfos ...*datapb.SegmentInfo) {
+	for segmentID, ts := range excludeInfo {
 		log.Debug("pipeline add exclude info",
-			zap.Int64("segmentID", segInfo.GetID()),
-			zap.Uint64("ts", segInfo.GetDmlPosition().GetTimestamp()),
+			zap.Int64("segmentID", segmentID),
+			zap.Uint64("ts", ts),
 		)
-		p.excludedSegments.Insert(segInfo.GetID(), segInfo)
+		p.excludedSegments.Insert(segmentID, ts)
 	}
 }
 
@@ -66,7 +65,7 @@ func NewPipeLine(
 	delegator delegator.ShardDelegator,
 ) (Pipeline, error) {
 	pipelineQueueLength := paramtable.Get().QueryNodeCfg.FlowGraphMaxQueueLength.GetAsInt32()
-	excludedSegments := typeutil.NewConcurrentMap[int64, *datapb.SegmentInfo]()
+	excludedSegments := typeutil.NewConcurrentMap[int64, uint64]()
 
 	p := &pipeline{
 		collectionID:     collectionID,

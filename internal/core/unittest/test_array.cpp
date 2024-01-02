@@ -32,10 +32,9 @@ TEST(Array, TestConstructArray) {
         ASSERT_EQ(int_array.get_data<int>(i), i);
     }
     ASSERT_TRUE(int_array.is_same_array(field_int_array));
-    auto int_array_tmp = Array(
-        const_cast<char*>(int_array.data()),
-        int_array.byte_size(),
-        int_array.get_element_type(),
+    auto int_array_tmp = Array(const_cast<char*>(int_array.data()),
+                               int_array.byte_size(),
+                               int_array.get_element_type(),
                                {});
     auto int_8_array = Array(const_cast<char*>(int_array.data()),
                              int_array.byte_size(),
@@ -48,10 +47,9 @@ TEST(Array, TestConstructArray) {
                               {});
     ASSERT_EQ(int_array.length(), int_16_array.length());
     ASSERT_TRUE(int_array_tmp == int_array);
-    auto int_array_view = ArrayView(
-        const_cast<char*>(int_array.data()),
-        int_array.byte_size(),
-        int_array.get_element_type(),
+    auto int_array_view = ArrayView(const_cast<char*>(int_array.data()),
+                                    int_array.byte_size(),
+                                    int_array.get_element_type(),
                                     {});
     ASSERT_EQ(int_array.length(), int_array_view.length());
     ASSERT_EQ(int_array.byte_size(), int_array_view.byte_size());
@@ -76,10 +74,9 @@ TEST(Array, TestConstructArray) {
                                 long_array.get_element_type(),
                                 {});
     ASSERT_TRUE(long_array_tmp == long_array);
-    auto long_array_view = ArrayView(
-        const_cast<char*>(long_array.data()),
-        long_array.byte_size(),
-        long_array.get_element_type(),
+    auto long_array_view = ArrayView(const_cast<char*>(long_array.data()),
+                                     long_array.byte_size(),
+                                     long_array.get_element_type(),
                                      {});
     ASSERT_EQ(long_array.length(), long_array_view.length());
     ASSERT_EQ(long_array.byte_size(), long_array_view.byte_size());
@@ -114,10 +111,9 @@ TEST(Array, TestConstructArray) {
                                   string_array.get_element_type(),
                                   std::move(string_element_offsets));
     ASSERT_TRUE(string_array_tmp == string_array);
-    auto string_array_view = ArrayView(
-        const_cast<char*>(string_array.data()),
-        string_array.byte_size(),
-        string_array.get_element_type(),
+    auto string_array_view = ArrayView(const_cast<char*>(string_array.data()),
+                                       string_array.byte_size(),
+                                       string_array.get_element_type(),
                                        std::move(string_view_element_offsets));
     ASSERT_EQ(string_array.length(), string_array_view.length());
     ASSERT_EQ(string_array.byte_size(), string_array_view.byte_size());
@@ -143,10 +139,9 @@ TEST(Array, TestConstructArray) {
                                 bool_array.get_element_type(),
                                 {});
     ASSERT_TRUE(bool_array_tmp == bool_array);
-    auto bool_array_view = ArrayView(
-        const_cast<char*>(bool_array.data()),
-        bool_array.byte_size(),
-        bool_array.get_element_type(),
+    auto bool_array_view = ArrayView(const_cast<char*>(bool_array.data()),
+                                     bool_array.byte_size(),
+                                     bool_array.get_element_type(),
                                      {});
     ASSERT_EQ(bool_array.length(), bool_array_view.length());
     ASSERT_EQ(bool_array.byte_size(), bool_array_view.byte_size());
@@ -172,10 +167,9 @@ TEST(Array, TestConstructArray) {
                                  float_array.get_element_type(),
                                  {});
     ASSERT_TRUE(float_array_tmp == float_array);
-    auto float_array_view = ArrayView(
-        const_cast<char*>(float_array.data()),
-        float_array.byte_size(),
-        float_array.get_element_type(),
+    auto float_array_view = ArrayView(const_cast<char*>(float_array.data()),
+                                      float_array.byte_size(),
+                                      float_array.get_element_type(),
                                       {});
     ASSERT_EQ(float_array.length(), float_array_view.length());
     ASSERT_EQ(float_array.byte_size(), float_array_view.byte_size());
@@ -202,10 +196,9 @@ TEST(Array, TestConstructArray) {
                                   double_array.get_element_type(),
                                   {});
     ASSERT_TRUE(double_array_tmp == double_array);
-    auto double_array_view = ArrayView(
-        const_cast<char*>(double_array.data()),
-        double_array.byte_size(),
-        double_array.get_element_type(),
+    auto double_array_view = ArrayView(const_cast<char*>(double_array.data()),
+                                       double_array.byte_size(),
+                                       double_array.get_element_type(),
                                        {});
     ASSERT_EQ(double_array.length(), double_array_view.length());
     ASSERT_EQ(double_array.byte_size(), double_array_view.byte_size());

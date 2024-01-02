@@ -138,7 +138,7 @@ TYPED_TEST_P(TypedScalarIndexCreatorTest, Codec) {
             milvus::DataType(dtype),
             config,
             milvus::storage::FileManagerContext());
-        auto arr = GenArr<T>(nb);
+        auto arr = GenSortedArr<T>(nb);
         build_index<T>(creator, arr);
         auto binary_set = creator->Serialize();
         auto copy_creator = milvus::indexbuilder::CreateScalarIndex(

@@ -139,6 +139,8 @@ func TestComponentParam(t *testing.T) {
 
 		t.Logf("MaxFieldNum: %d", Params.MaxFieldNum.GetAsInt64())
 
+		t.Logf("MaxVectorFieldNum: %d", Params.MaxVectorFieldNum.GetAsInt64())
+
 		t.Logf("MaxShardNum: %d", Params.MaxShardNum.GetAsInt64())
 
 		t.Logf("MaxDimension: %d", Params.MaxDimension.GetAsInt64())
@@ -279,7 +281,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 10000, Params.BalanceCheckInterval.GetAsInt())
 		assert.Equal(t, 10000, Params.IndexCheckInterval.GetAsInt())
 		assert.Equal(t, 3, Params.CollectionRecoverTimesLimit.GetAsInt())
-		assert.Equal(t, false, Params.AutoBalance.GetAsBool())
+		assert.Equal(t, true, Params.AutoBalance.GetAsBool())
 		assert.Equal(t, true, Params.AutoBalanceChannel.GetAsBool())
 		assert.Equal(t, 10, Params.CheckAutoBalanceConfigInterval.GetAsInt())
 	})
@@ -298,7 +300,7 @@ func TestComponentParam(t *testing.T) {
 
 		// test query side config
 		chunkRows := Params.ChunkRows.GetAsInt64()
-		assert.Equal(t, int64(1024), chunkRows)
+		assert.Equal(t, int64(128), chunkRows)
 
 		nlist := Params.InterimIndexNlist.GetAsInt64()
 		assert.Equal(t, int64(128), nlist)
@@ -339,7 +341,7 @@ func TestComponentParam(t *testing.T) {
 		params.Remove("queryNode.segcore.growing.nprobe")
 		params.Save("queryNode.segcore.chunkRows", "64")
 		chunkRows = Params.ChunkRows.GetAsInt64()
-		assert.Equal(t, int64(1024), chunkRows)
+		assert.Equal(t, int64(128), chunkRows)
 
 		params.Save("queryNode.gracefulStopTimeout", "100")
 		gracefulStopTimeout := &Params.GracefulStopTimeout
@@ -355,7 +357,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, Params.EnableActiveStandby.GetAsBool(), false)
 		t.Logf("dataCoord EnableActiveStandby = %t", Params.EnableActiveStandby.GetAsBool())
 
-		assert.Equal(t, false, Params.AutoBalance.GetAsBool())
+		assert.Equal(t, true, Params.AutoBalance.GetAsBool())
 		assert.Equal(t, 10, Params.CheckAutoBalanceConfigInterval.GetAsInt())
 		assert.Equal(t, false, Params.AutoUpgradeSegmentIndex.GetAsBool())
 	})

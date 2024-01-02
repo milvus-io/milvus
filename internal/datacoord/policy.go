@@ -26,7 +26,6 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	"stathat.com/c/consistent"
 
 	"github.com/milvus-io/milvus/pkg/log"
 )
@@ -113,50 +112,6 @@ func filterNode(infos []*NodeChannelInfo, nodeID int64) []*NodeChannelInfo {
 	return filtered
 }
 
-// ConsistentHashRegisterPolicy use a consistent hash to maintain the mapping
-func ConsistentHashRegisterPolicy(hashRing *consistent.Consistent) RegisterPolicy {
-	return func(store ROChannelStore, nodeID int64) (*ChannelOpSet, *ChannelOpSet) {
-		elems := formatNodeIDs(store.GetNodes())
-		hashRing.Set(elems)
-
-		releases := make(map[int64][]RWChannel)
-
-		// If there are buffer channels, then nodeID is the first node.
-		if opSet := BufferChannelAssignPolicy(store, nodeID); opSet != nil {
-			return opSet, nil
-		}
-
-		opSet := NewChannelOpSet()
-		// If there are other nodes, channels on these nodes may be reassigned to
-		// the new registered node. We should find these channels.
-		channelsInfo := store.GetNodesChannels()
-		for _, c := range channelsInfo {
-			for _, ch := range c.Channels {
-				idStr, err := hashRing.Get(ch.GetName())
-				if err != nil {
-					log.Warn("receive error when getting from hashRing",
-						zap.String("channel", ch.String()), zap.Error(err))
-					return nil, nil
-				}
-				did, err := deformatNodeID(idStr)
-				if err != nil {
-					log.Warn("failed to deformat node id", zap.Int64("nodeID", did))
-					return nil, nil
-				}
-				if did != c.NodeID {
-					releases[c.NodeID] = append(releases[c.NodeID], ch)
-				}
-			}
-		}
-
-		// Channels in `releases` are reassigned eventually by channel manager.
-		for id, channels := range releases {
-			opSet.Add(id, channels...)
-		}
-		return nil, opSet
-	}
-}
-
 func formatNodeID(nodeID int64) string {
 	return strconv.FormatInt(nodeID, 10)
 }
@@ -199,49 +154,6 @@ func AverageAssignPolicy(store ROChannelStore, channels []RWChannel) *ChannelOpS
 		opSet.Add(id, chs...)
 	}
 	return opSet
-}
-
-// ConsistentHashChannelAssignPolicy use a consistent hash algorithm to determine channel assignment
-func ConsistentHashChannelAssignPolicy(hashRing *consistent.Consistent) ChannelAssignPolicy {
-	return func(store ROChannelStore, channels []RWChannel) *ChannelOpSet {
-		hashRing.Set(formatNodeIDs(store.GetNodes()))
-
-		filteredChannels := filterChannels(store, channels)
-		if len(filteredChannels) == 0 {
-			return nil
-		}
-
-		opSet := NewChannelOpSet()
-		if len(hashRing.Members()) == 0 {
-			opSet.Add(bufferID, channels...)
-			return opSet
-		}
-
-		adds := make(map[int64][]RWChannel)
-		for _, c := range filteredChannels {
-			idStr, err := hashRing.Get(c.GetName())
-			if err != nil {
-				log.Warn("receive error when getting from hashRing",
-					zap.String("channel", c.String()), zap.Error(err))
-				return nil
-			}
-			did, err := deformatNodeID(idStr)
-			if err != nil {
-				log.Warn("failed to deformat node id", zap.Int64("nodeID", did))
-				return NewChannelOpSet()
-			}
-			adds[did] = append(adds[did], c)
-		}
-
-		if len(adds) == 0 {
-			return nil
-		}
-
-		for id, chs := range adds {
-			opSet.Add(id, chs...)
-		}
-		return opSet
-	}
 }
 
 func filterChannels(store ROChannelStore, channels []RWChannel) []RWChannel {
@@ -314,57 +226,6 @@ func AvgAssignUnregisteredChannels(store ROChannelStore, nodeID int64) *ChannelO
 	return opSet
 }
 
-// ConsistentHashDeregisterPolicy return a DeregisterPolicy that uses consistent hash
-func ConsistentHashDeregisterPolicy(hashRing *consistent.Consistent) DeregisterPolicy {
-	return func(store ROChannelStore, nodeID int64) *ChannelOpSet {
-		hashRing.Set(formatNodeIDsWithFilter(store.GetNodes(), nodeID))
-		channels := store.GetNodesChannels()
-		opSet := NewChannelOpSet()
-		var deletedInfo *NodeChannelInfo
-
-		for _, cinfo := range channels {
-			if cinfo.NodeID == nodeID {
-				deletedInfo = cinfo
-				break
-			}
-		}
-		if deletedInfo == nil {
-			log.Warn("failed to find node when applying deregister policy", zap.Int64("nodeID", nodeID))
-			return nil
-		}
-
-		opSet.Delete(nodeID, deletedInfo.Channels...)
-
-		// If no members in hash ring, store channels in buffer
-		if len(hashRing.Members()) == 0 {
-			opSet.Add(bufferID, deletedInfo.Channels...)
-			return opSet
-		}
-
-		// reassign channels of deleted node
-		updates := make(map[int64][]RWChannel)
-		for _, c := range deletedInfo.Channels {
-			idStr, err := hashRing.Get(c.GetName())
-			if err != nil {
-				log.Warn("failed to get channel in hash ring", zap.String("channel", c.String()))
-				return nil
-			}
-
-			did, err := deformatNodeID(idStr)
-			if err != nil {
-				log.Warn("failed to deformat id", zap.String("id", idStr))
-			}
-
-			updates[did] = append(updates[did], c)
-		}
-
-		for id, chs := range updates {
-			opSet.Add(id, chs...)
-		}
-		return opSet
-	}
-}
-
 type BalanceChannelPolicy func(store ROChannelStore, ts time.Time) *ChannelOpSet
 
 func AvgBalanceChannelPolicy(store ROChannelStore, ts time.Time) *ChannelOpSet {
@@ -392,49 +253,6 @@ func EmptyReassignPolicy(store ROChannelStore, reassigns []*NodeChannelInfo) *Ch
 // EmptyBalancePolicy is a dummy balance policy
 func EmptyBalancePolicy(store ROChannelStore, ts time.Time) *ChannelOpSet {
 	return nil
-}
-
-// RoundRobinReassignPolicy is a reassigning policy that evenly assign channels
-func RoundRobinReassignPolicy(store ROChannelStore, reassigns []*NodeChannelInfo) *ChannelOpSet {
-	allNodes := store.GetNodesChannels()
-	filterMap := make(map[int64]struct{})
-	for _, reassign := range reassigns {
-		filterMap[reassign.NodeID] = struct{}{}
-	}
-	avaNodes := make([]*NodeChannelInfo, 0, len(allNodes))
-	for _, c := range allNodes {
-		if _, ok := filterMap[c.NodeID]; ok {
-			continue
-		}
-		avaNodes = append(avaNodes, c)
-	}
-	opSet := NewChannelOpSet()
-	if len(avaNodes) == 0 {
-		// if no node is left, do not reassign
-		return opSet
-	}
-	sort.Slice(avaNodes, func(i, j int) bool {
-		return len(avaNodes[i].Channels) <= len(avaNodes[j].Channels)
-	})
-
-	// reassign channels to remaining nodes
-	i := 0
-	addUpdates := make(map[int64]*ChannelOp)
-	for _, reassign := range reassigns {
-		opSet.Delete(reassign.NodeID, reassign.Channels...)
-
-		for _, ch := range reassign.Channels {
-			targetID := avaNodes[i%len(avaNodes)].NodeID
-			i++
-			if _, ok := addUpdates[targetID]; !ok {
-				addUpdates[targetID] = NewAddOp(targetID, ch)
-			} else {
-				addUpdates[targetID].Append(ch)
-			}
-		}
-	}
-	opSet.Insert(lo.Values(addUpdates)...)
-	return opSet
 }
 
 // AverageReassignPolicy is a reassigning policy that evenly balance channels among datanodes

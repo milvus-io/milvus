@@ -930,12 +930,38 @@ func (s *DataNodeServicesSuite) TestFlushChannels() {
 }*/
 
 func (s *DataNodeServicesSuite) TestRPCWatch() {
-	ctx := context.Background()
-	status, err := s.node.NotifyChannelOperation(ctx, nil)
-	s.NoError(err)
-	s.NotNil(status)
+	s.Run("node not healthy", func() {
+		s.SetupTest()
+		s.node.UpdateStateCode(commonpb.StateCode_Abnormal)
 
-	resp, err := s.node.CheckChannelOperationProgress(ctx, nil)
-	s.NoError(err)
-	s.NotNil(resp)
+		ctx := context.Background()
+		status, err := s.node.NotifyChannelOperation(ctx, nil)
+		s.NoError(err)
+		s.False(merr.Ok(status))
+		s.ErrorIs(merr.Error(status), merr.ErrServiceNotReady)
+
+		resp, err := s.node.CheckChannelOperationProgress(ctx, nil)
+		s.NoError(err)
+		s.False(merr.Ok(resp.GetStatus()))
+		s.ErrorIs(merr.Error(status), merr.ErrServiceNotReady)
+	})
+
+	s.Run("node healthy", func() {
+		s.SetupTest()
+		mockChManager := NewMockChannelManager(s.T())
+		s.node.channelManager = mockChManager
+		mockChManager.EXPECT().Submit(mock.Anything).Return(nil).Once()
+		ctx := context.Background()
+		status, err := s.node.NotifyChannelOperation(ctx, &datapb.ChannelOperationsRequest{Infos: []*datapb.ChannelWatchInfo{{OpID: 19530}}})
+		s.NoError(err)
+		s.True(merr.Ok(status))
+
+		mockChManager.EXPECT().GetProgress(mock.Anything).Return(
+			&datapb.ChannelOperationProgressResponse{Status: merr.Status(nil)},
+		).Once()
+
+		resp, err := s.node.CheckChannelOperationProgress(ctx, nil)
+		s.NoError(err)
+		s.True(merr.Ok(resp.GetStatus()))
+	})
 }

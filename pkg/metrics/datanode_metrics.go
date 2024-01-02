@@ -161,6 +161,7 @@ var (
 			Buckets:   longTaskBuckets,
 		}, []string{
 			nodeIDLabelName,
+			compactionTypeLabelName,
 		})
 
 	DataNodeCompactionLatencyInQueue = prometheus.NewHistogramVec(

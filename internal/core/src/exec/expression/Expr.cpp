@@ -162,7 +162,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
             casted_expr,
             "PhyUnaryRangeFilterExpr",
             context->get_segment(),
-            context->get_query_timestamp(),
+            context->get_active_count(),
             context->query_config()->get_expr_batch_size());
     } else if (auto casted_expr = std::dynamic_pointer_cast<
                    const milvus::expr::LogicalUnaryExpr>(expr)) {
@@ -175,6 +175,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
             casted_expr,
             "PhyTermFilterExpr",
             context->get_segment(),
+            context->get_active_count(),
             context->get_query_timestamp(),
             context->query_config()->get_expr_batch_size());
     } else if (auto casted_expr = std::dynamic_pointer_cast<
@@ -198,7 +199,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
             casted_expr,
             "PhyBinaryRangeFilterExpr",
             context->get_segment(),
-            context->get_query_timestamp(),
+            context->get_active_count(),
             context->query_config()->get_expr_batch_size());
     } else if (auto casted_expr = std::dynamic_pointer_cast<
                    const milvus::expr::AlwaysTrueExpr>(expr)) {
@@ -207,7 +208,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
             casted_expr,
             "PhyAlwaysTrueExpr",
             context->get_segment(),
-            context->get_query_timestamp(),
+            context->get_active_count(),
             context->query_config()->get_expr_batch_size());
     } else if (auto casted_expr = std::dynamic_pointer_cast<
                    const milvus::expr::BinaryArithOpEvalRangeExpr>(expr)) {
@@ -216,7 +217,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
             casted_expr,
             "PhyBinaryArithOpEvalRangeExpr",
             context->get_segment(),
-            context->get_query_timestamp(),
+            context->get_active_count(),
             context->query_config()->get_expr_batch_size());
     } else if (auto casted_expr =
                    std::dynamic_pointer_cast<const milvus::expr::CompareExpr>(
@@ -226,7 +227,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
             casted_expr,
             "PhyCompareFilterExpr",
             context->get_segment(),
-            context->get_query_timestamp(),
+            context->get_active_count(),
             context->query_config()->get_expr_batch_size());
     } else if (auto casted_expr =
                    std::dynamic_pointer_cast<const milvus::expr::ExistsExpr>(
@@ -236,7 +237,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
             casted_expr,
             "PhyExistsFilterExpr",
             context->get_segment(),
-            context->get_query_timestamp(),
+            context->get_active_count(),
             context->query_config()->get_expr_batch_size());
     } else if (auto casted_expr = std::dynamic_pointer_cast<
                    const milvus::expr::JsonContainsExpr>(expr)) {
@@ -245,7 +246,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
             casted_expr,
             "PhyJsonContainsFilterExpr",
             context->get_segment(),
-            context->get_query_timestamp(),
+            context->get_active_count(),
             context->query_config()->get_expr_batch_size());
     }
     return result;

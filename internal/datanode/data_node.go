@@ -88,6 +88,7 @@ type DataNode struct {
 	stateCode        atomic.Value // commonpb.StateCode_Initializing
 	flowgraphManager FlowgraphManager
 	eventManagerMap  *typeutil.ConcurrentMap[string, *channelEventManager]
+	channelManager   ChannelManager
 
 	syncMgr            syncmgr.SyncManager
 	writeBufferManager writebuffer.BufferManager

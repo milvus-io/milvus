@@ -329,8 +329,10 @@ TEST(StringExpr, Term) {
         auto plan = ProtoParser(*schema).CreatePlan(*plan_proto);
         query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
         BitsetType final;
-        visitor.ExecuteExprNode(
-            plan->plan_node_->filter_plannode_.value(), seg_promote, final);
+        visitor.ExecuteExprNode(plan->plan_node_->filter_plannode_.value(),
+                                seg_promote,
+                                N * num_iters,
+                                final);
         EXPECT_EQ(final.size(), N * num_iters);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -443,8 +445,10 @@ TEST(StringExpr, Compare) {
         auto plan = ProtoParser(*schema).CreatePlan(*plan_proto);
         query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
         BitsetType final;
-        visitor.ExecuteExprNode(
-            plan->plan_node_->filter_plannode_.value(), seg_promote, final);
+        visitor.ExecuteExprNode(plan->plan_node_->filter_plannode_.value(),
+                                seg_promote,
+                                N * num_iters,
+                                final);
         EXPECT_EQ(final.size(), N * num_iters);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -540,8 +544,10 @@ TEST(StringExpr, UnaryRange) {
         auto plan = ProtoParser(*schema).CreatePlan(*plan_proto);
         query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
         BitsetType final;
-        visitor.ExecuteExprNode(
-            plan->plan_node_->filter_plannode_.value(), seg_promote, final);
+        visitor.ExecuteExprNode(plan->plan_node_->filter_plannode_.value(),
+                                seg_promote,
+                                N * num_iters,
+                                final);
         EXPECT_EQ(final.size(), N * num_iters);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -655,8 +661,10 @@ TEST(StringExpr, BinaryRange) {
         auto plan = ProtoParser(*schema).CreatePlan(*plan_proto);
         query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
         BitsetType final;
-        visitor.ExecuteExprNode(
-            plan->plan_node_->filter_plannode_.value(), seg_promote, final);
+        visitor.ExecuteExprNode(plan->plan_node_->filter_plannode_.value(),
+                                seg_promote,
+                                N * num_iters,
+                                final);
         EXPECT_EQ(final.size(), N * num_iters);
 
         for (int i = 0; i < N * num_iters; ++i) {

@@ -1,12 +1,15 @@
 package datacoord
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/testutils"
 )
 
 func TestSchedulerSuite(t *testing.T) {
@@ -14,7 +17,7 @@ func TestSchedulerSuite(t *testing.T) {
 }
 
 type SchedulerSuite struct {
-	suite.Suite
+	testutils.PromMetricsSuite
 	scheduler *CompactionScheduler
 }
 
@@ -22,11 +25,11 @@ func (s *SchedulerSuite) SetupTest() {
 	s.scheduler = NewCompactionScheduler()
 	s.scheduler.parallelTasks = map[int64][]*compactionTask{
 		100: {
-			{dataNodeID: 100, plan: &datapb.CompactionPlan{PlanID: 1, Channel: "ch-1", Type: datapb.CompactionType_MinorCompaction}},
-			{dataNodeID: 100, plan: &datapb.CompactionPlan{PlanID: 2, Channel: "ch-1", Type: datapb.CompactionType_MinorCompaction}},
+			{dataNodeID: 100, plan: &datapb.CompactionPlan{PlanID: 1, Channel: "ch-1", Type: datapb.CompactionType_MixCompaction}},
+			{dataNodeID: 100, plan: &datapb.CompactionPlan{PlanID: 2, Channel: "ch-1", Type: datapb.CompactionType_MixCompaction}},
 		},
 		101: {
-			{dataNodeID: 101, plan: &datapb.CompactionPlan{PlanID: 3, Channel: "ch-2", Type: datapb.CompactionType_MinorCompaction}},
+			{dataNodeID: 101, plan: &datapb.CompactionPlan{PlanID: 3, Channel: "ch-2", Type: datapb.CompactionType_MixCompaction}},
 		},
 		102: {
 			{dataNodeID: 102, plan: &datapb.CompactionPlan{PlanID: 4, Channel: "ch-3", Type: datapb.CompactionType_Level0DeleteCompaction}},
@@ -173,4 +176,42 @@ func (s *SchedulerSuite) TestScheduleNodeWithL0Executing() {
 			s.Equal(4+len(test.tasks), s.scheduler.GetTaskCount())
 		})
 	}
+}
+
+func (s *SchedulerSuite) TestFinish() {
+	s.Run("finish from parallelTasks", func() {
+		s.SetupTest()
+		metrics.DataCoordCompactionTaskNum.Reset()
+
+		s.scheduler.Finish(100, &datapb.CompactionPlan{PlanID: 1, Type: datapb.CompactionType_MixCompaction})
+		taskNum, err := metrics.DataCoordCompactionTaskNum.GetMetricWithLabelValues("100", datapb.CompactionType_MixCompaction.String(), metrics.Executing)
+		s.NoError(err)
+		s.MetricsEqual(taskNum, -1)
+
+		taskNum, err = metrics.DataCoordCompactionTaskNum.GetMetricWithLabelValues("100", datapb.CompactionType_MixCompaction.String(), metrics.Done)
+		s.NoError(err)
+		s.MetricsEqual(taskNum, 1)
+	})
+
+	s.Run("finish from queuingTasks", func() {
+		s.SetupTest()
+		metrics.DataCoordCompactionTaskNum.Reset()
+		var datanodeID int64 = 10000
+
+		plan := &datapb.CompactionPlan{PlanID: 19530, Type: datapb.CompactionType_Level0DeleteCompaction}
+		s.scheduler.Submit(&compactionTask{plan: plan, dataNodeID: datanodeID})
+
+		taskNum, err := metrics.DataCoordCompactionTaskNum.GetMetricWithLabelValues(fmt.Sprint(datanodeID), datapb.CompactionType_Level0DeleteCompaction.String(), metrics.Pending)
+		s.NoError(err)
+		s.MetricsEqual(taskNum, 1)
+
+		s.scheduler.Finish(datanodeID, plan)
+		taskNum, err = metrics.DataCoordCompactionTaskNum.GetMetricWithLabelValues(fmt.Sprint(datanodeID), datapb.CompactionType_Level0DeleteCompaction.String(), metrics.Pending)
+		s.NoError(err)
+		s.MetricsEqual(taskNum, 0)
+
+		taskNum, err = metrics.DataCoordCompactionTaskNum.GetMetricWithLabelValues(fmt.Sprint(datanodeID), datapb.CompactionType_Level0DeleteCompaction.String(), metrics.Done)
+		s.NoError(err)
+		s.MetricsEqual(taskNum, 1)
+	})
 }

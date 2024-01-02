@@ -99,9 +99,26 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			{true, schemapb.DataType_Double, []interface{}{float64(1), float64(2)}, "valid float64"},
 			{true, schemapb.DataType_VarChar, []interface{}{"test1", "test2"}, "valid varChar"},
 			{true, schemapb.DataType_JSON, []interface{}{[]byte("{\"key\":\"value\"}"), []byte("{\"hello\":\"world\"}")}, "valid json"},
+			{true, schemapb.DataType_Array, []interface{}{
+				&schemapb.ScalarField{
+					Data: &schemapb.ScalarField_IntData{
+						IntData: &schemapb.IntArray{
+							Data: []int32{1, 2},
+						},
+					},
+				},
+				&schemapb.ScalarField{
+					Data: &schemapb.ScalarField_IntData{
+						IntData: &schemapb.IntArray{
+							Data: []int32{3, 4},
+						},
+					},
+				},
+			}, "valid array"},
 			{true, schemapb.DataType_FloatVector, []interface{}{[]float32{1.0, 2.0}}, "valid floatvector"},
 			{true, schemapb.DataType_BinaryVector, []interface{}{[]byte{255}}, "valid binaryvector"},
 			{true, schemapb.DataType_Float16Vector, []interface{}{[]byte{255, 255, 255, 255}}, "valid float16vector"},
+
 			{false, schemapb.DataType_Bool, []interface{}{1, 2}, "invalid bool"},
 			{false, schemapb.DataType_Int8, []interface{}{nil, nil}, "invalid int8"},
 			{false, schemapb.DataType_Int16, []interface{}{nil, nil}, "invalid int16"},
@@ -114,8 +131,20 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			{false, schemapb.DataType_FloatVector, []interface{}{nil, nil}, "invalid floatvector"},
 			{false, schemapb.DataType_BinaryVector, []interface{}{nil, nil}, "invalid binaryvector"},
 			{false, schemapb.DataType_Float16Vector, []interface{}{nil, nil}, "invalid float16vector"},
-			{false, schemapb.DataType_None, nil, "invalid data type"},
 		}
+
+		// make sure all new data types missed to handle would throw unexpected error
+		// todo(yah01): enable this after the BF16 vector type ready
+		// for typeName, typeValue := range schemapb.DataType_value {
+		// 	tests = append(tests, struct {
+		// 		isvalid bool
+
+		// 		tp      schemapb.DataType
+		// 		content []interface{}
+
+		// 		description string
+		// 	}{false, schemapb.DataType(typeValue), []interface{}{nil, nil}, "invalid " + typeName})
+		// }
 
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
@@ -125,7 +154,7 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 					assert.Equal(t, 2, fd.RowNum())
 				} else {
 					fd, err := interface2FieldData(test.tp, test.content, 2)
-					assert.Error(t, err)
+					assert.ErrorIs(t, err, errTransferType)
 					assert.Nil(t, fd)
 				}
 			})

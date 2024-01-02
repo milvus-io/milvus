@@ -126,6 +126,7 @@ TEST_F(TaskTest, UnaryExpr) {
     auto query_context = std::make_shared<milvus::exec::QueryContext>(
         "test1",
         segment_.get(),
+        1000000,
         MAX_TIMESTAMP,
         std::make_shared<milvus::exec::QueryConfig>(
             std::unordered_map<std::string, std::string>{}));
@@ -169,6 +170,7 @@ TEST_F(TaskTest, LogicalExpr) {
     auto query_context = std::make_shared<milvus::exec::QueryContext>(
         "test1",
         segment_.get(),
+        1000000,
         MAX_TIMESTAMP,
         std::make_shared<milvus::exec::QueryConfig>(
             std::unordered_map<std::string, std::string>{}));
@@ -191,7 +193,7 @@ TEST_F(TaskTest, LogicalExpr) {
     EXPECT_EQ(num_rows, num_rows_);
 }
 
-TEST(CompileInputs, and) {
+TEST_F(TaskTest, CompileInputs_and) {
     using namespace milvus;
     using namespace milvus::query;
     using namespace milvus::segcore;
@@ -199,7 +201,6 @@ TEST(CompileInputs, and) {
     auto vec_fid = schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     auto int64_fid = schema->AddDebugField("int64", DataType::INT64);
-    auto seg = CreateSealedSegment(schema);
     proto::plan::GenericValue val;
     val.set_int64_val(10);
     // expr: (int64_fid < 10 and int64_fid < 10) and (int64_fid < 10 and int64_fid < 10)
@@ -226,7 +227,7 @@ TEST(CompileInputs, and) {
     auto expr7 = std::make_shared<expr::LogicalBinaryExpr>(
         expr::LogicalBinaryExpr::OpType::And, expr3, expr6);
     auto query_context = std::make_shared<milvus::exec::QueryContext>(
-        DEAFULT_QUERY_ID, seg.get(), MAX_TIMESTAMP);
+        DEAFULT_QUERY_ID, segment_.get(), 1000000, MAX_TIMESTAMP);
     auto exprs = milvus::exec::CompileInputs(expr7, query_context.get(), {});
     EXPECT_EQ(exprs.size(), 4);
     for (int i = 0; i < exprs.size(); ++i) {
@@ -235,7 +236,7 @@ TEST(CompileInputs, and) {
     }
 }
 
-TEST(CompileInputs, or_with_and) {
+TEST_F(TaskTest, CompileInputs_or_with_and) {
     using namespace milvus;
     using namespace milvus::query;
     using namespace milvus::segcore;
@@ -243,7 +244,6 @@ TEST(CompileInputs, or_with_and) {
     auto vec_fid = schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     auto int64_fid = schema->AddDebugField("int64", DataType::INT64);
-    auto seg = CreateSealedSegment(schema);
     proto::plan::GenericValue val;
     val.set_int64_val(10);
     {
@@ -269,7 +269,7 @@ TEST(CompileInputs, or_with_and) {
         auto expr6 = std::make_shared<expr::LogicalBinaryExpr>(
             expr::LogicalBinaryExpr::OpType::And, expr1, expr2);
         auto query_context = std::make_shared<milvus::exec::QueryContext>(
-            DEAFULT_QUERY_ID, seg.get(), MAX_TIMESTAMP);
+            DEAFULT_QUERY_ID, segment_.get(), 1000000, MAX_TIMESTAMP);
         auto expr7 = std::make_shared<expr::LogicalBinaryExpr>(
             expr::LogicalBinaryExpr::OpType::Or, expr3, expr6);
         auto exprs =
@@ -303,7 +303,7 @@ TEST(CompileInputs, or_with_and) {
         auto expr6 = std::make_shared<expr::LogicalBinaryExpr>(
             expr::LogicalBinaryExpr::OpType::And, expr1, expr2);
         auto query_context = std::make_shared<milvus::exec::QueryContext>(
-            DEAFULT_QUERY_ID, seg.get(), MAX_TIMESTAMP);
+            DEAFULT_QUERY_ID, segment_.get(), 1000000, MAX_TIMESTAMP);
         auto expr7 = std::make_shared<expr::LogicalBinaryExpr>(
             expr::LogicalBinaryExpr::OpType::Or, expr3, expr6);
         auto exprs =
@@ -340,7 +340,7 @@ TEST(CompileInputs, or_with_and) {
         auto expr6 = std::make_shared<expr::LogicalBinaryExpr>(
             expr::LogicalBinaryExpr::OpType::And, expr1, expr2);
         auto query_context = std::make_shared<milvus::exec::QueryContext>(
-            DEAFULT_QUERY_ID, seg.get(), MAX_TIMESTAMP);
+            DEAFULT_QUERY_ID, segment_.get(), 1000000, MAX_TIMESTAMP);
         auto expr7 = std::make_shared<expr::LogicalBinaryExpr>(
             expr::LogicalBinaryExpr::OpType::And, expr3, expr6);
         auto exprs =

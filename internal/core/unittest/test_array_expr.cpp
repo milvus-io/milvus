@@ -606,8 +606,10 @@ TEST(Expr, TestArrayRange) {
         auto plan =
             CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
         BitsetType final;
-        visitor.ExecuteExprNode(
-            plan->plan_node_->filter_plannode_.value(), seg_promote, final);
+        visitor.ExecuteExprNode(plan->plan_node_->filter_plannode_.value(),
+                                seg_promote,
+                                N * num_iters,
+                                final);
         EXPECT_EQ(final.size(), N * num_iters);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -724,8 +726,10 @@ TEST(Expr, TestArrayEqual) {
         auto plan =
             CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
         BitsetType final;
-        visitor.ExecuteExprNode(
-            plan->plan_node_->filter_plannode_.value(), seg_promote, final);
+        visitor.ExecuteExprNode(plan->plan_node_->filter_plannode_.value(),
+                                seg_promote,
+                                N * num_iters,
+                                final);
         EXPECT_EQ(final.size(), N * num_iters);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -924,7 +928,7 @@ TEST(Expr, TestArrayContains) {
         BitsetType final;
         auto plan =
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
-        visitor.ExecuteExprNode(plan, seg_promote, final);
+        visitor.ExecuteExprNode(plan, seg_promote, N * num_iters, final);
         std::cout << "cost"
                   << std::chrono::duration_cast<std::chrono::microseconds>(
                          std::chrono::steady_clock::now() - start)
@@ -978,7 +982,7 @@ TEST(Expr, TestArrayContains) {
         BitsetType final;
         auto plan =
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
-        visitor.ExecuteExprNode(plan, seg_promote, final);
+        visitor.ExecuteExprNode(plan, seg_promote, N * num_iters, final);
         std::cout << "cost"
                   << std::chrono::duration_cast<std::chrono::microseconds>(
                          std::chrono::steady_clock::now() - start)
@@ -1022,7 +1026,7 @@ TEST(Expr, TestArrayContains) {
         BitsetType final;
         auto plan =
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
-        visitor.ExecuteExprNode(plan, seg_promote, final);
+        visitor.ExecuteExprNode(plan, seg_promote, N * num_iters, final);
         std::cout << "cost"
                   << std::chrono::duration_cast<std::chrono::microseconds>(
                          std::chrono::steady_clock::now() - start)
@@ -1076,7 +1080,7 @@ TEST(Expr, TestArrayContains) {
         BitsetType final;
         auto plan =
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
-        visitor.ExecuteExprNode(plan, seg_promote, final);
+        visitor.ExecuteExprNode(plan, seg_promote, N * num_iters, final);
         std::cout << "cost"
                   << std::chrono::duration_cast<std::chrono::microseconds>(
                          std::chrono::steady_clock::now() - start)
@@ -1121,7 +1125,7 @@ TEST(Expr, TestArrayContains) {
         BitsetType final;
         auto plan =
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
-        visitor.ExecuteExprNode(plan, seg_promote, final);
+        visitor.ExecuteExprNode(plan, seg_promote, N * num_iters, final);
         std::cout << "cost"
                   << std::chrono::duration_cast<std::chrono::microseconds>(
                          std::chrono::steady_clock::now() - start)
@@ -1173,7 +1177,7 @@ TEST(Expr, TestArrayContains) {
         BitsetType final;
         auto plan =
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
-        visitor.ExecuteExprNode(plan, seg_promote, final);
+        visitor.ExecuteExprNode(plan, seg_promote, N * num_iters, final);
         std::cout << "cost"
                   << std::chrono::duration_cast<std::chrono::microseconds>(
                          std::chrono::steady_clock::now() - start)
@@ -1737,8 +1741,10 @@ TEST(Expr, TestArrayBinaryArith) {
         auto plan =
             CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
         BitsetType final;
-        visitor.ExecuteExprNode(
-            plan->plan_node_->filter_plannode_.value(), seg_promote, final);
+        visitor.ExecuteExprNode(plan->plan_node_->filter_plannode_.value(),
+                                seg_promote,
+                                N * num_iters,
+                                final);
         EXPECT_EQ(final.size(), N * num_iters);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -1827,7 +1833,7 @@ TEST(Expr, TestArrayStringMatch) {
         BitsetType final;
         auto plan =
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
-        visitor.ExecuteExprNode(plan, seg_promote, final);
+        visitor.ExecuteExprNode(plan, seg_promote, N * num_iters, final);
         std::cout << "cost"
                   << std::chrono::duration_cast<std::chrono::microseconds>(
                          std::chrono::steady_clock::now() - start)
@@ -2036,8 +2042,10 @@ TEST(Expr, TestArrayInTerm) {
         auto plan =
             CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
         BitsetType final;
-        visitor.ExecuteExprNode(
-            plan->plan_node_->filter_plannode_.value(), seg_promote, final);
+        visitor.ExecuteExprNode(plan->plan_node_->filter_plannode_.value(),
+                                seg_promote,
+                                N * num_iters,
+                                final);
         EXPECT_EQ(final.size(), N * num_iters);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -2126,7 +2134,7 @@ TEST(Expr, TestTermInArray) {
         BitsetType final;
         auto plan =
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
-        visitor.ExecuteExprNode(plan, seg_promote, final);
+        visitor.ExecuteExprNode(plan, seg_promote, N * num_iters, final);
         std::cout << "cost"
                   << std::chrono::duration_cast<std::chrono::microseconds>(
                          std::chrono::steady_clock::now() - start)
