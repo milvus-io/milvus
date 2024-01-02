@@ -19,11 +19,12 @@ package json
 import (
 	"encoding/json"
 	"fmt"
+	"io"
+	"strings"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/util/merr"
-	"io"
-	"strings"
 )
 
 const (
@@ -144,6 +145,4 @@ func (j *reader) Next(count int64) (*storage.InsertData, error) {
 	return insertData, nil
 }
 
-func (j *reader) Close() {
-
-}
+func (j *reader) Close() {}
