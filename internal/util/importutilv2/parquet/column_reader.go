@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+
 	"github.com/apache/arrow/go/v12/arrow"
 	"github.com/apache/arrow/go/v12/arrow/array"
 	"github.com/apache/arrow/go/v12/parquet/pqarrow"
@@ -32,8 +33,8 @@ import (
 )
 
 type ColumnReader struct {
-	columnReader *pqarrow.ColumnReader
 	columnIndex  int
+	columnReader *pqarrow.ColumnReader
 
 	dim   int
 	field *schemapb.FieldSchema
@@ -54,10 +55,10 @@ func NewColumnReader(reader *pqarrow.FileReader, columnIndex int, field *schemap
 	}
 
 	cr := &ColumnReader{
+		columnIndex:  columnIndex,
 		columnReader: columnReader,
 		dim:          int(dim),
 		field:        field,
-		columnIndex:  columnIndex,
 	}
 	return cr, nil
 }
@@ -176,6 +177,7 @@ func (c *ColumnReader) Next(count int64) (storage.FieldData, error) {
 					},
 				})
 			}
+
 		case schemapb.DataType_Int8:
 			int8Array, err := ReadIntegerOrFloatArrayData[int32](c, count)
 			if err != nil {
@@ -190,6 +192,7 @@ func (c *ColumnReader) Next(count int64) (storage.FieldData, error) {
 					},
 				})
 			}
+
 		case schemapb.DataType_Int16:
 			int16Array, err := ReadIntegerOrFloatArrayData[int32](c, count)
 			if err != nil {
@@ -280,7 +283,7 @@ func (c *ColumnReader) Next(count int64) (storage.FieldData, error) {
 				})
 			}
 		default:
-			return nil, merr.WrapErrImportFailed(fmt.Sprintf("unsupported data type: %s of array field: %s",
+			return nil, merr.WrapErrImportFailed(fmt.Sprintf("unsupported data type '%s' for array field '%s'",
 				elementType.String(), c.field.GetName()))
 		}
 		return &storage.ArrayFieldData{
@@ -288,10 +291,12 @@ func (c *ColumnReader) Next(count int64) (storage.FieldData, error) {
 			Data:        data,
 		}, nil
 	default:
-		return nil, merr.WrapErrImportFailed(fmt.Sprintf("unsupported data type: %s of field: %s",
+		return nil, merr.WrapErrImportFailed(fmt.Sprintf("unsupported data type '%s' for field '%s'",
 			c.field.GetDataType().String(), c.field.GetName()))
 	}
 }
+
+func (c *ColumnReader) Close() {}
 
 func ReadBoolData(pcr *ColumnReader, count int64) ([]bool, error) {
 	chunked, err := pcr.columnReader.NextBatch(count)
@@ -304,8 +309,7 @@ func ReadBoolData(pcr *ColumnReader, count int64) ([]bool, error) {
 		chunkData := make([]bool, dataNums)
 		boolReader, ok := chunk.(*array.Boolean)
 		if !ok {
-			return nil, merr.WrapErrImportFailed(fmt.Sprintf("the column data in parquet "+
-				"is not bool of field: %s, but: %s", pcr.field.GetName(), chunk.DataType().Name()))
+			return nil, WrapTypeErr("bool", chunk.DataType().Name(), pcr.field)
 		}
 		for i := 0; i < dataNums; i++ {
 			chunkData[i] = boolReader.Value(i)
@@ -313,9 +317,6 @@ func ReadBoolData(pcr *ColumnReader, count int64) ([]bool, error) {
 		data = append(data, chunkData...)
 	}
 	return data, nil
-}
-
-func (c *ColumnReader) Close() {
 }
 
 func ReadIntegerOrFloatData[T constraints.Integer | constraints.Float](pcr *ColumnReader, count int64) ([]T, error) {
@@ -359,8 +360,7 @@ func ReadIntegerOrFloatData[T constraints.Integer | constraints.Float](pcr *Colu
 				chunkData[i] = T(float64Reader.Value(i))
 			}
 		default:
-			return nil, merr.WrapErrImportFailed(fmt.Sprintf("the column data type is not integer, "+
-				"neither float, but: %s", chunk.DataType().Name()))
+			return nil, WrapTypeErr("integer|float", chunk.DataType().Name(), pcr.field)
 		}
 		data = append(data, chunkData...)
 	}
@@ -378,8 +378,7 @@ func ReadStringData(pcr *ColumnReader, count int64) ([]string, error) {
 		chunkData := make([]string, dataNums)
 		stringReader, ok := chunk.(*array.String)
 		if !ok {
-			return nil, merr.WrapErrImportFailed(fmt.Sprintf("the column data in parquet "+
-				"is not string of field: %s, but: %s", pcr.field.GetName(), chunk.DataType().Name()))
+			return nil, WrapTypeErr("string", chunk.DataType().Name(), pcr.field)
 		}
 		for i := 0; i < dataNums; i++ {
 			chunkData[i] = stringReader.Value(i)
@@ -405,26 +404,24 @@ func ReadBinaryData(pcr *ColumnReader, count int64) ([]byte, error) {
 			}
 		case arrow.LIST:
 			listReader := chunk.(*array.List)
-			if !checkVectorIsRegular(listReader.Offsets(), pcr.dim, true) {
+			if !isRegularVector(listReader.Offsets(), pcr.dim, true) {
 				return nil, merr.WrapErrImportFailed("binary vector is irregular")
 			}
 			uint8Reader, ok := listReader.ListValues().(*array.Uint8)
 			if !ok {
-				return nil, merr.WrapErrImportFailed(fmt.Sprintf("the column element data "+
-					"of array in parquet is not binary: %s", pcr.field.GetName()))
+				return nil, WrapTypeErr("binary", listReader.ListValues().DataType().Name(), pcr.field)
 			}
 			for i := 0; i < uint8Reader.Len(); i++ {
 				data = append(data, uint8Reader.Value(i))
 			}
 		default:
-			return nil, merr.WrapErrImportFailed(fmt.Sprintf("the column element data "+
-				"of array in parquet is not binary: %s, it's: %s", pcr.field.GetName(), chunk.DataType().Name()))
+			return nil, WrapTypeErr("binary", chunk.DataType().Name(), pcr.field)
 		}
 	}
 	return data, nil
 }
 
-func checkVectorIsRegular(offsets []int32, dim int, isBinary bool) bool {
+func isRegularVector(offsets []int32, dim int, isBinary bool) bool {
 	if len(offsets) < 1 {
 		return false
 	}
@@ -450,13 +447,11 @@ func ReadBoolArrayData(pcr *ColumnReader, count int64) ([][]bool, error) {
 	for _, chunk := range chunked.Chunks() {
 		listReader, ok := chunk.(*array.List)
 		if !ok {
-			return nil, merr.WrapErrImportFailed(fmt.Sprintf("the column data in parquet "+
-				"is not list of field: %s, but: %s", pcr.field.GetName(), chunk.DataType().Name()))
+			return nil, WrapTypeErr("list", chunk.DataType().Name(), pcr.field)
 		}
 		boolReader, ok := listReader.ListValues().(*array.Boolean)
 		if !ok {
-			return nil, merr.WrapErrImportFailed(fmt.Sprintf("the column data in parquet is not bool array "+
-				"of field: %s， but: %s list", pcr.field.GetName(), listReader.ListValues().DataType().Name()))
+			return nil, WrapTypeErr("boolArray", chunk.DataType().Name(), pcr.field)
 		}
 		offsets := listReader.Offsets()
 		for i := 1; i < len(offsets); i++ {
@@ -491,12 +486,11 @@ func ReadIntegerOrFloatArrayData[T constraints.Integer | constraints.Float](pcr 
 	for _, chunk := range chunked.Chunks() {
 		listReader, ok := chunk.(*array.List)
 		if !ok {
-			return nil, merr.WrapErrImportFailed(fmt.Sprintf("the column data in parquet is not "+
-				"list of field: %s, but: %s", pcr.field.GetName(), chunk.DataType().Name()))
+			return nil, WrapTypeErr("list", chunk.DataType().Name(), pcr.field)
 		}
 		offsets := listReader.Offsets()
 		if typeutil.IsVectorType(pcr.field.GetDataType()) &&
-			!checkVectorIsRegular(offsets, pcr.dim, pcr.field.GetDataType() == schemapb.DataType_BinaryVector) {
+			!isRegularVector(offsets, pcr.dim, pcr.field.GetDataType() == schemapb.DataType_BinaryVector) {
 			return nil, merr.WrapErrImportFailed("float vector is irregular")
 		}
 		valueReader := listReader.ListValues()
@@ -532,8 +526,7 @@ func ReadIntegerOrFloatArrayData[T constraints.Integer | constraints.Float](pcr 
 				return T(float64Reader.Value(i))
 			})
 		default:
-			return nil, merr.WrapErrImportFailed(fmt.Sprintf("the column data type "+
-				"is not integer array, neither float array, but: %s", valueReader.DataType().Name()))
+			return nil, WrapTypeErr("integerArray|floatArray", chunk.DataType().Name(), pcr.field)
 		}
 	}
 	return data, nil
@@ -548,13 +541,11 @@ func ReadStringArrayData(pcr *ColumnReader, count int64) ([][]string, error) {
 	for _, chunk := range chunked.Chunks() {
 		listReader, ok := chunk.(*array.List)
 		if !ok {
-			return nil, merr.WrapErrImportFailed(fmt.Sprintf("the column data in parquet "+
-				"is not list of field: %s, but: %s", pcr.field.GetName(), chunk.DataType().Name()))
+			return nil, WrapTypeErr("list", chunk.DataType().Name(), pcr.field)
 		}
 		stringReader, ok := listReader.ListValues().(*array.String)
 		if !ok {
-			return nil, merr.WrapErrImportFailed(fmt.Sprintf("the column data in parquet is not string "+
-				"array of field: %s， but: %s list", pcr.field.GetName(), listReader.ListValues().DataType().Name()))
+			return nil, WrapTypeErr("stringArray", chunk.DataType().Name(), pcr.field)
 		}
 		offsets := listReader.Offsets()
 		for i := 1; i < len(offsets); i++ {

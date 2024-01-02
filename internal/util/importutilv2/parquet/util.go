@@ -18,71 +18,77 @@ package parquet
 
 import (
 	"fmt"
+
 	"github.com/apache/arrow/go/v12/arrow"
 	"github.com/apache/arrow/go/v12/parquet/pqarrow"
+	"github.com/samber/lo"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-	"github.com/samber/lo"
-	"go.uber.org/zap"
 )
 
+func WrapTypeErr(expect string, actual string, field *schemapb.FieldSchema) error {
+	return merr.WrapErrImportFailed(
+		fmt.Sprintf("expect '%s' type for field '%s', but got '%s' type",
+			expect, field.GetName(), actual))
+}
+
 func CreateColumnReaders(fileReader *pqarrow.FileReader, schema *schemapb.CollectionSchema) (map[int64]*ColumnReader, error) {
-	pqSchema, err := fileReader.Schema()
-	if err != nil {
-		log.Warn("can't schema from file", zap.Error(err))
-		return nil, err
-	}
-	fields := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) string {
+	nameToField := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) string {
 		return field.GetName()
 	})
-	pqFields := pqSchema.Fields()
+
+	pqSchema, err := fileReader.Schema()
+	if err != nil {
+		return nil, merr.WrapErrImportFailed(fmt.Sprintf("get parquet schema failed, err=%v", err))
+	}
+
 	crs := make(map[int64]*ColumnReader)
-	fmt.Println("dyh debug, CreateColumnReaders, pqFields:", pqFields, ", fields:", fields)
-	for i, pqField := range pqFields {
-		field, ok := fields[pqField.Name]
+	for i, pqField := range pqSchema.Fields() {
+		field, ok := nameToField[pqField.Name]
 		if !ok {
 			// TODO @cai.zhang: handle dynamic field
 			return nil, merr.WrapErrImportFailed(fmt.Sprintf("the field: %s is not in schema, "+
 				"if it's a dynamic field, please reformat data by bulk_writer", pqField.Name))
 		}
 		if field.GetIsPrimaryKey() && field.GetAutoID() {
-			return nil, merr.WrapErrImportFailed(fmt.Sprintf("the field: %s is primary key, "+
-				"and autoID is true, please remove it from file", field.GetName()))
+			return nil, merr.WrapErrImportFailed(
+				fmt.Sprintf("the primary key '%s' is auto-generated, no need to provide", field.GetName()))
 		}
+
 		arrowType, isList := convertArrowSchemaToDataType(pqField, false)
 		dataType := field.GetDataType()
-		fmt.Println("dyh, debug, aaaaaa, arrowType:", arrowType, ", isList:", isList, ", field:", field)
-		if isList { // TODO: dyh, refine error
+		if isList {
 			if !typeutil.IsVectorType(dataType) && dataType != schemapb.DataType_Array {
-				return nil, merr.WrapErrImportFailed(fmt.Sprintf("list field schema is not match, "+
-					"collection field dataType: %s, file field dataType: %s", dataType.String(), pqField.Type.Name()))
+				return nil, WrapTypeErr(dataType.String(), pqField.Type.Name(), field)
 			}
 			if dataType == schemapb.DataType_Array {
 				dataType = field.GetElementType()
 			}
 		}
 		if !isConvertible(arrowType, dataType, isList) {
-			//return nil, merr.WrapErrImportFailed(fmt.Sprintf("field schema is not match, "+
-			//	"collection field dataType: %s, file field dataType: %s", dataType.String(), pqField.Type.Name()))
+			return nil, WrapTypeErr(dataType.String(), pqField.Type.Name(), field)
 		}
+
 		cr, err := NewColumnReader(fileReader, i, field)
 		if err != nil {
 			return nil, err
 		}
 		if _, ok = crs[field.GetFieldID()]; ok {
-			return nil, merr.WrapErrImportFailed(fmt.Sprintf("there is multi field of fieldName: %s", field.GetName()))
+			return nil, merr.WrapErrImportFailed(
+				fmt.Sprintf("there is multi field with name: %s", field.GetName()))
 		}
 		crs[field.GetFieldID()] = cr
 	}
-	for _, field := range fields {
+
+	for _, field := range nameToField {
 		if (field.GetIsPrimaryKey() && field.GetAutoID()) || field.GetIsDynamic() {
 			continue
 		}
 		if _, ok := crs[field.GetFieldID()]; !ok {
-			return nil, merr.WrapErrImportFailed(fmt.Sprintf("there is no field "+
-				"in parquet file of name: %s", field.GetName()))
+			return nil, merr.WrapErrImportFailed(
+				fmt.Sprintf("no parquet field for milvus file '%s'", field.GetName()))
 		}
 	}
 	return crs, nil

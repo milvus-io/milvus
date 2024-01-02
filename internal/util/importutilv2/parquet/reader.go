@@ -18,11 +18,13 @@ package parquet
 
 import (
 	"fmt"
+
 	"github.com/apache/arrow/go/v12/arrow/memory"
 	"github.com/apache/arrow/go/v12/parquet"
 	"github.com/apache/arrow/go/v12/parquet/file"
 	"github.com/apache/arrow/go/v12/parquet/pqarrow"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -30,9 +32,10 @@ import (
 )
 
 type Reader struct {
-	schema     *schemapb.CollectionSchema
-	fileReader *pqarrow.FileReader
-	crs        map[int64]*ColumnReader // fieldID -> ColumnReader
+	reader *file.Reader
+
+	schema *schemapb.CollectionSchema
+	crs    map[int64]*ColumnReader // fieldID -> ColumnReader
 }
 
 func NewReader(schema *schemapb.CollectionSchema, cmReader storage.FileReader) (*Reader, error) {
@@ -41,15 +44,14 @@ func NewReader(schema *schemapb.CollectionSchema, cmReader storage.FileReader) (
 		BufferedStreamEnabled: true,
 	}))
 	if err != nil {
-		return nil, err
+		return nil, merr.WrapErrImportFailed(fmt.Sprintf("new parquet reader failed, err=%v", err))
 	}
-	log.Info("create file reader done", zap.Int("row group num", reader.NumRowGroups()),
+	log.Info("create parquet reader done", zap.Int("row group num", reader.NumRowGroups()),
 		zap.Int64("num rows", reader.NumRows()))
 
 	fileReader, err := pqarrow.NewFileReader(reader, pqarrow.ArrowReadProperties{}, memory.DefaultAllocator)
 	if err != nil {
-		log.Warn("create arrow parquet file reader failed", zap.Error(err))
-		return nil, err
+		return nil, merr.WrapErrImportFailed(fmt.Sprintf("new parquet file reader failed, err=%v", err))
 	}
 
 	crs, err := CreateColumnReaders(fileReader, schema)
@@ -57,9 +59,9 @@ func NewReader(schema *schemapb.CollectionSchema, cmReader storage.FileReader) (
 		return nil, err
 	}
 	return &Reader{
-		schema:     schema,
-		fileReader: fileReader,
-		crs:        crs,
+		reader: reader,
+		schema: schema,
+		crs:    crs,
 	}, nil
 }
 
@@ -74,14 +76,16 @@ func (r *Reader) Next(count int64) (*storage.InsertData, error) {
 			return nil, err
 		}
 		insertData.Data[fieldID] = fieldData
-		fmt.Println("dyh debug, ColumnReader Next", ", rowNum:", fieldData.RowNum(), ", count:", count)
 	}
-	fmt.Println("dyh debug, Reader Next", ", rowNum:", insertData)
 	return insertData, nil
 }
 
 func (r *Reader) Close() {
 	for _, cr := range r.crs {
 		cr.Close()
+	}
+	err := r.reader.Close()
+	if err != nil {
+		log.Warn("close parquet reader failed", zap.Error(err))
 	}
 }
