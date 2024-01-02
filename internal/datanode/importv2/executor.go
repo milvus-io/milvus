@@ -19,8 +19,6 @@ package importv2
 import (
 	"context"
 	"fmt"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"sync"
 	"time"
 
@@ -31,7 +29,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -66,7 +66,7 @@ func NewExecutor(manager TaskManager, syncMgr syncmgr.SyncManager, cm storage.Ch
 
 func (e *executor) Start() {
 	log.Info("start import executor")
-	ticker := time.NewTicker(3 * time.Second)
+	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 	for {
 		select {
@@ -146,7 +146,7 @@ func (e *executor) PreImport(task Task) {
 	}
 
 	e.manager.Update(task.GetTaskID(), UpdateState(internalpb.ImportState_Completed))
-	log.Info("preimport done", zap.String("state", task.GetState().String()),
+	log.Info("executor preimport done", zap.String("state", task.GetState().String()),
 		zap.Any("fileStats", task.(*PreImportTask).GetFileStats()))
 }
 
@@ -246,83 +246,6 @@ func (e *executor) importFile(reader importutilv2.Reader, count int64, task Task
 		}
 	}
 }
-
-//func (e *executor) Hash(task Task, insertData *storage.InsertData, needAppend bool) (HashedData, error) {
-//	schema := task.GetSchema()
-//	if needAppend {
-//		schema = typeutil.AppendSystemFields(task.GetSchema())
-//	}
-//	res, err := InitHashedData(task.GetVchannels(), task.GetPartitionIDs(), schema)
-//	if err != nil {
-//		return nil, err
-//	}
-//	pkField, err := typeutil.GetPrimaryFieldSchema(task.GetSchema())
-//	if err != nil {
-//		return nil, err
-//	}
-//	if pkField.GetAutoID() { // TODO: dyh, fix it, find better way
-//		// gen fake auto id for preimport
-//		if insertData.Data[pkField.GetFieldID()] == nil || insertData.Data[pkField.GetFieldID()].RowNum() == 0 {
-//			switch pkField.GetDataType() {
-//			case schemapb.DataType_Int64:
-//				data := make([]int64, insertData.GetRowNum())
-//				for i := 0; i < insertData.GetRowNum(); i++ {
-//					data[i] = int64(i)
-//				}
-//				insertData.Data[pkField.GetFieldID()] = &storage.Int64FieldData{Data: data}
-//			case schemapb.DataType_VarChar:
-//				data := make([]string, insertData.GetRowNum())
-//				for i := 0; i < insertData.GetRowNum(); i++ {
-//					data[i] = fmt.Sprint(i)
-//				}
-//				insertData.Data[pkField.GetFieldID()] = &storage.StringFieldData{Data: data}
-//			}
-//		}
-//	}
-//	partKeyField, err := typeutil.GetPartitionKeyFieldSchema(task.GetSchema())
-//	if err != nil {
-//		// no partition key
-//		vchannelNum := int64(len(task.GetVchannels()))
-//		fn, err := HashFunc(pkField.GetDataType())
-//		if err != nil {
-//			return nil, err
-//		}
-//		for i := 0; i < insertData.GetRowNum(); i++ {
-//			row := insertData.GetRow(i)
-//			pk := row[pkField.GetFieldID()]
-//			p1 := fn(pk, vchannelNum)
-//			err = res[p1][0].Append(row)
-//			if err != nil {
-//				return nil, err
-//			}
-//		}
-//		return res, nil
-//	}
-//
-//	// with partitionKey
-//	vchannelNum := int64(len(task.GetVchannels()))
-//	partitionNum := int64(len(task.GetPartitionIDs()))
-//	fn1, err := HashFunc(pkField.GetDataType())
-//	if err != nil {
-//		return nil, err
-//	}
-//	fn2, err := HashFunc(partKeyField.GetDataType())
-//	if err != nil {
-//		return nil, err
-//	}
-//	for i := 0; i < insertData.GetRowNum(); i++ { // TODO: dyh, gen auto id if enable
-//		row := insertData.GetRow(i)
-//		pk1 := row[pkField.GetFieldID()]
-//		pk2 := row[partKeyField.GetFieldID()]
-//		p1 := fn1(pk1, vchannelNum)
-//		p2 := fn2(pk2, partitionNum)
-//		err = res[p1][p2].Append(row)
-//		if err != nil {
-//			return nil, err
-//		}
-//	}
-//	return res, nil
-//}
 
 func (e *executor) Sync(task *ImportTask, hashedData HashedData) error {
 	futures := make([]*conc.Future[error], 0)

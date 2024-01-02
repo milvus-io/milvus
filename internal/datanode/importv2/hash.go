@@ -18,6 +18,7 @@ package importv2
 
 import (
 	"fmt"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -88,7 +89,7 @@ func GetHashedRowsCount(task Task, insertData *storage.InsertData) (map[string]*
 	if err != nil {
 		return nil, err
 	}
-	if pkField.GetAutoID() { // TODO: dyh, fix it, find better way
+	if pkField.GetAutoID() { // TODO: dyh, fix it, find a better way
 		// gen fake auto id for preimport
 		if insertData.Data[pkField.GetFieldID()] == nil || insertData.Data[pkField.GetFieldID()].RowNum() == 0 {
 			switch pkField.GetDataType() {

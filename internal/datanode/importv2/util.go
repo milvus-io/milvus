@@ -181,7 +181,7 @@ func GetInsertDataRowNum(data *storage.InsertData, schema *schemapb.CollectionSc
 	return 0
 }
 
-func FillDynamicData(data *storage.InsertData, schema *schemapb.CollectionSchema) error {
+func FillDynamicData(data *storage.InsertData, schema *schemapb.CollectionSchema) error { // TODO: dyh move it to numpy reader, only numpy import need it
 	if !schema.GetEnableDynamicField() {
 		return nil
 	}
@@ -197,12 +197,9 @@ func FillDynamicData(data *storage.InsertData, schema *schemapb.CollectionSchema
 	jsonFD := dynamicData.(*storage.JSONFieldData)
 	bs := []byte("{}")
 	count := rowNum - dynamicData.RowNum()
-	fmt.Println("dyh debug, FillDynamicData 2", " rowNum:", rowNum, " dynamicData.RowNum():", dynamicData.RowNum(),
-		" count:", count)
 	for i := 0; i < count; i++ {
 		jsonFD.Data = append(jsonFD.Data, bs)
 	}
 	data.Data[dynamicField.GetFieldID()] = dynamicData
-	fmt.Println("dyh debug, FillDynamicData 2", data.Data[dynamicField.GetFieldID()].RowNum())
 	return nil
 }
