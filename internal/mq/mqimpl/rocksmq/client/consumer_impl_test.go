@@ -53,6 +53,7 @@ func TestConsumer_newConsumer(t *testing.T) {
 	os.MkdirAll(rmqPath, os.ModePerm)
 	rmqPathTest := rmqPath + "/test_consumer1"
 	rmq := newRocksMQ(t, rmqPathTest)
+	defer rmq.Close()
 	defer removePath(rmqPath)
 	client, err := newClient(Options{
 		Server: rmq,
@@ -124,6 +125,7 @@ func TestConsumer_Seek(t *testing.T) {
 	os.MkdirAll(rmqPath, os.ModePerm)
 	rmqPathTest := rmqPath + "/test_consumer2"
 	rmq := newRocksMQ(t, rmqPathTest)
+	defer rmq.Close()
 	defer removePath(rmqPath)
 	client, err := newClient(Options{
 		Server: rmq,
