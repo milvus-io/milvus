@@ -836,7 +836,7 @@ func (s *DelegatorDataSuite) TestSyncTargetVersion() {
 		ms.EXPECT().Type().Return(segments.SegmentTypeGrowing)
 		ms.EXPECT().Collection().Return(1)
 		ms.EXPECT().Partition().Return(1)
-		ms.EXPECT().RowNum().Return(0)
+		ms.EXPECT().InsertCount().Return(0)
 		ms.EXPECT().Indexes().Return(nil)
 		ms.EXPECT().Shard().Return(s.vchannelName)
 		s.manager.Segment.Put(segments.SegmentTypeGrowing, ms)
