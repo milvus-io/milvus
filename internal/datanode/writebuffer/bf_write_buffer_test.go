@@ -211,7 +211,7 @@ func (s *BFWriteBufferSuite) TestAutoSync() {
 
 func (s *BFWriteBufferSuite) TestBufferDataWithStorageV2() {
 	params.Params.CommonCfg.EnableStorageV2.SwapTempValue("true")
-	defer params.Params.Reset(params.Params.CommonCfg.EnableStorageV2.Key)
+	defer paramtable.Get().CommonCfg.EnableStorageV2.SwapTempValue("false")
 	params.Params.CommonCfg.StorageScheme.SwapTempValue("file")
 	tmpDir := s.T().TempDir()
 	arrowSchema, err := typeutil.ConvertToArrowSchema(s.collSchema.Fields)
@@ -241,6 +241,7 @@ func (s *BFWriteBufferSuite) TestBufferDataWithStorageV2() {
 
 func (s *BFWriteBufferSuite) TestAutoSyncWithStorageV2() {
 	params.Params.CommonCfg.EnableStorageV2.SwapTempValue("true")
+	defer paramtable.Get().CommonCfg.EnableStorageV2.SwapTempValue("false")
 	paramtable.Get().Save(paramtable.Get().DataNodeCfg.FlushInsertBufferSize.Key, "1")
 	tmpDir := s.T().TempDir()
 	arrowSchema, err := typeutil.ConvertToArrowSchema(s.collSchema.Fields)
