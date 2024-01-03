@@ -169,7 +169,9 @@ func (dn *deleteNode) Operate(in []Msg) []Msg {
 }
 
 func (dn *deleteNode) bufferDeleteMsg(msg *msgstream.DeleteMsg, tr TimeRange, startPos, endPos *msgpb.MsgPosition) ([]UniqueID, error) {
-	log.Debug("bufferDeleteMsg", zap.Any("primary keys", msg.PrimaryKeys), zap.String("vChannelName", dn.channelName))
+	log.Debug("bufferDeleteMsg",
+		zap.Int("pkNum", typeutil.GetSizeOfIDs(msg.GetPrimaryKeys())),
+		zap.String("vChannelName", dn.channelName))
 
 	primaryKeys := storage.ParseIDs2PrimaryKeys(msg.PrimaryKeys)
 	segIDToPks, segIDToTss := dn.filterSegmentByPK(msg.PartitionID, primaryKeys, msg.Timestamps)
