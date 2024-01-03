@@ -402,9 +402,7 @@ func TestGarbageCollector_recycleUnusedIndexes(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 		).Return(nil)
-		gc := &garbageCollector{
-			meta: createMetaForRecycleUnusedIndexes(catalog),
-		}
+		gc := newGarbageCollector(createMetaForRecycleUnusedIndexes(catalog), nil, GcOption{})
 		gc.recycleUnusedIndexes()
 	})
 
@@ -415,9 +413,7 @@ func TestGarbageCollector_recycleUnusedIndexes(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 		).Return(errors.New("fail"))
-		gc := &garbageCollector{
-			meta: createMetaForRecycleUnusedIndexes(catalog),
-		}
+		gc := newGarbageCollector(createMetaForRecycleUnusedIndexes(catalog), nil, GcOption{})
 		gc.recycleUnusedIndexes()
 	})
 }
@@ -543,9 +539,7 @@ func TestGarbageCollector_recycleUnusedSegIndexes(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 		).Return(nil)
-		gc := &garbageCollector{
-			meta: createMetaForRecycleUnusedSegIndexes(catalog),
-		}
+		gc := newGarbageCollector(createMetaForRecycleUnusedSegIndexes(catalog), nil, GcOption{})
 		gc.recycleUnusedSegIndexes()
 	})
 
@@ -558,9 +552,7 @@ func TestGarbageCollector_recycleUnusedSegIndexes(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 		).Return(errors.New("fail"))
-		gc := &garbageCollector{
-			meta: createMetaForRecycleUnusedSegIndexes(catalog),
-		}
+		gc := newGarbageCollector(createMetaForRecycleUnusedSegIndexes(catalog), nil, GcOption{})
 		gc.recycleUnusedSegIndexes()
 	})
 }
@@ -705,12 +697,13 @@ func TestGarbageCollector_recycleUnusedIndexFiles(t *testing.T) {
 		cm.EXPECT().ListWithPrefix(mock.Anything, mock.Anything, mock.Anything).Return([]string{"a/b/c/", "a/b/600/", "a/b/601/", "a/b/602/"}, nil, nil)
 		cm.EXPECT().RemoveWithPrefix(mock.Anything, mock.Anything).Return(nil)
 		cm.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil)
-		gc := &garbageCollector{
-			meta: createMetaTableForRecycleUnusedIndexFiles(&datacoord.Catalog{MetaKv: kvmocks.NewMetaKv(t)}),
-			option: GcOption{
+		gc := newGarbageCollector(
+			createMetaTableForRecycleUnusedIndexFiles(&datacoord.Catalog{MetaKv: kvmocks.NewMetaKv(t)}),
+			nil,
+			GcOption{
 				cli: cm,
-			},
-		}
+			})
+
 		gc.recycleUnusedIndexFiles()
 	})
 
@@ -718,12 +711,12 @@ func TestGarbageCollector_recycleUnusedIndexFiles(t *testing.T) {
 		cm := &mocks.ChunkManager{}
 		cm.EXPECT().RootPath().Return("root")
 		cm.EXPECT().ListWithPrefix(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil, errors.New("error"))
-		gc := &garbageCollector{
-			meta: createMetaTableForRecycleUnusedIndexFiles(&datacoord.Catalog{MetaKv: kvmocks.NewMetaKv(t)}),
-			option: GcOption{
+		gc := newGarbageCollector(
+			createMetaTableForRecycleUnusedIndexFiles(&datacoord.Catalog{MetaKv: kvmocks.NewMetaKv(t)}),
+			nil,
+			GcOption{
 				cli: cm,
-			},
-		}
+			})
 		gc.recycleUnusedIndexFiles()
 	})
 
@@ -733,12 +726,12 @@ func TestGarbageCollector_recycleUnusedIndexFiles(t *testing.T) {
 		cm.EXPECT().Remove(mock.Anything, mock.Anything).Return(errors.New("error"))
 		cm.EXPECT().ListWithPrefix(mock.Anything, mock.Anything, mock.Anything).Return([]string{"a/b/c/", "a/b/600/", "a/b/601/", "a/b/602/"}, nil, nil)
 		cm.EXPECT().RemoveWithPrefix(mock.Anything, mock.Anything).Return(nil)
-		gc := &garbageCollector{
-			meta: createMetaTableForRecycleUnusedIndexFiles(&datacoord.Catalog{MetaKv: kvmocks.NewMetaKv(t)}),
-			option: GcOption{
+		gc := newGarbageCollector(
+			createMetaTableForRecycleUnusedIndexFiles(&datacoord.Catalog{MetaKv: kvmocks.NewMetaKv(t)}),
+			nil,
+			GcOption{
 				cli: cm,
-			},
-		}
+			})
 		gc.recycleUnusedIndexFiles()
 	})
 
@@ -748,12 +741,12 @@ func TestGarbageCollector_recycleUnusedIndexFiles(t *testing.T) {
 		cm.EXPECT().Remove(mock.Anything, mock.Anything).Return(errors.New("error"))
 		cm.EXPECT().ListWithPrefix(mock.Anything, mock.Anything, mock.Anything).Return([]string{"a/b/c/", "a/b/600/", "a/b/601/", "a/b/602/"}, nil, nil)
 		cm.EXPECT().RemoveWithPrefix(mock.Anything, mock.Anything).Return(errors.New("error"))
-		gc := &garbageCollector{
-			meta: createMetaTableForRecycleUnusedIndexFiles(&datacoord.Catalog{MetaKv: kvmocks.NewMetaKv(t)}),
-			option: GcOption{
+		gc := newGarbageCollector(
+			createMetaTableForRecycleUnusedIndexFiles(&datacoord.Catalog{MetaKv: kvmocks.NewMetaKv(t)}),
+			nil,
+			GcOption{
 				cli: cm,
-			},
-		}
+			})
 		gc.recycleUnusedIndexFiles()
 	})
 }
@@ -802,6 +795,57 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 						DroppedAt:     0,
 						DmlPosition: &msgpb.MsgPosition{
 							Timestamp: 900,
+						},
+						Binlogs: []*datapb.FieldBinlog{
+							{
+								FieldID: 1,
+								Binlogs: []*datapb.Binlog{
+									{
+										LogPath: "log1",
+										LogSize: 1024,
+									},
+								},
+							},
+							{
+								FieldID: 2,
+								Binlogs: []*datapb.Binlog{
+									{
+										LogPath: "log2",
+										LogSize: 1024,
+									},
+								},
+							},
+						},
+						Deltalogs: []*datapb.FieldBinlog{
+							{
+								FieldID: 1,
+								Binlogs: []*datapb.Binlog{
+									{
+										LogPath: "del_log1",
+										LogSize: 1024,
+									},
+								},
+							},
+							{
+								FieldID: 2,
+								Binlogs: []*datapb.Binlog{
+									{
+										LogPath: "del_log2",
+										LogSize: 1024,
+									},
+								},
+							},
+						},
+						Statslogs: []*datapb.FieldBinlog{
+							{
+								FieldID: 1,
+								Binlogs: []*datapb.Binlog{
+									{
+										LogPath: "stats_log1",
+										LogSize: 1024,
+									},
+								},
+							},
 						},
 					},
 					segmentIndexes: map[UniqueID]*model.SegmentIndex{
@@ -1044,14 +1088,13 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 	}
 	cm := &mocks.ChunkManager{}
 	cm.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil)
-	gc := &garbageCollector{
-		option: GcOption{
-			cli:           &mocks.ChunkManager{},
+	gc := newGarbageCollector(
+		m,
+		newMockHandlerWithMeta(m),
+		GcOption{
+			cli:           cm,
 			dropTolerance: 1,
-		},
-		meta:    m,
-		handler: newMockHandlerWithMeta(m),
-	}
+		})
 	gc.clearEtcd()
 
 	/*
@@ -1133,6 +1176,56 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 	assert.Nil(t, segA)
 	segB = gc.meta.GetSegment(segID + 1)
 	assert.Nil(t, segB)
+}
+
+func TestGarbageCollector_removelogs(t *testing.T) {
+	paramtable.Init()
+	cm := &mocks.ChunkManager{}
+	gc := newGarbageCollector(
+		nil,
+		nil,
+		GcOption{
+			cli:           cm,
+			dropTolerance: 1,
+		})
+	var logs []*datapb.Binlog
+	for i := 0; i < 50; i++ {
+		logs = append(logs, &datapb.Binlog{
+			LogPath: "log" + strconv.Itoa(i),
+		})
+	}
+
+	t.Run("success", func(t *testing.T) {
+		call := cm.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil)
+		defer call.Unset()
+		b := gc.removeLogs(logs)
+		assert.True(t, b)
+	})
+
+	t.Run("minio not found error", func(t *testing.T) {
+		call := cm.EXPECT().Remove(mock.Anything, mock.Anything).Return(minio.ErrorResponse{
+			Code: "NoSuchKey",
+		})
+		defer call.Unset()
+		b := gc.removeLogs(logs)
+		assert.True(t, b)
+	})
+
+	t.Run("minio server error", func(t *testing.T) {
+		call := cm.EXPECT().Remove(mock.Anything, mock.Anything).Return(minio.ErrorResponse{
+			Code: "Server Error",
+		})
+		defer call.Unset()
+		b := gc.removeLogs(logs)
+		assert.False(t, b)
+	})
+
+	t.Run("other type error", func(t *testing.T) {
+		call := cm.EXPECT().Remove(mock.Anything, mock.Anything).Return(errors.New("other error"))
+		defer call.Unset()
+		b := gc.removeLogs(logs)
+		assert.False(t, b)
+	})
 }
 
 type GarbageCollectorSuite struct {

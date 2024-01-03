@@ -2160,6 +2160,7 @@ type dataCoordConfig struct {
 	GCInterval              ParamItem `refreshable:"false"`
 	GCMissingTolerance      ParamItem `refreshable:"false"`
 	GCDropTolerance         ParamItem `refreshable:"false"`
+	GCRemoveConcurrent      ParamItem `refreshable:"false"`
 	EnableActiveStandby     ParamItem `refreshable:"false"`
 
 	BindIndexNodeMode          ParamItem `refreshable:"false"`
@@ -2472,6 +2473,15 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.GCDropTolerance.Init(base.mgr)
+
+	p.GCRemoveConcurrent = ParamItem{
+		Key:          "dataCoord.gc.removeConcurrent",
+		Version:      "2.3.4",
+		DefaultValue: "32",
+		Doc:          "number of concurrent goroutines to remove dropped s3 objects",
+		Export:       true,
+	}
+	p.GCRemoveConcurrent.Init(base.mgr)
 
 	p.EnableActiveStandby = ParamItem{
 		Key:          "dataCoord.enableActiveStandby",
