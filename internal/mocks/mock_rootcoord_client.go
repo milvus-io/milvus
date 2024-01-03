@@ -914,6 +914,76 @@ func (_c *MockRootCoordClient_DeleteCredential_Call) RunAndReturn(run func(conte
 	return _c
 }
 
+// DescribeAlias provides a mock function with given fields: ctx, in, opts
+func (_m *MockRootCoordClient) DescribeAlias(ctx context.Context, in *milvuspb.DescribeAliasRequest, opts ...grpc.CallOption) (*milvuspb.DescribeAliasResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	var r0 *milvuspb.DescribeAliasResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DescribeAliasRequest, ...grpc.CallOption) (*milvuspb.DescribeAliasResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DescribeAliasRequest, ...grpc.CallOption) *milvuspb.DescribeAliasResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.DescribeAliasResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DescribeAliasRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockRootCoordClient_DescribeAlias_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DescribeAlias'
+type MockRootCoordClient_DescribeAlias_Call struct {
+	*mock.Call
+}
+
+// DescribeAlias is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *milvuspb.DescribeAliasRequest
+//   - opts ...grpc.CallOption
+func (_e *MockRootCoordClient_Expecter) DescribeAlias(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_DescribeAlias_Call {
+	return &MockRootCoordClient_DescribeAlias_Call{Call: _e.mock.On("DescribeAlias",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockRootCoordClient_DescribeAlias_Call) Run(run func(ctx context.Context, in *milvuspb.DescribeAliasRequest, opts ...grpc.CallOption)) *MockRootCoordClient_DescribeAlias_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*milvuspb.DescribeAliasRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockRootCoordClient_DescribeAlias_Call) Return(_a0 *milvuspb.DescribeAliasResponse, _a1 error) *MockRootCoordClient_DescribeAlias_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockRootCoordClient_DescribeAlias_Call) RunAndReturn(run func(context.Context, *milvuspb.DescribeAliasRequest, ...grpc.CallOption) (*milvuspb.DescribeAliasResponse, error)) *MockRootCoordClient_DescribeAlias_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DescribeCollection provides a mock function with given fields: ctx, in, opts
 func (_m *MockRootCoordClient) DescribeCollection(ctx context.Context, in *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
 	_va := make([]interface{}, len(opts))
@@ -2100,6 +2170,76 @@ func (_c *MockRootCoordClient_InvalidateCollectionMetaCache_Call) Return(_a0 *co
 }
 
 func (_c *MockRootCoordClient_InvalidateCollectionMetaCache_Call) RunAndReturn(run func(context.Context, *proxypb.InvalidateCollMetaCacheRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockRootCoordClient_InvalidateCollectionMetaCache_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListAliases provides a mock function with given fields: ctx, in, opts
+func (_m *MockRootCoordClient) ListAliases(ctx context.Context, in *milvuspb.ListAliasesRequest, opts ...grpc.CallOption) (*milvuspb.ListAliasesResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	var r0 *milvuspb.ListAliasesResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListAliasesRequest, ...grpc.CallOption) (*milvuspb.ListAliasesResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListAliasesRequest, ...grpc.CallOption) *milvuspb.ListAliasesResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.ListAliasesResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ListAliasesRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockRootCoordClient_ListAliases_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListAliases'
+type MockRootCoordClient_ListAliases_Call struct {
+	*mock.Call
+}
+
+// ListAliases is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *milvuspb.ListAliasesRequest
+//   - opts ...grpc.CallOption
+func (_e *MockRootCoordClient_Expecter) ListAliases(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_ListAliases_Call {
+	return &MockRootCoordClient_ListAliases_Call{Call: _e.mock.On("ListAliases",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockRootCoordClient_ListAliases_Call) Run(run func(ctx context.Context, in *milvuspb.ListAliasesRequest, opts ...grpc.CallOption)) *MockRootCoordClient_ListAliases_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*milvuspb.ListAliasesRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockRootCoordClient_ListAliases_Call) Return(_a0 *milvuspb.ListAliasesResponse, _a1 error) *MockRootCoordClient_ListAliases_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockRootCoordClient_ListAliases_Call) RunAndReturn(run func(context.Context, *milvuspb.ListAliasesRequest, ...grpc.CallOption) (*milvuspb.ListAliasesResponse, error)) *MockRootCoordClient_ListAliases_Call {
 	_c.Call.Return(run)
 	return _c
 }

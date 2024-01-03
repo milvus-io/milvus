@@ -65,6 +65,8 @@ type IMetaTable interface {
 	CreateAlias(ctx context.Context, dbName string, alias string, collectionName string, ts Timestamp) error
 	DropAlias(ctx context.Context, dbName string, alias string, ts Timestamp) error
 	AlterAlias(ctx context.Context, dbName string, alias string, collectionName string, ts Timestamp) error
+	DescribeAlias(ctx context.Context, dbName string, alias string, ts Timestamp) (string, error)
+	ListAliases(ctx context.Context, dbName string, collectionName string, ts Timestamp) ([]string, error)
 	AlterCollection(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts Timestamp) error
 	RenameCollection(ctx context.Context, dbName string, oldName string, newDBName string, newName string, ts Timestamp) error
 
@@ -1052,6 +1054,71 @@ func (mt *MetaTable) AlterAlias(ctx context.Context, dbName string, alias string
 	)
 
 	return nil
+}
+
+func (mt *MetaTable) DescribeAlias(ctx context.Context, dbName string, alias string, ts Timestamp) (string, error) {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+
+	if dbName == "" {
+		log.Warn("db name is empty", zap.String("alias", alias))
+		dbName = util.DefaultDBName
+	}
+
+	// check if database exists.
+	dbExist := mt.aliases.exist(dbName)
+	if !dbExist {
+		return "", merr.WrapErrDatabaseNotFound(dbName)
+	}
+	// check if alias exists.
+	collectionID, ok := mt.aliases.get(dbName, alias)
+	if !ok {
+		return "", merr.WrapErrAliasNotFound(dbName, alias)
+	}
+
+	collectionMeta, ok := mt.collID2Meta[collectionID]
+	if !ok {
+		return "", merr.WrapErrCollectionIDOfAliasNotFound(collectionID)
+	}
+	if collectionMeta.State == pb.CollectionState_CollectionCreated {
+		return collectionMeta.Name, nil
+	}
+	return "", merr.WrapErrAliasNotFound(dbName, alias)
+}
+
+func (mt *MetaTable) ListAliases(ctx context.Context, dbName string, collectionName string, ts Timestamp) ([]string, error) {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+
+	if dbName == "" {
+		log.Warn("db name is empty", zap.String("collection", collectionName))
+		dbName = util.DefaultDBName
+	}
+
+	// check if database exists.
+	dbExist := mt.aliases.exist(dbName)
+	if !dbExist {
+		return nil, merr.WrapErrDatabaseNotFound(dbName)
+	}
+	var aliases []string
+	if collectionName == "" {
+		collections := mt.aliases.listCollections(dbName)
+		for name, collectionID := range collections {
+			if collectionMeta, ok := mt.collID2Meta[collectionID]; ok &&
+				collectionMeta.State == pb.CollectionState_CollectionCreated {
+				aliases = append(aliases, name)
+			}
+		}
+	} else {
+		collectionID, exist := mt.names.get(dbName, collectionName)
+		collectionMeta, exist2 := mt.collID2Meta[collectionID]
+		if exist && exist2 && collectionMeta.State == pb.CollectionState_CollectionCreated {
+			aliases = mt.listAliasesByID(collectionID)
+		} else {
+			return nil, merr.WrapErrCollectionNotFound(collectionName)
+		}
+	}
+	return aliases, nil
 }
 
 func (mt *MetaTable) IsAlias(db, name string) bool {

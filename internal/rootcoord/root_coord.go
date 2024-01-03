@@ -1853,6 +1853,86 @@ func (c *Core) AlterAlias(ctx context.Context, in *milvuspb.AlterAliasRequest) (
 	return merr.Success(), nil
 }
 
+// DescribeAlias describe collection alias
+func (c *Core) DescribeAlias(ctx context.Context, in *milvuspb.DescribeAliasRequest) (*milvuspb.DescribeAliasResponse, error) {
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return &milvuspb.DescribeAliasResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.RootCoordRole),
+		zap.String("db", in.GetDbName()),
+		zap.String("alias", in.GetAlias()))
+	method := "DescribeAlias"
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder("DescribeAlias")
+
+	log.Info("received request to describe alias")
+
+	if in.GetAlias() == "" {
+		return &milvuspb.DescribeAliasResponse{
+			Status: merr.Status(merr.WrapErrParameterMissing("alias", "no input alias")),
+		}, nil
+	}
+
+	collectionName, err := c.meta.DescribeAlias(ctx, in.GetDbName(), in.GetAlias(), 0)
+	if err != nil {
+		log.Warn("fail to DescribeAlias", zap.Error(err))
+		return &milvuspb.DescribeAliasResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+
+	log.Info("done to describe alias")
+	return &milvuspb.DescribeAliasResponse{
+		Status:     merr.Status(nil),
+		DbName:     in.GetDbName(),
+		Alias:      in.GetAlias(),
+		Collection: collectionName,
+	}, nil
+}
+
+// ListAliases list aliases
+func (c *Core) ListAliases(ctx context.Context, in *milvuspb.ListAliasesRequest) (*milvuspb.ListAliasesResponse, error) {
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return &milvuspb.ListAliasesResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	method := "ListAliases"
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder(method)
+
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.RootCoordRole),
+		zap.String("db", in.GetDbName()),
+		zap.String("collectionName", in.GetCollectionName()))
+	log.Info("received request to list aliases")
+
+	aliases, err := c.meta.ListAliases(ctx, in.GetDbName(), in.GetCollectionName(), 0)
+	if err != nil {
+		log.Warn("fail to ListAliases", zap.Error(err))
+		return &milvuspb.ListAliasesResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+
+	log.Info("done to list aliases")
+	return &milvuspb.ListAliasesResponse{
+		Status:  merr.Status(nil),
+		DbName:  in.GetDbName(),
+		Aliases: aliases,
+	}, nil
+}
+
 // Import imports large files (json, numpy, etc.) on MinIO/S3 storage into Milvus storage.
 func (c *Core) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {

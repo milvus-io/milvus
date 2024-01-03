@@ -28,7 +28,7 @@ const (
 
 // Define leaf errors here,
 // WARN: take care to add new error,
-// check whehter you can use the erorrs below before adding a new one.
+// check whether you can use the errors below before adding a new one.
 // Name: Err + related prefix + error name
 var (
 	// Service related
@@ -99,6 +99,7 @@ var (
 
 	// Parameter related
 	ErrParameterInvalid = newMilvusError("invalid parameter", 1100, false)
+	ErrParameterMissing = newMilvusError("missing parameter", 1101, false)
 
 	// Metrics related
 	ErrMetricNotFound = newMilvusError("metric not found", 1200, false)
@@ -119,6 +120,7 @@ var (
 	ErrAliasNotFound               = newMilvusError("alias not found", 1600, false)
 	ErrAliasCollectionNameConfilct = newMilvusError("alias and collection name conflict", 1601, false)
 	ErrAliasAlreadyExist           = newMilvusError("alias already exist", 1602, false)
+	ErrCollectionIDOfAliasNotFound = newMilvusError("collection id of alias not found", 1603, false)
 
 	// field related
 	ErrFieldNotFound    = newMilvusError("field not found", 1700, false)

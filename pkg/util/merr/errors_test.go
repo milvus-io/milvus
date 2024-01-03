@@ -128,6 +128,7 @@ func (s *ErrSuite) TestWrap() {
 	// Parameter related
 	s.ErrorIs(WrapErrParameterInvalid(8, 1, "failed to create"), ErrParameterInvalid)
 	s.ErrorIs(WrapErrParameterInvalidRange(1, 1<<16, 0, "topk should be in range"), ErrParameterInvalid)
+	s.ErrorIs(WrapErrParameterMissing("alias_name", "no alias parameter"), ErrParameterMissing)
 
 	// Metrics related
 	s.ErrorIs(WrapErrMetricNotFound("unknown", "failed to get metric"), ErrMetricNotFound)
@@ -139,6 +140,10 @@ func (s *ErrSuite) TestWrap() {
 
 	// field related
 	s.ErrorIs(WrapErrFieldNotFound("meta", "failed to get field"), ErrFieldNotFound)
+
+	// alias related
+	s.ErrorIs(WrapErrAliasNotFound("alias", "failed to get collection id"), ErrAliasNotFound)
+	s.ErrorIs(WrapErrCollectionIDOfAliasNotFound(1000, "failed to get collection id"), ErrCollectionIDOfAliasNotFound)
 }
 
 func (s *ErrSuite) TestOldCode() {

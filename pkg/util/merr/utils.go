@@ -448,6 +448,14 @@ func WrapErrCollectionNumLimitExceeded(limit int, msg ...string) error {
 	return err
 }
 
+func WrapErrCollectionIDOfAliasNotFound(collectionID int64, msg ...string) error {
+	err := wrapFields(ErrCollectionIDOfAliasNotFound, value("collectionID", collectionID))
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
 func WrapErrCollectionNotFullyLoaded(collection any, msg ...string) error {
 	err := wrapFields(ErrCollectionNotFullyLoaded, value("collection", collection))
 	if len(msg) > 0 {
@@ -776,6 +784,16 @@ func WrapErrParameterInvalidRange[T any](lower, upper, actual T, msg ...string) 
 
 func WrapErrParameterInvalidMsg(fmt string, args ...any) error {
 	return errors.Wrapf(ErrParameterInvalid, fmt, args...)
+}
+
+func WrapErrParameterMissing[T any](param T, msg ...string) error {
+	err := wrapFields(ErrParameterMissing,
+		value("missing_param", param),
+	)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
 }
 
 // Metrics related
