@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type GrpcAccessInfoSuite struct {
@@ -146,6 +147,14 @@ func (s *GrpcAccessInfoSuite) TestExpression() {
 	}
 	result = s.info.Get("$method_expr")
 	s.Equal(testExpr, result[0])
+}
+
+func (s *GrpcAccessInfoSuite) TestClusterPrefix() {
+	cluster := "instance-test"
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().CommonCfg.ClusterPrefix.Key, cluster)
+	result := s.info.Get("$cluster_prefix")
+	s.Equal(cluster, result[0])
 }
 
 func TestGrpcAccssInfo(t *testing.T) {
