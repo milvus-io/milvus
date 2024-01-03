@@ -680,6 +680,7 @@ func (loader *segmentLoader) loadFieldsIndex(ctx context.Context,
 	numRows int64,
 	indexedFieldInfos map[int64]*IndexedFieldInfo,
 ) error {
+	log := log.Ctx(ctx)
 	for fieldID, fieldInfo := range indexedFieldInfos {
 		indexInfo := fieldInfo.IndexInfo
 		err := loader.loadFieldIndex(ctx, segment, indexInfo)
