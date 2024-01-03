@@ -142,6 +142,14 @@ func (m *GrpcRootCoordClient) AlterAlias(ctx context.Context, in *milvuspb.Alter
 	return &commonpb.Status{}, m.Err
 }
 
+func (m *GrpcRootCoordClient) DescribeAlias(ctx context.Context, in *milvuspb.DescribeAliasRequest, opts ...grpc.CallOption) (*milvuspb.DescribeAliasResponse, error) {
+	return &milvuspb.DescribeAliasResponse{}, m.Err
+}
+
+func (m *GrpcRootCoordClient) ListAliases(ctx context.Context, in *milvuspb.ListAliasesRequest, opts ...grpc.CallOption) (*milvuspb.ListAliasesResponse, error) {
+	return &milvuspb.ListAliasesResponse{}, m.Err
+}
+
 func (m *GrpcRootCoordClient) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowCollectionsResponse, error) {
 	return &milvuspb.ShowCollectionsResponse{}, m.Err
 }
