@@ -4309,6 +4309,7 @@ func closeTestServer(t *testing.T, svr *Server) {
 	assert.NoError(t, err)
 	err = svr.CleanMeta()
 	assert.NoError(t, err)
+	paramtable.Get().Reset(Params.CommonCfg.DataCoordTimeTick.Key)
 }
 
 func newTestServer2(t *testing.T, receiveCh chan any, opts ...Option) *Server {
