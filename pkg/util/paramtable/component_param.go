@@ -2128,6 +2128,7 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Doc:          "delegator delete buffer block size when using list delete buffer",
 		DefaultValue: "1048576", // 1MB
 	}
+	p.DeleteBufferBlockSize.Init(base.mgr)
 
 	p.IoPoolSize = ParamItem{
 		Key:          "queryNode.ioPoolSize",
