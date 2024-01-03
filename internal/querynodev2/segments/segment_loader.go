@@ -798,7 +798,6 @@ func (loader *segmentLoader) LoadDeltaLogs(ctx context.Context, segment Segment,
 	)
 	dCodec := storage.DeleteCodec{}
 	var blobs []*storage.Blob
-	var mtx sync.Mutex
 	var futures []*conc.Future[any]
 	for _, deltaLog := range deltaLogs {
 		for _, bLog := range deltaLog.GetBinlogs() {
@@ -817,18 +816,17 @@ func (loader *segmentLoader) LoadDeltaLogs(ctx context.Context, segment Segment,
 					Key:   bLog.GetLogPath(),
 					Value: value,
 				}
-				mtx.Lock()
-				blobs = append(blobs, blob)
-				mtx.Unlock()
-				return nil, nil
+				return blob, nil
 			})
 			futures = append(futures, future)
 		}
 	}
 	for _, future := range futures {
-		if _, err := future.Await(); err != nil {
+		blob, err := future.Await()
+		if err != nil {
 			return err
 		}
+		blobs = append(blobs, blob.(*storage.Blob))
 	}
 	if len(blobs) == 0 {
 		log.Info("there are no delta logs saved with segment, skip loading delete record")
