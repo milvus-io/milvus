@@ -19,7 +19,6 @@ package checkers
 import (
 	"context"
 	"sort"
-	"time"
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -154,12 +153,12 @@ func (b *BalanceChecker) Check(ctx context.Context) []task.Task {
 	replicasToBalance := b.replicasToBalance()
 	segmentPlans, channelPlans := b.balanceReplicas(replicasToBalance)
 
-	tasks := balance.CreateSegmentTasksFromPlans(ctx, b.ID(), Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond), segmentPlans)
+	tasks := balance.CreateSegmentTasksFromPlans(ctx, b.ID(), segmentPlans)
 	task.SetPriority(task.TaskPriorityLow, tasks...)
 	task.SetReason("segment unbalanced", tasks...)
 	ret = append(ret, tasks...)
 
-	tasks = balance.CreateChannelTasksFromPlans(ctx, b.ID(), Params.QueryCoordCfg.ChannelTaskTimeout.GetAsDuration(time.Millisecond), channelPlans)
+	tasks = balance.CreateChannelTasksFromPlans(ctx, b.ID(), channelPlans)
 	task.SetReason("channel unbalanced", tasks...)
 	ret = append(ret, tasks...)
 	return ret

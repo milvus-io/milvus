@@ -18,14 +18,12 @@ package checkers
 
 import (
 	"context"
-	"time"
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
-	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -161,7 +159,6 @@ func (c *IndexChecker) createSegmentUpdateTask(ctx context.Context, segment *met
 	action := task.NewSegmentActionWithScope(segment.Node, task.ActionTypeUpdate, segment.GetInsertChannel(), segment.GetID(), querypb.DataScope_Historical)
 	t, err := task.NewSegmentTask(
 		ctx,
-		params.Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond),
 		c.ID(),
 		segment.GetCollectionID(),
 		replica.GetID(),

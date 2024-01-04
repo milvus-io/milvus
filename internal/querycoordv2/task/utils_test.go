@@ -19,7 +19,6 @@ package task
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/suite"
 
@@ -92,7 +91,6 @@ func (s *UtilsSuite) TestPackLoadSegmentRequest() {
 	action := NewSegmentAction(1, ActionTypeGrow, "test-ch", 100)
 	task, err := NewSegmentTask(
 		ctx,
-		time.Second,
 		nil,
 		1,
 		10,
@@ -145,7 +143,6 @@ func (s *UtilsSuite) TestPackLoadSegmentRequestMmap() {
 	action := NewSegmentAction(1, ActionTypeGrow, "test-ch", 100)
 	task, err := NewSegmentTask(
 		ctx,
-		time.Second,
 		nil,
 		1,
 		10,

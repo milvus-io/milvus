@@ -19,7 +19,6 @@ package checkers
 import (
 	"context"
 	"sort"
-	"time"
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -28,7 +27,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
-	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
@@ -381,7 +379,7 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 		plans = append(plans, shardPlans...)
 	}
 
-	return balance.CreateSegmentTasksFromPlans(ctx, c.ID(), Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond), plans)
+	return balance.CreateSegmentTasksFromPlans(ctx, c.ID(), plans)
 }
 
 func (c *SegmentChecker) createSegmentReduceTasks(ctx context.Context, segments []*meta.Segment, replicaID int64, scope querypb.DataScope) []task.Task {
@@ -390,7 +388,6 @@ func (c *SegmentChecker) createSegmentReduceTasks(ctx context.Context, segments 
 		action := task.NewSegmentActionWithScope(s.Node, task.ActionTypeReduce, s.GetInsertChannel(), s.GetID(), scope)
 		task, err := task.NewSegmentTask(
 			ctx,
-			Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond),
 			c.ID(),
 			s.GetCollectionID(),
 			replicaID,

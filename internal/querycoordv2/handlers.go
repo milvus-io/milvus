@@ -141,7 +141,6 @@ func (s *Server) balanceSegments(ctx context.Context, req *querypb.LoadBalanceRe
 			zap.Int64("segmentID", plan.Segment.GetID()),
 		)
 		task, err := task.NewSegmentTask(ctx,
-			Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond),
 			task.WrapIDSource(req.GetBase().GetMsgID()),
 			req.GetCollectionID(),
 			replica.GetID(),
