@@ -254,7 +254,6 @@ func (t *SyncTask) processStatsBlob() {
 
 func (t *SyncTask) processDeltaBlob() {
 	if t.deltaBlob != nil {
-
 		value := t.deltaBlob.GetValue()
 		data := &datapb.Binlog{}
 
