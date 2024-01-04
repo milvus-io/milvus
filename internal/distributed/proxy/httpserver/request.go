@@ -72,3 +72,22 @@ type SearchReq struct {
 	Vector         []float32          `json:"vector"`
 	Params         map[string]float64 `json:"params"`
 }
+
+type ImportReq struct {
+	DbName         string            `json:"dbName"`
+	CollectionName string            `json:"collectionName" validate:"required"`
+	PartitionName  string            `json:"partitionName"`
+	Files          [][]string        `json:"files"`
+	Options        map[string]string `json:"options"`
+	ClusteringInfo []byte            `json:"clusteringInfo"`
+}
+
+type GetImportProgressReq struct {
+	DbName    string `json:"dbName"`
+	RequestID string `json:"requestID" validate:"required"`
+}
+
+type ListImportsReq struct {
+	DbName         string `json:"dbName"`
+	CollectionName string `json:"collectionName"`
+}

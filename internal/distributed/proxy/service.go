@@ -1173,3 +1173,15 @@ func (s *Server) AllocTimestamp(ctx context.Context, req *milvuspb.AllocTimestam
 func (s *Server) ReplicateMessage(ctx context.Context, req *milvuspb.ReplicateMessageRequest) (*milvuspb.ReplicateMessageResponse, error) {
 	return s.proxy.ReplicateMessage(ctx, req)
 }
+
+func (s *Server) ImportV2(ctx context.Context, req *internalpb.ImportRequest) (*internalpb.ImportResponse, error) {
+	return s.proxy.ImportV2(ctx, req)
+}
+
+func (s *Server) GetImportProgress(ctx context.Context, req *internalpb.GetImportProgressRequest) (*internalpb.GetImportProgressResponse, error) {
+	return s.proxy.GetImportProgress(ctx, req)
+}
+
+func (s *Server) ListImports(ctx context.Context, req *internalpb.ListImportsRequest) (*internalpb.ListImportsResponse, error) {
+	return s.proxy.ListImports(ctx, req)
+}

@@ -256,15 +256,9 @@ enum ImportState {
   Completed = 4;
 }
 
-message ColumnBasedFile {
-  repeated string files = 1;
-}
-
 message ImportFile {
-  oneof file {
-    string row_based_file = 1;
-    ColumnBasedFile column_based_file = 2;
-  }
+  // one row-based file or multiple column-based files
+  repeated string paths = 1;
 }
 
 message ImportRequest {
@@ -282,7 +276,8 @@ message ImportResponse {
 }
 
 message GetImportProgressRequest {
-  string requestID = 1;
+  string db_name = 1;
+  string requestID = 2;
 }
 
 message GetImportProgressResponse {
@@ -293,13 +288,14 @@ message GetImportProgressResponse {
 }
 
 message ListImportsRequest {
-
+  string db_name = 1;
+  string collection_name = 2;
 }
 
 message ListImportsResponse {
   common.Status status = 1;
   repeated string requestIDs = 2;
-  repeated ImportState state = 3;
-  repeated string reason = 4;
-  repeated int64 progress = 5;
+  repeated ImportState states = 3;
+  repeated string reasons = 4;
+  repeated int64 progresses = 5;
 }

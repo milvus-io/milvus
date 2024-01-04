@@ -2,6 +2,7 @@ from datetime import datetime
 import time
 from pymilvus import utility
 import sys
+import requests, uuid
 
 sys.path.append("..")
 from check.func_check import ResponseChecker
@@ -13,6 +14,43 @@ from utils.util_log import test_log as log
 TIMEOUT = 20
 
 
+def vector_bulkinsert(url, payload):
+    url = f'http://{url}/v1/vector/bulkinsert'
+    headers = {
+        'Content-Type': 'application/json',
+        'RequestId': str(uuid.uuid1())
+    }
+    response = requests.post(url, headers=headers, json=payload, verify=False)
+    res = response.json()
+    log.info(f"vector_bulkinsert response: {res}")
+    assert res['code'] == 200
+    return res['requestID']
+
+
+def vector_bulkinsert_describe(url, payload):
+    url = f'http://{url}/v1/vector/bulkinsert/describe'
+    headers = {
+        'Content-Type': 'application/json',
+        'RequestId': str(uuid.uuid1())
+    }
+    response = requests.get(url, headers=headers, json=payload, verify=False)
+    res = response.json()
+    log.info(f"vector_bulkinsert_describe response: {res}, code={res['code']}")
+    assert res['code'] == 200
+    return res['state'], res['progress']
+
+
+def vector_bulkinsert_list(url, payload):
+    url = f'http://{url}/v1/vector/bulkinsert/list'
+    headers = {
+        'Content-Type': 'application/json',
+        'RequestId': str(uuid.uuid1())
+    }
+    response = requests.get(url, headers=headers, json=payload, verify=False)
+    res = response.json()
+    assert res['code'] == 200
+
+
 class ApiUtilityWrapper:
     """ Method of encapsulating utility files """
 
@@ -22,13 +60,20 @@ class ApiUtilityWrapper:
     def do_bulk_insert(self, collection_name, files="", partition_name=None, timeout=None,
                        using="default", check_task=None, check_items=None, **kwargs):
         log.info(f"files to load: {files}")
-        func_name = sys._getframe().f_code.co_name
-        res, is_succ = api_request([self.ut.do_bulk_insert, collection_name,
-                                    files, partition_name, timeout, using], **kwargs)
-        check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ,
-                                       collection_name=collection_name, using=using).run()
+        # func_name = sys._getframe().f_code.co_name
+        payload = {
+            "dbName": None,
+            "collectionName": collection_name,
+            "partitionName": partition_name,
+            "files": [files],
+            "options": None,
+            "clusteringInfo": None,
+        }
+        res = vector_bulkinsert("localhost:19530", payload)
+        # check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ,
+        #                                collection_name=collection_name, using=using).run()
         time.sleep(1)
-        return res, check_result
+        return res, None
 
     # def do_bulk_insert(self, collection_name, files="", partition_name=None, timeout=None,
     #                    using="default", check_task=None, check_items=None, **kwargs):
@@ -112,16 +157,24 @@ class ApiUtilityWrapper:
         else:
             task_timeout = TIMEOUT
         log.info(f"wait bulk load timeout is {task_timeout}")
+        count = 20
         for task_id in task_ids:
             while True:
-                state, progress = utility.get_bulk_insert_state(task_id, task_timeout, using, **kwargs)
-                if state == 4 and progress == 100:
+                payload = {
+                    "dbName": None,
+                    "requestID": task_id,
+                }
+                state, progress = vector_bulkinsert_describe("localhost:19530", payload)
+                if state == "Completed" and progress == 100:
                     print(f"wait for bulk load tasks completed successfully")
                     break
-                if state == 3:
+                if state == "Failed":
                     raise Exception(str(state))
                 time.sleep(2)
-                print(f"waiting for bulk load tasks... state={state}, progress={progress}")
+                count = count - 1
+                if count <= 0:
+                    raise Exception(str("timeout"))
+                log.warn(f"waiting for bulk load tasks... state={state}, progress={progress}")
         return True, 4
 
     # def wait_for_bulk_insert_tasks_completed(self, task_ids, target_state=BulkInsertState.ImportCompleted,
@@ -489,19 +542,22 @@ class ApiUtilityWrapper:
     def role_name(self):
         return self.role.name
 
-    def role_grant(self, object: str, object_name: str, privilege: str, db_name: str = "default", check_task=None, check_items=None, **kwargs):
+    def role_grant(self, object: str, object_name: str, privilege: str, db_name: str = "default", check_task=None,
+                   check_items=None, **kwargs):
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([self.role.grant, object, object_name, privilege, db_name], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
         return res, check_result
 
-    def role_revoke(self, object: str, object_name: str, privilege: str, db_name: str = "default", check_task=None, check_items=None, **kwargs):
+    def role_revoke(self, object: str, object_name: str, privilege: str, db_name: str = "default", check_task=None,
+                    check_items=None, **kwargs):
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([self.role.revoke, object, object_name, privilege, db_name], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
         return res, check_result
 
-    def role_list_grant(self, object: str, object_name: str, db_name: str = "default", check_task=None, check_items=None, **kwargs):
+    def role_list_grant(self, object: str, object_name: str, db_name: str = "default", check_task=None,
+                        check_items=None, **kwargs):
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([self.role.list_grant, object, object_name, db_name], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()

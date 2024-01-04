@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -1800,4 +1801,76 @@ func TestInterceptor(t *testing.T) {
 	_, _ = h.executeRestRequestInterceptor(context.Background(), nil, &milvuspb.CreateCollectionRequest{}, func(reqCtx context.Context, req any) (any, error) {
 		return &commonpb.Status{}, nil
 	})
+}
+
+func TestImport(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(proxy.Params.HTTPCfg.AcceptTypeAllowInt64.Key, "true")
+	testCases := []testCase{}
+
+	mp2 := mocks.NewMockProxy(t)
+	mp2.EXPECT().ImportV2(mock.Anything, mock.Anything).Return(nil, ErrDefault).Once()
+	testCases = append(testCases, testCase{
+		name:         "import fail",
+		mp:           mp2,
+		exceptCode:   200,
+		expectedBody: PrintErr(ErrDefault),
+	})
+
+	err := merr.WrapErrCollectionNotFound(DefaultCollectionName)
+	mp3 := mocks.NewMockProxy(t)
+	mp3.EXPECT().ImportV2(mock.Anything, mock.Anything).Return(&internalpb.ImportResponse{
+		Status: merr.Status(err),
+	}, nil).Once()
+	testCases = append(testCases, testCase{
+		name:         "import fail",
+		mp:           mp3,
+		exceptCode:   200,
+		expectedBody: PrintErr(err),
+	})
+
+	mp4 := mocks.NewMockProxy(t)
+	mp4.EXPECT().ImportV2(mock.Anything, mock.Anything).Return(&internalpb.ImportResponse{
+		Status:    &StatusSuccess,
+		RequestID: "1000",
+	}, nil).Once()
+	testCases = append(testCases, testCase{
+		name:         "import success",
+		mp:           mp4,
+		exceptCode:   200,
+		expectedBody: "{\"code\":200,\"requestID\":\"1000\"}",
+	})
+
+	files := [][]string{
+		{
+			"dummy_path/1.json",
+		},
+		{
+			"dummy_path/a.npy",
+			"dummy_path/b.npy",
+		},
+		{
+			"dummy_path/x.parquet",
+		},
+	}
+	for _, tt := range testCases {
+		t.Run(tt.name, func(t *testing.T) {
+			testEngine := initHTTPServer(tt.mp, true)
+			data, _ := json.Marshal(map[string]interface{}{
+				HTTPCollectionName: DefaultCollectionName,
+				"files":            files,
+			})
+			bodyReader := bytes.NewReader(data)
+			req := httptest.NewRequest(http.MethodPost, versional(VectorImportPath), bodyReader)
+			req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+			assert.Equal(t, tt.exceptCode, w.Code)
+			if tt.expectedErr != nil {
+				assert.Equal(t, true, CheckErrCode(w.Body.String(), tt.expectedErr))
+			} else {
+				assert.Equal(t, tt.expectedBody, w.Body.String())
+			}
+		})
+	}
 }

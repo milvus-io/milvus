@@ -49,38 +49,29 @@ func NewReader(cm storage.ChunkManager,
 		if err != nil {
 			return nil, err
 		}
-		paths := importFile.GetColumnBasedFile().GetFiles()
+		paths := importFile.GetPaths()
 		return binlog.NewReader(cm, schema, paths, tsStart, tsEnd)
 	}
 
-	fileType, paths, err := GetFileTypeAndPaths(importFile)
+	fileType, err := GetFileType(importFile)
 	if err != nil {
 		return nil, err
 	}
 	switch fileType {
 	case JSON:
-		reader, err := cm.Reader(context.Background(), paths[0]) // TODO: dyh, resolve context
+		reader, err := cm.Reader(context.Background(), importFile.GetPaths()[0]) // TODO: dyh, resolve context
 		if err != nil {
-			return nil, WrapReadFileError(paths[0], err)
+			return nil, WrapReadFileError(importFile.GetPaths()[0], err)
 		}
-		//reader2, err := cm.Reader(context.Background(), paths[0])
-		//if err != nil {
-		//	return nil, WrapReadFileError(paths[0], err)
-		//}
-		//bytesss, err := io.ReadAll(reader2)
-		//if err != nil {
-		//	panic(err)
-		//}
-		//fmt.Println(">>>>>>>>>>>>>>>>>>>>>>>", string(bytesss))
 		return json.NewReader(reader, schema)
 	case Numpy:
-		readers, err := CreateReaders(paths, cm, schema)
+		readers, err := CreateReaders(importFile.GetPaths(), cm, schema)
 		if err != nil {
 			return nil, err
 		}
 		return numpy.NewReader(schema, readers)
 	case Parquet:
-		cmReader, err := cm.Reader(context.Background(), paths[0]) // TODO: dyh, resolve context
+		cmReader, err := cm.Reader(context.Background(), importFile.GetPaths()[0]) // TODO: dyh, resolve context
 		if err != nil {
 			return nil, err
 		}

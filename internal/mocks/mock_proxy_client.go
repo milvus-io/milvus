@@ -111,9 +111,9 @@ type MockProxyClient_GetComponentStates_Call struct {
 }
 
 // GetComponentStates is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.GetComponentStatesRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.GetComponentStatesRequest
+//  - opts ...grpc.CallOption
 func (_e *MockProxyClient_Expecter) GetComponentStates(ctx interface{}, in interface{}, opts ...interface{}) *MockProxyClient_GetComponentStates_Call {
 	return &MockProxyClient_GetComponentStates_Call{Call: _e.mock.On("GetComponentStates",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -181,9 +181,9 @@ type MockProxyClient_GetDdChannel_Call struct {
 }
 
 // GetDdChannel is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *internalpb.GetDdChannelRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *internalpb.GetDdChannelRequest
+//  - opts ...grpc.CallOption
 func (_e *MockProxyClient_Expecter) GetDdChannel(ctx interface{}, in interface{}, opts ...interface{}) *MockProxyClient_GetDdChannel_Call {
 	return &MockProxyClient_GetDdChannel_Call{Call: _e.mock.On("GetDdChannel",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -208,6 +208,76 @@ func (_c *MockProxyClient_GetDdChannel_Call) Return(_a0 *milvuspb.StringResponse
 }
 
 func (_c *MockProxyClient_GetDdChannel_Call) RunAndReturn(run func(context.Context, *internalpb.GetDdChannelRequest, ...grpc.CallOption) (*milvuspb.StringResponse, error)) *MockProxyClient_GetDdChannel_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetImportProgress provides a mock function with given fields: ctx, in, opts
+func (_m *MockProxyClient) GetImportProgress(ctx context.Context, in *internalpb.GetImportProgressRequest, opts ...grpc.CallOption) (*internalpb.GetImportProgressResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	var r0 *internalpb.GetImportProgressResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.GetImportProgressRequest, ...grpc.CallOption) (*internalpb.GetImportProgressResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.GetImportProgressRequest, ...grpc.CallOption) *internalpb.GetImportProgressResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*internalpb.GetImportProgressResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *internalpb.GetImportProgressRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxyClient_GetImportProgress_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetImportProgress'
+type MockProxyClient_GetImportProgress_Call struct {
+	*mock.Call
+}
+
+// GetImportProgress is a helper method to define mock.On call
+//  - ctx context.Context
+//  - in *internalpb.GetImportProgressRequest
+//  - opts ...grpc.CallOption
+func (_e *MockProxyClient_Expecter) GetImportProgress(ctx interface{}, in interface{}, opts ...interface{}) *MockProxyClient_GetImportProgress_Call {
+	return &MockProxyClient_GetImportProgress_Call{Call: _e.mock.On("GetImportProgress",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockProxyClient_GetImportProgress_Call) Run(run func(ctx context.Context, in *internalpb.GetImportProgressRequest, opts ...grpc.CallOption)) *MockProxyClient_GetImportProgress_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*internalpb.GetImportProgressRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockProxyClient_GetImportProgress_Call) Return(_a0 *internalpb.GetImportProgressResponse, _a1 error) *MockProxyClient_GetImportProgress_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxyClient_GetImportProgress_Call) RunAndReturn(run func(context.Context, *internalpb.GetImportProgressRequest, ...grpc.CallOption) (*internalpb.GetImportProgressResponse, error)) *MockProxyClient_GetImportProgress_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -251,9 +321,9 @@ type MockProxyClient_GetProxyMetrics_Call struct {
 }
 
 // GetProxyMetrics is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.GetMetricsRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.GetMetricsRequest
+//  - opts ...grpc.CallOption
 func (_e *MockProxyClient_Expecter) GetProxyMetrics(ctx interface{}, in interface{}, opts ...interface{}) *MockProxyClient_GetProxyMetrics_Call {
 	return &MockProxyClient_GetProxyMetrics_Call{Call: _e.mock.On("GetProxyMetrics",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -321,9 +391,9 @@ type MockProxyClient_GetStatisticsChannel_Call struct {
 }
 
 // GetStatisticsChannel is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *internalpb.GetStatisticsChannelRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *internalpb.GetStatisticsChannelRequest
+//  - opts ...grpc.CallOption
 func (_e *MockProxyClient_Expecter) GetStatisticsChannel(ctx interface{}, in interface{}, opts ...interface{}) *MockProxyClient_GetStatisticsChannel_Call {
 	return &MockProxyClient_GetStatisticsChannel_Call{Call: _e.mock.On("GetStatisticsChannel",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -348,6 +418,76 @@ func (_c *MockProxyClient_GetStatisticsChannel_Call) Return(_a0 *milvuspb.String
 }
 
 func (_c *MockProxyClient_GetStatisticsChannel_Call) RunAndReturn(run func(context.Context, *internalpb.GetStatisticsChannelRequest, ...grpc.CallOption) (*milvuspb.StringResponse, error)) *MockProxyClient_GetStatisticsChannel_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ImportV2 provides a mock function with given fields: ctx, in, opts
+func (_m *MockProxyClient) ImportV2(ctx context.Context, in *internalpb.ImportRequest, opts ...grpc.CallOption) (*internalpb.ImportResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	var r0 *internalpb.ImportResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.ImportRequest, ...grpc.CallOption) (*internalpb.ImportResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.ImportRequest, ...grpc.CallOption) *internalpb.ImportResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*internalpb.ImportResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *internalpb.ImportRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxyClient_ImportV2_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ImportV2'
+type MockProxyClient_ImportV2_Call struct {
+	*mock.Call
+}
+
+// ImportV2 is a helper method to define mock.On call
+//  - ctx context.Context
+//  - in *internalpb.ImportRequest
+//  - opts ...grpc.CallOption
+func (_e *MockProxyClient_Expecter) ImportV2(ctx interface{}, in interface{}, opts ...interface{}) *MockProxyClient_ImportV2_Call {
+	return &MockProxyClient_ImportV2_Call{Call: _e.mock.On("ImportV2",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockProxyClient_ImportV2_Call) Run(run func(ctx context.Context, in *internalpb.ImportRequest, opts ...grpc.CallOption)) *MockProxyClient_ImportV2_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*internalpb.ImportRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockProxyClient_ImportV2_Call) Return(_a0 *internalpb.ImportResponse, _a1 error) *MockProxyClient_ImportV2_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxyClient_ImportV2_Call) RunAndReturn(run func(context.Context, *internalpb.ImportRequest, ...grpc.CallOption) (*internalpb.ImportResponse, error)) *MockProxyClient_ImportV2_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -391,9 +531,9 @@ type MockProxyClient_InvalidateCollectionMetaCache_Call struct {
 }
 
 // InvalidateCollectionMetaCache is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *proxypb.InvalidateCollMetaCacheRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *proxypb.InvalidateCollMetaCacheRequest
+//  - opts ...grpc.CallOption
 func (_e *MockProxyClient_Expecter) InvalidateCollectionMetaCache(ctx interface{}, in interface{}, opts ...interface{}) *MockProxyClient_InvalidateCollectionMetaCache_Call {
 	return &MockProxyClient_InvalidateCollectionMetaCache_Call{Call: _e.mock.On("InvalidateCollectionMetaCache",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -461,9 +601,9 @@ type MockProxyClient_InvalidateCredentialCache_Call struct {
 }
 
 // InvalidateCredentialCache is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *proxypb.InvalidateCredCacheRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *proxypb.InvalidateCredCacheRequest
+//  - opts ...grpc.CallOption
 func (_e *MockProxyClient_Expecter) InvalidateCredentialCache(ctx interface{}, in interface{}, opts ...interface{}) *MockProxyClient_InvalidateCredentialCache_Call {
 	return &MockProxyClient_InvalidateCredentialCache_Call{Call: _e.mock.On("InvalidateCredentialCache",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -531,9 +671,9 @@ type MockProxyClient_ListClientInfos_Call struct {
 }
 
 // ListClientInfos is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *proxypb.ListClientInfosRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *proxypb.ListClientInfosRequest
+//  - opts ...grpc.CallOption
 func (_e *MockProxyClient_Expecter) ListClientInfos(ctx interface{}, in interface{}, opts ...interface{}) *MockProxyClient_ListClientInfos_Call {
 	return &MockProxyClient_ListClientInfos_Call{Call: _e.mock.On("ListClientInfos",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -558,6 +698,76 @@ func (_c *MockProxyClient_ListClientInfos_Call) Return(_a0 *proxypb.ListClientIn
 }
 
 func (_c *MockProxyClient_ListClientInfos_Call) RunAndReturn(run func(context.Context, *proxypb.ListClientInfosRequest, ...grpc.CallOption) (*proxypb.ListClientInfosResponse, error)) *MockProxyClient_ListClientInfos_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListImports provides a mock function with given fields: ctx, in, opts
+func (_m *MockProxyClient) ListImports(ctx context.Context, in *internalpb.ListImportsRequest, opts ...grpc.CallOption) (*internalpb.ListImportsResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	var r0 *internalpb.ListImportsResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.ListImportsRequest, ...grpc.CallOption) (*internalpb.ListImportsResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.ListImportsRequest, ...grpc.CallOption) *internalpb.ListImportsResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*internalpb.ListImportsResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *internalpb.ListImportsRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxyClient_ListImports_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListImports'
+type MockProxyClient_ListImports_Call struct {
+	*mock.Call
+}
+
+// ListImports is a helper method to define mock.On call
+//  - ctx context.Context
+//  - in *internalpb.ListImportsRequest
+//  - opts ...grpc.CallOption
+func (_e *MockProxyClient_Expecter) ListImports(ctx interface{}, in interface{}, opts ...interface{}) *MockProxyClient_ListImports_Call {
+	return &MockProxyClient_ListImports_Call{Call: _e.mock.On("ListImports",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockProxyClient_ListImports_Call) Run(run func(ctx context.Context, in *internalpb.ListImportsRequest, opts ...grpc.CallOption)) *MockProxyClient_ListImports_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*internalpb.ListImportsRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockProxyClient_ListImports_Call) Return(_a0 *internalpb.ListImportsResponse, _a1 error) *MockProxyClient_ListImports_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxyClient_ListImports_Call) RunAndReturn(run func(context.Context, *internalpb.ListImportsRequest, ...grpc.CallOption) (*internalpb.ListImportsResponse, error)) *MockProxyClient_ListImports_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -601,9 +811,9 @@ type MockProxyClient_RefreshPolicyInfoCache_Call struct {
 }
 
 // RefreshPolicyInfoCache is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *proxypb.RefreshPolicyInfoCacheRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *proxypb.RefreshPolicyInfoCacheRequest
+//  - opts ...grpc.CallOption
 func (_e *MockProxyClient_Expecter) RefreshPolicyInfoCache(ctx interface{}, in interface{}, opts ...interface{}) *MockProxyClient_RefreshPolicyInfoCache_Call {
 	return &MockProxyClient_RefreshPolicyInfoCache_Call{Call: _e.mock.On("RefreshPolicyInfoCache",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -671,9 +881,9 @@ type MockProxyClient_SetRates_Call struct {
 }
 
 // SetRates is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *proxypb.SetRatesRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *proxypb.SetRatesRequest
+//  - opts ...grpc.CallOption
 func (_e *MockProxyClient_Expecter) SetRates(ctx interface{}, in interface{}, opts ...interface{}) *MockProxyClient_SetRates_Call {
 	return &MockProxyClient_SetRates_Call{Call: _e.mock.On("SetRates",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -741,9 +951,9 @@ type MockProxyClient_UpdateCredentialCache_Call struct {
 }
 
 // UpdateCredentialCache is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *proxypb.UpdateCredCacheRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *proxypb.UpdateCredCacheRequest
+//  - opts ...grpc.CallOption
 func (_e *MockProxyClient_Expecter) UpdateCredentialCache(ctx interface{}, in interface{}, opts ...interface{}) *MockProxyClient_UpdateCredentialCache_Call {
 	return &MockProxyClient_UpdateCredentialCache_Call{Call: _e.mock.On("UpdateCredentialCache",
 		append([]interface{}{ctx, in}, opts...)...)}

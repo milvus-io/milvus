@@ -197,3 +197,21 @@ func (c *Client) GetDdChannel(ctx context.Context, req *internalpb.GetDdChannelR
 		return client.GetDdChannel(ctx, req)
 	})
 }
+
+func (c *Client) ImportV2(ctx context.Context, req *internalpb.ImportRequest, opts ...grpc.CallOption) (*internalpb.ImportResponse, error) {
+	return wrapGrpcCall(ctx, c, func(client proxypb.ProxyClient) (*internalpb.ImportResponse, error) {
+		return client.ImportV2(ctx, req)
+	})
+}
+
+func (c *Client) GetImportProgress(ctx context.Context, req *internalpb.GetImportProgressRequest, opts ...grpc.CallOption) (*internalpb.GetImportProgressResponse, error) {
+	return wrapGrpcCall(ctx, c, func(client proxypb.ProxyClient) (*internalpb.GetImportProgressResponse, error) {
+		return client.GetImportProgress(ctx, req)
+	})
+}
+
+func (c *Client) ListImports(ctx context.Context, req *internalpb.ListImportsRequest, opts ...grpc.CallOption) (*internalpb.ListImportsResponse, error) {
+	return wrapGrpcCall(ctx, c, func(client proxypb.ProxyClient) (*internalpb.ListImportsResponse, error) {
+		return client.ListImports(ctx, req)
+	})
+}

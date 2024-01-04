@@ -51,45 +51,36 @@ func (f FileType) String() string {
 	return FileTypeName[int(f)]
 }
 
-func WrapIllegalFileTypeError(file string, format string) error {
-	return merr.WrapErrImportFailed(fmt.Sprintf("unrecognized file '%s' type for %s import", file, format))
-}
-
 func WrapReadFileError(file string, err error) error {
 	return merr.WrapErrImportFailed(fmt.Sprintf("failed to read the file '%s', error: %s", file, err.Error()))
 }
 
-func GetFileTypeAndPaths(file *internalpb.ImportFile) (FileType, []string, error) {
-	switch file.GetFile().(type) {
-	case *internalpb.ImportFile_RowBasedFile:
-		filePath := file.GetRowBasedFile()
-		if filepath.Ext(filePath) != JSONFileExt {
-			return 0, nil, WrapIllegalFileTypeError(filePath, "row-based")
-		}
-		return JSON, []string{filePath}, nil
-	case *internalpb.ImportFile_ColumnBasedFile:
-		paths := file.GetColumnBasedFile().GetFiles()
-		if len(paths) == 0 {
-			return 0, nil, merr.WrapErrImportFailed("no file to import")
-		}
-		ext := filepath.Ext(paths[0])
-		for i := 1; i < len(paths); i++ {
-			if filepath.Ext(paths[i]) != ext {
-				return 0, nil, merr.WrapErrImportFailed(
-					fmt.Sprintf("inconsistency in file types, (%s) vs (%s)", paths[0], paths[i]))
-			}
-		}
-		if ext == NumpyFileExt {
-			return Numpy, paths, nil
-		} else if ext == ParquetFileExt {
-			if len(paths) != 1 {
-				return 0, nil, merr.WrapErrImportFailed("only 1 file is allowed for parquet importing")
-			}
-			return Parquet, paths, nil
-		}
-		return 0, nil, WrapIllegalFileTypeError(paths[0], "column-based")
+func GetFileType(file *internalpb.ImportFile) (FileType, error) {
+	if len(file.GetPaths()) == 0 {
+		return 0, merr.WrapErrImportFailed("no file to import")
 	}
-	return 0, nil, merr.WrapErrImportFailed("unexpect file type when import")
+	exts := lo.Map(file.GetPaths(), func(path string, _ int) string {
+		return filepath.Ext(path)
+	})
+
+	ext := exts[0]
+	for i := 1; i < len(exts); i++ {
+		if exts[i] != ext {
+			return 0, merr.WrapErrImportFailed(
+				fmt.Sprintf("inconsistency in file types, (%s) vs (%s)",
+					file.GetPaths()[0], file.GetPaths()[i]))
+		}
+	}
+
+	switch ext {
+	case JSONFileExt:
+		return JSON, nil
+	case NumpyFileExt:
+		return Numpy, nil
+	case ParquetFileExt:
+		return Parquet, nil
+	}
+	return 0, merr.WrapErrImportFailed(fmt.Sprintf("unexpect file type, files=%v", file.GetPaths()))
 }
 
 func CreateReaders(paths []string, // TODO: dyh, move it to numpy
@@ -107,7 +98,8 @@ func CreateReaders(paths []string, // TODO: dyh, move it to numpy
 			continue
 		}
 		if _, ok := nameToPath[field.GetName()]; !ok {
-			return nil, merr.WrapErrImportFailed(fmt.Sprintf("no file for field: %s, files: %v", field.GetName(), lo.Values(nameToPath)))
+			return nil, merr.WrapErrImportFailed(
+				fmt.Sprintf("no file for field: %s, files: %v", field.GetName(), lo.Values(nameToPath)))
 		}
 		reader, err := cm.Reader(context.Background(), nameToPath[field.GetName()])
 		if err != nil {

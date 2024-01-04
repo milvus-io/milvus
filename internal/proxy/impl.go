@@ -5258,6 +5258,11 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &internalpb.ImportResponse{Status: merr.Status(err)}, nil
 	}
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.ProxyRole),
+	)
+	method := "ImportV2"
+	log.Info(rpcReceived(method))
 	resp := &internalpb.ImportResponse{
 		Status: merr.Success(),
 	}
@@ -5303,17 +5308,13 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 		}
 		partitionIDs = []UniqueID{partitionID}
 	}
-	if len(req.GetFiles()) == 0 {
-		resp.Status = merr.Status(merr.WrapErrImportFailed("import request is empty"))
+	req.Files = lo.Filter(req.GetFiles(), func(file *internalpb.ImportFile, _ int) bool {
+		return len(file.GetPaths()) > 0
+	})
+	if len(req.Files) == 0 {
+		resp.Status = merr.Status(merr.WrapErrImportFailed("import request is empty, no file to import"))
 		return resp, nil
 	}
-	// TODO: check if files are empty
-	//for _, file := range req.GetFiles() {
-	//	switch file.GetFile() {
-	//	case *internalpb.ImportFile_RowBasedFile:
-	//
-	//	}
-	//}
 	importRequest := &datapb.ImportRequestInternal{
 		CollectionID: collectionID,
 		PartitionIDs: partitionIDs,
