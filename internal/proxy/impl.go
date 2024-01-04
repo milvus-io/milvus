@@ -5282,7 +5282,7 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 		return resp, nil
 	}
 
-	hasPartitionKey := typeutil.HasPartitionKey(schema)
+	hasPartitionKey := typeutil.HasPartitionKey(schema.CollectionSchema)
 	if req.GetPartitionName() != "" && hasPartitionKey {
 		resp.Status = merr.Status(merr.WrapErrImportFailed("not allow to set partition name for collection with partition key"))
 		return resp, nil
@@ -5319,7 +5319,7 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 		CollectionID: collectionID,
 		PartitionIDs: partitionIDs,
 		ChannelNames: channels,
-		Schema:       schema,
+		Schema:       schema.CollectionSchema,
 		Files:        req.GetFiles(),
 		Options:      req.GetOptions(),
 	}

@@ -1026,6 +1026,61 @@ func (_c *MockDataCoord_GetFlushedSegments_Call) RunAndReturn(run func(context.C
 	return _c
 }
 
+// GetImportProgress provides a mock function with given fields: _a0, _a1
+func (_m *MockDataCoord) GetImportProgress(_a0 context.Context, _a1 *internalpb.GetImportProgressRequest) (*internalpb.GetImportProgressResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *internalpb.GetImportProgressResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.GetImportProgressRequest) (*internalpb.GetImportProgressResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.GetImportProgressRequest) *internalpb.GetImportProgressResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*internalpb.GetImportProgressResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *internalpb.GetImportProgressRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockDataCoord_GetImportProgress_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetImportProgress'
+type MockDataCoord_GetImportProgress_Call struct {
+	*mock.Call
+}
+
+// GetImportProgress is a helper method to define mock.On call
+//  - _a0 context.Context
+//  - _a1 *internalpb.GetImportProgressRequest
+func (_e *MockDataCoord_Expecter) GetImportProgress(_a0 interface{}, _a1 interface{}) *MockDataCoord_GetImportProgress_Call {
+	return &MockDataCoord_GetImportProgress_Call{Call: _e.mock.On("GetImportProgress", _a0, _a1)}
+}
+
+func (_c *MockDataCoord_GetImportProgress_Call) Run(run func(_a0 context.Context, _a1 *internalpb.GetImportProgressRequest)) *MockDataCoord_GetImportProgress_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*internalpb.GetImportProgressRequest))
+	})
+	return _c
+}
+
+func (_c *MockDataCoord_GetImportProgress_Call) Return(_a0 *internalpb.GetImportProgressResponse, _a1 error) *MockDataCoord_GetImportProgress_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDataCoord_GetImportProgress_Call) RunAndReturn(run func(context.Context, *internalpb.GetImportProgressRequest) (*internalpb.GetImportProgressResponse, error)) *MockDataCoord_GetImportProgress_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetIndexBuildProgress provides a mock function with given fields: _a0, _a1
 func (_m *MockDataCoord) GetIndexBuildProgress(_a0 context.Context, _a1 *indexpb.GetIndexBuildProgressRequest) (*indexpb.GetIndexBuildProgressResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -1961,6 +2016,61 @@ func (_c *MockDataCoord_Import_Call) RunAndReturn(run func(context.Context, *dat
 	return _c
 }
 
+// ImportV2 provides a mock function with given fields: _a0, _a1
+func (_m *MockDataCoord) ImportV2(_a0 context.Context, _a1 *datapb.ImportRequestInternal) (*internalpb.ImportResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *internalpb.ImportResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.ImportRequestInternal) (*internalpb.ImportResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.ImportRequestInternal) *internalpb.ImportResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*internalpb.ImportResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.ImportRequestInternal) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockDataCoord_ImportV2_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ImportV2'
+type MockDataCoord_ImportV2_Call struct {
+	*mock.Call
+}
+
+// ImportV2 is a helper method to define mock.On call
+//  - _a0 context.Context
+//  - _a1 *datapb.ImportRequestInternal
+func (_e *MockDataCoord_Expecter) ImportV2(_a0 interface{}, _a1 interface{}) *MockDataCoord_ImportV2_Call {
+	return &MockDataCoord_ImportV2_Call{Call: _e.mock.On("ImportV2", _a0, _a1)}
+}
+
+func (_c *MockDataCoord_ImportV2_Call) Run(run func(_a0 context.Context, _a1 *datapb.ImportRequestInternal)) *MockDataCoord_ImportV2_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.ImportRequestInternal))
+	})
+	return _c
+}
+
+func (_c *MockDataCoord_ImportV2_Call) Return(_a0 *internalpb.ImportResponse, _a1 error) *MockDataCoord_ImportV2_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDataCoord_ImportV2_Call) RunAndReturn(run func(context.Context, *datapb.ImportRequestInternal) (*internalpb.ImportResponse, error)) *MockDataCoord_ImportV2_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Init provides a mock function with given fields:
 func (_m *MockDataCoord) Init() error {
 	ret := _m.Called()
@@ -1998,6 +2108,61 @@ func (_c *MockDataCoord_Init_Call) Return(_a0 error) *MockDataCoord_Init_Call {
 }
 
 func (_c *MockDataCoord_Init_Call) RunAndReturn(run func() error) *MockDataCoord_Init_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListImports provides a mock function with given fields: _a0, _a1
+func (_m *MockDataCoord) ListImports(_a0 context.Context, _a1 *internalpb.ListImportsRequest) (*internalpb.ListImportsResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *internalpb.ListImportsResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.ListImportsRequest) (*internalpb.ListImportsResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.ListImportsRequest) *internalpb.ListImportsResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*internalpb.ListImportsResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *internalpb.ListImportsRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockDataCoord_ListImports_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListImports'
+type MockDataCoord_ListImports_Call struct {
+	*mock.Call
+}
+
+// ListImports is a helper method to define mock.On call
+//  - _a0 context.Context
+//  - _a1 *internalpb.ListImportsRequest
+func (_e *MockDataCoord_Expecter) ListImports(_a0 interface{}, _a1 interface{}) *MockDataCoord_ListImports_Call {
+	return &MockDataCoord_ListImports_Call{Call: _e.mock.On("ListImports", _a0, _a1)}
+}
+
+func (_c *MockDataCoord_ListImports_Call) Run(run func(_a0 context.Context, _a1 *internalpb.ListImportsRequest)) *MockDataCoord_ListImports_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*internalpb.ListImportsRequest))
+	})
+	return _c
+}
+
+func (_c *MockDataCoord_ListImports_Call) Return(_a0 *internalpb.ListImportsResponse, _a1 error) *MockDataCoord_ListImports_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDataCoord_ListImports_Call) RunAndReturn(run func(context.Context, *internalpb.ListImportsRequest) (*internalpb.ListImportsResponse, error)) *MockDataCoord_ListImports_Call {
 	_c.Call.Return(run)
 	return _c
 }

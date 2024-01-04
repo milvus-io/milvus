@@ -2220,6 +2220,61 @@ func (_c *MockProxy_GetFlushState_Call) RunAndReturn(run func(context.Context, *
 	return _c
 }
 
+// GetImportProgress provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) GetImportProgress(_a0 context.Context, _a1 *internalpb.GetImportProgressRequest) (*internalpb.GetImportProgressResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *internalpb.GetImportProgressResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.GetImportProgressRequest) (*internalpb.GetImportProgressResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.GetImportProgressRequest) *internalpb.GetImportProgressResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*internalpb.GetImportProgressResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *internalpb.GetImportProgressRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_GetImportProgress_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetImportProgress'
+type MockProxy_GetImportProgress_Call struct {
+	*mock.Call
+}
+
+// GetImportProgress is a helper method to define mock.On call
+//  - _a0 context.Context
+//  - _a1 *internalpb.GetImportProgressRequest
+func (_e *MockProxy_Expecter) GetImportProgress(_a0 interface{}, _a1 interface{}) *MockProxy_GetImportProgress_Call {
+	return &MockProxy_GetImportProgress_Call{Call: _e.mock.On("GetImportProgress", _a0, _a1)}
+}
+
+func (_c *MockProxy_GetImportProgress_Call) Run(run func(_a0 context.Context, _a1 *internalpb.GetImportProgressRequest)) *MockProxy_GetImportProgress_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*internalpb.GetImportProgressRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_GetImportProgress_Call) Return(_a0 *internalpb.GetImportProgressResponse, _a1 error) *MockProxy_GetImportProgress_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_GetImportProgress_Call) RunAndReturn(run func(context.Context, *internalpb.GetImportProgressRequest) (*internalpb.GetImportProgressResponse, error)) *MockProxy_GetImportProgress_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetImportState provides a mock function with given fields: _a0, _a1
 func (_m *MockProxy) GetImportState(_a0 context.Context, _a1 *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -3263,6 +3318,61 @@ func (_c *MockProxy_Import_Call) RunAndReturn(run func(context.Context, *milvusp
 	return _c
 }
 
+// ImportV2 provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) ImportV2(_a0 context.Context, _a1 *internalpb.ImportRequest) (*internalpb.ImportResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *internalpb.ImportResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.ImportRequest) (*internalpb.ImportResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.ImportRequest) *internalpb.ImportResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*internalpb.ImportResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *internalpb.ImportRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_ImportV2_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ImportV2'
+type MockProxy_ImportV2_Call struct {
+	*mock.Call
+}
+
+// ImportV2 is a helper method to define mock.On call
+//  - _a0 context.Context
+//  - _a1 *internalpb.ImportRequest
+func (_e *MockProxy_Expecter) ImportV2(_a0 interface{}, _a1 interface{}) *MockProxy_ImportV2_Call {
+	return &MockProxy_ImportV2_Call{Call: _e.mock.On("ImportV2", _a0, _a1)}
+}
+
+func (_c *MockProxy_ImportV2_Call) Run(run func(_a0 context.Context, _a1 *internalpb.ImportRequest)) *MockProxy_ImportV2_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*internalpb.ImportRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_ImportV2_Call) Return(_a0 *internalpb.ImportResponse, _a1 error) *MockProxy_ImportV2_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_ImportV2_Call) RunAndReturn(run func(context.Context, *internalpb.ImportRequest) (*internalpb.ImportResponse, error)) *MockProxy_ImportV2_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Init provides a mock function with given fields:
 func (_m *MockProxy) Init() error {
 	ret := _m.Called()
@@ -3740,6 +3850,61 @@ func (_c *MockProxy_ListImportTasks_Call) Return(_a0 *milvuspb.ListImportTasksRe
 }
 
 func (_c *MockProxy_ListImportTasks_Call) RunAndReturn(run func(context.Context, *milvuspb.ListImportTasksRequest) (*milvuspb.ListImportTasksResponse, error)) *MockProxy_ListImportTasks_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListImports provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) ListImports(_a0 context.Context, _a1 *internalpb.ListImportsRequest) (*internalpb.ListImportsResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *internalpb.ListImportsResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.ListImportsRequest) (*internalpb.ListImportsResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.ListImportsRequest) *internalpb.ListImportsResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*internalpb.ListImportsResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *internalpb.ListImportsRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_ListImports_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListImports'
+type MockProxy_ListImports_Call struct {
+	*mock.Call
+}
+
+// ListImports is a helper method to define mock.On call
+//  - _a0 context.Context
+//  - _a1 *internalpb.ListImportsRequest
+func (_e *MockProxy_Expecter) ListImports(_a0 interface{}, _a1 interface{}) *MockProxy_ListImports_Call {
+	return &MockProxy_ListImports_Call{Call: _e.mock.On("ListImports", _a0, _a1)}
+}
+
+func (_c *MockProxy_ListImports_Call) Run(run func(_a0 context.Context, _a1 *internalpb.ListImportsRequest)) *MockProxy_ListImports_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*internalpb.ListImportsRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_ListImports_Call) Return(_a0 *internalpb.ListImportsResponse, _a1 error) *MockProxy_ListImports_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_ListImports_Call) RunAndReturn(run func(context.Context, *internalpb.ListImportsRequest) (*internalpb.ListImportsResponse, error)) *MockProxy_ListImports_Call {
 	_c.Call.Return(run)
 	return _c
 }
