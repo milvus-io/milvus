@@ -7,19 +7,20 @@ import (
 )
 
 type Field struct {
-	FieldID        int64
-	Name           string
-	IsPrimaryKey   bool
-	Description    string
-	DataType       schemapb.DataType
-	TypeParams     []*commonpb.KeyValuePair
-	IndexParams    []*commonpb.KeyValuePair
-	AutoID         bool
-	State          schemapb.FieldState
-	IsDynamic      bool
-	IsPartitionKey bool // partition key mode, multi logic partitions share a physical partition
-	DefaultValue   *schemapb.ValueField
-	ElementType    schemapb.DataType
+	FieldID         int64
+	Name            string
+	IsPrimaryKey    bool
+	Description     string
+	DataType        schemapb.DataType
+	TypeParams      []*commonpb.KeyValuePair
+	IndexParams     []*commonpb.KeyValuePair
+	AutoID          bool
+	State           schemapb.FieldState
+	IsDynamic       bool
+	IsPartitionKey  bool // partition key mode, multi logic partitions share a physical partition
+	IsClusteringKey bool
+	DefaultValue    *schemapb.ValueField
+	ElementType     schemapb.DataType
 }
 
 func (f *Field) Available() bool {
@@ -28,19 +29,20 @@ func (f *Field) Available() bool {
 
 func (f *Field) Clone() *Field {
 	return &Field{
-		FieldID:        f.FieldID,
-		Name:           f.Name,
-		IsPrimaryKey:   f.IsPrimaryKey,
-		Description:    f.Description,
-		DataType:       f.DataType,
-		TypeParams:     common.CloneKeyValuePairs(f.TypeParams),
-		IndexParams:    common.CloneKeyValuePairs(f.IndexParams),
-		AutoID:         f.AutoID,
-		State:          f.State,
-		IsDynamic:      f.IsDynamic,
-		IsPartitionKey: f.IsPartitionKey,
-		DefaultValue:   f.DefaultValue,
-		ElementType:    f.ElementType,
+		FieldID:         f.FieldID,
+		Name:            f.Name,
+		IsPrimaryKey:    f.IsPrimaryKey,
+		Description:     f.Description,
+		DataType:        f.DataType,
+		TypeParams:      common.CloneKeyValuePairs(f.TypeParams),
+		IndexParams:     common.CloneKeyValuePairs(f.IndexParams),
+		AutoID:          f.AutoID,
+		State:           f.State,
+		IsDynamic:       f.IsDynamic,
+		IsPartitionKey:  f.IsPartitionKey,
+		IsClusteringKey: f.IsClusteringKey,
+		DefaultValue:    f.DefaultValue,
+		ElementType:     f.ElementType,
 	}
 }
 
@@ -68,6 +70,7 @@ func (f *Field) Equal(other Field) bool {
 		f.AutoID == other.AutoID &&
 		f.IsPartitionKey == other.IsPartitionKey &&
 		f.IsDynamic == other.IsDynamic &&
+		f.IsClusteringKey == other.IsClusteringKey &&
 		f.DefaultValue == other.DefaultValue &&
 		f.ElementType == other.ElementType
 }
@@ -91,18 +94,19 @@ func MarshalFieldModel(field *Field) *schemapb.FieldSchema {
 	}
 
 	return &schemapb.FieldSchema{
-		FieldID:        field.FieldID,
-		Name:           field.Name,
-		IsPrimaryKey:   field.IsPrimaryKey,
-		Description:    field.Description,
-		DataType:       field.DataType,
-		TypeParams:     field.TypeParams,
-		IndexParams:    field.IndexParams,
-		AutoID:         field.AutoID,
-		IsDynamic:      field.IsDynamic,
-		IsPartitionKey: field.IsPartitionKey,
-		DefaultValue:   field.DefaultValue,
-		ElementType:    field.ElementType,
+		FieldID:         field.FieldID,
+		Name:            field.Name,
+		IsPrimaryKey:    field.IsPrimaryKey,
+		Description:     field.Description,
+		DataType:        field.DataType,
+		TypeParams:      field.TypeParams,
+		IndexParams:     field.IndexParams,
+		AutoID:          field.AutoID,
+		IsDynamic:       field.IsDynamic,
+		IsPartitionKey:  field.IsPartitionKey,
+		IsClusteringKey: field.IsClusteringKey,
+		DefaultValue:    field.DefaultValue,
+		ElementType:     field.ElementType,
 	}
 }
 
@@ -124,18 +128,19 @@ func UnmarshalFieldModel(fieldSchema *schemapb.FieldSchema) *Field {
 	}
 
 	return &Field{
-		FieldID:        fieldSchema.FieldID,
-		Name:           fieldSchema.Name,
-		IsPrimaryKey:   fieldSchema.IsPrimaryKey,
-		Description:    fieldSchema.Description,
-		DataType:       fieldSchema.DataType,
-		TypeParams:     fieldSchema.TypeParams,
-		IndexParams:    fieldSchema.IndexParams,
-		AutoID:         fieldSchema.AutoID,
-		IsDynamic:      fieldSchema.IsDynamic,
-		IsPartitionKey: fieldSchema.IsPartitionKey,
-		DefaultValue:   fieldSchema.DefaultValue,
-		ElementType:    fieldSchema.ElementType,
+		FieldID:         fieldSchema.FieldID,
+		Name:            fieldSchema.Name,
+		IsPrimaryKey:    fieldSchema.IsPrimaryKey,
+		Description:     fieldSchema.Description,
+		DataType:        fieldSchema.DataType,
+		TypeParams:      fieldSchema.TypeParams,
+		IndexParams:     fieldSchema.IndexParams,
+		AutoID:          fieldSchema.AutoID,
+		IsDynamic:       fieldSchema.IsDynamic,
+		IsPartitionKey:  fieldSchema.IsPartitionKey,
+		IsClusteringKey: fieldSchema.IsClusteringKey,
+		DefaultValue:    fieldSchema.DefaultValue,
+		ElementType:     fieldSchema.ElementType,
 	}
 }
 
