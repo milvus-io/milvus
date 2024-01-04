@@ -77,6 +77,10 @@ func (t *SearchTask) Username() string {
 	return t.req.Req.GetUsername()
 }
 
+func (t *SearchTask) IsGpuIndex() bool {
+	return t.collection.IsGpuIndex()
+}
+
 func (t *SearchTask) PreExecute() error {
 	// Update task wait time metric before execute
 	nodeID := strconv.FormatInt(paramtable.GetNodeID(), 10)

@@ -64,6 +64,10 @@ func (t *MockTask) Username() string {
 	return t.username
 }
 
+func (t *MockTask) IsGpuIndex() bool {
+	return false
+}
+
 func (t *MockTask) TimeRecorder() *timerecord.TimeRecorder {
 	return t.tr
 }

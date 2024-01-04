@@ -30,6 +30,7 @@ func newScheduler(policy schedulePolicy) Scheduler {
 		receiveChan:      make(chan addTaskReq, maxReceiveChanSize),
 		execChan:         make(chan Task),
 		pool:             conc.NewPool[any](maxReadConcurrency, conc.WithPreAlloc(true)),
+		gpuPool:          conc.NewPool[any](paramtable.Get().QueryNodeCfg.MaxGpuReadConcurrency.GetAsInt(), conc.WithPreAlloc(true)),
 		schedulerCounter: schedulerCounter{},
 		lifetime:         lifetime.NewLifetime(lifetime.Initializing),
 	}
@@ -46,6 +47,7 @@ type scheduler struct {
 	receiveChan chan addTaskReq
 	execChan    chan Task
 	pool        *conc.Pool[any]
+	gpuPool     *conc.Pool[any]
 
 	// wg is the waitgroup for internal worker goroutine
 	wg sync.WaitGroup
@@ -227,7 +229,7 @@ func (s *scheduler) exec() {
 			continue
 		}
 
-		s.pool.Submit(func() (any, error) {
+		s.getPool(t).Submit(func() (any, error) {
 			// Update concurrency metric and notify task done.
 			metrics.QueryNodeReadTaskConcurrency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Inc()
 			collector.Counter.Inc(metricsinfo.ExecuteQueueType, 1)
@@ -243,6 +245,14 @@ func (s *scheduler) exec() {
 			return nil, err
 		})
 	}
+}
+
+func (s *scheduler) getPool(t Task) *conc.Pool[any] {
+	if t.IsGpuIndex() {
+		return s.gpuPool
+	}
+
+	return s.pool
 }
 
 // setupExecListener setup the execChan and next task to run.
