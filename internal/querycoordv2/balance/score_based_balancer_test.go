@@ -353,6 +353,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceOneRound() {
 			balancer.meta.ReplicaManager.Put(utils.CreateTestReplica(c.replicaID, c.collectionID, c.nodes))
 			balancer.targetMgr.UpdateCollectionNextTarget(c.collectionID)
 			balancer.targetMgr.UpdateCollectionCurrentTarget(c.collectionID)
+			balancer.targetMgr.UpdateCollectionNextTarget(c.collectionID)
 
 			// 2. set up target for distribution for multi collections
 			for node, s := range c.distributions {
@@ -463,6 +464,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceMultiRound() {
 			append(balanceCase.nodes, balanceCase.notExistedNodes...)))
 		balancer.targetMgr.UpdateCollectionNextTarget(balanceCase.collectionIDs[i])
 		balancer.targetMgr.UpdateCollectionCurrentTarget(balanceCase.collectionIDs[i])
+		balancer.targetMgr.UpdateCollectionNextTarget(balanceCase.collectionIDs[i])
 	}
 
 	// 2. set up target for distribution for multi collections
