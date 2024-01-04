@@ -52,8 +52,8 @@ IndexFactory::CreateScalarIndex(
 //
 
 template <>
-inline ScalarIndexPtr<std::string>
-IndexFactory::CreateScalarIndex(
+ScalarIndexPtr<std::string>
+IndexFactory::CreateScalarIndex<std::string>(
     const IndexType& index_type,
     const storage::FileManagerContext& file_manager_context,
     DataType d_type) {
@@ -88,7 +88,7 @@ IndexFactory::CreateScalarIndex(
 
 template <>
 ScalarIndexPtr<std::string>
-IndexFactory::CreateScalarIndex(
+IndexFactory::CreateScalarIndex<std::string>(
     const IndexType& index_type,
     const storage::FileManagerContext& file_manager_context,
     std::shared_ptr<milvus_storage::Space> space,

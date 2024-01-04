@@ -179,9 +179,6 @@ func (b *RowCountBasedBalancer) BalanceReplica(replica *meta.Replica) ([]Segment
 	segmentPlans, channelPlans := make([]SegmentAssignPlan, 0), make([]ChannelAssignPlan, 0)
 	if len(offlineNodes) != 0 {
 		log.Info("Handle stopping nodes",
-			zap.Int64("collection", replica.CollectionID),
-			zap.Int64("replica id", replica.Replica.GetID()),
-			zap.String("replica group", replica.Replica.GetResourceGroup()),
 			zap.Any("stopping nodes", offlineNodes),
 			zap.Any("available nodes", onlineNodes),
 		)
