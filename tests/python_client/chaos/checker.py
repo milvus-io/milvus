@@ -724,9 +724,6 @@ class InsertChecker(Checker):
                                          timeout=timeout,
                                          enable_traceback=enable_traceback,
                                          check_task=CheckTasks.check_nothing)
-        if result:
-            # TODO: persist data to file
-            self.inserted_data.extend(ts_data)
         return res, result
 
     @exception_handler()
