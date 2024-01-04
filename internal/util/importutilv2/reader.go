@@ -27,11 +27,6 @@ type Reader interface {
 	Close()
 }
 
-type FieldReader interface {
-	Next(count int64) (storage.FieldData, error)
-	Close()
-}
-
 func NewReader(cm storage.ChunkManager,
 	schema *schemapb.CollectionSchema,
 	paths []string,
