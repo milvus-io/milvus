@@ -55,7 +55,7 @@ fi
 if [ "${CHECK_BUILDER:-}" == "1" ];then
     awk 'c&&c--{sub(/^/,"#")} /# Command/{c=3} 1' $ROOT_DIR/docker-compose.yml > $ROOT_DIR/docker-compose-devcontainer.yml
 else
-    awk 'c&&c--{sub(/^/,"#")} /# Build devcontainer/{c=5} 1' $ROOT_DIR/docker-compose.yml > $ROOT_DIR/docker-compose-devcontainer.yml.tmp
+    awk 'c&&c--{sub(/^/,"#")} /# Build devcontainer/{c=7} 1' $ROOT_DIR/docker-compose.yml > $ROOT_DIR/docker-compose-devcontainer.yml.tmp
     awk 'c&&c--{sub(/^/,"#")} /# Command/{c=3} 1' $ROOT_DIR/docker-compose-devcontainer.yml.tmp > $ROOT_DIR/docker-compose-devcontainer.yml
     rm $ROOT_DIR/docker-compose-devcontainer.yml.tmp
 fi
