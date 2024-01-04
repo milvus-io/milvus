@@ -1948,7 +1948,9 @@ func (c *Core) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvus
 		log.Error("failed to find collection ID from its name",
 			zap.String("collectionName", req.GetCollectionName()),
 			zap.Error(err))
-		return nil, err
+		return &milvuspb.ImportResponse{
+			Status: merr.Status(err),
+		}, nil
 	}
 
 	isBackUp := importutil.IsBackup(req.GetOptions())
