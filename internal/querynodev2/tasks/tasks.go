@@ -82,6 +82,9 @@ type Task interface {
 	// Return "" if the task do not contain any user info.
 	Username() string
 
+	// Return whether the task would be running on GPU.
+	IsGpuIndex() bool
+
 	// PreExecute the task, only call once.
 	PreExecute() error
 
