@@ -27,6 +27,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/bloberror"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blockblob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/container"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/service"
 
@@ -89,6 +90,77 @@ func newAzureObjectStorageWithConfig(ctx context.Context, c *config) (*AzureObje
 	return &AzureObjectStorage{Client: client}, nil
 }
 
+type BlobReader struct {
+	client   *blockblob.Client
+	position int64
+}
+
+func NewBlobReader(client *blockblob.Client, offset int64) (*BlobReader, error) {
+	return &BlobReader{client: client, position: offset}, nil
+}
+
+func (b *BlobReader) Read(p []byte) (n int, err error) {
+	ctx := context.TODO()
+
+	opts := &azblob.DownloadStreamOptions{}
+	if b.position > 0 {
+		opts.Range = blob.HTTPRange{
+			Offset: b.position,
+		}
+	}
+	object, err := b.client.DownloadStream(ctx, opts)
+	if err != nil {
+		return 0, err
+	}
+	n, err = object.Body.Read(p)
+	if err != nil {
+		return n, err
+	}
+	b.position += int64(n)
+
+	return n, nil
+}
+
+func (b *BlobReader) Close() error {
+	return nil
+}
+
+func (b *BlobReader) ReadAt(p []byte, off int64) (n int, err error) {
+	httpRange := blob.HTTPRange{
+		Offset: off,
+	}
+	object, err := b.client.DownloadStream(context.Background(), &blob.DownloadStreamOptions{
+		Range: httpRange,
+	})
+	if err != nil {
+		return 0, err
+	}
+	defer object.Body.Close()
+	return io.ReadFull(object.Body, p)
+}
+
+func (b *BlobReader) Seek(offset int64, whence int) (int64, error) {
+	props, err := b.client.GetProperties(context.Background(), &blob.GetPropertiesOptions{})
+	if err != nil {
+		return 0, err
+	}
+	size := *props.ContentLength
+	var newOffset int64
+	switch whence {
+	case io.SeekStart:
+		newOffset = offset
+	case io.SeekCurrent:
+		newOffset = b.position + offset
+	case io.SeekEnd:
+		newOffset = size + offset
+	default:
+		return 0, merr.WrapErrIoFailedReason("invalid whence")
+	}
+
+	b.position = newOffset
+	return newOffset, nil
+}
+
 func (AzureObjectStorage *AzureObjectStorage) GetObject(ctx context.Context, bucketName, objectName string, offset int64, size int64) (FileReader, error) {
 	opts := azblob.DownloadStreamOptions{}
 	if offset > 0 {
@@ -97,11 +169,11 @@ func (AzureObjectStorage *AzureObjectStorage) GetObject(ctx context.Context, buc
 			Count:  size,
 		}
 	}
-	object, err := AzureObjectStorage.Client.NewContainerClient(bucketName).NewBlockBlobClient(objectName).DownloadStream(ctx, &opts)
+	_, err := AzureObjectStorage.Client.NewContainerClient(bucketName).NewBlockBlobClient(objectName).DownloadStream(ctx, &opts)
 	if err != nil {
 		return nil, checkObjectStorageError(objectName, err)
 	}
-	return NewAzureFile(object.Body), nil
+	return NewBlobReader(AzureObjectStorage.Client.NewContainerClient(bucketName).NewBlockBlobClient(objectName), offset)
 }
 
 func (AzureObjectStorage *AzureObjectStorage) PutObject(ctx context.Context, bucketName, objectName string, reader io.Reader, objectSize int64) error {
