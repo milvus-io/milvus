@@ -1933,8 +1933,10 @@ func TestSearchTask_Requery(t *testing.T) {
 	collectionName := "col"
 	collectionID := UniqueID(0)
 	cache := NewMockCache(t)
+	collSchema := constructCollectionSchema(pkField, vecField, dim, collection)
+	schema := newSchemaInfo(collSchema)
 	cache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(collectionID, nil).Maybe()
-	cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(constructCollectionSchema(pkField, vecField, dim, collection), nil).Maybe()
+	cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schema, nil).Maybe()
 	cache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"_default": UniqueID(1)}, nil).Maybe()
 	cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionBasicInfo{}, nil).Maybe()
 	cache.EXPECT().GetShards(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(map[string][]nodeInfo{}, nil).Maybe()
@@ -1942,7 +1944,8 @@ func TestSearchTask_Requery(t *testing.T) {
 	globalMetaCache = cache
 
 	t.Run("Test normal", func(t *testing.T) {
-		schema := constructCollectionSchema(pkField, vecField, dim, collection)
+		collSchema := constructCollectionSchema(pkField, vecField, dim, collection)
+		schema := newSchemaInfo(collSchema)
 		qn := mocks.NewMockQueryNodeClient(t)
 		qn.EXPECT().Query(mock.Anything, mock.Anything).RunAndReturn(
 			func(ctx context.Context, request *querypb.QueryRequest, option ...grpc.CallOption) (*internalpb.RetrieveResults, error) {
@@ -2033,7 +2036,9 @@ func TestSearchTask_Requery(t *testing.T) {
 	})
 
 	t.Run("Test no primary key", func(t *testing.T) {
-		schema := &schemapb.CollectionSchema{}
+		collSchema := &schemapb.CollectionSchema{}
+		schema := newSchemaInfo(collSchema)
+
 		node := mocks.NewMockProxy(t)
 
 		qt := &searchTask{
@@ -2056,7 +2061,8 @@ func TestSearchTask_Requery(t *testing.T) {
 	})
 
 	t.Run("Test requery failed", func(t *testing.T) {
-		schema := constructCollectionSchema(pkField, vecField, dim, collection)
+		collSchema := constructCollectionSchema(pkField, vecField, dim, collection)
+		schema := newSchemaInfo(collSchema)
 		qn := mocks.NewMockQueryNodeClient(t)
 		qn.EXPECT().Query(mock.Anything, mock.Anything).
 			Return(nil, fmt.Errorf("mock err 1"))
@@ -2089,7 +2095,8 @@ func TestSearchTask_Requery(t *testing.T) {
 	})
 
 	t.Run("Test postExecute with requery failed", func(t *testing.T) {
-		schema := constructCollectionSchema(pkField, vecField, dim, collection)
+		collSchema := constructCollectionSchema(pkField, vecField, dim, collection)
+		schema := newSchemaInfo(collSchema)
 		qn := mocks.NewMockQueryNodeClient(t)
 		qn.EXPECT().Query(mock.Anything, mock.Anything).
 			Return(nil, fmt.Errorf("mock err 1"))

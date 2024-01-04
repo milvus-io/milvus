@@ -1,6 +1,7 @@
 package writebuffer
 
 import (
+	"fmt"
 	"math/rand"
 	"testing"
 	"time"
@@ -18,13 +19,15 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/testutils"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
 type L0WriteBufferSuite struct {
-	suite.Suite
+	testutils.PromMetricsSuite
 	channelName  string
 	collID       int64
 	collSchema   *schemapb.CollectionSchema
@@ -161,13 +164,18 @@ func (s *L0WriteBufferSuite) TestBufferData() {
 
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 1000}, metacache.NewBloomFilterSet())
 	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
-	s.metacache.EXPECT().GetSegmentByID(int64(1000)).Return(nil, false)
+	s.metacache.EXPECT().GetSegmentByID(int64(1000)).Return(nil, false).Once()
 	s.metacache.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything).Return()
 	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 	s.metacache.EXPECT().GetSegmentIDsBy(mock.Anything, mock.Anything).Return([]int64{})
 
+	metrics.DataNodeFlowGraphBufferDataSize.Reset()
 	err = wb.BufferData([]*msgstream.InsertMsg{msg}, []*msgstream.DeleteMsg{delMsg}, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})
 	s.NoError(err)
+
+	value, err := metrics.DataNodeFlowGraphBufferDataSize.GetMetricWithLabelValues(fmt.Sprint(paramtable.GetNodeID()), fmt.Sprint(s.metacache.Collection()))
+	s.NoError(err)
+	s.MetricsEqual(value, 5524)
 }
 
 func (s *L0WriteBufferSuite) TestCreateFailure() {

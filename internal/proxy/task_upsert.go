@@ -59,7 +59,7 @@ type upsertTask struct {
 	chTicker         channelsTimeTicker
 	vChannels        []vChan
 	pChannels        []pChan
-	schema           *schemapb.CollectionSchema
+	schema           *schemaInfo
 	partitionKeyMode bool
 	partitionKeys    *schemapb.FieldData
 }
@@ -172,7 +172,7 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 	it.result.SuccIndex = sliceIndex
 
 	if it.schema.EnableDynamicField {
-		err := checkDynamicFieldData(it.schema, it.upsertMsg.InsertMsg)
+		err := checkDynamicFieldData(it.schema.CollectionSchema, it.upsertMsg.InsertMsg)
 		if err != nil {
 			return err
 		}
@@ -181,7 +181,7 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 	// check primaryFieldData whether autoID is true or not
 	// only allow support autoID == false
 	var err error
-	it.result.IDs, err = checkPrimaryFieldData(it.schema, it.result, it.upsertMsg.InsertMsg, false)
+	it.result.IDs, err = checkPrimaryFieldData(it.schema.CollectionSchema, it.result, it.upsertMsg.InsertMsg, false)
 	log := log.Ctx(ctx).With(zap.String("collectionName", it.upsertMsg.InsertMsg.CollectionName))
 	if err != nil {
 		log.Warn("check primary field data and hash primary key failed when upsert",
@@ -189,7 +189,7 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 		return err
 	}
 	// set field ID to insert field data
-	err = fillFieldIDBySchema(it.upsertMsg.InsertMsg.GetFieldsData(), it.schema)
+	err = fillFieldIDBySchema(it.upsertMsg.InsertMsg.GetFieldsData(), it.schema.CollectionSchema)
 	if err != nil {
 		log.Warn("insert set fieldID to fieldData failed when upsert",
 			zap.Error(err))
@@ -197,8 +197,8 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 	}
 
 	if it.partitionKeyMode {
-		fieldSchema, _ := typeutil.GetPartitionKeyFieldSchema(it.schema)
-		it.partitionKeys, err = getPartitionKeyFieldData(fieldSchema, it.upsertMsg.InsertMsg)
+		pkFieldSchema, _ := it.schema.GetPkField()
+		it.partitionKeys, err = getPartitionKeyFieldData(pkFieldSchema, it.upsertMsg.InsertMsg)
 		if err != nil {
 			log.Warn("get partition keys from insert request failed",
 				zap.String("collectionName", collectionName),
@@ -214,7 +214,7 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 	}
 
 	if err := newValidateUtil(withNANCheck(), withOverflowCheck(), withMaxLenCheck()).
-		Validate(it.upsertMsg.InsertMsg.GetFieldsData(), it.schema, it.upsertMsg.InsertMsg.NRows()); err != nil {
+		Validate(it.upsertMsg.InsertMsg.GetFieldsData(), it.schema.CollectionSchema, it.upsertMsg.InsertMsg.NRows()); err != nil {
 		return err
 	}
 

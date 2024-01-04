@@ -2725,7 +2725,7 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 	return qt.result, nil
 }
 
-func (node *Proxy) SearchV2(ctx context.Context, request *milvuspb.SearchRequestV2) (*milvuspb.SearchResults, error) {
+func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSearchRequest) (*milvuspb.SearchResults, error) {
 	return &milvuspb.SearchResults{
 		Status: merr.Status(merr.WrapErrServiceInternal("unimplemented")),
 	}, nil

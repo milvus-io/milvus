@@ -65,6 +65,7 @@ func TestClient_CreateProducer(t *testing.T) {
 	os.MkdirAll(rmqPath, os.ModePerm)
 	rmqPathTest := rmqPath + "/test_client1"
 	rmq := newRocksMQ(t, rmqPathTest)
+	defer rmq.Close()
 	defer removePath(rmqPath)
 	client1, err := NewClient(Options{
 		Server: rmq,
@@ -105,6 +106,7 @@ func TestClient_Subscribe(t *testing.T) {
 	os.MkdirAll(rmqPath, os.ModePerm)
 	rmqPathTest := rmqPath + "/test_client2"
 	rmq := newRocksMQ(t, rmqPathTest)
+	defer rmq.Close()
 	defer removePath(rmqPath)
 	client1, err := NewClient(Options{
 		Server: rmq,
@@ -169,6 +171,7 @@ func TestClient_SeekLatest(t *testing.T) {
 	os.MkdirAll(rmqPath, os.ModePerm)
 	rmqPathTest := rmqPath + "/seekLatest"
 	rmq := newRocksMQ(t, rmqPathTest)
+	defer rmq.Close()
 	defer removePath(rmqPath)
 	client, err := NewClient(Options{
 		Server: rmq,
@@ -243,6 +246,7 @@ func TestClient_consume(t *testing.T) {
 	os.MkdirAll(rmqPath, os.ModePerm)
 	rmqPathTest := rmqPath + "/test_client3"
 	rmq := newRocksMQ(t, rmqPathTest)
+	defer rmq.Close()
 	defer removePath(rmqPath)
 	client, err := NewClient(Options{
 		Server: rmq,
@@ -281,6 +285,7 @@ func TestRocksmq_Properties(t *testing.T) {
 	os.MkdirAll(rmqPath, os.ModePerm)
 	rmqPathTest := rmqPath + "/test_client4"
 	rmq := newRocksMQ(t, rmqPathTest)
+	defer rmq.Close()
 	defer removePath(rmqPath)
 	client, err := NewClient(Options{
 		Server: rmq,
@@ -325,18 +330,21 @@ func TestRocksmq_Properties(t *testing.T) {
 	_, err = producer.Send(msg)
 	assert.NoError(t, err)
 
-	msg = &mqwrapper.ProducerMessage{
-		Payload:    msgb,
-		Properties: map[string]string{common.TraceIDKey: "b"},
-	}
-	_, err = producer.Send(msg)
-	assert.NoError(t, err)
-
 	msgChan := consumer.Chan()
 	msgConsume, ok := <-msgChan
 	assert.True(t, ok)
 	assert.Equal(t, len(msgConsume.Properties()), 1)
 	assert.Equal(t, msgConsume.Properties()[common.TraceIDKey], "a")
+	assert.NoError(t, err)
+
+	// rocksmq consumer needs produce to notify to receive msg
+	// if produce all in the begin, it will stuck if consume not that fast
+	// related with https://github.com/milvus-io/milvus/issues/27801
+	msg = &mqwrapper.ProducerMessage{
+		Payload:    msgb,
+		Properties: map[string]string{common.TraceIDKey: "b"},
+	}
+	_, err = producer.Send(msg)
 	assert.NoError(t, err)
 
 	msgConsume, ok = <-msgChan
