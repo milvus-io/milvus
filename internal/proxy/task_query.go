@@ -52,7 +52,7 @@ type queryTask struct {
 	ids            *schemapb.IDs
 	collectionName string
 	queryParams    *queryParams
-	schema         *schemapb.CollectionSchema
+	schema         *schemaInfo
 
 	userOutputFields []string
 
@@ -206,25 +206,25 @@ func (t *queryTask) createPlan(ctx context.Context) error {
 	cntMatch := matchCountRule(t.request.GetOutputFields())
 	if cntMatch {
 		var err error
-		t.plan, err = createCntPlan(t.request.GetExpr(), schema)
+		t.plan, err = createCntPlan(t.request.GetExpr(), schema.CollectionSchema)
 		t.userOutputFields = []string{"count(*)"}
 		return err
 	}
 
 	var err error
 	if t.plan == nil {
-		t.plan, err = planparserv2.CreateRetrievePlan(schema, t.request.Expr)
+		t.plan, err = planparserv2.CreateRetrievePlan(schema.CollectionSchema, t.request.Expr)
 		if err != nil {
 			return err
 		}
 	}
 
-	t.request.OutputFields, t.userOutputFields, err = translateOutputFields(t.request.OutputFields, schema, true)
+	t.request.OutputFields, t.userOutputFields, err = translateOutputFields(t.request.OutputFields, t.schema, true)
 	if err != nil {
 		return err
 	}
 
-	outputFieldIDs, err := translateToOutputFieldIDs(t.request.GetOutputFields(), schema)
+	outputFieldIDs, err := translateToOutputFieldIDs(t.request.GetOutputFields(), schema.CollectionSchema)
 	if err != nil {
 		return err
 	}
@@ -453,7 +453,7 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 	metrics.ProxyDecodeResultLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.QueryLabel).Observe(0.0)
 	tr.CtxRecord(ctx, "reduceResultStart")
 
-	reducer := createMilvusReducer(ctx, t.queryParams, t.RetrieveRequest, t.schema, t.plan, t.collectionName)
+	reducer := createMilvusReducer(ctx, t.queryParams, t.RetrieveRequest, t.schema.CollectionSchema, t.plan, t.collectionName)
 
 	t.result, err = reducer.Reduce(toReduceResults)
 	if err != nil {

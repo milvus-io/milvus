@@ -118,21 +118,22 @@ func (ib *InsertBuffer) Yield() *storage.InsertData {
 	return ib.buffer
 }
 
-func (ib *InsertBuffer) Buffer(msgs []*msgstream.InsertMsg, startPos, endPos *msgpb.MsgPosition) ([]storage.FieldData, error) {
+func (ib *InsertBuffer) Buffer(msgs []*msgstream.InsertMsg, startPos, endPos *msgpb.MsgPosition) ([]storage.FieldData, int64, error) {
 	pkData := make([]storage.FieldData, 0, len(msgs))
+	var totalMemSize int64 = 0
 	for _, msg := range msgs {
 		tmpBuffer, err := storage.InsertMsgToInsertData(msg, ib.collSchema)
 		if err != nil {
 			log.Warn("failed to transfer insert msg to insert data", zap.Error(err))
-			return nil, err
+			return nil, 0, err
 		}
 
 		pkFieldData, err := storage.GetPkFromInsertData(ib.collSchema, tmpBuffer)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		if pkFieldData.RowNum() != tmpBuffer.GetRowNum() {
-			return nil, merr.WrapErrServiceInternal("pk column row num not match")
+			return nil, 0, merr.WrapErrServiceInternal("pk column row num not match")
 		}
 		pkData = append(pkData, pkFieldData)
 
@@ -141,13 +142,14 @@ func (ib *InsertBuffer) Buffer(msgs []*msgstream.InsertMsg, startPos, endPos *ms
 		tsData, err := storage.GetTimestampFromInsertData(tmpBuffer)
 		if err != nil {
 			log.Warn("no timestamp field found in insert msg", zap.Error(err))
-			return nil, err
+			return nil, 0, err
 		}
 
 		// update buffer size
 		ib.UpdateStatistics(int64(tmpBuffer.GetRowNum()), int64(tmpBuffer.GetMemorySize()), ib.getTimestampRange(tsData), startPos, endPos)
+		totalMemSize += int64(tmpBuffer.GetMemorySize())
 	}
-	return pkData, nil
+	return pkData, totalMemSize, nil
 }
 
 func (ib *InsertBuffer) getTimestampRange(tsData *storage.Int64FieldData) TimeRange {
