@@ -158,6 +158,7 @@ func (s *SyncTaskSuite) getSuiteSyncTask() *SyncTask {
 		WithChunkManager(s.chunkManager).
 		WithAllocator(s.allocator).
 		WithMetaCache(s.metacache)
+	task.binlogMemsize = map[int64]int64{0: 1, 1: 1, 100: 100}
 
 	return task
 }
@@ -345,6 +346,17 @@ func (s *SyncTaskSuite) TestRunError() {
 	s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
 	s.metacache.EXPECT().GetSegmentsBy(mock.Anything).Return([]*metacache.SegmentInfo{seg})
 
+	s.Run("allocate_id_fail", func() {
+		mockAllocator := allocator.NewMockAllocator(s.T())
+		mockAllocator.EXPECT().Alloc(mock.Anything).Return(0, 0, errors.New("mocked"))
+
+		task := s.getSuiteSyncTask()
+		task.allocator = mockAllocator
+
+		err := task.Run()
+		s.Error(err)
+	})
+
 	s.Run("metawrite_fail", func() {
 		s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(errors.New("mocked"))
 
@@ -379,6 +391,21 @@ func (s *SyncTaskSuite) TestRunError() {
 
 		s.Error(err)
 		s.True(flag)
+	})
+}
+
+func (s *SyncTaskSuite) TestNextID() {
+	task := s.getSuiteSyncTask()
+
+	task.ids = []int64{0}
+	s.Run("normal_next", func() {
+		id := task.nextID()
+		s.EqualValues(0, id)
+	})
+	s.Run("id_exhausted", func() {
+		s.Panics(func() {
+			task.nextID()
+		})
 	})
 }
 
