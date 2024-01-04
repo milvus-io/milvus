@@ -25,11 +25,11 @@
 #include "storage/ThreadPools.h"
 
 using milvus::DataType;
-using milvus::storage::FieldDataMeta;
 using milvus::FieldDataPtr;
 using milvus::FieldId;
 using milvus::segcore::GeneratedData;
 using milvus::storage::ChunkManagerPtr;
+using milvus::storage::FieldDataMeta;
 using milvus::storage::InsertData;
 using milvus::storage::StorageConfig;
 

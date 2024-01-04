@@ -26,24 +26,15 @@ pub extern "C" fn tantivy_free_index_writer(ptr: *mut c_void) {
     free_binding::<IndexWriterWrapper>(ptr);
 }
 
+// tantivy_finish_index will finish the index writer, and the index writer can't be used any more.
+// After this was called, you should reset the pointer to null.
 #[no_mangle]
 pub extern "C" fn tantivy_finish_index(ptr: *mut c_void) {
     let real = ptr as *mut IndexWriterWrapper;
     unsafe {
-        (*real).finish();
+        Box::from_raw(real).finish()
     }
 }
-
-// should be only used for test
-#[no_mangle]
-pub extern "C" fn tantivy_create_reader_for_index(ptr: *mut c_void) -> *mut c_void{
-    let real = ptr as *mut IndexWriterWrapper;
-    unsafe {
-        let reader = (*real).create_reader();
-        create_binding(reader)
-    }
-}
-
 
 // -------------------------build--------------------
 #[no_mangle]
