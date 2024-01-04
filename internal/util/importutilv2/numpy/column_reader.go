@@ -29,7 +29,6 @@ import (
 	"github.com/sbinet/npyio/npy"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -76,7 +75,7 @@ func NewColumnReader(reader io.Reader, field *schemapb.FieldSchema) (*ColumnRead
 
 func ReadN[T any](reader io.Reader, order binary.ByteOrder, n int64) ([]T, error) {
 	data := make([]T, n)
-	err := binary.Read(reader, order, &data) // TODO: dyh, handle EOF
+	err := binary.Read(reader, order, &data)
 	if err != nil {
 		return nil, err
 	}
@@ -95,79 +94,84 @@ func (c *ColumnReader) getCount(count int64) int64 {
 	if total == 0 {
 		return 0
 	}
+	if c.field.GetDataType() == schemapb.DataType_BinaryVector {
+		count *= c.dim / 8
+	} else if c.field.GetDataType() == schemapb.DataType_FloatVector {
+		count *= c.dim
+	}
 	if int(count) > (total - c.readPosition) {
 		return int64(total - c.readPosition)
 	}
 	return count
 }
 
-func (c *ColumnReader) Next(count int64) (res storage.FieldData, resErr error) {
-	count = c.getCount(count * c.dim)
+func (c *ColumnReader) Next(count int64) (any, error) {
+	readCount := c.getCount(count)
+	if readCount == 0 {
+		return nil, nil
+	}
+	var (
+		data any
+		err  error
+	)
 	dt := c.field.GetDataType()
 	switch dt {
 	case schemapb.DataType_Bool:
-		data, err := ReadN[bool](c.reader, c.order, count)
+		data, err = ReadN[bool](c.reader, c.order, readCount)
 		if err != nil {
 			return nil, err
 		}
-		c.readPosition += int(count)
-		return &storage.BoolFieldData{Data: data}, nil
+		c.readPosition += int(readCount)
 	case schemapb.DataType_Int8:
-		data, err := ReadN[int8](c.reader, c.order, count)
+		data, err = ReadN[int8](c.reader, c.order, readCount)
 		if err != nil {
 			return nil, err
 		}
-		c.readPosition += int(count)
-		return &storage.Int8FieldData{Data: data}, nil
+		c.readPosition += int(readCount)
 	case schemapb.DataType_Int16:
-		data, err := ReadN[int16](c.reader, c.order, count)
+		data, err = ReadN[int16](c.reader, c.order, readCount)
 		if err != nil {
 			return nil, err
 		}
-		c.readPosition += int(count)
-		return &storage.Int16FieldData{Data: data}, nil
+		c.readPosition += int(readCount)
 	case schemapb.DataType_Int32:
-		data, err := ReadN[int32](c.reader, c.order, count)
+		data, err = ReadN[int32](c.reader, c.order, readCount)
 		if err != nil {
 			return nil, err
 		}
-		c.readPosition += int(count)
-		return &storage.Int32FieldData{Data: data}, nil
+		c.readPosition += int(readCount)
 	case schemapb.DataType_Int64:
-		data, err := ReadN[int64](c.reader, c.order, count)
+		data, err = ReadN[int64](c.reader, c.order, readCount)
 		if err != nil {
 			return nil, err
 		}
-		c.readPosition += int(count)
-		return &storage.Int64FieldData{Data: data}, nil
+		c.readPosition += int(readCount)
 	case schemapb.DataType_Float:
-		data, err := ReadN[float32](c.reader, c.order, count)
+		data, err = ReadN[float32](c.reader, c.order, readCount)
 		if err != nil {
 			return nil, err
 		}
-		c.readPosition += int(count)
-		return &storage.FloatFieldData{Data: data}, nil
+		c.readPosition += int(readCount)
 	case schemapb.DataType_Double:
-		data, err := ReadN[float64](c.reader, c.order, count)
+		data, err = ReadN[float64](c.reader, c.order, readCount)
 		if err != nil {
 			return nil, err
 		}
-		c.readPosition += int(count)
-		return &storage.DoubleFieldData{Data: data}, nil
+		c.readPosition += int(readCount)
 	case schemapb.DataType_VarChar:
-		data, err := c.ReadString(count)
-		c.readPosition += int(count)
+		data, err = c.ReadString(readCount)
+		c.readPosition += int(readCount)
 		if err != nil {
 			return nil, err
 		}
-		return &storage.StringFieldData{Data: data}, nil
 	case schemapb.DataType_JSON:
-		data, err := c.ReadString(count)
+		var strs []string
+		strs, err = c.ReadString(readCount)
 		if err != nil {
 			return nil, err
 		}
 		byteArr := make([][]byte, 0)
-		for _, str := range data {
+		for _, str := range strs {
 			var dummy interface{}
 			err = json.Unmarshal([]byte(str), &dummy)
 			if err != nil {
@@ -176,36 +180,33 @@ func (c *ColumnReader) Next(count int64) (res storage.FieldData, resErr error) {
 			}
 			byteArr = append(byteArr, []byte(str))
 		}
-		c.readPosition += int(count)
-		return &storage.JSONFieldData{Data: byteArr}, nil
+		data = byteArr
+		c.readPosition += int(readCount)
 	case schemapb.DataType_BinaryVector:
-		data, err := ReadN[uint8](c.reader, c.order, count)
+		data, err = ReadN[uint8](c.reader, c.order, readCount)
 		if err != nil {
 			return nil, err
 		}
-		c.readPosition += int(count)
-		return &storage.BinaryVectorFieldData{
-			Data: data,
-			Dim:  int(c.dim),
-		}, nil
+		c.readPosition += int(readCount)
 	case schemapb.DataType_FloatVector:
-		elementType, err := convertNumpyType(c.npyReader.Header.Descr.Type)
+		var elementType schemapb.DataType
+		elementType, err = convertNumpyType(c.npyReader.Header.Descr.Type)
 		if err != nil {
 			return nil, err
 		}
-		var data []float32
 		switch elementType {
 		case schemapb.DataType_Float:
-			data, err = ReadN[float32](c.reader, c.order, count)
+			data, err = ReadN[float32](c.reader, c.order, readCount)
 			if err != nil {
 				return nil, err
 			}
-			err = typeutil.VerifyFloats32(data)
+			err = typeutil.VerifyFloats32(data.([]float32))
 			if err != nil {
 				return nil, nil
 			}
 		case schemapb.DataType_Double:
-			data64, err := ReadN[float64](c.reader, c.order, count)
+			var data64 []float64
+			data64, err = ReadN[float64](c.reader, c.order, readCount)
 			if err != nil {
 				return nil, err
 			}
@@ -217,14 +218,11 @@ func (c *ColumnReader) Next(count int64) (res storage.FieldData, resErr error) {
 				return float32(f)
 			})
 		}
-		c.readPosition += int(count)
-		return &storage.FloatVectorFieldData{
-			Data: data,
-			Dim:  int(c.dim),
-		}, nil
+		c.readPosition += int(readCount)
 	default:
 		return nil, merr.WrapErrImportFailed(fmt.Sprintf("unsupported data type: %s", dt.String()))
 	}
+	return data, nil
 }
 
 func (c *ColumnReader) Close() {}
