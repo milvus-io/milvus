@@ -28,16 +28,16 @@ import (
 type Reader struct {
 	schema     *schemapb.CollectionSchema
 	bufferSize int
-	crs        map[int64]*ColumnReader // fieldID -> ColumnReader
+	frs        map[int64]*FieldReader // fieldID -> FieldReader
 }
 
 func NewReader(schema *schemapb.CollectionSchema, readers map[int64]io.Reader, bufferSize int) (*Reader, error) {
 	fields := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) int64 {
 		return field.GetFieldID()
 	})
-	crs := make(map[int64]*ColumnReader)
+	crs := make(map[int64]*FieldReader)
 	for fieldID, r := range readers {
-		cr, err := NewColumnReader(r, fields[fieldID])
+		cr, err := NewFieldReader(r, fields[fieldID])
 		if err != nil {
 			return nil, err
 		}
@@ -46,7 +46,7 @@ func NewReader(schema *schemapb.CollectionSchema, readers map[int64]io.Reader, b
 	return &Reader{
 		schema:     schema,
 		bufferSize: bufferSize,
-		crs:        crs,
+		frs:        crs,
 	}, nil
 }
 
@@ -57,7 +57,7 @@ func (r *Reader) Read() (*storage.InsertData, error) {
 	}
 OUTER:
 	for {
-		for fieldID, cr := range r.crs {
+		for fieldID, cr := range r.frs {
 			data, err := cr.Next(1)
 			if err != nil {
 				return nil, err
@@ -75,7 +75,7 @@ OUTER:
 		}
 	}
 
-	for fieldID := range r.crs {
+	for fieldID := range r.frs {
 		if insertData.Data[fieldID].RowNum() == 0 {
 			return nil, nil
 		}
@@ -84,7 +84,7 @@ OUTER:
 }
 
 func (r *Reader) Close() {
-	for _, cr := range r.crs {
+	for _, cr := range r.frs {
 		cr.Close()
 	}
 }

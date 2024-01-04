@@ -33,7 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-type ColumnReader struct {
+type FieldReader struct {
 	reader    io.Reader
 	npyReader *npy.Reader
 	order     binary.ByteOrder
@@ -44,7 +44,7 @@ type ColumnReader struct {
 	readPosition int
 }
 
-func NewColumnReader(reader io.Reader, field *schemapb.FieldSchema) (*ColumnReader, error) {
+func NewFieldReader(reader io.Reader, field *schemapb.FieldSchema) (*FieldReader, error) {
 	r, err := npyio.NewReader(reader)
 	if err != nil {
 		return nil, err
@@ -63,7 +63,7 @@ func NewColumnReader(reader io.Reader, field *schemapb.FieldSchema) (*ColumnRead
 		return nil, err
 	}
 
-	cr := &ColumnReader{
+	cr := &FieldReader{
 		reader:    reader,
 		npyReader: r,
 		dim:       dim,
@@ -82,7 +82,7 @@ func ReadN[T any](reader io.Reader, order binary.ByteOrder, n int64) ([]T, error
 	return data, nil
 }
 
-func (c *ColumnReader) getCount(count int64) int64 {
+func (c *FieldReader) getCount(count int64) int64 {
 	shape := c.npyReader.Header.Descr.Shape
 	if len(shape) == 0 {
 		return 0
@@ -105,7 +105,7 @@ func (c *ColumnReader) getCount(count int64) int64 {
 	return count
 }
 
-func (c *ColumnReader) Next(count int64) (any, error) {
+func (c *FieldReader) Next(count int64) (any, error) {
 	readCount := c.getCount(count)
 	if readCount == 0 {
 		return nil, nil
@@ -225,10 +225,10 @@ func (c *ColumnReader) Next(count int64) (any, error) {
 	return data, nil
 }
 
-func (c *ColumnReader) Close() {}
+func (c *FieldReader) Close() {}
 
 // setByteOrder sets BigEndian/LittleEndian, the logic of this method is copied from npyio lib
-func (c *ColumnReader) setByteOrder() {
+func (c *FieldReader) setByteOrder() {
 	var nativeEndian binary.ByteOrder
 	v := uint16(1)
 	switch byte(v >> 8) {
@@ -248,7 +248,7 @@ func (c *ColumnReader) setByteOrder() {
 	}
 }
 
-func (c *ColumnReader) ReadString(count int64) ([]string, error) {
+func (c *FieldReader) ReadString(count int64) ([]string, error) {
 	// varchar length, this is the max length, some item is shorter than this length, but they also occupy bytes of max length
 	maxLen, utf, err := stringLen(c.npyReader.Header.Descr.Type)
 	if err != nil || maxLen <= 0 {
