@@ -75,7 +75,7 @@ ReadMediumType(BinlogReaderPtr reader) {
                "medium type must be parsed from stream header");
     int32_t magic_num;
     auto ret = reader->Read(sizeof(magic_num), &magic_num);
-    AssertInfo(ret.ok(), "read binlog failed");
+    AssertInfo(ret.ok(), "read binlog failed: {}", ret.what());
     if (magic_num == MAGIC_NUM) {
         return StorageType::Remote;
     }
@@ -91,7 +91,8 @@ add_vector_payload(std::shared_ptr<arrow::ArrayBuilder> builder,
     auto binary_builder =
         std::dynamic_pointer_cast<arrow::FixedSizeBinaryBuilder>(builder);
     auto ast = binary_builder->AppendValues(values, length);
-    AssertInfo(ast.ok(), "append value to arrow builder failed");
+    AssertInfo(
+        ast.ok(), "append value to arrow builder failed: {}", ast.ToString());
 }
 
 // append values for numeric data
@@ -103,7 +104,8 @@ add_numeric_payload(std::shared_ptr<arrow::ArrayBuilder> builder,
     AssertInfo(builder != nullptr, "empty arrow builder");
     auto numeric_builder = std::dynamic_pointer_cast<BT>(builder);
     auto ast = numeric_builder->AppendValues(start, start + length);
-    AssertInfo(ast.ok(), "append value to arrow builder failed");
+    AssertInfo(
+        ast.ok(), "append value to arrow builder failed: {}", ast.ToString());
 }
 
 void
@@ -164,8 +166,7 @@ AddPayloadToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder,
             break;
         }
         default: {
-            PanicInfo(DataTypeInvalid,
-                      fmt::format("unsupported data type {}", data_type));
+            PanicInfo(DataTypeInvalid, "unsupported data type {}", data_type);
         }
     }
 }
@@ -183,7 +184,8 @@ AddOneStringToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder,
     } else {
         ast = string_builder->Append(str, str_size);
     }
-    AssertInfo(ast.ok(), "append value to arrow builder failed");
+    AssertInfo(
+        ast.ok(), "append value to arrow builder failed: {}", ast.ToString());
 }
 
 void
@@ -199,7 +201,8 @@ AddOneBinaryToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder,
     } else {
         ast = binary_builder->Append(data, length);
     }
-    AssertInfo(ast.ok(), "append value to arrow builder failed");
+    AssertInfo(
+        ast.ok(), "append value to arrow builder failed: {}", ast.ToString());
 }
 
 std::shared_ptr<arrow::ArrayBuilder>
@@ -236,8 +239,7 @@ CreateArrowBuilder(DataType data_type) {
         }
         default: {
             PanicInfo(
-                DataTypeInvalid,
-                fmt::format("unsupported numeric data type {}", data_type));
+                DataTypeInvalid, "unsupported numeric data type {}", data_type);
         }
     }
 }
@@ -246,24 +248,23 @@ std::shared_ptr<arrow::ArrayBuilder>
 CreateArrowBuilder(DataType data_type, int dim) {
     switch (static_cast<DataType>(data_type)) {
         case DataType::VECTOR_FLOAT: {
-            AssertInfo(dim > 0, "invalid dim value");
+            AssertInfo(dim > 0, "invalid dim value: {}", dim);
             return std::make_shared<arrow::FixedSizeBinaryBuilder>(
                 arrow::fixed_size_binary(dim * sizeof(float)));
         }
         case DataType::VECTOR_BINARY: {
-            AssertInfo(dim % 8 == 0 && dim > 0, "invalid dim value");
+            AssertInfo(dim % 8 == 0 && dim > 0, "invalid dim value: {}", dim);
             return std::make_shared<arrow::FixedSizeBinaryBuilder>(
                 arrow::fixed_size_binary(dim / 8));
         }
         case DataType::VECTOR_FLOAT16: {
-            AssertInfo(dim > 0, "invalid dim value");
+            AssertInfo(dim > 0, "invalid dim value: {}", dim);
             return std::make_shared<arrow::FixedSizeBinaryBuilder>(
                 arrow::fixed_size_binary(dim * sizeof(float16)));
         }
         default: {
             PanicInfo(
-                DataTypeInvalid,
-                fmt::format("unsupported vector data type {}", data_type));
+                DataTypeInvalid, "unsupported vector data type {}", data_type);
         }
     }
 }
@@ -302,8 +303,7 @@ CreateArrowSchema(DataType data_type) {
         }
         default: {
             PanicInfo(
-                DataTypeInvalid,
-                fmt::format("unsupported numeric data type {}", data_type));
+                DataTypeInvalid, "unsupported numeric data type {}", data_type);
         }
     }
 }
@@ -312,24 +312,23 @@ std::shared_ptr<arrow::Schema>
 CreateArrowSchema(DataType data_type, int dim) {
     switch (static_cast<DataType>(data_type)) {
         case DataType::VECTOR_FLOAT: {
-            AssertInfo(dim > 0, "invalid dim value");
+            AssertInfo(dim > 0, "invalid dim value: {}", dim);
             return arrow::schema({arrow::field(
                 "val", arrow::fixed_size_binary(dim * sizeof(float)))});
         }
         case DataType::VECTOR_BINARY: {
-            AssertInfo(dim % 8 == 0 && dim > 0, "invalid dim value");
+            AssertInfo(dim % 8 == 0 && dim > 0, "invalid dim value: {}", dim);
             return arrow::schema(
                 {arrow::field("val", arrow::fixed_size_binary(dim / 8))});
         }
         case DataType::VECTOR_FLOAT16: {
-            AssertInfo(dim > 0, "invalid dim value");
+            AssertInfo(dim > 0, "invalid dim value: {}", dim);
             return arrow::schema({arrow::field(
                 "val", arrow::fixed_size_binary(dim * sizeof(float16)))});
         }
         default: {
             PanicInfo(
-                DataTypeInvalid,
-                fmt::format("unsupported vector data type {}", data_type));
+                DataTypeInvalid, "unsupported vector data type {}", data_type);
         }
     }
 }
@@ -348,8 +347,7 @@ GetDimensionFromFileMetaData(const parquet::ColumnDescriptor* schema,
             return schema->type_length() / sizeof(float16);
         }
         default:
-            PanicInfo(DataTypeInvalid,
-                      fmt::format("unsupported data type {}", data_type));
+            PanicInfo(DataTypeInvalid, "unsupported data type {}", data_type);
     }
 }
 
@@ -360,7 +358,8 @@ GetDimensionFromArrowArray(std::shared_ptr<arrow::Array> data,
         case DataType::VECTOR_FLOAT: {
             AssertInfo(
                 data->type()->id() == arrow::Type::type::FIXED_SIZE_BINARY,
-                "inconsistent data type");
+                "inconsistent data type: {}",
+                data->type_id());
             auto array =
                 std::dynamic_pointer_cast<arrow::FixedSizeBinaryArray>(data);
             return array->byte_width() / sizeof(float);
@@ -368,14 +367,14 @@ GetDimensionFromArrowArray(std::shared_ptr<arrow::Array> data,
         case DataType::VECTOR_BINARY: {
             AssertInfo(
                 data->type()->id() == arrow::Type::type::FIXED_SIZE_BINARY,
-                "inconsistent data type");
+                "inconsistent data type: {}",
+                data->type_id());
             auto array =
                 std::dynamic_pointer_cast<arrow::FixedSizeBinaryArray>(data);
             return array->byte_width() * 8;
         }
         default:
-            PanicInfo(DataTypeInvalid,
-                      fmt::format("unsupported data type {}", data_type));
+            PanicInfo(DataTypeInvalid, "unsupported data type {}", data_type);
     }
 }
 
@@ -468,8 +467,7 @@ EncodeAndUploadIndexSlice2(std::shared_ptr<milvus_storage::Space> space,
     auto serialized_index_size = serialized_index_data.size();
     auto status = space->WriteBolb(
         object_key, serialized_index_data.data(), serialized_index_size);
-    AssertInfo(status.ok(),
-               fmt::format("write to space error: {}", status.ToString()));
+    AssertInfo(status.ok(), "write to space error: {}", status.ToString());
     return std::make_pair(std::move(object_key), serialized_index_size);
 }
 
@@ -540,9 +538,13 @@ PutIndexData(ChunkManager* remote_chunk_manager,
     auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
     std::vector<std::future<std::pair<std::string, size_t>>> futures;
     AssertInfo(data_slices.size() == slice_sizes.size(),
-               "inconsistent size of data slices with slice sizes!");
+               "inconsistent data slices size {} with slice sizes {}",
+               data_slices.size(),
+               slice_sizes.size());
     AssertInfo(data_slices.size() == slice_names.size(),
-               "inconsistent size of data slices with slice names!");
+               "inconsistent data slices size {} with slice names size {}",
+               data_slices.size(),
+               slice_names.size());
 
     for (int64_t i = 0; i < data_slices.size(); ++i) {
         futures.push_back(pool.Submit(EncodeAndUploadIndexSlice,
@@ -574,9 +576,13 @@ PutIndexData(std::shared_ptr<milvus_storage::Space> space,
     auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
     std::vector<std::future<std::pair<std::string, size_t>>> futures;
     AssertInfo(data_slices.size() == slice_sizes.size(),
-               "inconsistent size of data slices with slice sizes!");
+               "inconsistent data slices size {} with slice sizes {}",
+               data_slices.size(),
+               slice_sizes.size());
     AssertInfo(data_slices.size() == slice_names.size(),
-               "inconsistent size of data slices with slice names!");
+               "inconsistent data slices size {} with slice names size {}",
+               data_slices.size(),
+               slice_names.size());
 
     for (int64_t i = 0; i < data_slices.size(); ++i) {
         futures.push_back(pool.Submit(EncodeAndUploadIndexSlice2,
@@ -672,8 +678,8 @@ CreateChunkManager(const StorageConfig& storage_config) {
 
         default: {
             PanicInfo(ConfigInvalid,
-                      fmt::format("unsupported storage_config.storage_type {}",
-                                  fmt::underlying(storage_type)));
+                      "unsupported storage_config.storage_type {}",
+                      fmt::underlying(storage_type));
         }
     }
 }

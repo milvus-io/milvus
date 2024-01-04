@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -260,6 +261,39 @@ func (s *WriteBufferSuite) TestGetCheckpoint() {
 
 		checkpoint := s.wb.GetCheckpoint()
 		s.EqualValues(400, checkpoint.GetTimestamp())
+	})
+}
+
+func (s *WriteBufferSuite) TestSyncSegmentsError() {
+	wb, err := newWriteBufferBase(s.channelName, s.metacache, s.storageCache, s.syncMgr, &writeBufferOption{
+		pkStatsFactory: func(vchannel *datapb.SegmentInfo) *metacache.BloomFilterSet {
+			return metacache.NewBloomFilterSet()
+		},
+	})
+	s.Require().NoError(err)
+
+	serializer := syncmgr.NewMockSerializer(s.T())
+
+	wb.serializer = serializer
+
+	segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 1,
+	}, nil)
+	s.metacache.EXPECT().GetSegmentByID(int64(1)).Return(segment, true)
+	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
+
+	s.Run("segment_not_found", func() {
+		serializer.EXPECT().EncodeBuffer(mock.Anything, mock.Anything).Return(nil, merr.WrapErrSegmentNotFound(1)).Once()
+		s.NotPanics(func() {
+			wb.syncSegments(context.Background(), []int64{1})
+		})
+	})
+
+	s.Run("other_err", func() {
+		serializer.EXPECT().EncodeBuffer(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		s.Panics(func() {
+			wb.syncSegments(context.Background(), []int64{1})
+		})
 	})
 }
 

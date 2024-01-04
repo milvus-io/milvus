@@ -51,6 +51,10 @@ func (t *QueryTask) Username() string {
 	return t.req.Req.GetUsername()
 }
 
+func (t *QueryTask) IsGpuIndex() bool {
+	return false
+}
+
 // PreExecute the task, only call once.
 func (t *QueryTask) PreExecute() error {
 	// Update task wait time metric before execute

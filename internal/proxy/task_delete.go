@@ -230,7 +230,7 @@ type deleteRunner struct {
 	tsoAllocatorIns tsoAllocator
 
 	// delete info
-	schema           *schemapb.CollectionSchema
+	schema           *schemaInfo
 	collectionID     UniqueID
 	partitionID      UniqueID
 	partitionKeyMode bool
@@ -264,8 +264,8 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 		return ErrWithLog(log, "Failed to get collection schema", err)
 	}
 
-	dr.partitionKeyMode = hasParitionKeyModeField(dr.schema)
-	// get prititionIDs of delete
+	dr.partitionKeyMode = dr.schema.IsPartitionKeyCollection()
+	// get partitionIDs of delete
 	dr.partitionID = common.InvalidPartitionID
 	if len(dr.req.PartitionName) > 0 {
 		if dr.partitionKeyMode {
@@ -300,12 +300,12 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 }
 
 func (dr *deleteRunner) Run(ctx context.Context) error {
-	plan, err := planparserv2.CreateRetrievePlan(dr.schema, dr.req.Expr)
+	plan, err := planparserv2.CreateRetrievePlan(dr.schema.CollectionSchema, dr.req.Expr)
 	if err != nil {
 		return fmt.Errorf("failed to create expr plan, expr = %s", dr.req.GetExpr())
 	}
 
-	isSimple, pk, numRow := getPrimaryKeysFromPlan(dr.schema, plan)
+	isSimple, pk, numRow := getPrimaryKeysFromPlan(dr.schema.CollectionSchema, plan)
 	if isSimple {
 		// if could get delete.primaryKeys from delete expr
 		err := dr.simpleDelete(ctx, pk, numRow)
@@ -379,7 +379,7 @@ func (dr *deleteRunner) getStreamingQueryAndDelteFunc(plan *planpb.PlanNode) exe
 			zap.Int64("nodeID", nodeID))
 
 		// set plan
-		_, outputFieldIDs := translatePkOutputFields(dr.schema)
+		_, outputFieldIDs := translatePkOutputFields(dr.schema.CollectionSchema)
 		outputFieldIDs = append(outputFieldIDs, common.TimeStampField)
 		plan.OutputFieldIds = outputFieldIDs
 
