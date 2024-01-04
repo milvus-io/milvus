@@ -8,8 +8,6 @@ import (
 	internalpb "github.com/milvus-io/milvus/internal/proto/internalpb"
 	mock "github.com/stretchr/testify/mock"
 
-	schemapb "github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-
 	typeutil "github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -226,19 +224,19 @@ func (_c *MockCache_GetCollectionName_Call) RunAndReturn(run func(context.Contex
 }
 
 // GetCollectionSchema provides a mock function with given fields: ctx, database, collectionName
-func (_m *MockCache) GetCollectionSchema(ctx context.Context, database string, collectionName string) (*schemapb.CollectionSchema, error) {
+func (_m *MockCache) GetCollectionSchema(ctx context.Context, database string, collectionName string) (*schemaInfo, error) {
 	ret := _m.Called(ctx, database, collectionName)
 
-	var r0 *schemapb.CollectionSchema
+	var r0 *schemaInfo
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, string) (*schemapb.CollectionSchema, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) (*schemaInfo, error)); ok {
 		return rf(ctx, database, collectionName)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, string, string) *schemapb.CollectionSchema); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) *schemaInfo); ok {
 		r0 = rf(ctx, database, collectionName)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*schemapb.CollectionSchema)
+			r0 = ret.Get(0).(*schemaInfo)
 		}
 	}
 
@@ -271,12 +269,12 @@ func (_c *MockCache_GetCollectionSchema_Call) Run(run func(ctx context.Context, 
 	return _c
 }
 
-func (_c *MockCache_GetCollectionSchema_Call) Return(_a0 *schemapb.CollectionSchema, _a1 error) *MockCache_GetCollectionSchema_Call {
+func (_c *MockCache_GetCollectionSchema_Call) Return(_a0 *schemaInfo, _a1 error) *MockCache_GetCollectionSchema_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockCache_GetCollectionSchema_Call) RunAndReturn(run func(context.Context, string, string) (*schemapb.CollectionSchema, error)) *MockCache_GetCollectionSchema_Call {
+func (_c *MockCache_GetCollectionSchema_Call) RunAndReturn(run func(context.Context, string, string) (*schemaInfo, error)) *MockCache_GetCollectionSchema_Call {
 	_c.Call.Return(run)
 	return _c
 }

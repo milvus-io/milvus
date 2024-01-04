@@ -245,7 +245,7 @@ func TestCreateIndexTask_PreExecute(t *testing.T) {
 		mock.Anything, // context.Context
 		mock.AnythingOfType("string"),
 		mock.AnythingOfType("string"),
-	).Return(newTestSchema(), nil)
+	).Return(newSchemaInfo(newTestSchema()), nil)
 
 	globalMetaCache = mockCache
 

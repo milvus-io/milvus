@@ -55,7 +55,7 @@ type searchTask struct {
 
 	tr             *timerecord.TimeRecorder
 	collectionName string
-	schema         *schemapb.CollectionSchema
+	schema         *schemaInfo
 	requery        bool
 
 	userOutputFields []string
@@ -179,20 +179,14 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair) (*planpb.QueryIn
 	}, offset, nil
 }
 
-func getOutputFieldIDs(schema *schemapb.CollectionSchema, outputFields []string) (outputFieldIDs []UniqueID, err error) {
+func getOutputFieldIDs(schema *schemaInfo, outputFields []string) (outputFieldIDs []UniqueID, err error) {
 	outputFieldIDs = make([]UniqueID, 0, len(outputFields))
 	for _, name := range outputFields {
-		hitField := false
-		for _, field := range schema.GetFields() {
-			if field.Name == name {
-				outputFieldIDs = append(outputFieldIDs, field.GetFieldID())
-				hitField = true
-				break
-			}
-		}
-		if !hitField {
+		id, ok := schema.MapFieldID(name)
+		if !ok {
 			return nil, fmt.Errorf("Field %s not exist", name)
 		}
+		outputFieldIDs = append(outputFieldIDs, id)
 	}
 	return outputFieldIDs, nil
 }
@@ -297,7 +291,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 			if enableMultipleVectorFields {
 				return errors.New(AnnsFieldKey + " not found in search_params")
 			}
-			vecFieldSchema, err2 := typeutil.GetVectorFieldSchema(t.schema)
+			vecFieldSchema, err2 := typeutil.GetVectorFieldSchema(t.schema.CollectionSchema)
 			if err2 != nil {
 				return errors.New(AnnsFieldKey + " not found in schema")
 			}
@@ -309,7 +303,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		}
 		t.offset = offset
 
-		plan, err := planparserv2.CreateSearchPlan(t.schema, t.request.Dsl, annsField, queryInfo)
+		plan, err := planparserv2.CreateSearchPlan(t.schema.CollectionSchema, t.request.Dsl, annsField, queryInfo)
 		if err != nil {
 			log.Warn("failed to create query plan", zap.Error(err),
 				zap.String("dsl", t.request.Dsl), // may be very large if large term passed.
@@ -487,7 +481,7 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 		zap.Int64s("partitionIDs", t.GetPartitionIDs()),
 		zap.Int("number of valid search results", len(validSearchResults)))
 	tr.CtxRecord(ctx, "reduceResultStart")
-	primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(t.schema)
+	primaryFieldSchema, err := t.schema.GetPkField()
 	if err != nil {
 		log.Warn("failed to get primary field schema", zap.Error(err))
 		return err
@@ -580,7 +574,7 @@ func (t *searchTask) estimateResultSize(nq int64, topK int64) (int64, error) {
 }
 
 func (t *searchTask) Requery() error {
-	pkField, err := typeutil.GetPrimaryFieldSchema(t.schema)
+	pkField, err := t.schema.GetPkField()
 	if err != nil {
 		return err
 	}
