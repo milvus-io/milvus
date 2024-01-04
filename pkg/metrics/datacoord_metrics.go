@@ -283,6 +283,7 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(DataCoordSegmentBinLogFileCount)
 	registry.MustRegister(DataCoordDmlChannelNum)
 	registry.MustRegister(DataCoordCompactedSegmentSize)
+	registry.MustRegister(DataCoordCompactionTaskNum)
 	registry.MustRegister(DataCoordSizeStoredL0Segment)
 	registry.MustRegister(DataCoordRateStoredL0Segment)
 	registry.MustRegister(FlushedSegmentFileNum)
