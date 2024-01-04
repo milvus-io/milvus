@@ -349,7 +349,7 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 
 	reader, err := NewReader(cm, schema, []string{insertPrefix, deltaPrefix}, suite.tsStart, suite.tsEnd)
 	suite.NoError(err)
-	insertData, err := reader.Next(-1)
+	insertData, err := reader.Read()
 	suite.NoError(err)
 
 	pks, err := storage.GetPkFromInsertData(schema, originalInsertData)

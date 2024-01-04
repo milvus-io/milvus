@@ -23,11 +23,11 @@ import (
 )
 
 type Reader interface {
-	Next(count int64) (*storage.InsertData, error)
+	Read() (*storage.InsertData, error)
 	Close()
 }
 
-type ColumnReader interface {
+type FieldReader interface {
 	Next(count int64) (storage.FieldData, error)
 	Close()
 }
@@ -36,6 +36,7 @@ func NewReader(cm storage.ChunkManager,
 	schema *schemapb.CollectionSchema,
 	paths []string,
 	options Options,
+	bufferSize int64,
 ) (Reader, error) {
 	if IsBackup(options) {
 		tsStart, tsEnd, err := ParseTimeRange(options)

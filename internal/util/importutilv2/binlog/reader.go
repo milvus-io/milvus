@@ -17,6 +17,7 @@
 package binlog
 
 import (
+	"context"
 	"encoding/json"
 	"math"
 
@@ -47,18 +48,21 @@ func NewReader(cm storage.ChunkManager,
 		cm:     cm,
 		schema: schema,
 	}
-	err := r.Init(paths, tsStart, tsEnd)
+	err := r.init(paths, tsStart, tsEnd)
 	if err != nil {
 		return nil, err
 	}
 	return r, nil
 }
 
-func (r *reader) Init(paths []string, tsStart, tsEnd uint64) error {
+func (r *reader) init(paths []string, tsStart, tsEnd uint64) error {
 	if tsStart != 0 || tsEnd != math.MaxUint64 {
 		r.filters = append(r.filters, FilterWithTimeRange(tsStart, tsEnd))
 	}
-	insertLogs, deltaLogs, err := listBinlogs(r.cm, paths)
+	if len(paths) < 1 {
+		return merr.WrapErrImportFailed("no insert binlogs to import")
+	}
+	insertLogs, err := listInsertLogs(r.cm, paths[0])
 	if err != nil {
 		return err
 	}
@@ -67,21 +71,31 @@ func (r *reader) Init(paths []string, tsStart, tsEnd uint64) error {
 		return err
 	}
 	r.insertLogs = insertLogs
-	if len(deltaLogs) > 0 {
-		r.deleteData, err = r.ReadDelete(deltaLogs, tsStart, tsEnd)
-		if err != nil {
-			return err
-		}
-		deleteFilter, err := FilterWithDelete(r)
-		if err != nil {
-			return err
-		}
-		r.filters = append(r.filters, deleteFilter)
+
+	if len(paths) < 2 {
+		return nil
 	}
+	deltaLogs, _, err := r.cm.ListWithPrefix(context.Background(), paths[1], true)
+	if err != nil {
+		return err
+	}
+	if len(deltaLogs) == 0 {
+		return nil
+	}
+	r.deleteData, err = r.readDelete(deltaLogs, tsStart, tsEnd)
+	if err != nil {
+		return err
+	}
+
+	deleteFilter, err := FilterWithDelete(r)
+	if err != nil {
+		return err
+	}
+	r.filters = append(r.filters, deleteFilter)
 	return nil
 }
 
-func (r *reader) ReadDelete(deltaLogs []string, tsStart, tsEnd uint64) (*storage.DeleteData, error) {
+func (r *reader) readDelete(deltaLogs []string, tsStart, tsEnd uint64) (*storage.DeleteData, error) {
 	deleteData := storage.NewDeleteData(nil, nil)
 	for _, path := range deltaLogs {
 		reader, err := newBinlogReader(r.cm, path)
@@ -108,7 +122,7 @@ func (r *reader) ReadDelete(deltaLogs []string, tsStart, tsEnd uint64) (*storage
 	return deleteData, nil
 }
 
-func (r *reader) Next(count int64) (*storage.InsertData, error) {
+func (r *reader) Read() (*storage.InsertData, error) {
 	insertData, err := storage.NewInsertData(r.schema)
 	if err != nil {
 		return nil, err
@@ -122,19 +136,19 @@ func (r *reader) Next(count int64) (*storage.InsertData, error) {
 			return nil, merr.WrapErrFieldNotFound(fieldID)
 		}
 		path := binlogs[r.readIdx]
-		cr, err := newColumnReader(r.cm, field, path)
+		fr, err := newFieldReader(r.cm, field, path)
 		if err != nil {
 			return nil, err
 		}
-		fieldData, err := cr.Next(count)
+		fieldData, err := fr.Next(-1)
 		if err != nil {
-			cr.Close()
+			fr.Close()
 			return nil, err
 		}
-		cr.Close()
+		fr.Close()
 		insertData.Data[field.GetFieldID()] = fieldData
 	}
-	insertData, err = r.Filter(insertData)
+	insertData, err = r.filter(insertData)
 	if err != nil {
 		return nil, err
 	}
@@ -142,22 +156,33 @@ func (r *reader) Next(count int64) (*storage.InsertData, error) {
 	return insertData, nil
 }
 
-func (r *reader) Filter(insertData *storage.InsertData) (*storage.InsertData, error) {
+func (r *reader) filter(insertData *storage.InsertData) (*storage.InsertData, error) {
 	if len(r.filters) == 0 {
+		return insertData, nil
+	}
+	masks := make(map[int]struct{}, 0)
+OUTER:
+	for i := 0; i < insertData.GetRowNum(); i++ {
+		row := insertData.GetRow(i)
+		for _, f := range r.filters {
+			if !f(row) {
+				masks[i] = struct{}{}
+				continue OUTER
+			}
+		}
+	}
+	if len(masks) == 0 { // no data will undergo filtration, return directly
 		return insertData, nil
 	}
 	result, err := storage.NewInsertData(r.schema)
 	if err != nil {
 		return nil, err
 	}
-OUTER:
 	for i := 0; i < insertData.GetRowNum(); i++ {
-		row := insertData.GetRow(i)
-		for _, filter := range r.filters {
-			if !filter(row) {
-				continue OUTER
-			}
+		if _, ok := masks[i]; ok {
+			continue
 		}
+		row := insertData.GetRow(i)
 		err = result.Append(row)
 		if err != nil {
 			return nil, err

@@ -21,23 +21,23 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 )
 
-type columnReader struct {
+type fieldReader struct {
 	reader      *storage.BinlogReader
 	fieldSchema *schemapb.FieldSchema
 }
 
-func newColumnReader(cm storage.ChunkManager, fieldSchema *schemapb.FieldSchema, path string) (*columnReader, error) {
+func newFieldReader(cm storage.ChunkManager, fieldSchema *schemapb.FieldSchema, path string) (*fieldReader, error) {
 	reader, err := newBinlogReader(cm, path)
 	if err != nil {
 		return nil, err
 	}
-	return &columnReader{
+	return &fieldReader{
 		reader:      reader,
 		fieldSchema: fieldSchema,
 	}, nil
 }
 
-func (r *columnReader) Next(_ int64) (storage.FieldData, error) {
+func (r *fieldReader) Next(_ int64) (storage.FieldData, error) {
 	fieldData, err := storage.NewFieldData(r.fieldSchema.GetDataType(), r.fieldSchema)
 	if err != nil {
 		return nil, err
@@ -55,6 +55,6 @@ func (r *columnReader) Next(_ int64) (storage.FieldData, error) {
 	return fieldData, nil
 }
 
-func (r *columnReader) Close() {
+func (r *fieldReader) Close() {
 	r.reader.Close()
 }
