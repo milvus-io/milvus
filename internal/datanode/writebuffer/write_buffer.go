@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
@@ -253,13 +254,16 @@ func (wb *writeBufferBase) flushSegments(ctx context.Context, segmentIDs []int64
 }
 
 func (wb *writeBufferBase) syncSegments(ctx context.Context, segmentIDs []int64) {
+	log := log.Ctx(ctx)
 	for _, segmentID := range segmentIDs {
 		syncTask, err := wb.getSyncTask(ctx, segmentID)
 		if err != nil {
-			// TODO check err type
-			// segment info not found
-			log.Ctx(ctx).Warn("segment not found in meta", zap.Int64("segmentID", segmentID))
-			continue
+			if errors.Is(err, merr.ErrSegmentNotFound) {
+				log.Warn("segment not found in meta", zap.Int64("segmentID", segmentID))
+				continue
+			} else {
+				log.Fatal("failed to get sync task", zap.Int64("segmentID", segmentID), zap.Error(err))
+			}
 		}
 
 		// discard Future here, handle error in callback
