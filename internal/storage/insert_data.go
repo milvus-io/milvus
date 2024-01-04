@@ -121,6 +121,7 @@ type FieldData interface {
 	RowNum() int
 	GetRow(i int) any
 	AppendRow(row interface{}) error
+	AppendRows(rows interface{}) error
 	GetDataType() schemapb.DataType
 }
 
@@ -403,6 +404,135 @@ func (data *Float16VectorFieldData) AppendRow(row interface{}) error {
 	v, ok := row.([]byte)
 	if !ok || len(v) != data.Dim*2 {
 		return merr.WrapErrParameterInvalid("[]byte", row, "Wrong row type")
+	}
+	data.Data = append(data.Data, v...)
+	return nil
+}
+
+func (data *BoolFieldData) AppendRows(rows interface{}) error {
+	v, ok := rows.([]bool)
+	if !ok {
+		return merr.WrapErrParameterInvalid("[]bool", rows, "Wrong rows type")
+	}
+	data.Data = append(data.Data, v...)
+	return nil
+}
+
+func (data *Int8FieldData) AppendRows(rows interface{}) error {
+	v, ok := rows.([]int8)
+	if !ok {
+		return merr.WrapErrParameterInvalid("[]int8", rows, "Wrong rows type")
+	}
+	data.Data = append(data.Data, v...)
+	return nil
+}
+
+func (data *Int16FieldData) AppendRows(rows interface{}) error {
+	v, ok := rows.([]int16)
+	if !ok {
+		return merr.WrapErrParameterInvalid("[]int16", rows, "Wrong rows type")
+	}
+	data.Data = append(data.Data, v...)
+	return nil
+}
+
+func (data *Int32FieldData) AppendRows(rows interface{}) error {
+	v, ok := rows.([]int32)
+	if !ok {
+		return merr.WrapErrParameterInvalid("[]int32", rows, "Wrong rows type")
+	}
+	data.Data = append(data.Data, v...)
+	return nil
+}
+
+func (data *Int64FieldData) AppendRows(rows interface{}) error {
+	v, ok := rows.([]int64)
+	if !ok {
+		return merr.WrapErrParameterInvalid("[]int64", rows, "Wrong rows type")
+	}
+	data.Data = append(data.Data, v...)
+	return nil
+}
+
+func (data *FloatFieldData) AppendRows(rows interface{}) error {
+	v, ok := rows.([]float32)
+	if !ok {
+		return merr.WrapErrParameterInvalid("[]float32", rows, "Wrong rows type")
+	}
+	data.Data = append(data.Data, v...)
+	return nil
+}
+
+func (data *DoubleFieldData) AppendRows(rows interface{}) error {
+	v, ok := rows.([]float64)
+	if !ok {
+		return merr.WrapErrParameterInvalid("[]float64", rows, "Wrong rows type")
+	}
+	data.Data = append(data.Data, v...)
+	return nil
+}
+
+func (data *StringFieldData) AppendRows(rows interface{}) error {
+	v, ok := rows.([]string)
+	if !ok {
+		return merr.WrapErrParameterInvalid("[]string", rows, "Wrong rows type")
+	}
+	data.Data = append(data.Data, v...)
+	return nil
+}
+
+func (data *ArrayFieldData) AppendRows(rows interface{}) error {
+	v, ok := rows.([]*schemapb.ScalarField)
+	if !ok {
+		return merr.WrapErrParameterInvalid("[]*schemapb.ScalarField", rows, "Wrong rows type")
+	}
+	data.Data = append(data.Data, v...)
+	return nil
+}
+
+func (data *JSONFieldData) AppendRows(rows interface{}) error {
+	v, ok := rows.([][]byte)
+	if !ok {
+		return merr.WrapErrParameterInvalid("[][]byte", rows, "Wrong rows type")
+	}
+	data.Data = append(data.Data, v...)
+	return nil
+}
+
+// AppendRows appends FLATTEN vectors to field data.
+func (data *BinaryVectorFieldData) AppendRows(rows interface{}) error {
+	v, ok := rows.([]byte)
+	if !ok {
+		return merr.WrapErrParameterInvalid("[]byte", rows, "Wrong rows type")
+	}
+	if len(v)%(data.Dim/8) != 0 {
+		return merr.WrapErrParameterInvalid(data.Dim/8, len(v), "Wrong vector size")
+	}
+	data.Data = append(data.Data, v...)
+	return nil
+}
+
+// AppendRows appends FLATTEN vectors to field data.
+func (data *FloatVectorFieldData) AppendRows(rows interface{}) error {
+	v, ok := rows.([]float32)
+	if !ok || len(v)%(data.Dim) != 0 {
+		return merr.WrapErrParameterInvalid("[]float32", rows, "Wrong rows type")
+	}
+	if len(v)%(data.Dim) != 0 {
+		return merr.WrapErrParameterInvalid(data.Dim, len(v), "Wrong vector size")
+	}
+	data.Data = append(data.Data, v...)
+	return nil
+}
+
+// AppendRows appends FLATTEN vectors to field data.
+func (data *Float16VectorFieldData) AppendRows(rows interface{}) error {
+	v, ok := rows.([]byte)
+	if !ok || len(v)%(data.Dim*2) != 0 {
+		return merr.WrapErrParameterInvalid("[]byte", rows, "Wrong rows type")
+	}
+	if len(v)%(data.Dim*2) != 0 {
+		return merr.WrapErrParameterInvalid(data.Dim*2, len(v), "Wrong vector size")
 	}
 	data.Data = append(data.Data, v...)
 	return nil

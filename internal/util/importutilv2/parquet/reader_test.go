@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"math/rand"
 	"os"
 	"testing"
@@ -321,31 +322,28 @@ func buildArrayData(dataType, elementType schemapb.DataType, dim, rows int, isBi
 
 func writeParquet(w io.Writer, schema *schemapb.CollectionSchema, numRows int) error {
 	pqSchema := convertMilvusSchemaToArrowSchema(schema)
-	fw, err := pqarrow.NewFileWriter(pqSchema, w, parquet.NewWriterProperties(parquet.WithMaxRowGroupLength(1000)), pqarrow.DefaultWriterProps())
+	fw, err := pqarrow.NewFileWriter(pqSchema, w, parquet.NewWriterProperties(parquet.WithMaxRowGroupLength(int64(numRows))), pqarrow.DefaultWriterProps())
 	if err != nil {
 		return err
 	}
 	defer fw.Close()
 
-	batch := 1000
-	for i := 0; i <= numRows/batch; i++ {
-		columns := make([]arrow.Array, 0, len(schema.Fields))
-		for _, field := range schema.Fields {
-			var dim int64 = 1
-			if typeutil.IsVectorType(field.GetDataType()) {
-				dim, err = typeutil.GetDim(field)
-				if err != nil {
-					return err
-				}
+	columns := make([]arrow.Array, 0, len(schema.Fields))
+	for _, field := range schema.Fields {
+		var dim int64 = 1
+		if typeutil.IsVectorType(field.GetDataType()) {
+			dim, err = typeutil.GetDim(field)
+			if err != nil {
+				return err
 			}
-			columnData := buildArrayData(field.DataType, field.ElementType, int(dim), batch, field.Name == "FieldBinaryVector2")
-			columns = append(columns, columnData)
 		}
-		recordBatch := array.NewRecord(pqSchema, columns, int64(batch))
-		err = fw.Write(recordBatch)
-		if err != nil {
-			return err
-		}
+		columnData := buildArrayData(field.DataType, field.ElementType, int(dim), numRows, field.Name == "FieldBinaryVector2")
+		columns = append(columns, columnData)
+	}
+	recordBatch := array.NewRecord(pqSchema, columns, int64(numRows))
+	err = fw.Write(recordBatch)
+	if err != nil {
+		return err
 	}
 
 	return nil
@@ -380,7 +378,7 @@ func (s *ReaderSuite) run(dt schemapb.DataType) {
 		},
 	}
 
-	filePath := "/tmp/test_reader.parquet"
+	filePath := fmt.Sprintf("/tmp/test_%d_reader.parquet", rand.Int())
 	defer os.Remove(filePath)
 	wf, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE, 0o666)
 	assert.NoError(s.T(), err)
@@ -393,7 +391,7 @@ func (s *ReaderSuite) run(dt schemapb.DataType) {
 	assert.NoError(s.T(), err)
 	cmReader, err := cm.Reader(ctx, filePath)
 	assert.NoError(s.T(), err)
-	reader, err := NewReader(schema, cmReader)
+	reader, err := NewReader(schema, cmReader, math.MaxInt)
 	s.NoError(err)
 
 	checkFn := func(actualInsertData *storage.InsertData, offsetBegin, expectRows int) {
@@ -414,12 +412,9 @@ func (s *ReaderSuite) run(dt schemapb.DataType) {
 		}
 	}
 
-	res, err := reader.Next(int64(s.numRows / 2))
+	res, err := reader.Read()
 	s.NoError(err)
-	checkFn(res, 0, s.numRows/2)
-	res, err = reader.Next(int64(s.numRows / 2))
-	s.NoError(err)
-	checkFn(res, s.numRows/2, s.numRows/2)
+	checkFn(res, 0, s.numRows)
 }
 
 func (s *ReaderSuite) TestReadScalarFields() {
