@@ -29,13 +29,17 @@ import (
 	"unsafe"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/samber/lo"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -123,6 +127,7 @@ type Collection struct {
 	loadType      querypb.LoadType
 	metricType    atomic.String
 	schema        atomic.Pointer[schemapb.CollectionSchema]
+	isGpuIndex    bool
 
 	refCount *atomic.Uint32
 }
@@ -135,6 +140,11 @@ func (c *Collection) ID() int64 {
 // Schema returns the schema of collection
 func (c *Collection) Schema() *schemapb.CollectionSchema {
 	return c.schema.Load()
+}
+
+// IsGpuIndex returns a boolean value indicating whether the collection is using a GPU index.
+func (c *Collection) IsGpuIndex() bool {
+	return c.isGpuIndex
 }
 
 // getPartitionIDs return partitionIDs of collection
@@ -205,6 +215,7 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 
 	collection := C.NewCollection(unsafe.Pointer(&schemaBlob[0]), (C.int64_t)(len(schemaBlob)))
 
+	isGpuIndex := false
 	if indexMeta != nil && len(indexMeta.GetIndexMetas()) > 0 && indexMeta.GetMaxIndexRowCount() > 0 {
 		indexMetaBlob, err := proto.Marshal(indexMeta)
 		if err != nil {
@@ -212,6 +223,15 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 			return nil
 		}
 		C.SetIndexMeta(collection, unsafe.Pointer(&indexMetaBlob[0]), (C.int64_t)(len(indexMetaBlob)))
+
+		for _, indexMeta := range indexMeta.GetIndexMetas() {
+			isGpuIndex = lo.ContainsBy(indexMeta.GetIndexParams(), func(param *commonpb.KeyValuePair) bool {
+				return param.Key == common.IndexTypeKey && indexparamcheck.IsGpuIndex(param.Value)
+			})
+			if isGpuIndex {
+				break
+			}
+		}
 	}
 
 	coll := &Collection{
@@ -220,6 +240,7 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 		partitions:    typeutil.NewConcurrentSet[int64](),
 		loadType:      loadType,
 		refCount:      atomic.NewUint32(0),
+		isGpuIndex:    isGpuIndex,
 	}
 	coll.schema.Store(schema)
 

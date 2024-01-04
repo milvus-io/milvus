@@ -1754,15 +1754,16 @@ type queryNodeConfig struct {
 	// chunk cache
 	ReadAheadPolicy ParamItem `refreshable:"false"`
 
-	GroupEnabled         ParamItem `refreshable:"true"`
-	MaxReceiveChanSize   ParamItem `refreshable:"false"`
-	MaxUnsolvedQueueSize ParamItem `refreshable:"true"`
-	MaxReadConcurrency   ParamItem `refreshable:"true"`
-	MaxGroupNQ           ParamItem `refreshable:"true"`
-	TopKMergeRatio       ParamItem `refreshable:"true"`
-	CPURatio             ParamItem `refreshable:"true"`
-	MaxTimestampLag      ParamItem `refreshable:"true"`
-	GCEnabled            ParamItem `refreshable:"true"`
+	GroupEnabled          ParamItem `refreshable:"true"`
+	MaxReceiveChanSize    ParamItem `refreshable:"false"`
+	MaxUnsolvedQueueSize  ParamItem `refreshable:"true"`
+	MaxReadConcurrency    ParamItem `refreshable:"true"`
+	MaxGpuReadConcurrency ParamItem `refreshable:"false"`
+	MaxGroupNQ            ParamItem `refreshable:"true"`
+	TopKMergeRatio        ParamItem `refreshable:"true"`
+	CPURatio              ParamItem `refreshable:"true"`
+	MaxTimestampLag       ParamItem `refreshable:"true"`
+	GCEnabled             ParamItem `refreshable:"true"`
 
 	GCHelperEnabled     ParamItem `refreshable:"false"`
 	MinimumGOGCConfig   ParamItem `refreshable:"false"`
@@ -1999,6 +2000,13 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Export: true,
 	}
 	p.MaxReadConcurrency.Init(base.mgr)
+
+	p.MaxGpuReadConcurrency = ParamItem{
+		Key:          "queryNode.scheduler.maGpuReadConcurrency",
+		Version:      "2.0.0",
+		DefaultValue: "8",
+	}
+	p.MaxGpuReadConcurrency.Init(base.mgr)
 
 	p.MaxUnsolvedQueueSize = ParamItem{
 		Key:          "queryNode.scheduler.unsolvedQueueSize",

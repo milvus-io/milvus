@@ -23,7 +23,7 @@ require (
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
 	github.com/klauspost/compress v1.16.7
 	github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d
-	github.com/milvus-io/milvus-proto/go-api/v2 v2.3.4-0.20231220103033-abd0d12ba669
+	github.com/milvus-io/milvus-proto/go-api/v2 v2.3.4-0.20231228051838-b5442d755fa4
 	github.com/minio/minio-go/v7 v7.0.61
 	github.com/prometheus/client_golang v1.14.0
 	github.com/prometheus/client_model v0.3.0
@@ -53,7 +53,6 @@ require (
 	golang.org/x/text v0.13.0
 	google.golang.org/grpc v1.57.0
 	google.golang.org/grpc/examples v0.0.0-20220617181431-3e7b97febc7f
-	stathat.com/c/consistent v1.0.0
 )
 
 require github.com/apache/arrow/go/v12 v12.0.1
@@ -244,10 +243,10 @@ replace (
 	github.com/bketelsen/crypt => github.com/bketelsen/crypt v0.0.4 // Fix security alert for core-os/etcd
 	github.com/expr-lang/expr => github.com/SimFG/expr v0.0.0-20231218130003-94d085776dc5
 	github.com/go-kit/kit => github.com/go-kit/kit v0.1.0
+	// github.com/milvus-io/milvus-storage/go => ../milvus-storage/go
 	github.com/milvus-io/milvus/pkg => ./pkg
 	github.com/streamnative/pulsarctl => github.com/xiaofan-luan/pulsarctl v0.5.1
 	github.com/tecbot/gorocksdb => github.com/milvus-io/gorocksdb v0.0.0-20220624081344-8c5f4212846b // indirect
-// github.com/milvus-io/milvus-storage/go => ../milvus-storage/go
 )
 
 exclude github.com/apache/pulsar-client-go/oauth2 v0.0.0-20211108044248-fe3b7c4e445b
