@@ -897,15 +897,14 @@ func TestProxy(t *testing.T) {
 	t.Run("show collections", func(t *testing.T) {
 		defer wg.Done()
 		resp, err := proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
-			Base:            nil,
-			DbName:          dbName,
-			TimeStamp:       0,
-			Type:            milvuspb.ShowType_All,
-			CollectionNames: nil,
+			Base:      nil,
+			DbName:    dbName,
+			TimeStamp: 0,
+			Type:      milvuspb.ShowType_All,
 		})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-		assert.Equal(t, 1, len(resp.CollectionNames), resp.CollectionNames)
+		assert.True(t, merr.Ok(resp.GetStatus()))
+		assert.Contains(t, resp.CollectionNames, collectionName, "collections: %v", resp.CollectionNames)
 	})
 
 	wg.Add(1)
@@ -2386,7 +2385,7 @@ func TestProxy(t *testing.T) {
 		})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-		assert.Equal(t, 0, len(resp.CollectionNames))
+		assert.NotContains(t, resp.CollectionNames, collectionName)
 	})
 
 	username := "test_username_" + funcutil.RandomString(15)

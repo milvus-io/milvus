@@ -35,11 +35,12 @@ type DeleteBuffer[T timed] interface {
 	Put(T)
 	ListAfter(uint64) []T
 	SafeTs() uint64
+	TryDiscard(uint64)
 }
 
 func NewDoubleCacheDeleteBuffer[T timed](startTs uint64, maxSize int64) DeleteBuffer[T] {
 	return &doubleCacheBuffer[T]{
-		head:    newDoubleCacheItem[T](startTs, maxSize),
+		head:    newCacheBlock[T](startTs, maxSize),
 		maxSize: maxSize,
 		ts:      startTs,
 	}
@@ -48,13 +49,16 @@ func NewDoubleCacheDeleteBuffer[T timed](startTs uint64, maxSize int64) DeleteBu
 // doubleCacheBuffer implements DeleteBuffer with fixed sized double cache.
 type doubleCacheBuffer[T timed] struct {
 	mut        sync.RWMutex
-	head, tail *doubleCacheItem[T]
+	head, tail *cacheBlock[T]
 	maxSize    int64
 	ts         uint64
 }
 
 func (c *doubleCacheBuffer[T]) SafeTs() uint64 {
 	return c.ts
+}
+
+func (c *doubleCacheBuffer[T]) TryDiscard(_ uint64) {
 }
 
 // Put implements DeleteBuffer.
@@ -86,18 +90,19 @@ func (c *doubleCacheBuffer[T]) ListAfter(ts uint64) []T {
 // evict sets head as tail and evicts tail.
 func (c *doubleCacheBuffer[T]) evict(newTs uint64) {
 	c.tail = c.head
-	c.head = newDoubleCacheItem[T](newTs, c.maxSize/2)
+	c.head = newCacheBlock[T](newTs, c.maxSize/2)
 	c.ts = c.tail.headTs
 }
 
-func newDoubleCacheItem[T timed](ts uint64, maxSize int64) *doubleCacheItem[T] {
-	return &doubleCacheItem[T]{
+func newCacheBlock[T timed](ts uint64, maxSize int64, elements ...T) *cacheBlock[T] {
+	return &cacheBlock[T]{
 		headTs:  ts,
 		maxSize: maxSize,
+		data:    elements,
 	}
 }
 
-type doubleCacheItem[T timed] struct {
+type cacheBlock[T timed] struct {
 	mut     sync.RWMutex
 	headTs  uint64
 	size    int64
@@ -108,7 +113,7 @@ type doubleCacheItem[T timed] struct {
 
 // Cache adds entry into cache item.
 // returns error if item is full
-func (c *doubleCacheItem[T]) Put(entry T) error {
+func (c *cacheBlock[T]) Put(entry T) error {
 	c.mut.Lock()
 	defer c.mut.Unlock()
 
@@ -122,7 +127,7 @@ func (c *doubleCacheItem[T]) Put(entry T) error {
 }
 
 // ListAfter returns entries of which ts after provided value.
-func (c *doubleCacheItem[T]) ListAfter(ts uint64) []T {
+func (c *cacheBlock[T]) ListAfter(ts uint64) []T {
 	c.mut.RLock()
 	defer c.mut.RUnlock()
 	idx := sort.Search(len(c.data), func(idx int) bool {

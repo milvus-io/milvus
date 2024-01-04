@@ -1771,6 +1771,7 @@ type queryNodeConfig struct {
 
 	// delete buffer
 	MaxSegmentDeleteBuffer ParamItem `refreshable:"false"`
+	DeleteBufferBlockSize  ParamItem `refreshable:"false"`
 
 	// loader
 	IoPoolSize ParamItem `refreshable:"false"`
@@ -2121,6 +2122,14 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 	}
 	p.MaxSegmentDeleteBuffer.Init(base.mgr)
 
+	p.DeleteBufferBlockSize = ParamItem{
+		Key:          "queryNode.deleteBufferBlockSize",
+		Version:      "2.3.5",
+		Doc:          "delegator delete buffer block size when using list delete buffer",
+		DefaultValue: "1048576", // 1MB
+	}
+	p.DeleteBufferBlockSize.Init(base.mgr)
+
 	p.IoPoolSize = ParamItem{
 		Key:          "queryNode.ioPoolSize",
 		Version:      "2.3.0",
@@ -2238,6 +2247,7 @@ type dataCoordConfig struct {
 	GCInterval              ParamItem `refreshable:"false"`
 	GCMissingTolerance      ParamItem `refreshable:"false"`
 	GCDropTolerance         ParamItem `refreshable:"false"`
+	GCRemoveConcurrent      ParamItem `refreshable:"false"`
 	EnableActiveStandby     ParamItem `refreshable:"false"`
 
 	BindIndexNodeMode          ParamItem `refreshable:"false"`
@@ -2586,6 +2596,15 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.GCDropTolerance.Init(base.mgr)
+
+	p.GCRemoveConcurrent = ParamItem{
+		Key:          "dataCoord.gc.removeConcurrent",
+		Version:      "2.3.4",
+		DefaultValue: "32",
+		Doc:          "number of concurrent goroutines to remove dropped s3 objects",
+		Export:       true,
+	}
+	p.GCRemoveConcurrent.Init(base.mgr)
 
 	p.EnableActiveStandby = ParamItem{
 		Key:          "dataCoord.enableActiveStandby",

@@ -51,6 +51,15 @@ var (
 			Help:      "counter of vectors successfully inserted",
 		}, []string{nodeIDLabelName})
 
+	// ProxyUpsertVectors record the number of vectors upsert successfully.
+	ProxyUpsertVectors = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "upsert_vectors_count",
+			Help:      "counter of vectors successfully upserted",
+		}, []string{nodeIDLabelName})
+
 	// ProxySQLatency record the latency of search successfully.
 	ProxySQLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -295,6 +304,7 @@ func RegisterProxy(registry *prometheus.Registry) {
 	registry.MustRegister(ProxyReceivedNQ)
 	registry.MustRegister(ProxySearchVectors)
 	registry.MustRegister(ProxyInsertVectors)
+	registry.MustRegister(ProxyUpsertVectors)
 
 	registry.MustRegister(ProxySQLatency)
 	registry.MustRegister(ProxyCollectionSQLatency)

@@ -73,6 +73,24 @@ func TestUpsertTask_CheckAligned(t *testing.T) {
 
 	numRows := 20
 	dim := 128
+	collSchema := &schemapb.CollectionSchema{
+		Name:        "TestUpsertTask_checkRowNums",
+		Description: "TestUpsertTask_checkRowNums",
+		AutoID:      false,
+		Fields: []*schemapb.FieldSchema{
+			boolFieldSchema,
+			int8FieldSchema,
+			int16FieldSchema,
+			int32FieldSchema,
+			int64FieldSchema,
+			floatFieldSchema,
+			doubleFieldSchema,
+			floatVectorFieldSchema,
+			binaryVectorFieldSchema,
+			varCharFieldSchema,
+		},
+	}
+	schema := newSchemaInfo(collSchema)
 	case2 := upsertTask{
 		req: &milvuspb.UpsertRequest{
 			NumRows:    uint32(numRows),
@@ -80,23 +98,7 @@ func TestUpsertTask_CheckAligned(t *testing.T) {
 		},
 		rowIDs:     generateInt64Array(numRows),
 		timestamps: generateUint64Array(numRows),
-		schema: &schemapb.CollectionSchema{
-			Name:        "TestUpsertTask_checkRowNums",
-			Description: "TestUpsertTask_checkRowNums",
-			AutoID:      false,
-			Fields: []*schemapb.FieldSchema{
-				boolFieldSchema,
-				int8FieldSchema,
-				int16FieldSchema,
-				int32FieldSchema,
-				int64FieldSchema,
-				floatFieldSchema,
-				doubleFieldSchema,
-				floatVectorFieldSchema,
-				binaryVectorFieldSchema,
-				varCharFieldSchema,
-			},
-		},
+		schema:     schema,
 		upsertMsg: &msgstream.UpsertMsg{
 			InsertMsg: &msgstream.InsertMsg{
 				InsertRequest: msgpb.InsertRequest{},
