@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 )
@@ -59,6 +60,7 @@ func (c *run) printBanner(w io.Writer) {
 	fmt.Fprintln(w, "GitCommit: "+GitCommit)
 	fmt.Fprintln(w, "GoVersion: "+GoVersion)
 	fmt.Fprintln(w)
+	metrics.BuildInfo.WithLabelValues(BuildTags, BuildTime, GitCommit).Set(1)
 }
 
 func (c *run) printHardwareInfo(w io.Writer) {
