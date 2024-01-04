@@ -294,7 +294,7 @@ func (cit *createIndexTask) getIndexedField(ctx context.Context) (*schemapb.Fiel
 		log.Error("failed to get collection schema", zap.Error(err))
 		return nil, fmt.Errorf("failed to get collection schema: %s", err)
 	}
-	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
+	schemaHelper, err := typeutil.CreateSchemaHelper(schema.CollectionSchema)
 	if err != nil {
 		log.Error("failed to parse collection schema", zap.Error(err))
 		return nil, fmt.Errorf("failed to parse collection schema: %s", err)
@@ -616,7 +616,7 @@ func (dit *describeIndexTask) Execute(ctx context.Context) error {
 		log.Error("failed to get collection schema", zap.Error(err))
 		return fmt.Errorf("failed to get collection schema: %s", err)
 	}
-	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
+	schemaHelper, err := typeutil.CreateSchemaHelper(schema.CollectionSchema)
 	if err != nil {
 		log.Error("failed to parse collection schema", zap.Error(err))
 		return fmt.Errorf("failed to parse collection schema: %s", err)
@@ -740,7 +740,7 @@ func (dit *getIndexStatisticsTask) Execute(ctx context.Context) error {
 		log.Error("failed to get collection schema", zap.String("collection_name", dit.GetCollectionName()), zap.Error(err))
 		return fmt.Errorf("failed to get collection schema: %s", dit.GetCollectionName())
 	}
-	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
+	schemaHelper, err := typeutil.CreateSchemaHelper(schema.CollectionSchema)
 	if err != nil {
 		log.Error("failed to parse collection schema", zap.String("collection_name", schema.GetName()), zap.Error(err))
 		return fmt.Errorf("failed to parse collection schema: %s", dit.GetCollectionName())

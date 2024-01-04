@@ -849,10 +849,22 @@ func Test_createCntPlan(t *testing.T) {
 
 func Test_queryTask_createPlan(t *testing.T) {
 	t.Run("match count rule", func(t *testing.T) {
+		collSchema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         "a",
+					IsPrimaryKey: true,
+					DataType:     schemapb.DataType_Int64,
+				},
+			},
+		}
+		schema := newSchemaInfo(collSchema)
 		tsk := &queryTask{
 			request: &milvuspb.QueryRequest{
 				OutputFields: []string{"count(*)"},
 			},
+			schema: schema,
 		}
 		err := tsk.createPlan(context.TODO())
 		assert.NoError(t, err)
@@ -866,13 +878,14 @@ func Test_queryTask_createPlan(t *testing.T) {
 			request: &milvuspb.QueryRequest{
 				OutputFields: []string{"a"},
 			},
+			schema: &schemaInfo{},
 		}
 		err := tsk.createPlan(context.TODO())
 		assert.Error(t, err)
 	})
 
 	t.Run("invalid expression", func(t *testing.T) {
-		schema := &schemapb.CollectionSchema{
+		collSchema := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{
 					FieldID:      100,
@@ -882,6 +895,7 @@ func Test_queryTask_createPlan(t *testing.T) {
 				},
 			},
 		}
+		schema := newSchemaInfo(collSchema)
 
 		tsk := &queryTask{
 			schema: schema,
@@ -895,7 +909,7 @@ func Test_queryTask_createPlan(t *testing.T) {
 	})
 
 	t.Run("invalid output fields", func(t *testing.T) {
-		schema := &schemapb.CollectionSchema{
+		collSchema := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{
 					FieldID:      100,
@@ -905,6 +919,7 @@ func Test_queryTask_createPlan(t *testing.T) {
 				},
 			},
 		}
+		schema := newSchemaInfo(collSchema)
 
 		tsk := &queryTask{
 			schema: schema,
