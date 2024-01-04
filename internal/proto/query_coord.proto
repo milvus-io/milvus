@@ -586,6 +586,7 @@ message SyncAction {
   repeated int64 sealedInTarget = 8;
   int64 TargetVersion = 9;
   repeated int64 droppedInTarget  = 10; 
+  msg.MsgPosition checkpoint = 11;
 }
 
 message SyncDistributionRequest {

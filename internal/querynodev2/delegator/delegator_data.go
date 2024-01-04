@@ -742,7 +742,7 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 }
 
 func (sd *shardDelegator) SyncTargetVersion(newVersion int64, growingInTarget []int64,
-	sealedInTarget []int64, droppedInTarget []int64,
+	sealedInTarget []int64, droppedInTarget []int64, checkpoint *msgpb.MsgPosition,
 ) {
 	growings := sd.segmentManager.GetBy(
 		segments.WithType(segments.SegmentTypeGrowing),
@@ -774,6 +774,7 @@ func (sd *shardDelegator) SyncTargetVersion(newVersion int64, growingInTarget []
 			zap.Int64s("growingSegments", redundantGrowingIDs))
 	}
 	sd.distribution.SyncTargetVersion(newVersion, growingInTarget, sealedInTarget, redundantGrowingIDs)
+	sd.deleteBuffer.TryDiscard(checkpoint.GetTimestamp())
 }
 
 func (sd *shardDelegator) GetTargetVersion() int64 {
