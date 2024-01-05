@@ -26,14 +26,6 @@ import (
 )
 
 const (
-	CompactTypeI         = "compactTypeI"
-	CompactTypeII        = "compactTypeII"
-	CompactInputLabel    = "input"
-	CompactInput2Label   = "input2"
-	CompactOutputLabel   = "output"
-	compactIOLabelName   = "IO"
-	compactTypeLabelName = "compactType"
-
 	InsertFileLabel          = "insert_file"
 	DeleteFileLabel          = "delete_file"
 	StatFileLabel            = "stat_file"
@@ -172,6 +164,18 @@ var (
 			Buckets:   buckets,
 		}, []string{})
 
+	DataCoordCompactionTaskNum = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "compaction_task_num",
+			Help:      "Number of compaction tasks currently",
+		}, []string{
+			nodeIDLabelName,
+			compactionTypeLabelName,
+			statusLabelName,
+		})
+
 	FlushedSegmentFileNum = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
@@ -226,7 +230,7 @@ var (
 			Name:      "segment_compact_duration",
 			Help:      "time spent on each segment flush",
 			Buckets:   []float64{0.1, 0.5, 1, 5, 10, 20, 50, 100, 250, 500, 1000, 3600, 5000, 10000}, // unit seconds
-		}, []string{compactTypeLabelName})
+		}, []string{})
 
 	DataCoordCompactLoad = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -234,15 +238,8 @@ var (
 			Subsystem: typeutil.DataCoordRole,
 			Name:      "compaction_load",
 			Help:      "Information on the input and output of compaction",
-		}, []string{compactTypeLabelName, compactIOLabelName})
+		}, []string{})
 
-	DataCoordNumCompactionTask = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: milvusNamespace,
-			Subsystem: typeutil.DataCoordRole,
-			Name:      "num_compaction_tasks",
-			Help:      "Number of compaction tasks currently",
-		}, []string{statusLabelName})
 	*/
 
 	// IndexRequestCounter records the number of the index requests.
@@ -286,6 +283,7 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(DataCoordSegmentBinLogFileCount)
 	registry.MustRegister(DataCoordDmlChannelNum)
 	registry.MustRegister(DataCoordCompactedSegmentSize)
+	registry.MustRegister(DataCoordCompactionTaskNum)
 	registry.MustRegister(DataCoordSizeStoredL0Segment)
 	registry.MustRegister(DataCoordRateStoredL0Segment)
 	registry.MustRegister(FlushedSegmentFileNum)

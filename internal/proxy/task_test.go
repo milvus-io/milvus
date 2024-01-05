@@ -434,7 +434,7 @@ func TestTranslateOutputFields(t *testing.T) {
 	var userOutputFields []string
 	var err error
 
-	schema := &schemapb.CollectionSchema{
+	collSchema := &schemapb.CollectionSchema{
 		Name:        "TestTranslateOutputFields",
 		Description: "TestTranslateOutputFields",
 		AutoID:      false,
@@ -446,6 +446,7 @@ func TestTranslateOutputFields(t *testing.T) {
 			{Name: float16VectorFieldName, FieldID: 102, DataType: schemapb.DataType_Float16Vector},
 		},
 	}
+	schema := newSchemaInfo(collSchema)
 
 	outputFields, userOutputFields, err = translateOutputFields([]string{}, schema, false)
 	assert.Equal(t, nil, err)
@@ -527,7 +528,7 @@ func TestTranslateOutputFields(t *testing.T) {
 	assert.Error(t, err)
 
 	t.Run("enable dynamic schema", func(t *testing.T) {
-		schema := &schemapb.CollectionSchema{
+		collSchema := &schemapb.CollectionSchema{
 			Name:               "TestTranslateOutputFields",
 			Description:        "TestTranslateOutputFields",
 			AutoID:             false,
@@ -540,6 +541,7 @@ func TestTranslateOutputFields(t *testing.T) {
 				{Name: common.MetaFieldName, FieldID: 102, DataType: schemapb.DataType_JSON, IsDynamic: true},
 			},
 		}
+		schema := newSchemaInfo(collSchema)
 
 		outputFields, userOutputFields, err = translateOutputFields([]string{"A", idFieldName}, schema, true)
 		assert.Equal(t, nil, err)
@@ -682,10 +684,36 @@ func TestCreateCollectionTask(t *testing.T) {
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 
+		// too many vector fields
+		schema = proto.Clone(schemaBackup).(*schemapb.CollectionSchema)
+		schema.Fields = append(schema.Fields, schema.Fields[0])
+		for i := 0; i < Params.ProxyCfg.MaxVectorFieldNum.GetAsInt(); i++ {
+			schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+				FieldID:      101,
+				Name:         floatVecField + "_" + strconv.Itoa(i),
+				IsPrimaryKey: false,
+				Description:  "",
+				DataType:     schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.DimKey,
+						Value: strconv.Itoa(testVecDim),
+					},
+				},
+				IndexParams: nil,
+				AutoID:      false,
+			})
+		}
+		tooManyVectorFieldsSchema, err := proto.Marshal(schema)
+		assert.NoError(t, err)
+		task.CreateCollectionRequest.Schema = tooManyVectorFieldsSchema
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+
 		task.CreateCollectionRequest = reqBackup
 
 		// validateCollectionName
-
+		schema = proto.Clone(schemaBackup).(*schemapb.CollectionSchema)
 		schema.Name = " " // empty
 		emptyNameSchema, err := proto.Marshal(schema)
 		assert.NoError(t, err)
@@ -1296,7 +1324,7 @@ func TestDropPartitionTask(t *testing.T) {
 		mock.AnythingOfType("string"),
 		mock.AnythingOfType("string"),
 		mock.AnythingOfType("string"),
-	).Return(&schemapb.CollectionSchema{}, nil)
+	).Return(newSchemaInfo(&schemapb.CollectionSchema{}), nil)
 	globalMetaCache = mockCache
 
 	task := &dropPartitionTask{
@@ -1347,7 +1375,7 @@ func TestDropPartitionTask(t *testing.T) {
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
-		).Return(&schemapb.CollectionSchema{}, nil)
+		).Return(newSchemaInfo(&schemapb.CollectionSchema{}), nil)
 		globalMetaCache = mockCache
 		task.PartitionName = "partition1"
 		err = task.PreExecute(ctx)
@@ -1374,7 +1402,7 @@ func TestDropPartitionTask(t *testing.T) {
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
-		).Return(&schemapb.CollectionSchema{}, nil)
+		).Return(newSchemaInfo(&schemapb.CollectionSchema{}), nil)
 		globalMetaCache = mockCache
 		err = task.PreExecute(ctx)
 		assert.NoError(t, err)
@@ -1400,7 +1428,7 @@ func TestDropPartitionTask(t *testing.T) {
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
-		).Return(&schemapb.CollectionSchema{}, nil)
+		).Return(newSchemaInfo(&schemapb.CollectionSchema{}), nil)
 		globalMetaCache = mockCache
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
@@ -2110,7 +2138,7 @@ func Test_createIndexTask_getIndexedField(t *testing.T) {
 			mock.Anything, // context.Context
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
-		).Return(&schemapb.CollectionSchema{
+		).Return(newSchemaInfo(&schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{
 					FieldID:      100,
@@ -2127,7 +2155,7 @@ func Test_createIndexTask_getIndexedField(t *testing.T) {
 					AutoID: false,
 				},
 			},
-		}, nil)
+		}), nil)
 
 		globalMetaCache = cache
 		field, err := cit.getIndexedField(context.Background())
@@ -2153,7 +2181,7 @@ func Test_createIndexTask_getIndexedField(t *testing.T) {
 			mock.Anything, // context.Context
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
-		).Return(&schemapb.CollectionSchema{
+		).Return(newSchemaInfo(&schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{
 					Name: fieldName,
@@ -2162,7 +2190,7 @@ func Test_createIndexTask_getIndexedField(t *testing.T) {
 					Name: fieldName, // duplicate
 				},
 			},
-		}, nil)
+		}), nil)
 		globalMetaCache = cache
 		_, err := cit.getIndexedField(context.Background())
 		assert.Error(t, err)
@@ -2174,13 +2202,13 @@ func Test_createIndexTask_getIndexedField(t *testing.T) {
 			mock.Anything, // context.Context
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
-		).Return(&schemapb.CollectionSchema{
+		).Return(newSchemaInfo(&schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{
 					Name: fieldName + fieldName,
 				},
 			},
-		}, nil)
+		}), nil)
 		globalMetaCache = cache
 		_, err := cit.getIndexedField(context.Background())
 		assert.Error(t, err)
@@ -2322,7 +2350,7 @@ func Test_createIndexTask_PreExecute(t *testing.T) {
 			mock.Anything, // context.Context
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
-		).Return(&schemapb.CollectionSchema{
+		).Return(newSchemaInfo(&schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{
 					FieldID:      100,
@@ -2339,7 +2367,7 @@ func Test_createIndexTask_PreExecute(t *testing.T) {
 					AutoID: false,
 				},
 			},
-		}, nil)
+		}), nil)
 		globalMetaCache = cache
 		cit.req.ExtraParams = []*commonpb.KeyValuePair{
 			{
@@ -2533,6 +2561,42 @@ func Test_loadCollectionTask_Execute(t *testing.T) {
 					{
 						CollectionID:         collectionID,
 						FieldID:              100,
+						IndexName:            indexName,
+						IndexID:              indexID,
+						TypeParams:           nil,
+						IndexParams:          nil,
+						IndexedRows:          1025,
+						TotalRows:            1025,
+						State:                commonpb.IndexState_Finished,
+						IndexStateFailReason: "",
+						IsAutoIndex:          false,
+						UserIndexParams:      nil,
+					},
+				},
+			}, nil
+		}
+
+		err := lct.Execute(ctx)
+		assert.Error(t, err)
+	})
+
+	t.Run("not all vector fields with index", func(t *testing.T) {
+		vecFields := make([]*schemapb.FieldSchema, 0)
+		for _, field := range newTestSchema().GetFields() {
+			if isVectorType(field.GetDataType()) {
+				vecFields = append(vecFields, field)
+			}
+		}
+
+		assert.GreaterOrEqual(t, len(vecFields), 2)
+
+		dc.DescribeIndexFunc = func(ctx context.Context, request *indexpb.DescribeIndexRequest, opts ...grpc.CallOption) (*indexpb.DescribeIndexResponse, error) {
+			return &indexpb.DescribeIndexResponse{
+				Status: merr.Success(),
+				IndexInfos: []*indexpb.IndexInfo{
+					{
+						CollectionID:         collectionID,
+						FieldID:              vecFields[0].FieldID,
 						IndexName:            indexName,
 						IndexID:              indexID,
 						TypeParams:           nil,

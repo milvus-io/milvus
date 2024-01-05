@@ -24,6 +24,7 @@ def pytest_addoption(parser):
     parser.addoption("--port", action="store", default=19530, help="service's port")
     parser.addoption("--user", action="store", default="", help="user name for connection")
     parser.addoption("--password", action="store", default="", help="password for connection")
+    parser.addoption("--db_name", action="store", default="default", help="database name for connection")
     parser.addoption("--secure", type=bool, action="store", default=False, help="secure for connection")
     parser.addoption("--milvus_ns", action="store", default="chaos-testing", help="milvus_ns")
     parser.addoption("--http_port", action="store", default=19121, help="http's port")
@@ -73,6 +74,11 @@ def user(request):
 @pytest.fixture
 def password(request):
     return request.config.getoption("--password")
+
+
+@pytest.fixture
+def db_name(request):
+    return request.config.getoption("--db_name")
 
 
 @pytest.fixture

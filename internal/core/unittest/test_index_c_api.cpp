@@ -198,12 +198,12 @@ TEST(CBoolIndexTest, All) {
         { DeleteBinarySet(binary_set); }
     }
 
-    delete[] (char*)(half_ds->GetTensor());
+    delete[](char*)(half_ds->GetTensor());
 }
 
 // TODO: more scalar type.
 TEST(CInt64IndexTest, All) {
-    auto arr = GenArr<int64_t>(NB);
+    auto arr = GenSortedArr<int64_t>(NB);
 
     auto params = GenParams<int64_t>();
     for (const auto& tp : params) {
@@ -315,6 +315,6 @@ TEST(CStringIndexTest, All) {
         { DeleteBinarySet(binary_set); }
     }
 
-    delete[] (char*)(str_ds->GetTensor());
+    delete[](char*)(str_ds->GetTensor());
 }
 #endif

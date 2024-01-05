@@ -56,7 +56,7 @@ const (
 	boundedTS = 2
 
 	// enableMultipleVectorFields indicates whether to enable multiple vector fields.
-	enableMultipleVectorFields = false
+	enableMultipleVectorFields = true
 
 	defaultMaxVarCharLength = 65535
 
@@ -67,6 +67,8 @@ const (
 
 	// DefaultStringIndexType name of default index type for varChar/string field
 	DefaultStringIndexType = "Trie"
+
+	InvertedIndexType = "INVERTED"
 )
 
 var logger = log.L().WithOptions(zap.Fields(zap.String("role", typeutil.ProxyRole)))
@@ -247,12 +249,12 @@ func validatePartitionTag(partitionTag string, strictCheck bool) error {
 
 func validateStringIndexType(indexType string) bool {
 	// compatible with the index type marisa-trie of attu versions prior to 2.3.0
-	return indexType == DefaultStringIndexType || indexType == "marisa-trie"
+	return indexType == DefaultStringIndexType || indexType == "marisa-trie" || indexType == InvertedIndexType
 }
 
 func validateArithmeticIndexType(indexType string) bool {
 	// compatible with the index type Asceneding of attu versions prior to 2.3.0
-	return indexType == DefaultArithmeticIndexType || indexType == "Asceneding"
+	return indexType == DefaultArithmeticIndexType || indexType == "Asceneding" || indexType == InvertedIndexType
 }
 
 func validateFieldName(fieldName string) error {
@@ -976,7 +978,7 @@ func translatePkOutputFields(schema *schemapb.CollectionSchema) ([]string, []int
 //	output_fields=["*"] 	 ==> [A,B,C,D]
 //	output_fields=["*",A] 	 ==> [A,B,C,D]
 //	output_fields=["*",C]    ==> [A,B,C,D]
-func translateOutputFields(outputFields []string, schema *schemapb.CollectionSchema, addPrimary bool) ([]string, []string, error) {
+func translateOutputFields(outputFields []string, schema *schemaInfo, addPrimary bool) ([]string, []string, error) {
 	var primaryFieldName string
 	allFieldNameMap := make(map[string]bool)
 	resultFieldNameMap := make(map[string]bool)
@@ -1004,7 +1006,7 @@ func translateOutputFields(outputFields []string, schema *schemapb.CollectionSch
 				userOutputFieldsMap[outputFieldName] = true
 			} else {
 				if schema.EnableDynamicField {
-					schemaH, err := typeutil.CreateSchemaHelper(schema)
+					schemaH, err := typeutil.CreateSchemaHelper(schema.CollectionSchema)
 					if err != nil {
 						return nil, nil, err
 					}
@@ -1445,7 +1447,7 @@ func assignPartitionKeys(ctx context.Context, dbName string, collName string, ke
 		return nil, err
 	}
 
-	partitionKeyFieldSchema, err := typeutil.GetPartitionKeyFieldSchema(schema)
+	partitionKeyFieldSchema, err := typeutil.GetPartitionKeyFieldSchema(schema.CollectionSchema)
 	if err != nil {
 		return nil, err
 	}
@@ -1598,7 +1600,7 @@ func SendReplicateMessagePack(ctx context.Context, replicateMsgStream msgstream.
 	}
 }
 
-func GetCachedCollectionSchema(ctx context.Context, dbName string, colName string) (*schemapb.CollectionSchema, error) {
+func GetCachedCollectionSchema(ctx context.Context, dbName string, colName string) (*schemaInfo, error) {
 	if globalMetaCache != nil {
 		return globalMetaCache.GetCollectionSchema(ctx, dbName, colName)
 	}

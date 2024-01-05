@@ -1,0 +1,55 @@
+name: 'Bump Builder Version'
+description: 'bump builder version in the .env file'
+inputs:
+  tag:
+    description: 'Tag name'
+    required: true
+  type:
+    description: 'the type of builder image, cpu or gpu'
+    required: true
+    default: 'cpu'
+  token:
+    description: 'github token to create pull request'
+    required: true
+runs:
+  using: "composite"
+  steps:
+      - name: Bump Builder Version when cpu type
+        if: ${{ inputs.type == 'cpu' }}
+        shell: bash
+        run: |
+          sed -i "s#^DATE_VERSION=.*#DATE_VERSION=${{ inputs.tag }}#g" .env
+          sed -i "s#^LATEST_DATE_VERSION=.*#LATEST_DATE_VERSION=${{ inputs.tag }}#g" .env
+      - name: Bump Builder Version when gpu type
+        if: ${{ inputs.type == 'gpu' }}
+        shell: bash
+        run: |
+          sed -i "s#^GPU_DATE_VERSION=.*#GPU_DATE_VERSION=${{ inputs.tag }}#g" .env
+          sed -i "s#^LATEST_GPU_DATE_VERSION=.*#LATEST_GPU_DATE_VERSION=${{ inputs.tag }}#g" .env
+      - name: git config
+        shell: bash
+        run: |
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add .env
+          git commit -m "Update Builder image changes"
+      - name: Create Pull Request
+        id: cpr
+        uses: peter-evans/create-pull-request@v3
+        continue-on-error: true
+        with:
+          token: ${{ inputs.token }}
+          author: ${{ github.actor }} <${{ github.actor }}@users.noreply.github.com>
+          signoff: false
+          branch: update_${{ inputs.type }}_builder_${{ github.sha }}
+          delete-branch: true
+          title: '[automated] Update ${{ inputs.type }} Builder image changes'
+          body: |
+            Update ${{ inputs.type }} Builder image changes
+            See changes: https://github.com/milvus-io/milvus/commit/${{ github.sha }}
+            Signed-off-by: ${{ github.actor }} ${{ github.actor }}@users.noreply.github.com
+      - name: Check outputs
+        shell: bash
+        run: |
+          echo "Pull Request Number - ${{ steps.cpr.outputs.pull-request-number }}"
+          echo "Pull Request URL - ${{ steps.cpr.outputs.pull-request-url }}"

@@ -88,6 +88,7 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 		if growing == nil {
 			var err error
 			growing, err = segments.NewSegment(
+				context.Background(),
 				sd.collection,
 				segmentID,
 				insertData.PartitionID,
@@ -107,7 +108,7 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 			}
 		}
 
-		err := growing.Insert(insertData.RowIDs, insertData.Timestamps, insertData.InsertRecord)
+		err := growing.Insert(context.Background(), insertData.RowIDs, insertData.Timestamps, insertData.InsertRecord)
 		if err != nil {
 			log.Error("failed to insert data into growing segment",
 				zap.Int64("segmentID", segmentID),
@@ -334,7 +335,7 @@ func (sd *shardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.Segm
 		}
 
 		log.Info("forwarding L0 delete records...", zap.Int("deletionCount", len(deletedPks)))
-		err = segment.Delete(deletedPks, deletedTss)
+		err = segment.Delete(ctx, deletedPks, deletedTss)
 		if err != nil {
 			log.Warn("failed to forward L0 deletions to growing segment",
 				zap.Error(err),
@@ -842,7 +843,7 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 }
 
 func (sd *shardDelegator) SyncTargetVersion(newVersion int64, growingInTarget []int64,
-	sealedInTarget []int64, droppedInTarget []int64,
+	sealedInTarget []int64, droppedInTarget []int64, checkpoint *msgpb.MsgPosition,
 ) {
 	growings := sd.segmentManager.GetBy(
 		segments.WithType(segments.SegmentTypeGrowing),
@@ -874,6 +875,7 @@ func (sd *shardDelegator) SyncTargetVersion(newVersion int64, growingInTarget []
 			zap.Int64s("growingSegments", redundantGrowingIDs))
 	}
 	sd.distribution.SyncTargetVersion(newVersion, growingInTarget, sealedInTarget, redundantGrowingIDs)
+	sd.deleteBuffer.TryDiscard(checkpoint.GetTimestamp())
 }
 
 func (sd *shardDelegator) GetTargetVersion() int64 {

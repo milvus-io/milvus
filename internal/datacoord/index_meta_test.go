@@ -475,9 +475,10 @@ func TestMeta_GetSegmentIndexState(t *testing.T) {
 		},
 	}
 
-	t.Run("segment has no index", func(t *testing.T) {
-		state := m.GetSegmentIndexState(collID, segID)
-		assert.Equal(t, commonpb.IndexState_IndexStateNone, state.state)
+	t.Run("collection has no index", func(t *testing.T) {
+		state := m.GetSegmentIndexState(collID, segID, indexID)
+		assert.Equal(t, commonpb.IndexState_IndexStateNone, state.GetState())
+		assert.Contains(t, state.GetFailReason(), "collection not exist with ID")
 	})
 
 	t.Run("meta not saved yet", func(t *testing.T) {
@@ -496,13 +497,14 @@ func TestMeta_GetSegmentIndexState(t *testing.T) {
 				UserIndexParams: indexParams,
 			},
 		}
-		state := m.GetSegmentIndexState(collID, segID)
-		assert.Equal(t, commonpb.IndexState_Unissued, state.state)
+		state := m.GetSegmentIndexState(collID, segID, indexID)
+		assert.Equal(t, commonpb.IndexState_Unissued, state.GetState())
 	})
 
 	t.Run("segment not exist", func(t *testing.T) {
-		state := m.GetSegmentIndexState(collID, segID+1)
-		assert.Equal(t, commonpb.IndexState_IndexStateNone, state.state)
+		state := m.GetSegmentIndexState(collID, segID+1, indexID)
+		assert.Equal(t, commonpb.IndexState_IndexStateNone, state.GetState())
+		assert.Contains(t, state.FailReason, "segment is not exist with ID")
 	})
 
 	t.Run("unissued", func(t *testing.T) {
@@ -523,8 +525,8 @@ func TestMeta_GetSegmentIndexState(t *testing.T) {
 			IndexSize:     0,
 		})
 
-		state := m.GetSegmentIndexState(collID, segID)
-		assert.Equal(t, commonpb.IndexState_Unissued, state.state)
+		state := m.GetSegmentIndexState(collID, segID, indexID)
+		assert.Equal(t, commonpb.IndexState_Unissued, state.GetState())
 	})
 
 	t.Run("finish", func(t *testing.T) {
@@ -545,8 +547,8 @@ func TestMeta_GetSegmentIndexState(t *testing.T) {
 			IndexSize:     0,
 		})
 
-		state := m.GetSegmentIndexState(collID, segID)
-		assert.Equal(t, commonpb.IndexState_Finished, state.state)
+		state := m.GetSegmentIndexState(collID, segID, indexID)
+		assert.Equal(t, commonpb.IndexState_Finished, state.GetState())
 	})
 }
 
@@ -643,22 +645,22 @@ func TestMeta_GetSegmentIndexStateOnField(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		state := m.GetSegmentIndexStateOnField(collID, segID, fieldID)
-		assert.Equal(t, commonpb.IndexState_Finished, state.state)
+		assert.Equal(t, commonpb.IndexState_Finished, state.GetState())
 	})
 
 	t.Run("no index on field", func(t *testing.T) {
 		state := m.GetSegmentIndexStateOnField(collID, segID, fieldID+1)
-		assert.Equal(t, commonpb.IndexState_IndexStateNone, state.state)
+		assert.Equal(t, commonpb.IndexState_IndexStateNone, state.GetState())
 	})
 
 	t.Run("no index", func(t *testing.T) {
 		state := m.GetSegmentIndexStateOnField(collID+1, segID, fieldID+1)
-		assert.Equal(t, commonpb.IndexState_IndexStateNone, state.state)
+		assert.Equal(t, commonpb.IndexState_IndexStateNone, state.GetState())
 	})
 
 	t.Run("segment not exist", func(t *testing.T) {
 		state := m.GetSegmentIndexStateOnField(collID, segID+1, fieldID)
-		assert.Equal(t, commonpb.IndexState_IndexStateNone, state.state)
+		assert.Equal(t, commonpb.IndexState_IndexStateNone, state.GetState())
 	})
 }
 
@@ -1230,6 +1232,19 @@ func TestMeta_GetHasUnindexTaskSegments(t *testing.T) {
 					IsAutoIndex:     false,
 					UserIndexParams: nil,
 				},
+				indexID + 1: {
+					TenantID:        "",
+					CollectionID:    collID,
+					FieldID:         fieldID + 1,
+					IndexID:         indexID + 1,
+					IndexName:       indexName + "_1",
+					IsDeleted:       false,
+					CreateTime:      0,
+					TypeParams:      nil,
+					IndexParams:     nil,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
+				},
 			},
 		},
 	}
@@ -1238,6 +1253,33 @@ func TestMeta_GetHasUnindexTaskSegments(t *testing.T) {
 		segments := m.GetHasUnindexTaskSegments()
 		assert.Equal(t, 1, len(segments))
 		assert.Equal(t, segID, segments[0].ID)
+	})
+
+	t.Run("segment partial field with index", func(t *testing.T) {
+		m.segments.segments[segID].segmentIndexes = map[UniqueID]*model.SegmentIndex{
+			indexID: {
+				CollectionID: collID,
+				SegmentID:    segID,
+				IndexID:      indexID,
+				IndexState:   commonpb.IndexState_Finished,
+			},
+		}
+
+		segments := m.GetHasUnindexTaskSegments()
+		assert.Equal(t, 1, len(segments))
+		assert.Equal(t, segID, segments[0].ID)
+	})
+
+	t.Run("segment all vector field with index", func(t *testing.T) {
+		m.segments.segments[segID].segmentIndexes[indexID+1] = &model.SegmentIndex{
+			CollectionID: collID,
+			SegmentID:    segID,
+			IndexID:      indexID + 1,
+			IndexState:   commonpb.IndexState_Finished,
+		}
+
+		segments := m.GetHasUnindexTaskSegments()
+		assert.Equal(t, 0, len(segments))
 	})
 }
 

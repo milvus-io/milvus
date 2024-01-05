@@ -136,8 +136,8 @@ PhyBinaryRangeFilterExpr::PreCheckOverflow(HighPrecisionType& val1,
     val1 = GetValueFromProto<HighPrecisionType>(expr_->lower_val_);
     val2 = GetValueFromProto<HighPrecisionType>(expr_->upper_val_);
     auto get_next_overflow_batch = [this]() -> ColumnVectorPtr {
-        int64_t batch_size = overflow_check_pos_ + batch_size_ >= num_rows_
-                                 ? num_rows_ - overflow_check_pos_
+        int64_t batch_size = overflow_check_pos_ + batch_size_ >= active_count_
+                                 ? active_count_ - overflow_check_pos_
                                  : batch_size_;
         overflow_check_pos_ += batch_size;
         if (cached_overflow_res_ != nullptr &&

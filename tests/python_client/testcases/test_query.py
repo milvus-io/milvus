@@ -340,6 +340,29 @@ class TestQueryParams(TestcaseBase):
                 for _r in res:
                     assert _r[ct.default_bool_field_name] == bool_value
 
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.xfail(reason="issue #29570")
+    def test_query_expr_by_int64(self):
+        """
+        target: test query through int64 field and output int64 field
+        method: use int64 as query expr parameter
+        expected: verify query output number
+        """
+        self._connect()
+        df = cf.gen_default_dataframe_data(nb=ct.default_nb*10)
+        self.collection_wrap.construct_from_dataframe(cf.gen_unique_str(prefix), df,
+                                                      primary_field=ct.default_int64_field_name)
+        assert self.collection_wrap.num_entities == ct.default_nb * 10
+        self.collection_wrap.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
+        self.collection_wrap.load()
+
+        # filter on int64 fields
+        expr_list = [f'{ct.default_int64_field_name} > 8192 && {ct.default_int64_field_name} < 8194',
+                 f'{ct.default_int64_field_name} > 16384 && {ct.default_int64_field_name} < 16386']
+        for expr in expr_list:
+            res, _ = self.collection_wrap.query(expr, output_fields=[ct.default_int64_field_name])
+            assert len(res) == 1
+
     @pytest.mark.tags(CaseLabel.L1)
     def test_query_expr_by_int8_field(self):
         """

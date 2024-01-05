@@ -624,8 +624,10 @@ binary_arith_op_eval_range_expr: <
             CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
         query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
         BitsetType final;
-        visitor.ExecuteExprNode(
-            plan->plan_node_->filter_plannode_.value(), seg_promote, final);
+        visitor.ExecuteExprNode(plan->plan_node_->filter_plannode_.value(),
+                                seg_promote,
+                                N * num_iters,
+                                final);
         EXPECT_EQ(final.size(), N * num_iters);
 
         for (int i = 0; i < N * num_iters; ++i) {

@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-storage/go/storage/options"
 	"github.com/milvus-io/milvus-storage/go/storage/schema"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/storage"
 	iTypeutil "github.com/milvus-io/milvus/internal/util/typeutil"
@@ -101,13 +102,15 @@ func (s *storageV2Serializer) EncodeBuffer(ctx context.Context, pack *SyncPack) 
 	}
 
 	if pack.isFlush {
-		mergedStatsBlob, err := s.serializeMergedPkStats(pack)
-		if err != nil {
-			log.Warn("failed to serialize merged stats log", zap.Error(err))
-			return nil, err
-		}
+		if pack.level != datapb.SegmentLevel_L0 {
+			mergedStatsBlob, err := s.serializeMergedPkStats(pack)
+			if err != nil {
+				log.Warn("failed to serialize merged stats log", zap.Error(err))
+				return nil, err
+			}
 
-		task.mergedStatsBlob = mergedStatsBlob
+			task.mergedStatsBlob = mergedStatsBlob
+		}
 		task.WithFlush()
 	}
 

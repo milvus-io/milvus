@@ -160,6 +160,14 @@ func (cit *createIndexTask) parseIndexParams() error {
 			if exist && !validateArithmeticIndexType(specifyIndexType) {
 				return merr.WrapErrParameterInvalid(DefaultArithmeticIndexType, specifyIndexType, "index type not match")
 			}
+		} else if typeutil.IsBoolType(cit.fieldSchema.DataType) {
+			if !exist {
+				return merr.WrapErrParameterInvalidMsg("no index type specified")
+			}
+			if specifyIndexType != InvertedIndexType {
+				return merr.WrapErrParameterInvalidMsg("index type (%s) not supported for boolean, supported: %s",
+					specifyIndexType, InvertedIndexType)
+			}
 		} else {
 			return merr.WrapErrParameterInvalid("supported field",
 				fmt.Sprintf("create index on %s field", cit.fieldSchema.DataType.String()),
@@ -286,7 +294,7 @@ func (cit *createIndexTask) getIndexedField(ctx context.Context) (*schemapb.Fiel
 		log.Error("failed to get collection schema", zap.Error(err))
 		return nil, fmt.Errorf("failed to get collection schema: %s", err)
 	}
-	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
+	schemaHelper, err := typeutil.CreateSchemaHelper(schema.CollectionSchema)
 	if err != nil {
 		log.Error("failed to parse collection schema", zap.Error(err))
 		return nil, fmt.Errorf("failed to parse collection schema: %s", err)
@@ -608,7 +616,7 @@ func (dit *describeIndexTask) Execute(ctx context.Context) error {
 		log.Error("failed to get collection schema", zap.Error(err))
 		return fmt.Errorf("failed to get collection schema: %s", err)
 	}
-	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
+	schemaHelper, err := typeutil.CreateSchemaHelper(schema.CollectionSchema)
 	if err != nil {
 		log.Error("failed to parse collection schema", zap.Error(err))
 		return fmt.Errorf("failed to parse collection schema: %s", err)
@@ -732,7 +740,7 @@ func (dit *getIndexStatisticsTask) Execute(ctx context.Context) error {
 		log.Error("failed to get collection schema", zap.String("collection_name", dit.GetCollectionName()), zap.Error(err))
 		return fmt.Errorf("failed to get collection schema: %s", dit.GetCollectionName())
 	}
-	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
+	schemaHelper, err := typeutil.CreateSchemaHelper(schema.CollectionSchema)
 	if err != nil {
 		log.Error("failed to parse collection schema", zap.String("collection_name", schema.GetName()), zap.Error(err))
 		return fmt.Errorf("failed to parse collection schema: %s", dit.GetCollectionName())

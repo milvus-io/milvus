@@ -111,7 +111,7 @@ type compactionPlanHandler struct {
 
 	meta      CompactionMeta
 	allocator allocator
-	chManager *ChannelManagerImpl
+	chManager ChannelManager
 	scheduler Scheduler
 	sessions  SessionManager
 
@@ -120,7 +120,7 @@ type compactionPlanHandler struct {
 	stopWg   sync.WaitGroup
 }
 
-func newCompactionPlanHandler(sessions SessionManager, cm *ChannelManagerImpl, meta CompactionMeta, allocator allocator,
+func newCompactionPlanHandler(sessions SessionManager, cm ChannelManager, meta CompactionMeta, allocator allocator,
 ) *compactionPlanHandler {
 	return &compactionPlanHandler{
 		plans:     make(map[int64]*compactionTask),
@@ -252,7 +252,7 @@ func (c *compactionPlanHandler) removeTasksByChannel(channel string) {
 				zap.Int64("planID", task.plan.GetPlanID()),
 				zap.Int64("node", task.dataNodeID),
 			)
-			c.scheduler.Finish(task.dataNodeID, task.plan.PlanID)
+			c.scheduler.Finish(task.dataNodeID, task.plan)
 			delete(c.plans, id)
 		}
 	}
@@ -383,7 +383,7 @@ func (c *compactionPlanHandler) completeCompaction(result *datapb.CompactionPlan
 
 	plan := c.plans[planID].plan
 	nodeID := c.plans[planID].dataNodeID
-	defer c.scheduler.Finish(nodeID, plan.PlanID)
+	defer c.scheduler.Finish(nodeID, plan)
 	switch plan.GetType() {
 	case datapb.CompactionType_MergeCompaction, datapb.CompactionType_MixCompaction:
 		if err := c.handleMergeCompactionResult(plan, result); err != nil {
@@ -523,7 +523,7 @@ func (c *compactionPlanHandler) updateCompaction(ts Timestamp) error {
 		log.Info("compaction failed", zap.Int64("planID", task.plan.PlanID), zap.Int64("nodeID", task.dataNodeID))
 		c.plans[planID] = c.plans[planID].shadowClone(setState(failed))
 		c.setSegmentsCompacting(task.plan, false)
-		c.scheduler.Finish(task.dataNodeID, task.plan.PlanID)
+		c.scheduler.Finish(task.dataNodeID, task.plan)
 	}
 
 	// Timeout tasks will be timeout and failed in DataNode
@@ -537,7 +537,7 @@ func (c *compactionPlanHandler) updateCompaction(ts Timestamp) error {
 			log.Info("compaction failed for timeout", zap.Int64("planID", task.plan.PlanID), zap.Int64("nodeID", task.dataNodeID))
 			c.plans[planID] = c.plans[planID].shadowClone(setState(failed))
 			c.setSegmentsCompacting(task.plan, false)
-			c.scheduler.Finish(task.dataNodeID, task.plan.PlanID)
+			c.scheduler.Finish(task.dataNodeID, task.plan)
 		}
 
 		// DataNode will check if plan's are timeout but not as sensitive as DataCoord,

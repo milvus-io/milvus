@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
@@ -253,13 +254,16 @@ func (wb *writeBufferBase) flushSegments(ctx context.Context, segmentIDs []int64
 }
 
 func (wb *writeBufferBase) syncSegments(ctx context.Context, segmentIDs []int64) {
+	log := log.Ctx(ctx)
 	for _, segmentID := range segmentIDs {
 		syncTask, err := wb.getSyncTask(ctx, segmentID)
 		if err != nil {
-			// TODO check err type
-			// segment info not found
-			log.Ctx(ctx).Warn("segment not found in meta", zap.Int64("segmentID", segmentID))
-			continue
+			if errors.Is(err, merr.ErrSegmentNotFound) {
+				log.Warn("segment not found in meta", zap.Int64("segmentID", segmentID))
+				continue
+			} else {
+				log.Fatal("failed to get sync task", zap.Int64("segmentID", segmentID), zap.Error(err))
+			}
 		}
 
 		// discard Future here, handle error in callback
@@ -335,7 +339,7 @@ func (wb *writeBufferBase) bufferInsert(insertMsgs []*msgstream.InsertMsg, start
 
 		segBuf := wb.getOrCreateBuffer(segmentID)
 
-		pkData, err := segBuf.insertBuffer.Buffer(msgs, startPos, endPos)
+		pkData, totalMemSize, err := segBuf.insertBuffer.Buffer(msgs, startPos, endPos)
 		if err != nil {
 			log.Warn("failed to buffer insert data", zap.Int64("segmentID", segmentID), zap.Error(err))
 			return nil, err
@@ -344,10 +348,7 @@ func (wb *writeBufferBase) bufferInsert(insertMsgs []*msgstream.InsertMsg, start
 		wb.metaCache.UpdateSegments(metacache.UpdateBufferedRows(segBuf.insertBuffer.rows),
 			metacache.WithSegmentIDs(segmentID))
 
-		totalSize := lo.SumBy(pkData, func(iData storage.FieldData) float64 {
-			return float64(iData.GetMemorySize())
-		})
-		metrics.DataNodeFlowGraphBufferDataSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), fmt.Sprint(wb.collectionID)).Add(totalSize)
+		metrics.DataNodeFlowGraphBufferDataSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), fmt.Sprint(wb.collectionID)).Add(float64(totalMemSize))
 	}
 
 	return segmentPKData, nil
@@ -371,7 +372,7 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (sy
 		return nil, merr.WrapErrSegmentNotFound(segmentID)
 	}
 	var batchSize int64
-	var totalMemSize float64
+	var totalMemSize float64 = 0
 	var tsFrom, tsTo uint64
 
 	insert, delta, timeRange, startPos := wb.yieldBuffer(segmentID)
@@ -387,6 +388,7 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (sy
 	if delta != nil {
 		totalMemSize += float64(delta.Size())
 	}
+
 	actions = append(actions, metacache.StartSyncing(batchSize))
 	wb.metaCache.UpdateSegments(metacache.MergeSegmentAction(actions...), metacache.WithSegmentIDs(segmentID))
 
@@ -403,7 +405,8 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (sy
 		WithCheckpoint(wb.checkpoint).
 		WithBatchSize(batchSize)
 
-	if segmentInfo.State() == commonpb.SegmentState_Flushing {
+	if segmentInfo.State() == commonpb.SegmentState_Flushing ||
+		segmentInfo.Level() == datapb.SegmentLevel_L0 { // Level zero segment will always be sync as flushed
 		pack.WithFlush()
 	}
 

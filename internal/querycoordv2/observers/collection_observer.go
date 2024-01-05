@@ -156,9 +156,6 @@ func (ob *CollectionObserver) readyToObserve(collectionID int64) bool {
 
 func (ob *CollectionObserver) observeLoadStatus(ctx context.Context) {
 	partitions := ob.meta.CollectionManager.GetAllPartitions()
-	if len(partitions) > 0 {
-		log.Info("observe partitions status", zap.Int("partitionNum", len(partitions)))
-	}
 	loading := false
 	for _, partition := range partitions {
 		if partition.LoadPercentage == 100 {

@@ -12,6 +12,7 @@ def pytest_addoption(parser):
     parser.addoption("--chaos_interval", action="store", default="2m", help="chaos_interval")
     parser.addoption("--is_check", action="store", type=bool, default=False, help="is_check")
     parser.addoption("--wait_signal", action="store", type=bool, default=True, help="wait_signal")
+    parser.addoption("--collection_num", action="store", default="1", help="collection_num")
 
 
 @pytest.fixture
@@ -42,6 +43,11 @@ def target_scope(request):
 @pytest.fixture
 def target_number(request):
     return request.config.getoption("--target_number")
+
+
+@pytest.fixture
+def collection_num(request):
+    return request.config.getoption("--collection_num")
 
 
 @pytest.fixture

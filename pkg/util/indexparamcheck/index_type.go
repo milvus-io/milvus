@@ -16,6 +16,7 @@ type IndexType = string
 
 // IndexType definitions
 const (
+	IndexGpuBF           IndexType = "GPU_BRUTE_FORCE"
 	IndexRaftIvfFlat     IndexType = "GPU_IVF_FLAT"
 	IndexRaftIvfPQ       IndexType = "GPU_IVF_PQ"
 	IndexRaftCagra       IndexType = "GPU_CAGRA"
@@ -29,3 +30,10 @@ const (
 	IndexHNSW            IndexType = "HNSW"
 	IndexDISKANN         IndexType = "DISKANN"
 )
+
+func IsGpuIndex(indexType IndexType) bool {
+	return indexType == IndexGpuBF ||
+		indexType == IndexRaftIvfFlat ||
+		indexType == IndexRaftIvfPQ ||
+		indexType == IndexRaftCagra
+}

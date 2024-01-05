@@ -41,6 +41,10 @@ func (t *QueryStreamTask) Username() string {
 	return t.req.Req.GetUsername()
 }
 
+func (t *QueryStreamTask) IsGpuIndex() bool {
+	return false
+}
+
 // PreExecute the task, only call once.
 func (t *QueryStreamTask) PreExecute() error {
 	return nil
@@ -48,6 +52,7 @@ func (t *QueryStreamTask) PreExecute() error {
 
 func (t *QueryStreamTask) Execute() error {
 	retrievePlan, err := segments.NewRetrievePlan(
+		t.ctx,
 		t.collection,
 		t.req.Req.GetSerializedExprPlan(),
 		t.req.Req.GetMvccTimestamp(),

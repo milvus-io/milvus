@@ -22,6 +22,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type BloomFilterSetSuite struct {
@@ -35,6 +36,7 @@ type BloomFilterSetSuite struct {
 func (suite *BloomFilterSetSuite) SetupTest() {
 	suite.intPks = []int64{1, 2, 3}
 	suite.stringPks = []string{"1", "2", "3"}
+	paramtable.Init()
 	suite.set = newBloomFilterSet()
 }
 

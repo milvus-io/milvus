@@ -77,6 +77,10 @@ func (t *SearchTask) Username() string {
 	return t.req.Req.GetUsername()
 }
 
+func (t *SearchTask) IsGpuIndex() bool {
+	return t.collection.IsGpuIndex()
+}
+
 func (t *SearchTask) PreExecute() error {
 	// Update task wait time metric before execute
 	nodeID := strconv.FormatInt(paramtable.GetNodeID(), 10)
@@ -118,7 +122,7 @@ func (t *SearchTask) Execute() error {
 
 	req := t.req
 	t.combinePlaceHolderGroups()
-	searchReq, err := segments.NewSearchRequest(t.collection, req, t.placeholderGroup)
+	searchReq, err := segments.NewSearchRequest(t.ctx, t.collection, req, t.placeholderGroup)
 	if err != nil {
 		return err
 	}
@@ -182,6 +186,7 @@ func (t *SearchTask) Execute() error {
 
 	tr.RecordSpan()
 	blobs, err := segments.ReduceSearchResultsAndFillData(
+		t.ctx,
 		searchReq.Plan(),
 		results,
 		int64(len(results)),
@@ -199,7 +204,7 @@ func (t *SearchTask) Execute() error {
 		metrics.ReduceSegments).
 		Observe(float64(tr.RecordSpan().Milliseconds()))
 	for i := range t.originNqs {
-		blob, err := segments.GetSearchResultDataBlob(blobs, i)
+		blob, err := segments.GetSearchResultDataBlob(t.ctx, blobs, i)
 		if err != nil {
 			return err
 		}

@@ -782,6 +782,18 @@ func GetVectorFieldSchema(schema *schemapb.CollectionSchema) (*schemapb.FieldSch
 	return nil, errors.New("vector field is not found")
 }
 
+// GetVectorFieldSchemas get vector fields schema from collection schema.
+func GetVectorFieldSchemas(schema *schemapb.CollectionSchema) []*schemapb.FieldSchema {
+	ret := make([]*schemapb.FieldSchema, 0)
+	for _, fieldSchema := range schema.Fields {
+		if IsVectorType(fieldSchema.DataType) {
+			ret = append(ret, fieldSchema)
+		}
+	}
+
+	return ret
+}
+
 // GetPrimaryFieldSchema get primary field schema from collection schema
 func GetPrimaryFieldSchema(schema *schemapb.CollectionSchema) (*schemapb.FieldSchema, error) {
 	for _, fieldSchema := range schema.Fields {
@@ -853,6 +865,21 @@ func IsPrimaryFieldDataExist(datas []*schemapb.FieldData, primaryFieldSchema *sc
 	}
 
 	return primaryFieldData != nil
+}
+
+func AppendSystemFields(schema *schemapb.CollectionSchema) {
+	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+		FieldID:      int64(common.RowIDField),
+		Name:         common.RowIDFieldName,
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_Int64,
+	})
+	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+		FieldID:      int64(common.TimeStampField),
+		Name:         common.TimeStampFieldName,
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_Int64,
+	})
 }
 
 func AppendIDs(dst *schemapb.IDs, src *schemapb.IDs, idx int) {

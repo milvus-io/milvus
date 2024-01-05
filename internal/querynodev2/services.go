@@ -32,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -301,28 +300,21 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		}
 	}()
 
-	flushedSet := typeutil.NewSet(channel.GetFlushedSegmentIds()...)
-	infos := lo.Map(lo.Values(req.GetSegmentInfos()), func(info *datapb.SegmentInfo, _ int) *datapb.SegmentInfo {
-		if flushedSet.Contain(info.GetID()) {
-			// for flushed segments, exclude all insert data
-			info = typeutil.Clone(info)
-			info.DmlPosition = &msgpb.MsgPosition{
-				Timestamp: typeutil.MaxTimestamp,
-			}
-		}
-		return info
+	growingInfo := lo.SliceToMap(channel.GetUnflushedSegmentIds(), func(id int64) (int64, uint64) {
+		info := req.GetSegmentInfos()[id]
+		return id, info.GetDmlPosition().GetTimestamp()
 	})
-	pipeline.ExcludedSegments(infos...)
+	pipeline.ExcludedSegments(growingInfo)
+
+	flushedInfo := lo.SliceToMap(channel.GetFlushedSegmentIds(), func(id int64) (int64, uint64) {
+		return id, typeutil.MaxTimestamp
+	})
+	pipeline.ExcludedSegments(flushedInfo)
 	for _, channelInfo := range req.GetInfos() {
-		droppedInfos := lo.Map(channelInfo.GetDroppedSegmentIds(), func(id int64, _ int) *datapb.SegmentInfo {
-			return &datapb.SegmentInfo{
-				ID: id,
-				DmlPosition: &msgpb.MsgPosition{
-					Timestamp: typeutil.MaxTimestamp,
-				},
-			}
+		droppedInfos := lo.SliceToMap(channelInfo.GetDroppedSegmentIds(), func(id int64) (int64, uint64) {
+			return id, typeutil.MaxTimestamp
 		})
-		pipeline.ExcludedSegments(droppedInfos...)
+		pipeline.ExcludedSegments(droppedInfos)
 	}
 
 	err = loadL0Segments(ctx, delegator, req)
@@ -577,15 +569,10 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, req *querypb.Release
 		// in case of consumed it's growing segment again
 		pipeline := node.pipelineManager.Get(req.GetShard())
 		if pipeline != nil {
-			droppedInfos := lo.Map(req.GetSegmentIDs(), func(id int64, _ int) *datapb.SegmentInfo {
-				return &datapb.SegmentInfo{
-					ID: id,
-					DmlPosition: &msgpb.MsgPosition{
-						Timestamp: typeutil.MaxTimestamp,
-					},
-				}
+			droppedInfos := lo.SliceToMap(req.GetSegmentIDs(), func(id int64) (int64, uint64) {
+				return id, typeutil.MaxTimestamp
 			})
-			pipeline.ExcludedSegments(droppedInfos...)
+			pipeline.ExcludedSegments(droppedInfos)
 		}
 
 		req.NeedTransfer = false
@@ -1383,18 +1370,14 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 			log.Info("sync action", zap.Int64("TargetVersion", action.GetTargetVersion()))
 			pipeline := node.pipelineManager.Get(req.GetChannel())
 			if pipeline != nil {
-				droppedInfos := lo.Map(action.GetDroppedInTarget(), func(id int64, _ int) *datapb.SegmentInfo {
-					return &datapb.SegmentInfo{
-						ID: id,
-						DmlPosition: &msgpb.MsgPosition{
-							Timestamp: typeutil.MaxTimestamp,
-						},
-					}
+				droppedInfos := lo.SliceToMap(action.GetDroppedInTarget(), func(id int64) (int64, uint64) {
+					return id, typeutil.MaxTimestamp
 				})
-				pipeline.ExcludedSegments(droppedInfos...)
+
+				pipeline.ExcludedSegments(droppedInfos)
 			}
 			shardDelegator.SyncTargetVersion(action.GetTargetVersion(), action.GetGrowingInTarget(),
-				action.GetSealedInTarget(), action.GetDroppedInTarget())
+				action.GetSealedInTarget(), action.GetDroppedInTarget(), action.GetCheckpoint())
 		default:
 			return merr.Status(merr.WrapErrServiceInternal("unknown action type", action.GetType().String())), nil
 		}
@@ -1465,7 +1448,7 @@ func (node *QueryNode) Delete(ctx context.Context, req *querypb.DeleteRequest) (
 
 	pks := storage.ParseIDs2PrimaryKeys(req.GetPrimaryKeys())
 	for _, segment := range segments {
-		err := segment.Delete(pks, req.GetTimestamps())
+		err := segment.Delete(ctx, pks, req.GetTimestamps())
 		if err != nil {
 			log.Warn("segment delete failed", zap.Error(err))
 			return merr.Status(err), nil

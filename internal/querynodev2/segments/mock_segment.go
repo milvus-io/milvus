@@ -115,13 +115,13 @@ func (_c *MockSegment_Collection_Call) RunAndReturn(run func() int64) *MockSegme
 	return _c
 }
 
-// Delete provides a mock function with given fields: primaryKeys, timestamps
-func (_m *MockSegment) Delete(primaryKeys []storage.PrimaryKey, timestamps []uint64) error {
-	ret := _m.Called(primaryKeys, timestamps)
+// Delete provides a mock function with given fields: ctx, primaryKeys, timestamps
+func (_m *MockSegment) Delete(ctx context.Context, primaryKeys []storage.PrimaryKey, timestamps []uint64) error {
+	ret := _m.Called(ctx, primaryKeys, timestamps)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func([]storage.PrimaryKey, []uint64) error); ok {
-		r0 = rf(primaryKeys, timestamps)
+	if rf, ok := ret.Get(0).(func(context.Context, []storage.PrimaryKey, []uint64) error); ok {
+		r0 = rf(ctx, primaryKeys, timestamps)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -135,15 +135,16 @@ type MockSegment_Delete_Call struct {
 }
 
 // Delete is a helper method to define mock.On call
+//   - ctx context.Context
 //   - primaryKeys []storage.PrimaryKey
 //   - timestamps []uint64
-func (_e *MockSegment_Expecter) Delete(primaryKeys interface{}, timestamps interface{}) *MockSegment_Delete_Call {
-	return &MockSegment_Delete_Call{Call: _e.mock.On("Delete", primaryKeys, timestamps)}
+func (_e *MockSegment_Expecter) Delete(ctx interface{}, primaryKeys interface{}, timestamps interface{}) *MockSegment_Delete_Call {
+	return &MockSegment_Delete_Call{Call: _e.mock.On("Delete", ctx, primaryKeys, timestamps)}
 }
 
-func (_c *MockSegment_Delete_Call) Run(run func(primaryKeys []storage.PrimaryKey, timestamps []uint64)) *MockSegment_Delete_Call {
+func (_c *MockSegment_Delete_Call) Run(run func(ctx context.Context, primaryKeys []storage.PrimaryKey, timestamps []uint64)) *MockSegment_Delete_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].([]storage.PrimaryKey), args[1].([]uint64))
+		run(args[0].(context.Context), args[1].([]storage.PrimaryKey), args[2].([]uint64))
 	})
 	return _c
 }
@@ -153,7 +154,7 @@ func (_c *MockSegment_Delete_Call) Return(_a0 error) *MockSegment_Delete_Call {
 	return _c
 }
 
-func (_c *MockSegment_Delete_Call) RunAndReturn(run func([]storage.PrimaryKey, []uint64) error) *MockSegment_Delete_Call {
+func (_c *MockSegment_Delete_Call) RunAndReturn(run func(context.Context, []storage.PrimaryKey, []uint64) error) *MockSegment_Delete_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -370,13 +371,13 @@ func (_c *MockSegment_Indexes_Call) RunAndReturn(run func() []*IndexedFieldInfo)
 	return _c
 }
 
-// Insert provides a mock function with given fields: rowIDs, timestamps, record
-func (_m *MockSegment) Insert(rowIDs []int64, timestamps []uint64, record *segcorepb.InsertRecord) error {
-	ret := _m.Called(rowIDs, timestamps, record)
+// Insert provides a mock function with given fields: ctx, rowIDs, timestamps, record
+func (_m *MockSegment) Insert(ctx context.Context, rowIDs []int64, timestamps []uint64, record *segcorepb.InsertRecord) error {
+	ret := _m.Called(ctx, rowIDs, timestamps, record)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func([]int64, []uint64, *segcorepb.InsertRecord) error); ok {
-		r0 = rf(rowIDs, timestamps, record)
+	if rf, ok := ret.Get(0).(func(context.Context, []int64, []uint64, *segcorepb.InsertRecord) error); ok {
+		r0 = rf(ctx, rowIDs, timestamps, record)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -390,16 +391,17 @@ type MockSegment_Insert_Call struct {
 }
 
 // Insert is a helper method to define mock.On call
+//   - ctx context.Context
 //   - rowIDs []int64
 //   - timestamps []uint64
 //   - record *segcorepb.InsertRecord
-func (_e *MockSegment_Expecter) Insert(rowIDs interface{}, timestamps interface{}, record interface{}) *MockSegment_Insert_Call {
-	return &MockSegment_Insert_Call{Call: _e.mock.On("Insert", rowIDs, timestamps, record)}
+func (_e *MockSegment_Expecter) Insert(ctx interface{}, rowIDs interface{}, timestamps interface{}, record interface{}) *MockSegment_Insert_Call {
+	return &MockSegment_Insert_Call{Call: _e.mock.On("Insert", ctx, rowIDs, timestamps, record)}
 }
 
-func (_c *MockSegment_Insert_Call) Run(run func(rowIDs []int64, timestamps []uint64, record *segcorepb.InsertRecord)) *MockSegment_Insert_Call {
+func (_c *MockSegment_Insert_Call) Run(run func(ctx context.Context, rowIDs []int64, timestamps []uint64, record *segcorepb.InsertRecord)) *MockSegment_Insert_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].([]int64), args[1].([]uint64), args[2].(*segcorepb.InsertRecord))
+		run(args[0].(context.Context), args[1].([]int64), args[2].([]uint64), args[3].(*segcorepb.InsertRecord))
 	})
 	return _c
 }
@@ -409,7 +411,7 @@ func (_c *MockSegment_Insert_Call) Return(_a0 error) *MockSegment_Insert_Call {
 	return _c
 }
 
-func (_c *MockSegment_Insert_Call) RunAndReturn(run func([]int64, []uint64, *segcorepb.InsertRecord) error) *MockSegment_Insert_Call {
+func (_c *MockSegment_Insert_Call) RunAndReturn(run func(context.Context, []int64, []uint64, *segcorepb.InsertRecord) error) *MockSegment_Insert_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -537,13 +539,13 @@ func (_c *MockSegment_Level_Call) RunAndReturn(run func() datapb.SegmentLevel) *
 	return _c
 }
 
-// LoadDeltaData provides a mock function with given fields: deltaData
-func (_m *MockSegment) LoadDeltaData(deltaData *storage.DeleteData) error {
-	ret := _m.Called(deltaData)
+// LoadDeltaData provides a mock function with given fields: ctx, deltaData
+func (_m *MockSegment) LoadDeltaData(ctx context.Context, deltaData *storage.DeleteData) error {
+	ret := _m.Called(ctx, deltaData)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(*storage.DeleteData) error); ok {
-		r0 = rf(deltaData)
+	if rf, ok := ret.Get(0).(func(context.Context, *storage.DeleteData) error); ok {
+		r0 = rf(ctx, deltaData)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -557,14 +559,15 @@ type MockSegment_LoadDeltaData_Call struct {
 }
 
 // LoadDeltaData is a helper method to define mock.On call
+//   - ctx context.Context
 //   - deltaData *storage.DeleteData
-func (_e *MockSegment_Expecter) LoadDeltaData(deltaData interface{}) *MockSegment_LoadDeltaData_Call {
-	return &MockSegment_LoadDeltaData_Call{Call: _e.mock.On("LoadDeltaData", deltaData)}
+func (_e *MockSegment_Expecter) LoadDeltaData(ctx interface{}, deltaData interface{}) *MockSegment_LoadDeltaData_Call {
+	return &MockSegment_LoadDeltaData_Call{Call: _e.mock.On("LoadDeltaData", ctx, deltaData)}
 }
 
-func (_c *MockSegment_LoadDeltaData_Call) Run(run func(deltaData *storage.DeleteData)) *MockSegment_LoadDeltaData_Call {
+func (_c *MockSegment_LoadDeltaData_Call) Run(run func(ctx context.Context, deltaData *storage.DeleteData)) *MockSegment_LoadDeltaData_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(*storage.DeleteData))
+		run(args[0].(context.Context), args[1].(*storage.DeleteData))
 	})
 	return _c
 }
@@ -574,7 +577,7 @@ func (_c *MockSegment_LoadDeltaData_Call) Return(_a0 error) *MockSegment_LoadDel
 	return _c
 }
 
-func (_c *MockSegment_LoadDeltaData_Call) RunAndReturn(run func(*storage.DeleteData) error) *MockSegment_LoadDeltaData_Call {
+func (_c *MockSegment_LoadDeltaData_Call) RunAndReturn(run func(context.Context, *storage.DeleteData) error) *MockSegment_LoadDeltaData_Call {
 	_c.Call.Return(run)
 	return _c
 }

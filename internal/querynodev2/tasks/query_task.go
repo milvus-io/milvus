@@ -51,6 +51,10 @@ func (t *QueryTask) Username() string {
 	return t.req.Req.GetUsername()
 }
 
+func (t *QueryTask) IsGpuIndex() bool {
+	return false
+}
+
 // PreExecute the task, only call once.
 func (t *QueryTask) PreExecute() error {
 	// Update task wait time metric before execute
@@ -80,6 +84,7 @@ func (t *QueryTask) Execute() error {
 	tr := timerecord.NewTimeRecorderWithTrace(t.ctx, "QueryTask")
 
 	retrievePlan, err := segments.NewRetrievePlan(
+		t.ctx,
 		t.collection,
 		t.req.Req.GetSerializedExprPlan(),
 		t.req.Req.GetMvccTimestamp(),

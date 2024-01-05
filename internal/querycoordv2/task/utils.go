@@ -198,8 +198,8 @@ func fillSubChannelRequest(
 ) error {
 	segmentIDs := typeutil.NewUniqueSet()
 	for _, vchannel := range req.GetInfos() {
-		segmentIDs.Insert(vchannel.GetFlushedSegmentIds()...)
 		segmentIDs.Insert(vchannel.GetUnflushedSegmentIds()...)
+		segmentIDs.Insert(vchannel.GetLevelZeroSegmentIds()...)
 	}
 
 	if segmentIDs.Len() == 0 {

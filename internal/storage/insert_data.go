@@ -115,12 +115,22 @@ func (i *InsertData) Append(row map[FieldID]interface{}) error {
 	return nil
 }
 
+func (i *InsertData) GetRow(idx int) map[FieldID]interface{} {
+	res := make(map[FieldID]interface{})
+	for field, data := range i.Data {
+		res[field] = data.GetRow(idx)
+	}
+	return res
+}
+
 // FieldData defines field data interface
 type FieldData interface {
 	GetMemorySize() int
 	RowNum() int
 	GetRow(i int) any
 	AppendRow(row interface{}) error
+	AppendRows(rows interface{}) error
+	GetDataType() schemapb.DataType
 }
 
 func NewFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema) (FieldData, error) {
@@ -198,7 +208,8 @@ func NewFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema)
 		}, nil
 	case schemapb.DataType_String, schemapb.DataType_VarChar:
 		return &StringFieldData{
-			Data: make([]string, 0),
+			Data:     make([]string, 0),
+			DataType: dataType,
 		}, nil
 	default:
 		return nil, fmt.Errorf("Unexpected schema data type: %d", dataType)
@@ -227,7 +238,8 @@ type DoubleFieldData struct {
 	Data []float64
 }
 type StringFieldData struct {
-	Data []string
+	Data     []string
+	DataType schemapb.DataType
 }
 type ArrayFieldData struct {
 	ElementType schemapb.DataType
@@ -405,6 +417,135 @@ func (data *Float16VectorFieldData) AppendRow(row interface{}) error {
 	return nil
 }
 
+func (data *BoolFieldData) AppendRows(rows interface{}) error {
+	v, ok := rows.([]bool)
+	if !ok {
+		return merr.WrapErrParameterInvalid("[]bool", rows, "Wrong rows type")
+	}
+	data.Data = append(data.Data, v...)
+	return nil
+}
+
+func (data *Int8FieldData) AppendRows(rows interface{}) error {
+	v, ok := rows.([]int8)
+	if !ok {
+		return merr.WrapErrParameterInvalid("[]int8", rows, "Wrong rows type")
+	}
+	data.Data = append(data.Data, v...)
+	return nil
+}
+
+func (data *Int16FieldData) AppendRows(rows interface{}) error {
+	v, ok := rows.([]int16)
+	if !ok {
+		return merr.WrapErrParameterInvalid("[]int16", rows, "Wrong rows type")
+	}
+	data.Data = append(data.Data, v...)
+	return nil
+}
+
+func (data *Int32FieldData) AppendRows(rows interface{}) error {
+	v, ok := rows.([]int32)
+	if !ok {
+		return merr.WrapErrParameterInvalid("[]int32", rows, "Wrong rows type")
+	}
+	data.Data = append(data.Data, v...)
+	return nil
+}
+
+func (data *Int64FieldData) AppendRows(rows interface{}) error {
+	v, ok := rows.([]int64)
+	if !ok {
+		return merr.WrapErrParameterInvalid("[]int64", rows, "Wrong rows type")
+	}
+	data.Data = append(data.Data, v...)
+	return nil
+}
+
+func (data *FloatFieldData) AppendRows(rows interface{}) error {
+	v, ok := rows.([]float32)
+	if !ok {
+		return merr.WrapErrParameterInvalid("[]float32", rows, "Wrong rows type")
+	}
+	data.Data = append(data.Data, v...)
+	return nil
+}
+
+func (data *DoubleFieldData) AppendRows(rows interface{}) error {
+	v, ok := rows.([]float64)
+	if !ok {
+		return merr.WrapErrParameterInvalid("[]float64", rows, "Wrong rows type")
+	}
+	data.Data = append(data.Data, v...)
+	return nil
+}
+
+func (data *StringFieldData) AppendRows(rows interface{}) error {
+	v, ok := rows.([]string)
+	if !ok {
+		return merr.WrapErrParameterInvalid("[]string", rows, "Wrong rows type")
+	}
+	data.Data = append(data.Data, v...)
+	return nil
+}
+
+func (data *ArrayFieldData) AppendRows(rows interface{}) error {
+	v, ok := rows.([]*schemapb.ScalarField)
+	if !ok {
+		return merr.WrapErrParameterInvalid("[]*schemapb.ScalarField", rows, "Wrong rows type")
+	}
+	data.Data = append(data.Data, v...)
+	return nil
+}
+
+func (data *JSONFieldData) AppendRows(rows interface{}) error {
+	v, ok := rows.([][]byte)
+	if !ok {
+		return merr.WrapErrParameterInvalid("[][]byte", rows, "Wrong rows type")
+	}
+	data.Data = append(data.Data, v...)
+	return nil
+}
+
+// AppendRows appends FLATTEN vectors to field data.
+func (data *BinaryVectorFieldData) AppendRows(rows interface{}) error {
+	v, ok := rows.([]byte)
+	if !ok {
+		return merr.WrapErrParameterInvalid("[]byte", rows, "Wrong rows type")
+	}
+	if len(v)%(data.Dim/8) != 0 {
+		return merr.WrapErrParameterInvalid(data.Dim/8, len(v), "Wrong vector size")
+	}
+	data.Data = append(data.Data, v...)
+	return nil
+}
+
+// AppendRows appends FLATTEN vectors to field data.
+func (data *FloatVectorFieldData) AppendRows(rows interface{}) error {
+	v, ok := rows.([]float32)
+	if !ok || len(v)%(data.Dim) != 0 {
+		return merr.WrapErrParameterInvalid("[]float32", rows, "Wrong rows type")
+	}
+	if len(v)%(data.Dim) != 0 {
+		return merr.WrapErrParameterInvalid(data.Dim, len(v), "Wrong vector size")
+	}
+	data.Data = append(data.Data, v...)
+	return nil
+}
+
+// AppendRows appends FLATTEN vectors to field data.
+func (data *Float16VectorFieldData) AppendRows(rows interface{}) error {
+	v, ok := rows.([]byte)
+	if !ok || len(v)%(data.Dim*2) != 0 {
+		return merr.WrapErrParameterInvalid("[]byte", rows, "Wrong rows type")
+	}
+	if len(v)%(data.Dim*2) != 0 {
+		return merr.WrapErrParameterInvalid(data.Dim*2, len(v), "Wrong vector size")
+	}
+	data.Data = append(data.Data, v...)
+	return nil
+}
+
 // GetMemorySize implements FieldData.GetMemorySize
 func (data *BoolFieldData) GetMemorySize() int          { return binary.Size(data.Data) }
 func (data *Int8FieldData) GetMemorySize() int          { return binary.Size(data.Data) }
@@ -416,6 +557,29 @@ func (data *DoubleFieldData) GetMemorySize() int        { return binary.Size(dat
 func (data *BinaryVectorFieldData) GetMemorySize() int  { return binary.Size(data.Data) + 4 }
 func (data *FloatVectorFieldData) GetMemorySize() int   { return binary.Size(data.Data) + 4 }
 func (data *Float16VectorFieldData) GetMemorySize() int { return binary.Size(data.Data) + 4 }
+
+// GetDataType implements FieldData.GetDataType
+func (data *BoolFieldData) GetDataType() schemapb.DataType   { return schemapb.DataType_Bool }
+func (data *Int8FieldData) GetDataType() schemapb.DataType   { return schemapb.DataType_Int8 }
+func (data *Int16FieldData) GetDataType() schemapb.DataType  { return schemapb.DataType_Int16 }
+func (data *Int32FieldData) GetDataType() schemapb.DataType  { return schemapb.DataType_Int32 }
+func (data *Int64FieldData) GetDataType() schemapb.DataType  { return schemapb.DataType_Int64 }
+func (data *FloatFieldData) GetDataType() schemapb.DataType  { return schemapb.DataType_Float }
+func (data *DoubleFieldData) GetDataType() schemapb.DataType { return schemapb.DataType_Double }
+func (data *StringFieldData) GetDataType() schemapb.DataType { return data.DataType }
+func (data *ArrayFieldData) GetDataType() schemapb.DataType  { return schemapb.DataType_Array }
+func (data *JSONFieldData) GetDataType() schemapb.DataType   { return schemapb.DataType_JSON }
+func (data *BinaryVectorFieldData) GetDataType() schemapb.DataType {
+	return schemapb.DataType_BinaryVector
+}
+
+func (data *FloatVectorFieldData) GetDataType() schemapb.DataType {
+	return schemapb.DataType_FloatVector
+}
+
+func (data *Float16VectorFieldData) GetDataType() schemapb.DataType {
+	return schemapb.DataType_Float16Vector
+}
 
 // why not binary.Size(data) directly? binary.Size(data) return -1
 // binary.Size returns how many bytes Write would generate to encode the value v, which
