@@ -78,13 +78,12 @@ func (i *InsertData) GetRowNum() int {
 	if i.Data == nil || len(i.Data) == 0 {
 		return 0
 	}
-
-	data, ok := i.Data[common.RowIDField]
-	if !ok {
-		return 0
+	var rowNum int
+	for _, data := range i.Data {
+		rowNum = data.RowNum()
+		break
 	}
-
-	return data.RowNum()
+	return rowNum
 }
 
 func (i *InsertData) GetMemorySize() int {
