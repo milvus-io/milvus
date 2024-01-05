@@ -23,6 +23,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -1322,4 +1323,258 @@ func TestMergeFieldData(t *testing.T) {
 		err := MergeFieldData([]*schemapb.FieldData{emptyField}, []*schemapb.FieldData{emptyField})
 		assert.Error(t, err)
 	})
+}
+
+type FieldDataSuite struct {
+	suite.Suite
+}
+
+func (s *FieldDataSuite) TestPrepareFieldData() {
+	fieldID := int64(100)
+	fieldName := "testField"
+	topK := int64(100)
+
+	s.Run("bool", func() {
+		samples := []*schemapb.FieldData{
+			{
+				FieldId:   fieldID,
+				FieldName: fieldName,
+				Type:      schemapb.DataType_Bool,
+			},
+		}
+
+		fields := PrepareResultFieldData(samples, topK)
+		s.Require().Len(fields, 1)
+		field := fields[0]
+		s.Equal(fieldID, field.GetFieldId())
+		s.Equal(fieldName, field.GetFieldName())
+		s.Equal(schemapb.DataType_Bool, field.GetType())
+
+		s.EqualValues(topK, cap(field.GetScalars().GetBoolData().GetData()))
+	})
+
+	s.Run("int", func() {
+		dataTypes := []schemapb.DataType{
+			schemapb.DataType_Int32,
+			schemapb.DataType_Int16,
+			schemapb.DataType_Int8,
+		}
+		for _, dataType := range dataTypes {
+			samples := []*schemapb.FieldData{
+				{
+					FieldId:   fieldID,
+					FieldName: fieldName,
+					Type:      dataType,
+				},
+			}
+
+			fields := PrepareResultFieldData(samples, topK)
+			s.Require().Len(fields, 1)
+			field := fields[0]
+			s.Equal(fieldID, field.GetFieldId())
+			s.Equal(fieldName, field.GetFieldName())
+			s.Equal(dataType, field.GetType())
+
+			s.EqualValues(topK, cap(field.GetScalars().GetIntData().GetData()))
+		}
+	})
+
+	s.Run("long", func() {
+		samples := []*schemapb.FieldData{
+			{
+				FieldId:   fieldID,
+				FieldName: fieldName,
+				Type:      schemapb.DataType_Int64,
+			},
+		}
+
+		fields := PrepareResultFieldData(samples, topK)
+		s.Require().Len(fields, 1)
+		field := fields[0]
+		s.Equal(fieldID, field.GetFieldId())
+		s.Equal(fieldName, field.GetFieldName())
+		s.Equal(schemapb.DataType_Int64, field.GetType())
+
+		s.EqualValues(topK, cap(field.GetScalars().GetLongData().GetData()))
+	})
+
+	s.Run("float", func() {
+		samples := []*schemapb.FieldData{
+			{
+				FieldId:   fieldID,
+				FieldName: fieldName,
+				Type:      schemapb.DataType_Float,
+			},
+		}
+
+		fields := PrepareResultFieldData(samples, topK)
+		s.Require().Len(fields, 1)
+		field := fields[0]
+		s.Equal(fieldID, field.GetFieldId())
+		s.Equal(fieldName, field.GetFieldName())
+		s.Equal(schemapb.DataType_Float, field.GetType())
+
+		s.EqualValues(topK, cap(field.GetScalars().GetFloatData().GetData()))
+	})
+
+	s.Run("double", func() {
+		samples := []*schemapb.FieldData{
+			{
+				FieldId:   fieldID,
+				FieldName: fieldName,
+				Type:      schemapb.DataType_Double,
+			},
+		}
+
+		fields := PrepareResultFieldData(samples, topK)
+		s.Require().Len(fields, 1)
+		field := fields[0]
+		s.Equal(fieldID, field.GetFieldId())
+		s.Equal(fieldName, field.GetFieldName())
+		s.Equal(schemapb.DataType_Double, field.GetType())
+
+		s.EqualValues(topK, cap(field.GetScalars().GetDoubleData().GetData()))
+	})
+
+	s.Run("string", func() {
+		dataTypes := []schemapb.DataType{
+			schemapb.DataType_VarChar,
+			schemapb.DataType_String,
+		}
+		for _, dataType := range dataTypes {
+			samples := []*schemapb.FieldData{
+				{
+					FieldId:   fieldID,
+					FieldName: fieldName,
+					Type:      dataType,
+				},
+			}
+
+			fields := PrepareResultFieldData(samples, topK)
+			s.Require().Len(fields, 1)
+			field := fields[0]
+			s.Equal(fieldID, field.GetFieldId())
+			s.Equal(fieldName, field.GetFieldName())
+			s.Equal(dataType, field.GetType())
+
+			s.EqualValues(topK, cap(field.GetScalars().GetStringData().GetData()))
+		}
+	})
+
+	s.Run("json", func() {
+		samples := []*schemapb.FieldData{
+			{
+				FieldId:   fieldID,
+				FieldName: fieldName,
+				Type:      schemapb.DataType_JSON,
+			},
+		}
+
+		fields := PrepareResultFieldData(samples, topK)
+		s.Require().Len(fields, 1)
+		field := fields[0]
+		s.Equal(fieldID, field.GetFieldId())
+		s.Equal(fieldName, field.GetFieldName())
+		s.Equal(schemapb.DataType_JSON, field.GetType())
+
+		s.EqualValues(topK, cap(field.GetScalars().GetJsonData().GetData()))
+	})
+
+	s.Run("array", func() {
+		samples := []*schemapb.FieldData{
+			{
+				FieldId:   fieldID,
+				FieldName: fieldName,
+				Type:      schemapb.DataType_Array,
+			},
+		}
+
+		fields := PrepareResultFieldData(samples, topK)
+		s.Require().Len(fields, 1)
+		field := fields[0]
+		s.Equal(fieldID, field.GetFieldId())
+		s.Equal(fieldName, field.GetFieldName())
+		s.Equal(schemapb.DataType_Array, field.GetType())
+
+		s.EqualValues(topK, cap(field.GetScalars().GetArrayData().GetData()))
+	})
+
+	s.Run("float_vector", func() {
+		samples := []*schemapb.FieldData{
+			{
+				FieldId:   fieldID,
+				FieldName: fieldName,
+				Type:      schemapb.DataType_FloatVector,
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Dim: 128,
+					},
+				},
+			},
+		}
+
+		fields := PrepareResultFieldData(samples, topK)
+		s.Require().Len(fields, 1)
+		field := fields[0]
+		s.Equal(fieldID, field.GetFieldId())
+		s.Equal(fieldName, field.GetFieldName())
+		s.Equal(schemapb.DataType_FloatVector, field.GetType())
+
+		s.EqualValues(128, field.GetVectors().GetDim())
+		s.EqualValues(topK*128, cap(field.GetVectors().GetFloatVector().GetData()))
+	})
+
+	s.Run("float16_vector", func() {
+		samples := []*schemapb.FieldData{
+			{
+				FieldId:   fieldID,
+				FieldName: fieldName,
+				Type:      schemapb.DataType_Float16Vector,
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Dim: 128,
+					},
+				},
+			},
+		}
+
+		fields := PrepareResultFieldData(samples, topK)
+		s.Require().Len(fields, 1)
+		field := fields[0]
+		s.Equal(fieldID, field.GetFieldId())
+		s.Equal(fieldName, field.GetFieldName())
+		s.Equal(schemapb.DataType_Float16Vector, field.GetType())
+
+		s.EqualValues(128, field.GetVectors().GetDim())
+		s.EqualValues(topK*128*2, cap(field.GetVectors().GetFloat16Vector()))
+	})
+
+	s.Run("binary_vector", func() {
+		samples := []*schemapb.FieldData{
+			{
+				FieldId:   fieldID,
+				FieldName: fieldName,
+				Type:      schemapb.DataType_BinaryVector,
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Dim: 128,
+					},
+				},
+			},
+		}
+
+		fields := PrepareResultFieldData(samples, topK)
+		s.Require().Len(fields, 1)
+		field := fields[0]
+		s.Equal(fieldID, field.GetFieldId())
+		s.Equal(fieldName, field.GetFieldName())
+		s.Equal(schemapb.DataType_BinaryVector, field.GetType())
+
+		s.EqualValues(128, field.GetVectors().GetDim())
+		s.EqualValues(topK*128/8, cap(field.GetVectors().GetBinaryVector()))
+	})
+}
+
+func TestFieldData(t *testing.T) {
+	suite.Run(t, new(FieldDataSuite))
 }
