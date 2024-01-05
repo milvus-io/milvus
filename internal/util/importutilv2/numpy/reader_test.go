@@ -21,6 +21,7 @@ import (
 	rand2 "crypto/rand"
 	"fmt"
 	"io"
+	"math"
 	"math/rand"
 	"strconv"
 	"strings"
@@ -243,7 +244,7 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 		}
 	}
 
-	reader, err := NewReader(schema, readers)
+	reader, err := NewReader(schema, readers, math.MaxInt)
 	suite.NoError(err)
 
 	checkFn := func(actualInsertData *storage.InsertData, offsetBegin, expectRows int) {
@@ -263,12 +264,9 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 		}
 	}
 
-	res, err := reader.Next(int64(suite.numRows / 2))
+	res, err := reader.Read()
 	suite.NoError(err)
-	checkFn(res, 0, suite.numRows/2)
-	res, err = reader.Next(int64(suite.numRows / 2))
-	suite.NoError(err)
-	checkFn(res, suite.numRows/2, suite.numRows/2)
+	checkFn(res, 0, suite.numRows)
 }
 
 func (suite *ReaderSuite) TestReadScalarFields() {
