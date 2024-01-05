@@ -18,14 +18,12 @@ package checkers
 
 import (
 	"context"
-	"time"
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
-	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
@@ -129,8 +127,15 @@ func (c *IndexChecker) checkReplica(ctx context.Context, collection *meta.Collec
 	}
 
 	tasks = lo.FilterMap(segmentsToUpdate.Collect(), func(segmentID int64, _ int) (task.Task, bool) {
-		return c.createSegmentUpdateTask(ctx, idSegments[segmentID], replica)
+		t := task.CreateSegmentTask(ctx, c.ID(), idSegments[segmentID], replica.GetID(), idSegments[segmentID].Node, task.ActionTypeUpdate, querypb.DataScope_Historical)
+		return t, t != nil
 	})
+
+	for _, t := range tasks {
+		// index task shall have lower or equal priority than balance task
+		t.SetPriority(task.TaskPriorityLow)
+		t.SetReason("missing index")
+	}
 
 	return tasks
 }
@@ -156,29 +161,4 @@ func (c *IndexChecker) getSealedSegmentsDist(replica *meta.Replica) []*meta.Segm
 		ret = append(ret, c.dist.SegmentDistManager.GetByCollectionAndNode(replica.CollectionID, node)...)
 	}
 	return ret
-}
-
-func (c *IndexChecker) createSegmentUpdateTask(ctx context.Context, segment *meta.Segment, replica *meta.Replica) (task.Task, bool) {
-	action := task.NewSegmentActionWithScope(segment.Node, task.ActionTypeUpdate, segment.GetInsertChannel(), segment.GetID(), querypb.DataScope_Historical)
-	t, err := task.NewSegmentTask(
-		ctx,
-		params.Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond),
-		c.ID(),
-		segment.GetCollectionID(),
-		replica.GetID(),
-		action,
-	)
-	if err != nil {
-		log.Warn("create segment update task failed",
-			zap.Int64("collection", segment.GetCollectionID()),
-			zap.String("channel", segment.GetInsertChannel()),
-			zap.Int64("node", segment.Node),
-			zap.Error(err),
-		)
-		return nil, false
-	}
-	// index task shall have lower or equal priority than balance task
-	t.SetPriority(task.TaskPriorityLow)
-	t.SetReason("missing index")
-	return t, true
 }

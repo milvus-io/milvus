@@ -19,7 +19,6 @@ package checkers
 import (
 	"context"
 	"sort"
-	"time"
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -28,7 +27,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
-	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
@@ -94,10 +92,12 @@ func (c *SegmentChecker) Check(ctx context.Context) []task.Task {
 	// find already released segments which are not contained in target
 	segments := c.dist.SegmentDistManager.GetAll()
 	released := utils.FilterReleased(segments, collectionIDs)
-	reduceTasks := c.createSegmentReduceTasks(ctx, released, -1, querypb.DataScope_Historical)
-	task.SetReason("collection released", reduceTasks...)
-	results = append(results, reduceTasks...)
-	task.SetPriority(task.TaskPriorityNormal, results...)
+	for _, s := range released {
+		t := task.CreateSegmentTask(ctx, c.ID(), s, -1, s.Node, task.ActionTypeReduce, querypb.DataScope_Historical)
+		t.SetReason("collection released")
+		t.SetPriority(task.TaskPriorityNormal)
+		results = append(results, t)
+	}
 	return results
 }
 
@@ -120,27 +120,48 @@ func (c *SegmentChecker) checkReplica(ctx context.Context, replica *meta.Replica
 
 	// compare with targets to find the lack and redundancy of segments
 	lacks, redundancies := c.getSealedSegmentDiff(replica.GetCollectionID(), replica.GetID())
-	tasks := c.createSegmentLoadTasks(ctx, lacks, replica)
-	task.SetReason("lacks of segment", tasks...)
-	ret = append(ret, tasks...)
+	plans := c.genSegmentLoadPlan(ctx, lacks, replica)
+	for _, p := range plans {
+		t := balance.CreateSegmentTaskFromPlan(ctx, c.ID(), p)
+		if t != nil {
+			t.SetPriority(task.TaskPriorityNormal)
+			t.SetReason("lacks of segment")
+			ret = append(ret, t)
+		}
+	}
 
 	redundancies = c.filterSegmentInUse(replica, redundancies)
-	tasks = c.createSegmentReduceTasks(ctx, redundancies, replica.GetID(), querypb.DataScope_Historical)
-	task.SetReason("segment not exists in target", tasks...)
-	ret = append(ret, tasks...)
+	for _, s := range redundancies {
+		t := task.CreateSegmentTask(ctx, c.ID(), s, replica.GetID(), s.Node, task.ActionTypeReduce, querypb.DataScope_Historical)
+		if t != nil {
+			t.SetPriority(task.TaskPriorityNormal)
+			t.SetReason("segment not exists in target")
+			ret = append(ret, t)
+		}
+	}
 
 	// compare inner dists to find repeated loaded segments
 	redundancies = c.findRepeatedSealedSegments(replica.GetID())
 	redundancies = c.filterExistedOnLeader(replica, redundancies)
-	tasks = c.createSegmentReduceTasks(ctx, redundancies, replica.GetID(), querypb.DataScope_Historical)
-	task.SetReason("redundancies of segment", tasks...)
-	ret = append(ret, tasks...)
+	for _, s := range redundancies {
+		t := task.CreateSegmentTask(ctx, c.ID(), s, replica.GetID(), s.Node, task.ActionTypeReduce, querypb.DataScope_Historical)
+		if t != nil {
+			t.SetPriority(task.TaskPriorityNormal)
+			t.SetReason("redundancies of segment")
+			ret = append(ret, t)
+		}
+	}
 
 	// compare with target to find the lack and redundancy of segments
 	_, redundancies = c.getGrowingSegmentDiff(replica.GetCollectionID(), replica.GetID())
-	tasks = c.createSegmentReduceTasks(ctx, redundancies, replica.GetID(), querypb.DataScope_Streaming)
-	task.SetReason("streaming segment not exists in target", tasks...)
-	ret = append(ret, tasks...)
+	for _, s := range redundancies {
+		t := task.CreateSegmentTask(ctx, c.ID(), s, replica.GetID(), s.Node, task.ActionTypeReduce, querypb.DataScope_Streaming)
+		if t != nil {
+			t.SetPriority(task.TaskPriorityNormal)
+			t.SetReason("streaming segment not exists in target")
+			ret = append(ret, t)
+		}
+	}
 
 	return ret
 }
@@ -337,7 +358,7 @@ func (c *SegmentChecker) filterSegmentInUse(replica *meta.Replica, segments []*m
 	return filtered
 }
 
-func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []*datapb.SegmentInfo, replica *meta.Replica) []task.Task {
+func (c *SegmentChecker) genSegmentLoadPlan(ctx context.Context, segments []*datapb.SegmentInfo, replica *meta.Replica) []balance.SegmentAssignPlan {
 	if len(segments) == 0 {
 		return nil
 	}
@@ -381,33 +402,5 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 		plans = append(plans, shardPlans...)
 	}
 
-	return balance.CreateSegmentTasksFromPlans(ctx, c.ID(), Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond), plans)
-}
-
-func (c *SegmentChecker) createSegmentReduceTasks(ctx context.Context, segments []*meta.Segment, replicaID int64, scope querypb.DataScope) []task.Task {
-	ret := make([]task.Task, 0, len(segments))
-	for _, s := range segments {
-		action := task.NewSegmentActionWithScope(s.Node, task.ActionTypeReduce, s.GetInsertChannel(), s.GetID(), scope)
-		task, err := task.NewSegmentTask(
-			ctx,
-			Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond),
-			c.ID(),
-			s.GetCollectionID(),
-			replicaID,
-			action,
-		)
-		if err != nil {
-			log.Warn("create segment reduce task failed",
-				zap.Int64("collection", s.GetCollectionID()),
-				zap.Int64("replica", replicaID),
-				zap.String("channel", s.GetInsertChannel()),
-				zap.Int64("from", s.Node),
-				zap.Error(err),
-			)
-			continue
-		}
-
-		ret = append(ret, task)
-	}
-	return ret
+	return plans
 }

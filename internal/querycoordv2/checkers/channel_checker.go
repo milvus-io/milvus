@@ -18,14 +18,11 @@ package checkers
 
 import (
 	"context"
-	"time"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
-	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -88,9 +85,15 @@ func (c *ChannelChecker) Check(ctx context.Context) []task.Task {
 
 	channels := c.dist.ChannelDistManager.GetAll()
 	released := utils.FilterReleased(channels, collectionIDs)
-	releaseTasks := c.createChannelReduceTasks(ctx, released, -1)
-	task.SetReason("collection released", releaseTasks...)
-	tasks = append(tasks, releaseTasks...)
+	for _, ch := range released {
+		t := task.CreateChannelTask(ctx, c.ID(), -1, ch.Node, task.ActionTypeReduce, ch)
+		if t != nil {
+			t.SetPriority(task.TaskPriorityHigh)
+			t.SetReason("collection released")
+			tasks = append(tasks, t)
+		}
+	}
+
 	return tasks
 }
 
@@ -98,21 +101,35 @@ func (c *ChannelChecker) checkReplica(ctx context.Context, replica *meta.Replica
 	ret := make([]task.Task, 0)
 
 	lacks, redundancies := c.getDmChannelDiff(replica.GetCollectionID(), replica.GetID())
-	tasks := c.createChannelLoadTask(ctx, lacks, replica)
-	task.SetReason("lacks of channel", tasks...)
-	ret = append(ret, tasks...)
+	plans := c.genChannelLoadPlan(ctx, lacks, replica)
+	for i := range plans {
+		plans[i].ReplicaID = replica.GetID()
+		t := balance.CreateChannelTaskFromPlan(ctx, c.ID(), plans[i])
+		if t != nil {
+			t.SetPriority(task.TaskPriorityHigh)
+			t.SetReason("lacks of channel")
+			ret = append(ret, t)
+		}
+	}
 
-	tasks = c.createChannelReduceTasks(ctx, redundancies, replica.GetID())
-	task.SetReason("collection released", tasks...)
-	ret = append(ret, tasks...)
+	for _, ch := range redundancies {
+		t := task.CreateChannelTask(ctx, c.ID(), replica.GetID(), ch.Node, task.ActionTypeReduce, ch)
+		if t != nil {
+			t.SetPriority(task.TaskPriorityHigh)
+			t.SetReason("collection released")
+			ret = append(ret, t)
+		}
+	}
 
 	repeated := c.findRepeatedChannels(replica.GetID())
-	tasks = c.createChannelReduceTasks(ctx, repeated, replica.GetID())
-	task.SetReason("redundancies of channel")
-	ret = append(ret, tasks...)
-
-	// All channel related tasks should be with high priority
-	task.SetPriority(task.TaskPriorityHigh, tasks...)
+	for _, ch := range repeated {
+		t := task.CreateChannelTask(ctx, c.ID(), replica.GetID(), ch.Node, task.ActionTypeReduce, ch)
+		if t != nil {
+			t.SetPriority(task.TaskPriorityHigh)
+			t.SetReason("redundancies of channel")
+			ret = append(ret, t)
+		}
+	}
 	return ret
 }
 
@@ -190,7 +207,9 @@ func (c *ChannelChecker) findRepeatedChannels(replicaID int64) []*meta.DmChannel
 	return ret
 }
 
-func (c *ChannelChecker) createChannelLoadTask(ctx context.Context, channels []*meta.DmChannel, replica *meta.Replica) []task.Task {
+func (c *ChannelChecker) genChannelLoadPlan(ctx context.Context, channels []*meta.DmChannel, replica *meta.Replica) []balance.ChannelAssignPlan {
+	// replica will be loaded in one resource group, if one of the node from the resource group has been transferring to other resource group,
+	// shouldn't assign channel to it again
 	outboundNodes := c.meta.ResourceManager.CheckOutboundNodes(replica)
 	availableNodes := lo.Filter(replica.Replica.GetNodes(), func(node int64, _ int) bool {
 		return !outboundNodes.Contain(node)
@@ -200,25 +219,5 @@ func (c *ChannelChecker) createChannelLoadTask(ctx context.Context, channels []*
 		plans[i].ReplicaID = replica.GetID()
 	}
 
-	return balance.CreateChannelTasksFromPlans(ctx, c.ID(), Params.QueryCoordCfg.ChannelTaskTimeout.GetAsDuration(time.Millisecond), plans)
-}
-
-func (c *ChannelChecker) createChannelReduceTasks(ctx context.Context, channels []*meta.DmChannel, replicaID int64) []task.Task {
-	ret := make([]task.Task, 0, len(channels))
-	for _, ch := range channels {
-		action := task.NewChannelAction(ch.Node, task.ActionTypeReduce, ch.GetChannelName())
-		task, err := task.NewChannelTask(ctx, Params.QueryCoordCfg.ChannelTaskTimeout.GetAsDuration(time.Millisecond), c.ID(), ch.GetCollectionID(), replicaID, action)
-		if err != nil {
-			log.Warn("create channel reduce task failed",
-				zap.Int64("collection", ch.GetCollectionID()),
-				zap.Int64("replica", replicaID),
-				zap.String("channel", ch.GetChannelName()),
-				zap.Int64("from", ch.Node),
-				zap.Error(err),
-			)
-			continue
-		}
-		ret = append(ret, task)
-	}
-	return ret
+	return plans
 }

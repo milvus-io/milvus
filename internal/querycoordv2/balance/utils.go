@@ -34,93 +34,67 @@ const (
 	DistInfoPrefix = "Balance-Dists:"
 )
 
-func CreateSegmentTasksFromPlans(ctx context.Context, source task.Source, timeout time.Duration, plans []SegmentAssignPlan) []task.Task {
-	ret := make([]task.Task, 0)
-	for _, p := range plans {
-		actions := make([]task.Action, 0)
-		if p.To != -1 {
-			action := task.NewSegmentActionWithScope(p.To, task.ActionTypeGrow, p.Segment.GetInsertChannel(), p.Segment.GetID(), querypb.DataScope_Historical)
-			actions = append(actions, action)
-		}
-		if p.From != -1 {
-			action := task.NewSegmentActionWithScope(p.From, task.ActionTypeReduce, p.Segment.GetInsertChannel(), p.Segment.GetID(), querypb.DataScope_Historical)
-			actions = append(actions, action)
-		}
-		t, err := task.NewSegmentTask(
-			ctx,
-			timeout,
-			source,
-			p.Segment.GetCollectionID(),
-			p.ReplicaID,
-			actions...,
-		)
-		if err != nil {
-			log.Warn("create segment task from plan failed",
-				zap.Int64("collection", p.Segment.GetCollectionID()),
-				zap.Int64("segmentID", p.Segment.GetID()),
-				zap.Int64("replica", p.ReplicaID),
-				zap.String("channel", p.Segment.GetInsertChannel()),
-				zap.Int64("from", p.From),
-				zap.Int64("to", p.To),
-				zap.Error(err),
-			)
-			continue
-		}
-
-		log.Info("create segment task",
-			zap.Int64("collection", p.Segment.GetCollectionID()),
-			zap.Int64("segmentID", p.Segment.GetID()),
-			zap.Int64("replica", p.ReplicaID),
-			zap.String("channel", p.Segment.GetInsertChannel()),
-			zap.Int64("from", p.From),
-			zap.Int64("to", p.To))
-		if task.GetTaskType(t) == task.TaskTypeMove {
-			// from balance checker
-			t.SetPriority(task.TaskPriorityLow)
-		} else {
-			// from segment checker
-			t.SetPriority(task.TaskPriorityNormal)
-		}
-		ret = append(ret, t)
+func CreateSegmentTaskFromPlan(ctx context.Context, source task.Source, p SegmentAssignPlan) task.Task {
+	log := log.Ctx(ctx).With(
+		zap.Int64("collection", p.Segment.GetCollectionID()),
+		zap.Int64("segmentID", p.Segment.GetID()),
+		zap.Int64("replica", p.ReplicaID),
+		zap.String("channel", p.Segment.GetInsertChannel()),
+		zap.Int64("from", p.From),
+		zap.Int64("to", p.To),
+	)
+	actions := make([]task.Action, 0)
+	if p.To != -1 {
+		action := task.NewSegmentActionWithScope(p.To, task.ActionTypeGrow, p.Segment.GetInsertChannel(), p.Segment.GetID(), querypb.DataScope_Historical)
+		actions = append(actions, action)
 	}
-	return ret
+	if p.From != -1 {
+		action := task.NewSegmentActionWithScope(p.From, task.ActionTypeReduce, p.Segment.GetInsertChannel(), p.Segment.GetID(), querypb.DataScope_Historical)
+		actions = append(actions, action)
+	}
+	t, err := task.NewSegmentTask(
+		ctx,
+		time.Second,
+		source,
+		p.Segment.GetCollectionID(),
+		p.ReplicaID,
+		actions...,
+	)
+	if err != nil {
+		log.Warn("create segment task from plan failed",
+			zap.Error(err))
+		return nil
+	}
+
+	log.Info("create segment task")
+	return t
 }
 
-func CreateChannelTasksFromPlans(ctx context.Context, source task.Source, timeout time.Duration, plans []ChannelAssignPlan) []task.Task {
-	ret := make([]task.Task, 0, len(plans))
-	for _, p := range plans {
-		actions := make([]task.Action, 0)
-		if p.To != -1 {
-			action := task.NewChannelAction(p.To, task.ActionTypeGrow, p.Channel.GetChannelName())
-			actions = append(actions, action)
-		}
-		if p.From != -1 {
-			action := task.NewChannelAction(p.From, task.ActionTypeReduce, p.Channel.GetChannelName())
-			actions = append(actions, action)
-		}
-		t, err := task.NewChannelTask(ctx, timeout, source, p.Channel.GetCollectionID(), p.ReplicaID, actions...)
-		if err != nil {
-			log.Warn("create channel task failed",
-				zap.Int64("collection", p.Channel.GetCollectionID()),
-				zap.Int64("replica", p.ReplicaID),
-				zap.String("channel", p.Channel.GetChannelName()),
-				zap.Int64("from", p.From),
-				zap.Int64("to", p.To),
-				zap.Error(err),
-			)
-			continue
-		}
-
-		log.Info("create channel task",
-			zap.Int64("collection", p.Channel.GetCollectionID()),
-			zap.Int64("replica", p.ReplicaID),
-			zap.String("channel", p.Channel.GetChannelName()),
-			zap.Int64("from", p.From),
-			zap.Int64("to", p.To))
-		t.SetPriority(task.TaskPriorityHigh)
-		ret = append(ret, t)
+func CreateChannelTaskFromPlan(ctx context.Context, source task.Source, p ChannelAssignPlan) task.Task {
+	log := log.Ctx(ctx).With(
+		zap.Int64("collection", p.Channel.GetCollectionID()),
+		zap.Int64("replica", p.ReplicaID),
+		zap.String("channel", p.Channel.GetChannelName()),
+		zap.Int64("from", p.From),
+		zap.Int64("to", p.To),
+	)
+	actions := make([]task.Action, 0)
+	if p.To != -1 {
+		action := task.NewChannelAction(p.To, task.ActionTypeGrow, p.Channel.GetChannelName())
+		actions = append(actions, action)
 	}
-	return ret
+	if p.From != -1 {
+		action := task.NewChannelAction(p.From, task.ActionTypeReduce, p.Channel.GetChannelName())
+		actions = append(actions, action)
+	}
+	t, err := task.NewChannelTask(ctx, time.Second, source, p.Channel.GetCollectionID(), p.ReplicaID, actions...)
+	if err != nil {
+		log.Warn("create channel task failed", zap.Error(err))
+		return nil
+	}
+
+	log.Info("create channel task")
+	return t
 }
 
 func PrintNewBalancePlans(collectionID int64, replicaID int64, segmentPlans []SegmentAssignPlan,

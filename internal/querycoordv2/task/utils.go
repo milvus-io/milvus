@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/samber/lo"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -32,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -259,4 +261,54 @@ func getMetricType(indexInfos []*indexpb.IndexInfo, schema *schemapb.CollectionS
 		return "", err
 	}
 	return metricType, nil
+}
+
+func CreateSegmentTask(ctx context.Context,
+	source Source,
+	segment *meta.Segment,
+	replicaID int64,
+	actionTargetNode int64,
+	actionType ActionType,
+	scope querypb.DataScope,
+) Task {
+	log := log.Ctx(ctx).With(
+		zap.Int64("collection", segment.GetCollectionID()),
+		zap.Int64("replicaID", replicaID),
+		zap.String("channel", segment.GetInsertChannel()),
+		zap.Int64("node", actionTargetNode),
+		zap.Int64("segmentID", segment.GetID()),
+		zap.String("actionType", actionType.String()))
+
+	action := NewSegmentActionWithScope(actionTargetNode, actionType, segment.GetInsertChannel(), segment.GetID(), scope)
+	t, err := NewSegmentTask(ctx, time.Second, source, segment.GetCollectionID(), replicaID, action)
+	if err != nil {
+		log.Warn("create segment task failed", zap.Error(err))
+		return nil
+	}
+
+	log.Info("create segment task")
+	return t
+}
+
+func CreateChannelTask(ctx context.Context,
+	source Source,
+	replicaID int64,
+	actionTargetNode int64,
+	actionType ActionType,
+	ch *meta.DmChannel,
+) Task {
+	log := log.Ctx(ctx).With(
+		zap.Int64("collection", ch.GetCollectionID()),
+		zap.Int64("replica", replicaID),
+		zap.String("channel", ch.GetChannelName()),
+		zap.Int64("node", actionTargetNode))
+	action := NewChannelAction(actionTargetNode, actionType, ch.GetChannelName())
+	t, err := NewChannelTask(ctx, time.Second, source, ch.GetCollectionID(), replicaID, action)
+	if err != nil {
+		log.Warn("create channel reduce task failed", zap.Error(err))
+		return nil
+	}
+
+	log.Info("create segment task")
+	return t
 }
