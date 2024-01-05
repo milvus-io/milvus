@@ -75,13 +75,8 @@ func (r *Reader) Read() (*storage.InsertData, error) {
 	if err != nil {
 		return nil, err
 	}
-	count := 100
 OUTER:
 	for {
-		count--
-		if count == 0 {
-			count = 0
-		}
 		for fieldID, cr := range r.frs {
 			data, err := cr.Next(1)
 			if err != nil {
