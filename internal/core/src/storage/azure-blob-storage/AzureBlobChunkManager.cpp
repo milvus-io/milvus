@@ -79,7 +79,17 @@ AzureBlobChunkManager::AzureBlobChunkManager(
                 CreateFromConnectionString(GetConnectionString(
                     access_key_id, access_key_value, address)));
     }
-    client_->GetProperties();
+    try {
+        Azure::Core::Context context;
+        client_->GetBlobContainerClient("justforconnectioncheck")
+            .GetBlockBlobClient("justforconnectioncheck")
+            .GetProperties(Azure::Storage::Blobs::GetBlobPropertiesOptions(),
+                           context);
+    } catch (const Azure::Storage::StorageException& e) {
+        if (e.StatusCode != Azure::Core::Http::HttpStatusCode::NotFound) {
+            throw;
+        }
+    }
 }
 
 AzureBlobChunkManager::~AzureBlobChunkManager() {
