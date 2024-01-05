@@ -39,8 +39,6 @@ import (
 
 const BufferSize = 64 * 1024 * 1024 // TODO: dyh, make it configurable
 
-type HashedData [][]*storage.InsertData // vchannel -> (partitionID -> InsertData)
-
 type Executor interface {
 	Start()
 	Close()
@@ -91,6 +89,7 @@ func (e *executor) Start() {
 				})
 			}
 			_ = wg.Wait()
+			LogStats(e.manager)
 		}
 	}
 }
@@ -166,7 +165,11 @@ func (e *executor) readFileStat(reader importutilv2.Reader, task Task, fileIdx i
 		if err != nil {
 			return err
 		}
-		rowsCount, err := GetHashedRowsCount(task, data)
+		err = CheckRowsEqual(task.GetSchema(), data)
+		if err != nil {
+			return err
+		}
+		rowsCount, err := GetRowsStats(task, data)
 		if err != nil {
 			return err
 		}
@@ -227,7 +230,7 @@ func (e *executor) importFile(reader importutilv2.Reader, task Task) error {
 		if err != nil {
 			return err
 		}
-		hashedData, err := GetHashedData(iTask, data)
+		hashedData, err := HashData(iTask, data)
 		if err != nil {
 			return err
 		}

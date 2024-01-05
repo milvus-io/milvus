@@ -55,6 +55,12 @@ func WithStates(states ...internalpb.ImportState) TaskFilter {
 	}
 }
 
+func WithType(taskType TaskType) TaskFilter {
+	return func(task Task) bool {
+		return task.GetType() == taskType
+	}
+}
+
 type UpdateAction func(task Task)
 
 func UpdateState(state internalpb.ImportState) UpdateAction {

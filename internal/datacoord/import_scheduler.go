@@ -17,7 +17,6 @@
 package datacoord
 
 import (
-	"fmt"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"sync"
 	"time"
@@ -188,6 +187,8 @@ func (s *importScheduler) processPendingImport(task ImportTask) {
 }
 
 func (s *importScheduler) processInProgressPreImport(task ImportTask) {
+	log := log.With(zap.Int64("request", task.GetRequestID()),
+		zap.Int64("taskID", task.GetTaskID()))
 	req := &datapb.QueryPreImportRequest{
 		RequestID: task.GetRequestID(),
 		TaskID:    task.GetTaskID(),
@@ -198,7 +199,6 @@ func (s *importScheduler) processInProgressPreImport(task ImportTask) {
 		s.checkErr(task, err)
 		return
 	}
-	fmt.Println("dyh debug, file stats", resp.GetFileStats())
 	actions := []UpdateAction{UpdateFileStats(resp.GetFileStats())}
 	if resp.GetState() == internalpb.ImportState_Completed {
 		actions = append(actions, UpdateState(internalpb.ImportState_Completed))
@@ -211,12 +211,13 @@ func (s *importScheduler) processInProgressPreImport(task ImportTask) {
 		log.Warn("update import task failed", WrapLogFields(task, err)...)
 		return
 	}
-	log.Info("query preimport done",
-		zap.Int64("request", task.GetRequestID()),
-		zap.Int64("taskID", task.GetTaskID()),
-		zap.String("state", resp.GetState().String()),
-		zap.String("reason", resp.GetReason()),
-		zap.Any("fileStats", resp.GetFileStats()))
+	if resp.GetState() == internalpb.ImportState_Failed {
+		log.Warn("preimport failed", zap.String("reason", resp.GetReason()))
+	} else {
+		log.Info("query preimport done",
+			zap.String("state", resp.GetState().String()),
+			zap.Any("fileStats", resp.GetFileStats()))
+	}
 }
 
 func (s *importScheduler) processInProgressImport(task ImportTask) {

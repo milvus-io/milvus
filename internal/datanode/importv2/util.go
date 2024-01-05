@@ -20,8 +20,11 @@ import (
 	"context"
 	"fmt"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/log"
+	"go.uber.org/zap"
 
 	"github.com/samber/lo"
 
@@ -121,21 +124,27 @@ func CheckRowsEqual(schema *schemapb.CollectionSchema, data *storage.InsertData)
 	if len(data.Data) == 0 {
 		return nil
 	}
-	fields := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) int64 {
+	idToField := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) int64 {
 		return field.GetFieldID()
 	})
 
 	var field int64
 	var rows int
 	for fieldID, d := range data.Data {
+		if idToField[fieldID].GetIsPrimaryKey() && idToField[fieldID].GetAutoID() {
+			continue
+		}
 		field, rows = fieldID, d.RowNum()
 		break
 	}
 	for fieldID, d := range data.Data {
+		if idToField[fieldID].GetIsPrimaryKey() && idToField[fieldID].GetAutoID() {
+			continue
+		}
 		if d.RowNum() != rows {
 			return merr.WrapErrImportFailed(
 				fmt.Sprintf("imported rows are not aligned, field '%s' with '%d' rows, field '%s' with '%d' rows",
-					fields[field].GetName(), rows, fields[fieldID].GetName(), d.RowNum()))
+					idToField[field].GetName(), rows, idToField[fieldID].GetName(), d.RowNum()))
 		}
 	}
 	return nil
@@ -202,4 +211,21 @@ func FillDynamicData(data *storage.InsertData, schema *schemapb.CollectionSchema
 	}
 	data.Data[dynamicField.GetFieldID()] = dynamicData
 	return nil
+}
+
+func LogStats(manager TaskManager) {
+	logFunc := func(tasks []Task, taskType TaskType) {
+		byState := lo.GroupBy(tasks, func(t Task) internalpb.ImportState {
+			return t.GetState()
+		})
+		log.Info("import task stats", zap.String("type", taskType.String()),
+			zap.Int("pending", len(byState[internalpb.ImportState_Pending])),
+			zap.Int("inProgress", len(byState[internalpb.ImportState_InProgress])),
+			zap.Int("completed", len(byState[internalpb.ImportState_Completed])),
+			zap.Int("failed", len(byState[internalpb.ImportState_Failed])))
+	}
+	tasks := manager.GetBy(WithType(PreImportTaskType))
+	logFunc(tasks, PreImportTaskType)
+	tasks = manager.GetBy(WithType(ImportTaskType))
+	logFunc(tasks, ImportTaskType)
 }

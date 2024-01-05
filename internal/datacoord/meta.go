@@ -254,7 +254,6 @@ func (m *meta) GetNumRowsOfCollection(collectionID UniqueID) int64 {
 	var ret int64
 	segments := m.segments.GetSegments()
 	for _, segment := range segments {
-		fmt.Println("................*", segment.SegmentInfo)
 		if isSegmentHealthy(segment) && segment.GetCollectionID() == collectionID {
 			ret += segment.GetNumOfRows()
 		}
@@ -620,7 +619,6 @@ func UpdateNumOfRows(segmentID int64, rows int64) UpdateOperator {
 				zap.Int64("segment bin log row count (correct)", count))
 			segment.NumOfRows = count
 		}
-		fmt.Println("dyh debug, updateNumOfRows, count:", count)
 		return true
 	}
 }
