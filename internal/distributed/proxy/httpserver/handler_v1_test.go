@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -22,6 +21,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -1862,6 +1862,95 @@ func TestImport(t *testing.T) {
 			})
 			bodyReader := bytes.NewReader(data)
 			req := httptest.NewRequest(http.MethodPost, versional(VectorImportPath), bodyReader)
+			req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+			assert.Equal(t, tt.exceptCode, w.Code)
+			if tt.expectedErr != nil {
+				assert.Equal(t, true, CheckErrCode(w.Body.String(), tt.expectedErr))
+			} else {
+				assert.Equal(t, tt.expectedBody, w.Body.String())
+			}
+		})
+	}
+
+	testCases = []testCase{}
+	mp5 := mocks.NewMockProxy(t)
+	mp5.EXPECT().GetImportProgress(mock.Anything, mock.Anything).Return(nil, ErrDefault).Once()
+	testCases = append(testCases, testCase{
+		name:         "get import progress fail",
+		mp:           mp5,
+		exceptCode:   200,
+		expectedBody: PrintErr(ErrDefault),
+	})
+
+	mp6 := mocks.NewMockProxy(t)
+	mp6.EXPECT().GetImportProgress(mock.Anything, mock.Anything).Return(&internalpb.GetImportProgressResponse{
+		Status:   &StatusSuccess,
+		State:    internalpb.ImportState_Completed,
+		Progress: 100,
+	}, nil).Once()
+	testCases = append(testCases, testCase{
+		name:         "get import progress success",
+		mp:           mp6,
+		exceptCode:   200,
+		expectedBody: "{\"code\":200,\"progress\":100,\"state\":\"Completed\"}",
+	})
+
+	for _, tt := range testCases {
+		t.Run(tt.name, func(t *testing.T) {
+			testEngine := initHTTPServer(tt.mp, true)
+			data, _ := json.Marshal(map[string]interface{}{
+				HTTPCollectionName: DefaultCollectionName,
+				"requestID":        "1000",
+			})
+			bodyReader := bytes.NewReader(data)
+			req := httptest.NewRequest(http.MethodGet, versional(VectorImportDescribePath), bodyReader)
+			req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+			assert.Equal(t, tt.exceptCode, w.Code)
+			if tt.expectedErr != nil {
+				assert.Equal(t, true, CheckErrCode(w.Body.String(), tt.expectedErr))
+			} else {
+				assert.Equal(t, tt.expectedBody, w.Body.String())
+			}
+		})
+	}
+
+	testCases = []testCase{}
+	mp7 := mocks.NewMockProxy(t)
+	mp7.EXPECT().ListImports(mock.Anything, mock.Anything).Return(nil, ErrDefault).Once()
+	testCases = append(testCases, testCase{
+		name:         "list imports fail",
+		mp:           mp7,
+		exceptCode:   200,
+		expectedBody: PrintErr(ErrDefault),
+	})
+
+	mp8 := mocks.NewMockProxy(t)
+	mp8.EXPECT().ListImports(mock.Anything, mock.Anything).Return(&internalpb.ListImportsResponse{
+		Status:     &StatusSuccess,
+		RequestIDs: []string{"1000"},
+		States:     []internalpb.ImportState{internalpb.ImportState_Completed},
+		Reasons:    []string{""},
+		Progresses: []int64{100},
+	}, nil).Once()
+	testCases = append(testCases, testCase{
+		name:         "list imports success",
+		mp:           mp8,
+		exceptCode:   200,
+		expectedBody: "{\"code\":200,\"data\":[{\"progress\":100,\"requestID\":\"1000\",\"state\":\"Completed\"}]}",
+	})
+
+	for _, tt := range testCases {
+		t.Run(tt.name, func(t *testing.T) {
+			testEngine := initHTTPServer(tt.mp, true)
+			data, _ := json.Marshal(map[string]interface{}{
+				HTTPCollectionName: DefaultCollectionName,
+			})
+			bodyReader := bytes.NewReader(data)
+			req := httptest.NewRequest(http.MethodGet, versional(VectorImportListPath), bodyReader)
 			req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
 			w := httptest.NewRecorder()
 			testEngine.ServeHTTP(w, req)

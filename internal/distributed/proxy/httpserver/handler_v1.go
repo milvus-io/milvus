@@ -3,9 +3,6 @@ package httpserver
 import (
 	"context"
 	"encoding/json"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/samber/lo"
 	"net/http"
 	"strconv"
 
@@ -13,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
 	"github.com/golang/protobuf/proto"
+	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -20,10 +18,12 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/requestutil"
 )
@@ -953,7 +953,7 @@ func (h *HandlersV1) search(c *gin.Context) {
 	}
 }
 
-func (h *HandlersV1) import_(c *gin.Context) {
+func (h *HandlersV1) import_(c *gin.Context) { //nolint:all
 	httpReq := ImportReq{
 		DbName: DefaultDbName,
 	}
