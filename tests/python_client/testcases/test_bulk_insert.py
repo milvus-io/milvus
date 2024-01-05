@@ -991,9 +991,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         # import data
         error = {}
         if file_nums == 0:
-            error = {ct.err_code: 1100, ct.err_msg: "import request is empty: invalid parameter"}
+            error = {ct.err_code: 1100, ct.err_msg: "import request is empty"}
         if file_nums > 1:
-            error = {ct.err_code: 65535, ct.err_msg: "for JSON or parquet file, each task only accepts one file"}
+            error = {ct.err_code: 65535, ct.err_msg: "for Parquet import, accepts only one file"}
         self.utility_wrap.do_bulk_insert(
             collection_name=c_name, files=files,
             check_task=CheckTasks.err_res, check_items=error

@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"os"
 	"strconv"
 	"sync"
@@ -5312,8 +5313,15 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 		return len(file.GetPaths()) > 0
 	})
 	if len(req.Files) == 0 {
-		resp.Status = merr.Status(merr.WrapErrImportFailed("import request is empty, no file to import"))
+		resp.Status = merr.Status(merr.WrapErrParameterInvalidMsg("import request is empty"))
 		return resp, nil
+	}
+	for _, file := range req.GetFiles() {
+		_, err = importutilv2.GetFileType(file)
+		if err != nil {
+			resp.Status = merr.Status(err)
+			return resp, nil
+		}
 	}
 	importRequest := &datapb.ImportRequestInternal{
 		CollectionID: collectionID,

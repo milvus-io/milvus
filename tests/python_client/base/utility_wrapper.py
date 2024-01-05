@@ -14,7 +14,7 @@ from utils.util_log import test_log as log
 TIMEOUT = 20
 
 
-def vector_bulkinsert(url, payload):
+def vector_bulkinsert(url, payload, check_items=None):
     url = f'http://{url}/v1/vector/bulkinsert'
     headers = {
         'Content-Type': 'application/json',
@@ -23,8 +23,12 @@ def vector_bulkinsert(url, payload):
     response = requests.post(url, headers=headers, json=payload, verify=False)
     res = response.json()
     log.info(f"vector_bulkinsert response: {res}")
-    assert res['code'] == 200
-    return res['requestID']
+    if check_items is not None and check_items["err_msg"] is not None:
+        log.info(f"check_items: {check_items['err_msg']}, res_message: {res['message']}")
+        assert check_items["err_msg"] in res['message']
+    else:
+        assert res['code'] == 200
+        return res['requestID']
 
 
 def vector_bulkinsert_describe(url, payload):
@@ -69,7 +73,7 @@ class ApiUtilityWrapper:
             "options": None,
             "clusteringInfo": None,
         }
-        res = vector_bulkinsert("localhost:19530", payload)
+        res = vector_bulkinsert("localhost:19530", payload, check_items)
         # check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ,
         #                                collection_name=collection_name, using=using).run()
         time.sleep(1)

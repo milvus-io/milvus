@@ -159,6 +159,9 @@ func (e *executor) readFileStat(reader importutilv2.Reader, task Task, fileIdx i
 		if err != nil {
 			return err
 		}
+		if data == nil {
+			break
+		}
 		err = FillDynamicData(data, task.GetSchema())
 		if err != nil {
 			return err
@@ -168,9 +171,6 @@ func (e *executor) readFileStat(reader importutilv2.Reader, task Task, fileIdx i
 			return err
 		}
 		MergeHashedRowsCount(rowsCount, hashedRows)
-		if data.GetRowNum() == 0 {
-			break
-		}
 		totalRows += data.GetRowNum()
 	}
 
@@ -215,6 +215,9 @@ func (e *executor) importFile(reader importutilv2.Reader, task Task) error {
 		if err != nil {
 			return err
 		}
+		if data == nil {
+			return nil
+		}
 		err = FillDynamicData(data, task.GetSchema())
 		if err != nil {
 			return err
@@ -223,9 +226,6 @@ func (e *executor) importFile(reader importutilv2.Reader, task Task) error {
 		err = AppendSystemFieldsData(iTask, data)
 		if err != nil {
 			return err
-		}
-		if data.GetRowNum() == 0 {
-			return nil
 		}
 		hashedData, err := GetHashedData(iTask, data)
 		if err != nil {

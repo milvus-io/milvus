@@ -74,10 +74,16 @@ func GetFileType(file *internalpb.ImportFile) (FileType, error) {
 
 	switch ext {
 	case JSONFileExt:
+		if len(file.GetPaths()) != 1 {
+			return 0, merr.WrapErrImportFailed("for JSON import, accepts only one file")
+		}
 		return JSON, nil
 	case NumpyFileExt:
 		return Numpy, nil
 	case ParquetFileExt:
+		if len(file.GetPaths()) != 1 {
+			return 0, merr.WrapErrImportFailed("for Parquet import, accepts only one file")
+		}
 		return Parquet, nil
 	}
 	return 0, merr.WrapErrImportFailed(fmt.Sprintf("unexpect file type, files=%v", file.GetPaths()))
