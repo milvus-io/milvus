@@ -160,6 +160,42 @@ func (suite *SegmentCheckerTestSuite) TestLoadSegments() {
 	suite.Len(tasks, 1)
 }
 
+func (suite *SegmentCheckerTestSuite) TestSkipLoadSegments() {
+	checker := suite.checker
+	// set meta
+	checker.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
+	checker.meta.CollectionManager.PutPartition(utils.CreateTestPartition(1, 1))
+	checker.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
+	suite.nodeMgr.Add(session.NewNodeInfo(1, "localhost"))
+	suite.nodeMgr.Add(session.NewNodeInfo(2, "localhost"))
+	checker.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 1)
+	checker.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 2)
+
+	// set target
+	segments := []*datapb.SegmentInfo{
+		{
+			ID:            1,
+			PartitionID:   1,
+			InsertChannel: "test-insert-channel",
+		},
+	}
+
+	channels := []*datapb.VchannelInfo{
+		{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel",
+		},
+	}
+
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
+		channels, segments, nil)
+	checker.targetMgr.UpdateCollectionNextTarget(int64(1))
+
+	// when channel not subscribed, segment_checker won't generate load segment task
+	tasks := checker.Check(context.TODO())
+	suite.Len(tasks, 0)
+}
+
 func (suite *SegmentCheckerTestSuite) TestSkipCheckReplica() {
 	checker := suite.checker
 	// set meta

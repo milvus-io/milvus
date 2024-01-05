@@ -344,39 +344,44 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 		return nil
 	}
 
-	isLevel0 := segments[0].GetLevel() == datapb.SegmentLevel_L0
-
-	shardSegments := make(map[string][]*meta.Segment)
-	for _, s := range segments {
-		if isLevel0 &&
-			len(c.dist.LeaderViewManager.GetLeadersByShard(s.GetInsertChannel())) == 0 {
-			continue
+	// filter out stopping nodes and outbound nodes
+	outboundNodes := c.meta.ResourceManager.CheckOutboundNodes(replica)
+	availableNodes := lo.Filter(replica.Replica.GetNodes(), func(node int64, _ int) bool {
+		stop, err := c.nodeMgr.IsStoppingNode(node)
+		if err != nil {
+			return false
 		}
-		channel := s.GetInsertChannel()
-		packedSegments := shardSegments[channel]
-		packedSegments = append(packedSegments, &meta.Segment{
-			SegmentInfo: s,
-		})
-		shardSegments[channel] = packedSegments
+		return !outboundNodes.Contain(node) && !stop
+	})
+
+	if len(availableNodes) == 0 {
+		return nil
 	}
+
+	isLevel0 := segments[0].GetLevel() == datapb.SegmentLevel_L0
+	shardSegments := lo.GroupBy(segments, func(s *datapb.SegmentInfo) string {
+		return s.GetInsertChannel()
+	})
 
 	plans := make([]balance.SegmentAssignPlan, 0)
 	for shard, segments := range shardSegments {
-		outboundNodes := c.meta.ResourceManager.CheckOutboundNodes(replica)
-		availableNodes := lo.Filter(replica.Replica.GetNodes(), func(node int64, _ int) bool {
-			stop, err := c.nodeMgr.IsStoppingNode(node)
-			if err != nil {
-				return false
-			}
+		// if channel is not subscribed yet, skip load segments
+		if len(c.dist.LeaderViewManager.GetLeadersByShard(shard)) == 0 {
+			continue
+		}
 
-			if isLevel0 {
-				leader := c.dist.LeaderViewManager.GetLatestLeadersByReplicaShard(replica, shard)
-				return !outboundNodes.Contain(node) && !stop && node == leader.ID
+		// L0 segment can only be assign to shard leader's node
+		if isLevel0 {
+			leader := c.dist.LeaderViewManager.GetLatestLeadersByReplicaShard(replica, shard)
+			availableNodes = []int64{leader.ID}
+		}
+
+		segmentInfos := lo.Map(segments, func(s *datapb.SegmentInfo, _ int) *meta.Segment {
+			return &meta.Segment{
+				SegmentInfo: s,
 			}
-			return !outboundNodes.Contain(node) && !stop
 		})
-
-		shardPlans := c.balancer.AssignSegment(replica.CollectionID, segments, availableNodes)
+		shardPlans := c.balancer.AssignSegment(replica.CollectionID, segmentInfos, availableNodes)
 		for i := range shardPlans {
 			shardPlans[i].ReplicaID = replica.GetID()
 		}
