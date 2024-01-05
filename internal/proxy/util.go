@@ -62,6 +62,8 @@ const (
 
 	defaultMaxArrayCapacity = 4096
 
+	defaultMaxSearchRequest = 1024
+
 	// DefaultArithmeticIndexType name of default index type for scalar field
 	DefaultArithmeticIndexType = "STL_SORT"
 
@@ -69,6 +71,8 @@ const (
 	DefaultStringIndexType = "Trie"
 
 	InvertedIndexType = "INVERTED"
+
+	defaultRRFParamsValue = 60
 )
 
 var logger = log.L().WithOptions(zap.Fields(zap.String("role", typeutil.ProxyRole)))

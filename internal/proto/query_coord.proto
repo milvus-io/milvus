@@ -219,7 +219,7 @@ message LoadMetaInfo {
   LoadType load_type = 1;
   int64 collectionID = 2;
   repeated int64 partitionIDs = 3;
-  string metric_type = 4;
+  string metric_type = 4 [deprecated=true];
 }
 
 message WatchDmChannelsRequest {

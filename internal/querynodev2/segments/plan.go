@@ -54,13 +54,7 @@ func createSearchPlanByExpr(ctx context.Context, col *Collection, expr []byte, m
 		return nil, err1
 	}
 
-	newPlan := &SearchPlan{cSearchPlan: cPlan}
-	if len(metricType) != 0 {
-		newPlan.setMetricType(metricType)
-	} else {
-		newPlan.setMetricType(col.GetMetricType())
-	}
-	return newPlan, nil
+	return &SearchPlan{cSearchPlan: cPlan}, nil
 }
 
 func (plan *SearchPlan) getTopK() int64 {

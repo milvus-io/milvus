@@ -912,6 +912,17 @@ SegmentSealedImpl::check_search(const query::Plan* plan) const {
     AssertInfo(plan->extra_info_opt_.has_value(),
                "Extra info of search plan doesn't have value");
 
+    auto& metric_str = plan->plan_node_->search_info_.metric_type_;
+    auto searched_field_id = plan->plan_node_->search_info_.field_id_;
+    auto index_meta =
+        col_index_meta_->GetFieldIndexMeta(FieldId(searched_field_id));
+    if (metric_str.empty()) {
+        metric_str = index_meta.GeMetricType();
+    } else {
+        AssertInfo(metric_str == index_meta.GeMetricType(),
+                   "metric type not match");
+    }
+
     if (!is_system_field_ready()) {
         PanicInfo(
             FieldNotLoaded,

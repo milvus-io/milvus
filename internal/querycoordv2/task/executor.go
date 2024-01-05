@@ -175,7 +175,6 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 
 	loadMeta := packLoadMeta(
 		ex.meta.GetLoadType(task.CollectionID()),
-		"",
 		task.CollectionID(),
 		partitions...,
 	)
@@ -370,14 +369,8 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 		log.Warn("fail to get index meta of collection")
 		return err
 	}
-	metricType, err := getMetricType(indexInfo, collectionInfo.GetSchema())
-	if err != nil {
-		log.Warn("failed to get metric type", zap.Error(err))
-		return err
-	}
 	loadMeta := packLoadMeta(
 		ex.meta.GetLoadType(task.CollectionID()),
-		metricType,
 		task.CollectionID(),
 		partitions...,
 	)

@@ -278,6 +278,16 @@ class SegmentGrowingImpl : public SegmentGrowing {
     void
     check_search(const query::Plan* plan) const override {
         Assert(plan);
+        auto& metric_str = plan->plan_node_->search_info_.metric_type_;
+        auto searched_field_id = plan->plan_node_->search_info_.field_id_;
+        auto index_meta =
+            index_meta_->GetFieldIndexMeta(FieldId(searched_field_id));
+        if (metric_str.empty()) {
+            metric_str = index_meta.GeMetricType();
+        } else {
+            AssertInfo(metric_str == index_meta.GeMetricType(),
+                       "metric type not match");
+        }
     }
 
     const ConcurrentVector<Timestamp>&

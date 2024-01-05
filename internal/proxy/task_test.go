@@ -71,6 +71,20 @@ const (
 	testMaxVarCharLength = 100
 )
 
+func genCollectionSchema(collectionName string) *schemapb.CollectionSchema {
+	return constructCollectionSchemaWithAllType(
+		testBoolField,
+		testInt32Field,
+		testInt64Field,
+		testFloatField,
+		testDoubleField,
+		testFloatVecField,
+		testBinaryVecField,
+		testFloat16VecField,
+		testVecDim,
+		collectionName)
+}
+
 func constructCollectionSchema(
 	int64Field, floatVecField string,
 	dim int,
