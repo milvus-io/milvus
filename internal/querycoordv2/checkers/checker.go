@@ -21,10 +21,11 @@ import (
 	"sync/atomic"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
+	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 )
 
 type Checker interface {
-	ID() CheckerType
+	ID() utils.CheckerType
 	Description() string
 	Check(ctx context.Context) []task.Task
 	IsActive() bool

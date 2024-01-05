@@ -784,7 +784,7 @@ func (s *Server) handleTimetickMessage(ctx context.Context, ttMsg *msgstream.Dat
 	}
 	err = s.cluster.Flush(s.ctx, ttMsg.GetBase().GetSourceID(), ch, finfo)
 	if err != nil {
-		log.Warn("failed to handle flush", zap.Any("source", ttMsg.GetBase().GetSourceID()), zap.Error(err))
+		log.Warn("failed to handle flush", zap.Int64("source", ttMsg.GetBase().GetSourceID()), zap.Error(err))
 		return err
 	}
 
@@ -1011,7 +1011,7 @@ func (s *Server) startFlushLoop(ctx context.Context) {
 				log.Info("flush successfully", zap.Any("segmentID", segmentID))
 				err := s.postFlush(ctx, segmentID)
 				if err != nil {
-					log.Warn("failed to do post flush", zap.Any("segmentID", segmentID), zap.Error(err))
+					log.Warn("failed to do post flush", zap.Int64("segmentID", segmentID), zap.Error(err))
 				}
 			}
 		}

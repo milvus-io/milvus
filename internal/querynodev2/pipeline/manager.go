@@ -120,7 +120,7 @@ func (m *manager) Remove(channels ...string) {
 			pipeline.Close()
 			delete(m.channel2Pipeline, channel)
 		} else {
-			log.Warn("pipeline to be removed doesn't existed", zap.Any("channel", channel))
+			log.Warn("pipeline to be removed doesn't existed", zap.String("channel", channel))
 		}
 	}
 	metrics.QueryNodeNumFlowGraphs.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Dec()

@@ -48,7 +48,7 @@ func TestGrpcServerParams(t *testing.T) {
 	assert.Equal(t, serverConfig.ServerMaxRecvSize.GetAsInt(), DefaultServerMaxRecvSize)
 
 	base.Save("grpc.serverMaxRecvSize", "a")
-	assert.Equal(t, serverConfig.ServerMaxSendSize.GetAsInt(), DefaultServerMaxRecvSize)
+	assert.Equal(t, serverConfig.ServerMaxRecvSize.GetAsInt(), DefaultServerMaxRecvSize)
 
 	assert.NotZero(t, serverConfig.ServerMaxSendSize.GetAsInt())
 	t.Logf("ServerMaxSendSize = %d", serverConfig.ServerMaxSendSize.GetAsInt())

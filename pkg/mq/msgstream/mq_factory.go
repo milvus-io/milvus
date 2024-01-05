@@ -169,7 +169,7 @@ func (f *PmsFactory) NewMsgStreamDisposer(ctx context.Context) func([]string, st
 					}
 				}
 				log.Warn("failed to clean up subscriptions", zap.String("pulsar web", f.PulsarWebAddress),
-					zap.String("topic", channel), zap.Any("subname", subname), zap.Error(err))
+					zap.String("topic", channel), zap.String("subname", subname), zap.Error(err))
 			}
 		}
 		return nil

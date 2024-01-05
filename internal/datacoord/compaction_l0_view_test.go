@@ -152,7 +152,7 @@ func (s *LevelZeroSegmentsViewSuite) TestTrigger() {
 					return v.ID
 				})
 				s.ElementsMatch(gotSegIDs, test.expectedSegs)
-				log.Info("trigger reason", zap.Any("trigger reason", reason))
+				log.Info("trigger reason", zap.String("trigger reason", reason))
 			}
 		})
 	}
