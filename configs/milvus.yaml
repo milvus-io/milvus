@@ -177,9 +177,9 @@ rootCoord:
   port: 53100
   grpc:
     serverMaxSendSize: 536870912
-    serverMaxRecvSize: 536870912
+    serverMaxRecvSize: 268435456
     clientMaxSendSize: 268435456
-    clientMaxRecvSize: 268435456
+    clientMaxRecvSize: 536870912
 
 # Related configuration of proxy, used to validate client requests and reduce the returned results.
 proxy:
@@ -237,10 +237,10 @@ proxy:
   port: 19530
   internalPort: 19529
   grpc:
-    serverMaxSendSize: 67108864
+    serverMaxSendSize: 268435456
     serverMaxRecvSize: 67108864
     clientMaxSendSize: 268435456
-    clientMaxRecvSize: 268435456
+    clientMaxRecvSize: 67108864
 
 # Related configuration of queryCoord, used to manage topology and load balancing for the query nodes, and handoff from growing segments to sealed segments.
 queryCoord:
@@ -266,9 +266,9 @@ queryCoord:
   port: 19531
   grpc:
     serverMaxSendSize: 536870912
-    serverMaxRecvSize: 536870912
+    serverMaxRecvSize: 268435456
     clientMaxSendSize: 268435456
-    clientMaxRecvSize: 268435456
+    clientMaxRecvSize: 536870912
   taskMergeCap: 1
   taskExecutionCap: 256
   enableActiveStandby: false # Enable active-standby
@@ -339,9 +339,9 @@ queryNode:
   port: 21123
   grpc:
     serverMaxSendSize: 536870912
-    serverMaxRecvSize: 536870912
+    serverMaxRecvSize: 268435456
     clientMaxSendSize: 268435456
-    clientMaxRecvSize: 268435456
+    clientMaxRecvSize: 536870912
 
 indexCoord:
   bindIndexNodeMode:
@@ -363,9 +363,9 @@ indexNode:
   port: 21121
   grpc:
     serverMaxSendSize: 536870912
-    serverMaxRecvSize: 536870912
+    serverMaxRecvSize: 268435456
     clientMaxSendSize: 268435456
-    clientMaxRecvSize: 268435456
+    clientMaxRecvSize: 536870912
 
 dataCoord:
   channel:
@@ -425,9 +425,9 @@ dataCoord:
   port: 13333
   grpc:
     serverMaxSendSize: 536870912
-    serverMaxRecvSize: 536870912
+    serverMaxRecvSize: 268435456
     clientMaxSendSize: 268435456
-    clientMaxRecvSize: 268435456
+    clientMaxRecvSize: 536870912
 
 dataNode:
   dataSync:
@@ -451,9 +451,9 @@ dataNode:
   port: 21124
   grpc:
     serverMaxSendSize: 536870912
-    serverMaxRecvSize: 536870912
+    serverMaxRecvSize: 268435456
     clientMaxSendSize: 268435456
-    clientMaxRecvSize: 268435456
+    clientMaxRecvSize: 536870912
   memory:
     forceSyncEnable: true # `true` to force sync if memory usage is too high
     forceSyncSegmentNum: 1 # number of segments to sync, segments with top largest buffer will be synced.
@@ -485,8 +485,10 @@ log:
 grpc:
   log:
     level: WARNING
-  serverMaxSendSize: 536870912
-  serverMaxRecvSize: 536870912
+    serverMaxSendSize: 536870912
+    serverMaxRecvSize: 268435456
+    clientMaxSendSize: 268435456
+    clientMaxRecvSize: 536870912
   client:
     compressionEnabled: false
     dialTimeout: 200
@@ -496,8 +498,6 @@ grpc:
     initialBackOff: 0.2 # seconds
     maxBackoff: 10 # seconds
     backoffMultiplier: 2.0 # deprecated
-  clientMaxSendSize: 268435456
-  clientMaxRecvSize: 268435456
 
 # Configure the proxy tls enable.
 tls:
