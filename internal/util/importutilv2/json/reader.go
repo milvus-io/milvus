@@ -19,11 +19,12 @@ package json
 import (
 	"encoding/json"
 	"fmt"
+	"io"
+	"strings"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/util/merr"
-	"io"
-	"strings"
 )
 
 const (
@@ -36,22 +37,19 @@ type reader struct {
 	dec    *json.Decoder
 	schema *schemapb.CollectionSchema
 
+	bufferSize  int
 	isOldFormat bool
 
-	validator Validator
-	parser    RowParser
+	parser RowParser
 }
 
-func NewReader(r io.Reader, schema *schemapb.CollectionSchema) (*reader, error) {
+func NewReader(r io.Reader, schema *schemapb.CollectionSchema, bufferSize int) (*reader, error) {
 	reader := &reader{
-		dec:    json.NewDecoder(r),
-		schema: schema,
+		dec:        json.NewDecoder(r),
+		schema:     schema,
+		bufferSize: bufferSize,
 	}
 	var err error
-	reader.validator, err = NewValidator(schema)
-	if err != nil {
-		return nil, err
-	}
 	reader.parser, err = NewRowParser(schema)
 	if err != nil {
 		return nil, err
@@ -76,18 +74,17 @@ func (j *reader) Init() error {
 	if t != json.Delim('{') && t != json.Delim('[') {
 		return merr.WrapErrImportFailed("invalid JSON format, the content should be started with '{' or '['")
 	}
-	//_ = j.dec.More()
 	j.isOldFormat = t == json.Delim('{')
 	return nil
 }
 
-func (j *reader) Next(count int64) (*storage.InsertData, error) {
+func (j *reader) Read() (*storage.InsertData, error) {
 	insertData, err := storage.NewInsertData(j.schema)
 	if err != nil {
 		return nil, err
 	}
 	if !j.dec.More() {
-		return insertData, nil
+		return nil, nil
 	}
 	if j.isOldFormat {
 		// read the key
@@ -112,16 +109,12 @@ func (j *reader) Next(count int64) (*storage.InsertData, error) {
 			return nil, merr.WrapErrImportFailed("invalid JSON format, rows list should begin with '['")
 		}
 	}
-	for j.dec.More() && count > 0 {
+	for j.dec.More() {
 		var value any
 		if err = j.dec.Decode(&value); err != nil {
 			return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to parse row, error: %v", err))
 		}
-		row, err := j.validator.Validate(value)
-		if err != nil {
-			return nil, err
-		}
-		row, err = j.parser.Parse(row)
+		row, err := j.parser.Parse(value)
 		if err != nil {
 			return nil, err
 		}
@@ -129,7 +122,9 @@ func (j *reader) Next(count int64) (*storage.InsertData, error) {
 		if err != nil {
 			return nil, err
 		}
-		count--
+		if insertData.GetMemorySize() >= j.bufferSize {
+			break
+		}
 	}
 
 	if !j.dec.More() {
@@ -145,6 +140,4 @@ func (j *reader) Next(count int64) (*storage.InsertData, error) {
 	return insertData, nil
 }
 
-func (j *reader) Close() {
-
-}
+func (j *reader) Close() {}

@@ -20,6 +20,7 @@ import (
 	rand2 "crypto/rand"
 	"encoding/json"
 	"fmt"
+	"math"
 	"math/rand"
 	"strconv"
 	"strings"
@@ -221,9 +222,8 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 
 	jsonBytes, err := json.Marshal(rows)
 	suite.NoError(err)
-	fmt.Println("==============", string(jsonBytes))
 	r := strings.NewReader(string(jsonBytes))
-	reader, err := NewReader(r, schema)
+	reader, err := NewReader(r, schema, math.MaxInt)
 	suite.NoError(err)
 
 	checkFn := func(actualInsertData *storage.InsertData, offsetBegin, expectRows int) {
@@ -243,12 +243,9 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 		}
 	}
 
-	res, err := reader.Next(int64(suite.numRows / 2))
+	res, err := reader.Read()
 	suite.NoError(err)
-	checkFn(res, 0, suite.numRows/2)
-	res, err = reader.Next(int64(suite.numRows / 2))
-	suite.NoError(err)
-	checkFn(res, suite.numRows/2, suite.numRows/2)
+	checkFn(res, 0, suite.numRows)
 }
 
 func (suite *ReaderSuite) TestReadScalarFields() {
