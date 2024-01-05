@@ -192,6 +192,7 @@ struct TantivyIndexWrapper {
             tantivy_finish_index(writer_);
             writer_ = nullptr;
             reader_ = tantivy_load_index(path_.c_str());
+            finished_ = true;
         }
     }
 
