@@ -65,13 +65,10 @@ func newBinlogReader(cm storage.ChunkManager, path string) (*storage.BinlogReade
 	return reader, nil
 }
 
-func listBinlogs(cm storage.ChunkManager, paths []string) (map[int64][]string, []string, error) {
-	if len(paths) < 1 {
-		return nil, nil, merr.WrapErrImportFailed("no insert binlogs to import")
-	}
-	insertLogPaths, _, err := cm.ListWithPrefix(context.Background(), paths[0], true)
+func listInsertLogs(cm storage.ChunkManager, insertPrefix string) (map[int64][]string, error) {
+	insertLogPaths, _, err := cm.ListWithPrefix(context.Background(), insertPrefix, true)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	insertLogs := make(map[int64][]string)
 	for _, logPath := range insertLogPaths {
@@ -79,21 +76,14 @@ func listBinlogs(cm storage.ChunkManager, paths []string) (map[int64][]string, [
 		fieldStrID := path.Base(fieldPath)
 		fieldID, err := strconv.ParseInt(fieldStrID, 10, 64)
 		if err != nil {
-			return nil, nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to parse field id from log, error: %v", err))
+			return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to parse field id from log, error: %v", err))
 		}
 		insertLogs[fieldID] = append(insertLogs[fieldID], logPath)
 	}
 	for _, v := range insertLogs {
 		sort.Strings(v)
 	}
-	if len(paths) < 2 {
-		return insertLogs, nil, nil
-	}
-	deltaLogs, _, err := cm.ListWithPrefix(context.Background(), paths[1], true)
-	if err != nil {
-		return nil, nil, err
-	}
-	return insertLogs, deltaLogs, nil
+	return insertLogs, nil
 }
 
 func verify(schema *schemapb.CollectionSchema, insertLogs map[int64][]string) error {

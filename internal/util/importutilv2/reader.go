@@ -30,12 +30,7 @@ import (
 
 //go:generate mockery --name=Reader --structname=MockReader --output=./  --filename=mock_reader.go --with-expecter --inpackage
 type Reader interface {
-	Next(count int64) (*storage.InsertData, error)
-	Close()
-}
-
-type ColumnReader interface {
-	Next(count int64) (storage.FieldData, error)
+	Read() (*storage.InsertData, error)
 	Close()
 }
 
@@ -43,6 +38,7 @@ func NewReader(cm storage.ChunkManager,
 	schema *schemapb.CollectionSchema,
 	importFile *internalpb.ImportFile,
 	options Options,
+	bufferSize int64,
 ) (Reader, error) {
 	if IsBackup(options) {
 		tsStart, tsEnd, err := ParseTimeRange(options)
