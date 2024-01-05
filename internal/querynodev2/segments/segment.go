@@ -903,7 +903,7 @@ func (s *LocalSegment) LoadIndex(ctx context.Context, indexInfo *querypb.FieldIn
 }
 
 func (s *LocalSegment) LoadIndexInfo(ctx context.Context, indexInfo *querypb.FieldIndexInfo, info *LoadIndexInfo) error {
-	log := log.With(
+	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", s.Collection()),
 		zap.Int64("partitionID", s.Partition()),
 		zap.Int64("segmentID", s.ID()),
@@ -950,7 +950,7 @@ func (s *LocalSegment) UpdateFieldRawDataSize(ctx context.Context, numRows int64
 		return err
 	}
 
-	log.Info("updateFieldRawDataSize done", zap.Int64("segmentID", s.ID()))
+	log.Ctx(ctx).Info("updateFieldRawDataSize done", zap.Int64("segmentID", s.ID()))
 
 	return nil
 }
