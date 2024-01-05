@@ -52,25 +52,25 @@ func (_c *MockReader_Close_Call) RunAndReturn(run func()) *MockReader_Close_Call
 	return _c
 }
 
-// Next provides a mock function with given fields: count
-func (_m *MockReader) Next(count int64) (*storage.InsertData, error) {
-	ret := _m.Called(count)
+// Read provides a mock function with given fields:
+func (_m *MockReader) Read() (*storage.InsertData, error) {
+	ret := _m.Called()
 
 	var r0 *storage.InsertData
 	var r1 error
-	if rf, ok := ret.Get(0).(func(int64) (*storage.InsertData, error)); ok {
-		return rf(count)
+	if rf, ok := ret.Get(0).(func() (*storage.InsertData, error)); ok {
+		return rf()
 	}
-	if rf, ok := ret.Get(0).(func(int64) *storage.InsertData); ok {
-		r0 = rf(count)
+	if rf, ok := ret.Get(0).(func() *storage.InsertData); ok {
+		r0 = rf()
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*storage.InsertData)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(int64) error); ok {
-		r1 = rf(count)
+	if rf, ok := ret.Get(1).(func() error); ok {
+		r1 = rf()
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -78,30 +78,29 @@ func (_m *MockReader) Next(count int64) (*storage.InsertData, error) {
 	return r0, r1
 }
 
-// MockReader_Next_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Next'
-type MockReader_Next_Call struct {
+// MockReader_Read_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Read'
+type MockReader_Read_Call struct {
 	*mock.Call
 }
 
-// Next is a helper method to define mock.On call
-//  - count int64
-func (_e *MockReader_Expecter) Next(count interface{}) *MockReader_Next_Call {
-	return &MockReader_Next_Call{Call: _e.mock.On("Next", count)}
+// Read is a helper method to define mock.On call
+func (_e *MockReader_Expecter) Read() *MockReader_Read_Call {
+	return &MockReader_Read_Call{Call: _e.mock.On("Read")}
 }
 
-func (_c *MockReader_Next_Call) Run(run func(count int64)) *MockReader_Next_Call {
+func (_c *MockReader_Read_Call) Run(run func()) *MockReader_Read_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64))
+		run()
 	})
 	return _c
 }
 
-func (_c *MockReader_Next_Call) Return(_a0 *storage.InsertData, _a1 error) *MockReader_Next_Call {
+func (_c *MockReader_Read_Call) Return(_a0 *storage.InsertData, _a1 error) *MockReader_Read_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockReader_Next_Call) RunAndReturn(run func(int64) (*storage.InsertData, error)) *MockReader_Next_Call {
+func (_c *MockReader_Read_Call) RunAndReturn(run func() (*storage.InsertData, error)) *MockReader_Read_Call {
 	_c.Call.Return(run)
 	return _c
 }

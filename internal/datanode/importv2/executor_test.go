@@ -202,13 +202,11 @@ func createInsertData(t *testing.T, schema *schemapb.CollectionSchema, rowCount 
 
 func (s *ExecutorSuite) TestExecutor_ReadFileStat() {
 	importFile := &internalpb.ImportFile{
-		File: &internalpb.ImportFile_RowBasedFile{
-			RowBasedFile: "dummy.json",
-		},
+		Paths: []string{"dummy.json"},
 	}
 	var once sync.Once
 	data := createInsertData(s.T(), s.schema, s.numRows)
-	s.reader.EXPECT().Next(mock.Anything).RunAndReturn(func(i int64) (*storage.InsertData, error) {
+	s.reader.EXPECT().Read().RunAndReturn(func() (*storage.InsertData, error) {
 		res, err := storage.NewInsertData(s.schema)
 		s.NoError(err)
 		once.Do(func() {
@@ -240,7 +238,7 @@ func (s *ExecutorSuite) TestImportFile() {
 	})
 	var once sync.Once
 	data := createInsertData(s.T(), s.schema, s.numRows)
-	s.reader.EXPECT().Next(mock.Anything).RunAndReturn(func(i int64) (*storage.InsertData, error) {
+	s.reader.EXPECT().Read().RunAndReturn(func() (*storage.InsertData, error) {
 		res, err := storage.NewInsertData(s.schema)
 		s.NoError(err)
 		once.Do(func() {
@@ -255,9 +253,7 @@ func (s *ExecutorSuite) TestImportFile() {
 		Schema:       s.schema,
 		Files: []*internalpb.ImportFile{
 			{
-				File: &internalpb.ImportFile_RowBasedFile{
-					RowBasedFile: "dummy.json",
-				},
+				Paths: []string{"dummy.json"},
 			},
 		},
 		Ts: 1000,
@@ -275,7 +271,7 @@ func (s *ExecutorSuite) TestImportFile() {
 	}
 	importTask := NewImportTask(importReq)
 	s.manager.Add(importTask)
-	err := s.executor.importFile(s.reader, int64(s.numRows), importTask)
+	err := s.executor.importFile(s.reader, importTask)
 	s.NoError(err)
 }
 
