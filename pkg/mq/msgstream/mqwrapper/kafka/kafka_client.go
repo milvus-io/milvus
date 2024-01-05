@@ -124,7 +124,7 @@ func (kc *kafkaClient) getKafkaProducer() (*kafka.Producer, error) {
 					// authentication issues, etc.
 					// After a fatal error has been raised, any subsequent Produce*() calls will fail with
 					// the original error code.
-					log.Error("kafka error", zap.Any("error msg", ev.Error()))
+					log.Error("kafka error", zap.String("error msg", ev.Error()))
 					if ev.IsFatal() {
 						panic(ev)
 					}

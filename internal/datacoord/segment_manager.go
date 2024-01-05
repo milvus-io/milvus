@@ -553,7 +553,7 @@ func (s *SegmentManager) cleanupSealedSegment(ts Timestamp, channel string) {
 		}
 
 		if isEmptySealedSegment(segment, ts) {
-			log.Info("remove empty sealed segment", zap.Int64("collection", segment.CollectionID), zap.Any("segment", id))
+			log.Info("remove empty sealed segment", zap.Int64("collection", segment.CollectionID), zap.Int64("segment", id))
 			s.meta.SetState(id, commonpb.SegmentState_Dropped)
 			continue
 		}

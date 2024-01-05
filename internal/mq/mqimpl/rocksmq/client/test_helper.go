@@ -58,11 +58,11 @@ func removePath(rmqPath string) {
 	rocksdbPath := rmqPath
 	err := os.RemoveAll(rocksdbPath)
 	if err != nil {
-		log.Error("Failed to call os.removeAll.", zap.Any("path", rocksdbPath))
+		log.Error("Failed to call os.removeAll.", zap.String("path", rocksdbPath))
 	}
 	metaPath := rmqPath + "_meta_kv"
 	err = os.RemoveAll(metaPath)
 	if err != nil {
-		log.Error("Failed to call os.removeAll.", zap.Any("path", metaPath))
+		log.Error("Failed to call os.removeAll.", zap.String("path", metaPath))
 	}
 }

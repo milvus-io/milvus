@@ -679,8 +679,8 @@ func (t *showCollectionsTask) Execute(ctx context.Context) error {
 		for _, collectionName := range t.CollectionNames {
 			collectionID, err := globalMetaCache.GetCollectionID(ctx, t.GetDbName(), collectionName)
 			if err != nil {
-				log.Debug("Failed to get collection id.", zap.Any("collectionName", collectionName),
-					zap.Any("requestID", t.Base.MsgID), zap.Any("requestType", "showCollections"))
+				log.Debug("Failed to get collection id.", zap.String("collectionName", collectionName),
+					zap.Int64("requestID", t.Base.MsgID), zap.String("requestType", "showCollections"))
 				return err
 			}
 			collectionIDs = append(collectionIDs, collectionID)
@@ -726,14 +726,14 @@ func (t *showCollectionsTask) Execute(ctx context.Context) error {
 			collectionName, ok := IDs2Names[id]
 			if !ok {
 				log.Debug("Failed to get collection info. This collection may be not released",
-					zap.Any("collectionID", id),
-					zap.Any("requestID", t.Base.MsgID), zap.Any("requestType", "showCollections"))
+					zap.Int64("collectionID", id),
+					zap.Int64("requestID", t.Base.MsgID), zap.String("requestType", "showCollections"))
 				continue
 			}
 			collectionInfo, err := globalMetaCache.GetCollectionInfo(ctx, t.GetDbName(), collectionName, id)
 			if err != nil {
-				log.Debug("Failed to get collection info.", zap.Any("collectionName", collectionName),
-					zap.Any("requestID", t.Base.MsgID), zap.Any("requestType", "showCollections"))
+				log.Debug("Failed to get collection info.", zap.String("collectionName", collectionName),
+					zap.Int64("requestID", t.Base.MsgID), zap.String("requestType", "showCollections"))
 				return err
 			}
 			t.result.CollectionIds = append(t.result.CollectionIds, id)
@@ -1178,8 +1178,8 @@ func (t *showPartitionsTask) Execute(ctx context.Context) error {
 		collectionName := t.CollectionName
 		collectionID, err := globalMetaCache.GetCollectionID(ctx, t.GetDbName(), collectionName)
 		if err != nil {
-			log.Debug("Failed to get collection id.", zap.Any("collectionName", collectionName),
-				zap.Any("requestID", t.Base.MsgID), zap.Any("requestType", "showPartitions"))
+			log.Debug("Failed to get collection id.", zap.String("collectionName", collectionName),
+				zap.Int64("requestID", t.Base.MsgID), zap.String("requestType", "showPartitions"))
 			return err
 		}
 		IDs2Names := make(map[UniqueID]string)
@@ -1191,8 +1191,8 @@ func (t *showPartitionsTask) Execute(ctx context.Context) error {
 		for _, partitionName := range t.PartitionNames {
 			partitionID, err := globalMetaCache.GetPartitionID(ctx, t.GetDbName(), collectionName, partitionName)
 			if err != nil {
-				log.Debug("Failed to get partition id.", zap.Any("partitionName", partitionName),
-					zap.Any("requestID", t.Base.MsgID), zap.Any("requestType", "showPartitions"))
+				log.Debug("Failed to get partition id.", zap.String("partitionName", partitionName),
+					zap.Int64("requestID", t.Base.MsgID), zap.String("requestType", "showPartitions"))
 				return err
 			}
 			partitionIDs = append(partitionIDs, partitionID)
@@ -1230,14 +1230,14 @@ func (t *showPartitionsTask) Execute(ctx context.Context) error {
 		for offset, id := range resp.PartitionIDs {
 			partitionName, ok := IDs2Names[id]
 			if !ok {
-				log.Debug("Failed to get partition id.", zap.Any("partitionName", partitionName),
-					zap.Any("requestID", t.Base.MsgID), zap.Any("requestType", "showPartitions"))
+				log.Debug("Failed to get partition id.", zap.String("partitionName", partitionName),
+					zap.Int64("requestID", t.Base.MsgID), zap.String("requestType", "showPartitions"))
 				return errors.New("failed to show partitions")
 			}
 			partitionInfo, err := globalMetaCache.GetPartitionInfo(ctx, t.GetDbName(), collectionName, partitionName)
 			if err != nil {
-				log.Debug("Failed to get partition id.", zap.Any("partitionName", partitionName),
-					zap.Any("requestID", t.Base.MsgID), zap.Any("requestType", "showPartitions"))
+				log.Debug("Failed to get partition id.", zap.String("partitionName", partitionName),
+					zap.Int64("requestID", t.Base.MsgID), zap.String("requestType", "showPartitions"))
 				return err
 			}
 			t.result.PartitionIDs = append(t.result.PartitionIDs, id)

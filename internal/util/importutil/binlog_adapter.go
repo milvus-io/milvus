@@ -180,7 +180,7 @@ func (p *BinlogAdapter) Read(segmentHolder *SegmentFilesHolder) error {
 
 		// read timestamps list
 		timestampLog := segmentHolder.fieldFiles[common.TimeStampField][i] // no need to check existence, already verified
-		log.Info("Binlog adapter: prepare to read timestamp binglog", zap.Any("logPath", timestampLog))
+		log.Info("Binlog adapter: prepare to read timestamp binglog", zap.String("logPath", timestampLog))
 		timestampList, err := p.readTimestamp(timestampLog)
 		if err != nil {
 			return err

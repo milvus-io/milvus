@@ -81,14 +81,14 @@ func (kp *kafkaProducer) Close() {
 		// flush in-flight msg within queue.
 		i := kp.p.Flush(10000)
 		if i > 0 {
-			log.Warn("There are still un-flushed outstanding events", zap.Int("event_num", i), zap.Any("topic", kp.topic))
+			log.Warn("There are still un-flushed outstanding events", zap.Int("event_num", i), zap.String("topic", kp.topic))
 		}
 
 		close(kp.deliveryChan)
 
 		cost := time.Since(start).Milliseconds()
 		if cost > 500 {
-			log.Debug("kafka producer is closed", zap.Any("topic", kp.topic), zap.Int64("time cost(ms)", cost))
+			log.Debug("kafka producer is closed", zap.String("topic", kp.topic), zap.Int64("time cost(ms)", cost))
 		}
 	})
 }

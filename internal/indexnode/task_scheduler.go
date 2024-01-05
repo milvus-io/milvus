@@ -108,7 +108,7 @@ func (queue *IndexTaskQueue) AddActiveTask(t task) {
 	tName := t.Name()
 	_, ok := queue.activeTasks[tName]
 	if ok {
-		log.Debug("IndexNode task already in active task list", zap.Any("TaskID", tName))
+		log.Debug("IndexNode task already in active task list", zap.String("TaskID", tName))
 	}
 
 	queue.activeTasks[tName] = t
