@@ -394,55 +394,56 @@ func PrepareResultFieldData(sample []*schemapb.FieldData, topK int64) []*schemap
 			FieldId:   fieldData.FieldId,
 			IsDynamic: fieldData.IsDynamic,
 		}
-		if !IsVectorType(fieldData.GetType()) {
+		switch fieldType := fieldData.Field.(type) {
+		case *schemapb.FieldData_Scalars:
 			scalarField := fieldData.GetScalars()
 			scalar := &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{},
 			}
-			switch fieldData.GetType() {
-			case schemapb.DataType_Bool:
+			switch fieldType.Scalars.Data.(type) {
+			case *schemapb.ScalarField_BoolData:
 				scalar.Scalars.Data = &schemapb.ScalarField_BoolData{
 					BoolData: &schemapb.BoolArray{
 						Data: make([]bool, 0, topK),
 					},
 				}
-			case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
+			case *schemapb.ScalarField_IntData:
 				scalar.Scalars.Data = &schemapb.ScalarField_IntData{
 					IntData: &schemapb.IntArray{
 						Data: make([]int32, 0, topK),
 					},
 				}
-			case schemapb.DataType_Int64:
+			case *schemapb.ScalarField_LongData:
 				scalar.Scalars.Data = &schemapb.ScalarField_LongData{
 					LongData: &schemapb.LongArray{
 						Data: make([]int64, 0, topK),
 					},
 				}
-			case schemapb.DataType_Float:
+			case *schemapb.ScalarField_FloatData:
 				scalar.Scalars.Data = &schemapb.ScalarField_FloatData{
 					FloatData: &schemapb.FloatArray{
 						Data: make([]float32, 0, topK),
 					},
 				}
-			case schemapb.DataType_Double:
+			case *schemapb.ScalarField_DoubleData:
 				scalar.Scalars.Data = &schemapb.ScalarField_DoubleData{
 					DoubleData: &schemapb.DoubleArray{
 						Data: make([]float64, 0, topK),
 					},
 				}
-			case schemapb.DataType_String, schemapb.DataType_VarChar:
+			case *schemapb.ScalarField_StringData:
 				scalar.Scalars.Data = &schemapb.ScalarField_StringData{
 					StringData: &schemapb.StringArray{
 						Data: make([]string, 0, topK),
 					},
 				}
-			case schemapb.DataType_JSON:
+			case *schemapb.ScalarField_JsonData:
 				scalar.Scalars.Data = &schemapb.ScalarField_JsonData{
 					JsonData: &schemapb.JSONArray{
 						Data: make([][]byte, 0, topK),
 					},
 				}
-			case schemapb.DataType_Array:
+			case *schemapb.ScalarField_ArrayData:
 				scalar.Scalars.Data = &schemapb.ScalarField_ArrayData{
 					ArrayData: &schemapb.ArrayArray{
 						Data:        make([]*schemapb.ScalarField, 0, topK),
@@ -451,7 +452,7 @@ func PrepareResultFieldData(sample []*schemapb.FieldData, topK int64) []*schemap
 				}
 			}
 			fd.Field = scalar
-		} else {
+		case *schemapb.FieldData_Vectors:
 			vectorField := fieldData.GetVectors()
 			dim := vectorField.GetDim()
 			vectors := &schemapb.FieldData_Vectors{
@@ -459,18 +460,18 @@ func PrepareResultFieldData(sample []*schemapb.FieldData, topK int64) []*schemap
 					Dim: dim,
 				},
 			}
-			switch fieldData.GetType() {
-			case schemapb.DataType_FloatVector:
+			switch fieldType.Vectors.Data.(type) {
+			case *schemapb.VectorField_FloatVector:
 				vectors.Vectors.Data = &schemapb.VectorField_FloatVector{
 					FloatVector: &schemapb.FloatArray{
 						Data: make([]float32, 0, dim*topK),
 					},
 				}
-			case schemapb.DataType_Float16Vector:
+			case *schemapb.VectorField_Float16Vector:
 				vectors.Vectors.Data = &schemapb.VectorField_Float16Vector{
 					Float16Vector: make([]byte, 0, topK*dim*2),
 				}
-			case schemapb.DataType_BinaryVector:
+			case *schemapb.VectorField_BinaryVector:
 				vectors.Vectors.Data = &schemapb.VectorField_BinaryVector{
 					BinaryVector: make([]byte, 0, topK*dim/8),
 				}

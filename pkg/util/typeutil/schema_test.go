@@ -1340,6 +1340,11 @@ func (s *FieldDataSuite) TestPrepareFieldData() {
 				FieldId:   fieldID,
 				FieldName: fieldName,
 				Type:      schemapb.DataType_Bool,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_BoolData{},
+					},
+				},
 			},
 		}
 
@@ -1365,6 +1370,11 @@ func (s *FieldDataSuite) TestPrepareFieldData() {
 					FieldId:   fieldID,
 					FieldName: fieldName,
 					Type:      dataType,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_IntData{},
+						},
+					},
 				},
 			}
 
@@ -1385,6 +1395,11 @@ func (s *FieldDataSuite) TestPrepareFieldData() {
 				FieldId:   fieldID,
 				FieldName: fieldName,
 				Type:      schemapb.DataType_Int64,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{},
+					},
+				},
 			},
 		}
 
@@ -1404,6 +1419,11 @@ func (s *FieldDataSuite) TestPrepareFieldData() {
 				FieldId:   fieldID,
 				FieldName: fieldName,
 				Type:      schemapb.DataType_Float,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_FloatData{},
+					},
+				},
 			},
 		}
 
@@ -1423,6 +1443,11 @@ func (s *FieldDataSuite) TestPrepareFieldData() {
 				FieldId:   fieldID,
 				FieldName: fieldName,
 				Type:      schemapb.DataType_Double,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_DoubleData{},
+					},
+				},
 			},
 		}
 
@@ -1447,6 +1472,11 @@ func (s *FieldDataSuite) TestPrepareFieldData() {
 					FieldId:   fieldID,
 					FieldName: fieldName,
 					Type:      dataType,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_StringData{},
+						},
+					},
 				},
 			}
 
@@ -1467,6 +1497,11 @@ func (s *FieldDataSuite) TestPrepareFieldData() {
 				FieldId:   fieldID,
 				FieldName: fieldName,
 				Type:      schemapb.DataType_JSON,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_JsonData{},
+					},
+				},
 			},
 		}
 
@@ -1486,6 +1521,15 @@ func (s *FieldDataSuite) TestPrepareFieldData() {
 				FieldId:   fieldID,
 				FieldName: fieldName,
 				Type:      schemapb.DataType_Array,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_ArrayData{
+							ArrayData: &schemapb.ArrayArray{
+								ElementType: schemapb.DataType_Bool,
+							},
+						},
+					},
+				},
 			},
 		}
 
@@ -1497,6 +1541,7 @@ func (s *FieldDataSuite) TestPrepareFieldData() {
 		s.Equal(schemapb.DataType_Array, field.GetType())
 
 		s.EqualValues(topK, cap(field.GetScalars().GetArrayData().GetData()))
+		s.Equal(schemapb.DataType_Bool, field.GetScalars().GetArrayData().GetElementType())
 	})
 
 	s.Run("float_vector", func() {
@@ -1507,7 +1552,8 @@ func (s *FieldDataSuite) TestPrepareFieldData() {
 				Type:      schemapb.DataType_FloatVector,
 				Field: &schemapb.FieldData_Vectors{
 					Vectors: &schemapb.VectorField{
-						Dim: 128,
+						Dim:  128,
+						Data: &schemapb.VectorField_FloatVector{},
 					},
 				},
 			},
@@ -1532,7 +1578,8 @@ func (s *FieldDataSuite) TestPrepareFieldData() {
 				Type:      schemapb.DataType_Float16Vector,
 				Field: &schemapb.FieldData_Vectors{
 					Vectors: &schemapb.VectorField{
-						Dim: 128,
+						Dim:  128,
+						Data: &schemapb.VectorField_Float16Vector{},
 					},
 				},
 			},
@@ -1557,7 +1604,8 @@ func (s *FieldDataSuite) TestPrepareFieldData() {
 				Type:      schemapb.DataType_BinaryVector,
 				Field: &schemapb.FieldData_Vectors{
 					Vectors: &schemapb.VectorField{
-						Dim: 128,
+						Dim:  128,
+						Data: &schemapb.VectorField_BinaryVector{},
 					},
 				},
 			},
