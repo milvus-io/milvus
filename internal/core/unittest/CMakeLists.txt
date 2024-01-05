@@ -61,6 +61,7 @@ set(MILVUS_TEST_FILES
         test_storage.cpp
         test_exec.cpp
         test_inverted_index.cpp
+        test_group_by.cpp
         )
 
 if ( BUILD_DISK_ANN STREQUAL "ON" )

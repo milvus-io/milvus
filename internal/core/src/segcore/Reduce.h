@@ -82,6 +82,11 @@ class ReduceHelper {
     std::vector<char>
     GetSearchResultDataSlice(int slice_index_);
 
+    void
+    AssembleGroupByValues(
+        std::unique_ptr<milvus::proto::schema::SearchResultData>& search_result,
+        const std::vector<GroupByValueType>& group_by_vals);
+
  private:
     std::vector<SearchResult*>& search_results_;
     milvus::query::Plan* plan_;
@@ -108,6 +113,7 @@ class ReduceHelper {
                         SearchResultPairComparator>
         heap_;
     std::unordered_set<milvus::PkType> pk_set_;
+    std::unordered_set<milvus::GroupByValueType> group_by_val_set_;
 };
 
 }  // namespace milvus::segcore

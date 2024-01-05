@@ -129,6 +129,7 @@ func ReduceSearchResultData(ctx context.Context, searchResultData []*schemapb.Se
 		offsets := make([]int64, len(searchResultData))
 
 		idSet := make(map[interface{}]struct{})
+		groupByValueSet := make(map[interface{}]struct{})
 		var j int64
 		for j = 0; j < topk; {
 			sel := SelectSearchResultData(searchResultData, resultOffsets, offsets, i)
@@ -138,15 +139,29 @@ func ReduceSearchResultData(ctx context.Context, searchResultData []*schemapb.Se
 			idx := resultOffsets[sel][i] + offsets[sel]
 
 			id := typeutil.GetPK(searchResultData[sel].GetIds(), idx)
+			groupByVal := typeutil.GetData(searchResultData[sel].GetGroupByFieldValue(), int(idx))
 			score := searchResultData[sel].Scores[idx]
 
 			// remove duplicates
 			if _, ok := idSet[id]; !ok {
-				retSize += typeutil.AppendFieldData(ret.FieldsData, searchResultData[sel].FieldsData, idx)
-				typeutil.AppendPKs(ret.Ids, id)
-				ret.Scores = append(ret.Scores, score)
-				idSet[id] = struct{}{}
-				j++
+				groupByValExist := false
+				if groupByVal != nil {
+					_, groupByValExist = groupByValueSet[groupByVal]
+				}
+				if !groupByValExist {
+					retSize += typeutil.AppendFieldData(ret.FieldsData, searchResultData[sel].FieldsData, idx)
+					typeutil.AppendPKs(ret.Ids, id)
+					ret.Scores = append(ret.Scores, score)
+					if groupByVal != nil {
+						groupByValueSet[groupByVal] = struct{}{}
+						if err := typeutil.AppendGroupByValue(ret, groupByVal, searchResultData[sel].GetGroupByFieldValue().GetType()); err != nil {
+							log.Error("Failed to append groupByValues", zap.Error(err))
+							return ret, err
+						}
+					}
+					idSet[id] = struct{}{}
+					j++
+				}
 			} else {
 				// skip entity with same id
 				skipDupCnt++
