@@ -186,6 +186,9 @@ class SegmentInternalInterface : public SegmentInterface {
                         int64_t chunk_id,
                         const milvus::VariableColumn<std::string>& var_column);
 
+    virtual DataType
+    GetFieldDataType(FieldId fieldId) const = 0;
+
  public:
     virtual void
     vector_search(SearchInfo& search_info,

@@ -553,7 +553,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 		}
 		log.Info("time cost of generating compaction",
 			zap.Int64("plan ID", plan.PlanID),
-			zap.Any("time cost", time.Since(start).Milliseconds()),
+			zap.Int64("time cost", time.Since(start).Milliseconds()),
 			zap.Int64("collectionID", signal.collectionID),
 			zap.String("channel", channel),
 			zap.Int64("partitionID", partitionID),
