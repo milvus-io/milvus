@@ -23,24 +23,28 @@ import (
 	"github.com/apache/arrow/go/v12/parquet"
 	"github.com/apache/arrow/go/v12/parquet/file"
 	"github.com/apache/arrow/go/v12/parquet/pqarrow"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/merr"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 type Reader struct {
 	reader *file.Reader
 
+	bufferSize int
+
 	schema *schemapb.CollectionSchema
-	crs    map[int64]*ColumnReader // fieldID -> ColumnReader
+	frs    map[int64]*FieldReader // fieldID -> FieldReader
 }
 
-func NewReader(schema *schemapb.CollectionSchema, cmReader storage.FileReader) (*Reader, error) {
+func NewReader(schema *schemapb.CollectionSchema, cmReader storage.FileReader, bufferSize int) (*Reader, error) {
+	const pqBufSize = 32 * 1024 * 1024 // TODO: dyh, make if configurable
+	size := calcBufferSize(pqBufSize, schema)
 	reader, err := file.NewParquetReader(cmReader, file.WithReadProps(&parquet.ReaderProperties{
-		BufferSize:            32 * 1024 * 1024, // TODO: dyh, make if configurable
+		BufferSize:            int64(size),
 		BufferedStreamEnabled: true,
 	}))
 	if err != nil {
@@ -54,34 +58,57 @@ func NewReader(schema *schemapb.CollectionSchema, cmReader storage.FileReader) (
 		return nil, merr.WrapErrImportFailed(fmt.Sprintf("new parquet file reader failed, err=%v", err))
 	}
 
-	crs, err := CreateColumnReaders(fileReader, schema)
+	crs, err := CreateFieldReaders(fileReader, schema)
 	if err != nil {
 		return nil, err
 	}
 	return &Reader{
-		reader: reader,
-		schema: schema,
-		crs:    crs,
+		reader:     reader,
+		bufferSize: bufferSize,
+		schema:     schema,
+		frs:        crs,
 	}, nil
 }
 
-func (r *Reader) Next(count int64) (*storage.InsertData, error) {
+func (r *Reader) Read() (*storage.InsertData, error) {
 	insertData, err := storage.NewInsertData(r.schema)
 	if err != nil {
 		return nil, err
 	}
-	for fieldID, cr := range r.crs {
-		fieldData, err := cr.Next(count)
-		if err != nil {
-			return nil, err
+	count := 100
+OUTER:
+	for {
+		count--
+		if count == 0 {
+			count = 0
 		}
-		insertData.Data[fieldID] = fieldData
+		for fieldID, cr := range r.frs {
+			data, err := cr.Next(1)
+			if err != nil {
+				return nil, err
+			}
+			if data == nil {
+				break OUTER
+			}
+			err = insertData.Data[fieldID].AppendRows(data)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if insertData.GetMemorySize() >= r.bufferSize {
+			break
+		}
+	}
+	for fieldID := range r.frs {
+		if insertData.Data[fieldID].RowNum() == 0 {
+			return nil, nil
+		}
 	}
 	return insertData, nil
 }
 
 func (r *Reader) Close() {
-	for _, cr := range r.crs {
+	for _, cr := range r.frs {
 		cr.Close()
 	}
 	err := r.reader.Close()

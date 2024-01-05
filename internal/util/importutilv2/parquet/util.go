@@ -34,7 +34,14 @@ func WrapTypeErr(expect string, actual string, field *schemapb.FieldSchema) erro
 			expect, field.GetName(), actual))
 }
 
-func CreateColumnReaders(fileReader *pqarrow.FileReader, schema *schemapb.CollectionSchema) (map[int64]*ColumnReader, error) {
+func calcBufferSize(blockSize int, schema *schemapb.CollectionSchema) int {
+	if len(schema.GetFields()) <= 0 {
+		return blockSize
+	}
+	return blockSize / len(schema.GetFields())
+}
+
+func CreateFieldReaders(fileReader *pqarrow.FileReader, schema *schemapb.CollectionSchema) (map[int64]*FieldReader, error) {
 	nameToField := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) string {
 		return field.GetName()
 	})
@@ -44,7 +51,7 @@ func CreateColumnReaders(fileReader *pqarrow.FileReader, schema *schemapb.Collec
 		return nil, merr.WrapErrImportFailed(fmt.Sprintf("get parquet schema failed, err=%v", err))
 	}
 
-	crs := make(map[int64]*ColumnReader)
+	crs := make(map[int64]*FieldReader)
 	for i, pqField := range pqSchema.Fields() {
 		field, ok := nameToField[pqField.Name]
 		if !ok {
@@ -71,7 +78,7 @@ func CreateColumnReaders(fileReader *pqarrow.FileReader, schema *schemapb.Collec
 			return nil, WrapTypeErr(dataType.String(), pqField.Type.Name(), field)
 		}
 
-		cr, err := NewColumnReader(fileReader, i, field)
+		cr, err := NewFieldReader(fileReader, i, field)
 		if err != nil {
 			return nil, err
 		}

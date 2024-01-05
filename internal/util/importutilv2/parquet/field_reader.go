@@ -24,7 +24,7 @@ import (
 	"github.com/apache/arrow/go/v12/arrow"
 	"github.com/apache/arrow/go/v12/arrow/array"
 	"github.com/apache/arrow/go/v12/parquet/pqarrow"
-	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/samber/lo"
 	"golang.org/x/exp/constraints"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -32,7 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-type ColumnReader struct {
+type FieldReader struct {
 	columnIndex  int
 	columnReader *pqarrow.ColumnReader
 
@@ -40,7 +40,7 @@ type ColumnReader struct {
 	field *schemapb.FieldSchema
 }
 
-func NewColumnReader(reader *pqarrow.FileReader, columnIndex int, field *schemapb.FieldSchema) (*ColumnReader, error) {
+func NewFieldReader(reader *pqarrow.FileReader, columnIndex int, field *schemapb.FieldSchema) (*FieldReader, error) {
 	columnReader, err := reader.GetColumn(context.Background(), columnIndex) // TODO: dyh, resolve context
 	if err != nil {
 		return nil, err
@@ -54,7 +54,7 @@ func NewColumnReader(reader *pqarrow.FileReader, columnIndex int, field *schemap
 		}
 	}
 
-	cr := &ColumnReader{
+	cr := &FieldReader{
 		columnIndex:  columnIndex,
 		columnReader: columnReader,
 		dim:          int(dim),
@@ -63,72 +63,49 @@ func NewColumnReader(reader *pqarrow.FileReader, columnIndex int, field *schemap
 	return cr, nil
 }
 
-func (c *ColumnReader) Next(count int64) (storage.FieldData, error) {
+func (c *FieldReader) Next(count int64) (any, error) {
 	switch c.field.GetDataType() {
 	case schemapb.DataType_Bool:
-		data, err := ReadBoolData(c, count)
-		if err != nil {
-			return nil, err
-		}
-		return &storage.BoolFieldData{Data: data}, nil
+		return ReadBoolData(c, count)
 	case schemapb.DataType_Int8:
-		data, err := ReadIntegerOrFloatData[int8](c, count)
-		if err != nil {
-			return nil, err
-		}
-		return &storage.Int8FieldData{Data: data}, nil
+		return ReadIntegerOrFloatData[int8](c, count)
 	case schemapb.DataType_Int16:
-		data, err := ReadIntegerOrFloatData[int16](c, count)
-		if err != nil {
-			return nil, err
-		}
-		return &storage.Int16FieldData{Data: data}, nil
+		return ReadIntegerOrFloatData[int16](c, count)
 	case schemapb.DataType_Int32:
-		data, err := ReadIntegerOrFloatData[int32](c, count)
-		if err != nil {
-			return nil, err
-		}
-		return &storage.Int32FieldData{Data: data}, nil
+		return ReadIntegerOrFloatData[int32](c, count)
 	case schemapb.DataType_Int64:
-		data, err := ReadIntegerOrFloatData[int64](c, count)
-		if err != nil {
-			return nil, err
-		}
-		return &storage.Int64FieldData{Data: data}, nil
+		return ReadIntegerOrFloatData[int64](c, count)
 	case schemapb.DataType_Float:
 		data, err := ReadIntegerOrFloatData[float32](c, count)
 		if err != nil {
 			return nil, err
 		}
-		err = typeutil.VerifyFloats32(data)
-		if err != nil {
-			return nil, err
+		if data == nil {
+			return nil, nil
 		}
-		return &storage.FloatFieldData{Data: data}, nil
+		return data, typeutil.VerifyFloats32(data.([]float32))
 	case schemapb.DataType_Double:
 		data, err := ReadIntegerOrFloatData[float64](c, count)
 		if err != nil {
 			return nil, err
 		}
-		err = typeutil.VerifyFloats64(data)
-		if err != nil {
-			return nil, err
+		if data == nil {
+			return nil, nil
 		}
-		return &storage.DoubleFieldData{Data: data}, nil
+		return data, typeutil.VerifyFloats64(data.([]float64))
 	case schemapb.DataType_VarChar, schemapb.DataType_String:
-		data, err := ReadStringData(c, count)
-		if err != nil {
-			return nil, err
-		}
-		return &storage.StringFieldData{Data: data}, nil
+		return ReadStringData(c, count)
 	case schemapb.DataType_JSON:
 		// JSON field read data from string array Parquet
 		data, err := ReadStringData(c, count)
 		if err != nil {
 			return nil, err
 		}
+		if data == nil {
+			return nil, nil
+		}
 		byteArr := make([][]byte, 0)
-		for _, str := range data {
+		for _, str := range data.([]string) {
 			var dummy interface{}
 			err = json.Unmarshal([]byte(str), &dummy)
 			if err != nil {
@@ -136,29 +113,19 @@ func (c *ColumnReader) Next(count int64) (storage.FieldData, error) {
 			}
 			byteArr = append(byteArr, []byte(str))
 		}
-		return &storage.JSONFieldData{Data: byteArr}, nil
+		return byteArr, nil
 	case schemapb.DataType_BinaryVector:
-		binaryData, err := ReadBinaryData(c, count)
-		if err != nil {
-			return nil, err
-		}
-		return &storage.BinaryVectorFieldData{
-			Data: binaryData,
-			Dim:  c.dim,
-		}, nil
+		return ReadBinaryData(c, count)
 	case schemapb.DataType_FloatVector:
 		arrayData, err := ReadIntegerOrFloatArrayData[float32](c, count)
 		if err != nil {
 			return nil, err
 		}
-		data := make([]float32, 0, len(arrayData)*c.dim)
-		for _, arr := range arrayData {
-			data = append(data, arr...)
+		if arrayData == nil {
+			return nil, nil
 		}
-		return &storage.FloatVectorFieldData{
-			Data: data,
-			Dim:  c.dim,
-		}, nil
+		vectors := lo.Flatten(arrayData.([][]float32))
+		return vectors, nil
 	case schemapb.DataType_Array:
 		data := make([]*schemapb.ScalarField, 0, count)
 		elementType := c.field.GetElementType()
@@ -168,7 +135,10 @@ func (c *ColumnReader) Next(count int64) (storage.FieldData, error) {
 			if err != nil {
 				return nil, err
 			}
-			for _, elementArray := range boolArray {
+			if boolArray == nil {
+				return nil, nil
+			}
+			for _, elementArray := range boolArray.([][]bool) {
 				data = append(data, &schemapb.ScalarField{
 					Data: &schemapb.ScalarField_BoolData{
 						BoolData: &schemapb.BoolArray{
@@ -183,7 +153,10 @@ func (c *ColumnReader) Next(count int64) (storage.FieldData, error) {
 			if err != nil {
 				return nil, err
 			}
-			for _, elementArray := range int8Array {
+			if int8Array == nil {
+				return nil, nil
+			}
+			for _, elementArray := range int8Array.([][]int32) {
 				data = append(data, &schemapb.ScalarField{
 					Data: &schemapb.ScalarField_IntData{
 						IntData: &schemapb.IntArray{
@@ -198,7 +171,10 @@ func (c *ColumnReader) Next(count int64) (storage.FieldData, error) {
 			if err != nil {
 				return nil, err
 			}
-			for _, elementArray := range int16Array {
+			if int16Array == nil {
+				return nil, nil
+			}
+			for _, elementArray := range int16Array.([][]int32) {
 				data = append(data, &schemapb.ScalarField{
 					Data: &schemapb.ScalarField_IntData{
 						IntData: &schemapb.IntArray{
@@ -213,7 +189,10 @@ func (c *ColumnReader) Next(count int64) (storage.FieldData, error) {
 			if err != nil {
 				return nil, err
 			}
-			for _, elementArray := range int32Array {
+			if int32Array == nil {
+				return nil, nil
+			}
+			for _, elementArray := range int32Array.([][]int32) {
 				data = append(data, &schemapb.ScalarField{
 					Data: &schemapb.ScalarField_IntData{
 						IntData: &schemapb.IntArray{
@@ -228,7 +207,10 @@ func (c *ColumnReader) Next(count int64) (storage.FieldData, error) {
 			if err != nil {
 				return nil, err
 			}
-			for _, elementArray := range int64Array {
+			if int64Array == nil {
+				return nil, nil
+			}
+			for _, elementArray := range int64Array.([][]int64) {
 				data = append(data, &schemapb.ScalarField{
 					Data: &schemapb.ScalarField_LongData{
 						LongData: &schemapb.LongArray{
@@ -243,7 +225,10 @@ func (c *ColumnReader) Next(count int64) (storage.FieldData, error) {
 			if err != nil {
 				return nil, err
 			}
-			for _, elementArray := range float32Array {
+			if float32Array == nil {
+				return nil, nil
+			}
+			for _, elementArray := range float32Array.([][]float32) {
 				data = append(data, &schemapb.ScalarField{
 					Data: &schemapb.ScalarField_FloatData{
 						FloatData: &schemapb.FloatArray{
@@ -258,7 +243,10 @@ func (c *ColumnReader) Next(count int64) (storage.FieldData, error) {
 			if err != nil {
 				return nil, err
 			}
-			for _, elementArray := range float64Array {
+			if float64Array == nil {
+				return nil, nil
+			}
+			for _, elementArray := range float64Array.([][]float64) {
 				data = append(data, &schemapb.ScalarField{
 					Data: &schemapb.ScalarField_DoubleData{
 						DoubleData: &schemapb.DoubleArray{
@@ -273,7 +261,10 @@ func (c *ColumnReader) Next(count int64) (storage.FieldData, error) {
 			if err != nil {
 				return nil, err
 			}
-			for _, elementArray := range stringArray {
+			if stringArray == nil {
+				return nil, nil
+			}
+			for _, elementArray := range stringArray.([][]string) {
 				data = append(data, &schemapb.ScalarField{
 					Data: &schemapb.ScalarField_StringData{
 						StringData: &schemapb.StringArray{
@@ -286,19 +277,16 @@ func (c *ColumnReader) Next(count int64) (storage.FieldData, error) {
 			return nil, merr.WrapErrImportFailed(fmt.Sprintf("unsupported data type '%s' for array field '%s'",
 				elementType.String(), c.field.GetName()))
 		}
-		return &storage.ArrayFieldData{
-			ElementType: elementType,
-			Data:        data,
-		}, nil
+		return data, nil
 	default:
 		return nil, merr.WrapErrImportFailed(fmt.Sprintf("unsupported data type '%s' for field '%s'",
 			c.field.GetDataType().String(), c.field.GetName()))
 	}
 }
 
-func (c *ColumnReader) Close() {}
+func (c *FieldReader) Close() {}
 
-func ReadBoolData(pcr *ColumnReader, count int64) ([]bool, error) {
+func ReadBoolData(pcr *FieldReader, count int64) (any, error) {
 	chunked, err := pcr.columnReader.NextBatch(count)
 	if err != nil {
 		return nil, err
@@ -316,10 +304,13 @@ func ReadBoolData(pcr *ColumnReader, count int64) ([]bool, error) {
 		}
 		data = append(data, chunkData...)
 	}
+	if len(data) == 0 {
+		return nil, nil
+	}
 	return data, nil
 }
 
-func ReadIntegerOrFloatData[T constraints.Integer | constraints.Float](pcr *ColumnReader, count int64) ([]T, error) {
+func ReadIntegerOrFloatData[T constraints.Integer | constraints.Float](pcr *FieldReader, count int64) (any, error) {
 	chunked, err := pcr.columnReader.NextBatch(count)
 	if err != nil {
 		return nil, err
@@ -364,10 +355,13 @@ func ReadIntegerOrFloatData[T constraints.Integer | constraints.Float](pcr *Colu
 		}
 		data = append(data, chunkData...)
 	}
+	if len(data) == 0 {
+		return nil, nil
+	}
 	return data, nil
 }
 
-func ReadStringData(pcr *ColumnReader, count int64) ([]string, error) {
+func ReadStringData(pcr *FieldReader, count int64) (any, error) {
 	chunked, err := pcr.columnReader.NextBatch(count)
 	if err != nil {
 		return nil, err
@@ -385,10 +379,13 @@ func ReadStringData(pcr *ColumnReader, count int64) ([]string, error) {
 		}
 		data = append(data, chunkData...)
 	}
+	if len(data) == 0 {
+		return nil, nil
+	}
 	return data, nil
 }
 
-func ReadBinaryData(pcr *ColumnReader, count int64) ([]byte, error) {
+func ReadBinaryData(pcr *FieldReader, count int64) (any, error) {
 	chunked, err := pcr.columnReader.NextBatch(count)
 	if err != nil {
 		return nil, err
@@ -418,6 +415,9 @@ func ReadBinaryData(pcr *ColumnReader, count int64) ([]byte, error) {
 			return nil, WrapTypeErr("binary", chunk.DataType().Name(), pcr.field)
 		}
 	}
+	if len(data) == 0 {
+		return nil, nil
+	}
 	return data, nil
 }
 
@@ -428,17 +428,15 @@ func isRegularVector(offsets []int32, dim int, isBinary bool) bool {
 	if isBinary {
 		dim = dim / 8
 	}
-	start := offsets[0]
 	for i := 1; i < len(offsets); i++ {
-		if offsets[i]-start != int32(dim) {
+		if offsets[i]-offsets[i-1] != int32(dim) {
 			return false
 		}
-		start = offsets[i]
 	}
 	return true
 }
 
-func ReadBoolArrayData(pcr *ColumnReader, count int64) ([][]bool, error) {
+func ReadBoolArrayData(pcr *FieldReader, count int64) (any, error) {
 	chunked, err := pcr.columnReader.NextBatch(count)
 	if err != nil {
 		return nil, err
@@ -463,10 +461,13 @@ func ReadBoolArrayData(pcr *ColumnReader, count int64) ([][]bool, error) {
 			data = append(data, elementData)
 		}
 	}
+	if len(data) == 0 {
+		return nil, nil
+	}
 	return data, nil
 }
 
-func ReadIntegerOrFloatArrayData[T constraints.Integer | constraints.Float](pcr *ColumnReader, count int64) ([][]T, error) {
+func ReadIntegerOrFloatArrayData[T constraints.Integer | constraints.Float](pcr *FieldReader, count int64) (any, error) {
 	chunked, err := pcr.columnReader.NextBatch(count)
 	if err != nil {
 		return nil, err
@@ -529,10 +530,13 @@ func ReadIntegerOrFloatArrayData[T constraints.Integer | constraints.Float](pcr 
 			return nil, WrapTypeErr("integerArray|floatArray", chunk.DataType().Name(), pcr.field)
 		}
 	}
+	if len(data) == 0 {
+		return nil, nil
+	}
 	return data, nil
 }
 
-func ReadStringArrayData(pcr *ColumnReader, count int64) ([][]string, error) {
+func ReadStringArrayData(pcr *FieldReader, count int64) (any, error) {
 	chunked, err := pcr.columnReader.NextBatch(count)
 	if err != nil {
 		return nil, err
@@ -556,6 +560,9 @@ func ReadStringArrayData(pcr *ColumnReader, count int64) ([][]string, error) {
 			}
 			data = append(data, elementData)
 		}
+	}
+	if len(data) == 0 {
+		return nil, nil
 	}
 	return data, nil
 }
