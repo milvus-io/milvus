@@ -140,7 +140,7 @@ func (r *reader) Read() (*storage.InsertData, error) {
 		if err != nil {
 			return nil, err
 		}
-		fieldData, err := fr.Next(-1)
+		fieldData, err := fr.Next()
 		if err != nil {
 			fr.Close()
 			return nil, err
