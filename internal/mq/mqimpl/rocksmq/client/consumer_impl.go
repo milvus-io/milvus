@@ -132,7 +132,7 @@ func (c *consumer) Close() {
 	// TODO should panic?
 	err := c.client.server.DestroyConsumerGroup(c.topic, c.consumerName)
 	if err != nil {
-		log.Warn("Consumer close failed", zap.Any("topicName", c.topic), zap.Any("groupName", c.consumerName), zap.Any("error", err))
+		log.Warn("Consumer close failed", zap.String("topicName", c.topic), zap.String("groupName", c.consumerName), zap.Error(err))
 	}
 }
 

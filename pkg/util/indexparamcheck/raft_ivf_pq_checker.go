@@ -15,7 +15,9 @@ func (c *raftIVFPQChecker) CheckTrain(params map[string]string) error {
 	if err := c.ivfBaseChecker.CheckTrain(params); err != nil {
 		return err
 	}
-
+	if !CheckStrByValues(params, Metric, RaftMetrics) {
+		return fmt.Errorf("metric type not found or not supported, supported: %v", RaftMetrics)
+	}
 	return c.checkPQParams(params)
 }
 

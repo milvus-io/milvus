@@ -66,7 +66,6 @@ type CollectionObserverSuite struct {
 	meta              *meta.Meta
 	targetMgr         *meta.TargetManager
 	targetObserver    *TargetObserver
-	leaderObserver    *LeaderObserver
 	checkerController *checkers.CheckerController
 
 	// Test object
@@ -200,7 +199,6 @@ func (suite *CollectionObserverSuite) SetupTest() {
 	suite.checkerController = &checkers.CheckerController{}
 
 	mockCluster := session.NewMockCluster(suite.T())
-	suite.leaderObserver = NewLeaderObserver(suite.dist, suite.meta, suite.targetMgr, suite.broker, mockCluster, nodeMgr)
 	mockCluster.EXPECT().SyncDistribution(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
 
 	// Test object
@@ -209,7 +207,6 @@ func (suite *CollectionObserverSuite) SetupTest() {
 		suite.meta,
 		suite.targetMgr,
 		suite.targetObserver,
-		suite.leaderObserver,
 		suite.checkerController,
 	)
 
@@ -217,7 +214,6 @@ func (suite *CollectionObserverSuite) SetupTest() {
 		suite.broker.EXPECT().GetPartitions(mock.Anything, collection).Return(suite.partitions[collection], nil).Maybe()
 	}
 	suite.targetObserver.Start()
-	suite.leaderObserver.Start()
 	suite.ob.Start()
 	suite.loadAll()
 }

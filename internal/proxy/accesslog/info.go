@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/requestutil"
 )
 
@@ -271,4 +272,8 @@ func getSdkVersion(i *GrpcAccessInfo) string {
 		return unknownString
 	}
 	return clientInfo.SdkType + "-" + clientInfo.SdkVersion
+}
+
+func getClusterPrefix(i *GrpcAccessInfo) string {
+	return paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
 }

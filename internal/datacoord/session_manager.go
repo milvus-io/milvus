@@ -200,7 +200,7 @@ func (c *SessionManagerImpl) Compaction(nodeID int64, plan *datapb.CompactionPla
 		return err
 	}
 
-	log.Info("success to execute compaction", zap.Int64("node", nodeID), zap.Any("planID", plan.GetPlanID()))
+	log.Info("success to execute compaction", zap.Int64("node", nodeID), zap.Int64("planID", plan.GetPlanID()))
 	return nil
 }
 

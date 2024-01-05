@@ -719,7 +719,7 @@ func (c *ChannelManagerImpl) watchChannelStatesLoop(ctx context.Context, revisio
 			return
 		case ackEvent := <-timeoutWatcher:
 			log.Info("receive timeout acks from state watcher",
-				zap.Any("state", ackEvent.ackType),
+				zap.Int("state", ackEvent.ackType),
 				zap.Int64("nodeID", ackEvent.nodeID), zap.String("channelName", ackEvent.channelName))
 			c.processAck(ackEvent)
 		case event, ok := <-etcdWatcher:

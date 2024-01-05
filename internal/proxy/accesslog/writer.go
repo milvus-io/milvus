@@ -100,8 +100,8 @@ func NewRotateLogger(logCfg *paramtable.AccessLogConfig, minioCfg *paramtable.Mi
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		log.Debug("remtepath", zap.Any("remote", logCfg.RemotePath.GetValue()))
-		log.Debug("maxBackups", zap.Any("maxBackups", logCfg.MaxBackups.GetValue()))
+		log.Debug("remtepath", zap.String("remote", logCfg.RemotePath.GetValue()))
+		log.Debug("maxBackups", zap.String("maxBackups", logCfg.MaxBackups.GetValue()))
 		handler, err := NewMinioHandler(ctx, minioCfg, logCfg.RemotePath.GetValue(), logCfg.MaxBackups.GetAsInt())
 		if err != nil {
 			return nil, err

@@ -135,7 +135,7 @@ func (kc *Consumer) Chan() <-chan mqwrapper.Message {
 					e, err := kc.c.ReadMessage(readTimeout)
 					if err != nil {
 						// if we failed to read message in 30 Seconds, print out a warn message since there should always be a tt
-						log.Warn("consume msg failed", zap.Any("topic", kc.topic), zap.String("groupID", kc.groupID), zap.Error(err))
+						log.Warn("consume msg failed", zap.String("topic", kc.topic), zap.String("groupID", kc.groupID), zap.Error(err))
 					} else {
 						if kc.skipMsg {
 							kc.skipMsg = false
@@ -217,7 +217,7 @@ func (kc *Consumer) GetLatestMsgID() (mqwrapper.MessageID, error) {
 		high = high - 1
 	}
 
-	log.Info("get latest msg ID ", zap.Any("topic", kc.topic), zap.Int64("oldest offset", low), zap.Int64("latest offset", high))
+	log.Info("get latest msg ID ", zap.String("topic", kc.topic), zap.Int64("oldest offset", low), zap.Int64("latest offset", high))
 	return &kafkaID{messageID: high}, nil
 }
 
@@ -249,7 +249,7 @@ func (kc *Consumer) closeInternal() {
 	}
 	cost := time.Since(start).Milliseconds()
 	if cost > 200 {
-		log.Warn("close consumer costs too long time", zap.Any("topic", kc.topic), zap.String("groupID", kc.groupID), zap.Int64("time(ms)", cost))
+		log.Warn("close consumer costs too long time", zap.String("topic", kc.topic), zap.String("groupID", kc.groupID), zap.Int64("time(ms)", cost))
 	}
 }
 
