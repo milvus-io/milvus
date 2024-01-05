@@ -30,6 +30,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 var (
@@ -229,4 +230,13 @@ func validateHeader(npyReader *npy.Reader, field *schemapb.FieldSchema, dim int)
 		}
 	}
 	return nil
+}
+
+func calcRowCount(bufferSize int, schema *schemapb.CollectionSchema) (int64, error) {
+	sizePerRecord, err := typeutil.EstimateSizePerRecord(schema)
+	if err != nil {
+		return 0, err
+	}
+	rowCount := int64(bufferSize) / int64(sizePerRecord)
+	return rowCount, nil
 }
