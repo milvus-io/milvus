@@ -867,6 +867,21 @@ func IsPrimaryFieldDataExist(datas []*schemapb.FieldData, primaryFieldSchema *sc
 	return primaryFieldData != nil
 }
 
+func AppendSystemFields(schema *schemapb.CollectionSchema) {
+	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+		FieldID:      int64(common.RowIDField),
+		Name:         common.RowIDFieldName,
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_Int64,
+	})
+	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+		FieldID:      int64(common.TimeStampField),
+		Name:         common.TimeStampFieldName,
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_Int64,
+	})
+}
+
 func AppendIDs(dst *schemapb.IDs, src *schemapb.IDs, idx int) {
 	switch src.IdField.(type) {
 	case *schemapb.IDs_IntId:
