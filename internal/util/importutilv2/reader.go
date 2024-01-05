@@ -38,7 +38,7 @@ func NewReader(cm storage.ChunkManager,
 	schema *schemapb.CollectionSchema,
 	importFile *internalpb.ImportFile,
 	options Options,
-	bufferSize int64,
+	bufferSize int,
 ) (Reader, error) {
 	if IsBackup(options) {
 		tsStart, tsEnd, err := ParseTimeRange(options)
@@ -59,19 +59,19 @@ func NewReader(cm storage.ChunkManager,
 		if err != nil {
 			return nil, WrapReadFileError(importFile.GetPaths()[0], err)
 		}
-		return json.NewReader(reader, schema)
+		return json.NewReader(reader, schema, bufferSize)
 	case Numpy:
 		readers, err := CreateReaders(importFile.GetPaths(), cm, schema)
 		if err != nil {
 			return nil, err
 		}
-		return numpy.NewReader(schema, readers)
+		return numpy.NewReader(schema, readers, bufferSize)
 	case Parquet:
 		cmReader, err := cm.Reader(context.Background(), importFile.GetPaths()[0]) // TODO: dyh, resolve context
 		if err != nil {
 			return nil, err
 		}
-		return parquet.NewReader(schema, cmReader)
+		return parquet.NewReader(schema, cmReader, bufferSize)
 	}
 	return nil, merr.WrapErrImportFailed("unexpected import file")
 }

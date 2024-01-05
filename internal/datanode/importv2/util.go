@@ -185,8 +185,8 @@ func FillDynamicData(data *storage.InsertData, schema *schemapb.CollectionSchema
 	if !schema.GetEnableDynamicField() {
 		return nil
 	}
-	dynamicField, err := typeutil.GetDynamicField(schema)
-	if err != nil {
+	dynamicField := typeutil.GetDynamicField(schema)
+	if dynamicField == nil {
 		return nil
 	}
 	rowNum := GetInsertDataRowNum(data, schema)
