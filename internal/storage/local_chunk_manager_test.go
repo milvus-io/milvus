@@ -110,7 +110,7 @@ func TestLocalCM(t *testing.T) {
 
 		for _, test := range loadWithPrefixTests {
 			t.Run(test.description, func(t *testing.T) {
-				gotk, gotv, err := testCM.ReadWithPrefix(ctx, path.Join(localPath, testLoadRoot, test.prefix))
+				gotk, gotv, err := readAllChunkWithPrefix(ctx, testCM, path.Join(localPath, testLoadRoot, test.prefix))
 				assert.NoError(t, err)
 				assert.Equal(t, len(test.expectedValue), len(gotk))
 				assert.Equal(t, len(test.expectedValue), len(gotv))
@@ -447,7 +447,7 @@ func TestLocalCM(t *testing.T) {
 		//   localPath/testPrefix/a/b
 		//   localPath/testPrefix/a/c
 		pathPrefix := path.Join(localPath, testPrefix, "a")
-		dirs, m, err := testCM.ListWithPrefix(ctx, pathPrefix, true)
+		dirs, m, err := ListAllChunkWithPrefix(ctx, testCM, pathPrefix, true)
 		assert.NoError(t, err)
 		assert.Equal(t, 2, len(dirs))
 		assert.Equal(t, 2, len(m))
@@ -459,7 +459,7 @@ func TestLocalCM(t *testing.T) {
 		assert.NoError(t, err)
 
 		// no file returned
-		dirs, m, err = testCM.ListWithPrefix(ctx, pathPrefix, true)
+		dirs, m, err = ListAllChunkWithPrefix(ctx, testCM, pathPrefix, true)
 		assert.NoError(t, err)
 		assert.Equal(t, 0, len(dirs))
 		assert.Equal(t, 0, len(m))
@@ -499,7 +499,7 @@ func TestLocalCM(t *testing.T) {
 		//   localPath/testPrefix/abd
 		//   localPath/testPrefix/bcd
 		testPrefix1 := path.Join(localPath, testPrefix)
-		dirs, mods, err := testCM.ListWithPrefix(ctx, testPrefix1+"/", false)
+		dirs, mods, err := ListAllChunkWithPrefix(ctx, testCM, testPrefix1+"/", false)
 		assert.NoError(t, err)
 		assert.Equal(t, 3, len(dirs))
 		assert.Equal(t, 3, len(mods))
@@ -513,7 +513,7 @@ func TestLocalCM(t *testing.T) {
 		//   localPath/testPrefix/abc/deg
 		//   localPath/testPrefix/abd
 		//   localPath/testPrefix/bcd
-		dirs, mods, err = testCM.ListWithPrefix(ctx, testPrefix1+"/", true)
+		dirs, mods, err = ListAllChunkWithPrefix(ctx, testCM, testPrefix1+"/", true)
 		assert.NoError(t, err)
 		assert.Equal(t, 4, len(dirs))
 		assert.Equal(t, 4, len(mods))
@@ -527,7 +527,7 @@ func TestLocalCM(t *testing.T) {
 		//   localPath/testPrefix/abc
 		//   localPath/testPrefix/abd
 		testPrefix2 := path.Join(localPath, testPrefix, "a")
-		dirs, mods, err = testCM.ListWithPrefix(ctx, testPrefix2, false)
+		dirs, mods, err = ListAllChunkWithPrefix(ctx, testCM, testPrefix2, false)
 		assert.NoError(t, err)
 		assert.Equal(t, 2, len(dirs))
 		assert.Equal(t, 2, len(mods))
@@ -539,7 +539,7 @@ func TestLocalCM(t *testing.T) {
 		//   localPath/testPrefix/abc/def
 		//   localPath/testPrefix/abc/deg
 		//   localPath/testPrefix/abd
-		dirs, mods, err = testCM.ListWithPrefix(ctx, testPrefix2, true)
+		dirs, mods, err = ListAllChunkWithPrefix(ctx, testCM, testPrefix2, true)
 		assert.NoError(t, err)
 		assert.Equal(t, 3, len(dirs))
 		assert.Equal(t, 3, len(mods))
@@ -555,7 +555,7 @@ func TestLocalCM(t *testing.T) {
 		// non-recursive find localPath/testPrefix
 		// return:
 		//   localPath/testPrefix
-		dirs, mods, err = testCM.ListWithPrefix(ctx, testPrefix1, false)
+		dirs, mods, err = ListAllChunkWithPrefix(ctx, testCM, testPrefix1, false)
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(dirs))
 		assert.Equal(t, 1, len(mods))
@@ -564,7 +564,7 @@ func TestLocalCM(t *testing.T) {
 		// recursive find localPath/testPrefix
 		// return:
 		//   localPath/testPrefix/bcd
-		dirs, mods, err = testCM.ListWithPrefix(ctx, testPrefix1, true)
+		dirs, mods, err = ListAllChunkWithPrefix(ctx, testCM, testPrefix1, true)
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(dirs))
 		assert.Equal(t, 1, len(mods))
@@ -573,7 +573,7 @@ func TestLocalCM(t *testing.T) {
 		// non-recursive find localPath/testPrefix/a*
 		// return:
 		//   localPath/testPrefix/abc
-		dirs, mods, err = testCM.ListWithPrefix(ctx, testPrefix2, false)
+		dirs, mods, err = ListAllChunkWithPrefix(ctx, testCM, testPrefix2, false)
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(dirs))
 		assert.Equal(t, 1, len(mods))
@@ -581,7 +581,7 @@ func TestLocalCM(t *testing.T) {
 
 		// recursive find localPath/testPrefix/a*
 		// no file returned
-		dirs, mods, err = testCM.ListWithPrefix(ctx, testPrefix2, true)
+		dirs, mods, err = ListAllChunkWithPrefix(ctx, testCM, testPrefix2, true)
 		assert.NoError(t, err)
 		assert.Equal(t, 0, len(dirs))
 		assert.Equal(t, 0, len(mods))
@@ -593,7 +593,7 @@ func TestLocalCM(t *testing.T) {
 
 		// recursive find localPath/testPrefix
 		// no file returned
-		dirs, mods, err = testCM.ListWithPrefix(ctx, testPrefix1, true)
+		dirs, mods, err = ListAllChunkWithPrefix(ctx, testCM, testPrefix1, true)
 		assert.NoError(t, err)
 		assert.Equal(t, 0, len(dirs))
 		assert.Equal(t, 0, len(mods))
@@ -601,10 +601,27 @@ func TestLocalCM(t *testing.T) {
 		// recursive find localPath/testPrefix
 		// return
 		//   localPath/testPrefix
-		dirs, mods, err = testCM.ListWithPrefix(ctx, testPrefix1, false)
+		dirs, mods, err = ListAllChunkWithPrefix(ctx, testCM, testPrefix1, false)
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(dirs))
 		assert.Equal(t, 1, len(mods))
 		assert.Contains(t, dirs, filepath.Dir(key4))
 	})
+}
+
+func readAllChunkWithPrefix(ctx context.Context, manager ChunkManager, prefix string) ([]string, [][]byte, error) {
+	var paths []string
+	var contents [][]byte
+	if err := manager.WalkWithPrefix(ctx, prefix, true, func(object *ChunkObjectInfo) error {
+		paths = append(paths, object.FilePath)
+		content, err := manager.Read(ctx, object.FilePath)
+		if err != nil {
+			return err
+		}
+		contents = append(contents, content)
+		return nil
+	}); err != nil {
+		return nil, nil, err
+	}
+	return paths, contents, nil
 }

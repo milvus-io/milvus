@@ -136,14 +136,8 @@ func (c *mockChunkmgr) MultiRead(ctx context.Context, filePaths []string) ([][]b
 	return nil, errNotImplErr
 }
 
-func (c *mockChunkmgr) ReadWithPrefix(ctx context.Context, prefix string) ([]string, [][]byte, error) {
-	// TODO
-	return nil, nil, errNotImplErr
-}
-
-func (c *mockChunkmgr) ListWithPrefix(ctx context.Context, prefix string, recursive bool) ([]string, []time.Time, error) {
-	// TODO
-	return nil, nil, errNotImplErr
+func (c *mockChunkmgr) WalkWithPrefix(ctx context.Context, prefix string, recursive bool, cb func(*storage.ChunkObjectInfo) error) error {
+	return errNotImplErr
 }
 
 func (c *mockChunkmgr) Mmap(ctx context.Context, filePath string) (*mmap.ReaderAt, error) {

@@ -41,6 +41,12 @@ type FileReader interface {
 	io.Seeker
 }
 
+// ChunkObjectInfo is to store object info.
+type ChunkObjectInfo struct {
+	FilePath   string
+	ModifyTime time.Time
+}
+
 // ChunkManager is to manager chunks.
 // Include Read, Write, Remove chunks.
 type ChunkManager interface {
@@ -62,9 +68,9 @@ type ChunkManager interface {
 	Reader(ctx context.Context, filePath string) (FileReader, error)
 	// MultiRead reads @filePath and returns content.
 	MultiRead(ctx context.Context, filePaths []string) ([][]byte, error)
-	ListWithPrefix(ctx context.Context, prefix string, recursive bool) ([]string, []time.Time, error)
-	// ReadWithPrefix reads files with same @prefix and returns contents.
-	ReadWithPrefix(ctx context.Context, prefix string) ([]string, [][]byte, error)
+	// WalkWithPrefix list files with same @prefix and call @cb for each file.
+	// If cb return error, underlying walking failed or context canceled, WalkWithPrefix will stop and return that error.
+	WalkWithPrefix(ctx context.Context, prefix string, recursive bool, cb func(*ChunkObjectInfo) error) error
 	Mmap(ctx context.Context, filePath string) (*mmap.ReaderAt, error)
 	// ReadAt reads @filePath by offset @off, content stored in @p, return @n as the number of bytes read.
 	// if all bytes are read, @err is io.EOF.
@@ -76,4 +82,19 @@ type ChunkManager interface {
 	MultiRemove(ctx context.Context, filePaths []string) error
 	// RemoveWithPrefix remove files with same @prefix.
 	RemoveWithPrefix(ctx context.Context, prefix string) error
+}
+
+// ListAllChunkWithPrefix is a helper function to list all objects with same @prefix by using `ListWithPrefix`.
+// `ListWithPrefix` is more efficient way to call if you don't need all chunk at same time.
+func ListAllChunkWithPrefix(ctx context.Context, manager ChunkManager, prefix string, recursive bool) ([]string, []time.Time, error) {
+	var dirs []string
+	var mods []time.Time
+	if err := manager.WalkWithPrefix(ctx, prefix, recursive, func(chunkInfo *ChunkObjectInfo) error {
+		dirs = append(dirs, chunkInfo.FilePath)
+		mods = append(mods, chunkInfo.ModifyTime)
+		return nil
+	}); err != nil {
+		return nil, nil, err
+	}
+	return dirs, mods, nil
 }

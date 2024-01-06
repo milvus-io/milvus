@@ -148,7 +148,7 @@ func TestMinioChunkManager(t *testing.T) {
 
 		for _, test := range loadWithPrefixTests {
 			t.Run(test.description, func(t *testing.T) {
-				gotk, gotv, err := testCM.ReadWithPrefix(ctx, path.Join(testLoadRoot, test.prefix))
+				gotk, gotv, err := readAllChunkWithPrefix(ctx, testCM, path.Join(testLoadRoot, test.prefix))
 				assert.NoError(t, err)
 				assert.Equal(t, len(test.expectedValue), len(gotk))
 				assert.Equal(t, len(test.expectedValue), len(gotv))
@@ -454,7 +454,7 @@ func TestMinioChunkManager(t *testing.T) {
 		assert.NoError(t, err)
 
 		pathPrefix := path.Join(testPrefix, "a")
-		r, m, err := testCM.ListWithPrefix(ctx, pathPrefix, true)
+		r, m, err := ListAllChunkWithPrefix(ctx, testCM, pathPrefix, true)
 		assert.NoError(t, err)
 		assert.Equal(t, len(r), 2)
 		assert.Equal(t, len(m), 2)
@@ -470,18 +470,18 @@ func TestMinioChunkManager(t *testing.T) {
 		key = path.Join(testPrefix, "bc", "a", "b")
 		err = testCM.Write(ctx, key, value)
 		assert.NoError(t, err)
-		dirs, mods, err := testCM.ListWithPrefix(ctx, testPrefix+"/", true)
+		dirs, mods, err := ListAllChunkWithPrefix(ctx, testCM, testPrefix+"/", true)
 		assert.NoError(t, err)
 		assert.Equal(t, 5, len(dirs))
 		assert.Equal(t, 5, len(mods))
 
-		dirs, mods, err = testCM.ListWithPrefix(ctx, path.Join(testPrefix, "b"), true)
+		dirs, mods, err = ListAllChunkWithPrefix(ctx, testCM, path.Join(testPrefix, "b"), true)
 		assert.NoError(t, err)
 		assert.Equal(t, 3, len(dirs))
 		assert.Equal(t, 3, len(mods))
 
 		testCM.RemoveWithPrefix(ctx, testPrefix)
-		r, m, err = testCM.ListWithPrefix(ctx, pathPrefix, true)
+		r, m, err = ListAllChunkWithPrefix(ctx, testCM, pathPrefix, true)
 		assert.NoError(t, err)
 		assert.Equal(t, 0, len(r))
 		assert.Equal(t, 0, len(m))
@@ -489,7 +489,7 @@ func TestMinioChunkManager(t *testing.T) {
 		// test wrong prefix
 		b := make([]byte, 2048)
 		pathWrong := path.Join(testPrefix, string(b))
-		_, _, err = testCM.ListWithPrefix(ctx, pathWrong, true)
+		_, _, err = ListAllChunkWithPrefix(ctx, testCM, pathWrong, true)
 		assert.Error(t, err)
 	})
 
@@ -602,7 +602,7 @@ func TestAzureChunkManager(t *testing.T) {
 
 		for _, test := range loadWithPrefixTests {
 			t.Run(test.description, func(t *testing.T) {
-				gotk, gotv, err := testCM.ReadWithPrefix(ctx, path.Join(testLoadRoot, test.prefix))
+				gotk, gotv, err := readAllChunkWithPrefix(ctx, testCM, path.Join(testLoadRoot, test.prefix))
 				assert.NoError(t, err)
 				assert.Equal(t, len(test.expectedValue), len(gotk))
 				assert.Equal(t, len(test.expectedValue), len(gotv))
@@ -908,7 +908,7 @@ func TestAzureChunkManager(t *testing.T) {
 		assert.NoError(t, err)
 
 		pathPrefix := path.Join(testPrefix, "a")
-		r, m, err := testCM.ListWithPrefix(ctx, pathPrefix, true)
+		r, m, err := ListAllChunkWithPrefix(ctx, testCM, pathPrefix, true)
 		assert.NoError(t, err)
 		assert.Equal(t, len(r), 2)
 		assert.Equal(t, len(m), 2)
@@ -924,18 +924,18 @@ func TestAzureChunkManager(t *testing.T) {
 		key = path.Join(testPrefix, "bc", "a", "b")
 		err = testCM.Write(ctx, key, value)
 		assert.NoError(t, err)
-		dirs, mods, err := testCM.ListWithPrefix(ctx, testPrefix+"/", true)
+		dirs, mods, err := ListAllChunkWithPrefix(ctx, testCM, testPrefix+"/", true)
 		assert.NoError(t, err)
 		assert.Equal(t, 5, len(dirs))
 		assert.Equal(t, 5, len(mods))
 
-		dirs, mods, err = testCM.ListWithPrefix(ctx, path.Join(testPrefix, "b"), true)
+		dirs, mods, err = ListAllChunkWithPrefix(ctx, testCM, path.Join(testPrefix, "b"), true)
 		assert.NoError(t, err)
 		assert.Equal(t, 3, len(dirs))
 		assert.Equal(t, 3, len(mods))
 
 		testCM.RemoveWithPrefix(ctx, testPrefix)
-		r, m, err = testCM.ListWithPrefix(ctx, pathPrefix, true)
+		r, m, err = ListAllChunkWithPrefix(ctx, testCM, pathPrefix, true)
 		assert.NoError(t, err)
 		assert.Equal(t, 0, len(r))
 		assert.Equal(t, 0, len(m))
@@ -943,7 +943,7 @@ func TestAzureChunkManager(t *testing.T) {
 		// test wrong prefix
 		b := make([]byte, 2048)
 		pathWrong := path.Join(testPrefix, string(b))
-		_, _, err = testCM.ListWithPrefix(ctx, pathWrong, true)
+		_, _, err = ListAllChunkWithPrefix(ctx, testCM, pathWrong, true)
 		assert.Error(t, err)
 	})
 

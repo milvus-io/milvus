@@ -99,21 +99,20 @@ func (mc *MockChunkManager) MultiRead(ctx context.Context, filePaths []string) (
 	return nil, nil
 }
 
-func (mc *MockChunkManager) ListWithPrefix(ctx context.Context, prefix string, recursive bool) ([]string, []time.Time, error) {
+func (mc *MockChunkManager) WalkWithPrefix(ctx context.Context, prefix string, recursive bool, cb func(*storage.ChunkObjectInfo) error) error {
 	if mc.listErr != nil {
-		return nil, nil, mc.listErr
+		return mc.listErr
 	}
 
 	result, ok := mc.listResult[prefix]
 	if ok {
-		return result, nil, nil
+		for _, filePath := range result {
+			if err := cb(&storage.ChunkObjectInfo{FilePath: filePath, ModifyTime: time.Now()}); err != nil {
+				return err
+			}
+		}
 	}
-
-	return nil, nil, nil
-}
-
-func (mc *MockChunkManager) ReadWithPrefix(ctx context.Context, prefix string) ([]string, [][]byte, error) {
-	return nil, nil, nil
+	return nil
 }
 
 func (mc *MockChunkManager) ReadAt(ctx context.Context, filePath string, off int64, length int64) ([]byte, error) {
