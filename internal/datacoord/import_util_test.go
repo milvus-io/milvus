@@ -34,6 +34,7 @@ import (
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -336,8 +337,24 @@ func TestImportUtil_ListBinlogsAndGroupBySegment(t *testing.T) {
 		}
 
 		cm := mocks2.NewChunkManager(t)
-		cm.EXPECT().ListWithPrefix(mock.Anything, insertPrefix, mock.Anything).Return(segmentInsertPaths, nil, nil)
-		cm.EXPECT().ListWithPrefix(mock.Anything, deltaPrefix, mock.Anything).Return(segmentDeltaPaths, nil, nil)
+		cm.EXPECT().WalkWithPrefix(mock.Anything, insertPrefix, mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, s string, b bool, f func(*storage.ChunkObjectInfo) error) error {
+				for _, p := range segmentInsertPaths {
+					if err := f(&storage.ChunkObjectInfo{FilePath: p}); err != nil {
+						return err
+					}
+				}
+				return nil
+			})
+		cm.EXPECT().WalkWithPrefix(mock.Anything, deltaPrefix, mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, s string, b bool, f func(*storage.ChunkObjectInfo) error) error {
+				for _, p := range segmentDeltaPaths {
+					if err := f(&storage.ChunkObjectInfo{FilePath: p}); err != nil {
+						return err
+					}
+				}
+				return nil
+			})
 
 		file := &internalpb.ImportFile{
 			Id:    1,

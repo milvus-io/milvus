@@ -540,12 +540,13 @@ func (s *Server) newChunkManagerFactory() (storage.ChunkManager, error) {
 
 func (s *Server) initGarbageCollection(cli storage.ChunkManager) {
 	s.garbageCollector = newGarbageCollector(s.meta, s.handler, GcOption{
-		cli:              cli,
-		enabled:          Params.DataCoordCfg.EnableGarbageCollection.GetAsBool(),
-		checkInterval:    Params.DataCoordCfg.GCInterval.GetAsDuration(time.Second),
-		scanInterval:     Params.DataCoordCfg.GCScanIntervalInHour.GetAsDuration(time.Hour),
-		missingTolerance: Params.DataCoordCfg.GCMissingTolerance.GetAsDuration(time.Second),
-		dropTolerance:    Params.DataCoordCfg.GCDropTolerance.GetAsDuration(time.Second),
+		cli:               cli,
+		enabled:           Params.DataCoordCfg.EnableGarbageCollection.GetAsBool(),
+		checkInterval:     Params.DataCoordCfg.GCInterval.GetAsDuration(time.Second),
+		scanInterval:      Params.DataCoordCfg.GCScanIntervalInHour.GetAsDuration(time.Hour),
+		fileCheckInterval: Params.DataCoordCfg.GCFileCheckInterval.GetAsDuration(time.Second),
+		missingTolerance:  Params.DataCoordCfg.GCMissingTolerance.GetAsDuration(time.Second),
+		dropTolerance:     Params.DataCoordCfg.GCDropTolerance.GetAsDuration(time.Second),
 	})
 }
 

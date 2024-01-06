@@ -192,13 +192,13 @@ var (
 
 	/* garbage collector related metrics */
 
-	// GarbageCollectorListLatency metrics for gc scan storage files.
-	GarbageCollectorListLatency = prometheus.NewHistogramVec(
+	// GarbageCollectorFileScanDuration metrics for gc scan storage files.
+	GarbageCollectorFileScanDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.DataCoordRole,
-			Name:      "gc_list_latency",
-			Help:      "latency of list objects in storage while garbage collecting (in milliseconds)",
+			Name:      "gc_file_scan_duration",
+			Help:      "duration of scan file in storage while garbage collecting (in milliseconds)",
 			Buckets:   longTaskBuckets,
 		}, []string{nodeIDLabelName, segmentFileTypeLabelName})
 
@@ -305,6 +305,8 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(IndexTaskNum)
 	registry.MustRegister(IndexNodeNum)
 	registry.MustRegister(ImportTasks)
+	registry.MustRegister(GarbageCollectorFileScanDuration)
+	registry.MustRegister(GarbageCollectorRunCount)
 }
 
 func CleanupDataCoordSegmentMetrics(collectionID int64, segmentID int64) {

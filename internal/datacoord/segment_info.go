@@ -216,6 +216,28 @@ func (s *SegmentsInfo) SetIsCompacting(segmentID UniqueID, isCompacting bool) {
 	}
 }
 
+func (s *SegmentInfo) IsDeltaLogExists(filePath string) bool {
+	for _, deltaLogs := range s.GetDeltalogs() {
+		for _, l := range deltaLogs.GetBinlogs() {
+			if l.GetLogPath() == filePath {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (s *SegmentInfo) IsStatsLogExists(filePath string) bool {
+	for _, statsLogs := range s.GetStatslogs() {
+		for _, l := range statsLogs.GetBinlogs() {
+			if l.GetLogPath() == filePath {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // Clone deep clone the segment info and return a new instance
 func (s *SegmentInfo) Clone(opts ...SegmentInfoOption) *SegmentInfo {
 	info := proto.Clone(s.SegmentInfo).(*datapb.SegmentInfo)

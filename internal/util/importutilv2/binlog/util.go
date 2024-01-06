@@ -66,19 +66,18 @@ func newBinlogReader(ctx context.Context, cm storage.ChunkManager, path string) 
 }
 
 func listInsertLogs(ctx context.Context, cm storage.ChunkManager, insertPrefix string) (map[int64][]string, error) {
-	insertLogPaths, _, err := cm.ListWithPrefix(ctx, insertPrefix, true)
-	if err != nil {
-		return nil, err
-	}
 	insertLogs := make(map[int64][]string)
-	for _, logPath := range insertLogPaths {
-		fieldPath := path.Dir(logPath)
+	if err := cm.WalkWithPrefix(ctx, insertPrefix, true, func(insertLog *storage.ChunkObjectInfo) error {
+		fieldPath := path.Dir(insertLog.FilePath)
 		fieldStrID := path.Base(fieldPath)
 		fieldID, err := strconv.ParseInt(fieldStrID, 10, 64)
 		if err != nil {
-			return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to parse field id from log, error: %v", err))
+			return merr.WrapErrImportFailed(fmt.Sprintf("failed to parse field id from log, error: %v", err))
 		}
-		insertLogs[fieldID] = append(insertLogs[fieldID], logPath)
+		insertLogs[fieldID] = append(insertLogs[fieldID], insertLog.FilePath)
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 	for _, v := range insertLogs {
 		sort.Strings(v)

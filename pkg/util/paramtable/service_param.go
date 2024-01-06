@@ -1032,21 +1032,22 @@ func (r *NatsmqConfig) Init(base *BaseTable) {
 // /////////////////////////////////////////////////////////////////////////////
 // --- minio ---
 type MinioConfig struct {
-	Address          ParamItem `refreshable:"false"`
-	Port             ParamItem `refreshable:"false"`
-	AccessKeyID      ParamItem `refreshable:"false"`
-	SecretAccessKey  ParamItem `refreshable:"false"`
-	UseSSL           ParamItem `refreshable:"false"`
-	SslCACert        ParamItem `refreshable:"false"`
-	BucketName       ParamItem `refreshable:"false"`
-	RootPath         ParamItem `refreshable:"false"`
-	UseIAM           ParamItem `refreshable:"false"`
-	CloudProvider    ParamItem `refreshable:"false"`
-	IAMEndpoint      ParamItem `refreshable:"false"`
-	LogLevel         ParamItem `refreshable:"false"`
-	Region           ParamItem `refreshable:"false"`
-	UseVirtualHost   ParamItem `refreshable:"false"`
-	RequestTimeoutMs ParamItem `refreshable:"false"`
+	Address            ParamItem `refreshable:"false"`
+	Port               ParamItem `refreshable:"false"`
+	AccessKeyID        ParamItem `refreshable:"false"`
+	SecretAccessKey    ParamItem `refreshable:"false"`
+	UseSSL             ParamItem `refreshable:"false"`
+	SslCACert          ParamItem `refreshable:"false"`
+	BucketName         ParamItem `refreshable:"false"`
+	RootPath           ParamItem `refreshable:"false"`
+	UseIAM             ParamItem `refreshable:"false"`
+	CloudProvider      ParamItem `refreshable:"false"`
+	IAMEndpoint        ParamItem `refreshable:"false"`
+	LogLevel           ParamItem `refreshable:"false"`
+	Region             ParamItem `refreshable:"false"`
+	UseVirtualHost     ParamItem `refreshable:"false"`
+	RequestTimeoutMs   ParamItem `refreshable:"false"`
+	ListObjectsMaxKeys ParamItem `refreshable:"true"`
 }
 
 func (p *MinioConfig) Init(base *BaseTable) {
@@ -1214,4 +1215,15 @@ Leave it empty if you want to use AWS default endpoint`,
 		Export:       true,
 	}
 	p.RequestTimeoutMs.Init(base.mgr)
+
+	p.ListObjectsMaxKeys = ParamItem{
+		Key:          "minio.listObjectsMaxKeys",
+		Version:      "2.3.5",
+		DefaultValue: "0",
+		Doc: `The maximum number of objects requested per batch in minio ListObjects rpc, 
+0 means using minio client by default, which is 1000,
+decrease these configration if ListObjects timeout`,
+		Export: true,
+	}
+	p.ListObjectsMaxKeys.Init(base.mgr)
 }

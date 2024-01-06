@@ -2607,6 +2607,7 @@ type dataCoordConfig struct {
 	// Garbage Collection
 	EnableGarbageCollection ParamItem `refreshable:"false"`
 	GCInterval              ParamItem `refreshable:"false"`
+	GCFileCheckInterval     ParamItem `refreshable:"false"` // gc interval of file on object storage, expose on milvus.yaml in future.
 	GCMissingTolerance      ParamItem `refreshable:"false"`
 	GCDropTolerance         ParamItem `refreshable:"false"`
 	GCRemoveConcurrent      ParamItem `refreshable:"false"`
@@ -2989,6 +2990,15 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.GCScanIntervalInHour.Init(base.mgr)
+
+	p.GCFileCheckInterval = ParamItem{
+		Key:          "dataCoord.gc.fileCheckInterval",
+		Version:      "2.3.5",
+		DefaultValue: "86400",
+		Doc:          "gc interval of file on object storage in seconds",
+		Export:       true,
+	}
+	p.GCFileCheckInterval.Init(base.mgr)
 
 	// Do not set this to incredible small value, make sure this to be more than 10 minutes at least
 	p.GCMissingTolerance = ParamItem{
