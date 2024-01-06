@@ -16,10 +16,23 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proxy"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
+
+// HandlersV1 handles http requests
+type HandlersV1 struct {
+	proxy types.ProxyComponent
+}
+
+// NewHandlers creates a new HandlersV1
+func NewHandlersV1(proxy types.ProxyComponent) *HandlersV1 {
+	return &HandlersV1{
+		proxy: proxy,
+	}
+}
 
 func checkAuthorization(ctx context.Context, c *gin.Context, req interface{}) error {
 	if proxy.Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
@@ -37,7 +50,7 @@ func checkAuthorization(ctx context.Context, c *gin.Context, req interface{}) er
 	return nil
 }
 
-func (h *Handlers) checkDatabase(ctx context.Context, c *gin.Context, dbName string) bool {
+func (h *HandlersV1) checkDatabase(ctx context.Context, c *gin.Context, dbName string) bool {
 	if dbName == DefaultDbName {
 		return true
 	}
@@ -64,7 +77,7 @@ func (h *Handlers) checkDatabase(ctx context.Context, c *gin.Context, dbName str
 	return false
 }
 
-func (h *Handlers) describeCollection(ctx context.Context, c *gin.Context, dbName string, collectionName string) (*schemapb.CollectionSchema, error) {
+func (h *HandlersV1) describeCollection(ctx context.Context, c *gin.Context, dbName string, collectionName string) (*schemapb.CollectionSchema, error) {
 	collSchema, err := proxy.GetCachedCollectionSchema(ctx, dbName, collectionName)
 	if err == nil {
 		return collSchema, nil
@@ -89,7 +102,7 @@ func (h *Handlers) describeCollection(ctx context.Context, c *gin.Context, dbNam
 	return response.Schema, nil
 }
 
-func (h *Handlers) hasCollection(ctx context.Context, c *gin.Context, dbName string, collectionName string) (bool, error) {
+func (h *HandlersV1) hasCollection(ctx context.Context, c *gin.Context, dbName string, collectionName string) (bool, error) {
 	req := milvuspb.HasCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
@@ -105,7 +118,7 @@ func (h *Handlers) hasCollection(ctx context.Context, c *gin.Context, dbName str
 	return response.Value, nil
 }
 
-func (h *Handlers) RegisterRoutesToV1(router gin.IRouter) {
+func (h *HandlersV1) RegisterRoutesToV1(router gin.IRouter) {
 	router.GET(VectorCollectionsPath, h.listCollections)
 	router.POST(VectorCollectionsCreatePath, h.createCollection)
 	router.GET(VectorCollectionsDescribePath, h.getCollectionDetails)
@@ -118,7 +131,7 @@ func (h *Handlers) RegisterRoutesToV1(router gin.IRouter) {
 	router.POST(VectorSearchPath, h.search)
 }
 
-func (h *Handlers) listCollections(c *gin.Context) {
+func (h *HandlersV1) listCollections(c *gin.Context) {
 	dbName := c.DefaultQuery(HTTPDbName, DefaultDbName)
 	req := milvuspb.ShowCollectionsRequest{
 		DbName: dbName,
@@ -148,14 +161,14 @@ func (h *Handlers) listCollections(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: collections})
 }
 
-func (h *Handlers) createCollection(c *gin.Context) {
+func (h *HandlersV1) createCollection(c *gin.Context) {
 	httpReq := CreateCollectionReq{
 		DbName:       DefaultDbName,
 		MetricType:   DefaultMetricType,
 		PrimaryField: DefaultPrimaryFieldName,
 		VectorField:  DefaultVectorFieldName,
 	}
-	if err := c.ShouldBindBodyWith(&httpReq, binding.JSON); err != nil {
+	if err := c.ShouldBindWith(&httpReq, binding.JSON); err != nil {
 		log.Warn("high level restful api, the parameter of create collection is incorrect", zap.Any("request", httpReq), zap.Error(err))
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
@@ -258,7 +271,7 @@ func (h *Handlers) createCollection(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: gin.H{}})
 }
 
-func (h *Handlers) getCollectionDetails(c *gin.Context) {
+func (h *HandlersV1) getCollectionDetails(c *gin.Context) {
 	collectionName := c.Query(HTTPCollectionName)
 	if collectionName == "" {
 		log.Warn("high level restful api, desc collection require parameter: [collectionName], but miss")
@@ -342,11 +355,11 @@ func (h *Handlers) getCollectionDetails(c *gin.Context) {
 	}})
 }
 
-func (h *Handlers) dropCollection(c *gin.Context) {
+func (h *HandlersV1) dropCollection(c *gin.Context) {
 	httpReq := DropCollectionReq{
 		DbName: DefaultDbName,
 	}
-	if err := c.ShouldBindBodyWith(&httpReq, binding.JSON); err != nil {
+	if err := c.ShouldBindWith(&httpReq, binding.JSON); err != nil {
 		log.Warn("high level restful api, the parameter of drop collection is incorrect", zap.Any("request", httpReq), zap.Error(err))
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
@@ -396,13 +409,13 @@ func (h *Handlers) dropCollection(c *gin.Context) {
 	}
 }
 
-func (h *Handlers) query(c *gin.Context) {
+func (h *HandlersV1) query(c *gin.Context) {
 	httpReq := QueryReq{
 		DbName:       DefaultDbName,
 		Limit:        100,
 		OutputFields: []string{DefaultOutputFields},
 	}
-	if err := c.ShouldBindBodyWith(&httpReq, binding.JSON); err != nil {
+	if err := c.ShouldBindWith(&httpReq, binding.JSON); err != nil {
 		log.Warn("high level restful api, the parameter of query is incorrect", zap.Any("request", httpReq), zap.Error(err))
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
@@ -461,7 +474,7 @@ func (h *Handlers) query(c *gin.Context) {
 	}
 }
 
-func (h *Handlers) get(c *gin.Context) {
+func (h *HandlersV1) get(c *gin.Context) {
 	httpReq := GetReq{
 		DbName:       DefaultDbName,
 		OutputFields: []string{DefaultOutputFields},
@@ -531,7 +544,7 @@ func (h *Handlers) get(c *gin.Context) {
 	}
 }
 
-func (h *Handlers) delete(c *gin.Context) {
+func (h *HandlersV1) delete(c *gin.Context) {
 	httpReq := DeleteReq{
 		DbName: DefaultDbName,
 	}
@@ -591,7 +604,7 @@ func (h *Handlers) delete(c *gin.Context) {
 	}
 }
 
-func (h *Handlers) insert(c *gin.Context) {
+func (h *HandlersV1) insert(c *gin.Context) {
 	httpReq := InsertReq{
 		DbName: DefaultDbName,
 	}
@@ -682,7 +695,7 @@ func (h *Handlers) insert(c *gin.Context) {
 	}
 }
 
-func (h *Handlers) upsert(c *gin.Context) {
+func (h *HandlersV1) upsert(c *gin.Context) {
 	httpReq := UpsertReq{
 		DbName: DefaultDbName,
 	}
@@ -778,12 +791,12 @@ func (h *Handlers) upsert(c *gin.Context) {
 	}
 }
 
-func (h *Handlers) search(c *gin.Context) {
+func (h *HandlersV1) search(c *gin.Context) {
 	httpReq := SearchReq{
 		DbName: DefaultDbName,
 		Limit:  100,
 	}
-	if err := c.ShouldBindBodyWith(&httpReq, binding.JSON); err != nil {
+	if err := c.ShouldBindWith(&httpReq, binding.JSON); err != nil {
 		log.Warn("high level restful api, the parameter of search is incorrect", zap.Any("request", httpReq), zap.Error(err))
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
