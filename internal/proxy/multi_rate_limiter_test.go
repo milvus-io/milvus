@@ -292,6 +292,9 @@ func TestRateLimiter(t *testing.T) {
 
 		etcdCli, _ := etcd.GetEtcdClient(
 			Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+			Params.EtcdCfg.EtcdEnableAuth.GetAsBool(),
+			Params.EtcdCfg.EtcdAuthUserName.GetValue(),
+			Params.EtcdCfg.EtcdAuthPassword.GetValue(),
 			Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
 			Params.EtcdCfg.Endpoints.GetAsStrings(),
 			Params.EtcdCfg.EtcdTLSCert.GetValue(),

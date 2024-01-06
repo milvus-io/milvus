@@ -61,6 +61,9 @@ func (suite *LeaderObserverTestSuite) SetupTest() {
 	config := GenerateEtcdConfig()
 	cli, err := etcd.GetEtcdClient(
 		config.UseEmbedEtcd.GetAsBool(),
+		config.EtcdEnableAuth.GetAsBool(),
+		config.EtcdAuthUserName.GetValue(),
+		config.EtcdAuthPassword.GetValue(),
 		config.EtcdUseSSL.GetAsBool(),
 		config.Endpoints.GetAsStrings(),
 		config.EtcdTLSCert.GetValue(),

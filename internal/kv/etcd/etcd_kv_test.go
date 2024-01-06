@@ -56,6 +56,9 @@ type EtcdKVSuite struct {
 func (s *EtcdKVSuite) SetupSuite() {
 	etcdCli, err := etcd.GetEtcdClient(
 		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdEnableAuth.GetAsBool(),
+		Params.EtcdCfg.EtcdAuthUserName.GetValue(),
+		Params.EtcdCfg.EtcdAuthPassword.GetValue(),
 		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
 		Params.EtcdCfg.Endpoints.GetAsStrings(),
 		Params.EtcdCfg.EtcdTLSCert.GetValue(),
@@ -708,6 +711,9 @@ func TestEtcdKV(t *testing.T) {
 func Test_WalkWithPagination(t *testing.T) {
 	etcdCli, err := etcd.GetEtcdClient(
 		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdEnableAuth.GetAsBool(),
+		Params.EtcdCfg.EtcdAuthUserName.GetValue(),
+		Params.EtcdCfg.EtcdAuthPassword.GetValue(),
 		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
 		Params.EtcdCfg.Endpoints.GetAsStrings(),
 		Params.EtcdCfg.EtcdTLSCert.GetValue(),
@@ -834,6 +840,9 @@ func TestCheckTnxStringValueSizeAndWarn(t *testing.T) {
 func TestHas(t *testing.T) {
 	etcdCli, err := etcd.GetEtcdClient(
 		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdEnableAuth.GetAsBool(),
+		Params.EtcdCfg.EtcdAuthUserName.GetValue(),
+		Params.EtcdCfg.EtcdAuthPassword.GetValue(),
 		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
 		Params.EtcdCfg.Endpoints.GetAsStrings(),
 		Params.EtcdCfg.EtcdTLSCert.GetValue(),
@@ -872,6 +881,9 @@ func TestHas(t *testing.T) {
 func TestHasPrefix(t *testing.T) {
 	etcdCli, err := etcd.GetEtcdClient(
 		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdEnableAuth.GetAsBool(),
+		Params.EtcdCfg.EtcdAuthUserName.GetValue(),
+		Params.EtcdCfg.EtcdAuthPassword.GetValue(),
 		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
 		Params.EtcdCfg.Endpoints.GetAsStrings(),
 		Params.EtcdCfg.EtcdTLSCert.GetValue(),

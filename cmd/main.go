@@ -78,7 +78,7 @@ func main() {
 					sessionSuffix := sessionutil.GetSessions(cmd.Process.Pid)
 					defer sessionutil.RemoveServerInfoFile(cmd.Process.Pid)
 
-					if err := milvus.CleanSession(metaPath, etcdEndpoints, sessionSuffix); err != nil {
+					if err := milvus.CleanSession(metaPath, etcdEndpoints, params.EtcdCfg.EtcdEnableAuth.GetAsBool(), params.EtcdCfg.EtcdAuthUserName.GetValue(), params.EtcdCfg.EtcdAuthPassword.GetValue(), sessionSuffix); err != nil {
 						log.Println("clean session failed", err.Error())
 					}
 				}

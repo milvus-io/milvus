@@ -36,7 +36,7 @@ var maxTxnNum = 128
 
 // GetEtcdClient returns etcd client
 func GetEtcdClient(
-	useEmbedEtcd bool,
+	useEmbedEtcd bool, enableAuth bool, userName, password string,
 	useSSL bool,
 	endpoints []string,
 	certFile string,
@@ -46,6 +46,9 @@ func GetEtcdClient(
 ) (*clientv3.Client, error) {
 	log.Info("create etcd client",
 		zap.Bool("useEmbedEtcd", useEmbedEtcd),
+		zap.Bool("enableAuth", enableAuth),
+		zap.String("userName", userName),
+		zap.String("password", password),
 		zap.Bool("useSSL", useSSL),
 		zap.Any("endpoints", endpoints),
 		zap.String("minVersion", minVersion))
@@ -53,23 +56,35 @@ func GetEtcdClient(
 		return GetEmbedEtcdClient()
 	}
 	if useSSL {
-		return GetRemoteEtcdSSLClient(endpoints, certFile, keyFile, caCertFile, minVersion)
+		return GetRemoteEtcdSSLClient(endpoints, enableAuth, userName, password, certFile, keyFile, caCertFile, minVersion)
 	}
-	return GetRemoteEtcdClient(endpoints)
+	return GetRemoteEtcdClient(endpoints, enableAuth, userName, password)
 }
 
 // GetRemoteEtcdClient returns client of remote etcd by given endpoints
-func GetRemoteEtcdClient(endpoints []string) (*clientv3.Client, error) {
+func GetRemoteEtcdClient(endpoints []string, enableAuth bool, userName, password string) (*clientv3.Client, error) {
+	if !enableAuth {
+		return clientv3.New(clientv3.Config{
+			Endpoints:   endpoints,
+			DialTimeout: 5 * time.Second,
+		})
+	}
 	return clientv3.New(clientv3.Config{
 		Endpoints:   endpoints,
 		DialTimeout: 5 * time.Second,
+		Username:    userName,
+		Password:    password,
 	})
 }
 
-func GetRemoteEtcdSSLClient(endpoints []string, certFile string, keyFile string, caCertFile string, minVersion string) (*clientv3.Client, error) {
+func GetRemoteEtcdSSLClient(endpoints []string, enableAuth bool, userName, password, certFile string, keyFile string, caCertFile string, minVersion string) (*clientv3.Client, error) {
 	var cfg clientv3.Config
 	cfg.Endpoints = endpoints
 	cfg.DialTimeout = 5 * time.Second
+	if enableAuth {
+		cfg.Username = userName
+		cfg.Password = password
+	}
 	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 	if err != nil {
 		return nil, errors.Wrap(err, "load etcd cert key pair error")

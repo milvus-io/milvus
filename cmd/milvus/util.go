@@ -204,13 +204,13 @@ func getHelp() string {
 	return runLine + "\n" + serverTypeLine
 }
 
-func CleanSession(metaPath string, etcdEndpoints []string, sessionSuffix []string) error {
+func CleanSession(metaPath string, etcdEndpoints []string, enableAuth bool, userName, password string, sessionSuffix []string) error {
 	if len(sessionSuffix) == 0 {
 		log.Warn("not found session info , skip to clean sessions")
 		return nil
 	}
 
-	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
+	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints, enableAuth, userName, password)
 	if err != nil {
 		return err
 	}

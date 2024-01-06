@@ -96,6 +96,9 @@ type EtcdConfig struct {
 	KvRootPath        CompositeParamItem `refreshable:"false"`
 	EtcdLogLevel      ParamItem          `refreshable:"false"`
 	EtcdLogPath       ParamItem          `refreshable:"false"`
+	EtcdEnableAuth    ParamItem          `refreshable:"false"`
+	EtcdAuthUserName  ParamItem          `refreshable:"false"`
+	EtcdAuthPassword  ParamItem          `refreshable:"false"`
 	EtcdUseSSL        ParamItem          `refreshable:"false"`
 	EtcdTLSCert       ParamItem          `refreshable:"false"`
 	EtcdTLSKey        ParamItem          `refreshable:"false"`
@@ -214,6 +217,31 @@ please adjust in embedded Milvus: /tmp/milvus/logs/etcd.log`,
 		Export: true,
 	}
 	p.EtcdLogPath.Init(base.mgr)
+
+	p.EtcdEnableAuth = ParamItem{
+		Key:          "etcd.auth.enabled",
+		DefaultValue: "false",
+		Version:      "2.3.4",
+		Doc:          "Whether to enable authentication",
+		Export:       true,
+	}
+	p.EtcdEnableAuth.Init(base.mgr)
+
+	p.EtcdAuthUserName = ParamItem{
+		Key:     "etcd.auth.userName",
+		Version: "2.3.4",
+		Doc:     "username for etcd authentication",
+		Export:  true,
+	}
+	p.EtcdAuthUserName.Init(base.mgr)
+
+	p.EtcdAuthPassword = ParamItem{
+		Key:     "etcd.auth.password",
+		Version: "2.3.4",
+		Doc:     "password for etcd authentication",
+		Export:  true,
+	}
+	p.EtcdAuthPassword.Init(base.mgr)
 
 	p.EtcdUseSSL = ParamItem{
 		Key:          "etcd.ssl.enabled",

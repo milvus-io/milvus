@@ -74,6 +74,9 @@ func (suite *QueryNodeSuite) SetupTest() {
 	// init etcd
 	suite.etcd, err = etcd.GetEtcdClient(
 		suite.params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		suite.params.EtcdCfg.EtcdEnableAuth.GetAsBool(),
+		suite.params.EtcdCfg.EtcdAuthUserName.GetValue(),
+		suite.params.EtcdCfg.EtcdAuthPassword.GetValue(),
 		suite.params.EtcdCfg.EtcdUseSSL.GetAsBool(),
 		suite.params.EtcdCfg.Endpoints.GetAsStrings(),
 		suite.params.EtcdCfg.EtcdTLSCert.GetValue(),

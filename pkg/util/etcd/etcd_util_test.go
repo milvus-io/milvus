@@ -30,7 +30,7 @@ func TestEtcd(t *testing.T) {
 	assert.NoError(t, err)
 	defer StopEtcdServer()
 
-	etcdCli, err := GetEtcdClient(true, false, []string{}, "", "", "", "")
+	etcdCli, err := GetEtcdClient(true, false, "", "", false, []string{}, "", "", "", "")
 	assert.NoError(t, err)
 
 	key := path.Join("test", "test")
@@ -42,21 +42,21 @@ func TestEtcd(t *testing.T) {
 	assert.False(t, resp.Count < 1)
 	assert.Equal(t, string(resp.Kvs[0].Value), "value")
 
-	_, err = GetEtcdClient(false, true, []string{},
+	_, err = GetEtcdClient(false, false, "", "", true, []string{},
 		"../../../configs/cert/client.pem",
 		"../../../configs/cert/client.key",
 		"../../../configs/cert/ca.pem",
 		"some not right word")
 	assert.Error(t, err)
 
-	_, err = GetEtcdClient(false, true, []string{},
+	_, err = GetEtcdClient(false, false, "", "", true, []string{},
 		"../../../configs/cert/client.pem",
 		"../../../configs/cert/client.key",
 		"wrong/file",
 		"1.2")
 	assert.Error(t, err)
 
-	_, err = GetEtcdClient(false, true, []string{},
+	_, err = GetEtcdClient(false, false, "", "", true, []string{},
 		"wrong/file",
 		"../../../configs/cert/client.key",
 		"../../../configs/cert/ca.pem",

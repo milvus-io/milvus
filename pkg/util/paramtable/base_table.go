@@ -177,6 +177,9 @@ func (bt *BaseTable) initConfigsFromRemote() {
 	}
 	info := &config.EtcdInfo{
 		UseEmbed:        etcdConfig.UseEmbedEtcd.GetAsBool(),
+		EnableAuth:      etcdConfig.EtcdEnableAuth.GetAsBool(),
+		UserName:        etcdConfig.EtcdAuthUserName.GetValue(),
+		Password:        etcdConfig.EtcdAuthPassword.GetValue(),
 		UseSSL:          etcdConfig.EtcdUseSSL.GetAsBool(),
 		Endpoints:       etcdConfig.Endpoints.GetAsStrings(),
 		CertFile:        etcdConfig.EtcdTLSCert.GetValue(),

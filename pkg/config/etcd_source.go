@@ -49,6 +49,9 @@ func NewEtcdSource(etcdInfo *EtcdInfo) (*EtcdSource, error) {
 	log.Debug("init etcd source", zap.Any("etcdInfo", etcdInfo))
 	etcdCli, err := etcd.GetEtcdClient(
 		etcdInfo.UseEmbed,
+		etcdInfo.EnableAuth,
+		etcdInfo.UserName,
+		etcdInfo.Password,
 		etcdInfo.UseSSL,
 		etcdInfo.Endpoints,
 		etcdInfo.CertFile,

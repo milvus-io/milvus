@@ -102,6 +102,9 @@ func TestProxyClientManager_GetProxyClients(t *testing.T) {
 	assert.NoError(t, err)
 	cli, err := etcd.GetEtcdClient(
 		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdEnableAuth.GetAsBool(),
+		Params.EtcdCfg.EtcdAuthUserName.GetValue(),
+		Params.EtcdCfg.EtcdAuthPassword.GetValue(),
 		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
 		Params.EtcdCfg.Endpoints.GetAsStrings(),
 		Params.EtcdCfg.EtcdTLSCert.GetValue(),
@@ -135,6 +138,9 @@ func TestProxyClientManager_AddProxyClient(t *testing.T) {
 	assert.NoError(t, err)
 	cli, err := etcd.GetEtcdClient(
 		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdEnableAuth.GetAsBool(),
+		Params.EtcdCfg.EtcdAuthUserName.GetValue(),
+		Params.EtcdCfg.EtcdAuthPassword.GetValue(),
 		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
 		Params.EtcdCfg.Endpoints.GetAsStrings(),
 		Params.EtcdCfg.EtcdTLSCert.GetValue(),
