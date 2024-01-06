@@ -21,7 +21,6 @@ import (
 	"io"
 	"path"
 	"sync"
-	"time"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
@@ -225,7 +224,7 @@ func (vcm *VectorChunkManager) MultiRead(ctx context.Context, filePaths []string
 }
 
 func (vcm *VectorChunkManager) ReadWithPrefix(ctx context.Context, prefix string) ([]string, [][]byte, error) {
-	filePaths, _, err := vcm.ListWithPrefix(ctx, prefix, true)
+	filePaths, _, err := ListAllChunkWithPrefix(ctx, vcm.vectorStorage, prefix, true)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -236,8 +235,8 @@ func (vcm *VectorChunkManager) ReadWithPrefix(ctx context.Context, prefix string
 	return filePaths, results, nil
 }
 
-func (vcm *VectorChunkManager) ListWithPrefix(ctx context.Context, prefix string, recursive bool) ([]string, []time.Time, error) {
-	return vcm.vectorStorage.ListWithPrefix(ctx, prefix, recursive)
+func (vcm *VectorChunkManager) WalkWithPrefix(ctx context.Context, prefix string, recursive bool, cb func(*ChunkObjectInfo) error) error {
+	return vcm.vectorStorage.WalkWithPrefix(ctx, prefix, recursive, cb)
 }
 
 func (vcm *VectorChunkManager) Mmap(ctx context.Context, filePath string) (*mmap.ReaderAt, error) {
@@ -319,7 +318,7 @@ func (vcm *VectorChunkManager) RemoveWithPrefix(ctx context.Context, prefix stri
 		return err
 	}
 	if vcm.cacheEnable {
-		filePaths, _, err := vcm.ListWithPrefix(ctx, prefix, true)
+		filePaths, _, err := ListAllChunkWithPrefix(ctx, vcm.cacheStorage, prefix, true)
 		if err != nil {
 			return err
 		}

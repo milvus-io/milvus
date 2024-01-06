@@ -20,6 +20,7 @@ import (
 	"context"
 	"os"
 	"path"
+	"strings"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -122,7 +123,6 @@ func buildVectorChunkManager(ctx context.Context, localPath string, localCacheEn
 		return nil, err
 	}
 	lcm := NewLocalChunkManager(RootPath(localPath))
-
 	vcm, err := NewVectorChunkManager(ctx, lcm, rcm, 16, localCacheEnable)
 	if err != nil {
 		return nil, err
@@ -483,4 +483,34 @@ func TestVectorChunkManager_Read(t *testing.T) {
 
 		vcm.Close()
 	}
+}
+
+// TODO: NewMinioChunkManager is deprecated. Rewrite this unittest.
+func newMinIOChunkManager(ctx context.Context, bucketName string, rootPath string) (*RemoteChunkManager, error) {
+	endPoint := getMinioAddress()
+	accessKeyID := Params.MinioCfg.AccessKeyID.GetValue()
+	secretAccessKey := Params.MinioCfg.SecretAccessKey.GetValue()
+	useSSL := Params.MinioCfg.UseSSL.GetAsBool()
+	return NewRemoteChunkManager(ctx, &config{
+		rootPath:          rootPath,
+		address:           endPoint,
+		accessKeyID:       accessKeyID,
+		secretAccessKeyID: secretAccessKey,
+		useSSL:            useSSL,
+		bucketName:        bucketName,
+		useIAM:            false,
+		cloudProvider:     "aws",
+		createBucket:      true,
+		useVirtualHost:    false,
+		region:            "",
+	})
+}
+
+func getMinioAddress() string {
+	minioHost := Params.MinioCfg.Address.GetValue()
+	if strings.Contains(minioHost, ":") {
+		return minioHost
+	}
+	port := Params.MinioCfg.Port.GetValue()
+	return minioHost + ":" + port
 }

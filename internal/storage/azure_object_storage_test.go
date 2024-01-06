@@ -124,7 +124,7 @@ func TestAzureObjectStorage(t *testing.T) {
 
 		for _, test := range loadWithPrefixTests {
 			t.Run(test.description, func(t *testing.T) {
-				gotk, _, err := testCM.ListObjects(ctx, config.bucketName, test.prefix, false)
+				gotk, _, err := listAllObjectsWithPrefixAtBucket(ctx, testCM, config.bucketName, test.prefix, false)
 				assert.NoError(t, err)
 				assert.Equal(t, len(test.expectedValue), len(gotk))
 				for _, key := range gotk {
@@ -177,7 +177,7 @@ func TestAzureObjectStorage(t *testing.T) {
 
 		for _, test := range insertWithPrefixTests {
 			t.Run(fmt.Sprintf("prefix: %s, recursive: %t", test.prefix, test.recursive), func(t *testing.T) {
-				gotk, _, err := testCM.ListObjects(ctx, config.bucketName, test.prefix, test.recursive)
+				gotk, _, err := listAllObjectsWithPrefixAtBucket(ctx, testCM, config.bucketName, test.prefix, test.recursive)
 				assert.NoError(t, err)
 				assert.Equal(t, len(test.expectedValue), len(gotk))
 				for _, key := range gotk {
