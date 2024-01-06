@@ -172,6 +172,9 @@ func StartMiniCluster(ctx context.Context, opts ...Option) (cluster *MiniCluster
 		var etcdCli *clientv3.Client
 		etcdCli, err = etcd.GetEtcdClient(
 			params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+			params.EtcdCfg.EtcdEnableAuth.GetAsBool(),
+			params.EtcdCfg.EtcdAuthUserName.GetValue(),
+			params.EtcdCfg.EtcdAuthPassword.GetValue(),
 			params.EtcdCfg.EtcdUseSSL.GetAsBool(),
 			params.EtcdCfg.Endpoints.GetAsStrings(),
 			params.EtcdCfg.EtcdTLSCert.GetValue(),

@@ -40,6 +40,9 @@ func TestSpawnReplicasWithRG(t *testing.T) {
 	config := GenerateEtcdConfig()
 	cli, _ := etcd.GetEtcdClient(
 		config.UseEmbedEtcd.GetAsBool(),
+		config.EtcdEnableAuth.GetAsBool(),
+		config.EtcdAuthUserName.GetValue(),
+		config.EtcdAuthPassword.GetValue(),
 		config.EtcdUseSSL.GetAsBool(),
 		config.Endpoints.GetAsStrings(),
 		config.EtcdTLSCert.GetValue(),

@@ -4234,6 +4234,9 @@ func newTestServer(t *testing.T, receiveCh chan any, opts ...Option) *Server {
 	factory := dependency.NewDefaultFactory(true)
 	etcdCli, err := etcd.GetEtcdClient(
 		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdEnableAuth.GetAsBool(),
+		Params.EtcdCfg.EtcdAuthUserName.GetValue(),
+		Params.EtcdCfg.EtcdAuthPassword.GetValue(),
 		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
 		Params.EtcdCfg.Endpoints.GetAsStrings(),
 		Params.EtcdCfg.EtcdTLSCert.GetValue(),
@@ -4288,6 +4291,9 @@ func newTestServerWithMeta(t *testing.T, receiveCh chan any, meta *meta, opts ..
 
 	etcdCli, err := etcd.GetEtcdClient(
 		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdEnableAuth.GetAsBool(),
+		Params.EtcdCfg.EtcdAuthUserName.GetValue(),
+		Params.EtcdCfg.EtcdAuthPassword.GetValue(),
 		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
 		Params.EtcdCfg.Endpoints.GetAsStrings(),
 		Params.EtcdCfg.EtcdTLSCert.GetValue(),
@@ -4346,6 +4352,9 @@ func newTestServer2(t *testing.T, receiveCh chan any, opts ...Option) *Server {
 
 	etcdCli, err := etcd.GetEtcdClient(
 		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdEnableAuth.GetAsBool(),
+		Params.EtcdCfg.EtcdAuthUserName.GetValue(),
+		Params.EtcdCfg.EtcdAuthPassword.GetValue(),
 		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
 		Params.EtcdCfg.Endpoints.GetAsStrings(),
 		Params.EtcdCfg.EtcdTLSCert.GetValue(),
@@ -4542,6 +4551,9 @@ func testDataCoordBase(t *testing.T, opts ...Option) *Server {
 	ctx := context.Background()
 	etcdCli, err := etcd.GetEtcdClient(
 		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdEnableAuth.GetAsBool(),
+		Params.EtcdCfg.EtcdAuthUserName.GetValue(),
+		Params.EtcdCfg.EtcdAuthPassword.GetValue(),
 		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
 		Params.EtcdCfg.Endpoints.GetAsStrings(),
 		Params.EtcdCfg.EtcdTLSCert.GetValue(),

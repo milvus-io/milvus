@@ -38,6 +38,9 @@ func TestProxyManager(t *testing.T) {
 
 	etcdCli, err := etcd.GetEtcdClient(
 		paramtable.Get().EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		paramtable.Get().EtcdCfg.EtcdEnableAuth.GetAsBool(),
+		paramtable.Get().EtcdCfg.EtcdAuthUserName.GetValue(),
+		paramtable.Get().EtcdCfg.EtcdAuthPassword.GetValue(),
 		paramtable.Get().EtcdCfg.EtcdUseSSL.GetAsBool(),
 		paramtable.Get().EtcdCfg.Endpoints.GetAsStrings(),
 		paramtable.Get().EtcdCfg.EtcdTLSCert.GetValue(),
@@ -114,6 +117,9 @@ func TestProxyManager_ErrCompacted(t *testing.T) {
 
 	etcdCli, err := etcd.GetEtcdClient(
 		paramtable.Get().EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		paramtable.Get().EtcdCfg.EtcdEnableAuth.GetAsBool(),
+		paramtable.Get().EtcdCfg.EtcdAuthUserName.GetValue(),
+		paramtable.Get().EtcdCfg.EtcdAuthPassword.GetValue(),
 		paramtable.Get().EtcdCfg.EtcdUseSSL.GetAsBool(),
 		paramtable.Get().EtcdCfg.Endpoints.GetAsStrings(),
 		paramtable.Get().EtcdCfg.EtcdTLSCert.GetValue(),

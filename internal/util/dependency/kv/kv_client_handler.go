@@ -64,6 +64,9 @@ func createEtcdClient() (*clientv3.Client, error) {
 	cfg := &paramtable.Get().ServiceParam
 	return etcd.GetEtcdClient(
 		cfg.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		cfg.EtcdCfg.EtcdEnableAuth.GetAsBool(),
+		cfg.EtcdCfg.EtcdAuthUserName.GetValue(),
+		cfg.EtcdCfg.EtcdAuthPassword.GetValue(),
 		cfg.EtcdCfg.EtcdUseSSL.GetAsBool(),
 		cfg.EtcdCfg.Endpoints.GetAsStrings(),
 		cfg.EtcdCfg.EtcdTLSCert.GetValue(),

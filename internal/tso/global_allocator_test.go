@@ -38,7 +38,7 @@ func TestGlobalTSOAllocator_Initialize(t *testing.T) {
 		endpoints = "localhost:2379"
 	}
 	etcdEndpoints := strings.Split(endpoints, ",")
-	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
+	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints, false, "", "")
 	assert.NoError(t, err)
 	defer etcdCli.Close()
 
@@ -78,7 +78,7 @@ func TestGlobalTSOAllocator_All(t *testing.T) {
 		endpoints = "localhost:2379"
 	}
 	etcdEndpoints := strings.Split(endpoints, ",")
-	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
+	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints, false, "", "")
 	assert.NoError(t, err)
 	defer etcdCli.Close()
 	etcdKV := tsoutil2.NewTSOKVBase(etcdCli, "/test/root/kv", "tsoTest")
@@ -167,7 +167,7 @@ func TestGlobalTSOAllocator_Fail(t *testing.T) {
 		endpoints = "localhost:2379"
 	}
 	etcdEndpoints := strings.Split(endpoints, ",")
-	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
+	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints, false, "", "")
 	assert.NoError(t, err)
 	defer etcdCli.Close()
 	etcdKV := tsoutil2.NewTSOKVBase(etcdCli, "/test/root/kv", "tsoTest")
@@ -211,7 +211,7 @@ func TestGlobalTSOAllocator_Update(t *testing.T) {
 		endpoints = "localhost:2379"
 	}
 	etcdEndpoints := strings.Split(endpoints, ",")
-	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
+	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints, false, "", "")
 	assert.NoError(t, err)
 	defer etcdCli.Close()
 	etcdKV := tsoutil2.NewTSOKVBase(etcdCli, "/test/root/kv", "tsoTest")
@@ -236,7 +236,7 @@ func TestGlobalTSOAllocator_load(t *testing.T) {
 		endpoints = "localhost:2379"
 	}
 	etcdEndpoints := strings.Split(endpoints, ",")
-	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
+	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints, false, "", "")
 	assert.NoError(t, err)
 	defer etcdCli.Close()
 	etcdKV := tsoutil2.NewTSOKVBase(etcdCli, "/test/root/kv", "tsoTest")

@@ -29,6 +29,8 @@ etcd:
     #  - file path to append server logs to.
     # please adjust in embedded Milvus: /tmp/milvus/logs/etcd.log
     path: stdout
+  auth:
+    enabled: false # Whether to enable authentication
   ssl:
     enabled: false # Whether to support ETCD secure connection mode
     tlsCert: /path/to/etcd-client.pem # path to your cert file

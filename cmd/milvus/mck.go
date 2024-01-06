@@ -214,10 +214,16 @@ func (c *mck) connectEctd() {
 	var etcdCli *clientv3.Client
 	var err error
 	if c.etcdIP != "" {
-		etcdCli, err = etcd.GetRemoteEtcdClient([]string{c.etcdIP})
+		etcdCli, err = etcd.GetRemoteEtcdClient([]string{c.etcdIP},
+			c.params.EtcdCfg.EtcdEnableAuth.GetAsBool(),
+			c.params.EtcdCfg.EtcdAuthUserName.GetValue(),
+			c.params.EtcdCfg.EtcdAuthPassword.GetValue())
 	} else {
 		etcdCli, err = etcd.GetEtcdClient(
 			c.params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+			c.params.EtcdCfg.EtcdEnableAuth.GetAsBool(),
+			c.params.EtcdCfg.EtcdAuthUserName.GetValue(),
+			c.params.EtcdCfg.EtcdAuthPassword.GetValue(),
 			c.params.EtcdCfg.EtcdUseSSL.GetAsBool(),
 			c.params.EtcdCfg.Endpoints.GetAsStrings(),
 			c.params.EtcdCfg.EtcdTLSCert.GetValue(),

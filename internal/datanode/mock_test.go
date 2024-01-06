@@ -103,6 +103,9 @@ func newIDLEDataNodeMock(ctx context.Context, pkType schemapb.DataType) *DataNod
 func newTestEtcdKV() (kv.WatchKV, error) {
 	etcdCli, err := etcd.GetEtcdClient(
 		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdEnableAuth.GetAsBool(),
+		Params.EtcdCfg.EtcdAuthUserName.GetValue(),
+		Params.EtcdCfg.EtcdAuthPassword.GetValue(),
 		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
 		Params.EtcdCfg.Endpoints.GetAsStrings(),
 		Params.EtcdCfg.EtcdTLSCert.GetValue(),
@@ -119,6 +122,9 @@ func newTestEtcdKV() (kv.WatchKV, error) {
 func clearEtcd(rootPath string) error {
 	client, err := etcd.GetEtcdClient(
 		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdEnableAuth.GetAsBool(),
+		Params.EtcdCfg.EtcdAuthUserName.GetValue(),
+		Params.EtcdCfg.EtcdAuthPassword.GetValue(),
 		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
 		Params.EtcdCfg.Endpoints.GetAsStrings(),
 		Params.EtcdCfg.EtcdTLSCert.GetValue(),
