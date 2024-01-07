@@ -465,6 +465,15 @@ func WrapErrCollectionLoaded(collection string, msgAndArgs ...any) error {
 	return err
 }
 
+func WrapErrCollectionIllegalSchema(collection string, msgAndArgs ...any) error {
+	err := wrapFields(ErrCollectionIllegalSchema, value("collection", collection))
+	if len(msgAndArgs) > 0 {
+		msg := msgAndArgs[0].(string)
+		err = errors.Wrapf(err, msg, msgAndArgs[1:]...)
+	}
+	return err
+}
+
 func WrapErrAliasNotFound(db any, alias any, msg ...string) error {
 	err := wrapFields(ErrAliasNotFound,
 		value("database", db),
