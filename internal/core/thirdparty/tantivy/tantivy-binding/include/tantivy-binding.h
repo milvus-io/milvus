@@ -27,8 +27,6 @@ void tantivy_free_index_writer(void *ptr);
 
 void tantivy_finish_index(void *ptr);
 
-void *tantivy_create_reader_for_index(void *ptr);
-
 void tantivy_index_add_int8s(void *ptr, const int8_t *array, uintptr_t len);
 
 void tantivy_index_add_int16s(void *ptr, const int16_t *array, uintptr_t len);

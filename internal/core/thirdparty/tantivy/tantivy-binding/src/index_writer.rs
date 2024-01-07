@@ -16,10 +16,6 @@ pub struct IndexWriterWrapper {
 }
 
 impl IndexWriterWrapper {
-    pub fn create_reader(&self) -> IndexReaderWrapper {
-        IndexReaderWrapper::new(&self.index, &self.field_name, self.field)
-    }
-
     pub fn new(field_name: String, data_type: TantivyDataType, path: String) -> IndexWriterWrapper {
         let field: Field;
         let mut schema_builder = Schema::builder();
@@ -101,8 +97,9 @@ impl IndexWriterWrapper {
             .unwrap();
     }
 
-    pub fn finish(&mut self) {
+    pub fn finish(mut self) {
         self.index_writer.commit().unwrap();
         block_on(self.index_writer.garbage_collect_files()).unwrap();
+        self.index_writer.wait_merging_threads().unwrap();
     }
 }
