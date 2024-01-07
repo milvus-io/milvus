@@ -83,7 +83,6 @@ func versional(path string) string {
 }
 
 func initHTTPServer(proxy types.ProxyComponent, needAuth bool) *gin.Engine {
-	h := NewHandlers(proxy)
 	ginHandler := gin.Default()
 	ginHandler.Use(func(c *gin.Context) {
 		_, err := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
@@ -98,7 +97,7 @@ func initHTTPServer(proxy types.ProxyComponent, needAuth bool) *gin.Engine {
 		c.Next()
 	})
 	app := ginHandler.Group(URIPrefixV1, genAuthMiddleWare(needAuth))
-	NewHandlers(h.proxy).RegisterRoutesToV1(app)
+	NewHandlersV1(proxy).RegisterRoutesToV1(app)
 	return ginHandler
 }
 

@@ -50,4 +50,4 @@ fi
 echo ${AZURE_CMAKE_CMD}
 ${AZURE_CMAKE_CMD}
 
-make & make install
+make install
