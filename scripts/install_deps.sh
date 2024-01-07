@@ -52,6 +52,15 @@ function install_linux_deps() {
   else
     echo "cmake version is $cmake_version"
   fi
+  # install rust
+  if command -v cargo >/dev/null 2>&1; then
+      echo "cargo exists"
+      rustup install 1.73
+      rustup default 1.73
+  else
+      bash -c "curl https://sh.rustup.rs -sSf | sh -s -- --default-toolchain=1.73 -y" || { echo 'rustup install failed'; exit 1;}
+      source $HOME/.cargo/env
+  fi
 }
 
 function install_mac_deps() {
@@ -68,6 +77,15 @@ function install_mac_deps() {
   fi
 
   sudo ln -s "$(brew --prefix llvm@15)" "/usr/local/opt/llvm"
+  # install rust
+  if command -v cargo >/dev/null 2>&1; then
+      echo "cargo exists"
+      rustup install 1.73
+      rustup default 1.73
+  else
+      bash -c "curl https://sh.rustup.rs -sSf | sh -s -- --default-toolchain=1.73 -y" || { echo 'rustup install failed'; exit 1;}
+      source $HOME/.cargo/env
+  fi
 }
 
 if ! command -v go &> /dev/null
