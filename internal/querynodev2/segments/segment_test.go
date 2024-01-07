@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/gogo/protobuf/proto"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -158,6 +159,26 @@ func (suite *SegmentSuite) TestCASVersion() {
 
 	suite.True(segment.CASVersion(curVersion, curVersion+1))
 	suite.Equal(curVersion+1, segment.Version())
+}
+
+func (suite *SegmentSuite) TestLoadDupIndex() {
+	segment := suite.sealed
+
+	indexInfo := &IndexedFieldInfo{
+		IndexInfo: &querypb.FieldIndexInfo{
+			FieldID: 100,
+			IndexID: 101,
+		},
+	}
+
+	segment.AddIndex(100, indexInfo)
+
+	dupIndex := proto.Clone(indexInfo.IndexInfo).(*querypb.FieldIndexInfo)
+	dupIndex.IndexName = "dupIndex"
+	err := segment.LoadIndex(context.Background(), dupIndex, schemapb.DataType_Int64)
+	suite.NoError(err)
+
+	suite.NotEqual(segment.GetIndex(100).IndexInfo.GetIndexName(), dupIndex.GetIndexName())
 }
 
 func (suite *SegmentSuite) TestSegmentReleased() {

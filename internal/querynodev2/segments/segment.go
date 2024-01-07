@@ -868,6 +868,23 @@ func (s *LocalSegment) LoadDeltaData(ctx context.Context, deltaData *storage.Del
 }
 
 func (s *LocalSegment) LoadIndex(ctx context.Context, indexInfo *querypb.FieldIndexInfo, fieldType schemapb.DataType) error {
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", s.Collection()),
+		zap.Int64("partitionID", s.Partition()),
+		zap.String("channel", s.Shard()),
+		zap.Int64("segmentID", s.ID()),
+		zap.Int64("fieldID", indexInfo.GetFieldID()),
+		zap.Int64("indexID", indexInfo.GetIndexID()),
+	)
+
+	old := s.GetIndex(indexInfo.GetFieldID())
+	// the index loaded
+	if old != nil &&
+		old.IndexInfo.GetIndexID() == indexInfo.GetIndexID() {
+		log.Warn("index already loaded")
+		return nil
+	}
+
 	loadIndexInfo, err := newLoadIndexInfo(ctx)
 	defer deleteLoadIndexInfo(loadIndexInfo)
 	if err != nil {
