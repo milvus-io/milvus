@@ -150,21 +150,26 @@ SegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
             case DataType::INT64: {
                 auto int64_index = dynamic_cast<index::ScalarIndex<int64_t>*>(
                     scalar_indexings_[field_id].get());
-                for (int i = 0; i < row_count; ++i) {
-                    insert_record_.insert_pk(int64_index->Reverse_Lookup(i), i);
+                if (int64_index->HasRawData()) {
+                    for (int i = 0; i < row_count; ++i) {
+                        insert_record_.insert_pk(int64_index->Reverse_Lookup(i),
+                                                 i);
+                    }
+                    insert_record_.seal_pks();
                 }
-                insert_record_.seal_pks();
                 break;
             }
             case DataType::VARCHAR: {
                 auto string_index =
                     dynamic_cast<index::ScalarIndex<std::string>*>(
                         scalar_indexings_[field_id].get());
-                for (int i = 0; i < row_count; ++i) {
-                    insert_record_.insert_pk(string_index->Reverse_Lookup(i),
-                                             i);
+                if (string_index->HasRawData()) {
+                    for (int i = 0; i < row_count; ++i) {
+                        insert_record_.insert_pk(
+                            string_index->Reverse_Lookup(i), i);
+                    }
+                    insert_record_.seal_pks();
                 }
-                insert_record_.seal_pks();
                 break;
             }
             default: {
