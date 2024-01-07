@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -40,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/querynodev2/tsafe"
+	"github.com/milvus-io/milvus/internal/util/clustering"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -115,11 +117,11 @@ func (s *DelegatorSuite) SetupTest() {
 				Name:         "vector",
 				FieldID:      101,
 				IsPrimaryKey: false,
-				DataType:     schemapb.DataType_BinaryVector,
+				DataType:     schemapb.DataType_FloatVector,
 				TypeParams: []*commonpb.KeyValuePair{
 					{
 						Key:   common.DimKey,
-						Value: "128",
+						Value: "8",
 					},
 				},
 			},
@@ -1180,4 +1182,428 @@ func TestDelegatorTSafeListenerClosed(t *testing.T) {
 	sd.Close()
 	assert.Equal(t, sd.Serviceable(), false)
 	assert.Equal(t, sd.Stopped(), true)
+}
+
+func vector2Placeholder(vectors [][]float32) *commonpb.PlaceholderValue {
+	var placeHolderType commonpb.PlaceholderType
+	ph := &commonpb.PlaceholderValue{
+		Tag:    "$0",
+		Values: make([][]byte, 0, len(vectors)),
+	}
+	if len(vectors) == 0 {
+		return ph
+	}
+
+	ph.Type = placeHolderType
+	for _, vector := range vectors {
+		ph.Values = append(ph.Values, clustering.SerializeFloatVector(vector))
+	}
+	return ph
+}
+
+func generateClusteringInfo(centroids [][]float32) *schemapb.ClusteringInfo {
+	vectorClusteringInfos := make([]*schemapb.VectorClusteringInfo, 0)
+	for _, centroid := range centroids {
+		vectorClusteringInfo := &schemapb.VectorClusteringInfo{
+			Centroid: &schemapb.VectorField{
+				Dim: int64(len(centroid)),
+				Data: &schemapb.VectorField_FloatVector{
+					FloatVector: &schemapb.FloatArray{
+						Data: centroid,
+					},
+				},
+			},
+		}
+		vectorClusteringInfos = append(vectorClusteringInfos, vectorClusteringInfo)
+	}
+	return &schemapb.ClusteringInfo{
+		VectorClusteringInfos: vectorClusteringInfos,
+	}
+}
+
+func (s *DelegatorSuite) TestOptimizeSearchBasedOnClustering_config() {
+	s.delegator.Start()
+	paramtable.SetNodeID(1)
+	vector1 := []float32{0.8877872002188053, 0.6131822285635065, 0.8476814632326242, 0.6645877829359371, 0.9962627712600025, 0.8976183052440327, 0.41941169325798844, 0.7554387854258499}
+	vector2 := []float32{0.8644394874390322, 0.023327886647378615, 0.08330118483461302, 0.7068040179963112, 0.6983994910799851, 0.5562075958994153, 0.3288536247938002, 0.07077341010237759}
+	vectors := [][]float32{vector1, vector2}
+
+	phg := &commonpb.PlaceholderGroup{
+		Placeholders: []*commonpb.PlaceholderValue{
+			vector2Placeholder(vectors),
+		},
+	}
+	bs, _ := proto.Marshal(phg)
+	req := &querypb.SearchRequest{
+		Req: &internalpb.SearchRequest{
+			MetricType:       "IP",
+			PlaceholderGroup: bs,
+			ClusteringOptions: &internalpb.SearchClusteringOptions{
+				FilterRatio: 1,
+			},
+		},
+	}
+	sealeds := []SnapshotItem{
+		{
+			NodeID: 1,
+			Segments: []SegmentEntry{
+				{
+					NodeID:    2,
+					SegmentID: 1002,
+					ClusteringInfos: generateClusteringInfo([][]float32{
+						{0.40448594, 0.16214314, 0.17850745, 0.6640584, 0.77309024, 0.48807725, 0.66572666, 0.15990956},
+					}),
+				},
+				{
+					NodeID:    2,
+					SegmentID: 1003,
+					ClusteringInfos: generateClusteringInfo([][]float32{
+						{1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0},
+					}),
+				},
+			},
+		},
+	}
+	sr, snapshots := s.delegator.OptimizeSearchBasedOnClustering(req, sealeds)
+	assert.NotEmpty(s.T(), sr)
+	assert.NotEmpty(s.T(), snapshots)
+	assert.Equal(s.T(), 2, len(snapshots[0].Segments))
+
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.EnableSearchBasedOnClustering.Key, "false")
+	sr2, snapshots2 := s.delegator.OptimizeSearchBasedOnClustering(req, sealeds)
+	assert.NotEmpty(s.T(), sr2)
+	assert.NotEmpty(s.T(), snapshots2)
+	assert.Equal(s.T(), 2, len(snapshots2[0].Segments))
+}
+
+func (s *DelegatorSuite) TestOptimizeSearchBasedOnClustering_nq1() {
+	s.delegator.Start()
+	paramtable.SetNodeID(1)
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.EnableSearchBasedOnClustering.Key, "true")
+	vector1 := []float32{0.40448594, 0.16214314, 0.17850745, 0.6640584, 0.77309024, 0.48807725, 0.66572666, 0.15990956}
+	vectors := [][]float32{vector1}
+
+	phg := &commonpb.PlaceholderGroup{
+		Placeholders: []*commonpb.PlaceholderValue{
+			vector2Placeholder(vectors),
+		},
+	}
+
+	bs, _ := proto.Marshal(phg)
+
+	req := &querypb.SearchRequest{
+		Req: &internalpb.SearchRequest{
+			MetricType:       "L2",
+			PlaceholderGroup: bs,
+			ClusteringOptions: &internalpb.SearchClusteringOptions{
+				FilterRatio: 0.5,
+			},
+		},
+	}
+	sealeds := []SnapshotItem{
+		{
+			NodeID: 1,
+			Segments: []SegmentEntry{
+				{
+					NodeID:    1,
+					SegmentID: 1000,
+					ClusteringInfos: generateClusteringInfo([][]float32{
+						{0.6951474, 0.45225978, 0.51508516, 0.24968886, 0.6085484, 0.964968, 0.32239532, 0.7771577},
+					}),
+				},
+				{
+					NodeID:    1,
+					SegmentID: 1001,
+					ClusteringInfos: generateClusteringInfo([][]float32{
+						{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0},
+						{1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0},
+					}),
+				},
+			},
+		},
+		{
+			NodeID: 2,
+			Segments: []SegmentEntry{
+				{
+					NodeID:    2,
+					SegmentID: 1002,
+					ClusteringInfos: generateClusteringInfo([][]float32{
+						{0.40448594, 0.16214314, 0.17850745, 0.6640584, 0.77309024, 0.48807725, 0.66572666, 0.15990956},
+						{0.41448594, 0.16214314, 0.17850745, 0.6640584, 0.77309024, 0.48807725, 0.66572666, 0.15990956},
+					}),
+				},
+				{
+					NodeID:    2,
+					SegmentID: 1003,
+					ClusteringInfos: generateClusteringInfo([][]float32{
+						{1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0},
+					}),
+				},
+			},
+		},
+		{
+			NodeID: 3,
+			Segments: []SegmentEntry{
+				{
+					NodeID:    3,
+					SegmentID: 1004,
+				},
+			},
+		},
+	}
+	sr, snapshots := s.delegator.OptimizeSearchBasedOnClustering(req, sealeds)
+	assert.NotEmpty(s.T(), sr)
+	assert.NotEmpty(s.T(), snapshots)
+	assert.Equal(s.T(), 1, len(snapshots[0].Segments))
+}
+
+func (s *DelegatorSuite) TestOptimizeSearchBasedOnClustering_nq2() {
+	s.delegator.Start()
+	paramtable.SetNodeID(1)
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.EnableSearchBasedOnClustering.Key, "true")
+	vector1 := []float32{0.8877872002188053, 0.6131822285635065, 0.8476814632326242, 0.6645877829359371, 0.9962627712600025, 0.8976183052440327, 0.41941169325798844, 0.7554387854258499}
+	vector2 := []float32{0.8644394874390322, 0.023327886647378615, 0.08330118483461302, 0.7068040179963112, 0.6983994910799851, 0.5562075958994153, 0.3288536247938002, 0.07077341010237759}
+	vectors := [][]float32{vector1, vector2}
+
+	phg := &commonpb.PlaceholderGroup{
+		Placeholders: []*commonpb.PlaceholderValue{
+			vector2Placeholder(vectors),
+		},
+	}
+
+	bs, _ := proto.Marshal(phg)
+
+	req := &querypb.SearchRequest{
+		Req: &internalpb.SearchRequest{
+			MetricType:       "IP",
+			PlaceholderGroup: bs,
+			ClusteringOptions: &internalpb.SearchClusteringOptions{
+				FilterRatio: 0.5,
+			},
+		},
+	}
+	sealeds := []SnapshotItem{
+		{
+			NodeID: 1,
+			Segments: []SegmentEntry{
+				{
+					NodeID:    1,
+					SegmentID: 1000,
+					ClusteringInfos: generateClusteringInfo([][]float32{
+						{0.6951474, 0.45225978, 0.51508516, 0.24968886, 0.6085484, 0.964968, 0.32239532, 0.7771577},
+					}),
+				},
+				{
+					NodeID:    1,
+					SegmentID: 1001,
+					ClusteringInfos: generateClusteringInfo([][]float32{
+						{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0},
+					}),
+				},
+			},
+		},
+		{
+			NodeID: 2,
+			Segments: []SegmentEntry{
+				{
+					NodeID:    2,
+					SegmentID: 1002,
+					ClusteringInfos: generateClusteringInfo([][]float32{
+						{0.40448594, 0.16214314, 0.17850745, 0.6640584, 0.77309024, 0.48807725, 0.66572666, 0.15990956},
+					}),
+				},
+				{
+					NodeID:    2,
+					SegmentID: 1003,
+					ClusteringInfos: generateClusteringInfo([][]float32{
+						{1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0},
+					}),
+				},
+			},
+		},
+		{
+			NodeID: 3,
+			Segments: []SegmentEntry{
+				{
+					NodeID:    3,
+					SegmentID: 1004,
+				},
+			},
+		},
+	}
+	sr, snapshots := s.delegator.OptimizeSearchBasedOnClustering(req, sealeds)
+	assert.NotEmpty(s.T(), sr)
+	assert.NotEmpty(s.T(), snapshots)
+	assert.Equal(s.T(), 1, len(snapshots[0].Segments))
+}
+
+func (s *DelegatorSuite) TestOptimizeSearchBasedOnClustering_nq1_LargeTopK() {
+	s.delegator.Start()
+	paramtable.SetNodeID(1)
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.EnableSearchBasedOnClustering.Key, "true")
+	vector1 := []float32{0.40448594, 0.16214314, 0.17850745, 0.6640584, 0.77309024, 0.48807725, 0.66572666, 0.15990956}
+	vectors := [][]float32{vector1}
+
+	phg := &commonpb.PlaceholderGroup{
+		Placeholders: []*commonpb.PlaceholderValue{
+			vector2Placeholder(vectors),
+		},
+	}
+
+	bs, _ := proto.Marshal(phg)
+
+	req := &querypb.SearchRequest{
+		Req: &internalpb.SearchRequest{
+			MetricType:       "COSINE",
+			PlaceholderGroup: bs,
+			Topk:             40,
+			ClusteringOptions: &internalpb.SearchClusteringOptions{
+				FilterRatio: 0.5,
+			},
+		},
+	}
+	sealeds := []SnapshotItem{
+		{
+			NodeID: 1,
+			Segments: []SegmentEntry{
+				{
+					NodeID:    1,
+					SegmentID: 1000,
+					NumOfRows: 10,
+					ClusteringInfos: &schemapb.ClusteringInfo{
+						VectorClusteringInfos: []*schemapb.VectorClusteringInfo{
+							{
+								Centroid: &schemapb.VectorField{
+									Data: &schemapb.VectorField_FloatVector{
+										FloatVector: &schemapb.FloatArray{
+											Data: []float32{0.6951474, 0.45225978, 0.51508516, 0.24968886, 0.6085484, 0.964968, 0.32239532, 0.7771577},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+				{
+					NodeID:    1,
+					SegmentID: 1001,
+					NumOfRows: 10,
+					ClusteringInfos: generateClusteringInfo([][]float32{
+						{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0},
+						{1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0},
+					}),
+				},
+				{
+					NodeID:    1,
+					SegmentID: 1002,
+					NumOfRows: 10,
+					ClusteringInfos: generateClusteringInfo([][]float32{
+						{0.40448594, 0.16214314, 0.17850745, 0.6640584, 0.77309024, 0.48807725, 0.66572666, 0.15990956},
+						{0.41448594, 0.16214314, 0.17850745, 0.6640584, 0.77309024, 0.48807725, 0.66572666, 0.15990956},
+					}),
+				},
+				{
+					NodeID:    1,
+					SegmentID: 1003,
+					NumOfRows: 10,
+					ClusteringInfos: generateClusteringInfo([][]float32{
+						{1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0},
+					}),
+				},
+				{
+					NodeID:    1,
+					SegmentID: 1004,
+					NumOfRows: 10,
+					ClusteringInfos: generateClusteringInfo([][]float32{
+						{1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0},
+					}),
+				},
+			},
+		},
+	}
+	sr, snapshots := s.delegator.OptimizeSearchBasedOnClustering(req, sealeds)
+	assert.NotEmpty(s.T(), sr)
+	assert.NotEmpty(s.T(), snapshots)
+	assert.Equal(s.T(), 4, len(snapshots[0].Segments))
+}
+
+// If clustering info is not correct, like clustering center is wrong, search should not fail
+func (s *DelegatorSuite) TestOptimizeSearchBasedOnClustering_WrongClusteringInfo() {
+	s.delegator.Start()
+	paramtable.SetNodeID(1)
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.EnableSearchBasedOnClustering.Key, "true")
+	vector1 := []float32{0.40448594, 0.16214314, 0.17850745, 0.6640584, 0.77309024, 0.48807725, 0.66572666, 0.15990956}
+	vectors := [][]float32{vector1}
+
+	phg := &commonpb.PlaceholderGroup{
+		Placeholders: []*commonpb.PlaceholderValue{
+			vector2Placeholder(vectors),
+		},
+	}
+
+	bs, _ := proto.Marshal(phg)
+
+	req := &querypb.SearchRequest{
+		Req: &internalpb.SearchRequest{
+			MetricType:       "L2",
+			PlaceholderGroup: bs,
+			Topk:             40,
+			ClusteringOptions: &internalpb.SearchClusteringOptions{
+				FilterRatio: 0.5,
+			},
+		},
+	}
+	sealeds := []SnapshotItem{
+		{
+			NodeID: 1,
+			Segments: []SegmentEntry{
+				{
+					NodeID:    1,
+					SegmentID: 1000,
+					NumOfRows: 10,
+					ClusteringInfos: generateClusteringInfo([][]float32{
+						{0.6951474, 0.45225978, 0.51508516, 0.24968886},
+					}),
+				},
+				{
+					NodeID:    1,
+					SegmentID: 1001,
+					NumOfRows: 10,
+					ClusteringInfos: generateClusteringInfo([][]float32{
+						{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0},
+						{1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0},
+					}),
+				},
+				{
+					NodeID:    1,
+					SegmentID: 1002,
+					NumOfRows: 10,
+					ClusteringInfos: generateClusteringInfo([][]float32{
+						{0.40448594, 0.16214314, 0.17850745, 0.6640584},
+						{0.41448594, 0.16214314, 0.17850745, 0.6640584},
+					}),
+				},
+				{
+					NodeID:    1,
+					SegmentID: 1003,
+					NumOfRows: 10,
+					ClusteringInfos: generateClusteringInfo([][]float32{
+						{1.0, 1.0, 1.0, 1.0},
+					}),
+				},
+				{
+					NodeID:    1,
+					SegmentID: 1004,
+					NumOfRows: 10,
+					ClusteringInfos: generateClusteringInfo([][]float32{
+						{1.0, 1.0, 1.0, 1.0},
+					}),
+				},
+			},
+		},
+	}
+	sr, snapshots := s.delegator.OptimizeSearchBasedOnClustering(req, sealeds)
+	assert.NotEmpty(s.T(), sr)
+	assert.NotEmpty(s.T(), snapshots)
+	assert.Equal(s.T(), 5, len(snapshots[0].Segments))
 }

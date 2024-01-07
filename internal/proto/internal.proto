@@ -101,6 +101,7 @@ message SearchRequest {
   string metricType = 16;
   bool ignoreGrowing = 17; // Optional
   string username = 18;
+  SearchClusteringOptions clustering_options = 19;
 }
 
 message SearchResults {
@@ -246,4 +247,9 @@ enum RateType {
 message Rate {
   RateType rt = 1;
   double r = 2;
+}
+
+// options to control clustering related behavior in SearchRequest 
+message SearchClusteringOptions {
+  float filterRatio = 1;
 }

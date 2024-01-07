@@ -348,6 +348,8 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, int64(100), gracefulStopTimeout.GetAsInt64())
 
 		assert.Equal(t, false, Params.EnableWorkerSQCostMetrics.GetAsBool())
+
+		assert.Equal(t, true, Params.EnableSearchBasedOnClustering.GetAsBool())
 	})
 
 	t.Run("test dataCoordConfig", func(t *testing.T) {

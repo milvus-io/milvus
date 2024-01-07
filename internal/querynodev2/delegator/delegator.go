@@ -20,6 +20,8 @@ package delegator
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -31,6 +33,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
@@ -40,17 +43,21 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/querynodev2/tsafe"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/clustering"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/conc"
+	"github.com/milvus-io/milvus/pkg/util/distance"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // ShardDelegator is the interface definition.
@@ -72,6 +79,7 @@ type ShardDelegator interface {
 	ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmentsRequest, force bool) error
 	SyncTargetVersion(newVersion int64, growingInTarget []int64, sealedInTarget []int64, droppedInTarget []int64, checkpoint *msgpb.MsgPosition)
 	GetTargetVersion() int64
+	OptimizeSearchBasedOnClustering(req *querypb.SearchRequest, sealeds []SnapshotItem) (*querypb.SearchRequest, []SnapshotItem)
 
 	// control
 	Serviceable() bool
@@ -112,7 +120,14 @@ type shardDelegator struct {
 	tsCond      *sync.Cond
 	latestTsafe *atomic.Uint64
 	// queryHook
-	queryHook optimizers.QueryHook
+	queryHook   optimizers.QueryHook
+	vectorField *VectorField
+}
+
+type VectorField struct {
+	dim       int64
+	dataType  schemapb.DataType
+	fieldName string
 }
 
 // getLogger returns the zap logger with pre-defined shard attributes.
@@ -228,6 +243,8 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 		growing = []SegmentEntry{}
 	}
 
+	// filter segments based on cluster info
+	req, sealed = sd.OptimizeSearchBasedOnClustering(req, sealed)
 	sealedNum := lo.SumBy(sealed, func(item SnapshotItem) int { return len(item.Segments) })
 	log.Debug("search segments...",
 		zap.Int("sealedNum", sealedNum),
@@ -668,6 +685,10 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 	sizePerBlock := paramtable.Get().QueryNodeCfg.DeleteBufferBlockSize.GetAsInt64()
 	log.Info("Init delete cache with list delete buffer", zap.Int64("sizePerBlock", sizePerBlock), zap.Time("startTime", tsoutil.PhysicalTime(startTs)))
 
+	vectorField, err := getVectorFieldFromSchema(collection.Schema())
+	if err != nil {
+		return nil, err
+	}
 	sd := &shardDelegator{
 		collectionID:    collectionID,
 		replicaID:       replicaID,
@@ -686,12 +707,164 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		loader:          loader,
 		factory:         factory,
 		queryHook:       queryHook,
+		vectorField:     vectorField,
 	}
 	m := sync.Mutex{}
 	sd.tsCond = sync.NewCond(&m)
 	if sd.lifetime.Add(lifetime.NotStopped) == nil {
 		go sd.watchTSafe()
 	}
+
 	log.Info("finish build new shardDelegator")
 	return sd, nil
+}
+
+func getVectorFieldFromSchema(schema *schemapb.CollectionSchema) (*VectorField, error) {
+	vecFieldSchema, err := typeutil.GetVectorFieldSchema(schema)
+	if err != nil {
+		return nil, err
+	}
+	dimStr, err := funcutil.GetAttrByKeyFromRepeatedKV(common.DimKey, vecFieldSchema.GetTypeParams())
+	if err != nil {
+		return nil, err
+	}
+	dimValue, err := strconv.ParseInt(dimStr, 10, 32)
+	if err != nil {
+		return nil, err
+	}
+
+	vectorField := VectorField{
+		dim:       dimValue,
+		dataType:  vecFieldSchema.GetDataType(),
+		fieldName: vecFieldSchema.GetName(),
+	}
+	return &vectorField, nil
+}
+
+// OptimizeSearchBasedOnClustering optimize SearchRequest based on segments' clustering info.
+// Basic rule: calculate distance between search vector and clustering centroid of each segment,
+// only search on top x% nearest segment
+// Todo support call external hook
+func (sd *shardDelegator) OptimizeSearchBasedOnClustering(req *querypb.SearchRequest, sealeds []SnapshotItem) (*querypb.SearchRequest, []SnapshotItem) {
+	log := log.With(zap.Int64("searchRequestID", req.GetReq().GetReqID()))
+	if !paramtable.Get().QueryNodeCfg.EnableSearchBasedOnClustering.GetAsBool() {
+		log.Debug("skip OptimizeSearchBasedOnClustering by system config")
+		return req, sealeds
+	}
+	if req.GetReq().GetClusteringOptions().GetFilterRatio() >= 1 {
+		log.Debug("skip OptimizeSearchBasedOnClustering by user config")
+		return req, sealeds
+	}
+	metricType := req.GetReq().GetMetricType()
+	topK := req.GetReq().GetTopk()
+	filterRatio := req.GetReq().GetClusteringOptions().GetFilterRatio()
+	log.Debug("SearchRequest parameter",
+		zap.String("metricType", metricType),
+		zap.Int64("topK", topK),
+		zap.Float32("filterRatio", filterRatio))
+
+	var phg commonpb.PlaceholderGroup
+	err := proto.Unmarshal(req.GetReq().GetPlaceholderGroup(), &phg)
+	if err != nil {
+		log.Warn("fail to parse SearchRequest PlaceholderGroup", zap.Error(err))
+		return req, sealeds
+	}
+	if len(phg.GetPlaceholders()) == 0 {
+		return req, sealeds
+	}
+	bSearchVectors := phg.GetPlaceholders()[0].GetValues()
+
+	segments := make([]SegmentEntry, 0)
+	for _, sealed := range sealeds {
+		segments = append(segments, sealed.Segments...)
+	}
+
+	type segmentDistanceStruct struct {
+		segment  SegmentEntry
+		distance float32
+	}
+
+	optimizedSegs := make(map[UniqueID]SegmentEntry, 0)
+	for _, bSearchVector := range bSearchVectors {
+		vectorSegmentDistance := make([]segmentDistanceStruct, 0)
+		for _, segment := range segments {
+			if segment.ClusteringInfos == nil || len(segment.ClusteringInfos.GetVectorClusteringInfos()) == 0 ||
+				segment.ClusteringInfos.GetVectorClusteringInfos()[0].Centroid == nil {
+				optimizedSegs[segment.SegmentID] = segment
+				continue
+			}
+			// currently, segment can contains only one vector cluster
+			vectorClusteringInfo := segment.ClusteringInfos.GetVectorClusteringInfos()[0]
+			distance, err := clustering.CalcVectorDistance(sd.vectorField.dim, sd.vectorField.dataType, bSearchVector, vectorClusteringInfo.Centroid, metricType)
+			if err != nil {
+				log.Warn("Fail to calculate distance between clustering center and search vector, skip this segment", zap.Error(err))
+				optimizedSegs[segment.SegmentID] = segment
+				continue
+			}
+			log.Debug("distance between bSearchVector and cluster center",
+				zap.Int64("segmentID", segment.SegmentID),
+				zap.Float32s("distance", distance),
+				zap.Any("bSearchVector", bSearchVector),
+				zap.Any("clusterCentroid", vectorClusteringInfo.String()))
+			if len(distance) > 0 {
+				vectorSegmentDistance = append(vectorSegmentDistance, segmentDistanceStruct{segment: segment, distance: distance[0]})
+			} else {
+				// if no legal distance is calculated, regard this segment as a normal one.
+				optimizedSegs[segment.SegmentID] = segment
+			}
+		}
+
+		// sort by distance
+		switch metricType {
+		case distance.L2:
+			sort.SliceStable(vectorSegmentDistance, func(i, j int) bool {
+				return vectorSegmentDistance[i].distance < vectorSegmentDistance[j].distance
+			})
+		case distance.IP:
+			// for IP or cosine metric, larger result means more similar, we should sort reverse
+			sort.SliceStable(vectorSegmentDistance, func(i, j int) bool {
+				return vectorSegmentDistance[i].distance > vectorSegmentDistance[j].distance
+			})
+		case distance.COSINE:
+			sort.SliceStable(vectorSegmentDistance, func(i, j int) bool {
+				return vectorSegmentDistance[i].distance > vectorSegmentDistance[j].distance
+			})
+		}
+
+		toFilterSegNum := len(vectorSegmentDistance)
+		targetSegNum := int(float32(toFilterSegNum) * filterRatio)
+		var optimizedRowNums int64
+		for i, segmentDistance := range vectorSegmentDistance {
+			if i < targetSegNum || optimizedRowNums < topK {
+				optimizedRowNums = optimizedRowNums + segmentDistance.segment.NumOfRows
+				optimizedSegs[segmentDistance.segment.SegmentID] = segmentDistance.segment
+			}
+		}
+	}
+	log.Debug("optimized segments", zap.Int("before", len(segments)), zap.Int("after", len(optimizedSegs)), zap.Any("segments", optimizedSegs))
+
+	// merge to SnapshotItem
+	nodeSegments := make(map[int64]SnapshotItem, 0)
+	for _, segment := range optimizedSegs {
+		if _, ok := nodeSegments[segment.NodeID]; ok {
+			snapshot := nodeSegments[segment.NodeID]
+			segments := append(snapshot.Segments, segment)
+			nodeSegments[segment.NodeID] = SnapshotItem{
+				NodeID:   segment.NodeID,
+				Segments: segments,
+			}
+		} else {
+			nodeSegments[segment.NodeID] = SnapshotItem{
+				NodeID:   segment.NodeID,
+				Segments: []SegmentEntry{segment},
+			}
+		}
+	}
+	nodeSegmentsArr := make([]SnapshotItem, 0)
+	for _, snapshot := range nodeSegments {
+		nodeSegmentsArr = append(nodeSegmentsArr, snapshot)
+	}
+
+	log.Debug("OptimizeSearchBasedOnClustering done", zap.Any("sealed", sealeds))
+	return req, nodeSegmentsArr
 }

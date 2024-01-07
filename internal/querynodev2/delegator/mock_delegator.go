@@ -340,6 +340,63 @@ func (_c *MockShardDelegator_LoadSegments_Call) RunAndReturn(run func(context.Co
 	return _c
 }
 
+// OptimizeSearchBasedOnClustering provides a mock function with given fields: req, sealeds
+func (_m *MockShardDelegator) OptimizeSearchBasedOnClustering(req *querypb.SearchRequest, sealeds []SnapshotItem) (*querypb.SearchRequest, []SnapshotItem) {
+	ret := _m.Called(req, sealeds)
+
+	var r0 *querypb.SearchRequest
+	var r1 []SnapshotItem
+	if rf, ok := ret.Get(0).(func(*querypb.SearchRequest, []SnapshotItem) (*querypb.SearchRequest, []SnapshotItem)); ok {
+		return rf(req, sealeds)
+	}
+	if rf, ok := ret.Get(0).(func(*querypb.SearchRequest, []SnapshotItem) *querypb.SearchRequest); ok {
+		r0 = rf(req, sealeds)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*querypb.SearchRequest)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(*querypb.SearchRequest, []SnapshotItem) []SnapshotItem); ok {
+		r1 = rf(req, sealeds)
+	} else {
+		if ret.Get(1) != nil {
+			r1 = ret.Get(1).([]SnapshotItem)
+		}
+	}
+
+	return r0, r1
+}
+
+// MockShardDelegator_OptimizeSearchBasedOnClustering_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'OptimizeSearchBasedOnClustering'
+type MockShardDelegator_OptimizeSearchBasedOnClustering_Call struct {
+	*mock.Call
+}
+
+// OptimizeSearchBasedOnClustering is a helper method to define mock.On call
+//   - req *querypb.SearchRequest
+//   - sealeds []SnapshotItem
+func (_e *MockShardDelegator_Expecter) OptimizeSearchBasedOnClustering(req interface{}, sealeds interface{}) *MockShardDelegator_OptimizeSearchBasedOnClustering_Call {
+	return &MockShardDelegator_OptimizeSearchBasedOnClustering_Call{Call: _e.mock.On("OptimizeSearchBasedOnClustering", req, sealeds)}
+}
+
+func (_c *MockShardDelegator_OptimizeSearchBasedOnClustering_Call) Run(run func(req *querypb.SearchRequest, sealeds []SnapshotItem)) *MockShardDelegator_OptimizeSearchBasedOnClustering_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*querypb.SearchRequest), args[1].([]SnapshotItem))
+	})
+	return _c
+}
+
+func (_c *MockShardDelegator_OptimizeSearchBasedOnClustering_Call) Return(_a0 *querypb.SearchRequest, _a1 []SnapshotItem) *MockShardDelegator_OptimizeSearchBasedOnClustering_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockShardDelegator_OptimizeSearchBasedOnClustering_Call) RunAndReturn(run func(*querypb.SearchRequest, []SnapshotItem) (*querypb.SearchRequest, []SnapshotItem)) *MockShardDelegator_OptimizeSearchBasedOnClustering_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ProcessDelete provides a mock function with given fields: deleteData, ts
 func (_m *MockShardDelegator) ProcessDelete(deleteData []*DeleteData, ts uint64) {
 	_m.Called(deleteData, ts)

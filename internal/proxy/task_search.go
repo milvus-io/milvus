@@ -21,6 +21,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/clustering"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -310,6 +311,13 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	t.SearchRequest.OutputFieldsId = outputFieldIDs
+
+	searchClusteringOptions, err := clustering.SearchClusteringOptions(t.request.GetSearchParams())
+	if err != nil {
+		log.Warn("fail to parse SearchClusteringOptions", zap.Any("params", t.request.GetSearchParams()), zap.Error(err))
+		return err
+	}
+	t.SearchRequest.ClusteringOptions = searchClusteringOptions
 
 	partitionNames := t.request.GetPartitionNames()
 	if t.request.GetDslType() == commonpb.DslType_BoolExprV1 {

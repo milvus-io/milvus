@@ -23,6 +23,7 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -79,11 +80,14 @@ type distribution struct {
 
 // SegmentEntry stores the segment meta information.
 type SegmentEntry struct {
-	NodeID        int64
-	SegmentID     UniqueID
-	PartitionID   UniqueID
-	Version       int64
-	TargetVersion int64
+	NodeID          int64
+	SegmentID       UniqueID
+	PartitionID     UniqueID
+	Version         int64
+	TargetVersion   int64
+	NumOfRows       int64
+	Schema          *schemapb.CollectionSchema
+	ClusteringInfos *schemapb.ClusteringInfo
 }
 
 // NewDistribution creates a new distribution instance with all field initialized.
