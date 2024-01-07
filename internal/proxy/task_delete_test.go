@@ -234,7 +234,7 @@ func TestDeleteRunner_Init(t *testing.T) {
 	// channels := []string{"test_channel"}
 	dbName := "test_1"
 
-	schema := &schemapb.CollectionSchema{
+	collSchema := &schemapb.CollectionSchema{
 		Name:        collectionName,
 		Description: "",
 		AutoID:      false,
@@ -253,6 +253,7 @@ func TestDeleteRunner_Init(t *testing.T) {
 			},
 		},
 	}
+	schema := newSchemaInfo(collSchema)
 
 	t.Run("empty collection name", func(t *testing.T) {
 		dr := deleteRunner{}
@@ -312,7 +313,7 @@ func TestDeleteRunner_Init(t *testing.T) {
 			mock.Anything, // context.Context
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
-		).Return(&schemapb.CollectionSchema{
+		).Return(newSchemaInfo(&schemapb.CollectionSchema{
 			Name:        collectionName,
 			Description: "",
 			AutoID:      false,
@@ -325,7 +326,7 @@ func TestDeleteRunner_Init(t *testing.T) {
 					IsPartitionKey: true,
 				},
 			},
-		}, nil)
+		}), nil)
 
 		globalMetaCache = cache
 		assert.Error(t, dr.Init(context.Background()))
@@ -440,7 +441,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 	queue.Start()
 	defer queue.Close()
 
-	schema := &schemapb.CollectionSchema{
+	collSchema := &schemapb.CollectionSchema{
 		Name:        collectionName,
 		Description: "",
 		AutoID:      false,
@@ -459,6 +460,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 			},
 		},
 	}
+	schema := newSchemaInfo(collSchema)
 
 	metaCache := NewMockCache(t)
 	metaCache.EXPECT().GetCollectionID(mock.Anything, dbName, collectionName).Return(collectionID, nil).Maybe()
@@ -474,6 +476,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 			req: &milvuspb.DeleteRequest{
 				Expr: "????",
 			},
+			schema: schema,
 		}
 		assert.Error(t, dr.Run(context.Background()))
 	})
@@ -838,7 +841,7 @@ func TestDeleteRunner_StreamingQueryAndDelteFunc(t *testing.T) {
 	queue.Start()
 	defer queue.Close()
 
-	schema := &schemapb.CollectionSchema{
+	collSchema := &schemapb.CollectionSchema{
 		Name:        "test_delete",
 		Description: "",
 		AutoID:      false,
@@ -859,7 +862,9 @@ func TestDeleteRunner_StreamingQueryAndDelteFunc(t *testing.T) {
 	}
 
 	// test partitionKey mode
-	schema.Fields[1].IsPartitionKey = true
+	collSchema.Fields[1].IsPartitionKey = true
+
+	schema := newSchemaInfo(collSchema)
 	partitionMaps := make(map[string]int64)
 	partitionMaps["test_0"] = 1
 	partitionMaps["test_1"] = 2
@@ -930,7 +935,7 @@ func TestDeleteRunner_StreamingQueryAndDelteFunc(t *testing.T) {
 		globalMetaCache = mockCache
 		defer func() { globalMetaCache = nil }()
 
-		plan, err := planparserv2.CreateRetrievePlan(dr.schema, dr.req.Expr)
+		plan, err := planparserv2.CreateRetrievePlan(dr.schema.CollectionSchema, dr.req.Expr)
 		assert.NoError(t, err)
 		queryFunc := dr.getStreamingQueryAndDelteFunc(plan)
 		assert.Error(t, queryFunc(ctx, 1, qn))
@@ -973,7 +978,7 @@ func TestDeleteRunner_StreamingQueryAndDelteFunc(t *testing.T) {
 		globalMetaCache = mockCache
 		defer func() { globalMetaCache = nil }()
 
-		plan, err := planparserv2.CreateRetrievePlan(dr.schema, dr.req.Expr)
+		plan, err := planparserv2.CreateRetrievePlan(dr.schema.CollectionSchema, dr.req.Expr)
 		assert.NoError(t, err)
 		queryFunc := dr.getStreamingQueryAndDelteFunc(plan)
 		assert.Error(t, queryFunc(ctx, 1, qn))

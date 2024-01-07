@@ -80,7 +80,7 @@ func (h *HandlersV1) checkDatabase(ctx context.Context, c *gin.Context, dbName s
 func (h *HandlersV1) describeCollection(ctx context.Context, c *gin.Context, dbName string, collectionName string) (*schemapb.CollectionSchema, error) {
 	collSchema, err := proxy.GetCachedCollectionSchema(ctx, dbName, collectionName)
 	if err == nil {
-		return collSchema, nil
+		return collSchema.CollectionSchema, nil
 	}
 	req := milvuspb.DescribeCollectionRequest{
 		DbName:         dbName,

@@ -116,7 +116,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		log.Warn("get collection schema from global meta cache failed", zap.String("collectionName", collectionName), zap.Error(err))
 		return err
 	}
-	it.schema = schema
+	it.schema = schema.CollectionSchema
 
 	rowNums := uint32(it.insertMsg.NRows())
 	// set insertTask.rowIDs
@@ -164,7 +164,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	}
 
 	// set field ID to insert field data
-	err = fillFieldIDBySchema(it.insertMsg.GetFieldsData(), schema)
+	err = fillFieldIDBySchema(it.insertMsg.GetFieldsData(), schema.CollectionSchema)
 	if err != nil {
 		log.Info("set fieldID to fieldData failed",
 			zap.Error(err))
@@ -199,7 +199,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	}
 
 	if err := newValidateUtil(withNANCheck(), withOverflowCheck(), withMaxLenCheck(), withMaxCapCheck()).
-		Validate(it.insertMsg.GetFieldsData(), schema, it.insertMsg.NRows()); err != nil {
+		Validate(it.insertMsg.GetFieldsData(), schema.CollectionSchema, it.insertMsg.NRows()); err != nil {
 		return err
 	}
 
