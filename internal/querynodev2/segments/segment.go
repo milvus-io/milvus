@@ -74,18 +74,20 @@ type baseSegment struct {
 	shard          string
 	collectionID   int64
 	typ            SegmentType
+	level          datapb.SegmentLevel
 	version        *atomic.Int64
 	startPosition  *msgpb.MsgPosition // for growing segment release
 	bloomFilterSet *pkoracle.BloomFilterSet
 }
 
-func newBaseSegment(id, partitionID, collectionID int64, shard string, typ SegmentType, version int64, startPosition *msgpb.MsgPosition) baseSegment {
+func newBaseSegment(id, partitionID, collectionID int64, shard string, typ SegmentType, level datapb.SegmentLevel, version int64, startPosition *msgpb.MsgPosition) baseSegment {
 	return baseSegment{
 		segmentID:      id,
 		partitionID:    partitionID,
 		collectionID:   collectionID,
 		shard:          shard,
 		typ:            typ,
+		level:          level,
 		version:        atomic.NewInt64(version),
 		startPosition:  startPosition,
 		bloomFilterSet: pkoracle.NewBloomFilterSet(id, partitionID, typ),
@@ -114,7 +116,7 @@ func (s *baseSegment) Type() SegmentType {
 }
 
 func (s *baseSegment) Level() datapb.SegmentLevel {
-	return datapb.SegmentLevel_Legacy
+	return s.level
 }
 
 func (s *baseSegment) StartPosition() *msgpb.MsgPosition {
@@ -205,10 +207,12 @@ func NewSegment(ctx context.Context,
 		zap.Int64("collectionID", collectionID),
 		zap.Int64("partitionID", partitionID),
 		zap.Int64("segmentID", segmentID),
-		zap.String("segmentType", segmentType.String()))
+		zap.String("segmentType", segmentType.String()),
+		zap.String("level", level.String()),
+	)
 
 	segment := &LocalSegment{
-		baseSegment:        newBaseSegment(segmentID, partitionID, collectionID, shard, segmentType, version, startPosition),
+		baseSegment:        newBaseSegment(segmentID, partitionID, collectionID, shard, segmentType, level, version, startPosition),
 		ptr:                newPtr,
 		lastDeltaTimestamp: atomic.NewUint64(0),
 		fieldIndexes:       typeutil.NewConcurrentMap[int64, *IndexedFieldInfo](),
