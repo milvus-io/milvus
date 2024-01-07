@@ -35,6 +35,10 @@ on:
       - '!**.md'
       - '!build/ci/jenkins/**'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   Build:
     name: Build and test AMD64 Ubuntu ${{ matrix.ubuntu }}
