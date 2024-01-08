@@ -17,12 +17,10 @@
 package querynodev2
 
 import (
-	"fmt"
 	"math"
 	"math/rand"
 	"strconv"
 
-	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -60,45 +58,32 @@ const (
 
 // ---------- unittest util functions ----------
 // functions of messages and requests
-func genBruteForceDSL(schema *schemapb.CollectionSchema, topK int64, roundDecimal int64) (string, error) {
-	var vecFieldName string
-	var metricType string
-	topKStr := strconv.FormatInt(topK, 10)
-	nProbStr := strconv.Itoa(defaultNProb)
-	roundDecimalStr := strconv.FormatInt(roundDecimal, 10)
-	var fieldID int64
-	for _, f := range schema.Fields {
-		if f.DataType == schemapb.DataType_FloatVector {
-			vecFieldName = f.Name
-			fieldID = f.FieldID
-			for _, p := range f.IndexParams {
-				if p.Key == metricTypeKey {
-					metricType = p.Value
-				}
-			}
-		}
+func genSearchPlan(dataType schemapb.DataType, fieldID int64, metricType string) *planpb.PlanNode {
+	var vectorType planpb.VectorType
+	switch dataType {
+	case schemapb.DataType_FloatVector:
+		vectorType = planpb.VectorType_FloatVector
+	case schemapb.DataType_Float16Vector:
+		vectorType = planpb.VectorType_Float16Vector
+	case schemapb.DataType_BinaryVector:
+		vectorType = planpb.VectorType_BinaryVector
 	}
-	if vecFieldName == "" || metricType == "" {
-		err := errors.New("invalid vector field name or metric type")
-		return "", err
-	}
-	return `vector_anns: <
-              field_id: ` + fmt.Sprintf("%d", fieldID) + `
-              query_info: <
-                topk: ` + topKStr + `
-                round_decimal: ` + roundDecimalStr + `
-                metric_type: "` + metricType + `"
-                search_params: "{\"nprobe\": ` + nProbStr + `}"
-              >
-              placeholder_tag: "$0"
-            >`, nil
-}
 
-func genDSLByIndexType(schema *schemapb.CollectionSchema, indexType string) (string, error) {
-	if indexType == IndexFaissIDMap { // float vector
-		return genBruteForceDSL(schema, defaultTopK, defaultRoundDecimal)
+	return &planpb.PlanNode{
+		Node: &planpb.PlanNode_VectorAnns{
+			VectorAnns: &planpb.VectorANNS{
+				VectorType: vectorType,
+				FieldId:    fieldID,
+				QueryInfo: &planpb.QueryInfo{
+					Topk:         defaultTopK,
+					MetricType:   metricType,
+					SearchParams: "{\"nprobe\":" + strconv.Itoa(defaultNProb) + "}",
+					RoundDecimal: defaultRoundDecimal,
+				},
+				PlaceholderTag: "$0",
+			},
+		},
 	}
-	return "", fmt.Errorf("Invalid indexType")
 }
 
 func genPlaceHolderGroup(nq int64) ([]byte, error) {

@@ -18,6 +18,7 @@ package storage
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"math/rand"
 	"path"
@@ -85,7 +86,7 @@ func TestMinIOCM(t *testing.T) {
 
 	configRoot := Params.MinioCfg.RootPath.GetValue()
 
-	testMinIOKVRoot := path.Join(configRoot, "milvus-minio-ut-root")
+	testMinIOKVRoot := path.Join(configRoot, fmt.Sprintf("minio-ut-%d", rand.Int()))
 
 	t.Run("test load", func(t *testing.T) {
 		testLoadRoot := path.Join(testMinIOKVRoot, "test_load")

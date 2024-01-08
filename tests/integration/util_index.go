@@ -44,19 +44,24 @@ const (
 )
 
 func (s *MiniClusterSuite) WaitForIndexBuiltWithDB(ctx context.Context, dbName, collection, field string) {
-	s.waitForIndexBuiltInternal(ctx, dbName, collection, field)
+	s.waitForIndexBuiltInternal(ctx, dbName, collection, field, "")
 }
 
 func (s *MiniClusterSuite) WaitForIndexBuilt(ctx context.Context, collection, field string) {
-	s.waitForIndexBuiltInternal(ctx, "", collection, field)
+	s.waitForIndexBuiltInternal(ctx, "", collection, field, "")
 }
 
-func (s *MiniClusterSuite) waitForIndexBuiltInternal(ctx context.Context, dbName, collection, field string) {
+func (s *MiniClusterSuite) WaitForIndexBuiltWithIndexName(ctx context.Context, collection, field, indexName string) {
+	s.waitForIndexBuiltInternal(ctx, "", collection, field, indexName)
+}
+
+func (s *MiniClusterSuite) waitForIndexBuiltInternal(ctx context.Context, dbName, collection, field, indexName string) {
 	getIndexBuilt := func() bool {
 		resp, err := s.Cluster.Proxy.DescribeIndex(ctx, &milvuspb.DescribeIndexRequest{
 			DbName:         dbName,
 			CollectionName: collection,
 			FieldName:      field,
+			IndexName:      indexName,
 		})
 		if err != nil {
 			s.FailNow("failed to describe index")

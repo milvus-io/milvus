@@ -26,64 +26,12 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/common"
 )
 
 type UtilsSuite struct {
 	suite.Suite
-}
-
-func (s *UtilsSuite) TestGetMetricType() {
-	collection := int64(1)
-	schema := &schemapb.CollectionSchema{
-		Name: "TestGetMetricType",
-		Fields: []*schemapb.FieldSchema{
-			{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
-		},
-	}
-	indexInfo := &indexpb.IndexInfo{
-		CollectionID: collection,
-		FieldID:      100,
-		IndexParams: []*commonpb.KeyValuePair{
-			{
-				Key:   common.MetricTypeKey,
-				Value: "L2",
-			},
-		},
-	}
-
-	indexInfo2 := &indexpb.IndexInfo{
-		CollectionID: collection,
-		FieldID:      100,
-	}
-
-	s.Run("test normal", func() {
-		metricType, err := getMetricType([]*indexpb.IndexInfo{indexInfo}, schema)
-		s.NoError(err)
-		s.Equal("L2", metricType)
-	})
-
-	s.Run("test get vec field failed", func() {
-		_, err := getMetricType([]*indexpb.IndexInfo{indexInfo}, &schemapb.CollectionSchema{
-			Name: "TestGetMetricType",
-		})
-		s.Error(err)
-	})
-	s.Run("test field id mismatch", func() {
-		_, err := getMetricType([]*indexpb.IndexInfo{indexInfo}, &schemapb.CollectionSchema{
-			Name: "TestGetMetricType",
-			Fields: []*schemapb.FieldSchema{
-				{FieldID: -1, Name: "vec", DataType: schemapb.DataType_FloatVector},
-			},
-		})
-		s.Error(err)
-	})
-	s.Run("test no metric type", func() {
-		_, err := getMetricType([]*indexpb.IndexInfo{indexInfo2}, schema)
-		s.Error(err)
-	})
 }
 
 func (s *UtilsSuite) TestPackLoadSegmentRequest() {
