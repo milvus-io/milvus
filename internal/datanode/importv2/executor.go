@@ -108,22 +108,25 @@ func (e *executor) estimateReadRows(schema *schemapb.CollectionSchema) (int64, e
 	return int64(BufferSize / sizePerRow), nil
 }
 
-func (e *executor) handleErr(task Task, err error, msg string) {
-	log.Warn(msg, zap.Int64("taskID", task.GetTaskID()),
+func WrapLogFields(task Task, fields ...zap.Field) []zap.Field {
+	res := []zap.Field{
+		zap.Int64("taskID", task.GetTaskID()),
 		zap.Int64("requestID", task.GetRequestID()),
 		zap.Int64("collectionID", task.GetCollectionID()),
 		zap.String("state", task.GetState().String()),
 		zap.String("type", task.GetType().String()),
-		zap.Error(err))
+	}
+	res = append(res, fields...)
+	return res
+}
+
+func (e *executor) handleErr(task Task, err error, msg string) {
+	log.Warn(msg, WrapLogFields(task, zap.Error(err))...)
 	e.manager.Update(task.GetTaskID(), UpdateState(internalpb.ImportState_Failed), UpdateReason(err.Error()))
 }
 
 func (e *executor) PreImport(task Task) {
-	log := log.With(zap.Int64("taskID", task.GetTaskID()),
-		zap.Int64("requestID", task.GetRequestID()),
-		zap.Int64("collectionID", task.GetCollectionID()),
-		zap.String("type", task.GetType().String()),
-		zap.Any("schema", task.GetSchema()))
+	log.Info("start to preimport", WrapLogFields(task, zap.Any("schema", task.GetSchema()))...)
 	e.manager.Update(task.GetTaskID(), UpdateState(internalpb.ImportState_InProgress))
 	files := lo.Map(task.(*PreImportTask).GetFileStats(),
 		func(fileStat *datapb.ImportFileStats, _ int) *internalpb.ImportFile {
@@ -136,6 +139,7 @@ func (e *executor) PreImport(task Task) {
 			e.handleErr(task, err, "new reader failed")
 			return
 		}
+		start := time.Now()
 		err = e.readFileStat(reader, task, i)
 		if err != nil {
 			e.handleErr(task, err, "preimport failed")
@@ -143,11 +147,13 @@ func (e *executor) PreImport(task Task) {
 			return
 		}
 		reader.Close()
+		log.Info("read file stat done", WrapLogFields(task, zap.Strings("files", file.GetPaths()),
+			zap.Duration("dur", time.Since(start)))...)
 	}
 
 	e.manager.Update(task.GetTaskID(), UpdateState(internalpb.ImportState_Completed))
-	log.Info("executor preimport done", zap.String("state", task.GetState().String()),
-		zap.Any("fileStats", task.(*PreImportTask).GetFileStats()))
+	log.Info("executor preimport done",
+		WrapLogFields(task, zap.Any("fileStats", task.(*PreImportTask).GetFileStats()))...)
 }
 
 func (e *executor) readFileStat(reader importutilv2.Reader, task Task, fileIdx int) error {
@@ -186,11 +192,7 @@ func (e *executor) readFileStat(reader importutilv2.Reader, task Task, fileIdx i
 }
 
 func (e *executor) Import(task Task) {
-	log := log.With(zap.Int64("taskID", task.GetTaskID()),
-		zap.Int64("requestID", task.GetRequestID()),
-		zap.Int64("collectionID", task.GetCollectionID()),
-		zap.String("type", task.GetType().String()),
-		zap.Any("schema", task.GetSchema()))
+	log.Info("start to import", WrapLogFields(task, zap.Any("schema", task.GetSchema()))...)
 	e.manager.Update(task.GetTaskID(), UpdateState(internalpb.ImportState_InProgress))
 
 	req := task.(*ImportTask).req
@@ -200,6 +202,7 @@ func (e *executor) Import(task Task) {
 			e.handleErr(task, err, fmt.Sprintf("new reader failed, file: %s", file.String()))
 			return
 		}
+		start := time.Now()
 		err = e.importFile(reader, task)
 		if err != nil {
 			e.handleErr(task, err, fmt.Sprintf("do import failed, file: %s", file.String()))
@@ -207,9 +210,11 @@ func (e *executor) Import(task Task) {
 			return
 		}
 		reader.Close()
+		log.Info("import file done", WrapLogFields(task, zap.Strings("files", file.GetPaths()),
+			zap.Duration("dur", time.Since(start)))...)
 	}
 	e.manager.Update(task.GetTaskID(), UpdateState(internalpb.ImportState_Completed))
-	log.Info("import done")
+	log.Info("import done", WrapLogFields(task)...)
 }
 
 func (e *executor) importFile(reader importutilv2.Reader, task Task) error {
@@ -242,6 +247,7 @@ func (e *executor) importFile(reader importutilv2.Reader, task Task) error {
 }
 
 func (e *executor) Sync(task *ImportTask, hashedData HashedData) error {
+	log.Info("start to sync import data", WrapLogFields(task)...)
 	futures := make([]*conc.Future[error], 0)
 	syncTasks := make([]syncmgr.Task, 0)
 	for channelIdx, datas := range hashedData {
@@ -269,5 +275,9 @@ func (e *executor) Sync(task *ImportTask, hashedData HashedData) error {
 		}
 		e.manager.Update(task.GetTaskID(), UpdateSegmentInfo(segmentInfo))
 	}
+	importedRows := lo.Map(task.GetSegmentsInfo(), func(info *datapb.ImportSegmentInfo, _ int) int64 {
+		return info.GetImportedRows()
+	})
+	log.Info("sync import data done", WrapLogFields(task, zap.Any("importedRows", importedRows))...)
 	return nil
 }
