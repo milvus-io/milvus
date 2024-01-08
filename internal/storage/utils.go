@@ -459,8 +459,8 @@ func RowBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *schemap
 // If any field is missing in the msg, an error will be returned.
 //
 // This funcion also checks the length of each column. All columns shall have the same length.
-// Also, the InsertData.Infos shall have BlobInfo with this lenght returned.
-// When the lenght is not aligned, an error will be returned.
+// Also, the InsertData.Infos shall have BlobInfo with this length returned.
+// When the length is not aligned, an error will be returned.
 func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *schemapb.CollectionSchema) (idata *InsertData, err error) {
 	srcFields := make(map[FieldID]*schemapb.FieldData)
 	for _, field := range msg.FieldsData {
