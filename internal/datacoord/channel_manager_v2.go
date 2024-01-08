@@ -22,12 +22,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -527,13 +529,15 @@ func (m *ChannelManagerImplV2) advanceStandbys(standbys []*NodeChannelInfo) bool
 func (m *ChannelManagerImplV2) advanceToNotifies(toNotifies []*NodeChannelInfo) bool {
 	var advanced bool = false
 	for _, nodeAssign := range toNotifies {
-		if len(nodeAssign.Channels) == 0 {
+		channelCount := len(nodeAssign.Channels)
+		if channelCount == 0 {
 			continue
 		}
 
 		var (
-			succeededChannels []RWChannel
-			failedChannels    []RWChannel
+			succeededChannels = make([]RWChannel, 0, channelCount)
+			failedChannels    = make([]RWChannel, 0, channelCount)
+			futures           = make([]*conc.Future[any], 0, channelCount)
 		)
 
 		chNames := lo.Map(nodeAssign.Channels, func(ch RWChannel, _ int) string {
@@ -545,34 +549,28 @@ func (m *ChannelManagerImplV2) advanceToNotifies(toNotifies []*NodeChannelInfo) 
 			zap.Strings("channel names", chNames),
 		)
 		for _, ch := range nodeAssign.Channels {
-			info := ch.GetWatchInfo()
-			err := m.Notify(nodeAssign.NodeID, info)
-			log.Info("Notify channel operations",
-				zap.String("channel", ch.GetName()),
-				zap.Int64("assignment", nodeAssign.NodeID),
-				zap.String("operation", info.GetState().String()),
-			)
+			innerCh := ch
+
+			future := getOrCreateIOPool().Submit(func() (any, error) {
+				err := m.Notify(nodeAssign.NodeID, innerCh.GetWatchInfo())
+				return innerCh, err
+			})
+			futures = append(futures, future)
+		}
+
+		for _, f := range futures {
+			ch, err := f.Await()
 			if err != nil {
-				failedChannels = append(failedChannels, ch)
-				log.Warn("Fail to notify channel operations",
-					zap.String("channel", ch.GetName()),
-					zap.Int64("assignment", nodeAssign.NodeID),
-					zap.String("operation", info.GetState().String()),
-				)
+				failedChannels = append(failedChannels, ch.(RWChannel))
 			} else {
-				succeededChannels = append(succeededChannels, ch)
+				succeededChannels = append(succeededChannels, ch.(RWChannel))
 				advanced = true
-				log.Debug("Success to notify channel operations",
-					zap.String("channel", ch.GetName()),
-					zap.Int64("assignment", nodeAssign.NodeID),
-					zap.String("operation", info.GetState().String()),
-				)
 			}
 		}
 
 		log.Info("Finish to notify channel operations to datanode",
 			zap.Int64("assignment", nodeAssign.NodeID),
-			zap.Int("operation count", len(chNames)),
+			zap.Int("operation count", channelCount),
 			zap.Int("success count", len(succeededChannels)),
 			zap.Int("failure count", len(failedChannels)),
 		)
@@ -585,12 +583,19 @@ func (m *ChannelManagerImplV2) advanceToNotifies(toNotifies []*NodeChannelInfo) 
 	return advanced
 }
 
+type poolResult struct {
+	successful bool
+	ch         RWChannel
+}
+
 func (m *ChannelManagerImplV2) advanceToChecks(toChecks []*NodeChannelInfo) bool {
 	var advanced bool = false
 	for _, nodeAssign := range toChecks {
 		if len(nodeAssign.Channels) == 0 {
 			continue
 		}
+
+		futures := make([]*conc.Future[any], 0, len(nodeAssign.Channels))
 
 		chNames := lo.Map(nodeAssign.Channels, func(ch RWChannel, _ int) string {
 			return ch.GetName()
@@ -601,29 +606,59 @@ func (m *ChannelManagerImplV2) advanceToChecks(toChecks []*NodeChannelInfo) bool
 		)
 
 		for _, ch := range nodeAssign.Channels {
-			info := ch.GetWatchInfo()
-			if successful, got := m.Check(nodeAssign.NodeID, info); got {
-				log.Info("Success to check channel operations",
-					zap.Int64("opID", info.GetOpID()),
-					zap.String("check operation", info.GetState().String()),
-					zap.String("channel", info.GetVchan().GetChannelName()),
-					zap.Bool("operation finishing state", successful))
+			innerCh := ch
+
+			future := getOrCreateIOPool().Submit(func() (any, error) {
+				successful, got := m.Check(nodeAssign.NodeID, innerCh.GetWatchInfo())
+				if got {
+					return poolResult{
+						successful: successful,
+						ch:         innerCh,
+					}, nil
+				}
+				return nil, errors.New("Got results with no progress")
+			})
+			futures = append(futures, future)
+		}
+
+		for _, f := range futures {
+			got, err := f.Await()
+			if err == nil {
 				m.mu.Lock()
-				m.store.UpdateState(successful, ch)
+				result := got.(poolResult)
+				m.store.UpdateState(result.successful, result.ch)
 				m.mu.Unlock()
+
+				advanced = true
 			}
 		}
-		advanced = true
+
+		log.Info("Finish to Check ToWatch/ToRelease channel operations progress",
+			zap.Int("channel count", len(nodeAssign.Channels)),
+			zap.Strings("channel names", chNames),
+		)
 	}
 	return advanced
 }
 
 func (m *ChannelManagerImplV2) Notify(nodeID int64, info *datapb.ChannelWatchInfo) error {
-	return m.subCluster.NotifyChannelOperation(m.ctx, nodeID, &datapb.ChannelOperationsRequest{Infos: []*datapb.ChannelWatchInfo{info}})
+	log := log.With(
+		zap.String("channel", info.GetVchan().GetChannelName()),
+		zap.Int64("assignment", nodeID),
+		zap.String("operation", info.GetState().String()),
+	)
+	log.Info("Notify channel operation")
+	err := m.subCluster.NotifyChannelOperation(m.ctx, nodeID, &datapb.ChannelOperationsRequest{Infos: []*datapb.ChannelWatchInfo{info}})
+	if err != nil {
+		log.Warn("Fail to notify channel operations", zap.Error(err))
+		return err
+	}
+	log.Debug("Success to notify channel operations")
+	return nil
 }
 
 func (m *ChannelManagerImplV2) Check(nodeID int64, info *datapb.ChannelWatchInfo) (successful bool, got bool) {
-	log.With(
+	log := log.With(
 		zap.Int64("opID", info.GetOpID()),
 		zap.Int64("nodeID", nodeID),
 		zap.String("check operation", info.GetState().String()),
@@ -634,6 +669,9 @@ func (m *ChannelManagerImplV2) Check(nodeID int64, info *datapb.ChannelWatchInfo
 		log.Warn("Fail to check channel operation progress")
 		return false, false
 	}
+	log.Info("Got channel operation progress",
+		zap.String("got state", resp.GetState().String()),
+		zap.Int32("progress", resp.GetProgress()))
 	switch info.GetState() {
 	case datapb.ChannelWatchState_ToWatch:
 		if resp.GetState() == datapb.ChannelWatchState_ToWatch {
