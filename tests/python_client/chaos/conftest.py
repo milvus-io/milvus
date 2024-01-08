@@ -11,6 +11,7 @@ def pytest_addoption(parser):
     parser.addoption("--chaos_duration", action="store", default="7m", help="chaos_duration")
     parser.addoption("--chaos_interval", action="store", default="2m", help="chaos_interval")
     parser.addoption("--is_check", action="store", type=bool, default=False, help="is_check")
+    parser.addoption("--enable_upsert", action="store", type=bool, default=True, help="is_check")
     parser.addoption("--wait_signal", action="store", type=bool, default=True, help="wait_signal")
     parser.addoption("--collection_num", action="store", default="1", help="collection_num")
 
@@ -58,6 +59,11 @@ def chaos_duration(request):
 @pytest.fixture
 def chaos_interval(request):
     return request.config.getoption("--chaos_interval")
+
+
+@pytest.fixture
+def enable_upsert(request):
+    return request.config.getoption("--enable_upsert")
 
 
 @pytest.fixture

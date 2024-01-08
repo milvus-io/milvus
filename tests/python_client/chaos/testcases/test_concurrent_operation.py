@@ -67,16 +67,25 @@ class TestOperations(TestBase):
         self.milvus_ns = milvus_ns
         self.release_name = get_milvus_instance_name(self.milvus_ns, milvus_sys=self.milvus_sys)
 
-    def init_health_checkers(self, collection_name=None):
+    def init_health_checkers(self, collection_name=None, enable_upsert=True):
         c_name = collection_name
-        checkers = {
-            Op.insert: InsertChecker(collection_name=c_name),
-            Op.upsert: UpsertChecker(collection_name=c_name),
-            Op.flush: FlushChecker(collection_name=c_name),
-            Op.search: SearchChecker(collection_name=c_name),
-            Op.query: QueryChecker(collection_name=c_name),
-            Op.delete: DeleteChecker(collection_name=c_name),
-        }
+        if enable_upsert:
+            checkers = {
+                Op.insert: InsertChecker(collection_name=c_name),
+                Op.upsert: UpsertChecker(collection_name=c_name),
+                Op.flush: FlushChecker(collection_name=c_name),
+                Op.search: SearchChecker(collection_name=c_name),
+                Op.query: QueryChecker(collection_name=c_name),
+                Op.delete: DeleteChecker(collection_name=c_name),
+            }
+        else:
+            checkers = {
+                Op.insert: InsertChecker(collection_name=c_name),
+                Op.flush: FlushChecker(collection_name=c_name),
+                Op.search: SearchChecker(collection_name=c_name),
+                Op.query: QueryChecker(collection_name=c_name),
+                Op.delete: DeleteChecker(collection_name=c_name),
+            }
         self.health_checkers = checkers
 
     @pytest.fixture(scope="function", params=get_all_collections())
@@ -86,14 +95,14 @@ class TestOperations(TestBase):
         yield request.param
 
     @pytest.mark.tags(CaseLabel.L3)
-    def test_operations(self, request_duration, is_check, collection_name):
+    def test_operations(self, request_duration, is_check, collection_name, enable_upsert):
         # start the monitor threads to check the milvus ops
         log.info("*********************Test Start**********************")
         log.info(connections.get_connection_addr('default'))
         # event_records = EventRecords()
         c_name = collection_name if collection_name else cf.gen_unique_str("Checker_")
         # event_records.insert("init_health_checkers", "start")
-        self.init_health_checkers(collection_name=c_name)
+        self.init_health_checkers(collection_name=c_name, enable_upsert=enable_upsert)
         # event_records.insert("init_health_checkers", "finished")
         cc.start_monitor_threads(self.health_checkers)
         log.info("*********************Load Start**********************")

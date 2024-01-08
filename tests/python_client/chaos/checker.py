@@ -345,7 +345,7 @@ class Checker:
                                     shards_num=shards_num,
                                     timeout=timeout,
                                     enable_traceback=enable_traceback)
-        self.index_name = cf.gen_unique_str('index_')
+        self.index_name = "vec_index"
         self.c_wrap.create_index(self.float_vector_field_name,
                                  constants.DEFAULT_INDEX_PARAM,
                                  index_name=self.index_name,
