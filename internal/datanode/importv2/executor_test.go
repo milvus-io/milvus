@@ -207,8 +207,7 @@ func (s *ExecutorSuite) TestExecutor_ReadFileStat() {
 	var once sync.Once
 	data := createInsertData(s.T(), s.schema, s.numRows)
 	s.reader.EXPECT().Read().RunAndReturn(func() (*storage.InsertData, error) {
-		res, err := storage.NewInsertData(s.schema)
-		s.NoError(err)
+		var res *storage.InsertData
 		once.Do(func() {
 			res = data
 		})
@@ -239,8 +238,7 @@ func (s *ExecutorSuite) TestImportFile() {
 	var once sync.Once
 	data := createInsertData(s.T(), s.schema, s.numRows)
 	s.reader.EXPECT().Read().RunAndReturn(func() (*storage.InsertData, error) {
-		res, err := storage.NewInsertData(s.schema)
-		s.NoError(err)
+		var res *storage.InsertData
 		once.Do(func() {
 			res = data
 		})
