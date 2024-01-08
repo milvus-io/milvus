@@ -208,6 +208,36 @@ func (t *createCollectionTask) validatePartitionKey() error {
 	return nil
 }
 
+func (t *createCollectionTask) validateClusteringKey() error {
+	idx := -1
+	for i, field := range t.schema.Fields {
+		if field.GetIsClusteringKey() {
+			if idx != -1 {
+				return merr.WrapErrCollectionIllegalSchema(t.CollectionName,
+					fmt.Sprintf("there are more than one clustering key, field name = %s, %s", t.schema.Fields[idx].Name, field.Name))
+			}
+
+			if field.GetIsPrimaryKey() {
+				return merr.WrapErrCollectionIllegalSchema(t.CollectionName,
+					fmt.Sprintf("the clustering key field must not be primary key field, field name = %s", field.Name))
+			}
+
+			if field.GetIsPartitionKey() {
+				return merr.WrapErrCollectionIllegalSchema(t.CollectionName,
+					fmt.Sprintf("the clustering key field must not be partition key field, field name = %s", field.Name))
+			}
+			idx = i
+		}
+	}
+
+	if idx != -1 {
+		log.Info("create collection with clustering key",
+			zap.String("collectionName", t.CollectionName),
+			zap.String("clusteringKeyField", t.schema.Fields[idx].Name))
+	}
+	return nil
+}
+
 func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	t.Base.MsgType = commonpb.MsgType_CreateCollection
 	t.Base.SourceID = paramtable.GetNodeID()
@@ -263,6 +293,11 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 
 	// validate partition key mode
 	if err := t.validatePartitionKey(); err != nil {
+		return err
+	}
+
+	// validate clustering key
+	if err := t.validateClusteringKey(); err != nil {
 		return err
 	}
 
@@ -572,18 +607,19 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 			}
 			if field.FieldID >= common.StartOfUserFieldID {
 				t.result.Schema.Fields = append(t.result.Schema.Fields, &schemapb.FieldSchema{
-					FieldID:        field.FieldID,
-					Name:           field.Name,
-					IsPrimaryKey:   field.IsPrimaryKey,
-					AutoID:         field.AutoID,
-					Description:    field.Description,
-					DataType:       field.DataType,
-					TypeParams:     field.TypeParams,
-					IndexParams:    field.IndexParams,
-					IsDynamic:      field.IsDynamic,
-					IsPartitionKey: field.IsPartitionKey,
-					DefaultValue:   field.DefaultValue,
-					ElementType:    field.ElementType,
+					FieldID:         field.FieldID,
+					Name:            field.Name,
+					IsPrimaryKey:    field.IsPrimaryKey,
+					AutoID:          field.AutoID,
+					Description:     field.Description,
+					DataType:        field.DataType,
+					TypeParams:      field.TypeParams,
+					IndexParams:     field.IndexParams,
+					IsDynamic:       field.IsDynamic,
+					IsPartitionKey:  field.IsPartitionKey,
+					IsClusteringKey: field.IsClusteringKey,
+					DefaultValue:    field.DefaultValue,
+					ElementType:     field.ElementType,
 				})
 			}
 		}

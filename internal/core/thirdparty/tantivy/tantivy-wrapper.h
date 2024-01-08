@@ -93,9 +93,11 @@ struct TantivyIndexWrapper {
         writer_ = other.writer_;
         reader_ = other.reader_;
         finished_ = other.finished_;
+        path_ = other.path_;
         other.writer_ = nullptr;
         other.reader_ = nullptr;
         other.finished_ = false;
+        other.path_ = "";
     }
 
     TantivyIndexWrapper&
@@ -104,10 +106,12 @@ struct TantivyIndexWrapper {
             free();
             writer_ = other.writer_;
             reader_ = other.reader_;
+            path_ = other.path_;
             finished_ = other.finished_;
             other.writer_ = nullptr;
             other.reader_ = nullptr;
             other.finished_ = false;
+            other.path_ = "";
         }
         return *this;
     }
@@ -116,11 +120,13 @@ struct TantivyIndexWrapper {
                         TantivyDataType data_type,
                         const char* path) {
         writer_ = tantivy_create_index(field_name, data_type, path);
+        path_ = std::string(path);
     }
 
     explicit TantivyIndexWrapper(const char* path) {
         assert(tantivy_index_exist(path));
         reader_ = tantivy_load_index(path);
+        path_ = std::string(path);
     }
 
     ~TantivyIndexWrapper() {
@@ -130,6 +136,8 @@ struct TantivyIndexWrapper {
     template <typename T>
     void
     add_data(const T* array, uintptr_t len) {
+        assert(!finished_);
+
         if constexpr (std::is_same_v<T, bool>) {
             tantivy_index_add_bools(writer_, array, len);
             return;
@@ -182,7 +190,9 @@ struct TantivyIndexWrapper {
     finish() {
         if (!finished_) {
             tantivy_finish_index(writer_);
-            reader_ = tantivy_create_reader_for_index(writer_);
+            writer_ = nullptr;
+            reader_ = tantivy_load_index(path_.c_str());
+            finished_ = true;
         }
     }
 
@@ -358,5 +368,6 @@ struct TantivyIndexWrapper {
     bool finished_ = false;
     IndexWriter writer_ = nullptr;
     IndexReader reader_ = nullptr;
+    std::string path_;
 };
 }  // namespace milvus::tantivy

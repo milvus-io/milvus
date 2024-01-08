@@ -32,9 +32,9 @@ FindTermSSE4(const int64_t* src, size_t vec_size, int64_t val) {
     size_t remaining_size = vec_size % 2;
 
     __m128i xmm_target = _mm_set1_epi64x(val);
-    for (size_t i = 0; i < num_chunk; ++i) {
+    for (size_t i = 0; i < num_chunk * 2; i += 2) {
         __m128i xmm_data =
-            _mm_loadu_si128(reinterpret_cast<const __m128i*>(src + i * 2));
+            _mm_loadu_si128(reinterpret_cast<const __m128i*>(src + i));
         __m128i xmm_match = _mm_cmpeq_epi64(xmm_data, xmm_target);
         int mask = _mm_movemask_epi8(xmm_match);
         if (mask != 0) {

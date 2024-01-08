@@ -40,5 +40,14 @@ const int TERM_EXPR_IN_SIZE_THREAD = 50;
             std::is_same<T, float>::value || std::is_same<T, double>::value, \
         Message);
 
+enum class CompareType {
+    GT = 1,
+    GE = 2,
+    LT = 3,
+    LE = 4,
+    EQ = 5,
+    NEQ = 6,
+};
+
 }  // namespace simd
 }  // namespace milvus

@@ -124,15 +124,23 @@ func (suite *CheckerControllerSuite) TestBasic() {
 	suite.scheduler.EXPECT().GetSegmentTaskNum().Return(0).Maybe()
 	suite.scheduler.EXPECT().GetChannelTaskNum().Return(0).Maybe()
 
-	suite.balancer.EXPECT().AssignSegment(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-	suite.balancer.EXPECT().AssignChannel(mock.Anything, mock.Anything).Return(nil)
+	assignSegCounter := atomic.NewInt32(0)
+	assingChanCounter := atomic.NewInt32(0)
+	suite.balancer.EXPECT().AssignSegment(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(i1 int64, s []*meta.Segment, i2 []int64) []balance.SegmentAssignPlan {
+		assignSegCounter.Inc()
+		return nil
+	})
+	suite.balancer.EXPECT().AssignChannel(mock.Anything, mock.Anything).RunAndReturn(func(dc []*meta.DmChannel, i []int64) []balance.ChannelAssignPlan {
+		assingChanCounter.Inc()
+		return nil
+	})
 	suite.controller.Start()
 	defer suite.controller.Stop()
 
 	suite.Eventually(func() bool {
 		suite.controller.Check()
-		return counter.Load() > 0
-	}, 5*time.Second, 1*time.Second)
+		return counter.Load() > 0 && assignSegCounter.Load() > 0 && assingChanCounter.Load() > 0
+	}, 5*time.Second, 1*time.Millisecond)
 }
 
 func TestCheckControllerSuite(t *testing.T) {

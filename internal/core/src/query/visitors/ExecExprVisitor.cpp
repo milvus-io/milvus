@@ -2632,30 +2632,9 @@ ExecExprVisitor::ExecTermVisitorImplTemplate(TermExpr& expr_raw) -> BitsetType {
         return index->In(n, terms.data());
     };
 
-#if defined(USE_DYNAMIC_SIMD)
-    std::function<bool(MayConstRef<T> x)> elem_func;
-    if (n <= milvus::simd::TERM_EXPR_IN_SIZE_THREAD) {
-        elem_func = [&terms, &term_set, n](MayConstRef<T> x) {
-            if constexpr (std::is_integral<T>::value ||
-                          std::is_floating_point<T>::value) {
-                return milvus::simd::find_term_func<T>(terms.data(), n, x);
-            } else {
-                // For string type, simd performance not better than set mode
-                static_assert(std::is_same<T, std::string>::value ||
-                              std::is_same<T, std::string_view>::value);
-                return term_set.find(x) != term_set.end();
-            }
-        };
-    } else {
-        elem_func = [&term_set, n](MayConstRef<T> x) {
-            return term_set.find(x) != term_set.end();
-        };
-    }
-#else
     auto elem_func = [&term_set](MayConstRef<T> x) {
         return term_set.find(x) != term_set.end();
     };
-#endif
 
     auto default_skip_index_func = [&](const SkipIndex& skipIndex,
                                        FieldId fieldId,

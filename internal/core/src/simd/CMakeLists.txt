@@ -25,7 +25,8 @@ if (${CMAKE_SYSTEM_PROCESSOR} STREQUAL "x86_64")
     )
     set_source_files_properties(sse4.cpp PROPERTIES COMPILE_FLAGS "-msse4.2")
     set_source_files_properties(avx2.cpp PROPERTIES COMPILE_FLAGS "-mavx2")
-    set_source_files_properties(avx512.cpp PROPERTIES COMPILE_FLAGS "-mavx512f  -mavx512dq -mavx512bw")
+    set_source_files_properties(avx512.cpp PROPERTIES COMPILE_FLAGS "-mavx512f -mavx512vl -mavx512dq -mavx512bw")
+
 elseif (${CMAKE_SYSTEM_PROCESSOR} MATCHES "arm*")
     # TODO: add arm cpu simd
     message ("simd using arm mode")

@@ -71,8 +71,20 @@ BinarySet
 InvertedIndexTantivy<T>::Upload(const Config& config) {
     finish();
 
-    for (const auto& entry : std::filesystem::directory_iterator(path_)) {
-        disk_file_manager_->AddFile(entry.path());
+    boost::filesystem::path p(path_);
+    boost::filesystem::directory_iterator end_iter;
+
+    for (boost::filesystem::directory_iterator iter(p); iter != end_iter;
+         iter++) {
+        if (boost::filesystem::is_directory(*iter)) {
+            LOG_WARN("{} is a directory", iter->path().string());
+        } else {
+            LOG_INFO("trying to add index file: {}", iter->path().string());
+            AssertInfo(disk_file_manager_->AddFile(iter->path().string()),
+                       "failed to add index file: {}",
+                       iter->path().string());
+            LOG_INFO("index file: {} added", iter->path().string());
+        }
     }
 
     BinarySet ret;
