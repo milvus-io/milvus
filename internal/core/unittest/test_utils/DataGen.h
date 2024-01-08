@@ -904,7 +904,7 @@ SealedCreator(SchemaPtr schema, const GeneratedData& dataset) {
 }
 
 inline std::unique_ptr<milvus::index::VectorIndex>
-GenVecIndexing(int64_t N, int64_t dim, const float* vec) {
+GenVecIndexing(int64_t N, int64_t dim, const float* vec, const char* index_type) {
     auto conf =
         knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
                        {knowhere::meta::DIM, std::to_string(dim)},
@@ -920,7 +920,7 @@ GenVecIndexing(int64_t N, int64_t dim, const float* vec) {
     milvus::storage::FileManagerContext file_manager_context(
         field_data_meta, index_meta, chunk_manager);
     auto indexing = std::make_unique<index::VectorMemIndex<float>>(
-        knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+        index_type,
         knowhere::metric::L2,
         knowhere::Version::GetCurrentVersion().VersionNumber(),
         file_manager_context);

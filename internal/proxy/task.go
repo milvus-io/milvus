@@ -44,6 +44,7 @@ import (
 const (
 	IgnoreGrowingKey     = "ignore_growing"
 	ReduceStopForBestKey = "reduce_stop_for_best"
+	GroupByFieldKey      = "group_by_field"
 	AnnsFieldKey         = "anns_field"
 	TopKKey              = "topk"
 	NQKey                = "nq"
@@ -207,6 +208,36 @@ func (t *createCollectionTask) validatePartitionKey() error {
 	return nil
 }
 
+func (t *createCollectionTask) validateClusteringKey() error {
+	idx := -1
+	for i, field := range t.schema.Fields {
+		if field.GetIsClusteringKey() {
+			if idx != -1 {
+				return merr.WrapErrCollectionIllegalSchema(t.CollectionName,
+					fmt.Sprintf("there are more than one clustering key, field name = %s, %s", t.schema.Fields[idx].Name, field.Name))
+			}
+
+			if field.GetIsPrimaryKey() {
+				return merr.WrapErrCollectionIllegalSchema(t.CollectionName,
+					fmt.Sprintf("the clustering key field must not be primary key field, field name = %s", field.Name))
+			}
+
+			if field.GetIsPartitionKey() {
+				return merr.WrapErrCollectionIllegalSchema(t.CollectionName,
+					fmt.Sprintf("the clustering key field must not be partition key field, field name = %s", field.Name))
+			}
+			idx = i
+		}
+	}
+
+	if idx != -1 {
+		log.Info("create collection with clustering key",
+			zap.String("collectionName", t.CollectionName),
+			zap.String("clusteringKeyField", t.schema.Fields[idx].Name))
+	}
+	return nil
+}
+
 func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	t.Base.MsgType = commonpb.MsgType_CreateCollection
 	t.Base.SourceID = paramtable.GetNodeID()
@@ -262,6 +293,11 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 
 	// validate partition key mode
 	if err := t.validatePartitionKey(); err != nil {
+		return err
+	}
+
+	// validate clustering key
+	if err := t.validateClusteringKey(); err != nil {
 		return err
 	}
 
@@ -571,18 +607,19 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 			}
 			if field.FieldID >= common.StartOfUserFieldID {
 				t.result.Schema.Fields = append(t.result.Schema.Fields, &schemapb.FieldSchema{
-					FieldID:        field.FieldID,
-					Name:           field.Name,
-					IsPrimaryKey:   field.IsPrimaryKey,
-					AutoID:         field.AutoID,
-					Description:    field.Description,
-					DataType:       field.DataType,
-					TypeParams:     field.TypeParams,
-					IndexParams:    field.IndexParams,
-					IsDynamic:      field.IsDynamic,
-					IsPartitionKey: field.IsPartitionKey,
-					DefaultValue:   field.DefaultValue,
-					ElementType:    field.ElementType,
+					FieldID:         field.FieldID,
+					Name:            field.Name,
+					IsPrimaryKey:    field.IsPrimaryKey,
+					AutoID:          field.AutoID,
+					Description:     field.Description,
+					DataType:        field.DataType,
+					TypeParams:      field.TypeParams,
+					IndexParams:     field.IndexParams,
+					IsDynamic:       field.IsDynamic,
+					IsPartitionKey:  field.IsPartitionKey,
+					IsClusteringKey: field.IsClusteringKey,
+					DefaultValue:    field.DefaultValue,
+					ElementType:     field.ElementType,
 				})
 			}
 		}
@@ -678,8 +715,8 @@ func (t *showCollectionsTask) Execute(ctx context.Context) error {
 		for _, collectionName := range t.CollectionNames {
 			collectionID, err := globalMetaCache.GetCollectionID(ctx, t.GetDbName(), collectionName)
 			if err != nil {
-				log.Debug("Failed to get collection id.", zap.Any("collectionName", collectionName),
-					zap.Any("requestID", t.Base.MsgID), zap.Any("requestType", "showCollections"))
+				log.Debug("Failed to get collection id.", zap.String("collectionName", collectionName),
+					zap.Int64("requestID", t.Base.MsgID), zap.String("requestType", "showCollections"))
 				return err
 			}
 			collectionIDs = append(collectionIDs, collectionID)
@@ -725,14 +762,14 @@ func (t *showCollectionsTask) Execute(ctx context.Context) error {
 			collectionName, ok := IDs2Names[id]
 			if !ok {
 				log.Debug("Failed to get collection info. This collection may be not released",
-					zap.Any("collectionID", id),
-					zap.Any("requestID", t.Base.MsgID), zap.Any("requestType", "showCollections"))
+					zap.Int64("collectionID", id),
+					zap.Int64("requestID", t.Base.MsgID), zap.String("requestType", "showCollections"))
 				continue
 			}
 			collectionInfo, err := globalMetaCache.GetCollectionInfo(ctx, t.GetDbName(), collectionName, id)
 			if err != nil {
-				log.Debug("Failed to get collection info.", zap.Any("collectionName", collectionName),
-					zap.Any("requestID", t.Base.MsgID), zap.Any("requestType", "showCollections"))
+				log.Debug("Failed to get collection info.", zap.String("collectionName", collectionName),
+					zap.Int64("requestID", t.Base.MsgID), zap.String("requestType", "showCollections"))
 				return err
 			}
 			t.result.CollectionIds = append(t.result.CollectionIds, id)
@@ -1177,8 +1214,8 @@ func (t *showPartitionsTask) Execute(ctx context.Context) error {
 		collectionName := t.CollectionName
 		collectionID, err := globalMetaCache.GetCollectionID(ctx, t.GetDbName(), collectionName)
 		if err != nil {
-			log.Debug("Failed to get collection id.", zap.Any("collectionName", collectionName),
-				zap.Any("requestID", t.Base.MsgID), zap.Any("requestType", "showPartitions"))
+			log.Debug("Failed to get collection id.", zap.String("collectionName", collectionName),
+				zap.Int64("requestID", t.Base.MsgID), zap.String("requestType", "showPartitions"))
 			return err
 		}
 		IDs2Names := make(map[UniqueID]string)
@@ -1190,8 +1227,8 @@ func (t *showPartitionsTask) Execute(ctx context.Context) error {
 		for _, partitionName := range t.PartitionNames {
 			partitionID, err := globalMetaCache.GetPartitionID(ctx, t.GetDbName(), collectionName, partitionName)
 			if err != nil {
-				log.Debug("Failed to get partition id.", zap.Any("partitionName", partitionName),
-					zap.Any("requestID", t.Base.MsgID), zap.Any("requestType", "showPartitions"))
+				log.Debug("Failed to get partition id.", zap.String("partitionName", partitionName),
+					zap.Int64("requestID", t.Base.MsgID), zap.String("requestType", "showPartitions"))
 				return err
 			}
 			partitionIDs = append(partitionIDs, partitionID)
@@ -1229,14 +1266,14 @@ func (t *showPartitionsTask) Execute(ctx context.Context) error {
 		for offset, id := range resp.PartitionIDs {
 			partitionName, ok := IDs2Names[id]
 			if !ok {
-				log.Debug("Failed to get partition id.", zap.Any("partitionName", partitionName),
-					zap.Any("requestID", t.Base.MsgID), zap.Any("requestType", "showPartitions"))
+				log.Debug("Failed to get partition id.", zap.String("partitionName", partitionName),
+					zap.Int64("requestID", t.Base.MsgID), zap.String("requestType", "showPartitions"))
 				return errors.New("failed to show partitions")
 			}
 			partitionInfo, err := globalMetaCache.GetPartitionInfo(ctx, t.GetDbName(), collectionName, partitionName)
 			if err != nil {
-				log.Debug("Failed to get partition id.", zap.Any("partitionName", partitionName),
-					zap.Any("requestID", t.Base.MsgID), zap.Any("requestType", "showPartitions"))
+				log.Debug("Failed to get partition id.", zap.String("partitionName", partitionName),
+					zap.Int64("requestID", t.Base.MsgID), zap.String("requestType", "showPartitions"))
 				return err
 			}
 			t.result.PartitionIDs = append(t.result.PartitionIDs, id)
@@ -1487,7 +1524,7 @@ func (t *loadCollectionTask) Execute(ctx context.Context) (err error) {
 		),
 		DbID:           0,
 		CollectionID:   collID,
-		Schema:         collSchema,
+		Schema:         collSchema.CollectionSchema,
 		ReplicaNumber:  t.ReplicaNumber,
 		FieldIndexID:   fieldIndexIDs,
 		Refresh:        t.Refresh,
@@ -1738,7 +1775,7 @@ func (t *loadPartitionsTask) Execute(ctx context.Context) error {
 		DbID:           0,
 		CollectionID:   collID,
 		PartitionIDs:   partitionIDs,
-		Schema:         collSchema,
+		Schema:         collSchema.CollectionSchema,
 		ReplicaNumber:  t.ReplicaNumber,
 		FieldIndexID:   fieldIndexIDs,
 		Refresh:        t.Refresh,

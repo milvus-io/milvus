@@ -23,7 +23,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
+	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -73,7 +73,7 @@ func (s *Server) ActivateChecker(ctx context.Context, req *querypb.ActivateCheck
 		log.Warn("failed to activate checker", zap.Error(err))
 		return merr.Status(err), nil
 	}
-	if err := s.checkerController.Activate(checkers.CheckerType(req.CheckerID)); err != nil {
+	if err := s.checkerController.Activate(utils.CheckerType(req.CheckerID)); err != nil {
 		log.Warn("failed to activate checker", zap.Error(err))
 		return merr.Status(merr.WrapErrServiceInternal(err.Error())), nil
 	}
@@ -87,7 +87,7 @@ func (s *Server) DeactivateChecker(ctx context.Context, req *querypb.DeactivateC
 		log.Warn("failed to deactivate checker", zap.Error(err))
 		return merr.Status(err), nil
 	}
-	if err := s.checkerController.Deactivate(checkers.CheckerType(req.CheckerID)); err != nil {
+	if err := s.checkerController.Deactivate(utils.CheckerType(req.CheckerID)); err != nil {
 		log.Warn("failed to deactivate checker", zap.Error(err))
 		return merr.Status(merr.WrapErrServiceInternal(err.Error())), nil
 	}

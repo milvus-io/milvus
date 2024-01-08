@@ -164,7 +164,7 @@ func (s *Server) init() error {
 	// wait for grpc server loop start
 	err = <-s.grpcErrChan
 	if err != nil {
-		log.Error("IndexNode", zap.Any("grpc error", err))
+		log.Error("IndexNode", zap.Error(err))
 		return err
 	}
 

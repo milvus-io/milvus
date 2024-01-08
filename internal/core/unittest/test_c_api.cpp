@@ -316,7 +316,7 @@ TEST(CApiTest, SegmentTest) {
     ASSERT_NE(status.error_code, Success);
     DeleteCollection(collection);
     DeleteSegment(segment);
-    free((char *)status.error_msg);
+    free((char*)status.error_msg);
 }
 
 TEST(CApiTest, CPlan) {
@@ -1579,7 +1579,10 @@ TEST(CApiTest, ReduceRemoveDuplicates) {
 }
 
 void
-testReduceSearchWithExpr(int N, int topK, int num_queries, bool filter_all = false) {
+testReduceSearchWithExpr(int N,
+                         int topK,
+                         int num_queries,
+                         bool filter_all = false) {
     std::cerr << "testReduceSearchWithExpr(" << N << ", " << topK << ", "
               << num_queries << ")" << std::endl;
 
@@ -1637,7 +1640,8 @@ testReduceSearchWithExpr(int N, int topK, int num_queries, bool filter_all = fal
                                                 search_params: "{\"nprobe\": 10}"
                                             >
                                             placeholder_tag: "$0">
-                                            output_field_ids: 100)") %topK %N;
+                                            output_field_ids: 100)") %
+              topK % N;
     }
     auto serialized_expr_plan = fmt.str();
     auto blob = generate_query_data(num_queries);
@@ -2305,7 +2309,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
         generate_collection_schema(knowhere::metric::L2, DIM, false);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
-   CSegmentInterface segment;
+    CSegmentInterface segment;
     auto status = NewSegment(collection, Growing, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
 

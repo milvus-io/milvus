@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
@@ -680,6 +681,13 @@ func (loader *segmentLoader) loadFieldsIndex(ctx context.Context,
 	numRows int64,
 	indexedFieldInfos map[int64]*IndexedFieldInfo,
 ) error {
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", segment.Collection()),
+		zap.Int64("partitionID", segment.Partition()),
+		zap.Int64("segmentID", segment.ID()),
+		zap.Int64("rowCount", numRows),
+	)
+
 	for fieldID, fieldInfo := range indexedFieldInfos {
 		indexInfo := fieldInfo.IndexInfo
 		err := loader.loadFieldIndex(ctx, segment, indexInfo)
@@ -688,8 +696,6 @@ func (loader *segmentLoader) loadFieldsIndex(ctx context.Context,
 		}
 
 		log.Info("load field binlogs done for sealed segment with index",
-			zap.Int64("collection", segment.collectionID),
-			zap.Int64("segment", segment.segmentID),
 			zap.Int64("fieldID", fieldID),
 			zap.Any("binlog", fieldInfo.FieldBinlog.Binlogs),
 			zap.Int32("current_index_version", fieldInfo.IndexInfo.GetCurrentIndexVersion()),
@@ -792,23 +798,35 @@ func (loader *segmentLoader) LoadDeltaLogs(ctx context.Context, segment Segment,
 	)
 	dCodec := storage.DeleteCodec{}
 	var blobs []*storage.Blob
+	var futures []*conc.Future[any]
 	for _, deltaLog := range deltaLogs {
 		for _, bLog := range deltaLog.GetBinlogs() {
+			bLog := bLog
 			// the segment has applied the delta logs, skip it
 			if bLog.GetTimestampTo() > 0 && // this field may be missed in legacy versions
 				bLog.GetTimestampTo() < segment.LastDeltaTimestamp() {
 				continue
 			}
-			value, err := loader.cm.Read(ctx, bLog.GetLogPath())
-			if err != nil {
-				return err
-			}
-			blob := &storage.Blob{
-				Key:   bLog.GetLogPath(),
-				Value: value,
-			}
-			blobs = append(blobs, blob)
+			future := GetLoadPool().Submit(func() (any, error) {
+				value, err := loader.cm.Read(ctx, bLog.GetLogPath())
+				if err != nil {
+					return nil, err
+				}
+				blob := &storage.Blob{
+					Key:   bLog.GetLogPath(),
+					Value: value,
+				}
+				return blob, nil
+			})
+			futures = append(futures, future)
 		}
+	}
+	for _, future := range futures {
+		blob, err := future.Await()
+		if err != nil {
+			return err
+		}
+		blobs = append(blobs, blob.(*storage.Blob))
 	}
 	if len(blobs) == 0 {
 		log.Info("there are no delta logs saved with segment, skip loading delete record")

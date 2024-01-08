@@ -50,69 +50,42 @@ jobs:
         id: extracter
         run: |
           echo "::set-output name=version::$(date +%Y%m%d)"
-          echo "::set-output name=sha_short::$(git rev-parse --short HEAD)"
+          echo "::set-output name=sha_short::$(git rev-parse --short=7 HEAD)"
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            milvusdb/milvus-env
+          tags: |
+            type=raw,enable=true,value=${{ matrix.os }}-{{date 'YYYYMMDD'}}-{{sha}}
+            type=raw,enable=true,value=${{ matrix.os }}-latest
       # - name: Setup upterm session
       #   uses: lhotari/action-upterm@v1
-      - name: Docker Pull
-        shell: bash
-        run: |
-          docker run --rm --privileged tonistiigi/binfmt:latest --install arm64
-          docker buildx ls
-
-          # Check if the builder named "milvus" exists
-          if docker buildx ls | grep -q "milvus"; then
-              echo "Builder 'milvus' already exists. Skipping creation."
-          else
-              # Create the builder named "milvus"
-              echo "Creating builder named 'milvus'..."
-              docker buildx create --use --name=milvus --driver docker-container
-              echo "'milvus' builder created."
-          fi
-      - name: Docker Build
-        if: success() && github.event_name == 'pull_request' && github.repository == 'milvus-io/milvus'
-        shell: bash
-        run: |
-          docker buildx ls
-          docker buildx build --platform linux/amd64,linux/arm64 -t milvusdb/milvus-env:${OS_NAME}-${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }} -f build/docker/builder/cpu/${OS_NAME}/Dockerfile .      
-      - name: Docker Build&Push
-        if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
-        shell: bash
-        run: |
-          docker buildx ls
-          docker login -u ${{ secrets.DOCKERHUB_USER }} \
-                       -p ${{ secrets.DOCKERHUB_TOKEN }}
-          docker buildx build --platform linux/amd64,linux/arm64 --push -t milvusdb/milvus-env:${OS_NAME}-${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }} -f build/docker/builder/cpu/${OS_NAME}/Dockerfile .
-          docker buildx build --platform linux/amd64,linux/arm64 --push -t milvusdb/milvus-env:${OS_NAME}-latest -f build/docker/builder/cpu/${OS_NAME}/Dockerfile .
-      - name: Update Builder Image Changes
-        if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus' && matrix.os == 'ubuntu20.04'
-        continue-on-error: true
-        shell: bash
-        run: |
-          sed -i "s#^DATE_VERSION=.*#DATE_VERSION=${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }}#g" .env
-          sed -i "s#^LATEST_DATE_VERSION=.*#LATEST_DATE_VERSION=${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }}#g" .env
-          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
-          git add .env
-          git commit -m "Update Builder image changes"
-      - name: Create Pull Request
-        id: cpr
-        if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus' && matrix.os == 'ubuntu20.04'
-        continue-on-error: true
-        uses: peter-evans/create-pull-request@v3
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
         with:
-          token: ${{ secrets.ALL_CONTRIBUTORS_TOKEN }}
-          author: ${{ github.actor }} <${{ github.actor }}@users.noreply.github.com>
-          signoff: false
-          branch: update_builder_${{ github.sha }}
-          delete-branch: true
-          title: '[automated] Update Builder image changes'
-          body: |
-            Update Builder image changes
-            See changes: https://github.com/milvus-io/milvus/commit/${{ github.sha }}
-            Signed-off-by: ${{ github.actor }} ${{ github.actor }}@users.noreply.github.com
-      - name: Check outputs
+          platforms: arm64
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Login to Docker Hub
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USER }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          file: build/docker/builder/cpu/${{ matrix.os }}/Dockerfile
+      - name: Bump Builder Version
+        uses: ./.github/actions/bump-builder-version
         if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus' && matrix.os == 'ubuntu20.04'
-        run: |
-          echo "Pull Request Number - ${{ steps.cpr.outputs.pull-request-number }}"
-          echo "Pull Request URL - ${{ steps.cpr.outputs.pull-request-url }}"
-
+        with:
+          tag: "${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }}"
+          type: cpu
+          token: ${{ secrets.ALL_CONTRIBUTORS_TOKEN }}

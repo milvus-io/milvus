@@ -459,7 +459,8 @@ GetIndexTypesV2() {
 template <>
 inline std::vector<std::string>
 GetIndexTypesV2<std::string>() {
-    return std::vector<std::string>{milvus::index::INVERTED_INDEX_TYPE, "marisa"};
+    return std::vector<std::string>{milvus::index::INVERTED_INDEX_TYPE,
+                                    "marisa"};
 }
 
 }  // namespace

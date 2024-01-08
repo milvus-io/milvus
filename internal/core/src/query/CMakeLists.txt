@@ -26,6 +26,7 @@ set(MILVUS_QUERY_SRCS
         SearchOnIndex.cpp
         SearchBruteForce.cpp
         SubSearchResult.cpp
+        GroupByOperator.cpp
         PlanProto.cpp
         )
 add_library(milvus_query ${MILVUS_QUERY_SRCS})

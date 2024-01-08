@@ -8,6 +8,8 @@ import (
 	internalpb "github.com/milvus-io/milvus/internal/proto/internalpb"
 	mock "github.com/stretchr/testify/mock"
 
+	msgpb "github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+
 	querypb "github.com/milvus-io/milvus/internal/proto/querypb"
 
 	streamrpc "github.com/milvus-io/milvus/internal/util/streamrpc"
@@ -724,9 +726,9 @@ func (_c *MockShardDelegator_SyncDistribution_Call) RunAndReturn(run func(contex
 	return _c
 }
 
-// SyncTargetVersion provides a mock function with given fields: newVersion, growingInTarget, sealedInTarget, droppedInTarget
-func (_m *MockShardDelegator) SyncTargetVersion(newVersion int64, growingInTarget []int64, sealedInTarget []int64, droppedInTarget []int64) {
-	_m.Called(newVersion, growingInTarget, sealedInTarget, droppedInTarget)
+// SyncTargetVersion provides a mock function with given fields: newVersion, growingInTarget, sealedInTarget, droppedInTarget, checkpoint
+func (_m *MockShardDelegator) SyncTargetVersion(newVersion int64, growingInTarget []int64, sealedInTarget []int64, droppedInTarget []int64, checkpoint *msgpb.MsgPosition) {
+	_m.Called(newVersion, growingInTarget, sealedInTarget, droppedInTarget, checkpoint)
 }
 
 // MockShardDelegator_SyncTargetVersion_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SyncTargetVersion'
@@ -739,13 +741,14 @@ type MockShardDelegator_SyncTargetVersion_Call struct {
 //   - growingInTarget []int64
 //   - sealedInTarget []int64
 //   - droppedInTarget []int64
-func (_e *MockShardDelegator_Expecter) SyncTargetVersion(newVersion interface{}, growingInTarget interface{}, sealedInTarget interface{}, droppedInTarget interface{}) *MockShardDelegator_SyncTargetVersion_Call {
-	return &MockShardDelegator_SyncTargetVersion_Call{Call: _e.mock.On("SyncTargetVersion", newVersion, growingInTarget, sealedInTarget, droppedInTarget)}
+//   - checkpoint *msgpb.MsgPosition
+func (_e *MockShardDelegator_Expecter) SyncTargetVersion(newVersion interface{}, growingInTarget interface{}, sealedInTarget interface{}, droppedInTarget interface{}, checkpoint interface{}) *MockShardDelegator_SyncTargetVersion_Call {
+	return &MockShardDelegator_SyncTargetVersion_Call{Call: _e.mock.On("SyncTargetVersion", newVersion, growingInTarget, sealedInTarget, droppedInTarget, checkpoint)}
 }
 
-func (_c *MockShardDelegator_SyncTargetVersion_Call) Run(run func(newVersion int64, growingInTarget []int64, sealedInTarget []int64, droppedInTarget []int64)) *MockShardDelegator_SyncTargetVersion_Call {
+func (_c *MockShardDelegator_SyncTargetVersion_Call) Run(run func(newVersion int64, growingInTarget []int64, sealedInTarget []int64, droppedInTarget []int64, checkpoint *msgpb.MsgPosition)) *MockShardDelegator_SyncTargetVersion_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].([]int64), args[2].([]int64), args[3].([]int64))
+		run(args[0].(int64), args[1].([]int64), args[2].([]int64), args[3].([]int64), args[4].(*msgpb.MsgPosition))
 	})
 	return _c
 }
@@ -755,7 +758,7 @@ func (_c *MockShardDelegator_SyncTargetVersion_Call) Return() *MockShardDelegato
 	return _c
 }
 
-func (_c *MockShardDelegator_SyncTargetVersion_Call) RunAndReturn(run func(int64, []int64, []int64, []int64)) *MockShardDelegator_SyncTargetVersion_Call {
+func (_c *MockShardDelegator_SyncTargetVersion_Call) RunAndReturn(run func(int64, []int64, []int64, []int64, *msgpb.MsgPosition)) *MockShardDelegator_SyncTargetVersion_Call {
 	_c.Call.Return(run)
 	return _c
 }

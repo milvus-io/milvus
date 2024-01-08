@@ -80,6 +80,6 @@ func (p *producer) Send(message *mqwrapper.ProducerMessage) (UniqueID, error) {
 func (p *producer) Close() {
 	err := p.c.server.DestroyTopic(p.topic)
 	if err != nil {
-		log.Warn("Producer close failed", zap.Any("topicName", p.topic), zap.Any("error", err))
+		log.Warn("Producer close failed", zap.String("topicName", p.topic), zap.Error(err))
 	}
 }

@@ -341,6 +341,7 @@ class TestQueryParams(TestcaseBase):
                     assert _r[ct.default_bool_field_name] == bool_value
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.xfail(reason="issue #29570")
     def test_query_expr_by_int64(self):
         """
         target: test query through int64 field and output int64 field

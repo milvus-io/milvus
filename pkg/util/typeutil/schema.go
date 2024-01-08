@@ -816,6 +816,16 @@ func GetPartitionKeyFieldSchema(schema *schemapb.CollectionSchema) (*schemapb.Fi
 	return nil, errors.New("partition key field is not found")
 }
 
+// GetDynamicField returns the dynamic field if it exists.
+func GetDynamicField(schema *schemapb.CollectionSchema) *schemapb.FieldSchema {
+	for _, fieldSchema := range schema.GetFields() {
+		if fieldSchema.GetIsDynamic() {
+			return fieldSchema
+		}
+	}
+	return nil
+}
+
 // HasPartitionKey check if a collection schema has PartitionKey field
 func HasPartitionKey(schema *schemapb.CollectionSchema) bool {
 	for _, fieldSchema := range schema.Fields {
@@ -865,6 +875,21 @@ func IsPrimaryFieldDataExist(datas []*schemapb.FieldData, primaryFieldSchema *sc
 	}
 
 	return primaryFieldData != nil
+}
+
+func AppendSystemFields(schema *schemapb.CollectionSchema) {
+	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+		FieldID:      int64(common.RowIDField),
+		Name:         common.RowIDFieldName,
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_Int64,
+	})
+	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+		FieldID:      int64(common.TimeStampField),
+		Name:         common.TimeStampFieldName,
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_Int64,
+	})
 }
 
 func AppendIDs(dst *schemapb.IDs, src *schemapb.IDs, idx int) {
@@ -1068,4 +1093,62 @@ func SelectMinPK[T ResultWithID](results []T, cursors []int64) (int, bool) {
 	}
 
 	return sel, drainResult
+}
+
+func AppendGroupByValue(dstResData *schemapb.SearchResultData,
+	groupByVal interface{}, srcDataType schemapb.DataType,
+) error {
+	if dstResData.GroupByFieldValue == nil {
+		dstResData.GroupByFieldValue = &schemapb.FieldData{
+			Type: srcDataType,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{},
+			},
+		}
+	}
+	dstScalarField := dstResData.GroupByFieldValue.GetScalars()
+	switch srcDataType {
+	case schemapb.DataType_Bool:
+		if dstScalarField.GetBoolData() == nil {
+			dstScalarField.Data = &schemapb.ScalarField_BoolData{
+				BoolData: &schemapb.BoolArray{
+					Data: []bool{},
+				},
+			}
+		}
+		dstScalarField.GetBoolData().Data = append(dstScalarField.GetBoolData().Data, groupByVal.(bool))
+	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
+		if dstScalarField.GetIntData() == nil {
+			dstScalarField.Data = &schemapb.ScalarField_IntData{
+				IntData: &schemapb.IntArray{
+					Data: []int32{},
+				},
+			}
+		}
+		dstScalarField.GetIntData().Data = append(dstScalarField.GetIntData().Data, groupByVal.(int32))
+	case schemapb.DataType_Int64:
+		if dstScalarField.GetLongData() == nil {
+			dstScalarField.Data = &schemapb.ScalarField_LongData{
+				LongData: &schemapb.LongArray{
+					Data: []int64{},
+				},
+			}
+		}
+		dstScalarField.GetLongData().Data = append(dstScalarField.GetLongData().Data, groupByVal.(int64))
+	case schemapb.DataType_VarChar:
+		if dstScalarField.GetStringData() == nil {
+			dstScalarField.Data = &schemapb.ScalarField_StringData{
+				StringData: &schemapb.StringArray{
+					Data: []string{},
+				},
+			}
+		}
+		dstScalarField.GetStringData().Data = append(dstScalarField.GetStringData().Data, groupByVal.(string))
+	default:
+		log.Error("Not supported field type from group_by value field", zap.String("field type",
+			srcDataType.String()))
+		return fmt.Errorf("not supported field type from group_by value field: %s",
+			srcDataType.String())
+	}
+	return nil
 }

@@ -263,10 +263,10 @@ func (queue *dmTaskQueue) PopActiveTask(taskID UniqueID) task {
 		defer queue.statsLock.Unlock()
 
 		delete(queue.activeTasks, taskID)
-		log.Debug("Proxy dmTaskQueue popPChanStats", zap.Any("taskID", t.ID()))
+		log.Debug("Proxy dmTaskQueue popPChanStats", zap.Int64("taskID", t.ID()))
 		queue.popPChanStats(t)
 	} else {
-		log.Warn("Proxy task not in active task list!", zap.Any("taskID", taskID))
+		log.Warn("Proxy task not in active task list!", zap.Int64("taskID", taskID))
 	}
 	return t
 }

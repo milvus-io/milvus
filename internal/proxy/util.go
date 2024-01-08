@@ -978,7 +978,7 @@ func translatePkOutputFields(schema *schemapb.CollectionSchema) ([]string, []int
 //	output_fields=["*"] 	 ==> [A,B,C,D]
 //	output_fields=["*",A] 	 ==> [A,B,C,D]
 //	output_fields=["*",C]    ==> [A,B,C,D]
-func translateOutputFields(outputFields []string, schema *schemapb.CollectionSchema, addPrimary bool) ([]string, []string, error) {
+func translateOutputFields(outputFields []string, schema *schemaInfo, addPrimary bool) ([]string, []string, error) {
 	var primaryFieldName string
 	allFieldNameMap := make(map[string]bool)
 	resultFieldNameMap := make(map[string]bool)
@@ -1006,7 +1006,7 @@ func translateOutputFields(outputFields []string, schema *schemapb.CollectionSch
 				userOutputFieldsMap[outputFieldName] = true
 			} else {
 				if schema.EnableDynamicField {
-					schemaH, err := typeutil.CreateSchemaHelper(schema)
+					schemaH, err := typeutil.CreateSchemaHelper(schema.CollectionSchema)
 					if err != nil {
 						return nil, nil, err
 					}
@@ -1447,7 +1447,7 @@ func assignPartitionKeys(ctx context.Context, dbName string, collName string, ke
 		return nil, err
 	}
 
-	partitionKeyFieldSchema, err := typeutil.GetPartitionKeyFieldSchema(schema)
+	partitionKeyFieldSchema, err := typeutil.GetPartitionKeyFieldSchema(schema.CollectionSchema)
 	if err != nil {
 		return nil, err
 	}
@@ -1600,7 +1600,7 @@ func SendReplicateMessagePack(ctx context.Context, replicateMsgStream msgstream.
 	}
 }
 
-func GetCachedCollectionSchema(ctx context.Context, dbName string, colName string) (*schemapb.CollectionSchema, error) {
+func GetCachedCollectionSchema(ctx context.Context, dbName string, colName string) (*schemaInfo, error) {
 	if globalMetaCache != nil {
 		return globalMetaCache.GetCollectionSchema(ctx, dbName, colName)
 	}

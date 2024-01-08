@@ -265,6 +265,7 @@ message VchannelInfo {
   repeated int64 dropped_segmentIds = 9;
   repeated int64 indexed_segmentIds = 10;
   repeated SegmentInfo indexed_segments = 11;
+  repeated int64 level_zero_segment_ids = 12;
 }
 
 message WatchDmChannelsRequest {

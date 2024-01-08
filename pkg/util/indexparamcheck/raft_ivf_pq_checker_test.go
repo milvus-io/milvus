@@ -123,7 +123,7 @@ func Test_raftIVFPQChecker_CheckTrain(t *testing.T) {
 		{validParamsMzero, true},
 		{p1, true},
 		{p2, true},
-		{p3, true},
+		{p3, false},
 		{p4, false},
 		{p5, false},
 		{p6, false},

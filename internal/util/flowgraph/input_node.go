@@ -77,7 +77,7 @@ func (inNode *InputNode) SetCloseMethod(gracefully bool) {
 	log.Info("input node close method set",
 		zap.String("node", inNode.Name()),
 		zap.Int64("collection", inNode.collectionID),
-		zap.Any("gracefully", gracefully))
+		zap.Bool("gracefully", gracefully))
 }
 
 // Operate consume a message pack from msgstream and return

@@ -166,7 +166,7 @@ func (t *timetickSync) sendToChannel() bool {
 		// give warning every 2 second if not get ttMsg from source sessions
 		if maxCnt%10 == 0 {
 			log.Warn("session idle for long time", zap.Any("idle list", idleSessionList),
-				zap.Any("idle time", Params.ProxyCfg.TimeTickInterval.GetAsInt64()*time.Millisecond.Milliseconds()*maxCnt))
+				zap.Int64("idle time", Params.ProxyCfg.TimeTickInterval.GetAsInt64()*time.Millisecond.Milliseconds()*maxCnt))
 		}
 		return false
 	}

@@ -911,14 +911,14 @@ func (s *DelegatorDataSuite) TestSyncTargetVersion() {
 		ms.EXPECT().Type().Return(segments.SegmentTypeGrowing)
 		ms.EXPECT().Collection().Return(1)
 		ms.EXPECT().Partition().Return(1)
-		ms.EXPECT().RowNum().Return(0)
+		ms.EXPECT().InsertCount().Return(0)
 		ms.EXPECT().Indexes().Return(nil)
 		ms.EXPECT().Shard().Return(s.vchannelName)
 		ms.EXPECT().Level().Return(datapb.SegmentLevel_L1)
 		s.manager.Segment.Put(segments.SegmentTypeGrowing, ms)
 	}
 
-	s.delegator.SyncTargetVersion(int64(5), []int64{1}, []int64{2}, []int64{3, 4})
+	s.delegator.SyncTargetVersion(int64(5), []int64{1}, []int64{2}, []int64{3, 4}, &msgpb.MsgPosition{})
 	s.Equal(int64(5), s.delegator.GetTargetVersion())
 }
 

@@ -69,7 +69,7 @@ type Cache interface {
 	// GetPartitionsIndex returns a partition names in partition key indexed order.
 	GetPartitionsIndex(ctx context.Context, database, collectionName string) ([]string, error)
 	// GetCollectionSchema get collection's schema.
-	GetCollectionSchema(ctx context.Context, database, collectionName string) (*schemapb.CollectionSchema, error)
+	GetCollectionSchema(ctx context.Context, database, collectionName string) (*schemaInfo, error)
 	GetShards(ctx context.Context, withCache bool, database, collectionName string, collectionID int64) (map[string][]nodeInfo, error)
 	DeprecateShardCache(database, collectionName string)
 	expireShardLeaderCache(ctx context.Context)
@@ -99,15 +99,59 @@ type collectionBasicInfo struct {
 }
 
 type collectionInfo struct {
-	collID typeutil.UniqueID
-	schema *schemapb.CollectionSchema
-	// partInfo            map[string]*partitionInfo
+	collID              typeutil.UniqueID
+	schema              *schemaInfo
 	partInfo            *partitionInfos
 	leaderMutex         sync.RWMutex
 	shardLeaders        *shardLeaders
 	createdTimestamp    uint64
 	createdUtcTimestamp uint64
 	consistencyLevel    commonpb.ConsistencyLevel
+}
+
+// schemaInfo is a helper function wraps *schemapb.CollectionSchema
+// with extra fields mapping and methods
+type schemaInfo struct {
+	*schemapb.CollectionSchema
+	fieldMap             *typeutil.ConcurrentMap[string, int64] // field name to id mapping
+	hasPartitionKeyField bool
+	pkField              *schemapb.FieldSchema
+}
+
+func newSchemaInfo(schema *schemapb.CollectionSchema) *schemaInfo {
+	fieldMap := typeutil.NewConcurrentMap[string, int64]()
+	hasPartitionkey := false
+	var pkField *schemapb.FieldSchema
+	for _, field := range schema.GetFields() {
+		fieldMap.Insert(field.GetName(), field.GetFieldID())
+		if field.GetIsPartitionKey() {
+			hasPartitionkey = true
+		}
+		if field.GetIsPrimaryKey() {
+			pkField = field
+		}
+	}
+	return &schemaInfo{
+		CollectionSchema:     schema,
+		fieldMap:             fieldMap,
+		hasPartitionKeyField: hasPartitionkey,
+		pkField:              pkField,
+	}
+}
+
+func (s *schemaInfo) MapFieldID(name string) (int64, bool) {
+	return s.fieldMap.Get(name)
+}
+
+func (s *schemaInfo) IsPartitionKeyCollection() bool {
+	return s.hasPartitionKeyField
+}
+
+func (s *schemaInfo) GetPkField() (*schemapb.FieldSchema, error) {
+	if s.pkField == nil {
+		return nil, merr.WrapErrServiceInternal("pk field not found")
+	}
+	return s.pkField, nil
 }
 
 // partitionInfos contains the cached collection partition informations.
@@ -396,7 +440,7 @@ func (m *MetaCache) getFullCollectionInfo(ctx context.Context, database, collect
 	return collInfo, nil
 }
 
-func (m *MetaCache) GetCollectionSchema(ctx context.Context, database, collectionName string) (*schemapb.CollectionSchema, error) {
+func (m *MetaCache) GetCollectionSchema(ctx context.Context, database, collectionName string) (*schemaInfo, error) {
 	m.mu.RLock()
 	var collInfo *collectionInfo
 	var ok bool
@@ -426,7 +470,7 @@ func (m *MetaCache) GetCollectionSchema(ctx context.Context, database, collectio
 		metrics.ProxyUpdateCacheLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 		log.Debug("Reload collection from root coordinator ",
 			zap.String("collectionName", collectionName),
-			zap.Any("time (milliseconds) take ", tr.ElapseSpan().Milliseconds()))
+			zap.Int64("time (milliseconds) take ", tr.ElapseSpan().Milliseconds()))
 		return collInfo.schema, nil
 	}
 	defer m.mu.RUnlock()
@@ -445,7 +489,7 @@ func (m *MetaCache) updateCollection(coll *milvuspb.DescribeCollectionResponse, 
 	if !ok {
 		m.collInfo[database][collectionName] = &collectionInfo{}
 	}
-	m.collInfo[database][collectionName].schema = coll.Schema
+	m.collInfo[database][collectionName].schema = newSchemaInfo(coll.Schema)
 	m.collInfo[database][collectionName].collID = coll.CollectionID
 	m.collInfo[database][collectionName].createdTimestamp = coll.CreatedTimestamp
 	m.collInfo[database][collectionName].createdUtcTimestamp = coll.CreatedUtcTimestamp

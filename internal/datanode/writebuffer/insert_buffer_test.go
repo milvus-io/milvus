@@ -134,7 +134,7 @@ func (s *InsertBufferSuite) TestBuffer() {
 		insertBuffer, err := NewInsertBuffer(s.collSchema)
 		s.Require().NoError(err)
 
-		fieldData, err := insertBuffer.Buffer([]*msgstream.InsertMsg{insertMsg}, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})
+		fieldData, memSize, err := insertBuffer.Buffer([]*msgstream.InsertMsg{insertMsg}, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})
 		s.NoError(err)
 
 		pkData := lo.Map(fieldData, func(fd storage.FieldData, _ int) []int64 {
@@ -142,6 +142,7 @@ func (s *InsertBufferSuite) TestBuffer() {
 		})
 		s.ElementsMatch(pks, lo.Flatten(pkData))
 		s.EqualValues(100, insertBuffer.MinTimestamp())
+		s.EqualValues(5364, memSize)
 	})
 
 	s.Run("pk_not_found", func() {
@@ -152,7 +153,7 @@ func (s *InsertBufferSuite) TestBuffer() {
 		insertBuffer, err := NewInsertBuffer(s.collSchema)
 		s.Require().NoError(err)
 
-		_, err = insertBuffer.Buffer([]*msgstream.InsertMsg{insertMsg}, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})
+		_, _, err = insertBuffer.Buffer([]*msgstream.InsertMsg{insertMsg}, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})
 		s.Error(err)
 	})
 
@@ -180,7 +181,7 @@ func (s *InsertBufferSuite) TestBuffer() {
 		insertBuffer, err := NewInsertBuffer(badSchema)
 		s.Require().NoError(err)
 
-		_, err = insertBuffer.Buffer([]*msgstream.InsertMsg{insertMsg}, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})
+		_, _, err = insertBuffer.Buffer([]*msgstream.InsertMsg{insertMsg}, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})
 		s.Error(err)
 	})
 }
@@ -196,7 +197,7 @@ func (s *InsertBufferSuite) TestYield() {
 	s.Require().NoError(err)
 
 	pks, insertMsg := s.composeInsertMsg(10, 128)
-	_, err = insertBuffer.Buffer([]*msgstream.InsertMsg{insertMsg}, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})
+	_, _, err = insertBuffer.Buffer([]*msgstream.InsertMsg{insertMsg}, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})
 	s.Require().NoError(err)
 
 	result = insertBuffer.Yield()

@@ -26,7 +26,8 @@ struct SearchResultPair {
     milvus::SearchResult* search_result_;
     int64_t segment_index_;
     int64_t offset_;
-    int64_t offset_rb_;  // right bound
+    int64_t offset_rb_;                                       // right bound
+    std::optional<milvus::GroupByValueType> group_by_value_;  //for group_by
 
     SearchResultPair(milvus::PkType primary_key,
                      float distance,
@@ -34,12 +35,24 @@ struct SearchResultPair {
                      int64_t index,
                      int64_t lb,
                      int64_t rb)
+        : SearchResultPair(
+              primary_key, distance, result, index, lb, rb, std::nullopt) {
+    }
+
+    SearchResultPair(milvus::PkType primary_key,
+                     float distance,
+                     SearchResult* result,
+                     int64_t index,
+                     int64_t lb,
+                     int64_t rb,
+                     std::optional<milvus::GroupByValueType> group_by_value)
         : primary_key_(std::move(primary_key)),
           distance_(distance),
           search_result_(result),
           segment_index_(index),
           offset_(lb),
-          offset_rb_(rb) {
+          offset_rb_(rb),
+          group_by_value_(group_by_value) {
     }
 
     bool
@@ -56,6 +69,9 @@ struct SearchResultPair {
         if (offset_ < offset_rb_) {
             primary_key_ = search_result_->primary_keys_.at(offset_);
             distance_ = search_result_->distances_.at(offset_);
+            if (offset_ < search_result_->group_by_values_.size()) {
+                group_by_value_ = search_result_->group_by_values_.at(offset_);
+            }
         } else {
             primary_key_ = INVALID_PK;
             distance_ = std::numeric_limits<float>::min();

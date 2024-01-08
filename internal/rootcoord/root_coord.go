@@ -626,7 +626,7 @@ func (c *Core) initBuiltinRoles() error {
 	for role, privilegesJSON := range rolePrivilegesMap {
 		err := c.meta.CreateRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: role})
 		if err != nil && !common.IsIgnorableError(err) {
-			log.Error("create a builtin role fail", zap.Any("error", err), zap.String("roleName", role))
+			log.Error("create a builtin role fail", zap.String("roleName", role), zap.Error(err))
 			return errors.Wrapf(err, "failed to create a builtin role: %s", role)
 		}
 		for _, privilege := range privilegesJSON[util.RoleConfigPrivileges] {
@@ -645,7 +645,7 @@ func (c *Core) initBuiltinRoles() error {
 				},
 			}, milvuspb.OperatePrivilegeType_Grant)
 			if err != nil && !common.IsIgnorableError(err) {
-				log.Error("grant privilege to builtin role fail", zap.Any("error", err), zap.String("roleName", role), zap.Any("privilege", privilege))
+				log.Error("grant privilege to builtin role fail", zap.String("roleName", role), zap.Any("privilege", privilege), zap.Error(err))
 				return errors.Wrapf(err, "failed to grant privilege: <%s, %s, %s> of db: %s to role: %s", privilege[util.RoleConfigObjectType], privilege[util.RoleConfigObjectName], privilege[util.RoleConfigPrivilege], privilege[util.RoleConfigDBName], role)
 			}
 		}
@@ -2039,7 +2039,7 @@ func (c *Core) ReportImport(ctx context.Context, ir *rootcoordpb.ImportResult) (
 		// Here ir.GetState() == commonpb.ImportState_ImportPersisted
 		// Seal these import segments, so they can be auto-flushed later.
 		log.Info("an import task turns to persisted state, flush segments to be sealed",
-			zap.Any("task ID", ir.GetTaskId()), zap.Any("segments", ir.GetSegments()))
+			zap.Int64("task ID", ir.GetTaskId()), zap.Any("segments", ir.GetSegments()))
 		if err := c.broker.Flush(ctx, ti.GetCollectionId(), ir.GetSegments()); err != nil {
 			log.Error("failed to call Flush on bulk insert segments",
 				zap.Int64("task ID", ir.GetTaskId()))
