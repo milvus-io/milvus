@@ -259,7 +259,7 @@ func (e *executor) Sync(task *ImportTask, hashedData HashedData) error {
 			if err != nil {
 				return err
 			}
-			future := e.syncMgr.SyncData(context.TODO(), syncTask) // TODO: dyh, resolve context
+			future := e.syncMgr.SyncData(task.GetCtx(), syncTask)
 			futures = append(futures, future)
 			syncTasks = append(syncTasks, syncTask)
 		}

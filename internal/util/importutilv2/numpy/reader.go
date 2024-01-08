@@ -26,15 +26,19 @@ import (
 )
 
 type Reader struct {
-	schema     *schemapb.CollectionSchema
-	bufferSize int
-	frs        map[int64]*FieldReader // fieldID -> FieldReader
+	schema *schemapb.CollectionSchema
+	count  int64
+	frs    map[int64]*FieldReader // fieldID -> FieldReader
 }
 
 func NewReader(schema *schemapb.CollectionSchema, readers map[int64]io.Reader, bufferSize int) (*Reader, error) {
 	fields := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) int64 {
 		return field.GetFieldID()
 	})
+	count, err := calcRowCount(bufferSize, schema)
+	if err != nil {
+		return nil, err
+	}
 	crs := make(map[int64]*FieldReader)
 	for fieldID, r := range readers {
 		cr, err := NewFieldReader(r, fields[fieldID])
@@ -44,9 +48,9 @@ func NewReader(schema *schemapb.CollectionSchema, readers map[int64]io.Reader, b
 		crs[fieldID] = cr
 	}
 	return &Reader{
-		schema:     schema,
-		bufferSize: bufferSize,
-		frs:        crs,
+		schema: schema,
+		count:  count,
+		frs:    crs,
 	}, nil
 }
 
@@ -55,29 +59,17 @@ func (r *Reader) Read() (*storage.InsertData, error) {
 	if err != nil {
 		return nil, err
 	}
-OUTER:
-	for {
-		for fieldID, cr := range r.frs {
-			data, err := cr.Next(1)
-			if err != nil {
-				return nil, err
-			}
-			if data == nil {
-				break OUTER
-			}
-			err = insertData.Data[fieldID].AppendRows(data)
-			if err != nil {
-				return nil, err
-			}
+	for fieldID, cr := range r.frs {
+		data, err := cr.Next(r.count)
+		if err != nil {
+			return nil, err
 		}
-		if insertData.GetMemorySize() >= r.bufferSize {
-			break
-		}
-	}
-
-	for fieldID := range r.frs {
-		if insertData.Data[fieldID].RowNum() == 0 {
+		if data == nil {
 			return nil, nil
+		}
+		err = insertData.Data[fieldID].AppendRows(data)
+		if err != nil {
+			return nil, err
 		}
 	}
 	return insertData, nil

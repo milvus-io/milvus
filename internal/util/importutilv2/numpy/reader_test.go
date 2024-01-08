@@ -182,6 +182,12 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 				Name:         "pk",
 				IsPrimaryKey: true,
 				DataType:     suite.pkDataType,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   "max_length",
+						Value: "256",
+					},
+				},
 			},
 			{
 				FieldID:  101,
@@ -199,6 +205,12 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 				Name:        dt.String(),
 				DataType:    dt,
 				ElementType: schemapb.DataType_Int32,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   "max_length",
+						Value: "256",
+					},
+				},
 			},
 		},
 	}
