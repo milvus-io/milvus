@@ -18,10 +18,12 @@ package importutilv2
 
 import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/binlog"
 )
 
+//go:generate mockery --name=Reader --structname=MockReader --output=./  --filename=mock_reader.go --with-expecter --inpackage
 type Reader interface {
 	Read() (*storage.InsertData, error)
 	Close()
@@ -29,15 +31,16 @@ type Reader interface {
 
 func NewReader(cm storage.ChunkManager,
 	schema *schemapb.CollectionSchema,
-	paths []string,
+	importFile *internalpb.ImportFile,
 	options Options,
-	bufferSize int64,
+	bufferSize int,
 ) (Reader, error) {
 	if IsBackup(options) {
 		tsStart, tsEnd, err := ParseTimeRange(options)
 		if err != nil {
 			return nil, err
 		}
+		paths := importFile.GetPaths()
 		return binlog.NewReader(cm, schema, paths, tsStart, tsEnd)
 	}
 
