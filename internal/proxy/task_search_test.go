@@ -2308,3 +2308,120 @@ func (s *GetPartitionIDsSuite) TestRegexpPartitionNames() {
 func TestGetPartitionIDs(t *testing.T) {
 	suite.Run(t, new(GetPartitionIDsSuite))
 }
+
+func TestSearchTask_CanSkipAllocTimestamp(t *testing.T) {
+	dbName := "test_query"
+	collName := "test_skip_alloc_timestamp"
+	collID := UniqueID(111)
+	mockMetaCache := NewMockCache(t)
+	globalMetaCache = mockMetaCache
+
+	t.Run("default consistency level", func(t *testing.T) {
+		st := &searchTask{
+			request: &milvuspb.SearchRequest{
+				Base:                  nil,
+				DbName:                dbName,
+				CollectionName:        collName,
+				UseDefaultConsistency: true,
+			},
+		}
+		mockMetaCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(collID, nil)
+		mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
+			&collectionBasicInfo{
+				collID:           collID,
+				consistencyLevel: commonpb.ConsistencyLevel_Eventually,
+			}, nil).Once()
+
+		skip := st.CanSkipAllocTimestamp()
+		assert.True(t, skip)
+
+		mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
+			&collectionBasicInfo{
+				collID:           collID,
+				consistencyLevel: commonpb.ConsistencyLevel_Bounded,
+			}, nil).Once()
+		skip = st.CanSkipAllocTimestamp()
+		assert.True(t, skip)
+
+		mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
+			&collectionBasicInfo{
+				collID:           collID,
+				consistencyLevel: commonpb.ConsistencyLevel_Strong,
+			}, nil).Once()
+		skip = st.CanSkipAllocTimestamp()
+		assert.False(t, skip)
+	})
+
+	t.Run("request consistency level", func(t *testing.T) {
+		mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
+			&collectionBasicInfo{
+				collID:           collID,
+				consistencyLevel: commonpb.ConsistencyLevel_Eventually,
+			}, nil).Times(3)
+
+		st := &searchTask{
+			request: &milvuspb.SearchRequest{
+				Base:                  nil,
+				DbName:                dbName,
+				CollectionName:        collName,
+				UseDefaultConsistency: false,
+				ConsistencyLevel:      commonpb.ConsistencyLevel_Eventually,
+			},
+		}
+
+		skip := st.CanSkipAllocTimestamp()
+		assert.True(t, skip)
+
+		st.request.ConsistencyLevel = commonpb.ConsistencyLevel_Bounded
+		skip = st.CanSkipAllocTimestamp()
+		assert.True(t, skip)
+
+		st.request.ConsistencyLevel = commonpb.ConsistencyLevel_Strong
+		skip = st.CanSkipAllocTimestamp()
+		assert.False(t, skip)
+	})
+
+	t.Run("failed", func(t *testing.T) {
+		mockMetaCache.ExpectedCalls = nil
+		mockMetaCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(collID, nil)
+		mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
+			nil, fmt.Errorf("mock error")).Once()
+
+		st := &searchTask{
+			request: &milvuspb.SearchRequest{
+				Base:                  nil,
+				DbName:                dbName,
+				CollectionName:        collName,
+				UseDefaultConsistency: true,
+				ConsistencyLevel:      commonpb.ConsistencyLevel_Eventually,
+			},
+		}
+
+		skip := st.CanSkipAllocTimestamp()
+		assert.False(t, skip)
+
+		mockMetaCache.ExpectedCalls = nil
+		mockMetaCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(collID, fmt.Errorf("mock error"))
+		mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
+			&collectionBasicInfo{
+				collID:           collID,
+				consistencyLevel: commonpb.ConsistencyLevel_Eventually,
+			}, nil)
+
+		skip = st.CanSkipAllocTimestamp()
+		assert.False(t, skip)
+
+		st2 := &searchTask{
+			request: &milvuspb.SearchRequest{
+				Base:                  nil,
+				DbName:                dbName,
+				CollectionName:        collName,
+				UseDefaultConsistency: false,
+				ConsistencyLevel:      commonpb.ConsistencyLevel_Eventually,
+			},
+		}
+
+		skip = st2.CanSkipAllocTimestamp()
+		assert.True(t, skip)
+	})
+}

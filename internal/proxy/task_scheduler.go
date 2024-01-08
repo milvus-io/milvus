@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -170,14 +171,24 @@ func (queue *baseTaskQueue) Enqueue(t task) error {
 		return err
 	}
 
-	ts, err := queue.tsoAllocatorIns.AllocOne(t.TraceCtx())
-	if err != nil {
-		return err
+	var ts Timestamp
+	var id UniqueID
+	if t.CanSkipAllocTimestamp() {
+		ts = tsoutil.ComposeTS(time.Now().UnixMilli(), 0)
+		id, err = globalMetaCache.AllocID(t.TraceCtx())
+		if err != nil {
+			return err
+		}
+	} else {
+		ts, err = queue.tsoAllocatorIns.AllocOne(t.TraceCtx())
+		if err != nil {
+			return err
+		}
+		// we always use same msg id and ts for now.
+		id = UniqueID(ts)
 	}
 	t.SetTs(ts)
-
-	// we always use same msg id and ts for now.
-	t.SetID(UniqueID(ts))
+	t.SetID(id)
 
 	return queue.addUnissuedTask(t)
 }

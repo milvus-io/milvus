@@ -28,6 +28,7 @@ import (
 
 // CreateAliasTask contains task information of CreateAlias
 type CreateAliasTask struct {
+	baseTask
 	Condition
 	*milvuspb.CreateAliasRequest
 	ctx       context.Context
@@ -115,6 +116,7 @@ func (t *CreateAliasTask) PostExecute(ctx context.Context) error {
 
 // DropAliasTask is the task to drop alias
 type DropAliasTask struct {
+	baseTask
 	Condition
 	*milvuspb.DropAliasRequest
 	ctx       context.Context
@@ -187,6 +189,7 @@ func (t *DropAliasTask) PostExecute(ctx context.Context) error {
 
 // AlterAliasTask is the task to alter alias
 type AlterAliasTask struct {
+	baseTask
 	Condition
 	*milvuspb.AlterAliasRequest
 	ctx       context.Context
@@ -263,6 +266,7 @@ func (t *AlterAliasTask) PostExecute(ctx context.Context) error {
 
 // DescribeAliasTask is the task to describe alias
 type DescribeAliasTask struct {
+	baseTask
 	Condition
 	nodeID UniqueID
 	*milvuspb.DescribeAliasRequest
@@ -326,6 +330,7 @@ func (a *DescribeAliasTask) PostExecute(ctx context.Context) error {
 
 // ListAliasesTask is the task to list aliases
 type ListAliasesTask struct {
+	baseTask
 	Condition
 	nodeID UniqueID
 	*milvuspb.ListAliasesRequest

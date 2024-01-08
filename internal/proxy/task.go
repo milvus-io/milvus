@@ -112,6 +112,13 @@ type task interface {
 	PostExecute(ctx context.Context) error
 	WaitToFinish() error
 	Notify(err error)
+	CanSkipAllocTimestamp() bool
+}
+
+type baseTask struct{}
+
+func (bt *baseTask) CanSkipAllocTimestamp() bool {
+	return false
 }
 
 type dmlTask interface {
@@ -123,6 +130,7 @@ type dmlTask interface {
 type BaseInsertTask = msgstream.InsertMsg
 
 type createCollectionTask struct {
+	baseTask
 	Condition
 	*milvuspb.CreateCollectionRequest
 	ctx       context.Context
@@ -361,6 +369,7 @@ func (t *createCollectionTask) PostExecute(ctx context.Context) error {
 }
 
 type dropCollectionTask struct {
+	baseTask
 	Condition
 	*milvuspb.DropCollectionRequest
 	ctx       context.Context
@@ -430,6 +439,7 @@ func (t *dropCollectionTask) PostExecute(ctx context.Context) error {
 }
 
 type hasCollectionTask struct {
+	baseTask
 	Condition
 	*milvuspb.HasCollectionRequest
 	ctx       context.Context
@@ -504,6 +514,7 @@ func (t *hasCollectionTask) PostExecute(ctx context.Context) error {
 }
 
 type describeCollectionTask struct {
+	baseTask
 	Condition
 	*milvuspb.DescribeCollectionRequest
 	ctx       context.Context
@@ -639,6 +650,7 @@ func (t *describeCollectionTask) PostExecute(ctx context.Context) error {
 }
 
 type showCollectionsTask struct {
+	baseTask
 	Condition
 	*milvuspb.ShowCollectionsRequest
 	ctx        context.Context
@@ -798,6 +810,7 @@ func (t *showCollectionsTask) PostExecute(ctx context.Context) error {
 }
 
 type alterCollectionTask struct {
+	baseTask
 	Condition
 	*milvuspb.AlterCollectionRequest
 	ctx        context.Context
@@ -882,6 +895,7 @@ func (t *alterCollectionTask) PostExecute(ctx context.Context) error {
 }
 
 type createPartitionTask struct {
+	baseTask
 	Condition
 	*milvuspb.CreatePartitionRequest
 	ctx       context.Context
@@ -969,6 +983,7 @@ func (t *createPartitionTask) PostExecute(ctx context.Context) error {
 }
 
 type dropPartitionTask struct {
+	baseTask
 	Condition
 	*milvuspb.DropPartitionRequest
 	ctx        context.Context
@@ -1083,6 +1098,7 @@ func (t *dropPartitionTask) PostExecute(ctx context.Context) error {
 }
 
 type hasPartitionTask struct {
+	baseTask
 	Condition
 	*milvuspb.HasPartitionRequest
 	ctx       context.Context
@@ -1159,6 +1175,7 @@ func (t *hasPartitionTask) PostExecute(ctx context.Context) error {
 }
 
 type showPartitionsTask struct {
+	baseTask
 	Condition
 	*milvuspb.ShowPartitionsRequest
 	ctx        context.Context
@@ -1321,6 +1338,7 @@ func (t *showPartitionsTask) PostExecute(ctx context.Context) error {
 }
 
 type flushTask struct {
+	baseTask
 	Condition
 	*milvuspb.FlushRequest
 	ctx       context.Context
@@ -1422,6 +1440,7 @@ func (t *flushTask) PostExecute(ctx context.Context) error {
 }
 
 type loadCollectionTask struct {
+	baseTask
 	Condition
 	*milvuspb.LoadCollectionRequest
 	ctx        context.Context
@@ -1579,6 +1598,7 @@ func (t *loadCollectionTask) PostExecute(ctx context.Context) error {
 }
 
 type releaseCollectionTask struct {
+	baseTask
 	Condition
 	*milvuspb.ReleaseCollectionRequest
 	ctx        context.Context
@@ -1671,6 +1691,7 @@ func (t *releaseCollectionTask) PostExecute(ctx context.Context) error {
 }
 
 type loadPartitionsTask struct {
+	baseTask
 	Condition
 	*milvuspb.LoadPartitionsRequest
 	ctx        context.Context
@@ -1821,6 +1842,7 @@ func (t *loadPartitionsTask) PostExecute(ctx context.Context) error {
 }
 
 type releasePartitionsTask struct {
+	baseTask
 	Condition
 	*milvuspb.ReleasePartitionsRequest
 	ctx        context.Context
@@ -1928,6 +1950,7 @@ func (t *releasePartitionsTask) PostExecute(ctx context.Context) error {
 }
 
 type CreateResourceGroupTask struct {
+	baseTask
 	Condition
 	*milvuspb.CreateResourceGroupRequest
 	ctx        context.Context
@@ -1992,6 +2015,7 @@ func (t *CreateResourceGroupTask) PostExecute(ctx context.Context) error {
 }
 
 type DropResourceGroupTask struct {
+	baseTask
 	Condition
 	*milvuspb.DropResourceGroupRequest
 	ctx        context.Context
@@ -2056,6 +2080,7 @@ func (t *DropResourceGroupTask) PostExecute(ctx context.Context) error {
 }
 
 type DescribeResourceGroupTask struct {
+	baseTask
 	Condition
 	*milvuspb.DescribeResourceGroupRequest
 	ctx        context.Context
@@ -2177,6 +2202,7 @@ func (t *DescribeResourceGroupTask) PostExecute(ctx context.Context) error {
 }
 
 type TransferNodeTask struct {
+	baseTask
 	Condition
 	*milvuspb.TransferNodeRequest
 	ctx        context.Context
@@ -2241,6 +2267,7 @@ func (t *TransferNodeTask) PostExecute(ctx context.Context) error {
 }
 
 type TransferReplicaTask struct {
+	baseTask
 	Condition
 	*milvuspb.TransferReplicaRequest
 	ctx        context.Context
@@ -2314,6 +2341,7 @@ func (t *TransferReplicaTask) PostExecute(ctx context.Context) error {
 }
 
 type ListResourceGroupsTask struct {
+	baseTask
 	Condition
 	*milvuspb.ListResourceGroupsRequest
 	ctx        context.Context

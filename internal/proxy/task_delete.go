@@ -34,6 +34,7 @@ import (
 type BaseDeleteTask = msgstream.DeleteMsg
 
 type deleteTask struct {
+	baseTask
 	Condition
 	ctx context.Context
 	tr  *timerecord.TimeRecorder

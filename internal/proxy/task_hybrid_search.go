@@ -31,6 +31,7 @@ const (
 )
 
 type hybridSearchTask struct {
+	baseTask
 	Condition
 	ctx context.Context
 	*internalpb.HybridSearchRequest

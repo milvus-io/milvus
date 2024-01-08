@@ -53,6 +53,7 @@ const (
 )
 
 type createIndexTask struct {
+	baseTask
 	Condition
 	req       *milvuspb.CreateIndexRequest
 	ctx       context.Context
@@ -435,6 +436,7 @@ func (cit *createIndexTask) PostExecute(ctx context.Context) error {
 }
 
 type alterIndexTask struct {
+	baseTask
 	Condition
 	req        *milvuspb.AlterIndexRequest
 	ctx        context.Context
@@ -554,6 +556,7 @@ func (t *alterIndexTask) PostExecute(ctx context.Context) error {
 }
 
 type describeIndexTask struct {
+	baseTask
 	Condition
 	*milvuspb.DescribeIndexRequest
 	ctx       context.Context
@@ -677,6 +680,7 @@ func (dit *describeIndexTask) PostExecute(ctx context.Context) error {
 }
 
 type getIndexStatisticsTask struct {
+	baseTask
 	Condition
 	*milvuspb.GetIndexStatisticsRequest
 	ctx       context.Context
@@ -793,6 +797,7 @@ func (dit *getIndexStatisticsTask) PostExecute(ctx context.Context) error {
 }
 
 type dropIndexTask struct {
+	baseTask
 	Condition
 	ctx context.Context
 	*milvuspb.DropIndexRequest
@@ -913,6 +918,7 @@ func (dit *dropIndexTask) PostExecute(ctx context.Context) error {
 
 // Deprecated: use describeIndexTask instead
 type getIndexBuildProgressTask struct {
+	baseTask
 	Condition
 	*milvuspb.GetIndexBuildProgressRequest
 	ctx       context.Context
@@ -1002,6 +1008,7 @@ func (gibpt *getIndexBuildProgressTask) PostExecute(ctx context.Context) error {
 
 // Deprecated: use describeIndexTask instead
 type getIndexStateTask struct {
+	baseTask
 	Condition
 	*milvuspb.GetIndexStateRequest
 	ctx       context.Context
