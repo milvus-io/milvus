@@ -69,6 +69,10 @@ class TestOperations(TestBase):
 
     def init_health_checkers(self, collection_name=None, enable_upsert=True):
         c_name = collection_name
+        if enable_upsert in ["False", "false", "FALSE"]:
+            enable_upsert = False
+        if enable_upsert in ["True", "true", "TRUE"]:
+            enable_upsert = True
         if enable_upsert:
             checkers = {
                 Op.insert: InsertChecker(collection_name=c_name),
