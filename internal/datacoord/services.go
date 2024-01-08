@@ -1261,7 +1261,7 @@ func (s *Server) GetFlushState(ctx context.Context, req *datapb.GetFlushStateReq
 		}
 	}
 
-	channels := s.channelManager.GetChannelNamesByCollectionID(req.GetCollectionID())
+	channels := s.channelManager.GetChannelsByCollectionID(req.GetCollectionID())
 	if len(channels) == 0 { // For compatibility with old client
 		resp.Flushed = true
 
@@ -1270,11 +1270,11 @@ func (s *Server) GetFlushState(ctx context.Context, req *datapb.GetFlushStateReq
 	}
 
 	for _, channel := range channels {
-		cp := s.meta.GetChannelCheckpoint(channel)
+		cp := s.meta.GetChannelCheckpoint(channel.GetName())
 		if cp == nil || cp.GetTimestamp() < req.GetFlushTs() {
 			resp.Flushed = false
 
-			log.RatedInfo(10, "GetFlushState failed, channel unflushed", zap.String("channel", channel),
+			log.RatedInfo(10, "GetFlushState failed, channel unflushed", zap.String("channel", channel.GetName()),
 				zap.Time("CP", tsoutil.PhysicalTime(cp.GetTimestamp())),
 				zap.Duration("lag", tsoutil.PhysicalTime(req.GetFlushTs()).Sub(tsoutil.PhysicalTime(cp.GetTimestamp()))))
 			return resp, nil
