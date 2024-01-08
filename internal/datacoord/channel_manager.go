@@ -32,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
 )
 
@@ -389,8 +388,6 @@ func (c *ChannelManagerImpl) DeleteNode(nodeID int64) error {
 		return nil
 	}
 
-	c.unsubAttempt(nodeChannelInfo)
-
 	updates := c.deregisterPolicy(c.store, nodeID)
 	if updates == nil {
 		return nil
@@ -419,26 +416,6 @@ func (c *ChannelManagerImpl) DeleteNode(nodeID int64) error {
 	// No channels will be return
 	_, err := c.store.Delete(nodeID)
 	return err
-}
-
-// unsubAttempt attempts to unsubscribe node-channel info from the channel.
-func (c *ChannelManagerImpl) unsubAttempt(ncInfo *NodeChannelInfo) {
-	if ncInfo == nil {
-		return
-	}
-
-	if c.msgstreamFactory == nil {
-		log.Warn("msgstream factory is not set")
-		return
-	}
-
-	nodeID := ncInfo.NodeID
-	for _, ch := range ncInfo.Channels {
-		// align to datanode subname, using vchannel name
-		subName := fmt.Sprintf("%s-%d-%s", Params.CommonCfg.DataNodeSubName.GetValue(), nodeID, ch.GetName())
-		pchannelName := funcutil.ToPhysicalChannel(ch.GetName())
-		msgstream.UnsubscribeChannels(c.ctx, c.msgstreamFactory, subName, []string{pchannelName})
-	}
 }
 
 // Watch tries to add the channel to cluster. Watch is a no op if the channel already exists.
@@ -853,14 +830,6 @@ func (c *ChannelManagerImpl) CleanupAndReassign(nodeID UniqueID, channelName str
 		return fmt.Errorf("failed to find matching channel: %s and node: %d", channelName, nodeID)
 	}
 	c.mu.RUnlock()
-
-	if c.msgstreamFactory == nil {
-		log.Warn("msgstream factory is not set, unable to clean up topics")
-	} else {
-		subName := fmt.Sprintf("%s-%d-%d", Params.CommonCfg.DataNodeSubName.GetValue(), nodeID, chToCleanUp.GetCollectionID())
-		pchannelName := funcutil.ToPhysicalChannel(channelName)
-		msgstream.UnsubscribeChannels(c.ctx, c.msgstreamFactory, subName, []string{pchannelName})
-	}
 
 	reallocates := &NodeChannelInfo{nodeID, []RWChannel{chToCleanUp}}
 	isDropped := c.isMarkedDrop(channelName)
