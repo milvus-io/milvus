@@ -15,6 +15,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -113,6 +114,11 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 	if isCurUserObject(objectType, username, objectName) {
 		return ctx, nil
 	}
+
+	if isSelectMyRoleGrants(req, roleNames) {
+		return ctx, nil
+	}
+
 	objectNameIndexs := privilegeExt.ObjectNameIndexs
 	objectNames := funcutil.GetObjectNames(req, objectNameIndexs)
 	objectPrivilege := privilegeExt.ObjectPrivilege.String()
@@ -179,6 +185,16 @@ func isCurUserObject(objectType string, curUser string, object string) bool {
 		return false
 	}
 	return curUser == object
+}
+
+func isSelectMyRoleGrants(req interface{}, roleNames []string) bool {
+	selectGrantReq, ok := req.(*milvuspb.SelectGrantRequest)
+	if !ok {
+		return false
+	}
+	filterGrantEntity := selectGrantReq.GetEntity()
+	roleName := filterGrantEntity.GetRole().GetName()
+	return funcutil.SliceContain(roleNames, roleName)
 }
 
 func DBMatchFunc(args ...interface{}) (interface{}, error) {
