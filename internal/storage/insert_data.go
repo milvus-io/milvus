@@ -127,6 +127,7 @@ type FieldData interface {
 	GetMemorySize() int
 	RowNum() int
 	GetRow(i int) any
+	GetRows() any
 	AppendRow(row interface{}) error
 	AppendRows(rows interface{}) error
 	GetDataType() schemapb.DataType
@@ -297,6 +298,20 @@ func (data *FloatVectorFieldData) GetRow(i int) interface{} {
 func (data *Float16VectorFieldData) GetRow(i int) interface{} {
 	return data.Data[i*data.Dim*2 : (i+1)*data.Dim*2]
 }
+
+func (data *BoolFieldData) GetRows() any          { return data.Data }
+func (data *Int8FieldData) GetRows() any          { return data.Data }
+func (data *Int16FieldData) GetRows() any         { return data.Data }
+func (data *Int32FieldData) GetRows() any         { return data.Data }
+func (data *Int64FieldData) GetRows() any         { return data.Data }
+func (data *FloatFieldData) GetRows() any         { return data.Data }
+func (data *DoubleFieldData) GetRows() any        { return data.Data }
+func (data *StringFieldData) GetRows() any        { return data.Data }
+func (data *ArrayFieldData) GetRows() any         { return data.Data }
+func (data *JSONFieldData) GetRows() any          { return data.Data }
+func (data *BinaryVectorFieldData) GetRows() any  { return data.Data }
+func (data *FloatVectorFieldData) GetRows() any   { return data.Data }
+func (data *Float16VectorFieldData) GetRows() any { return data.Data }
 
 // AppendRow implements FieldData.AppendRow
 func (data *BoolFieldData) AppendRow(row interface{}) error {

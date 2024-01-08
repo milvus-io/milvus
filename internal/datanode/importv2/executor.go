@@ -37,7 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-type HashedData [][]*storage.InsertData // vchannel -> (partitionID -> InsertData)
+const BufferSize = 64 * 1024 * 1024 // TODO: dyh, make it configurable
 
 type Executor interface {
 	Start()
@@ -89,6 +89,7 @@ func (e *executor) Start() {
 				})
 			}
 			_ = wg.Wait()
+			LogStats(e.manager)
 		}
 	}
 }
@@ -100,7 +101,6 @@ func (e *executor) Close() {
 }
 
 func (e *executor) estimateReadRows(schema *schemapb.CollectionSchema) (int64, error) {
-	const BufferSize = 16 * 1024 * 1024 // TODO: dyh, make it configurable
 	sizePerRow, err := typeutil.EstimateSizePerRecord(schema)
 	if err != nil {
 		return 0, err
@@ -131,7 +131,7 @@ func (e *executor) PreImport(task Task) {
 		})
 
 	for i, file := range files {
-		reader, err := importutilv2.NewReader(e.cm, task.GetSchema(), file, nil) // TODO: dyh, fix options
+		reader, err := importutilv2.NewReader(e.cm, task.GetSchema(), file, nil, BufferSize) // TODO: dyh, fix options
 		if err != nil {
 			e.handleErr(task, err, "new reader failed")
 			return
@@ -151,30 +151,29 @@ func (e *executor) PreImport(task Task) {
 }
 
 func (e *executor) readFileStat(reader importutilv2.Reader, task Task, fileIdx int) error {
-	count, err := e.estimateReadRows(task.GetSchema())
-	if err != nil {
-		return err
-	}
-
 	totalRows := 0
 	hashedRows := make(map[string]*datapb.PartitionRows)
 	for {
-		data, err := reader.Next(count)
+		data, err := reader.Read()
 		if err != nil {
 			return err
+		}
+		if data == nil {
+			break
 		}
 		err = FillDynamicData(data, task.GetSchema())
 		if err != nil {
 			return err
 		}
-		rowsCount, err := GetHashedRowsCount(task, data)
+		err = CheckRowsEqual(task.GetSchema(), data)
+		if err != nil {
+			return err
+		}
+		rowsCount, err := GetRowsStats(task, data)
 		if err != nil {
 			return err
 		}
 		MergeHashedRowsCount(rowsCount, hashedRows)
-		if data.GetRowNum() == 0 {
-			break
-		}
 		totalRows += data.GetRowNum()
 	}
 
@@ -193,20 +192,15 @@ func (e *executor) Import(task Task) {
 		zap.String("type", task.GetType().String()),
 		zap.Any("schema", task.GetSchema()))
 	e.manager.Update(task.GetTaskID(), UpdateState(internalpb.ImportState_InProgress))
-	count, err := e.estimateReadRows(task.GetSchema())
-	if err != nil {
-		e.handleErr(task, err, "estimate rows size failed")
-		return
-	}
 
 	req := task.(*ImportTask).req
 	for _, file := range req.GetFiles() {
-		reader, err := importutilv2.NewReader(e.cm, task.GetSchema(), file, nil) // TODO: dyh, fix options
+		reader, err := importutilv2.NewReader(e.cm, task.GetSchema(), file, nil, BufferSize) // TODO: dyh, fix options
 		if err != nil {
 			e.handleErr(task, err, fmt.Sprintf("new reader failed, file: %s", file.String()))
 			return
 		}
-		err = e.importFile(reader, count, task)
+		err = e.importFile(reader, task)
 		if err != nil {
 			e.handleErr(task, err, fmt.Sprintf("do import failed, file: %s", file.String()))
 			reader.Close()
@@ -218,11 +212,14 @@ func (e *executor) Import(task Task) {
 	log.Info("import done")
 }
 
-func (e *executor) importFile(reader importutilv2.Reader, count int64, task Task) error {
+func (e *executor) importFile(reader importutilv2.Reader, task Task) error {
 	for {
-		data, err := reader.Next(count)
+		data, err := reader.Read()
 		if err != nil {
 			return err
+		}
+		if data == nil {
+			return nil
 		}
 		err = FillDynamicData(data, task.GetSchema())
 		if err != nil {
@@ -233,10 +230,7 @@ func (e *executor) importFile(reader importutilv2.Reader, count int64, task Task
 		if err != nil {
 			return err
 		}
-		if data.GetRowNum() == 0 {
-			return nil
-		}
-		hashedData, err := GetHashedData(iTask, data)
+		hashedData, err := HashData(iTask, data)
 		if err != nil {
 			return err
 		}
@@ -259,7 +253,7 @@ func (e *executor) Sync(task *ImportTask, hashedData HashedData) error {
 			if err != nil {
 				return err
 			}
-			future := e.syncMgr.SyncData(context.TODO(), syncTask)
+			future := e.syncMgr.SyncData(context.TODO(), syncTask) // TODO: dyh, resolve context
 			futures = append(futures, future)
 			syncTasks = append(syncTasks, syncTask)
 		}

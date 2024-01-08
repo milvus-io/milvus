@@ -94,6 +94,11 @@ service DataCoord {
   rpc ReportDataNodeTtMsgs(ReportDataNodeTtMsgsRequest) returns (common.Status) {}
 
   rpc GcControl(GcControlRequest) returns(common.Status){}
+
+  // importV2
+  rpc ImportV2(ImportRequestInternal) returns(internal.ImportResponse){}
+  rpc GetImportProgress(internal.GetImportProgressRequest) returns(internal.GetImportProgressResponse){}
+  rpc ListImports(internal.ListImportsRequest) returns(internal.ListImportsResponse){}
 }
 
 service DataNode {
@@ -749,6 +754,15 @@ message ChannelOperationProgressResponse {
   int32 progress = 4;
 }
 
+message ImportRequestInternal {
+  int64 collectionID = 1;
+  repeated int64 partitionIDs = 2;
+  repeated string channel_names = 3;
+  schema.CollectionSchema schema = 4;
+  repeated internal.ImportFile files = 5;
+  repeated common.KeyValuePair options = 6;
+}
+
 message PreImportRequest {
   string clusterID = 1;
   int64 requestID = 2;
@@ -757,7 +771,7 @@ message PreImportRequest {
   repeated int64 partitionIDs = 5;
   repeated string vchannels = 6;
   schema.CollectionSchema schema = 7;
-  repeated milvus.ImportFile import_files = 8;
+  repeated internal.ImportFile import_files = 8;
 }
 
 message autoIDRange {
@@ -765,11 +779,12 @@ message autoIDRange {
   int64 end = 2;
 }
 
-message ImportSegmentRequestInfo {
+message ImportRequestSegment {
   int64 segmentID = 1;
   int64 partitionID = 2;
   string vchannel = 3;
-  autoIDRange autoID_ranges = 4;
+  uint64 ts = 4;
+  autoIDRange autoID_ranges = 5;
 }
 
 message ImportRequest {
@@ -778,8 +793,10 @@ message ImportRequest {
   int64 taskID = 3;
   int64 collectionID = 4;
   schema.CollectionSchema schema = 5;
-  repeated milvus.ImportFile files = 6;
-  repeated ImportSegmentRequestInfo segments_info = 7;
+  repeated internal.ImportFile files = 6;
+  uint64 ts = 7;
+  autoIDRange autoID_range = 8;
+  map<int64, ImportRequestSegment> request_segments = 9;
 }
 
 message QueryPreImportRequest {
@@ -793,7 +810,7 @@ message PartitionRows {
 }
 
 message ImportFileStats {
-  milvus.ImportFile import_file = 1;
+  internal.ImportFile import_file = 1;
   int64 file_size = 2;
   int64 total_rows = 3;
   map<string, PartitionRows> hashed_rows = 4;
@@ -802,7 +819,7 @@ message ImportFileStats {
 message QueryPreImportResponse {
   common.Status status = 1;
   int64 taskID = 2;
-  milvus.ImportState state = 3;
+  internal.ImportState state = 3;
   string reason = 4;
   int64 slots = 5;
   repeated ImportFileStats file_stats = 6;
@@ -819,13 +836,12 @@ message ImportSegmentInfo {
   int64 imported_rows = 2;
   repeated FieldBinlog binlogs = 3;
   repeated FieldBinlog statslogs = 4;
-  repeated index.IndexFilePathInfo index_infos = 5;
 }
 
 message QueryImportResponse {
   common.Status status = 1;
   int64 taskID = 2;
-  milvus.ImportState state = 3;
+  internal.ImportState state = 3;
   string reason = 4;
   int64 slots = 5;
   repeated ImportSegmentInfo import_segments_info = 6;
@@ -844,7 +860,7 @@ message PreImportTask {
   repeated int64 partitionIDs = 4;
   repeated string vchannels = 5;
   int64 nodeID = 6;
-  milvus.ImportState state = 7;
+  internal.ImportState state = 7;
   string reason = 8;
   repeated ImportFileStats file_stats = 9;
 }
@@ -855,7 +871,7 @@ message ImportTaskV2 {
   int64 collectionID = 3;
   repeated int64 segmentIDs = 4;
   int64 nodeID = 5;
-  milvus.ImportState state = 6;
+  internal.ImportState state = 6;
   string reason = 7;
   repeated ImportFileStats file_stats = 8;
 }

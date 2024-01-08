@@ -17,110 +17,95 @@
 package importv2
 
 import (
-	"fmt"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-type hashFunc func(row map[int64]interface{}) (int64, int64)
+type HashedData [][]*storage.InsertData // vchannel -> (partitionID -> InsertData)
 
-func getHashFunc(schema *schemapb.CollectionSchema, chanNum, partitionNum int) (hashFunc, error) {
+func newHashData(schema *schemapb.CollectionSchema, channelNum, partitionNum int) (HashedData, error) {
+	var err error
+	res := make(HashedData, channelNum)
+	for i := 0; i < channelNum; i++ {
+		res[i] = make([]*storage.InsertData, partitionNum)
+		for j := 0; j < partitionNum; j++ {
+			res[i][j], err = storage.NewInsertData(schema)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	return res, nil
+}
+
+func HashData(task Task, rows *storage.InsertData) (HashedData, error) {
+	var (
+		schema       = typeutil.AppendSystemFields(task.GetSchema())
+		channelNum   = len(task.GetVchannels())
+		partitionNum = len(task.GetPartitionIDs())
+	)
+
+	fn, err := getHashFunc(task.GetSchema(), channelNum, partitionNum)
+	if err != nil {
+		return nil, err
+	}
+
+	res, err := newHashData(schema, channelNum, partitionNum)
+	if err != nil {
+		return nil, err
+	}
+
+	for i := 0; i < rows.GetRowNum(); i++ {
+		row := rows.GetRow(i)
+		p1, p2 := fn(row)
+		err = res[p1][p2].Append(row)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return res, nil
+}
+
+func GetRowsStats(task Task, rows *storage.InsertData) (map[string]*datapb.PartitionRows, error) {
+	var (
+		schema       = task.GetSchema()
+		channelNum   = len(task.GetVchannels())
+		partitionNum = len(task.GetPartitionIDs())
+	)
+
 	pkField, err := typeutil.GetPrimaryFieldSchema(schema)
 	if err != nil {
 		return nil, err
 	}
-	partKeyField, err := typeutil.GetPartitionKeyFieldSchema(schema)
-	if err != nil {
-		return hashByChannels(int64(chanNum), pkField), nil
-	}
-	return hashByChannelsAndPartitionKey(int64(chanNum), int64(partitionNum), pkField, partKeyField), nil
-}
+	partKeyField, _ := typeutil.GetPartitionKeyFieldSchema(schema)
 
-func hashByChannels(channelNum int64, pkField *schemapb.FieldSchema) hashFunc {
-	fn1 := hashFuncBasic(pkField.GetDataType())
-	return func(row map[int64]interface{}) (int64, int64) {
-		pk1 := row[pkField.GetFieldID()]
-		p1 := fn1(pk1, channelNum)
-		return p1, 0
+	hashRowsCount := make([][]int, channelNum)
+	for i := 0; i < channelNum; i++ {
+		hashRowsCount[i] = make([]int, partitionNum)
 	}
-}
 
-func hashByChannelsAndPartitionKey(channelNum, partitionNum int64,
-	pkField, partField *schemapb.FieldSchema) hashFunc {
-	fn1 := hashFuncBasic(pkField.GetDataType())
-	fn2 := hashFuncBasic(partField.GetDataType())
-	return func(row map[int64]interface{}) (int64, int64) {
-		pk1 := row[pkField.GetFieldID()]
-		pk2 := row[partField.GetFieldID()]
-		p1 := fn1(pk1, channelNum)
-		p2 := fn2(pk2, partitionNum)
-		return p1, p2
-	}
-}
-
-func hashFuncBasic(dataType schemapb.DataType) func(pk interface{}, shardNum int64) int64 {
-	switch dataType {
-	case schemapb.DataType_Int64:
-		return func(pk interface{}, shardNum int64) int64 {
-			hash, _ := typeutil.Hash32Int64(pk.(int64))
-			return int64(hash) % shardNum
+	rowNum := GetInsertDataRowNum(rows, schema)
+	if !pkField.GetAutoID() {
+		fn, err := getHashFunc(schema, channelNum, partitionNum)
+		if err != nil {
+			return nil, err
 		}
-	case schemapb.DataType_VarChar:
-		return func(pk interface{}, shardNum int64) int64 {
-			hash := typeutil.HashString2Uint32(pk.(string))
-			return int64(hash) % shardNum
+		for i := 0; i < rowNum; i++ {
+			p1, p2 := fn(rows.GetRow(i))
+			hashRowsCount[p1][p2]++
 		}
-	default:
-		return nil
-	}
-}
-
-func GetHashedRowsCount(task Task, insertData *storage.InsertData) (map[string]*datapb.PartitionRows, error) {
-	hashFunc, err := getHashFunc(task.GetSchema(), len(task.GetVchannels()), len(task.GetPartitionIDs()))
-	if err != nil {
-		return nil, err
-	}
-
-	rowNum := GetInsertDataRowNum(insertData, task.GetSchema())
-	pkField, err := typeutil.GetPrimaryFieldSchema(task.GetSchema())
-	if err != nil {
-		return nil, err
-	}
-	if pkField.GetAutoID() { // TODO: dyh, fix it, find a better way
-		// gen fake auto id for preimport
-		if insertData.Data[pkField.GetFieldID()] == nil || insertData.Data[pkField.GetFieldID()].RowNum() == 0 {
-			switch pkField.GetDataType() {
-			case schemapb.DataType_Int64:
-				data := make([]int64, rowNum)
-				for i := 0; i < rowNum; i++ {
-					data[i] = int64(i)
-				}
-				insertData.Data[pkField.GetFieldID()] = &storage.Int64FieldData{Data: data}
-			case schemapb.DataType_VarChar:
-				data := make([]string, rowNum)
-				for i := 0; i < rowNum; i++ {
-					data[i] = fmt.Sprint(i)
-				}
-				insertData.Data[pkField.GetFieldID()] = &storage.StringFieldData{Data: data}
-			}
+	} else {
+		id := int64(0)
+		num := int64(channelNum)
+		fn1 := hashByID()
+		fn2 := hashByPartitionKey(int64(partitionNum), partKeyField)
+		for i := 0; i < rowNum; i++ {
+			p1, p2 := fn1(id, num), fn2(rows.GetRow(i))
+			hashRowsCount[p1][p2]++
+			id++
 		}
-	}
-
-	err = CheckRowsEqual(task.GetSchema(), insertData)
-	if err != nil {
-		return nil, err
-	}
-
-	hashRowsCount := make([][]int, len(task.GetVchannels()))
-	for i := 0; i < len(task.GetVchannels()); i++ {
-		hashRowsCount[i] = make([]int, len(task.GetPartitionIDs()))
-	}
-	for i := 0; i < rowNum; i++ {
-		p1, p2 := hashFunc(insertData.GetRow(i))
-		hashRowsCount[p1][p2]++
 	}
 
 	res := make(map[string]*datapb.PartitionRows)
@@ -131,41 +116,79 @@ func GetHashedRowsCount(task Task, insertData *storage.InsertData) (map[string]*
 	}
 	for i, partitionRows := range hashRowsCount {
 		channel := task.GetVchannels()[i]
-		for j, rowNum := range partitionRows {
+		for j, n := range partitionRows {
 			partition := task.GetPartitionIDs()[j]
-			res[channel].PartitionRows[partition] = int64(rowNum)
+			res[channel].PartitionRows[partition] = int64(n)
 		}
 	}
 	return res, nil
 }
 
-func GetHashedData(task Task, insertData *storage.InsertData) (HashedData, error) {
-	hashFunc, err := getHashFunc(task.GetSchema(), len(task.GetVchannels()), len(task.GetPartitionIDs()))
+func getHashFunc(schema *schemapb.CollectionSchema, chanNum, partitionNum int) (func(row map[int64]interface{}) (int64, int64), error) {
+	pkField, err := typeutil.GetPrimaryFieldSchema(schema)
 	if err != nil {
 		return nil, err
 	}
+	partKeyField, _ := typeutil.GetPartitionKeyFieldSchema(schema)
 
-	schema := typeutil.AppendSystemFields(task.GetSchema())
-	res := make(HashedData, len(task.GetVchannels()))
-	for i := range task.GetVchannels() {
-		res[i] = make([]*storage.InsertData, len(task.GetPartitionIDs()))
-		for j := range task.GetPartitionIDs() {
-			res[i][j], err = storage.NewInsertData(schema)
-			if err != nil {
-				return nil, err
-			}
+	f1 := hashByVChannel(int64(chanNum), pkField)
+	f2 := hashByPartitionKey(int64(partitionNum), partKeyField)
+
+	return func(row map[int64]interface{}) (int64, int64) {
+		return f1(row), f2(row)
+	}, nil
+}
+
+func hashByVChannel(channelNum int64, pkField *schemapb.FieldSchema) func(row map[int64]interface{}) int64 {
+	if channelNum == 1 || pkField == nil {
+		return func(_ map[int64]interface{}) int64 {
+			return 0
 		}
 	}
+	fn := hashFunc(pkField.GetDataType())
+	return func(row map[int64]interface{}) int64 {
+		pk := row[pkField.GetFieldID()]
+		p := fn(pk, channelNum)
+		return p
+	}
+}
 
-	for i := 0; i < insertData.GetRowNum(); i++ {
-		row := insertData.GetRow(i)
-		p1, p2 := hashFunc(row)
-		err = res[p1][p2].Append(row)
-		if err != nil {
-			return nil, err
+func hashByPartitionKey(partitionNum int64, partField *schemapb.FieldSchema) func(row map[int64]interface{}) int64 {
+	if partitionNum == 1 {
+		return func(_ map[int64]interface{}) int64 {
+			return 0
 		}
 	}
-	return res, nil
+	fn := hashFunc(partField.GetDataType())
+	return func(row map[int64]interface{}) int64 {
+		pk := row[partField.GetFieldID()]
+		p := fn(pk, partitionNum)
+		return p
+	}
+}
+
+func hashByID() func(id int64, shardNum int64) int64 {
+	return func(id int64, shardNum int64) int64 {
+		hash, _ := typeutil.Hash32Int64(id)
+		return int64(hash) % shardNum
+	}
+}
+
+func hashFunc(dataType schemapb.DataType) func(data any, shardNum int64) int64 {
+	switch dataType {
+	case schemapb.DataType_Int64:
+		return func(data any, shardNum int64) int64 {
+			hash, _ := typeutil.Hash32Int64(data.(int64))
+			return int64(hash) % shardNum
+		}
+	case schemapb.DataType_VarChar:
+		return func(data any, shardNum int64) int64 {
+			hash := typeutil.HashString2Uint32(data.(string))
+			return int64(hash) % shardNum
+		}
+	default:
+		return nil
+	}
 }
 
 func MergeHashedRowsCount(src, dst map[string]*datapb.PartitionRows) {
