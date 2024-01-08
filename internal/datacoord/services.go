@@ -1722,7 +1722,8 @@ func (s *Server) ImportV2(ctx context.Context, in *datapb.ImportRequestInternal)
 				State:        internalpb.ImportState_Pending,
 				FileStats:    fileStats,
 			},
-			schema: in.GetSchema(), // TODO: dyh, move to preimport task
+			schema:         in.GetSchema(), // TODO: dyh, move to preimport task
+			lastActiveTime: time.Now(),
 		}
 		err = s.importMeta.Add(task)
 		if err != nil {

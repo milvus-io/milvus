@@ -134,19 +134,19 @@ func (c *importChecker) checkPreImportState(requestID int64) {
 			RequestID: t.GetRequestID(),
 		})
 		if err != nil {
-			log.Warn("drop import failed", WrapLogFields(t, err)...)
+			log.Warn("drop import failed", WrapLogFields(t, zap.Error(err))...)
 			return
 		}
 		for _, segment := range t.(*importTask).GetSegmentIDs() {
 			err = c.meta.DropSegment(segment)
 			if err != nil {
-				log.Warn("drop segment failed", WrapLogFields(t, err)...)
+				log.Warn("drop segment failed", WrapLogFields(t, zap.Error(err))...)
 				return
 			}
 		}
 		err = c.imeta.Remove(t.GetTaskID())
 		if err != nil {
-			log.Warn("remove import task failed", WrapLogFields(t, err)...)
+			log.Warn("remove import task failed", WrapLogFields(t, zap.Error(err))...)
 			return
 		}
 	}
@@ -159,10 +159,10 @@ func (c *importChecker) checkPreImportState(requestID int64) {
 	for _, t := range newTasks {
 		err = c.imeta.Add(t)
 		if err != nil {
-			log.Warn("add new import task failed", WrapLogFields(t, nil)...)
+			log.Warn("add new import task failed", WrapLogFields(t)...)
 			return
 		}
-		log.Info("add new import task", WrapLogFields(t, nil)...)
+		log.Info("add new import task", WrapLogFields(t, zap.Error(err))...)
 	}
 }
 
@@ -181,19 +181,19 @@ func (c *importChecker) checkImportState(requestID int64) {
 		for _, segmentID := range segmentIDs {
 			err := AddImportSegment(c.cluster, c.meta, segmentID)
 			if err != nil {
-				log.Warn("add import segment failed", WrapLogFields(task, err)...)
+				log.Warn("add import segment failed", WrapLogFields(task, zap.Error(err))...)
 				return
 			}
 			err = c.meta.UnsetIsImporting(segmentID)
 			if err != nil {
-				log.Warn("unset importing flag failed", WrapLogFields(task, err)...)
+				log.Warn("unset importing flag failed", WrapLogFields(task, zap.Error(err))...)
 				return
 			}
 		}
 		// accelerate building index
 		_, err := c.sm.SealAllSegments(context.Background(), task.GetCollectionID(), segmentIDs, true)
 		if err != nil {
-			log.Warn("seal imported segments failed", WrapLogFields(task, err)...)
+			log.Warn("seal imported segments failed", WrapLogFields(task, zap.Error(err))...)
 		}
 	}
 }

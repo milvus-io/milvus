@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"sync"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -92,12 +93,14 @@ func (m *importMeta) Update(taskID int64, actions ...UpdateAction) error {
 			if err != nil {
 				return err
 			}
+			updatedTask.(*preImportTask).lastActiveTime = time.Now()
 			m.tasks[updatedTask.GetTaskID()] = updatedTask
 		case ImportTaskType:
 			err := m.catalog.SaveImportTask(updatedTask.(*importTask).ImportTaskV2)
 			if err != nil {
 				return err
 			}
+			updatedTask.(*importTask).lastActiveTime = time.Now()
 			m.tasks[updatedTask.GetTaskID()] = updatedTask
 		}
 	}

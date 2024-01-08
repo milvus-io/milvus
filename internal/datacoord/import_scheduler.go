@@ -31,6 +31,7 @@ import (
 
 const (
 	NullNodeID = -1
+	GCDuration = 3 * time.Hour // TODO: dyh, make it configurable
 )
 
 type ImportScheduler interface {
@@ -101,8 +102,10 @@ func (s *importScheduler) process() {
 			case ImportTaskType:
 				s.processInProgressImport(task)
 			}
-		case internalpb.ImportState_Failed, internalpb.ImportState_Completed:
-			s.processCompletedOrFailed(task)
+		case internalpb.ImportState_Completed:
+			s.processCompleted(task)
+		case internalpb.ImportState_Failed:
+			s.processFailed(task)
 		}
 	}
 }
@@ -111,13 +114,13 @@ func (s *importScheduler) checkErr(task ImportTask, err error) {
 	if !merr.IsRetryableErr(err) {
 		err = s.imeta.Update(task.GetTaskID(), UpdateState(internalpb.ImportState_Failed), UpdateReason(err.Error()))
 		if err != nil {
-			log.Warn("failed to update import task state to failed", WrapLogFields(task, err)...)
+			log.Warn("failed to update import task state to failed", WrapLogFields(task, zap.Error(err))...)
 		}
 		return
 	}
 	err = s.imeta.Update(task.GetTaskID(), UpdateState(internalpb.ImportState_Pending))
 	if err != nil {
-		log.Warn("failed to update import task state to pending", WrapLogFields(task, err)...)
+		log.Warn("failed to update import task state to pending", WrapLogFields(task, zap.Error(err))...)
 	}
 }
 
@@ -141,61 +144,59 @@ func (s *importScheduler) getIdleNode() int64 {
 func (s *importScheduler) processPendingPreImport(task ImportTask) {
 	nodeID := s.getIdleNode()
 	if nodeID == NullNodeID {
-		log.Warn("no datanode can be scheduled", WrapLogFields(task, nil)...)
+		log.Warn("no datanode can be scheduled", WrapLogFields(task)...)
 		return
 	}
-	log.Info("processing pending preimport task...", WrapLogFields(task, nil)...)
+	log.Info("processing pending preimport task...", WrapLogFields(task)...)
 	req := AssemblePreImportRequest(task)
 	err := s.cluster.PreImport(nodeID, req)
 	if err != nil {
-		log.Warn("preimport failed", WrapLogFields(task, err)...)
+		log.Warn("preimport failed", WrapLogFields(task, zap.Error(err))...)
 		return
 	}
 	err = s.imeta.Update(task.GetTaskID(),
 		UpdateState(internalpb.ImportState_InProgress),
 		UpdateNodeID(nodeID))
 	if err != nil {
-		log.Warn("update import task failed", WrapLogFields(task, err)...)
+		log.Warn("update import task failed", WrapLogFields(task, zap.Error(err))...)
 	}
-	log.Info("process pending preimport task done", WrapLogFields(task, nil)...)
+	log.Info("process pending preimport task done", WrapLogFields(task)...)
 }
 
 func (s *importScheduler) processPendingImport(task ImportTask) {
 	nodeID := s.getIdleNode()
 	if nodeID == NullNodeID {
-		log.Warn("no datanode can be scheduled", WrapLogFields(task, nil)...)
+		log.Warn("no datanode can be scheduled", WrapLogFields(task)...)
 		return
 	}
-	log.Info("processing pending import task...", WrapLogFields(task, nil)...)
+	log.Info("processing pending import task...", WrapLogFields(task)...)
 	req, err := AssembleImportRequest(task, s.meta, s.alloc)
 	if err != nil {
-		log.Warn("assemble import request failed", WrapLogFields(task, err)...)
+		log.Warn("assemble import request failed", WrapLogFields(task, zap.Error(err))...)
 		return
 	}
 	err = s.cluster.ImportV2(nodeID, req)
 	if err != nil {
-		log.Warn("import failed", WrapLogFields(task, err)...)
+		log.Warn("import failed", WrapLogFields(task, zap.Error(err))...)
 		return
 	}
 	err = s.imeta.Update(task.GetTaskID(),
 		UpdateState(internalpb.ImportState_InProgress),
 		UpdateNodeID(nodeID))
 	if err != nil {
-		log.Warn("update import task failed", WrapLogFields(task, err)...)
+		log.Warn("update import task failed", WrapLogFields(task, zap.Error(err))...)
 	}
-	log.Info("processing pending import task done", WrapLogFields(task, nil)...)
+	log.Info("processing pending import task done", WrapLogFields(task)...)
 }
 
 func (s *importScheduler) processInProgressPreImport(task ImportTask) {
-	log := log.With(zap.Int64("request", task.GetRequestID()),
-		zap.Int64("taskID", task.GetTaskID()))
 	req := &datapb.QueryPreImportRequest{
 		RequestID: task.GetRequestID(),
 		TaskID:    task.GetTaskID(),
 	}
 	resp, err := s.cluster.QueryPreImport(task.GetNodeID(), req)
 	if err != nil {
-		log.Warn("query preimport failed", WrapLogFields(task, err)...)
+		log.Warn("query preimport failed", WrapLogFields(task, zap.Error(err))...)
 		s.checkErr(task, err)
 		return
 	}
@@ -208,15 +209,15 @@ func (s *importScheduler) processInProgressPreImport(task ImportTask) {
 	// TODO: check if rows changed to save meta op
 	err = s.imeta.Update(task.GetTaskID(), actions...)
 	if err != nil {
-		log.Warn("update import task failed", WrapLogFields(task, err)...)
+		log.Warn("update import task failed", WrapLogFields(task, zap.Error(err))...)
 		return
 	}
 	if resp.GetState() == internalpb.ImportState_Failed {
-		log.Warn("preimport failed", zap.String("reason", resp.GetReason()))
+		log.Warn("preimport failed",
+			WrapLogFields(task, zap.String("reason", resp.GetReason()))...)
 	} else {
 		log.Info("query preimport done",
-			zap.String("state", resp.GetState().String()),
-			zap.Any("fileStats", resp.GetFileStats()))
+			WrapLogFields(task, zap.Any("fileStats", resp.GetFileStats()))...)
 	}
 }
 
@@ -227,7 +228,7 @@ func (s *importScheduler) processInProgressImport(task ImportTask) {
 	}
 	resp, err := s.cluster.QueryImport(task.GetNodeID(), req)
 	if err != nil {
-		log.Warn("query import failed", WrapLogFields(task, err)...)
+		log.Warn("query import failed", WrapLogFields(task, zap.Error(err))...)
 		s.checkErr(task, err)
 		return
 	}
@@ -236,43 +237,65 @@ func (s *importScheduler) processInProgressImport(task ImportTask) {
 		op2 := UpdateNumOfRows(info.GetSegmentID(), info.GetImportedRows())
 		err = s.meta.UpdateSegmentsInfo(op1, op2)
 		if err != nil {
-			log.Warn("update import segment info failed", WrapLogFields(task, err)...)
+			log.Warn("update import segment info failed", WrapLogFields(task, zap.Error(err))...)
 			continue
 		}
 	}
 	if resp.GetState() == internalpb.ImportState_Completed {
 		err = s.imeta.Update(task.GetTaskID(), UpdateState(internalpb.ImportState_Completed))
 		if err != nil {
-			log.Warn("update import task failed", WrapLogFields(task, err)...)
+			log.Warn("update import task failed", WrapLogFields(task, zap.Error(err))...)
 		}
 	}
 	if resp.GetState() == internalpb.ImportState_Failed {
 		err = s.imeta.Update(task.GetTaskID(), UpdateState(internalpb.ImportState_Failed), UpdateReason(resp.GetReason()))
 		if err != nil {
-			log.Warn("update import task failed", WrapLogFields(task, err)...)
+			log.Warn("update import task failed", WrapLogFields(task, zap.Error(err))...)
 		}
 	}
-	log.Info("query import done",
-		zap.Int64("request", task.GetRequestID()),
-		zap.Int64("taskID", task.GetTaskID()),
-		zap.String("state", resp.GetState().String()))
+	log.Info("query import done", WrapLogFields(task)...)
 }
 
-func (s *importScheduler) processCompletedOrFailed(task ImportTask) {
-	if task.GetNodeID() == NullNodeID {
+func (s *importScheduler) processCompleted(task ImportTask) {
+	err := DropImportTask(task, s.cluster, s.imeta)
+	if err != nil {
+		log.Warn("drop import failed", WrapLogFields(task, zap.Error(err))...)
 		return
 	}
-	req := &datapb.DropImportRequest{
-		RequestID: task.GetRequestID(),
-		TaskID:    task.GetTaskID(),
+	if time.Since(task.GetLastActiveTime()) >= GCDuration {
+		err = s.imeta.Remove(task.GetTaskID())
+		if err != nil {
+			log.Warn("remove import task failed", WrapLogFields(task, zap.Error(err))...)
+		}
 	}
-	err := s.cluster.DropImport(task.GetNodeID(), req)
+}
+
+func (s *importScheduler) processFailed(task ImportTask) {
+	if task.GetType() == ImportTaskType {
+		segments := task.(*importTask).GetSegmentIDs()
+		for _, segment := range segments {
+			err := s.meta.DropSegment(segment)
+			if err != nil {
+				log.Warn("drop import segment failed",
+					WrapLogFields(task, zap.Int64("segment", segment), zap.Error(err))...)
+				return
+			}
+		}
+		err := s.imeta.Update(task.GetTaskID(), UpdateSegmentIDs(nil))
+		if err != nil {
+			log.Warn("update import task segments failed", WrapLogFields(task, zap.Error(err))...)
+			return
+		}
+	}
+	err := DropImportTask(task, s.cluster, s.imeta)
 	if err != nil {
-		log.Warn("drop import failed", WrapLogFields(task, err)...)
+		log.Warn("drop import failed", WrapLogFields(task, zap.Error(err))...)
 		return
 	}
-	err = s.imeta.Update(task.GetTaskID(), UpdateNodeID(NullNodeID))
-	if err != nil {
-		log.Warn("update import task failed", WrapLogFields(task, err)...)
+	if time.Since(task.GetLastActiveTime()) >= GCDuration {
+		err = s.imeta.Remove(task.GetTaskID())
+		if err != nil {
+			log.Warn("remove import task failed", WrapLogFields(task, zap.Error(err))...)
+		}
 	}
 }

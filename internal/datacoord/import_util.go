@@ -32,8 +32,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
-func WrapLogFields(task ImportTask, err error) []zap.Field {
-	fields := []zap.Field{
+func WrapLogFields(task ImportTask, fields ...zap.Field) []zap.Field {
+	res := []zap.Field{
 		zap.Int64("taskID", task.GetTaskID()),
 		zap.Int64("requestID", task.GetRequestID()),
 		zap.Int64("collectionID", task.GetCollectionID()),
@@ -41,10 +41,8 @@ func WrapLogFields(task ImportTask, err error) []zap.Field {
 		zap.String("state", task.GetState().String()),
 		zap.String("type", task.GetType().String()),
 	}
-	if err != nil {
-		fields = append(fields, zap.Error(err))
-	}
-	return fields
+	res = append(res, fields...)
+	return res
 }
 
 func AssemblePreImportRequest(task ImportTask) *datapb.PreImportRequest {
@@ -208,7 +206,8 @@ func NewImportTasks(fileGroups [][]*datapb.ImportFileStats,
 				State:        internalpb.ImportState_Pending,
 				FileStats:    group,
 			},
-			schema: schema,
+			schema:         schema,
+			lastActiveTime: time.Now(),
 		}
 		segments, err := AssignSegments(task, manager)
 		if err != nil {
@@ -325,4 +324,19 @@ func GetImportProgress(requestID int64, imeta ImportMeta, meta *meta) (int64, in
 		return 100, internalpb.ImportState_Completed, ""
 	}
 	return int64(progress), internalpb.ImportState_InProgress, ""
+}
+
+func DropImportTask(task ImportTask, cluster Cluster, imeta ImportMeta) error {
+	if task.GetNodeID() == NullNodeID {
+		return nil
+	}
+	req := &datapb.DropImportRequest{
+		RequestID: task.GetRequestID(),
+		TaskID:    task.GetTaskID(),
+	}
+	err := cluster.DropImport(task.GetNodeID(), req)
+	if err != nil {
+		return err
+	}
+	return imeta.Update(task.GetTaskID(), UpdateNodeID(NullNodeID))
 }
