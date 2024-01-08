@@ -629,7 +629,7 @@ func TestMeta_alterMetaStore(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestMeta_PrepareCompleteCompactionMutation(t *testing.T) {
+func TestMeta_prepareCompactionMutation(t *testing.T) {
 	prepareSegments := &SegmentsInfo{
 		map[UniqueID]*SegmentInfo{
 			1: {SegmentInfo: &datapb.SegmentInfo{
@@ -685,7 +685,7 @@ func TestMeta_PrepareCompleteCompactionMutation(t *testing.T) {
 		Deltalogs:           []*datapb.FieldBinlog{getFieldBinlogPaths(0, "deltalog5")},
 		NumOfRows:           2,
 	}
-	beforeCompact, afterCompact, newSegment, metricMutation, err := m.PrepareCompleteCompactionMutation(plan, inCompactionResult)
+	beforeCompact, afterCompact, newSegment, metricMutation, err := m.prepareCompactionMutation(plan, inCompactionResult)
 	assert.NoError(t, err)
 	assert.NotNil(t, beforeCompact)
 	assert.NotNil(t, afterCompact)
@@ -717,6 +717,9 @@ func TestMeta_PrepareCompleteCompactionMutation(t *testing.T) {
 	assert.EqualValues(t, inCompactionResult.GetDeltalogs(), newSegment.GetDeltalogs())
 	assert.NotZero(t, newSegment.lastFlushTime)
 	assert.Equal(t, uint64(15), newSegment.GetLastExpireTime())
+
+	_, _, err = m.CompleteCompactionMutation(plan, inCompactionResult)
+	assert.Error(t, err)
 }
 
 func Test_meta_SetSegmentCompacting(t *testing.T) {

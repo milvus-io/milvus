@@ -294,16 +294,11 @@ func (c *compactionPlanHandler) completeCompaction(result *datapb.CompactionResu
 
 func (c *compactionPlanHandler) handleMergeCompactionResult(plan *datapb.CompactionPlan, result *datapb.CompactionResult) error {
 	// Also prepare metric updates.
-	_, modSegments, newSegment, metricMutation, err := c.meta.PrepareCompleteCompactionMutation(plan, result)
+	newSegment, metricMutation, err := c.meta.CompleteCompactionMutation(plan, result)
 	if err != nil {
 		return err
 	}
 	log := log.With(zap.Int64("planID", plan.GetPlanID()))
-
-	if err := c.meta.alterMetaStoreAfterCompaction(newSegment, modSegments); err != nil {
-		log.Warn("fail to alert meta store", zap.Error(err))
-		return err
-	}
 
 	nodeID := c.plans[plan.GetPlanID()].dataNodeID
 	req := &datapb.SyncSegmentsRequest{
