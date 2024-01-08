@@ -25,7 +25,6 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 )
 
@@ -121,18 +120,15 @@ func (c *importChecker) checkPreImportState(requestID int64) {
 	}
 	groups, err := RegroupImportFiles(tasks)
 	if err != nil {
-		log.Warn("regroup import files failed", zap.Int64("reqID", requestID))
+		log.Warn("regroup import files failed", zap.Int64("reqID", requestID), zap.Error(err))
 		return
 	}
 	importTasks := c.imeta.GetBy(WithType(ImportTaskType), WithReq(requestID))
 	if len(importTasks) == len(groups) {
 		return // all imported are generated
 	}
-	for _, t := range importTasks { // happens only when txn failed
-		err := c.cluster.DropImport(t.GetNodeID(), &datapb.DropImportRequest{
-			TaskID:    t.GetTaskID(),
-			RequestID: t.GetRequestID(),
-		})
+	for _, t := range importTasks { // happens only when txn of adding new import tasks failed
+		err = DropImportTask(t, c.cluster, c.imeta)
 		if err != nil {
 			log.Warn("drop import failed", WrapLogFields(t, zap.Error(err))...)
 			return
@@ -159,10 +155,10 @@ func (c *importChecker) checkPreImportState(requestID int64) {
 	for _, t := range newTasks {
 		err = c.imeta.Add(t)
 		if err != nil {
-			log.Warn("add new import task failed", WrapLogFields(t)...)
+			log.Warn("add new import task failed", WrapLogFields(t, zap.Error(err))...)
 			return
 		}
-		log.Info("add new import task", WrapLogFields(t, zap.Error(err))...)
+		log.Info("add new import task", WrapLogFields(t)...)
 	}
 }
 

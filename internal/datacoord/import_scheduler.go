@@ -206,7 +206,7 @@ func (s *importScheduler) processInProgressPreImport(task ImportTask) {
 	} else if resp.GetState() == internalpb.ImportState_Failed {
 		actions = append(actions, UpdateState(internalpb.ImportState_Failed), UpdateReason(resp.GetReason()))
 	}
-	// TODO: check if rows changed to save meta op
+	// TODO: dyh, check if rows changed to save meta op
 	err = s.imeta.Update(task.GetTaskID(), actions...)
 	if err != nil {
 		log.Warn("update import task failed", WrapLogFields(task, zap.Error(err))...)
@@ -233,6 +233,7 @@ func (s *importScheduler) processInProgressImport(task ImportTask) {
 		return
 	}
 	for _, info := range resp.GetImportSegmentsInfo() {
+		// TODO: dyh, check if segment info changed to save meta op
 		op1 := UpdateBinlogsOperator(info.GetSegmentID(), info.GetBinlogs(), info.GetStatslogs(), nil)
 		op2 := UpdateNumOfRows(info.GetSegmentID(), info.GetImportedRows())
 		err = s.meta.UpdateSegmentsInfo(op1, op2)
