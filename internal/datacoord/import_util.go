@@ -100,24 +100,18 @@ func AssignSegments(task ImportTask, manager Manager) ([]int64, error) {
 }
 
 func AssembleImportRequest(task ImportTask, meta *meta, alloc allocator) (*datapb.ImportRequest, error) {
-	requestSegments := make(map[int64]*datapb.ImportRequestSegment, 0)
+	requestSegments := make([]*datapb.ImportRequestSegment, 0)
 	for _, segmentID := range task.(*importTask).GetSegmentIDs() {
 		segment := meta.GetSegment(segmentID)
 		if segment == nil {
 			return nil, merr.WrapErrSegmentNotFound(segmentID, "assemble import request failed")
 		}
-		//idBegin, idEnd, err := alloc.allocN(segment.GetMaxRowNum())
-		//if err != nil {
-		//	return nil, err
-		//}
-		//ts, err := alloc.allocTimestamp(context.Background()) // TODO: dyh, resolve context
-		requestSegments[segmentID] = &datapb.ImportRequestSegment{
+		requestSegments = append(requestSegments, &datapb.ImportRequestSegment{
 			SegmentID:   segment.GetID(),
 			PartitionID: segment.GetPartitionID(),
 			Vchannel:    segment.GetInsertChannel(),
-			//Ts:           ts,
-			//AutoIDRanges: &datapb.AutoIDRange{Begin: idBegin, End: idEnd},
-		}
+			MaxRows:     segment.GetMaxRowNum(),
+		})
 	}
 	ts, err := alloc.allocTimestamp(context.Background()) // TODO: dyh, resolve context
 	if err != nil {

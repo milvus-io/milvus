@@ -254,7 +254,7 @@ func (e *executor) Sync(task *ImportTask, hashedData HashedData) error {
 		channel := task.vchannels[channelIdx]
 		for partitionIdx, data := range datas {
 			partitionID := task.partitions[partitionIdx]
-			segmentID := PickSegment(task, channel, partitionID)
+			segmentID := PickSegment(task, channel, partitionID, data.GetRowNum())
 			syncTask, err := NewSyncTask(task, segmentID, partitionID, channel, data)
 			if err != nil {
 				return err

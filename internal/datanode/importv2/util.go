@@ -89,9 +89,8 @@ func NewImportSegmentInfo(syncTask syncmgr.Task, task *ImportTask) (*datapb.Impo
 	}, nil
 }
 
-func PickSegment(task *ImportTask, vchannel string, partitionID int64) int64 {
-	requestSegments := task.req.GetRequestSegments()
-	targets := lo.Filter(lo.Values(requestSegments), func(info *datapb.ImportRequestSegment, _ int) bool {
+func PickSegment(task *ImportTask, vchannel string, partitionID int64, rows int) int64 {
+	candidates := lo.Filter(task.req.GetRequestSegments(), func(info *datapb.ImportRequestSegment, _ int) bool {
 		return info.GetVchannel() == vchannel && info.GetPartitionID() == partitionID
 	})
 
@@ -99,10 +98,15 @@ func PickSegment(task *ImportTask, vchannel string, partitionID int64) int64 {
 		return segment.GetSegmentID()
 	})
 
-	minSegment := lo.MinBy(targets, func(seg1 *datapb.ImportRequestSegment, seg2 *datapb.ImportRequestSegment) bool {
-		return importedSegments[seg1.GetSegmentID()].GetImportedRows() < importedSegments[seg2.GetSegmentID()].GetImportedRows()
-	})
-	return minSegment.GetSegmentID()
+	for _, candidate := range candidates {
+		if segment, ok := importedSegments[candidate.GetSegmentID()]; ok {
+			if segment.GetImportedRows()+int64(rows) <= candidate.GetMaxRows() {
+				return candidate.GetSegmentID()
+			}
+		}
+	}
+	log.Warn("pick suitable segment failed, use the first one", WrapLogFields(task)...)
+	return candidates[0].GetSegmentID()
 }
 
 func AddSegment(metaCache metacache.MetaCache, vchannel string, segID, partID, collID int64) {

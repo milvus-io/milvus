@@ -259,8 +259,8 @@ func (s *ExecutorSuite) TestImportFile() {
 			Begin: 0,
 			End:   int64(s.numRows),
 		},
-		RequestSegments: map[int64]*datapb.ImportRequestSegment{
-			13: {
+		RequestSegments: []*datapb.ImportRequestSegment{
+			{
 				SegmentID:   13,
 				PartitionID: 14,
 				Vchannel:    "v0",
