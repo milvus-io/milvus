@@ -176,7 +176,6 @@ replace (
 	github.com/go-kit/kit => github.com/go-kit/kit v0.1.0
 	github.com/streamnative/pulsarctl => github.com/xiaofan-luan/pulsarctl v0.5.1
 	github.com/tecbot/gorocksdb => github.com/milvus-io/gorocksdb v0.0.0-20220624081344-8c5f4212846b // indirect
-	github.com/milvus-io/milvus-proto/go-api/v2 => github.com/bigsheeper/milvus-proto/go-api/v2 v2.0.0-20231226033027-2f74dec9b0d3
 )
 
 exclude github.com/apache/pulsar-client-go/oauth2 v0.0.0-20211108044248-fe3b7c4e445b
