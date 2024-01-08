@@ -2956,6 +2956,9 @@ class TestUtilityRBAC(TestcaseBase):
         r_name = cf.gen_unique_str(prefix)
         c_name = cf.gen_unique_str(prefix)
         u, _ = self.utility_wrap.create_user(user=user, password=password)
+        user2 = cf.gen_unique_str(prefix)
+        u2, _ = self.utility_wrap.create_user(user=user2, password=password)
+
 
         self.utility_wrap.init_role(r_name)
         self.utility_wrap.create_role()
@@ -2971,9 +2974,26 @@ class TestUtilityRBAC(TestcaseBase):
             self.utility_wrap.role_grant(grant_item["object"], grant_item["object_name"], grant_item["privilege"],
                                          **db_kwargs)
 
-        # list grants
+        # list grants with default user
         g_list, _ = self.utility_wrap.role_list_grants(**db_kwargs)
         assert len(g_list.groups) == len(grant_list)
+
+        self.connection_wrap.disconnect(alias=DefaultConfig.DEFAULT_USING)
+        self.connection_wrap.connect(host=host, port=port, user=user,
+                                     password=password, check_task=ct.CheckTasks.ccr, **db_kwargs)
+
+        # list grants with user
+        g_list, _ = self.utility_wrap.role_list_grants(**db_kwargs)
+        assert len(g_list.groups) == len(grant_list)
+
+
+        self.connection_wrap.disconnect(alias=DefaultConfig.DEFAULT_USING)
+        self.connection_wrap.connect(host=host, port=port, user=user2,
+                                     password=password, check_task=ct.CheckTasks.ccr, **db_kwargs)
+
+        # user2 can not list grants of role
+        self.utility_wrap.role_list_grants(**db_kwargs,
+                                                  check_task=CheckTasks.check_permission_deny)
 
     @pytest.mark.tags(CaseLabel.RBAC)
     def test_drop_role_which_bind_user(self, host, port):
