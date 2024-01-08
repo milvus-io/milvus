@@ -94,11 +94,6 @@ service DataCoord {
   rpc ReportDataNodeTtMsgs(ReportDataNodeTtMsgsRequest) returns (common.Status) {}
 
   rpc GcControl(GcControlRequest) returns(common.Status){}
-
-  // importV2
-  rpc ImportV2(ImportRequestInternal) returns(internal.ImportResponse){}
-  rpc GetImportProgress(internal.GetImportProgressRequest) returns(internal.GetImportProgressResponse){}
-  rpc ListImports(internal.ListImportsRequest) returns(internal.ListImportsResponse){}
 }
 
 service DataNode {

@@ -22,11 +22,6 @@ service Proxy {
   rpc SetRates(SetRatesRequest) returns (common.Status) {}
 
   rpc ListClientInfos(ListClientInfosRequest) returns (ListClientInfosResponse) {}
-
-  // importV2
-  rpc ImportV2(internal.ImportRequest) returns(internal.ImportResponse){}
-  rpc GetImportProgress(internal.GetImportProgressRequest) returns(internal.GetImportProgressResponse){}
-  rpc ListImports(internal.ListImportsRequest) returns(internal.ListImportsResponse){}
 }
 
 message InvalidateCollMetaCacheRequest {
