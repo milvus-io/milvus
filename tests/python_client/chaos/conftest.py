@@ -11,7 +11,7 @@ def pytest_addoption(parser):
     parser.addoption("--chaos_duration", action="store", default="7m", help="chaos_duration")
     parser.addoption("--chaos_interval", action="store", default="2m", help="chaos_interval")
     parser.addoption("--is_check", action="store", type=bool, default=False, help="is_check")
-    parser.addoption("--enable_upsert", action="store", type=bool, default=True, help="is_check")
+    parser.addoption("--enable_upsert", action="store", type=str, default="true", help="enable_upsert")
     parser.addoption("--wait_signal", action="store", type=bool, default=True, help="wait_signal")
     parser.addoption("--collection_num", action="store", default="1", help="collection_num")
 

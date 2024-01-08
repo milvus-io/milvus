@@ -90,6 +90,7 @@ class TestOperations(TestBase):
                 Op.query: QueryChecker(collection_name=c_name),
                 Op.delete: DeleteChecker(collection_name=c_name),
             }
+        log.info(f"init_health_checkers: {checkers}")
         self.health_checkers = checkers
 
     @pytest.fixture(scope="function", params=get_all_collections())
@@ -102,6 +103,7 @@ class TestOperations(TestBase):
     def test_operations(self, request_duration, is_check, collection_name, enable_upsert):
         # start the monitor threads to check the milvus ops
         log.info("*********************Test Start**********************")
+        log.info(f"enable_upsert: {enable_upsert}")
         log.info(connections.get_connection_addr('default'))
         # event_records = EventRecords()
         c_name = collection_name if collection_name else cf.gen_unique_str("Checker_")
