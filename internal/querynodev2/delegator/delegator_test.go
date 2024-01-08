@@ -153,7 +153,7 @@ func (s *DelegatorSuite) SetupTest() {
 		},
 	}, &querypb.LoadMetaInfo{
 		PartitionIDs: s.partitionIDs,
-	})
+	}, nil)
 
 	s.mq = &msgstream.MockMsgStream{}
 
@@ -1269,7 +1269,7 @@ func (s *DelegatorSuite) TestOptimizeSearchBasedOnClustering_config() {
 	assert.NotEmpty(s.T(), snapshots)
 	assert.Equal(s.T(), 2, len(snapshots[0].Segments))
 
-	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.EnableSearchBasedOnClustering.Key, "false")
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.ClusteringOptimizeSearchEnable.Key, "false")
 	sr2, snapshots2 := s.delegator.OptimizeSearchBasedOnClustering(req, sealeds)
 	assert.NotEmpty(s.T(), sr2)
 	assert.NotEmpty(s.T(), snapshots2)
@@ -1279,7 +1279,7 @@ func (s *DelegatorSuite) TestOptimizeSearchBasedOnClustering_config() {
 func (s *DelegatorSuite) TestOptimizeSearchBasedOnClustering_nq1() {
 	s.delegator.Start()
 	paramtable.SetNodeID(1)
-	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.EnableSearchBasedOnClustering.Key, "true")
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.ClusteringOptimizeSearchEnable.Key, "true")
 	vector1 := []float32{0.40448594, 0.16214314, 0.17850745, 0.6640584, 0.77309024, 0.48807725, 0.66572666, 0.15990956}
 	vectors := [][]float32{vector1}
 
@@ -1360,7 +1360,7 @@ func (s *DelegatorSuite) TestOptimizeSearchBasedOnClustering_nq1() {
 func (s *DelegatorSuite) TestOptimizeSearchBasedOnClustering_nq2() {
 	s.delegator.Start()
 	paramtable.SetNodeID(1)
-	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.EnableSearchBasedOnClustering.Key, "true")
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.ClusteringOptimizeSearchEnable.Key, "true")
 	vector1 := []float32{0.8877872002188053, 0.6131822285635065, 0.8476814632326242, 0.6645877829359371, 0.9962627712600025, 0.8976183052440327, 0.41941169325798844, 0.7554387854258499}
 	vector2 := []float32{0.8644394874390322, 0.023327886647378615, 0.08330118483461302, 0.7068040179963112, 0.6983994910799851, 0.5562075958994153, 0.3288536247938002, 0.07077341010237759}
 	vectors := [][]float32{vector1, vector2}
@@ -1440,7 +1440,7 @@ func (s *DelegatorSuite) TestOptimizeSearchBasedOnClustering_nq2() {
 func (s *DelegatorSuite) TestOptimizeSearchBasedOnClustering_nq1_LargeTopK() {
 	s.delegator.Start()
 	paramtable.SetNodeID(1)
-	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.EnableSearchBasedOnClustering.Key, "true")
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.ClusteringOptimizeSearchEnable.Key, "true")
 	vector1 := []float32{0.40448594, 0.16214314, 0.17850745, 0.6640584, 0.77309024, 0.48807725, 0.66572666, 0.15990956}
 	vectors := [][]float32{vector1}
 
@@ -1531,7 +1531,7 @@ func (s *DelegatorSuite) TestOptimizeSearchBasedOnClustering_nq1_LargeTopK() {
 func (s *DelegatorSuite) TestOptimizeSearchBasedOnClustering_WrongClusteringInfo() {
 	s.delegator.Start()
 	paramtable.SetNodeID(1)
-	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.EnableSearchBasedOnClustering.Key, "true")
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.ClusteringOptimizeSearchEnable.Key, "true")
 	vector1 := []float32{0.40448594, 0.16214314, 0.17850745, 0.6640584, 0.77309024, 0.48807725, 0.66572666, 0.15990956}
 	vectors := [][]float32{vector1}
 

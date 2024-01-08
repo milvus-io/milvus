@@ -1790,7 +1790,7 @@ type queryNodeConfig struct {
 
 	ExprEvalBatchSize ParamItem `refreshable:"false"`
 
-	EnableSearchBasedOnClustering ParamItem `refreshable:"true"`
+	ClusteringOptimizeSearchEnable ParamItem `refreshable:"true"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -2203,13 +2203,13 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 
 	p.ExprEvalBatchSize.Init(base.mgr)
 
-	p.EnableSearchBasedOnClustering = ParamItem{
-		Key:          "queryNode.enableSearchBasedOnClustering",
+	p.ClusteringOptimizeSearchEnable = ParamItem{
+		Key:          "queryNode.clusteringOptimizeSearch.enabled",
 		Version:      "2.4.0",
 		DefaultValue: "true",
 		Doc:          "whether enable use clustering info to optimize search",
 	}
-	p.EnableSearchBasedOnClustering.Init(base.mgr)
+	p.ClusteringOptimizeSearchEnable.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

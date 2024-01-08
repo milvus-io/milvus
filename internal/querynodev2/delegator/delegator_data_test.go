@@ -127,7 +127,7 @@ func (s *DelegatorDataSuite) SetupTest() {
 		},
 	}, &querypb.LoadMetaInfo{
 		LoadType: querypb.LoadType_LoadCollection,
-	})
+	}, nil)
 
 	s.mq = &msgstream.MockMsgStream{}
 

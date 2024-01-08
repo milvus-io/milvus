@@ -129,17 +129,18 @@ func packLoadSegmentRequest(
 			commonpbutil.WithMsgType(commonpb.MsgType_LoadSegments),
 			commonpbutil.WithMsgID(task.ID()),
 		),
-		Infos:          []*querypb.SegmentLoadInfo{loadInfo},
-		Schema:         schema,   // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
-		LoadMeta:       loadMeta, // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
-		CollectionID:   task.CollectionID(),
-		ReplicaID:      task.ReplicaID(),
-		DeltaPositions: []*msgpb.MsgPosition{loadInfo.GetDeltaPosition()}, // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
-		DstNodeID:      action.Node(),
-		Version:        time.Now().UnixNano(),
-		NeedTransfer:   true,
-		IndexInfoList:  indexInfo,
-		LoadScope:      loadScope,
+		Infos:                []*querypb.SegmentLoadInfo{loadInfo},
+		Schema:               schema,   // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
+		LoadMeta:             loadMeta, // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
+		CollectionID:         task.CollectionID(),
+		ReplicaID:            task.ReplicaID(),
+		DeltaPositions:       []*msgpb.MsgPosition{loadInfo.GetDeltaPosition()}, // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
+		DstNodeID:            action.Node(),
+		Version:              time.Now().UnixNano(),
+		NeedTransfer:         true,
+		IndexInfoList:        indexInfo,
+		LoadScope:            loadScope,
+		CollectionProperties: collectionProperties,
 	}
 }
 

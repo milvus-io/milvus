@@ -3,6 +3,7 @@
 package segments
 
 import (
+	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	schemapb "github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	querypb "github.com/milvus-io/milvus/internal/proto/querypb"
 	mock "github.com/stretchr/testify/mock"
@@ -67,9 +68,9 @@ func (_c *MockCollectionManager_Get_Call) RunAndReturn(run func(int64) *Collecti
 	return _c
 }
 
-// PutOrRef provides a mock function with given fields: collectionID, schema, meta, loadMeta
-func (_m *MockCollectionManager) PutOrRef(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo) {
-	_m.Called(collectionID, schema, meta, loadMeta)
+// PutOrRef provides a mock function with given fields: collectionID, schema, meta, loadMeta, collectionProperties
+func (_m *MockCollectionManager) PutOrRef(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo, collectionProperties []*commonpb.KeyValuePair) {
+	_m.Called(collectionID, schema, meta, loadMeta, collectionProperties)
 }
 
 // MockCollectionManager_PutOrRef_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PutOrRef'
@@ -82,13 +83,14 @@ type MockCollectionManager_PutOrRef_Call struct {
 //   - schema *schemapb.CollectionSchema
 //   - meta *segcorepb.CollectionIndexMeta
 //   - loadMeta *querypb.LoadMetaInfo
-func (_e *MockCollectionManager_Expecter) PutOrRef(collectionID interface{}, schema interface{}, meta interface{}, loadMeta interface{}) *MockCollectionManager_PutOrRef_Call {
-	return &MockCollectionManager_PutOrRef_Call{Call: _e.mock.On("PutOrRef", collectionID, schema, meta, loadMeta)}
+//   - collectionProperties []*commonpb.KeyValuePair
+func (_e *MockCollectionManager_Expecter) PutOrRef(collectionID interface{}, schema interface{}, meta interface{}, loadMeta interface{}, collectionProperties interface{}) *MockCollectionManager_PutOrRef_Call {
+	return &MockCollectionManager_PutOrRef_Call{Call: _e.mock.On("PutOrRef", collectionID, schema, meta, loadMeta, collectionProperties)}
 }
 
-func (_c *MockCollectionManager_PutOrRef_Call) Run(run func(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo)) *MockCollectionManager_PutOrRef_Call {
+func (_c *MockCollectionManager_PutOrRef_Call) Run(run func(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo, collectionProperties []*commonpb.KeyValuePair)) *MockCollectionManager_PutOrRef_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(*schemapb.CollectionSchema), args[2].(*segcorepb.CollectionIndexMeta), args[3].(*querypb.LoadMetaInfo))
+		run(args[0].(int64), args[1].(*schemapb.CollectionSchema), args[2].(*segcorepb.CollectionIndexMeta), args[3].(*querypb.LoadMetaInfo), args[4].([]*commonpb.KeyValuePair))
 	})
 	return _c
 }
@@ -98,7 +100,7 @@ func (_c *MockCollectionManager_PutOrRef_Call) Return() *MockCollectionManager_P
 	return _c
 }
 
-func (_c *MockCollectionManager_PutOrRef_Call) RunAndReturn(run func(int64, *schemapb.CollectionSchema, *segcorepb.CollectionIndexMeta, *querypb.LoadMetaInfo)) *MockCollectionManager_PutOrRef_Call {
+func (_c *MockCollectionManager_PutOrRef_Call) RunAndReturn(run func(int64, *schemapb.CollectionSchema, *segcorepb.CollectionIndexMeta, *querypb.LoadMetaInfo, []*commonpb.KeyValuePair)) *MockCollectionManager_PutOrRef_Call {
 	_c.Call.Return(run)
 	return _c
 }

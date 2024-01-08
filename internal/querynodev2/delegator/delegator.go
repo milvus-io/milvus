@@ -747,24 +747,41 @@ func getVectorFieldFromSchema(schema *schemapb.CollectionSchema) (*VectorField, 
 // Todo support call external hook
 func (sd *shardDelegator) OptimizeSearchBasedOnClustering(req *querypb.SearchRequest, sealeds []SnapshotItem) (*querypb.SearchRequest, []SnapshotItem) {
 	log := log.With(zap.Int64("searchRequestID", req.GetReq().GetReqID()))
-	if !paramtable.Get().QueryNodeCfg.EnableSearchBasedOnClustering.GetAsBool() {
+	if !paramtable.Get().QueryNodeCfg.ClusteringOptimizeSearchEnable.GetAsBool() {
 		log.Debug("skip OptimizeSearchBasedOnClustering by system config")
 		return req, sealeds
 	}
-	if req.GetReq().GetClusteringOptions().GetFilterRatio() >= 1 {
-		log.Debug("skip OptimizeSearchBasedOnClustering by user config")
+
+	if sd.vectorField.dataType != schemapb.DataType_FloatVector {
+		log.Debug("Currently we only support FloatVector")
 		return req, sealeds
 	}
+
+	// filter ratio set priority: user client config > collection config > system config
+	var filterRatio float64
+	collectionPropertiesMap := funcutil.KeyValuePair2Map(sd.collection.GetCollectionProperties())
+	ratio, exist := collectionPropertiesMap[clustering.CollectionClusteringOptimizeSearchFilterRatio]
+	if !exist {
+		ratio = clustering.DefaultCollectionClusteringOptimizeSearchFilterRatio
+	}
+	filterRatio, err := strconv.ParseFloat(ratio, 64)
+	if err != nil {
+		log.Error("Error format for filterRatio", zap.String("ratio", ratio), zap.Error(err))
+		return req, sealeds
+	}
+	if req.GetReq().GetClusteringOptions().GetFilterRatio() != 0 {
+		filterRatio = float64(req.GetReq().GetClusteringOptions().GetFilterRatio())
+	}
+
 	metricType := req.GetReq().GetMetricType()
 	topK := req.GetReq().GetTopk()
-	filterRatio := req.GetReq().GetClusteringOptions().GetFilterRatio()
-	log.Debug("SearchRequest parameter",
+	log.Debug("Search parameter",
 		zap.String("metricType", metricType),
 		zap.Int64("topK", topK),
-		zap.Float32("filterRatio", filterRatio))
+		zap.Float64("filterRatio", filterRatio))
 
 	var phg commonpb.PlaceholderGroup
-	err := proto.Unmarshal(req.GetReq().GetPlaceholderGroup(), &phg)
+	err = proto.Unmarshal(req.GetReq().GetPlaceholderGroup(), &phg)
 	if err != nil {
 		log.Warn("fail to parse SearchRequest PlaceholderGroup", zap.Error(err))
 		return req, sealeds
@@ -832,7 +849,7 @@ func (sd *shardDelegator) OptimizeSearchBasedOnClustering(req *querypb.SearchReq
 		}
 
 		toFilterSegNum := len(vectorSegmentDistance)
-		targetSegNum := int(float32(toFilterSegNum) * filterRatio)
+		targetSegNum := int(float64(toFilterSegNum) * filterRatio)
 		var optimizedRowNums int64
 		for i, segmentDistance := range vectorSegmentDistance {
 			if i < targetSegNum || optimizedRowNums < topK {

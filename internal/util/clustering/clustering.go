@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/distance"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 )
@@ -36,7 +37,9 @@ const (
 	ClusteringId          = "clustering.id"
 	ClusteringOperationid = "clustering.operationID"
 
-	SearchClusteringFilterRatio = "clustering.filter_ratio"
+	SearchClusteringFilterRatio                          = "clustering.filter_ratio"
+	CollectionClusteringOptimizeSearchFilterRatio        = common.CollectionClusteringOptimizeSearchFilterRatio
+	DefaultCollectionClusteringOptimizeSearchFilterRatio = "0.5"
 )
 
 func SearchClusteringOptions(kv []*commonpb.KeyValuePair) (*internalpb.SearchClusteringOptions, error) {

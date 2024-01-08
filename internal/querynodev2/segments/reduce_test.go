@@ -71,6 +71,7 @@ func (suite *ReduceSuite) SetupTest() {
 		schema,
 		GenTestIndexMeta(suite.collectionID, schema),
 		querypb.LoadType_LoadCollection,
+		nil,
 	)
 	suite.segment, err = NewSegment(ctx,
 		suite.collection,
