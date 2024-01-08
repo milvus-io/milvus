@@ -291,7 +291,56 @@ func GenTestCollectionSchema(collectionName string, pkType schemapb.DataType) *s
 	return &schema
 }
 
+func GenTestIndexInfoList(collectionID int64, schema *schemapb.CollectionSchema) []*indexpb.IndexInfo {
+	res := make([]*indexpb.IndexInfo, 0)
+	vectorFieldSchemas := typeutil.GetVectorFieldSchemas(schema)
+	for _, field := range vectorFieldSchemas {
+		index := &indexpb.IndexInfo{
+			CollectionID: collectionID,
+			FieldID:      field.GetFieldID(),
+			// For now, a field can only have one index
+			// using fieldID and fieldName as indexID and indexName, just make sure not repeated.
+			IndexID:    field.GetFieldID(),
+			IndexName:  field.GetName(),
+			TypeParams: field.GetTypeParams(),
+		}
+		switch field.GetDataType() {
+		case schemapb.DataType_FloatVector, schemapb.DataType_Float16Vector:
+			{
+				index.IndexParams = []*commonpb.KeyValuePair{
+					{Key: common.MetricTypeKey, Value: metric.L2},
+					{Key: common.IndexTypeKey, Value: IndexFaissIVFFlat},
+					{Key: "nlist", Value: "128"},
+				}
+			}
+		case schemapb.DataType_BinaryVector:
+			{
+				index.IndexParams = []*commonpb.KeyValuePair{
+					{Key: common.MetricTypeKey, Value: metric.JACCARD},
+					{Key: common.IndexTypeKey, Value: IndexFaissBinIVFFlat},
+					{Key: "nlist", Value: "128"},
+				}
+			}
+		}
+		res = append(res, index)
+	}
+	return res
+}
+
 func GenTestIndexMeta(collectionID int64, schema *schemapb.CollectionSchema) *segcorepb.CollectionIndexMeta {
+	indexInfos := GenTestIndexInfoList(collectionID, schema)
+	fieldIndexMetas := make([]*segcorepb.FieldIndexMeta, 0)
+	for _, info := range indexInfos {
+		fieldIndexMetas = append(fieldIndexMetas, &segcorepb.FieldIndexMeta{
+			CollectionID:    info.GetCollectionID(),
+			FieldID:         info.GetFieldID(),
+			IndexName:       info.GetIndexName(),
+			TypeParams:      info.GetTypeParams(),
+			IndexParams:     info.GetIndexParams(),
+			IsAutoIndex:     info.GetIsAutoIndex(),
+			UserIndexParams: info.GetUserIndexParams(),
+		})
+	}
 	sizePerRecord, err := typeutil.EstimateSizePerRecord(schema)
 	maxIndexRecordPerSegment := int64(0)
 	if err != nil || sizePerRecord == 0 {
@@ -301,37 +350,6 @@ func GenTestIndexMeta(collectionID int64, schema *schemapb.CollectionSchema) *se
 		proportion := paramtable.Get().DataCoordCfg.SegmentSealProportion.GetAsFloat()
 		maxIndexRecordPerSegment = int64(threshold * proportion / float64(sizePerRecord))
 	}
-
-	fieldIndexMetas := make([]*segcorepb.FieldIndexMeta, 0)
-	fieldIndexMetas = append(fieldIndexMetas, &segcorepb.FieldIndexMeta{
-		CollectionID: collectionID,
-		FieldID:      simpleFloatVecField.id,
-		IndexName:    "querynode-test",
-		TypeParams: []*commonpb.KeyValuePair{
-			{
-				Key:   dimKey,
-				Value: strconv.Itoa(simpleFloatVecField.dim),
-			},
-		},
-		IndexParams: []*commonpb.KeyValuePair{
-			{
-				Key:   metricTypeKey,
-				Value: simpleFloatVecField.metricType,
-			},
-			{
-				Key:   common.IndexTypeKey,
-				Value: IndexFaissIVFFlat,
-			},
-			{
-				Key:   "nlist",
-				Value: "128",
-			},
-		},
-		IsAutoIndex: false,
-		UserIndexParams: []*commonpb.KeyValuePair{
-			{},
-		},
-	})
 
 	indexMeta := segcorepb.CollectionIndexMeta{
 		MaxIndexRowCount: maxIndexRecordPerSegment,
@@ -887,6 +905,80 @@ func SaveDeltaLog(collectionID int64,
 	log.Debug("[query node unittest] save delta log file to MinIO/S3")
 
 	return fieldBinlog, cm.MultiWrite(context.Background(), kvs)
+}
+
+func GenAndSaveIndexV2(collectionID, partitionID, segmentID, buildID int64,
+	fieldSchema *schemapb.FieldSchema,
+	indexInfo *indexpb.IndexInfo,
+	cm storage.ChunkManager,
+	msgLength int,
+) (*querypb.FieldIndexInfo, error) {
+	typeParams := funcutil.KeyValuePair2Map(indexInfo.GetTypeParams())
+	indexParams := funcutil.KeyValuePair2Map(indexInfo.GetIndexParams())
+
+	index, err := indexcgowrapper.NewCgoIndex(fieldSchema.GetDataType(), typeParams, indexParams)
+	if err != nil {
+		return nil, err
+	}
+	defer index.Delete()
+
+	var dataset *indexcgowrapper.Dataset
+	switch fieldSchema.DataType {
+	case schemapb.DataType_BinaryVector:
+		dataset = indexcgowrapper.GenBinaryVecDataset(generateBinaryVectors(msgLength, defaultDim))
+	case schemapb.DataType_FloatVector:
+		dataset = indexcgowrapper.GenFloatVecDataset(generateFloatVectors(msgLength, defaultDim))
+	}
+
+	err = index.Build(dataset)
+	if err != nil {
+		return nil, err
+	}
+
+	// save index to minio
+	binarySet, err := index.Serialize()
+	if err != nil {
+		return nil, err
+	}
+
+	// serialize index params
+	indexCodec := storage.NewIndexFileBinlogCodec()
+	serializedIndexBlobs, err := indexCodec.Serialize(
+		buildID,
+		0,
+		collectionID,
+		partitionID,
+		segmentID,
+		fieldSchema.GetFieldID(),
+		indexParams,
+		indexInfo.GetIndexName(),
+		indexInfo.GetIndexID(),
+		binarySet,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	indexPaths := make([]string, 0)
+	for _, index := range serializedIndexBlobs {
+		indexPath := filepath.Join(cm.RootPath(), "index_files",
+			strconv.Itoa(int(segmentID)), index.Key)
+		indexPaths = append(indexPaths, indexPath)
+		err := cm.Write(context.Background(), indexPath, index.Value)
+		if err != nil {
+			return nil, err
+		}
+	}
+	_, cCurrentIndexVersion := getIndexEngineVersion()
+
+	return &querypb.FieldIndexInfo{
+		FieldID:             fieldSchema.GetFieldID(),
+		EnableIndex:         true,
+		IndexName:           indexInfo.GetIndexName(),
+		IndexParams:         indexInfo.GetIndexParams(),
+		IndexFilePaths:      indexPaths,
+		CurrentIndexVersion: cCurrentIndexVersion,
+	}, nil
 }
 
 func GenAndSaveIndex(collectionID, partitionID, segmentID, fieldID int64, msgLength int, indexType, metricType string, cm storage.ChunkManager) (*querypb.FieldIndexInfo, error) {
