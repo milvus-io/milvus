@@ -1477,7 +1477,7 @@ func TestProxy(t *testing.T) {
 	topk := 10
 	roundDecimal := 6
 	expr := fmt.Sprintf("%s > 0", int64Field)
-	constructVectorsPlaceholderGroup := func() *commonpb.PlaceholderGroup {
+	constructVectorsPlaceholderGroup := func(nq int) *commonpb.PlaceholderGroup {
 		values := make([][]byte, 0, nq)
 		for i := 0; i < nq; i++ {
 			bs := make([]byte, 0, dim*4)
@@ -1502,8 +1502,8 @@ func TestProxy(t *testing.T) {
 		}
 	}
 
-	constructSearchRequest := func() *milvuspb.SearchRequest {
-		plg := constructVectorsPlaceholderGroup()
+	constructSearchRequest := func(nq int) *milvuspb.SearchRequest {
+		plg := constructVectorsPlaceholderGroup(nq)
 		plgBs, err := proto.Marshal(plg)
 		assert.NoError(t, err)
 
@@ -1538,12 +1538,50 @@ func TestProxy(t *testing.T) {
 	wg.Add(1)
 	t.Run("search", func(t *testing.T) {
 		defer wg.Done()
-		req := constructSearchRequest()
+		req := constructSearchRequest(nq)
 
 		resp, err := proxy.Search(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
+
+	constructHybridSearchRequest := func(reqs []*milvuspb.SearchRequest) *milvuspb.HybridSearchRequest {
+		params := make(map[string]float64)
+		params[RRFParamsKey] = 60
+		b, err := json.Marshal(params)
+		assert.NoError(t, err)
+		rankParams := []*commonpb.KeyValuePair{
+			{Key: RankTypeKey, Value: "rrf"},
+			{Key: RankParamsKey, Value: string(b)},
+			{Key: LimitKey, Value: strconv.Itoa(topk)},
+			{Key: RoundDecimalKey, Value: strconv.Itoa(roundDecimal)},
+		}
+
+		return &milvuspb.HybridSearchRequest{
+			Base:               nil,
+			DbName:             dbName,
+			CollectionName:     collectionName,
+			Requests:           reqs,
+			PartitionNames:     nil,
+			OutputFields:       nil,
+			RankParams:         rankParams,
+			TravelTimestamp:    0,
+			GuaranteeTimestamp: 0,
+		}
+	}
+
+	wg.Add(1)
+	nq = 1
+	t.Run("hybrid search", func(t *testing.T) {
+		defer wg.Done()
+		req1 := constructSearchRequest(nq)
+		req2 := constructSearchRequest(nq)
+
+		resp, err := proxy.HybridSearch(ctx, constructHybridSearchRequest([]*milvuspb.SearchRequest{req1, req2}))
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+	nq = 10
 
 	constructPrimaryKeysPlaceholderGroup := func() *commonpb.PlaceholderGroup {
 		expr := fmt.Sprintf("%v in [%v]", int64Field, insertedIds[0])

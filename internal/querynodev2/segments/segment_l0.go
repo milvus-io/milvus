@@ -62,7 +62,7 @@ func NewL0Segment(collection *Collection,
 		zap.String("segmentType", segmentType.String()))
 
 	segment := &L0Segment{
-		baseSegment: newBaseSegment(segmentID, partitionID, collectionID, shard, segmentType, version, startPosition),
+		baseSegment: newBaseSegment(segmentID, partitionID, collectionID, shard, segmentType, datapb.SegmentLevel_L0, version, startPosition),
 	}
 
 	return segment, nil

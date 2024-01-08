@@ -31,6 +31,8 @@ const (
 	FailLabel    = "fail"
 	TotalLabel   = "total"
 
+	HybridSearchLabel = "hybrid_search"
+
 	InsertLabel    = "insert"
 	DeleteLabel    = "delete"
 	UpsertLabel    = "upsert"
