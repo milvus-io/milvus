@@ -18,10 +18,12 @@ package importutilv2
 
 import (
 	"fmt"
+	"path/filepath"
+
+	"github.com/samber/lo"
+
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/samber/lo"
-	"path/filepath"
 )
 
 type FileType int

@@ -18,6 +18,7 @@ package importv2
 
 import (
 	"context"
+
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -167,7 +168,7 @@ func (p *PreImportTask) GetCtx() context.Context {
 }
 
 func (p *PreImportTask) Cancel() {
-	p.Cancel()
+	p.cancel()
 }
 
 type ImportTask struct {
@@ -249,7 +250,7 @@ func (t *ImportTask) GetCtx() context.Context {
 }
 
 func (t *ImportTask) Cancel() {
-	t.Cancel()
+	t.cancel()
 }
 
 func (t *ImportTask) GetSegmentsInfo() []*datapb.ImportSegmentInfo {
