@@ -1735,6 +1735,7 @@ func (s *Server) ImportV2(ctx context.Context, in *datapb.ImportRequestInternal)
 				State:        internalpb.ImportState_Pending,
 				TimeoutTs:    timeoutTs,
 				FileStats:    fileStats,
+				Options:      in.GetOptions(),
 			},
 			schema:         in.GetSchema(), // TODO: dyh, move to preimport task
 			lastActiveTime: time.Now(),

@@ -21,6 +21,7 @@ import (
 
 	"github.com/samber/lo"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -122,6 +123,7 @@ type Task interface {
 	GetReason() string
 	GetSchema() *schemapb.CollectionSchema
 	GetCtx() context.Context
+	GetOptions() []*commonpb.KeyValuePair
 	Cancel()
 }
 
@@ -148,6 +150,7 @@ func NewPreImportTask(req *datapb.PreImportRequest) Task {
 			Vchannels:    req.GetVchannels(),
 			State:        internalpb.ImportState_Pending,
 			FileStats:    fileStats,
+			Options:      req.GetOptions(),
 		},
 		ctx:    ctx,
 		cancel: cancel,
@@ -191,6 +194,7 @@ func NewImportTask(req *datapb.ImportRequest) Task {
 			TaskID:       req.GetTaskID(),
 			CollectionID: req.GetCollectionID(),
 			State:        internalpb.ImportState_Pending,
+			Options:      req.GetOptions(),
 		},
 		ctx:          ctx,
 		cancel:       cancel,

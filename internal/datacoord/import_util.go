@@ -58,6 +58,7 @@ func AssemblePreImportRequest(task ImportTask) *datapb.PreImportRequest {
 		Vchannels:    pt.GetVchannels(),
 		Schema:       task.GetSchema(),
 		ImportFiles:  importFiles,
+		Options:      pt.GetOptions(),
 	}
 }
 
@@ -144,6 +145,7 @@ func AssembleImportRequest(task ImportTask, meta *meta, alloc allocator) (*datap
 		CollectionID:    task.GetCollectionID(),
 		Schema:          task.GetSchema(),
 		Files:           importFiles,
+		Options:         task.(*importTask).GetOptions(),
 		Ts:              ts,
 		AutoIDRange:     &datapb.AutoIDRange{Begin: idBegin, End: idEnd},
 		RequestSegments: requestSegments,
@@ -209,6 +211,7 @@ func NewImportTasks(fileGroups [][]*datapb.ImportFileStats,
 				State:        internalpb.ImportState_Pending,
 				TimeoutTs:    pt.GetTimeoutTs(),
 				FileStats:    group,
+				Options:      pt.GetOptions(),
 			},
 			schema:         pt.GetSchema(),
 			lastActiveTime: time.Now(),

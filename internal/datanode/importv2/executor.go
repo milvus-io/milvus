@@ -127,7 +127,7 @@ func (e *executor) PreImport(task Task) {
 		})
 
 	for i, file := range files {
-		reader, err := importutilv2.NewReader(task.GetCtx(), e.cm, task.GetSchema(), file, nil, BufferSize) // TODO: dyh, fix options
+		reader, err := importutilv2.NewReader(task.GetCtx(), e.cm, task.GetSchema(), file, task.GetOptions(), BufferSize)
 		if err != nil {
 			e.handleErr(task, err, "new reader failed")
 			return
@@ -190,7 +190,7 @@ func (e *executor) Import(task Task) {
 
 	req := task.(*ImportTask).req
 	for _, file := range req.GetFiles() {
-		reader, err := importutilv2.NewReader(task.GetCtx(), e.cm, task.GetSchema(), file, nil, BufferSize) // TODO: dyh, fix options
+		reader, err := importutilv2.NewReader(task.GetCtx(), e.cm, task.GetSchema(), file, task.GetOptions(), BufferSize)
 		if err != nil {
 			e.handleErr(task, err, fmt.Sprintf("new reader failed, file: %s", file.String()))
 			return
