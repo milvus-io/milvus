@@ -17,6 +17,7 @@
 package config
 
 import (
+	"context"
 	"os"
 	"path"
 	"testing"
@@ -24,6 +25,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"golang.org/x/sync/errgroup"
 )
 
 func TestAllConfigFromManager(t *testing.T) {
@@ -67,6 +69,28 @@ func TestAllDupliateSource(t *testing.T) {
 
 	err = mgr.pullSourceConfigs("ErrSource")
 	assert.Error(t, err, "invalid source or source not added")
+}
+
+func TestDeadlock(t *testing.T) {
+	mgr, _ := Init()
+
+	// test concurrent lock and recursive rlock
+	wg, _ := errgroup.WithContext(context.Background())
+	wg.Go(func() error {
+		for i := 0; i < 100; i++ {
+			mgr.GetBy(WithPrefix("rootcoord."))
+		}
+		return nil
+	})
+
+	wg.Go(func() error {
+		for i := 0; i < 100; i++ {
+			mgr.SetConfig("rootcoord.xxx", "111")
+		}
+		return nil
+	})
+
+	wg.Wait()
 }
 
 type ErrSource struct{}
