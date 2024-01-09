@@ -80,6 +80,7 @@ Search(CSegmentInterface c_segment,
        CSearchPlan c_plan,
        CPlaceholderGroup c_placeholder_group,
        CTraceContext c_trace,
+       uint64_t timestamp,
        CSearchResult* result) {
     try {
         auto segment = (milvus::segcore::SegmentInterface*)c_segment;
@@ -90,7 +91,7 @@ Search(CSegmentInterface c_segment,
             c_trace.traceID, c_trace.spanID, c_trace.flag};
         auto span = milvus::tracer::StartSpan("SegCoreSearch", &ctx);
         milvus::tracer::SetRootSpan(span);
-        auto search_result = segment->Search(plan, phg_ptr);
+        auto search_result = segment->Search(plan, phg_ptr, timestamp);
         if (!milvus::PositivelyRelated(
                 plan->plan_node_->search_info_.metric_type_)) {
             for (auto& dis : search_result->distances_) {

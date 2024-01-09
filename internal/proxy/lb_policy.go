@@ -32,7 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-type executeFunc func(context.Context, UniqueID, types.QueryNodeClient, ...string) error
+type executeFunc func(context.Context, UniqueID, types.QueryNodeClient, string) error
 
 type ChannelWorkload struct {
 	db             string
