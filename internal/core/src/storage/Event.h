@@ -21,7 +21,7 @@
 #include <vector>
 #include <unordered_map>
 
-#include "common/FieldData.h"
+#include "base/FieldData.h"
 #include "common/Types.h"
 #include "storage/Types.h"
 #include "storage/BinlogReader.h"
@@ -74,7 +74,7 @@ struct DescriptorEventData {
 struct BaseEventData {
     Timestamp start_timestamp;
     Timestamp end_timestamp;
-    FieldDataPtr field_data;
+    milvus::base::FieldDataPtr field_data;
 
     BaseEventData() = default;
     explicit BaseEventData(BinlogReaderPtr reader,
@@ -133,7 +133,7 @@ int
 GetEventFixPartSize(EventType EventTypeCode);
 
 struct LocalInsertEvent {
-    FieldDataPtr field_data;
+    milvus::base::FieldDataPtr field_data;
 
     std::vector<uint8_t>
     Serialize();
@@ -142,7 +142,7 @@ struct LocalInsertEvent {
 struct LocalIndexEvent {
     uint64_t index_size;
     uint32_t degree;
-    FieldDataPtr field_data;
+    milvus::base::FieldDataPtr field_data;
 
     LocalIndexEvent() = default;
     explicit LocalIndexEvent(BinlogReaderPtr reader);

@@ -21,9 +21,8 @@
 
 #include "common/EasyAssert.h"
 #include "common/Types.h"
-#include "common/Vector.h"
+#include "base/Vector.h"
 #include "exec/expression/Expr.h"
-#include "segcore/SegmentInterface.h"
 
 namespace milvus {
 namespace exec {
@@ -170,7 +169,7 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
         const std::shared_ptr<const milvus::expr::BinaryArithOpEvalRangeExpr>&
             expr,
         const std::string& name,
-        const segcore::SegmentInternalInterface* segment,
+        const segment::SegmentInternalInterface* segment,
         int64_t active_count,
         int64_t batch_size)
         : SegmentExpr(std::move(input),
@@ -183,27 +182,27 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
     }
 
     void
-    Eval(EvalCtx& context, VectorPtr& result) override;
+    Eval(EvalCtx& context, milvus::base::VectorPtr& result) override;
 
  private:
     template <typename T>
-    VectorPtr
+    milvus::base::VectorPtr
     ExecRangeVisitorImpl();
 
     template <typename T>
-    VectorPtr
+    milvus::base::VectorPtr
     ExecRangeVisitorImplForIndex();
 
     template <typename T>
-    VectorPtr
+    milvus::base::VectorPtr
     ExecRangeVisitorImplForData();
 
     template <typename ValueType>
-    VectorPtr
+    milvus::base::VectorPtr
     ExecRangeVisitorImplForJson();
 
     template <typename ValueType>
-    VectorPtr
+    milvus::base::VectorPtr
     ExecRangeVisitorImplForArray();
 
  private:

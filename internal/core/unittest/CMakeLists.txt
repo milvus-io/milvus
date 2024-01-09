@@ -128,11 +128,15 @@ add_executable(all_tests
 target_link_libraries(all_tests
         gtest
         milvus_segcore
+        milvus_query
+        milvus_segment
+        milvus_exec
+        milvus_base
         milvus_storage
         milvus_indexbuilder
-        pthread
         milvus_common
-        milvus_exec
+        milvus_index
+        pthread
         )
 
 install(TARGETS all_tests DESTINATION unittest)

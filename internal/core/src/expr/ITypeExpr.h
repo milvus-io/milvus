@@ -22,7 +22,7 @@
 
 #include <fmt/core.h>
 
-#include "common/Schema.h"
+#include "base/Schema.h"
 #include "common/Types.h"
 #include "pb/plan.pb.h"
 

@@ -16,7 +16,7 @@
 
 #include "storage/PayloadWriter.h"
 #include "common/EasyAssert.h"
-#include "common/FieldMeta.h"
+#include "base/FieldMeta.h"
 #include "storage/Util.h"
 
 namespace milvus::storage {

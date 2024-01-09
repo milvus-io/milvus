@@ -20,7 +20,8 @@ namespace milvus {
 namespace exec {
 
 void
-PhyJsonContainsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
+PhyJsonContainsFilterExpr::Eval(EvalCtx& context,
+                                milvus::base::VectorPtr& result) {
     switch (expr_->column_.data_type_) {
         case DataType::ARRAY:
         case DataType::JSON: {
@@ -39,7 +40,7 @@ PhyJsonContainsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     }
 }
 
-VectorPtr
+milvus::base::VectorPtr
 PhyJsonContainsFilterExpr::EvalJsonContainsForDataSegment() {
     auto data_type = expr_->column_.data_type_;
     switch (expr_->op_) {
@@ -154,7 +155,7 @@ PhyJsonContainsFilterExpr::EvalJsonContainsForDataSegment() {
 }
 
 template <typename ExprValueType>
-VectorPtr
+milvus::base::VectorPtr
 PhyJsonContainsFilterExpr::ExecArrayContains() {
     using GetType =
         std::conditional_t<std::is_same_v<ExprValueType, std::string>,
@@ -167,8 +168,8 @@ PhyJsonContainsFilterExpr::ExecArrayContains() {
     AssertInfo(expr_->column_.nested_path_.size() == 0,
                "[ExecArrayContains]nested path must be null");
 
-    auto res_vec =
-        std::make_shared<ColumnVector>(DataType::BOOL, real_batch_size);
+    auto res_vec = std::make_shared<milvus::base::ColumnVector>(
+        DataType::BOOL, real_batch_size);
     bool* res = (bool*)res_vec->GetRawData();
     std::unordered_set<GetType> elements;
     for (auto const& element : expr_->vals_) {
@@ -203,7 +204,7 @@ PhyJsonContainsFilterExpr::ExecArrayContains() {
 }
 
 template <typename ExprValueType>
-VectorPtr
+milvus::base::VectorPtr
 PhyJsonContainsFilterExpr::ExecJsonContains() {
     using GetType =
         std::conditional_t<std::is_same_v<ExprValueType, std::string>,
@@ -214,8 +215,8 @@ PhyJsonContainsFilterExpr::ExecJsonContains() {
         return nullptr;
     }
 
-    auto res_vec =
-        std::make_shared<ColumnVector>(DataType::BOOL, real_batch_size);
+    auto res_vec = std::make_shared<milvus::base::ColumnVector>(
+        DataType::BOOL, real_batch_size);
     bool* res = (bool*)res_vec->GetRawData();
     std::unordered_set<GetType> elements;
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
@@ -259,14 +260,14 @@ PhyJsonContainsFilterExpr::ExecJsonContains() {
     return res_vec;
 }
 
-VectorPtr
+milvus::base::VectorPtr
 PhyJsonContainsFilterExpr::ExecJsonContainsArray() {
     auto real_batch_size = GetNextBatchSize();
     if (real_batch_size == 0) {
         return nullptr;
     }
-    auto res_vec =
-        std::make_shared<ColumnVector>(DataType::BOOL, real_batch_size);
+    auto res_vec = std::make_shared<milvus::base::ColumnVector>(
+        DataType::BOOL, real_batch_size);
     bool* res = (bool*)res_vec->GetRawData();
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     std::vector<proto::plan::Array> elements;
@@ -321,7 +322,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArray() {
 }
 
 template <typename ExprValueType>
-VectorPtr
+milvus::base::VectorPtr
 PhyJsonContainsFilterExpr::ExecArrayContainsAll() {
     using GetType =
         std::conditional_t<std::is_same_v<ExprValueType, std::string>,
@@ -333,8 +334,8 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAll() {
     if (real_batch_size == 0) {
         return nullptr;
     }
-    auto res_vec =
-        std::make_shared<ColumnVector>(DataType::BOOL, real_batch_size);
+    auto res_vec = std::make_shared<milvus::base::ColumnVector>(
+        DataType::BOOL, real_batch_size);
     bool* res = (bool*)res_vec->GetRawData();
 
     std::unordered_set<GetType> elements;
@@ -373,7 +374,7 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAll() {
 }
 
 template <typename ExprValueType>
-VectorPtr
+milvus::base::VectorPtr
 PhyJsonContainsFilterExpr::ExecJsonContainsAll() {
     using GetType =
         std::conditional_t<std::is_same_v<ExprValueType, std::string>,
@@ -383,8 +384,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAll() {
     if (real_batch_size == 0) {
         return nullptr;
     }
-    auto res_vec =
-        std::make_shared<ColumnVector>(DataType::BOOL, real_batch_size);
+    auto res_vec = std::make_shared<milvus::base::ColumnVector>(
+        DataType::BOOL, real_batch_size);
     bool* res = (bool*)res_vec->GetRawData();
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     std::unordered_set<GetType> elements;
@@ -432,14 +433,14 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAll() {
     return res_vec;
 }
 
-VectorPtr
+milvus::base::VectorPtr
 PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffType() {
     auto real_batch_size = GetNextBatchSize();
     if (real_batch_size == 0) {
         return nullptr;
     }
-    auto res_vec =
-        std::make_shared<ColumnVector>(DataType::BOOL, real_batch_size);
+    auto res_vec = std::make_shared<milvus::base::ColumnVector>(
+        DataType::BOOL, real_batch_size);
     bool* res = (bool*)res_vec->GetRawData();
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
 
@@ -557,14 +558,14 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffType() {
     return res_vec;
 }
 
-VectorPtr
+milvus::base::VectorPtr
 PhyJsonContainsFilterExpr::ExecJsonContainsAllArray() {
     auto real_batch_size = GetNextBatchSize();
     if (real_batch_size == 0) {
         return nullptr;
     }
-    auto res_vec =
-        std::make_shared<ColumnVector>(DataType::BOOL, real_batch_size);
+    auto res_vec = std::make_shared<milvus::base::ColumnVector>(
+        DataType::BOOL, real_batch_size);
     bool* res = (bool*)res_vec->GetRawData();
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
 
@@ -623,14 +624,14 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArray() {
     return res_vec;
 }
 
-VectorPtr
+milvus::base::VectorPtr
 PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffType() {
     auto real_batch_size = GetNextBatchSize();
     if (real_batch_size == 0) {
         return nullptr;
     }
-    auto res_vec =
-        std::make_shared<ColumnVector>(DataType::BOOL, real_batch_size);
+    auto res_vec = std::make_shared<milvus::base::ColumnVector>(
+        DataType::BOOL, real_batch_size);
     bool* res = (bool*)res_vec->GetRawData();
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
 

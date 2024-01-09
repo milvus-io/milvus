@@ -20,9 +20,8 @@
 
 #include "common/EasyAssert.h"
 #include "common/Types.h"
-#include "common/Vector.h"
+#include "base/Vector.h"
 #include "exec/expression/Expr.h"
-#include "segcore/SegmentInterface.h"
 #include "simd/hook.h"
 
 namespace milvus {
@@ -67,7 +66,7 @@ class PhyLogicalBinaryExpr : public Expr {
     }
 
     void
-    Eval(EvalCtx& context, VectorPtr& result) override;
+    Eval(EvalCtx& context, milvus::base::VectorPtr& result) override;
 
     void
     MoveCursor() override {

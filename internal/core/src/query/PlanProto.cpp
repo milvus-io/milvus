@@ -22,7 +22,6 @@
 #include "generated/ExtractInfoExprVisitor.h"
 #include "generated/ExtractInfoPlanNodeVisitor.h"
 #include "pb/plan.pb.h"
-#include "query/Utils.h"
 
 namespace milvus::query {
 namespace planpb = milvus::proto::plan;
@@ -193,7 +192,7 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
 
     auto& query_info_proto = anns_proto.query_info();
 
-    SearchInfo search_info;
+    milvus::base::SearchInfo search_info;
     auto field_id = FieldId(anns_proto.field_id());
     search_info.field_id_ = field_id;
 

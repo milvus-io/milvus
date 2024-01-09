@@ -22,7 +22,7 @@
 #include "common/EasyAssert.h"
 #include "common/Json.h"
 #include "common/Consts.h"
-#include "common/FieldMeta.h"
+#include "base/FieldMeta.h"
 #include "common/Array.h"
 
 namespace milvus::storage {

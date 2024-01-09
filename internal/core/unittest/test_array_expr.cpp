@@ -23,7 +23,7 @@
 #include "query/Plan.h"
 #include "query/PlanNode.h"
 #include "query/generated/ExecExprVisitor.h"
-#include "segcore/SegmentGrowingImpl.h"
+#include "segment/SegmentGrowingImpl.h"
 #include "simdjson/padded_string.h"
 #include "test_utils/DataGen.h"
 #include "index/IndexFactory.h"
@@ -33,7 +33,8 @@
 TEST(Expr, TestArrayRange) {
     using namespace milvus;
     using namespace milvus::query;
-    using namespace milvus::segcore;
+    using namespace milvus::base;
+    using namespace milvus::segment;
     std::vector<std::tuple<std::string,
                            std::string,
                            std::function<bool(milvus::Array & array)>>>
@@ -624,7 +625,8 @@ TEST(Expr, TestArrayRange) {
 TEST(Expr, TestArrayEqual) {
     using namespace milvus;
     using namespace milvus::query;
-    using namespace milvus::segcore;
+    using namespace milvus::base;
+    using namespace milvus::segment;
     std::vector<
         std::tuple<std::string, std::function<bool(std::vector<int64_t>)>>>
         testcases = {
@@ -748,7 +750,8 @@ TEST(Expr, TestArrayEqual) {
 TEST(Expr, PraseArrayContainsExpr) {
     using namespace milvus;
     using namespace milvus::query;
-    using namespace milvus::segcore;
+    using namespace milvus::base;
+    using namespace milvus::segment;
 
     std::vector<const char*> raw_plans{
         R"(vector_anns:<
@@ -837,7 +840,8 @@ struct ArrayTestcase {
 TEST(Expr, TestArrayContains) {
     using namespace milvus;
     using namespace milvus::query;
-    using namespace milvus::segcore;
+    using namespace milvus::base;
+    using namespace milvus::segment;
 
     auto schema = std::make_shared<Schema>();
     auto i64_fid = schema->AddDebugField("id", DataType::INT64);
@@ -1200,7 +1204,8 @@ TEST(Expr, TestArrayContains) {
 TEST(Expr, TestArrayBinaryArith) {
     using namespace milvus;
     using namespace milvus::query;
-    using namespace milvus::segcore;
+    using namespace milvus::base;
+    using namespace milvus::segment;
 
     auto schema = std::make_shared<Schema>();
     auto i64_fid = schema->AddDebugField("id", DataType::INT64);
@@ -1767,7 +1772,8 @@ struct UnaryRangeTestcase {
 TEST(Expr, TestArrayStringMatch) {
     using namespace milvus;
     using namespace milvus::query;
-    using namespace milvus::segcore;
+    using namespace milvus::base;
+    using namespace milvus::segment;
 
     auto schema = std::make_shared<Schema>();
     auto i64_fid = schema->AddDebugField("id", DataType::INT64);
@@ -1852,7 +1858,8 @@ TEST(Expr, TestArrayStringMatch) {
 TEST(Expr, TestArrayInTerm) {
     using namespace milvus;
     using namespace milvus::query;
-    using namespace milvus::segcore;
+    using namespace milvus::base;
+    using namespace milvus::segment;
 
     auto schema = std::make_shared<Schema>();
     auto i64_fid = schema->AddDebugField("id", DataType::INT64);
@@ -2059,7 +2066,8 @@ TEST(Expr, TestArrayInTerm) {
 TEST(Expr, TestTermInArray) {
     using namespace milvus;
     using namespace milvus::query;
-    using namespace milvus::segcore;
+    using namespace milvus::base;
+    using namespace milvus::segment;
 
     auto schema = std::make_shared<Schema>();
     auto i64_fid = schema->AddDebugField("id", DataType::INT64);

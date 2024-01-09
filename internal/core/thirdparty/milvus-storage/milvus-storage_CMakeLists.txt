@@ -16,9 +16,9 @@ find_package(AWSSDK REQUIRED)
 
 file(GLOB_RECURSE SRC_FILES src/*.cpp src/*.cc)
 message(STATUS "SRC_FILES: ${SRC_FILES}")
-add_library(milvus-storage ${SRC_FILES})
+add_library(milvus-storage SHARED ${SRC_FILES})
 target_include_directories(milvus-storage PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include/milvus-storage ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_link_libraries(milvus-storage PUBLIC arrow::arrow arrow::parquet Boost::boost protobuf::protobuf AWS::aws-sdk-cpp-core glog::glog opendal)
+target_link_libraries(milvus-storage PUBLIC arrow::arrow arrow::parquet Boost::boost protobuf::protobuf AWS::aws-sdk-cpp-core AWS::aws-sdk-cpp-identity-management glog::glog opendal)
 
 if (WITH_UT)
   enable_testing()

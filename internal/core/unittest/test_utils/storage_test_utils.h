@@ -19,15 +19,15 @@
 #include "Constants.h"
 #include "DataGen.h"
 #include "common/Types.h"
-#include "common/LoadInfo.h"
+#include "base/LoadInfo.h"
 #include "storage/Types.h"
 #include "storage/InsertData.h"
 #include "storage/ThreadPools.h"
 
 using milvus::DataType;
-using milvus::FieldDataPtr;
 using milvus::FieldId;
-using milvus::segcore::GeneratedData;
+using milvus::base::FieldDataPtr;
+using milvus::base::GeneratedData;
 using milvus::storage::ChunkManagerPtr;
 using milvus::storage::FieldDataMeta;
 using milvus::storage::InsertData;
@@ -44,17 +44,17 @@ get_default_local_storage_config() {
     return storage_config;
 }
 
-inline LoadFieldDataInfo
+inline milvus::base::LoadFieldDataInfo
 PrepareInsertBinlog(int64_t collection_id,
                     int64_t partition_id,
                     int64_t segment_id,
                     const std::string& prefix,
                     const GeneratedData& dataset,
                     const ChunkManagerPtr cm) {
-    LoadFieldDataInfo load_info;
+    milvus::base::LoadFieldDataInfo load_info;
     auto row_count = dataset.row_ids_.size();
 
-    auto SaveFieldData = [&](const FieldDataPtr field_data,
+    auto SaveFieldData = [&](const milvus::base::FieldDataPtr field_data,
                              const std::string& file,
                              const int64_t field_id) {
         auto insert_data = std::make_shared<InsertData>(field_data);
@@ -67,23 +67,24 @@ PrepareInsertBinlog(int64_t collection_id,
 
         load_info.field_infos.emplace(
             field_id,
-            FieldBinlogInfo{field_id,
-                            static_cast<int64_t>(row_count),
-                            std::vector<int64_t>{int64_t(row_count)},
-                            false,
-                            std::vector<std::string>{file}});
+            milvus::base::FieldBinlogInfo{
+                field_id,
+                static_cast<int64_t>(row_count),
+                std::vector<int64_t>{int64_t(row_count)},
+                false,
+                std::vector<std::string>{file}});
     };
 
     {
         auto field_data =
-            std::make_shared<milvus::FieldData<int64_t>>(DataType::INT64);
+            std::make_shared<milvus::base::FieldData<int64_t>>(DataType::INT64);
         field_data->FillFieldData(dataset.row_ids_.data(), row_count);
         auto path = prefix + "/" + std::to_string(RowFieldID.get());
         SaveFieldData(field_data, path, RowFieldID.get());
     }
     {
         auto field_data =
-            std::make_shared<milvus::FieldData<int64_t>>(DataType::INT64);
+            std::make_shared<milvus::base::FieldData<int64_t>>(DataType::INT64);
         field_data->FillFieldData(dataset.timestamps_.data(), row_count);
         auto path = prefix + "/" + std::to_string(TimestampFieldID.get());
         SaveFieldData(field_data, path, TimestampFieldID.get());
@@ -92,7 +93,7 @@ PrepareInsertBinlog(int64_t collection_id,
     for (auto& data : dataset.raw_->fields_data()) {
         int64_t field_id = data.field_id();
         auto field_meta = fields.at(FieldId(field_id));
-        auto field_data = milvus::segcore::CreateFieldDataFromDataArray(
+        auto field_data = milvus::base::CreateFieldDataFromDataArray(
             row_count, &data, field_meta);
         auto path = prefix + "/" + std::to_string(field_id);
         SaveFieldData(field_data, path, field_id);
@@ -107,7 +108,7 @@ PutFieldData(milvus::storage::ChunkManager* remote_chunk_manager,
              const std::vector<int64_t>& element_counts,
              const std::vector<std::string>& object_keys,
              FieldDataMeta& field_data_meta,
-             milvus::FieldMeta& field_meta) {
+             milvus::base::FieldMeta& field_meta) {
     auto& pool =
         milvus::ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
     std::vector<std::future<std::pair<std::string, size_t>>> futures;

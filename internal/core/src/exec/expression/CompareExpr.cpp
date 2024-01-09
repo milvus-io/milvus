@@ -15,7 +15,6 @@
 // limitations under the License.
 
 #include "CompareExpr.h"
-#include "query/Relational.h"
 
 namespace milvus {
 namespace exec {
@@ -110,15 +109,15 @@ PhyCompareFilterExpr::GetChunkData(DataType data_type,
 }
 
 template <typename OpType>
-VectorPtr
+milvus::base::VectorPtr
 PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op) {
     auto real_batch_size = GetNextBatchSize();
     if (real_batch_size == 0) {
         return nullptr;
     }
 
-    auto res_vec =
-        std::make_shared<ColumnVector>(DataType::BOOL, real_batch_size);
+    auto res_vec = std::make_shared<milvus::base::ColumnVector>(
+        DataType::BOOL, real_batch_size);
     bool* res = (bool*)res_vec->GetRawData();
 
     auto left_data_barrier = segment_->num_chunk_data(expr_->left_field_id_);
@@ -143,7 +142,7 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op) {
              i < chunk_size;
              ++i) {
             res[processed_rows++] = boost::apply_visitor(
-                milvus::query::Relational<decltype(op)>{}, left(i), right(i));
+                milvus::Relational<decltype(op)>{}, left(i), right(i));
 
             if (processed_rows >= batch_size_) {
                 current_chunk_id_ = chunk_id;
@@ -156,7 +155,7 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op) {
 }
 
 void
-PhyCompareFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
+PhyCompareFilterExpr::Eval(EvalCtx& context, milvus::base::VectorPtr& result) {
     // For segment both fields has no index, can use SIMD to speed up.
     // Avoiding too much call stack that blocks SIMD.
     if (!is_left_indexed_ && !is_right_indexed_ && !IsStringExpr()) {
@@ -166,7 +165,7 @@ PhyCompareFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     result = ExecCompareExprDispatcherForHybridSegment();
 }
 
-VectorPtr
+milvus::base::VectorPtr
 PhyCompareFilterExpr::ExecCompareExprDispatcherForHybridSegment() {
     switch (expr_->op_type_) {
         case OpType::Equal: {
@@ -189,7 +188,7 @@ PhyCompareFilterExpr::ExecCompareExprDispatcherForHybridSegment() {
         }
         case OpType::PrefixMatch: {
             return ExecCompareExprDispatcher(
-                milvus::query::MatchOp<OpType::PrefixMatch>{});
+                milvus::MatchOp<OpType::PrefixMatch>{});
         }
             // case OpType::PostfixMatch: {
             // }
@@ -199,7 +198,7 @@ PhyCompareFilterExpr::ExecCompareExprDispatcherForHybridSegment() {
     }
 }
 
-VectorPtr
+milvus::base::VectorPtr
 PhyCompareFilterExpr::ExecCompareExprDispatcherForBothDataSegment() {
     switch (expr_->left_data_type_) {
         case DataType::BOOL:
@@ -225,7 +224,7 @@ PhyCompareFilterExpr::ExecCompareExprDispatcherForBothDataSegment() {
 }
 
 template <typename T>
-VectorPtr
+milvus::base::VectorPtr
 PhyCompareFilterExpr::ExecCompareLeftType() {
     switch (expr_->right_data_type_) {
         case DataType::BOOL:
@@ -251,14 +250,14 @@ PhyCompareFilterExpr::ExecCompareLeftType() {
 }
 
 template <typename T, typename U>
-VectorPtr
+milvus::base::VectorPtr
 PhyCompareFilterExpr::ExecCompareRightType() {
     auto real_batch_size = GetNextBatchSize();
     if (real_batch_size == 0) {
         return nullptr;
     }
-    auto res_vec =
-        std::make_shared<ColumnVector>(DataType::BOOL, real_batch_size);
+    auto res_vec = std::make_shared<milvus::base::ColumnVector>(
+        DataType::BOOL, real_batch_size);
     bool* res = (bool*)res_vec->GetRawData();
     auto expr_type = expr_->op_type_;
     auto execute_sub_batch = [expr_type](const T* left,

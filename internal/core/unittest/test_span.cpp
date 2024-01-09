@@ -11,7 +11,7 @@
 
 #include <gtest/gtest.h>
 
-#include "segcore/SegmentGrowing.h"
+#include "segment/SegmentGrowing.h"
 #include "test_utils/DataGen.h"
 
 const int64_t ROW_COUNT = 100 * 1000;
@@ -19,7 +19,8 @@ const int64_t ROW_COUNT = 100 * 1000;
 TEST(Span, Naive) {
     using namespace milvus;
     using namespace milvus::query;
-    using namespace milvus::segcore;
+    using namespace milvus::base;
+    using namespace milvus::segment;
     int64_t N = ROW_COUNT;
     constexpr int64_t size_per_chunk = 32 * 1024;
     auto schema = std::make_shared<Schema>();

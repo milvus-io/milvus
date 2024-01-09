@@ -14,17 +14,17 @@
 //
 
 #include <gtest/gtest.h>
-#include "common/Schema.h"
-#include "segcore/SegmentSealedImpl.h"
+#include "base/Schema.h"
+#include "segment/SegmentSealedImpl.h"
 #include "test_utils/DataGen.h"
 #include "query/Plan.h"
+#include "query/QueryInterface.h"
 #include "segcore/segment_c.h"
 #include "segcore/reduce_c.h"
 #include "test_utils/c_api_test_utils.h"
 #include "segcore/plan_c.h"
 
 using namespace milvus;
-using namespace milvus::segcore;
 using namespace milvus::query;
 using namespace milvus::storage;
 
@@ -35,27 +35,27 @@ prepareSegmentSystemFieldData(const std::unique_ptr<SegmentSealed>& segment,
                               size_t row_count,
                               GeneratedData& data_set) {
     auto field_data =
-        std::make_shared<milvus::FieldData<int64_t>>(DataType::INT64);
+        std::make_shared<milvus::base::FieldData<int64_t>>(DataType::INT64);
     field_data->FillFieldData(data_set.row_ids_.data(), row_count);
     auto field_data_info =
         FieldDataInfo{RowFieldID.get(),
                       row_count,
-                      std::vector<milvus::FieldDataPtr>{field_data}};
+                      std::vector<milvus::base::FieldDataPtr>{field_data}};
     segment->LoadFieldData(RowFieldID, field_data_info);
 
-    field_data = std::make_shared<milvus::FieldData<int64_t>>(DataType::INT64);
+    field_data =
+        std::make_shared<milvus::base::FieldData<int64_t>>(DataType::INT64);
     field_data->FillFieldData(data_set.timestamps_.data(), row_count);
     field_data_info =
         FieldDataInfo{TimestampFieldID.get(),
                       row_count,
-                      std::vector<milvus::FieldDataPtr>{field_data}};
+                      std::vector<milvus::base::FieldDataPtr>{field_data}};
     segment->LoadFieldData(TimestampFieldID, field_data_info);
 }
 
 TEST(GroupBY, Normal2) {
     using namespace milvus;
     using namespace milvus::query;
-    using namespace milvus::segcore;
 
     //0. prepare schema
     int dim = 64;
@@ -92,7 +92,7 @@ TEST(GroupBY, Normal2) {
     auto vector_data = raw_data.get_col<float>(vec_fid);
     auto indexing = GenVecIndexing(
         N, dim, vector_data.data(), knowhere::IndexEnum::INDEX_HNSW);
-    LoadIndexInfo load_index_info;
+    milvus::index::LoadIndexInfo load_index_info;
     load_index_info.field_id = vec_fid.get();
     load_index_info.index = std::move(indexing);
     load_index_info.index_params[METRICS_TYPE] = knowhere::metric::L2;
@@ -120,8 +120,8 @@ TEST(GroupBY, Normal2) {
         auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
         auto ph_group =
             ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-        auto search_result =
-            segment->Search(plan.get(), ph_group.get(), 1L << 63);
+        auto search_result = milvus::query::Search(
+            segment.get(), plan.get(), ph_group.get(), 1L << 63);
         auto& group_by_values = search_result->group_by_values_;
         ASSERT_EQ(search_result->group_by_values_.size(),
                   search_result->seg_offsets_.size());
@@ -172,8 +172,8 @@ TEST(GroupBY, Normal2) {
         auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
         auto ph_group =
             ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-        auto search_result =
-            segment->Search(plan.get(), ph_group.get(), 1L << 63);
+        auto search_result = milvus::query::Search(
+            segment.get(), plan.get(), ph_group.get(), 1L << 63);
         auto& group_by_values = search_result->group_by_values_;
         ASSERT_EQ(search_result->group_by_values_.size(),
                   search_result->seg_offsets_.size());
@@ -224,8 +224,8 @@ TEST(GroupBY, Normal2) {
         auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
         auto ph_group =
             ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-        auto search_result =
-            segment->Search(plan.get(), ph_group.get(), 1L << 63);
+        auto search_result = milvus::query::Search(
+            segment.get(), plan.get(), ph_group.get(), 1L << 63);
         auto& group_by_values = search_result->group_by_values_;
         ASSERT_EQ(search_result->group_by_values_.size(),
                   search_result->seg_offsets_.size());
@@ -276,8 +276,8 @@ TEST(GroupBY, Normal2) {
         auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
         auto ph_group =
             ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-        auto search_result =
-            segment->Search(plan.get(), ph_group.get(), 1L << 63);
+        auto search_result = milvus::query::Search(
+            segment.get(), plan.get(), ph_group.get(), 1L << 63);
         auto& group_by_values = search_result->group_by_values_;
         ASSERT_EQ(search_result->group_by_values_.size(),
                   search_result->seg_offsets_.size());
@@ -328,8 +328,8 @@ TEST(GroupBY, Normal2) {
         auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
         auto ph_group =
             ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-        auto search_result =
-            segment->Search(plan.get(), ph_group.get(), 1L << 63);
+        auto search_result = milvus::query::Search(
+            segment.get(), plan.get(), ph_group.get(), 1L << 63);
         auto& group_by_values = search_result->group_by_values_;
         ASSERT_EQ(search_result->group_by_values_.size(),
                   search_result->seg_offsets_.size());
@@ -381,8 +381,8 @@ TEST(GroupBY, Normal2) {
         auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
         auto ph_group =
             ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-        auto search_result =
-            segment->Search(plan.get(), ph_group.get(), 1L << 63);
+        auto search_result = milvus::query::Search(
+            segment.get(), plan.get(), ph_group.get(), 1L << 63);
         auto& group_by_values = search_result->group_by_values_;
         ASSERT_EQ(search_result->group_by_values_.size(),
                   search_result->seg_offsets_.size());
@@ -418,7 +418,6 @@ TEST(GroupBY, Normal2) {
 TEST(GroupBY, Reduce) {
     using namespace milvus;
     using namespace milvus::query;
-    using namespace milvus::segcore;
 
     //0. prepare schema
     int dim = 64;
@@ -468,7 +467,7 @@ TEST(GroupBY, Reduce) {
     auto vector_data_1 = raw_data1.get_col<float>(vec_fid);
     auto indexing_1 = GenVecIndexing(
         N, dim, vector_data_1.data(), knowhere::IndexEnum::INDEX_HNSW);
-    LoadIndexInfo load_index_info_1;
+    milvus::index::LoadIndexInfo load_index_info_1;
     load_index_info_1.field_id = vec_fid.get();
     load_index_info_1.index = std::move(indexing_1);
     load_index_info_1.index_params[METRICS_TYPE] = knowhere::metric::L2;
@@ -477,7 +476,7 @@ TEST(GroupBY, Reduce) {
     auto vector_data_2 = raw_data2.get_col<float>(vec_fid);
     auto indexing_2 = GenVecIndexing(
         N, dim, vector_data_2.data(), knowhere::IndexEnum::INDEX_HNSW);
-    LoadIndexInfo load_index_info_2;
+    milvus::index::LoadIndexInfo load_index_info_2;
     load_index_info_2.field_id = vec_fid.get();
     load_index_info_2.index = std::move(indexing_2);
     load_index_info_2.index_params[METRICS_TYPE] = knowhere::metric::L2;

@@ -20,31 +20,33 @@
 
 #include "Constants.h"
 #include "common/EasyAssert.h"
-#include "common/Schema.h"
+#include "base/Schema.h"
 #include "common/Types.h"
 #include "index/ScalarIndexSort.h"
 #include "index/StringIndexSort.h"
 #include "index/VectorMemIndex.h"
-#include "query/SearchOnIndex.h"
-#include "segcore/Collection.h"
-#include "segcore/SegmentGrowingImpl.h"
-#include "segcore/SegmentSealedImpl.h"
-#include "segcore/Utils.h"
+#include "segment/SearchOnIndex.h"
+#include "base/Collection.h"
+#include "segment/SegmentGrowingImpl.h"
+#include "segment/SegmentSealedImpl.h"
+#include "base/Utils.h"
 #include "knowhere/comp/index_param.h"
 
 #include "PbHelper.h"
 #include "segcore/collection_c.h"
 
 using boost::algorithm::starts_with;
+using namespace milvus::base;
+using namespace milvus::segment;
 
-namespace milvus::segcore {
+namespace milvus::base {
 
 struct GeneratedData {
     std::vector<idx_t> row_ids_;
     std::vector<Timestamp> timestamps_;
     InsertData* raw_;
     std::vector<FieldId> field_ids;
-    SchemaPtr schema_;
+    milvus::base::SchemaPtr schema_;
 
     void
     DeepCopy(const GeneratedData& data) {
@@ -223,14 +225,14 @@ struct GeneratedData {
  private:
     GeneratedData() = default;
     friend GeneratedData
-    DataGen(SchemaPtr schema,
+    DataGen(milvus::base::SchemaPtr schema,
             int64_t N,
             uint64_t seed,
             uint64_t ts_offset,
             int repeat_count,
             int array_len);
     friend GeneratedData
-    DataGenForJsonArray(SchemaPtr schema,
+    DataGenForJsonArray(milvus::base::SchemaPtr schema,
                         int64_t N,
                         uint64_t seed,
                         uint64_t ts_offset,
@@ -239,7 +241,7 @@ struct GeneratedData {
 };
 
 inline GeneratedData
-DataGen(SchemaPtr schema,
+DataGen(milvus::base::SchemaPtr schema,
         int64_t N,
         uint64_t seed = 42,
         uint64_t ts_offset = 0,
@@ -253,8 +255,8 @@ DataGen(SchemaPtr schema,
     auto insert_data = std::make_unique<InsertData>();
     auto insert_cols = [&insert_data](
                            auto& data, int64_t count, auto& field_meta) {
-        auto array = milvus::segcore::CreateDataArrayFrom(
-            data.data(), count, field_meta);
+        auto array =
+            milvus::base::CreateDataArrayFrom(data.data(), count, field_meta);
         insert_data->mutable_fields_data()->AddAllocated(array.release());
     };
 
@@ -516,7 +518,7 @@ join(const std::vector<T>& items, const std::string& delimiter) {
 }
 
 inline GeneratedData
-DataGenForJsonArray(SchemaPtr schema,
+DataGenForJsonArray(milvus::base::SchemaPtr schema,
                     int64_t N,
                     uint64_t seed = 42,
                     uint64_t ts_offset = 0,
@@ -529,8 +531,8 @@ DataGenForJsonArray(SchemaPtr schema,
     auto insert_data = std::make_unique<InsertData>();
     auto insert_cols = [&insert_data](
                            auto& data, int64_t count, auto& field_meta) {
-        auto array = milvus::segcore::CreateDataArrayFrom(
-            data.data(), count, field_meta);
+        auto array =
+            milvus::base::CreateDataArrayFrom(data.data(), count, field_meta);
         insert_data->mutable_fields_data()->AddAllocated(array.release());
     };
     for (auto field_id : schema->get_field_ids()) {
@@ -580,7 +582,7 @@ DataGenForJsonArray(SchemaPtr schema,
         }
     }
 
-    milvus::segcore::GeneratedData res;
+    milvus::base::GeneratedData res;
     res.schema_ = schema;
     res.raw_ = insert_data.release();
     res.raw_->set_num_rows(N);
@@ -778,7 +780,7 @@ CreateBFloat16PlaceholderGroupFromBlob(int64_t num_queries,
 }
 
 inline auto
-SearchResultToVector(const SearchResult& sr) {
+SearchResultToVector(const milvus::base::SearchResult& sr) {
     int64_t num_queries = sr.total_nq_;
     int64_t topk = sr.unity_topK_;
     std::vector<std::pair<int, float>> result;
@@ -793,7 +795,7 @@ SearchResultToVector(const SearchResult& sr) {
 }
 
 inline nlohmann::json
-SearchResultToJson(const SearchResult& sr) {
+SearchResultToJson(const milvus::base::SearchResult& sr) {
     int64_t num_queries = sr.total_nq_;
     int64_t topk = sr.unity_topK_;
     std::vector<std::vector<std::string>> results;
@@ -809,12 +811,12 @@ SearchResultToJson(const SearchResult& sr) {
     return nlohmann::json{results};
 };
 
-inline FieldDataPtr
+inline milvus::base::FieldDataPtr
 CreateFieldDataFromDataArray(ssize_t raw_count,
                              const DataArray* data,
-                             const FieldMeta& field_meta) {
+                             const milvus::base::FieldMeta& field_meta) {
     int64_t dim = 1;
-    FieldDataPtr field_data = nullptr;
+    milvus::base::FieldDataPtr field_data = nullptr;
 
     auto createFieldData = [&field_data, &raw_count](const void* raw_data,
                                                      DataType data_type,
@@ -938,22 +940,22 @@ SealedLoadFieldData(const GeneratedData& dataset,
     auto row_count = dataset.row_ids_.size();
     {
         auto field_data =
-            std::make_shared<milvus::FieldData<int64_t>>(DataType::INT64);
+            std::make_shared<milvus::base::FieldData<int64_t>>(DataType::INT64);
         field_data->FillFieldData(dataset.row_ids_.data(), row_count);
         auto field_data_info =
             FieldDataInfo(RowFieldID.get(),
                           row_count,
-                          std::vector<milvus::FieldDataPtr>{field_data});
+                          std::vector<milvus::base::FieldDataPtr>{field_data});
         seg.LoadFieldData(RowFieldID, field_data_info);
     }
     {
         auto field_data =
-            std::make_shared<milvus::FieldData<int64_t>>(DataType::INT64);
+            std::make_shared<milvus::base::FieldData<int64_t>>(DataType::INT64);
         field_data->FillFieldData(dataset.timestamps_.data(), row_count);
         auto field_data_info =
             FieldDataInfo(TimestampFieldID.get(),
                           row_count,
-                          std::vector<milvus::FieldDataPtr>{field_data});
+                          std::vector<milvus::base::FieldDataPtr>{field_data});
         seg.LoadFieldData(TimestampFieldID, field_data_info);
     }
     for (auto& iter : dataset.schema_->get_fields()) {
@@ -988,7 +990,7 @@ SealedLoadFieldData(const GeneratedData& dataset,
 }
 
 inline std::unique_ptr<SegmentSealed>
-SealedCreator(SchemaPtr schema, const GeneratedData& dataset) {
+SealedCreator(milvus::base::SchemaPtr schema, const GeneratedData& dataset) {
     auto segment = CreateSealedSegment(schema);
     SealedLoadFieldData(dataset, *segment);
     return segment;
@@ -1113,7 +1115,7 @@ inline CCollection
 NewCollection(const char* schema_proto_blob,
               const MetricType metric_type = knowhere::metric::L2) {
     auto proto = std::string(schema_proto_blob);
-    auto collection = std::make_unique<milvus::segcore::Collection>(proto);
+    auto collection = std::make_unique<milvus::base::Collection>(proto);
     auto schema = collection->get_schema();
     milvus::proto::segcore::CollectionIndexMeta col_index_meta;
     for (auto field : schema->get_fields()) {
@@ -1129,4 +1131,4 @@ NewCollection(const char* schema_proto_blob,
     return (void*)collection.release();
 }
 
-}  // namespace milvus::segcore
+}  // namespace milvus::base

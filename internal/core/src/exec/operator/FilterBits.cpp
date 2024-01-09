@@ -37,7 +37,7 @@ FilterBits::FilterBits(
 }
 
 void
-FilterBits::AddInput(RowVectorPtr& input) {
+FilterBits::AddInput(milvus::base::RowVectorPtr& input) {
     input_ = std::move(input);
 }
 
@@ -55,7 +55,7 @@ FilterBits::IsFinished() {
     return AllInputProcessed();
 }
 
-RowVectorPtr
+milvus::base::RowVectorPtr
 FilterBits::GetOutput() {
     if (AllInputProcessed()) {
         return nullptr;
@@ -70,12 +70,13 @@ FilterBits::GetOutput() {
                "FilterBits result size should be one and not be nullptr");
 
     if (results_[0]->type() == DataType::ROW) {
-        auto row_vec = std::dynamic_pointer_cast<RowVector>(results_[0]);
+        auto row_vec =
+            std::dynamic_pointer_cast<milvus::base::RowVector>(results_[0]);
         num_processed_rows_ += row_vec->child(0)->size();
     } else {
         num_processed_rows_ += results_[0]->size();
     }
-    return std::make_shared<RowVector>(results_);
+    return std::make_shared<milvus::base::RowVector>(results_);
 }
 
 }  // namespace exec

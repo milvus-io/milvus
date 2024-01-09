@@ -9,10 +9,11 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include "segcore_init_c.h"
+
 #include "config/ConfigKnowhere.h"
 #include "log/Log.h"
-#include "segcore/SegcoreConfig.h"
-#include "segcore/segcore_init_c.h"
+#include "base/SegcoreConfig.h"
 
 namespace milvus::segcore {
 
@@ -26,29 +27,29 @@ SegcoreInit(const char* conf_file) {
 // TODO merge small index config into one config map, including enable/disable small_index
 extern "C" void
 SegcoreSetChunkRows(const int64_t value) {
-    milvus::segcore::SegcoreConfig& config =
-        milvus::segcore::SegcoreConfig::default_config();
+    milvus::base::SegcoreConfig& config =
+        milvus::base::SegcoreConfig::default_config();
     config.set_chunk_rows(value);
 }
 
 extern "C" void
 SegcoreSetEnableTempSegmentIndex(const bool value) {
-    milvus::segcore::SegcoreConfig& config =
-        milvus::segcore::SegcoreConfig::default_config();
+    milvus::base::SegcoreConfig& config =
+        milvus::base::SegcoreConfig::default_config();
     config.set_enable_interim_segment_index(value);
 }
 
 extern "C" void
 SegcoreSetNlist(const int64_t value) {
-    milvus::segcore::SegcoreConfig& config =
-        milvus::segcore::SegcoreConfig::default_config();
+    milvus::base::SegcoreConfig& config =
+        milvus::base::SegcoreConfig::default_config();
     config.set_nlist(value);
 }
 
 extern "C" void
 SegcoreSetNprobe(const int64_t value) {
-    milvus::segcore::SegcoreConfig& config =
-        milvus::segcore::SegcoreConfig::default_config();
+    milvus::base::SegcoreConfig& config =
+        milvus::base::SegcoreConfig::default_config();
     config.set_nprobe(value);
 }
 

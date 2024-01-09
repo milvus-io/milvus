@@ -30,7 +30,7 @@ set(MILVUS_EXEC_SRCS
 
 add_library(milvus_exec STATIC ${MILVUS_EXEC_SRCS})
 if(USE_DYNAMIC_SIMD)
-        target_link_libraries(milvus_exec milvus_common milvus_simd milvus-storage ${CONAN_LIBS})
+        target_link_libraries(milvus_exec milvus_base milvus-storage milvus_common ${CONAN_LIBS} milvus_simd)
 else() 
-        target_link_libraries(milvus_exec milvus_common milvus-storage ${CONAN_LIBS})
+        target_link_libraries(milvus_exec milvus_base milvus-storage milvus_common ${CONAN_LIBS})
 endif()

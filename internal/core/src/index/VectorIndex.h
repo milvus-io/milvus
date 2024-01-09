@@ -27,8 +27,8 @@
 #include "index/Index.h"
 #include "common/Types.h"
 #include "common/BitsetView.h"
-#include "common/QueryResult.h"
-#include "common/QueryInfo.h"
+#include "base/QueryResult.h"
+#include "base/QueryInfo.h"
 #include "knowhere/version.h"
 
 namespace milvus::index {
@@ -54,9 +54,9 @@ class VectorIndex : public IndexBase {
         PanicInfo(Unsupported, "vector index don't support add with dataset");
     }
 
-    virtual std::unique_ptr<SearchResult>
+    virtual std::unique_ptr<milvus::base::SearchResult>
     Query(const DatasetPtr dataset,
-          const SearchInfo& search_info,
+          const milvus::base::SearchInfo& search_info,
           const BitsetView& bitset) = 0;
 
     virtual const bool

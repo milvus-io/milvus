@@ -27,8 +27,8 @@
 constexpr int64_t nb = 100;
 namespace indexcgo = milvus::proto::indexcgo;
 namespace schemapb = milvus::proto::schema;
+using milvus::base::GeneratedData;
 using milvus::index::ScalarIndexPtr;
-using milvus::segcore::GeneratedData;
 template <typename T>
 class TypedScalarIndexTest : public ::testing::Test {
  protected:

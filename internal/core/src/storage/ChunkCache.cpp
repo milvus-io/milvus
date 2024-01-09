@@ -74,7 +74,7 @@ ChunkCache::Prefetch(const std::string& filepath) {
 
 std::shared_ptr<ColumnBase>
 ChunkCache::Mmap(const std::filesystem::path& path,
-                 const FieldDataPtr& field_data) {
+                 const milvus::base::FieldDataPtr& field_data) {
     auto dir = path.parent_path();
     std::filesystem::create_directories(dir);
 

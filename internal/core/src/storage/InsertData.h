@@ -25,7 +25,7 @@ namespace milvus::storage {
 
 class InsertData : public DataCodec {
  public:
-    explicit InsertData(FieldDataPtr data)
+    explicit InsertData(milvus::base::FieldDataPtr data)
         : DataCodec(data, CodecType::InsertDataType) {
     }
 

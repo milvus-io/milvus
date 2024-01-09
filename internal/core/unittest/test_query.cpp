@@ -18,14 +18,16 @@
 #include "query/generated/ExecPlanNodeVisitor.h"
 #include "query/generated/ExprVisitor.h"
 #include "query/generated/ShowPlanNodeVisitor.h"
-#include "segcore/SegmentSealed.h"
+#include "query/QueryInterface.h"
+#include "segment/SegmentSealed.h"
 #include "test_utils/AssertUtils.h"
 #include "test_utils/DataGen.h"
 
 using json = nlohmann::json;
 using namespace milvus;
 using namespace milvus::query;
-using namespace milvus::segcore;
+using namespace milvus::base;
+using namespace milvus::segment;
 
 namespace {
 const int64_t ROW_COUNT = 100 * 1000;
@@ -78,7 +80,7 @@ TEST(Query, ParsePlaceholderGroup) {
 
 TEST(Query, ExecWithPredicateLoader) {
     using namespace milvus::query;
-    using namespace milvus::segcore;
+    using namespace milvus::base;
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
@@ -130,7 +132,8 @@ TEST(Query, ExecWithPredicateLoader) {
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
     Timestamp timestamp = 1000000;
 
-    auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
+    auto sr = milvus::query::Search(
+        segment.get(), plan.get(), ph_group.get(), timestamp);
 
     query::Json json = SearchResultToJson(*sr);
 #ifdef __linux__
@@ -162,7 +165,7 @@ TEST(Query, ExecWithPredicateLoader) {
 
 TEST(Query, ExecWithPredicateSmallN) {
     using namespace milvus::query;
-    using namespace milvus::segcore;
+    using namespace milvus::base;
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 7, knowhere::metric::L2);
@@ -215,7 +218,8 @@ TEST(Query, ExecWithPredicateSmallN) {
 
     Timestamp timestamp = 1000000;
 
-    auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
+    auto sr = milvus::query::Search(
+        segment.get(), plan.get(), ph_group.get(), timestamp);
 
     query::Json json = SearchResultToJson(*sr);
     std::cout << json.dump(2);
@@ -223,7 +227,7 @@ TEST(Query, ExecWithPredicateSmallN) {
 
 TEST(Query, ExecWithPredicate) {
     using namespace milvus::query;
-    using namespace milvus::segcore;
+    using namespace milvus::base;
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
@@ -275,7 +279,8 @@ TEST(Query, ExecWithPredicate) {
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
     Timestamp timestamp = 1000000;
 
-    auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
+    auto sr = milvus::query::Search(
+        segment.get(), plan.get(), ph_group.get(), timestamp);
 
     query::Json json = SearchResultToJson(*sr);
 #ifdef __linux__
@@ -307,7 +312,7 @@ TEST(Query, ExecWithPredicate) {
 
 TEST(Query, ExecTerm) {
     using namespace milvus::query;
-    using namespace milvus::segcore;
+    using namespace milvus::base;
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
@@ -357,7 +362,8 @@ TEST(Query, ExecTerm) {
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
     Timestamp timestamp = 1000000;
 
-    auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
+    auto sr = milvus::query::Search(
+        segment.get(), plan.get(), ph_group.get(), timestamp);
     int topk = 5;
     auto json = SearchResultToJson(*sr);
     ASSERT_EQ(sr->total_nq_, num_queries);
@@ -366,7 +372,7 @@ TEST(Query, ExecTerm) {
 
 TEST(Query, ExecEmpty) {
     using namespace milvus::query;
-    using namespace milvus::segcore;
+    using namespace milvus::base;
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField("age", DataType::FLOAT);
     schema->AddDebugField(
@@ -392,7 +398,8 @@ TEST(Query, ExecEmpty) {
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
     Timestamp timestamp = 1000000;
-    auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
+    auto sr = milvus::query::Search(
+        segment.get(), plan.get(), ph_group.get(), timestamp);
     std::cout << SearchResultToJson(*sr);
     ASSERT_EQ(sr->unity_topK_, 0);
 
@@ -407,7 +414,7 @@ TEST(Query, ExecEmpty) {
 
 TEST(Query, ExecWithoutPredicateFlat) {
     using namespace milvus::query;
-    using namespace milvus::segcore;
+    using namespace milvus::base;
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, std::nullopt);
     schema->AddDebugField("age", DataType::FLOAT);
@@ -441,7 +448,8 @@ TEST(Query, ExecWithoutPredicateFlat) {
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
     Timestamp timestamp = 1000000;
-    auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
+    auto sr = milvus::query::Search(
+        segment.get(), plan.get(), ph_group.get(), timestamp);
     std::vector<std::vector<std::string>> results;
     auto json = SearchResultToJson(*sr);
     std::cout << json.dump(2);
@@ -449,7 +457,7 @@ TEST(Query, ExecWithoutPredicateFlat) {
 
 TEST(Query, ExecWithoutPredicate) {
     using namespace milvus::query;
-    using namespace milvus::segcore;
+    using namespace milvus::base;
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
@@ -485,7 +493,8 @@ TEST(Query, ExecWithoutPredicate) {
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
     Timestamp timestamp = 1000000;
 
-    auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
+    auto sr = milvus::query::Search(
+        segment.get(), plan.get(), ph_group.get(), timestamp);
     assert_order(*sr, "l2");
     std::vector<std::vector<std::string>> results;
     auto json = SearchResultToJson(*sr);
@@ -555,7 +564,8 @@ TEST(Query, InnerProduct) {
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
     Timestamp ts = N * 2;
-    auto sr = segment->Search(plan.get(), ph_group.get(), ts);
+    auto sr =
+        milvus::query::Search(segment.get(), plan.get(), ph_group.get(), ts);
     assert_order(*sr, "ip");
 }
 
@@ -653,7 +663,8 @@ TEST(Query, FillSegment) {
             schema->get_field_id(FieldName("fakevec")));
         plan->target_entries_.push_back(
             schema->get_field_id(FieldName("the_value")));
-        auto result = segment->Search(plan.get(), ph.get(), ts);
+        auto result =
+            milvus::query::Search(segment.get(), plan.get(), ph.get(), ts);
         result->result_offsets_.resize(topk * num_queries);
         segment->FillTargetEntry(plan.get(), *result);
         segment->FillPrimaryKeys(plan.get(), *result);
@@ -705,7 +716,7 @@ TEST(Query, FillSegment) {
 
 TEST(Query, ExecWithPredicateBinary) {
     using namespace milvus::query;
-    using namespace milvus::segcore;
+    using namespace milvus::base;
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugField(
         "fakevec", DataType::VECTOR_BINARY, 512, knowhere::metric::JACCARD);
@@ -759,7 +770,8 @@ TEST(Query, ExecWithPredicateBinary) {
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
     Timestamp timestamp = 1000000;
-    auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
+    auto sr = milvus::query::Search(
+        segment.get(), plan.get(), ph_group.get(), timestamp);
 
     query::Json json = SearchResultToJson(*sr);
     std::cout << json.dump(2);

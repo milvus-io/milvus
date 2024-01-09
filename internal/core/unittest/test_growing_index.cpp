@@ -12,13 +12,15 @@
 #include <gtest/gtest.h>
 
 #include "pb/plan.pb.h"
-#include "segcore/SegmentGrowing.h"
-#include "segcore/SegmentGrowingImpl.h"
+#include "segment/SegmentGrowing.h"
+#include "segment/SegmentGrowingImpl.h"
 #include "pb/schema.pb.h"
 #include "test_utils/DataGen.h"
 #include "query/Plan.h"
+#include "query/QueryInterface.h"
 
-using namespace milvus::segcore;
+using namespace milvus::base;
+using namespace milvus::segment;
 using namespace milvus;
 namespace pb = milvus::proto;
 
@@ -33,14 +35,16 @@ TEST(GrowingIndex, Correctness) {
     std::map<std::string, std::string> index_params = {
         {"index_type", "IVF_FLAT"}, {"metric_type", "L2"}, {"nlist", "128"}};
     std::map<std::string, std::string> type_params = {{"dim", "128"}};
-    FieldIndexMeta fieldIndexMeta(
+    milvus::base::FieldIndexMeta fieldIndexMeta(
         vec, std::move(index_params), std::move(type_params));
     auto& config = SegcoreConfig::default_config();
     config.set_chunk_rows(1024);
     config.set_enable_interim_segment_index(true);
-    std::map<FieldId, FieldIndexMeta> filedMap = {{vec, fieldIndexMeta}};
-    IndexMetaPtr metaPtr =
-        std::make_shared<CollectionIndexMeta>(226985, std::move(filedMap));
+    std::map<FieldId, milvus::base::FieldIndexMeta> filedMap = {
+        {vec, fieldIndexMeta}};
+    milvus::base::IndexMetaPtr metaPtr =
+        std::make_shared<milvus::base::CollectionIndexMeta>(
+            226985, std::move(filedMap));
     auto segment = CreateGrowingSegment(schema, metaPtr);
     auto segmentImplPtr = dynamic_cast<SegmentGrowingImpl*>(segment.get());
 
@@ -103,7 +107,8 @@ TEST(GrowingIndex, Correctness) {
             ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
         Timestamp timestamp = 1000000;
-        auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
+        auto sr = milvus::query::Search(
+            segment.get(), plan.get(), ph_group.get(), timestamp);
         EXPECT_EQ(sr->total_nq_, num_queries);
         EXPECT_EQ(sr->unity_topK_, top_k);
         EXPECT_EQ(sr->distances_.size(), num_queries * top_k);
@@ -113,8 +118,8 @@ TEST(GrowingIndex, Correctness) {
             *schema, range_plan_str.data(), range_plan_str.size());
         auto range_ph_group = ParsePlaceholderGroup(
             range_plan.get(), ph_group_raw.SerializeAsString());
-        auto range_sr =
-            segment->Search(range_plan.get(), range_ph_group.get(), timestamp);
+        auto range_sr = milvus::query::Search(
+            segment.get(), range_plan.get(), range_ph_group.get(), timestamp);
         ASSERT_EQ(range_sr->total_nq_, num_queries);
         EXPECT_EQ(sr->unity_topK_, top_k);
         EXPECT_EQ(sr->distances_.size(), num_queries * top_k);
@@ -174,14 +179,16 @@ TEST_P(GrowingIndexGetVectorTest, GetVector) {
         {"metric_type", metricType},
         {"nlist", "128"}};
     std::map<std::string, std::string> type_params = {{"dim", "128"}};
-    FieldIndexMeta fieldIndexMeta(
+    milvus::base::FieldIndexMeta fieldIndexMeta(
         vec, std::move(index_params), std::move(type_params));
     auto& config = SegcoreConfig::default_config();
     config.set_chunk_rows(1024);
     config.set_enable_interim_segment_index(true);
-    std::map<FieldId, FieldIndexMeta> filedMap = {{vec, fieldIndexMeta}};
-    IndexMetaPtr metaPtr =
-        std::make_shared<CollectionIndexMeta>(100000, std::move(filedMap));
+    std::map<FieldId, milvus::base::FieldIndexMeta> filedMap = {
+        {vec, fieldIndexMeta}};
+    milvus::base::IndexMetaPtr metaPtr =
+        std::make_shared<milvus::base::CollectionIndexMeta>(
+            100000, std::move(filedMap));
     auto segment_growing = CreateGrowingSegment(schema, metaPtr);
     auto segment = dynamic_cast<SegmentGrowingImpl*>(segment_growing.get());
 

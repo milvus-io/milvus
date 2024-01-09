@@ -17,12 +17,13 @@
 #include "common/Types.h"
 #include "indexbuilder/IndexFactory.h"
 #include "indexbuilder/VecIndexCreator.h"
-#include "common/QueryResult.h"
+#include "base/QueryResult.h"
 #include "test_utils/indexbuilder_test_utils.h"
 #include "test_utils/storage_test_utils.h"
 
 using namespace milvus;
-using namespace milvus::segcore;
+using namespace milvus::base;
+using namespace milvus::segment;
 using namespace milvus::proto::indexcgo;
 
 using Param = std::pair<knowhere::IndexType, knowhere::MetricType>;
@@ -168,7 +169,7 @@ TEST_P(IndexWrapperTest, BuildAndQuery) {
 
     ASSERT_NO_THROW(vec_index->Load(binary_set));
 
-    milvus::SearchInfo search_info;
+    milvus::base::SearchInfo search_info;
     search_info.topk_ = K;
     search_info.metric_type_ = metric_type;
     search_info.search_params_ = search_conf;

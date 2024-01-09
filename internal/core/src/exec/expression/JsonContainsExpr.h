@@ -20,9 +20,8 @@
 
 #include "common/EasyAssert.h"
 #include "common/Types.h"
-#include "common/Vector.h"
+#include "base/Vector.h"
 #include "exec/expression/Expr.h"
-#include "segcore/SegmentInterface.h"
 
 namespace milvus {
 namespace exec {
@@ -33,7 +32,7 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
         const std::vector<std::shared_ptr<Expr>>& input,
         const std::shared_ptr<const milvus::expr::JsonContainsExpr>& expr,
         const std::string& name,
-        const segcore::SegmentInternalInterface* segment,
+        const segment::SegmentInternalInterface* segment,
         int64_t active_count,
         int64_t batch_size)
         : SegmentExpr(std::move(input),
@@ -46,38 +45,38 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
     }
 
     void
-    Eval(EvalCtx& context, VectorPtr& result) override;
+    Eval(EvalCtx& context, milvus::base::VectorPtr& result) override;
 
  private:
-    VectorPtr
+    milvus::base::VectorPtr
     EvalJsonContainsForDataSegment();
 
     template <typename ExprValueType>
-    VectorPtr
+    milvus::base::VectorPtr
     ExecJsonContains();
 
     template <typename ExprValueType>
-    VectorPtr
+    milvus::base::VectorPtr
     ExecArrayContains();
 
     template <typename ExprValueType>
-    VectorPtr
+    milvus::base::VectorPtr
     ExecJsonContainsAll();
 
     template <typename ExprValueType>
-    VectorPtr
+    milvus::base::VectorPtr
     ExecArrayContainsAll();
 
-    VectorPtr
+    milvus::base::VectorPtr
     ExecJsonContainsArray();
 
-    VectorPtr
+    milvus::base::VectorPtr
     ExecJsonContainsAllArray();
 
-    VectorPtr
+    milvus::base::VectorPtr
     ExecJsonContainsAllWithDiffType();
 
-    VectorPtr
+    milvus::base::VectorPtr
     ExecJsonContainsWithDiffType();
 
  private:

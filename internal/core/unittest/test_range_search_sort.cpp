@@ -15,10 +15,10 @@
 #include <vector>
 #include <iostream>
 
-#include "common/RangeSearchHelper.h"
+#include "base/RangeSearchHelper.h"
 #include "common/Types.h"
 #include "common/Utils.h"
-#include "common/Schema.h"
+#include "base/Schema.h"
 #include "test_utils/indexbuilder_test_utils.h"
 
 bool
@@ -165,7 +165,8 @@ INSTANTIATE_TEST_CASE_P(RangeSearchSortParameters,
                                           knowhere::metric::HAMMING));
 
 TEST_P(RangeSearchSortTest, CheckRangeSearchSort) {
-    auto res = milvus::ReGenRangeSearchResult(dataset, TOPK, N, metric_type);
+    auto res =
+        milvus::base::ReGenRangeSearchResult(dataset, TOPK, N, metric_type);
     auto [p_id, p_dist] =
         RangeSearchSortResultBF(dataset, TOPK, N, metric_type);
     CheckRangeSearchSortResult(p_id, p_dist, res, N * TOPK);

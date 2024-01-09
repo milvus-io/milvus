@@ -19,11 +19,12 @@ set(INDEX_FILES
         ScalarIndexSort.cpp
         SkipIndex.cpp
         InvertedIndexTantivy.cpp
+        FieldIndexing.cpp
         )
 
 milvus_add_pkg_config("milvus_index")
 add_library(milvus_index SHARED ${INDEX_FILES})
 
-target_link_libraries(milvus_index milvus_storage milvus-storage tantivy_binding)
+target_link_libraries(milvus_index milvus_storage milvus-storage milvus_base tantivy_binding)
 
 install(TARGETS milvus_index DESTINATION "${CMAKE_INSTALL_LIBDIR}")

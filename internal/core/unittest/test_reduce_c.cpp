@@ -12,7 +12,7 @@
 #include <gtest/gtest.h>
 
 #include "common/Consts.h"
-#include "segcore/ReduceStructure.h"
+#include "base/ReduceStructure.h"
 
 TEST(SearchResultPair, Greater) {
     auto pair1 = SearchResultPair(0, 1.0, nullptr, 0, 0, 1);

@@ -66,7 +66,7 @@ Count(const milvus::FixedVector<bool>& vec) {
 }
 
 inline void
-assert_order(const milvus::SearchResult& result,
+assert_order(const milvus::base::SearchResult& result,
              const knowhere::MetricType& metric_type) {
     bool dsc = milvus::PositivelyRelated(metric_type);
     auto& ids = result.seg_offsets_;

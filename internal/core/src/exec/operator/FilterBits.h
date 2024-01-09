@@ -43,9 +43,9 @@ class FilterBits : public Operator {
     }
 
     void
-    AddInput(RowVectorPtr& input) override;
+    AddInput(milvus::base::RowVectorPtr& input) override;
 
-    RowVectorPtr
+    milvus::base::RowVectorPtr
     GetOutput() override;
 
     bool

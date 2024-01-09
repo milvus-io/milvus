@@ -27,7 +27,7 @@ namespace milvus::storage {
 // TODO :: indexParams storage in a single file
 class IndexData : public DataCodec {
  public:
-    explicit IndexData(FieldDataPtr data)
+    explicit IndexData(milvus::base::FieldDataPtr data)
         : DataCodec(data, CodecType::IndexDataType) {
     }
 

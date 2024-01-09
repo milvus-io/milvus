@@ -21,8 +21,9 @@
 #include <vector>
 #include <future>
 
-#include "common/FieldData.h"
-#include "common/LoadInfo.h"
+#include "base/FieldData.h"
+#include "base/LoadInfo.h"
+#include "base/Schema.h"
 #include "knowhere/comp/index_param.h"
 #include "parquet/schema.h"
 #include "storage/PayloadStream.h"
@@ -32,6 +33,7 @@
 #include "storage/DataCodec.h"
 #include "storage/Types.h"
 #include "storage/space.h"
+#include "mmap/Types.h"
 
 namespace milvus::storage {
 
@@ -113,14 +115,14 @@ EncodeAndUploadFieldSlice(ChunkManager* chunk_manager,
                           uint8_t* buf,
                           int64_t element_count,
                           FieldDataMeta field_data_meta,
-                          const FieldMeta& field_meta,
+                          const milvus::base::FieldMeta& field_meta,
                           std::string object_key);
 
 std::vector<std::future<std::unique_ptr<DataCodec>>>
 GetObjectData(ChunkManager* remote_chunk_manager,
               const std::vector<std::string>& remote_files);
 
-std::vector<FieldDataPtr>
+std::vector<milvus::base::FieldDataPtr>
 GetObjectData(std::shared_ptr<milvus_storage::Space> space,
               const std::vector<std::string>& remote_files);
 
@@ -140,10 +142,11 @@ PutIndexData(std::shared_ptr<milvus_storage::Space> space,
              FieldDataMeta& field_meta,
              IndexMeta& index_meta);
 int64_t
-GetTotalNumRowsForFieldDatas(const std::vector<FieldDataPtr>& field_datas);
+GetTotalNumRowsForFieldDatas(
+    const std::vector<milvus::base::FieldDataPtr>& field_datas);
 
 size_t
-GetNumRowsForLoadInfo(const LoadFieldDataInfo& load_info);
+GetNumRowsForLoadInfo(const milvus::base::LoadFieldDataInfo& load_info);
 
 void
 ReleaseArrowUnused();
@@ -154,18 +157,28 @@ ReleaseArrowUnused();
 ChunkManagerPtr
 CreateChunkManager(const StorageConfig& storage_config);
 
-FieldDataPtr
+milvus::base::FieldDataPtr
 CreateFieldData(const DataType& type,
                 int64_t dim = 1,
                 int64_t total_num_rows = 0);
 
 int64_t
-GetByteSizeOfFieldDatas(const std::vector<FieldDataPtr>& field_datas);
+GetByteSizeOfFieldDatas(
+    const std::vector<milvus::base::FieldDataPtr>& field_datas);
 
-std::vector<FieldDataPtr>
-CollectFieldDataChannel(FieldDataChannelPtr& channel);
+std::vector<milvus::base::FieldDataPtr>
+CollectFieldDataChannel(milvus::base::FieldDataChannelPtr& channel);
 
-FieldDataPtr
-MergeFieldData(std::vector<FieldDataPtr>& data_array);
+milvus::base::FieldDataPtr
+MergeFieldData(std::vector<milvus::base::FieldDataPtr>& data_array);
+
+void
+LoadFieldDatasFromRemote(const std::vector<std::string>& remote_files,
+                         milvus::base::FieldDataChannelPtr channel);
+
+void
+LoadFieldDatasFromRemote2(std::shared_ptr<milvus_storage::Space> space,
+                          milvus::base::SchemaPtr schema,
+                          FieldDataInfo& field_data_info);
 
 }  // namespace milvus::storage

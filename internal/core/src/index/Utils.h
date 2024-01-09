@@ -28,11 +28,32 @@
 #include <string>
 
 #include "common/Types.h"
-#include "common/FieldData.h"
+#include "base/FieldData.h"
+#include "index/Index.h"
 #include "index/IndexInfo.h"
 #include "storage/Types.h"
 
 namespace milvus::index {
+
+// see also internal/querynode/load_index_info.go
+struct LoadIndexInfo {
+    int64_t collection_id;
+    int64_t partition_id;
+    int64_t segment_id;
+    int64_t field_id;
+    DataType field_type;
+    bool enable_mmap;
+    std::string mmap_dir_path;
+    int64_t index_id;
+    int64_t index_build_id;
+    int64_t index_version;
+    std::map<std::string, std::string> index_params;
+    std::vector<std::string> index_files;
+    index::IndexBasePtr index;
+    std::string uri;
+    int64_t index_store_version;
+    IndexVersion index_engine_version;
+};
 
 size_t
 get_file_size(int fd);
@@ -114,14 +135,21 @@ ParseConfigFromIndexParams(
     const std::map<std::string, std::string>& index_params);
 
 void
-AssembleIndexDatas(std::map<std::string, FieldDataPtr>& index_datas);
+AssembleIndexDatas(
+    std::map<std::string, milvus::base::FieldDataPtr>& index_datas);
 
 void
-AssembleIndexDatas(std::map<std::string, FieldDataChannelPtr>& index_datas,
-                   std::unordered_map<std::string, FieldDataPtr>& result);
+AssembleIndexDatas(
+    std::map<std::string, milvus::base::FieldDataChannelPtr>& index_datas,
+    std::unordered_map<std::string, milvus::base::FieldDataPtr>& result);
 
 // On Linux, read() (and similar system calls) will transfer at most 0x7ffff000 (2,147,479,552) bytes once
 void
 ReadDataFromFD(int fd, void* buf, size_t size, size_t chunk_size = 0x7ffff000);
 
+std::unique_ptr<DataArray>
+ReverseDataFromIndex(const index::IndexBase* index,
+                     const int64_t* seg_offsets,
+                     int64_t count,
+                     const milvus::base::FieldMeta& field_meta);
 }  // namespace milvus::index

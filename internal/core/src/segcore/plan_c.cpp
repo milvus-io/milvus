@@ -9,10 +9,11 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include "plan_c.h"
+
 #include "pb/segcore.pb.h"
 #include "query/Plan.h"
-#include "segcore/Collection.h"
-#include "segcore/plan_c.h"
+#include "base/Collection.h"
 
 // Note: serialized_expr_plan is of binary format
 CStatus
@@ -20,7 +21,7 @@ CreateSearchPlanByExpr(CCollection c_col,
                        const void* serialized_expr_plan,
                        const int64_t size,
                        CSearchPlan* res_plan) {
-    auto col = (milvus::segcore::Collection*)c_col;
+    auto col = (milvus::base::Collection*)c_col;
 
     try {
         auto res = milvus::query::CreateSearchPlanByExpr(
@@ -138,7 +139,7 @@ CreateRetrievePlanByExpr(CCollection c_col,
                          const void* serialized_expr_plan,
                          const int64_t size,
                          CRetrievePlan* res_plan) {
-    auto col = static_cast<milvus::segcore::Collection*>(c_col);
+    auto col = static_cast<milvus::base::Collection*>(c_col);
 
     try {
         auto res = milvus::query::CreateRetrievePlanByExpr(

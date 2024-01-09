@@ -54,10 +54,10 @@ class MemFileManagerImpl : public FileManagerImpl {
         return "MemIndexFileManagerImpl";
     }
 
-    std::map<std::string, FieldDataPtr>
+    std::map<std::string, milvus::base::FieldDataPtr>
     LoadIndexToMemory(const std::vector<std::string>& remote_files);
 
-    std::vector<FieldDataPtr>
+    std::vector<milvus::base::FieldDataPtr>
     CacheRawDataToMemory(std::vector<std::string> remote_files);
 
     bool

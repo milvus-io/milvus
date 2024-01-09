@@ -40,11 +40,11 @@
 #include "knowhere/comp/time_recorder.h"
 #include "common/BitsetView.h"
 #include "common/Consts.h"
-#include "common/FieldData.h"
+#include "base/FieldData.h"
 #include "common/File.h"
 #include "common/Slice.h"
 #include "common/Tracer.h"
-#include "common/RangeSearchHelper.h"
+#include "base/RangeSearchHelper.h"
 #include "common/Utils.h"
 #include "log/Log.h"
 #include "mmap/Types.h"
@@ -194,7 +194,7 @@ VectorMemIndex<T>::LoadV2(const Config& config) {
 
     auto slice_meta_file = index_prefix + "/" + INDEX_FILE_SLICE_META;
     auto res = space_->GetBlobByteSize(std::string(slice_meta_file));
-    std::map<std::string, FieldDataPtr> index_datas{};
+    std::map<std::string, milvus::base::FieldDataPtr> index_datas{};
 
     if (!res.ok() && !res.status().IsFileNotFound()) {
         PanicInfo(DataFormatBroken, "failed to read blob");
@@ -295,7 +295,7 @@ VectorMemIndex<T>::Load(milvus::tracer::TraceContext ctx,
 
     auto parallel_degree =
         static_cast<uint64_t>(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
-    std::map<std::string, FieldDataPtr> index_datas{};
+    std::map<std::string, milvus::base::FieldDataPtr> index_datas{};
 
     // try to read slice meta first
     std::string slice_meta_filepath;
@@ -430,7 +430,7 @@ VectorMemIndex<T>::BuildV2(const Config& config) {
     }
 
     auto reader = res.value();
-    std::vector<FieldDataPtr> field_datas;
+    std::vector<milvus::base::FieldDataPtr> field_datas;
     for (auto rec : *reader) {
         if (!rec.ok()) {
             PanicInfo(IndexBuildError,
@@ -529,9 +529,9 @@ VectorMemIndex<T>::AddWithDataset(const DatasetPtr& dataset,
 }
 
 template <typename T>
-std::unique_ptr<SearchResult>
+std::unique_ptr<milvus::base::SearchResult>
 VectorMemIndex<T>::Query(const DatasetPtr dataset,
-                         const SearchInfo& search_info,
+                         const milvus::base::SearchInfo& search_info,
                          const BitsetView& bitset) {
     //    AssertInfo(GetMetricType() == search_info.metric_type_,
     //               "Metric type of field index isn't the same with search info");
@@ -539,7 +539,7 @@ VectorMemIndex<T>::Query(const DatasetPtr dataset,
     auto num_queries = dataset->GetRows();
     knowhere::Json search_conf = search_info.search_params_;
     if (search_info.group_by_field_id_.has_value()) {
-        auto result = std::make_unique<SearchResult>();
+        auto result = std::make_unique<milvus::base::SearchResult>();
         try {
             knowhere::expected<
                 std::vector<std::shared_ptr<knowhere::IndexNode::iterator>>>
@@ -575,9 +575,9 @@ VectorMemIndex<T>::Query(const DatasetPtr dataset,
         auto index_type = GetIndexType();
         if (CheckKeyInConfig(search_conf, RADIUS)) {
             if (CheckKeyInConfig(search_conf, RANGE_FILTER)) {
-                CheckRangeSearchParam(search_conf[RADIUS],
-                                      search_conf[RANGE_FILTER],
-                                      GetMetricType());
+                milvus::base::CheckRangeSearchParam(search_conf[RADIUS],
+                                                    search_conf[RANGE_FILTER],
+                                                    GetMetricType());
             }
             milvus::tracer::AddEvent("start_knowhere_index_range_search");
             auto res = index_.RangeSearch(*dataset, search_conf, bitset);
@@ -588,7 +588,7 @@ VectorMemIndex<T>::Query(const DatasetPtr dataset,
                           KnowhereStatusString(res.error()),
                           res.what());
             }
-            auto result = ReGenRangeSearchResult(
+            auto result = milvus::base::ReGenRangeSearchResult(
                 res.value(), topk, num_queries, GetMetricType());
             milvus::tracer::AddEvent("finish_ReGenRangeSearchResult");
             return result;
@@ -618,7 +618,7 @@ VectorMemIndex<T>::Query(const DatasetPtr dataset,
             distances[i] = std::round(distances[i] * multiplier) / multiplier;
         }
     }
-    auto result = std::make_unique<SearchResult>();
+    auto result = std::make_unique<milvus::base::SearchResult>();
     result->seg_offsets_.resize(total_num);
     result->distances_.resize(total_num);
     result->total_nq_ = num_queries;

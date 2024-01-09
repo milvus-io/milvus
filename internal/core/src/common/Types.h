@@ -321,6 +321,164 @@ struct TypeTraits<DataType::VECTOR_FLOAT> {
     static constexpr const char* Name = "VECTOR_FLOAT";
 };
 
+inline size_t
+datatype_sizeof(DataType data_type, int dim = 1) {
+    switch (data_type) {
+        case DataType::BOOL:
+            return sizeof(bool);
+        case DataType::INT8:
+            return sizeof(int8_t);
+        case DataType::INT16:
+            return sizeof(int16_t);
+        case DataType::INT32:
+            return sizeof(int32_t);
+        case DataType::INT64:
+            return sizeof(int64_t);
+        case DataType::FLOAT:
+            return sizeof(float);
+        case DataType::DOUBLE:
+            return sizeof(double);
+        case DataType::VECTOR_FLOAT:
+            return sizeof(float) * dim;
+        case DataType::VECTOR_BINARY: {
+            AssertInfo(dim % 8 == 0, "dim={}", dim);
+            return dim / 8;
+        }
+        case DataType::VECTOR_FLOAT16: {
+            return sizeof(float16) * dim;
+        }
+        case DataType::VECTOR_BFLOAT16: {
+            return sizeof(bfloat16) * dim;
+        }
+        default: {
+            throw SegcoreError(DataTypeInvalid,
+                               fmt::format("invalid type is {}", data_type));
+        }
+    }
+}
+
+// TODO: use magic_enum when available
+inline std::string
+datatype_name(DataType data_type) {
+    switch (data_type) {
+        case DataType::NONE:
+            return "none";
+        case DataType::BOOL:
+            return "bool";
+        case DataType::INT8:
+            return "int8_t";
+        case DataType::INT16:
+            return "int16_t";
+        case DataType::INT32:
+            return "int32_t";
+        case DataType::INT64:
+            return "int64_t";
+        case DataType::FLOAT:
+            return "float";
+        case DataType::DOUBLE:
+            return "double";
+        case DataType::STRING:
+            return "string";
+        case DataType::VARCHAR:
+            return "varChar";
+        case DataType::ARRAY:
+            return "array";
+        case DataType::JSON:
+            return "json";
+        case DataType::VECTOR_FLOAT:
+            return "vector_float";
+        case DataType::VECTOR_BINARY: {
+            return "vector_binary";
+        }
+        case DataType::VECTOR_FLOAT16: {
+            return "vector_float16";
+        }
+        case DataType::VECTOR_BFLOAT16: {
+            return "vector_bfloat16";
+        }
+        default: {
+            PanicInfo(DataTypeInvalid, "Unsupported DataType({})", data_type);
+        }
+    }
+}
+
+inline bool
+datatype_is_vector(DataType datatype) {
+    return datatype == DataType::VECTOR_BINARY ||
+           datatype == DataType::VECTOR_FLOAT ||
+           datatype == DataType::VECTOR_FLOAT16 ||
+           datatype == DataType::VECTOR_BFLOAT16;
+}
+
+inline bool
+datatype_is_string(DataType datatype) {
+    switch (datatype) {
+        case DataType::VARCHAR:
+        case DataType::STRING:
+            return true;
+        default:
+            return false;
+    }
+}
+
+inline bool
+datatype_is_binary(DataType datatype) {
+    switch (datatype) {
+        case DataType::ARRAY:
+        case DataType::JSON:
+            return true;
+        default:
+            return false;
+    }
+}
+
+inline bool
+datatype_is_json(DataType datatype) {
+    return datatype == DataType::JSON;
+}
+
+inline bool
+datatype_is_array(DataType datatype) {
+    return datatype == DataType::ARRAY;
+}
+
+inline bool
+datatype_is_variable(DataType datatype) {
+    switch (datatype) {
+        case DataType::VARCHAR:
+        case DataType::STRING:
+        case DataType::ARRAY:
+        case DataType::JSON:
+            return true;
+        default:
+            return false;
+    }
+}
+
+inline bool
+datatype_is_integer(DataType datatype) {
+    switch (datatype) {
+        case DataType::INT8:
+        case DataType::INT16:
+        case DataType::INT32:
+        case DataType::INT64:
+            return true;
+        default:
+            return false;
+    }
+}
+
+inline bool
+datatype_is_floating(DataType datatype) {
+    switch (datatype) {
+        case DataType::FLOAT:
+        case DataType::DOUBLE:
+            return true;
+        default:
+            return false;
+    }
+}
+
 }  // namespace milvus
 template <>
 struct fmt::formatter<milvus::DataType> : formatter<string_view> {

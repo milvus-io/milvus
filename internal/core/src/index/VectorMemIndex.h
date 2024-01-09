@@ -73,9 +73,9 @@ class VectorMemIndex : public VectorIndex {
         return index_.Count();
     }
 
-    std::unique_ptr<SearchResult>
+    std::unique_ptr<milvus::base::SearchResult>
     Query(const DatasetPtr dataset,
-          const SearchInfo& search_info,
+          const milvus::base::SearchInfo& search_info,
           const BitsetView& bitset) override;
 
     const bool

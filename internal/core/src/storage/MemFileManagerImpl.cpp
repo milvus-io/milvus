@@ -19,7 +19,7 @@
 #include <unordered_map>
 
 #include "common/Common.h"
-#include "common/FieldData.h"
+#include "base/FieldData.h"
 #include "log/Log.h"
 #include "storage/Util.h"
 #include "storage/FileManager.h"
@@ -140,10 +140,10 @@ MemFileManagerImpl::LoadFile(const std::string& filename) noexcept {
     return true;
 }
 
-std::map<std::string, FieldDataPtr>
+std::map<std::string, milvus::base::FieldDataPtr>
 MemFileManagerImpl::LoadIndexToMemory(
     const std::vector<std::string>& remote_files) {
-    std::map<std::string, FieldDataPtr> file_to_index_data;
+    std::map<std::string, milvus::base::FieldDataPtr> file_to_index_data;
     auto parallel_degree =
         static_cast<uint64_t>(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
     std::vector<std::string> batch_files;
@@ -175,7 +175,7 @@ MemFileManagerImpl::LoadIndexToMemory(
     return file_to_index_data;
 }
 
-std::vector<FieldDataPtr>
+std::vector<milvus::base::FieldDataPtr>
 MemFileManagerImpl::CacheRawDataToMemory(
     std::vector<std::string> remote_files) {
     std::sort(remote_files.begin(),
@@ -188,7 +188,7 @@ MemFileManagerImpl::CacheRawDataToMemory(
     auto parallel_degree =
         uint64_t(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
     std::vector<std::string> batch_files;
-    std::vector<FieldDataPtr> field_datas;
+    std::vector<milvus::base::FieldDataPtr> field_datas;
 
     auto FetchRawData = [&]() {
         auto raw_datas = GetObjectData(rcm_.get(), batch_files);

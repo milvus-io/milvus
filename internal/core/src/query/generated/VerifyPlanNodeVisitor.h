@@ -14,7 +14,7 @@
 // DO NOT EDIT
 #include "common/Json.h"
 #include "query/PlanImpl.h"
-#include "segcore/SegmentGrowing.h"
+#include "segment/SegmentInterface.h"
 #include <utility>
 #include "PlanNodeVisitor.h"
 
@@ -37,7 +37,7 @@ class VerifyPlanNodeVisitor : public PlanNodeVisitor {
     visit(RetrievePlanNode& node) override;
 
  public:
-    using RetType = SearchResult;
+    using RetType = milvus::base::SearchResult;
     VerifyPlanNodeVisitor() = default;
 
  private:

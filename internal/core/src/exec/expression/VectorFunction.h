@@ -21,7 +21,7 @@
 #include <string>
 #include <vector>
 
-#include "common/Vector.h"
+#include "base/Vector.h"
 #include "exec/QueryContext.h"
 
 namespace milvus {
@@ -32,10 +32,10 @@ class VectorFunction {
     virtual ~VectorFunction() = default;
 
     virtual void
-    Apply(std::vector<VectorPtr>& args,
+    Apply(std::vector<milvus::base::VectorPtr>& args,
           DataType output_type,
           EvalCtx& context,
-          VectorPtr& result) const = 0;
+          milvus::base::VectorPtr& result) const = 0;
 };
 
 std::shared_ptr<VectorFunction>

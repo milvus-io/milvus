@@ -23,7 +23,7 @@
 #include "query/generated/ExecPlanNodeVisitor.h"
 #include "query/generated/ExprVisitor.h"
 #include "query/generated/ShowPlanNodeVisitor.h"
-#include "segcore/SegmentSealed.h"
+#include "segment/SegmentSealed.h"
 #include "test_utils/AssertUtils.h"
 #include "test_utils/DataGen.h"
 #include "plan/PlanNode.h"
@@ -35,7 +35,8 @@
 using namespace milvus;
 using namespace milvus::exec;
 using namespace milvus::query;
-using namespace milvus::segcore;
+using namespace milvus::base;
+using namespace milvus::segment;
 
 class TaskTest : public testing::Test {
  protected:
@@ -43,7 +44,7 @@ class TaskTest : public testing::Test {
     SetUp() override {
         using namespace milvus;
         using namespace milvus::query;
-        using namespace milvus::segcore;
+        using namespace milvus::base;
         auto schema = std::make_shared<Schema>();
         auto vec_fid = schema->AddDebugField(
             "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
@@ -196,7 +197,7 @@ TEST_F(TaskTest, LogicalExpr) {
 TEST_F(TaskTest, CompileInputs_and) {
     using namespace milvus;
     using namespace milvus::query;
-    using namespace milvus::segcore;
+    using namespace milvus::base;
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
@@ -239,7 +240,7 @@ TEST_F(TaskTest, CompileInputs_and) {
 TEST_F(TaskTest, CompileInputs_or_with_and) {
     using namespace milvus;
     using namespace milvus::query;
-    using namespace milvus::segcore;
+    using namespace milvus::base;
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);

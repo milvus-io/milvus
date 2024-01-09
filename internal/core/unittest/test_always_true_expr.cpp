@@ -18,7 +18,7 @@
 #include "common/Types.h"
 #include "query/Expr.h"
 #include "query/generated/ExecExprVisitor.h"
-#include "segcore/SegmentGrowingImpl.h"
+#include "segment/SegmentGrowingImpl.h"
 #include "test_utils/DataGen.h"
 #include "expr/ITypeExpr.h"
 #include "plan/PlanNode.h"
@@ -26,7 +26,8 @@
 TEST(Expr, AlwaysTrue) {
     using namespace milvus;
     using namespace milvus::query;
-    using namespace milvus::segcore;
+    using namespace milvus::base;
+    using namespace milvus::segment;
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);

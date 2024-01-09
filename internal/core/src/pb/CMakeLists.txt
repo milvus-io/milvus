@@ -11,7 +11,7 @@
 
 find_package(Protobuf REQUIRED)
 
-add_library(milvus_proto STATIC
+add_library(milvus_proto SHARED
     common.pb.cc
     index_cgo_msg.pb.cc
     plan.pb.cc

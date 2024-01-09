@@ -21,9 +21,9 @@
 
 #include "common/EasyAssert.h"
 #include "common/Types.h"
-#include "common/Vector.h"
+#include "base/Vector.h"
 #include "exec/expression/Expr.h"
-#include "segcore/SegmentInterface.h"
+#include "segment/SegmentInterface.h"
 #include "simd/interface.h"
 
 namespace milvus {
@@ -90,7 +90,7 @@ class PhyCompareFilterExpr : public Expr {
         const std::vector<std::shared_ptr<Expr>>& input,
         const std::shared_ptr<const milvus::expr::CompareExpr>& expr,
         const std::string& name,
-        const segcore::SegmentInternalInterface* segment,
+        const segment::SegmentInternalInterface* segment,
         int64_t active_count,
         int64_t batch_size)
         : Expr(DataType::BOOL, std::move(input), name),
@@ -113,7 +113,7 @@ class PhyCompareFilterExpr : public Expr {
     }
 
     void
-    Eval(EvalCtx& context, VectorPtr& result) override;
+    Eval(EvalCtx& context, milvus::base::VectorPtr& result) override;
 
     void
     MoveCursor() override {
@@ -190,21 +190,21 @@ class PhyCompareFilterExpr : public Expr {
                  int data_barrier);
 
     template <typename OpType>
-    VectorPtr
+    milvus::base::VectorPtr
     ExecCompareExprDispatcher(OpType op);
 
-    VectorPtr
+    milvus::base::VectorPtr
     ExecCompareExprDispatcherForHybridSegment();
 
-    VectorPtr
+    milvus::base::VectorPtr
     ExecCompareExprDispatcherForBothDataSegment();
 
     template <typename T>
-    VectorPtr
+    milvus::base::VectorPtr
     ExecCompareLeftType();
 
     template <typename T, typename U>
-    VectorPtr
+    milvus::base::VectorPtr
     ExecCompareRightType();
 
  private:
@@ -218,7 +218,7 @@ class PhyCompareFilterExpr : public Expr {
     int64_t current_chunk_pos_{0};
     int64_t size_per_chunk_{0};
 
-    const segcore::SegmentInternalInterface* segment_;
+    const segment::SegmentInternalInterface* segment_;
     int64_t batch_size_;
     std::shared_ptr<const milvus::expr::CompareExpr> expr_;
 };

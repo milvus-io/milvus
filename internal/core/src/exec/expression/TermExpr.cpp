@@ -15,12 +15,11 @@
 // limitations under the License.
 
 #include "TermExpr.h"
-#include "query/Utils.h"
 namespace milvus {
 namespace exec {
 
 void
-PhyTermFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
+PhyTermFilterExpr::Eval(EvalCtx& context, milvus::base::VectorPtr& result) {
     if (is_pk_field_) {
         result = ExecPkTermImpl();
         return;
@@ -131,7 +130,8 @@ PhyTermFilterExpr::CanSkipSegment() {
     if (segment_->type() == SegmentType::Sealed &&
         skip_index.CanSkipBinaryRange<T>(field_id_, 0, min, max, true, true)) {
         cached_bits_.resize(active_count_, false);
-        cached_offsets_ = std::make_shared<ColumnVector>(DataType::INT64, 0);
+        cached_offsets_ =
+            std::make_shared<milvus::base::ColumnVector>(DataType::INT64, 0);
         cached_offsets_inited_ = true;
         return true;
     }
@@ -170,8 +170,8 @@ PhyTermFilterExpr::InitPkCacheOffset() {
     auto [uids, seg_offsets] =
         segment_->search_ids(*id_array, query_timestamp_);
     cached_bits_.resize(active_count_, false);
-    cached_offsets_ =
-        std::make_shared<ColumnVector>(DataType::INT64, seg_offsets.size());
+    cached_offsets_ = std::make_shared<milvus::base::ColumnVector>(
+        DataType::INT64, seg_offsets.size());
     int64_t* cached_offsets_ptr = (int64_t*)cached_offsets_->GetRawData();
     int i = 0;
     for (const auto& offset : seg_offsets) {
@@ -182,7 +182,7 @@ PhyTermFilterExpr::InitPkCacheOffset() {
     cached_offsets_inited_ = true;
 }
 
-VectorPtr
+milvus::base::VectorPtr
 PhyTermFilterExpr::ExecPkTermImpl() {
     if (!cached_offsets_inited_) {
         InitPkCacheOffset();
@@ -197,20 +197,20 @@ PhyTermFilterExpr::ExecPkTermImpl() {
         return nullptr;
     }
 
-    auto res_vec =
-        std::make_shared<ColumnVector>(DataType::BOOL, real_batch_size);
+    auto res_vec = std::make_shared<milvus::base::ColumnVector>(
+        DataType::BOOL, real_batch_size);
     bool* res = (bool*)res_vec->GetRawData();
 
     for (size_t i = 0; i < real_batch_size; ++i) {
         res[i] = cached_bits_[current_data_chunk_pos_++];
     }
 
-    std::vector<VectorPtr> vecs{res_vec, cached_offsets_};
-    return std::make_shared<RowVector>(vecs);
+    std::vector<milvus::base::VectorPtr> vecs{res_vec, cached_offsets_};
+    return std::make_shared<milvus::base::RowVector>(vecs);
 }
 
 template <typename ValueType>
-VectorPtr
+milvus::base::VectorPtr
 PhyTermFilterExpr::ExecVisitorImplTemplateJson() {
     if (expr_->is_in_field_) {
         return ExecTermJsonVariableInField<ValueType>();
@@ -220,7 +220,7 @@ PhyTermFilterExpr::ExecVisitorImplTemplateJson() {
 }
 
 template <typename ValueType>
-VectorPtr
+milvus::base::VectorPtr
 PhyTermFilterExpr::ExecVisitorImplTemplateArray() {
     if (expr_->is_in_field_) {
         return ExecTermArrayVariableInField<ValueType>();
@@ -230,7 +230,7 @@ PhyTermFilterExpr::ExecVisitorImplTemplateArray() {
 }
 
 template <typename ValueType>
-VectorPtr
+milvus::base::VectorPtr
 PhyTermFilterExpr::ExecTermArrayVariableInField() {
     using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
                                        std::string_view,
@@ -239,8 +239,8 @@ PhyTermFilterExpr::ExecTermArrayVariableInField() {
     if (real_batch_size == 0) {
         return nullptr;
     }
-    auto res_vec =
-        std::make_shared<ColumnVector>(DataType::BOOL, real_batch_size);
+    auto res_vec = std::make_shared<milvus::base::ColumnVector>(
+        DataType::BOOL, real_batch_size);
     bool* res = (bool*)res_vec->GetRawData();
 
     AssertInfo(expr_->vals_.size() == 1,
@@ -276,7 +276,7 @@ PhyTermFilterExpr::ExecTermArrayVariableInField() {
 }
 
 template <typename ValueType>
-VectorPtr
+milvus::base::VectorPtr
 PhyTermFilterExpr::ExecTermArrayFieldInVariable() {
     using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
                                        std::string_view,
@@ -286,8 +286,8 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable() {
     if (real_batch_size == 0) {
         return nullptr;
     }
-    auto res_vec =
-        std::make_shared<ColumnVector>(DataType::BOOL, real_batch_size);
+    auto res_vec = std::make_shared<milvus::base::ColumnVector>(
+        DataType::BOOL, real_batch_size);
     bool* res = (bool*)res_vec->GetRawData();
 
     int index = -1;
@@ -337,7 +337,7 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable() {
 }
 
 template <typename ValueType>
-VectorPtr
+milvus::base::VectorPtr
 PhyTermFilterExpr::ExecTermJsonVariableInField() {
     using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
                                        std::string_view,
@@ -346,8 +346,8 @@ PhyTermFilterExpr::ExecTermJsonVariableInField() {
     if (real_batch_size == 0) {
         return nullptr;
     }
-    auto res_vec =
-        std::make_shared<ColumnVector>(DataType::BOOL, real_batch_size);
+    auto res_vec = std::make_shared<milvus::base::ColumnVector>(
+        DataType::BOOL, real_batch_size);
     bool* res = (bool*)res_vec->GetRawData();
     AssertInfo(expr_->vals_.size() == 1,
                "element length in json array must be one");
@@ -390,7 +390,7 @@ PhyTermFilterExpr::ExecTermJsonVariableInField() {
 }
 
 template <typename ValueType>
-VectorPtr
+milvus::base::VectorPtr
 PhyTermFilterExpr::ExecTermJsonFieldInVariable() {
     using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
                                        std::string_view,
@@ -399,8 +399,8 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable() {
     if (real_batch_size == 0) {
         return nullptr;
     }
-    auto res_vec =
-        std::make_shared<ColumnVector>(DataType::BOOL, real_batch_size);
+    auto res_vec = std::make_shared<milvus::base::ColumnVector>(
+        DataType::BOOL, real_batch_size);
     bool* res = (bool*)res_vec->GetRawData();
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     std::unordered_set<ValueType> term_set;
@@ -453,7 +453,7 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable() {
 }
 
 template <typename T>
-VectorPtr
+milvus::base::VectorPtr
 PhyTermFilterExpr::ExecVisitorImpl() {
     if (is_index_mode_) {
         return ExecVisitorImplForIndex<T>();
@@ -463,7 +463,7 @@ PhyTermFilterExpr::ExecVisitorImpl() {
 }
 
 template <typename T>
-VectorPtr
+milvus::base::VectorPtr
 PhyTermFilterExpr::ExecVisitorImplForIndex() {
     typedef std::
         conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
@@ -479,7 +479,7 @@ PhyTermFilterExpr::ExecVisitorImplForIndex() {
         auto converted_val = GetValueFromProto<T>(val);
         // Integral overflow process
         if constexpr (std::is_integral_v<T>) {
-            if (milvus::query::out_of_range<T>(converted_val)) {
+            if (milvus::out_of_range<T>(converted_val)) {
                 continue;
             }
         }
@@ -496,11 +496,11 @@ PhyTermFilterExpr::ExecVisitorImplForIndex() {
                "expect batch size {}",
                res.size(),
                real_batch_size);
-    return std::make_shared<ColumnVector>(std::move(res));
+    return std::make_shared<milvus::base::ColumnVector>(std::move(res));
 }
 
 template <>
-VectorPtr
+milvus::base::VectorPtr
 PhyTermFilterExpr::ExecVisitorImplForIndex<bool>() {
     using Index = index::ScalarIndex<bool>;
     auto real_batch_size = GetNextBatchSize();
@@ -518,18 +518,18 @@ PhyTermFilterExpr::ExecVisitorImplForIndex<bool>() {
         return std::move(func(index_ptr, vals.size(), (bool*)vals.data()));
     };
     auto res = ProcessIndexChunks<bool>(execute_sub_batch, vals);
-    return std::make_shared<ColumnVector>(std::move(res));
+    return std::make_shared<milvus::base::ColumnVector>(std::move(res));
 }
 
 template <typename T>
-VectorPtr
+milvus::base::VectorPtr
 PhyTermFilterExpr::ExecVisitorImplForData() {
     auto real_batch_size = GetNextBatchSize();
     if (real_batch_size == 0) {
         return nullptr;
     }
-    auto res_vec =
-        std::make_shared<ColumnVector>(DataType::BOOL, real_batch_size);
+    auto res_vec = std::make_shared<milvus::base::ColumnVector>(
+        DataType::BOOL, real_batch_size);
     bool* res = (bool*)res_vec->GetRawData();
     std::vector<T> vals;
     for (auto& val : expr_->vals_) {

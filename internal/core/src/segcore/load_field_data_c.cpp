@@ -14,14 +14,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "load_field_data_c.h"
+
 #include "common/EasyAssert.h"
-#include "common/LoadInfo.h"
-#include "segcore/load_field_data_c.h"
+#include "base/LoadInfo.h"
 
 CStatus
 NewLoadFieldDataInfo(CLoadFieldDataInfo* c_load_field_data_info) {
     try {
-        auto load_field_data_info = std::make_unique<LoadFieldDataInfo>();
+        auto load_field_data_info =
+            std::make_unique<milvus::base::LoadFieldDataInfo>();
         *c_load_field_data_info = load_field_data_info.release();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
@@ -31,7 +33,8 @@ NewLoadFieldDataInfo(CLoadFieldDataInfo* c_load_field_data_info) {
 
 void
 DeleteLoadFieldDataInfo(CLoadFieldDataInfo c_load_field_data_info) {
-    auto info = static_cast<LoadFieldDataInfo*>(c_load_field_data_info);
+    auto info =
+        static_cast<milvus::base::LoadFieldDataInfo*>(c_load_field_data_info);
     delete info;
 }
 
@@ -41,13 +44,14 @@ AppendLoadFieldInfo(CLoadFieldDataInfo c_load_field_data_info,
                     int64_t row_count) {
     try {
         auto load_field_data_info =
-            static_cast<LoadFieldDataInfo*>(c_load_field_data_info);
+            static_cast<milvus::base::LoadFieldDataInfo*>(
+                c_load_field_data_info);
         auto iter = load_field_data_info->field_infos.find(field_id);
         if (iter != load_field_data_info->field_infos.end()) {
             throw milvus::SegcoreError(milvus::FieldAlreadyExist,
                                        "append same field info multi times");
         }
-        FieldBinlogInfo binlog_info;
+        milvus::base::FieldBinlogInfo binlog_info;
         binlog_info.field_id = field_id;
         binlog_info.row_count = row_count;
         load_field_data_info->field_infos[field_id] = binlog_info;
@@ -64,7 +68,8 @@ AppendLoadFieldDataPath(CLoadFieldDataInfo c_load_field_data_info,
                         const char* c_file_path) {
     try {
         auto load_field_data_info =
-            static_cast<LoadFieldDataInfo*>(c_load_field_data_info);
+            static_cast<milvus::base::LoadFieldDataInfo*>(
+                c_load_field_data_info);
         auto iter = load_field_data_info->field_infos.find(field_id);
         if (iter == load_field_data_info->field_infos.end()) {
             throw milvus::SegcoreError(milvus::FieldIDInvalid,
@@ -85,20 +90,22 @@ void
 AppendMMapDirPath(CLoadFieldDataInfo c_load_field_data_info,
                   const char* c_dir_path) {
     auto load_field_data_info =
-        static_cast<LoadFieldDataInfo*>(c_load_field_data_info);
+        static_cast<milvus::base::LoadFieldDataInfo*>(c_load_field_data_info);
     load_field_data_info->mmap_dir_path = std::string(c_dir_path);
 }
 
 void
 SetUri(CLoadFieldDataInfo c_load_field_data_info, const char* uri) {
-    auto load_field_data_info = (LoadFieldDataInfo*)c_load_field_data_info;
+    auto load_field_data_info =
+        (milvus::base::LoadFieldDataInfo*)c_load_field_data_info;
     load_field_data_info->url = std::string(uri);
 }
 
 void
 SetStorageVersion(CLoadFieldDataInfo c_load_field_data_info,
                   int64_t storage_version) {
-    auto load_field_data_info = (LoadFieldDataInfo*)c_load_field_data_info;
+    auto load_field_data_info =
+        (milvus::base::LoadFieldDataInfo*)c_load_field_data_info;
     load_field_data_info->storage_version = storage_version;
 }
 
@@ -106,6 +113,7 @@ void
 EnableMmap(CLoadFieldDataInfo c_load_field_data_info,
            int64_t field_id,
            bool enabled) {
-    auto info = static_cast<LoadFieldDataInfo*>(c_load_field_data_info);
+    auto info =
+        static_cast<milvus::base::LoadFieldDataInfo*>(c_load_field_data_info);
     info->field_infos[field_id].enable_mmap = enabled;
 }

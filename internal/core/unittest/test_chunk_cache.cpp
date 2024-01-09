@@ -20,7 +20,7 @@
 #include <vector>
 
 #include "fmt/format.h"
-#include "common/Schema.h"
+#include "base/Schema.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/storage_test_utils.h"
 #include "storage/ChunkCache.h"
@@ -40,21 +40,21 @@ TEST(ChunkCacheTest, Read) {
     milvus::storage::LocalChunkManagerSingleton::GetInstance().Init(
         local_storage_path);
 
-    auto schema = std::make_shared<milvus::Schema>();
+    auto schema = std::make_shared<milvus::base::Schema>();
     auto fake_id = schema->AddDebugField(
         "fakevec", milvus::DataType::VECTOR_FLOAT, dim, metric_type);
     auto i64_fid = schema->AddDebugField("counter", milvus::DataType::INT64);
     schema->set_primary_field_id(i64_fid);
 
-    auto dataset = milvus::segcore::DataGen(schema, N);
+    auto dataset = milvus::base::DataGen(schema, N);
 
     auto field_data_meta =
         milvus::storage::FieldDataMeta{1, 2, 3, fake_id.get()};
-    auto field_meta = milvus::FieldMeta(milvus::FieldName("facevec"),
-                                        fake_id,
-                                        milvus::DataType::VECTOR_FLOAT,
-                                        dim,
-                                        metric_type);
+    auto field_meta = milvus::base::FieldMeta(milvus::FieldName("facevec"),
+                                              fake_id,
+                                              milvus::DataType::VECTOR_FLOAT,
+                                              dim,
+                                              metric_type);
 
     auto lcm = milvus::storage::LocalChunkManagerSingleton::GetInstance()
                    .GetChunkManager();
@@ -102,21 +102,21 @@ TEST(ChunkCacheTest, TestMultithreads) {
     milvus::storage::LocalChunkManagerSingleton::GetInstance().Init(
         local_storage_path);
 
-    auto schema = std::make_shared<milvus::Schema>();
+    auto schema = std::make_shared<milvus::base::Schema>();
     auto fake_id = schema->AddDebugField(
         "fakevec", milvus::DataType::VECTOR_FLOAT, dim, metric_type);
     auto i64_fid = schema->AddDebugField("counter", milvus::DataType::INT64);
     schema->set_primary_field_id(i64_fid);
 
-    auto dataset = milvus::segcore::DataGen(schema, N);
+    auto dataset = milvus::base::DataGen(schema, N);
 
     auto field_data_meta =
         milvus::storage::FieldDataMeta{1, 2, 3, fake_id.get()};
-    auto field_meta = milvus::FieldMeta(milvus::FieldName("facevec"),
-                                        fake_id,
-                                        milvus::DataType::VECTOR_FLOAT,
-                                        dim,
-                                        metric_type);
+    auto field_meta = milvus::base::FieldMeta(milvus::FieldName("facevec"),
+                                              fake_id,
+                                              milvus::DataType::VECTOR_FLOAT,
+                                              dim,
+                                              metric_type);
 
     auto lcm = milvus::storage::LocalChunkManagerSingleton::GetInstance()
                    .GetChunkManager();

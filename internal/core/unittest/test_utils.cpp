@@ -19,7 +19,6 @@
 #include "common/Types.h"
 #include "common/Utils.h"
 #include "common/Exception.h"
-#include "query/Utils.h"
 #include "test_utils/DataGen.h"
 
 TEST(Util, StringMatch) {
@@ -48,7 +47,8 @@ TEST(Util, StringMatch) {
 TEST(Util, GetDeleteBitmap) {
     using namespace milvus;
     using namespace milvus::query;
-    using namespace milvus::segcore;
+    using namespace milvus::base;
+    using namespace milvus::segment;
 
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugField(
@@ -111,7 +111,7 @@ TEST(Util, GetDeleteBitmap) {
 }
 
 TEST(Util, OutOfRange) {
-    using milvus::query::out_of_range;
+    using milvus::out_of_range;
 
     ASSERT_FALSE(out_of_range<int32_t>(
         static_cast<int64_t>(std::numeric_limits<int32_t>::max()) - 1));
@@ -126,8 +126,8 @@ TEST(Util, OutOfRange) {
 
 TEST(Util, upper_bound) {
     using milvus::Timestamp;
-    using milvus::segcore::ConcurrentVector;
-    using milvus::segcore::upper_bound;
+    using milvus::base::ConcurrentVector;
+    using milvus::base::upper_bound;
 
     std::vector<Timestamp> data{0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
     ConcurrentVector<Timestamp> timestamps(1);

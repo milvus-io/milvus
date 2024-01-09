@@ -185,7 +185,7 @@ class Driver : public std::enable_shared_from_this<Driver> {
     static void
     Enqueue(std::shared_ptr<Driver> instance);
 
-    RowVectorPtr
+    milvus::base::RowVectorPtr
     Next(std::shared_ptr<BlockingState>& blocking_state);
 
     DriverContext*
@@ -225,7 +225,7 @@ class Driver : public std::enable_shared_from_this<Driver> {
     StopReason
     RunInternal(std::shared_ptr<Driver>& self,
                 std::shared_ptr<BlockingState>& blocking_state,
-                RowVectorPtr& result);
+                milvus::base::RowVectorPtr& result);
 
     void
     Close();
@@ -243,7 +243,8 @@ class Driver : public std::enable_shared_from_this<Driver> {
     friend struct DriverFactory;
 };
 
-using Consumer = std::function<BlockingReason(RowVectorPtr, ContinueFuture*)>;
+using Consumer =
+    std::function<BlockingReason(milvus::base::RowVectorPtr, ContinueFuture*)>;
 using ConsumerSupplier = std::function<Consumer()>;
 class LocalPlanner {
  public:

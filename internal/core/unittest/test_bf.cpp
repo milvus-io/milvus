@@ -14,12 +14,12 @@
 
 #include "common/Utils.h"
 
-#include "query/SearchBruteForce.h"
+#include "segment/SearchBruteForce.h"
 #include "test_utils/Distance.h"
 #include "test_utils/DataGen.h"
 
 using namespace milvus;
-using namespace milvus::segcore;
+using namespace milvus::base;
 using namespace milvus::query;
 
 namespace {
@@ -130,8 +130,12 @@ class TestFloatSearchBruteForce : public ::testing::Test {
             // ASSERT_ANY_THROW(BruteForceSearch(dataset, base.data(), nb, bitset_view));
             return;
         }
-        auto result = BruteForceSearch(
-            dataset, base.data(), nb, knowhere::Json(), bitset_view, DataType::VECTOR_FLOAT);
+        auto result = BruteForceSearch(dataset,
+                                       base.data(),
+                                       nb,
+                                       knowhere::Json(),
+                                       bitset_view,
+                                       DataType::VECTOR_FLOAT);
         for (int i = 0; i < nq; i++) {
             auto ref = Ref(base.data(),
                            query.data() + i * dim,

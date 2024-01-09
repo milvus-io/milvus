@@ -35,7 +35,7 @@ elseif (${CMAKE_SYSTEM_PROCESSOR} MATCHES "arm*")
     )
 endif()
 
-add_library(milvus_simd ${MILVUS_SIMD_SRCS})
+add_library(milvus_simd SHARED ${MILVUS_SIMD_SRCS})
 
 # Link the milvus_simd library with other libraries as needed
 target_link_libraries(milvus_simd milvus_log)

@@ -11,10 +11,10 @@
 
 #include <gtest/gtest.h>
 #include <random>
-#include "segcore/InsertRecord.h"
+#include "base/InsertRecord.h"
 
 using namespace milvus;
-using namespace milvus::segcore;
+using namespace milvus::base;
 
 template <typename T>
 class TypedOffsetOrderedMapTest : public testing::Test {
@@ -52,7 +52,7 @@ class TypedOffsetOrderedMapTest : public testing::Test {
  protected:
     int64_t offset_ = 0;
     std::vector<T> data_;
-    milvus::segcore::OffsetOrderedMap<T> map_;
+    milvus::base::OffsetOrderedMap<T> map_;
     std::default_random_engine er;
 };
 

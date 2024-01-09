@@ -13,7 +13,8 @@
 #include "test_utils/DataGen.h"
 
 using namespace milvus;
-using namespace milvus::segcore;
+using namespace milvus::base;
+using namespace milvus::segment;
 
 TEST(Binary, Insert) {
     int64_t N = 100000;

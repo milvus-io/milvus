@@ -20,9 +20,8 @@
 
 #include "common/EasyAssert.h"
 #include "common/Types.h"
-#include "common/Vector.h"
+#include "base/Vector.h"
 #include "exec/expression/Expr.h"
-#include "segcore/SegmentInterface.h"
 
 namespace milvus {
 namespace exec {
@@ -40,7 +39,7 @@ class PhyExistsFilterExpr : public SegmentExpr {
         const std::vector<std::shared_ptr<Expr>>& input,
         const std::shared_ptr<const milvus::expr::ExistsExpr>& expr,
         const std::string& name,
-        const segcore::SegmentInternalInterface* segment,
+        const segment::SegmentInternalInterface* segment,
         int64_t active_count,
         int64_t batch_size)
         : SegmentExpr(std::move(input),
@@ -53,10 +52,10 @@ class PhyExistsFilterExpr : public SegmentExpr {
     }
 
     void
-    Eval(EvalCtx& context, VectorPtr& result) override;
+    Eval(EvalCtx& context, milvus::base::VectorPtr& result) override;
 
  private:
-    VectorPtr
+    milvus::base::VectorPtr
     EvalJsonExistsForDataSegment();
 
  private:

@@ -69,7 +69,7 @@ ParsePlaceholderGroup(const Plan* plan,
 }
 
 std::unique_ptr<Plan>
-CreateSearchPlanByExpr(const Schema& schema,
+CreateSearchPlanByExpr(const milvus::base::Schema& schema,
                        const void* serialized_expr_plan,
                        const int64_t size) {
     // Note: serialized_expr_plan is of binary format
@@ -79,7 +79,7 @@ CreateSearchPlanByExpr(const Schema& schema,
 }
 
 std::unique_ptr<RetrievePlan>
-CreateRetrievePlanByExpr(const Schema& schema,
+CreateRetrievePlanByExpr(const milvus::base::Schema& schema,
                          const void* serialized_expr_plan,
                          const int64_t size) {
     proto::plan::PlanNode plan_node;
@@ -111,7 +111,7 @@ GetNumOfQueries(const PlaceholderGroup* group) {
 }
 
 // std::unique_ptr<RetrievePlan>
-// CreateRetrievePlan(const Schema& schema, proto::segcore::RetrieveRequest&& request) {
+// CreateRetrievePlan(const milvus::base::Schema& schema, proto::segcore::RetrieveRequest&& request) {
 //    auto plan = std::make_unique<RetrievePlan>();
 //    plan->seg_offsets_ = std::unique_ptr<proto::schema::IDs>(request.release_ids());
 //    for (auto& field_id : request.output_fields_id()) {

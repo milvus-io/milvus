@@ -16,7 +16,7 @@
 #include <boost/variant.hpp>
 #include <utility>
 #include <deque>
-#include "segcore/SegmentGrowingImpl.h"
+#include "segment/SegmentInterface.h"
 #include "query/ExprImpl.h"
 #include "ExprVisitor.h"
 

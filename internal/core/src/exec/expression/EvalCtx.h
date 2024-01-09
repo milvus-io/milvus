@@ -21,7 +21,7 @@
 #include <string>
 #include <vector>
 
-#include "common/Vector.h"
+#include "base/Vector.h"
 #include "exec/QueryContext.h"
 
 namespace milvus {
@@ -30,7 +30,9 @@ namespace exec {
 class ExprSet;
 class EvalCtx {
  public:
-    EvalCtx(ExecContext* exec_ctx, ExprSet* expr_set, RowVector* row)
+    EvalCtx(ExecContext* exec_ctx,
+            ExprSet* expr_set,
+            milvus::base::RowVector* row)
         : exec_ctx_(exec_ctx), expr_set_(expr_set_), row_(row) {
         assert(exec_ctx_ != nullptr);
         assert(expr_set_ != nullptr);
@@ -54,7 +56,7 @@ class EvalCtx {
  private:
     ExecContext* exec_ctx_;
     ExprSet* expr_set_;
-    RowVector* row_;
+    milvus::base::RowVector* row_;
     bool input_no_nulls_;
 };
 

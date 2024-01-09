@@ -35,7 +35,7 @@ ExprSet::Eval(int32_t begin,
               int32_t end,
               bool initialize,
               EvalCtx& context,
-              std::vector<VectorPtr>& results) {
+              std::vector<milvus::base::VectorPtr>& results) {
     results.resize(exprs_.size());
 
     for (size_t i = begin; i < end; ++i) {

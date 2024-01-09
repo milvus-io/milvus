@@ -23,7 +23,6 @@
 #include <arrow/array/builder_primitive.h>
 #include <fmt/core.h>
 
-#include "FieldMeta.h"
 #include "Types.h"
 
 namespace milvus {

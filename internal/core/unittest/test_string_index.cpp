@@ -350,7 +350,7 @@ TEST_F(StringIndexMarisaTest, BaseIndexCodec) {
     }
 }
 
-using milvus::segcore::GeneratedData;
+using milvus::base::GeneratedData;
 class StringIndexMarisaTestV2 : public StringIndexBaseTest {
     std::shared_ptr<arrow::Schema>
     TestSchema(int vec_size) {

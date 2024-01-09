@@ -18,11 +18,11 @@
 #include "query/Expr.h"
 #include "query/generated/PlanNodeVisitor.h"
 #include "query/generated/ExecExprVisitor.h"
-#include "segcore/SegmentGrowingImpl.h"
+#include "segment/SegmentGrowingImpl.h"
+#include "segment/SearchBruteForce.h"
 #include "test_utils/DataGen.h"
 #include "query/PlanProto.h"
-#include "query/Utils.h"
-#include "query/SearchBruteForce.h"
+#include "query/QueryInterface.h"
 
 using namespace milvus;
 
@@ -163,8 +163,8 @@ SetTargetEntry(std::unique_ptr<proto::plan::PlanNode>& plan_node,
 }
 
 auto
-GenTermPlan(const FieldMeta& fvec_meta,
-            const FieldMeta& str_meta,
+GenTermPlan(const milvus::base::FieldMeta& fvec_meta,
+            const milvus::base::FieldMeta& str_meta,
             const std::vector<std::string>& strs)
     -> std::unique_ptr<proto::plan::PlanNode> {
     auto column_info = GenColumnInfo(str_meta.get_id().get(),
@@ -194,7 +194,8 @@ GenTermPlan(const FieldMeta& fvec_meta,
 }
 
 auto
-GenAlwaysFalseExpr(const FieldMeta& fvec_meta, const FieldMeta& str_meta) {
+GenAlwaysFalseExpr(const milvus::base::FieldMeta& fvec_meta,
+                   const milvus::base::FieldMeta& str_meta) {
     auto column_info = GenColumnInfo(str_meta.get_id().get(),
                                      proto::schema::DataType::VarChar,
                                      false,
@@ -209,7 +210,8 @@ GenAlwaysFalseExpr(const FieldMeta& fvec_meta, const FieldMeta& str_meta) {
 }
 
 auto
-GenAlwaysTrueExpr(const FieldMeta& fvec_meta, const FieldMeta& str_meta) {
+GenAlwaysTrueExpr(const milvus::base::FieldMeta& fvec_meta,
+                  const milvus::base::FieldMeta& str_meta) {
     auto always_false_expr = GenAlwaysFalseExpr(fvec_meta, str_meta);
     auto not_expr = GenNotExpr();
     not_expr->set_allocated_child(always_false_expr);
@@ -219,7 +221,8 @@ GenAlwaysTrueExpr(const FieldMeta& fvec_meta, const FieldMeta& str_meta) {
 }
 
 auto
-GenAlwaysFalsePlan(const FieldMeta& fvec_meta, const FieldMeta& str_meta) {
+GenAlwaysFalsePlan(const milvus::base::FieldMeta& fvec_meta,
+                   const milvus::base::FieldMeta& str_meta) {
     auto always_false_expr = GenAlwaysFalseExpr(fvec_meta, str_meta);
     proto::plan::VectorType vector_type;
     if (fvec_meta.get_data_type() == DataType::VECTOR_FLOAT) {
@@ -238,7 +241,8 @@ GenAlwaysFalsePlan(const FieldMeta& fvec_meta, const FieldMeta& str_meta) {
 }
 
 auto
-GenAlwaysTruePlan(const FieldMeta& fvec_meta, const FieldMeta& str_meta) {
+GenAlwaysTruePlan(const milvus::base::FieldMeta& fvec_meta,
+                  const milvus::base::FieldMeta& str_meta) {
     auto always_true_expr = GenAlwaysTrueExpr(fvec_meta, str_meta);
     proto::plan::VectorType vector_type;
     if (fvec_meta.get_data_type() == DataType::VECTOR_FLOAT) {
@@ -256,7 +260,7 @@ GenAlwaysTruePlan(const FieldMeta& fvec_meta, const FieldMeta& str_meta) {
     return plan_node;
 }
 
-SchemaPtr
+milvus::base::SchemaPtr
 GenTestSchema() {
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField("str", DataType::VARCHAR);
@@ -268,7 +272,7 @@ GenTestSchema() {
     return schema;
 }
 
-SchemaPtr
+milvus::base::SchemaPtr
 GenStrPKSchema() {
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("str", DataType::VARCHAR);
@@ -283,7 +287,8 @@ GenStrPKSchema() {
 
 TEST(StringExpr, Term) {
     using namespace milvus::query;
-    using namespace milvus::segcore;
+    using namespace milvus::base;
+    using namespace milvus::segment;
 
     auto schema = GenTestSchema();
     const auto& fvec_meta = schema->operator[](FieldName("fvec"));
@@ -347,7 +352,7 @@ TEST(StringExpr, Term) {
 
 TEST(StringExpr, Compare) {
     using namespace milvus::query;
-    using namespace milvus::segcore;
+    using namespace milvus::base;
 
     auto schema = GenTestSchema();
     const auto& fvec_meta = schema->operator[](FieldName("fvec"));
@@ -418,8 +423,9 @@ TEST(StringExpr, Compare) {
     for (int iter = 0; iter < num_iters; ++iter) {
         auto raw_data = DataGen(schema, N, iter);
 
-        auto reserve_col = [&, raw_data](const FieldMeta& field_meta,
-                                         std::vector<std::string>& str_col) {
+        auto reserve_col = [&, raw_data](
+                               const milvus::base::FieldMeta& field_meta,
+                               std::vector<std::string>& str_col) {
             auto new_str_col = raw_data.get_col(field_meta.get_id());
             auto begin = FIELD_DATA(new_str_col, string).begin();
             auto end = FIELD_DATA(new_str_col, string).end();
@@ -464,7 +470,7 @@ TEST(StringExpr, Compare) {
 
 TEST(StringExpr, UnaryRange) {
     using namespace milvus::query;
-    using namespace milvus::segcore;
+    using namespace milvus::base;
 
     auto schema = GenTestSchema();
     const auto& fvec_meta = schema->operator[](FieldName("fvec"));
@@ -563,7 +569,7 @@ TEST(StringExpr, UnaryRange) {
 
 TEST(StringExpr, BinaryRange) {
     using namespace milvus::query;
-    using namespace milvus::segcore;
+    using namespace milvus::base;
 
     auto schema = GenTestSchema();
     const auto& fvec_meta = schema->operator[](FieldName("fvec"));
@@ -681,7 +687,7 @@ TEST(StringExpr, BinaryRange) {
 
 TEST(AlwaysTrueStringPlan, SearchWithOutputFields) {
     using namespace milvus::query;
-    using namespace milvus::segcore;
+    using namespace milvus::base;
 
     auto schema = GenStrPKSchema();
     const auto& fvec_meta = schema->operator[](FieldName("fvec"));
@@ -715,7 +721,7 @@ TEST(AlwaysTrueStringPlan, SearchWithOutputFields) {
 
     std::vector<const PlaceholderGroup*> ph_group_arr = {ph_group.get()};
 
-    query::dataset::SearchDataset search_dataset{
+    segment::dataset::SearchDataset search_dataset{
         knowhere::metric::L2,  //
         num_queries,           //
         topk,                  //
@@ -723,10 +729,15 @@ TEST(AlwaysTrueStringPlan, SearchWithOutputFields) {
         dim,       //
         query_ptr  //
     };
-    auto sub_result = BruteForceSearch(
-        search_dataset, vec_col.data(), N, knowhere::Json(), nullptr, DataType::VECTOR_FLOAT);
+    auto sub_result = BruteForceSearch(search_dataset,
+                                       vec_col.data(),
+                                       N,
+                                       knowhere::Json(),
+                                       nullptr,
+                                       DataType::VECTOR_FLOAT);
 
-    auto sr = segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
+    auto sr = milvus::query::Search(
+        segment.get(), plan.get(), ph_group.get(), MAX_TIMESTAMP);
     segment->FillPrimaryKeys(plan.get(), *sr);
     segment->FillTargetEntry(plan.get(), *sr);
     ASSERT_EQ(sr->pk_type_, DataType::VARCHAR);
@@ -749,7 +760,7 @@ TEST(AlwaysTrueStringPlan, SearchWithOutputFields) {
 
 TEST(AlwaysTrueStringPlan, QueryWithOutputFields) {
     using namespace milvus::query;
-    using namespace milvus::segcore;
+    using namespace milvus::base;
 
     auto schema = GenStrPKSchema();
     const auto& fvec_meta = schema->operator[](FieldName("fvec"));
@@ -776,8 +787,8 @@ TEST(AlwaysTrueStringPlan, QueryWithOutputFields) {
 
     Timestamp time = MAX_TIMESTAMP;
 
-    auto retrieved =
-        segment->Retrieve(plan.get(), time, DEFAULT_MAX_OUTPUT_SIZE);
+    auto retrieved = milvus::query::Retrieve(
+        segment.get(), plan.get(), time, DEFAULT_MAX_OUTPUT_SIZE);
     ASSERT_EQ(retrieved->ids().str_id().data().size(), N);
     ASSERT_EQ(retrieved->offset().size(), N);
     ASSERT_EQ(retrieved->fields_data().size(), 1);

@@ -16,10 +16,10 @@
 
 #pragma once
 
-#include "common/QueryInfo.h"
-#include "knowhere/index_node.h"
-#include "segcore/SegmentInterface.h"
+#include "base/QueryInfo.h"
 #include "common/Span.h"
+#include "knowhere/index_node.h"
+#include "segment/SegmentInterface.h"
 
 namespace milvus {
 namespace query {
@@ -30,7 +30,7 @@ struct DataGetter {
     std::shared_ptr<Span<std::string_view>> str_field_data_;
     const index::ScalarIndex<T>* field_index_;
 
-    DataGetter(const segcore::SegmentInternalInterface& segment,
+    DataGetter(const segment::SegmentInternalInterface& segment,
                FieldId& field_id) {
         if (segment.HasFieldData(field_id)) {
             if constexpr (std::is_same_v<T, std::string>) {
@@ -71,9 +71,9 @@ struct DataGetter {
 void
 GroupBy(const std::vector<std::shared_ptr<knowhere::IndexNode::iterator>>&
             iterators,
-        const SearchInfo& searchInfo,
+        const milvus::base::SearchInfo& searchInfo,
         std::vector<GroupByValueType>& group_by_values,
-        const segcore::SegmentInternalInterface& segment,
+        const segment::SegmentInternalInterface& segment,
         std::vector<int64_t>& seg_offsets,
         std::vector<float>& distances);
 

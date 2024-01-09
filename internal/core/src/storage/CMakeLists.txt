@@ -67,6 +67,7 @@ if (DEFINED AZURE_BUILD_DIR)
             "-L${AZURE_BUILD_DIR} -lblob-chunk-manager"
             blob-chunk-manager
             milvus_common
+            milvus_base
             milvus-storage
             pthread
             ${CONAN_LIBS}
@@ -74,6 +75,7 @@ if (DEFINED AZURE_BUILD_DIR)
 else ()
     target_link_libraries(milvus_storage PUBLIC
             milvus_common
+            milvus_base
             milvus-storage
             pthread
             ${CONAN_LIBS}

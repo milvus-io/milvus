@@ -9,15 +9,14 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include "reduce_c.h"
+
 #include <vector>
-#include "Reduce.h"
-#include "common/QueryResult.h"
+#include "base/Reduce.h"
+#include "base/Utils.h"
+#include "base/QueryResult.h"
 #include "common/EasyAssert.h"
 #include "query/Plan.h"
-#include "segcore/reduce_c.h"
-#include "segcore/Utils.h"
-
-using SearchResult = milvus::SearchResult;
 
 CStatus
 ReduceSearchResultsAndFillData(CSearchResultDataBlobs* cSearchResultDataBlobs,
@@ -28,15 +27,16 @@ ReduceSearchResultsAndFillData(CSearchResultDataBlobs* cSearchResultDataBlobs,
                                int64_t* slice_topKs,
                                int64_t num_slices) {
     try {
-        // get SearchResult and SearchPlan
+        // get milvus::base::SearchResult and SearchPlan
         auto plan = static_cast<milvus::query::Plan*>(c_plan);
         AssertInfo(num_segments > 0, "num_segments must be greater than 0");
-        std::vector<SearchResult*> search_results(num_segments);
+        std::vector<milvus::base::SearchResult*> search_results(num_segments);
         for (int i = 0; i < num_segments; ++i) {
-            search_results[i] = static_cast<SearchResult*>(c_search_results[i]);
+            search_results[i] =
+                static_cast<milvus::base::SearchResult*>(c_search_results[i]);
         }
 
-        auto reduce_helper = milvus::segcore::ReduceHelper(
+        auto reduce_helper = milvus::base::ReduceHelper(
             search_results, plan, slice_nqs, slice_topKs, num_slices);
         reduce_helper.Reduce();
         reduce_helper.Marshal();
@@ -55,7 +55,7 @@ GetSearchResultDataBlob(CProto* searchResultDataBlob,
                         int32_t blob_index) {
     try {
         auto search_result_data_blobs =
-            reinterpret_cast<milvus::segcore::SearchResultDataBlobs*>(
+            reinterpret_cast<milvus::base::SearchResultDataBlobs*>(
                 cSearchResultDataBlobs);
         AssertInfo(blob_index < search_result_data_blobs->blobs.size(),
                    "blob_index out of range");
@@ -77,7 +77,7 @@ DeleteSearchResultDataBlobs(CSearchResultDataBlobs cSearchResultDataBlobs) {
         return;
     }
     auto search_result_data_blobs =
-        reinterpret_cast<milvus::segcore::SearchResultDataBlobs*>(
+        reinterpret_cast<milvus::base::SearchResultDataBlobs*>(
             cSearchResultDataBlobs);
     delete search_result_data_blobs;
 }

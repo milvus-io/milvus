@@ -12,13 +12,15 @@
 #include <cstdint>
 #include <benchmark/benchmark.h>
 #include <string>
-#include "segcore/SegmentGrowing.h"
-#include "segcore/SegmentSealed.h"
+#include "segment/SegmentGrowing.h"
+#include "segment/SegmentSealed.h"
 #include "test_utils/DataGen.h"
+#include "query/QueryInterface.h"
 
 using namespace milvus;
 using namespace milvus::query;
-using namespace milvus::segcore;
+using namespace milvus::base;
+using namespace milvus::segment;
 
 static int dim = 768;
 
@@ -72,14 +74,16 @@ Search_GrowingIndex(benchmark::State& state) {
     std::map<std::string, std::string> index_params = {
         {"index_type", "IVF_FLAT"}, {"metric_type", "L2"}, {"nlist", "128"}};
     std::map<std::string, std::string> type_params = {{"dim", "128"}};
-    FieldIndexMeta fieldIndexMeta(schema->get_field_id(FieldName("fakevec")),
-                                  std::move(index_params),
-                                  std::move(type_params));
+    milvus::base::FieldIndexMeta fieldIndexMeta(
+        schema->get_field_id(FieldName("fakevec")),
+        std::move(index_params),
+        std::move(type_params));
     segconf.set_enable_interim_segment_index(true);
-    std::map<FieldId, FieldIndexMeta> filedMap = {
+    std::map<FieldId, milvus::base::FieldIndexMeta> filedMap = {
         {schema->get_field_id(FieldName("fakevec")), fieldIndexMeta}};
-    IndexMetaPtr metaPtr =
-        std::make_shared<CollectionIndexMeta>(226985, std::move(filedMap));
+    milvus::base::IndexMetaPtr metaPtr =
+        std::make_shared<milvus::base::CollectionIndexMeta>(
+            226985, std::move(filedMap));
 
     auto segment = CreateGrowingSegment(schema, metaPtr, -1, segconf);
 
@@ -93,7 +97,8 @@ Search_GrowingIndex(benchmark::State& state) {
     Timestamp ts = 10000000;
 
     for (auto _ : state) {
-        auto qr = segment->Search(search_plan.get(), ph_group.get(), ts);
+        auto qr = milvus::query::Search(
+            segment.get(), search_plan.get(), ph_group.get(), ts);
     }
 }
 
@@ -118,7 +123,7 @@ Search_Sealed(benchmark::State& state) {
         auto vec = dataset_.get_col<float>(milvus::FieldId(100));
         auto indexing =
             GenVecIndexing(N, dim, vec.data(), knowhere::IndexEnum::INDEX_HNSW);
-        segcore::LoadIndexInfo info;
+        index::LoadIndexInfo info;
         info.index = std::move(indexing);
         info.field_id = (*schema)[FieldName("fakevec")].get_id().get();
         info.index_params["index_type"] = "HNSW";
@@ -130,7 +135,8 @@ Search_Sealed(benchmark::State& state) {
     Timestamp ts = 10000000;
 
     for (auto _ : state) {
-        auto qr = segment->Search(search_plan.get(), ph_group.get(), ts);
+        auto qr = milvus::query::Search(
+            segment.get(), search_plan.get(), ph_group.get(), ts);
     }
 }
 

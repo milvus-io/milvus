@@ -30,10 +30,11 @@
 #include "common/EasyAssert.h"
 #include "common/Exception.h"
 #include "common/File.h"
-#include "common/FieldData.h"
+#include "base/FieldData.h"
 #include "common/Slice.h"
 #include "index/Utils.h"
 #include "index/Meta.h"
+#include "index/ScalarIndex.h"
 #include "storage/Util.h"
 #include "knowhere/comp/index_param.h"
 
@@ -206,7 +207,8 @@ ParseConfigFromIndexParams(
 }
 
 void
-AssembleIndexDatas(std::map<std::string, FieldDataPtr>& index_datas) {
+AssembleIndexDatas(
+    std::map<std::string, milvus::base::FieldDataPtr>& index_datas) {
     if (index_datas.find(INDEX_FILE_SLICE_META) != index_datas.end()) {
         auto slice_meta = index_datas.at(INDEX_FILE_SLICE_META);
         Config meta_data = Config::parse(std::string(
@@ -238,8 +240,9 @@ AssembleIndexDatas(std::map<std::string, FieldDataPtr>& index_datas) {
 }
 
 void
-AssembleIndexDatas(std::map<std::string, FieldDataChannelPtr>& index_datas,
-                   std::unordered_map<std::string, FieldDataPtr>& result) {
+AssembleIndexDatas(
+    std::map<std::string, milvus::base::FieldDataChannelPtr>& index_datas,
+    std::unordered_map<std::string, milvus::base::FieldDataPtr>& result) {
     if (auto meta_iter = index_datas.find(INDEX_FILE_SLICE_META);
         meta_iter != index_datas.end()) {
         auto raw_metadata_array =
@@ -303,6 +306,117 @@ ReadDataFromFD(int fd, void* buf, size_t size, size_t chunk_size) {
         buf = static_cast<char*>(buf) + size_read;
         size -= static_cast<std::size_t>(size_read);
     }
+}
+
+// TODO: split scalar IndexBase with knowhere::Index
+std::unique_ptr<DataArray>
+ReverseDataFromIndex(const index::IndexBase* index,
+                     const int64_t* seg_offsets,
+                     int64_t count,
+                     const milvus::base::FieldMeta& field_meta) {
+    auto data_type = field_meta.get_data_type();
+    auto data_array = std::make_unique<DataArray>();
+    data_array->set_field_id(field_meta.get_id().get());
+    data_array->set_type(static_cast<milvus::proto::schema::DataType>(
+        field_meta.get_data_type()));
+
+    auto scalar_array = data_array->mutable_scalars();
+    switch (data_type) {
+        case DataType::BOOL: {
+            using IndexType = index::ScalarIndex<bool>;
+            auto ptr = dynamic_cast<const IndexType*>(index);
+            std::vector<bool> raw_data(count);
+            for (int64_t i = 0; i < count; ++i) {
+                raw_data[i] = ptr->Reverse_Lookup(seg_offsets[i]);
+            }
+            auto obj = scalar_array->mutable_bool_data();
+            *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
+            break;
+        }
+        case DataType::INT8: {
+            using IndexType = index::ScalarIndex<int8_t>;
+            auto ptr = dynamic_cast<const IndexType*>(index);
+            std::vector<int8_t> raw_data(count);
+            for (int64_t i = 0; i < count; ++i) {
+                raw_data[i] = ptr->Reverse_Lookup(seg_offsets[i]);
+            }
+            auto obj = scalar_array->mutable_int_data();
+            *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
+            break;
+        }
+        case DataType::INT16: {
+            using IndexType = index::ScalarIndex<int16_t>;
+            auto ptr = dynamic_cast<const IndexType*>(index);
+            std::vector<int16_t> raw_data(count);
+            for (int64_t i = 0; i < count; ++i) {
+                raw_data[i] = ptr->Reverse_Lookup(seg_offsets[i]);
+            }
+            auto obj = scalar_array->mutable_int_data();
+            *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
+            break;
+        }
+        case DataType::INT32: {
+            using IndexType = index::ScalarIndex<int32_t>;
+            auto ptr = dynamic_cast<const IndexType*>(index);
+            std::vector<int32_t> raw_data(count);
+            for (int64_t i = 0; i < count; ++i) {
+                raw_data[i] = ptr->Reverse_Lookup(seg_offsets[i]);
+            }
+            auto obj = scalar_array->mutable_int_data();
+            *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
+            break;
+        }
+        case DataType::INT64: {
+            using IndexType = index::ScalarIndex<int64_t>;
+            auto ptr = dynamic_cast<const IndexType*>(index);
+            std::vector<int64_t> raw_data(count);
+            for (int64_t i = 0; i < count; ++i) {
+                raw_data[i] = ptr->Reverse_Lookup(seg_offsets[i]);
+            }
+            auto obj = scalar_array->mutable_long_data();
+            *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
+            break;
+        }
+        case DataType::FLOAT: {
+            using IndexType = index::ScalarIndex<float>;
+            auto ptr = dynamic_cast<const IndexType*>(index);
+            std::vector<float> raw_data(count);
+            for (int64_t i = 0; i < count; ++i) {
+                raw_data[i] = ptr->Reverse_Lookup(seg_offsets[i]);
+            }
+            auto obj = scalar_array->mutable_float_data();
+            *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
+            break;
+        }
+        case DataType::DOUBLE: {
+            using IndexType = index::ScalarIndex<double>;
+            auto ptr = dynamic_cast<const IndexType*>(index);
+            std::vector<double> raw_data(count);
+            for (int64_t i = 0; i < count; ++i) {
+                raw_data[i] = ptr->Reverse_Lookup(seg_offsets[i]);
+            }
+            auto obj = scalar_array->mutable_double_data();
+            *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
+            break;
+        }
+        case DataType::VARCHAR: {
+            using IndexType = index::ScalarIndex<std::string>;
+            auto ptr = dynamic_cast<const IndexType*>(index);
+            std::vector<std::string> raw_data(count);
+            for (int64_t i = 0; i < count; ++i) {
+                raw_data[i] = ptr->Reverse_Lookup(seg_offsets[i]);
+            }
+            auto obj = scalar_array->mutable_string_data();
+            *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
+            break;
+        }
+        default: {
+            PanicInfo(DataTypeInvalid,
+                      fmt::format("unsupported datatype {}", data_type));
+        }
+    }
+
+    return data_array;
 }
 
 }  // namespace milvus::index

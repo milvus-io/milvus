@@ -31,9 +31,7 @@
 #include "fmt/core.h"
 #include "pb/plan.pb.h"
 #include "query/ExprImpl.h"
-#include "query/Relational.h"
-#include "query/Utils.h"
-#include "segcore/SegmentGrowingImpl.h"
+#include "segment/SegmentInterface.h"
 #include "simdjson/error.h"
 #include "query/PlanProto.h"
 #include "index/SkipIndex.h"
@@ -46,7 +44,7 @@ namespace milvus::query {
 namespace impl {
 class ExecExprVisitor : ExprVisitor {
  public:
-    ExecExprVisitor(const segcore::SegmentInternalInterface& segment,
+    ExecExprVisitor(const segment::SegmentInternalInterface& segment,
                     int64_t row_count,
                     Timestamp timestamp)
         : segment_(segment), row_count_(row_count), timestamp_(timestamp) {
@@ -106,7 +104,7 @@ class ExecExprVisitor : ExprVisitor {
         -> BitsetType;
 
  private:
-    const segcore::SegmentInternalInterface& segment_;
+    const segment::SegmentInternalInterface& segment_;
     int64_t row_count_;
     Timestamp timestamp_;
     BitsetTypeOpt bitset_opt_;

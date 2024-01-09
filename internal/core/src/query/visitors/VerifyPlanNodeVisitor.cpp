@@ -18,7 +18,7 @@ namespace impl {
 // WILL BE USED BY GENERATOR UNDER suvlim/core_gen/
 class VerifyPlanNodeVisitor : PlanNodeVisitor {
  public:
-    using RetType = SearchResult;
+    using RetType = milvus::base::SearchResult;
     VerifyPlanNodeVisitor() = default;
 
  private:

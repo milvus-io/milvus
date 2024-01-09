@@ -20,9 +20,8 @@
 
 #include "common/EasyAssert.h"
 #include "common/Types.h"
-#include "common/Vector.h"
+#include "base/Vector.h"
 #include "exec/expression/Expr.h"
-#include "segcore/SegmentInterface.h"
 
 namespace milvus {
 namespace exec {
@@ -65,7 +64,7 @@ class PhyTermFilterExpr : public SegmentExpr {
         const std::vector<std::shared_ptr<Expr>>& input,
         const std::shared_ptr<const milvus::expr::TermFilterExpr>& expr,
         const std::string& name,
-        const segcore::SegmentInternalInterface* segment,
+        const segment::SegmentInternalInterface* segment,
         int64_t active_count,
         milvus::Timestamp timestamp,
         int64_t batch_size)
@@ -80,7 +79,7 @@ class PhyTermFilterExpr : public SegmentExpr {
     }
 
     void
-    Eval(EvalCtx& context, VectorPtr& result) override;
+    Eval(EvalCtx& context, milvus::base::VectorPtr& result) override;
 
  private:
     void
@@ -90,43 +89,43 @@ class PhyTermFilterExpr : public SegmentExpr {
     bool
     CanSkipSegment();
 
-    VectorPtr
+    milvus::base::VectorPtr
     ExecPkTermImpl();
 
     template <typename T>
-    VectorPtr
+    milvus::base::VectorPtr
     ExecVisitorImpl();
 
     template <typename T>
-    VectorPtr
+    milvus::base::VectorPtr
     ExecVisitorImplForIndex();
 
     template <typename T>
-    VectorPtr
+    milvus::base::VectorPtr
     ExecVisitorImplForData();
 
     template <typename ValueType>
-    VectorPtr
+    milvus::base::VectorPtr
     ExecVisitorImplTemplateJson();
 
     template <typename ValueType>
-    VectorPtr
+    milvus::base::VectorPtr
     ExecTermJsonVariableInField();
 
     template <typename ValueType>
-    VectorPtr
+    milvus::base::VectorPtr
     ExecTermJsonFieldInVariable();
 
     template <typename ValueType>
-    VectorPtr
+    milvus::base::VectorPtr
     ExecVisitorImplTemplateArray();
 
     template <typename ValueType>
-    VectorPtr
+    milvus::base::VectorPtr
     ExecTermArrayVariableInField();
 
     template <typename ValueType>
-    VectorPtr
+    milvus::base::VectorPtr
     ExecTermArrayFieldInVariable();
 
  private:
@@ -134,7 +133,7 @@ class PhyTermFilterExpr : public SegmentExpr {
     milvus::Timestamp query_timestamp_;
     // If expr is like "pk in (..)", can use pk index to optimize
     bool cached_offsets_inited_{false};
-    ColumnVectorPtr cached_offsets_;
+    milvus::base::ColumnVectorPtr cached_offsets_;
     FixedVector<bool> cached_bits_;
 };
 }  //namespace exec

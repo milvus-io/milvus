@@ -13,12 +13,14 @@
 
 #include "common/Types.h"
 #include "knowhere/comp/index_param.h"
-#include "segcore/SegmentGrowing.h"
-#include "segcore/SegmentGrowingImpl.h"
+#include "segment/SegmentGrowing.h"
+#include "segment/SegmentGrowingImpl.h"
 #include "pb/schema.pb.h"
 #include "test_utils/DataGen.h"
+#include "query/QueryInterface.h"
 
-using namespace milvus::segcore;
+using namespace milvus::base;
+using namespace milvus::segment;
 using namespace milvus;
 namespace pb = milvus::proto;
 
@@ -66,7 +68,7 @@ TEST(Growing, RealCount) {
                     dataset.raw_);
 
     // no delete.
-    ASSERT_EQ(c, segment->get_real_count());
+    ASSERT_EQ(c, milvus::query::GetRealCount(segment.get()));
 
     // delete half.
     auto half = c / 2;
@@ -76,7 +78,7 @@ TEST(Growing, RealCount) {
     auto status =
         segment->Delete(del_offset1, half, del_ids1.get(), del_tss1.data());
     ASSERT_TRUE(status.ok());
-    ASSERT_EQ(c - half, segment->get_real_count());
+    ASSERT_EQ(c - half, milvus::query::GetRealCount(segment.get()));
 
     // delete duplicate.
     auto del_offset2 = segment->get_deleted_count();
@@ -85,7 +87,7 @@ TEST(Growing, RealCount) {
     status =
         segment->Delete(del_offset2, half, del_ids1.get(), del_tss2.data());
     ASSERT_TRUE(status.ok());
-    ASSERT_EQ(c - half, segment->get_real_count());
+    ASSERT_EQ(c - half, milvus::query::GetRealCount(segment.get()));
 
     // delete all.
     auto del_offset3 = segment->get_deleted_count();
@@ -94,7 +96,7 @@ TEST(Growing, RealCount) {
     auto del_tss3 = GenTss(c, c + half * 2);
     status = segment->Delete(del_offset3, c, del_ids3.get(), del_tss3.data());
     ASSERT_TRUE(status.ok());
-    ASSERT_EQ(0, segment->get_real_count());
+    ASSERT_EQ(0, milvus::query::GetRealCount(segment.get()));
 }
 
 TEST(Growing, FillData) {
@@ -130,14 +132,16 @@ TEST(Growing, FillData) {
         {"metric_type", metric_type},
         {"nlist", "128"}};
     std::map<std::string, std::string> type_params = {{"dim", "128"}};
-    FieldIndexMeta fieldIndexMeta(
+    milvus::base::FieldIndexMeta fieldIndexMeta(
         vec, std::move(index_params), std::move(type_params));
     auto config = SegcoreConfig::default_config();
     config.set_chunk_rows(1024);
     config.set_enable_interim_segment_index(true);
-    std::map<FieldId, FieldIndexMeta> filedMap = {{vec, fieldIndexMeta}};
-    IndexMetaPtr metaPtr =
-        std::make_shared<CollectionIndexMeta>(100000, std::move(filedMap));
+    std::map<FieldId, milvus::base::FieldIndexMeta> filedMap = {
+        {vec, fieldIndexMeta}};
+    milvus::base::IndexMetaPtr metaPtr =
+        std::make_shared<milvus::base::CollectionIndexMeta>(
+            100000, std::move(filedMap));
     auto segment_growing = CreateGrowingSegment(schema, metaPtr, 1, config);
     auto segment = dynamic_cast<SegmentGrowingImpl*>(segment_growing.get());
 

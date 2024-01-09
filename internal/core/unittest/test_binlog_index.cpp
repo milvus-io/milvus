@@ -15,15 +15,17 @@
 
 #include "pb/plan.pb.h"
 #include "segcore/segcore_init_c.h"
-#include "segcore/SegmentSealed.h"
-#include "segcore/SegmentSealedImpl.h"
+#include "segment/SegmentSealed.h"
+#include "segment/SegmentSealedImpl.h"
 #include "pb/schema.pb.h"
 #include "test_utils/DataGen.h"
 #include "index/IndexFactory.h"
 #include "query/Plan.h"
+#include "query/QueryInterface.h"
 #include "knowhere/comp/brute_force.h"
 
-using namespace milvus::segcore;
+using namespace milvus::base;
+using namespace milvus::segment;
 using namespace milvus;
 namespace pb = milvus::proto;
 
@@ -84,22 +86,23 @@ class BinlogIndexTest : public ::testing::TestWithParam<Param> {
     }
 
  public:
-    IndexMetaPtr
+    milvus::base::IndexMetaPtr
     GetCollectionIndexMeta(std::string index_type) {
         std::map<std::string, std::string> index_params = {
             {"index_type", index_type},
             {"metric_type", metricType},
             {"nlist", "1024"}};
         std::map<std::string, std::string> type_params = {{"dim", "128"}};
-        FieldIndexMeta fieldIndexMeta(
+        milvus::base::FieldIndexMeta fieldIndexMeta(
             vec_field_id, std::move(index_params), std::move(type_params));
         auto& config = SegcoreConfig::default_config();
         config.set_chunk_rows(1024);
         config.set_enable_interim_segment_index(true);
-        std::map<FieldId, FieldIndexMeta> filedMap = {
+        std::map<FieldId, milvus::base::FieldIndexMeta> filedMap = {
             {vec_field_id, fieldIndexMeta}};
-        IndexMetaPtr metaPtr =
-            std::make_shared<CollectionIndexMeta>(226985, std::move(filedMap));
+        milvus::base::IndexMetaPtr metaPtr =
+            std::make_shared<milvus::base::CollectionIndexMeta>(
+                226985, std::move(filedMap));
         return std::move(metaPtr);
     }
 
@@ -107,36 +110,39 @@ class BinlogIndexTest : public ::testing::TestWithParam<Param> {
     LoadOtherFields() {
         auto dataset = DataGen(schema, data_n);
         // load id
-        LoadFieldDataInfo row_id_info;
+        milvus::base::LoadFieldDataInfo row_id_info;
         FieldMeta row_id_field_meta(
             FieldName("RowID"), RowFieldID, DataType::INT64);
         auto field_data =
-            std::make_shared<milvus::FieldData<int64_t>>(DataType::INT64);
+            std::make_shared<milvus::base::FieldData<int64_t>>(DataType::INT64);
         field_data->FillFieldData(dataset.row_ids_.data(), data_n);
-        auto field_data_info = FieldDataInfo{
-            RowFieldID.get(), data_n, std::vector<FieldDataPtr>{field_data}};
+        auto field_data_info =
+            FieldDataInfo{RowFieldID.get(),
+                          data_n,
+                          std::vector<milvus::base::FieldDataPtr>{field_data}};
         segment->LoadFieldData(RowFieldID, field_data_info);
         // load ts
-        LoadFieldDataInfo ts_info;
+        milvus::base::LoadFieldDataInfo ts_info;
         FieldMeta ts_field_meta(
             FieldName("Timestamp"), TimestampFieldID, DataType::INT64);
         field_data =
-            std::make_shared<milvus::FieldData<int64_t>>(DataType::INT64);
+            std::make_shared<milvus::base::FieldData<int64_t>>(DataType::INT64);
         field_data->FillFieldData(dataset.timestamps_.data(), data_n);
-        field_data_info = FieldDataInfo{TimestampFieldID.get(),
-                                        data_n,
-                                        std::vector<FieldDataPtr>{field_data}};
+        field_data_info =
+            FieldDataInfo{TimestampFieldID.get(),
+                          data_n,
+                          std::vector<milvus::base::FieldDataPtr>{field_data}};
         segment->LoadFieldData(TimestampFieldID, field_data_info);
     }
 
  protected:
-    milvus::SchemaPtr schema;
+    milvus::base::SchemaPtr schema;
     const char* metricType;
     size_t data_n = 10000;
     size_t data_d = 128;
     size_t topk = 10;
-    milvus::FieldDataPtr vec_field_data = nullptr;
-    milvus::segcore::SegmentSealedUPtr segment = nullptr;
+    milvus::base::FieldDataPtr vec_field_data = nullptr;
+    milvus::segment::SegmentSealedUPtr segment = nullptr;
     milvus::FieldId vec_field_id;
     std::shared_ptr<float[]> vec_data;
 };
@@ -146,18 +152,20 @@ INSTANTIATE_TEST_CASE_P(MetricTypeParameters,
                         ::testing::Values(knowhere::metric::L2));
 
 TEST_P(BinlogIndexTest, Accuracy) {
-    IndexMetaPtr collection_index_meta =
+    milvus::base::IndexMetaPtr collection_index_meta =
         GetCollectionIndexMeta(knowhere::IndexEnum::INDEX_FAISS_IVFFLAT);
 
     segment = CreateSealedSegment(schema, collection_index_meta);
     LoadOtherFields();
 
-    auto& segcore_config = milvus::segcore::SegcoreConfig::default_config();
+    auto& segcore_config = milvus::base::SegcoreConfig::default_config();
     segcore_config.set_enable_interim_segment_index(true);
     segcore_config.set_nprobe(32);
     // 1. load field data, and build binlog index for binlog data
-    auto field_data_info = FieldDataInfo{
-        vec_field_id.get(), data_n, std::vector<FieldDataPtr>{vec_field_data}};
+    auto field_data_info =
+        FieldDataInfo{vec_field_id.get(),
+                      data_n,
+                      std::vector<milvus::base::FieldDataPtr>{vec_field_data}};
     segment->LoadFieldData(vec_field_id, field_data_info);
     //assert segment has been built binlog index
     EXPECT_TRUE(segment->HasIndex(vec_field_id));
@@ -191,8 +199,8 @@ TEST_P(BinlogIndexTest, Accuracy) {
     std::vector<const milvus::query::PlaceholderGroup*> ph_group_arr = {
         ph_group.get()};
     auto nlist = segcore_config.get_nlist();
-    auto binlog_index_sr =
-        segment->Search(plan.get(), ph_group.get(), 1L << 63);
+    auto binlog_index_sr = milvus::query::Search(
+        segment.get(), plan.get(), ph_group.get(), 1L << 63);
     ASSERT_EQ(binlog_index_sr->total_nq_, num_queries);
     EXPECT_EQ(binlog_index_sr->unity_topK_, topk);
     EXPECT_EQ(binlog_index_sr->distances_.size(), num_queries * topk);
@@ -217,7 +225,7 @@ TEST_P(BinlogIndexTest, Accuracy) {
         auto database = knowhere::GenDataSet(data_n, data_d, vec_data.get());
         indexing->BuildWithDataset(database, build_conf);
 
-        LoadIndexInfo load_info;
+        milvus::index::LoadIndexInfo load_info;
         load_info.field_id = vec_field_id.get();
 
         load_info.index = std::move(indexing);
@@ -227,7 +235,8 @@ TEST_P(BinlogIndexTest, Accuracy) {
         EXPECT_TRUE(segment->HasIndex(vec_field_id));
         EXPECT_EQ(segment->get_row_count(), data_n);
         EXPECT_FALSE(segment->HasFieldData(vec_field_id));
-        auto ivf_sr = segment->Search(plan.get(), ph_group.get(), 1L << 63);
+        auto ivf_sr = milvus::query::Search(
+            segment.get(), plan.get(), ph_group.get(), 1L << 63);
         auto similary = GetKnnSearchRecall(num_queries,
                                            binlog_index_sr->seg_offsets_.data(),
                                            topk,
@@ -238,15 +247,17 @@ TEST_P(BinlogIndexTest, Accuracy) {
 }
 
 TEST_P(BinlogIndexTest, DisableInterimIndex) {
-    IndexMetaPtr collection_index_meta =
+    milvus::base::IndexMetaPtr collection_index_meta =
         GetCollectionIndexMeta(knowhere::IndexEnum::INDEX_FAISS_IVFFLAT);
 
     segment = CreateSealedSegment(schema, collection_index_meta);
     LoadOtherFields();
     SegcoreSetEnableTempSegmentIndex(false);
 
-    auto field_data_info = FieldDataInfo{
-        vec_field_id.get(), data_n, std::vector<FieldDataPtr>{vec_field_data}};
+    auto field_data_info =
+        FieldDataInfo{vec_field_id.get(),
+                      data_n,
+                      std::vector<milvus::base::FieldDataPtr>{vec_field_data}};
     segment->LoadFieldData(vec_field_id, field_data_info);
 
     EXPECT_FALSE(segment->HasIndex(vec_field_id));
@@ -270,7 +281,7 @@ TEST_P(BinlogIndexTest, DisableInterimIndex) {
     auto database = knowhere::GenDataSet(data_n, data_d, vec_data.get());
     indexing->BuildWithDataset(database, build_conf);
 
-    LoadIndexInfo load_info;
+    milvus::index::LoadIndexInfo load_info;
     load_info.field_id = vec_field_id.get();
 
     load_info.index = std::move(indexing);
@@ -284,14 +295,16 @@ TEST_P(BinlogIndexTest, DisableInterimIndex) {
 }
 
 TEST_P(BinlogIndexTest, LoadBingLogWihIDMAP) {
-    IndexMetaPtr collection_index_meta =
+    milvus::base::IndexMetaPtr collection_index_meta =
         GetCollectionIndexMeta(knowhere::IndexEnum::INDEX_FAISS_IDMAP);
 
     segment = CreateSealedSegment(schema, collection_index_meta);
     LoadOtherFields();
 
-    auto field_data_info = FieldDataInfo{
-        vec_field_id.get(), data_n, std::vector<FieldDataPtr>{vec_field_data}};
+    auto field_data_info =
+        FieldDataInfo{vec_field_id.get(),
+                      data_n,
+                      std::vector<milvus::base::FieldDataPtr>{vec_field_data}};
     segment->LoadFieldData(vec_field_id, field_data_info);
 
     EXPECT_FALSE(segment->HasIndex(vec_field_id));
@@ -300,14 +313,16 @@ TEST_P(BinlogIndexTest, LoadBingLogWihIDMAP) {
 }
 
 TEST_P(BinlogIndexTest, LoadBinlogWithoutIndexMeta) {
-    IndexMetaPtr collection_index_meta =
+    milvus::base::IndexMetaPtr collection_index_meta =
         GetCollectionIndexMeta(knowhere::IndexEnum::INDEX_FAISS_IDMAP);
 
     segment = CreateSealedSegment(schema, collection_index_meta);
     SegcoreSetEnableTempSegmentIndex(true);
 
-    auto field_data_info = FieldDataInfo{
-        vec_field_id.get(), data_n, std::vector<FieldDataPtr>{vec_field_data}};
+    auto field_data_info =
+        FieldDataInfo{vec_field_id.get(),
+                      data_n,
+                      std::vector<milvus::base::FieldDataPtr>{vec_field_data}};
     segment->LoadFieldData(vec_field_id, field_data_info);
 
     EXPECT_FALSE(segment->HasIndex(vec_field_id));

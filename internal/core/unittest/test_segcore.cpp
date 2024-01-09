@@ -14,7 +14,7 @@
 #include <string>
 #include <iostream>
 
-#include "segcore/SegmentGrowingImpl.h"
+#include "segment/SegmentGrowingImpl.h"
 #include "test_utils/DataGen.h"
 
 using namespace milvus;
@@ -50,7 +50,7 @@ generate_data(int N) {
 }  // namespace
 
 TEST(SegmentCoreTest, NormalDistributionTest) {
-    using namespace milvus::segcore;
+    using namespace milvus::base;
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
@@ -63,7 +63,7 @@ TEST(SegmentCoreTest, NormalDistributionTest) {
 
 // Test insert column-based data
 TEST(SegmentCoreTest, MockTest2) {
-    using namespace milvus::segcore;
+    using namespace milvus::base;
 
     // schema
     auto schema = std::make_shared<Schema>();
@@ -84,7 +84,7 @@ TEST(SegmentCoreTest, MockTest2) {
 }
 
 TEST(SegmentCoreTest, SmallIndex) {
-    using namespace milvus::segcore;
+    using namespace milvus::base;
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
@@ -92,13 +92,13 @@ TEST(SegmentCoreTest, SmallIndex) {
 }
 
 TEST(InsertRecordTest, growing_int64_t) {
-    using namespace milvus::segcore;
+    using namespace milvus::base;
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     auto i64_fid = schema->AddDebugField("age", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
-    auto record = milvus::segcore::InsertRecord<false>(*schema, int64_t(32));
+    auto record = milvus::base::InsertRecord<false>(*schema, int64_t(32));
     const int N = 100000;
 
     for (int i = 1; i <= N; i++)
@@ -112,13 +112,13 @@ TEST(InsertRecordTest, growing_int64_t) {
 }
 
 TEST(InsertRecordTest, growing_string) {
-    using namespace milvus::segcore;
+    using namespace milvus::base;
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     auto i64_fid = schema->AddDebugField("name", DataType::VARCHAR);
     schema->set_primary_field_id(i64_fid);
-    auto record = milvus::segcore::InsertRecord<false>(*schema, int64_t(32));
+    auto record = milvus::base::InsertRecord<false>(*schema, int64_t(32));
     const int N = 100000;
 
     for (int i = 1; i <= N; i++)
@@ -132,13 +132,13 @@ TEST(InsertRecordTest, growing_string) {
 }
 
 TEST(InsertRecordTest, sealed_int64_t) {
-    using namespace milvus::segcore;
+    using namespace milvus::base;
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     auto i64_fid = schema->AddDebugField("age", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
-    auto record = milvus::segcore::InsertRecord<true>(*schema, int64_t(32));
+    auto record = milvus::base::InsertRecord<true>(*schema, int64_t(32));
     const int N = 100000;
 
     for (int i = N; i >= 1; i--)
@@ -153,13 +153,13 @@ TEST(InsertRecordTest, sealed_int64_t) {
 }
 
 TEST(InsertRecordTest, sealed_string) {
-    using namespace milvus::segcore;
+    using namespace milvus::base;
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     auto i64_fid = schema->AddDebugField("name", DataType::VARCHAR);
     schema->set_primary_field_id(i64_fid);
-    auto record = milvus::segcore::InsertRecord<true>(*schema, int64_t(32));
+    auto record = milvus::base::InsertRecord<true>(*schema, int64_t(32));
     const int N = 100000;
 
     for (int i = 1; i <= N; i++)

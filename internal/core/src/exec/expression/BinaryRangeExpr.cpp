@@ -16,13 +16,12 @@
 
 #include "BinaryRangeExpr.h"
 
-#include "query/Utils.h"
-
 namespace milvus {
 namespace exec {
 
 void
-PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
+PhyBinaryRangeFilterExpr::Eval(EvalCtx& context,
+                               milvus::base::VectorPtr& result) {
     switch (expr_->column_.data_type_) {
         case DataType::BOOL: {
             result = ExecRangeVisitorImpl<bool>();
@@ -116,7 +115,7 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
 }
 
 template <typename T>
-VectorPtr
+milvus::base::VectorPtr
 PhyBinaryRangeFilterExpr::ExecRangeVisitorImpl() {
     if (is_index_mode_) {
         return ExecRangeVisitorImplForIndex<T>();
@@ -126,7 +125,7 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImpl() {
 }
 
 template <typename T, typename IndexInnerType, typename HighPrecisionType>
-ColumnVectorPtr
+milvus::base::ColumnVectorPtr
 PhyBinaryRangeFilterExpr::PreCheckOverflow(HighPrecisionType& val1,
                                            HighPrecisionType& val2,
                                            bool& lower_inclusive,
@@ -135,7 +134,7 @@ PhyBinaryRangeFilterExpr::PreCheckOverflow(HighPrecisionType& val1,
     upper_inclusive = expr_->upper_inclusive_;
     val1 = GetValueFromProto<HighPrecisionType>(expr_->lower_val_);
     val2 = GetValueFromProto<HighPrecisionType>(expr_->upper_val_);
-    auto get_next_overflow_batch = [this]() -> ColumnVectorPtr {
+    auto get_next_overflow_batch = [this]() -> milvus::base::ColumnVectorPtr {
         int64_t batch_size = overflow_check_pos_ + batch_size_ >= active_count_
                                  ? active_count_ - overflow_check_pos_
                                  : batch_size_;
@@ -144,22 +143,23 @@ PhyBinaryRangeFilterExpr::PreCheckOverflow(HighPrecisionType& val1,
             cached_overflow_res_->size() == batch_size) {
             return cached_overflow_res_;
         }
-        auto res = std::make_shared<ColumnVector>(DataType::BOOL, batch_size);
+        auto res = std::make_shared<milvus::base::ColumnVector>(DataType::BOOL,
+                                                                batch_size);
         return res;
     };
 
     if constexpr (std::is_integral_v<T> && !std::is_same_v<bool, T>) {
-        if (milvus::query::gt_ub<T>(val1)) {
+        if (milvus::gt_ub<T>(val1)) {
             return get_next_overflow_batch();
-        } else if (milvus::query::lt_lb<T>(val1)) {
+        } else if (milvus::lt_lb<T>(val1)) {
             val1 = std::numeric_limits<T>::min();
             lower_inclusive = true;
         }
 
-        if (milvus::query::gt_ub<T>(val2)) {
+        if (milvus::gt_ub<T>(val2)) {
             val2 = std::numeric_limits<T>::max();
             upper_inclusive = true;
-        } else if (milvus::query::lt_lb<T>(val2)) {
+        } else if (milvus::lt_lb<T>(val2)) {
             return get_next_overflow_batch();
         }
     }
@@ -167,7 +167,7 @@ PhyBinaryRangeFilterExpr::PreCheckOverflow(HighPrecisionType& val1,
 }
 
 template <typename T>
-VectorPtr
+milvus::base::VectorPtr
 PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForIndex() {
     typedef std::
         conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
@@ -206,11 +206,11 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForIndex() {
                "expect batch size {}",
                res.size(),
                real_batch_size);
-    return std::make_shared<ColumnVector>(std::move(res));
+    return std::make_shared<milvus::base::ColumnVector>(std::move(res));
 }
 
 template <typename T>
-VectorPtr
+milvus::base::VectorPtr
 PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData() {
     typedef std::
         conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
@@ -234,8 +234,8 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData() {
             PreCheckOverflow<T>(val1, val2, lower_inclusive, upper_inclusive)) {
         return res;
     }
-    auto res_vec =
-        std::make_shared<ColumnVector>(DataType::BOOL, real_batch_size);
+    auto res_vec = std::make_shared<milvus::base::ColumnVector>(
+        DataType::BOOL, real_batch_size);
     bool* res = (bool*)res_vec->GetRawData();
     auto execute_sub_batch = [lower_inclusive, upper_inclusive](
                                  const T* data,
@@ -285,7 +285,7 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData() {
 }
 
 template <typename ValueType>
-VectorPtr
+milvus::base::VectorPtr
 PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJson() {
     using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
                                        std::string_view,
@@ -294,8 +294,8 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJson() {
     if (real_batch_size == 0) {
         return nullptr;
     }
-    auto res_vec =
-        std::make_shared<ColumnVector>(DataType::BOOL, real_batch_size);
+    auto res_vec = std::make_shared<milvus::base::ColumnVector>(
+        DataType::BOOL, real_batch_size);
     bool* res = (bool*)res_vec->GetRawData();
 
     bool lower_inclusive = expr_->lower_inclusive_;
@@ -335,7 +335,7 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJson() {
 }
 
 template <typename ValueType>
-VectorPtr
+milvus::base::VectorPtr
 PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForArray() {
     using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
                                        std::string_view,
@@ -344,8 +344,8 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForArray() {
     if (real_batch_size == 0) {
         return nullptr;
     }
-    auto res_vec =
-        std::make_shared<ColumnVector>(DataType::BOOL, real_batch_size);
+    auto res_vec = std::make_shared<milvus::base::ColumnVector>(
+        DataType::BOOL, real_batch_size);
     bool* res = (bool*)res_vec->GetRawData();
 
     bool lower_inclusive = expr_->lower_inclusive_;

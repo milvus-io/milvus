@@ -23,15 +23,15 @@
 
 #include "boost/container/vector.hpp"
 #include "common/EasyAssert.h"
-#include "common/LoadInfo.h"
+#include "base/LoadInfo.h"
 #include "common/Types.h"
 #include "common/type_c.h"
 #include "index/IndexFactory.h"
 #include "knowhere/comp/index_param.h"
 #include "pb/plan.pb.h"
 #include "query/ExprImpl.h"
-#include "segcore/Collection.h"
-#include "segcore/Reduce.h"
+#include "base/Collection.h"
+#include "base/Reduce.h"
 #include "segcore/reduce_c.h"
 #include "segcore/segment_c.h"
 #include "test_utils/DataGen.h"
@@ -39,6 +39,7 @@
 #include "test_utils/indexbuilder_test_utils.h"
 #include "test_utils/storage_test_utils.h"
 #include "query/generated/ExecExprVisitor.h"
+#include "query/QueryInterface.h"
 #include "expr/ITypeExpr.h"
 #include "plan/PlanNode.h"
 #include "exec/expression/Expr.h"
@@ -46,11 +47,12 @@
 namespace chrono = std::chrono;
 
 using namespace milvus;
-using namespace milvus::segcore;
+using namespace milvus::base;
+using namespace milvus::segment;
 using namespace milvus::index;
 using namespace knowhere;
+using milvus::index::LoadIndexInfo;
 using milvus::index::VectorIndex;
-using milvus::segcore::LoadIndexInfo;
 
 namespace {
 // const int DIM = 16;
@@ -386,7 +388,7 @@ TEST(CApiTest, CollectionTest) {
 }
 
 TEST(CApiTest, LoadInfoTest) {
-    auto load_info = std::make_shared<LoadFieldDataInfo>();
+    auto load_info = std::make_shared<milvus::base::LoadFieldDataInfo>();
     auto c_load_info = reinterpret_cast<CLoadFieldDataInfo*>(load_info.get());
     AppendLoadFieldInfo(c_load_info, 100, 100);
     EnableMmap(c_load_info, 100, true);
@@ -567,7 +569,7 @@ TEST(CApiTest, InsertTest) {
     CSegmentInterface segment;
     auto status = NewSegment(c_collection, Growing, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
-    auto col = (milvus::segcore::Collection*)c_collection;
+    auto col = (milvus::base::Collection*)c_collection;
 
     int N = 10000;
     auto dataset = DataGen(col->get_schema(), N);
@@ -620,7 +622,7 @@ TEST(CApiTest, MultiDeleteGrowingSegment) {
     CSegmentInterface segment;
     auto status = NewSegment(collection, Growing, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
-    auto col = (milvus::segcore::Collection*)collection;
+    auto col = (milvus::base::Collection*)collection;
 
     int N = 10;
     auto dataset = DataGen(col->get_schema(), N);
@@ -661,7 +663,7 @@ TEST(CApiTest, MultiDeleteGrowingSegment) {
         value.set_int64_val(1);
         retrive_pks.push_back(value);
     }
-    auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
+    auto schema = ((milvus::base::Collection*)collection)->get_schema();
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
     auto term_expr = std::make_shared<milvus::expr::TermFilterExpr>(
         milvus::expr::ColumnInfo(
@@ -740,7 +742,7 @@ TEST(CApiTest, MultiDeleteSealedSegment) {
     CSegmentInterface segment;
     auto status = NewSegment(collection, Sealed, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
-    auto col = (milvus::segcore::Collection*)collection;
+    auto col = (milvus::base::Collection*)collection;
 
     int N = 10;
     auto dataset = DataGen(col->get_schema(), N);
@@ -772,7 +774,7 @@ TEST(CApiTest, MultiDeleteSealedSegment) {
         value.set_int64_val(1);
         retrive_pks.push_back(value);
     }
-    auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
+    auto schema = ((milvus::base::Collection*)collection)->get_schema();
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
     auto term_expr = std::make_shared<milvus::expr::TermFilterExpr>(
         milvus::expr::ColumnInfo(
@@ -852,7 +854,7 @@ TEST(CApiTest, DeleteRepeatedPksFromGrowingSegment) {
     CSegmentInterface segment;
     auto status = NewSegment(collection, Growing, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
-    auto col = (milvus::segcore::Collection*)collection;
+    auto col = (milvus::base::Collection*)collection;
 
     int N = 10;
     auto dataset = DataGen(col->get_schema(), N);
@@ -891,7 +893,7 @@ TEST(CApiTest, DeleteRepeatedPksFromGrowingSegment) {
             retrive_row_ids.push_back(val);
         }
     }
-    auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
+    auto schema = ((milvus::base::Collection*)collection)->get_schema();
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
     auto term_expr = std::make_shared<milvus::expr::TermFilterExpr>(
         milvus::expr::ColumnInfo(
@@ -955,7 +957,7 @@ TEST(CApiTest, DeleteRepeatedPksFromSealedSegment) {
     CSegmentInterface segment;
     auto status = NewSegment(collection, Sealed, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
-    auto col = (milvus::segcore::Collection*)collection;
+    auto col = (milvus::base::Collection*)collection;
 
     int N = 20;
     auto dataset = DataGen(col->get_schema(), N, 42, 0, 2);
@@ -973,7 +975,7 @@ TEST(CApiTest, DeleteRepeatedPksFromSealedSegment) {
             retrive_row_ids.push_back(val);
         }
     }
-    auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
+    auto schema = ((milvus::base::Collection*)collection)->get_schema();
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
     auto term_expr = std::make_shared<milvus::expr::TermFilterExpr>(
         milvus::expr::ColumnInfo(
@@ -1037,7 +1039,7 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnGrowingSegment) {
     CSegmentInterface segment;
     auto status = NewSegment(collection, Growing, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
-    auto col = (milvus::segcore::Collection*)collection;
+    auto col = (milvus::base::Collection*)collection;
 
     int N = 10;
     auto dataset = DataGen(col->get_schema(), N);
@@ -1083,7 +1085,7 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnGrowingSegment) {
             retrive_row_ids.push_back(val);
         }
     }
-    auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
+    auto schema = ((milvus::base::Collection*)collection)->get_schema();
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
     auto term_expr = std::make_shared<milvus::expr::TermFilterExpr>(
         milvus::expr::ColumnInfo(
@@ -1143,7 +1145,7 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnSealedSegment) {
     CSegmentInterface segment;
     auto status = NewSegment(collection, Sealed, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
-    auto col = (milvus::segcore::Collection*)collection;
+    auto col = (milvus::base::Collection*)collection;
 
     int N = 10;
     auto dataset = DataGen(col->get_schema(), N, 42, 0, 2);
@@ -1180,7 +1182,7 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnSealedSegment) {
             retrive_row_ids.push_back(val);
         }
     }
-    auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
+    auto schema = ((milvus::base::Collection*)collection)->get_schema();
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
     auto term_expr = std::make_shared<milvus::expr::TermFilterExpr>(
         milvus::expr::ColumnInfo(
@@ -1214,7 +1216,7 @@ TEST(CApiTest, SearchTest) {
     CSegmentInterface segment;
     auto status = NewSegment(c_collection, Growing, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
-    auto col = (milvus::segcore::Collection*)c_collection;
+    auto col = (milvus::base::Collection*)c_collection;
 
     int N = 10000;
     auto dataset = DataGen(col->get_schema(), N);
@@ -1284,7 +1286,7 @@ TEST(CApiTest, SearchTestWithExpr) {
     CSegmentInterface segment;
     auto status = NewSegment(c_collection, Growing, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
-    auto col = (milvus::segcore::Collection*)c_collection;
+    auto col = (milvus::base::Collection*)c_collection;
 
     int N = 10000;
     auto dataset = DataGen(col->get_schema(), N);
@@ -1352,7 +1354,7 @@ TEST(CApiTest, RetrieveTestWithExpr) {
     CSegmentInterface segment;
     auto status = NewSegment(collection, Growing, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
-    auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
+    auto schema = ((milvus::base::Collection*)collection)->get_schema();
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
 
     int N = 10000;
@@ -1411,7 +1413,7 @@ TEST(CApiTest, GetMemoryUsageInBytesTest) {
     // std::cout << "old_memory_usage_size = " << old_memory_usage_size << std::endl;
     ASSERT_EQ(old_memory_usage_size, 0);
 
-    auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
+    auto schema = ((milvus::base::Collection*)collection)->get_schema();
     int N = 10000;
     auto dataset = DataGen(schema, N);
 
@@ -1469,7 +1471,7 @@ TEST(CApiTest, GetRowCountTest) {
     auto status = NewSegment(collection, Growing, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
 
-    auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
+    auto schema = ((milvus::base::Collection*)collection)->get_schema();
     int N = 10000;
     auto dataset = DataGen(schema, N);
 
@@ -1499,7 +1501,7 @@ TEST(CApiTest, GetRealCount) {
     auto status = NewSegment(collection, Growing, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
 
-    auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
+    auto schema = ((milvus::base::Collection*)collection)->get_schema();
     int N = 10000;
     auto dataset = DataGen(schema, N);
 
@@ -1545,13 +1547,13 @@ TEST(CApiTest, GetRealCount) {
 
 void
 CheckSearchResultDuplicate(const std::vector<CSearchResult>& results) {
-    auto nq = ((SearchResult*)results[0])->total_nq_;
+    auto nq = ((milvus::base::SearchResult*)results[0])->total_nq_;
 
     std::unordered_set<PkType> pk_set;
     for (int qi = 0; qi < nq; qi++) {
         pk_set.clear();
         for (size_t i = 0; i < results.size(); i++) {
-            auto search_result = (SearchResult*)results[i];
+            auto search_result = (milvus::base::SearchResult*)results[i];
             ASSERT_EQ(nq, search_result->total_nq_);
             auto topk_beg = search_result->topk_per_nq_prefix_sum_[qi];
             auto topk_end = search_result->topk_per_nq_prefix_sum_[qi + 1];
@@ -1569,7 +1571,7 @@ TEST(CApiTest, ReduceNullResult) {
     CSegmentInterface segment;
     auto status = NewSegment(collection, Growing, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
-    auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
+    auto schema = ((milvus::base::Collection*)collection)->get_schema();
     int N = 10000;
     auto dataset = DataGen(schema, N);
     int64_t offset;
@@ -1634,7 +1636,7 @@ TEST(CApiTest, ReduceNullResult) {
                                                 slice_nqs.size());
         ASSERT_EQ(status.error_code, Success);
 
-        auto search_result = (SearchResult*)results[0];
+        auto search_result = (milvus::base::SearchResult*)results[0];
         auto size = search_result->result_offsets_.size();
         EXPECT_EQ(size, num_queries / 2);
 
@@ -1654,7 +1656,7 @@ TEST(CApiTest, ReduceRemoveDuplicates) {
     auto status = NewSegment(collection, Growing, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
 
-    auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
+    auto schema = ((milvus::base::Collection*)collection)->get_schema();
     int N = 10000;
     auto dataset = DataGen(schema, N);
 
@@ -1790,7 +1792,7 @@ testReduceSearchWithExpr(int N,
     auto status = NewSegment(collection, Growing, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
 
-    auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
+    auto schema = ((milvus::base::Collection*)collection)->get_schema();
     auto dataset = DataGen(schema, N);
 
     int64_t offset;
@@ -1895,7 +1897,7 @@ testReduceSearchWithExpr(int N,
     ASSERT_EQ(status.error_code, Success);
 
     auto search_result_data_blobs =
-        reinterpret_cast<milvus::segcore::SearchResultDataBlobs*>(
+        reinterpret_cast<milvus::base::SearchResultDataBlobs*>(
             cSearchResultData);
 
     // check result
@@ -2023,7 +2025,7 @@ TEST(CApiTest, LoadIndexSearch) {
     indexing.Serialize(binary_set);
 
     // fill loadIndexInfo
-    milvus::segcore::LoadIndexInfo load_index_info;
+    milvus::index::LoadIndexInfo load_index_info;
     auto& index_params = load_index_info.index_params;
     index_params["index_type"] = knowhere::IndexEnum::INDEX_FAISS_IVFSQ8;
     load_index_info.index = std::make_unique<VectorMemIndex<float>>(
@@ -2046,7 +2048,7 @@ TEST(CApiTest, Indexing_Without_Predicate) {
     std::string schema_string = generate_collection_schema(
         knowhere::metric::L2, DIM, VectorType::FloatVector);
     auto collection = NewCollection(schema_string.c_str());
-    auto schema = ((segcore::Collection*)collection)->get_schema();
+    auto schema = ((base::Collection*)collection)->get_schema();
     CSegmentInterface segment;
     auto status = NewSegment(collection, Growing, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
@@ -2124,7 +2126,8 @@ TEST(CApiTest, Indexing_Without_Predicate) {
     auto query_dataset = knowhere::GenDataSet(num_queries, DIM, query_ptr);
     auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
-    SearchInfo search_info = search_plan->plan_node_->search_info_;
+    milvus::base::SearchInfo search_info =
+        search_plan->plan_node_->search_info_;
     auto result_on_index =
         vec_index->Query(query_dataset, search_info, nullptr);
     auto ids = result_on_index->seg_offsets_.data();
@@ -2136,7 +2139,7 @@ TEST(CApiTest, Indexing_Without_Predicate) {
     }
 
     auto search_result_on_raw_index =
-        (SearchResult*)c_search_result_on_smallIndex;
+        (milvus::base::SearchResult*)c_search_result_on_smallIndex;
     search_result_on_raw_index->seg_offsets_ = vec_ids;
     search_result_on_raw_index->distances_ = vec_dis;
 
@@ -2175,8 +2178,8 @@ TEST(CApiTest, Indexing_Without_Predicate) {
 
     auto search_result_on_raw_index_json =
         SearchResultToJson(*search_result_on_raw_index);
-    auto search_result_on_bigIndex_json =
-        SearchResultToJson((*(SearchResult*)c_search_result_on_bigIndex));
+    auto search_result_on_bigIndex_json = SearchResultToJson(
+        (*(milvus::base::SearchResult*)c_search_result_on_bigIndex));
 
     ASSERT_EQ(search_result_on_raw_index_json.dump(1),
               search_result_on_bigIndex_json.dump(1));
@@ -2197,7 +2200,7 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
     std::string schema_string = generate_collection_schema(
         knowhere::metric::L2, DIM, VectorType::FloatVector);
     auto collection = NewCollection(schema_string.c_str());
-    auto schema = ((segcore::Collection*)collection)->get_schema();
+    auto schema = ((base::Collection*)collection)->get_schema();
     CSegmentInterface segment;
     auto status = NewSegment(collection, Growing, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
@@ -2275,7 +2278,8 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
     auto query_dataset = knowhere::GenDataSet(num_queries, DIM, query_ptr);
     auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
-    SearchInfo search_info = search_plan->plan_node_->search_info_;
+    milvus::base::SearchInfo search_info =
+        search_plan->plan_node_->search_info_;
     auto result_on_index =
         vec_index->Query(query_dataset, search_info, nullptr);
     auto ids = result_on_index->seg_offsets_.data();
@@ -2287,7 +2291,7 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
     }
 
     auto search_result_on_raw_index =
-        (SearchResult*)c_search_result_on_smallIndex;
+        (milvus::base::SearchResult*)c_search_result_on_smallIndex;
     search_result_on_raw_index->seg_offsets_ = vec_ids;
     search_result_on_raw_index->distances_ = vec_dis;
 
@@ -2327,8 +2331,8 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
 
     auto search_result_on_raw_index_json =
         SearchResultToJson(*search_result_on_raw_index);
-    auto search_result_on_bigIndex_json =
-        SearchResultToJson((*(SearchResult*)c_search_result_on_bigIndex));
+    auto search_result_on_bigIndex_json = SearchResultToJson(
+        (*(milvus::base::SearchResult*)c_search_result_on_bigIndex));
 
     ASSERT_EQ(search_result_on_raw_index_json.dump(1),
               search_result_on_bigIndex_json.dump(1));
@@ -2349,7 +2353,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
     std::string schema_string = generate_collection_schema(
         knowhere::metric::L2, DIM, VectorType::FloatVector);
     auto collection = NewCollection(schema_string.c_str());
-    auto schema = ((segcore::Collection*)collection)->get_schema();
+    auto schema = ((base::Collection*)collection)->get_schema();
     CSegmentInterface segment;
     auto status = NewSegment(collection, Growing, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
@@ -2455,7 +2459,8 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
     auto query_dataset = knowhere::GenDataSet(num_queries, DIM, query_ptr);
     auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
-    SearchInfo search_info = search_plan->plan_node_->search_info_;
+    milvus::base::SearchInfo search_info =
+        search_plan->plan_node_->search_info_;
     auto result_on_index =
         vec_index->Query(query_dataset, search_info, nullptr);
     auto ids = result_on_index->seg_offsets_.data();
@@ -2467,7 +2472,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
     }
 
     auto search_result_on_raw_index =
-        (SearchResult*)c_search_result_on_smallIndex;
+        (milvus::base::SearchResult*)c_search_result_on_smallIndex;
     search_result_on_raw_index->seg_offsets_ = vec_ids;
     search_result_on_raw_index->distances_ = vec_dis;
 
@@ -2505,7 +2510,8 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
                                        &c_search_result_on_bigIndex);
     ASSERT_EQ(res_after_load_index.error_code, Success);
 
-    auto search_result_on_bigIndex = (SearchResult*)c_search_result_on_bigIndex;
+    auto search_result_on_bigIndex =
+        (milvus::base::SearchResult*)c_search_result_on_bigIndex;
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * TOPK;
         ASSERT_EQ(search_result_on_bigIndex->seg_offsets_[offset], BIAS + i);
@@ -2529,7 +2535,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
     std::string schema_string = generate_collection_schema(
         knowhere::metric::L2, DIM, VectorType::FloatVector);
     auto collection = NewCollection(schema_string.c_str());
-    auto schema = ((segcore::Collection*)collection)->get_schema();
+    auto schema = ((base::Collection*)collection)->get_schema();
     CSegmentInterface segment;
     auto status = NewSegment(collection, Growing, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
@@ -2637,7 +2643,8 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
     auto query_dataset = knowhere::GenDataSet(num_queries, DIM, query_ptr);
     auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
-    SearchInfo search_info = search_plan->plan_node_->search_info_;
+    milvus::base::SearchInfo search_info =
+        search_plan->plan_node_->search_info_;
     auto result_on_index =
         vec_index->Query(query_dataset, search_info, nullptr);
     auto ids = result_on_index->seg_offsets_.data();
@@ -2649,7 +2656,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
     }
 
     auto search_result_on_raw_index =
-        (SearchResult*)c_search_result_on_smallIndex;
+        (milvus::base::SearchResult*)c_search_result_on_smallIndex;
     search_result_on_raw_index->seg_offsets_ = vec_ids;
     search_result_on_raw_index->distances_ = vec_dis;
 
@@ -2687,7 +2694,8 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
                                        &c_search_result_on_bigIndex);
     ASSERT_EQ(res_after_load_index.error_code, Success);
 
-    auto search_result_on_bigIndex = (SearchResult*)c_search_result_on_bigIndex;
+    auto search_result_on_bigIndex =
+        (milvus::base::SearchResult*)c_search_result_on_bigIndex;
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * TOPK;
         ASSERT_EQ(search_result_on_bigIndex->seg_offsets_[offset], BIAS + i);
@@ -2711,7 +2719,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
     std::string schema_string = generate_collection_schema(
         knowhere::metric::L2, DIM, VectorType::FloatVector);
     auto collection = NewCollection(schema_string.c_str());
-    auto schema = ((segcore::Collection*)collection)->get_schema();
+    auto schema = ((base::Collection*)collection)->get_schema();
     CSegmentInterface segment;
     auto status = NewSegment(collection, Growing, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
@@ -2811,7 +2819,8 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
     auto query_dataset = knowhere::GenDataSet(num_queries, DIM, query_ptr);
     auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
-    SearchInfo search_info = search_plan->plan_node_->search_info_;
+    milvus::base::SearchInfo search_info =
+        search_plan->plan_node_->search_info_;
     auto result_on_index =
         vec_index->Query(query_dataset, search_info, nullptr);
     auto ids = result_on_index->seg_offsets_.data();
@@ -2823,7 +2832,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
     }
 
     auto search_result_on_raw_index =
-        (SearchResult*)c_search_result_on_smallIndex;
+        (milvus::base::SearchResult*)c_search_result_on_smallIndex;
     search_result_on_raw_index->seg_offsets_ = vec_ids;
     search_result_on_raw_index->distances_ = vec_dis;
 
@@ -2861,7 +2870,8 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
                                        &c_search_result_on_bigIndex);
     ASSERT_EQ(res_after_load_index.error_code, Success);
 
-    auto search_result_on_bigIndex = (SearchResult*)c_search_result_on_bigIndex;
+    auto search_result_on_bigIndex =
+        (milvus::base::SearchResult*)c_search_result_on_bigIndex;
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * TOPK;
         ASSERT_EQ(search_result_on_bigIndex->seg_offsets_[offset], BIAS + i);
@@ -2885,7 +2895,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
     std::string schema_string = generate_collection_schema(
         knowhere::metric::L2, DIM, VectorType::FloatVector);
     auto collection = NewCollection(schema_string.c_str());
-    auto schema = ((segcore::Collection*)collection)->get_schema();
+    auto schema = ((base::Collection*)collection)->get_schema();
     CSegmentInterface segment;
     auto status = NewSegment(collection, Growing, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
@@ -2986,7 +2996,8 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
     auto query_dataset = knowhere::GenDataSet(num_queries, DIM, query_ptr);
     auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
-    SearchInfo search_info = search_plan->plan_node_->search_info_;
+    milvus::base::SearchInfo search_info =
+        search_plan->plan_node_->search_info_;
     auto result_on_index =
         vec_index->Query(query_dataset, search_info, nullptr);
     auto ids = result_on_index->seg_offsets_.data();
@@ -2998,7 +3009,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
     }
 
     auto search_result_on_raw_index =
-        (SearchResult*)c_search_result_on_smallIndex;
+        (milvus::base::SearchResult*)c_search_result_on_smallIndex;
     search_result_on_raw_index->seg_offsets_ = vec_ids;
     search_result_on_raw_index->distances_ = vec_dis;
 
@@ -3036,7 +3047,8 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
                                        &c_search_result_on_bigIndex);
     ASSERT_EQ(res_after_load_index.error_code, Success);
 
-    auto search_result_on_bigIndex = (SearchResult*)c_search_result_on_bigIndex;
+    auto search_result_on_bigIndex =
+        (milvus::base::SearchResult*)c_search_result_on_bigIndex;
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * TOPK;
         ASSERT_EQ(search_result_on_bigIndex->seg_offsets_[offset], BIAS + i);
@@ -3061,7 +3073,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
         knowhere::metric::JACCARD, DIM, VectorType::BinaryVector);
     auto collection =
         NewCollection(schema_string.c_str(), knowhere::metric::JACCARD);
-    auto schema = ((segcore::Collection*)collection)->get_schema();
+    auto schema = ((base::Collection*)collection)->get_schema();
     CSegmentInterface segment;
     auto status = NewSegment(collection, Growing, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
@@ -3168,7 +3180,8 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
     auto query_dataset = knowhere::GenDataSet(num_queries, DIM, query_ptr);
     auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
-    SearchInfo search_info = search_plan->plan_node_->search_info_;
+    milvus::base::SearchInfo search_info =
+        search_plan->plan_node_->search_info_;
     auto result_on_index =
         vec_index->Query(query_dataset, search_info, nullptr);
     auto ids = result_on_index->seg_offsets_.data();
@@ -3180,7 +3193,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
     }
 
     auto search_result_on_raw_index =
-        (SearchResult*)c_search_result_on_smallIndex;
+        (milvus::base::SearchResult*)c_search_result_on_smallIndex;
     search_result_on_raw_index->seg_offsets_ = vec_ids;
     search_result_on_raw_index->distances_ = vec_dis;
 
@@ -3218,7 +3231,8 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
                                        &c_search_result_on_bigIndex);
     ASSERT_EQ(res_after_load_index.error_code, Success);
 
-    auto search_result_on_bigIndex = (SearchResult*)c_search_result_on_bigIndex;
+    auto search_result_on_bigIndex =
+        (milvus::base::SearchResult*)c_search_result_on_bigIndex;
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * TOPK;
         ASSERT_EQ(search_result_on_bigIndex->seg_offsets_[offset], BIAS + i);
@@ -3243,7 +3257,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
         knowhere::metric::JACCARD, DIM, VectorType::BinaryVector);
     auto collection =
         NewCollection(schema_string.c_str(), knowhere::metric::JACCARD);
-    auto schema = ((segcore::Collection*)collection)->get_schema();
+    auto schema = ((base::Collection*)collection)->get_schema();
     CSegmentInterface segment;
     auto status = NewSegment(collection, Growing, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
@@ -3350,7 +3364,8 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
     auto query_dataset = knowhere::GenDataSet(num_queries, DIM, query_ptr);
     auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
-    SearchInfo search_info = search_plan->plan_node_->search_info_;
+    milvus::base::SearchInfo search_info =
+        search_plan->plan_node_->search_info_;
     auto result_on_index =
         vec_index->Query(query_dataset, search_info, nullptr);
     auto ids = result_on_index->seg_offsets_.data();
@@ -3362,7 +3377,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
     }
 
     auto search_result_on_raw_index =
-        (SearchResult*)c_search_result_on_smallIndex;
+        (milvus::base::SearchResult*)c_search_result_on_smallIndex;
     search_result_on_raw_index->seg_offsets_ = vec_ids;
     search_result_on_raw_index->distances_ = vec_dis;
 
@@ -3400,7 +3415,8 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
                                        &c_search_result_on_bigIndex);
     ASSERT_EQ(res_after_load_index.error_code, Success);
 
-    auto search_result_on_bigIndex = (SearchResult*)c_search_result_on_bigIndex;
+    auto search_result_on_bigIndex =
+        (milvus::base::SearchResult*)c_search_result_on_bigIndex;
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * TOPK;
         ASSERT_EQ(search_result_on_bigIndex->seg_offsets_[offset], BIAS + i);
@@ -3425,7 +3441,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
         knowhere::metric::JACCARD, DIM, VectorType::BinaryVector);
     auto collection =
         NewCollection(schema_string.c_str(), knowhere::metric::JACCARD);
-    auto schema = ((segcore::Collection*)collection)->get_schema();
+    auto schema = ((base::Collection*)collection)->get_schema();
     CSegmentInterface segment;
     auto status = NewSegment(collection, Growing, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
@@ -3526,7 +3542,8 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
     auto query_dataset = knowhere::GenDataSet(num_queries, DIM, query_ptr);
     auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
-    SearchInfo search_info = search_plan->plan_node_->search_info_;
+    milvus::base::SearchInfo search_info =
+        search_plan->plan_node_->search_info_;
     auto result_on_index =
         vec_index->Query(query_dataset, search_info, nullptr);
     auto ids = result_on_index->seg_offsets_.data();
@@ -3538,7 +3555,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
     }
 
     auto search_result_on_raw_index =
-        (SearchResult*)c_search_result_on_smallIndex;
+        (milvus::base::SearchResult*)c_search_result_on_smallIndex;
     search_result_on_raw_index->seg_offsets_ = vec_ids;
     search_result_on_raw_index->distances_ = vec_dis;
 
@@ -3595,7 +3612,8 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
     //    status = ReduceSearchResultsAndFillData(plan, results.data(), results.size());
     //    ASSERT_EQ(status.error_code, Success);
 
-    auto search_result_on_bigIndex = (SearchResult*)c_search_result_on_bigIndex;
+    auto search_result_on_bigIndex =
+        (milvus::base::SearchResult*)c_search_result_on_bigIndex;
     for (int i = 0; i < num_queries; ++i) {
         ASSERT_EQ(search_result_on_bigIndex->topk_per_nq_prefix_sum_.size(),
                   search_result_on_bigIndex->total_nq_ + 1);
@@ -3623,7 +3641,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
         knowhere::metric::JACCARD, DIM, VectorType::BinaryVector);
     auto collection =
         NewCollection(schema_string.c_str(), knowhere::metric::JACCARD);
-    auto schema = ((segcore::Collection*)collection)->get_schema();
+    auto schema = ((base::Collection*)collection)->get_schema();
     CSegmentInterface segment;
     auto status = NewSegment(collection, Growing, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
@@ -3724,7 +3742,8 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
     auto query_dataset = knowhere::GenDataSet(num_queries, DIM, query_ptr);
     auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
-    SearchInfo search_info = search_plan->plan_node_->search_info_;
+    milvus::base::SearchInfo search_info =
+        search_plan->plan_node_->search_info_;
     auto result_on_index =
         vec_index->Query(query_dataset, search_info, nullptr);
     auto ids = result_on_index->seg_offsets_.data();
@@ -3736,7 +3755,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
     }
 
     auto search_result_on_raw_index =
-        (SearchResult*)c_search_result_on_smallIndex;
+        (milvus::base::SearchResult*)c_search_result_on_smallIndex;
     search_result_on_raw_index->seg_offsets_ = vec_ids;
     search_result_on_raw_index->distances_ = vec_dis;
 
@@ -3790,7 +3809,8 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
                                             slice_nqs.size());
     ASSERT_EQ(status.error_code, Success);
 
-    auto search_result_on_bigIndex = (SearchResult*)c_search_result_on_bigIndex;
+    auto search_result_on_bigIndex =
+        (milvus::base::SearchResult*)c_search_result_on_bigIndex;
     for (int i = 0; i < num_queries; ++i) {
         ASSERT_EQ(search_result_on_bigIndex->topk_per_nq_prefix_sum_.size(),
                   search_result_on_bigIndex->total_nq_ + 1);
@@ -3837,7 +3857,7 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     std::string schema_string = generate_collection_schema(
         knowhere::metric::L2, DIM, VectorType::FloatVector);
     auto collection = NewCollection(schema_string.c_str());
-    auto schema = ((segcore::Collection*)collection)->get_schema();
+    auto schema = ((base::Collection*)collection)->get_schema();
     CSegmentInterface segment;
     auto status = NewSegment(collection, Sealed, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
@@ -3940,7 +3960,7 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
 
     auto query_dataset = knowhere::GenDataSet(num_queries, DIM, query_ptr);
     auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
-    SearchInfo search_info;
+    milvus::base::SearchInfo search_info;
     search_info.topk_ = TOPK;
     search_info.metric_type_ = knowhere::metric::L2;
     search_info.search_params_ = generate_search_conf(
@@ -3972,7 +3992,8 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
                                        &c_search_result_on_bigIndex);
     ASSERT_EQ(res_after_load_index.error_code, Success);
 
-    auto search_result_on_bigIndex = (SearchResult*)c_search_result_on_bigIndex;
+    auto search_result_on_bigIndex =
+        (milvus::base::SearchResult*)c_search_result_on_bigIndex;
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * TOPK;
         ASSERT_EQ(search_result_on_bigIndex->seg_offsets_[offset], BIAS + i);
@@ -3991,7 +4012,7 @@ TEST(CApiTest, SealedSegment_search_without_predicates) {
     std::string schema_string = generate_collection_schema(
         knowhere::metric::L2, DIM, VectorType::FloatVector);
     auto collection = NewCollection(schema_string.c_str());
-    auto schema = ((segcore::Collection*)collection)->get_schema();
+    auto schema = ((base::Collection*)collection)->get_schema();
     CSegmentInterface segment;
     auto status = NewSegment(collection, Sealed, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
@@ -4071,7 +4092,7 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     std::string schema_string = generate_collection_schema(
         knowhere::metric::L2, DIM, VectorType::FloatVector);
     auto collection = NewCollection(schema_string.c_str());
-    auto schema = ((segcore::Collection*)collection)->get_schema();
+    auto schema = ((base::Collection*)collection)->get_schema();
     CSegmentInterface segment;
     auto status = NewSegment(collection, Sealed, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
@@ -4191,7 +4212,8 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     auto query_dataset = knowhere::GenDataSet(num_queries, DIM, query_ptr);
     auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
-    SearchInfo search_info = search_plan->plan_node_->search_info_;
+    milvus::base::SearchInfo search_info =
+        search_plan->plan_node_->search_info_;
     auto result_on_index =
         vec_index->Query(query_dataset, search_info, nullptr);
     auto ids = result_on_index->seg_offsets_.data();
@@ -4211,7 +4233,8 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
                                        &c_search_result_on_bigIndex);
     ASSERT_EQ(res_after_load_index.error_code, Success);
 
-    auto search_result_on_bigIndex = (SearchResult*)c_search_result_on_bigIndex;
+    auto search_result_on_bigIndex =
+        (milvus::base::SearchResult*)c_search_result_on_bigIndex;
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * TOPK;
         ASSERT_EQ(search_result_on_bigIndex->seg_offsets_[offset], BIAS + i);
@@ -4285,7 +4308,7 @@ TEST(CApiTest, GrowingSegment_Load_Field_Data) {
 
     auto status = LoadFieldData(segment, &load_info);
     ASSERT_EQ(status.error_code, Success);
-    ASSERT_EQ(segment->get_real_count(), ROW_COUNT);
+    ASSERT_EQ(ROW_COUNT, milvus::query::GetRealCount(segment));
     ASSERT_NE(segment->get_field_avg_size(str_fid), 0);
 
     DeleteSegment(segment);
@@ -4456,7 +4479,7 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_WHEN_IP) {
     CSegmentInterface segment;
     auto status = NewSegment(c_collection, Growing, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
-    auto col = (milvus::segcore::Collection*)c_collection;
+    auto col = (milvus::base::Collection*)c_collection;
 
     int N = 10000;
     auto dataset = DataGen(col->get_schema(), N);
@@ -4521,7 +4544,7 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_IP) {
     CSegmentInterface segment;
     auto status = NewSegment(c_collection, Growing, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
-    auto col = (milvus::segcore::Collection*)c_collection;
+    auto col = (milvus::base::Collection*)c_collection;
 
     int N = 10000;
     auto dataset = DataGen(col->get_schema(), N);
@@ -4585,7 +4608,7 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_WHEN_L2) {
     CSegmentInterface segment;
     auto status = NewSegment(c_collection, Growing, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
-    auto col = (milvus::segcore::Collection*)c_collection;
+    auto col = (milvus::base::Collection*)c_collection;
 
     int N = 10000;
     auto dataset = DataGen(col->get_schema(), N);
@@ -4649,7 +4672,7 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_L2) {
     CSegmentInterface segment;
     auto status = NewSegment(c_collection, Growing, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
-    auto col = (milvus::segcore::Collection*)c_collection;
+    auto col = (milvus::base::Collection*)c_collection;
 
     int N = 10000;
     auto dataset = DataGen(col->get_schema(), N);
@@ -4863,7 +4886,7 @@ TEST(CApiTest, Indexing_Without_Predicate_float16) {
     std::string schema_string = generate_collection_schema(
         knowhere::metric::L2, DIM, VectorType::Float16Vector);
     auto collection = NewCollection(schema_string.c_str());
-    auto schema = ((segcore::Collection*)collection)->get_schema();
+    auto schema = ((base::Collection*)collection)->get_schema();
     CSegmentInterface segment;
     auto status = NewSegment(collection, Growing, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
@@ -4942,7 +4965,8 @@ TEST(CApiTest, Indexing_Without_Predicate_float16) {
     auto query_dataset = knowhere::GenDataSet(num_queries, DIM, query_ptr);
     auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
-    SearchInfo search_info = search_plan->plan_node_->search_info_;
+    milvus::base::SearchInfo search_info =
+        search_plan->plan_node_->search_info_;
     auto result_on_index =
         vec_index->Query(query_dataset, search_info, nullptr);
     auto ids = result_on_index->seg_offsets_.data();
@@ -4954,7 +4978,7 @@ TEST(CApiTest, Indexing_Without_Predicate_float16) {
     }
 
     auto search_result_on_raw_index =
-        (SearchResult*)c_search_result_on_smallIndex;
+        (milvus::base::SearchResult*)c_search_result_on_smallIndex;
     search_result_on_raw_index->seg_offsets_ = vec_ids;
     search_result_on_raw_index->distances_ = vec_dis;
 
@@ -4993,8 +5017,8 @@ TEST(CApiTest, Indexing_Without_Predicate_float16) {
 
     auto search_result_on_raw_index_json =
         SearchResultToJson(*search_result_on_raw_index);
-    auto search_result_on_bigIndex_json =
-        SearchResultToJson((*(SearchResult*)c_search_result_on_bigIndex));
+    auto search_result_on_bigIndex_json = SearchResultToJson(
+        (*(milvus::base::SearchResult*)c_search_result_on_bigIndex));
 
     ASSERT_EQ(search_result_on_raw_index_json.dump(1),
               search_result_on_bigIndex_json.dump(1));
@@ -5015,7 +5039,7 @@ TEST(CApiTest, Indexing_Without_Predicate_bfloat16) {
     std::string schema_string = generate_collection_schema(
         knowhere::metric::L2, DIM, VectorType::BFloat16Vector);
     auto collection = NewCollection(schema_string.c_str());
-    auto schema = ((segcore::Collection*)collection)->get_schema();
+    auto schema = ((base::Collection*)collection)->get_schema();
     CSegmentInterface segment;
     auto status = NewSegment(collection, Growing, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
@@ -5094,7 +5118,8 @@ TEST(CApiTest, Indexing_Without_Predicate_bfloat16) {
     auto query_dataset = knowhere::GenDataSet(num_queries, DIM, query_ptr);
     auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
-    SearchInfo search_info = search_plan->plan_node_->search_info_;
+    milvus::base::SearchInfo search_info =
+        search_plan->plan_node_->search_info_;
     auto result_on_index =
         vec_index->Query(query_dataset, search_info, nullptr);
     auto ids = result_on_index->seg_offsets_.data();
@@ -5106,7 +5131,7 @@ TEST(CApiTest, Indexing_Without_Predicate_bfloat16) {
     }
 
     auto search_result_on_raw_index =
-        (SearchResult*)c_search_result_on_smallIndex;
+        (milvus::base::SearchResult*)c_search_result_on_smallIndex;
     search_result_on_raw_index->seg_offsets_ = vec_ids;
     search_result_on_raw_index->distances_ = vec_dis;
 
@@ -5145,8 +5170,8 @@ TEST(CApiTest, Indexing_Without_Predicate_bfloat16) {
 
     auto search_result_on_raw_index_json =
         SearchResultToJson(*search_result_on_raw_index);
-    auto search_result_on_bigIndex_json =
-        SearchResultToJson((*(SearchResult*)c_search_result_on_bigIndex));
+    auto search_result_on_bigIndex_json = SearchResultToJson(
+        (*(milvus::base::SearchResult*)c_search_result_on_bigIndex));
 
     ASSERT_EQ(search_result_on_raw_index_json.dump(1),
               search_result_on_bigIndex_json.dump(1));
@@ -5166,7 +5191,7 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_IP_FLOAT16) {
     CSegmentInterface segment;
     auto status = NewSegment(c_collection, Growing, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
-    auto col = (milvus::segcore::Collection*)c_collection;
+    auto col = (milvus::base::Collection*)c_collection;
 
     int N = 10000;
     auto dataset = DataGen(col->get_schema(), N);
@@ -5231,7 +5256,7 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_IP_BFLOAT16) {
     CSegmentInterface segment;
     auto status = NewSegment(c_collection, Growing, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
-    auto col = (milvus::segcore::Collection*)c_collection;
+    auto col = (milvus::base::Collection*)c_collection;
 
     int N = 10000;
     auto dataset = DataGen(col->get_schema(), N);

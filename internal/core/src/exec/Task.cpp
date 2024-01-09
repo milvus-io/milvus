@@ -136,7 +136,7 @@ Task::Terminate(TaskState state) {
     }
 }
 
-RowVectorPtr
+milvus::base::RowVectorPtr
 Task::Next(ContinueFuture* future) {
     // NOTE: Task::Next is single-threaded execution
     AssertInfo(plan_fragment_.execution_strategy_ ==

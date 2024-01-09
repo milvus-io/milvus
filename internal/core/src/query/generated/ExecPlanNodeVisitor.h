@@ -14,7 +14,7 @@
 // DO NOT EDIT
 #include "common/Json.h"
 #include "query/PlanImpl.h"
-#include "segcore/SegmentGrowing.h"
+#include "segment/SegmentInterface.h"
 #include <utility>
 #include "PlanNodeVisitor.h"
 
@@ -38,7 +38,7 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
     visit(RetrievePlanNode& node) override;
 
  public:
-    ExecPlanNodeVisitor(const segcore::SegmentInterface& segment,
+    ExecPlanNodeVisitor(const segment::SegmentInterface& segment,
                         Timestamp timestamp,
                         const PlaceholderGroup* placeholder_group)
         : segment_(segment),
@@ -46,13 +46,13 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
           placeholder_group_(placeholder_group) {
     }
 
-    ExecPlanNodeVisitor(const segcore::SegmentInterface& segment,
+    ExecPlanNodeVisitor(const segment::SegmentInterface& segment,
                         Timestamp timestamp)
         : segment_(segment), timestamp_(timestamp) {
         placeholder_group_ = nullptr;
     }
 
-    SearchResult
+    milvus::base::SearchResult
     get_moved_result(PlanNode& node) {
         assert(!search_result_opt_.has_value());
         node.accept(*this);
@@ -63,7 +63,7 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
         return ret;
     }
 
-    RetrieveResult
+    milvus::base::RetrieveResult
     get_retrieve_result(PlanNode& node) {
         assert(!retrieve_result_opt_.has_value());
         std::cout.flush();
@@ -103,7 +103,7 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
     void
     ExecuteExprNodeInternal(
         const std::shared_ptr<milvus::plan::PlanNode>& plannode,
-        const milvus::segcore::SegmentInternalInterface* segment,
+        const milvus::segment::SegmentInternalInterface* segment,
         int64_t active_count,
         BitsetType& result,
         bool& cache_offset_getted,
@@ -111,7 +111,7 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
 
     void
     ExecuteExprNode(const std::shared_ptr<milvus::plan::PlanNode>& plannode,
-                    const milvus::segcore::SegmentInternalInterface* segment,
+                    const milvus::segment::SegmentInternalInterface* segment,
                     int64_t active_count,
                     BitsetType& result) {
         bool get_cache_offset;
@@ -130,12 +130,12 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
     VectorVisitorImpl(VectorPlanNode& node);
 
  private:
-    const segcore::SegmentInterface& segment_;
+    const segment::SegmentInterface& segment_;
     Timestamp timestamp_;
     const PlaceholderGroup* placeholder_group_;
 
-    SearchResultOpt search_result_opt_;
-    RetrieveResultOpt retrieve_result_opt_;
+    milvus::base::SearchResultOpt search_result_opt_;
+    milvus::base::RetrieveResultOpt retrieve_result_opt_;
     bool expr_use_pk_index_ = false;
     std::vector<int64_t> expr_cached_pk_id_offsets_;
 };

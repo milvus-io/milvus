@@ -21,10 +21,10 @@
 #include <vector>
 
 #include "common/Types.h"
-#include "common/Vector.h"
+#include "base/Vector.h"
 #include "expr/ITypeExpr.h"
 #include "common/EasyAssert.h"
-#include "segcore/SegmentInterface.h"
+#include "segment/SegmentInterface.h"
 
 namespace milvus {
 namespace plan {
@@ -73,7 +73,7 @@ class SegmentNode : public PlanNode {
  public:
     SegmentNode(
         const PlanNodeId& id,
-        const std::shared_ptr<milvus::segcore::SegmentInternalInterface>&
+        const std::shared_ptr<milvus::segment::SegmentInternalInterface>&
             segment)
         : PlanNode(id), segment_(segment) {
     }
@@ -99,13 +99,13 @@ class SegmentNode : public PlanNode {
     }
 
  private:
-    std::shared_ptr<milvus::segcore::SegmentInternalInterface> segment_;
+    std::shared_ptr<milvus::segment::SegmentInternalInterface> segment_;
 };
 
 class ValuesNode : public PlanNode {
  public:
     ValuesNode(const PlanNodeId& id,
-               const std::vector<RowVectorPtr>& values,
+               const std::vector<milvus::base::RowVectorPtr>& values,
                bool parallelizeable = false)
         : PlanNode(id),
           values_{std::move(values)},
@@ -114,7 +114,7 @@ class ValuesNode : public PlanNode {
     }
 
     ValuesNode(const PlanNodeId& id,
-               std::vector<RowVectorPtr>&& values,
+               std::vector<milvus::base::RowVectorPtr>&& values,
                bool parallelizeable = false)
         : PlanNode(id),
           values_{std::move(values)},
@@ -127,7 +127,7 @@ class ValuesNode : public PlanNode {
         return output_type_;
     }
 
-    const std::vector<RowVectorPtr>&
+    const std::vector<milvus::base::RowVectorPtr>&
     values() const {
         return values_;
     }
@@ -154,7 +154,7 @@ class ValuesNode : public PlanNode {
 
  private:
     DataType output_type_;
-    const std::vector<RowVectorPtr> values_;
+    const std::vector<milvus::base::RowVectorPtr> values_;
     bool parallelizable_;
 };
 

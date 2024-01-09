@@ -20,32 +20,33 @@
 
 #include "common/EasyAssert.h"
 #include "common/Types.h"
-#include "common/Vector.h"
+#include "base/Vector.h"
 #include "exec/expression/Expr.h"
-#include "segcore/SegmentInterface.h"
-#include "query/Utils.h"
 
 namespace milvus {
 namespace exec {
 
-static ColumnVectorPtr
-GetColumnVector(const VectorPtr& result) {
-    ColumnVectorPtr res;
-    if (auto convert_vector = std::dynamic_pointer_cast<ColumnVector>(result)) {
+static milvus::base::ColumnVectorPtr
+GetColumnVector(const milvus::base::VectorPtr& result) {
+    milvus::base::ColumnVectorPtr res;
+    if (auto convert_vector =
+            std::dynamic_pointer_cast<milvus::base::ColumnVector>(result)) {
         res = convert_vector;
     } else if (auto convert_vector =
-                   std::dynamic_pointer_cast<RowVector>(result)) {
-        if (auto convert_flat_vector = std::dynamic_pointer_cast<ColumnVector>(
-                convert_vector->child(0))) {
+                   std::dynamic_pointer_cast<milvus::base::RowVector>(result)) {
+        if (auto convert_flat_vector =
+                std::dynamic_pointer_cast<milvus::base::ColumnVector>(
+                    convert_vector->child(0))) {
             res = convert_flat_vector;
         } else {
-            PanicInfo(
-                UnexpectedError,
-                "RowVector result must have a first ColumnVector children");
+            PanicInfo(UnexpectedError,
+                      "milvus::base::RowVector result must have a first "
+                      "milvus::base::ColumnVector children");
         }
     } else {
         PanicInfo(UnexpectedError,
-                  "expr result must have a ColumnVector or RowVector result");
+                  "expr result must have a milvus::base::ColumnVector or "
+                  "milvus::base::RowVector result");
     }
     return res;
 }
@@ -120,7 +121,7 @@ GetValueFromProtoInternal(const milvus::proto::plan::GenericValue& value_proto,
         Assert(value_proto.val_case() ==
                milvus::proto::plan::GenericValue::kInt64Val);
         auto val = value_proto.int64_val();
-        if (milvus::query::out_of_range<T>(val)) {
+        if (milvus::out_of_range<T>(val)) {
             overflowed = true;
             return T();
         } else {

@@ -12,10 +12,10 @@
 #include <gtest/gtest.h>
 #include <vector>
 
-#include "segcore/TimestampIndex.h"
+#include "base/TimestampIndex.h"
 
 using namespace milvus;
-using namespace milvus::segcore;
+using namespace milvus::base;
 
 TEST(TimestampIndex, Naive) {
     SUCCEED();

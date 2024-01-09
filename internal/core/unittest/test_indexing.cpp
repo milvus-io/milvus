@@ -27,11 +27,10 @@
 #include "index/Index.h"
 #include "knowhere/comp/index_param.h"
 #include "nlohmann/json.hpp"
-#include "query/SearchBruteForce.h"
-#include "segcore/Reduce.h"
+#include "segment/SearchBruteForce.h"
+#include "base/Reduce.h"
 #include "index/IndexFactory.h"
-#include "common/QueryResult.h"
-#include "segcore/Types.h"
+#include "base/QueryResult.h"
 #include "storage/options.h"
 #include "test_utils/indexbuilder_test_utils.h"
 #include "test_utils/storage_test_utils.h"
@@ -41,7 +40,8 @@
 #include <boost/filesystem.hpp>
 
 using namespace milvus;
-using namespace milvus::segcore;
+using namespace milvus::base;
+using namespace milvus::segment;
 
 namespace {
 template <int DIM>
@@ -164,7 +164,7 @@ TEST(Indexing, BinaryBruteForce) {
     auto dataset = DataGen(schema, N, 10);
     auto bin_vec = dataset.get_col<uint8_t>(vec_fid);
     auto query_data = 1024 * dim / 8 + bin_vec.data();
-    query::dataset::SearchDataset search_dataset{
+    segment::dataset::SearchDataset search_dataset{
         metric_type,  //
         num_queries,  //
         topk,         //
@@ -173,14 +173,14 @@ TEST(Indexing, BinaryBruteForce) {
         query_data  //
     };
 
-    auto sub_result = query::BruteForceSearch(search_dataset,
-                                              bin_vec.data(),
-                                              N,
-                                              knowhere::Json(),
-                                              nullptr,
-                                              DataType::VECTOR_BINARY);
+    auto sub_result = segment::BruteForceSearch(search_dataset,
+                                                bin_vec.data(),
+                                                N,
+                                                knowhere::Json(),
+                                                nullptr,
+                                                DataType::VECTOR_BINARY);
 
-    SearchResult sr;
+    milvus::base::SearchResult sr;
     sr.total_nq_ = num_queries;
     sr.unity_topK_ = topk;
     sr.seg_offsets_ = std::move(sub_result.mutable_seg_offsets());
@@ -283,7 +283,7 @@ TEST(Indexing, Naive) {
     BitsetView view = bitmap;
     auto query_ds = knowhere::GenDataSet(1, DIM, raw_data.data());
 
-    milvus::SearchInfo searchInfo;
+    milvus::base::SearchInfo searchInfo;
     searchInfo.topk_ = TOPK;
     searchInfo.metric_type_ = knowhere::metric::L2;
     searchInfo.search_params_ = search_conf;
@@ -435,7 +435,7 @@ TEST_P(IndexTest, BuildAndQuery) {
     EXPECT_EQ(vec_index->Count(), NB);
     EXPECT_EQ(vec_index->GetDim(), DIM);
 
-    milvus::SearchInfo search_info;
+    milvus::base::SearchInfo search_info;
     search_info.topk_ = K;
     search_info.metric_type_ = metric_type;
     search_info.search_params_ = search_conf;
@@ -493,7 +493,7 @@ TEST_P(IndexTest, Mmap) {
     EXPECT_EQ(vec_index->Count(), NB);
     EXPECT_EQ(vec_index->GetDim(), DIM);
 
-    milvus::SearchInfo search_info;
+    milvus::base::SearchInfo search_info;
     search_info.topk_ = K;
     search_info.metric_type_ = metric_type;
     search_info.search_params_ = search_conf;
@@ -651,7 +651,7 @@ TEST(Indexing, SearchDiskAnnWithInvalidParam) {
     knowhere::DataSetPtr xq_dataset =
         knowhere::GenDataSet(NQ, DIM, xb_data.data() + DIM * query_offset);
 
-    milvus::SearchInfo search_info;
+    milvus::base::SearchInfo search_info;
     search_info.topk_ = K;
     search_info.metric_type_ = metric_type;
     search_info.search_params_ = milvus::Config{
@@ -731,7 +731,7 @@ TEST(Indexing, SearchDiskAnnWithInvalidParam) {
 //     knowhere::DataSetPtr xq_dataset =
 //         knowhere::GenDataSet(NQ, DIM, xb_data.data() + DIM * query_offset);
 
-//     milvus::SearchInfo search_info;
+//     milvus::base::SearchInfo search_info;
 //     search_info.topk_ = K;
 //     search_info.metric_type_ = metric_type;
 //     search_info.search_params_ = milvus::Config{
@@ -984,7 +984,7 @@ TEST_P(IndexTestV2, BuildAndQuery) {
     EXPECT_EQ(vec_index->Count(), NB);
     EXPECT_EQ(vec_index->GetDim(), DIM);
 
-    milvus::SearchInfo search_info;
+    milvus::base::SearchInfo search_info;
     search_info.topk_ = K;
     search_info.metric_type_ = metric_type;
     search_info.search_params_ = search_conf;

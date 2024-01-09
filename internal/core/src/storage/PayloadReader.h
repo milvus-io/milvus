@@ -19,7 +19,7 @@
 #include <memory>
 #include <parquet/arrow/reader.h>
 
-#include "common/FieldData.h"
+#include "base/FieldData.h"
 #include "storage/PayloadStream.h"
 
 namespace milvus::storage {
@@ -33,7 +33,7 @@ class PayloadReader {
     void
     init(std::shared_ptr<arrow::io::BufferReader> buffer);
 
-    const FieldDataPtr
+    const milvus::base::FieldDataPtr
     get_field_data() const {
         return field_data_;
     }
@@ -41,7 +41,7 @@ class PayloadReader {
  private:
     DataType column_type_;
     int dim_;
-    FieldDataPtr field_data_;
+    milvus::base::FieldDataPtr field_data_;
 };
 
 }  // namespace milvus::storage

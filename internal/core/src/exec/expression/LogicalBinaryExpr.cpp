@@ -20,13 +20,13 @@ namespace milvus {
 namespace exec {
 
 void
-PhyLogicalBinaryExpr::Eval(EvalCtx& context, VectorPtr& result) {
+PhyLogicalBinaryExpr::Eval(EvalCtx& context, milvus::base::VectorPtr& result) {
     AssertInfo(inputs_.size() == 2,
                "logical binary expr must has two input, but now {}",
                inputs_.size());
-    VectorPtr left;
+    milvus::base::VectorPtr left;
     inputs_[0]->Eval(context, left);
-    VectorPtr right;
+    milvus::base::VectorPtr right;
     inputs_[1]->Eval(context, right);
     auto lflat = GetColumnVector(left);
     auto rflat = GetColumnVector(right);

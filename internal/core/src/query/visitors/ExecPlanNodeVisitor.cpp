@@ -14,15 +14,12 @@
 #include <utility>
 
 #include "query/PlanImpl.h"
-#include "query/SubSearchResult.h"
 #include "query/generated/ExecExprVisitor.h"
-#include "query/Utils.h"
-#include "segcore/SegmentGrowing.h"
+#include "segment/SegmentInterface.h"
 #include "common/Json.h"
 #include "log/Log.h"
 #include "plan/PlanNode.h"
 #include "exec/Task.h"
-#include "segcore/SegmentInterface.h"
 #include "query/GroupByOperator.h"
 
 namespace milvus::query {
@@ -32,7 +29,7 @@ namespace impl {
 // WILL BE USED BY GENERATOR UNDER suvlim/core_gen/
 class ExecPlanNodeVisitor : PlanNodeVisitor {
  public:
-    ExecPlanNodeVisitor(const segcore::SegmentInterface& segment,
+    ExecPlanNodeVisitor(const segment::SegmentInterface& segment,
                         Timestamp timestamp,
                         const PlaceholderGroup& placeholder_group)
         : segment_(segment),
@@ -40,7 +37,7 @@ class ExecPlanNodeVisitor : PlanNodeVisitor {
           placeholder_group_(placeholder_group) {
     }
 
-    SearchResult
+    milvus::base::SearchResult
     get_moved_result(PlanNode& node) {
         assert(!search_result_opt_.has_value());
         node.accept(*this);
@@ -56,17 +53,18 @@ class ExecPlanNodeVisitor : PlanNodeVisitor {
     VectorVisitorImpl(VectorPlanNode& node);
 
  private:
-    const segcore::SegmentInterface& segment_;
+    const segment::SegmentInterface& segment_;
     Timestamp timestamp_;
     const PlaceholderGroup& placeholder_group_;
 
-    SearchResultOpt search_result_opt_;
+    milvus::base::SearchResultOpt search_result_opt_;
 };
 }  // namespace impl
 
-static SearchResult
-empty_search_result(int64_t num_queries, SearchInfo& search_info) {
-    SearchResult final_result;
+static milvus::base::SearchResult
+empty_search_result(int64_t num_queries,
+                    milvus::base::SearchInfo& search_info) {
+    milvus::base::SearchResult final_result;
     final_result.total_nq_ = num_queries;
     final_result.unity_topK_ = 0;  // no result
     return final_result;
@@ -75,7 +73,7 @@ empty_search_result(int64_t num_queries, SearchInfo& search_info) {
 void
 ExecPlanNodeVisitor::ExecuteExprNodeInternal(
     const std::shared_ptr<milvus::plan::PlanNode>& plannode,
-    const milvus::segcore::SegmentInternalInterface* segment,
+    const milvus::segment::SegmentInternalInterface* segment,
     int64_t active_count,
     BitsetType& bitset_holder,
     bool& cache_offset_getted,
@@ -101,21 +99,25 @@ ExecPlanNodeVisitor::ExecuteExprNodeInternal(
         AssertInfo(childrens.size() == 1,
                    "expr result vector's children size not equal one");
         LOG_DEBUG("output result length:{}", childrens[0]->size());
-        if (auto vec = std::dynamic_pointer_cast<ColumnVector>(childrens[0])) {
-            AppendOneChunk(bitset_holder,
-                           static_cast<bool*>(vec->GetRawData()),
-                           vec->size());
+        if (auto vec = std::dynamic_pointer_cast<milvus::base::ColumnVector>(
+                childrens[0])) {
+            milvus::AppendOneChunk(bitset_holder,
+                                   static_cast<bool*>(vec->GetRawData()),
+                                   vec->size());
         } else if (auto row =
-                       std::dynamic_pointer_cast<RowVector>(childrens[0])) {
+                       std::dynamic_pointer_cast<milvus::base::RowVector>(
+                           childrens[0])) {
             auto bit_vec =
-                std::dynamic_pointer_cast<ColumnVector>(row->child(0));
-            AppendOneChunk(bitset_holder,
-                           static_cast<bool*>(bit_vec->GetRawData()),
-                           bit_vec->size());
+                std::dynamic_pointer_cast<milvus::base::ColumnVector>(
+                    row->child(0));
+            milvus::AppendOneChunk(bitset_holder,
+                                   static_cast<bool*>(bit_vec->GetRawData()),
+                                   bit_vec->size());
             if (!cache_offset_getted) {
                 // offset cache only get once because not support iterator batch
                 auto cache_offset_vec =
-                    std::dynamic_pointer_cast<ColumnVector>(row->child(1));
+                    std::dynamic_pointer_cast<milvus::base::ColumnVector>(
+                        row->child(1));
                 // If get empty cached offsets. mean no record hits in this segment
                 // no need to get next batch.
                 if (cache_offset_vec->size() == 0) {
@@ -145,9 +147,9 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
     // TODO: optimize here, remove the dynamic cast
     assert(!search_result_opt_.has_value());
     auto segment =
-        dynamic_cast<const segcore::SegmentInternalInterface*>(&segment_);
+        dynamic_cast<const segment::SegmentInternalInterface*>(&segment_);
     AssertInfo(segment, "support SegmentSmallIndex Only");
-    SearchResult search_result;
+    milvus::base::SearchResult search_result;
     auto& ph = placeholder_group_->at(0);
     auto src_data = ph.get_blob<EmbeddedType<VectorType>>();
     auto num_queries = ph.num_of_queries_;
@@ -207,9 +209,9 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
     search_result_opt_ = std::move(search_result);
 }
 
-std::unique_ptr<RetrieveResult>
+std::unique_ptr<milvus::base::RetrieveResult>
 wrap_num_entities(int64_t cnt) {
-    auto retrieve_result = std::make_unique<RetrieveResult>();
+    auto retrieve_result = std::make_unique<milvus::base::RetrieveResult>();
     DataArray arr;
     arr.set_type(milvus::proto::schema::Int64);
     auto scalar = arr.mutable_scalars();
@@ -222,9 +224,9 @@ void
 ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
     assert(!retrieve_result_opt_.has_value());
     auto segment =
-        dynamic_cast<const segcore::SegmentInternalInterface*>(&segment_);
+        dynamic_cast<const segment::SegmentInternalInterface*>(&segment_);
     AssertInfo(segment, "Support SegmentSmallIndex Only");
-    RetrieveResult retrieve_result;
+    milvus::base::RetrieveResult retrieve_result;
 
     auto active_count = segment->get_active_count(timestamp_);
 

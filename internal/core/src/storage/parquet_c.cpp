@@ -17,7 +17,7 @@
 #include <mutex>
 
 #include "common/EasyAssert.h"
-#include "common/FieldData.h"
+#include "base/FieldData.h"
 #include "storage/parquet_c.h"
 #include "storage/PayloadReader.h"
 #include "storage/PayloadWriter.h"

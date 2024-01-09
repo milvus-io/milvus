@@ -20,11 +20,9 @@
 
 #include "common/EasyAssert.h"
 #include "common/Types.h"
-#include "common/Vector.h"
+#include "base/Vector.h"
 #include "exec/expression/Expr.h"
 #include "index/Meta.h"
-#include "segcore/SegmentInterface.h"
-#include "query/Utils.h"
 
 namespace milvus {
 namespace exec {
@@ -50,7 +48,7 @@ struct UnaryElementFunc {
             } else if constexpr (op == proto::plan::OpType::LessEqual) {
                 res[i] = src[i] <= val;
             } else if constexpr (op == proto::plan::OpType::PrefixMatch) {
-                res[i] = milvus::query::Match(
+                res[i] = milvus::Match(
                     src[i], val, proto::plan::OpType::PrefixMatch);
             } else {
                 PanicInfo(
@@ -119,7 +117,7 @@ struct UnaryElementFuncForArray {
             } else if constexpr (op == proto::plan::OpType::LessEqual) {
                 UnaryArrayCompare(array_data <= val);
             } else if constexpr (op == proto::plan::OpType::PrefixMatch) {
-                UnaryArrayCompare(milvus::query::Match(array_data, val, op));
+                UnaryArrayCompare(milvus::Match(array_data, val, op));
             } else {
                 PanicInfo(OpTypeInvalid,
                           "unsupported op_type:{} for "
@@ -170,7 +168,7 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
         const std::vector<std::shared_ptr<Expr>>& input,
         const std::shared_ptr<const milvus::expr::UnaryRangeFilterExpr>& expr,
         const std::string& name,
-        const segcore::SegmentInternalInterface* segment,
+        const segment::SegmentInternalInterface* segment,
         int64_t active_count,
         int64_t batch_size)
         : SegmentExpr(std::move(input),
@@ -183,37 +181,37 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     }
 
     void
-    Eval(EvalCtx& context, VectorPtr& result) override;
+    Eval(EvalCtx& context, milvus::base::VectorPtr& result) override;
 
  private:
     template <typename T>
-    VectorPtr
+    milvus::base::VectorPtr
     ExecRangeVisitorImpl();
 
     template <typename T>
-    VectorPtr
+    milvus::base::VectorPtr
     ExecRangeVisitorImplForIndex();
 
     template <typename T>
-    VectorPtr
+    milvus::base::VectorPtr
     ExecRangeVisitorImplForData();
 
     template <typename ExprValueType>
-    VectorPtr
+    milvus::base::VectorPtr
     ExecRangeVisitorImplJson();
 
     template <typename ExprValueType>
-    VectorPtr
+    milvus::base::VectorPtr
     ExecRangeVisitorImplArray();
 
     // Check overflow and cache result for performace
     template <typename T>
-    ColumnVectorPtr
+    milvus::base::ColumnVectorPtr
     PreCheckOverflow();
 
  private:
     std::shared_ptr<const milvus::expr::UnaryRangeFilterExpr> expr_;
-    ColumnVectorPtr cached_overflow_res_{nullptr};
+    milvus::base::ColumnVectorPtr cached_overflow_res_{nullptr};
     int64_t overflow_check_pos_{0};
 };
 }  // namespace exec

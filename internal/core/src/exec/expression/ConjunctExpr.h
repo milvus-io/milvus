@@ -20,9 +20,8 @@
 
 #include "common/EasyAssert.h"
 #include "common/Types.h"
-#include "common/Vector.h"
+#include "base/Vector.h"
 #include "exec/expression/Expr.h"
-#include "segcore/SegmentInterface.h"
 
 namespace milvus {
 namespace exec {
@@ -30,7 +29,8 @@ namespace exec {
 template <bool is_and>
 struct ConjunctElementFunc {
     int64_t
-    operator()(ColumnVectorPtr& input_result, ColumnVectorPtr& result) {
+    operator()(milvus::base::ColumnVectorPtr& input_result,
+               milvus::base::ColumnVectorPtr& result) {
         bool* input_data = static_cast<bool*>(input_result->GetRawData());
         bool* res_data = static_cast<bool*>(result->GetRawData());
         int64_t activate_rows = 0;
@@ -68,7 +68,7 @@ class PhyConjunctFilterExpr : public Expr {
     }
 
     void
-    Eval(EvalCtx& context, VectorPtr& result) override;
+    Eval(EvalCtx& context, milvus::base::VectorPtr& result) override;
 
     void
     MoveCursor() override {
@@ -79,15 +79,15 @@ class PhyConjunctFilterExpr : public Expr {
 
  private:
     int64_t
-    UpdateResult(ColumnVectorPtr& input_result,
+    UpdateResult(milvus::base::ColumnVectorPtr& input_result,
                  EvalCtx& ctx,
-                 ColumnVectorPtr& result);
+                 milvus::base::ColumnVectorPtr& result);
 
     static DataType
     ResolveType(const std::vector<DataType>& inputs);
 
     bool
-    CanSkipFollowingExprs(ColumnVectorPtr& vec);
+    CanSkipFollowingExprs(milvus::base::ColumnVectorPtr& vec);
 
     void
     SkipFollowingExprs(int start);

@@ -11,12 +11,12 @@
 
 #include <gtest/gtest.h>
 
-#include "common/LoadInfo.h"
+#include "base/LoadInfo.h"
 #include "common/Types.h"
 #include "index/IndexFactory.h"
 #include "knowhere/comp/index_param.h"
 #include "query/ExprImpl.h"
-#include "segcore/Reduce.h"
+#include "base/Reduce.h"
 #include "segcore/reduce_c.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/PbHelper.h"
@@ -26,29 +26,30 @@
 #include "pb/plan.pb.h"
 #include "query/Expr.h"
 #include "query/Plan.h"
-#include "query/Utils.h"
 #include "query/PlanImpl.h"
 #include "query/PlanNode.h"
 #include "query/PlanProto.h"
-#include "query/SearchBruteForce.h"
 #include "query/generated/ExecPlanNodeVisitor.h"
 #include "query/generated/PlanNodeVisitor.h"
 #include "query/generated/ExecExprVisitor.h"
 #include "query/generated/ExprVisitor.h"
 #include "query/generated/ShowPlanNodeVisitor.h"
-#include "segcore/Collection.h"
-#include "segcore/SegmentSealed.h"
-#include "segcore/SegmentGrowing.h"
-#include "segcore/SegmentGrowingImpl.h"
+#include "query/QueryInterface.h"
+#include "base/Collection.h"
+#include "segment/SegmentSealed.h"
+#include "segment/SegmentGrowing.h"
+#include "segment/SegmentGrowingImpl.h"
+#include "segment/SearchBruteForce.h"
 #include "test_utils/AssertUtils.h"
 #include "test_utils/DataGen.h"
 
-using namespace milvus::segcore;
+using namespace milvus::base;
+using namespace milvus::segment;
 using namespace milvus;
 using namespace milvus::index;
 using namespace knowhere;
+using milvus::index::LoadIndexInfo;
 using milvus::index::VectorIndex;
-using milvus::segcore::LoadIndexInfo;
 
 const int64_t ROW_COUNT = 100 * 1000;
 
@@ -94,7 +95,7 @@ const int64_t ROW_COUNT = 100 * 1000;
 
 TEST(Float16, ShowExecutor) {
     using namespace milvus::query;
-    using namespace milvus::segcore;
+    using namespace milvus::base;
     using namespace milvus;
     auto metric_type = knowhere::metric::L2;
     auto node = std::make_unique<Float16VectorANNS>();
@@ -117,7 +118,7 @@ TEST(Float16, ShowExecutor) {
 
 TEST(Float16, ExecWithoutPredicateFlat) {
     using namespace milvus::query;
-    using namespace milvus::segcore;
+    using namespace milvus::base;
     using namespace milvus;
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugField(
@@ -154,7 +155,8 @@ TEST(Float16, ExecWithoutPredicateFlat) {
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
     Timestamp timestamp = 1000000;
-    auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
+    auto sr = milvus::query::Search(
+        segment.get(), plan.get(), ph_group.get(), timestamp);
     std::vector<std::vector<std::string>> results;
     auto json = SearchResultToJson(*sr);
     std::cout << json.dump(2);
@@ -173,14 +175,16 @@ TEST(Float16, GetVector) {
         {"metric_type", metricType},
         {"nlist", "128"}};
     std::map<std::string, std::string> type_params = {{"dim", "128"}};
-    FieldIndexMeta fieldIndexMeta(
+    milvus::base::FieldIndexMeta fieldIndexMeta(
         vec, std::move(index_params), std::move(type_params));
     auto config = SegcoreConfig::default_config();
     config.set_chunk_rows(1024);
     config.set_enable_interim_segment_index(true);
-    std::map<FieldId, FieldIndexMeta> filedMap = {{vec, fieldIndexMeta}};
-    IndexMetaPtr metaPtr =
-        std::make_shared<CollectionIndexMeta>(100000, std::move(filedMap));
+    std::map<FieldId, milvus::base::FieldIndexMeta> filedMap = {
+        {vec, fieldIndexMeta}};
+    milvus::base::IndexMetaPtr metaPtr =
+        std::make_shared<milvus::base::CollectionIndexMeta>(
+            100000, std::move(filedMap));
     auto segment_growing = CreateGrowingSegment(schema, metaPtr, 1, config);
     auto segment = dynamic_cast<SegmentGrowingImpl*>(segment_growing.get());
 
@@ -247,8 +251,8 @@ TEST(Float16, RetrieveEmpty) {
     std::vector<FieldId> target_offsets{fid_64, fid_vec};
     plan->field_ids_ = target_offsets;
 
-    auto retrieve_results =
-        segment->Retrieve(plan.get(), 100, DEFAULT_MAX_OUTPUT_SIZE);
+    auto retrieve_results = milvus::query::Retrieve(
+        segment.get(), plan.get(), 100, DEFAULT_MAX_OUTPUT_SIZE);
 
     Assert(retrieve_results->fields_data_size() == target_offsets.size());
     auto field0 = retrieve_results->fields_data(0);
@@ -261,7 +265,7 @@ TEST(Float16, RetrieveEmpty) {
 
 TEST(Float16, ExecWithPredicate) {
     using namespace milvus::query;
-    using namespace milvus::segcore;
+    using namespace milvus::base;
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT16, 16, knowhere::metric::L2);
@@ -312,7 +316,8 @@ TEST(Float16, ExecWithPredicate) {
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
-    auto sr = segment->Search(plan.get(), ph_group.get(), 1L << 63);
+    auto sr = milvus::query::Search(
+        segment.get(), plan.get(), ph_group.get(), 1L << 63);
     int topk = 5;
 
     query::Json json = SearchResultToJson(*sr);
@@ -361,7 +366,6 @@ TEST(Float16, ExecWithPredicate) {
 
 TEST(BFloat16, ShowExecutor) {
     using namespace milvus::query;
-    using namespace milvus::segcore;
     using namespace milvus;
     auto metric_type = knowhere::metric::L2;
     auto node = std::make_unique<BFloat16VectorANNS>();
@@ -384,7 +388,6 @@ TEST(BFloat16, ShowExecutor) {
 
 TEST(BFloat16, ExecWithoutPredicateFlat) {
     using namespace milvus::query;
-    using namespace milvus::segcore;
     using namespace milvus;
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugField(
@@ -421,7 +424,8 @@ TEST(BFloat16, ExecWithoutPredicateFlat) {
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
     Timestamp timestamp = 1000000;
-    auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
+    auto sr = milvus::query::Search(
+        segment.get(), plan.get(), ph_group.get(), timestamp);
 
     std::vector<std::vector<std::string>> results;
     auto json = SearchResultToJson(*sr);
@@ -441,14 +445,16 @@ TEST(BFloat16, GetVector) {
         {"metric_type", metricType},
         {"nlist", "128"}};
     std::map<std::string, std::string> type_params = {{"dim", "128"}};
-    FieldIndexMeta fieldIndexMeta(
+    milvus::base::FieldIndexMeta fieldIndexMeta(
         vec, std::move(index_params), std::move(type_params));
     auto config = SegcoreConfig::default_config();
     config.set_chunk_rows(1024);
     config.set_enable_interim_segment_index(true);
-    std::map<FieldId, FieldIndexMeta> filedMap = {{vec, fieldIndexMeta}};
-    IndexMetaPtr metaPtr =
-        std::make_shared<CollectionIndexMeta>(100000, std::move(filedMap));
+    std::map<FieldId, milvus::base::FieldIndexMeta> filedMap = {
+        {vec, fieldIndexMeta}};
+    milvus::base::IndexMetaPtr metaPtr =
+        std::make_shared<milvus::base::CollectionIndexMeta>(
+            100000, std::move(filedMap));
     auto segment_growing = CreateGrowingSegment(schema, metaPtr, 1, config);
     auto segment = dynamic_cast<SegmentGrowingImpl*>(segment_growing.get());
 
@@ -511,8 +517,8 @@ TEST(BFloat16, RetrieveEmpty) {
     std::vector<FieldId> target_offsets{fid_64, fid_vec};
     plan->field_ids_ = target_offsets;
 
-    auto retrieve_results =
-        segment->Retrieve(plan.get(), 100, DEFAULT_MAX_OUTPUT_SIZE);
+    auto retrieve_results = milvus::query::Retrieve(
+        segment.get(), plan.get(), 100, DEFAULT_MAX_OUTPUT_SIZE);
 
     Assert(retrieve_results->fields_data_size() == target_offsets.size());
     auto field0 = retrieve_results->fields_data(0);
@@ -525,7 +531,6 @@ TEST(BFloat16, RetrieveEmpty) {
 
 TEST(BFloat16, ExecWithPredicate) {
     using namespace milvus::query;
-    using namespace milvus::segcore;
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField(
         "fakevec", DataType::VECTOR_BFLOAT16, 16, knowhere::metric::L2);
@@ -576,7 +581,8 @@ TEST(BFloat16, ExecWithPredicate) {
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
     Timestamp timestamp = 1000000;
-    auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
+    auto sr = milvus::query::Search(
+        segment.get(), plan.get(), ph_group.get(), timestamp);
     int topk = 5;
 
     query::Json json = SearchResultToJson(*sr);

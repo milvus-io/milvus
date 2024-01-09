@@ -199,7 +199,7 @@ InvertedIndexTantivy<T>::BuildV2(const Config& config) {
         PanicInfo(S3Error, "failed to create scan iterator");
     }
     auto reader = res.value();
-    std::vector<FieldDataPtr> field_datas;
+    std::vector<milvus::base::FieldDataPtr> field_datas;
     for (auto rec = reader->Next(); rec != nullptr; rec = reader->Next()) {
         if (!rec.ok()) {
             PanicInfo(DataFormatBroken, "failed to read data");

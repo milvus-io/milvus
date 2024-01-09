@@ -24,7 +24,7 @@
 #include <string>
 #include <vector>
 
-#include "common/FieldMeta.h"
+#include "base/FieldMeta.h"
 #include "mmap/Types.h"
 #include "storage/Util.h"
 #include "common/File.h"
@@ -32,7 +32,7 @@
 namespace milvus {
 
 inline size_t
-GetDataSize(const std::vector<FieldDataPtr>& datas) {
+GetDataSize(const std::vector<milvus::base::FieldDataPtr>& datas) {
     size_t total_size{0};
     for (const auto& data : datas) {
         total_size += data->Size();
@@ -42,7 +42,9 @@ GetDataSize(const std::vector<FieldDataPtr>& datas) {
 }
 
 inline void*
-FillField(DataType data_type, const FieldDataPtr& data, void* dst) {
+FillField(DataType data_type,
+          const milvus::base::FieldDataPtr& data,
+          void* dst) {
     char* dest = reinterpret_cast<char*>(dst);
     if (datatype_is_variable(data_type)) {
         switch (data_type) {
@@ -80,7 +82,7 @@ FillField(DataType data_type, const FieldDataPtr& data, void* dst) {
 inline size_t
 WriteFieldData(File& file,
                DataType data_type,
-               const FieldDataPtr& data,
+               const milvus::base::FieldDataPtr& data,
                std::vector<std::vector<uint64_t>>& element_indices) {
     size_t total_written{0};
     if (datatype_is_variable(data_type)) {

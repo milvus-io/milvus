@@ -8,7 +8,7 @@
 4. `Search(plan, placeholderGroup, timestamp) -> QueryResult`: Perform search operations according to the plan containing search parameters and predicate conditions, and return search results. Ensure that the time of all search results is before the specified timestamp(MVCC)
 5. `FillTargetEntry(plan, &queryResult)`: Fill the missing column data for search results based on target columns in the plan
 
-See design details `${milvus_root}/internal/core/src/segcore/SegmentInterface.h`
+See design details `${milvus_root}/internal/core/src/segment/SegmentInterface.h`
 
 ## Basic Concepts：
 

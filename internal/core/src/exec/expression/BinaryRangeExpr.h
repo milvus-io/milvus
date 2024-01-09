@@ -20,9 +20,8 @@
 
 #include "common/EasyAssert.h"
 #include "common/Types.h"
-#include "common/Vector.h"
+#include "base/Vector.h"
 #include "exec/expression/Expr.h"
-#include "segcore/SegmentInterface.h"
 
 namespace milvus {
 namespace exec {
@@ -168,7 +167,7 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
         const std::vector<std::shared_ptr<Expr>>& input,
         const std::shared_ptr<const milvus::expr::BinaryRangeFilterExpr>& expr,
         const std::string& name,
-        const segcore::SegmentInternalInterface* segment,
+        const segment::SegmentInternalInterface* segment,
         int64_t active_count,
         int64_t batch_size)
         : SegmentExpr(std::move(input),
@@ -181,7 +180,7 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
     }
 
     void
-    Eval(EvalCtx& context, VectorPtr& result) override;
+    Eval(EvalCtx& context, milvus::base::VectorPtr& result) override;
 
  private:
     // Check overflow and cache result for performace
@@ -193,35 +192,35 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
             std::is_integral_v<IndexInnerType> && !std::is_same_v<bool, T>,
             int64_t,
             IndexInnerType>>
-    ColumnVectorPtr
+    milvus::base::ColumnVectorPtr
     PreCheckOverflow(HighPrecisionType& val1,
                      HighPrecisionType& val2,
                      bool& lower_inclusive,
                      bool& upper_inclusive);
 
     template <typename T>
-    VectorPtr
+    milvus::base::VectorPtr
     ExecRangeVisitorImpl();
 
     template <typename T>
-    VectorPtr
+    milvus::base::VectorPtr
     ExecRangeVisitorImplForIndex();
 
     template <typename T>
-    VectorPtr
+    milvus::base::VectorPtr
     ExecRangeVisitorImplForData();
 
     template <typename ValueType>
-    VectorPtr
+    milvus::base::VectorPtr
     ExecRangeVisitorImplForJson();
 
     template <typename ValueType>
-    VectorPtr
+    milvus::base::VectorPtr
     ExecRangeVisitorImplForArray();
 
  private:
     std::shared_ptr<const milvus::expr::BinaryRangeFilterExpr> expr_;
-    ColumnVectorPtr cached_overflow_res_{nullptr};
+    milvus::base::ColumnVectorPtr cached_overflow_res_{nullptr};
     int64_t overflow_check_pos_{0};
 };
 }  //namespace exec

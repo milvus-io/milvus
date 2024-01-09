@@ -15,45 +15,21 @@
 #include "knowhere/comp/index_param.h"
 #include "query/Expr.h"
 #include "query/ExprImpl.h"
-#include "segcore/ScalarIndex.h"
+#include "query/QueryInterface.h"
 #include "test_utils/DataGen.h"
 #include "exec/expression/Expr.h"
 #include "plan/PlanNode.h"
 
 using namespace milvus;
-using namespace milvus::segcore;
+using namespace milvus::base;
+using namespace milvus::segment;
 
 std::unique_ptr<proto::segcore::RetrieveResults>
-RetrieveUsingDefaultOutputSize(SegmentInterface* segment,
+RetrieveUsingDefaultOutputSize(SegmentInternalInterface* segment,
                                const query::RetrievePlan* plan,
                                Timestamp timestamp) {
-    return segment->Retrieve(plan, timestamp, DEFAULT_MAX_OUTPUT_SIZE);
-}
-
-TEST(Retrieve, ScalarIndex) {
-    SUCCEED();
-    auto index = std::make_unique<ScalarIndexVector>();
-    std::vector<int64_t> data;
-    int N = 1000;
-    auto req_ids = std::make_unique<IdArray>();
-    auto req_ids_arr = req_ids->mutable_int_id();
-
-    for (int i = 0; i < N; ++i) {
-        data.push_back(i * 3 % N);
-        req_ids_arr->add_data(i);
-    }
-    index->append_data(data.data(), N, SegOffset(10000));
-    index->build();
-
-    auto [res_ids, res_offsets] = index->do_search_ids(*req_ids);
-    auto res_ids_arr = res_ids->int_id();
-
-    for (int i = 0; i < N; ++i) {
-        auto res_offset = res_offsets[i].get() - 10000;
-        auto res_id = res_ids_arr.data(i);
-        auto std_id = (res_offset * 3 % N);
-        ASSERT_EQ(res_id, std_id);
-    }
+    return milvus::query::Retrieve(
+        segment, plan, timestamp, DEFAULT_MAX_OUTPUT_SIZE);
 }
 
 TEST(Retrieve, AutoID) {
@@ -304,10 +280,11 @@ TEST(Retrieve, Limit) {
     // test query results exceed the limit size
     std::vector<FieldId> target_fields{TimestampFieldID, fid_64, fid_vec};
     plan->field_ids_ = target_fields;
-    EXPECT_THROW(segment->Retrieve(plan.get(), N, 1), std::runtime_error);
+    EXPECT_THROW(milvus::query::Retrieve(segment.get(), plan.get(), N, 1),
+                 std::runtime_error);
 
-    auto retrieve_results =
-        segment->Retrieve(plan.get(), N, DEFAULT_MAX_OUTPUT_SIZE);
+    auto retrieve_results = milvus::query::Retrieve(
+        segment.get(), plan.get(), N, DEFAULT_MAX_OUTPUT_SIZE);
     Assert(retrieve_results->fields_data_size() == target_fields.size());
     auto field0 = retrieve_results->fields_data(0);
     auto field2 = retrieve_results->fields_data(2);
@@ -353,10 +330,11 @@ TEST(Retrieve, FillEntry) {
                                        fid_vec32,
                                        fid_vecbin};
     plan->field_ids_ = target_fields;
-    EXPECT_THROW(segment->Retrieve(plan.get(), N, 1), std::runtime_error);
+    EXPECT_THROW(milvus::query::Retrieve(segment.get(), plan.get(), N, 1),
+                 std::runtime_error);
 
-    auto retrieve_results =
-        segment->Retrieve(plan.get(), N, DEFAULT_MAX_OUTPUT_SIZE);
+    auto retrieve_results = milvus::query::Retrieve(
+        segment.get(), plan.get(), N, DEFAULT_MAX_OUTPUT_SIZE);
     Assert(retrieve_results->fields_data_size() == target_fields.size());
 }
 
@@ -506,7 +484,8 @@ TEST(Retrieve, Delete) {
 
         std::vector<Timestamp> timestamps{10, 10, 10, 10, 10};
 
-        LoadDeletedRecordInfo info = {timestamps.data(), ids.get(), row_count};
+        milvus::base::LoadDeletedRecordInfo info = {
+            timestamps.data(), ids.get(), row_count};
         segment->LoadDeletedRecord(info);
         row_count = 5;
     }

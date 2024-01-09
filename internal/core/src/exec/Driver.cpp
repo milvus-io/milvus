@@ -78,7 +78,7 @@ Driver::Enqueue(std::shared_ptr<Driver> driver) {
 void
 Driver::Run(std::shared_ptr<Driver> self) {
     std::shared_ptr<BlockingState> blocking_state;
-    RowVectorPtr result;
+    milvus::base::RowVectorPtr result;
     auto reason = self->RunInternal(self, blocking_state, result);
 
     AssertInfo(result == nullptr,
@@ -129,11 +129,11 @@ Driver::Close() {
     Task::RemoveDriver(ctx_->task_, this);
 }
 
-RowVectorPtr
+milvus::base::RowVectorPtr
 Driver::Next(std::shared_ptr<BlockingState>& blocking_state) {
     auto self = shared_from_this();
 
-    RowVectorPtr result;
+    milvus::base::RowVectorPtr result;
     auto stop = RunInternal(self, blocking_state, result);
 
     Assert(stop == StopReason::kBlock || stop == StopReason::kAtEnd ||
@@ -167,7 +167,7 @@ Driver::Next(std::shared_ptr<BlockingState>& blocking_state) {
 StopReason
 Driver::RunInternal(std::shared_ptr<Driver>& self,
                     std::shared_ptr<BlockingState>& blocking_state,
-                    RowVectorPtr& result) {
+                    milvus::base::RowVectorPtr& result) {
     try {
         int num_operators = operators_.size();
         ContinueFuture future;
@@ -203,7 +203,7 @@ Driver::RunInternal(std::shared_ptr<Driver>& self,
                                   next_op,
                                   "NeedInput");
                     if (needs_input) {
-                        RowVectorPtr result;
+                        milvus::base::RowVectorPtr result;
                         {
                             CALL_OPERATOR(
                                 result = op->GetOutput(), op, "GetOutput");

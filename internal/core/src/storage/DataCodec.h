@@ -20,7 +20,7 @@
 #include <memory>
 #include <utility>
 
-#include "common/FieldData.h"
+#include "base/FieldData.h"
 #include "storage/Types.h"
 #include "storage/PayloadStream.h"
 #include "storage/BinlogReader.h"
@@ -29,7 +29,7 @@ namespace milvus::storage {
 
 class DataCodec {
  public:
-    explicit DataCodec(FieldDataPtr data, CodecType type)
+    explicit DataCodec(milvus::base::FieldDataPtr data, CodecType type)
         : field_data_(std::move(data)), codec_type_(type) {
     }
 
@@ -64,7 +64,7 @@ class DataCodec {
         return field_data_->get_data_type();
     }
 
-    FieldDataPtr
+    milvus::base::FieldDataPtr
     GetFieldData() const {
         return field_data_;
     }
@@ -72,7 +72,7 @@ class DataCodec {
  protected:
     CodecType codec_type_;
     std::pair<Timestamp, Timestamp> time_range_;
-    FieldDataPtr field_data_;
+    milvus::base::FieldDataPtr field_data_;
 };
 
 // Deserialize the data stream of the file obtained from remote or local

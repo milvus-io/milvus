@@ -54,7 +54,8 @@ class ChunkCache {
 
  private:
     std::shared_ptr<ColumnBase>
-    Mmap(const std::filesystem::path& path, const FieldDataPtr& field_data);
+    Mmap(const std::filesystem::path& path,
+         const milvus::base::FieldDataPtr& field_data);
 
  private:
     using ColumnTable =

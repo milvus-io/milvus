@@ -21,14 +21,15 @@
 #include "query/Expr.h"
 #include "query/Plan.h"
 #include "query/generated/ExecExprVisitor.h"
-#include "segcore/SegmentGrowingImpl.h"
+#include "segment/SegmentGrowingImpl.h"
 #include "test_utils/DataGen.h"
 
 using namespace milvus;
 
 TEST(Expr, IntegerOverflow) {
     using namespace milvus::query;
-    using namespace milvus::segcore;
+    using namespace milvus::base;
+    using namespace milvus::segment;
     std::vector<std::tuple<std::string, std::function<bool(int8_t)>>> testcases = {
         /////////////////////////////////////////////////////////// term
         {

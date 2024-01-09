@@ -24,8 +24,8 @@
 
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
-#include "common/FieldData.h"
-#include "common/FieldDataInterface.h"
+#include "base/FieldData.h"
+#include "base/FieldDataInterface.h"
 #ifdef AZURE_BUILD_DIR
 #include "storage/AzureChunkManager.h"
 #endif
@@ -39,6 +39,7 @@
 #include "storage/Types.h"
 #include "storage/ThreadPools.h"
 #include "storage/Util.h"
+#include "storage/RemoteChunkManagerSingleton.h"
 
 namespace milvus::storage {
 
@@ -492,7 +493,7 @@ EncodeAndUploadFieldSlice(ChunkManager* chunk_manager,
                           uint8_t* buf,
                           int64_t element_count,
                           FieldDataMeta field_data_meta,
-                          const FieldMeta& field_meta,
+                          const milvus::base::FieldMeta& field_meta,
                           std::string object_key) {
     auto field_data =
         CreateFieldData(field_meta.get_data_type(), field_meta.get_dim(), 0);
@@ -519,7 +520,7 @@ GetObjectData(ChunkManager* remote_chunk_manager,
     return futures;
 }
 
-std::vector<FieldDataPtr>
+std::vector<milvus::base::FieldDataPtr>
 GetObjectData(std::shared_ptr<milvus_storage::Space> space,
               const std::vector<std::string>& remote_files) {
     auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH);
@@ -529,7 +530,7 @@ GetObjectData(std::shared_ptr<milvus_storage::Space> space,
             pool.Submit(DownloadAndDecodeRemoteFileV2, space, file));
     }
 
-    std::vector<FieldDataPtr> datas;
+    std::vector<milvus::base::FieldDataPtr> datas;
     for (int i = 0; i < futures.size(); ++i) {
         auto res = futures[i].get();
         datas.emplace_back(res->GetFieldData());
@@ -615,7 +616,8 @@ PutIndexData(std::shared_ptr<milvus_storage::Space> space,
 }
 
 int64_t
-GetTotalNumRowsForFieldDatas(const std::vector<FieldDataPtr>& field_datas) {
+GetTotalNumRowsForFieldDatas(
+    const std::vector<milvus::base::FieldDataPtr>& field_datas) {
     int64_t count = 0;
     for (auto& field_data : field_datas) {
         count += field_data->get_num_rows();
@@ -625,7 +627,7 @@ GetTotalNumRowsForFieldDatas(const std::vector<FieldDataPtr>& field_datas) {
 }
 
 size_t
-GetNumRowsForLoadInfo(const LoadFieldDataInfo& load_info) {
+GetNumRowsForLoadInfo(const milvus::base::LoadFieldDataInfo& load_info) {
     if (load_info.field_infos.empty()) {
         return 0;
     }
@@ -698,42 +700,51 @@ CreateChunkManager(const StorageConfig& storage_config) {
     }
 }
 
-FieldDataPtr
+milvus::base::FieldDataPtr
 CreateFieldData(const DataType& type, int64_t dim, int64_t total_num_rows) {
     switch (type) {
         case DataType::BOOL:
-            return std::make_shared<FieldData<bool>>(type, total_num_rows);
+            return std::make_shared<milvus::base::FieldData<bool>>(
+                type, total_num_rows);
         case DataType::INT8:
-            return std::make_shared<FieldData<int8_t>>(type, total_num_rows);
+            return std::make_shared<milvus::base::FieldData<int8_t>>(
+                type, total_num_rows);
         case DataType::INT16:
-            return std::make_shared<FieldData<int16_t>>(type, total_num_rows);
+            return std::make_shared<milvus::base::FieldData<int16_t>>(
+                type, total_num_rows);
         case DataType::INT32:
-            return std::make_shared<FieldData<int32_t>>(type, total_num_rows);
+            return std::make_shared<milvus::base::FieldData<int32_t>>(
+                type, total_num_rows);
         case DataType::INT64:
-            return std::make_shared<FieldData<int64_t>>(type, total_num_rows);
+            return std::make_shared<milvus::base::FieldData<int64_t>>(
+                type, total_num_rows);
         case DataType::FLOAT:
-            return std::make_shared<FieldData<float>>(type, total_num_rows);
+            return std::make_shared<milvus::base::FieldData<float>>(
+                type, total_num_rows);
         case DataType::DOUBLE:
-            return std::make_shared<FieldData<double>>(type, total_num_rows);
+            return std::make_shared<milvus::base::FieldData<double>>(
+                type, total_num_rows);
         case DataType::STRING:
         case DataType::VARCHAR:
-            return std::make_shared<FieldData<std::string>>(type,
-                                                            total_num_rows);
+            return std::make_shared<milvus::base::FieldData<std::string>>(
+                type, total_num_rows);
         case DataType::JSON:
-            return std::make_shared<FieldData<Json>>(type, total_num_rows);
+            return std::make_shared<milvus::base::FieldData<Json>>(
+                type, total_num_rows);
         case DataType::ARRAY:
-            return std::make_shared<FieldData<Array>>(type, total_num_rows);
+            return std::make_shared<milvus::base::FieldData<Array>>(
+                type, total_num_rows);
         case DataType::VECTOR_FLOAT:
-            return std::make_shared<FieldData<FloatVector>>(
+            return std::make_shared<milvus::base::FieldData<FloatVector>>(
                 dim, type, total_num_rows);
         case DataType::VECTOR_BINARY:
-            return std::make_shared<FieldData<BinaryVector>>(
+            return std::make_shared<milvus::base::FieldData<BinaryVector>>(
                 dim, type, total_num_rows);
         case DataType::VECTOR_FLOAT16:
-            return std::make_shared<FieldData<Float16Vector>>(
+            return std::make_shared<milvus::base::FieldData<Float16Vector>>(
                 dim, type, total_num_rows);
         case DataType::VECTOR_BFLOAT16:
-            return std::make_shared<FieldData<BFloat16Vector>>(
+            return std::make_shared<milvus::base::FieldData<BFloat16Vector>>(
                 dim, type, total_num_rows);
         default:
             throw SegcoreError(
@@ -743,7 +754,8 @@ CreateFieldData(const DataType& type, int64_t dim, int64_t total_num_rows) {
 }
 
 int64_t
-GetByteSizeOfFieldDatas(const std::vector<FieldDataPtr>& field_datas) {
+GetByteSizeOfFieldDatas(
+    const std::vector<milvus::base::FieldDataPtr>& field_datas) {
     int64_t result = 0;
     for (auto& data : field_datas) {
         result += data->Size();
@@ -752,18 +764,18 @@ GetByteSizeOfFieldDatas(const std::vector<FieldDataPtr>& field_datas) {
     return result;
 }
 
-std::vector<FieldDataPtr>
-CollectFieldDataChannel(FieldDataChannelPtr& channel) {
-    std::vector<FieldDataPtr> result;
-    FieldDataPtr field_data;
+std::vector<milvus::base::FieldDataPtr>
+CollectFieldDataChannel(milvus::base::FieldDataChannelPtr& channel) {
+    std::vector<milvus::base::FieldDataPtr> result;
+    milvus::base::FieldDataPtr field_data;
     while (channel->pop(field_data)) {
         result.push_back(field_data);
     }
     return result;
 }
 
-FieldDataPtr
-MergeFieldData(std::vector<FieldDataPtr>& data_array) {
+milvus::base::FieldDataPtr
+MergeFieldData(std::vector<milvus::base::FieldDataPtr>& data_array) {
     if (data_array.size() == 0) {
         return nullptr;
     }
@@ -783,6 +795,72 @@ MergeFieldData(std::vector<FieldDataPtr>& data_array) {
         merged_data->FillFieldData(data->Data(), data->Length());
     }
     return merged_data;
+}
+void
+LoadFieldDatasFromRemote2(std::shared_ptr<milvus_storage::Space> space,
+                          milvus::base::SchemaPtr schema,
+                          FieldDataInfo& field_data_info) {
+    auto res = space->ScanData();
+
+    if (!res.ok()) {
+        PanicInfo(S3Error, "failed to create scan iterator");
+    }
+    auto reader = res.value();
+    for (auto rec = reader->Next(); rec != nullptr; rec = reader->Next()) {
+        if (!rec.ok()) {
+            PanicInfo(DataFormatBroken, "failed to read data");
+        }
+        auto data = rec.ValueUnsafe();
+        auto total_num_rows = data->num_rows();
+        for (auto& field : schema->get_fields()) {
+            if (field.second.get_id().get() != field_data_info.field_id) {
+                continue;
+            }
+            auto col_data =
+                data->GetColumnByName(field.second.get_name().get());
+            auto field_data = storage::CreateFieldData(
+                field.second.get_data_type(),
+                field.second.is_vector() ? field.second.get_dim() : 0,
+                total_num_rows);
+            field_data->FillFieldData(col_data);
+            field_data_info.channel->push(field_data);
+        }
+    }
+    field_data_info.channel->close();
+}
+// init segcore storage config first, and create default remote chunk manager
+// segcore use default remote chunk manager to load data from minio/s3
+void
+LoadFieldDatasFromRemote(const std::vector<std::string>& remote_files,
+                         milvus::base::FieldDataChannelPtr channel) {
+    try {
+        auto rcm = storage::RemoteChunkManagerSingleton::GetInstance()
+                       .GetRemoteChunkManager();
+        auto& pool = ThreadPools::GetThreadPool(ThreadPoolPriority::HIGH);
+
+        std::vector<std::future<milvus::base::FieldDataPtr>> futures;
+        futures.reserve(remote_files.size());
+        for (const auto& file : remote_files) {
+            auto future = pool.Submit([&]() {
+                auto fileSize = rcm->Size(file);
+                auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[fileSize]);
+                rcm->Read(file, buf.get(), fileSize);
+                auto result = storage::DeserializeFileData(buf, fileSize);
+                return result->GetFieldData();
+            });
+            futures.emplace_back(std::move(future));
+        }
+
+        for (auto& future : futures) {
+            auto field_data = future.get();
+            channel->push(field_data);
+        }
+
+        channel->close();
+    } catch (std::exception& e) {
+        LOG_INFO("failed to load data from remote: {}", e.what());
+        channel->close(std::move(e));
+    }
 }
 
 }  // namespace milvus::storage

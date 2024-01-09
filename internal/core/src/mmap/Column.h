@@ -28,8 +28,8 @@
 #include "common/Array.h"
 #include "common/EasyAssert.h"
 #include "common/File.h"
-#include "common/FieldMeta.h"
-#include "common/FieldData.h"
+#include "base/FieldMeta.h"
+#include "base/FieldData.h"
 #include "common/Span.h"
 #include "fmt/format.h"
 #include "log/Log.h"
@@ -40,7 +40,7 @@ namespace milvus {
 class ColumnBase {
  public:
     // memory mode ctor
-    ColumnBase(size_t reserve, const FieldMeta& field_meta)
+    ColumnBase(size_t reserve, const milvus::base::FieldMeta& field_meta)
         : type_size_(field_meta.get_sizeof()) {
         // simdjson requires a padding following the json data
         padding_ = field_meta.get_data_type() == DataType::JSON
@@ -67,7 +67,9 @@ class ColumnBase {
     }
 
     // mmap mode ctor
-    ColumnBase(const File& file, size_t size, const FieldMeta& field_meta)
+    ColumnBase(const File& file,
+               size_t size,
+               const milvus::base::FieldMeta& field_meta)
         : type_size_(field_meta.get_sizeof()),
           num_rows_(size / field_meta.get_sizeof()) {
         padding_ = field_meta.get_data_type() == DataType::JSON
@@ -160,7 +162,7 @@ class ColumnBase {
     Span() const = 0;
 
     void
-    AppendBatch(const FieldDataPtr& data) {
+    AppendBatch(const milvus::base::FieldDataPtr& data) {
         size_t required_size = size_ + data->Size();
         if (required_size > cap_size_) {
             Expand(required_size * 2 + padding_);
@@ -235,12 +237,14 @@ class ColumnBase {
 class Column : public ColumnBase {
  public:
     // memory mode ctor
-    Column(size_t cap, const FieldMeta& field_meta)
+    Column(size_t cap, const milvus::base::FieldMeta& field_meta)
         : ColumnBase(cap, field_meta) {
     }
 
     // mmap mode ctor
-    Column(const File& file, size_t size, const FieldMeta& field_meta)
+    Column(const File& file,
+           size_t size,
+           const milvus::base::FieldMeta& field_meta)
         : ColumnBase(file, size, field_meta) {
     }
 
@@ -267,12 +271,14 @@ class VariableColumn : public ColumnBase {
         std::conditional_t<std::is_same_v<T, std::string>, std::string_view, T>;
 
     // memory mode ctor
-    VariableColumn(size_t cap, const FieldMeta& field_meta)
+    VariableColumn(size_t cap, const milvus::base::FieldMeta& field_meta)
         : ColumnBase(cap, field_meta) {
     }
 
     // mmap mode ctor
-    VariableColumn(const File& file, size_t size, const FieldMeta& field_meta)
+    VariableColumn(const File& file,
+                   size_t size,
+                   const milvus::base::FieldMeta& field_meta)
         : ColumnBase(file, size, field_meta) {
     }
 
@@ -363,13 +369,15 @@ class VariableColumn : public ColumnBase {
 class ArrayColumn : public ColumnBase {
  public:
     // memory mode ctor
-    ArrayColumn(size_t num_rows, const FieldMeta& field_meta)
+    ArrayColumn(size_t num_rows, const milvus::base::FieldMeta& field_meta)
         : ColumnBase(num_rows, field_meta),
           element_type_(field_meta.get_element_type()) {
     }
 
     // mmap mode ctor
-    ArrayColumn(const File& file, size_t size, const FieldMeta& field_meta)
+    ArrayColumn(const File& file,
+                size_t size,
+                const milvus::base::FieldMeta& field_meta)
         : ColumnBase(file, size, field_meta),
           element_type_(field_meta.get_element_type()) {
     }

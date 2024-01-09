@@ -38,7 +38,7 @@ PhyConjunctFilterExpr::ResolveType(const std::vector<DataType>& inputs) {
 }
 
 static bool
-AllTrue(ColumnVectorPtr& vec) {
+AllTrue(milvus::base::ColumnVectorPtr& vec) {
     bool* data = static_cast<bool*>(vec->GetRawData());
 #if defined(USE_DYNAMIC_SIMD)
     return milvus::simd::all_true(data, vec->size());
@@ -53,7 +53,7 @@ AllTrue(ColumnVectorPtr& vec) {
 }
 
 static void
-AllSet(ColumnVectorPtr& vec) {
+AllSet(milvus::base::ColumnVectorPtr& vec) {
     bool* data = static_cast<bool*>(vec->GetRawData());
     for (int i = 0; i < vec->size(); ++i) {
         data[i] = true;
@@ -61,7 +61,7 @@ AllSet(ColumnVectorPtr& vec) {
 }
 
 static void
-AllReset(ColumnVectorPtr& vec) {
+AllReset(milvus::base::ColumnVectorPtr& vec) {
     bool* data = static_cast<bool*>(vec->GetRawData());
     for (int i = 0; i < vec->size(); ++i) {
         data[i] = false;
@@ -69,7 +69,7 @@ AllReset(ColumnVectorPtr& vec) {
 }
 
 static bool
-AllFalse(ColumnVectorPtr& vec) {
+AllFalse(milvus::base::ColumnVectorPtr& vec) {
     bool* data = static_cast<bool*>(vec->GetRawData());
 #if defined(USE_DYNAMIC_SIMD)
     return milvus::simd::all_false(data, vec->size());
@@ -84,9 +84,9 @@ AllFalse(ColumnVectorPtr& vec) {
 }
 
 int64_t
-PhyConjunctFilterExpr::UpdateResult(ColumnVectorPtr& input_result,
+PhyConjunctFilterExpr::UpdateResult(milvus::base::ColumnVectorPtr& input_result,
                                     EvalCtx& ctx,
-                                    ColumnVectorPtr& result) {
+                                    milvus::base::ColumnVectorPtr& result) {
     if (is_and_) {
         ConjunctElementFunc<true> func;
         return func(input_result, result);
@@ -97,7 +97,8 @@ PhyConjunctFilterExpr::UpdateResult(ColumnVectorPtr& input_result,
 }
 
 bool
-PhyConjunctFilterExpr::CanSkipFollowingExprs(ColumnVectorPtr& vec) {
+PhyConjunctFilterExpr::CanSkipFollowingExprs(
+    milvus::base::ColumnVectorPtr& vec) {
     if ((is_and_ && AllFalse(vec)) || (!is_and_ && AllTrue(vec))) {
         return true;
     }
@@ -112,9 +113,9 @@ PhyConjunctFilterExpr::SkipFollowingExprs(int start) {
 }
 
 void
-PhyConjunctFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
+PhyConjunctFilterExpr::Eval(EvalCtx& context, milvus::base::VectorPtr& result) {
     for (int i = 0; i < inputs_.size(); ++i) {
-        VectorPtr input_result;
+        milvus::base::VectorPtr input_result;
         inputs_[i]->Eval(context, input_result);
         if (i == 0) {
             result = input_result;

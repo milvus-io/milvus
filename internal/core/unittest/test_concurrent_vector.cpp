@@ -15,11 +15,12 @@
 #include <thread>
 #include <vector>
 
-#include "segcore/ConcurrentVector.h"
-#include "segcore/SegmentGrowing.h"
-#include "segcore/AckResponder.h"
+#include "base/ConcurrentVector.h"
+#include "segment/SegmentGrowing.h"
+#include "base/AckResponder.h"
 
-using namespace milvus::segcore;
+using namespace milvus::base;
+using namespace milvus::segment;
 using std::vector;
 
 TEST(ConcurrentVector, TestSingle) {

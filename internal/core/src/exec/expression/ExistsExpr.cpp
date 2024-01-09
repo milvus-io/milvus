@@ -21,7 +21,7 @@ namespace milvus {
 namespace exec {
 
 void
-PhyExistsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
+PhyExistsFilterExpr::Eval(EvalCtx& context, milvus::base::VectorPtr& result) {
     switch (expr_->column_.data_type_) {
         case DataType::JSON: {
             if (is_index_mode_) {
@@ -38,14 +38,14 @@ PhyExistsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     }
 }
 
-VectorPtr
+milvus::base::VectorPtr
 PhyExistsFilterExpr::EvalJsonExistsForDataSegment() {
     auto real_batch_size = GetNextBatchSize();
     if (real_batch_size == 0) {
         return nullptr;
     }
-    auto res_vec =
-        std::make_shared<ColumnVector>(DataType::BOOL, real_batch_size);
+    auto res_vec = std::make_shared<milvus::base::ColumnVector>(
+        DataType::BOOL, real_batch_size);
     bool* res = (bool*)res_vec->GetRawData();
 
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);

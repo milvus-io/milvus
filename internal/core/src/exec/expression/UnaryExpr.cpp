@@ -21,7 +21,8 @@ namespace milvus {
 namespace exec {
 
 void
-PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
+PhyUnaryRangeFilterExpr::Eval(EvalCtx& context,
+                              milvus::base::VectorPtr& result) {
     switch (expr_->column_.data_type_) {
         case DataType::BOOL: {
             result = ExecRangeVisitorImpl<bool>();
@@ -115,7 +116,7 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
 }
 
 template <typename ValueType>
-VectorPtr
+milvus::base::VectorPtr
 PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray() {
     using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
                                        std::string_view,
@@ -124,8 +125,8 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray() {
     if (real_batch_size == 0) {
         return nullptr;
     }
-    auto res_vec =
-        std::make_shared<ColumnVector>(DataType::BOOL, real_batch_size);
+    auto res_vec = std::make_shared<milvus::base::ColumnVector>(
+        DataType::BOOL, real_batch_size);
     bool* res = (bool*)res_vec->GetRawData();
 
     ValueType val = GetValueFromProto<ValueType>(expr_->val_);
@@ -197,7 +198,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray() {
 }
 
 template <typename ExprValueType>
-VectorPtr
+milvus::base::VectorPtr
 PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson() {
     using GetType =
         std::conditional_t<std::is_same_v<ExprValueType, std::string>,
@@ -209,8 +210,8 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson() {
     }
 
     ExprValueType val = GetValueFromProto<ExprValueType>(expr_->val_);
-    auto res_vec =
-        std::make_shared<ColumnVector>(DataType::BOOL, real_batch_size);
+    auto res_vec = std::make_shared<milvus::base::ColumnVector>(
+        DataType::BOOL, real_batch_size);
     bool* res = (bool*)res_vec->GetRawData();
     auto op_type = expr_->op_type_;
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
@@ -327,7 +328,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson() {
                     if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                         res[i] = false;
                     } else {
-                        UnaryRangeJSONCompare(milvus::query::Match(
+                        UnaryRangeJSONCompare(milvus::Match(
                             ExprValueType(x.value()), val, op_type));
                     }
                 }
@@ -351,7 +352,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson() {
 }
 
 template <typename T>
-VectorPtr
+milvus::base::VectorPtr
 PhyUnaryRangeFilterExpr::ExecRangeVisitorImpl() {
     if (is_index_mode_) {
         return ExecRangeVisitorImplForIndex<T>();
@@ -361,7 +362,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImpl() {
 }
 
 template <typename T>
-VectorPtr
+milvus::base::VectorPtr
 PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForIndex() {
     typedef std::
         conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
@@ -429,16 +430,16 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForIndex() {
                "expect batch size {}",
                res.size(),
                real_batch_size);
-    return std::make_shared<ColumnVector>(std::move(res));
+    return std::make_shared<milvus::base::ColumnVector>(std::move(res));
 }
 
 template <typename T>
-ColumnVectorPtr
+milvus::base::ColumnVectorPtr
 PhyUnaryRangeFilterExpr::PreCheckOverflow() {
     if constexpr (std::is_integral_v<T> && !std::is_same_v<T, bool>) {
         int64_t val = GetValueFromProto<int64_t>(expr_->val_);
 
-        if (milvus::query::out_of_range<T>(val)) {
+        if (milvus::out_of_range<T>(val)) {
             int64_t batch_size =
                 overflow_check_pos_ + batch_size_ >= active_count_
                     ? active_count_ - overflow_check_pos_
@@ -451,11 +452,11 @@ PhyUnaryRangeFilterExpr::PreCheckOverflow() {
             switch (expr_->op_type_) {
                 case proto::plan::GreaterThan:
                 case proto::plan::GreaterEqual: {
-                    auto res_vec = std::make_shared<ColumnVector>(
+                    auto res_vec = std::make_shared<milvus::base::ColumnVector>(
                         DataType::BOOL, batch_size);
                     cached_overflow_res_ = res_vec;
                     bool* res = (bool*)res_vec->GetRawData();
-                    if (milvus::query::lt_lb<T>(val)) {
+                    if (milvus::lt_lb<T>(val)) {
                         for (size_t i = 0; i < batch_size; ++i) {
                             res[i] = true;
                         }
@@ -465,11 +466,11 @@ PhyUnaryRangeFilterExpr::PreCheckOverflow() {
                 }
                 case proto::plan::LessThan:
                 case proto::plan::LessEqual: {
-                    auto res_vec = std::make_shared<ColumnVector>(
+                    auto res_vec = std::make_shared<milvus::base::ColumnVector>(
                         DataType::BOOL, batch_size);
                     cached_overflow_res_ = res_vec;
                     bool* res = (bool*)res_vec->GetRawData();
-                    if (milvus::query::gt_ub<T>(val)) {
+                    if (milvus::gt_ub<T>(val)) {
                         for (size_t i = 0; i < batch_size; ++i) {
                             res[i] = true;
                         }
@@ -478,7 +479,7 @@ PhyUnaryRangeFilterExpr::PreCheckOverflow() {
                     return res_vec;
                 }
                 case proto::plan::Equal: {
-                    auto res_vec = std::make_shared<ColumnVector>(
+                    auto res_vec = std::make_shared<milvus::base::ColumnVector>(
                         DataType::BOOL, batch_size);
                     cached_overflow_res_ = res_vec;
                     bool* res = (bool*)res_vec->GetRawData();
@@ -488,7 +489,7 @@ PhyUnaryRangeFilterExpr::PreCheckOverflow() {
                     return res_vec;
                 }
                 case proto::plan::NotEqual: {
-                    auto res_vec = std::make_shared<ColumnVector>(
+                    auto res_vec = std::make_shared<milvus::base::ColumnVector>(
                         DataType::BOOL, batch_size);
                     cached_overflow_res_ = res_vec;
                     bool* res = (bool*)res_vec->GetRawData();
@@ -509,7 +510,7 @@ PhyUnaryRangeFilterExpr::PreCheckOverflow() {
 }
 
 template <typename T>
-VectorPtr
+milvus::base::VectorPtr
 PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData() {
     typedef std::
         conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
@@ -523,8 +524,8 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData() {
         return nullptr;
     }
     IndexInnerType val = GetValueFromProto<IndexInnerType>(expr_->val_);
-    auto res_vec =
-        std::make_shared<ColumnVector>(DataType::BOOL, real_batch_size);
+    auto res_vec = std::make_shared<milvus::base::ColumnVector>(
+        DataType::BOOL, real_batch_size);
     bool* res = (bool*)res_vec->GetRawData();
     auto expr_type = expr_->op_type_;
     auto execute_sub_batch = [expr_type](const T* data,

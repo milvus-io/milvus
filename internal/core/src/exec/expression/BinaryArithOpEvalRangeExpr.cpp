@@ -20,7 +20,8 @@ namespace milvus {
 namespace exec {
 
 void
-PhyBinaryArithOpEvalRangeExpr::Eval(EvalCtx& context, VectorPtr& result) {
+PhyBinaryArithOpEvalRangeExpr::Eval(EvalCtx& context,
+                                    milvus::base::VectorPtr& result) {
     switch (expr_->column_.data_type_) {
         case DataType::BOOL: {
             result = ExecRangeVisitorImpl<bool>();
@@ -102,7 +103,7 @@ PhyBinaryArithOpEvalRangeExpr::Eval(EvalCtx& context, VectorPtr& result) {
 }
 
 template <typename ValueType>
-VectorPtr
+milvus::base::VectorPtr
 PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson() {
     using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
                                        std::string_view,
@@ -111,8 +112,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson() {
     if (real_batch_size == 0) {
         return nullptr;
     }
-    auto res_vec =
-        std::make_shared<ColumnVector>(DataType::BOOL, real_batch_size);
+    auto res_vec = std::make_shared<milvus::base::ColumnVector>(
+        DataType::BOOL, real_batch_size);
     bool* res = (bool*)res_vec->GetRawData();
 
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
@@ -282,7 +283,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson() {
 }
 
 template <typename ValueType>
-VectorPtr
+milvus::base::VectorPtr
 PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray() {
     using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
                                        std::string_view,
@@ -291,8 +292,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray() {
     if (real_batch_size == 0) {
         return nullptr;
     }
-    auto res_vec =
-        std::make_shared<ColumnVector>(DataType::BOOL, real_batch_size);
+    auto res_vec = std::make_shared<milvus::base::ColumnVector>(
+        DataType::BOOL, real_batch_size);
     bool* res = (bool*)res_vec->GetRawData();
 
     int index = -1;
@@ -432,7 +433,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray() {
 }
 
 template <typename T>
-VectorPtr
+milvus::base::VectorPtr
 PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImpl() {
     if (is_index_mode_) {
         return ExecRangeVisitorImplForIndex<T>();
@@ -442,7 +443,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImpl() {
 }
 
 template <typename T>
-VectorPtr
+milvus::base::VectorPtr
 PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForIndex() {
     using Index = index::ScalarIndex<T>;
     typedef std::conditional_t<std::is_integral_v<T> &&
@@ -593,11 +594,11 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForIndex() {
                "expect batch size {}",
                res.size(),
                real_batch_size);
-    return std::make_shared<ColumnVector>(std::move(res));
+    return std::make_shared<milvus::base::ColumnVector>(std::move(res));
 }
 
 template <typename T>
-VectorPtr
+milvus::base::VectorPtr
 PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData() {
     typedef std::conditional_t<std::is_integral_v<T> &&
                                    !std::is_same_v<bool, T>,
@@ -612,8 +613,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData() {
     auto value = GetValueFromProto<HighPrecisionType>(expr_->value_);
     auto right_operand =
         GetValueFromProto<HighPrecisionType>(expr_->right_operand_);
-    auto res_vec =
-        std::make_shared<ColumnVector>(DataType::BOOL, real_batch_size);
+    auto res_vec = std::make_shared<milvus::base::ColumnVector>(
+        DataType::BOOL, real_batch_size);
     bool* res = (bool*)res_vec->GetRawData();
 
     auto op_type = expr_->op_type_;

@@ -27,7 +27,7 @@
 #include "common/Common.h"
 #include "common/Types.h"
 #include "common/Exception.h"
-#include "segcore/SegmentInterface.h"
+#include "segment/SegmentInterface.h"
 
 namespace milvus {
 namespace exec {
@@ -173,7 +173,7 @@ class Context {
 class QueryContext : public Context {
  public:
     QueryContext(const std::string& query_id,
-                 const milvus::segcore::SegmentInternalInterface* segment,
+                 const milvus::segment::SegmentInternalInterface* segment,
                  int64_t active_count,
                  milvus::Timestamp timestamp,
                  std::shared_ptr<QueryConfig> query_config =
@@ -210,7 +210,7 @@ class QueryContext : public Context {
         return query_id_;
     }
 
-    const milvus::segcore::SegmentInternalInterface*
+    const milvus::segment::SegmentInternalInterface*
     get_segment() {
         return segment_;
     }
@@ -233,7 +233,7 @@ class QueryContext : public Context {
     std::string query_id_;
 
     // current segment that query execute in
-    const milvus::segcore::SegmentInternalInterface* segment_;
+    const milvus::segment::SegmentInternalInterface* segment_;
     // num rows for current query
     int64_t active_count_;
     // timestamp this query generate

@@ -10,14 +10,14 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
-#include <segcore/ConcurrentVector.h>
+#include <base/ConcurrentVector.h>
 #include "common/Types.h"
 #include "common/Span.h"
 #include "common/VectorTrait.h"
 
 TEST(Common, Span) {
     using namespace milvus;
-    using namespace milvus::segcore;
+    using namespace milvus::base;
 
     Span<float> s1(nullptr, 100);
     Span<milvus::FloatVector> s2(nullptr, 10, 16 * sizeof(float));

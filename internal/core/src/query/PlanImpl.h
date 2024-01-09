@@ -45,11 +45,11 @@ struct ExtractedPlanInfo {
 
 struct Plan {
  public:
-    explicit Plan(const Schema& schema) : schema_(schema) {
+    explicit Plan(const milvus::base::Schema& schema) : schema_(schema) {
     }
 
  public:
-    const Schema& schema_;
+    const milvus::base::Schema& schema_;
     std::unique_ptr<VectorPlanNode> plan_node_;
     std::map<std::string, FieldId> tag2field_;  // PlaceholderName -> FieldId
     std::vector<FieldId> target_entries_;
@@ -82,11 +82,12 @@ struct Placeholder {
 
 struct RetrievePlan {
  public:
-    explicit RetrievePlan(const Schema& schema) : schema_(schema) {
+    explicit RetrievePlan(const milvus::base::Schema& schema)
+        : schema_(schema) {
     }
 
  public:
-    const Schema& schema_;
+    const milvus::base::Schema& schema_;
     std::unique_ptr<RetrievePlanNode> plan_node_;
     std::vector<FieldId> field_ids_;
 };

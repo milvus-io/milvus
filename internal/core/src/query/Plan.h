@@ -15,7 +15,7 @@
 #include <string>
 
 #include "PlanImpl.h"
-#include "common/Schema.h"
+#include "base/Schema.h"
 #include "pb/plan.pb.h"
 #include "pb/segcore.pb.h"
 
@@ -28,7 +28,7 @@ struct RetrievePlan;
 
 // Note: serialized_expr_plan is of binary format
 std::unique_ptr<Plan>
-CreateSearchPlanByExpr(const Schema& schema,
+CreateSearchPlanByExpr(const milvus::base::Schema& schema,
                        const void* serialized_expr_plan,
                        const int64_t size);
 
@@ -46,7 +46,7 @@ int64_t
 GetNumOfQueries(const PlaceholderGroup*);
 
 std::unique_ptr<RetrievePlan>
-CreateRetrievePlanByExpr(const Schema& schema,
+CreateRetrievePlanByExpr(const milvus::base::Schema& schema,
                          const void* serialized_expr_plan,
                          const int64_t size);
 

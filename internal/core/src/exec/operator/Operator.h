@@ -21,7 +21,7 @@
 #include <vector>
 
 #include "common/Types.h"
-#include "common/Vector.h"
+#include "base/Vector.h"
 #include "exec/Driver.h"
 #include "exec/Task.h"
 #include "exec/QueryContext.h"
@@ -107,14 +107,14 @@ class Operator {
     NeedInput() const = 0;
 
     virtual void
-    AddInput(RowVectorPtr& input) = 0;
+    AddInput(milvus::base::RowVectorPtr& input) = 0;
 
     virtual void
     NoMoreInput() {
         no_more_input_ = true;
     }
 
-    virtual RowVectorPtr
+    virtual milvus::base::RowVectorPtr
     GetOutput() = 0;
 
     virtual bool
@@ -157,11 +157,11 @@ class Operator {
 
     DataType output_type_;
 
-    RowVectorPtr input_;
+    milvus::base::RowVectorPtr input_;
 
     bool no_more_input_{false};
 
-    std::vector<VectorPtr> results_;
+    std::vector<milvus::base::VectorPtr> results_;
 };
 
 class SourceOperator : public Operator {
@@ -181,7 +181,7 @@ class SourceOperator : public Operator {
     }
 
     void
-    AddInput(RowVectorPtr& /* unused */) override {
+    AddInput(milvus::base::RowVectorPtr& /* unused */) override {
         throw NotImplementedException(
             "SourceOperator does not support addInput()");
     }

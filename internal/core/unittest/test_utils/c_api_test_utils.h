@@ -21,11 +21,11 @@
 #include <iostream>
 #include <unordered_set>
 
+#include "base/Collection.h"
 #include "common/Types.h"
 #include "common/type_c.h"
 #include "pb/plan.pb.h"
-#include "segcore/Collection.h"
-#include "segcore/Reduce.h"
+#include "base/Reduce.h"
 #include "segcore/reduce_c.h"
 #include "segcore/segment_c.h"
 #include "DataGen.h"
@@ -34,7 +34,7 @@
 #include "indexbuilder_test_utils.h"
 
 using namespace milvus;
-using namespace milvus::segcore;
+using namespace milvus::base;
 
 namespace {
 const char*
@@ -110,7 +110,7 @@ generate_query_data(int nq) {
 }
 void
 CheckSearchResultDuplicate(const std::vector<CSearchResult>& results) {
-    auto nq = ((SearchResult*)results[0])->total_nq_;
+    auto nq = ((milvus::base::SearchResult*)results[0])->total_nq_;
 
     std::unordered_set<PkType> pk_set;
     std::unordered_set<GroupByValueType> group_by_val_set;
@@ -118,7 +118,7 @@ CheckSearchResultDuplicate(const std::vector<CSearchResult>& results) {
         pk_set.clear();
         group_by_val_set.clear();
         for (size_t i = 0; i < results.size(); i++) {
-            auto search_result = (SearchResult*)results[i];
+            auto search_result = (milvus::base::SearchResult*)results[i];
             ASSERT_EQ(nq, search_result->total_nq_);
             auto topk_beg = search_result->topk_per_nq_prefix_sum_[qi];
             auto topk_end = search_result->topk_per_nq_prefix_sum_[qi + 1];

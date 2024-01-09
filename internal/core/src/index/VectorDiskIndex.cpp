@@ -25,7 +25,7 @@
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/Util.h"
 #include "common/Consts.h"
-#include "common/RangeSearchHelper.h"
+#include "base/RangeSearchHelper.h"
 #include "indexbuilder/types.h"
 
 namespace milvus::index {
@@ -314,9 +314,9 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
 }
 
 template <typename T>
-std::unique_ptr<SearchResult>
+std::unique_ptr<milvus::base::SearchResult>
 VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
-                             const SearchInfo& search_info,
+                             const milvus::base::SearchInfo& search_info,
                              const BitsetView& bitset) {
     AssertInfo(GetMetricType() == search_info.metric_type_,
                "Metric type of field index isn't the same with search info");
@@ -353,9 +353,9 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
                 search_info.search_params_, RANGE_FILTER);
             if (range_filter.has_value()) {
                 search_config[RANGE_FILTER] = range_filter.value();
-                CheckRangeSearchParam(search_config[RADIUS],
-                                      search_config[RANGE_FILTER],
-                                      GetMetricType());
+                milvus::base::CheckRangeSearchParam(search_config[RADIUS],
+                                                    search_config[RANGE_FILTER],
+                                                    GetMetricType());
             }
             auto res = index_.RangeSearch(*dataset, search_config, bitset);
 
@@ -365,7 +365,7 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
                                       KnowhereStatusString(res.error()),
                                       res.what()));
             }
-            return ReGenRangeSearchResult(
+            return milvus::base::ReGenRangeSearchResult(
                 res.value(), topk, num_queries, GetMetricType());
         } else {
             auto res = index_.Search(*dataset, search_config, bitset);
@@ -392,7 +392,7 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
             distances[i] = std::round(distances[i] * multiplier) / multiplier;
         }
     }
-    auto result = std::make_unique<SearchResult>();
+    auto result = std::make_unique<milvus::base::SearchResult>();
     result->seg_offsets_.resize(total_num);
     result->distances_.resize(total_num);
     result->total_nq_ = num_queries;

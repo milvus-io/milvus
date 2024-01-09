@@ -25,7 +25,7 @@
 #include "exec/expression/Utils.h"
 #include "exec/QueryContext.h"
 #include "expr/ITypeExpr.h"
-#include "query/PlanProto.h"
+#include "segment/SegmentInterface.h"
 
 namespace milvus {
 namespace exec {
@@ -63,7 +63,7 @@ class Expr {
     }
 
     virtual void
-    Eval(EvalCtx& context, VectorPtr& result) {
+    Eval(EvalCtx& context, milvus::base::VectorPtr& result) {
     }
 
     // Only move cursor to next batch
@@ -87,7 +87,7 @@ class SegmentExpr : public Expr {
  public:
     SegmentExpr(const std::vector<ExprPtr>&& input,
                 const std::string& name,
-                const segcore::SegmentInternalInterface* segment,
+                const segment::SegmentInternalInterface* segment,
                 const FieldId& field_id,
                 int64_t active_count,
                 int64_t batch_size)
@@ -280,7 +280,7 @@ class SegmentExpr : public Expr {
     }
 
  protected:
-    const segcore::SegmentInternalInterface* segment_;
+    const segment::SegmentInternalInterface* segment_;
     const FieldId field_id_;
     bool is_pk_field_{false};
     DataType pk_type_;
@@ -333,7 +333,7 @@ class ExprSet {
     virtual ~ExprSet() = default;
 
     void
-    Eval(EvalCtx& ctx, std::vector<VectorPtr>& results) {
+    Eval(EvalCtx& ctx, std::vector<milvus::base::VectorPtr>& results) {
         Eval(0, exprs_.size(), true, ctx, results);
     }
 
@@ -342,7 +342,7 @@ class ExprSet {
          int32_t end,
          bool initialize,
          EvalCtx& ctx,
-         std::vector<VectorPtr>& result);
+         std::vector<milvus::base::VectorPtr>& result);
 
     void
     Clear() {

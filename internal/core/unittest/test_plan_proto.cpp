@@ -19,6 +19,7 @@
 
 TEST(PlanProto, NotSetUnsupported) {
     using namespace milvus;
+    using namespace milvus::base;
     using namespace milvus::query;
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugField(

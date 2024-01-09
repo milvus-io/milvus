@@ -10,13 +10,11 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
-#include "query/Relational.h"
 #include "common/Utils.h"
 #include <string>
 
+using namespace milvus;
 TEST(Relational, Basic) {
-    using namespace milvus::query;
-
     int64_t i64 = 4;
     int64_t another_i64 = 5;
 
@@ -57,8 +55,6 @@ TEST(Relational, Basic) {
 }
 
 TEST(Relational, DifferentFundamentalType) {
-    using namespace milvus::query;
-
     int32_t i32 = 3;
     int64_t i64 = 4;
 
@@ -74,8 +70,6 @@ TEST(Relational, DifferentFundamentalType) {
 }
 
 TEST(Relational, DifferentInCompatibleType) {
-    using namespace milvus::query;
-
     int64_t i64 = 4;
     std::string s = "str4";
 

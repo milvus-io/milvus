@@ -29,8 +29,8 @@
 #include "common/Common.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
-#include "common/FieldData.h"
-#include "common/FieldDataInterface.h"
+#include "base/FieldData.h"
+#include "base/FieldDataInterface.h"
 #include "common/File.h"
 #include "common/Slice.h"
 #include "common/Types.h"
@@ -537,7 +537,7 @@ WriteOptFieldIvfDataImpl(
     const int64_t field_id,
     const std::shared_ptr<LocalChunkManager>& local_chunk_manager,
     const std::string& local_data_path,
-    const std::vector<FieldDataPtr>& field_datas,
+    const std::vector<milvus::base::FieldDataPtr>& field_datas,
     uint64_t& write_offset) {
     using FieldDataT = DataTypeNativeOrVoid<T>;
     using OffsetT = uint32_t;
@@ -589,7 +589,7 @@ WriteOptFieldIvfData(
     const int64_t field_id,
     const std::shared_ptr<LocalChunkManager>& local_chunk_manager,
     const std::string& local_data_path,
-    const std::vector<FieldDataPtr>& field_datas,
+    const std::vector<milvus::base::FieldDataPtr>& field_datas,
     uint64_t& write_offset) {
     switch (dt) {
         case DataType::BOOL:
@@ -692,7 +692,7 @@ DiskFileManagerImpl::CacheOptFieldToDisk(
     for (auto& [field_id, tup] : fields_map) {
         const auto& field_name = std::get<0>(tup);
         const auto& field_type = std::get<1>(tup);
-        std::vector<FieldDataPtr> field_datas;
+        std::vector<milvus::base::FieldDataPtr> field_datas;
         for (auto rec : *reader) {
             if (!rec.ok()) {
                 PanicInfo(IndexBuildError,
@@ -746,7 +746,7 @@ DiskFileManagerImpl::CacheOptFieldToDisk(OptFieldT& fields_map) {
                            std::string(VEC_OPT_FIELDS);
     local_chunk_manager->CreateFile(local_data_path);
 
-    std::vector<FieldDataPtr> field_datas;
+    std::vector<milvus::base::FieldDataPtr> field_datas;
     std::vector<std::string> batch_files;
     uint64_t write_offset = 0;
     WriteOptFieldsIvfMeta(
@@ -770,7 +770,7 @@ DiskFileManagerImpl::CacheOptFieldToDisk(OptFieldT& fields_map) {
             return "";
         }
 
-        std::vector<FieldDataPtr>().swap(field_datas);
+        std::vector<milvus::base::FieldDataPtr>().swap(field_datas);
         SortByPath(field_paths);
 
         for (auto& file : field_paths) {

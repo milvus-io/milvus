@@ -20,7 +20,7 @@ namespace milvus {
 namespace exec {
 
 void
-PhyAlwaysTrueExpr::Eval(EvalCtx& context, VectorPtr& result) {
+PhyAlwaysTrueExpr::Eval(EvalCtx& context, milvus::base::VectorPtr& result) {
     int64_t real_batch_size = current_pos_ + batch_size_ >= active_count_
                                   ? active_count_ - current_pos_
                                   : batch_size_;
@@ -30,8 +30,8 @@ PhyAlwaysTrueExpr::Eval(EvalCtx& context, VectorPtr& result) {
         return;
     }
 
-    auto res_vec =
-        std::make_shared<ColumnVector>(DataType::BOOL, real_batch_size);
+    auto res_vec = std::make_shared<milvus::base::ColumnVector>(
+        DataType::BOOL, real_batch_size);
     bool* res_bool = (bool*)res_vec->GetRawData();
     for (size_t i = 0; i < real_batch_size; ++i) {
         res_bool[i] = true;

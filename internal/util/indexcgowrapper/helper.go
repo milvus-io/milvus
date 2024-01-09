@@ -4,7 +4,7 @@ package indexcgowrapper
 #cgo pkg-config: milvus_common milvus_storage
 
 #include <stdlib.h>	// free
-#include "common/binary_set_c.h"
+#include "segcore/binary_set_c.h"
 #include "storage/storage_c.h"
 */
 import "C"

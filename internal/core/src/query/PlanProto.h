@@ -16,7 +16,7 @@
 
 #include "Plan.h"
 #include "PlanNode.h"
-#include "common/Schema.h"
+#include "base/Schema.h"
 #include "pb/plan.pb.h"
 #include "plan/PlanNode.h"
 
@@ -24,7 +24,7 @@ namespace milvus::query {
 
 class ProtoParser {
  public:
-    explicit ProtoParser(const Schema& schema) : schema(schema) {
+    explicit ProtoParser(const milvus::base::Schema& schema) : schema(schema) {
     }
 
     // ExprPtr
@@ -108,7 +108,7 @@ class ProtoParser {
     CreateAlwaysTrueExprs();
 
  private:
-    const Schema& schema;
+    const milvus::base::Schema& schema;
 };
 
 }  // namespace milvus::query

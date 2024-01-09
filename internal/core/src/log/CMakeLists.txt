@@ -17,5 +17,6 @@ set(LOG_FILES   ${MILVUS_ENGINE_SRC}/log/Log.cpp
                 )
 
 add_library(milvus_log STATIC ${LOG_FILES})
+target_link_libraries(milvus_log ${CONAN_LIBS})
 set_target_properties(milvus_log PROPERTIES RULE_LAUNCH_COMPILE "")
 set_target_properties(milvus_log PROPERTIES RULE_LAUNCH_LINK "")

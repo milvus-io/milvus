@@ -18,7 +18,7 @@
 #include "storage/Event.h"
 #include "storage/Util.h"
 #include "common/Json.h"
-#include "common/FieldMeta.h"
+#include "base/FieldMeta.h"
 #include "common/Consts.h"
 
 namespace milvus::storage {

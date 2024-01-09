@@ -13,7 +13,7 @@
 #include <boost/format.hpp>
 
 #include "common/Types.h"
-#include "segcore/SegmentSealedImpl.h"
+#include "segment/SegmentSealedImpl.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/storage_test_utils.h"
 #include "index/IndexFactory.h"
@@ -23,18 +23,20 @@
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/MinioChunkManager.h"
 #include "test_utils/indexbuilder_test_utils.h"
+#include "query/QueryInterface.h"
 
 using namespace milvus;
 using namespace milvus::query;
-using namespace milvus::segcore;
-using milvus::segcore::LoadIndexInfo;
+using namespace milvus::base;
+using namespace milvus::segment;
+using milvus::index::LoadIndexInfo;
 
 const int64_t ROW_COUNT = 10 * 1000;
 const int64_t BIAS = 4200;
 
 TEST(Sealed, without_predicate) {
     using namespace milvus::query;
-    using namespace milvus::segcore;
+    using namespace milvus::base;
     auto schema = std::make_shared<Schema>();
     auto dim = 16;
     auto topK = 5;
@@ -84,7 +86,8 @@ TEST(Sealed, without_predicate) {
 
     std::vector<const PlaceholderGroup*> ph_group_arr = {ph_group.get()};
 
-    auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
+    auto sr = milvus::query::Search(
+        segment.get(), plan.get(), ph_group.get(), timestamp);
     auto pre_result = SearchResultToJson(*sr);
     milvus::index::CreateIndexInfo create_index_info;
     create_index_info.field_type = DataType::VECTOR_FLOAT;
@@ -111,7 +114,7 @@ TEST(Sealed, without_predicate) {
     EXPECT_EQ(vec_index->GetDim(), dim);
     auto query_dataset = knowhere::GenDataSet(num_queries, dim, query_ptr);
 
-    milvus::SearchInfo searchInfo;
+    milvus::base::SearchInfo searchInfo;
     searchInfo.topk_ = topK;
     searchInfo.metric_type_ = knowhere::metric::L2;
     searchInfo.search_params_ = search_conf;
@@ -128,7 +131,8 @@ TEST(Sealed, without_predicate) {
     sealed_segment->DropFieldData(fake_id);
     sealed_segment->LoadIndex(load_info);
 
-    sr = sealed_segment->Search(plan.get(), ph_group.get(), timestamp);
+    sr = milvus::query::Search(
+        sealed_segment.get(), plan.get(), ph_group.get(), timestamp);
 
     auto post_result = SearchResultToJson(*sr);
     std::cout << "ref_result" << std::endl;
@@ -137,13 +141,14 @@ TEST(Sealed, without_predicate) {
     std::cout << post_result.dump(1);
     // ASSERT_EQ(ref_result.dump(1), post_result.dump(1));
 
-    sr = sealed_segment->Search(plan.get(), ph_group.get(), 0);
+    sr = milvus::query::Search(
+        sealed_segment.get(), plan.get(), ph_group.get(), 0);
     EXPECT_EQ(sr->get_total_result_count(), 0);
 }
 
 TEST(Sealed, with_predicate) {
     using namespace milvus::query;
-    using namespace milvus::segcore;
+    using namespace milvus::base;
     auto schema = std::make_shared<Schema>();
     auto dim = 16;
     auto topK = 5;
@@ -204,7 +209,8 @@ TEST(Sealed, with_predicate) {
 
     std::vector<const PlaceholderGroup*> ph_group_arr = {ph_group.get()};
 
-    auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
+    auto sr = milvus::query::Search(
+        segment.get(), plan.get(), ph_group.get(), timestamp);
     milvus::index::CreateIndexInfo create_index_info;
     create_index_info.field_type = DataType::VECTOR_FLOAT;
     create_index_info.metric_type = knowhere::metric::L2;
@@ -231,7 +237,7 @@ TEST(Sealed, with_predicate) {
     auto search_conf =
         knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
                        {knowhere::indexparam::NPROBE, 10}};
-    milvus::SearchInfo searchInfo;
+    milvus::base::SearchInfo searchInfo;
     searchInfo.topk_ = topK;
     searchInfo.metric_type_ = knowhere::metric::L2;
     searchInfo.search_params_ = search_conf;
@@ -247,7 +253,8 @@ TEST(Sealed, with_predicate) {
     sealed_segment->DropFieldData(fake_id);
     sealed_segment->LoadIndex(load_info);
 
-    sr = sealed_segment->Search(plan.get(), ph_group.get(), timestamp);
+    sr = milvus::query::Search(
+        sealed_segment.get(), plan.get(), ph_group.get(), timestamp);
 
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * topK;
@@ -258,7 +265,7 @@ TEST(Sealed, with_predicate) {
 
 TEST(Sealed, with_predicate_filter_all) {
     using namespace milvus::query;
-    using namespace milvus::segcore;
+    using namespace milvus::base;
     auto schema = std::make_shared<Schema>();
     auto dim = 16;
     auto topK = 5;
@@ -343,7 +350,8 @@ TEST(Sealed, with_predicate_filter_all) {
     ivf_sealed_segment->DropFieldData(fake_id);
     ivf_sealed_segment->LoadIndex(load_info);
 
-    auto sr = ivf_sealed_segment->Search(plan.get(), ph_group.get(), timestamp);
+    auto sr = milvus::query::Search(
+        ivf_sealed_segment.get(), plan.get(), ph_group.get(), timestamp);
     EXPECT_EQ(sr->unity_topK_, 0);
     EXPECT_EQ(sr->get_total_result_count(), 0);
 
@@ -378,8 +386,8 @@ TEST(Sealed, with_predicate_filter_all) {
     hnsw_sealed_segment->DropFieldData(fake_id);
     hnsw_sealed_segment->LoadIndex(hnsw_load_info);
 
-    auto sr2 =
-        hnsw_sealed_segment->Search(plan.get(), ph_group.get(), timestamp);
+    auto sr2 = milvus::query::Search(
+        hnsw_sealed_segment.get(), plan.get(), ph_group.get(), timestamp);
     EXPECT_EQ(sr2->unity_topK_, 0);
     EXPECT_EQ(sr2->get_total_result_count(), 0);
 }
@@ -473,13 +481,15 @@ TEST(Sealed, LoadFieldData) {
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
-    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get(), timestamp));
+    ASSERT_ANY_THROW(milvus::query::Search(
+        segment.get(), plan.get(), ph_group.get(), timestamp));
 
     SealedLoadFieldData(dataset, *segment);
-    segment->Search(plan.get(), ph_group.get(), timestamp);
+    milvus::query::Search(segment.get(), plan.get(), ph_group.get(), timestamp);
 
     segment->DropFieldData(fakevec_id);
-    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get(), timestamp));
+    ASSERT_ANY_THROW(milvus::query::Search(
+        segment.get(), plan.get(), ph_group.get(), timestamp));
 
     LoadIndexInfo vec_info;
     vec_info.field_id = fakevec_id.get();
@@ -502,12 +512,14 @@ TEST(Sealed, LoadFieldData) {
         ASSERT_EQ(chunk_span3[i], ref3[i]);
     }
 
-    auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
+    auto sr = milvus::query::Search(
+        segment.get(), plan.get(), ph_group.get(), timestamp);
     auto json = SearchResultToJson(*sr);
     std::cout << json.dump(1);
 
     segment->DropIndex(fakevec_id);
-    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get(), timestamp));
+    ASSERT_ANY_THROW(milvus::query::Search(
+        segment.get(), plan.get(), ph_group.get(), timestamp));
 }
 
 TEST(Sealed, LoadFieldDataMmap) {
@@ -572,13 +584,15 @@ TEST(Sealed, LoadFieldDataMmap) {
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
-    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get(), timestamp));
+    ASSERT_ANY_THROW(milvus::query::Search(
+        segment.get(), plan.get(), ph_group.get(), timestamp));
 
     SealedLoadFieldData(dataset, *segment, {}, true);
-    segment->Search(plan.get(), ph_group.get(), timestamp);
+    milvus::query::Search(segment.get(), plan.get(), ph_group.get(), timestamp);
 
     segment->DropFieldData(fakevec_id);
-    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get(), timestamp));
+    ASSERT_ANY_THROW(milvus::query::Search(
+        segment.get(), plan.get(), ph_group.get(), timestamp));
 
     LoadIndexInfo vec_info;
     vec_info.field_id = fakevec_id.get();
@@ -601,12 +615,14 @@ TEST(Sealed, LoadFieldDataMmap) {
         ASSERT_EQ(chunk_span3[i], ref3[i]);
     }
 
-    auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
+    auto sr = milvus::query::Search(
+        segment.get(), plan.get(), ph_group.get(), timestamp);
     auto json = SearchResultToJson(*sr);
     std::cout << json.dump(1);
 
     segment->DropIndex(fakevec_id);
-    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get(), timestamp));
+    ASSERT_ANY_THROW(milvus::query::Search(
+        segment.get(), plan.get(), ph_group.get(), timestamp));
 }
 
 TEST(Sealed, LoadScalarIndex) {
@@ -691,23 +707,28 @@ TEST(Sealed, LoadScalarIndex) {
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
-    LoadFieldDataInfo row_id_info;
+    milvus::base::LoadFieldDataInfo row_id_info;
     FieldMeta row_id_field_meta(
         FieldName("RowID"), RowFieldID, DataType::INT64);
     auto field_data =
-        std::make_shared<milvus::FieldData<int64_t>>(DataType::INT64);
+        std::make_shared<milvus::base::FieldData<int64_t>>(DataType::INT64);
     field_data->FillFieldData(dataset.row_ids_.data(), N);
-    auto field_data_info = FieldDataInfo{
-        RowFieldID.get(), N, std::vector<FieldDataPtr>{field_data}};
+    auto field_data_info =
+        FieldDataInfo{RowFieldID.get(),
+                      N,
+                      std::vector<milvus::base::FieldDataPtr>{field_data}};
     segment->LoadFieldData(RowFieldID, field_data_info);
 
-    LoadFieldDataInfo ts_info;
+    milvus::base::LoadFieldDataInfo ts_info;
     FieldMeta ts_field_meta(
         FieldName("Timestamp"), TimestampFieldID, DataType::INT64);
-    field_data = std::make_shared<milvus::FieldData<int64_t>>(DataType::INT64);
+    field_data =
+        std::make_shared<milvus::base::FieldData<int64_t>>(DataType::INT64);
     field_data->FillFieldData(dataset.timestamps_.data(), N);
-    field_data_info = FieldDataInfo{
-        TimestampFieldID.get(), N, std::vector<FieldDataPtr>{field_data}};
+    field_data_info =
+        FieldDataInfo{TimestampFieldID.get(),
+                      N,
+                      std::vector<milvus::base::FieldDataPtr>{field_data}};
     segment->LoadFieldData(TimestampFieldID, field_data_info);
 
     LoadIndexInfo vec_info;
@@ -741,7 +762,8 @@ TEST(Sealed, LoadScalarIndex) {
     nothing_index.index = GenScalarIndexing<int32_t>(N, nothing_data.data());
     segment->LoadIndex(nothing_index);
 
-    auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
+    auto sr = milvus::query::Search(
+        segment.get(), plan.get(), ph_group.get(), timestamp);
     auto json = SearchResultToJson(*sr);
     std::cout << json.dump(1);
 }
@@ -799,7 +821,8 @@ TEST(Sealed, Delete) {
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
-    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get(), timestamp));
+    ASSERT_ANY_THROW(milvus::query::Search(
+        segment.get(), plan.get(), ph_group.get(), timestamp));
 
     SealedLoadFieldData(dataset, *segment);
 
@@ -809,7 +832,8 @@ TEST(Sealed, Delete) {
     ids->mutable_int_id()->mutable_data()->Add(pks.begin(), pks.end());
     std::vector<Timestamp> timestamps{10, 10, 10, 10, 10};
 
-    LoadDeletedRecordInfo info = {timestamps.data(), ids.get(), row_count};
+    milvus::base::LoadDeletedRecordInfo info = {
+        timestamps.data(), ids.get(), row_count};
     segment->LoadDeletedRecord(info);
 
     BitsetType bitset(N, false);
@@ -883,7 +907,8 @@ TEST(Sealed, OverlapDelete) {
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
-    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get(), timestamp));
+    ASSERT_ANY_THROW(milvus::query::Search(
+        segment.get(), plan.get(), ph_group.get(), timestamp));
 
     SealedLoadFieldData(dataset, *segment);
 
@@ -893,7 +918,8 @@ TEST(Sealed, OverlapDelete) {
     ids->mutable_int_id()->mutable_data()->Add(pks.begin(), pks.end());
     std::vector<Timestamp> timestamps{10, 10, 10, 10, 10};
 
-    LoadDeletedRecordInfo info = {timestamps.data(), ids.get(), row_count};
+    milvus::base::LoadDeletedRecordInfo info = {
+        timestamps.data(), ids.get(), row_count};
     segment->LoadDeletedRecord(info);
     ASSERT_EQ(segment->get_deleted_count(), pks.size())
         << "deleted_count=" << segment->get_deleted_count()
@@ -905,7 +931,7 @@ TEST(Sealed, OverlapDelete) {
     auto new_ids = std::make_unique<IdArray>();
     new_ids->mutable_int_id()->mutable_data()->Add(pks.begin(), pks.end());
     timestamps.insert(timestamps.end(), {11, 11, 11});
-    LoadDeletedRecordInfo overlap_info = {
+    milvus::base::LoadDeletedRecordInfo overlap_info = {
         timestamps.data(), new_ids.get(), row_count};
     segment->LoadDeletedRecord(overlap_info);
 
@@ -974,8 +1000,8 @@ TEST(Sealed, BF) {
     auto vec_data = GenRandomFloatVecs(N, dim);
     auto field_data = storage::CreateFieldData(DataType::VECTOR_FLOAT, dim);
     field_data->FillFieldData(vec_data.data(), N);
-    auto field_data_info =
-        FieldDataInfo{fake_id.get(), N, std::vector<FieldDataPtr>{field_data}};
+    auto field_data_info = FieldDataInfo{
+        fake_id.get(), N, std::vector<milvus::base::FieldDataPtr>{field_data}};
     segment->LoadFieldData(fake_id, field_data_info);
 
     auto topK = 1;
@@ -1001,7 +1027,8 @@ TEST(Sealed, BF) {
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
-    auto result = segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
+    auto result = milvus::query::Search(
+        segment.get(), plan.get(), ph_group.get(), MAX_TIMESTAMP);
     auto ves = SearchResultToVector(*result);
     // first: offset, second: distance
     EXPECT_GE(ves[0].first, 0);
@@ -1028,8 +1055,8 @@ TEST(Sealed, BF_Overflow) {
     auto vec_data = GenMaxFloatVecs(N, dim);
     auto field_data = storage::CreateFieldData(DataType::VECTOR_FLOAT, dim);
     field_data->FillFieldData(vec_data.data(), N);
-    auto field_data_info =
-        FieldDataInfo{fake_id.get(), N, std::vector<FieldDataPtr>{field_data}};
+    auto field_data_info = FieldDataInfo{
+        fake_id.get(), N, std::vector<milvus::base::FieldDataPtr>{field_data}};
     segment->LoadFieldData(fake_id, field_data_info);
 
     auto topK = 1;
@@ -1055,7 +1082,8 @@ TEST(Sealed, BF_Overflow) {
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
-    auto result = segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
+    auto result = milvus::query::Search(
+        segment.get(), plan.get(), ph_group.get(), MAX_TIMESTAMP);
     auto ves = SearchResultToVector(*result);
     for (int i = 0; i < num_queries; ++i) {
         EXPECT_EQ(ves[0].first, -1);
@@ -1088,7 +1116,7 @@ TEST(Sealed, RealCount) {
     schema->set_primary_field_id(pk);
     auto segment = CreateSealedSegment(schema);
 
-    ASSERT_EQ(0, segment->get_real_count());
+    ASSERT_EQ(0, milvus::query::GetRealCount(segment.get()));
 
     int64_t c = 10;
     auto dataset = DataGen(schema, c);
@@ -1096,7 +1124,7 @@ TEST(Sealed, RealCount) {
     SealedLoadFieldData(dataset, *segment);
 
     // no delete.
-    ASSERT_EQ(c, segment->get_real_count());
+    ASSERT_EQ(c, milvus::query::GetRealCount(segment.get()));
 
     // delete half.
     auto half = c / 2;
@@ -1107,7 +1135,7 @@ TEST(Sealed, RealCount) {
     auto status =
         segment->Delete(del_offset1, half, del_ids1.get(), del_tss1.data());
     ASSERT_TRUE(status.ok());
-    ASSERT_EQ(c - half, segment->get_real_count());
+    ASSERT_EQ(c - half, milvus::query::GetRealCount(segment.get()));
 
     // delete duplicate.
     auto del_offset2 = segment->get_deleted_count();
@@ -1116,7 +1144,7 @@ TEST(Sealed, RealCount) {
     status =
         segment->Delete(del_offset2, half, del_ids1.get(), del_tss2.data());
     ASSERT_TRUE(status.ok());
-    ASSERT_EQ(c - half, segment->get_real_count());
+    ASSERT_EQ(c - half, milvus::query::GetRealCount(segment.get()));
 
     // delete all.
     auto del_offset3 = segment->get_deleted_count();
@@ -1125,7 +1153,7 @@ TEST(Sealed, RealCount) {
     auto del_tss3 = GenTss(c, c + half * 2);
     status = segment->Delete(del_offset3, c, del_ids3.get(), del_tss3.data());
     ASSERT_TRUE(status.ok());
-    ASSERT_EQ(0, segment->get_real_count());
+    ASSERT_EQ(0, milvus::query::GetRealCount(segment.get()));
 }
 
 TEST(Sealed, GetVector) {
@@ -1210,11 +1238,11 @@ TEST(Sealed, GetVectorFromChunkCache) {
     auto dataset = DataGen(schema, N);
     auto field_data_meta =
         milvus::storage::FieldDataMeta{1, 2, 3, fakevec_id.get()};
-    auto field_meta = milvus::FieldMeta(milvus::FieldName("facevec"),
-                                        fakevec_id,
-                                        milvus::DataType::VECTOR_FLOAT,
-                                        dim,
-                                        metric_type);
+    auto field_meta = milvus::base::FieldMeta(milvus::FieldName("facevec"),
+                                              fakevec_id,
+                                              milvus::DataType::VECTOR_FLOAT,
+                                              dim,
+                                              metric_type);
 
     auto rcm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
                    .GetRemoteChunkManager();
@@ -1246,13 +1274,13 @@ TEST(Sealed, GetVectorFromChunkCache) {
     segment_sealed->LoadIndex(vec_info);
 
     auto field_binlog_info =
-        FieldBinlogInfo{fakevec_id.get(),
-                        N,
-                        std::vector<int64_t>{N},
-                        false,
-                        std::vector<std::string>{file_name}};
-    segment_sealed->AddFieldDataInfoForSealed(LoadFieldDataInfo{
-        std::map<int64_t, FieldBinlogInfo>{
+        milvus::base::FieldBinlogInfo{fakevec_id.get(),
+                                      N,
+                                      std::vector<int64_t>{N},
+                                      false,
+                                      std::vector<std::string>{file_name}};
+    segment_sealed->AddFieldDataInfoForSealed(milvus::base::LoadFieldDataInfo{
+        std::map<int64_t, milvus::base::FieldBinlogInfo>{
             {fakevec_id.get(), field_binlog_info}},
         mmap_dir,
     });
@@ -1321,11 +1349,11 @@ TEST(Sealed, WarmupChunkCache) {
     auto dataset = DataGen(schema, N);
     auto field_data_meta =
         milvus::storage::FieldDataMeta{1, 2, 3, fakevec_id.get()};
-    auto field_meta = milvus::FieldMeta(milvus::FieldName("facevec"),
-                                        fakevec_id,
-                                        milvus::DataType::VECTOR_FLOAT,
-                                        dim,
-                                        metric_type);
+    auto field_meta = milvus::base::FieldMeta(milvus::FieldName("facevec"),
+                                              fakevec_id,
+                                              milvus::DataType::VECTOR_FLOAT,
+                                              dim,
+                                              metric_type);
 
     auto rcm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
                    .GetRemoteChunkManager();
@@ -1446,7 +1474,7 @@ TEST(Sealed, LoadArrayFieldData) {
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
     SealedLoadFieldData(dataset, *segment);
-    segment->Search(plan.get(), ph_group.get(), 1L << 63);
+    milvus::query::Search(segment.get(), plan.get(), ph_group.get(), 1L << 63);
 
     auto ids_ds = GenRandomIds(N);
     auto s = dynamic_cast<SegmentSealedImpl*>(segment.get());
@@ -1503,7 +1531,7 @@ TEST(Sealed, LoadArrayFieldDataWithMMap) {
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
     SealedLoadFieldData(dataset, *segment, {}, true);
-    segment->Search(plan.get(), ph_group.get(), 1L << 63);
+    milvus::query::Search(segment.get(), plan.get(), ph_group.get(), 1L << 63);
 }
 
 TEST(Sealed, SkipIndexSkipUnaryRange) {
@@ -1669,7 +1697,9 @@ TEST(Sealed, SkipIndexSkipStringRange) {
     auto string_field_data = storage::CreateFieldData(DataType::VARCHAR, 1, N);
     string_field_data->FillFieldData(strings.data(), N);
     auto string_field_data_info = FieldDataInfo{
-        string_fid.get(), N, std::vector<FieldDataPtr>{string_field_data}};
+        string_fid.get(),
+        N,
+        std::vector<milvus::base::FieldDataPtr>{string_field_data}};
     segment->LoadFieldData(string_fid, string_field_data_info);
     auto& skip_index = segment->GetSkipIndex();
     ASSERT_TRUE(skip_index.CanSkipUnaryRange<std::string>(
@@ -1744,11 +1774,13 @@ TEST(Sealed, QueryAllFields) {
         {"metric_type", metric_type},
         {"nlist", "128"}};
     std::map<std::string, std::string> type_params = {{"dim", "128"}};
-    FieldIndexMeta fieldIndexMeta(
+    milvus::base::FieldIndexMeta fieldIndexMeta(
         vec, std::move(index_params), std::move(type_params));
-    std::map<FieldId, FieldIndexMeta> filedMap = {{vec, fieldIndexMeta}};
-    IndexMetaPtr metaPtr =
-        std::make_shared<CollectionIndexMeta>(100000, std::move(filedMap));
+    std::map<FieldId, milvus::base::FieldIndexMeta> filedMap = {
+        {vec, fieldIndexMeta}};
+    milvus::base::IndexMetaPtr metaPtr =
+        std::make_shared<milvus::base::CollectionIndexMeta>(
+            100000, std::move(filedMap));
     auto segment_sealed = CreateSealedSegment(schema, metaPtr);
     auto segment = dynamic_cast<SegmentSealedImpl*>(segment_sealed.get());
 

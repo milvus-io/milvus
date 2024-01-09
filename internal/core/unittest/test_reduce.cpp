@@ -15,10 +15,10 @@
 #include <vector>
 
 #include "knowhere/comp/index_param.h"
-#include "query/SubSearchResult.h"
+#include "segment/SubSearchResult.h"
 
 using namespace milvus;
-using namespace milvus::query;
+using namespace milvus::segment;
 
 using SubSearchResultUniq = std::unique_ptr<SubSearchResult>;
 

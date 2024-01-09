@@ -18,29 +18,18 @@ endif()
 milvus_add_pkg_config("milvus_segcore")
 
 set(SEGCORE_FILES
-        Collection.cpp
-        collection_c.cpp
-        segment_c.cpp
-        SegmentGrowingImpl.cpp
-        SegmentSealedImpl.cpp
-        FieldIndexing.cpp
-        InsertRecord.cpp
-        Reduce.cpp
-        metrics_c.cpp
-        plan_c.cpp
-        reduce_c.cpp
-        load_index_c.cpp
-        load_field_data_c.cpp
-        SegmentInterface.cpp
-        SegcoreConfig.cpp
-        IndexConfigGenerator.cpp
-        segcore_init_c.cpp
-        ScalarIndex.cpp
-        TimestampIndex.cpp
-        Utils.cpp
-        ConcurrentVector.cpp)
-add_library(milvus_segcore SHARED ${SEGCORE_FILES})
+     collection_c.cpp
+     segment_c.cpp
+     metrics_c.cpp
+     plan_c.cpp
+     reduce_c.cpp
+     load_index_c.cpp
+     load_field_data_c.cpp
+     segcore_init_c.cpp
+     binary_set_c.cpp
+     )
+ add_library(milvus_segcore SHARED ${SEGCORE_FILES})
 
-target_link_libraries(milvus_segcore milvus_query milvus_exec ${OpenMP_CXX_FLAGS} milvus-storage)
+target_link_libraries(milvus_segcore milvus_query milvus_exec milvus_segment milvus_base milvus-storage ${OpenMP_CXX_FLAGS})
 
 install(TARGETS milvus_segcore DESTINATION "${CMAKE_INSTALL_LIBDIR}")

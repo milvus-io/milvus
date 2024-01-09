@@ -13,9 +13,9 @@
 extern "C" {
 #endif
 
+#include "plan_c.h"
+#include "segment_c.h"
 #include "common/type_c.h"
-#include "segcore/plan_c.h"
-#include "segcore/segment_c.h"
 
 typedef void* CSearchResultDataBlobs;
 

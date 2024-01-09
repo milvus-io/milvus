@@ -20,18 +20,14 @@ set(MILVUS_QUERY_SRCS
         visitors/VerifyExprVisitor.cpp
         visitors/ExtractInfoPlanNodeVisitor.cpp
         visitors/ExtractInfoExprVisitor.cpp
+        QueryInterface.cpp
         Plan.cpp
-        SearchOnGrowing.cpp
-        SearchOnSealed.cpp
-        SearchOnIndex.cpp
-        SearchBruteForce.cpp
-        SubSearchResult.cpp
-        GroupByOperator.cpp
         PlanProto.cpp
+        GroupByOperator.cpp
         )
-add_library(milvus_query ${MILVUS_QUERY_SRCS})
+    add_library(milvus_query SHARED ${MILVUS_QUERY_SRCS})
 if(USE_DYNAMIC_SIMD)
-        target_link_libraries(milvus_query milvus_index milvus_simd)
+        target_link_libraries(milvus_query milvus_exec milvus_segment milvus_base milvus_index milvus_common milvus_simd)
 else()
-        target_link_libraries(milvus_query milvus_index)
+        target_link_libraries(milvus_query milvus_exec milvus_segment milvus_base milvus_index milvus_common)
 endif()

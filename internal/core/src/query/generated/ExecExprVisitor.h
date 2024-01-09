@@ -17,7 +17,7 @@
 #include <type_traits>
 #include <utility>
 #include <deque>
-#include "segcore/SegmentGrowingImpl.h"
+#include "segment/SegmentInterface.h"
 #include "query/ExprImpl.h"
 #include "ExprVisitor.h"
 #include "ExecPlanNodeVisitor.h"
@@ -60,7 +60,7 @@ class ExecExprVisitor : public ExprVisitor {
     visit(JsonContainsExpr& expr) override;
 
  public:
-    ExecExprVisitor(const segcore::SegmentInternalInterface& segment,
+    ExecExprVisitor(const segment::SegmentInternalInterface& segment,
                     int64_t row_count,
                     Timestamp timestamp)
         : segment_(segment),
@@ -69,7 +69,7 @@ class ExecExprVisitor : public ExprVisitor {
           plan_visitor_(nullptr) {
     }
 
-    ExecExprVisitor(const segcore::SegmentInternalInterface& segment,
+    ExecExprVisitor(const segment::SegmentInternalInterface& segment,
                     ExecPlanNodeVisitor* plan_visitor,
                     int64_t row_count,
                     Timestamp timestamp)
@@ -239,7 +239,7 @@ class ExecExprVisitor : public ExprVisitor {
                         CmpFunc cmp_func);
 
  private:
-    const segcore::SegmentInternalInterface& segment_;
+    const segment::SegmentInternalInterface& segment_;
     Timestamp timestamp_;
     int64_t row_count_;
 

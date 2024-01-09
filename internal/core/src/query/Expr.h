@@ -24,7 +24,7 @@
 #include <utility>
 #include <vector>
 
-#include "common/Schema.h"
+#include "base/Schema.h"
 #include "common/Types.h"
 #include "pb/plan.pb.h"
 

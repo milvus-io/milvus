@@ -21,7 +21,7 @@ namespace milvus {
 namespace exec {
 
 void
-PhyLogicalUnaryExpr::Eval(EvalCtx& context, VectorPtr& result) {
+PhyLogicalUnaryExpr::Eval(EvalCtx& context, milvus::base::VectorPtr& result) {
     AssertInfo(inputs_.size() == 1,
                "logical unary expr must has one input, but now {}",
                inputs_.size());

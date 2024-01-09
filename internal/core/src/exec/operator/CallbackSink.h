@@ -22,20 +22,20 @@ namespace milvus {
 namespace exec {
 class CallbackSink : public Operator {
  public:
-    CallbackSink(
-        int32_t operator_id,
-        DriverContext* ctx,
-        std::function<BlockingReason(RowVectorPtr, ContinueFuture*)> callback)
+    CallbackSink(int32_t operator_id,
+                 DriverContext* ctx,
+                 std::function<BlockingReason(milvus::base::RowVectorPtr,
+                                              ContinueFuture*)> callback)
         : Operator(ctx, DataType::NONE, operator_id, "N/A", "CallbackSink"),
           callback_(callback) {
     }
 
     void
-    AddInput(RowVectorPtr& input) override {
+    AddInput(milvus::base::RowVectorPtr& input) override {
         blocking_reason_ = callback_(input, &future_);
     }
 
-    RowVectorPtr
+    milvus::base::RowVectorPtr
     GetOutput() override {
         return nullptr;
     }
@@ -82,7 +82,8 @@ class CallbackSink : public Operator {
 
     ContinueFuture future_;
     BlockingReason blocking_reason_{BlockingReason::kNotBlocked};
-    std::function<BlockingReason(RowVectorPtr, ContinueFuture*)> callback_;
+    std::function<BlockingReason(milvus::base::RowVectorPtr, ContinueFuture*)>
+        callback_;
 };
 
 }  // namespace exec
