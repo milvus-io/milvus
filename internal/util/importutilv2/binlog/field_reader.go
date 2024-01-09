@@ -17,6 +17,7 @@
 package binlog
 
 import (
+	"context"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 )
@@ -26,8 +27,8 @@ type fieldReader struct {
 	fieldSchema *schemapb.FieldSchema
 }
 
-func newFieldReader(cm storage.ChunkManager, fieldSchema *schemapb.FieldSchema, path string) (*fieldReader, error) {
-	reader, err := newBinlogReader(cm, path)
+func newFieldReader(ctx context.Context, cm storage.ChunkManager, fieldSchema *schemapb.FieldSchema, path string) (*fieldReader, error) {
+	reader, err := newBinlogReader(ctx, cm, path)
 	if err != nil {
 		return nil, err
 	}

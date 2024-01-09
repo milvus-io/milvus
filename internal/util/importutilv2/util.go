@@ -17,16 +17,11 @@
 package importutilv2
 
 import (
-	"context"
 	"fmt"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/samber/lo"
-	"io"
 	"path/filepath"
-	"strings"
 )
 
 type FileType int
@@ -87,31 +82,4 @@ func GetFileType(file *internalpb.ImportFile) (FileType, error) {
 		return Parquet, nil
 	}
 	return 0, merr.WrapErrImportFailed(fmt.Sprintf("unexpect file type, files=%v", file.GetPaths()))
-}
-
-func CreateReaders(paths []string, // TODO: dyh, move it to numpy
-	cm storage.ChunkManager,
-	schema *schemapb.CollectionSchema,
-) (map[int64]io.Reader, error) {
-	readers := make(map[int64]io.Reader)
-	nameToPath := lo.SliceToMap(paths, func(path string) (string, string) {
-		nameWithExt := filepath.Base(path)
-		name := strings.TrimSuffix(nameWithExt, filepath.Ext(nameWithExt))
-		return name, path
-	})
-	for _, field := range schema.GetFields() {
-		if field.GetIsPrimaryKey() && field.GetAutoID() {
-			continue
-		}
-		if _, ok := nameToPath[field.GetName()]; !ok {
-			return nil, merr.WrapErrImportFailed(
-				fmt.Sprintf("no file for field: %s, files: %v", field.GetName(), lo.Values(nameToPath)))
-		}
-		reader, err := cm.Reader(context.Background(), nameToPath[field.GetName()])
-		if err != nil {
-			return nil, WrapReadFileError(nameToPath[field.GetName()], err)
-		}
-		readers[field.GetFieldID()] = reader
-	}
-	return readers, nil
 }

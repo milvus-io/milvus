@@ -28,6 +28,7 @@ import (
 )
 
 type reader struct {
+	ctx    context.Context
 	cm     storage.ChunkManager
 	schema *schemapb.CollectionSchema
 
@@ -38,13 +39,15 @@ type reader struct {
 	filters []Filter
 }
 
-func NewReader(cm storage.ChunkManager,
+func NewReader(ctx context.Context,
+	cm storage.ChunkManager,
 	schema *schemapb.CollectionSchema,
 	paths []string,
 	tsStart,
 	tsEnd uint64,
 ) (*reader, error) {
 	r := &reader{
+		ctx:    ctx,
 		cm:     cm,
 		schema: schema,
 	}
@@ -62,7 +65,7 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64) error {
 	if len(paths) < 1 {
 		return merr.WrapErrImportFailed("no insert binlogs to import")
 	}
-	insertLogs, err := listInsertLogs(r.cm, paths[0])
+	insertLogs, err := listInsertLogs(r.ctx, r.cm, paths[0])
 	if err != nil {
 		return err
 	}
@@ -98,7 +101,7 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64) error {
 func (r *reader) readDelete(deltaLogs []string, tsStart, tsEnd uint64) (*storage.DeleteData, error) {
 	deleteData := storage.NewDeleteData(nil, nil)
 	for _, path := range deltaLogs {
-		reader, err := newBinlogReader(r.cm, path)
+		reader, err := newBinlogReader(r.ctx, r.cm, path)
 		if err != nil {
 			return nil, err
 		}
@@ -136,7 +139,7 @@ func (r *reader) Read() (*storage.InsertData, error) {
 			return nil, merr.WrapErrFieldNotFound(fieldID)
 		}
 		path := binlogs[r.readIdx]
-		fr, err := newFieldReader(r.cm, field, path)
+		fr, err := newFieldReader(r.ctx, r.cm, field, path)
 		if err != nil {
 			return nil, err
 		}

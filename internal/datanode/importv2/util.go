@@ -41,7 +41,7 @@ func WrapNoTaskError(taskID int64, taskType TaskType) error {
 	return merr.WrapErrImportFailed(fmt.Sprintf("cannot find %s with id %d", taskType.String(), taskID))
 }
 
-func NewSyncTask(task *ImportTask, segmentID, partitionID int64, vchannel string, insertData *storage.InsertData) (syncmgr.Task, error) {
+func NewSyncTask(ctx context.Context, task *ImportTask, segmentID, partitionID int64, vchannel string, insertData *storage.InsertData) (syncmgr.Task, error) {
 	metaCache := task.metaCaches[vchannel]
 	AddSegment(metaCache, vchannel, segmentID, partitionID, task.GetCollectionID())
 
@@ -70,7 +70,7 @@ func NewSyncTask(task *ImportTask, segmentID, partitionID int64, vchannel string
 		WithChannelName(vchannel).
 		WithSegmentID(segmentID)
 
-	return serializer.EncodeBuffer(context.Background(), syncPack) // TODO: dyh, resolve context
+	return serializer.EncodeBuffer(ctx, syncPack)
 }
 
 func NewImportSegmentInfo(syncTask syncmgr.Task, task *ImportTask) (*datapb.ImportSegmentInfo, error) {

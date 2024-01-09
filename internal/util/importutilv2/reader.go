@@ -34,7 +34,8 @@ type Reader interface {
 	Close()
 }
 
-func NewReader(cm storage.ChunkManager,
+func NewReader(ctx context.Context,
+	cm storage.ChunkManager,
 	schema *schemapb.CollectionSchema,
 	importFile *internalpb.ImportFile,
 	options Options,
@@ -46,7 +47,7 @@ func NewReader(cm storage.ChunkManager,
 			return nil, err
 		}
 		paths := importFile.GetPaths()
-		return binlog.NewReader(cm, schema, paths, tsStart, tsEnd)
+		return binlog.NewReader(ctx, cm, schema, paths, tsStart, tsEnd)
 	}
 
 	fileType, err := GetFileType(importFile)
@@ -55,23 +56,19 @@ func NewReader(cm storage.ChunkManager,
 	}
 	switch fileType {
 	case JSON:
-		reader, err := cm.Reader(context.Background(), importFile.GetPaths()[0]) // TODO: dyh, resolve context
+		reader, err := cm.Reader(ctx, importFile.GetPaths()[0])
 		if err != nil {
 			return nil, WrapReadFileError(importFile.GetPaths()[0], err)
 		}
 		return json.NewReader(reader, schema, bufferSize)
 	case Numpy:
-		readers, err := CreateReaders(importFile.GetPaths(), cm, schema)
-		if err != nil {
-			return nil, err
-		}
-		return numpy.NewReader(schema, readers, bufferSize)
+		return numpy.NewReader(ctx, schema, importFile.GetPaths(), cm, bufferSize)
 	case Parquet:
-		cmReader, err := cm.Reader(context.Background(), importFile.GetPaths()[0]) // TODO: dyh, resolve context
+		cmReader, err := cm.Reader(ctx, importFile.GetPaths()[0])
 		if err != nil {
 			return nil, err
 		}
-		return parquet.NewReader(schema, cmReader, bufferSize)
+		return parquet.NewReader(ctx, schema, cmReader, bufferSize)
 	}
 	return nil, merr.WrapErrImportFailed("unexpected import file")
 }

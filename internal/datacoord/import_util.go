@@ -18,15 +18,14 @@ package datacoord
 
 import (
 	"context"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"sort"
 	"time"
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -83,16 +82,26 @@ func AssignSegments(task ImportTask, manager Manager) ([]int64, error) {
 
 	// alloc new segments
 	segments := make([]int64, 0)
+	addSegment := func(vchannel string, partitionID int64, rows int64) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		for rows > 0 {
+			segmentInfo, err := manager.AddImportSegment(ctx, task.GetCollectionID(),
+				partitionID, vchannel, maxRowsPerSegment)
+			if err != nil {
+				return err
+			}
+			segments = append(segments, segmentInfo.GetID())
+			rows -= segmentInfo.GetMaxRowNum()
+		}
+		return nil
+	}
+
 	for vchannel, partitionRows := range hashedRows {
 		for partitionID, rows := range partitionRows {
-			for rows > 0 {
-				segmentInfo, err := manager.AddImportSegment(context.TODO(), task.GetCollectionID(), // TODO: dyh, fix context
-					partitionID, vchannel, maxRowsPerSegment)
-				if err != nil {
-					return nil, err
-				}
-				segments = append(segments, segmentInfo.GetID())
-				rows -= segmentInfo.GetMaxRowNum()
+			err = addSegment(vchannel, partitionID, rows)
+			if err != nil {
+				return nil, err
 			}
 		}
 	}
@@ -113,7 +122,9 @@ func AssembleImportRequest(task ImportTask, meta *meta, alloc allocator) (*datap
 			MaxRows:     segment.GetMaxRowNum(),
 		})
 	}
-	ts, err := alloc.allocTimestamp(context.Background()) // TODO: dyh, resolve context
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	ts, err := alloc.allocTimestamp(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -179,9 +190,7 @@ func RegroupImportFiles(tasks []ImportTask) ([][]*datapb.ImportFileStats, error)
 }
 
 func NewImportTasks(fileGroups [][]*datapb.ImportFileStats,
-	requestID int64,
-	collectionID int64,
-	schema *schemapb.CollectionSchema,
+	pt *preImportTask,
 	manager Manager,
 	alloc allocator,
 ) ([]ImportTask, error) {
@@ -193,14 +202,15 @@ func NewImportTasks(fileGroups [][]*datapb.ImportFileStats,
 	for i, group := range fileGroups {
 		task := &importTask{
 			ImportTaskV2: &datapb.ImportTaskV2{
-				RequestID:    requestID,
+				RequestID:    pt.GetRequestID(),
 				TaskID:       idBegin + int64(i),
-				CollectionID: collectionID,
+				CollectionID: pt.GetCollectionID(),
 				NodeID:       NullNodeID,
 				State:        internalpb.ImportState_Pending,
+				TimeoutTs:    pt.GetTimeoutTs(),
 				FileStats:    group,
 			},
-			schema:         schema,
+			schema:         pt.GetSchema(),
 			lastActiveTime: time.Now(),
 		}
 		segments, err := AssignSegments(task, manager)
@@ -226,9 +236,9 @@ func AddImportSegment(cluster Cluster, meta *meta, segmentID int64) error {
 		RowNum:       segment.GetNumOfRows(),
 		StatsLog:     segment.GetStatslogs(),
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second) // TODO: config
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	_, err := cluster.AddImportSegment(ctx, req) // TODO: handle resp
+	_, err := cluster.AddImportSegment(ctx, req) // TODO: dyh, handle resp
 	return err
 }
 

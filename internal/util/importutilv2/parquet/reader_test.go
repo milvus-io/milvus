@@ -391,7 +391,7 @@ func (s *ReaderSuite) run(dt schemapb.DataType) {
 	assert.NoError(s.T(), err)
 	cmReader, err := cm.Reader(ctx, filePath)
 	assert.NoError(s.T(), err)
-	reader, err := NewReader(schema, cmReader, math.MaxInt)
+	reader, err := NewReader(ctx, schema, cmReader, math.MaxInt)
 	s.NoError(err)
 
 	checkFn := func(actualInsertData *storage.InsertData, offsetBegin, expectRows int) {

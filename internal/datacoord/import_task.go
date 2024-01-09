@@ -128,6 +128,7 @@ type ImportTask interface {
 	GetSchema() *schemapb.CollectionSchema
 	GetFileStats() []*datapb.ImportFileStats
 	GetLastActiveTime() time.Time
+	GetTimeoutTs() uint64
 	Clone() ImportTask
 }
 

@@ -19,6 +19,8 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"math"
 	"math/rand"
 	"strconv"
 	"time"
@@ -1698,7 +1700,18 @@ func (s *Server) ImportV2(ctx context.Context, in *datapb.ImportRequestInternal)
 		zap.Any("files", in.GetFiles()))
 	log.Info("receive import request")
 
-	const FilesPerPreImportTask = 2 // TODO: dyh, move to config
+	var timeoutTs uint64 = math.MaxUint64
+	timeoutStr, err := funcutil.GetAttrByKeyFromRepeatedKV("timeout", in.GetOptions())
+	if err == nil {
+		dur, err := time.ParseDuration(timeoutStr)
+		if err != nil {
+			resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprint("parse import timeout failed, err=%w", err)))
+			return resp, nil
+		}
+		timeoutTs = tsoutil.ComposeTSByTime(time.Now().Add(dur), 0)
+	}
+
+	const FilesPerPreImportTask = 2 // TODO: dyh, make it configurable
 	fileGroups := lo.Chunk(in.GetFiles(), FilesPerPreImportTask)
 	idStart, _, err := s.allocator.allocN(int64(len(fileGroups)) + 1)
 	if err != nil {
@@ -1720,6 +1733,7 @@ func (s *Server) ImportV2(ctx context.Context, in *datapb.ImportRequestInternal)
 				PartitionIDs: in.GetPartitionIDs(),
 				Vchannels:    in.GetChannelNames(),
 				State:        internalpb.ImportState_Pending,
+				TimeoutTs:    timeoutTs,
 				FileStats:    fileStats,
 			},
 			schema:         in.GetSchema(), // TODO: dyh, move to preimport task
