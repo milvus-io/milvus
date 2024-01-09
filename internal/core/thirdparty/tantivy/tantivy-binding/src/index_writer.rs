@@ -5,7 +5,6 @@ use tantivy::{doc, tokenizer, Index, IndexWriter};
 
 use crate::data_type::TantivyDataType;
 
-
 pub struct IndexWriterWrapper {
     pub field_name: String,
     pub field: Field,

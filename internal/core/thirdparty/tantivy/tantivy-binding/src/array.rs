@@ -1,6 +1,5 @@
 use libc::size_t;
 
-
 #[repr(C)]
 pub struct RustArray {
     array: *mut u32,
@@ -23,7 +22,7 @@ impl RustArray {
 
 #[no_mangle]
 pub extern "C" fn free_rust_array(array: RustArray) {
-    let RustArray { array, len , cap} = array;
+    let RustArray { array, len, cap } = array;
     unsafe {
         Vec::from_raw_parts(array, len, cap);
     }
