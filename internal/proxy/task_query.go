@@ -61,6 +61,8 @@ type queryTask struct {
 	plan             *planpb.PlanNode
 	partitionKeyMode bool
 	lb               LBPolicy
+	channelsMvcc     map[string]Timestamp
+	fastSkip         bool
 }
 
 type queryParams struct {
@@ -466,19 +468,33 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-func (t *queryTask) queryShard(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channelIDs ...string) error {
+func (t *queryTask) queryShard(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string) error {
+	needOverrideMvcc := false
+	mvccTs := t.MvccTimestamp
+	if len(t.channelsMvcc) > 0 {
+		mvccTs, needOverrideMvcc = t.channelsMvcc[channel]
+		// In fast mode, if there is no corresponding channel in channelsMvcc, quickly skip this query.
+		if !needOverrideMvcc && t.fastSkip {
+			return nil
+		}
+	}
+
 	retrieveReq := typeutil.Clone(t.RetrieveRequest)
 	retrieveReq.GetBase().TargetID = nodeID
+	if needOverrideMvcc && mvccTs > 0 {
+		retrieveReq.MvccTimestamp = mvccTs
+	}
+
 	req := &querypb.QueryRequest{
 		Req:         retrieveReq,
-		DmlChannels: channelIDs,
+		DmlChannels: []string{channel},
 		Scope:       querypb.DataScope_All,
 	}
 
 	log := log.Ctx(ctx).With(zap.Int64("collection", t.GetCollectionID()),
 		zap.Int64s("partitionIDs", t.GetPartitionIDs()),
 		zap.Int64("nodeID", nodeID),
-		zap.Strings("channels", channelIDs))
+		zap.String("channel", channel))
 
 	result, err := qn.Query(ctx, req)
 	if err != nil {

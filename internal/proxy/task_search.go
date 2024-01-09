@@ -63,9 +63,10 @@ type searchTask struct {
 	offset    int64
 	resultBuf *typeutil.ConcurrentSet[*internalpb.SearchResults]
 
-	qc   types.QueryCoordClient
-	node types.ProxyComponent
-	lb   LBPolicy
+	qc              types.QueryCoordClient
+	node            types.ProxyComponent
+	lb              LBPolicy
+	queryChannelsTs map[string]Timestamp
 }
 
 func getPartitionIDs(ctx context.Context, dbName string, collectionName string, partitionNames []string) (partitionIDs []UniqueID, err error) {
@@ -456,6 +457,13 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 		return err
 	}
 
+	t.queryChannelsTs = make(map[string]uint64)
+	for _, r := range toReduceResults {
+		for ch, ts := range r.GetChannelsMvcc() {
+			t.queryChannelsTs[ch] = ts
+		}
+	}
+
 	if len(toReduceResults) >= 1 {
 		MetricType = toReduceResults[0].GetMetricType()
 	}
@@ -513,20 +521,20 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-func (t *searchTask) searchShard(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channelIDs ...string) error {
+func (t *searchTask) searchShard(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string) error {
 	searchReq := typeutil.Clone(t.SearchRequest)
 	searchReq.GetBase().TargetID = nodeID
 	req := &querypb.SearchRequest{
 		Req:             searchReq,
-		DmlChannels:     channelIDs,
+		DmlChannels:     []string{channel},
 		Scope:           querypb.DataScope_All,
-		TotalChannelNum: int32(len(channelIDs)),
+		TotalChannelNum: int32(1),
 	}
 
 	log := log.Ctx(ctx).With(zap.Int64("collection", t.GetCollectionID()),
 		zap.Int64s("partitionIDs", t.GetPartitionIDs()),
 		zap.Int64("nodeID", nodeID),
-		zap.Strings("channels", channelIDs))
+		zap.String("channel", channel))
 
 	var result *internalpb.SearchResults
 	var err error
@@ -593,6 +601,10 @@ func (t *searchTask) Requery() error {
 		GuaranteeTimestamp: t.request.GetGuaranteeTimestamp(),
 		QueryParams:        t.request.GetSearchParams(),
 	}
+	channelsMvcc := make(map[string]Timestamp)
+	for k, v := range t.queryChannelsTs {
+		channelsMvcc[k] = v
+	}
 	qt := &queryTask{
 		ctx:       t.ctx,
 		Condition: NewTaskCondition(t.ctx),
@@ -603,10 +615,12 @@ func (t *searchTask) Requery() error {
 			),
 			ReqID: paramtable.GetNodeID(),
 		},
-		request: queryReq,
-		plan:    plan,
-		qc:      t.node.(*Proxy).queryCoord,
-		lb:      t.node.(*Proxy).lbPolicy,
+		request:      queryReq,
+		plan:         plan,
+		qc:           t.node.(*Proxy).queryCoord,
+		lb:           t.node.(*Proxy).lbPolicy,
+		channelsMvcc: channelsMvcc,
+		fastSkip:     true,
 	}
 	queryResult, err := t.node.(*Proxy).query(t.ctx, qt)
 	if err != nil {
@@ -823,7 +837,7 @@ func reduceSearchResultData(ctx context.Context, subSearchResultData []*schemapb
 			zap.Int64("nq", sData.NumQueries),
 			zap.Int64("topk", sData.TopK),
 			zap.Int("length of pks", pkLength),
-			zap.Any("length of FieldsData", len(sData.FieldsData)))
+			zap.Int("length of FieldsData", len(sData.FieldsData)))
 		if err := checkSearchResultData(sData, nq, topk); err != nil {
 			log.Ctx(ctx).Warn("invalid search results", zap.Error(err))
 			return ret, err
@@ -850,6 +864,7 @@ func reduceSearchResultData(ctx context.Context, subSearchResultData []*schemapb
 
 	var retSize int64
 	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
+
 	// reducing nq * topk results
 	for i := int64(0); i < nq; i++ {
 		var (

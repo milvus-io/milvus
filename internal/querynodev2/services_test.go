@@ -1149,6 +1149,7 @@ func (suite *ServiceSuite) genCSearchRequest(nq int64, indexType string, schema 
 		PlaceholderGroup:   placeHolder,
 		DslType:            commonpb.DslType_BoolExprV1,
 		Nq:                 nq,
+		MvccTimestamp:      typeutil.MaxTimestamp,
 	}, nil
 }
 

@@ -658,8 +658,13 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 		zap.String("channel", channel),
 		zap.String("scope", req.GetScope().String()),
 	)
-
-	resp := &internalpb.SearchResults{}
+	channelsMvcc := make(map[string]uint64)
+	for _, ch := range req.GetDmlChannels() {
+		channelsMvcc[ch] = req.GetReq().GetMvccTimestamp()
+	}
+	resp := &internalpb.SearchResults{
+		ChannelsMvcc: channelsMvcc,
+	}
 	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
 		resp.Status = merr.Status(err)
 		return resp, nil
@@ -790,7 +795,6 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 			Scope:           req.Scope,
 			TotalChannelNum: req.TotalChannelNum,
 		}
-
 		runningGp.Go(func() error {
 			ret, err := node.searchChannel(runningCtx, req, ch)
 			mu.Lock()
@@ -889,7 +893,7 @@ func (node *QueryNode) QuerySegments(ctx context.Context, req *querypb.QueryRequ
 		return resp, nil
 	}
 
-	tr.CtxElapse(ctx, fmt.Sprintf("do query done, traceID = %s, fromSharedLeader = %t, vChannel = %s, segmentIDs = %v",
+	tr.CtxElapse(ctx, fmt.Sprintf("do query done, traceID = %s, fromShardLeader = %t, vChannel = %s, segmentIDs = %v",
 		traceID,
 		req.GetFromShardLeader(),
 		channel,
@@ -1101,7 +1105,7 @@ func (node *QueryNode) QueryStreamSegments(req *querypb.QueryRequest, srv queryp
 		return nil
 	}
 
-	tr.CtxElapse(ctx, fmt.Sprintf("do query done, traceID = %s, fromSharedLeader = %t, vChannel = %s, segmentIDs = %v",
+	tr.CtxElapse(ctx, fmt.Sprintf("do query done, traceID = %s, fromShardLeader = %t, vChannel = %s, segmentIDs = %v",
 		traceID,
 		req.GetFromShardLeader(),
 		channel,

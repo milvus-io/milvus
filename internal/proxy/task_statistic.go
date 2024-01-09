@@ -273,19 +273,19 @@ func (g *getStatisticsTask) getStatisticsFromQueryNode(ctx context.Context) erro
 	return nil
 }
 
-func (g *getStatisticsTask) getStatisticsShard(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channelIDs ...string) error {
+func (g *getStatisticsTask) getStatisticsShard(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string) error {
 	nodeReq := proto.Clone(g.GetStatisticsRequest).(*internalpb.GetStatisticsRequest)
 	nodeReq.Base.TargetID = nodeID
 	req := &querypb.GetStatisticsRequest{
 		Req:         nodeReq,
-		DmlChannels: channelIDs,
+		DmlChannels: []string{channel},
 		Scope:       querypb.DataScope_All,
 	}
 	result, err := qn.GetStatistics(ctx, req)
 	if err != nil {
 		log.Warn("QueryNode statistic return error",
 			zap.Int64("nodeID", nodeID),
-			zap.Strings("channels", channelIDs),
+			zap.String("channel", channel),
 			zap.Error(err))
 		globalMetaCache.DeprecateShardCache(g.request.GetDbName(), g.collectionName)
 		return err
@@ -293,7 +293,7 @@ func (g *getStatisticsTask) getStatisticsShard(ctx context.Context, nodeID int64
 	if result.GetStatus().GetErrorCode() == commonpb.ErrorCode_NotShardLeader {
 		log.Warn("QueryNode is not shardLeader",
 			zap.Int64("nodeID", nodeID),
-			zap.Strings("channels", channelIDs))
+			zap.String("channel", channel))
 		globalMetaCache.DeprecateShardCache(g.request.GetDbName(), g.collectionName)
 		return errInvalidShardLeaders
 	}

@@ -200,10 +200,13 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 
 	// wait tsafe
 	waitTr := timerecord.NewTimeRecorder("wait tSafe")
-	err := sd.waitTSafe(ctx, req.Req.GuaranteeTimestamp)
+	tSafe, err := sd.waitTSafe(ctx, req.Req.GuaranteeTimestamp)
 	if err != nil {
 		log.Warn("delegator search failed to wait tsafe", zap.Error(err))
 		return nil, err
+	}
+	if req.GetReq().GetMvccTimestamp() == 0 {
+		req.Req.MvccTimestamp = tSafe
 	}
 	metrics.QueryNodeSQLatencyWaitTSafe.WithLabelValues(
 		fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel).
@@ -275,10 +278,13 @@ func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryReq
 
 	// wait tsafe
 	waitTr := timerecord.NewTimeRecorder("wait tSafe")
-	err := sd.waitTSafe(ctx, req.Req.GuaranteeTimestamp)
+	tSafe, err := sd.waitTSafe(ctx, req.Req.GuaranteeTimestamp)
 	if err != nil {
 		log.Warn("delegator query failed to wait tsafe", zap.Error(err))
 		return err
+	}
+	if req.GetReq().GetMvccTimestamp() == 0 {
+		req.Req.MvccTimestamp = tSafe
 	}
 	metrics.QueryNodeSQLatencyWaitTSafe.WithLabelValues(
 		fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel).
@@ -343,10 +349,13 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 
 	// wait tsafe
 	waitTr := timerecord.NewTimeRecorder("wait tSafe")
-	err := sd.waitTSafe(ctx, req.Req.GuaranteeTimestamp)
+	tSafe, err := sd.waitTSafe(ctx, req.Req.GuaranteeTimestamp)
 	if err != nil {
 		log.Warn("delegator query failed to wait tsafe", zap.Error(err))
 		return nil, err
+	}
+	if req.GetReq().GetMvccTimestamp() == 0 {
+		req.Req.MvccTimestamp = tSafe
 	}
 	metrics.QueryNodeSQLatencyWaitTSafe.WithLabelValues(
 		fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel).
@@ -406,7 +415,7 @@ func (sd *shardDelegator) GetStatistics(ctx context.Context, req *querypb.GetSta
 	}
 
 	// wait tsafe
-	err := sd.waitTSafe(ctx, req.Req.GuaranteeTimestamp)
+	_, err := sd.waitTSafe(ctx, req.Req.GuaranteeTimestamp)
 	if err != nil {
 		log.Warn("delegator GetStatistics failed to wait tsafe", zap.Error(err))
 		return nil, err
@@ -547,14 +556,15 @@ func executeSubTasks[T any, R interface {
 }
 
 // waitTSafe returns when tsafe listener notifies a timestamp which meet the guarantee ts.
-func (sd *shardDelegator) waitTSafe(ctx context.Context, ts uint64) error {
+func (sd *shardDelegator) waitTSafe(ctx context.Context, ts uint64) (uint64, error) {
 	log := sd.getLogger(ctx)
 	// already safe to search
-	if sd.latestTsafe.Load() >= ts {
-		return nil
+	latestTSafe := sd.latestTsafe.Load()
+	if latestTSafe >= ts {
+		return latestTSafe, nil
 	}
 	// check lag duration too large
-	st, _ := tsoutil.ParseTS(sd.latestTsafe.Load())
+	st, _ := tsoutil.ParseTS(latestTSafe)
 	gt, _ := tsoutil.ParseTS(ts)
 	lag := gt.Sub(st)
 	maxLag := paramtable.Get().QueryNodeCfg.MaxTimestampLag.GetAsDuration(time.Second)
@@ -565,7 +575,7 @@ func (sd *shardDelegator) waitTSafe(ctx context.Context, ts uint64) error {
 			zap.Duration("lag", lag),
 			zap.Duration("maxTsLag", maxLag),
 		)
-		return WrapErrTsLagTooLarge(lag, maxLag)
+		return 0, WrapErrTsLagTooLarge(lag, maxLag)
 	}
 
 	ch := make(chan struct{})
@@ -587,12 +597,12 @@ func (sd *shardDelegator) waitTSafe(ctx context.Context, ts uint64) error {
 		case <-ctx.Done():
 			// notify wait goroutine to quit
 			sd.tsCond.Broadcast()
-			return ctx.Err()
+			return 0, ctx.Err()
 		case <-ch:
 			if !sd.Serviceable() {
-				return merr.WrapErrChannelNotAvailable(sd.vchannelName, "delegator closed during wait tsafe")
+				return 0, merr.WrapErrChannelNotAvailable(sd.vchannelName, "delegator closed during wait tsafe")
 			}
-			return nil
+			return sd.latestTsafe.Load(), nil
 		}
 	}
 }

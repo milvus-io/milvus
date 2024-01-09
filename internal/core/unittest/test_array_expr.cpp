@@ -894,7 +894,7 @@ TEST(Expr, TestArrayContains) {
         *seg_promote, seg_promote->get_row_count(), MAX_TIMESTAMP);
 
     std::vector<ArrayTestcase<bool>> bool_testcases{{{true, true}, {}},
-                                               {{false, false}, {}}};
+                                                    {{false, false}, {}}};
 
     for (auto testcase : bool_testcases) {
         auto check = [&](const std::vector<bool>& values) {
@@ -1652,9 +1652,7 @@ TEST(Expr, TestArrayBinaryArith) {
               value:<int64_val:10 >
         >)",
              "int",
-             [](milvus::Array& array) {
-                 return array.length() == 10;
-             }},
+             [](milvus::Array& array) { return array.length() == 10; }},
             {R"(binary_arith_op_eval_range_expr: <
               column_info: <
                 field_id: 101
@@ -1667,9 +1665,7 @@ TEST(Expr, TestArrayBinaryArith) {
               value:<int64_val:8 >
         >)",
              "int",
-             [](milvus::Array& array) {
-                 return array.length() != 8;
-             }},
+             [](milvus::Array& array) { return array.length() != 8; }},
         };
 
     std::string raw_plan_tmp = R"(vector_anns: <
@@ -1847,7 +1843,7 @@ TEST(Expr, TestArrayInTerm) {
     ExecExprVisitor visitor(
         *seg_promote, seg_promote->get_row_count(), MAX_TIMESTAMP);
 
-        std::vector<std::tuple<std::string,
+    std::vector<std::tuple<std::string,
                            std::string,
                            std::function<bool(milvus::Array & array)>>>
         testcases = {
@@ -1860,11 +1856,11 @@ TEST(Expr, TestArrayInTerm) {
               >
               values:<int64_val:1 > values:<int64_val:2 > values:<int64_val:3 >
         >)",
-       "long",
-       [](milvus::Array& array) {
-           auto val = array.get_data<int64_t>(0);
-           return val == 1 || val ==2 || val == 3;
-       }},
+             "long",
+             [](milvus::Array& array) {
+                 auto val = array.get_data<int64_t>(0);
+                 return val == 1 || val == 2 || val == 3;
+             }},
             {R"(term_expr: <
               column_info: <
                 field_id: 101
@@ -1874,9 +1870,7 @@ TEST(Expr, TestArrayInTerm) {
               >
         >)",
              "long",
-             [](milvus::Array& array) {
-                 return false;
-             }},
+             [](milvus::Array& array) { return false; }},
             {R"(term_expr: <
               column_info: <
                 field_id: 102
@@ -1900,9 +1894,7 @@ TEST(Expr, TestArrayInTerm) {
               >
         >)",
              "bool",
-             [](milvus::Array& array) {
-                 return false;
-             }},
+             [](milvus::Array& array) { return false; }},
             {R"(term_expr: <
               column_info: <
                 field_id: 103
@@ -1926,9 +1918,7 @@ TEST(Expr, TestArrayInTerm) {
               >
         >)",
              "float",
-             [](milvus::Array& array) {
-                 return false;
-             }},
+             [](milvus::Array& array) { return false; }},
             {R"(term_expr: <
               column_info: <
                 field_id: 104
@@ -1952,9 +1942,7 @@ TEST(Expr, TestArrayInTerm) {
               >
         >)",
              "string",
-             [](milvus::Array& array) {
-                 return false;
-             }},
+             [](milvus::Array& array) { return false; }},
             {R"(term_expr: <
               column_info: <
                 field_id: 104
