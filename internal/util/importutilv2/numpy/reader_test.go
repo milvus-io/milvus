@@ -18,6 +18,7 @@ package numpy
 
 import (
 	"bytes"
+	"context"
 	rand2 "crypto/rand"
 	"fmt"
 	"io"
@@ -30,11 +31,13 @@ import (
 	"github.com/samber/lo"
 	"github.com/sbinet/npyio"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"golang.org/x/exp/slices"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -218,8 +221,18 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 	fieldIDToField := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) int64 {
 		return field.GetFieldID()
 	})
+	files := make(map[int64]string)
+	for _, field := range schema.GetFields() {
+		files[field.GetFieldID()] = fmt.Sprintf("%s.npy", field.GetName())
+	}
 
-	readers := make(map[int64]io.Reader)
+	cm := mocks.NewChunkManager(suite.T())
+	type mockReader struct {
+		io.Reader
+		io.Closer
+		io.ReaderAt
+		io.Seeker
+	}
 	for fieldID, fieldData := range insertData.Data {
 		dataType := fieldIDToField[fieldID].GetDataType()
 		if dataType == schemapb.DataType_JSON {
@@ -230,7 +243,9 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 			}
 			reader, err := CreateReader(jsonStrs)
 			suite.NoError(err)
-			readers[fieldID] = reader
+			cm.EXPECT().Reader(mock.Anything, files[fieldID]).Return(&mockReader{
+				Reader: reader,
+			}, nil)
 		} else if dataType == schemapb.DataType_FloatVector {
 			chunked := lo.Chunk(insertData.Data[fieldID].GetRows().([]float32), dim)
 			chunkedRows := make([][dim]float32, len(chunked))
@@ -239,7 +254,9 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 			}
 			reader, err := CreateReader(chunkedRows)
 			suite.NoError(err)
-			readers[fieldID] = reader
+			cm.EXPECT().Reader(mock.Anything, files[fieldID]).Return(&mockReader{
+				Reader: reader,
+			}, nil)
 		} else if dataType == schemapb.DataType_BinaryVector {
 			chunked := lo.Chunk(insertData.Data[fieldID].GetRows().([]byte), dim/8)
 			chunkedRows := make([][dim / 8]byte, len(chunked))
@@ -248,15 +265,19 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 			}
 			reader, err := CreateReader(chunkedRows)
 			suite.NoError(err)
-			readers[fieldID] = reader
+			cm.EXPECT().Reader(mock.Anything, files[fieldID]).Return(&mockReader{
+				Reader: reader,
+			}, nil)
 		} else {
 			reader, err := CreateReader(insertData.Data[fieldID].GetRows())
 			suite.NoError(err)
-			readers[fieldID] = reader
+			cm.EXPECT().Reader(mock.Anything, files[fieldID]).Return(&mockReader{
+				Reader: reader,
+			}, nil)
 		}
 	}
 
-	reader, err := NewReader(schema, readers, math.MaxInt)
+	reader, err := NewReader(context.Background(), schema, lo.Values(files), cm, math.MaxInt)
 	suite.NoError(err)
 
 	checkFn := func(actualInsertData *storage.InsertData, offsetBegin, expectRows int) {

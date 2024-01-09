@@ -17,6 +17,7 @@
 package parquet
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/apache/arrow/go/v12/arrow/memory"
@@ -40,7 +41,7 @@ type Reader struct {
 	frs    map[int64]*FieldReader // fieldID -> FieldReader
 }
 
-func NewReader(schema *schemapb.CollectionSchema, cmReader storage.FileReader, bufferSize int) (*Reader, error) {
+func NewReader(ctx context.Context, schema *schemapb.CollectionSchema, cmReader storage.FileReader, bufferSize int) (*Reader, error) {
 	const pqBufSize = 32 * 1024 * 1024 // TODO: dyh, make if configurable
 	size := calcBufferSize(pqBufSize, schema)
 	reader, err := file.NewParquetReader(cmReader, file.WithReadProps(&parquet.ReaderProperties{
@@ -58,7 +59,7 @@ func NewReader(schema *schemapb.CollectionSchema, cmReader storage.FileReader, b
 		return nil, merr.WrapErrImportFailed(fmt.Sprintf("new parquet file reader failed, err=%v", err))
 	}
 
-	crs, err := CreateFieldReaders(fileReader, schema)
+	crs, err := CreateFieldReaders(ctx, fileReader, schema)
 	if err != nil {
 		return nil, err
 	}

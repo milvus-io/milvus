@@ -17,6 +17,8 @@
 package importv2
 
 import (
+	"context"
+
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -119,10 +121,14 @@ type Task interface {
 	GetState() internalpb.ImportState
 	GetReason() string
 	GetSchema() *schemapb.CollectionSchema
+	GetCtx() context.Context
+	Cancel()
 }
 
 type PreImportTask struct {
 	*datapb.PreImportTask
+	ctx    context.Context
+	cancel context.CancelFunc
 	schema *schemapb.CollectionSchema
 }
 
@@ -132,6 +138,7 @@ func NewPreImportTask(req *datapb.PreImportRequest) Task {
 			ImportFile: file,
 		}
 	})
+	ctx, cancel := context.WithCancel(context.Background())
 	return &PreImportTask{
 		PreImportTask: &datapb.PreImportTask{
 			RequestID:    req.GetRequestID(),
@@ -142,6 +149,8 @@ func NewPreImportTask(req *datapb.PreImportRequest) Task {
 			State:        internalpb.ImportState_Pending,
 			FileStats:    fileStats,
 		},
+		ctx:    ctx,
+		cancel: cancel,
 		schema: req.GetSchema(),
 	}
 }
@@ -154,8 +163,18 @@ func (p *PreImportTask) GetSchema() *schemapb.CollectionSchema {
 	return p.schema
 }
 
+func (p *PreImportTask) GetCtx() context.Context {
+	return p.ctx
+}
+
+func (p *PreImportTask) Cancel() {
+	p.cancel()
+}
+
 type ImportTask struct {
 	*datapb.ImportTaskV2
+	ctx          context.Context
+	cancel       context.CancelFunc
 	schema       *schemapb.CollectionSchema
 	segmentsInfo map[int64]*datapb.ImportSegmentInfo
 	req          *datapb.ImportRequest
@@ -165,6 +184,7 @@ type ImportTask struct {
 }
 
 func NewImportTask(req *datapb.ImportRequest) Task {
+	ctx, cancel := context.WithCancel(context.Background())
 	task := &ImportTask{
 		ImportTaskV2: &datapb.ImportTaskV2{
 			RequestID:    req.GetRequestID(),
@@ -172,6 +192,8 @@ func NewImportTask(req *datapb.ImportRequest) Task {
 			CollectionID: req.GetCollectionID(),
 			State:        internalpb.ImportState_Pending,
 		},
+		ctx:          ctx,
+		cancel:       cancel,
 		schema:       req.GetSchema(),
 		segmentsInfo: make(map[int64]*datapb.ImportSegmentInfo),
 		req:          req,
@@ -221,6 +243,14 @@ func (t *ImportTask) GetVchannels() []string {
 
 func (t *ImportTask) GetSchema() *schemapb.CollectionSchema {
 	return t.schema
+}
+
+func (t *ImportTask) GetCtx() context.Context {
+	return t.ctx
+}
+
+func (t *ImportTask) Cancel() {
+	t.cancel()
 }
 
 func (t *ImportTask) GetSegmentsInfo() []*datapb.ImportSegmentInfo {

@@ -134,7 +134,7 @@ func (e *executor) PreImport(task Task) {
 		})
 
 	for i, file := range files {
-		reader, err := importutilv2.NewReader(e.cm, task.GetSchema(), file, nil, BufferSize) // TODO: dyh, fix options
+		reader, err := importutilv2.NewReader(task.GetCtx(), e.cm, task.GetSchema(), file, nil, BufferSize) // TODO: dyh, fix options
 		if err != nil {
 			e.handleErr(task, err, "new reader failed")
 			return
@@ -197,7 +197,7 @@ func (e *executor) Import(task Task) {
 
 	req := task.(*ImportTask).req
 	for _, file := range req.GetFiles() {
-		reader, err := importutilv2.NewReader(e.cm, task.GetSchema(), file, nil, BufferSize) // TODO: dyh, fix options
+		reader, err := importutilv2.NewReader(task.GetCtx(), e.cm, task.GetSchema(), file, nil, BufferSize) // TODO: dyh, fix options
 		if err != nil {
 			e.handleErr(task, err, fmt.Sprintf("new reader failed, file: %s", file.String()))
 			return
@@ -255,11 +255,11 @@ func (e *executor) Sync(task *ImportTask, hashedData HashedData) error {
 		for partitionIdx, data := range datas {
 			partitionID := task.partitions[partitionIdx]
 			segmentID := PickSegment(task, channel, partitionID, data.GetRowNum())
-			syncTask, err := NewSyncTask(task, segmentID, partitionID, channel, data)
+			syncTask, err := NewSyncTask(task.GetCtx(), task, segmentID, partitionID, channel, data)
 			if err != nil {
 				return err
 			}
-			future := e.syncMgr.SyncData(context.TODO(), syncTask) // TODO: dyh, resolve context
+			future := e.syncMgr.SyncData(task.GetCtx(), syncTask)
 			futures = append(futures, future)
 			syncTasks = append(syncTasks, syncTask)
 		}

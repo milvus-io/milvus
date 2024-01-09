@@ -94,11 +94,6 @@ service DataCoord {
   rpc ReportDataNodeTtMsgs(ReportDataNodeTtMsgsRequest) returns (common.Status) {}
 
   rpc GcControl(GcControlRequest) returns(common.Status){}
-
-  // importV2
-  rpc ImportV2(ImportRequestInternal) returns(internal.ImportResponse){}
-  rpc GetImportProgress(internal.GetImportProgressRequest) returns(internal.GetImportProgressResponse){}
-  rpc ListImports(internal.ListImportsRequest) returns(internal.ListImportsResponse){}
 }
 
 service DataNode {
@@ -861,7 +856,8 @@ message PreImportTask {
   int64 nodeID = 6;
   internal.ImportState state = 7;
   string reason = 8;
-  repeated ImportFileStats file_stats = 9;
+  uint64 timeout_ts = 9;
+  repeated ImportFileStats file_stats = 10;
 }
 
 message ImportTaskV2 {
@@ -872,7 +868,8 @@ message ImportTaskV2 {
   int64 nodeID = 5;
   internal.ImportState state = 6;
   string reason = 7;
-  repeated ImportFileStats file_stats = 8;
+  uint64 timeout_ts = 8;
+  repeated ImportFileStats file_stats = 9;
 }
 
 enum GcCommand {

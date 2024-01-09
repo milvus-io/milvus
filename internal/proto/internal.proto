@@ -257,7 +257,7 @@ enum ImportState {
 }
 
 message ImportFile {
-  // one row-based file or multiple column-based files
+  // A singular row-based file or multiple column-based files.
   repeated string paths = 1;
 }
 

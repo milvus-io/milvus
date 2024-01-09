@@ -17,6 +17,7 @@
 package parquet
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/apache/arrow/go/v12/arrow"
@@ -41,7 +42,7 @@ func calcBufferSize(blockSize int, schema *schemapb.CollectionSchema) int {
 	return blockSize / len(schema.GetFields())
 }
 
-func CreateFieldReaders(fileReader *pqarrow.FileReader, schema *schemapb.CollectionSchema) (map[int64]*FieldReader, error) {
+func CreateFieldReaders(ctx context.Context, fileReader *pqarrow.FileReader, schema *schemapb.CollectionSchema) (map[int64]*FieldReader, error) {
 	nameToField := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) string {
 		return field.GetName()
 	})
@@ -78,7 +79,7 @@ func CreateFieldReaders(fileReader *pqarrow.FileReader, schema *schemapb.Collect
 			return nil, WrapTypeErr(dataType.String(), pqField.Type.Name(), field)
 		}
 
-		cr, err := NewFieldReader(fileReader, i, field)
+		cr, err := NewFieldReader(ctx, fileReader, i, field)
 		if err != nil {
 			return nil, err
 		}

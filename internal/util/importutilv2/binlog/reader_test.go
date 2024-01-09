@@ -17,6 +17,7 @@
 package binlog
 
 import (
+	"context"
 	rand2 "crypto/rand"
 	"fmt"
 	"math"
@@ -327,7 +328,7 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 		},
 	}
 	cm := mocks.NewChunkManager(suite.T())
-	typeutil.AppendSystemFields(schema)
+	schema = typeutil.AppendSystemFields(schema)
 
 	originalInsertData := createInsertData(suite.T(), schema, suite.numRows)
 	insertLogs := lo.Flatten(lo.Values(insertBinlogs))
@@ -336,6 +337,7 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 	cm.EXPECT().ListWithPrefix(mock.Anything, deltaPrefix, mock.Anything).Return(deltaLogs, nil, nil)
 	for fieldID, paths := range insertBinlogs {
 		field := typeutil.GetField(schema, fieldID)
+		suite.NotNil(field)
 		buf0 := createBinlogBuf(suite.T(), field, originalInsertData.Data[fieldID])
 		cm.EXPECT().Read(mock.Anything, paths[0]).Return(buf0, nil)
 	}
@@ -347,7 +349,7 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 		}
 	}
 
-	reader, err := NewReader(cm, schema, []string{insertPrefix, deltaPrefix}, suite.tsStart, suite.tsEnd)
+	reader, err := NewReader(context.Background(), cm, schema, []string{insertPrefix, deltaPrefix}, suite.tsStart, suite.tsEnd)
 	suite.NoError(err)
 	insertData, err := reader.Read()
 	suite.NoError(err)
