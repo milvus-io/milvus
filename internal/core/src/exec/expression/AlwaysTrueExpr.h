@@ -45,6 +45,15 @@ class PhyAlwaysTrueExpr : public Expr {
     void
     Eval(EvalCtx& context, VectorPtr& result) override;
 
+    void
+    MoveCursor() override {
+        int64_t real_batch_size = current_pos_ + batch_size_ >= active_count_
+                                      ? active_count_ - current_pos_
+                                      : batch_size_;
+
+        current_pos_ += real_batch_size;
+    }
+
  private:
     std::shared_ptr<const milvus::expr::AlwaysTrueExpr> expr_;
     int64_t active_count_;

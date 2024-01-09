@@ -39,6 +39,11 @@ class PhyLogicalUnaryExpr : public Expr {
     void
     Eval(EvalCtx& context, VectorPtr& result) override;
 
+    void
+    MoveCursor() override {
+        inputs_[0]->MoveCursor();
+    }
+
  private:
     std::shared_ptr<const milvus::expr::LogicalUnaryExpr> expr_;
 };
