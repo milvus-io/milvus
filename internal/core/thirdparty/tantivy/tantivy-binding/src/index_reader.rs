@@ -3,7 +3,7 @@ use std::str::FromStr;
 
 
 
-use tantivy::collector::TopDocs;
+use tantivy::collector::{TopDocs, DocSetCollector};
 use tantivy::directory::MmapDirectory;
 use tantivy::query::{Query, RangeQuery, TermQuery, RegexQuery};
 use tantivy::schema::{Field, IndexRecordOption};
@@ -57,12 +57,11 @@ impl IndexReaderWrapper {
 
     fn search(&self, q: &dyn Query) -> Vec<u32> {
         let searcher = self.reader.searcher();
-        let cnt = self.cnt;
         let hits = searcher
-            .search(q, &TopDocs::with_limit(cnt as usize))
+            .search(q, &DocSetCollector)
             .unwrap();
         let mut ret = Vec::new();
-        for (_, address) in hits {
+        for address in &hits {
             ret.push(address.doc_id);
         }
         ret
