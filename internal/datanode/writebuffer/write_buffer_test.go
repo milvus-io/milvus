@@ -63,6 +63,8 @@ func (s *WriteBufferSuite) SetupTest() {
 
 func (s *WriteBufferSuite) TestDefaultOption() {
 	s.Run("default BFPkOracle", func() {
+		paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableLevelZeroSegment.Key, "false")
+		defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableLevelZeroSegment.Key)
 		wb, err := NewWriteBuffer(s.channelName, s.metacache, s.storageCache, s.syncMgr)
 		s.NoError(err)
 		_, ok := wb.(*bfWriteBuffer)
