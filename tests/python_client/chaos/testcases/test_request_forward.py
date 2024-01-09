@@ -98,7 +98,7 @@ def delete_data(c_name="hello_milvus", host_list=None):
     time.sleep(10)
 
 
-def hello_milvus(host_1="127.0.0.1", host_2="127.0.0.1", request_duration=300):
+def hello_milvus(host_1="127.0.0.1", host_2="127.0.0.1", request_duration=300, c_name="hello_milvus"):
     connections.connect("host_1", uri=f"http://{host_1}:19530")
     connections.connect("host_2", uri=f"http://{host_2}:19530")
     log.info(connections)
@@ -130,9 +130,11 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='host ip')
     parser.add_argument('--host_1', type=str, default='127.0.0.1', help='host ip')
     parser.add_argument('--host_2', type=str, default='127.0.0.1', help='host ip')
-    parser.add_argument('--request_duration', type=str, default='1', help='host ip')
+    parser.add_argument('--request_duration', type=str, default='1', help='request duration')
+    parser.add_argument('--c_name', type=str, default='hello_milvus', help='collection name')
     args = parser.parse_args()
     host_1 = args.host_1
     host_2 = args.host_2
-    request_duration = int(args.request_duration) * 60
-    hello_milvus(host_1, host_2, request_duration)
+    request_duration = int(args.request_duration) * 60  # minutes to seconds
+    c_name = args.c_name
+    hello_milvus(host_1, host_2, request_duration, c_name)
