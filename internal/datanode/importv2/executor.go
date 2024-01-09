@@ -26,7 +26,6 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -34,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/conc"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 const BufferSize = 64 * 1024 * 1024 // TODO: dyh, make it configurable
@@ -48,8 +46,6 @@ type executor struct {
 	manager TaskManager
 	syncMgr syncmgr.SyncManager
 	cm      storage.ChunkManager
-
-	// TODO: dyh, add thread pool
 
 	closeOnce sync.Once
 	closeChan chan struct{}
@@ -66,19 +62,23 @@ func NewExecutor(manager TaskManager, syncMgr syncmgr.SyncManager, cm storage.Ch
 
 func (e *executor) Start() {
 	log.Info("start import executor")
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
+	var (
+		exeTicker = time.NewTicker(2 * time.Second)
+		logTicker = time.NewTicker(10 * time.Minute)
+	)
+	defer exeTicker.Stop()
+	defer logTicker.Stop()
 	for {
 		select {
 		case <-e.closeChan:
 			log.Info("import executor exited")
 			return
-		case <-ticker.C:
+		case <-exeTicker.C:
 			tasks := e.manager.GetBy(WithStates(internalpb.ImportState_Pending))
 			wg, _ := errgroup.WithContext(context.Background())
 			for _, task := range tasks {
 				task := task
-				wg.Go(func() error {
+				wg.Go(func() error { // TODO: dyh, add thread pool
 					switch task.GetType() {
 					case PreImportTaskType:
 						e.PreImport(task)
@@ -89,6 +89,7 @@ func (e *executor) Start() {
 				})
 			}
 			_ = wg.Wait()
+		case <-logTicker.C:
 			LogStats(e.manager)
 		}
 	}
@@ -98,14 +99,6 @@ func (e *executor) Close() {
 	e.closeOnce.Do(func() {
 		close(e.closeChan)
 	})
-}
-
-func (e *executor) estimateReadRows(schema *schemapb.CollectionSchema) (int64, error) {
-	sizePerRow, err := typeutil.EstimateSizePerRecord(schema)
-	if err != nil {
-		return 0, err
-	}
-	return int64(BufferSize / sizePerRow), nil
 }
 
 func WrapLogFields(task Task, fields ...zap.Field) []zap.Field {
