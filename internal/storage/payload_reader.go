@@ -68,6 +68,8 @@ func (r *PayloadReader) GetDataFromPayload() (interface{}, int, error) {
 		return r.GetFloatVectorFromPayload()
 	case schemapb.DataType_Float16Vector:
 		return r.GetFloat16VectorFromPayload()
+	case schemapb.DataType_BFloat16Vector:
+		return r.GetBFloat16VectorFromPayload()
 	case schemapb.DataType_String, schemapb.DataType_VarChar:
 		val, err := r.GetStringFromPayload()
 		return val, 0, err
@@ -323,6 +325,33 @@ func (r *PayloadReader) GetBinaryVectorFromPayload() ([]byte, int, error) {
 // GetFloat16VectorFromPayload returns vector, dimension, error
 func (r *PayloadReader) GetFloat16VectorFromPayload() ([]byte, int, error) {
 	if r.colType != schemapb.DataType_Float16Vector {
+		return nil, -1, fmt.Errorf("failed to get float vector from datatype %v", r.colType.String())
+	}
+	col, err := r.reader.RowGroup(0).Column(0)
+	if err != nil {
+		return nil, -1, err
+	}
+	dim := col.Descriptor().TypeLength() / 2
+	values := make([]parquet.FixedLenByteArray, r.numRows)
+	valuesRead, err := ReadDataFromAllRowGroups[parquet.FixedLenByteArray, *file.FixedLenByteArrayColumnChunkReader](r.reader, values, 0, r.numRows)
+	if err != nil {
+		return nil, -1, err
+	}
+
+	if valuesRead != r.numRows {
+		return nil, -1, fmt.Errorf("expect %d rows, but got valuesRead = %d", r.numRows, valuesRead)
+	}
+
+	ret := make([]byte, int64(dim*2)*r.numRows)
+	for i := 0; i < int(r.numRows); i++ {
+		copy(ret[i*dim*2:(i+1)*dim*2], values[i])
+	}
+	return ret, dim, nil
+}
+
+// GetBFloat16VectorFromPayload returns vector, dimension, error
+func (r *PayloadReader) GetBFloat16VectorFromPayload() ([]byte, int, error) {
+	if r.colType != schemapb.DataType_BFloat16Vector {
 		return nil, -1, fmt.Errorf("failed to get float vector from datatype %v", r.colType.String())
 	}
 	col, err := r.reader.RowGroup(0).Column(0)

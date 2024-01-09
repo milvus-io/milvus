@@ -118,6 +118,17 @@ func EstimateSizePerRecord(schema *schemapb.CollectionSchema) (int, error) {
 					break
 				}
 			}
+		case schemapb.DataType_BFloat16Vector:
+			for _, kv := range fs.TypeParams {
+				if kv.Key == common.DimKey {
+					v, err := strconv.Atoi(kv.Value)
+					if err != nil {
+						return -1, err
+					}
+					res += v * 2
+					break
+				}
+			}
 		}
 	}
 	return res, nil
@@ -318,7 +329,7 @@ func (helper *SchemaHelper) GetVectorDimFromID(fieldID int64) (int, error) {
 // IsVectorType returns true if input is a vector type, otherwise false
 func IsVectorType(dataType schemapb.DataType) bool {
 	switch dataType {
-	case schemapb.DataType_FloatVector, schemapb.DataType_BinaryVector, schemapb.DataType_Float16Vector:
+	case schemapb.DataType_FloatVector, schemapb.DataType_BinaryVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
 		return true
 	default:
 		return false
@@ -657,6 +668,19 @@ func AppendFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData, idx i
 				}
 				/* #nosec G103 */
 				appendSize += int64(unsafe.Sizeof(srcVector.Float16Vector[idx*(dim*2) : (idx+1)*(dim*2)]))
+			case *schemapb.VectorField_Bfloat16Vector:
+				if dstVector.GetBfloat16Vector() == nil {
+					srcToCopy := srcVector.Bfloat16Vector[idx*(dim*2) : (idx+1)*(dim*2)]
+					dstVector.Data = &schemapb.VectorField_Bfloat16Vector{
+						Bfloat16Vector: make([]byte, len(srcToCopy)),
+					}
+					copy(dstVector.Data.(*schemapb.VectorField_Bfloat16Vector).Bfloat16Vector, srcToCopy)
+				} else {
+					dstBfloat16Vector := dstVector.Data.(*schemapb.VectorField_Bfloat16Vector)
+					dstBfloat16Vector.Bfloat16Vector = append(dstBfloat16Vector.Bfloat16Vector, srcVector.Bfloat16Vector[idx*(dim*2):(idx+1)*(dim*2)]...)
+				}
+				/* #nosec G103 */
+				appendSize += int64(unsafe.Sizeof(srcVector.Bfloat16Vector[idx*(dim*2) : (idx+1)*(dim*2)]))
 			default:
 				log.Error("Not supported field type", zap.String("field type", fieldData.Type.String()))
 			}
@@ -710,6 +734,9 @@ func DeleteFieldData(dst []*schemapb.FieldData) {
 			case *schemapb.VectorField_Float16Vector:
 				dstFloat16Vector := dstVector.Data.(*schemapb.VectorField_Float16Vector)
 				dstFloat16Vector.Float16Vector = dstFloat16Vector.Float16Vector[:len(dstFloat16Vector.Float16Vector)-int(dim*2)]
+			case *schemapb.VectorField_Bfloat16Vector:
+				dstBfloat16Vector := dstVector.Data.(*schemapb.VectorField_Bfloat16Vector)
+				dstBfloat16Vector.Bfloat16Vector = dstBfloat16Vector.Bfloat16Vector[:len(dstBfloat16Vector.Bfloat16Vector)-int(dim*2)]
 			default:
 				log.Error("wrong field type added", zap.String("field type", fieldData.Type.String()))
 			}
@@ -1093,6 +1120,10 @@ func GetData(field *schemapb.FieldData, idx int) interface{} {
 		dim := int(field.GetVectors().GetDim())
 		dataBytes := dim * 2
 		return field.GetVectors().GetFloat16Vector()[idx*dataBytes : (idx+1)*dataBytes]
+	case schemapb.DataType_BFloat16Vector:
+		dim := int(field.GetVectors().GetDim())
+		dataBytes := dim * 2
+		return field.GetVectors().GetBfloat16Vector()[idx*dataBytes : (idx+1)*dataBytes]
 	}
 	return nil
 }

@@ -66,6 +66,32 @@ func generateBinaryVectorTestCases() []vecTestCase {
 	}
 }
 
+func generateFloat16VectorTestCases() []vecTestCase {
+	return []vecTestCase{
+		{IndexFaissIDMap, metric.L2, false, schemapb.DataType_Float16Vector},
+		{IndexFaissIDMap, metric.IP, false, schemapb.DataType_Float16Vector},
+		{IndexFaissIVFFlat, metric.L2, false, schemapb.DataType_Float16Vector},
+		{IndexFaissIVFFlat, metric.IP, false, schemapb.DataType_Float16Vector},
+		{IndexFaissIVFPQ, metric.L2, false, schemapb.DataType_Float16Vector},
+		{IndexFaissIVFPQ, metric.IP, false, schemapb.DataType_Float16Vector},
+		{IndexFaissIVFSQ8, metric.L2, false, schemapb.DataType_Float16Vector},
+		{IndexFaissIVFSQ8, metric.IP, false, schemapb.DataType_Float16Vector},
+	}
+}
+
+func generateBFloat16VectorTestCases() []vecTestCase {
+	return []vecTestCase{
+		{IndexFaissIDMap, metric.L2, false, schemapb.DataType_BFloat16Vector},
+		{IndexFaissIDMap, metric.IP, false, schemapb.DataType_BFloat16Vector},
+		{IndexFaissIVFFlat, metric.L2, false, schemapb.DataType_BFloat16Vector},
+		{IndexFaissIVFFlat, metric.IP, false, schemapb.DataType_BFloat16Vector},
+		{IndexFaissIVFPQ, metric.L2, false, schemapb.DataType_BFloat16Vector},
+		{IndexFaissIVFPQ, metric.IP, false, schemapb.DataType_BFloat16Vector},
+		{IndexFaissIVFSQ8, metric.L2, false, schemapb.DataType_BFloat16Vector},
+		{IndexFaissIVFSQ8, metric.IP, false, schemapb.DataType_BFloat16Vector},
+	}
+}
+
 func generateTestCases() []vecTestCase {
 	return append(generateFloatVectorTestCases(), generateBinaryVectorTestCases()...)
 }
@@ -134,6 +160,40 @@ func TestCIndex_BuildFloatVecIndex(t *testing.T) {
 
 		vectors := generateFloatVectors(nb, dim)
 		err = index.Build(GenFloatVecDataset(vectors))
+		assert.Equal(t, err, nil)
+
+		err = index.Delete()
+		assert.Equal(t, err, nil)
+	}
+}
+
+func TestCIndex_BuildFloat16VecIndex(t *testing.T) {
+	for _, c := range generateFloat16VectorTestCases() {
+		typeParams, indexParams := generateParams(c.indexType, c.metricType)
+
+		index, err := NewCgoIndex(c.dtype, typeParams, indexParams)
+		assert.Equal(t, err, nil)
+		assert.NotEqual(t, index, nil)
+
+		vectors := generateFloat16Vectors(nb, dim)
+		err = index.Build(GenFloat16VecDataset(vectors))
+		assert.Equal(t, err, nil)
+
+		err = index.Delete()
+		assert.Equal(t, err, nil)
+	}
+}
+
+func TestCIndex_BuildBFloat16VecIndex(t *testing.T) {
+	for _, c := range generateBFloat16VectorTestCases() {
+		typeParams, indexParams := generateParams(c.indexType, c.metricType)
+
+		index, err := NewCgoIndex(c.dtype, typeParams, indexParams)
+		assert.Equal(t, err, nil)
+		assert.NotEqual(t, index, nil)
+
+		vectors := generateBFloat16Vectors(nb, dim)
+		err = index.Build(GenBFloat16VecDataset(vectors))
 		assert.Equal(t, err, nil)
 
 		err = index.Delete()

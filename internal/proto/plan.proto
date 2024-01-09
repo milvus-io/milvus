@@ -34,6 +34,7 @@ enum VectorType {
   BinaryVector = 0;
   FloatVector = 1;
   Float16Vector = 2;
+  BFloat16Vector = 3;
 };
 
 message GenericValue {

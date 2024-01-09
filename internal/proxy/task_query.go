@@ -76,7 +76,7 @@ func translateToOutputFieldIDs(outputFields []string, schema *schemapb.Collectio
 	outputFieldIDs := make([]UniqueID, 0, len(outputFields)+1)
 	if len(outputFields) == 0 {
 		for _, field := range schema.Fields {
-			if field.FieldID >= common.StartOfUserFieldID && field.DataType != schemapb.DataType_FloatVector && field.DataType != schemapb.DataType_BinaryVector && field.DataType != schemapb.DataType_Float16Vector {
+			if field.FieldID >= common.StartOfUserFieldID && !isVectorType(field.DataType) {
 				outputFieldIDs = append(outputFieldIDs, field.FieldID)
 			}
 		}

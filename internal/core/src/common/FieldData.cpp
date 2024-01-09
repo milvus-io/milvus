@@ -151,6 +151,7 @@ FieldDataImpl<Type, is_scalar>::FillFieldData(
         }
         case DataType::VECTOR_FLOAT:
         case DataType::VECTOR_FLOAT16:
+        case DataType::VECTOR_BFLOAT16:
         case DataType::VECTOR_BINARY: {
             auto array_info =
                 GetDataInfoFromArray<arrow::FixedSizeBinaryArray,
@@ -184,6 +185,7 @@ template class FieldDataImpl<Array, true>;
 template class FieldDataImpl<int8_t, false>;
 template class FieldDataImpl<float, false>;
 template class FieldDataImpl<float16, false>;
+template class FieldDataImpl<bfloat16, false>;
 
 FieldDataPtr
 InitScalarFieldData(const DataType& type, int64_t cap_rows) {

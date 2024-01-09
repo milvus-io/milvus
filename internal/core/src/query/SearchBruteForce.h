@@ -29,6 +29,6 @@ BruteForceSearch(const dataset::SearchDataset& dataset,
                  int64_t chunk_rows,
                  const knowhere::Json& conf,
                  const BitsetView& bitset,
-                 DataType data_type = DataType::VECTOR_FLOAT);
+                 DataType data_type);
 
 }  // namespace milvus::query

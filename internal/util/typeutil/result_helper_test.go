@@ -64,6 +64,7 @@ func TestGenEmptyFieldData(t *testing.T) {
 		schemapb.DataType_BinaryVector,
 		schemapb.DataType_FloatVector,
 		schemapb.DataType_Float16Vector,
+		schemapb.DataType_BFloat16Vector,
 	}
 
 	field := &schemapb.FieldSchema{Name: "field_name", FieldID: 100}

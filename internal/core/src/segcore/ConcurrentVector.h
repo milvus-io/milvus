@@ -151,11 +151,15 @@ class ConcurrentVectorImpl : public VectorBase {
     using TraitType = std::conditional_t<
         is_scalar,
         Type,
-        std::conditional_t<std::is_same_v<Type, float>,
-                           FloatVector,
-                           std::conditional_t<std::is_same_v<Type, float16>,
-                                              Float16Vector,
-                                              BinaryVector>>>;
+        std::conditional_t<
+            std::is_same_v<Type, float>,
+            FloatVector,
+            std::conditional_t<
+                std::is_same_v<Type, float16>,
+                Float16Vector,
+                std::conditional_t<std::is_same_v<Type, bfloat16>,
+                                   BFloat16Vector,
+                                   BinaryVector>>>>;
 
  public:
     explicit ConcurrentVectorImpl(ssize_t dim, int64_t size_per_chunk)
@@ -393,6 +397,16 @@ class ConcurrentVector<Float16Vector>
  public:
     ConcurrentVector(int64_t dim, int64_t size_per_chunk)
         : ConcurrentVectorImpl<float16, false>::ConcurrentVectorImpl(
+              dim, size_per_chunk) {
+    }
+};
+
+template <>
+class ConcurrentVector<BFloat16Vector>
+    : public ConcurrentVectorImpl<bfloat16, false> {
+ public:
+    ConcurrentVector(int64_t dim, int64_t size_per_chunk)
+        : ConcurrentVectorImpl<bfloat16, false>::ConcurrentVectorImpl(
               dim, size_per_chunk) {
     }
 };

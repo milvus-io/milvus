@@ -724,7 +724,7 @@ TEST(AlwaysTrueStringPlan, SearchWithOutputFields) {
         query_ptr  //
     };
     auto sub_result = BruteForceSearch(
-        search_dataset, vec_col.data(), N, knowhere::Json(), nullptr);
+        search_dataset, vec_col.data(), N, knowhere::Json(), nullptr, DataType::VECTOR_FLOAT);
 
     auto sr = segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
     segment->FillPrimaryKeys(plan.get(), *sr);
