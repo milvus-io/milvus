@@ -53,7 +53,7 @@ impl IndexReaderWrapper {
     fn search(&self, q: &dyn Query) -> Vec<u32> {
         let searcher = self.reader.searcher();
         let hits = searcher.search(q, &DocSetCollector).unwrap();
-        let mut ret = Vec::new();
+        let mut ret = Vec::with_capacity(hits.len());
         for address in &hits {
             ret.push(address.doc_id);
         }
