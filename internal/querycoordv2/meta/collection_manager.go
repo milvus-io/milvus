@@ -505,9 +505,11 @@ func (m *CollectionManager) UpdateLoadPercent(partitionID int64, loadPercent int
 	saveCollection := false
 	if collectionPercent == 100 {
 		saveCollection = true
+		if newCollection.LoadSpan != nil {
+			newCollection.LoadSpan.End()
+			newCollection.LoadSpan = nil
+		}
 		newCollection.Status = querypb.LoadStatus_Loaded
-		newCollection.LoadSpan.End()
-		newCollection.LoadSpan = nil
 
 		// if collection becomes loaded, clear it's recoverTimes in load info
 		newCollection.RecoverTimes = 0
