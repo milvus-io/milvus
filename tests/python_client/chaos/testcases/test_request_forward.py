@@ -98,7 +98,7 @@ def delete_data(c_name="hello_milvus", host_list=None):
     time.sleep(10)
 
 
-def hello_milvus(host_1="127.0.0.1", host_2="127.0.0.1"):
+def hello_milvus(host_1="127.0.0.1", host_2="127.0.0.1", request_duration=300):
     connections.connect("host_1", uri=f"http://{host_1}:19530")
     connections.connect("host_2", uri=f"http://{host_2}:19530")
     log.info(connections)
@@ -107,11 +107,13 @@ def hello_milvus(host_1="127.0.0.1", host_2="127.0.0.1"):
     init_collection(host_list=host_list, c_name=c_name)
 
     def insert_worker():
-        while True:
+        t0 = time.time()
+        while time.time() - t0 < request_duration:
             insert_data(host_list=host_list, c_name=c_name)
 
     def delete_worker():
-        while True:
+        t0 = time.time()
+        while time.time() - t0 < request_duration:
             delete_data(host_list=host_list, c_name=c_name)
     tasks = []
     t1 = Thread(target=insert_worker)
@@ -128,7 +130,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='host ip')
     parser.add_argument('--host_1', type=str, default='127.0.0.1', help='host ip')
     parser.add_argument('--host_2', type=str, default='127.0.0.1', help='host ip')
+    parser.add_argument('--request_duration', type=str, default='1', help='host ip')
     args = parser.parse_args()
     host_1 = args.host_1
     host_2 = args.host_2
-    hello_milvus(host_1, host_2)
+    request_duration = int(args.request_duration) * 60
+    hello_milvus(host_1, host_2, request_duration)
