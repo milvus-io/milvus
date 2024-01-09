@@ -1,15 +1,3 @@
-# Copyright (C) 2019-2020 Zilliz. All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
-# with the License. You may obtain a copy of the License at
-#
-# http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software distributed under the License
-# is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-# or implied. See the License for the specific language governing permissions and limitations under the License.
-
-
 import random
 import numpy as np
 import time
@@ -63,7 +51,7 @@ def insert_data(c_name="hello_milvus", nb=3000, host_list=None):
     for using in host_list:
         collection = Collection(name=c_name, using=using)
         res = collection.insert(data)
-        log.info(f"{using} insert data: {len(data[0])} {res}")
+        log.info(f"{using} {c_name} insert data: {len(data[0])} {res}")
     time.sleep(1)
 
 
@@ -78,11 +66,11 @@ def delete_data(c_name="hello_milvus", host_list=None):
                 output_fields=["int64"]
             )
             sorted_res = sorted(res, key=lambda k: k['int64'])
-            log.info(f"{using} query result: {len(sorted_res)}")
+            log.info(f"{using} {c_name} query result: {len(sorted_res)}")
             ids = [i["int64"] for i in res]
             ids_list.append(ids)
             res = collection.query(expr="", output_fields=["count(*)"])
-            log.info(f"{using} count(*) result: {res}")
+            log.info(f"{using} {c_name} count(*) result: {res}")
     ids_list = [sorted(x) for x in ids_list]
     # common ids
     common_ids = functools.reduce(lambda x, y: list(set(x).intersection(set(y))), ids_list)
@@ -94,7 +82,7 @@ def delete_data(c_name="hello_milvus", host_list=None):
     for using in host_list:
         collection = Collection(name=c_name, using=using)
         res = collection.delete(expr=expr)
-        log.info(f"{using} delete data: {res}")
+        log.info(f"{using} {c_name} delete data: {res}")
     time.sleep(10)
 
 
