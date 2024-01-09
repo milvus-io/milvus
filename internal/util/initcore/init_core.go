@@ -47,7 +47,7 @@ func InitLocalChunkManager(path string) {
 func InitTraceConfig(params *paramtable.ComponentParam) {
 	config := C.CTraceConfig{
 		exporter:       C.CString(params.TraceCfg.Exporter.GetValue()),
-		sampleFraction: C.int(params.TraceCfg.SampleFraction.GetAsInt()),
+		sampleFraction: C.float(params.TraceCfg.SampleFraction.GetAsFloat()),
 		jaegerURL:      C.CString(params.TraceCfg.JaegerURL.GetValue()),
 		otlpEndpoint:   C.CString(params.TraceCfg.OtlpEndpoint.GetValue()),
 		nodeID:         C.int(paramtable.GetNodeID()),
