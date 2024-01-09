@@ -49,6 +49,7 @@ default_limit = ct.default_limit
 vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
 default_search_field = ct.default_float_vec_field_name
 default_search_params = ct.default_search_params
+max_vector_field_num = ct.max_vector_field_num
 
 
 class TestCollectionParams(TestcaseBase):
@@ -814,6 +815,7 @@ class TestCollectionParams(TestcaseBase):
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.xfail(reason="issue #29796")
     def test_collection_vector_invalid_dim(self, get_invalid_dim):
         """
         target: test collection with invalid dimension
@@ -993,6 +995,84 @@ class TestCollectionParams(TestcaseBase):
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.check_collection_property,
                                              check_items={exp_name: c_name, exp_schema: schema})
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_collection_maximum_vector_fields(self):
+        """
+        target: Test create collection with the maximum vector fields (default is 4)
+        method: create collection with the maximum vector field number
+        expected: no exception
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        int_fields = []
+        limit_num = max_vector_field_num
+        for i in range(limit_num):
+            vector_field_name = cf.gen_unique_str("vector_field_name")
+            field = cf.gen_float_vec_field(name=vector_field_name)
+            int_fields.append(field)
+        int_fields.append(cf.gen_int64_field(is_primary=True))
+        schema = cf.gen_collection_schema(fields=int_fields)
+        self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.check_collection_property,
+                                             check_items={exp_name: c_name, exp_schema: schema})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("primary_key", [cf.gen_int64_field(is_primary=True), cf.gen_string_field(is_primary=True)])
+    def test_create_collection_multiple_vector_and_maximum_fields(self, primary_key):
+        """
+        target: test create collection with multiple vector fields and maximum fields
+        method: create collection with multiple vector fields and maximum fields
+        expected: no exception
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        int_fields = []
+        vector_limit_num = max_vector_field_num - 2
+        limit_num = ct.max_field_num - 2
+        # add maximum vector fields
+        for i in range(vector_limit_num):
+            int_field_name = cf.gen_unique_str("field_name")
+            field = cf.gen_int64_field(name=int_field_name)
+            int_fields.append(field)
+        # add other vector fields to maximum fields num
+        for i in range(limit_num - 2):
+            int_field_name = cf.gen_unique_str("field_name")
+            field = cf.gen_int64_field(name=int_field_name)
+            int_fields.append(field)
+        int_fields.append(cf.gen_float_vec_field())
+        int_fields.append(primary_key)
+        schema = cf.gen_collection_schema(fields=int_fields)
+        self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.check_collection_property,
+                                             check_items={exp_name: c_name, exp_schema: schema})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("primary_key", [cf.gen_int64_field(is_primary=True), cf.gen_string_field(is_primary=True)])
+    def test_create_collection_maximum_vector_and_all_fields(self, primary_key):
+        """
+        target: test create collection with maximum vector fields and maximum fields
+        method: create collection with maximum vector fields and maximum fields
+        expected: no exception
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        int_fields = []
+        vector_limit_num = max_vector_field_num
+        limit_num = ct.max_field_num - 2
+        # add maximum vector fields
+        for i in range(vector_limit_num):
+            int_field_name = cf.gen_unique_str("field_name")
+            field = cf.gen_int64_field(name=int_field_name)
+            int_fields.append(field)
+        # add other vector fields to maximum fields num
+        for i in range(limit_num - 4):
+            int_field_name = cf.gen_unique_str("field_name")
+            field = cf.gen_int64_field(name=int_field_name)
+            int_fields.append(field)
+        int_fields.append(cf.gen_float_vec_field())
+        int_fields.append(primary_key)
+        schema = cf.gen_collection_schema(fields=int_fields)
+        self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.check_collection_property,
+                                             check_items={exp_name: c_name, exp_schema: schema})
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_create_collection_over_maximum_fields(self):
         """
@@ -1012,6 +1092,82 @@ class TestCollectionParams(TestcaseBase):
         int_fields.append(cf.gen_int64_field(is_primary=True))
         schema = cf.gen_collection_schema(fields=int_fields)
         error = {ct.err_code: 1, ct.err_msg: "maximum field's number should be limited to 64"}
+        self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_create_collection_over_maximum_vector_fields(self):
+        """
+        target: Test create collection with more than the maximum vector fields (default is 4)
+        method: create collection with more than the maximum vector field number
+        expected: raise exception
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        int_fields = []
+        limit_num = max_vector_field_num
+        for i in range(limit_num + 1):
+            vector_field_name = cf.gen_unique_str("vector_field_name")
+            field = cf.gen_float_vec_field(name=vector_field_name)
+            int_fields.append(field)
+        int_fields.append(cf.gen_int64_field(is_primary=True))
+        schema = cf.gen_collection_schema(fields=int_fields)
+        error = {ct.err_code: 65535, ct.err_msg: "maximum vector field's number should be limited to 4"}
+        self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_create_collection_multiple_vector_and_over_maximum_all_fields(self):
+        """
+        target: test create collection with multiple vector fields and over maximum fields
+        method: create collection with multiple vector fields and over maximum fields
+        expected: raise exception
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        int_fields = []
+        vector_limit_num = max_vector_field_num - 2
+        limit_num = ct.max_field_num
+        # add multiple vector fields
+        for i in range(vector_limit_num):
+            vector_field_name = cf.gen_unique_str("field_name")
+            field = cf.gen_float_vec_field(name=vector_field_name)
+            int_fields.append(field)
+        # add other vector fields to maximum fields num
+        for i in range(limit_num):
+            int_field_name = cf.gen_unique_str("field_name")
+            field = cf.gen_int64_field(name=int_field_name)
+            int_fields.append(field)
+        int_fields.append(cf.gen_int64_field(is_primary=True))
+        log.debug(len(int_fields))
+        schema = cf.gen_collection_schema(fields=int_fields)
+        error = {ct.err_code: 65535, ct.err_msg: "maximum field's number should be limited to 64"}
+        self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_create_collection_over_maximum_vector_and_all_fields(self):
+        """
+        target: test create collection with over maximum vector fields and maximum fields
+        method: create collection with over maximum vector fields and maximum fields
+        expected: raise exception
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        int_fields = []
+        vector_limit_num = max_vector_field_num
+        limit_num = ct.max_field_num - 2
+        # add maximum vector fields
+        for i in range(vector_limit_num + 1):
+            vector_field_name = cf.gen_unique_str("field_name")
+            field = cf.gen_float_vec_field(name=vector_field_name)
+            int_fields.append(field)
+        # add other vector fields to maximum fields num
+        for i in range(limit_num - 4):
+            int_field_name = cf.gen_unique_str("field_name")
+            field = cf.gen_int64_field(name=int_field_name)
+            int_fields.append(field)
+        int_fields.append(cf.gen_float_vec_field())
+        int_fields.append(cf.gen_int64_field(is_primary=True))
+        schema = cf.gen_collection_schema(fields=int_fields)
+        error = {ct.err_code: 65535, ct.err_msg: "maximum field's number should be limited to 64"}
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
 
 
@@ -4104,3 +4260,235 @@ class TestCollectionARRAY(TestcaseBase):
         # check insert successfully
         collection_w.flush()
         collection_w.num_entities == nb
+
+
+class TestCollectionMultipleVectorValid(TestcaseBase):
+    """
+    ******************************************************************
+    #  The followings are valid cases
+    ******************************************************************
+    """
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("primary_key", [cf.gen_int64_field(is_primary=True), cf.gen_string_field(is_primary=True)])
+    @pytest.mark.parametrize("auto_id", [True, False])
+    @pytest.mark.parametrize("shards_num", [1, 3])
+    def test_create_collection_multiple_vectors_all_supported_field_type(self, primary_key, auto_id, shards_num):
+        """
+        target: test create collection with multiple vector fields
+        method: create collection with multiple vector fields
+        expected: no exception
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        int_fields = []
+        vector_limit_num = max_vector_field_num - 2
+        # add multiple vector fields
+        for i in range(vector_limit_num):
+            vector_field_name = cf.gen_unique_str("field_name")
+            field = cf.gen_float_vec_field(name=vector_field_name)
+            int_fields.append(field)
+        # add other vector fields to maximum fields num
+        int_fields.append(cf.gen_int8_field())
+        int_fields.append(cf.gen_int16_field())
+        int_fields.append(cf.gen_int32_field())
+        int_fields.append(cf.gen_float_field())
+        int_fields.append(cf.gen_double_field())
+        int_fields.append(cf.gen_string_field(cf.gen_unique_str("vchar_field_name")))
+        int_fields.append(cf.gen_json_field())
+        int_fields.append(cf.gen_bool_field())
+        int_fields.append(cf.gen_array_field())
+        int_fields.append(cf.gen_binary_vec_field())
+        int_fields.append(primary_key)
+        schema = cf.gen_collection_schema(fields=int_fields, auto_id=auto_id, shards_num=shards_num)
+        self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.check_collection_property,
+                                             check_items={exp_name: c_name, exp_schema: schema})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("primary_key", [ct.default_int64_field_name, ct.default_string_field_name])
+    @pytest.mark.parametrize("auto_id", [True, False])
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    def test_create_collection_multiple_vectors_different_dim(self, primary_key, auto_id, enable_dynamic_field):
+        """
+        target: test create collection with multiple vector fields (different dim)
+        method: create collection with multiple vector fields
+        expected: no exception
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        another_dim = 1
+        schema = cf.gen_default_collection_schema(primary_field=primary_key, auto_id=auto_id, dim=ct.max_dim,
+                                                  enable_dynamic_field=enable_dynamic_field,
+                                                  multiple_dim_array=[another_dim])
+        self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.check_collection_property,
+                                             check_items={exp_name: c_name, exp_schema: schema})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("primary_key", [ct.default_int64_field_name, ct.default_string_field_name])
+    def test_create_collection_multiple_vectors_maximum_dim(self, primary_key):
+        """
+        target: test create collection with multiple vector fields
+        method: create collection with multiple vector fields
+        expected: no exception
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        schema = cf.gen_default_collection_schema(primary_field=primary_key, dim=ct.max_dim,
+                                                  multiple_dim_array=[ct.max_dim])
+        self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.check_collection_property,
+                                             check_items={exp_name: c_name, exp_schema: schema})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("primary_key", [cf.gen_int64_field(is_primary=True), cf.gen_string_field(is_primary=True)])
+    @pytest.mark.parametrize("auto_id", [True, False])
+    @pytest.mark.parametrize("par_key_field", [ct.default_int64_field_name, ct.default_string_field_name])
+    def test_create_collection_multiple_vectors_partition_key(self, primary_key, auto_id, par_key_field):
+        """
+        target: test create collection with multiple vector fields
+        method: create collection with multiple vector fields
+        expected: no exception
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        int_fields = []
+        vector_limit_num = max_vector_field_num - 2
+        # add multiple vector fields
+        for i in range(vector_limit_num):
+            vector_field_name = cf.gen_unique_str("field_name")
+            field = cf.gen_float_vec_field(name=vector_field_name)
+            int_fields.append(field)
+        # add other vector fields to maximum fields num
+        int_fields.append(cf.gen_int8_field())
+        int_fields.append(cf.gen_int16_field())
+        int_fields.append(cf.gen_int32_field())
+        int_fields.append(cf.gen_int64_field(cf.gen_unique_str("int_field_name"),
+                                             is_partition_key=(par_key_field == ct.default_int64_field_name)))
+        int_fields.append(cf.gen_float_field())
+        int_fields.append(cf.gen_double_field())
+        int_fields.append(cf.gen_string_field(cf.gen_unique_str("vchar_field_name"),
+                                              is_partition_key=(par_key_field == ct.default_string_field_name)))
+        int_fields.append(cf.gen_json_field())
+        int_fields.append(cf.gen_bool_field())
+        int_fields.append(cf.gen_array_field())
+        int_fields.append(cf.gen_binary_vec_field())
+        int_fields.append(primary_key)
+        schema = cf.gen_collection_schema(fields=int_fields, auto_id=auto_id)
+        collection_w = \
+        self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.check_collection_property,
+                                             check_items={exp_name: c_name, exp_schema: schema})[0]
+        assert len(collection_w.partitions) == ct.default_partition_num
+
+
+class TestCollectionMultipleVectorInvalid(TestcaseBase):
+    """ Test case of search interface """
+
+    @pytest.fixture(scope="function", params=ct.get_invalid_strs)
+    def get_invalid_dim(self, request):
+        if request.param == 1:
+            pytest.skip("1 is valid dim")
+        yield request.param
+
+    """
+    ******************************************************************
+    #  The followings are invalid cases
+    ******************************************************************
+    """
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("primary_key", [cf.gen_int64_field(is_primary=True), cf.gen_string_field(is_primary=True)])
+    def test_create_collection_multiple_vectors_same_vector_field_name(self, primary_key):
+        """
+        target: test create collection with multiple vector fields
+        method: create collection with multiple vector fields
+        expected: no exception
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        int_fields = []
+        vector_limit_num = max_vector_field_num - 2
+        # add multiple vector fields
+        for i in range(vector_limit_num):
+            field = cf.gen_float_vec_field()
+            int_fields.append(field)
+        # add other vector fields to maximum fields num
+        int_fields.append(cf.gen_int8_field())
+        int_fields.append(cf.gen_int16_field())
+        int_fields.append(cf.gen_int32_field())
+        int_fields.append(cf.gen_float_field())
+        int_fields.append(cf.gen_double_field())
+        int_fields.append(cf.gen_string_field(cf.gen_unique_str("vchar_field_name")))
+        int_fields.append(cf.gen_json_field())
+        int_fields.append(cf.gen_bool_field())
+        int_fields.append(cf.gen_array_field())
+        int_fields.append(cf.gen_binary_vec_field())
+        int_fields.append(primary_key)
+        schema = cf.gen_collection_schema(fields=int_fields)
+        error = {ct.err_code: 65535, ct.err_msg: "duplicated field name"}
+        self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("invalid_vector_name", ["12-s", "12 s", "(mn)", "中文", "%$#", "a".join("a" for i in range(256))])
+    def test_create_collection_multiple_vectors_invalid_part_vector_field_name(self, invalid_vector_name):
+        """
+        target: test create collection with multiple vector fields
+        method: create collection with multiple vector fields
+        expected: no exception
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        int_fields = []
+        # add multiple vector fields
+        vector_field_1 = cf.gen_float_vec_field(name=invalid_vector_name)
+        int_fields.append(vector_field_1)
+        vector_field_2 = cf.gen_float_vec_field(name="valid_field_name")
+        int_fields.append(vector_field_2)
+        # add other vector fields to maximum fields num
+        int_fields.append(cf.gen_int64_field(is_primary=True))
+        schema = cf.gen_collection_schema(fields=int_fields)
+        error = {ct.err_code: 1701, ct.err_msg: "Invalid field name: %s" % invalid_vector_name}
+        self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("invalid_vector_name", ["12-s", "12 s", "(mn)", "中文", "%$#", "a".join("a" for i in range(256))])
+    def test_create_collection_multiple_vectors_invalid_all_vector_field_name(self, invalid_vector_name):
+        """
+        target: test create collection with multiple vector fields
+        method: create collection with multiple vector fields
+        expected: no exception
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        int_fields = []
+        # add multiple vector fields
+        vector_field_1 = cf.gen_float_vec_field(name=invalid_vector_name)
+        int_fields.append(vector_field_1)
+        vector_field_2 = cf.gen_float_vec_field(name=invalid_vector_name + " ")
+        int_fields.append(vector_field_2)
+        # add other vector fields to maximum fields num
+        int_fields.append(cf.gen_int64_field(is_primary=True))
+        schema = cf.gen_collection_schema(fields=int_fields)
+        error = {ct.err_code: 1701, ct.err_msg: "Invalid field name: %s" % invalid_vector_name}
+        self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue #29796")
+    def test_create_collection_multiple_vectors_invalid_dim(self, get_invalid_dim):
+        """
+        target: test create collection with multiple vector fields
+        method: create collection with multiple vector fields
+        expected: no exception
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        int_fields = []
+        # add multiple vector fields
+        vector_field_1 = cf.gen_float_vec_field(dim=get_invalid_dim)
+        int_fields.append(vector_field_1)
+        vector_field_2 = cf.gen_float_vec_field(name="float_vec_field")
+        int_fields.append(vector_field_2)
+        # add other vector fields to maximum fields num
+        int_fields.append(cf.gen_int64_field(is_primary=True))
+        schema = cf.gen_collection_schema(fields=int_fields)
+        error = {ct.err_code: 65535, ct.err_msg: "Invalid dim"}
+        self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
+
