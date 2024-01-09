@@ -101,6 +101,10 @@ func NewManager() *Manager {
 func (m *Manager) GetConfig(key string) (string, error) {
 	m.RLock()
 	defer m.RUnlock()
+	return m.getConfig(key)
+}
+
+func (m *Manager) getConfig(key string) (string, error) {
 	realKey := formatKey(key)
 	v, ok := m.overlays[realKey]
 	if ok {
@@ -120,10 +124,14 @@ func (m *Manager) GetConfig(key string) (string, error) {
 func (m *Manager) GetConfigs() map[string]string {
 	m.RLock()
 	defer m.RUnlock()
+	return m.getConfigs()
+}
+
+func (m *Manager) getConfigs() map[string]string {
 	config := make(map[string]string)
 
 	for key := range m.keySourceMap {
-		sValue, err := m.GetConfig(key)
+		sValue, err := m.getConfig(key)
 		if err != nil {
 			continue
 		}
@@ -141,7 +149,7 @@ func (m *Manager) GetBy(filters ...Filter) map[string]string {
 	defer m.RUnlock()
 	matchedConfig := make(map[string]string)
 
-	for key, value := range m.GetConfigs() {
+	for key, value := range m.getConfigs() {
 		newkey, ok := filterate(key, filters...)
 		if ok {
 			matchedConfig[newkey] = value
