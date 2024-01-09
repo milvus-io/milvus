@@ -12,51 +12,107 @@
 package hardware
 
 import (
-	"strings"
+	"os"
 
 	"github.com/cockroachdb/errors"
-	"github.com/containerd/cgroups"
+	"github.com/containerd/cgroups/v3"
+	"github.com/containerd/cgroups/v3/cgroup1"
+	statsv1 "github.com/containerd/cgroups/v3/cgroup1/stats"
+	"github.com/containerd/cgroups/v3/cgroup2"
+	statsv2 "github.com/containerd/cgroups/v3/cgroup2/stats"
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
 // inContainer checks if the service is running inside a container.
 func inContainer() (bool, error) {
-	paths, err := cgroups.ParseCgroupFile("/proc/1/cgroup")
-	if err != nil {
-		return false, err
+	if fileExists("/proc/self/cgroup") {
+		log.Info("Running inside a container...", zap.Bool("cgroupv2", cgroups.Mode() == cgroups.Unified))
+		return true, nil
 	}
-	devicePath := strings.TrimPrefix(paths[string(cgroups.Devices)], "/")
-	return devicePath != "", nil
+	return false, nil
+}
+
+func getCgroupV1Stats() (*statsv1.Metrics, error) {
+	manager, err := cgroup1.Load(cgroup1.StaticPath("/"))
+	if err != nil {
+		return nil, err
+	}
+	// Get the memory stats for the specified cgroup
+	stats, err := manager.Stat(cgroup1.IgnoreNotExist)
+	if err != nil {
+		return nil, err
+	}
+
+	if stats.GetMemory() == nil || stats.GetMemory().GetUsage() == nil {
+		return nil, errors.New("cannot find memory usage info from cGroupsv1")
+	}
+	return stats, nil
+}
+
+func getCgroupV2Stats() (*statsv2.Metrics, error) {
+	manager, err := cgroup2.Load("/")
+	if err != nil {
+		return nil, err
+	}
+	// Get the memory stats for the specified cgroup
+	stats, err := manager.Stat()
+	if err != nil {
+		return nil, err
+	}
+
+	if stats.GetMemory() == nil {
+		return nil, errors.New("cannot find memory usage info from cGroupsv2")
+	}
+	return stats, nil
 }
 
 // getContainerMemLimit returns memory limit and error
 func getContainerMemLimit() (uint64, error) {
-	control, err := cgroups.Load(cgroups.V1, cgroups.RootPath)
-	if err != nil {
-		return 0, err
+	var limit uint64
+	// if cgroupv2 is enabled
+	if cgroups.Mode() == cgroups.Unified {
+		stats, err := getCgroupV2Stats()
+		if err != nil {
+			return 0, err
+		}
+		limit = stats.GetMemory().GetUsageLimit()
+	} else {
+		stats, err := getCgroupV1Stats()
+		if err != nil {
+			return 0, err
+		}
+		limit = stats.GetMemory().GetUsage().GetLimit()
 	}
-	stats, err := control.Stat(cgroups.IgnoreNotExist)
-	if err != nil {
-		return 0, err
-	}
-	if stats.Memory == nil || stats.Memory.Usage == nil {
-		return 0, errors.New("cannot find memory usage info from cGroups")
-	}
-	return stats.Memory.Usage.Limit, nil
+	return limit, nil
 }
 
 // getContainerMemUsed returns memory usage and error
+// On cgroup v1 host, the result is `mem.Usage - mem.Stats["total_inactive_file"]` .
+// On cgroup v2 host, the result is `mem.Usage - mem.Stats["inactive_file"] `.
+// ref: <https://github.com/docker/cli/blob/e57b5f78de635e6e2b688686d10b830c4747c4dc/cli/command/container/stats_helpers.go#L239>
 func getContainerMemUsed() (uint64, error) {
-	control, err := cgroups.Load(cgroups.V1, cgroups.RootPath)
-	if err != nil {
-		return 0, err
+	var used uint64
+	// if cgroupv2 is enabled
+	if cgroups.Mode() == cgroups.Unified {
+		stats, err := getCgroupV2Stats()
+		if err != nil {
+			return 0, err
+		}
+		used = stats.GetMemory().GetUsage() - stats.GetMemory().GetInactiveFile()
+	} else {
+		stats, err := getCgroupV1Stats()
+		if err != nil {
+			return 0, err
+		}
+		used = stats.GetMemory().GetUsage().GetUsage() - stats.GetMemory().GetTotalInactiveFile()
 	}
-	stats, err := control.Stat(cgroups.IgnoreNotExist)
-	if err != nil {
-		return 0, err
-	}
-	if stats.Memory == nil || stats.Memory.Usage == nil {
-		return 0, errors.New("cannot find memory usage info from cGroups")
-	}
-	// ref: <https://github.com/docker/cli/blob/e57b5f78de635e6e2b688686d10b830c4747c4dc/cli/command/container/stats_helpers.go#L239>
-	return stats.Memory.Usage.Usage - stats.Memory.TotalActiveFile - stats.Memory.TotalInactiveFile, nil
+	return used, nil
+}
+
+// fileExists checks if a file or directory exists at the given path
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return !os.IsNotExist(err)
 }

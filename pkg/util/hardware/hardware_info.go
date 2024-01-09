@@ -103,6 +103,13 @@ func GetMemoryCount() uint64 {
 	if limit < stats.Total {
 		return limit
 	}
+
+	if ic {
+		log.Warn("host memory is used in container",
+			zap.Uint64("containerMemoryLimit", limit),
+			zap.Uint64("HostMemoryLimit", stats.Total),
+		)
+	}
 	return stats.Total
 }
 
