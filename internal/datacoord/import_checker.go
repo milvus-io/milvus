@@ -214,8 +214,7 @@ func (c *importChecker) checkImportState(requestID int64) {
 }
 
 func (c *importChecker) checkTimeout(requestID int64) {
-	tasks := c.imeta.GetBy(WithStates(internalpb.ImportState_Pending,
-		internalpb.ImportState_InProgress), WithReq(requestID))
+	tasks := c.imeta.GetBy(WithStates(internalpb.ImportState_InProgress), WithReq(requestID))
 	var isTimeout = false
 	for _, task := range tasks {
 		timeoutTime := tsoutil.PhysicalTime(task.GetTimeoutTs())
