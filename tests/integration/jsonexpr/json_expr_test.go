@@ -206,8 +206,8 @@ func (s *JSONExprSuite) TestJSON_InsertWithoutDynamicData() {
 	// search
 	expr = `$meta["A"] > 90`
 	checkFunc := func(result *milvuspb.SearchResults) {
-		for _, f := range result.Results.GetFieldsData() {
-			s.Nil(f)
+		for _, topk := range result.GetResults().GetTopks() {
+			s.Zero(topk)
 		}
 	}
 	s.doSearch(collectionName, []string{common.MetaFieldName}, expr, dim, checkFunc)
@@ -564,8 +564,8 @@ func (s *JSONExprSuite) checkSearch(collectionName, fieldName string, dim int) {
 
 	expr = `exists AAA`
 	checkFunc = func(result *milvuspb.SearchResults) {
-		for _, f := range result.Results.GetFieldsData() {
-			s.Nil(f)
+		for _, topk := range result.GetResults().GetTopks() {
+			s.Zero(topk)
 		}
 	}
 	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
@@ -613,8 +613,8 @@ func (s *JSONExprSuite) checkSearch(collectionName, fieldName string, dim int) {
 
 	expr = `A like "10"`
 	checkFunc = func(result *milvuspb.SearchResults) {
-		for _, f := range result.Results.GetFieldsData() {
-			s.Nil(f)
+		for _, topk := range result.GetResults().GetTopks() {
+			s.Zero(topk)
 		}
 	}
 	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
@@ -632,8 +632,8 @@ func (s *JSONExprSuite) checkSearch(collectionName, fieldName string, dim int) {
 
 	expr = `str1 like 'abc"def-%'`
 	checkFunc = func(result *milvuspb.SearchResults) {
-		for _, f := range result.Results.GetFieldsData() {
-			s.Nil(f)
+		for _, topk := range result.GetResults().GetTopks() {
+			s.Zero(topk)
 		}
 	}
 	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
@@ -641,8 +641,8 @@ func (s *JSONExprSuite) checkSearch(collectionName, fieldName string, dim int) {
 
 	expr = `str2 like 'abc\\"def-%'`
 	checkFunc = func(result *milvuspb.SearchResults) {
-		for _, f := range result.Results.GetFieldsData() {
-			s.Nil(f)
+		for _, topk := range result.GetResults().GetTopks() {
+			s.Zero(topk)
 		}
 	}
 	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
@@ -660,8 +660,8 @@ func (s *JSONExprSuite) checkSearch(collectionName, fieldName string, dim int) {
 
 	expr = `A in []`
 	checkFunc = func(result *milvuspb.SearchResults) {
-		for _, f := range result.Results.GetFieldsData() {
-			s.Nil(f)
+		for _, topk := range result.GetResults().GetTopks() {
+			s.Zero(topk)
 		}
 	}
 	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
@@ -1116,8 +1116,8 @@ func (s *JSONExprSuite) TestJsonContains() {
 
 	expr = `json_contains_all(C, [0, 99])`
 	checkFunc = func(result *milvuspb.SearchResults) {
-		for _, f := range result.Results.GetFieldsData() {
-			s.Nil(f)
+		for _, topk := range result.GetResults().GetTopks() {
+			s.Zero(topk)
 		}
 	}
 	s.doSearch(collectionName, []string{"A"}, expr, dim, checkFunc)
@@ -1133,8 +1133,8 @@ func (s *JSONExprSuite) TestJsonContains() {
 
 	expr = `json_contains_any(C, [101, 102])`
 	checkFunc = func(result *milvuspb.SearchResults) {
-		for _, f := range result.Results.GetFieldsData() {
-			s.Nil(f)
+		for _, topk := range result.GetResults().GetTopks() {
+			s.Zero(topk)
 		}
 	}
 	s.doSearch(collectionName, []string{"A"}, expr, dim, checkFunc)
