@@ -767,6 +767,7 @@ message PreImportRequest {
   repeated string vchannels = 6;
   schema.CollectionSchema schema = 7;
   repeated internal.ImportFile import_files = 8;
+  repeated common.KeyValuePair options = 9;
 }
 
 message autoIDRange {
@@ -788,9 +789,10 @@ message ImportRequest {
   int64 collectionID = 4;
   schema.CollectionSchema schema = 5;
   repeated internal.ImportFile files = 6;
-  uint64 ts = 7;
-  autoIDRange autoID_range = 8;
-  repeated ImportRequestSegment request_segments = 9;
+  repeated common.KeyValuePair options = 7;
+  uint64 ts = 8;
+  autoIDRange autoID_range = 9;
+  repeated ImportRequestSegment request_segments = 10;
 }
 
 message QueryPreImportRequest {
@@ -858,6 +860,7 @@ message PreImportTask {
   string reason = 8;
   uint64 timeout_ts = 9;
   repeated ImportFileStats file_stats = 10;
+  repeated common.KeyValuePair options = 11;
 }
 
 message ImportTaskV2 {
@@ -870,6 +873,7 @@ message ImportTaskV2 {
   string reason = 7;
   uint64 timeout_ts = 8;
   repeated ImportFileStats file_stats = 9;
+  repeated common.KeyValuePair options = 10;
 }
 
 enum GcCommand {
