@@ -412,7 +412,7 @@ func (c *compactionPlanHandler) handleL0CompactionResult(plan *datapb.Compaction
 	})
 
 	for _, seg := range levelZeroSegments {
-		operators = append(operators, UpdateStatusOperator(seg.SegmentID, commonpb.SegmentState_Dropped))
+		operators = append(operators, UpdateStatusOperator(seg.GetSegmentID(), commonpb.SegmentState_Dropped), UpdateCompactedOperator(seg.GetSegmentID()))
 	}
 
 	log.Info("meta update: update segments info for level zero compaction",
