@@ -308,7 +308,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 			log.Warn("failed to create query plan", zap.Error(err),
 				zap.String("dsl", t.request.Dsl), // may be very large if large term passed.
 				zap.String("anns field", annsField), zap.Any("query info", queryInfo))
-			return fmt.Errorf("failed to create query plan: %v", err)
+			return merr.WrapErrParameterInvalidMsg("failed to create query plan: %v", err)
 		}
 		log.Debug("create query plan",
 			zap.String("dsl", t.request.Dsl), // may be very large if large term passed.
