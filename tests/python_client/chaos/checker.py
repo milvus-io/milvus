@@ -359,7 +359,7 @@ class Checker:
             log.info(f"collection {c_name} created, start to insert data")
             t0 = time.perf_counter()
             self.c_wrap.insert(
-                data=cf.get_column_data_by_schema(nb=constants.ENTITIES_FOR_SEARCH, schema=schema, start=0),
+                data=cf.get_column_data_by_schema(nb=constants.ENTITIES_FOR_SEARCH, schema=schema),
                 partition_name=self.p_name,
                 timeout=timeout,
                 enable_traceback=enable_traceback)
