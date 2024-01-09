@@ -192,17 +192,23 @@ func (s *HybridSearchSuite) TestHybridSearch() {
 
 	searchResult, err := c.Proxy.HybridSearch(ctx, hSearchReq)
 
-	if searchResult.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("searchResult fail reason", zap.String("reason", searchResult.GetStatus().GetReason()))
-	}
-	s.NoError(err)
-	s.Equal(commonpb.ErrorCode_Success, searchResult.GetStatus().GetErrorCode())
+	s.NoError(merr.CheckRPCCall(searchResult, err))
 
 	// weighted rank hybrid search
 	weightsParams := make(map[string][]float64)
 	weightsParams[proxy.WeightsParamsKey] = []float64{0.5, 0.2}
 	b, err = json.Marshal(weightsParams)
 	s.NoError(err)
+
+	// create a new request preventing data race
+	hSearchReq = &milvuspb.HybridSearchRequest{
+		Base:           nil,
+		DbName:         dbName,
+		CollectionName: collectionName,
+		PartitionNames: nil,
+		Requests:       []*milvuspb.SearchRequest{fSearchReq, bSearchReq},
+		OutputFields:   []string{integration.FloatVecField, integration.BinVecField},
+	}
 	hSearchReq.RankParams = []*commonpb.KeyValuePair{
 		{Key: proxy.RankTypeKey, Value: "weighted"},
 		{Key: proxy.RankParamsKey, Value: string(b)},
@@ -211,11 +217,7 @@ func (s *HybridSearchSuite) TestHybridSearch() {
 
 	searchResult, err = c.Proxy.HybridSearch(ctx, hSearchReq)
 
-	if searchResult.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("searchResult fail reason", zap.String("reason", searchResult.GetStatus().GetReason()))
-	}
-	s.NoError(err)
-	s.Equal(commonpb.ErrorCode_Success, searchResult.GetStatus().GetErrorCode())
+	s.NoError(merr.CheckRPCCall(searchResult, err))
 
 	log.Info("TestHybridSearch succeed")
 }
