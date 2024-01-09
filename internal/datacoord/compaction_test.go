@@ -128,9 +128,9 @@ func (s *CompactionPlanHandlerSuite) TestClean() {
 
 func (s *CompactionPlanHandlerSuite) TestHandleL0CompactionResults() {
 	channel := "Ch-1"
-	s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+	s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 		Run(func(operators ...UpdateOperator) {
-			s.Equal(5, len(operators))
+			s.Equal(7, len(operators))
 		}).Return(nil).Once()
 
 	deltalogs := []*datapb.FieldBinlog{getFieldBinlogPaths(101, getDeltaLogPath("log3", 1))}

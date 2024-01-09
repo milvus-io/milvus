@@ -533,6 +533,30 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		assert.Equal(t, updated.NumOfRows, expected.NumOfRows)
 	})
 
+	t.Run("update compacted segment", func(t *testing.T) {
+		meta, err := newMemoryMeta()
+		assert.NoError(t, err)
+
+		// segment not found
+		err = meta.UpdateSegmentsInfo(
+			UpdateCompactedOperator(1),
+		)
+		assert.NoError(t, err)
+
+		// normal
+		segment1 := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: 1, State: commonpb.SegmentState_Flushed,
+			Binlogs:   []*datapb.FieldBinlog{getFieldBinlogPaths(1, getInsertLogPath("binlog0", 1))},
+			Statslogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, getStatsLogPath("statslog0", 1))},
+		}}
+		err = meta.AddSegment(context.TODO(), segment1)
+		assert.NoError(t, err)
+
+		err = meta.UpdateSegmentsInfo(
+			UpdateCompactedOperator(1),
+		)
+		assert.NoError(t, err)
+	})
 	t.Run("update non-existed segment", func(t *testing.T) {
 		meta, err := newMemoryMeta()
 		assert.NoError(t, err)
@@ -745,7 +769,7 @@ func TestMeta_PrepareCompleteCompactionMutation(t *testing.T) {
 	assert.Equal(t, UniqueID(100), newSegment.GetCollectionID())
 	assert.Equal(t, UniqueID(10), newSegment.GetPartitionID())
 	assert.Equal(t, inSegment.NumOfRows, newSegment.GetNumOfRows())
-	assert.Equal(t, commonpb.SegmentState_Flushing, newSegment.GetState())
+	assert.Equal(t, commonpb.SegmentState_Flushed, newSegment.GetState())
 
 	assert.EqualValues(t, inSegment.GetInsertLogs(), newSegment.GetBinlogs())
 	assert.EqualValues(t, inSegment.GetField2StatslogPaths(), newSegment.GetStatslogs())

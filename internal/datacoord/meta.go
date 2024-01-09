@@ -521,6 +521,19 @@ func UpdateStatusOperator(segmentID int64, status commonpb.SegmentState) UpdateO
 	}
 }
 
+func UpdateCompactedOperator(segmentID int64) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			log.Warn("meta update: update binlog failed - segment not found",
+				zap.Int64("segmentID", segmentID))
+			return false
+		}
+		segment.Compacted = true
+		return true
+	}
+}
+
 // update binlogs in segmentInfo
 func UpdateBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs []*datapb.FieldBinlog) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
@@ -1052,7 +1065,7 @@ func (m *meta) PrepareCompleteCompactionMutation(plan *datapb.CompactionPlan,
 		PartitionID:         modSegments[0].PartitionID,
 		InsertChannel:       modSegments[0].InsertChannel,
 		NumOfRows:           compactToSegment.NumOfRows,
-		State:               commonpb.SegmentState_Flushing,
+		State:               commonpb.SegmentState_Flushed,
 		MaxRowNum:           modSegments[0].MaxRowNum,
 		Binlogs:             compactToSegment.GetInsertLogs(),
 		Statslogs:           compactToSegment.GetField2StatslogPaths(),
