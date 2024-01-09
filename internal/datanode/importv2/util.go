@@ -48,18 +48,12 @@ func NewSyncTask(ctx context.Context, task *ImportTask, segmentID, partitionID i
 	var serializer syncmgr.Serializer
 	var err error
 	if params.Params.CommonCfg.EnableStorageV2.GetAsBool() {
-		serializer, err = syncmgr.NewStorageV2Serializer(
-			nil,
-			metaCache,
-			nil,
-		)
 		return nil, merr.WrapErrImportFailed("storage v2 is not supported") // TODO: dyh, resolve storage v2
-	} else {
-		serializer, err = syncmgr.NewStorageSerializer(
-			metaCache,
-			nil,
-		)
 	}
+	serializer, err = syncmgr.NewStorageSerializer(
+		metaCache,
+		nil,
+	)
 	if err != nil {
 		return nil, err
 	}
