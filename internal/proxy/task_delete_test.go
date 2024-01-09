@@ -546,7 +546,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 			},
 		}
 		lb.EXPECT().Execute(mock.Anything, mock.Anything).Call.Return(func(ctx context.Context, workload CollectionWorkLoad) error {
-			return workload.exec(ctx, 1, qn)
+			return workload.exec(ctx, 1, qn, "")
 		})
 
 		qn.EXPECT().QueryStream(mock.Anything, mock.Anything).Return(nil, errors.New("mock error"))
@@ -591,7 +591,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 		stream.EXPECT().Produce(mock.Anything).Return(nil)
 
 		lb.EXPECT().Execute(mock.Anything, mock.Anything).Call.Return(func(ctx context.Context, workload CollectionWorkLoad) error {
-			return workload.exec(ctx, 1, qn)
+			return workload.exec(ctx, 1, qn, "")
 		})
 
 		qn.EXPECT().QueryStream(mock.Anything, mock.Anything).Call.Return(
@@ -654,7 +654,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 		mockMgr.EXPECT().getOrCreateDmlStream(mock.Anything).Return(stream, nil)
 		mockMgr.EXPECT().getChannels(collectionID).Return(channels, nil)
 		lb.EXPECT().Execute(mock.Anything, mock.Anything).Call.Return(func(ctx context.Context, workload CollectionWorkLoad) error {
-			return workload.exec(ctx, 1, qn)
+			return workload.exec(ctx, 1, qn, "")
 		})
 
 		qn.EXPECT().QueryStream(mock.Anything, mock.Anything).Call.Return(
@@ -716,7 +716,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 		mockMgr.EXPECT().getOrCreateDmlStream(mock.Anything).Return(stream, nil)
 		mockMgr.EXPECT().getChannels(collectionID).Return(channels, nil)
 		lb.EXPECT().Execute(mock.Anything, mock.Anything).Call.Return(func(ctx context.Context, workload CollectionWorkLoad) error {
-			return workload.exec(ctx, 1, qn)
+			return workload.exec(ctx, 1, qn, "")
 		})
 
 		qn.EXPECT().QueryStream(mock.Anything, mock.Anything).Call.Return(
@@ -797,7 +797,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 		mockMgr.EXPECT().getOrCreateDmlStream(mock.Anything).Return(stream, nil)
 		mockMgr.EXPECT().getChannels(collectionID).Return(channels, nil)
 		lb.EXPECT().Execute(mock.Anything, mock.Anything).Call.Return(func(ctx context.Context, workload CollectionWorkLoad) error {
-			return workload.exec(ctx, 1, qn)
+			return workload.exec(ctx, 1, qn, "")
 		})
 
 		qn.EXPECT().QueryStream(mock.Anything, mock.Anything).Call.Return(
@@ -899,7 +899,7 @@ func TestDeleteRunner_StreamingQueryAndDelteFunc(t *testing.T) {
 		qn := mocks.NewMockQueryNodeClient(t)
 		// witho out plan
 		queryFunc := dr.getStreamingQueryAndDelteFunc(nil)
-		assert.Error(t, queryFunc(ctx, 1, qn))
+		assert.Error(t, queryFunc(ctx, 1, qn, ""))
 	})
 
 	t.Run("partitionKey mode get meta failed", func(t *testing.T) {
@@ -938,7 +938,7 @@ func TestDeleteRunner_StreamingQueryAndDelteFunc(t *testing.T) {
 		plan, err := planparserv2.CreateRetrievePlan(dr.schema.CollectionSchema, dr.req.Expr)
 		assert.NoError(t, err)
 		queryFunc := dr.getStreamingQueryAndDelteFunc(plan)
-		assert.Error(t, queryFunc(ctx, 1, qn))
+		assert.Error(t, queryFunc(ctx, 1, qn, ""))
 	})
 
 	t.Run("partitionKey mode get partition ID failed", func(t *testing.T) {
@@ -981,6 +981,6 @@ func TestDeleteRunner_StreamingQueryAndDelteFunc(t *testing.T) {
 		plan, err := planparserv2.CreateRetrievePlan(dr.schema.CollectionSchema, dr.req.Expr)
 		assert.NoError(t, err)
 		queryFunc := dr.getStreamingQueryAndDelteFunc(plan)
-		assert.Error(t, queryFunc(ctx, 1, qn))
+		assert.Error(t, queryFunc(ctx, 1, qn, ""))
 	})
 }

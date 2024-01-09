@@ -1,7 +1,17 @@
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License
+
 //
 // Created by zilliz on 2023/12/1.
 //
-
 
 #include <gtest/gtest.h>
 #include "common/Schema.h"
@@ -20,29 +30,29 @@ using namespace milvus::storage;
 
 const char* METRICS_TYPE = "metric_type";
 
-
 void
 prepareSegmentSystemFieldData(const std::unique_ptr<SegmentSealed>& segment,
                               size_t row_count,
-                              GeneratedData& data_set){
+                              GeneratedData& data_set) {
     auto field_data =
-            std::make_shared<milvus::FieldData<int64_t>>(DataType::INT64);
+        std::make_shared<milvus::FieldData<int64_t>>(DataType::INT64);
     field_data->FillFieldData(data_set.row_ids_.data(), row_count);
-    auto field_data_info = FieldDataInfo{
-            RowFieldID.get(), row_count, std::vector<milvus::FieldDataPtr>{field_data}};
+    auto field_data_info =
+        FieldDataInfo{RowFieldID.get(),
+                      row_count,
+                      std::vector<milvus::FieldDataPtr>{field_data}};
     segment->LoadFieldData(RowFieldID, field_data_info);
 
-    field_data =
-            std::make_shared<milvus::FieldData<int64_t>>(DataType::INT64);
+    field_data = std::make_shared<milvus::FieldData<int64_t>>(DataType::INT64);
     field_data->FillFieldData(data_set.timestamps_.data(), row_count);
     field_data_info =
-            FieldDataInfo{TimestampFieldID.get(),
-                          row_count,
-                          std::vector<milvus::FieldDataPtr>{field_data}};
+        FieldDataInfo{TimestampFieldID.get(),
+                      row_count,
+                      std::vector<milvus::FieldDataPtr>{field_data}};
     segment->LoadFieldData(TimestampFieldID, field_data_info);
 }
 
-TEST(GroupBY, Normal2){
+TEST(GroupBY, Normal2) {
     using namespace milvus;
     using namespace milvus::query;
     using namespace milvus::segcore;
@@ -51,7 +61,7 @@ TEST(GroupBY, Normal2){
     int dim = 64;
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugField(
-            "fakevec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
+        "fakevec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
     auto int8_fid = schema->AddDebugField("int8", DataType::INT8);
     auto int16_fid = schema->AddDebugField("int16", DataType::INT16);
     auto int32_fid = schema->AddDebugField("int32", DataType::INT32);
@@ -71,7 +81,7 @@ TEST(GroupBY, Normal2){
         auto info = FieldDataInfo(field_data.field_id(), N);
         auto field_meta = fields.at(FieldId(field_id));
         info.channel->push(
-                CreateFieldDataFromDataArray(N, &field_data, field_meta));
+            CreateFieldDataFromDataArray(N, &field_data, field_meta));
         info.channel->close();
 
         segment->LoadFieldData(FieldId(field_id), info);
@@ -80,7 +90,8 @@ TEST(GroupBY, Normal2){
 
     //3. load index
     auto vector_data = raw_data.get_col<float>(vec_fid);
-    auto indexing = GenVecIndexing(N, dim, vector_data.data(), knowhere::IndexEnum::INDEX_HNSW);
+    auto indexing = GenVecIndexing(
+        N, dim, vector_data.data(), knowhere::IndexEnum::INDEX_HNSW);
     LoadIndexInfo load_index_info;
     load_index_info.field_id = vec_fid.get();
     load_index_info.index = std::move(indexing);
@@ -102,26 +113,34 @@ TEST(GroupBY, Normal2){
          >)";
 
         auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
-        auto plan = CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        auto plan =
+            CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
         auto num_queries = 1;
         auto seed = 1024;
         auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
-        auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-        auto search_result = segment->Search(plan.get(), ph_group.get());
+        auto ph_group =
+            ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+        auto search_result =
+            segment->Search(plan.get(), ph_group.get(), 1L << 63);
         auto& group_by_values = search_result->group_by_values_;
-        ASSERT_EQ(search_result->group_by_values_.size(), search_result->seg_offsets_.size());
-        ASSERT_EQ(search_result->distances_.size(), search_result->seg_offsets_.size());
+        ASSERT_EQ(search_result->group_by_values_.size(),
+                  search_result->seg_offsets_.size());
+        ASSERT_EQ(search_result->distances_.size(),
+                  search_result->seg_offsets_.size());
 
         int size = group_by_values.size();
         std::unordered_set<int8_t> i8_set;
         float lastDistance = 0.0;
-        for(size_t i = 0; i < size; i++){
-            if(std::holds_alternative<int8_t>(group_by_values[i])){
+        for (size_t i = 0; i < size; i++) {
+            if (std::holds_alternative<int8_t>(group_by_values[i])) {
                 int8_t g_val = std::get<int8_t>(group_by_values[i]);
-                ASSERT_FALSE(i8_set.count(g_val)>0);//no repetition on groupBy field
+                ASSERT_FALSE(i8_set.count(g_val) >
+                             0);  //no repetition on groupBy field
                 i8_set.insert(g_val);
                 auto distance = search_result->distances_.at(i);
-                ASSERT_TRUE(lastDistance<=distance);//distance should be decreased as metrics_type is L2
+                ASSERT_TRUE(
+                    lastDistance <=
+                    distance);  //distance should be decreased as metrics_type is L2
                 lastDistance = distance;
             } else {
                 //check padding
@@ -146,26 +165,34 @@ TEST(GroupBY, Normal2){
          >)";
 
         auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
-        auto plan = CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        auto plan =
+            CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
         auto num_queries = 1;
         auto seed = 1024;
         auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
-        auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-        auto search_result = segment->Search(plan.get(), ph_group.get());
+        auto ph_group =
+            ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+        auto search_result =
+            segment->Search(plan.get(), ph_group.get(), 1L << 63);
         auto& group_by_values = search_result->group_by_values_;
-        ASSERT_EQ(search_result->group_by_values_.size(), search_result->seg_offsets_.size());
-        ASSERT_EQ(search_result->distances_.size(), search_result->seg_offsets_.size());
+        ASSERT_EQ(search_result->group_by_values_.size(),
+                  search_result->seg_offsets_.size());
+        ASSERT_EQ(search_result->distances_.size(),
+                  search_result->seg_offsets_.size());
 
         int size = group_by_values.size();
         std::unordered_set<int16_t> i16_set;
         float lastDistance = 0.0;
-        for(size_t i = 0; i < size; i++){
-            if(std::holds_alternative<int16_t>(group_by_values[i])){
+        for (size_t i = 0; i < size; i++) {
+            if (std::holds_alternative<int16_t>(group_by_values[i])) {
                 int16_t g_val = std::get<int16_t>(group_by_values[i]);
-                ASSERT_FALSE(i16_set.count(g_val)>0);//no repetition on groupBy field
+                ASSERT_FALSE(i16_set.count(g_val) >
+                             0);  //no repetition on groupBy field
                 i16_set.insert(g_val);
                 auto distance = search_result->distances_.at(i);
-                ASSERT_TRUE(lastDistance<=distance);//distance should be decreased as metrics_type is L2
+                ASSERT_TRUE(
+                    lastDistance <=
+                    distance);  //distance should be decreased as metrics_type is L2
                 lastDistance = distance;
             } else {
                 //check padding
@@ -190,26 +217,34 @@ TEST(GroupBY, Normal2){
          >)";
 
         auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
-        auto plan = CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        auto plan =
+            CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
         auto num_queries = 1;
         auto seed = 1024;
         auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
-        auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-        auto search_result = segment->Search(plan.get(), ph_group.get());
+        auto ph_group =
+            ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+        auto search_result =
+            segment->Search(plan.get(), ph_group.get(), 1L << 63);
         auto& group_by_values = search_result->group_by_values_;
-        ASSERT_EQ(search_result->group_by_values_.size(), search_result->seg_offsets_.size());
-        ASSERT_EQ(search_result->distances_.size(), search_result->seg_offsets_.size());
+        ASSERT_EQ(search_result->group_by_values_.size(),
+                  search_result->seg_offsets_.size());
+        ASSERT_EQ(search_result->distances_.size(),
+                  search_result->seg_offsets_.size());
 
         int size = group_by_values.size();
         std::unordered_set<int32_t> i32_set;
         float lastDistance = 0.0;
-        for(size_t i = 0; i < size; i++){
-            if(std::holds_alternative<int32_t>(group_by_values[i])){
+        for (size_t i = 0; i < size; i++) {
+            if (std::holds_alternative<int32_t>(group_by_values[i])) {
                 int16_t g_val = std::get<int32_t>(group_by_values[i]);
-                ASSERT_FALSE(i32_set.count(g_val)>0);//no repetition on groupBy field
+                ASSERT_FALSE(i32_set.count(g_val) >
+                             0);  //no repetition on groupBy field
                 i32_set.insert(g_val);
                 auto distance = search_result->distances_.at(i);
-                ASSERT_TRUE(lastDistance<=distance);//distance should be decreased as metrics_type is L2
+                ASSERT_TRUE(
+                    lastDistance <=
+                    distance);  //distance should be decreased as metrics_type is L2
                 lastDistance = distance;
             } else {
                 //check padding
@@ -234,26 +269,34 @@ TEST(GroupBY, Normal2){
          >)";
 
         auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
-        auto plan = CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        auto plan =
+            CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
         auto num_queries = 1;
         auto seed = 1024;
         auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
-        auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-        auto search_result = segment->Search(plan.get(), ph_group.get());
+        auto ph_group =
+            ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+        auto search_result =
+            segment->Search(plan.get(), ph_group.get(), 1L << 63);
         auto& group_by_values = search_result->group_by_values_;
-        ASSERT_EQ(search_result->group_by_values_.size(), search_result->seg_offsets_.size());
-        ASSERT_EQ(search_result->distances_.size(), search_result->seg_offsets_.size());
+        ASSERT_EQ(search_result->group_by_values_.size(),
+                  search_result->seg_offsets_.size());
+        ASSERT_EQ(search_result->distances_.size(),
+                  search_result->seg_offsets_.size());
 
         int size = group_by_values.size();
         std::unordered_set<int64_t> i64_set;
         float lastDistance = 0.0;
-        for(size_t i = 0; i < size; i++){
-            if(std::holds_alternative<int64_t>(group_by_values[i])){
+        for (size_t i = 0; i < size; i++) {
+            if (std::holds_alternative<int64_t>(group_by_values[i])) {
                 int16_t g_val = std::get<int64_t>(group_by_values[i]);
-                ASSERT_FALSE(i64_set.count(g_val)>0);//no repetition on groupBy field
+                ASSERT_FALSE(i64_set.count(g_val) >
+                             0);  //no repetition on groupBy field
                 i64_set.insert(g_val);
                 auto distance = search_result->distances_.at(i);
-                ASSERT_TRUE(lastDistance<=distance);//distance should be decreased as metrics_type is L2
+                ASSERT_TRUE(
+                    lastDistance <=
+                    distance);  //distance should be decreased as metrics_type is L2
                 lastDistance = distance;
             } else {
                 //check padding
@@ -278,26 +321,35 @@ TEST(GroupBY, Normal2){
          >)";
 
         auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
-        auto plan = CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        auto plan =
+            CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
         auto num_queries = 1;
         auto seed = 1024;
         auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
-        auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-        auto search_result = segment->Search(plan.get(), ph_group.get());
+        auto ph_group =
+            ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+        auto search_result =
+            segment->Search(plan.get(), ph_group.get(), 1L << 63);
         auto& group_by_values = search_result->group_by_values_;
-        ASSERT_EQ(search_result->group_by_values_.size(), search_result->seg_offsets_.size());
-        ASSERT_EQ(search_result->distances_.size(), search_result->seg_offsets_.size());
+        ASSERT_EQ(search_result->group_by_values_.size(),
+                  search_result->seg_offsets_.size());
+        ASSERT_EQ(search_result->distances_.size(),
+                  search_result->seg_offsets_.size());
 
         int size = group_by_values.size();
         std::unordered_set<std::string_view> strs_set;
         float lastDistance = 0.0;
-        for(size_t i = 0; i < size; i++){
-            if(std::holds_alternative<std::string_view>(group_by_values[i])){
-                std::string_view g_val = std::get<std::string_view>(group_by_values[i]);
-                ASSERT_FALSE(strs_set.count(g_val)>0);//no repetition on groupBy field
+        for (size_t i = 0; i < size; i++) {
+            if (std::holds_alternative<std::string_view>(group_by_values[i])) {
+                std::string_view g_val =
+                    std::get<std::string_view>(group_by_values[i]);
+                ASSERT_FALSE(strs_set.count(g_val) >
+                             0);  //no repetition on groupBy field
                 strs_set.insert(g_val);
                 auto distance = search_result->distances_.at(i);
-                ASSERT_TRUE(lastDistance<=distance);//distance should be decreased as metrics_type is L2
+                ASSERT_TRUE(
+                    lastDistance <=
+                    distance);  //distance should be decreased as metrics_type is L2
                 lastDistance = distance;
             } else {
                 //check padding
@@ -322,40 +374,48 @@ TEST(GroupBY, Normal2){
          >)";
 
         auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
-        auto plan = CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        auto plan =
+            CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
         auto num_queries = 1;
         auto seed = 1024;
         auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
-        auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-        auto search_result = segment->Search(plan.get(), ph_group.get());
+        auto ph_group =
+            ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+        auto search_result =
+            segment->Search(plan.get(), ph_group.get(), 1L << 63);
         auto& group_by_values = search_result->group_by_values_;
-        ASSERT_EQ(search_result->group_by_values_.size(), search_result->seg_offsets_.size());
-        ASSERT_EQ(search_result->distances_.size(), search_result->seg_offsets_.size());
+        ASSERT_EQ(search_result->group_by_values_.size(),
+                  search_result->seg_offsets_.size());
+        ASSERT_EQ(search_result->distances_.size(),
+                  search_result->seg_offsets_.size());
 
         int size = group_by_values.size();
         std::unordered_set<bool> bools_set;
         int boolValCount = 0;
         float lastDistance = 0.0;
-        for(size_t i = 0; i < size; i++){
-            if(std::holds_alternative<bool>(group_by_values[i])){
+        for (size_t i = 0; i < size; i++) {
+            if (std::holds_alternative<bool>(group_by_values[i])) {
                 bool g_val = std::get<bool>(group_by_values[i]);
-                ASSERT_FALSE(bools_set.count(g_val)>0);//no repetition on groupBy field
+                ASSERT_FALSE(bools_set.count(g_val) >
+                             0);  //no repetition on groupBy field
                 bools_set.insert(g_val);
-                boolValCount+=1;
+                boolValCount += 1;
                 auto distance = search_result->distances_.at(i);
-                ASSERT_TRUE(lastDistance<=distance);//distance should be decreased as metrics_type is L2
+                ASSERT_TRUE(
+                    lastDistance <=
+                    distance);  //distance should be decreased as metrics_type is L2
                 lastDistance = distance;
             } else {
                 //check padding
                 ASSERT_EQ(search_result->seg_offsets_[i], INVALID_SEG_OFFSET);
                 ASSERT_EQ(search_result->distances_[i], 0.0);
             }
-            ASSERT_TRUE(boolValCount<=2);//bool values cannot exceed two
+            ASSERT_TRUE(boolValCount <= 2);  //bool values cannot exceed two
         }
     }
 }
 
-TEST(GroupBY, Reduce){
+TEST(GroupBY, Reduce) {
     using namespace milvus;
     using namespace milvus::query;
     using namespace milvus::segcore;
@@ -364,7 +424,7 @@ TEST(GroupBY, Reduce){
     int dim = 64;
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugField(
-            "fakevec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
+        "fakevec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
     auto int64_fid = schema->AddDebugField("int64", DataType::INT64);
     schema->set_primary_field_id(int64_fid);
     auto segment1 = CreateSealedSegment(schema);
@@ -386,7 +446,7 @@ TEST(GroupBY, Reduce){
         auto info = FieldDataInfo(field_data.field_id(), N);
         auto field_meta = fields.at(FieldId(field_id));
         info.channel->push(
-                CreateFieldDataFromDataArray(N, &field_data, field_meta));
+            CreateFieldDataFromDataArray(N, &field_data, field_meta));
         info.channel->close();
         segment1->LoadFieldData(FieldId(field_id), info);
     }
@@ -398,7 +458,7 @@ TEST(GroupBY, Reduce){
         auto info = FieldDataInfo(field_data.field_id(), N);
         auto field_meta = fields.at(FieldId(field_id));
         info.channel->push(
-                CreateFieldDataFromDataArray(N, &field_data, field_meta));
+            CreateFieldDataFromDataArray(N, &field_data, field_meta));
         info.channel->close();
         segment2->LoadFieldData(FieldId(field_id), info);
     }
@@ -406,7 +466,8 @@ TEST(GroupBY, Reduce){
 
     //3. load index
     auto vector_data_1 = raw_data1.get_col<float>(vec_fid);
-    auto indexing_1 = GenVecIndexing(N, dim, vector_data_1.data(), knowhere::IndexEnum::INDEX_HNSW);
+    auto indexing_1 = GenVecIndexing(
+        N, dim, vector_data_1.data(), knowhere::IndexEnum::INDEX_HNSW);
     LoadIndexInfo load_index_info_1;
     load_index_info_1.field_id = vec_fid.get();
     load_index_info_1.index = std::move(indexing_1);
@@ -414,13 +475,13 @@ TEST(GroupBY, Reduce){
     segment1->LoadIndex(load_index_info_1);
 
     auto vector_data_2 = raw_data2.get_col<float>(vec_fid);
-    auto indexing_2 = GenVecIndexing(N, dim, vector_data_2.data(), knowhere::IndexEnum::INDEX_HNSW);
+    auto indexing_2 = GenVecIndexing(
+        N, dim, vector_data_2.data(), knowhere::IndexEnum::INDEX_HNSW);
     LoadIndexInfo load_index_info_2;
     load_index_info_2.field_id = vec_fid.get();
     load_index_info_2.index = std::move(indexing_2);
     load_index_info_2.index_params[METRICS_TYPE] = knowhere::metric::L2;
     segment2->LoadIndex(load_index_info_2);
-
 
     //4. search group by respectively
     const char* raw_plan = R"(vector_anns: <
@@ -435,11 +496,13 @@ TEST(GroupBY, Reduce){
 
          >)";
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
-    auto plan = CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+    auto plan =
+        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
     auto num_queries = 10;
     auto topK = 100;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
-    auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
     CPlaceholderGroup c_ph_group = ph_group.release();
     CSearchPlan c_plan = plan.release();
 
@@ -447,9 +510,11 @@ TEST(GroupBY, Reduce){
     CSegmentInterface c_segment_2 = segment2.release();
     CSearchResult c_search_res_1;
     CSearchResult c_search_res_2;
-    auto status = Search(c_segment_1, c_plan, c_ph_group, {}, &c_search_res_1);
+    auto status =
+        Search(c_segment_1, c_plan, c_ph_group, {}, 1L << 63, &c_search_res_1);
     ASSERT_EQ(status.error_code, Success);
-    status = Search(c_segment_2, c_plan, c_ph_group, {}, &c_search_res_2);
+    status =
+        Search(c_segment_2, c_plan, c_ph_group, {}, 1L << 63, &c_search_res_2);
     ASSERT_EQ(status.error_code, Success);
     std::vector<CSearchResult> results;
     results.push_back(c_search_res_1);
@@ -458,20 +523,17 @@ TEST(GroupBY, Reduce){
     auto slice_nqs = std::vector<int64_t>{num_queries / 2, num_queries / 2};
     auto slice_topKs = std::vector<int64_t>{topK / 2, topK};
     CSearchResultDataBlobs cSearchResultData;
-    status = ReduceSearchResultsAndFillData(
-            &cSearchResultData,
-            c_plan,
-            results.data(),
-            results.size(),
-            slice_nqs.data(),
-            slice_topKs.data(),
-            slice_nqs.size()
-            );
+    status = ReduceSearchResultsAndFillData(&cSearchResultData,
+                                            c_plan,
+                                            results.data(),
+                                            results.size(),
+                                            slice_nqs.data(),
+                                            slice_topKs.data(),
+                                            slice_nqs.size());
     CheckSearchResultDuplicate(results);
     DeleteSearchResult(c_search_res_1);
     DeleteSearchResult(c_search_res_2);
     DeleteSearchResultDataBlobs(cSearchResultData);
-
 
     DeleteSearchPlan(c_plan);
     DeletePlaceholderGroup(c_ph_group);

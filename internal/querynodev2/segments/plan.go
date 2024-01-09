@@ -84,6 +84,7 @@ type SearchRequest struct {
 	cPlaceholderGroup C.CPlaceholderGroup
 	msgID             UniqueID
 	searchFieldID     UniqueID
+	mvccTimestamp     Timestamp
 }
 
 func NewSearchRequest(ctx context.Context, collection *Collection, req *querypb.SearchRequest, placeholderGrp []byte) (*SearchRequest, error) {
@@ -123,6 +124,7 @@ func NewSearchRequest(ctx context.Context, collection *Collection, req *querypb.
 		cPlaceholderGroup: cPlaceholderGroup,
 		msgID:             req.GetReq().GetBase().GetMsgID(),
 		searchFieldID:     int64(fieldID),
+		mvccTimestamp:     req.GetReq().GetMvccTimestamp(),
 	}
 
 	return ret, nil

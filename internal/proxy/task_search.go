@@ -63,9 +63,10 @@ type searchTask struct {
 	offset    int64
 	resultBuf *typeutil.ConcurrentSet[*internalpb.SearchResults]
 
-	qc   types.QueryCoordClient
-	node types.ProxyComponent
-	lb   LBPolicy
+	qc              types.QueryCoordClient
+	node            types.ProxyComponent
+	lb              LBPolicy
+	queryChannelsTs map[string]Timestamp
 }
 
 func getPartitionIDs(ctx context.Context, dbName string, collectionName string, partitionNames []string) (partitionIDs []UniqueID, err error) {
@@ -488,6 +489,13 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 		return err
 	}
 
+	t.queryChannelsTs = make(map[string]uint64)
+	for _, r := range toReduceResults {
+		for ch, ts := range r.GetChannelsMvcc() {
+			t.queryChannelsTs[ch] = ts
+		}
+	}
+
 	if len(toReduceResults) >= 1 {
 		MetricType = toReduceResults[0].GetMetricType()
 	}
@@ -545,20 +553,20 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-func (t *searchTask) searchShard(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channelIDs ...string) error {
+func (t *searchTask) searchShard(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string) error {
 	searchReq := typeutil.Clone(t.SearchRequest)
 	searchReq.GetBase().TargetID = nodeID
 	req := &querypb.SearchRequest{
 		Req:             searchReq,
-		DmlChannels:     channelIDs,
+		DmlChannels:     []string{channel},
 		Scope:           querypb.DataScope_All,
-		TotalChannelNum: int32(len(channelIDs)),
+		TotalChannelNum: int32(1),
 	}
 
 	log := log.Ctx(ctx).With(zap.Int64("collection", t.GetCollectionID()),
 		zap.Int64s("partitionIDs", t.GetPartitionIDs()),
 		zap.Int64("nodeID", nodeID),
-		zap.Strings("channels", channelIDs))
+		zap.String("channel", channel))
 
 	var result *internalpb.SearchResults
 	var err error
@@ -619,7 +627,7 @@ func (t *searchTask) Requery() error {
 		QueryParams:        t.request.GetSearchParams(),
 	}
 
-	return doRequery(t.ctx, t.GetCollectionID(), t.node, t.schema.CollectionSchema, queryReq, t.result)
+	return doRequery(t.ctx, t.GetCollectionID(), t.node, t.schema.CollectionSchema, queryReq, t.result, t.queryChannelsTs)
 }
 
 func (t *searchTask) fillInEmptyResult(numQueries int64) {
@@ -672,6 +680,7 @@ func doRequery(ctx context.Context,
 	schema *schemapb.CollectionSchema,
 	request *milvuspb.QueryRequest,
 	result *milvuspb.SearchResults,
+	queryChannelsTs map[string]Timestamp,
 ) error {
 	outputFields := request.GetOutputFields()
 	pkField, err := typeutil.GetPrimaryFieldSchema(schema)
@@ -680,7 +689,10 @@ func doRequery(ctx context.Context,
 	}
 	ids := result.GetResults().GetIds()
 	plan := planparserv2.CreateRequeryPlan(pkField, ids)
-
+	channelsMvcc := make(map[string]Timestamp)
+	for k, v := range queryChannelsTs {
+		channelsMvcc[k] = v
+	}
 	qt := &queryTask{
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
@@ -691,10 +703,12 @@ func doRequery(ctx context.Context,
 			),
 			ReqID: paramtable.GetNodeID(),
 		},
-		request: request,
-		plan:    plan,
-		qc:      node.(*Proxy).queryCoord,
-		lb:      node.(*Proxy).lbPolicy,
+		request:      request,
+		plan:         plan,
+		qc:           node.(*Proxy).queryCoord,
+		lb:           node.(*Proxy).lbPolicy,
+		channelsMvcc: channelsMvcc,
+		fastSkip:     true,
 	}
 	queryResult, err := node.(*Proxy).query(ctx, qt)
 	if err != nil {

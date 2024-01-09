@@ -26,6 +26,7 @@ import (
 	"testing"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -639,6 +640,8 @@ func genColumnBasedInsertMsg(schema *schemapb.CollectionSchema, numRows, fVecDim
 			FieldsData: nil,
 			NumRows:    uint64(numRows),
 			Version:    msgpb.InsertDataVersion_ColumnBased,
+			RowIDs:     lo.RepeatBy(numRows, func(idx int) int64 { return int64(idx) }),
+			Timestamps: lo.RepeatBy(numRows, func(idx int) uint64 { return uint64(idx) }),
 		},
 	}
 	pks = make([]int64, 0)

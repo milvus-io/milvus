@@ -94,6 +94,7 @@ message SearchRequest {
   common.DslType dsl_type = 8;
   bytes serialized_expr_plan = 9;
   repeated int64 output_fields_id = 10;
+  uint64 mvcc_timestamp = 11;
   uint64 guarantee_timestamp = 12;
   uint64 timeout_timestamp = 13;
   int64  nq = 14;
@@ -120,6 +121,7 @@ message SearchResults {
 
   // search request cost
   CostAggregation costAggregation = 13;
+  map<string, uint64> channels_mvcc = 14;
 }
 
 message CostAggregation {
@@ -160,7 +162,7 @@ message RetrieveResults {
   repeated int64 global_sealed_segmentIDs = 8;
 
    // query request cost
-   CostAggregation costAggregation = 13;
+  CostAggregation costAggregation = 13;
 }
 
 message LoadIndex {
