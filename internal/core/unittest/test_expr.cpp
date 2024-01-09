@@ -1927,6 +1927,77 @@ TEST(Expr, TestGrowingSegmentGetBatchSize) {
     }
 }
 
+TEST(Expr, TestConjuctExpr) {
+    using namespace milvus;
+    using namespace milvus::query;
+    using namespace milvus::segcore;
+    auto schema = std::make_shared<Schema>();
+    auto vec_fid = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto int8_fid = schema->AddDebugField("int8", DataType::INT8);
+    auto int8_1_fid = schema->AddDebugField("int81", DataType::INT8);
+    auto int16_fid = schema->AddDebugField("int16", DataType::INT16);
+    auto int16_1_fid = schema->AddDebugField("int161", DataType::INT16);
+    auto int32_fid = schema->AddDebugField("int32", DataType::INT32);
+    auto int32_1_fid = schema->AddDebugField("int321", DataType::INT32);
+    auto int64_fid = schema->AddDebugField("int64", DataType::INT64);
+    auto int64_1_fid = schema->AddDebugField("int641", DataType::INT64);
+    auto str1_fid = schema->AddDebugField("string1", DataType::VARCHAR);
+    auto str2_fid = schema->AddDebugField("string2", DataType::VARCHAR);
+    auto float_fid = schema->AddDebugField("float", DataType::FLOAT);
+    auto double_fid = schema->AddDebugField("double", DataType::DOUBLE);
+    schema->set_primary_field_id(str1_fid);
+
+    auto seg = CreateSealedSegment(schema);
+    int N = 1000000;
+    auto raw_data = DataGen(schema, N);
+    // load field data
+    auto fields = schema->get_fields();
+    for (auto field_data : raw_data.raw_->fields_data()) {
+        int64_t field_id = field_data.field_id();
+
+        auto info = FieldDataInfo(field_data.field_id(), N, "/tmp/a");
+        auto field_meta = fields.at(FieldId(field_id));
+        info.channel->push(
+            CreateFieldDataFromDataArray(N, &field_data, field_meta));
+        info.channel->close();
+
+        seg->LoadFieldData(FieldId(field_id), info);
+    }
+    query::ExecPlanNodeVisitor visitor(*seg, MAX_TIMESTAMP);
+
+    auto build_expr = [&](int l, int r) -> expr::TypedExprPtr {
+        ::milvus::proto::plan::GenericValue value;
+        value.set_int64_val(l);
+        auto left = std::make_shared<milvus::expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(int64_fid, DataType::INT64),
+            proto::plan::OpType::GreaterThan,
+            value);
+        value.set_int64_val(r);
+        auto right = std::make_shared<milvus::expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(int64_fid, DataType::INT64),
+            proto::plan::OpType::LessThan,
+            value);
+
+        return std::make_shared<milvus::expr::LogicalBinaryExpr>(
+            expr::LogicalBinaryExpr::OpType::And, left, right);
+    };
+
+    std::vector<std::pair<int, int>> test_case = {
+        {100, 0}, {0, 100}, {8192, 8194}};
+    for (auto& pair : test_case) {
+        std::cout << pair.first << "|" << pair.second << std::endl;
+        auto expr = build_expr(pair.first, pair.second);
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+        BitsetType final;
+        visitor.ExecuteExprNode(plan, seg.get(), N, final);
+        for (int i = 0; i < N; ++i) {
+            EXPECT_EQ(final[i], pair.first < i && i < pair.second) << i;
+        }
+    }
+}
+
 TEST(Expr, TestUnaryBenchTest) {
     using namespace milvus;
     using namespace milvus::query;
