@@ -42,9 +42,10 @@ type hybridSearchTask struct {
 
 	userOutputFields []string
 
-	qc   types.QueryCoordClient
-	node types.ProxyComponent
-	lb   LBPolicy
+	qc              types.QueryCoordClient
+	node            types.ProxyComponent
+	lb              LBPolicy
+	queryChannelsTs map[string]Timestamp
 
 	collectionID UniqueID
 
@@ -296,7 +297,8 @@ func (t *hybridSearchTask) Requery() error {
 		UseDefaultConsistency: t.request.GetUseDefaultConsistency(),
 	}
 
-	return doRequery(t.ctx, t.collectionID, t.node, t.schema.CollectionSchema, queryReq, t.result)
+	// TODO:Xige-16 refine the mvcc functionality of hybrid search
+	return doRequery(t.ctx, t.collectionID, t.node, t.schema.CollectionSchema, queryReq, t.result, t.queryChannelsTs)
 }
 
 func rankSearchResultData(ctx context.Context,

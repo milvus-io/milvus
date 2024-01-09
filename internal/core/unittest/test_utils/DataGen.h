@@ -904,7 +904,10 @@ SealedCreator(SchemaPtr schema, const GeneratedData& dataset) {
 }
 
 inline std::unique_ptr<milvus::index::VectorIndex>
-GenVecIndexing(int64_t N, int64_t dim, const float* vec, const char* index_type) {
+GenVecIndexing(int64_t N,
+               int64_t dim,
+               const float* vec,
+               const char* index_type) {
     auto conf =
         knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
                        {knowhere::meta::DIM, std::to_string(dim)},

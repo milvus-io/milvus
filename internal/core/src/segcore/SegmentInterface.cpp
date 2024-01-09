@@ -67,11 +67,12 @@ SegmentInternalInterface::FillTargetEntry(const query::Plan* plan,
 std::unique_ptr<SearchResult>
 SegmentInternalInterface::Search(
     const query::Plan* plan,
-    const query::PlaceholderGroup* placeholder_group) const {
+    const query::PlaceholderGroup* placeholder_group,
+    Timestamp timestamp) const {
     std::shared_lock lck(mutex_);
     milvus::tracer::AddEvent("obtained_segment_lock_mutex");
     check_search(plan);
-    query::ExecPlanNodeVisitor visitor(*this, 1L << 63, placeholder_group);
+    query::ExecPlanNodeVisitor visitor(*this, timestamp, placeholder_group);
     auto results = std::make_unique<SearchResult>();
     *results = visitor.get_moved_result(*plan->plan_node_);
     results->segment_ = (void*)this;

@@ -350,7 +350,7 @@ func (dr *deleteRunner) produce(ctx context.Context, primaryKeys *schemapb.IDs) 
 // getStreamingQueryAndDelteFunc return query function used by LBPolicy
 // make sure it concurrent safe
 func (dr *deleteRunner) getStreamingQueryAndDelteFunc(plan *planpb.PlanNode) executeFunc {
-	return func(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channelIDs ...string) error {
+	return func(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string) error {
 		var partitionIDs []int64
 
 		// optimize query when partitionKey on
@@ -375,7 +375,7 @@ func (dr *deleteRunner) getStreamingQueryAndDelteFunc(plan *planpb.PlanNode) exe
 		log := log.Ctx(ctx).With(
 			zap.Int64("collectionID", dr.collectionID),
 			zap.Int64s("partitionIDs", partitionIDs),
-			zap.Strings("channels", channelIDs),
+			zap.String("channel", channel),
 			zap.Int64("nodeID", nodeID))
 
 		// set plan
@@ -405,7 +405,7 @@ func (dr *deleteRunner) getStreamingQueryAndDelteFunc(plan *planpb.PlanNode) exe
 				OutputFieldsId:     outputFieldIDs,
 				GuaranteeTimestamp: parseGuaranteeTsFromConsistency(dr.ts, dr.ts, dr.req.GetConsistencyLevel()),
 			},
-			DmlChannels: channelIDs,
+			DmlChannels: []string{channel},
 			Scope:       querypb.DataScope_All,
 		}
 
