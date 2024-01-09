@@ -3,7 +3,7 @@ use std::str::FromStr;
 
 
 
-use tantivy::collector::{TopDocs, DocSetCollector};
+use tantivy::collector::{DocSetCollector};
 use tantivy::directory::MmapDirectory;
 use tantivy::query::{Query, RangeQuery, TermQuery, RegexQuery};
 use tantivy::schema::{Field, IndexRecordOption};
