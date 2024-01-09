@@ -111,7 +111,7 @@ func (s *importScheduler) process() {
 }
 
 func (s *importScheduler) checkErr(task ImportTask, err error) {
-	if !merr.IsRetryableErr(err) {
+	if !merr.IsRetryableErr(err) && !merr.IsCanceledOrTimeout(err) {
 		err = s.imeta.Update(task.GetTaskID(), UpdateState(internalpb.ImportState_Failed), UpdateReason(err.Error()))
 		if err != nil {
 			log.Warn("failed to update import task state to failed", WrapLogFields(task, zap.Error(err))...)
