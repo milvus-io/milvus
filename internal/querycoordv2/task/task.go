@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	. "github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -118,9 +119,9 @@ type baseTask struct {
 	span trace.Span
 }
 
-func newBaseTask(ctx context.Context, source Source, collectionID, replicaID UniqueID, shard string) *baseTask {
+func newBaseTask(ctx context.Context, source Source, collectionID, replicaID UniqueID, shard string, taskTag string) *baseTask {
 	ctx, cancel := context.WithCancel(ctx)
-	ctx, span := otel.Tracer("QueryCoord").Start(ctx, "QueryCoord-BaseTask")
+	ctx, span := otel.Tracer(typeutil.QueryCoordRole).Start(ctx, taskTag)
 
 	return &baseTask{
 		source:       source,
@@ -310,7 +311,7 @@ func NewSegmentTask(ctx context.Context,
 		}
 	}
 
-	base := newBaseTask(ctx, source, collectionID, replicaID, shard)
+	base := newBaseTask(ctx, source, collectionID, replicaID, shard, fmt.Sprintf("SegmentTask-%s-%d", actions[0].Type().String(), segmentID))
 	base.actions = actions
 	return &SegmentTask{
 		baseTask:  base,
@@ -365,7 +366,7 @@ func NewChannelTask(ctx context.Context,
 		}
 	}
 
-	base := newBaseTask(ctx, source, collectionID, replicaID, channel)
+	base := newBaseTask(ctx, source, collectionID, replicaID, channel, fmt.Sprintf("ChannelTask-%s-%s", actions[0].Type().String(), channel))
 	base.actions = actions
 	return &ChannelTask{
 		baseTask: base,
