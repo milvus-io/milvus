@@ -512,10 +512,9 @@ func executeSubTasks[T any, R interface {
 		go func(task subTask[T]) {
 			defer wg.Done()
 			result, err := execute(ctx, task.req, task.worker)
-			if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-				err = fmt.Errorf("worker(%d) query failed: %s", task.targetID, result.GetStatus().GetReason())
-			}
+			err = merr.CheckRPCCall(result, err)
 			if err != nil {
+				err = errors.Wrap(err, fmt.Sprintf("worker(%d) execution failed", task.targetID))
 				log.Warn("failed to execute sub task",
 					zap.String("taskType", taskType),
 					zap.Int64("nodeID", task.targetID),

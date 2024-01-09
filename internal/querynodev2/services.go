@@ -666,7 +666,7 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 
 	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.TotalLabel, metrics.FromLeader).Inc()
 	defer func() {
-		if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+		if !merr.Ok(resp.GetStatus()) {
 			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.FailLabel, metrics.FromLeader).Inc()
 		}
 	}()
@@ -837,7 +837,7 @@ func (node *QueryNode) QuerySegments(ctx context.Context, req *querypb.QueryRequ
 
 	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.TotalLabel, metrics.FromLeader).Inc()
 	defer func() {
-		if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+		if !merr.Ok(resp.GetStatus()) {
 			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.FailLabel, metrics.FromLeader).Inc()
 		}
 	}()
@@ -1057,7 +1057,7 @@ func (node *QueryNode) QueryStreamSegments(req *querypb.QueryRequest, srv queryp
 	resp := &internalpb.RetrieveResults{}
 	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.TotalLabel, metrics.FromLeader).Inc()
 	defer func() {
-		if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+		if !merr.Ok(resp.GetStatus()) {
 			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.FailLabel, metrics.FromLeader).Inc()
 		}
 	}()
