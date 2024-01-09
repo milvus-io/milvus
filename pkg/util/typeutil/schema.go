@@ -383,6 +383,106 @@ func IsVariableDataType(dataType schemapb.DataType) bool {
 	return IsStringType(dataType) || IsArrayType(dataType) || IsJSONType(dataType)
 }
 
+// PrepareResultFieldData construct this slice fo FieldData for final result reduce
+// this shall preallocate the space for field data internal slice prevent slice growing cost.
+func PrepareResultFieldData(sample []*schemapb.FieldData, topK int64) []*schemapb.FieldData {
+	result := make([]*schemapb.FieldData, 0, len(sample))
+	for _, fieldData := range sample {
+		fd := &schemapb.FieldData{
+			Type:      fieldData.Type,
+			FieldName: fieldData.FieldName,
+			FieldId:   fieldData.FieldId,
+			IsDynamic: fieldData.IsDynamic,
+		}
+		switch fieldType := fieldData.Field.(type) {
+		case *schemapb.FieldData_Scalars:
+			scalarField := fieldData.GetScalars()
+			scalar := &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{},
+			}
+			switch fieldType.Scalars.Data.(type) {
+			case *schemapb.ScalarField_BoolData:
+				scalar.Scalars.Data = &schemapb.ScalarField_BoolData{
+					BoolData: &schemapb.BoolArray{
+						Data: make([]bool, 0, topK),
+					},
+				}
+			case *schemapb.ScalarField_IntData:
+				scalar.Scalars.Data = &schemapb.ScalarField_IntData{
+					IntData: &schemapb.IntArray{
+						Data: make([]int32, 0, topK),
+					},
+				}
+			case *schemapb.ScalarField_LongData:
+				scalar.Scalars.Data = &schemapb.ScalarField_LongData{
+					LongData: &schemapb.LongArray{
+						Data: make([]int64, 0, topK),
+					},
+				}
+			case *schemapb.ScalarField_FloatData:
+				scalar.Scalars.Data = &schemapb.ScalarField_FloatData{
+					FloatData: &schemapb.FloatArray{
+						Data: make([]float32, 0, topK),
+					},
+				}
+			case *schemapb.ScalarField_DoubleData:
+				scalar.Scalars.Data = &schemapb.ScalarField_DoubleData{
+					DoubleData: &schemapb.DoubleArray{
+						Data: make([]float64, 0, topK),
+					},
+				}
+			case *schemapb.ScalarField_StringData:
+				scalar.Scalars.Data = &schemapb.ScalarField_StringData{
+					StringData: &schemapb.StringArray{
+						Data: make([]string, 0, topK),
+					},
+				}
+			case *schemapb.ScalarField_JsonData:
+				scalar.Scalars.Data = &schemapb.ScalarField_JsonData{
+					JsonData: &schemapb.JSONArray{
+						Data: make([][]byte, 0, topK),
+					},
+				}
+			case *schemapb.ScalarField_ArrayData:
+				scalar.Scalars.Data = &schemapb.ScalarField_ArrayData{
+					ArrayData: &schemapb.ArrayArray{
+						Data:        make([]*schemapb.ScalarField, 0, topK),
+						ElementType: scalarField.GetArrayData().GetElementType(),
+					},
+				}
+			}
+			fd.Field = scalar
+		case *schemapb.FieldData_Vectors:
+			vectorField := fieldData.GetVectors()
+			dim := vectorField.GetDim()
+			vectors := &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: dim,
+				},
+			}
+			switch fieldType.Vectors.Data.(type) {
+			case *schemapb.VectorField_FloatVector:
+				vectors.Vectors.Data = &schemapb.VectorField_FloatVector{
+					FloatVector: &schemapb.FloatArray{
+						Data: make([]float32, 0, dim*topK),
+					},
+				}
+			case *schemapb.VectorField_Float16Vector:
+				vectors.Vectors.Data = &schemapb.VectorField_Float16Vector{
+					Float16Vector: make([]byte, 0, topK*dim*2),
+				}
+			case *schemapb.VectorField_BinaryVector:
+				vectors.Vectors.Data = &schemapb.VectorField_BinaryVector{
+					BinaryVector: make([]byte, 0, topK*dim/8),
+				}
+			}
+			fd.Field = vectors
+		}
+		result = append(result, fd)
+	}
+	return result
+}
+
 // AppendFieldData appends fields data of specified index from src to dst
 func AppendFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData, idx int64) (appendSize int64) {
 	for i, fieldData := range src {
