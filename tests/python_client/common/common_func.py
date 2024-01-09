@@ -158,7 +158,8 @@ def gen_binary_vec_field(name=ct.default_binary_vec_field_name, is_primary=False
 
 
 def gen_default_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name,
-                                  auto_id=False, dim=ct.default_dim, enable_dynamic_field=False, with_json=True, **kwargs):
+                                  auto_id=False, dim=ct.default_dim, enable_dynamic_field=False, with_json=True,
+                                  multiple_dim_array=[], **kwargs):
     if enable_dynamic_field:
         if primary_field is ct.default_int64_field_name:
             fields = [gen_int64_field(), gen_float_vec_field(dim=dim)]
@@ -167,11 +168,17 @@ def gen_default_collection_schema(description=ct.default_desc, primary_field=ct.
         else:
             log.error("Primary key only support int or varchar")
             assert False
+        if len(multiple_dim_array) != 0:
+            for other_dim in multiple_dim_array:
+                fields.append(gen_float_vec_field(gen_unique_str("multiple_vector"), dim=other_dim))
     else:
         fields = [gen_int64_field(), gen_float_field(), gen_string_field(), gen_json_field(),
                   gen_float_vec_field(dim=dim)]
         if with_json is False:
             fields.remove(gen_json_field())
+        if len(multiple_dim_array) != 0:
+            for other_dim in multiple_dim_array:
+                fields.append(gen_float_vec_field(gen_unique_str("multiple_vector"), dim=other_dim))
 
     schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
                                                                     primary_field=primary_field, auto_id=auto_id,
