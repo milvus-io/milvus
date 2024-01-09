@@ -70,6 +70,13 @@ class PhyConjunctFilterExpr : public Expr {
     void
     Eval(EvalCtx& context, VectorPtr& result) override;
 
+    void
+    MoveCursor() override {
+        for (auto& input : inputs_) {
+            input->MoveCursor();
+        }
+    }
+
  private:
     int64_t
     UpdateResult(ColumnVectorPtr& input_result,
@@ -80,7 +87,10 @@ class PhyConjunctFilterExpr : public Expr {
     ResolveType(const std::vector<DataType>& inputs);
 
     bool
-    CanSkipNextExprs(ColumnVectorPtr& vec);
+    CanSkipFollowingExprs(ColumnVectorPtr& vec);
+
+    void
+    SkipFollowingExprs(int start);
     // true if conjunction (and), false if disjunction (or).
     bool is_and_;
     std::vector<int32_t> input_order_;

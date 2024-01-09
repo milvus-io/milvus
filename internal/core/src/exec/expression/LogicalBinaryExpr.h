@@ -69,6 +69,12 @@ class PhyLogicalBinaryExpr : public Expr {
     void
     Eval(EvalCtx& context, VectorPtr& result) override;
 
+    void
+    MoveCursor() override {
+        inputs_[0]->MoveCursor();
+        inputs_[1]->MoveCursor();
+    }
+
  private:
     std::shared_ptr<const milvus::expr::LogicalBinaryExpr> expr_;
 };

@@ -66,6 +66,12 @@ class Expr {
     Eval(EvalCtx& context, VectorPtr& result) {
     }
 
+    // Only move cursor to next batch
+    // but not do real eval for optimization
+    virtual void
+    MoveCursor() {
+    }
+
  protected:
     DataType type_;
     const std::vector<std::shared_ptr<Expr>> inputs_;
@@ -115,6 +121,53 @@ class SegmentExpr : public Expr {
             num_index_chunk_ = segment_->num_chunk_index(field_id_);
         } else {
             num_data_chunk_ = upper_div(active_count_, size_per_chunk_);
+        }
+    }
+
+    void
+    MoveCursorForData() {
+        if (segment_->type() == SegmentType::Sealed) {
+            auto size =
+                std::min(active_count_ - current_data_chunk_pos_, batch_size_);
+            current_data_chunk_pos_ += size;
+        } else {
+            int64_t processed_size = 0;
+            for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
+                auto data_pos =
+                    (i == current_data_chunk_) ? current_data_chunk_pos_ : 0;
+                auto size = (i == (num_data_chunk_ - 1) &&
+                             active_count_ % size_per_chunk_ != 0)
+                                ? active_count_ % size_per_chunk_ - data_pos
+                                : size_per_chunk_ - data_pos;
+
+                size = std::min(size, batch_size_ - processed_size);
+
+                processed_size += size;
+                if (processed_size >= batch_size_) {
+                    current_data_chunk_ = i;
+                    current_data_chunk_pos_ = data_pos + size;
+                    break;
+                }
+            }
+        }
+    }
+
+    void
+    MoveCursorForIndex() {
+        AssertInfo(segment_->type() == SegmentType::Sealed,
+                   "index mode only for sealed segment");
+        auto size =
+            std::min(active_count_ - current_index_chunk_pos_, batch_size_);
+
+        current_index_chunk_pos_ += size;
+    }
+
+    void
+    MoveCursor() override {
+        if (is_index_mode_) {
+            MoveCursorForIndex();
+        } else {
+            MoveCursorForData();
         }
     }
 

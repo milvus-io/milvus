@@ -97,11 +97,18 @@ PhyConjunctFilterExpr::UpdateResult(ColumnVectorPtr& input_result,
 }
 
 bool
-PhyConjunctFilterExpr::CanSkipNextExprs(ColumnVectorPtr& vec) {
+PhyConjunctFilterExpr::CanSkipFollowingExprs(ColumnVectorPtr& vec) {
     if ((is_and_ && AllFalse(vec)) || (!is_and_ && AllTrue(vec))) {
         return true;
     }
     return false;
+}
+
+void
+PhyConjunctFilterExpr::SkipFollowingExprs(int start) {
+    for (int i = start; i < inputs_.size(); ++i) {
+        inputs_[i]->MoveCursor();
+    }
 }
 
 void
@@ -112,7 +119,8 @@ PhyConjunctFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         if (i == 0) {
             result = input_result;
             auto all_flat_result = GetColumnVector(result);
-            if (CanSkipNextExprs(all_flat_result)) {
+            if (CanSkipFollowingExprs(all_flat_result)) {
+                SkipFollowingExprs(i + 1);
                 return;
             }
             continue;
@@ -122,6 +130,7 @@ PhyConjunctFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         auto active_rows =
             UpdateResult(input_flat_result, context, all_flat_result);
         if (active_rows == 0) {
+            SkipFollowingExprs(i + 1);
             return;
         }
     }
