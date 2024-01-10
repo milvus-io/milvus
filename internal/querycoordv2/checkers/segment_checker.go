@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/samber/lo"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -120,25 +121,26 @@ func (c *SegmentChecker) checkReplica(ctx context.Context, replica *meta.Replica
 
 	// compare with targets to find the lack and redundancy of segments
 	lacks, redundancies := c.getSealedSegmentDiff(replica.GetCollectionID(), replica.GetID())
-	tasks := c.createSegmentLoadTasks(ctx, lacks, replica)
+	// loadCtx := trace.ContextWithSpan(context.Background(), c.meta.GetCollection(replica.CollectionID).LoadSpan)
+	tasks := c.createSegmentLoadTasks(c.getTraceCtx(ctx, replica.CollectionID), lacks, replica)
 	task.SetReason("lacks of segment", tasks...)
 	ret = append(ret, tasks...)
 
 	redundancies = c.filterSegmentInUse(replica, redundancies)
-	tasks = c.createSegmentReduceTasks(ctx, redundancies, replica.GetID(), querypb.DataScope_Historical)
+	tasks = c.createSegmentReduceTasks(c.getTraceCtx(ctx, replica.CollectionID), redundancies, replica.GetID(), querypb.DataScope_Historical)
 	task.SetReason("segment not exists in target", tasks...)
 	ret = append(ret, tasks...)
 
 	// compare inner dists to find repeated loaded segments
 	redundancies = c.findRepeatedSealedSegments(replica.GetID())
 	redundancies = c.filterExistedOnLeader(replica, redundancies)
-	tasks = c.createSegmentReduceTasks(ctx, redundancies, replica.GetID(), querypb.DataScope_Historical)
+	tasks = c.createSegmentReduceTasks(c.getTraceCtx(ctx, replica.CollectionID), redundancies, replica.GetID(), querypb.DataScope_Historical)
 	task.SetReason("redundancies of segment", tasks...)
 	ret = append(ret, tasks...)
 
 	// compare with target to find the lack and redundancy of segments
 	_, redundancies = c.getGrowingSegmentDiff(replica.GetCollectionID(), replica.GetID())
-	tasks = c.createSegmentReduceTasks(ctx, redundancies, replica.GetID(), querypb.DataScope_Streaming)
+	tasks = c.createSegmentReduceTasks(c.getTraceCtx(ctx, replica.CollectionID), redundancies, replica.GetID(), querypb.DataScope_Streaming)
 	task.SetReason("streaming segment not exists in target", tasks...)
 	ret = append(ret, tasks...)
 
@@ -410,4 +412,13 @@ func (c *SegmentChecker) createSegmentReduceTasks(ctx context.Context, segments 
 		ret = append(ret, task)
 	}
 	return ret
+}
+
+func (c *SegmentChecker) getTraceCtx(ctx context.Context, collectionID int64) context.Context {
+	coll := c.meta.GetCollection(collectionID)
+	if coll == nil || coll.LoadSpan == nil {
+		return ctx
+	}
+
+	return trace.ContextWithSpan(ctx, coll.LoadSpan)
 }
