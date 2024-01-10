@@ -780,7 +780,7 @@ func (suite *ServiceSuite) TestLoadIndex_Failed() {
 			suite.node.loader = loader
 		}()
 
-		mockLoader.EXPECT().LoadIndex(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(errors.New("mocked error"))
+		mockLoader.EXPECT().LoadIndex(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(errors.New("mocked error"))
 
 		indexInfos := segments.GenTestIndexInfoList(suite.collectionID, schema)
 		infos := suite.genSegmentLoadInfos(schema, indexInfos)

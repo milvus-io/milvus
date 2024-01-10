@@ -147,7 +147,7 @@ func (node *QueryNode) loadIndex(ctx context.Context, req *querypb.LoadSegmentsR
 	)
 
 	status := merr.Success()
-	log.Info("start to load index")
+	log.Info("start to load index", zap.Any("schema", req.GetSchema()))
 
 	for _, info := range req.GetInfos() {
 		log := log.With(zap.Int64("segmentID", info.GetSegmentID()))
@@ -162,7 +162,7 @@ func (node *QueryNode) loadIndex(ctx context.Context, req *querypb.LoadSegmentsR
 			continue
 		}
 
-		err := node.loader.LoadIndex(ctx, localSegment, info, req.Version)
+		err := node.loader.LoadIndex(ctx, localSegment, info, req.Version, req.GetSchema())
 		if err != nil {
 			log.Warn("failed to load index", zap.Error(err))
 			status = merr.Status(err)

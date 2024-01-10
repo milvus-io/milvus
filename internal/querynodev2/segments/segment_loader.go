@@ -66,7 +66,7 @@ type Loader interface {
 	LoadBloomFilterSet(ctx context.Context, collectionID int64, version int64, infos ...*querypb.SegmentLoadInfo) ([]*pkoracle.BloomFilterSet, error)
 
 	// LoadIndex append index for segment and remove vector binlogs.
-	LoadIndex(ctx context.Context, segment *LocalSegment, info *querypb.SegmentLoadInfo, version int64) error
+	LoadIndex(ctx context.Context, segment *LocalSegment, info *querypb.SegmentLoadInfo, version int64, schema *schemapb.CollectionSchema) error
 }
 
 type LoadResource struct {
@@ -1089,7 +1089,7 @@ func (loader *segmentLoader) getFieldType(collectionID, fieldID int64) (schemapb
 	return 0, merr.WrapErrFieldNotFound(fieldID)
 }
 
-func (loader *segmentLoader) LoadIndex(ctx context.Context, segment *LocalSegment, loadInfo *querypb.SegmentLoadInfo, version int64) error {
+func (loader *segmentLoader) LoadIndex(ctx context.Context, segment *LocalSegment, loadInfo *querypb.SegmentLoadInfo, version int64, schema *schemapb.CollectionSchema) error {
 	log := log.Ctx(ctx).With(
 		zap.Int64("collection", segment.Collection()),
 		zap.Int64("segment", segment.ID()),
@@ -1113,6 +1113,7 @@ func (loader *segmentLoader) LoadIndex(ctx context.Context, segment *LocalSegmen
 	}
 	defer loader.freeRequest(resource)
 
+	schemaHelper, _ := typeutil.CreateSchemaHelper(schema)
 	log.Info("segment loader start to load index", zap.Int("segmentNumAfterFilter", len(infos)))
 
 	for _, loadInfo := range infos {
@@ -1134,6 +1135,14 @@ func (loader *segmentLoader) LoadIndex(ctx context.Context, segment *LocalSegmen
 			if err != nil {
 				log.Warn("failed to load index for segment", zap.Error(err))
 				return err
+			}
+			field, _ := schemaHelper.GetFieldFromID(info.GetFieldID())
+			if !typeutil.IsVectorType(field.GetDataType()) && !segment.HasRawData(info.GetFieldID()) {
+				log.Info("field index doesn't include raw data, load binlog...", zap.Int64("fieldID", info.GetFieldID()), zap.String("index", info.GetIndexName()))
+				if err = segment.LoadFieldData(ctx, info.GetFieldID(), loadInfo.GetNumOfRows(), fieldInfo, true); err != nil {
+					log.Warn("load raw data failed", zap.Int64("fieldID", info.GetFieldID()), zap.Error(err))
+					return err
+				}
 			}
 			segment.AddIndex(info.FieldID, &IndexedFieldInfo{
 				IndexInfo:   info,
