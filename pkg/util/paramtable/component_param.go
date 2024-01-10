@@ -818,6 +818,7 @@ type rootCoordConfig struct {
 	ImportTaskSubPath           ParamItem `refreshable:"true"`
 	EnableActiveStandby         ParamItem `refreshable:"false"`
 	MaxDatabaseNum              ParamItem `refreshable:"false"`
+	MaxGeneralCapacity          ParamItem `refreshable:"true"`
 }
 
 func (p *rootCoordConfig) init(base *BaseTable) {
@@ -897,6 +898,21 @@ func (p *rootCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.MaxDatabaseNum.Init(base.mgr)
+
+	p.MaxGeneralCapacity = ParamItem{
+		Key:          "rootCoord.maxGeneralCapacity",
+		Version:      "2.3.5",
+		DefaultValue: "65536",
+		Doc:          "upper limit for the sum of of product of partitionNumber and shardNumber",
+		Export:       true,
+		Formatter: func(v string) string {
+			if getAsInt(v) < 512 {
+				return "512"
+			}
+			return v
+		},
+	}
+	p.MaxGeneralCapacity.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

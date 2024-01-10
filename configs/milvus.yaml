@@ -180,6 +180,7 @@ rootCoord:
     serverMaxRecvSize: 268435456
     clientMaxSendSize: 268435456
     clientMaxRecvSize: 536870912
+  maxGeneralCapacity: 65536
 
 # Related configuration of proxy, used to validate client requests and reduce the returned results.
 proxy:
