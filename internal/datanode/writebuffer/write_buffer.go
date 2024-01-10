@@ -76,12 +76,13 @@ type writeBufferBase struct {
 	collectionID int64
 	channelName  string
 
-	metaWriter syncmgr.MetaWriter
-	collSchema *schemapb.CollectionSchema
-	metaCache  metacache.MetaCache
-	syncMgr    syncmgr.SyncManager
-	broker     broker.Broker
-	serializer syncmgr.Serializer
+	metaWriter       syncmgr.MetaWriter
+	collSchema       *schemapb.CollectionSchema
+	estSizePerRecord int
+	metaCache        metacache.MetaCache
+	syncMgr          syncmgr.SyncManager
+	broker           broker.Broker
+	serializer       syncmgr.Serializer
 
 	buffers map[int64]*segmentBuffer // segmentID => segmentBuffer
 
