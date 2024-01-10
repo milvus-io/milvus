@@ -67,10 +67,9 @@ var (
 	k3 = buildFieldStatslogPath(collectionID, partitionID, segmentID, fieldID)
 	k4 = buildSegmentPath(collectionID, partitionID, segmentID2)
 	k5 = buildSegmentPath(collectionID, partitionID, segmentID)
-	k6 = buildFlushedSegmentPath(collectionID, partitionID, segmentID)
-	k7 = buildFieldBinlogPath(collectionID, partitionID, segmentID2, fieldID)
-	k8 = buildFieldDeltalogPath(collectionID, partitionID, segmentID2, fieldID)
-	k9 = buildFieldStatslogPath(collectionID, partitionID, segmentID2, fieldID)
+	k6 = buildFieldBinlogPath(collectionID, partitionID, segmentID2, fieldID)
+	k7 = buildFieldDeltalogPath(collectionID, partitionID, segmentID2, fieldID)
+	k8 = buildFieldStatslogPath(collectionID, partitionID, segmentID2, fieldID)
 
 	keys = map[string]struct{}{
 		k1: {},
@@ -81,7 +80,6 @@ var (
 		k6: {},
 		k7: {},
 		k8: {},
-		k9: {},
 	}
 
 	invalidSegment = &datapb.SegmentInfo{
@@ -739,7 +737,7 @@ func verifySavedKvsForDroppedSegment(t *testing.T, savedKvs map[string]string) {
 		assert.True(t, ok)
 	}
 
-	for _, k := range []string{k7, k8, k9} {
+	for _, k := range []string{k6, k7, k8} {
 		ret, ok := savedKvs[k]
 		assert.True(t, ok)
 		verifyBinlogs(t, []byte(ret))
