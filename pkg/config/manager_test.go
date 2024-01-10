@@ -25,6 +25,8 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"go.etcd.io/etcd/server/v3/embed"
+	"go.etcd.io/etcd/server/v3/etcdserver/api/v3client"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -123,75 +125,58 @@ func TestBasic(t *testing.T) {
 }
 
 func TestOnEvent(t *testing.T) {
-	mgr, _ := Init()
-	envSource := NewEnvSource(formatKey)
-	err := mgr.AddSource(envSource)
+	cfg, _ := embed.ConfigFromFile("../../configs/advanced/etcd.yaml")
+	cfg.Dir = "/tmp/milvus/test"
+	e, err := embed.StartEtcd(cfg)
 	assert.NoError(t, err)
+	defer e.Close()
+	defer os.RemoveAll(cfg.Dir)
+
+	client := v3client.New(e.Server)
+
 	dir, _ := os.MkdirTemp("", "milvus")
-	fileSource := NewFileSource(&FileInfo{[]string{path.Join(dir, "milvus.yaml"), path.Join(dir, "user.yaml")}, 1})
-	err = mgr.AddSource(fileSource)
-	assert.NoError(t, err)
+	yamlFile := path.Join(dir, "milvus.yaml")
+	mgr, _ := Init(WithEnvSource(formatKey),
+		WithFilesSource(&FileInfo{
+			Files:           []string{yamlFile},
+			RefreshInterval: 10 * time.Millisecond,
+		}),
+		WithEtcdSource(&EtcdInfo{
+			Endpoints:       []string{cfg.ACUrls[0].Host},
+			KeyPrefix:       "test",
+			RefreshInterval: 10 * time.Millisecond,
+		}))
 
-	envSource.configs.Insert("ab", "aaa")
-	mgr.OnEvent(&Event{
-		EventSource: envSource.GetSourceName(),
-		EventType:   CreateType,
-		Key:         "ab",
-		Value:       "aaa",
-	})
-
-	fileSource.configs["ab"] = "bbb"
-	mgr.OnEvent(&Event{
-		EventSource: fileSource.GetSourceName(),
-		EventType:   CreateType,
-		Key:         "ab",
-		Value:       "bbb",
-	})
+	os.WriteFile(yamlFile, []byte("a.b: aaa"), 0o600)
+	time.Sleep(time.Second)
 	value, err := mgr.GetConfig("a.b")
 	assert.NoError(t, err)
 	assert.Equal(t, value, "aaa")
 
-	envSource.configs.Insert("ab", "ccc")
-	mgr.OnEvent(&Event{
-		EventSource: envSource.GetSourceName(),
-		EventType:   UpdateType,
-		Key:         "ab",
-		Value:       "ccc",
-	})
+	ctx := context.Background()
+	client.KV.Put(ctx, "test/config/a/b", "bbb")
+	time.Sleep(time.Second)
+	value, err = mgr.GetConfig("a.b")
+	assert.NoError(t, err)
+	assert.Equal(t, value, "bbb")
 
+	client.KV.Put(ctx, "test/config/a/b", "ccc")
+	time.Sleep(time.Second)
 	value, err = mgr.GetConfig("a.b")
 	assert.NoError(t, err)
 	assert.Equal(t, value, "ccc")
 
-	fileSource.configs["ab"] = "ddd"
-	mgr.OnEvent(&Event{
-		EventSource: fileSource.GetSourceName(),
-		EventType:   UpdateType,
-		Key:         "ab",
-		Value:       "ddd",
-	})
-
+	os.WriteFile(yamlFile, []byte("a.b: ddd"), 0o600)
+	time.Sleep(time.Second)
 	value, err = mgr.GetConfig("a.b")
 	assert.NoError(t, err)
 	assert.Equal(t, value, "ccc")
 
-	mgr.OnEvent(&Event{
-		EventSource: envSource.GetSourceName(),
-		EventType:   DeleteType,
-		Key:         "ab",
-	})
-
-	_, err = mgr.GetConfig("a.b")
-	assert.Error(t, err)
-
-	mgr.OnEvent(&Event{
-		EventSource: fileSource.GetSourceName(),
-		EventType:   DeleteType,
-		Key:         "ab",
-	})
-
-	_, err = mgr.GetConfig("a.b")
-	assert.Error(t, err)
+	client.KV.Delete(ctx, "test/config/a/b")
+	time.Sleep(time.Second)
+	value, err = mgr.GetConfig("a.b")
+	assert.NoError(t, err)
+	assert.Equal(t, value, "ddd")
 }
 
 func TestDeadlock(t *testing.T) {
