@@ -14,6 +14,7 @@
 #include <boost/filesystem.hpp>
 #include <unordered_set>
 
+#include "common/Tracer.h"
 #include "index/InvertedIndexTantivy.h"
 #include "storage/Util.h"
 #include "storage/InsertData.h"
@@ -168,7 +169,7 @@ test_run() {
 
         auto index =
             index::IndexFactory::GetInstance().CreateIndex(index_info, ctx);
-        index->Load(config);
+        index->Load(milvus::tracer::TraceContext{}, config);
 
         auto cnt = index->Count();
         ASSERT_EQ(cnt, nb);
@@ -369,7 +370,7 @@ test_string() {
 
         auto index =
             index::IndexFactory::GetInstance().CreateIndex(index_info, ctx);
-        index->Load(config);
+        index->Load(milvus::tracer::TraceContext{}, config);
 
         auto cnt = index->Count();
         ASSERT_EQ(cnt, nb);

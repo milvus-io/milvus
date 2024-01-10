@@ -50,7 +50,7 @@ class VectorMemIndex : public VectorIndex {
     Load(const BinarySet& binary_set, const Config& config = {}) override;
 
     void
-    Load(const Config& config = {}) override;
+    Load(milvus::tracer::TraceContext ctx, const Config& config = {}) override;
 
     void
     LoadV2(const Config& config = {}) override;
