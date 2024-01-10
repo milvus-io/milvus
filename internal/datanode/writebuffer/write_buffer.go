@@ -116,18 +116,25 @@ func newWriteBufferBase(channel string, metacache metacache.MetaCache, storageV2
 		return nil, err
 	}
 
+	schema := metacache.Schema()
+	estSize, err := typeutil.EstimateSizePerRecord(schema)
+	if err != nil {
+		return nil, err
+	}
+
 	return &writeBufferBase{
-		channelName:    channel,
-		collectionID:   metacache.Collection(),
-		collSchema:     metacache.Schema(),
-		syncMgr:        syncMgr,
-		metaWriter:     option.metaWriter,
-		buffers:        make(map[int64]*segmentBuffer),
-		metaCache:      metacache,
-		serializer:     serializer,
-		syncPolicies:   option.syncPolicies,
-		flushTimestamp: flushTs,
-		storagev2Cache: storageV2Cache,
+		channelName:      channel,
+		collectionID:     metacache.Collection(),
+		collSchema:       schema,
+		estSizePerRecord: estSize,
+		syncMgr:          syncMgr,
+		metaWriter:       option.metaWriter,
+		buffers:          make(map[int64]*segmentBuffer),
+		metaCache:        metacache,
+		serializer:       serializer,
+		syncPolicies:     option.syncPolicies,
+		flushTimestamp:   flushTs,
+		storagev2Cache:   storageV2Cache,
 	}, nil
 }
 
@@ -335,7 +342,9 @@ func (wb *writeBufferBase) bufferInsert(insertMsgs []*msgstream.InsertMsg, start
 				InsertChannel: wb.channelName,
 				StartPosition: startPos,
 				State:         commonpb.SegmentState_Growing,
-			}, func(_ *datapb.SegmentInfo) *metacache.BloomFilterSet { return metacache.NewBloomFilterSet() }, metacache.SetStartPosRecorded(false))
+			}, func(_ *datapb.SegmentInfo) *metacache.BloomFilterSet {
+				return metacache.NewBloomFilterSetWithBatchSize(wb.getEstBatchSize())
+			}, metacache.SetStartPosRecorded(false))
 		}
 
 		segBuf := wb.getOrCreateBuffer(segmentID)
@@ -414,6 +423,12 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (sy
 	metrics.DataNodeFlowGraphBufferDataSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), fmt.Sprint(wb.collectionID)).Sub(totalMemSize)
 
 	return wb.serializer.EncodeBuffer(ctx, pack)
+}
+
+// getEstBatchSize returns the batch size based on estimated size per record and FlushBufferSize configuration value.
+func (wb *writeBufferBase) getEstBatchSize() uint {
+	sizeLimit := paramtable.Get().DataNodeCfg.FlushInsertBufferSize.GetAsInt64()
+	return uint(sizeLimit / int64(wb.estSizePerRecord))
 }
 
 func (wb *writeBufferBase) Close(drop bool) {
