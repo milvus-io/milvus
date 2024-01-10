@@ -25,6 +25,7 @@ import (
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 type Manager interface {
@@ -60,6 +61,28 @@ func (m *NodeManager) Stopping(nodeID int64) {
 	if nodeInfo, ok := m.nodes[nodeID]; ok {
 		nodeInfo.SetState(NodeStateStopping)
 	}
+}
+
+func (m *NodeManager) Suspend(nodeID int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	nodeInfo, ok := m.nodes[nodeID]
+	if !ok {
+		return merr.WrapErrNodeNotFound(nodeID)
+	}
+	nodeInfo.SetState(NodeStateSuspend)
+	return nil
+}
+
+func (m *NodeManager) Resume(nodeID int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	nodeInfo, ok := m.nodes[nodeID]
+	if !ok {
+		return merr.WrapErrNodeNotFound(nodeID)
+	}
+	nodeInfo.SetState(NodeStateNormal)
+	return nil
 }
 
 func (m *NodeManager) IsStoppingNode(nodeID int64) (bool, error) {
@@ -98,8 +121,9 @@ func NewNodeManager() *NodeManager {
 type State int
 
 const (
-	NodeStateNormal = iota
-	NodeStateStopping
+	NormalStateName   = "Normal"
+	StoppingStateName = "Stopping"
+	SuspendStateName  = "Suspend"
 )
 
 type ImmutableNodeInfo struct {
@@ -107,6 +131,22 @@ type ImmutableNodeInfo struct {
 	Address  string
 	Hostname string
 	Version  semver.Version
+}
+
+const (
+	NodeStateNormal State = iota
+	NodeStateStopping
+	NodeStateSuspend
+)
+
+var stateNameMap = map[State]string{
+	NodeStateNormal:   NormalStateName,
+	NodeStateStopping: StoppingStateName,
+	NodeStateSuspend:  SuspendStateName,
+}
+
+func (s State) String() string {
+	return stateNameMap[s]
 }
 
 type NodeInfo struct {
@@ -159,6 +199,12 @@ func (n *NodeInfo) SetState(s State) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.state = s
+}
+
+func (n *NodeInfo) GetState() State {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	return n.state
 }
 
 func (n *NodeInfo) UpdateStats(opts ...StatsOption) {

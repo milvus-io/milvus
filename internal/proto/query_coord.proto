@@ -794,9 +794,9 @@ message CollectionTarget {
   int64 version = 3;
 }
 message NodeInfo {
-  int32 id = 2;
+  int64 ID = 2;
   string address = 3;
-  string status = 5;
+  string state = 4;
 }
 
 message ListQueryNodeRequest {
@@ -808,20 +808,16 @@ message ListQueryNodeResponse {
   repeated NodeInfo nodeInfos = 2;
 }
 
-message NodeDistribution {
-  int32 id = 1;
-  repeated string channel_names = 2;
-  repeated int64 sealed_segmentIDs = 3;
-}
-
-message GetQueryNodeStateRequest {
+message GetQueryNodeDistributionRequest {
   common.MsgBase base = 1;
-  int32 nodeID = 2;
+  int64 nodeID = 2;
 }
 
-message GetQueryNodeStatesResponse {
+message GetQueryNodeDistributionResponse {
   common.Status status = 1;
-  repeated NodeDistribution node_distributions = 2;
+  int64 ID = 2;
+  repeated string channel_names = 3;
+  repeated int64 sealed_segmentIDs = 4;
 }
 
 message SuspendBalanceRequest {
@@ -834,12 +830,12 @@ message ResumeBalanceRequest {
 
 message SuspendNodeRequest {
   common.MsgBase base = 1;
-  int32 nodeID = 2;
+  int64 nodeID = 2;
 }
 
 message ResumeNodeRequest {
   common.MsgBase base = 1;
-  int32 nodeID = 2;
+  int64 nodeID = 2;
 }
 
 message TransferSegmentRequest {
@@ -847,9 +843,9 @@ message TransferSegmentRequest {
   repeated int64 segmentIDs = 2;
   int64 source_nodeID = 3;
   int64 target_nodeID = 4;
-  bool transfer_all = 5;
+  bool transfer_all_segments = 5;
   bool to_all_nodes = 6;
-  bool release_in_source = 7;
+  bool copy_mode = 7;
 }
 
 message TransferChannelRequest {
@@ -859,7 +855,7 @@ message TransferChannelRequest {
   int64 target_nodeID = 4;
   bool transfer_all = 5;
   bool to_all_nodes = 6;
-  bool release_in_source = 7;
+  bool copy_mode = 7;
 }
 
 message HasSameDistributionRequest {
