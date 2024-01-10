@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/samber/lo"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
@@ -98,16 +99,16 @@ func (c *ChannelChecker) checkReplica(ctx context.Context, replica *meta.Replica
 	ret := make([]task.Task, 0)
 
 	lacks, redundancies := c.getDmChannelDiff(replica.GetCollectionID(), replica.GetID())
-	tasks := c.createChannelLoadTask(ctx, lacks, replica)
+	tasks := c.createChannelLoadTask(c.getTraceCtx(ctx, replica.CollectionID), lacks, replica)
 	task.SetReason("lacks of channel", tasks...)
 	ret = append(ret, tasks...)
 
-	tasks = c.createChannelReduceTasks(ctx, redundancies, replica.GetID())
+	tasks = c.createChannelReduceTasks(c.getTraceCtx(ctx, replica.CollectionID), redundancies, replica.GetID())
 	task.SetReason("collection released", tasks...)
 	ret = append(ret, tasks...)
 
 	repeated := c.findRepeatedChannels(replica.GetID())
-	tasks = c.createChannelReduceTasks(ctx, repeated, replica.GetID())
+	tasks = c.createChannelReduceTasks(c.getTraceCtx(ctx, replica.CollectionID), repeated, replica.GetID())
 	task.SetReason("redundancies of channel")
 	ret = append(ret, tasks...)
 
@@ -221,4 +222,13 @@ func (c *ChannelChecker) createChannelReduceTasks(ctx context.Context, channels 
 		ret = append(ret, task)
 	}
 	return ret
+}
+
+func (c *ChannelChecker) getTraceCtx(ctx context.Context, collectionID int64) context.Context {
+	coll := c.meta.GetCollection(collectionID)
+	if coll == nil || coll.LoadSpan == nil {
+		return ctx
+	}
+
+	return trace.ContextWithSpan(ctx, coll.LoadSpan)
 }

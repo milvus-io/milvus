@@ -29,7 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/pkg/util/merr"
-	. "github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type (
@@ -69,10 +69,10 @@ type Source fmt.Stringer
 type Task interface {
 	Context() context.Context
 	Source() Source
-	ID() UniqueID
-	CollectionID() UniqueID
-	ReplicaID() UniqueID
-	SetID(id UniqueID)
+	ID() typeutil.UniqueID
+	CollectionID() typeutil.UniqueID
+	ReplicaID() typeutil.UniqueID
+	SetID(id typeutil.UniqueID)
 	Status() Status
 	SetStatus(status Status)
 	Err() error
@@ -100,9 +100,9 @@ type baseTask struct {
 	doneCh   chan struct{}
 	canceled *atomic.Bool
 
-	id           UniqueID // Set by scheduler
-	collectionID UniqueID
-	replicaID    UniqueID
+	id           typeutil.UniqueID // Set by scheduler
+	collectionID typeutil.UniqueID
+	replicaID    typeutil.UniqueID
 	shard        string
 	loadType     querypb.LoadType
 
@@ -118,9 +118,9 @@ type baseTask struct {
 	span trace.Span
 }
 
-func newBaseTask(ctx context.Context, source Source, collectionID, replicaID UniqueID, shard string) *baseTask {
+func newBaseTask(ctx context.Context, source Source, collectionID, replicaID typeutil.UniqueID, shard string, taskTag string) *baseTask {
 	ctx, cancel := context.WithCancel(ctx)
-	ctx, span := otel.Tracer("QueryCoord").Start(ctx, "QueryCoord-BaseTask")
+	ctx, span := otel.Tracer(typeutil.QueryCoordRole).Start(ctx, taskTag)
 
 	return &baseTask{
 		source:       source,
@@ -146,19 +146,19 @@ func (task *baseTask) Source() Source {
 	return task.source
 }
 
-func (task *baseTask) ID() UniqueID {
+func (task *baseTask) ID() typeutil.UniqueID {
 	return task.id
 }
 
-func (task *baseTask) SetID(id UniqueID) {
+func (task *baseTask) SetID(id typeutil.UniqueID) {
 	task.id = id
 }
 
-func (task *baseTask) CollectionID() UniqueID {
+func (task *baseTask) CollectionID() typeutil.UniqueID {
 	return task.collectionID
 }
 
-func (task *baseTask) ReplicaID() UniqueID {
+func (task *baseTask) ReplicaID() typeutil.UniqueID {
 	return task.replicaID
 }
 
@@ -278,7 +278,7 @@ func (task *baseTask) String() string {
 type SegmentTask struct {
 	*baseTask
 
-	segmentID UniqueID
+	segmentID typeutil.UniqueID
 }
 
 // NewSegmentTask creates a SegmentTask with actions,
@@ -288,7 +288,7 @@ func NewSegmentTask(ctx context.Context,
 	timeout time.Duration,
 	source Source,
 	collectionID,
-	replicaID UniqueID,
+	replicaID typeutil.UniqueID,
 	actions ...Action,
 ) (*SegmentTask, error) {
 	if len(actions) == 0 {
@@ -310,7 +310,7 @@ func NewSegmentTask(ctx context.Context,
 		}
 	}
 
-	base := newBaseTask(ctx, source, collectionID, replicaID, shard)
+	base := newBaseTask(ctx, source, collectionID, replicaID, shard, fmt.Sprintf("SegmentTask-%s-%d", actions[0].Type().String(), segmentID))
 	base.actions = actions
 	return &SegmentTask{
 		baseTask:  base,
@@ -322,7 +322,7 @@ func (task *SegmentTask) Shard() string {
 	return task.shard
 }
 
-func (task *SegmentTask) SegmentID() UniqueID {
+func (task *SegmentTask) SegmentID() typeutil.UniqueID {
 	return task.segmentID
 }
 
@@ -345,7 +345,7 @@ func NewChannelTask(ctx context.Context,
 	timeout time.Duration,
 	source Source,
 	collectionID,
-	replicaID UniqueID,
+	replicaID typeutil.UniqueID,
 	actions ...Action,
 ) (*ChannelTask, error) {
 	if len(actions) == 0 {
@@ -365,7 +365,7 @@ func NewChannelTask(ctx context.Context,
 		}
 	}
 
-	base := newBaseTask(ctx, source, collectionID, replicaID, channel)
+	base := newBaseTask(ctx, source, collectionID, replicaID, channel, fmt.Sprintf("ChannelTask-%s-%s", actions[0].Type().String(), channel))
 	base.actions = actions
 	return &ChannelTask{
 		baseTask: base,

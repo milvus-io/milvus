@@ -23,6 +23,8 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -179,6 +181,8 @@ func (job *LoadCollectionJob) Execute() error {
 			CreatedAt: time.Now(),
 		}
 	})
+
+	_, sp := otel.Tracer(typeutil.QueryCoordRole).Start(job.ctx, "LoadCollection", trace.WithNewRoot())
 	collection := &meta.Collection{
 		CollectionLoadInfo: &querypb.CollectionLoadInfo{
 			CollectionID:  req.GetCollectionID(),
@@ -188,6 +192,7 @@ func (job *LoadCollectionJob) Execute() error {
 			LoadType:      querypb.LoadType_LoadCollection,
 		},
 		CreatedAt: time.Now(),
+		LoadSpan:  sp,
 	}
 	job.undo.IsNewCollection = true
 	err = job.meta.CollectionManager.PutCollection(collection, partitions...)
@@ -355,6 +360,8 @@ func (job *LoadPartitionJob) Execute() error {
 	})
 	if !job.meta.CollectionManager.Exist(req.GetCollectionID()) {
 		job.undo.IsNewCollection = true
+
+		_, sp := otel.Tracer(typeutil.QueryCoordRole).Start(job.ctx, "LoadPartition", trace.WithNewRoot())
 		collection := &meta.Collection{
 			CollectionLoadInfo: &querypb.CollectionLoadInfo{
 				CollectionID:  req.GetCollectionID(),
@@ -364,6 +371,7 @@ func (job *LoadPartitionJob) Execute() error {
 				LoadType:      querypb.LoadType_LoadPartition,
 			},
 			CreatedAt: time.Now(),
+			LoadSpan:  sp,
 		}
 		err = job.meta.CollectionManager.PutCollection(collection, partitions...)
 		if err != nil {
