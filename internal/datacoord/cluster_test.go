@@ -68,7 +68,7 @@ func (suite *ClusterSuite) TestStartup() {
 	}
 	suite.mockSession.EXPECT().AddSession(mock.Anything).Return().Times(len(nodes))
 	suite.mockChManager.EXPECT().Startup(mock.Anything, mock.Anything, mock.Anything).
-		RunAndReturn(func(ctx context.Context, nodeIDs []int64, legacys []int64) error {
+		RunAndReturn(func(ctx context.Context, legacys []int64, nodeIDs []int64) error {
 			suite.ElementsMatch(lo.Map(nodes, func(info *NodeInfo, _ int) int64 { return info.NodeID }), nodeIDs)
 			return nil
 		}).Once()
