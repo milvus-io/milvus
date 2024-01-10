@@ -111,6 +111,7 @@ func (s *MetaCacheSuite) TestCompactSegments() {
 		for _, seg := range segs {
 			if seg.SegmentID() == s.newSegments[i] {
 				s.Equal(commonpb.SegmentState_Flushed, seg.State())
+				s.Equal(int64(100), seg.NumOfRows())
 			}
 			if seg.SegmentID() == s.flushedSegments[i] {
 				s.Equal(s.newSegments[i], seg.CompactTo())
