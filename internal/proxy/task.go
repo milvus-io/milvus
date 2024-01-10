@@ -1635,11 +1635,10 @@ func (t *releaseCollectionTask) Execute(ctx context.Context) (err error) {
 	}
 
 	t.result, err = t.queryCoord.ReleaseCollection(ctx, request)
-
-	globalMetaCache.RemoveCollection(ctx, t.GetDbName(), t.CollectionName)
 	if err != nil {
 		return err
 	}
+
 	SendReplicateMessagePack(ctx, t.replicateMsgStream, t.ReleaseCollectionRequest)
 	return nil
 }
