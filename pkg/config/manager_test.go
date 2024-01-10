@@ -17,6 +17,7 @@
 package config
 
 import (
+	"context"
 	"os"
 	"path"
 	"testing"
@@ -24,6 +25,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"golang.org/x/sync/errgroup"
 )
 
 func TestAllConfigFromManager(t *testing.T) {
@@ -67,6 +69,151 @@ func TestAllDupliateSource(t *testing.T) {
 
 	err = mgr.pullSourceConfigs("ErrSource")
 	assert.Error(t, err, "invalid source or source not added")
+}
+
+func TestBasic(t *testing.T) {
+	mgr, _ := Init()
+
+	// test set config
+	mgr.SetConfig("a.b", "aaa")
+	value, err := mgr.GetConfig("a.b")
+	assert.NoError(t, err)
+	assert.Equal(t, value, "aaa")
+	_, err = mgr.GetConfig("a.a")
+	assert.Error(t, err)
+
+	// test delete config
+	mgr.SetConfig("a.b", "aaa")
+	mgr.DeleteConfig("a.b")
+	assert.Error(t, err)
+
+	// test reset config
+	mgr.ResetConfig("a.b")
+	assert.Error(t, err)
+
+	// test forbid config
+	envSource := NewEnvSource(formatKey)
+	err = mgr.AddSource(envSource)
+	assert.NoError(t, err)
+
+	envSource.configs.Insert("ab", "aaa")
+	mgr.OnEvent(&Event{
+		EventSource: envSource.GetSourceName(),
+		EventType:   CreateType,
+		Key:         "ab",
+		Value:       "aaa",
+	})
+	value, err = mgr.GetConfig("a.b")
+	assert.NoError(t, err)
+	assert.Equal(t, value, "aaa")
+
+	mgr.ForbidUpdate("a.b")
+	mgr.OnEvent(&Event{
+		EventSource: envSource.GetSourceName(),
+		EventType:   UpdateType,
+		Key:         "a.b",
+		Value:       "bbb",
+	})
+	value, err = mgr.GetConfig("a.b")
+	assert.NoError(t, err)
+	assert.Equal(t, value, "aaa")
+
+	configs := mgr.FileConfigs()
+	assert.Len(t, configs, 0)
+}
+
+func TestOnEvent(t *testing.T) {
+	mgr, _ := Init()
+	envSource := NewEnvSource(formatKey)
+	err := mgr.AddSource(envSource)
+	assert.NoError(t, err)
+	dir, _ := os.MkdirTemp("", "milvus")
+	fileSource := NewFileSource(&FileInfo{[]string{path.Join(dir, "milvus.yaml"), path.Join(dir, "user.yaml")}, 1})
+	err = mgr.AddSource(fileSource)
+	assert.NoError(t, err)
+
+	envSource.configs.Insert("ab", "aaa")
+	mgr.OnEvent(&Event{
+		EventSource: envSource.GetSourceName(),
+		EventType:   CreateType,
+		Key:         "ab",
+		Value:       "aaa",
+	})
+
+	fileSource.configs["ab"] = "bbb"
+	mgr.OnEvent(&Event{
+		EventSource: fileSource.GetSourceName(),
+		EventType:   CreateType,
+		Key:         "ab",
+		Value:       "bbb",
+	})
+	value, err := mgr.GetConfig("a.b")
+	assert.NoError(t, err)
+	assert.Equal(t, value, "aaa")
+
+	envSource.configs.Insert("ab", "ccc")
+	mgr.OnEvent(&Event{
+		EventSource: envSource.GetSourceName(),
+		EventType:   UpdateType,
+		Key:         "ab",
+		Value:       "ccc",
+	})
+
+	value, err = mgr.GetConfig("a.b")
+	assert.NoError(t, err)
+	assert.Equal(t, value, "ccc")
+
+	fileSource.configs["ab"] = "ddd"
+	mgr.OnEvent(&Event{
+		EventSource: fileSource.GetSourceName(),
+		EventType:   UpdateType,
+		Key:         "ab",
+		Value:       "ddd",
+	})
+
+	value, err = mgr.GetConfig("a.b")
+	assert.NoError(t, err)
+	assert.Equal(t, value, "ccc")
+
+	mgr.OnEvent(&Event{
+		EventSource: envSource.GetSourceName(),
+		EventType:   DeleteType,
+		Key:         "ab",
+	})
+
+	_, err = mgr.GetConfig("a.b")
+	assert.Error(t, err)
+
+	mgr.OnEvent(&Event{
+		EventSource: fileSource.GetSourceName(),
+		EventType:   DeleteType,
+		Key:         "ab",
+	})
+
+	_, err = mgr.GetConfig("a.b")
+	assert.Error(t, err)
+}
+
+func TestDeadlock(t *testing.T) {
+	mgr, _ := Init()
+
+	// test concurrent lock and recursive rlock
+	wg, _ := errgroup.WithContext(context.Background())
+	wg.Go(func() error {
+		for i := 0; i < 100; i++ {
+			mgr.GetBy(WithPrefix("rootcoord."))
+		}
+		return nil
+	})
+
+	wg.Go(func() error {
+		for i := 0; i < 100; i++ {
+			mgr.SetConfig("rootcoord.xxx", "111")
+		}
+		return nil
+	})
+
+	wg.Wait()
 }
 
 type ErrSource struct{}
