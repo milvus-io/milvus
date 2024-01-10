@@ -17,6 +17,7 @@
 package importv2
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -26,6 +27,7 @@ import (
 )
 
 func TestImportManager(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
 	manager := NewTaskManager()
 	task1 := &ImportTask{
 		ImportTaskV2: &datapb.ImportTaskV2{
@@ -36,6 +38,8 @@ func TestImportManager(t *testing.T) {
 			NodeID:       7,
 			State:        internalpb.ImportState_Pending,
 		},
+		ctx:    ctx,
+		cancel: cancel,
 	}
 	manager.Add(task1)
 	manager.Add(task1)
@@ -51,6 +55,8 @@ func TestImportManager(t *testing.T) {
 			NodeID:       7,
 			State:        internalpb.ImportState_Completed,
 		},
+		ctx:    ctx,
+		cancel: cancel,
 	}
 	manager.Add(task2)
 
