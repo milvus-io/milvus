@@ -19,7 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
-	"path"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -211,9 +211,9 @@ func (gc *garbageCollector) scan() {
 
 	// walk only data cluster related prefixes
 	prefixes := make([]string, 0, 3)
-	prefixes = append(prefixes, path.Join(gc.option.cli.RootPath(), common.SegmentInsertLogPath))
-	prefixes = append(prefixes, path.Join(gc.option.cli.RootPath(), common.SegmentStatslogPath))
-	prefixes = append(prefixes, path.Join(gc.option.cli.RootPath(), common.SegmentDeltaLogPath))
+	prefixes = append(prefixes, filepath.Clean(gc.option.cli.RootPath()+common.SegmentInsertLogPath))
+	prefixes = append(prefixes, filepath.Clean(gc.option.cli.RootPath()+common.SegmentStatslogPath))
+	prefixes = append(prefixes, filepath.Clean(gc.option.cli.RootPath()+common.SegmentDeltaLogPath))
 	labels := []string{metrics.InsertFileLabel, metrics.StatFileLabel, metrics.DeleteFileLabel}
 	var removedKeys []string
 
@@ -485,7 +485,7 @@ func (gc *garbageCollector) recycleUnusedIndexFiles() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	startTs := time.Now()
-	prefix := path.Join(gc.option.cli.RootPath(), common.SegmentIndexPath) + "/"
+	prefix := filepath.Clean(gc.option.cli.RootPath()+common.SegmentIndexPath) + "/"
 	// list dir first
 	keys, _, err := gc.option.cli.ListWithPrefix(ctx, prefix, false)
 	if err != nil {

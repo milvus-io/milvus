@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -41,7 +42,7 @@ func newEtcd210(cfg *configs.MilvusConfig) (*etcd210, error) {
 
 func (b etcd210) loadTtAliases() (meta.TtAliasesMeta210, error) {
 	ttAliases := make(meta.TtAliasesMeta210)
-	prefix := path.Join(rootcoord.SnapshotPrefix, rootcoord.CollectionAliasMetaPrefix210)
+	prefix := filepath.Clean(rootcoord.SnapshotPrefix + rootcoord.CollectionAliasMetaPrefix210)
 	keys, values, err := b.txn.LoadWithPrefix(prefix)
 	if err != nil {
 		return nil, err
@@ -101,7 +102,7 @@ func (b etcd210) loadAliases() (meta.AliasesMeta210, error) {
 
 func (b etcd210) loadTtCollections() (meta.TtCollectionsMeta210, error) {
 	ttCollections := make(meta.TtCollectionsMeta210)
-	prefix := path.Join(rootcoord.SnapshotPrefix, rootcoord.CollectionMetaPrefix)
+	prefix := filepath.Clean(rootcoord.SnapshotPrefix + rootcoord.CollectionMetaPrefix)
 	keys, values, err := b.txn.LoadWithPrefix(prefix)
 	if err != nil {
 		return nil, err
@@ -275,8 +276,8 @@ func (b etcd210) loadLastDDLRecords() (meta.LastDDLRecords, error) {
 	prefixes := []string{
 		legacy.DDOperationPrefixBefore220,
 		legacy.DDMsgSendPrefixBefore220,
-		path.Join(rootcoord.SnapshotPrefix, legacy.DDOperationPrefixBefore220),
-		path.Join(rootcoord.SnapshotPrefix, legacy.DDMsgSendPrefixBefore220),
+		filepath.Clean(rootcoord.SnapshotPrefix + legacy.DDOperationPrefixBefore220),
+		filepath.Clean(rootcoord.SnapshotPrefix + legacy.DDMsgSendPrefixBefore220),
 	}
 	for _, prefix := range prefixes {
 		keys, values, err := b.txn.LoadWithPrefix(prefix)
@@ -382,10 +383,10 @@ func lineCleanPrefix(prefix string) {
 func (b etcd210) Clean() error {
 	prefixes := []string{
 		rootcoord.CollectionMetaPrefix,
-		path.Join(rootcoord.SnapshotPrefix, rootcoord.CollectionMetaPrefix),
+		filepath.Clean(rootcoord.SnapshotPrefix + rootcoord.CollectionMetaPrefix),
 
 		rootcoord.CollectionAliasMetaPrefix210,
-		path.Join(rootcoord.SnapshotPrefix, rootcoord.CollectionAliasMetaPrefix210),
+		filepath.Clean(rootcoord.SnapshotPrefix + rootcoord.CollectionAliasMetaPrefix210),
 
 		legacy.SegmentIndexPrefixBefore220,
 
@@ -394,9 +395,9 @@ func (b etcd210) Clean() error {
 		legacy.IndexBuildPrefixBefore220,
 
 		legacy.DDMsgSendPrefixBefore220,
-		path.Join(rootcoord.SnapshotPrefix, legacy.DDMsgSendPrefixBefore220),
+		filepath.Clean(rootcoord.SnapshotPrefix + legacy.DDMsgSendPrefixBefore220),
 		legacy.DDOperationPrefixBefore220,
-		path.Join(rootcoord.SnapshotPrefix, legacy.DDOperationPrefixBefore220),
+		filepath.Clean(rootcoord.SnapshotPrefix + legacy.DDOperationPrefixBefore220),
 	}
 	for _, prefix := range prefixes {
 		if err := b.CleanWithPrefix(prefix); err != nil {
@@ -505,7 +506,7 @@ func (b etcd210) Restore(backupFile string) error {
 		if entryIncludeRootPath {
 			return key
 		}
-		return path.Join(header.Instance, header.MetaPath, key)
+		return filepath.Clean(header.Instance + header.MetaPath + key)
 	}
 	ctx := context.Background()
 	for k, v := range saves {

@@ -19,7 +19,7 @@ package rootcoord
 import (
 	"bytes"
 	"fmt"
-	"path"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -103,11 +103,11 @@ func NewSuffixSnapshot(metaKV kv.MetaKv, sep, root, snapshot string) (*SuffixSna
 	}
 
 	// handles trailing / logic
-	tk := path.Join(snapshot, "k")
+	tk := filepath.Clean(snapshot + "k")
 	snapshotLen := len(tk) - 1
 	// makes sure snapshot has trailing '/'
 	snapshot = tk[:len(tk)-1]
-	tk = path.Join(root, "k")
+	tk = filepath.Clean(root + "k")
 	rootLen := len(tk) - 1
 
 	ss := &SuffixSnapshot{
@@ -138,13 +138,13 @@ func (ss *SuffixSnapshot) hideRootPrefix(value string) string {
 // composeSnapshotPrefix build a prefix for load snapshots
 // formated like [snapshotPrefix]/key[sep]
 func (ss *SuffixSnapshot) composeSnapshotPrefix(key string) string {
-	return path.Join(ss.snapshotPrefix, key+ss.separator)
+	return filepath.Clean(ss.snapshotPrefix + key + ss.separator)
 }
 
 // ComposeSnapshotKey used in migration tool also, in case of any rules change.
 func ComposeSnapshotKey(snapshotPrefix string, key string, separator string, ts typeutil.Timestamp) string {
 	// [key][sep][ts]
-	return path.Join(snapshotPrefix, fmt.Sprintf("%s%s%d", key, separator, ts))
+	return filepath.Clean(snapshotPrefix + fmt.Sprintf("%s%s%d", key, separator, ts))
 }
 
 // composeTSKey unified tsKey composing method
@@ -456,7 +456,7 @@ func (ss *SuffixSnapshot) LoadWithPrefix(key string, ts typeutil.Timestamp) ([]s
 	latestOriginalKey := ""
 	tValueGroups := make([]tsv, 0)
 
-	prefix := path.Join(ss.snapshotPrefix, key)
+	prefix := filepath.Clean(ss.snapshotPrefix + key)
 	appendResultFn := func(ts typeutil.Timestamp) {
 		value, ok := binarySearchRecords(tValueGroups, ts)
 		if !ok || ss.isTombstone(value) {

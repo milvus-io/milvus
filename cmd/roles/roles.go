@@ -189,7 +189,7 @@ func (mr *MilvusRoles) runQueryNode(ctx context.Context, localMsg bool, wg *sync
 	wg.Add(1)
 	// clear local storage
 	rootPath := paramtable.Get().LocalStorageCfg.Path.GetValue()
-	queryDataLocalPath := filepath.Join(rootPath, typeutil.QueryNodeRole)
+	queryDataLocalPath := filepath.Clean(rootPath + typeutil.QueryNodeRole)
 	cleanLocalDir(queryDataLocalPath)
 	// clear mmap dir
 	mmapDir := paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue()
@@ -218,7 +218,7 @@ func (mr *MilvusRoles) runIndexCoord(ctx context.Context, localMsg bool, wg *syn
 func (mr *MilvusRoles) runIndexNode(ctx context.Context, localMsg bool, wg *sync.WaitGroup) component {
 	wg.Add(1)
 	rootPath := paramtable.Get().LocalStorageCfg.Path.GetValue()
-	indexDataLocalPath := filepath.Join(rootPath, typeutil.IndexNodeRole)
+	indexDataLocalPath := filepath.Clean(rootPath + typeutil.IndexNodeRole)
 	cleanLocalDir(indexDataLocalPath)
 
 	return runComponent(ctx, localMsg, wg, components.NewIndexNode, metrics.RegisterIndexNode)

@@ -18,7 +18,7 @@ package datacoord
 
 import (
 	"fmt"
-	"path"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -68,7 +68,7 @@ func (c *channelStateTimer) getWatchersWithRevision(prefix string, revision int6
 }
 
 func (c *channelStateTimer) loadAllChannels(nodeID UniqueID) ([]*datapb.ChannelWatchInfo, error) {
-	prefix := path.Join(Params.CommonCfg.DataCoordWatchSubPath.GetValue(), strconv.FormatInt(nodeID, 10))
+	prefix := filepath.Clean(Params.CommonCfg.DataCoordWatchSubPath.GetValue() + strconv.FormatInt(nodeID, 10))
 
 	// TODO: change to LoadWithPrefixBytes
 	keys, values, err := c.watchkv.LoadWithPrefix(prefix)

@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -75,7 +75,7 @@ func createRuntimeDir(sType string) string {
 }
 
 func createPidFile(w io.Writer, filename string, runtimeDir string) (*flock.Flock, error) {
-	fileFullName := path.Join(runtimeDir, filename)
+	fileFullName := filepath.Clean(runtimeDir + filename)
 
 	fd, err := os.OpenFile(fileFullName, os.O_CREATE|os.O_RDWR, 0o664)
 	if err != nil {
@@ -233,10 +233,10 @@ func CleanSession(metaPath string, etcdEndpoints []string, sessionSuffix []strin
 
 func getSessionPaths(ctx context.Context, client *clientv3.Client, metaPath string, sessionSuffix []string) []string {
 	sessionKeys := make([]string, 0)
-	sessionPathPrefix := path.Join(metaPath, sessionutil.DefaultServiceRoot)
+	sessionPathPrefix := filepath.Clean(metaPath + sessionutil.DefaultServiceRoot)
 	newSessionSuffixSet := addActiveKeySuffix(ctx, client, sessionPathPrefix, sessionSuffix)
 	for _, suffix := range newSessionSuffixSet {
-		key := path.Join(sessionPathPrefix, suffix)
+		key := filepath.Clean(sessionPathPrefix + suffix)
 		sessionKeys = append(sessionKeys, key)
 	}
 	return sessionKeys
@@ -266,7 +266,7 @@ func addActiveKeySuffix(ctx context.Context, client *clientv3.Client, sessionPat
 				continue
 			}
 
-			key := path.Join(sessionPathPrefix, serverType)
+			key := filepath.Clean(sessionPathPrefix + serverType)
 			serverID, err := getServerID(ctx, client, key)
 			if err != nil {
 				log.Warn("get server id failed from key", zap.String("suffix", suffix), zap.Error(err))

@@ -19,7 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
-	"path"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -333,7 +333,7 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 
 			req = &indexpb.CreateJobRequest{
 				ClusterID:           Params.CommonCfg.ClusterPrefix.GetValue(),
-				IndexFilePrefix:     path.Join(ib.chunkManager.RootPath(), common.SegmentIndexPath),
+				IndexFilePrefix:     filepath.Clean(ib.chunkManager.RootPath() + common.SegmentIndexPath),
 				BuildID:             buildID,
 				DataPaths:           binLogs,
 				IndexVersion:        meta.IndexVersion + 1,
@@ -356,7 +356,7 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 		} else {
 			req = &indexpb.CreateJobRequest{
 				ClusterID:           Params.CommonCfg.ClusterPrefix.GetValue(),
-				IndexFilePrefix:     path.Join(ib.chunkManager.RootPath(), common.SegmentIndexPath),
+				IndexFilePrefix:     filepath.Clean(ib.chunkManager.RootPath() + common.SegmentIndexPath),
 				BuildID:             buildID,
 				DataPaths:           binLogs,
 				IndexVersion:        meta.IndexVersion + 1,

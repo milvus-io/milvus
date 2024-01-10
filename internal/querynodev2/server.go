@@ -31,7 +31,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path"
 	"path/filepath"
 	"plugin"
 	"runtime/debug"
@@ -183,7 +182,7 @@ func (node *QueryNode) Register() error {
 
 // InitSegcore set init params of segCore, such as chunckRows, SIMD type...
 func (node *QueryNode) InitSegcore() error {
-	cGlogConf := C.CString(path.Join(paramtable.GetBaseTable().GetConfigDir(), paramtable.DefaultGlogConf))
+	cGlogConf := C.CString(filepath.Clean(paramtable.GetBaseTable().GetConfigDir() + paramtable.DefaultGlogConf))
 	C.SegcoreInit(cGlogConf)
 	C.free(unsafe.Pointer(cGlogConf))
 
@@ -230,7 +229,7 @@ func (node *QueryNode) InitSegcore() error {
 	cGpuMemoryPoolMaxSize := C.uint32_t(paramtable.Get().GpuConfig.MaxSize.GetAsUint32())
 	C.SegcoreSetKnowhereGpuMemoryPoolSize(cGpuMemoryPoolInitSize, cGpuMemoryPoolMaxSize)
 
-	localDataRootPath := filepath.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), typeutil.QueryNodeRole)
+	localDataRootPath := filepath.Clean(paramtable.Get().LocalStorageCfg.Path.GetValue() + typeutil.QueryNodeRole)
 	initcore.InitLocalChunkManager(localDataRootPath)
 
 	err := initcore.InitRemoteChunkManager(paramtable.Get())
@@ -242,11 +241,11 @@ func (node *QueryNode) InitSegcore() error {
 	if len(mmapDirPath) == 0 {
 		paramtable.Get().Save(
 			paramtable.Get().QueryNodeCfg.MmapDirPath.Key,
-			path.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), "mmap"),
+			filepath.Clean(paramtable.Get().LocalStorageCfg.Path.GetValue()+"mmap"),
 		)
 		mmapDirPath = paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue()
 	}
-	chunkCachePath := path.Join(mmapDirPath, "chunk_cache")
+	chunkCachePath := filepath.Clean(mmapDirPath + "chunk_cache")
 	policy := paramtable.Get().QueryNodeCfg.ReadAheadPolicy.GetValue()
 	err = initcore.InitChunkCache(chunkCachePath, policy)
 	if err != nil {

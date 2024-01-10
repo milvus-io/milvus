@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path"
+	"path/filepath"
 	"syscall"
 
 	"github.com/milvus-io/milvus/pkg/util/hardware"
@@ -61,7 +61,7 @@ func (c *stop) formatFlags(args []string, flags *flag.FlagSet) {
 func (c *stop) stopPid(filename string, runtimeDir string) error {
 	var pid int
 
-	fd, err := os.OpenFile(path.Join(runtimeDir, filename), os.O_RDONLY, 0o664)
+	fd, err := os.OpenFile(filepath.Clean(runtimeDir+filename), os.O_RDONLY, 0o664)
 	if err != nil {
 		return err
 	}

@@ -19,7 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
-	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -186,7 +186,7 @@ func (kc *Catalog) listBinlogs(binlogType storage.BinlogType) (map[typeutil.Uniq
 
 		collectionID, partitionID, segmentID, err := kc.parseBinlogKey(string(key), prefixIdx)
 		if err != nil {
-			return fmt.Errorf("prefix:%s, %w", path.Join(kc.metaRootpath, logPathPrefix), err)
+			return fmt.Errorf("prefix:%s, %w", filepath.Clean(kc.metaRootpath+logPathPrefix), err)
 		}
 
 		switch binlogType {

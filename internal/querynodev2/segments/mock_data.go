@@ -694,7 +694,7 @@ func SaveBinLog(ctx context.Context,
 		}
 
 		k := JoinIDPath(collectionID, partitionID, segmentID, fieldID)
-		key := path.Join(chunkManager.RootPath(), "insert-log", k)
+		key := filepath.Clean(chunkManager.RootPath() + "insert-log" + k)
 		kvs[key] = blob.Value
 		fieldBinlog = append(fieldBinlog, &datapb.FieldBinlog{
 			FieldID: fieldID,
@@ -716,7 +716,7 @@ func SaveBinLog(ctx context.Context,
 		}
 
 		k := JoinIDPath(collectionID, partitionID, segmentID, fieldID)
-		key := path.Join(chunkManager.RootPath(), "stats-log", k)
+		key := filepath.Clean(chunkManager.RootPath() + "stats-log" + k)
 		kvs[key] = blob.Value[:]
 		statsBinlog = append(statsBinlog, &datapb.FieldBinlog{
 			FieldID: fieldID,
@@ -892,7 +892,7 @@ func SaveDeltaLog(collectionID int64,
 	log.Debug("[query node unittest] save delta log", zap.Int64("fieldID", pkFieldID))
 	key := JoinIDPath(collectionID, partitionID, segmentID, pkFieldID)
 	// keyPath := path.Join(defaultLocalStorage, "delta-log", key)
-	keyPath := path.Join(cm.RootPath(), "delta-log", key)
+	keyPath := path.Clean(cm.RootPath() + "delta-log" + key)
 	kvs[keyPath] = blob.Value[:]
 	fieldBinlog = append(fieldBinlog, &datapb.FieldBinlog{
 		FieldID: pkFieldID,
@@ -961,7 +961,7 @@ func GenAndSaveIndexV2(collectionID, partitionID, segmentID, buildID int64,
 
 	indexPaths := make([]string, 0)
 	for _, index := range serializedIndexBlobs {
-		indexPath := filepath.Join(cm.RootPath(), "index_files",
+		indexPath := filepath.Clean(cm.RootPath()+"index_files"+
 			strconv.Itoa(int(segmentID)), index.Key)
 		indexPaths = append(indexPaths, indexPath)
 		err := cm.Write(context.Background(), indexPath, index.Value)
@@ -1022,7 +1022,7 @@ func GenAndSaveIndex(collectionID, partitionID, segmentID, fieldID int64, msgLen
 	indexPaths := make([]string, 0)
 	for _, index := range serializedIndexBlobs {
 		// indexPath := filepath.Join(defaultLocalStorage, strconv.Itoa(int(segmentID)), index.Key)
-		indexPath := filepath.Join(cm.RootPath(), "index_files",
+		indexPath := filepath.Clean(cm.RootPath()+"index_files"+
 			strconv.Itoa(int(segmentID)), index.Key)
 		indexPaths = append(indexPaths, indexPath)
 		err := cm.Write(context.Background(), indexPath, index.Value)
