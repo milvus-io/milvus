@@ -21,7 +21,7 @@ namespace milvus::tracer {
 
 struct TraceConfig {
     std::string exporter;
-    int sampleFraction;
+    float sampleFraction;
     std::string jaegerURL;
     std::string otlpEndpoint;
     bool oltpSecure;

@@ -92,7 +92,7 @@ typedef struct CStorageConfig {
 
 typedef struct CTraceConfig {
     const char* exporter;
-    int sampleFraction;
+    float sampleFraction;
     const char* jaegerURL;
     const char* otlpEndpoint;
     bool oltpSecure;
