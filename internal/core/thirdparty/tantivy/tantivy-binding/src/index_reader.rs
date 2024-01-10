@@ -7,7 +7,10 @@ use tantivy::query::{Query, RangeQuery, RegexQuery, TermQuery};
 use tantivy::schema::{Field, IndexRecordOption};
 use tantivy::{Index, IndexReader, ReloadPolicy, Term};
 
+use crate::hashset_collector::{HashSetChildCollector, HashSetCollector};
+use crate::linkedlist_collector::{LinkedListChildCollector, LinkedListCollector};
 use crate::util::make_bounds;
+use crate::vec_collector::VecCollector;
 
 pub struct IndexReaderWrapper {
     pub field_name: String,
@@ -52,10 +55,10 @@ impl IndexReaderWrapper {
 
     fn search(&self, q: &dyn Query) -> Vec<u32> {
         let searcher = self.reader.searcher();
-        let hits = searcher.search(q, &DocSetCollector).unwrap();
+        let hits = searcher.search(q, &VecCollector).unwrap();
         let mut ret = Vec::with_capacity(hits.len());
-        for address in &hits {
-            ret.push(address.doc_id);
+        for address in hits {
+            ret.push(address);
         }
         ret
     }
