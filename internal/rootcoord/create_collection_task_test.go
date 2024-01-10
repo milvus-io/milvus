@@ -183,6 +183,48 @@ func Test_createCollectionTask_validate(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	t.Run("collection general number exceeds limit", func(t *testing.T) {
+		paramtable.Get().Save(Params.RootCoordCfg.MaxGeneralCapacity.Key, strconv.Itoa(1))
+		defer paramtable.Get().Reset(Params.RootCoordCfg.MaxGeneralCapacity.Key)
+
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("ListAllAvailCollections",
+			mock.Anything,
+		).Return(map[int64][]int64{
+			1: {1, 2},
+		}, nil)
+		meta.On("GetDatabaseByID",
+			mock.Anything, mock.Anything, mock.Anything,
+		).Return(&model.Database{
+			Name: "default",
+		}, nil)
+		meta.On("GetCollectionByID",
+			mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+		).Return(&model.Collection{
+			Name:      "default",
+			ShardsNum: 2,
+			Partitions: []*model.Partition{
+				{
+					PartitionID: 1,
+				},
+			},
+		}, nil)
+
+		core := newTestCore(withMeta(meta))
+
+		task := createCollectionTask{
+			baseTask: newBaseTask(context.TODO(), core),
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:          &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				NumPartitions: 256,
+				ShardsNum:     2,
+			},
+			dbID: util.DefaultDBID,
+		}
+		err := task.validate()
+		assert.ErrorIs(t, err, merr.ErrGeneralCapacityExceeded)
+	})
+
 	t.Run("normal case", func(t *testing.T) {
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.On("ListAllAvailCollections",
@@ -190,12 +232,16 @@ func Test_createCollectionTask_validate(t *testing.T) {
 		).Return(map[int64][]int64{
 			1: {1, 2},
 		}, nil)
+		meta.On("GetDatabaseByID", mock.Anything,
+			mock.Anything, mock.Anything).Return(nil, errors.New("mock"))
 
 		core := newTestCore(withMeta(meta))
 		task := createCollectionTask{
 			baseTask: newBaseTask(context.TODO(), core),
 			Req: &milvuspb.CreateCollectionRequest{
-				Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				Base:          &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				NumPartitions: 2,
+				ShardsNum:     2,
 			},
 			dbID: 1,
 		}
@@ -526,6 +572,8 @@ func Test_createCollectionTask_Prepare(t *testing.T) {
 	})
 
 	t.Run("invalid schema", func(t *testing.T) {
+		meta.On("GetDatabaseByID", mock.Anything,
+			mock.Anything, mock.Anything).Return(nil, errors.New("mock"))
 		core := newTestCore(withMeta(meta))
 		collectionName := funcutil.GenRandomStr()
 		task := &createCollectionTask{
@@ -554,7 +602,8 @@ func Test_createCollectionTask_Prepare(t *testing.T) {
 		}
 		marshaledSchema, err := proto.Marshal(schema)
 		assert.NoError(t, err)
-
+		meta.On("GetDatabaseByID", mock.Anything,
+			mock.Anything, mock.Anything).Return(nil, errors.New("mock"))
 		core := newTestCore(withInvalidIDAllocator(), withMeta(meta))
 
 		task := createCollectionTask{
@@ -577,6 +626,8 @@ func Test_createCollectionTask_Prepare(t *testing.T) {
 		field1 := funcutil.GenRandomStr()
 
 		ticker := newRocksMqTtSynchronizer()
+		meta.On("GetDatabaseByID", mock.Anything,
+			mock.Anything, mock.Anything).Return(nil, errors.New("mock"))
 
 		core := newTestCore(withValidIDAllocator(), withTtSynchronizer(ticker), withMeta(meta))
 
@@ -912,6 +963,8 @@ func Test_createCollectionTask_PartitionKey(t *testing.T) {
 	).Return(map[int64][]int64{
 		util.DefaultDBID: {1, 2},
 	}, nil)
+	meta.On("GetDatabaseByID", mock.Anything,
+		mock.Anything, mock.Anything).Return(nil, errors.New("mock"))
 
 	paramtable.Get().Save(Params.QuotaConfig.MaxCollectionNum.Key, strconv.Itoa(math.MaxInt64))
 	defer paramtable.Get().Reset(Params.QuotaConfig.MaxCollectionNum.Key)
