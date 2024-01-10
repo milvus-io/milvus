@@ -17,7 +17,7 @@ class MilvusConan(ConanFile):
         "aws-sdk-cpp/1.9.234",
         "googleapis/cci.20221108",
         "benchmark/1.7.0",
-        "gtest/1.8.1",
+        "gtest/1.13.0",
         "protobuf/3.21.4",
         "rapidxml/1.13",
         "yaml-cpp/0.7.0",
