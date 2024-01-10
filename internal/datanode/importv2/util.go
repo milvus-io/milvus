@@ -94,10 +94,12 @@ func PickSegment(task *ImportTask, vchannel string, partitionID int64, rows int)
 	})
 
 	for _, candidate := range candidates {
+		var importedRows int64 = 0
 		if segment, ok := importedSegments[candidate.GetSegmentID()]; ok {
-			if segment.GetImportedRows()+int64(rows) <= candidate.GetMaxRows() {
-				return candidate.GetSegmentID()
-			}
+			importedRows = segment.GetImportedRows()
+		}
+		if importedRows+int64(rows) <= candidate.GetMaxRows() {
+			return candidate.GetSegmentID()
 		}
 	}
 	log.Warn("pick suitable segment failed, use the first one", WrapLogFields(task)...)

@@ -17,6 +17,8 @@
 package importv2
 
 import (
+	"github.com/samber/lo"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -92,6 +94,9 @@ func GetRowsStats(task Task, rows *storage.InsertData) (map[string]*datapb.Parti
 		num := int64(channelNum)
 		fn1 := hashByID()
 		fn2 := hashByPartitionKey(int64(partitionNum), partKeyField)
+		rows.Data = lo.PickBy(rows.Data, func(fieldID int64, _ storage.FieldData) bool {
+			return fieldID != pkField.GetFieldID()
+		})
 		for i := 0; i < rowNum; i++ {
 			p1, p2 := fn1(id, num), fn2(rows.GetRow(i))
 			hashRowsCount[p1][p2]++
