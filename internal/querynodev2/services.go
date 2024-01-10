@@ -671,7 +671,7 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 
 	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.TotalLabel, metrics.FromLeader).Inc()
 	defer func() {
-		if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+		if !merr.Ok(resp.GetStatus()) {
 			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.FailLabel, metrics.FromLeader).Inc()
 		}
 	}()
