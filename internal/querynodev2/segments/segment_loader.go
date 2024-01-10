@@ -618,6 +618,14 @@ func (loader *segmentLoader) loadSegment(ctx context.Context,
 		}
 	}
 
+	metrics.QueryNodeNumEntities.WithLabelValues(
+		fmt.Sprint(paramtable.GetNodeID()),
+		fmt.Sprint(segment.Collection()),
+		fmt.Sprint(segment.Partition()),
+		segment.Type().String(),
+		fmt.Sprint(segment.Indexes()),
+	).Add(float64(loadInfo.GetNumOfRows()))
+
 	log.Info("loading delta...")
 	return loader.LoadDeltaLogs(ctx, segment, loadInfo.Deltalogs)
 }
