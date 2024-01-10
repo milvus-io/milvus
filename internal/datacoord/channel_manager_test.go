@@ -462,6 +462,15 @@ func TestChannelManager(t *testing.T) {
 
 		waitAndCheckState(t, watchkv, datapb.ChannelWatchState_ToWatch, nodeID, "channel-3", collectionID)
 		chManager.stateTimer.removeTimers([]string{"channel-3"})
+
+		ch, err := chManager.GetChannel("channel-3")
+		assert.NoError(t, err)
+		assert.NotNil(t, ch)
+		assert.EqualValues(t, "channel-3", ch.GetName())
+
+		ch, err = chManager.GetChannel("channel-not-exist")
+		assert.Error(t, err)
+		assert.Nil(t, ch)
 	})
 
 	t.Run("test Watch", func(t *testing.T) {

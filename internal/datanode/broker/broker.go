@@ -3,6 +3,8 @@ package broker
 import (
 	"context"
 
+	"google.golang.org/grpc"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -51,4 +53,11 @@ type DataCoord interface {
 	DropVirtualChannel(ctx context.Context, req *datapb.DropVirtualChannelRequest) (*datapb.DropVirtualChannelResponse, error)
 	UpdateSegmentStatistics(ctx context.Context, req *datapb.UpdateSegmentStatisticsRequest) error
 	SaveImportSegment(ctx context.Context, req *datapb.SaveImportSegmentRequest) error
+	ListChannelSegmentInfo(ctx context.Context, req *datapb.ChannelSegmentInfoRequest) (ListChannelSegmentInfoClient, error)
+}
+
+// interface equal to datapb.ListChannelSegmentInfoClient
+type ListChannelSegmentInfoClient interface {
+	Recv() (*datapb.SegmentInfo, error)
+	grpc.ClientStream
 }

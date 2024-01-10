@@ -151,3 +151,7 @@ func (dc *dataCoordBroker) SaveImportSegment(ctx context.Context, req *datapb.Sa
 
 	return nil
 }
+
+func (dc *dataCoordBroker) ListChannelSegmentInfo(ctx context.Context, req *datapb.ChannelSegmentInfoRequest) (ListChannelSegmentInfoClient, error) {
+	return dc.client.ListChannelSegmentInfo(ctx, req)
+}

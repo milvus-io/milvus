@@ -19,12 +19,14 @@ package datanode
 import (
 	"context"
 	"fmt"
+	"io"
 	"path"
 	"sync"
 	"time"
 
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/broker"
@@ -439,15 +441,16 @@ func getServiceWithChannel(initCtx context.Context, node *DataNode, info *datapb
 // initCtx is used to init the dataSyncService only, if initCtx.Canceled or initCtx.Timeout
 // newServiceWithEtcdTickler stops and returns the initCtx.Err()
 func newServiceWithEtcdTickler(initCtx context.Context, node *DataNode, info *datapb.ChannelWatchInfo, tickler *etcdTickler) (*dataSyncService, error) {
-	// recover segment checkpoints
-	unflushedSegmentInfos, err := node.broker.GetSegmentInfo(initCtx, info.GetVchan().GetUnflushedSegmentIds())
+	unflushedSegmentInfos, flushedSegmentInfos, err := getChannelSegmentInfos(initCtx, node.broker, info.GetVchan().GetChannelName())
 	if err != nil {
 		return nil, err
 	}
-	flushedSegmentInfos, err := node.broker.GetSegmentInfo(initCtx, info.GetVchan().GetFlushedSegmentIds())
-	if err != nil {
-		return nil, err
-	}
+	log.Info("Listed segment info from channel",
+		zap.String("channel", info.GetVchan().GetChannelName()),
+		zap.Int("unflushed count", len(unflushedSegmentInfos)),
+		zap.Int("flushed count", len(flushedSegmentInfos)),
+		zap.Any("unflushed size in MB", len(unflushedSegmentInfos)*24/1024/1024),
+		zap.Any("flushed size in MB", len(flushedSegmentInfos)*24/1024/1024))
 
 	var storageCache *metacache.StorageV2Cache
 	if params.Params.CommonCfg.EnableStorageV2.GetAsBool() {
@@ -465,20 +468,52 @@ func newServiceWithEtcdTickler(initCtx context.Context, node *DataNode, info *da
 	return getServiceWithChannel(initCtx, node, info, metaCache, storageCache, unflushedSegmentInfos, flushedSegmentInfos)
 }
 
+func getChannelSegmentInfos(ctx context.Context, broker broker.DataCoord, channel string) (unflushed, flushed []*datapb.SegmentInfo, err error) {
+	stream, err := broker.ListChannelSegmentInfo(ctx, &datapb.ChannelSegmentInfoRequest{
+		Channel: channel,
+	})
+	if err != nil {
+		log.Error("GetChannelSegmentInfo error", zap.Error(err))
+		return nil, nil, err
+	}
+
+	for {
+		info, err := stream.Recv()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			log.Error("GetChannelSegmentInfo failed", zap.Error(err))
+			return nil, nil, err
+		}
+
+		switch info.GetState() {
+		case commonpb.SegmentState_Flushed:
+			flushed = append(flushed, info)
+		case commonpb.SegmentState_Sealed, commonpb.SegmentState_Growing:
+			info.State = commonpb.SegmentState_Growing
+			unflushed = append(unflushed, info)
+		}
+	}
+	return
+}
+
 // newDataSyncService gets a dataSyncService, but flowgraphs are not running
 // initCtx is used to init the dataSyncService only, if initCtx.Canceled or initCtx.Timeout
 // newDataSyncService stops and returns the initCtx.Err()
 // NOTE: compactiable for event manager
 func newDataSyncService(initCtx context.Context, node *DataNode, info *datapb.ChannelWatchInfo, tickler *tickler) (*dataSyncService, error) {
-	// recover segment checkpoints
-	unflushedSegmentInfos, err := node.broker.GetSegmentInfo(initCtx, info.GetVchan().GetUnflushedSegmentIds())
+	unflushedSegmentInfos, flushedSegmentInfos, err := getChannelSegmentInfos(initCtx, node.broker, info.GetVchan().GetChannelName())
 	if err != nil {
 		return nil, err
 	}
-	flushedSegmentInfos, err := node.broker.GetSegmentInfo(initCtx, info.GetVchan().GetFlushedSegmentIds())
-	if err != nil {
-		return nil, err
-	}
+
+	log.Info("Listed segment info from channel",
+		zap.String("channel", info.GetVchan().GetChannelName()),
+		zap.Int("unflushed count", len(unflushedSegmentInfos)),
+		zap.Int("flushed count", len(flushedSegmentInfos)),
+		zap.Any("unflushed size in MB", len(unflushedSegmentInfos)*24/1024/1024),
+		zap.Any("flushed size in MB", len(flushedSegmentInfos)*24/1024/1024))
 
 	var storageCache *metacache.StorageV2Cache
 	if params.Params.CommonCfg.EnableStorageV2.GetAsBool() {

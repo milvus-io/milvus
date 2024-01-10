@@ -18,6 +18,7 @@ package datanode
 
 import (
 	"context"
+	"io"
 	"math/rand"
 	"os"
 	"strconv"
@@ -105,11 +106,17 @@ func TestDataNode(t *testing.T) {
 	node.SetAddress("address")
 	assert.Equal(t, "address", node.GetAddress())
 
-	broker := &broker.MockBroker{}
-	broker.EXPECT().ReportTimeTick(mock.Anything, mock.Anything).Return(nil).Maybe()
-	broker.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).Return([]*datapb.SegmentInfo{}, nil).Maybe()
+	mockClientStream := &broker.MockListChanSegInfoClient{}
+	mockClientStream.EXPECT().Recv().RunAndReturn(
+		func() (*datapb.SegmentInfo, error) {
+			return nil, io.EOF
+		})
 
-	node.broker = broker
+	mockBroker := &broker.MockBroker{}
+	mockBroker.EXPECT().ReportTimeTick(mock.Anything, mock.Anything).Return(nil).Maybe()
+	mockBroker.EXPECT().ListChannelSegmentInfo(mock.Anything, mock.Anything).Return(mockClientStream, nil)
+
+	node.broker = mockBroker
 
 	defer node.Stop()
 

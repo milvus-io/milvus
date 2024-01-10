@@ -94,6 +94,9 @@ service DataCoord {
   rpc ReportDataNodeTtMsgs(ReportDataNodeTtMsgsRequest) returns (common.Status) {}
 
   rpc GcControl(GcControlRequest) returns(common.Status){}
+
+  // streaming get
+  rpc ListChannelSegmentInfo(ChannelSegmentInfoRequest) returns (stream SegmentInfo) {}
 }
 
 service DataNode {
@@ -880,4 +883,9 @@ message GcControlRequest {
   common.MsgBase base = 1;
   GcCommand command = 2;
   repeated common.KeyValuePair params = 3;
+}
+
+message ChannelSegmentInfoRequest {
+  common.MsgBase base = 1;
+  string channel = 2;
 }

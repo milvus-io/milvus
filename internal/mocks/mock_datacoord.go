@@ -2002,6 +2002,49 @@ func (_c *MockDataCoord_Init_Call) RunAndReturn(run func() error) *MockDataCoord
 	return _c
 }
 
+// ListChannelSegmentInfo provides a mock function with given fields: _a0, _a1
+func (_m *MockDataCoord) ListChannelSegmentInfo(_a0 *datapb.ChannelSegmentInfoRequest, _a1 datapb.DataCoord_ListChannelSegmentInfoServer) error {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*datapb.ChannelSegmentInfoRequest, datapb.DataCoord_ListChannelSegmentInfoServer) error); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockDataCoord_ListChannelSegmentInfo_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListChannelSegmentInfo'
+type MockDataCoord_ListChannelSegmentInfo_Call struct {
+	*mock.Call
+}
+
+// ListChannelSegmentInfo is a helper method to define mock.On call
+//   - _a0 *datapb.ChannelSegmentInfoRequest
+//   - _a1 datapb.DataCoord_ListChannelSegmentInfoServer
+func (_e *MockDataCoord_Expecter) ListChannelSegmentInfo(_a0 interface{}, _a1 interface{}) *MockDataCoord_ListChannelSegmentInfo_Call {
+	return &MockDataCoord_ListChannelSegmentInfo_Call{Call: _e.mock.On("ListChannelSegmentInfo", _a0, _a1)}
+}
+
+func (_c *MockDataCoord_ListChannelSegmentInfo_Call) Run(run func(_a0 *datapb.ChannelSegmentInfoRequest, _a1 datapb.DataCoord_ListChannelSegmentInfoServer)) *MockDataCoord_ListChannelSegmentInfo_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*datapb.ChannelSegmentInfoRequest), args[1].(datapb.DataCoord_ListChannelSegmentInfoServer))
+	})
+	return _c
+}
+
+func (_c *MockDataCoord_ListChannelSegmentInfo_Call) Return(_a0 error) *MockDataCoord_ListChannelSegmentInfo_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockDataCoord_ListChannelSegmentInfo_Call) RunAndReturn(run func(*datapb.ChannelSegmentInfoRequest, datapb.DataCoord_ListChannelSegmentInfoServer) error) *MockDataCoord_ListChannelSegmentInfo_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ManualCompaction provides a mock function with given fields: _a0, _a1
 func (_m *MockDataCoord) ManualCompaction(_a0 context.Context, _a1 *milvuspb.ManualCompactionRequest) (*milvuspb.ManualCompactionResponse, error) {
 	ret := _m.Called(_a0, _a1)

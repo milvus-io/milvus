@@ -631,3 +631,16 @@ func (c *Client) GcControl(ctx context.Context, req *datapb.GcControlRequest, op
 		return client.GcControl(ctx, req)
 	})
 }
+
+func wrapStreamGrpcCall[T datapb.DataCoord_ListChannelSegmentInfoClient](ctx context.Context, c *Client, call func(coordClient datapb.DataCoordClient) (T, error)) (T, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataCoordClient) (any, error) {
+		return call(client)
+	})
+	return ret.(T), err
+}
+
+func (c *Client) ListChannelSegmentInfo(ctx context.Context, req *datapb.ChannelSegmentInfoRequest, opts ...grpc.CallOption) (datapb.DataCoord_ListChannelSegmentInfoClient, error) {
+	return wrapStreamGrpcCall(ctx, c, func(client datapb.DataCoordClient) (datapb.DataCoord_ListChannelSegmentInfoClient, error) {
+		return client.ListChannelSegmentInfo(ctx, req)
+	})
+}

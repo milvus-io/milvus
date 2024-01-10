@@ -323,6 +323,61 @@ func (_c *MockBroker_GetSegmentInfo_Call) RunAndReturn(run func(context.Context,
 	return _c
 }
 
+// ListChannelSegmentInfo provides a mock function with given fields: ctx, req
+func (_m *MockBroker) ListChannelSegmentInfo(ctx context.Context, req *datapb.ChannelSegmentInfoRequest) (ListChannelSegmentInfoClient, error) {
+	ret := _m.Called(ctx, req)
+
+	var r0 ListChannelSegmentInfoClient
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.ChannelSegmentInfoRequest) (ListChannelSegmentInfoClient, error)); ok {
+		return rf(ctx, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.ChannelSegmentInfoRequest) ListChannelSegmentInfoClient); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(ListChannelSegmentInfoClient)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.ChannelSegmentInfoRequest) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockBroker_ListChannelSegmentInfo_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListChannelSegmentInfo'
+type MockBroker_ListChannelSegmentInfo_Call struct {
+	*mock.Call
+}
+
+// ListChannelSegmentInfo is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req *datapb.ChannelSegmentInfoRequest
+func (_e *MockBroker_Expecter) ListChannelSegmentInfo(ctx interface{}, req interface{}) *MockBroker_ListChannelSegmentInfo_Call {
+	return &MockBroker_ListChannelSegmentInfo_Call{Call: _e.mock.On("ListChannelSegmentInfo", ctx, req)}
+}
+
+func (_c *MockBroker_ListChannelSegmentInfo_Call) Run(run func(ctx context.Context, req *datapb.ChannelSegmentInfoRequest)) *MockBroker_ListChannelSegmentInfo_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.ChannelSegmentInfoRequest))
+	})
+	return _c
+}
+
+func (_c *MockBroker_ListChannelSegmentInfo_Call) Return(_a0 ListChannelSegmentInfoClient, _a1 error) *MockBroker_ListChannelSegmentInfo_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockBroker_ListChannelSegmentInfo_Call) RunAndReturn(run func(context.Context, *datapb.ChannelSegmentInfoRequest) (ListChannelSegmentInfoClient, error)) *MockBroker_ListChannelSegmentInfo_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ReportImport provides a mock function with given fields: ctx, req
 func (_m *MockBroker) ReportImport(ctx context.Context, req *rootcoordpb.ImportResult) error {
 	ret := _m.Called(ctx, req)
@@ -643,7 +698,8 @@ func (_c *MockBroker_UpdateSegmentStatistics_Call) RunAndReturn(run func(context
 func NewMockBroker(t interface {
 	mock.TestingT
 	Cleanup(func())
-}) *MockBroker {
+},
+) *MockBroker {
 	mock := &MockBroker{}
 	mock.Mock.Test(t)
 

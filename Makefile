@@ -440,6 +440,7 @@ generate-mockery-datacoord: getdeps
 	$(INSTALL_PATH)/mockery --name=CompactionMeta --dir=internal/datacoord --filename=mock_compaction_meta.go --output=internal/datacoord  --structname=MockCompactionMeta --with-expecter --inpackage
 	$(INSTALL_PATH)/mockery --name=Scheduler --dir=internal/datacoord --filename=mock_scheduler.go --output=internal/datacoord  --structname=MockScheduler --with-expecter --inpackage
 	$(INSTALL_PATH)/mockery --name=ChannelManager --dir=internal/datacoord --filename=mock_channelmanager.go --output=internal/datacoord  --structname=MockChannelManager --with-expecter --inpackage
+	$(INSTALL_PATH)/mockery --name=ListChannelSegmentInfoServer --dir=internal/datacoord --filename=mock_streamserver.go --output=internal/datacoord  --structname=MockListChanSegInfoServer --with-expecter --inpackage
 
 generate-mockery-datanode: getdeps
 	$(INSTALL_PATH)/mockery --name=Allocator --dir=$(PWD)/internal/datanode/allocator --output=$(PWD)/internal/datanode/allocator --filename=mock_allocator.go --with-expecter --structname=MockAllocator --outpkg=allocator --inpackage
@@ -453,6 +454,7 @@ generate-mockery-datanode: getdeps
 	$(INSTALL_PATH)/mockery --name=BinlogIO --dir=$(PWD)/internal/datanode/io --output=$(PWD)/internal/datanode/io --filename=mock_binlogio.go --with-expecter --structname=MockBinlogIO --outpkg=io --inpackage
 	$(INSTALL_PATH)/mockery --name=FlowgraphManager --dir=$(PWD)/internal/datanode --output=$(PWD)/internal/datanode --filename=mock_fgmanager.go --with-expecter --structname=MockFlowgraphManager --outpkg=datanode --inpackage
 	$(INSTALL_PATH)/mockery --name=ChannelManager --dir=$(PWD)/internal/datanode --output=$(PWD)/internal/datanode --filename=mock_channelmanager.go --with-expecter --structname=MockChannelManager --outpkg=datanode --inpackage
+	$(INSTALL_PATH)/mockery --name=ListChannelSegmentInfoClient --dir=$(PWD)/internal/datanode/broker --output=$(PWD)/internal/datanode/broker --filename=mock_streamclient.go --with-expecter --structname=MockListChanSegInfoClient --outpkg=broker --inpackage
 
 generate-mockery-metastore: getdeps
 	$(INSTALL_PATH)/mockery --name=RootCoordCatalog --dir=$(PWD)/internal/metastore --output=$(PWD)/internal/metastore/mocks --filename=mock_rootcoord_catalog.go --with-expecter --structname=RootCoordCatalog --outpkg=mocks

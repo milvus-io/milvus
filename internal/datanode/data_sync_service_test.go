@@ -21,12 +21,12 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"math"
 	"math/rand"
 	"testing"
 	"time"
 
-	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -59,71 +59,9 @@ func init() {
 	paramtable.Init()
 }
 
-func getWatchInfo(info *testInfo) *datapb.ChannelWatchInfo {
-	return &datapb.ChannelWatchInfo{
-		Vchan: getVchanInfo(info),
-	}
-}
-
-func getVchanInfo(info *testInfo) *datapb.VchannelInfo {
-	var ufs []*datapb.SegmentInfo
-	var fs []*datapb.SegmentInfo
-	if info.isValidCase {
-		ufs = []*datapb.SegmentInfo{{
-			CollectionID:  info.ufCollID,
-			PartitionID:   1,
-			InsertChannel: info.ufchanName,
-			ID:            info.ufSegID,
-			NumOfRows:     info.ufNor,
-			DmlPosition:   &msgpb.MsgPosition{},
-		}}
-		fs = []*datapb.SegmentInfo{{
-			CollectionID:  info.fCollID,
-			PartitionID:   1,
-			InsertChannel: info.fchanName,
-			ID:            info.fSegID,
-			NumOfRows:     info.fNor,
-			DmlPosition:   &msgpb.MsgPosition{},
-		}}
-	} else {
-		ufs = []*datapb.SegmentInfo{}
-	}
-
-	var ufsIds []int64
-	var fsIds []int64
-	for _, segmentInfo := range ufs {
-		ufsIds = append(ufsIds, segmentInfo.ID)
-	}
-	for _, segmentInfo := range fs {
-		fsIds = append(fsIds, segmentInfo.ID)
-	}
-	vi := &datapb.VchannelInfo{
-		CollectionID:        info.collID,
-		ChannelName:         info.chanName,
-		SeekPosition:        &msgpb.MsgPosition{},
-		UnflushedSegmentIds: ufsIds,
-		FlushedSegmentIds:   fsIds,
-	}
-	return vi
-}
-
 type testInfo struct {
 	isValidCase  bool
-	channelNil   bool
 	inMsgFactory dependency.Factory
-
-	collID   UniqueID
-	chanName string
-
-	ufCollID   UniqueID
-	ufSegID    UniqueID
-	ufchanName string
-	ufNor      int64
-
-	fCollID   UniqueID
-	fSegID    UniqueID
-	fchanName string
-	fNor      int64
 
 	description string
 }
@@ -133,24 +71,15 @@ func TestDataSyncService_newDataSyncService(t *testing.T) {
 
 	tests := []*testInfo{
 		{
-			true, false, &mockMsgStreamFactory{false, true},
-			1, "by-dev-rootcoord-dml-test_v0",
-			1, 0, "", 0,
-			1, 0, "", 0,
+			true, &mockMsgStreamFactory{false, true},
 			"SetParamsReturnError",
 		},
 		{
-			true, false, &mockMsgStreamFactory{true, true},
-			1, "by-dev-rootcoord-dml-test_v1",
-			1, 0, "by-dev-rootcoord-dml-test_v1", 0,
-			1, 1, "by-dev-rootcoord-dml-test_v2", 0,
+			true, &mockMsgStreamFactory{true, true},
 			"add normal segments",
 		},
 		{
-			true, false, &mockMsgStreamFactory{true, true},
-			1, "by-dev-rootcoord-dml-test_v1",
-			1, 1, "by-dev-rootcoord-dml-test_v1", 0,
-			1, 2, "by-dev-rootcoord-dml-test_v1", 0,
+			true, &mockMsgStreamFactory{true, true},
 			"add un-flushed and flushed segments",
 		},
 	}
@@ -158,6 +87,54 @@ func TestDataSyncService_newDataSyncService(t *testing.T) {
 	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
 	node := newIDLEDataNodeMock(ctx, schemapb.DataType_Int64)
+	dataCh := make(chan *datapb.SegmentInfo, 10)
+
+	insertChannelName := fmt.Sprintf("by-dev-rootcoord-dml-%d", rand.Int())
+
+	segs := []*datapb.SegmentInfo{
+		{
+			PartitionID:   1,
+			InsertChannel: insertChannelName,
+			ID:            0,
+			DmlPosition:   &msgpb.MsgPosition{},
+			State:         commonpb.SegmentState_Growing,
+		},
+		{
+			PartitionID:   1,
+			InsertChannel: insertChannelName,
+			ID:            1,
+			DmlPosition:   &msgpb.MsgPosition{},
+			State:         commonpb.SegmentState_Flushed,
+		},
+	}
+
+	for i := range segs {
+		dataCh <- segs[i]
+	}
+
+	mockClientStream := broker.NewMockListChanSegInfoClient(t)
+	mockClientStream.EXPECT().Recv().RunAndReturn(
+		func() (*datapb.SegmentInfo, error) {
+			if len(dataCh) > 0 {
+				return <-dataCh, nil
+			}
+			return nil, io.EOF
+		})
+
+	broker := broker.NewMockBroker(t)
+	broker.EXPECT().ListChannelSegmentInfo(mock.Anything, mock.Anything).Return(mockClientStream, nil)
+	node.broker = broker
+
+	Factory := &MetaFactory{}
+	collMeta := Factory.GetCollectionMeta(UniqueID(0), "coll1", schemapb.DataType_Int64)
+
+	watchInfo := &datapb.ChannelWatchInfo{
+		Schema: collMeta.GetSchema(),
+		Vchan: &datapb.VchannelInfo{
+			CollectionID: collMeta.ID,
+			ChannelName:  insertChannelName,
+		},
+	}
 
 	for _, test := range tests {
 		t.Run(test.description, func(t *testing.T) {
@@ -165,7 +142,7 @@ func TestDataSyncService_newDataSyncService(t *testing.T) {
 			ds, err := newServiceWithEtcdTickler(
 				ctx,
 				node,
-				getWatchInfo(test),
+				watchInfo,
 				genTestTickler(),
 			)
 
@@ -383,62 +360,50 @@ func (s *DataSyncServiceSuite) TestStartStop() {
 	)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	s.broker.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).Call.Return(
-		func(_ context.Context, segmentIDs []int64) []*datapb.SegmentInfo {
-			data := map[int64]*datapb.SegmentInfo{
-				0: {
-					ID:            0,
-					CollectionID:  collMeta.ID,
-					PartitionID:   1,
-					InsertChannel: insertChannelName,
-				},
-
-				1: {
-					ID:            1,
-					CollectionID:  collMeta.ID,
-					PartitionID:   1,
-					InsertChannel: insertChannelName,
-				},
-			}
-			return lo.FilterMap(segmentIDs, func(id int64, _ int) (*datapb.SegmentInfo, bool) {
-				item, ok := data[id]
-				return item, ok
-			})
-		}, nil)
 	s.wbManager.EXPECT().Register(insertChannelName, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
-	ufs := []*datapb.SegmentInfo{{
-		CollectionID:  collMeta.ID,
-		PartitionID:   1,
-		InsertChannel: insertChannelName,
-		ID:            0,
-		NumOfRows:     0,
-		DmlPosition:   &msgpb.MsgPosition{},
-	}}
-	fs := []*datapb.SegmentInfo{{
-		CollectionID:  collMeta.ID,
-		PartitionID:   1,
-		InsertChannel: insertChannelName,
-		ID:            1,
-		NumOfRows:     0,
-		DmlPosition:   &msgpb.MsgPosition{},
-	}}
-	var ufsIds []int64
-	var fsIds []int64
-	for _, segmentInfo := range ufs {
-		ufsIds = append(ufsIds, segmentInfo.ID)
+	dataCh := make(chan *datapb.SegmentInfo, 10)
+	segs := []*datapb.SegmentInfo{
+		{
+			CollectionID:  collMeta.ID,
+			PartitionID:   1,
+			InsertChannel: insertChannelName,
+			ID:            0,
+			NumOfRows:     0,
+			DmlPosition:   &msgpb.MsgPosition{},
+			State:         commonpb.SegmentState_Growing,
+		},
+		{
+			CollectionID:  collMeta.ID,
+			PartitionID:   1,
+			InsertChannel: insertChannelName,
+			ID:            1,
+			NumOfRows:     0,
+			DmlPosition:   &msgpb.MsgPosition{},
+			State:         commonpb.SegmentState_Flushed,
+		},
 	}
-	for _, segmentInfo := range fs {
-		fsIds = append(fsIds, segmentInfo.ID)
+
+	for i := range segs {
+		dataCh <- segs[i]
 	}
+
+	mockClientStream := broker.NewMockListChanSegInfoClient(s.T())
+	mockClientStream.EXPECT().Recv().RunAndReturn(
+		func() (*datapb.SegmentInfo, error) {
+			if len(dataCh) > 0 {
+				return <-dataCh, nil
+			}
+			return nil, io.EOF
+		})
+
+	s.broker.EXPECT().ListChannelSegmentInfo(mock.Anything, mock.Anything).Return(mockClientStream, nil)
 
 	watchInfo := &datapb.ChannelWatchInfo{
 		Schema: collMeta.GetSchema(),
 		Vchan: &datapb.VchannelInfo{
-			CollectionID:        collMeta.ID,
-			ChannelName:         insertChannelName,
-			UnflushedSegmentIds: ufsIds,
-			FlushedSegmentIds:   fsIds,
+			CollectionID: collMeta.ID,
+			ChannelName:  insertChannelName,
 		},
 	}
 
@@ -512,6 +477,6 @@ func (s *DataSyncServiceSuite) TestStartStop() {
 	<-ch
 }
 
-func TestDataSyncService(t *testing.T) {
+func TestDataSyncServiceSuite(t *testing.T) {
 	suite.Run(t, new(DataSyncServiceSuite))
 }

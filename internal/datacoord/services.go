@@ -27,6 +27,7 @@ import (
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -1679,4 +1680,58 @@ func (s *Server) GcControl(ctx context.Context, request *datapb.GcControlRequest
 	}
 
 	return status, nil
+}
+
+// ListChannelSegmentInfoServer is a local interface equals to datapb.DataCoord_ListChannelSegmentInfoServer
+// for convinience in UT
+type ListChannelSegmentInfoServer interface {
+	Send(*datapb.SegmentInfo) error
+	grpc.ServerStream
+}
+
+func (s *Server) ListChannelSegmentInfo(request *datapb.ChannelSegmentInfoRequest, stream datapb.DataCoord_ListChannelSegmentInfoServer) error {
+	log := log.Ctx(stream.Context()).With(
+		zap.String("channel", request.GetChannel()),
+		zap.Int64("source", request.GetBase().GetSourceID()),
+	)
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return err
+	}
+
+	log.Info("DataCoord receives ListChannelSegmentInfo request")
+	ch, err := s.channelManager.GetChannel(request.GetChannel())
+	if err != nil {
+		log.Warn("DataCoord ListChannelSegmentInfo failed", zap.Error(err))
+		return err
+	}
+
+	vChanInfo := s.handler.GetDataVChanPositions(ch, allPartitionID)
+
+	// sending flushed segments info
+	for _, segID := range vChanInfo.GetFlushedSegmentIds() {
+		info := s.meta.GetHealthySegment(segID)
+		if info == nil {
+			err := merr.WrapErrSegmentNotFound(segID)
+			log.Warn("DataCoord ListChannelSegmentInfo failed", zap.Error(err))
+			return err
+		}
+		clonedInfo := info.Clone()
+		segmentutil.ReCalcRowCount(info.SegmentInfo, clonedInfo.SegmentInfo)
+		stream.Send(clonedInfo.SegmentInfo)
+	}
+
+	// sending unflushed segments info
+	for _, segID := range vChanInfo.GetUnflushedSegmentIds() {
+		info := s.meta.GetHealthySegment(segID)
+		if info == nil {
+			err := merr.WrapErrSegmentNotFound(segID)
+			log.Warn("DataCoord ListChannelSegmentInfo failed", zap.Error(err))
+			return err
+		}
+		clonedInfo := info.Clone()
+		segmentutil.ReCalcRowCount(info.SegmentInfo, clonedInfo.SegmentInfo)
+		stream.Send(clonedInfo.SegmentInfo)
+	}
+
+	return nil
 }

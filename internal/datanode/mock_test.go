@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"math"
 	"time"
 
@@ -85,11 +86,17 @@ func newIDLEDataNodeMock(ctx context.Context, pkType schemapb.DataType) *DataNod
 	node.SetSession(&sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}})
 	node.dispClient = msgdispatcher.NewClient(factory, typeutil.DataNodeRole, paramtable.GetNodeID())
 
-	broker := &broker.MockBroker{}
-	broker.EXPECT().ReportTimeTick(mock.Anything, mock.Anything).Return(nil).Maybe()
-	broker.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).Return([]*datapb.SegmentInfo{}, nil).Maybe()
+	mockClientStream := &broker.MockListChanSegInfoClient{}
+	mockClientStream.EXPECT().Recv().RunAndReturn(
+		func() (*datapb.SegmentInfo, error) {
+			return nil, io.EOF
+		})
 
-	node.broker = broker
+	mockBroker := &broker.MockBroker{}
+	mockBroker.EXPECT().ReportTimeTick(mock.Anything, mock.Anything).Return(nil).Maybe()
+	mockBroker.EXPECT().ListChannelSegmentInfo(mock.Anything, mock.Anything).Return(mockClientStream, nil)
+
+	node.broker = mockBroker
 	node.timeTickSender = newTimeTickSender(node.broker, 0)
 
 	syncMgr, _ := syncmgr.NewSyncManager(node.chunkManager, node.allocator)

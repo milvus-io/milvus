@@ -19,6 +19,7 @@ package datanode
 import (
 	"context"
 	"fmt"
+	"io"
 	"math/rand"
 	"path"
 	"strings"
@@ -62,14 +63,20 @@ func TestWatchChannel(t *testing.T) {
 
 	defer cancel()
 
-	broker := broker.NewMockBroker(t)
-	broker.EXPECT().ReportTimeTick(mock.Anything, mock.Anything).Return(nil).Maybe()
-	broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(nil).Maybe()
-	broker.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).Return([]*datapb.SegmentInfo{}, nil).Maybe()
-	broker.EXPECT().DropVirtualChannel(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
-	broker.EXPECT().UpdateChannelCheckpoint(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	mockClientStream := &broker.MockListChanSegInfoClient{}
+	mockClientStream.EXPECT().Recv().RunAndReturn(
+		func() (*datapb.SegmentInfo, error) {
+			return nil, io.EOF
+		})
 
-	node.broker = broker
+	mockBroker := broker.NewMockBroker(t)
+	mockBroker.EXPECT().ReportTimeTick(mock.Anything, mock.Anything).Return(nil).Maybe()
+	mockBroker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(nil).Maybe()
+	mockBroker.EXPECT().ListChannelSegmentInfo(mock.Anything, mock.Anything).Return(mockClientStream, nil)
+	mockBroker.EXPECT().DropVirtualChannel(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+	mockBroker.EXPECT().UpdateChannelCheckpoint(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+
+	node.broker = mockBroker
 
 	node.timeTickSender.Stop()
 	node.timeTickSender = newTimeTickSender(node.broker, 0)

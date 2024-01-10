@@ -189,6 +189,60 @@ func (_c *MockChannelManager_FindWatcher_Call) RunAndReturn(run func(string) (in
 	return _c
 }
 
+// GetChannel provides a mock function with given fields: channel
+func (_m *MockChannelManager) GetChannel(channel string) (RWChannel, error) {
+	ret := _m.Called(channel)
+
+	var r0 RWChannel
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) (RWChannel, error)); ok {
+		return rf(channel)
+	}
+	if rf, ok := ret.Get(0).(func(string) RWChannel); ok {
+		r0 = rf(channel)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(RWChannel)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(channel)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockChannelManager_GetChannel_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetChannel'
+type MockChannelManager_GetChannel_Call struct {
+	*mock.Call
+}
+
+// GetChannel is a helper method to define mock.On call
+//   - channel string
+func (_e *MockChannelManager_Expecter) GetChannel(channel interface{}) *MockChannelManager_GetChannel_Call {
+	return &MockChannelManager_GetChannel_Call{Call: _e.mock.On("GetChannel", channel)}
+}
+
+func (_c *MockChannelManager_GetChannel_Call) Run(run func(channel string)) *MockChannelManager_GetChannel_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *MockChannelManager_GetChannel_Call) Return(_a0 RWChannel, _a1 error) *MockChannelManager_GetChannel_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockChannelManager_GetChannel_Call) RunAndReturn(run func(string) (RWChannel, error)) *MockChannelManager_GetChannel_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetChannelsByCollectionID provides a mock function with given fields: collectionID
 func (_m *MockChannelManager) GetChannelsByCollectionID(collectionID int64) []RWChannel {
 	ret := _m.Called(collectionID)

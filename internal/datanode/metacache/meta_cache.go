@@ -55,7 +55,7 @@ type MetaCache interface {
 
 var _ MetaCache = (*metaCacheImpl)(nil)
 
-type PkStatsFactory func(vchannel *datapb.SegmentInfo) *BloomFilterSet
+type PkStatsFactory func(info *datapb.SegmentInfo) *BloomFilterSet
 
 type metaCacheImpl struct {
 	collectionID int64

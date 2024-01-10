@@ -49,6 +49,7 @@ type ChannelManager interface {
 	Match(nodeID int64, channel string) bool
 	FindWatcher(channel string) (int64, error)
 
+	GetChannel(channel string) (RWChannel, error)
 	GetNodeChannelsByCollectionID(collectionID UniqueID) map[UniqueID][]string
 	GetChannelsByCollectionID(collectionID UniqueID) []RWChannel
 	GetCollectionIDByChannel(channel string) (bool, UniqueID)
@@ -470,8 +471,13 @@ func (c *ChannelManagerImpl) fillChannelWatchInfoWithState(op *ChannelOp, state 
 	checkInterval := Params.DataCoordCfg.WatchTimeoutInterval.GetAsDuration(time.Second)
 	for _, ch := range op.Channels {
 		vcInfo := c.h.GetDataVChanPositions(ch, allPartitionID)
+		liteInfo := &datapb.VchannelInfo{
+			CollectionID: vcInfo.GetCollectionID(),
+			ChannelName:  vcInfo.GetChannelName(),
+			SeekPosition: vcInfo.GetSeekPosition(),
+		}
 		info := &datapb.ChannelWatchInfo{
-			Vchan:   vcInfo,
+			Vchan:   liteInfo,
 			StartTs: startTs,
 			State:   state,
 			Schema:  ch.GetSchema(),
@@ -582,6 +588,29 @@ func (c *ChannelManagerImpl) FindWatcher(channel string) (int64, error) {
 		}
 	}
 	return 0, errChannelNotWatched
+}
+
+func (c *ChannelManagerImpl) GetChannel(channel string) (RWChannel, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	infos := c.store.GetNodesChannels()
+	for _, info := range infos {
+		for _, channelInfo := range info.Channels {
+			if channelInfo.GetName() == channel {
+				return channelInfo, nil
+			}
+		}
+	}
+
+	// channel in buffer
+	bufferInfo := c.store.GetBufferChannelInfo()
+	for _, channelInfo := range bufferInfo.Channels {
+		if channelInfo.GetName() == channel {
+			return channelInfo, nil
+		}
+	}
+	return nil, errChannelNotWatched
 }
 
 // RemoveChannel removes the channel from channel manager.

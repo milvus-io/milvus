@@ -57,6 +57,56 @@ func TestServerSuite(t *testing.T) {
 	suite.Run(t, new(ServerSuite))
 }
 
+func (s *ServerSuite) TestListChannelSegmentInfo() {
+	s.testServer.meta.AddCollection(&collectionInfo{ID: 0})
+
+	flushed := []int64{1, 2}
+	unflushed := []int64{3, 4}
+	for _, segID := range flushed {
+		info := &datapb.SegmentInfo{
+			ID:            segID,
+			InsertChannel: "chan-1",
+			State:         commonpb.SegmentState_Flushed,
+		}
+		err := s.testServer.meta.AddSegment(context.TODO(), NewSegmentInfo(info))
+		s.Require().NoError(err)
+	}
+	for _, segID := range unflushed {
+		info := &datapb.SegmentInfo{
+			ID:            segID,
+			InsertChannel: "chan-1",
+			State:         commonpb.SegmentState_Sealed,
+		}
+		err := s.testServer.meta.AddSegment(context.TODO(), NewSegmentInfo(info))
+		s.Require().NoError(err)
+	}
+
+	s.mockChMgr.EXPECT().GetChannel(mock.Anything).Return(getChannel("chan-1", 0), nil)
+
+	mockHandler := NewNMockHandler(s.T())
+	mockHandler.EXPECT().GetDataVChanPositions(mock.Anything, mock.Anything).
+		Return(&datapb.VchannelInfo{
+			FlushedSegmentIds:   flushed,
+			UnflushedSegmentIds: unflushed,
+		})
+	s.testServer.handler = mockHandler
+
+	var count int = 0
+	mockStreamServer := NewMockListChanSegInfoServer(s.T())
+	mockStreamServer.EXPECT().Context().Return(context.TODO()).Once()
+	mockStreamServer.EXPECT().Send(mock.Anything).
+		RunAndReturn(func(info *datapb.SegmentInfo) error {
+			count += 1
+			return nil
+		}).Times(4)
+
+	err := s.testServer.ListChannelSegmentInfo(&datapb.ChannelSegmentInfoRequest{
+		Channel: "chan-1",
+	}, mockStreamServer)
+	s.NoError(err)
+	s.EqualValues(4, count)
+}
+
 func (s *ServerSuite) TestGetFlushState_ByFlushTs() {
 	s.mockChMgr.EXPECT().GetChannelsByCollectionID(int64(0)).
 		Return([]RWChannel{&channelMeta{Name: "ch1", CollectionID: 0}}).Times(3)
