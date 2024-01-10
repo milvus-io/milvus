@@ -19,6 +19,8 @@ package rootcoord
 import (
 	"context"
 
+	"github.com/samber/lo"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -52,11 +54,15 @@ func (t *showCollectionTask) Execute(ctx context.Context) error {
 		t.Rsp.Status = merr.Status(err)
 		return err
 	}
-	for _, meta := range colls {
-		t.Rsp.CollectionNames = append(t.Rsp.CollectionNames, meta.Name)
-		t.Rsp.CollectionIds = append(t.Rsp.CollectionIds, meta.CollectionID)
-		t.Rsp.CreatedTimestamps = append(t.Rsp.CreatedTimestamps, meta.CreateTime)
-		physical, _ := tsoutil.ParseHybridTs(meta.CreateTime)
+	for _, coll := range colls {
+		if len(t.Req.GetCollectionNames()) > 0 && !lo.Contains(t.Req.GetCollectionNames(), coll.Name) {
+			continue
+		}
+
+		t.Rsp.CollectionNames = append(t.Rsp.CollectionNames, coll.Name)
+		t.Rsp.CollectionIds = append(t.Rsp.CollectionIds, coll.CollectionID)
+		t.Rsp.CreatedTimestamps = append(t.Rsp.CreatedTimestamps, coll.CreateTime)
+		physical, _ := tsoutil.ParseHybridTs(coll.CreateTime)
 		t.Rsp.CreatedUtcTimestamps = append(t.Rsp.CreatedUtcTimestamps, uint64(physical))
 	}
 	return nil
