@@ -58,7 +58,7 @@ search(size_t repeat = 10) {
 
 int
 main(int argc, char* argv[]) {
-    // build_index(1000000);
+    build_index(1000000);
     search(10);
 
     return 0;
