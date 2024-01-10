@@ -46,7 +46,7 @@ func NewBloomFilterSet(historyEntries ...*storage.PkStatistics) *BloomFilterSet 
 }
 
 // NewBloomFilterSetWithBatchSize returns a BloomFilterSet.
-// The batchSize paramter is used to initialize new bloom filter.
+// The batchSize parameter is used to initialize new bloom filter.
 // It shall be the estimated row count per batch for segment to sync with.
 func NewBloomFilterSetWithBatchSize(batchSize uint, historyEntries ...*storage.PkStatistics) *BloomFilterSet {
 	return &BloomFilterSet{
