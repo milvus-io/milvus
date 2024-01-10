@@ -84,7 +84,7 @@ func TestServiceParam(t *testing.T) {
 		// test default value
 		{
 			pc := &PulsarConfig{}
-			base := &BaseTable{mgr: &config.Manager{}}
+			base := &BaseTable{mgr: config.NewManager()}
 			pc.Init(base)
 			assert.Empty(t, pc.Address.GetValue())
 		}
