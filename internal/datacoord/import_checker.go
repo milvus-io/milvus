@@ -32,6 +32,7 @@ import (
 
 const (
 	inactiveTimeout = 30 * time.Minute // TODO: dyh, make it configurable
+	GCRetention     = 3 * time.Hour    // TODO: dyh, make it configurable
 )
 
 type ImportChecker interface {
@@ -40,11 +41,12 @@ type ImportChecker interface {
 }
 
 type importChecker struct {
-	meta    *meta
-	cluster Cluster
-	alloc   allocator
-	sm      Manager
-	imeta   ImportMeta
+	meta         *meta
+	cluster      Cluster
+	alloc        allocator
+	sm           Manager
+	imeta        ImportMeta
+	buildIndexCh chan UniqueID
 
 	closeOnce sync.Once
 	closeChan chan struct{}
@@ -55,33 +57,35 @@ func NewImportChecker(meta *meta,
 	alloc allocator,
 	sm Manager,
 	imeta ImportMeta,
+	buildIndexCh chan UniqueID,
 ) ImportChecker {
 	return &importChecker{
-		meta:      meta,
-		cluster:   cluster,
-		alloc:     alloc,
-		sm:        sm,
-		imeta:     imeta,
-		closeChan: make(chan struct{}),
+		meta:         meta,
+		cluster:      cluster,
+		alloc:        alloc,
+		sm:           sm,
+		imeta:        imeta,
+		buildIndexCh: buildIndexCh,
+		closeChan:    make(chan struct{}),
 	}
 }
 
 func (c *importChecker) Start() {
 	log.Info("start import checker")
 	var (
-		checkStateTicker   = time.NewTicker(5 * time.Second)
-		checkTimeoutTicker = time.NewTicker(10 * time.Minute)
-		logTicker          = time.NewTicker(30 * time.Second)
+		stateTicker   = time.NewTicker(5 * time.Second)
+		logTicker     = time.NewTicker(30 * time.Second)
+		timeoutTicker = time.NewTicker(10 * time.Minute)
 	)
-	defer checkStateTicker.Stop()
-	defer checkTimeoutTicker.Stop()
+	defer stateTicker.Stop()
 	defer logTicker.Stop()
+	defer timeoutTicker.Stop()
 	for {
 		select {
 		case <-c.closeChan:
 			log.Info("import checker exited")
 			return
-		case <-checkStateTicker.C:
+		case <-stateTicker.C:
 			tasks := c.imeta.GetBy()
 			tasksByReq := lo.GroupBy(tasks, func(t ImportTask) int64 {
 				return t.GetRequestID()
@@ -90,13 +94,14 @@ func (c *importChecker) Start() {
 				c.checkPreImportState(requestID)
 				c.checkImportState(requestID)
 			}
-		case <-checkTimeoutTicker.C:
+		case <-timeoutTicker.C:
 			tasks := c.imeta.GetBy()
 			tasksByReq := lo.GroupBy(tasks, func(t ImportTask) int64 {
 				return t.GetRequestID()
 			})
 			for requestID := range tasksByReq {
 				c.checkTimeout(requestID)
+				c.checkGC(requestID)
 			}
 		case <-logTicker.C:
 			c.LogStats()
@@ -193,6 +198,11 @@ func (c *importChecker) checkImportState(requestID int64) {
 	}
 	for _, task := range tasks {
 		segmentIDs := task.(*importTask).GetSegmentIDs()
+		_, err := c.sm.SealAllSegments(context.Background(), task.GetCollectionID(), segmentIDs, true)
+		if err != nil {
+			log.Warn("seal imported segments failed", WrapLogFields(task, zap.Error(err))...)
+			return
+		}
 		for _, segmentID := range segmentIDs {
 			err := AddImportSegment(c.cluster, c.meta, segmentID)
 			if err != nil {
@@ -206,9 +216,8 @@ func (c *importChecker) checkImportState(requestID int64) {
 			}
 		}
 		// accelerate building index
-		_, err := c.sm.SealAllSegments(context.Background(), task.GetCollectionID(), segmentIDs, true)
-		if err != nil {
-			log.Warn("seal imported segments failed", WrapLogFields(task, zap.Error(err))...)
+		for _, segmentID := range segmentIDs {
+			c.buildIndexCh <- segmentID
 		}
 	}
 }
@@ -241,5 +250,29 @@ func (c *importChecker) checkTimeout(requestID int64) {
 		if err != nil {
 			log.Warn("update task state failed", WrapLogFields(task, zap.Error(err))...)
 		}
+	}
+}
+
+func (c *importChecker) checkGC(requestID int64) {
+	tasks := c.imeta.GetBy(WithStates(internalpb.ImportState_Failed, internalpb.ImportState_Completed), WithReq(requestID))
+	var needGC = false
+	for _, task := range tasks {
+		if time.Since(task.GetLastActiveTime()) >= GCRetention {
+			log.Info("the task has reached the GC retention",
+				WrapLogFields(task, zap.Time("taskLastActiveTime", task.GetLastActiveTime()),
+					zap.Duration("GCRetention", GCRetention))...)
+			needGC = true
+			break
+		}
+	}
+	if !needGC {
+		return
+	}
+	for _, task := range tasks {
+		err := c.imeta.Remove(task.GetTaskID())
+		if err != nil {
+			log.Warn("remove task failed", WrapLogFields(task, zap.Error(err))...)
+		}
+		log.Info("reached GC retention, task removed", WrapLogFields(task)...)
 	}
 }

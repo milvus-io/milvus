@@ -31,7 +31,6 @@ import (
 
 const (
 	NullNodeID = -1
-	GCDuration = 3 * time.Hour // TODO: dyh, make it configurable
 )
 
 type ImportScheduler interface {
@@ -263,12 +262,6 @@ func (s *importScheduler) processCompleted(task ImportTask) {
 		log.Warn("drop import failed", WrapLogFields(task, zap.Error(err))...)
 		return
 	}
-	if time.Since(task.GetLastActiveTime()) >= GCDuration {
-		err = s.imeta.Remove(task.GetTaskID())
-		if err != nil {
-			log.Warn("remove import task failed", WrapLogFields(task, zap.Error(err))...)
-		}
-	}
 }
 
 func (s *importScheduler) processFailed(task ImportTask) {
@@ -292,11 +285,5 @@ func (s *importScheduler) processFailed(task ImportTask) {
 	if err != nil {
 		log.Warn("drop import failed", WrapLogFields(task, zap.Error(err))...)
 		return
-	}
-	if time.Since(task.GetLastActiveTime()) >= GCDuration {
-		err = s.imeta.Remove(task.GetTaskID())
-		if err != nil {
-			log.Warn("remove import task failed", WrapLogFields(task, zap.Error(err))...)
-		}
 	}
 }

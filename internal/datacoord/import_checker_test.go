@@ -106,7 +106,7 @@ func TestImportChecker(t *testing.T) {
 
 	meta, err := newMeta(context.TODO(), catalog, nil)
 	assert.Nil(t, err)
-	checker := NewImportChecker(meta, cluster, alloc, nil, imeta).(*importChecker) // TODO: dyh, fix sm
+	checker := NewImportChecker(meta, cluster, alloc, nil, imeta, make(chan UniqueID, 1024)).(*importChecker) // TODO: dyh, fix sm
 
 	// preimport tasks are not fully completed
 	checker.checkPreImportState(0)
