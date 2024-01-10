@@ -21,6 +21,7 @@
 #include "common/EasyAssert.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/dataset.h"
+#include "common/Tracer.h"
 #include "common/Types.h"
 
 const std::string kMmapFilepath = "mmap_filepath";
@@ -40,7 +41,7 @@ class IndexBase {
     Load(const BinarySet& binary_set, const Config& config = {}) = 0;
 
     virtual void
-    Load(const Config& config = {}) = 0;
+    Load(milvus::tracer::TraceContext ctx, const Config& config = {}) = 0;
 
     virtual void
     LoadV2(const Config& config = {}) = 0;

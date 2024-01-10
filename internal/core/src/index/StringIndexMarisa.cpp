@@ -287,7 +287,8 @@ StringIndexMarisa::Load(const BinarySet& set, const Config& config) {
 }
 
 void
-StringIndexMarisa::Load(const Config& config) {
+StringIndexMarisa::Load(milvus::tracer::TraceContext ctx,
+                        const Config& config) {
     auto index_files =
         GetValueFromConfig<std::vector<std::string>>(config, "index_files");
     AssertInfo(index_files.has_value(),
