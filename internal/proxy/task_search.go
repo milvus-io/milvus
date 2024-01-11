@@ -806,7 +806,7 @@ func reduceSearchResultData(ctx context.Context, subSearchResultData []*schemapb
 		Results: &schemapb.SearchResultData{
 			NumQueries: nq,
 			TopK:       topk,
-			FieldsData: make([]*schemapb.FieldData, len(subSearchResultData[0].FieldsData)),
+			FieldsData: typeutil.PrepareResultFieldData(subSearchResultData[0].GetFieldsData(), limit),
 			Scores:     []float32{},
 			Ids:        &schemapb.IDs{},
 			Topks:      []int64{},
@@ -817,13 +817,13 @@ func reduceSearchResultData(ctx context.Context, subSearchResultData []*schemapb
 	case schemapb.DataType_Int64:
 		ret.GetResults().Ids.IdField = &schemapb.IDs_IntId{
 			IntId: &schemapb.LongArray{
-				Data: make([]int64, 0),
+				Data: make([]int64, 0, limit),
 			},
 		}
 	case schemapb.DataType_VarChar:
 		ret.GetResults().Ids.IdField = &schemapb.IDs_StrId{
 			StrId: &schemapb.StringArray{
-				Data: make([]string, 0),
+				Data: make([]string, 0, limit),
 			},
 		}
 	default:
