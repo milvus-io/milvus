@@ -1004,14 +1004,15 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 	}
 
 	log.Info("predict memory and disk usage while loading (in MiB)",
-		zap.Float64("maxSegmentSize", toMB(maxSegmentSize)),
+		zap.Float64("maxSegmentSize(MB)", toMB(maxSegmentSize)),
 		zap.Int("concurrency", concurrency),
-		zap.Float64("committedMemSize", toMB(loader.committedResource.MemorySize)),
-		zap.Float64("memUsage", toMB(memUsage)),
-		zap.Float64("committedDiskSize", toMB(loader.committedResource.DiskSize)),
-		zap.Float64("diskUsage", toMB(diskUsage)),
-		zap.Float64("predictMemUsage", toMB(predictMemUsage)),
-		zap.Float64("predictDiskUsage", toMB(predictDiskUsage)),
+		zap.Float64("committedMemSize(MB)", toMB(loader.committedResource.MemorySize)),
+		zap.Float64("memLimit(MB)", toMB(totalMem)),
+		zap.Float64("memUsage(MB)", toMB(memUsage)),
+		zap.Float64("committedDiskSize(MB)", toMB(loader.committedResource.DiskSize)),
+		zap.Float64("diskUsage(MB)", toMB(diskUsage)),
+		zap.Float64("predictMemUsage(MB)", toMB(predictMemUsage)),
+		zap.Float64("predictDiskUsage(MB)", toMB(predictDiskUsage)),
 		zap.Bool("mmapEnabled", mmapEnabled),
 	)
 
