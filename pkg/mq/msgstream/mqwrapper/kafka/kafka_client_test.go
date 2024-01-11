@@ -313,13 +313,13 @@ func createParamItem(v string) paramtable.ParamItem {
 	item := paramtable.ParamItem{
 		Formatter: func(originValue string) string { return v },
 	}
-	item.Init(&config.Manager{})
+	item.Init(config.NewManager())
 	return item
 }*/
 
 func initParamItem(item *paramtable.ParamItem, v string) {
 	item.Formatter = func(originValue string) string { return v }
-	item.Init(&config.Manager{})
+	item.Init(config.NewManager())
 }
 
 type kafkaCfgOption func(cfg *paramtable.KafkaConfig)
