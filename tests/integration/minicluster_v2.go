@@ -118,6 +118,19 @@ func StartMiniClusterV2(ctx context.Context, opts ...OptionV2) (*MiniClusterV2, 
 		etcdCli:  cluster.EtcdCli,
 	}
 
+	ports, err := GetAvailablePorts(7)
+	if err != nil {
+		return nil, err
+	}
+	log.Info("minicluster ports", zap.Ints("ports", ports))
+	params.Save(params.RootCoordGrpcServerCfg.Port.Key, fmt.Sprint(ports[0]))
+	params.Save(params.DataCoordGrpcServerCfg.Port.Key, fmt.Sprint(ports[1]))
+	params.Save(params.QueryCoordGrpcServerCfg.Port.Key, fmt.Sprint(ports[2]))
+	params.Save(params.DataNodeGrpcServerCfg.Port.Key, fmt.Sprint(ports[3]))
+	params.Save(params.QueryNodeGrpcServerCfg.Port.Key, fmt.Sprint(ports[4]))
+	params.Save(params.IndexNodeGrpcServerCfg.Port.Key, fmt.Sprint(ports[5]))
+	params.Save(params.ProxyGrpcServerCfg.Port.Key, fmt.Sprint(ports[6]))
+
 	// setup clients
 	cluster.RootCoordClient, err = grpcrootcoordclient.NewClient(ctx)
 	if err != nil {
@@ -190,20 +203,7 @@ func StartMiniClusterV2(ctx context.Context, opts ...OptionV2) (*MiniClusterV2, 
 
 func (cluster *MiniClusterV2) Start() error {
 	log.Info("mini cluster start")
-	ports, err := GetAvailablePorts(7)
-	if err != nil {
-		return err
-	}
-	log.Info("minicluster ports", zap.Ints("ports", ports))
-	params.Save(params.RootCoordGrpcServerCfg.Port.Key, fmt.Sprint(ports[0]))
-	params.Save(params.DataCoordGrpcServerCfg.Port.Key, fmt.Sprint(ports[1]))
-	params.Save(params.QueryCoordGrpcServerCfg.Port.Key, fmt.Sprint(ports[2]))
-	params.Save(params.DataNodeGrpcServerCfg.Port.Key, fmt.Sprint(ports[3]))
-	params.Save(params.QueryNodeGrpcServerCfg.Port.Key, fmt.Sprint(ports[4]))
-	params.Save(params.IndexNodeGrpcServerCfg.Port.Key, fmt.Sprint(ports[5]))
-	params.Save(params.ProxyGrpcServerCfg.Port.Key, fmt.Sprint(ports[6]))
-
-	err = cluster.RootCoord.Run()
+	err := cluster.RootCoord.Run()
 	if err != nil {
 		return err
 	}

@@ -565,6 +565,7 @@ func TestEmbedEtcd(te *testing.T) {
 			{map[string]string{"y/c": "vvv"}, []string{}, "y", 2, 3},
 			{map[string]string{"p/a": "vvv"}, []string{"y/a", "y"}, "y", 3, 0},
 			{map[string]string{}, []string{"p"}, "p", 1, 0},
+			{nil, []string{"p"}, "p", 0, 0},
 		}
 
 		for _, test := range multiSaveAndRemoveWithPrefixTests {
