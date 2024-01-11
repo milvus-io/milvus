@@ -811,6 +811,22 @@ func interface2FieldData(schemaDataType schemapb.DataType, content []interface{}
 		data.Dim = len(data.Data) / 2 / int(numRows)
 		rst = data
 
+	case schemapb.DataType_BFloat16Vector:
+		data := &storage.BFloat16VectorFieldData{
+			Data: []byte{},
+		}
+
+		for _, c := range content {
+			r, ok := c.([]byte)
+			if !ok {
+				return nil, errTransferType
+			}
+			data.Data = append(data.Data, r...)
+		}
+
+		data.Dim = len(data.Data) / 2 / int(numRows)
+		rst = data
+
 	case schemapb.DataType_BinaryVector:
 		data := &storage.BinaryVectorFieldData{
 			Data: []byte{},

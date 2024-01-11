@@ -77,6 +77,10 @@ func (v *validateUtil) Validate(data []*schemapb.FieldData, schema *schemapb.Col
 			if err := v.checkFloat16VectorFieldData(field, fieldSchema); err != nil {
 				return err
 			}
+		case schemapb.DataType_BFloat16Vector:
+			if err := v.checkBFloat16VectorFieldData(field, fieldSchema); err != nil {
+				return err
+			}
 		case schemapb.DataType_BinaryVector:
 			if err := v.checkBinaryVectorFieldData(field, fieldSchema); err != nil {
 				return err
@@ -182,6 +186,25 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 				return errNumRowsMismatch(field.GetFieldName(), n, numRows)
 			}
 
+		case schemapb.DataType_BFloat16Vector:
+			f, err := schema.GetFieldFromName(field.GetFieldName())
+			if err != nil {
+				return err
+			}
+
+			dim, err := typeutil.GetDim(f)
+			if err != nil {
+				return err
+			}
+
+			n, err := funcutil.GetNumRowsOfBFloat16VectorField(field.GetVectors().GetBfloat16Vector(), dim)
+			if err != nil {
+				return err
+			}
+
+			if n != numRows {
+				return errNumRowsMismatch(field.GetFieldName(), n, numRows)
+			}
 		default:
 			// error won't happen here.
 			n, err := funcutil.GetNumRowOfFieldData(field)
@@ -289,6 +312,11 @@ func (v *validateUtil) checkFloatVectorFieldData(field *schemapb.FieldData, fiel
 }
 
 func (v *validateUtil) checkFloat16VectorFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
+	// TODO
+	return nil
+}
+
+func (v *validateUtil) checkBFloat16VectorFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
 	// TODO
 	return nil
 }

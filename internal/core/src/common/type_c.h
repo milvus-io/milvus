@@ -51,6 +51,7 @@ enum CDataType {
     BinaryVector = 100,
     FloatVector = 101,
     Float16Vector = 102,
+    BFloat16Vector = 103,
 };
 typedef enum CDataType CDataType;
 

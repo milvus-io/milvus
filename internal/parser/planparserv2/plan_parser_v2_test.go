@@ -396,6 +396,28 @@ func TestCreateSearchPlan(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestCreateFloat16SearchPlan(t *testing.T) {
+	schema := newTestSchema()
+	_, err := CreateSearchPlan(schema, `$meta["A"] != 10`, "Float16VectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.NoError(t, err)
+}
+
+func TestCreateBFloat16earchPlan(t *testing.T) {
+	schema := newTestSchema()
+	_, err := CreateSearchPlan(schema, `$meta["A"] != 10`, "BFloat16VectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.NoError(t, err)
+}
+
 func TestExpr_Invalid(t *testing.T) {
 	schema := newTestSchema()
 	helper, err := typeutil.CreateSchemaHelper(schema)

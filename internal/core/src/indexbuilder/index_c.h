@@ -38,6 +38,11 @@ BuildFloatVecIndex(CIndex index, int64_t float_value_num, const float* vectors);
 CStatus
 BuildBinaryVecIndex(CIndex index, int64_t data_size, const uint8_t* vectors);
 
+CStatus
+BuildFloat16VecIndex(CIndex index, int64_t data_size, const uint8_t* vectors);
+
+CStatus
+BuildBFloat16VecIndex(CIndex index, int64_t data_size, const uint8_t* vectors);
 // field_data:
 //  1, serialized proto::schema::BoolArray, if type is bool;
 //  2, serialized proto::schema::StringArray, if type is string;

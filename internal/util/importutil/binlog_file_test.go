@@ -48,6 +48,11 @@ func createBinlogBuf(t *testing.T, dataType schemapb.DataType, data interface{})
 		if len(vectors) > 0 {
 			dim = len(vectors[0]) / 2
 		}
+	} else if dataType == schemapb.DataType_BFloat16Vector {
+		vectors := data.([][]byte)
+		if len(vectors) > 0 {
+			dim = len(vectors[0]) / 2
+		}
 	}
 
 	evt, err := w.NextInsertEventWriter(dim)
@@ -170,6 +175,14 @@ func createBinlogBuf(t *testing.T, dataType schemapb.DataType, data interface{})
 		// the "original_size" is come from storage.originalSizeKey
 		sizeTotal := len(vectors) * dim * 2
 		w.AddExtra("original_size", fmt.Sprintf("%v", sizeTotal))
+	case schemapb.DataType_BFloat16Vector:
+		vectors := data.([][]byte)
+		for i := 0; i < len(vectors); i++ {
+			err = evt.AddBFloat16VectorToPayload(vectors[i], dim)
+			assert.NoError(t, err)
+		}
+		sizeTotal := len(vectors) * dim * 2
+		w.AddExtra("original_size", fmt.Sprintf("%v", sizeTotal))
 	default:
 		assert.True(t, false)
 		return nil
@@ -285,6 +298,11 @@ func Test_BinlogFileOpen(t *testing.T) {
 
 	dataFloat16Vector, dim, err := binlogFile.ReadFloat16Vector()
 	assert.Nil(t, dataFloat16Vector)
+	assert.Equal(t, 0, dim)
+	assert.Error(t, err)
+
+	dataBFloat16Vector, dim, err := binlogFile.ReadBFloat16Vector()
+	assert.Nil(t, dataBFloat16Vector)
 	assert.Equal(t, 0, dim)
 	assert.Error(t, err)
 
@@ -1086,6 +1104,94 @@ func Test_BinlogFileFloat16Vector(t *testing.T) {
 	data, d, err = binlogFile.ReadFloat16Vector()
 	assert.Zero(t, len(data))
 	assert.Zero(t, d)
+	assert.Error(t, err)
+
+	// binlog data type is not float16 vector
+	chunkManager.readBuf["dummy"] = createBinlogBuf(t, schemapb.DataType_FloatVector, [][]float32{{1.0, 2.0, 3.0}})
+	err = binlogFile.Open("dummy")
+	assert.NoError(t, err)
+
+	data, dim, err = binlogFile.ReadFloat16Vector()
+	assert.Nil(t, data)
+	assert.Zero(t, dim)
+	assert.Error(t, err)
+
+	binlogFile.Close()
+}
+
+func Test_BinlogFileBFloat16Vector(t *testing.T) {
+	vectors := make([][]byte, 0)
+	vectors = append(vectors, []byte{1, 3, 5, 7})
+	vectors = append(vectors, []byte{2, 4, 6, 8})
+	dim := len(vectors[0]) / 2
+	vecCount := len(vectors)
+
+	chunkManager := &MockChunkManager{
+		readBuf: map[string][]byte{
+			"dummy": createBinlogBuf(t, schemapb.DataType_BFloat16Vector, vectors),
+		},
+	}
+
+	binlogFile, err := NewBinlogFile(chunkManager)
+	assert.NoError(t, err)
+	assert.NotNil(t, binlogFile)
+
+	// correct reading
+	err = binlogFile.Open("dummy")
+	assert.NoError(t, err)
+	assert.Equal(t, schemapb.DataType_BFloat16Vector, binlogFile.DataType())
+
+	data, d, err := binlogFile.ReadBFloat16Vector()
+	assert.NoError(t, err)
+	assert.Equal(t, dim, d)
+	assert.NotNil(t, data)
+	assert.Equal(t, vecCount*dim*2, len(data))
+	for i := 0; i < vecCount; i++ {
+		for j := 0; j < dim*2; j++ {
+			assert.Equal(t, vectors[i][j], data[i*dim*2+j])
+		}
+	}
+
+	binlogFile.Close()
+
+	// wrong data type reading
+	binlogFile, err = NewBinlogFile(chunkManager)
+	assert.NoError(t, err)
+	err = binlogFile.Open("dummy")
+	assert.NoError(t, err)
+
+	dt, d, err := binlogFile.ReadFloatVector()
+	assert.Zero(t, len(dt))
+	assert.Zero(t, d)
+	assert.Error(t, err)
+
+	binlogFile.Close()
+
+	// wrong log type
+	chunkManager.readBuf["dummy"] = createDeltalogBuf(t, []int64{1}, false, baseTimestamp)
+	err = binlogFile.Open("dummy")
+	assert.NoError(t, err)
+
+	data, d, err = binlogFile.ReadBFloat16Vector()
+	assert.Zero(t, len(data))
+	assert.Zero(t, d)
+	assert.Error(t, err)
+
+	// failed to iterate events reader
+	binlogFile.reader.Close()
+	data, d, err = binlogFile.ReadBFloat16Vector()
+	assert.Zero(t, len(data))
+	assert.Zero(t, d)
+	assert.Error(t, err)
+
+	// binlog data type is not bfloat16 vector
+	chunkManager.readBuf["dummy"] = createBinlogBuf(t, schemapb.DataType_FloatVector, [][]float32{{1.0, 2.0, 3.0}})
+	err = binlogFile.Open("dummy")
+	assert.NoError(t, err)
+
+	data, dim, err = binlogFile.ReadBFloat16Vector()
+	assert.Nil(t, data)
+	assert.Zero(t, dim)
 	assert.Error(t, err)
 
 	binlogFile.Close()

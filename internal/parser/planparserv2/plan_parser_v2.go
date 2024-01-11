@@ -143,8 +143,10 @@ func CreateSearchPlan(schemaPb *schemapb.CollectionSchema, exprStr string, vecto
 		vectorType = planpb.VectorType_FloatVector
 	} else if dataType == schemapb.DataType_BinaryVector {
 		vectorType = planpb.VectorType_BinaryVector
-	} else {
+	} else if dataType == schemapb.DataType_Float16Vector {
 		vectorType = planpb.VectorType_Float16Vector
+	} else if dataType == schemapb.DataType_BFloat16Vector {
+		vectorType = planpb.VectorType_BFloat16Vector
 	}
 	planNode := &planpb.PlanNode{
 		Node: &planpb.PlanNode_VectorAnns{

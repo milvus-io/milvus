@@ -15,24 +15,25 @@ func TestInsertBinlogIteratorSuite(t *testing.T) {
 }
 
 const (
-	CollectionID       = 10000
-	PartitionID        = 10001
-	SegmentID          = 10002
-	RowIDField         = 0
-	TimestampField     = 1
-	BoolField          = 100
-	Int8Field          = 101
-	Int16Field         = 102
-	Int32Field         = 103
-	Int64Field         = 104
-	FloatField         = 105
-	DoubleField        = 106
-	StringField        = 107
-	BinaryVectorField  = 108
-	FloatVectorField   = 109
-	ArrayField         = 110
-	JSONField          = 111
-	Float16VectorField = 112
+	CollectionID        = 10000
+	PartitionID         = 10001
+	SegmentID           = 10002
+	RowIDField          = 0
+	TimestampField      = 1
+	BoolField           = 100
+	Int8Field           = 101
+	Int16Field          = 102
+	Int32Field          = 103
+	Int64Field          = 104
+	FloatField          = 105
+	DoubleField         = 106
+	StringField         = 107
+	BinaryVectorField   = 108
+	FloatVectorField    = 109
+	ArrayField          = 110
+	JSONField           = 111
+	Float16VectorField  = 112
+	BFloat16VectorField = 113
 )
 
 type InsertBinlogIteratorSuite struct {
@@ -104,6 +105,7 @@ func (s *InsertBinlogIteratorSuite) TestBinlogIterator() {
 			s.Equal(insertData.Data[BinaryVectorField].GetRow(idx).([]byte), insertRow.Value[BinaryVectorField].([]byte))
 			s.Equal(insertData.Data[FloatVectorField].GetRow(idx).([]float32), insertRow.Value[FloatVectorField].([]float32))
 			s.Equal(insertData.Data[Float16VectorField].GetRow(idx).([]byte), insertRow.Value[Float16VectorField].([]byte))
+			s.Equal(insertData.Data[BFloat16VectorField].GetRow(idx).([]byte), insertRow.Value[BFloat16VectorField].([]byte))
 
 			idx++
 		}
@@ -236,6 +238,13 @@ func genTestInsertData() (*storage.InsertData, *etcdpb.CollectionMeta) {
 					Description:  "float16_vector",
 					DataType:     schemapb.DataType_Float16Vector,
 				},
+				{
+					FieldID:      BFloat16VectorField,
+					Name:         "field_bfloat16_vector",
+					IsPrimaryKey: false,
+					Description:  "bfloat16_vector",
+					DataType:     schemapb.DataType_BFloat16Vector,
+				},
 			},
 		},
 	}
@@ -301,6 +310,10 @@ func genTestInsertData() (*storage.InsertData, *etcdpb.CollectionMeta) {
 				},
 			},
 			Float16VectorField: &storage.Float16VectorFieldData{
+				Data: []byte{0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255},
+				Dim:  4,
+			},
+			BFloat16VectorField: &storage.BFloat16VectorFieldData{
 				Data: []byte{0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255},
 				Dim:  4,
 			},

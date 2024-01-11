@@ -110,6 +110,17 @@ class FieldData<Float16Vector> : public FieldDataImpl<float16, false> {
     }
 };
 
+template <>
+class FieldData<BFloat16Vector> : public FieldDataImpl<bfloat16, false> {
+ public:
+    explicit FieldData(int64_t dim,
+                       DataType data_type,
+                       int64_t buffered_num_rows = 0)
+        : FieldDataImpl<bfloat16, false>::FieldDataImpl(
+              dim, data_type, buffered_num_rows) {
+    }
+};
+
 using FieldDataPtr = std::shared_ptr<FieldDataBase>;
 using FieldDataChannel = Channel<FieldDataPtr>;
 using FieldDataChannelPtr = std::shared_ptr<FieldDataChannel>;

@@ -247,6 +247,8 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 				eventWriter, err = writer.NextInsertEventWriter(singleData.(*BinaryVectorFieldData).Dim)
 			case schemapb.DataType_Float16Vector:
 				eventWriter, err = writer.NextInsertEventWriter(singleData.(*Float16VectorFieldData).Dim)
+			case schemapb.DataType_BFloat16Vector:
+				eventWriter, err = writer.NextInsertEventWriter(singleData.(*BFloat16VectorFieldData).Dim)
 			default:
 				return nil, fmt.Errorf("undefined data type %d", field.DataType)
 			}
@@ -370,6 +372,14 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 				return nil, err
 			}
 			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*Float16VectorFieldData).GetMemorySize()))
+		case schemapb.DataType_BFloat16Vector:
+			err = eventWriter.AddBFloat16VectorToPayload(singleData.(*BFloat16VectorFieldData).Data, singleData.(*BFloat16VectorFieldData).Dim)
+			if err != nil {
+				eventWriter.Close()
+				writer.Close()
+				return nil, err
+			}
+			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*BFloat16VectorFieldData).GetMemorySize()))
 		default:
 			return nil, fmt.Errorf("undefined data type %d", field.DataType)
 		}
@@ -701,6 +711,33 @@ func (insertCodec *InsertCodec) DeserializeInto(fieldBinlogs []*Blob, rowNum int
 				totalLength += length
 				float16VectorFieldData.Dim = dim
 				insertData.Data[fieldID] = float16VectorFieldData
+
+			case schemapb.DataType_BFloat16Vector:
+				var singleData []byte
+				singleData, dim, err = eventReader.GetBFloat16VectorFromPayload()
+				if err != nil {
+					eventReader.Close()
+					binlogReader.Close()
+					return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, err
+				}
+
+				if insertData.Data[fieldID] == nil {
+					insertData.Data[fieldID] = &BFloat16VectorFieldData{
+						Data: make([]byte, 0, rowNum*dim),
+					}
+				}
+				bfloat16VectorFieldData := insertData.Data[fieldID].(*BFloat16VectorFieldData)
+
+				bfloat16VectorFieldData.Data = append(bfloat16VectorFieldData.Data, singleData...)
+				length, err := eventReader.GetPayloadLengthFromReader()
+				if err != nil {
+					eventReader.Close()
+					binlogReader.Close()
+					return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, err
+				}
+				totalLength += length
+				bfloat16VectorFieldData.Dim = dim
+				insertData.Data[fieldID] = bfloat16VectorFieldData
 
 			case schemapb.DataType_FloatVector:
 				var singleData []float32

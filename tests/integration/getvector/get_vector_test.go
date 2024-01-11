@@ -124,6 +124,8 @@ func (s *TestGetVectorSuite) run() {
 		vecFieldData = integration.NewFloatVectorFieldData(vecFieldName, NB, dim)
 	} else if s.vecType == schemapb.DataType_Float16Vector {
 		vecFieldData = integration.NewFloat16VectorFieldData(vecFieldName, NB, dim)
+		// } else if s.vecType == schemapb.DataType_BFloat16Vector {
+		// 	vecFieldData = integration.NewBFloat16VectorFieldData(vecFieldName, NB, dim)
 	} else {
 		vecFieldData = integration.NewBinaryVectorFieldData(vecFieldName, NB, dim)
 	}
@@ -250,6 +252,7 @@ func (s *TestGetVectorSuite) run() {
 		// 		s.Require().ElementsMatch(expect, actual)
 		// 	}
 		// }
+	} else if s.vecType == schemapb.DataType_BFloat16Vector {
 	} else {
 		s.Require().Len(result.GetFieldsData()[vecFieldIndex].GetVectors().GetBinaryVector(), nq*topk*dim/8)
 		rawData := vecFieldData.GetVectors().GetBinaryVector()
@@ -304,6 +307,16 @@ func (s *TestGetVectorSuite) TestGetVector_Float16Vector() {
 	s.vecType = schemapb.DataType_Float16Vector
 	s.run()
 }
+
+// func (s *TestGetVectorSuite) TestGetVector_BFloat16Vector() {
+// 	s.nq = 10
+// 	s.topK = 10
+// 	s.indexType = integration.IndexFaissIDMap
+// 	s.metricType = metric.L2
+// 	s.pkType = schemapb.DataType_Int64
+// 	s.vecType = schemapb.DataType_BFloat16Vector
+// 	s.run()
+// }
 
 func (s *TestGetVectorSuite) TestGetVector_IVF_FLAT() {
 	s.nq = 10

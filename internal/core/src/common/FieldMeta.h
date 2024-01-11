@@ -51,6 +51,9 @@ datatype_sizeof(DataType data_type, int dim = 1) {
         case DataType::VECTOR_FLOAT16: {
             return sizeof(float16) * dim;
         }
+        case DataType::VECTOR_BFLOAT16: {
+            return sizeof(bfloat16) * dim;
+        }
         default: {
             throw SegcoreError(DataTypeInvalid,
                                fmt::format("invalid type is {}", data_type));
@@ -94,6 +97,9 @@ datatype_name(DataType data_type) {
         case DataType::VECTOR_FLOAT16: {
             return "vector_float16";
         }
+        case DataType::VECTOR_BFLOAT16: {
+            return "vector_bfloat16";
+        }
         default: {
             PanicInfo(DataTypeInvalid, "Unsupported DataType({})", data_type);
         }
@@ -104,7 +110,8 @@ inline bool
 datatype_is_vector(DataType datatype) {
     return datatype == DataType::VECTOR_BINARY ||
            datatype == DataType::VECTOR_FLOAT ||
-           datatype == DataType::VECTOR_FLOAT16;
+           datatype == DataType::VECTOR_FLOAT16 ||
+           datatype == DataType::VECTOR_BFLOAT16;
 }
 
 inline bool

@@ -1710,7 +1710,7 @@ func (t *loadPartitionsTask) Execute(ctx context.Context) error {
 	for _, index := range indexResponse.IndexInfos {
 		fieldIndexIDs[index.FieldID] = index.IndexID
 		for _, field := range collSchema.Fields {
-			if index.FieldID == field.FieldID && (field.DataType == schemapb.DataType_FloatVector || field.DataType == schemapb.DataType_BinaryVector || field.DataType == schemapb.DataType_Float16Vector) {
+			if index.FieldID == field.FieldID && isVectorType(field.DataType) {
 				hasVecIndex = true
 			}
 		}

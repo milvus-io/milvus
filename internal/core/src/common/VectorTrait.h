@@ -42,6 +42,12 @@ class Float16Vector : public VectorTrait {
     static constexpr auto metric_type = DataType::VECTOR_FLOAT16;
 };
 
+class BFloat16Vector : public VectorTrait {
+ public:
+    using embedded_type = bfloat16;
+    static constexpr auto metric_type = DataType::VECTOR_BFLOAT16;
+};
+
 template <typename VectorType>
 inline constexpr int64_t
 element_sizeof(int64_t dim) {
@@ -50,6 +56,8 @@ element_sizeof(int64_t dim) {
         return dim * sizeof(float);
     } else if constexpr (std::is_same_v<VectorType, Float16Vector>) {
         return dim * sizeof(float16);
+    } else if constexpr (std::is_same_v<VectorType, BFloat16Vector>) {
+        return dim * sizeof(bfloat16);
     } else {
         return dim / 8;
     }
@@ -78,7 +86,11 @@ struct EmbeddedTypeImpl<T, std::enable_if_t<IsVector<T>>> {
     using type = std::conditional_t<
         std::is_same_v<T, FloatVector>,
         float,
-        std::conditional_t<std::is_same_v<T, Float16Vector>, float16, uint8_t>>;
+        std::conditional_t<std::is_same_v<T, Float16Vector>,
+                           float16,
+                           std::conditional_t<std::is_same_v<T, BFloat16Vector>,
+                                              bfloat16,
+                                              uint8_t>>>;
 };
 
 template <typename T>

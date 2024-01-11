@@ -32,7 +32,8 @@ CheckBruteForceSearchParam(const FieldMeta& field,
     AssertInfo(datatype_is_vector(data_type),
                "[BruteForceSearch] Data type isn't vector type");
     bool is_float_data_type = (data_type == DataType::VECTOR_FLOAT ||
-                               data_type == DataType::VECTOR_FLOAT16);
+                               data_type == DataType::VECTOR_FLOAT16 ||
+                               data_type == DataType::VECTOR_BFLOAT16);
     bool is_float_metric_type = IsFloatMetricType(metric_type);
     AssertInfo(is_float_data_type == is_float_metric_type,
                "[BruteForceSearch] Data type and metric type miss-match");
@@ -55,36 +56,6 @@ BruteForceSearch(const dataset::SearchDataset& dataset,
 
     auto base_dataset = knowhere::GenDataSet(chunk_rows, dim, chunk_data_raw);
     auto query_dataset = knowhere::GenDataSet(nq, dim, dataset.query_data);
-
-    if (data_type == DataType::VECTOR_FLOAT16) {
-        // Todo: Temporarily use cast to float32 to achieve, need to optimize
-        // first, First, transfer the cast to knowhere part
-        // second, knowhere partially supports float16 and removes the forced conversion to float32
-        auto xb = base_dataset->GetTensor();
-        std::vector<float> float_xb(base_dataset->GetRows() *
-                                    base_dataset->GetDim());
-
-        auto xq = query_dataset->GetTensor();
-        std::vector<float> float_xq(query_dataset->GetRows() *
-                                    query_dataset->GetDim());
-
-        auto fp16_xb = static_cast<const float16*>(xb);
-        for (int i = 0; i < base_dataset->GetRows() * base_dataset->GetDim();
-             i++) {
-            float_xb[i] = (float)fp16_xb[i];
-        }
-
-        auto fp16_xq = static_cast<const float16*>(xq);
-        for (int i = 0; i < query_dataset->GetRows() * query_dataset->GetDim();
-             i++) {
-            float_xq[i] = (float)fp16_xq[i];
-        }
-        void* void_ptr_xb = static_cast<void*>(float_xb.data());
-        void* void_ptr_xq = static_cast<void*>(float_xq.data());
-        base_dataset = knowhere::GenDataSet(chunk_rows, dim, void_ptr_xb);
-        query_dataset = knowhere::GenDataSet(nq, dim, void_ptr_xq);
-    }
-
     auto config = knowhere::Json{
         {knowhere::meta::METRIC_TYPE, dataset.metric_type},
         {knowhere::meta::DIM, dim},
@@ -101,8 +72,20 @@ BruteForceSearch(const dataset::SearchDataset& dataset,
             CheckRangeSearchParam(
                 config[RADIUS], config[RANGE_FILTER], dataset.metric_type);
         }
-        auto res = knowhere::BruteForce::RangeSearch(
-            base_dataset, query_dataset, config, bitset);
+        knowhere::expected<knowhere::DataSetPtr> res;
+        if (data_type == DataType::VECTOR_FLOAT) {
+            res = knowhere::BruteForce::RangeSearch<float>(
+                base_dataset, query_dataset, config, bitset);
+        } else if (data_type == DataType::VECTOR_FLOAT16) {
+            res = knowhere::BruteForce::RangeSearch<float16>(
+                base_dataset, query_dataset, config, bitset);
+        } else if (data_type == DataType::VECTOR_BFLOAT16) {
+            res = knowhere::BruteForce::RangeSearch<bfloat16>(
+                base_dataset, query_dataset, config, bitset);
+        } else if (data_type == DataType::VECTOR_BINARY) {
+            res = knowhere::BruteForce::RangeSearch<uint8_t>(
+                base_dataset, query_dataset, config, bitset);
+        }
         milvus::tracer::AddEvent("knowhere_finish_BruteForce_RangeSearch");
         if (!res.has_value()) {
             PanicInfo(KnowhereError,
@@ -118,13 +101,40 @@ BruteForceSearch(const dataset::SearchDataset& dataset,
         std::copy_n(
             GetDatasetDistance(result), nq * topk, sub_result.get_distances());
     } else {
-        auto stat = knowhere::BruteForce::SearchWithBuf(
-            base_dataset,
-            query_dataset,
-            sub_result.mutable_seg_offsets().data(),
-            sub_result.mutable_distances().data(),
-            config,
-            bitset);
+        knowhere::Status stat;
+        if (data_type == DataType::VECTOR_FLOAT) {
+            stat = knowhere::BruteForce::SearchWithBuf<float>(
+                base_dataset,
+                query_dataset,
+                sub_result.mutable_seg_offsets().data(),
+                sub_result.mutable_distances().data(),
+                config,
+                bitset);
+        } else if (data_type == DataType::VECTOR_FLOAT16) {
+            stat = knowhere::BruteForce::SearchWithBuf<float16>(
+                base_dataset,
+                query_dataset,
+                sub_result.mutable_seg_offsets().data(),
+                sub_result.mutable_distances().data(),
+                config,
+                bitset);
+        } else if (data_type == DataType::VECTOR_BFLOAT16) {
+            stat = knowhere::BruteForce::SearchWithBuf<bfloat16>(
+                base_dataset,
+                query_dataset,
+                sub_result.mutable_seg_offsets().data(),
+                sub_result.mutable_distances().data(),
+                config,
+                bitset);
+        } else if (data_type == DataType::VECTOR_BINARY) {
+            stat = knowhere::BruteForce::SearchWithBuf<uint8_t>(
+                base_dataset,
+                query_dataset,
+                sub_result.mutable_seg_offsets().data(),
+                sub_result.mutable_distances().data(),
+                config,
+                bitset);
+        }
         milvus::tracer::AddEvent("knowhere_finish_BruteForce_SearchWithBuf");
         if (stat != knowhere::Status::success) {
             throw SegcoreError(
@@ -135,5 +145,4 @@ BruteForceSearch(const dataset::SearchDataset& dataset,
     sub_result.round_values();
     return sub_result;
 }
-
 }  // namespace milvus::query
