@@ -25,6 +25,7 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -45,6 +46,7 @@ type Collection struct {
 
 	mut             sync.RWMutex
 	refreshNotifier chan struct{}
+	LoadSpan        trace.Span
 }
 
 func (collection *Collection) SetRefreshNotifier(notifier chan struct{}) {
@@ -79,6 +81,7 @@ func (collection *Collection) Clone() *Collection {
 		CreatedAt:          collection.CreatedAt,
 		UpdatedAt:          collection.UpdatedAt,
 		refreshNotifier:    collection.refreshNotifier,
+		LoadSpan:           collection.LoadSpan,
 	}
 }
 
@@ -502,6 +505,10 @@ func (m *CollectionManager) UpdateLoadPercent(partitionID int64, loadPercent int
 	saveCollection := false
 	if collectionPercent == 100 {
 		saveCollection = true
+		if newCollection.LoadSpan != nil {
+			newCollection.LoadSpan.End()
+			newCollection.LoadSpan = nil
+		}
 		newCollection.Status = querypb.LoadStatus_Loaded
 
 		// if collection becomes loaded, clear it's recoverTimes in load info
