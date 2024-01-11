@@ -16,14 +16,14 @@
 
 #pragma once
 
+#include <fmt/core.h>
 #include <memory>
 #include <string>
 #include <vector>
 
-#include <fmt/core.h>
-
 #include "common/Schema.h"
 #include "common/Types.h"
+#include "common/Utils.h"
 #include "pb/plan.pb.h"
 
 namespace milvus {
@@ -73,7 +73,7 @@ struct ColumnInfo {
         return fmt::format("[FieldId:{}, data_type:{}, nested_path:{}]",
                            std::to_string(field_id_.get()),
                            data_type_,
-                           milvus::Join(nested_path_, ","));
+                           milvus::Join<std::string>(nested_path_, ","));
     }
 };
 

@@ -442,9 +442,9 @@ func (s *LocalSegment) Search(ctx context.Context, searchReq *SearchRequest) (*S
 	traceID := span.SpanContext().TraceID()
 	spanID := span.SpanContext().SpanID()
 	traceCtx := C.CTraceContext{
-		traceID: (*C.uint8_t)(unsafe.Pointer(&traceID[0])),
-		spanID:  (*C.uint8_t)(unsafe.Pointer(&spanID[0])),
-		flag:    C.uchar(span.SpanContext().TraceFlags()),
+		traceID:    (*C.uint8_t)(unsafe.Pointer(&traceID[0])),
+		spanID:     (*C.uint8_t)(unsafe.Pointer(&spanID[0])),
+		traceFlags: (C.uint8_t)(span.SpanContext().TraceFlags()),
 	}
 
 	hasIndex := s.ExistIndex(searchReq.searchFieldID)
@@ -455,10 +455,10 @@ func (s *LocalSegment) Search(ctx context.Context, searchReq *SearchRequest) (*S
 	var status C.CStatus
 	GetSQPool().Submit(func() (any, error) {
 		tr := timerecord.NewTimeRecorder("cgoSearch")
-		status = C.Search(s.ptr,
+		status = C.Search(traceCtx,
+			s.ptr,
 			searchReq.plan.cSearchPlan,
 			searchReq.cPlaceholderGroup,
-			traceCtx,
 			C.uint64_t(searchReq.mvccTimestamp),
 			&searchResult.cSearchResult,
 		)
@@ -496,9 +496,9 @@ func (s *LocalSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segco
 	traceID := span.SpanContext().TraceID()
 	spanID := span.SpanContext().SpanID()
 	traceCtx := C.CTraceContext{
-		traceID: (*C.uint8_t)(unsafe.Pointer(&traceID[0])),
-		spanID:  (*C.uint8_t)(unsafe.Pointer(&spanID[0])),
-		flag:    C.uchar(span.SpanContext().TraceFlags()),
+		traceID:    (*C.uint8_t)(unsafe.Pointer(&traceID[0])),
+		spanID:     (*C.uint8_t)(unsafe.Pointer(&spanID[0])),
+		traceFlags: (C.uint8_t)(span.SpanContext().TraceFlags()),
 	}
 
 	maxLimitSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
@@ -507,9 +507,9 @@ func (s *LocalSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segco
 	GetSQPool().Submit(func() (any, error) {
 		ts := C.uint64_t(plan.Timestamp)
 		tr := timerecord.NewTimeRecorder("cgoRetrieve")
-		status = C.Retrieve(s.ptr,
+		status = C.Retrieve(traceCtx,
+			s.ptr,
 			plan.cRetrievePlan,
-			traceCtx,
 			ts,
 			&retrieveResult.cRetrieveResult,
 			C.int64_t(maxLimitSize))

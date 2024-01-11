@@ -214,9 +214,9 @@ func (li *LoadIndexInfo) appendIndexData(ctx context.Context, indexKeys []string
 			traceID := span.SpanContext().TraceID()
 			spanID := span.SpanContext().SpanID()
 			traceCtx := C.CTraceContext{
-				traceID: (*C.uint8_t)(unsafe.Pointer(&traceID[0])),
-				spanID:  (*C.uint8_t)(unsafe.Pointer(&spanID[0])),
-				flag:    C.uchar(span.SpanContext().TraceFlags()),
+				traceID:    (*C.uint8_t)(unsafe.Pointer(&traceID[0])),
+				spanID:     (*C.uint8_t)(unsafe.Pointer(&spanID[0])),
+				traceFlags: (C.uint8_t)(span.SpanContext().TraceFlags()),
 			}
 
 			status = C.AppendIndexV2(traceCtx, li.cLoadIndexInfo)

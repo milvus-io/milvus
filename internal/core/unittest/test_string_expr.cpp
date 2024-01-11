@@ -9,23 +9,26 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <boost/format.hpp>
 #include <gtest/gtest.h>
 #include <memory>
-#include <boost/format.hpp>
 #include <regex>
 
+#include "common/Tracer.h"
 #include "pb/plan.pb.h"
 #include "query/Expr.h"
-#include "query/generated/PlanNodeVisitor.h"
+#include "query/PlanProto.h"
+#include "query/SearchBruteForce.h"
+#include "query/Utils.h"
 #include "query/generated/ExecExprVisitor.h"
+#include "query/generated/PlanNodeVisitor.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
-#include "query/PlanProto.h"
-#include "query/Utils.h"
-#include "query/SearchBruteForce.h"
 
 using namespace milvus;
+using namespace milvus::query;
+using namespace milvus::segcore;
 
 namespace {
 auto
@@ -237,9 +240,6 @@ GenStrPKSchema() {
 }  // namespace
 
 TEST(StringExpr, Term) {
-    using namespace milvus::query;
-    using namespace milvus::segcore;
-
     auto schema = GenTestSchema();
     const auto& fvec_meta = schema->operator[](FieldName("fvec"));
     const auto& str_meta = schema->operator[](FieldName("str"));
@@ -301,9 +301,6 @@ TEST(StringExpr, Term) {
 }
 
 TEST(StringExpr, Compare) {
-    using namespace milvus::query;
-    using namespace milvus::segcore;
-
     auto schema = GenTestSchema();
     const auto& fvec_meta = schema->operator[](FieldName("fvec"));
     const auto& str_meta = schema->operator[](FieldName("str"));
@@ -419,9 +416,6 @@ TEST(StringExpr, Compare) {
 }
 
 TEST(StringExpr, UnaryRange) {
-    using namespace milvus::query;
-    using namespace milvus::segcore;
-
     auto schema = GenTestSchema();
     const auto& fvec_meta = schema->operator[](FieldName("fvec"));
     const auto& str_meta = schema->operator[](FieldName("str"));
@@ -518,9 +512,6 @@ TEST(StringExpr, UnaryRange) {
 }
 
 TEST(StringExpr, BinaryRange) {
-    using namespace milvus::query;
-    using namespace milvus::segcore;
-
     auto schema = GenTestSchema();
     const auto& fvec_meta = schema->operator[](FieldName("fvec"));
     const auto& str_meta = schema->operator[](FieldName("str"));
@@ -636,9 +627,6 @@ TEST(StringExpr, BinaryRange) {
 }
 
 TEST(AlwaysTrueStringPlan, SearchWithOutputFields) {
-    using namespace milvus::query;
-    using namespace milvus::segcore;
-
     auto schema = GenStrPKSchema();
     const auto& fvec_meta = schema->operator[](FieldName("fvec"));
     const auto& str_meta = schema->operator[](FieldName("str"));
@@ -671,18 +659,24 @@ TEST(AlwaysTrueStringPlan, SearchWithOutputFields) {
 
     std::vector<const PlaceholderGroup*> ph_group_arr = {ph_group.get()};
 
+    MetricType metric_type = knowhere::metric::L2;
     query::dataset::SearchDataset search_dataset{
-        knowhere::metric::L2,  //
+        metric_type,  //
         num_queries,           //
         topk,                  //
         round_decimal,
         dim,       //
         query_ptr  //
     };
+
+    SearchInfo search_info;
+    search_info.topk_ = topk;
+    search_info.round_decimal_ = round_decimal;
+    search_info.metric_type_ = metric_type;
     auto sub_result = BruteForceSearch(search_dataset,
                                        vec_col.data(),
                                        N,
-                                       knowhere::Json(),
+                                       search_info,
                                        nullptr,
                                        DataType::VECTOR_FLOAT);
 
@@ -708,9 +702,6 @@ TEST(AlwaysTrueStringPlan, SearchWithOutputFields) {
 }
 
 TEST(AlwaysTrueStringPlan, QueryWithOutputFields) {
-    using namespace milvus::query;
-    using namespace milvus::segcore;
-
     auto schema = GenStrPKSchema();
     const auto& fvec_meta = schema->operator[](FieldName("fvec"));
     const auto& str_meta = schema->operator[](FieldName("str"));
