@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/mocks"
+	"github.com/milvus-io/milvus/internal/kv/predicates"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -429,7 +430,7 @@ func Test_AlterSegments(t *testing.T) {
 func Test_DropSegment(t *testing.T) {
 	t.Run("remove failed", func(t *testing.T) {
 		metakv := mocks.NewMetaKv(t)
-		metakv.EXPECT().MultiRemove(mock.Anything).Return(errors.New("error"))
+		metakv.EXPECT().MultiSaveAndRemoveWithPrefix(mock.Anything, mock.Anything).Return(errors.New("error"))
 
 		catalog := NewCatalog(metakv, rootPath, "")
 		err := catalog.DropSegment(context.TODO(), segment1)
@@ -439,7 +440,7 @@ func Test_DropSegment(t *testing.T) {
 	t.Run("remove successfully", func(t *testing.T) {
 		removedKvs := make(map[string]struct{}, 0)
 		metakv := mocks.NewMetaKv(t)
-		metakv.EXPECT().MultiRemove(mock.Anything).RunAndReturn(func(s []string) error {
+		metakv.EXPECT().MultiSaveAndRemoveWithPrefix(mock.Anything, mock.Anything).RunAndReturn(func(m map[string]string, s []string, p ...predicates.Predicate) error {
 			for _, key := range s {
 				removedKvs[key] = struct{}{}
 			}
@@ -450,8 +451,13 @@ func Test_DropSegment(t *testing.T) {
 		err := catalog.DropSegment(context.TODO(), segment1)
 		assert.NoError(t, err)
 
+		segKey := buildSegmentPath(segment1.GetCollectionID(), segment1.GetPartitionID(), segment1.GetID())
+		binlogPreix := fmt.Sprintf("%s/%d/%d/%d", SegmentBinlogPathPrefix, segment1.GetCollectionID(), segment1.GetPartitionID(), segment1.GetID())
+		deltalogPreix := fmt.Sprintf("%s/%d/%d/%d", SegmentDeltalogPathPrefix, segment1.GetCollectionID(), segment1.GetPartitionID(), segment1.GetID())
+		statelogPreix := fmt.Sprintf("%s/%d/%d/%d", SegmentStatslogPathPrefix, segment1.GetCollectionID(), segment1.GetPartitionID(), segment1.GetID())
+
 		assert.Equal(t, 4, len(removedKvs))
-		for _, k := range []string{k1, k2, k3, k5} {
+		for _, k := range []string{segKey, binlogPreix, deltalogPreix, statelogPreix} {
 			_, ok := removedKvs[k]
 			assert.True(t, ok)
 		}
