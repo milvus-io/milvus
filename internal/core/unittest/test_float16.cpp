@@ -153,7 +153,7 @@ TEST(Float16, ExecWithoutPredicateFlat) {
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
-    auto sr = segment->Search(plan.get(), ph_group.get());
+    auto sr = segment->Search(plan.get(), ph_group.get(), 1L << 63);
     int topk = 5;
 
     query::Json json = SearchResultToJson(*sr);
@@ -411,7 +411,7 @@ TEST(Float16, ExecWithPredicate) {
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
-    auto sr = segment->Search(plan.get(), ph_group.get());
+    auto sr = segment->Search(plan.get(), ph_group.get(), 1L << 63);
     int topk = 5;
 
     query::Json json = SearchResultToJson(*sr);

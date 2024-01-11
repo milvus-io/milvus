@@ -80,10 +80,11 @@ TEST(Sealed, without_predicate) {
         CreatePlaceholderGroupFromBlob(num_queries, 16, query_ptr);
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+    Timestamp timestamp = 1000000;
 
     std::vector<const PlaceholderGroup*> ph_group_arr = {ph_group.get()};
 
-    auto sr = segment->Search(plan.get(), ph_group.get());
+    auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
     auto pre_result = SearchResultToJson(*sr);
     milvus::index::CreateIndexInfo create_index_info;
     create_index_info.field_type = DataType::VECTOR_FLOAT;
@@ -127,7 +128,7 @@ TEST(Sealed, without_predicate) {
     sealed_segment->DropFieldData(fake_id);
     sealed_segment->LoadIndex(load_info);
 
-    sr = sealed_segment->Search(plan.get(), ph_group.get());
+    sr = sealed_segment->Search(plan.get(), ph_group.get(), timestamp);
 
     auto post_result = SearchResultToJson(*sr);
     std::cout << "ref_result" << std::endl;
@@ -135,6 +136,9 @@ TEST(Sealed, without_predicate) {
     std::cout << "post_result" << std::endl;
     std::cout << post_result.dump(1);
     // ASSERT_EQ(ref_result.dump(1), post_result.dump(1));
+
+    sr = sealed_segment->Search(plan.get(), ph_group.get(), 0);
+    EXPECT_EQ(sr->get_total_result_count(), 0);
 }
 
 TEST(Sealed, with_predicate) {
@@ -196,10 +200,11 @@ TEST(Sealed, with_predicate) {
         CreatePlaceholderGroupFromBlob(num_queries, 16, query_ptr);
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+    Timestamp timestamp = 1000000;
 
     std::vector<const PlaceholderGroup*> ph_group_arr = {ph_group.get()};
 
-    auto sr = segment->Search(plan.get(), ph_group.get());
+    auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
     milvus::index::CreateIndexInfo create_index_info;
     create_index_info.field_type = DataType::VECTOR_FLOAT;
     create_index_info.metric_type = knowhere::metric::L2;
@@ -242,7 +247,7 @@ TEST(Sealed, with_predicate) {
     sealed_segment->DropFieldData(fake_id);
     sealed_segment->LoadIndex(load_info);
 
-    sr = sealed_segment->Search(plan.get(), ph_group.get());
+    sr = sealed_segment->Search(plan.get(), ph_group.get(), timestamp);
 
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * topK;
@@ -303,6 +308,7 @@ TEST(Sealed, with_predicate_filter_all) {
         CreatePlaceholderGroupFromBlob(num_queries, 16, query_ptr);
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+    Timestamp timestamp = 1000000;
 
     std::vector<const PlaceholderGroup*> ph_group_arr = {ph_group.get()};
 
@@ -337,7 +343,7 @@ TEST(Sealed, with_predicate_filter_all) {
     ivf_sealed_segment->DropFieldData(fake_id);
     ivf_sealed_segment->LoadIndex(load_info);
 
-    auto sr = ivf_sealed_segment->Search(plan.get(), ph_group.get());
+    auto sr = ivf_sealed_segment->Search(plan.get(), ph_group.get(), timestamp);
     EXPECT_EQ(sr->get_total_result_count(), 0);
 
     auto hnsw_conf =
@@ -371,7 +377,8 @@ TEST(Sealed, with_predicate_filter_all) {
     hnsw_sealed_segment->DropFieldData(fake_id);
     hnsw_sealed_segment->LoadIndex(hnsw_load_info);
 
-    auto sr2 = hnsw_sealed_segment->Search(plan.get(), ph_group.get());
+    auto sr2 =
+        hnsw_sealed_segment->Search(plan.get(), ph_group.get(), timestamp);
     EXPECT_EQ(sr2->get_total_result_count(), 0);
 }
 
@@ -454,7 +461,7 @@ TEST(Sealed, LoadFieldData) {
                                     >
                                     placeholder_tag: "$0"
      >)";
-
+    Timestamp timestamp = 1000000;
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
         CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
@@ -463,13 +470,13 @@ TEST(Sealed, LoadFieldData) {
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
-    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get()));
+    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get(), timestamp));
 
     SealedLoadFieldData(dataset, *segment);
-    segment->Search(plan.get(), ph_group.get());
+    segment->Search(plan.get(), ph_group.get(), timestamp);
 
     segment->DropFieldData(fakevec_id);
-    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get()));
+    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get(), timestamp));
 
     LoadIndexInfo vec_info;
     vec_info.field_id = fakevec_id.get();
@@ -492,12 +499,12 @@ TEST(Sealed, LoadFieldData) {
         ASSERT_EQ(chunk_span3[i], ref3[i]);
     }
 
-    auto sr = segment->Search(plan.get(), ph_group.get());
+    auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
     auto json = SearchResultToJson(*sr);
     std::cout << json.dump(1);
 
     segment->DropIndex(fakevec_id);
-    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get()));
+    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get(), timestamp));
 }
 
 TEST(Sealed, LoadFieldDataMmap) {
@@ -552,7 +559,7 @@ TEST(Sealed, LoadFieldDataMmap) {
                                     >
                                     placeholder_tag: "$0"
      >)";
-
+    Timestamp timestamp = 1000000;
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
         CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
@@ -561,13 +568,13 @@ TEST(Sealed, LoadFieldDataMmap) {
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
-    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get()));
+    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get(), timestamp));
 
     SealedLoadFieldData(dataset, *segment, {}, true);
-    segment->Search(plan.get(), ph_group.get());
+    segment->Search(plan.get(), ph_group.get(), timestamp);
 
     segment->DropFieldData(fakevec_id);
-    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get()));
+    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get(), timestamp));
 
     LoadIndexInfo vec_info;
     vec_info.field_id = fakevec_id.get();
@@ -590,12 +597,12 @@ TEST(Sealed, LoadFieldDataMmap) {
         ASSERT_EQ(chunk_span3[i], ref3[i]);
     }
 
-    auto sr = segment->Search(plan.get(), ph_group.get());
+    auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
     auto json = SearchResultToJson(*sr);
     std::cout << json.dump(1);
 
     segment->DropIndex(fakevec_id);
-    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get()));
+    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get(), timestamp));
 }
 
 TEST(Sealed, LoadScalarIndex) {
@@ -670,7 +677,7 @@ TEST(Sealed, LoadScalarIndex) {
                                     >
                                     placeholder_tag: "$0"
      >)";
-
+    Timestamp timestamp = 1000000;
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
         CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
@@ -732,7 +739,7 @@ TEST(Sealed, LoadScalarIndex) {
     nothing_index.index = GenScalarIndexing<int32_t>(N, nothing_data.data());
     segment->LoadIndex(nothing_index);
 
-    auto sr = segment->Search(plan.get(), ph_group.get());
+    auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
     auto json = SearchResultToJson(*sr);
     std::cout << json.dump(1);
 }
@@ -781,7 +788,7 @@ TEST(Sealed, Delete) {
                                     >
                                     placeholder_tag: "$0"
      >)";
-
+    Timestamp timestamp = 1000000;
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
         CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
@@ -790,7 +797,7 @@ TEST(Sealed, Delete) {
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
-    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get()));
+    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get(), timestamp));
 
     SealedLoadFieldData(dataset, *segment);
 
@@ -865,7 +872,7 @@ TEST(Sealed, OverlapDelete) {
                                     >
                                     placeholder_tag: "$0"
      >)";
-
+    Timestamp timestamp = 1000000;
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
         CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
@@ -874,7 +881,7 @@ TEST(Sealed, OverlapDelete) {
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
-    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get()));
+    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get(), timestamp));
 
     SealedLoadFieldData(dataset, *segment);
 
@@ -992,7 +999,7 @@ TEST(Sealed, BF) {
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
-    auto result = segment->Search(plan.get(), ph_group.get());
+    auto result = segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
     auto ves = SearchResultToVector(*result);
     // first: offset, second: distance
     EXPECT_GE(ves[0].first, 0);
@@ -1046,7 +1053,7 @@ TEST(Sealed, BF_Overflow) {
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
-    auto result = segment->Search(plan.get(), ph_group.get());
+    auto result = segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
     auto ves = SearchResultToVector(*result);
     for (int i = 0; i < num_queries; ++i) {
         EXPECT_EQ(ves[0].first, -1);
@@ -1322,7 +1329,7 @@ TEST(Sealed, LoadArrayFieldData) {
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
     SealedLoadFieldData(dataset, *segment);
-    segment->Search(plan.get(), ph_group.get());
+    segment->Search(plan.get(), ph_group.get(), 1L << 63);
 
     auto ids_ds = GenRandomIds(N);
     auto s = dynamic_cast<SegmentSealedImpl*>(segment.get());
@@ -1379,7 +1386,7 @@ TEST(Sealed, LoadArrayFieldDataWithMMap) {
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
     SealedLoadFieldData(dataset, *segment, {}, true);
-    segment->Search(plan.get(), ph_group.get());
+    segment->Search(plan.get(), ph_group.get(), 1L << 63);
 }
 
 TEST(Sealed, QueryAllFields) {

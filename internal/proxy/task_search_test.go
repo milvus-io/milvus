@@ -1985,7 +1985,7 @@ func TestSearchTask_Requery(t *testing.T) {
 
 		lb := NewMockLBPolicy(t)
 		lb.EXPECT().Execute(mock.Anything, mock.Anything).Run(func(ctx context.Context, workload CollectionWorkLoad) {
-			err = workload.exec(ctx, 0, qn)
+			err = workload.exec(ctx, 0, qn, "")
 			assert.NoError(t, err)
 		}).Return(nil)
 		lb.EXPECT().UpdateCostMetrics(mock.Anything, mock.Anything).Return()
@@ -2065,7 +2065,7 @@ func TestSearchTask_Requery(t *testing.T) {
 
 		lb := NewMockLBPolicy(t)
 		lb.EXPECT().Execute(mock.Anything, mock.Anything).Run(func(ctx context.Context, workload CollectionWorkLoad) {
-			_ = workload.exec(ctx, 0, qn)
+			_ = workload.exec(ctx, 0, qn, "")
 		}).Return(fmt.Errorf("mock err 1"))
 		node.lbPolicy = lb
 
@@ -2099,7 +2099,7 @@ func TestSearchTask_Requery(t *testing.T) {
 
 		lb := NewMockLBPolicy(t)
 		lb.EXPECT().Execute(mock.Anything, mock.Anything).Run(func(ctx context.Context, workload CollectionWorkLoad) {
-			_ = workload.exec(ctx, 0, qn)
+			_ = workload.exec(ctx, 0, qn, "")
 		}).Return(fmt.Errorf("mock err 1"))
 		node.lbPolicy = lb
 
