@@ -19,6 +19,7 @@
 #include "ExprImpl.h"
 #include "common/VectorTrait.h"
 #include "common/EasyAssert.h"
+#include "log/Log.h"
 #include "generated/ExtractInfoExprVisitor.h"
 #include "generated/ExtractInfoPlanNodeVisitor.h"
 #include "pb/plan.pb.h"
@@ -173,7 +174,8 @@ ExtractBinaryArithOpEvalRangeExprImpl(
 }
 
 std::unique_ptr<VectorPlanNode>
-ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
+ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto,
+                               const tracer::TraceContext trace_ctx) {
     // TODO: add more buffs
     Assert(plan_node_proto.has_vector_anns());
     auto& anns_proto = plan_node_proto.vector_anns();
@@ -202,6 +204,8 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
     search_info.round_decimal_ = query_info_proto.round_decimal();
     search_info.search_params_ =
         nlohmann::json::parse(query_info_proto.search_params());
+    search_info.trace_ctx_ = tracer::TraceContext{
+        trace_ctx.traceID, trace_ctx.spanID, trace_ctx.traceFlags};
 
     if (query_info_proto.group_by_field_id() != 0) {
         auto group_by_field_id = FieldId(query_info_proto.group_by_field_id());
@@ -221,6 +225,7 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
             return std::make_unique<FloatVectorANNS>();
         }
     }();
+
     plan_node->placeholder_tag_ = anns_proto.placeholder_tag();
     plan_node->predicate_ = std::move(expr_opt);
     if (anns_proto.has_predicates()) {
@@ -231,8 +236,8 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
 }
 
 std::unique_ptr<RetrievePlanNode>
-ProtoParser::RetrievePlanNodeFromProto(
-    const planpb::PlanNode& plan_node_proto) {
+ProtoParser::RetrievePlanNodeFromProto(const planpb::PlanNode& plan_node_proto,
+                                       const tracer::TraceContext trace_ctx) {
     Assert(plan_node_proto.has_predicates() || plan_node_proto.has_query());
 
     auto plan_node = [&]() -> std::unique_ptr<RetrievePlanNode> {
@@ -268,6 +273,8 @@ ProtoParser::RetrievePlanNodeFromProto(
             node->is_count_ = query.is_count();
             node->limit_ = query.limit();
         }
+        node->trace_ctx_ = tracer::TraceContext{
+            trace_ctx.traceID, trace_ctx.spanID, trace_ctx.traceFlags};
         return node;
     }();
 
@@ -275,10 +282,11 @@ ProtoParser::RetrievePlanNodeFromProto(
 }
 
 std::unique_ptr<Plan>
-ProtoParser::CreatePlan(const proto::plan::PlanNode& plan_node_proto) {
+ProtoParser::CreatePlan(const proto::plan::PlanNode& plan_node_proto,
+                        const tracer::TraceContext trace_ctx) {
     auto plan = std::make_unique<Plan>(schema);
 
-    auto plan_node = PlanNodeFromProto(plan_node_proto);
+    auto plan_node = PlanNodeFromProto(plan_node_proto, trace_ctx);
     ExtractedPlanInfo plan_info(schema.size());
     ExtractInfoPlanNodeVisitor extractor(plan_info);
     plan_node->accept(extractor);
@@ -296,10 +304,11 @@ ProtoParser::CreatePlan(const proto::plan::PlanNode& plan_node_proto) {
 }
 
 std::unique_ptr<RetrievePlan>
-ProtoParser::CreateRetrievePlan(const proto::plan::PlanNode& plan_node_proto) {
+ProtoParser::CreateRetrievePlan(const proto::plan::PlanNode& plan_node_proto,
+                                const tracer::TraceContext trace_ctx) {
     auto retrieve_plan = std::make_unique<RetrievePlan>(schema);
 
-    auto plan_node = RetrievePlanNodeFromProto(plan_node_proto);
+    auto plan_node = RetrievePlanNodeFromProto(plan_node_proto, trace_ctx);
     ExtractedPlanInfo plan_info(schema.size());
     ExtractInfoPlanNodeVisitor extractor(plan_info);
     plan_node->accept(extractor);

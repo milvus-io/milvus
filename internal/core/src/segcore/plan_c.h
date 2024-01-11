@@ -9,6 +9,8 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#pragma once
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -25,13 +27,14 @@ typedef void* CRetrievePlan;
 
 // Note: serialized_expr_plan is of binary format
 CStatus
-CreateSearchPlanByExpr(CCollection col,
+CreateSearchPlanByExpr(CCollection c_col,
                        const void* serialized_expr_plan,
                        const int64_t size,
-                       CSearchPlan* res_plan);
+                       CSearchPlan* res_plan,
+                       CTraceContext c_trace_ctx);
 
 CStatus
-ParsePlaceholderGroup(CSearchPlan plan,
+ParsePlaceholderGroup(CSearchPlan c_plan,
                       const void* placeholder_group_blob,
                       const int64_t blob_size,
                       CPlaceholderGroup* res_placeholder_group);
@@ -61,7 +64,8 @@ CStatus
 CreateRetrievePlanByExpr(CCollection c_col,
                          const void* serialized_expr_plan,
                          const int64_t size,
-                         CRetrievePlan* res_plan);
+                         CRetrievePlan* res_plan,
+                         CTraceContext c_trace_ctx);
 
 void
 DeleteRetrievePlan(CRetrievePlan plan);

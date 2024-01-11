@@ -71,17 +71,19 @@ ParsePlaceholderGroup(const Plan* plan,
 std::unique_ptr<Plan>
 CreateSearchPlanByExpr(const Schema& schema,
                        const void* serialized_expr_plan,
-                       const int64_t size) {
+                       const int64_t size,
+                       const tracer::TraceContext trace_ctx) {
     // Note: serialized_expr_plan is of binary format
     proto::plan::PlanNode plan_node;
     plan_node.ParseFromArray(serialized_expr_plan, size);
-    return ProtoParser(schema).CreatePlan(plan_node);
+    return ProtoParser(schema).CreatePlan(plan_node, trace_ctx);
 }
 
 std::unique_ptr<RetrievePlan>
 CreateRetrievePlanByExpr(const Schema& schema,
                          const void* serialized_expr_plan,
-                         const int64_t size) {
+                         const int64_t size,
+                         const tracer::TraceContext trace_ctx) {
     proto::plan::PlanNode plan_node;
     google::protobuf::io::ArrayInputStream array_stream(serialized_expr_plan,
                                                         size);
@@ -92,7 +94,7 @@ CreateRetrievePlanByExpr(const Schema& schema,
     if (!res) {
         throw SegcoreError(UnexpectedError, "parse plan node proto failed");
     }
-    return ProtoParser(schema).CreateRetrievePlan(plan_node);
+    return ProtoParser(schema).CreateRetrievePlan(plan_node, trace_ctx);
 }
 
 int64_t

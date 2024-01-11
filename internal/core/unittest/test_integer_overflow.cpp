@@ -9,13 +9,11 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <boost/format.hpp>
 #include <gtest/gtest.h>
 #include <cstdint>
 #include <memory>
 #include <regex>
 #include <vector>
-#include <chrono>
 
 #include "common/Types.h"
 #include "query/Expr.h"
@@ -25,10 +23,11 @@
 #include "test_utils/DataGen.h"
 
 using namespace milvus;
+using namespace milvus::query;
+using namespace milvus::segcore;
+using namespace milvus::tracer;
 
 TEST(Expr, IntegerOverflow) {
-    using namespace milvus::query;
-    using namespace milvus::segcore;
     std::vector<std::tuple<std::string, std::function<bool(int8_t)>>> testcases = {
         /////////////////////////////////////////////////////////// term
         {

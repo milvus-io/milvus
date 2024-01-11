@@ -221,7 +221,7 @@ AppendIndexV2(CTraceContext c_trace, CLoadIndexInfo c_load_index_info) {
         index_info.index_engine_version = engine_version;
 
         auto ctx = milvus::tracer::TraceContext{
-            c_trace.traceID, c_trace.spanID, c_trace.flag};
+            c_trace.traceID, c_trace.spanID, c_trace.traceFlags};
         auto span = milvus::tracer::StartSpan("SegCoreLoadIndex", &ctx);
         milvus::tracer::SetRootSpan(span);
 

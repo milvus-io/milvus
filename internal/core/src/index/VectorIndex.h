@@ -101,6 +101,27 @@ class VectorIndex : public IndexBase {
             err_msg);
     }
 
+    knowhere::Json
+    PrepareSearchParams(const SearchInfo& search_info) {
+        knowhere::Json search_cfg = search_info.search_params_;
+
+        search_cfg[knowhere::meta::METRIC_TYPE] = search_info.metric_type_;
+        search_cfg[knowhere::meta::TOPK] = search_info.topk_;
+
+        // save trace context into search conf
+        if (search_info.trace_ctx_.traceID != nullptr &&
+            search_info.trace_ctx_.spanID != nullptr) {
+            search_cfg[knowhere::meta::TRACE_ID] =
+                tracer::GetTraceIDAsStr(&search_info.trace_ctx_);
+            search_cfg[knowhere::meta::SPAN_ID] =
+                tracer::GetSpanIDAsStr(&search_info.trace_ctx_);
+            search_cfg[knowhere::meta::TRACE_FLAGS] =
+                search_info.trace_ctx_.traceFlags;
+        }
+
+        return search_cfg;
+    }
+
  private:
     MetricType metric_type_;
     int64_t dim_;

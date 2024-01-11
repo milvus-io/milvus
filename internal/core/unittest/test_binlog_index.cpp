@@ -13,18 +13,19 @@
 #include <boost/format.hpp>
 #include <regex>
 
+#include "index/IndexFactory.h"
+#include "knowhere/comp/brute_force.h"
 #include "pb/plan.pb.h"
+#include "pb/schema.pb.h"
+#include "query/Plan.h"
 #include "segcore/segcore_init_c.h"
 #include "segcore/SegmentSealed.h"
 #include "segcore/SegmentSealedImpl.h"
-#include "pb/schema.pb.h"
 #include "test_utils/DataGen.h"
-#include "index/IndexFactory.h"
-#include "query/Plan.h"
-#include "knowhere/comp/brute_force.h"
 
-using namespace milvus::segcore;
 using namespace milvus;
+using namespace milvus::segcore;
+using namespace milvus::tracer;
 namespace pb = milvus::proto;
 
 std::shared_ptr<float[]>

@@ -26,6 +26,7 @@ using json = nlohmann::json;
 using namespace milvus;
 using namespace milvus::query;
 using namespace milvus::segcore;
+using namespace milvus::tracer;
 
 namespace {
 const int64_t ROW_COUNT = 100 * 1000;
@@ -77,8 +78,6 @@ TEST(Query, ParsePlaceholderGroup) {
 }
 
 TEST(Query, ExecWithPredicateLoader) {
-    using namespace milvus::query;
-    using namespace milvus::segcore;
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
@@ -161,8 +160,6 @@ TEST(Query, ExecWithPredicateLoader) {
 }
 
 TEST(Query, ExecWithPredicateSmallN) {
-    using namespace milvus::query;
-    using namespace milvus::segcore;
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 7, knowhere::metric::L2);
@@ -222,8 +219,6 @@ TEST(Query, ExecWithPredicateSmallN) {
 }
 
 TEST(Query, ExecWithPredicate) {
-    using namespace milvus::query;
-    using namespace milvus::segcore;
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
@@ -306,8 +301,6 @@ TEST(Query, ExecWithPredicate) {
 }
 
 TEST(Query, ExecTerm) {
-    using namespace milvus::query;
-    using namespace milvus::segcore;
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
@@ -365,8 +358,6 @@ TEST(Query, ExecTerm) {
 }
 
 TEST(Query, ExecEmpty) {
-    using namespace milvus::query;
-    using namespace milvus::segcore;
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField("age", DataType::FLOAT);
     schema->AddDebugField(
@@ -406,8 +397,6 @@ TEST(Query, ExecEmpty) {
 }
 
 TEST(Query, ExecWithoutPredicateFlat) {
-    using namespace milvus::query;
-    using namespace milvus::segcore;
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, std::nullopt);
     schema->AddDebugField("age", DataType::FLOAT);
@@ -448,8 +437,6 @@ TEST(Query, ExecWithoutPredicateFlat) {
 }
 
 TEST(Query, ExecWithoutPredicate) {
-    using namespace milvus::query;
-    using namespace milvus::segcore;
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
@@ -704,8 +691,6 @@ TEST(Query, FillSegment) {
 }
 
 TEST(Query, ExecWithPredicateBinary) {
-    using namespace milvus::query;
-    using namespace milvus::segcore;
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugField(
         "fakevec", DataType::VECTOR_BINARY, 512, knowhere::metric::JACCARD);

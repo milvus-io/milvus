@@ -11,6 +11,7 @@
 
 #include <gtest/gtest.h>
 
+#include "common/Tracer.h"
 #include "pb/plan.pb.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
@@ -19,6 +20,7 @@
 #include "query/Plan.h"
 
 using namespace milvus::segcore;
+using namespace milvus::tracer;
 using namespace milvus;
 namespace pb = milvus::proto;
 

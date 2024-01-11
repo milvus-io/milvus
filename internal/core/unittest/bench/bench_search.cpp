@@ -19,6 +19,7 @@
 using namespace milvus;
 using namespace milvus::query;
 using namespace milvus::segcore;
+using namespace milvus::tracer;
 
 static int dim = 768;
 

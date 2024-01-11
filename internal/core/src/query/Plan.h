@@ -16,6 +16,7 @@
 
 #include "PlanImpl.h"
 #include "common/Schema.h"
+#include "common/Tracer.h"
 #include "pb/plan.pb.h"
 #include "pb/segcore.pb.h"
 
@@ -30,7 +31,8 @@ struct RetrievePlan;
 std::unique_ptr<Plan>
 CreateSearchPlanByExpr(const Schema& schema,
                        const void* serialized_expr_plan,
-                       const int64_t size);
+                       const int64_t size,
+                       const tracer::TraceContext trace_ctx = {});
 
 std::unique_ptr<PlaceholderGroup>
 ParsePlaceholderGroup(const Plan* plan,
@@ -48,7 +50,8 @@ GetNumOfQueries(const PlaceholderGroup*);
 std::unique_ptr<RetrievePlan>
 CreateRetrievePlanByExpr(const Schema& schema,
                          const void* serialized_expr_plan,
-                         const int64_t size);
+                         const int64_t size,
+                         const tracer::TraceContext trace_ctx = {});
 
 // Query Overall TopK from Plan
 // Used to alloc result memory at Go side

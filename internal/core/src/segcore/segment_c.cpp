@@ -79,7 +79,6 @@ CStatus
 Search(CSegmentInterface c_segment,
        CSearchPlan c_plan,
        CPlaceholderGroup c_placeholder_group,
-       CTraceContext c_trace,
        uint64_t timestamp,
        CSearchResult* result) {
     try {
@@ -87,10 +86,11 @@ Search(CSegmentInterface c_segment,
         auto plan = (milvus::query::Plan*)c_plan;
         auto phg_ptr = reinterpret_cast<const milvus::query::PlaceholderGroup*>(
             c_placeholder_group);
-        auto ctx = milvus::tracer::TraceContext{
-            c_trace.traceID, c_trace.spanID, c_trace.flag};
-        auto span = milvus::tracer::StartSpan("SegCoreSearch", &ctx);
+
+        auto span = milvus::tracer::StartSpan(
+            "SegCoreSearch", &plan->plan_node_->search_info_.trace_ctx_);
         milvus::tracer::SetRootSpan(span);
+
         auto search_result = segment->Search(plan, phg_ptr, timestamp);
         if (!milvus::PositivelyRelated(
                 plan->plan_node_->search_info_.metric_type_)) {
@@ -115,7 +115,6 @@ DeleteRetrieveResult(CRetrieveResult* retrieve_result) {
 CStatus
 Retrieve(CSegmentInterface c_segment,
          CRetrievePlan c_plan,
-         CTraceContext c_trace,
          uint64_t timestamp,
          CRetrieveResult* result,
          int64_t limit_size) {
@@ -124,9 +123,9 @@ Retrieve(CSegmentInterface c_segment,
             static_cast<milvus::segcore::SegmentInterface*>(c_segment);
         auto plan = static_cast<const milvus::query::RetrievePlan*>(c_plan);
 
-        auto ctx = milvus::tracer::TraceContext{
-            c_trace.traceID, c_trace.spanID, c_trace.flag};
-        auto span = milvus::tracer::StartSpan("SegCoreRetrieve", &ctx);
+        auto span = milvus::tracer::StartSpan("SegCoreRetrieve",
+                                              &plan->plan_node_->trace_ctx_);
+        milvus::tracer::SetRootSpan(span);
 
         auto retrieve_result = segment->Retrieve(plan, timestamp, limit_size);
 

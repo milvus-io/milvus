@@ -19,6 +19,7 @@ package segments
 /*
 #cgo pkg-config: milvus_segcore
 
+#include "common/type_c.h"
 #include "segcore/collection_c.h"
 #include "segcore/segment_c.h"
 #include "segcore/plan_c.h"
@@ -31,6 +32,7 @@ import (
 	"unsafe"
 
 	"github.com/cockroachdb/errors"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -47,7 +49,18 @@ func createSearchPlanByExpr(ctx context.Context, col *Collection, expr []byte) (
 		return nil, errors.New("nil collection ptr, collectionID = " + fmt.Sprintln(col.id))
 	}
 	var cPlan C.CSearchPlan
-	status := C.CreateSearchPlanByExpr(col.collectionPtr, unsafe.Pointer(&expr[0]), (C.int64_t)(len(expr)), &cPlan)
+
+	span := trace.SpanFromContext(ctx)
+	traceID := span.SpanContext().TraceID()
+	spanID := span.SpanContext().SpanID()
+	traceFlags := span.SpanContext().TraceFlags()
+	traceCtx := C.CTraceContext{
+		traceID:    (*C.uint8_t)(unsafe.Pointer(&traceID[0])),
+		spanID:     (*C.uint8_t)(unsafe.Pointer(&spanID[0])),
+		traceFlags: (C.uint8_t)(traceFlags),
+	}
+
+	status := C.CreateSearchPlanByExpr(col.collectionPtr, unsafe.Pointer(&expr[0]), (C.int64_t)(len(expr)), &cPlan, traceCtx)
 
 	err1 := HandleCStatus(ctx, &status, "Create Plan by expr failed")
 	if err1 != nil {
@@ -181,9 +194,20 @@ func NewRetrievePlan(ctx context.Context, col *Collection, expr []byte, timestam
 	if col.collectionPtr == nil {
 		return nil, merr.WrapErrCollectionNotFound(col.id, "collection released")
 	}
-
 	var cPlan C.CRetrievePlan
-	status := C.CreateRetrievePlanByExpr(col.collectionPtr, unsafe.Pointer(&expr[0]), (C.int64_t)(len(expr)), &cPlan)
+
+	span := trace.SpanFromContext(ctx)
+	traceID := span.SpanContext().TraceID()
+	spanID := span.SpanContext().SpanID()
+	traceFlags := span.SpanContext().TraceFlags()
+	traceCtx := C.CTraceContext{
+		traceID:    (*C.uint8_t)(unsafe.Pointer(&traceID[0])),
+		spanID:     (*C.uint8_t)(unsafe.Pointer(&spanID[0])),
+		traceFlags: (C.uint8_t)(traceFlags),
+	}
+
+	status := C.CreateRetrievePlanByExpr(
+		col.collectionPtr, unsafe.Pointer(&expr[0]), (C.int64_t)(len(expr)), &cPlan, traceCtx)
 
 	err := HandleCStatus(ctx, &status, "Create retrieve plan by expr failed")
 	if err != nil {

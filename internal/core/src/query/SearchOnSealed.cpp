@@ -91,12 +91,8 @@ SearchOnSealed(const Schema& schema,
 
     auto data_type = field.get_data_type();
     CheckBruteForceSearchParam(field, search_info);
-    auto sub_qr = BruteForceSearch(dataset,
-                                   vec_data,
-                                   row_count,
-                                   search_info.search_params_,
-                                   bitset,
-                                   data_type);
+    auto sub_qr = BruteForceSearch(
+        dataset, vec_data, row_count, search_info, bitset, data_type);
 
     result.distances_ = std::move(sub_qr.mutable_distances());
     result.seg_offsets_ = std::move(sub_qr.mutable_seg_offsets());

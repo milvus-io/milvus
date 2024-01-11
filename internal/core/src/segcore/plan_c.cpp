@@ -19,12 +19,16 @@ CStatus
 CreateSearchPlanByExpr(CCollection c_col,
                        const void* serialized_expr_plan,
                        const int64_t size,
-                       CSearchPlan* res_plan) {
+                       CSearchPlan* res_plan,
+                       CTraceContext c_trace_ctx) {
     auto col = (milvus::segcore::Collection*)c_col;
 
     try {
+        auto trace_ctx = milvus::tracer::TraceContext{
+            c_trace_ctx.traceID, c_trace_ctx.spanID, c_trace_ctx.traceFlags};
+
         auto res = milvus::query::CreateSearchPlanByExpr(
-            *col->get_schema(), serialized_expr_plan, size);
+            *col->get_schema(), serialized_expr_plan, size, trace_ctx);
         auto col_index_meta = col->get_index_meta();
         auto field_id = milvus::query::GetFieldID(res.get());
         AssertInfo(col_index_meta != nullptr, "index meta not exist");
@@ -137,12 +141,16 @@ CStatus
 CreateRetrievePlanByExpr(CCollection c_col,
                          const void* serialized_expr_plan,
                          const int64_t size,
-                         CRetrievePlan* res_plan) {
+                         CRetrievePlan* res_plan,
+                         CTraceContext c_trace_ctx) {
     auto col = static_cast<milvus::segcore::Collection*>(c_col);
 
     try {
+        auto trace_ctx = milvus::tracer::TraceContext{
+            c_trace_ctx.traceID, c_trace_ctx.spanID, c_trace_ctx.traceFlags};
+
         auto res = milvus::query::CreateRetrievePlanByExpr(
-            *col->get_schema(), serialized_expr_plan, size);
+            *col->get_schema(), serialized_expr_plan, size, trace_ctx);
 
         auto status = CStatus();
         status.error_code = milvus::Success;

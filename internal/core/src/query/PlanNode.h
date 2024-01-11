@@ -18,6 +18,7 @@
 #include <string>
 
 #include "common/QueryInfo.h"
+#include "common/Tracer.h"
 #include "query/Expr.h"
 
 namespace milvus::plan {
@@ -76,6 +77,7 @@ struct RetrievePlanNode : PlanNode {
     std::optional<std::shared_ptr<milvus::plan::PlanNode>> filter_plannode_;
     bool is_count_;
     int64_t limit_;
+    tracer::TraceContext trace_ctx_;
 };
 
 }  // namespace milvus::query

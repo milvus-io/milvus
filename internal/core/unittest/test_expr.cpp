@@ -35,11 +35,13 @@
 #include "exec/expression/Expr.h"
 #include "exec/Task.h"
 
+using namespace milvus;
+using namespace milvus::query;
+using namespace milvus::segcore;
+using namespace milvus::tracer;
+
 TEST(Expr, Range) {
     SUCCEED();
-    using namespace milvus;
-    using namespace milvus::query;
-    using namespace milvus::segcore;
     // std::string dsl_string = R"({
     //     "bool": {
     //         "must": [
@@ -121,9 +123,6 @@ TEST(Expr, Range) {
 
 TEST(Expr, RangeBinary) {
     SUCCEED();
-    using namespace milvus;
-    using namespace milvus::query;
-    using namespace milvus::segcore;
     // std::string dsl_string = R"({
     //     "bool": {
     //         "must": [
@@ -204,9 +203,6 @@ TEST(Expr, RangeBinary) {
 
 TEST(Expr, InvalidRange) {
     SUCCEED();
-    using namespace milvus;
-    using namespace milvus::query;
-    using namespace milvus::segcore;
     //     std::string dsl_string = R"(
     // {
     //     "bool": {
@@ -283,9 +279,6 @@ TEST(Expr, InvalidRange) {
 }
 
 TEST(Expr, ShowExecutor) {
-    using namespace milvus;
-    using namespace milvus::query;
-    using namespace milvus::segcore;
     auto node = std::make_unique<FloatVectorANNS>();
     auto schema = std::make_shared<Schema>();
     auto metric_type = knowhere::metric::L2;
@@ -308,9 +301,6 @@ TEST(Expr, ShowExecutor) {
 }
 
 TEST(Expr, TestRange) {
-    using namespace milvus;
-    using namespace milvus::query;
-    using namespace milvus::segcore;
     std::vector<std::tuple<std::string, std::function<bool(int)>>> testcases = {
         {R"(binary_range_expr: <
               column_info: <
@@ -529,10 +519,6 @@ TEST(Expr, TestRange) {
 }
 
 TEST(Expr, TestBinaryRangeJSON) {
-    using namespace milvus;
-    using namespace milvus::query;
-    using namespace milvus::segcore;
-
     struct Testcase {
         bool lower_inclusive;
         bool upper_inclusive;
@@ -632,10 +618,6 @@ TEST(Expr, TestBinaryRangeJSON) {
 }
 
 TEST(Expr, TestExistsJson) {
-    using namespace milvus;
-    using namespace milvus::query;
-    using namespace milvus::segcore;
-
     struct Testcase {
         std::vector<std::string> nested_path;
     };
@@ -727,10 +709,6 @@ GetValueFromProto(const milvus::proto::plan::GenericValue& value_proto) {
 };
 
 TEST(Expr, TestUnaryRangeJson) {
-    using namespace milvus;
-    using namespace milvus::query;
-    using namespace milvus::segcore;
-
     struct Testcase {
         int64_t val;
         std::vector<std::string> nested_path;
@@ -900,10 +878,6 @@ TEST(Expr, TestUnaryRangeJson) {
 }
 
 TEST(Expr, TestTermJson) {
-    using namespace milvus;
-    using namespace milvus::query;
-    using namespace milvus::segcore;
-
     struct Testcase {
         std::vector<int64_t> term;
         std::vector<std::string> nested_path;
@@ -975,9 +949,6 @@ TEST(Expr, TestTermJson) {
 }
 
 TEST(Expr, TestTerm) {
-    using namespace milvus;
-    using namespace milvus::query;
-    using namespace milvus::segcore;
     auto vec_2k_3k = [] {
         std::string buf;
         for (int i = 2000; i < 3000; ++i) {
@@ -1102,9 +1073,6 @@ TEST(Expr, TestTerm) {
 }
 
 TEST(Expr, TestCompare) {
-    using namespace milvus;
-    using namespace milvus::query;
-    using namespace milvus::segcore;
     std::vector<std::tuple<std::string, std::function<bool(int, int64_t)>>>
         testcases = {
             {R"(LessThan)", [](int a, int64_t b) { return a < b; }},
@@ -1222,9 +1190,6 @@ TEST(Expr, TestCompare) {
 }
 
 TEST(Expr, TestCompareWithScalarIndex) {
-    using namespace milvus;
-    using namespace milvus::query;
-    using namespace milvus::segcore;
     std::vector<std::tuple<std::string, std::function<bool(int, int64_t)>>>
         testcases = {
             {R"(LessThan)", [](int a, int64_t b) { return a < b; }},
@@ -1321,9 +1286,6 @@ TEST(Expr, TestCompareWithScalarIndex) {
 }
 
 TEST(Expr, TestCompareExpr) {
-    using namespace milvus;
-    using namespace milvus::query;
-    using namespace milvus::segcore;
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
@@ -1473,9 +1435,6 @@ TEST(Expr, TestCompareExpr) {
 }
 
 TEST(Expr, TestMultiLogicalExprsOptimization) {
-    using namespace milvus;
-    using namespace milvus::query;
-    using namespace milvus::segcore;
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
@@ -1562,9 +1521,6 @@ TEST(Expr, TestMultiLogicalExprsOptimization) {
 }
 
 TEST(Expr, TestExprs) {
-    using namespace milvus;
-    using namespace milvus::query;
-    using namespace milvus::segcore;
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
@@ -1737,9 +1693,6 @@ TEST(Expr, TestExprs) {
 }
 
 TEST(Expr, test_term_pk) {
-    using namespace milvus;
-    using namespace milvus::query;
-    using namespace milvus::segcore;
     auto schema = std::make_shared<Schema>();
     schema->AddField(FieldName("Timestamp"), FieldId(1), DataType::INT64);
     auto vec_fid = schema->AddDebugField(
@@ -1804,9 +1757,6 @@ TEST(Expr, test_term_pk) {
 }
 
 TEST(Expr, TestSealedSegmentGetBatchSize) {
-    using namespace milvus;
-    using namespace milvus::query;
-    using namespace milvus::segcore;
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
@@ -1869,9 +1819,6 @@ TEST(Expr, TestSealedSegmentGetBatchSize) {
 }
 
 TEST(Expr, TestGrowingSegmentGetBatchSize) {
-    using namespace milvus;
-    using namespace milvus::query;
-    using namespace milvus::segcore;
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
@@ -1928,9 +1875,6 @@ TEST(Expr, TestGrowingSegmentGetBatchSize) {
 }
 
 TEST(Expr, TestConjuctExpr) {
-    using namespace milvus;
-    using namespace milvus::query;
-    using namespace milvus::segcore;
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
@@ -1999,9 +1943,6 @@ TEST(Expr, TestConjuctExpr) {
 }
 
 TEST(Expr, TestUnaryBenchTest) {
-    using namespace milvus;
-    using namespace milvus::query;
-    using namespace milvus::segcore;
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
@@ -2074,9 +2015,6 @@ TEST(Expr, TestUnaryBenchTest) {
 }
 
 TEST(Expr, TestBinaryRangeBenchTest) {
-    using namespace milvus;
-    using namespace milvus::query;
-    using namespace milvus::segcore;
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
@@ -2158,9 +2096,6 @@ TEST(Expr, TestBinaryRangeBenchTest) {
 }
 
 TEST(Expr, TestLogicalUnaryBenchTest) {
-    using namespace milvus;
-    using namespace milvus::query;
-    using namespace milvus::segcore;
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
@@ -2236,9 +2171,6 @@ TEST(Expr, TestLogicalUnaryBenchTest) {
 }
 
 TEST(Expr, TestBinaryLogicalBenchTest) {
-    using namespace milvus;
-    using namespace milvus::query;
-    using namespace milvus::segcore;
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
@@ -2324,9 +2256,6 @@ TEST(Expr, TestBinaryLogicalBenchTest) {
 }
 
 TEST(Expr, TestBinaryArithOpEvalRangeBenchExpr) {
-    using namespace milvus;
-    using namespace milvus::query;
-    using namespace milvus::segcore;
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
@@ -2408,9 +2337,6 @@ TEST(Expr, TestBinaryArithOpEvalRangeBenchExpr) {
 }
 
 TEST(Expr, TestCompareExprBenchTest) {
-    using namespace milvus;
-    using namespace milvus::query;
-    using namespace milvus::segcore;
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
@@ -2485,9 +2411,6 @@ TEST(Expr, TestCompareExprBenchTest) {
 }
 
 TEST(Expr, TestRefactorExprs) {
-    using namespace milvus;
-    using namespace milvus::query;
-    using namespace milvus::segcore;
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
@@ -2658,9 +2581,6 @@ TEST(Expr, TestRefactorExprs) {
 }
 
 TEST(Expr, TestCompareWithScalarIndexMaris) {
-    using namespace milvus;
-    using namespace milvus::query;
-    using namespace milvus::segcore;
     std::vector<
         std::tuple<std::string, std::function<bool(std::string, std::string)>>>
         testcases = {
@@ -2760,9 +2680,6 @@ TEST(Expr, TestCompareWithScalarIndexMaris) {
 }
 
 TEST(Expr, TestBinaryArithOpEvalRange) {
-    using namespace milvus;
-    using namespace milvus::query;
-    using namespace milvus::segcore;
     std::vector<std::tuple<std::string, std::function<bool(int)>, DataType>>
         testcases = {
             // Add test cases for BinaryArithOpEvalRangeExpr EQ of various data types
@@ -3136,10 +3053,6 @@ TEST(Expr, TestBinaryArithOpEvalRange) {
 }
 
 TEST(Expr, TestBinaryArithOpEvalRangeJSON) {
-    using namespace milvus;
-    using namespace milvus::query;
-    using namespace milvus::segcore;
-
     struct Testcase {
         int64_t right_operand;
         int64_t value;
@@ -3229,10 +3142,6 @@ TEST(Expr, TestBinaryArithOpEvalRangeJSON) {
 }
 
 TEST(Expr, TestBinaryArithOpEvalRangeJSONFloat) {
-    using namespace milvus;
-    using namespace milvus::query;
-    using namespace milvus::segcore;
-
     struct Testcase {
         double right_operand;
         double value;
@@ -3359,9 +3268,6 @@ TEST(Expr, TestBinaryArithOpEvalRangeJSONFloat) {
 }
 
 TEST(Expr, TestBinaryArithOpEvalRangeWithScalarSortIndex) {
-    using namespace milvus;
-    using namespace milvus::query;
-    using namespace milvus::segcore;
     std::vector<std::tuple<std::string, std::function<bool(int)>, DataType>>
         testcases = {
             // Add test cases for BinaryArithOpEvalRangeExpr EQ of various data types
@@ -3678,9 +3584,6 @@ TEST(Expr, TestBinaryArithOpEvalRangeWithScalarSortIndex) {
 }
 
 TEST(Expr, TestUnaryRangeWithJSON) {
-    using namespace milvus;
-    using namespace milvus::query;
-    using namespace milvus::segcore;
     std::vector<
         std::tuple<std::string,
                    std::function<bool(
@@ -3881,9 +3784,6 @@ TEST(Expr, TestUnaryRangeWithJSON) {
 }
 
 TEST(Expr, TestTermWithJSON) {
-    using namespace milvus;
-    using namespace milvus::query;
-    using namespace milvus::segcore;
     std::vector<
         std::tuple<std::string,
                    std::function<bool(
@@ -4062,9 +3962,6 @@ TEST(Expr, TestTermWithJSON) {
 }
 
 TEST(Expr, TestExistsWithJSON) {
-    using namespace milvus;
-    using namespace milvus::query;
-    using namespace milvus::segcore;
     std::vector<std::tuple<std::string, std::function<bool(bool)>, DataType>>
         testcases = {
             {R"()", [](bool v) { return v; }, DataType::BOOL},
@@ -4225,10 +4122,6 @@ struct Testcase {
 };
 
 TEST(Expr, TestTermInFieldJson) {
-    using namespace milvus;
-    using namespace milvus::query;
-    using namespace milvus::segcore;
-
     auto schema = std::make_shared<Schema>();
     auto i64_fid = schema->AddDebugField("id", DataType::INT64);
     auto json_fid = schema->AddDebugField("json", DataType::JSON);
@@ -4445,10 +4338,6 @@ TEST(Expr, TestTermInFieldJson) {
 }
 
 TEST(Expr, PraseJsonContainsExpr) {
-    using namespace milvus;
-    using namespace milvus::query;
-    using namespace milvus::segcore;
-
     std::vector<const char*> raw_plans{
         R"(vector_anns:<
             field_id:100
@@ -4592,10 +4481,6 @@ TEST(Expr, PraseJsonContainsExpr) {
 }
 
 TEST(Expr, TestJsonContainsAny) {
-    using namespace milvus;
-    using namespace milvus::query;
-    using namespace milvus::segcore;
-
     auto schema = std::make_shared<Schema>();
     auto i64_fid = schema->AddDebugField("id", DataType::INT64);
     auto json_fid = schema->AddDebugField("json", DataType::JSON);
@@ -4816,10 +4701,6 @@ TEST(Expr, TestJsonContainsAny) {
 }
 
 TEST(Expr, TestJsonContainsAll) {
-    using namespace milvus;
-    using namespace milvus::query;
-    using namespace milvus::segcore;
-
     auto schema = std::make_shared<Schema>();
     auto i64_fid = schema->AddDebugField("id", DataType::INT64);
     auto json_fid = schema->AddDebugField("json", DataType::JSON);
@@ -5064,10 +4945,6 @@ TEST(Expr, TestJsonContainsAll) {
 }
 
 TEST(Expr, TestJsonContainsArray) {
-    using namespace milvus;
-    using namespace milvus::query;
-    using namespace milvus::segcore;
-
     auto schema = std::make_shared<Schema>();
     auto i64_fid = schema->AddDebugField("id", DataType::INT64);
     auto json_fid = schema->AddDebugField("json", DataType::JSON);
@@ -5371,8 +5248,6 @@ generatedArrayWithFourDiffType(int64_t int_val,
                                double float_val,
                                bool bool_val,
                                std::string string_val) {
-    using namespace milvus;
-
     proto::plan::GenericValue value;
     proto::plan::Array diff_type_array;
     diff_type_array.set_same_type(false);
@@ -5397,10 +5272,6 @@ generatedArrayWithFourDiffType(int64_t int_val,
 }
 
 TEST(Expr, TestJsonContainsDiffTypeArray) {
-    using namespace milvus;
-    using namespace milvus::query;
-    using namespace milvus::segcore;
-
     auto schema = std::make_shared<Schema>();
     auto i64_fid = schema->AddDebugField("id", DataType::INT64);
     auto json_fid = schema->AddDebugField("json", DataType::JSON);
@@ -5503,10 +5374,6 @@ TEST(Expr, TestJsonContainsDiffTypeArray) {
 }
 
 TEST(Expr, TestJsonContainsDiffType) {
-    using namespace milvus;
-    using namespace milvus::query;
-    using namespace milvus::segcore;
-
     auto schema = std::make_shared<Schema>();
     auto i64_fid = schema->AddDebugField("id", DataType::INT64);
     auto json_fid = schema->AddDebugField("json", DataType::JSON);

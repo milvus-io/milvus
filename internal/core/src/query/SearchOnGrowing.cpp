@@ -122,7 +122,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
             auto sub_qr = BruteForceSearch(search_dataset,
                                            chunk_data,
                                            size_per_chunk,
-                                           info.search_params_,
+                                           info,
                                            sub_view,
                                            data_type);
 

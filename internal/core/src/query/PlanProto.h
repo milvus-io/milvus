@@ -17,6 +17,7 @@
 #include "Plan.h"
 #include "PlanNode.h"
 #include "common/Schema.h"
+#include "common/Tracer.h"
 #include "pb/plan.pb.h"
 #include "plan/PlanNode.h"
 
@@ -62,16 +63,20 @@ class ProtoParser {
     ParseExpr(const proto::plan::Expr& expr_pb);
 
     std::unique_ptr<VectorPlanNode>
-    PlanNodeFromProto(const proto::plan::PlanNode& plan_node_proto);
+    PlanNodeFromProto(const proto::plan::PlanNode& plan_node_proto,
+                      const tracer::TraceContext trace_ctx = {});
 
     std::unique_ptr<RetrievePlanNode>
-    RetrievePlanNodeFromProto(const proto::plan::PlanNode& plan_node_proto);
+    RetrievePlanNodeFromProto(const proto::plan::PlanNode& plan_node_proto,
+                              const tracer::TraceContext trace_ctx = {});
 
     std::unique_ptr<Plan>
-    CreatePlan(const proto::plan::PlanNode& plan_node_proto);
+    CreatePlan(const proto::plan::PlanNode& plan_node_proto,
+               const tracer::TraceContext trace_ctx = {});
 
     std::unique_ptr<RetrievePlan>
-    CreateRetrievePlan(const proto::plan::PlanNode& plan_node_proto);
+    CreateRetrievePlan(const proto::plan::PlanNode& plan_node_proto,
+                       const tracer::TraceContext trace_ctx = {});
 
     expr::TypedExprPtr
     ParseUnaryRangeExprs(const proto::plan::UnaryRangeExpr& expr_pb);
