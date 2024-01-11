@@ -214,6 +214,9 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
         } else if (anns_proto.vector_type() ==
                    milvus::proto::plan::VectorType::Float16Vector) {
             return std::make_unique<Float16VectorANNS>();
+        } else if (anns_proto.vector_type() ==
+                   milvus::proto::plan::VectorType::BFloat16Vector) {
+            return std::make_unique<BFloat16VectorANNS>();
         } else {
             return std::make_unique<FloatVectorANNS>();
         }

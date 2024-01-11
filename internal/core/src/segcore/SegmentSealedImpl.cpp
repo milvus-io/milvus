@@ -1227,6 +1227,15 @@ SegmentSealedImpl::get_raw_data(FieldId field_id,
                 ret->mutable_vectors()->mutable_float16_vector()->data());
             break;
         }
+        case DataType::VECTOR_BFLOAT16: {
+            bulk_subscript_impl(
+                field_meta.get_sizeof(),
+                column->Data(),
+                seg_offsets,
+                count,
+                ret->mutable_vectors()->mutable_bfloat16_vector()->data());
+            break;
+        }
         case DataType::VECTOR_BINARY: {
             bulk_subscript_impl(
                 field_meta.get_sizeof(),

@@ -485,6 +485,14 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
                 seg_offsets,
                 count,
                 result->mutable_vectors()->mutable_float16_vector()->data());
+        } else if (field_meta.get_data_type() == DataType::VECTOR_BFLOAT16) {
+            bulk_subscript_impl<BFloat16Vector>(
+                field_id,
+                field_meta.get_sizeof(),
+                vec_ptr,
+                seg_offsets,
+                count,
+                result->mutable_vectors()->mutable_bfloat16_vector()->data());
         } else {
             PanicInfo(DataTypeInvalid, "logical error");
         }

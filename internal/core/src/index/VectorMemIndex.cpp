@@ -71,7 +71,8 @@ VectorMemIndex<T>::VectorMemIndex(
         AssertInfo(file_manager_ != nullptr, "create file manager failed!");
     }
     CheckCompatible(version);
-    index_ = knowhere::IndexFactory::Instance().Create(GetIndexType(), version);
+    index_ =
+        knowhere::IndexFactory::Instance().Create<T>(GetIndexType(), version);
 }
 
 template <typename T>
@@ -93,7 +94,8 @@ VectorMemIndex<T>::VectorMemIndex(
     }
     auto version = create_index_info.index_engine_version;
     CheckCompatible(version);
-    index_ = knowhere::IndexFactory::Instance().Create(GetIndexType(), version);
+    index_ =
+        knowhere::IndexFactory::Instance().Create<T>(GetIndexType(), version);
 }
 
 template <typename T>
@@ -887,5 +889,7 @@ VectorMemIndex<T>::LoadFromFileV2(const Config& config) {
 }
 template class VectorMemIndex<float>;
 template class VectorMemIndex<uint8_t>;
+template class VectorMemIndex<float16>;
+template class VectorMemIndex<bfloat16>;
 
 }  // namespace milvus::index

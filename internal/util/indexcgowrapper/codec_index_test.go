@@ -1,6 +1,7 @@
 package indexcgowrapper
 
 import (
+	"math"
 	"math/rand"
 	"os"
 	"strconv"
@@ -102,6 +103,84 @@ func generateFloatVectors(numRows, dim int) []float32 {
 	return ret
 }
 
+type Float16 uint16
+
+func NewFloat16(f float32) Float16 {
+	i := math.Float32bits(f)
+	sign := uint16((i >> 31) & 0x1)
+	exp := (i >> 23) & 0xff
+	exp16 := int16(exp) - 127 + 15
+	frac := uint16(i>>13) & 0x3ff
+	if exp == 0 {
+		exp16 = 0
+	} else if exp == 0xff {
+		exp16 = 0x1f
+	} else {
+		if exp16 > 0x1e {
+			exp16 = 0x1f
+			frac = 0
+		} else if exp16 < 0x01 {
+			exp16 = 0
+			frac = 0
+		}
+	}
+	f16 := (sign << 15) | uint16(exp16<<10) | frac
+	return Float16(f16)
+}
+
+type BFloat16 uint16
+
+func NewBFloat16(f float32) BFloat16 {
+	i := math.Float32bits(f)
+	sign := uint16((i >> 31) & 0x1)
+	exp := (i >> 23) & 0xff
+	exp16 := int16(exp) - 127 + 15
+	frac := uint16(i>>13) & 0x3ff
+	if exp == 0 {
+		exp16 = 0
+	} else if exp == 0xff {
+		exp16 = 0x1f
+	} else {
+		if exp16 > 0x1e {
+			exp16 = 0x1f
+			frac = 0
+		} else if exp16 < 0x01 {
+			exp16 = 0
+			frac = 0
+		}
+	}
+	bf16 := (sign << 15) | uint16(exp16<<10) | frac
+	return BFloat16(bf16)
+}
+
+func generateFloat16Vectors(numRows, dim int) []byte {
+	total := numRows * dim * 2
+	ret := make([]byte, total)
+	float32Array := generateFloat32Array(numRows * dim)
+	for _, f32 := range float32Array {
+		f16 := NewFloat16(f32)
+		b1 := byte(f16 & 0xff)
+		ret = append(ret, b1)
+		b2 := byte(f16 >> 8)
+		ret = append(ret, b2)
+	}
+	return ret
+}
+
+func generateBFloat16Vectors(numRows, dim int) []byte {
+	total := numRows * dim * 2
+	ret := make([]byte, total)
+	float32Array := generateFloat32Array(numRows * dim)
+	for _, f32 := range float32Array {
+		bf16 := NewBFloat16(f32)
+		b1 := byte(bf16 & 0xff)
+		ret = append(ret, b1)
+		b2 := byte(bf16 >> 8)
+		ret = append(ret, b2)
+	}
+	return ret
+}
+
 func generateBinaryVectors(numRows, dim int) []byte {
 	total := (numRows * dim) / 8
 	ret := make([]byte, total)
@@ -158,6 +237,16 @@ func genFieldData(dtype schemapb.DataType, numRows, dim int) storage.FieldData {
 	case schemapb.DataType_FloatVector:
 		return &storage.FloatVectorFieldData{
 			Data: generateFloatVectors(numRows, dim),
+			Dim:  dim,
+		}
+	case schemapb.DataType_Float16Vector:
+		return &storage.Float16VectorFieldData{
+			Data: generateFloat16Vectors(numRows, dim),
+			Dim:  dim,
+		}
+	case schemapb.DataType_BFloat16Vector:
+		return &storage.BFloat16VectorFieldData{
+			Data: generateBFloat16Vectors(numRows, dim),
 			Dim:  dim,
 		}
 	default:
@@ -246,6 +335,40 @@ func genBinaryVecIndexCases(dtype schemapb.DataType) []indexTestCase {
 	}
 }
 
+func genFloat16VecIndexCases(dtype schemapb.DataType) []indexTestCase {
+	return []indexTestCase{
+		{
+			dtype:      dtype,
+			typeParams: nil,
+			indexParams: map[string]string{
+				common.IndexTypeKey:  IndexFaissIVFPQ,
+				common.MetricTypeKey: metric.L2,
+				common.DimKey:        strconv.Itoa(dim),
+				"nlist":              strconv.Itoa(nlist),
+				"m":                  strconv.Itoa(m),
+				"nbits":              strconv.Itoa(nbits),
+			},
+		},
+	}
+}
+
+func genBFloat16VecIndexCases(dtype schemapb.DataType) []indexTestCase {
+	return []indexTestCase{
+		{
+			dtype:      dtype,
+			typeParams: nil,
+			indexParams: map[string]string{
+				common.IndexTypeKey:  IndexFaissIVFPQ,
+				common.MetricTypeKey: metric.L2,
+				common.DimKey:        strconv.Itoa(dim),
+				"nlist":              strconv.Itoa(nlist),
+				"m":                  strconv.Itoa(m),
+				"nbits":              strconv.Itoa(nbits),
+			},
+		},
+	}
+}
+
 func genTypedIndexCase(dtype schemapb.DataType) []indexTestCase {
 	switch dtype {
 	case schemapb.DataType_Bool:
@@ -270,6 +393,10 @@ func genTypedIndexCase(dtype schemapb.DataType) []indexTestCase {
 		return genBinaryVecIndexCases(dtype)
 	case schemapb.DataType_FloatVector:
 		return genFloatVecIndexCases(dtype)
+	case schemapb.DataType_Float16Vector:
+		return genFloat16VecIndexCases(dtype)
+	case schemapb.DataType_BFloat16Vector:
+		return genBFloat16VecIndexCases(dtype)
 	default:
 		return nil
 	}
@@ -288,6 +415,8 @@ func genIndexCase() []indexTestCase {
 		schemapb.DataType_VarChar,
 		schemapb.DataType_BinaryVector,
 		schemapb.DataType_FloatVector,
+		schemapb.DataType_Float16Vector,
+		schemapb.DataType_BFloat16Vector,
 	}
 	var ret []indexTestCase
 	for _, dtype := range dtypes {

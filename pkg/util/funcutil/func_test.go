@@ -276,6 +276,34 @@ func TestGetNumRowsOfFloat16VectorField(t *testing.T) {
 	}
 }
 
+func TestGetNumRowsOfBFloat16VectorField(t *testing.T) {
+	cases := []struct {
+		bDatas   []byte
+		dim      int64
+		want     uint64
+		errIsNil bool
+	}{
+		{[]byte{}, -1, 0, false},     // dim <= 0
+		{[]byte{}, 0, 0, false},      // dim <= 0
+		{[]byte{1.0}, 128, 0, false}, // length % dim != 0
+		{[]byte{}, 128, 0, true},
+		{[]byte{1.0, 2.0}, 1, 1, true},
+		{[]byte{1.0, 2.0, 3.0, 4.0}, 2, 1, true},
+	}
+
+	for _, test := range cases {
+		got, err := GetNumRowsOfBFloat16VectorField(test.bDatas, test.dim)
+		if test.errIsNil {
+			assert.Equal(t, nil, err)
+			if got != test.want {
+				t.Errorf("GetNumRowsOfBFloat16VectorField(%v, %v) = %v, %v", test.bDatas, test.dim, test.want, nil)
+			}
+		} else {
+			assert.NotEqual(t, nil, err)
+		}
+	}
+}
+
 func TestGetNumRowsOfBinaryVectorField(t *testing.T) {
 	cases := []struct {
 		bDatas   []byte

@@ -329,6 +329,12 @@ CreateVectorDataArray(int64_t count, const FieldMeta& field_meta) {
             obj->resize(length * sizeof(float16));
             break;
         }
+        case DataType::VECTOR_BFLOAT16: {
+            auto length = count * dim;
+            auto obj = vector_array->mutable_bfloat16_vector();
+            obj->resize(length * sizeof(bfloat16));
+            break;
+        }
         default: {
             PanicInfo(DataTypeInvalid,
                       fmt::format("unsupported datatype {}", data_type));
@@ -461,6 +467,13 @@ CreateVectorDataArrayFrom(const void* data_raw,
             auto data = reinterpret_cast<const char*>(data_raw);
             auto obj = vector_array->mutable_float16_vector();
             obj->assign(data, length * sizeof(float16));
+            break;
+        }
+        case DataType::VECTOR_BFLOAT16: {
+            auto length = count * dim;
+            auto data = reinterpret_cast<const char*>(data_raw);
+            auto obj = vector_array->mutable_bfloat16_vector();
+            obj->assign(data, length * sizeof(bfloat16));
             break;
         }
         default: {

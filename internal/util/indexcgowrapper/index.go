@@ -130,7 +130,9 @@ func (index *CgoIndex) Build(dataset *Dataset) error {
 	case schemapb.DataType_FloatVector:
 		return index.buildFloatVecIndex(dataset)
 	case schemapb.DataType_Float16Vector:
-		return fmt.Errorf("build index on supported data type: %s", dataset.DType.String())
+		return index.buildFloat16VecIndex(dataset)
+	case schemapb.DataType_BFloat16Vector:
+		return index.buildBFloat16VecIndex(dataset)
 	case schemapb.DataType_BinaryVector:
 		return index.buildBinaryVecIndex(dataset)
 	case schemapb.DataType_Bool:
@@ -160,6 +162,18 @@ func (index *CgoIndex) buildFloatVecIndex(dataset *Dataset) error {
 	vectors := dataset.Data[keyRawArr].([]float32)
 	status := C.BuildFloatVecIndex(index.indexPtr, (C.int64_t)(len(vectors)), (*C.float)(&vectors[0]))
 	return HandleCStatus(&status, "failed to build float vector index")
+}
+
+func (index *CgoIndex) buildFloat16VecIndex(dataset *Dataset) error {
+	vectors := dataset.Data[keyRawArr].([]byte)
+	status := C.BuildFloat16VecIndex(index.indexPtr, (C.int64_t)(len(vectors)), (*C.uint8_t)(&vectors[0]))
+	return HandleCStatus(&status, "failed to build float16 vector index")
+}
+
+func (index *CgoIndex) buildBFloat16VecIndex(dataset *Dataset) error {
+	vectors := dataset.Data[keyRawArr].([]byte)
+	status := C.BuildBFloat16VecIndex(index.indexPtr, (C.int64_t)(len(vectors)), (*C.uint8_t)(&vectors[0]))
+	return HandleCStatus(&status, "failed to build bfloat16 vector index")
 }
 
 func (index *CgoIndex) buildBinaryVecIndex(dataset *Dataset) error {

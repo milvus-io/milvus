@@ -57,6 +57,15 @@ ExtractInfoPlanNodeVisitor::visit(Float16VectorANNS& node) {
 }
 
 void
+ExtractInfoPlanNodeVisitor::visit(BFloat16VectorANNS& node) {
+    plan_info_.add_involved_field(node.search_info_.field_id_);
+    if (node.predicate_.has_value()) {
+        ExtractInfoExprVisitor expr_visitor(plan_info_);
+        node.predicate_.value()->accept(expr_visitor);
+    }
+}
+
+void
 ExtractInfoPlanNodeVisitor::visit(RetrievePlanNode& node) {
     // Assert(node.predicate_.has_value());
     ExtractInfoExprVisitor expr_visitor(plan_info_);

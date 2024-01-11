@@ -271,6 +271,58 @@ BuildFloatVecIndex(CIndex index,
 }
 
 CStatus
+BuildFloat16VecIndex(CIndex index,
+                     int64_t float16_value_num,
+                     const uint8_t* vectors) {
+    auto status = CStatus();
+    try {
+        AssertInfo(
+            index,
+            "failed to build float16 vector index, passed index was null");
+        auto real_index =
+            reinterpret_cast<milvus::indexbuilder::IndexCreatorBase*>(index);
+        auto cIndex =
+            dynamic_cast<milvus::indexbuilder::VecIndexCreator*>(real_index);
+        auto dim = cIndex->dim();
+        auto row_nums = float16_value_num / dim / 2;
+        auto ds = knowhere::GenDataSet(row_nums, dim, vectors);
+        cIndex->Build(ds);
+        status.error_code = Success;
+        status.error_msg = "";
+    } catch (std::exception& e) {
+        status.error_code = UnexpectedError;
+        status.error_msg = strdup(e.what());
+    }
+    return status;
+}
+
+CStatus
+BuildBFloat16VecIndex(CIndex index,
+                      int64_t bfloat16_value_num,
+                      const uint8_t* vectors) {
+    auto status = CStatus();
+    try {
+        AssertInfo(
+            index,
+            "failed to build bfloat16 vector index, passed index was null");
+        auto real_index =
+            reinterpret_cast<milvus::indexbuilder::IndexCreatorBase*>(index);
+        auto cIndex =
+            dynamic_cast<milvus::indexbuilder::VecIndexCreator*>(real_index);
+        auto dim = cIndex->dim();
+        auto row_nums = bfloat16_value_num / dim / 2;
+        auto ds = knowhere::GenDataSet(row_nums, dim, vectors);
+        cIndex->Build(ds);
+        status.error_code = Success;
+        status.error_msg = "";
+    } catch (std::exception& e) {
+        status.error_code = UnexpectedError;
+        status.error_msg = strdup(e.what());
+    }
+    return status;
+}
+
+CStatus
 BuildBinaryVecIndex(CIndex index, int64_t data_size, const uint8_t* vectors) {
     auto status = CStatus();
     try {

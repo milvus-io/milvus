@@ -118,6 +118,7 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			{true, schemapb.DataType_FloatVector, []interface{}{[]float32{1.0, 2.0}}, "valid floatvector"},
 			{true, schemapb.DataType_BinaryVector, []interface{}{[]byte{255}}, "valid binaryvector"},
 			{true, schemapb.DataType_Float16Vector, []interface{}{[]byte{255, 255, 255, 255}}, "valid float16vector"},
+			{true, schemapb.DataType_BFloat16Vector, []interface{}{[]byte{255, 255, 255, 255}}, "valid bfloat16vector"},
 
 			{false, schemapb.DataType_Bool, []interface{}{1, 2}, "invalid bool"},
 			{false, schemapb.DataType_Int8, []interface{}{nil, nil}, "invalid int8"},
@@ -131,6 +132,7 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			{false, schemapb.DataType_FloatVector, []interface{}{nil, nil}, "invalid floatvector"},
 			{false, schemapb.DataType_BinaryVector, []interface{}{nil, nil}, "invalid binaryvector"},
 			{false, schemapb.DataType_Float16Vector, []interface{}{nil, nil}, "invalid float16vector"},
+			{false, schemapb.DataType_BFloat16Vector, []interface{}{nil, nil}, "invalid bfloat16vector"},
 		}
 
 		// make sure all new data types missed to handle would throw unexpected error
