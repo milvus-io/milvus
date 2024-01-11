@@ -682,13 +682,13 @@ func (t *flushBufferInsertTask) flushInsertData() error {
 		}
 		err := group.Wait()
 		metrics.DataNodeSave2StorageLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.InsertLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
-		if err == nil {
-			for _, d := range t.data {
-				metrics.DataNodeFlushedSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.InsertLabel).Add(float64(len(d)))
-			}
+		if err != nil {
+			log.Warn("failed to flush insert data", zap.Error(err))
+			return err
 		}
-		log.Warn("failed to flush insert data", zap.Error(err))
-		return err
+		for _, d := range t.data {
+			metrics.DataNodeFlushedSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.InsertLabel).Add(float64(len(d)))
+		}
 	}
 	return nil
 }
@@ -706,13 +706,13 @@ func (t *flushBufferDeleteTask) flushDeleteData() error {
 		tr := timerecord.NewTimeRecorder("deleteData")
 		err := t.MultiWrite(ctx, t.data)
 		metrics.DataNodeSave2StorageLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.DeleteLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
-		if err == nil {
-			for _, d := range t.data {
-				metrics.DataNodeFlushedSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.DeleteLabel).Add(float64(len(d)))
-			}
+		if err != nil {
+			log.Warn("failed to flush delete data", zap.Error(err))
+			return err
 		}
-		log.Warn("failed to flush delete data", zap.Error(err))
-		return err
+		for _, d := range t.data {
+			metrics.DataNodeFlushedSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.DeleteLabel).Add(float64(len(d)))
+		}
 	}
 	return nil
 }
