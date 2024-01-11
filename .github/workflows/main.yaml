@@ -41,19 +41,16 @@ concurrency:
 
 jobs:
   Build:
-    name: Build and test AMD64 Ubuntu ${{ matrix.ubuntu }}
+    name: Build and test AMD64 Ubuntu 20.04
     runs-on: ubuntu-latest
     timeout-minutes: 180
     strategy:
       fail-fast: false
-      matrix:
-        ubuntu: [20.04]
     env:
-      UBUNTU: ${{ matrix.ubuntu }}
+      UBUNTU: 20.04
     steps:
       - name: Setup mold
         uses: rui314/setup-mold@v1
-        
       - name: Maximize build space
         uses: easimon/maximize-build-space@master
         if: ${{ ! startsWith(runner.name, 'self') }} # skip this step if it is self-hosted runner
@@ -110,10 +107,8 @@ jobs:
     timeout-minutes: 60
     strategy:
       fail-fast: false
-      matrix:
-        ubuntu: [20.04]
     env:
-      UBUNTU: ${{ matrix.ubuntu }}
+      UBUNTU: 20.04
     steps:
       - name: Download Artifact
         uses: actions/download-artifact@v4.1.0
@@ -150,10 +145,8 @@ jobs:
     timeout-minutes: 60
     strategy:
       fail-fast: false
-      matrix:
-        ubuntu: [20.04]
     env:
-      UBUNTU: ${{ matrix.ubuntu }}
+      UBUNTU: 20.04
     steps:
       - name: Download Artifact
         uses: actions/download-artifact@v4.1.0
@@ -189,10 +182,8 @@ jobs:
     timeout-minutes: 60
     strategy:
       fail-fast: false
-      matrix:
-        ubuntu: [20.04]
     env:
-      UBUNTU: ${{ matrix.ubuntu }}
+      UBUNTU: 20.04
     steps:
       - name: Download Artifact
         uses: actions/download-artifact@v4.1.0
@@ -241,7 +232,6 @@ jobs:
       - name: Display structure of code coverage results
         run: |
           ls -lah
-
       - name: Upload coverage to Codecov
         if: "github.repository == 'milvus-io/milvus'"
         uses: codecov/codecov-action@v3.1.1
@@ -258,5 +248,5 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./go_coverage.txt,./lcov_output.info,./it_coverage.txt
-          name: ubuntu-${{ matrix.ubuntu }}-unittests
+          name: ubuntu-20.04-unittests
           fail_ci_if_error: true
