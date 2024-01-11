@@ -195,15 +195,6 @@ func (mgr *segmentManager) Put(segmentType SegmentType, segments ...Segment) {
 			segment.Type().String(),
 			fmt.Sprint(len(segment.Indexes())),
 		).Inc()
-		if segment.InsertCount() > 0 {
-			metrics.QueryNodeNumEntities.WithLabelValues(
-				fmt.Sprint(paramtable.GetNodeID()),
-				fmt.Sprint(segment.Collection()),
-				fmt.Sprint(segment.Partition()),
-				segment.Type().String(),
-				fmt.Sprint(len(segment.Indexes())),
-			).Add(float64(segment.InsertCount()))
-		}
 	}
 	mgr.updateMetric()
 
@@ -557,14 +548,5 @@ func remove(segment Segment) bool {
 		segment.Type().String(),
 		fmt.Sprint(len(segment.Indexes())),
 	).Dec()
-	if segment.InsertCount() > 0 {
-		metrics.QueryNodeNumEntities.WithLabelValues(
-			fmt.Sprint(paramtable.GetNodeID()),
-			fmt.Sprint(segment.Collection()),
-			fmt.Sprint(segment.Partition()),
-			segment.Type().String(),
-			fmt.Sprint(len(segment.Indexes())),
-		).Sub(float64(segment.InsertCount()))
-	}
 	return true
 }

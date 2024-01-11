@@ -536,13 +536,6 @@ func (s *LocalSegment) Insert(ctx context.Context, rowIDs []int64, timestamps []
 	s.insertCount.Add(int64(numOfRow))
 	s.rowNum.Store(-1)
 	s.memSize.Store(-1)
-	metrics.QueryNodeNumEntities.WithLabelValues(
-		fmt.Sprint(paramtable.GetNodeID()),
-		fmt.Sprint(s.collectionID),
-		fmt.Sprint(s.partitionID),
-		s.Type().String(),
-		fmt.Sprint(0),
-	).Add(float64(numOfRow))
 	return nil
 }
 
@@ -979,6 +972,15 @@ func (s *LocalSegment) Release() {
 	}
 
 	C.DeleteSegment(ptr)
+
+	metrics.QueryNodeNumEntities.WithLabelValues(
+		fmt.Sprint(paramtable.GetNodeID()),
+		fmt.Sprint(s.Collection()),
+		fmt.Sprint(s.Partition()),
+		s.Type().String(),
+		fmt.Sprint(len(s.Indexes())),
+	).Sub(float64(s.InsertCount()))
+
 	log.Info("delete segment from memory",
 		zap.Int64("collectionID", s.collectionID),
 		zap.Int64("partitionID", s.partitionID),
