@@ -250,10 +250,6 @@ func (s *LocalSegment) InsertCount() int64 {
 	s.ptrLock.RLock()
 	defer s.ptrLock.RUnlock()
 
-	if !s.isValid() {
-		return 0
-	}
-
 	return s.insertCount.Load()
 }
 
@@ -1003,5 +999,6 @@ func (s *LocalSegment) Release() {
 		zap.Int64("partitionID", s.partitionID),
 		zap.Int64("segmentID", s.ID()),
 		zap.String("segmentType", s.typ.String()),
+		zap.Int64("insertCount", s.InsertCount()),
 	)
 }
