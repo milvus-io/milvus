@@ -85,7 +85,7 @@ func (r *Reader) Read() (*storage.InsertData, error) {
 OUTER:
 	for {
 		for fieldID, cr := range r.frs {
-			data, err := cr.Next(10)
+			data, err := cr.Next(r.count / 10)
 			if err != nil {
 				return nil, err
 			}
