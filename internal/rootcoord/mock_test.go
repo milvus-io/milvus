@@ -72,6 +72,8 @@ type mockMetaTable struct {
 	AlterAliasFunc                   func(ctx context.Context, dbName string, alias string, collectionName string, ts Timestamp) error
 	DropAliasFunc                    func(ctx context.Context, dbName string, alias string, ts Timestamp) error
 	IsAliasFunc                      func(dbName, name string) bool
+	DescribeAliasFunc                func(ctx context.Context, dbName, alias string, ts Timestamp) (string, error)
+	ListAliasesFunc                  func(ctx context.Context, dbName, collectionName string, ts Timestamp) ([]string, error)
 	ListAliasesByIDFunc              func(collID UniqueID) []string
 	GetCollectionIDByNameFunc        func(name string) (UniqueID, error)
 	GetPartitionByNameFunc           func(collID UniqueID, partitionName string, ts Timestamp) (UniqueID, error)
@@ -149,6 +151,14 @@ func (m mockMetaTable) DropAlias(ctx context.Context, dbName, alias string, ts T
 
 func (m mockMetaTable) IsAlias(dbName, name string) bool {
 	return m.IsAliasFunc(dbName, name)
+}
+
+func (m mockMetaTable) DescribeAlias(ctx context.Context, dbName, alias string, ts Timestamp) (string, error) {
+	return m.DescribeAliasFunc(ctx, dbName, alias, ts)
+}
+
+func (m mockMetaTable) ListAliases(ctx context.Context, dbName, collectionName string, ts Timestamp) ([]string, error) {
+	return m.ListAliasesFunc(ctx, dbName, collectionName, ts)
 }
 
 func (m mockMetaTable) ListAliasesByID(collID UniqueID) []string {
@@ -509,6 +519,12 @@ func withInvalidMeta() Opt {
 	}
 	meta.ListUserRoleFunc = func(tenant string) ([]string, error) {
 		return nil, errors.New("error mock ListUserRole")
+	}
+	meta.DescribeAliasFunc = func(ctx context.Context, dbName, alias string, ts Timestamp) (string, error) {
+		return "", errors.New("error mock DescribeAlias")
+	}
+	meta.ListAliasesFunc = func(ctx context.Context, dbName, collectionName string, ts Timestamp) ([]string, error) {
+		return nil, errors.New("error mock ListAliases")
 	}
 	return withMeta(meta)
 }

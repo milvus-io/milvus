@@ -462,6 +462,109 @@ func TestRootCoord_AlterAlias(t *testing.T) {
 	})
 }
 
+func TestRootCoord_DescribeAlias(t *testing.T) {
+	t.Run("not healthy", func(t *testing.T) {
+		c := newTestCore(withAbnormalCode())
+		ctx := context.Background()
+		resp, err := c.DescribeAlias(ctx, &milvuspb.DescribeAliasRequest{Alias: "test"})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	t.Run("failed to add task", func(t *testing.T) {
+		c := newTestCore(withHealthyCode(),
+			withInvalidScheduler(),
+			withInvalidMeta())
+		ctx := context.Background()
+		resp, err := c.DescribeAlias(ctx, &milvuspb.DescribeAliasRequest{Alias: "test"})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	t.Run("failed to execute", func(t *testing.T) {
+		c := newTestCore(withHealthyCode(),
+			withTaskFailScheduler(),
+			withInvalidMeta())
+		ctx := context.Background()
+		resp, err := c.DescribeAlias(ctx, &milvuspb.DescribeAliasRequest{Alias: "test"})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	t.Run("input alias is empty", func(t *testing.T) {
+		c := newTestCore(withHealthyCode(),
+			withValidScheduler())
+		meta := newMockMetaTable()
+		meta.DescribeAliasFunc = func(ctx context.Context, dbName, alias string, ts Timestamp) (string, error) {
+			return "", nil
+		}
+		c.meta = meta
+		ctx := context.Background()
+		resp, err := c.DescribeAlias(ctx, &milvuspb.DescribeAliasRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, int32(1101), resp.GetStatus().GetCode())
+	})
+
+	t.Run("normal case, everything is ok", func(t *testing.T) {
+		c := newTestCore(withHealthyCode(),
+			withValidScheduler())
+		meta := newMockMetaTable()
+		meta.DescribeAliasFunc = func(ctx context.Context, dbName, alias string, ts Timestamp) (string, error) {
+			return "", nil
+		}
+		c.meta = meta
+		ctx := context.Background()
+		resp, err := c.DescribeAlias(ctx, &milvuspb.DescribeAliasRequest{Alias: "test"})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+}
+
+func TestRootCoord_ListAliases(t *testing.T) {
+	t.Run("not healthy", func(t *testing.T) {
+		c := newTestCore(withAbnormalCode())
+		ctx := context.Background()
+		resp, err := c.ListAliases(ctx, &milvuspb.ListAliasesRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	t.Run("failed to add task", func(t *testing.T) {
+		c := newTestCore(withHealthyCode(),
+			withInvalidScheduler(),
+			withInvalidMeta())
+		ctx := context.Background()
+		resp, err := c.ListAliases(ctx, &milvuspb.ListAliasesRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	t.Run("failed to execute", func(t *testing.T) {
+		c := newTestCore(withHealthyCode(),
+			withTaskFailScheduler(),
+			withInvalidMeta())
+		ctx := context.Background()
+		resp, err := c.ListAliases(ctx, &milvuspb.ListAliasesRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	t.Run("normal case, everything is ok", func(t *testing.T) {
+		c := newTestCore(withHealthyCode(),
+			withValidScheduler())
+		meta := newMockMetaTable()
+		meta.ListAliasesFunc = func(ctx context.Context, dbName, collectionName string, ts Timestamp) ([]string, error) {
+			return nil, nil
+		}
+		c.meta = meta
+		ctx := context.Background()
+		resp, err := c.ListAliases(ctx, &milvuspb.ListAliasesRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+}
+
 func TestRootCoord_DescribeCollection(t *testing.T) {
 	t.Run("not healthy", func(t *testing.T) {
 		c := newTestCore(withAbnormalCode())

@@ -62,7 +62,6 @@ func TestMain(m *testing.M) {
 }
 
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
 type WaitOption struct {
 	Duration      time.Duration `json:"duration"`
 	Port          int           `json:"port"`
@@ -464,6 +463,18 @@ func Test_NewServer(t *testing.T) {
 		mockProxy.EXPECT().AlterAlias(mock.Anything, mock.Anything).Return(nil, nil)
 		_, err := server.AlterAlias(ctx, nil)
 		assert.NoError(t, err)
+	})
+
+	t.Run("DescribeAlias", func(t *testing.T) {
+		mockProxy.EXPECT().DescribeAlias(mock.Anything, mock.Anything).Return(nil, nil)
+		_, err := server.DescribeAlias(ctx, nil)
+		assert.Nil(t, err)
+	})
+
+	t.Run("ListAliases", func(t *testing.T) {
+		mockProxy.EXPECT().ListAliases(mock.Anything, mock.Anything).Return(nil, nil)
+		_, err := server.ListAliases(ctx, nil)
+		assert.Nil(t, err)
 	})
 
 	t.Run("GetCompactionState", func(t *testing.T) {
