@@ -173,7 +173,9 @@ func (e *executor) readFileStat(reader importutilv2.Reader, task Task, fileIdx i
 			return err
 		}
 		MergeHashedRowsCount(rowsCount, hashedRows)
-		totalRows += data.GetRowNum()
+		rows := data.GetRowNum()
+		totalRows += rows
+		log.Info("reading file stat...", WrapLogFields(task, zap.Int("readRows", rows))...)
 	}
 
 	stat := &datapb.ImportFileStats{

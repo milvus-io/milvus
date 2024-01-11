@@ -161,7 +161,6 @@ class ApiUtilityWrapper:
         else:
             task_timeout = TIMEOUT
         log.info(f"wait bulk load timeout is {task_timeout}")
-        count = 20
         for task_id in task_ids:
             while True:
                 payload = {
@@ -175,8 +174,8 @@ class ApiUtilityWrapper:
                 if state == "Failed":
                     raise Exception(str(state))
                 time.sleep(2)
-                count = count - 1
-                if count <= 0:
+                timeout = timeout - 2
+                if timeout <= 0:
                     raise Exception(str("timeout"))
                 log.warn(f"waiting for bulk load tasks... state={state}, progress={progress}")
         return True, 4

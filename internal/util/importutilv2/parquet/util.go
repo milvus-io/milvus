@@ -174,3 +174,12 @@ func isConvertible(src, dst schemapb.DataType, isList bool) bool {
 		return false
 	}
 }
+
+func calcRowCount(bufferSize int, schema *schemapb.CollectionSchema) (int64, error) {
+	sizePerRecord, err := typeutil.EstimateSizePerRecord(schema)
+	if err != nil {
+		return 0, err
+	}
+	rowCount := int64(bufferSize) / int64(sizePerRecord)
+	return rowCount, nil
+}
