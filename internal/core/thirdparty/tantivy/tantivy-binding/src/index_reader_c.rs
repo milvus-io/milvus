@@ -1,7 +1,10 @@
 use std::ffi::{c_char, c_void, CStr};
 
 use crate::{
-    index_reader::IndexReaderWrapper, util_c::tantivy_index_exist, util::{create_binding, free_binding}, array::RustArray,
+    array::RustArray,
+    index_reader::IndexReaderWrapper,
+    util::{create_binding, free_binding},
+    util_c::tantivy_index_exist,
 };
 
 #[no_mangle]
@@ -196,7 +199,10 @@ pub extern "C" fn tantivy_range_query_keyword(
 }
 
 #[no_mangle]
-pub extern "C" fn tantivy_prefix_query_keyword(ptr: *mut c_void, prefix: *const c_char) -> RustArray {
+pub extern "C" fn tantivy_prefix_query_keyword(
+    ptr: *mut c_void,
+    prefix: *const c_char,
+) -> RustArray {
     let real = ptr as *mut IndexReaderWrapper;
     unsafe {
         let c_str = CStr::from_ptr(prefix);

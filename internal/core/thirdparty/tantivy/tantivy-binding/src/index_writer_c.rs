@@ -2,7 +2,9 @@ use core::slice;
 use std::ffi::{c_char, c_void, CStr};
 
 use crate::{
-    data_type::TantivyDataType, index_writer::IndexWriterWrapper, util::{create_binding, free_binding},
+    data_type::TantivyDataType,
+    index_writer::IndexWriterWrapper,
+    util::{create_binding, free_binding},
 };
 
 #[no_mangle]
@@ -31,9 +33,7 @@ pub extern "C" fn tantivy_free_index_writer(ptr: *mut c_void) {
 #[no_mangle]
 pub extern "C" fn tantivy_finish_index(ptr: *mut c_void) {
     let real = ptr as *mut IndexWriterWrapper;
-    unsafe {
-        Box::from_raw(real).finish()
-    }
+    unsafe { Box::from_raw(real).finish() }
 }
 
 // -------------------------build--------------------
