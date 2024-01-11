@@ -80,6 +80,7 @@ func (suite *RetrieveSuite) SetupTest() {
 			CollectionID: suite.collectionID,
 			PartitionIDs: []int64{suite.partitionID},
 		},
+		nil,
 	)
 	suite.collection = suite.manager.Collection.Get(suite.collectionID)
 

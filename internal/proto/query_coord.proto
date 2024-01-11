@@ -265,6 +265,7 @@ message SegmentLoadInfo {
   msg.MsgPosition delta_position = 15;
   int64 readableVersion = 16;
   data.SegmentLevel level = 17;
+  schema.ClusteringInfo clustering_info = 18;
 }
 
 message FieldIndexInfo {
@@ -302,6 +303,7 @@ message LoadSegmentsRequest {
   bool need_transfer = 11;
   LoadScope load_scope = 12;
   repeated index.IndexInfo index_info_list = 13;
+  repeated common.KeyValuePair collection_properties = 14;
 }
 
 message ReleaseSegmentsRequest {
