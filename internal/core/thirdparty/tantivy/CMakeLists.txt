@@ -64,3 +64,10 @@ target_link_libraries(test_tantivy
         boost_filesystem
         dl
         )
+
+add_executable(bench_tantivy bench.cpp)
+target_link_libraries(bench_tantivy
+        tantivy_binding
+        boost_filesystem
+        dl
+        )

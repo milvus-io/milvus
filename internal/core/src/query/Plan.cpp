@@ -77,7 +77,15 @@ CreateRetrievePlanByExpr(const Schema& schema,
                          const void* serialized_expr_plan,
                          const int64_t size) {
     proto::plan::PlanNode plan_node;
-    plan_node.ParseFromArray(serialized_expr_plan, size);
+    google::protobuf::io::ArrayInputStream array_stream(serialized_expr_plan,
+                                                        size);
+    google::protobuf::io::CodedInputStream input_stream(&array_stream);
+    input_stream.SetRecursionLimit(std::numeric_limits<int32_t>::max());
+
+    auto res = plan_node.ParsePartialFromCodedStream(&input_stream);
+    if (!res) {
+        throw SegcoreError(UnexpectedError, "parse plan node proto failed");
+    }
     return ProtoParser(schema).CreateRetrievePlan(plan_node);
 }
 

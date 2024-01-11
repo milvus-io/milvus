@@ -294,7 +294,8 @@ InvertedIndexTantivy<T>::BuildV2(const Config& config) {
 
 template <typename T>
 void
-InvertedIndexTantivy<T>::Load(const Config& config) {
+InvertedIndexTantivy<T>::Load(milvus::tracer::TraceContext ctx,
+                              const Config& config) {
     auto index_files =
         GetValueFromConfig<std::vector<std::string>>(config, "index_files");
     AssertInfo(index_files.has_value(),

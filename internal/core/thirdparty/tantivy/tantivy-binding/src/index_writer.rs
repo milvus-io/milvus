@@ -4,7 +4,6 @@ use tantivy::schema::{Field, IndexRecordOption, Schema, TextFieldIndexing, TextO
 use tantivy::{doc, tokenizer, Index, IndexWriter};
 
 use crate::data_type::TantivyDataType;
-use crate::index_reader::IndexReaderWrapper;
 
 pub struct IndexWriterWrapper {
     pub field_name: String,
