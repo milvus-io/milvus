@@ -132,13 +132,14 @@ func (es *EtcdSource) UpdateOptions(opts Options) {
 }
 
 func (es *EtcdSource) refreshConfigurations() error {
+	log := log.Ctx(context.TODO()).WithRateGroup("config.etcdSource", 1, 60)
 	es.RLock()
 	prefix := path.Join(es.keyPrefix, "config")
 	es.RUnlock()
 
 	ctx, cancel := context.WithTimeout(es.ctx, ReadConfigTimeout)
 	defer cancel()
-	log.Debug("etcd refreshConfigurations", zap.String("prefix", prefix), zap.Any("endpoints", es.etcdCli.Endpoints()))
+	log.RatedDebug(10, "etcd refreshConfigurations", zap.String("prefix", prefix), zap.Any("endpoints", es.etcdCli.Endpoints()))
 	response, err := es.etcdCli.Get(ctx, prefix, clientv3.WithPrefix(), clientv3.WithSerializable())
 	if err != nil {
 		return err

@@ -23,6 +23,24 @@ func GenFloatVecDataset(vectors []float32) *Dataset {
 	}
 }
 
+func GenFloat16VecDataset(vectors []byte) *Dataset {
+	return &Dataset{
+		DType: schemapb.DataType_Float16Vector,
+		Data: map[string]interface{}{
+			keyRawArr: vectors,
+		},
+	}
+}
+
+func GenBFloat16VecDataset(vectors []byte) *Dataset {
+	return &Dataset{
+		DType: schemapb.DataType_BFloat16Vector,
+		Data: map[string]interface{}{
+			keyRawArr: vectors,
+		},
+	}
+}
+
 func GenBinaryVecDataset(vectors []byte) *Dataset {
 	return &Dataset{
 		DType: schemapb.DataType_BinaryVector,
@@ -94,6 +112,10 @@ func GenDataset(data storage.FieldData) *Dataset {
 		return GenBinaryVecDataset(f.Data)
 	case *storage.FloatVectorFieldData:
 		return GenFloatVecDataset(f.Data)
+	case *storage.Float16VectorFieldData:
+		return GenFloat16VecDataset(f.Data)
+	case *storage.BFloat16VectorFieldData:
+		return GenBFloat16VecDataset(f.Data)
 	default:
 		return &Dataset{
 			DType: schemapb.DataType_None,

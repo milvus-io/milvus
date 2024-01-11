@@ -57,7 +57,7 @@ VectorDiskAnnIndex<T>::VectorDiskAnnIndex(
     local_chunk_manager->CreateDir(local_index_path_prefix);
     auto diskann_index_pack =
         knowhere::Pack(std::shared_ptr<knowhere::FileManager>(file_manager_));
-    index_ = knowhere::IndexFactory::Instance().Create(
+    index_ = knowhere::IndexFactory::Instance().Create<T>(
         GetIndexType(), version, diskann_index_pack);
 }
 
@@ -86,7 +86,7 @@ VectorDiskAnnIndex<T>::VectorDiskAnnIndex(
     local_chunk_manager->CreateDir(local_index_path_prefix);
     auto diskann_index_pack =
         knowhere::Pack(std::shared_ptr<knowhere::FileManager>(file_manager_));
-    index_ = knowhere::IndexFactory::Instance().Create(
+    index_ = knowhere::IndexFactory::Instance().Create<T>(
         GetIndexType(), version, diskann_index_pack);
 }
 
@@ -280,7 +280,7 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
     local_chunk_manager->Write(local_data_path, offset, &dim, sizeof(dim));
     offset += sizeof(dim);
 
-    auto data_size = num * dim * sizeof(float);
+    auto data_size = num * dim * sizeof(T);
     auto raw_data = const_cast<void*>(milvus::GetDatasetTensor(dataset));
     local_chunk_manager->Write(local_data_path, offset, raw_data, data_size);
 
@@ -466,5 +466,7 @@ VectorDiskAnnIndex<T>::update_load_json(const Config& config) {
 }
 
 template class VectorDiskAnnIndex<float>;
+template class VectorDiskAnnIndex<float16>;
+template class VectorDiskAnnIndex<bfloat16>;
 
 }  // namespace milvus::index
