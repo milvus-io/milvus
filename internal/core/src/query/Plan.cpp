@@ -51,11 +51,11 @@ ParsePlaceholderGroup(const Plan* plan,
         element.line_sizeof_ = info.values().Get(0).size();
         if (field_meta.get_sizeof() != element.line_sizeof_) {
             throw SegcoreError(
-                    DimNotMatch,
-                    fmt::format("vector dimension mismatch, expected vector "
-                                "size(byte) {}, actual {}.",
-                                field_meta.get_sizeof(),
-                                element.line_sizeof_));
+                DimNotMatch,
+                fmt::format("vector dimension mismatch, expected vector "
+                            "size(byte) {}, actual {}.",
+                            field_meta.get_sizeof(),
+                            element.line_sizeof_));
         }
         auto& target = element.blob_;
         target.reserve(element.line_sizeof_ * element.num_of_queries_);
