@@ -31,28 +31,29 @@ def vector_bulkinsert(url, payload, check_items=None):
         return res['requestID']
 
 
-def vector_bulkinsert_describe(url, payload):
-    url = f'http://{url}/v1/vector/bulkinsert/describe'
+def vector_bulkinsert_describe(url, request_id):
+    url = f'http://{url}/v1/vector/bulkinsert/describe?requestID={request_id}'
     headers = {
         'Content-Type': 'application/json',
         'RequestId': str(uuid.uuid1())
     }
-    response = requests.get(url, headers=headers, json=payload, verify=False)
+    response = requests.get(url, headers=headers, verify=False)
     res = response.json()
     log.info(f"vector_bulkinsert_describe response: {res}, code={res['code']}")
     assert res['code'] == 200
-    return res['state'], res['progress']
+    return res['data']['state'], res['data']['progress']
 
 
-def vector_bulkinsert_list(url, payload):
+def vector_bulkinsert_list(url):
     url = f'http://{url}/v1/vector/bulkinsert/list'
     headers = {
         'Content-Type': 'application/json',
         'RequestId': str(uuid.uuid1())
     }
-    response = requests.get(url, headers=headers, json=payload, verify=False)
+    response = requests.get(url, headers=headers, verify=False)
     res = response.json()
     assert res['code'] == 200
+    return res['data']
 
 
 class ApiUtilityWrapper:
@@ -163,11 +164,7 @@ class ApiUtilityWrapper:
         log.info(f"wait bulk load timeout is {task_timeout}")
         for task_id in task_ids:
             while True:
-                payload = {
-                    "dbName": None,
-                    "requestID": task_id,
-                }
-                state, progress = vector_bulkinsert_describe("localhost:19530", payload)
+                state, progress = vector_bulkinsert_describe("localhost:19530", request_id=task_id)
                 if state == "Completed" and progress == 100:
                     print(f"wait for bulk load tasks completed successfully")
                     break

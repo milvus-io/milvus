@@ -267,6 +267,7 @@ func GetImportProgress(requestID int64, imeta ImportMeta, meta *meta) (int64, in
 		preparingProgress float32 = 100
 		preImportProgress float32 = 0
 		importProgress    float32 = 0
+		segStateProgress  float32 = 0
 	)
 	totalTaskNum := len(imeta.GetBy(WithReq(requestID)))
 	for _, task := range tasks {
@@ -281,8 +282,8 @@ func GetImportProgress(requestID int64, imeta ImportMeta, meta *meta) (int64, in
 	}
 	tasks = imeta.GetBy(WithReq(requestID), WithType(ImportTaskType))
 	var (
-		unsetImportStateSegments int = 0
-		totalSegments            int = 0
+		unsetImportStateSegments = 0
+		totalSegments            = 0
 	)
 	for _, task := range tasks {
 		switch task.GetState() {
@@ -325,8 +326,12 @@ func GetImportProgress(requestID int64, imeta ImportMeta, meta *meta) (int64, in
 			importProgress += 100 / float32(len(tasks))
 		}
 	}
-	unsetImportStateProgress := 100 * float32(unsetImportStateSegments) / float32(totalSegments)
-	progress := preparingProgress*0.1 + preImportProgress*0.4 + importProgress*0.4 + unsetImportStateProgress*0.1
+	if totalSegments == 0 {
+		segStateProgress = 100
+	} else {
+		segStateProgress = 100 * float32(unsetImportStateSegments) / float32(totalSegments)
+	}
+	progress := preparingProgress*0.1 + preImportProgress*0.4 + importProgress*0.4 + segStateProgress*0.1
 	if progress == 100 {
 		return 100, internalpb.ImportState_Completed, ""
 	}
