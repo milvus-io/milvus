@@ -24,6 +24,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -205,6 +206,15 @@ func (mgr *TargetManager) PullNextTargetV2(broker Broker, collectionID int64, ch
 
 		for _, info := range vChannelInfos {
 			channelInfos[info.GetChannelName()] = append(channelInfos[info.GetChannelName()], info)
+			for _, segmentID := range info.GetLevelZeroSegmentIds() {
+				segments[segmentID] = &datapb.SegmentInfo{
+					ID:            segmentID,
+					CollectionID:  collectionID,
+					InsertChannel: info.GetChannelName(),
+					State:         commonpb.SegmentState_Flushed,
+					Level:         datapb.SegmentLevel_L0,
+				}
+			}
 		}
 
 		partitionSet := typeutil.NewUniqueSet(chosenPartitionIDs...)
