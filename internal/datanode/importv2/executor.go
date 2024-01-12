@@ -32,8 +32,10 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
 type Executor interface {
@@ -219,6 +221,7 @@ func (e *executor) Import(task Task) {
 
 func (e *executor) importFile(reader importutilv2.Reader, task Task) error {
 	for {
+		tr := timerecord.NewTimeRecorder("import file")
 		data, err := reader.Read()
 		if err != nil {
 			return err
@@ -226,6 +229,7 @@ func (e *executor) importFile(reader importutilv2.Reader, task Task) error {
 		if data == nil {
 			return nil
 		}
+		metrics.DataNodeImportLatency.WithLabelValues("read").Observe(float64(tr.RecordSpan().Milliseconds()))
 		err = FillDynamicData(data, task.GetSchema())
 		if err != nil {
 			return err
@@ -239,10 +243,12 @@ func (e *executor) importFile(reader importutilv2.Reader, task Task) error {
 		if err != nil {
 			return err
 		}
+		metrics.DataNodeImportLatency.WithLabelValues("hash").Observe(float64(tr.RecordSpan().Milliseconds()))
 		err = e.Sync(iTask, hashedData)
 		if err != nil {
 			return err
 		}
+		metrics.DataNodeImportLatency.WithLabelValues("sync").Observe(float64(tr.RecordSpan().Milliseconds()))
 	}
 }
 

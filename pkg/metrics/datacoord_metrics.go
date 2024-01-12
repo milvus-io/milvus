@@ -268,6 +268,14 @@ var (
 			Name:      "index_node_num",
 			Help:      "number of IndexNodes managed by IndexCoord",
 		}, []string{})
+
+	ImportTasks = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "import_tasks",
+			Help:      "the import tasks grouping by type and state",
+		}, []string{"task_type", "import_state"})
 )
 
 // RegisterDataCoord registers DataCoord metrics
@@ -290,6 +298,7 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(IndexRequestCounter)
 	registry.MustRegister(IndexTaskNum)
 	registry.MustRegister(IndexNodeNum)
+	registry.MustRegister(ImportTasks)
 }
 
 func CleanupDataCoordSegmentMetrics(collectionID int64, segmentID int64) {

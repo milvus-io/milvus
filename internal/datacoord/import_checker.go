@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"sync"
 	"time"
 
@@ -115,11 +116,17 @@ func (c *importChecker) LogStats() {
 		byState := lo.GroupBy(tasks, func(t ImportTask) internalpb.ImportState {
 			return t.GetState()
 		})
+		pending := len(byState[internalpb.ImportState_Pending])
+		inProgress := len(byState[internalpb.ImportState_InProgress])
+		completed := len(byState[internalpb.ImportState_Completed])
+		failed := len(byState[internalpb.ImportState_Failed])
 		log.Info("import task stats", zap.String("type", taskType.String()),
-			zap.Int("pending", len(byState[internalpb.ImportState_Pending])),
-			zap.Int("inProgress", len(byState[internalpb.ImportState_InProgress])),
-			zap.Int("completed", len(byState[internalpb.ImportState_Completed])),
-			zap.Int("failed", len(byState[internalpb.ImportState_Failed])))
+			zap.Int("pending", pending), zap.Int("inProgress", inProgress),
+			zap.Int("completed", completed), zap.Int("failed", failed))
+		metrics.ImportTasks.WithLabelValues(taskType.String(), internalpb.ImportState_Pending.String()).Set(float64(pending))
+		metrics.ImportTasks.WithLabelValues(taskType.String(), internalpb.ImportState_InProgress.String()).Set(float64(inProgress))
+		metrics.ImportTasks.WithLabelValues(taskType.String(), internalpb.ImportState_Completed.String()).Set(float64(completed))
+		metrics.ImportTasks.WithLabelValues(taskType.String(), internalpb.ImportState_Failed.String()).Set(float64(failed))
 	}
 	tasks := c.imeta.GetBy(WithType(PreImportTaskType))
 	logFunc(tasks, PreImportTaskType)
