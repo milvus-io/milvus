@@ -190,6 +190,75 @@ func (coord *RootCoordMock) AlterAlias(ctx context.Context, req *milvuspb.AlterA
 	return merr.Success(), nil
 }
 
+func (coord *RootCoordMock) DescribeAlias(ctx context.Context, req *milvuspb.DescribeAliasRequest, opts ...grpc.CallOption) (*milvuspb.DescribeAliasResponse, error) {
+	code := coord.state.Load().(commonpb.StateCode)
+	if code != commonpb.StateCode_Healthy {
+		return &milvuspb.DescribeAliasResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    fmt.Sprintf("state code = %s", commonpb.StateCode_name[int32(code)]),
+			},
+		}, nil
+	}
+	coord.collMtx.Lock()
+	defer coord.collMtx.Unlock()
+
+	collID, exist := coord.collAlias2ID[req.Alias]
+	if !exist {
+		return &milvuspb.DescribeAliasResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_CollectionNotExists,
+				Reason:    fmt.Sprintf("alias does not exist, alias = %s", req.Alias),
+			},
+		}, nil
+	}
+	collMeta, exist := coord.collID2Meta[collID]
+	if !exist {
+		return &milvuspb.DescribeAliasResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_CollectionNotExists,
+				Reason:    fmt.Sprintf("alias exist but not find related collection, alias = %s collID = %d", req.Alias, collID),
+			},
+		}, nil
+	}
+	return &milvuspb.DescribeAliasResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "",
+		},
+		DbName:     req.GetDbName(),
+		Alias:      req.GetAlias(),
+		Collection: collMeta.name,
+	}, nil
+}
+
+func (coord *RootCoordMock) ListAliases(ctx context.Context, req *milvuspb.ListAliasesRequest, opts ...grpc.CallOption) (*milvuspb.ListAliasesResponse, error) {
+	code := coord.state.Load().(commonpb.StateCode)
+	if code != commonpb.StateCode_Healthy {
+		return &milvuspb.ListAliasesResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    fmt.Sprintf("state code = %s", commonpb.StateCode_name[int32(code)]),
+			},
+		}, nil
+	}
+	coord.collMtx.Lock()
+	defer coord.collMtx.Unlock()
+
+	var aliases []string
+	for alias := range coord.collAlias2ID {
+		aliases = append(aliases, alias)
+	}
+	return &milvuspb.ListAliasesResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "",
+		},
+		DbName:  req.GetDbName(),
+		Aliases: aliases,
+	}, nil
+}
+
 func (coord *RootCoordMock) updateState(state commonpb.StateCode) {
 	coord.state.Store(state)
 }

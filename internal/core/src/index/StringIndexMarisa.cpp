@@ -17,11 +17,16 @@
 #include <boost/uuid/uuid.hpp>
 #include <boost/uuid/uuid_io.hpp>
 #include <boost/uuid/uuid_generators.hpp>
+#include <cstring>
 #include <memory>
 #include <stdlib.h>
 #include <stdio.h>
 #include <fcntl.h>
+#include <sys/errno.h>
+#include <sys/mman.h>
+#include <unistd.h>
 
+#include "common/File.h"
 #include "common/Types.h"
 #include "common/EasyAssert.h"
 #include "common/Exception.h"
@@ -249,28 +254,29 @@ StringIndexMarisa::LoadWithoutAssemble(const BinarySet& set,
                                        const Config& config) {
     auto uuid = boost::uuids::random_generator()();
     auto uuid_string = boost::uuids::to_string(uuid);
-    auto file = std::string("/tmp/") + uuid_string;
+    auto file_name = std::string("/tmp/") + uuid_string;
 
     auto index = set.GetByName(MARISA_TRIE_INDEX);
     auto len = index->size;
 
-    auto fd = open(
-        file.c_str(), O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR | S_IXUSR);
-    lseek(fd, 0, SEEK_SET);
-
-    auto status = write(fd, index->data.get(), len);
-    if (status != len) {
-        close(fd);
-        remove(file.c_str());
+    auto file = File::Open(file_name, O_RDWR | O_CREAT | O_EXCL);
+    auto written = file.Write(index->data.get(), len);
+    if (written != len) {
+        file.Close();
+        remove(file_name.c_str());
         throw SegcoreError(
             ErrorCode::UnistdError,
-            "write index to fd error, errorCode is " + std::to_string(status));
+            fmt::format("write index to fd error: {}", strerror(errno)));
     }
 
-    lseek(fd, 0, SEEK_SET);
-    trie_.read(fd);
-    close(fd);
-    remove(file.c_str());
+    file.Seek(0, SEEK_SET);
+    if (config.contains(kEnableMmap)) {
+        trie_.mmap(file_name.c_str());
+    } else {
+        trie_.read(file.Descriptor());
+    }
+    // make sure the file would be removed after we unmap & close it
+    unlink(file_name.c_str());
 
     auto str_ids = set.GetByName(MARISA_STR_IDS);
     auto str_ids_len = str_ids->size;
@@ -287,7 +293,8 @@ StringIndexMarisa::Load(const BinarySet& set, const Config& config) {
 }
 
 void
-StringIndexMarisa::Load(const Config& config) {
+StringIndexMarisa::Load(milvus::tracer::TraceContext ctx,
+                        const Config& config) {
     auto index_files =
         GetValueFromConfig<std::vector<std::string>>(config, "index_files");
     AssertInfo(index_files.has_value(),

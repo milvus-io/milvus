@@ -171,7 +171,6 @@ func (suite *SegmentSuite) TestSegmentReleased() {
 	sealed.ptrLock.RLock()
 	suite.False(sealed.isValid())
 	sealed.ptrLock.RUnlock()
-	suite.EqualValues(0, sealed.InsertCount())
 	suite.EqualValues(0, sealed.RowNum())
 	suite.EqualValues(0, sealed.MemSize())
 	suite.False(sealed.HasRawData(101))

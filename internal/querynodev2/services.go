@@ -671,7 +671,7 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 
 	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.TotalLabel, metrics.FromLeader).Inc()
 	defer func() {
-		if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+		if !merr.Ok(resp.GetStatus()) {
 			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.FailLabel, metrics.FromLeader).Inc()
 		}
 	}()
@@ -1407,10 +1407,7 @@ func (node *QueryNode) Delete(ctx context.Context, req *querypb.DeleteRequest) (
 	}
 
 	log.Info("QueryNode received worker delete request")
-	log.Debug("Worker delete detail",
-		zap.String("pks", req.GetPrimaryKeys().String()),
-		zap.Uint64s("tss", req.GetTimestamps()),
-	)
+	log.Debug("Worker delete detail", zap.Stringer("info", &deleteRequestStringer{DeleteRequest: req}))
 
 	filters := []segments.SegmentFilter{
 		segments.WithID(req.GetSegmentId()),
@@ -1441,4 +1438,22 @@ func (node *QueryNode) Delete(ctx context.Context, req *querypb.DeleteRequest) (
 	}
 
 	return merr.Success(), nil
+}
+
+type deleteRequestStringer struct {
+	*querypb.DeleteRequest
+}
+
+func (req *deleteRequestStringer) String() string {
+	var pkInfo string
+	switch {
+	case req.GetPrimaryKeys().GetIntId() != nil:
+		ids := req.GetPrimaryKeys().GetIntId().GetData()
+		pkInfo = fmt.Sprintf("Pks range[%d-%d], len: %d", ids[0], ids[len(ids)-1], len(ids))
+	case req.GetPrimaryKeys().GetStrId() != nil:
+		ids := req.GetPrimaryKeys().GetStrId().GetData()
+		pkInfo = fmt.Sprintf("Pks range[%s-%s], len: %d", ids[0], ids[len(ids)-1], len(ids))
+	}
+	tss := req.GetTimestamps()
+	return fmt.Sprintf("%s, timestamp range: [%d-%d]", pkInfo, tss[0], tss[len(tss)-1])
 }

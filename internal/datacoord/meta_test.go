@@ -333,6 +333,7 @@ func TestMeta_Basic(t *testing.T) {
 		metakv2.EXPECT().MultiRemove(mock.Anything).Return(errors.New("failed")).Maybe()
 		metakv2.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 		metakv2.EXPECT().LoadWithPrefix(mock.Anything).Return(nil, nil, nil).Maybe()
+		metakv2.EXPECT().MultiSaveAndRemoveWithPrefix(mock.Anything, mock.Anything).Return(errors.New("failed"))
 		catalog = datacoord.NewCatalog(metakv2, "", "")
 		meta, err = newMeta(context.TODO(), catalog, nil)
 		assert.NoError(t, err)

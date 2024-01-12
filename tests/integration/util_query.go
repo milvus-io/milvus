@@ -192,6 +192,17 @@ func constructPlaceholderGroup(nq, dim int, vectorType schemapb.DataType) *commo
 			}
 			values = append(values, ret)
 		}
+	// case schemapb.DataType_BFloat16Vector:
+	// 	placeholderType = commonpb.PlaceholderType_BFloat16Vector
+	// 	for i := 0; i < nq; i++ {
+	// 		total := dim * 2
+	// 		ret := make([]byte, total)
+	// 		_, err := rand.Read(ret)
+	// 		if err != nil {
+	// 			panic(err)
+	// 		}
+	// 		values = append(values, ret)
+	// 	}
 	default:
 		panic("invalid vector data type")
 	}

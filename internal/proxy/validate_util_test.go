@@ -632,7 +632,132 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 					TypeParams: []*commonpb.KeyValuePair{
 						{
 							Key:   common.DimKey,
-							Value: "8",
+							Value: "2",
+						},
+					},
+				},
+			},
+		}
+		h, err := typeutil.CreateSchemaHelper(schema)
+		assert.NoError(t, err)
+
+		v := newValidateUtil()
+
+		err = v.checkAligned(data, h, 100)
+
+		assert.Error(t, err)
+	})
+
+	//////////////////////////////////////////////////////////////////////
+
+	t.Run("bfloat16 vector column not found", func(t *testing.T) {
+		data := []*schemapb.FieldData{
+			{
+				FieldName: "test",
+				Type:      schemapb.DataType_BFloat16Vector,
+			},
+		}
+
+		schema := &schemapb.CollectionSchema{}
+		h, err := typeutil.CreateSchemaHelper(schema)
+		assert.NoError(t, err)
+
+		v := newValidateUtil()
+
+		err = v.checkAligned(data, h, 100)
+
+		assert.Error(t, err)
+	})
+
+	t.Run("bfloat16 vector column dimension not found", func(t *testing.T) {
+		data := []*schemapb.FieldData{
+			{
+				FieldName: "test",
+				Type:      schemapb.DataType_BFloat16Vector,
+			},
+		}
+
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:     "test",
+					DataType: schemapb.DataType_BFloat16Vector,
+				},
+			},
+		}
+		h, err := typeutil.CreateSchemaHelper(schema)
+		assert.NoError(t, err)
+
+		v := newValidateUtil()
+
+		err = v.checkAligned(data, h, 100)
+
+		assert.Error(t, err)
+	})
+
+	t.Run("invalid num rows", func(t *testing.T) {
+		data := []*schemapb.FieldData{
+			{
+				FieldName: "test",
+				Type:      schemapb.DataType_BFloat16Vector,
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Data: &schemapb.VectorField_Bfloat16Vector{
+							Bfloat16Vector: []byte("not128"),
+						},
+					},
+				},
+			},
+		}
+
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:     "test",
+					DataType: schemapb.DataType_BFloat16Vector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.DimKey,
+							Value: "128",
+						},
+					},
+				},
+			},
+		}
+		h, err := typeutil.CreateSchemaHelper(schema)
+		assert.NoError(t, err)
+
+		v := newValidateUtil()
+
+		err = v.checkAligned(data, h, 100)
+
+		assert.Error(t, err)
+	})
+
+	t.Run("num rows mismatch", func(t *testing.T) {
+		data := []*schemapb.FieldData{
+			{
+				FieldName: "test",
+				Type:      schemapb.DataType_BFloat16Vector,
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Data: &schemapb.VectorField_Bfloat16Vector{
+							Bfloat16Vector: []byte{'1', '2'},
+						},
+					},
+				},
+			},
+		}
+
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:     "test",
+					DataType: schemapb.DataType_BFloat16Vector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.DimKey,
+							Value: "2",
 						},
 					},
 				},
@@ -878,6 +1003,28 @@ func Test_validateUtil_Validate(t *testing.T) {
 					},
 				},
 			},
+			{
+				FieldName: "test4",
+				Type:      schemapb.DataType_Float16Vector,
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Data: &schemapb.VectorField_Float16Vector{
+							Float16Vector: generateFloat16Vectors(2, 8),
+						},
+					},
+				},
+			},
+			{
+				FieldName: "test5",
+				Type:      schemapb.DataType_BFloat16Vector,
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Data: &schemapb.VectorField_Bfloat16Vector{
+							Bfloat16Vector: generateBFloat16Vectors(2, 8),
+						},
+					},
+				},
+			},
 		}
 
 		schema := &schemapb.CollectionSchema{
@@ -911,6 +1058,28 @@ func Test_validateUtil_Validate(t *testing.T) {
 					TypeParams: []*commonpb.KeyValuePair{
 						{
 							Key:   common.MaxLengthKey,
+							Value: "8",
+						},
+					},
+				},
+				{
+					Name:     "test4",
+					FieldID:  104,
+					DataType: schemapb.DataType_Float16Vector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.DimKey,
+							Value: "8",
+						},
+					},
+				},
+				{
+					Name:     "test5",
+					FieldID:  105,
+					DataType: schemapb.DataType_BFloat16Vector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.DimKey,
 							Value: "8",
 						},
 					},
@@ -953,6 +1122,28 @@ func Test_validateUtil_Validate(t *testing.T) {
 			},
 			{
 				FieldName: "test3",
+				Type:      schemapb.DataType_Float16Vector,
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Data: &schemapb.VectorField_Float16Vector{
+							Float16Vector: generateFloat16Vectors(2, 8),
+						},
+					},
+				},
+			},
+			{
+				FieldName: "test4",
+				Type:      schemapb.DataType_BFloat16Vector,
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Data: &schemapb.VectorField_Bfloat16Vector{
+							Bfloat16Vector: generateBFloat16Vectors(2, 8),
+						},
+					},
+				},
+			},
+			{
+				FieldName: "test5",
 				Type:      schemapb.DataType_VarChar,
 				Field: &schemapb.FieldData_Scalars{
 					Scalars: &schemapb.ScalarField{
@@ -993,6 +1184,28 @@ func Test_validateUtil_Validate(t *testing.T) {
 				{
 					Name:     "test3",
 					FieldID:  103,
+					DataType: schemapb.DataType_Float16Vector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.DimKey,
+							Value: "8",
+						},
+					},
+				},
+				{
+					Name:     "test4",
+					FieldID:  104,
+					DataType: schemapb.DataType_BFloat16Vector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.DimKey,
+							Value: "8",
+						},
+					},
+				},
+				{
+					Name:     "test5",
+					FieldID:  105,
 					DataType: schemapb.DataType_VarChar,
 					TypeParams: []*commonpb.KeyValuePair{
 						{

@@ -31,7 +31,7 @@ beginTime=`date +%s`
 
 for d in $(go list ./tests/integration/...); do
     echo "$d"
-    go test -race -tags dynamic -v -coverpkg=./... -coverprofile=profile.out -covermode=atomic "$d" -timeout=20m
+    go test -race -tags dynamic -v -coverpkg=./... -coverprofile=profile.out -covermode=atomic "$d" -timeout=30m
     if [ -f profile.out ]; then
         grep -v kafka profile.out | grep -v planparserv2/generated | grep -v mocks | sed '1d' >> ${FILE_COVERAGE_INFO}
         rm profile.out

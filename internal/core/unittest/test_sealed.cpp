@@ -1620,6 +1620,10 @@ TEST(Sealed, QueryAllFields) {
         schema->AddDebugField("float_array", DataType::ARRAY, DataType::FLOAT);
     auto vec = schema->AddDebugField(
         "embeddings", DataType::VECTOR_FLOAT, 128, metric_type);
+    auto float16_vec = schema->AddDebugField(
+        "float16_vec", DataType::VECTOR_FLOAT16, 128, metric_type);
+    auto bfloat16_vec = schema->AddDebugField(
+        "bfloat16_vec", DataType::VECTOR_BFLOAT16, 128, metric_type);
     schema->set_primary_field_id(int64_field);
 
     std::map<std::string, std::string> index_params = {
@@ -1656,6 +1660,8 @@ TEST(Sealed, QueryAllFields) {
     auto double_array_values = dataset.get_col<ScalarArray>(double_array_field);
     auto float_array_values = dataset.get_col<ScalarArray>(float_array_field);
     auto vector_values = dataset.get_col<float>(vec);
+    auto float16_vector_values = dataset.get_col<uint8_t>(float16_vec);
+    auto bfloat16_vector_values = dataset.get_col<uint8_t>(bfloat16_vec);
 
     auto ids_ds = GenRandomIds(dataset_size);
     auto bool_result =
@@ -1690,6 +1696,10 @@ TEST(Sealed, QueryAllFields) {
         float_array_field, ids_ds->GetIds(), dataset_size);
     auto vec_result =
         segment->bulk_subscript(vec, ids_ds->GetIds(), dataset_size);
+    auto float16_vec_result =
+        segment->bulk_subscript(float16_vec, ids_ds->GetIds(), dataset_size);
+    auto bfloat16_vec_result =
+        segment->bulk_subscript(bfloat16_vec, ids_ds->GetIds(), dataset_size);
 
     EXPECT_EQ(bool_result->scalars().bool_data().data_size(), dataset_size);
     EXPECT_EQ(int8_result->scalars().int_data().data_size(), dataset_size);
@@ -1703,6 +1713,10 @@ TEST(Sealed, QueryAllFields) {
     EXPECT_EQ(json_result->scalars().json_data().data_size(), dataset_size);
     EXPECT_EQ(vec_result->vectors().float_vector().data_size(),
               dataset_size * dim);
+    EXPECT_EQ(float16_vec_result->vectors().float16_vector().size(),
+              dataset_size * dim * 2);
+    EXPECT_EQ(bfloat16_vec_result->vectors().bfloat16_vector().size(),
+              dataset_size * dim * 2);
     EXPECT_EQ(int_array_result->scalars().array_data().data_size(),
               dataset_size);
     EXPECT_EQ(long_array_result->scalars().array_data().data_size(),

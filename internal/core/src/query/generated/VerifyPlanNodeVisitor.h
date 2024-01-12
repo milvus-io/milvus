@@ -31,6 +31,9 @@ class VerifyPlanNodeVisitor : public PlanNodeVisitor {
     visit(Float16VectorANNS& node) override;
 
     void
+    visit(BFloat16VectorANNS& node) override;
+
+    void
     visit(RetrievePlanNode& node) override;
 
  public:

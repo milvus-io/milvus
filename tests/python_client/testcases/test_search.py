@@ -292,7 +292,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         collection_w.search(vectors[:default_nq], invalid_search_field, default_search_params,
                             default_limit, default_search_exp,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 65535,
+                            check_items={"err_code": 1100,
                                          "err_msg": "failed to create query plan: failed to get field schema "
                                                     "by name: %s not found" % invalid_search_field})
 
@@ -528,7 +528,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, default_limit, expression,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 65535,
+                            check_items={"err_code": 1100,
                                          "err_msg": "failed to create query plan: predicate is not a "
                                                     "boolean expression: %s, data type: Bool" % expression})
 
@@ -9350,7 +9350,7 @@ class TestCollectionSearchJSON(TestcaseBase):
         collection_w.search(vectors[:default_nq], default_search_field, {},
                             limit=ct.default_nb, expr=expression,
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 65535,
+                            check_items={ct.err_code: 1100,
                                          ct.err_msg: "failed to create query plan: cannot parse "
                                                      "expression: %s, error: contains_any operation "
                                                      "element must be an array" % expression})

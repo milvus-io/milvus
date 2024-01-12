@@ -33,6 +33,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
@@ -248,10 +249,6 @@ func (s *LocalSegment) RUnlock() {
 func (s *LocalSegment) InsertCount() int64 {
 	s.ptrLock.RLock()
 	defer s.ptrLock.RUnlock()
-
-	if !s.isValid() {
-		return 0
-	}
 
 	return s.insertCount.Load()
 }
@@ -695,6 +692,8 @@ func (s *LocalSegment) LoadMultiFieldData(ctx context.Context, rowCount int64, f
 func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCount int64, field *datapb.FieldBinlog, mmapEnabled bool) error {
 	s.ptrLock.RLock()
 	defer s.ptrLock.RUnlock()
+	ctx, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, fmt.Sprintf("LoadFieldData-%d-%d", s.segmentID, fieldID))
+	defer sp.End()
 
 	if s.ptr == nil {
 		return merr.WrapErrSegmentNotLoaded(s.segmentID, "segment released")
@@ -883,18 +882,29 @@ func (s *LocalSegment) LoadDeltaData(ctx context.Context, deltaData *storage.Del
 }
 
 func (s *LocalSegment) LoadIndex(ctx context.Context, indexInfo *querypb.FieldIndexInfo, fieldType schemapb.DataType) error {
-	loadIndexInfo, err := newLoadIndexInfo(ctx)
-	defer deleteLoadIndexInfo(loadIndexInfo)
-	if err != nil {
-		return err
-	}
+	ctx, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, fmt.Sprintf("LoadIndex-%d-%d", s.segmentID, indexInfo.GetFieldID()))
+	defer sp.End()
 
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", s.Collection()),
 		zap.Int64("partitionID", s.Partition()),
 		zap.Int64("segmentID", s.ID()),
-		zap.Int64("fieldID", indexInfo.FieldID),
+		zap.Int64("fieldID", indexInfo.GetFieldID()),
+		zap.Int64("indexID", indexInfo.GetIndexID()),
 	)
+
+	old := s.GetIndex(indexInfo.GetFieldID())
+	// the index loaded
+	if old != nil && old.IndexInfo.GetIndexID() == indexInfo.GetIndexID() {
+		log.Warn("index already loaded")
+		return nil
+	}
+
+	loadIndexInfo, err := newLoadIndexInfo(ctx)
+	if err != nil {
+		return err
+	}
+	defer deleteLoadIndexInfo(loadIndexInfo)
 
 	err = loadIndexInfo.appendLoadIndexInfo(ctx, indexInfo, s.collectionID, s.partitionID, s.segmentID, fieldType)
 	if err != nil {
@@ -998,5 +1008,6 @@ func (s *LocalSegment) Release() {
 		zap.Int64("partitionID", s.partitionID),
 		zap.Int64("segmentID", s.ID()),
 		zap.String("segmentType", s.typ.String()),
+		zap.Int64("insertCount", s.InsertCount()),
 	)
 }

@@ -16,6 +16,7 @@
 
 #include "index/VectorDiskIndex.h"
 
+#include "common/Tracer.h"
 #include "common/Utils.h"
 #include "config/ConfigKnowhere.h"
 #include "index/Meta.h"
@@ -56,7 +57,7 @@ VectorDiskAnnIndex<T>::VectorDiskAnnIndex(
     local_chunk_manager->CreateDir(local_index_path_prefix);
     auto diskann_index_pack =
         knowhere::Pack(std::shared_ptr<knowhere::FileManager>(file_manager_));
-    index_ = knowhere::IndexFactory::Instance().Create(
+    index_ = knowhere::IndexFactory::Instance().Create<T>(
         GetIndexType(), version, diskann_index_pack);
 }
 
@@ -85,7 +86,7 @@ VectorDiskAnnIndex<T>::VectorDiskAnnIndex(
     local_chunk_manager->CreateDir(local_index_path_prefix);
     auto diskann_index_pack =
         knowhere::Pack(std::shared_ptr<knowhere::FileManager>(file_manager_));
-    index_ = knowhere::IndexFactory::Instance().Create(
+    index_ = knowhere::IndexFactory::Instance().Create<T>(
         GetIndexType(), version, diskann_index_pack);
 }
 
@@ -93,24 +94,39 @@ template <typename T>
 void
 VectorDiskAnnIndex<T>::Load(const BinarySet& binary_set /* not used */,
                             const Config& config) {
-    Load(config);
+    Load(milvus::tracer::TraceContext{}, config);
 }
 
 template <typename T>
 void
-VectorDiskAnnIndex<T>::Load(const Config& config) {
+VectorDiskAnnIndex<T>::Load(milvus::tracer::TraceContext ctx,
+                            const Config& config) {
     knowhere::Json load_config = update_load_json(config);
 
-    auto index_files =
-        GetValueFromConfig<std::vector<std::string>>(config, "index_files");
-    AssertInfo(index_files.has_value(),
-               "index file paths is empty when load disk ann index data");
-    file_manager_->CacheIndexToDisk(index_files.value());
+    // start read file span with active scope
+    {
+        auto read_file_span =
+            milvus::tracer::StartSpan("SegCoreReadDiskIndexFile", &ctx);
+        auto read_scope =
+            milvus::tracer::GetTracer()->WithActiveSpan(read_file_span);
+        auto index_files =
+            GetValueFromConfig<std::vector<std::string>>(config, "index_files");
+        AssertInfo(index_files.has_value(),
+                   "index file paths is empty when load disk ann index data");
+        file_manager_->CacheIndexToDisk(index_files.value());
+        read_file_span->End();
+    }
 
+    // start engine load index span
+    auto span_load_engine =
+        milvus::tracer::StartSpan("SegCoreEngineLoadDiskIndex", &ctx);
+    auto engine_scope =
+        milvus::tracer::GetTracer()->WithActiveSpan(span_load_engine);
     auto stat = index_.Deserialize(knowhere::BinarySet(), load_config);
     if (stat != knowhere::Status::success)
         PanicInfo(ErrorCode::UnexpectedError,
                   "failed to Deserialize index, " + KnowhereStatusString(stat));
+    span_load_engine->End();
 
     SetDim(index_.Dim());
 }
@@ -264,7 +280,7 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
     local_chunk_manager->Write(local_data_path, offset, &dim, sizeof(dim));
     offset += sizeof(dim);
 
-    auto data_size = num * dim * sizeof(float);
+    auto data_size = num * dim * sizeof(T);
     auto raw_data = const_cast<void*>(milvus::GetDatasetTensor(dataset));
     local_chunk_manager->Write(local_data_path, offset, raw_data, data_size);
 
@@ -450,5 +466,7 @@ VectorDiskAnnIndex<T>::update_load_json(const Config& config) {
 }
 
 template class VectorDiskAnnIndex<float>;
+template class VectorDiskAnnIndex<float16>;
+template class VectorDiskAnnIndex<bfloat16>;
 
 }  // namespace milvus::index

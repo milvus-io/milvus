@@ -13,6 +13,7 @@
 
 #include <string>
 #include "common/EasyAssert.h"
+#include "common/Types.h"
 #include "fmt/core.h"
 #include <fcntl.h>
 #include <unistd.h>
@@ -49,6 +50,11 @@ class File {
     ssize_t
     Write(const void* buf, size_t size) {
         return write(fd_, buf, size);
+    }
+
+    offset_t
+    Seek(offset_t offset, int whence) {
+        return lseek(fd_, offset, whence);
     }
 
     void

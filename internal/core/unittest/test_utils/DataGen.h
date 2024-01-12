@@ -117,6 +117,14 @@ struct GeneratedData {
                     auto src_data = reinterpret_cast<const T*>(
                         target_field_data.vectors().float16_vector().data());
                     std::copy_n(src_data, len, ret.data());
+                } else if (field_meta.get_data_type() ==
+                           DataType::VECTOR_BFLOAT16) {
+                    // int len = raw_->num_rows() * field_meta.get_dim() * sizeof(bfloat16);
+                    int len = raw_->num_rows() * field_meta.get_dim();
+                    ret.resize(len);
+                    auto src_data = reinterpret_cast<const T*>(
+                        target_field_data.vectors().bfloat16_vector().data());
+                    std::copy_n(src_data, len, ret.data());
                 } else {
                     PanicInfo(Unsupported, "unsupported");
                 }
@@ -297,6 +305,16 @@ DataGen(SchemaPtr schema,
                 vector<float16> final(dim * N);
                 for (auto& x : final) {
                     x = float16(distr(er) + offset);
+                }
+                insert_cols(final, N, field_meta);
+                break;
+            }
+
+            case DataType::VECTOR_BFLOAT16: {
+                auto dim = field_meta.get_dim();
+                vector<bfloat16> final(dim * N);
+                for (auto& x : final) {
+                    x = bfloat16(distr(er) + offset);
                 }
                 insert_cols(final, N, field_meta);
                 break;
@@ -699,6 +717,67 @@ CreateFloat16PlaceholderGroup(int64_t num_queries,
 }
 
 inline auto
+CreateFloat16PlaceholderGroupFromBlob(int64_t num_queries,
+                                      int64_t dim,
+                                      const float16* ptr) {
+    namespace ser = milvus::proto::common;
+    ser::PlaceholderGroup raw_group;
+    auto value = raw_group.add_placeholders();
+    value->set_tag("$0");
+    value->set_type(ser::PlaceholderType::Float16Vector);
+    for (int i = 0; i < num_queries; ++i) {
+        std::vector<float16> vec;
+        for (int d = 0; d < dim; ++d) {
+            vec.push_back(*ptr);
+            ++ptr;
+        }
+        value->add_values(vec.data(), vec.size() * sizeof(float16));
+    }
+    return raw_group;
+}
+
+inline auto
+CreateBFloat16PlaceholderGroup(int64_t num_queries,
+                               int64_t dim,
+                               int64_t seed = 42) {
+    namespace ser = milvus::proto::common;
+    ser::PlaceholderGroup raw_group;
+    auto value = raw_group.add_placeholders();
+    value->set_tag("$0");
+    value->set_type(ser::PlaceholderType::BFloat16Vector);
+    std::normal_distribution<double> dis(0, 1);
+    std::default_random_engine e(seed);
+    for (int i = 0; i < num_queries; ++i) {
+        std::vector<bfloat16> vec;
+        for (int d = 0; d < dim; ++d) {
+            vec.push_back(bfloat16(dis(e)));
+        }
+        value->add_values(vec.data(), vec.size() * sizeof(bfloat16));
+    }
+    return raw_group;
+}
+
+inline auto
+CreateBFloat16PlaceholderGroupFromBlob(int64_t num_queries,
+                                       int64_t dim,
+                                       const bfloat16* ptr) {
+    namespace ser = milvus::proto::common;
+    ser::PlaceholderGroup raw_group;
+    auto value = raw_group.add_placeholders();
+    value->set_tag("$0");
+    value->set_type(ser::PlaceholderType::BFloat16Vector);
+    for (int i = 0; i < num_queries; ++i) {
+        std::vector<bfloat16> vec;
+        for (int d = 0; d < dim; ++d) {
+            vec.push_back(*ptr);
+            ++ptr;
+        }
+        value->add_values(vec.data(), vec.size() * sizeof(bfloat16));
+    }
+    return raw_group;
+}
+
+inline auto
 SearchResultToVector(const SearchResult& sr) {
     int64_t num_queries = sr.total_nq_;
     int64_t topk = sr.unity_topK_;
@@ -757,6 +836,18 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                 dim = field_meta.get_dim();
                 AssertInfo(dim % 8 == 0, "wrong dim value for binary vector");
                 createFieldData(raw_data, DataType::VECTOR_BINARY, dim);
+                break;
+            }
+            case DataType::VECTOR_FLOAT16: {
+                auto raw_data = data->vectors().float16_vector().data();
+                dim = field_meta.get_dim();
+                createFieldData(raw_data, DataType::VECTOR_FLOAT16, dim);
+                break;
+            }
+            case DataType::VECTOR_BFLOAT16: {
+                auto raw_data = data->vectors().bfloat16_vector().data();
+                dim = field_meta.get_dim();
+                createFieldData(raw_data, DataType::VECTOR_BFLOAT16, dim);
                 break;
             }
             default: {
@@ -937,7 +1028,7 @@ GenVecIndexing(int64_t N,
     conf["index_files"] = index_files;
     // we need a load stage to use index as the producation does
     // knowhere would do some data preparation in this stage
-    indexing->Load(conf);
+    indexing->Load(milvus::tracer::TraceContext{}, conf);
     return indexing;
 }
 

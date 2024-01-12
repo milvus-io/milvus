@@ -26,15 +26,32 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
+// BloomFilterSet is a struct with multiple `storage.PkStatstics`.
+// it maintains bloom filter generated from segment primary keys.
+// it may be updated with new insert FieldData when serving growing segments.
 type BloomFilterSet struct {
-	mut     sync.Mutex
-	current *storage.PkStatistics
-	history []*storage.PkStatistics
+	mut       sync.Mutex
+	batchSize uint
+	current   *storage.PkStatistics
+	history   []*storage.PkStatistics
 }
 
+// NewBloomFilterSet returns a BloomFilterSet with provided historyEntries.
+// Shall serve Flushed segments only. For growing segments, use `NewBloomFilterSetWithBatchSize` instead.
 func NewBloomFilterSet(historyEntries ...*storage.PkStatistics) *BloomFilterSet {
 	return &BloomFilterSet{
-		history: historyEntries,
+		batchSize: paramtable.Get().CommonCfg.BloomFilterSize.GetAsUint(),
+		history:   historyEntries,
+	}
+}
+
+// NewBloomFilterSetWithBatchSize returns a BloomFilterSet.
+// The batchSize parameter is used to initialize new bloom filter.
+// It shall be the estimated row count per batch for segment to sync with.
+func NewBloomFilterSetWithBatchSize(batchSize uint, historyEntries ...*storage.PkStatistics) *BloomFilterSet {
+	return &BloomFilterSet{
+		batchSize: batchSize,
+		history:   historyEntries,
 	}
 }
 
@@ -59,7 +76,7 @@ func (bfs *BloomFilterSet) UpdatePKRange(ids storage.FieldData) error {
 
 	if bfs.current == nil {
 		bfs.current = &storage.PkStatistics{
-			PkFilter: bloom.NewWithEstimates(paramtable.Get().CommonCfg.BloomFilterSize.GetAsUint(),
+			PkFilter: bloom.NewWithEstimates(bfs.batchSize,
 				paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat()),
 		}
 	}

@@ -182,9 +182,12 @@ SegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
 
     set_bit(index_ready_bitset_, field_id, true);
     update_row_count(row_count);
-    // release field column
-    fields_.erase(field_id);
-    set_bit(field_data_ready_bitset_, field_id, false);
+    // release field column if the index contains raw data
+    if (scalar_indexings_[field_id]->HasRawData() &&
+        get_bit(field_data_ready_bitset_, field_id)) {
+        fields_.erase(field_id);
+        set_bit(field_data_ready_bitset_, field_id, false);
+    }
 
     lck.unlock();
 }
@@ -200,9 +203,15 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info) {
 
         auto field_id = FieldId(id);
         auto insert_files = info.insert_files;
+        std::sort(insert_files.begin(),
+                  insert_files.end(),
+                  [](const std::string& a, const std::string& b) {
+                      return std::stol(a.substr(a.find_last_of('/') + 1)) <
+                             std::stol(b.substr(b.find_last_of('/') + 1));
+                  });
+
         auto field_data_info =
             FieldDataInfo(field_id.get(), num_rows, load_info.mmap_dir_path);
-
         LOG_INFO("segment {} loads field {} with num_rows {}",
                  this->get_segment_id(),
                  field_id.get(),
@@ -1225,6 +1234,15 @@ SegmentSealedImpl::get_raw_data(FieldId field_id,
                 seg_offsets,
                 count,
                 ret->mutable_vectors()->mutable_float16_vector()->data());
+            break;
+        }
+        case DataType::VECTOR_BFLOAT16: {
+            bulk_subscript_impl(
+                field_meta.get_sizeof(),
+                column->Data(),
+                seg_offsets,
+                count,
+                ret->mutable_vectors()->mutable_bfloat16_vector()->data());
             break;
         }
         case DataType::VECTOR_BINARY: {

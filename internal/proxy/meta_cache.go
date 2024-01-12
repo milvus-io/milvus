@@ -929,6 +929,7 @@ func (m *MetaCache) DeprecateShardCache(database, collectionName string) {
 }
 
 func (m *MetaCache) expireShardLeaderCache(ctx context.Context) {
+	log := log.Ctx(ctx).WithRateGroup("proxy.expireShardLeaderCache", 1, 60)
 	go func() {
 		ticker := time.NewTicker(params.Params.ProxyCfg.ShardLeaderCacheInterval.GetAsDuration(time.Second))
 		defer ticker.Stop()
@@ -941,7 +942,7 @@ func (m *MetaCache) expireShardLeaderCache(ctx context.Context) {
 			case <-ticker.C:
 				m.mu.RLock()
 				for database, db := range m.collInfo {
-					log.Info("expire all shard leader cache",
+					log.RatedInfo(10, "expire all shard leader cache",
 						zap.String("database", database),
 						zap.Strings("collections", lo.Keys(db)))
 					for _, info := range db {

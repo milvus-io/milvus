@@ -188,6 +188,15 @@ IndexFactory::CreateVectorIndex(
                 return std::make_unique<VectorDiskAnnIndex<float>>(
                     index_type, metric_type, version, file_manager_context);
             }
+            // // Uncomment after adding diskann part
+            // case DataType::VECTOR_FLOAT16: {
+            //     return std::make_unique<VectorDiskAnnIndex<float16>>(
+            //         index_type, metric_type, version, file_manager_context);
+            // }
+            // case DataType::VECTOR_BFLOAT16: {
+            //     return std::make_unique<VectorDiskAnnIndex<bfloat16>>(
+            //         index_type, metric_type, version, file_manager_context);
+            // }
             default:
                 throw SegcoreError(
                     DataTypeInvalid,
@@ -202,6 +211,14 @@ IndexFactory::CreateVectorIndex(
             }
             case DataType::VECTOR_BINARY: {
                 return std::make_unique<VectorMemIndex<uint8_t>>(
+                    index_type, metric_type, version, file_manager_context);
+            }
+            case DataType::VECTOR_FLOAT16: {
+                return std::make_unique<VectorMemIndex<float16>>(
+                    index_type, metric_type, version, file_manager_context);
+            }
+            case DataType::VECTOR_BFLOAT16: {
+                return std::make_unique<VectorMemIndex<bfloat16>>(
                     index_type, metric_type, version, file_manager_context);
             }
             default:
@@ -277,6 +294,15 @@ IndexFactory::CreateVectorIndex(
                     space,
                     file_manager_context);
             }
+            // // Uncomment after adding diskann part
+            // case DataType::VECTOR_FLOAT16: {
+            //     return std::make_unique<VectorDiskAnnIndex<float16>>(
+            //         index_type, metric_type, version, file_manager_context);
+            // }
+            // case DataType::VECTOR_BFLOAT16: {
+            //     return std::make_unique<VectorDiskAnnIndex<bfloat16>>(
+            //         index_type, metric_type, version, file_manager_context);
+            // }
             default:
                 throw SegcoreError(
                     DataTypeInvalid,
@@ -291,6 +317,14 @@ IndexFactory::CreateVectorIndex(
             }
             case DataType::VECTOR_BINARY: {
                 return std::make_unique<VectorMemIndex<uint8_t>>(
+                    create_index_info, file_manager_context, space);
+            }
+            case DataType::VECTOR_FLOAT16: {
+                return std::make_unique<VectorMemIndex<float16>>(
+                    create_index_info, file_manager_context, space);
+            }
+            case DataType::VECTOR_BFLOAT16: {
+                return std::make_unique<VectorMemIndex<bfloat16>>(
                     create_index_info, file_manager_context, space);
             }
             default:

@@ -131,7 +131,7 @@ class TestFloatSearchBruteForce : public ::testing::Test {
             return;
         }
         auto result = BruteForceSearch(
-            dataset, base.data(), nb, knowhere::Json(), bitset_view);
+            dataset, base.data(), nb, knowhere::Json(), bitset_view, DataType::VECTOR_FLOAT);
         for (int i = 0; i < nq; i++) {
             auto ref = Ref(base.data(),
                            query.data() + i * dim,

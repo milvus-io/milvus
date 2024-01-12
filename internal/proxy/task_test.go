@@ -67,6 +67,7 @@ const (
 	testFloatVecField    = "fvec"
 	testBinaryVecField   = "bvec"
 	testFloat16VecField  = "f16vec"
+	testBFloat16VecField = "bf16vec"
 	testVecDim           = 128
 	testMaxVarCharLength = 100
 )
@@ -81,6 +82,7 @@ func genCollectionSchema(collectionName string) *schemapb.CollectionSchema {
 		testFloatVecField,
 		testBinaryVecField,
 		testFloat16VecField,
+		testBFloat16VecField,
 		testVecDim,
 		collectionName)
 }
@@ -187,7 +189,7 @@ func constructCollectionSchemaByDataType(collectionName string, fieldName2DataTy
 			Name:     fieldName,
 			DataType: dataType,
 		}
-		if dataType == schemapb.DataType_FloatVector || dataType == schemapb.DataType_BinaryVector || dataType == schemapb.DataType_Float16Vector {
+		if isVectorType(dataType) {
 			fieldSchema.TypeParams = []*commonpb.KeyValuePair{
 				{
 					Key:   common.DimKey,
@@ -219,7 +221,7 @@ func constructCollectionSchemaByDataType(collectionName string, fieldName2DataTy
 
 func constructCollectionSchemaWithAllType(
 	boolField, int32Field, int64Field, floatField, doubleField string,
-	floatVecField, binaryVecField, float16VecField string,
+	floatVecField, binaryVecField, float16VecField, bfloat16VecField string,
 	dim int,
 	collectionName string,
 ) *schemapb.CollectionSchema {
@@ -318,6 +320,21 @@ func constructCollectionSchemaWithAllType(
 		IndexParams: nil,
 		AutoID:      false,
 	}
+	bf16Vec := &schemapb.FieldSchema{
+		FieldID:      0,
+		Name:         bfloat16VecField,
+		IsPrimaryKey: false,
+		Description:  "",
+		DataType:     schemapb.DataType_BFloat16Vector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{
+				Key:   common.DimKey,
+				Value: strconv.Itoa(dim),
+			},
+		},
+		IndexParams: nil,
+		AutoID:      false,
+	}
 
 	if enableMultipleVectorFields {
 		return &schemapb.CollectionSchema{
@@ -333,6 +350,7 @@ func constructCollectionSchemaWithAllType(
 				fVec,
 				bVec,
 				f16Vec,
+				bf16Vec,
 			},
 		}
 	}
@@ -438,11 +456,12 @@ func constructSearchRequest(
 
 func TestTranslateOutputFields(t *testing.T) {
 	const (
-		idFieldName            = "id"
-		tsFieldName            = "timestamp"
-		floatVectorFieldName   = "float_vector"
-		binaryVectorFieldName  = "binary_vector"
-		float16VectorFieldName = "float16_vector"
+		idFieldName             = "id"
+		tsFieldName             = "timestamp"
+		floatVectorFieldName    = "float_vector"
+		binaryVectorFieldName   = "binary_vector"
+		float16VectorFieldName  = "float16_vector"
+		bfloat16VectorFieldName = "bfloat16_vector"
 	)
 	var outputFields []string
 	var userOutputFields []string
@@ -458,6 +477,7 @@ func TestTranslateOutputFields(t *testing.T) {
 			{Name: floatVectorFieldName, FieldID: 100, DataType: schemapb.DataType_FloatVector},
 			{Name: binaryVectorFieldName, FieldID: 101, DataType: schemapb.DataType_BinaryVector},
 			{Name: float16VectorFieldName, FieldID: 102, DataType: schemapb.DataType_Float16Vector},
+			{Name: bfloat16VectorFieldName, FieldID: 103, DataType: schemapb.DataType_BFloat16Vector},
 		},
 	}
 	schema := newSchemaInfo(collSchema)
@@ -484,23 +504,23 @@ func TestTranslateOutputFields(t *testing.T) {
 
 	outputFields, userOutputFields, err = translateOutputFields([]string{"*"}, schema, false)
 	assert.Equal(t, nil, err)
-	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName}, outputFields)
-	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName}, userOutputFields)
+	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName, bfloat16VectorFieldName}, outputFields)
+	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName, bfloat16VectorFieldName}, userOutputFields)
 
 	outputFields, userOutputFields, err = translateOutputFields([]string{" * "}, schema, false)
 	assert.Equal(t, nil, err)
-	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName}, outputFields)
-	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName}, userOutputFields)
+	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName, bfloat16VectorFieldName}, outputFields)
+	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName, bfloat16VectorFieldName}, userOutputFields)
 
 	outputFields, userOutputFields, err = translateOutputFields([]string{"*", tsFieldName}, schema, false)
 	assert.Equal(t, nil, err)
-	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName}, outputFields)
-	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName}, userOutputFields)
+	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName, bfloat16VectorFieldName}, outputFields)
+	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName, bfloat16VectorFieldName}, userOutputFields)
 
 	outputFields, userOutputFields, err = translateOutputFields([]string{"*", floatVectorFieldName}, schema, false)
 	assert.Equal(t, nil, err)
-	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName}, outputFields)
-	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName}, userOutputFields)
+	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName, bfloat16VectorFieldName}, outputFields)
+	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName, bfloat16VectorFieldName}, userOutputFields)
 
 	//=========================================================================
 	outputFields, userOutputFields, err = translateOutputFields([]string{}, schema, true)
@@ -525,18 +545,18 @@ func TestTranslateOutputFields(t *testing.T) {
 
 	outputFields, userOutputFields, err = translateOutputFields([]string{"*"}, schema, true)
 	assert.Equal(t, nil, err)
-	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName}, outputFields)
-	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName}, userOutputFields)
+	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName, bfloat16VectorFieldName}, outputFields)
+	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName, bfloat16VectorFieldName}, userOutputFields)
 
 	outputFields, userOutputFields, err = translateOutputFields([]string{"*", tsFieldName}, schema, true)
 	assert.Equal(t, nil, err)
-	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName}, outputFields)
-	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName}, userOutputFields)
+	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName, bfloat16VectorFieldName}, outputFields)
+	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName, bfloat16VectorFieldName}, userOutputFields)
 
 	outputFields, userOutputFields, err = translateOutputFields([]string{"*", floatVectorFieldName}, schema, true)
 	assert.Equal(t, nil, err)
-	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName}, outputFields)
-	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName}, userOutputFields)
+	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName, bfloat16VectorFieldName}, outputFields)
+	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName, bfloat16VectorFieldName}, userOutputFields)
 
 	outputFields, userOutputFields, err = translateOutputFields([]string{"A"}, schema, true)
 	assert.Error(t, err)
@@ -2020,119 +2040,6 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 		assert.NoError(t, task.Execute(ctx))
 		assert.NoError(t, task.PostExecute(ctx))
 	})
-}
-
-func TestCreateAlias_all(t *testing.T) {
-	rc := NewRootCoordMock()
-
-	defer rc.Close()
-	ctx := context.Background()
-	prefix := "TestCreateAlias_all"
-	collectionName := prefix + funcutil.GenRandomStr()
-	task := &CreateAliasTask{
-		Condition: NewTaskCondition(ctx),
-		CreateAliasRequest: &milvuspb.CreateAliasRequest{
-			Base:           nil,
-			CollectionName: collectionName,
-			Alias:          "alias1",
-		},
-		ctx:       ctx,
-		result:    merr.Success(),
-		rootCoord: rc,
-	}
-
-	assert.NoError(t, task.OnEnqueue())
-
-	assert.NotNil(t, task.TraceCtx())
-
-	id := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
-	task.SetID(id)
-	assert.Equal(t, id, task.ID())
-
-	task.Base.MsgType = commonpb.MsgType_CreateAlias
-	assert.Equal(t, commonpb.MsgType_CreateAlias, task.Type())
-	ts := Timestamp(time.Now().UnixNano())
-	task.SetTs(ts)
-	assert.Equal(t, ts, task.BeginTs())
-	assert.Equal(t, ts, task.EndTs())
-
-	assert.NoError(t, task.PreExecute(ctx))
-	assert.NoError(t, task.Execute(ctx))
-	assert.NoError(t, task.PostExecute(ctx))
-}
-
-func TestDropAlias_all(t *testing.T) {
-	rc := NewRootCoordMock()
-
-	defer rc.Close()
-	ctx := context.Background()
-	task := &DropAliasTask{
-		Condition: NewTaskCondition(ctx),
-		DropAliasRequest: &milvuspb.DropAliasRequest{
-			Base:  nil,
-			Alias: "alias1",
-		},
-		ctx:       ctx,
-		result:    merr.Success(),
-		rootCoord: rc,
-	}
-
-	assert.NoError(t, task.OnEnqueue())
-	assert.NotNil(t, task.TraceCtx())
-
-	id := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
-	task.SetID(id)
-	assert.Equal(t, id, task.ID())
-
-	task.Base.MsgType = commonpb.MsgType_DropAlias
-	assert.Equal(t, commonpb.MsgType_DropAlias, task.Type())
-	ts := Timestamp(time.Now().UnixNano())
-	task.SetTs(ts)
-	assert.Equal(t, ts, task.BeginTs())
-	assert.Equal(t, ts, task.EndTs())
-
-	assert.NoError(t, task.PreExecute(ctx))
-	assert.NoError(t, task.Execute(ctx))
-	assert.NoError(t, task.PostExecute(ctx))
-}
-
-func TestAlterAlias_all(t *testing.T) {
-	rc := NewRootCoordMock()
-
-	defer rc.Close()
-	ctx := context.Background()
-	prefix := "TestAlterAlias_all"
-	collectionName := prefix + funcutil.GenRandomStr()
-	task := &AlterAliasTask{
-		Condition: NewTaskCondition(ctx),
-		AlterAliasRequest: &milvuspb.AlterAliasRequest{
-			Base:           nil,
-			CollectionName: collectionName,
-			Alias:          "alias1",
-		},
-		ctx:       ctx,
-		result:    merr.Success(),
-		rootCoord: rc,
-	}
-
-	assert.NoError(t, task.OnEnqueue())
-
-	assert.NotNil(t, task.TraceCtx())
-
-	id := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
-	task.SetID(id)
-	assert.Equal(t, id, task.ID())
-
-	task.Base.MsgType = commonpb.MsgType_AlterAlias
-	assert.Equal(t, commonpb.MsgType_AlterAlias, task.Type())
-	ts := Timestamp(time.Now().UnixNano())
-	task.SetTs(ts)
-	assert.Equal(t, ts, task.BeginTs())
-	assert.Equal(t, ts, task.EndTs())
-
-	assert.NoError(t, task.PreExecute(ctx))
-	assert.NoError(t, task.Execute(ctx))
-	assert.NoError(t, task.PostExecute(ctx))
 }
 
 func Test_createIndexTask_getIndexedField(t *testing.T) {

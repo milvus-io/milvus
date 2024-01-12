@@ -341,7 +341,6 @@ class TestQueryParams(TestcaseBase):
                     assert _r[ct.default_bool_field_name] == bool_value
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="issue #29570")
     def test_query_expr_by_int64(self):
         """
         target: test query through int64 field and output int64 field
@@ -2382,6 +2381,24 @@ class TestQueryOperation(TestcaseBase):
         assert res[ct.default_double_field_name] == 3.1415
         assert res[ct.default_bool_field_name] is False
         assert res[ct.default_string_field_name] == "abc"
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_query_multi_logical_exprs(self):
+        """
+        target: test the scenario which query with many logical expressions
+        method: 1. create collection
+                3. query the expr that like: int64 == 0 || int64 == 1 ........ 
+        expected: run successfully
+        """
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name)
+        df = cf.gen_default_dataframe_data()
+        collection_w.insert(df)
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
+        collection_w.load()
+        multi_exprs = " || ".join(f'{default_int_field_name} == {i}' for i in range(60))
+        _, check_res = collection_w.query(multi_exprs, output_fields=[f'{default_int_field_name}'])
+        assert(check_res == True) 
 
 
 class TestQueryString(TestcaseBase):

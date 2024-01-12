@@ -1,22 +1,19 @@
 use std::ops::Bound;
 use std::str::FromStr;
 
-
-
-use tantivy::collector::TopDocs;
 use tantivy::directory::MmapDirectory;
-use tantivy::query::{Query, RangeQuery, TermQuery, RegexQuery};
+use tantivy::query::{Query, RangeQuery, RegexQuery, TermQuery};
 use tantivy::schema::{Field, IndexRecordOption};
 use tantivy::{Index, IndexReader, ReloadPolicy, Term};
 
-
 use crate::util::make_bounds;
+use crate::vec_collector::VecCollector;
 
 pub struct IndexReaderWrapper {
     pub field_name: String,
     pub field: Field,
     pub reader: IndexReader,
-		pub cnt: u32,
+    pub cnt: u32,
 }
 
 impl IndexReaderWrapper {
@@ -26,20 +23,18 @@ impl IndexReaderWrapper {
             .reload_policy(ReloadPolicy::Manual)
             .try_into()
             .unwrap();
-        let metas = index
-            .searchable_segment_metas()
-            .unwrap();
+        let metas = index.searchable_segment_metas().unwrap();
         let mut sum: u32 = 0;
         for meta in metas {
             sum += meta.max_doc();
         }
-				reader.reload().unwrap();
+        reader.reload().unwrap();
         IndexReaderWrapper {
-					field_name: field_name.to_string(),
-					field,
-					reader,
-					cnt: sum,
-				}
+            field_name: field_name.to_string(),
+            field,
+            reader,
+            cnt: sum,
+        }
     }
 
     pub fn load(path: &str) -> IndexReaderWrapper {
@@ -52,18 +47,15 @@ impl IndexReaderWrapper {
     }
 
     pub fn count(&self) -> u32 {
-				self.cnt
+        self.cnt
     }
 
     fn search(&self, q: &dyn Query) -> Vec<u32> {
         let searcher = self.reader.searcher();
-        let cnt = self.cnt;
-        let hits = searcher
-            .search(q, &TopDocs::with_limit(cnt as usize))
-            .unwrap();
-        let mut ret = Vec::new();
-        for (_, address) in hits {
-            ret.push(address.doc_id);
+        let hits = searcher.search(q, &VecCollector).unwrap();
+        let mut ret = Vec::with_capacity(hits.len());
+        for address in hits {
+            ret.push(address);
         }
         ret
     }
@@ -193,10 +185,7 @@ impl IndexReaderWrapper {
         self.search(&q)
     }
 
-    pub fn prefix_query_keyword(
-        &self,
-        prefix: &str,
-    ) -> Vec<u32> {
+    pub fn prefix_query_keyword(&self, prefix: &str) -> Vec<u32> {
         let pattern = format!("{}(.|\n)*", prefix);
         let q = RegexQuery::from_pattern(&pattern, self.field).unwrap();
         self.search(&q)

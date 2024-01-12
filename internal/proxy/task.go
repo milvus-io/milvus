@@ -73,6 +73,8 @@ const (
 	CreateAliasTaskName           = "CreateAliasTask"
 	DropAliasTaskName             = "DropAliasTask"
 	AlterAliasTaskName            = "AlterAliasTask"
+	DescribeAliasTaskName         = "DescribeAliasTask"
+	ListAliasesTaskName           = "ListAliasesTask"
 	AlterCollectionTaskName       = "AlterCollectionTask"
 	UpsertTaskName                = "UpsertTask"
 	CreateResourceGroupTaskName   = "CreateResourceGroupTask"
@@ -1635,11 +1637,10 @@ func (t *releaseCollectionTask) Execute(ctx context.Context) (err error) {
 	}
 
 	t.result, err = t.queryCoord.ReleaseCollection(ctx, request)
-
-	globalMetaCache.RemoveCollection(ctx, t.GetDbName(), t.CollectionName)
 	if err != nil {
 		return err
 	}
+
 	SendReplicateMessagePack(ctx, t.replicateMsgStream, t.ReleaseCollectionRequest)
 	return nil
 }
@@ -1752,7 +1753,7 @@ func (t *loadPartitionsTask) Execute(ctx context.Context) error {
 	for _, index := range indexResponse.IndexInfos {
 		fieldIndexIDs[index.FieldID] = index.IndexID
 		for _, field := range collSchema.Fields {
-			if index.FieldID == field.FieldID && (field.DataType == schemapb.DataType_FloatVector || field.DataType == schemapb.DataType_BinaryVector || field.DataType == schemapb.DataType_Float16Vector) {
+			if index.FieldID == field.FieldID && isVectorType(field.DataType) {
 				hasVecIndex = true
 			}
 		}
@@ -1903,241 +1904,6 @@ func (t *releasePartitionsTask) Execute(ctx context.Context) (err error) {
 
 func (t *releasePartitionsTask) PostExecute(ctx context.Context) error {
 	globalMetaCache.DeprecateShardCache(t.GetDbName(), t.CollectionName)
-	return nil
-}
-
-// CreateAliasTask contains task information of CreateAlias
-type CreateAliasTask struct {
-	Condition
-	*milvuspb.CreateAliasRequest
-	ctx       context.Context
-	rootCoord types.RootCoordClient
-	result    *commonpb.Status
-}
-
-// TraceCtx returns the trace context of the task.
-func (t *CreateAliasTask) TraceCtx() context.Context {
-	return t.ctx
-}
-
-// ID return the id of the task
-func (t *CreateAliasTask) ID() UniqueID {
-	return t.Base.MsgID
-}
-
-// SetID sets the id of the task
-func (t *CreateAliasTask) SetID(uid UniqueID) {
-	t.Base.MsgID = uid
-}
-
-// Name returns the name of the task
-func (t *CreateAliasTask) Name() string {
-	return CreateAliasTaskName
-}
-
-// Type returns the type of the task
-func (t *CreateAliasTask) Type() commonpb.MsgType {
-	return t.Base.MsgType
-}
-
-// BeginTs returns the ts
-func (t *CreateAliasTask) BeginTs() Timestamp {
-	return t.Base.Timestamp
-}
-
-// EndTs returns the ts
-func (t *CreateAliasTask) EndTs() Timestamp {
-	return t.Base.Timestamp
-}
-
-// SetTs sets the ts
-func (t *CreateAliasTask) SetTs(ts Timestamp) {
-	t.Base.Timestamp = ts
-}
-
-// OnEnqueue defines the behavior task enqueued
-func (t *CreateAliasTask) OnEnqueue() error {
-	if t.Base == nil {
-		t.Base = commonpbutil.NewMsgBase()
-	}
-	return nil
-}
-
-// PreExecute defines the tion before task execution
-func (t *CreateAliasTask) PreExecute(ctx context.Context) error {
-	t.Base.MsgType = commonpb.MsgType_CreateAlias
-	t.Base.SourceID = paramtable.GetNodeID()
-
-	collAlias := t.Alias
-	// collection alias uses the same format as collection name
-	if err := ValidateCollectionAlias(collAlias); err != nil {
-		return err
-	}
-
-	collName := t.CollectionName
-	if err := validateCollectionName(collName); err != nil {
-		return err
-	}
-	return nil
-}
-
-// Execute defines the tual execution of create alias
-func (t *CreateAliasTask) Execute(ctx context.Context) error {
-	var err error
-	t.result, err = t.rootCoord.CreateAlias(ctx, t.CreateAliasRequest)
-	return err
-}
-
-// PostExecute defines the post execution, do nothing for create alias
-func (t *CreateAliasTask) PostExecute(ctx context.Context) error {
-	return nil
-}
-
-// DropAliasTask is the task to drop alias
-type DropAliasTask struct {
-	Condition
-	*milvuspb.DropAliasRequest
-	ctx       context.Context
-	rootCoord types.RootCoordClient
-	result    *commonpb.Status
-}
-
-// TraceCtx returns the context for trace
-func (t *DropAliasTask) TraceCtx() context.Context {
-	return t.ctx
-}
-
-// ID returns the MsgID
-func (t *DropAliasTask) ID() UniqueID {
-	return t.Base.MsgID
-}
-
-// SetID sets the MsgID
-func (t *DropAliasTask) SetID(uid UniqueID) {
-	t.Base.MsgID = uid
-}
-
-// Name returns the name of the task
-func (t *DropAliasTask) Name() string {
-	return DropAliasTaskName
-}
-
-func (t *DropAliasTask) Type() commonpb.MsgType {
-	return t.Base.MsgType
-}
-
-func (t *DropAliasTask) BeginTs() Timestamp {
-	return t.Base.Timestamp
-}
-
-func (t *DropAliasTask) EndTs() Timestamp {
-	return t.Base.Timestamp
-}
-
-func (t *DropAliasTask) SetTs(ts Timestamp) {
-	t.Base.Timestamp = ts
-}
-
-func (t *DropAliasTask) OnEnqueue() error {
-	if t.Base == nil {
-		t.Base = commonpbutil.NewMsgBase()
-	}
-	return nil
-}
-
-func (t *DropAliasTask) PreExecute(ctx context.Context) error {
-	t.Base.MsgType = commonpb.MsgType_DropAlias
-	t.Base.SourceID = paramtable.GetNodeID()
-	collAlias := t.Alias
-	if err := ValidateCollectionAlias(collAlias); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (t *DropAliasTask) Execute(ctx context.Context) error {
-	var err error
-	t.result, err = t.rootCoord.DropAlias(ctx, t.DropAliasRequest)
-	return err
-}
-
-func (t *DropAliasTask) PostExecute(ctx context.Context) error {
-	return nil
-}
-
-// AlterAliasTask is the task to alter alias
-type AlterAliasTask struct {
-	Condition
-	*milvuspb.AlterAliasRequest
-	ctx       context.Context
-	rootCoord types.RootCoordClient
-	result    *commonpb.Status
-}
-
-func (t *AlterAliasTask) TraceCtx() context.Context {
-	return t.ctx
-}
-
-func (t *AlterAliasTask) ID() UniqueID {
-	return t.Base.MsgID
-}
-
-func (t *AlterAliasTask) SetID(uid UniqueID) {
-	t.Base.MsgID = uid
-}
-
-func (t *AlterAliasTask) Name() string {
-	return AlterAliasTaskName
-}
-
-func (t *AlterAliasTask) Type() commonpb.MsgType {
-	return t.Base.MsgType
-}
-
-func (t *AlterAliasTask) BeginTs() Timestamp {
-	return t.Base.Timestamp
-}
-
-func (t *AlterAliasTask) EndTs() Timestamp {
-	return t.Base.Timestamp
-}
-
-func (t *AlterAliasTask) SetTs(ts Timestamp) {
-	t.Base.Timestamp = ts
-}
-
-func (t *AlterAliasTask) OnEnqueue() error {
-	if t.Base == nil {
-		t.Base = commonpbutil.NewMsgBase()
-	}
-	return nil
-}
-
-func (t *AlterAliasTask) PreExecute(ctx context.Context) error {
-	t.Base.MsgType = commonpb.MsgType_AlterAlias
-	t.Base.SourceID = paramtable.GetNodeID()
-
-	collAlias := t.Alias
-	// collection alias uses the same format as collection name
-	if err := ValidateCollectionAlias(collAlias); err != nil {
-		return err
-	}
-
-	collName := t.CollectionName
-	if err := validateCollectionName(collName); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (t *AlterAliasTask) Execute(ctx context.Context) error {
-	var err error
-	t.result, err = t.rootCoord.AlterAlias(ctx, t.AlterAliasRequest)
-	return err
-}
-
-func (t *AlterAliasTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
