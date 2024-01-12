@@ -241,6 +241,11 @@ func Error(status *commonpb.Status) error {
 	return newMilvusErrorWithDetail(status.GetReason(), status.GetDetail(), code, status.GetRetriable())
 }
 
+// SegcoreError returns a merr according to the given segcore error code and message
+func SegcoreError(code int32, msg string) error {
+	return newMilvusError(msg, code, false)
+}
+
 // CheckHealthy checks whether the state is healthy,
 // returns nil if healthy,
 // otherwise returns ErrServiceNotReady wrapped with current state
