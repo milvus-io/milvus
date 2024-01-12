@@ -126,7 +126,7 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 			fmt.Sprint(growing.Collection()),
 			fmt.Sprint(growing.Partition()),
 			growing.Type().String(),
-			fmt.Sprint(0),
+			"0",
 		).Add(float64(len(insertData.RowIDs)))
 		growing.UpdateBloomFilter(insertData.PrimaryKeys)
 
