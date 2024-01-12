@@ -2759,6 +2759,9 @@ type dataNodeConfig struct {
 	ChannelWorkPoolSize ParamItem `refreshable:"true"`
 
 	UpdateChannelCheckpointMaxParallel ParamItem `refreshable:"true"`
+
+	MaxConcurrentImportTaskNum ParamItem `refreshable:"true"`
+	ImportBufferSize           ParamItem `refreshable:"true"`
 }
 
 func (p *dataNodeConfig) init(base *BaseTable) {
@@ -2984,6 +2987,26 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		DefaultValue: "1000",
 	}
 	p.UpdateChannelCheckpointMaxParallel.Init(base.mgr)
+
+	p.MaxConcurrentImportTaskNum = ParamItem{
+		Key:          "datanode.import.maxConcurrentTaskNum",
+		Version:      "2.4.0",
+		Doc:          "The maximum number of import/pre-import tasks allowed to run concurrently on a datanode.",
+		DefaultValue: "10",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.MaxConcurrentImportTaskNum.Init(base.mgr)
+
+	p.ImportBufferSize = ParamItem{
+		Key:          "datanode.import.bufferSize",
+		Version:      "2.4.0",
+		Doc:          "The maximum buffer size in MB that each import/pre-import task is permitted to utilize.",
+		DefaultValue: "64",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.ImportBufferSize.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

@@ -69,7 +69,8 @@ func (r *Reader) Read() (*storage.InsertData, error) {
 		return nil, err
 	}
 	for fieldID, cr := range r.frs {
-		data, err := cr.Next(r.count)
+		var data any
+		data, err = cr.Next(r.count)
 		if err != nil {
 			return nil, err
 		}
@@ -80,6 +81,10 @@ func (r *Reader) Read() (*storage.InsertData, error) {
 		if err != nil {
 			return nil, err
 		}
+	}
+	err = fillDynamicData(insertData, r.schema)
+	if err != nil {
+		return nil, err
 	}
 	return insertData, nil
 }

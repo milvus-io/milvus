@@ -406,6 +406,14 @@ func TestComponentParam(t *testing.T) {
 		updateChannelCheckpointMaxParallel := Params.UpdateChannelCheckpointMaxParallel.GetAsInt()
 		t.Logf("updateChannelCheckpointMaxParallel: %d", updateChannelCheckpointMaxParallel)
 		assert.Equal(t, 1000, Params.UpdateChannelCheckpointMaxParallel.GetAsInt())
+
+		maxConcurrentImportTaskNum := Params.MaxConcurrentImportTaskNum.GetAsInt()
+		t.Logf("maxConcurrentImportTaskNum: %d", maxConcurrentImportTaskNum)
+		assert.Equal(t, 10, maxConcurrentImportTaskNum)
+
+		importBufferSize := Params.ImportBufferSize.GetAsInt()
+		t.Logf("importBufferSize: %d", importBufferSize)
+		assert.Equal(t, 64, importBufferSize)
 	})
 
 	t.Run("test indexNodeConfig", func(t *testing.T) {

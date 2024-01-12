@@ -34,7 +34,15 @@ import (
 
 const DynamicFieldMaxLength = 512
 
-func GetAvgLengthOfVarLengthField(fieldSchema *schemapb.FieldSchema) (int, error) {
+type getVariableFieldLengthPolicy int
+
+const (
+	max    getVariableFieldLengthPolicy = 0
+	avg    getVariableFieldLengthPolicy = 1
+	custom getVariableFieldLengthPolicy = 2
+)
+
+func getVarFieldLength(fieldSchema *schemapb.FieldSchema, policy getVariableFieldLengthPolicy) (int, error) {
 	maxLength := 0
 	var err error
 
@@ -53,22 +61,43 @@ func GetAvgLengthOfVarLengthField(fieldSchema *schemapb.FieldSchema) (int, error
 		if err != nil {
 			return 0, err
 		}
+		switch policy {
+		case max:
+			return maxLength, nil
+		case avg:
+			return maxLength / 2, nil
+		case custom:
+			// TODO this is a hack and may not accurate, we should rely on estimate size per record
+			// However we should report size and datacoord calculate based on size
+			// https://github.com/milvus-io/milvus/issues/17687
+			if maxLength > 256 {
+				return 256, nil
+			}
+			return maxLength, nil
+		default:
+			return 0, fmt.Errorf("unrecognized getVariableFieldLengthPolicy %v", policy)
+		}
 	case schemapb.DataType_Array, schemapb.DataType_JSON:
 		return DynamicFieldMaxLength, nil
 	default:
 		return 0, fmt.Errorf("field %s is not a variable-length type", fieldSchema.DataType.String())
 	}
-
-	// TODO this is a hack and may not accurate, we should rely on estimate size per record
-	// However we should report size and datacoord calculate based on size
-	if maxLength > 256 {
-		return 256, nil
-	}
-	return maxLength, nil
 }
 
 // EstimateSizePerRecord returns the estimate size of a record in a collection
 func EstimateSizePerRecord(schema *schemapb.CollectionSchema) (int, error) {
+	return estimateSizeBy(schema, custom)
+}
+
+func EstimateMaxSizePerRecord(schema *schemapb.CollectionSchema) (int, error) {
+	return estimateSizeBy(schema, max)
+}
+
+func EstimateAvgSizePerRecord(schema *schemapb.CollectionSchema) (int, error) {
+	return estimateSizeBy(schema, avg)
+}
+
+func estimateSizeBy(schema *schemapb.CollectionSchema, policy getVariableFieldLengthPolicy) (int, error) {
 	res := 0
 	for _, fs := range schema.Fields {
 		switch fs.DataType {
@@ -81,7 +110,7 @@ func EstimateSizePerRecord(schema *schemapb.CollectionSchema) (int, error) {
 		case schemapb.DataType_Int64, schemapb.DataType_Double:
 			res += 8
 		case schemapb.DataType_VarChar, schemapb.DataType_Array, schemapb.DataType_JSON:
-			maxLengthPerRow, err := GetAvgLengthOfVarLengthField(fs)
+			maxLengthPerRow, err := getVarFieldLength(fs, policy)
 			if err != nil {
 				return 0, err
 			}

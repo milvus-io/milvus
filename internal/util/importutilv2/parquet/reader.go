@@ -36,6 +36,7 @@ type Reader struct {
 	reader *file.Reader
 
 	bufferSize int
+	count      int64
 
 	schema *schemapb.CollectionSchema
 	frs    map[int64]*FieldReader // fieldID -> FieldReader
@@ -63,9 +64,14 @@ func NewReader(ctx context.Context, schema *schemapb.CollectionSchema, cmReader 
 	if err != nil {
 		return nil, err
 	}
+	count, err := readCountPerBatch(bufferSize, schema)
+	if err != nil {
+		return nil, err
+	}
 	return &Reader{
 		reader:     reader,
 		bufferSize: bufferSize,
+		count:      count,
 		schema:     schema,
 		frs:        crs,
 	}, nil
@@ -79,7 +85,7 @@ func (r *Reader) Read() (*storage.InsertData, error) {
 OUTER:
 	for {
 		for fieldID, cr := range r.frs {
-			data, err := cr.Next(1)
+			data, err := cr.Next(r.count)
 			if err != nil {
 				return nil, err
 			}
