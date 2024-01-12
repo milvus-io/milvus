@@ -108,7 +108,7 @@ class TestChaos(TestChaosBase):
         schema = cf.gen_bulk_insert_collection_schema(dim=dim, with_varchar_field=with_varchar_field)
         data = cf.gen_default_list_data_for_bulk_insert(nb=nb, varchar_len=varchar_len,
                                                         with_varchar_field=with_varchar_field)
-        data_dir = "/tmp/bulk_insert_data"
+        data_dir = "/data/bulk_insert_data"
         Path(data_dir).mkdir(parents=True, exist_ok=True)
         files = []
         if file_type == "json":

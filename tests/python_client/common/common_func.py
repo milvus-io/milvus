@@ -590,7 +590,7 @@ def prepare_bulk_insert_data(schema=None,
     t0 = time.time()
     data = get_column_data_by_schema(schema=schema, nb=nb, skip_vectors=True)
     log.info(f"generate raw data for bulk insert cost {time.time() - t0} s")
-    data_dir = "/tmp/bulk_insert_data"
+    data_dir = "/data/bulk_insert_data"
     Path(data_dir).mkdir(parents=True, exist_ok=True)
     log.info(f"schema:{schema}, nb:{nb}, file_type:{file_type}, minio_endpoint:{minio_endpoint}, bucket_name:{bucket_name}")
     files = []

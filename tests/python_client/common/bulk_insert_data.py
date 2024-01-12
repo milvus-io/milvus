@@ -12,7 +12,7 @@ from common.common_func import gen_unique_str
 from common.minio_comm import copy_files_to_minio
 from utils.util_log import test_log as log
 
-data_source = "/tmp/bulk_insert_data"
+data_source = "/data/bulk_insert_data"
 fake = Faker()
 BINARY = "binary"
 FLOAT = "float"

@@ -33,7 +33,7 @@ default_vec_n_int_fields = [df.vec_field, df.int_field, df.array_int_field]
 
 
 # milvus_ns = "chaos-testing"
-base_dir = "/tmp/bulk_insert_data"
+base_dir = "/data/bulk_insert_data"
 
 
 def entity_suffix(entities):
@@ -50,7 +50,7 @@ class TestcaseBaseBulkInsert(TestcaseBase):
 
     @pytest.fixture(scope="function", autouse=True)
     def init_minio_client(self, minio_host):
-        Path("/tmp/bulk_insert_data").mkdir(parents=True, exist_ok=True)
+        Path("/data/bulk_insert_data").mkdir(parents=True, exist_ok=True)
         self._connect()
         self.milvus_sys = MilvusSys(alias='default')
         ms = MilvusSys()
