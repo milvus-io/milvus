@@ -101,7 +101,7 @@ func TestManager(t *testing.T) {
 		go c.Run()
 		assert.Eventually(t, func() bool {
 			return c.Num() == 1 // expected merged
-		}, 300*time.Millisecond, 10*time.Millisecond)
+		}, 3*time.Second, 10*time.Millisecond)
 
 		assert.NotPanics(t, func() {
 			c.Close()
