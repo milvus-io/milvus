@@ -29,7 +29,7 @@ struct SealedIndexingEntry {
     index::IndexBasePtr indexing_;
 };
 
-using SealedIndexingEntryPtr = std::unique_ptr<SealedIndexingEntry>;
+using SealedIndexingEntryPtr = std::shared_ptr<SealedIndexingEntry>;
 
 struct SealedIndexingRecord {
     void
@@ -43,11 +43,11 @@ struct SealedIndexingRecord {
         field_indexings_[field_id] = std::move(ptr);
     }
 
-    const SealedIndexingEntry*
+    const SealedIndexingEntryPtr
     get_field_indexing(FieldId field_id) const {
         std::shared_lock lck(mutex_);
         AssertInfo(field_indexings_.count(field_id), "field_id not found");
-        return field_indexings_.at(field_id).get();
+        return field_indexings_.at(field_id);
     }
 
     void
