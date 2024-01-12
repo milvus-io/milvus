@@ -15,6 +15,7 @@ require (
 	github.com/casbin/casbin/v2 v2.44.2
 	github.com/casbin/json-adapter/v2 v2.0.0
 	github.com/cockroachdb/errors v1.9.1
+	github.com/containerd/cgroups/v3 v3.0.3 // indirect
 	github.com/gin-gonic/gin v1.9.1
 	github.com/gofrs/flock v0.8.1
 	github.com/gogo/protobuf v1.3.2
@@ -90,10 +91,10 @@ require (
 	github.com/cenkalti/backoff/v4 v4.2.0 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
 	github.com/chenzhuoyu/base64x v0.0.0-20221115062448-fe3a3abad311 // indirect
+	github.com/cilium/ebpf v0.11.0 // indirect
 	github.com/cockroachdb/logtags v0.0.0-20211118104740-dabe8e521a4f // indirect
 	github.com/cockroachdb/redact v1.1.3 // indirect
 	github.com/confluentinc/confluent-kafka-go v1.9.1 // indirect
-	github.com/containerd/cgroups v1.1.0 // indirect
 	github.com/coreos/go-semver v0.3.0 // indirect
 	github.com/coreos/go-systemd/v22 v22.3.2 // indirect
 	github.com/cznic/mathutil v0.0.0-20181122101859-297441e03548 // indirect

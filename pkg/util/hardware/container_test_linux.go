@@ -17,12 +17,33 @@ package hardware
 import (
 	"testing"
 
+	"github.com/containerd/cgroups/v3"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestInContainer(t *testing.T) {
 	_, err := inContainer()
 	assert.NoError(t, err)
+}
+
+func TestGetCgroupStats(t *testing.T) {
+	if cgroups.Mode() == cgroups.Unified {
+		stats2, err := getCgroupV2Stats()
+		assert.NoError(t, err)
+		assert.NotNil(t, stats2)
+
+		stats1, err := getCgroupV1Stats()
+		assert.Error(t, err)
+		assert.Nil(t, stats1)
+	} else {
+		stats1, err := getCgroupV1Stats()
+		assert.NoError(t, err)
+		assert.NotNil(t, stats1)
+
+		stats2, err := getCgroupV2Stats()
+		assert.Error(t, err)
+		assert.Nil(t, stats2)
+	}
 }
 
 func TestGetContainerMemLimit(t *testing.T) {
