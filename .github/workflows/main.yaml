@@ -110,6 +110,11 @@ jobs:
     env:
       UBUNTU: 20.04
     steps:
+      - name: print working directory before download artifact
+        shell: bash
+        run: |
+          pwd
+          ls -lah
       - name: Download Artifact
         uses: actions/download-artifact@v4.1.0
         with:
@@ -155,6 +160,11 @@ jobs:
     env:
       UBUNTU: 20.04
     steps:
+      - name: print working directory before download artifact
+        shell: bash
+        run: |
+          pwd
+          ls -lah
       - name: Download Artifact
         uses: actions/download-artifact@v4.1.0
         with:
@@ -199,6 +209,11 @@ jobs:
     env:
       UBUNTU: 20.04
     steps:
+      - name: print working directory before download artifact
+        shell: bash
+        run: |
+          pwd
+          ls -lah
       - name: Download Artifact
         uses: actions/download-artifact@v4.1.0
         with:
