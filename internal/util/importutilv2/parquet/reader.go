@@ -64,7 +64,7 @@ func NewReader(ctx context.Context, schema *schemapb.CollectionSchema, cmReader 
 	if err != nil {
 		return nil, err
 	}
-	count, err := calcRowCount(bufferSize, schema)
+	count, err := readCountPerBatch(bufferSize, schema)
 	if err != nil {
 		return nil, err
 	}
@@ -85,7 +85,7 @@ func (r *Reader) Read() (*storage.InsertData, error) {
 OUTER:
 	for {
 		for fieldID, cr := range r.frs {
-			data, err := cr.Next(r.count / 10)
+			data, err := cr.Next(r.count)
 			if err != nil {
 				return nil, err
 			}

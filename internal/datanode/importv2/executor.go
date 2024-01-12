@@ -164,10 +164,6 @@ func (e *executor) readFileStat(reader importutilv2.Reader, task Task, fileIdx i
 		if data == nil {
 			break
 		}
-		err = FillDynamicData(data, task.GetSchema())
-		if err != nil {
-			return err
-		}
 		err = CheckRowsEqual(task.GetSchema(), data)
 		if err != nil {
 			return err
@@ -230,10 +226,6 @@ func (e *executor) importFile(reader importutilv2.Reader, task Task) error {
 			return nil
 		}
 		metrics.DataNodeImportLatency.WithLabelValues("read").Observe(float64(tr.RecordSpan().Milliseconds()))
-		err = FillDynamicData(data, task.GetSchema())
-		if err != nil {
-			return err
-		}
 		iTask := task.(*ImportTask)
 		err = AppendSystemFieldsData(iTask, data)
 		if err != nil {
