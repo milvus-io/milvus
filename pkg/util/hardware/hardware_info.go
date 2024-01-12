@@ -74,13 +74,6 @@ func GetCPUUsage() float64 {
 
 // GetMemoryCount returns the memory count in bytes.
 func GetMemoryCount() uint64 {
-	icOnce.Do(func() {
-		ic, icErr = inContainer()
-	})
-	if icErr != nil {
-		log.Error(icErr.Error())
-		return 0
-	}
 	// get host memory by `gopsutil`
 	stats, err := mem.VirtualMemory()
 	if err != nil {
@@ -88,27 +81,18 @@ func GetMemoryCount() uint64 {
 			zap.Error(err))
 		return 0
 	}
-	// not in container, return host memory
-	if !ic {
-		return stats.Total
-	}
 
 	// get container memory by `cgroups`
 	limit, err := getContainerMemLimit()
-	if err != nil {
-		log.Warn("failed to get container memory limit", zap.Error(err))
-		return 0
-	}
 	// in container, return min(hostMem, containerMem)
-	if limit < stats.Total {
+	if limit > 0 && limit < stats.Total {
 		return limit
 	}
 
-	if ic {
-		log.Warn("host memory is used in container",
-			zap.Uint64("containerMemoryLimit", limit),
-			zap.Uint64("HostMemoryLimit", stats.Total),
-		)
+	if err != nil || limit > stats.Total {
+		log.RatedWarn(3600, "failed to get container memory limit",
+			zap.Uint64("containerLimit", limit),
+			zap.Error(err))
 	}
 	return stats.Total
 }

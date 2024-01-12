@@ -20,19 +20,8 @@ import (
 	statsv1 "github.com/containerd/cgroups/v3/cgroup1/stats"
 	"github.com/containerd/cgroups/v3/cgroup2"
 	statsv2 "github.com/containerd/cgroups/v3/cgroup2/stats"
-	"go.uber.org/zap"
-
-	"github.com/milvus-io/milvus/pkg/log"
+	"k8s.io/apimachinery/pkg/api/resource"
 )
-
-// inContainer checks if the service is running inside a container.
-func inContainer() (bool, error) {
-	if fileExists("/proc/self/cgroup") {
-		log.Info("Running inside a container...", zap.Bool("cgroupv2", cgroups.Mode() == cgroups.Unified))
-		return true, nil
-	}
-	return false, nil
-}
 
 func getCgroupV1Stats() (*statsv1.Metrics, error) {
 	manager, err := cgroup1.Load(cgroup1.StaticPath("/"))
@@ -70,6 +59,17 @@ func getCgroupV2Stats() (*statsv2.Metrics, error) {
 
 // getContainerMemLimit returns memory limit and error
 func getContainerMemLimit() (uint64, error) {
+	memoryStr := os.Getenv("MEM_LIMIT")
+	if memoryStr != "" {
+		memQuantity, err := resource.ParseQuantity(memoryStr)
+		if err != nil {
+			return 0, err
+		}
+
+		memValue := memQuantity.Value()
+		return uint64(memValue), nil
+	}
+
 	var limit uint64
 	// if cgroupv2 is enabled
 	if cgroups.Mode() == cgroups.Unified {
