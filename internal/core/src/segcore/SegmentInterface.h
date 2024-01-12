@@ -231,6 +231,10 @@ class SegmentInternalInterface : public SegmentInterface {
     virtual std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
     search_ids(const IdArray& id_array, Timestamp timestamp) const = 0;
 
+    void
+    check_metric_type(const query::Plan* plan,
+                      const IndexMetaPtr index_meta) const;
+
     /**
      * Apply timestamp filtering on bitset, the query can't see an entity whose
      * timestamp is bigger than the timestamp of query.
