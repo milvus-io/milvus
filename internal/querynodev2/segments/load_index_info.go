@@ -157,6 +157,13 @@ func (li *LoadIndexInfo) appendFieldInfo(ctx context.Context, collectionID int64
 	return HandleCStatus(ctx, &status, "AppendFieldInfo failed")
 }
 
+func (li *LoadIndexInfo) appendStorageInfo(uri string, version int64) {
+	cURI := C.CString(uri)
+	defer C.free(unsafe.Pointer(cURI))
+	cVersion := C.int64_t(version)
+	C.AppendStorageInfo(li.cLoadIndexInfo, cURI, cVersion)
+}
+
 // appendIndexData appends index path to cLoadIndexInfo and create index
 func (li *LoadIndexInfo) appendIndexData(ctx context.Context, indexKeys []string) error {
 	for _, indexPath := range indexKeys {
@@ -166,17 +173,22 @@ func (li *LoadIndexInfo) appendIndexData(ctx context.Context, indexKeys []string
 		}
 	}
 
-	span := trace.SpanFromContext(ctx)
+	var status C.CStatus
+	if paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool() {
+		status = C.AppendIndexV3(li.cLoadIndexInfo)
+	} else {
+		span := trace.SpanFromContext(ctx)
 
-	traceID := span.SpanContext().TraceID()
-	spanID := span.SpanContext().SpanID()
-	traceCtx := C.CTraceContext{
-		traceID: (*C.uint8_t)(unsafe.Pointer(&traceID[0])),
-		spanID:  (*C.uint8_t)(unsafe.Pointer(&spanID[0])),
-		flag:    C.uchar(span.SpanContext().TraceFlags()),
+		traceID := span.SpanContext().TraceID()
+		spanID := span.SpanContext().SpanID()
+		traceCtx := C.CTraceContext{
+			traceID: (*C.uint8_t)(unsafe.Pointer(&traceID[0])),
+			spanID:  (*C.uint8_t)(unsafe.Pointer(&spanID[0])),
+			flag:    C.uchar(span.SpanContext().TraceFlags()),
+		}
+
+		status = C.AppendIndexV2(traceCtx, li.cLoadIndexInfo)
 	}
-
-	status := C.AppendIndexV2(traceCtx, li.cLoadIndexInfo)
 	return HandleCStatus(ctx, &status, "AppendIndex failed")
 }
 

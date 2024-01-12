@@ -226,11 +226,11 @@ type commonConfig struct {
 	LockSlowLogInfoThreshold ParamItem `refreshable:"true"`
 	LockSlowLogWarnThreshold ParamItem `refreshable:"true"`
 
-	StorageScheme   ParamItem `refreshable:"false"`
-	EnableStorageV2 ParamItem `refreshable:"false"`
-	TTMsgEnabled    ParamItem `refreshable:"true"`
-	TraceLogMode    ParamItem `refreshable:"true"`
-
+	StorageScheme         ParamItem `refreshable:"false"`
+	EnableStorageV2       ParamItem `refreshable:"false"`
+	StoragePathPrefix     ParamItem `refreshable:"false"`
+	TTMsgEnabled          ParamItem `refreshable:"true"`
+	TraceLogMode          ParamItem `refreshable:"true"`
 	BloomFilterSize       ParamItem `refreshable:"true"`
 	MaxBloomFalsePositive ParamItem `refreshable:"true"`
 }
@@ -659,6 +659,13 @@ like the old password verification when updating the credential`,
 		DefaultValue: "s3",
 	}
 	p.StorageScheme.Init(base.mgr)
+
+	p.StoragePathPrefix = ParamItem{
+		Key:          "common.storage.pathPrefix",
+		Version:      "2.3.4",
+		DefaultValue: "",
+	}
+	p.StoragePathPrefix.Init(base.mgr)
 
 	p.TTMsgEnabled = ParamItem{
 		Key:          "common.ttMsgEnabled",

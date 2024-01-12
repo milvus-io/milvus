@@ -833,7 +833,8 @@ func genInsertData(msgLength int, schema *schemapb.CollectionSchema) (*storage.I
 			}
 		case schemapb.DataType_Array:
 			insertData.Data[f.FieldID] = &storage.ArrayFieldData{
-				Data: generateArrayArray(msgLength),
+				ElementType: schemapb.DataType_Int32,
+				Data:        generateArrayArray(msgLength),
 			}
 		case schemapb.DataType_JSON:
 			insertData.Data[f.FieldID] = &storage.JSONFieldData{
