@@ -184,31 +184,10 @@ func (t *compactionTask) uploadRemainLog(
 	meta *etcdpb.CollectionMeta,
 	stats *storage.PrimaryKeyStats,
 	totRows int64,
-	fID2Content map[UniqueID][]interface{},
+	writeBuffer *storage.InsertData,
 	fID2Type map[UniqueID]schemapb.DataType,
 ) (map[UniqueID]*datapb.FieldBinlog, map[UniqueID]*datapb.FieldBinlog, error) {
-	var iData *InsertData
-
-	// remain insert data
-	if len(fID2Content) != 0 {
-		iData = &InsertData{Data: make(map[storage.FieldID]storage.FieldData)}
-		for fID, content := range fID2Content {
-			tp, ok := fID2Type[fID]
-			if !ok {
-				log.Warn("no field ID in this schema", zap.Int64("fieldID", fID))
-				return nil, nil, errors.New("Unexpected error")
-			}
-
-			fData, err := interface2FieldData(tp, content, int64(len(content)))
-			if err != nil {
-				log.Warn("transfer interface to FieldData wrong", zap.Error(err))
-				return nil, nil, err
-			}
-			iData.Data[fID] = fData
-		}
-	}
-
-	inPaths, statPaths, err := t.uploadStatsLog(ctxTimeout, targetSegID, partID, iData, stats, totRows, meta)
+	inPaths, statPaths, err := t.uploadStatsLog(ctxTimeout, targetSegID, partID, writeBuffer, stats, totRows, meta)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -221,29 +200,10 @@ func (t *compactionTask) uploadSingleInsertLog(
 	targetSegID UniqueID,
 	partID UniqueID,
 	meta *etcdpb.CollectionMeta,
-	fID2Content map[UniqueID][]interface{},
+	writeBuffer *storage.InsertData,
 	fID2Type map[UniqueID]schemapb.DataType,
 ) (map[UniqueID]*datapb.FieldBinlog, error) {
-	iData := &InsertData{
-		Data: make(map[storage.FieldID]storage.FieldData),
-	}
-
-	for fID, content := range fID2Content {
-		tp, ok := fID2Type[fID]
-		if !ok {
-			log.Warn("no field ID in this schema", zap.Int64("fieldID", fID))
-			return nil, errors.New("Unexpected error")
-		}
-
-		fData, err := interface2FieldData(tp, content, int64(len(content)))
-		if err != nil {
-			log.Warn("transfer interface to FieldData wrong", zap.Error(err))
-			return nil, err
-		}
-		iData.Data[fID] = fData
-	}
-
-	inPaths, err := t.uploadInsertLog(ctxTimeout, targetSegID, partID, iData, meta)
+	inPaths, err := t.uploadInsertLog(ctxTimeout, targetSegID, partID, writeBuffer, meta)
 	if err != nil {
 		return nil, err
 	}
@@ -263,13 +223,11 @@ func (t *compactionTask) merge(
 	mergeStart := time.Now()
 
 	var (
-		maxRowsPerBinlog int   // maximum rows populating one binlog
-		numBinlogs       int   // binlog number
-		numRows          int64 // the number of rows uploaded
-		expired          int64 // the number of expired entity
+		numBinlogs int   // binlog number
+		numRows    int64 // the number of rows uploaded
+		expired    int64 // the number of expired entity
 
-		fID2Type    = make(map[UniqueID]schemapb.DataType)
-		fID2Content = make(map[UniqueID][]interface{})
+		fID2Type = make(map[UniqueID]schemapb.DataType)
 
 		insertField2Path = make(map[UniqueID]*datapb.FieldBinlog)
 		insertPaths      = make([]*datapb.FieldBinlog, 0)
@@ -277,6 +235,10 @@ func (t *compactionTask) merge(
 		statField2Path = make(map[UniqueID]*datapb.FieldBinlog)
 		statPaths      = make([]*datapb.FieldBinlog, 0)
 	)
+	writeBuffer, err := storage.NewInsertData(meta.GetSchema())
+	if err != nil {
+		return nil, nil, -1, err
+	}
 
 	isDeletedValue := func(v *storage.Value) bool {
 		ts, ok := delta[v.PK.GetValue()]
@@ -333,19 +295,6 @@ func (t *compactionTask) merge(
 
 	pkID := pkField.GetFieldID()
 	pkType := pkField.GetDataType()
-
-	// estimate Rows per binlog
-	// TODO should not convert size to row because we already know the size, this is especially important on varchar types.
-	size, err := typeutil.EstimateSizePerRecord(meta.GetSchema())
-	if err != nil {
-		log.Warn("failed to estimate size per record", zap.Error(err))
-		return nil, nil, 0, err
-	}
-
-	maxRowsPerBinlog = int(Params.DataNodeCfg.BinLogMaxSize.GetAsInt64() / int64(size))
-	if Params.DataNodeCfg.BinLogMaxSize.GetAsInt64()%int64(size) != 0 {
-		maxRowsPerBinlog++
-	}
 
 	expired = 0
 	numRows = 0
@@ -415,19 +364,19 @@ func (t *compactionTask) merge(
 				return nil, nil, 0, errors.New("unexpected error")
 			}
 
-			for fID, vInter := range row {
-				if _, ok := fID2Content[fID]; !ok {
-					fID2Content[fID] = make([]interface{}, 0)
-				}
-				fID2Content[fID] = append(fID2Content[fID], vInter)
+			err = writeBuffer.Append(row)
+			if err != nil {
+				return nil, nil, 0, err
 			}
-			// update pk to new stats log
-			stats.Update(v.PK)
 
 			currentRows++
-			if currentRows >= maxRowsPerBinlog {
+			stats.Update(v.PK)
+
+			// check size every 100 rows in case of too many `GetMemorySize` call
+			if (currentRows+1)%100 == 0 && writeBuffer.GetMemorySize() > paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsInt() {
+				numRows += int64(writeBuffer.GetRowNum())
 				uploadInsertStart := time.Now()
-				inPaths, err := t.uploadSingleInsertLog(ctxTimeout, targetSegID, partID, meta, fID2Content, fID2Type)
+				inPaths, err := t.uploadSingleInsertLog(ctxTimeout, targetSegID, partID, meta, writeBuffer, fID2Type)
 				if err != nil {
 					log.Warn("failed to upload single insert log", zap.Error(err))
 					return nil, nil, 0, err
@@ -437,19 +386,19 @@ func (t *compactionTask) merge(
 				timestampFrom = -1
 				timestampTo = -1
 
-				fID2Content = make(map[int64][]interface{})
+				writeBuffer, _ = storage.NewInsertData(meta.GetSchema())
 				currentRows = 0
-				numRows += int64(maxRowsPerBinlog)
 				numBinlogs++
 			}
 		}
 	}
 
 	// upload stats log and remain insert rows
-	if numRows != 0 || currentRows != 0 {
+	if writeBuffer.GetRowNum() > 0 || numRows > 0 {
+		numRows += int64(writeBuffer.GetRowNum())
 		uploadStart := time.Now()
 		inPaths, statsPaths, err := t.uploadRemainLog(ctxTimeout, targetSegID, partID, meta,
-			stats, numRows+int64(currentRows), fID2Content, fID2Type)
+			stats, numRows+int64(currentRows), writeBuffer, fID2Type)
 		if err != nil {
 			return nil, nil, 0, err
 		}
@@ -457,7 +406,6 @@ func (t *compactionTask) merge(
 		uploadInsertTimeCost += time.Since(uploadStart)
 		addInsertFieldPath(inPaths, timestampFrom, timestampTo)
 		addStatFieldPath(statsPaths)
-		numRows += int64(currentRows)
 		numBinlogs += len(inPaths)
 	}
 

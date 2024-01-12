@@ -22,9 +22,11 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"math/rand"
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -1082,8 +1084,8 @@ func (f *FailMessageStreamFactory) NewTtMsgStream(ctx context.Context) (msgstrea
 	return nil, errors.New("mocked failure")
 }
 
-func genInsertDataWithPKs(PKs [2]primaryKey, dataType schemapb.DataType) *InsertData {
-	iD := genInsertData()
+func genInsertDataWithPKs(PKs [2]storage.PrimaryKey, dataType schemapb.DataType) *InsertData {
+	iD := genInsertData(2)
 	switch dataType {
 	case schemapb.DataType_Int64:
 		values := make([]int64, len(PKs))
@@ -1114,46 +1116,46 @@ func genTestStat(meta *etcdpb.CollectionMeta) *storage.PrimaryKeyStats {
 	return storage.NewPrimaryKeyStats(pkFieldID, pkFieldType, 0)
 }
 
-func genInsertData() *InsertData {
+func genInsertData(rowNum int) *InsertData {
 	return &InsertData{
 		Data: map[int64]storage.FieldData{
 			0: &storage.Int64FieldData{
-				Data: []int64{1, 2},
+				Data: lo.RepeatBy(rowNum, func(i int) int64 { return int64(i + 1) }),
 			},
 			1: &storage.Int64FieldData{
-				Data: []int64{3, 4},
+				Data: lo.RepeatBy(rowNum, func(i int) int64 { return int64(i + 3) }),
 			},
 			100: &storage.FloatVectorFieldData{
-				Data: []float32{1.0, 6.0, 7.0, 8.0},
+				Data: lo.RepeatBy(rowNum*2, func(i int) float32 { return rand.Float32() }),
 				Dim:  2,
 			},
 			101: &storage.BinaryVectorFieldData{
-				Data: []byte{0, 255, 255, 255, 128, 128, 128, 0},
+				Data: lo.RepeatBy(rowNum*4, func(i int) byte { return byte(rand.Intn(256)) }),
 				Dim:  32,
 			},
 			102: &storage.BoolFieldData{
-				Data: []bool{true, false},
+				Data: lo.RepeatBy(rowNum, func(i int) bool { return i%2 == 0 }),
 			},
 			103: &storage.Int8FieldData{
-				Data: []int8{5, 6},
+				Data: lo.RepeatBy(rowNum, func(i int) int8 { return int8(i) }),
 			},
 			104: &storage.Int16FieldData{
-				Data: []int16{7, 8},
+				Data: lo.RepeatBy(rowNum, func(i int) int16 { return int16(i) }),
 			},
 			105: &storage.Int32FieldData{
-				Data: []int32{9, 10},
+				Data: lo.RepeatBy(rowNum, func(i int) int32 { return int32(i) }),
 			},
 			106: &storage.Int64FieldData{
-				Data: []int64{1, 2},
+				Data: lo.RepeatBy(rowNum, func(i int) int64 { return int64(i) }),
 			},
 			107: &storage.FloatFieldData{
-				Data: []float32{2.333, 2.334},
+				Data: lo.RepeatBy(rowNum, func(i int) float32 { return rand.Float32() }),
 			},
 			108: &storage.DoubleFieldData{
-				Data: []float64{3.333, 3.334},
+				Data: lo.RepeatBy(rowNum, func(i int) float64 { return rand.Float64() }),
 			},
 			109: &storage.StringFieldData{
-				Data: []string{"test1", "test2"},
+				Data: lo.RepeatBy(rowNum, func(i int) string { return fmt.Sprintf("test%d", i) }),
 			},
 		},
 	}
