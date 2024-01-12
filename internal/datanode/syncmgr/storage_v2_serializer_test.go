@@ -249,7 +249,7 @@ func (s *StorageV2SerializerSuite) TestSerializeInsert() {
 		s.EqualValues(50, taskV2.tsFrom)
 		s.EqualValues(100, taskV2.tsTo)
 		s.NotNil(taskV2.reader)
-		s.NotNil(taskV2.batchStatsBlob)
+		s.NotNil(taskV2.statsBlob)
 	})
 
 	s.Run("with_flush_segment_not_found", func() {

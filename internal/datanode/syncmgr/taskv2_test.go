@@ -316,7 +316,7 @@ func (s *SyncTaskSuiteV2) TestBuildRecord() {
 		},
 	}
 
-	err = buildRecord(b, data, fieldSchemas)
+	err = typeutil.BuildRecord(b, data, fieldSchemas)
 	s.NoError(err)
 	s.EqualValues(2, b.NewRecord().NumRows())
 }

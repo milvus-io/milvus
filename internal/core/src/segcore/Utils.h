@@ -25,6 +25,7 @@
 // #include "common/Schema.h"
 #include "common/Types.h"
 #include "index/Index.h"
+#include "log/Log.h"
 #include "segcore/DeletedRecord.h"
 #include "segcore/InsertRecord.h"
 #include "storage/space.h"

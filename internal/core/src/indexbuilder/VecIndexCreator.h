@@ -35,6 +35,7 @@ class VecIndexCreator : public IndexCreatorBase {
 
     VecIndexCreator(DataType data_type,
                     const std::string& field_name,
+                    const int64_t dim,
                     Config& config,
                     const storage::FileManagerContext& file_manager_context,
                     std::shared_ptr<milvus_storage::Space> space);
