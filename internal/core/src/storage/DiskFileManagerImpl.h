@@ -102,6 +102,13 @@ class DiskFileManagerImpl : public FileManagerImpl {
     std::string
     CacheRawDataToDisk(std::shared_ptr<milvus_storage::Space> space);
 
+    std::string
+    CacheOptFieldToDisk(OptFieldT& fields_map);
+
+    std::string
+    CacheOptFieldToDisk(std::shared_ptr<milvus_storage::Space> space,
+                        OptFieldT& fields_map);
+
     virtual bool
     AddFileUsingSpace(const std::string& local_file_name,
                       const std::vector<int64_t>& local_file_offsets,

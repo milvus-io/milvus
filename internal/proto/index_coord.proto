@@ -242,6 +242,14 @@ message StorageConfig {
     int64 request_timeout_ms = 13;
 }
 
+message OptionalFieldInfo {
+  int64 fieldID = 1;
+  string field_name = 2;
+  int32 field_type = 3;
+  repeated string data_paths = 4;
+  repeated int64 data_ids = 5;
+}
+
 message CreateJobRequest {
     string clusterID = 1;
     string index_file_prefix = 2;
@@ -266,6 +274,7 @@ message CreateJobRequest {
     string index_store_path = 21;
     int64 dim = 22;
     repeated int64 data_ids = 23;
+    repeated OptionalFieldInfo optional_scalar_fields = 24;
 }
 
 message QueryJobsRequest {
