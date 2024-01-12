@@ -402,14 +402,14 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			inPaths, statsPaths, numOfRow, err := ct.merge(context.Background(), allPaths, 2, 0, meta, dm)
 			assert.NoError(t, err)
 			assert.Equal(t, int64(2), numOfRow)
-			assert.Equal(t, 2, len(inPaths[0].GetBinlogs()))
+			assert.Equal(t, 1, len(inPaths[0].GetBinlogs()))
 			assert.Equal(t, 1, len(statsPaths))
 			assert.Equal(t, 1, len(statsPaths[0].GetBinlogs()))
 			assert.NotEqual(t, -1, inPaths[0].GetBinlogs()[0].GetTimestampFrom())
 			assert.NotEqual(t, -1, inPaths[0].GetBinlogs()[0].GetTimestampTo())
 		})
 		// set Params.DataNodeCfg.BinLogMaxSize.Key = 1 to generate multi binlogs, each has only one row
-		t.Run("Merge without expiration3", func(t *testing.T) {
+		t.Run("merge_with_more_than_100rows", func(t *testing.T) {
 			mockbIO := &binlogIO{cm, alloc}
 			paramtable.Get().Save(Params.CommonCfg.EntityExpirationTTL.Key, "0")
 			BinLogMaxSize := Params.DataNodeCfg.BinLogMaxSize.GetAsInt()
@@ -417,7 +417,7 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 				paramtable.Get().Save(Params.DataNodeCfg.BinLogMaxSize.Key, fmt.Sprintf("%d", BinLogMaxSize))
 			}()
 			paramtable.Get().Save(Params.DataNodeCfg.BinLogMaxSize.Key, "1")
-			iData := genInsertDataWithExpiredTS()
+			iData := genInsertData(101)
 
 			var allPaths [][]string
 			inpath, err := mockbIO.uploadInsertLog(context.Background(), 1, 0, iData, meta)
@@ -451,14 +451,12 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			}
 			inPaths, statsPaths, numOfRow, err := ct.merge(context.Background(), allPaths, 2, 0, meta, dm)
 			assert.NoError(t, err)
-			assert.Equal(t, int64(2), numOfRow)
+			assert.Equal(t, int64(101), numOfRow)
 			assert.Equal(t, 2, len(inPaths[0].GetBinlogs()))
 			assert.Equal(t, 1, len(statsPaths))
 			for _, inpath := range inPaths {
 				assert.NotEqual(t, -1, inpath.GetBinlogs()[0].GetTimestampFrom())
 				assert.NotEqual(t, -1, inpath.GetBinlogs()[0].GetTimestampTo())
-				// as only one row for each binlog, timestampTo == timestampFrom
-				assert.Equal(t, inpath.GetBinlogs()[0].GetTimestampTo(), inpath.GetBinlogs()[0].GetTimestampFrom())
 			}
 		})
 

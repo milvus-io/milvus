@@ -364,9 +364,11 @@ func (t *compactionTask) merge(
 				return nil, nil, 0, err
 			}
 
+			currentRows++
 			stats.Update(v.PK)
 
-			if writeBuffer.GetMemorySize() > paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsInt() {
+			// check size every 100 rows in case of too many `GetMemorySize` call
+			if (currentRows+1)%100 == 0 && writeBuffer.GetMemorySize() > paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsInt() {
 				numRows += int64(writeBuffer.GetRowNum())
 				uploadInsertStart := time.Now()
 				inPaths, err := t.uploadSingleInsertLog(ctxTimeout, targetSegID, partID, meta, writeBuffer, fID2Type)
