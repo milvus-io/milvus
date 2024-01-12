@@ -87,7 +87,7 @@ pipeline {
                     axes {
                         axis {
                             name 'MILVUS_SERVER_TYPE'
-                            values 'standalone', 'distributed-pulsar', 'distributed-kafka', 'standalone-authentication'
+                            values 'standalone', 'distributed-pulsar', 'distributed-kafka', 'standalone-authentication', 'standalone-one-pod'
                         }
                         axis {
                             name 'MILVUS_CLIENT'
@@ -106,6 +106,7 @@ pipeline {
                                             // def setMemoryResourceLimitArgs="--set standalone.resources.limits.memory=4Gi"
                                             def mqMode='pulsar' // default using is pulsar
                                             def authenticationEnabled = "false"
+                                            def valuesFile = "values/ci/nightly.yaml"
                                             if ("${MILVUS_SERVER_TYPE}" == "distributed-pulsar") {
                                                 clusterEnabled = "true"
                                             } else if ("${MILVUS_SERVER_TYPE}" == "distributed-kafka") {
@@ -113,6 +114,8 @@ pipeline {
                                                 mqMode='kafka'
                                             } else if("${MILVUS_SERVER_TYPE}" == "standalone-authentication") {
                                                 authenticationEnabled = "true"
+                                            } else if("${MILVUS_SERVER_TYPE}" == "standalone-one-pod") {
+                                                valuesFile = "values/ci/nightly-one-pod.yaml"
                                             }
                                             if ("${MILVUS_CLIENT}" == "pymilvus") {
                                                 if ("${imageTag}"==''){
@@ -161,7 +164,7 @@ pipeline {
                                                     --set common.security.authorizationEnabled=${authenticationEnabled} \
                                                     --version ${chart_version} \
                                                     -f values/${mqMode}.yaml \
-                                                    -f values/ci/nightly.yaml "
+                                                    -f ${valuesFile}"
                                                     """
                                                 }
                                             } else {

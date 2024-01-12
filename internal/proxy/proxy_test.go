@@ -755,6 +755,30 @@ func TestProxy(t *testing.T) {
 	})
 
 	wg.Add(1)
+	t.Run("describe alias", func(t *testing.T) {
+		defer wg.Done()
+		describeAliasReq := &milvuspb.DescribeAliasRequest{
+			Base:   nil,
+			DbName: dbName,
+			Alias:  "alias",
+		}
+		resp, err := proxy.DescribeAlias(ctx, describeAliasReq)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	wg.Add(1)
+	t.Run("list alias", func(t *testing.T) {
+		defer wg.Done()
+		listAliasReq := &milvuspb.ListAliasesRequest{
+			Base: nil,
+		}
+		resp, err := proxy.ListAliases(ctx, listAliasReq)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	wg.Add(1)
 	t.Run("alter alias", func(t *testing.T) {
 		defer wg.Done()
 		// alter alias
@@ -2885,6 +2909,22 @@ func TestProxy(t *testing.T) {
 	})
 
 	wg.Add(1)
+	t.Run("ListAliases fail, unhealthy", func(t *testing.T) {
+		defer wg.Done()
+		resp, err := proxy.ListAliases(ctx, &milvuspb.ListAliasesRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	wg.Add(1)
+	t.Run("DescribeAlias fail, unhealthy", func(t *testing.T) {
+		defer wg.Done()
+		resp, err := proxy.DescribeAlias(ctx, &milvuspb.DescribeAliasRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	wg.Add(1)
 	t.Run("GetPersistentSegmentInfo fail, unhealthy", func(t *testing.T) {
 		defer wg.Done()
 		resp, err := proxy.GetPersistentSegmentInfo(ctx, &milvuspb.GetPersistentSegmentInfoRequest{})
@@ -3200,6 +3240,22 @@ func TestProxy(t *testing.T) {
 		resp, err := proxy.AlterAlias(ctx, &milvuspb.AlterAliasRequest{})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	wg.Add(1)
+	t.Run("DescribeAlias fail, dd queue full", func(t *testing.T) {
+		defer wg.Done()
+		resp, err := proxy.DescribeAlias(ctx, &milvuspb.DescribeAliasRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	wg.Add(1)
+	t.Run("ListAliases fail, dd queue full", func(t *testing.T) {
+		defer wg.Done()
+		resp, err := proxy.ListAliases(ctx, &milvuspb.ListAliasesRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
 	proxy.sched.ddQueue.setMaxTaskNum(ddParallel)
@@ -3520,6 +3576,22 @@ func TestProxy(t *testing.T) {
 		resp, err := proxy.AlterAlias(shortCtx, &milvuspb.AlterAliasRequest{})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	wg.Add(1)
+	t.Run("DescribeAlias fail, timeout", func(t *testing.T) {
+		defer wg.Done()
+		resp, err := proxy.DescribeAlias(shortCtx, &milvuspb.DescribeAliasRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	wg.Add(1)
+	t.Run("ListAliases fail, timeout", func(t *testing.T) {
+		defer wg.Done()
+		resp, err := proxy.ListAliases(shortCtx, &milvuspb.ListAliasesRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
 	wg.Add(1)

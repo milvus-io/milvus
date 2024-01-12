@@ -139,6 +139,14 @@ func (m *mockProxyComponent) AlterAlias(ctx context.Context, request *milvuspb.A
 	return testStatus, nil
 }
 
+func (m *mockProxyComponent) DescribeAlias(ctx context.Context, request *milvuspb.DescribeAliasRequest) (*milvuspb.DescribeAliasResponse, error) {
+	return &milvuspb.DescribeAliasResponse{Status: testStatus}, nil
+}
+
+func (m *mockProxyComponent) ListAliases(ctx context.Context, request *milvuspb.ListAliasesRequest) (*milvuspb.ListAliasesResponse, error) {
+	return &milvuspb.ListAliasesResponse{Status: testStatus}, nil
+}
+
 func (m *mockProxyComponent) CreateIndex(ctx context.Context, request *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
 	return testStatus, nil
 }

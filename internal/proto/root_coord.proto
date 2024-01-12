@@ -54,6 +54,8 @@ service RootCoord {
     rpc CreateAlias(milvus.CreateAliasRequest) returns (common.Status) {}
     rpc DropAlias(milvus.DropAliasRequest) returns (common.Status) {}
     rpc AlterAlias(milvus.AlterAliasRequest) returns (common.Status) {}
+    rpc DescribeAlias(milvus.DescribeAliasRequest) returns (milvus.DescribeAliasResponse) {}
+    rpc ListAliases(milvus.ListAliasesRequest) returns (milvus.ListAliasesResponse) {}
 
     /**
      * @brief This method is used to list all collections.

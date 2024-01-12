@@ -555,6 +555,61 @@ func (_c *IMetaTable_DeleteCredential_Call) RunAndReturn(run func(string) error)
 	return _c
 }
 
+// DescribeAlias provides a mock function with given fields: ctx, dbName, alias, ts
+func (_m *IMetaTable) DescribeAlias(ctx context.Context, dbName string, alias string, ts uint64) (string, error) {
+	ret := _m.Called(ctx, dbName, alias, ts)
+
+	var r0 string
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, uint64) (string, error)); ok {
+		return rf(ctx, dbName, alias, ts)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, uint64) string); ok {
+		r0 = rf(ctx, dbName, alias, ts)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, string, uint64) error); ok {
+		r1 = rf(ctx, dbName, alias, ts)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// IMetaTable_DescribeAlias_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DescribeAlias'
+type IMetaTable_DescribeAlias_Call struct {
+	*mock.Call
+}
+
+// DescribeAlias is a helper method to define mock.On call
+//   - ctx context.Context
+//   - dbName string
+//   - alias string
+//   - ts uint64
+func (_e *IMetaTable_Expecter) DescribeAlias(ctx interface{}, dbName interface{}, alias interface{}, ts interface{}) *IMetaTable_DescribeAlias_Call {
+	return &IMetaTable_DescribeAlias_Call{Call: _e.mock.On("DescribeAlias", ctx, dbName, alias, ts)}
+}
+
+func (_c *IMetaTable_DescribeAlias_Call) Run(run func(ctx context.Context, dbName string, alias string, ts uint64)) *IMetaTable_DescribeAlias_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string), args[3].(uint64))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_DescribeAlias_Call) Return(_a0 string, _a1 error) *IMetaTable_DescribeAlias_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *IMetaTable_DescribeAlias_Call) RunAndReturn(run func(context.Context, string, string, uint64) (string, error)) *IMetaTable_DescribeAlias_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DropAlias provides a mock function with given fields: ctx, dbName, alias, ts
 func (_m *IMetaTable) DropAlias(ctx context.Context, dbName string, alias string, ts uint64) error {
 	ret := _m.Called(ctx, dbName, alias, ts)
@@ -1202,6 +1257,63 @@ func (_c *IMetaTable_IsAlias_Call) Return(_a0 bool) *IMetaTable_IsAlias_Call {
 }
 
 func (_c *IMetaTable_IsAlias_Call) RunAndReturn(run func(string, string) bool) *IMetaTable_IsAlias_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListAliases provides a mock function with given fields: ctx, dbName, collectionName, ts
+func (_m *IMetaTable) ListAliases(ctx context.Context, dbName string, collectionName string, ts uint64) ([]string, error) {
+	ret := _m.Called(ctx, dbName, collectionName, ts)
+
+	var r0 []string
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, uint64) ([]string, error)); ok {
+		return rf(ctx, dbName, collectionName, ts)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, uint64) []string); ok {
+		r0 = rf(ctx, dbName, collectionName, ts)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]string)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, string, uint64) error); ok {
+		r1 = rf(ctx, dbName, collectionName, ts)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// IMetaTable_ListAliases_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListAliases'
+type IMetaTable_ListAliases_Call struct {
+	*mock.Call
+}
+
+// ListAliases is a helper method to define mock.On call
+//   - ctx context.Context
+//   - dbName string
+//   - collectionName string
+//   - ts uint64
+func (_e *IMetaTable_Expecter) ListAliases(ctx interface{}, dbName interface{}, collectionName interface{}, ts interface{}) *IMetaTable_ListAliases_Call {
+	return &IMetaTable_ListAliases_Call{Call: _e.mock.On("ListAliases", ctx, dbName, collectionName, ts)}
+}
+
+func (_c *IMetaTable_ListAliases_Call) Run(run func(ctx context.Context, dbName string, collectionName string, ts uint64)) *IMetaTable_ListAliases_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string), args[3].(uint64))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_ListAliases_Call) Return(_a0 []string, _a1 error) *IMetaTable_ListAliases_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *IMetaTable_ListAliases_Call) RunAndReturn(run func(context.Context, string, string, uint64) ([]string, error)) *IMetaTable_ListAliases_Call {
 	_c.Call.Return(run)
 	return _c
 }
