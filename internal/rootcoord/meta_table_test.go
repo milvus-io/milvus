@@ -709,6 +709,234 @@ func TestMetaTable_AlterCollection(t *testing.T) {
 	})
 }
 
+func TestMetaTable_DescribeAlias(t *testing.T) {
+	t.Run("metatable describe alias ok", func(t *testing.T) {
+		var collectionID int64 = 100
+		collectionName := "test_metatable_describe_alias"
+		aliasName := "a_alias"
+		meta := &MetaTable{
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				collectionID: {
+					CollectionID: collectionID,
+					Name:         collectionName,
+				},
+			},
+			names:   newNameDb(),
+			aliases: newNameDb(),
+		}
+		meta.names.insert("", collectionName, collectionID)
+		meta.aliases.insert("", aliasName, collectionID)
+
+		ctx := context.Background()
+		descCollectionName, err := meta.DescribeAlias(ctx, "", aliasName, 0)
+		assert.NoError(t, err)
+		assert.Equal(t, collectionName, descCollectionName)
+	})
+
+	t.Run("metatable describe not exist alias", func(t *testing.T) {
+		var collectionID int64 = 100
+		aliasName1 := "a_alias"
+		aliasName2 := "a_alias2"
+		meta := &MetaTable{
+			names:   newNameDb(),
+			aliases: newNameDb(),
+		}
+		meta.aliases.insert("", aliasName1, collectionID)
+		ctx := context.Background()
+		descCollectionName, err := meta.DescribeAlias(ctx, "", aliasName2, 0)
+		assert.Error(t, err)
+		assert.Equal(t, "", descCollectionName)
+	})
+
+	t.Run("metatable describe not exist database", func(t *testing.T) {
+		aliasName := "a_alias"
+		meta := &MetaTable{
+			names:   newNameDb(),
+			aliases: newNameDb(),
+		}
+		ctx := context.Background()
+		descCollectionName, err := meta.DescribeAlias(ctx, "", aliasName, 0)
+		assert.Error(t, err)
+		assert.Equal(t, "", descCollectionName)
+	})
+
+	t.Run("metatable describe alias fail", func(t *testing.T) {
+		var collectionID int64 = 100
+		collectionName := "test_metatable_describe_alias"
+		aliasName := "a_alias"
+		meta := &MetaTable{
+			names:   newNameDb(),
+			aliases: newNameDb(),
+		}
+		meta.names.insert("", collectionName, collectionID)
+		meta.aliases.insert("", aliasName, collectionID)
+		ctx := context.Background()
+		_, err := meta.DescribeAlias(ctx, "", aliasName, 0)
+		assert.Error(t, err)
+	})
+
+	t.Run("metatable describe alias dropped collection", func(t *testing.T) {
+		var collectionID int64 = 100
+		collectionName := "test_metatable_describe_alias"
+		aliasName := "a_alias"
+		meta := &MetaTable{
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				collectionID: {
+					CollectionID: collectionID,
+					Name:         collectionName,
+				},
+			},
+			names:   newNameDb(),
+			aliases: newNameDb(),
+		}
+		meta.names.insert("", collectionName, collectionID)
+		meta.aliases.insert("", aliasName, collectionID)
+
+		ctx := context.Background()
+		meta.collID2Meta[collectionID] = &model.Collection{State: pb.CollectionState_CollectionDropped}
+		alias, err := meta.DescribeAlias(ctx, "", aliasName, 0)
+		assert.Equal(t, "", alias)
+		assert.Error(t, err)
+	})
+}
+
+func TestMetaTable_ListAliases(t *testing.T) {
+	t.Run("metatable list alias ok", func(t *testing.T) {
+		var collectionID1 int64 = 101
+		collectionName1 := "test_metatable_list_alias1"
+		aliasName1 := "a_alias"
+		var collectionID2 int64 = 102
+		collectionName2 := "test_metatable_list_alias2"
+		aliasName2 := "a_alias2"
+		var collectionID3 int64 = 103
+		collectionName3 := "test_metatable_list_alias3"
+		aliasName3 := "a_alias3"
+		aliasName4 := "a_alias4"
+		meta := &MetaTable{
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				collectionID1: {
+					CollectionID: collectionID1,
+					Name:         collectionName1,
+				},
+				collectionID1: {
+					CollectionID: collectionID2,
+					Name:         collectionName2,
+				},
+			},
+			names:   newNameDb(),
+			aliases: newNameDb(),
+		}
+		meta.names.insert("", collectionName1, collectionID1)
+		meta.names.insert("", collectionName2, collectionID2)
+		meta.names.insert("db2", collectionName3, collectionID3)
+
+		meta.aliases.insert("", aliasName1, collectionID1)
+		meta.aliases.insert("", aliasName2, collectionID2)
+		meta.aliases.insert("db2", aliasName3, collectionID3)
+		meta.aliases.insert("db2", aliasName4, collectionID3)
+
+		meta.collID2Meta[collectionID1] = &model.Collection{State: pb.CollectionState_CollectionCreated}
+		meta.collID2Meta[collectionID2] = &model.Collection{State: pb.CollectionState_CollectionCreated}
+		meta.collID2Meta[collectionID3] = &model.Collection{State: pb.CollectionState_CollectionCreated}
+
+		ctx := context.Background()
+		aliases, err := meta.ListAliases(ctx, "", "", 0)
+		assert.NoError(t, err)
+		assert.Equal(t, 2, len(aliases))
+
+		aliases2, err := meta.ListAliases(ctx, "", collectionName1, 0)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(aliases2))
+
+		aliases3, err := meta.ListAliases(ctx, "db2", "", 0)
+		assert.NoError(t, err)
+		assert.Equal(t, 2, len(aliases3))
+
+		aliases4, err := meta.ListAliases(ctx, "db2", collectionName3, 0)
+		assert.NoError(t, err)
+		assert.Equal(t, 2, len(aliases4))
+	})
+
+	t.Run("metatable list alias in not exist database", func(t *testing.T) {
+		aliasName := "a_alias"
+		meta := &MetaTable{
+			names:   newNameDb(),
+			aliases: newNameDb(),
+		}
+		ctx := context.Background()
+		aliases, err := meta.ListAliases(ctx, "", aliasName, 0)
+		assert.Error(t, err)
+		assert.Equal(t, 0, len(aliases))
+	})
+
+	t.Run("metatable list alias error", func(t *testing.T) {
+		var collectionID1 int64 = 101
+		collectionName1 := "test_metatable_list_alias1"
+		aliasName1 := "a_alias"
+		var collectionID2 int64 = 102
+		collectionName2 := "test_metatable_list_alias2"
+		aliasName2 := "a_alias2"
+		meta := &MetaTable{
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				collectionID1: {
+					CollectionID: collectionID1,
+					Name:         collectionName1,
+				},
+				collectionID1: {
+					CollectionID: collectionID2,
+					Name:         collectionName2,
+				},
+			},
+			names:   newNameDb(),
+			aliases: newNameDb(),
+		}
+		meta.aliases.insert("", aliasName1, collectionID1)
+		meta.aliases.insert("", aliasName2, collectionID2)
+		ctx := context.Background()
+		_, err := meta.ListAliases(ctx, "", collectionName1, 0)
+		assert.Error(t, err)
+	})
+
+	t.Run("metatable list alias Dropping collection", func(t *testing.T) {
+		ctx := context.Background()
+
+		var collectionID1 int64 = 101
+		collectionName1 := "test_metatable_list_alias1"
+		aliasName1 := "a_alias"
+		var collectionID2 int64 = 102
+		collectionName2 := "test_metatable_list_alias2"
+		aliasName2 := "a_alias2"
+		meta := &MetaTable{
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				collectionID1: {
+					CollectionID: collectionID1,
+					Name:         collectionName1,
+				},
+				collectionID1: {
+					CollectionID: collectionID2,
+					Name:         collectionName2,
+				},
+			},
+			names:   newNameDb(),
+			aliases: newNameDb(),
+		}
+		meta.names.insert("", collectionName1, collectionID1)
+		meta.names.insert("", collectionName2, collectionID2)
+		meta.aliases.insert("", aliasName1, collectionID1)
+		meta.aliases.insert("", aliasName2, collectionID2)
+		meta.collID2Meta[collectionID1] = &model.Collection{State: pb.CollectionState_CollectionCreated}
+		meta.collID2Meta[collectionID2] = &model.Collection{State: pb.CollectionState_CollectionDropped}
+
+		aliases, err := meta.ListAliases(ctx, "", "", 0)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(aliases))
+
+		aliases2, err := meta.ListAliases(ctx, "", collectionName1, 0)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(aliases2))
+	})
+}
+
 func Test_filterUnavailable(t *testing.T) {
 	coll := &model.Collection{}
 	nPartition := 10
