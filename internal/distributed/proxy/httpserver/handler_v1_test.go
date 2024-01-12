@@ -1894,18 +1894,13 @@ func TestImport(t *testing.T) {
 		name:         "get import progress success",
 		mp:           mp6,
 		exceptCode:   200,
-		expectedBody: "{\"code\":200,\"progress\":100,\"state\":\"Completed\"}",
+		expectedBody: "{\"code\":200,\"data\":{\"progress\":100,\"state\":\"Completed\"}}",
 	})
 
 	for _, tt := range testCases {
 		t.Run(tt.name, func(t *testing.T) {
 			testEngine := initHTTPServer(tt.mp, true)
-			data, _ := json.Marshal(map[string]interface{}{
-				HTTPCollectionName: DefaultCollectionName,
-				"requestID":        "1000",
-			})
-			bodyReader := bytes.NewReader(data)
-			req := httptest.NewRequest(http.MethodGet, versional(VectorImportDescribePath), bodyReader)
+			req := httptest.NewRequest(http.MethodGet, versional(fmt.Sprintf("%s?requestID=1000", VectorImportDescribePath)), nil)
 			req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
 			w := httptest.NewRecorder()
 			testEngine.ServeHTTP(w, req)
@@ -1946,11 +1941,7 @@ func TestImport(t *testing.T) {
 	for _, tt := range testCases {
 		t.Run(tt.name, func(t *testing.T) {
 			testEngine := initHTTPServer(tt.mp, true)
-			data, _ := json.Marshal(map[string]interface{}{
-				HTTPCollectionName: DefaultCollectionName,
-			})
-			bodyReader := bytes.NewReader(data)
-			req := httptest.NewRequest(http.MethodGet, versional(VectorImportListPath), bodyReader)
+			req := httptest.NewRequest(http.MethodGet, versional(VectorImportListPath), nil)
 			req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
 			w := httptest.NewRecorder()
 			testEngine.ServeHTTP(w, req)
