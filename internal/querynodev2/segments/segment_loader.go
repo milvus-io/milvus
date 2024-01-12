@@ -680,6 +680,12 @@ func (loader *segmentLoader) loadFieldsIndex(ctx context.Context,
 	vecFieldInfos map[int64]*IndexedFieldInfo,
 ) error {
 	schemaHelper, _ := typeutil.CreateSchemaHelper(schema)
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", segment.Collection()),
+		zap.Int64("partitionID", segment.Partition()),
+		zap.Int64("segmentID", segment.ID()),
+		zap.Int64("rowCount", numRows),
+	)
 
 	for fieldID, fieldInfo := range vecFieldInfos {
 		indexInfo := fieldInfo.IndexInfo
@@ -689,8 +695,6 @@ func (loader *segmentLoader) loadFieldsIndex(ctx context.Context,
 		}
 
 		log.Info("load field binlogs done for sealed segment with index",
-			zap.Int64("collection", segment.collectionID),
-			zap.Int64("segment", segment.segmentID),
 			zap.Int64("fieldID", fieldID),
 			zap.Any("binlog", fieldInfo.FieldBinlog.Binlogs),
 			zap.Int32("current_index_version", fieldInfo.IndexInfo.GetCurrentIndexVersion()),
