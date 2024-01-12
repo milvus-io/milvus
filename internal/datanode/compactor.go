@@ -162,6 +162,9 @@ func (t *compactionTask) mergeDeltalogs(dBlobs map[UniqueID][]*Blob) (map[interf
 		for i := int64(0); i < dData.RowCount; i++ {
 			pk := dData.Pks[i]
 			ts := dData.Tss[i]
+			if lastTS, ok := pk2ts[pk.GetValue()]; ok && lastTS > ts {
+				ts = lastTS
+			}
 
 			pk2ts[pk.GetValue()] = ts
 		}
