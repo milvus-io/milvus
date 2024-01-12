@@ -33,9 +33,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/conc"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
-
-const BufferSize = 64 * 1024 * 1024 // TODO: dyh, make it configurable
 
 type Executor interface {
 	Start()
@@ -119,7 +118,10 @@ func (e *executor) handleErr(task Task, err error, msg string) {
 }
 
 func (e *executor) PreImport(task Task) {
-	log.Info("start to preimport", WrapLogFields(task, zap.Any("schema", task.GetSchema()))...)
+	bufferSize := paramtable.Get().DataNodeCfg.ImportBufferSize.GetAsInt() * 1024 * 1024
+	log.Info("start to preimport", WrapLogFields(task,
+		zap.Int("bufferSize", bufferSize),
+		zap.Any("schema", task.GetSchema()))...)
 	e.manager.Update(task.GetTaskID(), UpdateState(internalpb.ImportState_InProgress))
 	files := lo.Map(task.(*PreImportTask).GetFileStats(),
 		func(fileStat *datapb.ImportFileStats, _ int) *internalpb.ImportFile {
@@ -127,7 +129,7 @@ func (e *executor) PreImport(task Task) {
 		})
 
 	for i, file := range files {
-		reader, err := importutilv2.NewReader(task.GetCtx(), e.cm, task.GetSchema(), file, task.GetOptions(), BufferSize)
+		reader, err := importutilv2.NewReader(task.GetCtx(), e.cm, task.GetSchema(), file, task.GetOptions(), bufferSize)
 		if err != nil {
 			e.handleErr(task, err, "new reader failed")
 			return
@@ -187,12 +189,15 @@ func (e *executor) readFileStat(reader importutilv2.Reader, task Task, fileIdx i
 }
 
 func (e *executor) Import(task Task) {
-	log.Info("start to import", WrapLogFields(task, zap.Any("schema", task.GetSchema()))...)
+	bufferSize := paramtable.Get().DataNodeCfg.ImportBufferSize.GetAsInt() * 1024 * 1024
+	log.Info("start to import", WrapLogFields(task,
+		zap.Int("bufferSize", bufferSize),
+		zap.Any("schema", task.GetSchema()))...)
 	e.manager.Update(task.GetTaskID(), UpdateState(internalpb.ImportState_InProgress))
 
 	req := task.(*ImportTask).req
 	for _, file := range req.GetFiles() {
-		reader, err := importutilv2.NewReader(task.GetCtx(), e.cm, task.GetSchema(), file, task.GetOptions(), BufferSize)
+		reader, err := importutilv2.NewReader(task.GetCtx(), e.cm, task.GetSchema(), file, task.GetOptions(), bufferSize)
 		if err != nil {
 			e.handleErr(task, err, fmt.Sprintf("new reader failed, file: %s", file.String()))
 			return

@@ -360,6 +360,9 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, true, Params.AutoBalance.GetAsBool())
 		assert.Equal(t, 10, Params.CheckAutoBalanceConfigInterval.GetAsInt())
 		assert.Equal(t, false, Params.AutoUpgradeSegmentIndex.GetAsBool())
+		assert.Equal(t, 2, Params.FilesPerPreImportTask.GetAsInt())
+		assert.Equal(t, 10800*time.Second, Params.ImportTaskRetention.GetAsDuration(time.Second))
+		assert.Equal(t, 1800*time.Second, Params.ImportInactiveTimeout.GetAsDuration(time.Second))
 	})
 
 	t.Run("test dataNodeConfig", func(t *testing.T) {
@@ -406,6 +409,14 @@ func TestComponentParam(t *testing.T) {
 		updateChannelCheckpointMaxParallel := Params.UpdateChannelCheckpointMaxParallel.GetAsInt()
 		t.Logf("updateChannelCheckpointMaxParallel: %d", updateChannelCheckpointMaxParallel)
 		assert.Equal(t, 1000, Params.UpdateChannelCheckpointMaxParallel.GetAsInt())
+
+		maxConcurrentImportTaskNum := Params.MaxConcurrentImportTaskNum.GetAsInt()
+		t.Logf("maxConcurrentImportTaskNum: %d", maxConcurrentImportTaskNum)
+		assert.Equal(t, 10, maxConcurrentImportTaskNum)
+
+		importBufferSize := Params.ImportBufferSize.GetAsInt()
+		t.Logf("importBufferSize: %d", importBufferSize)
+		assert.Equal(t, 64, importBufferSize)
 	})
 
 	t.Run("test indexNodeConfig", func(t *testing.T) {

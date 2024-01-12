@@ -2270,6 +2270,11 @@ type dataCoordConfig struct {
 	// auto balance channel on datanode
 	AutoBalance                    ParamItem `refreshable:"true"`
 	CheckAutoBalanceConfigInterval ParamItem `refreshable:"false"`
+
+	// import
+	FilesPerPreImportTask ParamItem `refreshable:"true"`
+	ImportTaskRetention   ParamItem `refreshable:"true"`
+	ImportInactiveTimeout ParamItem `refreshable:"true"`
 }
 
 func (p *dataCoordConfig) init(base *BaseTable) {
@@ -2708,6 +2713,36 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.AutoUpgradeSegmentIndex.Init(base.mgr)
+
+	p.FilesPerPreImportTask = ParamItem{
+		Key:          "dataCoord.import.filesPerPreImportTask",
+		Version:      "2.4.0",
+		Doc:          "The maximum number of files allowed per pre-import task.",
+		DefaultValue: "2",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.FilesPerPreImportTask.Init(base.mgr)
+
+	p.ImportTaskRetention = ParamItem{
+		Key:          "dataCoord.import.taskRetention",
+		Version:      "2.4.0",
+		Doc:          "The retention period in seconds for tasks in the Completed or Failed state.",
+		DefaultValue: "10800",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.ImportTaskRetention.Init(base.mgr)
+
+	p.ImportInactiveTimeout = ParamItem{
+		Key:          "dataCoord.import.inactiveTimeout",
+		Version:      "2.4.0",
+		Doc:          "The timeout duration in seconds for a task in the 'InProgress' state if it remains inactive (with no progress updates).",
+		DefaultValue: "1800",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.ImportInactiveTimeout.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -2759,6 +2794,9 @@ type dataNodeConfig struct {
 	ChannelWorkPoolSize ParamItem `refreshable:"true"`
 
 	UpdateChannelCheckpointMaxParallel ParamItem `refreshable:"true"`
+
+	MaxConcurrentImportTaskNum ParamItem `refreshable:"true"`
+	ImportBufferSize           ParamItem `refreshable:"true"`
 }
 
 func (p *dataNodeConfig) init(base *BaseTable) {
@@ -2984,6 +3022,26 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		DefaultValue: "1000",
 	}
 	p.UpdateChannelCheckpointMaxParallel.Init(base.mgr)
+
+	p.MaxConcurrentImportTaskNum = ParamItem{
+		Key:          "datanode.import.maxConcurrentTaskNum",
+		Version:      "2.4.0",
+		Doc:          "The maximum number of import/pre-import tasks allowed to run concurrently on a datanode.",
+		DefaultValue: "10",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.MaxConcurrentImportTaskNum.Init(base.mgr)
+
+	p.ImportBufferSize = ParamItem{
+		Key:          "datanode.import.bufferSize",
+		Version:      "2.4.0",
+		Doc:          "The maximum buffer size in MB that each import/pre-import task is permitted to utilize.",
+		DefaultValue: "64",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.ImportBufferSize.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

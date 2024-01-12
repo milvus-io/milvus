@@ -30,11 +30,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
-const (
-	inactiveTimeout = 30 * time.Minute // TODO: dyh, make it configurable
-	GCRetention     = 3 * time.Hour    // TODO: dyh, make it configurable
-)
-
 type ImportChecker interface {
 	Start()
 	Close()
@@ -223,6 +218,7 @@ func (c *importChecker) checkImportState(requestID int64) {
 }
 
 func (c *importChecker) checkTimeout(requestID int64) {
+	inactiveTimeout := Params.DataCoordCfg.ImportInactiveTimeout.GetAsDuration(time.Second)
 	tasks := c.imeta.GetBy(WithStates(internalpb.ImportState_InProgress), WithReq(requestID))
 	var isTimeout = false
 	for _, task := range tasks {
@@ -254,6 +250,7 @@ func (c *importChecker) checkTimeout(requestID int64) {
 }
 
 func (c *importChecker) checkGC(requestID int64) {
+	GCRetention := Params.DataCoordCfg.ImportTaskRetention.GetAsDuration(time.Second)
 	tasks := c.imeta.GetBy(WithStates(internalpb.ImportState_Failed, internalpb.ImportState_Completed), WithReq(requestID))
 	var needGC = false
 	for _, task := range tasks {

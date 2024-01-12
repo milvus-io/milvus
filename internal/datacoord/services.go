@@ -1711,8 +1711,8 @@ func (s *Server) ImportV2(ctx context.Context, in *datapb.ImportRequestInternal)
 		timeoutTs = tsoutil.ComposeTSByTime(time.Now().Add(dur), 0)
 	}
 
-	const FilesPerPreImportTask = 2 // TODO: dyh, make it configurable
-	fileGroups := lo.Chunk(in.GetFiles(), FilesPerPreImportTask)
+	fileNum := Params.DataCoordCfg.FilesPerPreImportTask.GetAsInt()
+	fileGroups := lo.Chunk(in.GetFiles(), fileNum)
 	idStart, _, err := s.allocator.allocN(int64(len(fileGroups)) + 1)
 	if err != nil {
 		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprint("alloc request id failed, err=%w", err)))
