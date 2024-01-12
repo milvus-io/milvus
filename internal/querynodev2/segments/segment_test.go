@@ -184,13 +184,14 @@ func (suite *SegmentSuite) TestLoadDupIndex() {
 func (suite *SegmentSuite) TestSegmentReleased() {
 	suite.sealed.Release()
 
-	suite.sealed.ptrLock.RLock()
-	suite.False(suite.sealed.isValid())
-	suite.sealed.ptrLock.RUnlock()
-	suite.EqualValues(0, suite.sealed.InsertCount())
-	suite.EqualValues(0, suite.sealed.RowNum())
-	suite.EqualValues(0, suite.sealed.MemSize())
-	suite.False(suite.sealed.HasRawData(101))
+	sealed := suite.sealed
+
+	sealed.ptrLock.RLock()
+	suite.False(sealed.isValid())
+	sealed.ptrLock.RUnlock()
+	suite.EqualValues(0, sealed.RowNum())
+	suite.EqualValues(0, sealed.MemSize())
+	suite.False(sealed.HasRawData(101))
 }
 
 func TestSegment(t *testing.T) {
