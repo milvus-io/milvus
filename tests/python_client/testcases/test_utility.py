@@ -4295,6 +4295,67 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.describe_resource_group(name=ct.default_resource_group_name,
                                                   check_task=CheckTasks.check_permission_deny)
 
+    @pytest.mark.tags(CaseLabel.RBAC)
+    def test_alias_rbac(self, host, port):
+        """
+        target: test rbac related to alias interfaces
+        method: Create a role and grant privileges related to aliases.
+                Verify if a user can execute the corresponding alias interface
+                based on whether the user possesses the role.
+        expected: Users with the assigned role can access the alias interface,
+                while those without the role cannot.
+        """
+
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+        user = cf.gen_unique_str(prefix)
+        password = cf.gen_unique_str(prefix)
+        r_name = cf.gen_unique_str(prefix)
+        c_name = cf.gen_unique_str(prefix)
+        alias_name = cf.gen_unique_str(prefix)
+        u, _ = self.utility_wrap.create_user(user=user, password=password)
+        user2 = cf.gen_unique_str(prefix)
+        u2, _ = self.utility_wrap.create_user(user=user2, password=password)
+
+
+        self.utility_wrap.init_role(r_name)
+        self.utility_wrap.create_role()
+        self.utility_wrap.role_add_user(user)
+
+        db_kwargs = {}
+        # grant user privilege
+        self.utility_wrap.init_role(r_name)
+        alias_privileges = [
+            {"object": "Global", "object_name": "*", "privilege": "CreateAlias"},
+            {"object": "Global", "object_name": "*", "privilege": "DropAlias"},
+            {"object": "Global", "object_name": "*", "privilege": "DescribeAlias"},
+            {"object": "Global", "object_name": "*", "privilege": "ListAliases"},
+        ]
+
+        for grant_item in alias_privileges:
+            self.utility_wrap.role_grant(grant_item["object"], grant_item["object_name"], grant_item["privilege"],
+                                         **db_kwargs)
+
+        self.init_collection_wrap(name=c_name)
+        self.connection_wrap.disconnect(alias=DefaultConfig.DEFAULT_USING)
+
+        self.connection_wrap.connect(host=host, port=port, user=user,
+                                     password=password, check_task=ct.CheckTasks.ccr, **db_kwargs)
+
+        self.utility_wrap.create_alias(c_name, alias_name)
+        self.utility_wrap.drop_alias(alias_name)
+
+        self.connection_wrap.disconnect(alias=DefaultConfig.DEFAULT_USING)
+        self.connection_wrap.connect(host=host, port=port, user=user2,
+                                     password=password, check_task=ct.CheckTasks.ccr, **db_kwargs)
+
+
+        # user2 can not create or drop alias
+        self.utility_wrap.create_alias(c_name, alias_name,
+                                                  check_task=CheckTasks.check_permission_deny)
+
+        self.utility_wrap.drop_alias(alias_name,
+                                                  check_task=CheckTasks.check_permission_deny)
 
 class TestUtilityNegativeRbac(TestcaseBase):
 
@@ -4940,6 +5001,7 @@ class TestUtilityNegativeRbac(TestcaseBase):
         error = {ct.err_code: 35,
                  ct.err_msg: "unable to create role because the number of roles has reached the limit"}
         self.utility_wrap.create_role(check_task=CheckTasks.err_res, check_items=error)
+
 
 
 @pytest.mark.tags(CaseLabel.L3)
