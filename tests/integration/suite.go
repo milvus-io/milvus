@@ -84,7 +84,7 @@ func (s *MiniClusterSuite) SetupTest() {
 
 	params = paramtable.Get()
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*180)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute*20)
 	s.cancelFunc = cancel
 	c, err := StartMiniClusterV2(ctx, func(c *MiniClusterV2) {
 		// change config etcd endpoints

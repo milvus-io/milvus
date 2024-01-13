@@ -217,3 +217,20 @@ func constructPlaceholderGroup(nq, dim int, vectorType schemapb.DataType) *commo
 		},
 	}
 }
+
+func ConstructQueryRequest(
+	dbName, collectionName string,
+	expr string,
+	outputFields []string,
+) *milvuspb.QueryRequest {
+	return &milvuspb.QueryRequest{
+		Base:               nil,
+		DbName:             dbName,
+		CollectionName:     collectionName,
+		PartitionNames:     nil,
+		Expr:               expr,
+		OutputFields:       outputFields,
+		TravelTimestamp:    0,
+		GuaranteeTimestamp: 0,
+	}
+}

@@ -926,9 +926,19 @@ func (s *Session) cancelKeepAlive() {
 	}
 }
 
+func (s *Session) deleteSession() {
+	if s.etcdCli != nil {
+		_, err := s.etcdCli.Delete(context.Background(), s.getCompleteKey())
+		if err != nil {
+			log.Warn("failed to delete session", zap.Error(err))
+		}
+	}
+}
+
 func (s *Session) Stop() {
 	s.Revoke(time.Second)
 	s.cancelKeepAlive()
+	s.deleteSession()
 	s.wg.Wait()
 }
 
