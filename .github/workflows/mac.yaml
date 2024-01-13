@@ -43,7 +43,7 @@ jobs:
           echo "corehash=${CORE_HASH}" >> $GITHUB_ENV
           echo "Set CCache hash to ${CORE_HASH}"
       - name: Mac Cache CCache Volumes
-        uses: pat-s/always-upload-cache@v3
+        uses: actions/cache@v3
         with:
           path: /var/tmp/ccache
           key: macos-ccache-${{ env.corehash }}
@@ -63,7 +63,7 @@ jobs:
           key: macos-go-mod-${{ hashFiles('**/go.sum') }}
           restore-keys: macos-go-mod-
       - name: Mac Cache Conan Packages
-        uses: pat-s/always-upload-cache@v3
+        uses: actions/cache@v3
         with:
           path: ~/.conan
           key: macos-conan-${{ hashFiles('internal/core/conanfile.*') }}
