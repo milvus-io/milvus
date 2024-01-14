@@ -28,6 +28,7 @@ import "C"
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"sync"
 	"unsafe"
 
@@ -975,7 +976,7 @@ func (s *LocalSegment) Release() {
 		fmt.Sprint(s.Collection()),
 		fmt.Sprint(s.Partition()),
 		s.Type().String(),
-		fmt.Sprint(len(s.Indexes())),
+		strconv.FormatInt(int64(len(s.Indexes())), 10),
 	).Sub(float64(s.InsertCount()))
 
 	log.Info("delete segment from memory",
