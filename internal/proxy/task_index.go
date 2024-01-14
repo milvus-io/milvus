@@ -162,7 +162,7 @@ func (cit *createIndexTask) parseIndexParams() error {
 		} else {
 			return merr.WrapErrParameterInvalid("supported field",
 				fmt.Sprintf("create index on %s field", cit.fieldSchema.DataType.String()),
-				"create index on json field is not supported")
+				fmt.Sprintf("create index on %s field is not supported", cit.fieldSchema.DataType.String()))
 		}
 	}
 

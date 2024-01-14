@@ -1343,8 +1343,8 @@ class TestIndexInvalid(TestcaseBase):
                                                                       dim=ct.default_dim, is_index=False)[0:4]
         collection_w.create_index(ct.default_json_field_name, index_params=ct.default_flat_index,
                                   check_task=CheckTasks.err_res,
-                                  check_items={ct.err_code: 1,
-                                               ct.err_msg: "create index on json field is not supported"})
+                                  check_items={ct.err_code: 1100,
+                                               ct.err_msg: "create index on JSON field is not supported"})
 
 
 @pytest.mark.tags(CaseLabel.GPU)
