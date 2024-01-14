@@ -126,7 +126,7 @@ func (c *LeaderChecker) findNeedLoadedSegments(ctx context.Context, replica int6
 		leaderWithDirtyVersion := version.GetVersion() > s.Version && c.nodeMgr.Get(version.GetNodeID()) == nil
 
 		if !ok || leaderWithOldVersion || leaderWithDirtyVersion {
-			log.Debug("leader checker append a segment to set",
+			log.RatedDebug(10, "leader checker append a segment to set",
 				zap.Int64("segmentID", s.GetID()),
 				zap.Int64("nodeID", s.Node))
 			action := task.NewSegmentActionWithScope(s.Node, task.ActionTypeGrow, s.GetInsertChannel(), s.GetID(), querypb.DataScope_Historical)
