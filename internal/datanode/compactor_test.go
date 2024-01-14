@@ -178,6 +178,7 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 					4,
 					5,
 					1,
+					2,
 				},
 				[]Timestamp{
 					20000,
@@ -186,6 +187,7 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 					30000,
 					50000,
 					50000,
+					10000,
 				})
 			require.NoError(t, err)
 
@@ -213,6 +215,7 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 					if test.isvalid {
 						assert.NoError(t, err)
 						assert.Equal(t, 5, len(pk2ts))
+						assert.EqualValues(t, 20001, pk2ts[UniqueID(2)])
 					} else {
 						assert.Error(t, err)
 						assert.Nil(t, pk2ts)
