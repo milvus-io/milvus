@@ -107,7 +107,7 @@ func getCheckerInterval(checker utils.CheckerType) time.Duration {
 	case utils.IndexChecker:
 		return Params.QueryCoordCfg.IndexCheckInterval.GetAsDuration(time.Millisecond)
 	case utils.LeaderChecker:
-		return Params.QueryCoordCfg.LeaderViewUpdateInterval.GetAsDuration(time.Millisecond)
+		return Params.QueryCoordCfg.LeaderViewUpdateInterval.GetAsDuration(time.Second)
 	default:
 		return Params.QueryCoordCfg.CheckInterval.GetAsDuration(time.Millisecond)
 	}
