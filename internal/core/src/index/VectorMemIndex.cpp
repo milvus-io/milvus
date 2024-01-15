@@ -293,8 +293,6 @@ VectorMemIndex<T>::Load(milvus::tracer::TraceContext ctx,
 
     LOG_INFO("load index files: {}", index_files.value().size());
 
-    auto parallel_degree =
-        static_cast<uint64_t>(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
     std::map<std::string, FieldDataPtr> index_datas{};
 
     // try to read slice meta first
@@ -344,7 +342,8 @@ VectorMemIndex<T>::Load(milvus::tracer::TraceContext ctx,
                 }
 
                 auto batch_data = file_manager_->LoadIndexToMemory(batch);
-                for (const auto& file_name : batch) {
+                for (auto& file : batch) {
+                    std::string file_name = file.substr(index_file_prefix.length()-1);
                     AssertInfo(batch_data.find(file_name) != batch_data.end(),
                                "lost index slice data: {}",
                                file_name);
