@@ -30,7 +30,9 @@
 
 #include "storage/MinioChunkManager.h"
 #include "storage/AliyunSTSClient.h"
+#include "storage/TencentCloudSTSClient.h"
 #include "storage/AliyunCredentialsProvider.h"
+#include "storage/TencentCloudCredentialsProvider.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "log/Log.h"
@@ -180,6 +182,48 @@ AliyunChunkManager::AliyunChunkManager(const StorageConfig& storage_config) {
                       << storage_config.bucket_name << "', root_path:'"
                       << storage_config.root_path << "', use_secure:'"
                       << std::boolalpha << storage_config.useSSL << "']";
+}
+
+TencentCloudChunkManager::TencentCloudChunkManager(
+    const StorageConfig& storage_config) {
+    default_bucket_name_ = storage_config.bucket_name;
+    remote_root_path_ = storage_config.root_path;
+
+    InitSDKAPIDefault(storage_config.log_level);
+
+    Aws::Client::ClientConfiguration config = generateConfig(storage_config);
+
+    StorageConfig mutable_config = storage_config;
+    mutable_config.useVirtualHost = true;
+    if (storage_config.useIAM) {
+        auto tencent_cloud_provider = Aws::MakeShared<
+            Aws::Auth::TencentCloudSTSAssumeRoleWebIdentityCredentialsProvider>(
+            "TencentCloudSTSAssumeRoleWebIdentityCredentialsProvider");
+        auto tencent_cloud_credentials =
+            tencent_cloud_provider->GetAWSCredentials();
+        AssertInfo(!tencent_cloud_credentials.GetAWSAccessKeyId().empty(),
+                   "if use iam, access key id should not be empty");
+        AssertInfo(!tencent_cloud_credentials.GetAWSSecretKey().empty(),
+                   "if use iam, secret key should not be empty");
+        AssertInfo(!tencent_cloud_credentials.GetSessionToken().empty(),
+                   "if use iam, token should not be empty");
+        client_ = std::make_shared<Aws::S3::S3Client>(
+            tencent_cloud_provider,
+            config,
+            Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never,
+            mutable_config.useVirtualHost);
+    } else {
+        BuildAccessKeyClient(mutable_config, config);
+    }
+
+    PreCheck(storage_config);
+
+    LOG_SEGCORE_INFO_
+        << "init TencentCloudChunkManager with parameter[endpoint: '"
+        << storage_config.address << "', default_bucket_name:'"
+        << storage_config.bucket_name << "', root_path:'"
+        << storage_config.root_path << "', use_secure:'" << std::boolalpha
+        << storage_config.useSSL << "']";
 }
 
 }  // namespace milvus::storage
