@@ -86,13 +86,21 @@ service QueryCoord {
         returns (DescribeResourceGroupResponse) {
     }
 
-    // ops interfaces
-    rpc ListCheckers(ListCheckersRequest) returns (ListCheckersResponse) {
-    }
-    rpc ActivateChecker(ActivateCheckerRequest) returns (common.Status) {
-    }
-    rpc DeactivateChecker(DeactivateCheckerRequest) returns (common.Status) {
-    }
+
+  // ops interfaces
+  rpc ListCheckers(ListCheckersRequest) returns (ListCheckersResponse) {}
+  rpc ActivateChecker(ActivateCheckerRequest) returns (common.Status) {}
+  rpc DeactivateChecker(DeactivateCheckerRequest) returns (common.Status) {}
+    
+  rpc ListQueryNode(ListQueryNodeRequest) returns (ListQueryNodeResponse) {}
+  rpc GetQueryNodeDistribution(GetQueryNodeDistributionRequest) returns (GetQueryNodeDistributionResponse) {}
+  rpc SuspendBalance(SuspendBalanceRequest) returns (common.Status)  {}
+  rpc ResumeBalance(ResumeBalanceRequest) returns (common.Status)  {}
+  rpc SuspendNode(SuspendNodeRequest) returns (common.Status) {}
+  rpc ResumeNode(ResumeNodeRequest) returns (common.Status) {}
+  rpc TransferSegment(TransferSegmentRequest) returns (common.Status) {}
+  rpc TransferChannel(TransferChannelRequest) returns (common.Status) {}
+  rpc HasSameDistribution(HasSameDistributionRequest) returns (common.Status) {}
 }
 
 service QueryNode {
@@ -840,17 +848,17 @@ message ResumeNodeRequest {
 
 message TransferSegmentRequest {
   common.MsgBase base = 1;
-  repeated int64 segmentIDs = 2;
+  int64 segmentID = 2;
   int64 source_nodeID = 3;
   int64 target_nodeID = 4;
-  bool transfer_all_segments = 5;
+  bool transfer_all = 5;
   bool to_all_nodes = 6;
   bool copy_mode = 7;
 }
 
 message TransferChannelRequest {
   common.MsgBase base = 1;
-  repeated string channel_names = 2;
+  string channel_name = 2;
   int64 source_nodeID = 3;
   int64 target_nodeID = 4;
   bool transfer_all = 5;

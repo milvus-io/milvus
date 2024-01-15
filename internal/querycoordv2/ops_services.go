@@ -124,7 +124,7 @@ func (s *Server) ListQueryNode(ctx context.Context, req *querypb.ListQueryNodeRe
 }
 
 // return query node's data distribution, for given nodeID, return it's (channel_name_list, sealed_segment_list)
-func (s *Server) GetDataDistribution(ctx context.Context, req *querypb.GetQueryNodeDistributionRequest) (*querypb.GetQueryNodeDistributionResponse, error) {
+func (s *Server) GetQueryNodeDistribution(ctx context.Context, req *querypb.GetQueryNodeDistributionRequest) (*querypb.GetQueryNodeDistributionResponse, error) {
 	log := log.Ctx(ctx)
 	errMsg := "failed to get querynode state"
 	if err := merr.CheckHealthy(s.State()); err != nil {
@@ -175,7 +175,7 @@ func (s *Server) ResumeBalance(ctx context.Context, req *querypb.ResumeBalanceRe
 	return merr.Success(), nil
 }
 
-// suspend node from resource operation, for given node, suspend load_segment/release_segment/sub_channel/unsub_channel operations
+// suspend node from resource operation, for given node, suspend load_segment/sub_channel operations
 func (s *Server) SuspendNode(ctx context.Context, req *querypb.SuspendNodeRequest) (*commonpb.Status, error) {
 	log := log.Ctx(ctx)
 	errMsg := "failed to suspend query node"
@@ -193,7 +193,7 @@ func (s *Server) SuspendNode(ctx context.Context, req *querypb.SuspendNodeReques
 	return merr.Success(), nil
 }
 
-// resume node from resource operation, for given node, resume load_segment/release_segment/sub_channel/unsub_channel operations
+// resume node from resource operation, for given node, resume load_segment/sub_channel operations
 func (s *Server) ResumeNode(ctx context.Context, req *querypb.ResumeNodeRequest) (*commonpb.Status, error) {
 	log := log.Ctx(ctx)
 	errMsg := "failed to resume query node"
@@ -220,7 +220,7 @@ func (s *Server) TransferSegment(ctx context.Context, req *querypb.TransferSegme
 	log.Info("load balance request received",
 		zap.Int64("source", req.GetSourceNodeID()),
 		zap.Int64("dest", req.GetTargetNodeID()),
-		zap.Int64s("segments", req.GetSegmentIDs()))
+		zap.Int64("segment", req.GetSegmentID()))
 
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		msg := "failed to load balance"
@@ -260,27 +260,21 @@ func (s *Server) TransferSegment(ctx context.Context, req *querypb.TransferSegme
 		segments := s.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithNodeID(srcNode))
 
 		toBalance := typeutil.NewSet[*meta.Segment]()
-		if len(req.GetSegmentIDs()) == 0 {
+		if req.GetTransferAll() {
 			toBalance.Insert(segments...)
 		} else {
 			// check whether sealed segment exist
-			segmentsMap := lo.SliceToMap(segments, func(s *meta.Segment) (int64, *meta.Segment) {
-				return s.GetID(), s
-			})
-			for _, segmentID := range req.GetSegmentIDs() {
-				segment, ok := segmentsMap[segmentID]
-				if !ok {
-					err := merr.WrapErrSegmentNotFound(segmentID, "segment not found in source node")
-					return merr.Status(err), nil
-				}
+			segment, ok := lo.Find(segments, func(s *meta.Segment) bool { return s.GetID() == req.GetSegmentID() })
+			if ok {
+				err := merr.WrapErrSegmentNotFound(req.GetSegmentID(), "segment not found in source node")
+				return merr.Status(err), nil
+			}
 
-				// Only balance segments in targets
-				existInTarget := s.targetMgr.GetSealedSegment(segment.GetCollectionID(), segment.GetID(), meta.CurrentTarget) != nil
-				if !existInTarget {
-					log.Info("segment doesn't exist in current target, skip it", zap.Int64("segmentID", segmentID))
-					continue
-				}
-				toBalance.Insert(segment)
+			existInTarget := s.targetMgr.GetSealedSegment(segment.GetCollectionID(), segment.GetID(), meta.CurrentTarget) != nil
+			if !existInTarget {
+				log.Info("segment doesn't exist in current target, skip it", zap.Int64("segmentID", req.GetSegmentID()))
+			} else {
+				toBalance.Insert()
 			}
 		}
 
@@ -303,7 +297,7 @@ func (s *Server) TransferChannel(ctx context.Context, req *querypb.TransferChann
 	log.Info("load balance request received",
 		zap.Int64("source", req.GetSourceNodeID()),
 		zap.Int64("dest", req.GetTargetNodeID()),
-		zap.Strings("channels", req.GetChannelNames()))
+		zap.String("channel", req.GetChannelName()))
 
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		msg := "failed to load balance"
@@ -341,23 +335,17 @@ func (s *Server) TransferChannel(ctx context.Context, req *querypb.TransferChann
 
 		// check sealed segment list
 		channels := s.dist.ChannelDistManager.GetByCollectionAndNode(replica.CollectionID, srcNode)
-		channelsMap := lo.SliceToMap(channels, func(ch *meta.DmChannel) (string, *meta.DmChannel) {
-			return ch.GetChannelName(), ch
-		})
-
 		toBalance := typeutil.NewSet[*meta.DmChannel]()
-		if len(req.GetChannelNames()) == 0 {
+		if req.GetTransferAll() {
 			toBalance.Insert(channels...)
 		} else {
 			// check whether sealed segment exist
-			for _, ch := range req.GetChannelNames() {
-				channel, ok := channelsMap[ch]
-				if !ok {
-					err := merr.WrapErrChannelNotFound(ch, "channel not found in source node")
-					return merr.Status(err), nil
-				}
-				toBalance.Insert(channel)
+			channel, ok := lo.Find(channels, func(ch *meta.DmChannel) bool { return ch.GetChannelName() == req.GetChannelName() })
+			if !ok {
+				err := merr.WrapErrChannelNotFound(req.GetChannelName(), "channel not found in source node")
+				return merr.Status(err), nil
 			}
+			toBalance.Insert(channel)
 		}
 
 		err := s.balanceChannels(ctx, replica.GetCollectionID(), replica, srcNode, dstNodeSet.Collect(), toBalance.Collect(), false, req.GetCopyMode())
