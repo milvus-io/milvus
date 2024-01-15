@@ -172,12 +172,18 @@ func (mcm *RemoteChunkManager) Read(ctx context.Context, filePath string) ([]byt
 	var empty []byte
 	_, err = object.Read(empty)
 	if err != nil {
-		errResponse := minio.ToErrorResponse(err)
-		if errResponse.Code == "NoSuchKey" {
-			return nil, WrapErrNoSuchKey(filePath)
+		switch err := err.(type) {
+		case *azcore.ResponseError:
+			if err.ErrorCode == string(bloberror.BlobNotFound) {
+				return nil, WrapErrNoSuchKey(filePath)
+			}
+		case minio.ErrorResponse:
+			if err.Code == "NoSuchKey" {
+				return nil, WrapErrNoSuchKey(filePath)
+			}
 		}
 		log.Warn("failed to read object", zap.String("path", filePath), zap.Error(err))
-		return nil, err
+		return nil, checkObjectStorageError(filePath, err)
 	}
 	size, err := mcm.getObjectSize(ctx, mcm.bucketName, filePath)
 	if err != nil {
@@ -243,9 +249,15 @@ func (mcm *RemoteChunkManager) ReadAt(ctx context.Context, filePath string, off 
 
 	data, err := Read(object, length)
 	if err != nil {
-		errResponse := minio.ToErrorResponse(err)
-		if errResponse.Code == "NoSuchKey" {
-			return nil, WrapErrNoSuchKey(filePath)
+		switch err := err.(type) {
+		case *azcore.ResponseError:
+			if err.ErrorCode == string(bloberror.BlobNotFound) {
+				return nil, WrapErrNoSuchKey(filePath)
+			}
+		case minio.ErrorResponse:
+			if err.Code == "NoSuchKey" {
+				return nil, WrapErrNoSuchKey(filePath)
+			}
 		}
 		log.Warn("failed to read object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
 		return nil, err
