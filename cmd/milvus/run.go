@@ -19,7 +19,7 @@ import (
 type run struct{}
 
 func init() {
-  paramtable.Init()
+	paramtable.Init()
 }
 
 func (c *run) execute(args []string, flags *flag.FlagSet) {
