@@ -668,6 +668,10 @@ func (s *Server) handleNodeUpLoop() {
 }
 
 func (s *Server) tryHandleNodeUp() {
+	// if node node up event, skip health check
+	if len(s.nodeUpEventChan) == 0 {
+		return
+	}
 	log := log.Ctx(s.ctx).WithRateGroup("qcv2.Server", 1, 60)
 	ctx, cancel := context.WithTimeout(s.ctx, Params.QueryCoordCfg.CheckHealthRPCTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
