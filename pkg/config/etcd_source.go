@@ -37,11 +37,12 @@ const (
 
 type EtcdSource struct {
 	sync.RWMutex
-	etcdCli       *clientv3.Client
-	ctx           context.Context
-	currentConfig map[string]string
-	keyPrefix     string
+	etcdCli        *clientv3.Client
+	ctx            context.Context
+	currentConfigs map[string]string
+	keyPrefix      string
 
+	updateMu        sync.Mutex
 	configRefresher *refresher
 }
 
@@ -59,10 +60,10 @@ func NewEtcdSource(etcdInfo *EtcdInfo) (*EtcdSource, error) {
 		return nil, err
 	}
 	es := &EtcdSource{
-		etcdCli:       etcdCli,
-		ctx:           context.Background(),
-		currentConfig: make(map[string]string),
-		keyPrefix:     etcdInfo.KeyPrefix,
+		etcdCli:        etcdCli,
+		ctx:            context.Background(),
+		currentConfigs: make(map[string]string),
+		keyPrefix:      etcdInfo.KeyPrefix,
 	}
 	es.configRefresher = newRefresher(etcdInfo.RefreshInterval, es.refreshConfigurations)
 	return es, nil
@@ -71,7 +72,7 @@ func NewEtcdSource(etcdInfo *EtcdInfo) (*EtcdSource, error) {
 // GetConfigurationByKey implements ConfigSource
 func (es *EtcdSource) GetConfigurationByKey(key string) (string, error) {
 	es.RLock()
-	v, ok := es.currentConfig[key]
+	v, ok := es.currentConfigs[key]
 	es.RUnlock()
 	if !ok {
 		return "", fmt.Errorf("key not found: %s", key)
@@ -88,7 +89,7 @@ func (es *EtcdSource) GetConfigurations() (map[string]string, error) {
 	}
 	es.configRefresher.start(es.GetSourceName())
 	es.RLock()
-	for key, value := range es.currentConfig {
+	for key, value := range es.currentConfigs {
 		configMap[key] = value
 	}
 	es.RUnlock()
@@ -152,12 +153,24 @@ func (es *EtcdSource) refreshConfigurations() error {
 		newConfig[formatKey(key)] = string(kv.Value)
 		log.Debug("got config from etcd", zap.String("key", string(kv.Key)), zap.String("value", string(kv.Value)))
 	}
+	return es.update(newConfig)
+}
+
+func (es *EtcdSource) update(configs map[string]string) error {
+	// make sure config not change when fire event
+	es.updateMu.Lock()
+	defer es.updateMu.Unlock()
+
 	es.Lock()
-	defer es.Unlock()
-	err = es.configRefresher.fireEvents(es.GetSourceName(), es.currentConfig, newConfig)
+	events, err := PopulateEvents(es.GetSourceName(), es.currentConfigs, configs)
 	if err != nil {
+		es.Unlock()
+		log.Warn("generating event error", zap.Error(err))
 		return err
 	}
-	es.currentConfig = newConfig
+	es.currentConfigs = configs
+	es.Unlock()
+
+	es.configRefresher.fireEvents(events...)
 	return nil
 }
