@@ -50,6 +50,10 @@ type WriteBuffer interface {
 	// If there are any non-empty segment buffer, returns the earliest buffer start position.
 	// Otherwise, returns latest buffered checkpoint.
 	GetCheckpoint() *msgpb.MsgPosition
+	// MemorySize returns the size in bytes currently used by this write buffer.
+	MemorySize() int64
+	// SetMemoryHighFlag marks current write buffer shall execute high memory sync policy.
+	SetMemoryHighFlag()
 	// Close is the method to close and sink current buffer data.
 	Close(drop bool)
 }
@@ -90,6 +94,7 @@ type writeBufferBase struct {
 	syncPolicies   []SyncPolicy
 	checkpoint     *msgpb.MsgPosition
 	flushTimestamp *atomic.Uint64
+	memoryHigh     *atomic.Bool
 
 	storagev2Cache *metacache.StorageV2Cache
 }
@@ -97,7 +102,9 @@ type writeBufferBase struct {
 func newWriteBufferBase(channel string, metacache metacache.MetaCache, storageV2Cache *metacache.StorageV2Cache, syncMgr syncmgr.SyncManager, option *writeBufferOption) (*writeBufferBase, error) {
 	flushTs := atomic.NewUint64(nonFlushTS)
 	flushTsPolicy := GetFlushTsPolicy(flushTs, metacache)
-	option.syncPolicies = append(option.syncPolicies, flushTsPolicy)
+	memoryHigh := atomic.NewBool(false)
+	memoryHighPolicy := GetMemoryHighPolicy(memoryHigh)
+	option.syncPolicies = append(option.syncPolicies, flushTsPolicy, memoryHighPolicy)
 
 	var serializer syncmgr.Serializer
 	var err error
@@ -135,6 +142,7 @@ func newWriteBufferBase(channel string, metacache metacache.MetaCache, storageV2
 		serializer:       serializer,
 		syncPolicies:     option.syncPolicies,
 		flushTimestamp:   flushTs,
+		memoryHigh:       memoryHigh,
 		storagev2Cache:   storageV2Cache,
 	}, nil
 }
@@ -160,6 +168,21 @@ func (wb *writeBufferBase) SetFlushTimestamp(flushTs uint64) {
 
 func (wb *writeBufferBase) GetFlushTimestamp() uint64 {
 	return wb.flushTimestamp.Load()
+}
+
+func (wb *writeBufferBase) MemorySize() int64 {
+	wb.mut.RLock()
+	defer wb.mut.RUnlock()
+
+	var size int64
+	for _, segBuf := range wb.buffers {
+		size += segBuf.MemorySize()
+	}
+	return size
+}
+
+func (wb *writeBufferBase) SetMemoryHighFlag() {
+	wb.memoryHigh.Store(true)
 }
 
 func (wb *writeBufferBase) GetCheckpoint() *msgpb.MsgPosition {
@@ -283,6 +306,12 @@ func (wb *writeBufferBase) syncSegments(ctx context.Context, segmentIDs []int64)
 // getSegmentsToSync applies all policies to get segments list to sync.
 // **NOTE** shall be invoked within mutex protection
 func (wb *writeBufferBase) getSegmentsToSync(ts typeutil.Timestamp) []int64 {
+	if wb.memoryHigh.Load() {
+		defer func() {
+			// reset memory high flag
+			wb.memoryHigh.Store(false)
+		}()
+	}
 	buffers := lo.Values(wb.buffers)
 	segments := typeutil.NewSet[int64]()
 	for _, policy := range wb.syncPolicies {

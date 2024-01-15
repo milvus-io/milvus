@@ -271,6 +271,47 @@ func (_c *MockWriteBuffer_HasSegment_Call) RunAndReturn(run func(int64) bool) *M
 	return _c
 }
 
+// MemorySize provides a mock function with given fields:
+func (_m *MockWriteBuffer) MemorySize() int64 {
+	ret := _m.Called()
+
+	var r0 int64
+	if rf, ok := ret.Get(0).(func() int64); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(int64)
+	}
+
+	return r0
+}
+
+// MockWriteBuffer_MemorySize_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'MemorySize'
+type MockWriteBuffer_MemorySize_Call struct {
+	*mock.Call
+}
+
+// MemorySize is a helper method to define mock.On call
+func (_e *MockWriteBuffer_Expecter) MemorySize() *MockWriteBuffer_MemorySize_Call {
+	return &MockWriteBuffer_MemorySize_Call{Call: _e.mock.On("MemorySize")}
+}
+
+func (_c *MockWriteBuffer_MemorySize_Call) Run(run func()) *MockWriteBuffer_MemorySize_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockWriteBuffer_MemorySize_Call) Return(_a0 int64) *MockWriteBuffer_MemorySize_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockWriteBuffer_MemorySize_Call) RunAndReturn(run func() int64) *MockWriteBuffer_MemorySize_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // SetFlushTimestamp provides a mock function with given fields: flushTs
 func (_m *MockWriteBuffer) SetFlushTimestamp(flushTs uint64) {
 	_m.Called(flushTs)
@@ -300,6 +341,38 @@ func (_c *MockWriteBuffer_SetFlushTimestamp_Call) Return() *MockWriteBuffer_SetF
 }
 
 func (_c *MockWriteBuffer_SetFlushTimestamp_Call) RunAndReturn(run func(uint64)) *MockWriteBuffer_SetFlushTimestamp_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SetMemoryHighFlag provides a mock function with given fields:
+func (_m *MockWriteBuffer) SetMemoryHighFlag() {
+	_m.Called()
+}
+
+// MockWriteBuffer_SetMemoryHighFlag_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetMemoryHighFlag'
+type MockWriteBuffer_SetMemoryHighFlag_Call struct {
+	*mock.Call
+}
+
+// SetMemoryHighFlag is a helper method to define mock.On call
+func (_e *MockWriteBuffer_Expecter) SetMemoryHighFlag() *MockWriteBuffer_SetMemoryHighFlag_Call {
+	return &MockWriteBuffer_SetMemoryHighFlag_Call{Call: _e.mock.On("SetMemoryHighFlag")}
+}
+
+func (_c *MockWriteBuffer_SetMemoryHighFlag_Call) Run(run func()) *MockWriteBuffer_SetMemoryHighFlag_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockWriteBuffer_SetMemoryHighFlag_Call) Return() *MockWriteBuffer_SetMemoryHighFlag_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockWriteBuffer_SetMemoryHighFlag_Call) RunAndReturn(run func()) *MockWriteBuffer_SetMemoryHighFlag_Call {
 	_c.Call.Return(run)
 	return _c
 }

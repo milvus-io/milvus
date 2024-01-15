@@ -380,6 +380,70 @@ func (_c *MockBufferManager_RemoveChannel_Call) RunAndReturn(run func(string)) *
 	return _c
 }
 
+// Start provides a mock function with given fields:
+func (_m *MockBufferManager) Start() {
+	_m.Called()
+}
+
+// MockBufferManager_Start_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Start'
+type MockBufferManager_Start_Call struct {
+	*mock.Call
+}
+
+// Start is a helper method to define mock.On call
+func (_e *MockBufferManager_Expecter) Start() *MockBufferManager_Start_Call {
+	return &MockBufferManager_Start_Call{Call: _e.mock.On("Start")}
+}
+
+func (_c *MockBufferManager_Start_Call) Run(run func()) *MockBufferManager_Start_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockBufferManager_Start_Call) Return() *MockBufferManager_Start_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockBufferManager_Start_Call) RunAndReturn(run func()) *MockBufferManager_Start_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// Stop provides a mock function with given fields:
+func (_m *MockBufferManager) Stop() {
+	_m.Called()
+}
+
+// MockBufferManager_Stop_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Stop'
+type MockBufferManager_Stop_Call struct {
+	*mock.Call
+}
+
+// Stop is a helper method to define mock.On call
+func (_e *MockBufferManager_Expecter) Stop() *MockBufferManager_Stop_Call {
+	return &MockBufferManager_Stop_Call{Call: _e.mock.On("Stop")}
+}
+
+func (_c *MockBufferManager_Stop_Call) Run(run func()) *MockBufferManager_Stop_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockBufferManager_Stop_Call) Return() *MockBufferManager_Stop_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockBufferManager_Stop_Call) RunAndReturn(run func()) *MockBufferManager_Stop_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NewMockBufferManager creates a new instance of MockBufferManager. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewMockBufferManager(t interface {

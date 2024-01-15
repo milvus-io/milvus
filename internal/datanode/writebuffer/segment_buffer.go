@@ -65,6 +65,11 @@ func (buf *segmentBuffer) GetTimeRange() *TimeRange {
 	return result
 }
 
+// MemorySize returns total memory size of insert buffer & delta buffer.
+func (buf *segmentBuffer) MemorySize() int64 {
+	return buf.insertBuffer.size + buf.deltaBuffer.size
+}
+
 // TimeRange is a range of timestamp contains the min-timestamp and max-timestamp
 type TimeRange struct {
 	timestampMin typeutil.Timestamp

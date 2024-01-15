@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -92,6 +93,64 @@ func (s *SyncPolicySuite) TestCompactedSegmentsPolicy() {
 
 	result := policy.SelectSegments([]*segmentBuffer{{segmentID: 1}, {segmentID: 2}}, tsoutil.ComposeTSByTime(time.Now(), 0))
 	s.ElementsMatch(ids, result)
+}
+
+func (s *SyncPolicySuite) TestMemoryHighPolicy() {
+	memoryHigh := atomic.NewBool(false)
+	policy := GetMemoryHighPolicy(memoryHigh)
+
+	s.Run("memory_high_false", func() {
+		memoryHigh.Store(false)
+		buffers := []*segmentBuffer{
+			{
+				segmentID:    100,
+				insertBuffer: &InsertBuffer{BufferBase: BufferBase{size: 100}},
+				deltaBuffer:  &DeltaBuffer{BufferBase: BufferBase{size: 100}},
+			},
+		}
+
+		result := policy.SelectSegments(buffers, 1000)
+
+		s.Len(result, 0)
+	})
+
+	s.Run("memory_high_true", func() {
+		memoryHigh.Store(true)
+		param := paramtable.Get()
+
+		param.Save(param.DataNodeCfg.MemoryForceSyncMinSize.Key, "200")
+		param.Save(param.DataNodeCfg.MemoryForceSyncSegmentNum.Key, "2")
+		defer param.Reset(param.DataNodeCfg.MemoryForceSyncMinSize.Key)
+		defer param.Reset(param.DataNodeCfg.MemoryForceSyncSegmentNum.Key)
+
+		buffers := []*segmentBuffer{
+			{
+				segmentID:    100,
+				insertBuffer: &InsertBuffer{BufferBase: BufferBase{size: 100}},
+				deltaBuffer:  &DeltaBuffer{BufferBase: BufferBase{size: 99}},
+			},
+			{
+				segmentID:    200,
+				insertBuffer: &InsertBuffer{BufferBase: BufferBase{size: 200}},
+				deltaBuffer:  &DeltaBuffer{BufferBase: BufferBase{size: 200}},
+			},
+			{
+				segmentID:    300,
+				insertBuffer: &InsertBuffer{BufferBase: BufferBase{size: 300}},
+				deltaBuffer:  &DeltaBuffer{BufferBase: BufferBase{size: 300}},
+			},
+			{
+				segmentID:    400,
+				insertBuffer: &InsertBuffer{BufferBase: BufferBase{size: 400}},
+				deltaBuffer:  &DeltaBuffer{BufferBase: BufferBase{size: 400}},
+			},
+		}
+
+		result := policy.SelectSegments(buffers, 1000)
+
+		s.Len(result, 2)
+		s.ElementsMatch([]int64{300, 400}, result)
+	})
 }
 
 func TestSyncPolicy(t *testing.T) {
