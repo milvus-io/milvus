@@ -135,10 +135,12 @@ func getCollectionTTL(properties map[string]string) (time.Duration, error) {
 }
 
 func UpdateCompactionSegmentSizeMetrics(segments []*datapb.CompactionSegment) {
+	var totalSize int64
 	for _, seg := range segments {
-		size := getCompactedSegmentSize(seg)
-		metrics.DataCoordCompactedSegmentSize.WithLabelValues().Observe(float64(size))
+		totalSize += getCompactedSegmentSize(seg)
 	}
+	// observe size in bytes
+	metrics.DataCoordCompactedSegmentSize.WithLabelValues().Observe(float64(totalSize))
 }
 
 func getCompactedSegmentSize(s *datapb.CompactionSegment) int64 {
