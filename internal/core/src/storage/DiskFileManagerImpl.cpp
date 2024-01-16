@@ -394,13 +394,7 @@ DiskFileManagerImpl::CacheRawDataToDisk(
     uint32_t num_rows = 0;
     uint32_t dim = 0;
     int64_t write_offset = sizeof(num_rows) + sizeof(dim);
-    auto res = space->ScanData();
-    if (!res.ok()) {
-        PanicInfo(IndexBuildError,
-                  fmt::format("failed to create scan iterator: {}",
-                              res.status().ToString()));
-    }
-    auto reader = res.value();
+    auto reader = space->ScanData();
     for (auto rec : *reader) {
         if (!rec.ok()) {
             PanicInfo(IndexBuildError,
