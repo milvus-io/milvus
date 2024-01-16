@@ -48,7 +48,7 @@ jobs:
           echo "corehash=${CORE_HASH}" >> $GITHUB_ENV
           echo "Set CCache hash to ${CORE_HASH}"
       - name: Cache CCache Volumes
-        uses: pat-s/always-upload-cache@v3
+        uses: actions/cache@v3
         with:
           path: .docker/amd64-ubuntu20.04-ccache
           key: ubuntu20.04-ccache-${{ env.corehash }}
@@ -60,7 +60,7 @@ jobs:
           key: ubuntu20.04-go-mod-${{ hashFiles('go.sum, */go.sum') }}
           restore-keys: ubuntu20.04-go-mod-
       - name: Cache Conan Packages
-        uses: pat-s/always-upload-cache@v3
+        uses: actions/cache@v3
         with:
           path: .docker/amd64-ubuntu20.04-conan
           key: ubuntu20.04-conan-${{ hashFiles('internal/core/conanfile.*') }}
@@ -87,7 +87,7 @@ jobs:
           echo "corehash=${CORE_HASH}" >> $GITHUB_ENV
           echo "Set CCache hash to ${CORE_HASH}"
       - name: Cache CCache Volumes
-        uses: pat-s/always-upload-cache@v3
+        uses: actions/cache@v3
         with:
           path: .docker/amd64-amazonlinux2023-ccache
           key: amazonlinux2023-ccache-${{ env.corehash }}
@@ -105,7 +105,7 @@ jobs:
           key: amazonlinux2023-go-mod-${{ hashFiles('go.sum, */go.sum') }}
           restore-keys: amazonlinux2023-go-mod-
       - name: Cache Conan Packages
-        uses: pat-s/always-upload-cache@v3
+        uses: actions/cache@v3
         with:
           path: .docker/amd64-amazonlinux2023-conan
           key: amazonlinux2023-conan-${{ hashFiles('internal/core/conanfile.*') }}
