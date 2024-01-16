@@ -57,6 +57,9 @@ var (
 	ErrPartitionNotLoaded      = newMilvusError("partition not loaded", 201, false)
 	ErrPartitionNotFullyLoaded = newMilvusError("partition not fully loaded", 202, true)
 
+	// General capacity related
+	ErrGeneralCapacityExceeded = newMilvusError("general capacity exceeded", 250, false)
+
 	// ResourceGroup related
 	ErrResourceGroupNotFound = newMilvusError("resource group not found", 300, false)
 
