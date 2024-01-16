@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"time"
 
@@ -103,6 +104,12 @@ func newMinioClient(ctx context.Context, c *config) (*minio.Client, error) {
 			creds = credentials.NewIAM("")
 		} else {
 			creds = credentials.NewStaticV4(c.accessKeyID, c.secretAccessKeyID, "")
+		}
+	}
+	if c.useSSL && len(c.sslCACert) > 0 {
+		err := os.Setenv("SSL_CERT_FILE", c.sslCACert)
+		if err != nil {
+			return nil, err
 		}
 	}
 	minioOpts := &minio.Options{

@@ -50,6 +50,7 @@ get_azure_storage_config() {
                           "error",
                           "",
                           false,
+                          "/path/to/ca.pem",
                           false,
                           false,
                           30000};
