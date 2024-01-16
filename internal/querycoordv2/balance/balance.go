@@ -57,7 +57,7 @@ var (
 )
 
 type Balance interface {
-	AssignSegment(collectionID int64, segments []*meta.Segment, nodes []int64) []SegmentAssignPlan
+	AssignSegment(collectionID int64, segments []*meta.Segment, nodes []int64, manualBalance bool) []SegmentAssignPlan
 	AssignChannel(channels []*meta.DmChannel, nodes []int64) []ChannelAssignPlan
 	BalanceReplica(replica *meta.Replica) ([]SegmentAssignPlan, []ChannelAssignPlan)
 }
@@ -67,7 +67,7 @@ type RoundRobinBalancer struct {
 	nodeManager *session.NodeManager
 }
 
-func (b *RoundRobinBalancer) AssignSegment(collectionID int64, segments []*meta.Segment, nodes []int64) []SegmentAssignPlan {
+func (b *RoundRobinBalancer) AssignSegment(collectionID int64, segments []*meta.Segment, nodes []int64, manualBalance bool) []SegmentAssignPlan {
 	nodesInfo := b.getNodes(nodes)
 	if len(nodesInfo) == 0 {
 		return nil

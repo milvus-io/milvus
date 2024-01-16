@@ -97,7 +97,7 @@ func (suite *BalanceTestSuite) TestAssignBalance() {
 					suite.mockScheduler.EXPECT().GetNodeSegmentDelta(c.nodeIDs[i]).Return(c.deltaCnts[i])
 				}
 			}
-			plans := suite.roundRobinBalancer.AssignSegment(0, c.assignments, c.nodeIDs)
+			plans := suite.roundRobinBalancer.AssignSegment(0, c.assignments, c.nodeIDs, false)
 			suite.ElementsMatch(c.expectPlans, plans)
 		})
 	}

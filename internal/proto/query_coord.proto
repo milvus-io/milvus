@@ -100,7 +100,7 @@ service QueryCoord {
   rpc ResumeNode(ResumeNodeRequest) returns (common.Status) {}
   rpc TransferSegment(TransferSegmentRequest) returns (common.Status) {}
   rpc TransferChannel(TransferChannelRequest) returns (common.Status) {}
-  rpc HasSameDistribution(HasSameDistributionRequest) returns (common.Status) {}
+  rpc CheckQueryNodeDistribution(CheckQueryNodeDistributionRequest) returns (common.Status) {}
 }
 
 service QueryNode {
@@ -866,7 +866,7 @@ message TransferChannelRequest {
   bool copy_mode = 7;
 }
 
-message HasSameDistributionRequest {
+message CheckQueryNodeDistributionRequest {
   common.MsgBase base = 1;
   int64 source_nodeID = 3;
   int64 target_nodeID = 4;

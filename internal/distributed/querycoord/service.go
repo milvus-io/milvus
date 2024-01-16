@@ -479,6 +479,6 @@ func (s *Server) TransferChannel(ctx context.Context, req *querypb.TransferChann
 	return s.queryCoord.TransferChannel(ctx, req)
 }
 
-func (s *Server) HasSameDistribution(ctx context.Context, req *querypb.HasSameDistributionRequest) (*commonpb.Status, error) {
-	return s.queryCoord.HasSameDistribution(ctx, req)
+func (s *Server) CheckQueryNodeDistribution(ctx context.Context, req *querypb.CheckQueryNodeDistributionRequest) (*commonpb.Status, error) {
+	return s.queryCoord.CheckQueryNodeDistribution(ctx, req)
 }

@@ -491,13 +491,13 @@ func (c *Client) TransferChannel(ctx context.Context, req *querypb.TransferChann
 	})
 }
 
-func (c *Client) HasSameDistribution(ctx context.Context, req *querypb.HasSameDistributionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+func (c *Client) CheckQueryNodeDistribution(ctx context.Context, req *querypb.CheckQueryNodeDistributionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
 		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
 	)
 	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*commonpb.Status, error) {
-		return client.HasSameDistribution(ctx, req)
+		return client.CheckQueryNodeDistribution(ctx, req)
 	})
 }

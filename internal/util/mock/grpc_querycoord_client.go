@@ -143,11 +143,11 @@ func (m *GrpcQueryCoordClient) DeactivateChecker(ctx context.Context, in *queryp
 }
 
 func (m *GrpcQueryCoordClient) ListQueryNode(ctx context.Context, req *querypb.ListQueryNodeRequest, opts ...grpc.CallOption) (*querypb.ListQueryNodeResponse, error) {
-	return &querypb.ListQueryNodeResponse{}, nil
+	return &querypb.ListQueryNodeResponse{}, m.Err
 }
 
 func (m *GrpcQueryCoordClient) GetQueryNodeDistribution(ctx context.Context, req *querypb.GetQueryNodeDistributionRequest, opts ...grpc.CallOption) (*querypb.GetQueryNodeDistributionResponse, error) {
-	return &querypb.GetQueryNodeDistributionResponse{}, nil
+	return &querypb.GetQueryNodeDistributionResponse{}, m.Err
 }
 
 func (m *GrpcQueryCoordClient) SuspendBalance(ctx context.Context, req *querypb.SuspendBalanceRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
@@ -174,6 +174,6 @@ func (m *GrpcQueryCoordClient) TransferChannel(ctx context.Context, req *querypb
 	return &commonpb.Status{}, m.Err
 }
 
-func (m *GrpcQueryCoordClient) HasSameDistribution(ctx context.Context, req *querypb.HasSameDistributionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+func (m *GrpcQueryCoordClient) CheckQueryNodeDistribution(ctx context.Context, req *querypb.CheckQueryNodeDistributionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }

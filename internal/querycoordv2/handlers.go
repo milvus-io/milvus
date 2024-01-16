@@ -99,7 +99,7 @@ func (s *Server) balanceSegments(ctx context.Context,
 	copyMode bool,
 ) error {
 	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID), zap.Int64("srcNode", srcNode))
-	plans := s.balancer.AssignSegment(collectionID, segments, dstNodes)
+	plans := s.balancer.AssignSegment(collectionID, segments, dstNodes, true)
 	for i := range plans {
 		plans[i].From = srcNode
 		plans[i].Replica = replica
@@ -195,8 +195,8 @@ func (s *Server) balanceChannels(ctx context.Context,
 			releaseAction := task.NewChannelAction(plan.From, task.ActionTypeReduce, plan.Channel.GetChannelName())
 			actions = append(actions, releaseAction)
 		}
-		task, err := task.NewSegmentTask(ctx,
-			Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond),
+		task, err := task.NewChannelTask(ctx,
+			Params.QueryCoordCfg.ChannelTaskTimeout.GetAsDuration(time.Millisecond),
 			utils.ManualBalance,
 			collectionID,
 			plan.Replica,

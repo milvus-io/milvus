@@ -34,6 +34,9 @@ type Manager interface {
 	Remove(nodeID int64)
 	Get(nodeID int64) *NodeInfo
 	GetAll() []*NodeInfo
+
+	Suspend(nodeID int64) error
+	Resume(nodeID int64) error
 }
 
 type NodeManager struct {
@@ -81,7 +84,9 @@ func (m *NodeManager) Resume(nodeID int64) error {
 	if !ok {
 		return merr.WrapErrNodeNotFound(nodeID)
 	}
-	nodeInfo.SetState(NodeStateNormal)
+	if nodeInfo.GetState() == NodeStateSuspend {
+		nodeInfo.SetState(NodeStateNormal)
+	}
 	return nil
 }
 

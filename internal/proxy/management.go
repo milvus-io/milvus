@@ -34,17 +34,18 @@ import (
 // this file contains proxy management restful API handler
 
 const (
-	mgrRouteGcPause             = `/management/datacoord/garbage_collection/pause`
-	mgrRouteGcResume            = `/management/datacoord/garbage_collection/resume`
-	mgrListQueryNode            = `/management/querycoord/list/querynode`
-	mgrGetQueryNodeDistribution = `/management/querycoord/data/get_distribution`
-	mgrSuspendBalance           = `/management/querycoord/balance/suspend`
-	mgrResumeBalance            = `/management/querycoord/balance/resume`
-	mgrSuspendNode              = `/management/querycoord/suspend_node`
-	mgrResumeNode               = `/management/querycoord/resume_node`
-	mgrTransferSegment          = `/management/querycoord/transfer_segment`
-	mgrTransferChannel          = `/management/querycoord/transfer_channel`
-	mgrHasSameDistribution      = `/management/querycoord/data/check_distribution`
+	mgrRouteGcPause  = `/management/datacoord/garbage_collection/pause`
+	mgrRouteGcResume = `/management/datacoord/garbage_collection/resume`
+
+	mgrSuspendQueryCoordBalance   = `/management/querycoord/suspend/balance`
+	mgrResumeQueryCoordBalance    = `/management/querycoord/resume/balance`
+	mgrSuspendQueryNode           = `/management/querycoord/suspend/node`
+	mgrResumeQueryNode            = `/management/querycoord/resume/node`
+	mgrTransferSegment            = `/management/querycoord/transfer/segment`
+	mgrTransferChannel            = `/management/querycoord/transfer/channel`
+	mgrListQueryNode              = `/management/querycoord/list/querynode`
+	mgrGetQueryNodeDistribution   = `/management/querycoord/data/get/distribution`
+	mgrCheckQueryNodeDistribution = `/management/querycoord/data/check/distribution`
 )
 
 var mgrRouteRegisterOnce sync.Once
@@ -68,20 +69,20 @@ func RegisterMgrRoute(proxy *Proxy) {
 			HandlerFunc: proxy.GetQueryNodeDistribution,
 		})
 		management.Register(&management.Handler{
-			Path:        mgrSuspendBalance,
+			Path:        mgrSuspendQueryCoordBalance,
 			HandlerFunc: proxy.SuspendQueryCoordBalance,
 		})
 		management.Register(&management.Handler{
-			Path:        mgrResumeBalance,
+			Path:        mgrResumeQueryCoordBalance,
 			HandlerFunc: proxy.ResumeQueryCoordBalance,
 		})
 		management.Register(&management.Handler{
-			Path:        mgrSuspendNode,
-			HandlerFunc: proxy.SuspendNode,
+			Path:        mgrSuspendQueryNode,
+			HandlerFunc: proxy.SuspendQueryNode,
 		})
 		management.Register(&management.Handler{
-			Path:        mgrResumeNode,
-			HandlerFunc: proxy.ResumeNode,
+			Path:        mgrResumeQueryNode,
+			HandlerFunc: proxy.ResumeQueryNode,
 		})
 		management.Register(&management.Handler{
 			Path:        mgrTransferSegment,
@@ -92,8 +93,8 @@ func RegisterMgrRoute(proxy *Proxy) {
 			HandlerFunc: proxy.TransferChannel,
 		})
 		management.Register(&management.Handler{
-			Path:        mgrHasSameDistribution,
-			HandlerFunc: proxy.HasSameDistribution,
+			Path:        mgrCheckQueryNodeDistribution,
+			HandlerFunc: proxy.CheckQueryNodeDistribution,
 		})
 	})
 }
@@ -170,9 +171,16 @@ func (node *Proxy) ListQueryNode(w http.ResponseWriter, req *http.Request) {
 }
 
 func (node *Proxy) GetQueryNodeDistribution(w http.ResponseWriter, req *http.Request) {
-	nodeID, err := strconv.ParseInt(req.URL.Query().Get("node_id"), 10, 64)
+	err := req.ParseForm()
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(fmt.Sprintf(`{"msg": "failed to transfer segment, %s"}`, err.Error())))
+		return
+	}
+
+	nodeID, err := strconv.ParseInt(req.FormValue("node_id"), 10, 64)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
 		w.Write([]byte(fmt.Sprintf(`{"msg": "failed to get query node distribution, %s"}`, err.Error())))
 		return
 	}
@@ -242,10 +250,17 @@ func (node *Proxy) ResumeQueryCoordBalance(w http.ResponseWriter, req *http.Requ
 	w.Write([]byte(`{"msg": "OK"}`))
 }
 
-func (node *Proxy) SuspendNode(w http.ResponseWriter, req *http.Request) {
-	nodeID, err := strconv.ParseInt(req.URL.Query().Get("node_id"), 10, 64)
+func (node *Proxy) SuspendQueryNode(w http.ResponseWriter, req *http.Request) {
+	err := req.ParseForm()
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(fmt.Sprintf(`{"msg": "failed to transfer segment, %s"}`, err.Error())))
+		return
+	}
+
+	nodeID, err := strconv.ParseInt(req.FormValue("node_id"), 10, 64)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
 		w.Write([]byte(fmt.Sprintf(`{"msg": "failed to suspend node, %s"}`, err.Error())))
 		return
 	}
@@ -268,14 +283,21 @@ func (node *Proxy) SuspendNode(w http.ResponseWriter, req *http.Request) {
 	w.Write([]byte(`{"msg": "OK"}`))
 }
 
-func (node *Proxy) ResumeNode(w http.ResponseWriter, req *http.Request) {
-	nodeID, err := strconv.ParseInt(req.URL.Query().Get("node_id"), 10, 64)
+func (node *Proxy) ResumeQueryNode(w http.ResponseWriter, req *http.Request) {
+	err := req.ParseForm()
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(fmt.Sprintf(`{"msg": "failed to transfer segment, %s"}`, err.Error())))
+		return
+	}
+
+	nodeID, err := strconv.ParseInt(req.FormValue("node_id"), 10, 64)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
 		w.Write([]byte(fmt.Sprintf(`{"msg": "failed to resume node, %s"}`, err.Error())))
 		return
 	}
-	resp, err := node.queryCoord.SuspendNode(req.Context(), &querypb.SuspendNodeRequest{
+	resp, err := node.queryCoord.ResumeNode(req.Context(), &querypb.ResumeNodeRequest{
 		Base:   commonpbutil.NewMsgBase(),
 		NodeID: nodeID,
 	})
@@ -297,7 +319,7 @@ func (node *Proxy) ResumeNode(w http.ResponseWriter, req *http.Request) {
 func (node *Proxy) TransferSegment(w http.ResponseWriter, req *http.Request) {
 	err := req.ParseForm()
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
+		w.WriteHeader(http.StatusBadRequest)
 		w.Write([]byte(fmt.Sprintf(`{"msg": "failed to transfer segment, %s"}`, err.Error())))
 		return
 	}
@@ -308,7 +330,7 @@ func (node *Proxy) TransferSegment(w http.ResponseWriter, req *http.Request) {
 
 	source, err := strconv.ParseInt(req.FormValue("source_node_id"), 10, 64)
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
+		w.WriteHeader(http.StatusBadRequest)
 		w.Write([]byte(fmt.Sprintf(`{"msg": failed to transfer segment", %s"}`, err.Error())))
 		return
 	}
@@ -320,7 +342,7 @@ func (node *Proxy) TransferSegment(w http.ResponseWriter, req *http.Request) {
 	} else {
 		value, err := strconv.ParseInt(target, 10, 64)
 		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
+			w.WriteHeader(http.StatusBadRequest)
 			w.Write([]byte(fmt.Sprintf(`{"msg": "failed to transfer segment, %s"}`, err.Error())))
 			return
 		}
@@ -333,7 +355,7 @@ func (node *Proxy) TransferSegment(w http.ResponseWriter, req *http.Request) {
 	} else {
 		value, err := strconv.ParseInt(segmentID, 10, 64)
 		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
+			w.WriteHeader(http.StatusBadRequest)
 			w.Write([]byte(fmt.Sprintf(`{"msg": "failed to transfer segment, %s"}`, err.Error())))
 			return
 		}
@@ -346,7 +368,7 @@ func (node *Proxy) TransferSegment(w http.ResponseWriter, req *http.Request) {
 	} else {
 		value, err := strconv.ParseBool(copyMode)
 		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
+			w.WriteHeader(http.StatusBadRequest)
 			w.Write([]byte(fmt.Sprintf(`{"msg": "failed to transfer segment, %s"}`, err.Error())))
 			return
 		}
@@ -372,7 +394,7 @@ func (node *Proxy) TransferSegment(w http.ResponseWriter, req *http.Request) {
 func (node *Proxy) TransferChannel(w http.ResponseWriter, req *http.Request) {
 	err := req.ParseForm()
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
+		w.WriteHeader(http.StatusBadRequest)
 		w.Write([]byte(fmt.Sprintf(`{"msg": "failed to transfer channel, %s"}`, err.Error())))
 		return
 	}
@@ -383,7 +405,7 @@ func (node *Proxy) TransferChannel(w http.ResponseWriter, req *http.Request) {
 
 	source, err := strconv.ParseInt(req.FormValue("source_node_id"), 10, 64)
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
+		w.WriteHeader(http.StatusBadRequest)
 		w.Write([]byte(fmt.Sprintf(`{"msg": failed to transfer channel", %s"}`, err.Error())))
 		return
 	}
@@ -395,7 +417,7 @@ func (node *Proxy) TransferChannel(w http.ResponseWriter, req *http.Request) {
 	} else {
 		value, err := strconv.ParseInt(target, 10, 64)
 		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
+			w.WriteHeader(http.StatusBadRequest)
 			w.Write([]byte(fmt.Sprintf(`{"msg": "failed to transfer channel, %s"}`, err.Error())))
 			return
 		}
@@ -405,16 +427,17 @@ func (node *Proxy) TransferChannel(w http.ResponseWriter, req *http.Request) {
 	channel := req.FormValue("channel_name")
 	if len(channel) == 0 {
 		request.TransferAll = true
+	} else {
+		request.ChannelName = channel
 	}
-	request.ChannelName = channel
 
 	copyMode := req.FormValue("copy_mode")
 	if len(copyMode) == 0 {
-		request.CopyMode = true
+		request.CopyMode = false
 	} else {
 		value, err := strconv.ParseBool(copyMode)
 		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
+			w.WriteHeader(http.StatusBadRequest)
 			w.Write([]byte(fmt.Sprintf(`{"msg": "failed to transfer channel, %s"}`, err.Error())))
 			return
 		}
@@ -437,28 +460,28 @@ func (node *Proxy) TransferChannel(w http.ResponseWriter, req *http.Request) {
 	w.Write([]byte(`{"msg": "OK"}`))
 }
 
-func (node *Proxy) HasSameDistribution(w http.ResponseWriter, req *http.Request) {
+func (node *Proxy) CheckQueryNodeDistribution(w http.ResponseWriter, req *http.Request) {
 	err := req.ParseForm()
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
+		w.WriteHeader(http.StatusBadRequest)
 		w.Write([]byte(fmt.Sprintf(`{"msg": "failed to check whether query node has same distribution, %s"}`, err.Error())))
 		return
 	}
 
 	source, err := strconv.ParseInt(req.FormValue("source_node_id"), 10, 64)
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
+		w.WriteHeader(http.StatusBadRequest)
 		w.Write([]byte(fmt.Sprintf(`{"msg": failed to check whether query node has same distribution", %s"}`, err.Error())))
 		return
 	}
 
 	target, err := strconv.ParseInt(req.FormValue("source_node_id"), 10, 64)
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
+		w.WriteHeader(http.StatusBadRequest)
 		w.Write([]byte(fmt.Sprintf(`{"msg": "failed to check whether query node has same distribution, %s"}`, err.Error())))
 		return
 	}
-	resp, err := node.queryCoord.HasSameDistribution(req.Context(), &querypb.HasSameDistributionRequest{
+	resp, err := node.queryCoord.CheckQueryNodeDistribution(req.Context(), &querypb.CheckQueryNodeDistributionRequest{
 		Base:         commonpbutil.NewMsgBase(),
 		SourceNodeID: source,
 		TargetNodeID: target,

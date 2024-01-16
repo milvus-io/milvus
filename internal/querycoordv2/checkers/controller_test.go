@@ -134,7 +134,7 @@ func (suite *CheckerControllerSuite) TestBasic() {
 
 	assignSegCounter := atomic.NewInt32(0)
 	assingChanCounter := atomic.NewInt32(0)
-	suite.balancer.EXPECT().AssignSegment(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(i1 int64, s []*meta.Segment, i2 []int64) []balance.SegmentAssignPlan {
+	suite.balancer.EXPECT().AssignSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(i1 int64, s []*meta.Segment, i2 []int64, i4 bool) []balance.SegmentAssignPlan {
 		assignSegCounter.Inc()
 		return nil
 	})

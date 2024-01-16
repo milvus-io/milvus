@@ -126,13 +126,22 @@ func (s *Server) ListQueryNode(ctx context.Context, req *querypb.ListQueryNodeRe
 // return query node's data distribution, for given nodeID, return it's (channel_name_list, sealed_segment_list)
 func (s *Server) GetQueryNodeDistribution(ctx context.Context, req *querypb.GetQueryNodeDistributionRequest) (*querypb.GetQueryNodeDistributionResponse, error) {
 	log := log.Ctx(ctx)
-	errMsg := "failed to get querynode state"
+	errMsg := "failed to get query node distribution"
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		log.Warn(errMsg, zap.Error(err))
 		return &querypb.GetQueryNodeDistributionResponse{
 			Status: merr.Status(errors.Wrap(err, errMsg)),
 		}, nil
 	}
+
+	if s.nodeMgr.Get(req.GetNodeID()) == nil {
+		err := merr.WrapErrNodeNotFound(req.GetNodeID(), errMsg)
+		log.Warn(errMsg, zap.Error(err))
+		return &querypb.GetQueryNodeDistributionResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
 	segments := s.dist.SegmentDistManager.GetByFilter(meta.WithNodeID(req.GetNodeID()))
 	channels := s.dist.ChannelDistManager.GetByNode(req.NodeID)
 	return &querypb.GetQueryNodeDistributionResponse{
@@ -184,6 +193,12 @@ func (s *Server) SuspendNode(ctx context.Context, req *querypb.SuspendNodeReques
 		return merr.Status(err), nil
 	}
 
+	if s.nodeMgr.Get(req.GetNodeID()) == nil {
+		err := merr.WrapErrNodeNotFound(req.GetNodeID(), errMsg)
+		log.Warn(errMsg, zap.Error(err))
+		return merr.Status(err), nil
+	}
+
 	err := s.nodeMgr.Suspend(req.GetNodeID())
 	if err != nil {
 		log.Warn(errMsg, zap.Error(err))
@@ -200,6 +215,12 @@ func (s *Server) ResumeNode(ctx context.Context, req *querypb.ResumeNodeRequest)
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		log.Warn(errMsg, zap.Error(err))
 		return merr.Status(errors.Wrap(err, errMsg)), nil
+	}
+
+	if s.nodeMgr.Get(req.GetNodeID()) == nil {
+		err := merr.WrapErrNodeNotFound(req.GetNodeID(), errMsg)
+		log.Warn(errMsg, zap.Error(err))
+		return merr.Status(err), nil
 	}
 
 	err := s.nodeMgr.Resume(req.GetNodeID())
@@ -246,6 +267,7 @@ func (s *Server) TransferSegment(ctx context.Context, req *querypb.TransferSegme
 		} else {
 			dstNodeSet.Insert(req.GetTargetNodeID())
 		}
+		dstNodeSet.Remove(srcNode)
 
 		// check whether dstNode is healthy
 		for dstNode := range dstNodeSet {
@@ -265,7 +287,7 @@ func (s *Server) TransferSegment(ctx context.Context, req *querypb.TransferSegme
 		} else {
 			// check whether sealed segment exist
 			segment, ok := lo.Find(segments, func(s *meta.Segment) bool { return s.GetID() == req.GetSegmentID() })
-			if ok {
+			if !ok {
 				err := merr.WrapErrSegmentNotFound(req.GetSegmentID(), "segment not found in source node")
 				return merr.Status(err), nil
 			}
@@ -274,7 +296,7 @@ func (s *Server) TransferSegment(ctx context.Context, req *querypb.TransferSegme
 			if !existInTarget {
 				log.Info("segment doesn't exist in current target, skip it", zap.Int64("segmentID", req.GetSegmentID()))
 			} else {
-				toBalance.Insert()
+				toBalance.Insert(segment)
 			}
 		}
 
@@ -323,6 +345,7 @@ func (s *Server) TransferChannel(ctx context.Context, req *querypb.TransferChann
 		} else {
 			dstNodeSet.Insert(req.GetTargetNodeID())
 		}
+		dstNodeSet.Remove(srcNode)
 
 		// check whether dstNode is healthy
 		for dstNode := range dstNodeSet {
@@ -345,7 +368,12 @@ func (s *Server) TransferChannel(ctx context.Context, req *querypb.TransferChann
 				err := merr.WrapErrChannelNotFound(req.GetChannelName(), "channel not found in source node")
 				return merr.Status(err), nil
 			}
-			toBalance.Insert(channel)
+			existInTarget := s.targetMgr.GetDmChannel(channel.GetCollectionID(), channel.GetChannelName(), meta.CurrentTarget) != nil
+			if !existInTarget {
+				log.Info("channel doesn't exist in current target, skip it", zap.String("channelName", channel.GetChannelName()))
+			} else {
+				toBalance.Insert(channel)
+			}
 		}
 
 		err := s.balanceChannels(ctx, replica.GetCollectionID(), replica, srcNode, dstNodeSet.Collect(), toBalance.Collect(), false, req.GetCopyMode())
@@ -358,7 +386,7 @@ func (s *Server) TransferChannel(ctx context.Context, req *querypb.TransferChann
 	return merr.Success(), nil
 }
 
-func (s *Server) HasSameDistribution(ctx context.Context, req *querypb.HasSameDistributionRequest) (*commonpb.Status, error) {
+func (s *Server) CheckQueryNodeDistribution(ctx context.Context, req *querypb.CheckQueryNodeDistributionRequest) (*commonpb.Status, error) {
 	log := log.Ctx(ctx)
 	errMsg := "failed to get querynode state"
 	if err := merr.CheckHealthy(s.State()); err != nil {
@@ -366,9 +394,23 @@ func (s *Server) HasSameDistribution(ctx context.Context, req *querypb.HasSameDi
 		return merr.Status(err), nil
 	}
 
+	sourceNode := s.nodeMgr.Get(req.GetSourceNodeID())
+	if sourceNode == nil {
+		err := merr.WrapErrNodeNotFound(req.GetSourceNodeID(), "source node not found")
+		log.Warn(errMsg, zap.Error(err))
+		return merr.Status(err), nil
+	}
+
+	targetNode := s.nodeMgr.Get(req.GetTargetNodeID())
+	if targetNode == nil {
+		err := merr.WrapErrNodeNotFound(req.GetTargetNodeID(), "target node not found")
+		log.Warn(errMsg, zap.Error(err))
+		return merr.Status(err), nil
+	}
+
 	// check channel list
 	channelOnSrc := s.dist.ChannelDistManager.GetByNode(req.GetSourceNodeID())
-	channelOnDst := s.dist.ChannelDistManager.GetByNode(req.GetSourceNodeID())
+	channelOnDst := s.dist.ChannelDistManager.GetByNode(req.GetTargetNodeID())
 	channelMap := lo.SliceToMap(channelOnDst, func(ch *meta.DmChannel) (string, *meta.DmChannel) {
 		return ch.GetChannelName(), ch
 	})

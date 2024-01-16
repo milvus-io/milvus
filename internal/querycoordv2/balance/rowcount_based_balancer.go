@@ -41,15 +41,17 @@ type RowCountBasedBalancer struct {
 
 // AssignSegment, when row count based balancer assign segments, it will assign segment to node with least global row count.
 // try to make every query node has same row count.
-func (b *RowCountBasedBalancer) AssignSegment(collectionID int64, segments []*meta.Segment, nodes []int64) []SegmentAssignPlan {
-	// filter out suspended node
-	nodes = lo.Filter(nodes, func(node int64, _ int) bool {
-		info := b.nodeManager.Get(node)
-		if info != nil && info.GetState() == session.NodeStateNormal {
-			return true
-		}
-		return false
-	})
+func (b *RowCountBasedBalancer) AssignSegment(collectionID int64, segments []*meta.Segment, nodes []int64, manualBalance bool) []SegmentAssignPlan {
+	// skip out suspend node during assignment, but skip this check for manual balance
+	if !manualBalance {
+		nodes = lo.Filter(nodes, func(node int64, _ int) bool {
+			info := b.nodeManager.Get(node)
+			if info != nil && info.GetState() == session.NodeStateNormal {
+				return true
+			}
+			return false
+		})
+	}
 
 	nodeItems := b.convertToNodeItemsBySegment(nodes)
 	if len(nodeItems) == 0 {
@@ -233,7 +235,7 @@ func (b *RowCountBasedBalancer) genStoppingSegmentPlan(replica *meta.Replica, on
 				b.targetMgr.GetSealedSegment(segment.GetCollectionID(), segment.GetID(), meta.NextTarget) != nil &&
 				segment.GetLevel() != datapb.SegmentLevel_L0
 		})
-		plans := b.AssignSegment(replica.CollectionID, segments, onlineNodes)
+		plans := b.AssignSegment(replica.CollectionID, segments, onlineNodes, false)
 		for i := range plans {
 			plans[i].From = nodeID
 			plans[i].Replica = replica
@@ -301,7 +303,7 @@ func (b *RowCountBasedBalancer) genSegmentPlan(replica *meta.Replica, onlineNode
 		return nil
 	}
 
-	segmentPlans := b.AssignSegment(replica.CollectionID, segmentsToMove, nodesWithLessRow)
+	segmentPlans := b.AssignSegment(replica.CollectionID, segmentsToMove, nodesWithLessRow, false)
 	for i := range segmentPlans {
 		segmentPlans[i].From = segmentPlans[i].Segment.Node
 		segmentPlans[i].Replica = replica

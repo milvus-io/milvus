@@ -144,6 +144,61 @@ func (_c *MockQueryCoord_CheckHealth_Call) RunAndReturn(run func(context.Context
 	return _c
 }
 
+// CheckQueryNodeDistribution provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryCoord) CheckQueryNodeDistribution(_a0 context.Context, _a1 *querypb.CheckQueryNodeDistributionRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.CheckQueryNodeDistributionRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.CheckQueryNodeDistributionRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.CheckQueryNodeDistributionRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockQueryCoord_CheckQueryNodeDistribution_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CheckQueryNodeDistribution'
+type MockQueryCoord_CheckQueryNodeDistribution_Call struct {
+	*mock.Call
+}
+
+// CheckQueryNodeDistribution is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *querypb.CheckQueryNodeDistributionRequest
+func (_e *MockQueryCoord_Expecter) CheckQueryNodeDistribution(_a0 interface{}, _a1 interface{}) *MockQueryCoord_CheckQueryNodeDistribution_Call {
+	return &MockQueryCoord_CheckQueryNodeDistribution_Call{Call: _e.mock.On("CheckQueryNodeDistribution", _a0, _a1)}
+}
+
+func (_c *MockQueryCoord_CheckQueryNodeDistribution_Call) Run(run func(_a0 context.Context, _a1 *querypb.CheckQueryNodeDistributionRequest)) *MockQueryCoord_CheckQueryNodeDistribution_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*querypb.CheckQueryNodeDistributionRequest))
+	})
+	return _c
+}
+
+func (_c *MockQueryCoord_CheckQueryNodeDistribution_Call) Return(_a0 *commonpb.Status, _a1 error) *MockQueryCoord_CheckQueryNodeDistribution_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockQueryCoord_CheckQueryNodeDistribution_Call) RunAndReturn(run func(context.Context, *querypb.CheckQueryNodeDistributionRequest) (*commonpb.Status, error)) *MockQueryCoord_CheckQueryNodeDistribution_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CreateResourceGroup provides a mock function with given fields: _a0, _a1
 func (_m *MockQueryCoord) CreateResourceGroup(_a0 context.Context, _a1 *milvuspb.CreateResourceGroupRequest) (*commonpb.Status, error) {
 	ret := _m.Called(_a0, _a1)
@@ -855,61 +910,6 @@ func (_c *MockQueryCoord_GetTimeTickChannel_Call) Return(_a0 *milvuspb.StringRes
 }
 
 func (_c *MockQueryCoord_GetTimeTickChannel_Call) RunAndReturn(run func(context.Context, *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error)) *MockQueryCoord_GetTimeTickChannel_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// HasSameDistribution provides a mock function with given fields: _a0, _a1
-func (_m *MockQueryCoord) HasSameDistribution(_a0 context.Context, _a1 *querypb.HasSameDistributionRequest) (*commonpb.Status, error) {
-	ret := _m.Called(_a0, _a1)
-
-	var r0 *commonpb.Status
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *querypb.HasSameDistributionRequest) (*commonpb.Status, error)); ok {
-		return rf(_a0, _a1)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, *querypb.HasSameDistributionRequest) *commonpb.Status); ok {
-		r0 = rf(_a0, _a1)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*commonpb.Status)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context, *querypb.HasSameDistributionRequest) error); ok {
-		r1 = rf(_a0, _a1)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// MockQueryCoord_HasSameDistribution_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'HasSameDistribution'
-type MockQueryCoord_HasSameDistribution_Call struct {
-	*mock.Call
-}
-
-// HasSameDistribution is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *querypb.HasSameDistributionRequest
-func (_e *MockQueryCoord_Expecter) HasSameDistribution(_a0 interface{}, _a1 interface{}) *MockQueryCoord_HasSameDistribution_Call {
-	return &MockQueryCoord_HasSameDistribution_Call{Call: _e.mock.On("HasSameDistribution", _a0, _a1)}
-}
-
-func (_c *MockQueryCoord_HasSameDistribution_Call) Run(run func(_a0 context.Context, _a1 *querypb.HasSameDistributionRequest)) *MockQueryCoord_HasSameDistribution_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*querypb.HasSameDistributionRequest))
-	})
-	return _c
-}
-
-func (_c *MockQueryCoord_HasSameDistribution_Call) Return(_a0 *commonpb.Status, _a1 error) *MockQueryCoord_HasSameDistribution_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *MockQueryCoord_HasSameDistribution_Call) RunAndReturn(run func(context.Context, *querypb.HasSameDistributionRequest) (*commonpb.Status, error)) *MockQueryCoord_HasSameDistribution_Call {
 	_c.Call.Return(run)
 	return _c
 }
