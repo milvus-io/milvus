@@ -120,8 +120,10 @@ func (s *SyncPolicySuite) TestMemoryHighPolicy() {
 
 		param.Save(param.DataNodeCfg.MemoryForceSyncMinSize.Key, "200")
 		param.Save(param.DataNodeCfg.MemoryForceSyncSegmentNum.Key, "2")
+		param.Save(param.DataNodeCfg.MemoryForceSyncSegmentMinNum.Key, "0")
 		defer param.Reset(param.DataNodeCfg.MemoryForceSyncMinSize.Key)
 		defer param.Reset(param.DataNodeCfg.MemoryForceSyncSegmentNum.Key)
+		defer param.Reset(param.DataNodeCfg.MemoryForceSyncSegmentMinNum.Key)
 
 		buffers := []*segmentBuffer{
 			{

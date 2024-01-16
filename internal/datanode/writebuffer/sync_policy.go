@@ -110,9 +110,10 @@ func GetMemoryHighPolicy(memoryHigh *atomic.Bool) SyncPolicy {
 		heap.Init(h)
 
 		maxNum := paramtable.Get().DataNodeCfg.MemoryForceSyncSegmentNum.GetAsInt()
+		minNum := paramtable.Get().DataNodeCfg.MemoryForceSyncSegmentMinNum.GetAsInt()
 		minSize := paramtable.Get().DataNodeCfg.MemoryForceSyncMinSize.GetAsInt64()
 		for _, buf := range buffers {
-			if buf.MemorySize() < minSize {
+			if h.Len() >= minNum && buf.MemorySize() < minSize {
 				continue
 			}
 			heap.Push(h, buf)
