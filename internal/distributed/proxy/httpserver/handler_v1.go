@@ -95,8 +95,7 @@ func (h *HandlersV1) describeCollection(ctx context.Context, c *gin.Context, dbN
 		return nil, err
 	}
 	primaryField, ok := getPrimaryField(response.Schema)
-	if ok && primaryField.AutoID && !response.Schema.AutoID {
-		log.Warn("primary filed autoID VS schema autoID", zap.String("collectionName", collectionName), zap.Bool("primary Field", primaryField.AutoID), zap.Bool("schema", response.Schema.AutoID))
+	if ok && primaryField.AutoID {
 		response.Schema.AutoID = EnableAutoID
 	}
 	return response.Schema, nil
@@ -163,10 +162,11 @@ func (h *HandlersV1) listCollections(c *gin.Context) {
 
 func (h *HandlersV1) createCollection(c *gin.Context) {
 	httpReq := CreateCollectionReq{
-		DbName:       DefaultDbName,
-		MetricType:   DefaultMetricType,
-		PrimaryField: DefaultPrimaryFieldName,
-		VectorField:  DefaultVectorFieldName,
+		DbName:             DefaultDbName,
+		MetricType:         DefaultMetricType,
+		PrimaryField:       DefaultPrimaryFieldName,
+		VectorField:        DefaultVectorFieldName,
+		EnableDynamicField: EnableDynamic,
 	}
 	if err := c.ShouldBindWith(&httpReq, binding.JSON); err != nil {
 		log.Warn("high level restful api, the parameter of create collection is incorrect", zap.Any("request", httpReq), zap.Error(err))
@@ -209,7 +209,7 @@ func (h *HandlersV1) createCollection(c *gin.Context) {
 				AutoID: DisableAutoID,
 			},
 		},
-		EnableDynamicField: EnableDynamic,
+		EnableDynamicField: httpReq.EnableDynamicField,
 	})
 	if err != nil {
 		log.Warn("high level restful api, marshal collection schema fail", zap.Any("request", httpReq), zap.Error(err))
@@ -741,7 +741,8 @@ func (h *HandlersV1) upsert(c *gin.Context) {
 	if err != nil || coll == nil {
 		return
 	}
-	if coll.AutoID {
+	primaryField, ok := getPrimaryField(coll)
+	if ok && primaryField.AutoID {
 		err := merr.WrapErrParameterInvalid("autoID: false", "autoID: true", "cannot upsert an autoID collection")
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 		return
