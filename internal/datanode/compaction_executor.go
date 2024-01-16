@@ -19,6 +19,7 @@ package datanode
 import (
 	"context"
 
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -145,9 +146,15 @@ func (c *compactionExecutor) clearTasksByChannel(channel string) {
 }
 
 func (c *compactionExecutor) getAllCompactionResults() []*datapb.CompactionPlanResult {
+	var (
+		executing          []int64
+		completed          []int64
+		completedLevelZero []int64
+	)
 	results := make([]*datapb.CompactionPlanResult, 0)
 	// get executing results
 	c.executing.Range(func(planID int64, task compactor) bool {
+		executing = append(executing, planID)
 		results = append(results, &datapb.CompactionPlanResult{
 			State:  commonpb.CompactionState_Executing,
 			PlanID: planID,
@@ -157,9 +164,27 @@ func (c *compactionExecutor) getAllCompactionResults() []*datapb.CompactionPlanR
 
 	// get completed results
 	c.completed.Range(func(planID int64, result *datapb.CompactionPlanResult) bool {
+		completed = append(completed, planID)
 		results = append(results, result)
+
+		if result.GetType() == datapb.CompactionType_Level0DeleteCompaction {
+			completedLevelZero = append(completedLevelZero, planID)
+		}
 		return true
 	})
+
+	// remote level zero results
+	lo.ForEach(completedLevelZero, func(planID int64, _ int) {
+		c.completed.Remove(planID)
+	})
+
+	if len(results) > 0 {
+		log.Info("DataNode Compaction results",
+			zap.Int64s("executing", executing),
+			zap.Int64s("completed", completed),
+			zap.Int64s("completed levelzero", completedLevelZero),
+		)
+	}
 
 	return results
 }

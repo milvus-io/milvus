@@ -570,6 +570,7 @@ func (t *compactionTask) compact() (*datapb.CompactionPlanResult, error) {
 		State:    commonpb.CompactionState_Completed,
 		PlanID:   t.getPlanID(),
 		Segments: []*datapb.CompactionSegment{pack},
+		Type:     t.plan.GetType(),
 	}
 
 	return planResult, nil
