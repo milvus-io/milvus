@@ -1066,6 +1066,8 @@ func (m *MetaCache) RemoveDatabase(ctx context.Context, database string) {
 }
 
 func (m *MetaCache) HasDatabase(ctx context.Context, database string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	_, ok := m.collInfo[database]
 	return ok
 }
