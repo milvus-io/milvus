@@ -961,8 +961,8 @@ func TestAzureChunkManager(t *testing.T) {
 		assert.True(t, errors.Is(err, ErrNoSuchKey))
 
 		_, err = testCM.Reader(ctx, key)
-		assert.Error(t, err)
-		assert.True(t, errors.Is(err, ErrNoSuchKey))
+		// lazy error for real read
+		assert.NoError(t, err)
 
 		_, err = testCM.ReadAt(ctx, key, 100, 1)
 		assert.Error(t, err)

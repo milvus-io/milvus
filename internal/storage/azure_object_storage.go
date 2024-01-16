@@ -90,44 +90,55 @@ func newAzureObjectStorageWithConfig(ctx context.Context, c *config) (*AzureObje
 	return &AzureObjectStorage{Client: client}, nil
 }
 
+// BlobReader is implemented because Azure's stream body does not have ReadAt and Seek interfaces.
+// BlobReader is not concurrency safe.
 type BlobReader struct {
-	client   *blockblob.Client
-	position int64
+	client          *blockblob.Client
+	position        int64
+	body            io.ReadCloser
+	needResetStream bool
 }
 
 func NewBlobReader(client *blockblob.Client, offset int64) (*BlobReader, error) {
-	return &BlobReader{client: client, position: offset}, nil
+	return &BlobReader{client: client, position: offset, needResetStream: true}, nil
 }
 
 func (b *BlobReader) Read(p []byte) (n int, err error) {
 	ctx := context.TODO()
 
-	opts := &azblob.DownloadStreamOptions{}
-	if b.position > 0 {
-		opts.Range = blob.HTTPRange{
-			Offset: b.position,
+	if b.needResetStream {
+		opts := &azblob.DownloadStreamOptions{
+			Range: blob.HTTPRange{
+				Offset: b.position,
+			},
 		}
+		object, err := b.client.DownloadStream(ctx, opts)
+		if err != nil {
+			return 0, err
+		}
+		b.body = object.Body
 	}
-	object, err := b.client.DownloadStream(ctx, opts)
-	if err != nil {
-		return 0, err
-	}
-	n, err = object.Body.Read(p)
+
+	n, err = b.body.Read(p)
 	if err != nil {
 		return n, err
 	}
 	b.position += int64(n)
-
+	b.needResetStream = false
 	return n, nil
 }
 
 func (b *BlobReader) Close() error {
+	if b.body != nil {
+		return b.body.Close()
+	}
 	return nil
 }
 
 func (b *BlobReader) ReadAt(p []byte, off int64) (n int, err error) {
 	httpRange := blob.HTTPRange{
 		Offset: off,
+		Count:  int64(len(p)),
 	}
 	object, err := b.client.DownloadStream(context.Background(), &blob.DownloadStreamOptions{
 		Range: httpRange,
@@ -158,6 +169,7 @@ func (b *BlobReader) Seek(offset int64, whence int) (int64, error) {
 	}
 
 	b.position = newOffset
+	b.needResetStream = true
 	return newOffset, nil
 }
 
@@ -168,10 +180,6 @@ func (AzureObjectStorage *AzureObjectStorage) GetObject(ctx context.Context, buc
 			Offset: offset,
 			Count:  size,
 		}
-	}
-	_, err := AzureObjectStorage.Client.NewContainerClient(bucketName).NewBlockBlobClient(objectName).DownloadStream(ctx, &opts)
-	if err != nil {
-		return nil, err
 	}
 	return NewBlobReader(AzureObjectStorage.Client.NewContainerClient(bucketName).NewBlockBlobClient(objectName), offset)
 }
