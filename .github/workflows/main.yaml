@@ -99,7 +99,6 @@ jobs:
             **/*
             !./.docker/**
             !./cmake_build/thirdparty/**
-            !.git
   UT-Cpp:
     name: UT for Cpp
     needs: Build
@@ -189,6 +188,7 @@ jobs:
             ./lcov_output.info
             *.info
             *.out
+            .git
   integration-test:
     name: Integration Test
     needs: Build
