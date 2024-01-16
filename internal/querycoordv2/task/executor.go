@@ -190,6 +190,7 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 		return err
 	}
 	segment := resp.GetInfos()[0]
+	log = log.With(zap.String("level", segment.GetLevel().String()))
 
 	indexes, err := ex.broker.GetIndexInfo(ctx, task.CollectionID(), segment.GetID())
 	if err != nil {
@@ -224,7 +225,7 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 		segmentIndex.IndexParams = funcutil.Map2KeyValuePair(params)
 	}
 
-	loadInfo := utils.PackSegmentLoadInfo(resp.GetInfos()[0], channel.GetSeekPosition(), indexes)
+	loadInfo := utils.PackSegmentLoadInfo(segment, channel.GetSeekPosition(), indexes)
 
 	req := packLoadSegmentRequest(
 		task,
