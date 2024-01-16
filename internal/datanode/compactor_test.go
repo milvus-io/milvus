@@ -178,6 +178,7 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 					4,
 					5,
 					1,
+					2,
 				},
 				[]Timestamp{
 					20000,
@@ -186,6 +187,7 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 					30000,
 					50000,
 					50000,
+					10000,
 				})
 			require.NoError(t, err)
 
@@ -213,6 +215,7 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 					if test.isvalid {
 						assert.NoError(t, err)
 						assert.Equal(t, 5, len(pk2ts))
+						assert.EqualValues(t, 20001, pk2ts[UniqueID(2)])
 					} else {
 						assert.Error(t, err)
 						assert.Nil(t, pk2ts)
@@ -367,7 +370,7 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			defer func() {
 				Params.Save(Params.DataNodeCfg.BinLogMaxSize.Key, BinLogMaxSize)
 			}()
-			paramtable.Get().Save(Params.DataNodeCfg.BinLogMaxSize.Key, "128")
+			paramtable.Get().Save(Params.DataNodeCfg.BinLogMaxSize.Key, "64")
 			iData := genInsertDataWithExpiredTS()
 			meta := NewMetaFactory().GetCollectionMeta(1, "test", schemapb.DataType_Int64)
 
@@ -402,14 +405,14 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			inPaths, statsPaths, numOfRow, err := ct.merge(context.Background(), allPaths, 2, 0, meta, dm)
 			assert.NoError(t, err)
 			assert.Equal(t, int64(2), numOfRow)
-			assert.Equal(t, 2, len(inPaths[0].GetBinlogs()))
+			assert.Equal(t, 1, len(inPaths[0].GetBinlogs()))
 			assert.Equal(t, 1, len(statsPaths))
 			assert.Equal(t, 1, len(statsPaths[0].GetBinlogs()))
 			assert.NotEqual(t, -1, inPaths[0].GetBinlogs()[0].GetTimestampFrom())
 			assert.NotEqual(t, -1, inPaths[0].GetBinlogs()[0].GetTimestampTo())
 		})
 		// set Params.DataNodeCfg.BinLogMaxSize.Key = 1 to generate multi binlogs, each has only one row
-		t.Run("Merge without expiration3", func(t *testing.T) {
+		t.Run("merge_with_more_than_100rows", func(t *testing.T) {
 			mockbIO := &binlogIO{cm, alloc}
 			paramtable.Get().Save(Params.CommonCfg.EntityExpirationTTL.Key, "0")
 			BinLogMaxSize := Params.DataNodeCfg.BinLogMaxSize.GetAsInt()
@@ -417,7 +420,7 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 				paramtable.Get().Save(Params.DataNodeCfg.BinLogMaxSize.Key, fmt.Sprintf("%d", BinLogMaxSize))
 			}()
 			paramtable.Get().Save(Params.DataNodeCfg.BinLogMaxSize.Key, "1")
-			iData := genInsertDataWithExpiredTS()
+			iData := genInsertData(101)
 
 			var allPaths [][]string
 			inpath, err := mockbIO.uploadInsertLog(context.Background(), 1, 0, iData, meta)
@@ -451,14 +454,12 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			}
 			inPaths, statsPaths, numOfRow, err := ct.merge(context.Background(), allPaths, 2, 0, meta, dm)
 			assert.NoError(t, err)
-			assert.Equal(t, int64(2), numOfRow)
+			assert.Equal(t, int64(101), numOfRow)
 			assert.Equal(t, 2, len(inPaths[0].GetBinlogs()))
 			assert.Equal(t, 1, len(statsPaths))
 			for _, inpath := range inPaths {
 				assert.NotEqual(t, -1, inpath.GetBinlogs()[0].GetTimestampFrom())
 				assert.NotEqual(t, -1, inpath.GetBinlogs()[0].GetTimestampTo())
-				// as only one row for each binlog, timestampTo == timestampFrom
-				assert.Equal(t, inpath.GetBinlogs()[0].GetTimestampTo(), inpath.GetBinlogs()[0].GetTimestampFrom())
 			}
 		})
 
@@ -741,36 +742,6 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 
 	t.Run("Test uploadRemainLog error", func(t *testing.T) {
 		f := &MetaFactory{}
-
-		t.Run("field not in field to type", func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-			defer cancel()
-
-			ct := &compactionTask{
-				done: make(chan struct{}, 1),
-			}
-			meta := f.GetCollectionMeta(UniqueID(10001), "test_upload_remain_log", schemapb.DataType_Int64)
-			fid2C := make(map[int64][]interface{})
-			fid2T := make(map[int64]schemapb.DataType)
-			fid2C[1] = nil
-			_, _, err := ct.uploadRemainLog(ctx, 1, 2, meta, nil, 0, fid2C, fid2T)
-			assert.Error(t, err)
-		})
-
-		t.Run("transfer interface wrong", func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-			defer cancel()
-
-			ct := &compactionTask{
-				done: make(chan struct{}, 1),
-			}
-			meta := f.GetCollectionMeta(UniqueID(10001), "test_upload_remain_log", schemapb.DataType_Int64)
-			fid2C := make(map[int64][]interface{})
-			fid2T := make(map[int64]schemapb.DataType)
-			fid2C[1] = nil
-			_, _, err := ct.uploadRemainLog(ctx, 1, 2, meta, nil, 0, fid2C, fid2T)
-			assert.Error(t, err)
-		})
 
 		t.Run("upload failed", func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)

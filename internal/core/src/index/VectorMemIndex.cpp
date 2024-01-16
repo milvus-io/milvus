@@ -344,7 +344,9 @@ VectorMemIndex<T>::Load(milvus::tracer::TraceContext ctx,
                 }
 
                 auto batch_data = file_manager_->LoadIndexToMemory(batch);
-                for (const auto& file_name : batch) {
+                for (const auto& file_path : batch) {
+                    const std::string file_name =
+                        file_path.substr(file_path.find_last_of('/') + 1);
                     AssertInfo(batch_data.find(file_name) != batch_data.end(),
                                "lost index slice data: {}",
                                file_name);

@@ -1007,7 +1007,7 @@ func (loader *segmentLoader) loadSegment(ctx context.Context,
 		fmt.Sprint(segment.Collection()),
 		fmt.Sprint(segment.Partition()),
 		segment.Type().String(),
-		fmt.Sprint(segment.Indexes()),
+		strconv.FormatInt(int64(len(segment.Indexes())), 10),
 	).Add(float64(loadInfo.GetNumOfRows()))
 
 	log.Info("loading delta...")

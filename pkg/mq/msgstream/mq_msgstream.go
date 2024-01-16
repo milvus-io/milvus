@@ -915,7 +915,12 @@ func (ms *MqTtMsgStream) Seek(ctx context.Context, msgPositions []*msgpb.MsgPosi
 					})
 					ms.chanMsgBuf[consumer] = append(ms.chanMsgBuf[consumer], tsMsg)
 				} else {
-					log.Info("skip msg", zap.Any("msg", tsMsg))
+					log.Info("skip msg",
+						zap.Int64("source", tsMsg.SourceID()),
+						zap.String("type", tsMsg.Type().String()),
+						zap.Int("size", tsMsg.Size()),
+						zap.Any("position", tsMsg.Position()),
+					)
 				}
 			}
 		}
