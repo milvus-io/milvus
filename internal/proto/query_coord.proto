@@ -265,6 +265,7 @@ message SegmentLoadInfo {
   msg.MsgPosition delta_position = 15;
   int64 readableVersion = 16;
   data.SegmentLevel level = 17;
+  int64 storageVersion = 18;
 }
 
 message FieldIndexInfo {
@@ -280,6 +281,7 @@ message FieldIndexInfo {
   int64 index_version = 9;
   int64 num_rows = 10;
   int32 current_index_version = 11;
+  int64 index_store_version = 12;
 }
 
 enum LoadScope {

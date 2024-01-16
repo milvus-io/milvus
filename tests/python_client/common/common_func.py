@@ -481,7 +481,8 @@ def gen_dataframe_multi_string_fields(string_fields, nb=ct.default_nb):
     return df
 
 
-def gen_dataframe_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0, with_json=True, random_primary_key=False):
+def gen_dataframe_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0, with_json=True,
+                                auto_id=False, random_primary_key=False):
     if not random_primary_key:
         int64_values = pd.Series(data=[i for i in range(start, start + nb)])
     else:
@@ -511,6 +512,8 @@ def gen_dataframe_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0, w
     })
     if with_json is False:
         df.drop(ct.default_json_field_name, axis=1, inplace=True)
+    if auto_id:
+        df.drop(ct.default_int64_field_name, axis=1, inplace=True)
 
     return df
 

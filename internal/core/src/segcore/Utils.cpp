@@ -719,10 +719,8 @@ void
 LoadFieldDatasFromRemote2(std::shared_ptr<milvus_storage::Space> space,
                           SchemaPtr schema,
                           FieldDataInfo& field_data_info) {
-    // log all schema ids
-    for (auto& field : schema->get_fields()) {
-    }
     auto res = space->ScanData();
+
     if (!res.ok()) {
         PanicInfo(S3Error, "failed to create scan iterator");
     }

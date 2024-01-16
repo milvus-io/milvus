@@ -53,13 +53,9 @@ func ConvertToArrowSchema(fields []*schemapb.FieldSchema) (*arrow.Schema, error)
 				Type: arrow.BinaryTypes.String,
 			})
 		case schemapb.DataType_Array:
-			elemType, err := convertToArrowType(field.ElementType)
-			if err != nil {
-				return nil, err
-			}
 			arrowFields = append(arrowFields, arrow.Field{
 				Name: field.Name,
-				Type: arrow.ListOf(elemType),
+				Type: arrow.BinaryTypes.Binary,
 			})
 		case schemapb.DataType_JSON:
 			arrowFields = append(arrowFields, arrow.Field{
