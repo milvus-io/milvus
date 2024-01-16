@@ -45,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/generic"
 	"github.com/milvus-io/milvus/pkg/util/interceptor"
+	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
@@ -274,11 +275,13 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 				otelgrpc.UnaryClientInterceptor(opts...),
 				interceptor.ClusterInjectionUnaryClientInterceptor(),
 				interceptor.ServerIDInjectionUnaryClientInterceptor(c.GetNodeID()),
+				logutil.UnaryClientTraceInterceptor,
 			)),
 			grpc.WithStreamInterceptor(grpc_middleware.ChainStreamClient(
 				otelgrpc.StreamClientInterceptor(opts...),
 				interceptor.ClusterInjectionStreamClientInterceptor(),
 				interceptor.ServerIDInjectionStreamClientInterceptor(c.GetNodeID()),
+				logutil.StreamClientTraceInterceptor,
 			)),
 			grpc.WithKeepaliveParams(keepalive.ClientParameters{
 				Time:                c.KeepAliveTime,
@@ -314,11 +317,13 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 				otelgrpc.UnaryClientInterceptor(opts...),
 				interceptor.ClusterInjectionUnaryClientInterceptor(),
 				interceptor.ServerIDInjectionUnaryClientInterceptor(c.GetNodeID()),
+				logutil.UnaryClientTraceInterceptor,
 			)),
 			grpc.WithStreamInterceptor(grpc_middleware.ChainStreamClient(
 				otelgrpc.StreamClientInterceptor(opts...),
 				interceptor.ClusterInjectionStreamClientInterceptor(),
 				interceptor.ServerIDInjectionStreamClientInterceptor(c.GetNodeID()),
+				logutil.StreamClientTraceInterceptor,
 			)),
 			grpc.WithKeepaliveParams(keepalive.ClientParameters{
 				Time:                c.KeepAliveTime,

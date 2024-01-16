@@ -20,6 +20,10 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
+const (
+	TraceIDKey = "traceID"
+)
+
 type ctxLogKeyType struct{}
 
 var CtxLogKey = ctxLogKeyType{}
@@ -116,25 +120,28 @@ func GetLevel() zapcore.Level {
 	return _globalP.Load().(*ZapProperties).Level.Level()
 }
 
+type Field struct {
+	Key   string
+	Value any
+}
+
 // WithTraceID returns a context with trace_id attached
 func WithTraceID(ctx context.Context, traceID string) context.Context {
-	return WithFields(ctx, zap.String("traceID", traceID))
+	return WithFields(ctx, Field{TraceIDKey, traceID})
 }
 
 // WithReqID adds given reqID field to the logger in ctx
 func WithReqID(ctx context.Context, reqID int64) context.Context {
-	fields := []zap.Field{zap.Int64("reqID", reqID)}
-	return WithFields(ctx, fields...)
+	return WithFields(ctx, Field{"reqID", reqID})
 }
 
 // WithModule adds given module field to the logger in ctx
 func WithModule(ctx context.Context, module string) context.Context {
-	fields := []zap.Field{zap.String("module", module)}
-	return WithFields(ctx, fields...)
+	return WithFields(ctx, Field{"module", module})
 }
 
 // WithFields returns a context with fields attached
-func WithFields(ctx context.Context, fields ...zap.Field) context.Context {
+func WithFields(ctx context.Context, fields ...Field) context.Context {
 	var zlogger *zap.Logger
 	if ctxLogger, ok := ctx.Value(CtxLogKey).(*MLogger); ok {
 		zlogger = ctxLogger.Logger
@@ -142,8 +149,14 @@ func WithFields(ctx context.Context, fields ...zap.Field) context.Context {
 		zlogger = ctxL()
 	}
 	mLogger := &MLogger{
-		Logger: zlogger.With(fields...),
+		Fields: make(map[string]any, len(fields)),
 	}
+	zfields := make([]zap.Field, 0, len(fields))
+	for _, field := range fields {
+		zfields = append(zfields, zap.Any(field.Key, field.Value))
+		mLogger.Fields[field.Key] = field.Value
+	}
+	mLogger.Logger = zlogger.With(zfields...)
 	return context.WithValue(ctx, CtxLogKey, mLogger)
 }
 

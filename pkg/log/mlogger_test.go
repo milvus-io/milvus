@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"go.uber.org/zap"
 )
 
 func TestExporterV2(t *testing.T) {
@@ -32,7 +31,7 @@ func TestExporterV2(t *testing.T) {
 	Ctx(nil).Info("empty context")
 	ts.assertMessagesNotContains("traceID")
 
-	fieldCtx := WithFields(ctx, zap.String("field", "test"))
+	fieldCtx := WithFields(ctx, Field{"field", "test"})
 	reqCtx := WithReqID(ctx, 123456)
 	modCtx := WithModule(ctx, "test")
 

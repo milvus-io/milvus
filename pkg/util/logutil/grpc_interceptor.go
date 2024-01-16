@@ -67,6 +67,11 @@ func withLevelAndTrace(ctx context.Context) context.Context {
 			// inject traceid in order to pass client request id
 			newctx = metadata.AppendToOutgoingContext(newctx, clientRequestIDKey, requestID[0])
 		}
+
+		traceIDs := md.Get("traceID")
+		if len(traceIDs) >= 1 {
+			traceID, _ = trace.TraceIDFromHex(traceIDs[0])
+		}
 	}
 	if !traceID.IsValid() {
 		traceID = trace.SpanContextFromContext(newctx).TraceID()

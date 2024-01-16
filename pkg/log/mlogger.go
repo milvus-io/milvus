@@ -26,7 +26,8 @@ import (
 // MLogger is a wrapper type of zap.Logger.
 type MLogger struct {
 	*zap.Logger
-	rl atomic.Value // *utils.ReconfigurableRateLimiter
+	rl     atomic.Value // *utils.ReconfigurableRateLimiter
+	Fields map[string]any
 }
 
 // With encapsulates zap.Logger With method to return MLogger instance.
