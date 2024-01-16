@@ -39,7 +39,7 @@ jobs:
           isAscend: True
           width: '30px'
           customUserConfig: 'milvus-io/milvus/.contributors'
-          workingDir: '/home/runner/work/milvus/milvus'
+          workingDir: ${{ github.workspace }}
           
       - name: Update README_CN.md
         uses: milvus-io/hero-bot@dco-enabled
@@ -52,7 +52,7 @@ jobs:
           isAscend: True
           width: '30px'
           customUserConfig: 'milvus-io/milvus/.contributors'
-          workingDir: '/home/runner/work/milvus/milvus'
+          workingDir: ${{ github.workspace }}
     
       - name: commit code
         run: |
