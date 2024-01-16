@@ -1358,6 +1358,9 @@ type queryCoordConfig struct {
 	HeartbeatAvailableInterval ParamItem `refreshable:"true"`
 	LoadTimeoutSeconds         ParamItem `refreshable:"true"`
 
+	DistributionRequestTimeout ParamItem `refreshable:"true"`
+	HeartBeatWarningLag        ParamItem `refreshable:"true"`
+
 	// Deprecated: Since 2.2.2, QueryCoord do not use HandOff logic anymore
 	CheckHandoffInterval ParamItem `refreshable:"true"`
 	EnableActiveStandby  ParamItem `refreshable:"false"`
@@ -1738,6 +1741,24 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.CheckNodeSessionInterval.Init(base.mgr)
+
+	p.DistributionRequestTimeout = ParamItem{
+		Key:          "queryCoord.distRequestTimeout",
+		Version:      "2.3.6",
+		DefaultValue: "5000",
+		Doc:          "the request timeout for querycoord fetching data distribution from querynodes, in milliseconds",
+		Export:       true,
+	}
+	p.DistributionRequestTimeout.Init(base.mgr)
+
+	p.HeartBeatWarningLag = ParamItem{
+		Key:          "queryCoord.heatbeatWarningLag",
+		Version:      "2.3.6",
+		DefaultValue: "5000",
+		Doc:          "the lag value for querycoord report warning when last heatbeat is too old, in milliseconds",
+		Export:       true,
+	}
+	p.HeartBeatWarningLag.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
