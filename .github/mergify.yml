@@ -190,25 +190,14 @@ pull_request_rules:
 
   - name: Dismiss block label if related issue be added into PR
     conditions:
-      - or:
-          - and:
-              - or:
-                  - base=master
-                  - base=sql_beta
-                  - base~=^2(\.\d+){1,2}$
-              - or:
-                  - body~=\#[0-9]{1,6}(\s+|$)
-                  - body~=https://github.com/milvus-io/milvus/issues/[0-9]{1,6}(\s+|$)
-          - and:
-              - or:
-                  - base=master
-                  - base=sql_beta
-                  - base~=^2(\.\d+){1,2}$
-              - and:
-                - label=kind/enhancement
-                - -label=size/L
-                - -label=size/XL
-                - -label=size/XXL
+      - and:
+          - or:
+              - base=master
+              - base=sql_beta
+              - base~=^2(\.\d+){1,2}$
+          - or:
+              - body~=\#[0-9]{1,6}(\s+|$)
+              - body~=https://github.com/milvus-io/milvus/issues/[0-9]{1,6}(\s+|$)
     actions:
       label:
         remove:
