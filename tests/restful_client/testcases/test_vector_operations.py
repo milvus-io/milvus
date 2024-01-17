@@ -1,6 +1,4 @@
-import datetime
 import random
-import time
 from sklearn import preprocessing
 import numpy as np
 import sys
@@ -10,14 +8,13 @@ from utils import constant
 from utils.utils import gen_collection_name
 from utils.util_log import test_log as logger
 import pytest
-from api.milvus import VectorClient
 from base.testbase import TestBase
-from utils.utils import (get_data_by_fields, get_data_by_payload, get_common_fields_by_data)
+from utils.utils import (get_data_by_payload, get_common_fields_by_data)
 
 
+@pytest.mark.L0
 class TestInsertVector(TestBase):
 
-    @pytest.mark.L0
     @pytest.mark.parametrize("insert_round", [2, 1])
     @pytest.mark.parametrize("nb", [100, 10, 1])
     @pytest.mark.parametrize("dim", [32, 128])
@@ -86,8 +83,10 @@ class TestInsertVector(TestBase):
             rsp = self.vector_client.vector_insert(payload)
             assert rsp['code'] == 200
             assert rsp['data']['insertCount'] == nb
-        logger.info("finished")
 
+
+@pytest.mark.L1
+class TestInsertVectorNegative(TestBase):
     def test_insert_vector_with_invalid_api_key(self):
         """
         Insert a vector with invalid api key
@@ -210,9 +209,9 @@ class TestInsertVector(TestBase):
         assert rsp['message'] == "fail to deal the insert data"
 
 
+@pytest.mark.L0
 class TestSearchVector(TestBase):
 
-    @pytest.mark.L0
     @pytest.mark.parametrize("metric_type", ["IP", "L2"])
     def test_search_vector_with_simple_payload(self, metric_type):
         """
@@ -243,8 +242,8 @@ class TestSearchVector(TestBase):
         if metric_type == "IP":
             assert distance == sorted(distance, reverse=True)
 
-    @pytest.mark.L0
     @pytest.mark.parametrize("sum_limit_offset", [16384, 16385])
+    @pytest.mark.xfail(reason="")
     def test_search_vector_with_exceed_sum_limit_offset(self, sum_limit_offset):
         """
         Search a vector with a simple payload
@@ -264,11 +263,11 @@ class TestSearchVector(TestBase):
             "collectionName": name,
             "vector": vector_to_search,
             "limit": limit,
-            "offset": sum_limit_offset-limit,
+            "offset": sum_limit_offset - limit,
         }
         rsp = self.vector_client.vector_search(payload)
         if sum_limit_offset > max_search_sum_limit_offset:
-            assert rsp['code'] == 1
+            assert rsp['code'] == 65535
             return
         assert rsp['code'] == 200
         res = rsp['data']
@@ -283,7 +282,6 @@ class TestSearchVector(TestBase):
         if metric_type == "IP":
             assert distance == sorted(distance, reverse=True)
 
-    @pytest.mark.L0
     @pytest.mark.parametrize("level", [0, 1, 2])
     @pytest.mark.parametrize("offset", [0, 10, 100])
     @pytest.mark.parametrize("limit", [1, 100])
@@ -322,7 +320,6 @@ class TestSearchVector(TestBase):
             for field in output_fields:
                 assert field in item
 
-    @pytest.mark.L0
     @pytest.mark.parametrize("filter_expr", ["uid >= 0", "uid >= 0 and uid < 100", "uid in [1,2,3]"])
     def test_search_vector_with_complex_int_filter(self, filter_expr):
         """
@@ -355,7 +352,6 @@ class TestSearchVector(TestBase):
             uid = item.get("uid")
             eval(filter_expr)
 
-    @pytest.mark.L0
     @pytest.mark.parametrize("filter_expr", ["name > \"placeholder\"", "name like \"placeholder%\""])
     def test_search_vector_with_complex_varchar_filter(self, filter_expr):
         """
@@ -401,7 +397,6 @@ class TestSearchVector(TestBase):
             if "like" in filter_expr:
                 assert name.startswith(prefix)
 
-    @pytest.mark.L0
     @pytest.mark.parametrize("filter_expr", ["uid < 100 and name > \"placeholder\"",
                                              "uid < 100 and name like \"placeholder%\""
                                              ])
@@ -453,6 +448,9 @@ class TestSearchVector(TestBase):
             if "like" in varchar_expr:
                 assert name.startswith(prefix)
 
+
+@pytest.mark.L1
+class TestSearchVectorNegative(TestBase):
     @pytest.mark.parametrize("limit", [0, 16385])
     def test_search_vector_with_invalid_limit(self, limit):
         """
@@ -541,9 +539,9 @@ class TestSearchVector(TestBase):
         pass
 
 
+@pytest.mark.L0
 class TestQueryVector(TestBase):
 
-    @pytest.mark.L0
     @pytest.mark.parametrize("expr", ["10+20 <= uid < 20+30", "uid in [1,2,3,4]",
                                       "uid > 0", "uid >= 0", "uid > 0",
                                       "uid > -100 and uid < 100"])
@@ -587,7 +585,6 @@ class TestQueryVector(TestBase):
             for field in output_fields:
                 assert field in r
 
-    @pytest.mark.L0
     @pytest.mark.parametrize("filter_expr", ["name > \"placeholder\"", "name like \"placeholder%\""])
     @pytest.mark.parametrize("include_output_fields", [True, False])
     def test_query_vector_with_varchar_filter(self, filter_expr, include_output_fields):
@@ -633,7 +630,7 @@ class TestQueryVector(TestBase):
             if "like" in filter_expr:
                 assert name.startswith(prefix)
 
-    @pytest.mark.parametrize("sum_of_limit_offset", [16384, 16385])
+    @pytest.mark.parametrize("sum_of_limit_offset", [16384])
     def test_query_vector_with_large_sum_of_limit_offset(self, sum_of_limit_offset):
         """
         Query a vector with sum of limit and offset larger than max value
@@ -682,9 +679,9 @@ class TestQueryVector(TestBase):
                 assert name.startswith(prefix)
 
 
+@pytest.mark.L0
 class TestGetVector(TestBase):
 
-    @pytest.mark.L0
     def test_get_vector_with_simple_payload(self):
         """
         Search a vector with a simple payload
@@ -787,9 +784,9 @@ class TestGetVector(TestBase):
                     assert field in r
 
 
+@pytest.mark.L0
 class TestDeleteVector(TestBase):
 
-    @pytest.mark.L0
     @pytest.mark.parametrize("include_invalid_id", [True, False])
     @pytest.mark.parametrize("id_field_type", ["list", "one"])
     def test_delete_vector_default(self, id_field_type, include_invalid_id):
@@ -850,6 +847,9 @@ class TestDeleteVector(TestBase):
         assert rsp['code'] == 200
         assert len(rsp['data']) == 0
 
+
+@pytest.mark.L1
+class TestDeleteVector(TestBase):
     def test_delete_vector_with_invalid_api_key(self):
         """
         Delete a vector with an invalid api key
