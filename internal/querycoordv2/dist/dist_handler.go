@@ -35,12 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
-)
-
-const (
-	distReqTimeout         = 3 * time.Second
-	heartBeatLagBehindWarn = 3 * time.Second
-	maxFailureTimes        = 3
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type distHandler struct {
@@ -96,7 +91,7 @@ func (dh *distHandler) handleDistResp(resp *querypb.GetDataDistributionResponse)
 			session.WithSegmentCnt(len(resp.GetSegments())),
 			session.WithChannelCnt(len(resp.GetChannels())),
 		)
-		if time.Since(node.LastHeartbeat()) > heartBeatLagBehindWarn {
+		if time.Since(node.LastHeartbeat()) > paramtable.Get().QueryCoordCfg.HeartBeatWarningLag.GetAsDuration(time.Millisecond) {
 			log.Warn("node last heart beat time lag too behind", zap.Time("now", time.Now()),
 				zap.Time("lastHeartBeatTime", node.LastHeartbeat()), zap.Int64("nodeID", node.ID()))
 		}
@@ -226,7 +221,7 @@ func (dh *distHandler) getDistribution(ctx context.Context) (*querypb.GetDataDis
 		channels[channel.GetChannelName()] = targetChannel.GetSeekPosition()
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, distReqTimeout)
+	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.DistributionRequestTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
 	resp, err := dh.client.GetDataDistribution(ctx, dh.nodeID, &querypb.GetDataDistributionRequest{
 		Base: commonpbutil.NewMsgBase(

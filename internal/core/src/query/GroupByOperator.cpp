@@ -176,8 +176,7 @@ GroupIteratorResult(
         const T& row_data = field_data.operator[](offset);
         auto it = groupMap.find(row_data);
         if (it == groupMap.end()) {
-            groupMap.insert(
-                std::make_pair(row_data, std::make_pair(offset, dis)));
+            groupMap.emplace(row_data, std::make_pair(offset, dis));
         } else if (dis_closer(dis, it->second.second)) {
             it->second = {offset, dis};
         }
@@ -192,6 +191,9 @@ GroupIteratorResult(
     std::sort(sortedGroupVals.begin(), sortedGroupVals.end(), customComparator);
 
     //4. save groupBy results
+    group_by_values.reserve(sortedGroupVals.size());
+    offsets.push_back(sortedGroupVals.size());
+    distances.push_back(sortedGroupVals.size());
     for (auto iter = sortedGroupVals.cbegin(); iter != sortedGroupVals.cend();
          iter++) {
         group_by_values.emplace_back(iter->first);
