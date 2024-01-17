@@ -68,10 +68,7 @@ class TestBase(Base):
         self.wait_collection_load_completed(collection_name)
         batch_size = batch_size
         batch = nb // batch_size
-        # in case of nb < batch_size
-        if batch == 0:
-            batch = 1
-            batch_size = nb
+        remainder = nb % batch_size
         data = []
         for i in range(batch):
             nb = batch_size
@@ -84,6 +81,17 @@ class TestBase(Base):
             logger.debug(f"body size: {body_size / 1024 / 1024} MB")
             rsp = self.vector_client.vector_insert(payload)
             assert rsp['code'] == 200
+        # insert remainder data
+        if remainder:
+            nb = remainder
+            data = get_data_by_payload(schema_payload, nb)
+            payload = {
+                "collectionName": collection_name,
+                "data": data
+            }
+            rsp = self.vector_client.vector_insert(payload)
+            assert rsp['code'] == 200
+
         return schema_payload, data
 
     def wait_collection_load_completed(self, name):
