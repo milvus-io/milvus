@@ -30,9 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
-var (
-	caseTimeout time.Duration
-)
+var caseTimeout time.Duration
 
 func init() {
 	flag.DurationVar(&caseTimeout, "caseTimeout", 10*time.Minute, "timeout duration for single case")
