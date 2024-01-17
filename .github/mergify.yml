@@ -167,12 +167,15 @@ pull_request_rules:
       - and:
           - -body~=\#[0-9]{1,6}(\s+|$)
           - -body~=https://github.com/milvus-io/milvus/issues/[0-9]{1,6}(\s+|$)
-      - and:
-        - label=kind/enhancement
-        - or:
-          - label=size/L
-          - label=size/XL
-          - label=size/XXL
+      - or:
+        - and:
+          - label=kind/enhancement
+          - or:
+            - label=size/L
+            - label=size/XL
+            - label=size/XXL
+        - label=kind/bug
+        - label=kind/feature
           
       - -label=kind/doc
       - -label=kind/test
