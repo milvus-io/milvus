@@ -100,7 +100,7 @@ using GroupByValueType = std::variant<std::monostate,
                                       int32_t,
                                       int64_t,
                                       bool,
-                                      std::string_view>;
+                                      std::string>;
 using ContainsType = proto::plan::JSONContainsExpr_JSONOp;
 
 inline bool
