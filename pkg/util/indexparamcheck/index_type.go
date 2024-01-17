@@ -38,3 +38,13 @@ func IsGpuIndex(indexType IndexType) bool {
 		indexType == IndexRaftIvfPQ ||
 		indexType == IndexRaftCagra
 }
+
+func IsMmapSupported(indexType IndexType) bool {
+	return indexType == IndexFaissIDMap ||
+		indexType == IndexFaissIvfFlat ||
+		indexType == IndexFaissIvfPQ ||
+		indexType == IndexFaissIvfSQ8 ||
+		indexType == IndexFaissBinIDMap ||
+		indexType == IndexFaissBinIvfFlat ||
+		indexType == IndexHNSW
+}
