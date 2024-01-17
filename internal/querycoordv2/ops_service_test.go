@@ -201,7 +201,11 @@ func (suite *OpsServiceSuite) TestListQueryNode() {
 	suite.False(merr.Ok(resp.Status))
 	// test server healthy
 	suite.server.UpdateStateCode(commonpb.StateCode_Healthy)
-	suite.nodeMgr.Add(session.NewNodeInfo(111, "localhost"))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   111,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
 	resp, err = suite.server.ListQueryNode(ctx, &querypb.ListQueryNodeRequest{})
 	suite.NoError(err)
 	suite.Equal(1, len(resp.GetNodeInfos()))
@@ -223,7 +227,11 @@ func (suite *OpsServiceSuite) TestGetQueryNodeDistribution() {
 	suite.NoError(err)
 	suite.False(merr.Ok(resp.Status))
 
-	suite.nodeMgr.Add(session.NewNodeInfo(1, "localhost"))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
 	// test success
 	channels := []*meta.DmChannel{
 		{
@@ -290,7 +298,11 @@ func (suite *OpsServiceSuite) TestCheckQueryNodeDistribution() {
 	})
 	suite.NoError(err)
 	suite.False(merr.Ok(resp))
-	suite.nodeMgr.Add(session.NewNodeInfo(1, "localhost"))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
 
 	resp, err = suite.server.CheckQueryNodeDistribution(ctx, &querypb.CheckQueryNodeDistributionRequest{
 		SourceNodeID: 1,
@@ -298,7 +310,11 @@ func (suite *OpsServiceSuite) TestCheckQueryNodeDistribution() {
 	suite.NoError(err)
 	suite.False(merr.Ok(resp))
 
-	suite.nodeMgr.Add(session.NewNodeInfo(2, "localhost"))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
 	// test success
 	channels := []*meta.DmChannel{
 		{
@@ -409,7 +425,11 @@ func (suite *OpsServiceSuite) TestSuspendAndResumeNode() {
 	suite.NoError(err)
 	suite.False(merr.Ok(resp))
 
-	suite.nodeMgr.Add(session.NewNodeInfo(1, "localhost"))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
 	// test success
 	suite.server.UpdateStateCode(commonpb.StateCode_Healthy)
 	resp, err = suite.server.SuspendNode(ctx, &querypb.SuspendNodeRequest{
@@ -445,7 +465,11 @@ func (suite *OpsServiceSuite) TestTransferSegment() {
 	})
 	suite.NoError(err)
 	suite.False(merr.Ok(resp))
-	suite.nodeMgr.Add(session.NewNodeInfo(1, "localhost"))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
 
 	collectionID := int64(1)
 	partitionID := int64(1)
@@ -466,7 +490,11 @@ func (suite *OpsServiceSuite) TestTransferSegment() {
 	})
 	suite.NoError(err)
 	suite.False(merr.Ok(resp))
-	suite.nodeMgr.Add(session.NewNodeInfo(2, "localhost"))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   2,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
 
 	// test segment not exist in node
 	resp, err = suite.server.TransferSegment(ctx, &querypb.TransferSegmentRequest{
@@ -556,7 +584,11 @@ func (suite *OpsServiceSuite) TestTransferSegment() {
 	suite.dist.ChannelDistManager.Update(1, chanenlInfos...)
 
 	for _, node := range nodes {
-		suite.nodeMgr.Add(session.NewNodeInfo(node, "localhost"))
+		suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   node,
+			Address:  "localhost",
+			Hostname: "localhost",
+		}))
 		suite.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, node)
 	}
 
@@ -649,7 +681,11 @@ func (suite *OpsServiceSuite) TestTransferChannel() {
 	})
 	suite.NoError(err)
 	suite.False(merr.Ok(resp))
-	suite.nodeMgr.Add(session.NewNodeInfo(1, "localhost"))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
 
 	collectionID := int64(1)
 	partitionID := int64(1)
@@ -670,7 +706,11 @@ func (suite *OpsServiceSuite) TestTransferChannel() {
 	})
 	suite.NoError(err)
 	suite.False(merr.Ok(resp))
-	suite.nodeMgr.Add(session.NewNodeInfo(2, "localhost"))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   2,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
 
 	segments := []*datapb.SegmentInfo{
 		{
@@ -762,7 +802,11 @@ func (suite *OpsServiceSuite) TestTransferChannel() {
 	suite.dist.ChannelDistManager.Update(1, chanenlInfos...)
 
 	for _, node := range nodes {
-		suite.nodeMgr.Add(session.NewNodeInfo(node, "localhost"))
+		suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   node,
+			Address:  "localhost",
+			Hostname: "localhost",
+		}))
 		suite.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, node)
 	}
 

@@ -278,7 +278,11 @@ func (suite *ScoreBasedBalancerTestSuite) TestSuspendNode() {
 				balancer.dist.SegmentDistManager.Update(node, s...)
 			}
 			for i := range c.nodes {
-				nodeInfo := session.NewNodeInfo(c.nodes[i], "127.0.0.1:0")
+				nodeInfo := session.NewNodeInfo(session.ImmutableNodeInfo{
+					NodeID:   c.nodes[i],
+					Address:  "localhost",
+					Hostname: "localhost",
+				})
 				nodeInfo.UpdateStats(session.WithSegmentCnt(c.segmentCnts[i]))
 				nodeInfo.SetState(c.states[i])
 				suite.balancer.nodeManager.Add(nodeInfo)

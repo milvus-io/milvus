@@ -101,6 +101,8 @@ func (s *Server) DeactivateChecker(ctx context.Context, req *querypb.DeactivateC
 // return all available node list, for each node, return it's (nodeID, ip_address)
 func (s *Server) ListQueryNode(ctx context.Context, req *querypb.ListQueryNodeRequest) (*querypb.ListQueryNodeResponse, error) {
 	log := log.Ctx(ctx)
+	log.Info("ListQueryNode request received")
+
 	errMsg := "failed to list querynode state"
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		log.Warn(errMsg, zap.Error(err))
@@ -125,7 +127,9 @@ func (s *Server) ListQueryNode(ctx context.Context, req *querypb.ListQueryNodeRe
 
 // return query node's data distribution, for given nodeID, return it's (channel_name_list, sealed_segment_list)
 func (s *Server) GetQueryNodeDistribution(ctx context.Context, req *querypb.GetQueryNodeDistributionRequest) (*querypb.GetQueryNodeDistributionResponse, error) {
-	log := log.Ctx(ctx)
+	log := log.Ctx(ctx).With(zap.Int64("nodeID", req.GetNodeID()))
+	log.Info("GetQueryNodeDistribution request received")
+
 	errMsg := "failed to get query node distribution"
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		log.Warn(errMsg, zap.Error(err))
@@ -154,10 +158,13 @@ func (s *Server) GetQueryNodeDistribution(ctx context.Context, req *querypb.GetQ
 // suspend background balance for all query node, include stopping balance and auto balance
 func (s *Server) SuspendBalance(ctx context.Context, req *querypb.SuspendBalanceRequest) (*commonpb.Status, error) {
 	log := log.Ctx(ctx)
+	log.Info("SuspendBalance request received")
+
 	errMsg := "failed to suspend balance for all querynode"
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		return merr.Status(err), nil
 	}
+
 	err := s.checkerController.Deactivate(utils.BalanceChecker)
 	if err != nil {
 		log.Warn(errMsg, zap.Error(err))
@@ -170,6 +177,9 @@ func (s *Server) SuspendBalance(ctx context.Context, req *querypb.SuspendBalance
 // resume background balance for all query node, include stopping balance and auto balance
 func (s *Server) ResumeBalance(ctx context.Context, req *querypb.ResumeBalanceRequest) (*commonpb.Status, error) {
 	log := log.Ctx(ctx)
+
+	log.Info("ResumeBalance request received")
+
 	errMsg := "failed to resume balance for all querynode"
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		return merr.Status(err), nil
@@ -187,6 +197,9 @@ func (s *Server) ResumeBalance(ctx context.Context, req *querypb.ResumeBalanceRe
 // suspend node from resource operation, for given node, suspend load_segment/sub_channel operations
 func (s *Server) SuspendNode(ctx context.Context, req *querypb.SuspendNodeRequest) (*commonpb.Status, error) {
 	log := log.Ctx(ctx)
+
+	log.Info("SuspendNode request received", zap.Int64("nodeID", req.GetNodeID()))
+
 	errMsg := "failed to suspend query node"
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		log.Warn(errMsg, zap.Error(err))
@@ -211,6 +224,8 @@ func (s *Server) SuspendNode(ctx context.Context, req *querypb.SuspendNodeReques
 // resume node from resource operation, for given node, resume load_segment/sub_channel operations
 func (s *Server) ResumeNode(ctx context.Context, req *querypb.ResumeNodeRequest) (*commonpb.Status, error) {
 	log := log.Ctx(ctx)
+	log.Info("ResumeNode request received", zap.Int64("nodeID", req.GetNodeID()))
+
 	errMsg := "failed to resume query node"
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		log.Warn(errMsg, zap.Error(err))
@@ -238,7 +253,7 @@ func (s *Server) ResumeNode(ctx context.Context, req *querypb.ResumeNodeRequest)
 func (s *Server) TransferSegment(ctx context.Context, req *querypb.TransferSegmentRequest) (*commonpb.Status, error) {
 	log := log.Ctx(ctx)
 
-	log.Info("load balance request received",
+	log.Info("TransferSegment request received",
 		zap.Int64("source", req.GetSourceNodeID()),
 		zap.Int64("dest", req.GetTargetNodeID()),
 		zap.Int64("segment", req.GetSegmentID()))
@@ -265,18 +280,14 @@ func (s *Server) TransferSegment(ctx context.Context, req *querypb.TransferSegme
 			availableNodes := lo.Filter(replica.Replica.GetNodes(), func(node int64, _ int) bool { return !outboundNodes.Contain(node) })
 			dstNodeSet.Insert(availableNodes...)
 		} else {
-			dstNodeSet.Insert(req.GetTargetNodeID())
-		}
-		dstNodeSet.Remove(srcNode)
-
-		// check whether dstNode is healthy
-		for dstNode := range dstNodeSet {
-			if err := s.isStoppingNode(dstNode); err != nil {
+			// check whether dstNode is healthy
+			if err := s.isStoppingNode(req.GetTargetNodeID()); err != nil {
 				err := merr.WrapErrNodeNotAvailable(srcNode, "the target node is invalid")
 				return merr.Status(err), nil
 			}
-			dstNodeSet.Insert(dstNode)
+			dstNodeSet.Insert(req.GetTargetNodeID())
 		}
+		dstNodeSet.Remove(srcNode)
 
 		// check sealed segment list
 		segments := s.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithNodeID(srcNode))
@@ -316,7 +327,7 @@ func (s *Server) TransferSegment(ctx context.Context, req *querypb.TransferSegme
 func (s *Server) TransferChannel(ctx context.Context, req *querypb.TransferChannelRequest) (*commonpb.Status, error) {
 	log := log.Ctx(ctx)
 
-	log.Info("load balance request received",
+	log.Info("TransferChannel request received",
 		zap.Int64("source", req.GetSourceNodeID()),
 		zap.Int64("dest", req.GetTargetNodeID()),
 		zap.String("channel", req.GetChannelName()))
@@ -343,18 +354,14 @@ func (s *Server) TransferChannel(ctx context.Context, req *querypb.TransferChann
 			availableNodes := lo.Filter(replica.Replica.GetNodes(), func(node int64, _ int) bool { return !outboundNodes.Contain(node) })
 			dstNodeSet.Insert(availableNodes...)
 		} else {
-			dstNodeSet.Insert(req.GetTargetNodeID())
-		}
-		dstNodeSet.Remove(srcNode)
-
-		// check whether dstNode is healthy
-		for dstNode := range dstNodeSet {
-			if err := s.isStoppingNode(dstNode); err != nil {
+			// check whether dstNode is healthy
+			if err := s.isStoppingNode(req.GetTargetNodeID()); err != nil {
 				err := merr.WrapErrNodeNotAvailable(srcNode, "the target node is invalid")
 				return merr.Status(err), nil
 			}
-			dstNodeSet.Insert(dstNode)
+			dstNodeSet.Insert(req.GetTargetNodeID())
 		}
+		dstNodeSet.Remove(srcNode)
 
 		// check sealed segment list
 		channels := s.dist.ChannelDistManager.GetByCollectionAndNode(replica.CollectionID, srcNode)
@@ -388,7 +395,12 @@ func (s *Server) TransferChannel(ctx context.Context, req *querypb.TransferChann
 
 func (s *Server) CheckQueryNodeDistribution(ctx context.Context, req *querypb.CheckQueryNodeDistributionRequest) (*commonpb.Status, error) {
 	log := log.Ctx(ctx)
-	errMsg := "failed to get querynode state"
+
+	log.Info("CheckQueryNodeDistribution request received",
+		zap.Int64("source", req.GetSourceNodeID()),
+		zap.Int64("dest", req.GetTargetNodeID()))
+
+	errMsg := "failed to check query node distribution"
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		log.Warn(errMsg, zap.Error(err))
 		return merr.Status(err), nil
@@ -411,11 +423,19 @@ func (s *Server) CheckQueryNodeDistribution(ctx context.Context, req *querypb.Ch
 	// check channel list
 	channelOnSrc := s.dist.ChannelDistManager.GetByNode(req.GetSourceNodeID())
 	channelOnDst := s.dist.ChannelDistManager.GetByNode(req.GetTargetNodeID())
-	channelMap := lo.SliceToMap(channelOnDst, func(ch *meta.DmChannel) (string, *meta.DmChannel) {
+	channelDstMap := lo.SliceToMap(channelOnDst, func(ch *meta.DmChannel) (string, *meta.DmChannel) {
 		return ch.GetChannelName(), ch
 	})
 	for _, ch := range channelOnSrc {
-		if _, ok := channelMap[ch.GetChannelName()]; !ok {
+		if _, ok := channelDstMap[ch.GetChannelName()]; !ok {
+			return merr.Status(merr.WrapErrChannelLack(ch.GetChannelName())), nil
+		}
+	}
+	channelSrcMap := lo.SliceToMap(channelOnSrc, func(ch *meta.DmChannel) (string, *meta.DmChannel) {
+		return ch.GetChannelName(), ch
+	})
+	for _, ch := range channelOnDst {
+		if _, ok := channelSrcMap[ch.GetChannelName()]; !ok {
 			return merr.Status(merr.WrapErrChannelLack(ch.GetChannelName())), nil
 		}
 	}
@@ -423,12 +443,19 @@ func (s *Server) CheckQueryNodeDistribution(ctx context.Context, req *querypb.Ch
 	// check segment list
 	segmentOnSrc := s.dist.SegmentDistManager.GetByFilter(meta.WithNodeID(req.GetSourceNodeID()))
 	segmentOnDst := s.dist.SegmentDistManager.GetByFilter(meta.WithNodeID(req.GetTargetNodeID()))
-	segmentMap := lo.SliceToMap(segmentOnDst, func(s *meta.Segment) (int64, *meta.Segment) {
+	segmentDstMap := lo.SliceToMap(segmentOnDst, func(s *meta.Segment) (int64, *meta.Segment) {
 		return s.GetID(), s
 	})
-
 	for _, s := range segmentOnSrc {
-		if _, ok := segmentMap[s.GetID()]; !ok {
+		if _, ok := segmentDstMap[s.GetID()]; !ok {
+			return merr.Status(merr.WrapErrSegmentLack(s.GetID())), nil
+		}
+	}
+	segmentSrcMap := lo.SliceToMap(segmentOnSrc, func(s *meta.Segment) (int64, *meta.Segment) {
+		return s.GetID(), s
+	})
+	for _, s := range segmentOnDst {
+		if _, ok := segmentSrcMap[s.GetID()]; !ok {
 			return merr.Status(merr.WrapErrSegmentLack(s.GetID())), nil
 		}
 	}

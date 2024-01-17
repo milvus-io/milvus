@@ -670,21 +670,17 @@ func (s *Server) LoadBalance(ctx context.Context, req *querypb.LoadBalanceReques
 		log.Warn(msg)
 		return merr.Status(err), nil
 	}
-
-	// check whether srcNode is healthy
 	srcNode := req.GetSourceNodeIDs()[0]
-	if err := s.isStoppingNode(srcNode); err != nil {
-		return merr.Status(errors.Wrap(err,
-			fmt.Sprintf("can't balance, because the source node[%d] is invalid", srcNode))), nil
-	}
-
-	// check whether replica is healthy
 	replica := s.meta.ReplicaManager.GetByCollectionAndNode(req.GetCollectionID(), srcNode)
 	if replica == nil {
 		err := merr.WrapErrNodeNotFound(srcNode, fmt.Sprintf("source node not found in any replica of collection %d", req.GetCollectionID()))
 		msg := "source node not found in any replica"
 		log.Warn(msg)
 		return merr.Status(err), nil
+	}
+	if err := s.isStoppingNode(srcNode); err != nil {
+		return merr.Status(errors.Wrap(err,
+			fmt.Sprintf("can't balance, because the source node[%d] is invalid", srcNode))), nil
 	}
 
 	// when no dst node specified, default to use all other nodes in same
@@ -710,7 +706,6 @@ func (s *Server) LoadBalance(ctx context.Context, req *querypb.LoadBalanceReques
 			return merr.Status(errors.Wrap(err,
 				fmt.Sprintf("can't balance, because the destination node[%d] is invalid", dstNode))), nil
 		}
-		dstNodeSet.Insert(dstNode)
 	}
 
 	// check sealed segment list

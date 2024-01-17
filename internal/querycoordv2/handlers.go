@@ -89,6 +89,8 @@ func (s *Server) getCollectionSegmentInfo(collection int64) []*querypb.SegmentIn
 }
 
 // generate balance segment task and submit to scheduler
+// if sync is true, this func call will wait task to finish, until reach the segment task timeout
+// if copyMode is true, this func call will generate a load segment task, instead a balance segment task
 func (s *Server) balanceSegments(ctx context.Context,
 	collectionID int64,
 	replica *meta.Replica,
@@ -122,7 +124,7 @@ func (s *Server) balanceSegments(ctx context.Context,
 			actions = append(actions, releaseAction)
 		}
 
-		task, err := task.NewSegmentTask(ctx,
+		task, err := task.NewSegmentTask(s.ctx,
 			Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond),
 			utils.ManualBalance,
 			collectionID,
@@ -140,6 +142,7 @@ func (s *Server) balanceSegments(ctx context.Context,
 			)
 			continue
 		}
+		task.SetReason("manual balance")
 		err = s.taskScheduler.Add(task)
 		if err != nil {
 			task.Cancel(err)
@@ -161,6 +164,8 @@ func (s *Server) balanceSegments(ctx context.Context,
 }
 
 // generate balance channel task and submit to scheduler
+// if sync is true, this func call will wait task to finish, until reach the channel task timeout
+// if copyMode is true, this func call will generate a load channel task, instead a balance channel task
 func (s *Server) balanceChannels(ctx context.Context,
 	collectionID int64,
 	replica *meta.Replica,
@@ -172,7 +177,7 @@ func (s *Server) balanceChannels(ctx context.Context,
 ) error {
 	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID))
 
-	plans := s.balancer.AssignChannel(channels, dstNodes)
+	plans := s.balancer.AssignChannel(channels, dstNodes, true)
 	for i := range plans {
 		plans[i].From = srcNode
 		plans[i].Replica = replica
@@ -195,7 +200,7 @@ func (s *Server) balanceChannels(ctx context.Context,
 			releaseAction := task.NewChannelAction(plan.From, task.ActionTypeReduce, plan.Channel.GetChannelName())
 			actions = append(actions, releaseAction)
 		}
-		task, err := task.NewChannelTask(ctx,
+		task, err := task.NewChannelTask(s.ctx,
 			Params.QueryCoordCfg.ChannelTaskTimeout.GetAsDuration(time.Millisecond),
 			utils.ManualBalance,
 			collectionID,
@@ -212,6 +217,7 @@ func (s *Server) balanceChannels(ctx context.Context,
 			)
 			continue
 		}
+		task.SetReason("manual balance")
 		err = s.taskScheduler.Add(task)
 		if err != nil {
 			task.Cancel(err)

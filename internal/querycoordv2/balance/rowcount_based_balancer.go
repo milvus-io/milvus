@@ -42,14 +42,11 @@ type RowCountBasedBalancer struct {
 // AssignSegment, when row count based balancer assign segments, it will assign segment to node with least global row count.
 // try to make every query node has same row count.
 func (b *RowCountBasedBalancer) AssignSegment(collectionID int64, segments []*meta.Segment, nodes []int64, manualBalance bool) []SegmentAssignPlan {
-	// skip out suspend node during assignment, but skip this check for manual balance
+	// skip out suspend node and stopping node during assignment, but skip this check for manual balance
 	if !manualBalance {
 		nodes = lo.Filter(nodes, func(node int64, _ int) bool {
 			info := b.nodeManager.Get(node)
-			if info != nil && info.GetState() == session.NodeStateNormal {
-				return true
-			}
-			return false
+			return info != nil && info.GetState() == session.NodeStateNormal
 		})
 	}
 
@@ -86,15 +83,14 @@ func (b *RowCountBasedBalancer) AssignSegment(collectionID int64, segments []*me
 
 // AssignSegment, when row count based balancer assign segments, it will assign channel to node with least global channel count.
 // try to make every query node has channel count
-func (b *RowCountBasedBalancer) AssignChannel(channels []*meta.DmChannel, nodes []int64) []ChannelAssignPlan {
-	// filter out suspended node
-	nodes = lo.Filter(nodes, func(node int64, _ int) bool {
-		info := b.nodeManager.Get(node)
-		if info != nil && info.GetState() == session.NodeStateNormal {
-			return true
-		}
-		return false
-	})
+func (b *RowCountBasedBalancer) AssignChannel(channels []*meta.DmChannel, nodes []int64, manualBalance bool) []ChannelAssignPlan {
+	// skip out suspend node and stopping node during assignment, but skip this check for manual balance
+	if !manualBalance {
+		nodes = lo.Filter(nodes, func(node int64, _ int) bool {
+			info := b.nodeManager.Get(node)
+			return info != nil && info.GetState() == session.NodeStateNormal
+		})
+	}
 
 	nodeItems := b.convertToNodeItemsByChannel(nodes)
 	nodeItems = lo.Shuffle(nodeItems)
@@ -316,7 +312,7 @@ func (b *RowCountBasedBalancer) genStoppingChannelPlan(replica *meta.Replica, on
 	channelPlans := make([]ChannelAssignPlan, 0)
 	for _, nodeID := range offlineNodes {
 		dmChannels := b.dist.ChannelDistManager.GetByCollectionAndNode(replica.GetCollectionID(), nodeID)
-		plans := b.AssignChannel(dmChannels, onlineNodes)
+		plans := b.AssignChannel(dmChannels, onlineNodes, false)
 		for i := range plans {
 			plans[i].From = nodeID
 			plans[i].Replica = replica
@@ -354,7 +350,7 @@ func (b *RowCountBasedBalancer) genChannelPlan(replica *meta.Replica, onlineNode
 			return nil
 		}
 
-		channelPlans := b.AssignChannel(channelsToMove, nodeWithLessChannel)
+		channelPlans := b.AssignChannel(channelsToMove, nodeWithLessChannel, false)
 		for i := range channelPlans {
 			channelPlans[i].From = channelPlans[i].Channel.Node
 			channelPlans[i].Replica = replica

@@ -641,15 +641,6 @@ func (s *ProxyManagementSuite) TestCheckQueryNodeDistribution() {
 		s.proxy.CheckQueryNodeDistribution(recorder, req)
 		s.Equal(http.StatusOK, recorder.Code)
 		s.Equal(`{"msg": "OK"}`, recorder.Body.String())
-
-		// test use default param
-		req, err = http.NewRequest(http.MethodPost, mgrCheckQueryNodeDistribution, strings.NewReader("source_node_id=1"))
-		s.Require().NoError(err)
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		recorder = httptest.NewRecorder()
-		s.proxy.CheckQueryNodeDistribution(recorder, req)
-		s.Equal(http.StatusOK, recorder.Code)
-		s.Equal(`{"msg": "OK"}`, recorder.Body.String())
 	})
 
 	s.Run("return_error", func() {

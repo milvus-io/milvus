@@ -1174,6 +1174,51 @@ func (suite *ServiceSuite) TestLoadBalance() {
 	suite.Equal(resp.GetCode(), merr.Code(merr.ErrServiceNotReady))
 }
 
+func (suite *ServiceSuite) TestLoadBalanceWithNoDstNode() {
+	suite.loadAll()
+	ctx := context.Background()
+	server := suite.server
+
+	// Test get balance first segment
+	for _, collection := range suite.collections {
+		replicas := suite.meta.ReplicaManager.GetByCollection(collection)
+		nodes := replicas[0].GetNodes()
+		srcNode := nodes[0]
+		suite.updateCollectionStatus(collection, querypb.LoadStatus_Loaded)
+		suite.updateSegmentDist(collection, srcNode)
+		segments := suite.getAllSegments(collection)
+		req := &querypb.LoadBalanceRequest{
+			CollectionID:     collection,
+			SourceNodeIDs:    []int64{srcNode},
+			SealedSegmentIDs: segments,
+		}
+		suite.taskScheduler.ExpectedCalls = make([]*mock.Call, 0)
+		suite.taskScheduler.EXPECT().Add(mock.Anything).Run(func(task task.Task) {
+			actions := task.Actions()
+			suite.Len(actions, 2)
+			growAction, reduceAction := actions[0], actions[1]
+			suite.Contains(nodes, growAction.Node())
+			suite.Equal(srcNode, reduceAction.Node())
+			task.Cancel(nil)
+		}).Return(nil)
+		resp, err := server.LoadBalance(ctx, req)
+		suite.NoError(err)
+		suite.Equal(commonpb.ErrorCode_Success, resp.ErrorCode)
+		suite.taskScheduler.AssertExpectations(suite.T())
+	}
+
+	// Test when server is not healthy
+	server.UpdateStateCode(commonpb.StateCode_Initializing)
+	req := &querypb.LoadBalanceRequest{
+		CollectionID:  suite.collections[0],
+		SourceNodeIDs: []int64{1},
+		DstNodeIDs:    []int64{100 + 1},
+	}
+	resp, err := server.LoadBalance(ctx, req)
+	suite.NoError(err)
+	suite.Equal(resp.GetCode(), merr.Code(merr.ErrServiceNotReady))
+}
+
 func (suite *ServiceSuite) TestLoadBalanceWithEmptySegmentList() {
 	suite.loadAll()
 	ctx := context.Background()

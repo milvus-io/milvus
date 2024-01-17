@@ -20,13 +20,13 @@ func (_m *MockBalancer) EXPECT() *MockBalancer_Expecter {
 	return &MockBalancer_Expecter{mock: &_m.Mock}
 }
 
-// AssignChannel provides a mock function with given fields: channels, nodes
-func (_m *MockBalancer) AssignChannel(channels []*meta.DmChannel, nodes []int64) []ChannelAssignPlan {
-	ret := _m.Called(channels, nodes)
+// AssignChannel provides a mock function with given fields: channels, nodes, manualBalance
+func (_m *MockBalancer) AssignChannel(channels []*meta.DmChannel, nodes []int64, manualBalance bool) []ChannelAssignPlan {
+	ret := _m.Called(channels, nodes, manualBalance)
 
 	var r0 []ChannelAssignPlan
-	if rf, ok := ret.Get(0).(func([]*meta.DmChannel, []int64) []ChannelAssignPlan); ok {
-		r0 = rf(channels, nodes)
+	if rf, ok := ret.Get(0).(func([]*meta.DmChannel, []int64, bool) []ChannelAssignPlan); ok {
+		r0 = rf(channels, nodes, manualBalance)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]ChannelAssignPlan)
@@ -44,13 +44,14 @@ type MockBalancer_AssignChannel_Call struct {
 // AssignChannel is a helper method to define mock.On call
 //   - channels []*meta.DmChannel
 //   - nodes []int64
-func (_e *MockBalancer_Expecter) AssignChannel(channels interface{}, nodes interface{}) *MockBalancer_AssignChannel_Call {
-	return &MockBalancer_AssignChannel_Call{Call: _e.mock.On("AssignChannel", channels, nodes)}
+//   - manualBalance bool
+func (_e *MockBalancer_Expecter) AssignChannel(channels interface{}, nodes interface{}, manualBalance interface{}) *MockBalancer_AssignChannel_Call {
+	return &MockBalancer_AssignChannel_Call{Call: _e.mock.On("AssignChannel", channels, nodes, manualBalance)}
 }
 
-func (_c *MockBalancer_AssignChannel_Call) Run(run func(channels []*meta.DmChannel, nodes []int64)) *MockBalancer_AssignChannel_Call {
+func (_c *MockBalancer_AssignChannel_Call) Run(run func(channels []*meta.DmChannel, nodes []int64, manualBalance bool)) *MockBalancer_AssignChannel_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].([]*meta.DmChannel), args[1].([]int64))
+		run(args[0].([]*meta.DmChannel), args[1].([]int64), args[2].(bool))
 	})
 	return _c
 }
@@ -60,7 +61,7 @@ func (_c *MockBalancer_AssignChannel_Call) Return(_a0 []ChannelAssignPlan) *Mock
 	return _c
 }
 
-func (_c *MockBalancer_AssignChannel_Call) RunAndReturn(run func([]*meta.DmChannel, []int64) []ChannelAssignPlan) *MockBalancer_AssignChannel_Call {
+func (_c *MockBalancer_AssignChannel_Call) RunAndReturn(run func([]*meta.DmChannel, []int64, bool) []ChannelAssignPlan) *MockBalancer_AssignChannel_Call {
 	_c.Call.Return(run)
 	return _c
 }

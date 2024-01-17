@@ -120,6 +120,7 @@ func (s *ErrSuite) TestWrap() {
 	s.ErrorIs(WrapErrNodeNotFound(1, "failed to get node"), ErrNodeNotFound)
 	s.ErrorIs(WrapErrNodeOffline(1, "failed to access node"), ErrNodeOffline)
 	s.ErrorIs(WrapErrNodeLack(3, 1, "need more nodes"), ErrNodeLack)
+	s.ErrorIs(WrapErrNodeStateUnexpected(1, "Stopping", "failed to suspend node"), ErrNodeStateUnexpected)
 
 	// IO related
 	s.ErrorIs(WrapErrIoKeyNotFound("test_key", "failed to read"), ErrIoKeyNotFound)

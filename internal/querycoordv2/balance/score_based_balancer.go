@@ -51,14 +51,11 @@ func NewScoreBasedBalancer(scheduler task.Scheduler,
 
 // AssignSegment got a segment list, and try to assign each segment to node's with lowest score
 func (b *ScoreBasedBalancer) AssignSegment(collectionID int64, segments []*meta.Segment, nodes []int64, manualBalance bool) []SegmentAssignPlan {
-	// skip out suspend node during assignment, but skip this check for manual balance
+	// skip out suspend node and stopping node during assignment, but skip this check for manual balance
 	if !manualBalance {
 		nodes = lo.Filter(nodes, func(node int64, _ int) bool {
 			info := b.nodeManager.Get(node)
-			if info != nil && info.GetState() == session.NodeStateNormal {
-				return true
-			}
-			return false
+			return info != nil && info.GetState() == session.NodeStateNormal
 		})
 	}
 

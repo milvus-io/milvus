@@ -138,7 +138,7 @@ func (suite *CheckerControllerSuite) TestBasic() {
 		assignSegCounter.Inc()
 		return nil
 	})
-	suite.balancer.EXPECT().AssignChannel(mock.Anything, mock.Anything).RunAndReturn(func(dc []*meta.DmChannel, i []int64) []balance.ChannelAssignPlan {
+	suite.balancer.EXPECT().AssignChannel(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(dc []*meta.DmChannel, i []int64, _ bool) []balance.ChannelAssignPlan {
 		assingChanCounter.Inc()
 		return nil
 	})

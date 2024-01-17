@@ -37,15 +37,16 @@ const (
 	mgrRouteGcPause  = `/management/datacoord/garbage_collection/pause`
 	mgrRouteGcResume = `/management/datacoord/garbage_collection/resume`
 
-	mgrSuspendQueryCoordBalance   = `/management/querycoord/suspend/balance`
-	mgrResumeQueryCoordBalance    = `/management/querycoord/resume/balance`
-	mgrSuspendQueryNode           = `/management/querycoord/suspend/node`
-	mgrResumeQueryNode            = `/management/querycoord/resume/node`
-	mgrTransferSegment            = `/management/querycoord/transfer/segment`
-	mgrTransferChannel            = `/management/querycoord/transfer/channel`
-	mgrListQueryNode              = `/management/querycoord/list/querynode`
-	mgrGetQueryNodeDistribution   = `/management/querycoord/data/get/distribution`
-	mgrCheckQueryNodeDistribution = `/management/querycoord/data/check/distribution`
+	mgrSuspendQueryCoordBalance = `/management/querycoord/balance/suspend`
+	mgrResumeQueryCoordBalance  = `/management/querycoord/balance/resume`
+	mgrTransferSegment          = `/management/querycoord/transfer/segment`
+	mgrTransferChannel          = `/management/querycoord/transfer/channel`
+
+	mgrSuspendQueryNode           = `/management/querycoord/node/suspend`
+	mgrResumeQueryNode            = `/management/querycoord/node/resume`
+	mgrListQueryNode              = `/management/querycoord/node/list`
+	mgrGetQueryNodeDistribution   = `/management/querycoord/distribution/get`
+	mgrCheckQueryNodeDistribution = `/management/querycoord/distribution/check`
 )
 
 var mgrRouteRegisterOnce sync.Once
@@ -351,7 +352,7 @@ func (node *Proxy) TransferSegment(w http.ResponseWriter, req *http.Request) {
 
 	segmentID := req.FormValue("segment_id")
 	if len(segmentID) == 0 {
-		request.ToAllNodes = true
+		request.TransferAll = true
 	} else {
 		value, err := strconv.ParseInt(segmentID, 10, 64)
 		if err != nil {
@@ -475,7 +476,7 @@ func (node *Proxy) CheckQueryNodeDistribution(w http.ResponseWriter, req *http.R
 		return
 	}
 
-	target, err := strconv.ParseInt(req.FormValue("source_node_id"), 10, 64)
+	target, err := strconv.ParseInt(req.FormValue("target_node_id"), 10, 64)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		w.Write([]byte(fmt.Sprintf(`{"msg": "failed to check whether query node has same distribution, %s"}`, err.Error())))

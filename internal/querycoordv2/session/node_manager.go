@@ -23,7 +23,9 @@ import (
 
 	"github.com/blang/semver/v4"
 	"go.uber.org/atomic"
+	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
@@ -73,8 +75,14 @@ func (m *NodeManager) Suspend(nodeID int64) error {
 	if !ok {
 		return merr.WrapErrNodeNotFound(nodeID)
 	}
-	nodeInfo.SetState(NodeStateSuspend)
-	return nil
+	switch nodeInfo.GetState() {
+	case NodeStateNormal:
+		nodeInfo.SetState(NodeStateSuspend)
+		return nil
+	default:
+		log.Warn("failed to suspend query node", zap.Int64("nodeID", nodeID), zap.String("state", nodeInfo.GetState().String()))
+		return merr.WrapErrNodeStateUnexpected(nodeID, nodeInfo.GetState().String(), "failed to suspend a query node")
+	}
 }
 
 func (m *NodeManager) Resume(nodeID int64) error {
@@ -84,10 +92,16 @@ func (m *NodeManager) Resume(nodeID int64) error {
 	if !ok {
 		return merr.WrapErrNodeNotFound(nodeID)
 	}
-	if nodeInfo.GetState() == NodeStateSuspend {
+
+	switch nodeInfo.GetState() {
+	case NodeStateSuspend:
 		nodeInfo.SetState(NodeStateNormal)
+		return nil
+
+	default:
+		log.Warn("failed to resume query node", zap.Int64("nodeID", nodeID), zap.String("state", nodeInfo.GetState().String()))
+		return merr.WrapErrNodeStateUnexpected(nodeID, nodeInfo.GetState().String(), "failed to resume query node")
 	}
-	return nil
 }
 
 func (m *NodeManager) IsStoppingNode(nodeID int64) (bool, error) {

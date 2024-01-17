@@ -21,6 +21,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/suite"
+
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 type NodeManagerSuite struct {
@@ -37,9 +39,21 @@ func (s *NodeManagerSuite) TearDownTest() {
 }
 
 func (s *NodeManagerSuite) TestNodeOperation() {
-	s.nodeManager.Add(NewNodeInfo(1, "localhost"))
-	s.nodeManager.Add(NewNodeInfo(2, "localhost"))
-	s.nodeManager.Add(NewNodeInfo(3, "localhost"))
+	s.nodeManager.Add(NewNodeInfo(ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	s.nodeManager.Add(NewNodeInfo(ImmutableNodeInfo{
+		NodeID:   2,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	s.nodeManager.Add(NewNodeInfo(ImmutableNodeInfo{
+		NodeID:   3,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
 
 	s.NotNil(s.nodeManager.Get(1))
 	s.Len(s.nodeManager.GetAll(), 3)
@@ -49,11 +63,15 @@ func (s *NodeManagerSuite) TestNodeOperation() {
 
 	s.nodeManager.Stopping(2)
 	s.True(s.nodeManager.IsStoppingNode(2))
-	s.nodeManager.Resume(2)
+	err := s.nodeManager.Resume(2)
+	s.ErrorIs(err, merr.ErrNodeStateUnexpected)
 	s.True(s.nodeManager.IsStoppingNode(2))
 	node := s.nodeManager.Get(2)
 	node.SetState(NodeStateNormal)
 	s.False(s.nodeManager.IsStoppingNode(2))
+
+	err = s.nodeManager.Resume(3)
+	s.ErrorIs(err, merr.ErrNodeStateUnexpected)
 
 	s.nodeManager.Suspend(3)
 	node = s.nodeManager.Get(3)
@@ -66,7 +84,11 @@ func (s *NodeManagerSuite) TestNodeOperation() {
 }
 
 func (s *NodeManagerSuite) TestNodeInfo() {
-	node := NewNodeInfo(1, "localhost")
+	node := NewNodeInfo(ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost",
+		Hostname: "localhost",
+	})
 	s.Equal(int64(1), node.ID())
 	s.Equal("localhost", node.Addr())
 	node.setChannelCnt(1)
