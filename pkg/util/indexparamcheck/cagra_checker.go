@@ -35,8 +35,20 @@ func (c *cagraChecker) CheckTrain(params map[string]string) error {
 		return fmt.Errorf("Graph degree cannot be larger than intermediate graph degree")
 	}
 
-	if !CheckStrByValues(params, Metric, CagraMetrics) {
-		return fmt.Errorf("metric type not found or not supported, supported: %v", CagraMetrics)
+	if !CheckStrByValues(params, Metric, RaftMetrics) {
+		return fmt.Errorf("metric type not found or not supported, supported: %v", RaftMetrics)
+	}
+
+	setDefaultIfNotExist(params, CagraBuildAlgo, "NN_DESCENT")
+
+	if !CheckStrByValues(params, CagraBuildAlgo, CagraBuildAlgoTypes) {
+		return fmt.Errorf("cagra build algo type not supported, supported: %v", CagraBuildAlgoTypes)
+	}
+
+	setDefaultIfNotExist(params, RaftCacheDatasetOnDevice, "false")
+
+	if !CheckStrByValues(params, RaftCacheDatasetOnDevice, []string{"true", "false"}) {
+		return fmt.Errorf("raft index cache_dataset_on_device param only support true false")
 	}
 
 	return nil
