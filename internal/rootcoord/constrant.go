@@ -16,6 +16,13 @@
 
 package rootcoord
 
+import (
+	"context"
+
+	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
+)
+
 const (
 	// TODO: better to make them configurable, use default value if no config was set since we never explode these before.
 	globalIDAllocatorKey      = "idTimestamp"
@@ -23,3 +30,42 @@ const (
 	globalTSOAllocatorKey     = "timestamp"
 	globalTSOAllocatorSubPath = "tso"
 )
+
+func checkGeneralCapacity(ctx context.Context, newColNum int,
+	newParNum int64,
+	newShardNum int32,
+	core *Core,
+	ts typeutil.Timestamp,
+) error {
+	var addedNum int64 = 0
+	if newColNum > 0 && newParNum > 0 && newShardNum > 0 {
+		// create collections scenarios
+		addedNum += int64(newColNum) * newParNum * int64(newShardNum)
+	} else if newColNum == 0 && newShardNum == 0 && newParNum > 0 {
+		// add partitions to existing collections
+		addedNum += newParNum
+	}
+
+	var generalNum int64 = 0
+	collectionsMap := core.meta.ListAllAvailCollections(ctx)
+	for dbId, collectionIds := range collectionsMap {
+		db, err := core.meta.GetDatabaseByID(ctx, dbId, ts)
+		if err == nil {
+			for _, collectionId := range collectionIds {
+				collection, err := core.meta.GetCollectionByID(ctx, db.Name, collectionId, ts, true)
+				if err == nil {
+					partNum := int64(collection.GetPartitionNum(false))
+					shardNum := int64(collection.ShardsNum)
+					generalNum += partNum * shardNum
+				}
+			}
+		}
+	}
+
+	generalNum += addedNum
+	if generalNum > Params.RootCoordCfg.MaxGeneralCapacity.GetAsInt64() {
+		return merr.WrapGeneralCapacityExceed(generalNum, Params.RootCoordCfg.MaxGeneralCapacity.GetAsInt64(),
+			"failed checking constraint: sum_collections(parition*shard) exceeding the max general capacity:")
+	}
+	return nil
+}

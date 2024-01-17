@@ -93,7 +93,7 @@ DiskFileManagerImpl::AddFileUsingSpace(
     for (int64_t i = 0; i < remote_files.size(); ++i) {
         auto data = LoadIndexFromDisk(
             local_file_name, local_file_offsets[i], remote_file_sizes[i]);
-        auto status = space_->WriteBolb(
+        auto status = space_->WriteBlob(
             remote_files[i], data.get(), remote_file_sizes[i]);
         if (!status.ok()) {
             return false;

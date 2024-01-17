@@ -152,6 +152,7 @@ CreateIndexV2(CIndex* res_index, CBuildIndexInfo c_build_index_info) {
         auto field_type = build_index_info->field_type;
         milvus::index::CreateIndexInfo index_info;
         index_info.field_type = build_index_info->field_type;
+        index_info.dim = build_index_info->dim;
 
         auto& config = build_index_info->config;
         // get index type
@@ -217,6 +218,7 @@ CreateIndexV2(CIndex* res_index, CBuildIndexInfo c_build_index_info) {
             milvus::indexbuilder::IndexFactory::GetInstance().CreateIndex(
                 build_index_info->field_type,
                 build_index_info->field_name,
+                build_index_info->dim,
                 config,
                 fileManagerContext,
                 std::move(store_space.value()));

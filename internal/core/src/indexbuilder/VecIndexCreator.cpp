@@ -24,12 +24,13 @@ VecIndexCreator::VecIndexCreator(
     DataType data_type,
     Config& config,
     const storage::FileManagerContext& file_manager_context)
-    : VecIndexCreator(data_type, "", config, file_manager_context, nullptr) {
+    : VecIndexCreator(data_type, "", 0, config, file_manager_context, nullptr) {
 }
 
 VecIndexCreator::VecIndexCreator(
     DataType data_type,
     const std::string& field_name,
+    const int64_t dim,
     Config& config,
     const storage::FileManagerContext& file_manager_context,
     std::shared_ptr<milvus_storage::Space> space)
@@ -41,6 +42,7 @@ VecIndexCreator::VecIndexCreator(
     index_info.field_name = field_name;
     index_info.index_engine_version =
         index::GetIndexEngineVersionFromConfig(config_);
+    index_info.dim = dim;
 
     index_ = index::IndexFactory::GetInstance().CreateIndex(
         index_info, file_manager_context, space_);

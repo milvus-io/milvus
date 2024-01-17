@@ -336,7 +336,7 @@ func (rl *rateLimiter) registerLimiters(globalLevel bool) {
 		rl.limiters.GetOrInsert(internalpb.RateType(rt), ratelimitutil.NewLimiter(limit, burst))
 		onEvent := func(rateType internalpb.RateType) func(*config.Event) {
 			return func(event *config.Event) {
-				f, err := strconv.ParseFloat(event.Value, 64)
+				f, err := strconv.ParseFloat(r.Formatter(event.Value), 64)
 				if err != nil {
 					log.Info("Error format for rateLimit",
 						zap.String("rateType", rateType.String()),

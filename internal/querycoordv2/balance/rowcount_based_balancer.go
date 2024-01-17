@@ -77,6 +77,7 @@ func (b *RowCountBasedBalancer) AssignSegment(collectionID int64, segments []*me
 // try to make every query node has channel count
 func (b *RowCountBasedBalancer) AssignChannel(channels []*meta.DmChannel, nodes []int64) []ChannelAssignPlan {
 	nodeItems := b.convertToNodeItemsByChannel(nodes)
+	nodeItems = lo.Shuffle(nodeItems)
 	if len(nodeItems) == 0 {
 		return nil
 	}

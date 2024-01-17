@@ -18,7 +18,6 @@ package datacoord
 
 import (
 	"context"
-	"fmt"
 	"path"
 	"sync"
 	"time"
@@ -28,8 +27,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -323,12 +324,20 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 				}
 			}
 
-			dim, _ := storage.GetDimFromParams(field.TypeParams)
-			var scheme string
-			if Params.MinioCfg.UseSSL.GetAsBool() {
-				scheme = "https"
-			} else {
-				scheme = "http"
+			dim, err := storage.GetDimFromParams(field.TypeParams)
+			if err != nil {
+				return false
+			}
+
+			storePath, err := typeutil.GetStorageURI(params.Params.CommonCfg.StorageScheme.GetValue(), params.Params.CommonCfg.StoragePathPrefix.GetValue(), segment.GetID())
+			if err != nil {
+				log.Ctx(ib.ctx).Warn("failed to get storage uri", zap.Error(err))
+				return false
+			}
+			indexStorePath, err := typeutil.GetStorageURI(params.Params.CommonCfg.StorageScheme.GetValue(), params.Params.CommonCfg.StoragePathPrefix.GetValue()+"/index", segment.GetID())
+			if err != nil {
+				log.Ctx(ib.ctx).Warn("failed to get storage uri", zap.Error(err))
+				return false
 			}
 
 			req = &indexpb.CreateJobRequest{
@@ -347,9 +356,9 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 				FieldID:             fieldID,
 				FieldName:           field.Name,
 				FieldType:           field.DataType,
-				StorePath:           fmt.Sprintf("s3://%s:%s@%s/%d?scheme=%s&endpoint_override=%s&allow_bucket_creation=true", Params.MinioCfg.AccessKeyID.GetValue(), Params.MinioCfg.SecretAccessKey.GetValue(), Params.MinioCfg.BucketName.GetValue(), segment.GetID(), scheme, Params.MinioCfg.Address.GetValue()),
+				StorePath:           storePath,
 				StoreVersion:        segment.GetStorageVersion(),
-				IndexStorePath:      fmt.Sprintf("s3://%s:%s@%s/index/%d?scheme=%s&endpoint_override=%s&allow_bucket_creation=true", Params.MinioCfg.AccessKeyID.GetValue(), Params.MinioCfg.SecretAccessKey.GetValue(), Params.MinioCfg.BucketName.GetValue(), segment.GetID(), scheme, Params.MinioCfg.Address.GetValue()),
+				IndexStorePath:      indexStorePath,
 				Dim:                 int64(dim),
 				CurrentIndexVersion: ib.indexEngineVersionManager.GetCurrentIndexEngineVersion(),
 			}

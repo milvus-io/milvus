@@ -181,6 +181,13 @@ SegmentGrowingImpl::LoadFieldData(const LoadFieldDataInfo& infos) {
     for (auto& [id, info] : infos.field_infos) {
         auto field_id = FieldId(id);
         auto insert_files = info.insert_files;
+        std::sort(insert_files.begin(),
+                  insert_files.end(),
+                  [](const std::string& a, const std::string& b) {
+                      return std::stol(a.substr(a.find_last_of('/') + 1)) <
+                             std::stol(b.substr(b.find_last_of('/') + 1));
+                  });
+
         auto channel = std::make_shared<FieldDataChannel>();
         auto& pool =
             ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);

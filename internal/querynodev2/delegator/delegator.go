@@ -26,6 +26,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
+	"go.opentelemetry.io/otel"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
@@ -51,6 +52,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // ShardDelegator is the interface definition.
@@ -562,6 +564,8 @@ func executeSubTasks[T any, R interface {
 
 // waitTSafe returns when tsafe listener notifies a timestamp which meet the guarantee ts.
 func (sd *shardDelegator) waitTSafe(ctx context.Context, ts uint64) (uint64, error) {
+	ctx, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "Delegator-waitTSafe")
+	defer sp.End()
 	log := sd.getLogger(ctx)
 	// already safe to search
 	latestTSafe := sd.latestTsafe.Load()

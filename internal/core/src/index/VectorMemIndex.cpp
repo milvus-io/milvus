@@ -320,8 +320,6 @@ VectorMemIndex<T>::Load(milvus::tracer::TraceContext ctx,
                  .empty()) {  // load with the slice meta info, then we can load batch by batch
             std::string index_file_prefix = slice_meta_filepath.substr(
                 0, slice_meta_filepath.find_last_of('/') + 1);
-            std::vector<std::string> batch{};
-            batch.reserve(parallel_degree);
 
             auto result =
                 file_manager_->LoadIndexToMemory({slice_meta_filepath});
@@ -337,32 +335,26 @@ VectorMemIndex<T>::Load(milvus::tracer::TraceContext ctx,
 
                 auto new_field_data = milvus::storage::CreateFieldData(
                     DataType::INT8, 1, total_len);
-                auto HandleBatch = [&](int index) {
-                    auto batch_data = file_manager_->LoadIndexToMemory(batch);
-                    for (int j = index - batch.size() + 1; j <= index; j++) {
-                        std::string file_name = GenSlicedFileName(prefix, j);
-                        AssertInfo(
-                            batch_data.find(file_name) != batch_data.end(),
-                            "lost index slice data");
-                        auto data = batch_data[file_name];
-                        new_field_data->FillFieldData(data->Data(),
-                                                      data->Size());
-                    }
-                    for (auto& file : batch) {
-                        pending_index_files.erase(file);
-                    }
-                    batch.clear();
-                };
 
+                std::vector<std::string> batch;
+                batch.reserve(slice_num);
                 for (auto i = 0; i < slice_num; ++i) {
                     std::string file_name = GenSlicedFileName(prefix, i);
                     batch.push_back(index_file_prefix + file_name);
-                    if (batch.size() >= parallel_degree) {
-                        HandleBatch(i);
-                    }
                 }
-                if (batch.size() > 0) {
-                    HandleBatch(slice_num - 1);
+
+                auto batch_data = file_manager_->LoadIndexToMemory(batch);
+                for (const auto& file_path : batch) {
+                    const std::string file_name =
+                        file_path.substr(file_path.find_last_of('/') + 1);
+                    AssertInfo(batch_data.find(file_name) != batch_data.end(),
+                               "lost index slice data: {}",
+                               file_name);
+                    auto data = batch_data[file_name];
+                    new_field_data->FillFieldData(data->Data(), data->Size());
+                }
+                for (auto& file : batch) {
+                    pending_index_files.erase(file);
                 }
 
                 AssertInfo(

@@ -15,14 +15,31 @@
 package hardware
 
 import (
+	"os"
 	"testing"
 
+	"github.com/containerd/cgroups/v3"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestInContainer(t *testing.T) {
-	_, err := inContainer()
-	assert.NoError(t, err)
+func TestGetCgroupStats(t *testing.T) {
+	if cgroups.Mode() == cgroups.Unified {
+		stats2, err := getCgroupV2Stats()
+		assert.NoError(t, err)
+		assert.NotNil(t, stats2)
+
+		stats1, err := getCgroupV1Stats()
+		assert.Error(t, err)
+		assert.Nil(t, stats1)
+	} else {
+		stats1, err := getCgroupV1Stats()
+		assert.NoError(t, err)
+		assert.NotNil(t, stats1)
+
+		stats2, err := getCgroupV2Stats()
+		assert.Error(t, err)
+		assert.Nil(t, stats2)
+	}
 }
 
 func TestGetContainerMemLimit(t *testing.T) {
@@ -30,6 +47,17 @@ func TestGetContainerMemLimit(t *testing.T) {
 	assert.NoError(t, err)
 	assert.True(t, limit > 0)
 	t.Log("limit memory:", limit)
+
+	err = os.Setenv("MEM_LIMIT", "5Gi")
+	assert.NoError(t, err)
+	defer func() {
+		_ = os.Unsetenv("MEM_LIMIT")
+		assert.Equal(t, "", os.Getenv("MEM_LIMIT"))
+	}()
+
+	limit, err = getContainerMemLimit()
+	assert.NoError(t, err)
+	assert.Equal(t, limit, 5*1024*1024*1024)
 }
 
 func TestGetContainerMemUsed(t *testing.T) {

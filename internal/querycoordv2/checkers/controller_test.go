@@ -137,10 +137,21 @@ func (suite *CheckerControllerSuite) TestBasic() {
 	suite.controller.Start()
 	defer suite.controller.Stop()
 
+	// expect assign channel first
 	suite.Eventually(func() bool {
 		suite.controller.Check()
-		return counter.Load() > 0 && assignSegCounter.Load() > 0 && assingChanCounter.Load() > 0
-	}, 5*time.Second, 1*time.Millisecond)
+		return counter.Load() > 0 && assingChanCounter.Load() > 0
+	}, 3*time.Second, 1*time.Millisecond)
+
+	// until new channel has been subscribed
+	suite.dist.ChannelDistManager.Update(1, utils.CreateTestChannel(1, 1, 1, "test-insert-channel2"))
+	suite.dist.LeaderViewManager.Update(1, utils.CreateTestLeaderView(1, 1, "test-insert-channel2", map[int64]int64{}, map[int64]*meta.Segment{}))
+
+	// expect assign segment after channel has been subscribed
+	suite.Eventually(func() bool {
+		suite.controller.Check()
+		return counter.Load() > 0 && assignSegCounter.Load() > 0
+	}, 3*time.Second, 1*time.Millisecond)
 }
 
 func TestCheckControllerSuite(t *testing.T) {

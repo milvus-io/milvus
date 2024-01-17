@@ -241,6 +241,11 @@ func Error(status *commonpb.Status) error {
 	return newMilvusErrorWithDetail(status.GetReason(), status.GetDetail(), code, status.GetRetriable())
 }
 
+// SegcoreError returns a merr according to the given segcore error code and message
+func SegcoreError(code int32, msg string) error {
+	return newMilvusError(msg, code, false)
+}
+
 // CheckHealthy checks whether the state is healthy,
 // returns nil if healthy,
 // otherwise returns ErrServiceNotReady wrapped with current state
@@ -534,6 +539,15 @@ func WrapErrPartitionNotLoaded(partition any, msg ...string) error {
 
 func WrapErrPartitionNotFullyLoaded(partition any, msg ...string) error {
 	err := wrapFields(ErrPartitionNotFullyLoaded, value("partition", partition))
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
+
+func WrapGeneralCapacityExceed(newGeneralSize any, generalCapacity any, msg ...string) error {
+	err := wrapFields(ErrGeneralCapacityExceeded, value("newGeneralSize", newGeneralSize),
+		value("generalCapacity", generalCapacity))
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "->"))
 	}

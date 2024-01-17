@@ -58,8 +58,10 @@ enum ErrorCode {
     FieldNotLoaded = 2027,
     ExprInvalid = 2028,
     UnistdError = 2030,
+    MetricTypeNotMatch = 2031,
     DimNotMatch = 2032,
     KnowhereError = 2100,
+
 };
 namespace impl {
 void

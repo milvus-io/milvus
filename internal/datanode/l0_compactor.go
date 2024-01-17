@@ -206,7 +206,7 @@ func (t *levelZeroCompactionTask) compact() (*datapb.CompactionPlanResult, error
 			log.Warn("Linear L0 compaction upload all buffer fail", zap.Error(err))
 			return nil, err
 		}
-		log.Warn("Linear L0 compaction finished", zap.Duration("elapse", t.tr.RecordSpan()))
+		log.Info("Linear L0 compaction finished", zap.Duration("elapse", t.tr.RecordSpan()))
 		return lo.Values(resultSegments), nil
 	}
 

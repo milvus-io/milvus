@@ -116,7 +116,7 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 			alloc := allocator.NewMockAllocator(t)
 			alloc.EXPECT().GetGenerator(mock.Anything, mock.Anything).Call.Return(nil, fmt.Errorf("mock err"))
 			b := binlogIO{cm, alloc}
-			_, _, err := b.uploadStatsLog(context.Background(), 1, 10, genInsertData(), genTestStat(meta), 10, meta)
+			_, _, err := b.uploadStatsLog(context.Background(), 1, 10, genInsertData(2), genTestStat(meta), 10, meta)
 			assert.Error(t, err)
 		})
 	})
@@ -140,7 +140,7 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 
 			alloc.EXPECT().GetGenerator(mock.Anything, mock.Anything).Call.Return(nil, fmt.Errorf("mock err"))
 
-			_, err := b.uploadInsertLog(context.Background(), 1, 10, genInsertData(), meta)
+			_, err := b.uploadInsertLog(context.Background(), 1, 10, genInsertData(2), meta)
 			assert.Error(t, err)
 		})
 
@@ -154,7 +154,7 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 			defer cancel()
 
-			_, err := b.uploadInsertLog(ctx, 1, 10, genInsertData(), meta)
+			_, err := b.uploadInsertLog(ctx, 1, 10, genInsertData(2), meta)
 			assert.Error(t, err)
 		})
 	})
@@ -260,7 +260,7 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 				iCodec := storage.NewInsertCodecWithSchema(meta)
 
 				kvs := make(map[string][]byte)
-				pin, err := b.genInsertBlobs(genInsertData(), 10, 1, iCodec, kvs)
+				pin, err := b.genInsertBlobs(genInsertData(2), 10, 1, iCodec, kvs)
 
 				assert.NoError(t, err)
 				assert.Equal(t, 12, len(pin))
@@ -301,7 +301,7 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 			bin := &binlogIO{cm, alloc}
 			kvs := make(map[string][]byte)
 
-			pin, err := bin.genInsertBlobs(genInsertData(), 10, 1, iCodec, kvs)
+			pin, err := bin.genInsertBlobs(genInsertData(2), 10, 1, iCodec, kvs)
 
 			assert.Error(t, err)
 			assert.Empty(t, kvs)
