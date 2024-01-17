@@ -1619,3 +1619,17 @@ func CheckDatabase(ctx context.Context, dbName string) bool {
 	}
 	return false
 }
+
+func convertNumberToOrdinal(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	suffixes := []string{"th", "st", "nd", "rd"}
+	lastDigit := n % 10
+	secondLastDigit := (n / 10) % 10
+
+	if secondLastDigit == 1 || lastDigit > 3 {
+		return fmt.Sprintf("%dth")
+	}
+	return fmt.Sprintf("%d%s", n, suffixes[lastDigit])
+}

@@ -506,7 +506,8 @@ func (v *validateUtil) checkArrayFieldData(field *schemapb.FieldData, fieldSchem
 func verifyLengthPerRow[E interface{ ~string | ~[]byte }](strArr []E, maxLength int64) error {
 	for i, s := range strArr {
 		if int64(len(s)) > maxLength {
-			msg := fmt.Sprintf("the length (%d) of %dth string exceeds max length (%d)", len(s), i, maxLength)
+			ord := convertNumberToOrdinal(i + 1)
+			msg := fmt.Sprintf("the length (%d) of %s string exceeds max length (%d)", len(s), ord, maxLength)
 			return merr.WrapErrParameterInvalid("valid length string", "string length exceeds max length", msg)
 		}
 	}

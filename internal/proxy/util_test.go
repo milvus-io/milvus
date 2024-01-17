@@ -2089,3 +2089,20 @@ func TestSendReplicateMessagePack(t *testing.T) {
 		SendReplicateMessagePack(ctx, mockStream, &milvuspb.ReleasePartitionsRequest{})
 	})
 }
+
+func Test_convertNumberToOrdinal(t *testing.T) {
+	cases := map[int]string{
+		0:  "0th",
+		1:  "1st",
+		2:  "2nd",
+		3:  "3rd",
+		4:  "4th",
+		11: "11th",
+		21: "21st",
+	}
+
+	for n, exp := range cases {
+		res := convertNumberToOrdinal(n)
+		assert.Equal(t, exp, res)
+	}
+}
