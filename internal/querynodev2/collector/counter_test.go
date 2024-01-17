@@ -39,7 +39,7 @@ func (suite *CounterTestSuite) TestBasic() {
 	suite.Equal(int64(0), value)
 
 	// get after inc
-	suite.counter.Inc(suite.label, 3)
+	suite.counter.Add(suite.label, 3)
 	value = suite.counter.Get(suite.label)
 	suite.Equal(int64(3), value)
 
@@ -49,7 +49,7 @@ func (suite *CounterTestSuite) TestBasic() {
 	suite.Equal(int64(0), value)
 
 	// get after dec
-	suite.counter.Dec(suite.label, 3)
+	suite.counter.Add(suite.label, -3)
 	value = suite.counter.Get(suite.label)
 	suite.Equal(int64(-3), value)
 

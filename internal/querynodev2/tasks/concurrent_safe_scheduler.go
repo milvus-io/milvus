@@ -232,13 +232,13 @@ func (s *scheduler) exec() {
 		s.getPool(t).Submit(func() (any, error) {
 			// Update concurrency metric and notify task done.
 			metrics.QueryNodeReadTaskConcurrency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Inc()
-			collector.Counter.Inc(metricsinfo.ExecuteQueueType, 1)
+			collector.Counter.Inc(metricsinfo.ExecuteQueueType)
 
 			err := t.Execute()
 
 			// Update all metric after task finished.
 			metrics.QueryNodeReadTaskConcurrency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Dec()
-			collector.Counter.Dec(metricsinfo.ExecuteQueueType, -1)
+			collector.Counter.Dec(metricsinfo.ExecuteQueueType)
 
 			// Notify task done.
 			t.Done(err)
