@@ -61,13 +61,32 @@ func Test_cagraChecker_CheckTrain(t *testing.T) {
 		DIM:    strconv.Itoa(0),
 		Metric: metric.L2,
 	}
-
+	p11 := map[string]string{
+		DIM:            strconv.Itoa(128),
+		Metric:         metric.L2,
+		CagraBuildAlgo: "IVF_PQ",
+	}
+	p12 := map[string]string{
+		DIM:            strconv.Itoa(128),
+		Metric:         metric.L2,
+		CagraBuildAlgo: "HNSW",
+	}
+	p13 := map[string]string{
+		DIM:                      strconv.Itoa(128),
+		Metric:                   metric.L2,
+		RaftCacheDatasetOnDevice: "false",
+	}
+	p14 := map[string]string{
+		DIM:                      strconv.Itoa(128),
+		Metric:                   metric.L2,
+		RaftCacheDatasetOnDevice: "False",
+	}
 	cases := []struct {
 		params   map[string]string
 		errIsNil bool
 	}{
 		{p1, true},
-		{p2, false},
+		{p2, true},
 		{p3, true},
 		{p4, true},
 		{p5, true},
@@ -76,6 +95,10 @@ func Test_cagraChecker_CheckTrain(t *testing.T) {
 		{p8, false},
 		{p9, false},
 		{p10, false},
+		{p11, true},
+		{p12, false},
+		{p13, true},
+		{p14, false},
 	}
 
 	c := newCagraChecker()
