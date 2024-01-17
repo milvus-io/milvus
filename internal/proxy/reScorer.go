@@ -109,9 +109,18 @@ func NewReScorer(reqs []*milvuspb.SearchRequest, rankParams []*commonpb.KeyValue
 
 	switch rankTypeMap[rankTypeStr] {
 	case rrfRankType:
-		k, ok := params[RRFParamsKey].(float64)
+		_, ok := params[RRFParamsKey]
 		if !ok {
 			return nil, errors.New(RRFParamsKey + " not found in rank_params")
+		}
+		var k float64
+		if reflect.ValueOf(params[RRFParamsKey]).CanFloat() {
+			k = reflect.ValueOf(params[RRFParamsKey]).Float()
+		} else {
+			return nil, errors.New("The type of rank param k should be float")
+		}
+		if k <= 0 || k >= maxRRFParamsValue {
+			return nil, errors.New("The rank params k should be in range (0, 16384)")
 		}
 		log.Debug("rrf params", zap.Float64("k", k))
 		for i := range reqs {
@@ -131,7 +140,16 @@ func NewReScorer(reqs []*milvuspb.SearchRequest, rankParams []*commonpb.KeyValue
 		case reflect.Slice:
 			rs := reflect.ValueOf(params[WeightsParamsKey])
 			for i := 0; i < rs.Len(); i++ {
-				weights = append(weights, float32(rs.Index(i).Interface().(float64)))
+				v := rs.Index(i).Elem()
+				if v.CanFloat() {
+					weight := v.Float()
+					if weight < 0 || weight > 1 {
+						return nil, errors.New("rank param weight should be in range [0, 1]")
+					}
+					weights = append(weights, float32(weight))
+				} else {
+					return nil, errors.New("The type of rank param weight should be float")
+				}
 			}
 		default:
 			return nil, errors.New("The weights param should be an array")
