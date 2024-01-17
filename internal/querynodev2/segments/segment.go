@@ -287,7 +287,7 @@ func (s *LocalSegment) LastDeltaTimestamp() uint64 {
 	return s.lastDeltaTimestamp.Load()
 }
 
-func (s *LocalSegment) AddIndex(fieldID int64, info *IndexedFieldInfo) {
+func (s *LocalSegment) addIndex(fieldID int64, info *IndexedFieldInfo) {
 	s.fieldIndexes.Insert(fieldID, info)
 }
 
@@ -942,6 +942,13 @@ func (s *LocalSegment) UpdateIndexInfo(ctx context.Context, indexInfo *querypb.F
 		zap.Int64("fieldID", indexInfo.FieldID)); err != nil {
 		return err
 	}
+
+	s.addIndex(indexInfo.GetFieldID(), &IndexedFieldInfo{
+		FieldBinlog: &datapb.FieldBinlog{
+			FieldID: indexInfo.GetFieldID(),
+		},
+		IndexInfo: indexInfo,
+	})
 	log.Info("updateSegmentIndex done")
 	return nil
 }

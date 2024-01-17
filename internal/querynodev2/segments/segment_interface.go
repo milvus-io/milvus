@@ -46,7 +46,6 @@ type Segment interface {
 	MemSize() int64
 
 	// Index related
-	AddIndex(fieldID int64, index *IndexedFieldInfo)
 	GetIndex(fieldID int64) *IndexedFieldInfo
 	ExistIndex(fieldID int64) bool
 	Indexes() []*IndexedFieldInfo

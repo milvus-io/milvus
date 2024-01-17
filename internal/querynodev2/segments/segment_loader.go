@@ -702,8 +702,6 @@ func (loader *segmentLoader) loadFieldsIndex(ctx context.Context,
 			zap.Int32("current_index_version", fieldInfo.IndexInfo.GetCurrentIndexVersion()),
 		)
 
-		segment.AddIndex(fieldID, fieldInfo)
-
 		// set average row data size of variable field
 		field, err := schemaHelper.GetFieldFromID(fieldID)
 		if err != nil {
@@ -1109,17 +1107,13 @@ func (loader *segmentLoader) LoadIndex(ctx context.Context, segment *LocalSegmen
 
 			fieldInfo, ok := fieldInfos[info.GetFieldID()]
 			if !ok {
-				return merr.WrapErrParameterInvalid("index info with corresponding  field info", "missing field info", strconv.FormatInt(fieldInfo.GetFieldID(), 10))
+				return merr.WrapErrParameterInvalid("index info with corresponding field info", "missing field info", strconv.FormatInt(fieldInfo.GetFieldID(), 10))
 			}
 			err := loader.loadFieldIndex(ctx, segment, info)
 			if err != nil {
 				log.Warn("failed to load index for segment", zap.Error(err))
 				return err
 			}
-			segment.AddIndex(info.FieldID, &IndexedFieldInfo{
-				IndexInfo:   info,
-				FieldBinlog: fieldInfo,
-			})
 		}
 		loader.notifyLoadFinish(loadInfo)
 	}
