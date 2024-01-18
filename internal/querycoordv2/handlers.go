@@ -359,8 +359,6 @@ func (s *Server) fillReplicaInfo(replica *meta.Replica, withShardNodes bool) (*m
 func checkNodeAvailable(nodeID int64, info *session.NodeInfo) error {
 	if info == nil {
 		return merr.WrapErrNodeOffline(nodeID)
-	} else if time.Since(info.LastHeartbeat()) > Params.QueryCoordCfg.HeartbeatAvailableInterval.GetAsDuration(time.Millisecond) {
-		return merr.WrapErrNodeOffline(nodeID, fmt.Sprintf("lastHB=%v", info.LastHeartbeat()))
 	}
 	return nil
 }
