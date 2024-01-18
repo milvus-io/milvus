@@ -411,6 +411,9 @@ func (node *Proxy) Start() error {
 	log.Debug("update state code", zap.String("role", typeutil.ProxyRole), zap.String("State", commonpb.StateCode_Healthy.String()))
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 
+	// register devops api
+	RegisterMgrRoute(node)
+
 	return nil
 }
 
