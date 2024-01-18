@@ -104,6 +104,18 @@ message SearchRequest {
   string username = 18;
 }
 
+message HybridSearchRequest {
+  common.MsgBase base = 1;
+  int64 reqID = 2;
+  int64 dbID = 3;
+  int64 collectionID = 4;
+  repeated int64 partitionIDs = 5;
+  repeated SearchRequest reqs = 6;
+  uint64 mvcc_timestamp = 11;
+  uint64 guarantee_timestamp = 12;
+  uint64 timeout_timestamp = 13;
+}
+
 message SearchResults {
   common.MsgBase base = 1;
   common.Status status = 2;

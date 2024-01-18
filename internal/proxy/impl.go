@@ -2753,11 +2753,18 @@ func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	qt := &hybridSearchTask{
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
-		request:   request,
-		tr:        timerecord.NewTimeRecorder(method),
-		qc:        node.queryCoord,
-		node:      node,
-		lb:        node.lbPolicy,
+		HybridSearchRequest: &internalpb.HybridSearchRequest{
+			Base: commonpbutil.NewMsgBase(
+				commonpbutil.WithMsgType(commonpb.MsgType_Search),
+				commonpbutil.WithSourceID(paramtable.GetNodeID()),
+			),
+			ReqID: paramtable.GetNodeID(),
+		},
+		request: request,
+		tr:      timerecord.NewTimeRecorder(method),
+		qc:      node.queryCoord,
+		node:    node,
+		lb:      node.lbPolicy,
 	}
 
 	guaranteeTs := request.GuaranteeTimestamp

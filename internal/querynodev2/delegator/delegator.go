@@ -62,6 +62,7 @@ type ShardDelegator interface {
 	GetSegmentInfo(readable bool) (sealed []SnapshotItem, growing []SegmentEntry)
 	SyncDistribution(ctx context.Context, entries ...SegmentEntry)
 	Search(ctx context.Context, req *querypb.SearchRequest) ([]*internalpb.SearchResults, error)
+	HybridSearch(ctx context.Context, req *querypb.HybridSearchRequest) (*querypb.HybridSearchResult, error)
 	Query(ctx context.Context, req *querypb.QueryRequest) ([]*internalpb.RetrieveResults, error)
 	QueryStream(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error
 	GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest) ([]*internalpb.GetStatisticsResponse, error)
@@ -185,6 +186,44 @@ func (sd *shardDelegator) modifyQueryRequest(req *querypb.QueryRequest, scope qu
 }
 
 // Search preforms search operation on shard.
+func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest, sealed []SnapshotItem, growing []SegmentEntry) ([]*internalpb.SearchResults, error) {
+	log := sd.getLogger(ctx)
+	if req.Req.IgnoreGrowing {
+		growing = []SegmentEntry{}
+	}
+
+	sealedNum := lo.SumBy(sealed, func(item SnapshotItem) int { return len(item.Segments) })
+	log.Debug("search segments...",
+		zap.Int("sealedNum", sealedNum),
+		zap.Int("growingNum", len(growing)),
+	)
+
+	req, err := optimizers.OptimizeSearchParams(ctx, req, sd.queryHook, sealedNum)
+	if err != nil {
+		log.Warn("failed to optimize search params", zap.Error(err))
+		return nil, err
+	}
+
+	tasks, err := organizeSubTask(ctx, req, sealed, growing, sd, sd.modifySearchRequest)
+	if err != nil {
+		log.Warn("Search organizeSubTask failed", zap.Error(err))
+		return nil, err
+	}
+
+	results, err := executeSubTasks(ctx, tasks, func(ctx context.Context, req *querypb.SearchRequest, worker cluster.Worker) (*internalpb.SearchResults, error) {
+		return worker.SearchSegments(ctx, req)
+	}, "Search", log)
+	if err != nil {
+		log.Warn("Delegator search failed", zap.Error(err))
+		return nil, err
+	}
+
+	log.Debug("Delegator search done")
+
+	return results, nil
+}
+
+// Search preforms search operation on shard.
 func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest) ([]*internalpb.SearchResults, error) {
 	log := sd.getLogger(ctx)
 	if err := sd.lifetime.Add(lifetime.IsWorking); err != nil {
@@ -229,39 +268,106 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 		return funcutil.SliceContain(existPartitions, segment.PartitionID)
 	})
 
-	if req.Req.IgnoreGrowing {
-		growing = []SegmentEntry{}
+	return sd.search(ctx, req, sealed, growing)
+}
+
+// HybridSearch preforms hybrid search operation on shard.
+func (sd *shardDelegator) HybridSearch(ctx context.Context, req *querypb.HybridSearchRequest) (*querypb.HybridSearchResult, error) {
+	log := sd.getLogger(ctx)
+	if err := sd.lifetime.Add(lifetime.IsWorking); err != nil {
+		return nil, err
+	}
+	defer sd.lifetime.Done()
+
+	if !funcutil.SliceContain(req.GetDmlChannels(), sd.vchannelName) {
+		log.Warn("deletgator received hybrid search request not belongs to it",
+			zap.Strings("reqChannels", req.GetDmlChannels()),
+		)
+		return nil, fmt.Errorf("dml channel not match, delegator channel %s, search channels %v", sd.vchannelName, req.GetDmlChannels())
 	}
 
-	sealedNum := lo.SumBy(sealed, func(item SnapshotItem) int { return len(item.Segments) })
-	log.Debug("search segments...",
-		zap.Int("sealedNum", sealedNum),
-		zap.Int("growingNum", len(growing)),
-	)
+	partitions := req.GetReq().GetPartitionIDs()
+	if !sd.collection.ExistPartition(partitions...) {
+		return nil, merr.WrapErrPartitionNotLoaded(partitions)
+	}
 
-	req, err = optimizers.OptimizeSearchParams(ctx, req, sd.queryHook, sealedNum)
+	// wait tsafe
+	waitTr := timerecord.NewTimeRecorder("wait tSafe")
+	tSafe, err := sd.waitTSafe(ctx, req.Req.GuaranteeTimestamp)
 	if err != nil {
-		log.Warn("failed to optimize search params", zap.Error(err))
+		log.Warn("delegator hybrid search failed to wait tsafe", zap.Error(err))
+		return nil, err
+	}
+	if req.GetReq().GetMvccTimestamp() == 0 {
+		req.Req.MvccTimestamp = tSafe
+	}
+	metrics.QueryNodeSQLatencyWaitTSafe.WithLabelValues(
+		fmt.Sprint(paramtable.GetNodeID()), metrics.HybridSearchLabel).
+		Observe(float64(waitTr.ElapseSpan().Milliseconds()))
+
+	sealed, growing, version, err := sd.distribution.PinReadableSegments(req.GetReq().GetPartitionIDs()...)
+	if err != nil {
+		log.Warn("delegator failed to hybrid search, current distribution is not serviceable")
+		return nil, merr.WrapErrChannelNotAvailable(sd.vchannelName, "distribution is not servcieable")
+	}
+	defer sd.distribution.Unpin(version)
+	existPartitions := sd.collection.GetPartitions()
+	growing = lo.Filter(growing, func(segment SegmentEntry, _ int) bool {
+		return funcutil.SliceContain(existPartitions, segment.PartitionID)
+	})
+
+	futures := make([]*conc.Future[*internalpb.SearchResults], len(req.GetReq().GetReqs()))
+	for index := range req.GetReq().GetReqs() {
+		future := conc.Go(func() (*internalpb.SearchResults, error) {
+			searchReq := &querypb.SearchRequest{
+				Req:             req.GetReq().Reqs[index],
+				DmlChannels:     req.GetDmlChannels(),
+				TotalChannelNum: req.GetTotalChannelNum(),
+				FromShardLeader: true,
+			}
+			searchReq.Req.GuaranteeTimestamp = req.GetReq().GetGuaranteeTimestamp()
+			searchReq.Req.TimeoutTimestamp = req.GetReq().GetTimeoutTimestamp()
+			if searchReq.GetReq().GetMvccTimestamp() == 0 {
+				searchReq.GetReq().MvccTimestamp = tSafe
+			}
+
+			results, err := sd.search(ctx, searchReq, sealed, growing)
+			if err != nil {
+				return nil, err
+			}
+
+			return segments.ReduceSearchResults(ctx,
+				results,
+				searchReq.Req.GetNq(),
+				searchReq.Req.GetTopk(),
+				searchReq.Req.GetMetricType())
+		})
+		futures[index] = future
+	}
+
+	err = conc.AwaitAll(futures...)
+	if err != nil {
 		return nil, err
 	}
 
-	tasks, err := organizeSubTask(ctx, req, sealed, growing, sd, sd.modifySearchRequest)
-	if err != nil {
-		log.Warn("Search organizeSubTask failed", zap.Error(err))
-		return nil, err
+	ret := &querypb.HybridSearchResult{
+		Status:  merr.Success(),
+		Results: make([]*internalpb.SearchResults, len(futures)),
+	}
+	for i, future := range futures {
+		result := future.Value()
+		if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+			log.Debug("delegator hybrid search failed",
+				zap.String("reason", result.GetStatus().GetReason()))
+			return nil, merr.Error(result.GetStatus())
+		}
+
+		ret.Results[i] = result
 	}
 
-	results, err := executeSubTasks(ctx, tasks, func(ctx context.Context, req *querypb.SearchRequest, worker cluster.Worker) (*internalpb.SearchResults, error) {
-		return worker.SearchSegments(ctx, req)
-	}, "Search", log)
-	if err != nil {
-		log.Warn("Delegator search failed", zap.Error(err))
-		return nil, err
-	}
+	log.Debug("Delegator hybrid search done")
 
-	log.Debug("Delegator search done")
-
-	return results, nil
+	return ret, nil
 }
 
 func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error {
