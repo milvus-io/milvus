@@ -24,6 +24,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -122,6 +123,100 @@ func TestDiskIndexParams(t *testing.T) {
 		indexParams = make(map[string]string)
 		err = FillDiskIndexParams(&params, indexParams)
 		assert.Error(t, err)
+	})
+
+	t.Run("patch index build params", func(t *testing.T) {
+		var params paramtable.ComponentParam
+		params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+
+		indexParams := make([]*commonpb.KeyValuePair, 0, 3)
+
+		indexParams = append(indexParams,
+			&commonpb.KeyValuePair{
+				Key:   PQCodeBudgetRatioKey,
+				Value: "0.125",
+			})
+
+		indexParams = append(indexParams,
+			&commonpb.KeyValuePair{
+				Key:   NumBuildThreadRatioKey,
+				Value: "1.0",
+			})
+
+		indexParams = append(indexParams,
+			&commonpb.KeyValuePair{
+				Key:   BeamWidthRatioKey,
+				Value: "4.0",
+			})
+
+		indexParams, err := AppendDiskIndexBuildParams(&params, indexParams)
+		assert.NoError(t, err)
+		assert.True(t, len(indexParams) == 4)
+
+		val := GetIndexParams(indexParams, SearchCacheBudgetRatioKey)
+		cfgVal, cfgErr := strconv.ParseFloat(params.CommonCfg.SearchCacheBudgetGBRatio.GetValue(), 64)
+		assert.NoError(t, cfgErr)
+		iVal, iErr := strconv.ParseFloat(val, 64)
+		assert.NoError(t, iErr)
+		assert.Equal(t, cfgVal, iVal)
+
+		params.Save(params.AutoIndexConfig.Enable.Key, "true")
+
+		jsonStr := `
+				{
+					"build_ratio": "{\"pq_code_budget_gb\": 0.125, \"num_threads\": 1}",
+					"prepare_ratio": "{\"search_cache_budget_gb\": 0.225, \"num_threads\": 8}",
+					"beamwidth_ratio": "8.0"
+				}
+			`
+		params.Save(params.AutoIndexConfig.ExtraParams.Key, jsonStr)
+
+		autoParams := make([]*commonpb.KeyValuePair, 0, 3)
+
+		autoParams = append(autoParams,
+			&commonpb.KeyValuePair{
+				Key:   PQCodeBudgetRatioKey,
+				Value: "0.125",
+			})
+
+		autoParams = append(autoParams,
+			&commonpb.KeyValuePair{
+				Key:   NumBuildThreadRatioKey,
+				Value: "1.0",
+			})
+
+		autoParams = append(autoParams,
+			&commonpb.KeyValuePair{
+				Key:   BeamWidthRatioKey,
+				Value: "4.0",
+			})
+
+		autoParams, err = AppendDiskIndexBuildParams(&params, autoParams)
+		assert.NoError(t, err)
+		assert.True(t, len(autoParams) == 4)
+
+		val = GetIndexParams(autoParams, SearchCacheBudgetRatioKey)
+		iVal, iErr = strconv.ParseFloat(val, 64)
+		assert.NoError(t, iErr)
+		assert.Equal(t, 0.225, iVal)
+
+		newJSONStr := `
+				{
+					"build_ratio": "{\"pq_code_budget_gb\": 0.125, \"num_threads\": 1}",
+					"prepare_ratio": "{\"search_cache_budget_gb\": 0.325, \"num_threads\": 8}",
+					"beamwidth_ratio": "8.0"
+				}
+			`
+		params.Save(params.AutoIndexConfig.ExtraParams.Key, newJSONStr)
+		autoParams, err = AppendDiskIndexBuildParams(&params, autoParams)
+
+		assert.NoError(t, err)
+		assert.True(t, len(autoParams) == 4)
+
+		val = GetIndexParams(autoParams, SearchCacheBudgetRatioKey)
+		iVal, iErr = strconv.ParseFloat(val, 64)
+		assert.NoError(t, iErr)
+		assert.Equal(t, 0.225, iVal)
 	})
 
 	t.Run("set disk index build params", func(t *testing.T) {

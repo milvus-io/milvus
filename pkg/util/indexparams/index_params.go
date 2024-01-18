@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"unsafe"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
@@ -185,6 +186,47 @@ func FillDiskIndexParams(params *paramtable.ComponentParam, indexParams map[stri
 	indexParams[SearchCacheBudgetRatioKey] = searchCacheBudgetGBRatio
 
 	return nil
+}
+
+func GetIndexParams(indexParams []*commonpb.KeyValuePair, key string) string {
+	for _, param := range indexParams {
+		if param.Key == key {
+			return param.Value
+		}
+	}
+	return ""
+}
+
+// AppendDiskIndexBuildParams append index params for `buildIndex` (params not exist in `CreateIndex`)
+func AppendDiskIndexBuildParams(params *paramtable.ComponentParam, indexParams []*commonpb.KeyValuePair) ([]*commonpb.KeyValuePair, error) {
+	existedVal := GetIndexParams(indexParams, SearchCacheBudgetRatioKey)
+	if len(existedVal) > 0 {
+		return indexParams, nil
+	}
+
+	var searchCacheBudgetGBRatio string
+	if params.AutoIndexConfig.Enable.GetAsBool() {
+		extraParams, err := NewBigDataExtraParamsFromJSON(params.AutoIndexConfig.ExtraParams.GetValue())
+		if err != nil {
+			return indexParams, fmt.Errorf("index param search_cache_budget_gb_ratio not exist in AutoIndex Config")
+		}
+		searchCacheBudgetGBRatio = fmt.Sprintf("%f", extraParams.SearchCacheBudgetGBRatio)
+	} else {
+		paramVal, err := strconv.ParseFloat(params.CommonCfg.SearchCacheBudgetGBRatio.GetValue(), 64)
+		if err != nil {
+			return indexParams, fmt.Errorf("index param search_cache_budget_gb_ratio not exist in Config")
+		}
+		searchCacheBudgetGBRatio = fmt.Sprintf("%f", paramVal)
+	}
+
+	if len(searchCacheBudgetGBRatio) > 0 {
+		indexParams = append(indexParams,
+			&commonpb.KeyValuePair{
+				Key:   SearchCacheBudgetRatioKey,
+				Value: searchCacheBudgetGBRatio,
+			})
+	}
+	return indexParams, nil
 }
 
 // SetDiskIndexBuildParams set index build params with ratio params on indexNode
