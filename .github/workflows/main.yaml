@@ -114,6 +114,10 @@ jobs:
         uses: actions/download-artifact@v4.1.0
         with:
           name: code
+          path: code.zip
+      - run: |
+          unzip code.zip
+          rm code.zip
       - name: print working directory
         shell: bash
         run: |
@@ -159,6 +163,10 @@ jobs:
         uses: actions/download-artifact@v4.1.0
         with:
           name: code
+          path: code.zip
+      - run: |
+          unzip code.zip
+          rm code.zip
       - name: print working directory
         shell: bash
         run: |
@@ -203,6 +211,10 @@ jobs:
         uses: actions/download-artifact@v4.1.0
         with:
           name: code
+          path: code.zip
+      - run: |
+          unzip code.zip
+          rm code.zip
       - name: print working directory
         shell: bash
         run: |
