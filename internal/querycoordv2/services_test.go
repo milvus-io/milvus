@@ -196,7 +196,6 @@ func (suite *ServiceSuite) SetupTest() {
 		suite.server.meta,
 		suite.server.targetMgr,
 		suite.targetObserver,
-		suite.server.leaderObserver,
 		&checkers.CheckerController{},
 	)
 

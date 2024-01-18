@@ -110,7 +110,6 @@ type Server struct {
 
 	// Observers
 	collectionObserver *observers.CollectionObserver
-	leaderObserver     *observers.LeaderObserver
 	targetObserver     *observers.TargetObserver
 	replicaObserver    *observers.ReplicaObserver
 	resourceObserver   *observers.ResourceObserver
@@ -363,14 +362,6 @@ func (s *Server) initMeta() error {
 
 func (s *Server) initObserver() {
 	log.Info("init observers")
-	s.leaderObserver = observers.NewLeaderObserver(
-		s.dist,
-		s.meta,
-		s.targetMgr,
-		s.broker,
-		s.cluster,
-		s.nodeMgr,
-	)
 	s.targetObserver = observers.NewTargetObserver(
 		s.meta,
 		s.targetMgr,
@@ -383,7 +374,6 @@ func (s *Server) initObserver() {
 		s.meta,
 		s.targetMgr,
 		s.targetObserver,
-		s.leaderObserver,
 		s.checkerController,
 	)
 
@@ -451,7 +441,6 @@ func (s *Server) startServerLoop() {
 
 	log.Info("start observers...")
 	s.collectionObserver.Start()
-	s.leaderObserver.Start()
 	s.targetObserver.Start()
 	s.replicaObserver.Start()
 	s.resourceObserver.Start()
@@ -494,9 +483,6 @@ func (s *Server) Stop() error {
 	log.Info("stop observers...")
 	if s.collectionObserver != nil {
 		s.collectionObserver.Stop()
-	}
-	if s.leaderObserver != nil {
-		s.leaderObserver.Stop()
 	}
 	if s.targetObserver != nil {
 		s.targetObserver.Stop()
