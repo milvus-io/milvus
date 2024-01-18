@@ -741,7 +741,7 @@ func ValidateUsername(username string) error {
 
 	firstChar := username[0]
 	if !isAlpha(firstChar) {
-		return merr.WrapErrParameterInvalidMsg("invalid user name %s, the first character must be a letter, but got %s", username, firstChar)
+		return merr.WrapErrParameterInvalidMsg("invalid user name %s, the first character must be a letter, but got %s", username, string(firstChar))
 	}
 
 	usernameSize := len(username)
@@ -1582,6 +1582,16 @@ func SendReplicateMessagePack(ctx context.Context, replicateMsgStream msgstream.
 		tsMsg = &msgstream.DropIndexMsg{
 			BaseMsg:          getBaseMsg(ctx, ts),
 			DropIndexRequest: *r,
+		}
+	case *milvuspb.LoadPartitionsRequest:
+		tsMsg = &msgstream.LoadPartitionsMsg{
+			BaseMsg:               getBaseMsg(ctx, ts),
+			LoadPartitionsRequest: *r,
+		}
+	case *milvuspb.ReleasePartitionsRequest:
+		tsMsg = &msgstream.ReleasePartitionsMsg{
+			BaseMsg:                  getBaseMsg(ctx, ts),
+			ReleasePartitionsRequest: *r,
 		}
 	default:
 		log.Warn("unknown request", zap.Any("request", request))

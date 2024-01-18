@@ -50,7 +50,7 @@ func TestCreateDatabase(t *testing.T) {
 	msgBytes, err := msg.Marshal(msg)
 	assert.NoError(t, err)
 
-	var newMsg TsMsg = &ReleaseCollectionMsg{}
+	var newMsg TsMsg = &CreateDatabaseMsg{}
 	_, err = newMsg.Unmarshal("1")
 	assert.Error(t, err)
 
@@ -59,6 +59,7 @@ func TestCreateDatabase(t *testing.T) {
 	assert.EqualValues(t, 200, newMsg.ID())
 	assert.EqualValues(t, 1000, newMsg.BeginTs())
 	assert.EqualValues(t, 1000, newMsg.EndTs())
+	assert.EqualValues(t, "unit_db", newMsg.(*CreateDatabaseMsg).DbName)
 
 	assert.True(t, msg.Size() > 0)
 }
@@ -95,6 +96,7 @@ func TestDropDatabase(t *testing.T) {
 	assert.EqualValues(t, 200, newMsg.ID())
 	assert.EqualValues(t, 1000, newMsg.BeginTs())
 	assert.EqualValues(t, 1000, newMsg.EndTs())
+	assert.EqualValues(t, "unit_db", newMsg.(*DropDatabaseMsg).DbName)
 
 	assert.True(t, msg.Size() > 0)
 }
