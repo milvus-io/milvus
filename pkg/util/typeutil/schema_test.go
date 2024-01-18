@@ -1225,6 +1225,30 @@ func TestMergeFieldData(t *testing.T) {
 					},
 				},
 			}, 1),
+			{
+				Type:      schemapb.DataType_Array,
+				FieldName: "bytes",
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_BytesData{},
+					},
+				},
+				FieldId: 104,
+			},
+			{
+				Type:      schemapb.DataType_Array,
+				FieldName: "bytes",
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_BytesData{
+							BytesData: &schemapb.BytesArray{
+								Data: [][]byte{[]byte("hello"), []byte("world")},
+							},
+						},
+					},
+				},
+				FieldId: 105,
+			},
 		}
 
 		srcFields := []*schemapb.FieldData{
@@ -1240,6 +1264,34 @@ func TestMergeFieldData(t *testing.T) {
 					},
 				},
 			}, 1),
+			{
+				Type:      schemapb.DataType_Array,
+				FieldName: "bytes",
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_BytesData{
+							BytesData: &schemapb.BytesArray{
+								Data: [][]byte{[]byte("hoo"), []byte("foo")},
+							},
+						},
+					},
+				},
+				FieldId: 104,
+			},
+			{
+				Type:      schemapb.DataType_Array,
+				FieldName: "bytes",
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_BytesData{
+							BytesData: &schemapb.BytesArray{
+								Data: [][]byte{[]byte("hoo")},
+							},
+						},
+					},
+				},
+				FieldId: 105,
+			},
 		}
 
 		err := MergeFieldData(dstFields, srcFields)
@@ -1266,6 +1318,8 @@ func TestMergeFieldData(t *testing.T) {
 			},
 		},
 			dstFields[3].GetScalars().GetArrayData().Data)
+		assert.Equal(t, [][]byte{[]byte("hoo"), []byte("foo")}, dstFields[4].GetScalars().GetBytesData().Data)
+		assert.Equal(t, [][]byte{[]byte("hello"), []byte("world"), []byte("hoo")}, dstFields[5].GetScalars().GetBytesData().Data)
 	})
 
 	t.Run("merge with nil", func(t *testing.T) {
