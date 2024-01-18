@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/bits-and-blooms/bloom/v3"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
@@ -325,51 +326,138 @@ func (wb *writeBufferBase) yieldBuffer(segmentID int64) (*storage.InsertData, *s
 	return insert, delta, timeRange, start
 }
 
-// bufferInsert transform InsertMsg into bufferred InsertData and returns primary key field data for future usage.
-func (wb *writeBufferBase) bufferInsert(insertMsgs []*msgstream.InsertMsg, startPos, endPos *msgpb.MsgPosition) (map[int64][]storage.FieldData, error) {
-	insertGroups := lo.GroupBy(insertMsgs, func(msg *msgstream.InsertMsg) int64 { return msg.GetSegmentID() })
-	segmentPKData := make(map[int64][]storage.FieldData)
-	segmentPartition := lo.SliceToMap(insertMsgs, func(msg *msgstream.InsertMsg) (int64, int64) { return msg.GetSegmentID(), msg.GetPartitionID() })
+type inData struct {
+	segmentID   int64
+	partitionID int64
+	data        []*storage.InsertData
+	pkField     []storage.FieldData
+	tsField     []*storage.Int64FieldData
+	rowNum      int64
 
-	for segmentID, msgs := range insertGroups {
-		_, ok := wb.metaCache.GetSegmentByID(segmentID)
-		// new segment
-		if !ok {
-			wb.metaCache.AddSegment(&datapb.SegmentInfo{
-				ID:            segmentID,
-				PartitionID:   segmentPartition[segmentID],
-				CollectionID:  wb.collectionID,
-				InsertChannel: wb.channelName,
-				StartPosition: startPos,
-				State:         commonpb.SegmentState_Growing,
-			}, func(_ *datapb.SegmentInfo) *metacache.BloomFilterSet {
-				return metacache.NewBloomFilterSetWithBatchSize(wb.getEstBatchSize())
-			}, metacache.SetStartPosRecorded(false))
-		}
+	batchBF *storage.PkStatistics
+}
 
-		segBuf := wb.getOrCreateBuffer(segmentID)
-
-		pkData, totalMemSize, err := segBuf.insertBuffer.Buffer(msgs, startPos, endPos)
-		if err != nil {
-			log.Warn("failed to buffer insert data", zap.Int64("segmentID", segmentID), zap.Error(err))
-			return nil, err
-		}
-		segmentPKData[segmentID] = pkData
-		wb.metaCache.UpdateSegments(metacache.UpdateBufferedRows(segBuf.insertBuffer.rows),
-			metacache.WithSegmentIDs(segmentID))
-
-		metrics.DataNodeFlowGraphBufferDataSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), fmt.Sprint(wb.collectionID)).Add(float64(totalMemSize))
+func (id *inData) generatePkStats() {
+	id.batchBF = &storage.PkStatistics{
+		PkFilter: bloom.NewWithEstimates(uint(id.rowNum), paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat()),
 	}
 
-	return segmentPKData, nil
+	for _, ids := range id.pkField {
+		id.batchBF.UpdatePKRange(ids)
+	}
+}
+
+func (id *inData) pkExists(pk storage.PrimaryKey, ts uint64) bool {
+	if !id.batchBF.PkExist(pk) {
+		return false
+	}
+
+	for batchIdx, timestamps := range id.tsField {
+		ids := id.pkField[batchIdx]
+		var primaryKey storage.PrimaryKey
+		switch ids.GetDataType() {
+		case schemapb.DataType_Int64:
+			primaryKey = storage.NewInt64PrimaryKey(0)
+		case schemapb.DataType_VarChar:
+			primaryKey = storage.NewVarCharPrimaryKey("")
+		}
+		for idx := 0; idx < timestamps.RowNum(); idx++ {
+			timestamp := timestamps.GetRow(idx).(int64)
+			if int64(ts) <= timestamp {
+				continue
+			}
+			primaryKey.SetValue(ids.GetRow(idx))
+
+			if pk.EQ(primaryKey) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// prepareInsert transfers InsertMsg into organized InsertData grouped by segmentID
+// also returns primary key field data
+func (wb *writeBufferBase) prepareInsert(insertMsgs []*msgstream.InsertMsg) ([]*inData, error) {
+	groups := lo.GroupBy(insertMsgs, func(msg *msgstream.InsertMsg) int64 { return msg.SegmentID })
+	segmentPartiton := lo.SliceToMap(insertMsgs, func(msg *msgstream.InsertMsg) (int64, int64) { return msg.GetSegmentID(), msg.GetPartitionID() })
+
+	result := make([]*inData, 0, len(groups))
+	for segment, msgs := range groups {
+		inData := &inData{
+			segmentID:   segment,
+			partitionID: segmentPartiton[segment],
+			data:        make([]*storage.InsertData, 0, len(msgs)),
+			pkField:     make([]storage.FieldData, 0, len(msgs)),
+		}
+		for _, msg := range msgs {
+			data, err := storage.InsertMsgToInsertData(msg, wb.collSchema)
+			if err != nil {
+				log.Warn("failed to transfer insert msg to insert data", zap.Error(err))
+				return nil, err
+			}
+
+			pkFieldData, err := storage.GetPkFromInsertData(wb.collSchema, data)
+			if err != nil {
+				return nil, err
+			}
+			if pkFieldData.RowNum() != data.GetRowNum() {
+				return nil, merr.WrapErrServiceInternal("pk column row num not match")
+			}
+
+			tsFieldData, err := storage.GetTimestampFromInsertData(data)
+			if err != nil {
+				return nil, err
+			}
+			if pkFieldData.RowNum() != data.GetRowNum() {
+				return nil, merr.WrapErrServiceInternal("timestamp column row num not match")
+			}
+
+			inData.data = append(inData.data, data)
+			inData.pkField = append(inData.pkField, pkFieldData)
+			inData.tsField = append(inData.tsField, tsFieldData)
+			inData.rowNum += int64(data.GetRowNum())
+		}
+		inData.generatePkStats()
+		result = append(result, inData)
+	}
+
+	return result, nil
+}
+
+// bufferInsert transform InsertMsg into bufferred InsertData and returns primary key field data for future usage.
+func (wb *writeBufferBase) bufferInsert(inData *inData, startPos, endPos *msgpb.MsgPosition) error {
+	_, ok := wb.metaCache.GetSegmentByID(inData.segmentID)
+	// new segment
+	if !ok {
+		wb.metaCache.AddSegment(&datapb.SegmentInfo{
+			ID:            inData.segmentID,
+			PartitionID:   inData.partitionID,
+			CollectionID:  wb.collectionID,
+			InsertChannel: wb.channelName,
+			StartPosition: startPos,
+			State:         commonpb.SegmentState_Growing,
+		}, func(_ *datapb.SegmentInfo) *metacache.BloomFilterSet {
+			return metacache.NewBloomFilterSetWithBatchSize(wb.getEstBatchSize())
+		}, metacache.SetStartPosRecorded(false))
+	}
+
+	segBuf := wb.getOrCreateBuffer(inData.segmentID)
+
+	totalMemSize := segBuf.insertBuffer.Buffer(inData, startPos, endPos)
+	wb.metaCache.UpdateSegments(metacache.UpdateBufferedRows(segBuf.insertBuffer.rows),
+		metacache.WithSegmentIDs(inData.segmentID))
+
+	metrics.DataNodeFlowGraphBufferDataSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), fmt.Sprint(wb.collectionID)).Add(float64(totalMemSize))
+
+	return nil
 }
 
 // bufferDelete buffers DeleteMsg into DeleteData.
-func (wb *writeBufferBase) bufferDelete(segmentID int64, pks []storage.PrimaryKey, tss []typeutil.Timestamp, startPos, endPos *msgpb.MsgPosition) error {
+func (wb *writeBufferBase) bufferDelete(segmentID int64, pks []storage.PrimaryKey, tss []typeutil.Timestamp, startPos, endPos *msgpb.MsgPosition) {
 	segBuf := wb.getOrCreateBuffer(segmentID)
 	bufSize := segBuf.deltaBuffer.Buffer(pks, tss, startPos, endPos)
 	metrics.DataNodeFlowGraphBufferDataSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), fmt.Sprint(wb.collectionID)).Add(float64(bufSize))
-	return nil
 }
 
 func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (syncmgr.Task, error) {
