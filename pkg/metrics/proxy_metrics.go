@@ -297,6 +297,15 @@ var (
 		}, []string{
 			nodeIDLabelName,
 		})
+
+	// ProxyRateLimitReqCount integrates a counter monitoring metric for the rate-limit rpc requests.
+	ProxyRateLimitReqCount = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "rate_limit_req_count",
+			Help:      "count of operation executed",
+		}, []string{nodeIDLabelName, msgTypeLabelName, statusLabelName})
 )
 
 // RegisterProxy registers Proxy metrics
@@ -341,6 +350,7 @@ func RegisterProxy(registry *prometheus.Registry) {
 
 	registry.MustRegister(ProxyWorkLoadScore)
 	registry.MustRegister(ProxyExecutingTotalNq)
+	registry.MustRegister(ProxyRateLimitReqCount)
 }
 
 func CleanupCollectionMetrics(nodeID int64, collection string) {

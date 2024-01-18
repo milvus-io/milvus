@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"strconv"
 
 	"github.com/golang/protobuf/proto"
 	"google.golang.org/grpc"
@@ -27,7 +28,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 // RateLimitInterceptor returns a new unary server interceptors that performs request rate limiting.
@@ -39,12 +42,16 @@ func RateLimitInterceptor(limiter types.Limiter) grpc.UnaryServerInterceptor {
 		}
 
 		err = limiter.Check(collectionID, rt, n)
+		nodeID := strconv.FormatInt(paramtable.GetNodeID(), 10)
+		metrics.ProxyRateLimitReqCount.WithLabelValues(nodeID, rt.String(), metrics.TotalLabel).Inc()
 		if err != nil {
+			metrics.ProxyRateLimitReqCount.WithLabelValues(nodeID, rt.String(), metrics.FailLabel).Inc()
 			rsp := getFailedResponse(req, err)
 			if rsp != nil {
 				return rsp, nil
 			}
 		}
+		metrics.ProxyRateLimitReqCount.WithLabelValues(nodeID, rt.String(), metrics.SuccessLabel).Inc()
 		return handler(ctx, req)
 	}
 }
