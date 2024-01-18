@@ -676,7 +676,7 @@ message AddImportSegmentRequest {
 
 message AddImportSegmentResponse {
   common.Status status = 1;
-  bytes channel_pos = 2;
+  bytes channel_pos = 2; // deprecated
 }
 
 message SaveImportSegmentRequest {
