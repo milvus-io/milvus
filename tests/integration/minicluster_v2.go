@@ -163,7 +163,7 @@ func StartMiniClusterV2(ctx context.Context, opts ...OptionV2) (*MiniClusterV2, 
 	}
 
 	// setup servers
-	cluster.factory = dependency.NewDefaultFactory(true)
+	cluster.factory = dependency.MockDefaultFactory(true, params)
 	chunkManager, err := cluster.factory.NewPersistentStorageChunkManager(cluster.ctx)
 	if err != nil {
 		return nil, err

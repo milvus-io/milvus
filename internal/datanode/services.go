@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/io"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
+	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -347,8 +348,12 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 		log.Warn("failed to sync segments", zap.Error(err))
 		return merr.Status(err), nil
 	}
-
-	pks, err := loadStats(ctx, node.chunkManager, ds.metacache.Schema(), req.GetCompactedTo(), req.GetCollectionId(), req.GetStatsLogs(), 0)
+	err := binlog.DecompressBinLog(storage.StatsBinlog, req.GetCollectionId(), req.GetPartitionId(), req.GetCompactedTo(), req.GetStatsLogs())
+	if err != nil {
+		log.Warn("failed to DecompressBinLog", zap.Error(err))
+		return merr.Status(err), nil
+	}
+	pks, err := loadStats(ctx, node.chunkManager, ds.metacache.Schema(), req.GetCompactedTo(), req.GetStatsLogs())
 	if err != nil {
 		log.Warn("failed to load segment statslog", zap.Error(err))
 		return merr.Status(err), nil
@@ -581,7 +586,15 @@ func (node *DataNode) AddImportSegment(ctx context.Context, req *datapb.AddImpor
 	// Add the new segment to the channel.
 	if len(ds.metacache.GetSegmentIDsBy(metacache.WithSegmentIDs(req.GetSegmentId()), metacache.WithSegmentState(commonpb.SegmentState_Flushed))) == 0 {
 		log.Info("adding a new segment to channel", logFields...)
-		pks, err := loadStats(ctx, node.chunkManager, ds.metacache.Schema(), req.GetSegmentId(), req.GetCollectionId(), req.GetStatsLog(), req.GetBase().GetTimestamp())
+		// no error will be throw
+		err := binlog.DecompressBinLog(storage.StatsBinlog, req.GetCollectionId(), req.GetPartitionId(), req.GetSegmentId(), req.GetStatsLog())
+		if err != nil {
+			log.Warn("failed to DecompressBinLog", zap.Error(err))
+			return &datapb.AddImportSegmentResponse{
+				Status: merr.Status(err),
+			}, nil
+		}
+		pks, err := loadStats(ctx, node.chunkManager, ds.metacache.Schema(), req.GetSegmentId(), req.GetStatsLog())
 		if err != nil {
 			log.Warn("failed to get segment pk stats", zap.Error(err))
 			return &datapb.AddImportSegmentResponse{

@@ -526,8 +526,7 @@ func (_c *MockMsgStream_SetRepackFunc_Call) RunAndReturn(run func(RepackFunc)) *
 func NewMockMsgStream(t interface {
 	mock.TestingT
 	Cleanup(func())
-},
-) *MockMsgStream {
+}) *MockMsgStream {
 	mock := &MockMsgStream{}
 	mock.Mock.Test(t)
 
