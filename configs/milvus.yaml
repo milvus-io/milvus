@@ -373,9 +373,9 @@ dataCoord:
     balanceSilentDuration: 300 # The duration before the channelBalancer on datacoord to run
     balanceInterval: 360 #The interval for the channelBalancer on datacoord to check balance status
   segment:
-    maxSize: 512 # Maximum size of a segment in MB
+    maxSize: 4096 # Maximum size of a segment in MB
     diskSegmentMaxSize: 2048 # Maximum size of a segment in MB for collection which has Disk index
-    sealProportion: 0.23
+    sealProportion: 1.0
     # The time of the assignment expiration in ms
     # Warning! this parameter is an expert variable and closely related to data integrity. Without specific
     # target and solid understanding of the scenarios, it should not be changed. If it's necessary to alter
@@ -390,7 +390,7 @@ dataCoord:
     minSizeFromIdleToSealed: 16 # The min size in MB of segment which can be idle from sealed.
     # The max number of binlog file for one segment, the segment will be sealed if
     # the number of binlog file reaches to max value.
-    maxBinlogFileNumber: 32
+    maxBinlogFileNumber: 20000
     smallProportion: 0.5 # The segment is considered as "small segment" when its # of rows is smaller than
     # (smallProportion * segment max # of rows).
     # A compaction will happen on small segments if the segment after compaction will have
