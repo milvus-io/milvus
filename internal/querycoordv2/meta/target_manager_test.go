@@ -44,10 +44,11 @@ type TargetManagerSuite struct {
 	suite.Suite
 
 	// Data
-	collections []int64
-	partitions  map[int64][]int64
-	channels    map[int64][]string
-	segments    map[int64]map[int64][]int64 // CollectionID, PartitionID -> Segments
+	collections    []int64
+	partitions     map[int64][]int64
+	channels       map[int64][]string
+	segments       map[int64]map[int64][]int64 // CollectionID, PartitionID -> Segments
+	level0Segments []int64
 	// Derived data
 	allChannels []string
 	allSegments []int64
@@ -80,6 +81,7 @@ func (suite *TargetManagerSuite) SetupSuite() {
 			103: {7, 8},
 		},
 	}
+	suite.level0Segments = []int64{10000, 10001}
 
 	suite.allChannels = make([]string, 0)
 	suite.allSegments = make([]int64, 0)
@@ -118,8 +120,9 @@ func (suite *TargetManagerSuite) SetupTest() {
 		dmChannels := make([]*datapb.VchannelInfo, 0)
 		for _, channel := range suite.channels[collection] {
 			dmChannels = append(dmChannels, &datapb.VchannelInfo{
-				CollectionID: collection,
-				ChannelName:  channel,
+				CollectionID:        collection,
+				ChannelName:         channel,
+				LevelZeroSegmentIds: suite.level0Segments,
 			})
 		}
 
@@ -265,7 +268,7 @@ func (suite *TargetManagerSuite) TestRemovePartition() {
 	suite.assertChannels([]string{}, suite.mgr.GetDmChannelsByCollection(collectionID, CurrentTarget))
 
 	suite.mgr.RemovePartition(collectionID, 100)
-	suite.assertSegments([]int64{3, 4}, suite.mgr.GetSealedSegmentsByCollection(collectionID, NextTarget))
+	suite.assertSegments(append([]int64{3, 4}, suite.level0Segments...), suite.mgr.GetSealedSegmentsByCollection(collectionID, NextTarget))
 	suite.assertChannels(suite.channels[collectionID], suite.mgr.GetDmChannelsByCollection(collectionID, NextTarget))
 	suite.assertSegments([]int64{}, suite.mgr.GetSealedSegmentsByCollection(collectionID, CurrentTarget))
 	suite.assertChannels([]string{}, suite.mgr.GetDmChannelsByCollection(collectionID, CurrentTarget))
@@ -310,7 +313,7 @@ func (suite *TargetManagerSuite) getAllSegment(collectionID int64, partitionIDs 
 		}
 	}
 
-	return allSegments
+	return append(allSegments, suite.level0Segments...)
 }
 
 func (suite *TargetManagerSuite) assertChannels(expected []string, actual map[string]*DmChannel) bool {

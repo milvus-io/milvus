@@ -196,7 +196,7 @@ func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) (error,
 
 				dataString := gjson.Get(data.Raw, fieldName).String()
 
-				if field.IsPrimaryKey && collSchema.AutoID {
+				if field.IsPrimaryKey && field.AutoID {
 					if dataString != "" {
 						return merr.WrapErrParameterInvalid("", "set primary key but autoID == true"), reallyDataArray
 					}
@@ -406,7 +406,7 @@ func anyToColumns(rows []map[string]interface{}, sch *schemapb.CollectionSchema)
 	fieldData := make(map[string]*schemapb.FieldData)
 	for _, field := range sch.Fields {
 		// skip auto id pk field
-		if field.IsPrimaryKey && field.AutoID {
+		if (field.IsPrimaryKey && field.AutoID) || field.IsDynamic {
 			continue
 		}
 		var data interface{}
@@ -461,15 +461,13 @@ func anyToColumns(rows []map[string]interface{}, sch *schemapb.CollectionSchema)
 		if err != nil {
 			return nil, err
 		}
-
 		for idx, field := range sch.Fields {
 			// skip auto id pk field
-			if field.IsPrimaryKey && field.AutoID {
+			if (field.IsPrimaryKey && field.AutoID) || field.IsDynamic {
 				// remove pk field from candidates set, avoid adding it into dynamic column
 				delete(set, field.Name)
 				continue
 			}
-
 			candi, ok := set[field.Name]
 			if !ok {
 				return nil, fmt.Errorf("row %d does not has field %s", idx, field.Name)

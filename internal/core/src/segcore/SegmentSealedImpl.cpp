@@ -486,18 +486,21 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
     auto data_type = field_meta.get_data_type();
 
     // write the field data to disk
-    size_t total_written{0};
-    auto data_size = 0;
     std::vector<uint64_t> indices{};
     std::vector<std::vector<uint64_t>> element_indices{};
     FieldDataPtr field_data;
+    size_t total_written = 0;
     while (data.channel->pop(field_data)) {
-        data_size += field_data->Size();
         auto written =
             WriteFieldData(file, data_type, field_data, element_indices);
-        if (written != field_data->Size()) {
-            break;
-        }
+
+        AssertInfo(written == field_data->Size(),
+                   fmt::format("failed to write data file {}, written {} but "
+                               "total {}, err: {}",
+                               filepath.c_str(),
+                               written,
+                               field_data->Size(),
+                               strerror(errno)));
 
         for (auto i = 0; i < field_data->get_num_rows(); i++) {
             auto size = field_data->Size(i);
@@ -505,14 +508,6 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
             total_written += size;
         }
     }
-    AssertInfo(
-        total_written == data_size,
-        fmt::format(
-            "failed to write data file {}, written {} but total {}, err: {}",
-            filepath.c_str(),
-            total_written,
-            data_size,
-            strerror(errno)));
 
     auto num_rows = data.row_count;
     std::shared_ptr<ColumnBase> column{};
@@ -926,16 +921,7 @@ SegmentSealedImpl::check_search(const query::Plan* plan) const {
     AssertInfo(plan->extra_info_opt_.has_value(),
                "Extra info of search plan doesn't have value");
 
-    auto& metric_str = plan->plan_node_->search_info_.metric_type_;
-    auto searched_field_id = plan->plan_node_->search_info_.field_id_;
-    auto index_meta =
-        col_index_meta_->GetFieldIndexMeta(FieldId(searched_field_id));
-    if (metric_str.empty()) {
-        metric_str = index_meta.GeMetricType();
-    } else {
-        AssertInfo(metric_str == index_meta.GeMetricType(),
-                   "metric type not match");
-    }
+    check_metric_type(plan, col_index_meta_);
 
     if (!is_system_field_ready()) {
         PanicInfo(

@@ -869,6 +869,7 @@ type rootCoordConfig struct {
 	ImportTaskSubPath           ParamItem `refreshable:"true"`
 	EnableActiveStandby         ParamItem `refreshable:"false"`
 	MaxDatabaseNum              ParamItem `refreshable:"false"`
+	MaxGeneralCapacity          ParamItem `refreshable:"true"`
 }
 
 func (p *rootCoordConfig) init(base *BaseTable) {
@@ -948,6 +949,21 @@ func (p *rootCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.MaxDatabaseNum.Init(base.mgr)
+
+	p.MaxGeneralCapacity = ParamItem{
+		Key:          "rootCoord.maxGeneralCapacity",
+		Version:      "2.3.5",
+		DefaultValue: "65536",
+		Doc:          "upper limit for the sum of of product of partitionNumber and shardNumber",
+		Export:       true,
+		Formatter: func(v string) string {
+			if getAsInt(v) < 512 {
+				return "512"
+			}
+			return v
+		},
+	}
+	p.MaxGeneralCapacity.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -1342,6 +1358,9 @@ type queryCoordConfig struct {
 	HeartbeatAvailableInterval ParamItem `refreshable:"true"`
 	LoadTimeoutSeconds         ParamItem `refreshable:"true"`
 
+	DistributionRequestTimeout ParamItem `refreshable:"true"`
+	HeartBeatWarningLag        ParamItem `refreshable:"true"`
+
 	// Deprecated: Since 2.2.2, QueryCoord do not use HandOff logic anymore
 	CheckHandoffInterval ParamItem `refreshable:"true"`
 	EnableActiveStandby  ParamItem `refreshable:"false"`
@@ -1722,6 +1741,24 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.CheckNodeSessionInterval.Init(base.mgr)
+
+	p.DistributionRequestTimeout = ParamItem{
+		Key:          "queryCoord.distRequestTimeout",
+		Version:      "2.3.6",
+		DefaultValue: "5000",
+		Doc:          "the request timeout for querycoord fetching data distribution from querynodes, in milliseconds",
+		Export:       true,
+	}
+	p.DistributionRequestTimeout.Init(base.mgr)
+
+	p.HeartBeatWarningLag = ParamItem{
+		Key:          "queryCoord.heatbeatWarningLag",
+		Version:      "2.3.6",
+		DefaultValue: "5000",
+		Doc:          "the lag value for querycoord report warning when last heatbeat is too old, in milliseconds",
+		Export:       true,
+	}
+	p.HeartBeatWarningLag.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -2009,9 +2046,9 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 	p.MaxReadConcurrency.Init(base.mgr)
 
 	p.MaxGpuReadConcurrency = ParamItem{
-		Key:          "queryNode.scheduler.maGpuReadConcurrency",
+		Key:          "queryNode.scheduler.maxGpuReadConcurrency",
 		Version:      "2.0.0",
-		DefaultValue: "8",
+		DefaultValue: "6",
 	}
 	p.MaxGpuReadConcurrency.Init(base.mgr)
 

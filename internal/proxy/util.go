@@ -73,6 +73,7 @@ const (
 	InvertedIndexType = "INVERTED"
 
 	defaultRRFParamsValue = 60
+	maxRRFParamsValue     = 16384
 )
 
 var logger = log.L().WithOptions(zap.Fields(zap.String("role", typeutil.ProxyRole)))

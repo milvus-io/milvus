@@ -18,7 +18,7 @@ package integration
 
 import (
 	"context"
-	"math/rand"
+	"flag"
 	"os"
 	"strings"
 	"time"
@@ -29,6 +29,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
+
+var caseTimeout time.Duration
+
+func init() {
+	flag.DurationVar(&caseTimeout, "caseTimeout", 10*time.Minute, "timeout duration for single case")
+}
 
 // EmbedEtcdSuite contains embed setup & teardown related logic
 type EmbedEtcdSuite struct {
@@ -66,7 +72,6 @@ type MiniClusterSuite struct {
 }
 
 func (s *MiniClusterSuite) SetupSuite() {
-	rand.Seed(time.Now().UnixNano())
 	s.Require().NoError(s.SetupEmbedEtcd())
 }
 
@@ -84,7 +89,8 @@ func (s *MiniClusterSuite) SetupTest() {
 
 	params = paramtable.Get()
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*180)
+	s.T().Log("Setup case timeout", caseTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), caseTimeout)
 	s.cancelFunc = cancel
 	c, err := StartMiniClusterV2(ctx, func(c *MiniClusterV2) {
 		// change config etcd endpoints
