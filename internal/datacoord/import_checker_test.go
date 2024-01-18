@@ -49,7 +49,7 @@ func TestImportChecker(t *testing.T) {
 		return rand.Int63(), nil
 	})
 
-	imeta, err := NewImportMeta(catalog)
+	imeta, err := NewImportMeta(nil, catalog)
 	assert.NoError(t, err)
 
 	pit1 := &preImportTask{

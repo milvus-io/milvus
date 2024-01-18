@@ -63,7 +63,8 @@ func NewSyncTask(ctx context.Context, task *ImportTask, segmentID, partitionID i
 		WithCollectionID(task.GetCollectionID()).
 		WithPartitionID(partitionID).
 		WithChannelName(vchannel).
-		WithSegmentID(segmentID)
+		WithSegmentID(segmentID).
+		WithBatchSize(int64(insertData.GetRowNum()))
 
 	return serializer.EncodeBuffer(ctx, syncPack)
 }

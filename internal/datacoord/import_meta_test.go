@@ -39,7 +39,7 @@ func TestImportMeta_Restore(t *testing.T) {
 		},
 	}, nil)
 
-	meta, err := NewImportMeta(catalog)
+	meta, err := NewImportMeta(nil, catalog)
 	assert.NoError(t, err)
 
 	tasks := meta.GetBy()
@@ -58,7 +58,7 @@ func TestImportMeta_Normal(t *testing.T) {
 	catalog.EXPECT().SaveImportTask(mock.Anything).Return(nil)
 	catalog.EXPECT().DropImportTask(mock.Anything).Return(nil)
 
-	meta, err := NewImportMeta(catalog)
+	meta, err := NewImportMeta(nil, catalog)
 	assert.NoError(t, err)
 
 	task1 := &importTask{
@@ -117,7 +117,7 @@ func TestImportMeta_Failed(t *testing.T) {
 	catalog.EXPECT().SaveImportTask(mock.Anything).Return(mockErr)
 	catalog.EXPECT().DropImportTask(mock.Anything).Return(mockErr)
 
-	meta, err := NewImportMeta(catalog)
+	meta, err := NewImportMeta(nil, catalog)
 	assert.NoError(t, err)
 
 	task1 := &importTask{

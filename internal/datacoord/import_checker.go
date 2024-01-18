@@ -195,7 +195,7 @@ func (c *importChecker) checkImportState(requestID int64) {
 			return
 		}
 	}
-	if AreAllTasksFinished(tasks, c.meta) {
+	if AreAllTasksFinished(tasks, c.meta, c.imeta) {
 		return
 	}
 	for _, task := range tasks {

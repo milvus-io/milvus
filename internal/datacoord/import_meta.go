@@ -17,6 +17,10 @@
 package datacoord
 
 import (
+	"context"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/pkg/util/retry"
 	"sync"
 	"time"
 
@@ -39,7 +43,19 @@ type importMeta struct {
 	catalog metastore.DataCoordCatalog
 }
 
-func NewImportMeta(catalog metastore.DataCoordCatalog) (ImportMeta, error) {
+func NewImportMeta(broker broker.Broker, catalog metastore.DataCoordCatalog) (ImportMeta, error) {
+	// TODO: dyh, remove dependency of broker
+	getSchema := func(collectionID int64) (*schemapb.CollectionSchema, error) {
+		var schema *schemapb.CollectionSchema
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		err := retry.Do(ctx, func() error {
+			resp, err := broker.DescribeCollectionInternal(ctx, collectionID)
+			schema = resp.GetSchema()
+			return err
+		})
+		return schema, err
+	}
 	restoredTasks, err := catalog.ListImportTasks()
 	if err != nil {
 		return nil, err
@@ -48,9 +64,29 @@ func NewImportMeta(catalog metastore.DataCoordCatalog) (ImportMeta, error) {
 	for _, t := range restoredTasks {
 		switch task := t.(type) {
 		case *datapb.PreImportTask:
-			tasks[task.GetTaskID()] = &preImportTask{PreImportTask: task} // TODO: dyh, resolve empty schema
+			catalog.DropImportTask(task.GetTaskID())
+			continue
+			schema, err := getSchema(task.GetCollectionID())
+			if err != nil {
+				return nil, err
+			}
+			tasks[task.GetTaskID()] = &preImportTask{
+				PreImportTask:  task,
+				schema:         schema,
+				lastActiveTime: time.Now(),
+			}
 		case *datapb.ImportTaskV2:
-			tasks[task.GetTaskID()] = &importTask{ImportTaskV2: task}
+			catalog.DropImportTask(task.GetTaskID())
+			continue
+			schema, err := getSchema(task.GetCollectionID())
+			if err != nil {
+				return nil, err
+			}
+			tasks[task.GetTaskID()] = &importTask{
+				ImportTaskV2:   task,
+				schema:         schema,
+				lastActiveTime: time.Now(),
+			}
 		}
 	}
 	return &importMeta{

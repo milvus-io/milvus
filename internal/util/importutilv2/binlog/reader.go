@@ -19,6 +19,7 @@ package binlog
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -188,7 +189,7 @@ OUTER:
 		row := insertData.GetRow(i)
 		err = result.Append(row)
 		if err != nil {
-			return nil, err
+			return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to append row, err=%s", err.Error()))
 		}
 	}
 	return result, nil

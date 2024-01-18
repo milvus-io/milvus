@@ -62,7 +62,7 @@ func (s *ImportSchedulerSuite) SetupTest() {
 		ID:     s.collectionID,
 		Schema: newTestSchema(),
 	})
-	s.imeta, err = NewImportMeta(s.catalog)
+	s.imeta, err = NewImportMeta(nil, s.catalog)
 	s.NoError(err)
 	s.scheduler = NewImportScheduler(s.meta, s.cluster, s.alloc, s.imeta).(*importScheduler)
 }

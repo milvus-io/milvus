@@ -107,7 +107,7 @@ func (i *InsertData) Append(row map[FieldID]interface{}) error {
 		}
 
 		if err := field.AppendRow(v); err != nil {
-			return err
+			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("append data for field %d failed, err=%s", fID, err.Error()))
 		}
 	}
 

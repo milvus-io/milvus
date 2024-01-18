@@ -384,7 +384,7 @@ func (s *Server) initDataCoord() error {
 	s.initGarbageCollection(storageCli)
 	s.initIndexBuilder(storageCli)
 
-	s.importMeta, err = NewImportMeta(s.meta.catalog)
+	s.importMeta, err = NewImportMeta(s.broker, s.meta.catalog)
 	if err != nil {
 		return err
 	}

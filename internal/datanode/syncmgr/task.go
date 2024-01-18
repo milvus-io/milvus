@@ -192,7 +192,7 @@ func (t *SyncTask) Run() (err error) {
 
 	t.metacache.UpdateSegments(metacache.MergeSegmentAction(actions...), metacache.WithSegmentIDs(t.segment.SegmentID()))
 
-	log.Info("task done")
+	log.Info("task done", zap.Float64("flushedSize", totalSize))
 
 	if !t.isFlush {
 		metrics.DataNodeAutoFlushBufferCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SuccessLabel, metricSegLevel).Inc()

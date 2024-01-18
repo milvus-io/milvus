@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 const (
@@ -38,18 +39,24 @@ type reader struct {
 	schema *schemapb.CollectionSchema
 
 	bufferSize  int
+	count       int64
 	isOldFormat bool
 
 	parser RowParser
 }
 
 func NewReader(r io.Reader, schema *schemapb.CollectionSchema, bufferSize int) (*reader, error) {
+	var err error
+	count, err := readCountPerBatch(bufferSize, schema)
+	if err != nil {
+		return nil, err
+	}
 	reader := &reader{
 		dec:        json.NewDecoder(r),
 		schema:     schema,
 		bufferSize: bufferSize,
+		count:      count,
 	}
-	var err error
 	reader.parser, err = NewRowParser(schema)
 	if err != nil {
 		return nil, err
@@ -69,7 +76,7 @@ func (j *reader) Init() error {
 	j.dec.UseNumber()
 	t, err := j.dec.Token()
 	if err != nil {
-		return merr.WrapErrImportFailed(fmt.Sprintf("failed to decode JSON, error: %v", err))
+		return merr.WrapErrImportFailed(fmt.Sprintf("init failed, failed to decode JSON, error: %v", err))
 	}
 	if t != json.Delim('{') && t != json.Delim('[') {
 		return merr.WrapErrImportFailed("invalid JSON format, the content should be started with '{' or '['")
@@ -109,6 +116,7 @@ func (j *reader) Read() (*storage.InsertData, error) {
 			return nil, merr.WrapErrImportFailed("invalid JSON format, rows list should begin with '['")
 		}
 	}
+	var cnt int64 = 0
 	for j.dec.More() {
 		var value any
 		if err = j.dec.Decode(&value); err != nil {
@@ -120,10 +128,14 @@ func (j *reader) Read() (*storage.InsertData, error) {
 		}
 		err = insertData.Append(row)
 		if err != nil {
-			return nil, err
+			return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to append row, err=%s", err.Error()))
 		}
-		if insertData.GetMemorySize() >= j.bufferSize {
-			break
+		cnt++
+		if cnt >= j.count {
+			cnt = 0
+			if insertData.GetMemorySize() >= j.bufferSize {
+				break
+			}
 		}
 	}
 
@@ -141,3 +153,15 @@ func (j *reader) Read() (*storage.InsertData, error) {
 }
 
 func (j *reader) Close() {}
+
+func readCountPerBatch(bufferSize int, schema *schemapb.CollectionSchema) (int64, error) {
+	sizePerRecord, err := typeutil.EstimateMaxSizePerRecord(schema)
+	if err != nil {
+		return 0, err
+	}
+	rowCount := int64(bufferSize) / int64(sizePerRecord)
+	if rowCount >= 1000 {
+		return 1000, nil
+	}
+	return rowCount, nil
+}

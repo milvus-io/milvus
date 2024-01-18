@@ -18,6 +18,8 @@ package datacoord
 
 import (
 	"context"
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/pkg/log"
 	"sort"
 	"time"
 
@@ -245,20 +247,32 @@ func AddImportSegment(cluster Cluster, meta *meta, segmentID int64) error {
 	return err
 }
 
-func AreAllTasksFinished(tasks []ImportTask, meta *meta) bool {
+func AreAllTasksFinished(tasks []ImportTask, meta *meta, imeta ImportMeta) bool {
+	var finished = true
 	for _, task := range tasks {
 		if task.GetState() != internalpb.ImportState_Completed {
 			return false
 		}
 		segmentIDs := task.(*importTask).GetSegmentIDs()
+		validSegments := make([]int64, 0)
 		for _, segmentID := range segmentIDs {
 			segment := meta.GetSegment(segmentID)
+			if segment.GetState() == commonpb.SegmentState_Dropped {
+				continue // this segment has been compacted
+			}
+			validSegments = append(validSegments, segmentID)
 			if segment.GetIsImporting() {
-				return false
+				finished = false
+			}
+		}
+		if len(validSegments) < len(segmentIDs) {
+			err := imeta.Update(task.GetTaskID(), UpdateSegmentIDs(validSegments))
+			if err != nil {
+				log.Warn("update segmentIDs failed", WrapLogFields(task, zap.Error(err))...)
 			}
 		}
 	}
-	return true
+	return finished
 }
 
 func GetImportProgress(requestID int64, imeta ImportMeta, meta *meta) (int64, internalpb.ImportState, string) {

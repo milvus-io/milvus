@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"sort"
 	"sync"
 	"time"
 
@@ -84,27 +85,37 @@ func (s *importScheduler) Close() {
 }
 
 func (s *importScheduler) process() {
-	tasks := s.imeta.GetBy()
-	for _, task := range tasks {
-		switch task.GetState() {
-		case internalpb.ImportState_Pending:
-			switch task.GetType() {
-			case PreImportTaskType:
-				s.processPendingPreImport(task)
-			case ImportTaskType:
-				s.processPendingImport(task)
+	all := s.imeta.GetBy()
+	tasksByReq := lo.GroupBy(all, func(t ImportTask) int64 {
+		return t.GetRequestID()
+	})
+	requests := lo.Keys(tasksByReq)
+	sort.Slice(requests, func(i, j int) bool {
+		return requests[i] < requests[j]
+	})
+	for _, request := range requests {
+		tasks := tasksByReq[request]
+		for _, task := range tasks {
+			switch task.GetState() {
+			case internalpb.ImportState_Pending:
+				switch task.GetType() {
+				case PreImportTaskType:
+					s.processPendingPreImport(task)
+				case ImportTaskType:
+					s.processPendingImport(task)
+				}
+			case internalpb.ImportState_InProgress:
+				switch task.GetType() {
+				case PreImportTaskType:
+					s.processInProgressPreImport(task)
+				case ImportTaskType:
+					s.processInProgressImport(task)
+				}
+			case internalpb.ImportState_Completed:
+				s.processCompleted(task)
+			case internalpb.ImportState_Failed:
+				s.processFailed(task)
 			}
-		case internalpb.ImportState_InProgress:
-			switch task.GetType() {
-			case PreImportTaskType:
-				s.processInProgressPreImport(task)
-			case ImportTaskType:
-				s.processInProgressImport(task)
-			}
-		case internalpb.ImportState_Completed:
-			s.processCompleted(task)
-		case internalpb.ImportState_Failed:
-			s.processFailed(task)
 		}
 	}
 }
@@ -137,13 +148,13 @@ func (s *importScheduler) getIdleNode() int64 {
 			return nodeID
 		}
 	}
+	//log.Warn("no datanode can be scheduled")
 	return NullNodeID
 }
 
 func (s *importScheduler) processPendingPreImport(task ImportTask) {
 	nodeID := s.getIdleNode()
 	if nodeID == NullNodeID {
-		log.Warn("no datanode can be scheduled", WrapLogFields(task)...)
 		return
 	}
 	log.Info("processing pending preimport task...", WrapLogFields(task)...)
@@ -165,7 +176,6 @@ func (s *importScheduler) processPendingPreImport(task ImportTask) {
 func (s *importScheduler) processPendingImport(task ImportTask) {
 	nodeID := s.getIdleNode()
 	if nodeID == NullNodeID {
-		log.Warn("no datanode can be scheduled", WrapLogFields(task)...)
 		return
 	}
 	log.Info("processing pending import task...", WrapLogFields(task)...)
@@ -232,8 +242,11 @@ func (s *importScheduler) processInProgressImport(task ImportTask) {
 		return
 	}
 	for _, info := range resp.GetImportSegmentsInfo() {
-		// TODO: dyh, check if segment info changed to save meta op
-		op1 := UpdateBinlogsOperator(info.GetSegmentID(), info.GetBinlogs(), info.GetStatslogs(), nil)
+		segment := s.meta.GetSegment(info.GetSegmentID())
+		if info.GetImportedRows() <= segment.GetNumOfRows() {
+			continue // rows not changed, no need to update
+		}
+		op1 := ReplaceBinlogsOperator(info.GetSegmentID(), info.GetBinlogs(), info.GetStatslogs(), nil)
 		op2 := UpdateNumOfRows(info.GetSegmentID(), info.GetImportedRows())
 		err = s.meta.UpdateSegmentsInfo(op1, op2)
 		if err != nil {

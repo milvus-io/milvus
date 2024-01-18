@@ -107,7 +107,6 @@ func WrapLogFields(task Task, fields ...zap.Field) []zap.Field {
 		zap.Int64("taskID", task.GetTaskID()),
 		zap.Int64("requestID", task.GetRequestID()),
 		zap.Int64("collectionID", task.GetCollectionID()),
-		zap.String("state", task.GetState().String()),
 		zap.String("type", task.GetType().String()),
 	}
 	res = append(res, fields...)
@@ -231,6 +230,7 @@ func (e *executor) importFile(reader importutilv2.Reader, task Task) error {
 		if err != nil {
 			return err
 		}
+		readRows := data.GetRowNum()
 		hashedData, err := HashData(iTask, data)
 		if err != nil {
 			return err
@@ -241,6 +241,7 @@ func (e *executor) importFile(reader importutilv2.Reader, task Task) error {
 			return err
 		}
 		metrics.DataNodeImportLatency.WithLabelValues("sync").Observe(float64(tr.RecordSpan().Milliseconds()))
+		log.Info("importing file...", WrapLogFields(task, zap.Int("readRows", readRows))...)
 	}
 }
 
@@ -272,10 +273,7 @@ func (e *executor) Sync(task *ImportTask, hashedData HashedData) error {
 			return err
 		}
 		e.manager.Update(task.GetTaskID(), UpdateSegmentInfo(segmentInfo))
+		log.Info("sync import data done", WrapLogFields(task, zap.Any("segmentInfo", segmentInfo))...)
 	}
-	importedRows := lo.Map(task.GetSegmentsInfo(), func(info *datapb.ImportSegmentInfo, _ int) int64 {
-		return info.GetImportedRows()
-	})
-	log.Info("sync import data done", WrapLogFields(task, zap.Any("importedRows", importedRows))...)
 	return nil
 }

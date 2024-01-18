@@ -429,7 +429,7 @@ func (s *SegmentManager) AddImportSegment(ctx context.Context, collectionID Uniq
 	log.Info("add import segment done",
 		zap.Int64("CollectionID", segmentInfo.CollectionID),
 		zap.Int64("SegmentID", segmentInfo.ID),
-		zap.Int("Rows", maxNumOfRows),
+		zap.Int("MaxNumOfRows", maxNumOfRows),
 		zap.String("Channel", segmentInfo.InsertChannel))
 
 	return segment, nil
