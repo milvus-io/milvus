@@ -59,9 +59,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
            const IdArray* pks,
            const Timestamp* timestamps) override;
 
-    int64_t
-    GetMemoryUsageInBytes() const override;
-
     void
     LoadDeletedRecord(const LoadDeletedRecordInfo& info) override;
 

@@ -91,9 +91,6 @@ class SegmentSealedImpl : public SegmentSealed {
 
  public:
     int64_t
-    GetMemoryUsageInBytes() const override;
-
-    int64_t
     get_row_count() const override;
 
     int64_t
