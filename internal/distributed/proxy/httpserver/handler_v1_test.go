@@ -765,6 +765,7 @@ func TestInsertForDataType(t *testing.T) {
 		"[success]kinds of data type": newCollectionSchema(generateCollectionSchema(schemapb.DataType_Int64, false)),
 		"[success]use binary vector":  newCollectionSchema(generateCollectionSchema(schemapb.DataType_Int64, true)),
 		"[success]with dynamic field": withDynamicField(newCollectionSchema(generateCollectionSchema(schemapb.DataType_Int64, false))),
+		"[success]with array fields":  withArrayField(newCollectionSchema(generateCollectionSchema(schemapb.DataType_Int64, false))),
 	}
 	for name, schema := range schemas {
 		t.Run(name, func(t *testing.T) {
@@ -795,9 +796,7 @@ func TestInsertForDataType(t *testing.T) {
 			assert.Equal(t, "{\"code\":200,\"data\":{\"insertCount\":3,\"insertIds\":[1,2,3]}}", w.Body.String())
 		})
 	}
-	schemas = map[string]*schemapb.CollectionSchema{
-		"with unsupport field type": withUnsupportField(newCollectionSchema(generateCollectionSchema(schemapb.DataType_Int64, false))),
-	}
+	schemas = map[string]*schemapb.CollectionSchema{}
 	for name, schema := range schemas {
 		t.Run(name, func(t *testing.T) {
 			mp := mocks.NewMockProxy(t)
