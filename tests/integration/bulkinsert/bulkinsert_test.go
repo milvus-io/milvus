@@ -95,6 +95,9 @@ func (s *BulkInsertSuite) TestBulkInsert() {
 	s.Equal(showCollectionsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
 
+	err = os.MkdirAll(c.ChunkManager.RootPath(), os.ModePerm)
+	s.NoError(err)
+
 	err = GenerateNumpyFile(c.ChunkManager.RootPath()+"/"+"embeddings.npy", 100, schemapb.DataType_FloatVector, []*commonpb.KeyValuePair{
 		{
 			Key:   common.DimKey,

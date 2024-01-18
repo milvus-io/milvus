@@ -7,6 +7,7 @@ option go_package = "github.com/milvus-io/milvus/internal/proto/indexpb";
 import "common.proto";
 import "internal.proto";
 import "milvus.proto";
+import "schema.proto";
 
 service IndexCoord {
   rpc GetComponentStates(milvus.GetComponentStatesRequest) returns (milvus.ComponentStates) {}
@@ -215,18 +216,29 @@ message StorageConfig {
 }
 
 message CreateJobRequest {
-  string clusterID = 1;
-  string index_file_prefix = 2;
-  int64 buildID = 3;
-  repeated string data_paths = 4;
-  int64 index_version = 5;
-  int64 indexID = 6;
-  string index_name = 7;
-  StorageConfig storage_config = 8;
-  repeated common.KeyValuePair index_params = 9;
-  repeated common.KeyValuePair type_params = 10;
-  int64 num_rows = 11;
-  int32 current_index_version = 12;
+    string clusterID = 1;
+    string index_file_prefix = 2;
+    int64 buildID = 3;
+    repeated string data_paths = 4;
+    int64 index_version = 5;
+    int64 indexID = 6;
+    string index_name = 7;
+    StorageConfig storage_config = 8;
+    repeated common.KeyValuePair index_params = 9;
+    repeated common.KeyValuePair type_params = 10;
+    int64 num_rows = 11;
+    int32 current_index_version = 12;
+    int64 collectionID = 13;
+    int64 partitionID = 14;
+    int64 segmentID = 15;
+    int64 fieldID = 16;
+    string field_name = 17;
+    schema.DataType field_type = 18;
+    string store_path = 19;
+    int64 store_version = 20;
+    string index_store_path = 21;
+    int64 dim = 22;
+    repeated int64 data_ids = 23;
 }
 
 message QueryJobsRequest {

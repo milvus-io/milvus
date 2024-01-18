@@ -29,6 +29,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
+	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -460,6 +461,11 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 	}
 
 	log.Info("compact start", zap.Int32("timeout in seconds", t.plan.GetTimeoutInSeconds()))
+	err = binlog.DecompressCompactionBinlogs(t.plan.GetSegmentBinlogs())
+	if err != nil {
+		log.Warn("DecompressCompactionBinlogs fails", zap.Error(err))
+		return nil, err
+	}
 	segIDs := make([]UniqueID, 0, len(t.plan.GetSegmentBinlogs()))
 	for _, s := range t.plan.GetSegmentBinlogs() {
 		segIDs = append(segIDs, s.GetSegmentID())

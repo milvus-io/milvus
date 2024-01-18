@@ -31,8 +31,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -266,6 +268,7 @@ func (s *Server) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsert
 			Status: merr.Status(err),
 		}, nil
 	}
+
 	segment := s.meta.GetHealthySegment(req.GetSegmentID())
 	if segment == nil {
 		return &datapb.GetInsertBinlogPathsResponse{
@@ -273,6 +276,12 @@ func (s *Server) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsert
 		}, nil
 	}
 
+	err := binlog.DecompressBinLog(storage.InsertBinlog, segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID(), segment.GetBinlogs())
+	if err != nil {
+		return &datapb.GetInsertBinlogPathsResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
 	resp := &datapb.GetInsertBinlogPathsResponse{
 		Status: merr.Success(),
 	}
@@ -439,6 +448,13 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 			return merr.Status(err), nil
 		}
 	}
+	// for compatibility issue, before 2.3.4, SaveBinlogPaths has only logpath
+	// try to parse path and fill logid
+	err := binlog.CompressSaveBinlogPaths(req)
+	if err != nil {
+		log.Warn("fail to CompressSaveBinlogPaths", zap.String("channel", channelName), zap.Error(err))
+		return merr.Status(err), nil
+	}
 
 	// validate
 	segmentID := req.GetSegmentID()
@@ -464,7 +480,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	}
 
 	// Set segment to SegmentState_Flushing. Also save binlogs and checkpoints.
-	err := s.meta.UpdateFlushSegmentsInfo(
+	err = s.meta.UpdateFlushSegmentsInfo(
 		req.GetSegmentID(),
 		req.GetFlushed(),
 		req.GetDropped(),

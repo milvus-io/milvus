@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -367,6 +368,12 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 		ok         bool
 	)
 
+	err = binlog.DecompressBinLog(storage.StatsBinlog, req.GetCollectionId(), req.GetPartitionId(), req.GetCompactedTo(), req.GetStatsLogs())
+	if err != nil {
+		log.Warn("failed to DecompressBinLog", zap.Error(err))
+		return merr.Status(err), nil
+	}
+
 	for _, fromSegment := range req.GetCompactedFrom() {
 		log := log.With(
 			zap.Int64("segment", fromSegment),
@@ -612,6 +619,13 @@ func (node *DataNode) AddImportSegment(ctx context.Context, req *datapb.AddImpor
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    "failed to get channel position",
 			},
+		}, nil
+	}
+	err = binlog.DecompressBinLog(storage.StatsBinlog, req.GetCollectionId(), req.GetPartitionId(), req.GetSegmentId(), req.GetStatsLog())
+	if err != nil {
+		log.Warn("failed to DecompressBinLog", zap.Error(err))
+		return &datapb.AddImportSegmentResponse{
+			Status: merr.Status(err),
 		}, nil
 	}
 	// Add the new segment to the channel.

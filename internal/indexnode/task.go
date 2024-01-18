@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
@@ -158,6 +159,12 @@ func (it *indexBuildTask) Prepare(ctx context.Context) error {
 	typeParams := make(map[string]string)
 	indexParams := make(map[string]string)
 
+	if len(it.req.DataPaths) == 0 {
+		for _, id := range it.req.GetDataIds() {
+			path := metautil.BuildInsertLogPath(it.req.GetStorageConfig().RootPath, it.req.GetCollectionID(), it.req.GetPartitionID(), it.req.GetSegmentID(), it.req.GetFieldID(), id)
+			it.req.DataPaths = append(it.req.DataPaths, path)
+		}
+	}
 	// type params can be removed
 	for _, kvPair := range it.req.GetTypeParams() {
 		key, value := kvPair.GetKey(), kvPair.GetValue()

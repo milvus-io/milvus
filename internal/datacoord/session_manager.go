@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	grpcdatanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
+	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -283,7 +284,8 @@ func (c *SessionManagerImpl) GetCompactionState() map[int64]*datapb.CompactionSt
 					commonpbutil.WithSourceID(paramtable.GetNodeID()),
 				),
 			})
-			if err != nil {
+
+			if err := merr.CheckRPCCall(resp, err); err != nil {
 				log.Info("Get State failed", zap.Error(err))
 				return
 			}
@@ -293,6 +295,9 @@ func (c *SessionManagerImpl) GetCompactionState() map[int64]*datapb.CompactionSt
 				return
 			}
 			for _, rst := range resp.GetResults() {
+				// for compatibility issue, before 2.3.4, resp has only logpath
+				// try to parse path and fill logid
+				binlog.CompressCompactionBinlogs(rst.GetResult())
 				plans.Insert(rst.PlanID, rst)
 			}
 		}(nodeID, s)

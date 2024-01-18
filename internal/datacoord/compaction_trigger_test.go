@@ -118,14 +118,14 @@ func Test_compactionTrigger_force(t *testing.T) {
 									Binlogs: []*datapb.FieldBinlog{
 										{
 											Binlogs: []*datapb.Binlog{
-												{EntriesNum: 5, LogPath: "log1"},
+												{EntriesNum: 5, LogID: 1},
 											},
 										},
 									},
 									Deltalogs: []*datapb.FieldBinlog{
 										{
 											Binlogs: []*datapb.Binlog{
-												{EntriesNum: 5, LogPath: "deltalog1"},
+												{EntriesNum: 5, LogID: 1},
 											},
 										},
 									},
@@ -163,14 +163,14 @@ func Test_compactionTrigger_force(t *testing.T) {
 									Binlogs: []*datapb.FieldBinlog{
 										{
 											Binlogs: []*datapb.Binlog{
-												{EntriesNum: 5, LogPath: "log2"},
+												{EntriesNum: 5, LogID: 2},
 											},
 										},
 									},
 									Deltalogs: []*datapb.FieldBinlog{
 										{
 											Binlogs: []*datapb.Binlog{
-												{EntriesNum: 5, LogPath: "deltalog2"},
+												{EntriesNum: 5, LogID: 2},
 											},
 										},
 									},
@@ -408,7 +408,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 							FieldBinlogs: []*datapb.FieldBinlog{
 								{
 									Binlogs: []*datapb.Binlog{
-										{EntriesNum: 5, LogPath: "log1"},
+										{EntriesNum: 5, LogID: 1},
 									},
 								},
 							},
@@ -416,17 +416,19 @@ func Test_compactionTrigger_force(t *testing.T) {
 							Deltalogs: []*datapb.FieldBinlog{
 								{
 									Binlogs: []*datapb.Binlog{
-										{EntriesNum: 5, LogPath: "deltalog1"},
+										{EntriesNum: 5, LogID: 1},
 									},
 								},
 							},
+							CollectionID: 2,
+							PartitionID:  1,
 						},
 						{
 							SegmentID: 2,
 							FieldBinlogs: []*datapb.FieldBinlog{
 								{
 									Binlogs: []*datapb.Binlog{
-										{EntriesNum: 5, LogPath: "log2"},
+										{EntriesNum: 5, LogID: 2},
 									},
 								},
 							},
@@ -434,10 +436,12 @@ func Test_compactionTrigger_force(t *testing.T) {
 							Deltalogs: []*datapb.FieldBinlog{
 								{
 									Binlogs: []*datapb.Binlog{
-										{EntriesNum: 5, LogPath: "deltalog2"},
+										{EntriesNum: 5, LogID: 2},
 									},
 								},
 							},
+							CollectionID: 2,
+							PartitionID:  1,
 						},
 					},
 					StartTime:        0,

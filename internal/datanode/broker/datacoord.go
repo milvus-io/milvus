@@ -8,6 +8,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -76,6 +77,11 @@ func (dc *dataCoordBroker) GetSegmentInfo(ctx context.Context, segmentIDs []int6
 	})
 	if err := merr.CheckRPCCall(infoResp, err); err != nil {
 		log.Warn("Fail to get SegmentInfo by ids from datacoord", zap.Error(err))
+		return nil, err
+	}
+	err = binlog.DecompressMultiBinLogs(infoResp.GetInfos())
+	if err != nil {
+		log.Warn("Fail to DecompressMultiBinLogs", zap.Error(err))
 		return nil, err
 	}
 

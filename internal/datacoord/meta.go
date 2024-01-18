@@ -21,8 +21,6 @@ import (
 	"context"
 	"fmt"
 	"path"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -36,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -43,7 +42,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
@@ -118,6 +116,7 @@ func (m *meta) reloadFromKV() error {
 	metrics.DataCoordNumSegments.WithLabelValues(metrics.DroppedSegmentLabel).Set(0)
 	numStoredRows := int64(0)
 	for _, segment := range segments {
+		// segments from catalog.ListSegments will not have logPath
 		m.segments.SetSegment(segment.ID, NewSegmentInfo(segment))
 		metrics.DataCoordNumSegments.WithLabelValues(segment.State.String()).Inc()
 		if segment.State == commonpb.SegmentState_Flushed {
@@ -996,7 +995,7 @@ func (m *meta) CompleteCompactionMutation(plan *datapb.CompactionPlan, result *d
 
 	// alter meta store.
 	if err := m.alterMetaStoreAfterCompaction(segment, modSegments); err != nil {
-		log.Warn("fail to alert meta store", zap.Error(err), zap.Int64("segmentID", segment.GetID()), zap.Int64("planID", plan.GetPlanID()))
+		log.Warn("fail to alter meta store", zap.Error(err), zap.Int64("segmentID", segment.GetID()), zap.Int64("planID", plan.GetPlanID()))
 		return nil, nil, err
 	}
 	return segment, metricMutation, nil
@@ -1026,6 +1025,10 @@ func (m *meta) prepareCompactionMutation(plan *datapb.CompactionPlan,
 			oldSegments = append(oldSegments, segment.Clone())
 
 			cloned := segment.Clone()
+			err := binlog.DecompressBinLog(storage.DeleteBinlog, cloned.GetCollectionID(), cloned.GetPartitionID(), cloned.GetID(), cloned.GetDeltalogs())
+			if err != nil {
+				return nil, nil, nil, nil, err
+			}
 			updateSegStateAndPrepareMetrics(cloned, commonpb.SegmentState_Dropped, metricMutation)
 			cloned.DroppedAt = uint64(time.Now().UnixNano())
 			cloned.Compacted = true
@@ -1057,7 +1060,7 @@ func (m *meta) prepareCompactionMutation(plan *datapb.CompactionPlan,
 		deletedDeltalogs = append(deletedDeltalogs, l.GetDeltalogs()...)
 	}
 
-	newAddedDeltalogs := m.updateDeltalogs(originDeltalogs, deletedDeltalogs, nil)
+	newAddedDeltalogs := m.updateDeltalogs(originDeltalogs, deletedDeltalogs)
 	copiedDeltalogs, err := m.copyDeltaFiles(newAddedDeltalogs, modSegments[0].CollectionID, modSegments[0].PartitionID, result.GetSegmentID())
 	if err != nil {
 		return nil, nil, nil, nil, err
@@ -1103,12 +1106,8 @@ func (m *meta) copyDeltaFiles(binlogs []*datapb.FieldBinlog, collectionID, parti
 	for _, fieldBinlog := range binlogs {
 		fieldBinlog = proto.Clone(fieldBinlog).(*datapb.FieldBinlog)
 		for _, binlog := range fieldBinlog.Binlogs {
-			logID, err := getDeltaLogID(m.chunkManager.RootPath(), binlog)
-			if err != nil {
-				log.Error("failed to get logID from binlog", zap.Int64("segmentID", targetSegmentID), zap.Stringer("binlog", binlog), zap.Error(err))
-				return nil, err
-			}
-			blobKey := metautil.JoinIDPath(collectionID, partitionID, targetSegmentID, logID)
+			// the logid of segment in meta will not be empty,
+			blobKey := metautil.JoinIDPath(collectionID, partitionID, targetSegmentID, binlog.LogID)
 			blobPath := path.Join(m.chunkManager.RootPath(), common.SegmentDeltaLogPath, blobKey)
 			blob, err := m.chunkManager.Read(m.ctx, binlog.LogPath)
 			if err != nil {
@@ -1118,39 +1117,10 @@ func (m *meta) copyDeltaFiles(binlogs []*datapb.FieldBinlog, collectionID, parti
 			if err != nil {
 				return nil, err
 			}
-			binlog.LogPath = blobPath
 		}
 		ret = append(ret, fieldBinlog)
 	}
 	return ret, nil
-}
-
-// getDeltaLogID is the util function to return delta logID from datapb.Binlog
-// if LogID field is filled, return field value directly.
-// otherwise, try to parse logID from LogPath.
-func getDeltaLogID(rootPath string, binlog *datapb.Binlog) (int64, error) {
-	if binlog.GetLogID() != 0 {
-		return binlog.GetLogID(), nil
-	}
-
-	path := binlog.GetLogPath()
-	// check path contains rootPath as prefix
-	if !strings.HasPrefix(path, rootPath) {
-		return 0, fmt.Errorf("path \"%s\" does not contains rootPath \"%s\"", path, rootPath)
-	}
-	p := path[len(rootPath):]
-	// remove leading "/"
-	for strings.HasPrefix(p, "/") {
-		p = p[1:]
-	}
-
-	// delta binlog path should consist of "delta_log/collID/partID/segID/logID"
-	parts := strings.Split(p, "/")
-	if len(parts) != 5 {
-		return 0, merr.WrapErrParameterInvalid("valid delta log path", path)
-	}
-
-	return strconv.ParseInt(parts[4], 10, 64)
 }
 
 func (m *meta) alterMetaStoreAfterCompaction(segmentCompactTo *SegmentInfo, segmentsCompactFrom []*SegmentInfo) error {
@@ -1196,66 +1166,17 @@ func (m *meta) alterMetaStoreAfterCompaction(segmentCompactTo *SegmentInfo, segm
 	return nil
 }
 
-func (m *meta) updateBinlogs(origin []*datapb.FieldBinlog, removes []*datapb.FieldBinlog, adds []*datapb.FieldBinlog) []*datapb.FieldBinlog {
-	fieldBinlogs := make(map[int64]map[string]*datapb.Binlog)
-	for _, f := range origin {
-		fid := f.GetFieldID()
-		if _, ok := fieldBinlogs[fid]; !ok {
-			fieldBinlogs[fid] = make(map[string]*datapb.Binlog)
-		}
-		for _, p := range f.GetBinlogs() {
-			fieldBinlogs[fid][p.GetLogPath()] = p
-		}
-	}
-
-	for _, f := range removes {
-		fid := f.GetFieldID()
-		if _, ok := fieldBinlogs[fid]; !ok {
-			continue
-		}
-		for _, p := range f.GetBinlogs() {
-			delete(fieldBinlogs[fid], p.GetLogPath())
-		}
-	}
-
-	for _, f := range adds {
-		fid := f.GetFieldID()
-		if _, ok := fieldBinlogs[fid]; !ok {
-			fieldBinlogs[fid] = make(map[string]*datapb.Binlog)
-		}
-		for _, p := range f.GetBinlogs() {
-			fieldBinlogs[fid][p.GetLogPath()] = p
-		}
-	}
-
-	res := make([]*datapb.FieldBinlog, 0, len(fieldBinlogs))
-	for fid, logs := range fieldBinlogs {
-		if len(logs) == 0 {
-			continue
-		}
-
-		binlogs := make([]*datapb.Binlog, 0, len(logs))
-		for _, log := range logs {
-			binlogs = append(binlogs, log)
-		}
-
-		field := &datapb.FieldBinlog{FieldID: fid, Binlogs: binlogs}
-		res = append(res, field)
-	}
-	return res
-}
-
-func (m *meta) updateDeltalogs(origin []*datapb.FieldBinlog, removes []*datapb.FieldBinlog, adds []*datapb.FieldBinlog) []*datapb.FieldBinlog {
+func (m *meta) updateDeltalogs(origin []*datapb.FieldBinlog, removes []*datapb.FieldBinlog) []*datapb.FieldBinlog {
 	res := make([]*datapb.FieldBinlog, 0, len(origin))
 	for _, fbl := range origin {
-		logs := make(map[string]*datapb.Binlog)
+		logs := make(map[int64]*datapb.Binlog)
 		for _, d := range fbl.GetBinlogs() {
-			logs[d.GetLogPath()] = d
+			logs[d.GetLogID()] = d
 		}
 		for _, remove := range removes {
 			if remove.GetFieldID() == fbl.GetFieldID() {
 				for _, r := range remove.GetBinlogs() {
-					delete(logs, r.GetLogPath())
+					delete(logs, r.GetLogID())
 				}
 			}
 		}
