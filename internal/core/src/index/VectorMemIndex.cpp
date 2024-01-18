@@ -483,37 +483,65 @@ VectorMemIndex<T>::Build(const Config& config) {
     auto insert_files =
         GetValueFromConfig<std::vector<std::string>>(config, "insert_files");
     AssertInfo(insert_files.has_value(),
-               "insert file paths is empty when build disk ann index");
+               "insert file paths is empty when building in memory index");
     auto field_datas =
         file_manager_->CacheRawDataToMemory(insert_files.value());
-
-    int64_t total_size = 0;
-    int64_t total_num_rows = 0;
-    int64_t dim = 0;
-    for (auto data : field_datas) {
-        total_size += data->Size();
-        total_num_rows += data->get_num_rows();
-        AssertInfo(dim == 0 || dim == data->get_dim(),
-                   "inconsistent dim value between field datas!");
-        dim = data->get_dim();
-    }
-
-    auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[total_size]);
-    int64_t offset = 0;
-    for (auto data : field_datas) {
-        std::memcpy(buf.get() + offset, data->Data(), data->Size());
-        offset += data->Size();
-        data.reset();
-    }
-    field_datas.clear();
 
     Config build_config;
     build_config.update(config);
     build_config.erase("insert_files");
     build_config.erase(VEC_OPT_FIELDS);
+    if (GetIndexType().find("SPARSE") == std::string::npos) {
+        int64_t total_size = 0;
+        int64_t total_num_rows = 0;
+        int64_t dim = 0;
+        for (auto data : field_datas) {
+            total_size += data->Size();
+            total_num_rows += data->get_num_rows();
+            AssertInfo(dim == 0 || dim == data->get_dim(),
+                       "inconsistent dim value between field datas!");
+            dim = data->get_dim();
+        }
 
-    auto dataset = GenDataset(total_num_rows, dim, buf.get());
-    BuildWithDataset(dataset, build_config);
+        auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[total_size]);
+        int64_t offset = 0;
+        for (auto data : field_datas) {
+            std::memcpy(buf.get() + offset, data->Data(), data->Size());
+            offset += data->Size();
+            data.reset();
+        }
+        field_datas.clear();
+
+        auto dataset = GenDataset(total_num_rows, dim, buf.get());
+        BuildWithDataset(dataset, build_config);
+    } else {
+        // sparse
+        int64_t total_rows = 0;
+        int64_t dim = 0;
+        for (auto field_data : field_datas) {
+            total_rows += field_data->Length();
+            dim = std::max(
+                dim,
+                std::dynamic_pointer_cast<FieldData<SparseFloatVector>>(
+                    field_data)
+                    ->Dim());
+        }
+        std::vector<knowhere::sparse::SparseRow<float>> vec(total_rows);
+        int64_t offset = 0;
+        for (auto field_data : field_datas) {
+            auto ptr = static_cast<const knowhere::sparse::SparseRow<float>*>(
+                field_data->Data());
+            AssertInfo(ptr, "failed to cast field data to sparse rows");
+            for (size_t i = 0; i < field_data->Length(); ++i) {
+                // this does a deep copy of field_data's data.
+                vec[offset + i] = ptr[i];
+            }
+            offset += field_data->Length();
+        }
+        auto dataset = GenDataset(total_rows, dim, vec.data());
+        dataset->SetIsSparse(true);
+        BuildWithDataset(dataset, build_config);
+    }
 }
 
 template <typename T>

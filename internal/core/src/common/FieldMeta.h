@@ -54,6 +54,10 @@ datatype_sizeof(DataType data_type, int dim = 1) {
         case DataType::VECTOR_BFLOAT16: {
             return sizeof(bfloat16) * dim;
         }
+        // Not supporting VECTOR_SPARSE_FLOAT here intentionally. We can't
+        // easily estimately the size of a sparse float vector. Caller of this
+        // method must handle this case themselves and must not pass
+        // VECTOR_SPARSE_FLOAT data_type.
         default: {
             throw SegcoreError(DataTypeInvalid,
                                fmt::format("invalid type is {}", data_type));
@@ -100,6 +104,9 @@ datatype_name(DataType data_type) {
         case DataType::VECTOR_BFLOAT16: {
             return "vector_bfloat16";
         }
+        case DataType::VECTOR_SPARSE_FLOAT: {
+            return "vector_sparse_float";
+        }
         default: {
             PanicInfo(DataTypeInvalid, "Unsupported DataType({})", data_type);
         }
@@ -111,7 +118,13 @@ datatype_is_vector(DataType datatype) {
     return datatype == DataType::VECTOR_BINARY ||
            datatype == DataType::VECTOR_FLOAT ||
            datatype == DataType::VECTOR_FLOAT16 ||
-           datatype == DataType::VECTOR_BFLOAT16;
+           datatype == DataType::VECTOR_BFLOAT16 ||
+           datatype == DataType::VECTOR_SPARSE_FLOAT;
+}
+
+inline bool
+datatype_is_sparse_vector(DataType datatype) {
+    return datatype == DataType::VECTOR_SPARSE_FLOAT;
 }
 
 inline bool
@@ -153,6 +166,7 @@ datatype_is_variable(DataType datatype) {
         case DataType::STRING:
         case DataType::ARRAY:
         case DataType::JSON:
+        case DataType::VECTOR_SPARSE_FLOAT:
             return true;
         default:
             return false;
@@ -217,6 +231,8 @@ class FieldMeta {
         Assert(datatype_is_array(type_));
     }
 
+    // pass in any value for dim for sparse vector is ok as it'll never be used:
+    // get_dim() not allowed to be invoked on a sparse vector field.
     FieldMeta(const FieldName& name,
               FieldId id,
               DataType type,
@@ -232,6 +248,8 @@ class FieldMeta {
     int64_t
     get_dim() const {
         Assert(datatype_is_vector(type_));
+        // should not attempt to get dim() of a sparse vector from schema.
+        Assert(!datatype_is_sparse_vector(type_));
         Assert(vector_info_.has_value());
         return vector_info_->dim_;
     }
@@ -282,6 +300,9 @@ class FieldMeta {
 
     size_t
     get_sizeof() const {
+        AssertInfo(!datatype_is_sparse_vector(type_),
+                   "should not attempt to get_sizeof() of a sparse vector from "
+                   "schema");
         static const size_t ARRAY_SIZE = 128;
         static const size_t JSON_SIZE = 512;
         if (is_vector()) {

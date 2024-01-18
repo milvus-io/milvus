@@ -31,6 +31,9 @@ PayloadWriter::PayloadWriter(const DataType column_type)
 // create payload writer for vector data type
 PayloadWriter::PayloadWriter(const DataType column_type, int dim)
     : column_type_(column_type) {
+    AssertInfo(column_type != DataType::VECTOR_SPARSE_FLOAT,
+               "PayloadWriter for Sparse Float Vector should be created "
+               "using the constructor without dimension");
     init_dimension(dim);
 }
 
@@ -58,7 +61,9 @@ PayloadWriter::add_one_string_payload(const char* str, int str_size) {
 void
 PayloadWriter::add_one_binary_payload(const uint8_t* data, int length) {
     AssertInfo(output_ == nullptr, "payload writer has been finished");
-    AssertInfo(milvus::datatype_is_binary(column_type_), "mismatch data type");
+    AssertInfo(milvus::datatype_is_binary(column_type_) ||
+                   milvus::datatype_is_sparse_vector(column_type_),
+               "mismatch data type");
     AddOneBinaryToArrowBuilder(builder_, data, length);
     rows_.fetch_add(1);
 }

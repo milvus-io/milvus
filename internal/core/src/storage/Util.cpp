@@ -39,8 +39,10 @@
 #include "storage/OpenDALChunkManager.h"
 #endif
 #include "storage/Types.h"
-#include "storage/ThreadPools.h"
 #include "storage/Util.h"
+#include "storage/ThreadPools.h"
+#include "storage/MemFileManagerImpl.h"
+#include "storage/DiskFileManagerImpl.h"
 
 namespace milvus::storage {
 
@@ -170,6 +172,12 @@ AddPayloadToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder,
             add_vector_payload(builder, const_cast<uint8_t*>(raw_data), length);
             break;
         }
+        case DataType::VECTOR_SPARSE_FLOAT: {
+            PanicInfo(DataTypeInvalid,
+                      "Sparse Float Vector payload should be added by calling "
+                      "add_one_binary_payload",
+                      data_type);
+        }
         default: {
             PanicInfo(DataTypeInvalid, "unsupported data type {}", data_type);
         }
@@ -242,6 +250,10 @@ CreateArrowBuilder(DataType data_type) {
         case DataType::JSON: {
             return std::make_shared<arrow::BinaryBuilder>();
         }
+        // sparse float vector doesn't require a dim
+        case DataType::VECTOR_SPARSE_FLOAT: {
+            return std::make_shared<arrow::BinaryBuilder>();
+        }
         default: {
             PanicInfo(
                 DataTypeInvalid, "unsupported numeric data type {}", data_type);
@@ -311,6 +323,10 @@ CreateArrowSchema(DataType data_type) {
         case DataType::JSON: {
             return arrow::schema({arrow::field("val", arrow::binary())});
         }
+        // sparse float vector doesn't require a dim
+        case DataType::VECTOR_SPARSE_FLOAT: {
+            return arrow::schema({arrow::field("val", arrow::binary())});
+        }
         default: {
             PanicInfo(
                 DataTypeInvalid, "unsupported numeric data type {}", data_type);
@@ -341,6 +357,9 @@ CreateArrowSchema(DataType data_type, int dim) {
             return arrow::schema({arrow::field(
                 "val", arrow::fixed_size_binary(dim * sizeof(bfloat16)))});
         }
+        case DataType::VECTOR_SPARSE_FLOAT: {
+            return arrow::schema({arrow::field("val", arrow::binary())});
+        }
         default: {
             PanicInfo(
                 DataTypeInvalid, "unsupported vector data type {}", data_type);
@@ -363,6 +382,11 @@ GetDimensionFromFileMetaData(const parquet::ColumnDescriptor* schema,
         }
         case DataType::VECTOR_BFLOAT16: {
             return schema->type_length() / sizeof(bfloat16);
+        }
+        case DataType::VECTOR_SPARSE_FLOAT: {
+            PanicInfo(DataTypeInvalid,
+                      fmt::format("GetDimensionFromFileMetaData should not be "
+                                  "called for sparse vector"));
         }
         default:
             PanicInfo(DataTypeInvalid, "unsupported data type {}", data_type);
@@ -501,11 +525,12 @@ EncodeAndUploadFieldSlice(ChunkManager* chunk_manager,
     field_data->FillFieldData(buf, element_count);
     auto insertData = std::make_shared<InsertData>(field_data);
     insertData->SetFieldDataMeta(field_data_meta);
-    auto serialized_index_data = insertData->serialize_to_remote_file();
-    auto serialized_index_size = serialized_index_data.size();
-    chunk_manager->Write(
-        object_key, serialized_index_data.data(), serialized_index_size);
-    return std::make_pair(std::move(object_key), serialized_index_size);
+    auto serialized_inserted_data = insertData->serialize_to_remote_file();
+    auto serialized_inserted_data_size = serialized_inserted_data.size();
+    chunk_manager->Write(object_key,
+                         serialized_inserted_data.data(),
+                         serialized_inserted_data_size);
+    return std::make_pair(std::move(object_key), serialized_inserted_data_size);
 }
 
 std::vector<std::future<std::unique_ptr<DataCodec>>>
@@ -738,6 +763,9 @@ CreateFieldData(const DataType& type, int64_t dim, int64_t total_num_rows) {
         case DataType::VECTOR_BFLOAT16:
             return std::make_shared<FieldData<BFloat16Vector>>(
                 dim, type, total_num_rows);
+        case DataType::VECTOR_SPARSE_FLOAT:
+            return std::make_shared<FieldData<SparseFloatVector>>(
+                type, total_num_rows);
         default:
             throw SegcoreError(
                 DataTypeInvalid,

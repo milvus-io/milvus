@@ -68,6 +68,10 @@ unsupported_index_combinations() {
     static std::vector<std::tuple<IndexType, MetricType>> ret{
         std::make_tuple(knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT,
                         knowhere::metric::L2),
+        std::make_tuple(knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX,
+                        knowhere::metric::L2),
+        std::make_tuple(knowhere::IndexEnum::INDEX_SPARSE_WAND,
+                        knowhere::metric::L2),
     };
     return ret;
 }

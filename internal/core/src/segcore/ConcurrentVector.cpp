@@ -36,8 +36,16 @@ VectorBase::set_data_raw(ssize_t element_offset,
         } else if (field_meta.get_data_type() == DataType::VECTOR_BFLOAT16) {
             return set_data_raw(
                 element_offset, VEC_FIELD_DATA(data, bfloat16), element_count);
+        } else if (field_meta.get_data_type() ==
+                   DataType::VECTOR_SPARSE_FLOAT) {
+            return set_data_raw(
+                element_offset,
+                SparseBytesToRows(
+                    data->vectors().sparse_float_vector().contents())
+                    .get(),
+                element_count);
         } else {
-            PanicInfo(DataTypeInvalid, "unsupported");
+            PanicInfo(DataTypeInvalid, "unsupported vector type");
         }
     }
 

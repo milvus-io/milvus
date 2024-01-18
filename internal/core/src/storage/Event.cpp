@@ -215,7 +215,8 @@ std::vector<uint8_t>
 BaseEventData::Serialize() {
     auto data_type = field_data->get_data_type();
     std::shared_ptr<PayloadWriter> payload_writer;
-    if (milvus::datatype_is_vector(data_type)) {
+    if (milvus::datatype_is_vector(data_type) &&
+        data_type != DataType::VECTOR_SPARSE_FLOAT) {
         payload_writer =
             std::make_unique<PayloadWriter>(data_type, field_data->get_dim());
     } else {
@@ -256,6 +257,18 @@ BaseEventData::Serialize() {
                     reinterpret_cast<const uint8_t*>(
                         std::string(string_view).c_str()),
                     string_view.size());
+            }
+            break;
+        }
+        case DataType::VECTOR_SPARSE_FLOAT: {
+            for (size_t offset = 0; offset < field_data->get_num_rows();
+                 ++offset) {
+                auto row =
+                    static_cast<const knowhere::sparse::SparseRow<float>*>(
+                        field_data->RawValue(offset));
+                payload_writer->add_one_binary_payload(
+                    static_cast<const uint8_t*>(row->data()),
+                    row->data_byte_size());
             }
             break;
         }

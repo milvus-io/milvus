@@ -346,6 +346,11 @@ struct InsertRecord {
                     this->append_field_data<BFloat16Vector>(
                         field_id, field_meta.get_dim(), size_per_chunk);
                     continue;
+                } else if (field_meta.get_data_type() ==
+                           DataType::VECTOR_SPARSE_FLOAT) {
+                    this->append_field_data<SparseFloatVector>(field_id,
+                                                               size_per_chunk);
+                    continue;
                 } else {
                     PanicInfo(DataTypeInvalid,
                               fmt::format("unsupported vector type",
@@ -524,8 +529,7 @@ struct InsertRecord {
         AssertInfo(fields_data_.find(field_id) != fields_data_.end(),
                    "Cannot find field_data with field_id: " +
                        std::to_string(field_id.get()));
-        auto ptr = fields_data_.at(field_id).get();
-        return ptr;
+        return fields_data_.at(field_id).get();
     }
 
     // get field data in given type, const version
@@ -552,7 +556,7 @@ struct InsertRecord {
     template <typename Type>
     void
     append_field_data(FieldId field_id, int64_t size_per_chunk) {
-        static_assert(IsScalar<Type>);
+        static_assert(IsScalar<Type> || IsSparse<Type>);
         fields_data_.emplace(
             field_id, std::make_unique<ConcurrentVector<Type>>(size_per_chunk));
     }
@@ -608,7 +612,6 @@ struct InsertRecord {
     std::unique_ptr<OffsetMap> pk2offset_;
 
  private:
-    //    std::vector<std::unique_ptr<VectorBase>> fields_data_;
     std::unordered_map<FieldId, std::unique_ptr<VectorBase>> fields_data_{};
     mutable std::shared_mutex shared_mutex_{};
 };

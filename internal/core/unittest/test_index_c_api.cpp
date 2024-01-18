@@ -79,6 +79,70 @@ TEST(FloatVecIndex, All) {
     { DeleteBinarySet(binary_set); }
 }
 
+TEST(SparseFloatVecIndex, All) {
+    auto index_type = knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX;
+    auto metric_type = knowhere::metric::IP;
+    indexcgo::TypeParams type_params;
+    indexcgo::IndexParams index_params;
+    std::tie(type_params, index_params) =
+        generate_params(index_type, metric_type);
+    std::string type_params_str, index_params_str;
+    bool ok = google::protobuf::TextFormat::PrintToString(type_params,
+                                                          &type_params_str);
+    assert(ok);
+    ok = google::protobuf::TextFormat::PrintToString(index_params,
+                                                     &index_params_str);
+    assert(ok);
+    auto dataset = GenDatasetWithDataType(
+        NB, metric_type, milvus::DataType::VECTOR_SPARSE_FLOAT);
+    auto xb_data = dataset.get_col<knowhere::sparse::SparseRow<float>>(
+        milvus::FieldId(100));
+    CDataType dtype = SparseFloatVector;
+    CIndex index;
+    CStatus status;
+    CBinarySet binary_set;
+    CIndex copy_index;
+
+    {
+        status = CreateIndexV0(
+            dtype, type_params_str.c_str(), index_params_str.c_str(), &index);
+        ASSERT_EQ(milvus::Success, status.error_code);
+    }
+    {
+        status = BuildSparseFloatVecIndex(
+            index,
+            NB,
+            kTestSparseDim,
+            static_cast<const uint8_t*>(
+                static_cast<const void*>(xb_data.data())));
+        ASSERT_EQ(milvus::Success, status.error_code);
+    }
+    {
+        status = SerializeIndexToBinarySet(index, &binary_set);
+        ASSERT_EQ(milvus::Success, status.error_code);
+    }
+    {
+        status = CreateIndexV0(dtype,
+                               type_params_str.c_str(),
+                               index_params_str.c_str(),
+                               &copy_index);
+        ASSERT_EQ(milvus::Success, status.error_code);
+    }
+    {
+        status = LoadIndexFromBinarySet(copy_index, binary_set);
+        ASSERT_EQ(milvus::Success, status.error_code);
+    }
+    {
+        status = DeleteIndex(index);
+        ASSERT_EQ(milvus::Success, status.error_code);
+    }
+    {
+        status = DeleteIndex(copy_index);
+        ASSERT_EQ(milvus::Success, status.error_code);
+    }
+    { DeleteBinarySet(binary_set); }
+}
+
 TEST(Float16VecIndex, All) {
     auto index_type = knowhere::IndexEnum::INDEX_FAISS_IVFPQ;
     auto metric_type = knowhere::metric::L2;
