@@ -15,9 +15,10 @@ import numpy as np
 import time
 import argparse
 from pymilvus import (
-    connections, list_collections,
+    connections,
     FieldSchema, CollectionSchema, DataType,
-    Collection
+    Collection,
+    AnnSearchRequest, RRFRanker, WeightedRanker
 )
 TIMEOUT = 120
 
@@ -27,37 +28,35 @@ def hello_milvus(host="127.0.0.1"):
     # create connection
     connections.connect(host=host, port="19530")
 
-    print(f"\nList collections...")
-    print(list_collections())
-
     # create collection
-    dim = 128
+    dim = 2
     default_fields = [
         FieldSchema(name="int64", dtype=DataType.INT64, is_primary=True),
         FieldSchema(name="float", dtype=DataType.FLOAT),
         FieldSchema(name="varchar", dtype=DataType.VARCHAR, max_length=65535),
-        FieldSchema(name="float_vector", dtype=DataType.FLOAT_VECTOR, dim=dim)
+        FieldSchema(name="array_int", dtype=DataType.ARRAY, element_type=DataType.INT64, max_capacity=200),
+        FieldSchema(name="float_vector", dtype=DataType.FLOAT_VECTOR, dim=dim),
+        FieldSchema(name="image_emb", dtype=DataType.FLOAT_VECTOR, dim=dim)
     ]
     default_schema = CollectionSchema(fields=default_fields, description="test collection")
 
     print(f"\nCreate collection...")
-    collection = Collection(name="hello_milvus", schema=default_schema)
-
-    print(f"\nList collections...")
-    print(list_collections())
+    collection = Collection(name="hello_milvus_v22", schema=default_schema)
 
     #  insert data
     nb = 3000
     vectors = [[random.random() for _ in range(dim)] for _ in range(nb)]
     t0 = time.time()
-    collection.insert(
-        [
+    data = [
             [i for i in range(nb)],
             [np.float32(i) for i in range(nb)],
             [str(i) for i in range(nb)],
-            vectors
+            [[1,2] for _ in range(nb)],
+            vectors,
+            [[random.random() for _ in range(dim)] for _ in range(nb)],
         ]
-    )
+    print(data)
+    collection.insert(data)
     t1 = time.time()
     print(f"\nInsert {nb} vectors cost {t1 - t0:.4f} seconds")
 
@@ -85,6 +84,7 @@ def hello_milvus(host="127.0.0.1"):
     collection.release()
 
     collection.create_index(field_name="float_vector", index_params=default_index)
+    collection.create_index(field_name="image_emb", index_params=default_index)
     t1 = time.time()
     print(f"\nCreate index cost {t1 - t0:.4f} seconds")
     print(f"\nload collection...")
@@ -118,6 +118,38 @@ def hello_milvus(host="127.0.0.1"):
     sorted_res = sorted(res, key=lambda k: k['int64'])
     for r in sorted_res:
         print(r)
+
+    reqs = [
+        AnnSearchRequest(**{
+            "data":[vectors[-1]],
+            "anns_field":"float_vector",
+            "param": {"metric_type": "L2"},
+            "limit": 10,
+        }),
+        AnnSearchRequest(**{
+            "data": [vectors[-1]],
+            "anns_field": "image_emb",
+            "param": {"metric_type": "L2"},
+            "limit": 10,
+        })
+    ]
+    # search for each field
+    for r in reqs:
+        res = collection.search(
+            data=r.data,
+            anns_field=r.anns_field,
+            param=r.param,
+            limit=r.limit,
+        )
+        print(f"search result for {r.anns_field}: {res}")
+
+    # hybrid search
+    res = collection.hybrid_search(
+        reqs=reqs,
+        rerank=RRFRanker(),
+        limit=10,
+    )
+    print(f"hybrid search result: {res}")
 
 
 parser = argparse.ArgumentParser(description='host ip')

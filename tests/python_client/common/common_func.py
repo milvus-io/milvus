@@ -186,6 +186,28 @@ def gen_default_collection_schema(description=ct.default_desc, primary_field=ct.
     return schema
 
 
+def gen_all_datatype_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name,
+                                       auto_id=False, dim=ct.default_dim, enable_dynamic_field=True, **kwargs):
+    fields = [
+        gen_int64_field(),
+        gen_float_field(),
+        gen_string_field(),
+        gen_json_field(),
+        gen_array_field(name="array_int", element_type=DataType.INT64),
+        gen_array_field(name="array_float", element_type=DataType.FLOAT),
+        gen_array_field(name="array_varchar", element_type=DataType.VARCHAR, max_length=200),
+        gen_array_field(name="array_bool", element_type=DataType.BOOL),
+        gen_float_vec_field(dim=dim),
+        gen_float_vec_field(name="image_emb", dim=dim),
+        gen_float_vec_field(name="text_emb", dim=dim),
+        gen_float_vec_field(name="voice_emb", dim=dim),
+    ]
+    schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
+                                                                    primary_field=primary_field, auto_id=auto_id,
+                                                                    enable_dynamic_field=enable_dynamic_field, **kwargs)
+    return schema
+
+
 def gen_array_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name, auto_id=False,
                                 dim=ct.default_dim, enable_dynamic_field=False, max_capacity=ct.default_max_capacity,
                                 max_length=100, with_json=False, **kwargs):
@@ -688,6 +710,17 @@ def get_float_vec_field_name(schema=None):
     return None
 
 
+def get_vec_field_name_list(schema=None):
+    vec_fields = []
+    if schema is None:
+        schema = gen_default_collection_schema()
+    fields = schema.fields
+    for field in fields:
+        if field.dtype == DataType.FLOAT_VECTOR:
+            vec_fields.append(field.name)
+    return vec_fields
+
+
 def get_binary_vec_field_name(schema=None):
     if schema is None:
         schema = gen_default_collection_schema()
@@ -761,8 +794,13 @@ def gen_data_by_type(field, nb=None, start=None):
         return [[random.random() for i in range(dim)] for _ in range(nb)]
     if data_type == DataType.ARRAY:
         max_capacity = field.params['max_capacity']
+        max_capacity = min(20, max_capacity)
         element_type = field.element_type
         if element_type == DataType.INT32:
+            if nb is None:
+                return [random.randint(-2147483648, 2147483647) for _ in range(max_capacity)]
+            return [[random.randint(-2147483648, 2147483647) for _ in range(max_capacity)] for _ in range(nb)]
+        if element_type == DataType.INT64:
             if nb is None:
                 return [random.randint(-2147483648, 2147483647) for _ in range(max_capacity)]
             return [[random.randint(-2147483648, 2147483647) for _ in range(max_capacity)] for _ in range(nb)]
@@ -777,7 +815,10 @@ def gen_data_by_type(field, nb=None, start=None):
             if nb is None:
                 return ["".join([chr(random.randint(97, 122)) for _ in range(length)]) for _ in range(max_capacity)]
             return [["".join([chr(random.randint(97, 122)) for _ in range(length)]) for _ in range(max_capacity)] for _ in range(nb)]
-
+        if element_type == DataType.BOOL:
+            if nb is None:
+                return [random.choice([True, False]) for _ in range(max_capacity)]
+            return [[random.choice([True, False]) for _ in range(max_capacity)] for _ in range(nb)]
     return None
 
 
