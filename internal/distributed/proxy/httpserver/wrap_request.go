@@ -212,6 +212,8 @@ func (f *FieldData) AsSchemapb() (*schemapb.FieldData, error) {
 				},
 			},
 		}
+	case schemapb.DataType_SparseFloatVector:
+		panic("not implemented in distributed httpserver")
 	default:
 		return nil, errors.New("unsupported data type")
 	}
@@ -268,6 +270,7 @@ func binaryVector2Bytes(vectors [][]byte) []byte {
 }
 
 func vector2Bytes(vectors [][]float32) []byte {
+	// TODO(SPARSE): handle sparse float vector
 	ph := &commonpb.PlaceholderValue{
 		Tag:    "$0",
 		Type:   commonpb.PlaceholderType_FloatVector,

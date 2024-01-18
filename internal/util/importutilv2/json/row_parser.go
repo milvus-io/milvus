@@ -33,6 +33,7 @@ type RowParser interface {
 	Parse(raw any) (Row, error)
 }
 
+// TODO(SPARSE): sparse vector doesn't require a dim.
 type rowParser struct {
 	dim          int
 	id2Field     map[int64]*schemapb.FieldSchema

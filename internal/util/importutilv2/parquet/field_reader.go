@@ -126,6 +126,7 @@ func (c *FieldReader) Next(count int64) (any, error) {
 		}
 		vectors := lo.Flatten(arrayData.([][]float32))
 		return vectors, nil
+	// TODO(SPARSE): add sparse support
 	case schemapb.DataType_Array:
 		data := make([]*schemapb.ScalarField, 0, count)
 		elementType := c.field.GetElementType()

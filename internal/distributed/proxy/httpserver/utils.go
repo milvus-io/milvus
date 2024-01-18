@@ -126,7 +126,7 @@ func checkGetPrimaryKey(coll *schemapb.CollectionSchema, idResult gjson.Result) 
 
 func IsVectorField(field *schemapb.FieldSchema) bool {
 	switch field.DataType {
-	case schemapb.DataType_BinaryVector, schemapb.DataType_FloatVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
+	case schemapb.DataType_BinaryVector, schemapb.DataType_FloatVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector, schemapb.DataType_SparseFloatVector:
 		return true
 	}
 	return false
@@ -211,6 +211,7 @@ func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) (error,
 				}
 
 				switch fieldType {
+				// TODO(SPARSE) add sparse field support in this file
 				case schemapb.DataType_FloatVector:
 					if dataString == "" {
 						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], "", "missing vector field: "+fieldName), reallyDataArray
