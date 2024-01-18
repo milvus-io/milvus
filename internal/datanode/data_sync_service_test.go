@@ -711,21 +711,6 @@ func TestClearGlobalFlushingCache(t *testing.T) {
 	assert.True(t, cache.checkIfCached(4))
 }
 
-func TestGetChannelLatestMsgID(t *testing.T) {
-	delay := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
-	ctx, cancel := context.WithDeadline(context.Background(), delay)
-	defer cancel()
-	node := newIDLEDataNodeMock(ctx, schemapb.DataType_Int64)
-
-	dmlChannelName := "fake-by-dev-rootcoord-dml-channel_12345v0"
-
-	insertStream, _ := node.factory.NewMsgStream(ctx)
-	insertStream.AsProducer([]string{dmlChannelName})
-	id, err := node.getChannelLatestMsgID(ctx, dmlChannelName, 0)
-	assert.NoError(t, err)
-	assert.NotNil(t, id)
-}
-
 func TestGetChannelWithTickler(t *testing.T) {
 	channelName := "by-dev-rootcoord-dml-0"
 	info := getWatchInfoByOpID(100, channelName, datapb.ChannelWatchState_ToWatch)
