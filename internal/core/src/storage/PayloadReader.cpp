@@ -59,7 +59,9 @@ PayloadReader::init(std::shared_ptr<arrow::io::BufferReader> input) {
     int64_t column_index = 0;
     auto file_meta = arrow_reader->parquet_reader()->metadata();
 
-    dim_ = datatype_is_vector(column_type_)
+    // dim is unused for sparse float vector
+    dim_ = (datatype_is_vector(column_type_) &&
+            column_type_ != DataType::VECTOR_SPARSE_FLOAT)
                ? GetDimensionFromFileMetaData(
                      file_meta->schema()->Column(column_index), column_type_)
                : 1;

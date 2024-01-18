@@ -26,10 +26,10 @@
 
 namespace milvus {
 
-template <typename Type, bool is_scalar>
+template <typename Type, bool is_type_entire_row>
 void
-FieldDataImpl<Type, is_scalar>::FillFieldData(const void* source,
-                                              ssize_t element_count) {
+FieldDataImpl<Type, is_type_entire_row>::FillFieldData(const void* source,
+                                                       ssize_t element_count) {
     if (element_count == 0) {
         return;
     }
@@ -57,9 +57,9 @@ GetDataInfoFromArray(const std::shared_ptr<arrow::Array> array) {
     return std::make_pair(typed_array->raw_values(), element_count);
 }
 
-template <typename Type, bool is_scalar>
+template <typename Type, bool is_type_entire_row>
 void
-FieldDataImpl<Type, is_scalar>::FillFieldData(
+FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
     const std::shared_ptr<arrow::Array> array) {
     AssertInfo(array != nullptr, "null arrow array");
     auto element_count = array->length();
@@ -159,6 +159,18 @@ FieldDataImpl<Type, is_scalar>::FillFieldData(
                     array);
             return FillFieldData(array_info.first, array_info.second);
         }
+        case DataType::VECTOR_SPARSE_FLOAT: {
+            AssertInfo(array->type()->id() == arrow::Type::type::BINARY,
+                       "inconsistent data type");
+            auto arr = std::dynamic_pointer_cast<arrow::BinaryArray>(array);
+            std::vector<knowhere::sparse::SparseRow<float>> values;
+            for (size_t index = 0; index < element_count; ++index) {
+                auto view = arr->GetString(index);
+                values.push_back(
+                    CopyAndWrapSparseRow(view.data(), view.size()));
+            }
+            return FillFieldData(values.data(), element_count);
+        }
         default: {
             throw SegcoreError(DataTypeInvalid,
                                GetName() + "::FillFieldData" +
@@ -186,6 +198,7 @@ template class FieldDataImpl<int8_t, false>;
 template class FieldDataImpl<float, false>;
 template class FieldDataImpl<float16, false>;
 template class FieldDataImpl<bfloat16, false>;
+template class FieldDataImpl<knowhere::sparse::SparseRow<float>, true>;
 
 FieldDataPtr
 InitScalarFieldData(const DataType& type, int64_t cap_rows) {

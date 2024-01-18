@@ -155,11 +155,11 @@ class GrowingIndexGetVectorTest : public ::testing::TestWithParam<Param> {
     const char* metricType;
 };
 
-INSTANTIATE_TEST_CASE_P(IndexTypeParameters,
-                        GrowingIndexGetVectorTest,
-                        ::testing::Values(knowhere::metric::L2,
-                                          knowhere::metric::COSINE,
-                                          knowhere::metric::IP));
+INSTANTIATE_TEST_SUITE_P(IndexTypeParameters,
+                         GrowingIndexGetVectorTest,
+                         ::testing::Values(knowhere::metric::L2,
+                                           knowhere::metric::COSINE,
+                                           knowhere::metric::IP));
 
 TEST_P(GrowingIndexGetVectorTest, GetVector) {
     auto schema = std::make_shared<Schema>();

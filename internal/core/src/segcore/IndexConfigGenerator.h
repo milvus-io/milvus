@@ -27,6 +27,8 @@ enum class IndexConfigLevel {
     SYSTEM_ASSIGN = 3
 };
 
+// this is the config used for generating growing index or the temp sealed index
+// when the segment is sealed before the index is built.
 class VecIndexConfig {
     inline static const std::map<SegmentType, std::string> support_index_types =
         {{SegmentType::Growing, knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC},

@@ -132,11 +132,6 @@ class Schema {
         return fields_.at(field_id);
     }
 
-    auto
-    get_total_sizeof() const {
-        return total_sizeof_;
-    }
-
     FieldId
     get_field_id(const FieldName& field_name) const {
         AssertInfo(name_ids_.count(field_name), "Cannot find field_name");
@@ -181,9 +176,6 @@ class Schema {
 
         fields_.emplace(field_id, field_meta);
         field_ids_.emplace_back(field_id);
-
-        auto field_sizeof = field_meta.get_sizeof();
-        total_sizeof_ += field_sizeof;
     }
 
  private:
@@ -197,7 +189,6 @@ class Schema {
     std::unordered_map<FieldName, FieldId> name_ids_;  // field_name -> field_id
     std::unordered_map<FieldId, FieldName> id_names_;  // field_id -> field_name
 
-    int64_t total_sizeof_ = 0;
     std::optional<FieldId> primary_field_id_opt_;
 };
 

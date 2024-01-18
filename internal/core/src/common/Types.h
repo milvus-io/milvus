@@ -80,6 +80,7 @@ enum class DataType {
     VECTOR_FLOAT = 101,
     VECTOR_FLOAT16 = 102,
     VECTOR_BFLOAT16 = 103,
+    VECTOR_SPARSE_FLOAT = 104,
 };
 
 using Timestamp = uint64_t;  // TODO: use TiKV-like timestamp
@@ -92,7 +93,7 @@ using ScalarArray = proto::schema::ScalarField;
 using DataArray = proto::schema::FieldData;
 using VectorArray = proto::schema::VectorField;
 using IdArray = proto::schema::IDs;
-using InsertData = proto::segcore::InsertRecord;
+using InsertRecordProto = proto::segcore::InsertRecord;
 using PkType = std::variant<std::monostate, int64_t, std::string>;
 
 inline size_t
@@ -378,6 +379,9 @@ struct fmt::formatter<milvus::DataType> : formatter<string_view> {
                 break;
             case milvus::DataType::VECTOR_BFLOAT16:
                 name = "VECTOR_BFLOAT16";
+                break;
+            case milvus::DataType::VECTOR_SPARSE_FLOAT:
+                name = "VECTOR_SPARSE_FLOAT";
                 break;
         }
         return formatter<string_view>::format(name, ctx);

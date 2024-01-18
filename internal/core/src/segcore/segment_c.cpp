@@ -207,12 +207,17 @@ Insert(CSegmentInterface c_segment,
        const uint64_t data_info_len) {
     try {
         auto segment = static_cast<milvus::segcore::SegmentGrowing*>(c_segment);
-        auto insert_data = std::make_unique<milvus::InsertData>();
-        auto suc = insert_data->ParseFromArray(data_info, data_info_len);
+        auto insert_record_proto =
+            std::make_unique<milvus::InsertRecordProto>();
+        auto suc =
+            insert_record_proto->ParseFromArray(data_info, data_info_len);
         AssertInfo(suc, "failed to parse insert data from records");
 
-        segment->Insert(
-            reserved_offset, size, row_ids, timestamps, insert_data.get());
+        segment->Insert(reserved_offset,
+                        size,
+                        row_ids,
+                        timestamps,
+                        insert_record_proto.get());
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);
