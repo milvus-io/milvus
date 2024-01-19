@@ -125,6 +125,7 @@ func (c *metaCacheImpl) CompactSegments(newSegmentID, partitionID int64, numOfRo
 				segmentID:        newSegmentID,
 				partitionID:      partitionID,
 				state:            commonpb.SegmentState_Flushed,
+				level:            datapb.SegmentLevel_L1,
 				flushedRows:      numOfRows,
 				startPosRecorded: true,
 				bfs:              bfs,
