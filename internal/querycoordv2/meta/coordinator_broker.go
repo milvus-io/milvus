@@ -25,6 +25,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -169,6 +170,12 @@ func (broker *CoordinatorBroker) GetSegmentInfo(ctx context.Context, ids ...Uniq
 	if len(resp.Infos) == 0 {
 		log.Warn("No such segment in DataCoord")
 		return nil, fmt.Errorf("no such segment in DataCoord")
+	}
+
+	err = binlog.DecompressMultiBinLogs(resp.GetInfos())
+	if err != nil {
+		log.Warn("failed to DecompressMultiBinLogs", zap.Error(err))
+		return nil, err
 	}
 
 	return resp, nil

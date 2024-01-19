@@ -31,6 +31,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -201,8 +202,10 @@ func (gc *garbageCollector) scan() {
 		filesMap := typeutil.NewSet[string]()
 		segments := gc.meta.GetAllSegmentsUnsafe()
 		for _, segment := range segments {
+			cloned := segment.Clone()
+			binlog.DecompressBinLogs(cloned.SegmentInfo)
 			segmentMap.Insert(segment.GetID())
-			for _, log := range getLogs(segment) {
+			for _, log := range getLogs(cloned) {
 				filesMap.Insert(log.GetLogPath())
 			}
 		}
@@ -323,14 +326,16 @@ func (gc *garbageCollector) clearEtcd() {
 	compactTo := make(map[int64]*SegmentInfo)
 	channels := typeutil.NewSet[string]()
 	for _, segment := range all {
-		if segment.GetState() == commonpb.SegmentState_Dropped {
-			drops[segment.GetID()] = segment
-			channels.Insert(segment.GetInsertChannel())
+		cloned := segment.Clone()
+		binlog.DecompressBinLogs(cloned.SegmentInfo)
+		if cloned.GetState() == commonpb.SegmentState_Dropped {
+			drops[cloned.GetID()] = cloned
+			channels.Insert(cloned.GetInsertChannel())
 			// continue
 			// A(indexed), B(indexed) -> C(no indexed), D(no indexed) -> E(no indexed), A, B can not be GC
 		}
-		for _, from := range segment.GetCompactionFrom() {
-			compactTo[from] = segment
+		for _, from := range cloned.GetCompactionFrom() {
+			compactTo[from] = cloned
 		}
 	}
 

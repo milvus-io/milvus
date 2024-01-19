@@ -227,6 +227,7 @@ func (t *levelZeroCompactionTask) compact() (*datapb.CompactionPlanResult, error
 		State:    commonpb.CompactionState_Completed,
 		Segments: resultSegments,
 		Channel:  t.plan.GetChannel(),
+		Type:     t.plan.GetType(),
 	}
 
 	metrics.DataNodeCompactionLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), t.plan.GetType().String()).

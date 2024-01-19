@@ -94,6 +94,19 @@ using VectorArray = proto::schema::VectorField;
 using IdArray = proto::schema::IDs;
 using InsertData = proto::segcore::InsertRecord;
 using PkType = std::variant<std::monostate, int64_t, std::string>;
+
+inline size_t
+CalcPksSize(const std::vector<PkType>& pks) {
+    size_t size = 0;
+    for (auto& pk : pks) {
+        size += sizeof(pk);
+        if (std::holds_alternative<std::string>(pk)) {
+            size += std::get<std::string>(pk).size();
+        }
+    }
+    return size;
+}
+
 using GroupByValueType = std::variant<std::monostate,
                                       int8_t,
                                       int16_t,
