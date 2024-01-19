@@ -1447,6 +1447,23 @@ class TestInsertInvalid(TestcaseBase):
         error = {ct.err_code: 65535, ct.err_msg: "value '+Inf' is not a number or infinity"}
         collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
 
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("json_value", ct.get_invalid_dict[:8])
+    def test_insert_json_filed_invalid(self, json_value):
+        """
+        target: test insert json field invalid
+        method: insert with nan value: list, number, string ...
+        expected: raise exception
+        """
+        if isinstance(json_value, list):
+            pytest.skip("invalid in dataframe")
+        collection_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=collection_name)
+        data = cf.gen_default_dataframe_data()
+        data.loc[0, ct.default_json_field_name] = json_value
+        error = {ct.err_code: 1001, ct.err_msg: "IO failed: json"}
+        collection_w.insert(data, check_task=CheckTasks.err_res, check_items=error)
+
 
 class TestInsertInvalidBinary(TestcaseBase):
     """
