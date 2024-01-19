@@ -380,13 +380,13 @@ func (id *inData) pkExists(pk storage.PrimaryKey, ts uint64) bool {
 // also returns primary key field data
 func (wb *writeBufferBase) prepareInsert(insertMsgs []*msgstream.InsertMsg) ([]*inData, error) {
 	groups := lo.GroupBy(insertMsgs, func(msg *msgstream.InsertMsg) int64 { return msg.SegmentID })
-	segmentPartiton := lo.SliceToMap(insertMsgs, func(msg *msgstream.InsertMsg) (int64, int64) { return msg.GetSegmentID(), msg.GetPartitionID() })
+	segmentPartition := lo.SliceToMap(insertMsgs, func(msg *msgstream.InsertMsg) (int64, int64) { return msg.GetSegmentID(), msg.GetPartitionID() })
 
 	result := make([]*inData, 0, len(groups))
 	for segment, msgs := range groups {
 		inData := &inData{
 			segmentID:   segment,
-			partitionID: segmentPartiton[segment],
+			partitionID: segmentPartition[segment],
 			data:        make([]*storage.InsertData, 0, len(msgs)),
 			pkField:     make([]storage.FieldData, 0, len(msgs)),
 		}
@@ -409,7 +409,7 @@ func (wb *writeBufferBase) prepareInsert(insertMsgs []*msgstream.InsertMsg) ([]*
 			if err != nil {
 				return nil, err
 			}
-			if pkFieldData.RowNum() != data.GetRowNum() {
+			if tsFieldData.RowNum() != data.GetRowNum() {
 				return nil, merr.WrapErrServiceInternal("timestamp column row num not match")
 			}
 
