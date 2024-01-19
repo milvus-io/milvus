@@ -288,13 +288,14 @@ TEST(Indexing, Naive) {
     searchInfo.metric_type_ = knowhere::metric::L2;
     searchInfo.search_params_ = search_conf;
     auto vec_index = dynamic_cast<index::VectorIndex*>(index.get());
-    auto result = vec_index->Query(query_ds, searchInfo, view);
+    SearchResult result;
+    vec_index->Query(query_ds, searchInfo, view, result);
 
     for (int i = 0; i < TOPK; ++i) {
-        if (result->seg_offsets_[i] < N / 2) {
+        if (result.seg_offsets_[i] < N / 2) {
             std::cout << "WRONG: ";
         }
-        std::cout << result->seg_offsets_[i] << "->" << result->distances_[i]
+        std::cout << result.seg_offsets_[i] << "->" << result.distances_[i]
                   << std::endl;
     }
 }
@@ -397,6 +398,73 @@ INSTANTIATE_TEST_CASE_P(
 #endif
         std::pair(knowhere::IndexEnum::INDEX_HNSW, knowhere::metric::L2)));
 
+TEST(Indexing, Iterator) {
+    constexpr int N = 10240;
+    constexpr int TOPK = 100;
+    constexpr int dim = 128;
+    constexpr int chunk_size = 5120;
+
+    auto [raw_data, timestamps, uids] = generate_data<dim>(N);
+    milvus::index::CreateIndexInfo create_index_info;
+    create_index_info.field_type = DataType::VECTOR_FLOAT;
+    create_index_info.metric_type = knowhere::metric::L2;
+    create_index_info.index_type = knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC;
+    create_index_info.index_engine_version =
+            knowhere::Version::GetCurrentVersion().VersionNumber();
+    auto index = milvus::index::IndexFactory::GetInstance().CreateIndex(
+            create_index_info, milvus::storage::FileManagerContext());
+
+    auto build_conf = knowhere::Json{
+            {knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
+            {knowhere::meta::DIM, std::to_string(dim)},
+            {knowhere::indexparam::NLIST, "128"},
+    };
+
+    auto search_conf = knowhere::Json{
+            {knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
+            {knowhere::indexparam::NPROBE, 4},
+    };
+
+    std::vector<knowhere::DataSetPtr> datasets;
+    auto raw = raw_data.data();
+    for (int beg = 0; beg < N; beg += chunk_size) {
+        auto end = beg + chunk_size;
+        if (end > N) {
+            end = N;
+        }
+        std::vector<float> ft(raw + dim * beg, raw + dim * end);
+        auto ds = knowhere::GenDataSet(end - beg, dim, ft.data());
+        datasets.push_back(ds);
+    }
+
+    for (auto& ds : datasets) {
+        index->BuildWithDataset(ds, build_conf);
+    }
+
+    auto bitmap = BitsetType(N, false);
+
+    BitsetView view = bitmap;
+    auto query_ds = knowhere::GenDataSet(1, dim, raw_data.data());
+
+    milvus::SearchInfo searchInfo;
+    searchInfo.topk_ = TOPK;
+    searchInfo.metric_type_ = knowhere::metric::L2;
+    searchInfo.search_params_ = search_conf;
+    auto vec_index = dynamic_cast<index::VectorIndex*>(index.get());
+
+    knowhere::expected<std::vector<std::shared_ptr<knowhere::IndexNode::iterator>>>
+            kw_iterators = vec_index->VectorIterators(query_ds, searchInfo, view);
+    ASSERT_TRUE(kw_iterators.has_value());
+    ASSERT_EQ(kw_iterators.value().size(), 1);
+    auto iterator = kw_iterators.value()[0];
+    ASSERT_TRUE(iterator->HasNext());
+    while(iterator->HasNext()){
+        auto [off, dis] = iterator->Next();
+        ASSERT_TRUE(off >= 0);
+        ASSERT_TRUE(dis >= 0);
+    }
+}
+
 TEST_P(IndexTest, BuildAndQuery) {
     milvus::index::CreateIndexInfo create_index_info;
     create_index_info.index_type = index_type;
@@ -439,16 +507,17 @@ TEST_P(IndexTest, BuildAndQuery) {
     search_info.topk_ = K;
     search_info.metric_type_ = metric_type;
     search_info.search_params_ = search_conf;
-    auto result = vec_index->Query(xq_dataset, search_info, nullptr);
-    EXPECT_EQ(result->total_nq_, NQ);
-    EXPECT_EQ(result->unity_topK_, K);
-    EXPECT_EQ(result->distances_.size(), NQ * K);
-    EXPECT_EQ(result->seg_offsets_.size(), NQ * K);
+    SearchResult result;
+    vec_index->Query(xq_dataset, search_info, nullptr, result);
+    EXPECT_EQ(result.total_nq_, NQ);
+    EXPECT_EQ(result.unity_topK_, K);
+    EXPECT_EQ(result.distances_.size(), NQ * K);
+    EXPECT_EQ(result.seg_offsets_.size(), NQ * K);
     if (!is_binary) {
-        EXPECT_EQ(result->seg_offsets_[0], query_offset);
+        EXPECT_EQ(result.seg_offsets_[0], query_offset);
     }
     search_info.search_params_ = range_search_conf;
-    vec_index->Query(xq_dataset, search_info, nullptr);
+    vec_index->Query(xq_dataset, search_info, nullptr, result);
 }
 
 TEST_P(IndexTest, Mmap) {
@@ -497,16 +566,17 @@ TEST_P(IndexTest, Mmap) {
     search_info.topk_ = K;
     search_info.metric_type_ = metric_type;
     search_info.search_params_ = search_conf;
-    auto result = vec_index->Query(xq_dataset, search_info, nullptr);
-    EXPECT_EQ(result->total_nq_, NQ);
-    EXPECT_EQ(result->unity_topK_, K);
-    EXPECT_EQ(result->distances_.size(), NQ * K);
-    EXPECT_EQ(result->seg_offsets_.size(), NQ * K);
+    SearchResult result;
+    vec_index->Query(xq_dataset, search_info, nullptr, result);
+    EXPECT_EQ(result.total_nq_, NQ);
+    EXPECT_EQ(result.unity_topK_, K);
+    EXPECT_EQ(result.distances_.size(), NQ * K);
+    EXPECT_EQ(result.seg_offsets_.size(), NQ * K);
     if (!is_binary) {
-        EXPECT_EQ(result->seg_offsets_[0], query_offset);
+        EXPECT_EQ(result.seg_offsets_[0], query_offset);
     }
     search_info.search_params_ = range_search_conf;
-    vec_index->Query(xq_dataset, search_info, nullptr);
+    vec_index->Query(xq_dataset, search_info, nullptr, result);
 }
 
 TEST_P(IndexTest, GetVector) {
@@ -658,7 +728,8 @@ TEST(Indexing, SearchDiskAnnWithInvalidParam) {
         {knowhere::meta::METRIC_TYPE, metric_type},
         {milvus::index::DISK_ANN_QUERY_LIST, K - 1},
     };
-    EXPECT_THROW(vec_index->Query(xq_dataset, search_info, nullptr),
+    SearchResult result;
+    EXPECT_THROW(vec_index->Query(xq_dataset, search_info, nullptr, result),
                  std::runtime_error);
 }
 

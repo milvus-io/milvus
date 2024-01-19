@@ -87,23 +87,24 @@ VectorFieldIndexing::GetDataFromIndex(const int64_t* seg_offsets,
 void
 VectorFieldIndexing::AppendSegmentIndex(int64_t reserved_offset,
                                         int64_t size,
-                                        const VectorBase* vec_base,
+                                        const VectorBase* field_raw_data,
                                         const void* data_source) {
     AssertInfo(field_meta_.get_data_type() == DataType::VECTOR_FLOAT,
                "Data type of vector field is not VECTOR_FLOAT");
 
     auto dim = field_meta_.get_dim();
     auto conf = get_build_params();
-    auto source = dynamic_cast<const ConcurrentVector<FloatVector>*>(vec_base);
+    auto source =
+        dynamic_cast<const ConcurrentVector<FloatVector>*>(field_raw_data);
 
-    auto per_chunk = source->get_size_per_chunk();
+    auto size_per_chunk = source->get_size_per_chunk();
     //append vector [vector_id_beg, vector_id_end] into index
     //build index [vector_id_beg, build_threshold) when index not exist
     if (!build) {
         idx_t vector_id_beg = index_cur_.load();
         idx_t vector_id_end = get_build_threshold() - 1;
-        auto chunk_id_beg = vector_id_beg / per_chunk;
-        auto chunk_id_end = vector_id_end / per_chunk;
+        auto chunk_id_beg = vector_id_beg / size_per_chunk;
+        auto chunk_id_end = vector_id_end / size_per_chunk;
 
         int64_t vec_num = vector_id_end - vector_id_beg + 1;
         // for train index
@@ -111,7 +112,7 @@ VectorFieldIndexing::AppendSegmentIndex(int64_t reserved_offset,
         unique_ptr<float[]> vec_data;
         //all train data in one chunk
         if (chunk_id_beg == chunk_id_end) {
-            data_addr = vec_base->get_chunk_data(chunk_id_beg);
+            data_addr = field_raw_data->get_chunk_data(chunk_id_beg);
         } else {
             //merge data from multiple chunks together
             vec_data = std::make_unique<float[]>(vec_num * dim);
@@ -122,12 +123,13 @@ VectorFieldIndexing::AppendSegmentIndex(int64_t reserved_offset,
                 int chunk_offset = 0;
                 int chunk_copysz =
                     chunk_id == chunk_id_end
-                        ? vector_id_end - chunk_id * per_chunk + 1
-                        : per_chunk;
-                std::memcpy(vec_data.get() + offset * dim,
-                            (const float*)vec_base->get_chunk_data(chunk_id) +
-                                chunk_offset * dim,
-                            chunk_copysz * dim * sizeof(float));
+                        ? vector_id_end - chunk_id * size_per_chunk + 1
+                        : size_per_chunk;
+                std::memcpy(
+                    vec_data.get() + offset * dim,
+                    (const float*)field_raw_data->get_chunk_data(chunk_id) +
+                        chunk_offset * dim,
+                    chunk_copysz * dim * sizeof(float));
                 offset += chunk_copysz;
             }
             data_addr = vec_data.get();
@@ -146,8 +148,8 @@ VectorFieldIndexing::AppendSegmentIndex(int64_t reserved_offset,
     //append rest data when index has built
     idx_t vector_id_beg = index_cur_.load();
     idx_t vector_id_end = reserved_offset + size - 1;
-    auto chunk_id_beg = vector_id_beg / per_chunk;
-    auto chunk_id_end = vector_id_end / per_chunk;
+    auto chunk_id_beg = vector_id_beg / size_per_chunk;
+    auto chunk_id_end = vector_id_end / size_per_chunk;
     int64_t vec_num = vector_id_end - vector_id_beg + 1;
 
     if (vec_num <= 0) {
@@ -163,11 +165,12 @@ VectorFieldIndexing::AppendSegmentIndex(int64_t reserved_offset,
         for (int chunk_id = chunk_id_beg; chunk_id <= chunk_id_end;
              chunk_id++) {
             int chunk_offset = chunk_id == chunk_id_beg
-                                   ? index_cur_ - chunk_id * per_chunk
+                                   ? index_cur_ - chunk_id * size_per_chunk
                                    : 0;
-            int chunk_sz = chunk_id == chunk_id_end
-                               ? vector_id_end % per_chunk - chunk_offset + 1
-                               : per_chunk - chunk_offset;
+            int chunk_sz =
+                chunk_id == chunk_id_end
+                    ? vector_id_end % size_per_chunk - chunk_offset + 1
+                    : size_per_chunk - chunk_offset;
             auto dataset = knowhere::GenDataSet(
                 chunk_sz,
                 dim,

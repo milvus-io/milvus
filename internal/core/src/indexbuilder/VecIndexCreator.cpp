@@ -85,7 +85,9 @@ VecIndexCreator::Query(const milvus::DatasetPtr& dataset,
                        const SearchInfo& search_info,
                        const BitsetView& bitset) {
     auto vector_index = dynamic_cast<index::VectorIndex*>(index_.get());
-    return vector_index->Query(dataset, search_info, bitset);
+    auto search_result = std::make_unique<SearchResult>();
+    vector_index->Query(dataset, search_info, bitset, *search_result);
+    return search_result;
 }
 
 BinarySet

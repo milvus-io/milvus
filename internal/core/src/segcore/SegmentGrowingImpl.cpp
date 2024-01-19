@@ -441,24 +441,8 @@ SegmentGrowingImpl::vector_search(SearchInfo& search_info,
                                   Timestamp timestamp,
                                   const BitsetView& bitset,
                                   SearchResult& output) const {
-    auto& sealed_indexing = this->get_sealed_indexing_record();
-    if (sealed_indexing.is_ready(search_info.field_id_)) {
-        query::SearchOnSealedIndex(this->get_schema(),
-                                   sealed_indexing,
-                                   search_info,
-                                   query_data,
-                                   query_count,
-                                   bitset,
-                                   output);
-    } else {
-        query::SearchOnGrowing(*this,
-                               search_info,
-                               query_data,
-                               query_count,
-                               timestamp,
-                               bitset,
-                               output);
-    }
+    query::SearchOnGrowing(
+        *this, search_info, query_data, query_count, timestamp, bitset, output);
 }
 
 std::unique_ptr<DataArray>
