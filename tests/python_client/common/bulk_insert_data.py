@@ -21,6 +21,8 @@ FLOAT = "float"
 class DataField:
     pk_field = "uid"
     vec_field = "vectors"
+    vec_image_emb_field = "image_emb"
+    vec_text_emb_field = "text_emb"
     int_field = "int_scalar"
     string_field = "string_scalar"
     bool_field = "bool_scalar"

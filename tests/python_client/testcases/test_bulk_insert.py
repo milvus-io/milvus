@@ -630,6 +630,8 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             cf.gen_array_field(name=df.array_string_field, element_type=DataType.VARCHAR, max_length=100),
             cf.gen_array_field(name=df.array_bool_field, element_type=DataType.BOOL),
             cf.gen_float_vec_field(name=df.vec_field, dim=dim),
+            cf.gen_float_vec_field(name=df.vec_image_emb_field, dim=dim),
+            cf.gen_float_vec_field(name=df.vec_text_emb_field, dim=dim),
         ]
         data_fields = [f.name for f in fields if not f.to_dict().get("auto_id", False)]
         files = prepare_bulk_insert_json_files(
@@ -715,6 +717,8 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             cf.gen_array_field(name=df.array_string_field, element_type=DataType.VARCHAR, max_length=100),
             cf.gen_array_field(name=df.array_bool_field, element_type=DataType.BOOL),
             cf.gen_float_vec_field(name=df.vec_field, dim=dim),
+            cf.gen_float_vec_field(name=df.vec_image_emb_field, dim=dim),
+            cf.gen_float_vec_field(name=df.vec_text_emb_field, dim=dim),
         ]
         data_fields = [f.name for f in fields if not f.to_dict().get("auto_id", False)]
         files = prepare_bulk_insert_new_json_files(
@@ -797,6 +801,8 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             cf.gen_double_field(name=df.double_field),
             cf.gen_json_field(name=df.json_field),
             cf.gen_float_vec_field(name=df.vec_field, dim=dim),
+            cf.gen_float_vec_field(name=df.vec_image_emb_field, dim=dim),
+            cf.gen_float_vec_field(name=df.vec_text_emb_field, dim=dim),
         ]
         data_fields = [f.name for f in fields if not f.to_dict().get("auto_id", False)]
         files = prepare_bulk_insert_numpy_files(
@@ -884,6 +890,8 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             cf.gen_array_field(name=df.array_string_field, element_type=DataType.VARCHAR, max_length=100),
             cf.gen_array_field(name=df.array_bool_field, element_type=DataType.BOOL),
             cf.gen_float_vec_field(name=df.vec_field, dim=dim),
+            cf.gen_float_vec_field(name=df.vec_image_emb_field, dim=dim),
+            cf.gen_float_vec_field(name=df.vec_text_emb_field, dim=dim),
         ]
         data_fields = [f.name for f in fields if not f.to_dict().get("auto_id", False)]
         files = prepare_bulk_insert_parquet_files(
