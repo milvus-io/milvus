@@ -10,8 +10,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -118,38 +116,17 @@ func (ib *InsertBuffer) Yield() *storage.InsertData {
 	return ib.buffer
 }
 
-func (ib *InsertBuffer) Buffer(msgs []*msgstream.InsertMsg, startPos, endPos *msgpb.MsgPosition) ([]storage.FieldData, int64, error) {
-	pkData := make([]storage.FieldData, 0, len(msgs))
-	var totalMemSize int64 = 0
-	for _, msg := range msgs {
-		tmpBuffer, err := storage.InsertMsgToInsertData(msg, ib.collSchema)
-		if err != nil {
-			log.Warn("failed to transfer insert msg to insert data", zap.Error(err))
-			return nil, 0, err
-		}
-
-		pkFieldData, err := storage.GetPkFromInsertData(ib.collSchema, tmpBuffer)
-		if err != nil {
-			return nil, 0, err
-		}
-		if pkFieldData.RowNum() != tmpBuffer.GetRowNum() {
-			return nil, 0, merr.WrapErrServiceInternal("pk column row num not match")
-		}
-		pkData = append(pkData, pkFieldData)
-
-		storage.MergeInsertData(ib.buffer, tmpBuffer)
-
-		tsData, err := storage.GetTimestampFromInsertData(tmpBuffer)
-		if err != nil {
-			log.Warn("no timestamp field found in insert msg", zap.Error(err))
-			return nil, 0, err
-		}
+func (ib *InsertBuffer) Buffer(inData *inData, startPos, endPos *msgpb.MsgPosition) int64 {
+	totalMemSize := int64(0)
+	for idx, data := range inData.data {
+		storage.MergeInsertData(ib.buffer, data)
+		tsData := inData.tsField[idx]
 
 		// update buffer size
-		ib.UpdateStatistics(int64(tmpBuffer.GetRowNum()), int64(tmpBuffer.GetMemorySize()), ib.getTimestampRange(tsData), startPos, endPos)
-		totalMemSize += int64(tmpBuffer.GetMemorySize())
+		ib.UpdateStatistics(int64(data.GetRowNum()), int64(data.GetMemorySize()), ib.getTimestampRange(tsData), startPos, endPos)
+		totalMemSize += int64(data.GetMemorySize())
 	}
-	return pkData, totalMemSize, nil
+	return totalMemSize
 }
 
 func (ib *InsertBuffer) getTimestampRange(tsData *storage.Int64FieldData) TimeRange {
