@@ -6193,7 +6193,7 @@ class TestSearchDiskann(TestcaseBase):
                             default_search_exp,
                             output_fields=output_fields,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 65538,
+                            check_items={"err_code": 65535,
                                          "err_msg": "UnknownError"})
 
     @pytest.mark.tags(CaseLabel.L2)
