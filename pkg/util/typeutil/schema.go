@@ -878,6 +878,16 @@ func MergeFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData) error 
 				} else {
 					dstScalar.GetJsonData().Data = append(dstScalar.GetJsonData().Data, srcScalar.JsonData.Data...)
 				}
+			case *schemapb.ScalarField_BytesData:
+				if dstScalar.GetBytesData() == nil {
+					dstScalar.Data = &schemapb.ScalarField_BytesData{
+						BytesData: &schemapb.BytesArray{
+							Data: srcScalar.BytesData.Data,
+						},
+					}
+				} else {
+					dstScalar.GetBytesData().Data = append(dstScalar.GetBytesData().Data, srcScalar.BytesData.Data...)
+				}
 			default:
 				log.Error("Not supported data type", zap.String("data type", srcFieldData.Type.String()))
 				return errors.New("unsupported data type: " + srcFieldData.Type.String())

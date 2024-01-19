@@ -133,7 +133,7 @@ func (s *CompactionPlanHandlerSuite) TestHandleL0CompactionResults() {
 			s.Equal(7, len(operators))
 		}).Return(nil).Once()
 
-	deltalogs := []*datapb.FieldBinlog{getFieldBinlogPaths(101, getDeltaLogPath("log3", 1))}
+	deltalogs := []*datapb.FieldBinlog{getFieldBinlogIDs(101, 3)}
 	// 2 l0 segments, 3 sealed segments
 	plan := &datapb.CompactionPlan{
 		PlanID: 1,
@@ -219,7 +219,7 @@ func (s *CompactionPlanHandlerSuite) TestRefreshL0Plan() {
 		},
 	)
 
-	deltalogs := []*datapb.FieldBinlog{getFieldBinlogPaths(101, getDeltaLogPath("log3", 1))}
+	deltalogs := []*datapb.FieldBinlog{getFieldBinlogIDs(101, 3)}
 	// 2 l0 segments
 	plan := &datapb.CompactionPlan{
 		PlanID: 1,
@@ -437,16 +437,16 @@ func (s *CompactionPlanHandlerSuite) TestCompleteCompaction() {
 
 		seg1 := &datapb.SegmentInfo{
 			ID:        1,
-			Binlogs:   []*datapb.FieldBinlog{getFieldBinlogPaths(101, getInsertLogPath("log1", 1))},
-			Statslogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, getStatsLogPath("log2", 1))},
-			Deltalogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, getDeltaLogPath("log3", 1))},
+			Binlogs:   []*datapb.FieldBinlog{getFieldBinlogIDs(101, 1)},
+			Statslogs: []*datapb.FieldBinlog{getFieldBinlogIDs(101, 2)},
+			Deltalogs: []*datapb.FieldBinlog{getFieldBinlogIDs(101, 3)},
 		}
 
 		seg2 := &datapb.SegmentInfo{
 			ID:        2,
-			Binlogs:   []*datapb.FieldBinlog{getFieldBinlogPaths(101, getInsertLogPath("log4", 2))},
-			Statslogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, getStatsLogPath("log5", 2))},
-			Deltalogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, getDeltaLogPath("log6", 2))},
+			Binlogs:   []*datapb.FieldBinlog{getFieldBinlogIDs(101, 4)},
+			Statslogs: []*datapb.FieldBinlog{getFieldBinlogIDs(101, 5)},
+			Deltalogs: []*datapb.FieldBinlog{getFieldBinlogIDs(101, 6)},
 		}
 
 		plan := &datapb.CompactionPlan{
@@ -483,9 +483,9 @@ func (s *CompactionPlanHandlerSuite) TestCompleteCompaction() {
 				{
 					SegmentID:           3,
 					NumOfRows:           15,
-					InsertLogs:          []*datapb.FieldBinlog{getFieldBinlogPaths(101, getInsertLogPath("log301", 3))},
-					Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogPaths(101, getStatsLogPath("log302", 3))},
-					Deltalogs:           []*datapb.FieldBinlog{getFieldBinlogPaths(101, getDeltaLogPath("log303", 3))},
+					InsertLogs:          []*datapb.FieldBinlog{getFieldBinlogIDs(101, 301)},
+					Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogIDs(101, 302)},
+					Deltalogs:           []*datapb.FieldBinlog{getFieldBinlogIDs(101, 303)},
 				},
 			},
 		}
@@ -584,6 +584,17 @@ func (s *CompactionPlanHandlerSuite) TestUpdateCompaction() {
 	s.Equal(failed, task.state)
 }
 
+func getFieldBinlogIDs(id int64, logIDs ...int64) *datapb.FieldBinlog {
+	l := &datapb.FieldBinlog{
+		FieldID: id,
+		Binlogs: make([]*datapb.Binlog, 0, len(logIDs)),
+	}
+	for _, id := range logIDs {
+		l.Binlogs = append(l.Binlogs, &datapb.Binlog{LogID: id})
+	}
+	return l
+}
+
 func getFieldBinlogPaths(id int64, paths ...string) *datapb.FieldBinlog {
 	l := &datapb.FieldBinlog{
 		FieldID: id,
@@ -595,13 +606,13 @@ func getFieldBinlogPaths(id int64, paths ...string) *datapb.FieldBinlog {
 	return l
 }
 
-func getFieldBinlogPathsWithEntry(id int64, entry int64, paths ...string) *datapb.FieldBinlog {
+func getFieldBinlogIDsWithEntry(id int64, entry int64, logIDs ...int64) *datapb.FieldBinlog {
 	l := &datapb.FieldBinlog{
 		FieldID: id,
-		Binlogs: make([]*datapb.Binlog, 0, len(paths)),
+		Binlogs: make([]*datapb.Binlog, 0, len(logIDs)),
 	}
-	for _, path := range paths {
-		l.Binlogs = append(l.Binlogs, &datapb.Binlog{LogPath: path, EntriesNum: entry})
+	for _, id := range logIDs {
+		l.Binlogs = append(l.Binlogs, &datapb.Binlog{LogID: id, EntriesNum: entry})
 	}
 	return l
 }

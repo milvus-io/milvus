@@ -258,11 +258,11 @@ func (s *ServerSuite) TestSaveBinlogPath_L0Segment() {
 				FieldID: 1,
 				Binlogs: []*datapb.Binlog{
 					{
-						LogPath:    "/by-dev/test/0/1/1/1/Allo1",
+						LogPath:    "/by-dev/test/0/1/1/1/1",
 						EntriesNum: 5,
 					},
 					{
-						LogPath:    "/by-dev/test/0/1/1/1/Allo2",
+						LogPath:    "/by-dev/test/0/1/1/1/2",
 						EntriesNum: 5,
 					},
 				},
@@ -323,11 +323,11 @@ func (s *ServerSuite) TestSaveBinlogPath_NormalCase() {
 				FieldID: 1,
 				Binlogs: []*datapb.Binlog{
 					{
-						LogPath:    "/by-dev/test/0/1/1/1/Allo1",
+						LogPath:    "/by-dev/test/0/1/1/1/1",
 						EntriesNum: 5,
 					},
 					{
-						LogPath:    "/by-dev/test/0/1/1/1/Allo2",
+						LogPath:    "/by-dev/test/0/1/1/1/2",
 						EntriesNum: 5,
 					},
 				},
@@ -338,11 +338,11 @@ func (s *ServerSuite) TestSaveBinlogPath_NormalCase() {
 				FieldID: 1,
 				Binlogs: []*datapb.Binlog{
 					{
-						LogPath:    "/by-dev/test_stats/0/1/1/1/Allo1",
+						LogPath:    "/by-dev/test_stats/0/1/1/1/1",
 						EntriesNum: 5,
 					},
 					{
-						LogPath:    "/by-dev/test_stats/0/1/1/1/Allo2",
+						LogPath:    "/by-dev/test_stats/0/1/1/1/2",
 						EntriesNum: 5,
 					},
 				},
@@ -373,8 +373,10 @@ func (s *ServerSuite) TestSaveBinlogPath_NormalCase() {
 	s.NotNil(fieldBinlogs)
 	s.EqualValues(2, len(fieldBinlogs.GetBinlogs()))
 	s.EqualValues(1, fieldBinlogs.GetFieldID())
-	s.EqualValues("/by-dev/test/0/1/1/1/Allo1", fieldBinlogs.GetBinlogs()[0].GetLogPath())
-	s.EqualValues("/by-dev/test/0/1/1/1/Allo2", fieldBinlogs.GetBinlogs()[1].GetLogPath())
+	s.EqualValues("", fieldBinlogs.GetBinlogs()[0].GetLogPath())
+	s.EqualValues(int64(1), fieldBinlogs.GetBinlogs()[0].GetLogID())
+	s.EqualValues("", fieldBinlogs.GetBinlogs()[1].GetLogPath())
+	s.EqualValues(int64(2), fieldBinlogs.GetBinlogs()[1].GetLogID())
 
 	s.EqualValues(segment.DmlPosition.ChannelName, "ch1")
 	s.EqualValues(segment.DmlPosition.MsgID, []byte{1, 2, 3})

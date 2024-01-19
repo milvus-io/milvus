@@ -13,9 +13,14 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type run struct{}
+
+func init() {
+	paramtable.Init()
+}
 
 func (c *run) execute(args []string, flags *flag.FlagSet) {
 	if len(args) < 3 {

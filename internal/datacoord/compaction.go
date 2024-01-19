@@ -441,7 +441,7 @@ func (c *compactionPlanHandler) handleMergeCompactionResult(plan *datapb.Compact
 		}
 
 		if err := c.meta.alterMetaStoreAfterCompaction(newSegment, modSegments); err != nil {
-			log.Warn("fail to alert meta store", zap.Error(err))
+			log.Warn("fail to alter meta store", zap.Error(err))
 			return err
 		}
 

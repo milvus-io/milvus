@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
@@ -96,7 +97,10 @@ func (kc *Catalog) ListSegments(ctx context.Context) ([]*datapb.SegmentInfo, err
 		return nil, err
 	}
 
-	kc.applyBinlogInfo(segments, insertLogs, deltaLogs, statsLogs)
+	err = kc.applyBinlogInfo(segments, insertLogs, deltaLogs, statsLogs)
+	if err != nil {
+		return nil, err
+	}
 	return segments, nil
 }
 
@@ -185,20 +189,12 @@ func (kc *Catalog) listBinlogs(binlogType storage.BinlogType) (map[typeutil.Uniq
 			return fmt.Errorf("failed to unmarshal datapb.FieldBinlog: %d, err:%w", fieldBinlog.FieldID, err)
 		}
 
-		collectionID, partitionID, segmentID, err := kc.parseBinlogKey(string(key), prefixIdx)
+		_, _, segmentID, err := kc.parseBinlogKey(string(key), prefixIdx)
 		if err != nil {
 			return fmt.Errorf("prefix:%s, %w", path.Join(kc.metaRootpath, logPathPrefix), err)
 		}
 
-		switch binlogType {
-		case storage.InsertBinlog:
-			fillLogPathByLogID(kc.ChunkManagerRootPath, storage.InsertBinlog, collectionID, partitionID, segmentID, fieldBinlog)
-		case storage.DeleteBinlog:
-			fillLogPathByLogID(kc.ChunkManagerRootPath, storage.DeleteBinlog, collectionID, partitionID, segmentID, fieldBinlog)
-		case storage.StatsBinlog:
-			fillLogPathByLogID(kc.ChunkManagerRootPath, storage.StatsBinlog, collectionID, partitionID, segmentID, fieldBinlog)
-		}
-
+		// no need to set log path and only store log id
 		ret[segmentID] = append(ret[segmentID], fieldBinlog)
 		return nil
 	}
@@ -212,20 +208,37 @@ func (kc *Catalog) listBinlogs(binlogType storage.BinlogType) (map[typeutil.Uniq
 
 func (kc *Catalog) applyBinlogInfo(segments []*datapb.SegmentInfo, insertLogs, deltaLogs,
 	statsLogs map[typeutil.UniqueID][]*datapb.FieldBinlog,
-) {
+) error {
+	var err error
 	for _, segmentInfo := range segments {
 		if len(segmentInfo.Binlogs) == 0 {
 			segmentInfo.Binlogs = insertLogs[segmentInfo.ID]
+		} else {
+			err = binlog.CompressFieldBinlogs(segmentInfo.Binlogs)
+			if err != nil {
+				return err
+			}
 		}
 
 		if len(segmentInfo.Deltalogs) == 0 {
 			segmentInfo.Deltalogs = deltaLogs[segmentInfo.ID]
+		} else {
+			err = binlog.CompressFieldBinlogs(segmentInfo.Deltalogs)
+			if err != nil {
+				return err
+			}
 		}
 
 		if len(segmentInfo.Statslogs) == 0 {
 			segmentInfo.Statslogs = statsLogs[segmentInfo.ID]
+		} else {
+			err = binlog.CompressFieldBinlogs(segmentInfo.Statslogs)
+			if err != nil {
+				return err
+			}
 		}
 	}
+	return nil
 }
 
 func (kc *Catalog) AddSegment(ctx context.Context, segment *datapb.SegmentInfo) error {
@@ -290,15 +303,12 @@ func (kc *Catalog) AlterSegments(ctx context.Context, segments []*datapb.Segment
 	for _, b := range binlogs {
 		segment := b.Segment
 
-		if err := ValidateSegment(segment); err != nil {
-			return err
-		}
-
 		binlogKvs, err := buildBinlogKvsWithLogID(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID(),
 			cloneLogs(segment.GetBinlogs()), cloneLogs(segment.GetDeltalogs()), cloneLogs(segment.GetStatslogs()))
 		if err != nil {
 			return err
 		}
+
 		maps.Copy(kvs, binlogKvs)
 	}
 
@@ -539,29 +549,7 @@ func (kc *Catalog) getBinlogsWithPrefix(binlogType storage.BinlogType, collectio
 	if err != nil {
 		return nil, nil, err
 	}
-
 	return keys, values, nil
-}
-
-// unmarshal binlog/deltalog/statslog
-func (kc *Catalog) unmarshalBinlog(binlogType storage.BinlogType, collectionID, partitionID, segmentID typeutil.UniqueID) ([]*datapb.FieldBinlog, error) {
-	_, values, err := kc.getBinlogsWithPrefix(binlogType, collectionID, partitionID, segmentID)
-	if err != nil {
-		return nil, err
-	}
-
-	result := make([]*datapb.FieldBinlog, len(values))
-	for i, value := range values {
-		fieldBinlog := &datapb.FieldBinlog{}
-		err = proto.Unmarshal([]byte(value), fieldBinlog)
-		if err != nil {
-			return nil, fmt.Errorf("failed to unmarshal datapb.FieldBinlog: %d, err:%w", fieldBinlog.FieldID, err)
-		}
-
-		fillLogPathByLogID(kc.ChunkManagerRootPath, binlogType, collectionID, partitionID, segmentID, fieldBinlog)
-		result[i] = fieldBinlog
-	}
-	return result, nil
 }
 
 func (kc *Catalog) CreateIndex(ctx context.Context, index *model.Index) error {
@@ -776,14 +764,4 @@ func (kc *Catalog) GcConfirm(ctx context.Context, collectionID, partitionID type
 		return false
 	}
 	return len(keys) == 0 && len(values) == 0
-}
-
-func fillLogPathByLogID(chunkManagerRootPath string, binlogType storage.BinlogType, collectionID, partitionID,
-	segmentID typeutil.UniqueID, fieldBinlog *datapb.FieldBinlog,
-) {
-	for _, binlog := range fieldBinlog.Binlogs {
-		path := buildLogPath(chunkManagerRootPath, binlogType, collectionID, partitionID,
-			segmentID, fieldBinlog.GetFieldID(), binlog.GetLogID())
-		binlog.LogPath = path
-	}
 }
