@@ -98,13 +98,26 @@ func UpdateFileStat(idx int, fileStat *datapb.ImportFileStats) UpdateAction {
 }
 
 func UpdateSegmentInfo(info *datapb.ImportSegmentInfo) UpdateAction {
+	mergeFn := func(current []*datapb.FieldBinlog, new []*datapb.FieldBinlog) []*datapb.FieldBinlog {
+		for _, binlog := range new {
+			fieldBinlogs, ok := lo.Find(current, func(log *datapb.FieldBinlog) bool {
+				return log.GetFieldID() == binlog.GetFieldID()
+			})
+			if !ok || fieldBinlogs == nil {
+				current = append(current, binlog)
+			} else {
+				fieldBinlogs.Binlogs = append(fieldBinlogs.Binlogs, binlog.Binlogs...)
+			}
+		}
+		return current
+	}
 	return func(task Task) {
 		if it, ok := task.(*ImportTask); ok {
 			segment := info.GetSegmentID()
 			if _, ok = it.segmentsInfo[segment]; ok {
-				it.segmentsInfo[segment].ImportedRows += info.GetImportedRows()
-				it.segmentsInfo[segment].Binlogs = append(it.segmentsInfo[segment].Binlogs, info.GetBinlogs()...)
-				it.segmentsInfo[segment].Statslogs = append(it.segmentsInfo[segment].Statslogs, info.GetStatslogs()...)
+				it.segmentsInfo[segment].ImportedRows = info.GetImportedRows()
+				it.segmentsInfo[segment].Binlogs = mergeFn(it.segmentsInfo[segment].Binlogs, info.GetBinlogs())
+				it.segmentsInfo[segment].Statslogs = mergeFn(it.segmentsInfo[segment].Statslogs, info.GetStatslogs())
 				return
 			}
 			it.segmentsInfo[segment] = info

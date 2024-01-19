@@ -246,15 +246,30 @@ func (s *importScheduler) processInProgressImport(task ImportTask) {
 		if info.GetImportedRows() <= segment.GetNumOfRows() {
 			continue // rows not changed, no need to update
 		}
-		op1 := ReplaceBinlogsOperator(info.GetSegmentID(), info.GetBinlogs(), info.GetStatslogs(), nil)
-		op2 := UpdateNumOfRows(info.GetSegmentID(), info.GetImportedRows())
-		err = s.meta.UpdateSegmentsInfo(op1, op2)
+		op := UpdateImportedRows(info.GetSegmentID(), info.GetImportedRows())
+		err = s.meta.UpdateSegmentsInfo(op)
 		if err != nil {
-			log.Warn("update import segment info failed", WrapLogFields(task, zap.Error(err))...)
-			continue
+			log.Warn("update import segment rows failed", WrapLogFields(task, zap.Error(err))...)
+			return
 		}
 	}
 	if resp.GetState() == internalpb.ImportState_Completed {
+		for _, info := range resp.GetImportSegmentsInfo() {
+			segmentID := info.GetSegmentID()
+			segment := s.meta.GetSegment(segmentID)
+			channelCP := s.meta.GetChannelCheckpoint(segment.GetInsertChannel())
+			if channelCP == nil {
+				log.Warn("nil channel checkpoint", WrapLogFields(task)...)
+				return
+			}
+			op1 := UpdateStartPosition([]*datapb.SegmentStartPosition{{StartPosition: channelCP, SegmentID: segmentID}})
+			op2 := ReplaceBinlogsOperator(segmentID, info.GetBinlogs(), info.GetStatslogs(), nil)
+			err = s.meta.UpdateSegmentsInfo(op1, op2)
+			if err != nil {
+				log.Warn("update import segment binlogs failed", WrapLogFields(task, zap.Error(err))...)
+				return
+			}
+		}
 		err = s.imeta.Update(task.GetTaskID(), UpdateState(internalpb.ImportState_Completed))
 		if err != nil {
 			log.Warn("update import task failed", WrapLogFields(task, zap.Error(err))...)

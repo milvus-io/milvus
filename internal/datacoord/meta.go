@@ -635,7 +635,7 @@ func UpdateCheckPointOperator(segmentID int64, importing bool, checkpoints []*da
 	}
 }
 
-func UpdateNumOfRows(segmentID int64, rows int64) UpdateOperator {
+func UpdateImportedRows(segmentID int64, rows int64) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)
 		if segment == nil {
@@ -644,13 +644,7 @@ func UpdateNumOfRows(segmentID int64, rows int64) UpdateOperator {
 			return false
 		}
 		segment.NumOfRows = rows
-		count := segmentutil.CalcRowCountFromBinLog(segment.SegmentInfo)
-		if count != segment.currRows && count > 0 {
-			log.Info("reported inconsistent with bin log row count",
-				zap.Int64("rows (wrong)", segment.currRows),
-				zap.Int64("segment bin log row count (correct)", count))
-			segment.NumOfRows = count
-		}
+		segment.currRows = rows
 		return true
 	}
 }

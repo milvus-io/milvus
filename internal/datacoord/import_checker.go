@@ -206,7 +206,7 @@ func (c *importChecker) checkImportState(requestID int64) {
 			return
 		}
 		for _, segmentID := range segmentIDs {
-			err := AddImportSegment(c.cluster, c.meta, segmentID)
+			err = AddImportSegment(c.cluster, c.meta, segmentID)
 			if err != nil {
 				log.Warn("add import segment failed", WrapLogFields(task, zap.Error(err))...)
 				return

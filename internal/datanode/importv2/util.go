@@ -64,6 +64,7 @@ func NewSyncTask(ctx context.Context, task *ImportTask, segmentID, partitionID i
 		WithPartitionID(partitionID).
 		WithChannelName(vchannel).
 		WithSegmentID(segmentID).
+		WithTimeRange(task.req.GetTs(), task.req.GetTs()).
 		WithBatchSize(int64(insertData.GetRowNum()))
 
 	return serializer.EncodeBuffer(ctx, syncPack)
@@ -103,8 +104,13 @@ func PickSegment(task *ImportTask, vchannel string, partitionID int64, rows int)
 			return candidate.GetSegmentID()
 		}
 	}
-	log.Warn("pick suitable segment failed, use the first one", WrapLogFields(task)...)
-	return candidates[0].GetSegmentID()
+	segmentID := lo.MinBy(task.GetSegmentsInfo(), func(s1, s2 *datapb.ImportSegmentInfo) bool {
+		return s1.GetImportedRows() < s2.GetImportedRows()
+	}).GetSegmentID()
+	log.Warn("failed to pick an appropriate segment, opt for the smallest one instead",
+		WrapLogFields(task, zap.Int64("segmentID", segmentID), zap.Int64("maxRows", candidates[0].GetMaxRows()),
+			zap.Int("rows", rows), zap.Int64("importedRows", importedSegments[segmentID].GetImportedRows()))...)
+	return segmentID
 }
 
 func AddSegment(metaCache metacache.MetaCache, vchannel string, segID, partID, collID int64) {
