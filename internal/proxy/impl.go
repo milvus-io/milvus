@@ -2807,7 +2807,7 @@ func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSea
 
 	log.Debug(
 		rpcEnqueued(method),
-		zap.Uint64("timestamp", qt.request.Base.Timestamp),
+		zap.Uint64("timestamp", qt.Base.Timestamp),
 	)
 
 	if err := qt.WaitToFinish(); err != nil {
