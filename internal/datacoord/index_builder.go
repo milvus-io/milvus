@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
@@ -297,6 +298,14 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 				UseVirtualHost:   Params.MinioCfg.UseVirtualHost.GetAsBool(),
 				CloudProvider:    Params.MinioCfg.CloudProvider.GetValue(),
 				RequestTimeoutMs: Params.MinioCfg.RequestTimeoutMs.GetAsInt64(),
+			}
+		}
+		if isDiskANNIndex(getIndexType(indexParams)) {
+			var err error
+			indexParams, err = indexparams.AppendDiskIndexBuildParams(Params, indexParams)
+			if err != nil {
+				log.Ctx(ib.ctx).Warn("failed to append index build params", zap.Int64("buildID", buildID),
+					zap.Int64("nodeID", nodeID), zap.Error(err))
 			}
 		}
 		req := &indexpb.CreateJobRequest{

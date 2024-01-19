@@ -182,6 +182,10 @@ func isFlatIndex(indexType string) bool {
 	return indexType == flatIndex || indexType == binFlatIndex
 }
 
+func isDiskANNIndex(indexType string) bool {
+	return indexType == diskAnnIndex
+}
+
 func parseBuildIDFromFilePath(key string) (UniqueID, error) {
 	ss := strings.Split(key, "/")
 	if strings.HasSuffix(key, "/") {
