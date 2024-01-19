@@ -457,6 +457,7 @@ func (kc *Catalog) alterModifyCollection(oldColl *model.Collection, newColl *mod
 	oldCollClone.CreateTime = newColl.CreateTime
 	oldCollClone.ConsistencyLevel = newColl.ConsistencyLevel
 	oldCollClone.State = newColl.State
+	oldCollClone.Properties = newColl.Properties
 
 	oldKey := BuildCollectionKey(oldColl.DBID, oldColl.CollectionID)
 	newKey := BuildCollectionKey(newColl.DBID, oldColl.CollectionID)
