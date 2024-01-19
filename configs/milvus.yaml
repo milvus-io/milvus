@@ -414,7 +414,7 @@ dataCoord:
         minSize: 8 # The minmum size in MB to force trigger a LevelZero Compaction
         deltalogMinNum: 10 # the minimum number of deltalog files to force trigger a LevelZero Compaction
   import:
-    filesPerPreImportTask: 2 # The maximum number of files allowed per pre-import task.
+    filesPerPreImportTask: 1 # The maximum number of files allowed per pre-import task.
     taskRetention: 10800 # The retention period in seconds for tasks in the Completed or Failed state.
     inactiveTimeout: 1800 # The timeout duration in seconds for a task in the "InProgress" state if it remains inactive (with no progress updates).
 
@@ -476,8 +476,10 @@ dataNode:
     # suggest to set it bigger on large collection numbers to avoid blocking
     updateChannelCheckpointMaxParallel: 1000
   import:
-    maxConcurrentTaskNum: 20 # The maximum number of import/pre-import tasks allowed to run concurrently on a datanode.
-    bufferSize: 256 # The maximum buffer size in MB that each import/pre-import task is permitted to utilize.
+    maxConcurrentTaskNum: 32 # The maximum number of import/pre-import tasks allowed to run concurrently on a datanode.
+    bufferSize: 64 # The maximum buffer size in MB that each import/pre-import task is permitted to utilize.
+  bulkinsert:
+    readBufferSize: 671088640
 
 # Configures the system log output.
 log:
