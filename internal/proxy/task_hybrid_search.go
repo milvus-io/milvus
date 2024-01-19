@@ -143,11 +143,12 @@ func (t *hybridSearchTask) PreExecute(ctx context.Context) error {
 				),
 				ReqID: paramtable.GetNodeID(),
 			},
-			request: searchReq,
-			tr:      timerecord.NewTimeRecorder("search"),
-			qc:      t.qc,
-			node:    t.node,
-			lb:      t.lb,
+			request:   searchReq,
+			tr:        timerecord.NewTimeRecorder("hybrid search"),
+			qc:        t.qc,
+			node:      t.node,
+			lb:        t.lb,
+			resultBuf: typeutil.NewConcurrentSet[*internalpb.SearchResults](),
 		}
 		err = t.searchTasks[index].PreExecute(ctx)
 		if err != nil {
