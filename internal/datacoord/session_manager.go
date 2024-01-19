@@ -287,18 +287,15 @@ func (c *SessionManagerImpl) GetCompactionPlansResults() map[int64]*datapb.Compa
 				),
 			})
 
-			// for compatibility issue, before 2.3.4, resp has only logpath
-			// try to parse path and fill logid
-			for _, result := range resp.Results {
-				binlog.CompressCompactionBinlogs(result.GetSegments())
-			}
-
 			if err := merr.CheckRPCCall(resp, err); err != nil {
 				log.Info("Get State failed", zap.Error(err))
 				return
 			}
 
 			for _, rst := range resp.GetResults() {
+				// for compatibility issue, before 2.3.4, resp has only logpath
+				// try to parse path and fill logid
+				binlog.CompressCompactionBinlogs(rst.GetSegments())
 				plans.Insert(rst.PlanID, rst)
 			}
 		}(nodeID, s)
