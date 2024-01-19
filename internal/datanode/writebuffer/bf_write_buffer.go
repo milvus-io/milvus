@@ -6,6 +6,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -52,17 +53,19 @@ func (wb *bfWriteBuffer) dispatchDeleteMsgs(groups []*inData, deleteMsgs []*msgs
 		}
 
 		for _, inData := range groups {
-			var deletePks []storage.PrimaryKey
-			var deleteTss []typeutil.Timestamp
-			for idx, pk := range pks {
-				ts := delMsg.GetTimestamps()[idx]
-				if inData.pkExists(pk, ts) {
-					deletePks = append(deletePks, pk)
-					deleteTss = append(deleteTss, delMsg.GetTimestamps()[idx])
+			if delMsg.GetPartitionID() == common.InvalidPartitionID || delMsg.GetPartitionID() == inData.partitionID {
+				var deletePks []storage.PrimaryKey
+				var deleteTss []typeutil.Timestamp
+				for idx, pk := range pks {
+					ts := delMsg.GetTimestamps()[idx]
+					if inData.pkExists(pk, ts) {
+						deletePks = append(deletePks, pk)
+						deleteTss = append(deleteTss, delMsg.GetTimestamps()[idx])
+					}
 				}
-			}
-			if len(deletePks) > 0 {
-				wb.bufferDelete(inData.segmentID, deletePks, deleteTss, startPos, endPos)
+				if len(deletePks) > 0 {
+					wb.bufferDelete(inData.segmentID, deletePks, deleteTss, startPos, endPos)
+				}
 			}
 		}
 	}
