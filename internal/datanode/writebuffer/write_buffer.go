@@ -355,7 +355,7 @@ func (id *inData) pkExists(pk storage.PrimaryKey, ts uint64) bool {
 	for batchIdx, timestamps := range id.tsField {
 		ids := id.pkField[batchIdx]
 		var primaryKey storage.PrimaryKey
-		switch ids.GetDataType() {
+		switch pk.Type() {
 		case schemapb.DataType_Int64:
 			primaryKey = storage.NewInt64PrimaryKey(0)
 		case schemapb.DataType_VarChar:
