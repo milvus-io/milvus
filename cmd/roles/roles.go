@@ -103,11 +103,6 @@ func runComponent[T component](ctx context.Context,
 		factory := dependency.NewFactory(localMsg)
 		var err error
 		role, err = creator(ctx, factory)
-		if localMsg {
-			paramtable.SetRole(typeutil.StandaloneRole)
-		} else {
-			paramtable.SetRole(role.GetName())
-		}
 		if err != nil {
 			panic(err)
 		}
