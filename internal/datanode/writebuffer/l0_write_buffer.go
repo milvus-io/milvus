@@ -12,10 +12,12 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/retry"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type l0WriteBuffer struct {
@@ -45,37 +47,80 @@ func NewL0WriteBuffer(channel string, metacache metacache.MetaCache, storageV2Ca
 	}, nil
 }
 
+func (wb *l0WriteBuffer) dispatchDeleteMsgs(groups []*inData, deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition) {
+	for _, delMsg := range deleteMsgs {
+		l0SegmentID := wb.getL0SegmentID(delMsg.GetPartitionID(), startPos)
+		pks := storage.ParseIDs2PrimaryKeys(delMsg.GetPrimaryKeys())
+		segments := wb.metaCache.GetSegmentsBy(metacache.WithPartitionID(delMsg.PartitionID),
+			metacache.WithSegmentState(commonpb.SegmentState_Growing, commonpb.SegmentState_Flushing, commonpb.SegmentState_Flushed))
+		for _, segment := range segments {
+			if segment.CompactTo() != 0 {
+				continue
+			}
+			var deletePks []storage.PrimaryKey
+			var deleteTss []typeutil.Timestamp
+			for idx, pk := range pks {
+				if segment.GetBloomFilterSet().PkExists(pk) {
+					deletePks = append(deletePks, pk)
+					deleteTss = append(deleteTss, delMsg.GetTimestamps()[idx])
+				}
+			}
+			if len(deletePks) > 0 {
+				wb.bufferDelete(l0SegmentID, deletePks, deleteTss, startPos, endPos)
+			}
+		}
+
+		for _, inData := range groups {
+			if delMsg.GetPartitionID() == common.InvalidPartitionID || delMsg.GetPartitionID() == inData.partitionID {
+				var deletePks []storage.PrimaryKey
+				var deleteTss []typeutil.Timestamp
+				for idx, pk := range pks {
+					ts := delMsg.GetTimestamps()[idx]
+					if inData.pkExists(pk, ts) {
+						deletePks = append(deletePks, pk)
+						deleteTss = append(deleteTss, delMsg.GetTimestamps()[idx])
+					}
+				}
+				if len(deletePks) > 0 {
+					wb.bufferDelete(l0SegmentID, deletePks, deleteTss, startPos, endPos)
+				}
+			}
+		}
+	}
+}
+
 func (wb *l0WriteBuffer) BufferData(insertMsgs []*msgstream.InsertMsg, deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition) error {
 	wb.mut.Lock()
 	defer wb.mut.Unlock()
 
-	// process insert msgs
-	pkData, err := wb.bufferInsert(insertMsgs, startPos, endPos)
+	groups, err := wb.prepareInsert(insertMsgs)
 	if err != nil {
-		log.Warn("failed to buffer insert data", zap.Error(err))
 		return err
 	}
 
+	// buffer insert data and add segment if not exists
+	for _, inData := range groups {
+		err := wb.bufferInsert(inData, startPos, endPos)
+		if err != nil {
+			return err
+		}
+	}
+
+	// distribute delete msg
+	// bf write buffer check bloom filter of segment and current insert batch to decide which segment to write delete data
+	wb.dispatchDeleteMsgs(groups, deleteMsgs, startPos, endPos)
+
 	// update pk oracle
-	for segmentID, dataList := range pkData {
-		segments := wb.metaCache.GetSegmentsBy(metacache.WithSegmentIDs(segmentID))
+	for _, inData := range groups {
+		// segment shall always exists after buffer insert
+		segments := wb.metaCache.GetSegmentsBy(metacache.WithSegmentIDs(inData.segmentID))
 		for _, segment := range segments {
-			for _, fieldData := range dataList {
+			for _, fieldData := range inData.pkField {
 				err := segment.GetBloomFilterSet().UpdatePKRange(fieldData)
 				if err != nil {
 					return err
 				}
 			}
-		}
-	}
-
-	for _, msg := range deleteMsgs {
-		l0SegmentID := wb.getL0SegmentID(msg.GetPartitionID(), startPos)
-		pks := storage.ParseIDs2PrimaryKeys(msg.GetPrimaryKeys())
-		err := wb.bufferDelete(l0SegmentID, pks, msg.GetTimestamps(), startPos, endPos)
-		if err != nil {
-			log.Warn("failed to buffer delete data", zap.Error(err))
-			return err
 		}
 	}
 
