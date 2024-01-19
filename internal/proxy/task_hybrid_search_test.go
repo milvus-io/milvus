@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -67,8 +68,9 @@ func TestHybridSearchTask_PreExecute(t *testing.T) {
 
 	genHybridSearchTaskWithNq := func(t *testing.T, collName string, reqs []*milvuspb.SearchRequest) *hybridSearchTask {
 		task := &hybridSearchTask{
-			ctx:       ctx,
-			Condition: NewTaskCondition(ctx),
+			ctx:                 ctx,
+			Condition:           NewTaskCondition(ctx),
+			HybridSearchRequest: &internalpb.HybridSearchRequest{},
 			request: &milvuspb.HybridSearchRequest{
 				CollectionName: collName,
 				Requests:       reqs,
@@ -225,6 +227,7 @@ func TestHybridSearchTask_ErrExecute(t *testing.T) {
 		result: &milvuspb.SearchResults{
 			Status: merr.Success(),
 		},
+		HybridSearchRequest: &internalpb.HybridSearchRequest{},
 		request: &milvuspb.HybridSearchRequest{
 			CollectionName: collectionName,
 			Requests: []*milvuspb.SearchRequest{
@@ -266,12 +269,12 @@ func TestHybridSearchTask_ErrExecute(t *testing.T) {
 	task.ctx = ctx
 	assert.NoError(t, task.PreExecute(ctx))
 
-	qn.EXPECT().Search(mock.Anything, mock.Anything).Return(nil, errors.New("mock error"))
+	qn.EXPECT().HybridSearch(mock.Anything, mock.Anything).Return(nil, errors.New("mock error"))
 	assert.Error(t, task.Execute(ctx))
 
 	qn.ExpectedCalls = nil
 	qn.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
-	qn.EXPECT().Search(mock.Anything, mock.Anything).Return(&internalpb.SearchResults{
+	qn.EXPECT().HybridSearch(mock.Anything, mock.Anything).Return(&querypb.HybridSearchResult{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		},
@@ -291,6 +294,10 @@ func TestHybridSearchTask_PostExecute(t *testing.T) {
 	mgr := NewMockShardClientManager(t)
 	mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(qn, nil).Maybe()
 	mgr.EXPECT().UpdateShardLeaders(mock.Anything, mock.Anything).Return(nil).Maybe()
+	qn.EXPECT().HybridSearch(mock.Anything, mock.Anything).Return(&querypb.HybridSearchResult{
+		Base:   commonpbutil.NewMsgBase(),
+		Status: merr.Success(),
+	}, nil)
 
 	t.Run("Test empty result", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
@@ -313,6 +320,9 @@ func TestHybridSearchTask_PostExecute(t *testing.T) {
 			qc:        nil,
 			tr:        timerecord.NewTimeRecorder("search"),
 			schema:    schema,
+			HybridSearchRequest: &internalpb.HybridSearchRequest{
+				Base: commonpbutil.NewMsgBase(),
+			},
 			request: &milvuspb.HybridSearchRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_Search,
@@ -320,6 +330,7 @@ func TestHybridSearchTask_PostExecute(t *testing.T) {
 				CollectionName: collectionName,
 				RankParams:     rankParams,
 			},
+			resultBuf:             typeutil.NewConcurrentSet[*querypb.HybridSearchResult](),
 			multipleRecallResults: typeutil.NewConcurrentSet[*milvuspb.SearchResults](),
 		}
 

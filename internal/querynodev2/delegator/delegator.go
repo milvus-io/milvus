@@ -354,6 +354,8 @@ func (sd *shardDelegator) HybridSearch(ctx context.Context, req *querypb.HybridS
 		Status:  merr.Success(),
 		Results: make([]*internalpb.SearchResults, len(futures)),
 	}
+
+	channelsMvcc := make(map[string]uint64)
 	for i, future := range futures {
 		result := future.Value()
 		if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
@@ -363,7 +365,11 @@ func (sd *shardDelegator) HybridSearch(ctx context.Context, req *querypb.HybridS
 		}
 
 		ret.Results[i] = result
+		for ch, ts := range result.GetChannelsMvcc() {
+			channelsMvcc[ch] = ts
+		}
 	}
+	ret.ChannelsMvcc = channelsMvcc
 
 	log.Debug("Delegator hybrid search done")
 

@@ -896,6 +896,7 @@ func (node *QueryNode) HybridSearch(ctx context.Context, req *querypb.HybridSear
 	}
 
 	tr.RecordSpan()
+	channelsMvcc := make(map[string]uint64)
 	for i, searchReq := range req.GetReq().GetReqs() {
 		toReduceResults := make([]*internalpb.SearchResults, len(MultipleResults))
 		for index, hs := range MultipleResults {
@@ -907,8 +908,12 @@ func (node *QueryNode) HybridSearch(ctx context.Context, req *querypb.HybridSear
 			resp.Status = merr.Status(err)
 			return resp, nil
 		}
+		for ch, ts := range result.GetChannelsMvcc() {
+			channelsMvcc[ch] = ts
+		}
 		resp.Results = append(resp.Results, result)
 	}
+	resp.ChannelsMvcc = channelsMvcc
 
 	reduceLatency := tr.RecordSpan()
 	metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.HybridSearchLabel, metrics.ReduceShards).

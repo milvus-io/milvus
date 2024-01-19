@@ -15,7 +15,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -23,24 +23,21 @@ func initSearchRequest(ctx context.Context, t *searchTask) error {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "init search request")
 	defer sp.End()
 
-	t.Base.MsgType = commonpb.MsgType_Search
-	t.Base.SourceID = paramtable.GetNodeID()
-
-	collectionName := t.request.CollectionName
-	t.collectionName = collectionName
-	collID, err := globalMetaCache.GetCollectionID(ctx, t.request.GetDbName(), collectionName)
+	collID, err := globalMetaCache.GetCollectionID(ctx, t.request.GetDbName(), t.collectionName)
 	if err != nil { // err is not nil if collection not exists
 		return err
 	}
 
-	log := log.Ctx(ctx).With(zap.Int64("collID", collID), zap.String("collName", collectionName))
+	log := log.Ctx(ctx).With(zap.Int64("collID", collID), zap.String("collName", t.collectionName))
 
 	t.SearchRequest.DbID = 0 // todo
 	t.SearchRequest.CollectionID = collID
-	t.schema, err = globalMetaCache.GetCollectionSchema(ctx, t.request.GetDbName(), collectionName)
-	if err != nil {
-		log.Warn("get collection schema failed", zap.Error(err))
-		return err
+	if t.schema == nil {
+		t.schema, err = globalMetaCache.GetCollectionSchema(ctx, t.request.GetDbName(), t.collectionName)
+		if err != nil {
+			log.Warn("get collection schema failed", zap.Error(err))
+			return err
+		}
 	}
 
 	// fetch search_growing from search param
@@ -121,7 +118,7 @@ func initSearchRequest(ctx context.Context, t *searchTask) error {
 				return err
 			}
 			partitionKeys := ParsePartitionKeys(expr)
-			hashedPartitionNames, err := assignPartitionKeys(ctx, t.request.GetDbName(), collectionName, partitionKeys)
+			hashedPartitionNames, err := assignPartitionKeys(ctx, t.request.GetDbName(), t.collectionName, partitionKeys)
 			if err != nil {
 				log.Warn("failed to assign partition keys", zap.Error(err))
 				return err
@@ -157,10 +154,14 @@ func initSearchRequest(ctx context.Context, t *searchTask) error {
 	}
 
 	// translate partition name to partition ids. Use regex-pattern to match partition name.
-	t.SearchRequest.PartitionIDs, err = getPartitionIDs(ctx, t.request.GetDbName(), collectionName, partitionNames)
+	t.SearchRequest.PartitionIDs, err = getPartitionIDs(ctx, t.request.GetDbName(), t.collectionName, partitionNames)
 	if err != nil {
 		log.Warn("failed to get partition ids", zap.Error(err))
 		return err
+	}
+
+	if deadline, ok := t.TraceCtx().Deadline(); ok {
+		t.SearchRequest.TimeoutTimestamp = tsoutil.ComposeTSByTime(deadline, 0)
 	}
 
 	t.SearchRequest.PlaceholderGroup = t.request.PlaceholderGroup
