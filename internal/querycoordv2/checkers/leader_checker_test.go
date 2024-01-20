@@ -101,6 +101,10 @@ func (suite *LeaderCheckerTestSuite) TestSyncLoadedSegments() {
 	}
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		channels, segments, nil)
+
+	// before target ready, should skip check collection
+	tasks := suite.checker.Check(context.TODO())
+	suite.Len(tasks, 0)
 	observer.target.UpdateCollectionNextTarget(int64(1))
 	observer.target.UpdateCollectionCurrentTarget(1)
 	observer.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 1, 2, 1, "test-insert-channel"))
@@ -109,7 +113,7 @@ func (suite *LeaderCheckerTestSuite) TestSyncLoadedSegments() {
 	view.TargetVersion = observer.target.GetCollectionTargetVersion(1, meta.CurrentTarget)
 	observer.dist.LeaderViewManager.Update(2, view)
 
-	tasks := suite.checker.Check(context.TODO())
+	tasks = suite.checker.Check(context.TODO())
 	suite.Len(tasks, 1)
 	suite.Equal(tasks[0].Source(), utils.LeaderChecker)
 	suite.Len(tasks[0].Actions(), 1)
@@ -311,7 +315,7 @@ func (suite *LeaderCheckerTestSuite) TestSyncRemovedSegments() {
 	observer.target.UpdateCollectionCurrentTarget(1)
 
 	observer.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
-	view := utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{3: 2}, map[int64]*meta.Segment{})
+	view := utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{3: 1}, map[int64]*meta.Segment{})
 	view.TargetVersion = observer.target.GetCollectionTargetVersion(1, meta.CurrentTarget)
 	observer.dist.LeaderViewManager.Update(2, view)
 
@@ -321,7 +325,7 @@ func (suite *LeaderCheckerTestSuite) TestSyncRemovedSegments() {
 	suite.Equal(tasks[0].ReplicaID(), int64(1))
 	suite.Len(tasks[0].Actions(), 1)
 	suite.Equal(tasks[0].Actions()[0].Type(), task.ActionTypeReduce)
-	suite.Equal(tasks[0].Actions()[0].Node(), int64(2))
+	suite.Equal(tasks[0].Actions()[0].Node(), int64(1))
 	suite.Equal(tasks[0].Actions()[0].(*task.SegmentAction).SegmentID(), int64(3))
 	suite.Equal(tasks[0].Priority(), task.TaskPriorityHigh)
 }
