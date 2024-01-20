@@ -64,11 +64,21 @@ func (c *LeaderChecker) Description() string {
 	return "LeaderChecker checks the difference of leader view between dist, and try to correct it"
 }
 
+func (c *LeaderChecker) readyToCheck(collectionID int64) bool {
+	metaExist := (c.meta.GetCollection(collectionID) != nil)
+	targetExist := c.target.IsNextTargetExist(collectionID) || c.target.IsCurrentTargetExist(collectionID)
+
+	return metaExist && targetExist
+}
+
 func (c *LeaderChecker) Check(ctx context.Context) []task.Task {
 	collectionIDs := c.meta.CollectionManager.GetAll()
 	tasks := make([]task.Task, 0)
 
 	for _, collectionID := range collectionIDs {
+		if !c.readyToCheck(collectionID) {
+			continue
+		}
 		collection := c.meta.CollectionManager.GetCollection(collectionID)
 		if collection == nil {
 			log.Warn("collection released during check leader", zap.Int64("collection", collectionID))
@@ -174,7 +184,7 @@ func (c *LeaderChecker) findNeedRemovedSegments(ctx context.Context, replica int
 			zap.Int64("segmentID", sid),
 			zap.Int64("nodeID", s.NodeID))
 
-		action := task.NewSegmentActionWithScope(leaderView.ID, task.ActionTypeReduce, leaderView.Channel, sid, querypb.DataScope_Historical)
+		action := task.NewSegmentActionWithScope(s.NodeID, task.ActionTypeReduce, leaderView.Channel, sid, querypb.DataScope_Historical)
 		t, err := task.NewSegmentTask(
 			ctx,
 			paramtable.Get().QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond),
