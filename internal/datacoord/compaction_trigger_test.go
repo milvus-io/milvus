@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"github.com/samber/lo"
 	"sort"
 	"sync/atomic"
 	"testing"
@@ -33,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
@@ -2398,6 +2400,285 @@ func (s *CompactionTriggerSuite) TestHandleGlobalSignal() {
 			isForce:      true,
 		})
 	})
+}
+
+// test updateSegmentMaxSize
+func Test_compactionTrigger_updateSegmentMaxSize(t *testing.T) {
+	type fields struct {
+		meta              *meta
+		allocator         allocator
+		signals           chan *compactionSignal
+		compactionHandler compactionPlanContext
+		globalTrigger     *time.Ticker
+	}
+	type args struct {
+		collectionID int64
+		compactTime  *compactTime
+	}
+	collectionID := int64(2)
+	vecFieldID1 := int64(201)
+	vecFieldID2 := int64(202)
+	segmentInfos := make([]*SegmentInfo, 0)
+	for i := UniqueID(0); i < 50; i++ {
+		info := &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:           i,
+				CollectionID: collectionID,
+			},
+			segmentIndexes: map[UniqueID]*model.SegmentIndex{
+				indexID: {
+					SegmentID:    i,
+					CollectionID: collectionID,
+					PartitionID:  1,
+					NumRows:      100,
+					IndexID:      indexID,
+					BuildID:      i,
+					NodeID:       0,
+					IndexVersion: 1,
+					IndexState:   commonpb.IndexState_Finished,
+				},
+			},
+		}
+		segmentInfos = append(segmentInfos, info)
+	}
+	segmentsInfo := &SegmentsInfo{
+		segments: lo.SliceToMap(segmentInfos, func(t *SegmentInfo) (UniqueID, *SegmentInfo) {
+			return t.ID, t
+		}),
+	}
+	info := &collectionInfo{
+		ID: collectionID,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:  vecFieldID1,
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.DimKey,
+							Value: "128",
+						},
+					},
+				},
+				{
+					FieldID:  vecFieldID2,
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.DimKey,
+							Value: "128",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	tests := []struct {
+		name      string
+		fields    fields
+		args      args
+		isDiskANN bool
+	}{
+		{
+			"all mem index",
+			fields{
+				&meta{
+					segments: segmentsInfo,
+					collections: map[int64]*collectionInfo{
+						collectionID: info,
+					},
+					indexes: map[UniqueID]map[UniqueID]*model.Index{
+						collectionID: {
+							indexID: {
+								TenantID:     "",
+								CollectionID: 2,
+								FieldID:      vecFieldID1,
+								IndexID:      indexID,
+								IndexName:    "_default_idx_1",
+								IsDeleted:    false,
+								CreateTime:   0,
+								TypeParams:   nil,
+								IndexParams: []*commonpb.KeyValuePair{
+									{
+										Key:   common.IndexTypeKey,
+										Value: "HNSW",
+									},
+								},
+								IsAutoIndex:     false,
+								UserIndexParams: nil,
+							},
+							indexID + 1: {
+								TenantID:     "",
+								CollectionID: 2,
+								FieldID:      vecFieldID2,
+								IndexID:      indexID + 1,
+								IndexName:    "_default_idx_2",
+								IsDeleted:    false,
+								CreateTime:   0,
+								TypeParams:   nil,
+								IndexParams: []*commonpb.KeyValuePair{
+									{
+										Key:   common.IndexTypeKey,
+										Value: "HNSW",
+									},
+								},
+								IsAutoIndex:     false,
+								UserIndexParams: nil,
+							},
+						},
+					},
+				},
+				newMockAllocator(),
+				nil,
+				&spyCompactionHandler{spyChan: make(chan *datapb.CompactionPlan, 2)},
+				nil,
+			},
+			args{
+				collectionID,
+				&compactTime{},
+			},
+			false,
+		},
+		{
+			"all disk index",
+			fields{
+				&meta{
+					segments: segmentsInfo,
+					collections: map[int64]*collectionInfo{
+						collectionID: info,
+					},
+					indexes: map[UniqueID]map[UniqueID]*model.Index{
+						collectionID: {
+							indexID: {
+								TenantID:     "",
+								CollectionID: 2,
+								FieldID:      vecFieldID1,
+								IndexID:      indexID,
+								IndexName:    "_default_idx_1",
+								IsDeleted:    false,
+								CreateTime:   0,
+								TypeParams:   nil,
+								IndexParams: []*commonpb.KeyValuePair{
+									{
+										Key:   common.IndexTypeKey,
+										Value: indexparamcheck.IndexDISKANN,
+									},
+								},
+								IsAutoIndex:     false,
+								UserIndexParams: nil,
+							},
+							indexID + 1: {
+								TenantID:     "",
+								CollectionID: 2,
+								FieldID:      vecFieldID2,
+								IndexID:      indexID + 1,
+								IndexName:    "_default_idx_2",
+								IsDeleted:    false,
+								CreateTime:   0,
+								TypeParams:   nil,
+								IndexParams: []*commonpb.KeyValuePair{
+									{
+										Key:   common.IndexTypeKey,
+										Value: indexparamcheck.IndexDISKANN,
+									},
+								},
+								IsAutoIndex:     false,
+								UserIndexParams: nil,
+							},
+						},
+					},
+				},
+				newMockAllocator(),
+				nil,
+				&spyCompactionHandler{spyChan: make(chan *datapb.CompactionPlan, 2)},
+				nil,
+			},
+			args{
+				collectionID,
+				&compactTime{},
+			},
+			true,
+		},
+		{
+			"some mme index",
+			fields{
+				&meta{
+					segments: segmentsInfo,
+					collections: map[int64]*collectionInfo{
+						collectionID: info,
+					},
+					indexes: map[UniqueID]map[UniqueID]*model.Index{
+						collectionID: {
+							indexID: {
+								TenantID:     "",
+								CollectionID: 2,
+								FieldID:      vecFieldID1,
+								IndexID:      indexID,
+								IndexName:    "_default_idx_1",
+								IsDeleted:    false,
+								CreateTime:   0,
+								TypeParams:   nil,
+								IndexParams: []*commonpb.KeyValuePair{
+									{
+										Key:   common.IndexTypeKey,
+										Value: indexparamcheck.IndexDISKANN,
+									},
+								},
+								IsAutoIndex:     false,
+								UserIndexParams: nil,
+							},
+							indexID + 1: {
+								TenantID:     "",
+								CollectionID: 2,
+								FieldID:      vecFieldID2,
+								IndexID:      indexID + 1,
+								IndexName:    "_default_idx_2",
+								IsDeleted:    false,
+								CreateTime:   0,
+								TypeParams:   nil,
+								IndexParams: []*commonpb.KeyValuePair{
+									{
+										Key:   common.IndexTypeKey,
+										Value: indexparamcheck.IndexHNSW,
+									},
+								},
+								IsAutoIndex:     false,
+								UserIndexParams: nil,
+							},
+						},
+					},
+				},
+				newMockAllocator(),
+				nil,
+				&spyCompactionHandler{spyChan: make(chan *datapb.CompactionPlan, 2)},
+				nil,
+			},
+			args{
+				collectionID,
+				&compactTime{},
+			},
+			false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tr := &compactionTrigger{
+				meta:                         tt.fields.meta,
+				handler:                      newMockHandlerWithMeta(tt.fields.meta),
+				allocator:                    tt.fields.allocator,
+				signals:                      tt.fields.signals,
+				compactionHandler:            tt.fields.compactionHandler,
+				globalTrigger:                tt.fields.globalTrigger,
+				estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
+				estimateNonDiskSegmentPolicy: calBySchemaPolicy,
+				testingOnly:                  true,
+			}
+			res, err := tr.updateSegmentMaxSize(segmentInfos)
+			assert.NoError(t, err)
+			assert.Equal(t, tt.isDiskANN, res)
+		})
+	}
 }
 
 func TestCompactionTriggerSuite(t *testing.T) {
