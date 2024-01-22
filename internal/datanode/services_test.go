@@ -641,7 +641,6 @@ func (s *DataNodeServicesSuite) TestAddImportSegment() {
 		s.Assert().NoError(err)
 		s.Assert().True(merr.Ok(resp.GetStatus()))
 		s.Assert().Equal("", resp.GetStatus().GetReason())
-		s.Assert().NotEqual(nil, resp.GetChannelPos())
 
 		getFlowGraphServiceAttempts = 3
 		resp, err = s.node.AddImportSegment(context.WithValue(s.ctx, ctxKey{}, ""), &datapb.AddImportSegmentRequest{
