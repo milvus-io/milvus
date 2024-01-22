@@ -310,13 +310,11 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
     search_config[knowhere::meta::TOPK] = topk;
     search_config[knowhere::meta::METRIC_TYPE] = GetMetricType();
 
-    // set search list size
-    auto search_list_size = GetValueFromConfig<uint32_t>(
-        search_info.search_params_, DISK_ANN_QUERY_LIST);
-
     if (GetIndexType() == knowhere::IndexEnum::INDEX_DISKANN) {
-        if (search_list_size.has_value()) {
-            search_config[DISK_ANN_SEARCH_LIST_SIZE] = search_list_size.value();
+        // set search list size
+        if (CheckKeyInConfig(search_info.search_params_, DISK_ANN_QUERY_LIST)) {
+            search_config[DISK_ANN_SEARCH_LIST_SIZE] =
+                search_info.search_params_[DISK_ANN_QUERY_LIST];
         }
         // set beamwidth
         search_config[DISK_ANN_QUERY_BEAMWIDTH] = int(search_beamwidth_);
