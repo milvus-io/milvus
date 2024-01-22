@@ -430,7 +430,6 @@ func (t *compactionTask) merge(
 }
 
 func (t *compactionTask) compact() (*datapb.CompactionPlanResult, error) {
-	// span := trace.
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(t.ctx, fmt.Sprintf("Compact-%d", t.getPlanID()))
 	defer span.End()
 	log := log.With(zap.Int64("planID", t.plan.GetPlanID()))
