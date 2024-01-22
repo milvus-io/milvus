@@ -71,6 +71,7 @@ func NewSegmentsInfo() *SegmentsInfo {
 }
 
 // GetSegment returns SegmentInfo
+// the logPath in meta is empty
 func (s *SegmentsInfo) GetSegment(segmentID UniqueID) *SegmentInfo {
 	segment, ok := s.segments[segmentID]
 	if !ok {
@@ -81,6 +82,7 @@ func (s *SegmentsInfo) GetSegment(segmentID UniqueID) *SegmentInfo {
 
 // GetSegments iterates internal map and returns all SegmentInfo in a slice
 // no deep copy applied
+// the logPath in meta is empty
 func (s *SegmentsInfo) GetSegments() []*SegmentInfo {
 	segments := make([]*SegmentInfo, 0, len(s.segments))
 	for _, segment := range s.segments {
@@ -96,6 +98,8 @@ func (s *SegmentsInfo) DropSegment(segmentID UniqueID) {
 }
 
 // SetSegment sets SegmentInfo with segmentID, perform overwrite if already exists
+// set the logPath of segement in meta empty, to save space
+// if segment has logPath, make it empty
 func (s *SegmentsInfo) SetSegment(segmentID UniqueID, segment *SegmentInfo) {
 	s.segments[segmentID] = segment
 }
@@ -190,30 +194,12 @@ func (s *SegmentsInfo) SetCurrentRows(segmentID UniqueID, rows int64) {
 	}
 }
 
-// SetBinlogs sets binlog paths for segment
-// if the segment is not found, do nothing
-// uses `Clone` since internal SegmentInfo's Binlogs is changed
-func (s *SegmentsInfo) SetBinlogs(segmentID UniqueID, binlogs []*datapb.FieldBinlog) {
-	if segment, ok := s.segments[segmentID]; ok {
-		s.segments[segmentID] = segment.Clone(SetBinlogs(binlogs))
-	}
-}
-
 // SetFlushTime sets flush time for segment
 // if the segment is not found, do nothing
 // uses `ShadowClone` since internal SegmentInfo is not changed
 func (s *SegmentsInfo) SetFlushTime(segmentID UniqueID, t time.Time) {
 	if segment, ok := s.segments[segmentID]; ok {
 		s.segments[segmentID] = segment.ShadowClone(SetFlushTime(t))
-	}
-}
-
-// AddSegmentBinlogs adds binlogs for segment
-// if the segment is not found, do nothing
-// uses `Clone` since internal SegmentInfo's Binlogs is changed
-func (s *SegmentsInfo) AddSegmentBinlogs(segmentID UniqueID, field2Binlogs map[UniqueID][]*datapb.Binlog) {
-	if segment, ok := s.segments[segmentID]; ok {
-		s.segments[segmentID] = segment.Clone(addSegmentBinlogs(field2Binlogs))
 	}
 }
 
@@ -338,13 +324,6 @@ func SetCurrentRows(rows int64) SegmentInfoOption {
 	}
 }
 
-// SetBinlogs is the option to set binlogs for segment info
-func SetBinlogs(binlogs []*datapb.FieldBinlog) SegmentInfoOption {
-	return func(segment *SegmentInfo) {
-		segment.Binlogs = binlogs
-	}
-}
-
 // SetFlushTime is the option to set flush time for segment info
 func SetFlushTime(t time.Time) SegmentInfoOption {
 	return func(segment *SegmentInfo) {
@@ -356,29 +335,6 @@ func SetFlushTime(t time.Time) SegmentInfoOption {
 func SetIsCompacting(isCompacting bool) SegmentInfoOption {
 	return func(segment *SegmentInfo) {
 		segment.isCompacting = isCompacting
-	}
-}
-
-func addSegmentBinlogs(field2Binlogs map[UniqueID][]*datapb.Binlog) SegmentInfoOption {
-	return func(segment *SegmentInfo) {
-		for fieldID, binlogPaths := range field2Binlogs {
-			found := false
-			for _, binlog := range segment.Binlogs {
-				if binlog.FieldID != fieldID {
-					continue
-				}
-				binlog.Binlogs = append(binlog.Binlogs, binlogPaths...)
-				found = true
-				break
-			}
-			if !found {
-				// if no field matched
-				segment.Binlogs = append(segment.Binlogs, &datapb.FieldBinlog{
-					FieldID: fieldID,
-					Binlogs: binlogPaths,
-				})
-			}
-		}
 	}
 }
 

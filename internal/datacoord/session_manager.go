@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	grpcdatanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
+	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -292,6 +293,9 @@ func (c *SessionManagerImpl) GetCompactionPlansResults() map[int64]*datapb.Compa
 			}
 
 			for _, rst := range resp.GetResults() {
+				// for compatibility issue, before 2.3.4, resp has only logpath
+				// try to parse path and fill logid
+				binlog.CompressCompactionBinlogs(rst.GetSegments())
 				plans.Insert(rst.PlanID, rst)
 			}
 		}(nodeID, s)

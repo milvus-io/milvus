@@ -192,7 +192,7 @@ var (
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.DataNodeRole,
-			Name:      "consume_counter",
+			Name:      "consume_bytes_count",
 			Help:      "",
 		}, []string{nodeIDLabelName, msgTypeLabelName})
 

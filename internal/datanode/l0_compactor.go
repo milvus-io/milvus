@@ -30,6 +30,7 @@ import (
 	iter "github.com/milvus-io/milvus/internal/datanode/iterators"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
+	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -132,6 +133,11 @@ func (t *levelZeroCompactionTask) compact() (*datapb.CompactionPlanResult, error
 		log.Warn("compact wrong, not target sealed segments")
 		return nil, errIllegalCompactionPlan
 	}
+	err := binlog.DecompressCompactionBinlogs(l0Segments)
+	if err != nil {
+		log.Warn("DecompressCompactionBinlogs failed", zap.Error(err))
+		return nil, err
+	}
 
 	var (
 		totalSize      int64
@@ -210,10 +216,7 @@ func (t *levelZeroCompactionTask) compact() (*datapb.CompactionPlanResult, error
 		return lo.Values(resultSegments), nil
 	}
 
-	var (
-		resultSegments []*datapb.CompactionSegment
-		err            error
-	)
+	var resultSegments []*datapb.CompactionSegment
 	// if totalSize*3 < int64(hardware.GetFreeMemoryCount()) {
 	//     resultSegments, err = batchProcess()
 	// }
@@ -227,6 +230,7 @@ func (t *levelZeroCompactionTask) compact() (*datapb.CompactionPlanResult, error
 		State:    commonpb.CompactionState_Completed,
 		Segments: resultSegments,
 		Channel:  t.plan.GetChannel(),
+		Type:     t.plan.GetType(),
 	}
 
 	metrics.DataNodeCompactionLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), t.plan.GetType().String()).

@@ -423,7 +423,7 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
 		return merr.Status(err), nil
 	}
-	node.lifetime.Done()
+	defer node.lifetime.Done()
 
 	// check target matches
 	if err := merr.CheckTargetID(req.GetBase()); err != nil {

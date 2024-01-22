@@ -1265,6 +1265,7 @@ func (loader *segmentLoader) patchEntryNumber(ctx context.Context, segment *Loca
 
 	counts := make([]int64, 0, len(rowIDField.GetBinlogs()))
 	for _, binlog := range rowIDField.GetBinlogs() {
+		// binlog.LogPath has already been filled
 		bs, err := loader.cm.Read(ctx, binlog.LogPath)
 		if err != nil {
 			return err

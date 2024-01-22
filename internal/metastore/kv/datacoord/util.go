@@ -18,9 +18,6 @@ package datacoord
 
 import (
 	"fmt"
-	"path"
-	"strconv"
-	"strings"
 
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
@@ -30,71 +27,14 @@ import (
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util"
-	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
-
-func CompressBinLog(fieldBinLogs []*datapb.FieldBinlog) ([]*datapb.FieldBinlog, error) {
-	compressedFieldBinLogs := make([]*datapb.FieldBinlog, 0)
-	for _, fieldBinLog := range fieldBinLogs {
-		compressedFieldBinLog := &datapb.FieldBinlog{}
-		compressedFieldBinLog.FieldID = fieldBinLog.FieldID
-		for _, binlog := range fieldBinLog.Binlogs {
-			logPath := binlog.LogPath
-			idx := strings.LastIndex(logPath, "/")
-			if idx == -1 {
-				return nil, fmt.Errorf("invailed binlog path: %s", logPath)
-			}
-			logPathStr := logPath[(idx + 1):]
-			logID, err := strconv.ParseInt(logPathStr, 10, 64)
-			if err != nil {
-				return nil, err
-			}
-			binlog := &datapb.Binlog{
-				EntriesNum: binlog.EntriesNum,
-				// remove timestamp since it's not necessary
-				LogSize: binlog.LogSize,
-				LogID:   logID,
-			}
-			compressedFieldBinLog.Binlogs = append(compressedFieldBinLog.Binlogs, binlog)
-		}
-		compressedFieldBinLogs = append(compressedFieldBinLogs, compressedFieldBinLog)
-	}
-	return compressedFieldBinLogs, nil
-}
-
-func DecompressBinLog(path string, info *datapb.SegmentInfo) error {
-	for _, fieldBinLogs := range info.GetBinlogs() {
-		fillLogPathByLogID(path, storage.InsertBinlog, info.CollectionID, info.PartitionID, info.ID, fieldBinLogs)
-	}
-
-	for _, deltaLogs := range info.GetDeltalogs() {
-		fillLogPathByLogID(path, storage.DeleteBinlog, info.CollectionID, info.PartitionID, info.ID, deltaLogs)
-	}
-
-	for _, statsLogs := range info.GetStatslogs() {
-		fillLogPathByLogID(path, storage.StatsBinlog, info.CollectionID, info.PartitionID, info.ID, statsLogs)
-	}
-	return nil
-}
 
 func ValidateSegment(segment *datapb.SegmentInfo) error {
 	log := log.With(
 		zap.Int64("collection", segment.GetCollectionID()),
 		zap.Int64("partition", segment.GetPartitionID()),
 		zap.Int64("segment", segment.GetID()))
-	err := checkBinlogs(storage.InsertBinlog, segment.GetID(), segment.GetBinlogs())
-	if err != nil {
-		return err
-	}
-	checkBinlogs(storage.DeleteBinlog, segment.GetID(), segment.GetDeltalogs())
-	if err != nil {
-		return err
-	}
-	checkBinlogs(storage.StatsBinlog, segment.GetID(), segment.GetStatslogs())
-	if err != nil {
-		return err
-	}
 	// check stats log and bin log size match
 
 	// check L0 Segment
@@ -142,47 +82,9 @@ func ValidateSegment(segment *datapb.SegmentInfo) error {
 	return nil
 }
 
-// build a binlog path on the storage by metadata
-func buildLogPath(chunkManagerRootPath string, binlogType storage.BinlogType, collectionID, partitionID, segmentID, filedID, logID typeutil.UniqueID) string {
-	switch binlogType {
-	case storage.InsertBinlog:
-		return metautil.BuildInsertLogPath(chunkManagerRootPath, collectionID, partitionID, segmentID, filedID, logID)
-	case storage.DeleteBinlog:
-		return metautil.BuildDeltaLogPath(chunkManagerRootPath, collectionID, partitionID, segmentID, logID)
-	case storage.StatsBinlog:
-		return metautil.BuildStatsLogPath(chunkManagerRootPath, collectionID, partitionID, segmentID, filedID, logID)
-	}
-	// should not happen
-	log.Panic("invalid binlog type", zap.Any("type", binlogType))
-	return ""
-}
-
-func checkBinlogs(binlogType storage.BinlogType, segmentID typeutil.UniqueID, logs []*datapb.FieldBinlog) error {
-	check := func(getSegmentID func(logPath string) typeutil.UniqueID) error {
-		for _, fieldBinlog := range logs {
-			for _, binlog := range fieldBinlog.Binlogs {
-				if segmentID != getSegmentID(binlog.LogPath) {
-					return fmt.Errorf("the segment path doesn't match the segmentID, segmentID %d, path %s", segmentID, binlog.LogPath)
-				}
-			}
-		}
-		return nil
-	}
-	switch binlogType {
-	case storage.InsertBinlog:
-		return check(metautil.GetSegmentIDFromInsertLogPath)
-	case storage.DeleteBinlog:
-		return check(metautil.GetSegmentIDFromDeltaLogPath)
-	case storage.StatsBinlog:
-		return check(metautil.GetSegmentIDFromStatsLogPath)
-	default:
-		return fmt.Errorf("the segment path doesn't match the segmentID, segmentID %d, type %d", segmentID, binlogType)
-	}
-}
-
 func hasSpecialStatslog(segment *datapb.SegmentInfo) bool {
 	for _, statslog := range segment.GetStatslogs()[0].GetBinlogs() {
-		_, logidx := path.Split(statslog.LogPath)
+		logidx := fmt.Sprint(statslog.LogID)
 		if logidx == storage.CompoundStatsType.LogIdx() {
 			return true
 		}
@@ -193,7 +95,7 @@ func hasSpecialStatslog(segment *datapb.SegmentInfo) bool {
 func buildBinlogKvsWithLogID(collectionID, partitionID, segmentID typeutil.UniqueID,
 	binlogs, deltalogs, statslogs []*datapb.FieldBinlog,
 ) (map[string]string, error) {
-	fillLogIDByLogPath(binlogs, deltalogs, statslogs)
+	// all the FieldBinlog will only have logid
 	kvs, err := buildBinlogKvs(collectionID, partitionID, segmentID, binlogs, deltalogs, statslogs)
 	if err != nil {
 		return nil, err
@@ -257,30 +159,6 @@ func cloneLogs(binlogs []*datapb.FieldBinlog) []*datapb.FieldBinlog {
 		res = append(res, proto.Clone(log).(*datapb.FieldBinlog))
 	}
 	return res
-}
-
-func fillLogIDByLogPath(multiFieldBinlogs ...[]*datapb.FieldBinlog) error {
-	for _, fieldBinlogs := range multiFieldBinlogs {
-		for _, fieldBinlog := range fieldBinlogs {
-			for _, binlog := range fieldBinlog.Binlogs {
-				logPath := binlog.LogPath
-				idx := strings.LastIndex(logPath, "/")
-				if idx == -1 {
-					return fmt.Errorf("invailed binlog path: %s", logPath)
-				}
-				logPathStr := logPath[(idx + 1):]
-				logID, err := strconv.ParseInt(logPathStr, 10, 64)
-				if err != nil {
-					return err
-				}
-
-				// set log path to empty and only store log id
-				binlog.LogPath = ""
-				binlog.LogID = logID
-			}
-		}
-	}
-	return nil
 }
 
 func buildBinlogKvs(collectionID, partitionID, segmentID typeutil.UniqueID, binlogs, deltalogs, statslogs []*datapb.FieldBinlog) (map[string]string, error) {

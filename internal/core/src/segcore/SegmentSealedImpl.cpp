@@ -13,6 +13,7 @@
 
 #include <fcntl.h>
 #include <fmt/core.h>
+#include <sys/stat.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -324,6 +325,7 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
             insert_record_.timestamp_index_ = std::move(index);
             AssertInfo(insert_record_.timestamps_.num_chunk() == 1,
                        "num chunk not equal to 1 for sealed segment");
+            stats_.mem_size += sizeof(Timestamp) * data.row_count;
         } else {
             AssertInfo(system_field_type == SystemFieldType::RowId,
                        "System field type of id column is not RowId");
@@ -336,6 +338,7 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
             insert_record_.row_ids_.fill_chunk_data(field_data);
             AssertInfo(insert_record_.row_ids_.num_chunk() == 1,
                        "num chunk not equal to 1 for sealed segment");
+            stats_.mem_size += sizeof(idx_t) * data.row_count;
         }
         ++system_ready_count_;
     } else {
@@ -364,6 +367,9 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                             auto str_size = str->size();
                             var_column->Append(str->data(), str_size);
                             field_data_size += str_size;
+
+                            // we stores the offset for each string, so there is a additional uint64_t for each string
+                            stats_.mem_size += str_size + sizeof(uint64_t);
                         }
                     }
                     var_column->Seal();
@@ -386,6 +392,10 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                             var_column->Append(padded_string.data(),
                                                padded_string_size);
                             field_data_size += padded_string_size;
+
+                            // we stores the offset for each JSON, so there is a additional uint64_t for each JSON
+                            stats_.mem_size +=
+                                padded_string_size + sizeof(uint64_t);
                         }
                     }
                     var_column->Seal();
@@ -402,6 +412,10 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                             auto array =
                                 static_cast<const milvus::Array*>(rawValue);
                             var_column->Append(*array);
+
+                            // we stores the offset for each array element, so there is a additional uint64_t for each array element
+                            stats_.mem_size +=
+                                array->byte_size() + sizeof(uint64_t);
                         }
                     }
                     var_column->Seal();
@@ -422,6 +436,8 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
             FieldDataPtr field_data;
             while (data.channel->pop(field_data)) {
                 column->AppendBatch(field_data);
+
+                stats_.mem_size += field_data->Size();
             }
             LoadPrimitiveSkipIndex(
                 field_id, 0, data_type, column->Span().data(), num_rows);
@@ -585,6 +601,8 @@ SegmentSealedImpl::LoadDeletedRecord(const LoadDeletedRecordInfo& info) {
 
     // step 2: fill pks and timestamps
     deleted_record_.push(pks, timestamps);
+
+    stats_.mem_size += sizeof(Timestamp) * info.row_count + CalcPksSize(pks);
 }
 
 void
@@ -643,14 +661,6 @@ SegmentSealedImpl::chunk_index_impl(FieldId field_id, int64_t chunk_id) const {
                    std::to_string(field_id.get()));
     auto ptr = scalar_indexings_.at(field_id).get();
     return ptr;
-}
-
-int64_t
-SegmentSealedImpl::GetMemoryUsageInBytes() const {
-    // TODO: add estimate for index
-    std::shared_lock lck(mutex_);
-    auto row_count = num_rows_.value_or(0);
-    return schema_->get_total_sizeof() * row_count;
 }
 
 int64_t
@@ -1406,6 +1416,9 @@ SegmentSealedImpl::Delete(int64_t reserved_offset,  // deprecated
     }
 
     deleted_record_.push(sort_pks, sort_timestamps.data());
+
+    stats_.mem_size +=
+        sizeof(Timestamp) * sort_pks.size() + CalcPksSize(sort_pks);
     return SegcoreError::success();
 }
 

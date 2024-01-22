@@ -153,8 +153,7 @@ func (_c *MockClient_Register_Call) RunAndReturn(run func(context.Context, strin
 func NewMockClient(t interface {
 	mock.TestingT
 	Cleanup(func())
-},
-) *MockClient {
+}) *MockClient {
 	mock := &MockClient{}
 	mock.Mock.Test(t)
 

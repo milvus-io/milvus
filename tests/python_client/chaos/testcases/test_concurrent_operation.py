@@ -79,6 +79,7 @@ class TestOperations(TestBase):
             Op.query: QueryChecker(collection_name=c_name),
             # Op.delete: DeleteChecker(collection_name=c_name),
         }
+        log.info(f"init_health_checkers: {checkers}")
         self.health_checkers = checkers
 
     @pytest.fixture(scope="function", params=get_all_collections())

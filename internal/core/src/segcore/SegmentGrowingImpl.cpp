@@ -108,6 +108,9 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
     insert_record_.timestamps_.set_data_raw(
         reserved_offset, timestamps_raw, num_rows);
     insert_record_.row_ids_.set_data_raw(reserved_offset, row_ids, num_rows);
+
+    // update the mem size of timestamps and row IDs
+    stats_.mem_size += num_rows * (sizeof(Timestamp) + sizeof(idx_t));
     for (auto [field_id, field_meta] : schema_->get_fields()) {
         if (field_id.get() < START_USER_FIELDID) {
             continue;
@@ -133,12 +136,14 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
         }
 
         // update average row data size
+        auto field_data_size = GetRawDataSizeOfDataArray(
+            &insert_data->fields_data(data_offset), field_meta, num_rows);
         if (datatype_is_variable(field_meta.get_data_type())) {
-            auto field_data_size = GetRawDataSizeOfDataArray(
-                &insert_data->fields_data(data_offset), field_meta, num_rows);
             SegmentInternalInterface::set_field_avg_size(
                 field_id, num_rows, field_data_size);
         }
+
+        stats_.mem_size += field_data_size;
 
         try_remove_chunks(field_id);
     }
@@ -246,6 +251,9 @@ SegmentGrowingImpl::LoadFieldData(const LoadFieldDataInfo& infos) {
                 storage::GetByteSizeOfFieldDatas(field_data));
         }
 
+        // update the mem size
+        stats_.mem_size += storage::GetByteSizeOfFieldDatas(field_data);
+
         LOG_INFO("segment {} loads field {} done",
                  this->get_segment_id(),
                  field_id.get());
@@ -331,6 +339,9 @@ SegmentGrowingImpl::LoadFieldDataV2(const LoadFieldDataInfo& infos) {
                 num_rows,
                 storage::GetByteSizeOfFieldDatas(field_data));
         }
+
+        // update the mem size
+        stats_.mem_size += storage::GetByteSizeOfFieldDatas(field_data);
     }
 
     // step 5: update small indexes
@@ -379,18 +390,8 @@ SegmentGrowingImpl::Delete(int64_t reserved_begin,
 
     // step 2: fill delete record
     deleted_record_.push(sort_pks, sort_timestamps.data());
+    stats_.mem_size += size * sizeof(Timestamp) + CalcPksSize(sort_pks);
     return SegcoreError::success();
-}
-
-int64_t
-SegmentGrowingImpl::GetMemoryUsageInBytes() const {
-    int64_t total_bytes = 0;
-    auto chunk_rows = segcore_config_.get_chunk_rows();
-    int64_t ins_n = upper_align(insert_record_.reserved, chunk_rows);
-    total_bytes += ins_n * (schema_->get_total_sizeof() + 16 + 1);
-    int64_t del_n = upper_align(deleted_record_.size(), chunk_rows);
-    total_bytes += del_n * (16 * 2);
-    return total_bytes;
 }
 
 void
@@ -411,6 +412,8 @@ SegmentGrowingImpl::LoadDeletedRecord(const LoadDeletedRecordInfo& info) {
 
     // step 2: fill pks and timestamps
     deleted_record_.push(pks, timestamps);
+
+    stats_.mem_size += info.row_count * sizeof(Timestamp) + CalcPksSize(pks);
 }
 
 SpanBase
