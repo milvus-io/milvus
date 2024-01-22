@@ -3207,6 +3207,12 @@ func TestDataCoord_SaveImportSegment(t *testing.T) {
 		assert.NoError(t, err)
 		err = svr.channelManager.Watch(context.TODO(), &channelMeta{Name: "ch1", CollectionID: 100})
 		assert.NoError(t, err)
+		err = svr.meta.UpdateChannelCheckpoint("ch1", &msgpb.MsgPosition{
+			ChannelName: "ch1",
+			MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
+			Timestamp:   1000,
+		})
+		assert.NoError(t, err)
 
 		status, err := svr.SaveImportSegment(context.TODO(), &datapb.SaveImportSegmentRequest{
 			SegmentId:    100,
@@ -3228,6 +3234,16 @@ func TestDataCoord_SaveImportSegment(t *testing.T) {
 							Timestamp:   1,
 						},
 						SegmentID: 100,
+					},
+				},
+				CheckPoints: []*datapb.CheckPoint{
+					{
+						SegmentID: 100,
+						Position: &msgpb.MsgPosition{
+							ChannelName: "ch1",
+							Timestamp:   1,
+						},
+						NumOfRows: int64(1),
 					},
 				},
 			},
