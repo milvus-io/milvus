@@ -192,8 +192,12 @@ func TestTimeTickedFlowGraph_AddNode(t *testing.T) {
 
 	fg.AddNode(a)
 	assert.Equal(t, len(fg.nodeCtx), 1)
+	assert.Equal(t, len(fg.nodeSequence), 1)
+	assert.Equal(t, a.Name(), fg.nodeSequence[0])
 	fg.AddNode(b)
 	assert.Equal(t, len(fg.nodeCtx), 2)
+	assert.Equal(t, len(fg.nodeSequence), 2)
+	assert.Equal(t, b.Name(), fg.nodeSequence[1])
 }
 
 func TestTimeTickedFlowGraph_Start(t *testing.T) {
@@ -222,4 +226,31 @@ func TestTimeTickedFlowGraph_Close(t *testing.T) {
 	assert.NoError(t, err)
 	defer cancel()
 	fg.Close()
+}
+
+func TestBlockAll(t *testing.T) {
+	fg := NewTimeTickedFlowGraph(context.Background())
+	fg.AddNode(&nodeA{})
+	fg.AddNode(&nodeB{})
+	fg.AddNode(&nodeC{})
+
+	count := 1000
+	ch := make([]chan struct{}, count)
+	for i := 0; i < count; i++ {
+		ch[i] = make(chan struct{})
+		go func(i int) {
+			fg.Blockall()
+			defer fg.Unblock()
+			close(ch[i])
+		}(i)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	for i := 0; i < count; i++ {
+		select {
+		case <-ch[i]:
+		case <-ctx.Done():
+			t.Error("block all timeout")
+		}
+	}
 }
