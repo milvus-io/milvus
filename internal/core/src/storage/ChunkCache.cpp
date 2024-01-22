@@ -30,16 +30,8 @@ ChunkCache::Read(const std::string& filepath) {
 
     auto field_data = DownloadAndDecodeRemoteFile(cm_.get(), filepath);
     auto column = Mmap(path, field_data->GetFieldData());
-    auto ok =
-        madvise(reinterpret_cast<void*>(const_cast<char*>(column->Data())),
-                column->ByteSize(),
-                read_ahead_policy_);
-    AssertInfo(ok == 0,
-               fmt::format("failed to madvise to the data file {}, err: {}",
-                           path.c_str(),
-                           strerror(errno)));
-
-    columns_.emplace(path, column);
+    ColumnTable::accessor a;
+    columns_.emplace(a, path, column);
     return column;
 }
 
@@ -96,7 +88,9 @@ ChunkCache::Mmap(const std::filesystem::path& path,
     std::shared_ptr<ColumnBase> column{};
 
     if (datatype_is_variable(data_type)) {
-        AssertInfo(false, "TODO: unimplemented for variable data type");
+        AssertInfo(false,
+                   fmt::format("TODO: unimplemented for variable data type: {}",
+                               data_type));
     } else {
         column = std::make_shared<Column>(file, data_size, dim, data_type);
     }

@@ -117,6 +117,51 @@ SegmentSealedImpl::LoadVecIndex(const LoadIndexInfo& info) {
         metric_type,
         std::move(const_cast<LoadIndexInfo&>(info).index));
     set_bit(index_ready_bitset_, field_id, true);
+
+    if (!info.warmup_chunk_cache) {
+        return;
+    }
+    AssertInfo(vector_indexings_.is_ready(field_id),
+               "vector index is not ready");
+    auto field_indexing = vector_indexings_.get_field_indexing(field_id);
+    auto vec_index =
+        dynamic_cast<index::VectorIndex*>(field_indexing->indexing_.get());
+    AssertInfo(vec_index, "invalid vector indexing");
+
+    auto has_raw_data = vec_index->HasRawData();
+    if (has_raw_data) {  // No need to warmup.
+        return;
+    }
+
+    auto it = field_data_info_.field_infos.find(field_id.get());
+    AssertInfo(it != field_data_info_.field_infos.end(),
+               fmt::format("cannot find binlog file for field: {}, seg: {}",
+                           field_id.get(),
+                           id_));
+    auto field_info = it->second;
+
+    auto cc = storage::ChunkCacheSingleton::GetInstance().GetChunkCache();
+    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::LOW);
+    for (const auto& data_path : field_info.insert_files) {
+        pool.Submit([&, data_path]() {
+            try {
+                auto column = cc->Read(data_path);
+                LOG_INFO(
+                    "warmup end, read file {} from chunk cache successfully",
+                    data_path);
+            } catch (const std::exception& e) {
+                AssertInfo(
+                    false,
+                    fmt::format("warmup failed, read from chunk cache failed, "
+                                "field_name={}, "
+                                "data_type={}, data_path={}, exception={}",
+                                field_meta.get_name().get(),
+                                field_meta.get_data_type(),
+                                data_path,
+                                e.what()));
+            }
+        });
+    }
 }
 
 void
@@ -869,10 +914,13 @@ SegmentSealedImpl::get_vector(FieldId field_id,
             AssertInfo(path_to_column.count(data_path) != 0,
                        "column not found");
             const auto& column = path_to_column.at(data_path);
-            AssertInfo(offset_in_binlog * row_bytes < column->ByteSize(),
-                       fmt::format("column idx out of range, idx: {}, size: {}",
-                                   offset_in_binlog * row_bytes,
-                                   column->ByteSize()));
+            AssertInfo(
+                offset_in_binlog * row_bytes < column->ByteSize(),
+                fmt::format(
+                    "column idx out of range, idx: {}, size: {}, data_path: {}",
+                    offset_in_binlog * row_bytes,
+                    column->ByteSize(),
+                    data_path));
             auto vector = &column->Data()[offset_in_binlog * row_bytes];
             std::memcpy(buf.data() + i * row_bytes, vector, row_bytes);
         }

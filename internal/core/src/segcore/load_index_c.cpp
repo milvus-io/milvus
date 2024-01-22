@@ -80,6 +80,7 @@ AppendFieldInfo(CLoadIndexInfo c_load_index_info,
                 int64_t segment_id,
                 int64_t field_id,
                 enum CDataType field_type,
+                bool warmup_chunk_cache,
                 bool enable_mmap,
                 const char* mmap_dir_path) {
     try {
@@ -90,6 +91,7 @@ AppendFieldInfo(CLoadIndexInfo c_load_index_info,
         load_index_info->segment_id = segment_id;
         load_index_info->field_id = field_id;
         load_index_info->field_type = milvus::DataType(field_type);
+        load_index_info->warmup_chunk_cache = warmup_chunk_cache;
         load_index_info->enable_mmap = enable_mmap;
         load_index_info->mmap_dir_path = std::string(mmap_dir_path);
 

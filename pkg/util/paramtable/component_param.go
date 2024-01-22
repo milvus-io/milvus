@@ -1796,7 +1796,8 @@ type queryNodeConfig struct {
 	MmapDirPath      ParamItem `refreshable:"false"`
 
 	// chunk cache
-	ReadAheadPolicy ParamItem `refreshable:"false"`
+	ReadAheadPolicy  ParamItem `refreshable:"false"`
+	WarmupChunkCache ParamItem `refreshable:"true"`
 
 	GroupEnabled          ParamItem `refreshable:"true"`
 	MaxReceiveChanSize    ParamItem `refreshable:"false"`
@@ -2004,6 +2005,16 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		Doc:          "The read ahead policy of chunk cache, options: `normal, random, sequential, willneed, dontneed`",
 	}
 	p.ReadAheadPolicy.Init(base.mgr)
+
+	p.WarmupChunkCache = ParamItem{
+		Key:          "queryNode.cache.warmup",
+		Version:      "2.4",
+		DefaultValue: "true",
+		Doc: `Specifies whether warming up the chunk cache is required.
+If set to true, original vector data will be asynchronously loaded into the chunk cache during the load process.
+It has the potential to significantly reduce query/search latency for a certain duration after the load, albeit with a concurrent increase in disk usage.`,
+	}
+	p.WarmupChunkCache.Init(base.mgr)
 
 	p.GroupEnabled = ParamItem{
 		Key:          "queryNode.grouping.enabled",
