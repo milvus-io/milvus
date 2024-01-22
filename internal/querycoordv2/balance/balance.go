@@ -53,6 +53,7 @@ var (
 	RoundRobinBalancerName    = "RoundRobinBalancer"
 	RowCountBasedBalancerName = "RowCountBasedBalancer"
 	ScoreBasedBalancerName    = "ScoreBasedBalancer"
+	MultiTargetBalancerName   = "MultipleTargetBalancer"
 )
 
 type Balance interface {

@@ -96,7 +96,7 @@ func (m *segmentCountCostModel) cost() float64 {
 }
 
 func cmpFloat(f1, f2 float64) int {
-	if math.Abs(f1-f2) < 0.001 {
+	if math.Abs(f1-f2) < params.Params.QueryCoordCfg.BalanceCostThreshold.GetAsFloat() {
 		return 0
 	}
 	if f1 < f2 {
