@@ -504,23 +504,17 @@ EncodeAndUploadFieldSlice(ChunkManager* chunk_manager,
     return std::make_pair(std::move(object_key), serialized_index_size);
 }
 
-std::vector<FieldDataPtr>
+std::vector<std::future<std::unique_ptr<DataCodec>>>
 GetObjectData(ChunkManager* remote_chunk_manager,
               const std::vector<std::string>& remote_files) {
     auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH);
     std::vector<std::future<std::unique_ptr<DataCodec>>> futures;
+    futures.reserve(remote_files.size());
     for (auto& file : remote_files) {
         futures.emplace_back(pool.Submit(
             DownloadAndDecodeRemoteFile, remote_chunk_manager, file));
     }
-
-    std::vector<FieldDataPtr> datas;
-    for (int i = 0; i < futures.size(); ++i) {
-        auto res = futures[i].get();
-        datas.emplace_back(res->GetFieldData());
-    }
-    ReleaseArrowUnused();
-    return datas;
+    return futures;
 }
 
 std::vector<FieldDataPtr>
