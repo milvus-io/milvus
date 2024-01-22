@@ -1975,9 +1975,9 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 	p.MaxReadConcurrency.Init(base.mgr)
 
 	p.MaxGpuReadConcurrency = ParamItem{
-		Key:          "queryNode.scheduler.maGpuReadConcurrency",
+		Key:          "queryNode.scheduler.maxGpuReadConcurrency",
 		Version:      "2.0.0",
-		DefaultValue: "8",
+		DefaultValue: "6",
 	}
 	p.MaxGpuReadConcurrency.Init(base.mgr)
 
