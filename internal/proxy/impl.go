@@ -4512,6 +4512,22 @@ func (node *Proxy) OperatePrivilege(ctx context.Context, req *milvuspb.OperatePr
 		log.Warn("fail to operate privilege", zap.Error(err))
 		return merr.Status(err), nil
 	}
+	relatedPrivileges := util.RelatedPrivileges[util.PrivilegeNameForMetastore(req.Entity.Grantor.Privilege.Name)]
+	if len(relatedPrivileges) != 0 {
+		for _, relatedPrivilege := range relatedPrivileges {
+			relatedReq := proto.Clone(req).(*milvuspb.OperatePrivilegeRequest)
+			relatedReq.Entity.Grantor.Privilege.Name = util.PrivilegeNameForAPI(relatedPrivilege)
+			result, err = node.rootCoord.OperatePrivilege(ctx, relatedReq)
+			if err != nil {
+				log.Warn("fail to operate related privilege", zap.String("related_privilege", relatedPrivilege), zap.Error(err))
+				return merr.Status(err), nil
+			}
+			if !merr.Ok(result) {
+				log.Warn("fail to operate related privilege", zap.String("related_privilege", relatedPrivilege), zap.Any("result", result))
+				return result, nil
+			}
+		}
+	}
 	return result, nil
 }
 
