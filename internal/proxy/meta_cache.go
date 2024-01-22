@@ -296,9 +296,6 @@ func NewMetaCache(rootCoord types.RootCoordClient, queryCoord types.QueryCoordCl
 }
 
 func (m *MetaCache) getCollection(database, collectionName string, collectionID UniqueID) (*collectionInfo, bool) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
 	db, ok := m.collInfo[database]
 	if !ok {
 		return nil, false
@@ -382,6 +379,8 @@ func buildSfKeyById(database string, collectionID UniqueID) string {
 
 func (m *MetaCache) UpdateByName(ctx context.Context, database, collectionName string) (*collectionInfo, error) {
 	collection, err, _ := m.sfGlobal.Do(buildSfKeyByName(database, collectionName), func() (*collectionInfo, error) {
+		m.mu.Lock()
+		defer m.mu.Unlock()
 		return m.update(ctx, database, collectionName, 0)
 	})
 	return collection, err
@@ -389,6 +388,8 @@ func (m *MetaCache) UpdateByName(ctx context.Context, database, collectionName s
 
 func (m *MetaCache) UpdateByID(ctx context.Context, database string, collectionID UniqueID) (*collectionInfo, error) {
 	collection, err, _ := m.sfGlobal.Do(buildSfKeyById(database, collectionID), func() (*collectionInfo, error) {
+		m.mu.Lock()
+		defer m.mu.Unlock()
 		return m.update(ctx, database, "", collectionID)
 	})
 	return collection, err
@@ -583,7 +584,8 @@ func (m *MetaCache) GetPartitionInfos(ctx context.Context, database, collectionN
 		metrics.ProxyUpdateCacheLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 		return collInfo.partInfo, nil
 	}
-	defer m.mu.RUnlock()
+
+	m.mu.RUnlock()
 	return collInfo.partInfo, nil
 }
 
