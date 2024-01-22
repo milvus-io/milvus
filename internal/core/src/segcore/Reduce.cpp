@@ -541,8 +541,8 @@ ReduceHelper::AssembleGroupByValues(
             case DataType::VARCHAR: {
                 auto field_data = group_by_values_field->mutable_string_data();
                 for (std::size_t idx = 0; idx < group_by_val_size; idx++) {
-                    std::string_view val =
-                        std::get<std::string_view>(group_by_vals[idx]);
+                    std::string val =
+                        std::move(std::get<std::string>(group_by_vals[idx]));
                     *(field_data->mutable_data()->Add()) = val;
                 }
                 break;

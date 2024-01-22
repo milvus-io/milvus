@@ -57,10 +57,6 @@ func TestGetIndexStateTask_Execute(t *testing.T) {
 
 	rootCoord := newMockRootCoord()
 	queryCoord := getMockQueryCoord()
-	queryCoord.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
-		Status:        merr.Success(),
-		CollectionIDs: []int64{},
-	}, nil)
 	datacoord := NewDataCoordMock()
 
 	gist := &getIndexStateTask{
@@ -75,7 +71,7 @@ func TestGetIndexStateTask_Execute(t *testing.T) {
 		rootCoord: rootCoord,
 		dataCoord: datacoord,
 		result: &milvuspb.GetIndexStateResponse{
-			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError, Reason: "mock"},
+			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError, Reason: "mock-1"},
 			State:  commonpb.IndexState_Unissued,
 		},
 		collectionID: collectionID,
@@ -83,7 +79,8 @@ func TestGetIndexStateTask_Execute(t *testing.T) {
 
 	shardMgr := newShardClientMgr()
 	// failed to get collection id.
-	_ = InitMetaCache(ctx, rootCoord, queryCoord, shardMgr)
+	err := InitMetaCache(ctx, rootCoord, queryCoord, shardMgr)
+	assert.NoError(t, err)
 	assert.Error(t, gist.Execute(ctx))
 
 	rootCoord.DescribeCollectionFunc = func(ctx context.Context, request *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
@@ -92,6 +89,12 @@ func TestGetIndexStateTask_Execute(t *testing.T) {
 			Schema:         newTestSchema(),
 			CollectionID:   collectionID,
 			CollectionName: request.CollectionName,
+		}, nil
+	}
+
+	rootCoord.ShowPartitionsFunc = func(ctx context.Context, request *milvuspb.ShowPartitionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowPartitionsResponse, error) {
+		return &milvuspb.ShowPartitionsResponse{
+			Status: merr.Success(),
 		}, nil
 	}
 

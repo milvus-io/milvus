@@ -101,15 +101,11 @@ func TestAzureObjectStorage(t *testing.T) {
 					_, err = testCM.GetObject(ctx, config.bucketName, test.loadKey, 1, 1023)
 					assert.NoError(t, err)
 				} else {
-					if test.loadKey == "/" {
-						got, err := testCM.GetObject(ctx, config.bucketName, test.loadKey, 0, 1024)
-						assert.Error(t, err)
-						assert.Empty(t, got)
-						return
-					}
 					got, err := testCM.GetObject(ctx, config.bucketName, test.loadKey, 0, 1024)
+					assert.NoError(t, err)
+					assert.NotEmpty(t, got)
+					_, err = io.ReadAll(got)
 					assert.Error(t, err)
-					assert.Empty(t, got)
 				}
 			})
 		}
