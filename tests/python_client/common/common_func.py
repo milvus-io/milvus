@@ -710,13 +710,25 @@ def get_float_vec_field_name(schema=None):
     return None
 
 
-def get_vec_field_name_list(schema=None):
+def get_float_vec_field_name_list(schema=None):
     vec_fields = []
     if schema is None:
         schema = gen_default_collection_schema()
     fields = schema.fields
     for field in fields:
-        if field.dtype == DataType.FLOAT_VECTOR:
+        if field.dtype in [DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR]:
+            vec_fields.append(field.name)
+    return vec_fields
+
+
+def get_scalar_field_name_list(schema=None):
+    vec_fields = []
+    if schema is None:
+        schema = gen_default_collection_schema()
+    fields = schema.fields
+    for field in fields:
+        if field.dtype in [DataType.BOOL, DataType.INT8, DataType.INT16, DataType.INT32, DataType.INT64, DataType.FLOAT,
+                           DataType.DOUBLE, DataType.VARCHAR]:
             vec_fields.append(field.name)
     return vec_fields
 

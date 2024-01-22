@@ -336,7 +336,8 @@ class Checker:
         self.int64_field_name = cf.get_int64_field_name(schema=schema)
         self.float_vector_field_name = cf.get_float_vec_field_name(schema=schema)
         self.search_ann_field = self.float_vector_field_name
-        self.vector_fields_name_list = cf.get_vec_field_name_list(schema=schema)
+        self.vector_fields_name_list = cf.get_float_vec_field_name_list(schema=schema)
+        self.scalar_fields_name_list = cf.get_scalar_field_name_list(schema=schema)
         self.hybrid_search_request = []
         self.c_wrap.init_collection(name=c_name,
                                     schema=schema,
@@ -589,6 +590,14 @@ class SearchChecker(Checker):
         if collection_name is None:
             collection_name = cf.gen_unique_str("SearchChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
+        # create inverted index for scalar field
+        for scalar_field_name in self.scalar_fields_name_list:
+            self.c_wrap.create_index(scalar_field_name,
+                                     {"index_type": "INVERTED"},
+                                     timeout=timeout,
+                                     enable_traceback=enable_traceback,
+                                     check_task=CheckTasks.check_nothing)
+
         for vec_field_name in self.vector_fields_name_list:
             self.c_wrap.create_index(vec_field_name,
                                      constants.DEFAULT_INDEX_PARAM,
@@ -678,8 +687,6 @@ class HybridSearchChecker(Checker):
         while self._keep_running:
             self.run_task()
             sleep(constants.WAIT_PER_OP / 10)
-
-
 
 
 class InsertFlushChecker(Checker):
@@ -1151,6 +1158,13 @@ class QueryChecker(Checker):
         if collection_name is None:
             collection_name = cf.gen_unique_str("QueryChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
+        # create inverted index for scalar field
+        for scalar_field_name in self.scalar_fields_name_list:
+            self.c_wrap.create_index(scalar_field_name,
+                                     {"index_type": "INVERTED"},
+                                     timeout=timeout,
+                                     enable_traceback=enable_traceback,
+                                     check_task=CheckTasks.check_nothing)
         for vec_field_name in self.vector_fields_name_list:
             self.c_wrap.create_index(vec_field_name,
                                      constants.DEFAULT_INDEX_PARAM,
@@ -1170,9 +1184,16 @@ class QueryChecker(Checker):
     @exception_handler()
     def run_task(self):
         int_values = []
-        for _ in range(5):
+        for _ in range(100):
             int_values.append(randint(0, constants.ENTITIES_FOR_SEARCH))
-        self.term_expr = f'{self.int64_field_name} in {int_values}'
+        min_value, max_value = min(int_values), max(int_values)
+        term_expr_list = [
+            f'{self.int64_field_name} in {int_values}',
+            f'{self.int64_field_name} > {min_value}',
+            f'{self.int64_field_name} < {max_value}',
+            f'{min_value} <= {self.int64_field_name} <= {max_value}',
+        ]
+        self.term_expr = random.choice(term_expr_list)
         res, result = self.query()
         return res, result
 

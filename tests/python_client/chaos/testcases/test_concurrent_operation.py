@@ -75,8 +75,8 @@ class TestOperations(TestBase):
             # Op.upsert: UpsertChecker(collection_name=c_name),
             # Op.flush: FlushChecker(collection_name=c_name),
             # Op.search: SearchChecker(collection_name=c_name),
-            Op.hybrid_search: HybridSearchChecker(collection_name=c_name),
-            # Op.query: QueryChecker(collection_name=c_name),
+            # Op.hybrid_search: HybridSearchChecker(collection_name=c_name),
+            Op.query: QueryChecker(collection_name=c_name),
             # Op.delete: DeleteChecker(collection_name=c_name),
         }
         self.health_checkers = checkers

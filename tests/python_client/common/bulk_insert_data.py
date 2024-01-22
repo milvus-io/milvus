@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 import random
 from faker import Faker
+import tensorflow as tf
 from sklearn import preprocessing
 from common.common_func import gen_unique_str
 from common.minio_comm import copy_files_to_minio
@@ -20,9 +21,10 @@ FLOAT = "float"
 
 class DataField:
     pk_field = "uid"
-    vec_field = "vectors"
-    vec_image_emb_field = "image_emb"
-    vec_text_emb_field = "text_emb"
+    float32_vector = "float32_vector"
+    float16_vector = "float16_vector"
+    bf16_vector = "bf16_vector"
+    binary_vector = "binary_vector"
     int_field = "int_scalar"
     string_field = "string_scalar"
     bool_field = "bool_scalar"
@@ -72,6 +74,18 @@ def entity_suffix(rows):
 
 def gen_float_vectors(nb, dim):
     vectors = [[random.random() for _ in range(dim)] for _ in range(nb)]
+    vectors = preprocessing.normalize(vectors, axis=1, norm='l2')
+    return vectors.tolist()
+
+
+def gen_float16_vectors(nb, dim):
+    vectors = [[np.float16(random.random()) for _ in range(dim)] for _ in range(nb)]
+    vectors = preprocessing.normalize(vectors, axis=1, norm='l2')
+    return vectors.tolist()
+
+
+def gen_brain_float16_vectors(nb, dim):
+    vectors = [tf.constant([random.random() for _ in range(dim)], dtype=tf.bfloat16) for _ in range(nb)]
     vectors = preprocessing.normalize(vectors, axis=1, norm='l2')
     return vectors.tolist()
 
