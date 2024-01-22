@@ -1355,6 +1355,9 @@ type queryCoordConfig struct {
 	OverloadedMemoryThresholdPercentage ParamItem `refreshable:"true"`
 	BalanceIntervalSeconds              ParamItem `refreshable:"true"`
 	MemoryUsageMaxDifferencePercentage  ParamItem `refreshable:"true"`
+	RowCountFactor                      ParamItem `refreshable:"true"`
+	SegmentCountFactor                  ParamItem `refreshable:"true"`
+	GlobalSegmentCountFactor            ParamItem `refreshable:"true"`
 	GrowingRowCountWeight               ParamItem `refreshable:"true"`
 
 	SegmentCheckInterval       ParamItem `refreshable:"true"`
@@ -1473,6 +1476,36 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.GlobalRowCountFactor.Init(base.mgr)
+
+	p.RowCountFactor = ParamItem{
+		Key:          "queryCoord.rowCountFactor",
+		Version:      "2.3.0",
+		DefaultValue: "0.4",
+		PanicIfEmpty: true,
+		Doc:          "the row count weight used when balancing segments among queryNodes",
+		Export:       true,
+	}
+	p.RowCountFactor.Init(base.mgr)
+
+	p.SegmentCountFactor = ParamItem{
+		Key:          "queryCoord.segmentCountFactor",
+		Version:      "2.3.0",
+		DefaultValue: "0.4",
+		PanicIfEmpty: true,
+		Doc:          "the segment count weight used when balancing segments among queryNodes",
+		Export:       true,
+	}
+	p.SegmentCountFactor.Init(base.mgr)
+
+	p.GlobalSegmentCountFactor = ParamItem{
+		Key:          "queryCoord.globalSegmentCountFactor",
+		Version:      "2.3.0",
+		DefaultValue: "0.1",
+		PanicIfEmpty: true,
+		Doc:          "the segment count weight used when balancing segments among queryNodes",
+		Export:       true,
+	}
+	p.GlobalSegmentCountFactor.Init(base.mgr)
 
 	p.ScoreUnbalanceTolerationFactor = ParamItem{
 		Key:          "queryCoord.scoreUnbalanceTolerationFactor",
