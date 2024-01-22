@@ -148,7 +148,7 @@ func initSearchRequest(ctx context.Context, t *searchTask) error {
 			return err
 		}
 
-		log.Debug("Proxy::searchTask::PreExecute",
+		log.Debug("proxy init search request",
 			zap.Int64s("plan.OutputFieldIds", plan.GetOutputFieldIds()),
 			zap.Stringer("plan", plan)) // may be very large if large term passed.
 	}
