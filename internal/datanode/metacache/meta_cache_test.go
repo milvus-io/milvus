@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type MetaCacheSuite struct {
@@ -46,6 +47,8 @@ type MetaCacheSuite struct {
 }
 
 func (s *MetaCacheSuite) SetupSuite() {
+	paramtable.Init()
+
 	s.collectionID = 1
 	s.vchannel = "test"
 	s.partitionIDs = []int64{1, 2, 3, 4}
@@ -112,6 +115,7 @@ func (s *MetaCacheSuite) TestCompactSegments() {
 			if seg.SegmentID() == s.newSegments[i] {
 				s.Equal(commonpb.SegmentState_Flushed, seg.State())
 				s.Equal(int64(100), seg.NumOfRows())
+				s.Equal(datapb.SegmentLevel_L1, seg.Level())
 			}
 			if seg.SegmentID() == s.flushedSegments[i] {
 				s.Equal(s.newSegments[i], seg.CompactTo())

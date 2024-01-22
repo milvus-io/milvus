@@ -337,12 +337,12 @@ TEST(GroupBY, Normal2) {
                   search_result->seg_offsets_.size());
 
         int size = group_by_values.size();
-        std::unordered_set<std::string_view> strs_set;
+        std::unordered_set<std::string> strs_set;
         float lastDistance = 0.0;
         for (size_t i = 0; i < size; i++) {
-            if (std::holds_alternative<std::string_view>(group_by_values[i])) {
-                std::string_view g_val =
-                    std::get<std::string_view>(group_by_values[i]);
+            if (std::holds_alternative<std::string>(group_by_values[i])) {
+                std::string g_val =
+                    std::move(std::get<std::string>(group_by_values[i]));
                 ASSERT_FALSE(strs_set.count(g_val) >
                              0);  //no repetition on groupBy field
                 strs_set.insert(g_val);

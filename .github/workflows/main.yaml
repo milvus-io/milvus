@@ -114,11 +114,6 @@ jobs:
         uses: actions/download-artifact@v4.1.0
         with:
           name: code
-      - name: print working directory
-        shell: bash
-        run: |
-          pwd
-          ls -lah
       - name: Download Caches
         uses: ./.github/actions/cache
         with:
@@ -127,8 +122,6 @@ jobs:
       - name: Start Service
         shell: bash
         run: |
-          pwd
-          ls -lah
           docker-compose up -d azurite
       - name: UT
         run: |
@@ -159,11 +152,6 @@ jobs:
         uses: actions/download-artifact@v4.1.0
         with:
           name: code
-      - name: print working directory
-        shell: bash
-        run: |
-          pwd
-          ls -lah
       - name: Download Caches
         uses: ./.github/actions/cache
         with:
@@ -172,8 +160,6 @@ jobs:
       - name: Start Service
         shell: bash
         run: |
-          pwd
-          ls -lah
           docker-compose up -d pulsar etcd minio azurite
       - name: UT
         run: |
@@ -203,11 +189,6 @@ jobs:
         uses: actions/download-artifact@v4.1.0
         with:
           name: code
-      - name: print working directory
-        shell: bash
-        run: |
-          pwd
-          ls -lah
       - name: Download Caches
         uses: ./.github/actions/cache
         with:
@@ -216,8 +197,6 @@ jobs:
       - name: Start Service
         shell: bash
         run: |
-          pwd
-          ls -lah
           docker-compose up -d pulsar etcd minio
       - name: IntegrationTest
         run: |

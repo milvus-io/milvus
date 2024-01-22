@@ -2477,6 +2477,15 @@ func TestManualCompaction(t *testing.T) {
 			},
 		}
 
+		mockHandler := NewMockCompactionPlanContext(t)
+		mockHandler.EXPECT().getCompactionTasksBySignalID(mock.Anything).Return(
+			[]*compactionTask{
+				{
+					triggerInfo: &compactionSignal{id: 1},
+					state:       executing,
+				},
+			})
+		svr.compactionHandler = mockHandler
 		resp, err := svr.ManualCompaction(context.TODO(), &milvuspb.ManualCompactionRequest{
 			CollectionID: 1,
 			Timetravel:   1,
