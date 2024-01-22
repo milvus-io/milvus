@@ -281,11 +281,14 @@ func (c *compactionPlanHandler) enqueuePlan(signal *compactionSignal, plan *data
 	log := log.With(zap.Int64("planID", plan.GetPlanID()), zap.Int64("nodeID", nodeID))
 	c.setSegmentsCompacting(plan, true)
 
+	_, span := otel.Tracer(typeutil.DataCoordRole).Start(context.Background(), fmt.Sprintf("Compaction-%s", plan.GetType()))
+
 	task := &compactionTask{
 		triggerInfo: signal,
 		plan:        plan,
 		state:       pipelining,
 		dataNodeID:  nodeID,
+		span:        span,
 	}
 	c.mu.Lock()
 	c.plans[plan.PlanID] = task
@@ -352,11 +355,11 @@ func (c *compactionPlanHandler) notifyTasks(tasks []*compactionTask) {
 			}
 			c.updateTask(plan.PlanID, setStartTime(ts))
 
-			ctx, span := otel.Tracer(typeutil.DataCoordRole).Start(context.Background(), fmt.Sprintf("Compaction-%s", plan.GetType()))
+			ctx := trace.ContextWithSpan(context.Background(), task.span)
 
 			err = c.sessions.Compaction(ctx, innerTask.dataNodeID, plan)
 
-			c.updateTask(plan.PlanID, setState(executing), setSpan(span))
+			c.updateTask(plan.PlanID, setState(executing))
 			if err != nil {
 				log.Warn("Failed to notify compaction tasks to DataNode", zap.Error(err))
 				return nil, err
@@ -608,12 +611,6 @@ type compactionTaskOpt func(task *compactionTask)
 func setState(state compactionTaskState) compactionTaskOpt {
 	return func(task *compactionTask) {
 		task.state = state
-	}
-}
-
-func setSpan(span trace.Span) compactionTaskOpt {
-	return func(task *compactionTask) {
-		task.span = span
 	}
 }
 
