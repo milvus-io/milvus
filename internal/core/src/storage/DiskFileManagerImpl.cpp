@@ -24,10 +24,11 @@
 #include "log/Log.h"
 
 #include "storage/DiskFileManagerImpl.h"
-#include "storage/LocalChunkManagerSingleton.h"
+#include "storage/FileManager.h"
 #include "storage/IndexData.h"
-#include "storage/Util.h"
+#include "storage/LocalChunkManagerSingleton.h"
 #include "storage/ThreadPools.h"
+#include "storage/Util.h"
 
 namespace milvus::storage {
 
@@ -116,16 +117,7 @@ DiskFileManagerImpl::AddBatchIndexFiles(
     const std::vector<int64_t>& remote_file_sizes) {
     auto local_chunk_manager =
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
-
-    auto LoadIndexFromDisk = [&](
-        const std::string& file,
-        const int64_t offset,
-        const int64_t data_size) -> std::shared_ptr<uint8_t[]> {
-        auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[data_size]);
-        local_chunk_manager->Read(file, offset, buf.get(), data_size);
-        return buf;
-    };
+    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH);
 
     std::vector<std::future<std::shared_ptr<uint8_t[]>>> futures;
     AssertInfo(local_file_offsets.size() == remote_files.size(),
@@ -134,10 +126,17 @@ DiskFileManagerImpl::AddBatchIndexFiles(
                "inconsistent size of file slices with size slices");
 
     for (int64_t i = 0; i < remote_files.size(); ++i) {
-        futures.push_back(pool.Submit(LoadIndexFromDisk,
-                                      local_file_name,
-                                      local_file_offsets[i],
-                                      remote_file_sizes[i]));
+        futures.push_back(pool.Submit(
+            [&](const std::string& file,
+                const int64_t offset,
+                const int64_t data_size) -> std::shared_ptr<uint8_t[]> {
+                auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[data_size]);
+                local_chunk_manager->Read(file, offset, buf.get(), data_size);
+                return buf;
+            },
+            local_file_name,
+            local_file_offsets[i],
+            remote_file_sizes[i]));
     }
 
     // hold index data util upload index file done
@@ -155,8 +154,8 @@ DiskFileManagerImpl::AddBatchIndexFiles(
                             remote_files,
                             field_meta_,
                             index_meta_);
-    for (auto iter = res.begin(); iter != res.end(); ++iter) {
-        remote_paths_to_size_[iter->first] = iter->second;
+    for (auto& re : res) {
+        remote_paths_to_size_[re.first] = re.second;
     }
 }
 
@@ -229,7 +228,7 @@ DiskFileManagerImpl::CacheBatchIndexFilesToDisk(
 
     uint64_t offset = local_file_init_offfset;
     for (int i = 0; i < batch_size; ++i) {
-        auto index_data = index_datas[i];
+        auto index_data = index_datas[i].get()->GetFieldData();
         auto index_size = index_data->Size();
         auto uint8_data =
             reinterpret_cast<uint8_t*>(const_cast<void*>(index_data->Data()));
@@ -273,7 +272,7 @@ DiskFileManagerImpl::CacheRawDataToDisk(std::vector<std::string> remote_files) {
         auto field_datas = GetObjectData(rcm_.get(), batch_files);
         int batch_size = batch_files.size();
         for (int i = 0; i < batch_size; ++i) {
-            auto field_data = field_datas[i];
+            auto field_data = field_datas[i].get()->GetFieldData();
             num_rows += uint32_t(field_data->get_num_rows());
             AssertInfo(dim == 0 || dim == field_data->get_dim(),
                        "inconsistent dim value in multi binlogs!");

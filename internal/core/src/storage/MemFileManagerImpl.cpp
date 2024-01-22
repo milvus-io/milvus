@@ -98,7 +98,8 @@ MemFileManagerImpl::LoadIndexToMemory(
         for (size_t idx = 0; idx < batch_files.size(); ++idx) {
             auto file_name =
                 batch_files[idx].substr(batch_files[idx].find_last_of('/') + 1);
-            file_to_index_data[file_name] = index_datas[idx];
+            file_to_index_data[file_name] =
+                index_datas[idx].get()->GetFieldData();
         }
     };
 
@@ -137,7 +138,7 @@ MemFileManagerImpl::CacheRawDataToMemory(
     auto FetchRawData = [&]() {
         auto raw_datas = GetObjectData(rcm_.get(), batch_files);
         for (auto& data : raw_datas) {
-            field_datas.emplace_back(data);
+            field_datas.emplace_back(data.get()->GetFieldData());
         }
     };
 

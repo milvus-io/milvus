@@ -447,62 +447,17 @@ EncodeAndUploadFieldSlice(ChunkManager* chunk_manager,
     return std::make_pair(std::move(object_key), serialized_index_size);
 }
 
-// /**
-//  * Returns the current resident set size (physical memory use) measured
-//  * in bytes, or zero if the value cannot be determined on this OS.
-//  */
-// size_t
-// getCurrentRSS() {
-// #if defined(_WIN32)
-//     /* Windows -------------------------------------------------- */
-//     PROCESS_MEMORY_COUNTERS info;
-//     GetProcessMemoryInfo(GetCurrentProcess(), &info, sizeof(info));
-//     return (size_t)info.WorkingSetSize;
-
-// #elif defined(__APPLE__) && defined(__MACH__)
-//     /* OSX ------------------------------------------------------ */
-//     struct mach_task_basic_info info;
-//     mach_msg_type_number_t infoCount = MACH_TASK_BASIC_INFO_COUNT;
-//     if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO, (task_info_t)&info, &infoCount) != KERN_SUCCESS)
-//         return (size_t)0L; /* Can't access? */
-//     return (size_t)info.resident_size;
-
-// #elif defined(__linux__) || defined(__linux) || defined(linux) || defined(__gnu_linux__)
-//     /* Linux ---------------------------------------------------- */
-//     long rss = 0L;
-//     FILE* fp = NULL;
-//     if ((fp = fopen("/proc/self/statm", "r")) == NULL)
-//         return (size_t)0L; /* Can't open? */
-//     if (fscanf(fp, "%*s%ld", &rss) != 1) {
-//         fclose(fp);
-//         return (size_t)0L; /* Can't read? */
-//     }
-//     fclose(fp);
-//     return (size_t)rss * (size_t)sysconf(_SC_PAGESIZE);
-
-// #else
-//     /* AIX, BSD, Solaris, and Unknown OS ------------------------ */
-//     return (size_t)0L; /* Unsupported. */
-// #endif
-// }
-
-std::vector<FieldDataPtr>
+std::vector<std::future<std::unique_ptr<DataCodec>>>
 GetObjectData(ChunkManager* remote_chunk_manager,
               const std::vector<std::string>& remote_files) {
     auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH);
     std::vector<std::future<std::unique_ptr<DataCodec>>> futures;
+    futures.reserve(remote_files.size());
     for (auto& file : remote_files) {
         futures.emplace_back(pool.Submit(
             DownloadAndDecodeRemoteFile, remote_chunk_manager, file));
     }
-
-    std::vector<FieldDataPtr> datas;
-    for (int i = 0; i < futures.size(); ++i) {
-        auto res = futures[i].get();
-        datas.emplace_back(res->GetFieldData());
-    }
-    ReleaseArrowUnused();
-    return datas;
+    return futures;
 }
 
 std::map<std::string, int64_t>
