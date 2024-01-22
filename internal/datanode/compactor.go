@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -207,13 +208,15 @@ func (t *compactionTask) uploadSingleInsertLog(
 }
 
 func (t *compactionTask) merge(
-	ctxTimeout context.Context,
+	ctx context.Context,
 	unMergedInsertlogs [][]string,
 	targetSegID UniqueID,
 	partID UniqueID,
 	meta *etcdpb.CollectionMeta,
 	delta map[interface{}]Timestamp,
 ) ([]*datapb.FieldBinlog, []*datapb.FieldBinlog, int64, error) {
+	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, fmt.Sprintf("CompactMerge-%d", t.getPlanID()))
+	defer span.End()
 	log := log.With(zap.Int64("planID", t.getPlanID()))
 	mergeStart := time.Now()
 
@@ -316,7 +319,7 @@ func (t *compactionTask) merge(
 
 	for _, path := range unMergedInsertlogs {
 		downloadStart := time.Now()
-		data, err := t.download(ctxTimeout, path)
+		data, err := t.download(ctx, path)
 		if err != nil {
 			log.Warn("download insertlogs wrong", zap.Strings("path", path), zap.Error(err))
 			return nil, nil, 0, err
@@ -374,7 +377,7 @@ func (t *compactionTask) merge(
 			if (currentRows+1)%100 == 0 && writeBuffer.GetMemorySize() > paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsInt() {
 				numRows += int64(writeBuffer.GetRowNum())
 				uploadInsertStart := time.Now()
-				inPaths, err := t.uploadSingleInsertLog(ctxTimeout, targetSegID, partID, meta, writeBuffer, fID2Type)
+				inPaths, err := t.uploadSingleInsertLog(ctx, targetSegID, partID, meta, writeBuffer, fID2Type)
 				if err != nil {
 					log.Warn("failed to upload single insert log", zap.Error(err))
 					return nil, nil, 0, err
@@ -395,7 +398,7 @@ func (t *compactionTask) merge(
 	if writeBuffer.GetRowNum() > 0 || numRows > 0 {
 		numRows += int64(writeBuffer.GetRowNum())
 		uploadStart := time.Now()
-		inPaths, statsPaths, err := t.uploadRemainLog(ctxTimeout, targetSegID, partID, meta,
+		inPaths, statsPaths, err := t.uploadRemainLog(ctx, targetSegID, partID, meta,
 			stats, numRows+int64(currentRows), writeBuffer, fID2Type)
 		if err != nil {
 			return nil, nil, 0, err
@@ -427,15 +430,18 @@ func (t *compactionTask) merge(
 }
 
 func (t *compactionTask) compact() (*datapb.CompactionPlanResult, error) {
+	// span := trace.
+	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(t.ctx, fmt.Sprintf("Compact-%d", t.getPlanID()))
+	defer span.End()
 	log := log.With(zap.Int64("planID", t.plan.GetPlanID()))
 	compactStart := time.Now()
-	if ok := funcutil.CheckCtxValid(t.ctx); !ok {
+	if ok := funcutil.CheckCtxValid(ctx); !ok {
 		log.Warn("compact wrong, task context done or timeout")
 		return nil, errContext
 	}
 
 	durInQueue := t.tr.RecordSpan()
-	ctxTimeout, cancelAll := context.WithTimeout(t.ctx, time.Duration(t.plan.GetTimeoutInSeconds())*time.Second)
+	ctxTimeout, cancelAll := context.WithTimeout(ctx, time.Duration(t.plan.GetTimeoutInSeconds())*time.Second)
 	defer cancelAll()
 
 	var targetSegID UniqueID

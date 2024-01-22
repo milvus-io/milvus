@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -266,12 +267,16 @@ func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan
 		}
 	}
 
+	spanCtx := trace.SpanContextFromContext(ctx)
+
+	taskCtx := trace.ContextWithSpanContext(node.ctx, spanCtx)
+
 	var task compactor
 	switch req.GetType() {
 	case datapb.CompactionType_Level0DeleteCompaction:
 		binlogIO := io.NewBinlogIO(node.chunkManager, getOrCreateIOPool())
 		task = newLevelZeroCompactionTask(
-			node.ctx,
+			taskCtx,
 			binlogIO,
 			node.allocator,
 			ds.metacache,
@@ -282,7 +287,7 @@ func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan
 		// TODO, replace this binlogIO with io.BinlogIO
 		binlogIO := &binlogIO{node.chunkManager, ds.idAllocator}
 		task = newCompactionTask(
-			node.ctx,
+			taskCtx,
 			binlogIO, binlogIO,
 			ds.metacache,
 			node.syncMgr,
