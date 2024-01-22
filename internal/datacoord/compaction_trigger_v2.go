@@ -6,9 +6,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
 )
 
@@ -93,11 +91,9 @@ func (m *CompactionTriggerManager) BuildLevelZeroCompactionPlan(view CompactionV
 	var segmentBinlogs []*datapb.CompactionSegmentBinlogs
 	levelZeroSegs := lo.Map(view.GetSegmentsView(), func(v *SegmentView, _ int) *datapb.CompactionSegmentBinlogs {
 		s := m.meta.GetSegment(v.ID)
-		cloned := s.Clone()
-		binlog.DecompressBinLog(storage.DeleteBinlog, cloned.GetCollectionID(), cloned.GetPartitionID(), cloned.GetID(), cloned.GetDeltalogs())
 		return &datapb.CompactionSegmentBinlogs{
 			SegmentID:    s.GetID(),
-			Deltalogs:    cloned.GetDeltalogs(),
+			Deltalogs:    s.GetDeltalogs(),
 			Level:        datapb.SegmentLevel_L0,
 			CollectionID: s.GetCollectionID(),
 			PartitionID:  s.GetPartitionID(),
