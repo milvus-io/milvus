@@ -144,7 +144,7 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "mutation_send_latency",
 			Help:      "latency that proxy send insert request to MsgStream",
-			Buckets:   buckets, // unit: ms
+			Buckets:   longTaskBuckets, // unit: ms
 		}, []string{nodeIDLabelName, msgTypeLabelName})
 
 	// ProxyAssignSegmentIDLatency record the latency that Proxy get segmentID from dataCoord.
