@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // LoadIndexInfo is a wrapper of the underlying C-structure C.CLoadIndexInfo
@@ -155,7 +156,17 @@ func (li *LoadIndexInfo) appendIndexData(ctx context.Context, indexKeys []string
 		}
 	}
 
-	status := C.AppendIndexV2(li.cLoadIndexInfo)
+	span := trace.SpanFromContext(ctx)
+
+	traceID := span.SpanContext().TraceID()
+	spanID := span.SpanContext().SpanID()
+	traceCtx := C.CTraceContext{
+		traceID: (*C.uint8_t)(unsafe.Pointer(&traceID[0])),
+		spanID:  (*C.uint8_t)(unsafe.Pointer(&spanID[0])),
+		flag:    C.uchar(span.SpanContext().TraceFlags()),
+	}
+
+	status := C.AppendIndexV2(traceCtx, li.cLoadIndexInfo)
 	return HandleCStatus(ctx, &status, "AppendIndex failed")
 }
 

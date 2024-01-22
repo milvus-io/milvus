@@ -64,24 +64,39 @@ template <typename T>
 void
 VectorDiskAnnIndex<T>::Load(const BinarySet& binary_set /* not used */,
                             const Config& config) {
-    Load(config);
+    Load(milvus::tracer::TraceContext{}, config);
 }
 
 template <typename T>
 void
-VectorDiskAnnIndex<T>::Load(const Config& config) {
+VectorDiskAnnIndex<T>::Load(milvus::tracer::TraceContext ctx,
+                            const Config& config) {
     knowhere::Json load_config = update_load_json(config);
 
-    auto index_files =
-        GetValueFromConfig<std::vector<std::string>>(config, "index_files");
-    AssertInfo(index_files.has_value(),
-               "index file paths is empty when load disk ann index data");
-    file_manager_->CacheIndexToDisk(index_files.value());
+    // start read file span with active scope
+    {
+        auto read_file_span =
+            milvus::tracer::StartSpan("SegCoreReadDiskIndexFile", &ctx);
+        auto read_scope =
+            milvus::tracer::GetTracer()->WithActiveSpan(read_file_span);
+        auto index_files =
+            GetValueFromConfig<std::vector<std::string>>(config, "index_files");
+        AssertInfo(index_files.has_value(),
+                   "index file paths is empty when load disk ann index data");
+        file_manager_->CacheIndexToDisk(index_files.value());
+        read_file_span->End();
+    }
 
+    // start engine load index span
+    auto span_load_engine =
+        milvus::tracer::StartSpan("SegCoreEngineLoadDiskIndex", &ctx);
+    auto engine_scope =
+        milvus::tracer::GetTracer()->WithActiveSpan(span_load_engine);
     auto stat = index_.Deserialize(knowhere::BinarySet(), load_config);
     if (stat != knowhere::Status::success)
         PanicInfo(ErrorCode::UnexpectedError,
                   "failed to Deserialize index, " + KnowhereStatusString(stat));
+    span_load_engine->End();
 
     SetDim(index_.Dim());
 }

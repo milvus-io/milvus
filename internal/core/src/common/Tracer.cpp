@@ -85,7 +85,7 @@ GetTracer() {
 }
 
 std::shared_ptr<trace::Span>
-StartSpan(std::string name, TraceContext* parentCtx) {
+StartSpan(const std::string& name, TraceContext* parentCtx) {
     trace::StartSpanOptions opts;
     if (enable_trace && parentCtx != nullptr && parentCtx->traceID != nullptr &&
         parentCtx->spanID != nullptr) {

@@ -108,7 +108,7 @@ VectorMemIndex::Load(const BinarySet& binary_set, const Config& config) {
 }
 
 void
-VectorMemIndex::Load(const Config& config) {
+VectorMemIndex::Load(milvus::tracer::TraceContext ctx, const Config& config) {
     if (config.contains(kMmapFilepath)) {
         return LoadFromFile(config);
     }
@@ -138,62 +138,72 @@ VectorMemIndex::Load(const Config& config) {
         }
     }
 
-    LOG_SEGCORE_INFO_ << "load with slice meta: "
-                      << !slice_meta_filepath.empty();
+    // start read file span with active scope
+    {
+        auto read_file_span =
+            milvus::tracer::StartSpan("SegCoreReadIndexFile", &ctx);
+        auto read_scope =
+            milvus::tracer::GetTracer()->WithActiveSpan(read_file_span);
+        LOG_SEGCORE_INFO_ << "load with slice meta: "
+                          << !slice_meta_filepath.empty();
 
-    if (!slice_meta_filepath
-             .empty()) {  // load with the slice meta info, then we can load batch by batch
-        std::string index_file_prefix = slice_meta_filepath.substr(
-            0, slice_meta_filepath.find_last_of('/') + 1);
+        if (!slice_meta_filepath
+                 .empty()) {  // load with the slice meta info, then we can load batch by batch
+            std::string index_file_prefix = slice_meta_filepath.substr(
+                0, slice_meta_filepath.find_last_of('/') + 1);
 
-        auto result = file_manager_->LoadIndexToMemory({slice_meta_filepath});
-        auto raw_slice_meta = result[INDEX_FILE_SLICE_META];
-        Config meta_data = Config::parse(
-            std::string(static_cast<const char*>(raw_slice_meta->Data()),
-                        raw_slice_meta->Size()));
+            auto result =
+                file_manager_->LoadIndexToMemory({slice_meta_filepath});
+            auto raw_slice_meta = result[INDEX_FILE_SLICE_META];
+            Config meta_data = Config::parse(
+                std::string(static_cast<const char*>(raw_slice_meta->Data()),
+                            raw_slice_meta->Size()));
 
-        for (auto& item : meta_data[META]) {
-            std::string prefix = item[NAME];
-            int slice_num = item[SLICE_NUM];
-            auto total_len = static_cast<size_t>(item[TOTAL_LEN]);
+            for (auto& item : meta_data[META]) {
+                std::string prefix = item[NAME];
+                int slice_num = item[SLICE_NUM];
+                auto total_len = static_cast<size_t>(item[TOTAL_LEN]);
 
-            auto new_field_data =
-                milvus::storage::CreateFieldData(DataType::INT8, 1, total_len);
+                auto new_field_data = milvus::storage::CreateFieldData(
+                    DataType::INT8, 1, total_len);
 
-            std::vector<std::string> batch;
-            batch.reserve(slice_num);
-            for (auto i = 0; i < slice_num; ++i) {
-                std::string file_name = GenSlicedFileName(prefix, i);
-                batch.push_back(index_file_prefix + file_name);
+                std::vector<std::string> batch;
+                batch.reserve(slice_num);
+                for (auto i = 0; i < slice_num; ++i) {
+                    std::string file_name = GenSlicedFileName(prefix, i);
+                    batch.push_back(index_file_prefix + file_name);
+                }
+
+                auto batch_data = file_manager_->LoadIndexToMemory(batch);
+                for (const auto& file_path : batch) {
+                    const std::string file_name =
+                        file_path.substr(file_path.find_last_of('/') + 1);
+                    AssertInfo(batch_data.find(file_name) != batch_data.end(),
+                               "lost index slice data: {}",
+                               file_name);
+                    auto data = batch_data[file_name];
+                    new_field_data->FillFieldData(data->Data(), data->Size());
+                }
+                for (auto& file : batch) {
+                    pending_index_files.erase(file);
+                }
+
+                AssertInfo(
+                    new_field_data->IsFull(),
+                    "index len is inconsistent after disassemble and assemble");
+                index_datas[prefix] = new_field_data;
             }
-
-            auto batch_data = file_manager_->LoadIndexToMemory(batch);
-            for (const auto& file_path : batch) {
-                const std::string file_name =
-                    file_path.substr(file_path.find_last_of('/') + 1);
-                AssertInfo(batch_data.find(file_name) != batch_data.end(),
-                           "lost index slice data: {}",
-                           file_name);
-                auto data = batch_data[file_name];
-                new_field_data->FillFieldData(data->Data(), data->Size());
-            }
-            for (auto& file : batch) {
-                pending_index_files.erase(file);
-            }
-
-            AssertInfo(
-                new_field_data->IsFull(),
-                "index len is inconsistent after disassemble and assemble");
-            index_datas[prefix] = new_field_data;
         }
-    }
-
-    if (!pending_index_files.empty()) {
-        auto result = file_manager_->LoadIndexToMemory(std::vector<std::string>(
-            pending_index_files.begin(), pending_index_files.end()));
-        for (auto&& index_data : result) {
-            index_datas.insert(std::move(index_data));
+        if (!pending_index_files.empty()) {
+            auto result =
+                file_manager_->LoadIndexToMemory(std::vector<std::string>(
+                    pending_index_files.begin(), pending_index_files.end()));
+            for (auto&& index_data : result) {
+                index_datas.insert(std::move(index_data));
+            }
         }
+
+        read_file_span->End();
     }
 
     LOG_SEGCORE_INFO_ << "construct binary set...";
@@ -207,6 +217,11 @@ VectorMemIndex::Load(const Config& config) {
         binary_set.Append(key, buf, size);
     }
 
+    // start engine load index span
+    auto span_load_engine =
+        milvus::tracer::StartSpan("SegCoreEngineLoadIndex", &ctx);
+    auto engine_scope =
+        milvus::tracer::GetTracer()->WithActiveSpan(span_load_engine);
     LOG_SEGCORE_INFO_ << "load index into Knowhere...";
     LoadWithoutAssemble(binary_set, config);
     LOG_SEGCORE_INFO_ << "load vector index done";

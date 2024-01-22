@@ -43,7 +43,7 @@ class ScalarIndexSort : public ScalarIndex<T> {
     Load(const BinarySet& index_binary, const Config& config = {}) override;
 
     void
-    Load(const Config& config = {}) override;
+    Load(milvus::tracer::TraceContext ctx, const Config& config = {}) override;
 
     int64_t
     Count() override {

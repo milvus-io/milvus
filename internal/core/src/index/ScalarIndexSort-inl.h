@@ -166,7 +166,8 @@ ScalarIndexSort<T>::Load(const BinarySet& index_binary, const Config& config) {
 
 template <typename T>
 inline void
-ScalarIndexSort<T>::Load(const Config& config) {
+ScalarIndexSort<T>::Load(milvus::tracer::TraceContext ctx,
+                         const Config& config) {
     auto index_files =
         GetValueFromConfig<std::vector<std::string>>(config, "index_files");
     AssertInfo(index_files.has_value(),

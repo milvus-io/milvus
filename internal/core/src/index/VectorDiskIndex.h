@@ -57,7 +57,7 @@ class VectorDiskAnnIndex : public VectorIndex {
          const Config& config = {}) override;
 
     void
-    Load(const Config& config = {}) override;
+    Load(milvus::tracer::TraceContext ctx, const Config& config = {}) override;
 
     void
     BuildWithDataset(const DatasetPtr& dataset,

@@ -38,6 +38,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"go.opentelemetry.io/otel"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -788,6 +789,9 @@ func (loader *segmentLoader) loadBloomFilter(ctx context.Context, segmentID int6
 }
 
 func (loader *segmentLoader) LoadDeltaLogs(ctx context.Context, segment *LocalSegment, deltaLogs []*datapb.FieldBinlog) error {
+	ctx, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, fmt.Sprintf("LoadDeltalogs-%d", segment.ID()))
+	defer sp.End()
+
 	log := log.Ctx(ctx).With(
 		zap.Int64("segmentID", segment.ID()),
 	)

@@ -42,7 +42,7 @@ class StringIndexMarisa : public StringIndex {
     Load(const BinarySet& set, const Config& config = {}) override;
 
     void
-    Load(const Config& config = {}) override;
+    Load(milvus::tracer::TraceContext ctx, const Config& config = {}) override;
 
     int64_t
     Count() override {
