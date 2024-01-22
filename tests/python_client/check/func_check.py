@@ -91,11 +91,11 @@ class ResponseChecker:
         elif self.check_task == CheckTasks.check_permission_deny:
             # Collection interface response check
             result = self.check_permission_deny(self.response, self.succ)
-            
+
         elif self.check_task == CheckTasks.check_rg_property:
             # describe resource group interface response check
             result = self.check_rg_property(self.response, self.func_name, self.check_items)
-            
+
         elif self.check_task == CheckTasks.check_describe_collection_property:
             # describe collection interface(high level api) response check
             result = self.check_describe_collection_property(self.response, self.func_name, self.check_items)
@@ -104,21 +104,25 @@ class ResponseChecker:
 
         return result
 
-    @staticmethod
-    def assert_succ(actual, expect):
-        assert actual is expect
+    def assert_succ(self, actual, expect):
+        assert actual is expect, f"Response of API {self.func_name} expect {expect}, but got {actual}"
         return True
 
-    @staticmethod
-    def assert_exception(res, actual=True, error_dict=None):
+    def assert_exception(self, res, actual=True, error_dict=None):
         assert actual is False
         assert len(error_dict) > 0
         if isinstance(res, Error):
             error_code = error_dict[ct.err_code]
-            assert res.code == error_code or error_dict[ct.err_msg] in res.message
+            assert res.code == error_code or error_dict[ct.err_msg] in res.message, (
+                f"Response of API {self.func_name} "
+                f"expect get error code {error_dict[ct.err_code]} or error message {error_dict[ct.err_code]}, "
+                f"but got {res.code} {res.message}")
+
         else:
             log.error("[CheckFunc] Response of API is not an error: %s" % str(res))
-            assert False
+            assert False, (f"Response of API expect get error code {error_dict[ct.err_code]} or "
+                           f"error message {error_dict[ct.err_code]}"
+                           f"but success")
         return True
 
     @staticmethod
@@ -342,7 +346,7 @@ class ResponseChecker:
                                                                check_items["metric"], hits.distances)
                     log.info("search_results_check: Checked the distances for one nq: OK")
                 else:
-                    pass    # just check nq and topk, not specific ids need check
+                    pass  # just check nq and topk, not specific ids need check
         log.info("search_results_check: limit (topK) and "
                  "ids searched for %d queries are correct" % len(search_res))
 
@@ -415,7 +419,7 @@ class ResponseChecker:
         primary_field = check_items.get("primary_field", None)
         if exp_res is not None:
             if isinstance(query_res, list):
-                assert pc.equal_entities_list(exp=exp_res, actual=query_res, primary_field=primary_field, 
+                assert pc.equal_entities_list(exp=exp_res, actual=query_res, primary_field=primary_field,
                                               with_vec=with_vec)
                 return True
             else:
