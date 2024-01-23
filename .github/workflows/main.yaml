@@ -128,7 +128,7 @@ jobs:
           chmod +x build/builder.sh
           chmod +x scripts/*
           chmod +x internal/core/output/unittest/*
-          ./build/builder.sh /bin/bash -c ./scripts/run_cpp_codecov.sh
+          ./build/builder.sh /bin/bash -euo pipefail  -c ./scripts/run_cpp_codecov.sh
       - name: Archive result
         uses: actions/upload-artifact@v4
         with:
