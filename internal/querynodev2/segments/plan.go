@@ -33,6 +33,7 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	. "github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -42,19 +43,36 @@ type SearchPlan struct {
 	cSearchPlan C.CSearchPlan
 }
 
-func createSearchPlanByExpr(ctx context.Context, col *Collection, expr []byte, metricType string) (*SearchPlan, error) {
+func createSearchPlanByExpr(ctx context.Context, col *Collection, expr []byte, metricType string) (*SearchPlan, int64, error) {
 	if col.collectionPtr == nil {
-		return nil, errors.New("nil collection ptr, collectionID = " + fmt.Sprintln(col.id))
+		return nil, common.InvalidFieldID, errors.New("nil collection ptr, collectionID = " + fmt.Sprintln(col.id))
 	}
 	var cPlan C.CSearchPlan
 	status := C.CreateSearchPlanByExpr(col.collectionPtr, unsafe.Pointer(&expr[0]), (C.int64_t)(len(expr)), &cPlan)
 
 	err1 := HandleCStatus(ctx, &status, "Create Plan by expr failed")
 	if err1 != nil {
-		return nil, err1
+		return nil, common.InvalidFieldID, err1
 	}
 
-	return &SearchPlan{cSearchPlan: cPlan}, nil
+	newPlan := &SearchPlan{cSearchPlan: cPlan}
+	var fieldID C.int64_t
+	status = C.GetFieldID(cPlan, &fieldID)
+	if err := HandleCStatus(ctx, &status, "get fieldID from plan failed"); err != nil {
+		newPlan.delete()
+		return nil, common.InvalidFieldID, err
+	}
+
+	cMetricType := C.GetMetricTypeByFieldID(col.collectionPtr, fieldID)
+	defer C.free(unsafe.Pointer(cMetricType))
+	metricTypeInIndex := C.GoString(cMetricType)
+
+	if len(metricType) != 0 && metricType != metricTypeInIndex {
+		return nil, common.InvalidFieldID, merr.WrapErrParameterInvalid(metricTypeInIndex, metricType, "metric type not match")
+	}
+
+	newPlan.setMetricType(metricTypeInIndex)
+	return newPlan, int64(fieldID), nil
 }
 
 func (plan *SearchPlan) getTopK() int64 {
@@ -88,11 +106,9 @@ type SearchRequest struct {
 }
 
 func NewSearchRequest(ctx context.Context, collection *Collection, req *querypb.SearchRequest, placeholderGrp []byte) (*SearchRequest, error) {
-	var err error
-	var plan *SearchPlan
 	metricType := req.GetReq().GetMetricType()
 	expr := req.Req.SerializedExprPlan
-	plan, err = createSearchPlanByExpr(ctx, collection, expr, metricType)
+	plan, fieldID, err := createSearchPlanByExpr(ctx, collection, expr, metricType)
 	if err != nil {
 		return nil, err
 	}
@@ -112,18 +128,11 @@ func NewSearchRequest(ctx context.Context, collection *Collection, req *querypb.
 		return nil, err
 	}
 
-	var fieldID C.int64_t
-	status = C.GetFieldID(plan.cSearchPlan, &fieldID)
-	if err = HandleCStatus(ctx, &status, "get fieldID from plan failed"); err != nil {
-		plan.delete()
-		return nil, err
-	}
-
 	ret := &SearchRequest{
 		plan:              plan,
 		cPlaceholderGroup: cPlaceholderGroup,
 		msgID:             req.GetReq().GetBase().GetMsgID(),
-		searchFieldID:     int64(fieldID),
+		searchFieldID:     fieldID,
 		mvccTimestamp:     req.GetReq().GetMvccTimestamp(),
 	}
 

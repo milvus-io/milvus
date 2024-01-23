@@ -323,9 +323,6 @@ SegmentInternalInterface::check_metric_type(
     auto searched_field_id = plan->plan_node_->search_info_.field_id_;
     auto field_index_meta =
         index_meta->GetFieldIndexMeta(FieldId(searched_field_id));
-    if (metric_str.empty()) {
-        metric_str = field_index_meta.GeMetricType();
-    }
     if (metric_str != field_index_meta.GeMetricType()) {
         throw SegcoreError(
             MetricTypeNotMatch,
