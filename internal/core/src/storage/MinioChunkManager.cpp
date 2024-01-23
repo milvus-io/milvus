@@ -32,6 +32,8 @@
 
 #include "storage/AliyunSTSClient.h"
 #include "storage/AliyunCredentialsProvider.h"
+#include "storage/TencentCloudSTSClient.h"
+#include "storage/TencentCloudCredentialsProvider.h"
 #include "storage/prometheus_client.h"
 #include "common/EasyAssert.h"
 #include "log/Log.h"
