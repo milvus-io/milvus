@@ -20,9 +20,12 @@ import (
 	"context"
 	"path"
 
+	"go.opentelemetry.io/otel"
+
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/retry"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type BinlogIO interface {
@@ -42,6 +45,8 @@ func NewBinlogIO(cm storage.ChunkManager, ioPool *conc.Pool[any]) BinlogIO {
 }
 
 func (b *BinlogIoImpl) Download(ctx context.Context, paths []string) ([][]byte, error) {
+	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "Download")
+	defer span.End()
 	future := b.pool.Submit(func() (any, error) {
 		var vs [][]byte
 		var err error
@@ -63,6 +68,8 @@ func (b *BinlogIoImpl) Download(ctx context.Context, paths []string) ([][]byte, 
 }
 
 func (b *BinlogIoImpl) Upload(ctx context.Context, kvs map[string][]byte) error {
+	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "Upload")
+	defer span.End()
 	future := b.pool.Submit(func() (any, error) {
 		err := retry.Do(ctx, func() error {
 			return b.MultiWrite(ctx, kvs)
