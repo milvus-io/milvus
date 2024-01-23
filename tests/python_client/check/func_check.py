@@ -92,6 +92,10 @@ class ResponseChecker:
             # Collection interface response check
             result = self.check_permission_deny(self.response, self.succ)
 
+        elif self.check_task == CheckTasks.check_auth_failure:
+            # connection interface response check
+            result = self.check_auth_failure(self.response, self.succ)
+
         elif self.check_task == CheckTasks.check_rg_property:
             # describe resource group interface response check
             result = self.check_rg_property(self.response, self.func_name, self.check_items)
@@ -584,6 +588,16 @@ class ResponseChecker:
         assert actual is False
         if isinstance(res, Error):
             assert "permission deny" in res.message
+        else:
+            log.error("[CheckFunc] Response of API is not an error: %s" % str(res))
+            assert False
+        return True
+
+    @staticmethod
+    def check_auth_failure(res, actual=True):
+        assert actual is False
+        if isinstance(res, Error):
+            assert "auth" in res.message
         else:
             log.error("[CheckFunc] Response of API is not an error: %s" % str(res))
             assert False
