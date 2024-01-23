@@ -22,10 +22,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/stretchr/testify/suite"
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/atomic"
+
+	"github.com/milvus-io/milvus/pkg/util/etcd"
 )
 
 type EtcdSourceSuite struct {
