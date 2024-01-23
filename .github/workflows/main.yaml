@@ -42,10 +42,12 @@ concurrency:
 jobs:
   Build:
     name: Build and test AMD64 Ubuntu 20.04
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-${{ matrix.ubuntu }}
     timeout-minutes: 180
     strategy:
       fail-fast: false
+      matrix:
+        ubuntu: [20.04]
     env:
       UBUNTU: 20.04
     steps:
@@ -100,10 +102,12 @@ jobs:
   UT-Cpp:
     name: UT for Cpp
     needs: Build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-${{ matrix.ubuntu }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
+      matrix:
+        ubuntu: [20.04]
     env:
       UBUNTU: 20.04
     steps:
@@ -141,10 +145,12 @@ jobs:
   UT-Go:
     name: UT for Go
     needs: Build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-${{ matrix.ubuntu }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
+      matrix:
+        ubuntu: [20.04]
     env:
       UBUNTU: 20.04
     steps:
@@ -181,10 +187,12 @@ jobs:
   integration-test:
     name: Integration Test
     needs: Build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-${{ matrix.ubuntu }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
+      matrix:
+        ubuntu: [20.04]
     env:
       UBUNTU: 20.04
     steps:
@@ -220,7 +228,7 @@ jobs:
   codecov:
     name: Upload Code Coverage
     needs: [UT-Cpp, UT-Go, integration-test]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-${{ matrix.ubuntu }}
     timeout-minutes: 5
     steps:
       - name: Checkout
