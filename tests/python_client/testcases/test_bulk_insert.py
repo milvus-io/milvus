@@ -337,7 +337,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("auto_id", [True, False])
     @pytest.mark.parametrize("dim", [128])
     @pytest.mark.parametrize("entities", [2000])
-    def test_binary_vector_only(self, is_row_based, auto_id, dim, entities):
+    def test_binary_vector_json(self, is_row_based, auto_id, dim, entities):
         """
         collection schema: [pk, binary_vector]
         Steps:
@@ -719,7 +719,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             cf.gen_float_vec_field(name=df.text_float_vec_field, dim=dim),
             cf.gen_binary_vec_field(name=df.binary_vec_field, dim=dim)
         ]
-        data_fields = [f.name for f in fields if    not f.to_dict().get("auto_id", False)]
+        data_fields = [f.name for f in fields if not f.to_dict().get("auto_id", False)]
         files = prepare_bulk_insert_new_json_files(
             minio_endpoint=self.minio_endpoint,
             bucket_name=self.bucket_name,
@@ -835,7 +835,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             cf.gen_float_vec_field(name=df.text_float_vec_field, dim=dim),
             cf.gen_binary_vec_field(name=df.binary_vec_field, dim=dim)
         ]
-        data_fields = [f.name for f in fields if    not f.to_dict().get("auto_id", False)]
+        data_fields = [f.name for f in fields if not f.to_dict().get("auto_id", False)]
         files = prepare_bulk_insert_numpy_files(
             minio_endpoint=self.minio_endpoint,
             bucket_name=self.bucket_name,

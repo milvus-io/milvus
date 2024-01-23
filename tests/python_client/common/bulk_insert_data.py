@@ -619,7 +619,11 @@ def gen_npy_files(float_vector, rows, dim, data_fields, file_size=None, file_num
     if file_nums == 1:
         # gen the numpy file without subfolders if only one set of files
         for data_field in data_fields:
-            if data_field in [DataField.vec_field, DataField.image_vec_field, DataField.text_vec_field]:
+            if "vec" in data_field:
+                if "float" in data_field:
+                    float_vector = True
+                if "binary" in data_field:
+                    float_vector = False
                 file_name = gen_vectors_in_numpy_file(dir=data_source, data_field=data_field, float_vector=float_vector,
                                                       rows=rows, dim=dim, force=force)
             elif data_field == DataField.string_field:  # string field for numpy not supported yet at 2022-10-17
