@@ -46,6 +46,8 @@ const (
 	DataNodeRole = "datanode"
 	// IndexNodeRole is a constant represent IndexNode
 	IndexNodeRole = "indexnode"
+	// MixtureRole is a constant represents Mixture running modtoe
+	MixtureRole = "mixture"
 )
 
 var (
