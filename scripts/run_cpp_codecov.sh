@@ -17,7 +17,7 @@
 # limitations under the License.
 
 # Exit immediately for non zero status
-set -e
+set -euo pipefail
 
 SOURCE="${BASH_SOURCE[0]}"
 while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symlink
