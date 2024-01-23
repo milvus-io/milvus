@@ -38,11 +38,11 @@ import (
 )
 
 const (
-	CloudProviderGCP    = "gcp"
-	CloudProviderAWS    = "aws"
-	CloudProviderAliyun = "aliyun"
-
-	CloudProviderAzure = "azure"
+	CloudProviderGCP     = "gcp"
+	CloudProviderAWS     = "aws"
+	CloudProviderAliyun  = "aliyun"
+	CloudProviderAzure   = "azure"
+	CloudProviderTencent = "tencent"
 )
 
 type ObjectStorage interface {

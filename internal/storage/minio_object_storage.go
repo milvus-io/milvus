@@ -30,6 +30,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/storage/aliyun"
 	"github.com/milvus-io/milvus/internal/storage/gcp"
+	"github.com/milvus-io/milvus/internal/storage/tencent"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 )
@@ -62,6 +63,12 @@ func newMinioClient(ctx context.Context, c *config) (*minio.Client, error) {
 		if !c.useIAM {
 			creds = credentials.NewStaticV2(c.accessKeyID, c.secretAccessKeyID, "")
 		}
+	case CloudProviderTencent:
+		newMinioFn = tencent.NewMinioClient
+		if !c.useIAM {
+			creds = credentials.NewStaticV4(c.accessKeyID, c.secretAccessKeyID, "")
+		}
+
 	default: // aws, minio
 		matchedDefault = true
 	}
