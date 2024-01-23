@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "common/EasyAssert.h"
+#include "common/Tracer.h"
 #include "common/Types.h"
 #include "knowhere/comp/index_param.h"
 #include "nlohmann/json.hpp"
@@ -418,7 +419,7 @@ TEST_P(IndexTest, BuildAndQuery) {
     }
     load_conf = generate_load_conf(index_type, metric_type, 0);
     load_conf["index_files"] = index_files;
-    ASSERT_NO_THROW(vec_index->Load(load_conf));
+    ASSERT_NO_THROW(vec_index->Load(milvus::tracer::TraceContext{}, load_conf));
     EXPECT_EQ(vec_index->Count(), NB);
     EXPECT_EQ(vec_index->GetDim(), DIM);
 
@@ -476,7 +477,7 @@ TEST_P(IndexTest, Mmap) {
     load_conf = generate_load_conf(index_type, metric_type, 0);
     load_conf["index_files"] = index_files;
     load_conf["mmap_filepath"] = "mmap/test_index_mmap_" + index_type;
-    vec_index->Load(load_conf);
+    vec_index->Load(milvus::tracer::TraceContext{}, load_conf);
     EXPECT_EQ(vec_index->Count(), NB);
     EXPECT_EQ(vec_index->GetDim(), DIM);
 
@@ -533,7 +534,7 @@ TEST_P(IndexTest, GetVector) {
         vec_index->Load(binary_set, load_conf);
         EXPECT_EQ(vec_index->Count(), NB);
     } else {
-        vec_index->Load(load_conf);
+        vec_index->Load(milvus::tracer::TraceContext{}, load_conf);
     }
     EXPECT_EQ(vec_index->GetDim(), DIM);
     EXPECT_EQ(vec_index->Count(), NB);
@@ -630,7 +631,7 @@ TEST(Indexing, SearchDiskAnnWithInvalidParam) {
     }
     auto load_conf = generate_load_conf(index_type, metric_type, NB);
     load_conf["index_files"] = index_files;
-    vec_index->Load(load_conf);
+    vec_index->Load(milvus::tracer::TraceContext{}, load_conf);
     EXPECT_EQ(vec_index->Count(), NB);
 
     // search disk index with search_list == limit

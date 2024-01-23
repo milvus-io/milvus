@@ -13,6 +13,8 @@
 
 #include "common/FieldMeta.h"
 #include "common/EasyAssert.h"
+#include "common/Tracer.h"
+#include "common/type_c.h"
 #include "index/Index.h"
 #include "index/IndexFactory.h"
 #include "index/Meta.h"
@@ -204,10 +206,10 @@ AppendIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
 }
 
 CStatus
-AppendIndexV2(CLoadIndexInfo c_load_index_info) {
+AppendIndexV2(CTraceContext c_trace, CLoadIndexInfo c_load_index_info) {
     try {
         auto load_index_info =
-            (milvus::segcore::LoadIndexInfo*)c_load_index_info;
+            static_cast<milvus::segcore::LoadIndexInfo*>(c_load_index_info);
         auto& index_params = load_index_info->index_params;
         auto field_type = load_index_info->field_type;
 
@@ -216,6 +218,11 @@ AppendIndexV2(CLoadIndexInfo c_load_index_info) {
         milvus::index::CreateIndexInfo index_info;
         index_info.field_type = load_index_info->field_type;
         index_info.index_engine_version = engine_version;
+
+        auto ctx = milvus::tracer::TraceContext{
+            c_trace.traceID, c_trace.spanID, c_trace.flag};
+        auto span = milvus::tracer::StartSpan("SegCoreLoadIndex", &ctx);
+        milvus::tracer::SetRootSpan(span);
 
         // get index type
         AssertInfo(index_params.find("index_type") != index_params.end(),
@@ -264,7 +271,7 @@ AppendIndexV2(CLoadIndexInfo c_load_index_info) {
             config[kMmapFilepath] = filepath.string();
         }
 
-        load_index_info->index->Load(config);
+        load_index_info->index->Load(ctx, config);
         auto status = CStatus();
         status.error_code = milvus::Success;
         status.error_msg = "";

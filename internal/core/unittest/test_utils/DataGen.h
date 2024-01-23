@@ -932,7 +932,7 @@ GenVecIndexing(int64_t N, int64_t dim, const float* vec) {
     conf["index_files"] = index_files;
     // we need a load stage to use index as the producation does
     // knowhere would do some data preparation in this stage
-    indexing->Load(conf);
+    indexing->Load(milvus::tracer::TraceContext{}, conf);
     return indexing;
 }
 

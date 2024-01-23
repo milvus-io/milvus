@@ -56,7 +56,7 @@ CStatus
 AppendIndexFilePath(CLoadIndexInfo c_load_index_info, const char* file_path);
 
 CStatus
-AppendIndexV2(CLoadIndexInfo c_load_index_info);
+AppendIndexV2(CTraceContext c_trace, CLoadIndexInfo c_load_index_info);
 
 CStatus
 AppendIndexEngineVersionToLoadInfo(CLoadIndexInfo c_load_index_info,
