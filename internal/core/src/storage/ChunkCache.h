@@ -16,7 +16,6 @@
 
 #pragma once
 
-#include <oneapi/tbb/concurrent_hash_map.h>
 #include "mmap/Column.h"
 
 namespace milvus::storage {
@@ -58,15 +57,14 @@ class ChunkCache {
     Mmap(const std::filesystem::path& path, const FieldDataPtr& field_data);
 
  private:
-    using ColumnTable =
-        oneapi::tbb::concurrent_hash_map<std::string,
-                                         std::shared_ptr<ColumnBase>>;
+    using ColumnTable = std::map<std::string, std::shared_ptr<ColumnBase>>;
 
  private:
-    mutable std::mutex mutex_;
+    mutable std::mutex mmap_mutex_;
     int read_ahead_policy_;
     std::string path_prefix_;
     ChunkManagerPtr cm_;
+    mutable std::shared_mutex columns_mutex_;
     ColumnTable columns_;
 };
 

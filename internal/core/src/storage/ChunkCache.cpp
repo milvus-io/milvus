@@ -22,16 +22,19 @@ std::shared_ptr<ColumnBase>
 ChunkCache::Read(const std::string& filepath) {
     auto path = std::filesystem::path(path_prefix_) / filepath;
 
-    ColumnTable::const_accessor ca;
-    if (columns_.find(ca, path)) {
-        return ca->second;
+    {
+        std::shared_lock lck(columns_mutex_);
+        auto it = columns_.find(path);
+        if (it != columns_.end()) {
+            return it->second;
+        }
     }
-    ca.release();
 
     auto field_data = DownloadAndDecodeRemoteFile(cm_.get(), filepath);
     auto column = Mmap(path, field_data->GetFieldData());
-    ColumnTable::accessor a;
-    columns_.emplace(a, path, column);
+
+    std::unique_lock lck(columns_mutex_);
+    columns_.emplace(path, column);
     return column;
 }
 
@@ -44,11 +47,14 @@ ChunkCache::Remove(const std::string& filepath) {
 void
 ChunkCache::Prefetch(const std::string& filepath) {
     auto path = std::filesystem::path(path_prefix_) / filepath;
-    ColumnTable::const_accessor ca;
-    if (!columns_.find(ca, path)) {
+
+    std::shared_lock lck(columns_mutex_);
+    auto it = columns_.find(path);
+    if (it == columns_.end()) {
         return;
     }
-    auto column = ca->second;
+
+    auto column = it->second;
     auto ok =
         madvise(reinterpret_cast<void*>(const_cast<char*>(column->Data())),
                 column->ByteSize(),
@@ -62,7 +68,7 @@ ChunkCache::Prefetch(const std::string& filepath) {
 std::shared_ptr<ColumnBase>
 ChunkCache::Mmap(const std::filesystem::path& path,
                  const FieldDataPtr& field_data) {
-    std::unique_lock lck(mutex_);
+    std::unique_lock lck(mmap_mutex_);
 
     auto dir = path.parent_path();
     std::filesystem::create_directories(dir);
