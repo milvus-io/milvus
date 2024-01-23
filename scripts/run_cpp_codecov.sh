@@ -68,7 +68,7 @@ for test in `ls ${MILVUS_CORE_UNITTEST_DIR}`; do
     ${MILVUS_CORE_UNITTEST_DIR}/${test}
     if [ $? -ne 0 ]; then
         echo ${args}
-        echo ${${MILVUS_CORE_UNITTEST_DIR}/}/${test} "run failed"
+        echo "error: run failed"
         exit -1
     fi
 done
