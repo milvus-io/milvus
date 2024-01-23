@@ -1358,6 +1358,9 @@ type queryCoordConfig struct {
 	RowCountFactor                      ParamItem `refreshable:"true"`
 	SegmentCountFactor                  ParamItem `refreshable:"true"`
 	GlobalSegmentCountFactor            ParamItem `refreshable:"true"`
+	SegmentCountMaxSteps                ParamItem `refreshable:"true"`
+	RowCountMaxSteps                    ParamItem `refreshable:"true"`
+	RandomMaxSteps                      ParamItem `refreshable:"true"`
 	GrowingRowCountWeight               ParamItem `refreshable:"true"`
 
 	SegmentCheckInterval       ParamItem `refreshable:"true"`
@@ -1506,6 +1509,36 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.GlobalSegmentCountFactor.Init(base.mgr)
+
+	p.SegmentCountMaxSteps = ParamItem{
+		Key:          "queryCoord.segmentCountMaxSteps",
+		Version:      "2.3.0",
+		DefaultValue: "50",
+		PanicIfEmpty: true,
+		Doc:          "segment count based plan generator max steps",
+		Export:       true,
+	}
+	p.SegmentCountMaxSteps.Init(base.mgr)
+
+	p.RowCountMaxSteps = ParamItem{
+		Key:          "queryCoord.rowCountMaxSteps",
+		Version:      "2.3.0",
+		DefaultValue: "50",
+		PanicIfEmpty: true,
+		Doc:          "segment count based plan generator max steps",
+		Export:       true,
+	}
+	p.RowCountMaxSteps.Init(base.mgr)
+
+	p.RandomMaxSteps = ParamItem{
+		Key:          "queryCoord.randomMaxSteps",
+		Version:      "2.3.0",
+		DefaultValue: "10",
+		PanicIfEmpty: true,
+		Doc:          "segment count based plan generator max steps",
+		Export:       true,
+	}
+	p.RandomMaxSteps.Init(base.mgr)
 
 	p.ScoreUnbalanceTolerationFactor = ParamItem{
 		Key:          "queryCoord.scoreUnbalanceTolerationFactor",

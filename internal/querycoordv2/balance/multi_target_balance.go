@@ -77,9 +77,9 @@ func (m *segmentCountCostModel) cost() float64 {
 		nodeSegmentCount[node] = len(segments)
 	}
 	expectAvg := float64(totalSegmentCount) / float64(nodeCount)
-	// calculate worst case, all rows are allocated to only one node
+	// calculate worst case, all segments are allocated to only one node
 	worst := float64(nodeCount-1)*expectAvg + float64(totalSegmentCount) - expectAvg
-	// calculate best case, all rows are allocated meanly
+	// calculate best case, all segments are allocated meanly
 	nodeWithMoreRows := totalSegmentCount % nodeCount
 	best := float64(nodeWithMoreRows)*(math.Ceil(expectAvg)-expectAvg) + float64(nodeCount-nodeWithMoreRows)*(expectAvg-math.Floor(expectAvg))
 
@@ -529,11 +529,11 @@ func (b *MultiTargetBalancer) genPlanByDistributions(nodeSegments, globalNodeSeg
 	// for row count based and segment count based generator, we have 2 types of generators: replica level and global level
 	generators := make([]generator, 0)
 	generators = append(generators,
-		newRowCountBasedPlanGenerator(50, false),
-		newRowCountBasedPlanGenerator(50, true),
-		newSegmentCountBasedPlanGenerator(50, false),
-		newSegmentCountBasedPlanGenerator(50, true),
-		newRandomPlanGenerator(10),
+		newRowCountBasedPlanGenerator(params.Params.QueryCoordCfg.RowCountMaxSteps.GetAsInt(), false),
+		newRowCountBasedPlanGenerator(params.Params.QueryCoordCfg.RowCountMaxSteps.GetAsInt(), true),
+		newSegmentCountBasedPlanGenerator(params.Params.QueryCoordCfg.SegmentCountMaxSteps.GetAsInt(), false),
+		newSegmentCountBasedPlanGenerator(params.Params.QueryCoordCfg.SegmentCountMaxSteps.GetAsInt(), true),
+		newRandomPlanGenerator(params.Params.QueryCoordCfg.RandomMaxSteps.GetAsInt()),
 	)
 
 	// run generators sequentially to generate plans
