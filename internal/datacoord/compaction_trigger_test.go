@@ -1747,7 +1747,7 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 	assert.True(t, couldDo)
 
 	// if only 10 bin logs, then disk index won't trigger compaction
-	info.Statslogs = binlogs[0:20]
+	info.Statslogs = binlogs[0:40]
 	couldDo = trigger.ShouldDoSingleCompaction(info, false, &compactTime{})
 	assert.True(t, couldDo)
 
@@ -2226,7 +2226,7 @@ func (s *CompactionTriggerSuite) TestHandleSignal() {
 		defer s.SetupTest()
 		tr := s.tr
 		s.compactionHandler.EXPECT().isFull().Return(false)
-		s.allocator.EXPECT().allocTimestamp(mock.Anything).Return(10000, nil)
+		//s.allocator.EXPECT().allocTimestamp(mock.Anything).Return(10000, nil)
 		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(nil, errors.New("mocked"))
 		tr.handleSignal(&compactionSignal{
 			segmentID:    1,
@@ -2247,6 +2247,14 @@ func (s *CompactionTriggerSuite) TestHandleSignal() {
 		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&collectionInfo{
 			Properties: map[string]string{
 				common.CollectionAutoCompactionKey: "bad_value",
+			},
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:  s.vecFieldID,
+						DataType: schemapb.DataType_FloatVector,
+					},
+				},
 			},
 		}, nil)
 		tr.handleSignal(&compactionSignal{
@@ -2321,6 +2329,30 @@ func (s *CompactionTriggerSuite) TestHandleSignal() {
 }
 
 func (s *CompactionTriggerSuite) TestHandleGlobalSignal() {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:  common.StartOfUserFieldID,
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.DimKey,
+						Value: "128",
+					},
+				},
+			},
+			{
+				FieldID:  common.StartOfUserFieldID + 1,
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.DimKey,
+						Value: "128",
+					},
+				},
+			},
+		},
+	}
 	s.Run("getCompaction_failed", func() {
 		defer s.SetupTest()
 		tr := s.tr
@@ -2344,6 +2376,7 @@ func (s *CompactionTriggerSuite) TestHandleGlobalSignal() {
 		s.compactionHandler.EXPECT().isFull().Return(false)
 		s.allocator.EXPECT().allocTimestamp(mock.Anything).Return(10000, nil)
 		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&collectionInfo{
+			Schema: schema,
 			Properties: map[string]string{
 				common.CollectionAutoCompactionKey: "bad_value",
 			},
@@ -2365,6 +2398,7 @@ func (s *CompactionTriggerSuite) TestHandleGlobalSignal() {
 		s.compactionHandler.EXPECT().isFull().Return(false)
 		s.allocator.EXPECT().allocTimestamp(mock.Anything).Return(10000, nil)
 		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&collectionInfo{
+			Schema: schema,
 			Properties: map[string]string{
 				common.CollectionAutoCompactionKey: "false",
 			},
@@ -2387,6 +2421,7 @@ func (s *CompactionTriggerSuite) TestHandleGlobalSignal() {
 		s.allocator.EXPECT().allocTimestamp(mock.Anything).Return(10000, nil)
 		s.allocator.EXPECT().allocID(mock.Anything).Return(20000, nil)
 		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&collectionInfo{
+			Schema: schema,
 			Properties: map[string]string{
 				common.CollectionAutoCompactionKey: "false",
 			},
