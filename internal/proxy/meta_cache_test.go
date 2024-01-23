@@ -773,11 +773,6 @@ func TestMetaCache_ExpireShardLeaderCache(t *testing.T) {
 	err := InitMetaCache(ctx, rootCoord, queryCoord, shardMgr)
 	assert.NoError(t, err)
 
-	queryCoord.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
-		Status:              merr.Success(),
-		CollectionIDs:       []UniqueID{1},
-		InMemoryPercentages: []int64{100},
-	}, nil)
 	queryCoord.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
 		Status: merr.Success(),
 		Shards: []*querypb.ShardLeadersList{
@@ -788,6 +783,7 @@ func TestMetaCache_ExpireShardLeaderCache(t *testing.T) {
 			},
 		},
 	}, nil)
+
 	nodeInfos, err := globalMetaCache.GetShards(ctx, true, dbName, "collection1", 1)
 	assert.NoError(t, err)
 	assert.Len(t, nodeInfos["channel-1"], 3)
