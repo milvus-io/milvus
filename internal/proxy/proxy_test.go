@@ -53,6 +53,7 @@ import (
 	grpcquerynode "github.com/milvus-io/milvus/internal/distributed/querynode"
 	grpcrootcoord "github.com/milvus-io/milvus/internal/distributed/rootcoord"
 	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -4613,6 +4614,55 @@ func TestProxy_ListImportTasks(t *testing.T) {
 		resp, err := proxy.ListImportTasks(context.TODO(), req)
 		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
 		assert.NoError(t, err)
+	})
+}
+
+func TestProxy_RelatedPrivilege(t *testing.T) {
+	req := &milvuspb.OperatePrivilegeRequest{
+		Entity: &milvuspb.GrantEntity{
+			Role:       &milvuspb.RoleEntity{Name: "public"},
+			ObjectName: "col1",
+			Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Collection.String()},
+			Grantor:    &milvuspb.GrantorEntity{Privilege: &milvuspb.PrivilegeEntity{Name: util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeLoad.String())}},
+		},
+	}
+	ctx := GetContext(context.Background(), "root:123456")
+
+	t.Run("related privilege grpc error", func(t *testing.T) {
+		rootCoord := mocks.NewMockRootCoordClient(t)
+		proxy := &Proxy{rootCoord: rootCoord}
+		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		rootCoord.EXPECT().OperatePrivilege(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, request *milvuspb.OperatePrivilegeRequest, option ...grpc.CallOption) (*commonpb.Status, error) {
+			privilegeName := request.Entity.Grantor.Privilege.Name
+			if privilegeName == util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeLoad.String()) {
+				return merr.Success(), nil
+			}
+			return nil, errors.New("mock grpc error")
+		})
+
+		resp, err := proxy.OperatePrivilege(ctx, req)
+		assert.NoError(t, err)
+		assert.False(t, merr.Ok(resp))
+	})
+
+	t.Run("related privilege status error", func(t *testing.T) {
+		rootCoord := mocks.NewMockRootCoordClient(t)
+		proxy := &Proxy{rootCoord: rootCoord}
+		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		rootCoord.EXPECT().OperatePrivilege(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, request *milvuspb.OperatePrivilegeRequest, option ...grpc.CallOption) (*commonpb.Status, error) {
+			privilegeName := request.Entity.Grantor.Privilege.Name
+			if privilegeName == util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeLoad.String()) ||
+				privilegeName == util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGetLoadState.String()) {
+				return merr.Success(), nil
+			}
+			return merr.Status(errors.New("mock status error")), nil
+		})
+
+		resp, err := proxy.OperatePrivilege(ctx, req)
+		assert.NoError(t, err)
+		assert.False(t, merr.Ok(resp))
 	})
 }
 
