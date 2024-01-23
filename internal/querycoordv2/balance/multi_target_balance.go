@@ -11,6 +11,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
+	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -82,8 +84,8 @@ func (m *segmentCountCostModel) cost() float64 {
 	best := float64(nodeWithMoreRows)*(math.Ceil(expectAvg)-expectAvg) + float64(nodeCount-nodeWithMoreRows)*(expectAvg-math.Floor(expectAvg))
 
 	var currCost float64
-	for _, rowCount := range nodeSegmentCount {
-		currCost += math.Abs(float64(rowCount) - expectAvg)
+	for _, count := range nodeSegmentCount {
+		currCost += math.Abs(float64(count) - expectAvg)
 	}
 
 	if worst == best {
@@ -273,9 +275,9 @@ func (g *rowCountBasedPlanGenerator) generatePlans() []SegmentAssignPlan {
 			g.globalNodeSegments = newGlobalCluster
 			maxNode.count -= int(segment.GetNumOfRows())
 			minNode.count += int(segment.GetNumOfRows())
-			for _, segment := range maxNode.segments {
+			for n, segment := range maxNode.segments {
 				if segment.GetID() == plan.Segment.ID {
-					maxNode.segments = append(maxNode.segments[:i], maxNode.segments[i+1:]...)
+					maxNode.segments = append(maxNode.segments[:n], maxNode.segments[n+1:]...)
 					break
 				}
 			}
@@ -350,9 +352,9 @@ func (g *segmentCountBasedPlanGenerator) generatePlans() []SegmentAssignPlan {
 			g.globalNodeSegments = newGlobalCluster
 			maxNode.count -= 1
 			minNode.count += 1
-			for _, segment := range maxNode.segments {
+			for n, segment := range maxNode.segments {
 				if segment.GetID() == plan.Segment.ID {
-					maxNode.segments = append(maxNode.segments[:i], maxNode.segments[i+1:]...)
+					maxNode.segments = append(maxNode.segments[:n], maxNode.segments[n+1:]...)
 					break
 				}
 			}
@@ -440,10 +442,8 @@ func (g *randomPlanGenerator) generatePlans() []SegmentAssignPlan {
 
 type MultiTargetBalancer struct {
 	*ScoreBasedBalancer
-	dist                   *meta.DistributionManager
-	rowCountCostWeight     int32
-	segmentCountCostWieght int32
-	targetMgr              *meta.TargetManager
+	dist      *meta.DistributionManager
+	targetMgr *meta.TargetManager
 }
 
 func (b *MultiTargetBalancer) BalanceReplica(replica *meta.Replica) ([]SegmentAssignPlan, []ChannelAssignPlan) {
@@ -520,15 +520,19 @@ func (b *MultiTargetBalancer) genSegmentPlan(replica *meta.Replica) []SegmentAss
 		globalNodeSegments[node] = b.dist.SegmentDistManager.GetByNode(node)
 	}
 
+	return b.genPlanByDistributions(nodeSegments, globalNodeSegments)
+}
+
+func (b *MultiTargetBalancer) genPlanByDistributions(nodeSegments, globalNodeSegments map[int64][]*meta.Segment) []SegmentAssignPlan {
 	// create generators
 	// we have 3 types of generators: row count, segment count, random
 	// for row count based and segment count based generator, we have 2 types of generators: replica level and global level
 	generators := make([]generator, 0)
 	generators = append(generators,
-		newRowCountBasedPlanGenerator(10, false),
-		newRowCountBasedPlanGenerator(10, true),
-		newSegmentCountBasedPlanGenerator(10, false),
-		newSegmentCountBasedPlanGenerator(10, true),
+		newRowCountBasedPlanGenerator(50, false),
+		newRowCountBasedPlanGenerator(50, true),
+		newSegmentCountBasedPlanGenerator(50, false),
+		newSegmentCountBasedPlanGenerator(50, true),
 		newRandomPlanGenerator(10),
 	)
 
@@ -546,4 +550,12 @@ func (b *MultiTargetBalancer) genSegmentPlan(replica *meta.Replica) []SegmentAss
 		globalNodeSegments = generator.getGlobalNodeSegments()
 	}
 	return plans
+}
+
+func NewMultiTargetBalancer(scheduler task.Scheduler, nodeManager *session.NodeManager, dist *meta.DistributionManager, meta *meta.Meta, targetMgr *meta.TargetManager) *MultiTargetBalancer {
+	return &MultiTargetBalancer{
+		ScoreBasedBalancer: NewScoreBasedBalancer(scheduler, nodeManager, dist, meta, targetMgr),
+		dist:               dist,
+		targetMgr:          targetMgr,
+	}
 }

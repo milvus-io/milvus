@@ -8,6 +8,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/suite"
 )
@@ -302,8 +303,7 @@ func (suite *MultiTargetBalancerTestSuite) TestRandomPlanGenerator() {
 		{
 			map[int64][]*meta.Segment{
 				1: {
-					{SegmentInfo: &datapb.SegmentInfo{ID: 1, NumOfRows: 20}},
-					{SegmentInfo: &datapb.SegmentInfo{ID: 2, NumOfRows: 30}},
+					{SegmentInfo: &datapb.SegmentInfo{ID: 1, NumOfRows: 20}}, {SegmentInfo: &datapb.SegmentInfo{ID: 2, NumOfRows: 30}},
 				},
 				2: {
 					{SegmentInfo: &datapb.SegmentInfo{ID: 3, NumOfRows: 20}},
@@ -320,6 +320,34 @@ func (suite *MultiTargetBalancerTestSuite) TestRandomPlanGenerator() {
 		generator.setGlobalNodeSegments(c.nodeSegments)
 		generator.generatePlans()
 		suite.InDelta(c.expectCost, generator.currClusterCost, 0.001)
+	}
+}
+
+func (suite *MultiTargetBalancerTestSuite) TestPlanNoConflict() {
+	nodeSegments := make(map[int64][]*meta.Segment)
+	totalCount := 0
+	// 10 nodes, at most 100 segments, at most 1000 rows
+	for i := 0; i < 10; i++ {
+		segNum := rand.Intn(100)
+		for j := 0; j < segNum; j++ {
+			rowCount := rand.Intn(1000)
+			nodeSegments[int64(i)] = append(nodeSegments[int64(i)], &meta.Segment{
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:        int64(i*1000 + j),
+					NumOfRows: int64(rowCount),
+				},
+			})
+			totalCount += rowCount
+		}
+	}
+
+	balancer := &MultiTargetBalancer{}
+	plans := balancer.genPlanByDistributions(nodeSegments, nodeSegments)
+	segmentSet := typeutil.NewSet[int64]()
+	for _, p := range plans {
+		suite.False(segmentSet.Contain(p.Segment.ID))
+		segmentSet.Insert(p.Segment.ID)
+		suite.NotEqual(p.From, p.To)
 	}
 }
 
