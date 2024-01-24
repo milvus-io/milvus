@@ -278,6 +278,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     void
     check_search(const query::Plan* plan) const override {
         Assert(plan);
+        AssertInfo(index_meta_.get(), "index_meta is nullptr");
         check_metric_type(plan, index_meta_);
     }
 

@@ -32,6 +32,36 @@ using milvus::segcore::LoadIndexInfo;
 const int64_t ROW_COUNT = 10 * 1000;
 const int64_t BIAS = 4200;
 
+namespace {
+std::string
+gen_index_meta(int dim, const char* metric_type) {
+    milvus::proto::segcore::CollectionIndexMeta collection_index_meta;
+    collection_index_meta.set_maxindexrowcount(1000);
+
+    auto field_index_meta = collection_index_meta.add_index_metas();
+    field_index_meta->set_fieldid(100);
+    field_index_meta->set_collectionid(1001);
+    field_index_meta->set_index_name("test-index");
+    auto dim_param = field_index_meta->add_type_params();
+    dim_param->set_key("dim");
+    dim_param->set_value(std::to_string(dim));
+    auto index_type_param = field_index_meta->add_index_params();
+    index_type_param->set_key("index_type");
+    index_type_param->set_value("IVF_FLAT");
+    auto metric_type_param = field_index_meta->add_index_params();
+    metric_type_param->set_key("metric_type");
+    metric_type_param->set_value(metric_type);
+    auto nlist_param = field_index_meta->add_index_params();
+    nlist_param->set_key("nlist");
+    nlist_param->set_value("128");
+
+    std::string index_meta_string;
+    auto marshal = google::protobuf::TextFormat::PrintToString(
+        collection_index_meta, &index_meta_string);
+    assert(marshal);
+}
+}  // namespace
+
 TEST(Sealed, without_predicate) {
     using namespace milvus::query;
     using namespace milvus::segcore;
@@ -124,7 +154,8 @@ TEST(Sealed, without_predicate) {
     load_info.index_params["metric_type"] = "L2";
 
     // load index for vec field, load raw data for scalar field
-    auto sealed_segment = SealedCreator(schema, dataset);
+    auto sealed_segment =
+        SealedCreator(schema, dataset, gen_index_meta(dim, metric_type));
     sealed_segment->DropFieldData(fake_id);
     sealed_segment->LoadIndex(load_info);
 
@@ -243,7 +274,8 @@ TEST(Sealed, with_predicate) {
     load_info.index_params["metric_type"] = "L2";
 
     // load index for vec field, load raw data for scalar field
-    auto sealed_segment = SealedCreator(schema, dataset);
+    auto sealed_segment =
+        SealedCreator(schema, dataset, gen_index_meta(dim, metric_type));
     sealed_segment->DropFieldData(fake_id);
     sealed_segment->LoadIndex(load_info);
 
@@ -339,7 +371,8 @@ TEST(Sealed, with_predicate_filter_all) {
     load_info.index_params["metric_type"] = "L2";
 
     // load index for vec field, load raw data for scalar field
-    auto ivf_sealed_segment = SealedCreator(schema, dataset);
+    auto ivf_sealed_segment =
+        SealedCreator(schema, dataset, gen_index_meta(dim, metric_type));
     ivf_sealed_segment->DropFieldData(fake_id);
     ivf_sealed_segment->LoadIndex(load_info);
 
@@ -374,7 +407,8 @@ TEST(Sealed, with_predicate_filter_all) {
     hnsw_load_info.index_params["metric_type"] = "L2";
 
     // load index for vec field, load raw data for scalar field
-    auto hnsw_sealed_segment = SealedCreator(schema, dataset);
+    auto hnsw_sealed_segment =
+        SealedCreator(schema, dataset, gen_index_meta(dim, metric_type));
     hnsw_sealed_segment->DropFieldData(fake_id);
     hnsw_sealed_segment->LoadIndex(hnsw_load_info);
 

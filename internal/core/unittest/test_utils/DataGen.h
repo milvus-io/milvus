@@ -17,6 +17,7 @@
 #include <random>
 #include <string>
 #include <google/protobuf/text_format.h>
+#include <gtest/gtest.h>
 
 #include "Constants.h"
 #include "common/EasyAssert.h"
@@ -988,8 +989,17 @@ SealedLoadFieldData(const GeneratedData& dataset,
 }
 
 inline std::unique_ptr<SegmentSealed>
-SealedCreator(SchemaPtr schema, const GeneratedData& dataset) {
-    auto segment = CreateSealedSegment(schema);
+SealedCreator(SchemaPtr schema,
+              const GeneratedData& dataset,
+              const std::string& index_meta_blob) {
+    milvus::proto::segcore::CollectionIndexMeta index_meta;
+    if (!google::protobuf::TextFormat::ParseFromString(index_meta_blob,
+                                                       &index_meta)) {
+        throw std::runtime_error("failed to parse index meta");
+    }
+    IndexMetaPtr index_meta_ptr =
+        std::make_shared<CollectionIndexMeta>(index_meta);
+    auto segment = CreateSealedSegment(schema, index_meta_ptr);
     SealedLoadFieldData(dataset, *segment);
     return segment;
 }
@@ -1110,10 +1120,20 @@ GenRandomIds(int rows, int64_t seed = 42) {
 }
 
 inline CCollection
-NewCollection(const char* schema_proto_blob) {
-    auto proto = std::string(schema_proto_blob);
-    auto collection = std::make_unique<milvus::segcore::Collection>(proto);
+NewCollection(const std::string& schema_proto_blob) {
+    auto collection = std::make_unique<milvus::segcore::Collection>(schema_proto_blob);
     return (void*)collection.release();
+}
+
+inline void
+CollectionSetIndexMeta(CCollection collection,
+                       const std::string& index_meta_blob) {
+    milvus::proto::segcore::CollectionIndexMeta index_meta;
+    ASSERT_TRUE(google::protobuf::TextFormat::ParseFromString(index_meta_blob,
+                                                              &index_meta));
+    char buffer[index_meta.ByteSizeLong()];
+    index_meta.SerializeToArray(buffer, index_meta.ByteSizeLong());
+    SetIndexMeta(collection, buffer, index_meta.ByteSizeLong());
 }
 
 }  // namespace milvus::segcore

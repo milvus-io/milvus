@@ -67,7 +67,7 @@ CRetrieve(CSegmentInterface c_segment,
         c_segment, c_plan, c_trace, timestamp, result, DEFAULT_MAX_OUTPUT_SIZE);
 }
 
-const char*
+const std::string&
 get_default_schema_config() {
     static std::string conf = R"(name: "default-collection"
                                 fields: <
@@ -89,11 +89,10 @@ get_default_schema_config() {
                                   data_type: Int64
                                   is_primary_key: true
                                 >)";
-    static std::string fake_conf = "";
-    return conf.c_str();
+    return conf;
 }
 
-const char*
+const std::string&
 get_float16_schema_config() {
     static std::string conf = R"(name: "float16-collection"
                                 fields: <
@@ -115,11 +114,10 @@ get_float16_schema_config() {
                                   data_type: Int64
                                   is_primary_key: true
                                 >)";
-    static std::string fake_conf = "";
-    return conf.c_str();
+    return conf;
 }
 
-const char*
+const std::string&
 get_bfloat16_schema_config() {
     static std::string conf = R"(name: "bfloat16-collection"
                                 fields: <
@@ -141,11 +139,10 @@ get_bfloat16_schema_config() {
                                   data_type: Int64
                                   is_primary_key: true
                                 >)";
-    static std::string fake_conf = "";
-    return conf.c_str();
+    return conf;
 }
 
-const char*
+const std::string&
 get_default_index_meta() {
     static std::string conf = R"(maxIndexRowCount: 1000
                                 index_metas: <
@@ -169,7 +166,7 @@ get_default_index_meta() {
                                    value: "128"
                                   >
                                 >)";
-    return conf.c_str();
+    return conf;
 }
 
 auto
@@ -292,15 +289,20 @@ enum VectorType {
     BFloat16Vector = 3,
 };
 
-std::string
-generate_collection_schema(std::string metric_type, int dim, VectorType vector_type) {
+std::pair<std::string, std::string>
+generate_collection_schema_and_index_meta(std::string metric_type,
+                                          int dim,
+                                          VectorType vector_type) {
+    auto vec_field_id = 100;
+
+    // 1. generate collection schema proto string
     namespace schema = milvus::proto::schema;
     schema::CollectionSchema collection_schema;
     collection_schema.set_name("collection_test");
 
     auto vec_field_schema = collection_schema.add_fields();
     vec_field_schema->set_name("fakevec");
-    vec_field_schema->set_fieldid(100);
+    vec_field_schema->set_fieldid(vec_field_id);
     if (vector_type == VectorType::BinaryVector) {
         vec_field_schema->set_data_type(schema::DataType::BinaryVector);
     } else if (vector_type == VectorType::Float16Vector) {
@@ -332,7 +334,33 @@ generate_collection_schema(std::string metric_type, int dim, VectorType vector_t
     auto marshal = google::protobuf::TextFormat::PrintToString(
         collection_schema, &schema_string);
     assert(marshal);
-    return schema_string;
+
+    // 2. generate index meta proto string
+    milvus::proto::segcore::CollectionIndexMeta collection_index_meta;
+    collection_index_meta.set_maxindexrowcount(1000);
+
+    auto field_index_meta = collection_index_meta.add_index_metas();
+    field_index_meta->set_fieldid(vec_field_id);
+    field_index_meta->set_collectionid(1001);
+    field_index_meta->set_index_name("test-index");
+    dim_param = field_index_meta->add_type_params();
+    dim_param->set_key("dim");
+    dim_param->set_value(std::to_string(dim));
+    auto index_type_param = field_index_meta->add_index_params();
+    index_type_param->set_key("index_type");
+    index_type_param->set_value("IVF_FLAT");
+    metric_type_param = field_index_meta->add_index_params();
+    metric_type_param->set_key("metric_type");
+    metric_type_param->set_value(metric_type);
+    auto nlist_param = field_index_meta->add_index_params();
+    nlist_param->set_key("nlist");
+    nlist_param->set_value("128");
+
+    std::string index_meta_string;
+    marshal = google::protobuf::TextFormat::PrintToString(collection_index_meta,
+                                                          &index_meta_string);
+    assert(marshal);
+    return {schema_string, index_meta_string};
 }
 
 // VecIndexPtr
@@ -396,7 +424,8 @@ TEST(CApiTest, SetIndexMetaTest) {
     auto collection = NewCollection(get_default_schema_config());
 
     milvus::proto::segcore::CollectionIndexMeta indexMeta;
-    indexMeta.ParseFromString(get_default_index_meta());
+    ASSERT_TRUE(google::protobuf::TextFormat::ParseFromString(
+        get_default_index_meta(), &indexMeta));
     char buffer[indexMeta.ByteSizeLong()];
     indexMeta.SerializeToArray(buffer, indexMeta.ByteSizeLong());
     SetIndexMeta(collection, buffer, indexMeta.ByteSizeLong());
@@ -425,9 +454,11 @@ TEST(CApiTest, SegmentTest) {
 }
 
 TEST(CApiTest, CPlan) {
-    std::string schema_string =
-        generate_collection_schema(knowhere::metric::JACCARD, DIM, VectorType::BinaryVector);
-    auto collection = NewCollection(schema_string.c_str());
+    auto [schema_string, index_meta_string] =
+        generate_collection_schema_and_index_meta(
+            knowhere::metric::JACCARD, DIM, VectorType::BinaryVector);
+    auto collection = NewCollection(schema_string);
+    CollectionSetIndexMeta(collection, index_meta_string);
 
     //  const char* dsl_string = R"(
     //  {
@@ -481,9 +512,11 @@ TEST(CApiTest, CPlan) {
 }
 
 TEST(CApiTest, CApiCPlan_float16) {
-    std::string schema_string =
-        generate_collection_schema(knowhere::metric::L2, 16, VectorType::Float16Vector);
-    auto collection = NewCollection(schema_string.c_str());
+    auto [schema_string, index_meta_string] =
+        generate_collection_schema_and_index_meta(
+            knowhere::metric::L2, 16, VectorType::Float16Vector);
+    auto collection = NewCollection(schema_string);
+    CollectionSetIndexMeta(collection, index_meta_string);
 
     milvus::proto::plan::PlanNode plan_node;
     auto vector_anns = plan_node.mutable_vector_anns();
@@ -521,9 +554,11 @@ TEST(CApiTest, CApiCPlan_float16) {
 }
 
 TEST(CApiTest, CApiCPlan_bfloat16) {
-    std::string schema_string =
-        generate_collection_schema(knowhere::metric::L2, 16, VectorType::BFloat16Vector);
-    auto collection = NewCollection(schema_string.c_str());
+    auto [schema_string, index_meta_string] =
+        generate_collection_schema_and_index_meta(
+            knowhere::metric::L2, 16, VectorType::BFloat16Vector);
+    auto collection = NewCollection(schema_string);
+    CollectionSetIndexMeta(collection, index_meta_string);
 
     milvus::proto::plan::PlanNode plan_node;
     auto vector_anns = plan_node.mutable_vector_anns();
@@ -1209,6 +1244,8 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnSealedSegment) {
 
 TEST(CApiTest, SearchTest) {
     auto c_collection = NewCollection(get_default_schema_config());
+    CollectionSetIndexMeta(c_collection, get_default_index_meta());
+
     CSegmentInterface segment;
     auto status = NewSegment(c_collection, Growing, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
@@ -1279,6 +1316,8 @@ TEST(CApiTest, SearchTest) {
 
 TEST(CApiTest, SearchTestWithExpr) {
     auto c_collection = NewCollection(get_default_schema_config());
+    CollectionSetIndexMeta(c_collection, get_default_index_meta());
+
     CSegmentInterface segment;
     auto status = NewSegment(c_collection, Growing, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
@@ -1564,6 +1603,8 @@ CheckSearchResultDuplicate(const std::vector<CSearchResult>& results) {
 
 TEST(CApiTest, ReduceNullResult) {
     auto collection = NewCollection(get_default_schema_config());
+    CollectionSetIndexMeta(collection, get_default_index_meta());
+
     CSegmentInterface segment;
     auto status = NewSegment(collection, Growing, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
@@ -1648,6 +1689,8 @@ TEST(CApiTest, ReduceNullResult) {
 
 TEST(CApiTest, ReduceRemoveDuplicates) {
     auto collection = NewCollection(get_default_schema_config());
+    CollectionSetIndexMeta(collection, get_default_index_meta());
+
     CSegmentInterface segment;
     auto status = NewSegment(collection, Growing, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
@@ -1784,6 +1827,8 @@ testReduceSearchWithExpr(int N,
               << num_queries << ")" << std::endl;
 
     auto collection = NewCollection(get_default_schema_config());
+    CollectionSetIndexMeta(collection, get_default_index_meta());
+
     CSegmentInterface segment;
     auto status = NewSegment(collection, Growing, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
@@ -2041,9 +2086,12 @@ TEST(CApiTest, Indexing_Without_Predicate) {
     // insert data to segment
     constexpr auto TOPK = 5;
 
-    std::string schema_string =
-        generate_collection_schema(knowhere::metric::L2, DIM, VectorType::FloatVector);
-    auto collection = NewCollection(schema_string.c_str());
+    auto [schema_string, index_meta_string] =
+        generate_collection_schema_and_index_meta(
+            knowhere::metric::L2, DIM, VectorType::FloatVector);
+    auto collection = NewCollection(schema_string);
+    CollectionSetIndexMeta(collection, index_meta_string);
+
     auto schema = ((segcore::Collection*)collection)->get_schema();
     CSegmentInterface segment;
     auto status = NewSegment(collection, Growing, -1, &segment);
@@ -2158,7 +2206,7 @@ TEST(CApiTest, Indexing_Without_Predicate) {
         knowhere::Version::GetCurrentVersion().VersionNumber());
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
     // load index for vec field, load raw data for scalar field
-    auto sealed_segment = SealedCreator(schema, dataset);
+    auto sealed_segment = SealedCreator(schema, dataset, index_meta_string);
     sealed_segment->DropFieldData(FieldId(100));
     sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
 
@@ -2192,9 +2240,12 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
     // insert data to segment
     constexpr auto TOPK = 5;
 
-    std::string schema_string =
-        generate_collection_schema(knowhere::metric::L2, DIM, VectorType::FloatVector);
-    auto collection = NewCollection(schema_string.c_str());
+    auto [schema_string, index_meta_string] =
+        generate_collection_schema_and_index_meta(
+            knowhere::metric::L2, DIM, VectorType::FloatVector);
+    auto collection = NewCollection(schema_string);
+    CollectionSetIndexMeta(collection, index_meta_string);
+
     auto schema = ((segcore::Collection*)collection)->get_schema();
     CSegmentInterface segment;
     auto status = NewSegment(collection, Growing, -1, &segment);
@@ -2310,7 +2361,7 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
     // load index for vec field, load raw data for scalar field
-    auto sealed_segment = SealedCreator(schema, dataset);
+    auto sealed_segment = SealedCreator(schema, dataset, index_meta_string);
     sealed_segment->DropFieldData(FieldId(100));
     sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
 
@@ -2344,9 +2395,12 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
     // insert data to segment
     constexpr auto TOPK = 5;
 
-    std::string schema_string =
-        generate_collection_schema(knowhere::metric::L2, DIM, VectorType::FloatVector);
-    auto collection = NewCollection(schema_string.c_str());
+    auto [schema_string, index_meta_string] =
+        generate_collection_schema_and_index_meta(
+            knowhere::metric::L2, DIM, VectorType::FloatVector);
+    auto collection = NewCollection(schema_string);
+    CollectionSetIndexMeta(collection, index_meta_string);
+
     auto schema = ((segcore::Collection*)collection)->get_schema();
     CSegmentInterface segment;
     auto status = NewSegment(collection, Growing, -1, &segment);
@@ -2490,7 +2544,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
     // load index for vec field, load raw data for scalar field
-    auto sealed_segment = SealedCreator(schema, dataset);
+    auto sealed_segment = SealedCreator(schema, dataset, index_meta_string);
     sealed_segment->DropFieldData(FieldId(100));
     sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
 
@@ -2524,9 +2578,12 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
     // insert data to segment
     constexpr auto TOPK = 5;
 
-    std::string schema_string =
-        generate_collection_schema(knowhere::metric::L2, DIM, VectorType::FloatVector);
-    auto collection = NewCollection(schema_string.c_str());
+    auto [schema_string, index_meta_string] =
+        generate_collection_schema_and_index_meta(
+            knowhere::metric::L2, DIM, VectorType::FloatVector);
+    auto collection = NewCollection(schema_string);
+    CollectionSetIndexMeta(collection, index_meta_string);
+
     auto schema = ((segcore::Collection*)collection)->get_schema();
     CSegmentInterface segment;
     auto status = NewSegment(collection, Growing, -1, &segment);
@@ -2672,7 +2729,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
     // load index for vec field, load raw data for scalar field
-    auto sealed_segment = SealedCreator(schema, dataset);
+    auto sealed_segment = SealedCreator(schema, dataset, index_meta_string);
     sealed_segment->DropFieldData(FieldId(100));
     sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
 
@@ -2706,9 +2763,12 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
     // insert data to segment
     constexpr auto TOPK = 5;
 
-    std::string schema_string =
-        generate_collection_schema(knowhere::metric::L2, DIM, VectorType::FloatVector);
-    auto collection = NewCollection(schema_string.c_str());
+    auto [schema_string, index_meta_string] =
+        generate_collection_schema_and_index_meta(
+            knowhere::metric::L2, DIM, VectorType::FloatVector);
+    auto collection = NewCollection(schema_string);
+    CollectionSetIndexMeta(collection, index_meta_string);
+
     auto schema = ((segcore::Collection*)collection)->get_schema();
     CSegmentInterface segment;
     auto status = NewSegment(collection, Growing, -1, &segment);
@@ -2846,7 +2906,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
     // load index for vec field, load raw data for scalar field
-    auto sealed_segment = SealedCreator(schema, dataset);
+    auto sealed_segment = SealedCreator(schema, dataset, index_meta_string);
     sealed_segment->DropFieldData(FieldId(100));
     sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
 
@@ -2880,9 +2940,12 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
     // insert data to segment
     constexpr auto TOPK = 5;
 
-    std::string schema_string =
-        generate_collection_schema(knowhere::metric::L2, DIM, VectorType::FloatVector);
-    auto collection = NewCollection(schema_string.c_str());
+    auto [schema_string, index_meta_string] =
+        generate_collection_schema_and_index_meta(
+            knowhere::metric::L2, DIM, VectorType::FloatVector);
+    auto collection = NewCollection(schema_string);
+    CollectionSetIndexMeta(collection, index_meta_string);
+
     auto schema = ((segcore::Collection*)collection)->get_schema();
     CSegmentInterface segment;
     auto status = NewSegment(collection, Growing, -1, &segment);
@@ -3021,7 +3084,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
     // load index for vec field, load raw data for scalar field
-    auto sealed_segment = SealedCreator(schema, dataset);
+    auto sealed_segment = SealedCreator(schema, dataset, index_meta_string);
     sealed_segment->DropFieldData(FieldId(100));
     sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
 
@@ -3055,9 +3118,12 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
     // insert data to segment
     constexpr auto TOPK = 5;
 
-    std::string schema_string =
-        generate_collection_schema(knowhere::metric::JACCARD, DIM, VectorType::BinaryVector);
-    auto collection = NewCollection(schema_string.c_str());
+    auto [schema_string, index_meta_string] =
+        generate_collection_schema_and_index_meta(
+            knowhere::metric::JACCARD, DIM, VectorType::BinaryVector);
+    auto collection = NewCollection(schema_string);
+    CollectionSetIndexMeta(collection, index_meta_string);
+
     auto schema = ((segcore::Collection*)collection)->get_schema();
     CSegmentInterface segment;
     auto status = NewSegment(collection, Growing, -1, &segment);
@@ -3202,7 +3268,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
     // load index for vec field, load raw data for scalar field
-    auto sealed_segment = SealedCreator(schema, dataset);
+    auto sealed_segment = SealedCreator(schema, dataset, index_meta_string);
     sealed_segment->DropFieldData(FieldId(100));
     sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
 
@@ -3236,9 +3302,12 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
     // insert data to segment
     constexpr auto TOPK = 5;
 
-    std::string schema_string =
-        generate_collection_schema(knowhere::metric::JACCARD, DIM, VectorType::BinaryVector);
-    auto collection = NewCollection(schema_string.c_str());
+    auto [schema_string, index_meta_string] =
+        generate_collection_schema_and_index_meta(
+            knowhere::metric::JACCARD, DIM, VectorType::BinaryVector);
+    auto collection = NewCollection(schema_string);
+    CollectionSetIndexMeta(collection, index_meta_string);
+
     auto schema = ((segcore::Collection*)collection)->get_schema();
     CSegmentInterface segment;
     auto status = NewSegment(collection, Growing, -1, &segment);
@@ -3383,7 +3452,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
     // load index for vec field, load raw data for scalar field
-    auto sealed_segment = SealedCreator(schema, dataset);
+    auto sealed_segment = SealedCreator(schema, dataset, index_meta_string);
     sealed_segment->DropFieldData(FieldId(100));
     sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
 
@@ -3417,9 +3486,12 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
     // insert data to segment
     constexpr auto TOPK = 5;
 
-    std::string schema_string =
-        generate_collection_schema(knowhere::metric::JACCARD, DIM, VectorType::BinaryVector);
-    auto collection = NewCollection(schema_string.c_str());
+    auto [schema_string, index_meta_string] =
+        generate_collection_schema_and_index_meta(
+            knowhere::metric::JACCARD, DIM, VectorType::BinaryVector);
+    auto collection = NewCollection(schema_string);
+    CollectionSetIndexMeta(collection, index_meta_string);
+
     auto schema = ((segcore::Collection*)collection)->get_schema();
     CSegmentInterface segment;
     auto status = NewSegment(collection, Growing, -1, &segment);
@@ -3558,7 +3630,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
     // load index for vec field, load raw data for scalar field
-    auto sealed_segment = SealedCreator(schema, dataset);
+    auto sealed_segment = SealedCreator(schema, dataset, index_meta_string);
     sealed_segment->DropFieldData(FieldId(100));
     sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
 
@@ -3614,9 +3686,12 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
     // insert data to segment
     constexpr auto TOPK = 5;
 
-    std::string schema_string =
-        generate_collection_schema(knowhere::metric::JACCARD, DIM, VectorType::BinaryVector);
-    auto collection = NewCollection(schema_string.c_str());
+    auto [schema_string, index_meta_string] =
+        generate_collection_schema_and_index_meta(
+            knowhere::metric::JACCARD, DIM, VectorType::BinaryVector);
+    auto collection = NewCollection(schema_string);
+    CollectionSetIndexMeta(collection, index_meta_string);
+
     auto schema = ((segcore::Collection*)collection)->get_schema();
     CSegmentInterface segment;
     auto status = NewSegment(collection, Growing, -1, &segment);
@@ -3755,7 +3830,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
     // load index for vec field, load raw data for scalar field
-    auto sealed_segment = SealedCreator(schema, dataset);
+    auto sealed_segment = SealedCreator(schema, dataset, index_meta_string);
     sealed_segment->DropFieldData(FieldId(100));
     sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
 
@@ -3828,9 +3903,12 @@ TEST(CApiTest, SealedSegmentTest) {
 TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     constexpr auto TOPK = 5;
 
-    std::string schema_string =
-        generate_collection_schema(knowhere::metric::L2, DIM, VectorType::FloatVector);
-    auto collection = NewCollection(schema_string.c_str());
+    auto [schema_string, index_meta_string] =
+        generate_collection_schema_and_index_meta(
+            knowhere::metric::L2, DIM, VectorType::FloatVector);
+    auto collection = NewCollection(schema_string);
+    CollectionSetIndexMeta(collection, index_meta_string);
+
     auto schema = ((segcore::Collection*)collection)->get_schema();
     CSegmentInterface segment;
     auto status = NewSegment(collection, Sealed, -1, &segment);
@@ -3953,7 +4031,7 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     ASSERT_EQ(status.error_code, Success);
 
     // load index for vec field, load raw data for scalar field
-    auto sealed_segment = SealedCreator(schema, dataset);
+    auto sealed_segment = SealedCreator(schema, dataset, index_meta_string);
     sealed_segment->DropFieldData(FieldId(100));
     sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
 
@@ -3982,9 +4060,12 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
 
 TEST(CApiTest, SealedSegment_search_without_predicates) {
     constexpr auto TOPK = 5;
-    std::string schema_string =
-        generate_collection_schema(knowhere::metric::L2, DIM, VectorType::FloatVector);
-    auto collection = NewCollection(schema_string.c_str());
+    auto [schema_string, index_meta_string] =
+        generate_collection_schema_and_index_meta(
+            knowhere::metric::L2, DIM, VectorType::FloatVector);
+    auto collection = NewCollection(schema_string);
+    CollectionSetIndexMeta(collection, index_meta_string);
+
     auto schema = ((segcore::Collection*)collection)->get_schema();
     CSegmentInterface segment;
     auto status = NewSegment(collection, Sealed, -1, &segment);
@@ -4062,9 +4143,12 @@ TEST(CApiTest, SealedSegment_search_without_predicates) {
 TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     constexpr auto TOPK = 5;
 
-    std::string schema_string =
-        generate_collection_schema(knowhere::metric::L2, DIM, VectorType::FloatVector);
-    auto collection = NewCollection(schema_string.c_str());
+    auto [schema_string, index_meta_string] =
+        generate_collection_schema_and_index_meta(
+            knowhere::metric::L2, DIM, VectorType::FloatVector);
+    auto collection = NewCollection(schema_string);
+    CollectionSetIndexMeta(collection, index_meta_string);
+
     auto schema = ((segcore::Collection*)collection)->get_schema();
     CSegmentInterface segment;
     auto status = NewSegment(collection, Sealed, -1, &segment);
@@ -4262,7 +4346,29 @@ TEST(CApiTest, GrowingSegment_Load_Field_Data) {
         "vector_float", DataType::VECTOR_FLOAT, DIM, "L2");
     schema->set_primary_field_id(str_fid);
 
-    auto segment = CreateGrowingSegment(schema, empty_index_meta).release();
+    milvus::proto::segcore::CollectionIndexMeta collection_index_meta;
+    collection_index_meta.set_maxindexrowcount(1000);
+    auto field_index_meta = collection_index_meta.add_index_metas();
+    field_index_meta->set_fieldid(vec_fid.get());
+    field_index_meta->set_collectionid(1001);
+    field_index_meta->set_index_name("test-index");
+    auto dim_param = field_index_meta->add_type_params();
+    dim_param->set_key("dim");
+    dim_param->set_value(std::to_string(DIM));
+    auto index_type_param = field_index_meta->add_index_params();
+    index_type_param->set_key("index_type");
+    index_type_param->set_value("IVF_FLAT");
+    auto metric_type_param = field_index_meta->add_index_params();
+    metric_type_param->set_key("metric_type");
+    metric_type_param->set_value("L2");
+    auto nlist_param = field_index_meta->add_index_params();
+    nlist_param->set_key("nlist");
+    nlist_param->set_value("128");
+
+    auto meta_ptr =
+        std::make_shared<CollectionIndexMeta>(collection_index_meta);
+
+    auto segment = CreateGrowingSegment(schema, meta_ptr).release();
 
     int N = ROW_COUNT;
     auto raw_data = DataGen(schema, N);
@@ -4447,6 +4553,7 @@ TEST(CApiTest, RetriveScalarFieldFromSealedSegmentWithIndex) {
 
 TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_WHEN_IP) {
     auto c_collection = NewCollection(get_default_schema_config());
+    CollectionSetIndexMeta(c_collection, get_default_index_meta());
     CSegmentInterface segment;
     auto status = NewSegment(c_collection, Growing, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
@@ -4511,6 +4618,7 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_WHEN_IP) {
 
 TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_IP) {
     auto c_collection = NewCollection(get_default_schema_config());
+    CollectionSetIndexMeta(c_collection, get_default_index_meta());
     CSegmentInterface segment;
     auto status = NewSegment(c_collection, Growing, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
@@ -4575,6 +4683,7 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_IP) {
 
 TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_WHEN_L2) {
     auto c_collection = NewCollection(get_default_schema_config());
+    CollectionSetIndexMeta(c_collection, get_default_index_meta());
     CSegmentInterface segment;
     auto status = NewSegment(c_collection, Growing, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
@@ -4639,6 +4748,7 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_WHEN_L2) {
 
 TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_L2) {
     auto c_collection = NewCollection(get_default_schema_config());
+    CollectionSetIndexMeta(c_collection, get_default_index_meta());
     CSegmentInterface segment;
     auto status = NewSegment(c_collection, Growing, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
@@ -4853,9 +4963,11 @@ TEST(CApiTest, Indexing_Without_Predicate_float16) {
     // insert data to segment
     constexpr auto TOPK = 5;
 
-    std::string schema_string =
-        generate_collection_schema(knowhere::metric::L2, DIM, VectorType::Float16Vector);
-    auto collection = NewCollection(schema_string.c_str());
+    auto [schema_string, index_meta_string] =
+        generate_collection_schema_and_index_meta(
+            knowhere::metric::L2, DIM, VectorType::Float16Vector);
+    auto collection = NewCollection(schema_string);
+    CollectionSetIndexMeta(collection, index_meta_string);
     auto schema = ((segcore::Collection*)collection)->get_schema();
     CSegmentInterface segment;
     auto status = NewSegment(collection, Growing, -1, &segment);
@@ -4881,7 +4993,8 @@ TEST(CApiTest, Indexing_Without_Predicate_float16) {
 
     milvus::proto::plan::PlanNode plan_node;
     auto vector_anns = plan_node.mutable_vector_anns();
-    vector_anns->set_vector_type(milvus::proto::plan::VectorType::Float16Vector);
+    vector_anns->set_vector_type(
+        milvus::proto::plan::VectorType::Float16Vector);
     vector_anns->set_placeholder_tag("$0");
     vector_anns->set_field_id(100);
     auto query_info = vector_anns->mutable_query_info();
@@ -4969,9 +5082,9 @@ TEST(CApiTest, Indexing_Without_Predicate_float16) {
         c_load_index_info,
         knowhere::Version::GetCurrentVersion().VersionNumber());
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
-    
+
     // load index for vec field, load raw data for scalar field
-    auto sealed_segment = SealedCreator(schema, dataset);
+    auto sealed_segment = SealedCreator(schema, dataset, index_meta_string);
     sealed_segment->DropFieldData(FieldId(100));
     sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
     CSearchResult c_search_result_on_bigIndex;
@@ -5004,9 +5117,11 @@ TEST(CApiTest, Indexing_Without_Predicate_bfloat16) {
     // insert data to segment
     constexpr auto TOPK = 5;
 
-    std::string schema_string =
-        generate_collection_schema(knowhere::metric::L2, DIM, VectorType::BFloat16Vector);
-    auto collection = NewCollection(schema_string.c_str());
+    auto [schema_string, index_meta_string] =
+        generate_collection_schema_and_index_meta(
+            knowhere::metric::L2, DIM, VectorType::BFloat16Vector);
+    auto collection = NewCollection(schema_string);
+    CollectionSetIndexMeta(collection, index_meta_string);
     auto schema = ((segcore::Collection*)collection)->get_schema();
     CSegmentInterface segment;
     auto status = NewSegment(collection, Growing, -1, &segment);
@@ -5032,7 +5147,8 @@ TEST(CApiTest, Indexing_Without_Predicate_bfloat16) {
 
     milvus::proto::plan::PlanNode plan_node;
     auto vector_anns = plan_node.mutable_vector_anns();
-    vector_anns->set_vector_type(milvus::proto::plan::VectorType::BFloat16Vector);
+    vector_anns->set_vector_type(
+        milvus::proto::plan::VectorType::BFloat16Vector);
     vector_anns->set_placeholder_tag("$0");
     vector_anns->set_field_id(100);
     auto query_info = vector_anns->mutable_query_info();
@@ -5120,9 +5236,9 @@ TEST(CApiTest, Indexing_Without_Predicate_bfloat16) {
         c_load_index_info,
         knowhere::Version::GetCurrentVersion().VersionNumber());
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
-    
+
     // load index for vec field, load raw data for scalar field
-    auto sealed_segment = SealedCreator(schema, dataset);
+    auto sealed_segment = SealedCreator(schema, dataset, index_meta_string);
     sealed_segment->DropFieldData(FieldId(100));
     sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
     CSearchResult c_search_result_on_bigIndex;
@@ -5153,6 +5269,7 @@ TEST(CApiTest, Indexing_Without_Predicate_bfloat16) {
 
 TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_IP_FLOAT16) {
     auto c_collection = NewCollection(get_float16_schema_config());
+    CollectionSetIndexMeta(c_collection, get_default_index_meta());
     CSegmentInterface segment;
     auto status = NewSegment(c_collection, Growing, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
@@ -5204,7 +5321,7 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_IP_FLOAT16) {
     placeholderGroups.push_back(placeholderGroup);
 
     CSearchResult search_result;
-    auto res = 
+    auto res =
         Search(segment, plan, placeholderGroup, {}, ts_offset, &search_result);
     ASSERT_EQ(res.error_code, Success);
 
@@ -5217,6 +5334,7 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_IP_FLOAT16) {
 
 TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_IP_BFLOAT16) {
     auto c_collection = NewCollection(get_bfloat16_schema_config());
+    CollectionSetIndexMeta(c_collection, get_default_index_meta());
     CSegmentInterface segment;
     auto status = NewSegment(c_collection, Growing, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
@@ -5268,7 +5386,7 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_IP_BFLOAT16) {
     placeholderGroups.push_back(placeholderGroup);
 
     CSearchResult search_result;
-    auto res = 
+    auto res =
         Search(segment, plan, placeholderGroup, {}, ts_offset, &search_result);
     ASSERT_EQ(res.error_code, Success);
 

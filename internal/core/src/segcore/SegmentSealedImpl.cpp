@@ -930,7 +930,7 @@ SegmentSealedImpl::check_search(const query::Plan* plan) const {
     AssertInfo(plan, "Search plan is null");
     AssertInfo(plan->extra_info_opt_.has_value(),
                "Extra info of search plan doesn't have value");
-
+    AssertInfo(col_index_meta_.get(), "col_index_meta_ is nullptr");
     check_metric_type(plan, col_index_meta_);
 
     if (!is_system_field_ready()) {
