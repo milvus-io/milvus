@@ -313,7 +313,7 @@ func (s *BFWriteBufferSuite) TestAutoSync() {
 			syncPolicies: []SyncPolicy{
 				GetFullBufferPolicy(),
 				GetSyncStaleBufferPolicy(paramtable.Get().DataNodeCfg.SyncPeriod.GetAsDuration(time.Second)),
-				GetFlushingSegmentsPolicy(s.metacacheInt64),
+				GetSealedSegmentsPolicy(s.metacacheInt64),
 			},
 		})
 		s.NoError(err)
@@ -394,7 +394,7 @@ func (s *BFWriteBufferSuite) TestAutoSyncWithStorageV2() {
 			syncPolicies: []SyncPolicy{
 				GetFullBufferPolicy(),
 				GetSyncStaleBufferPolicy(paramtable.Get().DataNodeCfg.SyncPeriod.GetAsDuration(time.Second)),
-				GetFlushingSegmentsPolicy(s.metacacheInt64),
+				GetSealedSegmentsPolicy(s.metacacheInt64),
 			},
 		})
 		s.NoError(err)
