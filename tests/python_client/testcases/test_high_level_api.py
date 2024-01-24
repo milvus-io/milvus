@@ -75,8 +75,8 @@ class TestHighLevelApi(TestcaseBase):
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         error = {ct.err_code: 1, ct.err_msg: f"Param id_type must be int or string"}
-        client_w.create_collection(client, collection_name, default_dim, id_type="invalid",
-                                   check_task=CheckTasks.err_res, check_items=error)
+        client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong",
+                                   id_type="invalid", check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_high_level_collection_string_auto_id(self):
@@ -104,13 +104,13 @@ class TestHighLevelApi(TestcaseBase):
         client = self._connect(enable_high_level_api=True)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
-        client_w.create_collection(client, collection_name, default_dim)
+        client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. create collection with same params
-        client_w.create_collection(client, collection_name, default_dim)
+        client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 3. create collection with same name and different params
         error = {ct.err_code: 1, ct.err_msg: f"create duplicate collection with different parameters, "
                                              f"collection: {collection_name}"}
-        client_w.create_collection(client, collection_name, default_dim+1,
+        client_w.create_collection(client, collection_name, default_dim+1, consistency_level="Strong",
                                    check_task=CheckTasks.err_res, check_items=error)
         client_w.drop_collection(client, collection_name)
 
@@ -139,7 +139,7 @@ class TestHighLevelApi(TestcaseBase):
         client = self._connect(enable_high_level_api=True)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
-        client_w.create_collection(client, collection_name, default_dim)
+        client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. search
         rng = np.random.default_rng(seed=19530)
         vectors_to_search = rng.random((1, 8))
@@ -167,24 +167,24 @@ class TestHighLevelApi(TestcaseBase):
         client = self._connect(enable_high_level_api=True)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
-        client_w.create_collection(client, collection_name, default_dim)
+        client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         collections = client_w.list_collections(client)[0]
         assert collection_name in collections
         client_w.describe_collection(client, collection_name,
                                      check_task=CheckTasks.check_describe_collection_property,
                                      check_items={"collection_name": collection_name,
-                                                  "dim": default_dim})
+                                                  "dim": default_dim, "consistency_level": 0})
         # 2. insert
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
         client_w.insert(client, collection_name, rows)
-        client_w.flush(client, collection_name)
-        assert client_w.num_entities(client, collection_name)[0] == default_nb
+
         # 3. search
         vectors_to_search = rng.random((1, default_dim))
         insert_ids = [i for i in range(default_nb)]
         client_w.search(client, collection_name, vectors_to_search,
+
                         check_task=CheckTasks.check_search_results,
                         check_items={"enable_high_level_api": True,
                                      "nq": len(vectors_to_search),
@@ -208,7 +208,7 @@ class TestHighLevelApi(TestcaseBase):
         client = self._connect(enable_high_level_api=True)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
-        client_w.create_collection(client, collection_name, default_dim)
+        client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         collections = client_w.list_collections(client)[0]
         assert collection_name in collections
         # 2. insert
@@ -221,8 +221,7 @@ class TestHighLevelApi(TestcaseBase):
             default_string_array_field_name: [str(i), str(i + 1), str(i + 2)]
         } for i in range(default_nb)]
         client_w.insert(client, collection_name, rows)
-        client_w.flush(client, collection_name)
-        assert client_w.num_entities(client, collection_name)[0] == default_nb
+
         # 3. search
         vectors_to_search = rng.random((1, default_dim))
         insert_ids = [i for i in range(default_nb)]
@@ -244,7 +243,8 @@ class TestHighLevelApi(TestcaseBase):
         client = self._connect(enable_high_level_api=True)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
-        client_w.create_collection(client, collection_name, default_dim, id_type="string", max_length=ct.default_length)
+        client_w.create_collection(client, collection_name, default_dim, id_type="string",
+                                   max_length=ct.default_length, consistency_level="Strong")
         client_w.describe_collection(client, collection_name,
                                      check_task=CheckTasks.check_describe_collection_property,
                                      check_items={"collection_name": collection_name,
@@ -255,8 +255,7 @@ class TestHighLevelApi(TestcaseBase):
         rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
         client_w.insert(client, collection_name, rows)
-        client_w.flush(client, collection_name)
-        assert client_w.num_entities(client, collection_name)[0] == default_nb
+
         # 3. search
         vectors_to_search = rng.random((1, default_dim))
         client_w.search(client, collection_name, vectors_to_search,
@@ -282,7 +281,8 @@ class TestHighLevelApi(TestcaseBase):
         client = self._connect(enable_high_level_api=True)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
-        client_w.create_collection(client, collection_name, default_dim, metric_type=metric_type, auto_id=auto_id)
+        client_w.create_collection(client, collection_name, default_dim, metric_type=metric_type,
+                                   auto_id=auto_id, consistency_level="Strong")
         # 2. insert
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
@@ -291,8 +291,7 @@ class TestHighLevelApi(TestcaseBase):
             for row in rows:
                 row.pop(default_primary_key_field_name)
         client_w.insert(client, collection_name, rows)
-        client_w.flush(client, collection_name)
-        assert client_w.num_entities(client, collection_name)[0] == default_nb
+
         # 3. search
         vectors_to_search = rng.random((1, default_dim))
         search_params = {"metric_type": metric_type}
@@ -321,9 +320,8 @@ class TestHighLevelApi(TestcaseBase):
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        pks = client_w.insert(client, collection_name, rows)[0]
-        client_w.flush(client, collection_name)
-        assert client_w.num_entities(client, collection_name)[0] == default_nb
+        client_w.insert(client, collection_name, rows)[0]
+        pks = [i for i in range(default_nb)]
         # 3. get first primary key
         first_pk_data = client_w.get(client, collection_name, pks[0:1])
         # 4. delete

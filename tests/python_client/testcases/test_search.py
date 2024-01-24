@@ -4464,7 +4464,7 @@ class TestCollectionSearch(TestcaseBase):
         res1 = collection_w.search(vector, default_search_field, search_params, limit)[0]
         res2 = collection_w.search(vector, default_search_field, search_params, limit * 2)[0]
         for i in range(default_nq):
-            assert res1[i].ids == res2[i].ids[limit:]
+            assert res1[i].ids == res2[i].ids[:limit]
 
 
 class TestSearchBase(TestcaseBase):
