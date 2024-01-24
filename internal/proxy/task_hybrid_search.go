@@ -298,7 +298,8 @@ func (t *hybridSearchTask) Requery() error {
 	}
 
 	// TODO:Xige-16 refine the mvcc functionality of hybrid search
-	return doRequery(t.ctx, t.collectionID, t.node, t.schema.CollectionSchema, queryReq, t.result, t.queryChannelsTs)
+	// TODO:silverxia move partitionIDs to hybrid search level
+	return doRequery(t.ctx, t.collectionID, t.node, t.schema.CollectionSchema, queryReq, t.result, t.queryChannelsTs, []int64{})
 }
 
 func rankSearchResultData(ctx context.Context,
