@@ -102,7 +102,7 @@ func convertRange(field *schemapb.FieldSchema, result gjson.Result) (string, err
 			if err != nil {
 				return "", err
 			}
-			dataArray = append(dataArray, value)
+			dataArray = append(dataArray, fmt.Sprintf(`"%s"`, value))
 		}
 		resultStr = joinArray(dataArray)
 	}
