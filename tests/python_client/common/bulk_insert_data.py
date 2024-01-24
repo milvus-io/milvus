@@ -321,12 +321,12 @@ def gen_vectors_in_numpy_file(dir, data_field, float_vector, rows, dim, force=Fa
         if rows > 0:
             if float_vector:
                 vectors = gen_float_vectors(rows, dim)
+                arr = np.array(vectors)
             else:
                 vectors = gen_binary_vectors(rows, (dim // 8))
-        arr = np.array(vectors)
-        # print(f"file_name: {file_name} data type: {arr.dtype}")
-        log.info(f"file_name: {file_name} data type: {arr.dtype} data shape: {arr.shape}")
-        np.save(file, arr)
+                arr = np.array(vectors, dtype=np.dtype("uint8"))
+            log.info(f"file_name: {file_name} data type: {arr.dtype} data shape: {arr.shape}")
+            np.save(file, arr)
     return file_name
 
 
@@ -427,10 +427,13 @@ def gen_data_by_data_field(data_field, rows, start=0, float_vector=True, dim=128
     if rows > 0:
         if "vec" in data_field:
             if "float" in data_field:
-                float_vector = True
-            if "binary" in data_field:
-                float_vector = False
-            data = gen_vectors(float_vector=float_vector, rows=rows, dim=dim)
+                data = gen_vectors(float_vector=True, rows=rows, dim=dim)
+                data = pd.Series([np.array(x, dtype=np.dtype("float32")) for x in data])
+            elif "binary" in data_field:
+                data = gen_vectors(float_vector=False, rows=rows, dim=dim)
+                data = pd.Series([np.array(x, dtype=np.dtype("uint8")) for x in data])
+            else:
+                data = gen_vectors(float_vector=float_vector, rows=rows, dim=dim)
         elif data_field == DataField.float_field:
             data = [np.float32(random.random()) for _ in range(rows)]
         elif data_field == DataField.double_field:
