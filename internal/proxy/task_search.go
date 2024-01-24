@@ -613,7 +613,8 @@ func (t *searchTask) Requery() error {
 				commonpbutil.WithMsgType(commonpb.MsgType_Retrieve),
 				commonpbutil.WithSourceID(paramtable.GetNodeID()),
 			),
-			ReqID: paramtable.GetNodeID(),
+			ReqID:        paramtable.GetNodeID(),
+			PartitionIDs: t.GetPartitionIDs(),
 		},
 		request:      queryReq,
 		plan:         plan,
@@ -621,6 +622,7 @@ func (t *searchTask) Requery() error {
 		lb:           t.node.(*Proxy).lbPolicy,
 		channelsMvcc: channelsMvcc,
 		fastSkip:     true,
+		reQuery:      true,
 	}
 	queryResult, err := t.node.(*Proxy).query(t.ctx, qt)
 	if err != nil {
