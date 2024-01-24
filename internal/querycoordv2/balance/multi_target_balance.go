@@ -187,8 +187,8 @@ func (g *basePlanGenerator) calClusterCost(replicaNodeSegments, globalNodeSegmen
 	replicaCost1, replicaCost2 := replicaRowCountCostModel.cost(), replicaSegmentCountCostModel.cost()
 	globalCost1, globalCost2 := globalRowCountCostModel.cost(), globalSegmentCountCostModel.cost()
 
-	return replicaCost1*float64(g.rowCountCostWeight) + replicaCost2*float64(g.segmentCountCostWeight) +
-		globalCost1*float64(g.globalRowCountCostWeight) + globalCost2*float64(g.globalSegmentCountCostWeight)
+	return replicaCost1*g.rowCountCostWeight + replicaCost2*g.segmentCountCostWeight +
+		globalCost1*g.globalRowCountCostWeight + globalCost2*g.globalSegmentCountCostWeight
 }
 
 func (g *basePlanGenerator) mergePlans(curr []SegmentAssignPlan, inc []SegmentAssignPlan) []SegmentAssignPlan {
