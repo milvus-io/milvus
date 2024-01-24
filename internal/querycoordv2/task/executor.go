@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -108,6 +109,9 @@ func (ex *Executor) Execute(task Task, step int) bool {
 
 		case *ChannelAction:
 			ex.executeDmChannelAction(task.(*ChannelTask), step)
+
+		case *LeaderAction:
+			ex.executeLeaderAction(task.(*LeaderTask), step)
 		}
 	}()
 
@@ -427,5 +431,169 @@ func (ex *Executor) unsubDmChannel(task *ChannelTask, step int) error {
 
 	elapsed := time.Since(startTs)
 	log.Info("unsubscribe channel done", zap.Int64("taskID", task.ID()), zap.Duration("time taken", elapsed))
+	return nil
+}
+
+func (ex *Executor) executeLeaderAction(task *LeaderTask, step int) {
+	switch task.Actions()[step].Type() {
+	case ActionTypeGrow, ActionTypeUpdate:
+		ex.setDistribution(task, step)
+
+	case ActionTypeReduce:
+		ex.removeDistribution(task, step)
+	}
+}
+
+func (ex *Executor) setDistribution(task *LeaderTask, step int) error {
+	action := task.Actions()[step].(*LeaderAction)
+	defer action.rpcReturned.Store(true)
+	ctx := task.Context()
+	log := log.Ctx(ctx).With(
+		zap.Int64("taskID", task.ID()),
+		zap.Int64("collectionID", task.CollectionID()),
+		zap.Int64("replicaID", task.ReplicaID()),
+		zap.Int64("segmentID", task.segmentID),
+		zap.Int64("leader", action.leaderID),
+		zap.Int64("node", action.Node()),
+		zap.String("source", task.Source().String()),
+	)
+
+	var err error
+	defer func() {
+		if err != nil {
+			task.Fail(err)
+		}
+		ex.removeTask(task, step)
+	}()
+
+	schema, err := ex.broker.GetCollectionSchema(ctx, task.CollectionID())
+	if err != nil {
+		log.Warn("failed to get collection info", zap.Error(err))
+		return err
+	}
+	partitions, err := utils.GetPartitions(ex.meta.CollectionManager, task.CollectionID())
+	if err != nil {
+		log.Warn("failed to get partitions of collection", zap.Error(err))
+		return err
+	}
+
+	loadMeta := packLoadMeta(
+		ex.meta.GetLoadType(task.CollectionID()),
+		"",
+		task.CollectionID(),
+		partitions...,
+	)
+	// get channel first, in case of target updated after segment info fetched
+	channel := ex.targetMgr.GetDmChannel(task.CollectionID(), task.shard, meta.NextTargetFirst)
+	if channel == nil {
+		return merr.WrapErrChannelNotAvailable(task.shard)
+	}
+
+	resp, err := ex.broker.GetSegmentInfo(ctx, task.SegmentID())
+	if err != nil || len(resp.GetInfos()) == 0 {
+		log.Warn("failed to get segment info from DataCoord", zap.Error(err))
+		return err
+	}
+	segment := resp.GetInfos()[0]
+
+	indexes, err := ex.broker.GetIndexInfo(ctx, task.CollectionID(), segment.GetID())
+	if err != nil {
+		if !errors.Is(err, merr.ErrIndexNotFound) {
+			log.Warn("failed to get index of segment", zap.Error(err))
+			return err
+		}
+		indexes = nil
+	}
+
+	loadInfo := utils.PackSegmentLoadInfo(resp, channel.GetSeekPosition(), indexes)
+
+	req := &querypb.SyncDistributionRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_LoadSegments),
+			commonpbutil.WithMsgID(task.ID()),
+		),
+		CollectionID: task.collectionID,
+		Channel:      task.Shard(),
+		Schema:       schema,
+		LoadMeta:     loadMeta,
+		ReplicaID:    task.ReplicaID(),
+		Actions: []*querypb.SyncAction{
+			{
+				Type:        querypb.SyncType_Set,
+				PartitionID: loadInfo.GetPartitionID(),
+				SegmentID:   action.SegmentID(),
+				NodeID:      action.Node(),
+				Info:        loadInfo,
+			},
+		},
+	}
+
+	startTs := time.Now()
+	log.Info("Sync Distribution...")
+	status, err := ex.cluster.SyncDistribution(task.Context(), task.leaderID, req)
+	// status, err := ex.cluster.LoadSegments(task.Context(), leaderID, req)
+	err = merr.CheckRPCCall(status, err)
+	if err != nil {
+		log.Warn("failed to load segment", zap.Error(err))
+		return err
+	}
+
+	elapsed := time.Since(startTs)
+	log.Info("sync distribution done", zap.Duration("elapsed", elapsed))
+
+	return nil
+}
+
+func (ex *Executor) removeDistribution(task *LeaderTask, step int) error {
+	action := task.Actions()[step].(*LeaderAction)
+	defer action.rpcReturned.Store(true)
+	ctx := task.Context()
+	log := log.Ctx(ctx).With(
+		zap.Int64("taskID", task.ID()),
+		zap.Int64("collectionID", task.CollectionID()),
+		zap.Int64("replicaID", task.ReplicaID()),
+		zap.Int64("segmentID", task.segmentID),
+		zap.Int64("leader", action.leaderID),
+		zap.Int64("node", action.Node()),
+		zap.String("source", task.Source().String()),
+	)
+
+	var err error
+	defer func() {
+		if err != nil {
+			task.Fail(err)
+		}
+		ex.removeTask(task, step)
+	}()
+
+	req := &querypb.SyncDistributionRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_LoadSegments),
+			commonpbutil.WithMsgID(task.ID()),
+		),
+		CollectionID: task.collectionID,
+		Channel:      task.Shard(),
+		ReplicaID:    task.ReplicaID(),
+		Actions: []*querypb.SyncAction{
+			{
+				Type:      querypb.SyncType_Set,
+				SegmentID: action.SegmentID(),
+			},
+		},
+	}
+
+	startTs := time.Now()
+	log.Info("Sync Distribution...")
+	status, err := ex.cluster.SyncDistribution(task.Context(), task.leaderID, req)
+	// status, err := ex.cluster.LoadSegments(task.Context(), leaderID, req)
+	err = merr.CheckRPCCall(status, err)
+	if err != nil {
+		log.Warn("failed to load segment", zap.Error(err))
+		return err
+	}
+
+	elapsed := time.Since(startTs)
+	log.Info("sync distribution done", zap.Duration("elapsed", elapsed))
+
 	return nil
 }

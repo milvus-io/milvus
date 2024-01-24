@@ -383,3 +383,44 @@ func (task *ChannelTask) Index() string {
 func (task *ChannelTask) String() string {
 	return fmt.Sprintf("%s [channel=%s]", task.baseTask.String(), task.Channel())
 }
+
+type LeaderTask struct {
+	*baseTask
+
+	segmentID typeutil.UniqueID
+	leaderID  int64
+}
+
+func NewLeaderTask(ctx context.Context,
+	timeout time.Duration,
+	source Source,
+	collectionID,
+	replicaID typeutil.UniqueID,
+	leaderID int64,
+	action *LeaderAction,
+) *LeaderTask {
+	segmentID := action.SegmentID()
+	base := newBaseTask(ctx, source, collectionID, replicaID, action.Shard(), fmt.Sprintf("LeaderTask-%s-%d", action.Type().String(), segmentID))
+	base.actions = []Action{action}
+	return &LeaderTask{
+		baseTask:  base,
+		segmentID: segmentID,
+		leaderID:  leaderID,
+	}
+}
+
+func (task *LeaderTask) Shard() string {
+	return task.shard
+}
+
+func (task *LeaderTask) SegmentID() typeutil.UniqueID {
+	return task.segmentID
+}
+
+func (task *LeaderTask) Index() string {
+	return fmt.Sprintf("%s[segment=%d][growing=false]", task.baseTask.Index(), task.segmentID)
+}
+
+func (task *LeaderTask) String() string {
+	return fmt.Sprintf("%s [segmentID=%d][leader=%d]", task.baseTask.String(), task.segmentID, task.leaderID)
+}

@@ -22,7 +22,6 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
@@ -133,23 +132,16 @@ func (c *LeaderChecker) findNeedLoadedSegments(ctx context.Context, replica int6
 			log.Debug("leader checker append a segment to set",
 				zap.Int64("segmentID", s.GetID()),
 				zap.Int64("nodeID", s.Node))
-			action := task.NewSegmentActionWithScope(s.Node, task.ActionTypeGrow, s.GetInsertChannel(), s.GetID(), querypb.DataScope_Historical)
-			t, err := task.NewSegmentTask(
+			action := task.NewLeaderAction(leaderView.ID, s.Node, task.ActionTypeGrow, s.GetInsertChannel(), s.GetID())
+			t := task.NewLeaderTask(
 				ctx,
 				params.Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond),
 				c.ID(),
 				s.GetCollectionID(),
 				replica,
+				leaderView.ID,
 				action,
 			)
-			if err != nil {
-				log.Warn("create segment update task failed",
-					zap.Int64("segmentID", s.GetID()),
-					zap.Int64("node", s.Node),
-					zap.Error(err),
-				)
-				continue
-			}
 			// index task shall have lower or equal priority than balance task
 			t.SetPriority(task.TaskPriorityHigh)
 			t.SetReason("add segment to leader view")
@@ -183,23 +175,16 @@ func (c *LeaderChecker) findNeedRemovedSegments(ctx context.Context, replica int
 		log.Debug("leader checker append a segment to remove",
 			zap.Int64("segmentID", sid),
 			zap.Int64("nodeID", s.NodeID))
-
-		action := task.NewSegmentActionWithScope(s.NodeID, task.ActionTypeReduce, leaderView.Channel, sid, querypb.DataScope_Historical)
-		t, err := task.NewSegmentTask(
+		action := task.NewLeaderAction(leaderView.ID, s.NodeID, task.ActionTypeReduce, leaderView.Channel, sid)
+		t := task.NewLeaderTask(
 			ctx,
 			paramtable.Get().QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond),
 			c.ID(),
 			leaderView.CollectionID,
 			replica,
+			leaderView.ID,
 			action,
 		)
-		if err != nil {
-			log.Warn("create segment reduce task failed",
-				zap.Int64("segmentID", sid),
-				zap.Int64("nodeID", s.NodeID),
-				zap.Error(err))
-			continue
-		}
 
 		t.SetPriority(task.TaskPriorityHigh)
 		t.SetReason("remove segment from leader view")
