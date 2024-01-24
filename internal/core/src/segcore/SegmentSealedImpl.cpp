@@ -931,8 +931,6 @@ SegmentSealedImpl::check_search(const query::Plan* plan) const {
     AssertInfo(plan->extra_info_opt_.has_value(),
                "Extra info of search plan doesn't have value");
 
-    check_metric_type(plan, col_index_meta_);
-
     if (!is_system_field_ready()) {
         PanicInfo(
             FieldNotLoaded,
