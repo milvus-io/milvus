@@ -53,8 +53,11 @@ func NewWatchKVFactory(rootPath string, etcdCfg *paramtable.EtcdConfig) (kv.Watc
 		}
 		return watchKv, err
 	}
-	client, err := etcd.GetEtcdClient(
+	client, err := etcd.CreateEtcdClient(
 		etcdCfg.UseEmbedEtcd.GetAsBool(),
+		etcdCfg.EtcdEnableAuth.GetAsBool(),
+		etcdCfg.EtcdAuthUserName.GetValue(),
+		etcdCfg.EtcdAuthPassword.GetValue(),
 		etcdCfg.EtcdUseSSL.GetAsBool(),
 		etcdCfg.Endpoints.GetAsStrings(),
 		etcdCfg.EtcdTLSCert.GetValue(),
