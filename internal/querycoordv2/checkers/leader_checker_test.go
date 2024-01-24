@@ -119,7 +119,7 @@ func (suite *LeaderCheckerTestSuite) TestSyncLoadedSegments() {
 	suite.Len(tasks[0].Actions(), 1)
 	suite.Equal(tasks[0].Actions()[0].Type(), task.ActionTypeGrow)
 	suite.Equal(tasks[0].Actions()[0].Node(), int64(1))
-	suite.Equal(tasks[0].Actions()[0].(*task.SegmentAction).SegmentID(), int64(1))
+	suite.Equal(tasks[0].Actions()[0].(*task.LeaderAction).SegmentID(), int64(1))
 	suite.Equal(tasks[0].Priority(), task.TaskPriorityHigh)
 }
 
@@ -161,7 +161,7 @@ func (suite *LeaderCheckerTestSuite) TestActivation() {
 	suite.Len(tasks[0].Actions(), 1)
 	suite.Equal(tasks[0].Actions()[0].Type(), task.ActionTypeGrow)
 	suite.Equal(tasks[0].Actions()[0].Node(), int64(1))
-	suite.Equal(tasks[0].Actions()[0].(*task.SegmentAction).SegmentID(), int64(1))
+	suite.Equal(tasks[0].Actions()[0].(*task.LeaderAction).SegmentID(), int64(1))
 	suite.Equal(tasks[0].Priority(), task.TaskPriorityHigh)
 }
 
@@ -236,7 +236,7 @@ func (suite *LeaderCheckerTestSuite) TestIgnoreSyncLoadedSegments() {
 	suite.Len(tasks[0].Actions(), 1)
 	suite.Equal(tasks[0].Actions()[0].Type(), task.ActionTypeGrow)
 	suite.Equal(tasks[0].Actions()[0].Node(), int64(1))
-	suite.Equal(tasks[0].Actions()[0].(*task.SegmentAction).SegmentID(), int64(1))
+	suite.Equal(tasks[0].Actions()[0].(*task.LeaderAction).SegmentID(), int64(1))
 	suite.Equal(tasks[0].Priority(), task.TaskPriorityHigh)
 }
 
@@ -289,7 +289,7 @@ func (suite *LeaderCheckerTestSuite) TestIgnoreBalancedSegment() {
 	suite.Len(tasks[0].Actions(), 1)
 	suite.Equal(tasks[0].Actions()[0].Type(), task.ActionTypeGrow)
 	suite.Equal(tasks[0].Actions()[0].Node(), int64(1))
-	suite.Equal(tasks[0].Actions()[0].(*task.SegmentAction).SegmentID(), int64(1))
+	suite.Equal(tasks[0].Actions()[0].(*task.LeaderAction).SegmentID(), int64(1))
 	suite.Equal(tasks[0].Priority(), task.TaskPriorityHigh)
 }
 
@@ -334,7 +334,7 @@ func (suite *LeaderCheckerTestSuite) TestSyncLoadedSegmentsWithReplicas() {
 	suite.Len(tasks[0].Actions(), 1)
 	suite.Equal(tasks[0].Actions()[0].Type(), task.ActionTypeGrow)
 	suite.Equal(tasks[0].Actions()[0].Node(), int64(1))
-	suite.Equal(tasks[0].Actions()[0].(*task.SegmentAction).SegmentID(), int64(1))
+	suite.Equal(tasks[0].Actions()[0].(*task.LeaderAction).SegmentID(), int64(1))
 	suite.Equal(tasks[0].Priority(), task.TaskPriorityHigh)
 }
 
@@ -368,7 +368,7 @@ func (suite *LeaderCheckerTestSuite) TestSyncRemovedSegments() {
 	suite.Len(tasks[0].Actions(), 1)
 	suite.Equal(tasks[0].Actions()[0].Type(), task.ActionTypeReduce)
 	suite.Equal(tasks[0].Actions()[0].Node(), int64(1))
-	suite.Equal(tasks[0].Actions()[0].(*task.SegmentAction).SegmentID(), int64(3))
+	suite.Equal(tasks[0].Actions()[0].(*task.LeaderAction).SegmentID(), int64(3))
 	suite.Equal(tasks[0].Priority(), task.TaskPriorityHigh)
 }
 
@@ -405,7 +405,7 @@ func (suite *LeaderCheckerTestSuite) TestIgnoreSyncRemovedSegments() {
 	suite.Len(tasks[0].Actions(), 1)
 	suite.Equal(tasks[0].Actions()[0].Type(), task.ActionTypeReduce)
 	suite.Equal(tasks[0].Actions()[0].Node(), int64(2))
-	suite.Equal(tasks[0].Actions()[0].(*task.SegmentAction).SegmentID(), int64(3))
+	suite.Equal(tasks[0].Actions()[0].(*task.LeaderAction).SegmentID(), int64(3))
 	suite.Equal(tasks[0].Priority(), task.TaskPriorityHigh)
 }
 
