@@ -67,9 +67,12 @@ func GetSyncStaleBufferPolicy(staleDuration time.Duration) SyncPolicy {
 	}, "buffer stale")
 }
 
-func GetFlushingSegmentsPolicy(meta metacache.MetaCache) SyncPolicy {
+func GetSealedSegmentsPolicy(meta metacache.MetaCache) SyncPolicy {
 	return wrapSelectSegmentFuncPolicy(func(_ []*segmentBuffer, _ typeutil.Timestamp) []int64 {
-		return meta.GetSegmentIDsBy(metacache.WithSegmentState(commonpb.SegmentState_Flushing))
+		ids := meta.GetSegmentIDsBy(metacache.WithSegmentState(commonpb.SegmentState_Sealed))
+		meta.UpdateSegments(metacache.UpdateState(commonpb.SegmentState_Flushing),
+			metacache.WithSegmentIDs(ids...), metacache.WithSegmentState(commonpb.SegmentState_Sealed))
+		return ids
 	}, "segment flushing")
 }
 
@@ -87,9 +90,6 @@ func GetFlushTsPolicy(flushTimestamp *atomic.Uint64, meta metacache.MetaCache) S
 					seg.Level() == datapb.SegmentLevel_L0
 				return buf.segmentID, inRange && buf.MinTimestamp() < flushTs
 			})
-			// set segment flushing
-			meta.UpdateSegments(metacache.UpdateState(commonpb.SegmentState_Flushing),
-				metacache.WithSegmentIDs(ids...), metacache.WithSegmentState(commonpb.SegmentState_Growing))
 
 			// flush all buffer
 			return ids
