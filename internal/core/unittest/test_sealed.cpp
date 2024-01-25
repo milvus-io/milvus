@@ -1282,9 +1282,6 @@ TEST(Sealed, GetVectorFromChunkCache) {
 }
 
 TEST(Sealed, WarmupChunkCache) {
-    // skip test due to mem leak from AWS::InitSDK
-    return;
-
     auto dim = 16;
     auto topK = 5;
     auto N = ROW_COUNT;
@@ -1298,7 +1295,7 @@ TEST(Sealed, WarmupChunkCache) {
     auto sc = milvus::storage::StorageConfig{};
     milvus::storage::RemoteChunkManagerSingleton::GetInstance().Init(sc);
     auto mcm = std::make_unique<milvus::storage::MinioChunkManager>(sc);
-    // mcm->CreateBucket(sc.bucket_name);
+    mcm->CreateBucket(sc.bucket_name);
     milvus::storage::ChunkCacheSingleton::GetInstance().Init(mmap_dir,
                                                              "willneed");
 
@@ -1339,7 +1336,7 @@ TEST(Sealed, WarmupChunkCache) {
     auto fakevec = dataset.get_col<float>(fakevec_id);
     auto conf = generate_build_conf(index_type, metric_type);
     auto ds = knowhere::GenDataSet(N, dim, fakevec.data());
-    auto indexing = std::make_unique<index::VectorMemIndex<float>>(
+    auto indexing = std::make_unique<index::VectorMemIndex>(
         index_type,
         metric_type,
         knowhere::Version::GetCurrentVersion().VersionNumber());
@@ -1356,7 +1353,6 @@ TEST(Sealed, WarmupChunkCache) {
         FieldBinlogInfo{fakevec_id.get(),
                         N,
                         std::vector<int64_t>{N},
-                        false,
                         std::vector<std::string>{file_name}};
     segment_sealed->AddFieldDataInfoForSealed(LoadFieldDataInfo{
         std::map<int64_t, FieldBinlogInfo>{
@@ -1381,8 +1377,8 @@ TEST(Sealed, WarmupChunkCache) {
         for (size_t j = 0; j < dim; ++j) {
             auto expect = fakevec[id * dim + j];
             auto actual = vector[i * dim + j];
-            AssertInfo(expect == actual,
-                       fmt::format("expect {}, actual {}", expect, actual));
+            AssertInfo(
+                expect == actual, "expect {}, actual {}", expect, actual);
         }
     }
 
