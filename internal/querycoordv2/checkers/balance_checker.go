@@ -30,7 +30,6 @@ import (
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
-	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -54,8 +53,8 @@ func NewBalanceChecker(meta *meta.Meta, balancer balance.Balance, nodeMgr *sessi
 	}
 }
 
-func (b *BalanceChecker) ID() utils.CheckerType {
-	return utils.BalanceChecker
+func (b *BalanceChecker) ID() task.Source {
+	return balanceChecker
 }
 
 func (b *BalanceChecker) Description() string {

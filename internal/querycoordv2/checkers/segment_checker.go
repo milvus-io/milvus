@@ -60,8 +60,8 @@ func NewSegmentChecker(
 	}
 }
 
-func (c *SegmentChecker) ID() utils.CheckerType {
-	return utils.SegmentChecker
+func (c *SegmentChecker) ID() task.Source {
+	return segmentChecker
 }
 
 func (c *SegmentChecker) Description() string {
