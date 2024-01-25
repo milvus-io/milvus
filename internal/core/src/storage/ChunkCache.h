@@ -38,11 +38,6 @@ class ChunkCache {
         LOG_INFO("Init ChunkCache with prefix: {}, read_ahead_policy: {}",
                  path_prefix_,
                  read_ahead_policy);
-#ifdef NODEBUG
-        LOG_INFO("dyh, running in release mode");
-#else
-        LOG_INFO("dyh, running in debug mode");
-#endif
     }
 
     ~ChunkCache() = default;

@@ -2016,7 +2016,7 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 
 	p.ChunkCacheWarmingUp = ParamItem{
 		Key:          "queryNode.cache.warmup",
-		Version:      "2.4",
+		Version:      "2.3.6",
 		DefaultValue: "async",
 		Doc: `options: async, sync, off. 
 Specifies the necessity for warming up the chunk cache. 
