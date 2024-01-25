@@ -901,10 +901,10 @@ SegmentSealedImpl::get_vector(FieldId field_id,
             const auto& column = path_to_column.at(data_path);
             AssertInfo(
                 offset_in_binlog * row_bytes < column->ByteSize(),
-                    "column idx out of range, idx: {}, size: {}, data_path: {}",
-                    offset_in_binlog * row_bytes,
-                    column->ByteSize(),
-                    data_path);
+                "column idx out of range, idx: {}, size: {}, data_path: {}",
+                offset_in_binlog * row_bytes,
+                column->ByteSize(),
+                data_path);
             auto vector = &column->Data()[offset_in_binlog * row_bytes];
             std::memcpy(buf.data() + i * row_bytes, vector, row_bytes);
         }
