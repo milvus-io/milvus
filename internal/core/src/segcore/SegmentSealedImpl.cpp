@@ -136,11 +136,6 @@ SegmentSealedImpl::WarmupChunkCache(const FieldId field_id) {
         dynamic_cast<index::VectorIndex*>(field_indexing->indexing_.get());
     AssertInfo(vec_index, "invalid vector indexing");
 
-    auto has_raw_data = vec_index->HasRawData();
-    if (has_raw_data) {  // No need to warmup.
-        return;
-    }
-
     auto it = field_data_info_.field_infos.find(field_id.get());
     AssertInfo(it != field_data_info_.field_infos.end(),
                "cannot find binlog file for field: {}, seg: {}",
@@ -906,11 +901,10 @@ SegmentSealedImpl::get_vector(FieldId field_id,
             const auto& column = path_to_column.at(data_path);
             AssertInfo(
                 offset_in_binlog * row_bytes < column->ByteSize(),
-                fmt::format(
                     "column idx out of range, idx: {}, size: {}, data_path: {}",
                     offset_in_binlog * row_bytes,
                     column->ByteSize(),
-                    data_path));
+                    data_path);
             auto vector = &column->Data()[offset_in_binlog * row_bytes];
             std::memcpy(buf.data() + i * row_bytes, vector, row_bytes);
         }

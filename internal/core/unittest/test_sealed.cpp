@@ -1285,6 +1285,54 @@ TEST(Sealed, GetVectorFromChunkCache) {
     Assert(!exist);
 }
 
+TEST(Sealed, WarmupChunkCache) {
+    auto dim = 16;
+    auto N = ROW_COUNT;
+    auto metric_type = knowhere::metric::L2;
+    auto schema = std::make_shared<Schema>();
+    auto fakevec_id = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
+    auto counter_id = schema->AddDebugField("counter", DataType::INT64);
+    schema->AddDebugField("int8", DataType::INT8);
+    schema->AddDebugField("int16", DataType::INT16);
+    schema->AddDebugField("float", DataType::FLOAT);
+    schema->set_primary_field_id(counter_id);
+
+    auto dataset = DataGen(schema, N);
+
+    auto fakevec = dataset.get_col<float>(fakevec_id);
+
+    auto indexing = GenVecIndexing(
+        N, dim, fakevec.data(), knowhere::IndexEnum::INDEX_FAISS_IVFFLAT);
+
+    auto segment_sealed = CreateSealedSegment(schema);
+
+    LoadIndexInfo vec_info;
+    vec_info.field_id = fakevec_id.get();
+    vec_info.index = std::move(indexing);
+    vec_info.index_params["metric_type"] = knowhere::metric::L2;
+    segment_sealed->LoadIndex(vec_info);
+
+    auto segment = dynamic_cast<SegmentSealedImpl*>(segment_sealed.get());
+
+    auto has = segment->HasRawData(vec_info.field_id);
+    EXPECT_TRUE(has);
+
+    segment_sealed->WarmupChunkCache(FieldId(vec_info.field_id));
+
+    auto ids_ds = GenRandomIds(N);
+    auto result = segment->get_vector(fakevec_id, ids_ds->GetIds(), N);
+
+    auto vector = result.get()->mutable_vectors()->float_vector().data();
+    EXPECT_TRUE(vector.size() == fakevec.size());
+    for (size_t i = 0; i < N; ++i) {
+        auto id = ids_ds->GetIds()[i];
+        for (size_t j = 0; j < dim; ++j) {
+            EXPECT_TRUE(vector[i * dim + j] == fakevec[id * dim + j]);
+        }
+    }
+}
+
 TEST(Sealed, LoadArrayFieldData) {
     auto dim = 16;
     auto topK = 5;
