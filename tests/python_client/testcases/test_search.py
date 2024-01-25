@@ -1280,7 +1280,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         collection_w.create_index("binary_vector", default_index,
                                   check_task=CheckTasks.err_res,
                                   check_items={"err_code": 1,
-                                               "err_msg": "metric type not found or not supported, "
+                                               "err_msg": f"metric type {metric} not found or not supported, "
                                                           "supported: [HAMMING JACCARD]"})
 
     @pytest.mark.tags(CaseLabel.L1)
