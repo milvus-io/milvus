@@ -41,6 +41,7 @@ type CollectionObserver struct {
 	meta                 *meta.Meta
 	targetMgr            *meta.TargetManager
 	targetObserver       *TargetObserver
+	leaderObserver       *LeaderObserver
 	checkerController    *checkers.CheckerController
 	partitionLoadedCount map[int64]int
 
@@ -52,6 +53,7 @@ func NewCollectionObserver(
 	meta *meta.Meta,
 	targetMgr *meta.TargetManager,
 	targetObserver *TargetObserver,
+	leaderObserver *LeaderObserver,
 	checherController *checkers.CheckerController,
 ) *CollectionObserver {
 	return &CollectionObserver{
@@ -59,6 +61,7 @@ func NewCollectionObserver(
 		meta:                 meta,
 		targetMgr:            targetMgr,
 		targetObserver:       targetObserver,
+		leaderObserver:       leaderObserver,
 		checkerController:    checherController,
 		partitionLoadedCount: make(map[int64]int),
 	}

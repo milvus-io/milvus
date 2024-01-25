@@ -20,11 +20,10 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
-	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 )
 
 type Checker interface {
-	ID() utils.CheckerType
+	ID() task.Source
 	Description() string
 	Check(ctx context.Context) []task.Task
 }

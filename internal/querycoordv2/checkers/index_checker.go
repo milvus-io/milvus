@@ -28,7 +28,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
-	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -57,8 +56,8 @@ func NewIndexChecker(
 	}
 }
 
-func (c *IndexChecker) ID() utils.CheckerType {
-	return utils.IndexChecker
+func (c *IndexChecker) ID() task.Source {
+	return indexChecker
 }
 
 func (c *IndexChecker) Description() string {

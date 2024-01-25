@@ -329,7 +329,14 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 
 		taskType := GetTaskType(task)
 
-		if taskType == TaskTypeMove {
+		if taskType == TaskTypeGrow {
+			leaderSegmentDist := scheduler.distMgr.LeaderViewManager.GetSealedSegmentDist(task.SegmentID())
+			nodeSegmentDist := scheduler.distMgr.SegmentDistManager.GetSegmentDist(task.SegmentID())
+			if lo.Contains(leaderSegmentDist, task.Actions()[0].Node()) &&
+				lo.Contains(nodeSegmentDist, task.Actions()[0].Node()) {
+				return merr.WrapErrServiceInternal("segment loaded, it can be only balanced")
+			}
+		} else if taskType == TaskTypeMove {
 			leaderSegmentDist := scheduler.distMgr.LeaderViewManager.GetSealedSegmentDist(task.SegmentID())
 			nodeSegmentDist := scheduler.distMgr.SegmentDistManager.GetSegmentDist(task.SegmentID())
 			if !lo.Contains(leaderSegmentDist, task.Actions()[1].Node()) ||

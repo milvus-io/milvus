@@ -30,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
-	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -111,11 +110,6 @@ func packLoadSegmentRequest(
 	if action.Type() == ActionTypeUpdate {
 		loadScope = querypb.LoadScope_Index
 	}
-
-	if task.Source() == utils.LeaderChecker {
-		loadScope = querypb.LoadScope_Delta
-	}
-
 	return &querypb.LoadSegmentsRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_LoadSegments),

@@ -55,8 +55,8 @@ func NewChannelChecker(
 	}
 }
 
-func (c *ChannelChecker) ID() utils.CheckerType {
-	return utils.ChannelChecker
+func (c *ChannelChecker) ID() task.Source {
+	return channelChecker
 }
 
 func (c *ChannelChecker) Description() string {
