@@ -47,7 +47,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -1338,7 +1337,10 @@ func (suite *ServiceSuite) TestHybridSearch_Concurrent() {
 			suite.NoError(err)
 			req := &querypb.HybridSearchRequest{
 				Req: &internalpb.HybridSearchRequest{
-					Base:          commonpbutil.NewMsgBase(),
+					Base: &commonpb.MsgBase{
+						MsgID:    rand.Int63(),
+						TargetID: suite.node.session.ServerID,
+					},
 					CollectionID:  suite.collectionID,
 					PartitionIDs:  suite.partitionIDs,
 					MvccTimestamp: typeutil.MaxTimestamp,
