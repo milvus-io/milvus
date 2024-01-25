@@ -260,6 +260,7 @@ queryCoord:
   heartbeatAvailableInterval: 10000 # 10s, Only QueryNodes which fetched heartbeats within the duration are available
   loadTimeoutSeconds: 600
   checkHandoffInterval: 5000
+  growingRowCountWeight: 4.0
   # can specify ip for example
   # ip: 127.0.0.1
   ip: # if not specify address, will use the first unicastable address as local ip
