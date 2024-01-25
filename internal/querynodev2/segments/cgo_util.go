@@ -33,8 +33,8 @@ import (
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/util/cgoconverter"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/cgoconverter"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
