@@ -1168,7 +1168,7 @@ class TestNewIndexBinary(TestcaseBase):
         collection_w.create_index(default_binary_vec_field_name, binary_index_params,
                                   index_name=binary_field_name, check_task=CheckTasks.err_res,
                                   check_items={ct.err_code: 65535,
-                                               ct.err_msg: "metric type not found or not supported, supported: "
+                                               ct.err_msg: "metric type L2 not found or not supported, supported: "
                                                            "[HAMMING JACCARD SUBSTRUCTURE SUPERSTRUCTURE]"})
 
     @pytest.mark.tags(CaseLabel.L2)

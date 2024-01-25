@@ -54,6 +54,7 @@ type hybridSearchTask struct {
 	multipleRecallResults *typeutil.ConcurrentSet[*milvuspb.SearchResults]
 	reScorers             []reScorer
 	queryChannelsTs       map[string]Timestamp
+	rankParams            *rankParams
 }
 
 func (t *hybridSearchTask) PreExecute(ctx context.Context) error {
@@ -391,13 +392,13 @@ func (t *hybridSearchTask) PostExecute(ctx context.Context) error {
 		return err
 	}
 
-	rankParams, err := parseRankParams(t.request.GetRankParams())
+	t.rankParams, err = parseRankParams(t.request.GetRankParams())
 	if err != nil {
 		return err
 	}
 
 	t.result, err = rankSearchResultData(ctx, 1,
-		rankParams,
+		t.rankParams,
 		primaryFieldSchema.GetDataType(),
 		t.multipleRecallResults.Collect())
 	if err != nil {
@@ -436,9 +437,16 @@ func (t *hybridSearchTask) Requery() error {
 		NotReturnAllMeta:      t.request.GetNotReturnAllMeta(),
 		ConsistencyLevel:      t.request.GetConsistencyLevel(),
 		UseDefaultConsistency: t.request.GetUseDefaultConsistency(),
+		QueryParams: []*commonpb.KeyValuePair{
+			{
+				Key:   LimitKey,
+				Value: strconv.FormatInt(t.rankParams.limit, 10),
+			},
+		},
 	}
 
-	return doRequery(t.ctx, t.CollectionID, t.node, t.schema.CollectionSchema, queryReq, t.result, t.queryChannelsTs)
+	// TODO:silverxia move partitionIDs to hybrid search level
+	return doRequery(t.ctx, t.CollectionID, t.node, t.schema.CollectionSchema, queryReq, t.result, t.queryChannelsTs, []int64{})
 }
 
 func rankSearchResultData(ctx context.Context,

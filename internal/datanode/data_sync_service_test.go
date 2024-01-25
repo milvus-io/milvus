@@ -24,7 +24,6 @@ import (
 	"math"
 	"math/rand"
 	"testing"
-	"time"
 
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
@@ -247,21 +246,6 @@ func TestBytesReader(t *testing.T) {
 	err = binary.Read(rawDataReader, common.Endian, &dataInt8)
 	assert.NoError(t, err)
 	assert.Equal(t, int8(100), dataInt8)
-}
-
-func TestGetChannelLatestMsgID(t *testing.T) {
-	delay := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
-	ctx, cancel := context.WithDeadline(context.Background(), delay)
-	defer cancel()
-	node := newIDLEDataNodeMock(ctx, schemapb.DataType_Int64)
-
-	dmlChannelName := "fake-by-dev-rootcoord-dml-channel_12345v0"
-
-	insertStream, _ := node.factory.NewMsgStream(ctx)
-	insertStream.AsProducer([]string{dmlChannelName})
-	id, err := node.getChannelLatestMsgID(ctx, dmlChannelName, 0)
-	assert.NoError(t, err)
-	assert.NotNil(t, id)
 }
 
 func TestGetChannelWithTickler(t *testing.T) {

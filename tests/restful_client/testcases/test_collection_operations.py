@@ -1,5 +1,5 @@
 import datetime
-import random
+import logging
 import time
 from utils.util_log import test_log as logger
 from utils.utils import gen_collection_name
@@ -39,6 +39,7 @@ class TestCreateCollection(TestBase):
             del payload["primaryField"]
         if vector_field is None:
             del payload["vectorField"]
+        logging.info(f"create collection {name} with payload: {payload}")
         rsp = client.collection_create(payload)
         assert rsp['code'] == 200
         rsp = client.collection_list()
@@ -67,6 +68,7 @@ class TestCreateCollection(TestBase):
             rsp = client.collection_create(collection_payload)
             concurrent_rsp.append(rsp)
             logger.info(rsp)
+
         name = gen_collection_name()
         dim = 128
         metric_type = "L2"
@@ -112,6 +114,7 @@ class TestCreateCollection(TestBase):
             rsp = client.collection_create(collection_payload)
             concurrent_rsp.append(rsp)
             logger.info(rsp)
+
         name = gen_collection_name()
         dim = 128
         client = self.collection_client
@@ -141,6 +144,10 @@ class TestCreateCollection(TestBase):
         assert rsp['code'] == 200
         assert rsp['data']['collectionName'] == name
 
+
+@pytest.mark.L1
+class TestCreateCollectionNegative(TestBase):
+
     def test_create_collections_with_invalid_api_key(self):
         """
         target: test create collection with invalid api key(wrong username and password)
@@ -158,7 +165,8 @@ class TestCreateCollection(TestBase):
         rsp = client.collection_create(payload)
         assert rsp['code'] == 1800
 
-    @pytest.mark.parametrize("name", [" ", "test_collection_" * 100, "test collection", "test/collection", "test\collection"])
+    @pytest.mark.parametrize("name",
+                             [" ", "test_collection_" * 100, "test collection", "test/collection", "test\collection"])
     def test_create_collections_with_invalid_collection_name(self, name):
         """
         target: test create collection with invalid collection name
@@ -202,6 +210,9 @@ class TestListCollections(TestBase):
         for name in name_list:
             assert name in all_collections
 
+
+@pytest.mark.L1
+class TestListCollectionsNegative(TestBase):
     def test_list_collections_with_invalid_api_key(self):
         """
         target: test list collection with an invalid api key
@@ -230,7 +241,6 @@ class TestListCollections(TestBase):
 @pytest.mark.L0
 class TestDescribeCollection(TestBase):
 
-
     def test_describe_collections_default(self):
         """
         target: test describe collection with a simple schema
@@ -255,6 +265,9 @@ class TestDescribeCollection(TestBase):
         assert rsp['data']['collectionName'] == name
         assert f"FloatVector({dim})" in str(rsp['data']['fields'])
 
+
+@pytest.mark.L1
+class TestDescribeCollectionNegative(TestBase):
     def test_describe_collections_with_invalid_api_key(self):
         """
         target: test describe collection with invalid api key
@@ -274,7 +287,7 @@ class TestDescribeCollection(TestBase):
         all_collections = rsp['data']
         assert name in all_collections
         # describe collection
-        illegal_client = CollectionClient(self.url, "illegal_api_key", self.protocol)
+        illegal_client = CollectionClient(self.url, "illegal_api_key")
         rsp = illegal_client.collection_describe(name)
         assert rsp['code'] == 1800
 
@@ -304,7 +317,6 @@ class TestDescribeCollection(TestBase):
 
 @pytest.mark.L0
 class TestDropCollection(TestBase):
-
     def test_drop_collections_default(self):
         """
         Drop a collection with a simple schema
@@ -339,6 +351,9 @@ class TestDropCollection(TestBase):
         for name in clo_list:
             assert name not in all_collections
 
+
+@pytest.mark.L1
+class TestDropCollectionNegative(TestBase):
     def test_drop_collections_with_invalid_api_key(self):
         """
         target: test drop collection with invalid api key
@@ -361,7 +376,7 @@ class TestDropCollection(TestBase):
         payload = {
             "collectionName": name,
         }
-        illegal_client = CollectionClient(self.url, "invalid_api_key", self.protocol)
+        illegal_client = CollectionClient(self.url, "invalid_api_key")
         rsp = illegal_client.collection_drop(payload)
         assert rsp['code'] == 1800
         rsp = client.collection_list()

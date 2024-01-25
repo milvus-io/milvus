@@ -14,15 +14,14 @@ def logger_request_response(response, url, tt, headers, data, str_data, str_resp
                 logger.debug(
                     f"method: {method}, url: {url}, cost time: {tt}, header: {headers}, payload: {str_data}, response: {str_response}")
             else:
-                logger.error(
+                logger.debug(
                     f"method: {method}, url: {url}, cost time: {tt}, header: {headers}, payload: {data}, response: {response.text}")
         else:
-            logger.error(
+            logger.debug(
                 f"method: {method}, url: {url}, cost time: {tt}, header: {headers}, payload: {data}, response: {response.text}")
     except Exception as e:
-        logger.error(e)
-        logger.error(
-            f"method: {method}, url: {url}, cost time: {tt}, header: {headers}, payload: {data}, response: {response.text}")
+        logger.debug(
+            f"method: {method}, url: {url}, cost time: {tt}, header: {headers}, payload: {data}, response: {response.text}, error: {e}")
 
 
 class Requests:
@@ -92,11 +91,11 @@ class Requests:
 
 
 class VectorClient(Requests):
-    def __init__(self, url, api_key, protocol):
-        super().__init__(url, api_key)
-        self.protocol = protocol
-        self.url = url
-        self.api_key = api_key
+    def __init__(self, endpoint, token):
+        super().__init__(url=endpoint, api_key=token)
+        self.endpoint = endpoint
+        self.token = token
+        self.api_key = token
         self.db_name = None
         self.headers = self.update_headers()
 
@@ -110,7 +109,7 @@ class VectorClient(Requests):
 
     def vector_search(self, payload, db_name="default", timeout=10):
         time.sleep(1)
-        url = f'{self.protocol}://{self.url}/vector/search'
+        url = f'{self.endpoint}/vector/search'
         if self.db_name is not None:
             payload["dbName"] = self.db_name
         if db_name != "default":
@@ -132,10 +131,10 @@ class VectorClient(Requests):
                     logger.info(f"after {timeout}s, still no data")
 
         return response.json()
-    
+
     def vector_query(self, payload, db_name="default", timeout=10):
         time.sleep(1)
-        url = f'{self.protocol}://{self.url}/vector/query'
+        url = f'{self.endpoint}/vector/query'
         if self.db_name is not None:
             payload["dbName"] = self.db_name
         if db_name != "default":
@@ -160,7 +159,7 @@ class VectorClient(Requests):
 
     def vector_get(self, payload, db_name="default"):
         time.sleep(1)
-        url = f'{self.protocol}://{self.url}/vector/get'
+        url = f'{self.endpoint}/vector/get'
         if self.db_name is not None:
             payload["dbName"] = self.db_name
         if db_name != "default":
@@ -169,31 +168,30 @@ class VectorClient(Requests):
         return response.json()
 
     def vector_delete(self, payload, db_name="default"):
-        url = f'{self.protocol}://{self.url}/vector/delete'
+        url = f'{self.endpoint}/vector/delete'
         if self.db_name is not None:
             payload["dbName"] = self.db_name
         if db_name != "default":
             payload["dbName"] = db_name
         response = self.post(url, headers=self.update_headers(), data=payload)
         return response.json()
-    
+
     def vector_insert(self, payload, db_name="default"):
-        url = f'{self.protocol}://{self.url}/vector/insert'
+        url = f'{self.endpoint}/vector/insert'
         if self.db_name is not None:
             payload["dbName"] = self.db_name
         if db_name != "default":
             payload["dbName"] = db_name
         response = self.post(url, headers=self.update_headers(), data=payload)
         return response.json()
-    
+
 
 class CollectionClient(Requests):
-    
-    def __init__(self, url, api_key, protocol):
-        super().__init__(url, api_key)
-        self.protocol = protocol
-        self.url = url
-        self.api_key = api_key
+
+    def __init__(self, endpoint, token):
+        super().__init__(url=endpoint, api_key=token)
+        self.endpoint = endpoint
+        self.api_key = token
         self.db_name = None
         self.headers = self.update_headers()
 
@@ -206,7 +204,7 @@ class CollectionClient(Requests):
         return headers
 
     def collection_list(self, db_name="default"):
-        url = f'{self.protocol}://{self.url}/vector/collections'
+        url = f'{self.endpoint}/vector/collections'
         params = {}
         if self.db_name is not None:
             params = {
@@ -219,19 +217,19 @@ class CollectionClient(Requests):
         response = self.get(url, headers=self.update_headers(), params=params)
         res = response.json()
         return res
-    
+
     def collection_create(self, payload, db_name="default"):
         time.sleep(1)  # wait for collection created and in case of rate limit
-        url = f'{self.protocol}://{self.url}/vector/collections/create'
+        url = f'{self.endpoint}/vector/collections/create'
         if self.db_name is not None:
             payload["dbName"] = self.db_name
         if db_name != "default":
             payload["dbName"] = db_name
         response = self.post(url, headers=self.update_headers(), data=payload)
         return response.json()
-    
+
     def collection_describe(self, collection_name, db_name="default"):
-        url = f'{self.protocol}://{self.url}/vector/collections/describe'
+        url = f'{self.endpoint}/vector/collections/describe'
         params = {"collectionName": collection_name}
         if self.db_name is not None:
             params = {
@@ -245,10 +243,10 @@ class CollectionClient(Requests):
             }
         response = self.get(url, headers=self.update_headers(), params=params)
         return response.json()
-    
+
     def collection_drop(self, payload, db_name="default"):
         time.sleep(1)  # wait for collection drop and in case of rate limit
-        url = f'{self.protocol}://{self.url}/vector/collections/drop'
+        url = f'{self.endpoint}/vector/collections/drop'
         if self.db_name is not None:
             payload["dbName"] = self.db_name
         if db_name != "default":

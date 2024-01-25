@@ -1528,16 +1528,16 @@ func getDiff(base, remove []int64) []int64 {
 func (s *Server) SaveImportSegment(ctx context.Context, req *datapb.SaveImportSegmentRequest) (*commonpb.Status, error) {
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetCollectionId()),
-	)
-	log.Info("DataCoord putting segment to the right DataNode and saving binlog path",
 		zap.Int64("segmentID", req.GetSegmentId()),
 		zap.Int64("partitionID", req.GetPartitionId()),
 		zap.String("channelName", req.GetChannelName()),
-		zap.Int64("# of rows", req.GetRowNum()))
+		zap.Int64("# of rows", req.GetRowNum()),
+	)
+	log.Info("DataCoord putting segment to the right DataNode and saving binlog path")
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-	resp, err := s.cluster.AddImportSegment(ctx,
+	_, err := s.cluster.AddImportSegment(ctx,
 		&datapb.AddImportSegmentRequest{
 			Base: commonpbutil.NewMsgBase(
 				commonpbutil.WithTimeStamp(req.GetBase().GetTimestamp()),
@@ -1554,8 +1554,15 @@ func (s *Server) SaveImportSegment(ctx context.Context, req *datapb.SaveImportSe
 		return merr.Status(err), nil
 	}
 
-	// Fill in start position message ID.
-	req.SaveBinlogPathReq.StartPositions[0].StartPosition.MsgID = resp.GetChannelPos()
+	// Fill in position message ID by channel checkpoint.
+	channelCP := s.meta.GetChannelCheckpoint(req.GetChannelName())
+	if channelCP == nil {
+		log.Warn("SaveImportSegment get nil channel checkpoint")
+		return merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("nil checkpoint when saving import segment, segmentID=%d, channel=%s",
+			req.GetSegmentId(), req.GetChannelName()))), nil
+	}
+	req.SaveBinlogPathReq.StartPositions[0].StartPosition.MsgID = channelCP.GetMsgID()
+	req.SaveBinlogPathReq.CheckPoints[0].Position.MsgID = channelCP.GetMsgID()
 
 	// Start saving bin log paths.
 	rsp, err := s.SaveBinlogPaths(context.Background(), req.GetSaveBinlogPathReq())

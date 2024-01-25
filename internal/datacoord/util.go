@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -189,7 +190,11 @@ func getIndexType(indexParams []*commonpb.KeyValuePair) string {
 }
 
 func isFlatIndex(indexType string) bool {
-	return indexType == flatIndex || indexType == binFlatIndex
+	return indexType == indexparamcheck.IndexFaissIDMap || indexType == indexparamcheck.IndexFaissBinIDMap
+}
+
+func isOptionalScalarFieldSupported(indexType string) bool {
+	return indexType == indexparamcheck.IndexHNSW
 }
 
 func parseBuildIDFromFilePath(key string) (UniqueID, error) {

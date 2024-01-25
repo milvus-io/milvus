@@ -107,6 +107,11 @@ type EtcdConfig struct {
 	UseEmbedEtcd ParamItem `refreshable:"false"`
 	ConfigPath   ParamItem `refreshable:"false"`
 	DataDir      ParamItem `refreshable:"false"`
+
+	// --- ETCD Authentication ---
+	EtcdEnableAuth   ParamItem `refreshable:"false"`
+	EtcdAuthUserName ParamItem `refreshable:"false"`
+	EtcdAuthPassword ParamItem `refreshable:"false"`
 }
 
 func (p *EtcdConfig) Init(base *BaseTable) {
@@ -267,6 +272,35 @@ We recommend using version 1.2 and above.`,
 		Export:       true,
 	}
 	p.RequestTimeout.Init(base.mgr)
+
+	p.EtcdEnableAuth = ParamItem{
+		Key:          "etcd.auth.enabled",
+		DefaultValue: "false",
+		Version:      "2.3.7",
+		Doc:          "Whether to enable authentication",
+		Export:       true,
+	}
+	p.EtcdEnableAuth.Init(base.mgr)
+
+	if p.UseEmbedEtcd.GetAsBool() && p.EtcdEnableAuth.GetAsBool() {
+		panic("embedded etcd can not enable auth")
+	}
+
+	p.EtcdAuthUserName = ParamItem{
+		Key:     "etcd.auth.userName",
+		Version: "2.3.7",
+		Doc:     "username for etcd authentication",
+		Export:  true,
+	}
+	p.EtcdAuthUserName.Init(base.mgr)
+
+	p.EtcdAuthPassword = ParamItem{
+		Key:     "etcd.auth.password",
+		Version: "2.3.7",
+		Doc:     "password for etcd authentication",
+		Export:  true,
+	}
+	p.EtcdAuthPassword.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

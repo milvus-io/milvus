@@ -293,6 +293,9 @@ func (suite *IndexBuildTaskV2Suite) TestBuildIndex() {
 		StoreVersion:   suite.space.GetCurrentVersion(),
 		IndexStorePath: "file://" + suite.space.Path(),
 		Dim:            4,
+		OptionalScalarFields: []*indexpb.OptionalFieldInfo{
+			{FieldID: 1, FieldName: "pk", FieldType: 5, DataIds: []int64{0}},
+		},
 	}
 
 	task := &indexBuildTaskV2{

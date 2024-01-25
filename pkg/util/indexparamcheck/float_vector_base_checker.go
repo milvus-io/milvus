@@ -13,7 +13,7 @@ type floatVectorBaseChecker struct {
 
 func (c floatVectorBaseChecker) staticCheck(params map[string]string) error {
 	if !CheckStrByValues(params, Metric, METRICS) {
-		return fmt.Errorf("metric type not found or not supported, supported: %v", METRICS)
+		return fmt.Errorf("metric type %s not found or not supported, supported: %v", params[Metric], METRICS)
 	}
 
 	return nil

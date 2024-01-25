@@ -874,7 +874,7 @@ func (node *QueryNode) HybridSearch(ctx context.Context, req *querypb.HybridSear
 		req := &querypb.HybridSearchRequest{
 			Req:             req.Req,
 			DmlChannels:     []string{ch},
-			TotalChannelNum: req.TotalChannelNum,
+			TotalChannelNum: 1,
 		}
 
 		i := i
