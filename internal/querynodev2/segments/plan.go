@@ -126,7 +126,7 @@ func NewSearchRequest(ctx context.Context, collection *Collection, req *querypb.
 		plan:              plan,
 		cPlaceholderGroup: cPlaceholderGroup,
 		msgID:             req.GetReq().GetBase().GetMsgID(),
-		searchFieldID:     fieldID,
+		searchFieldID:     int64(fieldID),
 		mvccTimestamp:     req.GetReq().GetMvccTimestamp(),
 	}
 
