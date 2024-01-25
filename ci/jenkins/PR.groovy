@@ -82,7 +82,7 @@ pipeline {
                 axes {
                     axis {
                         name 'MILVUS_SERVER_TYPE'
-                        values 'standalone', 'distributed', 'standalone-kafka'
+                        values 'standalone', 'distributed', 'standalone-kafka', 'standalone-one-pod'
                     }
                     axis {
                         name 'MILVUS_CLIENT'
@@ -105,6 +105,9 @@ pipeline {
                                         }
                                         if ("${MILVUS_SERVER_TYPE}".contains("kafka")) {
                                             valuesFile = "pr_kafka.yaml"
+                                        }
+                                        if ("${MILVUS_SERVER_TYPE}" == "standalone-one-pod") {
+                                            valuesFile = "nightly-one-pod.yaml"
                                         }
 
                                         if ("${MILVUS_CLIENT}" == "pymilvus") {
