@@ -45,7 +45,11 @@
 
 namespace milvus::storage {
 
-enum class RemoteStorageType { S3 = 0, GOOGLE_CLOUD = 1, ALIYUN_CLOUD = 2 };
+enum class RemoteStorageType {
+    S3 = 0,
+    GOOGLE_CLOUD = 1,
+    ALIYUN_CLOUD = 2,
+};
 
 template <typename... Args>
 
@@ -255,6 +259,15 @@ class AliyunChunkManager : public MinioChunkManager {
     virtual std::string
     GetName() const {
         return "AliyunChunkManager";
+    }
+};
+
+class TencentCloudChunkManager : public MinioChunkManager {
+ public:
+    explicit TencentCloudChunkManager(const StorageConfig& storage_config);
+    virtual std::string
+    GetName() const {
+        return "TencentCloudChunkManager";
     }
 };
 

@@ -56,7 +56,9 @@ set(STORAGE_FILES
     LocalChunkManager.cpp
     DiskFileManagerImpl.cpp
     ThreadPools.cpp
-    ChunkCache.cpp)
+    ChunkCache.cpp
+    TencentCloudCredentialsProvider.cpp
+    TencentCloudSTSClient.cpp)
 
 add_library(milvus_storage SHARED ${STORAGE_FILES})
 

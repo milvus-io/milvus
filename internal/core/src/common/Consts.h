@@ -38,6 +38,7 @@ const char INDEX_BUILD_ID_KEY[] = "indexBuildID";
 
 const char INDEX_ROOT_PATH[] = "index_files";
 const char RAWDATA_ROOT_PATH[] = "raw_datas";
+const char VEC_OPT_FIELDS[] = "opt_fields";
 
 const char DEFAULT_PLANNODE_ID[] = "0";
 const char DEAFULT_QUERY_ID[] = "0";

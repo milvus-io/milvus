@@ -191,6 +191,23 @@ TEST(Util, read_from_fd) {
         milvus::SegcoreError);
 }
 
+TEST(Util, get_common_prefix) {
+    std::string str1 = "";
+    std::string str2 = "milvus";
+    auto common_prefix = milvus::GetCommonPrefix(str1, str2);
+    EXPECT_STREQ(common_prefix.c_str(), "");
+
+    str1 = "milvus";
+    str2 = "milvus is great";
+    common_prefix = milvus::GetCommonPrefix(str1, str2);
+    EXPECT_STREQ(common_prefix.c_str(), "milvus");
+
+    str1 = "milvus";
+    str2 = "";
+    common_prefix = milvus::GetCommonPrefix(str1, str2);
+    EXPECT_STREQ(common_prefix.c_str(), "");
+}
+
 TEST(TranslatePatternMatchToRegexTest, SimplePatternWithPercent) {
     std::string pattern = "abc%";
     std::string result = milvus::TranslatePatternMatchToRegex(pattern);

@@ -151,7 +151,7 @@ func (wb *writeBufferBase) FlushSegments(ctx context.Context, segmentIDs []int64
 	wb.mut.RLock()
 	defer wb.mut.RUnlock()
 
-	return wb.flushSegments(ctx, segmentIDs)
+	return wb.sealSegments(ctx, segmentIDs)
 }
 
 func (wb *writeBufferBase) SetFlushTimestamp(flushTs uint64) {
@@ -250,13 +250,13 @@ func (wb *writeBufferBase) cleanupCompactedSegments() {
 	}
 }
 
-func (wb *writeBufferBase) flushSegments(ctx context.Context, segmentIDs []int64) error {
+func (wb *writeBufferBase) sealSegments(ctx context.Context, segmentIDs []int64) error {
 	// mark segment flushing if segment was growing
-	wb.metaCache.UpdateSegments(metacache.UpdateState(commonpb.SegmentState_Flushing),
+	wb.metaCache.UpdateSegments(metacache.UpdateState(commonpb.SegmentState_Sealed),
 		metacache.WithSegmentIDs(segmentIDs...),
 		metacache.WithSegmentState(commonpb.SegmentState_Growing))
 	// mark segment flushing if segment was importing
-	wb.metaCache.UpdateSegments(metacache.UpdateState(commonpb.SegmentState_Flushing),
+	wb.metaCache.UpdateSegments(metacache.UpdateState(commonpb.SegmentState_Sealed),
 		metacache.WithSegmentIDs(segmentIDs...),
 		metacache.WithImporting())
 	return nil

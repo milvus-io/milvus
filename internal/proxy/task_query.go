@@ -63,6 +63,8 @@ type queryTask struct {
 	lb               LBPolicy
 	channelsMvcc     map[string]Timestamp
 	fastSkip         bool
+
+	reQuery bool
 }
 
 type queryParams struct {
@@ -327,23 +329,26 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		return fmt.Errorf("empty expression should be used with limit")
 	}
 
-	partitionNames := t.request.GetPartitionNames()
-	if t.partitionKeyMode {
-		expr, err := ParseExprFromPlan(t.plan)
-		if err != nil {
-			return err
-		}
-		partitionKeys := ParsePartitionKeys(expr)
-		hashedPartitionNames, err := assignPartitionKeys(ctx, t.request.GetDbName(), t.request.CollectionName, partitionKeys)
-		if err != nil {
-			return err
-		}
+	// convert partition names only when requery is false
+	if !t.reQuery {
+		partitionNames := t.request.GetPartitionNames()
+		if t.partitionKeyMode {
+			expr, err := ParseExprFromPlan(t.plan)
+			if err != nil {
+				return err
+			}
+			partitionKeys := ParsePartitionKeys(expr)
+			hashedPartitionNames, err := assignPartitionKeys(ctx, t.request.GetDbName(), t.request.CollectionName, partitionKeys)
+			if err != nil {
+				return err
+			}
 
-		partitionNames = append(partitionNames, hashedPartitionNames...)
-	}
-	t.RetrieveRequest.PartitionIDs, err = getPartitionIDs(ctx, t.request.GetDbName(), t.request.CollectionName, partitionNames)
-	if err != nil {
-		return err
+			partitionNames = append(partitionNames, hashedPartitionNames...)
+		}
+		t.RetrieveRequest.PartitionIDs, err = getPartitionIDs(ctx, t.request.GetDbName(), t.request.CollectionName, partitionNames)
+		if err != nil {
+			return err
+		}
 	}
 
 	// count with pagination

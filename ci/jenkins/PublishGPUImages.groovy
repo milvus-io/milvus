@@ -14,7 +14,7 @@ pipeline {
 
     options {
         timestamps()
-        timeout(time: 70, unit: 'MINUTES')
+        timeout(time: 140, unit: 'MINUTES')
         // parallelsAlwaysFailFast()
         disableConcurrentBuilds()
     }

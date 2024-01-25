@@ -507,6 +507,7 @@ VectorMemIndex<T>::Build(const Config& config) {
     Config build_config;
     build_config.update(config);
     build_config.erase("insert_files");
+    build_config.erase(VEC_OPT_FIELDS);
 
     auto dataset = GenDataset(total_num_rows, dim, buf.get());
     BuildWithDataset(dataset, build_config);

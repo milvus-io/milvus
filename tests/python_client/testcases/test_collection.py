@@ -1258,13 +1258,15 @@ class TestCollectionOperation(TestcaseBase):
         fields = []
         for k, v in DataType.__members__.items():
             if v and v != DataType.UNKNOWN and v != DataType.STRING \
-            and v != DataType.VARCHAR and v != DataType.FLOAT_VECTOR \
-            and v != DataType.BINARY_VECTOR and v != DataType.ARRAY:
+                    and v != DataType.VARCHAR and v != DataType.FLOAT_VECTOR \
+                    and v != DataType.BINARY_VECTOR and v != DataType.ARRAY \
+                    and v != DataType.FLOAT16_VECTOR and v != DataType.BFLOAT16_VECTOR:
                 field, _ = self.field_schema_wrap.init_field_schema(name=k.lower(), dtype=v)
                 fields.append(field)
         fields.append(cf.gen_float_vec_field())
         schema, _ = self.collection_schema_wrap.init_collection_schema(fields,
                                                                        primary_field=ct.default_int64_field_name)
+        log.info(schema)
         c_name = cf.gen_unique_str(prefix)
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.check_collection_property,
                                              check_items={exp_name: c_name, exp_schema: schema})
@@ -3382,7 +3384,7 @@ class TestLoadPartition(TestcaseBase):
         binary_index["metric_type"] = metric_type
         if binary_index["index_type"] == "BIN_IVF_FLAT" and metric_type in ct.structure_metrics:
             error = {ct.err_code: 65535,
-                     ct.err_msg: "metric type not found or not supported, supported: [HAMMING JACCARD]"}
+                     ct.err_msg: f"metric type {metric_type} not found or not supported, supported: [HAMMING JACCARD]"}
             collection_w.create_index(ct.default_binary_vec_field_name, binary_index,
                                       check_task=CheckTasks.err_res, check_items=error)
             collection_w.create_index(ct.default_binary_vec_field_name, ct.default_bin_flat_index)

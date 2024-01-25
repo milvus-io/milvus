@@ -1,6 +1,5 @@
 import json
 import sys
-
 import pytest
 import time
 from pymilvus import connections, db
@@ -43,18 +42,16 @@ class TestBase(Base):
                 logger.error(e)
 
     @pytest.fixture(scope="function", autouse=True)
-    def init_client(self, protocol, host, port, username, password):
-        self.protocol = protocol
-        self.host = host
-        self.port = port
-        self.url = f"{host}:{port}/v1"
-        self.username = username
-        self.password = password
-        self.api_key = f"{self.username}:{self.password}"
+    def init_client(self, endpoint, token):
+        self.url = f"{endpoint}/v1"
+        self.api_key = f"{token}"
         self.invalid_api_key = "invalid_token"
         self.vector_client = VectorClient(self.url, self.api_key)
         self.collection_client = CollectionClient(self.url, self.api_key)
-        connections.connect(host=self.host, port=self.port)
+        if token is None:
+            self.vector_client.api_key = None
+            self.collection_client.api_key = None
+        connections.connect(uri=endpoint, token=token)
 
     def init_collection(self, collection_name, pk_field="id", metric_type="L2", dim=128, nb=100, batch_size=1000):
         # create collection
@@ -71,10 +68,7 @@ class TestBase(Base):
         self.wait_collection_load_completed(collection_name)
         batch_size = batch_size
         batch = nb // batch_size
-        # in case of nb < batch_size
-        if batch == 0:
-            batch = 1
-            batch_size = nb
+        remainder = nb % batch_size
         data = []
         for i in range(batch):
             nb = batch_size
@@ -84,9 +78,20 @@ class TestBase(Base):
                 "data": data
             }
             body_size = sys.getsizeof(json.dumps(payload))
-            logger.info(f"body size: {body_size / 1024 / 1024} MB")
+            logger.debug(f"body size: {body_size / 1024 / 1024} MB")
             rsp = self.vector_client.vector_insert(payload)
             assert rsp['code'] == 200
+        # insert remainder data
+        if remainder:
+            nb = remainder
+            data = get_data_by_payload(schema_payload, nb)
+            payload = {
+                "collectionName": collection_name,
+                "data": data
+            }
+            rsp = self.vector_client.vector_insert(payload)
+            assert rsp['code'] == 200
+
         return schema_payload, data
 
     def wait_collection_load_completed(self, name):
@@ -100,7 +105,6 @@ class TestBase(Base):
                 time.sleep(5)
 
     def create_database(self, db_name="default"):
-        connections.connect(host=self.host, port=self.port)
         all_db = db.list_database()
         logger.info(f"all database: {all_db}")
         if db_name not in all_db:
