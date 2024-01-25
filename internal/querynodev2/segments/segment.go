@@ -1166,6 +1166,8 @@ func (s *LocalSegment) LoadIndexInfo(ctx context.Context, indexInfo *querypb.Fie
 		log.Info("warming up chunk cache synchronously done")
 	case "async":
 		GetLoadPool().Submit(func() (any, error) {
+			s.ptrLock.RLock()
+			defer s.ptrLock.RUnlock()
 			if s.ptr == nil {
 				return nil, nil
 			}
