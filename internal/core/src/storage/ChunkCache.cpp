@@ -26,7 +26,9 @@ ChunkCache::Read(const std::string& filepath) {
         std::shared_lock lck(mutex_);
         auto it = columns_.find(path);
         if (it != columns_.end()) {
-            AssertInfo(it->second, fmt::format("unexpected null column, file={}", filepath));
+            AssertInfo(
+                it->second,
+                fmt::format("unexpected null column, file={}", filepath));
             return it->second;
         }
     }
@@ -39,7 +41,8 @@ ChunkCache::Read(const std::string& filepath) {
         return it->second;
     }
     auto column = Mmap(path, field_data->GetFieldData());
-    AssertInfo(column, fmt::format("unexpected null column, file={}", filepath));
+    AssertInfo(column,
+               fmt::format("unexpected null column, file={}", filepath));
     columns_.emplace(path, column);
     return column;
 }

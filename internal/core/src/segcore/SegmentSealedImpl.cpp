@@ -151,9 +151,8 @@ SegmentSealedImpl::WarmupChunkCache(const FieldId field_id) {
     auto cc = storage::ChunkCacheSingleton::GetInstance().GetChunkCache();
     for (const auto& data_path : field_info.insert_files) {
         auto column = cc->Read(data_path);
-        LOG_INFO(
-            "warmup end, read file {} from chunk cache successfully",
-            data_path);
+        LOG_INFO("warmup end, read file {} from chunk cache successfully",
+                 data_path);
     }
 }
 
