@@ -261,6 +261,9 @@ class SegmentSealedImpl : public SegmentSealed {
     void
     LoadScalarIndex(const LoadIndexInfo& info);
 
+    void
+    WarmupChunkCache(const FieldId field_id) override;
+
     bool
     generate_binlog_index(const FieldId field_id);
 
