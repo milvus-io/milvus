@@ -89,14 +89,14 @@ func (m *CompactionTriggerManager) Notify(taskID UniqueID, eventType CompactionT
 
 func (m *CompactionTriggerManager) BuildLevelZeroCompactionPlan(view CompactionView) *datapb.CompactionPlan {
 	var segmentBinlogs []*datapb.CompactionSegmentBinlogs
-	levelZeroSegs := lo.Map(view.GetSegmentsView(), func(v *SegmentView, _ int) *datapb.CompactionSegmentBinlogs {
-		s := m.meta.GetSegment(v.ID)
+	levelZeroSegs := lo.Map(view.GetSegmentsView(), func(segView *SegmentView, _ int) *datapb.CompactionSegmentBinlogs {
+		s := m.meta.GetSegment(segView.ID)
 		return &datapb.CompactionSegmentBinlogs{
-			SegmentID:    s.GetID(),
+			SegmentID:    segView.ID,
 			Deltalogs:    s.GetDeltalogs(),
 			Level:        datapb.SegmentLevel_L0,
-			CollectionID: s.GetCollectionID(),
-			PartitionID:  s.GetPartitionID(),
+			CollectionID: view.GetGroupLabel().CollectionID,
+			PartitionID:  view.GetGroupLabel().PartitionID,
 		}
 	})
 	segmentBinlogs = append(segmentBinlogs, levelZeroSegs...)
