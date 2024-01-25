@@ -339,34 +339,12 @@ func (s *CompactionPlanHandlerSuite) TestHandleMergeCompactionResult() {
 		err := handler.handleMergeCompactionResult(plan, compactionResult)
 		s.NoError(err)
 	})
-	s.Run("prepare error", func() {
+
+	s.Run("complete compaction mutation error", func() {
 		s.SetupTest()
 		s.mockMeta.EXPECT().GetHealthySegment(mock.Anything).Return(nil).Once()
-		s.mockMeta.EXPECT().PrepareCompleteCompactionMutation(mock.Anything, mock.Anything).Return(
-			nil, nil, nil, errors.New("mock error")).Once()
-
-		handler := newCompactionPlanHandler(s.mockSessMgr, s.mockCm, s.mockMeta, s.mockAlloc)
-		handler.plans[plan.PlanID] = &compactionTask{dataNodeID: 111, plan: plan}
-		compactionResult := &datapb.CompactionPlanResult{
-			PlanID: plan.PlanID,
-			Segments: []*datapb.CompactionSegment{
-				{SegmentID: 4, NumOfRows: 15},
-			},
-		}
-
-		err := handler.handleMergeCompactionResult(plan, compactionResult)
-		s.Error(err)
-	})
-
-	s.Run("alter error", func() {
-		s.SetupTest()
-		s.mockMeta.EXPECT().GetHealthySegment(mock.Anything).Return(nil).Once()
-		s.mockMeta.EXPECT().PrepareCompleteCompactionMutation(mock.Anything, mock.Anything).Return(
-			[]*SegmentInfo{},
-			NewSegmentInfo(&datapb.SegmentInfo{ID: 100}),
-			&segMetricMutation{}, nil).Once()
-		s.mockMeta.EXPECT().alterMetaStoreAfterCompaction(mock.Anything, mock.Anything).
-			Return(errors.New("mock error")).Once()
+		s.mockMeta.EXPECT().CompleteCompactionMutation(mock.Anything, mock.Anything).Return(
+			nil, nil, errors.New("mock error")).Once()
 
 		handler := newCompactionPlanHandler(s.mockSessMgr, s.mockCm, s.mockMeta, s.mockAlloc)
 		handler.plans[plan.PlanID] = &compactionTask{dataNodeID: 111, plan: plan}
@@ -384,12 +362,9 @@ func (s *CompactionPlanHandlerSuite) TestHandleMergeCompactionResult() {
 	s.Run("sync segment error", func() {
 		s.SetupTest()
 		s.mockMeta.EXPECT().GetHealthySegment(mock.Anything).Return(nil).Once()
-		s.mockMeta.EXPECT().PrepareCompleteCompactionMutation(mock.Anything, mock.Anything).Return(
-			[]*SegmentInfo{},
+		s.mockMeta.EXPECT().CompleteCompactionMutation(mock.Anything, mock.Anything).Return(
 			NewSegmentInfo(&datapb.SegmentInfo{ID: 100}),
 			&segMetricMutation{}, nil).Once()
-		s.mockMeta.EXPECT().alterMetaStoreAfterCompaction(mock.Anything, mock.Anything).
-			Return(nil).Once()
 		s.mockSessMgr.EXPECT().SyncSegments(mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
 
 		handler := newCompactionPlanHandler(s.mockSessMgr, s.mockCm, s.mockMeta, s.mockAlloc)
@@ -425,12 +400,9 @@ func (s *CompactionPlanHandlerSuite) TestCompleteCompaction() {
 		s.mockSessMgr.EXPECT().SyncSegments(mock.Anything, mock.Anything).Return(nil).Once()
 		// mock for handleMergeCompactionResult
 		s.mockMeta.EXPECT().GetHealthySegment(mock.Anything).Return(nil).Once()
-		s.mockMeta.EXPECT().PrepareCompleteCompactionMutation(mock.Anything, mock.Anything).Return(
-			[]*SegmentInfo{},
+		s.mockMeta.EXPECT().CompleteCompactionMutation(mock.Anything, mock.Anything).Return(
 			NewSegmentInfo(&datapb.SegmentInfo{ID: 100}),
 			&segMetricMutation{}, nil).Once()
-		s.mockMeta.EXPECT().alterMetaStoreAfterCompaction(mock.Anything, mock.Anything).
-			Return(nil).Once()
 		s.mockSch.EXPECT().Finish(mock.Anything, mock.Anything).Return()
 
 		dataNodeID := UniqueID(111)

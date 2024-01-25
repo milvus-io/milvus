@@ -79,8 +79,7 @@ type CompactionMeta interface {
 	UpdateSegmentsInfo(operators ...UpdateOperator) error
 	SetSegmentCompacting(segmentID int64, compacting bool)
 
-	PrepareCompleteCompactionMutation(plan *datapb.CompactionPlan, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *SegmentInfo, *segMetricMutation, error)
-	alterMetaStoreAfterCompaction(segmentCompactTo *SegmentInfo, segmentsCompactFrom []*SegmentInfo) error
+	CompleteCompactionMutation(plan *datapb.CompactionPlan, result *datapb.CompactionPlanResult) (*SegmentInfo, *segMetricMutation, error)
 }
 
 var _ CompactionMeta = (*meta)(nil)
@@ -447,19 +446,12 @@ func (c *compactionPlanHandler) handleMergeCompactionResult(plan *datapb.Compact
 		log.Info("meta has already been changed, skip meta change and retry sync segments")
 	} else {
 		// Also prepare metric updates.
-		modSegments, newSegment, metricMutation, err := c.meta.PrepareCompleteCompactionMutation(plan, result)
+		newSegment, metricMutation, err := c.meta.CompleteCompactionMutation(plan, result)
 		if err != nil {
 			return err
 		}
-
-		if err := c.meta.alterMetaStoreAfterCompaction(newSegment, modSegments); err != nil {
-			log.Warn("fail to alter meta store", zap.Error(err))
-			return err
-		}
-
 		// Apply metrics after successful meta update.
 		metricMutation.commit()
-
 		newSegmentInfo = newSegment
 	}
 
