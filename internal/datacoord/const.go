@@ -27,8 +27,5 @@ const (
 )
 
 const (
-	flatIndex    = "FLAT"
-	binFlatIndex = "BIN_FLAT"
-	diskAnnIndex = "DISKANN"
 	invalidIndex = "invalid"
 )

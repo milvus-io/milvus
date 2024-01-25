@@ -227,8 +227,11 @@ func (s *Server) init() error {
 		log.Warn("DataNode found available port during init", zap.Int("port", Params.Port.GetAsInt()))
 	}
 
-	etcdCli, err := etcd.GetEtcdClient(
+	etcdCli, err := etcd.CreateEtcdClient(
 		etcdConfig.UseEmbedEtcd.GetAsBool(),
+		etcdConfig.EtcdEnableAuth.GetAsBool(),
+		etcdConfig.EtcdAuthUserName.GetValue(),
+		etcdConfig.EtcdAuthPassword.GetValue(),
 		etcdConfig.EtcdUseSSL.GetAsBool(),
 		etcdConfig.Endpoints.GetAsStrings(),
 		etcdConfig.EtcdTLSCert.GetValue(),

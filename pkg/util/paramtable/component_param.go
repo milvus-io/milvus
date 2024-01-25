@@ -190,6 +190,7 @@ type commonConfig struct {
 	HighPriorityThreadCoreCoefficient   ParamItem `refreshable:"false"`
 	MiddlePriorityThreadCoreCoefficient ParamItem `refreshable:"false"`
 	LowPriorityThreadCoreCoefficient    ParamItem `refreshable:"false"`
+	EnableNodeFilteringOnPartitionKey   ParamItem `refreshable:"false"`
 	MaxDegree                           ParamItem `refreshable:"true"`
 	SearchListSize                      ParamItem `refreshable:"true"`
 	PQCodeBudgetGBRatio                 ParamItem `refreshable:"true"`
@@ -421,6 +422,13 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Export:       true,
 	}
 	p.IndexSliceSize.Init(base.mgr)
+
+	p.EnableNodeFilteringOnPartitionKey = ParamItem{
+		Key:          "common.nodeFiltering.enableOnPartitionKey",
+		Version:      "2.5.0",
+		DefaultValue: "false",
+	}
+	p.EnableNodeFilteringOnPartitionKey.Init(base.mgr)
 
 	p.MaxDegree = ParamItem{
 		Key:          "common.DiskIndex.MaxDegree",

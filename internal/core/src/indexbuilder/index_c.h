@@ -109,6 +109,13 @@ AppendIndexEngineVersionToBuildInfo(CBuildIndexInfo c_load_index_info,
                                     int32_t c_index_engine_version);
 
 CStatus
+AppendOptionalFieldDataPath(CBuildIndexInfo c_build_index_info,
+                            const int64_t field_id,
+                            const char* field_name,
+                            const int32_t field_type,
+                            const char* c_file_path);
+
+CStatus
 SerializeIndexAndUpLoad(CIndex index, CBinarySet* c_binary_set);
 
 CStatus
