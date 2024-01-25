@@ -353,7 +353,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson() {
 template <typename T>
 VectorPtr
 PhyUnaryRangeFilterExpr::ExecRangeVisitorImpl() {
-    if (is_index_mode_) {
+    if (CanUseIndexInner<T>()) {
         return ExecRangeVisitorImplForIndex<T>();
     } else {
         return ExecRangeVisitorImplForData<T>();
@@ -411,6 +411,11 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForIndex() {
             }
             case proto::plan::PrefixMatch: {
                 UnaryIndexFunc<T, proto::plan::PrefixMatch> func;
+                res = std::move(func(index_ptr, val));
+                break;
+            }
+            case proto::plan::Match: {
+                UnaryIndexFunc<T, proto::plan::Match> func;
                 res = std::move(func(index_ptr, val));
                 break;
             }
@@ -567,6 +572,11 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData() {
                 func(data, size, val, res);
                 break;
             }
+            case proto::plan::Match: {
+                UnaryElementFunc<T, proto::plan::Match> func;
+                func(data, size, val, res);
+                break;
+            }
             default:
                 PanicInfo(
                     OpTypeInvalid,
@@ -593,6 +603,15 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData() {
                num_data_chunk_,
                current_data_chunk_pos_);
     return res_vec;
+}
+
+template <typename T>
+bool
+PhyUnaryRangeFilterExpr::CanUseIndexInner() const {
+    if (!is_index_mode_) {
+        return false;
+    }
+    return CanUseIndex<T>(expr_->op_type_);
 }
 
 }  // namespace exec

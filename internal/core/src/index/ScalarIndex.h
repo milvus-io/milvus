@@ -70,6 +70,16 @@ class ScalarIndex : public IndexBase {
 
     virtual int64_t
     Size() = 0;
+
+    virtual bool
+    SupportRegexQuery() const {
+        return false;
+    }
+
+    virtual const TargetBitmap
+    RegexQuery(const std::string& pattern) {
+        PanicInfo(Unsupported, "regex query is not supported");
+    }
 };
 
 template <typename T>

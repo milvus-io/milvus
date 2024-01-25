@@ -190,3 +190,34 @@ TEST(Util, read_from_fd) {
             tmp_file.fd, read_buf.get(), data_size * max_loop, INT_MAX),
         milvus::SegcoreError);
 }
+
+TEST(TranslatePatternMatchToRegexTest, SimplePatternWithPercent) {
+    std::string pattern = "abc%";
+    std::string result = milvus::TranslatePatternMatchToRegex(pattern);
+    EXPECT_EQ(result, "abc.*");
+}
+
+TEST(TranslatePatternMatchToRegexTest, PatternWithUnderscore) {
+    std::string pattern = "a_c";
+    std::string result = milvus::TranslatePatternMatchToRegex(pattern);
+    EXPECT_EQ(result, "a.c");
+}
+
+TEST(TranslatePatternMatchToRegexTest, PatternWithSpecialCharacters) {
+    std::string pattern = "a\\%b\\_c";
+    std::string result = milvus::TranslatePatternMatchToRegex(pattern);
+    EXPECT_EQ(result, "a\\%b\\_c");
+}
+
+TEST(TranslatePatternMatchToRegexTest,
+     PatternWithMultiplePercentAndUnderscore) {
+    std::string pattern = "%a_b%";
+    std::string result = milvus::TranslatePatternMatchToRegex(pattern);
+    EXPECT_EQ(result, ".*a.b.*");
+}
+
+TEST(TranslatePatternMatchToRegexTest, PatternWithRegexChar) {
+    std::string pattern = "abc*def.ghi+";
+    std::string result = milvus::TranslatePatternMatchToRegex(pattern);
+    EXPECT_EQ(result, "abc\\*def\\.ghi\\+");
+}

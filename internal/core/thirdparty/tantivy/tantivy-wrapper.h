@@ -336,6 +336,12 @@ struct TantivyIndexWrapper {
         return RustArrayWrapper(array);
     }
 
+    RustArrayWrapper
+    regex_query(const std::string& pattern) {
+        auto array = tantivy_regex_query(reader_, pattern.c_str());
+        return RustArrayWrapper(array);
+    }
+
  public:
     inline IndexWriter
     get_writer() {

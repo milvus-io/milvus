@@ -279,6 +279,32 @@ class SegmentExpr : public Expr {
         return result;
     }
 
+    template <typename T>
+    bool
+    CanUseIndex(OpType op) const {
+        typedef std::
+            conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
+                IndexInnerType;
+        if constexpr (!std::is_same_v<IndexInnerType, std::string>) {
+            return true;
+        }
+
+        using Index = index::ScalarIndex<IndexInnerType>;
+        if (op == OpType::Match) {
+            for (size_t i = current_index_chunk_; i < num_index_chunk_; i++) {
+                const Index& index =
+                    segment_->chunk_scalar_index<IndexInnerType>(field_id_, i);
+                // 1, index support regex query, then index handles the query;
+                // 2, index has raw data, then call index.Reverse_Lookup to handle the query;
+                if (!index.SupportRegexQuery() && !index.HasRawData()) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
  protected:
     const segcore::SegmentInternalInterface* segment_;
     const FieldId field_id_;

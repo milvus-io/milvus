@@ -187,6 +187,10 @@ impl IndexReaderWrapper {
 
     pub fn prefix_query_keyword(&self, prefix: &str) -> Vec<u32> {
         let pattern = format!("{}(.|\n)*", prefix);
+        self.regex_query(&pattern)
+    }
+
+    pub fn regex_query(&self, pattern: &str) -> Vec<u32> {
         let q = RegexQuery::from_pattern(&pattern, self.field).unwrap();
         self.search(&q)
     }
