@@ -72,6 +72,7 @@ type Task interface {
 	ID() typeutil.UniqueID
 	CollectionID() typeutil.UniqueID
 	ReplicaID() typeutil.UniqueID
+	Shard() string
 	SetID(id typeutil.UniqueID)
 	Status() Status
 	SetStatus(status Status)
@@ -160,6 +161,10 @@ func (task *baseTask) CollectionID() typeutil.UniqueID {
 
 func (task *baseTask) ReplicaID() typeutil.UniqueID {
 	return task.replicaID
+}
+
+func (task *baseTask) Shard() string {
+	return task.shard
 }
 
 func (task *baseTask) LoadType() querypb.LoadType {
@@ -318,10 +323,6 @@ func NewSegmentTask(ctx context.Context,
 	}, nil
 }
 
-func (task *SegmentTask) Shard() string {
-	return task.shard
-}
-
 func (task *SegmentTask) SegmentID() typeutil.UniqueID {
 	return task.segmentID
 }
@@ -407,10 +408,6 @@ func NewLeaderTask(ctx context.Context,
 		segmentID: segmentID,
 		leaderID:  leaderID,
 	}
-}
-
-func (task *LeaderTask) Shard() string {
-	return task.shard
 }
 
 func (task *LeaderTask) SegmentID() typeutil.UniqueID {
