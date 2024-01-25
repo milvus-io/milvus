@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
@@ -45,11 +46,10 @@ import (
 )
 
 var (
-	errCompactionTypeUndifined = errors.New("compaction type undefined")
-	errIllegalCompactionPlan   = errors.New("compaction plan illegal")
-	errTransferType            = errors.New("transfer intferface to type wrong")
-	errUnknownDataType         = errors.New("unknown shema DataType")
-	errContext                 = errors.New("context done or timeout")
+	errIllegalCompactionPlan = errors.New("compaction plan illegal")
+	errTransferType          = errors.New("transfer intferface to type wrong")
+	errUnknownDataType       = errors.New("unknown shema DataType")
+	errContext               = errors.New("context done or timeout")
 )
 
 type iterator = storage.Iterator
@@ -67,6 +67,7 @@ type compactor interface {
 // make sure compactionTask implements compactor interface
 var _ compactor = (*compactionTask)(nil)
 
+// for MixCompaction only
 type compactionTask struct {
 	downloader
 	uploader
@@ -432,71 +433,49 @@ func (t *compactionTask) merge(
 func (t *compactionTask) compact() (*datapb.CompactionPlanResult, error) {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(t.ctx, fmt.Sprintf("Compact-%d", t.getPlanID()))
 	defer span.End()
-	log := log.Ctx(ctx).With(zap.Int64("planID", t.plan.GetPlanID()))
-	compactStart := time.Now()
+
+	log := log.Ctx(ctx).With(zap.Int64("planID", t.plan.GetPlanID()), zap.Int32("timeout in seconds", t.plan.GetTimeoutInSeconds()))
 	if ok := funcutil.CheckCtxValid(ctx); !ok {
 		log.Warn("compact wrong, task context done or timeout")
 		return nil, errContext
 	}
 
-	durInQueue := t.tr.RecordSpan()
 	ctxTimeout, cancelAll := context.WithTimeout(ctx, time.Duration(t.plan.GetTimeoutInSeconds())*time.Second)
 	defer cancelAll()
 
-	var targetSegID UniqueID
-	var err error
-	switch {
-	case t.plan.GetType() == datapb.CompactionType_UndefinedCompaction:
-		log.Warn("compact wrong, compaction type undefined")
-		return nil, errCompactionTypeUndifined
-
-	case len(t.plan.GetSegmentBinlogs()) < 1:
+	compactStart := time.Now()
+	durInQueue := t.tr.RecordSpan()
+	log.Info("compact start")
+	if len(t.plan.GetSegmentBinlogs()) < 1 {
 		log.Warn("compact wrong, there's no segments in segment binlogs")
 		return nil, errIllegalCompactionPlan
-
-	case t.plan.GetType() == datapb.CompactionType_MergeCompaction || t.plan.GetType() == datapb.CompactionType_MixCompaction:
-		targetSegID, err = t.AllocOne()
-		if err != nil {
-			log.Warn("compact wrong", zap.Error(err))
-			return nil, err
-		}
 	}
 
-	log.Info("compact start", zap.Int32("timeout in seconds", t.plan.GetTimeoutInSeconds()))
-	err = binlog.DecompressCompactionBinlogs(t.plan.GetSegmentBinlogs())
+	targetSegID, err := t.AllocOne()
 	if err != nil {
-		log.Warn("DecompressCompactionBinlogs fails", zap.Error(err))
+		log.Warn("compact wrong, unable to allocate segmentID", zap.Error(err))
 		return nil, err
 	}
-	segIDs := make([]UniqueID, 0, len(t.plan.GetSegmentBinlogs()))
-	for _, s := range t.plan.GetSegmentBinlogs() {
-		segIDs = append(segIDs, s.GetSegmentID())
-	}
 
-	_, partID, meta, err := t.getSegmentMeta(segIDs[0])
-	if err != nil {
-		log.Warn("compact wrong", zap.Error(err))
-		return nil, err
-	}
+	segIDs := lo.Map(t.plan.GetSegmentBinlogs(), func(binlogs *datapb.CompactionSegmentBinlogs, _ int) int64 {
+		return binlogs.GetSegmentID()
+	})
 
 	// Inject to stop flush
-	injectStart := time.Now()
+	// when compaction failed, these segments need to be Unblocked by injectDone in compaction_executor
+	// when compaction succeeded, these segments will be Unblocked by SyncSegments from DataCoord.
 	for _, segID := range segIDs {
 		t.syncMgr.Block(segID)
 	}
-	log.Info("compact inject elapse", zap.Duration("elapse", time.Since(injectStart)))
-	defer func() {
-		if err != nil {
-			for _, segID := range segIDs {
-				t.syncMgr.Unblock(segID)
-			}
-		}
-	}()
+	log.Info("compact finsh injection", zap.Duration("elapse", t.tr.RecordSpan()))
+
+	if err := binlog.DecompressCompactionBinlogs(t.plan.GetSegmentBinlogs()); err != nil {
+		log.Warn("compact wrong, fail to decompress compaction binlogs", zap.Error(err))
+		return nil, err
+	}
 
 	dblobs := make(map[UniqueID][]*Blob)
 	allPath := make([][]string, 0)
-
-	downloadStart := time.Now()
 	for _, s := range t.plan.GetSegmentBinlogs() {
 		// Get the number of field binlog files from non-empty segment
 		var binlogNum int
@@ -532,28 +511,30 @@ func (t *compactionTask) compact() (*datapb.CompactionPlanResult, error) {
 		if len(paths) != 0 {
 			bs, err := t.download(ctxTimeout, paths)
 			if err != nil {
-				log.Warn("compact download deltalogs wrong", zap.Int64("segment", segID), zap.Strings("path", paths), zap.Error(err))
+				log.Warn("compact wrong, fail to download deltalogs",
+					zap.Int64("segment", segID),
+					zap.Strings("path", paths),
+					zap.Error(err))
 				return nil, err
 			}
 			dblobs[segID] = append(dblobs[segID], bs...)
 		}
 	}
-
-	log.Info("compact download deltalogs elapse", zap.Duration("elapse", time.Since(downloadStart)))
-
-	if err != nil {
-		log.Warn("compact IO wrong", zap.Error(err))
-		return nil, err
-	}
+	log.Info("compact download deltalogs done", zap.Duration("elapse", t.tr.RecordSpan()))
 
 	deltaPk2Ts, err := t.mergeDeltalogs(dblobs)
 	if err != nil {
+		log.Warn("compact wrong, fail to merge deltalogs", zap.Error(err))
 		return nil, err
 	}
 
+	segmentBinlog := t.plan.GetSegmentBinlogs()[0]
+	partID := segmentBinlog.GetPartitionID()
+	meta := &etcdpb.CollectionMeta{ID: t.metaCache.Collection(), Schema: t.metaCache.Schema()}
+
 	inPaths, statsPaths, numRows, err := t.merge(ctxTimeout, allPath, targetSegID, partID, meta, deltaPk2Ts)
 	if err != nil {
-		log.Warn("compact wrong", zap.Error(err))
+		log.Warn("compact wrong, fail to merge", zap.Error(err))
 		return nil, err
 	}
 
@@ -571,15 +552,16 @@ func (t *compactionTask) compact() (*datapb.CompactionPlanResult, error) {
 		zap.Int("num of binlog paths", len(inPaths)),
 		zap.Int("num of stats paths", len(statsPaths)),
 		zap.Int("num of delta paths", len(pack.GetDeltalogs())),
+		zap.Duration("elapse", time.Since(compactStart)),
 	)
 
-	log.Info("compact overall elapse", zap.Duration("elapse", time.Since(compactStart)))
 	metrics.DataNodeCompactionLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), t.plan.GetType().String()).Observe(float64(t.tr.ElapseSpan().Milliseconds()))
 	metrics.DataNodeCompactionLatencyInQueue.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(durInQueue.Milliseconds()))
 
 	planResult := &datapb.CompactionPlanResult{
 		State:    commonpb.CompactionState_Completed,
 		PlanID:   t.getPlanID(),
+		Channel:  t.plan.GetChannel(),
 		Segments: []*datapb.CompactionSegment{pack},
 		Type:     t.plan.GetType(),
 	}
@@ -810,22 +792,6 @@ func interface2FieldData(schemaDataType schemapb.DataType, content []interface{}
 	}
 
 	return rst, nil
-}
-
-func (t *compactionTask) getSegmentMeta(segID UniqueID) (UniqueID, UniqueID, *etcdpb.CollectionMeta, error) {
-	collID := t.metaCache.Collection()
-	seg, ok := t.metaCache.GetSegmentByID(segID)
-	if !ok {
-		return -1, -1, nil, merr.WrapErrSegmentNotFound(segID)
-	}
-	partID := seg.PartitionID()
-	sch := t.metaCache.Schema()
-
-	meta := &etcdpb.CollectionMeta{
-		ID:     collID,
-		Schema: sch,
-	}
-	return collID, partID, meta, nil
 }
 
 func (t *compactionTask) getCollection() UniqueID {

@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -51,36 +52,6 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 	defer cancel()
 	cm := storage.NewLocalChunkManager(storage.RootPath(compactTestDir))
 	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
-	t.Run("Test getSegmentMeta", func(t *testing.T) {
-		f := MetaFactory{}
-		meta := f.GetCollectionMeta(1, "testCollection", schemapb.DataType_Int64)
-
-		metaCache := metacache.NewMockMetaCache(t)
-		metaCache.EXPECT().GetSegmentByID(mock.Anything).RunAndReturn(func(id int64, filters ...metacache.SegmentFilter) (*metacache.SegmentInfo, bool) {
-			if id == 100 {
-				return metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 100, CollectionID: 1, PartitionID: 10}, nil), true
-			}
-			return nil, false
-		})
-		metaCache.EXPECT().Collection().Return(1)
-		metaCache.EXPECT().Schema().Return(meta.GetSchema())
-		var err error
-
-		task := &compactionTask{
-			metaCache: metaCache,
-			done:      make(chan struct{}, 1),
-		}
-
-		_, _, _, err = task.getSegmentMeta(200)
-		assert.Error(t, err)
-
-		collID, partID, meta, err := task.getSegmentMeta(100)
-		assert.NoError(t, err)
-		assert.Equal(t, UniqueID(1), collID)
-		assert.Equal(t, UniqueID(10), partID)
-		assert.NotNil(t, meta)
-	})
-
 	t.Run("Test.interface2FieldData", func(t *testing.T) {
 		tests := []struct {
 			isvalid bool
@@ -795,45 +766,49 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 	}}
 	paramtable.Get().Save(Params.CommonCfg.EntityExpirationTTL.Key, "0") // Turn off auto expiration
 
-	t.Run("Test compact invalid", func(t *testing.T) {
-		alloc := allocator.NewMockAllocator(t)
-		alloc.EXPECT().AllocOne().Call.Return(int64(11111), nil)
-		ctx, cancel := context.WithCancel(context.TODO())
-		metaCache := metacache.NewMockMetaCache(t)
-		metaCache.EXPECT().Collection().Return(1)
-		metaCache.EXPECT().GetSegmentByID(mock.Anything).Return(nil, false)
-		syncMgr := syncmgr.NewMockSyncManager(t)
-		syncMgr.EXPECT().Unblock(mock.Anything).Return()
-		emptyTask := &compactionTask{
-			ctx:       ctx,
-			cancel:    cancel,
-			done:      make(chan struct{}, 1),
-			metaCache: metaCache,
-			syncMgr:   syncMgr,
-			tr:        timerecord.NewTimeRecorder("test"),
-		}
-
+	t.Run("Test compact invalid empty segment binlogs", func(t *testing.T) {
 		plan := &datapb.CompactionPlan{
 			PlanID:           999,
-			SegmentBinlogs:   notEmptySegmentBinlogs,
-			StartTime:        0,
+			SegmentBinlogs:   nil,
 			TimeoutInSeconds: 10,
-			Type:             datapb.CompactionType_UndefinedCompaction,
-			Channel:          "",
+			Type:             datapb.CompactionType_MixCompaction,
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		emptyTask := &compactionTask{
+			ctx:    ctx,
+			cancel: cancel,
+			tr:     timerecord.NewTimeRecorder("test"),
+
+			done: make(chan struct{}, 1),
+			plan: plan,
 		}
 
-		emptyTask.plan = plan
 		_, err := emptyTask.compact()
 		assert.Error(t, err)
-
-		plan.Type = datapb.CompactionType_MergeCompaction
-		emptyTask.Allocator = alloc
-		plan.SegmentBinlogs = notEmptySegmentBinlogs
-		_, err = emptyTask.compact()
-		assert.Error(t, err)
+		assert.ErrorIs(t, err, errIllegalCompactionPlan)
 
 		emptyTask.complete()
 		emptyTask.stop()
+	})
+
+	t.Run("Test compact invalid AllocOnce failed", func(t *testing.T) {
+		mockAlloc := allocator.NewMockAllocator(t)
+		mockAlloc.EXPECT().AllocOne().Call.Return(int64(0), errors.New("mock allocone error")).Once()
+		plan := &datapb.CompactionPlan{
+			PlanID:           999,
+			SegmentBinlogs:   notEmptySegmentBinlogs,
+			TimeoutInSeconds: 10,
+			Type:             datapb.CompactionType_MixCompaction,
+		}
+		task := &compactionTask{
+			ctx:       context.Background(),
+			tr:        timerecord.NewTimeRecorder("test"),
+			Allocator: mockAlloc,
+			plan:      plan,
+		}
+
+		_, err := task.compact()
+		assert.Error(t, err)
 	})
 
 	t.Run("Test typeII compact valid", func(t *testing.T) {
