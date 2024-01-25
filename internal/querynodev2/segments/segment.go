@@ -902,10 +902,10 @@ func (s *LocalSegment) LoadIndex(ctx context.Context, indexInfo *querypb.FieldIn
 		return errors.New(errMsg)
 	}
 
-	return s.LoadIndexInfo(ctx, indexInfo, loadIndexInfo)
+	return s.UpdateIndexInfo(ctx, indexInfo, loadIndexInfo)
 }
 
-func (s *LocalSegment) LoadIndexInfo(ctx context.Context, indexInfo *querypb.FieldIndexInfo, info *LoadIndexInfo) error {
+func (s *LocalSegment) UpdateIndexInfo(ctx context.Context, indexInfo *querypb.FieldIndexInfo, info *LoadIndexInfo) error {
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", s.Collection()),
 		zap.Int64("partitionID", s.Partition()),
@@ -920,7 +920,7 @@ func (s *LocalSegment) LoadIndexInfo(ctx context.Context, indexInfo *querypb.Fie
 	}
 
 	var status C.CStatus
-	GetLoadPool().Submit(func() (any, error) {
+	GetDynamicPool().Submit(func() (any, error) {
 		status = C.UpdateSealedSegmentIndex(s.ptr, info.cLoadIndexInfo)
 		return nil, nil
 	}).Await()
