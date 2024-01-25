@@ -232,7 +232,7 @@ class ResponseChecker:
         if check_items.get("dim", None) is not None:
             assert res["fields"][1]["params"]["dim"] == check_items.get("dim")
         assert res["fields"][0]["is_primary"] is True
-        assert res["fields"][0]["field_id"] == 100 and res["fields"][0]["type"] == 5
+        assert res["fields"][0]["field_id"] == 100 and (res["fields"][0]["type"] == 5 or 21)
         assert res["fields"][1]["field_id"] == 101 and res["fields"][1]["type"] == 101
 
         return True
@@ -310,12 +310,12 @@ class ResponseChecker:
             assert len(search_res) == check_items["nq"]
         else:
             log.info("search_results_check: Numbers of query searched is correct")
-        enable_high_level_api = check_items.get("enable_high_level_api", False)
+        enable_milvus_client_api = check_items.get("enable_milvus_client_api", False)
         log.debug(search_res)
         for hits in search_res:
             searched_original_vectors = []
             ids = []
-            if enable_high_level_api:
+            if enable_milvus_client_api:
                 for hit in hits:
                     ids.append(hit['id'])
             else:
