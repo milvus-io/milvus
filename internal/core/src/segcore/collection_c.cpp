@@ -43,11 +43,3 @@ GetCollectionName(CCollection collection) {
     auto col = (milvus::segcore::Collection*)collection;
     return strdup(col->get_collection_name().data());
 }
-
-const char*
-GetMetricTypeByFieldID(CCollection collection, const int64_t field_id) {
-    auto col = (milvus::segcore::Collection*)collection;
-    auto col_meta = col->GetIndexMeta();
-    auto field_meta = col_meta->GetFieldIndexMeta(milvus::FieldId(field_id));
-    return strdup(field_meta.GeMetricType().c_str());
-}

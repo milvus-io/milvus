@@ -33,9 +33,6 @@ DeleteCollection(CCollection collection);
 const char*
 GetCollectionName(CCollection collection);
 
-const char*
-GetMetricTypeByFieldID(CCollection collection, const int64_t field_id);
-
 #ifdef __cplusplus
 }
 #endif
