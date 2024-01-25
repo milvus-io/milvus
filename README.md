@@ -73,7 +73,7 @@ Check the requirements first.
 Linux systems (Ubuntu 20.04 or later recommended):
 ```bash
 go: >= 1.20
-cmake: >= 3.26.6
+cmake: >= 3.26.4
 gcc: 7.5
 ```
 
