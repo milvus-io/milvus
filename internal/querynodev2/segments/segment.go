@@ -30,6 +30,7 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"strings"
 	"sync"
 	"unsafe"
 
@@ -1154,6 +1155,25 @@ func (s *LocalSegment) LoadIndexInfo(ctx context.Context, indexInfo *querypb.Fie
 	})
 	log.Info("updateSegmentIndex done")
 
+	warmingUp := strings.ToLower(paramtable.Get().QueryNodeCfg.ChunkCacheWarmingUp.GetValue())
+	switch warmingUp {
+	case "sync":
+		GetLoadPool().Submit(func() (any, error) {
+			//cFieldID := C.int64_t(indexInfo.GetFieldID())
+			//status = C.DropFieldData(s.ptr, cFieldID)
+			return nil, nil
+		}).Await()
+		log.Info("warming up chunk cache synchronously done")
+	case "async":
+		GetLoadPool().Submit(func() (any, error) {
+			//cFieldID := C.int64_t(indexInfo.GetFieldID())
+			//status = C.DropFieldData(s.ptr, cFieldID)
+			//log.Info("warming up chunk cache asynchronously done")
+			return nil, nil
+		})
+	default:
+		// no warming up
+	}
 	return nil
 }
 

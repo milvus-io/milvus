@@ -117,10 +117,18 @@ SegmentSealedImpl::LoadVecIndex(const LoadIndexInfo& info) {
         metric_type,
         std::move(const_cast<LoadIndexInfo&>(info).index));
     set_bit(index_ready_bitset_, field_id, true);
+}
 
-    if (!info.warmup_chunk_cache) {
+void
+SegmentSealedImpl::WarmupChunkCache(const FieldId field_id) {
+    auto& field_meta = schema_->operator[](field_id);
+    AssertInfo(field_meta.is_vector(), "vector field is not vector type");
+
+    if (!get_bit(index_ready_bitset_, field_id) &&
+        !get_bit(binlog_index_bitset_, field_id)) {
         return;
     }
+
     AssertInfo(vector_indexings_.is_ready(field_id),
                "vector index is not ready");
     auto field_indexing = vector_indexings_.get_field_indexing(field_id);
@@ -141,26 +149,11 @@ SegmentSealedImpl::LoadVecIndex(const LoadIndexInfo& info) {
     auto field_info = it->second;
 
     auto cc = storage::ChunkCacheSingleton::GetInstance().GetChunkCache();
-    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::LOW);
     for (const auto& data_path : field_info.insert_files) {
-        pool.Submit([&, data_path]() {
-            try {
-                auto column = cc->Read(data_path);
-                LOG_INFO(
-                    "warmup end, read file {} from chunk cache successfully",
-                    data_path);
-            } catch (const std::exception& e) {
-                AssertInfo(
-                    false,
-                    fmt::format("warmup failed, read from chunk cache failed, "
-                                "field_name={}, "
-                                "data_type={}, data_path={}, exception={}",
-                                field_meta.get_name().get(),
-                                field_meta.get_data_type(),
-                                data_path,
-                                e.what()));
-            }
-        });
+        auto column = cc->Read(data_path);
+        LOG_INFO(
+            "warmup end, read file {} from chunk cache successfully",
+            data_path);
     }
 }
 

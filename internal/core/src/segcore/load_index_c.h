@@ -41,7 +41,6 @@ AppendFieldInfo(CLoadIndexInfo c_load_index_info,
                 int64_t segment_id,
                 int64_t field_id,
                 enum CDataType field_type,
-                bool warmup_chunk_cache,
                 bool enable_mmap,
                 const char* mmap_dir_path);
 

@@ -35,7 +35,6 @@ struct LoadIndexInfo {
     int64_t segment_id;
     int64_t field_id;
     DataType field_type;
-    bool warmup_chunk_cache;
     bool enable_mmap;
     std::string mmap_dir_path;
     int64_t index_id;

@@ -23,17 +23,23 @@ ChunkCache::Read(const std::string& filepath) {
     auto path = std::filesystem::path(path_prefix_) / filepath;
 
     {
-        std::shared_lock lck(columns_mutex_);
+        std::shared_lock lck(mutex_);
         auto it = columns_.find(path);
         if (it != columns_.end()) {
+            AssertInfo(it->second, fmt::format("unexpected null column, file={}", filepath));
             return it->second;
         }
     }
 
     auto field_data = DownloadAndDecodeRemoteFile(cm_.get(), filepath);
-    auto column = Mmap(path, field_data->GetFieldData());
 
-    std::unique_lock lck(columns_mutex_);
+    std::unique_lock lck(mutex_);
+    auto it = columns_.find(path);
+    if (it != columns_.end()) {
+        return it->second;
+    }
+    auto column = Mmap(path, field_data->GetFieldData());
+    AssertInfo(column, fmt::format("unexpected null column, file={}", filepath));
     columns_.emplace(path, column);
     return column;
 }
@@ -41,6 +47,7 @@ ChunkCache::Read(const std::string& filepath) {
 void
 ChunkCache::Remove(const std::string& filepath) {
     auto path = std::filesystem::path(path_prefix_) / filepath;
+    std::unique_lock lck(mutex_);
     columns_.erase(path);
 }
 
@@ -48,7 +55,7 @@ void
 ChunkCache::Prefetch(const std::string& filepath) {
     auto path = std::filesystem::path(path_prefix_) / filepath;
 
-    std::shared_lock lck(columns_mutex_);
+    std::shared_lock lck(mutex_);
     auto it = columns_.find(path);
     if (it == columns_.end()) {
         return;
@@ -68,8 +75,6 @@ ChunkCache::Prefetch(const std::string& filepath) {
 std::shared_ptr<ColumnBase>
 ChunkCache::Mmap(const std::filesystem::path& path,
                  const FieldDataPtr& field_data) {
-    std::unique_lock lck(mmap_mutex_);
-
     auto dir = path.parent_path();
     std::filesystem::create_directories(dir);
 

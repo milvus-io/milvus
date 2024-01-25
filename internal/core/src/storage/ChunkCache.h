@@ -38,6 +38,11 @@ class ChunkCache {
         LOG_INFO("Init ChunkCache with prefix: {}, read_ahead_policy: {}",
                  path_prefix_,
                  read_ahead_policy);
+#ifdef NODEBUG
+        LOG_INFO("dyh, running in release mode");
+#else
+        LOG_INFO("dyh, running in debug mode");
+#endif
     }
 
     ~ChunkCache() = default;
@@ -57,14 +62,13 @@ class ChunkCache {
     Mmap(const std::filesystem::path& path, const FieldDataPtr& field_data);
 
  private:
-    using ColumnTable = std::map<std::string, std::shared_ptr<ColumnBase>>;
+    using ColumnTable = std::unordered_map<std::string, std::shared_ptr<ColumnBase>>;
 
  private:
-    mutable std::mutex mmap_mutex_;
+    mutable std::shared_mutex mutex_;
     int read_ahead_policy_;
-    std::string path_prefix_;
+    const std::string path_prefix_;
     ChunkManagerPtr cm_;
-    mutable std::shared_mutex columns_mutex_;
     ColumnTable columns_;
 };
 

@@ -1796,8 +1796,8 @@ type queryNodeConfig struct {
 	MmapDirPath      ParamItem `refreshable:"false"`
 
 	// chunk cache
-	ReadAheadPolicy  ParamItem `refreshable:"false"`
-	WarmupChunkCache ParamItem `refreshable:"true"`
+	ReadAheadPolicy     ParamItem `refreshable:"false"`
+	ChunkCacheWarmingUp ParamItem `refreshable:"true"`
 
 	GroupEnabled          ParamItem `refreshable:"true"`
 	MaxReceiveChanSize    ParamItem `refreshable:"false"`
@@ -2006,15 +2006,18 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 	}
 	p.ReadAheadPolicy.Init(base.mgr)
 
-	p.WarmupChunkCache = ParamItem{
+	p.ChunkCacheWarmingUp = ParamItem{
 		Key:          "queryNode.cache.warmup",
 		Version:      "2.4",
-		DefaultValue: "true",
-		Doc: `Specifies whether warming up the chunk cache is required.
-If set to true, original vector data will be asynchronously loaded into the chunk cache during the load process.
-It has the potential to significantly reduce query/search latency for a certain duration after the load, albeit with a concurrent increase in disk usage.`,
+		DefaultValue: "async",
+		Doc: `options: async, sync, off. 
+Specifies the necessity for warming up the chunk cache. 
+1. If set to "sync" or "async," the original vector data will be synchronously/asynchronously loaded into the 
+chunk cache during the load process. This approach has the potential to substantially reduce query/search latency
+for a specific duration post-load, albeit accompanied by a concurrent increase in disk usage;
+2. If set to "off," original vector data will only be loaded into the chunk cache during search/query.`,
 	}
-	p.WarmupChunkCache.Init(base.mgr)
+	p.ChunkCacheWarmingUp.Init(base.mgr)
 
 	p.GroupEnabled = ParamItem{
 		Key:          "queryNode.grouping.enabled",
