@@ -269,7 +269,19 @@ func (ex *Executor) releaseSegment(task *SegmentTask, step int) {
 		// to protect the version, which serves search/query
 		req.NeedTransfer = true
 	} else {
-		req.Shard = task.shard
+		var targetSegment *meta.Segment
+		segments := ex.dist.SegmentDistManager.GetByNode(action.Node())
+		for _, segment := range segments {
+			if segment.GetID() == task.SegmentID() {
+				targetSegment = segment
+				break
+			}
+		}
+		if targetSegment == nil {
+			log.Info("segment to release not found in distribution")
+			return
+		}
+		req.Shard = targetSegment.GetInsertChannel()
 
 		if ex.meta.CollectionManager.Exist(task.CollectionID()) {
 			leader, ok := getShardLeader(ex.meta.ReplicaManager, ex.dist, task.CollectionID(), action.Node(), req.GetShard())
