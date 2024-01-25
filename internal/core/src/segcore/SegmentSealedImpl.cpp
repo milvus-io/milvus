@@ -143,16 +143,14 @@ SegmentSealedImpl::WarmupChunkCache(const FieldId field_id) {
 
     auto it = field_data_info_.field_infos.find(field_id.get());
     AssertInfo(it != field_data_info_.field_infos.end(),
-               fmt::format("cannot find binlog file for field: {}, seg: {}",
-                           field_id.get(),
-                           id_));
+               "cannot find binlog file for field: {}, seg: {}",
+               field_id.get(),
+               id_);
     auto field_info = it->second;
 
     auto cc = storage::ChunkCacheSingleton::GetInstance().GetChunkCache();
     for (const auto& data_path : field_info.insert_files) {
         auto column = cc->Read(data_path);
-        LOG_INFO("warmup end, read file {} from chunk cache successfully",
-                 data_path);
     }
 }
 

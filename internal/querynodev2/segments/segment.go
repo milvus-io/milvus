@@ -1160,7 +1160,7 @@ func (s *LocalSegment) LoadIndexInfo(ctx context.Context, indexInfo *querypb.Fie
 	case "sync":
 		GetLoadPool().Submit(func() (any, error) {
 			cFieldID := C.int64_t(indexInfo.GetFieldID())
-			status = C.DropFieldData(s.ptr, cFieldID)
+			status = C.WarmupChunkCache(s.ptr, cFieldID)
 			return nil, nil
 		}).Await()
 		log.Info("warming up chunk cache synchronously done")
@@ -1170,7 +1170,7 @@ func (s *LocalSegment) LoadIndexInfo(ctx context.Context, indexInfo *querypb.Fie
 				return nil, nil
 			}
 			cFieldID := C.int64_t(indexInfo.GetFieldID())
-			status = C.DropFieldData(s.ptr, cFieldID)
+			status = C.WarmupChunkCache(s.ptr, cFieldID)
 			log.Info("warming up chunk cache asynchronously done")
 			return nil, nil
 		})
