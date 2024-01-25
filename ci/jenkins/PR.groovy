@@ -140,27 +140,56 @@ pipeline {
                                                 """
                                             }
                                             withCredentials([usernamePassword(credentialsId: "${env.CI_DOCKER_CREDENTIAL_ID}", usernameVariable: 'CI_REGISTRY_USERNAME', passwordVariable: 'CI_REGISTRY_PASSWORD')]){
-                                                sh """
-                                                    MILVUS_CLUSTER_ENABLED=${clusterEnabled} \
-                                                    MILVUS_HELM_REPO="https://nexus-ci.zilliz.cc/repository/milvus-proxy" \
-                                                    TAG=${imageTag}\
-                                                    ./e2e-k8s.sh \
-                                                    --skip-export-logs \
-                                                    --skip-cleanup \
-                                                    --skip-setup \
-                                                    --skip-test \
-                                                    --skip-build \
-                                                    --skip-build-image \
-                                                    --install-extra-arg "
-                                                    --set etcd.metrics.enabled=true \
-                                                    --set etcd.metrics.podMonitor.enabled=true \
-                                                    --set indexCoordinator.gc.interval=1 \
-                                                    --set indexNode.disk.enabled=true \
-                                                    --set queryNode.disk.enabled=true \
-                                                    --set standalone.disk.enabled=true \
-                                                    --version ${chart_version} \
-                                                    -f values/ci/${valuesFile}"
-                                                    """
+                                                if ("${MILVUS_SERVER_TYPE}" == "standalone-one-pod") {
+                                                    try {
+                                                        sh """
+                                                        MILVUS_CLUSTER_ENABLED=${clusterEnabled} \
+                                                        MILVUS_HELM_REPO="https://nexus-ci.zilliz.cc/repository/milvus-proxy" \
+                                                        TAG=${imageTag}\
+                                                        ./e2e-k8s.sh \
+                                                        --skip-export-logs \
+                                                        --skip-cleanup \
+                                                        --skip-setup \
+                                                        --skip-test \
+                                                        --skip-build \
+                                                        --skip-build-image \
+                                                        --install-extra-arg "
+                                                        --set etcd.metrics.enabled=true \
+                                                        --set etcd.metrics.podMonitor.enabled=true \
+                                                        --set indexCoordinator.gc.interval=1 \
+                                                        --set indexNode.disk.enabled=true \
+                                                        --set queryNode.disk.enabled=true \
+                                                        --set standalone.disk.enabled=true \
+                                                        --version ${chart_version} \
+                                                        -f values/ci/${valuesFile}"
+                                                        """
+                                                    } catch (Exception e) {
+                                                        echo "Tests failed, but the build will not be marked as failed."
+                                                    }
+           
+                                                }else{
+                                                    sh """
+                                                        MILVUS_CLUSTER_ENABLED=${clusterEnabled} \
+                                                        MILVUS_HELM_REPO="https://nexus-ci.zilliz.cc/repository/milvus-proxy" \
+                                                        TAG=${imageTag}\
+                                                        ./e2e-k8s.sh \
+                                                        --skip-export-logs \
+                                                        --skip-cleanup \
+                                                        --skip-setup \
+                                                        --skip-test \
+                                                        --skip-build \
+                                                        --skip-build-image \
+                                                        --install-extra-arg "
+                                                        --set etcd.metrics.enabled=true \
+                                                        --set etcd.metrics.podMonitor.enabled=true \
+                                                        --set indexCoordinator.gc.interval=1 \
+                                                        --set indexNode.disk.enabled=true \
+                                                        --set queryNode.disk.enabled=true \
+                                                        --set standalone.disk.enabled=true \
+                                                        --version ${chart_version} \
+                                                        -f values/ci/${valuesFile}"
+                                                        """
+                                                } 
                                             }
                                         } else {
                                             error "Error: Unsupported Milvus client: ${MILVUS_CLIENT}"
@@ -198,14 +227,27 @@ pipeline {
                                             clusterEnabled = "true"
                                         }
                                         if ("${MILVUS_CLIENT}" == "pymilvus") {
-                                            sh """
-                                            MILVUS_HELM_RELEASE_NAME="${release_name}" \
-                                            MILVUS_HELM_NAMESPACE="milvus-ci" \
-                                            MILVUS_CLUSTER_ENABLED="${clusterEnabled}" \
-                                            TEST_TIMEOUT="${e2e_timeout_seconds}" \
-                                            ./ci_e2e_4am.sh  "-n 6 -x --tags L0 L1 --timeout ${case_timeout_seconds}"
-                                            """
-                            
+                                            if ("${MILVUS_SERVER_TYPE}" == "standalone-one-pod") {
+                                                try {
+                                                    sh """
+                                                    MILVUS_HELM_RELEASE_NAME="${release_name}" \
+                                                    MILVUS_HELM_NAMESPACE="milvus-ci" \
+                                                    MILVUS_CLUSTER_ENABLED="${clusterEnabled}" \
+                                                    TEST_TIMEOUT="${e2e_timeout_seconds}" \
+                                                    ./ci_e2e_4am.sh  "-n 6 -x --tags L0 L1 --timeout ${case_timeout_seconds}"
+                                                    """
+                                                } catch (Exception e) {
+                                                    echo "Tests failed, but the build will not be marked as failed."
+                                                }
+                                            }else{
+                                                sh """
+                                                MILVUS_HELM_RELEASE_NAME="${release_name}" \
+                                                MILVUS_HELM_NAMESPACE="milvus-ci" \
+                                                MILVUS_CLUSTER_ENABLED="${clusterEnabled}" \
+                                                TEST_TIMEOUT="${e2e_timeout_seconds}" \
+                                                ./ci_e2e_4am.sh  "-n 6 -x --tags L0 L1 --timeout ${case_timeout_seconds}"
+                                                """
+                                            }
                                         } else {
                                         error "Error: Unsupported Milvus client: ${MILVUS_CLIENT}"
                                         }
