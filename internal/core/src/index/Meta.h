@@ -52,6 +52,9 @@ constexpr const char* INDEX_ENGINE_VERSION = "index_engine_version";
 constexpr const char* DISK_ANN_PREFIX_PATH = "index_prefix";
 constexpr const char* DISK_ANN_RAW_DATA_PATH = "data_path";
 
+// VecIndex node filtering
+constexpr const char* VEC_OPT_FIELDS_PATH = "opt_fields_path";
+
 // DiskAnn build params
 constexpr const char* DISK_ANN_MAX_DEGREE = "max_degree";
 constexpr const char* DISK_ANN_SEARCH_LIST_SIZE = "search_list_size";

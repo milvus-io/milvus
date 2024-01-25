@@ -205,4 +205,12 @@ Join(const std::vector<T>& items, const std::string& delimiter) {
     return ss.str();
 }
 
+inline std::string
+GetCommonPrefix(const std::string& str1, const std::string& str2) {
+    size_t len = std::min(str1.length(), str2.length());
+    size_t i = 0;
+    while (i < len && str1[i] == str2[i]) ++i;
+    return str1.substr(0, i);
+}
+
 }  // namespace milvus

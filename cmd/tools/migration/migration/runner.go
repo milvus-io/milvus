@@ -68,8 +68,11 @@ func (r *Runner) WatchSessions() {
 }
 
 func (r *Runner) initEtcdCli() {
-	cli, err := etcd.GetEtcdClient(
+	cli, err := etcd.CreateEtcdClient(
 		r.cfg.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		r.cfg.EtcdCfg.EtcdEnableAuth.GetAsBool(),
+		r.cfg.EtcdCfg.EtcdAuthUserName.GetValue(),
+		r.cfg.EtcdCfg.EtcdAuthPassword.GetValue(),
 		r.cfg.EtcdCfg.EtcdUseSSL.GetAsBool(),
 		r.cfg.EtcdCfg.Endpoints.GetAsStrings(),
 		r.cfg.EtcdCfg.EtcdTLSCert.GetValue(),

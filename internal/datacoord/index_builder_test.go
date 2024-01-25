@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	mclient "github.com/milvus-io/milvus/internal/util/mock"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -1194,5 +1195,294 @@ func TestIndexBuilderV2(t *testing.T) {
 		}
 		ib.taskMutex.RUnlock()
 	}
+	ib.Stop()
+}
+
+func TestVecIndexWithOptionalScalarField(t *testing.T) {
+	var (
+		collID         = UniqueID(100)
+		partID         = UniqueID(200)
+		indexID        = UniqueID(300)
+		segID          = UniqueID(500)
+		buildID        = UniqueID(600)
+		nodeID         = UniqueID(700)
+		partitionKeyID = UniqueID(800)
+	)
+
+	paramtable.Init()
+	ctx := context.Background()
+	minNumberOfRowsToBuild := paramtable.Get().DataCoordCfg.MinSegmentNumRowsToEnableIndex.GetAsInt64() + 1
+
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	catalog.On("CreateSegmentIndex",
+		mock.Anything,
+		mock.Anything,
+	).Return(nil)
+	catalog.On("AlterSegmentIndexes",
+		mock.Anything,
+		mock.Anything,
+	).Return(nil)
+
+	ic := mocks.NewMockIndexNodeClient(t)
+	ic.EXPECT().GetJobStats(mock.Anything, mock.Anything, mock.Anything).
+		Return(&indexpb.GetJobStatsResponse{
+			Status:           merr.Success(),
+			TotalJobNum:      0,
+			EnqueueJobNum:    0,
+			InProgressJobNum: 0,
+			TaskSlots:        1,
+			JobInfos:         []*indexpb.JobInfo{},
+		}, nil)
+	ic.EXPECT().QueryJobs(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, in *indexpb.QueryJobsRequest, option ...grpc.CallOption) (*indexpb.QueryJobsResponse, error) {
+			indexInfos := make([]*indexpb.IndexTaskInfo, 0)
+			for _, buildID := range in.BuildIDs {
+				indexInfos = append(indexInfos, &indexpb.IndexTaskInfo{
+					BuildID:       buildID,
+					State:         commonpb.IndexState_Finished,
+					IndexFileKeys: []string{"file1", "file2"},
+				})
+			}
+			return &indexpb.QueryJobsResponse{
+				Status:     merr.Success(),
+				ClusterID:  in.ClusterID,
+				IndexInfos: indexInfos,
+			}, nil
+		})
+
+	ic.EXPECT().DropJobs(mock.Anything, mock.Anything, mock.Anything).
+		Return(merr.Success(), nil)
+
+	mt := meta{
+		catalog: catalog,
+		collections: map[int64]*collectionInfo{
+			collID: {
+				ID: collID,
+				Schema: &schemapb.CollectionSchema{
+					Fields: []*schemapb.FieldSchema{
+						{
+							FieldID:  fieldID,
+							Name:     "vec",
+							DataType: schemapb.DataType_FloatVector,
+						},
+						{
+							FieldID:        partitionKeyID,
+							Name:           "scalar",
+							DataType:       schemapb.DataType_Int64,
+							IsPartitionKey: true,
+						},
+					},
+				},
+				CreatedAt: 0,
+			},
+		},
+		indexes: map[UniqueID]map[UniqueID]*model.Index{
+			collID: {
+				indexID: {
+					TenantID:     "",
+					CollectionID: collID,
+					FieldID:      fieldID,
+					IndexID:      indexID,
+					IndexName:    indexName,
+					IsDeleted:    false,
+					CreateTime:   1,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.DimKey,
+							Value: "128",
+						},
+					},
+					IndexParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.MetricTypeKey,
+							Value: "L2",
+						},
+						{
+							Key:   common.IndexTypeKey,
+							Value: indexparamcheck.IndexHNSW,
+						},
+					},
+				},
+			},
+		},
+		segments: &SegmentsInfo{
+			segments: map[UniqueID]*SegmentInfo{
+				segID: {
+					SegmentInfo: &datapb.SegmentInfo{
+						ID:             segID,
+						CollectionID:   collID,
+						PartitionID:    partID,
+						InsertChannel:  "",
+						NumOfRows:      minNumberOfRowsToBuild,
+						State:          commonpb.SegmentState_Flushed,
+						MaxRowNum:      65536,
+						LastExpireTime: 10,
+					},
+					segmentIndexes: map[UniqueID]*model.SegmentIndex{
+						indexID: {
+							SegmentID:     segID,
+							CollectionID:  collID,
+							PartitionID:   partID,
+							NumRows:       minNumberOfRowsToBuild,
+							IndexID:       indexID,
+							BuildID:       buildID,
+							NodeID:        0,
+							IndexVersion:  0,
+							IndexState:    commonpb.IndexState_Unissued,
+							FailReason:    "",
+							IsDeleted:     false,
+							CreateTime:    0,
+							IndexFileKeys: nil,
+							IndexSize:     0,
+						},
+					},
+				},
+			},
+		},
+		buildID2SegmentIndex: map[UniqueID]*model.SegmentIndex{
+			buildID: {
+				SegmentID:     segID,
+				CollectionID:  collID,
+				PartitionID:   partID,
+				NumRows:       minNumberOfRowsToBuild,
+				IndexID:       indexID,
+				BuildID:       buildID,
+				NodeID:        0,
+				IndexVersion:  0,
+				IndexState:    commonpb.IndexState_Unissued,
+				FailReason:    "",
+				IsDeleted:     false,
+				CreateTime:    0,
+				IndexFileKeys: nil,
+				IndexSize:     0,
+			},
+		},
+	}
+
+	nodeManager := &IndexNodeManager{
+		ctx: ctx,
+		nodeClients: map[UniqueID]types.IndexNodeClient{
+			1: ic,
+		},
+	}
+
+	cm := &mocks.ChunkManager{}
+	cm.EXPECT().RootPath().Return("root")
+
+	waitTaskDoneFunc := func(builder *indexBuilder) {
+		for {
+			builder.taskMutex.RLock()
+			if len(builder.tasks) == 0 {
+				builder.taskMutex.RUnlock()
+				break
+			}
+			builder.taskMutex.RUnlock()
+		}
+
+		assert.Zero(t, len(builder.tasks))
+	}
+
+	resetMetaFunc := func() {
+		mt.buildID2SegmentIndex[buildID].IndexState = commonpb.IndexState_Unissued
+		mt.segments.segments[segID].segmentIndexes[indexID].IndexState = commonpb.IndexState_Unissued
+		mt.indexes[collID][indexID].IndexParams[1].Value = indexparamcheck.IndexHNSW
+		mt.collections[collID].Schema.Fields[1].IsPartitionKey = true
+	}
+
+	paramtable.Get().CommonCfg.EnableNodeFilteringOnPartitionKey.SwapTempValue("true")
+	defer paramtable.Get().CommonCfg.EnableNodeFilteringOnPartitionKey.SwapTempValue("false")
+	ib := newIndexBuilder(ctx, &mt, nodeManager, cm, newIndexEngineVersionManager(), nil)
+
+	t.Run("success to get opt field on startup", func(t *testing.T) {
+		ic.EXPECT().CreateJob(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, in *indexpb.CreateJobRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+				assert.NotZero(t, len(in.OptionalScalarFields), "optional scalar field should be set")
+				return merr.Success(), nil
+			}).Once()
+		assert.Equal(t, 1, len(ib.tasks))
+		assert.Equal(t, indexTaskInit, ib.tasks[buildID])
+
+		ib.scheduleDuration = time.Millisecond * 500
+		ib.Start()
+		waitTaskDoneFunc(ib)
+		resetMetaFunc()
+	})
+
+	segIdx := &model.SegmentIndex{
+		SegmentID:     segID,
+		CollectionID:  collID,
+		PartitionID:   partID,
+		NumRows:       minNumberOfRowsToBuild,
+		IndexID:       indexID,
+		BuildID:       buildID,
+		NodeID:        0,
+		IndexVersion:  0,
+		IndexState:    0,
+		FailReason:    "",
+		IsDeleted:     false,
+		CreateTime:    0,
+		IndexFileKeys: nil,
+		IndexSize:     0,
+	}
+
+	t.Run("enqueue", func(t *testing.T) {
+		ic.EXPECT().CreateJob(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, in *indexpb.CreateJobRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+				assert.NotZero(t, len(in.OptionalScalarFields), "optional scalar field should be set")
+				return merr.Success(), nil
+			}).Once()
+		err := ib.meta.AddSegmentIndex(segIdx)
+		assert.NoError(t, err)
+		ib.enqueue(buildID)
+		waitTaskDoneFunc(ib)
+		resetMetaFunc()
+	})
+
+	// should still be able to build vec index when opt field is not set
+	t.Run("enqueue returns empty optional field when cfg disable", func(t *testing.T) {
+		paramtable.Get().CommonCfg.EnableNodeFilteringOnPartitionKey.SwapTempValue("false")
+		ic.EXPECT().CreateJob(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, in *indexpb.CreateJobRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+				assert.Zero(t, len(in.OptionalScalarFields), "optional scalar field should be set")
+				return merr.Success(), nil
+			}).Once()
+		err := ib.meta.AddSegmentIndex(segIdx)
+		assert.NoError(t, err)
+		ib.enqueue(buildID)
+		waitTaskDoneFunc(ib)
+		resetMetaFunc()
+	})
+
+	t.Run("enqueue returns empty optional field when index is not HNSW", func(t *testing.T) {
+		paramtable.Get().CommonCfg.EnableNodeFilteringOnPartitionKey.SwapTempValue("true")
+		mt.indexes[collID][indexID].IndexParams[1].Value = indexparamcheck.IndexDISKANN
+		ic.EXPECT().CreateJob(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, in *indexpb.CreateJobRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+				assert.Zero(t, len(in.OptionalScalarFields), "optional scalar field should be set")
+				return merr.Success(), nil
+			}).Once()
+		err := ib.meta.AddSegmentIndex(segIdx)
+		assert.NoError(t, err)
+		ib.enqueue(buildID)
+		waitTaskDoneFunc(ib)
+		resetMetaFunc()
+	})
+
+	t.Run("enqueue returns empty optional field when no partition key", func(t *testing.T) {
+		paramtable.Get().CommonCfg.EnableNodeFilteringOnPartitionKey.SwapTempValue("true")
+		mt.collections[collID].Schema.Fields[1].IsPartitionKey = false
+		ic.EXPECT().CreateJob(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, in *indexpb.CreateJobRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+				assert.Zero(t, len(in.OptionalScalarFields), "optional scalar field should be set")
+				return merr.Success(), nil
+			}).Once()
+		err := ib.meta.AddSegmentIndex(segIdx)
+		assert.NoError(t, err)
+		ib.enqueue(buildID)
+		waitTaskDoneFunc(ib)
+		resetMetaFunc()
+	})
+
+	ib.nodeDown(nodeID)
 	ib.Stop()
 }

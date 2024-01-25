@@ -627,7 +627,7 @@ func (t *searchTask) Requery() error {
 		QueryParams:        t.request.GetSearchParams(),
 	}
 
-	return doRequery(t.ctx, t.GetCollectionID(), t.node, t.schema.CollectionSchema, queryReq, t.result, t.queryChannelsTs)
+	return doRequery(t.ctx, t.GetCollectionID(), t.node, t.schema.CollectionSchema, queryReq, t.result, t.queryChannelsTs, t.GetPartitionIDs())
 }
 
 func (t *searchTask) fillInEmptyResult(numQueries int64) {
@@ -681,6 +681,7 @@ func doRequery(ctx context.Context,
 	request *milvuspb.QueryRequest,
 	result *milvuspb.SearchResults,
 	queryChannelsTs map[string]Timestamp,
+	partitionIDs []int64,
 ) error {
 	outputFields := request.GetOutputFields()
 	pkField, err := typeutil.GetPrimaryFieldSchema(schema)
@@ -701,7 +702,8 @@ func doRequery(ctx context.Context,
 				commonpbutil.WithMsgType(commonpb.MsgType_Retrieve),
 				commonpbutil.WithSourceID(paramtable.GetNodeID()),
 			),
-			ReqID: paramtable.GetNodeID(),
+			ReqID:        paramtable.GetNodeID(),
+			PartitionIDs: partitionIDs, // use search partitionIDs
 		},
 		request:      request,
 		plan:         plan,
@@ -709,6 +711,7 @@ func doRequery(ctx context.Context,
 		lb:           node.(*Proxy).lbPolicy,
 		channelsMvcc: channelsMvcc,
 		fastSkip:     true,
+		reQuery:      true,
 	}
 	queryResult, err := node.(*Proxy).query(ctx, qt)
 	if err != nil {
