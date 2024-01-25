@@ -42,7 +42,7 @@ type SearchPlan struct {
 	cSearchPlan C.CSearchPlan
 }
 
-func createSearchPlanByExpr(ctx context.Context, col *Collection, expr []byte, metricType string) (*SearchPlan, error) {
+func createSearchPlanByExpr(ctx context.Context, col *Collection, expr []byte) (*SearchPlan, error) {
 	if col.collectionPtr == nil {
 		return nil, errors.New("nil collection ptr, collectionID = " + fmt.Sprintln(col.id))
 	}
@@ -90,7 +90,7 @@ type SearchRequest struct {
 func NewSearchRequest(ctx context.Context, collection *Collection, req *querypb.SearchRequest, placeholderGrp []byte) (*SearchRequest, error) {
 	metricType := req.GetReq().GetMetricType()
 	expr := req.Req.SerializedExprPlan
-	plan, err := createSearchPlanByExpr(ctx, collection, expr, metricType)
+	plan, err := createSearchPlanByExpr(ctx, collection, expr)
 	if err != nil {
 		return nil, err
 	}
