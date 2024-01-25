@@ -120,6 +120,36 @@ SegmentSealedImpl::LoadVecIndex(const LoadIndexInfo& info) {
 }
 
 void
+SegmentSealedImpl::WarmupChunkCache(const FieldId field_id) {
+    auto& field_meta = schema_->operator[](field_id);
+    AssertInfo(field_meta.is_vector(), "vector field is not vector type");
+
+    if (!get_bit(index_ready_bitset_, field_id) &&
+        !get_bit(binlog_index_bitset_, field_id)) {
+        return;
+    }
+
+    AssertInfo(vector_indexings_.is_ready(field_id),
+               "vector index is not ready");
+    auto field_indexing = vector_indexings_.get_field_indexing(field_id);
+    auto vec_index =
+        dynamic_cast<index::VectorIndex*>(field_indexing->indexing_.get());
+    AssertInfo(vec_index, "invalid vector indexing");
+
+    auto it = field_data_info_.field_infos.find(field_id.get());
+    AssertInfo(it != field_data_info_.field_infos.end(),
+               "cannot find binlog file for field: {}, seg: {}",
+               field_id.get(),
+               id_);
+    auto field_info = it->second;
+
+    auto cc = storage::ChunkCacheSingleton::GetInstance().GetChunkCache();
+    for (const auto& data_path : field_info.insert_files) {
+        auto column = cc->Read(data_path);
+    }
+}
+
+void
 SegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
     // NOTE: lock only when data is ready to avoid starvation
     auto field_id = FieldId(info.field_id);
@@ -869,10 +899,12 @@ SegmentSealedImpl::get_vector(FieldId field_id,
             AssertInfo(path_to_column.count(data_path) != 0,
                        "column not found");
             const auto& column = path_to_column.at(data_path);
-            AssertInfo(offset_in_binlog * row_bytes < column->ByteSize(),
-                       fmt::format("column idx out of range, idx: {}, size: {}",
-                                   offset_in_binlog * row_bytes,
-                                   column->ByteSize()));
+            AssertInfo(
+                offset_in_binlog * row_bytes < column->ByteSize(),
+                "column idx out of range, idx: {}, size: {}, data_path: {}",
+                offset_in_binlog * row_bytes,
+                column->ByteSize(),
+                data_path);
             auto vector = &column->Data()[offset_in_binlog * row_bytes];
             std::memcpy(buf.data() + i * row_bytes, vector, row_bytes);
         }
