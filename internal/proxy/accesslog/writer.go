@@ -203,7 +203,7 @@ func (l *RotateLogger) openFileExistingOrNew() error {
 func (l *RotateLogger) openNewFile() error {
 	err := os.MkdirAll(l.dir(), 0o744)
 	if err != nil {
-		return fmt.Errorf("make directories for new log file filed: %s", err)
+		return fmt.Errorf("make directories for new log file field: %s", err)
 	}
 
 	name := l.filename()

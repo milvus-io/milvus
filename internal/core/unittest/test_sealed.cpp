@@ -1746,9 +1746,9 @@ TEST(Sealed, QueryAllFields) {
     std::map<std::string, std::string> type_params = {{"dim", "128"}};
     FieldIndexMeta fieldIndexMeta(
         vec, std::move(index_params), std::move(type_params));
-    std::map<FieldId, FieldIndexMeta> filedMap = {{vec, fieldIndexMeta}};
+    std::map<FieldId, FieldIndexMeta> fieldMap = {{vec, fieldIndexMeta}};
     IndexMetaPtr metaPtr =
-        std::make_shared<CollectionIndexMeta>(100000, std::move(filedMap));
+        std::make_shared<CollectionIndexMeta>(100000, std::move(fieldMap));
     auto segment_sealed = CreateSealedSegment(schema, metaPtr);
     auto segment = dynamic_cast<SegmentSealedImpl*>(segment_sealed.get());
 

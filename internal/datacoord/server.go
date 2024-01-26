@@ -1052,8 +1052,8 @@ func (s *Server) postFlush(ctx context.Context, segmentID UniqueID) error {
 	metrics.FlushedSegmentFileNum.WithLabelValues(metrics.StatFileLabel).Observe(float64(statFileNum))
 
 	deleteFileNum := 0
-	for _, filedBinlog := range segment.GetDeltalogs() {
-		deleteFileNum += len(filedBinlog.GetBinlogs())
+	for _, fieldBinlog := range segment.GetDeltalogs() {
+		deleteFileNum += len(fieldBinlog.GetBinlogs())
 	}
 	metrics.FlushedSegmentFileNum.WithLabelValues(metrics.DeleteFileLabel).Observe(float64(deleteFileNum))
 

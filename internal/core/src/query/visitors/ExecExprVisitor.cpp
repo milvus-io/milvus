@@ -2561,13 +2561,13 @@ ExecExprVisitor::ExecTermVisitorImpl(TermExpr& expr_raw) -> BitsetType {
             InnerType;
     auto& expr = static_cast<TermExprImpl<InnerType>&>(expr_raw);
     auto& schema = segment_.get_schema();
-    auto primary_filed_id = schema.get_primary_field_id();
+    auto primary_field_id = schema.get_primary_field_id();
     auto field_id = expr_raw.column_.field_id;
     auto& field_meta = schema[field_id];
 
     bool use_pk_index = false;
-    if (primary_filed_id.has_value()) {
-        use_pk_index = primary_filed_id.value() == field_id &&
+    if (primary_field_id.has_value()) {
+        use_pk_index = primary_field_id.value() == field_id &&
                        IsPrimaryKeyDataType(field_meta.get_data_type());
     }
 

@@ -38,9 +38,9 @@ TEST(GrowingIndex, Correctness) {
     auto& config = SegcoreConfig::default_config();
     config.set_chunk_rows(1024);
     config.set_enable_interim_segment_index(true);
-    std::map<FieldId, FieldIndexMeta> filedMap = {{vec, fieldIndexMeta}};
+    std::map<FieldId, FieldIndexMeta> fieldMap = {{vec, fieldIndexMeta}};
     IndexMetaPtr metaPtr =
-        std::make_shared<CollectionIndexMeta>(226985, std::move(filedMap));
+        std::make_shared<CollectionIndexMeta>(226985, std::move(fieldMap));
     auto segment = CreateGrowingSegment(schema, metaPtr);
     auto segmentImplPtr = dynamic_cast<SegmentGrowingImpl*>(segment.get());
 
@@ -82,16 +82,16 @@ TEST(GrowingIndex, Correctness) {
                         dataset.row_ids_.data(),
                         dataset.timestamps_.data(),
                         dataset.raw_);
-        auto filed_data = segmentImplPtr->get_insert_record()
+        auto field_data = segmentImplPtr->get_insert_record()
                               .get_field_data<milvus::FloatVector>(vec);
 
         auto inserted = (i + 1) * per_batch;
         //once index built, chunk data will be removed
         if (i < 2) {
-            EXPECT_EQ(filed_data->num_chunk(),
-                      upper_div(inserted, filed_data->get_size_per_chunk()));
+            EXPECT_EQ(field_data->num_chunk(),
+                      upper_div(inserted, field_data->get_size_per_chunk()));
         } else {
-            EXPECT_EQ(filed_data->num_chunk(), 0);
+            EXPECT_EQ(field_data->num_chunk(), 0);
         }
 
         auto num_queries = 5;
@@ -179,9 +179,9 @@ TEST_P(GrowingIndexGetVectorTest, GetVector) {
     auto& config = SegcoreConfig::default_config();
     config.set_chunk_rows(1024);
     config.set_enable_interim_segment_index(true);
-    std::map<FieldId, FieldIndexMeta> filedMap = {{vec, fieldIndexMeta}};
+    std::map<FieldId, FieldIndexMeta> fieldMap = {{vec, fieldIndexMeta}};
     IndexMetaPtr metaPtr =
-        std::make_shared<CollectionIndexMeta>(100000, std::move(filedMap));
+        std::make_shared<CollectionIndexMeta>(100000, std::move(fieldMap));
     auto segment_growing = CreateGrowingSegment(schema, metaPtr);
     auto segment = dynamic_cast<SegmentGrowingImpl*>(segment_growing.get());
 

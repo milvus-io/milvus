@@ -151,7 +151,7 @@ func combineToCollectionIndexesMeta220(fieldIndexes FieldIndexes210, collectionI
 			return nil, err
 		}
 		for _, index := range record.indexes {
-			field, err := helper.GetFieldFromID(index.GetFiledID())
+			field, err := helper.GetFieldFromID(index.GetFieldID())
 			if err != nil {
 				return nil, err
 			}
@@ -179,12 +179,12 @@ func combineToCollectionIndexesMeta220(fieldIndexes FieldIndexes210, collectionI
 			}
 			newIndexName := indexInfo.GetIndexName()
 			if newIndexName == "_default_idx" {
-				newIndexName = "_default_idx_" + strconv.FormatInt(index.GetFiledID(), 10)
+				newIndexName = "_default_idx_" + strconv.FormatInt(index.GetFieldID(), 10)
 			}
 			record := &model.Index{
 				TenantID:        "",
 				CollectionID:    collectionID,
-				FieldID:         index.GetFiledID(),
+				FieldID:         index.GetFieldID(),
 				IndexID:         index.GetIndexID(),
 				IndexName:       newIndexName,
 				IsDeleted:       indexInfo.GetDeleted(),
@@ -284,7 +284,7 @@ func combineToLoadInfo220(collectionLoadInfo CollectionLoadInfo220, partitionLoa
 		}
 
 		for _, index := range indexes.indexes {
-			loadInfo.FieldIndexID[index.GetFiledID()] = index.GetIndexID()
+			loadInfo.FieldIndexID[index.GetFieldID()] = index.GetIndexID()
 		}
 	}
 
@@ -297,7 +297,7 @@ func combineToLoadInfo220(collectionLoadInfo CollectionLoadInfo220, partitionLoa
 
 		for _, loadInfo := range partitions {
 			for _, index := range indexes.indexes {
-				loadInfo.FieldIndexID[index.GetFiledID()] = index.GetIndexID()
+				loadInfo.FieldIndexID[index.GetFieldID()] = index.GetIndexID()
 			}
 		}
 	}

@@ -77,12 +77,12 @@ TEST_F(DiskAnnFileManagerTest, AddFilePositiveParallel) {
 
     // collection_id: 1, partition_id: 2, segment_id: 3
     // field_id: 100, index_build_id: 1000, index_version: 1
-    FieldDataMeta filed_data_meta = {1, 2, 3, 100};
+    FieldDataMeta field_data_meta = {1, 2, 3, 100};
     IndexMeta index_meta = {3, 100, 1000, 1, "index"};
 
     int64_t slice_size = milvus::FILE_SLICE_SIZE;
     auto diskAnnFileManager = std::make_shared<DiskFileManagerImpl>(
-        storage::FileManagerContext(filed_data_meta, index_meta, cm_));
+        storage::FileManagerContext(field_data_meta, index_meta, cm_));
     auto ok = diskAnnFileManager->AddFile(indexFilePath);
     EXPECT_EQ(ok, true);
 
@@ -206,7 +206,7 @@ TEST_F(DiskAnnFileManagerTest, TestThreadPoolException) {
 
 const int64_t kOptFieldId = 123456;
 const std::string kOptFieldName = "opt_field_name";
-const DataType kOptFiledType = DataType::INT64;
+const DataType kOptFieldType = DataType::INT64;
 const int64_t kOptFieldDataRange = 10000;
 const std::string kOptFieldPath = "/tmp/diskann/opt_field/123123";
 // const std::string kOptFieldPath = "/tmp/diskann/index_files/1000/index";
@@ -325,7 +325,7 @@ PrepareOptionalField(const std::shared_ptr<DiskFileManagerImpl>& file_manager,
     OptFieldT opt_field;
     std::vector<std::string> insert_files;
     insert_files.emplace_back(insert_file_path);
-    opt_field[kOptFieldId] = {kOptFieldName, kOptFiledType, insert_files};
+    opt_field[kOptFieldId] = {kOptFieldName, kOptFieldType, insert_files};
     return opt_field;
 }
 
@@ -384,8 +384,8 @@ TEST_F(DiskAnnFileManagerTest, CacheOptFieldToDiskFieldEmpty) {
 
 TEST_F(DiskAnnFileManagerTest, CacheOptFieldToDiskSpaceEmpty) {
     auto file_manager = CreateFileManager(cm_);
-    auto opt_fileds = PrepareOptionalField(file_manager, "");
-    auto res = file_manager->CacheOptFieldToDisk(nullptr, opt_fileds);
+    auto opt_fields = PrepareOptionalField(file_manager, "");
+    auto res = file_manager->CacheOptFieldToDisk(nullptr, opt_fields);
     EXPECT_TRUE(res.empty());
 }
 
@@ -396,16 +396,17 @@ TEST_F(DiskAnnFileManagerTest, CacheOptFieldToDiskOptFieldMoreThanOne) {
 
     OptFieldT opt_fields = PrepareOptionalField(file_manager, insert_file_path);
     opt_fields[kOptFieldId + 1] = {
-        kOptFieldName + "second", kOptFiledType, {insert_file_space_path}};
+        kOptFieldName + "second", kOptFieldType, {insert_file_space_path}};
     EXPECT_THROW(file_manager->CacheOptFieldToDisk(opt_fields), SegcoreError);
-    EXPECT_THROW(file_manager->CacheOptFieldToDisk(space, opt_fields), SegcoreError);
+    EXPECT_THROW(file_manager->CacheOptFieldToDisk(space, opt_fields),
+                 SegcoreError);
 }
 
 TEST_F(DiskAnnFileManagerTest, CacheOptFieldToDiskCorrect) {
     auto file_manager = CreateFileManager(cm_);
     const auto insert_file_path = PrepareInsertData();
-    auto opt_fileds = PrepareOptionalField(file_manager, insert_file_path);
-    auto res = file_manager->CacheOptFieldToDisk(opt_fileds);
+    auto opt_fields = PrepareOptionalField(file_manager, insert_file_path);
+    auto res = file_manager->CacheOptFieldToDisk(opt_fields);
     ASSERT_FALSE(res.empty());
     CheckOptFieldCorrectness(res);
 }
@@ -413,8 +414,8 @@ TEST_F(DiskAnnFileManagerTest, CacheOptFieldToDiskCorrect) {
 TEST_F(DiskAnnFileManagerTest, CacheOptFieldToDiskSpaceCorrect) {
     auto file_manager = CreateFileManager(cm_);
     const auto& [insert_file_path, space] = PrepareInsertDataSpace();
-    auto opt_fileds = PrepareOptionalField(file_manager, insert_file_path);
-    auto res = file_manager->CacheOptFieldToDisk(space, opt_fileds);
+    auto opt_fields = PrepareOptionalField(file_manager, insert_file_path);
+    auto res = file_manager->CacheOptFieldToDisk(space, opt_fields);
     ASSERT_FALSE(res.empty());
     CheckOptFieldCorrectness(res);
 }

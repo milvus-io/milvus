@@ -48,7 +48,7 @@ func buildInsertMsg(collectionID int64, partitionID int64, segmentID int64, chan
 		insertMsg.RowIDs = append(insertMsg.RowIDs, rand.Int63n(100))
 		insertMsg.NumRows++
 	}
-	insertMsg.FieldsData = genDefaultFiledData(rowSum)
+	insertMsg.FieldsData = genDefaultFieldData(rowSum)
 	return insertMsg
 }
 
@@ -120,7 +120,7 @@ func genDeletePK(pks ...int64) *schemapb.IDs {
 	}
 }
 
-func genDefaultFiledData(numRows int) []*schemapb.FieldData {
+func genDefaultFieldData(numRows int) []*schemapb.FieldData {
 	pkDatas := []int64{}
 	vectorDatas := []byte{}
 
@@ -160,13 +160,13 @@ func genDefaultFiledData(numRows int) []*schemapb.FieldData {
 	}
 }
 
-func genFiledDataWithSchema(schema *schemapb.CollectionSchema, numRows int) []*schemapb.FieldData {
+func genFieldDataWithSchema(schema *schemapb.CollectionSchema, numRows int) []*schemapb.FieldData {
 	fieldsData := make([]*schemapb.FieldData, 0)
 	for _, field := range schema.Fields {
 		if field.DataType < 100 {
 			fieldsData = append(fieldsData, segments.GenTestScalarFieldData(field.DataType, field.DataType.String(), field.GetFieldID(), numRows))
 		} else {
-			fieldsData = append(fieldsData, segments.GenTestVectorFiledData(field.DataType, field.DataType.String(), field.GetFieldID(), numRows, defaultDim))
+			fieldsData = append(fieldsData, segments.GenTestVectorFieldData(field.DataType, field.DataType.String(), field.GetFieldID(), numRows, defaultDim))
 		}
 	}
 	return fieldsData
