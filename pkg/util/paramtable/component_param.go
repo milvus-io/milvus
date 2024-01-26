@@ -32,7 +32,8 @@ const (
 	// DefaultIndexSliceSize defines the default slice size of index file when serializing.
 	DefaultIndexSliceSize                      = 16
 	DefaultGracefulTime                        = 5000 // ms
-	DefaultGracefulStopTimeout                 = 900  // s, for node
+	DefaultGracefulStopTimeout                 = 1800 // s, for node
+	DefaultProxyGracefulStopTimeout            = 30   // s，for proxy
 	DefaultCoordGracefulStopTimeout            = 5    // s，for coord
 	DefaultHighPriorityThreadCoreCoefficient   = 10
 	DefaultMiddlePriorityThreadCoreCoefficient = 5
@@ -1358,7 +1359,7 @@ please adjust in embedded Milvus: false`,
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "proxy.gracefulStopTimeout",
 		Version:      "2.3.7",
-		DefaultValue: strconv.Itoa(DefaultGracefulStopTimeout),
+		DefaultValue: strconv.Itoa(DefaultProxyGracefulStopTimeout),
 		Doc:          "seconds. force stop node without graceful stop",
 		Export:       true,
 	}

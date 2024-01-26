@@ -211,9 +211,14 @@ func (s *Server) start() error {
 }
 
 // Stop stops IndexNode's grpc service.
-func (s *Server) Stop() error {
+func (s *Server) Stop() (err error) {
 	Params := &paramtable.Get().IndexNodeGrpcServerCfg
-	log.Debug("IndexNode stop", zap.String("Address", Params.GetAddress()))
+	logger := log.With(zap.String("address", Params.GetAddress()))
+	logger.Info("IndexNode stopping")
+	defer func() {
+		logger.Info("IndexNode stopped", zap.Error(err))
+	}()
+
 	if s.indexnode != nil {
 		s.indexnode.Stop()
 	}

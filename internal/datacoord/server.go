@@ -1090,16 +1090,24 @@ func (s *Server) Stop() error {
 	if !s.stateCode.CompareAndSwap(commonpb.StateCode_Healthy, commonpb.StateCode_Abnormal) {
 		return nil
 	}
-	logutil.Logger(s.ctx).Info("server shutdown")
-	s.cluster.Close()
+	logutil.Logger(s.ctx).Info("datacoord server shutdown")
 	s.garbageCollector.close()
-	s.stopServerLoop()
+	logutil.Logger(s.ctx).Info("datacoord garbage collector stopped")
 
 	if Params.DataCoordCfg.EnableCompaction.GetAsBool() {
 		s.stopCompactionTrigger()
 		s.stopCompactionHandler()
 	}
+	logutil.Logger(s.ctx).Info("datacoord compaction stopped")
+
 	s.indexBuilder.Stop()
+	logutil.Logger(s.ctx).Info("datacoord index builder stopped")
+
+	s.cluster.Close()
+	logutil.Logger(s.ctx).Info("datacoord cluster stopped")
+
+	s.stopServerLoop()
+	logutil.Logger(s.ctx).Info("datacoord serverloop stopped")
 
 	if s.session != nil {
 		s.session.Stop()
@@ -1108,6 +1116,7 @@ func (s *Server) Stop() error {
 	if s.icSession != nil {
 		s.icSession.Stop()
 	}
+	logutil.Logger(s.ctx).Warn("datacoord stop successful")
 
 	return nil
 }

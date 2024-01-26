@@ -63,7 +63,7 @@ func (qs *QueryCoord) Run() error {
 // Stop terminates service
 func (qs *QueryCoord) Stop() error {
 	timeout := paramtable.Get().QueryCoordCfg.GracefulStopTimeout.GetAsDuration(time.Second)
-	return stopWithTimeout(qs.svr.Stop, timeout)
+	return exitWhenStopTimeout(qs.svr.Stop, timeout)
 }
 
 // GetComponentStates returns QueryCoord's states

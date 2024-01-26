@@ -63,7 +63,7 @@ func (q *QueryNode) Run() error {
 // Stop terminates service
 func (q *QueryNode) Stop() error {
 	timeout := paramtable.Get().QueryNodeCfg.GracefulStopTimeout.GetAsDuration(time.Second)
-	return stopWithTimeout(q.svr.Stop, timeout)
+	return exitWhenStopTimeout(q.svr.Stop, timeout)
 }
 
 // GetComponentStates returns QueryNode's states

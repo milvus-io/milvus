@@ -237,10 +237,15 @@ func (s *Server) Run() error {
 }
 
 // Stop stops QueryNode's grpc service.
-func (s *Server) Stop() error {
+func (s *Server) Stop() (err error) {
 	Params := &paramtable.Get().QueryNodeGrpcServerCfg
-	log.Debug("QueryNode stop", zap.String("Address", Params.GetAddress()))
-	err := s.querynode.Stop()
+	logger := log.With(zap.String("address", Params.GetAddress()))
+	logger.Info("QueryNode stopping")
+	defer func() {
+		logger.Info("QueryNode stopped", zap.Error(err))
+	}()
+
+	err = s.querynode.Stop()
 	if err != nil {
 		return err
 	}

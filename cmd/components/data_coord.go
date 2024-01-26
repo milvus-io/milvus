@@ -60,7 +60,7 @@ func (s *DataCoord) Run() error {
 // Stop terminates service
 func (s *DataCoord) Stop() error {
 	timeout := paramtable.Get().DataCoordCfg.GracefulStopTimeout.GetAsDuration(time.Second)
-	return stopWithTimeout(s.svr.Stop, timeout)
+	return exitWhenStopTimeout(s.svr.Stop, timeout)
 }
 
 // GetComponentStates returns DataCoord's states
