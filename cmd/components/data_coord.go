@@ -18,6 +18,7 @@ package components
 
 import (
 	"context"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -26,6 +27,7 @@ import (
 	grpcdatacoordclient "github.com/milvus-io/milvus/internal/distributed/datacoord"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -57,10 +59,8 @@ func (s *DataCoord) Run() error {
 
 // Stop terminates service
 func (s *DataCoord) Stop() error {
-	if err := s.svr.Stop(); err != nil {
-		return err
-	}
-	return nil
+	timeout := paramtable.Get().DataCoordCfg.GracefulStopTimeout.GetAsDuration(time.Second)
+	return stopWithTimeout(s.svr.Stop, timeout)
 }
 
 // GetComponentStates returns DataCoord's states

@@ -26,7 +26,7 @@ import (
 	"math/rand"
 	"os"
 	"sync"
-	"syscall"
+	"sync/atomic"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -199,16 +199,7 @@ func (node *DataNode) Register() error {
 	// Start liveness check
 	node.session.LivenessCheck(node.ctx, func() {
 		log.Error("Data Node disconnected from etcd, process will exit", zap.Int64("Server Id", node.GetSession().ServerID))
-		if err := node.Stop(); err != nil {
-			log.Fatal("failed to stop server", zap.Error(err))
-		}
-		metrics.NumNodes.WithLabelValues(fmt.Sprint(node.GetNodeID()), typeutil.DataNodeRole).Dec()
-		// manually send signal to starter goroutine
-		if node.session.TriggerKill {
-			if p, err := os.FindProcess(os.Getpid()); err == nil {
-				p.Signal(syscall.SIGINT)
-			}
-		}
+		os.Exit(1)
 	})
 
 	return nil
