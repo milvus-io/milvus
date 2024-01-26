@@ -34,6 +34,7 @@ type FileSource struct {
 	files   []string
 	configs map[string]string
 
+	updateMu        sync.Mutex
 	configRefresher *refresher
 }
 
@@ -154,13 +155,26 @@ func (fs *FileSource) loadFromFile() error {
 		}
 	}
 
+	return fs.update(newConfig)
+}
+
+// update souce config
+// make sure only update changes configs
+func (fs *FileSource) update(configs map[string]string) error {
+	// make sure config not change when fire event
+	fs.updateMu.Lock()
+	defer fs.updateMu.Unlock()
+
 	fs.Lock()
-	defer fs.Unlock()
-	err := fs.configRefresher.fireEvents(fs.GetSourceName(), fs.configs, newConfig)
+	events, err := PopulateEvents(fs.GetSourceName(), fs.configs, configs)
 	if err != nil {
+		fs.Unlock()
+		log.Warn("generating event error", zap.Error(err))
 		return err
 	}
-	fs.configs = newConfig
+	fs.configs = configs
+	fs.Unlock()
 
+	fs.configRefresher.fireEvents(events...)
 	return nil
 }
