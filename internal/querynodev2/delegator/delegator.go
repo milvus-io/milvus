@@ -318,9 +318,10 @@ func (sd *shardDelegator) HybridSearch(ctx context.Context, req *querypb.HybridS
 
 	futures := make([]*conc.Future[*internalpb.SearchResults], len(req.GetReq().GetReqs()))
 	for index := range req.GetReq().GetReqs() {
+		request := req.GetReq().Reqs[index]
 		future := conc.Go(func() (*internalpb.SearchResults, error) {
 			searchReq := &querypb.SearchRequest{
-				Req:             req.GetReq().Reqs[index],
+				Req:             request,
 				DmlChannels:     req.GetDmlChannels(),
 				TotalChannelNum: req.GetTotalChannelNum(),
 				FromShardLeader: true,
