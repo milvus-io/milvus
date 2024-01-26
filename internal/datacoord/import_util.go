@@ -243,7 +243,7 @@ func AddImportSegment(cluster Cluster, meta *meta, segmentID int64) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	_, err := cluster.AddImportSegment(ctx, req) // TODO: dyh, handle resp
+	_, err := cluster.AddImportSegment(ctx, req)
 	return err
 }
 

@@ -263,8 +263,9 @@ func (s *importScheduler) processInProgressImport(task ImportTask) {
 				return
 			}
 			op1 := UpdateStartPosition([]*datapb.SegmentStartPosition{{StartPosition: channelCP, SegmentID: segmentID}})
-			op2 := ReplaceBinlogsOperator(segmentID, info.GetBinlogs(), info.GetStatslogs(), nil)
-			err = s.meta.UpdateSegmentsInfo(op1, op2)
+			op2 := UpdateDmlPosition(segmentID, channelCP)
+			op3 := ReplaceBinlogsOperator(segmentID, info.GetBinlogs(), info.GetStatslogs(), nil)
+			err = s.meta.UpdateSegmentsInfo(op1, op2, op3)
 			if err != nil {
 				log.Warn("update import segment binlogs failed", WrapLogFields(task, zap.Error(err))...)
 				return

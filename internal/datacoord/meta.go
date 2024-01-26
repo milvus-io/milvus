@@ -593,6 +593,23 @@ func UpdateStartPosition(startPositions []*datapb.SegmentStartPosition) UpdateOp
 	}
 }
 
+func UpdateDmlPosition(segmentID int64, dmlPosition *msgpb.MsgPosition) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			log.Warn("meta update: update dml position failed - segment not found",
+				zap.Int64("segmentID", segmentID))
+			return false
+		}
+
+		if len(dmlPosition.GetMsgID()) == 0 {
+			return false
+		}
+		segment.DmlPosition = dmlPosition
+		return true
+	}
+}
+
 // update segment checkpoint and num rows
 // if was importing segment
 // only update rows.

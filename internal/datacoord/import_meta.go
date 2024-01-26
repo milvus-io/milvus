@@ -44,7 +44,6 @@ type importMeta struct {
 }
 
 func NewImportMeta(broker broker.Broker, catalog metastore.DataCoordCatalog) (ImportMeta, error) {
-	// TODO: dyh, remove dependency of broker
 	getSchema := func(collectionID int64) (*schemapb.CollectionSchema, error) {
 		var schema *schemapb.CollectionSchema
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -64,8 +63,6 @@ func NewImportMeta(broker broker.Broker, catalog metastore.DataCoordCatalog) (Im
 	for _, t := range restoredTasks {
 		switch task := t.(type) {
 		case *datapb.PreImportTask:
-			catalog.DropImportTask(task.GetTaskID())
-			continue
 			schema, err := getSchema(task.GetCollectionID())
 			if err != nil {
 				return nil, err
@@ -76,8 +73,6 @@ func NewImportMeta(broker broker.Broker, catalog metastore.DataCoordCatalog) (Im
 				lastActiveTime: time.Now(),
 			}
 		case *datapb.ImportTaskV2:
-			catalog.DropImportTask(task.GetTaskID())
-			continue
 			schema, err := getSchema(task.GetCollectionID())
 			if err != nil {
 				return nil, err
