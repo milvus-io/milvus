@@ -316,8 +316,10 @@ func (c *compactionPlanHandler) RefreshPlan(task *compactionTask) {
 
 		sealedSegBinlogs := lo.Map(sealedSegments, func(info *SegmentInfo, _ int) *datapb.CompactionSegmentBinlogs {
 			return &datapb.CompactionSegmentBinlogs{
-				SegmentID: info.GetID(),
-				Level:     datapb.SegmentLevel_L1,
+				SegmentID:    info.GetID(),
+				Level:        datapb.SegmentLevel_L1,
+				CollectionID: info.GetCollectionID(),
+				PartitionID:  info.GetPartitionID(),
 			}
 		})
 
