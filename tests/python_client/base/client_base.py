@@ -125,9 +125,9 @@ class TestcaseBase(Base):
     Public methods that can be used for test cases.
     """
 
-    def _connect(self, enable_high_level_api=False):
+    def _connect(self, enable_milvus_client_api=False):
         """ Add a connection and create the connect """
-        if enable_high_level_api:
+        if enable_milvus_client_api:
             if cf.param_info.param_uri:
                 uri = cf.param_info.param_uri
             else:

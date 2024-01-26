@@ -316,23 +316,4 @@ SegmentInternalInterface::LoadStringSkipIndex(
     skip_index_.LoadString(field_id, chunk_id, var_column);
 }
 
-void
-SegmentInternalInterface::check_metric_type(
-    const query::Plan* plan, const IndexMetaPtr index_meta) const {
-    auto& metric_str = plan->plan_node_->search_info_.metric_type_;
-    auto searched_field_id = plan->plan_node_->search_info_.field_id_;
-    auto field_index_meta =
-        index_meta->GetFieldIndexMeta(FieldId(searched_field_id));
-    if (metric_str.empty()) {
-        metric_str = field_index_meta.GeMetricType();
-    }
-    if (metric_str != field_index_meta.GeMetricType()) {
-        throw SegcoreError(
-            MetricTypeNotMatch,
-            fmt::format("metric type not match, expected {}, actual {}.",
-                        field_index_meta.GeMetricType(),
-                        metric_str));
-    }
-}
-
 }  // namespace milvus::segcore

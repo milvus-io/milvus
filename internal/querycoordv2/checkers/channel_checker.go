@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
+	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -39,6 +40,7 @@ type ChannelChecker struct {
 	meta      *meta.Meta
 	dist      *meta.DistributionManager
 	targetMgr *meta.TargetManager
+	nodeMgr   *session.NodeManager
 	balancer  balance.Balance
 }
 
@@ -47,6 +49,7 @@ func NewChannelChecker(
 	dist *meta.DistributionManager,
 	targetMgr *meta.TargetManager,
 	balancer balance.Balance,
+	nodeMgr *session.NodeManager,
 ) *ChannelChecker {
 	return &ChannelChecker{
 		checkerActivation: newCheckerActivation(),
@@ -54,6 +57,7 @@ func NewChannelChecker(
 		dist:              dist,
 		targetMgr:         targetMgr,
 		balancer:          balancer,
+		nodeMgr:           nodeMgr,
 	}
 }
 
@@ -109,7 +113,7 @@ func (c *ChannelChecker) checkReplica(ctx context.Context, replica *meta.Replica
 
 	repeated := c.findRepeatedChannels(replica.GetID())
 	tasks = c.createChannelReduceTasks(c.getTraceCtx(ctx, replica.CollectionID), repeated, replica.GetID())
-	task.SetReason("redundancies of channel")
+	task.SetReason("redundancies of channel", tasks...)
 	ret = append(ret, tasks...)
 
 	// All channel related tasks should be with high priority
@@ -174,8 +178,29 @@ func (c *ChannelChecker) findRepeatedChannels(replicaID int64) []*meta.DmChannel
 	}
 	dist := c.getChannelDist(replica)
 
+	targets := c.targetMgr.GetSealedSegmentsByCollection(replica.GetCollectionID(), meta.CurrentTarget)
 	versionsMap := make(map[string]*meta.DmChannel)
 	for _, ch := range dist {
+		leaderView := c.dist.LeaderViewManager.GetLeaderShardView(ch.Node, ch.GetChannelName())
+		if leaderView == nil {
+			log.Info("shard leadview is not ready, skip",
+				zap.Int64("collectionID", replica.GetCollectionID()),
+				zap.Int64("replicaID", replicaID),
+				zap.Int64("leaderID", ch.Node),
+				zap.String("channel", ch.GetChannelName()))
+			continue
+		}
+
+		if err := CheckLeaderAvaliable(c.nodeMgr, leaderView, targets); err != nil {
+			log.Info("replica has unavailable shard leader",
+				zap.Int64("collectionID", replica.GetCollectionID()),
+				zap.Int64("replicaID", replicaID),
+				zap.Int64("leaderID", ch.Node),
+				zap.String("channel", ch.GetChannelName()),
+				zap.Error(err))
+			continue
+		}
+
 		maxVer, ok := versionsMap[ch.GetChannelName()]
 		if !ok {
 			versionsMap[ch.GetChannelName()] = ch

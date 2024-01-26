@@ -42,7 +42,7 @@ type SearchPlan struct {
 	cSearchPlan C.CSearchPlan
 }
 
-func createSearchPlanByExpr(ctx context.Context, col *Collection, expr []byte, metricType string) (*SearchPlan, error) {
+func createSearchPlanByExpr(ctx context.Context, col *Collection, expr []byte) (*SearchPlan, error) {
 	if col.collectionPtr == nil {
 		return nil, errors.New("nil collection ptr, collectionID = " + fmt.Sprintln(col.id))
 	}
@@ -88,11 +88,9 @@ type SearchRequest struct {
 }
 
 func NewSearchRequest(ctx context.Context, collection *Collection, req *querypb.SearchRequest, placeholderGrp []byte) (*SearchRequest, error) {
-	var err error
-	var plan *SearchPlan
 	metricType := req.GetReq().GetMetricType()
 	expr := req.Req.SerializedExprPlan
-	plan, err = createSearchPlanByExpr(ctx, collection, expr, metricType)
+	plan, err := createSearchPlanByExpr(ctx, collection, expr)
 	if err != nil {
 		return nil, err
 	}
@@ -110,6 +108,12 @@ func NewSearchRequest(ctx context.Context, collection *Collection, req *querypb.
 	if err := HandleCStatus(ctx, &status, "parser searchRequest failed"); err != nil {
 		plan.delete()
 		return nil, err
+	}
+
+	metricTypeInPlan := plan.getMetricType()
+	if len(metricType) != 0 && metricType != metricTypeInPlan {
+		plan.delete()
+		return nil, merr.WrapErrParameterInvalid(metricTypeInPlan, metricType, "metric type not match")
 	}
 
 	var fieldID C.int64_t

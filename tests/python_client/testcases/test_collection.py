@@ -4305,6 +4305,8 @@ class TestCollectionMultipleVectorValid(TestcaseBase):
         schema = cf.gen_collection_schema(fields=int_fields, auto_id=auto_id, shards_num=shards_num)
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.check_collection_property,
                                              check_items={exp_name: c_name, exp_schema: schema})
+        self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.check_collection_property,
+                                             check_items={exp_name: c_name, exp_schema: schema})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("primary_key", [ct.default_int64_field_name, ct.default_string_field_name])

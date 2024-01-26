@@ -35,8 +35,13 @@ class Collection {
     }
 
     IndexMetaPtr&
-    GetIndexMeta() {
+    get_index_meta() {
         return index_meta_;
+    }
+
+    void
+    set_index_meta(const IndexMetaPtr index_meta) {
+        index_meta_ = index_meta;
     }
 
     const std::string_view

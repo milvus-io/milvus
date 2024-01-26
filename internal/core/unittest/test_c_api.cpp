@@ -3059,7 +3059,8 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
 
     std::string schema_string = generate_collection_schema(
         knowhere::metric::JACCARD, DIM, VectorType::BinaryVector);
-    auto collection = NewCollection(schema_string.c_str());
+    auto collection =
+        NewCollection(schema_string.c_str(), knowhere::metric::JACCARD);
     auto schema = ((segcore::Collection*)collection)->get_schema();
     CSegmentInterface segment;
     auto status = NewSegment(collection, Growing, -1, &segment);
@@ -3240,7 +3241,8 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
 
     std::string schema_string = generate_collection_schema(
         knowhere::metric::JACCARD, DIM, VectorType::BinaryVector);
-    auto collection = NewCollection(schema_string.c_str());
+    auto collection =
+        NewCollection(schema_string.c_str(), knowhere::metric::JACCARD);
     auto schema = ((segcore::Collection*)collection)->get_schema();
     CSegmentInterface segment;
     auto status = NewSegment(collection, Growing, -1, &segment);
@@ -3421,7 +3423,8 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
 
     std::string schema_string = generate_collection_schema(
         knowhere::metric::JACCARD, DIM, VectorType::BinaryVector);
-    auto collection = NewCollection(schema_string.c_str());
+    auto collection =
+        NewCollection(schema_string.c_str(), knowhere::metric::JACCARD);
     auto schema = ((segcore::Collection*)collection)->get_schema();
     CSegmentInterface segment;
     auto status = NewSegment(collection, Growing, -1, &segment);
@@ -3618,7 +3621,8 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
 
     std::string schema_string = generate_collection_schema(
         knowhere::metric::JACCARD, DIM, VectorType::BinaryVector);
-    auto collection = NewCollection(schema_string.c_str());
+    auto collection =
+        NewCollection(schema_string.c_str(), knowhere::metric::JACCARD);
     auto schema = ((segcore::Collection*)collection)->get_schema();
     CSegmentInterface segment;
     auto status = NewSegment(collection, Growing, -1, &segment);
@@ -4512,7 +4516,8 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_WHEN_IP) {
 }
 
 TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_IP) {
-    auto c_collection = NewCollection(get_default_schema_config());
+    auto c_collection =
+        NewCollection(get_default_schema_config(), knowhere::metric::IP);
     CSegmentInterface segment;
     auto status = NewSegment(c_collection, Growing, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
@@ -5156,7 +5161,8 @@ TEST(CApiTest, Indexing_Without_Predicate_bfloat16) {
 }
 
 TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_IP_FLOAT16) {
-    auto c_collection = NewCollection(get_float16_schema_config());
+    auto c_collection =
+        NewCollection(get_float16_schema_config(), knowhere::metric::IP);
     CSegmentInterface segment;
     auto status = NewSegment(c_collection, Growing, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
@@ -5220,7 +5226,8 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_IP_FLOAT16) {
 }
 
 TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_IP_BFLOAT16) {
-    auto c_collection = NewCollection(get_bfloat16_schema_config());
+    auto c_collection =
+        NewCollection(get_bfloat16_schema_config(), knowhere::metric::IP);
     CSegmentInterface segment;
     auto status = NewSegment(c_collection, Growing, -1, &segment);
     ASSERT_EQ(status.error_code, Success);

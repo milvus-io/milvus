@@ -168,7 +168,7 @@ GroupIteratorResult(
     auto dis_closer = [&](float l, float r) {
         if (PositivelyRelated(metrics_type))
             return l > r;
-        return l <= r;
+        return l < r;
     };
     while (iterator->HasNext() && groupMap.size() < topK) {
         auto [offset, dis] = iterator->Next();
@@ -191,8 +191,8 @@ GroupIteratorResult(
 
     //4. save groupBy results
     group_by_values.reserve(sortedGroupVals.size());
-    offsets.push_back(sortedGroupVals.size());
-    distances.push_back(sortedGroupVals.size());
+    offsets.reserve(sortedGroupVals.size());
+    distances.reserve(sortedGroupVals.size());
     for (auto iter = sortedGroupVals.cbegin(); iter != sortedGroupVals.cend();
          iter++) {
         group_by_values.emplace_back(iter->first);

@@ -30,6 +30,7 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"strings"
 	"sync"
 	"unsafe"
 
@@ -1115,10 +1116,19 @@ func (s *LocalSegment) LoadIndex(ctx context.Context, indexInfo *querypb.FieldIn
 		return errors.New(errMsg)
 	}
 
-	return s.LoadIndexInfo(ctx, indexInfo, loadIndexInfo)
+	err = s.UpdateIndexInfo(ctx, indexInfo, loadIndexInfo)
+	if err != nil {
+		return err
+	}
+
+	if !typeutil.IsVectorType(fieldType) || s.HasRawData(indexInfo.GetFieldID()) {
+		return nil
+	}
+	s.WarmupChunkCache(ctx, indexInfo.GetFieldID())
+	return nil
 }
 
-func (s *LocalSegment) LoadIndexInfo(ctx context.Context, indexInfo *querypb.FieldIndexInfo, info *LoadIndexInfo) error {
+func (s *LocalSegment) UpdateIndexInfo(ctx context.Context, indexInfo *querypb.FieldIndexInfo, info *LoadIndexInfo) error {
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", s.Collection()),
 		zap.Int64("partitionID", s.Partition()),
@@ -1133,7 +1143,7 @@ func (s *LocalSegment) LoadIndexInfo(ctx context.Context, indexInfo *querypb.Fie
 	}
 
 	var status C.CStatus
-	GetLoadPool().Submit(func() (any, error) {
+	GetDynamicPool().Submit(func() (any, error) {
 		status = C.UpdateSealedSegmentIndex(s.ptr, info.cLoadIndexInfo)
 		return nil, nil
 	}).Await()
@@ -1153,8 +1163,57 @@ func (s *LocalSegment) LoadIndexInfo(ctx context.Context, indexInfo *querypb.Fie
 		IndexInfo: indexInfo,
 	})
 	log.Info("updateSegmentIndex done")
-
 	return nil
+}
+
+func (s *LocalSegment) WarmupChunkCache(ctx context.Context, fieldID int64) {
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", s.Collection()),
+		zap.Int64("partitionID", s.Partition()),
+		zap.Int64("segmentID", s.ID()),
+		zap.Int64("fieldID", fieldID),
+	)
+	s.ptrLock.RLock()
+	defer s.ptrLock.RUnlock()
+
+	if s.ptr == nil {
+		return
+	}
+
+	var status C.CStatus
+
+	warmingUp := strings.ToLower(paramtable.Get().QueryNodeCfg.ChunkCacheWarmingUp.GetValue())
+	switch warmingUp {
+	case "sync":
+		GetLoadPool().Submit(func() (any, error) {
+			cFieldID := C.int64_t(fieldID)
+			status = C.WarmupChunkCache(s.ptr, cFieldID)
+			if err := HandleCStatus(ctx, &status, "warming up chunk cache failed"); err != nil {
+				log.Warn("warming up chunk cache synchronously failed", zap.Error(err))
+				return nil, err
+			}
+			log.Info("warming up chunk cache synchronously done")
+			return nil, nil
+		}).Await()
+	case "async":
+		GetLoadPool().Submit(func() (any, error) {
+			s.ptrLock.RLock()
+			defer s.ptrLock.RUnlock()
+			if s.ptr == nil {
+				return nil, nil
+			}
+			cFieldID := C.int64_t(fieldID)
+			status = C.WarmupChunkCache(s.ptr, cFieldID)
+			if err := HandleCStatus(ctx, &status, ""); err != nil {
+				log.Warn("warming up chunk cache asynchronously failed", zap.Error(err))
+				return nil, err
+			}
+			log.Info("warming up chunk cache asynchronously done")
+			return nil, nil
+		})
+	default:
+		// no warming up
+	}
 }
 
 func (s *LocalSegment) UpdateFieldRawDataSize(ctx context.Context, numRows int64, fieldBinlog *datapb.FieldBinlog) error {

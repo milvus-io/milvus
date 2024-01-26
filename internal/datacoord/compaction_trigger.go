@@ -701,6 +701,9 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, force bool, i
 					FieldBinlogs:        s.GetBinlogs(),
 					Field2StatslogPaths: s.GetStatslogs(),
 					Deltalogs:           s.GetDeltalogs(),
+					Level:               s.GetLevel(),
+					CollectionID:        s.GetCollectionID(),
+					PartitionID:         s.GetPartitionID(),
 				}
 				plan.TotalRows += s.GetNumOfRows()
 				plan.SegmentBinlogs = append(plan.SegmentBinlogs, segmentBinLogs)

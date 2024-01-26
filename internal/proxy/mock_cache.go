@@ -1039,39 +1039,6 @@ func (_c *MockCache_UpdateCredential_Call) RunAndReturn(run func(*internalpb.Cre
 	return _c
 }
 
-// expireShardLeaderCache provides a mock function with given fields: ctx
-func (_m *MockCache) expireShardLeaderCache(ctx context.Context) {
-	_m.Called(ctx)
-}
-
-// MockCache_expireShardLeaderCache_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'expireShardLeaderCache'
-type MockCache_expireShardLeaderCache_Call struct {
-	*mock.Call
-}
-
-// expireShardLeaderCache is a helper method to define mock.On call
-//   - ctx context.Context
-func (_e *MockCache_Expecter) expireShardLeaderCache(ctx interface{}) *MockCache_expireShardLeaderCache_Call {
-	return &MockCache_expireShardLeaderCache_Call{Call: _e.mock.On("expireShardLeaderCache", ctx)}
-}
-
-func (_c *MockCache_expireShardLeaderCache_Call) Run(run func(ctx context.Context)) *MockCache_expireShardLeaderCache_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context))
-	})
-	return _c
-}
-
-func (_c *MockCache_expireShardLeaderCache_Call) Return() *MockCache_expireShardLeaderCache_Call {
-	_c.Call.Return()
-	return _c
-}
-
-func (_c *MockCache_expireShardLeaderCache_Call) RunAndReturn(run func(context.Context)) *MockCache_expireShardLeaderCache_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // NewMockCache creates a new instance of MockCache. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewMockCache(t interface {
