@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/samber/lo"
 )
 
 type BinlogIO interface {
@@ -47,24 +48,31 @@ func NewBinlogIO(cm storage.ChunkManager, ioPool *conc.Pool[any]) BinlogIO {
 func (b *BinlogIoImpl) Download(ctx context.Context, paths []string) ([][]byte, error) {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "Download")
 	defer span.End()
-	future := b.pool.Submit(func() (any, error) {
-		var vs [][]byte
-		var err error
 
-		err = retry.Do(ctx, func() error {
-			vs, err = b.MultiRead(ctx, paths)
-			return err
+	futures := make([]*conc.Future[any], 0, len(paths))
+	for _, path := range paths {
+		future := b.pool.Submit(func() (any, error) {
+			var val []byte
+			var err error
+
+			err = retry.Do(ctx, func() error {
+				val, err = b.Read(ctx, path)
+				return err
+			})
+
+			return val, err
 		})
+		futures = append(futures, future)
+	}
 
-		return vs, err
-	})
-
-	vs, err := future.Await()
+	err := conc.AwaitAll(futures...) // future.Await()
 	if err != nil {
 		return nil, err
 	}
 
-	return vs.([][]byte), nil
+	return lo.Map(futures, func(future *conc.Future[any], _ int) []byte {
+		return future.Value().([]byte)
+	}), nil
 }
 
 func (b *BinlogIoImpl) Upload(ctx context.Context, kvs map[string][]byte) error {
