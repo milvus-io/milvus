@@ -2226,7 +2226,7 @@ func (s *CompactionTriggerSuite) TestHandleSignal() {
 		defer s.SetupTest()
 		tr := s.tr
 		s.compactionHandler.EXPECT().isFull().Return(false)
-		//s.allocator.EXPECT().allocTimestamp(mock.Anything).Return(10000, nil)
+		// s.allocator.EXPECT().allocTimestamp(mock.Anything).Return(10000, nil)
 		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(nil, errors.New("mocked"))
 		tr.handleSignal(&compactionSignal{
 			segmentID:    1,
