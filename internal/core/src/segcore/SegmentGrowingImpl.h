@@ -278,7 +278,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
     void
     check_search(const query::Plan* plan) const override {
         Assert(plan);
-        check_metric_type(plan, index_meta_);
     }
 
     const ConcurrentVector<Timestamp>&
