@@ -1110,9 +1110,22 @@ GenRandomIds(int rows, int64_t seed = 42) {
 }
 
 inline CCollection
-NewCollection(const char* schema_proto_blob) {
+NewCollection(const char* schema_proto_blob,
+              const MetricType metric_type = knowhere::metric::L2) {
     auto proto = std::string(schema_proto_blob);
     auto collection = std::make_unique<milvus::segcore::Collection>(proto);
+    auto schema = collection->get_schema();
+    milvus::proto::segcore::CollectionIndexMeta col_index_meta;
+    for (auto field : schema->get_fields()) {
+        auto field_index_meta = col_index_meta.add_index_metas();
+        auto index_param = field_index_meta->add_index_params();
+        index_param->set_key("metric_type");
+        index_param->set_value(metric_type);
+        field_index_meta->set_fieldid(field.first.get());
+    }
+
+    collection->set_index_meta(
+        std::make_shared<CollectionIndexMeta>(col_index_meta));
     return (void*)collection.release();
 }
 

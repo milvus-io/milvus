@@ -166,7 +166,7 @@ func (suite *ReduceSuite) TestReduceAllFunc() {
 	proto.UnmarshalText(planStr, &planpb)
 	serializedPlan, err := proto.Marshal(&planpb)
 	suite.NoError(err)
-	plan, err := createSearchPlanByExpr(context.Background(), suite.collection, serializedPlan, "")
+	plan, err := createSearchPlanByExpr(context.Background(), suite.collection, serializedPlan)
 	suite.NoError(err)
 	searchReq, err := parseSearchRequest(context.Background(), plan, placeGroupByte)
 	searchReq.mvccTimestamp = typeutil.MaxTimestamp

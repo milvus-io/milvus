@@ -2926,7 +2926,7 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	p.MaxParallelSyncMgrTasks = ParamItem{
 		Key:          "dataNode.dataSync.maxParallelSyncMgrTasks",
 		Version:      "2.3.4",
-		DefaultValue: "64",
+		DefaultValue: "256",
 		Doc:          "The max concurrent sync task number of datanode sync mgr globally",
 		Export:       true,
 	}

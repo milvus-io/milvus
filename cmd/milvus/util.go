@@ -128,6 +128,7 @@ func GetMilvusRoles(args []string, flags *flag.FlagSet) *roles.MilvusRoles {
 	serverType := args[2]
 	role := roles.NewMilvusRoles()
 	role.Alias = alias
+	role.ServerType = serverType
 
 	switch serverType {
 	case typeutil.RootCoordRole:
@@ -166,7 +167,6 @@ func GetMilvusRoles(args []string, flags *flag.FlagSet) *roles.MilvusRoles {
 		role.EnableDataNode = enableDataNode
 		role.EnableIndexNode = enableIndexNode
 		role.EnableProxy = enableProxy
-		role.Mixture = true
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown server type = %s\n%s", serverType, getHelp())
 		os.Exit(-1)
