@@ -130,6 +130,7 @@ func ReduceSearchResultData(ctx context.Context, searchResultData []*schemapb.Se
 		for j := int64(1); j < nq; j++ {
 			resultOffsets[i][j] = resultOffsets[i][j-1] + searchResultData[i].Topks[j-1]
 		}
+		ret.AllSearchCount += searchResultData[i].GetAllSearchCount()
 	}
 
 	var skipDupCnt int64
@@ -284,6 +285,7 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 
 	validRetrieveResults := []*internalpb.RetrieveResults{}
 	for _, r := range retrieveResults {
+		ret.AllRetrieveCount += r.GetAllRetrieveCount()
 		size := typeutil.GetSizeOfIDs(r.GetIds())
 		if r == nil || len(r.GetFieldsData()) == 0 || size == 0 {
 			continue
@@ -388,6 +390,7 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 	validRetrieveResults := []*segcorepb.RetrieveResults{}
 	for _, r := range retrieveResults {
 		size := typeutil.GetSizeOfIDs(r.GetIds())
+		ret.AllRetrieveCount += r.GetAllRetrieveCount()
 		if r == nil || len(r.GetOffset()) == 0 || size == 0 {
 			log.Debug("filter out invalid retrieve result")
 			continue

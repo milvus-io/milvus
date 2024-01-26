@@ -71,6 +71,7 @@ empty_search_result(int64_t num_queries, SearchInfo& search_info) {
     SearchResult final_result;
     final_result.total_nq_ = num_queries;
     final_result.unity_topK_ = 0;  // no result
+    final_result.total_data_cnt_ = 0;
     return final_result;
 }
 
@@ -212,6 +213,7 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
                            timestamp_,
                            final_view,
                            search_result);
+    search_result.total_data_cnt_ = final_view.size();
     if (search_result.vector_iterators_.has_value()) {
         std::vector<GroupByValueType> group_by_values;
         GroupBy(search_result.vector_iterators_.value(),
@@ -239,6 +241,7 @@ wrap_num_entities(int64_t cnt) {
     auto scalar = arr.mutable_scalars();
     scalar->mutable_long_data()->mutable_data()->Add(cnt);
     retrieve_result->field_data_ = {arr};
+    retrieve_result->total_data_cnt_ = 0;
     return retrieve_result;
 }
 
@@ -249,6 +252,7 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
         dynamic_cast<const segcore::SegmentInternalInterface*>(&segment_);
     AssertInfo(segment, "Support SegmentSmallIndex Only");
     RetrieveResult retrieve_result;
+    retrieve_result.total_data_cnt_ = 0;
 
     auto active_count = segment->get_active_count(timestamp_);
 
@@ -295,10 +299,12 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
     if (node.is_count_) {
         auto cnt = bitset_holder.size() - bitset_holder.count();
         retrieve_result = *(wrap_num_entities(cnt));
+        retrieve_result.total_data_cnt_ = bitset_holder.size();
         retrieve_result_opt_ = std::move(retrieve_result);
         return;
     }
 
+    retrieve_result.total_data_cnt_ = bitset_holder.size();
     bool false_filtered_out = false;
     if (get_cache_offset) {
         segment->timestamp_filter(bitset_holder, cache_offsets, timestamp_);

@@ -348,12 +348,14 @@ ReduceHelper::GetSearchResultDataSlice(int slice_index) {
     auto nq_end = slice_nqs_prefix_sum_[slice_index + 1];
 
     int64_t result_count = 0;
+    int64_t all_search_count = 0;
     for (auto search_result : search_results_) {
         AssertInfo(search_result->topk_per_nq_prefix_sum_.size() ==
                        search_result->total_nq_ + 1,
                    "incorrect topk_per_nq_prefix_sum_ size in search result");
         result_count += search_result->topk_per_nq_prefix_sum_[nq_end] -
                         search_result->topk_per_nq_prefix_sum_[nq_begin];
+        all_search_count += search_result->total_data_cnt_;
     }
 
     auto search_result_data =
@@ -362,6 +364,8 @@ ReduceHelper::GetSearchResultDataSlice(int slice_index) {
     search_result_data->set_top_k(slice_topKs_[slice_index]);
     search_result_data->set_num_queries(nq_end - nq_begin);
     search_result_data->mutable_topks()->Resize(nq_end - nq_begin, 0);
+
+    search_result_data->set_all_search_count(all_search_count);
 
     // `result_pairs` contains the SearchResult and result_offset info, used for filling output fields
     std::vector<std::pair<SearchResult*, int64_t>> result_pairs(result_count);

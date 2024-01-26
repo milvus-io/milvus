@@ -139,6 +139,31 @@ func (s *Server) getSystemInfoMetrics(
 	return resp, nil
 }
 
+func (s *Server) getCollectionStorageMetrics() (*milvuspb.GetMetricsResponse, error) {
+	coordTopology := metricsinfo.DataCoordTopology{
+		Cluster: metricsinfo.DataClusterTopology{
+			Self: s.getDataCoordMetrics(),
+		},
+		Connections: metricsinfo.ConnTopology{
+			Name:                metricsinfo.ConstructComponentName(typeutil.DataCoordRole, paramtable.GetNodeID()),
+			ConnectedComponents: []metricsinfo.ConnectionInfo{},
+		},
+	}
+
+	resp := &milvuspb.GetMetricsResponse{
+		Status:        merr.Success(),
+		ComponentName: metricsinfo.ConstructComponentName(typeutil.DataCoordRole, paramtable.GetNodeID()),
+	}
+	var err error
+	resp.Response, err = metricsinfo.MarshalTopology(coordTopology)
+	if err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+
+	return resp, nil
+}
+
 // getDataCoordMetrics composes datacoord infos
 func (s *Server) getDataCoordMetrics(ctx context.Context) metricsinfo.DataCoordInfos {
 	ret := metricsinfo.DataCoordInfos{

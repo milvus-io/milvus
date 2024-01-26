@@ -118,9 +118,10 @@ func retrieveOnSegmentsWithStream(ctx context.Context, segments []Segment, segTy
 
 			if len(result.GetOffset()) != 0 {
 				if err = svr.Send(&internalpb.RetrieveResults{
-					Status:     merr.Success(),
-					Ids:        result.GetIds(),
-					FieldsData: result.GetFieldsData(),
+					Status:           merr.Success(),
+					Ids:              result.GetIds(),
+					FieldsData:       result.GetFieldsData(),
+					AllRetrieveCount: result.GetAllRetrieveCount(),
 				}); err != nil {
 					errs[i] = err
 				}

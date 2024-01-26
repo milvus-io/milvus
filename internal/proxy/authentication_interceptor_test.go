@@ -10,6 +10,7 @@ import (
 	"google.golang.org/grpc/metadata"
 
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -140,5 +141,5 @@ func TestAuthenticationInterceptor(t *testing.T) {
 		user, _ := parseMD(rawToken)
 		assert.Equal(t, "mockUser", user)
 	}
-	hoo = defaultHook{}
+	hoo = hookutil.DefaultHook{}
 }

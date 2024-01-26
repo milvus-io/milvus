@@ -881,3 +881,149 @@ func TestMetaCache_AllocID(t *testing.T) {
 		assert.Equal(t, id, int64(0))
 	})
 }
+
+func TestGlobalMetaCache_UpdateDBInfo(t *testing.T) {
+	rootCoord := mocks.NewMockRootCoordClient(t)
+	queryCoord := mocks.NewMockQueryCoordClient(t)
+	shardMgr := newShardClientMgr()
+	ctx := context.Background()
+
+	cache, err := NewMetaCache(rootCoord, queryCoord, shardMgr)
+	assert.NoError(t, err)
+
+	t.Run("fail to list db", func(t *testing.T) {
+		rootCoord.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Code:      500,
+			},
+		}, nil).Once()
+		err := cache.updateDBInfo(ctx)
+		assert.Error(t, err)
+	})
+
+	t.Run("fail to list collection", func(t *testing.T) {
+		rootCoord.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+			DbNames: []string{"db1"},
+		}, nil).Once()
+		rootCoord.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&milvuspb.ShowCollectionsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Code:      500,
+			},
+		}, nil).Once()
+		err := cache.updateDBInfo(ctx)
+		assert.Error(t, err)
+	})
+
+	t.Run("success", func(t *testing.T) {
+		rootCoord.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+			DbNames: []string{"db1"},
+		}, nil).Once()
+		rootCoord.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&milvuspb.ShowCollectionsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+			CollectionNames: []string{"collection1"},
+			CollectionIds:   []int64{1},
+		}, nil).Once()
+		err := cache.updateDBInfo(ctx)
+		assert.NoError(t, err)
+		assert.Len(t, cache.dbInfo, 1)
+		assert.Len(t, cache.dbInfo["db1"], 1)
+		assert.Equal(t, "collection1", cache.dbInfo["db1"][1])
+	})
+}
+
+func TestGlobalMetaCache_GetCollectionNamesByID(t *testing.T) {
+	rootCoord := mocks.NewMockRootCoordClient(t)
+	queryCoord := mocks.NewMockQueryCoordClient(t)
+	shardMgr := newShardClientMgr()
+	ctx := context.Background()
+
+	t.Run("fail to update db info", func(t *testing.T) {
+		rootCoord.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Code:      500,
+			},
+		}, nil).Once()
+
+		cache, err := NewMetaCache(rootCoord, queryCoord, shardMgr)
+		assert.NoError(t, err)
+
+		_, _, err = cache.GetCollectionNamesByID(ctx, []int64{1})
+		assert.Error(t, err)
+	})
+
+	t.Run("not found collection", func(t *testing.T) {
+		rootCoord.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+			DbNames: []string{"db1"},
+		}, nil).Once()
+		rootCoord.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&milvuspb.ShowCollectionsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+			CollectionNames: []string{"collection1"},
+			CollectionIds:   []int64{1},
+		}, nil).Once()
+
+		cache, err := NewMetaCache(rootCoord, queryCoord, shardMgr)
+		assert.NoError(t, err)
+		_, _, err = cache.GetCollectionNamesByID(ctx, []int64{2})
+		assert.Error(t, err)
+	})
+
+	t.Run("not found collection 2", func(t *testing.T) {
+		rootCoord.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+			DbNames: []string{"db1"},
+		}, nil).Once()
+		rootCoord.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&milvuspb.ShowCollectionsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+			CollectionNames: []string{"collection1"},
+			CollectionIds:   []int64{1},
+		}, nil).Once()
+
+		cache, err := NewMetaCache(rootCoord, queryCoord, shardMgr)
+		assert.NoError(t, err)
+		_, _, err = cache.GetCollectionNamesByID(ctx, []int64{1, 2})
+		assert.Error(t, err)
+	})
+
+	t.Run("success", func(t *testing.T) {
+		rootCoord.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+			DbNames: []string{"db1"},
+		}, nil).Once()
+		rootCoord.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&milvuspb.ShowCollectionsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+			CollectionNames: []string{"collection1", "collection2"},
+			CollectionIds:   []int64{1, 2},
+		}, nil).Once()
+
+		cache, err := NewMetaCache(rootCoord, queryCoord, shardMgr)
+		assert.NoError(t, err)
+		dbNames, collectionNames, err := cache.GetCollectionNamesByID(ctx, []int64{1, 2})
+		assert.NoError(t, err)
+		assert.Equal(t, []string{"collection1", "collection2"}, collectionNames)
+		assert.Equal(t, []string{"db1", "db1"}, dbNames)
+	})
+}

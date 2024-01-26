@@ -189,6 +189,7 @@ struct SearchResult {
  public:
     int64_t total_nq_;
     int64_t unity_topK_;
+    int64_t total_data_cnt_;
     void* segment_;
 
     // first fill data during search, and then update data after reducing search results
@@ -223,6 +224,7 @@ struct RetrieveResult {
     RetrieveResult() = default;
 
  public:
+    int64_t total_data_cnt_;
     void* segment_;
     std::vector<int64_t> result_offsets_;
     std::vector<DataArray> field_data_;

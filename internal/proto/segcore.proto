@@ -9,6 +9,7 @@ message RetrieveResults {
   schema.IDs ids = 1;
   repeated int64 offset = 2;
   repeated schema.FieldData fields_data = 3;
+  int64 all_retrieve_count = 4;
 }
 
 message LoadFieldMeta {

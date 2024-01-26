@@ -902,6 +902,11 @@ func GetCurUserFromContext(ctx context.Context) (string, error) {
 	return username, nil
 }
 
+func GetCurUserFromContextOrDefault(ctx context.Context) string {
+	username, _ := GetCurUserFromContext(ctx)
+	return username
+}
+
 func GetCurDBNameFromContextOrDefault(ctx context.Context) string {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
@@ -1632,4 +1637,17 @@ func CheckDatabase(ctx context.Context, dbName string) bool {
 		return globalMetaCache.HasDatabase(ctx, dbName)
 	}
 	return false
+}
+
+func SetReportValue(status *commonpb.Status, value int) {
+	if value <= 0 {
+		return
+	}
+	if !merr.Ok(status) {
+		return
+	}
+	if status.ExtraInfo == nil {
+		status.ExtraInfo = make(map[string]string)
+	}
+	status.ExtraInfo["report_value"] = strconv.Itoa(value)
 }

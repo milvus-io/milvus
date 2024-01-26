@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/suite"
@@ -28,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -77,6 +79,27 @@ func (s *HelloMilvusSuite) TestHelloMilvus() {
 
 	fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
 	hashKeys := integration.GenerateHashKeys(rowNum)
+	insertCheckReport := func() {
+		timeoutCtx, cancelFunc := context.WithTimeout(ctx, 5*time.Second)
+		defer cancelFunc()
+
+		for {
+			select {
+			case <-timeoutCtx.Done():
+				s.Fail("insert check timeout")
+			case report := <-c.Extension.GetReportChan():
+				reportInfo := report.(map[string]any)
+				log.Info("insert report info", zap.Any("reportInfo", reportInfo))
+				if reportInfo[hookutil.OpTypeKey] == hookutil.OpTypeStorage {
+					continue
+				}
+				s.Equal(hookutil.OpTypeInsert, reportInfo[hookutil.OpTypeKey])
+				s.NotEqualValues(0, reportInfo[hookutil.DataSizeKey])
+				return
+			}
+		}
+	}
+	go insertCheckReport()
 	insertResult, err := c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
@@ -145,6 +168,28 @@ func (s *HelloMilvusSuite) TestHelloMilvus() {
 	searchReq := integration.ConstructSearchRequest("", collectionName, expr,
 		integration.FloatVecField, schemapb.DataType_FloatVector, nil, metric.L2, params, nq, dim, topk, roundDecimal)
 
+	searchCheckReport := func() {
+		timeoutCtx, cancelFunc := context.WithTimeout(ctx, 5*time.Second)
+		defer cancelFunc()
+
+		for {
+			select {
+			case <-timeoutCtx.Done():
+				s.Fail("search check timeout")
+			case report := <-c.Extension.GetReportChan():
+				reportInfo := report.(map[string]any)
+				log.Info("search report info", zap.Any("reportInfo", reportInfo))
+				if reportInfo[hookutil.OpTypeKey] == hookutil.OpTypeStorage {
+					continue
+				}
+				s.Equal(hookutil.OpTypeSearch, reportInfo[hookutil.OpTypeKey])
+				s.NotEqualValues(0, reportInfo[hookutil.DataSizeKey])
+				s.EqualValues(rowNum, reportInfo[hookutil.RelatedCntKey])
+				return
+			}
+		}
+	}
+	go searchCheckReport()
 	searchResult, err := c.Proxy.Search(ctx, searchReq)
 
 	err = merr.CheckRPCCall(searchResult, err)
@@ -161,6 +206,73 @@ func (s *HelloMilvusSuite) TestHelloMilvus() {
 	})
 	err = merr.CheckRPCCall(status, err)
 	s.NoError(err)
+
+	queryCheckReport := func() {
+		timeoutCtx, cancelFunc := context.WithTimeout(ctx, 5*time.Second)
+		defer cancelFunc()
+
+		for {
+			select {
+			case <-timeoutCtx.Done():
+				s.Fail("query check timeout")
+			case report := <-c.Extension.GetReportChan():
+				reportInfo := report.(map[string]any)
+				log.Info("query report info", zap.Any("reportInfo", reportInfo))
+				if reportInfo[hookutil.OpTypeKey] == hookutil.OpTypeStorage {
+					continue
+				}
+				s.Equal(hookutil.OpTypeQuery, reportInfo[hookutil.OpTypeKey])
+				s.NotEqualValues(0, reportInfo[hookutil.DataSizeKey])
+				s.EqualValues(rowNum, reportInfo[hookutil.RelatedCntKey])
+				return
+			}
+		}
+	}
+	go queryCheckReport()
+	queryResult, err := c.Proxy.Query(ctx, &milvuspb.QueryRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Expr:           "",
+		OutputFields:   []string{"count(*)"},
+	})
+	if queryResult.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+		log.Warn("searchResult fail reason", zap.String("reason", queryResult.GetStatus().GetReason()))
+	}
+	s.NoError(err)
+	s.Equal(commonpb.ErrorCode_Success, queryResult.GetStatus().GetErrorCode())
+
+	deleteCheckReport := func() {
+		timeoutCtx, cancelFunc := context.WithTimeout(ctx, 5*time.Second)
+		defer cancelFunc()
+
+		for {
+			select {
+			case <-timeoutCtx.Done():
+				s.Fail("delete check timeout")
+			case report := <-c.Extension.GetReportChan():
+				reportInfo := report.(map[string]any)
+				log.Info("delete report info", zap.Any("reportInfo", reportInfo))
+				if reportInfo[hookutil.OpTypeKey] == hookutil.OpTypeStorage {
+					continue
+				}
+				s.Equal(hookutil.OpTypeDelete, reportInfo[hookutil.OpTypeKey])
+				s.EqualValues(2, reportInfo[hookutil.SuccessCntKey])
+				s.EqualValues(0, reportInfo[hookutil.RelatedCntKey])
+				return
+			}
+		}
+	}
+	go deleteCheckReport()
+	deleteResult, err := c.Proxy.Delete(ctx, &milvuspb.DeleteRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Expr:           integration.Int64Field + " in [1, 2]",
+	})
+	if deleteResult.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+		log.Warn("deleteResult fail reason", zap.String("reason", deleteResult.GetStatus().GetReason()))
+	}
+	s.NoError(err)
+	s.Equal(commonpb.ErrorCode_Success, deleteResult.GetStatus().GetErrorCode())
 
 	log.Info("TestHelloMilvus succeed")
 }
