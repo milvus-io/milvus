@@ -51,6 +51,7 @@ func (b *BinlogIoImpl) Download(ctx context.Context, paths []string) ([][]byte, 
 
 	futures := make([]*conc.Future[any], 0, len(paths))
 	for _, path := range paths {
+		path := path
 		future := b.pool.Submit(func() (any, error) {
 			var val []byte
 			var err error
