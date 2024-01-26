@@ -73,11 +73,12 @@ func (s *SyncPolicySuite) TestSyncStalePolicy() {
 	s.Equal(0, len(ids), "")
 }
 
-func (s *SyncPolicySuite) TestFlushingSegmentsPolicy() {
+func (s *SyncPolicySuite) TestSealedSegmentsPolicy() {
 	metacache := metacache.NewMockMetaCache(s.T())
-	policy := GetFlushingSegmentsPolicy(metacache)
+	policy := GetSealedSegmentsPolicy(metacache)
 	ids := []int64{1, 2, 3}
 	metacache.EXPECT().GetSegmentIDsBy(mock.Anything).Return(ids)
+	metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything, mock.Anything).Return()
 
 	result := policy.SelectSegments([]*segmentBuffer{}, tsoutil.ComposeTSByTime(time.Now(), 0))
 	s.ElementsMatch(ids, result)

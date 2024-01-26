@@ -22,23 +22,24 @@ std::shared_ptr<ColumnBase>
 ChunkCache::Read(const std::string& filepath) {
     auto path = std::filesystem::path(path_prefix_) / filepath;
 
-    ColumnTable::const_accessor ca;
-    if (columns_.find(ca, path)) {
-        return ca->second;
+    {
+        std::shared_lock lck(mutex_);
+        auto it = columns_.find(path);
+        if (it != columns_.end()) {
+            AssertInfo(it->second, "unexpected null column, file={}", filepath);
+            return it->second;
+        }
     }
-    ca.release();
 
     auto field_data = DownloadAndDecodeRemoteFile(cm_.get(), filepath);
-    auto column = Mmap(path, field_data->GetFieldData());
-    auto ok =
-        madvise(reinterpret_cast<void*>(const_cast<char*>(column->Data())),
-                column->ByteSize(),
-                read_ahead_policy_);
-    AssertInfo(ok == 0,
-               fmt::format("failed to madvise to the data file {}, err: {}",
-                           path.c_str(),
-                           strerror(errno)));
 
+    std::unique_lock lck(mutex_);
+    auto it = columns_.find(path);
+    if (it != columns_.end()) {
+        return it->second;
+    }
+    auto column = Mmap(path, field_data->GetFieldData());
+    AssertInfo(column, "unexpected null column, file={}", filepath);
     columns_.emplace(path, column);
     return column;
 }
@@ -46,32 +47,34 @@ ChunkCache::Read(const std::string& filepath) {
 void
 ChunkCache::Remove(const std::string& filepath) {
     auto path = std::filesystem::path(path_prefix_) / filepath;
+    std::unique_lock lck(mutex_);
     columns_.erase(path);
 }
 
 void
 ChunkCache::Prefetch(const std::string& filepath) {
     auto path = std::filesystem::path(path_prefix_) / filepath;
-    ColumnTable::const_accessor ca;
-    if (!columns_.find(ca, path)) {
+
+    std::shared_lock lck(mutex_);
+    auto it = columns_.find(path);
+    if (it == columns_.end()) {
         return;
     }
-    auto column = ca->second;
+
+    auto column = it->second;
     auto ok =
         madvise(reinterpret_cast<void*>(const_cast<char*>(column->Data())),
                 column->ByteSize(),
                 read_ahead_policy_);
     AssertInfo(ok == 0,
-               fmt::format("failed to madvise to the data file {}, err: {}",
-                           path.c_str(),
-                           strerror(errno)));
+               "failed to madvise to the data file {}, err: {}",
+               path.c_str(),
+               strerror(errno));
 }
 
 std::shared_ptr<ColumnBase>
 ChunkCache::Mmap(const std::filesystem::path& path,
                  const FieldDataPtr& field_data) {
-    std::unique_lock lck(mutex_);
-
     auto dir = path.parent_path();
     std::filesystem::create_directories(dir);
 
@@ -86,17 +89,18 @@ ChunkCache::Mmap(const std::filesystem::path& path,
     std::vector<std::vector<uint64_t>> element_indices{};
     auto written = WriteFieldData(file, data_type, field_data, element_indices);
     AssertInfo(written == data_size,
-               fmt::format("failed to write data file {}, written "
-                           "{} but total {}, err: {}",
-                           path.c_str(),
-                           written,
-                           data_size,
-                           strerror(errno)));
+               "failed to write data file {}, written "
+               "{} but total {}, err: {}",
+               path.c_str(),
+               written,
+               data_size,
+               strerror(errno));
 
     std::shared_ptr<ColumnBase> column{};
 
     if (datatype_is_variable(data_type)) {
-        AssertInfo(false, "TODO: unimplemented for variable data type");
+        AssertInfo(
+            false, "TODO: unimplemented for variable data type: {}", data_type);
     } else {
         column = std::make_shared<Column>(file, data_size, dim, data_type);
     }
@@ -104,9 +108,9 @@ ChunkCache::Mmap(const std::filesystem::path& path,
     // unlink
     auto ok = unlink(path.c_str());
     AssertInfo(ok == 0,
-               fmt::format("failed to unlink mmap data file {}, err: {}",
-                           path.c_str(),
-                           strerror(errno)));
+               "failed to unlink mmap data file {}, err: {}",
+               path.c_str(),
+               strerror(errno));
 
     return column;
 }

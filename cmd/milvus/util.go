@@ -24,7 +24,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -129,6 +128,7 @@ func GetMilvusRoles(args []string, flags *flag.FlagSet) *roles.MilvusRoles {
 	serverType := args[2]
 	role := roles.NewMilvusRoles()
 	role.Alias = alias
+	role.ServerType = serverType
 
 	switch serverType {
 	case typeutil.RootCoordRole:
@@ -158,7 +158,7 @@ func GetMilvusRoles(args []string, flags *flag.FlagSet) *roles.MilvusRoles {
 		role.EnableIndexNode = true
 		role.Local = true
 		role.Embedded = serverType == typeutil.EmbeddedRole
-	case RoleMixture:
+	case typeutil.MixtureRole:
 		role.EnableRootCoord = enableRootCoord
 		role.EnableQueryCoord = enableQueryCoord
 		role.EnableDataCoord = enableDataCoord
@@ -172,7 +172,6 @@ func GetMilvusRoles(args []string, flags *flag.FlagSet) *roles.MilvusRoles {
 		os.Exit(-1)
 	}
 
-	paramtable.SetRole(serverType)
 	return role
 }
 

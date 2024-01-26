@@ -147,6 +147,12 @@ using FieldName = fluent::NamedType<std::string,
                                     impl::FieldNameTag,
                                     fluent::Comparable,
                                     fluent::Hashable>;
+
+// field id -> (field name, field type, binlog paths)
+using OptFieldT = std::unordered_map<
+    int64_t,
+    std::tuple<std::string, milvus::DataType, std::vector<std::string>>>;
+
 // using FieldOffset = fluent::NamedType<int64_t, impl::FieldOffsetTag, fluent::Comparable, fluent::Hashable>;
 using SegOffset =
     fluent::NamedType<int64_t, impl::SegOffsetTag, fluent::Arithmetic>;

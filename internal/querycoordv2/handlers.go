@@ -356,13 +356,6 @@ func (s *Server) fillReplicaInfo(replica *meta.Replica, withShardNodes bool) (*m
 	return info, nil
 }
 
-func checkNodeAvailable(nodeID int64, info *session.NodeInfo) error {
-	if info == nil {
-		return merr.WrapErrNodeOffline(nodeID)
-	}
-	return nil
-}
-
 func filterDupLeaders(replicaManager *meta.ReplicaManager, leaders map[int64]*meta.LeaderView) map[int64]*meta.LeaderView {
 	type leaderID struct {
 		ReplicaID int64

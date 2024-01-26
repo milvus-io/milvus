@@ -138,6 +138,8 @@ type MilvusRoles struct {
 	Alias    string
 	Embedded bool
 
+	ServerType string
+
 	closed chan struct{}
 	once   sync.Once
 }
@@ -333,6 +335,7 @@ func (mr *MilvusRoles) Run() {
 			log.Error("Failed to set deploy mode: ", zap.Error(err))
 		}
 		paramtable.Init()
+		paramtable.SetRole(mr.ServerType)
 	}
 
 	expr.Init()

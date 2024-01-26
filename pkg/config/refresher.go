@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/log"
@@ -28,7 +29,7 @@ type refresher struct {
 	refreshInterval  time.Duration
 	intervalDone     chan struct{}
 	intervalInitOnce sync.Once
-	eh               EventHandler
+	eh               atomic.Pointer[EventHandler]
 
 	fetchFunc func() error
 	stopOnce  sync.Once
@@ -86,10 +87,24 @@ func (r *refresher) fireEvents(name string, source, target map[string]string) er
 		return err
 	}
 	// Generate OnEvent Callback based on the events created
-	if r.eh != nil {
+	ptr := r.eh.Load()
+	if ptr != nil && *ptr != nil {
 		for _, e := range events {
-			r.eh.OnEvent(e)
+			(*ptr).OnEvent(e)
 		}
 	}
 	return nil
+}
+
+func (r *refresher) SetEventHandler(eh EventHandler) {
+	r.eh.Store(&eh)
+}
+
+func (r *refresher) GetEventHandler() EventHandler {
+	var eh EventHandler
+	ptr := r.eh.Load()
+	if ptr != nil {
+		eh = *ptr
+	}
+	return eh
 }

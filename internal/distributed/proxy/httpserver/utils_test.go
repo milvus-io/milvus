@@ -340,10 +340,11 @@ func TestPrimaryField(t *testing.T) {
 	idStr = gjson.Get(jsonStr, "id")
 	rangeStr, err = convertRange(&primaryField, idStr)
 	assert.Equal(t, nil, err)
-	assert.Equal(t, "1,2,3", rangeStr)
-	filter, err = checkGetPrimaryKey(coll, idStr)
+	assert.Equal(t, `"1","2","3"`, rangeStr)
+	coll2 := generateCollectionSchema(schemapb.DataType_VarChar, false)
+	filter, err = checkGetPrimaryKey(coll2, idStr)
 	assert.Equal(t, nil, err)
-	assert.Equal(t, "book_id in [1,2,3]", filter)
+	assert.Equal(t, `book_id in ["1","2","3"]`, filter)
 }
 
 func TestInsertWithDynamicFields(t *testing.T) {

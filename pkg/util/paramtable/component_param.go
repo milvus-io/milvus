@@ -190,6 +190,7 @@ type commonConfig struct {
 	HighPriorityThreadCoreCoefficient   ParamItem `refreshable:"false"`
 	MiddlePriorityThreadCoreCoefficient ParamItem `refreshable:"false"`
 	LowPriorityThreadCoreCoefficient    ParamItem `refreshable:"false"`
+	EnableNodeFilteringOnPartitionKey   ParamItem `refreshable:"false"`
 	MaxDegree                           ParamItem `refreshable:"true"`
 	SearchListSize                      ParamItem `refreshable:"true"`
 	PQCodeBudgetGBRatio                 ParamItem `refreshable:"true"`
@@ -421,6 +422,13 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Export:       true,
 	}
 	p.IndexSliceSize.Init(base.mgr)
+
+	p.EnableNodeFilteringOnPartitionKey = ParamItem{
+		Key:          "common.nodeFiltering.enableOnPartitionKey",
+		Version:      "2.5.0",
+		DefaultValue: "false",
+	}
+	p.EnableNodeFilteringOnPartitionKey.Init(base.mgr)
 
 	p.MaxDegree = ParamItem{
 		Key:          "common.DiskIndex.MaxDegree",
@@ -1796,7 +1804,8 @@ type queryNodeConfig struct {
 	MmapDirPath      ParamItem `refreshable:"false"`
 
 	// chunk cache
-	ReadAheadPolicy ParamItem `refreshable:"false"`
+	ReadAheadPolicy     ParamItem `refreshable:"false"`
+	ChunkCacheWarmingUp ParamItem `refreshable:"true"`
 
 	GroupEnabled          ParamItem `refreshable:"true"`
 	MaxReceiveChanSize    ParamItem `refreshable:"false"`
@@ -2004,6 +2013,19 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		Doc:          "The read ahead policy of chunk cache, options: `normal, random, sequential, willneed, dontneed`",
 	}
 	p.ReadAheadPolicy.Init(base.mgr)
+
+	p.ChunkCacheWarmingUp = ParamItem{
+		Key:          "queryNode.cache.warmup",
+		Version:      "2.3.6",
+		DefaultValue: "async",
+		Doc: `options: async, sync, off. 
+Specifies the necessity for warming up the chunk cache. 
+1. If set to "sync" or "async," the original vector data will be synchronously/asynchronously loaded into the 
+chunk cache during the load process. This approach has the potential to substantially reduce query/search latency
+for a specific duration post-load, albeit accompanied by a concurrent increase in disk usage;
+2. If set to "off," original vector data will only be loaded into the chunk cache during search/query.`,
+	}
+	p.ChunkCacheWarmingUp.Init(base.mgr)
 
 	p.GroupEnabled = ParamItem{
 		Key:          "queryNode.grouping.enabled",
@@ -2866,7 +2888,7 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	p.MaxParallelSyncMgrTasks = ParamItem{
 		Key:          "dataNode.dataSync.maxParallelSyncMgrTasks",
 		Version:      "2.3.4",
-		DefaultValue: "64",
+		DefaultValue: "256",
 		Doc:          "The max concurrent sync task number of datanode sync mgr globally",
 		Export:       true,
 	}

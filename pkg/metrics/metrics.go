@@ -106,6 +106,9 @@ var (
 	// longTaskBuckets provides long task duration in milliseconds
 	longTaskBuckets = []float64{1, 100, 500, 1000, 5000, 10000, 20000, 50000, 100000, 250000, 500000, 1000000, 3600000, 5000000, 10000000} // unit milliseconds
 
+	// size provides size in byte
+	sizeBuckets = []float64{10000, 100000, 1000000, 100000000, 500000000, 1024000000, 2048000000, 4096000000, 10000000000, 50000000000} // unit byte
+
 	NumNodes = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
