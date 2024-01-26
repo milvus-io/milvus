@@ -1333,7 +1333,9 @@ func (suite *ServiceSuite) TestHybridSearch_Concurrent() {
 	futures := make([]*conc.Future[*querypb.HybridSearchResult], 0, concurrency)
 	for i := 0; i < concurrency; i++ {
 		future := conc.Go(func() (*querypb.HybridSearchResult, error) {
-			creq, err := suite.genCSearchRequest(30, schemapb.DataType_FloatVector, 107, defaultMetricType)
+			creq1, err := suite.genCSearchRequest(30, schemapb.DataType_FloatVector, 107, defaultMetricType)
+			suite.NoError(err)
+			creq2, err := suite.genCSearchRequest(30, schemapb.DataType_FloatVector, 107, defaultMetricType)
 			suite.NoError(err)
 			req := &querypb.HybridSearchRequest{
 				Req: &internalpb.HybridSearchRequest{
@@ -1344,10 +1346,7 @@ func (suite *ServiceSuite) TestHybridSearch_Concurrent() {
 					CollectionID:  suite.collectionID,
 					PartitionIDs:  suite.partitionIDs,
 					MvccTimestamp: typeutil.MaxTimestamp,
-					Reqs: []*internalpb.SearchRequest{
-						proto.Clone(creq).(*internalpb.SearchRequest),
-						proto.Clone(creq).(*internalpb.SearchRequest),
-					},
+					Reqs:          []*internalpb.SearchRequest{creq1, creq2},
 				},
 				DmlChannels: []string{suite.vchannel},
 			}
