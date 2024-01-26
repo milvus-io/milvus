@@ -25,6 +25,7 @@ import (
 	"github.com/spf13/cast"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
+	"golang.org/x/exp/maps"
 
 	"github.com/milvus-io/milvus/pkg/log"
 )
@@ -34,7 +35,6 @@ type FileSource struct {
 	files   []string
 	configs map[string]string
 
-	updateMu        sync.Mutex
 	configRefresher *refresher
 }
 
@@ -70,9 +70,7 @@ func (fs *FileSource) GetConfigurations() (map[string]string, error) {
 	fs.configRefresher.start(fs.GetSourceName())
 
 	fs.RLock()
-	for k, v := range fs.configs {
-		configMap[k] = v
-	}
+	maps.Copy(configMap, fs.configs)
 	fs.RUnlock()
 	return configMap, nil
 }
@@ -161,20 +159,22 @@ func (fs *FileSource) loadFromFile() error {
 // update souce config
 // make sure only update changes configs
 func (fs *FileSource) update(configs map[string]string) error {
-	// make sure config not change when fire event
-	fs.updateMu.Lock()
-	defer fs.updateMu.Unlock()
+	fs.RLock()
+	source := make(map[string]string)
+	maps.Copy(source, fs.configs)
+	fs.RUnlock()
 
-	fs.Lock()
-	events, err := PopulateEvents(fs.GetSourceName(), fs.configs, configs)
+	events, err := PopulateEvents(fs.GetSourceName(), source, configs)
 	if err != nil {
 		fs.Unlock()
 		log.Warn("generating event error", zap.Error(err))
 		return err
 	}
-	fs.configs = configs
-	fs.Unlock()
 
 	fs.configRefresher.fireEvents(events...)
+
+	fs.Lock()
+	defer fs.Unlock()
+	fs.configs = source
 	return nil
 }
