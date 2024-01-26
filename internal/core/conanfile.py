@@ -76,7 +76,7 @@ class MilvusConan(ConanFile):
             # Macos M1 cannot use jemalloc
             if self.settings.arch not in ("x86_64", "x86"):
                 del self.options["folly"].use_sse4_2
-
+            self.options["abseil"].shared = True
             self.options["arrow"].with_jemalloc = False
         if self.settings.arch == "armv8":
             self.options["openblas"].dynamic_arch = False
