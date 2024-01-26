@@ -445,7 +445,7 @@ dataNode:
     flowGraph:
       maxQueueLength: 16 # Maximum length of task queue in flowgraph
       maxParallelism: 1024 # Maximum number of tasks executed in parallel in the flowgraph
-    maxParallelSyncTaskNum: 6 # Maximum number of sync tasks executed in parallel in each flush manager
+    maxParallelSyncMgrTasks: 256 #The max concurrent sync task number of datanode sync mgr globally 
     skipMode:
       # when there are only timetick msg in flowgraph for a while (longer than coldTime),
       # flowGraph will turn on skip mode to skip most timeticks to reduce cost, especially there are a lot of channels
