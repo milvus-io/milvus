@@ -65,7 +65,7 @@ func (b *BinlogIoImpl) Download(ctx context.Context, paths []string) ([][]byte, 
 		futures = append(futures, future)
 	}
 
-	err := conc.AwaitAll(futures...) // future.Await()
+	err := conc.AwaitAll(futures...)
 	if err != nil {
 		return nil, err
 	}
