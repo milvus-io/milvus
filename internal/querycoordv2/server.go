@@ -19,6 +19,7 @@ package querycoordv2
 import (
 	"context"
 	"fmt"
+	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"os"
 	"sync"
 	"syscall"
@@ -467,6 +468,11 @@ func (s *Server) startServerLoop() {
 }
 
 func (s *Server) Stop() error {
+	if !s.stateCode.CompareAndSwap(commonpb.StateCode_Healthy, commonpb.StateCode_Abnormal) {
+		return nil
+	}
+	logutil.Logger(s.ctx).Warn("server shutdown")
+
 	// stop the components from outside to inside,
 	// to make the dependencies stopped working properly,
 	// cancel the server context first to stop receiving requests
@@ -476,50 +482,67 @@ func (s *Server) Stop() error {
 	// job scheduler -> checker controller -> task scheduler -> dist controller -> cluster -> session
 	// observers -> dist controller
 
-	if s.jobScheduler != nil {
-		log.Info("stop job scheduler...")
-		s.jobScheduler.Stop()
-	}
+	ctx, cancel := context.WithTimeout(c.ctx, Params.CommonCfg.CoordGracefulStopTimeout.GetAsDuration(time.Second))
+	defer cancel()
 
-	if s.checkerController != nil {
-		log.Info("stop checker controller...")
-		s.checkerController.Stop()
-	}
+	done := make(chan struct{})
 
-	if s.taskScheduler != nil {
-		log.Info("stop task scheduler...")
-		s.taskScheduler.Stop()
-	}
+	go func() {
+		defer close(done)
+		if s.jobScheduler != nil {
+			log.Info("stop job scheduler...")
+			s.jobScheduler.Stop()
+		}
 
-	log.Info("stop observers...")
-	if s.collectionObserver != nil {
-		s.collectionObserver.Stop()
-	}
-	if s.leaderObserver != nil {
-		s.leaderObserver.Stop()
-	}
-	if s.targetObserver != nil {
-		s.targetObserver.Stop()
-	}
-	if s.replicaObserver != nil {
-		s.replicaObserver.Stop()
-	}
-	if s.resourceObserver != nil {
-		s.resourceObserver.Stop()
-	}
+		if s.checkerController != nil {
+			log.Info("stop checker controller...")
+			s.checkerController.Stop()
+		}
 
-	if s.distController != nil {
-		log.Info("stop dist controller...")
-		s.distController.Stop()
-	}
+		if s.taskScheduler != nil {
+			log.Info("stop task scheduler...")
+			s.taskScheduler.Stop()
+		}
 
-	if s.cluster != nil {
-		log.Info("stop cluster...")
-		s.cluster.Stop()
-	}
+		log.Info("stop observers...")
+		if s.collectionObserver != nil {
+			s.collectionObserver.Stop()
+		}
+		if s.leaderObserver != nil {
+			s.leaderObserver.Stop()
+		}
+		if s.targetObserver != nil {
+			s.targetObserver.Stop()
+		}
+		if s.replicaObserver != nil {
+			s.replicaObserver.Stop()
+		}
+		if s.resourceObserver != nil {
+			s.resourceObserver.Stop()
+		}
 
-	if s.session != nil {
-		s.session.Stop()
+		if s.distController != nil {
+			log.Info("stop dist controller...")
+			s.distController.Stop()
+		}
+
+		if s.cluster != nil {
+			log.Info("stop cluster...")
+			s.cluster.Stop()
+		}
+
+		if s.session != nil {
+			s.session.Stop()
+		}
+		s.wg.Wait()
+	}()
+
+	select {
+	case <-ctx.Done():
+		// direct stop after certain time
+		panic("stopping querycoord took too long")
+	case <-done:
+		logutil.Logger(s.ctx).Warn("querycoord stop sucessfully")
 	}
 
 	s.wg.Wait()

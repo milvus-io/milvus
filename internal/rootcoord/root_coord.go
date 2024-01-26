@@ -788,18 +788,42 @@ func (c *Core) revokeSession() {
 
 // Stop stops rootCoord.
 func (c *Core) Stop() error {
-	c.UpdateStateCode(commonpb.StateCode_Abnormal)
-	c.stopExecutor()
-	c.stopScheduler()
-	if c.proxyManager != nil {
-		c.proxyManager.Stop()
+	if !c.stateCode.CompareAndSwap(commonpb.StateCode_Healthy, commonpb.StateCode_Abnormal) {
+		return nil
 	}
-	c.cancelIfNotNil()
-	if c.quotaCenter != nil {
-		c.quotaCenter.stop()
+	logutil.Logger(c.ctx).Warn("server shutdown")
+
+	ctx, cancel := context.WithTimeout(c.ctx, Params.CommonCfg.CoordGracefulStopTimeout.GetAsDuration(time.Second))
+	defer cancel()
+
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+		c.stopExecutor()
+		logutil.Logger(c.ctx).Warn("stop executor sucessfully")
+		c.stopScheduler()
+		logutil.Logger(c.ctx).Warn("stop scheduler sucessfully")
+		if c.proxyManager != nil {
+			c.proxyManager.Stop()
+		}
+		logutil.Logger(c.ctx).Warn("stop proxy manager sucessfully")
+		c.cancelIfNotNil()
+		if c.quotaCenter != nil {
+			c.quotaCenter.stop()
+		}
+		logutil.Logger(c.ctx).Warn("stop quotacenter sucessfully")
+		c.wg.Wait()
+		c.revokeSession()
+	}()
+
+	select {
+	case <-ctx.Done():
+		// direct stop after certain time
+		panic("stopping rootcoord took too long")
+	case <-done:
+		logutil.Logger(c.ctx).Warn("rootcoord stop sucessfully")
 	}
-	c.wg.Wait()
-	c.revokeSession()
 	return nil
 }
 
