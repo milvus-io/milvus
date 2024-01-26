@@ -32,7 +32,8 @@ const (
 	// DefaultIndexSliceSize defines the default slice size of index file when serializing.
 	DefaultIndexSliceSize                      = 16
 	DefaultGracefulTime                        = 5000 // ms
-	DefaultGracefulStopTimeout                 = 1800 // s
+	DefaultGracefulStopTimeout                 = 900  // s
+	DefaultCoordGracefulStopTimeout            = 5    // s
 	DefaultHighPriorityThreadCoreCoefficient   = 10
 	DefaultMiddlePriorityThreadCoreCoefficient = 5
 	DefaultLowPriorityThreadCoreCoefficient    = 1
@@ -200,6 +201,7 @@ type commonConfig struct {
 	BeamWidthRatio                      ParamItem `refreshable:"true"`
 	GracefulTime                        ParamItem `refreshable:"true"`
 	GracefulStopTimeout                 ParamItem `refreshable:"true"`
+	CoordGracefulStopTimeout            ParamItem `refreshable:"true"`
 
 	StorageType ParamItem `refreshable:"false"`
 	SimdType    ParamItem `refreshable:"false"`
@@ -504,6 +506,15 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Export:       true,
 	}
 	p.GracefulStopTimeout.Init(base.mgr)
+
+	p.CoordGracefulStopTimeout = ParamItem{
+		Key:          "common.coord.gracefulStopTimeout",
+		Version:      "2.3.7",
+		DefaultValue: strconv.Itoa(DefaultCoordGracefulStopTimeout),
+		Doc:          "seconds. it will force quit the server if the graceful stop process is not completed during this time.",
+		Export:       true,
+	}
+	p.CoordGracefulStopTimeout.Init(base.mgr)
 
 	p.StorageType = ParamItem{
 		Key:          "common.storageType",
