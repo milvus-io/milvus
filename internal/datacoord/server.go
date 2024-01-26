@@ -1049,23 +1049,48 @@ func (s *Server) Stop() error {
 	if !s.stateCode.CompareAndSwap(commonpb.StateCode_Healthy, commonpb.StateCode_Abnormal) {
 		return nil
 	}
-	logutil.Logger(s.ctx).Info("server shutdown")
-	s.cluster.Close()
-	s.garbageCollector.close()
-	s.stopServerLoop()
+	logutil.Logger(s.ctx).Warn("server shutdown")
 
-	if Params.DataCoordCfg.EnableCompaction.GetAsBool() {
-		s.stopCompactionTrigger()
-		s.stopCompactionHandler()
-	}
-	s.indexBuilder.Stop()
+	ctx, cancel := context.WithTimeout(context.Background(), Params.CommonCfg.CoordGracefulStopTimeout.GetAsDuration(time.Second))
+	defer cancel()
 
-	if s.session != nil {
-		s.session.Stop()
-	}
+	done := make(chan struct{})
 
-	if s.icSession != nil {
-		s.icSession.Stop()
+	go func() {
+		defer close(done)
+		s.garbageCollector.close()
+		logutil.Logger(s.ctx).Info("datacoord garbage collector stopped")
+
+		if Params.DataCoordCfg.EnableCompaction.GetAsBool() {
+			s.stopCompactionTrigger()
+			s.stopCompactionHandler()
+		}
+		logutil.Logger(s.ctx).Info("datacoord compaction stopped")
+
+		s.indexBuilder.Stop()
+		logutil.Logger(s.ctx).Info("datacoord index builder stopped")
+
+		s.cluster.Close()
+		logutil.Logger(s.ctx).Info("index builder stopped")
+
+		s.stopServerLoop()
+		logutil.Logger(s.ctx).Info("serverloop stopped")
+
+		if s.session != nil {
+			s.session.Stop()
+		}
+
+		if s.icSession != nil {
+			s.icSession.Stop()
+		}
+	}()
+
+	select {
+	case <-ctx.Done():
+		// direct stop after certain time
+		panic("stopping datacoord took too long")
+	case <-done:
+		logutil.Logger(s.ctx).Warn("datacoord stop sucessfully")
 	}
 
 	return nil
