@@ -62,6 +62,7 @@ set(MILVUS_TEST_FILES
         test_exec.cpp
         test_inverted_index.cpp
         test_group_by.cpp
+        test_regex_query_util.cpp
         test_regex_query.cpp
         )
 

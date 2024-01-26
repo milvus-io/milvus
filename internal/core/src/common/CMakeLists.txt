@@ -23,7 +23,7 @@ set(COMMON_SRC
         IndexMeta.cpp
         EasyAssert.cpp
         FieldData.cpp
-        Utils.cpp
+        RegexQuery.cpp
         )
 
 add_library(milvus_common SHARED ${COMMON_SRC})

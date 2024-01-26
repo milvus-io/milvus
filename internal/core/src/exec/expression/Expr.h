@@ -299,6 +299,8 @@ class SegmentExpr : public Expr {
                 if (!index.SupportRegexQuery() && !index.HasRawData()) {
                     return false;
                 }
+                // all chunks have same index.
+                return true;
             }
         }
 

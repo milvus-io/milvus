@@ -27,6 +27,7 @@
 #include "index/Meta.h"
 #include "segcore/SegmentInterface.h"
 #include "query/Utils.h"
+#include "common/RegexQuery.h"
 
 namespace milvus {
 namespace exec {
@@ -152,6 +153,41 @@ struct UnaryElementFuncForArray {
     }
 };
 
+template <typename T>
+struct IndexFuncForMatch {
+    typedef std::
+        conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
+            IndexInnerType;
+    using Index = index::ScalarIndex<IndexInnerType>;
+    FixedVector<bool>
+    operator()(Index* index, IndexInnerType val) {
+        if constexpr (!std::is_same_v<T, std::string_view> &&
+                      !std::is_same_v<T, std::string>) {
+            PanicInfo(Unsupported, "regex query is only supported on string");
+        } else {
+            auto reg = TranslatePatternMatchToRegex(val);
+            if (index->SupportRegexQuery()) {
+                return index->RegexQuery(reg);
+            }
+            if (!index->HasRawData()) {
+                PanicInfo(Unsupported,
+                          "index don't support regex query and don't have "
+                          "raw data");
+            }
+
+            // retrieve raw data to do brute force query, may be very slow.
+            auto cnt = index->Count();
+            std::regex r(reg);
+            TargetBitmap res(cnt);
+            for (int64_t i = 0; i < cnt; i++) {
+                auto raw = index->Reverse_Lookup(i);
+                res[i] = std::regex_match(raw, r);
+            }
+            return res;
+        }
+    }
+};
+
 template <typename T, proto::plan::OpType op>
 struct UnaryIndexFunc {
     typedef std::
@@ -179,31 +215,8 @@ struct UnaryIndexFunc {
             dataset->Set(milvus::index::PREFIX_VALUE, val);
             return index->Query(std::move(dataset));
         } else if constexpr (op == proto::plan::OpType::Match) {
-            if constexpr (!std::is_same_v<T, std::string_view> &&
-                          !std::is_same_v<T, std::string>) {
-                PanicInfo(Unsupported,
-                          "regex query is only supported on string");
-            } else {
-                auto reg = TranslatePatternMatchToRegex(val);
-                if (index->SupportRegexQuery()) {
-                    return index->RegexQuery(reg);
-                }
-                if (!index->HasRawData()) {
-                    PanicInfo(Unsupported,
-                              "index don't support regex query and don't have "
-                              "raw data");
-                }
-
-                // retrieve raw data to do brute force query, may be very slow.
-                auto cnt = index->Count();
-                std::regex r(reg);
-                TargetBitmap res(cnt);
-                for (int64_t i = 0; i < cnt; i++) {
-                    auto raw = index->Reverse_Lookup(i);
-                    res[i] = std::regex_match(raw, r);
-                }
-                return res;
-            }
+            IndexFuncForMatch<T> func;
+            return func(index, val);
         } else {
             PanicInfo(
                 OpTypeInvalid,
@@ -261,7 +274,7 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
 
     template <typename T>
     bool
-    CanUseIndexInner() const;
+    CanUseIndex() const;
 
  private:
     std::shared_ptr<const milvus::expr::UnaryRangeFilterExpr> expr_;

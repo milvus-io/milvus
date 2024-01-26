@@ -353,7 +353,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson() {
 template <typename T>
 VectorPtr
 PhyUnaryRangeFilterExpr::ExecRangeVisitorImpl() {
-    if (CanUseIndexInner<T>()) {
+    if (CanUseIndex<T>()) {
         return ExecRangeVisitorImplForIndex<T>();
     } else {
         return ExecRangeVisitorImplForData<T>();
@@ -607,11 +607,11 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData() {
 
 template <typename T>
 bool
-PhyUnaryRangeFilterExpr::CanUseIndexInner() const {
+PhyUnaryRangeFilterExpr::CanUseIndex() const {
     if (!is_index_mode_) {
         return false;
     }
-    return CanUseIndex<T>(expr_->op_type_);
+    return SegmentExpr::CanUseIndex<T>(expr_->op_type_);
 }
 
 }  // namespace exec

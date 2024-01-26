@@ -207,34 +207,3 @@ TEST(Util, get_common_prefix) {
     common_prefix = milvus::GetCommonPrefix(str1, str2);
     EXPECT_STREQ(common_prefix.c_str(), "");
 }
-
-TEST(TranslatePatternMatchToRegexTest, SimplePatternWithPercent) {
-    std::string pattern = "abc%";
-    std::string result = milvus::TranslatePatternMatchToRegex(pattern);
-    EXPECT_EQ(result, "abc.*");
-}
-
-TEST(TranslatePatternMatchToRegexTest, PatternWithUnderscore) {
-    std::string pattern = "a_c";
-    std::string result = milvus::TranslatePatternMatchToRegex(pattern);
-    EXPECT_EQ(result, "a.c");
-}
-
-TEST(TranslatePatternMatchToRegexTest, PatternWithSpecialCharacters) {
-    std::string pattern = "a\\%b\\_c";
-    std::string result = milvus::TranslatePatternMatchToRegex(pattern);
-    EXPECT_EQ(result, "a\\%b\\_c");
-}
-
-TEST(TranslatePatternMatchToRegexTest,
-     PatternWithMultiplePercentAndUnderscore) {
-    std::string pattern = "%a_b%";
-    std::string result = milvus::TranslatePatternMatchToRegex(pattern);
-    EXPECT_EQ(result, ".*a.b.*");
-}
-
-TEST(TranslatePatternMatchToRegexTest, PatternWithRegexChar) {
-    std::string pattern = "abc*def.ghi+";
-    std::string result = milvus::TranslatePatternMatchToRegex(pattern);
-    EXPECT_EQ(result, "abc\\*def\\.ghi\\+");
-}

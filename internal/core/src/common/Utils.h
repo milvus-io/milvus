@@ -23,7 +23,6 @@
 #include <string>
 #include <string_view>
 #include <vector>
-#include <regex>
 
 #include "common/Consts.h"
 #include "common/FieldMeta.h"
@@ -134,14 +133,6 @@ PostfixMatch(const std::string_view str, const std::string_view postfix) {
     //    }
     return true;
 }
-
-std::string
-ReplaceUnescapedChars(const std::string& input,
-                      char src,
-                      const std::string& replacement);
-
-std::string
-TranslatePatternMatchToRegex(const std::string& pattern);
 
 inline int64_t
 upper_align(int64_t value, int64_t align) {

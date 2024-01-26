@@ -10,8 +10,9 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <re2/re2.h>
+#include <regex>
 
-#include "common/Utils.h"
+#include "common/RegexQuery.h"
 
 namespace milvus {
 std::string
