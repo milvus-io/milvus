@@ -43,10 +43,8 @@ type Reader struct {
 }
 
 func NewReader(ctx context.Context, schema *schemapb.CollectionSchema, cmReader storage.FileReader, bufferSize int) (*Reader, error) {
-	const pqBufSize = 32 * 1024 * 1024 // TODO: dyh, make if configurable
-	size := calcBufferSize(pqBufSize, schema)
 	reader, err := file.NewParquetReader(cmReader, file.WithReadProps(&parquet.ReaderProperties{
-		BufferSize:            int64(size),
+		BufferSize:            int64(bufferSize),
 		BufferedStreamEnabled: true,
 	}))
 	if err != nil {
@@ -64,7 +62,7 @@ func NewReader(ctx context.Context, schema *schemapb.CollectionSchema, cmReader 
 	if err != nil {
 		return nil, err
 	}
-	count, err := readCountPerBatch(bufferSize, schema)
+	count, err := estimateReadCountPerBatch(bufferSize, schema)
 	if err != nil {
 		return nil, err
 	}

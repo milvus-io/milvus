@@ -31,7 +31,7 @@ func TestImportManager(t *testing.T) {
 	manager := NewTaskManager()
 	task1 := &ImportTask{
 		ImportTaskV2: &datapb.ImportTaskV2{
-			RequestID:    1,
+			JobID:        1,
 			TaskID:       2,
 			CollectionID: 3,
 			SegmentIDs:   []int64{5, 6},
@@ -48,7 +48,7 @@ func TestImportManager(t *testing.T) {
 
 	task2 := &ImportTask{
 		ImportTaskV2: &datapb.ImportTaskV2{
-			RequestID:    1,
+			JobID:        1,
 			TaskID:       8,
 			CollectionID: 3,
 			SegmentIDs:   []int64{5, 6},

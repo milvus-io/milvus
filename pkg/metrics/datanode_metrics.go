@@ -226,14 +226,6 @@ var (
 			nodeIDLabelName,
 			channelNameLabelName,
 		})
-
-	DataNodeImportLatency = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Namespace: milvusNamespace,
-			Subsystem: typeutil.DataNodeRole,
-			Name:      "import_latency_by_phase",
-			Help:      "the import latency by phases",
-		}, []string{"phase"})
 )
 
 // RegisterDataNode registers DataNode metrics
@@ -261,7 +253,6 @@ func RegisterDataNode(registry *prometheus.Registry) {
 	registry.MustRegister(DataNodeForwardDeleteMsgTimeTaken)
 	registry.MustRegister(DataNodeNumProducers)
 	registry.MustRegister(DataNodeProduceTimeTickLag)
-	registry.MustRegister(DataNodeImportLatency)
 }
 
 func CleanupDataNodeCollectionMetrics(nodeID int64, collectionID int64, channel string) {

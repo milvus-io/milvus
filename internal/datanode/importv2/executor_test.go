@@ -214,7 +214,7 @@ func (s *ExecutorSuite) TestExecutor_ReadFileStat() {
 		return res, nil
 	})
 	preimportReq := &datapb.PreImportRequest{
-		RequestID:    1,
+		JobID:        1,
 		TaskID:       2,
 		CollectionID: 3,
 		PartitionIDs: []int64{4},
@@ -245,7 +245,7 @@ func (s *ExecutorSuite) TestImportFile() {
 		return res, nil
 	})
 	importReq := &datapb.ImportRequest{
-		RequestID:    10,
+		JobID:        10,
 		TaskID:       11,
 		CollectionID: 12,
 		Schema:       s.schema,

@@ -29,9 +29,10 @@ import (
 type FileType int
 
 const (
-	JSON    FileType = 0
-	Numpy   FileType = 1
-	Parquet FileType = 2
+	Invalid FileType = 0
+	JSON    FileType = 1
+	Numpy   FileType = 2
+	Parquet FileType = 3
 
 	JSONFileExt    = ".json"
 	NumpyFileExt   = ".npy"
@@ -39,9 +40,10 @@ const (
 )
 
 var FileTypeName = map[int]string{
-	0: "JSON",
-	1: "Numpy",
-	2: "Parquet",
+	0: "Invalid",
+	1: "JSON",
+	2: "Numpy",
+	3: "Parquet",
 }
 
 func (f FileType) String() string {
@@ -54,7 +56,7 @@ func WrapReadFileError(file string, err error) error {
 
 func GetFileType(file *internalpb.ImportFile) (FileType, error) {
 	if len(file.GetPaths()) == 0 {
-		return 0, merr.WrapErrImportFailed("no file to import")
+		return Invalid, merr.WrapErrImportFailed("no file to import")
 	}
 	exts := lo.Map(file.GetPaths(), func(path string, _ int) string {
 		return filepath.Ext(path)
@@ -63,7 +65,7 @@ func GetFileType(file *internalpb.ImportFile) (FileType, error) {
 	ext := exts[0]
 	for i := 1; i < len(exts); i++ {
 		if exts[i] != ext {
-			return 0, merr.WrapErrImportFailed(
+			return Invalid, merr.WrapErrImportFailed(
 				fmt.Sprintf("inconsistency in file types, (%s) vs (%s)",
 					file.GetPaths()[0], file.GetPaths()[i]))
 		}
@@ -72,16 +74,16 @@ func GetFileType(file *internalpb.ImportFile) (FileType, error) {
 	switch ext {
 	case JSONFileExt:
 		if len(file.GetPaths()) != 1 {
-			return 0, merr.WrapErrImportFailed("for JSON import, accepts only one file")
+			return Invalid, merr.WrapErrImportFailed("for JSON import, accepts only one file")
 		}
 		return JSON, nil
 	case NumpyFileExt:
 		return Numpy, nil
 	case ParquetFileExt:
 		if len(file.GetPaths()) != 1 {
-			return 0, merr.WrapErrImportFailed("for Parquet import, accepts only one file")
+			return Invalid, merr.WrapErrImportFailed("for Parquet import, accepts only one file")
 		}
 		return Parquet, nil
 	}
-	return 0, merr.WrapErrImportFailed(fmt.Sprintf("unexpect file type, files=%v", file.GetPaths()))
+	return Invalid, merr.WrapErrImportFailed(fmt.Sprintf("unexpect file type, files=%v", file.GetPaths()))
 }

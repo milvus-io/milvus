@@ -3068,7 +3068,7 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		Key:          "datanode.import.bufferSize",
 		Version:      "2.4.0",
 		Doc:          "The maximum buffer size in MB that each import/pre-import task is permitted to utilize.",
-		DefaultValue: "64",
+		DefaultValue: "67108864",
 		PanicIfEmpty: false,
 		Export:       true,
 	}

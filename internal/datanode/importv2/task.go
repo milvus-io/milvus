@@ -98,13 +98,26 @@ func UpdateFileStat(idx int, fileStat *datapb.ImportFileStats) UpdateAction {
 }
 
 func UpdateSegmentInfo(info *datapb.ImportSegmentInfo) UpdateAction {
+	mergeFn := func(current []*datapb.FieldBinlog, new []*datapb.FieldBinlog) []*datapb.FieldBinlog {
+		for _, binlog := range new {
+			fieldBinlogs, ok := lo.Find(current, func(log *datapb.FieldBinlog) bool {
+				return log.GetFieldID() == binlog.GetFieldID()
+			})
+			if !ok || fieldBinlogs == nil {
+				current = append(current, binlog)
+			} else {
+				fieldBinlogs.Binlogs = append(fieldBinlogs.Binlogs, binlog.Binlogs...)
+			}
+		}
+		return current
+	}
 	return func(task Task) {
 		if it, ok := task.(*ImportTask); ok {
 			segment := info.GetSegmentID()
 			if _, ok = it.segmentsInfo[segment]; ok {
-				it.segmentsInfo[segment].ImportedRows += info.GetImportedRows()
-				it.segmentsInfo[segment].Binlogs = append(it.segmentsInfo[segment].Binlogs, info.GetBinlogs()...)
-				it.segmentsInfo[segment].Statslogs = append(it.segmentsInfo[segment].Statslogs, info.GetStatslogs()...)
+				it.segmentsInfo[segment].ImportedRows = info.GetImportedRows()
+				it.segmentsInfo[segment].Binlogs = mergeFn(it.segmentsInfo[segment].Binlogs, info.GetBinlogs())
+				it.segmentsInfo[segment].Statslogs = mergeFn(it.segmentsInfo[segment].Statslogs, info.GetStatslogs())
 				return
 			}
 			it.segmentsInfo[segment] = info
@@ -113,7 +126,7 @@ func UpdateSegmentInfo(info *datapb.ImportSegmentInfo) UpdateAction {
 }
 
 type Task interface {
-	GetRequestID() int64
+	GetJobID() int64
 	GetTaskID() int64
 	GetCollectionID() int64
 	GetPartitionIDs() []int64
@@ -143,7 +156,7 @@ func NewPreImportTask(req *datapb.PreImportRequest) Task {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &PreImportTask{
 		PreImportTask: &datapb.PreImportTask{
-			RequestID:    req.GetRequestID(),
+			JobID:        req.GetJobID(),
 			TaskID:       req.GetTaskID(),
 			CollectionID: req.GetCollectionID(),
 			PartitionIDs: req.GetPartitionIDs(),
@@ -190,7 +203,7 @@ func NewImportTask(req *datapb.ImportRequest) Task {
 	ctx, cancel := context.WithCancel(context.Background())
 	task := &ImportTask{
 		ImportTaskV2: &datapb.ImportTaskV2{
-			RequestID:    req.GetRequestID(),
+			JobID:        req.GetJobID(),
 			TaskID:       req.GetTaskID(),
 			CollectionID: req.GetCollectionID(),
 			State:        internalpb.ImportState_Pending,

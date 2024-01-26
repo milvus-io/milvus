@@ -486,8 +486,8 @@ dataNode:
     # suggest to set it bigger on large collection numbers to avoid blocking
     updateChannelCheckpointMaxParallel: 1000
   import:
-    maxConcurrentTaskNum: 10 # The maximum number of import/pre-import tasks allowed to run concurrently on a datanode.
-    bufferSize: 64 # The maximum buffer size in MB that each import/pre-import task is permitted to utilize.
+    maxConcurrentTaskNum: 32 # The maximum number of import/pre-import tasks allowed to run concurrently on a datanode.
+    bufferSize: 67108864 # 64MB, The maximum buffer size that each import/pre-import task is permitted to utilize.
 
 # Configures the system log output.
 log:
