@@ -20,13 +20,13 @@ import (
 	"context"
 	"path"
 
+	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-	"github.com/samber/lo"
 )
 
 type BinlogIO interface {
