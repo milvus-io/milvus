@@ -337,7 +337,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("auto_id", [True, False])
     @pytest.mark.parametrize("dim", [128])
     @pytest.mark.parametrize("entities", [2000])
-    def test_binary_vector_only(self, is_row_based, auto_id, dim, entities):
+    def test_binary_vector_json(self, is_row_based, auto_id, dim, entities):
         """
         collection schema: [pk, binary_vector]
         Steps:
@@ -692,8 +692,8 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("auto_id", [True])
-    @pytest.mark.parametrize("dim", [2])  # 128
-    @pytest.mark.parametrize("entities", [2])  # 1000
+    @pytest.mark.parametrize("dim", [128])  # 128
+    @pytest.mark.parametrize("entities", [1000])  # 1000
     @pytest.mark.parametrize("enable_dynamic_field", [True])
     def test_bulk_insert_all_field_with_new_json_format(self, auto_id, dim, entities, enable_dynamic_field):
         """
@@ -714,7 +714,10 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             cf.gen_array_field(name=df.array_float_field, element_type=DataType.FLOAT),
             cf.gen_array_field(name=df.array_string_field, element_type=DataType.VARCHAR, max_length=100),
             cf.gen_array_field(name=df.array_bool_field, element_type=DataType.BOOL),
-            cf.gen_float_vec_field(name=df.vec_field, dim=dim),
+            cf.gen_float_vec_field(name=df.float_vec_field, dim=dim),
+            cf.gen_float_vec_field(name=df.image_float_vec_field, dim=dim),
+            cf.gen_float_vec_field(name=df.text_float_vec_field, dim=dim),
+            cf.gen_binary_vec_field(name=df.binary_vec_field, dim=dim)
         ]
         data_fields = [f.name for f in fields if not f.to_dict().get("auto_id", False)]
         files = prepare_bulk_insert_new_json_files(
@@ -748,32 +751,63 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         assert num_entities == entities
         # verify imported data is available for search
         index_params = ct.default_index
-        self.collection_wrap.create_index(
-            field_name=df.vec_field, index_params=index_params
-        )
+        float_vec_fields = [f.name for f in fields if "vec" in f.name and "float" in f.name]
+        binary_vec_fields = [f.name for f in fields if "vec" in f.name and "binary" in f.name]
+        for f in float_vec_fields:
+            self.collection_wrap.create_index(
+                field_name=f, index_params=index_params
+            )
+        for f in binary_vec_fields:
+            self.collection_wrap.create_index(
+                field_name=f, index_params=ct.default_binary_index
+            )
         self.collection_wrap.load()
         log.info(f"wait for load finished and be ready for search")
         time.sleep(2)
         # log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
         search_data = cf.gen_vectors(1, dim)
         search_params = ct.default_search_params
-        res, _ = self.collection_wrap.search(
-            search_data,
-            df.vec_field,
-            param=search_params,
-            limit=1,
-            output_fields=["*"],
-            check_task=CheckTasks.check_search_results,
-            check_items={"nq": 1, "limit": 1},
-        )
-        for hit in res:
-            for r in hit:
-                fields_from_search = r.fields.keys()
-                for f in fields:
-                    assert f.name in fields_from_search
-                if enable_dynamic_field:
-                    assert "name" in fields_from_search
-                    assert "address" in fields_from_search
+        for field_name in float_vec_fields:
+            res, _ = self.collection_wrap.search(
+                search_data,
+                field_name,
+                param=search_params,
+                limit=1,
+                output_fields=["*"],
+                check_task=CheckTasks.check_search_results,
+                check_items={"nq": 1, "limit": 1},
+            )
+            for hit in res:
+                for r in hit:
+                    fields_from_search = r.fields.keys()
+                    for f in fields:
+                        assert f.name in fields_from_search
+                    if enable_dynamic_field:
+                        assert "name" in fields_from_search
+                        assert "address" in fields_from_search
+
+        _, search_data = cf.gen_binary_vectors(1, dim)
+        search_params = ct.default_search_binary_params
+        for field_name in binary_vec_fields:
+            res, _ = self.collection_wrap.search(
+                search_data,
+                field_name,
+                param=search_params,
+                limit=1,
+                output_fields=["*"],
+                check_task=CheckTasks.check_search_results,
+                check_items={"nq": 1, "limit": 1},
+            )
+            for hit in res:
+                for r in hit:
+                    fields_from_search = r.fields.keys()
+                    for f in fields:
+                        assert f.name in fields_from_search
+                    if enable_dynamic_field:
+                        assert "name" in fields_from_search
+                        assert "address" in fields_from_search
+
+
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("auto_id", [True, False])
@@ -796,7 +830,10 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             cf.gen_float_field(name=df.float_field),
             cf.gen_double_field(name=df.double_field),
             cf.gen_json_field(name=df.json_field),
-            cf.gen_float_vec_field(name=df.vec_field, dim=dim),
+            cf.gen_float_vec_field(name=df.float_vec_field, dim=dim),
+            cf.gen_float_vec_field(name=df.image_float_vec_field, dim=dim),
+            cf.gen_float_vec_field(name=df.text_float_vec_field, dim=dim),
+            cf.gen_binary_vec_field(name=df.binary_vec_field, dim=dim)
         ]
         data_fields = [f.name for f in fields if not f.to_dict().get("auto_id", False)]
         files = prepare_bulk_insert_numpy_files(
@@ -805,8 +842,8 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             rows=entities,
             dim=dim,
             data_fields=data_fields,
-            force=True,
             enable_dynamic_field=enable_dynamic_field,
+            force=True,
         )
         self._connect()
         c_name = cf.gen_unique_str("bulk_insert")
@@ -830,32 +867,61 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         assert num_entities == entities
         # verify imported data is available for search
         index_params = ct.default_index
-        self.collection_wrap.create_index(
-            field_name=df.vec_field, index_params=index_params
-        )
+        float_vec_fields = [f.name for f in fields if "vec" in f.name and "float" in f.name]
+        binary_vec_fields = [f.name for f in fields if "vec" in f.name and "binary" in f.name]
+        for f in float_vec_fields:
+            self.collection_wrap.create_index(
+                field_name=f, index_params=index_params
+            )
+        for f in binary_vec_fields:
+            self.collection_wrap.create_index(
+                field_name=f, index_params=ct.default_binary_index
+            )
         self.collection_wrap.load()
         log.info(f"wait for load finished and be ready for search")
         time.sleep(2)
         # log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
         search_data = cf.gen_vectors(1, dim)
         search_params = ct.default_search_params
-        res, _ = self.collection_wrap.search(
-            search_data,
-            df.vec_field,
-            param=search_params,
-            limit=1,
-            output_fields=["*"],
-            check_task=CheckTasks.check_search_results,
-            check_items={"nq": 1, "limit": 1},
-        )
-        for hit in res:
-            for r in hit:
-                fields_from_search = r.fields.keys()
-                for f in fields:
-                    assert f.name in fields_from_search
-                if enable_dynamic_field:
-                    assert "name" in fields_from_search
-                    assert "address" in fields_from_search
+        for field_name in float_vec_fields:
+            res, _ = self.collection_wrap.search(
+                search_data,
+                field_name,
+                param=search_params,
+                limit=1,
+                output_fields=["*"],
+                check_task=CheckTasks.check_search_results,
+                check_items={"nq": 1, "limit": 1},
+            )
+            for hit in res:
+                for r in hit:
+                    fields_from_search = r.fields.keys()
+                    for f in fields:
+                        assert f.name in fields_from_search
+                    if enable_dynamic_field:
+                        assert "name" in fields_from_search
+                        assert "address" in fields_from_search
+
+        _, search_data = cf.gen_binary_vectors(1, dim)
+        search_params = ct.default_search_binary_params
+        for field_name in binary_vec_fields:
+            res, _ = self.collection_wrap.search(
+                search_data,
+                field_name,
+                param=search_params,
+                limit=1,
+                output_fields=["*"],
+                check_task=CheckTasks.check_search_results,
+                check_items={"nq": 1, "limit": 1},
+            )
+            for hit in res:
+                for r in hit:
+                    fields_from_search = r.fields.keys()
+                    for f in fields:
+                        assert f.name in fields_from_search
+                    if enable_dynamic_field:
+                        assert "name" in fields_from_search
+                        assert "address" in fields_from_search
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("auto_id", [True, False])
@@ -883,17 +949,18 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             cf.gen_array_field(name=df.array_float_field, element_type=DataType.FLOAT),
             cf.gen_array_field(name=df.array_string_field, element_type=DataType.VARCHAR, max_length=100),
             cf.gen_array_field(name=df.array_bool_field, element_type=DataType.BOOL),
-            cf.gen_float_vec_field(name=df.vec_field, dim=dim),
+            cf.gen_float_vec_field(name=df.float_vec_field, dim=dim),
+            cf.gen_float_vec_field(name=df.image_float_vec_field, dim=dim),
+            cf.gen_float_vec_field(name=df.text_float_vec_field, dim=dim),
+            cf.gen_binary_vec_field(name=df.binary_vec_field, dim=dim)
         ]
-        data_fields = [f.name for f in fields if not f.to_dict().get("auto_id", False)]
+        data_fields = [f.name for f in fields if    not f.to_dict().get("auto_id", False)]
         files = prepare_bulk_insert_parquet_files(
             minio_endpoint=self.minio_endpoint,
             bucket_name=self.bucket_name,
             rows=entities,
             dim=dim,
             data_fields=data_fields,
-            file_nums=file_nums,
-            array_length=array_len,
             enable_dynamic_field=enable_dynamic_field,
             force=True,
         )
@@ -919,32 +986,61 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         assert num_entities == entities
         # verify imported data is available for search
         index_params = ct.default_index
-        self.collection_wrap.create_index(
-            field_name=df.vec_field, index_params=index_params
-        )
+        float_vec_fields = [f.name for f in fields if "vec" in f.name and "float" in f.name]
+        binary_vec_fields = [f.name for f in fields if "vec" in f.name and "binary" in f.name]
+        for f in float_vec_fields:
+            self.collection_wrap.create_index(
+                field_name=f, index_params=index_params
+            )
+        for f in binary_vec_fields:
+            self.collection_wrap.create_index(
+                field_name=f, index_params=ct.default_binary_index
+            )
         self.collection_wrap.load()
         log.info(f"wait for load finished and be ready for search")
         time.sleep(2)
         # log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
         search_data = cf.gen_vectors(1, dim)
         search_params = ct.default_search_params
-        res, _ = self.collection_wrap.search(
-            search_data,
-            df.vec_field,
-            param=search_params,
-            limit=1,
-            output_fields=["*"],
-            check_task=CheckTasks.check_search_results,
-            check_items={"nq": 1, "limit": 1},
-        )
-        for hit in res:
-            for r in hit:
-                fields_from_search = r.fields.keys()
-                for f in fields:
-                    assert f.name in fields_from_search
-                if enable_dynamic_field:
-                    assert "name" in fields_from_search
-                    assert "address" in fields_from_search
+        for field_name in float_vec_fields:
+            res, _ = self.collection_wrap.search(
+                search_data,
+                field_name,
+                param=search_params,
+                limit=1,
+                output_fields=["*"],
+                check_task=CheckTasks.check_search_results,
+                check_items={"nq": 1, "limit": 1},
+            )
+            for hit in res:
+                for r in hit:
+                    fields_from_search = r.fields.keys()
+                    for f in fields:
+                        assert f.name in fields_from_search
+                    if enable_dynamic_field:
+                        assert "name" in fields_from_search
+                        assert "address" in fields_from_search
+
+        _, search_data = cf.gen_binary_vectors(1, dim)
+        search_params = ct.default_search_binary_params
+        for field_name in binary_vec_fields:
+            res, _ = self.collection_wrap.search(
+                search_data,
+                field_name,
+                param=search_params,
+                limit=1,
+                output_fields=["*"],
+                check_task=CheckTasks.check_search_results,
+                check_items={"nq": 1, "limit": 1},
+            )
+            for hit in res:
+                for r in hit:
+                    fields_from_search = r.fields.keys()
+                    for f in fields:
+                        assert f.name in fields_from_search
+                    if enable_dynamic_field:
+                        assert "name" in fields_from_search
+                        assert "address" in fields_from_search
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("auto_id", [True])

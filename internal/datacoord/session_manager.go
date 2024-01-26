@@ -57,7 +57,7 @@ type SessionManager interface {
 
 	Flush(ctx context.Context, nodeID int64, req *datapb.FlushSegmentsRequest)
 	FlushChannels(ctx context.Context, nodeID int64, req *datapb.FlushChannelsRequest) error
-	Compaction(nodeID int64, plan *datapb.CompactionPlan) error
+	Compaction(ctx context.Context, nodeID int64, plan *datapb.CompactionPlan) error
 	SyncSegments(nodeID int64, req *datapb.SyncSegmentsRequest) error
 	Import(ctx context.Context, nodeID int64, itr *datapb.ImportTaskRequest)
 	GetCompactionPlansResults() map[int64]*datapb.CompactionPlanResult
@@ -193,8 +193,8 @@ func (c *SessionManagerImpl) execFlush(ctx context.Context, nodeID int64, req *d
 }
 
 // Compaction is a grpc interface. It will send request to DataNode with provided `nodeID` synchronously.
-func (c *SessionManagerImpl) Compaction(nodeID int64, plan *datapb.CompactionPlan) error {
-	ctx, cancel := context.WithTimeout(context.Background(), Params.DataCoordCfg.CompactionRPCTimeout.GetAsDuration(time.Second))
+func (c *SessionManagerImpl) Compaction(ctx context.Context, nodeID int64, plan *datapb.CompactionPlan) error {
+	ctx, cancel := context.WithTimeout(ctx, Params.DataCoordCfg.CompactionRPCTimeout.GetAsDuration(time.Second))
 	defer cancel()
 	cli, err := c.getClient(ctx, nodeID)
 	if err != nil {

@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -46,9 +47,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
@@ -267,12 +266,16 @@ func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan
 		}
 	}
 
+	spanCtx := trace.SpanContextFromContext(ctx)
+
+	taskCtx := trace.ContextWithSpanContext(node.ctx, spanCtx)
+
 	var task compactor
 	switch req.GetType() {
 	case datapb.CompactionType_Level0DeleteCompaction:
 		binlogIO := io.NewBinlogIO(node.chunkManager, getOrCreateIOPool())
 		task = newLevelZeroCompactionTask(
-			node.ctx,
+			taskCtx,
 			binlogIO,
 			node.allocator,
 			ds.metacache,
@@ -283,7 +286,7 @@ func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan
 		// TODO, replace this binlogIO with io.BinlogIO
 		binlogIO := &binlogIO{node.chunkManager, ds.idAllocator}
 		task = newCompactionTask(
-			node.ctx,
+			taskCtx,
 			binlogIO, binlogIO,
 			ds.metacache,
 			node.syncMgr,
@@ -563,19 +566,6 @@ func (node *DataNode) AddImportSegment(ctx context.Context, req *datapb.AddImpor
 			},
 		}, nil
 	}
-	// Get the current dml channel position ID, that will be used in segments start positions and end positions.
-	var posID []byte
-	err = retry.Do(ctx, func() error {
-		id, innerError := node.getChannelLatestMsgID(context.Background(), req.GetChannelName(), req.GetSegmentId())
-		posID = id
-		return innerError
-	}, retry.Attempts(30))
-
-	if err != nil {
-		return &datapb.AddImportSegmentResponse{
-			Status: merr.Status(err),
-		}, nil
-	}
 	// Add the new segment to the channel.
 	if len(ds.metacache.GetSegmentIDsBy(metacache.WithSegmentIDs(req.GetSegmentId()), metacache.WithSegmentState(commonpb.SegmentState_Flushed))) == 0 {
 		log.Info("adding a new segment to channel", logFields...)
@@ -608,12 +598,10 @@ func (node *DataNode) AddImportSegment(ctx context.Context, req *datapb.AddImpor
 			Statslogs:     req.GetStatsLog(),
 			StartPosition: &msgpb.MsgPosition{
 				ChannelName: req.GetChannelName(),
-				MsgID:       posID,
 				Timestamp:   req.GetBase().GetTimestamp(),
 			},
 			DmlPosition: &msgpb.MsgPosition{
 				ChannelName: req.GetChannelName(),
-				MsgID:       posID,
 				Timestamp:   req.GetBase().GetTimestamp(),
 			},
 		}, func(info *datapb.SegmentInfo) *metacache.BloomFilterSet {
@@ -623,31 +611,8 @@ func (node *DataNode) AddImportSegment(ctx context.Context, req *datapb.AddImpor
 	}
 
 	return &datapb.AddImportSegmentResponse{
-		Status:     merr.Success(),
-		ChannelPos: posID,
+		Status: merr.Success(),
 	}, nil
-}
-
-func (node *DataNode) getChannelLatestMsgID(ctx context.Context, channelName string, segmentID int64) ([]byte, error) {
-	pChannelName := funcutil.ToPhysicalChannel(channelName)
-	dmlStream, err := node.factory.NewMsgStream(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer dmlStream.Close()
-
-	subName := fmt.Sprintf("datanode-%d-%s-%d", paramtable.GetNodeID(), channelName, segmentID)
-	log.Debug("dataSyncService register consumer for getChannelLatestMsgID",
-		zap.String("pChannelName", pChannelName),
-		zap.String("subscription", subName),
-	)
-	dmlStream.AsConsumer(ctx, []string{pChannelName}, subName, mqwrapper.SubscriptionPositionUnknown)
-	id, err := dmlStream.GetLatestMsgID(pChannelName)
-	if err != nil {
-		log.Error("fail to GetLatestMsgID", zap.String("pChannelName", pChannelName), zap.Error(err))
-		return nil, err
-	}
-	return id.Serialize(), nil
 }
 
 func assignSegmentFunc(node *DataNode, req *datapb.ImportTaskRequest) importutil.AssignSegmentFunc {
@@ -792,6 +757,16 @@ func saveSegmentFunc(node *DataNode, req *datapb.ImportTaskRequest, res *rootcoo
 							SegmentID: segmentID,
 						},
 					},
+					CheckPoints: []*datapb.CheckPoint{
+						{
+							SegmentID: segmentID,
+							Position: &msgpb.MsgPosition{
+								ChannelName: targetChName,
+								Timestamp:   ts,
+							},
+							NumOfRows: rowCount,
+						},
+					},
 					Importing: true,
 				},
 			})
@@ -803,7 +778,7 @@ func saveSegmentFunc(node *DataNode, req *datapb.ImportTaskRequest, res *rootcoo
 				return err
 			}
 			return nil
-		})
+		}, retry.Attempts(60)) // about 3min
 		if err != nil {
 			log.Warn("failed to save import segment", zap.Error(err))
 			return err

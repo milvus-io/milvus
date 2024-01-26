@@ -137,6 +137,7 @@ type MilvusRoles struct {
 	Local    bool
 	Alias    string
 	Embedded bool
+	Mixture  bool
 
 	closed chan struct{}
 	once   sync.Once
@@ -333,6 +334,9 @@ func (mr *MilvusRoles) Run() {
 			log.Error("Failed to set deploy mode: ", zap.Error(err))
 		}
 		paramtable.Init()
+		if mr.Mixture {
+			paramtable.SetRole(typeutil.MixtureRole)
+		}
 	}
 
 	expr.Init()

@@ -410,3 +410,18 @@ AddFieldDataInfoForSealed(CSegmentInterface c_segment,
         return milvus::FailureCStatus(milvus::UnexpectedError, e.what());
     }
 }
+
+CStatus
+WarmupChunkCache(CSegmentInterface c_segment, int64_t field_id) {
+    try {
+        auto segment_interface =
+            reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
+        auto segment =
+            dynamic_cast<milvus::segcore::SegmentSealed*>(segment_interface);
+        AssertInfo(segment != nullptr, "segment conversion failed");
+        segment->WarmupChunkCache(milvus::FieldId(field_id));
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(milvus::UnexpectedError, e.what());
+    }
+}

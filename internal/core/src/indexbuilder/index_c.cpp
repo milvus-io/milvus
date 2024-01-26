@@ -90,6 +90,9 @@ CreateIndex(CIndex* res_index, CBuildIndexInfo c_build_index_info) {
 
         auto& config = build_index_info->config;
         config["insert_files"] = build_index_info->insert_files;
+        if (build_index_info->opt_fields.size()) {
+            config["opt_fields"] = build_index_info->opt_fields;
+        }
 
         // get index type
         auto index_type = milvus::index::GetValueFromConfig<std::string>(
@@ -712,4 +715,25 @@ SerializeIndexAndUpLoadV2(CIndex index, CBinarySet* c_binary_set) {
         status.error_msg = strdup(e.what());
     }
     return status;
+}
+
+CStatus
+AppendOptionalFieldDataPath(CBuildIndexInfo c_build_index_info,
+                            const int64_t field_id,
+                            const char* field_name,
+                            const int32_t field_type,
+                            const char* c_file_path) {
+    try {
+        auto build_index_info = (BuildIndexInfo*)c_build_index_info;
+        std::string field_name_str(field_name);
+        auto& opt_fields_map = build_index_info->opt_fields;
+        if (opt_fields_map.find(field_id) == opt_fields_map.end()) {
+            opt_fields_map[field_id] = {
+                field_name, static_cast<milvus::DataType>(field_type), {}};
+        }
+        std::get<2>(opt_fields_map[field_id]).emplace_back(c_file_path);
+        return CStatus{Success, ""};
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
 }

@@ -10,6 +10,7 @@ from pymilvus import (
 )
 
 
+@pytest.mark.L0
 class TestRestfulSdkCompatibility(TestBase):
 
     @pytest.mark.parametrize("dim", [128, 256])

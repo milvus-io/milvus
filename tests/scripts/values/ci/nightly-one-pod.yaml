@@ -1,3 +1,7 @@
+metrics:
+  serviceMonitor:
+    enabled: true
+
 cluster:
   enabled: false
 etcd:

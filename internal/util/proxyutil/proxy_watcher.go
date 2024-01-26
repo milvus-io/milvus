@@ -54,7 +54,8 @@ type ProxyWatcher struct {
 	addSessionsFunc  []func(*sessionutil.Session)
 	delSessionsFunc  []func(*sessionutil.Session)
 
-	closeCh lifetime.SafeChan
+	closeOnce sync.Once
+	closeCh   lifetime.SafeChan
 }
 
 // NewProxyWatcher helper function to create a proxyWatcher
@@ -219,6 +220,8 @@ func (p *ProxyWatcher) getSessionsOnEtcd(ctx context.Context) ([]*sessionutil.Se
 
 // Stop stops the ProxyManager
 func (p *ProxyWatcher) Stop() {
-	p.closeCh.Close()
-	p.wg.Wait()
+	p.closeOnce.Do(func() {
+		p.closeCh.Close()
+		p.wg.Wait()
+	})
 }

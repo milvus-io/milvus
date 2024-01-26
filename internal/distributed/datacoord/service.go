@@ -90,8 +90,11 @@ func (s *Server) init() error {
 	params := paramtable.Get()
 	etcdConfig := &params.EtcdCfg
 
-	etcdCli, err := etcd.GetEtcdClient(
+	etcdCli, err := etcd.CreateEtcdClient(
 		etcdConfig.UseEmbedEtcd.GetAsBool(),
+		etcdConfig.EtcdEnableAuth.GetAsBool(),
+		etcdConfig.EtcdAuthUserName.GetValue(),
+		etcdConfig.EtcdAuthPassword.GetValue(),
 		etcdConfig.EtcdUseSSL.GetAsBool(),
 		etcdConfig.Endpoints.GetAsStrings(),
 		etcdConfig.EtcdTLSCert.GetValue(),

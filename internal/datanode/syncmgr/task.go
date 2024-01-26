@@ -98,28 +98,28 @@ func (t *SyncTask) getLogger() *log.MLogger {
 		zap.Int64("partitionID", t.partitionID),
 		zap.Int64("segmentID", t.segmentID),
 		zap.String("channel", t.channelName),
+		zap.String("level", t.level.String()),
 	)
 }
 
-func (t *SyncTask) handleError(err error, metricSegLevel string) {
+func (t *SyncTask) handleError(err error) {
 	if t.failureCallback != nil {
 		t.failureCallback(err)
 	}
 
-	metrics.DataNodeFlushBufferCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.FailLabel, metricSegLevel).Inc()
+	metrics.DataNodeFlushBufferCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.FailLabel, t.level.String()).Inc()
 	if !t.isFlush {
-		metrics.DataNodeAutoFlushBufferCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.FailLabel, metricSegLevel).Inc()
+		metrics.DataNodeAutoFlushBufferCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.FailLabel, t.level.String()).Inc()
 	}
 }
 
 func (t *SyncTask) Run() (err error) {
 	t.tr = timerecord.NewTimeRecorder("syncTask")
-	metricSegLevel := t.level.String()
 
 	log := t.getLogger()
 	defer func() {
 		if err != nil {
-			t.handleError(err, metricSegLevel)
+			t.handleError(err)
 		}
 	}()
 
@@ -128,7 +128,7 @@ func (t *SyncTask) Run() (err error) {
 	if !has {
 		log.Warn("failed to sync data, segment not found in metacache")
 		err := merr.WrapErrSegmentNotFound(t.segmentID)
-		t.handleError(err, metricSegLevel)
+		t.handleError(err)
 		return err
 	}
 
@@ -157,7 +157,7 @@ func (t *SyncTask) Run() (err error) {
 	err = t.writeLogs()
 	if err != nil {
 		log.Warn("failed to save serialized data into storage", zap.Error(err))
-		t.handleError(err, metricSegLevel)
+		t.handleError(err)
 		return err
 	}
 
@@ -169,15 +169,15 @@ func (t *SyncTask) Run() (err error) {
 		totalSize += float64(len(t.deltaBlob.Value))
 	}
 
-	metrics.DataNodeFlushedSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.AllLabel, metricSegLevel).Add(totalSize)
+	metrics.DataNodeFlushedSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.AllLabel, t.level.String()).Add(totalSize)
 
-	metrics.DataNodeSave2StorageLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metricSegLevel).Observe(float64(t.tr.RecordSpan().Milliseconds()))
+	metrics.DataNodeSave2StorageLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), t.level.String()).Observe(float64(t.tr.RecordSpan().Milliseconds()))
 
 	if t.metaWriter != nil {
 		err = t.writeMeta()
 		if err != nil {
 			log.Warn("failed to save serialized data into storage", zap.Error(err))
-			t.handleError(err, metricSegLevel)
+			t.handleError(err)
 			return err
 		}
 	}
@@ -195,9 +195,9 @@ func (t *SyncTask) Run() (err error) {
 	log.Info("task done", zap.Float64("flushedSize", totalSize))
 
 	if !t.isFlush {
-		metrics.DataNodeAutoFlushBufferCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SuccessLabel, metricSegLevel).Inc()
+		metrics.DataNodeAutoFlushBufferCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SuccessLabel, t.level.String()).Inc()
 	}
-	metrics.DataNodeFlushBufferCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SuccessLabel, metricSegLevel).Inc()
+	metrics.DataNodeFlushBufferCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SuccessLabel, t.level.String()).Inc()
 	return nil
 }
 

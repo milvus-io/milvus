@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/samber/lo"
+	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -30,6 +31,7 @@ import (
 	iter "github.com/milvus-io/milvus/internal/datanode/iterators"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
+	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -40,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type levelZeroCompactionTask struct {
@@ -107,15 +110,17 @@ func (t *levelZeroCompactionTask) getCollection() int64 {
 func (t *levelZeroCompactionTask) injectDone() {}
 
 func (t *levelZeroCompactionTask) compact() (*datapb.CompactionPlanResult, error) {
+	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(t.ctx, "L0Compact")
+	defer span.End()
 	log := log.With(zap.Int64("planID", t.plan.GetPlanID()), zap.String("type", t.plan.GetType().String()))
 	log.Info("L0 compaction", zap.Duration("wait in queue elapse", t.tr.RecordSpan()))
 
-	if !funcutil.CheckCtxValid(t.ctx) {
+	if !funcutil.CheckCtxValid(ctx) {
 		log.Warn("compact wrong, task context done or timeout")
 		return nil, errContext
 	}
 
-	ctxTimeout, cancelAll := context.WithTimeout(t.ctx, time.Duration(t.plan.GetTimeoutInSeconds())*time.Second)
+	ctxTimeout, cancelAll := context.WithTimeout(ctx, time.Duration(t.plan.GetTimeoutInSeconds())*time.Second)
 	defer cancelAll()
 
 	l0Segments := lo.Filter(t.plan.GetSegmentBinlogs(), func(s *datapb.CompactionSegmentBinlogs, _ int) bool {
@@ -131,6 +136,11 @@ func (t *levelZeroCompactionTask) compact() (*datapb.CompactionPlanResult, error
 	if len(targetSegIDs) == 0 {
 		log.Warn("compact wrong, not target sealed segments")
 		return nil, errIllegalCompactionPlan
+	}
+	err := binlog.DecompressCompactionBinlogs(l0Segments)
+	if err != nil {
+		log.Warn("DecompressCompactionBinlogs failed", zap.Error(err))
+		return nil, err
 	}
 
 	var (
@@ -210,10 +220,7 @@ func (t *levelZeroCompactionTask) compact() (*datapb.CompactionPlanResult, error
 		return lo.Values(resultSegments), nil
 	}
 
-	var (
-		resultSegments []*datapb.CompactionSegment
-		err            error
-	)
+	var resultSegments []*datapb.CompactionSegment
 	// if totalSize*3 < int64(hardware.GetFreeMemoryCount()) {
 	//     resultSegments, err = batchProcess()
 	// }

@@ -30,10 +30,11 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
+	itypeutil "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type indexTaskState int32
@@ -203,6 +204,19 @@ func (ib *indexBuilder) run() {
 	}
 }
 
+func getBinLogIds(segment *SegmentInfo, fieldID int64) []int64 {
+	binlogIDs := make([]int64, 0)
+	for _, fieldBinLog := range segment.GetBinlogs() {
+		if fieldBinLog.GetFieldID() == fieldID {
+			for _, binLog := range fieldBinLog.GetBinlogs() {
+				binlogIDs = append(binlogIDs, binLog.GetLogID())
+			}
+			break
+		}
+	}
+	return binlogIDs
+}
+
 func (ib *indexBuilder) process(buildID UniqueID) bool {
 	ib.taskMutex.RLock()
 	state := ib.tasks[buildID]
@@ -240,7 +254,8 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 			return true
 		}
 		indexParams := ib.meta.GetIndexParams(meta.CollectionID, meta.IndexID)
-		if isFlatIndex(getIndexType(indexParams)) || meta.NumRows < Params.DataCoordCfg.MinSegmentNumRowsToEnableIndex.GetAsInt64() {
+		indexType := getIndexType(indexParams)
+		if isFlatIndex(indexType) || meta.NumRows < Params.DataCoordCfg.MinSegmentNumRowsToEnableIndex.GetAsInt64() {
 			log.Ctx(ib.ctx).Info("segment does not need index really", zap.Int64("buildID", buildID),
 				zap.Int64("segmentID", meta.SegmentID), zap.Int64("num rows", meta.NumRows))
 			if err := ib.meta.FinishTask(&indexpb.IndexTaskInfo{
@@ -269,14 +284,23 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 			return false
 		}
 
-		binlogIDs := make([]int64, 0)
-		fieldID := ib.meta.GetFieldIDByIndexID(meta.CollectionID, meta.IndexID)
-		for _, fieldBinLog := range segment.GetBinlogs() {
-			if fieldBinLog.GetFieldID() == fieldID {
-				for _, binLog := range fieldBinLog.GetBinlogs() {
-					binlogIDs = append(binlogIDs, binLog.GetLogID())
+		// vector index build needs information of optional scalar fields data
+		optionalFields := make([]*indexpb.OptionalFieldInfo, 0)
+		if Params.CommonCfg.EnableNodeFilteringOnPartitionKey.GetAsBool() && isOptionalScalarFieldSupported(indexType) {
+			colSchema := ib.meta.GetCollection(meta.CollectionID).Schema
+			hasPartitionKey := typeutil.HasPartitionKey(colSchema)
+			if hasPartitionKey {
+				partitionKeyField, err := typeutil.GetPartitionKeyFieldSchema(colSchema)
+				if partitionKeyField == nil || err != nil {
+					log.Ctx(ib.ctx).Warn("index builder get partition key field failed", zap.Int64("build", buildID), zap.Error(err))
+				} else {
+					optionalFields = append(optionalFields, &indexpb.OptionalFieldInfo{
+						FieldID:   partitionKeyField.FieldID,
+						FieldName: partitionKeyField.Name,
+						FieldType: int32(partitionKeyField.DataType),
+						DataIds:   getBinLogIds(segment, partitionKeyField.FieldID),
+					})
 				}
-				break
 			}
 		}
 
@@ -306,6 +330,8 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 			}
 		}
 
+		fieldID := ib.meta.GetFieldIDByIndexID(meta.CollectionID, meta.IndexID)
+		binlogIDs := getBinLogIds(segment, fieldID)
 		var req *indexpb.CreateJobRequest
 		if Params.CommonCfg.EnableStorageV2.GetAsBool() {
 			collectionInfo, err := ib.handler.GetCollection(ib.ctx, segment.GetCollectionID())
@@ -329,55 +355,57 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 				return false
 			}
 
-			storePath, err := typeutil.GetStorageURI(params.Params.CommonCfg.StorageScheme.GetValue(), params.Params.CommonCfg.StoragePathPrefix.GetValue(), segment.GetID())
+			storePath, err := itypeutil.GetStorageURI(params.Params.CommonCfg.StorageScheme.GetValue(), params.Params.CommonCfg.StoragePathPrefix.GetValue(), segment.GetID())
 			if err != nil {
 				log.Ctx(ib.ctx).Warn("failed to get storage uri", zap.Error(err))
 				return false
 			}
-			indexStorePath, err := typeutil.GetStorageURI(params.Params.CommonCfg.StorageScheme.GetValue(), params.Params.CommonCfg.StoragePathPrefix.GetValue()+"/index", segment.GetID())
+			indexStorePath, err := itypeutil.GetStorageURI(params.Params.CommonCfg.StorageScheme.GetValue(), params.Params.CommonCfg.StoragePathPrefix.GetValue()+"/index", segment.GetID())
 			if err != nil {
 				log.Ctx(ib.ctx).Warn("failed to get storage uri", zap.Error(err))
 				return false
 			}
 
 			req = &indexpb.CreateJobRequest{
-				ClusterID:           Params.CommonCfg.ClusterPrefix.GetValue(),
-				IndexFilePrefix:     path.Join(ib.chunkManager.RootPath(), common.SegmentIndexPath),
-				BuildID:             buildID,
-				IndexVersion:        meta.IndexVersion + 1,
-				StorageConfig:       storageConfig,
-				IndexParams:         indexParams,
-				TypeParams:          typeParams,
-				NumRows:             meta.NumRows,
-				CollectionID:        segment.GetCollectionID(),
-				PartitionID:         segment.GetPartitionID(),
-				SegmentID:           segment.GetID(),
-				FieldID:             fieldID,
-				FieldName:           field.Name,
-				FieldType:           field.DataType,
-				StorePath:           storePath,
-				StoreVersion:        segment.GetStorageVersion(),
-				IndexStorePath:      indexStorePath,
-				Dim:                 int64(dim),
-				CurrentIndexVersion: ib.indexEngineVersionManager.GetCurrentIndexEngineVersion(),
-				DataIds:             binlogIDs,
+				ClusterID:            Params.CommonCfg.ClusterPrefix.GetValue(),
+				IndexFilePrefix:      path.Join(ib.chunkManager.RootPath(), common.SegmentIndexPath),
+				BuildID:              buildID,
+				IndexVersion:         meta.IndexVersion + 1,
+				StorageConfig:        storageConfig,
+				IndexParams:          indexParams,
+				TypeParams:           typeParams,
+				NumRows:              meta.NumRows,
+				CollectionID:         segment.GetCollectionID(),
+				PartitionID:          segment.GetPartitionID(),
+				SegmentID:            segment.GetID(),
+				FieldID:              fieldID,
+				FieldName:            field.Name,
+				FieldType:            field.DataType,
+				StorePath:            storePath,
+				StoreVersion:         segment.GetStorageVersion(),
+				IndexStorePath:       indexStorePath,
+				Dim:                  int64(dim),
+				CurrentIndexVersion:  ib.indexEngineVersionManager.GetCurrentIndexEngineVersion(),
+				DataIds:              binlogIDs,
+				OptionalScalarFields: optionalFields,
 			}
 		} else {
 			req = &indexpb.CreateJobRequest{
-				ClusterID:           Params.CommonCfg.ClusterPrefix.GetValue(),
-				IndexFilePrefix:     path.Join(ib.chunkManager.RootPath(), common.SegmentIndexPath),
-				BuildID:             buildID,
-				IndexVersion:        meta.IndexVersion + 1,
-				StorageConfig:       storageConfig,
-				IndexParams:         indexParams,
-				TypeParams:          typeParams,
-				NumRows:             meta.NumRows,
-				CurrentIndexVersion: ib.indexEngineVersionManager.GetCurrentIndexEngineVersion(),
-				DataIds:             binlogIDs,
-				CollectionID:        segment.GetCollectionID(),
-				PartitionID:         segment.GetPartitionID(),
-				SegmentID:           segment.GetID(),
-				FieldID:             fieldID,
+				ClusterID:            Params.CommonCfg.ClusterPrefix.GetValue(),
+				IndexFilePrefix:      path.Join(ib.chunkManager.RootPath(), common.SegmentIndexPath),
+				BuildID:              buildID,
+				IndexVersion:         meta.IndexVersion + 1,
+				StorageConfig:        storageConfig,
+				IndexParams:          indexParams,
+				TypeParams:           typeParams,
+				NumRows:              meta.NumRows,
+				CurrentIndexVersion:  ib.indexEngineVersionManager.GetCurrentIndexEngineVersion(),
+				DataIds:              binlogIDs,
+				CollectionID:         segment.GetCollectionID(),
+				PartitionID:          segment.GetPartitionID(),
+				SegmentID:            segment.GetID(),
+				FieldID:              fieldID,
+				OptionalScalarFields: optionalFields,
 			}
 		}
 

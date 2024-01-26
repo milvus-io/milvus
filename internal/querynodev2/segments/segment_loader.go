@@ -395,6 +395,10 @@ func (loader *segmentLoaderV2) loadSegment(ctx context.Context,
 			}
 		}
 
+		if err := segment.AddFieldDataInfo(ctx, loadInfo.GetNumOfRows(), loadInfo.GetBinlogPaths()); err != nil {
+			return err
+		}
+
 		log.Info("load fields...",
 			zap.Int64s("indexedFields", lo.Keys(indexedFieldInfos)),
 		)
@@ -415,9 +419,6 @@ func (loader *segmentLoaderV2) loadSegment(ctx context.Context,
 		})
 
 		if err := loader.loadSealedSegmentFields(ctx, segment, fieldsMap, loadInfo.GetNumOfRows()); err != nil {
-			return err
-		}
-		if err := segment.AddFieldDataInfo(ctx, loadInfo.GetNumOfRows(), loadInfo.GetBinlogPaths()); err != nil {
 			return err
 		}
 		// https://github.com/milvus-io/milvus/23654
@@ -956,6 +957,10 @@ func (loader *segmentLoader) loadSegment(ctx context.Context,
 
 		schemaHelper, _ := typeutil.CreateSchemaHelper(collection.Schema())
 
+		if err := segment.AddFieldDataInfo(ctx, loadInfo.GetNumOfRows(), loadInfo.GetBinlogPaths()); err != nil {
+			return err
+		}
+
 		log.Info("load fields...",
 			zap.Int64s("indexedFields", lo.Keys(indexedFieldInfos)),
 		)
@@ -976,9 +981,6 @@ func (loader *segmentLoader) loadSegment(ctx context.Context,
 			}
 		}
 		if err := loader.loadSealedSegmentFields(ctx, segment, fieldBinlogs, loadInfo.GetNumOfRows()); err != nil {
-			return err
-		}
-		if err := segment.AddFieldDataInfo(ctx, loadInfo.GetNumOfRows(), loadInfo.GetBinlogPaths()); err != nil {
 			return err
 		}
 		// https://github.com/milvus-io/milvus/23654

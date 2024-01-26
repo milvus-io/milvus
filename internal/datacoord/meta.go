@@ -1053,6 +1053,7 @@ func (m *meta) PrepareCompleteCompactionMutation(plan *datapb.CompactionPlan,
 	}
 
 	// find new added delta logs when executing compaction
+	// TODO: won't be needed when enable L0 Segment
 	var originDeltalogs []*datapb.FieldBinlog
 	for _, s := range modSegments {
 		originDeltalogs = append(originDeltalogs, s.GetDeltalogs()...)
@@ -1097,7 +1098,12 @@ func (m *meta) PrepareCompleteCompactionMutation(plan *datapb.CompactionPlan,
 		Level:               datapb.SegmentLevel_L1,
 	}
 	segment := NewSegmentInfo(segmentInfo)
-	metricMutation.addNewSeg(segment.GetState(), segment.GetLevel(), segment.GetNumOfRows())
+
+	// L1 segment with NumRows=0 will be discarded, so no need to change the metric
+	if segmentInfo.GetNumOfRows() > 0 {
+		metricMutation.addNewSeg(segment.GetState(), segment.GetLevel(), segment.GetNumOfRows())
+	}
+
 	log.Info("meta update: prepare for complete compaction mutation - complete",
 		zap.Int64("collectionID", segment.GetCollectionID()),
 		zap.Int64("partitionID", segment.GetPartitionID()),
