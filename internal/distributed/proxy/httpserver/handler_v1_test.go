@@ -1830,14 +1830,14 @@ func TestImport(t *testing.T) {
 
 	mp4 := mocks.NewMockProxy(t)
 	mp4.EXPECT().ImportV2(mock.Anything, mock.Anything).Return(&internalpb.ImportResponse{
-		Status:    &StatusSuccess,
-		RequestID: "1000",
+		Status: &StatusSuccess,
+		JobID:  "1000",
 	}, nil).Once()
 	testCases = append(testCases, testCase{
 		name:         "import success",
 		mp:           mp4,
 		exceptCode:   200,
-		expectedBody: "{\"code\":200,\"requestID\":\"1000\"}",
+		expectedBody: "{\"code\":200,\"jobID\":\"1000\"}",
 	})
 
 	files := [][]string{
@@ -1899,7 +1899,7 @@ func TestImport(t *testing.T) {
 	for _, tt := range testCases {
 		t.Run(tt.name, func(t *testing.T) {
 			testEngine := initHTTPServer(tt.mp, true)
-			req := httptest.NewRequest(http.MethodGet, versional(fmt.Sprintf("%s?requestID=1000", VectorImportDescribePath)), nil)
+			req := httptest.NewRequest(http.MethodGet, versional(fmt.Sprintf("%s?jobID=1000", VectorImportDescribePath)), nil)
 			req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
 			w := httptest.NewRecorder()
 			testEngine.ServeHTTP(w, req)
@@ -1925,7 +1925,7 @@ func TestImport(t *testing.T) {
 	mp8 := mocks.NewMockProxy(t)
 	mp8.EXPECT().ListImports(mock.Anything, mock.Anything).Return(&internalpb.ListImportsResponse{
 		Status:     &StatusSuccess,
-		RequestIDs: []string{"1000"},
+		JobIDs:     []string{"1000"},
 		States:     []internalpb.ImportState{internalpb.ImportState_Completed},
 		Reasons:    []string{""},
 		Progresses: []int64{100},
@@ -1934,7 +1934,7 @@ func TestImport(t *testing.T) {
 		name:         "list imports success",
 		mp:           mp8,
 		exceptCode:   200,
-		expectedBody: "{\"code\":200,\"data\":[{\"progress\":100,\"requestID\":\"1000\",\"state\":\"Completed\"}]}",
+		expectedBody: "{\"code\":200,\"data\":[{\"progress\":100,\"jobID\":\"1000\",\"state\":\"Completed\"}]}",
 	})
 
 	for _, tt := range testCases {

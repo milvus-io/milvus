@@ -50,10 +50,10 @@ const (
 
 	Dim = "dim"
 
-	HTTPReturnImportRequestID = "requestID"
-	HTTPReturnImportState     = "state"
-	HTTPReturnImportReason    = "reason"
-	HTTPReturnImportProgress  = "progress"
+	HTTPReturnImportJobID    = "jobID"
+	HTTPReturnImportState    = "state"
+	HTTPReturnImportReason   = "reason"
+	HTTPReturnImportProgress = "progress"
 )
 
 const (

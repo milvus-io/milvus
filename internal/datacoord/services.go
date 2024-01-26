@@ -1746,7 +1746,7 @@ func (s *Server) ImportV2(ctx context.Context, in *datapb.ImportRequestInternal)
 	fileGroups := lo.Chunk(in.GetFiles(), fileNum)
 	idStart, _, err := s.allocator.allocN(int64(len(fileGroups)) + 1)
 	if err != nil {
-		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprint("alloc request id failed, err=%w", err)))
+		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprint("alloc id failed, err=%w", err)))
 		return resp, nil
 	}
 
@@ -1758,7 +1758,7 @@ func (s *Server) ImportV2(ctx context.Context, in *datapb.ImportRequestInternal)
 		})
 		task := &preImportTask{
 			PreImportTask: &datapb.PreImportTask{
-				RequestID:    idStart,
+				JobID:        idStart,
 				TaskID:       idStart + int64(i) + 1,
 				CollectionID: in.GetCollectionID(),
 				PartitionIDs: in.GetPartitionIDs(),
@@ -1777,13 +1777,13 @@ func (s *Server) ImportV2(ctx context.Context, in *datapb.ImportRequestInternal)
 			return resp, nil
 		}
 	}
-	resp.RequestID = fmt.Sprint(idStart)
+	resp.JobID = fmt.Sprint(idStart)
 	log.Info("import done")
 	return resp, nil
 }
 
 func (s *Server) GetImportProgress(ctx context.Context, in *internalpb.GetImportProgressRequest) (*internalpb.GetImportProgressResponse, error) {
-	log := log.With(zap.String("requestID", in.GetRequestID()))
+	log := log.With(zap.String("jobID", in.GetJobID()))
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &internalpb.GetImportProgressResponse{
 			Status: merr.Status(err),
@@ -1793,12 +1793,12 @@ func (s *Server) GetImportProgress(ctx context.Context, in *internalpb.GetImport
 	resp := &internalpb.GetImportProgressResponse{
 		Status: merr.Success(),
 	}
-	requestID, err := strconv.ParseInt(in.GetRequestID(), 10, 64)
+	jobID, err := strconv.ParseInt(in.GetJobID(), 10, 64)
 	if err != nil {
-		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprint("parse request id failed, err=%w", err)))
+		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprint("parse job id failed, err=%w", err)))
 		return resp, nil
 	}
-	progress, state, reason := GetImportProgress(requestID, s.importMeta, s.meta)
+	progress, state, reason := GetImportProgress(jobID, s.importMeta, s.meta)
 	resp.State = state
 	resp.Reason = reason
 	resp.Progress = progress
@@ -1818,11 +1818,11 @@ func (s *Server) ListImports(ctx context.Context, in *internalpb.ListImportsRequ
 	}
 	tasks := s.importMeta.GetBy()
 	res := lo.KeyBy(tasks, func(t ImportTask) int64 {
-		return t.GetRequestID()
+		return t.GetJobID()
 	})
-	requests := lo.Map(lo.Keys(res), func(requestID int64, _ int) string {
-		return fmt.Sprintf("%d", requestID)
+	jobs := lo.Map(lo.Keys(res), func(jobID int64, _ int) string {
+		return fmt.Sprintf("%d", jobID)
 	})
-	resp.RequestIDs = requests
+	resp.JobIDs = jobs
 	return resp, nil
 }

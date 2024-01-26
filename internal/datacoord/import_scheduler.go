@@ -86,15 +86,15 @@ func (s *importScheduler) Close() {
 
 func (s *importScheduler) process() {
 	all := s.imeta.GetBy()
-	tasksByReq := lo.GroupBy(all, func(t ImportTask) int64 {
-		return t.GetRequestID()
+	tasksByJob := lo.GroupBy(all, func(t ImportTask) int64 {
+		return t.GetJobID()
 	})
-	requests := lo.Keys(tasksByReq)
-	sort.Slice(requests, func(i, j int) bool {
-		return requests[i] < requests[j]
+	jobs := lo.Keys(tasksByJob)
+	sort.Slice(jobs, func(i, j int) bool {
+		return jobs[i] < jobs[j]
 	})
-	for _, request := range requests {
-		tasks := tasksByReq[request]
+	for _, job := range jobs {
+		tasks := tasksByJob[job]
 		for _, task := range tasks {
 			switch task.GetState() {
 			case internalpb.ImportState_Pending:
@@ -139,7 +139,7 @@ func (s *importScheduler) getIdleNode() int64 {
 		return s.info.NodeID
 	})
 	for _, nodeID := range nodeIDs {
-		resp, err := s.cluster.QueryImport(nodeID, &datapb.QueryImportRequest{})
+		resp, err := s.cluster.QueryImport(nodeID, &datapb.QueryImportRequest{QuerySlot: true})
 		if err != nil {
 			log.Warn("query import failed", zap.Error(err))
 			continue
@@ -200,8 +200,8 @@ func (s *importScheduler) processPendingImport(task ImportTask) {
 
 func (s *importScheduler) processInProgressPreImport(task ImportTask) {
 	req := &datapb.QueryPreImportRequest{
-		RequestID: task.GetRequestID(),
-		TaskID:    task.GetTaskID(),
+		JobID:  task.GetJobID(),
+		TaskID: task.GetTaskID(),
 	}
 	resp, err := s.cluster.QueryPreImport(task.GetNodeID(), req)
 	if err != nil {
@@ -232,8 +232,8 @@ func (s *importScheduler) processInProgressPreImport(task ImportTask) {
 
 func (s *importScheduler) processInProgressImport(task ImportTask) {
 	req := &datapb.QueryImportRequest{
-		RequestID: task.GetRequestID(),
-		TaskID:    task.GetTaskID(),
+		JobID:  task.GetJobID(),
+		TaskID: task.GetTaskID(),
 	}
 	resp, err := s.cluster.QueryImport(task.GetNodeID(), req)
 	if err != nil {

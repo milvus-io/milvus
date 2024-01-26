@@ -36,7 +36,7 @@ import (
 func WrapLogFields(task ImportTask, fields ...zap.Field) []zap.Field {
 	res := []zap.Field{
 		zap.Int64("taskID", task.GetTaskID()),
-		zap.Int64("requestID", task.GetRequestID()),
+		zap.Int64("jobID", task.GetJobID()),
 		zap.Int64("collectionID", task.GetCollectionID()),
 		zap.Int64("nodeID", task.GetNodeID()),
 		zap.String("state", task.GetState().String()),
@@ -53,7 +53,7 @@ func AssemblePreImportRequest(task ImportTask) *datapb.PreImportRequest {
 		})
 	pt := task.(*preImportTask)
 	return &datapb.PreImportRequest{
-		RequestID:    task.GetRequestID(),
+		JobID:        task.GetJobID(),
 		TaskID:       task.GetTaskID(),
 		CollectionID: task.GetCollectionID(),
 		PartitionIDs: pt.GetPartitionIDs(),
@@ -142,7 +142,7 @@ func AssembleImportRequest(task ImportTask, meta *meta, alloc allocator) (*datap
 		return fileStat.GetImportFile()
 	})
 	return &datapb.ImportRequest{
-		RequestID:       task.GetRequestID(),
+		JobID:           task.GetJobID(),
 		TaskID:          task.GetTaskID(),
 		CollectionID:    task.GetCollectionID(),
 		Schema:          task.GetSchema(),
@@ -206,7 +206,7 @@ func NewImportTasks(fileGroups [][]*datapb.ImportFileStats,
 	for i, group := range fileGroups {
 		task := &importTask{
 			ImportTaskV2: &datapb.ImportTaskV2{
-				RequestID:    pt.GetRequestID(),
+				JobID:        pt.GetJobID(),
 				TaskID:       idBegin + int64(i),
 				CollectionID: pt.GetCollectionID(),
 				NodeID:       NullNodeID,
@@ -275,15 +275,15 @@ func AreAllTasksFinished(tasks []ImportTask, meta *meta, imeta ImportMeta) bool 
 	return finished
 }
 
-func GetImportProgress(requestID int64, imeta ImportMeta, meta *meta) (int64, internalpb.ImportState, string) {
-	tasks := imeta.GetBy(WithReq(requestID), WithType(PreImportTaskType))
+func GetImportProgress(jobID int64, imeta ImportMeta, meta *meta) (int64, internalpb.ImportState, string) {
+	tasks := imeta.GetBy(WithJob(jobID), WithType(PreImportTaskType))
 	var (
 		preparingProgress float32 = 100
 		preImportProgress float32 = 0
 		importProgress    float32 = 0
 		segStateProgress  float32 = 0
 	)
-	totalTaskNum := len(imeta.GetBy(WithReq(requestID)))
+	totalTaskNum := len(imeta.GetBy(WithJob(jobID)))
 	for _, task := range tasks {
 		switch task.GetState() {
 		case internalpb.ImportState_Failed:
@@ -294,7 +294,7 @@ func GetImportProgress(requestID int64, imeta ImportMeta, meta *meta) (int64, in
 			preImportProgress += 100 / float32(len(tasks))
 		}
 	}
-	tasks = imeta.GetBy(WithReq(requestID), WithType(ImportTaskType))
+	tasks = imeta.GetBy(WithJob(jobID), WithType(ImportTaskType))
 	var (
 		unsetImportStateSegments = 0
 		totalSegments            = 0
@@ -357,8 +357,8 @@ func DropImportTask(task ImportTask, cluster Cluster, imeta ImportMeta) error {
 		return nil
 	}
 	req := &datapb.DropImportRequest{
-		RequestID: task.GetRequestID(),
-		TaskID:    task.GetTaskID(),
+		JobID:  task.GetJobID(),
+		TaskID: task.GetTaskID(),
 	}
 	err := cluster.DropImport(task.GetNodeID(), req)
 	if err != nil {

@@ -49,9 +49,9 @@ func WithType(taskType TaskType) ImportTaskFilter {
 	}
 }
 
-func WithReq(reqID int64) ImportTaskFilter {
+func WithJob(jobID int64) ImportTaskFilter {
 	return func(task ImportTask) bool {
-		return task.GetRequestID() == reqID
+		return task.GetJobID() == jobID
 	}
 }
 
@@ -118,7 +118,7 @@ func UpdateSegmentIDs(segmentIDs []UniqueID) UpdateAction {
 }
 
 type ImportTask interface {
-	GetRequestID() int64
+	GetJobID() int64
 	GetTaskID() int64
 	GetCollectionID() int64
 	GetNodeID() int64

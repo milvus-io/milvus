@@ -80,12 +80,11 @@ type ImportReq struct {
 	PartitionName  string            `json:"partitionName"`
 	Files          [][]string        `json:"files"`
 	Options        map[string]string `json:"options"`
-	ClusteringInfo []byte            `json:"clusteringInfo"`
 }
 
 type GetImportProgressReq struct {
-	DbName    string `json:"dbName"`
-	RequestID string `json:"requestID" validate:"required"`
+	DbName string `json:"dbName"`
+	JobID  string `json:"jobID" validate:"required"`
 }
 
 type ListImportsReq struct {

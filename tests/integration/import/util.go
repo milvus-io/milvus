@@ -527,10 +527,10 @@ func GenerateJsonFile(t *testing.T, filePath string, schema *schemapb.Collection
 	assert.NoError(t, err)
 }
 
-func WaitForImportDone(ctx context.Context, c *integration.MiniClusterV2, requestID string) error {
+func WaitForImportDone(ctx context.Context, c *integration.MiniClusterV2, jobID string) error {
 	for {
 		resp, err := c.Proxy.GetImportProgress(ctx, &internalpb.GetImportProgressRequest{
-			RequestID: requestID,
+			JobID: jobID,
 		})
 		if err != nil {
 			return err
@@ -544,7 +544,7 @@ func WaitForImportDone(ctx context.Context, c *integration.MiniClusterV2, reques
 		case internalpb.ImportState_Failed:
 			return merr.WrapErrImportFailed(resp.GetReason())
 		default:
-			log.Info("import progress", zap.String("request", requestID),
+			log.Info("import progress", zap.String("jobID", jobID),
 				zap.Int64("progress", resp.GetProgress()),
 				zap.String("state", resp.GetState().String()))
 			time.Sleep(1 * time.Second)

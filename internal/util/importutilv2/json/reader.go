@@ -47,7 +47,7 @@ type reader struct {
 
 func NewReader(r io.Reader, schema *schemapb.CollectionSchema, bufferSize int) (*reader, error) {
 	var err error
-	count, err := readCountPerBatch(bufferSize, schema)
+	count, err := estimateReadCountPerBatch(bufferSize, schema)
 	if err != nil {
 		return nil, err
 	}
@@ -154,14 +154,13 @@ func (j *reader) Read() (*storage.InsertData, error) {
 
 func (j *reader) Close() {}
 
-func readCountPerBatch(bufferSize int, schema *schemapb.CollectionSchema) (int64, error) {
+func estimateReadCountPerBatch(bufferSize int, schema *schemapb.CollectionSchema) (int64, error) {
 	sizePerRecord, err := typeutil.EstimateMaxSizePerRecord(schema)
 	if err != nil {
 		return 0, err
 	}
-	rowCount := int64(bufferSize) / int64(sizePerRecord)
-	if rowCount >= 1000 {
+	if 1000*sizePerRecord <= bufferSize {
 		return 1000, nil
 	}
-	return rowCount, nil
+	return int64(bufferSize) / int64(sizePerRecord), nil
 }

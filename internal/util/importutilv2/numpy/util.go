@@ -253,13 +253,9 @@ func fillDynamicData(data *storage.InsertData, schema *schemapb.CollectionSchema
 	}
 	rowNum := GetInsertDataRowNum(data, schema)
 	dynamicData := data.Data[dynamicField.GetFieldID()]
-	if dynamicData.RowNum() >= rowNum {
-		return nil
-	}
 	jsonFD := dynamicData.(*storage.JSONFieldData)
 	bs := []byte("{}")
-	count := rowNum - dynamicData.RowNum()
-	for i := 0; i < count; i++ {
+	for i := 0; i < rowNum-dynamicData.RowNum(); i++ {
 		jsonFD.Data = append(jsonFD.Data, bs)
 	}
 	data.Data[dynamicField.GetFieldID()] = dynamicData

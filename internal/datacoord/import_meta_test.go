@@ -63,7 +63,7 @@ func TestImportMeta_Normal(t *testing.T) {
 
 	task1 := &importTask{
 		ImportTaskV2: &datapb.ImportTaskV2{
-			RequestID:    1,
+			JobID:        1,
 			TaskID:       2,
 			CollectionID: 3,
 			SegmentIDs:   []int64{5, 6},
@@ -84,7 +84,7 @@ func TestImportMeta_Normal(t *testing.T) {
 	err = meta.Add(task2)
 	assert.NoError(t, err)
 
-	tasks := meta.GetBy(WithReq(task1.GetRequestID()))
+	tasks := meta.GetBy(WithJob(task1.GetJobID()))
 	assert.Equal(t, 2, len(tasks))
 	tasks = meta.GetBy(WithType(ImportTaskType), WithStates(internalpb.ImportState_Completed))
 	assert.Equal(t, 1, len(tasks))
@@ -122,7 +122,7 @@ func TestImportMeta_Failed(t *testing.T) {
 
 	task1 := &importTask{
 		ImportTaskV2: &datapb.ImportTaskV2{
-			RequestID:    1,
+			JobID:        1,
 			TaskID:       2,
 			CollectionID: 3,
 			SegmentIDs:   []int64{5, 6},

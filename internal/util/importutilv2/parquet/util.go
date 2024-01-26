@@ -175,14 +175,13 @@ func isConvertible(src, dst schemapb.DataType, isList bool) bool {
 	}
 }
 
-func readCountPerBatch(bufferSize int, schema *schemapb.CollectionSchema) (int64, error) {
+func estimateReadCountPerBatch(bufferSize int, schema *schemapb.CollectionSchema) (int64, error) {
 	sizePerRecord, err := typeutil.EstimateMaxSizePerRecord(schema)
 	if err != nil {
 		return 0, err
 	}
-	rowCount := int64(bufferSize) / int64(sizePerRecord)
-	if rowCount >= 1000 {
+	if 1000*sizePerRecord <= bufferSize {
 		return 1000, nil
 	}
-	return rowCount, nil
+	return int64(bufferSize) / int64(sizePerRecord), nil
 }

@@ -68,7 +68,7 @@ func TestRegroupImportFiles(t *testing.T) {
 
 	task := &preImportTask{
 		PreImportTask: &datapb.PreImportTask{
-			RequestID:    0,
+			JobID:        0,
 			TaskID:       100,
 			CollectionID: 1,
 			PartitionIDs: []int64{2},

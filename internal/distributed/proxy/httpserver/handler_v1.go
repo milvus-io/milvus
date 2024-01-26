@@ -983,8 +983,7 @@ func (h *HandlersV1) import_(c *gin.Context) { //nolint:all
 		Files: lo.Map(httpReq.Files, func(paths []string, _ int) *internalpb.ImportFile {
 			return &internalpb.ImportFile{Paths: paths}
 		}),
-		Options:        funcutil.Map2KeyValuePair(httpReq.Options),
-		ClusteringInfo: httpReq.ClusteringInfo,
+		Options: funcutil.Map2KeyValuePair(httpReq.Options),
 	}
 	username, _ := c.Get(ContextUsername)
 	ctx := proxy.NewContextWithMetadata(c, username.(string), req.GetDbName())
@@ -1001,17 +1000,17 @@ func (h *HandlersV1) import_(c *gin.Context) { //nolint:all
 		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 	} else {
 		resp := response.(*internalpb.ImportResponse)
-		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnImportRequestID: resp.GetRequestID()})
+		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnImportJobID: resp.GetJobID()})
 	}
 }
 
 func (h *HandlersV1) getImportProgress(c *gin.Context) {
-	requestID := c.Query(HTTPReturnImportRequestID)
-	if requestID == "" {
-		log.Warn("high level restful api, describe bulkinsert require parameter: [requestID], but miss")
+	jobID := c.Query(HTTPReturnImportJobID)
+	if jobID == "" {
+		log.Warn("high level restful api, describe bulkinsert require parameter: [jobID], but miss")
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrMissingRequiredParameters),
-			HTTPReturnMessage: merr.ErrMissingRequiredParameters.Error() + ", required parameters: [requestID]",
+			HTTPReturnMessage: merr.ErrMissingRequiredParameters.Error() + ", required parameters: [jobID]",
 		})
 		return
 	}
@@ -1020,8 +1019,8 @@ func (h *HandlersV1) getImportProgress(c *gin.Context) {
 	ctx := proxy.NewContextWithMetadata(c, username.(string), dbName)
 
 	req := &internalpb.GetImportProgressRequest{
-		DbName:    dbName,
-		RequestID: requestID,
+		DbName: dbName,
+		JobID:  jobID,
 	}
 
 	response, err := h.executeRestRequestInterceptor(ctx, c, req, func(reqCtx context.Context, req any) (any, error) {
@@ -1075,10 +1074,10 @@ func (h *HandlersV1) listImports(c *gin.Context) {
 	}
 
 	resp := response.(*internalpb.ListImportsResponse)
-	stats := make([]map[string]any, 0, len(resp.GetRequestIDs()))
-	for i := 0; i < len(resp.GetRequestIDs()); i++ {
+	stats := make([]map[string]any, 0, len(resp.GetJobIDs()))
+	for i := 0; i < len(resp.GetJobIDs()); i++ {
 		stat := make(map[string]any)
-		stat[HTTPReturnImportRequestID] = resp.GetRequestIDs()[i]
+		stat[HTTPReturnImportJobID] = resp.GetJobIDs()[i]
 		stat[HTTPReturnImportState] = resp.GetStates()[i].String()
 		stat[HTTPReturnImportProgress] = resp.GetProgresses()[i]
 		reason := resp.GetReasons()[i]

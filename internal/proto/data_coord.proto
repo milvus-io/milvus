@@ -768,7 +768,7 @@ message ImportRequestInternal {
 
 message PreImportRequest {
   string clusterID = 1;
-  int64 requestID = 2;
+  int64 jobID = 2;
   int64 taskID = 3;
   int64 collectionID = 4;
   repeated int64 partitionIDs = 5;
@@ -792,7 +792,7 @@ message ImportRequestSegment {
 
 message ImportRequest {
   string clusterID = 1;
-  int64 requestID = 2;
+  int64 jobID = 2;
   int64 taskID = 3;
   int64 collectionID = 4;
   schema.CollectionSchema schema = 5;
@@ -805,7 +805,7 @@ message ImportRequest {
 
 message QueryPreImportRequest {
   string clusterID = 1;
-  int64 requestID = 2;
+  int64 jobID = 2;
   int64 taskID = 3;
 }
 
@@ -831,8 +831,9 @@ message QueryPreImportResponse {
 
 message QueryImportRequest {
   string clusterID = 1;
-  int64 requestID = 2;
+  int64 jobID = 2;
   int64 taskID = 3;
+  bool querySlot = 4;
 }
 
 message ImportSegmentInfo {
@@ -853,12 +854,12 @@ message QueryImportResponse {
 
 message DropImportRequest {
   string clusterID = 1;
-  int64 requestID = 2;
+  int64 jobID = 2;
   int64 taskID = 3;
 }
 
 message PreImportTask {
-  int64 requestID = 1;
+  int64 jobID = 1;
   int64 taskID = 2;
   int64 collectionID = 3;
   repeated int64 partitionIDs = 4;
@@ -872,7 +873,7 @@ message PreImportTask {
 }
 
 message ImportTaskV2 {
-  int64 requestID = 1;
+  int64 jobID = 1;
   int64 taskID = 2;
   int64 collectionID = 3;
   repeated int64 segmentIDs = 4;

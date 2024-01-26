@@ -71,7 +71,7 @@ func (s *ImportSchedulerSuite) TestProcessPreImport() {
 	s.catalog.EXPECT().SaveImportTask(mock.Anything).Return(nil)
 	var task ImportTask = &preImportTask{
 		PreImportTask: &datapb.PreImportTask{
-			RequestID:    0,
+			JobID:        0,
 			TaskID:       1,
 			CollectionID: s.collectionID,
 			State:        internalpb.ImportState_Pending,
@@ -117,7 +117,7 @@ func (s *ImportSchedulerSuite) TestProcessImport() {
 	s.catalog.EXPECT().SaveImportTask(mock.Anything).Return(nil)
 	var task ImportTask = &importTask{
 		ImportTaskV2: &datapb.ImportTaskV2{
-			RequestID:    0,
+			JobID:        0,
 			TaskID:       1,
 			CollectionID: s.collectionID,
 			State:        internalpb.ImportState_Pending,

@@ -402,7 +402,7 @@ func (c *SessionManagerImpl) AddImportSegment(ctx context.Context, nodeID int64,
 func (c *SessionManagerImpl) PreImport(nodeID int64, in *datapb.PreImportRequest) error {
 	log := log.With(
 		zap.Int64("nodeID", nodeID),
-		zap.Int64("requestID", in.GetRequestID()),
+		zap.Int64("jobID", in.GetJobID()),
 		zap.Int64("taskID", in.GetTaskID()),
 		zap.Int64("collectionID", in.GetCollectionID()),
 		zap.Int64s("partitionIDs", in.GetPartitionIDs()),
@@ -421,7 +421,7 @@ func (c *SessionManagerImpl) PreImport(nodeID int64, in *datapb.PreImportRequest
 func (c *SessionManagerImpl) ImportV2(nodeID int64, in *datapb.ImportRequest) error {
 	log := log.With(
 		zap.Int64("nodeID", nodeID),
-		zap.Int64("requestID", in.GetRequestID()),
+		zap.Int64("jobID", in.GetJobID()),
 		zap.Int64("taskID", in.GetTaskID()),
 		zap.Int64("collectionID", in.GetCollectionID()),
 	)
@@ -439,7 +439,7 @@ func (c *SessionManagerImpl) ImportV2(nodeID int64, in *datapb.ImportRequest) er
 func (c *SessionManagerImpl) QueryPreImport(nodeID int64, in *datapb.QueryPreImportRequest) (*datapb.QueryPreImportResponse, error) {
 	log := log.With(
 		zap.Int64("nodeID", nodeID),
-		zap.Int64("requestID", in.GetRequestID()),
+		zap.Int64("jobID", in.GetJobID()),
 		zap.Int64("taskID", in.GetTaskID()),
 	)
 	ctx, cancel := context.WithTimeout(context.Background(), importTaskTimeout)
@@ -459,7 +459,7 @@ func (c *SessionManagerImpl) QueryPreImport(nodeID int64, in *datapb.QueryPreImp
 func (c *SessionManagerImpl) QueryImport(nodeID int64, in *datapb.QueryImportRequest) (*datapb.QueryImportResponse, error) {
 	log := log.With(
 		zap.Int64("nodeID", nodeID),
-		zap.Int64("requestID", in.GetRequestID()),
+		zap.Int64("jobID", in.GetJobID()),
 		zap.Int64("taskID", in.GetTaskID()),
 	)
 	ctx, cancel := context.WithTimeout(context.Background(), importTaskTimeout)
@@ -479,7 +479,7 @@ func (c *SessionManagerImpl) QueryImport(nodeID int64, in *datapb.QueryImportReq
 func (c *SessionManagerImpl) DropImport(nodeID int64, in *datapb.DropImportRequest) error {
 	log := log.With(
 		zap.Int64("nodeID", nodeID),
-		zap.Int64("requestID", in.GetRequestID()),
+		zap.Int64("jobID", in.GetJobID()),
 		zap.Int64("taskID", in.GetTaskID()),
 	)
 	ctx, cancel := context.WithTimeout(context.Background(), importTaskTimeout)

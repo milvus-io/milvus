@@ -122,8 +122,8 @@ func (s *BulkInsertSuite) testNormal() {
 	s.NoError(err)
 	log.Info("Import result", zap.Any("importResp", importResp))
 
-	request := importResp.GetRequestID()
-	err = WaitForImportDone(ctx, c, request)
+	jobID := importResp.GetJobID()
+	err = WaitForImportDone(ctx, c, jobID)
 	s.NoError(err)
 
 	segments, err := c.MetaWatcher.ShowSegments()
@@ -227,8 +227,8 @@ func (s *BulkInsertSuite) TestZeroRowCount() {
 	s.NoError(err)
 	log.Info("Import result", zap.Any("importResp", importResp))
 
-	request := importResp.GetRequestID()
-	err = WaitForImportDone(ctx, c, request)
+	jobID := importResp.GetJobID()
+	err = WaitForImportDone(ctx, c, jobID)
 	s.NoError(err)
 
 	segments, err := c.MetaWatcher.ShowSegments()

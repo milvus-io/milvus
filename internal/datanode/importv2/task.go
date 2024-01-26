@@ -126,7 +126,7 @@ func UpdateSegmentInfo(info *datapb.ImportSegmentInfo) UpdateAction {
 }
 
 type Task interface {
-	GetRequestID() int64
+	GetJobID() int64
 	GetTaskID() int64
 	GetCollectionID() int64
 	GetPartitionIDs() []int64
@@ -156,7 +156,7 @@ func NewPreImportTask(req *datapb.PreImportRequest) Task {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &PreImportTask{
 		PreImportTask: &datapb.PreImportTask{
-			RequestID:    req.GetRequestID(),
+			JobID:        req.GetJobID(),
 			TaskID:       req.GetTaskID(),
 			CollectionID: req.GetCollectionID(),
 			PartitionIDs: req.GetPartitionIDs(),
@@ -203,7 +203,7 @@ func NewImportTask(req *datapb.ImportRequest) Task {
 	ctx, cancel := context.WithCancel(context.Background())
 	task := &ImportTask{
 		ImportTaskV2: &datapb.ImportTaskV2{
-			RequestID:    req.GetRequestID(),
+			JobID:        req.GetJobID(),
 			TaskID:       req.GetTaskID(),
 			CollectionID: req.GetCollectionID(),
 			State:        internalpb.ImportState_Pending,

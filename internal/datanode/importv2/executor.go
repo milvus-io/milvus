@@ -122,7 +122,7 @@ func (e *executor) Close() {
 func WrapLogFields(task Task, fields ...zap.Field) []zap.Field {
 	res := []zap.Field{
 		zap.Int64("taskID", task.GetTaskID()),
-		zap.Int64("requestID", task.GetRequestID()),
+		zap.Int64("jobID", task.GetJobID()),
 		zap.Int64("collectionID", task.GetCollectionID()),
 		zap.String("type", task.GetType().String()),
 	}
@@ -136,7 +136,7 @@ func (e *executor) handleErr(task Task, err error, msg string) {
 }
 
 func (e *executor) PreImport(task Task) {
-	bufferSize := paramtable.Get().DataNodeCfg.ImportBufferSize.GetAsInt() * 1024 * 1024
+	bufferSize := paramtable.Get().DataNodeCfg.ImportBufferSize.GetAsInt()
 	log.Info("start to preimport", WrapLogFields(task,
 		zap.Int("bufferSize", bufferSize),
 		zap.Any("schema", task.GetSchema()))...)
@@ -220,7 +220,7 @@ func (e *executor) readFileStat(reader importutilv2.Reader, task Task, fileIdx i
 }
 
 func (e *executor) Import(task Task) {
-	bufferSize := paramtable.Get().DataNodeCfg.ImportBufferSize.GetAsInt() * 1024 * 1024
+	bufferSize := paramtable.Get().DataNodeCfg.ImportBufferSize.GetAsInt()
 	log.Info("start to import", WrapLogFields(task,
 		zap.Int("bufferSize", bufferSize),
 		zap.Any("schema", task.GetSchema()))...)
