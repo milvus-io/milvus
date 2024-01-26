@@ -24,6 +24,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -205,6 +206,15 @@ func (mgr *TargetManager) PullNextTargetV2(broker Broker, collectionID int64, ch
 
 		for _, info := range vChannelInfos {
 			channelInfos[info.GetChannelName()] = append(channelInfos[info.GetChannelName()], info)
+			for _, segmentID := range info.GetLevelZeroSegmentIds() {
+				segments[segmentID] = &datapb.SegmentInfo{
+					ID:            segmentID,
+					CollectionID:  collectionID,
+					InsertChannel: info.GetChannelName(),
+					State:         commonpb.SegmentState_Flushed,
+					Level:         datapb.SegmentLevel_L0,
+				}
+			}
 		}
 
 		partitionSet := typeutil.NewUniqueSet(chosenPartitionIDs...)
@@ -322,19 +332,19 @@ func (mgr *TargetManager) removePartitionFromCollectionTarget(oldTarget *Collect
 func (mgr *TargetManager) getCollectionTarget(scope TargetScope, collectionID int64) *CollectionTarget {
 	switch scope {
 	case CurrentTarget:
-		return mgr.current.collectionTargetMap[collectionID]
+		return mgr.current.getCollectionTarget(collectionID)
 	case NextTarget:
-		return mgr.next.collectionTargetMap[collectionID]
+		return mgr.next.getCollectionTarget(collectionID)
 	case CurrentTargetFirst:
-		if current := mgr.current.collectionTargetMap[collectionID]; current != nil {
+		if current := mgr.current.getCollectionTarget(collectionID); current != nil {
 			return current
 		}
-		return mgr.next.collectionTargetMap[collectionID]
+		return mgr.next.getCollectionTarget(collectionID)
 	case NextTargetFirst:
-		if next := mgr.next.collectionTargetMap[collectionID]; next != nil {
+		if next := mgr.next.getCollectionTarget(collectionID); next != nil {
 			return next
 		}
-		return mgr.current.collectionTargetMap[collectionID]
+		return mgr.current.getCollectionTarget(collectionID)
 	}
 	return nil
 }

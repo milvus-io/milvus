@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
@@ -33,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 var (
@@ -72,6 +74,8 @@ var (
 )
 
 func (b *binlogIO) download(ctx context.Context, paths []string) ([]*Blob, error) {
+	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "download")
+	defer span.End()
 	log.Debug("down load", zap.Strings("path", paths))
 	resp := make([]*Blob, len(paths))
 	if len(paths) == 0 {
@@ -248,6 +252,8 @@ func (b *binlogIO) uploadStatsLog(
 	totRows int64,
 	meta *etcdpb.CollectionMeta,
 ) (map[UniqueID]*datapb.FieldBinlog, map[UniqueID]*datapb.FieldBinlog, error) {
+	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "UploadStatslog")
+	defer span.End()
 	var inPaths map[int64]*datapb.FieldBinlog
 	var err error
 
@@ -285,6 +291,8 @@ func (b *binlogIO) uploadInsertLog(
 	iData *InsertData,
 	meta *etcdpb.CollectionMeta,
 ) (map[UniqueID]*datapb.FieldBinlog, error) {
+	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "UploadInsertLog")
+	defer span.End()
 	iCodec := storage.NewInsertCodecWithSchema(meta)
 	kvs := make(map[string][]byte)
 
@@ -316,6 +324,8 @@ func (b *binlogIO) uploadDeltaLog(
 	dData *DeleteData,
 	meta *etcdpb.CollectionMeta,
 ) ([]*datapb.FieldBinlog, error) {
+	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "UploadDeltaLog")
+	defer span.End()
 	var (
 		deltaInfo = make([]*datapb.FieldBinlog, 0)
 		kvs       = make(map[string][]byte)

@@ -504,6 +504,10 @@ func (t *alterIndexTask) PreExecute(ctx context.Context) error {
 	}
 	t.collectionID = collection
 
+	if len(t.req.GetIndexName()) == 0 {
+		return merr.WrapErrParameterInvalidMsg("index name is empty")
+	}
+
 	if err = validateIndexName(t.req.GetIndexName()); err != nil {
 		return err
 	}

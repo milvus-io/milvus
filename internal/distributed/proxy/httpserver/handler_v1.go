@@ -135,8 +135,8 @@ func (h *HandlersV1) describeCollection(ctx context.Context, c *gin.Context, dbN
 		return nil, err
 	}
 	primaryField, ok := getPrimaryField(response.Schema)
-	if ok && primaryField.AutoID && !response.Schema.AutoID {
-		log.Warn("primary filed autoID VS schema autoID", zap.String("collectionName", collectionName), zap.Bool("primary Field", primaryField.AutoID), zap.Bool("schema", response.Schema.AutoID))
+	if ok && primaryField.AutoID && !primaryField.AutoID {
+		log.Warn("primary filed autoID VS schema autoID", zap.String("collectionName", collectionName), zap.Bool("primary Field", primaryField.AutoID), zap.Bool("schema", primaryField.AutoID))
 		response.Schema.AutoID = EnableAutoID
 	}
 	return response.Schema, nil
@@ -219,10 +219,11 @@ func (h *HandlersV1) listCollections(c *gin.Context) {
 
 func (h *HandlersV1) createCollection(c *gin.Context) {
 	httpReq := CreateCollectionReq{
-		DbName:       DefaultDbName,
-		MetricType:   DefaultMetricType,
-		PrimaryField: DefaultPrimaryFieldName,
-		VectorField:  DefaultVectorFieldName,
+		DbName:             DefaultDbName,
+		MetricType:         DefaultMetricType,
+		PrimaryField:       DefaultPrimaryFieldName,
+		VectorField:        DefaultVectorFieldName,
+		EnableDynamicField: EnableDynamic,
 	}
 	if err := c.ShouldBindWith(&httpReq, binding.JSON); err != nil {
 		log.Warn("high level restful api, the parameter of create collection is incorrect", zap.Any("request", httpReq), zap.Error(err))
@@ -265,7 +266,7 @@ func (h *HandlersV1) createCollection(c *gin.Context) {
 				AutoID: DisableAutoID,
 			},
 		},
-		EnableDynamicField: EnableDynamic,
+		EnableDynamicField: httpReq.EnableDynamicField,
 	})
 	if err != nil {
 		log.Warn("high level restful api, marshal collection schema fail", zap.Any("request", httpReq), zap.Error(err))
@@ -358,8 +359,8 @@ func (h *HandlersV1) getCollectionDetails(c *gin.Context) {
 	}
 	coll := response.(*milvuspb.DescribeCollectionResponse)
 	primaryField, ok := getPrimaryField(coll.Schema)
-	if ok && primaryField.AutoID && !coll.Schema.AutoID {
-		log.Warn("primary filed autoID VS schema autoID", zap.String("collectionName", collectionName), zap.Bool("primary Field", primaryField.AutoID), zap.Bool("schema", coll.Schema.AutoID))
+	if ok && primaryField.AutoID && !primaryField.AutoID {
+		log.Warn("primary filed autoID VS schema autoID", zap.String("collectionName", collectionName), zap.Bool("primary Field", primaryField.AutoID), zap.Bool("schema", primaryField.AutoID))
 		coll.Schema.AutoID = EnableAutoID
 	}
 
@@ -798,10 +799,12 @@ func (h *HandlersV1) upsert(c *gin.Context) {
 		if err != nil || collSchema == nil {
 			return nil, RestRequestInterceptorErr
 		}
-		if collSchema.AutoID {
-			err := merr.WrapErrParameterInvalid("autoID: false", "autoID: true", "cannot upsert an autoID collection")
-			c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
-			return nil, RestRequestInterceptorErr
+		for _, fieldSchema := range collSchema.Fields {
+			if fieldSchema.IsPrimaryKey && fieldSchema.AutoID {
+				err := merr.WrapErrParameterInvalid("autoID: false", "autoID: true", "cannot upsert an autoID collection")
+				c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+				return nil, RestRequestInterceptorErr
+			}
 		}
 		body, _ := c.Get(gin.BodyBytesKey)
 		err, httpReq.Data = checkAndSetData(string(body.([]byte)), collSchema)

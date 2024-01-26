@@ -12,7 +12,7 @@ allure-pytest==2.7.0
 pytest-print==0.2.1
 pytest-level==0.1.1
 pytest-xdist==2.5.0
-pymilvus==2.4.0rc19
+pymilvus==2.4.0rc24
 pytest-rerunfailures==9.1.1
 git+https://github.com/Projectplace/pytest-tags
 ndg-httpsclient
@@ -50,5 +50,5 @@ etcd-sdk-python==0.0.4
 
 # for test result anaylszer
 prettytable==3.8.0
-pyarrow==12.0.0
+pyarrow==14.0.1
 fastparquet==2023.7.0

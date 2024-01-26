@@ -241,13 +241,13 @@ func (_c *MockSessionManager_Close_Call) RunAndReturn(run func()) *MockSessionMa
 	return _c
 }
 
-// Compaction provides a mock function with given fields: nodeID, plan
-func (_m *MockSessionManager) Compaction(nodeID int64, plan *datapb.CompactionPlan) error {
-	ret := _m.Called(nodeID, plan)
+// Compaction provides a mock function with given fields: ctx, nodeID, plan
+func (_m *MockSessionManager) Compaction(ctx context.Context, nodeID int64, plan *datapb.CompactionPlan) error {
+	ret := _m.Called(ctx, nodeID, plan)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(int64, *datapb.CompactionPlan) error); ok {
-		r0 = rf(nodeID, plan)
+	if rf, ok := ret.Get(0).(func(context.Context, int64, *datapb.CompactionPlan) error); ok {
+		r0 = rf(ctx, nodeID, plan)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -261,15 +261,16 @@ type MockSessionManager_Compaction_Call struct {
 }
 
 // Compaction is a helper method to define mock.On call
+//   - ctx context.Context
 //   - nodeID int64
 //   - plan *datapb.CompactionPlan
-func (_e *MockSessionManager_Expecter) Compaction(nodeID interface{}, plan interface{}) *MockSessionManager_Compaction_Call {
-	return &MockSessionManager_Compaction_Call{Call: _e.mock.On("Compaction", nodeID, plan)}
+func (_e *MockSessionManager_Expecter) Compaction(ctx interface{}, nodeID interface{}, plan interface{}) *MockSessionManager_Compaction_Call {
+	return &MockSessionManager_Compaction_Call{Call: _e.mock.On("Compaction", ctx, nodeID, plan)}
 }
 
-func (_c *MockSessionManager_Compaction_Call) Run(run func(nodeID int64, plan *datapb.CompactionPlan)) *MockSessionManager_Compaction_Call {
+func (_c *MockSessionManager_Compaction_Call) Run(run func(ctx context.Context, nodeID int64, plan *datapb.CompactionPlan)) *MockSessionManager_Compaction_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(*datapb.CompactionPlan))
+		run(args[0].(context.Context), args[1].(int64), args[2].(*datapb.CompactionPlan))
 	})
 	return _c
 }
@@ -279,7 +280,7 @@ func (_c *MockSessionManager_Compaction_Call) Return(_a0 error) *MockSessionMana
 	return _c
 }
 
-func (_c *MockSessionManager_Compaction_Call) RunAndReturn(run func(int64, *datapb.CompactionPlan) error) *MockSessionManager_Compaction_Call {
+func (_c *MockSessionManager_Compaction_Call) RunAndReturn(run func(context.Context, int64, *datapb.CompactionPlan) error) *MockSessionManager_Compaction_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -19,6 +19,8 @@ package datacoord
 import (
 	"bytes"
 	"context"
+	"fmt"
+	"math/rand"
 	"path"
 	"strconv"
 	"strings"
@@ -107,7 +109,7 @@ func validateMinioPrefixElements(t *testing.T, cli *minio.Client, bucketName str
 
 func Test_garbageCollector_scan(t *testing.T) {
 	bucketName := `datacoord-ut` + strings.ToLower(funcutil.RandomString(8))
-	rootPath := `gc` + funcutil.RandomString(8)
+	rootPath := paramtable.Get().MinioCfg.RootPath.GetValue()
 	// TODO change to Params
 	cli, inserts, stats, delta, others, err := initUtOSSEnv(bucketName, rootPath, 4)
 	require.NoError(t, err)
@@ -278,9 +280,9 @@ func initUtOSSEnv(bucket, root string, n int) (mcm *storage.MinioChunkManager, i
 
 		var token string
 		if i == 1 {
-			token = path.Join(strconv.Itoa(i), strconv.Itoa(i), "error-seg-id", funcutil.RandomString(8), funcutil.RandomString(8))
+			token = path.Join(strconv.Itoa(i), strconv.Itoa(i), "error-seg-id", strconv.Itoa(i), fmt.Sprint(rand.Int63()))
 		} else {
-			token = path.Join(strconv.Itoa(1+i), strconv.Itoa(10+i), strconv.Itoa(100+i), funcutil.RandomString(8), funcutil.RandomString(8))
+			token = path.Join(strconv.Itoa(1+i), strconv.Itoa(10+i), strconv.Itoa(100+i), strconv.Itoa(i), fmt.Sprint(rand.Int63()))
 		}
 		// insert
 		filePath := path.Join(root, common.SegmentInsertLogPath, token)
@@ -299,9 +301,9 @@ func initUtOSSEnv(bucket, root string, n int) (mcm *storage.MinioChunkManager, i
 
 		// delta
 		if i == 1 {
-			token = path.Join(strconv.Itoa(i), strconv.Itoa(i), "error-seg-id", funcutil.RandomString(8))
+			token = path.Join(strconv.Itoa(i), strconv.Itoa(i), "error-seg-id", fmt.Sprint(rand.Int63()))
 		} else {
-			token = path.Join(strconv.Itoa(1+i), strconv.Itoa(10+i), strconv.Itoa(100+i), funcutil.RandomString(8))
+			token = path.Join(strconv.Itoa(1+i), strconv.Itoa(10+i), strconv.Itoa(100+i), fmt.Sprint(rand.Int63()))
 		}
 		filePath = path.Join(root, common.SegmentDeltaLogPath, token)
 		info, err = cli.PutObject(context.TODO(), bucket, filePath, reader, int64(len(content)), minio.PutObjectOptions{})

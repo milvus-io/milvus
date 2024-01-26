@@ -6,6 +6,9 @@ import (
 	"strconv"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -16,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 var _ Task = &QueryTask{}
@@ -25,6 +29,7 @@ func NewQueryTask(ctx context.Context,
 	manager *segments.Manager,
 	req *querypb.QueryRequest,
 ) *QueryTask {
+	ctx, span := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "schedule")
 	return &QueryTask{
 		ctx:            ctx,
 		collection:     collection,
@@ -32,6 +37,7 @@ func NewQueryTask(ctx context.Context,
 		req:            req,
 		notifier:       make(chan error, 1),
 		tr:             timerecord.NewTimeRecorderWithTrace(ctx, "queryTask"),
+		scheduleSpan:   span,
 	}
 }
 
@@ -43,6 +49,7 @@ type QueryTask struct {
 	result         *internalpb.RetrieveResults
 	notifier       chan error
 	tr             *timerecord.TimeRecorder
+	scheduleSpan   trace.Span
 }
 
 // Return the username which task is belong to.
@@ -81,6 +88,9 @@ func (t *QueryTask) PreExecute() error {
 
 // Execute the task, only call once.
 func (t *QueryTask) Execute() error {
+	if t.scheduleSpan != nil {
+		t.scheduleSpan.End()
+	}
 	tr := timerecord.NewTimeRecorderWithTrace(t.ctx, "QueryTask")
 
 	retrievePlan, err := segments.NewRetrievePlan(

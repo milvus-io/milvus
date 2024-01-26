@@ -1,5 +1,4 @@
 import logging
-from loguru import logger as loguru_logger
 import sys
 
 from config.log_config import log_config
@@ -44,7 +43,6 @@ class TestLog:
             ch = logging.StreamHandler(sys.stdout)
             ch.setLevel(logging.DEBUG)
             ch.setFormatter(formatter)
-            # self.log.addHandler(ch)
 
         except Exception as e:
             print("Can not use %s or %s or %s to log. error : %s" % (log_debug, log_file, log_err, str(e)))
@@ -55,6 +53,4 @@ log_debug = log_config.log_debug
 log_info = log_config.log_info
 log_err = log_config.log_err
 log_worker = log_config.log_worker
-self_defined_log = TestLog('ci_test', log_debug, log_info, log_err, log_worker).log
-loguru_log = loguru_logger
-test_log = self_defined_log
+test_log = TestLog('ci_test', log_debug, log_info, log_err, log_worker).log

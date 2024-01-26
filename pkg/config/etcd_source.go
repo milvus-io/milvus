@@ -112,7 +112,7 @@ func (es *EtcdSource) Close() {
 }
 
 func (es *EtcdSource) SetEventHandler(eh EventHandler) {
-	es.configRefresher.eh = eh
+	es.configRefresher.SetEventHandler(eh)
 }
 
 func (es *EtcdSource) UpdateOptions(opts Options) {
@@ -124,9 +124,9 @@ func (es *EtcdSource) UpdateOptions(opts Options) {
 	es.keyPrefix = opts.EtcdInfo.KeyPrefix
 	if es.configRefresher.refreshInterval != opts.EtcdInfo.RefreshInterval {
 		es.configRefresher.stop()
-		eh := es.configRefresher.eh
+		eh := es.configRefresher.GetEventHandler()
 		es.configRefresher = newRefresher(opts.EtcdInfo.RefreshInterval, es.refreshConfigurations)
-		es.configRefresher.eh = eh
+		es.configRefresher.SetEventHandler(eh)
 		es.configRefresher.start(es.GetSourceName())
 	}
 }

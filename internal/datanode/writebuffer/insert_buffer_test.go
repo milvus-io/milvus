@@ -11,7 +11,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -128,65 +127,28 @@ func (s *InsertBufferSuite) TestBasic() {
 }
 
 func (s *InsertBufferSuite) TestBuffer() {
-	s.Run("normal_buffer", func() {
-		pks, insertMsg := s.composeInsertMsg(10, 128)
+	wb := &writeBufferBase{
+		collSchema: s.collSchema,
+	}
+	_, insertMsg := s.composeInsertMsg(10, 128)
 
-		insertBuffer, err := NewInsertBuffer(s.collSchema)
-		s.Require().NoError(err)
+	insertBuffer, err := NewInsertBuffer(s.collSchema)
+	s.Require().NoError(err)
 
-		fieldData, memSize, err := insertBuffer.Buffer([]*msgstream.InsertMsg{insertMsg}, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})
-		s.NoError(err)
+	groups, err := wb.prepareInsert([]*msgstream.InsertMsg{insertMsg})
+	s.Require().NoError(err)
+	s.Require().Len(groups, 1)
 
-		pkData := lo.Map(fieldData, func(fd storage.FieldData, _ int) []int64 {
-			return lo.RepeatBy(fd.RowNum(), func(idx int) int64 { return fd.GetRow(idx).(int64) })
-		})
-		s.ElementsMatch(pks, lo.Flatten(pkData))
-		s.EqualValues(100, insertBuffer.MinTimestamp())
-		s.EqualValues(5364, memSize)
-	})
+	memSize := insertBuffer.Buffer(groups[0], &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})
 
-	s.Run("pk_not_found", func() {
-		_, insertMsg := s.composeInsertMsg(10, 128)
-
-		insertMsg.FieldsData = []*schemapb.FieldData{insertMsg.FieldsData[0], insertMsg.FieldsData[1], insertMsg.FieldsData[3]}
-
-		insertBuffer, err := NewInsertBuffer(s.collSchema)
-		s.Require().NoError(err)
-
-		_, _, err = insertBuffer.Buffer([]*msgstream.InsertMsg{insertMsg}, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})
-		s.Error(err)
-	})
-
-	s.Run("schema_without_pk", func() {
-		badSchema := &schemapb.CollectionSchema{
-			Name: "test_collection",
-			Fields: []*schemapb.FieldSchema{
-				{
-					FieldID: common.RowIDField, Name: common.RowIDFieldName, DataType: schemapb.DataType_Int64,
-				},
-				{
-					FieldID: common.TimeStampField, Name: common.TimeStampFieldName, DataType: schemapb.DataType_Int64,
-				},
-				{
-					FieldID: 101, Name: "vector", DataType: schemapb.DataType_FloatVector,
-					TypeParams: []*commonpb.KeyValuePair{
-						{Key: common.DimKey, Value: "128"},
-					},
-				},
-			},
-		}
-
-		_, insertMsg := s.composeInsertMsg(10, 128)
-
-		insertBuffer, err := NewInsertBuffer(badSchema)
-		s.Require().NoError(err)
-
-		_, _, err = insertBuffer.Buffer([]*msgstream.InsertMsg{insertMsg}, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})
-		s.Error(err)
-	})
+	s.EqualValues(100, insertBuffer.MinTimestamp())
+	s.EqualValues(5364, memSize)
 }
 
 func (s *InsertBufferSuite) TestYield() {
+	wb := &writeBufferBase{
+		collSchema: s.collSchema,
+	}
 	insertBuffer, err := NewInsertBuffer(s.collSchema)
 	s.Require().NoError(err)
 
@@ -197,8 +159,11 @@ func (s *InsertBufferSuite) TestYield() {
 	s.Require().NoError(err)
 
 	pks, insertMsg := s.composeInsertMsg(10, 128)
-	_, _, err = insertBuffer.Buffer([]*msgstream.InsertMsg{insertMsg}, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})
+	groups, err := wb.prepareInsert([]*msgstream.InsertMsg{insertMsg})
 	s.Require().NoError(err)
+	s.Require().Len(groups, 1)
+
+	insertBuffer.Buffer(groups[0], &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})
 
 	result = insertBuffer.Yield()
 	s.NotNil(result)

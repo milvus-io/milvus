@@ -41,14 +41,14 @@ NewSegment(CCollection collection,
         switch (seg_type) {
             case Growing: {
                 auto seg = milvus::segcore::CreateGrowingSegment(
-                    col->get_schema(), col->GetIndexMeta(), segment_id);
+                    col->get_schema(), col->get_index_meta(), segment_id);
                 segment = std::move(seg);
                 break;
             }
             case Sealed:
             case Indexing:
                 segment = milvus::segcore::CreateSealedSegment(
-                    col->get_schema(), col->GetIndexMeta(), segment_id);
+                    col->get_schema(), col->get_index_meta(), segment_id);
                 break;
             default:
                 PanicInfo(milvus::UnexpectedError,
@@ -405,6 +405,21 @@ AddFieldDataInfoForSealed(CSegmentInterface c_segment,
         auto load_info =
             static_cast<LoadFieldDataInfo*>(c_load_field_data_info);
         segment->AddFieldDataInfoForSealed(*load_info);
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(milvus::UnexpectedError, e.what());
+    }
+}
+
+CStatus
+WarmupChunkCache(CSegmentInterface c_segment, int64_t field_id) {
+    try {
+        auto segment_interface =
+            reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
+        auto segment =
+            dynamic_cast<milvus::segcore::SegmentSealed*>(segment_interface);
+        AssertInfo(segment != nullptr, "segment conversion failed");
+        segment->WarmupChunkCache(milvus::FieldId(field_id));
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(milvus::UnexpectedError, e.what());

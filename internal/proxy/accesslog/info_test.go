@@ -113,22 +113,29 @@ func (s *GrpcAccessInfoSuite) TestDbName() {
 
 func (s *GrpcAccessInfoSuite) TestSdkInfo() {
 	ctx := context.Background()
+	clientInfo := &commonpb.ClientInfo{
+		SdkType:    "test",
+		SdkVersion: "1.0",
+	}
+
 	s.info.ctx = ctx
 	result := s.info.Get("$sdk_version")
 	s.Equal(unknownString, result[0])
 
+	s.info.req = &milvuspb.ConnectRequest{
+		ClientInfo: clientInfo,
+	}
+	result = s.info.Get("$sdk_version")
+	s.Equal(clientInfo.SdkType+"-"+clientInfo.SdkVersion, result[0])
+
 	identifier := 11111
 	md := metadata.MD{util.IdentifierKey: []string{fmt.Sprint(identifier)}}
 	ctx = metadata.NewIncomingContext(ctx, md)
-	info := &commonpb.ClientInfo{
-		SdkType:    "test",
-		SdkVersion: "1.0",
-	}
-	connection.GetManager().Register(ctx, int64(identifier), info)
+	connection.GetManager().Register(ctx, int64(identifier), clientInfo)
 
 	s.info.ctx = ctx
 	result = s.info.Get("$sdk_version")
-	s.Equal(info.SdkType+"-"+info.SdkVersion, result[0])
+	s.Equal(clientInfo.SdkType+"-"+clientInfo.SdkVersion, result[0])
 }
 
 func (s *GrpcAccessInfoSuite) TestExpression() {

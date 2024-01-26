@@ -73,6 +73,7 @@ const (
 	InvertedIndexType = "INVERTED"
 
 	defaultRRFParamsValue = 60
+	maxRRFParamsValue     = 16384
 )
 
 var logger = log.L().WithOptions(zap.Fields(zap.String("role", typeutil.ProxyRole)))
@@ -749,7 +750,7 @@ func ValidateUsername(username string) error {
 
 	firstChar := username[0]
 	if !isAlpha(firstChar) {
-		return merr.WrapErrParameterInvalidMsg("invalid user name %s, the first character must be a letter, but got %s", username, firstChar)
+		return merr.WrapErrParameterInvalidMsg("invalid user name %s, the first character must be a letter, but got %s", username, string(firstChar))
 	}
 
 	usernameSize := len(username)

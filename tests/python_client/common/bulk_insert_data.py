@@ -21,6 +21,10 @@ FLOAT = "float"
 class DataField:
     pk_field = "uid"
     vec_field = "vectors"
+    float_vec_field = "float_vectors"
+    image_float_vec_field = "image_float_vec_field"
+    text_float_vec_field = "text_float_vec_field"
+    binary_vec_field = "binary_vec_field"
     int_field = "int_scalar"
     string_field = "string_scalar"
     bool_field = "bool_scalar"
@@ -317,12 +321,12 @@ def gen_vectors_in_numpy_file(dir, data_field, float_vector, rows, dim, force=Fa
         if rows > 0:
             if float_vector:
                 vectors = gen_float_vectors(rows, dim)
+                arr = np.array(vectors)
             else:
                 vectors = gen_binary_vectors(rows, (dim // 8))
-        arr = np.array(vectors)
-        # print(f"file_name: {file_name} data type: {arr.dtype}")
-        log.info(f"file_name: {file_name} data type: {arr.dtype} data shape: {arr.shape}")
-        np.save(file, arr)
+                arr = np.array(vectors, dtype=np.dtype("uint8"))
+            log.info(f"file_name: {file_name} data type: {arr.dtype} data shape: {arr.shape}")
+            np.save(file, arr)
     return file_name
 
 
@@ -421,8 +425,15 @@ def gen_data_by_data_field(data_field, rows, start=0, float_vector=True, dim=128
 
     data = []
     if rows > 0:
-        if data_field == DataField.vec_field:
-            data = gen_vectors(float_vector=float_vector, rows=rows, dim=dim)
+        if "vec" in data_field:
+            if "float" in data_field:
+                data = gen_vectors(float_vector=True, rows=rows, dim=dim)
+                data = pd.Series([np.array(x, dtype=np.dtype("float32")) for x in data])
+            elif "binary" in data_field:
+                data = gen_vectors(float_vector=False, rows=rows, dim=dim)
+                data = pd.Series([np.array(x, dtype=np.dtype("uint8")) for x in data])
+            else:
+                data = gen_vectors(float_vector=float_vector, rows=rows, dim=dim)
         elif data_field == DataField.float_field:
             data = [np.float32(random.random()) for _ in range(rows)]
         elif data_field == DataField.double_field:
@@ -530,8 +541,11 @@ def gen_dict_data_by_data_field(data_fields, rows, start=0, float_vector=True, d
     for r in range(rows):
         d = {}
         for data_field in data_fields:
-            if data_field == DataField.vec_field:
-                # vector columns
+            if "vec" in data_field:
+                if "float" in data_field:
+                    float_vector = True
+                if "binary" in data_field:
+                    float_vector = False
                 d[data_field] = gen_vectors(float_vector=float_vector, rows=1, dim=dim)[0]
             elif data_field == DataField.float_field:
                 d[data_field] = random.random()
@@ -608,7 +622,11 @@ def gen_npy_files(float_vector, rows, dim, data_fields, file_size=None, file_num
     if file_nums == 1:
         # gen the numpy file without subfolders if only one set of files
         for data_field in data_fields:
-            if data_field == DataField.vec_field:
+            if "vec" in data_field:
+                if "float" in data_field:
+                    float_vector = True
+                if "binary" in data_field:
+                    float_vector = False
                 file_name = gen_vectors_in_numpy_file(dir=data_source, data_field=data_field, float_vector=float_vector,
                                                       rows=rows, dim=dim, force=force)
             elif data_field == DataField.string_field:  # string field for numpy not supported yet at 2022-10-17

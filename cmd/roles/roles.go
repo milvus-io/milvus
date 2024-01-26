@@ -103,11 +103,6 @@ func runComponent[T component](ctx context.Context,
 		factory := dependency.NewFactory(localMsg)
 		var err error
 		role, err = creator(ctx, factory)
-		if localMsg {
-			paramtable.SetRole(typeutil.StandaloneRole)
-		} else {
-			paramtable.SetRole(role.GetName())
-		}
 		if err != nil {
 			panic(err)
 		}
@@ -142,6 +137,8 @@ type MilvusRoles struct {
 	Local    bool
 	Alias    string
 	Embedded bool
+
+	ServerType string
 
 	closed chan struct{}
 	once   sync.Once
@@ -338,6 +335,7 @@ func (mr *MilvusRoles) Run() {
 			log.Error("Failed to set deploy mode: ", zap.Error(err))
 		}
 		paramtable.Init()
+		paramtable.SetRole(mr.ServerType)
 	}
 
 	expr.Init()

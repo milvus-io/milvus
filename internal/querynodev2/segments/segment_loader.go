@@ -395,6 +395,10 @@ func (loader *segmentLoaderV2) loadSegment(ctx context.Context,
 			}
 		}
 
+		if err := segment.AddFieldDataInfo(ctx, loadInfo.GetNumOfRows(), loadInfo.GetBinlogPaths()); err != nil {
+			return err
+		}
+
 		log.Info("load fields...",
 			zap.Int64s("indexedFields", lo.Keys(indexedFieldInfos)),
 		)
@@ -415,9 +419,6 @@ func (loader *segmentLoaderV2) loadSegment(ctx context.Context,
 		})
 
 		if err := loader.loadSealedSegmentFields(ctx, segment, fieldsMap, loadInfo.GetNumOfRows()); err != nil {
-			return err
-		}
-		if err := segment.AddFieldDataInfo(ctx, loadInfo.GetNumOfRows(), loadInfo.GetBinlogPaths()); err != nil {
 			return err
 		}
 		// https://github.com/milvus-io/milvus/23654
@@ -956,6 +957,10 @@ func (loader *segmentLoader) loadSegment(ctx context.Context,
 
 		schemaHelper, _ := typeutil.CreateSchemaHelper(collection.Schema())
 
+		if err := segment.AddFieldDataInfo(ctx, loadInfo.GetNumOfRows(), loadInfo.GetBinlogPaths()); err != nil {
+			return err
+		}
+
 		log.Info("load fields...",
 			zap.Int64s("indexedFields", lo.Keys(indexedFieldInfos)),
 		)
@@ -976,9 +981,6 @@ func (loader *segmentLoader) loadSegment(ctx context.Context,
 			}
 		}
 		if err := loader.loadSealedSegmentFields(ctx, segment, fieldBinlogs, loadInfo.GetNumOfRows()); err != nil {
-			return err
-		}
-		if err := segment.AddFieldDataInfo(ctx, loadInfo.GetNumOfRows(), loadInfo.GetBinlogPaths()); err != nil {
 			return err
 		}
 		// https://github.com/milvus-io/milvus/23654
@@ -1092,8 +1094,6 @@ func (loader *segmentLoader) loadFieldsIndex(ctx context.Context,
 			zap.Any("binlog", fieldInfo.FieldBinlog.Binlogs),
 			zap.Int32("current_index_version", fieldInfo.IndexInfo.GetCurrentIndexVersion()),
 		)
-
-		segment.AddIndex(fieldID, fieldInfo)
 
 		// set average row data size of variable field
 		field, err := schemaHelper.GetFieldFromID(fieldID)
@@ -1267,6 +1267,7 @@ func (loader *segmentLoader) patchEntryNumber(ctx context.Context, segment *Loca
 
 	counts := make([]int64, 0, len(rowIDField.GetBinlogs()))
 	for _, binlog := range rowIDField.GetBinlogs() {
+		// binlog.LogPath has already been filled
 		bs, err := loader.cm.Read(ctx, binlog.LogPath)
 		if err != nil {
 			return err
@@ -1512,17 +1513,13 @@ func (loader *segmentLoader) LoadIndex(ctx context.Context, segment *LocalSegmen
 
 			fieldInfo, ok := fieldInfos[info.GetFieldID()]
 			if !ok {
-				return merr.WrapErrParameterInvalid("index info with corresponding  field info", "missing field info", strconv.FormatInt(fieldInfo.GetFieldID(), 10))
+				return merr.WrapErrParameterInvalid("index info with corresponding field info", "missing field info", strconv.FormatInt(fieldInfo.GetFieldID(), 10))
 			}
 			err := loader.loadFieldIndex(ctx, segment, info)
 			if err != nil {
 				log.Warn("failed to load index for segment", zap.Error(err))
 				return err
 			}
-			segment.AddIndex(info.FieldID, &IndexedFieldInfo{
-				IndexInfo:   info,
-				FieldBinlog: fieldInfo,
-			})
 		}
 		loader.notifyLoadFinish(loadInfo)
 	}

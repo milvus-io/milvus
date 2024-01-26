@@ -8,8 +8,7 @@ import (
 )
 
 const (
-	RunCmd      = "run"
-	RoleMixture = "mixture"
+	RunCmd = "run"
 )
 
 var (

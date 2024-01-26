@@ -1,13 +1,14 @@
 package httpserver
 
 type CreateCollectionReq struct {
-	DbName         string `json:"dbName"`
-	CollectionName string `json:"collectionName" validate:"required"`
-	Dimension      int32  `json:"dimension" validate:"required"`
-	Description    string `json:"description"`
-	MetricType     string `json:"metricType"`
-	PrimaryField   string `json:"primaryField"`
-	VectorField    string `json:"vectorField"`
+	DbName             string `json:"dbName"`
+	CollectionName     string `json:"collectionName" validate:"required"`
+	Dimension          int32  `json:"dimension" validate:"required"`
+	Description        string `json:"description"`
+	MetricType         string `json:"metricType"`
+	PrimaryField       string `json:"primaryField"`
+	VectorField        string `json:"vectorField"`
+	EnableDynamicField bool   `json:"enableDynamicField"`
 }
 
 type DropCollectionReq struct {

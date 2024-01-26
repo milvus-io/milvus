@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -134,10 +135,12 @@ func getCollectionTTL(properties map[string]string) (time.Duration, error) {
 }
 
 func UpdateCompactionSegmentSizeMetrics(segments []*datapb.CompactionSegment) {
+	var totalSize int64
 	for _, seg := range segments {
-		size := getCompactedSegmentSize(seg)
-		metrics.DataCoordCompactedSegmentSize.WithLabelValues().Observe(float64(size))
+		totalSize += getCompactedSegmentSize(seg)
 	}
+	// observe size in bytes
+	metrics.DataCoordCompactedSegmentSize.WithLabelValues().Observe(float64(totalSize))
 }
 
 func getCompactedSegmentSize(s *datapb.CompactionSegment) int64 {
@@ -189,7 +192,11 @@ func getIndexType(indexParams []*commonpb.KeyValuePair) string {
 }
 
 func isFlatIndex(indexType string) bool {
-	return indexType == flatIndex || indexType == binFlatIndex
+	return indexType == indexparamcheck.IndexFaissIDMap || indexType == indexparamcheck.IndexFaissBinIDMap
+}
+
+func isOptionalScalarFieldSupported(indexType string) bool {
+	return indexType == indexparamcheck.IndexHNSW
 }
 
 func parseBuildIDFromFilePath(key string) (UniqueID, error) {

@@ -503,7 +503,7 @@ func (sched *taskScheduler) controlLoop() {
 
 func (sched *taskScheduler) manipulationLoop() {
 	defer sched.wg.Done()
-
+	pool := conc.NewPool[struct{}](paramtable.Get().ProxyCfg.MaxTaskNum.GetAsInt())
 	for {
 		select {
 		case <-sched.ctx.Done():
@@ -511,7 +511,10 @@ func (sched *taskScheduler) manipulationLoop() {
 		case <-sched.dmQueue.utChan():
 			if !sched.dmQueue.utEmpty() {
 				t := sched.scheduleDmTask()
-				go sched.processTask(t, sched.dmQueue)
+				pool.Submit(func() (struct{}, error) {
+					sched.processTask(t, sched.dmQueue)
+					return struct{}{}, nil
+				})
 			}
 		}
 	}

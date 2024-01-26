@@ -13,6 +13,7 @@
 
 #include <fcntl.h>
 #include <fmt/core.h>
+#include <sys/stat.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -116,6 +117,36 @@ SegmentSealedImpl::LoadVecIndex(const LoadIndexInfo& info) {
         metric_type,
         std::move(const_cast<LoadIndexInfo&>(info).index));
     set_bit(index_ready_bitset_, field_id, true);
+}
+
+void
+SegmentSealedImpl::WarmupChunkCache(const FieldId field_id) {
+    auto& field_meta = schema_->operator[](field_id);
+    AssertInfo(field_meta.is_vector(), "vector field is not vector type");
+
+    if (!get_bit(index_ready_bitset_, field_id) &&
+        !get_bit(binlog_index_bitset_, field_id)) {
+        return;
+    }
+
+    AssertInfo(vector_indexings_.is_ready(field_id),
+               "vector index is not ready");
+    auto field_indexing = vector_indexings_.get_field_indexing(field_id);
+    auto vec_index =
+        dynamic_cast<index::VectorIndex*>(field_indexing->indexing_.get());
+    AssertInfo(vec_index, "invalid vector indexing");
+
+    auto it = field_data_info_.field_infos.find(field_id.get());
+    AssertInfo(it != field_data_info_.field_infos.end(),
+               "cannot find binlog file for field: {}, seg: {}",
+               field_id.get(),
+               id_);
+    auto field_info = it->second;
+
+    auto cc = storage::ChunkCacheSingleton::GetInstance().GetChunkCache();
+    for (const auto& data_path : field_info.insert_files) {
+        auto column = cc->Read(data_path);
+    }
 }
 
 void
@@ -324,6 +355,7 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
             insert_record_.timestamp_index_ = std::move(index);
             AssertInfo(insert_record_.timestamps_.num_chunk() == 1,
                        "num chunk not equal to 1 for sealed segment");
+            stats_.mem_size += sizeof(Timestamp) * data.row_count;
         } else {
             AssertInfo(system_field_type == SystemFieldType::RowId,
                        "System field type of id column is not RowId");
@@ -336,6 +368,7 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
             insert_record_.row_ids_.fill_chunk_data(field_data);
             AssertInfo(insert_record_.row_ids_.num_chunk() == 1,
                        "num chunk not equal to 1 for sealed segment");
+            stats_.mem_size += sizeof(idx_t) * data.row_count;
         }
         ++system_ready_count_;
     } else {
@@ -364,6 +397,9 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                             auto str_size = str->size();
                             var_column->Append(str->data(), str_size);
                             field_data_size += str_size;
+
+                            // we stores the offset for each string, so there is a additional uint64_t for each string
+                            stats_.mem_size += str_size + sizeof(uint64_t);
                         }
                     }
                     var_column->Seal();
@@ -386,6 +422,10 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                             var_column->Append(padded_string.data(),
                                                padded_string_size);
                             field_data_size += padded_string_size;
+
+                            // we stores the offset for each JSON, so there is a additional uint64_t for each JSON
+                            stats_.mem_size +=
+                                padded_string_size + sizeof(uint64_t);
                         }
                     }
                     var_column->Seal();
@@ -402,6 +442,10 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                             auto array =
                                 static_cast<const milvus::Array*>(rawValue);
                             var_column->Append(*array);
+
+                            // we stores the offset for each array element, so there is a additional uint64_t for each array element
+                            stats_.mem_size +=
+                                array->byte_size() + sizeof(uint64_t);
                         }
                     }
                     var_column->Seal();
@@ -422,6 +466,8 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
             FieldDataPtr field_data;
             while (data.channel->pop(field_data)) {
                 column->AppendBatch(field_data);
+
+                stats_.mem_size += field_data->Size();
             }
             LoadPrimitiveSkipIndex(
                 field_id, 0, data_type, column->Span().data(), num_rows);
@@ -486,18 +532,21 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
     auto data_type = field_meta.get_data_type();
 
     // write the field data to disk
-    size_t total_written{0};
-    auto data_size = 0;
     std::vector<uint64_t> indices{};
     std::vector<std::vector<uint64_t>> element_indices{};
     FieldDataPtr field_data;
+    size_t total_written = 0;
     while (data.channel->pop(field_data)) {
-        data_size += field_data->Size();
         auto written =
             WriteFieldData(file, data_type, field_data, element_indices);
-        if (written != field_data->Size()) {
-            break;
-        }
+
+        AssertInfo(written == field_data->Size(),
+                   fmt::format("failed to write data file {}, written {} but "
+                               "total {}, err: {}",
+                               filepath.c_str(),
+                               written,
+                               field_data->Size(),
+                               strerror(errno)));
 
         for (auto i = 0; i < field_data->get_num_rows(); i++) {
             auto size = field_data->Size(i);
@@ -505,14 +554,6 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
             total_written += size;
         }
     }
-    AssertInfo(
-        total_written == data_size,
-        fmt::format(
-            "failed to write data file {}, written {} but total {}, err: {}",
-            filepath.c_str(),
-            total_written,
-            data_size,
-            strerror(errno)));
 
     auto num_rows = data.row_count;
     std::shared_ptr<ColumnBase> column{};
@@ -590,6 +631,8 @@ SegmentSealedImpl::LoadDeletedRecord(const LoadDeletedRecordInfo& info) {
 
     // step 2: fill pks and timestamps
     deleted_record_.push(pks, timestamps);
+
+    stats_.mem_size += sizeof(Timestamp) * info.row_count + CalcPksSize(pks);
 }
 
 void
@@ -648,14 +691,6 @@ SegmentSealedImpl::chunk_index_impl(FieldId field_id, int64_t chunk_id) const {
                    std::to_string(field_id.get()));
     auto ptr = scalar_indexings_.at(field_id).get();
     return ptr;
-}
-
-int64_t
-SegmentSealedImpl::GetMemoryUsageInBytes() const {
-    // TODO: add estimate for index
-    std::shared_lock lck(mutex_);
-    auto row_count = num_rows_.value_or(0);
-    return schema_->get_total_sizeof() * row_count;
 }
 
 int64_t
@@ -864,10 +899,12 @@ SegmentSealedImpl::get_vector(FieldId field_id,
             AssertInfo(path_to_column.count(data_path) != 0,
                        "column not found");
             const auto& column = path_to_column.at(data_path);
-            AssertInfo(offset_in_binlog * row_bytes < column->ByteSize(),
-                       fmt::format("column idx out of range, idx: {}, size: {}",
-                                   offset_in_binlog * row_bytes,
-                                   column->ByteSize()));
+            AssertInfo(
+                offset_in_binlog * row_bytes < column->ByteSize(),
+                "column idx out of range, idx: {}, size: {}, data_path: {}",
+                offset_in_binlog * row_bytes,
+                column->ByteSize(),
+                data_path);
             auto vector = &column->Data()[offset_in_binlog * row_bytes];
             std::memcpy(buf.data() + i * row_bytes, vector, row_bytes);
         }
@@ -925,17 +962,6 @@ SegmentSealedImpl::check_search(const query::Plan* plan) const {
     AssertInfo(plan, "Search plan is null");
     AssertInfo(plan->extra_info_opt_.has_value(),
                "Extra info of search plan doesn't have value");
-
-    auto& metric_str = plan->plan_node_->search_info_.metric_type_;
-    auto searched_field_id = plan->plan_node_->search_info_.field_id_;
-    auto index_meta =
-        col_index_meta_->GetFieldIndexMeta(FieldId(searched_field_id));
-    if (metric_str.empty()) {
-        metric_str = index_meta.GeMetricType();
-    } else {
-        AssertInfo(metric_str == index_meta.GeMetricType(),
-                   "metric type not match");
-    }
 
     if (!is_system_field_ready()) {
         PanicInfo(
@@ -1420,6 +1446,9 @@ SegmentSealedImpl::Delete(int64_t reserved_offset,  // deprecated
     }
 
     deleted_record_.push(sort_pks, sort_timestamps.data());
+
+    stats_.mem_size +=
+        sizeof(Timestamp) * sort_pks.size() + CalcPksSize(sort_pks);
     return SegcoreError::success();
 }
 
