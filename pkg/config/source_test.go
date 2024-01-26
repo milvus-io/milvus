@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"golang.org/x/exp/maps"
 )
 
 func TestLoadFromFileSource(t *testing.T) {
@@ -48,5 +49,8 @@ func TestLoadFromFileSource(t *testing.T) {
 		assert.Equal(t, "3", v1)
 		v2, _ := fs.GetConfigurationByKey("c.d")
 		assert.Equal(t, "2", v2)
+		ret, err := fs.GetConfigurations()
+		assert.ElementsMatch(t, maps.Keys(ret), []string{"a.b", "ab", "c.d", "cd"})
+		assert.Nil(t, err)
 	})
 }
