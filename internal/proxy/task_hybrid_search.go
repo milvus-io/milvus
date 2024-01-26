@@ -214,6 +214,9 @@ func (t *hybridSearchTask) PreExecute(ctx context.Context) error {
 }
 
 func (t *hybridSearchTask) hybridSearchShard(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string) error {
+	for _, searchTask := range t.searchTasks {
+		t.HybridSearchRequest.Reqs = append(t.HybridSearchRequest.Reqs, searchTask.SearchRequest)
+	}
 	hybridSearchReq := typeutil.Clone(t.HybridSearchRequest)
 	hybridSearchReq.GetBase().TargetID = nodeID
 	req := &querypb.HybridSearchRequest{
