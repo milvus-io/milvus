@@ -161,7 +161,7 @@ var (
 			Subsystem: typeutil.DataCoordRole,
 			Name:      "compacted_segment_size",
 			Help:      "the segment size of compacted segment",
-			Buckets:   buckets,
+			Buckets:   sizeBuckets,
 		}, []string{})
 
 	DataCoordCompactionTaskNum = prometheus.NewGaugeVec(
