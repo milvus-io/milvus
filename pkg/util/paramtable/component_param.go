@@ -1279,6 +1279,7 @@ type queryCoordConfig struct {
 	OverloadedMemoryThresholdPercentage ParamItem `refreshable:"true"`
 	BalanceIntervalSeconds              ParamItem `refreshable:"true"`
 	MemoryUsageMaxDifferencePercentage  ParamItem `refreshable:"true"`
+	GrowingRowCountWeight               ParamItem `refreshable:"true"`
 
 	SegmentCheckInterval       ParamItem `refreshable:"true"`
 	ChannelCheckInterval       ParamItem `refreshable:"true"`
@@ -1435,6 +1436,16 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.BalanceIntervalSeconds.Init(base.mgr)
+
+	p.GrowingRowCountWeight = ParamItem{
+		Key:          "queryCoord.growingRowCountWeight",
+		Version:      "2.3.5",
+		DefaultValue: "4.0",
+		PanicIfEmpty: true,
+		Doc:          "the memory weight of growing segment row count",
+		Export:       true,
+	}
+	p.GrowingRowCountWeight.Init(base.mgr)
 
 	p.MemoryUsageMaxDifferencePercentage = ParamItem{
 		Key:          "queryCoord.memoryUsageMaxDifferencePercentage",
