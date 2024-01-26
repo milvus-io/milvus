@@ -110,9 +110,10 @@ func NewSearchRequest(ctx context.Context, collection *Collection, req *querypb.
 		return nil, err
 	}
 
-	if len(metricType) != 0 && metricType != plan.getMetricType() {
+	metricTypeInPlan := plan.getMetricType()
+	if len(metricType) != 0 && metricType != metricTypeInPlan {
 		plan.delete()
-		return nil, merr.WrapErrParameterInvalid(plan.getMetricType(), metricType, "metric type not match")
+		return nil, merr.WrapErrParameterInvalid(metricTypeInPlan, metricType, "metric type not match")
 	}
 
 	var fieldID C.int64_t
