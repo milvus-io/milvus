@@ -61,7 +61,7 @@ func (n *IndexNode) Run() error {
 // Stop terminates service
 func (n *IndexNode) Stop() error {
 	timeout := paramtable.Get().IndexNodeCfg.GracefulStopTimeout.GetAsDuration(time.Second)
-	return stopWithTimeout(n.svr.Stop, timeout)
+	return exitWhenStopTimeout(n.svr.Stop, timeout)
 }
 
 // GetComponentStates returns IndexNode's states

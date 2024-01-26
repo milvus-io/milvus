@@ -62,7 +62,7 @@ func (n *Proxy) Run() error {
 // Stop terminates service
 func (n *Proxy) Stop() error {
 	timeout := paramtable.Get().ProxyCfg.GracefulStopTimeout.GetAsDuration(time.Second)
-	return stopWithTimeout(n.svr.Stop, timeout)
+	return exitWhenStopTimeout(n.svr.Stop, timeout)
 }
 
 // GetComponentStates returns Proxy's states

@@ -62,7 +62,7 @@ func (rc *RootCoord) Run() error {
 // Stop terminates service
 func (rc *RootCoord) Stop() error {
 	timeout := paramtable.Get().RootCoordCfg.GracefulStopTimeout.GetAsDuration(time.Second)
-	return stopWithTimeout(rc.svr.Stop, timeout)
+	return exitWhenStopTimeout(rc.svr.Stop, timeout)
 }
 
 // GetComponentStates returns RootCoord's states

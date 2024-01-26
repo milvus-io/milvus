@@ -63,7 +63,7 @@ func (d *DataNode) Run() error {
 // Stop terminates service
 func (d *DataNode) Stop() error {
 	timeout := paramtable.Get().DataNodeCfg.GracefulStopTimeout.GetAsDuration(time.Second)
-	return stopWithTimeout(d.svr.Stop, timeout)
+	return exitWhenStopTimeout(d.svr.Stop, timeout)
 }
 
 // GetComponentStates returns DataNode's states
