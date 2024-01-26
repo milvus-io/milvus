@@ -261,18 +261,11 @@ type MockSessionManager_Compaction_Call struct {
 }
 
 // Compaction is a helper method to define mock.On call
-<<<<<<< HEAD
+//  - ctx context.Context
 //  - nodeID int64
 //  - plan *datapb.CompactionPlan
-func (_e *MockSessionManager_Expecter) Compaction(nodeID interface{}, plan interface{}) *MockSessionManager_Compaction_Call {
-	return &MockSessionManager_Compaction_Call{Call: _e.mock.On("Compaction", nodeID, plan)}
-=======
-//   - ctx context.Context
-//   - nodeID int64
-//   - plan *datapb.CompactionPlan
 func (_e *MockSessionManager_Expecter) Compaction(ctx interface{}, nodeID interface{}, plan interface{}) *MockSessionManager_Compaction_Call {
 	return &MockSessionManager_Compaction_Call{Call: _e.mock.On("Compaction", ctx, nodeID, plan)}
->>>>>>> 405877c8cde1086776b5fb9fc6caacc1a4b60fc2
 }
 
 func (_c *MockSessionManager_Compaction_Call) Run(run func(ctx context.Context, nodeID int64, plan *datapb.CompactionPlan)) *MockSessionManager_Compaction_Call {
