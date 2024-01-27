@@ -976,7 +976,7 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 			}
 		}
 		if scores != nil && int64(len(scores)) > i {
-			row[HTTPReturnDistance] = scores[i]
+			row[HTTPReturnDistance] = scores[i] // only 8 decimal places
 		}
 		queryResp = append(queryResp, row)
 	}
