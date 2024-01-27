@@ -35,7 +35,6 @@ import (
 	"path"
 	"path/filepath"
 	"sync"
-	"syscall"
 	"time"
 	"unsafe"
 
@@ -139,16 +138,7 @@ func (i *IndexNode) Register() error {
 	// start liveness check
 	i.session.LivenessCheck(i.loopCtx, func() {
 		log.Error("Index Node disconnected from etcd, process will exit", zap.Int64("Server Id", i.session.ServerID))
-		if err := i.Stop(); err != nil {
-			log.Fatal("failed to stop server", zap.Error(err))
-		}
-		metrics.NumNodes.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), typeutil.IndexNodeRole).Dec()
-		// manually send signal to starter goroutine
-		if i.session.TriggerKill {
-			if p, err := os.FindProcess(os.Getpid()); err == nil {
-				p.Signal(syscall.SIGINT)
-			}
-		}
+		os.Exit(1)
 	})
 	return nil
 }

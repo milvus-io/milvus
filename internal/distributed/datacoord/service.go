@@ -218,10 +218,14 @@ func (s *Server) start() error {
 
 // Stop stops the DataCoord server gracefully.
 // Need to call the GracefulStop interface of grpc server and call the stop method of the inner DataCoord object.
-func (s *Server) Stop() error {
+func (s *Server) Stop() (err error) {
 	Params := &paramtable.Get().DataCoordGrpcServerCfg
-	log.Debug("Datacoord stop", zap.String("Address", Params.GetAddress()))
-	var err error
+	logger := log.With(zap.String("address", Params.GetAddress()))
+	logger.Info("Datacoord stopping")
+	defer func() {
+		logger.Info("Datacoord stopped", zap.Error(err))
+	}()
+
 	s.cancel()
 
 	if s.etcdCli != nil {

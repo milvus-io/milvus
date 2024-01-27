@@ -34,7 +34,9 @@ const (
 	DefaultIndexSliceSize                      = 16
 	DefaultConsistencyLevelUsedInDelete        = commonpb.ConsistencyLevel_Bounded
 	DefaultGracefulTime                        = 5000 // ms
-	DefaultGracefulStopTimeout                 = 1800 // s
+	DefaultGracefulStopTimeout                 = 1800 // s, for node
+	DefaultProxyGracefulStopTimeout            = 30   // s，for proxy
+	DefaultCoordGracefulStopTimeout            = 5    // s，for coord
 	DefaultHighPriorityThreadCoreCoefficient   = 10
 	DefaultMiddlePriorityThreadCoreCoefficient = 5
 	DefaultLowPriorityThreadCoreCoefficient    = 1
@@ -819,6 +821,7 @@ type rootCoordConfig struct {
 	EnableActiveStandby         ParamItem `refreshable:"false"`
 	MaxDatabaseNum              ParamItem `refreshable:"false"`
 	MaxGeneralCapacity          ParamItem `refreshable:"true"`
+	GracefulStopTimeout         ParamItem `refreshable:"true"`
 }
 
 func (p *rootCoordConfig) init(base *BaseTable) {
@@ -913,6 +916,15 @@ func (p *rootCoordConfig) init(base *BaseTable) {
 		},
 	}
 	p.MaxGeneralCapacity.Init(base.mgr)
+
+	p.GracefulStopTimeout = ParamItem{
+		Key:          "rootCoord.gracefulStopTimeout",
+		Version:      "2.3.7",
+		DefaultValue: strconv.Itoa(DefaultCoordGracefulStopTimeout),
+		Doc:          "seconds. force stop node without graceful stop",
+		Export:       true,
+	}
+	p.GracefulStopTimeout.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -959,6 +971,8 @@ type proxyConfig struct {
 	PartitionNameRegexp          ParamItem `refreshable:"true"`
 
 	AccessLog AccessLogConfig
+
+	GracefulStopTimeout ParamItem `refreshable:"true"`
 }
 
 func (p *proxyConfig) init(base *BaseTable) {
@@ -1251,6 +1265,15 @@ please adjust in embedded Milvus: false`,
 		Doc:          "switch for whether proxy shall use partition name as regexp when searching",
 	}
 	p.PartitionNameRegexp.Init(base.mgr)
+
+	p.GracefulStopTimeout = ParamItem{
+		Key:          "proxy.gracefulStopTimeout",
+		Version:      "2.3.7",
+		DefaultValue: strconv.Itoa(DefaultProxyGracefulStopTimeout),
+		Doc:          "seconds. force stop node without graceful stop",
+		Export:       true,
+	}
+	p.GracefulStopTimeout.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -1314,6 +1337,7 @@ type queryCoordConfig struct {
 	ObserverTaskParallel           ParamItem `refreshable:"false"`
 	CheckAutoBalanceConfigInterval ParamItem `refreshable:"false"`
 	CheckNodeSessionInterval       ParamItem `refreshable:"false"`
+	GracefulStopTimeout            ParamItem `refreshable:"true"`
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -1702,6 +1726,15 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.HeartBeatWarningLag.Init(base.mgr)
+
+	p.GracefulStopTimeout = ParamItem{
+		Key:          "queryCoord.gracefulStopTimeout",
+		Version:      "2.3.7",
+		DefaultValue: strconv.Itoa(DefaultCoordGracefulStopTimeout),
+		Doc:          "seconds. force stop node without graceful stop",
+		Export:       true,
+	}
+	p.GracefulStopTimeout.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -2243,6 +2276,8 @@ type dataCoordConfig struct {
 	// auto balance channel on datanode
 	AutoBalance                    ParamItem `refreshable:"true"`
 	CheckAutoBalanceConfigInterval ParamItem `refreshable:"false"`
+
+	GracefulStopTimeout ParamItem `refreshable:"true"`
 }
 
 func (p *dataCoordConfig) init(base *BaseTable) {
@@ -2637,6 +2672,15 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.AutoUpgradeSegmentIndex.Init(base.mgr)
+
+	p.GracefulStopTimeout = ParamItem{
+		Key:          "dataCoord.gracefulStopTimeout",
+		Version:      "2.3.7",
+		DefaultValue: strconv.Itoa(DefaultCoordGracefulStopTimeout),
+		Doc:          "seconds. force stop node without graceful stop",
+		Export:       true,
+	}
+	p.GracefulStopTimeout.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -2687,6 +2731,8 @@ type dataNodeConfig struct {
 	ChannelWorkPoolSize ParamItem `refreshable:"true"`
 
 	UpdateChannelCheckpointMaxParallel ParamItem `refreshable:"true"`
+
+	GracefulStopTimeout ParamItem `refreshable:"true"`
 }
 
 func (p *dataNodeConfig) init(base *BaseTable) {
@@ -2903,6 +2949,15 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		DefaultValue: "1000",
 	}
 	p.UpdateChannelCheckpointMaxParallel.Init(base.mgr)
+
+	p.GracefulStopTimeout = ParamItem{
+		Key:          "datanode.gracefulStopTimeout",
+		Version:      "2.3.7",
+		DefaultValue: strconv.Itoa(DefaultGracefulStopTimeout),
+		Doc:          "seconds. force stop node without graceful stop",
+		Export:       true,
+	}
+	p.GracefulStopTimeout.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -2914,7 +2969,7 @@ type indexNodeConfig struct {
 	DiskCapacityLimit      ParamItem `refreshable:"true"`
 	MaxDiskUsagePercentage ParamItem `refreshable:"true"`
 
-	GracefulStopTimeout ParamItem `refreshable:"false"`
+	GracefulStopTimeout ParamItem `refreshable:"true"`
 }
 
 func (p *indexNodeConfig) init(base *BaseTable) {
@@ -2969,6 +3024,7 @@ func (p *indexNodeConfig) init(base *BaseTable) {
 		Key:          "indexNode.gracefulStopTimeout",
 		Version:      "2.2.1",
 		FallbackKeys: []string{"common.gracefulStopTimeout"},
+		Doc:          "seconds. force stop node without graceful stop",
 		Export:       true,
 	}
 	p.GracefulStopTimeout.Init(base.mgr)

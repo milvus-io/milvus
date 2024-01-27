@@ -18,6 +18,7 @@ package components
 
 import (
 	"context"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -26,6 +27,7 @@ import (
 	rc "github.com/milvus-io/milvus/internal/distributed/rootcoord"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -59,10 +61,8 @@ func (rc *RootCoord) Run() error {
 
 // Stop terminates service
 func (rc *RootCoord) Stop() error {
-	if rc.svr != nil {
-		return rc.svr.Stop()
-	}
-	return nil
+	timeout := paramtable.Get().RootCoordCfg.GracefulStopTimeout.GetAsDuration(time.Second)
+	return exitWhenStopTimeout(rc.svr.Stop, timeout)
 }
 
 // GetComponentStates returns RootCoord's states

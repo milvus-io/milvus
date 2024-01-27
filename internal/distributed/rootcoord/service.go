@@ -312,9 +312,14 @@ func (s *Server) start() error {
 	return nil
 }
 
-func (s *Server) Stop() error {
+func (s *Server) Stop() (err error) {
 	Params := &paramtable.Get().RootCoordGrpcServerCfg
-	log.Debug("Rootcoord stop", zap.String("Address", Params.GetAddress()))
+	logger := log.With(zap.String("address", Params.GetAddress()))
+	logger.Info("Rootcoord stopping")
+	defer func() {
+		logger.Info("Rootcoord stopped", zap.Error(err))
+	}()
+
 	if s.etcdCli != nil {
 		defer s.etcdCli.Close()
 	}
