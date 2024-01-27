@@ -162,8 +162,8 @@ func printIndexes(indexes []*milvuspb.IndexDescription) []gin.H {
 	var res []gin.H
 	for _, index := range indexes {
 		res = append(res, gin.H{
-			HTTPReturnIndexName:        index.IndexName,
-			HTTPReturnIndexField:       index.FieldName,
+			HTTPIndexName:              index.IndexName,
+			HTTPIndexField:             index.FieldName,
 			HTTPReturnIndexMetricsType: getMetricType(index.Params),
 		})
 	}
