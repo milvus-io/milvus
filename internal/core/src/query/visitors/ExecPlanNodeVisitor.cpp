@@ -81,10 +81,10 @@ ExecPlanNodeVisitor::ExecuteExprNodeInternal(
     bool& cache_offset_getted,
     std::vector<int64_t>& cache_offset) {
     bitset_holder.clear();
-    LOG_INFO("plannode: {}, active_count: {}, timestamp: {}",
-             plannode->ToString(),
-             active_count,
-             timestamp_);
+    LOG_DEBUG("plannode: {}, active_count: {}, timestamp: {}",
+              plannode->ToString(),
+              active_count,
+              timestamp_);
     auto plan = plan::PlanFragment(plannode);
     // TODO: get query id from proxy
     auto query_context = std::make_shared<milvus::exec::QueryContext>(
