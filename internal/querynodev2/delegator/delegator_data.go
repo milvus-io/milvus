@@ -597,13 +597,6 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 			// within the same LoadSegmentRequest.
 			position = deltaPositions[0]
 		}
-		var scope querypb.DataScope
-		switch candidate.Type() {
-		case commonpb.SegmentState_Growing:
-			scope = querypb.DataScope_Streaming
-		case commonpb.SegmentState_Flushed:
-			scope = querypb.DataScope_Historical
-		}
 
 		deletedPks, deletedTss := sd.GetLevel0Deletions(candidate.Partition())
 		deleteData := &storage.DeleteData{}
@@ -624,7 +617,7 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 				SegmentId:    info.GetSegmentID(),
 				PrimaryKeys:  storage.ParsePrimaryKeys2IDs(deleteData.Pks),
 				Timestamps:   deleteData.Tss,
-				Scope:        scope,
+				Scope:        querypb.DataScope_Historical, // only sealed segment need to loadStreamDelete
 			})
 			if err != nil {
 				log.Warn("failed to apply delete when LoadSegment", zap.Error(err))
