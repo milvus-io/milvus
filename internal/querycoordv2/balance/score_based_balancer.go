@@ -149,7 +149,7 @@ func (b *ScoreBasedBalancer) calculateScore(collectionID, nodeID int64) int {
 	// calculate global growing segment row count
 	views := b.dist.GetLeaderView(nodeID)
 	for _, view := range views {
-		rowCount += int(view.NumOfGrowingRows)
+		rowCount += int(float64(view.NumOfGrowingRows) * params.Params.QueryCoordCfg.GrowingRowCountWeight.GetAsFloat())
 	}
 
 	collectionRowCount := 0
@@ -162,7 +162,7 @@ func (b *ScoreBasedBalancer) calculateScore(collectionID, nodeID int64) int {
 	// calculate collection growing segment row count
 	collectionViews := b.dist.LeaderViewManager.GetByCollectionAndNode(collectionID, nodeID)
 	for _, view := range collectionViews {
-		collectionRowCount += int(view.NumOfGrowingRows)
+		collectionRowCount += int(float64(view.NumOfGrowingRows) * params.Params.QueryCoordCfg.GrowingRowCountWeight.GetAsFloat())
 	}
 	return collectionRowCount + int(float64(rowCount)*
 		params.Params.QueryCoordCfg.GlobalRowCountFactor.GetAsFloat())
