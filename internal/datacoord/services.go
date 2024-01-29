@@ -1714,7 +1714,7 @@ func (s *Server) GcControl(ctx context.Context, request *datapb.GcControlRequest
 	return status, nil
 }
 
-func (s *Server) ImportV2(ctx context.Context, in *datapb.ImportRequestInternal) (*internalpb.ImportResponse, error) {
+func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInternal) (*internalpb.ImportResponse, error) {
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &internalpb.ImportResponse{
 			Status: merr.Status(err),

@@ -18,10 +18,12 @@ package importv2
 
 import (
 	"fmt"
+	"io"
 	"runtime"
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
@@ -32,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/conc"
+	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -46,8 +49,7 @@ type executor struct {
 	syncMgr syncmgr.SyncManager
 	cm      storage.ChunkManager
 
-	readConcurrently bool
-	pool             *conc.Pool[any]
+	pool *conc.Pool[any]
 
 	closeOnce sync.Once
 	closeChan chan struct{}
@@ -55,7 +57,7 @@ type executor struct {
 
 func NewExecutor(manager TaskManager, syncMgr syncmgr.SyncManager, cm storage.ChunkManager) Executor {
 	pool := conc.NewPool[any](
-		paramtable.Get().DataNodeCfg.MaxConcurrentImportTaskNum.GetAsInt(),
+		hardware.GetCPUNum()*2,
 		conc.WithPreAlloc(false),
 		conc.WithDisablePurge(false),
 		conc.WithPreHandler(runtime.LockOSThread), // lock os thread for cgo thread disposal
@@ -84,25 +86,20 @@ func (e *executor) Start() {
 			return
 		case <-exeTicker.C:
 			tasks := e.manager.GetBy(WithStates(internalpb.ImportState_Pending))
-			e.readConcurrently = true
-			if len(tasks) >= e.pool.Free()/2 {
-				e.readConcurrently = false
-			}
-			futures := make([]*conc.Future[any], 0, len(tasks))
+			wg := &sync.WaitGroup{}
 			for _, task := range tasks {
-				task := task
-				f := e.pool.Submit(func() (any, error) {
+				wg.Add(1)
+				go func(task Task) {
+					defer wg.Done()
 					switch task.GetType() {
 					case PreImportTaskType:
 						e.PreImport(task)
 					case ImportTaskType:
 						e.Import(task)
 					}
-					return nil, nil
-				})
-				futures = append(futures, f)
+				}(task)
 			}
-			_ = conc.AwaitAll(futures...)
+			wg.Wait()
 		case <-logTicker.C:
 			LogStats(e.manager)
 		}
@@ -110,7 +107,8 @@ func (e *executor) Start() {
 }
 
 func (e *executor) Slots() int64 {
-	return int64(e.pool.Free())
+	tasks := e.manager.GetBy(WithStates(internalpb.ImportState_Pending, internalpb.ImportState_InProgress))
+	return paramtable.Get().DataNodeCfg.MaxConcurrentImportTaskNum.GetAsInt64() - int64(len(tasks))
 }
 
 func (e *executor) Close() {
@@ -136,7 +134,7 @@ func (e *executor) handleErr(task Task, err error, msg string) {
 }
 
 func (e *executor) PreImport(task Task) {
-	bufferSize := paramtable.Get().DataNodeCfg.ImportBufferSize.GetAsInt()
+	bufferSize := paramtable.Get().DataNodeCfg.FlushInsertBufferSize.GetAsInt()
 	log.Info("start to preimport", WrapLogFields(task,
 		zap.Int("bufferSize", bufferSize),
 		zap.Any("schema", task.GetSchema()))...)
@@ -163,23 +161,17 @@ func (e *executor) PreImport(task Task) {
 			zap.Duration("dur", time.Since(start)))...)
 	}
 
-	if e.readConcurrently {
-		futures := make([]*conc.Future[any], 0, len(files))
-		for i, file := range files {
-			i := i
-			file := file
-			f := e.pool.Submit(func() (any, error) {
-				fn(i, file)
-				return nil, nil
-			})
-			futures = append(futures, f)
-		}
-		_ = conc.AwaitAll(futures...)
-	} else {
-		for i, file := range files {
+	futures := make([]*conc.Future[any], 0, len(files))
+	for i, file := range files {
+		i := i
+		file := file
+		f := e.pool.Submit(func() (any, error) {
 			fn(i, file)
-		}
+			return nil, nil
+		})
+		futures = append(futures, f)
 	}
+	_ = conc.AwaitAll(futures...)
 
 	e.manager.Update(task.GetTaskID(), UpdateState(internalpb.ImportState_Completed))
 	log.Info("executor preimport done",
@@ -192,10 +184,10 @@ func (e *executor) readFileStat(reader importutilv2.Reader, task Task, fileIdx i
 	for {
 		data, err := reader.Read()
 		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
 			return err
-		}
-		if data == nil {
-			break
 		}
 		err = CheckRowsEqual(task.GetSchema(), data)
 		if err != nil {
@@ -220,7 +212,7 @@ func (e *executor) readFileStat(reader importutilv2.Reader, task Task, fileIdx i
 }
 
 func (e *executor) Import(task Task) {
-	bufferSize := paramtable.Get().DataNodeCfg.ImportBufferSize.GetAsInt()
+	bufferSize := paramtable.Get().DataNodeCfg.FlushInsertBufferSize.GetAsInt()
 	log.Info("start to import", WrapLogFields(task,
 		zap.Int("bufferSize", bufferSize),
 		zap.Any("schema", task.GetSchema()))...)
@@ -245,22 +237,16 @@ func (e *executor) Import(task Task) {
 			zap.Duration("dur", time.Since(start)))...)
 	}
 
-	if e.readConcurrently {
-		futures := make([]*conc.Future[any], 0, len(req.GetFiles()))
-		for _, file := range req.GetFiles() {
-			file := file
-			f := e.pool.Submit(func() (any, error) {
-				fn(file)
-				return nil, nil
-			})
-			futures = append(futures, f)
-		}
-		_ = conc.AwaitAll(futures...)
-	} else {
-		for _, file := range req.GetFiles() {
+	futures := make([]*conc.Future[any], 0, len(req.GetFiles()))
+	for _, file := range req.GetFiles() {
+		file := file
+		f := e.pool.Submit(func() (any, error) {
 			fn(file)
-		}
+			return nil, nil
+		})
+		futures = append(futures, f)
 	}
+	_ = conc.AwaitAll(futures...)
 
 	e.manager.Update(task.GetTaskID(), UpdateState(internalpb.ImportState_Completed))
 	log.Info("import done", WrapLogFields(task)...)
@@ -273,10 +259,10 @@ func (e *executor) importFile(reader importutilv2.Reader, task Task) error {
 	for {
 		data, err := reader.Read()
 		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
 			return err
-		}
-		if data == nil {
-			break
 		}
 		err = AppendSystemFieldsData(iTask, data)
 		if err != nil {

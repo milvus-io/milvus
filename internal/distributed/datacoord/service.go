@@ -486,7 +486,7 @@ func (s *Server) GcControl(ctx context.Context, req *datapb.GcControlRequest) (*
 	return s.dataCoord.GcControl(ctx, req)
 }
 
-func (s *Server) ImportV2(ctx context.Context, in *datapb.ImportRequestInternal) (*internalpb.ImportResponse, error) {
+func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInternal) (*internalpb.ImportResponse, error) {
 	return s.dataCoord.ImportV2(ctx, in)
 }
 

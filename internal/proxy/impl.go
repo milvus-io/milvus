@@ -5580,7 +5580,7 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 			return resp, nil
 		}
 	}
-	importRequest := &datapb.ImportRequestInternal{
+	importRequest := &internalpb.ImportRequestInternal{
 		CollectionID: collectionID,
 		PartitionIDs: partitionIDs,
 		ChannelNames: channels,

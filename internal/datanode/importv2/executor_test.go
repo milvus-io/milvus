@@ -20,6 +20,7 @@ import (
 	"context"
 	rand2 "crypto/rand"
 	"fmt"
+	"io"
 	"math/rand"
 	"strconv"
 	"sync"
@@ -211,7 +212,10 @@ func (s *ExecutorSuite) TestExecutor_ReadFileStat() {
 		once.Do(func() {
 			res = data
 		})
-		return res, nil
+		if res != nil {
+			return res, nil
+		}
+		return nil, io.EOF
 	})
 	preimportReq := &datapb.PreImportRequest{
 		JobID:        1,
@@ -242,7 +246,10 @@ func (s *ExecutorSuite) TestImportFile() {
 		once.Do(func() {
 			res = data
 		})
-		return res, nil
+		if res != nil {
+			return res, nil
+		}
+		return nil, io.EOF
 	})
 	importReq := &datapb.ImportRequest{
 		JobID:        10,

@@ -2017,15 +2017,15 @@ func (_c *MockDataCoord_Import_Call) RunAndReturn(run func(context.Context, *dat
 }
 
 // ImportV2 provides a mock function with given fields: _a0, _a1
-func (_m *MockDataCoord) ImportV2(_a0 context.Context, _a1 *datapb.ImportRequestInternal) (*internalpb.ImportResponse, error) {
+func (_m *MockDataCoord) ImportV2(_a0 context.Context, _a1 *internalpb.ImportRequestInternal) (*internalpb.ImportResponse, error) {
 	ret := _m.Called(_a0, _a1)
 
 	var r0 *internalpb.ImportResponse
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *datapb.ImportRequestInternal) (*internalpb.ImportResponse, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.ImportRequestInternal) (*internalpb.ImportResponse, error)); ok {
 		return rf(_a0, _a1)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *datapb.ImportRequestInternal) *internalpb.ImportResponse); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.ImportRequestInternal) *internalpb.ImportResponse); ok {
 		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
@@ -2033,7 +2033,7 @@ func (_m *MockDataCoord) ImportV2(_a0 context.Context, _a1 *datapb.ImportRequest
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *datapb.ImportRequestInternal) error); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, *internalpb.ImportRequestInternal) error); ok {
 		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
@@ -2049,14 +2049,14 @@ type MockDataCoord_ImportV2_Call struct {
 
 // ImportV2 is a helper method to define mock.On call
 //  - _a0 context.Context
-//  - _a1 *datapb.ImportRequestInternal
+//  - _a1 *internalpb.ImportRequestInternal
 func (_e *MockDataCoord_Expecter) ImportV2(_a0 interface{}, _a1 interface{}) *MockDataCoord_ImportV2_Call {
 	return &MockDataCoord_ImportV2_Call{Call: _e.mock.On("ImportV2", _a0, _a1)}
 }
 
-func (_c *MockDataCoord_ImportV2_Call) Run(run func(_a0 context.Context, _a1 *datapb.ImportRequestInternal)) *MockDataCoord_ImportV2_Call {
+func (_c *MockDataCoord_ImportV2_Call) Run(run func(_a0 context.Context, _a1 *internalpb.ImportRequestInternal)) *MockDataCoord_ImportV2_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*datapb.ImportRequestInternal))
+		run(args[0].(context.Context), args[1].(*internalpb.ImportRequestInternal))
 	})
 	return _c
 }
@@ -2066,7 +2066,7 @@ func (_c *MockDataCoord_ImportV2_Call) Return(_a0 *internalpb.ImportResponse, _a
 	return _c
 }
 
-func (_c *MockDataCoord_ImportV2_Call) RunAndReturn(run func(context.Context, *datapb.ImportRequestInternal) (*internalpb.ImportResponse, error)) *MockDataCoord_ImportV2_Call {
+func (_c *MockDataCoord_ImportV2_Call) RunAndReturn(run func(context.Context, *internalpb.ImportRequestInternal) (*internalpb.ImportResponse, error)) *MockDataCoord_ImportV2_Call {
 	_c.Call.Return(run)
 	return _c
 }

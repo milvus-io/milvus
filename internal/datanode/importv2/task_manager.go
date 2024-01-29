@@ -42,12 +42,7 @@ func NewTaskManager() TaskManager {
 func (m *taskManager) Add(task Task) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	switch task.GetType() {
-	case PreImportTaskType:
-		m.tasks[task.GetTaskID()] = task
-	case ImportTaskType:
-		m.tasks[task.GetTaskID()] = task
-	}
+	m.tasks[task.GetTaskID()] = task
 }
 
 func (m *taskManager) Update(taskID int64, actions ...UpdateAction) {

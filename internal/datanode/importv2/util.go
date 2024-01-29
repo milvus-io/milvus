@@ -42,14 +42,26 @@ func WrapNoTaskError(taskID int64, taskType TaskType) error {
 }
 
 func NewSyncTask(ctx context.Context, task *ImportTask, segmentID, partitionID int64, vchannel string, insertData *storage.InsertData) (syncmgr.Task, error) {
-	metaCache := task.metaCaches[vchannel]
-	AddSegment(metaCache, vchannel, segmentID, partitionID, task.GetCollectionID())
-
-	var serializer syncmgr.Serializer
-	var err error
 	if params.Params.CommonCfg.EnableStorageV2.GetAsBool() {
 		return nil, merr.WrapErrImportFailed("storage v2 is not supported") // TODO: dyh, resolve storage v2
 	}
+
+	metaCache := task.metaCaches[vchannel]
+	if _, ok := metaCache.GetSegmentByID(segmentID); !ok {
+		metaCache.AddSegment(&datapb.SegmentInfo{
+			ID:            segmentID,
+			State:         commonpb.SegmentState_Importing,
+			CollectionID:  task.GetCollectionID(),
+			PartitionID:   partitionID,
+			InsertChannel: vchannel,
+		}, func(info *datapb.SegmentInfo) *metacache.BloomFilterSet {
+			bfs := metacache.NewBloomFilterSet()
+			return bfs
+		}, metacache.UpdateImporting(true))
+	}
+
+	var serializer syncmgr.Serializer
+	var err error
 	serializer, err = syncmgr.NewStorageSerializer(
 		metaCache,
 		nil,
@@ -113,21 +125,6 @@ func PickSegment(task *ImportTask, vchannel string, partitionID int64, rows int)
 	return segmentID
 }
 
-func AddSegment(metaCache metacache.MetaCache, vchannel string, segID, partID, collID int64) {
-	if _, ok := metaCache.GetSegmentByID(segID); !ok {
-		metaCache.AddSegment(&datapb.SegmentInfo{
-			ID:            segID,
-			State:         commonpb.SegmentState_Importing,
-			CollectionID:  collID,
-			PartitionID:   partID,
-			InsertChannel: vchannel,
-		}, func(info *datapb.SegmentInfo) *metacache.BloomFilterSet {
-			bfs := metacache.NewBloomFilterSet()
-			return bfs
-		}, metacache.UpdateImporting(true))
-	}
-}
-
 func CheckRowsEqual(schema *schemapb.CollectionSchema, data *storage.InsertData) error {
 	if len(data.Data) == 0 {
 		return nil
@@ -164,7 +161,7 @@ func AppendSystemFieldsData(task *ImportTask, data *storage.InsertData) error {
 	if err != nil {
 		return err
 	}
-	rowNum := GetInsertDataRowNum(data, task.GetSchema())
+	rowNum := GetInsertDataRowCount(data, task.GetSchema())
 	ids := make([]int64, rowNum)
 	for i := 0; i < rowNum; i++ {
 		ids[i] = idRange.GetBegin() + int64(i)
@@ -183,7 +180,7 @@ func AppendSystemFieldsData(task *ImportTask, data *storage.InsertData) error {
 	return nil
 }
 
-func GetInsertDataRowNum(data *storage.InsertData, schema *schemapb.CollectionSchema) int {
+func GetInsertDataRowCount(data *storage.InsertData, schema *schemapb.CollectionSchema) int {
 	fields := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) int64 {
 		return field.GetFieldID()
 	})

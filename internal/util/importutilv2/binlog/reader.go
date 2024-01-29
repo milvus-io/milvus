@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -132,7 +133,7 @@ func (r *reader) Read() (*storage.InsertData, error) {
 		return nil, err
 	}
 	if r.readIdx == len(r.insertLogs[0]) {
-		return nil, nil
+		return nil, io.EOF
 	}
 	for fieldID, binlogs := range r.insertLogs {
 		field := typeutil.GetField(r.schema, fieldID)
