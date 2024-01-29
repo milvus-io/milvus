@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"path"
 	"sort"
 	"time"
 
@@ -27,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -365,4 +367,51 @@ func DropImportTask(task ImportTask, cluster Cluster, imeta ImportMeta) error {
 		return err
 	}
 	return imeta.Update(task.GetTaskID(), UpdateNodeID(NullNodeID))
+}
+
+func ListBinlogsAndGroupBySegment(ctx context.Context, cm storage.ChunkManager, importFile *internalpb.ImportFile) ([]*internalpb.ImportFile, error) {
+	if len(importFile.GetPaths()) < 1 {
+		return nil, merr.WrapErrImportFailed("no insert binlogs to import")
+	}
+
+	insertLogs, _, err := cm.ListWithPrefix(ctx, importFile.GetPaths()[0], true)
+	if err != nil {
+		return nil, err
+	}
+	segmentInsertPaths := lo.Uniq(lo.Map(insertLogs, func(fullPath string, _ int) string {
+		fieldPath := path.Dir(fullPath)
+		segmentPath := path.Dir(fieldPath)
+		return segmentPath
+	}))
+
+	segmentPrefixes := lo.Map(segmentInsertPaths, func(segmentPath string, _ int) *internalpb.ImportFile {
+		return &internalpb.ImportFile{Paths: []string{segmentPath}}
+	})
+
+	if len(importFile.GetPaths()) < 2 {
+		return segmentPrefixes, nil
+	}
+	deltaLogs, _, err := cm.ListWithPrefix(context.Background(), importFile.GetPaths()[1], true)
+	if err != nil {
+		return nil, err
+	}
+	if len(deltaLogs) == 0 {
+		return segmentPrefixes, nil
+	}
+
+	segmentDeltaPaths := lo.Uniq(lo.Map(deltaLogs, func(fullPath string, _ int) string {
+		segmentPath := path.Dir(fullPath)
+		return segmentPath
+	}))
+	segmentDeltaMap := lo.KeyBy(segmentDeltaPaths, func(deltaPrefix string) string {
+		return path.Base(deltaPrefix)
+	})
+
+	for i := range segmentPrefixes {
+		segmentID := path.Base(segmentPrefixes[i].GetPaths()[0])
+		if deltaPrefix, ok := segmentDeltaMap[segmentID]; ok {
+			segmentPrefixes[i].Paths = append(segmentPrefixes[i].Paths, deltaPrefix)
+		}
+	}
+	return segmentPrefixes, nil
 }

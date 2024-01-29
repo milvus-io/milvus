@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -1742,8 +1743,25 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 		timeoutTs = tsoutil.ComposeTSByTime(time.Now().Add(dur), 0)
 	}
 
-	fileNum := Params.DataCoordCfg.FilesPerPreImportTask.GetAsInt()
-	fileGroups := lo.Chunk(in.GetFiles(), fileNum)
+	var fileGroups [][]*internalpb.ImportFile
+	isBackup := importutilv2.IsBackup(in.GetOptions())
+	if isBackup {
+		fileGroups = make([][]*internalpb.ImportFile, 0)
+		for _, importFile := range in.GetFiles() {
+			segmentPrefixes, err := ListBinlogsAndGroupBySegment(ctx, s.meta.chunkManager, importFile)
+			if err != nil {
+				resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprint("list binlogs and group by segment failed, err=%w", err)))
+				return resp, nil
+			}
+			for _, prefix := range segmentPrefixes {
+				fileGroups = append(fileGroups, []*internalpb.ImportFile{prefix})
+			}
+		}
+	} else {
+		fileNum := Params.DataCoordCfg.FilesPerPreImportTask.GetAsInt()
+		fileGroups = lo.Chunk(in.GetFiles(), fileNum)
+	}
+
 	idStart, _, err := s.allocator.allocN(int64(len(fileGroups)) + 1)
 	if err != nil {
 		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprint("alloc id failed, err=%w", err)))
@@ -1768,7 +1786,7 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 				FileStats:    fileStats,
 				Options:      in.GetOptions(),
 			},
-			schema:         in.GetSchema(), // TODO: dyh, move to preimport task
+			schema:         in.GetSchema(),
 			lastActiveTime: time.Now(),
 		}
 		err = s.importMeta.Add(task)
