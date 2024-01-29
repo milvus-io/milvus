@@ -19,6 +19,7 @@ package parquet
 import (
 	"context"
 	"fmt"
+	"io"
 
 	"github.com/apache/arrow/go/v12/arrow/memory"
 	"github.com/apache/arrow/go/v12/parquet"
@@ -101,7 +102,7 @@ OUTER:
 	}
 	for fieldID := range r.frs {
 		if insertData.Data[fieldID].RowNum() == 0 {
-			return nil, nil
+			return nil, io.EOF
 		}
 	}
 	return insertData, nil

@@ -27,7 +27,7 @@ import (
 
 type HashedData [][]*storage.InsertData // [vchannelIndex][partitionIndex]*storage.InsertData
 
-func newHashData(schema *schemapb.CollectionSchema, channelNum, partitionNum int) (HashedData, error) {
+func newHashedData(schema *schemapb.CollectionSchema, channelNum, partitionNum int) (HashedData, error) {
 	var err error
 	res := make(HashedData, channelNum)
 	for i := 0; i < channelNum; i++ {
@@ -49,19 +49,23 @@ func HashData(task Task, rows *storage.InsertData) (HashedData, error) {
 		partitionNum = len(task.GetPartitionIDs())
 	)
 
-	fn, err := getHashFunc(task.GetSchema(), channelNum, partitionNum)
+	pkField, err := typeutil.GetPrimaryFieldSchema(schema)
 	if err != nil {
 		return nil, err
 	}
+	partKeyField, _ := typeutil.GetPartitionKeyFieldSchema(schema)
 
-	res, err := newHashData(schema, channelNum, partitionNum)
+	f1 := hashByVChannel(int64(channelNum), pkField)
+	f2 := hashByPartition(int64(partitionNum), partKeyField)
+
+	res, err := newHashedData(schema, channelNum, partitionNum)
 	if err != nil {
 		return nil, err
 	}
 
 	for i := 0; i < rows.GetRowNum(); i++ {
 		row := rows.GetRow(i)
-		p1, p2 := fn(row)
+		p1, p2 := f1(row), f2(row)
 		err = res[p1][p2].Append(row)
 		if err != nil {
 			return nil, err
@@ -88,12 +92,12 @@ func GetRowsStats(task Task, rows *storage.InsertData) (map[string]*datapb.Parti
 		hashRowsCount[i] = make([]int, partitionNum)
 	}
 
-	rowNum := GetInsertDataRowNum(rows, schema)
+	rowNum := GetInsertDataRowCount(rows, schema)
 	if pkField.GetAutoID() {
 		id := int64(0)
 		num := int64(channelNum)
 		fn1 := hashByID()
-		fn2 := hashByPartitionKey(int64(partitionNum), partKeyField)
+		fn2 := hashByPartition(int64(partitionNum), partKeyField)
 		rows.Data = lo.PickBy(rows.Data, func(fieldID int64, _ storage.FieldData) bool {
 			return fieldID != pkField.GetFieldID()
 		})
@@ -103,12 +107,11 @@ func GetRowsStats(task Task, rows *storage.InsertData) (map[string]*datapb.Parti
 			id++
 		}
 	} else {
-		fn, err := getHashFunc(schema, channelNum, partitionNum)
-		if err != nil {
-			return nil, err
-		}
+		f1 := hashByVChannel(int64(channelNum), pkField)
+		f2 := hashByPartition(int64(partitionNum), partKeyField)
 		for i := 0; i < rowNum; i++ {
-			p1, p2 := fn(rows.GetRow(i))
+			row := rows.GetRow(i)
+			p1, p2 := f1(row), f2(row)
 			hashRowsCount[p1][p2]++
 		}
 	}
@@ -127,21 +130,6 @@ func GetRowsStats(task Task, rows *storage.InsertData) (map[string]*datapb.Parti
 		}
 	}
 	return res, nil
-}
-
-func getHashFunc(schema *schemapb.CollectionSchema, chanNum, partitionNum int) (func(row map[int64]interface{}) (int64, int64), error) {
-	pkField, err := typeutil.GetPrimaryFieldSchema(schema)
-	if err != nil {
-		return nil, err
-	}
-	partKeyField, _ := typeutil.GetPartitionKeyFieldSchema(schema)
-
-	f1 := hashByVChannel(int64(chanNum), pkField)
-	f2 := hashByPartitionKey(int64(partitionNum), partKeyField)
-
-	return func(row map[int64]interface{}) (int64, int64) {
-		return f1(row), f2(row)
-	}, nil
 }
 
 func hashByVChannel(channelNum int64, pkField *schemapb.FieldSchema) func(row map[int64]interface{}) int64 {
@@ -168,7 +156,7 @@ func hashByVChannel(channelNum int64, pkField *schemapb.FieldSchema) func(row ma
 	}
 }
 
-func hashByPartitionKey(partitionNum int64, partField *schemapb.FieldSchema) func(row map[int64]interface{}) int64 {
+func hashByPartition(partitionNum int64, partField *schemapb.FieldSchema) func(row map[int64]interface{}) int64 {
 	if partitionNum == 1 {
 		return func(_ map[int64]interface{}) int64 {
 			return 0

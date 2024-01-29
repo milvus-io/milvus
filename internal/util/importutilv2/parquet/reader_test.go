@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"math"
 	"math/rand"
 	"os"
 	"testing"
@@ -403,7 +402,7 @@ func (s *ReaderSuite) run(dt schemapb.DataType) {
 	assert.NoError(s.T(), err)
 	cmReader, err := cm.Reader(ctx, filePath)
 	assert.NoError(s.T(), err)
-	reader, err := NewReader(ctx, schema, cmReader, math.MaxInt)
+	reader, err := NewReader(ctx, schema, cmReader, 64*1024*1024)
 	s.NoError(err)
 
 	checkFn := func(actualInsertData *storage.InsertData, offsetBegin, expectRows int) {

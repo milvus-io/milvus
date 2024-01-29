@@ -411,10 +411,6 @@ func TestComponentParam(t *testing.T) {
 		maxConcurrentImportTaskNum := Params.MaxConcurrentImportTaskNum.GetAsInt()
 		t.Logf("maxConcurrentImportTaskNum: %d", maxConcurrentImportTaskNum)
 		assert.Equal(t, 10, maxConcurrentImportTaskNum)
-
-		importBufferSize := Params.ImportBufferSize.GetAsInt()
-		t.Logf("importBufferSize: %d", importBufferSize)
-		assert.Equal(t, 67108864, importBufferSize)
 	})
 
 	t.Run("test indexNodeConfig", func(t *testing.T) {

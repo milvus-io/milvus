@@ -91,7 +91,7 @@ func (j *reader) Read() (*storage.InsertData, error) {
 		return nil, err
 	}
 	if !j.dec.More() {
-		return nil, nil
+		return nil, io.EOF
 	}
 	if j.isOldFormat {
 		// read the key
