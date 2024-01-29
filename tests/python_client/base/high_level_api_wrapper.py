@@ -511,3 +511,16 @@ class HighLevelApiWrapper:
                                        check_items, check,
                                        **kwargs).run()
         return res, check_result
+
+    @trace()
+    def using_database(self, client, db_name, timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.using_database, db_name], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task,
+                                       check_items, check,
+                                       db_name=db_name,
+                                       **kwargs).run()
+        return res, check_result
