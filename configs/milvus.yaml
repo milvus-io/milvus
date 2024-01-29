@@ -370,6 +370,7 @@ queryNode:
     serverMaxRecvSize: 268435456
     clientMaxSendSize: 268435456
     clientMaxRecvSize: 536870912
+  enableSegmentPrune: false # use partition prune function on shard delegator
 
 indexCoord:
   bindIndexNodeMode:

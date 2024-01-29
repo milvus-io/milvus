@@ -19,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/exprutil"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -358,11 +359,11 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	if !t.reQuery {
 		partitionNames := t.request.GetPartitionNames()
 		if t.partitionKeyMode {
-			expr, err := ParseExprFromPlan(t.plan)
+			expr, err := exprutil.ParseExprFromPlan(t.plan)
 			if err != nil {
 				return err
 			}
-			partitionKeys := ParsePartitionKeys(expr)
+			partitionKeys := exprutil.ParseKeys(expr, exprutil.PartitionKey)
 			hashedPartitionNames, err := assignPartitionKeys(ctx, t.request.GetDbName(), t.request.CollectionName, partitionKeys)
 			if err != nil {
 				return err

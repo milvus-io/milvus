@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/querynodev2/tsafe"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -64,7 +65,9 @@ type DelegatorSuite struct {
 	loader        *segments.MockLoader
 	mq            *msgstream.MockMsgStream
 
-	delegator ShardDelegator
+	delegator    ShardDelegator
+	chunkManager storage.ChunkManager
+	rootPath     string
 }
 
 func (s *DelegatorSuite) SetupSuite() {
@@ -154,6 +157,11 @@ func (s *DelegatorSuite) SetupTest() {
 	})
 
 	s.mq = &msgstream.MockMsgStream{}
+	s.rootPath = "delegator_test"
+
+	// init chunkManager
+	chunkManagerFactory := storage.NewTestChunkManagerFactory(paramtable.Get(), s.rootPath)
+	s.chunkManager, _ = chunkManagerFactory.NewPersistentStorageChunkManager(context.Background())
 
 	var err error
 	//	s.delegator, err = NewShardDelegator(s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.tsafeManager, s.loader)
@@ -161,7 +169,7 @@ func (s *DelegatorSuite) SetupTest() {
 		NewMsgStreamFunc: func(_ context.Context) (msgstream.MsgStream, error) {
 			return s.mq, nil
 		},
-	}, 10000, nil)
+	}, 10000, nil, s.chunkManager)
 	s.Require().NoError(err)
 }
 

@@ -71,6 +71,7 @@ message ColumnInfo {
   repeated string nested_path = 5;
   bool is_partition_key = 6;
   schema.DataType element_type = 7;
+  bool is_clustering_key = 8;
 }
 
 message ColumnExpr {

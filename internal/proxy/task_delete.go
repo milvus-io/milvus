@@ -21,6 +21,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/exprutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -356,11 +357,11 @@ func (dr *deleteRunner) getStreamingQueryAndDelteFunc(plan *planpb.PlanNode) exe
 
 		// optimize query when partitionKey on
 		if dr.partitionKeyMode {
-			expr, err := ParseExprFromPlan(plan)
+			expr, err := exprutil.ParseExprFromPlan(plan)
 			if err != nil {
 				return err
 			}
-			partitionKeys := ParsePartitionKeys(expr)
+			partitionKeys := exprutil.ParseKeys(expr, exprutil.PartitionKey)
 			hashedPartitionNames, err := assignPartitionKeys(ctx, dr.req.GetDbName(), dr.req.GetCollectionName(), partitionKeys)
 			if err != nil {
 				return err

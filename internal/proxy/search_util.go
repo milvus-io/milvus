@@ -12,6 +12,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/internal/util/exprutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -92,12 +93,12 @@ func initSearchRequest(ctx context.Context, t *searchTask) error {
 			zap.String("anns field", annsField), zap.Any("query info", queryInfo))
 
 		if t.partitionKeyMode {
-			expr, err := ParseExprFromPlan(plan)
+			expr, err := exprutil.ParseExprFromPlan(plan)
 			if err != nil {
 				log.Warn("failed to parse expr", zap.Error(err))
 				return err
 			}
-			partitionKeys := ParsePartitionKeys(expr)
+			partitionKeys := exprutil.ParseKeys(expr, exprutil.PartitionKey)
 			hashedPartitionNames, err := assignPartitionKeys(ctx, t.request.GetDbName(), t.collectionName, partitionKeys)
 			if err != nil {
 				log.Warn("failed to assign partition keys", zap.Error(err))
