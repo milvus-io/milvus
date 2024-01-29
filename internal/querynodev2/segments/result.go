@@ -54,6 +54,10 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 		for ch, ts := range r.GetChannelsMvcc() {
 			channelsMvcc[ch] = ts
 		}
+		// shouldn't let new SearchResults.MetricType to be empty, though the req.MetricType is empty
+		if metricType == "" {
+			metricType = r.MetricType
+		}
 	}
 	log := log.Ctx(ctx)
 

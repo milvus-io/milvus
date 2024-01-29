@@ -166,6 +166,9 @@ func (t *SearchTask) Execute() error {
 	}
 	defer segments.DeleteSearchResults(results)
 
+	// plan.MetricType is accurate, though req.MetricType may be empty
+	metricType := searchReq.Plan().GetMetricType()
+
 	if len(results) == 0 {
 		for i := range t.originNqs {
 			var task *SearchTask
@@ -180,7 +183,7 @@ func (t *SearchTask) Execute() error {
 					SourceID: paramtable.GetNodeID(),
 				},
 				Status:         merr.Success(),
-				MetricType:     req.GetReq().GetMetricType(),
+				MetricType:     metricType,
 				NumQueries:     t.originNqs[i],
 				TopK:           t.originTopks[i],
 				SlicedOffset:   1,
@@ -234,7 +237,7 @@ func (t *SearchTask) Execute() error {
 				SourceID: paramtable.GetNodeID(),
 			},
 			Status:         merr.Success(),
-			MetricType:     req.GetReq().GetMetricType(),
+			MetricType:     metricType,
 			NumQueries:     t.originNqs[i],
 			TopK:           t.originTopks[i],
 			SlicedBlob:     bs,

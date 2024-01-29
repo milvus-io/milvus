@@ -20,6 +20,70 @@ func (_m *MockCompactionMeta) EXPECT() *MockCompactionMeta_Expecter {
 	return &MockCompactionMeta_Expecter{mock: &_m.Mock}
 }
 
+// CompleteCompactionMutation provides a mock function with given fields: plan, result
+func (_m *MockCompactionMeta) CompleteCompactionMutation(plan *datapb.CompactionPlan, result *datapb.CompactionPlanResult) (*SegmentInfo, *segMetricMutation, error) {
+	ret := _m.Called(plan, result)
+
+	var r0 *SegmentInfo
+	var r1 *segMetricMutation
+	var r2 error
+	if rf, ok := ret.Get(0).(func(*datapb.CompactionPlan, *datapb.CompactionPlanResult) (*SegmentInfo, *segMetricMutation, error)); ok {
+		return rf(plan, result)
+	}
+	if rf, ok := ret.Get(0).(func(*datapb.CompactionPlan, *datapb.CompactionPlanResult) *SegmentInfo); ok {
+		r0 = rf(plan, result)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*SegmentInfo)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(*datapb.CompactionPlan, *datapb.CompactionPlanResult) *segMetricMutation); ok {
+		r1 = rf(plan, result)
+	} else {
+		if ret.Get(1) != nil {
+			r1 = ret.Get(1).(*segMetricMutation)
+		}
+	}
+
+	if rf, ok := ret.Get(2).(func(*datapb.CompactionPlan, *datapb.CompactionPlanResult) error); ok {
+		r2 = rf(plan, result)
+	} else {
+		r2 = ret.Error(2)
+	}
+
+	return r0, r1, r2
+}
+
+// MockCompactionMeta_CompleteCompactionMutation_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CompleteCompactionMutation'
+type MockCompactionMeta_CompleteCompactionMutation_Call struct {
+	*mock.Call
+}
+
+// CompleteCompactionMutation is a helper method to define mock.On call
+//   - plan *datapb.CompactionPlan
+//   - result *datapb.CompactionPlanResult
+func (_e *MockCompactionMeta_Expecter) CompleteCompactionMutation(plan interface{}, result interface{}) *MockCompactionMeta_CompleteCompactionMutation_Call {
+	return &MockCompactionMeta_CompleteCompactionMutation_Call{Call: _e.mock.On("CompleteCompactionMutation", plan, result)}
+}
+
+func (_c *MockCompactionMeta_CompleteCompactionMutation_Call) Run(run func(plan *datapb.CompactionPlan, result *datapb.CompactionPlanResult)) *MockCompactionMeta_CompleteCompactionMutation_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*datapb.CompactionPlan), args[1].(*datapb.CompactionPlanResult))
+	})
+	return _c
+}
+
+func (_c *MockCompactionMeta_CompleteCompactionMutation_Call) Return(_a0 *SegmentInfo, _a1 *segMetricMutation, _a2 error) *MockCompactionMeta_CompleteCompactionMutation_Call {
+	_c.Call.Return(_a0, _a1, _a2)
+	return _c
+}
+
+func (_c *MockCompactionMeta_CompleteCompactionMutation_Call) RunAndReturn(run func(*datapb.CompactionPlan, *datapb.CompactionPlanResult) (*SegmentInfo, *segMetricMutation, error)) *MockCompactionMeta_CompleteCompactionMutation_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetHealthySegment provides a mock function with given fields: segID
 func (_m *MockCompactionMeta) GetHealthySegment(segID int64) *SegmentInfo {
 	ret := _m.Called(segID)
@@ -60,79 +124,6 @@ func (_c *MockCompactionMeta_GetHealthySegment_Call) Return(_a0 *SegmentInfo) *M
 }
 
 func (_c *MockCompactionMeta_GetHealthySegment_Call) RunAndReturn(run func(int64) *SegmentInfo) *MockCompactionMeta_GetHealthySegment_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// PrepareCompleteCompactionMutation provides a mock function with given fields: plan, result
-func (_m *MockCompactionMeta) PrepareCompleteCompactionMutation(plan *datapb.CompactionPlan, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *SegmentInfo, *segMetricMutation, error) {
-	ret := _m.Called(plan, result)
-
-	var r0 []*SegmentInfo
-	var r1 *SegmentInfo
-	var r2 *segMetricMutation
-	var r3 error
-	if rf, ok := ret.Get(0).(func(*datapb.CompactionPlan, *datapb.CompactionPlanResult) ([]*SegmentInfo, *SegmentInfo, *segMetricMutation, error)); ok {
-		return rf(plan, result)
-	}
-	if rf, ok := ret.Get(0).(func(*datapb.CompactionPlan, *datapb.CompactionPlanResult) []*SegmentInfo); ok {
-		r0 = rf(plan, result)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]*SegmentInfo)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(*datapb.CompactionPlan, *datapb.CompactionPlanResult) *SegmentInfo); ok {
-		r1 = rf(plan, result)
-	} else {
-		if ret.Get(1) != nil {
-			r1 = ret.Get(1).(*SegmentInfo)
-		}
-	}
-
-	if rf, ok := ret.Get(2).(func(*datapb.CompactionPlan, *datapb.CompactionPlanResult) *segMetricMutation); ok {
-		r2 = rf(plan, result)
-	} else {
-		if ret.Get(2) != nil {
-			r2 = ret.Get(2).(*segMetricMutation)
-		}
-	}
-
-	if rf, ok := ret.Get(3).(func(*datapb.CompactionPlan, *datapb.CompactionPlanResult) error); ok {
-		r3 = rf(plan, result)
-	} else {
-		r3 = ret.Error(3)
-	}
-
-	return r0, r1, r2, r3
-}
-
-// MockCompactionMeta_PrepareCompleteCompactionMutation_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PrepareCompleteCompactionMutation'
-type MockCompactionMeta_PrepareCompleteCompactionMutation_Call struct {
-	*mock.Call
-}
-
-// PrepareCompleteCompactionMutation is a helper method to define mock.On call
-//   - plan *datapb.CompactionPlan
-//   - result *datapb.CompactionPlanResult
-func (_e *MockCompactionMeta_Expecter) PrepareCompleteCompactionMutation(plan interface{}, result interface{}) *MockCompactionMeta_PrepareCompleteCompactionMutation_Call {
-	return &MockCompactionMeta_PrepareCompleteCompactionMutation_Call{Call: _e.mock.On("PrepareCompleteCompactionMutation", plan, result)}
-}
-
-func (_c *MockCompactionMeta_PrepareCompleteCompactionMutation_Call) Run(run func(plan *datapb.CompactionPlan, result *datapb.CompactionPlanResult)) *MockCompactionMeta_PrepareCompleteCompactionMutation_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(*datapb.CompactionPlan), args[1].(*datapb.CompactionPlanResult))
-	})
-	return _c
-}
-
-func (_c *MockCompactionMeta_PrepareCompleteCompactionMutation_Call) Return(_a0 []*SegmentInfo, _a1 *SegmentInfo, _a2 *segMetricMutation, _a3 error) *MockCompactionMeta_PrepareCompleteCompactionMutation_Call {
-	_c.Call.Return(_a0, _a1, _a2, _a3)
-	return _c
-}
-
-func (_c *MockCompactionMeta_PrepareCompleteCompactionMutation_Call) RunAndReturn(run func(*datapb.CompactionPlan, *datapb.CompactionPlanResult) ([]*SegmentInfo, *SegmentInfo, *segMetricMutation, error)) *MockCompactionMeta_PrepareCompleteCompactionMutation_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -266,49 +257,6 @@ func (_c *MockCompactionMeta_UpdateSegmentsInfo_Call) Return(_a0 error) *MockCom
 }
 
 func (_c *MockCompactionMeta_UpdateSegmentsInfo_Call) RunAndReturn(run func(...UpdateOperator) error) *MockCompactionMeta_UpdateSegmentsInfo_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// alterMetaStoreAfterCompaction provides a mock function with given fields: segmentCompactTo, segmentsCompactFrom
-func (_m *MockCompactionMeta) alterMetaStoreAfterCompaction(segmentCompactTo *SegmentInfo, segmentsCompactFrom []*SegmentInfo) error {
-	ret := _m.Called(segmentCompactTo, segmentsCompactFrom)
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(*SegmentInfo, []*SegmentInfo) error); ok {
-		r0 = rf(segmentCompactTo, segmentsCompactFrom)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// MockCompactionMeta_alterMetaStoreAfterCompaction_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'alterMetaStoreAfterCompaction'
-type MockCompactionMeta_alterMetaStoreAfterCompaction_Call struct {
-	*mock.Call
-}
-
-// alterMetaStoreAfterCompaction is a helper method to define mock.On call
-//   - segmentCompactTo *SegmentInfo
-//   - segmentsCompactFrom []*SegmentInfo
-func (_e *MockCompactionMeta_Expecter) alterMetaStoreAfterCompaction(segmentCompactTo interface{}, segmentsCompactFrom interface{}) *MockCompactionMeta_alterMetaStoreAfterCompaction_Call {
-	return &MockCompactionMeta_alterMetaStoreAfterCompaction_Call{Call: _e.mock.On("alterMetaStoreAfterCompaction", segmentCompactTo, segmentsCompactFrom)}
-}
-
-func (_c *MockCompactionMeta_alterMetaStoreAfterCompaction_Call) Run(run func(segmentCompactTo *SegmentInfo, segmentsCompactFrom []*SegmentInfo)) *MockCompactionMeta_alterMetaStoreAfterCompaction_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(*SegmentInfo), args[1].([]*SegmentInfo))
-	})
-	return _c
-}
-
-func (_c *MockCompactionMeta_alterMetaStoreAfterCompaction_Call) Return(_a0 error) *MockCompactionMeta_alterMetaStoreAfterCompaction_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockCompactionMeta_alterMetaStoreAfterCompaction_Call) RunAndReturn(run func(*SegmentInfo, []*SegmentInfo) error) *MockCompactionMeta_alterMetaStoreAfterCompaction_Call {
 	_c.Call.Return(run)
 	return _c
 }

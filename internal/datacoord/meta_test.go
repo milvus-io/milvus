@@ -257,7 +257,7 @@ func (suite *MetaBasicSuite) TestPrepareCompleteCompactionMutation() {
 	inCompactionResult := &datapb.CompactionPlanResult{
 		Segments: []*datapb.CompactionSegment{inSegment},
 	}
-	afterCompact, newSegment, metricMutation, err := m.PrepareCompleteCompactionMutation(plan, inCompactionResult)
+	afterCompact, newSegment, metricMutation, err := m.prepareCompactionMutation(plan, inCompactionResult)
 	suite.NoError(err)
 	suite.NotNil(afterCompact)
 	suite.NotNil(newSegment)
