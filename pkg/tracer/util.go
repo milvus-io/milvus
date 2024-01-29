@@ -13,7 +13,7 @@ import (
 // Also setup logger in context with tracerID field.
 func SetupSpan(ctx context.Context, span trace.Span) context.Context {
 	ctx = trace.ContextWithSpan(ctx, span)
-	ctx = log.WithFields(ctx, zap.String("traceID", span.SpanContext().TraceID().String()))
+	ctx = log.WithFields(ctx, zap.Stringer("traceID", span.SpanContext().TraceID()))
 	return ctx
 }
 
@@ -23,5 +23,5 @@ func Propagate(ctx, newRoot context.Context) context.Context {
 	spanCtx := trace.SpanContextFromContext(ctx)
 
 	newCtx := trace.ContextWithSpanContext(newRoot, spanCtx)
-	return log.WithFields(newCtx, zap.String("traceID", spanCtx.TraceID().String()))
+	return log.WithFields(newCtx, zap.Stringer("traceID", spanCtx.TraceID()))
 }
