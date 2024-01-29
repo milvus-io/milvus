@@ -10,11 +10,12 @@ if [ ! -d "$THIRD_PARTY_DIR/milvus-proto" ]; then
   git clone https://github.com/milvus-io/milvus-proto.git
   cd milvus-proto
   # try tagged version first
-  COMMIT_ID=$(git ls-remote https://github.com/milvus-io/milvus-proto.git refs/tags/${API_VERSION} | cut -f 1)
-  if [[ -z $COMMIT_ID ]]; then 
-    # parse commit from pseudo version (eg v0.0.0-20230608062631-c453ef1b870a => c453ef1b870a)  
-    COMMIT_ID=$(echo $API_VERSION | awk -F'-' '{print $3}')
-  fi
+  COMMIT_ID="267686d8d63d95c77e6859e3920ac0930d3df50d"
+  # COMMIT_ID=$(git ls-remote https://github.com/milvus-io/milvus-proto.git refs/tags/${API_VERSION} | cut -f 1)
+  # if [[ -z $COMMIT_ID ]]; then 
+  #   # parse commit from pseudo version (eg v0.0.0-20230608062631-c453ef1b870a => c453ef1b870a)  
+  #   COMMIT_ID=$(echo $API_VERSION | awk -F'-' '{print $3}')
+  # fi
   echo "version: $API_VERSION, commitID: $COMMIT_ID"
   if [ -z $COMMIT_ID ]; then
       git checkout -b $API_VERSION $API_VERSION

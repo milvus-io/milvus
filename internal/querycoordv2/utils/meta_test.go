@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/rgpb"
 	etcdKV "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
@@ -51,21 +52,34 @@ func TestSpawnReplicasWithRG(t *testing.T) {
 	store := querycoord.NewCatalog(kv)
 	nodeMgr := session.NewNodeManager()
 	m := meta.NewMeta(RandomIncrementIDAllocator(), store, nodeMgr)
-	m.ResourceManager.AddResourceGroup("rg1")
-	m.ResourceManager.AddResourceGroup("rg2")
-	m.ResourceManager.AddResourceGroup("rg3")
+	m.ResourceManager.AddResourceGroup("rg1", &rgpb.ResourceGroupConfig{
+		Requests: &rgpb.ResourceGroupLimit{NodeNum: 3},
+		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 3},
+	})
+	m.ResourceManager.AddResourceGroup("rg2", &rgpb.ResourceGroupConfig{
+		Requests: &rgpb.ResourceGroupLimit{NodeNum: 3},
+		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 3},
+	})
+	m.ResourceManager.AddResourceGroup("rg3", &rgpb.ResourceGroupConfig{
+		Requests: &rgpb.ResourceGroupLimit{NodeNum: 3},
+		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 3},
+	})
 
 	for i := 1; i < 10; i++ {
-		nodeMgr.Add(session.NewNodeInfo(int64(i), "localhost"))
+		nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   int64(i),
+			Address:  "localhost",
+			Hostname: "localhost",
+		}))
 
 		if i%3 == 0 {
-			m.ResourceManager.AssignNode("rg1", int64(i))
+			m.ResourceManager.HandleNodeUp(int64(i))
 		}
 		if i%3 == 1 {
-			m.ResourceManager.AssignNode("rg2", int64(i))
+			m.ResourceManager.HandleNodeUp(int64(i))
 		}
 		if i%3 == 2 {
-			m.ResourceManager.AssignNode("rg3", int64(i))
+			m.ResourceManager.HandleNodeUp(int64(i))
 		}
 	}
 
@@ -127,7 +141,10 @@ func TestAddNodesToCollectionsInRGFailed(t *testing.T) {
 	store.EXPECT().SaveResourceGroup(mock.Anything).Return(nil)
 	nodeMgr := session.NewNodeManager()
 	m := meta.NewMeta(RandomIncrementIDAllocator(), store, nodeMgr)
-	m.ResourceManager.AddResourceGroup("rg")
+	m.ResourceManager.AddResourceGroup("rg", &rgpb.ResourceGroupConfig{
+		Requests: &rgpb.ResourceGroupLimit{NodeNum: 0},
+		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 0},
+	})
 	m.CollectionManager.PutCollection(CreateTestCollection(1, 2))
 	m.CollectionManager.PutCollection(CreateTestCollection(2, 2))
 	m.ReplicaManager.Put(meta.NewReplica(
@@ -189,7 +206,10 @@ func TestAddNodesToCollectionsInRG(t *testing.T) {
 	store.EXPECT().SaveResourceGroup(mock.Anything).Return(nil)
 	nodeMgr := session.NewNodeManager()
 	m := meta.NewMeta(RandomIncrementIDAllocator(), store, nodeMgr)
-	m.ResourceManager.AddResourceGroup("rg")
+	m.ResourceManager.AddResourceGroup("rg", &rgpb.ResourceGroupConfig{
+		Requests: &rgpb.ResourceGroupLimit{NodeNum: 0},
+		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 0},
+	})
 	m.CollectionManager.PutCollection(CreateTestCollection(1, 2))
 	m.CollectionManager.PutCollection(CreateTestCollection(2, 2))
 	m.ReplicaManager.Put(meta.NewReplica(

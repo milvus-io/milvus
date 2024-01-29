@@ -27,6 +27,8 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // check replica, find outbound nodes and remove it from replica if all segment/channel has been moved
@@ -67,25 +69,30 @@ func (ob *ReplicaObserver) schedule(ctx context.Context) {
 	defer ob.wg.Done()
 	log.Info("Start check replica loop")
 
-	ticker := time.NewTicker(params.Params.QueryCoordCfg.CheckNodeInReplicaInterval.GetAsDuration(time.Second))
-	defer ticker.Stop()
+	listener := ob.meta.ResourceManager.ListenNodeChanged()
 	for {
-		select {
-		case <-ctx.Done():
-			log.Info("Close replica observer")
+		ob.waitNodeChangedOrTimeout(ctx, listener)
+		// stop if the context is canceled.
+		if ctx.Err() != nil {
+			log.Info("Stop check replica observer")
 			return
-
-		case <-ticker.C:
-			ob.checkNodesInReplica()
 		}
+
+		// do check once.
+		ob.checkNodesInReplica()
 	}
+}
+
+func (ob *ReplicaObserver) waitNodeChangedOrTimeout(ctx context.Context, listener *syncutil.VersionedListener) {
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, params.Params.QueryCoordCfg.CheckNodeInReplicaInterval.GetAsDuration(time.Second))
+	defer cancel()
+	listener.Wait(ctxWithTimeout)
 }
 
 func (ob *ReplicaObserver) checkNodesInReplica() {
 	log := log.Ctx(context.Background()).WithRateGroup("qcv2.replicaObserver", 1, 60)
 	collections := ob.meta.GetAll()
 	for _, collectionID := range collections {
-		removedNodes := make([]int64, 0)
 		// remove nodes from replica which has been transferred to other rg
 		replicas := ob.meta.ReplicaManager.GetByCollection(collectionID)
 		for _, replica := range replicas {
@@ -103,7 +110,6 @@ func (ob *ReplicaObserver) checkNodesInReplica() {
 
 					if len(channels) == 0 && len(segments) == 0 {
 						replica.RemoveNode(node)
-						removedNodes = append(removedNodes, node)
 						log.Info("all segment/channel has been removed from outbound node, remove it from replica",
 							zap.Int64("collectionID", replica.GetCollectionID()),
 							zap.Int64("replicaID", replica.GetID()),
@@ -115,16 +121,35 @@ func (ob *ReplicaObserver) checkNodesInReplica() {
 			}
 		}
 
-		// assign removed nodes to other replicas in current rg
-		for _, node := range removedNodes {
-			rg, err := ob.meta.ResourceManager.FindResourceGroupByNode(node)
+		// Check unused nodes in resource group.
+		replicasByRG := utils.GroupReplicasByResourceGroup(replicas)
+		for rgName, replicasInRG := range replicasByRG {
+			nodes, err := ob.meta.ResourceManager.GetNodes(rgName)
 			if err != nil {
-				// unreachable logic path
-				log.Warn("found node which does not belong to any resource group", zap.Int64("nodeID", node))
+				log.Warn("fail to get nodes when check unused nodes in resource group", zap.Error(err))
 				continue
 			}
-			replicas := ob.meta.ReplicaManager.GetByCollectionAndRG(collectionID, rg)
-			utils.AddNodesToReplicas(ob.meta, replicas, node)
+
+			// Check if node is still in used by replicas in same collection.
+			// A query node cannot load multi replicas in same collection.
+			// Wait for the query node to release the old replica before
+			// assign the node into expected replica.
+			inUsedNodes := typeutil.NewUniqueSet()
+			for _, replica := range replicas {
+				inUsedNodes.Insert(replica.GetNodes()...)
+			}
+			unUsedNodes := typeutil.NewUniqueSet()
+			for _, node := range nodes {
+				if !inUsedNodes.Contain(node) {
+					unUsedNodes.Insert(node)
+				}
+			}
+
+			if unUsedNodes.Len() > 0 {
+				for _, node := range unUsedNodes.Collect() {
+					utils.AddNodesToReplicas(ob.meta, replicasInRG, node)
+				}
+			}
 		}
 	}
 }

@@ -88,7 +88,11 @@ func (suite *ChannelCheckerTestSuite) TearDownTest() {
 
 func (suite *ChannelCheckerTestSuite) setNodeAvailable(nodes ...int64) {
 	for _, node := range nodes {
-		nodeInfo := session.NewNodeInfo(node, "")
+		nodeInfo := session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   node,
+			Address:  "",
+			Hostname: "localhost",
+		})
 		nodeInfo.SetLastHeartbeat(time.Now())
 		suite.nodeMgr.Add(nodeInfo)
 	}
@@ -117,8 +121,12 @@ func (suite *ChannelCheckerTestSuite) TestLoadChannel() {
 	checker.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
 	suite.meta.CollectionManager.PutPartition(utils.CreateTestPartition(1, 1))
 	checker.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1}))
-	suite.nodeMgr.Add(session.NewNodeInfo(1, "localhost"))
-	checker.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 1)
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	checker.meta.ResourceManager.HandleNodeUp(1)
 
 	channels := []*datapb.VchannelInfo{
 		{

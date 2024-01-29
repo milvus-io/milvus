@@ -81,6 +81,16 @@ func GroupNodesByReplica(replicaMgr *meta.ReplicaManager, collectionID int64, no
 	return ret
 }
 
+// GroupReplicasByResourceGroup groups replicas by resource group,
+func GroupReplicasByResourceGroup(replicas []*meta.Replica) map[string][]*meta.Replica {
+	ret := make(map[string][]*meta.Replica)
+	for _, replica := range replicas {
+		rgName := replica.GetResourceGroup()
+		ret[rgName] = append(ret[rgName], replica)
+	}
+	return ret
+}
+
 // GroupPartitionsByCollection groups partitions by collection,
 // returns CollectionID -> Partitions
 func GroupPartitionsByCollection(partitions []*meta.Partition) map[int64][]*meta.Partition {

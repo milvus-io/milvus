@@ -101,21 +101,30 @@ const (
 	NodeStateStopping
 )
 
+type ImmutableNodeInfo struct {
+	NodeID   int64
+	Address  string
+	Hostname string
+}
+
 type NodeInfo struct {
 	stats
 	mu            sync.RWMutex
-	id            int64
-	addr          string
+	immutableInfo ImmutableNodeInfo
 	state         State
 	lastHeartbeat *atomic.Int64
 }
 
 func (n *NodeInfo) ID() int64 {
-	return n.id
+	return n.immutableInfo.NodeID
 }
 
 func (n *NodeInfo) Addr() string {
-	return n.addr
+	return n.immutableInfo.Address
+}
+
+func (n *NodeInfo) Hostname() string {
+	return n.immutableInfo.Hostname
 }
 
 func (n *NodeInfo) SegmentCnt() int {
@@ -158,11 +167,10 @@ func (n *NodeInfo) UpdateStats(opts ...StatsOption) {
 	n.mu.Unlock()
 }
 
-func NewNodeInfo(id int64, addr string) *NodeInfo {
+func NewNodeInfo(info ImmutableNodeInfo) *NodeInfo {
 	return &NodeInfo{
 		stats:         newStats(),
-		id:            id,
-		addr:          addr,
+		immutableInfo: info,
 		lastHeartbeat: atomic.NewInt64(0),
 	}
 }

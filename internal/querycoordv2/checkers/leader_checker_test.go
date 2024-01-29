@@ -193,7 +193,11 @@ func (suite *LeaderCheckerTestSuite) TestStoppingNode() {
 	view.TargetVersion = observer.target.GetCollectionTargetVersion(1, meta.CurrentTarget)
 	observer.dist.LeaderViewManager.Update(2, view)
 
-	suite.nodeMgr.Add(session.NewNodeInfo(2, "localhost"))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   2,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
 	suite.nodeMgr.Stopping(2)
 
 	tasks := suite.checker.Check(context.TODO())
@@ -276,8 +280,16 @@ func (suite *LeaderCheckerTestSuite) TestIgnoreBalancedSegment() {
 	observer.dist.LeaderViewManager.Update(2, leaderView)
 
 	// test querynode-1 and querynode-2 exist
-	suite.nodeMgr.Add(session.NewNodeInfo(1, "localhost"))
-	suite.nodeMgr.Add(session.NewNodeInfo(2, "localhost"))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   2,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
 	tasks := suite.checker.Check(context.TODO())
 	suite.Len(tasks, 0)
 

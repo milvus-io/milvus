@@ -156,7 +156,11 @@ func (suite *TaskSuite) SetupTest() {
 
 func (suite *TaskSuite) BeforeTest(suiteName, testName string) {
 	for node := range suite.distributions {
-		suite.nodeMgr.Add(session.NewNodeInfo(node, "localhost"))
+		suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   node,
+			Address:  "localhost",
+			Hostname: "localhost",
+		}))
 	}
 
 	switch testName {

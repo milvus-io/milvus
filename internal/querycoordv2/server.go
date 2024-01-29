@@ -50,7 +50,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
-	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
@@ -406,7 +405,11 @@ func (s *Server) startQueryCoord() error {
 		return err
 	}
 	for _, node := range sessions {
-		s.nodeMgr.Add(session.NewNodeInfo(node.ServerID, node.Address))
+		s.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   node.ServerID,
+			Address:  node.Address,
+			Hostname: node.HostName,
+		}))
 		s.taskScheduler.AddExecutor(node.ServerID)
 
 		if node.Stopping {
@@ -624,7 +627,11 @@ func (s *Server) watchNodes(revision int64) {
 					zap.Int64("nodeID", nodeID),
 					zap.String("nodeAddr", addr),
 				)
-				s.nodeMgr.Add(session.NewNodeInfo(nodeID, addr))
+				s.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+					NodeID:   nodeID,
+					Address:  addr,
+					Hostname: event.Session.HostName,
+				}))
 				s.nodeUpEventChan <- nodeID
 				select {
 				case s.notifyNodeUp <- struct{}{}:
@@ -696,24 +703,10 @@ func (s *Server) tryHandleNodeUp() {
 }
 
 func (s *Server) handleNodeUp(node int64) {
-	log := log.With(zap.Int64("nodeID", node))
 	s.taskScheduler.AddExecutor(node)
 	s.distController.StartDistInstance(s.ctx, node)
-
 	// need assign to new rg and replica
-	rgName, err := s.meta.ResourceManager.HandleNodeUp(node)
-	if err != nil {
-		log.Warn("HandleNodeUp: failed to assign node to resource group",
-			zap.Error(err),
-		)
-		return
-	}
-
-	log.Info("HandleNodeUp: assign node to resource group",
-		zap.String("resourceGroup", rgName),
-	)
-
-	utils.AddNodesToCollectionsInRG(s.meta, meta.DefaultResourceGroupName, node)
+	s.meta.ResourceManager.HandleNodeUp(node)
 }
 
 func (s *Server) handleNodeDown(node int64) {
@@ -747,18 +740,7 @@ func (s *Server) handleNodeDown(node int64) {
 	// Clear tasks
 	s.taskScheduler.RemoveByNode(node)
 
-	rgName, err := s.meta.ResourceManager.HandleNodeDown(node)
-	if err != nil {
-		log.Warn("HandleNodeDown: failed to remove node from resource group",
-			zap.String("resourceGroup", rgName),
-			zap.Error(err),
-		)
-		return
-	}
-
-	log.Info("HandleNodeDown: remove node from resource group",
-		zap.String("resourceGroup", rgName),
-	)
+	s.meta.ResourceManager.HandleNodeDown(node)
 }
 
 // checkReplicas checks whether replica contains offline node, and remove those nodes

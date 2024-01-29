@@ -143,7 +143,7 @@ func (suite *ServerSuite) SetupTest() {
 		suite.Require().NoError(err)
 		ok := suite.waitNodeUp(suite.nodes[i], 5*time.Second)
 		suite.Require().True(ok)
-		suite.server.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, suite.nodes[i].ID)
+		suite.server.meta.ResourceManager.HandleNodeUp(suite.nodes[i].ID)
 		suite.expectLoadAndReleasePartitions(suite.nodes[i])
 	}
 
@@ -209,7 +209,11 @@ func (suite *ServerSuite) TestNodeUp() {
 	}, 5*time.Second, time.Second)
 
 	// mock unhealthy node
-	suite.server.nodeMgr.Add(session.NewNodeInfo(1001, "localhost"))
+	suite.server.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1001,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
 
 	node2 := mocks.NewMockQueryNode(suite.T(), suite.server.etcdCli, 101)
 	node2.EXPECT().GetDataDistribution(mock.Anything, mock.Anything).Return(&querypb.GetDataDistributionResponse{Status: merr.Success()}, nil).Maybe()

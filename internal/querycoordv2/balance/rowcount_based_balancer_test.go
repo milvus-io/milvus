@@ -126,7 +126,11 @@ func (suite *RowCountBasedBalancerTestSuite) TestAssignSegment() {
 				balancer.dist.SegmentDistManager.Update(node, s...)
 			}
 			for i := range c.nodes {
-				nodeInfo := session.NewNodeInfo(c.nodes[i], "127.0.0.1:0")
+				nodeInfo := session.NewNodeInfo(session.ImmutableNodeInfo{
+					NodeID:   c.nodes[i],
+					Address:  "127.0.0.1:0",
+					Hostname: "localhost",
+				})
 				nodeInfo.UpdateStats(session.WithSegmentCnt(c.segmentCnts[i]))
 				nodeInfo.SetState(c.states[i])
 				suite.balancer.nodeManager.Add(nodeInfo)
@@ -408,12 +412,16 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalance() {
 				balancer.dist.ChannelDistManager.Update(node, v...)
 			}
 			for i := range c.nodes {
-				nodeInfo := session.NewNodeInfo(c.nodes[i], "127.0.0.1:0")
+				nodeInfo := session.NewNodeInfo(session.ImmutableNodeInfo{
+					NodeID:   c.nodes[i],
+					Address:  "127.0.0.1:0",
+					Hostname: "localhost",
+				})
 				nodeInfo.UpdateStats(session.WithSegmentCnt(c.segmentCnts[i]))
 				nodeInfo.UpdateStats(session.WithChannelCnt(len(c.distributionChannels[c.nodes[i]])))
 				nodeInfo.SetState(c.states[i])
 				suite.balancer.nodeManager.Add(nodeInfo)
-				suite.balancer.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, c.nodes[i])
+				suite.balancer.meta.ResourceManager.HandleNodeUp(c.nodes[i])
 			}
 
 			segmentPlans, channelPlans := suite.getCollectionBalancePlans(balancer, 1)
@@ -615,12 +623,16 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalanceOnPartStopping() {
 				balancer.dist.ChannelDistManager.Update(node, v...)
 			}
 			for i := range c.nodes {
-				nodeInfo := session.NewNodeInfo(c.nodes[i], "127.0.0.1:0")
+				nodeInfo := session.NewNodeInfo(session.ImmutableNodeInfo{
+					NodeID:   c.nodes[i],
+					Address:  "127.0.0.1:0",
+					Hostname: "localhost",
+				})
 				nodeInfo.UpdateStats(session.WithSegmentCnt(c.segmentCnts[i]))
 				nodeInfo.UpdateStats(session.WithChannelCnt(len(c.distributionChannels[c.nodes[i]])))
 				nodeInfo.SetState(c.states[i])
 				suite.balancer.nodeManager.Add(nodeInfo)
-				suite.balancer.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, c.nodes[i])
+				suite.balancer.meta.ResourceManager.HandleNodeUp(c.nodes[i])
 			}
 			segmentPlans, channelPlans := suite.getCollectionBalancePlans(balancer, 1)
 			suite.ElementsMatch(c.expectChannelPlans, channelPlans)
@@ -752,17 +764,19 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalanceOutboundNodes() {
 				balancer.dist.ChannelDistManager.Update(node, v...)
 			}
 			for i := range c.nodes {
-				nodeInfo := session.NewNodeInfo(c.nodes[i], "127.0.0.1:0")
+				nodeInfo := session.NewNodeInfo(session.ImmutableNodeInfo{
+					NodeID:   c.nodes[i],
+					Address:  "127.0.0.1:0",
+					Hostname: "localhost",
+				})
 				nodeInfo.UpdateStats(session.WithSegmentCnt(c.segmentCnts[i]))
 				nodeInfo.UpdateStats(session.WithChannelCnt(len(c.distributionChannels[c.nodes[i]])))
 				nodeInfo.SetState(c.states[i])
 				suite.balancer.nodeManager.Add(nodeInfo)
 			}
 			// make node-3 outbound
-			err := balancer.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 1)
-			suite.NoError(err)
-			err = balancer.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 2)
-			suite.NoError(err)
+			balancer.meta.ResourceManager.HandleNodeUp(1)
+			balancer.meta.ResourceManager.HandleNodeUp(2)
 			segmentPlans, channelPlans := suite.getCollectionBalancePlans(balancer, 1)
 			suite.ElementsMatch(c.expectChannelPlans, channelPlans)
 			suite.ElementsMatch(c.expectPlans, segmentPlans)
@@ -849,7 +863,11 @@ func (suite *RowCountBasedBalancerTestSuite) TestAssignSegmentWithGrowing() {
 	}
 
 	for _, node := range lo.Keys(distributions) {
-		nodeInfo := session.NewNodeInfo(node, "127.0.0.1:0")
+		nodeInfo := session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   node,
+			Address:  "127.0.0.1:0",
+			Hostname: "localhost",
+		})
 		nodeInfo.UpdateStats(session.WithSegmentCnt(20))
 		nodeInfo.SetState(session.NodeStateNormal)
 		suite.balancer.nodeManager.Add(nodeInfo)
@@ -977,12 +995,16 @@ func (suite *RowCountBasedBalancerTestSuite) TestDisableBalanceChannel() {
 				balancer.dist.ChannelDistManager.Update(node, v...)
 			}
 			for i := range c.nodes {
-				nodeInfo := session.NewNodeInfo(c.nodes[i], "127.0.0.1:0")
+				nodeInfo := session.NewNodeInfo(session.ImmutableNodeInfo{
+					NodeID:   c.nodes[i],
+					Address:  "127.0.0.1:0",
+					Hostname: "localhost",
+				})
 				nodeInfo.UpdateStats(session.WithSegmentCnt(c.segmentCnts[i]))
 				nodeInfo.UpdateStats(session.WithChannelCnt(len(c.distributionChannels[c.nodes[i]])))
 				nodeInfo.SetState(c.states[i])
 				suite.balancer.nodeManager.Add(nodeInfo)
-				suite.balancer.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, c.nodes[i])
+				suite.balancer.meta.ResourceManager.HandleNodeUp(c.nodes[i])
 			}
 
 			Params.Save(Params.QueryCoordCfg.AutoBalanceChannel.Key, fmt.Sprint(c.enableBalanceChannel))

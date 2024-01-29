@@ -109,10 +109,18 @@ func (suite *SegmentCheckerTestSuite) TestLoadSegments() {
 	checker.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
 	checker.meta.CollectionManager.PutPartition(utils.CreateTestPartition(1, 1))
 	checker.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
-	suite.nodeMgr.Add(session.NewNodeInfo(1, "localhost"))
-	suite.nodeMgr.Add(session.NewNodeInfo(2, "localhost"))
-	checker.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 1)
-	checker.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 2)
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   2,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	checker.meta.ResourceManager.HandleNodeUp(1)
+	checker.meta.ResourceManager.HandleNodeUp(2)
 
 	// set target
 	segments := []*datapb.SegmentInfo{
@@ -166,10 +174,18 @@ func (suite *SegmentCheckerTestSuite) TestSkipLoadSegments() {
 	checker.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
 	checker.meta.CollectionManager.PutPartition(utils.CreateTestPartition(1, 1))
 	checker.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
-	suite.nodeMgr.Add(session.NewNodeInfo(1, "localhost"))
-	suite.nodeMgr.Add(session.NewNodeInfo(2, "localhost"))
-	checker.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 1)
-	checker.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 2)
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   2,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	checker.meta.ResourceManager.HandleNodeUp(1)
+	checker.meta.ResourceManager.HandleNodeUp(2)
 
 	// set target
 	segments := []*datapb.SegmentInfo{
@@ -202,10 +218,18 @@ func (suite *SegmentCheckerTestSuite) TestSkipCheckReplica() {
 	checker.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
 	checker.meta.CollectionManager.PutPartition(utils.CreateTestPartition(1, 1))
 	checker.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
-	suite.nodeMgr.Add(session.NewNodeInfo(1, "localhost"))
-	suite.nodeMgr.Add(session.NewNodeInfo(2, "localhost"))
-	checker.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 1)
-	checker.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 2)
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   2,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	checker.meta.ResourceManager.HandleNodeUp(1)
+	checker.meta.ResourceManager.HandleNodeUp(2)
 
 	// set target
 	segments := []*datapb.SegmentInfo{

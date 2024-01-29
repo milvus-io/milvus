@@ -109,6 +109,14 @@ func (set Set[T]) Len() int {
 	return len(set)
 }
 
+func (set Set[T]) Clone() Set[T] {
+	cloned := make(Set[T], set.Len())
+	for elem := range set {
+		cloned.Insert(elem)
+	}
+	return cloned
+}
+
 type ConcurrentSet[T comparable] struct {
 	inner sync.Map
 }
