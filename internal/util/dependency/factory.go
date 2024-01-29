@@ -9,6 +9,7 @@ import (
 	smsgstream "github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -81,6 +82,7 @@ func (f *DefaultFactory) Init(params *paramtable.ComponentParam) {
 
 func (f *DefaultFactory) initMQ(standalone bool, params *paramtable.ComponentParam) error {
 	mqType := mustSelectMQType(standalone, params.MQCfg.Type.GetValue(), mqEnable{params.RocksmqEnable(), params.NatsmqEnable(), params.PulsarEnable(), params.KafkaEnable()})
+	metrics.RegisterMQType(mqType)
 	log.Info("try to init mq", zap.Bool("standalone", standalone), zap.String("mqType", mqType))
 
 	switch mqType {
