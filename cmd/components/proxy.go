@@ -18,6 +18,7 @@ package components
 
 import (
 	"context"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -26,6 +27,7 @@ import (
 	grpcproxy "github.com/milvus-io/milvus/internal/distributed/proxy"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -59,10 +61,8 @@ func (n *Proxy) Run() error {
 
 // Stop terminates service
 func (n *Proxy) Stop() error {
-	if err := n.svr.Stop(); err != nil {
-		return err
-	}
-	return nil
+	timeout := paramtable.Get().ProxyCfg.GracefulStopTimeout.GetAsDuration(time.Second)
+	return exitWhenStopTimeout(n.svr.Stop, timeout)
 }
 
 // GetComponentStates returns Proxy's states

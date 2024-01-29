@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -214,8 +215,6 @@ func (suite *QueryNodeSuite) TestInit_QueryHook() {
 }
 
 func (suite *QueryNodeSuite) TestStop() {
-	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.GracefulStopTimeout.Key, "2")
-
 	suite.node.manager = segments.NewManager()
 	mockSession := sessionutil.NewMockSession(suite.T())
 	mockSession.EXPECT().GoingStop().Return(nil)
@@ -227,7 +226,20 @@ func (suite *QueryNodeSuite) TestStop() {
 	segment, err := segments.NewSegment(context.Background(), collection, 100, 10, 1, "test_stop_channel", segments.SegmentTypeSealed, 1, nil, nil)
 	suite.NoError(err)
 	suite.node.manager.Segment.Put(segments.SegmentTypeSealed, segment)
-	err = suite.node.Stop()
+	future := conc.Go(func() (struct{}, error) {
+		return struct{}{}, suite.node.Stop()
+	})
+	// Graceful stop, should wait for all segments to be released
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	select {
+	case <-future.Inner():
+		suite.FailNow("stop should be blocked")
+	case <-ctx.Done():
+	}
+	suite.node.manager.Segment.Clear()
+
+	_, err = future.Await()
 	suite.NoError(err)
 	suite.True(suite.node.manager.Segment.Empty())
 }

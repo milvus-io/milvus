@@ -25,6 +25,7 @@ import (
 	"github.com/spf13/cast"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
+	"golang.org/x/exp/maps"
 
 	"github.com/milvus-io/milvus/pkg/log"
 )
@@ -69,9 +70,7 @@ func (fs *FileSource) GetConfigurations() (map[string]string, error) {
 	fs.configRefresher.start(fs.GetSourceName())
 
 	fs.RLock()
-	for k, v := range fs.configs {
-		configMap[k] = v
-	}
+	maps.Copy(configMap, fs.configs)
 	fs.RUnlock()
 	return configMap, nil
 }
@@ -154,13 +153,18 @@ func (fs *FileSource) loadFromFile() error {
 		}
 	}
 
-	fs.Lock()
-	defer fs.Unlock()
-	err := fs.configRefresher.fireEvents(fs.GetSourceName(), fs.configs, newConfig)
+	fs.RLock()
+	source := make(map[string]string)
+	maps.Copy(source, fs.configs)
+	fs.RUnlock()
+
+	err := fs.configRefresher.fireEvents(fs.GetSourceName(), source, newConfig)
 	if err != nil {
 		return err
 	}
-	fs.configs = newConfig
 
+	fs.Lock()
+	defer fs.Unlock()
+	fs.configs = newConfig
 	return nil
 }

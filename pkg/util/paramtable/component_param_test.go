@@ -125,6 +125,9 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, Params.EnableActiveStandby.GetAsBool(), false)
 		t.Logf("rootCoord EnableActiveStandby = %t", Params.EnableActiveStandby.GetAsBool())
 
+		params.Save("rootCoord.gracefulStopTimeout", "100")
+		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
+
 		SetCreateTime(time.Now())
 		SetUpdateTime(time.Now())
 	})
@@ -167,6 +170,9 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, Params.CostMetricsExpireTime.GetAsInt(), 1000)
 		assert.Equal(t, Params.RetryTimesOnReplica.GetAsInt(), 2)
 		assert.EqualValues(t, Params.HealthCheckTimeout.GetAsInt64(), 3000)
+
+		params.Save("proxy.gracefulStopTimeout", "100")
+		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
 	})
 
 	// t.Run("test proxyConfig panic", func(t *testing.T) {
@@ -285,6 +291,9 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, true, Params.AutoBalance.GetAsBool())
 		assert.Equal(t, true, Params.AutoBalanceChannel.GetAsBool())
 		assert.Equal(t, 10, Params.CheckAutoBalanceConfigInterval.GetAsInt())
+
+		params.Save("queryCoord.gracefulStopTimeout", "100")
+		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
 	})
 
 	t.Run("test queryNodeConfig", func(t *testing.T) {
@@ -350,6 +359,9 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, int64(100), gracefulStopTimeout.GetAsInt64())
 
 		assert.Equal(t, false, Params.EnableWorkerSQCostMetrics.GetAsBool())
+
+		params.Save("querynode.gracefulStopTimeout", "100")
+		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
 	})
 
 	t.Run("test dataCoordConfig", func(t *testing.T) {
@@ -362,6 +374,9 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, true, Params.AutoBalance.GetAsBool())
 		assert.Equal(t, 10, Params.CheckAutoBalanceConfigInterval.GetAsInt())
 		assert.Equal(t, false, Params.AutoUpgradeSegmentIndex.GetAsBool())
+
+		params.Save("datacoord.gracefulStopTimeout", "100")
+		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
 	})
 
 	t.Run("test dataNodeConfig", func(t *testing.T) {
@@ -408,12 +423,18 @@ func TestComponentParam(t *testing.T) {
 		updateChannelCheckpointMaxParallel := Params.UpdateChannelCheckpointMaxParallel.GetAsInt()
 		t.Logf("updateChannelCheckpointMaxParallel: %d", updateChannelCheckpointMaxParallel)
 		assert.Equal(t, 1000, Params.UpdateChannelCheckpointMaxParallel.GetAsInt())
+
+		params.Save("datanode.gracefulStopTimeout", "100")
+		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
 	})
 
 	t.Run("test indexNodeConfig", func(t *testing.T) {
 		Params := &params.IndexNodeCfg
 		params.Save(Params.GracefulStopTimeout.Key, "50")
 		assert.Equal(t, Params.GracefulStopTimeout.GetAsInt64(), int64(50))
+
+		params.Save("indexnode.gracefulStopTimeout", "100")
+		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
 	})
 
 	t.Run("channel config priority", func(t *testing.T) {
