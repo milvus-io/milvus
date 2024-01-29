@@ -48,7 +48,7 @@ default_string_array_field_name = ct.default_string_array_field_name
 
 
 class TestMilvusClientCollectionInvalid(TestcaseBase):
-    """ Test case of search interface """
+    """ Test case of create collection interface """
 
     @pytest.fixture(scope="function", params=[False, True])
     def auto_id(self, request):
@@ -68,9 +68,9 @@ class TestMilvusClientCollectionInvalid(TestcaseBase):
     @pytest.mark.parametrize("collection_name", ["12-s", "12 s", "(mn)", "中文", "%$#"])
     def test_milvus_client_collection_invalid_collection_name(self, collection_name):
         """
-        target: test fast create collection normal case
-        method: create collection
-        expected: create collection with default schema, index, and load successfully
+        target: test fast create collection with invalid collection name
+        method: create collection with invalid collection
+        expected: raise exception
         """
         client = self._connect(enable_milvus_client_api=True)
         # 1. create collection
@@ -82,9 +82,9 @@ class TestMilvusClientCollectionInvalid(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_collection_name_over_max_length(self):
         """
-        target: test fast create collection normal case
-        method: create collection
-        expected: create collection with default schema, index, and load successfully
+        target: test fast create collection with over max collection name length
+        method: create collection with over max collection name length
+        expected: raise exception
         """
         client = self._connect(enable_milvus_client_api=True)
         # 1. create collection
@@ -98,9 +98,9 @@ class TestMilvusClientCollectionInvalid(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_collection_name_empty(self):
         """
-        target: test fast create collection normal case
-        method: create collection
-        expected: create collection with default schema, index, and load successfully
+        target: test fast create collection name with empty
+        method: create collection name with empty
+        expected: raise exception
         """
         client = self._connect(enable_milvus_client_api=True)
         # 1. create collection
@@ -113,9 +113,9 @@ class TestMilvusClientCollectionInvalid(TestcaseBase):
     @pytest.mark.parametrize("dim", [ct.min_dim-1, ct.max_dim+1])
     def test_milvus_client_collection_invalid_dim(self, dim):
         """
-        target: test fast create collection normal case
-        method: create collection
-        expected: create collection with default schema, index, and load successfully
+        target: test fast create collection name with invalid dim
+        method: create collection name with invalid dim
+        expected: raise exception
         """
         client = self._connect(enable_milvus_client_api=True)
         collection_name = cf.gen_unique_str(prefix)
@@ -129,9 +129,9 @@ class TestMilvusClientCollectionInvalid(TestcaseBase):
     @pytest.mark.xfail(reason="pymilvus issue 1554")
     def test_milvus_client_collection_invalid_primary_field(self):
         """
-        target: test high level api: client.create_collection
-        method: create collection with invalid primary field
-        expected: Raise exception
+        target: test fast create collection name with invalid primary field
+        method: create collection name with invalid primary field
+        expected: raise exception
         """
         client = self._connect(enable_milvus_client_api=True)
         collection_name = cf.gen_unique_str(prefix)
@@ -143,9 +143,9 @@ class TestMilvusClientCollectionInvalid(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_collection_string_auto_id(self):
         """
-        target: test high level api: client.create_collection
-        method: create collection with auto id on string primary key
-        expected: Raise exception
+        target: test fast create collection without max_length for string primary key
+        method: create collection name with invalid primary field
+        expected: raise exception
         """
         client = self._connect(enable_milvus_client_api=True)
         collection_name = cf.gen_unique_str(prefix)
@@ -158,10 +158,9 @@ class TestMilvusClientCollectionInvalid(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_create_same_collection_different_params(self):
         """
-        target: test high level api: client.create_collection
-        method: create
-        expected: 1. Successfully to create collection with same params
-                  2. Report errors for creating collection with same name and different params
+        target: test create same collection with different params
+        method: create same collection with different params
+        expected: raise exception
         """
         client = self._connect(enable_milvus_client_api=True)
         collection_name = cf.gen_unique_str(prefix)
@@ -181,9 +180,9 @@ class TestMilvusClientCollectionInvalid(TestcaseBase):
     @pytest.mark.parametrize("metric_type", [1, " ", "invalid"])
     def test_milvus_client_collection_invalid_metric_type(self, metric_type):
         """
-        target: test high level api: client.create_collection
-        method: create collection with auto id on string primary key
-        expected: Raise exception
+        target: test create same collection with invalid metric type
+        method: create same collection with invalid metric type
+        expected: raise exception
         """
         client = self._connect(enable_milvus_client_api=True)
         collection_name = cf.gen_unique_str(prefix)
@@ -197,9 +196,9 @@ class TestMilvusClientCollectionInvalid(TestcaseBase):
     @pytest.mark.skip(reason="pymilvus issue 1864")
     def test_milvus_client_collection_invalid_schema_field_name(self):
         """
-        target: test high level api: client.create_collection
-        method: create collection with auto id on string primary key
-        expected: Raise exception
+        target: test create collection with invalid schema field name
+        method: create collection with invalid schema field name
+        expected: raise exception
         """
         client = self._connect(enable_milvus_client_api=True)
         collection_name = cf.gen_unique_str(prefix)
@@ -215,7 +214,7 @@ class TestMilvusClientCollectionInvalid(TestcaseBase):
 
 
 class TestMilvusClientCollectionValid(TestcaseBase):
-    """ Test case of search interface """
+    """ Test case of create collection interface """
 
     @pytest.fixture(scope="function", params=[False, True])
     def auto_id(self, request):
@@ -246,6 +245,7 @@ class TestMilvusClientCollectionValid(TestcaseBase):
         """
         client = self._connect(enable_milvus_client_api=True)
         collection_name = cf.gen_unique_str(prefix)
+        client_w.using_database(client, "default")
         # 1. create collection
         client_w.create_collection(client, collection_name, dim)
         collections = client_w.list_collections(client)[0]
@@ -260,7 +260,7 @@ class TestMilvusClientCollectionValid(TestcaseBase):
         # load_state = client_w.get_load_state(collection_name)[0]
         client_w.load_partitions(client, collection_name, "_default")
         client_w.release_partitions(client, collection_name, "_default")
-        if client_w.has_collection(collection_name)[0]:
+        if client_w.has_collection(client, collection_name)[0]:
             client_w.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -321,7 +321,7 @@ class TestMilvusClientCollectionValid(TestcaseBase):
         index = client_w.list_indexes(client, collection_name)[0]
         assert index == ['vector']
         # load_state = client_w.get_load_state(collection_name)[0]
-        if client_w.has_collection(collection_name)[0]:
+        if client_w.has_collection(client, collection_name)[0]:
             client_w.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -617,7 +617,7 @@ class TestMilvusClientCollectionValid(TestcaseBase):
 
 
 class TestMilvusClientDropCollectionInvalid(TestcaseBase):
-    """ Test case of search interface """
+    """ Test case of drop collection interface """
 
     """
     ******************************************************************
@@ -647,8 +647,252 @@ class TestMilvusClientDropCollectionInvalid(TestcaseBase):
         expected: drop successfully
         """
         client = self._connect(enable_milvus_client_api=True)
-        collection_name = "nonexisted"
+        collection_name = cf.gen_unique_str("nonexisted")
         client_w.drop_collection(client, collection_name)
+
+
+class TestMilvusClientReleaseCollectionInvalid(TestcaseBase):
+    """ Test case of release collection interface """
+
+    """
+    ******************************************************************
+    #  The following are invalid base cases
+    ******************************************************************
+    """
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("name", ["12-s", "12 s", "(mn)", "中文", "%$#"])
+    def test_milvus_client_release_collection_invalid_collection_name(self, name):
+        """
+        target: test fast create collection normal case
+        method: create collection
+        expected: create collection with default schema, index, and load successfully
+        """
+        client = self._connect(enable_milvus_client_api=True)
+        error = {ct.err_code: 1100, ct.err_msg: f"Invalid collection name: {name}. collection name can only "
+                                                f"contain numbers, letters and underscores: invalid parameter"}
+        client_w.release_collection(client, name,
+                                    check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_release_collection_not_existed(self):
+        """
+        target: test fast create collection normal case
+        method: create collection
+        expected: drop successfully
+        """
+        client = self._connect(enable_milvus_client_api=True)
+        collection_name = cf.gen_unique_str("nonexisted")
+        error = {ct.err_code: 1100, ct.err_msg: f"collection not found[database=default]"
+                                                f"[collection={collection_name}]"}
+        client_w.release_collection(client, collection_name,
+                                    check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_release_collection_name_over_max_length(self):
+        """
+        target: test fast create collection normal case
+        method: create collection
+        expected: create collection with default schema, index, and load successfully
+        """
+        client = self._connect(enable_milvus_client_api=True)
+        # 1. create collection
+        collection_name = "a".join("a" for i in range(256))
+        error = {ct.err_code: 1100, ct.err_msg: f"invalid dimension: {collection_name}. "
+                                                f"the length of a collection name must be less than 255 characters: "
+                                                f"invalid parameter"}
+        client_w.release_collection(client, collection_name, default_dim,
+                                    check_task=CheckTasks.err_res, check_items=error)
+
+
+class TestMilvusClientReleaseCollectionValid(TestcaseBase):
+    """ Test case of release collection interface """
+
+    @pytest.fixture(scope="function", params=[False, True])
+    def auto_id(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=["COSINE", "L2", "IP"])
+    def metric_type(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=["int", "string"])
+    def id_type(self, request):
+        yield request.param
+
+    """
+    ******************************************************************
+    #  The following are valid base cases
+    ******************************************************************
+    """
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_release_unloaded_collection(self):
+        """
+        target: test fast create collection normal case
+        method: create collection
+        expected: create collection with default schema, index, and load successfully
+        """
+        client = self._connect(enable_milvus_client_api=True)
+        collection_name = cf.gen_unique_str(prefix)
+        # 1. create collection
+        client_w.create_collection(client, collection_name, default_dim)
+        client_w.release_collection(client, collection_name)
+        client_w.release_collection(client, collection_name)
+        if client_w.has_collection(client, collection_name)[0]:
+            client_w.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_load_partially_loaded_collection(self):
+        """
+        target: test fast create collection normal case
+        method: create collection
+        expected: create collection with default schema, index, and load successfully
+        """
+        client = self._connect(enable_milvus_client_api=True)
+        collection_name = cf.gen_unique_str(prefix)
+        partition_name = cf.gen_unique_str("partition")
+        # 1. create collection
+        client_w.create_collection(client, collection_name, default_dim)
+        client_w.create_partition(client, collection_name, partition_name)
+        client_w.release_partitions(client, collection_name, ["_default", partition_name])
+        client_w.release_collection(client, collection_name)
+        client_w.load_collection(client, collection_name)
+        client_w.release_partitions(client, collection_name, [partition_name])
+        client_w.release_collection(client, collection_name)
+        if client_w.has_collection(client, collection_name)[0]:
+            client_w.drop_collection(client, collection_name)
+
+
+class TestMilvusClientLoadCollectionInvalid(TestcaseBase):
+    """ Test case of search interface """
+
+    """
+    ******************************************************************
+    #  The following are invalid base cases
+    ******************************************************************
+    """
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("name", ["12-s", "12 s", "(mn)", "中文", "%$#"])
+    def test_milvus_client_load_collection_invalid_collection_name(self, name):
+        """
+        target: test fast create collection normal case
+        method: create collection
+        expected: create collection with default schema, index, and load successfully
+        """
+        client = self._connect(enable_milvus_client_api=True)
+        error = {ct.err_code: 1100, ct.err_msg: f"Invalid collection name: {name}. collection name can only "
+                                                f"contain numbers, letters and underscores: invalid parameter"}
+        client_w.load_collection(client, name,
+                                 check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_load_collection_not_existed(self):
+        """
+        target: test fast create collection normal case
+        method: create collection
+        expected: drop successfully
+        """
+        client = self._connect(enable_milvus_client_api=True)
+        collection_name = cf.gen_unique_str("nonexisted")
+        error = {ct.err_code: 1100, ct.err_msg: f"collection not found[database=default]"
+                                                f"[collection={collection_name}]"}
+        client_w.load_collection(client, collection_name,
+                                 check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_load_collection_over_max_length(self):
+        """
+        target: test fast create collection normal case
+        method: create collection
+        expected: drop successfully
+        """
+        client = self._connect(enable_milvus_client_api=True)
+        collection_name = "a".join("a" for i in range(256))
+        error = {ct.err_code: 1100, ct.err_msg: f"invalid dimension: {collection_name}. "
+                                                f"the length of a collection name must be less than 255 characters: "
+                                                f"invalid parameter"}
+        client_w.load_collection(client, collection_name,
+                                    check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_load_collection_without_index(self):
+        """
+        target: test fast create collection normal case
+        method: create collection
+        expected: create collection with default schema, index, and load successfully
+        """
+        client = self._connect(enable_milvus_client_api=True)
+        collection_name = cf.gen_unique_str(prefix)
+        # 1. create collection
+        client_w.create_collection(client, collection_name, default_dim)
+        client_w.release_collection(client, collection_name)
+        client_w.drop_index(client, collection_name, "vector")
+        error = {ct.err_code: 700, ct.err_msg: f"index not found[collection={collection_name}]"}
+        client_w.load_collection(client, collection_name,
+                                 check_task=CheckTasks.err_res, check_items=error)
+        if client_w.has_collection(client, collection_name)[0]:
+            client_w.drop_collection(client, collection_name)
+
+
+class TestMilvusClientLoadCollectionValid(TestcaseBase):
+    """ Test case of search interface """
+
+    @pytest.fixture(scope="function", params=[False, True])
+    def auto_id(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=["COSINE", "L2", "IP"])
+    def metric_type(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=["int", "string"])
+    def id_type(self, request):
+        yield request.param
+
+    """
+    ******************************************************************
+    #  The following are valid base cases
+    ******************************************************************
+    """
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_load_loaded_collection(self):
+        """
+        target: test fast create collection normal case
+        method: create collection
+        expected: create collection with default schema, index, and load successfully
+        """
+        client = self._connect(enable_milvus_client_api=True)
+        collection_name = cf.gen_unique_str(prefix)
+        # 1. create collection
+        client_w.create_collection(client, collection_name, default_dim)
+        client_w.load_collection(client, collection_name)
+        if client_w.has_collection(client, collection_name)[0]:
+            client_w.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_load_partially_loaded_collection(self):
+        """
+        target: test fast create collection normal case
+        method: create collection
+        expected: create collection with default schema, index, and load successfully
+        """
+        client = self._connect(enable_milvus_client_api=True)
+        collection_name = cf.gen_unique_str(prefix)
+        partition_name = cf.gen_unique_str("partition")
+        # 1. create collection
+        client_w.create_collection(client, collection_name, default_dim)
+        client_w.create_partition(client, collection_name, partition_name)
+        client_w.release_collection(client, collection_name)
+        client_w.load_partitions(client, collection_name, [partition_name])
+        client_w.load_collection(client, collection_name)
+        client_w.release_collection(client, collection_name)
+        client_w.load_partitions(client, collection_name, ["_default", partition_name])
+        client_w.load_collection(client, collection_name)
+        if client_w.has_collection(client, collection_name)[0]:
+            client_w.drop_collection(client, collection_name)
 
 
 class TestMilvusClientDescribeCollectionInvalid(TestcaseBase):
@@ -758,7 +1002,7 @@ class TestMilvusClientHasCollectionInvalid(TestcaseBase):
 
 
 class TestMilvusClientRenameCollectionInValid(TestcaseBase):
-    """ Test case of search interface """
+    """ Test case of rename collection interface """
 
     """
     ******************************************************************
@@ -827,7 +1071,7 @@ class TestMilvusClientRenameCollectionInValid(TestcaseBase):
 
 
 class TestMilvusClientRenameCollectionValid(TestcaseBase):
-    """ Test case of search interface """
+    """ Test case of rename collection interface """
 
     """
     ******************************************************************
@@ -869,3 +1113,57 @@ class TestMilvusClientRenameCollectionValid(TestcaseBase):
         client_w.drop_collection(client, another_collection_name)
         # 3. rename to dropped collection
         client_w.rename_collection(client, collection_name, another_collection_name)
+
+
+class TestMilvusClientUsingDatabaseInvalid(TestcaseBase):
+    """ Test case of using database interface """
+
+    """
+    ******************************************************************
+    #  The following are invalid base cases
+    ******************************************************************
+    """
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="pymilvus issue 1900")
+    @pytest.mark.parametrize("name", ["12-s", "12 s", "(mn)", "中文", "%$#"])
+    def test_milvus_client_using_database_invalid_db_name(self, name):
+        """
+        target: test fast create collection normal case
+        method: create collection
+        expected: create collection with default schema, index, and load successfully
+        """
+        client = self._connect(enable_milvus_client_api=True)
+        error = {ct.err_code: 800, ct.err_msg: f"Invalid collection name: {name}. collection name can only "
+                                                f"contain numbers, letters and underscores: invalid parameter"}
+        client_w.using_database(client, name,
+                                check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_using_database_not_exist_db_name(self):
+        """
+        target: test fast create collection normal case
+        method: create collection
+        expected: drop successfully
+        """
+        client = self._connect(enable_milvus_client_api=True)
+        db_name = cf.gen_unique_str("nonexisted")
+        error = {ct.err_code: 800, ct.err_msg: f"database not found[database=non-default]"}
+        client_w.using_database(client, db_name,
+                                check_task=CheckTasks.err_res, check_items=error)[0]
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.xfail(reason="pymilvus issue 1900")
+    def test_milvus_client_using_database_db_name_over_max_length(self):
+        """
+        target: test fast create collection normal case
+        method: create collection
+        expected: drop successfully
+        """
+        client = self._connect(enable_milvus_client_api=True)
+        db_name = "a".join("a" for i in range(256))
+        error = {ct.err_code: 1100, ct.err_msg: f"invalid dimension: {db_name}. "
+                                                f"the length of a collection name must be less than 255 characters: "
+                                                f"invalid parameter"}
+        client_w.using_database(client, db_name,
+                                check_task=CheckTasks.err_res, check_items=error)[0]
