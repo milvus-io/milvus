@@ -32,6 +32,32 @@
 namespace milvus {
 namespace exec {
 
+template <typename T>
+struct UnaryElementFuncForMatch {
+    typedef std::
+        conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
+            IndexInnerType;
+
+    void
+    operator()(const T* src, size_t size, IndexInnerType val, bool* res) {
+        if constexpr (std::is_same_v<T, std::string_view>) {
+            // translate the pattern match in advance, which avoid computing it every loop.
+            std::regex reg(TranslatePatternMatchToRegex(val));
+            for (int i = 0; i < size; ++i) {
+                res[i] = std::regex_match(src[i].data(), reg);
+            }
+        } else if constexpr (std::is_same_v<T, std::string>) {
+            // translate the pattern match in advance, which avoid computing it every loop.
+            std::regex reg(TranslatePatternMatchToRegex(val));
+            for (int i = 0; i < size; ++i) {
+                res[i] = std::regex_match(src[i], reg);
+            }
+        } else {
+            PanicInfo(Unsupported, "regex query is only supported on string");
+        }
+    }
+};
+
 template <typename T, proto::plan::OpType op>
 struct UnaryElementFunc {
     typedef std::
@@ -40,22 +66,8 @@ struct UnaryElementFunc {
     void
     operator()(const T* src, size_t size, IndexInnerType val, bool* res) {
         if constexpr (op == proto::plan::OpType::Match) {
-            if constexpr (std::is_same_v<T, std::string_view>) {
-                // translate the pattern match in advance, which avoid computing it every loop.
-                std::regex reg(TranslatePatternMatchToRegex(val));
-                for (int i = 0; i < size; ++i) {
-                    res[i] = std::regex_match(src[i].data(), reg);
-                }
-            } else if constexpr (std::is_same_v<T, std::string>) {
-                // translate the pattern match in advance, which avoid computing it every loop.
-                std::regex reg(TranslatePatternMatchToRegex(val));
-                for (int i = 0; i < size; ++i) {
-                    res[i] = std::regex_match(src[i], reg);
-                }
-            } else {
-                PanicInfo(Unsupported,
-                          "regex query is only supported on string");
-            }
+            UnaryElementFuncForMatch<T> func;
+            func(src, size, val, res);
             return;
         }
 
@@ -154,7 +166,7 @@ struct UnaryElementFuncForArray {
 };
 
 template <typename T>
-struct IndexFuncForMatch {
+struct UnaryIndexFuncForMatch {
     typedef std::
         conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
             IndexInnerType;
@@ -215,7 +227,7 @@ struct UnaryIndexFunc {
             dataset->Set(milvus::index::PREFIX_VALUE, val);
             return index->Query(std::move(dataset));
         } else if constexpr (op == proto::plan::OpType::Match) {
-            IndexFuncForMatch<T> func;
+            UnaryIndexFuncForMatch<T> func;
             return func(index, val);
         } else {
             PanicInfo(
