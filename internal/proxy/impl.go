@@ -1689,6 +1689,10 @@ func (node *Proxy) GetLoadState(ctx context.Context, request *milvuspb.GetLoadSt
 
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, request.GetDbName(), request.CollectionName)
 	if err != nil {
+		log.Warn("failed to get collection id",
+			zap.String("dbName", request.GetDbName()),
+			zap.String("collectionName", request.CollectionName),
+			zap.Error(err))
 		successResponse.State = commonpb.LoadState_LoadStateNotExist
 		return successResponse, nil
 	}

@@ -80,12 +80,7 @@ func (r *refresher) refreshPeriodically(name string) {
 	}
 }
 
-func (r *refresher) fireEvents(name string, source, target map[string]string) error {
-	events, err := PopulateEvents(name, source, target)
-	if err != nil {
-		log.Warn("generating event error", zap.Error(err))
-		return err
-	}
+func (r *refresher) fireEvents(events ...*Event) {
 	// Generate OnEvent Callback based on the events created
 	ptr := r.eh.Load()
 	if ptr != nil && *ptr != nil {
@@ -93,7 +88,6 @@ func (r *refresher) fireEvents(name string, source, target map[string]string) er
 			(*ptr).OnEvent(e)
 		}
 	}
-	return nil
 }
 
 func (r *refresher) SetEventHandler(eh EventHandler) {

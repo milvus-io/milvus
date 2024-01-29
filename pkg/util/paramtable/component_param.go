@@ -2387,7 +2387,7 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	p.SegmentMaxSize = ParamItem{
 		Key:          "dataCoord.segment.maxSize",
 		Version:      "2.0.0",
-		DefaultValue: "512",
+		DefaultValue: "1024",
 		Doc:          "Maximum size of a segment in MB",
 		Export:       true,
 	}
@@ -2396,7 +2396,7 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	p.DiskSegmentMaxSize = ParamItem{
 		Key:          "dataCoord.segment.diskSegmentMaxSize",
 		Version:      "2.0.0",
-		DefaultValue: "512",
+		DefaultValue: "2048",
 		Doc:          "Maximun size of a segment in MB for collection which has Disk index",
 		Export:       true,
 	}
@@ -2405,7 +2405,7 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	p.SegmentSealProportion = ParamItem{
 		Key:          "dataCoord.segment.sealProportion",
 		Version:      "2.0.0",
-		DefaultValue: "0.23",
+		DefaultValue: "0.12",
 		Export:       true,
 	}
 	p.SegmentSealProportion.Init(base.mgr)
