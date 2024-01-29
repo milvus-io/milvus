@@ -48,3 +48,7 @@ func IsMmapSupported(indexType IndexType) bool {
 		indexType == IndexFaissBinIvfFlat ||
 		indexType == IndexHNSW
 }
+
+func IsDiskIndex(indexType IndexType) bool {
+	return indexType == IndexDISKANN
+}

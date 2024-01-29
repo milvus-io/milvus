@@ -974,18 +974,35 @@ func (m *meta) SetSegmentCompacting(segmentID UniqueID, compacting bool) {
 	m.segments.SetIsCompacting(segmentID, compacting)
 }
 
-// PrepareCompleteCompactionMutation returns
+// CompleteCompactionMutation completes compaction mutation.
+func (m *meta) CompleteCompactionMutation(plan *datapb.CompactionPlan,
+	result *datapb.CompactionPlanResult,
+) (*SegmentInfo, *segMetricMutation, error) {
+	m.Lock()
+	defer m.Unlock()
+	modSegments, segment, metricMutation, err := m.prepareCompactionMutation(plan, result)
+	if err != nil {
+		log.Warn("fail to prepare for complete compaction mutation", zap.Error(err), zap.Int64("planID", plan.GetPlanID()))
+		return nil, nil, err
+	}
+
+	if err := m.alterMetaStoreAfterCompaction(segment, modSegments); err != nil {
+		log.Warn("fail to alert meta store", zap.Error(err), zap.Int64("segmentID", segment.GetID()), zap.Int64("planID", plan.GetPlanID()))
+		return nil, nil, err
+	}
+	return segment, metricMutation, err
+}
+
+// prepareCompactionMutation returns
 // - the segment info of compactedFrom segments after compaction to alter
 // - the segment info of compactedTo segment after compaction to add
 // The compactedTo segment could contain 0 numRows
 // TODO:  too complicated
-func (m *meta) PrepareCompleteCompactionMutation(plan *datapb.CompactionPlan,
+func (m *meta) prepareCompactionMutation(plan *datapb.CompactionPlan,
 	result *datapb.CompactionPlanResult,
 ) ([]*SegmentInfo, *SegmentInfo, *segMetricMutation, error) {
 	log.Info("meta update: prepare for complete compaction mutation")
 	compactionLogs := plan.GetSegmentBinlogs()
-	m.Lock()
-	defer m.Unlock()
 
 	modSegments := make([]*SegmentInfo, 0, len(compactionLogs))
 
@@ -1136,8 +1153,6 @@ func (m *meta) alterMetaStoreAfterCompaction(segmentCompactTo *SegmentInfo, segm
 	for _, v := range segmentsCompactFrom {
 		compactFromIDs = append(compactFromIDs, v.GetID())
 	}
-	m.Lock()
-	defer m.Unlock()
 	for _, s := range segmentsCompactFrom {
 		m.segments.SetSegment(s.GetID(), s)
 	}

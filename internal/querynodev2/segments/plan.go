@@ -68,7 +68,7 @@ func (plan *SearchPlan) setMetricType(metricType string) {
 	C.SetMetricType(plan.cSearchPlan, cmt)
 }
 
-func (plan *SearchPlan) getMetricType() string {
+func (plan *SearchPlan) GetMetricType() string {
 	cMetricType := C.GetMetricType(plan.cSearchPlan)
 	defer C.free(unsafe.Pointer(cMetricType))
 	metricType := C.GoString(cMetricType)
@@ -110,7 +110,7 @@ func NewSearchRequest(ctx context.Context, collection *Collection, req *querypb.
 		return nil, err
 	}
 
-	metricTypeInPlan := plan.getMetricType()
+	metricTypeInPlan := plan.GetMetricType()
 	if len(metricType) != 0 && metricType != metricTypeInPlan {
 		plan.delete()
 		return nil, merr.WrapErrParameterInvalid(metricTypeInPlan, metricType, "metric type not match")

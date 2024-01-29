@@ -292,8 +292,8 @@ func TestPrintCollectionDetails(t *testing.T) {
 	}, printFields(coll.Fields))
 	assert.Equal(t, []gin.H{
 		{
-			HTTPReturnIndexName:        DefaultIndexName,
-			HTTPReturnIndexField:       FieldBookIntro,
+			HTTPIndexName:              DefaultIndexName,
+			HTTPIndexField:             FieldBookIntro,
 			HTTPReturnIndexMetricsType: DefaultMetricType,
 		},
 	}, printIndexes(indexes))
