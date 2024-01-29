@@ -19,7 +19,15 @@ package importv2
 import (
 	"context"
 	"fmt"
+	"math/rand"
+	"os"
+	"testing"
+	"time"
+
 	"github.com/golang/protobuf/proto"
+	"github.com/stretchr/testify/suite"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -30,12 +38,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/tests/integration"
-	"github.com/stretchr/testify/suite"
-	"go.uber.org/zap"
-	"math/rand"
-	"os"
-	"testing"
-	"time"
 )
 
 type BulkInsertSuite struct {
@@ -92,7 +94,7 @@ func (s *BulkInsertSuite) testNormal() {
 		}
 	} else if s.fileType == importutilv2.JSON {
 		rowBasedFile := c.ChunkManager.RootPath() + "/" + "test.json"
-		GenerateJsonFile(s.T(), rowBasedFile, schema, rowCount)
+		GenerateJSONFile(s.T(), rowBasedFile, schema, rowCount)
 		defer os.Remove(rowBasedFile)
 		files = []*internalpb.ImportFile{
 			{

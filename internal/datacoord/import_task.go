@@ -17,12 +17,13 @@
 package datacoord
 
 import (
-	"github.com/golang/protobuf/proto"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"time"
+
+	"github.com/golang/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 )
 
 type TaskType int

@@ -18,7 +18,6 @@ package datacoord
 
 import (
 	"context"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"testing"
 
 	"github.com/samber/lo"
@@ -27,6 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 )
 
 type ImportSchedulerSuite struct {

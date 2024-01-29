@@ -20,13 +20,15 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+
 	"github.com/cockroachdb/errors"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/distributed/proxy/httpserver"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/log"
-	"go.uber.org/zap"
-	"io"
-	"net/http"
 )
 
 func Import(collectionName string, partitionName string, files [][]string) (string, error) {
@@ -41,7 +43,7 @@ func Import(collectionName string, partitionName string, files [][]string) (stri
 		return "", errors.New(fmt.Sprintf("Marshal import response body failed, err=%s", err.Error()))
 	}
 
-	response, err := http.Post(postURL, "application/json", bytes.NewBuffer(postData))
+	response, err := http.Post(postURL, "application/json", bytes.NewBuffer(postData)) //nolint
 	if err != nil {
 		return "", errors.New(fmt.Sprintf("%s failed, err=%s", httpserver.VectorImportPath, err.Error()))
 	}

@@ -21,11 +21,22 @@ import (
 	rand2 "crypto/rand"
 	"encoding/json"
 	"fmt"
+	"math/rand"
+	"os"
+	"strconv"
+	"testing"
+	"time"
+
 	"github.com/apache/arrow/go/v12/arrow"
 	"github.com/apache/arrow/go/v12/arrow/array"
 	"github.com/apache/arrow/go/v12/arrow/memory"
 	"github.com/apache/arrow/go/v12/parquet"
 	"github.com/apache/arrow/go/v12/parquet/pqarrow"
+	"github.com/samber/lo"
+	"github.com/sbinet/npyio"
+	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -33,15 +44,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"github.com/milvus-io/milvus/tests/integration"
-	"github.com/samber/lo"
-	"github.com/sbinet/npyio"
-	"github.com/stretchr/testify/assert"
-	"go.uber.org/zap"
-	"math/rand"
-	"os"
-	"strconv"
-	"testing"
-	"time"
 )
 
 const dim = 128
@@ -486,7 +488,7 @@ func GenerateNumpyFile(filePath string, rowCount int, dType schemapb.DataType) e
 	return nil
 }
 
-func GenerateJsonFile(t *testing.T, filePath string, schema *schemapb.CollectionSchema, count int) {
+func GenerateJSONFile(t *testing.T, filePath string, schema *schemapb.CollectionSchema, count int) {
 	insertData := createInsertData(t, schema, count)
 	rows := make([]map[string]any, 0, count)
 	fieldIDToField := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) int64 {
@@ -523,7 +525,7 @@ func GenerateJsonFile(t *testing.T, filePath string, schema *schemapb.Collection
 	jsonBytes, err := json.Marshal(rows)
 	assert.NoError(t, err)
 
-	err = os.WriteFile(filePath, jsonBytes, 0644)
+	err = os.WriteFile(filePath, jsonBytes, 0644) // nolint
 	assert.NoError(t, err)
 }
 

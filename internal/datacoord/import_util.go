@@ -18,16 +18,16 @@ package datacoord
 
 import (
 	"context"
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/pkg/log"
 	"sort"
 	"time"
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -248,7 +248,7 @@ func AddImportSegment(cluster Cluster, meta *meta, segmentID int64) error {
 }
 
 func AreAllTasksFinished(tasks []ImportTask, meta *meta, imeta ImportMeta) bool {
-	var finished = true
+	finished := true
 	for _, task := range tasks {
 		if task.GetState() != internalpb.ImportState_Completed {
 			return false
@@ -279,9 +279,9 @@ func GetImportProgress(jobID int64, imeta ImportMeta, meta *meta) (int64, intern
 	tasks := imeta.GetBy(WithJob(jobID), WithType(PreImportTaskType))
 	var (
 		preparingProgress float32 = 100
-		preImportProgress float32 = 0
-		importProgress    float32 = 0
-		segStateProgress  float32 = 0
+		preImportProgress float32
+		importProgress    float32
+		segStateProgress  float32
 	)
 	totalTaskNum := len(imeta.GetBy(WithJob(jobID)))
 	for _, task := range tasks {

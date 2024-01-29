@@ -414,7 +414,7 @@ dataCoord:
     enableLevelZero: false
   enableCompaction: true # Enable data segment compaction
   compaction:
-    enableAutoCompaction: false
+    enableAutoCompaction: true
     rpcTimeout: 10 # compaction rpc request timeout in seconds
     maxParallelTaskNum: 10 # max parallel compaction task number
     indexBasedCompaction: true
@@ -424,7 +424,7 @@ dataCoord:
         minSize: 8 # The minmum size in MB to force trigger a LevelZero Compaction
         deltalogMinNum: 10 # the minimum number of deltalog files to force trigger a LevelZero Compaction
   import:
-    filesPerPreImportTask: 1 # The maximum number of files allowed per pre-import task.
+    filesPerPreImportTask: 2 # The maximum number of files allowed per pre-import task.
     taskRetention: 10800 # The retention period in seconds for tasks in the Completed or Failed state.
     inactiveTimeout: 1800 # The timeout duration in seconds for a task in the "InProgress" state if it remains inactive (with no progress updates).
 
@@ -487,8 +487,6 @@ dataNode:
     updateChannelCheckpointMaxParallel: 1000
   import:
     maxConcurrentTaskNum: 32 # The maximum number of import/pre-import tasks allowed to run concurrently on a datanode.
-  bulkinsert:
-    readBufferSize: 671088640
 
 # Configures the system log output.
 log:

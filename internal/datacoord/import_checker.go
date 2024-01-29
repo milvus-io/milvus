@@ -19,7 +19,6 @@ package datacoord
 import (
 	"context"
 	"fmt"
-	"github.com/milvus-io/milvus/pkg/metrics"
 	"sort"
 	"sync"
 	"time"
@@ -29,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
@@ -228,7 +228,7 @@ func (c *importChecker) checkImportState(jobID int64) {
 func (c *importChecker) checkTimeout(jobID int64) {
 	inactiveTimeout := Params.DataCoordCfg.ImportInactiveTimeout.GetAsDuration(time.Second)
 	tasks := c.imeta.GetBy(WithStates(internalpb.ImportState_InProgress), WithJob(jobID))
-	var isTimeout = false
+	var isTimeout bool
 	for _, task := range tasks {
 		timeoutTime := tsoutil.PhysicalTime(task.GetTimeoutTs())
 		if time.Now().After(timeoutTime) {

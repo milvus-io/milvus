@@ -18,7 +18,6 @@ package datacoord
 
 import (
 	"context"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"math/rand"
 	"testing"
 
@@ -27,6 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 )
 
 func TestImportChecker(t *testing.T) {

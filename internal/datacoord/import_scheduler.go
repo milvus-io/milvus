@@ -17,7 +17,6 @@
 package datacoord
 
 import (
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"sort"
 	"sync"
 	"time"
@@ -26,6 +25,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
@@ -148,7 +148,6 @@ func (s *importScheduler) getIdleNode() int64 {
 			return nodeID
 		}
 	}
-	//log.Warn("no datanode can be scheduled")
 	return NullNodeID
 }
 

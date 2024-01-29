@@ -17,14 +17,16 @@
 package datacoord
 
 import (
+	"testing"
+
+	"github.com/samber/lo"
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/samber/lo"
-	"github.com/stretchr/testify/assert"
-	"testing"
 )
 
 func TestRegroupImportFiles(t *testing.T) {
