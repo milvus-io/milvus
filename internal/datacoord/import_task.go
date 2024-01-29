@@ -56,6 +56,12 @@ func WithJob(jobID int64) ImportTaskFilter {
 	}
 }
 
+func WithCollection(collectionID int64) ImportTaskFilter {
+	return func(task ImportTask) bool {
+		return task.GetCollectionID() == collectionID
+	}
+}
+
 func WithStates(states ...internalpb.ImportState) ImportTaskFilter {
 	return func(task ImportTask) bool {
 		for _, state := range states {

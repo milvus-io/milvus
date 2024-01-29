@@ -26,6 +26,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -39,6 +40,7 @@ type ImportChecker interface {
 
 type importChecker struct {
 	meta         *meta
+	broker       broker.Broker
 	cluster      Cluster
 	alloc        allocator
 	sm           Manager
@@ -50,6 +52,7 @@ type importChecker struct {
 }
 
 func NewImportChecker(meta *meta,
+	broker broker.Broker,
 	cluster Cluster,
 	alloc allocator,
 	sm Manager,
@@ -58,6 +61,7 @@ func NewImportChecker(meta *meta,
 ) ImportChecker {
 	return &importChecker{
 		meta:         meta,
+		broker:       broker,
 		cluster:      cluster,
 		alloc:        alloc,
 		sm:           sm,
@@ -71,11 +75,11 @@ func (c *importChecker) Start() {
 	log.Info("start import checker")
 	var (
 		stateTicker   = time.NewTicker(5 * time.Second)
-		logTicker     = time.NewTicker(30 * time.Second)
+		collTicker    = time.NewTicker(30 * time.Second)
 		timeoutTicker = time.NewTicker(10 * time.Minute)
 	)
 	defer stateTicker.Stop()
-	defer logTicker.Stop()
+	defer collTicker.Stop()
 	defer timeoutTicker.Stop()
 	for {
 		select {
@@ -100,7 +104,14 @@ func (c *importChecker) Start() {
 				c.checkTimeout(jobID)
 				c.checkGC(jobID)
 			}
-		case <-logTicker.C:
+		case <-collTicker.C:
+			tasks := c.imeta.GetBy()
+			tasksByCollection := lo.GroupBy(tasks, func(t ImportTask) int64 {
+				return t.GetCollectionID()
+			})
+			for collectionID := range tasksByCollection {
+				c.checkCollection(collectionID)
+			}
 			c.LogStats()
 		}
 	}
@@ -251,6 +262,32 @@ func (c *importChecker) checkTimeout(jobID int64) {
 	for _, task := range tasks {
 		err := c.imeta.Update(task.GetTaskID(), UpdateState(internalpb.ImportState_Failed),
 			UpdateReason(fmt.Sprintf("import timeout, jobID=%d, taskID=%d", task.GetJobID(), task.GetTaskID())))
+		if err != nil {
+			log.Warn("update task state failed", WrapLogFields(task, zap.Error(err))...)
+		}
+	}
+}
+
+func (c *importChecker) checkCollection(collectionID int64) {
+	tasks := c.imeta.GetBy(WithStates(internalpb.ImportState_Pending,
+		internalpb.ImportState_InProgress), WithCollection(collectionID))
+	if len(tasks) == 0 {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	has, err := c.broker.HasCollection(ctx, collectionID)
+	if err != nil {
+		log.Warn("verify existence of collection failed", zap.Int64("collection", collectionID), zap.Error(err))
+		return
+	}
+	if has {
+		return
+	}
+	for _, task := range tasks {
+		err = c.imeta.Update(task.GetTaskID(), UpdateState(internalpb.ImportState_Failed),
+			UpdateReason(fmt.Sprintf("collection %d dropped", collectionID)))
 		if err != nil {
 			log.Warn("update task state failed", WrapLogFields(task, zap.Error(err))...)
 		}
