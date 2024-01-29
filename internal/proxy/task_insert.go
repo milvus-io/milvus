@@ -163,7 +163,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	// check primaryFieldData whether autoID is true or not
 	// set rowIDs as primary data if autoID == true
 	// TODO(dragondriver): in fact, NumRows is not trustable, we should check all input fields
-	it.result.IDs, err = checkPrimaryFieldData(it.schema, it.result, it.insertMsg, true)
+	it.result.IDs, err = checkPrimaryFieldData(it.schema, it.insertMsg, true)
 	log := log.Ctx(ctx).With(zap.String("collectionName", collectionName))
 	if err != nil {
 		log.Warn("check primary field data and hash primary key failed",
