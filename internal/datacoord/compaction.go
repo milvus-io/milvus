@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -344,10 +345,11 @@ func (c *compactionPlanHandler) notifyTasks(tasks []*compactionTask) {
 		innerTask := task
 		c.RefreshPlan(innerTask)
 		getOrCreateIOPool().Submit(func() (any, error) {
+			ctx := tracer.SetupSpan(context.Background(), innerTask.span)
 			plan := innerTask.plan
-			log := log.With(zap.Int64("planID", plan.GetPlanID()), zap.Int64("nodeID", innerTask.dataNodeID))
+			log := log.Ctx(ctx).With(zap.Int64("planID", plan.GetPlanID()), zap.Int64("nodeID", innerTask.dataNodeID))
 			log.Info("Notify compaction task to DataNode")
-			ts, err := c.allocator.allocTimestamp(context.TODO())
+			ts, err := c.allocator.allocTimestamp(ctx)
 			if err != nil {
 				log.Warn("Alloc start time for CompactionPlan failed", zap.Error(err))
 				// update plan ts to TIMEOUT ts
@@ -355,8 +357,6 @@ func (c *compactionPlanHandler) notifyTasks(tasks []*compactionTask) {
 				return nil, err
 			}
 			c.updateTask(plan.PlanID, setStartTime(ts))
-
-			ctx := trace.ContextWithSpan(context.Background(), task.span)
 
 			err = c.sessions.Compaction(ctx, innerTask.dataNodeID, plan)
 
