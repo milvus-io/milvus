@@ -27,6 +27,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 )
@@ -454,6 +455,10 @@ func (p *MetaStoreConfig) Init(base *BaseTable) {
 		Export:       true,
 	}
 	p.MetaStoreType.Init(base.mgr)
+
+	// TODO: The initialization operation of metadata storage is called in the initialization phase of every node.
+	// There should be a single initialization operation for meta store, then move the metrics registration to there.
+	metrics.RegisterMetaType(p.MetaStoreType.GetValue())
 }
 
 // /////////////////////////////////////////////////////////////////////////////
