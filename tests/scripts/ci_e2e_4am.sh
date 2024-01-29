@@ -72,10 +72,10 @@ cd ${ROOT}/tests/restful_client
 
 if [[ -n "${TEST_TIMEOUT:-}" ]]; then
 
-  timeout  "${TEST_TIMEOUT}" pytest testcases --endpoint http://${MILVUS_SERVICE_NAME}:${MILVUS_SERVICE_PORT} -m L0 -n 6 \
+  timeout  "${TEST_TIMEOUT}" pytest testcases --endpoint http://${MILVUS_SERVICE_NAME}:${MILVUS_SERVICE_PORT} -v -x -m L0 -n 6 --timeout 180\
                                      --html=${CI_LOG_PATH}/report_restful.html  --self-contained-html
 else
-  pytest testcases --endpoint http://${MILVUS_SERVICE_NAME}:${MILVUS_SERVICE_PORT} -m L0 -n 6 \
+  pytest testcases --endpoint http://${MILVUS_SERVICE_NAME}:${MILVUS_SERVICE_PORT} -v -x -m L0 -n 6 --timeout 180\
                                      --html=${CI_LOG_PATH}/report_restful.html --self-contained-html
 fi
 
