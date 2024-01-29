@@ -18,6 +18,8 @@ package delegator
 
 import (
 	"context"
+	"path"
+	"strconv"
 	"testing"
 
 	bloom "github.com/bits-and-blooms/bloom/v3"
@@ -41,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -58,7 +61,9 @@ type DelegatorDataSuite struct {
 	loader        *segments.MockLoader
 	mq            *msgstream.MockMsgStream
 
-	delegator *shardDelegator
+	delegator    *shardDelegator
+	rootPath     string
+	chunkManager storage.ChunkManager
 }
 
 func (s *DelegatorDataSuite) SetupSuite() {
@@ -126,16 +131,19 @@ func (s *DelegatorDataSuite) SetupTest() {
 			},
 		},
 	}, &querypb.LoadMetaInfo{
-		LoadType: querypb.LoadType_LoadCollection,
+		LoadType:     querypb.LoadType_LoadCollection,
+		PartitionIDs: []int64{1001, 1002},
 	})
 
 	s.mq = &msgstream.MockMsgStream{}
-
+	s.rootPath = s.Suite.T().Name()
+	chunkManagerFactory := storage.NewTestChunkManagerFactory(paramtable.Get(), s.rootPath)
+	s.chunkManager, _ = chunkManagerFactory.NewPersistentStorageChunkManager(context.Background())
 	delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.tsafeManager, s.loader, &msgstream.MockMqFactory{
 		NewMsgStreamFunc: func(_ context.Context) (msgstream.MsgStream, error) {
 			return s.mq, nil
 		},
-	}, 10000, nil)
+	}, 10000, nil, s.chunkManager)
 	s.Require().NoError(err)
 	sd, ok := delegator.(*shardDelegator)
 	s.Require().True(ok)
@@ -542,7 +550,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 				NewMsgStreamFunc: func(_ context.Context) (msgstream.MsgStream, error) {
 					return s.mq, nil
 				},
-			}, 10000, nil)
+			}, 10000, nil, nil)
 		s.NoError(err)
 
 		growing0 := segments.NewMockSegment(s.T())
@@ -899,6 +907,44 @@ func (s *DelegatorDataSuite) TestReleaseSegment() {
 	req.Base.TargetID = 1
 	err = s.delegator.ReleaseSegments(ctx, req, false)
 	s.NoError(err)
+}
+
+func (s *DelegatorDataSuite) TestLoadPartitionStats() {
+	segStats := make(map[UniqueID][]storage.FieldStats)
+	{
+		// p1 stats
+		fieldStats := make([]storage.FieldStats, 0)
+		fieldStat1 := storage.FieldStats{
+			FieldID: 1,
+			Type:    schemapb.DataType_Int64,
+			Max:     storage.NewInt64FieldValue(100),
+			Min:     storage.NewInt64FieldValue(200),
+		}
+		fieldStat2 := storage.FieldStats{
+			FieldID: 2,
+			Type:    schemapb.DataType_Int64,
+			Max:     storage.NewInt64FieldValue(100),
+			Min:     storage.NewInt64FieldValue(200),
+		}
+		fieldStats = append(fieldStats, fieldStat1)
+		fieldStats = append(fieldStats, fieldStat2)
+		segStats[1] = fieldStats
+	}
+	partitionStats1 := &storage.PartitionStats{
+		SegmentStats: segStats,
+	}
+	statsData1, err := storage.SerializePartitionStats(partitionStats1)
+	s.NoError(err)
+	partitionID1 := int64(1001)
+	idPath1 := metautil.JoinIDPath(s.collectionID, partitionID1)
+	statsPath1 := path.Join(s.chunkManager.RootPath(), common.PartitionStatsPath, idPath1, strconv.Itoa(1))
+	s.chunkManager.Write(context.Background(), statsPath1, statsData1)
+
+	// reload and check partition stats
+	s.delegator.maybeReloadPartitionStats(context.Background())
+	s.Equal(1, len(s.delegator.partitionStats))
+	s.NotNil(s.delegator.partitionStats[partitionID1])
+	s.Equal(int64(1), s.delegator.partitionStats[partitionID1].GetVersion())
 }
 
 func (s *DelegatorDataSuite) TestSyncTargetVersion() {

@@ -277,3 +277,55 @@ func TestMultiFieldStats(t *testing.T) {
 	assert.Equal(t, true, partitionKeyStats.Max.EQ(maxPk2))
 	assert.Equal(t, true, partitionKeyStats.Min.EQ(minPk2))
 }
+
+func TestPartitionStats(t *testing.T) {
+	segStats := make(map[UniqueID][]FieldStats)
+	{
+		fieldStats := make([]FieldStats, 0)
+		fieldStat1 := FieldStats{
+			FieldID: 1,
+			Type:    schemapb.DataType_Int64,
+			Max:     NewInt64FieldValue(100),
+			Min:     NewInt64FieldValue(200),
+		}
+		fieldStat2 := FieldStats{
+			FieldID: 2,
+			Type:    schemapb.DataType_Int64,
+			Max:     NewInt64FieldValue(100),
+			Min:     NewInt64FieldValue(200),
+		}
+		fieldStats = append(fieldStats, fieldStat1)
+		fieldStats = append(fieldStats, fieldStat2)
+		segStats[1] = fieldStats
+	}
+	{
+		fieldStats := make([]FieldStats, 0)
+		fieldStat1 := FieldStats{
+			FieldID: 1,
+			Type:    schemapb.DataType_Int64,
+			Max:     NewInt64FieldValue(100),
+			Min:     NewInt64FieldValue(200),
+		}
+		fieldStat2 := FieldStats{
+			FieldID: 2,
+			Type:    schemapb.DataType_Int64,
+			Max:     NewInt64FieldValue(100),
+			Min:     NewInt64FieldValue(200),
+		}
+		fieldStats = append(fieldStats, fieldStat1)
+		fieldStats = append(fieldStats, fieldStat2)
+		segStats[2] = fieldStats
+	}
+	partStats := &PartitionStats{
+		SegmentStats: segStats,
+	}
+	partBytes, err := SerializePartitionStats(partStats)
+	assert.NoError(t, err)
+	assert.NotNil(t, partBytes)
+	desPartStats, err := DeserializePartitionsStats(partBytes)
+	assert.NoError(t, err)
+	assert.NotNil(t, desPartStats)
+	assert.Equal(t, 2, len(desPartStats.SegmentStats))
+	assert.Equal(t, 2, len(desPartStats.SegmentStats[1]))
+	assert.Equal(t, 2, len(desPartStats.SegmentStats[2]))
+}

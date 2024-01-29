@@ -20,6 +20,8 @@ package delegator
 import (
 	"context"
 	"fmt"
+	"path"
+	"strconv"
 	"sync"
 	"time"
 
@@ -42,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/tsafe"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -49,6 +52,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -115,7 +119,9 @@ type shardDelegator struct {
 	tsCond      *sync.Cond
 	latestTsafe *atomic.Uint64
 	// queryHook
-	queryHook optimizers.QueryHook
+	queryHook      optimizers.QueryHook
+	partitionStats map[UniqueID]*storage.PartitionStats
+	chunkManager   storage.ChunkManager
 }
 
 // getLogger returns the zap logger with pre-defined shard attributes.
@@ -775,10 +781,72 @@ func (sd *shardDelegator) Close() {
 	sd.lifetime.Wait()
 }
 
+// As partition stats is an optimization for search/query which is not mandatory for milvus instance,
+// loading partitionStats will be a try-best process and will skip+logError when running across errors rather than
+// return an error status
+func (sd *shardDelegator) maybeReloadPartitionStats(ctx context.Context, partIDs ...UniqueID) {
+	var partsToReload []UniqueID
+	if len(partIDs) > 0 {
+		partsToReload = partIDs
+	} else {
+		partsToReload = append(partsToReload, sd.collection.GetPartitions()...)
+	}
+
+	colID := sd.Collection()
+	findMaxVersion := func(filePaths []string) (int64, string) {
+		maxVersion := int64(-1)
+		maxVersionFilePath := ""
+		for _, filePath := range filePaths {
+			versionStr := path.Base(filePath)
+			version, err := strconv.ParseInt(versionStr, 10, 64)
+			if err != nil {
+				continue
+			}
+			if version > maxVersion {
+				maxVersion = version
+				maxVersionFilePath = filePath
+			}
+		}
+		return maxVersion, maxVersionFilePath
+	}
+	for _, partID := range partsToReload {
+		idPath := metautil.JoinIDPath(colID, partID)
+		statsPathPrefix := path.Join(sd.chunkManager.RootPath(), common.PartitionStatsPath, idPath)
+		filePaths, _, err := sd.chunkManager.ListWithPrefix(ctx, statsPathPrefix, true)
+		if err != nil {
+			log.Error("Skip initializing partition stats for failing to list files with prefix",
+				zap.String("statsPathPrefix", statsPathPrefix))
+			continue
+		}
+		maxVersion, maxVersionFilePath := findMaxVersion(filePaths)
+		if maxVersion < 0 {
+			log.Info("failed to find valid partition stats file for partition", zap.Int64("partitionID", partID))
+			continue
+		}
+		partStats, exists := sd.partitionStats[maxVersion]
+		if !exists || (exists && partStats.GetVersion() < maxVersion) {
+			statsBytes, err := sd.chunkManager.Read(ctx, maxVersionFilePath)
+			if err != nil {
+				log.Error("failed to read stats file from object storage", zap.String("path", maxVersionFilePath))
+				continue
+			}
+			partStats, err := storage.DeserializePartitionsStats(statsBytes)
+			if err != nil {
+				log.Error("failed to parse partition stats from bytes", zap.Int("bytes_length", len(statsBytes)))
+				continue
+			}
+			sd.partitionStats[partID] = partStats
+			partStats.SetVersion(maxVersion)
+			log.Info("Updated partitionStats for partition", zap.Int64("partitionID", partID),
+				zap.Int64("latest_version_loaded", maxVersion))
+		}
+	}
+}
+
 // NewShardDelegator creates a new ShardDelegator instance with all fields initialized.
 func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID UniqueID, channel string, version int64,
 	workerManager cluster.Manager, manager *segments.Manager, tsafeManager tsafe.Manager, loader segments.Loader,
-	factory msgstream.Factory, startTs uint64, queryHook optimizers.QueryHook,
+	factory msgstream.Factory, startTs uint64, queryHook optimizers.QueryHook, chunkManager storage.ChunkManager,
 ) (ShardDelegator, error) {
 	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID),
 		zap.Int64("replicaID", replicaID),
@@ -813,6 +881,8 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		loader:          loader,
 		factory:         factory,
 		queryHook:       queryHook,
+		chunkManager:    chunkManager,
+		partitionStats:  make(map[UniqueID]*storage.PartitionStats),
 	}
 	m := sync.Mutex{}
 	sd.tsCond = sync.NewCond(&m)
@@ -820,5 +890,6 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		go sd.watchTSafe()
 	}
 	log.Info("finish build new shardDelegator")
+	sd.maybeReloadPartitionStats(ctx)
 	return sd, nil
 }

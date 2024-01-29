@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -1210,4 +1211,18 @@ func TransferInsertMsgToInsertRecord(schema *schemapb.CollectionSchema, msg *msg
 	insertRecord.FieldsData = append(insertRecord.FieldsData, msg.FieldsData...)
 
 	return insertRecord, nil
+}
+
+func NewTestChunkManagerFactory(params *paramtable.ComponentParam, rootPath string) *ChunkManagerFactory {
+	return NewChunkManagerFactory("minio",
+		RootPath(rootPath),
+		Address(params.MinioCfg.Address.GetValue()),
+		AccessKeyID(params.MinioCfg.AccessKeyID.GetValue()),
+		SecretAccessKeyID(params.MinioCfg.SecretAccessKey.GetValue()),
+		UseSSL(params.MinioCfg.UseSSL.GetAsBool()),
+		BucketName(params.MinioCfg.BucketName.GetValue()),
+		UseIAM(params.MinioCfg.UseIAM.GetAsBool()),
+		CloudProvider(params.MinioCfg.CloudProvider.GetValue()),
+		IAMEndpoint(params.MinioCfg.IAMEndpoint.GetValue()),
+		CreateBucket(true))
 }

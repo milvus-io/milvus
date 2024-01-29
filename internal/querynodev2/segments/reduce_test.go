@@ -60,7 +60,7 @@ func (suite *ReduceSuite) SetupTest() {
 	msgLength := 100
 
 	suite.rootPath = suite.T().Name()
-	chunkManagerFactory := NewTestChunkManagerFactory(paramtable.Get(), suite.rootPath)
+	chunkManagerFactory := storage.NewTestChunkManagerFactory(paramtable.Get(), suite.rootPath)
 	suite.chunkManager, _ = chunkManagerFactory.NewPersistentStorageChunkManager(ctx)
 	initcore.InitRemoteChunkManager(paramtable.Get())
 

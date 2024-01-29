@@ -77,7 +77,7 @@ func (suite *SegmentLoaderSuite) SetupTest() {
 	// TODO:: cpp chunk manager not support local chunk manager
 	// suite.chunkManager = storage.NewLocalChunkManager(storage.RootPath(
 	//	fmt.Sprintf("/tmp/milvus-ut/%d", rand.Int63())))
-	chunkManagerFactory := NewTestChunkManagerFactory(paramtable.Get(), suite.rootPath)
+	chunkManagerFactory := storage.NewTestChunkManagerFactory(paramtable.Get(), suite.rootPath)
 	suite.chunkManager, _ = chunkManagerFactory.NewPersistentStorageChunkManager(ctx)
 	suite.loader = NewLoader(suite.manager, suite.chunkManager)
 	initcore.InitRemoteChunkManager(paramtable.Get())
@@ -677,7 +677,7 @@ func (suite *SegmentLoaderDetailSuite) SetupTest() {
 	}
 
 	ctx := context.Background()
-	chunkManagerFactory := NewTestChunkManagerFactory(paramtable.Get(), suite.rootPath)
+	chunkManagerFactory := storage.NewTestChunkManagerFactory(paramtable.Get(), suite.rootPath)
 	suite.chunkManager, _ = chunkManagerFactory.NewPersistentStorageChunkManager(ctx)
 	suite.loader = NewLoader(suite.manager, suite.chunkManager)
 	initcore.InitRemoteChunkManager(paramtable.Get())
@@ -813,7 +813,7 @@ func (suite *SegmentLoaderV2Suite) SetupTest() {
 	// TODO:: cpp chunk manager not support local chunk manager
 	// suite.chunkManager = storage.NewLocalChunkManager(storage.RootPath(
 	//	fmt.Sprintf("/tmp/milvus-ut/%d", rand.Int63())))
-	chunkManagerFactory := NewTestChunkManagerFactory(paramtable.Get(), suite.rootPath)
+	chunkManagerFactory := storage.NewTestChunkManagerFactory(paramtable.Get(), suite.rootPath)
 	suite.chunkManager, _ = chunkManagerFactory.NewPersistentStorageChunkManager(ctx)
 	suite.loader = NewLoaderV2(suite.manager, suite.chunkManager)
 	initcore.InitRemoteChunkManager(paramtable.Get())
