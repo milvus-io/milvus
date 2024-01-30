@@ -112,7 +112,7 @@ func (t *levelZeroCompactionTask) injectDone() {}
 func (t *levelZeroCompactionTask) compact() (*datapb.CompactionPlanResult, error) {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(t.ctx, "L0Compact")
 	defer span.End()
-	log := log.With(zap.Int64("planID", t.plan.GetPlanID()), zap.String("type", t.plan.GetType().String()))
+	log := log.Ctx(t.ctx).With(zap.Int64("planID", t.plan.GetPlanID()), zap.String("type", t.plan.GetType().String()))
 	log.Info("L0 compaction", zap.Duration("wait in queue elapse", t.tr.RecordSpan()))
 
 	if !funcutil.CheckCtxValid(ctx) {
