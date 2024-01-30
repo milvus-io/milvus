@@ -18,12 +18,14 @@ SearchOnIndex(const dataset::SearchDataset& search_dataset,
               const index::VectorIndex& indexing,
               const SearchInfo& search_conf,
               const BitsetView& bitset,
-              SearchResult& search_result) {
+              SearchResult& search_result,
+              bool is_sparse) {
     auto num_queries = search_dataset.num_queries;
     auto dim = search_dataset.dim;
     auto metric_type = search_dataset.metric_type;
     auto dataset =
         knowhere::GenDataSet(num_queries, dim, search_dataset.query_data);
+    dataset->SetIsSparse(is_sparse);
     if (!PrepareVectorIteratorsFromIndex(search_conf,
                                          num_queries,
                                          dataset,

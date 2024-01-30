@@ -102,6 +102,7 @@ generate_build_conf(const milvus::IndexType& index_type,
                index_type == knowhere::IndexEnum::INDEX_SPARSE_WAND) {
         return knowhere::Json{
             {knowhere::meta::METRIC_TYPE, metric_type},
+            {knowhere::indexparam::DROP_RATIO_BUILD, "0.1"},
         };
     }
     return knowhere::Json();

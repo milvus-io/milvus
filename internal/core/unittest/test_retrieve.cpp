@@ -29,12 +29,34 @@ RetrieveUsingDefaultOutputSize(SegmentInterface* segment,
     return segment->Retrieve(plan, timestamp, DEFAULT_MAX_OUTPUT_SIZE);
 }
 
-TEST(Retrieve, AutoID) {
+using Param = DataType;
+class RetrieveTest : public ::testing::TestWithParam<Param> {
+ public:
+    void
+    SetUp() override {
+        data_type = GetParam();
+        metric_type = datatype_is_sparse_vector(data_type)
+                          ? knowhere::metric::IP
+                          : knowhere::metric::L2;
+        is_sparse = datatype_is_sparse_vector(data_type);
+    }
+
+    DataType data_type;
+    knowhere::MetricType metric_type;
+    bool is_sparse = false;
+};
+
+INSTANTIATE_TEST_SUITE_P(RetrieveTest,
+                         RetrieveTest,
+                         ::testing::Values(DataType::VECTOR_FLOAT,
+                                           DataType::VECTOR_SPARSE_FLOAT));
+
+TEST_P(RetrieveTest, AutoID) {
     auto schema = std::make_shared<Schema>();
     auto fid_64 = schema->AddDebugField("i64", DataType::INT64);
     auto DIM = 16;
-    auto fid_vec = schema->AddDebugField(
-        "vector_64", DataType::VECTOR_FLOAT, DIM, knowhere::metric::L2);
+    auto fid_vec =
+        schema->AddDebugField("vector_64", data_type, DIM, metric_type);
     schema->set_primary_field_id(fid_64);
 
     int64_t N = 100;
@@ -48,12 +70,10 @@ TEST(Retrieve, AutoID) {
 
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
     std::vector<proto::plan::GenericValue> values;
-    {
-        for (int i = 0; i < req_size; ++i) {
-            proto::plan::GenericValue val;
-            val.set_int64_val(i64_col[choose(i)]);
-            values.push_back(val);
-        }
+    for (int i = 0; i < req_size; ++i) {
+        proto::plan::GenericValue val;
+        val.set_int64_val(i64_col[choose(i)]);
+        values.push_back(val);
     }
     auto term_expr = std::make_shared<milvus::expr::TermFilterExpr>(
         milvus::expr::ColumnInfo(
@@ -75,26 +95,26 @@ TEST(Retrieve, AutoID) {
     for (int i = 0; i < req_size; ++i) {
         auto index = choose(i);
         auto data = field0_data.data(i);
-    }
-
-    for (int i = 0; i < req_size; ++i) {
-        auto index = choose(i);
-        auto data = field0_data.data(i);
         ASSERT_EQ(data, i64_col[index]);
     }
 
     auto field1 = retrieve_results->fields_data(1);
     Assert(field1.has_vectors());
-    auto field1_data = field1.vectors().float_vector();
-    ASSERT_EQ(field1_data.data_size(), DIM * req_size);
+    if (!is_sparse) {
+        auto field1_data = field1.vectors().float_vector();
+        ASSERT_EQ(field1_data.data_size(), DIM * req_size);
+    } else {
+        auto field1_data = field1.vectors().sparse_float_vector();
+        ASSERT_EQ(field1_data.contents_size(), req_size);
+    }
 }
 
-TEST(Retrieve, AutoID2) {
+TEST_P(RetrieveTest, AutoID2) {
     auto schema = std::make_shared<Schema>();
     auto fid_64 = schema->AddDebugField("i64", DataType::INT64);
     auto DIM = 16;
-    auto fid_vec = schema->AddDebugField(
-        "vector_64", DataType::VECTOR_FLOAT, DIM, knowhere::metric::L2);
+    auto fid_vec =
+        schema->AddDebugField("vector_64", data_type, DIM, metric_type);
     schema->set_primary_field_id(fid_64);
 
     int64_t N = 100;
@@ -140,16 +160,21 @@ TEST(Retrieve, AutoID2) {
 
     auto field1 = retrieve_results->fields_data(1);
     Assert(field1.has_vectors());
-    auto field1_data = field1.vectors().float_vector();
-    ASSERT_EQ(field1_data.data_size(), DIM * req_size);
+    if (!is_sparse) {
+        auto field1_data = field1.vectors().float_vector();
+        ASSERT_EQ(field1_data.data_size(), DIM * req_size);
+    } else {
+        auto field1_data = field1.vectors().sparse_float_vector();
+        ASSERT_EQ(field1_data.contents_size(), req_size);
+    }
 }
 
-TEST(Retrieve, NotExist) {
+TEST_P(RetrieveTest, NotExist) {
     auto schema = std::make_shared<Schema>();
     auto fid_64 = schema->AddDebugField("i64", DataType::INT64);
     auto DIM = 16;
-    auto fid_vec = schema->AddDebugField(
-        "vector_64", DataType::VECTOR_FLOAT, DIM, knowhere::metric::L2);
+    auto fid_vec =
+        schema->AddDebugField("vector_64", data_type, DIM, metric_type);
     schema->set_primary_field_id(fid_64);
 
     int64_t N = 100;
@@ -200,16 +225,21 @@ TEST(Retrieve, NotExist) {
 
     auto field1 = retrieve_results->fields_data(1);
     Assert(field1.has_vectors());
-    auto field1_data = field1.vectors().float_vector();
-    ASSERT_EQ(field1_data.data_size(), DIM * req_size);
+    if (!is_sparse) {
+        auto field1_data = field1.vectors().float_vector();
+        ASSERT_EQ(field1_data.data_size(), DIM * req_size);
+    } else {
+        auto field1_data = field1.vectors().sparse_float_vector();
+        ASSERT_EQ(field1_data.contents_size(), req_size);
+    }
 }
 
-TEST(Retrieve, Empty) {
+TEST_P(RetrieveTest, Empty) {
     auto schema = std::make_shared<Schema>();
     auto fid_64 = schema->AddDebugField("i64", DataType::INT64);
     auto DIM = 16;
-    auto fid_vec = schema->AddDebugField(
-        "vector_64", DataType::VECTOR_FLOAT, DIM, knowhere::metric::L2);
+    auto fid_vec =
+        schema->AddDebugField("vector_64", data_type, DIM, metric_type);
     schema->set_primary_field_id(fid_64);
 
     int64_t N = 100;
@@ -246,15 +276,19 @@ TEST(Retrieve, Empty) {
     Assert(field0.has_scalars());
     auto field0_data = field0.scalars().long_data();
     Assert(field0_data.data_size() == 0);
-    Assert(field1.vectors().float_vector().data_size() == 0);
+    if (!is_sparse) {
+        ASSERT_EQ(field1.vectors().float_vector().data_size(), 0);
+    } else {
+        ASSERT_EQ(field1.vectors().sparse_float_vector().contents_size(), 0);
+    }
 }
 
-TEST(Retrieve, Limit) {
+TEST_P(RetrieveTest, Limit) {
     auto schema = std::make_shared<Schema>();
     auto fid_64 = schema->AddDebugField("i64", DataType::INT64);
     auto DIM = 16;
-    auto fid_vec = schema->AddDebugField(
-        "vector_64", DataType::VECTOR_FLOAT, DIM, knowhere::metric::L2);
+    auto fid_vec =
+        schema->AddDebugField("vector_64", data_type, DIM, metric_type);
     schema->set_primary_field_id(fid_64);
 
     int64_t N = 101;
@@ -285,18 +319,22 @@ TEST(Retrieve, Limit) {
     auto field0 = retrieve_results->fields_data(0);
     auto field2 = retrieve_results->fields_data(2);
     Assert(field0.scalars().long_data().data_size() == N);
-    Assert(field2.vectors().float_vector().data_size() == N * DIM);
+    if (!is_sparse) {
+        Assert(field2.vectors().float_vector().data_size() == N * DIM);
+    } else {
+        Assert(field2.vectors().sparse_float_vector().contents_size() == N);
+    }
 }
 
-TEST(Retrieve, FillEntry) {
+TEST_P(RetrieveTest, FillEntry) {
     auto schema = std::make_shared<Schema>();
     auto fid_64 = schema->AddDebugField("i64", DataType::INT64);
     auto DIM = 16;
     auto fid_bool = schema->AddDebugField("bool", DataType::BOOL);
     auto fid_f32 = schema->AddDebugField("f32", DataType::FLOAT);
     auto fid_f64 = schema->AddDebugField("f64", DataType::DOUBLE);
-    auto fid_vec32 = schema->AddDebugField(
-        "vector_32", DataType::VECTOR_FLOAT, DIM, knowhere::metric::L2);
+    auto fid_vec =
+        schema->AddDebugField("vector", data_type, DIM, knowhere::metric::L2);
     auto fid_vecbin = schema->AddDebugField(
         "vec_bin", DataType::VECTOR_BINARY, DIM, knowhere::metric::L2);
     schema->set_primary_field_id(fid_64);
@@ -323,7 +361,7 @@ TEST(Retrieve, FillEntry) {
                                        fid_bool,
                                        fid_f32,
                                        fid_f64,
-                                       fid_vec32,
+                                       fid_vec,
                                        fid_vecbin};
     plan->field_ids_ = target_fields;
     EXPECT_THROW(segment->Retrieve(plan.get(), N, 1), std::runtime_error);
@@ -333,12 +371,12 @@ TEST(Retrieve, FillEntry) {
     Assert(retrieve_results->fields_data_size() == target_fields.size());
 }
 
-TEST(Retrieve, LargeTimestamp) {
+TEST_P(RetrieveTest, LargeTimestamp) {
     auto schema = std::make_shared<Schema>();
     auto fid_64 = schema->AddDebugField("i64", DataType::INT64);
     auto DIM = 16;
-    auto fid_vec = schema->AddDebugField(
-        "vector_64", DataType::VECTOR_FLOAT, DIM, knowhere::metric::L2);
+    auto fid_vec =
+        schema->AddDebugField("vector_64", data_type, DIM, metric_type);
     schema->set_primary_field_id(fid_64);
 
     int64_t N = 100;
@@ -392,16 +430,21 @@ TEST(Retrieve, LargeTimestamp) {
                 Assert(field_data.vectors().float_vector().data_size() ==
                        target_num * DIM);
             }
+            if (DataType(field_data.type()) == DataType::VECTOR_SPARSE_FLOAT) {
+                Assert(field_data.vectors()
+                           .sparse_float_vector()
+                           .contents_size() == target_num);
+            }
         }
     }
 }
 
-TEST(Retrieve, Delete) {
+TEST_P(RetrieveTest, Delete) {
     auto schema = std::make_shared<Schema>();
     auto fid_64 = schema->AddDebugField("i64", DataType::INT64);
     auto DIM = 16;
-    auto fid_vec = schema->AddDebugField(
-        "vector_64", DataType::VECTOR_FLOAT, DIM, knowhere::metric::L2);
+    auto fid_vec =
+        schema->AddDebugField("vector_64", data_type, DIM, metric_type);
     schema->set_primary_field_id(fid_64);
 
     auto fid_ts = schema->AddDebugField("Timestamp", DataType::INT64);
@@ -465,8 +508,13 @@ TEST(Retrieve, Delete) {
 
         auto field2 = retrieve_results->fields_data(2);
         Assert(field2.has_vectors());
-        auto field2_data = field2.vectors().float_vector();
-        ASSERT_EQ(field2_data.data_size(), DIM * req_size);
+        if (!is_sparse) {
+            auto field2_data = field2.vectors().float_vector();
+            ASSERT_EQ(field2_data.data_size(), DIM * req_size);
+        } else {
+            auto field2_data = field2.vectors().sparse_float_vector();
+            ASSERT_EQ(field2_data.contents_size(), req_size);
+        }
     }
 
     int64_t row_count = 0;
@@ -512,7 +560,12 @@ TEST(Retrieve, Delete) {
 
         auto field2 = retrieve_results->fields_data(2);
         Assert(field2.has_vectors());
-        auto field2_data = field2.vectors().float_vector();
-        ASSERT_EQ(field2_data.data_size(), DIM * size);
+        if (!is_sparse) {
+            auto field2_data = field2.vectors().float_vector();
+            ASSERT_EQ(field2_data.data_size(), DIM * size);
+        } else {
+            auto field2_data = field2.vectors().sparse_float_vector();
+            ASSERT_EQ(field2_data.contents_size(), size);
+        }
     }
 }

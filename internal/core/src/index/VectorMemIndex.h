@@ -85,6 +85,9 @@ class VectorMemIndex : public VectorIndex {
     std::vector<uint8_t>
     GetVector(const DatasetPtr dataset) const override;
 
+    std::unique_ptr<const knowhere::sparse::SparseRow<float>[]>
+    GetSparseVector(const DatasetPtr dataset) const override;
+
     BinarySet
     Upload(const Config& config = {}) override;
 

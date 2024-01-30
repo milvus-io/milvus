@@ -491,7 +491,7 @@ VectorMemIndex<T>::Build(const Config& config) {
     build_config.update(config);
     build_config.erase("insert_files");
     build_config.erase(VEC_OPT_FIELDS);
-    if (GetIndexType().find("SPARSE") == std::string::npos) {
+    if (!IndexIsSparse(GetIndexType())) {
         int64_t total_size = 0;
         int64_t total_num_rows = 0;
         int64_t dim = 0;
@@ -537,6 +537,7 @@ VectorMemIndex<T>::Build(const Config& config) {
                 // this does a deep copy of field_data's data.
                 // TODO: avoid copying by enforcing field data to give up
                 // ownership.
+                AssertInfo(dim >= ptr[i].dim(), "bad dim");
                 vec[offset + i] = ptr[i];
             }
             offset += field_data->Length();
@@ -639,12 +640,17 @@ VectorMemIndex<T>::HasRawData() const {
 template <typename T>
 std::vector<uint8_t>
 VectorMemIndex<T>::GetVector(const DatasetPtr dataset) const {
+    auto index_type = GetIndexType();
+    if (IndexIsSparse(index_type)) {
+        PanicInfo(ErrorCode::UnexpectedError,
+                  "failed to get vector, index is sparse");
+    }
+
     auto res = index_.GetVectorByIds(*dataset);
     if (!res.has_value()) {
         PanicInfo(ErrorCode::UnexpectedError,
                   "failed to get vector, " + KnowhereStatusString(res.error()));
     }
-    auto index_type = GetIndexType();
     auto tensor = res.value()->GetTensor();
     auto row_num = res.value()->GetRows();
     auto dim = res.value()->GetDim();
@@ -661,8 +667,22 @@ VectorMemIndex<T>::GetVector(const DatasetPtr dataset) const {
 }
 
 template <typename T>
-void
-VectorMemIndex<T>::LoadFromFile(const Config& config) {
+std::unique_ptr<const knowhere::sparse::SparseRow<float>[]>
+VectorMemIndex<T>::GetSparseVector(const DatasetPtr dataset) const {
+    auto res = index_.GetVectorByIds(*dataset);
+    if (!res.has_value()) {
+        PanicInfo(ErrorCode::UnexpectedError,
+                  "failed to get vector, " + KnowhereStatusString(res.error()));
+    }
+    // release and transfer ownership to the result unique ptr.
+    res.value()->SetIsOwner(false);
+    return std::unique_ptr<const knowhere::sparse::SparseRow<float>[]>(
+        static_cast<const knowhere::sparse::SparseRow<float>*>(
+            res.value()->GetTensor()));
+}
+
+template <typename T>
+void VectorMemIndex<T>::LoadFromFile(const Config& config) {
     auto filepath = GetValueFromConfig<std::string>(config, kMmapFilepath);
     AssertInfo(filepath.has_value(), "mmap filepath is empty when load index");
 

@@ -45,7 +45,9 @@ class ColumnBase {
  public:
     // memory mode ctor
     ColumnBase(size_t reserve, const FieldMeta& field_meta)
-        : type_size_(field_meta.get_sizeof()) {
+        : type_size_(datatype_is_sparse_vector(field_meta.get_data_type())
+                         ? 1
+                         : field_meta.get_sizeof()) {
         // simdjson requires a padding following the json data
         padding_ = field_meta.get_data_type() == DataType::JSON
                        ? simdjson::SIMDJSON_PADDING
@@ -55,7 +57,7 @@ class ColumnBase {
             return;
         }
 
-        cap_size_ = field_meta.get_sizeof() * reserve;
+        cap_size_ = type_size_ * reserve;
 
         // use anon mapping so we are able to free these memory with munmap only
         data_ = static_cast<char*>(mmap(nullptr,
@@ -72,8 +74,10 @@ class ColumnBase {
 
     // mmap mode ctor
     ColumnBase(const File& file, size_t size, const FieldMeta& field_meta)
-        : type_size_(field_meta.get_sizeof()),
-          num_rows_(size / field_meta.get_sizeof()) {
+        : type_size_(datatype_is_sparse_vector(field_meta.get_data_type())
+                         ? 1
+                         : field_meta.get_sizeof()),
+          num_rows_(size / type_size_) {
         padding_ = field_meta.get_data_type() == DataType::JSON
                        ? simdjson::SIMDJSON_PADDING
                        : 0;

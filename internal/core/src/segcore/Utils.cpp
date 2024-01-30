@@ -315,8 +315,11 @@ CreateVectorDataArray(int64_t count, const FieldMeta& field_meta) {
         field_meta.get_data_type()));
 
     auto vector_array = data_array->mutable_vectors();
-    auto dim = field_meta.get_dim();
-    vector_array->set_dim(dim);
+    auto dim = 0;
+    if (data_type != DataType::VECTOR_SPARSE_FLOAT) {
+        dim = field_meta.get_dim();
+        vector_array->set_dim(dim);
+    }
     switch (data_type) {
         case DataType::VECTOR_FLOAT: {
             auto length = count * dim;
@@ -494,8 +497,12 @@ CreateVectorDataArrayFrom(const void* data_raw,
         }
         case DataType::VECTOR_SPARSE_FLOAT: {
             SparseRowsToProto(
-                reinterpret_cast<const knowhere::sparse::SparseRow<float>*>(
-                    data_raw),
+                [&](size_t i) {
+                    return reinterpret_cast<
+                               const knowhere::sparse::SparseRow<float>*>(
+                               data_raw) +
+                           i;
+                },
                 count,
                 vector_array->mutable_sparse_float_vector());
             vector_array->set_dim(vector_array->sparse_float_vector().dim());
@@ -541,8 +548,11 @@ MergeDataArray(
                    "merge field data type not consistent");
         if (field_meta.is_vector()) {
             auto vector_array = data_array->mutable_vectors();
-            auto dim = field_meta.get_dim();
-            vector_array->set_dim(dim);
+            auto dim = 0;
+            if (!datatype_is_sparse_vector(data_type)) {
+                dim = field_meta.get_dim();
+                vector_array->set_dim(dim);
+            }
             if (field_meta.get_data_type() == DataType::VECTOR_FLOAT) {
                 auto data = VEC_FIELD_DATA(src_field_data, float).data();
                 auto obj = vector_array->mutable_float_vector();

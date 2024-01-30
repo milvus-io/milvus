@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include "Plan.h"
+#include "common/Utils.h"
 #include "PlanProto.h"
 #include "generated/ShowPlanNodeVisitor.h"
 
@@ -34,9 +35,8 @@ std::unique_ptr<PlaceholderGroup>
 ParsePlaceholderGroup(const Plan* plan,
                       const uint8_t* blob,
                       const int64_t blob_len) {
-    namespace set = milvus::proto::common;
     auto result = std::make_unique<PlaceholderGroup>();
-    set::PlaceholderGroup ph_group;
+    milvus::proto::common::PlaceholderGroup ph_group;
     auto ok = ph_group.ParseFromArray(blob, blob_len);
     Assert(ok);
     for (auto& info : ph_group.placeholders()) {
@@ -46,22 +46,26 @@ ParsePlaceholderGroup(const Plan* plan,
         auto field_id = plan->tag2field_.at(element.tag_);
         auto& field_meta = plan->schema_[field_id];
         element.num_of_queries_ = info.values_size();
-        AssertInfo(element.num_of_queries_, "must have queries");
-        Assert(element.num_of_queries_ > 0);
-        element.line_sizeof_ = info.values().Get(0).size();
-        if (field_meta.get_sizeof() != element.line_sizeof_) {
-            throw SegcoreError(
-                DimNotMatch,
-                fmt::format("vector dimension mismatch, expected vector "
-                            "size(byte) {}, actual {}.",
-                            field_meta.get_sizeof(),
-                            element.line_sizeof_));
-        }
-        auto& target = element.blob_;
-        target.reserve(element.line_sizeof_ * element.num_of_queries_);
-        for (auto& line : info.values()) {
-            Assert(element.line_sizeof_ == line.size());
-            target.insert(target.end(), line.begin(), line.end());
+        AssertInfo(element.num_of_queries_ > 0, "must have queries");
+        if (info.type() ==
+            milvus::proto::common::PlaceholderType::SparseFloatVector) {
+            element.sparse_matrix_ = SparseBytesToRows(info.values());
+        } else {
+            auto line_size = info.values().Get(0).size();
+            if (field_meta.get_sizeof() != line_size) {
+                throw SegcoreError(
+                    DimNotMatch,
+                    fmt::format("vector dimension mismatch, expected vector "
+                                "size(byte) {}, actual {}.",
+                                field_meta.get_sizeof(),
+                                line_size));
+            }
+            auto& target = element.blob_;
+            target.reserve(line_size * element.num_of_queries_);
+            for (auto& line : info.values()) {
+                Assert(line_size == line.size());
+                target.insert(target.end(), line.begin(), line.end());
+            }
         }
         result->emplace_back(std::move(element));
     }

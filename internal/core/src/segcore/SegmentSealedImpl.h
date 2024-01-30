@@ -267,7 +267,7 @@ class SegmentSealedImpl : public SegmentSealed {
     WarmupChunkCache(const FieldId field_id) override;
 
     bool
-    generate_binlog_index(const FieldId field_id);
+    generate_interim_index(const FieldId field_id);
 
  private:
     // segment loading state

@@ -34,6 +34,14 @@ using milvus::segcore::LoadIndexInfo;
 const int64_t ROW_COUNT = 10 * 1000;
 const int64_t BIAS = 4200;
 
+using Param = std::string;
+class SealedTest : public ::testing::TestWithParam<Param> {
+ public:
+    void
+    SetUp() override {
+    }
+};
+
 TEST(Sealed, without_predicate) {
     auto schema = std::make_shared<Schema>();
     auto dim = 16;
