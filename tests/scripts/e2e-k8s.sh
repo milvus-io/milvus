@@ -245,6 +245,10 @@ export HUB="${HUB:-milvusdb}"
 
 export CI="true"
 
+# hot fix for docker-compose.yml, force builder service to use host network
+sed -i '/builder:/,/^\s*$/s/image: \${IMAGE_REPO}\/milvus-env:\${OS_NAME}-\${DATE_VERSION}/&\n    network_mode: "host"/' $ROOT/docker-compose.yml
+
+
 if [[ ! -d "${ARTIFACTS}" ]];then
   mkdir -p "${ARTIFACTS}"
 fi
