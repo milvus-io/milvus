@@ -545,6 +545,7 @@ common:
     highPriority: 10 # This parameter specify how many times the number of threads is the number of cores in high priority thread pool
     middlePriority: 5 # This parameter specify how many times the number of threads is the number of cores in middle priority thread pool
     lowPriority: 1 # This parameter specify how many times the number of threads is the number of cores in low priority thread pool
+  buildIndexThreadPoolRatio: 0.75
   DiskIndex:
     MaxDegree: 56
     SearchListSize: 100
