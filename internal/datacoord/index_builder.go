@@ -302,7 +302,7 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 		}
 		if isDiskANNIndex(getIndexType(indexParams)) {
 			var err error
-			indexParams, err = indexparams.AppendDiskIndexBuildParams(Params, indexParams)
+			indexParams, err = indexparams.UpdateDiskIndexBuildParams(Params, indexParams)
 			if err != nil {
 				log.Ctx(ib.ctx).Warn("failed to append index build params", zap.Int64("buildID", buildID),
 					zap.Int64("nodeID", nodeID), zap.Error(err))
