@@ -6,6 +6,7 @@ import (
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 // The LevelZeroSegments keeps the min group
@@ -74,34 +75,75 @@ func (v *LevelZeroSegmentsView) Trigger() (CompactionView, string) {
 	})
 
 	var (
-		minDeltaSize  = Params.DataCoordCfg.LevelZeroCompactionTriggerMinSize.GetAsFloat()
-		minDeltaCount = Params.DataCoordCfg.LevelZeroCompactionTriggerDeltalogMinNum.GetAsInt()
-
-		curDeltaSize  float64
-		curDeltaCount int
-		reason        string
+		minDeltaSize  = paramtable.Get().DataCoordCfg.LevelZeroCompactionTriggerMinSize.GetAsFloat()
+		maxDeltaSize  = paramtable.Get().DataCoordCfg.LevelZeroCompactionTriggerMaxSize.GetAsFloat()
+		minDeltaCount = paramtable.Get().DataCoordCfg.LevelZeroCompactionTriggerDeltalogMinNum.GetAsInt()
+		maxDeltaCount = paramtable.Get().DataCoordCfg.LevelZeroCompactionTriggerDeltalogMaxNum.GetAsInt()
 	)
 
-	for _, segView := range validSegments {
-		curDeltaSize += segView.DeltaSize
-		curDeltaCount += segView.DeltalogCount
+	targetViews, targetSize := v.filterViewsBySizeRange(validSegments, minDeltaSize, maxDeltaSize)
+	if targetViews != nil {
+		reason := fmt.Sprintf("level zero segments size reaches compaction limit, curDeltaSize=%.2f, limitSizeRange=[%.2f, %.2f]",
+			targetSize, minDeltaSize, maxDeltaSize)
+		return &LevelZeroSegmentsView{
+			label:                     v.label,
+			segments:                  targetViews,
+			earliestGrowingSegmentPos: v.earliestGrowingSegmentPos,
+		}, reason
 	}
 
-	if curDeltaSize > minDeltaSize {
-		reason = "level zero segments size reaches compaction limit"
+	targetViews, targetCount := v.filterViewsByCountRange(validSegments, minDeltaCount, maxDeltaCount)
+	if targetViews != nil {
+		reason := fmt.Sprintf("level zero segments count reaches compaction limit, curDeltaCount=%d, limitCountRange=[%d, %d]",
+			targetCount, minDeltaCount, maxDeltaCount)
+		return &LevelZeroSegmentsView{
+			label:                     v.label,
+			segments:                  targetViews,
+			earliestGrowingSegmentPos: v.earliestGrowingSegmentPos,
+		}, reason
 	}
 
-	if curDeltaCount > minDeltaCount {
-		reason = "level zero segments number reaches compaction limit"
+	return nil, ""
+}
+
+// filterViewByCountRange picks segment views that total sizes in range [minCount, maxCount]
+func (v *LevelZeroSegmentsView) filterViewsByCountRange(segments []*SegmentView, minCount, maxCount int) ([]*SegmentView, int) {
+	curDeltaCount := 0
+	idx := 0
+	for _, view := range segments {
+		targetCount := view.DeltalogCount + curDeltaCount
+		if targetCount <= maxCount || idx == 0 {
+			idx += 1
+			curDeltaCount = targetCount
+			continue
+		}
+		break
 	}
 
-	if curDeltaSize < minDeltaSize && curDeltaCount < minDeltaCount {
-		return nil, ""
+	if curDeltaCount < minCount {
+		return nil, 0
 	}
 
-	return &LevelZeroSegmentsView{
-		label:                     v.label,
-		segments:                  validSegments,
-		earliestGrowingSegmentPos: v.earliestGrowingSegmentPos,
-	}, reason
+	return segments[:idx], curDeltaCount
+}
+
+// filterViewBySizeRange picks segment views that total count in range [minSize, maxSize]
+func (v *LevelZeroSegmentsView) filterViewsBySizeRange(segments []*SegmentView, minSize, maxSize float64) ([]*SegmentView, float64) {
+	var curDeltaSize float64
+	idx := 0
+	for _, view := range segments {
+		targetSize := view.DeltaSize + curDeltaSize
+		if targetSize <= maxSize || idx == 0 {
+			idx += 1
+			curDeltaSize = targetSize
+			continue
+		}
+		break
+	}
+
+	if curDeltaSize < minSize {
+		return nil, 0
+	}
+
+	return segments[:idx], curDeltaSize
 }

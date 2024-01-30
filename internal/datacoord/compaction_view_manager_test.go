@@ -29,7 +29,7 @@ type CompactionViewManagerSuite struct {
 	m *CompactionViewManager
 }
 
-const MB = 1024 * 1024 * 1024
+const MB = 1024 * 1024
 
 func genSegmentsForMeta(label *CompactionGroupLabel) map[int64]*SegmentInfo {
 	segArgs := []struct {
