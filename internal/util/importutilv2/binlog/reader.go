@@ -133,6 +133,9 @@ func (r *reader) Read() (*storage.InsertData, error) {
 		return nil, err
 	}
 	if r.readIdx == len(r.insertLogs[0]) {
+		// In the binlog import scenario, all data may be filtered out
+		// due to time range or deletions. Therefore, we use io.EOF as
+		// the indicator of the read end, instead of InsertData with 0 rows.
 		return nil, io.EOF
 	}
 	for fieldID, binlogs := range r.insertLogs {

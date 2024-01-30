@@ -49,9 +49,11 @@ func (m *taskManager) Update(taskID int64, actions ...UpdateAction) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, ok := m.tasks[taskID]; ok {
+		updatedTask := m.tasks[taskID].Clone()
 		for _, action := range actions {
-			action(m.tasks[taskID])
+			action(updatedTask)
 		}
+		m.tasks[taskID] = updatedTask
 	}
 }
 

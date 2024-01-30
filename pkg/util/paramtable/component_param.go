@@ -3077,7 +3077,7 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		Key:          "datanode.import.maxConcurrentTaskNum",
 		Version:      "2.4.0",
 		Doc:          "The maximum number of import/pre-import tasks allowed to run concurrently on a datanode.",
-		DefaultValue: "10",
+		DefaultValue: "16",
 		PanicIfEmpty: false,
 		Export:       true,
 	}

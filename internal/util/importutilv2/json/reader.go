@@ -115,6 +115,7 @@ func (j *reader) Read() (*storage.InsertData, error) {
 		if t != json.Delim('[') {
 			return nil, merr.WrapErrImportFailed("invalid JSON format, rows list should begin with '['")
 		}
+		j.isOldFormat = false
 	}
 	var cnt int64 = 0
 	for j.dec.More() {
