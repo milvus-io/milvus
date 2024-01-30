@@ -19,13 +19,17 @@ package importv2
 import (
 	"context"
 	rand2 "crypto/rand"
+	"encoding/json"
 	"fmt"
 	"io"
 	"math/rand"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -33,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -43,12 +48,30 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
+type sampleRow struct {
+	FieldString      string    `json:"pk,omitempty"`
+	FieldInt64       int64     `json:"int64,omitempty"`
+	FieldFloatVector []float32 `json:"vec,omitempty"`
+}
+
+type sampleContent struct {
+	Rows []sampleRow `json:"rows,omitempty"`
+}
+
+type mockReader struct {
+	io.Reader
+	io.Closer
+	io.ReaderAt
+	io.Seeker
+}
+
 type ExecutorSuite struct {
 	suite.Suite
 
 	numRows int
 	schema  *schemapb.CollectionSchema
 
+	cm       storage.ChunkManager
 	reader   *importutilv2.MockReader
 	syncMgr  *syncmgr.MockSyncManager
 	manager  TaskManager
@@ -79,7 +102,7 @@ func (s *ExecutorSuite) SetupTest() {
 				TypeParams: []*commonpb.KeyValuePair{
 					{
 						Key:   common.DimKey,
-						Value: "8",
+						Value: "4",
 					},
 				},
 			},
@@ -93,7 +116,6 @@ func (s *ExecutorSuite) SetupTest() {
 
 	s.manager = NewTaskManager()
 	s.syncMgr = syncmgr.NewMockSyncManager(s.T())
-	s.reader = importutilv2.NewMockReader(s.T())
 	s.executor = NewExecutor(s.manager, s.syncMgr, nil).(*executor)
 }
 
@@ -201,12 +223,240 @@ func createInsertData(t *testing.T, schema *schemapb.CollectionSchema, rowCount 
 	return insertData
 }
 
+func (s *ExecutorSuite) TestExecutor_Slots() {
+	preimportReq := &datapb.PreImportRequest{
+		JobID:        1,
+		TaskID:       2,
+		CollectionID: 3,
+		PartitionIDs: []int64{4},
+		Vchannels:    []string{"ch-0"},
+		Schema:       s.schema,
+		ImportFiles:  []*internalpb.ImportFile{{Paths: []string{"dummy.json"}}},
+	}
+	preimportTask := NewPreImportTask(preimportReq)
+	s.manager.Add(preimportTask)
+
+	slots := s.executor.Slots()
+	s.Equal(paramtable.Get().DataNodeCfg.MaxConcurrentImportTaskNum.GetAsInt64()-1, slots)
+}
+
+func (s *ExecutorSuite) TestExecutor_Start_Preimport() {
+	content := &sampleContent{
+		Rows: make([]sampleRow, 0),
+	}
+	for i := 0; i < 10; i++ {
+		row := sampleRow{
+			FieldString:      "No." + strconv.FormatInt(int64(i), 10),
+			FieldInt64:       int64(99999999999999999 + i),
+			FieldFloatVector: []float32{float32(i) + 0.1, float32(i) + 0.2, float32(i) + 0.3, float32(i) + 0.4},
+		}
+		content.Rows = append(content.Rows, row)
+	}
+	bytes, err := json.Marshal(content)
+	s.NoError(err)
+
+	cm := mocks.NewChunkManager(s.T())
+	ioReader := strings.NewReader(string(bytes))
+	cm.EXPECT().Reader(mock.Anything, mock.Anything).Return(&mockReader{Reader: ioReader}, nil)
+	s.executor.cm = cm
+
+	preimportReq := &datapb.PreImportRequest{
+		JobID:        1,
+		TaskID:       2,
+		CollectionID: 3,
+		PartitionIDs: []int64{4},
+		Vchannels:    []string{"ch-0"},
+		Schema:       s.schema,
+		ImportFiles:  []*internalpb.ImportFile{{Paths: []string{"dummy.json"}}},
+	}
+	preimportTask := NewPreImportTask(preimportReq)
+	s.manager.Add(preimportTask)
+
+	go s.executor.Start()
+	defer s.executor.Close()
+	s.Eventually(func() bool {
+		return s.manager.Get(preimportTask.GetTaskID()).GetState() == internalpb.ImportState_Completed
+	}, 10*time.Second, 100*time.Millisecond)
+}
+
+func (s *ExecutorSuite) TestExecutor_Start_Preimport_Failed() {
+	content := &sampleContent{
+		Rows: make([]sampleRow, 0),
+	}
+	for i := 0; i < 10; i++ {
+		var row sampleRow
+		if i == 0 { // make rows not consistent
+			row = sampleRow{
+				FieldString:      "No." + strconv.FormatInt(int64(i), 10),
+				FieldFloatVector: []float32{float32(i) + 0.1, float32(i) + 0.2, float32(i) + 0.3, float32(i) + 0.4},
+			}
+		} else {
+			row = sampleRow{
+				FieldString:      "No." + strconv.FormatInt(int64(i), 10),
+				FieldInt64:       int64(99999999999999999 + i),
+				FieldFloatVector: []float32{float32(i) + 0.1, float32(i) + 0.2, float32(i) + 0.3, float32(i) + 0.4},
+			}
+		}
+		content.Rows = append(content.Rows, row)
+	}
+	bytes, err := json.Marshal(content)
+	s.NoError(err)
+
+	cm := mocks.NewChunkManager(s.T())
+	type mockReader struct {
+		io.Reader
+		io.Closer
+		io.ReaderAt
+		io.Seeker
+	}
+	ioReader := strings.NewReader(string(bytes))
+	cm.EXPECT().Reader(mock.Anything, mock.Anything).Return(&mockReader{Reader: ioReader}, nil)
+	s.executor.cm = cm
+
+	preimportReq := &datapb.PreImportRequest{
+		JobID:        1,
+		TaskID:       2,
+		CollectionID: 3,
+		PartitionIDs: []int64{4},
+		Vchannels:    []string{"ch-0"},
+		Schema:       s.schema,
+		ImportFiles:  []*internalpb.ImportFile{{Paths: []string{"dummy.json"}}},
+	}
+	preimportTask := NewPreImportTask(preimportReq)
+	s.manager.Add(preimportTask)
+
+	go s.executor.Start()
+	defer s.executor.Close()
+	s.Eventually(func() bool {
+		return s.manager.Get(preimportTask.GetTaskID()).GetState() == internalpb.ImportState_Failed
+	}, 10*time.Second, 100*time.Millisecond)
+}
+
+func (s *ExecutorSuite) TestExecutor_Start_Import() {
+	content := &sampleContent{
+		Rows: make([]sampleRow, 0),
+	}
+	for i := 0; i < 10; i++ {
+		row := sampleRow{
+			FieldString:      "No." + strconv.FormatInt(int64(i), 10),
+			FieldInt64:       int64(99999999999999999 + i),
+			FieldFloatVector: []float32{float32(i) + 0.1, float32(i) + 0.2, float32(i) + 0.3, float32(i) + 0.4},
+		}
+		content.Rows = append(content.Rows, row)
+	}
+	bytes, err := json.Marshal(content)
+	s.NoError(err)
+
+	cm := mocks.NewChunkManager(s.T())
+	ioReader := strings.NewReader(string(bytes))
+	cm.EXPECT().Reader(mock.Anything, mock.Anything).Return(&mockReader{Reader: ioReader}, nil)
+	s.executor.cm = cm
+
+	s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, task syncmgr.Task) *conc.Future[error] {
+		future := conc.Go(func() (error, error) {
+			return nil, nil
+		})
+		return future
+	})
+	importReq := &datapb.ImportRequest{
+		JobID:        10,
+		TaskID:       11,
+		CollectionID: 12,
+		Schema:       s.schema,
+		Files: []*internalpb.ImportFile{
+			{
+				Paths: []string{"dummy.json"},
+			},
+		},
+		Ts: 1000,
+		AutoIDRange: &datapb.AutoIDRange{
+			Begin: 0,
+			End:   int64(s.numRows),
+		},
+		RequestSegments: []*datapb.ImportRequestSegment{
+			{
+				SegmentID:   13,
+				PartitionID: 14,
+				Vchannel:    "v0",
+			},
+		},
+	}
+	importTask := NewImportTask(importReq)
+	s.manager.Add(importTask)
+
+	go s.executor.Start()
+	defer s.executor.Close()
+	s.Eventually(func() bool {
+		return s.manager.Get(importTask.GetTaskID()).GetState() == internalpb.ImportState_Completed
+	}, 10*time.Second, 100*time.Millisecond)
+}
+
+func (s *ExecutorSuite) TestExecutor_Start_Import_Failed() {
+	content := &sampleContent{
+		Rows: make([]sampleRow, 0),
+	}
+	for i := 0; i < 10; i++ {
+		row := sampleRow{
+			FieldString:      "No." + strconv.FormatInt(int64(i), 10),
+			FieldInt64:       int64(99999999999999999 + i),
+			FieldFloatVector: []float32{float32(i) + 0.1, float32(i) + 0.2, float32(i) + 0.3, float32(i) + 0.4},
+		}
+		content.Rows = append(content.Rows, row)
+	}
+	bytes, err := json.Marshal(content)
+	s.NoError(err)
+
+	cm := mocks.NewChunkManager(s.T())
+	ioReader := strings.NewReader(string(bytes))
+	cm.EXPECT().Reader(mock.Anything, mock.Anything).Return(&mockReader{Reader: ioReader}, nil)
+	s.executor.cm = cm
+
+	s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, task syncmgr.Task) *conc.Future[error] {
+		future := conc.Go(func() (error, error) {
+			return errors.New("mock err"), errors.New("mock err")
+		})
+		return future
+	})
+	importReq := &datapb.ImportRequest{
+		JobID:        10,
+		TaskID:       11,
+		CollectionID: 12,
+		Schema:       s.schema,
+		Files: []*internalpb.ImportFile{
+			{
+				Paths: []string{"dummy.json"},
+			},
+		},
+		Ts: 1000,
+		AutoIDRange: &datapb.AutoIDRange{
+			Begin: 0,
+			End:   int64(s.numRows),
+		},
+		RequestSegments: []*datapb.ImportRequestSegment{
+			{
+				SegmentID:   13,
+				PartitionID: 14,
+				Vchannel:    "v0",
+			},
+		},
+	}
+	importTask := NewImportTask(importReq)
+	s.manager.Add(importTask)
+
+	go s.executor.Start()
+	defer s.executor.Close()
+	s.Eventually(func() bool {
+		return s.manager.Get(importTask.GetTaskID()).GetState() == internalpb.ImportState_Failed
+	}, 10*time.Second, 100*time.Millisecond)
+}
+
 func (s *ExecutorSuite) TestExecutor_ReadFileStat() {
 	importFile := &internalpb.ImportFile{
 		Paths: []string{"dummy.json"},
 	}
 	var once sync.Once
 	data := createInsertData(s.T(), s.schema, s.numRows)
+	s.reader = importutilv2.NewMockReader(s.T())
 	s.reader.EXPECT().Read().RunAndReturn(func() (*storage.InsertData, error) {
 		var res *storage.InsertData
 		once.Do(func() {
@@ -232,7 +482,7 @@ func (s *ExecutorSuite) TestExecutor_ReadFileStat() {
 	s.NoError(err)
 }
 
-func (s *ExecutorSuite) TestImportFile() {
+func (s *ExecutorSuite) TestExecutor_ImportFile() {
 	s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, task syncmgr.Task) *conc.Future[error] {
 		future := conc.Go(func() (error, error) {
 			return nil, nil
@@ -241,6 +491,7 @@ func (s *ExecutorSuite) TestImportFile() {
 	})
 	var once sync.Once
 	data := createInsertData(s.T(), s.schema, s.numRows)
+	s.reader = importutilv2.NewMockReader(s.T())
 	s.reader.EXPECT().Read().RunAndReturn(func() (*storage.InsertData, error) {
 		var res *storage.InsertData
 		once.Do(func() {

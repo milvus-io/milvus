@@ -164,7 +164,7 @@ func (c *SessionManagerImpl) getClient(ctx context.Context, nodeID int64) (types
 	c.sessions.RUnlock()
 
 	if !ok {
-		return nil, fmt.Errorf("can not find session of node %d", nodeID)
+		return nil, merr.WrapErrNodeNotFound(nodeID, "can not find session")
 	}
 
 	return session.GetOrCreateClient(ctx)

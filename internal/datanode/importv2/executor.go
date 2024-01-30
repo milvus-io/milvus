@@ -19,7 +19,6 @@ package importv2
 import (
 	"fmt"
 	"io"
-	"runtime"
 	"sync"
 	"time"
 
@@ -60,7 +59,6 @@ func NewExecutor(manager TaskManager, syncMgr syncmgr.SyncManager, cm storage.Ch
 		hardware.GetCPUNum()*2,
 		conc.WithPreAlloc(false),
 		conc.WithDisablePurge(false),
-		conc.WithPreHandler(runtime.LockOSThread), // lock os thread for cgo thread disposal
 	)
 	return &executor{
 		manager:   manager,
@@ -144,21 +142,22 @@ func (e *executor) PreImport(task Task) {
 			return fileStat.GetImportFile()
 		})
 
-	fn := func(i int, file *internalpb.ImportFile) {
+	fn := func(i int, file *internalpb.ImportFile) error {
 		reader, err := importutilv2.NewReader(task.GetCtx(), e.cm, task.GetSchema(), file, task.GetOptions(), bufferSize)
 		if err != nil {
 			e.handleErr(task, err, "new reader failed")
-			return
+			return err
 		}
 		defer reader.Close()
 		start := time.Now()
 		err = e.readFileStat(reader, task, i)
 		if err != nil {
 			e.handleErr(task, err, "preimport failed")
-			return
+			return err
 		}
 		log.Info("read file stat done", WrapLogFields(task, zap.Strings("files", file.GetPaths()),
 			zap.Duration("dur", time.Since(start)))...)
+		return nil
 	}
 
 	futures := make([]*conc.Future[any], 0, len(files))
@@ -166,12 +165,15 @@ func (e *executor) PreImport(task Task) {
 		i := i
 		file := file
 		f := e.pool.Submit(func() (any, error) {
-			fn(i, file)
-			return nil, nil
+			err := fn(i, file)
+			return err, err
 		})
 		futures = append(futures, f)
 	}
-	_ = conc.AwaitAll(futures...)
+	err := conc.AwaitAll(futures...)
+	if err != nil {
+		return
+	}
 
 	e.manager.Update(task.GetTaskID(), UpdateState(internalpb.ImportState_Completed))
 	log.Info("executor preimport done",
@@ -220,33 +222,37 @@ func (e *executor) Import(task Task) {
 
 	req := task.(*ImportTask).req
 
-	fn := func(file *internalpb.ImportFile) {
+	fn := func(file *internalpb.ImportFile) error {
 		reader, err := importutilv2.NewReader(task.GetCtx(), e.cm, task.GetSchema(), file, task.GetOptions(), bufferSize)
 		if err != nil {
 			e.handleErr(task, err, fmt.Sprintf("new reader failed, file: %s", file.String()))
-			return
+			return err
 		}
 		defer reader.Close()
 		start := time.Now()
 		err = e.importFile(reader, task)
 		if err != nil {
 			e.handleErr(task, err, fmt.Sprintf("do import failed, file: %s", file.String()))
-			return
+			return err
 		}
 		log.Info("import file done", WrapLogFields(task, zap.Strings("files", file.GetPaths()),
 			zap.Duration("dur", time.Since(start)))...)
+		return nil
 	}
 
 	futures := make([]*conc.Future[any], 0, len(req.GetFiles()))
 	for _, file := range req.GetFiles() {
 		file := file
 		f := e.pool.Submit(func() (any, error) {
-			fn(file)
-			return nil, nil
+			err := fn(file)
+			return err, err
 		})
 		futures = append(futures, f)
 	}
-	_ = conc.AwaitAll(futures...)
+	err := conc.AwaitAll(futures...)
+	if err != nil {
+		return
+	}
 
 	e.manager.Update(task.GetTaskID(), UpdateState(internalpb.ImportState_Completed))
 	log.Info("import done", WrapLogFields(task)...)

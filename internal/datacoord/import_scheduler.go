@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
@@ -121,16 +122,20 @@ func (s *importScheduler) process() {
 }
 
 func (s *importScheduler) checkErr(task ImportTask, err error) {
-	if !merr.IsRetryableErr(err) && !merr.IsCanceledOrTimeout(err) {
+	if merr.IsRetryableErr(err) || merr.IsCanceledOrTimeout(err) || errors.Is(err, merr.ErrNodeNotFound) {
+		err = s.imeta.Update(task.GetTaskID(), UpdateState(internalpb.ImportState_Pending))
+		if err != nil {
+			log.Warn("failed to update import task state to pending", WrapLogFields(task, zap.Error(err))...)
+			return
+		}
+		log.Info("reset task state to pending due to error occurs", WrapLogFields(task, zap.Error(err))...)
+	} else {
 		err = s.imeta.Update(task.GetTaskID(), UpdateState(internalpb.ImportState_Failed), UpdateReason(err.Error()))
 		if err != nil {
 			log.Warn("failed to update import task state to failed", WrapLogFields(task, zap.Error(err))...)
+			return
 		}
-		return
-	}
-	err = s.imeta.Update(task.GetTaskID(), UpdateState(internalpb.ImportState_Pending))
-	if err != nil {
-		log.Warn("failed to update import task state to pending", WrapLogFields(task, zap.Error(err))...)
+		log.Info("import task failed", WrapLogFields(task, zap.Error(err))...)
 	}
 }
 

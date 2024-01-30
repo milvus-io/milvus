@@ -19,6 +19,7 @@ package importv2
 import (
 	"context"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -138,6 +139,7 @@ type Task interface {
 	GetCtx() context.Context
 	GetOptions() []*commonpb.KeyValuePair
 	Cancel()
+	Clone() Task
 }
 
 type PreImportTask struct {
@@ -185,6 +187,16 @@ func (p *PreImportTask) GetCtx() context.Context {
 
 func (p *PreImportTask) Cancel() {
 	p.cancel()
+}
+
+func (p *PreImportTask) Clone() Task {
+	ctx, cancel := context.WithCancel(p.GetCtx())
+	return &PreImportTask{
+		PreImportTask: proto.Clone(p.PreImportTask).(*datapb.PreImportTask),
+		ctx:           ctx,
+		cancel:        cancel,
+		schema:        p.GetSchema(),
+	}
 }
 
 type ImportTask struct {
@@ -272,4 +284,19 @@ func (t *ImportTask) Cancel() {
 
 func (t *ImportTask) GetSegmentsInfo() []*datapb.ImportSegmentInfo {
 	return lo.Values(t.segmentsInfo)
+}
+
+func (t *ImportTask) Clone() Task {
+	ctx, cancel := context.WithCancel(t.GetCtx())
+	return &ImportTask{
+		ImportTaskV2: proto.Clone(t.ImportTaskV2).(*datapb.ImportTaskV2),
+		ctx:          ctx,
+		cancel:       cancel,
+		schema:       t.GetSchema(),
+		segmentsInfo: t.segmentsInfo,
+		req:          t.req,
+		vchannels:    t.GetVchannels(),
+		partitions:   t.GetPartitionIDs(),
+		metaCaches:   t.metaCaches,
+	}
 }

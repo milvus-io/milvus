@@ -487,7 +487,7 @@ dataNode:
     # suggest to set it bigger on large collection numbers to avoid blocking
     updateChannelCheckpointMaxParallel: 1000
   import:
-    maxConcurrentTaskNum: 32 # The maximum number of import/pre-import tasks allowed to run concurrently on a datanode.
+    maxConcurrentTaskNum: 16 # The maximum number of import/pre-import tasks allowed to run concurrently on a datanode.
 
 # Configures the system log output.
 log:

@@ -22,6 +22,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
@@ -363,7 +364,7 @@ func DropImportTask(task ImportTask, cluster Cluster, imeta ImportMeta) error {
 		TaskID: task.GetTaskID(),
 	}
 	err := cluster.DropImport(task.GetNodeID(), req)
-	if err != nil {
+	if err != nil && !errors.Is(err, merr.ErrNodeNotFound) {
 		return err
 	}
 	return imeta.Update(task.GetTaskID(), UpdateNodeID(NullNodeID))
