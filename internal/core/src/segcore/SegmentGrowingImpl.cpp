@@ -71,9 +71,14 @@ void
 SegmentGrowingImpl::try_remove_chunks(FieldId fieldId) {
     //remove the chunk data to reduce memory consumption
     if (indexing_record_.SyncDataWithIndex(fieldId)) {
-        auto vec_data_base =
+        VectorBase* vec_data_base =
             dynamic_cast<segcore::ConcurrentVector<FloatVector>*>(
                 insert_record_.get_field_data_base(fieldId));
+        if (!vec_data_base) {
+            vec_data_base =
+                dynamic_cast<segcore::ConcurrentVector<SparseFloatVector>*>(
+                    insert_record_.get_field_data_base(fieldId));
+        }
         if (vec_data_base && vec_data_base->num_chunk() > 0 &&
             chunk_mutex_.try_lock()) {
             vec_data_base->clear();
@@ -487,6 +492,16 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
                 seg_offsets,
                 count,
                 result->mutable_vectors()->mutable_bfloat16_vector()->data());
+        } else if (field_meta.get_data_type() ==
+                   DataType::VECTOR_SPARSE_FLOAT) {
+            bulk_subscript_sparse_float_vector_impl(
+                field_id,
+                (const ConcurrentVector<SparseFloatVector>*)vec_ptr,
+                seg_offsets,
+                count,
+                result->mutable_vectors()->mutable_sparse_float_vector());
+            result->mutable_vectors()->set_dim(
+                result->vectors().sparse_float_vector().dim());
         } else {
             PanicInfo(DataTypeInvalid, "logical error");
         }
@@ -603,6 +618,33 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
     return result;
 }
 
+void
+SegmentGrowingImpl::bulk_subscript_sparse_float_vector_impl(
+    FieldId field_id,
+    const ConcurrentVector<SparseFloatVector>* vec_raw,
+    const int64_t* seg_offsets,
+    int64_t count,
+    milvus::proto::schema::SparseFloatArray* output) const {
+    AssertInfo(HasRawData(field_id.get()), "Growing segment loss raw data");
+
+    // if index has finished building index, grab from index
+    if (indexing_record_.SyncDataWithIndex(field_id)) {
+        indexing_record_.GetDataFromIndex(
+            field_id, seg_offsets, count, 0, output);
+        return;
+    }
+    // else copy from raw data
+    std::lock_guard<std::shared_mutex> guard(chunk_mutex_);
+    SparseRowsToProto(
+        [&](size_t i) {
+            auto offset = seg_offsets[i];
+            return offset != INVALID_SEG_OFFSET ? vec_raw->get_element(offset)
+                                                : nullptr;
+        },
+        count,
+        output);
+}
+
 template <typename S, typename T>
 void
 SegmentGrowingImpl::bulk_subscript_ptr_impl(
@@ -631,32 +673,27 @@ SegmentGrowingImpl::bulk_subscript_impl(FieldId field_id,
     AssertInfo(vec_ptr, "Pointer of vec_raw is nullptr");
     auto& vec = *vec_ptr;
 
-    auto copy_from_chunk = [&]() {
-        auto output_base = reinterpret_cast<char*>(output_raw);
-        for (int i = 0; i < count; ++i) {
-            auto dst = output_base + i * element_sizeof;
-            auto offset = seg_offsets[i];
-            if (offset == INVALID_SEG_OFFSET) {
-                memset(dst, 0, element_sizeof);
-            } else {
-                auto src = (const uint8_t*)vec.get_element(offset);
-                memcpy(dst, src, element_sizeof);
-            }
-        }
-    };
-    //HasRawData interface guarantees that data can be fetched from growing segment
-    if (HasRawData(field_id.get())) {
-        //When data sync with index
-        if (indexing_record_.SyncDataWithIndex(field_id)) {
-            indexing_record_.GetDataFromIndex(
-                field_id, seg_offsets, count, element_sizeof, output_raw);
+    // HasRawData interface guarantees that data can be fetched from growing segment
+    AssertInfo(HasRawData(field_id.get()), "Growing segment loss raw data");
+    // when data is in sync with index
+    if (indexing_record_.SyncDataWithIndex(field_id)) {
+        indexing_record_.GetDataFromIndex(
+            field_id, seg_offsets, count, element_sizeof, output_raw);
+        return;
+    }
+    // else copy from chunk
+    std::lock_guard<std::shared_mutex> guard(chunk_mutex_);
+    auto output_base = reinterpret_cast<char*>(output_raw);
+    for (int i = 0; i < count; ++i) {
+        auto dst = output_base + i * element_sizeof;
+        auto offset = seg_offsets[i];
+        if (offset == INVALID_SEG_OFFSET) {
+            memset(dst, 0, element_sizeof);
         } else {
-            //Else copy from chunk
-            std::lock_guard<std::shared_mutex> guard(chunk_mutex_);
-            copy_from_chunk();
+            auto src = (const uint8_t*)vec.get_element(offset);
+            memcpy(dst, src, element_sizeof);
         }
     }
-    AssertInfo(HasRawData(field_id.get()), "Growing segment loss raw data");
 }
 
 template <typename S, typename T>

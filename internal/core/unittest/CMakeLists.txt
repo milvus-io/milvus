@@ -18,6 +18,7 @@ add_definitions(-DMILVUS_TEST_SEGCORE_YAML_PATH="${CMAKE_SOURCE_DIR}/unittest/te
 set(MILVUS_TEST_FILES
         init_gtest.cpp
         test_bf.cpp
+        test_bf_sparse.cpp
         test_binary.cpp
         test_bitmap.cpp
         test_bool_index.cpp

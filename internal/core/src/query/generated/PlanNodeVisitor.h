@@ -32,6 +32,9 @@ class PlanNodeVisitor {
     visit(BFloat16VectorANNS&) = 0;
 
     virtual void
+    visit(SparseFloatVectorANNS&) = 0;
+
+    virtual void
     visit(RetrievePlanNode&) = 0;
 };
 }  // namespace milvus::query

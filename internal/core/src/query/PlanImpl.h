@@ -64,19 +64,30 @@ struct Plan {
 struct Placeholder {
     std::string tag_;
     int64_t num_of_queries_;
-    int64_t line_sizeof_;
-    aligned_vector<char> blob_;
+    // TODO(SPARSE): add a dim_ field here, use the dim passed in search request
+    // instead of the dim in schema, since the dim of sparse float column is
+    // dynamic. This change will likely affect lots of code, thus I'll do it in
+    // a separate PR, and use dim=0 for sparse float vector searches for now.
 
-    template <typename T>
-    const T*
+    // only one of blob_ and sparse_matrix_ should be set. blob_ is used for
+    // dense vector search and sparse_matrix_ is for sparse vector search.
+    aligned_vector<char> blob_;
+    std::unique_ptr<knowhere::sparse::SparseRow<float>[]> sparse_matrix_;
+
+    const void*
     get_blob() const {
-        return reinterpret_cast<const T*>(blob_.data());
+        if (blob_.empty()) {
+            return sparse_matrix_.get();
+        }
+        return blob_.data();
     }
 
-    template <typename T>
-    T*
+    void*
     get_blob() {
-        return reinterpret_cast<T*>(blob_.data());
+        if (blob_.empty()) {
+            return sparse_matrix_.get();
+        }
+        return blob_.data();
     }
 };
 

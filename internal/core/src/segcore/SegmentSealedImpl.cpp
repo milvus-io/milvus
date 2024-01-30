@@ -848,65 +848,68 @@ SegmentSealedImpl::get_vector(FieldId field_id,
     if (has_raw_data) {
         // If index has raw data, get vector from memory.
         auto ids_ds = GenIdsDataset(count, ids);
-        auto vector = vec_index->GetVector(ids_ds);
-        return segcore::CreateVectorDataArrayFrom(
-            vector.data(), count, field_meta);
-    } else {
-        // If index doesn't have raw data, get vector from chunk cache.
-        auto cc = storage::ChunkCacheSingleton::GetInstance().GetChunkCache();
-
-        // group by data_path
-        auto id_to_data_path =
-            std::unordered_map<std::int64_t,
-                               std::tuple<std::string, int64_t>>{};
-        auto path_to_column =
-            std::unordered_map<std::string, std::shared_ptr<ColumnBase>>{};
-        for (auto i = 0; i < count; i++) {
-            const auto& tuple = GetFieldDataPath(field_id, ids[i]);
-            id_to_data_path.emplace(ids[i], tuple);
-            path_to_column.emplace(std::get<0>(tuple), nullptr);
+        if (field_meta.get_data_type() == DataType::VECTOR_SPARSE_FLOAT) {
+            auto res = vec_index->GetSparseVector(ids_ds);
+            return segcore::CreateVectorDataArrayFrom(
+                res.get(), count, field_meta);
+        } else {
+            // dense vector:
+            auto vector = vec_index->GetVector(ids_ds);
+            return segcore::CreateVectorDataArrayFrom(
+                vector.data(), count, field_meta);
         }
-
-        // read and prefetch
-        auto& pool =
-            ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH);
-        std::vector<
-            std::future<std::tuple<std::string, std::shared_ptr<ColumnBase>>>>
-            futures;
-        futures.reserve(path_to_column.size());
-        for (const auto& iter : path_to_column) {
-            const auto& data_path = iter.first;
-            futures.emplace_back(
-                pool.Submit(ReadFromChunkCache, cc, data_path));
-        }
-
-        for (int i = 0; i < futures.size(); ++i) {
-            const auto& [data_path, column] = futures[i].get();
-            path_to_column[data_path] = column;
-        }
-
-        // assign to data array
-        auto row_bytes = field_meta.get_sizeof();
-        auto buf = std::vector<char>(count * row_bytes);
-        for (auto i = 0; i < count; i++) {
-            AssertInfo(id_to_data_path.count(ids[i]) != 0, "id not found");
-            const auto& [data_path, offset_in_binlog] =
-                id_to_data_path.at(ids[i]);
-            AssertInfo(path_to_column.count(data_path) != 0,
-                       "column not found");
-            const auto& column = path_to_column.at(data_path);
-            AssertInfo(
-                offset_in_binlog * row_bytes < column->ByteSize(),
-                "column idx out of range, idx: {}, size: {}, data_path: {}",
-                offset_in_binlog * row_bytes,
-                column->ByteSize(),
-                data_path);
-            auto vector = &column->Data()[offset_in_binlog * row_bytes];
-            std::memcpy(buf.data() + i * row_bytes, vector, row_bytes);
-        }
-        return segcore::CreateVectorDataArrayFrom(
-            buf.data(), count, field_meta);
     }
+
+    AssertInfo(field_meta.get_data_type() != DataType::VECTOR_SPARSE_FLOAT,
+               "index of sparse float vector is guaranteed to have raw data");
+
+    // If index doesn't have raw data, get vector from chunk cache.
+    auto cc = storage::ChunkCacheSingleton::GetInstance().GetChunkCache();
+
+    // group by data_path
+    auto id_to_data_path =
+        std::unordered_map<std::int64_t, std::tuple<std::string, int64_t>>{};
+    auto path_to_column =
+        std::unordered_map<std::string, std::shared_ptr<ColumnBase>>{};
+    for (auto i = 0; i < count; i++) {
+        const auto& tuple = GetFieldDataPath(field_id, ids[i]);
+        id_to_data_path.emplace(ids[i], tuple);
+        path_to_column.emplace(std::get<0>(tuple), nullptr);
+    }
+
+    // read and prefetch
+    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH);
+    std::vector<
+        std::future<std::tuple<std::string, std::shared_ptr<ColumnBase>>>>
+        futures;
+    futures.reserve(path_to_column.size());
+    for (const auto& iter : path_to_column) {
+        const auto& data_path = iter.first;
+        futures.emplace_back(pool.Submit(ReadFromChunkCache, cc, data_path));
+    }
+
+    for (int i = 0; i < futures.size(); ++i) {
+        const auto& [data_path, column] = futures[i].get();
+        path_to_column[data_path] = column;
+    }
+
+    // assign to data array
+    auto row_bytes = field_meta.get_sizeof();
+    auto buf = std::vector<char>(count * row_bytes);
+    for (auto i = 0; i < count; i++) {
+        AssertInfo(id_to_data_path.count(ids[i]) != 0, "id not found");
+        const auto& [data_path, offset_in_binlog] = id_to_data_path.at(ids[i]);
+        AssertInfo(path_to_column.count(data_path) != 0, "column not found");
+        const auto& column = path_to_column.at(data_path);
+        AssertInfo(offset_in_binlog * row_bytes < column->ByteSize(),
+                   "column idx out of range, idx: {}, size: {}, data_path: {}",
+                   offset_in_binlog * row_bytes,
+                   column->ByteSize(),
+                   data_path);
+        auto vector = &column->Data()[offset_in_binlog * row_bytes];
+        std::memcpy(buf.data() + i * row_bytes, vector, row_bytes);
+    }
+    return segcore::CreateVectorDataArrayFrom(buf.data(), count, field_meta);
 }
 
 void
@@ -1102,7 +1105,7 @@ SegmentSealedImpl::bulk_subscript_array_impl(
     }
 }
 
-// for vector
+// for dense vector
 void
 SegmentSealedImpl::bulk_subscript_impl(int64_t element_sizeof,
                                        const void* src_raw,
@@ -1250,7 +1253,6 @@ SegmentSealedImpl::get_raw_data(FieldId field_id,
                                             ->mutable_data());
             break;
         }
-
         case DataType::VECTOR_FLOAT: {
             bulk_subscript_impl(field_meta.get_sizeof(),
                                 column->Data(),
@@ -1287,6 +1289,21 @@ SegmentSealedImpl::get_raw_data(FieldId field_id,
                 seg_offsets,
                 count,
                 ret->mutable_vectors()->mutable_binary_vector()->data());
+            break;
+        }
+        case DataType::VECTOR_SPARSE_FLOAT: {
+            auto rows = static_cast<const knowhere::sparse::SparseRow<float>*>(
+                static_cast<const void*>(column->Data()));
+            auto dst = ret->mutable_vectors()->mutable_sparse_float_vector();
+            SparseRowsToProto(
+                [&](size_t i) {
+                    auto offset = seg_offsets[i];
+                    return offset != INVALID_SEG_OFFSET ? (rows + offset)
+                                                        : nullptr;
+                },
+                count,
+                dst);
+            ret->mutable_vectors()->set_dim(dst->dim());
             break;
         }
 

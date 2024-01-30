@@ -27,7 +27,6 @@
 #include "index/ScalarIndexSort.h"
 #include "index/StringIndexSort.h"
 #include "index/VectorMemIndex.h"
-#include "query/SearchOnIndex.h"
 #include "segcore/Collection.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegmentSealedImpl.h"
@@ -247,8 +246,8 @@ struct GeneratedData {
 
 inline std::unique_ptr<knowhere::sparse::SparseRow<float>[]>
 GenerateRandomSparseFloatVector(size_t rows,
-                                size_t cols,
-                                float density,
+                                size_t cols = kTestSparseDim,
+                                float density = kTestSparseVectorDensity,
                                 int seed = 42) {
     int32_t num_elements = static_cast<int32_t>(rows * cols * density);
 
@@ -1142,6 +1141,23 @@ translate_text_plan_to_binary_plan(const char* text_plan) {
     std::memcpy(ret.data(), binary_plan.c_str(), binary_plan.size());
 
     return ret;
+}
+
+// we have lots of tests with literal string plan with hard coded metric type,
+// so creating a helper function to replace metric type for different metrics.
+inline std::vector<char>
+replace_metric_and_translate_text_plan_to_binary_plan(
+    std::string plan, knowhere::MetricType metric_type) {
+    if (metric_type != knowhere::metric::L2) {
+        std::string replace = R"(metric_type: "L2")";
+        std::string target = "metric_type: \"" + metric_type + "\"";
+        size_t pos = 0;
+        while ((pos = plan.find(replace, pos)) != std::string::npos) {
+            plan.replace(pos, replace.length(), target);
+            pos += target.length();
+        }
+    }
+    return translate_text_plan_to_binary_plan(plan.c_str());
 }
 
 inline auto

@@ -37,7 +37,7 @@ using namespace milvus::exec;
 using namespace milvus::query;
 using namespace milvus::segcore;
 
-class TaskTest : public testing::Test {
+class TaskTest : public testing::TestWithParam<DataType> {
  protected:
     void
     SetUp() override {
@@ -46,7 +46,7 @@ class TaskTest : public testing::Test {
         using namespace milvus::segcore;
         auto schema = std::make_shared<Schema>();
         auto vec_fid = schema->AddDebugField(
-            "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+            "fakevec", GetParam(), 16, knowhere::metric::L2);
         auto bool_fid = schema->AddDebugField("bool", DataType::BOOL);
         field_map_.insert({"bool", bool_fid});
         auto bool_1_fid = schema->AddDebugField("bool1", DataType::BOOL);
@@ -112,7 +112,12 @@ class TaskTest : public testing::Test {
     int64_t num_rows_{0};
 };
 
-TEST_F(TaskTest, UnaryExpr) {
+INSTANTIATE_TEST_SUITE_P(TaskTestSuite,
+                         TaskTest,
+                         ::testing::Values(DataType::VECTOR_FLOAT,
+                                           DataType::VECTOR_SPARSE_FLOAT));
+
+TEST_P(TaskTest, UnaryExpr) {
     ::milvus::proto::plan::GenericValue value;
     value.set_int64_val(-1);
     auto logical_expr = std::make_shared<milvus::expr::UnaryRangeFilterExpr>(
@@ -149,7 +154,7 @@ TEST_F(TaskTest, UnaryExpr) {
     EXPECT_EQ(num_rows, num_rows_);
 }
 
-TEST_F(TaskTest, LogicalExpr) {
+TEST_P(TaskTest, LogicalExpr) {
     ::milvus::proto::plan::GenericValue value;
     value.set_int64_val(-1);
     auto left = std::make_shared<milvus::expr::UnaryRangeFilterExpr>(
@@ -193,13 +198,13 @@ TEST_F(TaskTest, LogicalExpr) {
     EXPECT_EQ(num_rows, num_rows_);
 }
 
-TEST_F(TaskTest, CompileInputs_and) {
+TEST_P(TaskTest, CompileInputs_and) {
     using namespace milvus;
     using namespace milvus::query;
     using namespace milvus::segcore;
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField(
-        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto vec_fid =
+        schema->AddDebugField("fakevec", GetParam(), 16, knowhere::metric::L2);
     auto int64_fid = schema->AddDebugField("int64", DataType::INT64);
     proto::plan::GenericValue val;
     val.set_int64_val(10);
@@ -236,13 +241,13 @@ TEST_F(TaskTest, CompileInputs_and) {
     }
 }
 
-TEST_F(TaskTest, CompileInputs_or_with_and) {
+TEST_P(TaskTest, CompileInputs_or_with_and) {
     using namespace milvus;
     using namespace milvus::query;
     using namespace milvus::segcore;
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField(
-        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto vec_fid =
+        schema->AddDebugField("fakevec", GetParam(), 16, knowhere::metric::L2);
     auto int64_fid = schema->AddDebugField("int64", DataType::INT64);
     proto::plan::GenericValue val;
     val.set_int64_val(10);

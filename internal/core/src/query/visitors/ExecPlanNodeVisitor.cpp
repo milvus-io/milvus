@@ -149,7 +149,7 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
     AssertInfo(segment, "support SegmentSmallIndex Only");
     SearchResult search_result;
     auto& ph = placeholder_group_->at(0);
-    auto src_data = ph.get_blob<EmbeddedType<VectorType>>();
+    auto src_data = ph.get_blob();
     auto num_queries = ph.num_of_queries_;
 
     // TODO: add API to unify row_count
@@ -306,6 +306,11 @@ ExecPlanNodeVisitor::visit(Float16VectorANNS& node) {
 void
 ExecPlanNodeVisitor::visit(BFloat16VectorANNS& node) {
     VectorVisitorImpl<BFloat16Vector>(node);
+}
+
+void
+ExecPlanNodeVisitor::visit(SparseFloatVectorANNS& node) {
+    VectorVisitorImpl<SparseFloatVector>(node);
 }
 
 }  // namespace milvus::query

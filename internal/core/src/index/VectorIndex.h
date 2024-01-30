@@ -76,6 +76,9 @@ class VectorIndex : public IndexBase {
     virtual std::vector<uint8_t>
     GetVector(const DatasetPtr dataset) const = 0;
 
+    virtual std::unique_ptr<const knowhere::sparse::SparseRow<float>[]>
+    GetSparseVector(const DatasetPtr dataset) const = 0;
+
     IndexType
     GetIndexType() const {
         return index_type_;
