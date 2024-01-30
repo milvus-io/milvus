@@ -115,7 +115,7 @@ func (s *WriteBufferSuite) TestFlushSegments() {
 	wb, err := NewWriteBuffer(s.channelName, s.metacache, s.storageCache, s.syncMgr, WithDeletePolicy(DeletePolicyBFPkOracle))
 	s.NoError(err)
 
-	err = wb.FlushSegments(context.Background(), []int64{segmentID})
+	err = wb.SealSegments(context.Background(), []int64{segmentID})
 	s.NoError(err)
 }
 
@@ -296,6 +296,73 @@ func (s *WriteBufferSuite) TestSyncSegmentsError() {
 		s.Panics(func() {
 			wb.syncSegments(context.Background(), []int64{1})
 		})
+	})
+}
+
+func (s *WriteBufferSuite) TestEvictBuffer() {
+	wb, err := newWriteBufferBase(s.channelName, s.metacache, s.storageCache, s.syncMgr, &writeBufferOption{
+		pkStatsFactory: func(vchannel *datapb.SegmentInfo) *metacache.BloomFilterSet {
+			return metacache.NewBloomFilterSet()
+		},
+	})
+	s.Require().NoError(err)
+
+	serializer := syncmgr.NewMockSerializer(s.T())
+
+	wb.serializer = serializer
+
+	s.Run("no_checkpoint", func() {
+		wb.mut.Lock()
+		wb.buffers[100] = &segmentBuffer{}
+		wb.mut.Unlock()
+		defer func() {
+			wb.mut.Lock()
+			defer wb.mut.Unlock()
+			wb.buffers = make(map[int64]*segmentBuffer)
+		}()
+
+		wb.EvictBuffer(GetOldestBufferPolicy(1))
+
+		serializer.AssertNotCalled(s.T(), "EncodeBuffer")
+	})
+
+	s.Run("trigger_sync", func() {
+		buf1, err := newSegmentBuffer(2, s.collSchema)
+		s.Require().NoError(err)
+		buf1.insertBuffer.startPos = &msgpb.MsgPosition{
+			Timestamp: 440,
+		}
+		buf1.deltaBuffer.startPos = &msgpb.MsgPosition{
+			Timestamp: 400,
+		}
+		buf2, err := newSegmentBuffer(3, s.collSchema)
+		s.Require().NoError(err)
+		buf2.insertBuffer.startPos = &msgpb.MsgPosition{
+			Timestamp: 550,
+		}
+		buf2.deltaBuffer.startPos = &msgpb.MsgPosition{
+			Timestamp: 600,
+		}
+
+		wb.mut.Lock()
+		wb.buffers[2] = buf1
+		wb.buffers[3] = buf2
+		wb.checkpoint = &msgpb.MsgPosition{Timestamp: 100}
+		wb.mut.Unlock()
+
+		segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
+			ID: 2,
+		}, nil)
+		s.metacache.EXPECT().GetSegmentByID(int64(2)).Return(segment, true)
+		s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
+		serializer.EXPECT().EncodeBuffer(mock.Anything, mock.Anything).Return(syncmgr.NewSyncTask(), nil)
+		s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything).Return(nil)
+		defer func() {
+			s.wb.mut.Lock()
+			defer s.wb.mut.Unlock()
+			s.wb.buffers = make(map[int64]*segmentBuffer)
+		}()
+		wb.EvictBuffer(GetOldestBufferPolicy(1))
 	})
 }
 

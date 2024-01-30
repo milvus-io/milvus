@@ -6,7 +6,6 @@ import (
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -95,64 +94,48 @@ func (s *SyncPolicySuite) TestCompactedSegmentsPolicy() {
 	s.ElementsMatch(ids, result)
 }
 
-func (s *SyncPolicySuite) TestMemoryHighPolicy() {
-	memoryHigh := atomic.NewBool(false)
-	policy := GetMemoryHighPolicy(memoryHigh)
+func (s *SyncPolicySuite) TestOlderBufferPolicy() {
+	policy := GetOldestBufferPolicy(2)
 
-	s.Run("memory_high_false", func() {
-		memoryHigh.Store(false)
-		buffers := []*segmentBuffer{
+	type testCase struct {
+		tag     string
+		buffers []*segmentBuffer
+		expect  []int64
+	}
+
+	cases := []*testCase{
+		{tag: "empty_buffers", buffers: nil, expect: []int64{}},
+		{tag: "3_candidates", buffers: []*segmentBuffer{
 			{
 				segmentID:    100,
-				insertBuffer: &InsertBuffer{BufferBase: BufferBase{size: 100}},
-				deltaBuffer:  &DeltaBuffer{BufferBase: BufferBase{size: 100}},
-			},
-		}
-
-		result := policy.SelectSegments(buffers, 1000)
-
-		s.Len(result, 0)
-	})
-
-	s.Run("memory_high_true", func() {
-		memoryHigh.Store(true)
-		param := paramtable.Get()
-
-		param.Save(param.DataNodeCfg.MemoryForceSyncMinSize.Key, "200")
-		param.Save(param.DataNodeCfg.MemoryForceSyncSegmentNum.Key, "2")
-		param.Save(param.DataNodeCfg.MemoryForceSyncSegmentMinNum.Key, "0")
-		defer param.Reset(param.DataNodeCfg.MemoryForceSyncMinSize.Key)
-		defer param.Reset(param.DataNodeCfg.MemoryForceSyncSegmentNum.Key)
-		defer param.Reset(param.DataNodeCfg.MemoryForceSyncSegmentMinNum.Key)
-
-		buffers := []*segmentBuffer{
-			{
-				segmentID:    100,
-				insertBuffer: &InsertBuffer{BufferBase: BufferBase{size: 100}},
-				deltaBuffer:  &DeltaBuffer{BufferBase: BufferBase{size: 99}},
+				insertBuffer: &InsertBuffer{BufferBase: BufferBase{startPos: &msgpb.MsgPosition{Timestamp: 1}}},
+				deltaBuffer:  &DeltaBuffer{BufferBase: BufferBase{}},
 			},
 			{
 				segmentID:    200,
-				insertBuffer: &InsertBuffer{BufferBase: BufferBase{size: 200}},
-				deltaBuffer:  &DeltaBuffer{BufferBase: BufferBase{size: 200}},
+				insertBuffer: &InsertBuffer{BufferBase: BufferBase{startPos: &msgpb.MsgPosition{Timestamp: 2}}},
+				deltaBuffer:  &DeltaBuffer{BufferBase: BufferBase{}},
 			},
 			{
 				segmentID:    300,
-				insertBuffer: &InsertBuffer{BufferBase: BufferBase{size: 300}},
-				deltaBuffer:  &DeltaBuffer{BufferBase: BufferBase{size: 300}},
+				insertBuffer: &InsertBuffer{BufferBase: BufferBase{startPos: &msgpb.MsgPosition{Timestamp: 3}}},
+				deltaBuffer:  &DeltaBuffer{BufferBase: BufferBase{}},
 			},
+		}, expect: []int64{100, 200}},
+		{tag: "1_candidates", buffers: []*segmentBuffer{
 			{
-				segmentID:    400,
-				insertBuffer: &InsertBuffer{BufferBase: BufferBase{size: 400}},
-				deltaBuffer:  &DeltaBuffer{BufferBase: BufferBase{size: 400}},
+				segmentID:    100,
+				insertBuffer: &InsertBuffer{BufferBase: BufferBase{startPos: &msgpb.MsgPosition{Timestamp: 1}}},
+				deltaBuffer:  &DeltaBuffer{BufferBase: BufferBase{}},
 			},
-		}
+		}, expect: []int64{100}},
+	}
 
-		result := policy.SelectSegments(buffers, 1000)
-
-		s.Len(result, 2)
-		s.ElementsMatch([]int64{300, 400}, result)
-	})
+	for _, tc := range cases {
+		s.Run(tc.tag, func() {
+			s.ElementsMatch(tc.expect, policy.SelectSegments(tc.buffers, 0))
+		})
+	}
 }
 
 func TestSyncPolicy(t *testing.T) {
