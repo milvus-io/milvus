@@ -44,14 +44,15 @@ const (
 	DefaultMinioIAMEndpoint     = ""
 	DefaultEtcdEndpoints        = "localhost:2379"
 
-	DefaultLogFormat                         = "text"
-	DefaultLogLevelForBase                   = "debug"
-	DefaultRootPath                          = ""
-	DefaultMinioLogLevel                     = "fatal"
-	DefaultKnowhereThreadPoolNumRatioInBuild = 1
-	DefaultMinioRegion                       = ""
-	DefaultMinioUseVirtualHost               = "false"
-	DefaultMinioRequestTimeout               = "10000"
+	DefaultLogFormat                                     = "text"
+	DefaultLogLevelForBase                               = "debug"
+	DefaultRootPath                                      = ""
+	DefaultMinioLogLevel                                 = "fatal"
+	DefaultKnowhereThreadPoolNumRatioInBuild             = 1
+	DefaultKnowhereThreadPoolNumRatioInBuildOfStandalone = 0.75
+	DefaultMinioRegion                                   = ""
+	DefaultMinioUseVirtualHost                           = "false"
+	DefaultMinioRequestTimeout                           = "10000"
 )
 
 // Const of Global Config List

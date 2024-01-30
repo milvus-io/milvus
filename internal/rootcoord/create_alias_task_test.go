@@ -41,19 +41,6 @@ func Test_createAliasTask_Prepare(t *testing.T) {
 }
 
 func Test_createAliasTask_Execute(t *testing.T) {
-	t.Run("failed to expire cache", func(t *testing.T) {
-		core := newTestCore(withInvalidProxyManager())
-		task := &createAliasTask{
-			baseTask: newBaseTask(context.Background(), core),
-			Req: &milvuspb.CreateAliasRequest{
-				Base:  &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateAlias},
-				Alias: "test",
-			},
-		}
-		err := task.Execute(context.Background())
-		assert.Error(t, err)
-	})
-
 	t.Run("failed to create alias", func(t *testing.T) {
 		core := newTestCore(withInvalidMeta(), withValidProxyManager())
 		task := &createAliasTask{

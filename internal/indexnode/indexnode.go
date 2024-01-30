@@ -179,6 +179,13 @@ func (i *IndexNode) initSegcore() {
 	C.InitCpuNum(cCPUNum)
 
 	cKnowhereThreadPoolSize := C.uint32_t(hardware.GetCPUNum() * paramtable.DefaultKnowhereThreadPoolNumRatioInBuild)
+	if paramtable.GetRole() == typeutil.StandaloneRole {
+		threadPoolSize := int(float64(hardware.GetCPUNum()) * Params.CommonCfg.BuildIndexThreadPoolRatio.GetAsFloat())
+		if threadPoolSize < 1 {
+			threadPoolSize = 1
+		}
+		cKnowhereThreadPoolSize = C.uint32_t(threadPoolSize)
+	}
 	C.SegcoreSetKnowhereBuildThreadPoolNum(cKnowhereThreadPoolSize)
 
 	localDataRootPath := filepath.Join(Params.LocalStorageCfg.Path.GetValue(), typeutil.IndexNodeRole)

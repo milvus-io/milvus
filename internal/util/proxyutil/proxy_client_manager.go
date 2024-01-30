@@ -40,28 +40,25 @@ import (
 )
 
 type ExpireCacheConfig struct {
-	withDropFlag bool
+	msgType commonpb.MsgType
 }
 
 func (c ExpireCacheConfig) Apply(req *proxypb.InvalidateCollMetaCacheRequest) {
-	if !c.withDropFlag {
-		return
-	}
 	if req.GetBase() == nil {
 		req.Base = commonpbutil.NewMsgBase()
 	}
-	req.Base.MsgType = commonpb.MsgType_DropCollection
+	req.Base.MsgType = c.msgType
 }
 
 func DefaultExpireCacheConfig() ExpireCacheConfig {
-	return ExpireCacheConfig{withDropFlag: false}
+	return ExpireCacheConfig{}
 }
 
 type ExpireCacheOpt func(c *ExpireCacheConfig)
 
-func ExpireCacheWithDropFlag() ExpireCacheOpt {
+func SetMsgType(msgType commonpb.MsgType) ExpireCacheOpt {
 	return func(c *ExpireCacheConfig) {
-		c.withDropFlag = true
+		c.msgType = msgType
 	}
 }
 

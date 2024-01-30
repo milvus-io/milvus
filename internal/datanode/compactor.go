@@ -432,7 +432,7 @@ func (t *compactionTask) merge(
 func (t *compactionTask) compact() (*datapb.CompactionPlanResult, error) {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(t.ctx, fmt.Sprintf("Compact-%d", t.getPlanID()))
 	defer span.End()
-	log := log.With(zap.Int64("planID", t.plan.GetPlanID()))
+	log := log.Ctx(ctx).With(zap.Int64("planID", t.plan.GetPlanID()))
 	compactStart := time.Now()
 	if ok := funcutil.CheckCtxValid(ctx); !ok {
 		log.Warn("compact wrong, task context done or timeout")
