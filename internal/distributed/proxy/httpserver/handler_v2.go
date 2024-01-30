@@ -3,8 +3,10 @@ package httpserver
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
@@ -12,6 +14,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -93,8 +96,8 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 	router.POST(UserCategory+GrantRoleAction, timeoutMiddleware(wrapperPost(func() any { return &UserRoleReq{} }, wrapperTraceLog(h.addRoleToUser))))
 	router.POST(UserCategory+RevokeRoleAction, timeoutMiddleware(wrapperPost(func() any { return &UserRoleReq{} }, wrapperTraceLog(h.removeRoleFromUser))))
 
-	router.POST(RoleCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.listRoles)))))
-	router.POST(RoleCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &RoleReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.describeRole)))))
+	router.POST(RoleCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReq{} }, wrapperTraceLog(h.listRoles))))
+	router.POST(RoleCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &RoleReq{} }, wrapperTraceLog(h.describeRole))))
 
 	router.POST(RoleCategory+CreateAction, timeoutMiddleware(wrapperPost(func() any { return &RoleReq{} }, wrapperTraceLog(h.createRole))))
 	router.POST(RoleCategory+DropAction, timeoutMiddleware(wrapperPost(func() any { return &RoleReq{} }, wrapperTraceLog(h.dropRole))))
@@ -114,6 +117,10 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 	router.POST(AliasCategory+CreateAction, timeoutMiddleware(wrapperPost(func() any { return &AliasCollectionReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.createAlias)))))
 	router.POST(AliasCategory+DropAction, timeoutMiddleware(wrapperPost(func() any { return &AliasReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.dropAlias)))))
 	router.POST(AliasCategory+AlterAction, timeoutMiddleware(wrapperPost(func() any { return &AliasCollectionReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.alterAlias)))))
+
+	router.POST(ImportJobCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.listImportJob)))))
+	router.POST(ImportJobCategory+CreateAction, timeoutMiddleware(wrapperPost(func() any { return &DataFilesReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.createImportJob)))))
+	router.POST(ImportJobCategory+GetProgressAction, timeoutMiddleware(wrapperPost(func() any { return &TaskIDReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.getImportJobProcess)))))
 }
 
 type (
@@ -125,11 +132,16 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV4) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		req := newReq()
 		if err := c.ShouldBindBodyWith(req, binding.JSON); err != nil {
-			log.Warn("high level restful api, the parameter of create collection is incorrect", zap.Any("request", req), zap.Error(err))
+			log.Warn("high level restful api, read parameters from request body fail", zap.Any("request", req), zap.Error(err))
 			if _, ok := err.(validator.ValidationErrors); ok {
 				c.AbortWithStatusJSON(http.StatusOK, gin.H{
 					HTTPReturnCode:    merr.Code(merr.ErrMissingRequiredParameters),
 					HTTPReturnMessage: merr.ErrMissingRequiredParameters.Error() + ", error: " + err.Error(),
+				})
+			} else if err == io.EOF {
+				c.AbortWithStatusJSON(http.StatusOK, gin.H{
+					HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
+					HTTPReturnMessage: merr.ErrIncorrectParameterFormat.Error() + ", the request body should be nil, however {} is valid",
 				})
 			} else {
 				c.AbortWithStatusJSON(http.StatusOK, gin.H{
@@ -139,7 +151,7 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV4) gin.HandlerFunc {
 			}
 			return
 		}
-		log.Debug("[wrapper post]bind post request", zap.Any("req", req))
+		log.Debug("high level restful api, read parameters from request body", zap.Any("request", req))
 		dbName := ""
 		if getter, ok := req.(requestutil.DBNameGetter); ok {
 			dbName = getter.GetDbName()
@@ -149,25 +161,32 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV4) gin.HandlerFunc {
 		}
 		username, _ := c.Get(ContextUsername)
 		ctx := proxy.NewContextWithMetadata(c, username.(string), dbName)
+		traceID := strconv.FormatInt(time.Now().UnixNano(), 10)
+		ctx = log.WithTraceID(ctx, traceID)
+		c.Keys["traceID"] = traceID
 		v2(c, &ctx, req, dbName)
 	}
 }
 
 func wrapperTraceLog(v2 handlerFuncV4) handlerFuncV4 {
 	return func(c *gin.Context, ctx *context.Context, req any, dbName string) (interface{}, error) {
-		log.Debug("[wrapper trace log]bind post request", zap.Any("req", req))
 		switch proxy.Params.CommonCfg.TraceLogMode.GetAsInt() {
 		case 1: // simple info
-			var fields []zap.Field
-			fields = append(fields, zap.String("request_name", c.Request.Method))
+			fields := proxy.GetRequestBaseInfo(*ctx, req, &grpc.UnaryServerInfo{
+				FullMethod: c.Request.URL.Path,
+			}, false)
 			log.Ctx(*ctx).Info("trace info: simple", fields...)
 		case 2: // detail info
-			var fields []zap.Field
-			fields = append(fields, zap.String("request_name", c.Request.Method))
+			fields := proxy.GetRequestBaseInfo(*ctx, req, &grpc.UnaryServerInfo{
+				FullMethod: c.Request.URL.Path,
+			}, true)
+			fields = append(fields, proxy.GetRequestFieldWithoutSensitiveInfo(req))
 			log.Ctx(*ctx).Info("trace info: detail", fields...)
 		case 3: // detail info with request and response
-			var fields []zap.Field
-			fields = append(fields, zap.String("request_name", c.Request.Method))
+			fields := proxy.GetRequestBaseInfo(*ctx, req, &grpc.UnaryServerInfo{
+				FullMethod: c.Request.URL.Path,
+			}, true)
+			fields = append(fields, proxy.GetRequestFieldWithoutSensitiveInfo(req))
 			log.Ctx(*ctx).Info("trace info: all request", fields...)
 		}
 		resp, err := v2(c, ctx, req, dbName)
@@ -190,7 +209,7 @@ func wrapperProxy(c *gin.Context, ctx *context.Context, req any, checkAuth bool,
 		}
 	}
 	// todo delete the message
-	log.Debug("todo grpc call", zap.Any("request", req))
+	log.Ctx(*ctx).Debug("high level restful api, try to do a grpc call", zap.Any("request", req))
 	response, err := handler(ctx, req)
 	if err == nil {
 		status, ok := requestutil.GetStatusFromResponse(response)
@@ -199,7 +218,7 @@ func wrapperProxy(c *gin.Context, ctx *context.Context, req any, checkAuth bool,
 		}
 	}
 	if err != nil {
-		log.Warn("did grpc call, but fail with error", zap.Error(err), zap.Any("request", req))
+		log.Ctx(*ctx).Warn("high level restful api, grpc call failed", zap.Error(err), zap.Any("request", req))
 		if !ignoreErr {
 			c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 		}
@@ -223,7 +242,7 @@ func (h *HandlersV2) wrapperCheckDatabase(v2 handlerFuncV4) handlerFuncV4 {
 				return v2(c, ctx, req, dbName)
 			}
 		}
-		log.Warn("non-exist database", zap.String("database", dbName))
+		log.Ctx(*ctx).Warn("high level restful api, non-exist database", zap.String("database", dbName), zap.Any("request", req))
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrDatabaseNotFound),
 			HTTPReturnMessage: merr.ErrDatabaseNotFound.Error() + ", database: " + dbName,
@@ -251,7 +270,7 @@ func (h *HandlersV2) hasCollection(c *gin.Context, ctx *context.Context, anyReq 
 		has = resp.(*milvuspb.BoolResponse).Value
 	}
 	c.JSON(http.StatusOK, wrapperReturnHas(has))
-	return nil, nil
+	return has, nil
 }
 
 func (h *HandlersV2) listCollections(c *gin.Context, ctx *context.Context, anyReq any, dbName string) (interface{}, error) {
@@ -284,7 +303,7 @@ func (h *HandlersV2) getCollectionDetails(c *gin.Context, ctx *context.Context, 
 	primaryField, ok := getPrimaryField(coll.Schema)
 	autoID := false
 	if !ok {
-		log.Warn("get primary field from collection schema fail", zap.Any("collection schema", coll.Schema))
+		log.Ctx(*ctx).Warn("high level restful api, get primary field from collection schema fail", zap.Any("collection schema", coll.Schema))
 	} else {
 		autoID = primaryField.AutoID
 	}
@@ -479,7 +498,7 @@ func (h *HandlersV2) query(c *gin.Context, ctx *context.Context, anyReq any, dbN
 		allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
 		outputData, err := buildQueryResp(int64(0), queryResp.OutputFields, queryResp.FieldsData, nil, nil, allowJS)
 		if err != nil {
-			log.Warn("high level restful api, fail to deal with query result", zap.Any("response", resp), zap.Error(err))
+			log.Ctx(*ctx).Warn("high level restful api, fail to deal with query result", zap.Any("response", resp), zap.Error(err))
 			c.JSON(http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrInvalidSearchResult),
 				HTTPReturnMessage: merr.ErrInvalidSearchResult.Error() + ", error: " + err.Error(),
@@ -522,7 +541,7 @@ func (h *HandlersV2) get(c *gin.Context, ctx *context.Context, anyReq any, dbNam
 		allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
 		outputData, err := buildQueryResp(int64(0), queryResp.OutputFields, queryResp.FieldsData, nil, nil, allowJS)
 		if err != nil {
-			log.Warn("high level restful api, fail to deal with get result", zap.Any("response", resp), zap.Error(err))
+			log.Ctx(*ctx).Warn("high level restful api, fail to deal with get result", zap.Any("response", resp), zap.Error(err))
 			c.JSON(http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrInvalidSearchResult),
 				HTTPReturnMessage: merr.ErrInvalidSearchResult.Error() + ", error: " + err.Error(),
@@ -576,7 +595,7 @@ func (h *HandlersV2) insert(c *gin.Context, ctx *context.Context, anyReq any, db
 	body, _ := c.Get(gin.BodyBytesKey)
 	err, httpReq.Data = checkAndSetData(string(body.([]byte)), collSchema)
 	if err != nil {
-		log.Warn("high level restful api, fail to deal with insert data", zap.Any("body", body), zap.Error(err))
+		log.Ctx(*ctx).Warn("high level restful api, fail to deal with insert data", zap.Any("body", body), zap.Error(err))
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrInvalidInsertData),
 			HTTPReturnMessage: merr.ErrInvalidInsertData.Error() + ", error: " + err.Error(),
@@ -592,7 +611,7 @@ func (h *HandlersV2) insert(c *gin.Context, ctx *context.Context, anyReq any, db
 	}
 	req.FieldsData, err = anyToColumns(httpReq.Data, collSchema)
 	if err != nil {
-		log.Warn("high level restful api, fail to deal with insert data", zap.Any("data", httpReq.Data), zap.Error(err))
+		log.Ctx(*ctx).Warn("high level restful api, fail to deal with insert data", zap.Any("data", httpReq.Data), zap.Error(err))
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrInvalidInsertData),
 			HTTPReturnMessage: merr.ErrInvalidInsertData.Error() + ", error: " + err.Error(),
@@ -638,7 +657,7 @@ func (h *HandlersV2) upsert(c *gin.Context, ctx *context.Context, anyReq any, db
 	body, _ := c.Get(gin.BodyBytesKey)
 	err, httpReq.Data = checkAndSetData(string(body.([]byte)), collSchema)
 	if err != nil {
-		log.Warn("high level restful api, fail to deal with upsert data", zap.Any("body", body), zap.Error(err))
+		log.Ctx(*ctx).Warn("high level restful api, fail to deal with upsert data", zap.Any("body", body), zap.Error(err))
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrInvalidInsertData),
 			HTTPReturnMessage: merr.ErrInvalidInsertData.Error() + ", error: " + err.Error(),
@@ -654,7 +673,7 @@ func (h *HandlersV2) upsert(c *gin.Context, ctx *context.Context, anyReq any, db
 	}
 	req.FieldsData, err = anyToColumns(httpReq.Data, collSchema)
 	if err != nil {
-		log.Warn("high level restful api, fail to deal with upsert data", zap.Any("data", httpReq.Data), zap.Error(err))
+		log.Ctx(*ctx).Warn("high level restful api, fail to deal with upsert data", zap.Any("data", httpReq.Data), zap.Error(err))
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrInvalidInsertData),
 			HTTPReturnMessage: merr.ErrInvalidInsertData.Error() + ", error: " + err.Error(),
@@ -696,7 +715,7 @@ func (h *HandlersV2) search(c *gin.Context, ctx *context.Context, anyReq any, db
 		rangeFilter, rangeFilterOk := httpReq.Params[ParamRangeFilter]
 		if rangeFilterOk {
 			if !radiusOk {
-				log.Warn("high level restful api, search params invalid, because only " + ParamRangeFilter)
+				log.Ctx(*ctx).Warn("high level restful api, search params invalid, because only " + ParamRangeFilter)
 				c.AbortWithStatusJSON(http.StatusOK, gin.H{
 					HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
 					HTTPReturnMessage: merr.ErrIncorrectParameterFormat.Error() + ", error: invalid search params",
@@ -739,7 +758,7 @@ func (h *HandlersV2) search(c *gin.Context, ctx *context.Context, anyReq any, db
 			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
 			outputData, err := buildQueryResp(searchResp.Results.TopK, searchResp.Results.OutputFields, searchResp.Results.FieldsData, searchResp.Results.Ids, searchResp.Results.Scores, allowJS)
 			if err != nil {
-				log.Warn("high level restful api, fail to deal with search result", zap.Any("result", searchResp.Results), zap.Error(err))
+				log.Ctx(*ctx).Warn("high level restful api, fail to deal with search result", zap.Any("result", searchResp.Results), zap.Error(err))
 				c.JSON(http.StatusOK, gin.H{
 					HTTPReturnCode:    merr.Code(merr.ErrInvalidSearchResult),
 					HTTPReturnMessage: merr.ErrInvalidSearchResult.Error() + ", error: " + err.Error(),
@@ -836,7 +855,7 @@ func (h *HandlersV2) createCollection(c *gin.Context, ctx *context.Context, anyR
 		schema, err = proto.Marshal(&collSchema)
 	}
 	if err != nil {
-		log.Warn("high level restful api, marshal collection schema fail", zap.Any("request", httpReq), zap.Error(err))
+		log.Ctx(*ctx).Warn("high level restful api, marshal collection schema fail", zap.Any("request", httpReq), zap.Error(err))
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrMarshalCollectionSchema),
 			HTTPReturnMessage: merr.ErrMarshalCollectionSchema.Error() + ", error: " + err.Error(),
@@ -1308,7 +1327,7 @@ func (h *HandlersV2) createIndex(c *gin.Context, ctx *context.Context, anyReq an
 		}
 	}
 	c.JSON(http.StatusOK, wrapperReturnDefault())
-	return nil, nil
+	return httpReq.IndexParams, nil
 }
 
 func (h *HandlersV2) dropIndex(c *gin.Context, ctx *context.Context, anyReq any, dbName string) (interface{}, error) {
@@ -1410,7 +1429,105 @@ func (h *HandlersV2) alterAlias(c *gin.Context, ctx *context.Context, anyReq any
 	return resp, err
 }
 
-func (h *HandlersV2) GetCollectionSchema(c *gin.Context, ctx *context.Context, collectionName, dbName string) (*schemapb.CollectionSchema, error) {
+func (h *HandlersV2) listImportJob(c *gin.Context, ctx *context.Context, anyReq any, dbName string) (interface{}, error) {
+	collectionGetter, _ := anyReq.(requestutil.CollectionNameGetter)
+	limitGetter, _ := anyReq.(LimitGetter)
+	req := &milvuspb.ListImportTasksRequest{
+		CollectionName: collectionGetter.GetCollectionName(),
+		Limit:          int64(limitGetter.GetLimit()),
+		DbName:         dbName,
+	}
+	resp, err := wrapperProxy(c, ctx, req, h.checkAuth, false, func(reqCtx *context.Context, req any) (interface{}, error) {
+		return h.proxy.ListImportTasks(*reqCtx, req.(*milvuspb.ListImportTasksRequest))
+	})
+	if err == nil {
+		returnData := []map[string]interface{}{}
+		for _, job := range resp.(*milvuspb.ListImportTasksResponse).Tasks {
+			taskDetail := map[string]interface{}{
+				"taskID":          job.Id,
+				"state":           job.State.String(),
+				"dbName":          dbName,
+				"collectionName":  collectionGetter.GetCollectionName(),
+				"createTimestamp": strconv.FormatInt(job.CreateTs, 10),
+			}
+			for _, info := range job.Infos {
+				switch info.Key {
+				case "collection":
+					taskDetail["collectionName"] = info.Value
+				case "partition":
+					taskDetail["partitionName"] = info.Value
+				case "persist_cost":
+					taskDetail["persistCost"] = info.Value
+				case "progress_percent":
+					taskDetail["progressPercent"] = info.Value
+				case "failed_reason":
+					if info.Value != "" {
+						taskDetail[HTTPReturnIndexFailReason] = info.Value
+					}
+				}
+			}
+			returnData = append(returnData, taskDetail)
+		}
+		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: returnData})
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) createImportJob(c *gin.Context, ctx *context.Context, anyReq any, dbName string) (interface{}, error) {
+	collectionGetter, _ := anyReq.(requestutil.CollectionNameGetter)
+	fileNamesGetter, _ := anyReq.(FileNamesGetter)
+	req := &milvuspb.ImportRequest{
+		CollectionName: collectionGetter.GetCollectionName(),
+		DbName:         dbName,
+		Files:          fileNamesGetter.GetFileNames(),
+	}
+	resp, err := wrapperProxy(c, ctx, req, h.checkAuth, false, func(reqCtx *context.Context, req any) (interface{}, error) {
+		return h.proxy.Import(*reqCtx, req.(*milvuspb.ImportRequest))
+	})
+	if err == nil {
+		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: resp.(*milvuspb.ImportResponse).Tasks})
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) getImportJobProcess(c *gin.Context, ctx *context.Context, anyReq any, dbName string) (interface{}, error) {
+	taskIDGetter, _ := anyReq.(TaskIDGetter)
+	req := &milvuspb.GetImportStateRequest{
+		Task: taskIDGetter.GetTaskID(),
+	}
+	resp, err := wrapperProxy(c, ctx, req, h.checkAuth, false, func(reqCtx *context.Context, req any) (interface{}, error) {
+		return h.proxy.GetImportState(*reqCtx, req.(*milvuspb.GetImportStateRequest))
+	})
+	if err == nil {
+		response := resp.(*milvuspb.GetImportStateResponse)
+		returnData := map[string]interface{}{
+			"taskID":          response.Id,
+			"state":           response.State.String(),
+			"dbName":          dbName,
+			"createTimestamp": strconv.FormatInt(response.CreateTs, 10),
+		}
+		for _, info := range response.Infos {
+			switch info.Key {
+			case "collection":
+				returnData["collectionName"] = info.Value
+			case "partition":
+				returnData["partitionName"] = info.Value
+			case "persist_cost":
+				returnData["persistCost"] = info.Value
+			case "progress_percent":
+				returnData["progressPercent"] = info.Value
+			case "failed_reason":
+				if info.Value != "" {
+					returnData[HTTPReturnIndexFailReason] = info.Value
+				}
+			}
+		}
+		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: returnData})
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) GetCollectionSchema(c *gin.Context, ctx *context.Context, dbName, collectionName string) (*schemapb.CollectionSchema, error) {
 	collSchema, err := proxy.GetCachedCollectionSchema(*ctx, dbName, collectionName)
 	if err == nil {
 		return collSchema.CollectionSchema, nil

@@ -73,6 +73,12 @@ func TestHTTPWrapper(t *testing.T) {
 	})
 	postTestCases = append(postTestCases, requestBodyTestCase{
 		path:        path,
+		requestBody: []byte(``),
+		errMsg:      "can only accept json format request, the request body should be nil, however {} is valid",
+		errCode:     1801, // ErrIncorrectParameterFormat
+	})
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
 		requestBody: []byte(`{"collectionName": "book", "dbName"}`),
 		errMsg:      "can only accept json format request, error: invalid character '}' after object key",
 		errCode:     1801, // ErrIncorrectParameterFormat
@@ -656,6 +662,46 @@ func TestMethodGet(t *testing.T) {
 		Status: &StatusSuccess,
 		Alias:  DefaultAliasName,
 	}, nil).Once()
+	mp.EXPECT().ListImportTasks(mock.Anything, mock.Anything).Return(&milvuspb.ListImportTasksResponse{
+		Status: &StatusSuccess,
+		Tasks: []*milvuspb.GetImportStateResponse{
+			{
+				Status: &StatusSuccess,
+				State:  6,
+				Infos: []*commonpb.KeyValuePair{
+					{Key: "collection", Value: DefaultCollectionName},
+					{Key: "partition", Value: DefaultPartitionName},
+					{Key: "persist_cost", Value: "0.23"},
+					{Key: "progress_percent", Value: "100"},
+					{Key: "failed_reason"},
+				},
+				Id: 1234567890,
+			},
+			{
+				Status: &StatusSuccess,
+				State:  0,
+				Infos: []*commonpb.KeyValuePair{
+					{Key: "collection", Value: DefaultCollectionName},
+					{Key: "partition", Value: DefaultPartitionName},
+					{Key: "progress_percent", Value: "0"},
+					{Key: "failed_reason", Value: "failed to get file size of "},
+				},
+				Id: 123456789,
+			},
+		},
+	}, nil).Once()
+	mp.EXPECT().GetImportState(mock.Anything, mock.Anything).Return(&milvuspb.GetImportStateResponse{
+		Status: &StatusSuccess,
+		State:  6,
+		Infos: []*commonpb.KeyValuePair{
+			{Key: "collection", Value: DefaultCollectionName},
+			{Key: "partition", Value: DefaultPartitionName},
+			{Key: "persist_cost", Value: "0.23"},
+			{Key: "progress_percent", Value: "100"},
+			{Key: "failed_reason"},
+		},
+		Id: 1234567890,
+	}, nil).Once()
 
 	testEngine := initHTTPServerV2(mp, false)
 	queryTestCases := []rawTestCase{}
@@ -720,6 +766,12 @@ func TestMethodGet(t *testing.T) {
 	queryTestCases = append(queryTestCases, rawTestCase{
 		path: versionalV2(AliasCategory, DescribeAction),
 	})
+	queryTestCases = append(queryTestCases, rawTestCase{
+		path: versionalV2(ImportJobCategory, ListAction),
+	})
+	queryTestCases = append(queryTestCases, rawTestCase{
+		path: versionalV2(ImportJobCategory, GetProgressAction),
+	})
 
 	for _, testcase := range queryTestCases {
 		t.Run("query", func(t *testing.T) {
@@ -729,7 +781,8 @@ func TestMethodGet(t *testing.T) {
 				`"indexName": "` + DefaultIndexName + `",` +
 				`"userName": "` + util.UserRoot + `",` +
 				`"roleName": "` + util.RoleAdmin + `",` +
-				`"aliasName": "` + DefaultAliasName + `"` +
+				`"aliasName": "` + DefaultAliasName + `",` +
+				`"taskID": 1234567890` +
 				`}`))
 			req := httptest.NewRequest(http.MethodPost, testcase.path, bodyReader)
 			w := httptest.NewRecorder()
@@ -829,6 +882,7 @@ func TestMethodPost(t *testing.T) {
 	mp.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(commonErrorStatus, nil).Once()
 	mp.EXPECT().CreateAlias(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
 	mp.EXPECT().AlterAlias(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
+	mp.EXPECT().Import(mock.Anything, mock.Anything).Return(&milvuspb.ImportResponse{Status: commonSuccessStatus, Tasks: []int64{int64(1234567890)}}, nil).Once()
 	testEngine := initHTTPServerV2(mp, false)
 	queryTestCases := []rawTestCase{}
 	queryTestCases = append(queryTestCases, rawTestCase{
@@ -887,6 +941,9 @@ func TestMethodPost(t *testing.T) {
 	queryTestCases = append(queryTestCases, rawTestCase{
 		path: versionalV2(AliasCategory, AlterAction),
 	})
+	queryTestCases = append(queryTestCases, rawTestCase{
+		path: versionalV2(ImportJobCategory, CreateAction),
+	})
 
 	for _, testcase := range queryTestCases {
 		t.Run("query", func(t *testing.T) {
@@ -897,7 +954,8 @@ func TestMethodPost(t *testing.T) {
 				`"indexParams": [{"indexName": "` + DefaultIndexName + `", "fieldName": "book_intro", "metricsType": "L2", "indexType": "IVF_FLAT"}],` +
 				`"userName": "` + util.UserRoot + `", "password": "Milvus", "newPassword": "milvus", "roleName": "` + util.RoleAdmin + `",` +
 				`"roleName": "` + util.RoleAdmin + `", "objectType": "Global", "objectName": "*", "privilege": "*",` +
-				`"aliasName": "` + DefaultAliasName + `"` +
+				`"aliasName": "` + DefaultAliasName + `",` +
+				`"files": ["book.json"]` +
 				`}`))
 			req := httptest.NewRequest(http.MethodPost, testcase.path, bodyReader)
 			w := httptest.NewRecorder()

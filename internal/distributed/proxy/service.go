@@ -172,6 +172,25 @@ func (s *Server) startHTTPServer(errChan chan error) {
 	ginHandler := gin.New()
 	ginLogger := gin.LoggerWithConfig(gin.LoggerConfig{
 		SkipPaths: proxy.Params.ProxyCfg.GinLogSkipPaths.GetAsStrings(),
+		Formatter: func(param gin.LogFormatterParams) string {
+			if param.Latency > time.Minute {
+				param.Latency = param.Latency.Truncate(time.Second)
+			}
+			traceID, ok := param.Keys["traceID"]
+			if !ok {
+				traceID = ""
+			}
+			return fmt.Sprintf("[%v] [GIN] [%s] [traceID=%s] [code=%3d] [latency=%v] [client=%s] [method=%s] [error=%s]\n",
+				param.TimeStamp.Format("2006/01/02 15:04:05.000 Z07:00"),
+				param.Path,
+				traceID,
+				param.StatusCode,
+				param.Latency,
+				param.ClientIP,
+				param.Method,
+				param.ErrorMessage,
+			)
+		},
 	})
 	ginHandler.Use(ginLogger, gin.Recovery())
 	httpHeaderAllowInt64 := "false"
