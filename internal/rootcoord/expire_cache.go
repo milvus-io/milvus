@@ -26,20 +26,7 @@ import (
 )
 
 // ExpireMetaCache will call invalidate collection meta cache
-func (c *Core) ExpireMetaCache(ctx context.Context, dbName string, collNames []string, collectionID UniqueID, ts typeutil.Timestamp, opts ...proxyutil.ExpireCacheOpt) error {
-	// if collectionID is specified, invalidate all the collection meta cache with the specified collectionID and return
-	if collectionID != InvalidCollectionID {
-		req := proxypb.InvalidateCollMetaCacheRequest{
-			Base: commonpbutil.NewMsgBase(
-				commonpbutil.WithTimeStamp(ts),
-				commonpbutil.WithSourceID(c.session.ServerID),
-			),
-			DbName:       dbName,
-			CollectionID: collectionID,
-		}
-		return c.proxyClientManager.InvalidateCollectionMetaCache(ctx, &req, opts...)
-	}
-
+func (c *Core) ExpireMetaCache(ctx context.Context, dbName string, collNames []string, collectionID UniqueID, partitionName string, ts typeutil.Timestamp, opts ...proxyutil.ExpireCacheOpt) error {
 	// if only collNames are specified, invalidate the collection meta cache with the specified collectionName
 	for _, collName := range collNames {
 		req := proxypb.InvalidateCollMetaCacheRequest{
@@ -49,6 +36,8 @@ func (c *Core) ExpireMetaCache(ctx context.Context, dbName string, collNames []s
 			),
 			DbName:         dbName,
 			CollectionName: collName,
+			CollectionID:   collectionID,
+			PartitionName:  partitionName,
 		}
 		err := c.proxyClientManager.InvalidateCollectionMetaCache(ctx, &req, opts...)
 		if err != nil {

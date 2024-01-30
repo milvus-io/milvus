@@ -67,14 +67,6 @@ func (a *alterCollectionTask) Execute(ctx context.Context) error {
 		ts:       ts,
 	})
 
-	redoTask.AddSyncStep(&expireCacheStep{
-		baseStep:        baseStep{core: a.core},
-		dbName:          a.Req.GetDbName(),
-		collectionNames: []string{oldColl.Name},
-		collectionID:    oldColl.CollectionID,
-		ts:              ts,
-	})
-
 	a.Req.CollectionID = oldColl.CollectionID
 	redoTask.AddSyncStep(&BroadcastAlteredCollectionStep{
 		baseStep: baseStep{core: a.core},
