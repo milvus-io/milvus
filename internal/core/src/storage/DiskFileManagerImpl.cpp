@@ -676,13 +676,7 @@ DiskFileManagerImpl::CacheOptFieldToDisk(
     WriteOptFieldsIvfMeta(
         local_chunk_manager, local_data_path, num_of_fields, write_offset);
 
-    auto res = space->ScanData();
-    if (!res.ok()) {
-        PanicInfo(IndexBuildError,
-                  fmt::format("failed to create scan iterator: {}",
-                              res.status().ToString()));
-    }
-    auto reader = res.value();
+    auto reader = space->ScanData();
     for (auto& [field_id, tup] : fields_map) {
         const auto& field_name = std::get<0>(tup);
         const auto& field_type = std::get<1>(tup);
