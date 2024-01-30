@@ -22,8 +22,9 @@ import (
 type BufferManager interface {
 	// Register adds a WriteBuffer with provided schema & options.
 	Register(channel string, metacache metacache.MetaCache, storageV2Cache *metacache.StorageV2Cache, opts ...WriteBufferOption) error
-	// FlushSegments notifies writeBuffer corresponding to provided channel to flush segments.
-	FlushSegments(ctx context.Context, channel string, segmentIDs []int64) error
+	// SealSegments notifies writeBuffer corresponding to provided channel to seal segments.
+	// which will cause segment start flush procedure.
+	SealSegments(ctx context.Context, channel string, segmentIDs []int64) error
 	// FlushChannel set the flushTs of the provided write buffer.
 	FlushChannel(ctx context.Context, channel string, flushTs uint64) error
 	// RemoveChannel removes a write buffer from manager.
@@ -91,8 +92,8 @@ func (m *bufferManager) memoryCheck() {
 		return
 	}
 
-	m.mut.RLock()
-	defer m.mut.RUnlock()
+	m.mut.Lock()
+	defer m.mut.Unlock()
 
 	var total int64
 	var candidate WriteBuffer
@@ -115,14 +116,14 @@ func (m *bufferManager) memoryCheck() {
 	totalMemory := hardware.GetMemoryCount()
 	memoryWatermark := float64(totalMemory) * paramtable.Get().DataNodeCfg.MemoryWatermark.GetAsFloat()
 	if float64(total) < memoryWatermark {
-		log.RatedDebug(5, "skip force sync because memory level is not high enough",
+		log.RatedDebug(20, "skip force sync because memory level is not high enough",
 			zap.Float64("current_total_memory_usage", toMB(float64(total))),
 			zap.Float64("current_memory_watermark", toMB(memoryWatermark)))
 		return
 	}
 
 	if candidate != nil {
-		candidate.SetMemoryHighFlag()
+		candidate.EvictBuffer(GetOldestBufferPolicy(paramtable.Get().DataNodeCfg.MemoryForceSyncSegmentNum.GetAsInt()))
 		log.Info("notify writebuffer to sync",
 			zap.String("channel", candiChan), zap.Float64("bufferSize(MB)", toMB(float64(candiSize))))
 	}
@@ -150,8 +151,8 @@ func (m *bufferManager) Register(channel string, metacache metacache.MetaCache, 
 	return nil
 }
 
-// FlushSegments call sync segment and change segments state to Flushed.
-func (m *bufferManager) FlushSegments(ctx context.Context, channel string, segmentIDs []int64) error {
+// SealSegments call sync segment and change segments state to Flushed.
+func (m *bufferManager) SealSegments(ctx context.Context, channel string, segmentIDs []int64) error {
 	m.mut.RLock()
 	buf, ok := m.buffers[channel]
 	m.mut.RUnlock()
@@ -163,7 +164,7 @@ func (m *bufferManager) FlushSegments(ctx context.Context, channel string, segme
 		return merr.WrapErrChannelNotFound(channel)
 	}
 
-	return buf.FlushSegments(ctx, segmentIDs)
+	return buf.SealSegments(ctx, segmentIDs)
 }
 
 func (m *bufferManager) FlushChannel(ctx context.Context, channel string, flushTs uint64) error {

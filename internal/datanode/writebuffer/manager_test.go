@@ -88,7 +88,7 @@ func (s *ManagerSuite) TestFlushSegments() {
 	s.Run("channel_not_found", func() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		err := manager.FlushSegments(ctx, s.channelName, []int64{1, 2, 3})
+		err := manager.SealSegments(ctx, s.channelName, []int64{1, 2, 3})
 		s.Error(err, "FlushSegments shall return error when channel not found")
 	})
 
@@ -102,9 +102,9 @@ func (s *ManagerSuite) TestFlushSegments() {
 		s.manager.buffers[s.channelName] = wb
 		s.manager.mut.Unlock()
 
-		wb.EXPECT().FlushSegments(mock.Anything, mock.Anything).Return(nil)
+		wb.EXPECT().SealSegments(mock.Anything, mock.Anything).Return(nil)
 
-		err := manager.FlushSegments(ctx, s.channelName, []int64{1})
+		err := manager.SealSegments(ctx, s.channelName, []int64{1})
 		s.NoError(err)
 	})
 }
@@ -212,7 +212,7 @@ func (s *ManagerSuite) TestMemoryCheck() {
 	memoryLimit := hardware.GetMemoryCount()
 	signal := make(chan struct{}, 1)
 	wb.EXPECT().MemorySize().Return(int64(float64(memoryLimit) * 0.6))
-	wb.EXPECT().SetMemoryHighFlag().Run(func() {
+	wb.EXPECT().EvictBuffer(mock.Anything).Run(func(polices ...SyncPolicy) {
 		select {
 		case signal <- struct{}{}:
 		default:
