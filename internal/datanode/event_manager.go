@@ -38,6 +38,11 @@ import (
 
 const retryWatchInterval = 20 * time.Second
 
+func (node *DataNode) startWatchChannelsAtBackground(ctx context.Context) {
+	node.stopWaiter.Add(1)
+	go node.StartWatchChannels(ctx)
+}
+
 // StartWatchChannels start loop to watch channel allocation status via kv(etcd for now)
 func (node *DataNode) StartWatchChannels(ctx context.Context) {
 	defer node.stopWaiter.Done()
@@ -61,7 +66,7 @@ func (node *DataNode) StartWatchChannels(ctx context.Context) {
 		case event, ok := <-evtChan:
 			if !ok {
 				log.Warn("datanode failed to watch channel, return")
-				go node.StartWatchChannels(ctx)
+				node.startWatchChannelsAtBackground(ctx)
 				return
 			}
 
@@ -69,7 +74,7 @@ func (node *DataNode) StartWatchChannels(ctx context.Context) {
 				log.Warn("datanode watch channel canceled", zap.Error(event.Err()))
 				// https://github.com/etcd-io/etcd/issues/8980
 				if event.Err() == v3rpc.ErrCompacted {
-					go node.StartWatchChannels(ctx)
+					node.startWatchChannelsAtBackground(ctx)
 					return
 				}
 				// if watch loop return due to event canceled, the datanode is not functional anymore
