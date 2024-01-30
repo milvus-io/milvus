@@ -145,5 +145,7 @@ func GetRegisterer() prometheus.Registerer {
 func Register(r prometheus.Registerer) {
 	r.MustRegister(NumNodes)
 	r.MustRegister(LockCosts)
+	r.MustRegister(BuildInfo)
+	r.MustRegister(RuntimeInfo)
 	metricRegisterer = r
 }

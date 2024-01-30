@@ -27,7 +27,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -47,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
@@ -266,9 +266,11 @@ func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan
 		}
 	}
 
-	spanCtx := trace.SpanContextFromContext(ctx)
+	/*
+		spanCtx := trace.SpanContextFromContext(ctx)
 
-	taskCtx := trace.ContextWithSpanContext(node.ctx, spanCtx)
+		taskCtx := trace.ContextWithSpanContext(node.ctx, spanCtx)*/
+	taskCtx := tracer.Propagate(ctx, node.ctx)
 
 	var task compactor
 	switch req.GetType() {

@@ -3,6 +3,7 @@ import pytest
 
 from base.client_base import TestcaseBase
 from common.common_type import CheckTasks, CaseLabel
+from common.common_func import param_info
 from common import common_func as cf
 from common import common_type as ct
 from utils.util_log import test_log as log
@@ -13,6 +14,11 @@ prefix = "db"
 @pytest.mark.tags(CaseLabel.RBAC)
 class TestDatabaseParams(TestcaseBase):
     """ Test case of database """
+
+    def setup_method(self, method):
+        param_info.param_user = ct.default_user
+        param_info.param_password = ct.default_password
+        super().setup_method(method)
 
     def teardown_method(self, method):
         """
@@ -99,14 +105,27 @@ class TestDatabaseParams(TestcaseBase):
         dbs_afrer_drop, _ = self.database_wrap.list_database()
         assert db_name not in dbs_afrer_drop
 
-    def test_create_db_invalid_name(self, get_invalid_string):
+    @pytest.mark.parametrize("get_invalid_string", ct.get_invalid_strs[6:])
+    def test_create_db_invalid_name_value(self, get_invalid_string):
         """
         target: test create db with invalid name
         method: create db with invalid name
         expected: error
         """
         self._connect()
-        error = {ct.err_code: 1, ct.err_msg: "Invalid database name"}
+        error = {ct.err_code: 802, ct.err_msg: "invalid database name[database=%s]" % get_invalid_string}
+        self.database_wrap.create_database(db_name=get_invalid_string, check_task=CheckTasks.err_res,
+                                           check_items=error)
+
+    @pytest.mark.parametrize("get_invalid_string", ct.get_invalid_strs[:6])
+    def test_create_db_invalid_name_type(self, get_invalid_string):
+        """
+        target: test create db with invalid name
+        method: create db with invalid name
+        expected: error
+        """
+        self._connect()
+        error = {ct.err_code: 1, ct.err_msg: "invalid database name[database=%s]" % get_invalid_string}
         self.database_wrap.create_database(db_name=get_invalid_string, check_task=CheckTasks.err_res,
                                            check_items=error)
 
@@ -131,7 +150,34 @@ class TestDatabaseParams(TestcaseBase):
         error = {ct.err_code: 1, ct.err_msg: "database already exist: default"}
         self.database_wrap.create_database(ct.default_db, check_task=CheckTasks.err_res, check_items=error)
 
-    def test_drop_db_invalid_name(self, get_invalid_string):
+    @pytest.mark.parametrize("get_invalid_string", ct.get_invalid_strs[6:])
+    def test_drop_db_invalid_name_value(self, get_invalid_string):
+        """
+        target: test drop db with invalid name
+        method: drop db with invalid name
+        expected: exception
+        """
+        self._connect()
+
+        # create db
+        db_name = cf.gen_unique_str(prefix)
+        self.database_wrap.create_database(db_name)
+
+        # drop db
+        self.database_wrap.drop_database(db_name=get_invalid_string, check_task=CheckTasks.err_res,
+                                         check_items={ct.err_code: 802, ct.err_msg: "invalid database name"})
+
+        # created db is exist
+        self.database_wrap.create_database(db_name, check_task=CheckTasks.err_res,
+                                           check_items={ct.err_code: 65535,
+                                                        ct.err_msg: "database already exist: %s" % db_name})
+
+        self.database_wrap.drop_database(db_name)
+        dbs, _ = self.database_wrap.list_database()
+        assert db_name not in dbs
+
+    @pytest.mark.parametrize("get_invalid_string", ct.get_invalid_strs[:6])
+    def test_drop_db_invalid_name_type(self, get_invalid_string):
         """
         target: test drop db with invalid name
         method: drop db with invalid name
@@ -149,7 +195,8 @@ class TestDatabaseParams(TestcaseBase):
 
         # created db is exist
         self.database_wrap.create_database(db_name, check_task=CheckTasks.err_res,
-                                           check_items={ct.err_code: 1, ct.err_msg: "db existed"})
+                                           check_items={ct.err_code: 65535,
+                                                        ct.err_msg: "database already exist: %s" % db_name})
 
         self.database_wrap.drop_database(db_name)
         dbs, _ = self.database_wrap.list_database()
@@ -213,12 +260,20 @@ class TestDatabaseParams(TestcaseBase):
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
 
         # using db with invalid name
+        error = {ct.err_code: 800, ct.err_msg: "database not found[database=%s]" % invalid_db_name}
+        if invalid_db_name == "中文":
+            error = {ct.err_code: 1, ct.err_msg: "<metadata was invalid: [('dbname', '中文')"}
         self.database_wrap.using_database(db_name=invalid_db_name, check_task=CheckTasks.err_res,
-                                          check_items={ct.err_code: 1, ct.err_msg: "database not exist"})
+                                          check_items=error)
 
 
 @pytest.mark.tags(CaseLabel.RBAC)
 class TestDatabaseOperation(TestcaseBase):
+
+    def setup_method(self, method):
+        param_info.param_user = ct.default_user
+        param_info.param_password = ct.default_password
+        super().setup_method(method)
 
     def teardown_method(self, method):
         """
@@ -274,8 +329,8 @@ class TestDatabaseOperation(TestcaseBase):
             self.database_wrap.create_database(cf.gen_unique_str(prefix))
 
         # there are ct.max_database_num-1 dbs (default is not included)
-        error = {ct.err_code: 1,
-                 ct.err_msg: f"database number ({ct.max_database_num + 1}) exceeds max configuration ({ct.max_database_num})"}
+        error = {ct.err_code: 801,
+                 ct.err_msg: f"exceeded the limit number of database[limit={ct.max_database_num}]"}
         self.database_wrap.create_database(cf.gen_unique_str(prefix), check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/24182")
@@ -448,7 +503,9 @@ class TestDatabaseOperation(TestcaseBase):
 
         # drop db
         self.database_wrap.drop_database(db_name, check_task=CheckTasks.err_res,
-                                         check_items={ct.err_code: 1, ct.err_msg: "can not drop default database"})
+                                         check_items={ct.err_code: 65535,
+                                                      ct.err_msg: "database:%s not empty, must drop all "
+                                                                  "collections before drop database" % db_name})
 
         # drop collection and drop db
         collection_w.drop()
@@ -497,7 +554,8 @@ class TestDatabaseOperation(TestcaseBase):
 
         # verify current db
         self.utility_wrap.list_collections(check_task=CheckTasks.err_res,
-                                           check_items={ct.err_code: 1, ct.err_msg: "database not exist:"})
+                                           check_items={ct.err_code: 800,
+                                                        ct.err_msg: "database not found[database=%s]" % db_name})
         self.database_wrap.list_database()
         self.database_wrap.using_database(ct.default_db)
 
@@ -622,7 +680,8 @@ class TestDatabaseOtherApi(TestcaseBase):
         teardown method: drop collection and db
         """
         log.info("[database_teardown_method] Start teardown database test cases ...")
-
+        param_info.param_user = ct.default_user
+        param_info.param_password = ct.default_password
         self._connect()
 
         # clear db
@@ -661,11 +720,14 @@ class TestDatabaseOtherApi(TestcaseBase):
     @pytest.mark.parametrize("invalid_db_name", ["12-s", "12 s", "(mn)", "中文", "%$#"])
     def test_connect_invalid_db_name_2(self, host, port, invalid_db_name):
         # connect with invalid db
+        error = {ct.err_code: 800, ct.err_msg: "database not found[database=%s]" % invalid_db_name}
+        if invalid_db_name == "中文":
+            error = {ct.err_code: 1, ct.err_msg: "<metadata was invalid: [('dbname', '中文')"}
         self.connection_wrap.connect(host=host, port=port, db_name=invalid_db_name,
                                      user=ct.default_user, password=ct.default_password,
                                      secure=cf.param_info.param_secure,
                                      check_task=CheckTasks.err_res,
-                                     check_items={ct.err_code: 1, ct.err_msg: "database not found:"})
+                                     check_items=error)
 
     def test_connect_not_existed_db(self, host, port):
         """
@@ -873,11 +935,11 @@ class TestDatabaseOtherApi(TestcaseBase):
         # assert set(vec_res[0].keys()) == {ct.default_int64_field_name}
 
         # query iterator
-        self.collection_wrap.query_iterator(f"{ct.default_int64_field_name} <= 3000", limit=ct.default_limit * 10,
+        self.collection_wrap.query_iterator(expr=f"{ct.default_int64_field_name} <= 3000", batch_size=ct.default_limit * 10,
                                             partition_names=[partition_name],
                                             check_task=CheckTasks.check_query_iterator,
                                             check_items={"count": 1000,
-                                                         "limit": ct.default_limit * 10})
+                                                         "batch_size": ct.default_limit * 10})
 
     def prepare_data_for_db_search(self):
         """
@@ -885,6 +947,8 @@ class TestDatabaseOtherApi(TestcaseBase):
         :return:
         :rtype:
         """
+        param_info.param_user = ct.default_user
+        param_info.param_password = ct.default_password
         self._connect()
 
         # create a db

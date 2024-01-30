@@ -270,6 +270,7 @@ class CheckTasks:
     check_merge_compact = "check_merge_compact"
     check_role_property = "check_role_property"
     check_permission_deny = "check_permission_deny"
+    check_auth_failure = "check_auth_failure"
     check_value_equal = "check_value_equal"
     check_rg_property = "check_resource_group_property"
     check_describe_collection_property = "check_describe_collection_property"

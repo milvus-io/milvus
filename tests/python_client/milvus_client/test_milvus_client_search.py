@@ -178,6 +178,7 @@ class TestMilvusClientSearchValid(TestcaseBase):
         """
         client = self._connect(enable_milvus_client_api=True)
         collection_name = cf.gen_unique_str(prefix)
+        client_w.using_database(client, "default")
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         collections = client_w.list_collections(client)[0]

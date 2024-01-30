@@ -127,7 +127,7 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 			return errors.New("err")
 		}
 
-		core := newTestCore(withValidProxyManager(), withMeta(meta), withBroker(broker))
+		core := newTestCore(withMeta(meta), withBroker(broker))
 		task := &alterCollectionTask{
 			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.AlterCollectionRequest{
@@ -161,7 +161,7 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 			return nil
 		}
 
-		core := newTestCore(withValidProxyManager(), withMeta(meta), withBroker(broker))
+		core := newTestCore(withMeta(meta), withBroker(broker))
 		task := &alterCollectionTask{
 			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.AlterCollectionRequest{

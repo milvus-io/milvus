@@ -745,7 +745,7 @@ func TestProxy(t *testing.T) {
 
 		_, _ = proxy.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   0,
+				MsgType:   commonpb.MsgType_CreateAlias,
 				MsgID:     0,
 				Timestamp: 0,
 				SourceID:  0,
@@ -795,13 +795,13 @@ func TestProxy(t *testing.T) {
 
 		_, _ = proxy.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   0,
+				MsgType:   commonpb.MsgType_AlterAlias,
 				MsgID:     0,
 				Timestamp: 0,
 				SourceID:  0,
 			},
 			DbName:         dbName,
-			CollectionName: collectionName,
+			CollectionName: "alias",
 		})
 
 		nonExistingCollName := "coll_name_random_zarathustra"
@@ -829,14 +829,17 @@ func TestProxy(t *testing.T) {
 
 		_, _ = proxy.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   0,
+				MsgType:   commonpb.MsgType_DropAlias,
 				MsgID:     0,
 				Timestamp: 0,
 				SourceID:  0,
 			},
 			DbName:         dbName,
-			CollectionName: collectionName,
+			CollectionName: "alias",
 		})
+
+		_, err = globalMetaCache.GetCollectionID(ctx, dbName, "alias")
+		assert.Error(t, err)
 	})
 
 	wg.Add(1)
@@ -1993,15 +1996,6 @@ func TestProxy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 		assert.Equal(t, "", resp.Reason)
-
-		// release collection cache
-		resp, err = proxy.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{
-			Base:           nil,
-			CollectionName: collectionName,
-		})
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
-		assert.Equal(t, "", resp.Reason)
 	})
 
 	wg.Add(1)
@@ -2297,12 +2291,18 @@ func TestProxy(t *testing.T) {
 
 		// invalidate meta cache
 		resp, err = proxy.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{
-			Base:           nil,
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_DropPartition,
+			},
 			DbName:         dbName,
 			CollectionName: collectionName,
+			PartitionName:  partitionName,
 		})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		_, err = globalMetaCache.GetPartitionID(ctx, dbName, collectionName, partitionName)
+		assert.Error(t, err)
 
 		// drop non-exist partition -> fail
 
@@ -2311,6 +2311,17 @@ func TestProxy(t *testing.T) {
 			DbName:         dbName,
 			CollectionName: otherCollectionName,
 			PartitionName:  partitionName,
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		// not specify partition name
+		resp, err = proxy.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_DropPartition,
+			},
+			DbName:         dbName,
+			CollectionName: collectionName,
 		})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
@@ -2406,20 +2417,17 @@ func TestProxy(t *testing.T) {
 
 		// invalidate meta cache
 		resp, err = proxy.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{
-			Base:           nil,
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_DropCollection,
+			},
 			DbName:         dbName,
 			CollectionName: collectionName,
 		})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 
-		// release collection load cache
-		resp, err = proxy.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{
-			Base:           nil,
-			CollectionName: collectionName,
-		})
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+		_, err = globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
+		assert.Error(t, err)
 	})
 
 	wg.Add(1)

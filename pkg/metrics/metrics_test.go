@@ -21,6 +21,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
+	"golang.org/x/sync/errgroup"
 )
 
 func TestRegisterMetrics(t *testing.T) {
@@ -49,4 +50,22 @@ func TestGetRegisterer(t *testing.T) {
 	register = GetRegisterer()
 	assert.NotNil(t, register)
 	assert.Equal(t, r, register)
+}
+
+func TestRegisterRuntimeInfo(t *testing.T) {
+	g := &errgroup.Group{}
+	g.Go(func() error {
+		RegisterMetaType("etcd")
+		return nil
+	})
+	g.Go(func() error {
+		RegisterMQType("pulsar")
+		return nil
+	})
+	g.Wait()
+
+	infoMutex.Lock()
+	defer infoMutex.Unlock()
+	assert.Equal(t, "etcd", metaType)
+	assert.Equal(t, "pulsar", mqType)
 }
