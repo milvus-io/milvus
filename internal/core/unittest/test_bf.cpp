@@ -36,38 +36,10 @@ GenFloatVecs(int dim,
     return dataset.get_col<float>(fvec);
 }
 
-// (offset, distance)
-std::vector<std::tuple<int, float>>
-Distances(const float* base,
-          const float* query,  // one query.
-          int nb,
-          int dim,
-          const knowhere::MetricType& metric) {
-    if (milvus::IsMetricType(metric, knowhere::metric::L2)) {
-        std::vector<std::tuple<int, float>> res;
-        for (int i = 0; i < nb; i++) {
-            res.emplace_back(i, L2(base + i * dim, query, dim));
-        }
-        return res;
-    } else if (milvus::IsMetricType(metric, knowhere::metric::IP)) {
-        std::vector<std::tuple<int, float>> res;
-        for (int i = 0; i < nb; i++) {
-            res.emplace_back(i, IP(base + i * dim, query, dim));
-        }
-        return res;
-    } else {
-        PanicInfo(MetricTypeInvalid, "invalid metric type");
-    }
-}
-
-std::vector<int>
-GetOffsets(const std::vector<std::tuple<int, float>>& tuples, int k) {
-    std::vector<int> offsets;
-    for (int i = 0; i < k; i++) {
-        auto [offset, distance] = tuples[i];
-        offsets.push_back(offset);
-    }
-    return offsets;
+bool
+is_supported_float_metric(const std::string& metric) {
+    return milvus::IsMetricType(metric, knowhere::metric::L2) ||
+           milvus::IsMetricType(metric, knowhere::metric::IP);
 }
 
 // offsets
@@ -78,32 +50,31 @@ Ref(const float* base,
     int dim,
     int topk,
     const knowhere::MetricType& metric) {
-    auto res = Distances(base, query, nb, dim, metric);
-    std::sort(res.begin(), res.end());
-    if (milvus::IsMetricType(metric, knowhere::metric::L2)) {
-        // do nothing
-    } else if (milvus::IsMetricType(metric, knowhere::metric::IP)) {
-        std::reverse(res.begin(), res.end());
-    } else {
+    if (!is_supported_float_metric(metric)) {
         PanicInfo(MetricTypeInvalid, "invalid metric type");
     }
-    return GetOffsets(res, topk);
+    std::vector<std::tuple<float, int>> res;
+    auto dist_f = milvus::IsMetricType(metric, knowhere::metric::L2) ? L2 : IP;
+    for (int i = 0; i < nb; i++) {
+        res.emplace_back(dist_f(base + i * dim, query, dim), i);
+    }
+    std::sort(res.begin(), res.end());
+    if (milvus::IsMetricType(metric, knowhere::metric::IP)) {
+        std::reverse(res.begin(), res.end());
+    }
+    std::vector<int> offsets;
+    for (int i = 0; i < topk; i++) {
+        auto [distance, offset] = res[i];
+        offsets.push_back(offset);
+    }
+    return offsets;
 }
 
-bool
+void
 AssertMatch(const std::vector<int>& ref, const int64_t* ans) {
     for (int i = 0; i < ref.size(); i++) {
-        if (ref[i] != ans[i]) {
-            return false;
-        }
+        ASSERT_EQ(ref[i], ans[i]);
     }
-    return true;
-}
-
-bool
-is_supported_float_metric(const std::string& metric) {
-    return milvus::IsMetricType(metric, knowhere::metric::L2) ||
-           milvus::IsMetricType(metric, knowhere::metric::IP);
 }
 
 }  // namespace
@@ -130,8 +101,12 @@ class TestFloatSearchBruteForce : public ::testing::Test {
             // ASSERT_ANY_THROW(BruteForceSearch(dataset, base.data(), nb, bitset_view));
             return;
         }
-        auto result = BruteForceSearch(
-            dataset, base.data(), nb, knowhere::Json(), bitset_view, DataType::VECTOR_FLOAT);
+        auto result = BruteForceSearch(dataset,
+                                       base.data(),
+                                       nb,
+                                       knowhere::Json(),
+                                       bitset_view,
+                                       DataType::VECTOR_FLOAT);
         for (int i = 0; i < nq; i++) {
             auto ref = Ref(base.data(),
                            query.data() + i * dim,
