@@ -115,33 +115,6 @@ func GetOldestBufferPolicy(num int) SyncPolicy {
 	}, "oldest buffers")
 }
 
-/*
-func GetMemoryHighPolicy(memoryHigh *atomic.Bool) SyncPolicy {
-	return wrapSelectSegmentFuncPolicy(func(buffers []*segmentBuffer, ts typeutil.Timestamp) []int64 {
-		if !memoryHigh.Load() {
-			return nil
-		}
-
-		h := &SegStartPosHeap{}
-		heap.Init(h)
-
-		maxNum := paramtable.Get().DataNodeCfg.MemoryForceSyncSegmentNum.GetAsInt()
-		minNum := paramtable.Get().DataNodeCfg.MemoryForceSyncSegmentMinNum.GetAsInt()
-		minSize := paramtable.Get().DataNodeCfg.MemoryForceSyncMinSize.GetAsInt64()
-		for _, buf := range buffers {
-			if h.Len() >= minNum && buf.MemorySize() < minSize {
-				continue
-			}
-			heap.Push(h, buf)
-			if h.Len() > maxNum {
-				heap.Pop(h)
-			}
-		}
-
-		return lo.Map(*h, func(buf *segmentBuffer, _ int) int64 { return buf.segmentID })
-	}, "memory high")
-}*/
-
 // SegMemSizeHeap implement max-heap for sorting.
 type SegStartPosHeap []*segmentBuffer
 
