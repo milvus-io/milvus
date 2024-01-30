@@ -34,6 +34,11 @@ use_dynamic_simd = ON
 ifdef USE_DYNAMIC_SIMD
 	use_dynamic_simd = ${USE_DYNAMIC_SIMD}
 endif
+
+use_opendal = OFF
+ifdef USE_OPENDAL
+	use_opendal = ${USE_OPENDAL}
+endif
 # golangci-lint
 GOLANGCI_LINT_VERSION := 1.55.2
 GOLANGCI_LINT_OUTPUT := $(shell $(INSTALL_PATH)/golangci-lint --version 2>/dev/null)
@@ -197,7 +202,7 @@ download-milvus-proto:
 
 build-3rdparty:
 	@echo "Build 3rdparty ..."
-	@(env bash $(PWD)/scripts/3rdparty_build.sh)
+	@(env bash $(PWD)/scripts/3rdparty_build.sh -o ${use_opendal})
 
 generated-proto-without-cpp: download-milvus-proto
 	@echo "Generate proto ..."
@@ -213,19 +218,19 @@ generated-proto: download-milvus-proto build-3rdparty
 
 build-cpp: generated-proto
 	@echo "Building Milvus cpp library ..."
-	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine})
+	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -o ${use_opendal})
 
 build-cpp-gpu: generated-proto
 	@echo "Building Milvus cpp gpu library ... "
-	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -g -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine})
+	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -g -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -o ${use_opendal})
 
 build-cpp-with-unittest: generated-proto
 	@echo "Building Milvus cpp library with unittest ... "
-	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -u -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine})
+	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -u -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -o ${use_opendal})
 
 build-cpp-with-coverage: generated-proto
 	@echo "Building Milvus cpp library with coverage and unittest ..."
-	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -a ${use_asan} -u -c -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine})
+	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -a ${use_asan} -u -c -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -o ${use_opendal})
 
 check-proto-product: generated-proto
 	 @(env bash $(PWD)/scripts/check_proto_product.sh)

@@ -403,10 +403,9 @@ class StringIndexMarisaTestV2 : public StringIndexBaseTest {
               GeneratedData& dataset,
               std::vector<std::string>& scalars) {
         auto arrow_schema = TestSchema(vec_size);
-        auto schema_options = std::make_shared<milvus_storage::SchemaOptions>();
-        schema_options->primary_column = "pk";
-        schema_options->version_column = "ts";
-        schema_options->vector_column = "vec";
+        milvus_storage::SchemaOptions schema_options{.primary_column = "pk",
+                                                     .version_column = "ts",
+                                                     .vector_column = "vec"};
         auto schema = std::make_shared<milvus_storage::Schema>(arrow_schema,
                                                                schema_options);
         EXPECT_TRUE(schema->Validate().ok());
@@ -419,7 +418,7 @@ class StringIndexMarisaTestV2 : public StringIndexBaseTest {
         auto space = std::move(space_res.value());
         auto rec = TestRecords(vec_size, dataset, scalars);
         auto write_opt = milvus_storage::WriteOption{nb};
-        space->Write(rec.get(), &write_opt);
+        space->Write(*rec, write_opt);
         return std::move(space);
     }
     void

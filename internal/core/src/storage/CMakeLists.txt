@@ -49,7 +49,6 @@ set(STORAGE_FILES
     storage_c.cpp
     ChunkManager.cpp
     MinioChunkManager.cpp
-    OpenDALChunkManager.cpp
     AliyunSTSClient.cpp
     AliyunCredentialsProvider.cpp
     MemFileManagerImpl.cpp
@@ -59,6 +58,10 @@ set(STORAGE_FILES
     ChunkCache.cpp
     TencentCloudCredentialsProvider.cpp
     TencentCloudSTSClient.cpp)
+
+if(USE_OPENDAL)
+    list(APPEND STORAGE_FILES OpenDALChunkManager.cpp)
+endif()
 
 add_library(milvus_storage SHARED ${STORAGE_FILES})
 
