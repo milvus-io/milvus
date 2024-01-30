@@ -4,6 +4,7 @@ from pymilvus import DefaultConfig
 from base.client_base import TestcaseBase
 import common.common_type as ct
 import common.common_func as cf
+from common.common_type import CaseLabel, CheckTasks
 from common.code_mapping import ConnectionErrorMessage as cem
 
 # CONNECT_TIMEOUT = 12
@@ -1006,27 +1007,23 @@ class TestConnectUserPasswordInvalid(TestcaseBase):
         excepted: connected is false
         """
         self.connection_wrap.connect(host=host, port=port,
-                                     check_task=ct.CheckTasks.err_res,
-                                     check_items={ct.err_code: 2,
-                                                  ct.err_msg: "Fail connecting to server"})
+                                     check_task=CheckTasks.check_auth_failure)
 
     @pytest.mark.tags(ct.CaseLabel.RBAC)
-    @pytest.mark.parametrize("user", ["alice3333"])
-    def test_connect_with_invalid_user_connection(self, host, port, user):
+    def test_connect_with_invalid_user_connection(self, host, port):
         """
         target: test the nonexistent to connect
         method: connect with the nonexistent user
         excepted: connected is false
         """
-        self.connection_wrap.connect(host=host, port=port, user=user, password="abc123",
-                                     check_task=ct.CheckTasks.err_res,
-                                     check_items={ct.err_code: 2,
-                                                  ct.err_msg: "Fail connecting to server"})
+        user_name = cf.gen_unique_str()
+        password = cf.gen_str_by_length()
+        self.connection_wrap.connect(host=host, port=port, user=user_name, password=password,
+                                     check_task=CheckTasks.check_auth_failure)
 
     @pytest.mark.tags(ct.CaseLabel.RBAC)
-    @pytest.mark.parametrize("user", ["anny015"])
     @pytest.mark.parametrize("connect_name", [DefaultConfig.DEFAULT_USING])
-    def test_connect_with_password_invalid(self, host, port, user, connect_name):
+    def test_connect_with_password_invalid(self, host, port, connect_name):
         """
         target: test the wrong password when connecting
         method: connect with the wrong password
@@ -1037,11 +1034,11 @@ class TestConnectUserPasswordInvalid(TestcaseBase):
                                      password=ct.default_password, check_task=ct.CheckTasks.ccr)
 
         # 2.create a credential
-        self.utility_wrap.create_user(user=user, password="qwaszx0")
+        user_name = cf.gen_unique_str()
+        password = cf.gen_str_by_length()
+        self.utility_wrap.create_user(user=user_name, password=password)
 
         # 3.connect with the created user and wrong password
         self.connection_wrap.disconnect(alias=connect_name)
-        self.connection_wrap.connect(host=host, port=port, user=user, password=ct.default_password,
-                                     check_task=ct.CheckTasks.err_res,
-                                     check_items={ct.err_code: 2,
-                                                  ct.err_msg: "Fail connecting to server"})
+        self.connection_wrap.connect(host=host, port=port, user=user_name, password=ct.default_password,
+                                     check_task=CheckTasks.check_auth_failure)
