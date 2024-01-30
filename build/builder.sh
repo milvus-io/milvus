@@ -2,9 +2,6 @@
 
 set -euo pipefail
 
-# hot fix for docker-compose.yml, force builder service to use host network
-sed -i '/builder:/,/^\s*$/s/image: \${IMAGE_REPO}\/milvus-env:\${OS_NAME}-\${DATE_VERSION}/&\n    network_mode: "host"/' docker-compose.yml
-
 # Absolute path to the toplevel milvus directory.
 toplevel=$(dirname "$(cd "$(dirname "${0}")"; pwd)")
 
