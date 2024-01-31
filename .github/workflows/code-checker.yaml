@@ -58,6 +58,7 @@ jobs:
         env:
           OS_NAME: 'ubuntu20.04'
         run: |
+          export IS_NETWORK_MODE_HOST=false
           ./build/builder.sh /bin/bash -c "make check-proto-product && make verifiers"
 
   amazonlinux:
@@ -84,4 +85,5 @@ jobs:
       - name: Code Check
         run: |
           sed -i 's/ubuntu20.04/amazonlinux2023/g' .env
+          export IS_NETWORK_MODE_HOST=false
           ./build/builder.sh /bin/bash -c "make install"

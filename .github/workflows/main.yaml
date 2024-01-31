@@ -89,6 +89,7 @@ jobs:
           kind: 'cpp'
       - name: Build
         run: |
+          export IS_NETWORK_MODE_HOST=false
           ./build/builder.sh /bin/bash -c "make USE_ASAN=${{env.useasan}} build-cpp-with-coverage"
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
@@ -128,6 +129,7 @@ jobs:
           chmod +x build/builder.sh
           chmod +x scripts/*
           chmod +x internal/core/output/unittest/*
+          export IS_NETWORK_MODE_HOST=false
           ./build/builder.sh /bin/bash -c ./scripts/run_cpp_codecov.sh
       - name: Archive result
         uses: actions/upload-artifact@v4
@@ -165,6 +167,7 @@ jobs:
         run: |
           chmod +x build/builder.sh
           chmod +x scripts/run_go_codecov.sh
+          export IS_NETWORK_MODE_HOST=false
           ./build/builder.sh /bin/bash -c ./scripts/run_go_codecov.sh
       - name: Archive result
         uses: actions/upload-artifact@v4
@@ -202,6 +205,7 @@ jobs:
         run: |
           chmod +x build/builder.sh
           chmod +x scripts/run_intergration_test.sh
+          export IS_NETWORK_MODE_HOST=false
           ./build/builder.sh /bin/bash -c ./scripts/run_intergration_test.sh
       - name: Archive result
         uses: actions/upload-artifact@v4

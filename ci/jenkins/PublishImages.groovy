@@ -45,6 +45,7 @@ pipeline {
                     steps {
                         container('main') {
                             script {
+
                                 sh './build/set_docker_mirror.sh'
                                 sh "build/builder.sh /bin/bash -c \"make install\""
 
@@ -64,6 +65,7 @@ pipeline {
                                         export MILVUS_IMAGE_REPO="${env.TARGET_REPO}/milvus"
                                         export MILVUS_HARBOR_IMAGE_REPO="${env.HARBOR_REPO}/milvus/milvus"
                                         export MILVUS_IMAGE_TAG="${imageTag}-amd64"
+                                        export IS_NETWORK_MODE_HOST="true"
                                         build/build_image.sh
                                         docker push \${MILVUS_IMAGE_REPO}:\${MILVUS_IMAGE_TAG}
                                         docker logout
