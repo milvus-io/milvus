@@ -19,6 +19,8 @@ package binlog
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"math"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -28,6 +30,7 @@ import (
 )
 
 type reader struct {
+	ctx    context.Context
 	cm     storage.ChunkManager
 	schema *schemapb.CollectionSchema
 
@@ -38,13 +41,15 @@ type reader struct {
 	filters []Filter
 }
 
-func NewReader(cm storage.ChunkManager,
+func NewReader(ctx context.Context,
+	cm storage.ChunkManager,
 	schema *schemapb.CollectionSchema,
 	paths []string,
 	tsStart,
 	tsEnd uint64,
 ) (*reader, error) {
 	r := &reader{
+		ctx:    ctx,
 		cm:     cm,
 		schema: schema,
 	}
@@ -62,7 +67,7 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64) error {
 	if len(paths) < 1 {
 		return merr.WrapErrImportFailed("no insert binlogs to import")
 	}
-	insertLogs, err := listInsertLogs(r.cm, paths[0])
+	insertLogs, err := listInsertLogs(r.ctx, r.cm, paths[0])
 	if err != nil {
 		return err
 	}
@@ -98,7 +103,7 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64) error {
 func (r *reader) readDelete(deltaLogs []string, tsStart, tsEnd uint64) (*storage.DeleteData, error) {
 	deleteData := storage.NewDeleteData(nil, nil)
 	for _, path := range deltaLogs {
-		reader, err := newBinlogReader(r.cm, path)
+		reader, err := newBinlogReader(r.ctx, r.cm, path)
 		if err != nil {
 			return nil, err
 		}
@@ -128,7 +133,10 @@ func (r *reader) Read() (*storage.InsertData, error) {
 		return nil, err
 	}
 	if r.readIdx == len(r.insertLogs[0]) {
-		return nil, nil
+		// In the binlog import scenario, all data may be filtered out
+		// due to time range or deletions. Therefore, we use io.EOF as
+		// the indicator of the read end, instead of InsertData with 0 rows.
+		return nil, io.EOF
 	}
 	for fieldID, binlogs := range r.insertLogs {
 		field := typeutil.GetField(r.schema, fieldID)
@@ -136,11 +144,11 @@ func (r *reader) Read() (*storage.InsertData, error) {
 			return nil, merr.WrapErrFieldNotFound(fieldID)
 		}
 		path := binlogs[r.readIdx]
-		fr, err := newFieldReader(r.cm, field, path)
+		fr, err := newFieldReader(r.ctx, r.cm, field, path)
 		if err != nil {
 			return nil, err
 		}
-		fieldData, err := fr.Next(-1)
+		fieldData, err := fr.Next()
 		if err != nil {
 			fr.Close()
 			return nil, err
@@ -185,7 +193,7 @@ OUTER:
 		row := insertData.GetRow(i)
 		err = result.Append(row)
 		if err != nil {
-			return nil, err
+			return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to append row, err=%s", err.Error()))
 		}
 	}
 	return result, nil

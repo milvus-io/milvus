@@ -2846,6 +2846,8 @@ type dataNodeConfig struct {
 	ChannelWorkPoolSize ParamItem `refreshable:"true"`
 
 	UpdateChannelCheckpointMaxParallel ParamItem `refreshable:"true"`
+
+	MaxConcurrentImportTaskNum ParamItem `refreshable:"true"`
 }
 
 func (p *dataNodeConfig) init(base *BaseTable) {
@@ -3080,6 +3082,16 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		DefaultValue: "1000",
 	}
 	p.UpdateChannelCheckpointMaxParallel.Init(base.mgr)
+
+	p.MaxConcurrentImportTaskNum = ParamItem{
+		Key:          "datanode.import.maxConcurrentTaskNum",
+		Version:      "2.4.0",
+		Doc:          "The maximum number of import/pre-import tasks allowed to run concurrently on a datanode.",
+		DefaultValue: "16",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.MaxConcurrentImportTaskNum.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

@@ -192,7 +192,7 @@ func (t *SyncTask) Run() (err error) {
 
 	t.metacache.UpdateSegments(metacache.MergeSegmentAction(actions...), metacache.WithSegmentIDs(t.segment.SegmentID()))
 
-	log.Info("task done")
+	log.Info("task done", zap.Float64("flushedSize", totalSize))
 
 	if !t.isFlush {
 		metrics.DataNodeAutoFlushBufferCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SuccessLabel, t.level.String()).Inc()
@@ -338,4 +338,8 @@ func (t *SyncTask) StartPosition() *msgpb.MsgPosition {
 
 func (t *SyncTask) ChannelName() string {
 	return t.channelName
+}
+
+func (t *SyncTask) Binlogs() (map[int64]*datapb.FieldBinlog, map[int64]*datapb.FieldBinlog, *datapb.FieldBinlog) {
+	return t.insertBinlogs, t.statsBinlogs, t.deltaBinlog
 }

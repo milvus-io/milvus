@@ -17,7 +17,9 @@
 package parquet
 
 import (
+	"context"
 	"fmt"
+	"io"
 
 	"github.com/apache/arrow/go/v12/arrow/memory"
 	"github.com/apache/arrow/go/v12/parquet"
@@ -35,16 +37,15 @@ type Reader struct {
 	reader *file.Reader
 
 	bufferSize int
+	count      int64
 
 	schema *schemapb.CollectionSchema
 	frs    map[int64]*FieldReader // fieldID -> FieldReader
 }
 
-func NewReader(schema *schemapb.CollectionSchema, cmReader storage.FileReader, bufferSize int) (*Reader, error) {
-	const pqBufSize = 32 * 1024 * 1024 // TODO: dyh, make if configurable
-	size := calcBufferSize(pqBufSize, schema)
+func NewReader(ctx context.Context, schema *schemapb.CollectionSchema, cmReader storage.FileReader, bufferSize int) (*Reader, error) {
 	reader, err := file.NewParquetReader(cmReader, file.WithReadProps(&parquet.ReaderProperties{
-		BufferSize:            int64(size),
+		BufferSize:            int64(bufferSize),
 		BufferedStreamEnabled: true,
 	}))
 	if err != nil {
@@ -58,13 +59,18 @@ func NewReader(schema *schemapb.CollectionSchema, cmReader storage.FileReader, b
 		return nil, merr.WrapErrImportFailed(fmt.Sprintf("new parquet file reader failed, err=%v", err))
 	}
 
-	crs, err := CreateFieldReaders(fileReader, schema)
+	crs, err := CreateFieldReaders(ctx, fileReader, schema)
+	if err != nil {
+		return nil, err
+	}
+	count, err := estimateReadCountPerBatch(bufferSize, schema)
 	if err != nil {
 		return nil, err
 	}
 	return &Reader{
 		reader:     reader,
 		bufferSize: bufferSize,
+		count:      count,
 		schema:     schema,
 		frs:        crs,
 	}, nil
@@ -78,7 +84,7 @@ func (r *Reader) Read() (*storage.InsertData, error) {
 OUTER:
 	for {
 		for fieldID, cr := range r.frs {
-			data, err := cr.Next(1)
+			data, err := cr.Next(r.count)
 			if err != nil {
 				return nil, err
 			}
@@ -96,7 +102,7 @@ OUTER:
 	}
 	for fieldID := range r.frs {
 		if insertData.Data[fieldID].RowNum() == 0 {
-			return nil, nil
+			return nil, io.EOF
 		}
 	}
 	return insertData, nil

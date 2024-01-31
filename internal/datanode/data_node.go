@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/broker"
+	"github.com/milvus-io/milvus/internal/datanode/importv2"
 	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
 	"github.com/milvus-io/milvus/internal/datanode/writebuffer"
 	"github.com/milvus-io/milvus/internal/kv"
@@ -92,6 +93,7 @@ type DataNode struct {
 
 	syncMgr            syncmgr.SyncManager
 	writeBufferManager writebuffer.BufferManager
+	importManager      *importv2.Manager
 
 	clearSignal              chan string // vchannel name
 	segmentCache             *Cache
@@ -286,6 +288,8 @@ func (node *DataNode) Init() error {
 
 		node.writeBufferManager = writebuffer.NewManager(syncMgr)
 
+		node.importManager = importv2.NewManager(node.syncMgr, node.chunkManager)
+
 		node.channelCheckpointUpdater = newChannelCheckpointUpdater(node)
 
 		log.Info("init datanode done", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("Address", node.address))
@@ -379,6 +383,8 @@ func (node *DataNode) Start() error {
 
 		go node.compactionExecutor.start(node.ctx)
 
+		go node.importManager.Start()
+
 		if Params.DataNodeCfg.DataNodeTimeTickByRPC.GetAsBool() {
 			node.timeTickSender = newTimeTickSender(node.broker, node.session.ServerID,
 				retry.Attempts(20), retry.Sleep(time.Millisecond*100))
@@ -451,6 +457,10 @@ func (node *DataNode) Stop() error {
 
 		if node.channelCheckpointUpdater != nil {
 			node.channelCheckpointUpdater.close()
+		}
+
+		if node.importManager != nil {
+			node.importManager.Close()
 		}
 
 		node.stopWaiter.Wait()

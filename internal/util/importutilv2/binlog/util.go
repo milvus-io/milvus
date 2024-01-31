@@ -52,8 +52,8 @@ func readData(reader *storage.BinlogReader, et storage.EventTypeCode) ([]any, er
 	return rowsSet, nil
 }
 
-func newBinlogReader(cm storage.ChunkManager, path string) (*storage.BinlogReader, error) {
-	bytes, err := cm.Read(context.TODO(), path) // TODO: dyh, resolve context, and checks if the error is a retryable error
+func newBinlogReader(ctx context.Context, cm storage.ChunkManager, path string) (*storage.BinlogReader, error) {
+	bytes, err := cm.Read(ctx, path) // TODO: dyh, checks if the error is a retryable error
 	if err != nil {
 		return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to open binlog %s", path))
 	}
@@ -65,8 +65,8 @@ func newBinlogReader(cm storage.ChunkManager, path string) (*storage.BinlogReade
 	return reader, nil
 }
 
-func listInsertLogs(cm storage.ChunkManager, insertPrefix string) (map[int64][]string, error) {
-	insertLogPaths, _, err := cm.ListWithPrefix(context.Background(), insertPrefix, true)
+func listInsertLogs(ctx context.Context, cm storage.ChunkManager, insertPrefix string) (map[int64][]string, error) {
+	insertLogPaths, _, err := cm.ListWithPrefix(ctx, insertPrefix, true)
 	if err != nil {
 		return nil, err
 	}

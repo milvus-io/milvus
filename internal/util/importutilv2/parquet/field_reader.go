@@ -40,8 +40,8 @@ type FieldReader struct {
 	field *schemapb.FieldSchema
 }
 
-func NewFieldReader(reader *pqarrow.FileReader, columnIndex int, field *schemapb.FieldSchema) (*FieldReader, error) {
-	columnReader, err := reader.GetColumn(context.Background(), columnIndex) // TODO: dyh, resolve context
+func NewFieldReader(ctx context.Context, reader *pqarrow.FileReader, columnIndex int, field *schemapb.FieldSchema) (*FieldReader, error) {
+	columnReader, err := reader.GetColumn(ctx, columnIndex)
 	if err != nil {
 		return nil, err
 	}

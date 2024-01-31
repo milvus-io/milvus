@@ -159,7 +159,7 @@ func (r *rowParser) combineDynamicRow(dynamicValues map[string]any, row Row) err
 		row[dynamicFieldID] = data
 	} else {
 		// case 3
-		row[dynamicFieldID] = "{}"
+		row[dynamicFieldID] = []byte("{}")
 	}
 	return nil
 }
