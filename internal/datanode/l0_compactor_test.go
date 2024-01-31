@@ -225,6 +225,39 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactBatch() {
 
 func (s *LevelZeroCompactionTaskSuite) TestUploadByCheck() {
 	ctx := context.Background()
+	s.Run("uploadByCheck directly composeDeltalog failed", func() {
+		s.SetupTest()
+		s.mockMeta.EXPECT().Collection().Return(1)
+		s.mockMeta.EXPECT().GetSegmentByID(mock.Anything).Return(nil, false).Once()
+
+		segments := map[int64]*storage.DeleteData{100: s.dData}
+		results := make(map[int64]*datapb.CompactionSegment)
+		err := s.task.uploadByCheck(ctx, false, segments, results)
+		s.Error(err)
+		s.Equal(0, len(results))
+	})
+
+	s.Run("uploadByCheck directly Upload failed", func() {
+		s.SetupTest()
+		s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(errors.New("mock upload failed"))
+		s.mockMeta.EXPECT().Collection().Return(1)
+		s.mockMeta.EXPECT().GetSegmentByID(
+			mock.MatchedBy(func(ID int64) bool {
+				return ID == 100
+			}), mock.Anything).
+			Return(metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 100, PartitionID: 10}, nil), true)
+
+		s.mockAlloc.EXPECT().AllocOne().Return(19530, nil)
+		blobKey := metautil.JoinIDPath(1, 10, 100, 19530)
+		blobPath := path.Join(common.SegmentDeltaLogPath, blobKey)
+		s.mockBinlogIO.EXPECT().JoinFullPath(mock.Anything, mock.Anything).Return(blobPath)
+
+		segments := map[int64]*storage.DeleteData{100: s.dData}
+		results := make(map[int64]*datapb.CompactionSegment)
+		err := s.task.uploadByCheck(ctx, false, segments, results)
+		s.Error(err)
+		s.Equal(0, len(results))
+	})
 
 	s.Run("upload directly", func() {
 		s.SetupTest()

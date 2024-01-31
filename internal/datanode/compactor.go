@@ -511,10 +511,7 @@ func (t *compactionTask) compact() (*datapb.CompactionPlanResult, error) {
 		if len(paths) != 0 {
 			bs, err := t.download(ctxTimeout, paths)
 			if err != nil {
-				log.Warn("compact wrong, fail to download deltalogs",
-					zap.Int64("segment", segID),
-					zap.Strings("path", paths),
-					zap.Error(err))
+				log.Warn("compact wrong, fail to download deltalogs", zap.Int64("segment", segID), zap.Strings("path", paths), zap.Error(err))
 				return nil, err
 			}
 			dblobs[segID] = append(dblobs[segID], bs...)

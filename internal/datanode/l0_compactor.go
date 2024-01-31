@@ -334,17 +334,12 @@ func (t *levelZeroCompactionTask) uploadByCheck(ctx context.Context, requireChec
 		if !requireCheck || (dData.Size() >= paramtable.Get().DataNodeCfg.FlushDeleteBufferBytes.GetAsInt64()) {
 			blobs, binlog, err := t.composeDeltalog(segID, dData)
 			if err != nil {
-				log.Warn("L0 compaction composeDelta fail",
-					zap.Int64("segmentID", segID),
-					zap.Error(err))
+				log.Warn("L0 compaction composeDelta fail", zap.Int64("segmentID", segID), zap.Error(err))
 				return err
 			}
 			err = t.Upload(ctx, blobs)
 			if err != nil {
-				log.Warn("L0 compaction upload blobs fail",
-					zap.Int64("segmentID", segID),
-					zap.Any("binlog", binlog),
-					zap.Error(err))
+				log.Warn("L0 compaction upload blobs fail", zap.Int64("segmentID", segID), zap.Any("binlog", binlog), zap.Error(err))
 				return err
 			}
 
