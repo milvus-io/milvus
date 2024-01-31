@@ -1041,6 +1041,7 @@ func (node *Proxy) AlterCollection(ctx context.Context, request *milvuspb.AlterC
 		Condition:              NewTaskCondition(ctx),
 		AlterCollectionRequest: request,
 		rootCoord:              node.rootCoord,
+		queryCoord:             node.queryCoord,
 	}
 
 	log := log.Ctx(ctx).With(
