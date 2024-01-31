@@ -372,6 +372,8 @@ func (node *DataNode) Start() error {
 			return
 		}
 
+		node.writeBufferManager.Start()
+
 		node.stopWaiter.Add(1)
 		go node.BackGroundGC(node.clearSignal)
 
@@ -425,6 +427,10 @@ func (node *DataNode) Stop() error {
 			m.Close()
 			return true
 		})
+
+		if node.writeBufferManager != nil {
+			node.writeBufferManager.Stop()
+		}
 
 		if node.allocator != nil {
 			log.Info("close id allocator", zap.String("role", typeutil.DataNodeRole))

@@ -2827,6 +2827,7 @@ type dataNodeConfig struct {
 	// memory management
 	MemoryForceSyncEnable     ParamItem `refreshable:"true"`
 	MemoryForceSyncSegmentNum ParamItem `refreshable:"true"`
+	MemoryCheckInterval       ParamItem `refreshable:"true"`
 	MemoryWatermark           ParamItem `refreshable:"true"`
 
 	DataNodeTimeTickByRPC ParamItem `refreshable:"false"`
@@ -2938,6 +2939,15 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		DefaultValue: "1",
 	}
 	p.MemoryForceSyncSegmentNum.Init(base.mgr)
+
+	p.MemoryCheckInterval = ParamItem{
+		Key:          "datanode.memory.checkInterval",
+		Version:      "2.4.0",
+		DefaultValue: "3000", // milliseconds
+		Doc:          "the interal to check datanode memory usage, in milliseconds",
+		Export:       true,
+	}
+	p.MemoryCheckInterval.Init(base.mgr)
 
 	if os.Getenv(metricsinfo.DeployModeEnvKey) == metricsinfo.StandaloneDeployMode {
 		p.MemoryWatermark = ParamItem{

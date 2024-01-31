@@ -122,7 +122,7 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 
 	log.Info("receiving FlushSegments request")
 
-	err := node.writeBufferManager.FlushSegments(ctx, req.GetChannelName(), segmentIDs)
+	err := node.writeBufferManager.SealSegments(ctx, req.GetChannelName(), segmentIDs)
 	if err != nil {
 		log.Warn("failed to flush segments", zap.Error(err))
 		return merr.Status(err), nil
