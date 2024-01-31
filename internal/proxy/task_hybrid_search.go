@@ -19,7 +19,6 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -148,61 +147,51 @@ func (t *hybridSearchTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	futures := make([]*conc.Future[*searchTask], len(t.request.Requests))
+	t.searchTasks = make([]*searchTask, len(t.request.GetRequests()))
 	for index := range t.request.Requests {
 		searchReq := t.request.Requests[index]
-		future := conc.Go(func() (*searchTask, error) {
-			if len(searchReq.GetCollectionName()) == 0 {
-				searchReq.CollectionName = t.request.GetCollectionName()
-			} else if searchReq.GetCollectionName() != t.request.GetCollectionName() {
-				return nil, errors.New(fmt.Sprintf("inconsistent collection name in hybrid search request, "+
-					"expect %s, actual %s", searchReq.GetCollectionName(), t.request.GetCollectionName()))
-			}
 
-			searchReq.PartitionNames = t.request.GetPartitionNames()
-			searchReq.ConsistencyLevel = consistencyLevel
-			searchReq.GuaranteeTimestamp = guaranteeTs
-			searchReq.UseDefaultConsistency = useDefaultConsistency
-			searchReq.OutputFields = nil
+		if len(searchReq.GetCollectionName()) == 0 {
+			searchReq.CollectionName = t.request.GetCollectionName()
+		} else if searchReq.GetCollectionName() != t.request.GetCollectionName() {
+			return errors.New(fmt.Sprintf("inconsistent collection name in hybrid search request, "+
+				"expect %s, actual %s", searchReq.GetCollectionName(), t.request.GetCollectionName()))
+		}
 
-			st := &searchTask{
-				ctx:            ctx,
-				Condition:      NewTaskCondition(ctx),
-				collectionName: collectionName,
-				SearchRequest: &internalpb.SearchRequest{
-					Base: commonpbutil.NewMsgBase(
-						commonpbutil.WithMsgType(commonpb.MsgType_Search),
-						commonpbutil.WithSourceID(paramtable.GetNodeID()),
-					),
-					ReqID: paramtable.GetNodeID(),
-				},
-				request: searchReq,
-				tr:      timerecord.NewTimeRecorder("hybrid search"),
-				qc:      t.qc,
-				node:    t.node,
-				lb:      t.lb,
+		searchReq.PartitionNames = t.request.GetPartitionNames()
+		searchReq.ConsistencyLevel = consistencyLevel
+		searchReq.GuaranteeTimestamp = guaranteeTs
+		searchReq.UseDefaultConsistency = useDefaultConsistency
+		searchReq.OutputFields = nil
 
-				partitionKeyMode: partitionKeyMode,
-				resultBuf:        typeutil.NewConcurrentSet[*internalpb.SearchResults](),
-			}
-			err := initSearchRequest(ctx, st)
-			if err != nil {
-				return nil, err
-			}
+		t.searchTasks[index] = &searchTask{
+			ctx:            ctx,
+			Condition:      NewTaskCondition(ctx),
+			collectionName: collectionName,
+			SearchRequest: &internalpb.SearchRequest{
+				Base: commonpbutil.NewMsgBase(
+					commonpbutil.WithMsgType(commonpb.MsgType_Search),
+					commonpbutil.WithSourceID(paramtable.GetNodeID()),
+				),
+				ReqID:        paramtable.GetNodeID(),
+				DbID:         0, // todo
+				CollectionID: collID,
+			},
+			request: searchReq,
+			schema:  t.schema,
+			tr:      timerecord.NewTimeRecorder("hybrid search"),
+			qc:      t.qc,
+			node:    t.node,
+			lb:      t.lb,
 
-			return st, nil
-		})
-		futures[index] = future
-	}
-	err = conc.AwaitAll(futures...)
-	if err != nil {
-		log.Debug("init hybrid search request failed", zap.Error(err))
-		return err
-	}
-
-	t.searchTasks = make([]*searchTask, len(t.request.GetRequests()))
-	for i, future := range futures {
-		t.searchTasks[i] = future.Value()
+			partitionKeyMode: partitionKeyMode,
+			resultBuf:        typeutil.NewConcurrentSet[*internalpb.SearchResults](),
+		}
+		err := initSearchRequest(ctx, t.searchTasks[index])
+		if err != nil {
+			log.Debug("init hybrid search request failed", zap.Error(err))
+			return err
+		}
 	}
 
 	log.Debug("hybrid search preExecute done.",

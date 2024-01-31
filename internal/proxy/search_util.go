@@ -23,25 +23,10 @@ func initSearchRequest(ctx context.Context, t *searchTask) error {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "init search request")
 	defer sp.End()
 
-	collID, err := globalMetaCache.GetCollectionID(ctx, t.request.GetDbName(), t.collectionName)
-	if err != nil { // err is not nil if collection not exists
-		return err
-	}
-
-	log := log.Ctx(ctx).With(zap.Int64("collID", collID), zap.String("collName", t.collectionName))
-
-	t.SearchRequest.DbID = 0 // todo
-	t.SearchRequest.CollectionID = collID
-	if t.schema == nil {
-		t.schema, err = globalMetaCache.GetCollectionSchema(ctx, t.request.GetDbName(), t.collectionName)
-		if err != nil {
-			log.Warn("get collection schema failed", zap.Error(err))
-			return err
-		}
-	}
-
+	log := log.Ctx(ctx).With(zap.Int64("collID", t.GetCollectionID()), zap.String("collName", t.collectionName))
 	// fetch search_growing from search param
 	var ignoreGrowing bool
+	var err error
 	for i, kv := range t.request.GetSearchParams() {
 		if kv.GetKey() == IgnoreGrowingKey {
 			ignoreGrowing, err = strconv.ParseBool(kv.GetValue())

@@ -250,6 +250,8 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
+	t.SearchRequest.DbID = 0 // todo
+	t.SearchRequest.CollectionID = collID
 	log := log.Ctx(ctx).With(zap.Int64("collID", collID), zap.String("collName", collectionName))
 	t.schema, err = globalMetaCache.GetCollectionSchema(ctx, t.request.GetDbName(), collectionName)
 	if err != nil {
