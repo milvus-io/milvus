@@ -483,9 +483,7 @@ func (s *SegmentManager) SealAllSegments(ctx context.Context, collectionID Uniqu
 		}
 		// Decoupling the importing segment from the flush process.
 		// Hence, we seal and flush the importing segment without returning it.
-		// This approach prevents the flush validation of this
-		// importing segment (the flush validation for the importing
-		// segment will take place after unsetting the importing state).
+		// This approach prevents the flush validation of this importing segment.
 		if isImport && info.State == commonpb.SegmentState_Importing {
 			if err := s.meta.SetState(id, commonpb.SegmentState_Flushed); err != nil {
 				return nil, err
