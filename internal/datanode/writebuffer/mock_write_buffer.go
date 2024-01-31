@@ -102,45 +102,48 @@ func (_c *MockWriteBuffer_Close_Call) RunAndReturn(run func(bool)) *MockWriteBuf
 	return _c
 }
 
-// FlushSegments provides a mock function with given fields: ctx, segmentIDs
-func (_m *MockWriteBuffer) FlushSegments(ctx context.Context, segmentIDs []int64) error {
-	ret := _m.Called(ctx, segmentIDs)
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, []int64) error); ok {
-		r0 = rf(ctx, segmentIDs)
-	} else {
-		r0 = ret.Error(0)
+// EvictBuffer provides a mock function with given fields: policies
+func (_m *MockWriteBuffer) EvictBuffer(policies ...SyncPolicy) {
+	_va := make([]interface{}, len(policies))
+	for _i := range policies {
+		_va[_i] = policies[_i]
 	}
-
-	return r0
+	var _ca []interface{}
+	_ca = append(_ca, _va...)
+	_m.Called(_ca...)
 }
 
-// MockWriteBuffer_FlushSegments_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FlushSegments'
-type MockWriteBuffer_FlushSegments_Call struct {
+// MockWriteBuffer_EvictBuffer_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'EvictBuffer'
+type MockWriteBuffer_EvictBuffer_Call struct {
 	*mock.Call
 }
 
-// FlushSegments is a helper method to define mock.On call
-//   - ctx context.Context
-//   - segmentIDs []int64
-func (_e *MockWriteBuffer_Expecter) FlushSegments(ctx interface{}, segmentIDs interface{}) *MockWriteBuffer_FlushSegments_Call {
-	return &MockWriteBuffer_FlushSegments_Call{Call: _e.mock.On("FlushSegments", ctx, segmentIDs)}
+// EvictBuffer is a helper method to define mock.On call
+//   - policies ...SyncPolicy
+func (_e *MockWriteBuffer_Expecter) EvictBuffer(policies ...interface{}) *MockWriteBuffer_EvictBuffer_Call {
+	return &MockWriteBuffer_EvictBuffer_Call{Call: _e.mock.On("EvictBuffer",
+		append([]interface{}{}, policies...)...)}
 }
 
-func (_c *MockWriteBuffer_FlushSegments_Call) Run(run func(ctx context.Context, segmentIDs []int64)) *MockWriteBuffer_FlushSegments_Call {
+func (_c *MockWriteBuffer_EvictBuffer_Call) Run(run func(policies ...SyncPolicy)) *MockWriteBuffer_EvictBuffer_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].([]int64))
+		variadicArgs := make([]SyncPolicy, len(args)-0)
+		for i, a := range args[0:] {
+			if a != nil {
+				variadicArgs[i] = a.(SyncPolicy)
+			}
+		}
+		run(variadicArgs...)
 	})
 	return _c
 }
 
-func (_c *MockWriteBuffer_FlushSegments_Call) Return(_a0 error) *MockWriteBuffer_FlushSegments_Call {
-	_c.Call.Return(_a0)
+func (_c *MockWriteBuffer_EvictBuffer_Call) Return() *MockWriteBuffer_EvictBuffer_Call {
+	_c.Call.Return()
 	return _c
 }
 
-func (_c *MockWriteBuffer_FlushSegments_Call) RunAndReturn(run func(context.Context, []int64) error) *MockWriteBuffer_FlushSegments_Call {
+func (_c *MockWriteBuffer_EvictBuffer_Call) RunAndReturn(run func(...SyncPolicy)) *MockWriteBuffer_EvictBuffer_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -267,6 +270,90 @@ func (_c *MockWriteBuffer_HasSegment_Call) Return(_a0 bool) *MockWriteBuffer_Has
 }
 
 func (_c *MockWriteBuffer_HasSegment_Call) RunAndReturn(run func(int64) bool) *MockWriteBuffer_HasSegment_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// MemorySize provides a mock function with given fields:
+func (_m *MockWriteBuffer) MemorySize() int64 {
+	ret := _m.Called()
+
+	var r0 int64
+	if rf, ok := ret.Get(0).(func() int64); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(int64)
+	}
+
+	return r0
+}
+
+// MockWriteBuffer_MemorySize_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'MemorySize'
+type MockWriteBuffer_MemorySize_Call struct {
+	*mock.Call
+}
+
+// MemorySize is a helper method to define mock.On call
+func (_e *MockWriteBuffer_Expecter) MemorySize() *MockWriteBuffer_MemorySize_Call {
+	return &MockWriteBuffer_MemorySize_Call{Call: _e.mock.On("MemorySize")}
+}
+
+func (_c *MockWriteBuffer_MemorySize_Call) Run(run func()) *MockWriteBuffer_MemorySize_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockWriteBuffer_MemorySize_Call) Return(_a0 int64) *MockWriteBuffer_MemorySize_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockWriteBuffer_MemorySize_Call) RunAndReturn(run func() int64) *MockWriteBuffer_MemorySize_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SealSegments provides a mock function with given fields: ctx, segmentIDs
+func (_m *MockWriteBuffer) SealSegments(ctx context.Context, segmentIDs []int64) error {
+	ret := _m.Called(ctx, segmentIDs)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, []int64) error); ok {
+		r0 = rf(ctx, segmentIDs)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockWriteBuffer_SealSegments_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SealSegments'
+type MockWriteBuffer_SealSegments_Call struct {
+	*mock.Call
+}
+
+// SealSegments is a helper method to define mock.On call
+//   - ctx context.Context
+//   - segmentIDs []int64
+func (_e *MockWriteBuffer_Expecter) SealSegments(ctx interface{}, segmentIDs interface{}) *MockWriteBuffer_SealSegments_Call {
+	return &MockWriteBuffer_SealSegments_Call{Call: _e.mock.On("SealSegments", ctx, segmentIDs)}
+}
+
+func (_c *MockWriteBuffer_SealSegments_Call) Run(run func(ctx context.Context, segmentIDs []int64)) *MockWriteBuffer_SealSegments_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].([]int64))
+	})
+	return _c
+}
+
+func (_c *MockWriteBuffer_SealSegments_Call) Return(_a0 error) *MockWriteBuffer_SealSegments_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockWriteBuffer_SealSegments_Call) RunAndReturn(run func(context.Context, []int64) error) *MockWriteBuffer_SealSegments_Call {
 	_c.Call.Return(run)
 	return _c
 }

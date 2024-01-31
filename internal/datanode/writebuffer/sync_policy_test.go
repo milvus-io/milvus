@@ -94,6 +94,50 @@ func (s *SyncPolicySuite) TestCompactedSegmentsPolicy() {
 	s.ElementsMatch(ids, result)
 }
 
+func (s *SyncPolicySuite) TestOlderBufferPolicy() {
+	policy := GetOldestBufferPolicy(2)
+
+	type testCase struct {
+		tag     string
+		buffers []*segmentBuffer
+		expect  []int64
+	}
+
+	cases := []*testCase{
+		{tag: "empty_buffers", buffers: nil, expect: []int64{}},
+		{tag: "3_candidates", buffers: []*segmentBuffer{
+			{
+				segmentID:    100,
+				insertBuffer: &InsertBuffer{BufferBase: BufferBase{startPos: &msgpb.MsgPosition{Timestamp: 1}}},
+				deltaBuffer:  &DeltaBuffer{BufferBase: BufferBase{}},
+			},
+			{
+				segmentID:    200,
+				insertBuffer: &InsertBuffer{BufferBase: BufferBase{startPos: &msgpb.MsgPosition{Timestamp: 2}}},
+				deltaBuffer:  &DeltaBuffer{BufferBase: BufferBase{}},
+			},
+			{
+				segmentID:    300,
+				insertBuffer: &InsertBuffer{BufferBase: BufferBase{startPos: &msgpb.MsgPosition{Timestamp: 3}}},
+				deltaBuffer:  &DeltaBuffer{BufferBase: BufferBase{}},
+			},
+		}, expect: []int64{100, 200}},
+		{tag: "1_candidates", buffers: []*segmentBuffer{
+			{
+				segmentID:    100,
+				insertBuffer: &InsertBuffer{BufferBase: BufferBase{startPos: &msgpb.MsgPosition{Timestamp: 1}}},
+				deltaBuffer:  &DeltaBuffer{BufferBase: BufferBase{}},
+			},
+		}, expect: []int64{100}},
+	}
+
+	for _, tc := range cases {
+		s.Run(tc.tag, func() {
+			s.ElementsMatch(tc.expect, policy.SelectSegments(tc.buffers, 0))
+		})
+	}
+}
+
 func TestSyncPolicy(t *testing.T) {
 	suite.Run(t, new(SyncPolicySuite))
 }

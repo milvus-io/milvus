@@ -1,6 +1,7 @@
 package writebuffer
 
 import (
+	"container/heap"
 	"math/rand"
 	"time"
 
@@ -96,4 +97,41 @@ func GetFlushTsPolicy(flushTimestamp *atomic.Uint64, meta metacache.MetaCache) S
 		}
 		return nil
 	}, "flush ts")
+}
+
+func GetOldestBufferPolicy(num int) SyncPolicy {
+	return wrapSelectSegmentFuncPolicy(func(buffers []*segmentBuffer, ts typeutil.Timestamp) []int64 {
+		h := &SegStartPosHeap{}
+		heap.Init(h)
+
+		for _, buf := range buffers {
+			heap.Push(h, buf)
+			if h.Len() > num {
+				heap.Pop(h)
+			}
+		}
+
+		return lo.Map(*h, func(buf *segmentBuffer, _ int) int64 { return buf.segmentID })
+	}, "oldest buffers")
+}
+
+// SegMemSizeHeap implement max-heap for sorting.
+type SegStartPosHeap []*segmentBuffer
+
+func (h SegStartPosHeap) Len() int { return len(h) }
+func (h SegStartPosHeap) Less(i, j int) bool {
+	return h[i].MinTimestamp() > h[j].MinTimestamp()
+}
+func (h SegStartPosHeap) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
+
+func (h *SegStartPosHeap) Push(x any) {
+	*h = append(*h, x.(*segmentBuffer))
+}
+
+func (h *SegStartPosHeap) Pop() interface{} {
+	old := *h
+	n := len(old)
+	x := old[n-1]
+	*h = old[0 : n-1]
+	return x
 }

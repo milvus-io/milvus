@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -87,7 +88,7 @@ func (s *ManagerSuite) TestFlushSegments() {
 	s.Run("channel_not_found", func() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		err := manager.FlushSegments(ctx, s.channelName, []int64{1, 2, 3})
+		err := manager.SealSegments(ctx, s.channelName, []int64{1, 2, 3})
 		s.Error(err, "FlushSegments shall return error when channel not found")
 	})
 
@@ -101,9 +102,9 @@ func (s *ManagerSuite) TestFlushSegments() {
 		s.manager.buffers[s.channelName] = wb
 		s.manager.mut.Unlock()
 
-		wb.EXPECT().FlushSegments(mock.Anything, mock.Anything).Return(nil)
+		wb.EXPECT().SealSegments(mock.Anything, mock.Anything).Return(nil)
 
-		err := manager.FlushSegments(ctx, s.channelName, []int64{1})
+		err := manager.SealSegments(ctx, s.channelName, []int64{1})
 		s.NoError(err)
 	})
 }
@@ -190,6 +191,51 @@ func (s *ManagerSuite) TestRemoveChannel() {
 			manager.RemoveChannel(s.channelName)
 		})
 	})
+}
+
+func (s *ManagerSuite) TestMemoryCheck() {
+	manager := s.manager
+	param := paramtable.Get()
+
+	param.Save(param.DataNodeCfg.MemoryCheckInterval.Key, "50")
+	param.Save(param.DataNodeCfg.MemoryForceSyncEnable.Key, "false")
+	param.Save(param.DataNodeCfg.MemoryWatermark.Key, "0.7")
+
+	defer func() {
+		param.Reset(param.DataNodeCfg.MemoryCheckInterval.Key)
+		param.Reset(param.DataNodeCfg.MemoryForceSyncEnable.Key)
+		param.Reset(param.DataNodeCfg.MemoryWatermark.Key)
+	}()
+
+	wb := NewMockWriteBuffer(s.T())
+
+	memoryLimit := hardware.GetMemoryCount()
+	signal := make(chan struct{}, 1)
+	wb.EXPECT().MemorySize().Return(int64(float64(memoryLimit) * 0.6))
+	wb.EXPECT().EvictBuffer(mock.Anything).Run(func(polices ...SyncPolicy) {
+		select {
+		case signal <- struct{}{}:
+		default:
+		}
+	}).Return()
+	manager.mut.Lock()
+	manager.buffers[s.channelName] = wb
+	manager.mut.Unlock()
+
+	manager.Start()
+	defer manager.Stop()
+
+	<-time.After(time.Millisecond * 100)
+	wb.AssertNotCalled(s.T(), "MemorySize")
+
+	param.Save(param.DataNodeCfg.MemoryForceSyncEnable.Key, "true")
+
+	<-time.After(time.Millisecond * 100)
+	wb.AssertNotCalled(s.T(), "SetMemoryHighFlag")
+	param.Save(param.DataNodeCfg.MemoryWatermark.Key, "0.5")
+
+	<-signal
+	wb.AssertExpectations(s.T())
 }
 
 func TestManager(t *testing.T) {

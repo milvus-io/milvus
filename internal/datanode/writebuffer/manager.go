@@ -3,6 +3,7 @@ package writebuffer
 import (
 	"context"
 	"sync"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -11,16 +12,20 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/util/hardware"
+	"github.com/milvus-io/milvus/pkg/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 // BufferManager is the interface for WriteBuffer management.
 type BufferManager interface {
 	// Register adds a WriteBuffer with provided schema & options.
 	Register(channel string, metacache metacache.MetaCache, storageV2Cache *metacache.StorageV2Cache, opts ...WriteBufferOption) error
-	// FlushSegments notifies writeBuffer corresponding to provided channel to flush segments.
-	FlushSegments(ctx context.Context, channel string, segmentIDs []int64) error
-	// FlushChannel
+	// SealSegments notifies writeBuffer corresponding to provided channel to seal segments.
+	// which will cause segment start flush procedure.
+	SealSegments(ctx context.Context, channel string, segmentIDs []int64) error
+	// FlushChannel set the flushTs of the provided write buffer.
 	FlushChannel(ctx context.Context, channel string, flushTs uint64) error
 	// RemoveChannel removes a write buffer from manager.
 	RemoveChannel(channel string)
@@ -32,6 +37,11 @@ type BufferManager interface {
 	GetCheckpoint(channel string) (*msgpb.MsgPosition, bool, error)
 	// NotifyCheckpointUpdated notify write buffer checkpoint updated to reset flushTs.
 	NotifyCheckpointUpdated(channel string, ts uint64)
+
+	// Start makes the background check start to work.
+	Start()
+	// Stop the background checker and wait for worker goroutine quit.
+	Stop()
 }
 
 // NewManager returns initialized manager as `Manager`
@@ -39,6 +49,8 @@ func NewManager(syncMgr syncmgr.SyncManager) BufferManager {
 	return &bufferManager{
 		syncMgr: syncMgr,
 		buffers: make(map[string]WriteBuffer),
+
+		ch: lifetime.NewSafeChan(),
 	}
 }
 
@@ -46,6 +58,80 @@ type bufferManager struct {
 	syncMgr syncmgr.SyncManager
 	buffers map[string]WriteBuffer
 	mut     sync.RWMutex
+
+	wg sync.WaitGroup
+	ch lifetime.SafeChan
+}
+
+func (m *bufferManager) Start() {
+	m.wg.Add(1)
+	go func() {
+		defer m.wg.Done()
+		m.check()
+	}()
+}
+
+func (m *bufferManager) check() {
+	ticker := time.NewTimer(paramtable.Get().DataNodeCfg.MemoryCheckInterval.GetAsDuration(time.Millisecond))
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			m.memoryCheck()
+			ticker.Reset(paramtable.Get().DataNodeCfg.MemoryCheckInterval.GetAsDuration(time.Millisecond))
+		case <-m.ch.CloseCh():
+			log.Info("buffer manager memory check stopped")
+			return
+		}
+	}
+}
+
+// memoryCheck performs check based on current memory usage & configuration.
+func (m *bufferManager) memoryCheck() {
+	if !paramtable.Get().DataNodeCfg.MemoryForceSyncEnable.GetAsBool() {
+		return
+	}
+
+	m.mut.Lock()
+	defer m.mut.Unlock()
+
+	var total int64
+	var candidate WriteBuffer
+	var candiSize int64
+	var candiChan string
+	for chanName, buf := range m.buffers {
+		size := buf.MemorySize()
+		total += size
+		if size > candiSize {
+			candiSize = size
+			candidate = buf
+			candiChan = chanName
+		}
+	}
+
+	toMB := func(mem float64) float64 {
+		return mem / 1024 / 1024
+	}
+
+	totalMemory := hardware.GetMemoryCount()
+	memoryWatermark := float64(totalMemory) * paramtable.Get().DataNodeCfg.MemoryWatermark.GetAsFloat()
+	if float64(total) < memoryWatermark {
+		log.RatedDebug(20, "skip force sync because memory level is not high enough",
+			zap.Float64("current_total_memory_usage", toMB(float64(total))),
+			zap.Float64("current_memory_watermark", toMB(memoryWatermark)))
+		return
+	}
+
+	if candidate != nil {
+		candidate.EvictBuffer(GetOldestBufferPolicy(paramtable.Get().DataNodeCfg.MemoryForceSyncSegmentNum.GetAsInt()))
+		log.Info("notify writebuffer to sync",
+			zap.String("channel", candiChan), zap.Float64("bufferSize(MB)", toMB(float64(candiSize))))
+	}
+}
+
+func (m *bufferManager) Stop() {
+	m.ch.Close()
+	m.wg.Wait()
 }
 
 // Register a new WriteBuffer for channel.
@@ -65,8 +151,8 @@ func (m *bufferManager) Register(channel string, metacache metacache.MetaCache, 
 	return nil
 }
 
-// FlushSegments call sync segment and change segments state to Flushed.
-func (m *bufferManager) FlushSegments(ctx context.Context, channel string, segmentIDs []int64) error {
+// SealSegments call sync segment and change segments state to Flushed.
+func (m *bufferManager) SealSegments(ctx context.Context, channel string, segmentIDs []int64) error {
 	m.mut.RLock()
 	buf, ok := m.buffers[channel]
 	m.mut.RUnlock()
@@ -78,7 +164,7 @@ func (m *bufferManager) FlushSegments(ctx context.Context, channel string, segme
 		return merr.WrapErrChannelNotFound(channel)
 	}
 
-	return buf.FlushSegments(ctx, segmentIDs)
+	return buf.SealSegments(ctx, segmentIDs)
 }
 
 func (m *bufferManager) FlushChannel(ctx context.Context, channel string, flushTs uint64) error {
