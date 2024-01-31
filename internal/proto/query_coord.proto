@@ -674,6 +674,6 @@ message CheckerInfo {
   string desc = 2;
   bool activated = 3;
   bool found = 4;
-  repeated int64 inactiveCollections = 5;
+  repeated int64 inactive_collections = 5;
 }
 
