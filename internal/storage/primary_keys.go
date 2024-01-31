@@ -17,9 +17,10 @@
 package storage
 
 import (
+	"github.com/samber/lo"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/samber/lo"
 )
 
 // PrimaryKeys is the interface holding a slice of PrimaryKey

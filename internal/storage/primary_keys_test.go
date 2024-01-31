@@ -19,8 +19,9 @@ package storage
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 )
 
 type PrimaryKeysSuite struct {
