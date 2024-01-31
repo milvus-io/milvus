@@ -1,7 +1,6 @@
 package cache
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -12,28 +11,25 @@ type CacheSuite struct {
 }
 
 func (s *CacheSuite) TestLRUCache() {
-	size := 100
-	cache := NewLRUCache[int](int64(size))
+	size := 10
+	cache := NewLRUCache[int, int](int32(size), func(key int) (int, bool) {
+		return key, true
+	}, nil)
 
 	for i := 1; i <= size; i++ {
-		cache.Set(fmt.Sprint(i), i)
-		value, ok := cache.Get(fmt.Sprint(i))
+		item, ok := cache.GetAndPin(i)
 		s.True(ok)
-		s.Equal(i, value)
+		s.Equal(i, item.Value())
+		item.Unpin()
 	}
 
-	_, ok := cache.Get(fmt.Sprint(size + 1))
-	s.False(ok)
-
+	s.False(cache.Contain(size + 1))
 	for i := 1; i <= size; i++ {
-		cache.Set(fmt.Sprint(size+i), size+i)
-		_, ok = cache.Get(fmt.Sprint(size + i))
+		item, ok := cache.GetAndPin(size + i)
 		s.True(ok)
-	}
-
-	for i := 1; i <= size; i++ {
-		_, ok = cache.Get(fmt.Sprint(i))
-		s.False(ok)
+		s.Equal(size+i, item.Value())
+		s.False(cache.Contain(i))
+		item.Unpin()
 	}
 }
 

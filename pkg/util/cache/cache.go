@@ -1,91 +1,180 @@
 package cache
 
 import (
-	"time"
+	"container/list"
+	"sync"
 
-	"github.com/karlseguin/ccache/v3"
-
-	"github.com/milvus-io/milvus/pkg/util/generic"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"go.uber.org/atomic"
 )
 
-type cacheOptions struct {
-	Pin bool
+type cacheItem[K comparable, V any] struct {
+	key      K
+	value    V
+	pinCount atomic.Int32
 }
 
-type CacheOption func(*cacheOptions)
-
-var Pin = func(opts *cacheOptions) {
-	opts.Pin = true
+func newCacheItem[K comparable, V any](key K, value V) *cacheItem[K, V] {
+	return &cacheItem[K, V]{
+		key:   key,
+		value: value,
+	}
 }
 
-type Cache[T any] interface {
-	Get(key string) (T, bool)
-	Set(key string, value T, options ...CacheOption)
-	Fetch(key string, f func() (T, error)) (T, error)
-	Remove(key string)
+func (item *cacheItem[K, V]) Unpin() {
+	item.pinCount.Dec()
+}
+
+func (i *cacheItem[K, V]) Value() V {
+	return i.value
+}
+
+type (
+	OnCacheMiss[K comparable, V any] func(key K) (V, bool)
+	OnEvict[K comparable, V any]     func(key K, value V)
+)
+
+type Cache[K comparable, V any] interface {
+	GetAndPin(key K) (*cacheItem[K, V], bool)
+	Contain(key K) bool
+	Set(key K, value V)
+	Remove(key K)
 }
 
 // lruCache extends the ccache library to provide pinning and unpinning of items.
-type lruCache[T any] struct {
-	pinned *typeutil.ConcurrentMap[string, T]
-	cache  *ccache.Cache[T]
+type lruCache[K comparable, V any] struct {
+	rwlock sync.RWMutex
+	// the value is *cacheItem[V]
+	items      map[K]*list.Element
+	accessList *list.List
+
+	size int32
+	cap  int32
+
+	onCacheMiss OnCacheMiss[K, V]
+	onEvict     OnEvict[K, V]
 }
 
-func NewLRUCache[T any](size int64) Cache[T] {
-	return &lruCache[T]{
-		pinned: typeutil.NewConcurrentMap[string, T](),
-		cache:  ccache.New(ccache.Configure[T]().MaxSize(size).ItemsToPrune(1).GetsPerPromote(0)),
+func NewLRUCache[K comparable, V any](
+	cap int32,
+	onCacheMiss OnCacheMiss[K, V],
+	onEvict OnEvict[K, V],
+) Cache[K, V] {
+	return &lruCache[K, V]{
+		items:       make(map[K]*list.Element),
+		accessList:  list.New(),
+		cap:         cap,
+		onCacheMiss: onCacheMiss,
+		onEvict:     onEvict,
 	}
 }
 
-func (c *lruCache[T]) Get(key string) (T, bool) {
-	v, ok := c.pinned.Get(key)
+// GetAndPin gets and pins the given key if it exists,
+// NOTE: remember to unpin this key or it will never be evicted
+func (c *lruCache[K, V]) GetAndPin(key K) (*cacheItem[K, V], bool) {
+	c.rwlock.Lock()
+
+	iter, ok := c.items[key]
 	if ok {
-		return v, true
+		item := iter.Value.(*cacheItem[K, V])
+		c.accessList.Remove(iter)
+		c.accessList.PushFront(item)
+		item.pinCount.Inc()
+
+		c.rwlock.Unlock()
+		return item, true
 	}
 
-	item := c.cache.Get(key)
-	if item == nil {
-		return generic.Zero[T](), false
+	c.rwlock.Unlock()
+	if c.onCacheMiss != nil {
+		value, ok := c.onCacheMiss(key)
+		if ok {
+			c.rwlock.Lock()
+			defer c.rwlock.Unlock()
+			item := c.setAndPin(key, value)
+			return item, true
+		}
 	}
 
-	return item.Value(), true
+	return nil, false
 }
 
-const unexpired = 200 * 365 * 24 * time.Hour
+func (c *lruCache[K, V]) Contain(key K) bool {
+	c.rwlock.RLock()
+	defer c.rwlock.RUnlock()
 
-// const unexpired = 0
+	_, ok := c.items[key]
+	return ok
+}
 
-func (c *lruCache[T]) Set(key string, value T, options ...CacheOption) {
-	opts := cacheOptions{}
-	for _, opt := range options {
-		opt(&opts)
+func (c *lruCache[K, V]) Set(key K, value V) {
+	item := newCacheItem[K, V](key, value)
+
+	c.rwlock.Lock()
+	defer c.rwlock.Unlock()
+
+	if c.size >= c.cap {
+		c.evict(c.size - c.cap + 1)
 	}
 
-	if opts.Pin {
-		c.pinned.Insert(key, value)
-	} else {
-		// we don't want to expire the item, so we set the expiration to 250 years
-		c.cache.Set(key, value, unexpired)
+	c.add(item)
+}
+
+// for cache miss
+func (c *lruCache[K, V]) setAndPin(key K, value V) *cacheItem[K, V] {
+	item := newCacheItem[K, V](key, value)
+	item.pinCount.Inc()
+
+	if c.size >= c.cap {
+		c.evict(c.size - c.cap + 1)
+	}
+
+	c.add(item)
+	return item
+}
+
+func (c *lruCache[K, V]) add(item *cacheItem[K, V]) {
+	iter := c.accessList.PushFront(item)
+	c.items[item.key] = iter
+	c.size++
+}
+
+func (c *lruCache[K, V]) evict(n int32) {
+	if c.size < n {
+		n = c.size
+	}
+	for ; n > 0; n-- {
+		for {
+			oldest := c.accessList.Back()
+			item := oldest.Value.(*cacheItem[K, V])
+			if item.pinCount.Load() > 0 {
+				c.accessList.MoveToFront(oldest)
+			} else {
+				break
+			}
+		}
+
+		// evict
+		validOldest := c.accessList.Back()
+		item := validOldest.Value.(*cacheItem[K, V])
+		c.accessList.Remove(validOldest)
+		delete(c.items, item.key)
+		c.size--
+
+		// TODO(yah01): this could be optimized as it doesn't need to acquire the lock
+		if c.onEvict != nil {
+			c.onEvict(item.key, item.value)
+		}
 	}
 }
 
-func (c *lruCache[T]) Fetch(key string, f func() (T, error)) (T, error) {
-	v, ok := c.pinned.Get(key)
+func (c *lruCache[K, V]) Remove(key K) {
+	c.rwlock.Lock()
+	defer c.rwlock.Unlock()
+
+	iter, ok := c.items[key]
 	if ok {
-		return v, nil
+		c.accessList.Remove(iter)
+		delete(c.items, key)
+		c.size--
 	}
-
-	item, err := c.cache.Fetch(key, unexpired, f)
-	if err != nil || item == nil {
-		return generic.Zero[T](), err
-	}
-
-	return item.Value(), nil
-}
-
-func (c *lruCache[T]) Remove(key string) {
-	c.pinned.Remove(key)
-	c.cache.Delete(key)
 }
