@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
+set -eo pipefail
 
 # Absolute path to the toplevel milvus directory.
 toplevel=$(dirname "$(cd "$(dirname "${0}")"; pwd)")
+
+if [[ "$IS_NETWORK_MODE_HOST" == "true" ]]; then
+  sed -i '/builder:/,/^\s*$/s/image: \${IMAGE_REPO}\/milvus-env:\${OS_NAME}-\${DATE_VERSION}/&\n    network_mode: "host"/' $toplevel/docker-compose.yml
+fi
 
 if [[ -f "$toplevel/.env" ]]; then
     set -a  # automatically export all variables from .env
