@@ -650,11 +650,13 @@ message DeleteRequest {
 message ActivateCheckerRequest {
   common.MsgBase base = 1;
   int32 checkerID = 2;
+  repeated int64 collections = 3;
 }
 
 message DeactivateCheckerRequest {
   common.MsgBase base = 1;
   int32 checkerID = 2;
+  repeated int64 collections = 3;
 }
 
 message ListCheckersRequest {
@@ -672,5 +674,6 @@ message CheckerInfo {
   string desc = 2;
   bool activated = 3;
   bool found = 4;
+  repeated int64 inactiveCollections = 5;
 }
 

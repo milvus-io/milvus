@@ -206,6 +206,20 @@ func (suite *BalanceCheckerTestSuite) TestStoppingBalance() {
 	suite.Len(tasks, 2)
 }
 
+func (suite *BalanceCheckerTestSuite) TestCollectionActivation() {
+	suite.scheduler.EXPECT().GetSegmentTaskNum().Return(0)
+	collection1 := utils.CreateTestCollection(int64(1), int32(1))
+	collection1.Status = querypb.LoadStatus_Loaded
+	suite.NoError(suite.checker.meta.PutCollection(collection1))
+	replica1 := utils.CreateTestReplica(1, 1, []int64{1})
+	suite.NoError(suite.meta.ReplicaManager.Put(replica1))
+	suite.ElementsMatch([]int64{1}, suite.checker.replicasToBalance())
+	suite.checker.DeactivateCollection(1)
+	suite.Empty(suite.checker.replicasToBalance())
+	suite.checker.ActivateCollection(1)
+	suite.ElementsMatch([]int64{1}, suite.checker.replicasToBalance())
+}
+
 func TestBalanceCheckerSuite(t *testing.T) {
 	suite.Run(t, new(BalanceCheckerTestSuite))
 }

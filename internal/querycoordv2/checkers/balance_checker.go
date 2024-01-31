@@ -76,9 +76,10 @@ func (b *BalanceChecker) replicasToBalance() []int64 {
 		return loadedCollections[i] < loadedCollections[j]
 	})
 
+	activeCollections := lo.Filter(loadedCollections, func(collectionID int64, _ int) bool { return b.checkerActivation.IsCollectionActive(collectionID) })
 	// balance collections influenced by stopping nodes
 	stoppingReplicas := make([]int64, 0)
-	for _, cid := range loadedCollections {
+	for _, cid := range activeCollections {
 		replicas := b.meta.ReplicaManager.GetByCollection(cid)
 		for _, replica := range replicas {
 			for _, nodeID := range replica.GetNodes() {
@@ -107,7 +108,7 @@ func (b *BalanceChecker) replicasToBalance() []int64 {
 	// iterator one normal collection in one round
 	normalReplicasToBalance := make([]int64, 0)
 	hasUnbalancedCollection := false
-	for _, cid := range loadedCollections {
+	for _, cid := range activeCollections {
 		if b.normalBalanceCollectionsCurrentRound.Contain(cid) {
 			log.Debug("ScoreBasedBalancer has balanced collection, skip balancing in this round",
 				zap.Int64("collectionID", cid))

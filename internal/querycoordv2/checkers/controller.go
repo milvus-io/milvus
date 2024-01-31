@@ -168,32 +168,56 @@ func (controller *CheckerController) check(ctx context.Context, checkType utils.
 }
 
 func (controller *CheckerController) Deactivate(typ utils.CheckerType) error {
-	for _, checker := range controller.checkers {
-		if checker.ID() == typ {
-			checker.Deactivate()
-			return nil
-		}
+	if checker, ok := controller.checkers[typ]; ok {
+		checker.Deactivate()
+		return nil
 	}
 	return errTypeNotFound
 }
 
 func (controller *CheckerController) Activate(typ utils.CheckerType) error {
-	for _, checker := range controller.checkers {
-		if checker.ID() == typ {
-			checker.Activate()
-			return nil
-		}
+	if checker, ok := controller.checkers[typ]; ok {
+		checker.Activate()
+		return nil
 	}
 	return errTypeNotFound
 }
 
 func (controller *CheckerController) IsActive(typ utils.CheckerType) (bool, error) {
-	for _, checker := range controller.checkers {
-		if checker.ID() == typ {
-			return checker.IsActive(), nil
-		}
+	if checker, ok := controller.checkers[typ]; ok {
+		return checker.IsActive(), nil
 	}
 	return false, errTypeNotFound
+}
+
+func (controller *CheckerController) DeactivateCollection(typ utils.CheckerType, collection int64) error {
+	if checker, ok := controller.checkers[typ]; ok {
+		checker.DeactivateCollection(collection)
+		return nil
+	}
+	return errTypeNotFound
+}
+
+func (controller *CheckerController) ActivateCollection(typ utils.CheckerType, collection int64) error {
+	if checker, ok := controller.checkers[typ]; ok {
+		checker.ActivateCollection(collection)
+		return nil
+	}
+	return errTypeNotFound
+}
+
+func (controller *CheckerController) IsCollectionActive(typ utils.CheckerType, collection int64) (bool, error) {
+	if checker, ok := controller.checkers[typ]; ok {
+		return checker.IsCollectionActive(collection), nil
+	}
+	return false, errTypeNotFound
+}
+
+func (controller *CheckerController) GetInactiveCollections(typ utils.CheckerType) []int64 {
+	if checker, ok := controller.checkers[typ]; ok {
+		return checker.GetInactiveCollections()
+	}
+	return nil
 }
 
 func (controller *CheckerController) Checkers() []Checker {

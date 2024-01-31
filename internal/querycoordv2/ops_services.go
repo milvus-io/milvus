@@ -47,10 +47,11 @@ func (s *Server) ListCheckers(ctx context.Context, req *querypb.ListCheckersRequ
 	for _, checker := range checkers {
 		if checkerIDSet.Len() == 0 || checkerIDSet.Contain(int32(checker.ID())) {
 			resp.CheckerInfos = append(resp.CheckerInfos, &querypb.CheckerInfo{
-				Id:        int32(checker.ID()),
-				Activated: checker.IsActive(),
-				Desc:      checker.ID().String(),
-				Found:     true,
+				Id:                  int32(checker.ID()),
+				Activated:           checker.IsActive(),
+				Desc:                checker.ID().String(),
+				Found:               true,
+				InactiveCollections: checker.GetInactiveCollections(),
 			})
 			checkerIDSet.Remove(int32(checker.ID()))
 		}
@@ -67,29 +68,47 @@ func (s *Server) ListCheckers(ctx context.Context, req *querypb.ListCheckersRequ
 }
 
 func (s *Server) ActivateChecker(ctx context.Context, req *querypb.ActivateCheckerRequest) (*commonpb.Status, error) {
-	log := log.Ctx(ctx)
+	log := log.Ctx(ctx).With(zap.Int32("checker", req.CheckerID)).With(zap.Int64s("collections", req.Collections))
 	log.Info("activate checker request received")
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		log.Warn("failed to activate checker", zap.Error(err))
 		return merr.Status(err), nil
 	}
-	if err := s.checkerController.Activate(utils.CheckerType(req.CheckerID)); err != nil {
-		log.Warn("failed to activate checker", zap.Error(err))
-		return merr.Status(merr.WrapErrServiceInternal(err.Error())), nil
+
+	if len(req.Collections) == 0 {
+		if err := s.checkerController.Activate(utils.CheckerType(req.CheckerID)); err != nil {
+			log.Warn("failed to activate checker", zap.Error(err))
+			return merr.Status(merr.WrapErrServiceInternal(err.Error())), nil
+		}
+	} else {
+		for _, collection := range req.Collections {
+			if err := s.checkerController.ActivateCollection(utils.CheckerType(req.CheckerID), collection); err != nil {
+				log.Warn("failed to activate collection", zap.Int64("collection", collection), zap.Error(err))
+			}
+		}
 	}
 	return merr.Success(), nil
 }
 
 func (s *Server) DeactivateChecker(ctx context.Context, req *querypb.DeactivateCheckerRequest) (*commonpb.Status, error) {
-	log := log.Ctx(ctx)
+	log := log.Ctx(ctx).With(zap.Int32("checker", req.CheckerID)).With(zap.Int64s("collections", req.Collections))
 	log.Info("deactivate checker request received")
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		log.Warn("failed to deactivate checker", zap.Error(err))
 		return merr.Status(err), nil
 	}
-	if err := s.checkerController.Deactivate(utils.CheckerType(req.CheckerID)); err != nil {
-		log.Warn("failed to deactivate checker", zap.Error(err))
-		return merr.Status(merr.WrapErrServiceInternal(err.Error())), nil
+	if len(req.Collections) == 0 {
+		if err := s.checkerController.Deactivate(utils.CheckerType(req.CheckerID)); err != nil {
+			log.Warn("failed to deactivate checker", zap.Error(err))
+			return merr.Status(merr.WrapErrServiceInternal(err.Error())), nil
+		}
+	} else {
+		for _, collection := range req.Collections {
+			if err := s.checkerController.DeactivateCollection(utils.CheckerType(req.CheckerID), collection); err != nil {
+				log.Warn("failed to deactivate collection", zap.Error(err))
+				return merr.Status(merr.WrapErrServiceInternal(err.Error())), nil
+			}
+		}
 	}
 	return merr.Success(), nil
 }

@@ -22,6 +22,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type Checker interface {
@@ -31,10 +32,15 @@ type Checker interface {
 	IsActive() bool
 	Activate()
 	Deactivate()
+	DeactivateCollection(collectionID int64)
+	ActivateCollection(collectionID int64)
+	IsCollectionActive(collectionID int64) bool
+	GetInactiveCollections() []int64
 }
 
 type checkerActivation struct {
-	active atomic.Bool
+	active              atomic.Bool
+	inactiveCollections *typeutil.ConcurrentSet[int64]
 }
 
 func (c *checkerActivation) IsActive() bool {
@@ -49,8 +55,26 @@ func (c *checkerActivation) Deactivate() {
 	c.active.Store(false)
 }
 
+func (c *checkerActivation) DeactivateCollection(collectionID int64) {
+	c.inactiveCollections.Insert(collectionID)
+}
+
+func (c *checkerActivation) ActivateCollection(collectionID int64) {
+	c.inactiveCollections.Remove(collectionID)
+}
+
+func (c *checkerActivation) IsCollectionActive(collectionID int64) bool {
+	return !c.inactiveCollections.Contain(collectionID)
+}
+
+func (c *checkerActivation) GetInactiveCollections() []int64 {
+	return c.inactiveCollections.Collect()
+}
+
 func newCheckerActivation() *checkerActivation {
-	c := &checkerActivation{}
+	c := &checkerActivation{
+		inactiveCollections: typeutil.NewConcurrentSet[int64](),
+	}
 	c.Activate()
 	return c
 }
