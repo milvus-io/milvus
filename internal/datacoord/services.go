@@ -61,6 +61,27 @@ func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetSt
 	}, nil
 }
 
+func (s *Server) flushForImport(ctx context.Context, req *datapb.FlushRequest) (*datapb.FlushResponse, error) {
+	err := s.segmentManager.FlushImportSegments(ctx, req.GetCollectionID(), req.GetSegmentIDs())
+	if err != nil {
+		return &datapb.FlushResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+	// To expedite the process of index building.
+	for _, segmentID := range req.GetSegmentIDs() {
+		select {
+		case s.buildIndexCh <- segmentID:
+		default:
+		}
+	}
+	log.Info("flush for import done", zap.Int64("collectionID", req.GetCollectionID()),
+		zap.Int64s("segmentIDs", req.GetSegmentIDs()))
+	return &datapb.FlushResponse{
+		Status: merr.Success(),
+	}, nil
+}
+
 // Flush notify segment to flush
 // this api only guarantees all the segments requested is sealed
 // these segments will be flushed only after the Flush policy is fulfilled
@@ -77,6 +98,10 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 		return &datapb.FlushResponse{
 			Status: merr.Status(err),
 		}, nil
+	}
+
+	if req.GetIsImport() {
+		return s.flushForImport(ctx, req)
 	}
 
 	// generate a timestamp timeOfSeal, all data before timeOfSeal is guaranteed to be sealed or flushed
