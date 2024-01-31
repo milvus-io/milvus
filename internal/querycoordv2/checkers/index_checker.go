@@ -75,6 +75,9 @@ func (c *IndexChecker) Check(ctx context.Context) []task.Task {
 	var tasks []task.Task
 
 	for _, collectionID := range collectionIDs {
+		if !c.IsCollectionActive(collectionID) {
+			continue
+		}
 		collection := c.meta.CollectionManager.GetCollection(collectionID)
 		if collection == nil {
 			log.Warn("collection released during check index", zap.Int64("collection", collectionID))

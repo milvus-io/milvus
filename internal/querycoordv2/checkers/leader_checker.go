@@ -69,8 +69,9 @@ func (c *LeaderChecker) Description() string {
 func (c *LeaderChecker) readyToCheck(collectionID int64) bool {
 	metaExist := (c.meta.GetCollection(collectionID) != nil)
 	targetExist := c.target.IsNextTargetExist(collectionID) || c.target.IsCurrentTargetExist(collectionID)
+	active := c.IsCollectionActive(collectionID)
 
-	return metaExist && targetExist
+	return metaExist && targetExist && active
 }
 
 func (c *LeaderChecker) Check(ctx context.Context) []task.Task {

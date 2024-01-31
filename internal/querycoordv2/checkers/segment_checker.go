@@ -73,8 +73,9 @@ func (c *SegmentChecker) Description() string {
 func (c *SegmentChecker) readyToCheck(collectionID int64) bool {
 	metaExist := (c.meta.GetCollection(collectionID) != nil)
 	targetExist := c.targetMgr.IsNextTargetExist(collectionID) || c.targetMgr.IsCurrentTargetExist(collectionID)
+	active := c.IsCollectionActive(collectionID)
 
-	return metaExist && targetExist
+	return metaExist && targetExist && active
 }
 
 func (c *SegmentChecker) Check(ctx context.Context) []task.Task {
