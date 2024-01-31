@@ -11,15 +11,16 @@
 
 #include "segcore/Utils.h"
 
+#include <future>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "index/ScalarIndex.h"
 #include "log/Log.h"
 #include "storage/FieldData.h"
 #include "storage/RemoteChunkManagerSingleton.h"
-#include "common/Common.h"
-#include "storage/ThreadPool.h"
+#include "storage/ThreadPools.h"
 #include "storage/Util.h"
 #include "mmap/Utils.h"
 
@@ -693,41 +694,29 @@ ReverseDataFromIndex(const index::IndexBase* index,
 // init segcore storage config first, and create default remote chunk manager
 // segcore use default remote chunk manager to load data from minio/s3
 void
-LoadFieldDatasFromRemote(std::vector<std::string>& remote_files,
+LoadFieldDatasFromRemote(const std::vector<std::string>& remote_files,
                          storage::FieldDataChannelPtr channel) {
     try {
-        auto parallel_degree = static_cast<uint64_t>(
-            DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
-
         auto rcm = storage::RemoteChunkManagerSingleton::GetInstance()
                        .GetRemoteChunkManager();
-        std::sort(remote_files.begin(),
-                  remote_files.end(),
-                  [](const std::string& a, const std::string& b) {
-                      return std::stol(a.substr(a.find_last_of('/') + 1)) <
-                             std::stol(b.substr(b.find_last_of('/') + 1));
-                  });
+        auto& pool = ThreadPools::GetThreadPool(ThreadPoolPriority::HIGH);
 
-        std::vector<std::string> batch_files;
-
-        auto FetchRawData = [&]() {
-            auto result = storage::GetObjectData(rcm.get(), batch_files);
-            for (auto& data : result) {
-                channel->push(data);
-            }
-        };
-
-        for (auto& file : remote_files) {
-            if (batch_files.size() >= parallel_degree) {
-                FetchRawData();
-                batch_files.clear();
-            }
-
-            batch_files.emplace_back(file);
+        std::vector<std::future<storage::FieldDataPtr>> futures;
+        futures.reserve(remote_files.size());
+        for (const auto& file : remote_files) {
+            auto future = pool.Submit([&]() {
+                auto fileSize = rcm->Size(file);
+                auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[fileSize]);
+                rcm->Read(file, buf.get(), fileSize);
+                auto result = storage::DeserializeFileData(buf, fileSize);
+                return result->GetFieldData();
+            });
+            futures.emplace_back(std::move(future));
         }
 
-        if (batch_files.size() > 0) {
-            FetchRawData();
+        for (auto& future : futures) {
+            auto field_data = future.get();
+            channel->push(field_data);
         }
 
         channel->close();

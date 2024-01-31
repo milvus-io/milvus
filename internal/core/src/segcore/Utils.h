@@ -156,7 +156,7 @@ ReverseDataFromIndex(const index::IndexBase* index,
                      const FieldMeta& field_meta);
 
 void
-LoadFieldDatasFromRemote(std::vector<std::string>& remote_files,
+LoadFieldDatasFromRemote(const std::vector<std::string>& remote_files,
                          storage::FieldDataChannelPtr channel);
 
 /**
