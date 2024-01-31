@@ -459,11 +459,7 @@ func TestDeleteCodec(t *testing.T) {
 		pk1 := &Int64PrimaryKey{
 			Value: 1,
 		}
-		deleteData := &DeleteData{
-			Pks:      []PrimaryKey{pk1},
-			Tss:      []uint64{43757345},
-			RowCount: int64(1),
-		}
+		deleteData := NewDeleteData([]PrimaryKey{pk1}, []uint64{43757345})
 
 		pk2 := &Int64PrimaryKey{
 			Value: 2,
@@ -482,11 +478,7 @@ func TestDeleteCodec(t *testing.T) {
 	t.Run("string pk", func(t *testing.T) {
 		deleteCodec := NewDeleteCodec()
 		pk1 := NewVarCharPrimaryKey("test1")
-		deleteData := &DeleteData{
-			Pks:      []PrimaryKey{pk1},
-			Tss:      []uint64{43757345},
-			RowCount: int64(1),
-		}
+		deleteData := NewDeleteData([]PrimaryKey{pk1}, []uint64{43757345})
 
 		pk2 := NewVarCharPrimaryKey("test2")
 		deleteData.Append(pk2, 23578294723)

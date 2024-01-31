@@ -1051,13 +1051,11 @@ func (deleteCodec *DeleteCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 				}
 			}
 
-			result.Pks = append(result.Pks, deleteLog.Pk)
-			result.Tss = append(result.Tss, deleteLog.Ts)
+			result.Append(deleteLog.Pk, deleteLog.Ts)
 		}
 		eventReader.Close()
 		binlogReader.Close()
 	}
-	result.RowCount = int64(len(result.Pks))
 
 	return pid, sid, result, nil
 }
