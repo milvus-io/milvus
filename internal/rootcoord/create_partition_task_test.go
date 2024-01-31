@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
@@ -61,6 +62,14 @@ func Test_createPartitionTask_Prepare(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 		).Return(coll.Clone(), nil)
+		meta.On("ListAllAvailCollections",
+			mock.Anything,
+		).Return(map[int64][]int64{
+			1: {1, 2},
+		}, nil)
+		meta.On("GetDatabaseByID",
+			mock.Anything, mock.Anything, mock.Anything,
+		).Return(nil, errors.New("mock"))
 
 		core := newTestCore(withMeta(meta))
 		task := &createPartitionTask{

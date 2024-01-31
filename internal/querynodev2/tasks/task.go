@@ -9,6 +9,8 @@ import (
 	"strconv"
 
 	"github.com/golang/protobuf/proto"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -23,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 var (
@@ -46,7 +49,8 @@ type SearchTask struct {
 	others           []*SearchTask
 	notifier         chan error
 
-	tr *timerecord.TimeRecorder
+	tr           *timerecord.TimeRecorder
+	scheduleSpan trace.Span
 }
 
 func NewSearchTask(ctx context.Context,
@@ -54,6 +58,7 @@ func NewSearchTask(ctx context.Context,
 	manager *segments.Manager,
 	req *querypb.SearchRequest,
 ) *SearchTask {
+	ctx, span := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "schedule")
 	return &SearchTask{
 		ctx:              ctx,
 		collection:       collection,
@@ -68,6 +73,7 @@ func NewSearchTask(ctx context.Context,
 		originNqs:        []int64{req.GetReq().GetNq()},
 		notifier:         make(chan error, 1),
 		tr:               timerecord.NewTimeRecorderWithTrace(ctx, "searchTask"),
+		scheduleSpan:     span,
 	}
 }
 
@@ -118,6 +124,9 @@ func (t *SearchTask) Execute() error {
 		zap.String("shard", t.req.GetDmlChannels()[0]),
 	)
 
+	if t.scheduleSpan != nil {
+		t.scheduleSpan.End()
+	}
 	tr := timerecord.NewTimeRecorderWithTrace(t.ctx, "SearchTask")
 
 	req := t.req
@@ -157,6 +166,9 @@ func (t *SearchTask) Execute() error {
 	}
 	defer segments.DeleteSearchResults(results)
 
+	// plan.MetricType is accurate, though req.MetricType may be empty
+	metricType := searchReq.Plan().GetMetricType()
+
 	if len(results) == 0 {
 		for i := range t.originNqs {
 			var task *SearchTask
@@ -171,7 +183,7 @@ func (t *SearchTask) Execute() error {
 					SourceID: paramtable.GetNodeID(),
 				},
 				Status:         merr.Success(),
-				MetricType:     req.GetReq().GetMetricType(),
+				MetricType:     metricType,
 				NumQueries:     t.originNqs[i],
 				TopK:           t.originTopks[i],
 				SlicedOffset:   1,
@@ -225,7 +237,7 @@ func (t *SearchTask) Execute() error {
 				SourceID: paramtable.GetNodeID(),
 			},
 			Status:         merr.Success(),
-			MetricType:     req.GetReq().GetMetricType(),
+			MetricType:     metricType,
 			NumQueries:     t.originNqs[i],
 			TopK:           t.originTopks[i],
 			SlicedBlob:     bs,

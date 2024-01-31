@@ -107,22 +107,49 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 		zap.String("db", request.DbName),
 		zap.String("collectionName", request.CollectionName),
 		zap.Int64("collectionID", request.CollectionID),
+		zap.String("msgType", request.GetBase().GetMsgType().String()),
+		zap.String("partitionName", request.GetPartitionName()),
 	)
 
 	log.Info("received request to invalidate collection meta cache")
 
 	collectionName := request.CollectionName
 	collectionID := request.CollectionID
-
 	var aliasName []string
+
 	if globalMetaCache != nil {
-		if collectionName != "" {
-			globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName) // no need to return error, though collection may be not cached
-		}
-		if request.CollectionID != UniqueID(0) {
-			aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID)
+		switch request.GetBase().GetMsgType() {
+		case commonpb.MsgType_DropCollection, commonpb.MsgType_RenameCollection, commonpb.MsgType_DropAlias, commonpb.MsgType_AlterAlias:
+			if collectionName != "" {
+				globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName) // no need to return error, though collection may be not cached
+			}
+			if request.CollectionID != UniqueID(0) {
+				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID)
+			}
+			log.Info("complete to invalidate collection meta cache with collection name", zap.String("collectionName", collectionName))
+		case commonpb.MsgType_DropPartition:
+			if globalMetaCache != nil {
+				if collectionName != "" && request.GetPartitionName() != "" {
+					globalMetaCache.RemovePartition(ctx, request.GetDbName(), request.GetCollectionName(), request.GetPartitionName())
+				} else {
+					log.Warn("invalidate collection meta cache failed. collectionName or partitionName is empty",
+						zap.String("collectionName", collectionName),
+						zap.String("partitionName", request.GetPartitionName()))
+					return merr.Status(merr.WrapErrPartitionNotFound(request.GetPartitionName(), "partition name not specified")), nil
+				}
+			}
+		default:
+			log.Warn("receive unexpected msgType of invalidate collection meta cache", zap.String("msgType", request.GetBase().GetMsgType().String()))
+
+			if collectionName != "" {
+				globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName) // no need to return error, though collection may be not cached
+			}
+			if request.CollectionID != UniqueID(0) {
+				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID)
+			}
 		}
 	}
+
 	if request.GetBase().GetMsgType() == commonpb.MsgType_DropCollection {
 		// no need to handle error, since this Proxy may not create dml stream for the collection.
 		node.chMgr.removeDMLStream(request.GetCollectionID())
@@ -436,7 +463,7 @@ func (node *Proxy) DropCollection(ctx context.Context, request *milvuspb.DropCol
 		zap.String("collection", request.CollectionName),
 	)
 
-	log.Debug("DropCollection received")
+	log.Info("DropCollection received")
 
 	if err := node.sched.ddQueue.Enqueue(dct); err != nil {
 		log.Warn("DropCollection failed to enqueue",
@@ -462,7 +489,7 @@ func (node *Proxy) DropCollection(ctx context.Context, request *milvuspb.DropCol
 		return merr.Status(err), nil
 	}
 
-	log.Debug(
+	log.Info(
 		"DropCollection done",
 		zap.Uint64("BeginTs", dct.BeginTs()),
 		zap.Uint64("EndTs", dct.EndTs()),
@@ -1021,7 +1048,7 @@ func (node *Proxy) AlterCollection(ctx context.Context, request *milvuspb.AlterC
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName))
 
-	log.Debug(
+	log.Info(
 		rpcReceived(method))
 
 	if err := node.sched.ddQueue.Enqueue(act); err != nil {
@@ -1050,7 +1077,7 @@ func (node *Proxy) AlterCollection(ctx context.Context, request *milvuspb.AlterC
 		return merr.Status(err), nil
 	}
 
-	log.Debug(
+	log.Info(
 		rpcDone(method),
 		zap.Uint64("BeginTs", act.BeginTs()),
 		zap.Uint64("EndTs", act.EndTs()))
@@ -1086,7 +1113,7 @@ func (node *Proxy) CreatePartition(ctx context.Context, request *milvuspb.Create
 		zap.String("collection", request.CollectionName),
 		zap.String("partition", request.PartitionName))
 
-	log.Debug(rpcReceived(method))
+	log.Info(rpcReceived(method))
 
 	if err := node.sched.ddQueue.Enqueue(cpt); err != nil {
 		log.Warn(
@@ -1115,7 +1142,7 @@ func (node *Proxy) CreatePartition(ctx context.Context, request *milvuspb.Create
 		return merr.Status(err), nil
 	}
 
-	log.Debug(
+	log.Info(
 		rpcDone(method),
 		zap.Uint64("BeginTS", cpt.BeginTs()),
 		zap.Uint64("EndTS", cpt.EndTs()))
@@ -1152,7 +1179,7 @@ func (node *Proxy) DropPartition(ctx context.Context, request *milvuspb.DropPart
 		zap.String("collection", request.CollectionName),
 		zap.String("partition", request.PartitionName))
 
-	log.Debug(rpcReceived(method))
+	log.Info(rpcReceived(method))
 
 	if err := node.sched.ddQueue.Enqueue(dpt); err != nil {
 		log.Warn(
@@ -1164,7 +1191,7 @@ func (node *Proxy) DropPartition(ctx context.Context, request *milvuspb.DropPart
 		return merr.Status(err), nil
 	}
 
-	log.Debug(
+	log.Info(
 		rpcEnqueued(method),
 		zap.Uint64("BeginTS", dpt.BeginTs()),
 		zap.Uint64("EndTS", dpt.EndTs()))
@@ -1181,7 +1208,7 @@ func (node *Proxy) DropPartition(ctx context.Context, request *milvuspb.DropPart
 		return merr.Status(err), nil
 	}
 
-	log.Debug(
+	log.Info(
 		rpcDone(method),
 		zap.Uint64("BeginTS", dpt.BeginTs()),
 		zap.Uint64("EndTS", dpt.EndTs()))
@@ -1689,6 +1716,10 @@ func (node *Proxy) GetLoadState(ctx context.Context, request *milvuspb.GetLoadSt
 
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, request.GetDbName(), request.CollectionName)
 	if err != nil {
+		log.Warn("failed to get collection id",
+			zap.String("dbName", request.GetDbName()),
+			zap.String("collectionName", request.CollectionName),
+			zap.Error(err))
 		successResponse.State = commonpb.LoadState_LoadStateNotExist
 		return successResponse, nil
 	}
@@ -2062,7 +2093,7 @@ func (node *Proxy) DropIndex(ctx context.Context, request *milvuspb.DropIndexReq
 		zap.String("field", request.FieldName),
 		zap.String("index name", request.IndexName))
 
-	log.Debug(rpcReceived(method))
+	log.Info(rpcReceived(method))
 
 	if err := node.sched.ddQueue.Enqueue(dit); err != nil {
 		log.Warn(
@@ -2092,7 +2123,7 @@ func (node *Proxy) DropIndex(ctx context.Context, request *milvuspb.DropIndexReq
 		return merr.Status(err), nil
 	}
 
-	log.Debug(
+	log.Info(
 		rpcDone(method),
 		zap.Uint64("BeginTs", dit.BeginTs()),
 		zap.Uint64("EndTs", dit.EndTs()))
@@ -2424,7 +2455,7 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 	if err := dr.Run(ctx); err != nil {
 		log.Error("Failed to enqueue delete task: " + err.Error())
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
-			metrics.AbandonLabel).Inc()
+			metrics.FailLabel).Inc()
 
 		return &milvuspb.MutationResult{
 			Status: merr.Status(err),
@@ -3156,7 +3187,7 @@ func (node *Proxy) CreateAlias(ctx context.Context, request *milvuspb.CreateAlia
 		zap.String("alias", request.Alias),
 		zap.String("collection", request.CollectionName))
 
-	log.Debug(rpcReceived(method))
+	log.Info(rpcReceived(method))
 
 	if err := node.sched.ddQueue.Enqueue(cat); err != nil {
 		log.Warn(
@@ -3184,7 +3215,7 @@ func (node *Proxy) CreateAlias(ctx context.Context, request *milvuspb.CreateAlia
 		return merr.Status(err), nil
 	}
 
-	log.Debug(
+	log.Info(
 		rpcDone(method),
 		zap.Uint64("BeginTs", cat.BeginTs()),
 		zap.Uint64("EndTs", cat.EndTs()))
@@ -3346,7 +3377,7 @@ func (node *Proxy) DropAlias(ctx context.Context, request *milvuspb.DropAliasReq
 		zap.String("db", request.DbName),
 		zap.String("alias", request.Alias))
 
-	log.Debug(rpcReceived(method))
+	log.Info(rpcReceived(method))
 
 	if err := node.sched.ddQueue.Enqueue(dat); err != nil {
 		log.Warn(
@@ -3374,7 +3405,7 @@ func (node *Proxy) DropAlias(ctx context.Context, request *milvuspb.DropAliasReq
 		return merr.Status(err), nil
 	}
 
-	log.Debug(
+	log.Info(
 		rpcDone(method),
 		zap.Uint64("BeginTs", dat.BeginTs()),
 		zap.Uint64("EndTs", dat.EndTs()))
@@ -3410,7 +3441,7 @@ func (node *Proxy) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasR
 		zap.String("alias", request.Alias),
 		zap.String("collection", request.CollectionName))
 
-	log.Debug(rpcReceived(method))
+	log.Info(rpcReceived(method))
 
 	if err := node.sched.ddQueue.Enqueue(aat); err != nil {
 		log.Warn(
@@ -3438,7 +3469,7 @@ func (node *Proxy) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasR
 		return merr.Status(err), nil
 	}
 
-	log.Debug(
+	log.Info(
 		rpcDone(method),
 		zap.Uint64("BeginTs", aat.BeginTs()),
 		zap.Uint64("EndTs", aat.EndTs()))
@@ -4338,7 +4369,7 @@ func (node *Proxy) CreateCredential(ctx context.Context, req *milvuspb.CreateCre
 	log := log.Ctx(ctx).With(
 		zap.String("username", req.Username))
 
-	log.Debug("CreateCredential",
+	log.Info("CreateCredential",
 		zap.String("role", typeutil.ProxyRole))
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
@@ -4389,7 +4420,7 @@ func (node *Proxy) UpdateCredential(ctx context.Context, req *milvuspb.UpdateCre
 	log := log.Ctx(ctx).With(
 		zap.String("username", req.Username))
 
-	log.Debug("UpdateCredential",
+	log.Info("UpdateCredential",
 		zap.String("role", typeutil.ProxyRole))
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
@@ -4457,7 +4488,7 @@ func (node *Proxy) DeleteCredential(ctx context.Context, req *milvuspb.DeleteCre
 	log := log.Ctx(ctx).With(
 		zap.String("username", req.Username))
 
-	log.Debug("DeleteCredential",
+	log.Info("DeleteCredential",
 		zap.String("role", typeutil.ProxyRole))
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
@@ -4510,7 +4541,7 @@ func (node *Proxy) CreateRole(ctx context.Context, req *milvuspb.CreateRoleReque
 
 	log := log.Ctx(ctx)
 
-	log.Debug("CreateRole", zap.Any("req", req))
+	log.Info("CreateRole", zap.Stringer("req", req))
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
@@ -4537,7 +4568,7 @@ func (node *Proxy) DropRole(ctx context.Context, req *milvuspb.DropRoleRequest) 
 
 	log := log.Ctx(ctx)
 
-	log.Debug("DropRole",
+	log.Info("DropRole",
 		zap.Any("req", req))
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
@@ -4565,7 +4596,7 @@ func (node *Proxy) OperateUserRole(ctx context.Context, req *milvuspb.OperateUse
 
 	log := log.Ctx(ctx)
 
-	log.Debug("OperateUserRole", zap.Any("req", req))
+	log.Info("OperateUserRole", zap.Any("req", req))
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
@@ -4681,7 +4712,7 @@ func (node *Proxy) OperatePrivilege(ctx context.Context, req *milvuspb.OperatePr
 
 	log := log.Ctx(ctx)
 
-	log.Debug("OperatePrivilege",
+	log.Info("OperatePrivilege",
 		zap.Any("req", req))
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
@@ -4699,6 +4730,22 @@ func (node *Proxy) OperatePrivilege(ctx context.Context, req *milvuspb.OperatePr
 	if err != nil {
 		log.Warn("fail to operate privilege", zap.Error(err))
 		return merr.Status(err), nil
+	}
+	relatedPrivileges := util.RelatedPrivileges[util.PrivilegeNameForMetastore(req.Entity.Grantor.Privilege.Name)]
+	if len(relatedPrivileges) != 0 {
+		for _, relatedPrivilege := range relatedPrivileges {
+			relatedReq := proto.Clone(req).(*milvuspb.OperatePrivilegeRequest)
+			relatedReq.Entity.Grantor.Privilege.Name = util.PrivilegeNameForAPI(relatedPrivilege)
+			result, err = node.rootCoord.OperatePrivilege(ctx, relatedReq)
+			if err != nil {
+				log.Warn("fail to operate related privilege", zap.String("related_privilege", relatedPrivilege), zap.Error(err))
+				return merr.Status(err), nil
+			}
+			if !merr.Ok(result) {
+				log.Warn("fail to operate related privilege", zap.String("related_privilege", relatedPrivilege), zap.Any("result", result))
+				return result, nil
+			}
+		}
 	}
 	return result, nil
 }
@@ -4935,7 +4982,7 @@ func (node *Proxy) CreateResourceGroup(ctx context.Context, request *milvuspb.Cr
 		zap.String("role", typeutil.ProxyRole),
 	)
 
-	log.Debug("CreateResourceGroup received")
+	log.Info("CreateResourceGroup received")
 
 	if err := node.sched.ddQueue.Enqueue(t); err != nil {
 		log.Warn("CreateResourceGroup failed to enqueue",
@@ -4955,7 +5002,7 @@ func (node *Proxy) CreateResourceGroup(ctx context.Context, request *milvuspb.Cr
 		return getErrResponse(err, method), nil
 	}
 
-	log.Debug("CreateResourceGroup done",
+	log.Info("CreateResourceGroup done",
 		zap.Uint64("BeginTS", t.BeginTs()),
 		zap.Uint64("EndTS", t.EndTs()))
 
@@ -4993,7 +5040,7 @@ func (node *Proxy) DropResourceGroup(ctx context.Context, request *milvuspb.Drop
 		zap.String("role", typeutil.ProxyRole),
 	)
 
-	log.Debug("DropResourceGroup received")
+	log.Info("DropResourceGroup received")
 
 	if err := node.sched.ddQueue.Enqueue(t); err != nil {
 		log.Warn("DropResourceGroup failed to enqueue",
@@ -5014,7 +5061,7 @@ func (node *Proxy) DropResourceGroup(ctx context.Context, request *milvuspb.Drop
 		return getErrResponse(err, method), nil
 	}
 
-	log.Debug("DropResourceGroup done",
+	log.Info("DropResourceGroup done",
 		zap.Uint64("BeginTS", t.BeginTs()),
 		zap.Uint64("EndTS", t.EndTs()))
 
@@ -5060,7 +5107,7 @@ func (node *Proxy) TransferNode(ctx context.Context, request *milvuspb.TransferN
 		zap.String("role", typeutil.ProxyRole),
 	)
 
-	log.Debug("TransferNode received")
+	log.Info("TransferNode received")
 
 	if err := node.sched.ddQueue.Enqueue(t); err != nil {
 		log.Warn("TransferNode failed to enqueue",
@@ -5081,7 +5128,7 @@ func (node *Proxy) TransferNode(ctx context.Context, request *milvuspb.TransferN
 		return getErrResponse(err, method), nil
 	}
 
-	log.Debug("TransferNode done",
+	log.Info("TransferNode done",
 		zap.Uint64("BeginTS", t.BeginTs()),
 		zap.Uint64("EndTS", t.EndTs()))
 
@@ -5127,7 +5174,7 @@ func (node *Proxy) TransferReplica(ctx context.Context, request *milvuspb.Transf
 		zap.String("role", typeutil.ProxyRole),
 	)
 
-	log.Debug("TransferReplica received")
+	log.Info("TransferReplica received")
 
 	if err := node.sched.ddQueue.Enqueue(t); err != nil {
 		log.Warn("TransferReplica failed to enqueue",
@@ -5148,7 +5195,7 @@ func (node *Proxy) TransferReplica(ctx context.Context, request *milvuspb.Transf
 		return getErrResponse(err, method), nil
 	}
 
-	log.Debug("TransferReplica done",
+	log.Info("TransferReplica done",
 		zap.Uint64("BeginTS", t.BeginTs()),
 		zap.Uint64("EndTS", t.EndTs()))
 

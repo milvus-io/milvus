@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -115,6 +116,7 @@ func (m *meta) reloadFromKV() error {
 	metrics.DataCoordNumSegments.Reset()
 	numStoredRows := int64(0)
 	for _, segment := range segments {
+		// segments from catalog.ListSegments will not have logPath
 		m.segments.SetSegment(segment.ID, NewSegmentInfo(segment))
 		metrics.DataCoordNumSegments.WithLabelValues(segment.GetState().String(), segment.GetLevel().String()).Inc()
 		if segment.State == commonpb.SegmentState_Flushed {
@@ -303,6 +305,7 @@ func (m *meta) AddSegment(ctx context.Context, segment *SegmentInfo) error {
 		return err
 	}
 	m.segments.SetSegment(segment.GetID(), segment)
+
 	metrics.DataCoordNumSegments.WithLabelValues(segment.GetState().String(), segment.GetLevel().String()).Inc()
 	log.Info("meta update: adding segment - complete", zap.Int64("segmentID", segment.GetID()))
 	return nil
@@ -481,7 +484,6 @@ func CreateL0Operator(collectionID, partitionID, segmentID int64, channel string
 					Level:         datapb.SegmentLevel_L0,
 				},
 			}
-			modPack.metricMutation.addNewSeg(commonpb.SegmentState_Growing, datapb.SegmentLevel_L0, 0)
 		}
 		return true
 	}
@@ -972,18 +974,35 @@ func (m *meta) SetSegmentCompacting(segmentID UniqueID, compacting bool) {
 	m.segments.SetIsCompacting(segmentID, compacting)
 }
 
-// PrepareCompleteCompactionMutation returns
+// CompleteCompactionMutation completes compaction mutation.
+func (m *meta) CompleteCompactionMutation(plan *datapb.CompactionPlan,
+	result *datapb.CompactionPlanResult,
+) (*SegmentInfo, *segMetricMutation, error) {
+	m.Lock()
+	defer m.Unlock()
+	modSegments, segment, metricMutation, err := m.prepareCompactionMutation(plan, result)
+	if err != nil {
+		log.Warn("fail to prepare for complete compaction mutation", zap.Error(err), zap.Int64("planID", plan.GetPlanID()))
+		return nil, nil, err
+	}
+
+	if err := m.alterMetaStoreAfterCompaction(segment, modSegments); err != nil {
+		log.Warn("fail to alert meta store", zap.Error(err), zap.Int64("segmentID", segment.GetID()), zap.Int64("planID", plan.GetPlanID()))
+		return nil, nil, err
+	}
+	return segment, metricMutation, err
+}
+
+// prepareCompactionMutation returns
 // - the segment info of compactedFrom segments after compaction to alter
 // - the segment info of compactedTo segment after compaction to add
 // The compactedTo segment could contain 0 numRows
 // TODO:  too complicated
-func (m *meta) PrepareCompleteCompactionMutation(plan *datapb.CompactionPlan,
+func (m *meta) prepareCompactionMutation(plan *datapb.CompactionPlan,
 	result *datapb.CompactionPlanResult,
 ) ([]*SegmentInfo, *SegmentInfo, *segMetricMutation, error) {
 	log.Info("meta update: prepare for complete compaction mutation")
 	compactionLogs := plan.GetSegmentBinlogs()
-	m.Lock()
-	defer m.Unlock()
 
 	modSegments := make([]*SegmentInfo, 0, len(compactionLogs))
 
@@ -993,6 +1012,10 @@ func (m *meta) PrepareCompleteCompactionMutation(plan *datapb.CompactionPlan,
 	for _, cl := range compactionLogs {
 		if segment := m.segments.GetSegment(cl.GetSegmentID()); segment != nil {
 			cloned := segment.Clone()
+			err := binlog.DecompressBinLog(storage.DeleteBinlog, cloned.GetCollectionID(), cloned.GetPartitionID(), cloned.GetID(), cloned.GetDeltalogs())
+			if err != nil {
+				return nil, nil, nil, err
+			}
 			updateSegStateAndPrepareMetrics(cloned, commonpb.SegmentState_Dropped, metricMutation)
 			cloned.DroppedAt = uint64(time.Now().UnixNano())
 			cloned.Compacted = true
@@ -1014,6 +1037,7 @@ func (m *meta) PrepareCompleteCompactionMutation(plan *datapb.CompactionPlan,
 	}
 
 	// find new added delta logs when executing compaction
+	// TODO: won't be needed when enable L0 Segment
 	var originDeltalogs []*datapb.FieldBinlog
 	for _, s := range modSegments {
 		originDeltalogs = append(originDeltalogs, s.GetDeltalogs()...)
@@ -1027,7 +1051,7 @@ func (m *meta) PrepareCompleteCompactionMutation(plan *datapb.CompactionPlan,
 	// MixCompaction / MergeCompaction will generates one and only one segment
 	compactToSegment := result.GetSegments()[0]
 
-	newAddedDeltalogs := updateDeltalogs(originDeltalogs, deletedDeltalogs, nil)
+	newAddedDeltalogs := updateDeltalogs(originDeltalogs, deletedDeltalogs)
 	copiedDeltalogs, err := m.copyDeltaFiles(newAddedDeltalogs, modSegments[0].CollectionID, modSegments[0].PartitionID, compactToSegment.GetSegmentID())
 	if err != nil {
 		return nil, nil, nil, err
@@ -1058,7 +1082,12 @@ func (m *meta) PrepareCompleteCompactionMutation(plan *datapb.CompactionPlan,
 		Level:               datapb.SegmentLevel_L1,
 	}
 	segment := NewSegmentInfo(segmentInfo)
-	metricMutation.addNewSeg(segment.GetState(), segment.GetLevel(), segment.GetNumOfRows())
+
+	// L1 segment with NumRows=0 will be discarded, so no need to change the metric
+	if segmentInfo.GetNumOfRows() > 0 {
+		metricMutation.addNewSeg(segment.GetState(), segment.GetLevel(), segment.GetNumOfRows())
+	}
+
 	log.Info("meta update: prepare for complete compaction mutation - complete",
 		zap.Int64("collectionID", segment.GetCollectionID()),
 		zap.Int64("partitionID", segment.GetPartitionID()),
@@ -1085,7 +1114,6 @@ func (m *meta) copyDeltaFiles(binlogs []*datapb.FieldBinlog, collectionID, parti
 			if err != nil {
 				return nil, err
 			}
-			binlog.LogPath = blobPath
 		}
 		ret = append(ret, fieldBinlog)
 	}
@@ -1125,8 +1153,6 @@ func (m *meta) alterMetaStoreAfterCompaction(segmentCompactTo *SegmentInfo, segm
 	for _, v := range segmentsCompactFrom {
 		compactFromIDs = append(compactFromIDs, v.GetID())
 	}
-	m.Lock()
-	defer m.Unlock()
 	for _, s := range segmentsCompactFrom {
 		m.segments.SetSegment(s.GetID(), s)
 	}
@@ -1137,66 +1163,17 @@ func (m *meta) alterMetaStoreAfterCompaction(segmentCompactTo *SegmentInfo, segm
 	return nil
 }
 
-func (m *meta) updateBinlogs(origin []*datapb.FieldBinlog, removes []*datapb.FieldBinlog, adds []*datapb.FieldBinlog) []*datapb.FieldBinlog {
-	fieldBinlogs := make(map[int64]map[string]*datapb.Binlog)
-	for _, f := range origin {
-		fid := f.GetFieldID()
-		if _, ok := fieldBinlogs[fid]; !ok {
-			fieldBinlogs[fid] = make(map[string]*datapb.Binlog)
-		}
-		for _, p := range f.GetBinlogs() {
-			fieldBinlogs[fid][p.GetLogPath()] = p
-		}
-	}
-
-	for _, f := range removes {
-		fid := f.GetFieldID()
-		if _, ok := fieldBinlogs[fid]; !ok {
-			continue
-		}
-		for _, p := range f.GetBinlogs() {
-			delete(fieldBinlogs[fid], p.GetLogPath())
-		}
-	}
-
-	for _, f := range adds {
-		fid := f.GetFieldID()
-		if _, ok := fieldBinlogs[fid]; !ok {
-			fieldBinlogs[fid] = make(map[string]*datapb.Binlog)
-		}
-		for _, p := range f.GetBinlogs() {
-			fieldBinlogs[fid][p.GetLogPath()] = p
-		}
-	}
-
-	res := make([]*datapb.FieldBinlog, 0, len(fieldBinlogs))
-	for fid, logs := range fieldBinlogs {
-		if len(logs) == 0 {
-			continue
-		}
-
-		binlogs := make([]*datapb.Binlog, 0, len(logs))
-		for _, log := range logs {
-			binlogs = append(binlogs, log)
-		}
-
-		field := &datapb.FieldBinlog{FieldID: fid, Binlogs: binlogs}
-		res = append(res, field)
-	}
-	return res
-}
-
-func updateDeltalogs(origin []*datapb.FieldBinlog, removes []*datapb.FieldBinlog, adds []*datapb.FieldBinlog) []*datapb.FieldBinlog {
+func updateDeltalogs(origin []*datapb.FieldBinlog, removes []*datapb.FieldBinlog) []*datapb.FieldBinlog {
 	res := make([]*datapb.FieldBinlog, 0, len(origin))
 	for _, fbl := range origin {
-		logs := make(map[string]*datapb.Binlog)
+		logs := make(map[int64]*datapb.Binlog)
 		for _, d := range fbl.GetBinlogs() {
-			logs[d.GetLogPath()] = d
+			logs[d.GetLogID()] = d
 		}
 		for _, remove := range removes {
 			if remove.GetFieldID() == fbl.GetFieldID() {
 				for _, r := range remove.GetBinlogs() {
-					delete(logs, r.GetLogPath())
+					delete(logs, r.GetLogID())
 				}
 			}
 		}

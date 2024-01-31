@@ -66,8 +66,21 @@ func GetRemoteEtcdClient(endpoints []string) (*clientv3.Client, error) {
 	})
 }
 
+func GetRemoteEtcdClientWithAuth(endpoints []string, userName, password string) (*clientv3.Client, error) {
+	return clientv3.New(clientv3.Config{
+		Endpoints:   endpoints,
+		DialTimeout: 5 * time.Second,
+		Username:    userName,
+		Password:    password,
+	})
+}
+
 func GetRemoteEtcdSSLClient(endpoints []string, certFile string, keyFile string, caCertFile string, minVersion string) (*clientv3.Client, error) {
 	var cfg clientv3.Config
+	return GetRemoteEtcdSSLClientWithCfg(endpoints, certFile, keyFile, caCertFile, minVersion, cfg)
+}
+
+func GetRemoteEtcdSSLClientWithCfg(endpoints []string, certFile string, keyFile string, caCertFile string, minVersion string, cfg clientv3.Config) (*clientv3.Client, error) {
 	cfg.Endpoints = endpoints
 	cfg.DialTimeout = 5 * time.Second
 	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
@@ -106,6 +119,31 @@ func GetRemoteEtcdSSLClient(endpoints []string, certFile string, keyFile string,
 	}
 
 	return clientv3.New(cfg)
+}
+
+func CreateEtcdClient(
+	useEmbedEtcd bool,
+	enableAuth bool,
+	userName,
+	password string,
+	useSSL bool,
+	endpoints []string,
+	certFile string,
+	keyFile string,
+	caCertFile string,
+	minVersion string,
+) (*clientv3.Client, error) {
+	if !enableAuth || useEmbedEtcd {
+		return GetEtcdClient(useEmbedEtcd, useSSL, endpoints, certFile, keyFile, caCertFile, minVersion)
+	}
+	log.Info("create etcd client(enable auth)",
+		zap.Bool("useSSL", useSSL),
+		zap.Any("endpoints", endpoints),
+		zap.String("minVersion", minVersion))
+	if useSSL {
+		return GetRemoteEtcdSSLClientWithCfg(endpoints, certFile, keyFile, caCertFile, minVersion, clientv3.Config{Username: userName, Password: password})
+	}
+	return GetRemoteEtcdClientWithAuth(endpoints, userName, password)
 }
 
 func min(a, b int) int {

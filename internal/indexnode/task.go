@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
@@ -184,6 +185,13 @@ func (it *indexBuildTaskV2) BuildIndex(ctx context.Context) error {
 		return err
 	}
 
+	for _, optField := range it.req.GetOptionalScalarFields() {
+		if err := buildIndexInfo.AppendOptionalField(optField); err != nil {
+			log.Ctx(ctx).Warn("append optional field failed", zap.Error(err))
+			return err
+		}
+	}
+
 	it.index, err = indexcgowrapper.CreateIndexV2(ctx, buildIndexInfo)
 	if err != nil {
 		if it.index != nil && it.index.CleanLocalData() != nil {
@@ -317,6 +325,24 @@ func (it *indexBuildTask) Prepare(ctx context.Context) error {
 		zap.Int64("Collection", it.collectionID), zap.Int64("SegmentID", it.segmentID))
 	typeParams := make(map[string]string)
 	indexParams := make(map[string]string)
+
+	if len(it.req.DataPaths) == 0 {
+		for _, id := range it.req.GetDataIds() {
+			path := metautil.BuildInsertLogPath(it.req.GetStorageConfig().RootPath, it.req.GetCollectionID(), it.req.GetPartitionID(), it.req.GetSegmentID(), it.req.GetFieldID(), id)
+			it.req.DataPaths = append(it.req.DataPaths, path)
+		}
+	}
+
+	if it.req.OptionalScalarFields != nil {
+		for _, optFields := range it.req.GetOptionalScalarFields() {
+			if len(optFields.DataPaths) == 0 {
+				for _, id := range optFields.DataIds {
+					path := metautil.BuildInsertLogPath(it.req.GetStorageConfig().RootPath, it.req.GetCollectionID(), it.req.GetPartitionID(), it.req.GetSegmentID(), optFields.FieldID, id)
+					optFields.DataPaths = append(optFields.DataPaths, path)
+				}
+			}
+		}
+	}
 
 	// type params can be removed
 	for _, kvPair := range it.req.GetTypeParams() {
@@ -509,6 +535,13 @@ func (it *indexBuildTask) BuildIndex(ctx context.Context) error {
 	if err := buildIndexInfo.AppendIndexEngineVersion(it.currentIndexVersion); err != nil {
 		log.Ctx(ctx).Warn("append index engine version failed", zap.Error(err))
 		return err
+	}
+
+	for _, optField := range it.req.GetOptionalScalarFields() {
+		if err := buildIndexInfo.AppendOptionalField(optField); err != nil {
+			log.Ctx(ctx).Warn("append optional field failed", zap.Error(err))
+			return err
+		}
 	}
 
 	it.index, err = indexcgowrapper.CreateIndex(ctx, buildIndexInfo)

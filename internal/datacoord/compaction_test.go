@@ -133,7 +133,7 @@ func (s *CompactionPlanHandlerSuite) TestHandleL0CompactionResults() {
 			s.Equal(7, len(operators))
 		}).Return(nil).Once()
 
-	deltalogs := []*datapb.FieldBinlog{getFieldBinlogPaths(101, getDeltaLogPath("log3", 1))}
+	deltalogs := []*datapb.FieldBinlog{getFieldBinlogIDs(101, 3)}
 	// 2 l0 segments, 3 sealed segments
 	plan := &datapb.CompactionPlan{
 		PlanID: 1,
@@ -219,7 +219,7 @@ func (s *CompactionPlanHandlerSuite) TestRefreshL0Plan() {
 		},
 	)
 
-	deltalogs := []*datapb.FieldBinlog{getFieldBinlogPaths(101, getDeltaLogPath("log3", 1))}
+	deltalogs := []*datapb.FieldBinlog{getFieldBinlogIDs(101, 3)}
 	// 2 l0 segments
 	plan := &datapb.CompactionPlan{
 		PlanID: 1,
@@ -339,34 +339,12 @@ func (s *CompactionPlanHandlerSuite) TestHandleMergeCompactionResult() {
 		err := handler.handleMergeCompactionResult(plan, compactionResult)
 		s.NoError(err)
 	})
-	s.Run("prepare error", func() {
+
+	s.Run("complete compaction mutation error", func() {
 		s.SetupTest()
 		s.mockMeta.EXPECT().GetHealthySegment(mock.Anything).Return(nil).Once()
-		s.mockMeta.EXPECT().PrepareCompleteCompactionMutation(mock.Anything, mock.Anything).Return(
-			nil, nil, nil, errors.New("mock error")).Once()
-
-		handler := newCompactionPlanHandler(s.mockSessMgr, s.mockCm, s.mockMeta, s.mockAlloc)
-		handler.plans[plan.PlanID] = &compactionTask{dataNodeID: 111, plan: plan}
-		compactionResult := &datapb.CompactionPlanResult{
-			PlanID: plan.PlanID,
-			Segments: []*datapb.CompactionSegment{
-				{SegmentID: 4, NumOfRows: 15},
-			},
-		}
-
-		err := handler.handleMergeCompactionResult(plan, compactionResult)
-		s.Error(err)
-	})
-
-	s.Run("alter error", func() {
-		s.SetupTest()
-		s.mockMeta.EXPECT().GetHealthySegment(mock.Anything).Return(nil).Once()
-		s.mockMeta.EXPECT().PrepareCompleteCompactionMutation(mock.Anything, mock.Anything).Return(
-			[]*SegmentInfo{},
-			NewSegmentInfo(&datapb.SegmentInfo{ID: 100}),
-			&segMetricMutation{}, nil).Once()
-		s.mockMeta.EXPECT().alterMetaStoreAfterCompaction(mock.Anything, mock.Anything).
-			Return(errors.New("mock error")).Once()
+		s.mockMeta.EXPECT().CompleteCompactionMutation(mock.Anything, mock.Anything).Return(
+			nil, nil, errors.New("mock error")).Once()
 
 		handler := newCompactionPlanHandler(s.mockSessMgr, s.mockCm, s.mockMeta, s.mockAlloc)
 		handler.plans[plan.PlanID] = &compactionTask{dataNodeID: 111, plan: plan}
@@ -384,12 +362,9 @@ func (s *CompactionPlanHandlerSuite) TestHandleMergeCompactionResult() {
 	s.Run("sync segment error", func() {
 		s.SetupTest()
 		s.mockMeta.EXPECT().GetHealthySegment(mock.Anything).Return(nil).Once()
-		s.mockMeta.EXPECT().PrepareCompleteCompactionMutation(mock.Anything, mock.Anything).Return(
-			[]*SegmentInfo{},
+		s.mockMeta.EXPECT().CompleteCompactionMutation(mock.Anything, mock.Anything).Return(
 			NewSegmentInfo(&datapb.SegmentInfo{ID: 100}),
 			&segMetricMutation{}, nil).Once()
-		s.mockMeta.EXPECT().alterMetaStoreAfterCompaction(mock.Anything, mock.Anything).
-			Return(nil).Once()
 		s.mockSessMgr.EXPECT().SyncSegments(mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
 
 		handler := newCompactionPlanHandler(s.mockSessMgr, s.mockCm, s.mockMeta, s.mockAlloc)
@@ -425,28 +400,25 @@ func (s *CompactionPlanHandlerSuite) TestCompleteCompaction() {
 		s.mockSessMgr.EXPECT().SyncSegments(mock.Anything, mock.Anything).Return(nil).Once()
 		// mock for handleMergeCompactionResult
 		s.mockMeta.EXPECT().GetHealthySegment(mock.Anything).Return(nil).Once()
-		s.mockMeta.EXPECT().PrepareCompleteCompactionMutation(mock.Anything, mock.Anything).Return(
-			[]*SegmentInfo{},
+		s.mockMeta.EXPECT().CompleteCompactionMutation(mock.Anything, mock.Anything).Return(
 			NewSegmentInfo(&datapb.SegmentInfo{ID: 100}),
 			&segMetricMutation{}, nil).Once()
-		s.mockMeta.EXPECT().alterMetaStoreAfterCompaction(mock.Anything, mock.Anything).
-			Return(nil).Once()
 		s.mockSch.EXPECT().Finish(mock.Anything, mock.Anything).Return()
 
 		dataNodeID := UniqueID(111)
 
 		seg1 := &datapb.SegmentInfo{
 			ID:        1,
-			Binlogs:   []*datapb.FieldBinlog{getFieldBinlogPaths(101, getInsertLogPath("log1", 1))},
-			Statslogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, getStatsLogPath("log2", 1))},
-			Deltalogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, getDeltaLogPath("log3", 1))},
+			Binlogs:   []*datapb.FieldBinlog{getFieldBinlogIDs(101, 1)},
+			Statslogs: []*datapb.FieldBinlog{getFieldBinlogIDs(101, 2)},
+			Deltalogs: []*datapb.FieldBinlog{getFieldBinlogIDs(101, 3)},
 		}
 
 		seg2 := &datapb.SegmentInfo{
 			ID:        2,
-			Binlogs:   []*datapb.FieldBinlog{getFieldBinlogPaths(101, getInsertLogPath("log4", 2))},
-			Statslogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, getStatsLogPath("log5", 2))},
-			Deltalogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, getDeltaLogPath("log6", 2))},
+			Binlogs:   []*datapb.FieldBinlog{getFieldBinlogIDs(101, 4)},
+			Statslogs: []*datapb.FieldBinlog{getFieldBinlogIDs(101, 5)},
+			Deltalogs: []*datapb.FieldBinlog{getFieldBinlogIDs(101, 6)},
 		}
 
 		plan := &datapb.CompactionPlan{
@@ -483,9 +455,9 @@ func (s *CompactionPlanHandlerSuite) TestCompleteCompaction() {
 				{
 					SegmentID:           3,
 					NumOfRows:           15,
-					InsertLogs:          []*datapb.FieldBinlog{getFieldBinlogPaths(101, getInsertLogPath("log301", 3))},
-					Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogPaths(101, getStatsLogPath("log302", 3))},
-					Deltalogs:           []*datapb.FieldBinlog{getFieldBinlogPaths(101, getDeltaLogPath("log303", 3))},
+					InsertLogs:          []*datapb.FieldBinlog{getFieldBinlogIDs(101, 301)},
+					Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogIDs(101, 302)},
+					Deltalogs:           []*datapb.FieldBinlog{getFieldBinlogIDs(101, 303)},
 				},
 			},
 		}
@@ -584,6 +556,17 @@ func (s *CompactionPlanHandlerSuite) TestUpdateCompaction() {
 	s.Equal(failed, task.state)
 }
 
+func getFieldBinlogIDs(id int64, logIDs ...int64) *datapb.FieldBinlog {
+	l := &datapb.FieldBinlog{
+		FieldID: id,
+		Binlogs: make([]*datapb.Binlog, 0, len(logIDs)),
+	}
+	for _, id := range logIDs {
+		l.Binlogs = append(l.Binlogs, &datapb.Binlog{LogID: id})
+	}
+	return l
+}
+
 func getFieldBinlogPaths(id int64, paths ...string) *datapb.FieldBinlog {
 	l := &datapb.FieldBinlog{
 		FieldID: id,
@@ -595,13 +578,13 @@ func getFieldBinlogPaths(id int64, paths ...string) *datapb.FieldBinlog {
 	return l
 }
 
-func getFieldBinlogPathsWithEntry(id int64, entry int64, paths ...string) *datapb.FieldBinlog {
+func getFieldBinlogIDsWithEntry(id int64, entry int64, logIDs ...int64) *datapb.FieldBinlog {
 	l := &datapb.FieldBinlog{
 		FieldID: id,
-		Binlogs: make([]*datapb.Binlog, 0, len(paths)),
+		Binlogs: make([]*datapb.Binlog, 0, len(logIDs)),
 	}
-	for _, path := range paths {
-		l.Binlogs = append(l.Binlogs, &datapb.Binlog{LogPath: path, EntriesNum: entry})
+	for _, id := range logIDs {
+		l.Binlogs = append(l.Binlogs, &datapb.Binlog{LogID: id, EntriesNum: entry})
 	}
 	return l
 }

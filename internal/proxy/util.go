@@ -73,6 +73,7 @@ const (
 	InvertedIndexType = "INVERTED"
 
 	defaultRRFParamsValue = 60
+	maxRRFParamsValue     = 16384
 )
 
 var logger = log.L().WithOptions(zap.Fields(zap.String("role", typeutil.ProxyRole)))
@@ -749,7 +750,7 @@ func ValidateUsername(username string) error {
 
 	firstChar := username[0]
 	if !isAlpha(firstChar) {
-		return merr.WrapErrParameterInvalidMsg("invalid user name %s, the first character must be a letter, but got %s", username, firstChar)
+		return merr.WrapErrParameterInvalidMsg("invalid user name %s, the first character must be a letter, but got %s", username, string(firstChar))
 	}
 
 	usernameSize := len(username)
@@ -875,7 +876,7 @@ func GetCurUserFromContext(ctx context.Context) (string, error) {
 	}
 	authorization, ok := md[strings.ToLower(util.HeaderAuthorize)]
 	if !ok || len(authorization) < 1 {
-		return "", fmt.Errorf("fail to get authorization from the md, authorize:[%s]", util.HeaderAuthorize)
+		return "", fmt.Errorf("fail to get authorization from the md, %s:[token]", strings.ToLower(util.HeaderAuthorize))
 	}
 	token := authorization[0]
 	rawToken, err := crypto.Base64Decode(token)
@@ -903,10 +904,13 @@ func GetCurDBNameFromContextOrDefault(ctx context.Context) string {
 }
 
 func NewContextWithMetadata(ctx context.Context, username string, dbName string) context.Context {
+	dbKey := strings.ToLower(util.HeaderDBName)
+	if username == "" {
+		return contextutil.AppendToIncomingContext(ctx, dbKey, dbName)
+	}
 	originValue := fmt.Sprintf("%s%s%s", username, util.CredentialSeperator, username)
 	authKey := strings.ToLower(util.HeaderAuthorize)
 	authValue := crypto.Base64Encode(originValue)
-	dbKey := strings.ToLower(util.HeaderDBName)
 	return contextutil.AppendToIncomingContext(ctx, authKey, authValue, dbKey, dbName)
 }
 

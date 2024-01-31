@@ -356,15 +356,6 @@ func (s *Server) fillReplicaInfo(replica *meta.Replica, withShardNodes bool) (*m
 	return info, nil
 }
 
-func checkNodeAvailable(nodeID int64, info *session.NodeInfo) error {
-	if info == nil {
-		return merr.WrapErrNodeOffline(nodeID)
-	} else if time.Since(info.LastHeartbeat()) > Params.QueryCoordCfg.HeartbeatAvailableInterval.GetAsDuration(time.Millisecond) {
-		return merr.WrapErrNodeOffline(nodeID, fmt.Sprintf("lastHB=%v", info.LastHeartbeat()))
-	}
-	return nil
-}
-
 func filterDupLeaders(replicaManager *meta.ReplicaManager, leaders map[int64]*meta.LeaderView) map[int64]*meta.LeaderView {
 	type leaderID struct {
 		ReplicaID int64

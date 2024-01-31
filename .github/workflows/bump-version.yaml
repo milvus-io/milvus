@@ -42,7 +42,7 @@ jobs:
           token: ${{ secrets.ALL_CONTRIBUTORS_TOKEN }}
           author: sre-ci-robot <sre-ci-robot@users.noreply.github.com>
           signoff: true
-          branch: update_knowhere_commit_${{ github.sha }}
+          branch: bump_milvus_commit_${{ github.sha }}
           delete-branch: true
           title: '[automated] Bump milvus version to ${{ inputs.imageTag }}'
           body: |

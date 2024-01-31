@@ -31,8 +31,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -268,6 +270,7 @@ func (s *Server) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsert
 			Status: merr.Status(err),
 		}, nil
 	}
+
 	segment := s.meta.GetHealthySegment(req.GetSegmentID())
 	if segment == nil {
 		return &datapb.GetInsertBinlogPathsResponse{
@@ -275,6 +278,12 @@ func (s *Server) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsert
 		}, nil
 	}
 
+	err := binlog.DecompressBinLog(storage.InsertBinlog, segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID(), segment.GetBinlogs())
+	if err != nil {
+		return &datapb.GetInsertBinlogPathsResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
 	resp := &datapb.GetInsertBinlogPathsResponse{
 		Status: merr.Success(),
 	}
@@ -442,6 +451,13 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 			return merr.Status(err), nil
 		}
 	}
+	// for compatibility issue, before 2.3.4, SaveBinlogPaths has only logpath
+	// try to parse path and fill logid
+	err := binlog.CompressSaveBinlogPaths(req)
+	if err != nil {
+		log.Warn("fail to CompressSaveBinlogPaths", zap.String("channel", channelName), zap.Error(err))
+		return merr.Status(err), nil
+	}
 
 	// validate
 	segmentID := req.GetSegmentID()
@@ -493,7 +509,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		operators = append(operators, UpdateStorageVersionOperator(segmentID, req.GetStorageVersion()))
 	}
 	// run all operator and update new segment info
-	err := s.meta.UpdateSegmentsInfo(operators...)
+	err = s.meta.UpdateSegmentsInfo(operators...)
 	if err != nil {
 		log.Error("save binlog and checkpoints failed", zap.Error(err))
 		return merr.Status(err), nil
@@ -1062,8 +1078,16 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 		return resp, nil
 	}
 
+	plans := s.compactionHandler.getCompactionTasksBySignalID(id)
+	if len(plans) == 0 {
+		resp.CompactionID = -1
+		resp.CompactionPlanCount = 0
+	} else {
+		resp.CompactionID = id
+		resp.CompactionPlanCount = int32(len(plans))
+	}
+
 	log.Info("success to trigger manual compaction", zap.Int64("compactionID", id))
-	resp.CompactionID = id
 	return resp, nil
 }
 
@@ -1504,16 +1528,16 @@ func getDiff(base, remove []int64) []int64 {
 func (s *Server) SaveImportSegment(ctx context.Context, req *datapb.SaveImportSegmentRequest) (*commonpb.Status, error) {
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetCollectionId()),
-	)
-	log.Info("DataCoord putting segment to the right DataNode and saving binlog path",
 		zap.Int64("segmentID", req.GetSegmentId()),
 		zap.Int64("partitionID", req.GetPartitionId()),
 		zap.String("channelName", req.GetChannelName()),
-		zap.Int64("# of rows", req.GetRowNum()))
+		zap.Int64("# of rows", req.GetRowNum()),
+	)
+	log.Info("DataCoord putting segment to the right DataNode and saving binlog path")
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-	resp, err := s.cluster.AddImportSegment(ctx,
+	_, err := s.cluster.AddImportSegment(ctx,
 		&datapb.AddImportSegmentRequest{
 			Base: commonpbutil.NewMsgBase(
 				commonpbutil.WithTimeStamp(req.GetBase().GetTimestamp()),
@@ -1530,8 +1554,15 @@ func (s *Server) SaveImportSegment(ctx context.Context, req *datapb.SaveImportSe
 		return merr.Status(err), nil
 	}
 
-	// Fill in start position message ID.
-	req.SaveBinlogPathReq.StartPositions[0].StartPosition.MsgID = resp.GetChannelPos()
+	// Fill in position message ID by channel checkpoint.
+	channelCP := s.meta.GetChannelCheckpoint(req.GetChannelName())
+	if channelCP == nil {
+		log.Warn("SaveImportSegment get nil channel checkpoint")
+		return merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("nil checkpoint when saving import segment, segmentID=%d, channel=%s",
+			req.GetSegmentId(), req.GetChannelName()))), nil
+	}
+	req.SaveBinlogPathReq.StartPositions[0].StartPosition.MsgID = channelCP.GetMsgID()
+	req.SaveBinlogPathReq.CheckPoints[0].Position.MsgID = channelCP.GetMsgID()
 
 	// Start saving bin log paths.
 	rsp, err := s.SaveBinlogPaths(context.Background(), req.GetSaveBinlogPathReq())

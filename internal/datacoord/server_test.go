@@ -18,7 +18,6 @@ package datacoord
 
 import (
 	"context"
-	"fmt"
 	"math/rand"
 	"os"
 	"os/signal"
@@ -238,10 +237,10 @@ func TestGetInsertBinlogPaths(t *testing.T) {
 					FieldID: 1,
 					Binlogs: []*datapb.Binlog{
 						{
-							LogPath: "dev/datacoord/testsegment/1/part1",
+							LogID: 1,
 						},
 						{
-							LogPath: "dev/datacoord/testsegment/1/part2",
+							LogID: 2,
 						},
 					},
 				},
@@ -269,10 +268,10 @@ func TestGetInsertBinlogPaths(t *testing.T) {
 					FieldID: 1,
 					Binlogs: []*datapb.Binlog{
 						{
-							LogPath: "dev/datacoord/testsegment/1/part1",
+							LogID: 1,
 						},
 						{
-							LogPath: "dev/datacoord/testsegment/1/part2",
+							LogID: 2,
 						},
 					},
 				},
@@ -2149,10 +2148,10 @@ func TestGetRecoveryInfo(t *testing.T) {
 					FieldID: 1,
 					Binlogs: []*datapb.Binlog{
 						{
-							LogPath: "/binlog/file1",
+							LogPath: "/binlog/1",
 						},
 						{
-							LogPath: "/binlog/file2",
+							LogPath: "/binlog/2",
 						},
 					},
 				},
@@ -2162,10 +2161,10 @@ func TestGetRecoveryInfo(t *testing.T) {
 					FieldID: 1,
 					Binlogs: []*datapb.Binlog{
 						{
-							LogPath: "/stats_log/file1",
+							LogPath: "/stats_log/1",
 						},
 						{
-							LogPath: "/stats_log/file2",
+							LogPath: "/stats_log/2",
 						},
 					},
 				},
@@ -2176,7 +2175,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 						{
 							TimestampFrom: 0,
 							TimestampTo:   1,
-							LogPath:       "/stats_log/file1",
+							LogPath:       "/stats_log/1",
 							LogSize:       1,
 						},
 					},
@@ -2226,8 +2225,11 @@ func TestGetRecoveryInfo(t *testing.T) {
 		assert.EqualValues(t, 0, resp.GetBinlogs()[0].GetSegmentID())
 		assert.EqualValues(t, 1, len(resp.GetBinlogs()[0].GetFieldBinlogs()))
 		assert.EqualValues(t, 1, resp.GetBinlogs()[0].GetFieldBinlogs()[0].GetFieldID())
+		for _, binlog := range resp.GetBinlogs()[0].GetFieldBinlogs()[0].GetBinlogs() {
+			assert.Equal(t, "", binlog.GetLogPath())
+		}
 		for i, binlog := range resp.GetBinlogs()[0].GetFieldBinlogs()[0].GetBinlogs() {
-			assert.Equal(t, fmt.Sprintf("/binlog/file%d", i+1), binlog.GetLogPath())
+			assert.Equal(t, int64(i+1), binlog.GetLogID())
 		}
 	})
 	t.Run("with dropped segments", func(t *testing.T) {
@@ -2475,6 +2477,15 @@ func TestManualCompaction(t *testing.T) {
 			},
 		}
 
+		mockHandler := NewMockCompactionPlanContext(t)
+		mockHandler.EXPECT().getCompactionTasksBySignalID(mock.Anything).Return(
+			[]*compactionTask{
+				{
+					triggerInfo: &compactionSignal{id: 1},
+					state:       executing,
+				},
+			})
+		svr.compactionHandler = mockHandler
 		resp, err := svr.ManualCompaction(context.TODO(), &milvuspb.ManualCompactionRequest{
 			CollectionID: 1,
 			Timetravel:   1,
@@ -3129,9 +3140,9 @@ func TestDataCoord_SegmentStatistics(t *testing.T) {
 
 		seg1 := &datapb.SegmentInfo{
 			ID:        100,
-			Binlogs:   []*datapb.FieldBinlog{getFieldBinlogPathsWithEntry(101, 1, getInsertLogPath("log1", 100))},
-			Statslogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, getStatsLogPath("log2", 100))},
-			Deltalogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, getDeltaLogPath("log3", 100))},
+			Binlogs:   []*datapb.FieldBinlog{getFieldBinlogIDsWithEntry(101, 1, 1)},
+			Statslogs: []*datapb.FieldBinlog{getFieldBinlogIDs(1, 2)},
+			Deltalogs: []*datapb.FieldBinlog{getFieldBinlogIDs(1, 3)},
 			State:     commonpb.SegmentState_Importing,
 		}
 
@@ -3156,9 +3167,9 @@ func TestDataCoord_SegmentStatistics(t *testing.T) {
 
 		seg1 := &datapb.SegmentInfo{
 			ID:        100,
-			Binlogs:   []*datapb.FieldBinlog{getFieldBinlogPathsWithEntry(101, 1, getInsertLogPath("log1", 100))},
-			Statslogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, getStatsLogPath("log2", 100))},
-			Deltalogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, getDeltaLogPath("log3", 100))},
+			Binlogs:   []*datapb.FieldBinlog{getFieldBinlogIDsWithEntry(101, 1, 1)},
+			Statslogs: []*datapb.FieldBinlog{getFieldBinlogIDs(1, 2)},
+			Deltalogs: []*datapb.FieldBinlog{getFieldBinlogIDs(1, 3)},
 			State:     commonpb.SegmentState_Flushed,
 		}
 
@@ -3196,6 +3207,12 @@ func TestDataCoord_SaveImportSegment(t *testing.T) {
 		assert.NoError(t, err)
 		err = svr.channelManager.Watch(context.TODO(), &channelMeta{Name: "ch1", CollectionID: 100})
 		assert.NoError(t, err)
+		err = svr.meta.UpdateChannelCheckpoint("ch1", &msgpb.MsgPosition{
+			ChannelName: "ch1",
+			MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
+			Timestamp:   1000,
+		})
+		assert.NoError(t, err)
 
 		status, err := svr.SaveImportSegment(context.TODO(), &datapb.SaveImportSegmentRequest{
 			SegmentId:    100,
@@ -3217,6 +3234,16 @@ func TestDataCoord_SaveImportSegment(t *testing.T) {
 							Timestamp:   1,
 						},
 						SegmentID: 100,
+					},
+				},
+				CheckPoints: []*datapb.CheckPoint{
+					{
+						SegmentID: 100,
+						Position: &msgpb.MsgPosition{
+							ChannelName: "ch1",
+							Timestamp:   1,
+						},
+						NumOfRows: int64(1),
 					},
 				},
 			},

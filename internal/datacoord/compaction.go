@@ -24,13 +24,17 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // TODO this num should be determined by resources of datanode, for now, we set to a fixed value for simple
@@ -76,8 +80,7 @@ type CompactionMeta interface {
 	UpdateSegmentsInfo(operators ...UpdateOperator) error
 	SetSegmentCompacting(segmentID int64, compacting bool)
 
-	PrepareCompleteCompactionMutation(plan *datapb.CompactionPlan, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *SegmentInfo, *segMetricMutation, error)
-	alterMetaStoreAfterCompaction(segmentCompactTo *SegmentInfo, segmentsCompactFrom []*SegmentInfo) error
+	CompleteCompactionMutation(plan *datapb.CompactionPlan, result *datapb.CompactionPlanResult) (*SegmentInfo, *segMetricMutation, error)
 }
 
 var _ CompactionMeta = (*meta)(nil)
@@ -88,6 +91,7 @@ type compactionTask struct {
 	state       compactionTaskState
 	dataNodeID  int64
 	result      *datapb.CompactionPlanResult
+	span        trace.Span
 }
 
 func (t *compactionTask) shadowClone(opts ...compactionTaskOpt) *compactionTask {
@@ -96,6 +100,7 @@ func (t *compactionTask) shadowClone(opts ...compactionTaskOpt) *compactionTask 
 		plan:        t.plan,
 		state:       t.state,
 		dataNodeID:  t.dataNodeID,
+		span:        t.span,
 	}
 	for _, opt := range opts {
 		opt(task)
@@ -276,11 +281,14 @@ func (c *compactionPlanHandler) enqueuePlan(signal *compactionSignal, plan *data
 	log := log.With(zap.Int64("planID", plan.GetPlanID()), zap.Int64("nodeID", nodeID))
 	c.setSegmentsCompacting(plan, true)
 
+	_, span := otel.Tracer(typeutil.DataCoordRole).Start(context.Background(), fmt.Sprintf("Compaction-%s", plan.GetType()))
+
 	task := &compactionTask{
 		triggerInfo: signal,
 		plan:        plan,
 		state:       pipelining,
 		dataNodeID:  nodeID,
+		span:        span,
 	}
 	c.mu.Lock()
 	c.plans[plan.PlanID] = task
@@ -308,8 +316,10 @@ func (c *compactionPlanHandler) RefreshPlan(task *compactionTask) {
 
 		sealedSegBinlogs := lo.Map(sealedSegments, func(info *SegmentInfo, _ int) *datapb.CompactionSegmentBinlogs {
 			return &datapb.CompactionSegmentBinlogs{
-				SegmentID: info.GetID(),
-				Level:     datapb.SegmentLevel_L1,
+				SegmentID:    info.GetID(),
+				Level:        datapb.SegmentLevel_L1,
+				CollectionID: info.GetCollectionID(),
+				PartitionID:  info.GetPartitionID(),
 			}
 		})
 
@@ -335,10 +345,11 @@ func (c *compactionPlanHandler) notifyTasks(tasks []*compactionTask) {
 		innerTask := task
 		c.RefreshPlan(innerTask)
 		getOrCreateIOPool().Submit(func() (any, error) {
+			ctx := tracer.SetupSpan(context.Background(), innerTask.span)
 			plan := innerTask.plan
-			log := log.With(zap.Int64("planID", plan.GetPlanID()), zap.Int64("nodeID", innerTask.dataNodeID))
+			log := log.Ctx(ctx).With(zap.Int64("planID", plan.GetPlanID()), zap.Int64("nodeID", innerTask.dataNodeID))
 			log.Info("Notify compaction task to DataNode")
-			ts, err := c.allocator.allocTimestamp(context.TODO())
+			ts, err := c.allocator.allocTimestamp(ctx)
 			if err != nil {
 				log.Warn("Alloc start time for CompactionPlan failed", zap.Error(err))
 				// update plan ts to TIMEOUT ts
@@ -346,7 +357,9 @@ func (c *compactionPlanHandler) notifyTasks(tasks []*compactionTask) {
 				return nil, err
 			}
 			c.updateTask(plan.PlanID, setStartTime(ts))
-			err = c.sessions.Compaction(innerTask.dataNodeID, plan)
+
+			err = c.sessions.Compaction(ctx, innerTask.dataNodeID, plan)
+
 			c.updateTask(plan.PlanID, setState(executing))
 			if err != nil {
 				log.Warn("Failed to notify compaction tasks to DataNode", zap.Error(err))
@@ -397,7 +410,7 @@ func (c *compactionPlanHandler) completeCompaction(result *datapb.CompactionPlan
 		return errors.New("unknown compaction type")
 	}
 	UpdateCompactionSegmentSizeMetrics(result.GetSegments())
-	c.plans[planID] = c.plans[planID].shadowClone(setState(completed), setResult(result), cleanLogPath())
+	c.plans[planID] = c.plans[planID].shadowClone(setState(completed), setResult(result), cleanLogPath(), endSpan())
 	return nil
 }
 
@@ -435,19 +448,12 @@ func (c *compactionPlanHandler) handleMergeCompactionResult(plan *datapb.Compact
 		log.Info("meta has already been changed, skip meta change and retry sync segments")
 	} else {
 		// Also prepare metric updates.
-		modSegments, newSegment, metricMutation, err := c.meta.PrepareCompleteCompactionMutation(plan, result)
+		newSegment, metricMutation, err := c.meta.CompleteCompactionMutation(plan, result)
 		if err != nil {
 			return err
 		}
-
-		if err := c.meta.alterMetaStoreAfterCompaction(newSegment, modSegments); err != nil {
-			log.Warn("fail to alert meta store", zap.Error(err))
-			return err
-		}
-
 		// Apply metrics after successful meta update.
 		metricMutation.commit()
-
 		newSegmentInfo = newSegment
 	}
 
@@ -516,12 +522,12 @@ func (c *compactionPlanHandler) updateCompaction(ts Timestamp) error {
 				zap.Uint64("startTime", task.plan.GetStartTime()),
 				zap.Uint64("now", ts),
 			)
-			c.plans[planID] = c.plans[planID].shadowClone(setState(timeout))
+			c.plans[planID] = c.plans[planID].shadowClone(setState(timeout), endSpan())
 			continue
 		}
 
 		log.Info("compaction failed", zap.Int64("planID", task.plan.PlanID), zap.Int64("nodeID", task.dataNodeID))
-		c.plans[planID] = c.plans[planID].shadowClone(setState(failed))
+		c.plans[planID] = c.plans[planID].shadowClone(setState(failed), endSpan())
 		c.setSegmentsCompacting(task.plan, false)
 		c.scheduler.Finish(task.dataNodeID, task.plan)
 	}
@@ -535,7 +541,7 @@ func (c *compactionPlanHandler) updateCompaction(ts Timestamp) error {
 
 		if !ok {
 			log.Info("compaction failed for timeout", zap.Int64("planID", task.plan.PlanID), zap.Int64("nodeID", task.dataNodeID))
-			c.plans[planID] = c.plans[planID].shadowClone(setState(failed))
+			c.plans[planID] = c.plans[planID].shadowClone(setState(failed), endSpan())
 			c.setSegmentsCompacting(task.plan, false)
 			c.scheduler.Finish(task.dataNodeID, task.plan)
 		}
@@ -599,6 +605,14 @@ type compactionTaskOpt func(task *compactionTask)
 func setState(state compactionTaskState) compactionTaskOpt {
 	return func(task *compactionTask) {
 		task.state = state
+	}
+}
+
+func endSpan() compactionTaskOpt {
+	return func(task *compactionTask) {
+		if task.span != nil {
+			task.span.End()
+		}
 	}
 }
 

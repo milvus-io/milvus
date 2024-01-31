@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	ms "github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -66,8 +67,8 @@ func (t *createCollectionTask) validate() error {
 		return err
 	}
 
+	// 1. check shard number
 	shardsNum := t.Req.GetShardsNum()
-
 	cfgMaxShardNum := Params.RootCoordCfg.DmlChannelNum.GetAsInt32()
 	if shardsNum > cfgMaxShardNum {
 		return fmt.Errorf("shard num (%d) exceeds max configuration (%d)", shardsNum, cfgMaxShardNum)
@@ -78,6 +79,7 @@ func (t *createCollectionTask) validate() error {
 		return fmt.Errorf("shard num (%d) exceeds system limit (%d)", shardsNum, cfgShardLimit)
 	}
 
+	// 2. check db-collection capacity
 	db2CollIDs := t.core.meta.ListAllAvailCollections(t.ctx)
 
 	collIDs, ok := db2CollIDs[t.dbID]
@@ -92,6 +94,7 @@ func (t *createCollectionTask) validate() error {
 		return merr.WrapErrCollectionNumLimitExceeded(maxColNumPerDB, "max number of collection has reached the limit in DB")
 	}
 
+	// 3. check total collection number
 	totalCollections := 0
 	for _, collIDs := range db2CollIDs {
 		totalCollections += len(collIDs)
@@ -102,7 +105,13 @@ func (t *createCollectionTask) validate() error {
 		log.Warn("unable to create collection because the number of collection has reached the limit", zap.Int("max_collection_num", maxCollectionNum))
 		return merr.WrapErrCollectionNumLimitExceeded(maxCollectionNum, "max number of collection has reached the limit")
 	}
-	return nil
+
+	// 4. check collection * shard * partition
+	var newPartNum int64 = 1
+	if t.Req.GetNumPartitions() > 0 {
+		newPartNum = t.Req.GetNumPartitions()
+	}
+	return checkGeneralCapacity(t.ctx, 1, newPartNum, t.Req.GetShardsNum(), t.core, t.ts)
 }
 
 func checkDefaultValue(schema *schemapb.CollectionSchema) error {
@@ -470,6 +479,7 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 		collectionNames: []string{t.Req.GetCollectionName()},
 		collectionID:    InvalidCollectionID,
 		ts:              ts,
+		opts:            []proxyutil.ExpireCacheOpt{proxyutil.SetMsgType(commonpb.MsgType_DropCollection)},
 	}, &nullStep{})
 	undoTask.AddStep(&nullStep{}, &removeDmlChannelsStep{
 		baseStep:  baseStep{core: t.core},

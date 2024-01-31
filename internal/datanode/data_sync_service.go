@@ -138,8 +138,6 @@ func getMetaCacheWithEtcdTickler(initCtx context.Context, node *DataNode, info *
 }
 
 func initMetaCache(initCtx context.Context, storageV2Cache *metacache.StorageV2Cache, chunkManager storage.ChunkManager, info *datapb.ChannelWatchInfo, tickler interface{ inc() }, unflushed, flushed []*datapb.SegmentInfo) (metacache.MetaCache, error) {
-	recoverTs := info.GetVchan().GetSeekPosition().GetTimestamp()
-
 	// tickler will update addSegment progress to watchInfo
 	futures := make([]*conc.Future[any], 0, len(unflushed)+len(flushed))
 	segmentPks := typeutil.NewConcurrentMap[int64, []*storage.PkStatistics]()
@@ -160,7 +158,7 @@ func initMetaCache(initCtx context.Context, storageV2Cache *metacache.StorageV2C
 				if params.Params.CommonCfg.EnableStorageV2.GetAsBool() {
 					stats, err = loadStatsV2(storageV2Cache, segment, info.GetSchema())
 				} else {
-					stats, err = loadStats(initCtx, chunkManager, info.GetSchema(), segment.GetID(), segment.GetCollectionID(), segment.GetStatslogs(), recoverTs)
+					stats, err = loadStats(initCtx, chunkManager, info.GetSchema(), segment.GetID(), segment.GetStatslogs())
 				}
 				if err != nil {
 					return nil, err
@@ -246,7 +244,7 @@ func loadStatsV2(storageCache *metacache.StorageV2Cache, segment *datapb.Segment
 	return getResult(stats), nil
 }
 
-func loadStats(ctx context.Context, chunkManager storage.ChunkManager, schema *schemapb.CollectionSchema, segmentID int64, collectionID int64, statsBinlogs []*datapb.FieldBinlog, ts Timestamp) ([]*storage.PkStatistics, error) {
+func loadStats(ctx context.Context, chunkManager storage.ChunkManager, schema *schemapb.CollectionSchema, segmentID int64, statsBinlogs []*datapb.FieldBinlog) ([]*storage.PkStatistics, error) {
 	startTs := time.Now()
 	log := log.With(zap.Int64("segmentID", segmentID))
 	log.Info("begin to init pk bloom filter", zap.Int("statsBinLogsLen", len(statsBinlogs)))

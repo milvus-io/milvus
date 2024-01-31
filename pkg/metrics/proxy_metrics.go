@@ -144,7 +144,7 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "mutation_send_latency",
 			Help:      "latency that proxy send insert request to MsgStream",
-			Buckets:   buckets, // unit: ms
+			Buckets:   longTaskBuckets, // unit: ms
 		}, []string{nodeIDLabelName, msgTypeLabelName})
 
 	// ProxyAssignSegmentIDLatency record the latency that Proxy get segmentID from dataCoord.
@@ -297,6 +297,15 @@ var (
 		}, []string{
 			nodeIDLabelName,
 		})
+
+	// ProxyRateLimitReqCount integrates a counter monitoring metric for the rate-limit rpc requests.
+	ProxyRateLimitReqCount = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "rate_limit_req_count",
+			Help:      "count of operation executed",
+		}, []string{nodeIDLabelName, msgTypeLabelName, statusLabelName})
 )
 
 // RegisterProxy registers Proxy metrics
@@ -341,6 +350,7 @@ func RegisterProxy(registry *prometheus.Registry) {
 
 	registry.MustRegister(ProxyWorkLoadScore)
 	registry.MustRegister(ProxyExecutingTotalNq)
+	registry.MustRegister(ProxyRateLimitReqCount)
 }
 
 func CleanupCollectionMetrics(nodeID int64, collection string) {

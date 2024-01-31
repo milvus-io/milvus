@@ -10,7 +10,7 @@ type binIVFFlatChecker struct {
 
 func (c binIVFFlatChecker) StaticCheck(params map[string]string) error {
 	if !CheckStrByValues(params, Metric, BinIvfMetrics) {
-		return fmt.Errorf("metric type not found or not supported, supported: %v", BinIvfMetrics)
+		return fmt.Errorf("metric type %s not found or not supported, supported: %v", params[Metric], BinIvfMetrics)
 	}
 
 	if !CheckIntByRange(params, NLIST, MinNList, MaxNList) {

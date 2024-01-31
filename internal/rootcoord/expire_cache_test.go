@@ -30,8 +30,8 @@ func Test_expireCacheConfig_apply(t *testing.T) {
 	c := proxyutil.DefaultExpireCacheConfig()
 	req := &proxypb.InvalidateCollMetaCacheRequest{}
 	c.Apply(req)
-	assert.Nil(t, req.GetBase())
-	opt := proxyutil.ExpireCacheWithDropFlag()
+	assert.Equal(t, commonpb.MsgType_Undefined, req.GetBase().GetMsgType())
+	opt := proxyutil.SetMsgType(commonpb.MsgType_DropCollection)
 	opt(&c)
 	c.Apply(req)
 	assert.Equal(t, commonpb.MsgType_DropCollection, req.GetBase().GetMsgType())

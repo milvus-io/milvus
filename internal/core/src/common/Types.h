@@ -94,13 +94,26 @@ using VectorArray = proto::schema::VectorField;
 using IdArray = proto::schema::IDs;
 using InsertData = proto::segcore::InsertRecord;
 using PkType = std::variant<std::monostate, int64_t, std::string>;
+
+inline size_t
+CalcPksSize(const std::vector<PkType>& pks) {
+    size_t size = 0;
+    for (auto& pk : pks) {
+        size += sizeof(pk);
+        if (std::holds_alternative<std::string>(pk)) {
+            size += std::get<std::string>(pk).size();
+        }
+    }
+    return size;
+}
+
 using GroupByValueType = std::variant<std::monostate,
                                       int8_t,
                                       int16_t,
                                       int32_t,
                                       int64_t,
                                       bool,
-                                      std::string_view>;
+                                      std::string>;
 using ContainsType = proto::plan::JSONContainsExpr_JSONOp;
 
 inline bool
@@ -134,6 +147,12 @@ using FieldName = fluent::NamedType<std::string,
                                     impl::FieldNameTag,
                                     fluent::Comparable,
                                     fluent::Hashable>;
+
+// field id -> (field name, field type, binlog paths)
+using OptFieldT = std::unordered_map<
+    int64_t,
+    std::tuple<std::string, milvus::DataType, std::vector<std::string>>>;
+
 // using FieldOffset = fluent::NamedType<int64_t, impl::FieldOffsetTag, fluent::Comparable, fluent::Hashable>;
 using SegOffset =
     fluent::NamedType<int64_t, impl::SegOffsetTag, fluent::Arithmetic>;

@@ -142,6 +142,16 @@ var (
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeSelectUser.String()),
 		},
 	}
+
+	RelatedPrivileges = map[string][]string{
+		commonpb.ObjectPrivilege_PrivilegeLoad.String(): {
+			commonpb.ObjectPrivilege_PrivilegeGetLoadState.String(),
+			commonpb.ObjectPrivilege_PrivilegeGetLoadingProgress.String(),
+		},
+		commonpb.ObjectPrivilege_PrivilegeFlush.String(): {
+			commonpb.ObjectPrivilege_PrivilegeGetFlushState.String(),
+		},
+	}
 )
 
 // StringSet convert array to map for conveniently check if the array contains an element

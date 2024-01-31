@@ -383,9 +383,8 @@ func (node *DataNode) Start() error {
 			node.timeTickSender.start()
 		}
 
-		node.stopWaiter.Add(1)
 		// Start node watch node
-		go node.StartWatchChannels(node.ctx)
+		node.startWatchChannelsAtBackground(node.ctx)
 
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
 	})

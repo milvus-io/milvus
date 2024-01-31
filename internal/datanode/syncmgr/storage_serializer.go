@@ -75,7 +75,6 @@ func NewStorageSerializer(metacache metacache.MetaCache, metaWriter MetaWriter) 
 func (s *storageV1Serializer) EncodeBuffer(ctx context.Context, pack *SyncPack) (Task, error) {
 	task := NewSyncTask()
 	tr := timerecord.NewTimeRecorder("storage_serializer")
-	metricSegLevel := pack.level.String()
 
 	log := log.Ctx(ctx).With(
 		zap.Int64("segmentID", pack.segmentID),
@@ -135,7 +134,7 @@ func (s *storageV1Serializer) EncodeBuffer(ctx context.Context, pack *SyncPack) 
 
 	s.setTaskMeta(task, pack)
 
-	metrics.DataNodeEncodeBufferLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metricSegLevel).Observe(float64(tr.RecordSpan().Milliseconds()))
+	metrics.DataNodeEncodeBufferLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), pack.level.String()).Observe(float64(tr.RecordSpan().Milliseconds()))
 	return task, nil
 }
 

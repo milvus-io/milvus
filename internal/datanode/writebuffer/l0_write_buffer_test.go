@@ -67,12 +67,41 @@ func (s *L0WriteBufferSuite) SetupSuite() {
 	s.storageCache = storageCache
 }
 
-func (s *L0WriteBufferSuite) composeInsertMsg(segmentID int64, rowCount int, dim int) ([]int64, *msgstream.InsertMsg) {
+func (s *L0WriteBufferSuite) composeInsertMsg(segmentID int64, rowCount int, dim int, pkType schemapb.DataType) ([]int64, *msgstream.InsertMsg) {
 	tss := lo.RepeatBy(rowCount, func(idx int) int64 { return int64(tsoutil.ComposeTSByTime(time.Now(), int64(idx))) })
 	vectors := lo.RepeatBy(rowCount, func(_ int) []float32 {
 		return lo.RepeatBy(dim, func(_ int) float32 { return rand.Float32() })
 	})
 	flatten := lo.Flatten(vectors)
+	var pkField *schemapb.FieldData
+	switch pkType {
+	case schemapb.DataType_Int64:
+		pkField = &schemapb.FieldData{
+			FieldId: common.StartOfUserFieldID, FieldName: "pk", Type: schemapb.DataType_Int64,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{
+							Data: tss,
+						},
+					},
+				},
+			},
+		}
+	case schemapb.DataType_VarChar:
+		pkField = &schemapb.FieldData{
+			FieldId: common.StartOfUserFieldID, FieldName: "pk", Type: schemapb.DataType_VarChar,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{
+							Data: lo.Map(tss, func(v int64, _ int) string { return fmt.Sprintf("%v", v) }),
+						},
+					},
+				},
+			},
+		}
+	}
 	return tss, &msgstream.InsertMsg{
 		InsertRequest: msgpb.InsertRequest{
 			SegmentID:  segmentID,
@@ -104,18 +133,7 @@ func (s *L0WriteBufferSuite) composeInsertMsg(segmentID int64, rowCount int, dim
 						},
 					},
 				},
-				{
-					FieldId: common.StartOfUserFieldID, FieldName: "pk", Type: schemapb.DataType_Int64,
-					Field: &schemapb.FieldData_Scalars{
-						Scalars: &schemapb.ScalarField{
-							Data: &schemapb.ScalarField_LongData{
-								LongData: &schemapb.LongArray{
-									Data: tss,
-								},
-							},
-						},
-					},
-				},
+				pkField,
 				{
 					FieldId: common.StartOfUserFieldID + 1, FieldName: "vector", Type: schemapb.DataType_FloatVector,
 					Field: &schemapb.FieldData_Vectors{
@@ -138,7 +156,7 @@ func (s *L0WriteBufferSuite) composeDeleteMsg(pks []storage.PrimaryKey) *msgstre
 	delMsg := &msgstream.DeleteMsg{
 		DeleteRequest: msgpb.DeleteRequest{
 			PrimaryKeys: storage.ParsePrimaryKeys2IDs(pks),
-			Timestamps:  lo.RepeatBy(len(pks), func(idx int) uint64 { return tsoutil.ComposeTSByTime(time.Now(), int64(idx)) }),
+			Timestamps:  lo.RepeatBy(len(pks), func(idx int) uint64 { return tsoutil.ComposeTSByTime(time.Now(), int64(idx)+1) }),
 		},
 	}
 	return delMsg
@@ -154,28 +172,55 @@ func (s *L0WriteBufferSuite) SetupTest() {
 }
 
 func (s *L0WriteBufferSuite) TestBufferData() {
-	wb, err := NewL0WriteBuffer(s.channelName, s.metacache, s.storageCache, s.syncMgr, &writeBufferOption{
-		idAllocator: s.allocator,
+	s.Run("normal_run", func() {
+		wb, err := NewL0WriteBuffer(s.channelName, s.metacache, s.storageCache, s.syncMgr, &writeBufferOption{
+			idAllocator: s.allocator,
+		})
+		s.NoError(err)
+
+		pks, msg := s.composeInsertMsg(1000, 10, 128, schemapb.DataType_Int64)
+		delMsg := s.composeDeleteMsg(lo.Map(pks, func(id int64, _ int) storage.PrimaryKey { return storage.NewInt64PrimaryKey(id) }))
+
+		seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 1000}, metacache.NewBloomFilterSet())
+		s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
+		s.metacache.EXPECT().GetSegmentByID(int64(1000)).Return(nil, false).Once()
+		s.metacache.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything).Return()
+		s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
+		s.metacache.EXPECT().GetSegmentIDsBy(mock.Anything, mock.Anything).Return([]int64{})
+
+		metrics.DataNodeFlowGraphBufferDataSize.Reset()
+		err = wb.BufferData([]*msgstream.InsertMsg{msg}, []*msgstream.DeleteMsg{delMsg}, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})
+		s.NoError(err)
+
+		value, err := metrics.DataNodeFlowGraphBufferDataSize.GetMetricWithLabelValues(fmt.Sprint(paramtable.GetNodeID()), fmt.Sprint(s.metacache.Collection()))
+		s.NoError(err)
+		s.MetricsEqual(value, 5524)
+
+		delMsg = s.composeDeleteMsg(lo.Map(pks, func(id int64, _ int) storage.PrimaryKey { return storage.NewInt64PrimaryKey(id) }))
+		err = wb.BufferData([]*msgstream.InsertMsg{}, []*msgstream.DeleteMsg{delMsg}, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})
+		s.NoError(err)
+		s.MetricsEqual(value, 5684)
 	})
-	s.NoError(err)
 
-	pks, msg := s.composeInsertMsg(1000, 10, 128)
-	delMsg := s.composeDeleteMsg(lo.Map(pks, func(id int64, _ int) storage.PrimaryKey { return storage.NewInt64PrimaryKey(id) }))
+	s.Run("pk_type_not_match", func() {
+		wb, err := NewL0WriteBuffer(s.channelName, s.metacache, s.storageCache, s.syncMgr, &writeBufferOption{
+			idAllocator: s.allocator,
+		})
+		s.NoError(err)
 
-	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 1000}, metacache.NewBloomFilterSet())
-	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
-	s.metacache.EXPECT().GetSegmentByID(int64(1000)).Return(nil, false).Once()
-	s.metacache.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything).Return()
-	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
-	s.metacache.EXPECT().GetSegmentIDsBy(mock.Anything, mock.Anything).Return([]int64{})
+		pks, msg := s.composeInsertMsg(1000, 10, 128, schemapb.DataType_VarChar)
+		delMsg := s.composeDeleteMsg(lo.Map(pks, func(id int64, _ int) storage.PrimaryKey { return storage.NewInt64PrimaryKey(id) }))
 
-	metrics.DataNodeFlowGraphBufferDataSize.Reset()
-	err = wb.BufferData([]*msgstream.InsertMsg{msg}, []*msgstream.DeleteMsg{delMsg}, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})
-	s.NoError(err)
+		seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 1000}, metacache.NewBloomFilterSet())
+		s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
+		s.metacache.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything).Return()
+		s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
+		s.metacache.EXPECT().GetSegmentIDsBy(mock.Anything, mock.Anything).Return([]int64{})
 
-	value, err := metrics.DataNodeFlowGraphBufferDataSize.GetMetricWithLabelValues(fmt.Sprint(paramtable.GetNodeID()), fmt.Sprint(s.metacache.Collection()))
-	s.NoError(err)
-	s.MetricsEqual(value, 5524)
+		metrics.DataNodeFlowGraphBufferDataSize.Reset()
+		err = wb.BufferData([]*msgstream.InsertMsg{msg}, []*msgstream.DeleteMsg{delMsg}, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})
+		s.Error(err)
+	})
 }
 
 func (s *L0WriteBufferSuite) TestCreateFailure() {

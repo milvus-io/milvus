@@ -190,6 +190,8 @@ type commonConfig struct {
 	HighPriorityThreadCoreCoefficient   ParamItem `refreshable:"false"`
 	MiddlePriorityThreadCoreCoefficient ParamItem `refreshable:"false"`
 	LowPriorityThreadCoreCoefficient    ParamItem `refreshable:"false"`
+	EnableNodeFilteringOnPartitionKey   ParamItem `refreshable:"false"`
+	BuildIndexThreadPoolRatio           ParamItem `refreshable:"false"`
 	MaxDegree                           ParamItem `refreshable:"true"`
 	SearchListSize                      ParamItem `refreshable:"true"`
 	PQCodeBudgetGBRatio                 ParamItem `refreshable:"true"`
@@ -422,6 +424,13 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 	}
 	p.IndexSliceSize.Init(base.mgr)
 
+	p.EnableNodeFilteringOnPartitionKey = ParamItem{
+		Key:          "common.nodeFiltering.enableOnPartitionKey",
+		Version:      "2.5.0",
+		DefaultValue: "false",
+	}
+	p.EnableNodeFilteringOnPartitionKey.Init(base.mgr)
+
 	p.MaxDegree = ParamItem{
 		Key:          "common.DiskIndex.MaxDegree",
 		Version:      "2.0.0",
@@ -535,6 +544,14 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Export: true,
 	}
 	p.LowPriorityThreadCoreCoefficient.Init(base.mgr)
+
+	p.BuildIndexThreadPoolRatio = ParamItem{
+		Key:          "common.buildIndexThreadPoolRatio",
+		Version:      "2.4.0",
+		DefaultValue: strconv.FormatFloat(DefaultKnowhereThreadPoolNumRatioInBuildOfStandalone, 'f', 2, 64),
+		Export:       true,
+	}
+	p.BuildIndexThreadPoolRatio.Init(base.mgr)
 
 	p.AuthorizationEnabled = ParamItem{
 		Key:          "common.security.authorizationEnabled",
@@ -869,6 +886,7 @@ type rootCoordConfig struct {
 	ImportTaskSubPath           ParamItem `refreshable:"true"`
 	EnableActiveStandby         ParamItem `refreshable:"false"`
 	MaxDatabaseNum              ParamItem `refreshable:"false"`
+	MaxGeneralCapacity          ParamItem `refreshable:"true"`
 }
 
 func (p *rootCoordConfig) init(base *BaseTable) {
@@ -948,6 +966,21 @@ func (p *rootCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.MaxDatabaseNum.Init(base.mgr)
+
+	p.MaxGeneralCapacity = ParamItem{
+		Key:          "rootCoord.maxGeneralCapacity",
+		Version:      "2.3.5",
+		DefaultValue: "65536",
+		Doc:          "upper limit for the sum of of product of partitionNumber and shardNumber",
+		Export:       true,
+		Formatter: func(v string) string {
+			if getAsInt(v) < 512 {
+				return "512"
+			}
+			return v
+		},
+	}
+	p.MaxGeneralCapacity.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -1331,6 +1364,7 @@ type queryCoordConfig struct {
 	OverloadedMemoryThresholdPercentage ParamItem `refreshable:"true"`
 	BalanceIntervalSeconds              ParamItem `refreshable:"true"`
 	MemoryUsageMaxDifferencePercentage  ParamItem `refreshable:"true"`
+	GrowingRowCountWeight               ParamItem `refreshable:"true"`
 
 	SegmentCheckInterval       ParamItem `refreshable:"true"`
 	ChannelCheckInterval       ParamItem `refreshable:"true"`
@@ -1341,6 +1375,9 @@ type queryCoordConfig struct {
 	DistPullInterval           ParamItem `refreshable:"false"`
 	HeartbeatAvailableInterval ParamItem `refreshable:"true"`
 	LoadTimeoutSeconds         ParamItem `refreshable:"true"`
+
+	DistributionRequestTimeout ParamItem `refreshable:"true"`
+	HeartBeatWarningLag        ParamItem `refreshable:"true"`
 
 	// Deprecated: Since 2.2.2, QueryCoord do not use HandOff logic anymore
 	CheckHandoffInterval ParamItem `refreshable:"true"`
@@ -1484,6 +1521,16 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.BalanceIntervalSeconds.Init(base.mgr)
+
+	p.GrowingRowCountWeight = ParamItem{
+		Key:          "queryCoord.growingRowCountWeight",
+		Version:      "2.3.5",
+		DefaultValue: "4.0",
+		PanicIfEmpty: true,
+		Doc:          "the memory weight of growing segment row count",
+		Export:       true,
+	}
+	p.GrowingRowCountWeight.Init(base.mgr)
 
 	p.MemoryUsageMaxDifferencePercentage = ParamItem{
 		Key:          "queryCoord.memoryUsageMaxDifferencePercentage",
@@ -1722,6 +1769,24 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.CheckNodeSessionInterval.Init(base.mgr)
+
+	p.DistributionRequestTimeout = ParamItem{
+		Key:          "queryCoord.distRequestTimeout",
+		Version:      "2.3.6",
+		DefaultValue: "5000",
+		Doc:          "the request timeout for querycoord fetching data distribution from querynodes, in milliseconds",
+		Export:       true,
+	}
+	p.DistributionRequestTimeout.Init(base.mgr)
+
+	p.HeartBeatWarningLag = ParamItem{
+		Key:          "queryCoord.heatbeatWarningLag",
+		Version:      "2.3.6",
+		DefaultValue: "5000",
+		Doc:          "the lag value for querycoord report warning when last heatbeat is too old, in milliseconds",
+		Export:       true,
+	}
+	p.HeartBeatWarningLag.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -1759,7 +1824,8 @@ type queryNodeConfig struct {
 	MmapDirPath      ParamItem `refreshable:"false"`
 
 	// chunk cache
-	ReadAheadPolicy ParamItem `refreshable:"false"`
+	ReadAheadPolicy     ParamItem `refreshable:"false"`
+	ChunkCacheWarmingUp ParamItem `refreshable:"true"`
 
 	GroupEnabled          ParamItem `refreshable:"true"`
 	MaxReceiveChanSize    ParamItem `refreshable:"false"`
@@ -1968,6 +2034,19 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 	}
 	p.ReadAheadPolicy.Init(base.mgr)
 
+	p.ChunkCacheWarmingUp = ParamItem{
+		Key:          "queryNode.cache.warmup",
+		Version:      "2.3.6",
+		DefaultValue: "async",
+		Doc: `options: async, sync, off. 
+Specifies the necessity for warming up the chunk cache. 
+1. If set to "sync" or "async," the original vector data will be synchronously/asynchronously loaded into the 
+chunk cache during the load process. This approach has the potential to substantially reduce query/search latency
+for a specific duration post-load, albeit accompanied by a concurrent increase in disk usage;
+2. If set to "off," original vector data will only be loaded into the chunk cache during search/query.`,
+	}
+	p.ChunkCacheWarmingUp.Init(base.mgr)
+
 	p.GroupEnabled = ParamItem{
 		Key:          "queryNode.grouping.enabled",
 		Version:      "2.0.0",
@@ -2009,9 +2088,9 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 	p.MaxReadConcurrency.Init(base.mgr)
 
 	p.MaxGpuReadConcurrency = ParamItem{
-		Key:          "queryNode.scheduler.maGpuReadConcurrency",
+		Key:          "queryNode.scheduler.maxGpuReadConcurrency",
 		Version:      "2.0.0",
-		DefaultValue: "8",
+		DefaultValue: "6",
 	}
 	p.MaxGpuReadConcurrency.Init(base.mgr)
 
@@ -2328,7 +2407,7 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	p.SegmentMaxSize = ParamItem{
 		Key:          "dataCoord.segment.maxSize",
 		Version:      "2.0.0",
-		DefaultValue: "512",
+		DefaultValue: "1024",
 		Doc:          "Maximum size of a segment in MB",
 		Export:       true,
 	}
@@ -2337,7 +2416,7 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	p.DiskSegmentMaxSize = ParamItem{
 		Key:          "dataCoord.segment.diskSegmentMaxSize",
 		Version:      "2.0.0",
-		DefaultValue: "512",
+		DefaultValue: "2048",
 		Doc:          "Maximun size of a segment in MB for collection which has Disk index",
 		Export:       true,
 	}
@@ -2346,7 +2425,7 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	p.SegmentSealProportion = ParamItem{
 		Key:          "dataCoord.segment.sealProportion",
 		Version:      "2.0.0",
-		DefaultValue: "0.23",
+		DefaultValue: "0.12",
 		Export:       true,
 	}
 	p.SegmentSealProportion.Init(base.mgr)
@@ -2829,7 +2908,7 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	p.MaxParallelSyncMgrTasks = ParamItem{
 		Key:          "dataNode.dataSync.maxParallelSyncMgrTasks",
 		Version:      "2.3.4",
-		DefaultValue: "64",
+		DefaultValue: "256",
 		Doc:          "The max concurrent sync task number of datanode sync mgr globally",
 		Export:       true,
 	}

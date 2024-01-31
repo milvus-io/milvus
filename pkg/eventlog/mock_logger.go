@@ -130,8 +130,7 @@ func (_c *MockLogger_RecordFunc_Call) RunAndReturn(run func(Level, func() Evt)) 
 func NewMockLogger(t interface {
 	mock.TestingT
 	Cleanup(func())
-},
-) *MockLogger {
+}) *MockLogger {
 	mock := &MockLogger{}
 	mock.Mock.Test(t)
 

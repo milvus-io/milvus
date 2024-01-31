@@ -25,7 +25,6 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -196,6 +195,94 @@ func (suite *MetaBasicSuite) TestCollection() {
 	suite.ElementsMatch(info.Partitions, collInfo.Partitions)
 
 	suite.MetricsEqual(metrics.DataCoordNumCollections.WithLabelValues(), 1)
+}
+
+func (suite *MetaBasicSuite) TestPrepareCompleteCompactionMutation() {
+	prepareSegments := &SegmentsInfo{
+		map[UniqueID]*SegmentInfo{
+			1: {SegmentInfo: &datapb.SegmentInfo{
+				ID:           1,
+				CollectionID: 100,
+				PartitionID:  10,
+				State:        commonpb.SegmentState_Flushed,
+				Binlogs:      []*datapb.FieldBinlog{getFieldBinlogIDs(1, 1, 2)},
+				Statslogs:    []*datapb.FieldBinlog{getFieldBinlogIDs(1, 1, 2)},
+				Deltalogs:    []*datapb.FieldBinlog{getFieldBinlogIDs(0, 1, 2)},
+				NumOfRows:    1,
+			}},
+			2: {SegmentInfo: &datapb.SegmentInfo{
+				ID:           2,
+				CollectionID: 100,
+				PartitionID:  10,
+				State:        commonpb.SegmentState_Flushed,
+				Binlogs:      []*datapb.FieldBinlog{getFieldBinlogIDs(1, 3, 4)},
+				Statslogs:    []*datapb.FieldBinlog{getFieldBinlogIDs(1, 3, 4)},
+				Deltalogs:    []*datapb.FieldBinlog{getFieldBinlogIDs(0, 3, 4)},
+				NumOfRows:    1,
+			}},
+		},
+	}
+
+	// m := suite.meta
+	m := &meta{
+		catalog:  &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+		segments: prepareSegments,
+	}
+
+	plan := &datapb.CompactionPlan{
+		SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+			{
+				SegmentID:           1,
+				FieldBinlogs:        []*datapb.FieldBinlog{getFieldBinlogIDs(1, 1, 2)},
+				Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogIDs(1, 1, 2)},
+				Deltalogs:           []*datapb.FieldBinlog{getFieldBinlogIDs(0, 1, 2)},
+			},
+			{
+				SegmentID:           2,
+				FieldBinlogs:        []*datapb.FieldBinlog{getFieldBinlogIDs(1, 3, 4)},
+				Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogIDs(1, 3, 4)},
+				Deltalogs:           []*datapb.FieldBinlog{getFieldBinlogIDs(0, 3, 4)},
+			},
+		},
+		StartTime: 15,
+	}
+
+	inSegment := &datapb.CompactionSegment{
+		SegmentID:           3,
+		InsertLogs:          []*datapb.FieldBinlog{getFieldBinlogIDs(1, 5)},
+		Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogIDs(1, 5)},
+		Deltalogs:           []*datapb.FieldBinlog{getFieldBinlogIDs(0, 5)},
+		NumOfRows:           2,
+	}
+	inCompactionResult := &datapb.CompactionPlanResult{
+		Segments: []*datapb.CompactionSegment{inSegment},
+	}
+	afterCompact, newSegment, metricMutation, err := m.prepareCompactionMutation(plan, inCompactionResult)
+	suite.NoError(err)
+	suite.NotNil(afterCompact)
+	suite.NotNil(newSegment)
+	suite.Equal(2, len(metricMutation.stateChange[datapb.SegmentLevel_Legacy.String()]))
+	suite.Equal(1, len(metricMutation.stateChange[datapb.SegmentLevel_L1.String()]))
+	suite.Equal(int64(0), metricMutation.rowCountChange)
+	suite.Equal(int64(2), metricMutation.rowCountAccChange)
+
+	suite.Require().Equal(2, len(afterCompact))
+	suite.Equal(commonpb.SegmentState_Dropped, afterCompact[0].GetState())
+	suite.Equal(commonpb.SegmentState_Dropped, afterCompact[1].GetState())
+	suite.NotZero(afterCompact[0].GetDroppedAt())
+	suite.NotZero(afterCompact[1].GetDroppedAt())
+
+	suite.Equal(inSegment.SegmentID, newSegment.GetID())
+	suite.Equal(UniqueID(100), newSegment.GetCollectionID())
+	suite.Equal(UniqueID(10), newSegment.GetPartitionID())
+	suite.Equal(inSegment.NumOfRows, newSegment.GetNumOfRows())
+	suite.Equal(commonpb.SegmentState_Flushed, newSegment.GetState())
+
+	suite.EqualValues(inSegment.GetInsertLogs(), newSegment.GetBinlogs())
+	suite.EqualValues(inSegment.GetField2StatslogPaths(), newSegment.GetStatslogs())
+	suite.EqualValues(inSegment.GetDeltalogs(), newSegment.GetDeltalogs())
+	suite.NotZero(newSegment.lastFlushTime)
+	suite.Equal(uint64(15), newSegment.GetLastExpireTime())
 }
 
 func TestMeta(t *testing.T) {
@@ -496,8 +583,8 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 
 		segment1 := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 1, State: commonpb.SegmentState_Growing,
-			Binlogs:   []*datapb.FieldBinlog{getFieldBinlogPaths(1, getInsertLogPath("binlog0", 1))},
-			Statslogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, getStatsLogPath("statslog0", 1))},
+			Binlogs:   []*datapb.FieldBinlog{getFieldBinlogIDs(1, 0)},
+			Statslogs: []*datapb.FieldBinlog{getFieldBinlogIDs(1, 0)},
 		}}
 		err = meta.AddSegment(context.TODO(), segment1)
 		assert.NoError(t, err)
@@ -505,8 +592,8 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		err = meta.UpdateSegmentsInfo(
 			UpdateStatusOperator(1, commonpb.SegmentState_Flushing),
 			UpdateBinlogsOperator(1,
-				[]*datapb.FieldBinlog{getFieldBinlogPathsWithEntry(1, 10, getInsertLogPath("binlog1", 1))},
-				[]*datapb.FieldBinlog{getFieldBinlogPaths(1, getStatsLogPath("statslog1", 1))},
+				[]*datapb.FieldBinlog{getFieldBinlogIDsWithEntry(1, 10, 1)},
+				[]*datapb.FieldBinlog{getFieldBinlogIDs(1, 1)},
 				[]*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{EntriesNum: 1, TimestampFrom: 100, TimestampTo: 200, LogSize: 1000, LogPath: getDeltaLogPath("deltalog1", 1)}}}},
 			),
 			UpdateStartPosition([]*datapb.SegmentStartPosition{{SegmentID: 1, StartPosition: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}}}}),
@@ -518,8 +605,8 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		expected := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 1, State: commonpb.SegmentState_Flushing, NumOfRows: 10,
 			StartPosition: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}},
-			Binlogs:       []*datapb.FieldBinlog{getFieldBinlogPaths(1, "binlog0", "binlog1")},
-			Statslogs:     []*datapb.FieldBinlog{getFieldBinlogPaths(1, "statslog0", "statslog1")},
+			Binlogs:       []*datapb.FieldBinlog{getFieldBinlogIDs(1, 0, 1)},
+			Statslogs:     []*datapb.FieldBinlog{getFieldBinlogIDs(1, 0, 1)},
 			Deltalogs:     []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{EntriesNum: 1, TimestampFrom: 100, TimestampTo: 200, LogSize: 1000}}}},
 		}}
 
@@ -547,8 +634,8 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		// normal
 		segment1 := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 1, State: commonpb.SegmentState_Flushed,
-			Binlogs:   []*datapb.FieldBinlog{getFieldBinlogPaths(1, getInsertLogPath("binlog0", 1))},
-			Statslogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, getStatsLogPath("statslog0", 1))},
+			Binlogs:   []*datapb.FieldBinlog{getFieldBinlogIDs(1, 0)},
+			Statslogs: []*datapb.FieldBinlog{getFieldBinlogIDs(1, 0)},
 		}}
 		err = meta.AddSegment(context.TODO(), segment1)
 		assert.NoError(t, err)
@@ -621,8 +708,8 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		err = meta.UpdateSegmentsInfo(
 			UpdateStatusOperator(1, commonpb.SegmentState_Flushing),
 			UpdateBinlogsOperator(1,
-				[]*datapb.FieldBinlog{getFieldBinlogPaths(1, getInsertLogPath("binlog", 1))},
-				[]*datapb.FieldBinlog{getFieldBinlogPaths(1, getInsertLogPath("statslog", 1))},
+				[]*datapb.FieldBinlog{getFieldBinlogIDs(1, 0)},
+				[]*datapb.FieldBinlog{getFieldBinlogIDs(1, 0)},
 				[]*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{EntriesNum: 1, TimestampFrom: 100, TimestampTo: 200, LogSize: 1000, LogPath: getDeltaLogPath("deltalog", 1)}}}},
 			),
 			UpdateStartPosition([]*datapb.SegmentStartPosition{{SegmentID: 1, StartPosition: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}}}}),
@@ -679,9 +766,9 @@ func TestMeta_alterMetaStore(t *testing.T) {
 		segments: &SegmentsInfo{map[int64]*SegmentInfo{
 			1: {SegmentInfo: &datapb.SegmentInfo{
 				ID:        1,
-				Binlogs:   []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log1", "log2")},
-				Statslogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "statlog1", "statlog2")},
-				Deltalogs: []*datapb.FieldBinlog{getFieldBinlogPaths(0, "deltalog1", "deltalog2")},
+				Binlogs:   []*datapb.FieldBinlog{getFieldBinlogIDs(1, 1, 2)},
+				Statslogs: []*datapb.FieldBinlog{getFieldBinlogIDs(1, 1, 2)},
+				Deltalogs: []*datapb.FieldBinlog{getFieldBinlogIDs(1, 1, 2)},
 			}},
 		}},
 	}
@@ -690,93 +777,6 @@ func TestMeta_alterMetaStore(t *testing.T) {
 		return &SegmentInfo{SegmentInfo: t}
 	}))
 	assert.NoError(t, err)
-}
-
-func TestMeta_PrepareCompleteCompactionMutation(t *testing.T) {
-	prepareSegments := &SegmentsInfo{
-		map[UniqueID]*SegmentInfo{
-			1: {SegmentInfo: &datapb.SegmentInfo{
-				ID:           1,
-				CollectionID: 100,
-				PartitionID:  10,
-				State:        commonpb.SegmentState_Flushed,
-				Binlogs:      []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log1", "log2")},
-				Statslogs:    []*datapb.FieldBinlog{getFieldBinlogPaths(1, "statlog1", "statlog2")},
-				Deltalogs:    []*datapb.FieldBinlog{getFieldBinlogPaths(0, "deltalog1", "deltalog2")},
-				NumOfRows:    1,
-			}},
-			2: {SegmentInfo: &datapb.SegmentInfo{
-				ID:           2,
-				CollectionID: 100,
-				PartitionID:  10,
-				State:        commonpb.SegmentState_Flushed,
-				Binlogs:      []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log3", "log4")},
-				Statslogs:    []*datapb.FieldBinlog{getFieldBinlogPaths(1, "statlog3", "statlog4")},
-				Deltalogs:    []*datapb.FieldBinlog{getFieldBinlogPaths(0, "deltalog3", "deltalog4")},
-				NumOfRows:    1,
-			}},
-		},
-	}
-
-	m := &meta{
-		catalog:  &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
-		segments: prepareSegments,
-	}
-
-	plan := &datapb.CompactionPlan{
-		SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
-			{
-				SegmentID:           1,
-				FieldBinlogs:        []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log1", "log2")},
-				Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "statlog1", "statlog2")},
-				Deltalogs:           []*datapb.FieldBinlog{getFieldBinlogPaths(0, "deltalog1", "deltalog2")},
-			},
-			{
-				SegmentID:           2,
-				FieldBinlogs:        []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log3", "log4")},
-				Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "statlog3", "statlog4")},
-				Deltalogs:           []*datapb.FieldBinlog{getFieldBinlogPaths(0, "deltalog3", "deltalog4")},
-			},
-		},
-		StartTime: 15,
-	}
-
-	inSegment := &datapb.CompactionSegment{
-		SegmentID:           3,
-		InsertLogs:          []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log5")},
-		Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "statlog5")},
-		Deltalogs:           []*datapb.FieldBinlog{getFieldBinlogPaths(0, "deltalog5")},
-		NumOfRows:           2,
-	}
-	inCompactionResult := &datapb.CompactionPlanResult{
-		Segments: []*datapb.CompactionSegment{inSegment},
-	}
-	afterCompact, newSegment, metricMutation, err := m.PrepareCompleteCompactionMutation(plan, inCompactionResult)
-	assert.NoError(t, err)
-	assert.NotNil(t, afterCompact)
-	assert.NotNil(t, newSegment)
-	assert.Equal(t, 2, len(metricMutation.stateChange[datapb.SegmentLevel_Legacy.String()]))
-	assert.Equal(t, 1, len(metricMutation.stateChange[datapb.SegmentLevel_L1.String()]))
-	assert.Equal(t, int64(0), metricMutation.rowCountChange)
-	assert.Equal(t, int64(2), metricMutation.rowCountAccChange)
-
-	require.Equal(t, 2, len(afterCompact))
-	assert.Equal(t, commonpb.SegmentState_Dropped, afterCompact[0].GetState())
-	assert.Equal(t, commonpb.SegmentState_Dropped, afterCompact[1].GetState())
-	assert.NotZero(t, afterCompact[0].GetDroppedAt())
-	assert.NotZero(t, afterCompact[1].GetDroppedAt())
-
-	assert.Equal(t, inSegment.SegmentID, newSegment.GetID())
-	assert.Equal(t, UniqueID(100), newSegment.GetCollectionID())
-	assert.Equal(t, UniqueID(10), newSegment.GetPartitionID())
-	assert.Equal(t, inSegment.NumOfRows, newSegment.GetNumOfRows())
-	assert.Equal(t, commonpb.SegmentState_Flushed, newSegment.GetState())
-
-	assert.EqualValues(t, inSegment.GetInsertLogs(), newSegment.GetBinlogs())
-	assert.EqualValues(t, inSegment.GetField2StatslogPaths(), newSegment.GetStatslogs())
-	assert.EqualValues(t, inSegment.GetDeltalogs(), newSegment.GetDeltalogs())
-	assert.NotZero(t, newSegment.lastFlushTime)
-	assert.Equal(t, uint64(15), newSegment.GetLastExpireTime())
 }
 
 func Test_meta_SetSegmentCompacting(t *testing.T) {

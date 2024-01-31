@@ -181,3 +181,18 @@ func (bi *BuildIndexInfo) AppendIndexEngineVersion(indexEngineVersion int32) err
 	status := C.AppendIndexEngineVersionToBuildInfo(bi.cBuildIndexInfo, cIndexEngineVersion)
 	return HandleCStatus(&status, "AppendIndexEngineVersion failed")
 }
+
+func (bi *BuildIndexInfo) AppendOptionalField(optField *indexpb.OptionalFieldInfo) error {
+	cFieldId := C.int64_t(optField.GetFieldID())
+	cFieldType := C.int32_t(optField.GetFieldType())
+	cFieldName := C.CString(optField.GetFieldName())
+	for _, dataPath := range optField.GetDataPaths() {
+		cDataPath := C.CString(dataPath)
+		defer C.free(unsafe.Pointer(cDataPath))
+		status := C.AppendOptionalFieldDataPath(bi.cBuildIndexInfo, cFieldId, cFieldName, cFieldType, cDataPath)
+		if err := HandleCStatus(&status, "AppendOptionalFieldDataPath failed"); err != nil {
+			return err
+		}
+	}
+	return nil
+}

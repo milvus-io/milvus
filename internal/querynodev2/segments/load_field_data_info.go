@@ -34,9 +34,12 @@ type LoadFieldDataInfo struct {
 }
 
 func newLoadFieldDataInfo(ctx context.Context) (*LoadFieldDataInfo, error) {
+	var status C.CStatus
 	var cLoadFieldDataInfo C.CLoadFieldDataInfo
-
-	status := C.NewLoadFieldDataInfo(&cLoadFieldDataInfo)
+	GetDynamicPool().Submit(func() (any, error) {
+		status = C.NewLoadFieldDataInfo(&cLoadFieldDataInfo)
+		return nil, nil
+	}).Await()
 	if err := HandleCStatus(ctx, &status, "newLoadFieldDataInfo failed"); err != nil {
 		return nil, err
 	}
@@ -44,48 +47,75 @@ func newLoadFieldDataInfo(ctx context.Context) (*LoadFieldDataInfo, error) {
 }
 
 func deleteFieldDataInfo(info *LoadFieldDataInfo) {
-	C.DeleteLoadFieldDataInfo(info.cLoadFieldDataInfo)
+	GetDynamicPool().Submit(func() (any, error) {
+		C.DeleteLoadFieldDataInfo(info.cLoadFieldDataInfo)
+		return nil, nil
+	}).Await()
 }
 
 func (ld *LoadFieldDataInfo) appendLoadFieldInfo(ctx context.Context, fieldID int64, rowCount int64) error {
-	cFieldID := C.int64_t(fieldID)
-	cRowCount := C.int64_t(rowCount)
+	var status C.CStatus
+	GetDynamicPool().Submit(func() (any, error) {
+		cFieldID := C.int64_t(fieldID)
+		cRowCount := C.int64_t(rowCount)
 
-	status := C.AppendLoadFieldInfo(ld.cLoadFieldDataInfo, cFieldID, cRowCount)
+		status = C.AppendLoadFieldInfo(ld.cLoadFieldDataInfo, cFieldID, cRowCount)
+		return nil, nil
+	}).Await()
+
 	return HandleCStatus(ctx, &status, "appendLoadFieldInfo failed")
 }
 
 func (ld *LoadFieldDataInfo) appendLoadFieldDataPath(ctx context.Context, fieldID int64, binlog *datapb.Binlog) error {
-	cFieldID := C.int64_t(fieldID)
-	cEntriesNum := C.int64_t(binlog.GetEntriesNum())
-	cFile := C.CString(binlog.GetLogPath())
-	defer C.free(unsafe.Pointer(cFile))
+	var status C.CStatus
+	GetDynamicPool().Submit(func() (any, error) {
+		cFieldID := C.int64_t(fieldID)
+		cEntriesNum := C.int64_t(binlog.GetEntriesNum())
+		cFile := C.CString(binlog.GetLogPath())
+		defer C.free(unsafe.Pointer(cFile))
 
-	status := C.AppendLoadFieldDataPath(ld.cLoadFieldDataInfo, cFieldID, cEntriesNum, cFile)
+		status = C.AppendLoadFieldDataPath(ld.cLoadFieldDataInfo, cFieldID, cEntriesNum, cFile)
+		return nil, nil
+	}).Await()
+
 	return HandleCStatus(ctx, &status, "appendLoadFieldDataPath failed")
 }
 
 func (ld *LoadFieldDataInfo) enableMmap(fieldID int64, enabled bool) {
-	cFieldID := C.int64_t(fieldID)
-	cEnabled := C.bool(enabled)
+	GetDynamicPool().Submit(func() (any, error) {
+		cFieldID := C.int64_t(fieldID)
+		cEnabled := C.bool(enabled)
 
-	C.EnableMmap(ld.cLoadFieldDataInfo, cFieldID, cEnabled)
+		C.EnableMmap(ld.cLoadFieldDataInfo, cFieldID, cEnabled)
+		return nil, nil
+	}).Await()
 }
 
 func (ld *LoadFieldDataInfo) appendMMapDirPath(dir string) {
-	cDir := C.CString(dir)
-	defer C.free(unsafe.Pointer(cDir))
+	GetDynamicPool().Submit(func() (any, error) {
+		cDir := C.CString(dir)
+		defer C.free(unsafe.Pointer(cDir))
 
-	C.AppendMMapDirPath(ld.cLoadFieldDataInfo, cDir)
+		C.AppendMMapDirPath(ld.cLoadFieldDataInfo, cDir)
+		return nil, nil
+	}).Await()
 }
 
 func (ld *LoadFieldDataInfo) appendURI(uri string) {
-	cURI := C.CString(uri)
-	defer C.free(unsafe.Pointer(cURI))
-	C.SetUri(ld.cLoadFieldDataInfo, cURI)
+	GetDynamicPool().Submit(func() (any, error) {
+		cURI := C.CString(uri)
+		defer C.free(unsafe.Pointer(cURI))
+		C.SetUri(ld.cLoadFieldDataInfo, cURI)
+
+		return nil, nil
+	}).Await()
 }
 
 func (ld *LoadFieldDataInfo) appendStorageVersion(version int64) {
-	cVersion := C.int64_t(version)
-	C.SetStorageVersion(ld.cLoadFieldDataInfo, cVersion)
+	GetDynamicPool().Submit(func() (any, error) {
+		cVersion := C.int64_t(version)
+		C.SetStorageVersion(ld.cLoadFieldDataInfo, cVersion)
+
+		return nil, nil
+	}).Await()
 }

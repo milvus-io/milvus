@@ -18,7 +18,7 @@ func (c hnswChecker) StaticCheck(params map[string]string) error {
 		return errOutOfRange(HNSWM, HNSWMinM, HNSWMaxM)
 	}
 	if !CheckStrByValues(params, Metric, HnswMetrics) {
-		return fmt.Errorf("metric type not found or not supported, supported: %v", HnswMetrics)
+		return fmt.Errorf("metric type %s not found or not supported, supported: %v", params[Metric], HnswMetrics)
 	}
 	return nil
 }

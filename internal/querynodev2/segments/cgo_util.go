@@ -33,9 +33,8 @@ import (
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/util/cgoconverter"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/cgoconverter"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
@@ -45,18 +44,15 @@ func HandleCStatus(ctx context.Context, status *C.CStatus, extraInfo string, fie
 		return nil
 	}
 	errorCode := status.error_code
-	errorName, ok := commonpb.ErrorCode_name[int32(errorCode)]
-	if !ok {
-		errorName = "UnknownError"
-	}
 	errorMsg := C.GoString(status.error_msg)
 	defer C.free(unsafe.Pointer(status.error_msg))
 
 	log.Ctx(ctx).With(fields...).
 		WithOptions(zap.AddCallerSkip(1)) // Add caller stack to show HandleCStatus caller
 
-	log.Warn("CStatus returns err", zap.String("errorName", errorName), zap.String("errorMsg", errorMsg))
-	return merr.WrapErrServiceInternal(errorName, errorMsg)
+	err := merr.SegcoreError(int32(errorCode), errorMsg)
+	log.Warn("CStatus returns err", zap.Error(err))
+	return err
 }
 
 // HandleCProto deal with the result proto returned from CGO

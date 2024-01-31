@@ -39,6 +39,7 @@ MILVUS_HELM_NAMESPACE="${MILVUS_HELM_NAMESPACE:-default}"
 PARALLEL_NUM="${PARALLEL_NUM:-6}"
 # Use service name instead of IP to test
 MILVUS_SERVICE_NAME=$(echo "${MILVUS_HELM_RELEASE_NAME}-milvus.${MILVUS_HELM_NAMESPACE}" | tr -d '\n')
+# MILVUS_SERVICE_HOST=$(kubectl get svc ${MILVUS_SERVICE_NAME}-milvus -n ${MILVUS_HELM_NAMESPACE} -o jsonpath='{.spec.clusterIP}')
 MILVUS_SERVICE_PORT="19530"
 # Minio service name
 MINIO_SERVICE_NAME=$(echo "${MILVUS_HELM_RELEASE_NAME}-minio.${MILVUS_HELM_NAMESPACE}" | tr -d '\n')
@@ -63,6 +64,22 @@ fi
 
 echo "prepare e2e test"
 install_pytest_requirements
+
+
+# Run restful test
+
+cd ${ROOT}/tests/restful_client
+
+if [[ -n "${TEST_TIMEOUT:-}" ]]; then
+
+  timeout  "${TEST_TIMEOUT}" pytest testcases --endpoint http://${MILVUS_SERVICE_NAME}:${MILVUS_SERVICE_PORT} -v -x -m L0 -n 6 --timeout 180\
+                                     --html=${CI_LOG_PATH}/report_restful.html  --self-contained-html
+else
+  pytest testcases --endpoint http://${MILVUS_SERVICE_NAME}:${MILVUS_SERVICE_PORT} -v -x -m L0 -n 6 --timeout 180\
+                                     --html=${CI_LOG_PATH}/report_restful.html --self-contained-html
+fi
+
+cd ${ROOT}/tests/python_client
 
 
 # Pytest is not able to have both --timeout & --workers, so do not add --timeout or --workers in the shell script

@@ -170,12 +170,13 @@ type expireCacheStep struct {
 	dbName          string
 	collectionNames []string
 	collectionID    UniqueID
+	partitionName   string
 	ts              Timestamp
 	opts            []proxyutil.ExpireCacheOpt
 }
 
 func (s *expireCacheStep) Execute(ctx context.Context) ([]nestedStep, error) {
-	err := s.core.ExpireMetaCache(ctx, s.dbName, s.collectionNames, s.collectionID, s.ts, s.opts...)
+	err := s.core.ExpireMetaCache(ctx, s.dbName, s.collectionNames, s.collectionID, s.partitionName, s.ts, s.opts...)
 	return nil, err
 }
 

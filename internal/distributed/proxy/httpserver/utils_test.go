@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -291,8 +292,8 @@ func TestPrintCollectionDetails(t *testing.T) {
 	}, printFields(coll.Fields))
 	assert.Equal(t, []gin.H{
 		{
-			HTTPReturnIndexName:        DefaultIndexName,
-			HTTPReturnIndexField:       FieldBookIntro,
+			HTTPIndexName:              DefaultIndexName,
+			HTTPIndexField:             FieldBookIntro,
 			HTTPReturnIndexMetricsType: DefaultMetricType,
 		},
 	}, printIndexes(indexes))
@@ -339,10 +340,11 @@ func TestPrimaryField(t *testing.T) {
 	idStr = gjson.Get(jsonStr, "id")
 	rangeStr, err = convertRange(&primaryField, idStr)
 	assert.Equal(t, nil, err)
-	assert.Equal(t, "1,2,3", rangeStr)
-	filter, err = checkGetPrimaryKey(coll, idStr)
+	assert.Equal(t, `"1","2","3"`, rangeStr)
+	coll2 := generateCollectionSchema(schemapb.DataType_VarChar, false)
+	filter, err = checkGetPrimaryKey(coll2, idStr)
 	assert.Equal(t, nil, err)
-	assert.Equal(t, "book_id in [1,2,3]", filter)
+	assert.Equal(t, `book_id in ["1","2","3"]`, filter)
 }
 
 func TestInsertWithDynamicFields(t *testing.T) {
@@ -428,7 +430,9 @@ func compareRow(m1 map[string]interface{}, m2 map[string]interface{}) bool {
 	}
 
 	for key, value := range m2 {
-		if (key == FieldBookIntro) || (key == "field-binary") || (key == "field-json") {
+		if (key == FieldBookIntro) || (key == "field-binary") || (key == "field-json") || (key == "field-array") {
+			continue
+		} else if strings.HasPrefix(key, "array-") {
 			continue
 		} else if value != m1[key] {
 			return false
@@ -518,21 +522,11 @@ func newCollectionSchema(coll *schemapb.CollectionSchema) *schemapb.CollectionSc
 	}
 	coll.Fields = append(coll.Fields, &fieldSchema9)
 
-	//fieldSchema10 := schemapb.FieldSchema{
-	//	Name:      "$meta",
-	//	DataType:  schemapb.DataType_JSON,
-	//	IsDynamic: true,
-	//}
-	//coll.Fields = append(coll.Fields, &fieldSchema10)
-
-	return coll
-}
-
-func withUnsupportField(coll *schemapb.CollectionSchema) *schemapb.CollectionSchema {
 	fieldSchema10 := schemapb.FieldSchema{
-		Name:      "field-array",
-		DataType:  schemapb.DataType_Array,
-		IsDynamic: false,
+		Name:        "field-array",
+		DataType:    schemapb.DataType_Array,
+		IsDynamic:   false,
+		ElementType: schemapb.DataType_Bool,
 	}
 	coll.Fields = append(coll.Fields, &fieldSchema10)
 
@@ -547,6 +541,58 @@ func withDynamicField(coll *schemapb.CollectionSchema) *schemapb.CollectionSchem
 	}
 	coll.Fields = append(coll.Fields, &fieldSchema11)
 
+	return coll
+}
+
+func withArrayField(coll *schemapb.CollectionSchema) *schemapb.CollectionSchema {
+	fieldSchema0 := schemapb.FieldSchema{
+		Name:        "array-bool",
+		DataType:    schemapb.DataType_Array,
+		ElementType: schemapb.DataType_Bool,
+	}
+	coll.Fields = append(coll.Fields, &fieldSchema0)
+	fieldSchema1 := schemapb.FieldSchema{
+		Name:        "array-int8",
+		DataType:    schemapb.DataType_Array,
+		ElementType: schemapb.DataType_Int8,
+	}
+	coll.Fields = append(coll.Fields, &fieldSchema1)
+	fieldSchema2 := schemapb.FieldSchema{
+		Name:        "array-int16",
+		DataType:    schemapb.DataType_Array,
+		ElementType: schemapb.DataType_Int16,
+	}
+	coll.Fields = append(coll.Fields, &fieldSchema2)
+	fieldSchema3 := schemapb.FieldSchema{
+		Name:        "array-int32",
+		DataType:    schemapb.DataType_Array,
+		ElementType: schemapb.DataType_Int32,
+	}
+	coll.Fields = append(coll.Fields, &fieldSchema3)
+	fieldSchema4 := schemapb.FieldSchema{
+		Name:        "array-int64",
+		DataType:    schemapb.DataType_Array,
+		ElementType: schemapb.DataType_Int64,
+	}
+	coll.Fields = append(coll.Fields, &fieldSchema4)
+	fieldSchema5 := schemapb.FieldSchema{
+		Name:        "array-float",
+		DataType:    schemapb.DataType_Array,
+		ElementType: schemapb.DataType_Float,
+	}
+	coll.Fields = append(coll.Fields, &fieldSchema5)
+	fieldSchema6 := schemapb.FieldSchema{
+		Name:        "array-double",
+		DataType:    schemapb.DataType_Array,
+		ElementType: schemapb.DataType_Double,
+	}
+	coll.Fields = append(coll.Fields, &fieldSchema6)
+	fieldSchema7 := schemapb.FieldSchema{
+		Name:        "array-varchar",
+		DataType:    schemapb.DataType_Array,
+		ElementType: schemapb.DataType_VarChar,
+	}
+	coll.Fields = append(coll.Fields, &fieldSchema7)
 	return coll
 }
 
@@ -783,6 +829,15 @@ func newSearchResult(results []map[string]interface{}) []map[string]interface{} 
 		result["field-string"] = strconv.Itoa(i)
 		result["field-binary"] = []byte{byte(i)}
 		result["field-json"] = []byte(`{"XXX": 0}`)
+		result["field-array"] = []bool{true}
+		result["array-bool"] = []bool{true}
+		result["array-int8"] = []int32{0}
+		result["array-int16"] = []int32{0}
+		result["array-int32"] = []int32{0}
+		result["array-int64"] = []int64{0}
+		result["array-float"] = []float32{0}
+		result["array-double"] = []float64{0}
+		result["array-varchar"] = []string{""}
 		result["XXX"] = float64(i)
 		result["YYY"] = strconv.Itoa(i)
 		results[i] = result
@@ -790,10 +845,133 @@ func newSearchResult(results []map[string]interface{}) []map[string]interface{} 
 	return results
 }
 
+func newCollectionSchemaWithArray(coll *schemapb.CollectionSchema) *schemapb.CollectionSchema {
+	fieldSchema1 := schemapb.FieldSchema{
+		Name:        "array-bool",
+		DataType:    schemapb.DataType_Array,
+		ElementType: schemapb.DataType_Bool,
+	}
+	coll.Fields = append(coll.Fields, &fieldSchema1)
+
+	fieldSchema2 := schemapb.FieldSchema{
+		Name:        "array-int8",
+		DataType:    schemapb.DataType_Array,
+		ElementType: schemapb.DataType_Int8,
+	}
+	coll.Fields = append(coll.Fields, &fieldSchema2)
+
+	fieldSchema3 := schemapb.FieldSchema{
+		Name:        "array-int16",
+		DataType:    schemapb.DataType_Array,
+		ElementType: schemapb.DataType_Int16,
+	}
+	coll.Fields = append(coll.Fields, &fieldSchema3)
+
+	fieldSchema4 := schemapb.FieldSchema{
+		Name:        "array-int32",
+		DataType:    schemapb.DataType_Array,
+		ElementType: schemapb.DataType_Int32,
+	}
+	coll.Fields = append(coll.Fields, &fieldSchema4)
+
+	fieldSchema5 := schemapb.FieldSchema{
+		Name:        "array-int64",
+		DataType:    schemapb.DataType_Array,
+		ElementType: schemapb.DataType_Int64,
+	}
+	coll.Fields = append(coll.Fields, &fieldSchema5)
+
+	fieldSchema6 := schemapb.FieldSchema{
+		Name:        "array-float",
+		DataType:    schemapb.DataType_Array,
+		ElementType: schemapb.DataType_Float,
+	}
+	coll.Fields = append(coll.Fields, &fieldSchema6)
+
+	fieldSchema7 := schemapb.FieldSchema{
+		Name:        "array-double",
+		DataType:    schemapb.DataType_Array,
+		ElementType: schemapb.DataType_Double,
+	}
+	coll.Fields = append(coll.Fields, &fieldSchema7)
+
+	fieldSchema8 := schemapb.FieldSchema{
+		Name:        "array-varchar",
+		DataType:    schemapb.DataType_Array,
+		ElementType: schemapb.DataType_String,
+	}
+	coll.Fields = append(coll.Fields, &fieldSchema8)
+
+	return coll
+}
+
+func newSearchResultWithArray(results []map[string]interface{}) []map[string]interface{} {
+	for i, result := range results {
+		result["array-bool"] = &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_BoolData{
+				BoolData: &schemapb.BoolArray{
+					Data: []bool{true},
+				},
+			},
+		}
+		result["array-int8"] = &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_IntData{
+				IntData: &schemapb.IntArray{
+					Data: []int32{0},
+				},
+			},
+		}
+		result["array-int16"] = &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_IntData{
+				IntData: &schemapb.IntArray{
+					Data: []int32{0},
+				},
+			},
+		}
+		result["array-int32"] = &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_IntData{
+				IntData: &schemapb.IntArray{
+					Data: []int32{0},
+				},
+			},
+		}
+		result["array-int64"] = &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_LongData{
+				LongData: &schemapb.LongArray{
+					Data: []int64{0},
+				},
+			},
+		}
+		result["array-float"] = &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_FloatData{
+				FloatData: &schemapb.FloatArray{
+					Data: []float32{0},
+				},
+			},
+		}
+		result["array-double"] = &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_DoubleData{
+				DoubleData: &schemapb.DoubleArray{
+					Data: []float64{0},
+				},
+			},
+		}
+		result["array-varchar"] = &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_StringData{
+				StringData: &schemapb.StringArray{
+					Data: []string{""},
+				},
+			},
+		}
+		results[i] = result
+	}
+	return results
+}
+
 func TestAnyToColumn(t *testing.T) {
-	data, err := anyToColumns(newSearchResult(generateSearchResult(schemapb.DataType_Int64)), newCollectionSchema(generateCollectionSchema(schemapb.DataType_Int64, false)))
+	data, err := anyToColumns(newSearchResultWithArray(generateSearchResult(schemapb.DataType_Int64)), newCollectionSchemaWithArray(generateCollectionSchema(schemapb.DataType_Int64, false)))
 	assert.Equal(t, nil, err)
-	assert.Equal(t, 13, len(data))
+	assert.Equal(t, 12, len(data))
 }
 
 func TestBuildQueryResps(t *testing.T) {
