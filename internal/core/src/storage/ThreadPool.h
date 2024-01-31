@@ -41,10 +41,13 @@ class ThreadPool {
         max_threads_size_ = CPU_NUM * thread_core_coefficient;
 
         // only IO pool will set large limit, but the CPU helps nothing to IO operations,
-        // we need to limit the max thread num, each thread will download 16 MiB data,
-        // it should be not greater than 256 (4GiB data) to avoid OOM and send too many requests to object storage
-        if (max_threads_size_ > 256) {
-            max_threads_size_ = 256;
+        // we need to limit the max thread num, each thread will download 16~64 MiB data,
+        // according to our benchmark, 16 threads is enough to saturate the network bandwidth.
+        if (min_threads_size_ > 16) {
+            min_threads_size_ = 16;
+        }
+        if (max_threads_size_ > 16) {
+            max_threads_size_ = 16;
         }
         LOG_SEGCORE_INFO_ << "Init thread pool:" << name_
                           << " with min worker num:" << min_threads_size_
