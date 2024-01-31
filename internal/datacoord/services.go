@@ -1579,9 +1579,15 @@ func (s *Server) UnsetIsImportingState(ctx context.Context, req *datapb.UnsetIsI
 	log := log.Ctx(ctx)
 	log.Info("unsetting isImport state of segments",
 		zap.Int64s("segments", req.GetSegmentIds()))
+
+	ts, err := s.allocator.allocTimestamp(ctx)
+	if err != nil {
+		return merr.Status(err), nil
+	}
+
 	var reportErr error
 	for _, segID := range req.GetSegmentIds() {
-		if err := s.meta.UnsetIsImporting(segID); err != nil {
+		if err := s.meta.UnsetIsImporting(segID, ts); err != nil {
 			// Fail-open.
 			log.Error("failed to unset segment is importing state",
 				zap.Int64("segmentID", segID),

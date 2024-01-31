@@ -481,8 +481,20 @@ func (s *SegmentManager) SealAllSegments(ctx context.Context, collectionID Uniqu
 			ret = append(ret, id)
 			continue
 		}
-		// segment can be sealed only if it is growing or if it's importing
-		if (!isImport && info.State != commonpb.SegmentState_Growing) || (isImport && info.State != commonpb.SegmentState_Importing) {
+		// Decoupling the importing segment from the flush process.
+		// Hence, we seal the importing segment without returning it.
+		// This approach avoids notifying the datanode to flush the
+		// importing segment and prevents the flush validation of
+		// this importing segment (the flush validation for the importing
+		// segment will take place after unsetting the importing state).
+		if isImport && info.State == commonpb.SegmentState_Importing {
+			if err := s.meta.SetState(id, commonpb.SegmentState_Sealed); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		// segment can be sealed only if it is growing
+		if !isImport && info.State != commonpb.SegmentState_Growing {
 			continue
 		}
 		if err := s.meta.SetState(id, commonpb.SegmentState_Sealed); err != nil {

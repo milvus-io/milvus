@@ -379,20 +379,20 @@ func TestMeta_Basic(t *testing.T) {
 		info0_0 = meta.GetHealthySegment(segID0_0)
 		assert.NotNil(t, info0_0)
 		assert.Equal(t, true, info0_0.GetIsImporting())
-		err = meta.UnsetIsImporting(segID0_0)
+		err = meta.UnsetIsImporting(segID0_0, 0)
 		assert.NoError(t, err)
 		info0_0 = meta.GetHealthySegment(segID0_0)
 		assert.NotNil(t, info0_0)
 		assert.Equal(t, false, info0_0.GetIsImporting())
 
 		// UnsetIsImporting on segment that does not exist.
-		err = meta.UnsetIsImporting(segID1_0)
+		err = meta.UnsetIsImporting(segID1_0, 0)
 		assert.Error(t, err)
 
 		info1_1 := meta.GetHealthySegment(segID1_1)
 		assert.NotNil(t, info1_1)
 		assert.Equal(t, false, info1_1.GetIsImporting())
-		err = meta.UnsetIsImporting(segID1_1)
+		err = meta.UnsetIsImporting(segID1_1, 0)
 		assert.NoError(t, err)
 		info1_1 = meta.GetHealthySegment(segID1_1)
 		assert.NotNil(t, info1_1)
