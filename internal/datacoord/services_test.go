@@ -478,12 +478,14 @@ func (s *ServerSuite) TestFlush_BulkLoadSegment() {
 	resp, err = s.testServer.Flush(context.TODO(), req)
 	s.NoError(err)
 	s.EqualValues(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-	s.EqualValues(1, len(resp.SegmentIDs))
+	segment := s.testServer.meta.GetSegment(segID)
+	s.Equal(commonpb.SegmentState_Flushed, segment.GetState())
 
+	err = s.testServer.meta.UnsetIsImporting(segID)
+	s.NoError(err)
 	ids, err = s.testServer.segmentManager.GetFlushableSegments(context.TODO(), "channel-1", expireTs)
 	s.NoError(err)
-	s.EqualValues(1, len(ids))
-	s.EqualValues(segID, ids[0])
+	s.EqualValues(0, len(ids))
 }
 
 func (s *ServerSuite) TestFlush_ClosedServer() {

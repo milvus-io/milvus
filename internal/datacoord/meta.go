@@ -408,7 +408,7 @@ func (m *meta) SetState(segmentID UniqueID, targetState commonpb.SegmentState) e
 }
 
 // UnsetIsImporting removes the `isImporting` flag of a segment.
-func (m *meta) UnsetIsImporting(segmentID UniqueID, expireTs Timestamp) error {
+func (m *meta) UnsetIsImporting(segmentID UniqueID) error {
 	log.Debug("meta update: unsetting isImport state of segment",
 		zap.Int64("segmentID", segmentID))
 	m.Lock()
@@ -432,15 +432,6 @@ func (m *meta) UnsetIsImporting(segmentID UniqueID, expireTs Timestamp) error {
 	m.segments.SetIsImporting(segmentID, false)
 	log.Info("meta update: unsetting isImport state of segment - complete",
 		zap.Int64("segmentID", segmentID))
-
-	// The expiration time for the importing segment was initially set to 15 minutes.
-	// After unsetting the importing state, the importing segment transitioned into a normal segment.
-	// To activate the flush policy, it is necessary to reset the expiration time to 2 seconds thereafter.
-	m.segments.AddAllocation(segmentID, &Allocation{
-		SegmentID:  segmentID,
-		NumOfRows:  0,
-		ExpireTime: expireTs,
-	})
 	return nil
 }
 

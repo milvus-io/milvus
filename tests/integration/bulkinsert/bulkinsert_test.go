@@ -159,7 +159,7 @@ func (s *BulkInsertSuite) TestBulkInsert() {
 	s.NoError(err)
 	segmentIDs, has := flushResp.GetCollSegIDs()[collectionName]
 	ids := segmentIDs.GetData()
-	s.Require().NotEmpty(segmentIDs)
+	s.Require().Empty(segmentIDs)
 	s.Require().True(has)
 	flushTs, has := flushResp.GetCollFlushTs()[collectionName]
 	s.True(has)

@@ -319,7 +319,7 @@ func (m *importManager) loadAndFlipPersistedTasks(ctx context.Context) error {
 }
 
 func (m *importManager) flipTaskFlushedState(ctx context.Context, importTask *milvuspb.GetImportStateResponse, dataNodeID int64) error {
-	ok, err := m.checkSegmentsSealed(ctx, importTask.GetSegmentIds())
+	ok, err := m.checkFlushDone(ctx, importTask.GetSegmentIds())
 	if err != nil {
 		log.Error("an error occurred while checking flush state of segments",
 			zap.Int64("task ID", importTask.GetId()),
@@ -327,7 +327,7 @@ func (m *importManager) flipTaskFlushedState(ctx context.Context, importTask *mi
 		return err
 	}
 	if ok {
-		// All segments are sealed. DataNode becomes available.
+		// All segments are flushed. DataNode becomes available.
 		func() {
 			m.busyNodesLock.Lock()
 			defer m.busyNodesLock.Unlock()
@@ -365,8 +365,8 @@ func (m *importManager) flipTaskFlushedState(ctx context.Context, importTask *mi
 	return nil
 }
 
-// checkSegmentsSealed checks if given segments are all sealed.
-func (m *importManager) checkSegmentsSealed(ctx context.Context, segIDs []UniqueID) (bool, error) {
+// checkFlushDone checks if given segments are all sealed.
+func (m *importManager) checkFlushDone(ctx context.Context, segIDs []UniqueID) (bool, error) {
 	resp, err := m.callGetSegmentStates(ctx, &datapb.GetSegmentStatesRequest{
 		SegmentIDs: segIDs,
 	})
@@ -380,18 +380,19 @@ func (m *importManager) checkSegmentsSealed(ctx context.Context, segIDs []Unique
 	}
 	log.Debug("checking import segment states",
 		zap.Strings("segment states", lo.Map(resp.GetStates(), getSegmentStates)))
-	sealed := true
+	flushed := true
 	for _, states := range resp.GetStates() {
 		// Flushed segment could get compacted, so only returns false if there are still importing segments.
 		if states.GetState() == commonpb.SegmentState_Dropped ||
 			states.GetState() == commonpb.SegmentState_NotExist {
 			return false, errSegmentNotExist
 		}
-		if states.GetState() == commonpb.SegmentState_Importing {
-			sealed = false
+		if states.GetState() == commonpb.SegmentState_Importing ||
+			states.GetState() == commonpb.SegmentState_Sealed {
+			flushed = false
 		}
 	}
-	return sealed, nil
+	return flushed, nil
 }
 
 func (m *importManager) isSingleFileTask(files []string) (bool, error) {

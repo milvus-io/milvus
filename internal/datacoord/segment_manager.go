@@ -482,13 +482,12 @@ func (s *SegmentManager) SealAllSegments(ctx context.Context, collectionID Uniqu
 			continue
 		}
 		// Decoupling the importing segment from the flush process.
-		// Hence, we seal the importing segment without returning it.
-		// This approach avoids notifying the datanode to flush the
-		// importing segment and prevents the flush validation of
-		// this importing segment (the flush validation for the importing
+		// Hence, we seal and flush the importing segment without returning it.
+		// This approach prevents the flush validation of this
+		// importing segment (the flush validation for the importing
 		// segment will take place after unsetting the importing state).
 		if isImport && info.State == commonpb.SegmentState_Importing {
-			if err := s.meta.SetState(id, commonpb.SegmentState_Sealed); err != nil {
+			if err := s.meta.SetState(id, commonpb.SegmentState_Flushed); err != nil {
 				return nil, err
 			}
 			continue
