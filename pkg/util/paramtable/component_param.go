@@ -2825,12 +2825,10 @@ type dataNodeConfig struct {
 	FileReadConcurrency ParamItem `refreshable:"false"`
 
 	// memory management
-	MemoryForceSyncEnable        ParamItem `refreshable:"true"`
-	MemoryForceSyncSegmentNum    ParamItem `refreshable:"true"`
-	MemoryForceSyncSegmentMinNum ParamItem `refreshable:"true"`
-	MemoryForceSyncMinSize       ParamItem `refreshable:"true"`
-	MemoryCheckInterval          ParamItem `refreshable:"true"`
-	MemoryWatermark              ParamItem `refreshable:"true"`
+	MemoryForceSyncEnable     ParamItem `refreshable:"true"`
+	MemoryForceSyncSegmentNum ParamItem `refreshable:"true"`
+	MemoryCheckInterval       ParamItem `refreshable:"true"`
+	MemoryWatermark           ParamItem `refreshable:"true"`
 
 	DataNodeTimeTickByRPC ParamItem `refreshable:"false"`
 	// DataNode send timetick interval per collection
@@ -2942,25 +2940,9 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	}
 	p.MemoryForceSyncSegmentNum.Init(base.mgr)
 
-	p.MemoryForceSyncSegmentMinNum = ParamItem{
-		Key:          "datanode.memory.forceSyncSegmentMinNum",
-		Version:      "2.4.0",
-		DefaultValue: "1",
-	}
-	p.MemoryForceSyncSegmentMinNum.Init(base.mgr)
-
-	p.MemoryForceSyncMinSize = ParamItem{
-		Key:          "datanode.memory.forceSyncMinSize",
-		Version:      "2.3.6",
-		DefaultValue: "524288", // 512K
-		Doc:          "the minimal buffer size to choose by MemoryHighSyncPolicy, in bytes",
-		Export:       true,
-	}
-	p.MemoryForceSyncMinSize.Init(base.mgr)
-
 	p.MemoryCheckInterval = ParamItem{
 		Key:          "datanode.memory.checkInterval",
-		Version:      "2.3.6",
+		Version:      "2.4.0",
 		DefaultValue: "3000", // milliseconds
 		Doc:          "the interal to check datanode memory usage, in milliseconds",
 		Export:       true,
