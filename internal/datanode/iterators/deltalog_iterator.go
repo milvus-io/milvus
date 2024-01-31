@@ -4,8 +4,10 @@ import (
 	"sync"
 
 	"go.uber.org/atomic"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
 var _ Iterator = (*DeltalogIterator)(nil)
@@ -16,6 +18,7 @@ type DeltalogIterator struct {
 	disposed     atomic.Bool
 
 	data  *storage.DeleteData
+	blobs []*storage.Blob
 	label *Label
 	pos   int
 }
@@ -26,14 +29,9 @@ func NewDeltalogIterator(v [][]byte, label *Label) (*DeltalogIterator, error) {
 		blobs[i] = &storage.Blob{Value: v[i]}
 	}
 
-	reader := storage.NewDeleteCodec()
-	_, _, dData, err := reader.Deserialize(blobs)
-	if err != nil {
-		return nil, err
-	}
 	return &DeltalogIterator{
 		disposeCh: make(chan struct{}),
-		data:      dData,
+		blobs:     blobs,
 		label:     label,
 	}, nil
 }
@@ -68,6 +66,16 @@ func (d *DeltalogIterator) Dispose() {
 }
 
 func (d *DeltalogIterator) hasNext() bool {
+	if d.data == nil && d.blobs != nil {
+		reader := storage.NewDeleteCodec()
+		_, _, dData, err := reader.Deserialize(d.blobs)
+		if err != nil {
+			log.Warn("Deltalog iterator failed to deserialize blobs", zap.Error(err))
+			return false
+		}
+		d.data = dData
+		d.blobs = nil
+	}
 	return int64(d.pos) < d.data.RowCount
 }
 

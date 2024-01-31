@@ -2994,8 +2994,8 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	p.FlushDeleteBufferBytes = ParamItem{
 		Key:          "dataNode.segment.deleteBufBytes",
 		Version:      "2.0.0",
-		DefaultValue: "67108864",
-		Doc:          "Max buffer size to flush del for a single channel",
+		DefaultValue: "16777216",
+		Doc:          "Max buffer size in bytes to flush del for a single channel, default as 16MB",
 		Export:       true,
 	}
 	p.FlushDeleteBufferBytes.Init(base.mgr)

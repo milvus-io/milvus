@@ -19,8 +19,10 @@ type DeltalogIteratorSuite struct {
 func (s *DeltalogIteratorSuite) TestDeltalogIteratorIntPK() {
 	s.Run("invalid blobs", func() {
 		iter, err := NewDeltalogIterator([][]byte{}, nil)
-		s.Error(err)
-		s.Nil(iter)
+
+		s.NoError(err)
+		s.NotNil(iter)
+		s.False(iter.HasNext())
 	})
 
 	testpks := []int64{1, 2, 3, 4}
