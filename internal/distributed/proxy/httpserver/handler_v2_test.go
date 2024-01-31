@@ -50,7 +50,7 @@ func TestHTTPWrapper(t *testing.T) {
 	ginHandler := gin.Default()
 	app := ginHandler.Group("", genAuthMiddleWare(false))
 	path := "/wrapper/post"
-	app.POST(path, wrapperPost(func() any { return &DefaultReq{} }, func(c *gin.Context, ctx *context.Context, req any, dbName string) (interface{}, error) {
+	app.POST(path, wrapperPost(func() any { return &DefaultReq{} }, func(ctx context.Context, c *gin.Context, req any, dbName string) (interface{}, error) {
 		return nil, nil
 	}))
 	postTestCases = append(postTestCases, requestBodyTestCase{
@@ -58,7 +58,7 @@ func TestHTTPWrapper(t *testing.T) {
 		requestBody: []byte(`{}`),
 	})
 	path = "/wrapper/post/param"
-	app.POST(path, wrapperPost(func() any { return &CollectionNameReq{} }, func(c *gin.Context, ctx *context.Context, req any, dbName string) (interface{}, error) {
+	app.POST(path, wrapperPost(func() any { return &CollectionNameReq{} }, func(ctx context.Context, c *gin.Context, req any, dbName string) (interface{}, error) {
 		return nil, nil
 	}))
 	postTestCases = append(postTestCases, requestBodyTestCase{
@@ -73,12 +73,18 @@ func TestHTTPWrapper(t *testing.T) {
 	})
 	postTestCases = append(postTestCases, requestBodyTestCase{
 		path:        path,
+		requestBody: []byte(``),
+		errMsg:      "can only accept json format request, the request body should be nil, however {} is valid",
+		errCode:     1801, // ErrIncorrectParameterFormat
+	})
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
 		requestBody: []byte(`{"collectionName": "book", "dbName"}`),
 		errMsg:      "can only accept json format request, error: invalid character '}' after object key",
 		errCode:     1801, // ErrIncorrectParameterFormat
 	})
 	path = "/wrapper/post/trace"
-	app.POST(path, wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(func(c *gin.Context, ctx *context.Context, req any, dbName string) (interface{}, error) {
+	app.POST(path, wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(func(ctx context.Context, c *gin.Context, req any, dbName string) (interface{}, error) {
 		return nil, nil
 	})))
 	postTestCasesTrace = append(postTestCasesTrace, requestBodyTestCase{
@@ -86,7 +92,7 @@ func TestHTTPWrapper(t *testing.T) {
 		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `"}`),
 	})
 	path = "/wrapper/post/trace/wrong"
-	app.POST(path, wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(func(c *gin.Context, ctx *context.Context, req any, dbName string) (interface{}, error) {
+	app.POST(path, wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(func(ctx context.Context, c *gin.Context, req any, dbName string) (interface{}, error) {
 		return nil, merr.ErrCollectionNotFound
 	})))
 	postTestCasesTrace = append(postTestCasesTrace, requestBodyTestCase{
@@ -94,8 +100,8 @@ func TestHTTPWrapper(t *testing.T) {
 		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `"}`),
 	})
 	path = "/wrapper/post/trace/call"
-	app.POST(path, wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(func(c *gin.Context, ctx *context.Context, req any, dbName string) (interface{}, error) {
-		return wrapperProxy(c, ctx, req, false, false, func(reqCtx *context.Context, req any) (any, error) {
+	app.POST(path, wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(func(ctx context.Context, c *gin.Context, req any, dbName string) (interface{}, error) {
+		return wrapperProxy(ctx, c, req, false, false, func(reqctx context.Context, req any) (any, error) {
 			return nil, nil
 		})
 	})))
@@ -150,17 +156,17 @@ func TestGrpcWrapper(t *testing.T) {
 	app := ginHandler.Group("")
 	appNeedAuth := ginHandler.Group(needAuthPrefix, genAuthMiddleWare(true))
 	path := "/wrapper/grpc/-0"
-	handle := func(reqCtx *context.Context, req any) (any, error) {
+	handle := func(reqctx context.Context, req any) (any, error) {
 		return nil, nil
 	}
 	app.GET(path, func(c *gin.Context) {
 		ctx := proxy.NewContextWithMetadata(c, "", DefaultDbName)
-		wrapperProxy(c, &ctx, &DefaultReq{}, false, false, handle)
+		wrapperProxy(ctx, c, &DefaultReq{}, false, false, handle)
 	})
 	appNeedAuth.GET(path, func(c *gin.Context) {
 		username, _ := c.Get(ContextUsername)
 		ctx := proxy.NewContextWithMetadata(c, username.(string), DefaultDbName)
-		wrapperProxy(c, &ctx, &milvuspb.DescribeCollectionRequest{}, true, false, handle)
+		wrapperProxy(ctx, c, &milvuspb.DescribeCollectionRequest{}, true, false, handle)
 	})
 	getTestCases = append(getTestCases, rawTestCase{
 		path: path,
@@ -169,17 +175,17 @@ func TestGrpcWrapper(t *testing.T) {
 		path: needAuthPrefix + path,
 	})
 	path = "/wrapper/grpc/01"
-	handle = func(reqCtx *context.Context, req any) (any, error) {
+	handle = func(reqctx context.Context, req any) (any, error) {
 		return nil, merr.ErrNeedAuthenticate // 1800
 	}
 	app.GET(path, func(c *gin.Context) {
 		ctx := proxy.NewContextWithMetadata(c, "", DefaultDbName)
-		wrapperProxy(c, &ctx, &DefaultReq{}, false, false, handle)
+		wrapperProxy(ctx, c, &DefaultReq{}, false, false, handle)
 	})
 	appNeedAuth.GET(path, func(c *gin.Context) {
 		username, _ := c.Get(ContextUsername)
 		ctx := proxy.NewContextWithMetadata(c, username.(string), DefaultDbName)
-		wrapperProxy(c, &ctx, &milvuspb.DescribeCollectionRequest{}, true, false, handle)
+		wrapperProxy(ctx, c, &milvuspb.DescribeCollectionRequest{}, true, false, handle)
 	})
 	getTestCases = append(getTestCases, rawTestCase{
 		path:    path,
@@ -189,19 +195,19 @@ func TestGrpcWrapper(t *testing.T) {
 		path: needAuthPrefix + path,
 	})
 	path = "/wrapper/grpc/00"
-	handle = func(reqCtx *context.Context, req any) (any, error) {
+	handle = func(reqctx context.Context, req any) (any, error) {
 		return &milvuspb.BoolResponse{
 			Status: commonSuccessStatus,
 		}, nil
 	}
 	app.GET(path, func(c *gin.Context) {
 		ctx := proxy.NewContextWithMetadata(c, "", DefaultDbName)
-		wrapperProxy(c, &ctx, &DefaultReq{}, false, false, handle)
+		wrapperProxy(ctx, c, &DefaultReq{}, false, false, handle)
 	})
 	appNeedAuth.GET(path, func(c *gin.Context) {
 		username, _ := c.Get(ContextUsername)
 		ctx := proxy.NewContextWithMetadata(c, username.(string), DefaultDbName)
-		wrapperProxy(c, &ctx, &milvuspb.DescribeCollectionRequest{}, true, false, handle)
+		wrapperProxy(ctx, c, &milvuspb.DescribeCollectionRequest{}, true, false, handle)
 	})
 	getTestCases = append(getTestCases, rawTestCase{
 		path: path,
@@ -210,7 +216,7 @@ func TestGrpcWrapper(t *testing.T) {
 		path: needAuthPrefix + path,
 	})
 	path = "/wrapper/grpc/10"
-	handle = func(reqCtx *context.Context, req any) (any, error) {
+	handle = func(reqctx context.Context, req any) (any, error) {
 		return &milvuspb.BoolResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_CollectionNameNotFound, // 28
@@ -220,12 +226,12 @@ func TestGrpcWrapper(t *testing.T) {
 	}
 	app.GET(path, func(c *gin.Context) {
 		ctx := proxy.NewContextWithMetadata(c, "", DefaultDbName)
-		wrapperProxy(c, &ctx, &DefaultReq{}, false, false, handle)
+		wrapperProxy(ctx, c, &DefaultReq{}, false, false, handle)
 	})
 	appNeedAuth.GET(path, func(c *gin.Context) {
 		username, _ := c.Get(ContextUsername)
 		ctx := proxy.NewContextWithMetadata(c, username.(string), DefaultDbName)
-		wrapperProxy(c, &ctx, &milvuspb.DescribeCollectionRequest{}, true, false, handle)
+		wrapperProxy(ctx, c, &milvuspb.DescribeCollectionRequest{}, true, false, handle)
 	})
 	getTestCases = append(getTestCases, rawTestCase{
 		path:    path,
@@ -294,7 +300,7 @@ func TestTimeout(t *testing.T) {
 		headers: map[string]string{HTTPHeaderRequestTimeout: "5"},
 	})
 	path = "/middleware/timeout/10"
-	// app.GET(path, wrapper(wrapperTimeout(func(c *gin.Context, ctx *context.Context, req any, dbName string) (interface{}, error) {
+	// app.GET(path, wrapper(wrapperTimeout(func(ctx context.Context, c *gin.Context, req any, dbName string) (interface{}, error) {
 	app.GET(path, timeoutMiddleware(func(c *gin.Context) {
 		time.Sleep(10 * time.Second)
 	}))
@@ -310,7 +316,7 @@ func TestTimeout(t *testing.T) {
 		status:  http.StatusRequestTimeout,
 	})
 	path = "/middleware/timeout/60"
-	// app.GET(path, wrapper(wrapperTimeout(func(c *gin.Context, ctx *context.Context, req any, dbName string) (interface{}, error) {
+	// app.GET(path, wrapper(wrapperTimeout(func(ctx context.Context, c *gin.Context, req any, dbName string) (interface{}, error) {
 	app.GET(path, timeoutMiddleware(func(c *gin.Context) {
 		time.Sleep(60 * time.Second)
 	}))
@@ -372,7 +378,7 @@ func TestDatabaseWrapper(t *testing.T) {
 	ginHandler := gin.Default()
 	app := ginHandler.Group("", genAuthMiddleWare(false))
 	path := "/wrapper/database"
-	app.POST(path, wrapperPost(func() any { return &DatabaseReq{} }, h.wrapperCheckDatabase(func(c *gin.Context, ctx *context.Context, req any, dbName string) (interface{}, error) {
+	app.POST(path, wrapperPost(func() any { return &DatabaseReq{} }, h.wrapperCheckDatabase(func(ctx context.Context, c *gin.Context, req any, dbName string) (interface{}, error) {
 		return nil, nil
 	})))
 	postTestCases = append(postTestCases, requestBodyTestCase{
@@ -656,6 +662,46 @@ func TestMethodGet(t *testing.T) {
 		Status: &StatusSuccess,
 		Alias:  DefaultAliasName,
 	}, nil).Once()
+	mp.EXPECT().ListImportTasks(mock.Anything, mock.Anything).Return(&milvuspb.ListImportTasksResponse{
+		Status: &StatusSuccess,
+		Tasks: []*milvuspb.GetImportStateResponse{
+			{
+				Status: &StatusSuccess,
+				State:  6,
+				Infos: []*commonpb.KeyValuePair{
+					{Key: "collection", Value: DefaultCollectionName},
+					{Key: "partition", Value: DefaultPartitionName},
+					{Key: "persist_cost", Value: "0.23"},
+					{Key: "progress_percent", Value: "100"},
+					{Key: "failed_reason"},
+				},
+				Id: 1234567890,
+			},
+			{
+				Status: &StatusSuccess,
+				State:  0,
+				Infos: []*commonpb.KeyValuePair{
+					{Key: "collection", Value: DefaultCollectionName},
+					{Key: "partition", Value: DefaultPartitionName},
+					{Key: "progress_percent", Value: "0"},
+					{Key: "failed_reason", Value: "failed to get file size of "},
+				},
+				Id: 123456789,
+			},
+		},
+	}, nil).Once()
+	mp.EXPECT().GetImportState(mock.Anything, mock.Anything).Return(&milvuspb.GetImportStateResponse{
+		Status: &StatusSuccess,
+		State:  6,
+		Infos: []*commonpb.KeyValuePair{
+			{Key: "collection", Value: DefaultCollectionName},
+			{Key: "partition", Value: DefaultPartitionName},
+			{Key: "persist_cost", Value: "0.23"},
+			{Key: "progress_percent", Value: "100"},
+			{Key: "failed_reason"},
+		},
+		Id: 1234567890,
+	}, nil).Once()
 
 	testEngine := initHTTPServerV2(mp, false)
 	queryTestCases := []rawTestCase{}
@@ -720,6 +766,12 @@ func TestMethodGet(t *testing.T) {
 	queryTestCases = append(queryTestCases, rawTestCase{
 		path: versionalV2(AliasCategory, DescribeAction),
 	})
+	queryTestCases = append(queryTestCases, rawTestCase{
+		path: versionalV2(ImportJobCategory, ListAction),
+	})
+	queryTestCases = append(queryTestCases, rawTestCase{
+		path: versionalV2(ImportJobCategory, GetProgressAction),
+	})
 
 	for _, testcase := range queryTestCases {
 		t.Run("query", func(t *testing.T) {
@@ -729,7 +781,8 @@ func TestMethodGet(t *testing.T) {
 				`"indexName": "` + DefaultIndexName + `",` +
 				`"userName": "` + util.UserRoot + `",` +
 				`"roleName": "` + util.RoleAdmin + `",` +
-				`"aliasName": "` + DefaultAliasName + `"` +
+				`"aliasName": "` + DefaultAliasName + `",` +
+				`"taskID": 1234567890` +
 				`}`))
 			req := httptest.NewRequest(http.MethodPost, testcase.path, bodyReader)
 			w := httptest.NewRecorder()
@@ -829,6 +882,7 @@ func TestMethodPost(t *testing.T) {
 	mp.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(commonErrorStatus, nil).Once()
 	mp.EXPECT().CreateAlias(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
 	mp.EXPECT().AlterAlias(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
+	mp.EXPECT().Import(mock.Anything, mock.Anything).Return(&milvuspb.ImportResponse{Status: commonSuccessStatus, Tasks: []int64{int64(1234567890)}}, nil).Once()
 	testEngine := initHTTPServerV2(mp, false)
 	queryTestCases := []rawTestCase{}
 	queryTestCases = append(queryTestCases, rawTestCase{
@@ -887,6 +941,9 @@ func TestMethodPost(t *testing.T) {
 	queryTestCases = append(queryTestCases, rawTestCase{
 		path: versionalV2(AliasCategory, AlterAction),
 	})
+	queryTestCases = append(queryTestCases, rawTestCase{
+		path: versionalV2(ImportJobCategory, CreateAction),
+	})
 
 	for _, testcase := range queryTestCases {
 		t.Run("query", func(t *testing.T) {
@@ -897,7 +954,8 @@ func TestMethodPost(t *testing.T) {
 				`"indexParams": [{"indexName": "` + DefaultIndexName + `", "fieldName": "book_intro", "metricsType": "L2", "indexType": "IVF_FLAT"}],` +
 				`"userName": "` + util.UserRoot + `", "password": "Milvus", "newPassword": "milvus", "roleName": "` + util.RoleAdmin + `",` +
 				`"roleName": "` + util.RoleAdmin + `", "objectType": "Global", "objectName": "*", "privilege": "*",` +
-				`"aliasName": "` + DefaultAliasName + `"` +
+				`"aliasName": "` + DefaultAliasName + `",` +
+				`"files": ["book.json"]` +
 				`}`))
 			req := httptest.NewRequest(http.MethodPost, testcase.path, bodyReader)
 			w := httptest.NewRecorder()

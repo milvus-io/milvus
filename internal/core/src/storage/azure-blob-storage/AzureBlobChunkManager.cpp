@@ -82,7 +82,7 @@ AzureBlobChunkManager::AzureBlobChunkManager(
     try {
         Azure::Core::Context context;
         client_->GetBlobContainerClient("justforconnectioncheck")
-            .GetBlockBlobClient("")
+            .GetBlockBlobClient("justforconnectioncheck")
             .GetProperties(Azure::Storage::Blobs::GetBlobPropertiesOptions(),
                            context);
     } catch (const Azure::Storage::StorageException& e) {

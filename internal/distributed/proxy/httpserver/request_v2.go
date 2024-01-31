@@ -17,7 +17,8 @@ func (req *DatabaseReq) GetDbName() string { return req.DbName }
 type CollectionNameReq struct {
 	DbName         string   `json:"dbName"`
 	CollectionName string   `json:"collectionName" binding:"required"`
-	PartitionNames []string `json:"partitionNames"`
+	Limit          int32    `json:"limit"`          // list import jobs
+	PartitionNames []string `json:"partitionNames"` // get partitions load state
 }
 
 func (req *CollectionNameReq) GetDbName() string {
@@ -26,6 +27,10 @@ func (req *CollectionNameReq) GetDbName() string {
 
 func (req *CollectionNameReq) GetCollectionName() string {
 	return req.CollectionName
+}
+
+func (req *CollectionNameReq) GetLimit() int32 {
+	return req.Limit
 }
 
 func (req *CollectionNameReq) GetPartitionNames() []string {
@@ -51,6 +56,30 @@ type PartitionReq struct {
 func (req *PartitionReq) GetDbName() string         { return req.DbName }
 func (req *PartitionReq) GetCollectionName() string { return req.CollectionName }
 func (req *PartitionReq) GetPartitionName() string  { return req.PartitionName }
+
+type DataFilesReq struct {
+	DbName         string   `json:"dbName"`
+	CollectionName string   `json:"collectionName" binding:"required"`
+	Files          []string `json:"files" binding:"required"`
+}
+
+func (req *DataFilesReq) GetDbName() string {
+	return req.DbName
+}
+
+func (req *DataFilesReq) GetCollectionName() string {
+	return req.CollectionName
+}
+
+func (req *DataFilesReq) GetFileNames() []string {
+	return req.Files
+}
+
+type TaskIDReq struct {
+	TaskID int64 `json:"taskID" binding:"required"`
+}
+
+func (req *TaskIDReq) GetTaskID() int64 { return req.TaskID }
 
 type QueryReqV2 struct {
 	DbName         string   `json:"dbName"`
@@ -139,6 +168,15 @@ type IndexNameGetter interface {
 }
 type AliasNameGetter interface {
 	GetAliasName() string
+}
+type LimitGetter interface {
+	GetLimit() int32
+}
+type FileNamesGetter interface {
+	GetFileNames() []string
+}
+type TaskIDGetter interface {
+	GetTaskID() int64
 }
 
 type PasswordReq struct {
