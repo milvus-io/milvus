@@ -10012,7 +10012,8 @@ class TestSearchGroupBy(TestcaseBase):
         assert len(grpby_field_values) == len(set(grpby_field_values))
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_hybrid_search_group_by(self, metric):
+    @pytest.mark.skip(reason="not completed")
+    def test_hybrid_search_group_by(self):
         """
         target: test search group by
         method: 1. create a collection with multiple vector fields
@@ -10020,9 +10021,11 @@ class TestSearchGroupBy(TestcaseBase):
                 3. hybrid_search with group by
                 verify: the error code and msg
         """
+        pass
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_multi_vectors_search_one_vector_group_by(self, metric):
+    @pytest.mark.skip(reason="not completed")
+    def test_multi_vectors_search_one_vector_group_by(self):
         """
         target: test search group by
         method: 1. create a collection with multiple vector fields
@@ -10030,3 +10033,4 @@ class TestSearchGroupBy(TestcaseBase):
                 3. search on the vector with hnsw index with group by
                 verify: search successfully
         """
+        pass
