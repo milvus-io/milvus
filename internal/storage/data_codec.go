@@ -25,6 +25,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/samber/lo"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -878,6 +880,7 @@ type DeleteData struct {
 	Pks      []PrimaryKey // primary keys
 	Tss      []Timestamp  // timestamps
 	RowCount int64
+	memSize  int64
 }
 
 func NewDeleteData(pks []PrimaryKey, tss []Timestamp) *DeleteData {
@@ -885,6 +888,7 @@ func NewDeleteData(pks []PrimaryKey, tss []Timestamp) *DeleteData {
 		Pks:      pks,
 		Tss:      tss,
 		RowCount: int64(len(pks)),
+		memSize:  lo.SumBy(pks, func(pk PrimaryKey) int64 { return pk.Size() }) + int64(len(tss)*8),
 	}
 }
 
@@ -893,6 +897,7 @@ func (data *DeleteData) Append(pk PrimaryKey, ts Timestamp) {
 	data.Pks = append(data.Pks, pk)
 	data.Tss = append(data.Tss, ts)
 	data.RowCount++
+	data.memSize += pk.Size() + int64(8)
 }
 
 // Append append 1 pk&ts pair to DeleteData
@@ -900,25 +905,23 @@ func (data *DeleteData) AppendBatch(pks []PrimaryKey, tss []Timestamp) {
 	data.Pks = append(data.Pks, pks...)
 	data.Tss = append(data.Tss, tss...)
 	data.RowCount += int64(len(pks))
+	data.memSize += lo.SumBy(pks, func(pk PrimaryKey) int64 { return pk.Size() }) + int64(len(tss)*8)
 }
 
 func (data *DeleteData) Merge(other *DeleteData) {
 	data.Pks = append(other.Pks, other.Pks...)
 	data.Tss = append(other.Tss, other.Tss...)
 	data.RowCount += other.RowCount
+	data.memSize += other.Size()
 
 	other.Pks = nil
 	other.Tss = nil
 	other.RowCount = 0
+	other.memSize = 0
 }
 
 func (data *DeleteData) Size() int64 {
-	var size int64
-	for _, pk := range data.Pks {
-		size += pk.Size()
-	}
-
-	return size
+	return data.memSize
 }
 
 // DeleteCodec serializes and deserializes the delete data

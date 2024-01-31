@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -498,25 +499,6 @@ func TestDeleteCodec(t *testing.T) {
 		assert.Equal(t, sid, int64(1))
 		assert.Equal(t, data, deleteData)
 	})
-
-	t.Run("merge", func(t *testing.T) {
-		first := &DeleteData{
-			Pks:      []PrimaryKey{NewInt64PrimaryKey(1)},
-			Tss:      []uint64{100},
-			RowCount: 1,
-		}
-
-		second := &DeleteData{
-			Pks:      []PrimaryKey{NewInt64PrimaryKey(2)},
-			Tss:      []uint64{100},
-			RowCount: 1,
-		}
-
-		first.Merge(second)
-		assert.Equal(t, len(first.Pks), 2)
-		assert.Equal(t, len(first.Tss), 2)
-		assert.Equal(t, first.RowCount, int64(2))
-	})
 }
 
 func TestUpgradeDeleteLog(t *testing.T) {
@@ -754,4 +736,44 @@ func TestMemorySize(t *testing.T) {
 	assert.Equal(t, insertDataEmpty.Data[StringField].GetMemorySize(), 0)
 	assert.Equal(t, insertDataEmpty.Data[BinaryVectorField].GetMemorySize(), 4)
 	assert.Equal(t, insertDataEmpty.Data[FloatVectorField].GetMemorySize(), 4)
+}
+
+func TestDeleteData(t *testing.T) {
+	pks, err := GenInt64PrimaryKeys(1, 2, 3)
+	require.NoError(t, err)
+
+	t.Run("merge", func(t *testing.T) {
+		first := NewDeleteData(pks, []Timestamp{100, 101, 102})
+		second := NewDeleteData(pks, []Timestamp{100, 101, 102})
+		require.EqualValues(t, first.RowCount, second.RowCount)
+		require.EqualValues(t, first.Size(), second.Size())
+		require.EqualValues(t, 3, first.RowCount)
+		require.EqualValues(t, 72, first.Size())
+
+		first.Merge(second)
+		assert.Equal(t, len(first.Pks), 6)
+		assert.Equal(t, len(first.Tss), 6)
+		assert.EqualValues(t, first.RowCount, 6)
+		assert.EqualValues(t, first.Size(), 144)
+
+		assert.NotNil(t, second)
+		assert.EqualValues(t, 0, second.RowCount)
+		assert.EqualValues(t, 0, second.Size())
+	})
+
+	t.Run("append", func(t *testing.T) {
+		dData := NewDeleteData(nil, nil)
+		dData.Append(pks[0], 100)
+
+		assert.EqualValues(t, dData.RowCount, 1)
+		assert.EqualValues(t, dData.Size(), 24)
+	})
+
+	t.Run("append batch", func(t *testing.T) {
+		dData := NewDeleteData(nil, nil)
+		dData.AppendBatch(pks, []Timestamp{100, 101, 102})
+
+		assert.EqualValues(t, dData.RowCount, 3)
+		assert.EqualValues(t, dData.Size(), 72)
+	})
 }
