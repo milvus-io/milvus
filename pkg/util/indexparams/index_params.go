@@ -154,11 +154,11 @@ func NewBigDataExtraParamsFromMap(value map[string]string) (*BigDataIndexExtraPa
 // FillDiskIndexParams fill ratio params to index param on proxy node
 // Which will be used to calculate build and load params
 func FillDiskIndexParams(params *paramtable.ComponentParam, indexParams map[string]string) error {
-	maxDegree := params.CommonCfg.MaxDegree.GetValue()
-	searchListSize := params.CommonCfg.SearchListSize.GetValue()
-	pqCodeBudgetGBRatio := params.CommonCfg.PQCodeBudgetGBRatio.GetValue()
-	buildNumThreadsRatio := params.CommonCfg.BuildNumThreadsRatio.GetValue()
-	searchCacheBudgetGBRatio := params.CommonCfg.SearchCacheBudgetGBRatio.GetValue()
+	var maxDegree string
+	var searchListSize string
+	var pqCodeBudgetGBRatio string
+	var buildNumThreadsRatio string
+	var searchCacheBudgetGBRatio string
 
 	if params.AutoIndexConfig.Enable.GetAsBool() {
 		indexParams := params.AutoIndexConfig.IndexParams.GetAsJSONMap()
@@ -177,6 +177,13 @@ func FillDiskIndexParams(params *paramtable.ComponentParam, indexParams map[stri
 		}
 		pqCodeBudgetGBRatio = fmt.Sprintf("%f", extraParams.PQCodeBudgetGBRatio)
 		buildNumThreadsRatio = fmt.Sprintf("%f", extraParams.BuildNumThreadsRatio)
+		searchCacheBudgetGBRatio = fmt.Sprintf("%f", extraParams.SearchCacheBudgetGBRatio)
+	} else {
+		maxDegree = params.CommonCfg.MaxDegree.GetValue()
+		searchListSize = params.CommonCfg.SearchListSize.GetValue()
+		pqCodeBudgetGBRatio = params.CommonCfg.PQCodeBudgetGBRatio.GetValue()
+		buildNumThreadsRatio = params.CommonCfg.BuildNumThreadsRatio.GetValue()
+		searchCacheBudgetGBRatio = params.CommonCfg.SearchCacheBudgetGBRatio.GetValue()
 	}
 
 	indexParams[MaxDegreeKey] = maxDegree
@@ -197,12 +204,9 @@ func GetIndexParams(indexParams []*commonpb.KeyValuePair, key string) string {
 	return ""
 }
 
-// AppendDiskIndexBuildParams append index params for `buildIndex` (params not exist in `CreateIndex`)
-func AppendDiskIndexBuildParams(params *paramtable.ComponentParam, indexParams []*commonpb.KeyValuePair) ([]*commonpb.KeyValuePair, error) {
+// UpdateDiskIndexBuildParams update index params for `buildIndex` (override search cache size in `CreateIndex`)
+func UpdateDiskIndexBuildParams(params *paramtable.ComponentParam, indexParams []*commonpb.KeyValuePair) ([]*commonpb.KeyValuePair, error) {
 	existedVal := GetIndexParams(indexParams, SearchCacheBudgetRatioKey)
-	if len(existedVal) > 0 {
-		return indexParams, nil
-	}
 
 	var searchCacheBudgetGBRatio string
 	if params.AutoIndexConfig.Enable.GetAsBool() {
@@ -219,14 +223,33 @@ func AppendDiskIndexBuildParams(params *paramtable.ComponentParam, indexParams [
 		searchCacheBudgetGBRatio = fmt.Sprintf("%f", paramVal)
 	}
 
-	if len(searchCacheBudgetGBRatio) > 0 {
+	// append when not exist
+	if len(existedVal) == 0 {
 		indexParams = append(indexParams,
 			&commonpb.KeyValuePair{
 				Key:   SearchCacheBudgetRatioKey,
 				Value: searchCacheBudgetGBRatio,
 			})
+		return indexParams, nil
 	}
-	return indexParams, nil
+	// override when exist
+	updatedParams := make([]*commonpb.KeyValuePair, 0, len(indexParams))
+	for _, param := range indexParams {
+		if param.Key == SearchCacheBudgetRatioKey {
+			updatedParams = append(updatedParams,
+				&commonpb.KeyValuePair{
+					Key:   SearchCacheBudgetRatioKey,
+					Value: searchCacheBudgetGBRatio,
+				})
+		} else {
+			updatedParams = append(updatedParams,
+				&commonpb.KeyValuePair{
+					Key:   param.Key,
+					Value: param.Value,
+				})
+		}
+	}
+	return updatedParams, nil
 }
 
 // SetDiskIndexBuildParams set index build params with ratio params on indexNode

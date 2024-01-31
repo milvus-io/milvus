@@ -149,7 +149,7 @@ func TestDiskIndexParams(t *testing.T) {
 				Value: "4.0",
 			})
 
-		indexParams, err := AppendDiskIndexBuildParams(&params, indexParams)
+		indexParams, err := UpdateDiskIndexBuildParams(&params, indexParams)
 		assert.NoError(t, err)
 		assert.True(t, len(indexParams) == 4)
 
@@ -191,7 +191,7 @@ func TestDiskIndexParams(t *testing.T) {
 				Value: "4.0",
 			})
 
-		autoParams, err = AppendDiskIndexBuildParams(&params, autoParams)
+		autoParams, err = UpdateDiskIndexBuildParams(&params, autoParams)
 		assert.NoError(t, err)
 		assert.True(t, len(autoParams) == 4)
 
@@ -208,7 +208,7 @@ func TestDiskIndexParams(t *testing.T) {
 				}
 			`
 		params.Save(params.AutoIndexConfig.ExtraParams.Key, newJSONStr)
-		autoParams, err = AppendDiskIndexBuildParams(&params, autoParams)
+		autoParams, err = UpdateDiskIndexBuildParams(&params, autoParams)
 
 		assert.NoError(t, err)
 		assert.True(t, len(autoParams) == 4)
@@ -216,7 +216,7 @@ func TestDiskIndexParams(t *testing.T) {
 		val = GetIndexParams(autoParams, SearchCacheBudgetRatioKey)
 		iVal, iErr = strconv.ParseFloat(val, 64)
 		assert.NoError(t, iErr)
-		assert.Equal(t, 0.225, iVal)
+		assert.Equal(t, 0.325, iVal)
 	})
 
 	t.Run("set disk index build params", func(t *testing.T) {
