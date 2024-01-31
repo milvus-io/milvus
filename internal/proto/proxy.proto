@@ -32,6 +32,7 @@ message InvalidateCollMetaCacheRequest {
   string db_name = 2;
   string collection_name = 3;
   int64 collectionID = 4;
+  string partition_name = 5;
 }
 
 message InvalidateCredCacheRequest {

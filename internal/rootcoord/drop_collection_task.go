@@ -80,7 +80,7 @@ func (t *dropCollectionTask) Execute(ctx context.Context) error {
 		collectionNames: append(aliases, collMeta.Name),
 		collectionID:    collMeta.CollectionID,
 		ts:              ts,
-		opts:            []proxyutil.ExpireCacheOpt{proxyutil.ExpireCacheWithDropFlag()},
+		opts:            []proxyutil.ExpireCacheOpt{proxyutil.SetMsgType(commonpb.MsgType_DropCollection)},
 	})
 	redoTask.AddSyncStep(&changeCollectionStateStep{
 		baseStep:     baseStep{core: t.core},

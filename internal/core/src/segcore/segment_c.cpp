@@ -41,14 +41,14 @@ NewSegment(CCollection collection,
         switch (seg_type) {
             case Growing: {
                 auto seg = milvus::segcore::CreateGrowingSegment(
-                    col->get_schema(), col->GetIndexMeta(), segment_id);
+                    col->get_schema(), col->get_index_meta(), segment_id);
                 segment = std::move(seg);
                 break;
             }
             case Sealed:
             case Indexing:
                 segment = milvus::segcore::CreateSealedSegment(
-                    col->get_schema(), col->GetIndexMeta(), segment_id);
+                    col->get_schema(), col->get_index_meta(), segment_id);
                 break;
             default:
                 PanicInfo(milvus::UnexpectedError,

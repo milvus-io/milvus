@@ -107,22 +107,49 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 		zap.String("db", request.DbName),
 		zap.String("collectionName", request.CollectionName),
 		zap.Int64("collectionID", request.CollectionID),
+		zap.String("msgType", request.GetBase().GetMsgType().String()),
+		zap.String("partitionName", request.GetPartitionName()),
 	)
 
 	log.Info("received request to invalidate collection meta cache")
 
 	collectionName := request.CollectionName
 	collectionID := request.CollectionID
-
 	var aliasName []string
+
 	if globalMetaCache != nil {
-		if collectionName != "" {
-			globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName) // no need to return error, though collection may be not cached
-		}
-		if request.CollectionID != UniqueID(0) {
-			aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID)
+		switch request.GetBase().GetMsgType() {
+		case commonpb.MsgType_DropCollection, commonpb.MsgType_RenameCollection, commonpb.MsgType_DropAlias, commonpb.MsgType_AlterAlias:
+			if collectionName != "" {
+				globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName) // no need to return error, though collection may be not cached
+			}
+			if request.CollectionID != UniqueID(0) {
+				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID)
+			}
+			log.Info("complete to invalidate collection meta cache with collection name", zap.String("collectionName", collectionName))
+		case commonpb.MsgType_DropPartition:
+			if globalMetaCache != nil {
+				if collectionName != "" && request.GetPartitionName() != "" {
+					globalMetaCache.RemovePartition(ctx, request.GetDbName(), request.GetCollectionName(), request.GetPartitionName())
+				} else {
+					log.Warn("invalidate collection meta cache failed. collectionName or partitionName is empty",
+						zap.String("collectionName", collectionName),
+						zap.String("partitionName", request.GetPartitionName()))
+					return merr.Status(merr.WrapErrPartitionNotFound(request.GetPartitionName(), "partition name not specified")), nil
+				}
+			}
+		default:
+			log.Warn("receive unexpected msgType of invalidate collection meta cache", zap.String("msgType", request.GetBase().GetMsgType().String()))
+
+			if collectionName != "" {
+				globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName) // no need to return error, though collection may be not cached
+			}
+			if request.CollectionID != UniqueID(0) {
+				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID)
+			}
 		}
 	}
+
 	if request.GetBase().GetMsgType() == commonpb.MsgType_DropCollection {
 		// no need to handle error, since this Proxy may not create dml stream for the collection.
 		node.chMgr.removeDMLStream(request.GetCollectionID())
@@ -1689,6 +1716,10 @@ func (node *Proxy) GetLoadState(ctx context.Context, request *milvuspb.GetLoadSt
 
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, request.GetDbName(), request.CollectionName)
 	if err != nil {
+		log.Warn("failed to get collection id",
+			zap.String("dbName", request.GetDbName()),
+			zap.String("collectionName", request.CollectionName),
+			zap.Error(err))
 		successResponse.State = commonpb.LoadState_LoadStateNotExist
 		return successResponse, nil
 	}

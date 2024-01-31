@@ -261,6 +261,7 @@ queryCoord:
   heartbeatAvailableInterval: 10000 # 10s, Only QueryNodes which fetched heartbeats within the duration are available
   loadTimeoutSeconds: 600
   checkHandoffInterval: 5000
+  growingRowCountWeight: 4.0
   # can specify ip for example
   # ip: 127.0.0.1
   ip: # if not specify address, will use the first unicastable address as local ip
@@ -384,9 +385,9 @@ dataCoord:
     balanceSilentDuration: 300 # The duration before the channelBalancer on datacoord to run
     balanceInterval: 360 #The interval for the channelBalancer on datacoord to check balance status
   segment:
-    maxSize: 512 # Maximum size of a segment in MB
+    maxSize: 1024 # Maximum size of a segment in MB
     diskSegmentMaxSize: 2048 # Maximum size of a segment in MB for collection which has Disk index
-    sealProportion: 0.23
+    sealProportion: 0.12
     # The time of the assignment expiration in ms
     # Warning! this parameter is an expert variable and closely related to data integrity. Without specific
     # target and solid understanding of the scenarios, it should not be changed. If it's necessary to alter
@@ -445,7 +446,7 @@ dataNode:
     flowGraph:
       maxQueueLength: 16 # Maximum length of task queue in flowgraph
       maxParallelism: 1024 # Maximum number of tasks executed in parallel in the flowgraph
-    maxParallelSyncTaskNum: 6 # Maximum number of sync tasks executed in parallel in each flush manager
+    maxParallelSyncMgrTasks: 256 #The max concurrent sync task number of datanode sync mgr globally 
     skipMode:
       # when there are only timetick msg in flowgraph for a while (longer than coldTime),
       # flowGraph will turn on skip mode to skip most timeticks to reduce cost, especially there are a lot of channels
@@ -544,6 +545,7 @@ common:
     highPriority: 10 # This parameter specify how many times the number of threads is the number of cores in high priority thread pool
     middlePriority: 5 # This parameter specify how many times the number of threads is the number of cores in middle priority thread pool
     lowPriority: 1 # This parameter specify how many times the number of threads is the number of cores in low priority thread pool
+  buildIndexThreadPoolRatio: 0.75
   DiskIndex:
     MaxDegree: 56
     SearchListSize: 100

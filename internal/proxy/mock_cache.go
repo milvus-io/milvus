@@ -823,6 +823,41 @@ func (_c *MockCache_RefreshPolicyInfo_Call) RunAndReturn(run func(typeutil.Cache
 	return _c
 }
 
+// RemoveAlias provides a mock function with given fields: ctx, database, alias
+func (_m *MockCache) RemoveAlias(ctx context.Context, database string, alias string) {
+	_m.Called(ctx, database, alias)
+}
+
+// MockCache_RemoveAlias_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveAlias'
+type MockCache_RemoveAlias_Call struct {
+	*mock.Call
+}
+
+// RemoveAlias is a helper method to define mock.On call
+//   - ctx context.Context
+//   - database string
+//   - alias string
+func (_e *MockCache_Expecter) RemoveAlias(ctx interface{}, database interface{}, alias interface{}) *MockCache_RemoveAlias_Call {
+	return &MockCache_RemoveAlias_Call{Call: _e.mock.On("RemoveAlias", ctx, database, alias)}
+}
+
+func (_c *MockCache_RemoveAlias_Call) Run(run func(ctx context.Context, database string, alias string)) *MockCache_RemoveAlias_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string))
+	})
+	return _c
+}
+
+func (_c *MockCache_RemoveAlias_Call) Return() *MockCache_RemoveAlias_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockCache_RemoveAlias_Call) RunAndReturn(run func(context.Context, string, string)) *MockCache_RemoveAlias_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // RemoveCollection provides a mock function with given fields: ctx, database, collectionName
 func (_m *MockCache) RemoveCollection(ctx context.Context, database string, collectionName string) {
 	_m.Called(ctx, database, collectionName)
@@ -1035,39 +1070,6 @@ func (_c *MockCache_UpdateCredential_Call) Return() *MockCache_UpdateCredential_
 }
 
 func (_c *MockCache_UpdateCredential_Call) RunAndReturn(run func(*internalpb.CredentialInfo)) *MockCache_UpdateCredential_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// expireShardLeaderCache provides a mock function with given fields: ctx
-func (_m *MockCache) expireShardLeaderCache(ctx context.Context) {
-	_m.Called(ctx)
-}
-
-// MockCache_expireShardLeaderCache_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'expireShardLeaderCache'
-type MockCache_expireShardLeaderCache_Call struct {
-	*mock.Call
-}
-
-// expireShardLeaderCache is a helper method to define mock.On call
-//   - ctx context.Context
-func (_e *MockCache_Expecter) expireShardLeaderCache(ctx interface{}) *MockCache_expireShardLeaderCache_Call {
-	return &MockCache_expireShardLeaderCache_Call{Call: _e.mock.On("expireShardLeaderCache", ctx)}
-}
-
-func (_c *MockCache_expireShardLeaderCache_Call) Run(run func(ctx context.Context)) *MockCache_expireShardLeaderCache_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context))
-	})
-	return _c
-}
-
-func (_c *MockCache_expireShardLeaderCache_Call) Return() *MockCache_expireShardLeaderCache_Call {
-	_c.Call.Return()
-	return _c
-}
-
-func (_c *MockCache_expireShardLeaderCache_Call) RunAndReturn(run func(context.Context)) *MockCache_expireShardLeaderCache_Call {
 	_c.Call.Return(run)
 	return _c
 }

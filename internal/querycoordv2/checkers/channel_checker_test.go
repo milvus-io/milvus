@@ -19,6 +19,7 @@ package checkers
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -76,13 +77,21 @@ func (suite *ChannelCheckerTestSuite) SetupTest() {
 	distManager := meta.NewDistributionManager()
 
 	balancer := suite.createMockBalancer()
-	suite.checker = NewChannelChecker(suite.meta, distManager, targetManager, balancer)
+	suite.checker = NewChannelChecker(suite.meta, distManager, targetManager, balancer, suite.nodeMgr)
 
 	suite.broker.EXPECT().GetPartitions(mock.Anything, int64(1)).Return([]int64{1}, nil).Maybe()
 }
 
 func (suite *ChannelCheckerTestSuite) TearDownTest() {
 	suite.kv.Close()
+}
+
+func (suite *ChannelCheckerTestSuite) setNodeAvailable(nodes ...int64) {
+	for _, node := range nodes {
+		nodeInfo := session.NewNodeInfo(node, "")
+		nodeInfo.SetLastHeartbeat(time.Now())
+		suite.nodeMgr.Add(nodeInfo)
+	}
 }
 
 func (suite *ChannelCheckerTestSuite) createMockBalancer() balance.Balance {
@@ -151,7 +160,10 @@ func (suite *ChannelCheckerTestSuite) TestReduceChannel() {
 	checker.targetMgr.UpdateCollectionCurrentTarget(int64(1))
 
 	checker.dist.ChannelDistManager.Update(1, utils.CreateTestChannel(1, 1, 1, "test-insert-channel1"))
+	checker.dist.LeaderViewManager.Update(1, &meta.LeaderView{ID: 1, Channel: "test-insert-channel1"})
 	checker.dist.ChannelDistManager.Update(1, utils.CreateTestChannel(1, 1, 1, "test-insert-channel2"))
+	checker.dist.LeaderViewManager.Update(1, &meta.LeaderView{ID: 1, Channel: "test-insert-channel2"})
+	suite.setNodeAvailable(1)
 	tasks := checker.Check(context.TODO())
 	suite.Len(tasks, 1)
 	suite.EqualValues(1, tasks[0].ReplicaID())
@@ -191,6 +203,12 @@ func (suite *ChannelCheckerTestSuite) TestRepeatedChannels() {
 	checker.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 2, "test-insert-channel"))
 
 	tasks := checker.Check(context.TODO())
+	suite.Len(tasks, 0)
+
+	suite.setNodeAvailable(1, 2)
+	checker.dist.LeaderViewManager.Update(1, &meta.LeaderView{ID: 1, Channel: "test-insert-channel"})
+	checker.dist.LeaderViewManager.Update(2, &meta.LeaderView{ID: 2, Channel: "test-insert-channel"})
+	tasks = checker.Check(context.TODO())
 	suite.Len(tasks, 1)
 	suite.EqualValues(1, tasks[0].ReplicaID())
 	suite.Len(tasks[0].Actions(), 1)

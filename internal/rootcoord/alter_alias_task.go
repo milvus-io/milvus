@@ -21,6 +21,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/util/proxyutil"
 )
 
 type alterAliasTask struct {
@@ -36,7 +37,7 @@ func (t *alterAliasTask) Prepare(ctx context.Context) error {
 }
 
 func (t *alterAliasTask) Execute(ctx context.Context) error {
-	if err := t.core.ExpireMetaCache(ctx, t.Req.GetDbName(), []string{t.Req.GetAlias()}, InvalidCollectionID, t.GetTs()); err != nil {
+	if err := t.core.ExpireMetaCache(ctx, t.Req.GetDbName(), []string{t.Req.GetAlias()}, InvalidCollectionID, "", t.GetTs(), proxyutil.SetMsgType(commonpb.MsgType_AlterAlias)); err != nil {
 		return err
 	}
 	// alter alias is atomic enough.

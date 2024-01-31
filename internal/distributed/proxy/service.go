@@ -202,6 +202,8 @@ func (s *Server) startHTTPServer(errChan chan error) {
 	}
 	app := ginHandler.Group("/v1")
 	httpserver.NewHandlersV1(s.proxy).RegisterRoutesToV1(app)
+	appV2 := ginHandler.Group("/v2/vectordb")
+	httpserver.NewHandlersV2(s.proxy).RegisterRoutesToV2(appV2)
 	s.httpServer = &http.Server{Handler: ginHandler, ReadHeaderTimeout: time.Second}
 	errChan <- nil
 	if err := s.httpServer.Serve(s.httpListener); err != nil && err != cmux.ErrServerClosed {

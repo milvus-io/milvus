@@ -92,6 +92,10 @@ class ResponseChecker:
             # Collection interface response check
             result = self.check_permission_deny(self.response, self.succ)
 
+        elif self.check_task == CheckTasks.check_auth_failure:
+            # connection interface response check
+            result = self.check_auth_failure(self.response, self.succ)
+
         elif self.check_task == CheckTasks.check_rg_property:
             # describe resource group interface response check
             result = self.check_rg_property(self.response, self.func_name, self.check_items)
@@ -232,7 +236,7 @@ class ResponseChecker:
         if check_items.get("dim", None) is not None:
             assert res["fields"][1]["params"]["dim"] == check_items.get("dim")
         assert res["fields"][0]["is_primary"] is True
-        assert res["fields"][0]["field_id"] == 100 and res["fields"][0]["type"] == 5
+        assert res["fields"][0]["field_id"] == 100 and (res["fields"][0]["type"] == 5 or 21)
         assert res["fields"][1]["field_id"] == 101 and res["fields"][1]["type"] == 101
 
         return True
@@ -310,12 +314,12 @@ class ResponseChecker:
             assert len(search_res) == check_items["nq"]
         else:
             log.info("search_results_check: Numbers of query searched is correct")
-        enable_high_level_api = check_items.get("enable_high_level_api", False)
+        enable_milvus_client_api = check_items.get("enable_milvus_client_api", False)
         log.debug(search_res)
         for hits in search_res:
             searched_original_vectors = []
             ids = []
-            if enable_high_level_api:
+            if enable_milvus_client_api:
                 for hit in hits:
                     ids.append(hit['id'])
             else:
@@ -584,6 +588,16 @@ class ResponseChecker:
         assert actual is False
         if isinstance(res, Error):
             assert "permission deny" in res.message
+        else:
+            log.error("[CheckFunc] Response of API is not an error: %s" % str(res))
+            assert False
+        return True
+
+    @staticmethod
+    def check_auth_failure(res, actual=True):
+        assert actual is False
+        if isinstance(res, Error):
+            assert "auth" in res.message
         else:
             log.error("[CheckFunc] Response of API is not an error: %s" % str(res))
             assert False

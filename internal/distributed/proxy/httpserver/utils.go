@@ -162,8 +162,8 @@ func printIndexes(indexes []*milvuspb.IndexDescription) []gin.H {
 	var res []gin.H
 	for _, index := range indexes {
 		res = append(res, gin.H{
-			HTTPReturnIndexName:        index.IndexName,
-			HTTPReturnIndexField:       index.FieldName,
+			HTTPIndexName:              index.IndexName,
+			HTTPIndexField:             index.FieldName,
 			HTTPReturnIndexMetricsType: getMetricType(index.Params),
 		})
 	}
@@ -976,7 +976,7 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 			}
 		}
 		if scores != nil && int64(len(scores)) > i {
-			row[HTTPReturnDistance] = scores[i]
+			row[HTTPReturnDistance] = scores[i] // only 8 decimal places
 		}
 		queryResp = append(queryResp, row)
 	}

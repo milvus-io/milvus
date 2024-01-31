@@ -59,7 +59,10 @@ func newLoadIndexInfo(ctx context.Context) (*LoadIndexInfo, error) {
 
 // deleteLoadIndexInfo would delete C.CLoadIndexInfo
 func deleteLoadIndexInfo(info *LoadIndexInfo) {
-	C.DeleteLoadIndexInfo(info.cLoadIndexInfo)
+	GetDynamicPool().Submit(func() (any, error) {
+		C.DeleteLoadIndexInfo(info.cLoadIndexInfo)
+		return nil, nil
+	}).Await()
 }
 
 func (li *LoadIndexInfo) appendLoadIndexInfo(ctx context.Context, indexInfo *querypb.FieldIndexInfo, collectionID int64, partitionID int64, segmentID int64, fieldType schemapb.DataType) error {
@@ -113,55 +116,79 @@ func (li *LoadIndexInfo) appendLoadIndexInfo(ctx context.Context, indexInfo *que
 
 // appendIndexParam append indexParam to index
 func (li *LoadIndexInfo) appendIndexParam(ctx context.Context, indexKey string, indexValue string) error {
-	cIndexKey := C.CString(indexKey)
-	defer C.free(unsafe.Pointer(cIndexKey))
-	cIndexValue := C.CString(indexValue)
-	defer C.free(unsafe.Pointer(cIndexValue))
-	status := C.AppendIndexParam(li.cLoadIndexInfo, cIndexKey, cIndexValue)
+	var status C.CStatus
+	GetDynamicPool().Submit(func() (any, error) {
+		cIndexKey := C.CString(indexKey)
+		defer C.free(unsafe.Pointer(cIndexKey))
+		cIndexValue := C.CString(indexValue)
+		defer C.free(unsafe.Pointer(cIndexValue))
+		status = C.AppendIndexParam(li.cLoadIndexInfo, cIndexKey, cIndexValue)
+		return nil, nil
+	}).Await()
 	return HandleCStatus(ctx, &status, "AppendIndexParam failed")
 }
 
 func (li *LoadIndexInfo) appendIndexInfo(ctx context.Context, indexID int64, buildID int64, indexVersion int64) error {
-	cIndexID := C.int64_t(indexID)
-	cBuildID := C.int64_t(buildID)
-	cIndexVersion := C.int64_t(indexVersion)
+	var status C.CStatus
+	GetDynamicPool().Submit(func() (any, error) {
+		cIndexID := C.int64_t(indexID)
+		cBuildID := C.int64_t(buildID)
+		cIndexVersion := C.int64_t(indexVersion)
 
-	status := C.AppendIndexInfo(li.cLoadIndexInfo, cIndexID, cBuildID, cIndexVersion)
+		status = C.AppendIndexInfo(li.cLoadIndexInfo, cIndexID, cBuildID, cIndexVersion)
+		return nil, nil
+	}).Await()
 	return HandleCStatus(ctx, &status, "AppendIndexInfo failed")
 }
 
 func (li *LoadIndexInfo) cleanLocalData(ctx context.Context) error {
-	status := C.CleanLoadedIndex(li.cLoadIndexInfo)
+	var status C.CStatus
+	GetDynamicPool().Submit(func() (any, error) {
+		status = C.CleanLoadedIndex(li.cLoadIndexInfo)
+		return nil, nil
+	}).Await()
 	return HandleCStatus(ctx, &status, "failed to clean cached data on disk")
 }
 
 func (li *LoadIndexInfo) appendIndexFile(ctx context.Context, filePath string) error {
-	cIndexFilePath := C.CString(filePath)
-	defer C.free(unsafe.Pointer(cIndexFilePath))
+	var status C.CStatus
+	GetDynamicPool().Submit(func() (any, error) {
+		cIndexFilePath := C.CString(filePath)
+		defer C.free(unsafe.Pointer(cIndexFilePath))
 
-	status := C.AppendIndexFilePath(li.cLoadIndexInfo, cIndexFilePath)
+		status = C.AppendIndexFilePath(li.cLoadIndexInfo, cIndexFilePath)
+		return nil, nil
+	}).Await()
 	return HandleCStatus(ctx, &status, "AppendIndexIFile failed")
 }
 
 // appendFieldInfo appends fieldID & fieldType to index
 func (li *LoadIndexInfo) appendFieldInfo(ctx context.Context, collectionID int64, partitionID int64, segmentID int64, fieldID int64, fieldType schemapb.DataType, enableMmap bool, mmapDirPath string) error {
-	cColID := C.int64_t(collectionID)
-	cParID := C.int64_t(partitionID)
-	cSegID := C.int64_t(segmentID)
-	cFieldID := C.int64_t(fieldID)
-	cintDType := uint32(fieldType)
-	cEnableMmap := C.bool(enableMmap)
-	cMmapDirPath := C.CString(mmapDirPath)
-	defer C.free(unsafe.Pointer(cMmapDirPath))
-	status := C.AppendFieldInfo(li.cLoadIndexInfo, cColID, cParID, cSegID, cFieldID, cintDType, cEnableMmap, cMmapDirPath)
+	var status C.CStatus
+	GetDynamicPool().Submit(func() (any, error) {
+		cColID := C.int64_t(collectionID)
+		cParID := C.int64_t(partitionID)
+		cSegID := C.int64_t(segmentID)
+		cFieldID := C.int64_t(fieldID)
+		cintDType := uint32(fieldType)
+		cEnableMmap := C.bool(enableMmap)
+		cMmapDirPath := C.CString(mmapDirPath)
+		defer C.free(unsafe.Pointer(cMmapDirPath))
+		status = C.AppendFieldInfo(li.cLoadIndexInfo, cColID, cParID, cSegID, cFieldID, cintDType, cEnableMmap, cMmapDirPath)
+		return nil, nil
+	}).Await()
+
 	return HandleCStatus(ctx, &status, "AppendFieldInfo failed")
 }
 
 func (li *LoadIndexInfo) appendStorageInfo(uri string, version int64) {
-	cURI := C.CString(uri)
-	defer C.free(unsafe.Pointer(cURI))
-	cVersion := C.int64_t(version)
-	C.AppendStorageInfo(li.cLoadIndexInfo, cURI, cVersion)
+	GetDynamicPool().Submit(func() (any, error) {
+		cURI := C.CString(uri)
+		defer C.free(unsafe.Pointer(cURI))
+		cVersion := C.int64_t(version)
+		C.AppendStorageInfo(li.cLoadIndexInfo, cURI, cVersion)
+		return nil, nil
+	}).Await()
 }
 
 // appendIndexData appends index path to cLoadIndexInfo and create index
@@ -174,27 +201,37 @@ func (li *LoadIndexInfo) appendIndexData(ctx context.Context, indexKeys []string
 	}
 
 	var status C.CStatus
-	if paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool() {
-		status = C.AppendIndexV3(li.cLoadIndexInfo)
-	} else {
-		span := trace.SpanFromContext(ctx)
+	GetLoadPool().Submit(func() (any, error) {
+		if paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool() {
+			status = C.AppendIndexV3(li.cLoadIndexInfo)
+		} else {
+			span := trace.SpanFromContext(ctx)
 
-		traceID := span.SpanContext().TraceID()
-		spanID := span.SpanContext().SpanID()
-		traceCtx := C.CTraceContext{
-			traceID: (*C.uint8_t)(unsafe.Pointer(&traceID[0])),
-			spanID:  (*C.uint8_t)(unsafe.Pointer(&spanID[0])),
-			flag:    C.uchar(span.SpanContext().TraceFlags()),
+			traceID := span.SpanContext().TraceID()
+			spanID := span.SpanContext().SpanID()
+			traceCtx := C.CTraceContext{
+				traceID: (*C.uint8_t)(unsafe.Pointer(&traceID[0])),
+				spanID:  (*C.uint8_t)(unsafe.Pointer(&spanID[0])),
+				flag:    C.uchar(span.SpanContext().TraceFlags()),
+			}
+
+			status = C.AppendIndexV2(traceCtx, li.cLoadIndexInfo)
 		}
+		return nil, nil
+	}).Await()
 
-		status = C.AppendIndexV2(traceCtx, li.cLoadIndexInfo)
-	}
 	return HandleCStatus(ctx, &status, "AppendIndex failed")
 }
 
 func (li *LoadIndexInfo) appendIndexEngineVersion(ctx context.Context, indexEngineVersion int32) error {
 	cIndexEngineVersion := C.int32_t(indexEngineVersion)
 
-	status := C.AppendIndexEngineVersionToLoadInfo(li.cLoadIndexInfo, cIndexEngineVersion)
+	var status C.CStatus
+
+	GetDynamicPool().Submit(func() (any, error) {
+		status = C.AppendIndexEngineVersionToLoadInfo(li.cLoadIndexInfo, cIndexEngineVersion)
+		return nil, nil
+	}).Await()
+
 	return HandleCStatus(ctx, &status, "AppendIndexEngineVersion failed")
 }

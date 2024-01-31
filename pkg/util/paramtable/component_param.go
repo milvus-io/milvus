@@ -191,6 +191,7 @@ type commonConfig struct {
 	MiddlePriorityThreadCoreCoefficient ParamItem `refreshable:"false"`
 	LowPriorityThreadCoreCoefficient    ParamItem `refreshable:"false"`
 	EnableNodeFilteringOnPartitionKey   ParamItem `refreshable:"false"`
+	BuildIndexThreadPoolRatio           ParamItem `refreshable:"false"`
 	MaxDegree                           ParamItem `refreshable:"true"`
 	SearchListSize                      ParamItem `refreshable:"true"`
 	PQCodeBudgetGBRatio                 ParamItem `refreshable:"true"`
@@ -543,6 +544,14 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Export: true,
 	}
 	p.LowPriorityThreadCoreCoefficient.Init(base.mgr)
+
+	p.BuildIndexThreadPoolRatio = ParamItem{
+		Key:          "common.buildIndexThreadPoolRatio",
+		Version:      "2.4.0",
+		DefaultValue: strconv.FormatFloat(DefaultKnowhereThreadPoolNumRatioInBuildOfStandalone, 'f', 2, 64),
+		Export:       true,
+	}
+	p.BuildIndexThreadPoolRatio.Init(base.mgr)
 
 	p.AuthorizationEnabled = ParamItem{
 		Key:          "common.security.authorizationEnabled",
@@ -1355,6 +1364,7 @@ type queryCoordConfig struct {
 	OverloadedMemoryThresholdPercentage ParamItem `refreshable:"true"`
 	BalanceIntervalSeconds              ParamItem `refreshable:"true"`
 	MemoryUsageMaxDifferencePercentage  ParamItem `refreshable:"true"`
+	GrowingRowCountWeight               ParamItem `refreshable:"true"`
 
 	SegmentCheckInterval       ParamItem `refreshable:"true"`
 	ChannelCheckInterval       ParamItem `refreshable:"true"`
@@ -1511,6 +1521,16 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.BalanceIntervalSeconds.Init(base.mgr)
+
+	p.GrowingRowCountWeight = ParamItem{
+		Key:          "queryCoord.growingRowCountWeight",
+		Version:      "2.3.5",
+		DefaultValue: "4.0",
+		PanicIfEmpty: true,
+		Doc:          "the memory weight of growing segment row count",
+		Export:       true,
+	}
+	p.GrowingRowCountWeight.Init(base.mgr)
 
 	p.MemoryUsageMaxDifferencePercentage = ParamItem{
 		Key:          "queryCoord.memoryUsageMaxDifferencePercentage",
@@ -2387,7 +2407,7 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	p.SegmentMaxSize = ParamItem{
 		Key:          "dataCoord.segment.maxSize",
 		Version:      "2.0.0",
-		DefaultValue: "512",
+		DefaultValue: "1024",
 		Doc:          "Maximum size of a segment in MB",
 		Export:       true,
 	}
@@ -2396,7 +2416,7 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	p.DiskSegmentMaxSize = ParamItem{
 		Key:          "dataCoord.segment.diskSegmentMaxSize",
 		Version:      "2.0.0",
-		DefaultValue: "512",
+		DefaultValue: "2048",
 		Doc:          "Maximun size of a segment in MB for collection which has Disk index",
 		Export:       true,
 	}
@@ -2405,7 +2425,7 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	p.SegmentSealProportion = ParamItem{
 		Key:          "dataCoord.segment.sealProportion",
 		Version:      "2.0.0",
-		DefaultValue: "0.23",
+		DefaultValue: "0.12",
 		Export:       true,
 	}
 	p.SegmentSealProportion.Init(base.mgr)
@@ -2888,7 +2908,7 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	p.MaxParallelSyncMgrTasks = ParamItem{
 		Key:          "dataNode.dataSync.maxParallelSyncMgrTasks",
 		Version:      "2.3.4",
-		DefaultValue: "64",
+		DefaultValue: "256",
 		Doc:          "The max concurrent sync task number of datanode sync mgr globally",
 		Export:       true,
 	}

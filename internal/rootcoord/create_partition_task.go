@@ -81,6 +81,7 @@ func (t *createPartitionTask) Execute(ctx context.Context) error {
 		dbName:          t.Req.GetDbName(),
 		collectionNames: []string{t.collMeta.Name},
 		collectionID:    t.collMeta.CollectionID,
+		partitionName:   t.Req.GetPartitionName(),
 		ts:              t.GetTs(),
 	}, &nullStep{})
 

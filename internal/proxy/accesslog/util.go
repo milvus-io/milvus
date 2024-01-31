@@ -72,7 +72,7 @@ func getCurUserFromContext(ctx context.Context) (string, error) {
 	}
 	authorization, ok := md[strings.ToLower(util.HeaderAuthorize)]
 	if !ok || len(authorization) < 1 {
-		return "", fmt.Errorf("fail to get authorization from the md, authorize:[%s]", util.HeaderAuthorize)
+		return "", fmt.Errorf("fail to get authorization from the md, %s:[token]", strings.ToLower(util.HeaderAuthorize))
 	}
 	token := authorization[0]
 	rawToken, err := crypto.Base64Decode(token)

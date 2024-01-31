@@ -25,6 +25,13 @@ CreateSearchPlanByExpr(CCollection c_col,
     try {
         auto res = milvus::query::CreateSearchPlanByExpr(
             *col->get_schema(), serialized_expr_plan, size);
+        auto col_index_meta = col->get_index_meta();
+        auto field_id = milvus::query::GetFieldID(res.get());
+        AssertInfo(col_index_meta != nullptr, "index meta not exist");
+        auto field_index_meta =
+            col_index_meta->GetFieldIndexMeta(milvus::FieldId(field_id));
+        res->plan_node_->search_info_.metric_type_ =
+            field_index_meta.GeMetricType();
 
         auto status = CStatus();
         status.error_code = milvus::Success;

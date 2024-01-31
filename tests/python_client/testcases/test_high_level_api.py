@@ -71,7 +71,7 @@ class TestHighLevelApi(TestcaseBase):
         method: create collection with invalid primary field
         expected: Raise exception
         """
-        client = self._connect(enable_high_level_api=True)
+        client = self._connect(enable_milvus_client_api=True)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         error = {ct.err_code: 1, ct.err_msg: f"Param id_type must be int or string"}
@@ -85,7 +85,7 @@ class TestHighLevelApi(TestcaseBase):
         method: create collection with auto id on string primary key
         expected: Raise exception
         """
-        client = self._connect(enable_high_level_api=True)
+        client = self._connect(enable_milvus_client_api=True)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         error = {ct.err_code: 65535, ct.err_msg: f"type param(max_length) should be specified for varChar "
@@ -101,7 +101,7 @@ class TestHighLevelApi(TestcaseBase):
         expected: 1. Successfully to create collection with same params
                   2. Report errors for creating collection with same name and different params
         """
-        client = self._connect(enable_high_level_api=True)
+        client = self._connect(enable_milvus_client_api=True)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
@@ -121,7 +121,7 @@ class TestHighLevelApi(TestcaseBase):
         method: create collection with auto id on string primary key
         expected: Raise exception
         """
-        client = self._connect(enable_high_level_api=True)
+        client = self._connect(enable_milvus_client_api=True)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         error = {ct.err_code: 65535,
@@ -136,7 +136,7 @@ class TestHighLevelApi(TestcaseBase):
         method: create connection, collection, insert and search with not consistent metric type
         expected: Raise exception
         """
-        client = self._connect(enable_high_level_api=True)
+        client = self._connect(enable_milvus_client_api=True)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
@@ -164,7 +164,7 @@ class TestHighLevelApi(TestcaseBase):
         method: create connection, collection, insert and search
         expected: search/query successfully
         """
-        client = self._connect(enable_high_level_api=True)
+        client = self._connect(enable_milvus_client_api=True)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
@@ -186,7 +186,7 @@ class TestHighLevelApi(TestcaseBase):
         client_w.search(client, collection_name, vectors_to_search,
 
                         check_task=CheckTasks.check_search_results,
-                        check_items={"enable_high_level_api": True,
+                        check_items={"enable_milvus_client_api": True,
                                      "nq": len(vectors_to_search),
                                      "ids": insert_ids,
                                      "limit": default_limit})
@@ -205,7 +205,7 @@ class TestHighLevelApi(TestcaseBase):
         method: create connection, collection, insert and search
         expected: search/query successfully
         """
-        client = self._connect(enable_high_level_api=True)
+        client = self._connect(enable_milvus_client_api=True)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
@@ -227,7 +227,7 @@ class TestHighLevelApi(TestcaseBase):
         insert_ids = [i for i in range(default_nb)]
         client_w.search(client, collection_name, vectors_to_search,
                         check_task=CheckTasks.check_search_results,
-                        check_items={"enable_high_level_api": True,
+                        check_items={"enable_milvus_client_api": True,
                                      "nq": len(vectors_to_search),
                                      "ids": insert_ids,
                                      "limit": default_limit})
@@ -240,7 +240,7 @@ class TestHighLevelApi(TestcaseBase):
         method: create connection, collection, insert and search
         expected: search/query successfully
         """
-        client = self._connect(enable_high_level_api=True)
+        client = self._connect(enable_milvus_client_api=True)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, id_type="string",
@@ -260,7 +260,7 @@ class TestHighLevelApi(TestcaseBase):
         vectors_to_search = rng.random((1, default_dim))
         client_w.search(client, collection_name, vectors_to_search,
                         check_task=CheckTasks.check_search_results,
-                        check_items={"enable_high_level_api": True,
+                        check_items={"enable_milvus_client_api": True,
                                      "nq": len(vectors_to_search),
                                      "limit": default_limit})
         # 4. query
@@ -278,7 +278,7 @@ class TestHighLevelApi(TestcaseBase):
         method: create connection, collection, insert and search
         expected: search successfully with limit(topK)
         """
-        client = self._connect(enable_high_level_api=True)
+        client = self._connect(enable_milvus_client_api=True)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, metric_type=metric_type,
@@ -299,7 +299,7 @@ class TestHighLevelApi(TestcaseBase):
                         search_params=search_params,
                         output_fields=[default_primary_key_field_name],
                         check_task=CheckTasks.check_search_results,
-                        check_items={"enable_high_level_api": True,
+                        check_items={"enable_milvus_client_api": True,
                                      "nq": len(vectors_to_search),
                                      "limit": default_limit})
         client_w.drop_collection(client, collection_name)
@@ -311,7 +311,7 @@ class TestHighLevelApi(TestcaseBase):
         method: create connection, collection, insert delete, and search
         expected: search/query successfully without deleted data
         """
-        client = self._connect(enable_high_level_api=True)
+        client = self._connect(enable_milvus_client_api=True)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
@@ -323,10 +323,10 @@ class TestHighLevelApi(TestcaseBase):
         client_w.insert(client, collection_name, rows)[0]
         pks = [i for i in range(default_nb)]
         # 3. get first primary key
-        first_pk_data = client_w.get(client, collection_name, pks[0:1])
+        first_pk_data = client_w.get(client, collection_name, ids=pks[0:1])
         # 4. delete
         delete_num = 3
-        client_w.delete(client, collection_name, pks[0:delete_num])
+        client_w.delete(client, collection_name, ids=pks[0:delete_num])
         # 5. search
         vectors_to_search = rng.random((1, default_dim))
         insert_ids = [i for i in range(default_nb)]
@@ -336,7 +336,7 @@ class TestHighLevelApi(TestcaseBase):
         limit = default_nb - delete_num
         client_w.search(client, collection_name, vectors_to_search, limit=default_nb,
                         check_task=CheckTasks.check_search_results,
-                        check_items={"enable_high_level_api": True,
+                        check_items={"enable_milvus_client_api": True,
                                      "nq": len(vectors_to_search),
                                      "ids": insert_ids,
                                      "limit": limit})

@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -79,8 +80,7 @@ type CompactionMeta interface {
 	UpdateSegmentsInfo(operators ...UpdateOperator) error
 	SetSegmentCompacting(segmentID int64, compacting bool)
 
-	PrepareCompleteCompactionMutation(plan *datapb.CompactionPlan, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *SegmentInfo, *segMetricMutation, error)
-	alterMetaStoreAfterCompaction(segmentCompactTo *SegmentInfo, segmentsCompactFrom []*SegmentInfo) error
+	CompleteCompactionMutation(plan *datapb.CompactionPlan, result *datapb.CompactionPlanResult) (*SegmentInfo, *segMetricMutation, error)
 }
 
 var _ CompactionMeta = (*meta)(nil)
@@ -316,8 +316,10 @@ func (c *compactionPlanHandler) RefreshPlan(task *compactionTask) {
 
 		sealedSegBinlogs := lo.Map(sealedSegments, func(info *SegmentInfo, _ int) *datapb.CompactionSegmentBinlogs {
 			return &datapb.CompactionSegmentBinlogs{
-				SegmentID: info.GetID(),
-				Level:     datapb.SegmentLevel_L1,
+				SegmentID:    info.GetID(),
+				Level:        datapb.SegmentLevel_L1,
+				CollectionID: info.GetCollectionID(),
+				PartitionID:  info.GetPartitionID(),
 			}
 		})
 
@@ -343,10 +345,11 @@ func (c *compactionPlanHandler) notifyTasks(tasks []*compactionTask) {
 		innerTask := task
 		c.RefreshPlan(innerTask)
 		getOrCreateIOPool().Submit(func() (any, error) {
+			ctx := tracer.SetupSpan(context.Background(), innerTask.span)
 			plan := innerTask.plan
-			log := log.With(zap.Int64("planID", plan.GetPlanID()), zap.Int64("nodeID", innerTask.dataNodeID))
+			log := log.Ctx(ctx).With(zap.Int64("planID", plan.GetPlanID()), zap.Int64("nodeID", innerTask.dataNodeID))
 			log.Info("Notify compaction task to DataNode")
-			ts, err := c.allocator.allocTimestamp(context.TODO())
+			ts, err := c.allocator.allocTimestamp(ctx)
 			if err != nil {
 				log.Warn("Alloc start time for CompactionPlan failed", zap.Error(err))
 				// update plan ts to TIMEOUT ts
@@ -354,8 +357,6 @@ func (c *compactionPlanHandler) notifyTasks(tasks []*compactionTask) {
 				return nil, err
 			}
 			c.updateTask(plan.PlanID, setStartTime(ts))
-
-			ctx := trace.ContextWithSpan(context.Background(), task.span)
 
 			err = c.sessions.Compaction(ctx, innerTask.dataNodeID, plan)
 
@@ -447,19 +448,12 @@ func (c *compactionPlanHandler) handleMergeCompactionResult(plan *datapb.Compact
 		log.Info("meta has already been changed, skip meta change and retry sync segments")
 	} else {
 		// Also prepare metric updates.
-		modSegments, newSegment, metricMutation, err := c.meta.PrepareCompleteCompactionMutation(plan, result)
+		newSegment, metricMutation, err := c.meta.CompleteCompactionMutation(plan, result)
 		if err != nil {
 			return err
 		}
-
-		if err := c.meta.alterMetaStoreAfterCompaction(newSegment, modSegments); err != nil {
-			log.Warn("fail to alter meta store", zap.Error(err))
-			return err
-		}
-
 		// Apply metrics after successful meta update.
 		metricMutation.commit()
-
 		newSegmentInfo = newSegment
 	}
 
