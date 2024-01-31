@@ -365,7 +365,7 @@ func (m *importManager) flipTaskFlushedState(ctx context.Context, importTask *mi
 	return nil
 }
 
-// checkFlushDone checks if given segments are all sealed.
+// checkFlushDone checks if flush is done on given segments.
 func (m *importManager) checkFlushDone(ctx context.Context, segIDs []UniqueID) (bool, error) {
 	resp, err := m.callGetSegmentStates(ctx, &datapb.GetSegmentStatesRequest{
 		SegmentIDs: segIDs,
