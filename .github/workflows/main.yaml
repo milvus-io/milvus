@@ -41,8 +41,8 @@ concurrency:
 
 jobs:
   Build:
-    name: Build and test AMD64 Ubuntu ${{ matrix.ubuntu }}
-    runs-on: ubuntu-${{ matrix.ubuntu }}
+    name: Build and test AMD64 Ubuntu 20.04
+    runs-on: ubuntu-latest
     timeout-minutes: 180
     strategy:
       fail-fast: false
@@ -60,7 +60,7 @@ jobs:
           fetch-depth: 0
       - name: 'Check Changed files'
         id: changed-files-cpp
-        uses: tj-actions/changed-files@v35
+        uses: tj-actions/changed-files@v41
         with:
           since_last_remote_commit: 'true'
           files: |
@@ -94,7 +94,7 @@ jobs:
   UT-Cpp:
     name: UT for Cpp
     needs: Build
-    runs-on: ubuntu-${{ matrix.ubuntu }}
+    runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -139,7 +139,7 @@ jobs:
   UT-Go:
     name: UT for Go
     needs: Build
-    runs-on: ubuntu-${{ matrix.ubuntu }}
+    runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -184,7 +184,7 @@ jobs:
   integration-test:
     name: Integration Test
     needs: Build
-    runs-on: ubuntu-${{ matrix.ubuntu }}
+    runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -260,5 +260,5 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./go_coverage.txt,./lcov_output.info,./it_coverage.txt
-          name: ubuntu-${{ matrix.ubuntu }}-unittests
+          name: ubuntu-20.04-unittests
           fail_ci_if_error: true
