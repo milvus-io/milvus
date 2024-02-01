@@ -41,7 +41,7 @@ concurrency:
 
 jobs:
   Build:
-    name: Build and test AMD64 Ubuntu ${{ matrix.ubuntu }}
+    name: Build and test AMD64 Ubuntu 20.04
     runs-on: ubuntu-latest
     timeout-minutes: 180
     strategy:
@@ -260,5 +260,5 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./go_coverage.txt,./lcov_output.info,./it_coverage.txt
-          name: ubuntu-${{ matrix.ubuntu }}-unittests
+          name: ubuntu-20.04-unittests
           fail_ci_if_error: true
