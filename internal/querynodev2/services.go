@@ -821,6 +821,114 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 	return result, nil
 }
 
+// HybridSearch performs replica search tasks.
+func (node *QueryNode) HybridSearch(ctx context.Context, req *querypb.HybridSearchRequest) (*querypb.HybridSearchResult, error) {
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", req.GetReq().GetCollectionID()),
+		zap.Strings("channels", req.GetDmlChannels()))
+
+	log.Debug("Received HybridSearchRequest",
+		zap.Uint64("guaranteeTimestamp", req.GetReq().GetGuaranteeTimestamp()),
+		zap.Uint64("mvccTimestamp", req.GetReq().GetMvccTimestamp()))
+
+	tr := timerecord.NewTimeRecorderWithTrace(ctx, "HybridSearchRequest")
+
+	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
+		return &querypb.HybridSearchResult{
+			Base: &commonpb.MsgBase{
+				SourceID: paramtable.GetNodeID(),
+			},
+			Status: merr.Status(err),
+		}, nil
+	}
+	defer node.lifetime.Done()
+
+	err := merr.CheckTargetID(req.GetReq().GetBase())
+	if err != nil {
+		log.Warn("target ID check failed", zap.Error(err))
+		return &querypb.HybridSearchResult{
+			Base: &commonpb.MsgBase{
+				SourceID: paramtable.GetNodeID(),
+			},
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	resp := &querypb.HybridSearchResult{
+		Base: &commonpb.MsgBase{
+			SourceID: paramtable.GetNodeID(),
+		},
+		Status: merr.Success(),
+	}
+	collection := node.manager.Collection.Get(req.GetReq().GetCollectionID())
+	if collection == nil {
+		resp.Status = merr.Status(merr.WrapErrCollectionNotFound(req.GetReq().GetCollectionID()))
+		return resp, nil
+	}
+
+	MultipleResults := make([]*querypb.HybridSearchResult, len(req.GetDmlChannels()))
+	runningGp, runningCtx := errgroup.WithContext(ctx)
+
+	for i, ch := range req.GetDmlChannels() {
+		ch := ch
+		req := &querypb.HybridSearchRequest{
+			Req:             req.Req,
+			DmlChannels:     []string{ch},
+			TotalChannelNum: 1,
+		}
+
+		i := i
+		runningGp.Go(func() error {
+			ret, err := node.hybridSearchChannel(runningCtx, req, ch)
+			if err != nil {
+				return err
+			}
+			if err := merr.Error(ret.GetStatus()); err != nil {
+				return err
+			}
+			MultipleResults[i] = ret
+			return nil
+		})
+	}
+	if err := runningGp.Wait(); err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+
+	tr.RecordSpan()
+	channelsMvcc := make(map[string]uint64)
+	for i, searchReq := range req.GetReq().GetReqs() {
+		toReduceResults := make([]*internalpb.SearchResults, len(MultipleResults))
+		for index, hs := range MultipleResults {
+			toReduceResults[index] = hs.Results[i]
+		}
+		result, err := segments.ReduceSearchResults(ctx, toReduceResults, searchReq.GetNq(), searchReq.GetTopk(), searchReq.GetMetricType())
+		if err != nil {
+			log.Warn("failed to reduce search results", zap.Error(err))
+			resp.Status = merr.Status(err)
+			return resp, nil
+		}
+		for ch, ts := range result.GetChannelsMvcc() {
+			channelsMvcc[ch] = ts
+		}
+		resp.Results = append(resp.Results, result)
+	}
+	resp.ChannelsMvcc = channelsMvcc
+
+	reduceLatency := tr.RecordSpan()
+	metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.HybridSearchLabel, metrics.ReduceShards).
+		Observe(float64(reduceLatency.Milliseconds()))
+
+	collector.Rate.Add(metricsinfo.SearchThroughput, float64(proto.Size(req)))
+	metrics.QueryNodeExecuteCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.HybridSearchLabel).
+		Add(float64(proto.Size(req)))
+
+	if resp.GetCostAggregation() != nil {
+		resp.GetCostAggregation().ResponseTime = tr.ElapseSpan().Milliseconds()
+	}
+	return resp, nil
+}
+
 // only used for delegator query segments from worker
 func (node *QueryNode) QuerySegments(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {
 	resp := &internalpb.RetrieveResults{
