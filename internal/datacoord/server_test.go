@@ -365,6 +365,39 @@ func TestFlush(t *testing.T) {
 	})
 }
 
+func TestFlushForImport(t *testing.T) {
+	svr := newTestServer(t, nil)
+	defer closeTestServer(t, svr)
+
+	schema := newTestSchema()
+	svr.meta.AddCollection(&collectionInfo{ID: 0, Schema: schema, Partitions: []int64{}})
+
+	// normal
+	allocation, err := svr.segmentManager.allocSegmentForImport(
+		context.TODO(), 0, 1, "ch-1", 1, 1)
+	assert.NoError(t, err)
+	segmentID := allocation.SegmentID
+	req := &datapb.FlushRequest{
+		CollectionID: 0,
+		SegmentIDs:   []UniqueID{segmentID},
+	}
+	resp, err := svr.flushForImport(context.TODO(), req)
+	assert.NoError(t, err)
+	assert.EqualValues(t, int32(0), resp.GetStatus().GetCode())
+
+	// failed
+	allocation, err = svr.segmentManager.allocSegmentForImport(
+		context.TODO(), 0, 1, "ch-1", 1, 1)
+	assert.NoError(t, err)
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(errors.New("mock err"))
+	svr.meta.catalog = catalog
+	req.SegmentIDs = []UniqueID{allocation.SegmentID}
+	resp, err = svr.flushForImport(context.TODO(), req)
+	assert.NoError(t, err)
+	assert.NotEqual(t, int32(0), resp.GetStatus().GetCode())
+}
+
 // func TestGetComponentStates(t *testing.T) {
 // svr := newTestServer(t)
 // defer closeTestServer(t, svr)
