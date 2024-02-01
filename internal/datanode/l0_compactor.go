@@ -267,6 +267,14 @@ func (t *levelZeroCompactionTask) splitDelta(
 	targetSegBuffer map[int64]*storage.DeleteData,
 	targetSegIDs []int64,
 ) error {
+	// segments shall be safe to read outside
+	segments := t.metacache.GetSegmentsBy(metacache.WithSegmentIDs(targetSegIDs...))
+	split := func(pk storage.PrimaryKey) []int64 {
+		return lo.FilterMap(segments, func(segment *metacache.SegmentInfo, _ int) (int64, bool) {
+			return segment.SegmentID(), segment.GetBloomFilterSet().PkExists(pk)
+		})
+	}
+
 	// spilt all delete data to segments
 	for _, deltaIter := range allIters {
 		for deltaIter.HasNext() {
@@ -275,10 +283,7 @@ func (t *levelZeroCompactionTask) splitDelta(
 				return err
 			}
 
-			predicted, found := t.metacache.PredictSegments(labeled.GetPk(), metacache.WithSegmentIDs(targetSegIDs...))
-			if !found {
-				continue
-			}
+			predicted := split(labeled.GetPk())
 
 			for _, gotSeg := range predicted {
 				delBuffer, ok := targetSegBuffer[gotSeg]

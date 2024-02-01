@@ -90,16 +90,13 @@ jobs:
       - name: Build
         run: |
           ./build/builder.sh /bin/bash -c "make USE_ASAN=${{env.useasan}} build-cpp-with-coverage"
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
+      - run: |
+          zip -r code.zip . -x "./.docker/*" -x "./cmake_build/thirdparty/**" -x ".git/**"
+      - name: Archive code
+        uses: actions/upload-artifact@v3
         with:
           name: code
-          compression-level: 0 # no compression
-          path: |
-            **/*
-            !./.docker/**
-            !./cmake_build/thirdparty/**
-            !.git
+          path: code.zip
   UT-Cpp:
     name: UT for Cpp
     needs: Build
@@ -110,10 +107,13 @@ jobs:
     env:
       UBUNTU: 20.04
     steps:
-      - name: Download Artifact
-        uses: actions/download-artifact@v4.1.0
+      - name: Download code
+        uses: actions/download-artifact@v3.0.1
         with:
           name: code
+      - run: |
+          unzip code.zip
+          rm code.zip
       - name: Download Caches
         uses: ./.github/actions/cache
         with:
@@ -148,10 +148,13 @@ jobs:
     env:
       UBUNTU: 20.04
     steps:
-      - name: Download Artifact
-        uses: actions/download-artifact@v4.1.0
+      - name: Download code
+        uses: actions/download-artifact@v3.0.1
         with:
           name: code
+      - run: |
+          unzip code.zip
+          rm code.zip
       - name: Download Caches
         uses: ./.github/actions/cache
         with:
@@ -185,10 +188,13 @@ jobs:
     env:
       UBUNTU: 20.04
     steps:
-      - name: Download Artifact
-        uses: actions/download-artifact@v4.1.0
+      - name: Download code
+        uses: actions/download-artifact@v3.0.1
         with:
           name: code
+      - run: |
+          unzip code.zip
+          rm code.zip
       - name: Download Caches
         uses: ./.github/actions/cache
         with:
