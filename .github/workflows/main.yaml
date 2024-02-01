@@ -42,7 +42,7 @@ concurrency:
 jobs:
   Build:
     name: Build and test AMD64 Ubuntu ${{ matrix.ubuntu }}
-    runs-on: ubuntu-${{ matrix.ubuntu }}
+    runs-on: ubuntu-latest
     timeout-minutes: 180
     strategy:
       fail-fast: false
@@ -94,7 +94,7 @@ jobs:
   UT-Cpp:
     name: UT for Cpp
     needs: Build
-    runs-on: ubuntu-${{ matrix.ubuntu }}
+    runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -139,7 +139,7 @@ jobs:
   UT-Go:
     name: UT for Go
     needs: Build
-    runs-on: ubuntu-${{ matrix.ubuntu }}
+    runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -184,7 +184,7 @@ jobs:
   integration-test:
     name: Integration Test
     needs: Build
-    runs-on: ubuntu-${{ matrix.ubuntu }}
+    runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
       fail-fast: false
