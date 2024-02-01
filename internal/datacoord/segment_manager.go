@@ -80,7 +80,7 @@ type Manager interface {
 	FlushImportSegments(ctx context.Context, collectionID UniqueID, segmentIDs []UniqueID) error
 	// SealAllSegments seals all segments of collection with collectionID and return sealed segments.
 	// If segIDs is not empty, also seals segments in segIDs.
-	SealAllSegments(ctx context.Context, collectionID UniqueID, segIDs []UniqueID, isImporting bool) ([]UniqueID, error)
+	SealAllSegments(ctx context.Context, collectionID UniqueID, segIDs []UniqueID) ([]UniqueID, error)
 	// GetFlushableSegments returns flushable segment ids
 	GetFlushableSegments(ctx context.Context, channel string, ts Timestamp) ([]UniqueID, error)
 	// ExpireAllocations notifies segment status to expire old allocations
@@ -491,17 +491,9 @@ func (s *SegmentManager) FlushImportSegments(ctx context.Context, collectionID U
 }
 
 // SealAllSegments seals all segments of collection with collectionID and return sealed segments
-func (s *SegmentManager) SealAllSegments(ctx context.Context, collectionID UniqueID, segIDs []UniqueID, isImport bool) ([]UniqueID, error) {
+func (s *SegmentManager) SealAllSegments(ctx context.Context, collectionID UniqueID, segIDs []UniqueID) ([]UniqueID, error) {
 	_, sp := otel.Tracer(typeutil.DataCoordRole).Start(ctx, "Seal-Segments")
 	defer sp.End()
-
-	// Decoupling the importing segment from the flush process.
-	// This approach prevents the `GetFlushState` validation of
-	// this importing segment. To modify the state of importing
-	// segment, utilize SegmentManager.FlushImportSegments instead.
-	if isImport {
-		return nil, nil
-	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()

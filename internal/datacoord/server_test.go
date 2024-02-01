@@ -1014,7 +1014,7 @@ func (s *spySegmentManager) FlushImportSegments(ctx context.Context, collectionI
 }
 
 // SealAllSegments seals all segments of collection with collectionID and return sealed segments
-func (s *spySegmentManager) SealAllSegments(ctx context.Context, collectionID UniqueID, segIDs []UniqueID, isImport bool) ([]UniqueID, error) {
+func (s *spySegmentManager) SealAllSegments(ctx context.Context, collectionID UniqueID, segIDs []UniqueID) ([]UniqueID, error) {
 	panic("not implemented") // TODO: Implement
 }
 
