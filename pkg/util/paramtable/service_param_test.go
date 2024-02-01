@@ -169,6 +169,11 @@ func TestServiceParam(t *testing.T) {
 			assert.Equal(t, kc.SaslMechanisms.GetValue(), "PLAIN")
 			assert.Equal(t, kc.SecurityProtocol.GetValue(), "SASL_SSL")
 			assert.Equal(t, kc.ReadTimeout.GetAsDuration(time.Second), 10*time.Second)
+			assert.Equal(t, kc.KafkaUseSSL.GetAsBool(), false)
+			assert.Empty(t, kc.KafkaTLSCACert.GetValue())
+			assert.Empty(t, kc.KafkaTLSCert.GetValue())
+			assert.Empty(t, kc.KafkaTLSKey.GetValue())
+			assert.Empty(t, kc.KafkaTLSKeyPassword.GetValue())
 		}
 	})
 
