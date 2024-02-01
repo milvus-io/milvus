@@ -57,7 +57,7 @@ func NewSyncTask(ctx context.Context, task *ImportTask, segmentID, partitionID i
 		}, func(info *datapb.SegmentInfo) *metacache.BloomFilterSet {
 			bfs := metacache.NewBloomFilterSet()
 			return bfs
-		}, metacache.UpdateImporting(true))
+		})
 	}
 
 	var serializer syncmgr.Serializer

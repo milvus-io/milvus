@@ -609,7 +609,7 @@ func (node *DataNode) AddImportSegment(ctx context.Context, req *datapb.AddImpor
 		}, func(info *datapb.SegmentInfo) *metacache.BloomFilterSet {
 			bfs := metacache.NewBloomFilterSet(pks...)
 			return bfs
-		}, metacache.UpdateImporting(true))
+		})
 	}
 
 	return &datapb.AddImportSegmentResponse{
