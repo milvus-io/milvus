@@ -89,18 +89,22 @@ func (c *compactionExecutor) start(ctx context.Context) {
 }
 
 func (c *compactionExecutor) executeTask(task compactor) {
+	log := log.With(
+		zap.Int64("planID", task.getPlanID()),
+		zap.Int64("Collection", task.getCollection()),
+		zap.String("channel", task.getChannelName()),
+	)
+
 	defer func() {
 		c.toCompleteState(task)
 	}()
 
-	log.Info("start to execute compaction", zap.Int64("planID", task.getPlanID()), zap.Int64("Collection", task.getCollection()), zap.String("channel", task.getChannelName()))
+	log.Info("start to execute compaction")
 
 	result, err := task.compact()
 	if err != nil {
-		log.Warn("compaction task failed",
-			zap.Int64("planID", task.getPlanID()),
-			zap.Error(err),
-		)
+		task.injectDone()
+		log.Warn("compaction task failed", zap.Error(err))
 	} else {
 		c.completed.Insert(result.GetPlanID(), result)
 		c.completedCompactor.Insert(result.GetPlanID(), task)
