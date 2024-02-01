@@ -800,9 +800,10 @@ func (t *showCollectionsTask) PostExecute(ctx context.Context) error {
 type alterCollectionTask struct {
 	Condition
 	*milvuspb.AlterCollectionRequest
-	ctx       context.Context
-	rootCoord types.RootCoordClient
-	result    *commonpb.Status
+	ctx        context.Context
+	rootCoord  types.RootCoordClient
+	result     *commonpb.Status
+	queryCoord types.QueryCoordClient
 }
 
 func (t *alterCollectionTask) TraceCtx() context.Context {
@@ -844,9 +845,28 @@ func (t *alterCollectionTask) OnEnqueue() error {
 	return nil
 }
 
+func hasMmapProp(props ...*commonpb.KeyValuePair) bool {
+	for _, p := range props {
+		if p.GetKey() == common.MmapEnabledKey {
+			return true
+		}
+	}
+	return false
+}
+
 func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 	t.Base.MsgType = commonpb.MsgType_AlterCollection
 	t.Base.SourceID = paramtable.GetNodeID()
+
+	if hasMmapProp(t.Properties...) {
+		loaded, err := isCollectionLoaded(ctx, t.queryCoord, t.CollectionID)
+		if err != nil {
+			return err
+		}
+		if loaded {
+			return merr.WrapErrCollectionLoaded(t.CollectionName, "can not alter mmap properties if collection loaded")
+		}
+	}
 
 	return nil
 }
