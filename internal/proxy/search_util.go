@@ -60,7 +60,6 @@ func initSearchRequest(ctx context.Context, t *searchTask) error {
 	}
 	t.SearchRequest.OutputFieldsId = outputFieldIDs
 
-	partitionNames := t.request.GetPartitionNames()
 	if t.request.GetDslType() == commonpb.DslType_BoolExprV1 {
 		annsField, err := funcutil.GetAttrByKeyFromRepeatedKV(AnnsFieldKey, t.request.GetSearchParams())
 		if err != nil || len(annsField) == 0 {
@@ -109,7 +108,14 @@ func initSearchRequest(ctx context.Context, t *searchTask) error {
 				return err
 			}
 
-			partitionNames = append(partitionNames, hashedPartitionNames...)
+			if len(hashedPartitionNames) > 0 {
+				// translate partition name to partition ids. Use regex-pattern to match partition name.
+				t.SearchRequest.PartitionIDs, err = getPartitionIDs(ctx, t.request.GetDbName(), t.collectionName, hashedPartitionNames)
+				if err != nil {
+					log.Warn("failed to get partition ids", zap.Error(err))
+					return err
+				}
+			}
 		}
 
 		plan.OutputFieldIds = outputFieldIDs
@@ -136,13 +142,6 @@ func initSearchRequest(ctx context.Context, t *searchTask) error {
 		log.Debug("proxy init search request",
 			zap.Int64s("plan.OutputFieldIds", plan.GetOutputFieldIds()),
 			zap.Stringer("plan", plan)) // may be very large if large term passed.
-	}
-
-	// translate partition name to partition ids. Use regex-pattern to match partition name.
-	t.SearchRequest.PartitionIDs, err = getPartitionIDs(ctx, t.request.GetDbName(), t.collectionName, partitionNames)
-	if err != nil {
-		log.Warn("failed to get partition ids", zap.Error(err))
-		return err
 	}
 
 	if deadline, ok := t.TraceCtx().Deadline(); ok {

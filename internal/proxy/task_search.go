@@ -268,6 +268,15 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		return errors.New("not support manually specifying the partition names if partition key mode is used")
 	}
 
+	if !t.partitionKeyMode && len(t.request.GetPartitionNames()) > 0 {
+		// translate partition name to partition ids. Use regex-pattern to match partition name.
+		t.PartitionIDs, err = getPartitionIDs(ctx, t.request.GetDbName(), collectionName, t.request.GetPartitionNames())
+		if err != nil {
+			log.Warn("failed to get partition ids", zap.Error(err))
+			return err
+		}
+	}
+
 	t.request.OutputFields, t.userOutputFields, err = translateOutputFields(t.request.OutputFields, t.schema, false)
 	if err != nil {
 		log.Warn("translate output fields failed", zap.Error(err))
