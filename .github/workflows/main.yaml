@@ -184,10 +184,6 @@ jobs:
         with:
           os: 'ubuntu20.04'
           kind: 'go'
-      - name: Start Service
-        shell: bash
-        run: |
-          docker-compose up -d pulsar etcd minio
       - name: IntegrationTest
         run: |
           chmod +x build/builder.sh
