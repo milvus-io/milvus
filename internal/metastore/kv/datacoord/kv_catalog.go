@@ -781,10 +781,11 @@ func CompressBinLog(fieldBinLogs []*datapb.FieldBinlog) ([]*datapb.FieldBinlog, 
 				return nil, err
 			}
 			binlog := &datapb.Binlog{
-				EntriesNum: binlog.EntriesNum,
-				// remove timestamp since it's not necessary
-				LogSize: binlog.LogSize,
-				LogID:   logID,
+				EntriesNum:    binlog.EntriesNum,
+				LogSize:       binlog.LogSize,
+				TimestampFrom: binlog.TimestampFrom,
+				TimestampTo:   binlog.TimestampTo,
+				LogID:         logID,
 			}
 			compressedFieldBinLog.Binlogs = append(compressedFieldBinLog.Binlogs, binlog)
 		}
