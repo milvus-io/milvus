@@ -34,6 +34,8 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     using DiskFileManager = storage::DiskFileManagerImpl;
     using DiskFileManagerPtr = std::shared_ptr<DiskFileManager>;
 
+    InvertedIndexTantivy() = default;
+
     explicit InvertedIndexTantivy(const TantivyConfig& cfg,
                                   const storage::FileManagerContext& ctx)
         : InvertedIndexTantivy(cfg, ctx, nullptr) {
@@ -82,17 +84,11 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
         return wrapper_->count();
     }
 
-    /*
-     * deprecated.
-     * TODO: why not remove this?
-     */
+    // BuildWithRawData should be only used in ut. Only string is supported.
     void
     BuildWithRawData(size_t n,
                      const void* values,
-                     const Config& config = {}) override {
-        PanicInfo(ErrorCode::NotImplemented,
-                  "BuildWithRawData should be deprecated");
-    }
+                     const Config& config = {}) override;
 
     /*
      * deprecated.
@@ -151,6 +147,14 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
 
     const TargetBitmap
     Query(const DatasetPtr& dataset) override;
+
+    bool
+    SupportRegexQuery() const override {
+        return true;
+    }
+
+    const TargetBitmap
+    RegexQuery(const std::string& pattern) override;
 
  private:
     void

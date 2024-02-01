@@ -20,6 +20,7 @@
 #include "query/generated/ExecExprVisitor.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "test_utils/DataGen.h"
+#include "test_utils/GenExprProto.h"
 #include "query/PlanProto.h"
 #include "query/Utils.h"
 #include "query/SearchBruteForce.h"
@@ -27,37 +28,6 @@
 using namespace milvus;
 
 namespace {
-template <typename T>
-auto
-GenGenericValue(T value) {
-    auto generic = new proto::plan::GenericValue();
-    if constexpr (std::is_same_v<T, bool>) {
-        generic->set_bool_val(static_cast<bool>(value));
-    } else if constexpr (std::is_integral_v<T>) {
-        generic->set_int64_val(static_cast<int64_t>(value));
-    } else if constexpr (std::is_floating_point_v<T>) {
-        generic->set_float_val(static_cast<float>(value));
-    } else if constexpr (std::is_same_v<T, std::string>) {
-        generic->set_string_val(static_cast<std::string>(value));
-    } else {
-        static_assert(always_false<T>);
-    }
-    return generic;
-}
-
-auto
-GenColumnInfo(int64_t field_id,
-              proto::schema::DataType field_type,
-              bool auto_id,
-              bool is_pk) {
-    auto column_info = new proto::plan::ColumnInfo();
-    column_info->set_field_id(field_id);
-    column_info->set_data_type(field_type);
-    column_info->set_is_autoid(auto_id);
-    column_info->set_is_primary_key(is_pk);
-    return column_info;
-}
-
 auto
 GenQueryInfo(int64_t topk,
              std::string metric_type,
@@ -116,22 +86,12 @@ GenCompareExpr(proto::plan::OpType op) {
 
 template <typename T>
 auto
-GenUnaryRangeExpr(proto::plan::OpType op, T& value) {
-    auto unary_range_expr = new proto::plan::UnaryRangeExpr();
-    unary_range_expr->set_op(op);
-    auto generic = GenGenericValue(value);
-    unary_range_expr->set_allocated_value(generic);
-    return unary_range_expr;
-}
-
-template <typename T>
-auto
 GenBinaryRangeExpr(bool lb_inclusive, bool ub_inclusive, T lb, T ub) {
     auto binary_range_expr = new proto::plan::BinaryRangeExpr();
     binary_range_expr->set_lower_inclusive(lb_inclusive);
     binary_range_expr->set_upper_inclusive(ub_inclusive);
-    auto lb_generic = GenGenericValue(lb);
-    auto ub_generic = GenGenericValue(ub);
+    auto lb_generic = test::GenGenericValue(lb);
+    auto ub_generic = test::GenGenericValue(ub);
     binary_range_expr->set_allocated_lower_value(lb_generic);
     binary_range_expr->set_allocated_upper_value(ub_generic);
     return binary_range_expr;
@@ -142,11 +102,6 @@ GenNotExpr() {
     auto not_expr = new proto::plan::UnaryExpr();
     not_expr->set_op(proto::plan::UnaryExpr_UnaryOp_Not);
     return not_expr;
-}
-
-auto
-GenExpr() {
-    return std::make_unique<proto::plan::Expr>();
 }
 
 auto
@@ -167,14 +122,14 @@ GenTermPlan(const FieldMeta& fvec_meta,
             const FieldMeta& str_meta,
             const std::vector<std::string>& strs)
     -> std::unique_ptr<proto::plan::PlanNode> {
-    auto column_info = GenColumnInfo(str_meta.get_id().get(),
-                                     proto::schema::DataType::VarChar,
-                                     false,
-                                     false);
+    auto column_info = test::GenColumnInfo(str_meta.get_id().get(),
+                                           proto::schema::DataType::VarChar,
+                                           false,
+                                           false);
     auto term_expr = GenTermExpr<std::string>(strs);
     term_expr->set_allocated_column_info(column_info);
 
-    auto expr = GenExpr().release();
+    auto expr = test::GenExpr().release();
     expr->set_allocated_term_expr(term_expr);
 
     proto::plan::VectorType vector_type;
@@ -195,15 +150,15 @@ GenTermPlan(const FieldMeta& fvec_meta,
 
 auto
 GenAlwaysFalseExpr(const FieldMeta& fvec_meta, const FieldMeta& str_meta) {
-    auto column_info = GenColumnInfo(str_meta.get_id().get(),
-                                     proto::schema::DataType::VarChar,
-                                     false,
-                                     false);
+    auto column_info = test::GenColumnInfo(str_meta.get_id().get(),
+                                           proto::schema::DataType::VarChar,
+                                           false,
+                                           false);
     auto term_expr =
         GenTermExpr<std::string>({});  // in empty set, always false.
     term_expr->set_allocated_column_info(column_info);
 
-    auto expr = GenExpr().release();
+    auto expr = test::GenExpr().release();
     expr->set_allocated_term_expr(term_expr);
     return expr;
 }
@@ -213,7 +168,7 @@ GenAlwaysTrueExpr(const FieldMeta& fvec_meta, const FieldMeta& str_meta) {
     auto always_false_expr = GenAlwaysFalseExpr(fvec_meta, str_meta);
     auto not_expr = GenNotExpr();
     not_expr->set_allocated_child(always_false_expr);
-    auto expr = GenExpr().release();
+    auto expr = test::GenExpr().release();
     expr->set_allocated_unary_expr(not_expr);
     return expr;
 }
@@ -357,21 +312,22 @@ TEST(StringExpr, Compare) {
     auto gen_compare_plan =
         [&, fvec_meta, str_meta, another_str_meta](
             proto::plan::OpType op) -> std::unique_ptr<proto::plan::PlanNode> {
-        auto str_col_info = GenColumnInfo(str_meta.get_id().get(),
-                                          proto::schema::DataType::VarChar,
-                                          false,
-                                          false);
+        auto str_col_info =
+            test::GenColumnInfo(str_meta.get_id().get(),
+                                proto::schema::DataType::VarChar,
+                                false,
+                                false);
         auto another_str_col_info =
-            GenColumnInfo(another_str_meta.get_id().get(),
-                          proto::schema::DataType::VarChar,
-                          false,
-                          false);
+            test::GenColumnInfo(another_str_meta.get_id().get(),
+                                proto::schema::DataType::VarChar,
+                                false,
+                                false);
 
         auto compare_expr = GenCompareExpr(op);
         compare_expr->set_allocated_left_column_info(str_col_info);
         compare_expr->set_allocated_right_column_info(another_str_col_info);
 
-        auto expr = GenExpr().release();
+        auto expr = test::GenExpr().release();
         expr->set_allocated_compare_expr(compare_expr);
 
         proto::plan::VectorType vector_type;
@@ -474,14 +430,14 @@ TEST(StringExpr, UnaryRange) {
         [&, fvec_meta, str_meta](
             proto::plan::OpType op,
             std::string value) -> std::unique_ptr<proto::plan::PlanNode> {
-        auto column_info = GenColumnInfo(str_meta.get_id().get(),
-                                         proto::schema::DataType::VarChar,
-                                         false,
-                                         false);
-        auto unary_range_expr = GenUnaryRangeExpr(op, value);
+        auto column_info = test::GenColumnInfo(str_meta.get_id().get(),
+                                               proto::schema::DataType::VarChar,
+                                               false,
+                                               false);
+        auto unary_range_expr = test::GenUnaryRangeExpr(op, value);
         unary_range_expr->set_allocated_column_info(column_info);
 
-        auto expr = GenExpr().release();
+        auto expr = test::GenExpr().release();
         expr->set_allocated_unary_range_expr(unary_range_expr);
 
         proto::plan::VectorType vector_type;
@@ -575,15 +531,15 @@ TEST(StringExpr, BinaryRange) {
             bool ub_inclusive,
             std::string lb,
             std::string ub) -> std::unique_ptr<proto::plan::PlanNode> {
-        auto column_info = GenColumnInfo(str_meta.get_id().get(),
-                                         proto::schema::DataType::VarChar,
-                                         false,
-                                         false);
+        auto column_info = test::GenColumnInfo(str_meta.get_id().get(),
+                                               proto::schema::DataType::VarChar,
+                                               false,
+                                               false);
         auto binary_range_expr =
             GenBinaryRangeExpr(lb_inclusive, ub_inclusive, lb, ub);
         binary_range_expr->set_allocated_column_info(column_info);
 
-        auto expr = GenExpr().release();
+        auto expr = test::GenExpr().release();
         expr->set_allocated_binary_range_expr(binary_range_expr);
 
         proto::plan::VectorType vector_type;
@@ -723,8 +679,12 @@ TEST(AlwaysTrueStringPlan, SearchWithOutputFields) {
         dim,       //
         query_ptr  //
     };
-    auto sub_result = BruteForceSearch(
-        search_dataset, vec_col.data(), N, knowhere::Json(), nullptr, DataType::VECTOR_FLOAT);
+    auto sub_result = BruteForceSearch(search_dataset,
+                                       vec_col.data(),
+                                       N,
+                                       knowhere::Json(),
+                                       nullptr,
+                                       DataType::VECTOR_FLOAT);
 
     auto sr = segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
     segment->FillPrimaryKeys(plan.get(), *sr);

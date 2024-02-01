@@ -18,6 +18,8 @@
 
 #include <fmt/core.h>
 
+#include <utility>
+
 #include "common/EasyAssert.h"
 #include "common/Types.h"
 #include "common/Vector.h"
@@ -25,9 +27,36 @@
 #include "index/Meta.h"
 #include "segcore/SegmentInterface.h"
 #include "query/Utils.h"
+#include "common/RegexQuery.h"
 
 namespace milvus {
 namespace exec {
+
+template <typename T>
+struct UnaryElementFuncForMatch {
+    typedef std::
+        conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
+            IndexInnerType;
+
+    void
+    operator()(const T* src, size_t size, IndexInnerType val, bool* res) {
+        if constexpr (std::is_same_v<T, std::string_view>) {
+            // translate the pattern match in advance, which avoid computing it every loop.
+            std::regex reg(TranslatePatternMatchToRegex(val));
+            for (int i = 0; i < size; ++i) {
+                res[i] = std::regex_match(src[i].data(), reg);
+            }
+        } else if constexpr (std::is_same_v<T, std::string>) {
+            // translate the pattern match in advance, which avoid computing it every loop.
+            std::regex reg(TranslatePatternMatchToRegex(val));
+            for (int i = 0; i < size; ++i) {
+                res[i] = std::regex_match(src[i], reg);
+            }
+        } else {
+            PanicInfo(Unsupported, "regex query is only supported on string");
+        }
+    }
+};
 
 template <typename T, proto::plan::OpType op>
 struct UnaryElementFunc {
@@ -36,6 +65,12 @@ struct UnaryElementFunc {
             IndexInnerType;
     void
     operator()(const T* src, size_t size, IndexInnerType val, bool* res) {
+        if constexpr (op == proto::plan::OpType::Match) {
+            UnaryElementFuncForMatch<T> func;
+            func(src, size, val, res);
+            return;
+        }
+
         for (int i = 0; i < size; ++i) {
             if constexpr (op == proto::plan::OpType::Equal) {
                 res[i] = src[i] == val;
@@ -130,6 +165,41 @@ struct UnaryElementFuncForArray {
     }
 };
 
+template <typename T>
+struct UnaryIndexFuncForMatch {
+    typedef std::
+        conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
+            IndexInnerType;
+    using Index = index::ScalarIndex<IndexInnerType>;
+    FixedVector<bool>
+    operator()(Index* index, IndexInnerType val) {
+        if constexpr (!std::is_same_v<T, std::string_view> &&
+                      !std::is_same_v<T, std::string>) {
+            PanicInfo(Unsupported, "regex query is only supported on string");
+        } else {
+            auto reg = TranslatePatternMatchToRegex(val);
+            if (index->SupportRegexQuery()) {
+                return index->RegexQuery(reg);
+            }
+            if (!index->HasRawData()) {
+                PanicInfo(Unsupported,
+                          "index don't support regex query and don't have "
+                          "raw data");
+            }
+
+            // retrieve raw data to do brute force query, may be very slow.
+            auto cnt = index->Count();
+            std::regex r(reg);
+            TargetBitmap res(cnt);
+            for (int64_t i = 0; i < cnt; i++) {
+                auto raw = index->Reverse_Lookup(i);
+                res[i] = std::regex_match(raw, r);
+            }
+            return res;
+        }
+    }
+};
+
 template <typename T, proto::plan::OpType op>
 struct UnaryIndexFunc {
     typedef std::
@@ -156,6 +226,9 @@ struct UnaryIndexFunc {
                          proto::plan::OpType::PrefixMatch);
             dataset->Set(milvus::index::PREFIX_VALUE, val);
             return index->Query(std::move(dataset));
+        } else if constexpr (op == proto::plan::OpType::Match) {
+            UnaryIndexFuncForMatch<T> func;
+            return func(index, val);
         } else {
             PanicInfo(
                 OpTypeInvalid,
@@ -210,6 +283,10 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     template <typename T>
     ColumnVectorPtr
     PreCheckOverflow();
+
+    template <typename T>
+    bool
+    CanUseIndex() const;
 
  private:
     std::shared_ptr<const milvus::expr::UnaryRangeFilterExpr> expr_;
