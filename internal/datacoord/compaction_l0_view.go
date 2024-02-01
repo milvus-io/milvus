@@ -112,12 +112,12 @@ func (v *LevelZeroSegmentsView) filterViewsByCountRange(segments []*SegmentView,
 	idx := 0
 	for _, view := range segments {
 		targetCount := view.DeltalogCount + curDeltaCount
-		if targetCount <= maxCount || idx == 0 {
-			idx += 1
-			curDeltaCount = targetCount
-			continue
+		if idx != 0 && targetCount > maxCount {
+			break
 		}
-		break
+
+		idx += 1
+		curDeltaCount = targetCount
 	}
 
 	if curDeltaCount < minCount {
@@ -133,12 +133,12 @@ func (v *LevelZeroSegmentsView) filterViewsBySizeRange(segments []*SegmentView, 
 	idx := 0
 	for _, view := range segments {
 		targetSize := view.DeltaSize + curDeltaSize
-		if targetSize <= maxSize || idx == 0 {
-			idx += 1
-			curDeltaSize = targetSize
-			continue
+		if idx != 0 && targetSize > maxSize {
+			break
 		}
-		break
+
+		idx += 1
+		curDeltaSize = targetSize
 	}
 
 	if curDeltaSize < minSize {
