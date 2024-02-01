@@ -145,6 +145,11 @@ run<std::string>() {
         auto hits = w.prefix_query("a");
         hits.debug();
     }
+
+    {
+        auto hits = w.regex_query("a(.|\n)*");
+        hits.debug();
+    }
 }
 
 int

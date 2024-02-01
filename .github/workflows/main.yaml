@@ -44,10 +44,6 @@ jobs:
     name: Build and test AMD64 Ubuntu 20.04
     runs-on: ubuntu-latest
     timeout-minutes: 180
-    strategy:
-      fail-fast: false
-    env:
-      UBUNTU: 20.04
     steps:
       - name: Setup mold
         uses: rui314/setup-mold@v1
@@ -102,10 +98,6 @@ jobs:
     needs: Build
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    strategy:
-      fail-fast: false
-    env:
-      UBUNTU: 20.04
     steps:
       - name: Download code
         uses: actions/download-artifact@v3.0.1
@@ -143,10 +135,6 @@ jobs:
     needs: Build
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    strategy:
-      fail-fast: false
-    env:
-      UBUNTU: 20.04
     steps:
       - name: Download code
         uses: actions/download-artifact@v3.0.1
@@ -183,10 +171,6 @@ jobs:
     needs: Build
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    strategy:
-      fail-fast: false
-    env:
-      UBUNTU: 20.04
     steps:
       - name: Download code
         uses: actions/download-artifact@v3.0.1

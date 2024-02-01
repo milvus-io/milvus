@@ -18,6 +18,9 @@
 #include "storage/Util.h"
 
 #include <boost/filesystem.hpp>
+#include <boost/uuid/random_generator.hpp>
+#include <boost/uuid/uuid_io.hpp>
+#include "InvertedIndexTantivy.h"
 
 namespace milvus::index {
 template <typename T>
@@ -410,6 +413,42 @@ InvertedIndexTantivy<std::string>::Query(const DatasetPtr& dataset) {
         return PrefixMatch(prefix);
     }
     return ScalarIndex<std::string>::Query(dataset);
+}
+
+template <typename T>
+const TargetBitmap
+InvertedIndexTantivy<T>::RegexQuery(const std::string& pattern) {
+    TargetBitmap bitset(Count());
+    auto array = wrapper_->regex_query(pattern);
+    apply_hits(bitset, array, true);
+    return bitset;
+}
+
+template <typename T>
+void
+InvertedIndexTantivy<T>::BuildWithRawData(size_t n,
+                                          const void* values,
+                                          const Config& config) {
+    if constexpr (!std::is_same_v<T, std::string>) {
+        PanicInfo(Unsupported,
+                  "InvertedIndex.BuildWithRawData only support string");
+    } else {
+        boost::uuids::random_generator generator;
+        auto uuid = generator();
+        auto prefix = boost::uuids::to_string(uuid);
+        path_ = fmt::format("/tmp/{}", prefix);
+        boost::filesystem::create_directories(path_);
+        cfg_ = TantivyConfig{
+            .data_type_ = DataType::VARCHAR,
+        };
+        d_type_ = cfg_.to_tantivy_data_type();
+        std::string field = "test_inverted_index";
+        wrapper_ = std::make_shared<TantivyIndexWrapper>(
+            field.c_str(), d_type_, path_.c_str());
+        wrapper_->add_data<std::string>(static_cast<const std::string*>(values),
+                                        n);
+        finish();
+    }
 }
 
 template class InvertedIndexTantivy<bool>;

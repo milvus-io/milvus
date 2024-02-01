@@ -219,9 +219,9 @@ GenDataset(int64_t N,
 
 auto
 GenDatasetWithDataType(int64_t N,
-           const knowhere::MetricType& metric_type,
-           milvus::DataType data_type,
-           int64_t dim = DIM) {
+                       const knowhere::MetricType& metric_type,
+                       milvus::DataType data_type,
+                       int64_t dim = DIM) {
     auto schema = std::make_shared<milvus::Schema>();
     if (data_type == milvus::DataType::VECTOR_FLOAT16) {
         schema->AddDebugField(

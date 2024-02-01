@@ -494,6 +494,16 @@ test_string() {
                 ASSERT_EQ(bitset[i], boost::starts_with(data[i], prefix));
             }
         }
+
+        {
+            ASSERT_TRUE(real_index->SupportRegexQuery());
+            auto prefix = data[0];
+            auto bitset = real_index->RegexQuery(prefix + "(.|\n)*");
+            ASSERT_EQ(cnt, bitset.size());
+            for (size_t i = 0; i < bitset.size(); i++) {
+                ASSERT_EQ(bitset[i], boost::starts_with(data[i], prefix));
+            }
+        }
     }
 }
 

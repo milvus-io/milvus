@@ -23,7 +23,8 @@ set(COMMON_SRC
         IndexMeta.cpp
         EasyAssert.cpp
         FieldData.cpp
-)
+        RegexQuery.cpp
+        )
 
 add_library(milvus_common SHARED ${COMMON_SRC})
 
@@ -36,6 +37,7 @@ target_link_libraries(milvus_common
         simdjson
         opendal
         ${CONAN_LIBS}
+        re2
         )
 
 install(TARGETS milvus_common DESTINATION "${CMAKE_INSTALL_LIBDIR}")
