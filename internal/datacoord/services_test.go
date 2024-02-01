@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -381,6 +382,36 @@ func (s *ServerSuite) TestSaveBinlogPath_NormalCase() {
 	s.EqualValues(segment.DmlPosition.ChannelName, "ch1")
 	s.EqualValues(segment.DmlPosition.MsgID, []byte{1, 2, 3})
 	s.EqualValues(segment.NumOfRows, 10)
+}
+
+func (s *ServerSuite) TestFlushForImport() {
+	schema := newTestSchema()
+	s.testServer.meta.AddCollection(&collectionInfo{ID: 0, Schema: schema, Partitions: []int64{}})
+
+	// normal
+	allocation, err := s.testServer.segmentManager.allocSegmentForImport(
+		context.TODO(), 0, 1, "ch-1", 1, 1)
+	s.NoError(err)
+	segmentID := allocation.SegmentID
+	req := &datapb.FlushRequest{
+		CollectionID: 0,
+		SegmentIDs:   []UniqueID{segmentID},
+	}
+	resp, err := s.testServer.flushForImport(context.TODO(), req)
+	s.NoError(err)
+	s.EqualValues(int32(0), resp.GetStatus().GetCode())
+
+	// failed
+	allocation, err = s.testServer.segmentManager.allocSegmentForImport(
+		context.TODO(), 0, 1, "ch-1", 1, 1)
+	s.NoError(err)
+	catalog := mocks.NewDataCoordCatalog(s.T())
+	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(errors.New("mock err"))
+	s.testServer.meta.catalog = catalog
+	req.SegmentIDs = []UniqueID{allocation.SegmentID}
+	resp, err = s.testServer.flushForImport(context.TODO(), req)
+	s.NoError(err)
+	s.NotEqual(int32(0), resp.GetStatus().GetCode())
 }
 
 func (s *ServerSuite) TestFlush_NormalCase() {
