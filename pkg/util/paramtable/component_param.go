@@ -1112,9 +1112,11 @@ So adjust at your risk!`,
 		Version:      "2.4.0",
 		DefaultValue: "4",
 		Formatter: func(v string) string {
-			if getAsInt(v) > 10 {
-				return "10"
+			maxNum := getAsInt(v)
+			if maxNum > 10 || maxNum <= 0 {
+				panic("maximum vector field's number should be limited to (0, 10]")
 			}
+
 			return v
 		},
 		PanicIfEmpty: true,
