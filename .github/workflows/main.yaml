@@ -76,25 +76,11 @@ jobs:
         run: |
           echo "useasan=ON" >> $GITHUB_ENV
           echo "Setup USE_ASAN to true since cpp file(s) changed"
-      - name: 'Generate CCache Hash'
-        env:
-          CORE_HASH: ${{ hashFiles( 'internal/core/**/*.cpp', 'internal/core/**/*.cc', 'internal/core/**/*.c', 'internal/core/**/*.h', 'internal/core/**/*.hpp', 'internal/core/**/CMakeLists.txt', 'internal/core/conanfile.py') }}
-        run: |
-          echo "corehash=${CORE_HASH}" >> $GITHUB_ENV
-          echo "Set CCache hash to ${CORE_HASH}"
-      - name: Cache CCache Volumes
-        # uses: actions/cache@v3
-        uses: actions/cache@v3
+      - name: Download Caches
+        uses: ./.github/actions/cache
         with:
-          path: .docker/amd64-ubuntu${{ matrix.ubuntu }}-ccache
-          key: ubuntu${{ matrix.ubuntu }}-ccache-${{ env.corehash }}
-          restore-keys: ubuntu${{ matrix.ubuntu }}-ccache-
-      - name: Cache Conan Packages
-        uses: actions/cache@v3
-        with:
-          path: .docker/amd64-ubuntu${{ matrix.ubuntu }}-conan
-          key: ubuntu${{ matrix.ubuntu }}-conan-${{ hashFiles('internal/core/conanfile.*') }}
-          restore-keys: ubuntu${{ matrix.ubuntu }}-conan-
+          os: 'ubuntu20.04'
+          kind: 'cpp'
       - name: Build
         run: |
           ./build/builder.sh /bin/bash -c "make USE_ASAN=${{env.useasan}} build-cpp-with-coverage"
@@ -124,12 +110,11 @@ jobs:
       - run: |
           unzip code.zip
           rm code.zip
-      - name: Cache Conan Packages
-        uses: actions/cache@v3
+      - name: Download Caches
+        uses: ./.github/actions/cache
         with:
-          path: .docker/amd64-ubuntu${{ matrix.ubuntu }}-conan
-          key: ubuntu${{ matrix.ubuntu }}-conan-${{ hashFiles('internal/core/conanfile.*') }}
-          restore-keys: ubuntu${{ matrix.ubuntu }}-conan-
+          os: 'ubuntu20.04'
+          kind: 'cpp'
       - name: Start Service
         shell: bash
         run: |
@@ -170,12 +155,11 @@ jobs:
       - run: |
           unzip code.zip
           rm code.zip
-      - name: Cache Go Mod Volumes
-        uses: actions/cache@v3
+      - name: Download Caches
+        uses: ./.github/actions/cache
         with:
-          path: .docker/amd64-ubuntu${{ matrix.ubuntu }}-go-mod
-          key: ubuntu${{ matrix.ubuntu }}-go-mod-${{ hashFiles('**/go.sum') }}
-          restore-keys: ubuntu${{ matrix.ubuntu }}-go-mod-
+          os: 'ubuntu20.04'
+          kind: 'go'
       - name: Start Service
         shell: bash
         run: |
@@ -216,12 +200,11 @@ jobs:
       - run: |
           unzip code.zip
           rm code.zip
-      - name: Cache Go Mod Volumes
-        uses: actions/cache@v3
+      - name: Download Caches
+        uses: ./.github/actions/cache
         with:
-          path: .docker/amd64-ubuntu${{ matrix.ubuntu }}-go-mod
-          key: ubuntu${{ matrix.ubuntu }}-go-mod-${{ hashFiles('**/go.sum') }}
-          restore-keys: ubuntu${{ matrix.ubuntu }}-go-mod-
+          os: 'ubuntu20.04'
+          kind: 'go'
       - name: Start Service
         shell: bash
         run: |
