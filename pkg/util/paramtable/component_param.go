@@ -1111,19 +1111,15 @@ So adjust at your risk!`,
 		Key:          "proxy.maxVectorFieldNum",
 		Version:      "2.4.0",
 		DefaultValue: "4",
-		Formatter: func(v string) string {
-			maxNum := getAsInt(v)
-			if maxNum > 10 || maxNum <= 0 {
-				panic("maximum vector field's number should be limited to (0, 10]")
-			}
-
-			return v
-		},
 		PanicIfEmpty: true,
 		Doc:          "Maximum number of vector fields in a collection.",
 		Export:       true,
 	}
 	p.MaxVectorFieldNum.Init(base.mgr)
+
+	if p.MaxVectorFieldNum.GetAsInt() > 10 || p.MaxVectorFieldNum.GetAsInt() <= 0 {
+		panic(fmt.Sprintf("Maximum number of vector fields in a collection should be in (0, 10], not %d", p.MaxVectorFieldNum.GetAsInt()))
+	}
 
 	p.MaxShardNum = ParamItem{
 		Key:          "proxy.maxShardNum",
