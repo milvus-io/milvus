@@ -120,7 +120,7 @@ func NewReScorer(reqs []*milvuspb.SearchRequest, rankParams []*commonpb.KeyValue
 			return nil, errors.New("The type of rank param k should be float")
 		}
 		if k <= 0 || k >= maxRRFParamsValue {
-			return nil, errors.New("The rank params k should be in range (0, 16384)")
+			return nil, errors.New(fmt.Sprintf("The rank params k should be in range (0, %d)", maxRRFParamsValue))
 		}
 		log.Debug("rrf params", zap.Float64("k", k))
 		for i := range reqs {
