@@ -702,7 +702,7 @@ func TestPulsarClient_WithTenantAndNamespace(t *testing.T) {
 }
 
 func TestPulsarCtl(t *testing.T) {
-	topic := "test"
+	topic := "test-pulsar-ctl"
 	subName := "hello"
 
 	pulsarAddress := getPulsarAddress()
@@ -763,9 +763,9 @@ func TestPulsarCtl(t *testing.T) {
 		BufSize:                     1024,
 		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
 	})
-	defer consumer2.Close()
 	assert.NoError(t, err)
 	assert.NotNil(t, consumer2)
+	defer consumer2.Close()
 }
 
 func NewPulsarAdminClient() {
