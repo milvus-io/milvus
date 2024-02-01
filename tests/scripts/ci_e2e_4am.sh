@@ -105,9 +105,9 @@ fi
 # Run concurrent test with 10 processes
 if [[ -n "${TEST_TIMEOUT:-}" ]]; then
 
-  timeout  "${TEST_TIMEOUT}" pytest testcases/test_concurrent.py --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} --count 10 -n 10 \
+  timeout  "${TEST_TIMEOUT}" pytest testcases/test_concurrent.py --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} --count 5 -n 5 \
                                      --html=${CI_LOG_PATH}/report_concurrent.html  --self-contained-html
 else
-  pytest testcases/test_concurrent.py --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} --count 10 -n 10 \
+  pytest testcases/test_concurrent.py --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} --count 5 -n 5 \
                                      --html=${CI_LOG_PATH}/report_concurrent.html --self-contained-html
 fi

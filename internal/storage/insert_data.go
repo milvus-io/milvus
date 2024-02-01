@@ -75,7 +75,7 @@ func (iData *InsertData) IsEmpty() bool {
 }
 
 func (i *InsertData) GetRowNum() int {
-	if i.Data == nil || len(i.Data) == 0 {
+	if i == nil || i.Data == nil || len(i.Data) == 0 {
 		return 0
 	}
 	var rowNum int
