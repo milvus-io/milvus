@@ -1008,6 +1008,11 @@ func (s *spySegmentManager) allocSegmentForImport(ctx context.Context, collectio
 func (s *spySegmentManager) DropSegment(ctx context.Context, segmentID UniqueID) {
 }
 
+// FlushImportSegments set importing segment state to Flushed.
+func (s *spySegmentManager) FlushImportSegments(ctx context.Context, collectionID UniqueID, segmentIDs []UniqueID) error {
+	panic("not implemented")
+}
+
 // SealAllSegments seals all segments of collection with collectionID and return sealed segments
 func (s *spySegmentManager) SealAllSegments(ctx context.Context, collectionID UniqueID, segIDs []UniqueID, isImport bool) ([]UniqueID, error) {
 	panic("not implemented") // TODO: Implement

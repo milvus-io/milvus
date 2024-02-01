@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
@@ -75,6 +76,8 @@ type Manager interface {
 	allocSegmentForImport(ctx context.Context, collectionID, partitionID UniqueID, channelName string, requestRows int64, taskID int64) (*Allocation, error)
 	// DropSegment drops the segment from manager.
 	DropSegment(ctx context.Context, segmentID UniqueID)
+	// FlushImportSegments set importing segment state to Flushed.
+	FlushImportSegments(ctx context.Context, collectionID UniqueID, segmentIDs []UniqueID) error
 	// SealAllSegments seals all segments of collection with collectionID and return sealed segments.
 	// If segIDs is not empty, also seals segments in segIDs.
 	SealAllSegments(ctx context.Context, collectionID UniqueID, segIDs []UniqueID, isImporting bool) ([]UniqueID, error)
@@ -456,10 +459,50 @@ func (s *SegmentManager) DropSegment(ctx context.Context, segmentID UniqueID) {
 	}
 }
 
+// FlushImportSegments set importing segment state to Flushed.
+func (s *SegmentManager) FlushImportSegments(ctx context.Context, collectionID UniqueID, segmentIDs []UniqueID) error {
+	_, sp := otel.Tracer(typeutil.DataCoordRole).Start(ctx, "Flush-Import-Segments")
+	defer sp.End()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	candidates := lo.Filter(segmentIDs, func(segmentID UniqueID, _ int) bool {
+		info := s.meta.GetHealthySegment(segmentID)
+		if info == nil {
+			log.Warn("failed to get seg info from meta", zap.Int64("segmentID", segmentID))
+			return false
+		}
+		if info.CollectionID != collectionID {
+			return false
+		}
+		return info.State == commonpb.SegmentState_Importing
+	})
+
+	// We set the importing segment state directly to 'Flushed' rather than
+	// 'Sealed' because all data has been imported, and there is no data
+	// in the datanode flowgraph that needs to be synced.
+	for _, id := range candidates {
+		if err := s.meta.SetState(id, commonpb.SegmentState_Flushed); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // SealAllSegments seals all segments of collection with collectionID and return sealed segments
 func (s *SegmentManager) SealAllSegments(ctx context.Context, collectionID UniqueID, segIDs []UniqueID, isImport bool) ([]UniqueID, error) {
 	_, sp := otel.Tracer(typeutil.DataCoordRole).Start(ctx, "Seal-Segments")
 	defer sp.End()
+
+	// Decoupling the importing segment from the flush process.
+	// This approach prevents the `GetFlushState` validation of
+	// this importing segment. To modify the state of importing
+	// segment, utilize SegmentManager.FlushImportSegments instead.
+	if isImport {
+		return nil, nil
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var ret []UniqueID
@@ -481,17 +524,8 @@ func (s *SegmentManager) SealAllSegments(ctx context.Context, collectionID Uniqu
 			ret = append(ret, id)
 			continue
 		}
-		// Decoupling the importing segment from the flush process.
-		// Hence, we seal and flush the importing segment without returning it.
-		// This approach prevents the flush validation of this importing segment.
-		if isImport && info.State == commonpb.SegmentState_Importing {
-			if err := s.meta.SetState(id, commonpb.SegmentState_Flushed); err != nil {
-				return nil, err
-			}
-			continue
-		}
-		// segment can be sealed only if it is growing
-		if !isImport && info.State != commonpb.SegmentState_Growing {
+		// segment can be sealed only if it is growing.
+		if info.State != commonpb.SegmentState_Growing {
 			continue
 		}
 		if err := s.meta.SetState(id, commonpb.SegmentState_Sealed); err != nil {
