@@ -73,11 +73,23 @@ func NewKafkaClientInstanceWithConfig(ctx context.Context, config *paramtable.Ka
 		panic("enable security mode need config username and password at the same time!")
 	}
 
+	if config.SecurityProtocol.GetValue() != "" {
+		kafkaConfig.SetKey("security.protocol", config.SecurityProtocol.GetValue())
+	}
+
 	if config.SaslUsername.GetValue() != "" && config.SaslPassword.GetValue() != "" {
 		kafkaConfig.SetKey("sasl.mechanisms", config.SaslMechanisms.GetValue())
-		kafkaConfig.SetKey("security.protocol", config.SecurityProtocol.GetValue())
 		kafkaConfig.SetKey("sasl.username", config.SaslUsername.GetValue())
 		kafkaConfig.SetKey("sasl.password", config.SaslPassword.GetValue())
+	}
+
+	if config.KafkaUseSSL.GetAsBool() {
+		kafkaConfig.SetKey("ssl.certificate.location", config.KafkaTLSCert.GetValue())
+		kafkaConfig.SetKey("ssl.key.location", config.KafkaTLSKey.GetValue())
+		kafkaConfig.SetKey("ssl.ca.location", config.KafkaTLSCACert.GetValue())
+		if config.KafkaTLSKeyPassword.GetValue() != "" {
+			kafkaConfig.SetKey("ssl.key.password", config.KafkaTLSKeyPassword.GetValue())
+		}
 	}
 
 	specExtraConfig := func(config map[string]string) kafka.ConfigMap {
