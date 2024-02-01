@@ -437,11 +437,11 @@ func (s *ServerSuite) TestFlush_BulkLoadSegment() {
 	}
 	s.mockChMgr.EXPECT().GetNodeChannelsByCollectionID(mock.Anything).Return(map[int64][]string{
 		1: {"channel-1"},
-	}).Twice()
+	})
 
 	mockCluster := NewMockCluster(s.T())
 	mockCluster.EXPECT().FlushChannels(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-		Return(nil).Twice()
+		Return(nil)
 	mockCluster.EXPECT().Close().Maybe()
 	s.testServer.cluster = mockCluster
 
@@ -472,6 +472,7 @@ func (s *ServerSuite) TestFlush_BulkLoadSegment() {
 		},
 		DbID:         0,
 		CollectionID: 0,
+		SegmentIDs:   []int64{segID},
 		IsImport:     true,
 	}
 
