@@ -609,6 +609,37 @@ TEST(Sealed, LoadFieldDataMmap) {
     ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get(), timestamp));
 }
 
+TEST(Sealed, LoadPkScalarIndex) {
+    size_t N = ROW_COUNT;
+    auto schema = std::make_shared<Schema>();
+    auto pk_id = schema->AddDebugField("counter", DataType::INT64);
+    auto nothing_id = schema->AddDebugField("nothing", DataType::INT32);
+    schema->set_primary_field_id(pk_id);
+
+    auto dataset = DataGen(schema, N);
+    auto segment = CreateSealedSegment(schema);
+    auto fields = schema->get_fields();
+    for (auto field_data : dataset.raw_->fields_data()) {
+        int64_t field_id = field_data.field_id();
+
+        auto info = FieldDataInfo(field_data.field_id(), N);
+        auto field_meta = fields.at(FieldId(field_id));
+        info.channel->push(
+            CreateFieldDataFromDataArray(N, &field_data, field_meta));
+        info.channel->close();
+
+        segment->LoadFieldData(FieldId(field_id), info);
+    }
+
+    LoadIndexInfo pk_index;
+    pk_index.field_id = pk_id.get();
+    pk_index.field_type = DataType::INT64;
+    pk_index.index_params["index_type"] = "sort";
+    auto pk_data = dataset.get_col<int64_t>(pk_id);
+    pk_index.index = GenScalarIndexing<int64_t>(N, pk_data.data());
+    segment->LoadIndex(pk_index);
+}
+
 TEST(Sealed, LoadScalarIndex) {
     auto dim = 16;
     size_t N = ROW_COUNT;
