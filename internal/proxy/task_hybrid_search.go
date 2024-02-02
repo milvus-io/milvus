@@ -203,9 +203,6 @@ func (t *hybridSearchTask) PreExecute(ctx context.Context) error {
 }
 
 func (t *hybridSearchTask) hybridSearchShard(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string) error {
-	for _, searchTask := range t.searchTasks {
-		t.HybridSearchRequest.Reqs = append(t.HybridSearchRequest.Reqs, searchTask.SearchRequest)
-	}
 	hybridSearchReq := typeutil.Clone(t.HybridSearchRequest)
 	hybridSearchReq.GetBase().TargetID = nodeID
 	req := &querypb.HybridSearchRequest{
@@ -249,6 +246,10 @@ func (t *hybridSearchTask) Execute(ctx context.Context) error {
 	log := log.Ctx(ctx).With(zap.Int64("collID", t.CollectionID), zap.String("collName", t.request.GetCollectionName()))
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute hybrid search %d", t.ID()))
 	defer tr.CtxElapse(ctx, "done")
+
+	for _, searchTask := range t.searchTasks {
+		t.HybridSearchRequest.Reqs = append(t.HybridSearchRequest.Reqs, searchTask.SearchRequest)
+	}
 
 	t.resultBuf = typeutil.NewConcurrentSet[*querypb.HybridSearchResult]()
 	err := t.lb.Execute(ctx, CollectionWorkLoad{
