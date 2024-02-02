@@ -237,7 +237,6 @@ func (s *ServerSuite) TestSaveBinlogPath_SaveDroppedSegment() {
 		{"segID=1, sealed to flushing", 1, false, true, commonpb.SegmentState_Flushing},
 	}
 
-	s.testServer.flushCh = make(chan int64, 1)
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableAutoCompaction.Key, "False")
 	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableAutoCompaction.Key)
 	for _, test := range tests {
