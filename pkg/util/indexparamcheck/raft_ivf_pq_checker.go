@@ -57,6 +57,13 @@ func (c *raftIVFPQChecker) checkPQParams(params map[string]string) error {
 	if dimension%m != 0 {
 		return fmt.Errorf("dimension must be able to be divided by `m`, dimension: %d, m: %d", dimension, m)
 	}
+
+	setDefaultIfNotExist(params, RaftCacheDatasetOnDevice, "false")
+
+	if !CheckStrByValues(params, RaftCacheDatasetOnDevice, []string{"true", "false"}) {
+		return fmt.Errorf("raft index cache_dataset_on_device param only support true false")
+	}
+
 	return nil
 }
 
