@@ -61,7 +61,8 @@ class Base:
             """ Drop collection before disconnect """
             if not self.connection_wrap.has_connection(alias=DefaultConfig.DEFAULT_USING)[0]:
                 self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, host=cf.param_info.param_host,
-                                             port=cf.param_info.param_port)
+                                             port=cf.param_info.param_port, user=ct.default_user,
+                                             password=ct.default_password)
 
             if self.collection_wrap.collection is not None:
                 if self.collection_wrap.collection.name.startswith("alias"):
