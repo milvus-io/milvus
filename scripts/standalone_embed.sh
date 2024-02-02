@@ -16,7 +16,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-start() {
+run_embed() {
     cat << EOF > embedEtcd.yaml
 listen-client-urls: http://0.0.0.0:2379
 advertise-client-urls: http://0.0.0.0:2379
@@ -41,13 +41,9 @@ EOF
         --health-retries=3 \
         milvusdb/milvus:v2.3.7 \
         milvus run standalone  1> /dev/null
+}
 
-    if [ $? -ne 0 ]
-    then
-        echo "Start failed."
-        exit 1
-    fi
-
+wait_for_milvus_running() {
     echo "Wait for Milvus Starting..."
     while true
     do
@@ -59,6 +55,31 @@ EOF
         fi
         sleep 1
     done
+}
+
+start() {
+    res=`sudo docker ps|grep milvus-standalone|grep healthy|wc -l`
+    if [ $res -eq 1 ]
+    then
+        echo "Milvus is running."
+        exit 0
+    fi
+
+    res=`sudo docker ps -a|grep milvus-standalone|wc -l`
+    if [ $res -eq 1 ]
+    then
+        sudo docker start milvus-standalone 1> /dev/null
+    else
+        run_embed
+    fi
+
+    if [ $? -ne 0 ]
+    then
+        echo "Start failed."
+        exit 1
+    fi
+
+    wait_for_milvus_running
 }
 
 stop() {
