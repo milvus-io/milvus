@@ -123,6 +123,9 @@ func createInsertData(t *testing.T, schema *schemapb.CollectionSchema, rowCount 
 	insertData, err := storage.NewInsertData(schema)
 	assert.NoError(t, err)
 	for _, field := range schema.GetFields() {
+		if field.GetAutoID() && field.GetIsPrimaryKey() {
+			continue
+		}
 		switch field.GetDataType() {
 		case schemapb.DataType_Bool:
 			boolData := make([]bool, 0)
