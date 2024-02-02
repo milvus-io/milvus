@@ -1038,20 +1038,30 @@ func splitFieldsData(collectionInfo *CollectionInfo, fieldsData BlockData, shard
 	autoIDRange := make([]int64, 0)
 	if primaryKey.GetAutoID() {
 		log.Info("generating auto-id", zap.Int("rowCount", rowCount), zap.Int64("rowIDBegin", rowIDBegin))
-		if primaryKey.GetDataType() != schemapb.DataType_Int64 {
-			log.Warn("primary key field is auto-generated but the field type is not int64")
-			return nil, fmt.Errorf("primary key field is auto-generated but the field type is not int64")
-		}
+		if primaryKey.GetDataType() == schemapb.DataType_Int64 {
+			primaryDataArr := &storage.Int64FieldData{
+				Data: make([]int64, 0, rowCount),
+			}
+			for i := rowIDBegin; i < rowIDEnd; i++ {
+				primaryDataArr.Data = append(primaryDataArr.Data, i)
+			}
 
-		primaryDataArr := &storage.Int64FieldData{
-			Data: make([]int64, 0, rowCount),
-		}
-		for i := rowIDBegin; i < rowIDEnd; i++ {
-			primaryDataArr.Data = append(primaryDataArr.Data, i)
-		}
+			fieldsData[primaryKey.GetFieldID()] = primaryDataArr
+			autoIDRange = append(autoIDRange, rowIDBegin, rowIDEnd)
+		} else if primaryKey.GetDataType() == schemapb.DataType_VarChar {
+			primaryDataArr := &storage.StringFieldData{
+				Data: make([]string, 0, rowCount),
+			}
+			for i := rowIDBegin; i < rowIDEnd; i++ {
+				primaryDataArr.Data = append(primaryDataArr.Data, strconv.FormatInt(i, 10))
+			}
 
-		fieldsData[primaryKey.GetFieldID()] = primaryDataArr
-		autoIDRange = append(autoIDRange, rowIDBegin, rowIDEnd)
+			fieldsData[primaryKey.GetFieldID()] = primaryDataArr
+			autoIDRange = append(autoIDRange, rowIDBegin, rowIDEnd)
+		} else {
+			log.Warn("unsupported primary key type", zap.Int("type", int(primaryKey.GetDataType())))
+			return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("unsupported primary key type %d, primary key should be int64 or varchar", primaryKey.GetDataType()))
+		}
 	}
 
 	// if the primary key is not auto-gernerate and user doesn't provide, return error

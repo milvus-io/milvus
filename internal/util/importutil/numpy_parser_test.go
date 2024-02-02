@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
@@ -879,7 +880,7 @@ func Test_NumpyParserSplitFieldsData(t *testing.T) {
 		parser.rowIDAllocator = newIDAllocator(ctx, t, nil)
 	})
 
-	t.Run("primary key auto-generated", func(t *testing.T) {
+	t.Run("int64 primary key auto-generated", func(t *testing.T) {
 		parser.collectionInfo.resetSchema(createNumpySchema())
 		schema := findSchema(parser.collectionInfo.Schema, schemapb.DataType_Int64)
 		schema.AutoID = true
@@ -904,6 +905,52 @@ func Test_NumpyParserSplitFieldsData(t *testing.T) {
 		assert.Error(t, err)
 
 		schema.AutoID = false
+	})
+
+	t.Run("varchar primary key auto-generated", func(t *testing.T) {
+		parser.collectionInfo.resetSchema(createNumpySchema())
+		schema := findSchema(parser.collectionInfo.Schema, schemapb.DataType_Int64)
+		schema.IsPartitionKey = false
+		schema = findSchema(parser.collectionInfo.Schema, schemapb.DataType_VarChar)
+		schema.AutoID = true
+		parser.collectionInfo.PrimaryKey = schema
+
+		partitionID := int64(1)
+		fieldsData := createFieldsData(sampleSchema(), 0, baseTimestamp)
+		shards := createShardsData(sampleSchema(), fieldsData, 2, []int64{partitionID})
+		segmentData := genFieldsDataFunc()
+		parser.autoIDRange, err = splitFieldsData(parser.collectionInfo, segmentData, shards, parser.rowIDAllocator)
+		assert.NoError(t, err)
+		assert.NotEmpty(t, parser.autoIDRange)
+
+		totalNum := 0
+		for i := 0; i < int(parser.collectionInfo.ShardNum); i++ {
+			totalNum += shards[i][partitionID][106].RowNum()
+		}
+		assert.Equal(t, segmentData[106].RowNum(), totalNum)
+
+		// target field data is nil
+		shards[0][partitionID][105] = nil
+		parser.autoIDRange, err = splitFieldsData(parser.collectionInfo, segmentData, shards, parser.rowIDAllocator)
+		assert.Error(t, err)
+
+		schema.AutoID = false
+	})
+
+	t.Run("not support primary key type auto-generated", func(t *testing.T) {
+		parser.collectionInfo.resetSchema(createNumpySchema())
+		schema := findSchema(parser.collectionInfo.Schema, schemapb.DataType_Int64)
+		schema.IsPartitionKey = false
+		schema = findSchema(parser.collectionInfo.Schema, schemapb.DataType_Bool)
+		schema.AutoID = true
+		parser.collectionInfo.PrimaryKey = schema
+
+		partitionID := int64(1)
+		fieldsData := createFieldsData(sampleSchema(), 0, baseTimestamp)
+		shards := createShardsData(sampleSchema(), fieldsData, 2, []int64{partitionID})
+		segmentData := genFieldsDataFunc()
+		parser.autoIDRange, err = splitFieldsData(parser.collectionInfo, segmentData, shards, parser.rowIDAllocator)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	})
 
 	t.Run("has dynamic field", func(t *testing.T) {
