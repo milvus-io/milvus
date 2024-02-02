@@ -123,6 +123,7 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 		case commonpb.MsgType_DropCollection, commonpb.MsgType_RenameCollection, commonpb.MsgType_DropAlias, commonpb.MsgType_AlterAlias:
 			if collectionName != "" {
 				globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName) // no need to return error, though collection may be not cached
+				globalMetaCache.DeprecateShardCache(request.GetDbName(), collectionName)
 			}
 			if request.CollectionID != UniqueID(0) {
 				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID)
@@ -1042,6 +1043,7 @@ func (node *Proxy) AlterCollection(ctx context.Context, request *milvuspb.AlterC
 		Condition:              NewTaskCondition(ctx),
 		AlterCollectionRequest: request,
 		rootCoord:              node.rootCoord,
+		queryCoord:             node.queryCoord,
 	}
 
 	log := log.Ctx(ctx).With(
@@ -2785,11 +2787,18 @@ func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	qt := &hybridSearchTask{
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
-		request:   request,
-		tr:        timerecord.NewTimeRecorder(method),
-		qc:        node.queryCoord,
-		node:      node,
-		lb:        node.lbPolicy,
+		HybridSearchRequest: &internalpb.HybridSearchRequest{
+			Base: commonpbutil.NewMsgBase(
+				commonpbutil.WithMsgType(commonpb.MsgType_Search),
+				commonpbutil.WithSourceID(paramtable.GetNodeID()),
+			),
+			ReqID: paramtable.GetNodeID(),
+		},
+		request: request,
+		tr:      timerecord.NewTimeRecorder(method),
+		qc:      node.queryCoord,
+		node:    node,
+		lb:      node.lbPolicy,
 	}
 
 	guaranteeTs := request.GuaranteeTimestamp
@@ -2832,7 +2841,7 @@ func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSea
 
 	log.Debug(
 		rpcEnqueued(method),
-		zap.Uint64("timestamp", qt.request.Base.Timestamp),
+		zap.Uint64("timestamp", qt.Base.Timestamp),
 	)
 
 	if err := qt.WaitToFinish(); err != nil {

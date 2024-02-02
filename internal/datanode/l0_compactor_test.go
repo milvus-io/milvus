@@ -118,8 +118,15 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactLinear() {
 	s.task.plan = plan
 	s.task.tr = timerecord.NewTimeRecorder("test")
 
+	bfs1 := metacache.NewBloomFilterSetWithBatchSize(100)
+	bfs1.UpdatePKRange(&storage.Int64FieldData{Data: []int64{1, 2}})
+	segment1 := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 200}, bfs1)
+	bfs2 := metacache.NewBloomFilterSetWithBatchSize(100)
+	bfs2.UpdatePKRange(&storage.Int64FieldData{Data: []int64{1, 2}})
+	segment2 := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 201}, bfs2)
+
 	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).Return([][]byte{s.dBlob}, nil).Times(2)
-	s.mockMeta.EXPECT().PredictSegments(mock.Anything, mock.Anything).Return([]int64{200, 201}, true)
+	s.mockMeta.EXPECT().GetSegmentsBy(mock.Anything).Return([]*metacache.SegmentInfo{segment1, segment2})
 	s.mockMeta.EXPECT().Collection().Return(1)
 	s.mockMeta.EXPECT().GetSegmentByID(mock.Anything, mock.Anything).
 		RunAndReturn(func(id int64, filters ...metacache.SegmentFilter) (*metacache.SegmentInfo, bool) {
@@ -225,6 +232,39 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactBatch() {
 
 func (s *LevelZeroCompactionTaskSuite) TestUploadByCheck() {
 	ctx := context.Background()
+	s.Run("uploadByCheck directly composeDeltalog failed", func() {
+		s.SetupTest()
+		s.mockMeta.EXPECT().Collection().Return(1)
+		s.mockMeta.EXPECT().GetSegmentByID(mock.Anything).Return(nil, false).Once()
+
+		segments := map[int64]*storage.DeleteData{100: s.dData}
+		results := make(map[int64]*datapb.CompactionSegment)
+		err := s.task.uploadByCheck(ctx, false, segments, results)
+		s.Error(err)
+		s.Equal(0, len(results))
+	})
+
+	s.Run("uploadByCheck directly Upload failed", func() {
+		s.SetupTest()
+		s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(errors.New("mock upload failed"))
+		s.mockMeta.EXPECT().Collection().Return(1)
+		s.mockMeta.EXPECT().GetSegmentByID(
+			mock.MatchedBy(func(ID int64) bool {
+				return ID == 100
+			}), mock.Anything).
+			Return(metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 100, PartitionID: 10}, nil), true)
+
+		s.mockAlloc.EXPECT().AllocOne().Return(19530, nil)
+		blobKey := metautil.JoinIDPath(1, 10, 100, 19530)
+		blobPath := path.Join(common.SegmentDeltaLogPath, blobKey)
+		s.mockBinlogIO.EXPECT().JoinFullPath(mock.Anything, mock.Anything).Return(blobPath)
+
+		segments := map[int64]*storage.DeleteData{100: s.dData}
+		results := make(map[int64]*datapb.CompactionSegment)
+		err := s.task.uploadByCheck(ctx, false, segments, results)
+		s.Error(err)
+		s.Equal(0, len(results))
+	})
 
 	s.Run("upload directly", func() {
 		s.SetupTest()
@@ -335,16 +375,18 @@ func (s *LevelZeroCompactionTaskSuite) TestComposeDeltalog() {
 }
 
 func (s *LevelZeroCompactionTaskSuite) TestSplitDelta() {
+	bfs1 := metacache.NewBloomFilterSetWithBatchSize(100)
+	bfs1.UpdatePKRange(&storage.Int64FieldData{Data: []int64{1, 3}})
+	segment1 := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 100}, bfs1)
+	bfs2 := metacache.NewBloomFilterSetWithBatchSize(100)
+	bfs2.UpdatePKRange(&storage.Int64FieldData{Data: []int64{3}})
+	segment2 := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 101}, bfs2)
+	bfs3 := metacache.NewBloomFilterSetWithBatchSize(100)
+	bfs3.UpdatePKRange(&storage.Int64FieldData{Data: []int64{3}})
+	segment3 := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 102}, bfs3)
+
 	predicted := []int64{100, 101, 102}
-	s.mockMeta.EXPECT().PredictSegments(mock.MatchedBy(func(pk storage.PrimaryKey) bool {
-		return pk.GetValue().(int64) == 1
-	}), mock.Anything).Return([]int64{100}, true)
-	s.mockMeta.EXPECT().PredictSegments(mock.MatchedBy(func(pk storage.PrimaryKey) bool {
-		return pk.GetValue().(int64) == 2
-	}), mock.Anything).Return(nil, false)
-	s.mockMeta.EXPECT().PredictSegments(mock.MatchedBy(func(pk storage.PrimaryKey) bool {
-		return pk.GetValue().(int64) == 3
-	}), mock.Anything).Return([]int64{100, 101, 102}, true)
+	s.mockMeta.EXPECT().GetSegmentsBy(mock.Anything).Return([]*metacache.SegmentInfo{segment1, segment2, segment3})
 
 	diter, err := iter.NewDeltalogIterator([][]byte{s.dBlob}, nil)
 	s.Require().NoError(err)

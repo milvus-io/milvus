@@ -73,6 +73,8 @@ RustArray tantivy_range_query_keyword(void *ptr,
 
 RustArray tantivy_prefix_query_keyword(void *ptr, const char *prefix);
 
+RustArray tantivy_regex_query(void *ptr, const char *pattern);
+
 void *tantivy_create_index(const char *field_name, TantivyDataType data_type, const char *path);
 
 void tantivy_free_index_writer(void *ptr);

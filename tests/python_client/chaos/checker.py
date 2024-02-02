@@ -34,7 +34,7 @@ def get_chaos_info():
         with open(constants.CHAOS_INFO_SAVE_PATH, 'r') as f:
             chaos_info = json.load(f)
     except Exception as e:
-        log.error(f"get_chaos_info error: {e}")
+        log.warn(f"get_chaos_info error: {e}")
         return None
     return chaos_info
 
@@ -106,7 +106,11 @@ class RequestRecords(metaclass=Singleton):
     def sink(self):
         if len(self.buffer) == 0:
             return
-        df = pd.DataFrame(self.buffer)
+        try:
+            df = pd.DataFrame(self.buffer)
+        except Exception as e:
+            log.error(f"convert buffer {self.buffer} to dataframe error: {e}")
+            return
         if not self.created_file:
             with request_lock:
                 df.to_parquet(self.file_name, engine='fastparquet')
@@ -187,7 +191,7 @@ class ResultAnalyzer:
     def show_result_table(self):
         table = PrettyTable()
         table.field_names = ['operation_name', 'before_chaos',
-                             f'during_chaos\n{self.chaos_start_time}~{self.recovery_time}',
+                             f'during_chaos: {self.chaos_start_time}~{self.recovery_time}',
                              'after_chaos']
         data = self.get_stage_success_rate()
         for operation, values in data.items():
@@ -380,7 +384,6 @@ class Checker:
             offset_ts = int(time.time() * self.scale)
             ts_data.append(offset_ts)
         data[0] = ts_data  # set timestamp (ms) as int64
-        log.debug(f"insert data: {ts_data}")
         res, result = self.c_wrap.insert(data=data,
                                          partition_name=partition_name,
                                          timeout=timeout,

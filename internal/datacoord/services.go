@@ -112,6 +112,7 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 	for _, segment := range segments {
 		if segment != nil &&
 			(isFlushState(segment.GetState())) &&
+			segment.GetLevel() == datapb.SegmentLevel_L1 &&
 			!sealedSegmentsIDDict[segment.GetID()] {
 			flushSegmentIDs = append(flushSegmentIDs, segment.GetID())
 		}
@@ -149,7 +150,7 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 	log.Info("flush response with segments",
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.Int64s("sealSegments", sealedSegmentIDs),
-		zap.Int64s("flushSegments", flushSegmentIDs),
+		zap.Int("flushedSegmentsCount", len(flushSegmentIDs)),
 		zap.Time("timeOfSeal", timeOfSeal),
 		zap.Time("flushTs", tsoutil.PhysicalTime(ts)))
 

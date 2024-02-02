@@ -2334,7 +2334,9 @@ type dataCoordConfig struct {
 	// LevelZero Segment
 	EnableLevelZeroSegment                   ParamItem `refreshable:"false"`
 	LevelZeroCompactionTriggerMinSize        ParamItem `refreshable:"true"`
+	LevelZeroCompactionTriggerMaxSize        ParamItem `refreshable:"true"`
 	LevelZeroCompactionTriggerDeltalogMinNum ParamItem `refreshable:"true"`
+	LevelZeroCompactionTriggerDeltalogMaxNum ParamItem `refreshable:"true"`
 
 	// Garbage Collection
 	EnableGarbageCollection ParamItem `refreshable:"false"`
@@ -2637,7 +2639,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	// LevelZeroCompaction
 	p.EnableLevelZeroSegment = ParamItem{
 		Key:          "dataCoord.segment.enableLevelZero",
-		Version:      "2.3.4",
+		Version:      "2.4.0",
 		Doc:          "Whether to enable LevelZeroCompaction",
 		DefaultValue: "false",
 	}
@@ -2645,19 +2647,35 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 
 	p.LevelZeroCompactionTriggerMinSize = ParamItem{
 		Key:          "dataCoord.compaction.levelzero.forceTrigger.minSize",
-		Version:      "2.3.4",
-		Doc:          "The minmum size in MB to force trigger a LevelZero Compaction",
-		DefaultValue: "8",
+		Version:      "2.4.0",
+		Doc:          "The minmum size in bytes to force trigger a LevelZero Compaction, default as 8MB",
+		DefaultValue: "8388608",
 	}
 	p.LevelZeroCompactionTriggerMinSize.Init(base.mgr)
 
+	p.LevelZeroCompactionTriggerMaxSize = ParamItem{
+		Key:          "dataCoord.compaction.levelzero.forceTrigger.maxSize",
+		Version:      "2.4.0",
+		Doc:          "The maxmum size in bytes to force trigger a LevelZero Compaction, default as 64MB",
+		DefaultValue: "67108864",
+	}
+	p.LevelZeroCompactionTriggerMaxSize.Init(base.mgr)
+
 	p.LevelZeroCompactionTriggerDeltalogMinNum = ParamItem{
 		Key:          "dataCoord.compaction.levelzero.forceTrigger.deltalogMinNum",
-		Version:      "2.3.4",
+		Version:      "2.4.0",
 		Doc:          "The minimum number of deltalog files to force trigger a LevelZero Compaction",
 		DefaultValue: "10",
 	}
 	p.LevelZeroCompactionTriggerDeltalogMinNum.Init(base.mgr)
+
+	p.LevelZeroCompactionTriggerDeltalogMaxNum = ParamItem{
+		Key:          "dataCoord.compaction.levelzero.forceTrigger.deltalogMaxNum",
+		Version:      "2.4.0",
+		Doc:          "The maxmum number of deltalog files to force trigger a LevelZero Compaction, default as 20",
+		DefaultValue: "20",
+	}
+	p.LevelZeroCompactionTriggerDeltalogMaxNum.Init(base.mgr)
 
 	p.EnableGarbageCollection = ParamItem{
 		Key:          "dataCoord.enableGarbageCollection",
@@ -2862,6 +2880,7 @@ type dataNodeConfig struct {
 	// memory management
 	MemoryForceSyncEnable     ParamItem `refreshable:"true"`
 	MemoryForceSyncSegmentNum ParamItem `refreshable:"true"`
+	MemoryCheckInterval       ParamItem `refreshable:"true"`
 	MemoryWatermark           ParamItem `refreshable:"true"`
 
 	DataNodeTimeTickByRPC ParamItem `refreshable:"false"`
@@ -2975,6 +2994,15 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		DefaultValue: "1",
 	}
 	p.MemoryForceSyncSegmentNum.Init(base.mgr)
+
+	p.MemoryCheckInterval = ParamItem{
+		Key:          "datanode.memory.checkInterval",
+		Version:      "2.4.0",
+		DefaultValue: "3000", // milliseconds
+		Doc:          "the interal to check datanode memory usage, in milliseconds",
+		Export:       true,
+	}
+	p.MemoryCheckInterval.Init(base.mgr)
 
 	if os.Getenv(metricsinfo.DeployModeEnvKey) == metricsinfo.StandaloneDeployMode {
 		p.MemoryWatermark = ParamItem{

@@ -44,12 +44,16 @@ type WriteBuffer interface {
 	SetFlushTimestamp(flushTs uint64)
 	// GetFlushTimestamp get current flush timestamp
 	GetFlushTimestamp() uint64
-	// FlushSegments is the method to perform `Sync` operation with provided options.
-	FlushSegments(ctx context.Context, segmentIDs []int64) error
+	// SealSegments is the method to perform `Sync` operation with provided options.
+	SealSegments(ctx context.Context, segmentIDs []int64) error
 	// GetCheckpoint returns current channel checkpoint.
 	// If there are any non-empty segment buffer, returns the earliest buffer start position.
 	// Otherwise, returns latest buffered checkpoint.
 	GetCheckpoint() *msgpb.MsgPosition
+	// MemorySize returns the size in bytes currently used by this write buffer.
+	MemorySize() int64
+	// EvictBuffer evicts buffer to sync manager which match provided sync policies.
+	EvictBuffer(policies ...SyncPolicy)
 	// Close is the method to close and sink current buffer data.
 	Close(drop bool)
 }
@@ -147,7 +151,7 @@ func (wb *writeBufferBase) HasSegment(segmentID int64) bool {
 	return ok
 }
 
-func (wb *writeBufferBase) FlushSegments(ctx context.Context, segmentIDs []int64) error {
+func (wb *writeBufferBase) SealSegments(ctx context.Context, segmentIDs []int64) error {
 	wb.mut.RLock()
 	defer wb.mut.RUnlock()
 
@@ -160,6 +164,40 @@ func (wb *writeBufferBase) SetFlushTimestamp(flushTs uint64) {
 
 func (wb *writeBufferBase) GetFlushTimestamp() uint64 {
 	return wb.flushTimestamp.Load()
+}
+
+func (wb *writeBufferBase) MemorySize() int64 {
+	wb.mut.RLock()
+	defer wb.mut.RUnlock()
+
+	var size int64
+	for _, segBuf := range wb.buffers {
+		size += segBuf.MemorySize()
+	}
+	return size
+}
+
+func (wb *writeBufferBase) EvictBuffer(policies ...SyncPolicy) {
+	wb.mut.Lock()
+	defer wb.mut.Unlock()
+
+	log := log.Ctx(context.Background()).With(
+		zap.Int64("collectionID", wb.collectionID),
+		zap.String("channel", wb.channelName),
+	)
+	// need valid checkpoint before triggering syncing
+	if wb.checkpoint == nil {
+		log.Warn("evict buffer before buffering data")
+		return
+	}
+
+	ts := wb.checkpoint.GetTimestamp()
+
+	segmentIDs := wb.getSegmentsToSync(ts, policies...)
+	if len(segmentIDs) > 0 {
+		log.Info("evict buffer find segments to sync", zap.Int64s("segmentIDs", segmentIDs))
+		wb.syncSegments(context.Background(), segmentIDs)
+	}
 }
 
 func (wb *writeBufferBase) GetCheckpoint() *msgpb.MsgPosition {
@@ -225,7 +263,7 @@ func (wb *writeBufferBase) GetCheckpoint() *msgpb.MsgPosition {
 }
 
 func (wb *writeBufferBase) triggerSync() (segmentIDs []int64) {
-	segmentsToSync := wb.getSegmentsToSync(wb.checkpoint.GetTimestamp())
+	segmentsToSync := wb.getSegmentsToSync(wb.checkpoint.GetTimestamp(), wb.syncPolicies...)
 	if len(segmentsToSync) > 0 {
 		log.Info("write buffer get segments to sync", zap.Int64s("segmentIDs", segmentsToSync))
 		wb.syncSegments(context.Background(), segmentsToSync)
@@ -282,10 +320,10 @@ func (wb *writeBufferBase) syncSegments(ctx context.Context, segmentIDs []int64)
 
 // getSegmentsToSync applies all policies to get segments list to sync.
 // **NOTE** shall be invoked within mutex protection
-func (wb *writeBufferBase) getSegmentsToSync(ts typeutil.Timestamp) []int64 {
+func (wb *writeBufferBase) getSegmentsToSync(ts typeutil.Timestamp, policies ...SyncPolicy) []int64 {
 	buffers := lo.Values(wb.buffers)
 	segments := typeutil.NewSet[int64]()
-	for _, policy := range wb.syncPolicies {
+	for _, policy := range policies {
 		result := policy.SelectSegments(buffers, ts)
 		if len(result) > 0 {
 			log.Info("SyncPolicy selects segments", zap.Int64s("segmentIDs", result), zap.String("reason", policy.Reason()))

@@ -324,7 +324,7 @@ func (c *compactionPlanHandler) RefreshPlan(task *compactionTask) {
 		})
 
 		plan.SegmentBinlogs = append(plan.SegmentBinlogs, sealedSegBinlogs...)
-		log.Info("Compaction handler refreshed level zero compaction plan", zap.Any("target segments", sealedSegBinlogs))
+		log.Info("Compaction handler refreshed level zero compaction plan", zap.Any("target segments count", len(sealedSegBinlogs)))
 		return
 	}
 

@@ -398,7 +398,8 @@ TEST_F(DiskAnnFileManagerTest, CacheOptFieldToDiskOptFieldMoreThanOne) {
     opt_fields[kOptFieldId + 1] = {
         kOptFieldName + "second", kOptFiledType, {insert_file_space_path}};
     EXPECT_THROW(file_manager->CacheOptFieldToDisk(opt_fields), SegcoreError);
-    EXPECT_THROW(file_manager->CacheOptFieldToDisk(space, opt_fields), SegcoreError);
+    EXPECT_THROW(file_manager->CacheOptFieldToDisk(space, opt_fields),
+                 SegcoreError);
 }
 
 TEST_F(DiskAnnFileManagerTest, CacheOptFieldToDiskCorrect) {

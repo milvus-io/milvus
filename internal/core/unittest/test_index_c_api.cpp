@@ -93,7 +93,8 @@ TEST(Float16VecIndex, All) {
     ok = google::protobuf::TextFormat::PrintToString(index_params,
                                                      &index_params_str);
     assert(ok);
-    auto dataset = GenDatasetWithDataType(NB, metric_type, milvus::DataType::VECTOR_FLOAT16);
+    auto dataset = GenDatasetWithDataType(
+        NB, metric_type, milvus::DataType::VECTOR_FLOAT16);
     auto xb_data = dataset.get_col<uint8_t>(milvus::FieldId(100));
 
     CDataType dtype = Float16Vector;
@@ -151,7 +152,8 @@ TEST(BFloat16VecIndex, All) {
     ok = google::protobuf::TextFormat::PrintToString(index_params,
                                                      &index_params_str);
     assert(ok);
-    auto dataset = GenDatasetWithDataType(NB, metric_type, milvus::DataType::VECTOR_BFLOAT16);
+    auto dataset = GenDatasetWithDataType(
+        NB, metric_type, milvus::DataType::VECTOR_BFLOAT16);
     auto xb_data = dataset.get_col<uint8_t>(milvus::FieldId(100));
 
     CDataType dtype = BFloat16Vector;

@@ -12,7 +12,7 @@ const (
 	RoleCategory       = "/roles/"
 	IndexCategory      = "/indexes/"
 	AliasCategory      = "/aliases/"
-	JobCategory        = "/jobs/"
+	ImportJobCategory  = "/jobs/import/"
 
 	ListAction      = "list"
 	HasAction       = "has"

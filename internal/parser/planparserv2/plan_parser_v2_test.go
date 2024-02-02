@@ -155,14 +155,14 @@ func TestExpr_Like(t *testing.T) {
 	}
 
 	// TODO: enable these after regex-match is supported.
-	unsupported := []string{
-		`VarCharField like "not_%_supported"`,
-		`JSONField["A"] like "not_%_supported"`,
-		`$meta["A"] like "not_%_supported"`,
-	}
-	for _, exprStr := range unsupported {
-		assertInvalidExpr(t, helper, exprStr)
-	}
+	//unsupported := []string{
+	//	`VarCharField like "not_%_supported"`,
+	//	`JSONField["A"] like "not_%_supported"`,
+	//	`$meta["A"] like "not_%_supported"`,
+	//}
+	//for _, exprStr := range unsupported {
+	//	assertInvalidExpr(t, helper, exprStr)
+	//}
 }
 
 func TestExpr_BinaryRange(t *testing.T) {

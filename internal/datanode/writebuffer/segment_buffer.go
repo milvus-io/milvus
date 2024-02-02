@@ -3,9 +3,12 @@ package writebuffer
 import (
 	"math"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -37,6 +40,7 @@ func (buf *segmentBuffer) Yield() (insert *storage.InsertData, delete *storage.D
 }
 
 func (buf *segmentBuffer) MinTimestamp() typeutil.Timestamp {
+	log.Info("segmentID", zap.Int64("segmentID", buf.segmentID))
 	insertTs := buf.insertBuffer.MinTimestamp()
 	deltaTs := buf.deltaBuffer.MinTimestamp()
 
@@ -63,6 +67,11 @@ func (buf *segmentBuffer) GetTimeRange() *TimeRange {
 	}
 
 	return result
+}
+
+// MemorySize returns total memory size of insert buffer & delta buffer.
+func (buf *segmentBuffer) MemorySize() int64 {
+	return buf.insertBuffer.size + buf.deltaBuffer.size
 }
 
 // TimeRange is a range of timestamp contains the min-timestamp and max-timestamp

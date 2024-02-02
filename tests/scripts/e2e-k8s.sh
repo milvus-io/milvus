@@ -245,6 +245,8 @@ export HUB="${HUB:-milvusdb}"
 
 export CI="true"
 
+export IS_NETWORK_MODE_HOST=true
+
 if [[ ! -d "${ARTIFACTS}" ]];then
   mkdir -p "${ARTIFACTS}"
 fi

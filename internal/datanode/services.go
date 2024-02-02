@@ -123,7 +123,7 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 
 	log.Info("receiving FlushSegments request")
 
-	err := node.writeBufferManager.FlushSegments(ctx, req.GetChannelName(), segmentIDs)
+	err := node.writeBufferManager.SealSegments(ctx, req.GetChannelName(), segmentIDs)
 	if err != nil {
 		log.Warn("failed to flush segments", zap.Error(err))
 		return merr.Status(err), nil
@@ -284,7 +284,7 @@ func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan
 			node.syncMgr,
 			req,
 		)
-	case datapb.CompactionType_MixCompaction, datapb.CompactionType_MinorCompaction:
+	case datapb.CompactionType_MixCompaction:
 		// TODO, replace this binlogIO with io.BinlogIO
 		binlogIO := &binlogIO{node.chunkManager, ds.idAllocator}
 		task = newCompactionTask(

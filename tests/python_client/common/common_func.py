@@ -540,7 +540,7 @@ def gen_default_rows_data_all_data_type(nb=ct.default_nb, dim=ct.default_dim, st
     return array
 
 
-def gen_default_binary_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, start=0):
+def gen_default_binary_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, start=0, auto_id=False):
     int_values = pd.Series(data=[i for i in range(start, start + nb)])
     float_values = pd.Series(data=[np.float32(i) for i in range(start, start + nb)], dtype="float32")
     string_values = pd.Series(data=[str(i) for i in range(start, start + nb)], dtype="string")
@@ -551,6 +551,12 @@ def gen_default_binary_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, star
         ct.default_string_field_name: string_values,
         ct.default_binary_vec_field_name: binary_vec_values
     })
+    if auto_id is True:
+        df = pd.DataFrame({
+            ct.default_float_field_name: float_values,
+            ct.default_string_field_name: string_values,
+            ct.default_binary_vec_field_name: binary_vec_values
+        })
     return df, binary_raw_values
 
 

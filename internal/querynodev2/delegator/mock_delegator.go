@@ -253,6 +253,61 @@ func (_c *MockShardDelegator_GetTargetVersion_Call) RunAndReturn(run func() int6
 	return _c
 }
 
+// HybridSearch provides a mock function with given fields: ctx, req
+func (_m *MockShardDelegator) HybridSearch(ctx context.Context, req *querypb.HybridSearchRequest) (*querypb.HybridSearchResult, error) {
+	ret := _m.Called(ctx, req)
+
+	var r0 *querypb.HybridSearchResult
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.HybridSearchRequest) (*querypb.HybridSearchResult, error)); ok {
+		return rf(ctx, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.HybridSearchRequest) *querypb.HybridSearchResult); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*querypb.HybridSearchResult)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.HybridSearchRequest) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockShardDelegator_HybridSearch_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'HybridSearch'
+type MockShardDelegator_HybridSearch_Call struct {
+	*mock.Call
+}
+
+// HybridSearch is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req *querypb.HybridSearchRequest
+func (_e *MockShardDelegator_Expecter) HybridSearch(ctx interface{}, req interface{}) *MockShardDelegator_HybridSearch_Call {
+	return &MockShardDelegator_HybridSearch_Call{Call: _e.mock.On("HybridSearch", ctx, req)}
+}
+
+func (_c *MockShardDelegator_HybridSearch_Call) Run(run func(ctx context.Context, req *querypb.HybridSearchRequest)) *MockShardDelegator_HybridSearch_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*querypb.HybridSearchRequest))
+	})
+	return _c
+}
+
+func (_c *MockShardDelegator_HybridSearch_Call) Return(_a0 *querypb.HybridSearchResult, _a1 error) *MockShardDelegator_HybridSearch_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockShardDelegator_HybridSearch_Call) RunAndReturn(run func(context.Context, *querypb.HybridSearchRequest) (*querypb.HybridSearchResult, error)) *MockShardDelegator_HybridSearch_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // LoadGrowing provides a mock function with given fields: ctx, infos, version
 func (_m *MockShardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.SegmentLoadInfo, version int64) error {
 	ret := _m.Called(ctx, infos, version)

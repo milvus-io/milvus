@@ -96,6 +96,7 @@ func (bfs *BloomFilterSet) Roll(newStats ...*storage.PrimaryKeyStats) {
 				MinPK:    stats.MinPk,
 			}
 		})...)
+		bfs.current = nil
 	}
 }
 

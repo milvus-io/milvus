@@ -115,7 +115,7 @@ func (s *LevelZeroSegmentsViewSuite) TestTrigger() {
 		},
 		{
 			"Trigger by > TriggerDeltaSize",
-			8,
+			8 * 1024 * 1024,
 			1,
 			30000,
 			[]UniqueID{100, 101},
@@ -126,6 +126,20 @@ func (s *LevelZeroSegmentsViewSuite) TestTrigger() {
 			10,
 			30000,
 			[]UniqueID{100, 101},
+		},
+		{
+			"Trigger by > maxDeltaSize",
+			128 * 1024 * 1024,
+			1,
+			30000,
+			[]UniqueID{100},
+		},
+		{
+			"Trigger by > maxDeltaCount",
+			1,
+			24,
+			30000,
+			[]UniqueID{100},
 		},
 	}
 
@@ -152,7 +166,7 @@ func (s *LevelZeroSegmentsViewSuite) TestTrigger() {
 					return v.ID
 				})
 				s.ElementsMatch(gotSegIDs, test.expectedSegs)
-				log.Info("trigger reason", zap.String("trigger reason", reason))
+				log.Info("output view", zap.String("view", levelZeroView.String()), zap.String("trigger reason", reason))
 			}
 		})
 	}

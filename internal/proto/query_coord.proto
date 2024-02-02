@@ -71,6 +71,7 @@ service QueryNode {
 
   rpc GetStatistics(GetStatisticsRequest) returns (internal.GetStatisticsResponse) {}
   rpc Search(SearchRequest) returns (internal.SearchResults) {}
+  rpc HybridSearch(HybridSearchRequest) returns (HybridSearchResult) {}
   rpc SearchSegments(SearchRequest) returns (internal.SearchResults) {}
   rpc Query(QueryRequest) returns (internal.RetrieveResults) {}
   rpc QueryStream(QueryRequest) returns (stream internal.RetrieveResults){}
@@ -326,6 +327,20 @@ message SearchRequest {
   bool from_shard_leader = 4;
   DataScope scope = 5; // All, Streaming, Historical
   int32 total_channel_num = 6;
+}
+
+message HybridSearchRequest {
+  internal.HybridSearchRequest req = 1;
+  repeated string dml_channels = 2;
+  int32 total_channel_num = 3;
+}
+
+message HybridSearchResult {
+  common.MsgBase base = 1;
+  common.Status status = 2;
+  repeated internal.SearchResults results = 3;
+  internal.CostAggregation costAggregation = 4;
+  map<string, uint64> channels_mvcc = 5;
 }
 
 message QueryRequest {

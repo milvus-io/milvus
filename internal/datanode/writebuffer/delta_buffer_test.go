@@ -10,6 +10,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
@@ -25,7 +26,8 @@ func (s *DeltaBufferSuite) TestBuffer() {
 		pks := lo.Map(tss, func(ts uint64, _ int) storage.PrimaryKey { return storage.NewInt64PrimaryKey(int64(ts)) })
 
 		memSize := deltaBuffer.Buffer(pks, tss, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})
-		s.EqualValues(100*8*2, memSize)
+		// 24 = 16(pk) + 8(ts)
+		s.EqualValues(100*24, memSize)
 	})
 
 	s.Run("string_pk", func() {
@@ -37,7 +39,8 @@ func (s *DeltaBufferSuite) TestBuffer() {
 		})
 
 		memSize := deltaBuffer.Buffer(pks, tss, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})
-		s.EqualValues(100*8+100*3, memSize)
+		// 40 = (3*8+8)(string pk) + 8(ts)
+		s.EqualValues(100*40, memSize)
 	})
 }
 
@@ -59,6 +62,10 @@ func (s *DeltaBufferSuite) TestYield() {
 
 	s.ElementsMatch(tss, result.Tss)
 	s.ElementsMatch(pks, result.Pks)
+}
+
+func (s *DeltaBufferSuite) SetupSuite() {
+	paramtable.Init()
 }
 
 func TestDeltaBuffer(t *testing.T) {

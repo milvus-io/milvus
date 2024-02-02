@@ -190,7 +190,7 @@ func (t *levelZeroCompactionTask) compact() (*datapb.CompactionPlanResult, error
 		)
 		for segID, deltaLogs := range totalDeltalogs {
 			log := log.With(zap.Int64("levelzero segment", segID))
-			log.Info("Linear L0 compaction processing segment", zap.Int64s("target segmentIDs", targetSegIDs))
+			log.Info("Linear L0 compaction processing segment", zap.Int("target segment count", len(targetSegIDs)))
 
 			allIters, err := t.loadDelta(ctxTimeout, deltaLogs)
 			if err != nil {
@@ -267,6 +267,14 @@ func (t *levelZeroCompactionTask) splitDelta(
 	targetSegBuffer map[int64]*storage.DeleteData,
 	targetSegIDs []int64,
 ) error {
+	// segments shall be safe to read outside
+	segments := t.metacache.GetSegmentsBy(metacache.WithSegmentIDs(targetSegIDs...))
+	split := func(pk storage.PrimaryKey) []int64 {
+		return lo.FilterMap(segments, func(segment *metacache.SegmentInfo, _ int) (int64, bool) {
+			return segment.SegmentID(), segment.GetBloomFilterSet().PkExists(pk)
+		})
+	}
+
 	// spilt all delete data to segments
 	for _, deltaIter := range allIters {
 		for deltaIter.HasNext() {
@@ -275,10 +283,7 @@ func (t *levelZeroCompactionTask) splitDelta(
 				return err
 			}
 
-			predicted, found := t.metacache.PredictSegments(labeled.GetPk(), metacache.WithSegmentIDs(targetSegIDs...))
-			if !found {
-				continue
-			}
+			predicted := split(labeled.GetPk())
 
 			for _, gotSeg := range predicted {
 				delBuffer, ok := targetSegBuffer[gotSeg]
@@ -334,10 +339,12 @@ func (t *levelZeroCompactionTask) uploadByCheck(ctx context.Context, requireChec
 		if !requireCheck || (dData.Size() >= paramtable.Get().DataNodeCfg.FlushDeleteBufferBytes.GetAsInt64()) {
 			blobs, binlog, err := t.composeDeltalog(segID, dData)
 			if err != nil {
+				log.Warn("L0 compaction composeDelta fail", zap.Int64("segmentID", segID), zap.Error(err))
 				return err
 			}
 			err = t.Upload(ctx, blobs)
 			if err != nil {
+				log.Warn("L0 compaction upload blobs fail", zap.Int64("segmentID", segID), zap.Any("binlog", binlog), zap.Error(err))
 				return err
 			}
 
