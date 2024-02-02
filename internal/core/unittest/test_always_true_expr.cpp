@@ -33,6 +33,7 @@ TEST(Expr, AlwaysTrue) {
             arr[i] = er();
         }
         std::cout << arr[55] << std::endl;
+        std::cout << arr[1000] << std::endl;
     }
 
     using namespace milvus;
