@@ -62,7 +62,7 @@ fi
 beginTime=`date +%s`
 
 findASANBeginTime=`date +%s`
-ASAN_PATH=$(find /usr -name libasan.so* 2>/dev/null)
+ASAN_PATH=$(find /usr -name 'libasan.so*' 2>/dev/null -printf "%T@ %p\n" | sort -n | tail -1 | awk '{print $2}')
 echo "ASAN_PATH: ${ASAN_PATH}"
 findASANEndTime=`date +%s`
 echo "Total time for finding libasan.so:" $(($findASANEndTime-$findASANBeginTime)) "s"
