@@ -24,6 +24,17 @@
 #include "plan/PlanNode.h"
 
 TEST(Expr, AlwaysTrue) {
+    // please remember to delete this.
+    {
+        size_t l = 100;
+        auto arr = new int64_t[l];
+        std::default_random_engine er(19190504);
+        for (size_t i = 0; i < l; i++) {
+            arr[i] = er();
+        }
+        std::cout << arr[55] << std::endl;
+    }
+
     using namespace milvus;
     using namespace milvus::query;
     using namespace milvus::segcore;

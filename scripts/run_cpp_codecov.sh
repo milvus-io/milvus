@@ -61,6 +61,12 @@ fi
 # starting the timer
 beginTime=`date +%s`
 
+findASANBeginTime=`date +%s`
+export LD_PRELOAD=$(find /usr -name libasan.so* 2>/dev/null)
+echo "LD_PRELOAD: ${LD_PRELOAD}"
+findASANEndTime=`date +%s`
+echo "Total time for finding libasan.so:" $(($findASANEndTime-$findASANBeginTime)) "s"
+
 # run unittest
 for test in `ls ${MILVUS_CORE_UNITTEST_DIR}`; do
     echo "Running cpp unittest: ${MILVUS_CORE_UNITTEST_DIR}/$test"
