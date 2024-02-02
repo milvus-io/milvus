@@ -3,12 +3,9 @@ package writebuffer
 import (
 	"math"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -40,7 +37,6 @@ func (buf *segmentBuffer) Yield() (insert *storage.InsertData, delete *storage.D
 }
 
 func (buf *segmentBuffer) MinTimestamp() typeutil.Timestamp {
-	log.Info("segmentID", zap.Int64("segmentID", buf.segmentID))
 	insertTs := buf.insertBuffer.MinTimestamp()
 	deltaTs := buf.deltaBuffer.MinTimestamp()
 
