@@ -517,14 +517,12 @@ func (s *LevelZeroCompactionTaskSuite) TestSplitDelta() {
 	predicted := []int64{100, 101, 102}
 	s.mockMeta.EXPECT().GetSegmentsBy(mock.Anything).Return([]*metacache.SegmentInfo{segment1, segment2, segment3})
 
-	diter, err := iter.NewDeltalogIterator([][]byte{s.dBlob}, nil)
-	s.Require().NoError(err)
+	diter := iter.NewDeltalogIterator([][]byte{s.dBlob}, nil)
 	s.Require().NotNil(diter)
 
 	targetSegBuffer := make(map[int64]*storage.DeleteData)
 	targetSegIDs := predicted
-	err = s.task.splitDelta(context.TODO(), []*iter.DeltalogIterator{diter}, targetSegBuffer, targetSegIDs)
-	s.NoError(err)
+	s.task.splitDelta(context.TODO(), []*iter.DeltalogIterator{diter}, targetSegBuffer, targetSegIDs)
 
 	s.NotEmpty(targetSegBuffer)
 	s.ElementsMatch(predicted, lo.Keys(targetSegBuffer))

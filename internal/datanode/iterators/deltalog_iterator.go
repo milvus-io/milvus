@@ -23,7 +23,7 @@ type DeltalogIterator struct {
 	pos   int
 }
 
-func NewDeltalogIterator(v [][]byte, label *Label) (*DeltalogIterator, error) {
+func NewDeltalogIterator(v [][]byte, label *Label) *DeltalogIterator {
 	blobs := make([]*storage.Blob, len(v))
 	for i := range blobs {
 		blobs[i] = &storage.Blob{Value: v[i]}
@@ -33,7 +33,7 @@ func NewDeltalogIterator(v [][]byte, label *Label) (*DeltalogIterator, error) {
 		disposeCh: make(chan struct{}),
 		blobs:     blobs,
 		label:     label,
-	}, nil
+	}
 }
 
 func (d *DeltalogIterator) HasNext() bool {
