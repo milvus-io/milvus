@@ -19,12 +19,18 @@
 #include "index/IndexFactory.h"
 #include "index/Meta.h"
 #include "index/Utils.h"
+#include "knowhere/utils.h"
 #include "log/Log.h"
 #include "storage/FileManager.h"
 #include "segcore/Types.h"
 #include "storage/Util.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/LocalChunkManagerSingleton.h"
+
+bool
+IsLoadWithDisk(const char* index_type, int index_engine_version) {
+    return knowhere::UseDiskLoad(index_type, index_engine_version);
+}
 
 CStatus
 NewLoadIndexInfo(CLoadIndexInfo* c_load_index_info) {

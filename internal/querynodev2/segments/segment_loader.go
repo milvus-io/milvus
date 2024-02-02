@@ -23,7 +23,7 @@ package segments
 #include "segcore/segment_c.h"
 #include "segcore/segcore_init_c.h"
 #include "common/init_c.h"
-
+#include "segcore/load_index_c.h"
 */
 import "C"
 
@@ -35,6 +35,7 @@ import (
 	"strconv"
 	"sync"
 	"time"
+	"unsafe"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -917,7 +918,22 @@ func GetIndexResourceUsage(indexInfo *querypb.FieldIndexInfo) (uint64, uint64, e
 		return uint64(neededMemSize), uint64(neededDiskSize), nil
 	}
 
-	return uint64(indexInfo.IndexSize), 0, nil
+	factor := uint64(1)
+
+	var isLoadWithDisk bool
+	GetDynamicPool().Submit(func() (any, error) {
+		cIndexType := C.CString(indexType)
+		defer C.free(unsafe.Pointer(cIndexType))
+		cEngineVersion := C.int32_t(indexInfo.GetCurrentIndexVersion())
+		isLoadWithDisk = bool(C.IsLoadWithDisk(cIndexType, cEngineVersion))
+		return nil, nil
+	}).Await()
+
+	if !isLoadWithDisk {
+		factor = 2
+	}
+
+	return uint64(indexInfo.IndexSize) * factor, 0, nil
 }
 
 // checkSegmentSize checks whether the memory & disk is sufficient to load the segments with given concurrency,

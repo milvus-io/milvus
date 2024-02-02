@@ -23,6 +23,9 @@ extern "C" {
 
 typedef void* CLoadIndexInfo;
 
+bool
+IsLoadWithDisk(const char* index_type, int index_engine_version);
+
 CStatus
 NewLoadIndexInfo(CLoadIndexInfo* c_load_index_info);
 
