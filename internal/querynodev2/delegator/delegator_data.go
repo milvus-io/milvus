@@ -458,6 +458,7 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 		}
 
 		deleteData := &storage.DeleteData{}
+
 		// start position is dml position for segment
 		// if this position is before deleteBuffer's safe ts, it means some delete shall be read from msgstream
 		if position.GetTimestamp() < sd.deleteBuffer.SafeTs() {
@@ -497,6 +498,7 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 				SegmentId:    info.GetSegmentID(),
 				PrimaryKeys:  storage.ParsePrimaryKeys2IDs(deleteData.Pks),
 				Timestamps:   deleteData.Tss,
+				Scope:        querypb.DataScope_Historical,
 			})
 			if err != nil {
 				log.Warn("failed to apply delete when LoadSegment", zap.Error(err))
