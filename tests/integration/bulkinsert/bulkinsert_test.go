@@ -151,6 +151,20 @@ func (s *BulkInsertSuite) TestBulkInsert() {
 		}
 	}
 
+	// flush
+	flushResp, err := c.Proxy.Flush(ctx, &milvuspb.FlushRequest{
+		DbName:          dbName,
+		CollectionNames: []string{collectionName},
+	})
+	s.NoError(err)
+	segmentIDs, has := flushResp.GetCollSegIDs()[collectionName]
+	ids := segmentIDs.GetData()
+	s.Require().Empty(segmentIDs)
+	s.Require().True(has)
+	flushTs, has := flushResp.GetCollFlushTs()[collectionName]
+	s.True(has)
+	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
+
 	health2, err := c.DataCoord.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
 	s.NoError(err)
 	log.Info("dataCoord health", zap.Any("health2", health2))

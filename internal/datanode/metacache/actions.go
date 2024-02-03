@@ -53,12 +53,6 @@ func WithStartPosNotRecorded() SegmentFilter {
 	}
 }
 
-func WithImporting() SegmentFilter {
-	return func(info *SegmentInfo) bool {
-		return info.importing
-	}
-}
-
 func WithLevel(level datapb.SegmentLevel) SegmentFilter {
 	return func(info *SegmentInfo) bool {
 		return info.level == level
@@ -112,12 +106,6 @@ func RollStats(newStats ...*storage.PrimaryKeyStats) SegmentAction {
 func CompactTo(compactTo int64) SegmentAction {
 	return func(info *SegmentInfo) {
 		info.compactTo = compactTo
-	}
-}
-
-func UpdateImporting(importing bool) SegmentAction {
-	return func(info *SegmentInfo) {
-		info.importing = importing
 	}
 }
 

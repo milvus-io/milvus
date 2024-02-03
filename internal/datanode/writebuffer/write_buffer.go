@@ -293,10 +293,6 @@ func (wb *writeBufferBase) sealSegments(ctx context.Context, segmentIDs []int64)
 	wb.metaCache.UpdateSegments(metacache.UpdateState(commonpb.SegmentState_Sealed),
 		metacache.WithSegmentIDs(segmentIDs...),
 		metacache.WithSegmentState(commonpb.SegmentState_Growing))
-	// mark segment flushing if segment was importing
-	wb.metaCache.UpdateSegments(metacache.UpdateState(commonpb.SegmentState_Sealed),
-		metacache.WithSegmentIDs(segmentIDs...),
-		metacache.WithImporting())
 	return nil
 }
 

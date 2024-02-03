@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -383,6 +384,36 @@ func (s *ServerSuite) TestSaveBinlogPath_NormalCase() {
 	s.EqualValues(segment.NumOfRows, 10)
 }
 
+func (s *ServerSuite) TestFlushForImport() {
+	schema := newTestSchema()
+	s.testServer.meta.AddCollection(&collectionInfo{ID: 0, Schema: schema, Partitions: []int64{}})
+
+	// normal
+	allocation, err := s.testServer.segmentManager.allocSegmentForImport(
+		context.TODO(), 0, 1, "ch-1", 1, 1)
+	s.NoError(err)
+	segmentID := allocation.SegmentID
+	req := &datapb.FlushRequest{
+		CollectionID: 0,
+		SegmentIDs:   []UniqueID{segmentID},
+	}
+	resp, err := s.testServer.flushForImport(context.TODO(), req)
+	s.NoError(err)
+	s.EqualValues(int32(0), resp.GetStatus().GetCode())
+
+	// failed
+	allocation, err = s.testServer.segmentManager.allocSegmentForImport(
+		context.TODO(), 0, 1, "ch-1", 1, 1)
+	s.NoError(err)
+	catalog := mocks.NewDataCoordCatalog(s.T())
+	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(errors.New("mock err"))
+	s.testServer.meta.catalog = catalog
+	req.SegmentIDs = []UniqueID{allocation.SegmentID}
+	resp, err = s.testServer.flushForImport(context.TODO(), req)
+	s.NoError(err)
+	s.NotEqual(int32(0), resp.GetStatus().GetCode())
+}
+
 func (s *ServerSuite) TestFlush_NormalCase() {
 	req := &datapb.FlushRequest{
 		Base: &commonpb.MsgBase{
@@ -437,11 +468,11 @@ func (s *ServerSuite) TestFlush_BulkLoadSegment() {
 	}
 	s.mockChMgr.EXPECT().GetNodeChannelsByCollectionID(mock.Anything).Return(map[int64][]string{
 		1: {"channel-1"},
-	}).Twice()
+	})
 
 	mockCluster := NewMockCluster(s.T())
 	mockCluster.EXPECT().FlushChannels(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-		Return(nil).Twice()
+		Return(nil)
 	mockCluster.EXPECT().Close().Maybe()
 	s.testServer.cluster = mockCluster
 
@@ -472,18 +503,21 @@ func (s *ServerSuite) TestFlush_BulkLoadSegment() {
 		},
 		DbID:         0,
 		CollectionID: 0,
+		SegmentIDs:   []int64{segID},
 		IsImport:     true,
 	}
 
 	resp, err = s.testServer.Flush(context.TODO(), req)
 	s.NoError(err)
 	s.EqualValues(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-	s.EqualValues(1, len(resp.SegmentIDs))
+	segment := s.testServer.meta.GetSegment(segID)
+	s.Equal(commonpb.SegmentState_Flushed, segment.GetState())
 
+	err = s.testServer.meta.UnsetIsImporting(segID)
+	s.NoError(err)
 	ids, err = s.testServer.segmentManager.GetFlushableSegments(context.TODO(), "channel-1", expireTs)
 	s.NoError(err)
-	s.EqualValues(1, len(ids))
-	s.EqualValues(segID, ids[0])
+	s.EqualValues(0, len(ids))
 }
 
 func (s *ServerSuite) TestFlush_ClosedServer() {
