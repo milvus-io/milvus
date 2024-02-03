@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"path"
 	"sync"
 	"time"
 
@@ -48,6 +49,42 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
+
+var params *paramtable.ComponentParam = paramtable.Get()
+
+type ClusterConfig struct {
+	// ProxyNum int
+	// todo coord num can be more than 1 if enable Active-Standby
+	// RootCoordNum int
+	// DataCoordNum int
+	// IndexCoordNum int
+	// QueryCoordNum int
+	QueryNodeNum int
+	DataNodeNum  int
+	IndexNodeNum int
+}
+
+func DefaultParams() map[string]string {
+	testPath := fmt.Sprintf("integration-test-%d", time.Now().Unix())
+	return map[string]string{
+		params.EtcdCfg.RootPath.Key:  testPath,
+		params.MinioCfg.RootPath.Key: testPath,
+		//"runtime.role": typeutil.StandaloneRole,
+		//params.IntegrationTestCfg.IntegrationMode.Key: "true",
+		params.LocalStorageCfg.Path.Key:              path.Join("/tmp", testPath),
+		params.CommonCfg.StorageType.Key:             "local",
+		params.DataNodeCfg.MemoryForceSyncEnable.Key: "false", // local execution will print too many logs
+		params.CommonCfg.GracefulStopTimeout.Key:     "10",
+	}
+}
+
+func DefaultClusterConfig() ClusterConfig {
+	return ClusterConfig{
+		QueryNodeNum: 1,
+		DataNodeNum:  1,
+		IndexNodeNum: 1,
+	}
+}
 
 type MiniClusterV2 struct {
 	ctx context.Context
