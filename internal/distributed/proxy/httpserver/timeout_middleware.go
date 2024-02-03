@@ -166,6 +166,7 @@ func timeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 		case p := <-panicChan:
 			tw.FreeBuffer()
 			c.Writer = w
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{HTTPReturnCode: http.StatusInternalServerError})
 			panic(p)
 
 		case <-finish:

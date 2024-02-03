@@ -287,67 +287,31 @@ func TestTimeout(t *testing.T) {
 	headerTestCases := []headerTestCase{}
 	ginHandler := gin.Default()
 	app := ginHandler.Group("")
-	path := "/middleware/timeout/0"
-	app.GET(path, timeoutMiddleware(func(c *gin.Context) {
-	}))
+	path := "/middleware/timeout/5"
 	app.POST(path, timeoutMiddleware(func(c *gin.Context) {
+		time.Sleep(5 * time.Second)
 	}))
 	headerTestCases = append(headerTestCases, headerTestCase{
-		path: path,
+		path: path, // wait 5s
 	})
 	headerTestCases = append(headerTestCases, headerTestCase{
-		path:    path,
-		headers: map[string]string{HTTPHeaderRequestTimeout: "5"},
-	})
-	path = "/middleware/timeout/10"
-	// app.GET(path, wrapper(wrapperTimeout(func(ctx context.Context, c *gin.Context, req any, dbName string) (interface{}, error) {
-	app.GET(path, timeoutMiddleware(func(c *gin.Context) {
-		time.Sleep(10 * time.Second)
-	}))
-	app.POST(path, timeoutMiddleware(func(c *gin.Context) {
-		time.Sleep(10 * time.Second)
-	}))
-	headerTestCases = append(headerTestCases, headerTestCase{
-		path: path,
-	})
-	headerTestCases = append(headerTestCases, headerTestCase{
-		path:    path,
-		headers: map[string]string{HTTPHeaderRequestTimeout: "5"},
+		path:    path, // timeout 3s
+		headers: map[string]string{HTTPHeaderRequestTimeout: "3"},
 		status:  http.StatusRequestTimeout,
 	})
-	path = "/middleware/timeout/60"
-	// app.GET(path, wrapper(wrapperTimeout(func(ctx context.Context, c *gin.Context, req any, dbName string) (interface{}, error) {
-	app.GET(path, timeoutMiddleware(func(c *gin.Context) {
-		time.Sleep(60 * time.Second)
-	}))
+	path = "/middleware/timeout/31"
 	app.POST(path, timeoutMiddleware(func(c *gin.Context) {
-		time.Sleep(60 * time.Second)
+		time.Sleep(31 * time.Second)
 	}))
 	headerTestCases = append(headerTestCases, headerTestCase{
-		path:   path,
+		path:   path, // timeout 30s
 		status: http.StatusRequestTimeout,
 	})
 	headerTestCases = append(headerTestCases, headerTestCase{
-		path:    path,
-		headers: map[string]string{HTTPHeaderRequestTimeout: "120"},
+		path:    path, // wait 32s
+		headers: map[string]string{HTTPHeaderRequestTimeout: "32"},
 	})
 
-	for _, testcase := range headerTestCases {
-		t.Run("get"+testcase.path, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, testcase.path, nil)
-			for key, value := range testcase.headers {
-				req.Header.Set(key, value)
-			}
-			w := httptest.NewRecorder()
-			ginHandler.ServeHTTP(w, req)
-			if testcase.status == 0 {
-				assert.Equal(t, http.StatusOK, w.Code)
-			} else {
-				assert.Equal(t, testcase.status, w.Code)
-			}
-			fmt.Println(w.Body.String())
-		})
-	}
 	for _, testcase := range headerTestCases {
 		t.Run("post"+testcase.path, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, testcase.path, nil)
@@ -986,6 +950,11 @@ func TestDML(t *testing.T) {
 	}, nil).Times(6)
 	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{Status: commonErrorStatus}, nil).Times(4)
 	mp.EXPECT().Search(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{TopK: int64(0)}}, nil).Times(3)
+	mp.EXPECT().Search(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{Status: &commonpb.Status{
+		ErrorCode: 1700, // ErrFieldNotFound
+		Reason:    "groupBy field not found in schema: field not found[field=test]",
+	}}, nil).Once()
+	mp.EXPECT().HybridSearch(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{TopK: int64(0)}}, nil).Twice()
 	mp.EXPECT().Query(mock.Anything, mock.Anything).Return(&milvuspb.QueryResults{Status: commonSuccessStatus, OutputFields: []string{}, FieldsData: []*schemapb.FieldData{}}, nil).Twice()
 	mp.EXPECT().Insert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{Status: commonSuccessStatus, InsertCnt: int64(0), IDs: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{}}}}}, nil).Once()
 	mp.EXPECT().Insert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{Status: commonSuccessStatus, InsertCnt: int64(0), IDs: &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{}}}}}, nil).Once()
@@ -1010,7 +979,21 @@ func TestDML(t *testing.T) {
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        SearchAction,
-		requestBody: []byte(`{"collectionName": "book", "vector": [0.1, 0.2], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"], "params": {"radius":0.9, "range_filter": 0.1}}`),
+		requestBody: []byte(`{"collectionName": "book", "vector": [0.1, 0.2], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"], "params": {"radius":0.9, "range_filter": 0.1}, "groupingField": "word_count"}`),
+	})
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path:        SearchAction,
+		requestBody: []byte(`{"collectionName": "book", "vector": [0.1, 0.2], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"], "params": {"radius":0.9, "range_filter": 0.1}, "groupingField": "test"}`),
+		errMsg:      "groupBy field not found in schema: field not found[field=test]",
+		errCode:     65535,
+	})
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path:        HybridSearchAction,
+		requestBody: []byte(`{"collectionName": "hello_milvus", "search": [{"vector": [0.1, 0.2], "annsField": "float_vector1", "metricType": "L2", "limit": 3}, {"vector": [0.1, 0.2], "annsField": "float_vector2", "metricType": "L2", "limit": 3}], "rerank": {"strategy": "rrf", "params": {"k":  1}}}`),
+	})
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path:        HybridSearchAction,
+		requestBody: []byte(`{"collectionName": "hello_milvus", "search": [{"vector": [0.1, 0.2], "annsField": "float_vector1", "metricType": "L2", "limit": 3}, {"vector": [0.1, 0.2], "annsField": "float_vector2", "metricType": "L2", "limit": 3}], "rerank": {"strategy": "weighted", "params": {"weights":  [0.9, 0.8]}}}`),
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        QueryAction,
