@@ -315,12 +315,11 @@ func TestFlush(t *testing.T) {
 		resp, err = svr.Flush(context.TODO(), req)
 		assert.NoError(t, err)
 		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-		assert.EqualValues(t, 1, len(resp.SegmentIDs))
+		assert.EqualValues(t, 0, len(resp.SegmentIDs))
 
 		ids, err = svr.segmentManager.GetFlushableSegments(context.TODO(), "channel-1", expireTs)
 		assert.NoError(t, err)
-		assert.EqualValues(t, 1, len(ids))
-		assert.EqualValues(t, segID, ids[0])
+		assert.EqualValues(t, 0, len(ids))
 	})
 
 	t.Run("closed server", func(t *testing.T) {
@@ -364,6 +363,39 @@ func TestFlush(t *testing.T) {
 		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.Equal(t, Timestamp(0), resp.GetFlushTs())
 	})
+}
+
+func TestFlushForImport(t *testing.T) {
+	svr := newTestServer(t, nil)
+	defer closeTestServer(t, svr)
+
+	schema := newTestSchema()
+	svr.meta.AddCollection(&collectionInfo{ID: 0, Schema: schema, Partitions: []int64{}})
+
+	// normal
+	allocation, err := svr.segmentManager.allocSegmentForImport(
+		context.TODO(), 0, 1, "ch-1", 1, 1)
+	assert.NoError(t, err)
+	segmentID := allocation.SegmentID
+	req := &datapb.FlushRequest{
+		CollectionID: 0,
+		SegmentIDs:   []UniqueID{segmentID},
+	}
+	resp, err := svr.flushForImport(context.TODO(), req)
+	assert.NoError(t, err)
+	assert.EqualValues(t, int32(0), resp.GetStatus().GetCode())
+
+	// failed
+	allocation, err = svr.segmentManager.allocSegmentForImport(
+		context.TODO(), 0, 1, "ch-1", 1, 1)
+	assert.NoError(t, err)
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(errors.New("mock err"))
+	svr.meta.catalog = catalog
+	req.SegmentIDs = []UniqueID{allocation.SegmentID}
+	resp, err = svr.flushForImport(context.TODO(), req)
+	assert.NoError(t, err)
+	assert.NotEqual(t, int32(0), resp.GetStatus().GetCode())
 }
 
 // func TestGetComponentStates(t *testing.T) {
@@ -1258,8 +1290,13 @@ func (s *spySegmentManager) allocSegmentForImport(ctx context.Context, collectio
 func (s *spySegmentManager) DropSegment(ctx context.Context, segmentID UniqueID) {
 }
 
+// FlushImportSegments set importing segment state to Flushed.
+func (s *spySegmentManager) FlushImportSegments(ctx context.Context, collectionID UniqueID, segmentIDs []UniqueID) error {
+	panic("not implemented")
+}
+
 // SealAllSegments seals all segments of collection with collectionID and return sealed segments
-func (s *spySegmentManager) SealAllSegments(ctx context.Context, collectionID UniqueID, segIDs []UniqueID, isImport bool) ([]UniqueID, error) {
+func (s *spySegmentManager) SealAllSegments(ctx context.Context, collectionID UniqueID, segIDs []UniqueID) ([]UniqueID, error) {
 	panic("not implemented") // TODO: Implement
 }
 

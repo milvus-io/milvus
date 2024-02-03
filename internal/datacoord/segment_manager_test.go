@@ -344,7 +344,7 @@ func TestSaveSegmentsToMeta(t *testing.T) {
 	allocations, err := segmentManager.AllocSegment(context.Background(), collID, 0, "c1", 1000)
 	assert.NoError(t, err)
 	assert.EqualValues(t, 1, len(allocations))
-	_, err = segmentManager.SealAllSegments(context.Background(), collID, nil, false)
+	_, err = segmentManager.SealAllSegments(context.Background(), collID, nil)
 	assert.NoError(t, err)
 	segment := meta.GetHealthySegment(allocations[0].SegmentID)
 	assert.NotNil(t, segment)
@@ -366,7 +366,7 @@ func TestSaveSegmentsToMetaWithSpecificSegments(t *testing.T) {
 	allocations, err := segmentManager.AllocSegment(context.Background(), collID, 0, "c1", 1000)
 	assert.NoError(t, err)
 	assert.EqualValues(t, 1, len(allocations))
-	_, err = segmentManager.SealAllSegments(context.Background(), collID, []int64{allocations[0].SegmentID}, false)
+	_, err = segmentManager.SealAllSegments(context.Background(), collID, []int64{allocations[0].SegmentID})
 	assert.NoError(t, err)
 	segment := meta.GetHealthySegment(allocations[0].SegmentID)
 	assert.NotNil(t, segment)
@@ -507,7 +507,7 @@ func TestGetFlushableSegments(t *testing.T) {
 		assert.NoError(t, err)
 		assert.EqualValues(t, 1, len(allocations))
 
-		ids, err := segmentManager.SealAllSegments(context.TODO(), collID, nil, false)
+		ids, err := segmentManager.SealAllSegments(context.TODO(), collID, nil)
 		assert.NoError(t, err)
 		assert.EqualValues(t, 1, len(ids))
 		assert.EqualValues(t, allocations[0].SegmentID, ids[0])
@@ -888,4 +888,42 @@ func TestSegmentManager_DropSegmentsOfChannel(t *testing.T) {
 			assert.ElementsMatch(t, tt.want, s.segments)
 		})
 	}
+}
+
+func TestSegmentManager_FlushImportSegments(t *testing.T) {
+	alloc := NewNMockAllocator(t)
+	alloc.EXPECT().allocID(mock.Anything).Return(0, nil)
+	alloc.EXPECT().allocTimestamp(mock.Anything).Return(1000, nil)
+	mm, err := newMemoryMeta()
+	assert.NoError(t, err)
+
+	schema := newTestSchema()
+	assert.NoError(t, err)
+	mm.AddCollection(&collectionInfo{ID: collID, Schema: schema})
+	segmentManager, _ := newSegmentManager(mm, alloc)
+	allocation, err := segmentManager.allocSegmentForImport(context.TODO(), collID, 1, "c1", 2, 3)
+	assert.NoError(t, err)
+
+	segmentID := allocation.SegmentID
+	segment := mm.GetSegment(segmentID)
+	assert.Equal(t, commonpb.SegmentState_Importing, segment.GetState())
+
+	// normal
+	err = segmentManager.FlushImportSegments(context.TODO(), collID, []UniqueID{segmentID})
+	assert.NoError(t, err)
+	segment = mm.GetSegment(segmentID)
+	assert.Equal(t, commonpb.SegmentState_Flushed, segment.GetState())
+
+	// no segment
+	err = segmentManager.FlushImportSegments(context.TODO(), collID, []UniqueID{6})
+	assert.NoError(t, err)
+
+	// collection not match
+	mm.AddCollection(&collectionInfo{ID: 6, Schema: schema})
+	allocation, err = segmentManager.allocSegmentForImport(context.TODO(), 6, 1, "c1", 2, 3)
+	assert.NoError(t, err)
+	err = segmentManager.FlushImportSegments(context.TODO(), collID, []UniqueID{allocation.SegmentID})
+	assert.NoError(t, err)
+	segment = mm.GetSegment(allocation.SegmentID)
+	assert.Equal(t, commonpb.SegmentState_Importing, segment.GetState())
 }
