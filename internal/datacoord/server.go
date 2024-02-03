@@ -952,6 +952,13 @@ func (s *Server) handleSessionEvent(ctx context.Context, role string, event *ses
 				zap.Any("type", event.EventType))
 		}
 	case typeutil.IndexNodeRole:
+		if Params.DataCoordCfg.BindIndexNodeMode.GetAsBool() {
+			log.Info("receive indexnode session event, but adding indexnode by bind mode, skip it",
+				zap.String("address", event.Session.Address),
+				zap.Int64("serverID", event.Session.ServerID),
+				zap.String("event type", event.EventType.String()))
+			return nil
+		}
 		switch event.EventType {
 		case sessionutil.SessionAddEvent:
 			log.Info("received indexnode register",
