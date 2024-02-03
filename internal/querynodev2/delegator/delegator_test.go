@@ -251,6 +251,40 @@ func (s *DelegatorSuite) initSegments() {
 func (s *DelegatorSuite) TestSearch() {
 	s.delegator.Start()
 	paramtable.SetNodeID(1)
+	s.Run("empty", func() {
+		defer func() {
+			s.workerManager.ExpectedCalls = nil
+		}()
+		workers := make(map[int64]*cluster.MockWorker)
+		worker1 := &cluster.MockWorker{}
+		workers[1] = worker1
+		worker1.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
+			Run(func(_ context.Context, req *querypb.SearchRequest) {
+				s.EqualValues("IP", req.Req.GetMetricType())
+				s.EqualValues([]string{s.vchannelName}, req.GetDmlChannels())
+			}).Return(&internalpb.SearchResults{
+			Status: &commonpb.Status{
+				ErrorCode: 1,
+				Reason:    "metric type not match: invalid parameter[expected=L2][actual=IP]",
+				Code:      1100, // ErrParameterInvalid
+			},
+		}, nil)
+		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
+			return workers[nodeID]
+		}, nil)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		_, err := s.delegator.Search(ctx, &querypb.SearchRequest{
+			Req: &internalpb.SearchRequest{
+				Base:       commonpbutil.NewMsgBase(),
+				MetricType: "IP",
+			},
+			DmlChannels: []string{s.vchannelName},
+		})
+
+		s.EqualError(err, "worker(1) query failed: metric type not match: invalid parameter[expected=L2][actual=IP]")
+	})
 	s.initSegments()
 	s.Run("normal", func() {
 		defer func() {

@@ -218,6 +218,18 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		return nil, err
 	}
 
+	if err == nil && len(tasks) == 0 && req.Req.MetricType != "" {
+		node, _ := sd.workerManager.GetWorker(ctx, paramtable.GetNodeID())
+		result, err := node.SearchSegments(ctx, req)
+		if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+			err = fmt.Errorf("worker(%d) query failed: %s", paramtable.GetNodeID(), result.GetStatus().GetReason())
+		}
+		if err != nil {
+			log.Warn("Delegator search failed", zap.Error(err))
+			return nil, err
+		}
+	}
+
 	log.Debug("Delegator search done")
 
 	return results, nil
