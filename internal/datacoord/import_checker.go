@@ -212,7 +212,7 @@ func (c *importChecker) checkImportState(jobID int64) {
 	}
 	for _, task := range tasks {
 		segmentIDs := task.(*importTask).GetSegmentIDs()
-		_, err := c.sm.SealAllSegments(context.Background(), task.GetCollectionID(), segmentIDs, true)
+		err := c.sm.FlushImportSegments(context.Background(), task.GetCollectionID(), segmentIDs)
 		if err != nil {
 			log.Warn("seal imported segments failed", WrapLogFields(task, zap.Error(err))...)
 			return
