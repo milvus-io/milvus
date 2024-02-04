@@ -183,7 +183,13 @@ type flushPolicy func(segment *SegmentInfo, t Timestamp) bool
 const flushInterval = 2 * time.Second
 
 func flushPolicyL1(segment *SegmentInfo, t Timestamp) bool {
-	return segment.GetState() == commonpb.SegmentState_Sealed && segment.Level != datapb.SegmentLevel_L0 &&
+	return segment.GetState() == commonpb.SegmentState_Sealed &&
+		segment.Level != datapb.SegmentLevel_L0 &&
 		time.Since(segment.lastFlushTime) >= flushInterval &&
-		(segment.GetLastExpireTime() <= t && segment.currRows != 0 || (segment.IsImporting))
+		segment.GetLastExpireTime() <= t &&
+		segment.currRows != 0 &&
+		// Decoupling the importing segment from the flush process,
+		// This check avoids notifying the datanode to flush the
+		// importing segment which may not exist.
+		!segment.GetIsImporting()
 }

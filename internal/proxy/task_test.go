@@ -3597,3 +3597,22 @@ func TestClusteringKey(t *testing.T) {
 		assert.Error(t, err)
 	})
 }
+
+func TestAlterCollectionCheckLoaded(t *testing.T) {
+	qc := &mocks.MockQueryCoordClient{}
+	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+		Status:              &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		CollectionIDs:       []int64{1},
+		InMemoryPercentages: []int64{100},
+	}, nil)
+	task := &alterCollectionTask{
+		AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+			Base:         &commonpb.MsgBase{},
+			CollectionID: 1,
+			Properties:   []*commonpb.KeyValuePair{{Key: common.MmapEnabledKey, Value: "true"}},
+		},
+		queryCoord: qc,
+	}
+	err := task.PreExecute(context.Background())
+	assert.Equal(t, merr.Code(merr.ErrCollectionLoaded), merr.Code(err))
+}

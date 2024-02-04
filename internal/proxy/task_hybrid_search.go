@@ -39,9 +39,10 @@ type hybridSearchTask struct {
 	request     *milvuspb.HybridSearchRequest
 	searchTasks []*searchTask
 
-	tr      *timerecord.TimeRecorder
-	schema  *schemaInfo
-	requery bool
+	tr               *timerecord.TimeRecorder
+	schema           *schemaInfo
+	requery          bool
+	partitionKeyMode bool
 
 	userOutputFields []string
 
@@ -51,9 +52,11 @@ type hybridSearchTask struct {
 
 	resultBuf             *typeutil.ConcurrentSet[*querypb.HybridSearchResult]
 	multipleRecallResults *typeutil.ConcurrentSet[*milvuspb.SearchResults]
-	reScorers             []reScorer
-	queryChannelsTs       map[string]Timestamp
-	rankParams            *rankParams
+	partitionIDsSet       *typeutil.ConcurrentSet[UniqueID]
+
+	reScorers       []reScorer
+	queryChannelsTs map[string]Timestamp
+	rankParams      *rankParams
 }
 
 func (t *hybridSearchTask) PreExecute(ctx context.Context) error {
@@ -97,13 +100,25 @@ func (t *hybridSearchTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	partitionKeyMode, err := isPartitionKeyMode(ctx, t.request.GetDbName(), collectionName)
+	t.partitionKeyMode, err = isPartitionKeyMode(ctx, t.request.GetDbName(), collectionName)
 	if err != nil {
 		log.Warn("is partition key mode failed", zap.Error(err))
 		return err
 	}
-	if partitionKeyMode && len(t.request.GetPartitionNames()) != 0 {
-		return errors.New("not support manually specifying the partition names if partition key mode is used")
+	if t.partitionKeyMode {
+		if len(t.request.GetPartitionNames()) != 0 {
+			return errors.New("not support manually specifying the partition names if partition key mode is used")
+		}
+		t.partitionIDsSet = typeutil.NewConcurrentSet[UniqueID]()
+	}
+
+	if !t.partitionKeyMode && len(t.request.GetPartitionNames()) > 0 {
+		// translate partition name to partition ids. Use regex-pattern to match partition name.
+		t.PartitionIDs, err = getPartitionIDs(ctx, t.request.GetDbName(), collectionName, t.request.GetPartitionNames())
+		if err != nil {
+			log.Warn("failed to get partition ids", zap.Error(err))
+			return err
+		}
 	}
 
 	t.request.OutputFields, t.userOutputFields, err = translateOutputFields(t.request.OutputFields, t.schema, false)
@@ -176,6 +191,7 @@ func (t *hybridSearchTask) PreExecute(ctx context.Context) error {
 				ReqID:        paramtable.GetNodeID(),
 				DbID:         0, // todo
 				CollectionID: collID,
+				PartitionIDs: t.GetPartitionIDs(),
 			},
 			request: searchReq,
 			schema:  t.schema,
@@ -184,13 +200,16 @@ func (t *hybridSearchTask) PreExecute(ctx context.Context) error {
 			node:    t.node,
 			lb:      t.lb,
 
-			partitionKeyMode: partitionKeyMode,
+			partitionKeyMode: t.partitionKeyMode,
 			resultBuf:        typeutil.NewConcurrentSet[*internalpb.SearchResults](),
 		}
 		err := initSearchRequest(ctx, t.searchTasks[index])
 		if err != nil {
 			log.Debug("init hybrid search request failed", zap.Error(err))
 			return err
+		}
+		if t.partitionKeyMode {
+			t.partitionIDsSet.Upsert(t.searchTasks[index].GetPartitionIDs()...)
 		}
 	}
 
@@ -203,11 +222,11 @@ func (t *hybridSearchTask) PreExecute(ctx context.Context) error {
 }
 
 func (t *hybridSearchTask) hybridSearchShard(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string) error {
-	for _, searchTask := range t.searchTasks {
-		t.HybridSearchRequest.Reqs = append(t.HybridSearchRequest.Reqs, searchTask.SearchRequest)
-	}
 	hybridSearchReq := typeutil.Clone(t.HybridSearchRequest)
 	hybridSearchReq.GetBase().TargetID = nodeID
+	if t.partitionKeyMode {
+		t.PartitionIDs = t.partitionIDsSet.Collect()
+	}
 	req := &querypb.HybridSearchRequest{
 		Req:             hybridSearchReq,
 		DmlChannels:     []string{channel},
@@ -249,6 +268,10 @@ func (t *hybridSearchTask) Execute(ctx context.Context) error {
 	log := log.Ctx(ctx).With(zap.Int64("collID", t.CollectionID), zap.String("collName", t.request.GetCollectionName()))
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute hybrid search %d", t.ID()))
 	defer tr.CtxElapse(ctx, "done")
+
+	for _, searchTask := range t.searchTasks {
+		t.HybridSearchRequest.Reqs = append(t.HybridSearchRequest.Reqs, searchTask.SearchRequest)
+	}
 
 	t.resultBuf = typeutil.NewConcurrentSet[*querypb.HybridSearchResult]()
 	err := t.lb.Execute(ctx, CollectionWorkLoad{
@@ -437,8 +460,7 @@ func (t *hybridSearchTask) Requery() error {
 		},
 	}
 
-	// TODO:silverxia move partitionIDs to hybrid search level
-	return doRequery(t.ctx, t.CollectionID, t.node, t.schema.CollectionSchema, queryReq, t.result, t.queryChannelsTs, []int64{})
+	return doRequery(t.ctx, t.CollectionID, t.node, t.schema.CollectionSchema, queryReq, t.result, t.queryChannelsTs, t.GetPartitionIDs())
 }
 
 func rankSearchResultData(ctx context.Context,

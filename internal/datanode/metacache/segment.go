@@ -41,7 +41,6 @@ type SegmentInfo struct {
 	syncingRows      int64
 	bfs              *BloomFilterSet
 	compactTo        int64
-	importing        bool
 	level            datapb.SegmentLevel
 	syncingTasks     int32
 }
@@ -107,7 +106,6 @@ func (s *SegmentInfo) Clone() *SegmentInfo {
 		bfs:              s.bfs,
 		compactTo:        s.compactTo,
 		level:            s.level,
-		importing:        s.importing,
 		syncingTasks:     s.syncingTasks,
 	}
 }

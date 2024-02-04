@@ -4,6 +4,7 @@ import timeout_decorator
 from numpy import NaN
 
 from pymilvus import Collection
+from pymilvus import MilvusClient
 
 sys.path.append("..")
 from check.func_check import ResponseChecker
@@ -23,8 +24,21 @@ INDEX_NAME = ""
 
 class HighLevelApiWrapper:
 
+    milvus_client = None
+
     def __init__(self, active_trace=False):
         self.active_trace = active_trace
+
+    def init_milvus_client(self, uri, user="", password="", db_name="", token="", timeout=None,
+                           check_task=None, check_items=None, active_trace=False, **kwargs):
+        self.active_trace = active_trace
+        func_name = sys._getframe().f_code.co_name
+        res, is_succ = api_request([MilvusClient, uri, user, password, db_name, token, timeout], **kwargs)
+        self.milvus_client = res if is_succ else None
+        check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ,
+                                       uri=uri, user=user, password=password, db_name=db_name, token=token,
+                                       timeout=timeout, **kwargs).run()
+        return res, check_result
 
     @trace()
     def create_schema(self, client, timeout=None, check_task=None,
@@ -523,4 +537,144 @@ class HighLevelApiWrapper:
                                        check_items, check,
                                        db_name=db_name,
                                        **kwargs).run()
+        return res, check_result
+
+    def create_user(self, user_name, password, timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.milvus_client.create_user, user_name, password], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task,
+                                       check_items, check, user_name=user_name,
+                                       password=password, **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def drop_user(self, user_name, timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.milvus_client.drop_user, user_name], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task,
+                                       check_items, check, user_name=user_name, **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def update_password(self, user_name, old_password, new_password, reset_connection=False,
+                        timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.milvus_client.update_password, user_name, old_password, new_password,
+                                  reset_connection], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task,
+                                       check_items, check, user_name=user_name, old_password=old_password,
+                                       new_password=new_password, reset_connection=reset_connection,
+                                       **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def list_users(self, timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.milvus_client.list_users], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task,
+                                       check_items, check, **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def describe_user(self, user_name, timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.milvus_client.describe_user, user_name], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task,
+                                       check_items, check, user_name=user_name, **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def create_role(self, role_name, timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.milvus_client.create_role, role_name], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task,
+                                       check_items, check, role_name=role_name, **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def drop_role(self, role_name, timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.milvus_client.drop_role, role_name], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task,
+                                       check_items, check, role_name=role_name, **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def describe_role(self, role_name, timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.milvus_client.describe_role, role_name], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task,
+                                       check_items, check, role_name=role_name, **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def list_roles(self, timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.milvus_client.list_roles], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task,
+                                       check_items, check, **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def grant_role(self, user_name, role_name, timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.milvus_client.grant_role, user_name, role_name], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check,
+                                       user_name=user_name, role_name=role_name, **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def revoke_role(self, user_name, role_name, timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.milvus_client.revoke_role, user_name, role_name], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check,
+                                       user_name=user_name, role_name=role_name, **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def grant_privilege(self, role_name, object_type, privilege, object_name, db_name="",
+                        timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.milvus_client.grant_privilege, role_name, object_type, privilege,
+                                  object_name, db_name], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check,
+                                       role_name=role_name, object_type=object_type, privilege=privilege,
+                                       object_name=object_name, db_name=db_name, **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def revoke_privilege(self, role_name, object_type, privilege, object_name, db_name="",
+                         timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.milvus_client.revoke_privilege, role_name, object_type, privilege,
+                                  object_name, db_name], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check,
+                                       role_name=role_name, object_type=object_type, privilege=privilege,
+                                       object_name=object_name, db_name=db_name, **kwargs).run()
         return res, check_result
