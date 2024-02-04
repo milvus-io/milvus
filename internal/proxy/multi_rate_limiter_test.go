@@ -306,12 +306,12 @@ func TestRateLimiter(t *testing.T) {
 		ctx := context.Background()
 		// avoid production precision issues when comparing 0-terminated numbers
 		newRate := fmt.Sprintf("%.2f1", rand.Float64())
-		etcdCli.KV.Put(ctx, "by-dev/config/quotaAndLimits/dml/insertRate/collection/max", "8")
-		defer etcdCli.KV.Delete(ctx, "by-dev/config/quotaAndLimits/dml/insertRate/collection/max")
 		etcdCli.KV.Put(ctx, "by-dev/config/quotaAndLimits/ddl/collectionRate", newRate)
 		defer etcdCli.KV.Delete(ctx, "by-dev/config/quotaAndLimits/ddl/collectionRate")
 		etcdCli.KV.Put(ctx, "by-dev/config/quotaAndLimits/ddl/partitionRate", "invalid")
 		defer etcdCli.KV.Delete(ctx, "by-dev/config/quotaAndLimits/ddl/partitionRate")
+		etcdCli.KV.Put(ctx, "by-dev/config/quotaAndLimits/dml/insertRate/collection/max", "8")
+		defer etcdCli.KV.Delete(ctx, "by-dev/config/quotaAndLimits/dml/insertRate/collection/max")
 
 		assert.Eventually(t, func() bool {
 			limit, _ := limiter.limiters.Get(internalpb.RateType_DDLCollection)

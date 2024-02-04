@@ -309,7 +309,7 @@ func (t *compactionTrigger) reCalcSegmentMaxNumOfRows(collectionID UniqueID, isD
 	return t.estimateNonDiskSegmentPolicy(collMeta.Schema)
 }
 
-// TODO: Update segment info should be written back to Etcd.
+// TODO: Updated segment info should be written back to meta and etcd, write in here without lock is very dangerous
 func (t *compactionTrigger) updateSegmentMaxSize(segments []*SegmentInfo) (bool, error) {
 	if len(segments) == 0 {
 		return false, nil
