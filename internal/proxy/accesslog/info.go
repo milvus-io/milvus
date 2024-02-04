@@ -30,6 +30,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -165,11 +166,11 @@ func getMethodStatus(i *GrpcAccessInfo) string {
 		return fmt.Sprintf("Grpc%s", code.String())
 	}
 
-	if i.status.GetCode() != 0 {
+	if i.status.GetCode() != 0 || i.err != nil {
 		return "Failed"
 	}
 
-	return code.String()
+	return "Successful"
 }
 
 func getUserName(i *GrpcAccessInfo) string {
@@ -268,10 +269,15 @@ func getExpr(i *GrpcAccessInfo) string {
 
 func getSdkVersion(i *GrpcAccessInfo) string {
 	clientInfo := connection.GetManager().Get(i.ctx)
-	if clientInfo == nil {
-		return unknownString
+	if clientInfo != nil {
+		return clientInfo.SdkType + "-" + clientInfo.SdkVersion
 	}
-	return clientInfo.SdkType + "-" + clientInfo.SdkVersion
+
+	if req, ok := i.req.(*milvuspb.ConnectRequest); ok {
+		return req.ClientInfo.SdkType + "-" + req.ClientInfo.SdkVersion
+	}
+
+	return unknownString
 }
 
 func getClusterPrefix(i *GrpcAccessInfo) string {
