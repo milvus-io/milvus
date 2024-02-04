@@ -47,7 +47,11 @@ type LoadIndexInfo struct {
 func newLoadIndexInfo(ctx context.Context) (*LoadIndexInfo, error) {
 	var cLoadIndexInfo C.CLoadIndexInfo
 
-	status := C.NewLoadIndexInfo(&cLoadIndexInfo)
+	var status C.CStatus
+	GetDynamicPool().Submit(func() (any, error) {
+		status = C.NewLoadIndexInfo(&cLoadIndexInfo)
+		return nil, nil
+	}).Await()
 	if err := HandleCStatus(ctx, &status, "NewLoadIndexInfo failed"); err != nil {
 		return nil, err
 	}
