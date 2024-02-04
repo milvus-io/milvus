@@ -1545,14 +1545,12 @@ SegmentSealedImpl::generate_binlog_index(const FieldId field_id) {
     }
     try {
         // get binlog data and meta
-        auto row_count = num_rows_.value();
+        int64_t row_count;
+        {
+            std::shared_lock lck(mutex_);
+            row_count = num_rows_.value();
+        }
         auto dim = field_meta.get_dim();
-        std::shared_ptr<ColumnBase> vec_data{};
-
-        vec_data = fields_.at(field_id);
-        auto dataset =
-            knowhere::GenDataSet(row_count, dim, (void*)vec_data->Data());
-        dataset->SetIsOwner(false);
         // generate index params
         auto field_binlog_config = std::unique_ptr<VecIndexConfig>(
             new VecIndexConfig(row_count,
@@ -1566,6 +1564,15 @@ SegmentSealedImpl::generate_binlog_index(const FieldId field_id) {
         build_config[knowhere::meta::DIM] = std::to_string(dim);
         build_config[knowhere::meta::NUM_BUILD_THREAD] = std::to_string(1);
         auto index_metric = field_binlog_config->GetMetricType();
+
+        std::shared_ptr<ColumnBase> vec_data{};
+        {
+            std::shared_lock lck(mutex_);
+            vec_data = fields_.at(field_id);
+        }
+        auto dataset =
+            knowhere::GenDataSet(row_count, dim, (void*)vec_data->Data());
+        dataset->SetIsOwner(false);
 
         index::IndexBasePtr vec_index =
             std::make_unique<index::VectorMemIndex<float>>(
