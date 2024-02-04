@@ -540,6 +540,11 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		log.Error("save binlog and checkpoints failed", zap.Error(err))
 		return merr.Status(err), nil
 	}
+	log.Info("SaveBinlogPaths sync segment with meta",
+		zap.Any("binlogs", req.GetField2BinlogPaths()),
+		zap.Any("deltalogs", req.GetDeltalogs()),
+		zap.Any("statslogs", req.GetField2StatslogPaths()),
+	)
 
 	if req.GetSegLevel() == datapb.SegmentLevel_L0 {
 		metrics.DataCoordSizeStoredL0Segment.WithLabelValues(fmt.Sprint(req.GetCollectionID())).Observe(calculateL0SegmentSize(req.GetField2StatslogPaths()))
