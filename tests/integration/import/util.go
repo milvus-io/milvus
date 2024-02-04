@@ -443,6 +443,28 @@ func GenerateParquetFile(filePath string, schema *schemapb.CollectionSchema, num
 	return fw.Write(recordBatch)
 }
 
+func GenerateNumpyFiles(cm storage.ChunkManager, schema *schemapb.CollectionSchema, rowCount int) (*internalpb.ImportFile, error) {
+	paths := make([]string, 0)
+	err := os.Mkdir(cm.RootPath(), os.ModePerm)
+	if err != nil {
+		return nil, err
+	}
+	for _, field := range schema.GetFields() {
+		if field.GetAutoID() && field.GetIsPrimaryKey() {
+			continue
+		}
+		path := fmt.Sprintf("%s/%s.npy", cm.RootPath(), field.GetName())
+		err := GenerateNumpyFile(path, rowCount, field.GetDataType())
+		if err != nil {
+			return nil, err
+		}
+		paths = append(paths, path)
+	}
+	return &internalpb.ImportFile{
+		Paths: paths,
+	}, nil
+}
+
 func GenerateNumpyFile(filePath string, rowCount int, dType schemapb.DataType) error {
 	writeFn := func(path string, data interface{}) error {
 		f, err := os.Create(path)
@@ -459,18 +481,81 @@ func GenerateNumpyFile(filePath string, rowCount int, dType schemapb.DataType) e
 		return nil
 	}
 
-	if dType == schemapb.DataType_VarChar {
-		var data []string
+	switch dType {
+	case schemapb.DataType_Bool:
+		boolData := make([]bool, 0)
 		for i := 0; i < rowCount; i++ {
-			data = append(data, "str")
+			boolData = append(boolData, i%3 != 0)
 		}
-		err := writeFn(filePath, data)
+		err := writeFn(filePath, boolData)
 		if err != nil {
-			log.Warn("failed to create numpy file", zap.Error(err))
 			return err
 		}
-	}
-	if dType == schemapb.DataType_FloatVector {
+	case schemapb.DataType_Float:
+		floatData := make([]float32, 0)
+		for i := 0; i < rowCount; i++ {
+			floatData = append(floatData, float32(i/2))
+		}
+		err := writeFn(filePath, floatData)
+		if err != nil {
+			return err
+		}
+	case schemapb.DataType_Double:
+		doubleData := make([]float64, 0)
+		for i := 0; i < rowCount; i++ {
+			doubleData = append(doubleData, float64(i/5))
+		}
+		err := writeFn(filePath, doubleData)
+		if err != nil {
+			return err
+		}
+	case schemapb.DataType_Int8:
+		int8Data := make([]int8, 0)
+		for i := 0; i < rowCount; i++ {
+			int8Data = append(int8Data, int8(i%256))
+		}
+		err := writeFn(filePath, int8Data)
+		if err != nil {
+			return err
+		}
+	case schemapb.DataType_Int16:
+		int16Data := make([]int16, 0)
+		for i := 0; i < rowCount; i++ {
+			int16Data = append(int16Data, int16(i%65536))
+		}
+		err := writeFn(filePath, int16Data)
+		if err != nil {
+			return err
+		}
+	case schemapb.DataType_Int32:
+		int32Data := make([]int32, 0)
+		for i := 0; i < rowCount; i++ {
+			int32Data = append(int32Data, int32(i%1000))
+		}
+		err := writeFn(filePath, int32Data)
+		if err != nil {
+			return err
+		}
+	case schemapb.DataType_Int64:
+		int64Data := make([]int64, 0)
+		for i := 0; i < rowCount; i++ {
+			int64Data = append(int64Data, int64(i))
+		}
+		err := writeFn(filePath, int64Data)
+		if err != nil {
+			return err
+		}
+	case schemapb.DataType_BinaryVector:
+		binVecData := make([]byte, 0)
+		total := rowCount * dim / 8
+		for i := 0; i < total; i++ {
+			binVecData = append(binVecData, byte(i%256))
+		}
+		err := writeFn(filePath, binVecData)
+		if err != nil {
+			return err
+		}
+	case schemapb.DataType_FloatVector:
 		data := make([][dim]float32, 0, rowCount)
 		for i := 0; i < rowCount; i++ {
 			vec := [dim]float32{}
@@ -481,10 +566,56 @@ func GenerateNumpyFile(filePath string, rowCount int, dType schemapb.DataType) e
 		}
 		err := writeFn(filePath, data)
 		if err != nil {
-			log.Warn("failed to create numpy file", zap.Error(err))
 			return err
 		}
+	case schemapb.DataType_Float16Vector:
+		total := int64(rowCount) * dim * 2
+		float16VecData := make([]byte, total)
+		_, err := rand2.Read(float16VecData)
+		if err != nil {
+			return err
+		}
+		err = writeFn(filePath, float16VecData)
+		if err != nil {
+			return err
+		}
+	case schemapb.DataType_String, schemapb.DataType_VarChar:
+		varcharData := make([]string, 0)
+		for i := 0; i < rowCount; i++ {
+			varcharData = append(varcharData, strconv.Itoa(i))
+		}
+		err := writeFn(filePath, varcharData)
+		if err != nil {
+			return err
+		}
+	case schemapb.DataType_JSON:
+		jsonData := make([][]byte, 0)
+		for i := 0; i < rowCount; i++ {
+			jsonData = append(jsonData, []byte(fmt.Sprintf("{\"y\": %d}", i)))
+		}
+		err := writeFn(filePath, jsonData)
+		if err != nil {
+			return err
+		}
+	case schemapb.DataType_Array:
+		arrayData := make([]*schemapb.ScalarField, 0)
+		for i := 0; i < rowCount; i++ {
+			arrayData = append(arrayData, &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_IntData{
+					IntData: &schemapb.IntArray{
+						Data: []int32{int32(i), int32(i + 1), int32(i + 2)},
+					},
+				},
+			})
+		}
+		err := writeFn(filePath, arrayData)
+		if err != nil {
+			return err
+		}
+	default:
+		panic(fmt.Sprintf("unimplemented data type: %s", dType.String()))
 	}
+
 	return nil
 }
 

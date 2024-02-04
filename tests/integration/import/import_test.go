@@ -43,10 +43,19 @@ import (
 type BulkInsertSuite struct {
 	integration.MiniClusterSuite
 
+	pkType   schemapb.DataType
+	autoID   bool
 	fileType importutilv2.FileType
 }
 
-func (s *BulkInsertSuite) testNormal() {
+func (s *BulkInsertSuite) SetupTest() {
+	s.MiniClusterSuite.SetupTest()
+	s.fileType = importutilv2.Parquet
+	s.pkType = schemapb.DataType_Int64
+	s.autoID = false
+}
+
+func (s *BulkInsertSuite) run() {
 	const (
 		rowCount = 100
 	)
@@ -57,8 +66,8 @@ func (s *BulkInsertSuite) testNormal() {
 
 	collectionName := "TestBulkInsert" + funcutil.GenRandomStr()
 
-	schema := integration.ConstructSchema(collectionName, dim, true,
-		&schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
+	schema := integration.ConstructSchema(collectionName, dim, s.autoID,
+		&schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: s.pkType, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "128"}}, IsPrimaryKey: true, AutoID: s.autoID},
 		&schemapb.FieldSchema{FieldID: 101, Name: "image_path", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "65535"}}},
 		&schemapb.FieldSchema{FieldID: 102, Name: "embeddings", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}}},
 	)
@@ -75,23 +84,9 @@ func (s *BulkInsertSuite) testNormal() {
 
 	var files []*internalpb.ImportFile
 	if s.fileType == importutilv2.Numpy {
-		path1 := c.ChunkManager.RootPath() + "/" + "embeddings.npy"
-		err = GenerateNumpyFile(path1, rowCount, schemapb.DataType_FloatVector)
+		importFile, err := GenerateNumpyFiles(c.ChunkManager, schema, rowCount)
 		s.NoError(err)
-		defer os.Remove(path1)
-		path2 := c.ChunkManager.RootPath() + "/" + "image_path.npy"
-		err = GenerateNumpyFile(path2, rowCount, schemapb.DataType_VarChar)
-		s.NoError(err)
-		defer os.Remove(path2)
-
-		files = []*internalpb.ImportFile{
-			{
-				Paths: []string{
-					c.ChunkManager.RootPath() + "/" + "embeddings.npy",
-					c.ChunkManager.RootPath() + "/" + "image_path.npy",
-				},
-			},
-		}
+		files = []*internalpb.ImportFile{importFile}
 	} else if s.fileType == importutilv2.JSON {
 		rowBasedFile := c.ChunkManager.RootPath() + "/" + "test.json"
 		GenerateJSONFile(s.T(), rowBasedFile, schema, rowCount)
@@ -122,6 +117,7 @@ func (s *BulkInsertSuite) testNormal() {
 		Files:          files,
 	})
 	s.NoError(err)
+	s.Equal(int32(0), importResp.GetStatus().GetCode())
 	log.Info("Import result", zap.Any("importResp", importResp))
 
 	jobID := importResp.GetJobID()
@@ -169,17 +165,35 @@ func (s *BulkInsertSuite) testNormal() {
 
 func (s *BulkInsertSuite) TestNumpy() {
 	s.fileType = importutilv2.Numpy
-	s.testNormal()
+	s.run()
 }
 
 func (s *BulkInsertSuite) TestJSON() {
 	s.fileType = importutilv2.JSON
-	s.testNormal()
+	s.run()
 }
 
 func (s *BulkInsertSuite) TestParquet() {
 	s.fileType = importutilv2.Parquet
-	s.testNormal()
+	s.run()
+}
+
+func (s *BulkInsertSuite) TestAutoID() {
+	s.pkType = schemapb.DataType_Int64
+	s.autoID = true
+	s.run()
+
+	s.pkType = schemapb.DataType_VarChar
+	s.autoID = true
+	s.run()
+}
+
+func (s *BulkInsertSuite) TestPK() {
+	s.pkType = schemapb.DataType_Int64
+	s.run()
+
+	s.pkType = schemapb.DataType_VarChar
+	s.run()
 }
 
 func (s *BulkInsertSuite) TestZeroRowCount() {
