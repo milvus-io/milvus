@@ -22,8 +22,10 @@ import (
 
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -56,8 +58,10 @@ func (b *BinlogIoImpl) Download(ctx context.Context, paths []string) ([][]byte, 
 			var val []byte
 			var err error
 
+			log.Debug("BinlogIO download", zap.String("path", path))
 			err = retry.Do(ctx, func() error {
 				val, err = b.Read(ctx, path)
+				log.Warn("BinlogIO fail to download", zap.String("path", path), zap.Error(err))
 				return err
 			})
 
@@ -80,6 +84,7 @@ func (b *BinlogIoImpl) Upload(ctx context.Context, kvs map[string][]byte) error 
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "Upload")
 	defer span.End()
 	future := b.pool.Submit(func() (any, error) {
+		log.Debug("BinlogIO uplaod", zap.Strings("paths", lo.Keys(kvs)))
 		err := retry.Do(ctx, func() error {
 			return b.MultiWrite(ctx, kvs)
 		})

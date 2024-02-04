@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -160,71 +161,13 @@ func (t *levelZeroCompactionTask) compact() (*datapb.CompactionPlanResult, error
 		}
 	}
 
-	// TODO
-	// batchProcess := func() ([]*datapb.CompactionSegment, error) {
-	//     resultSegments := make(map[int64]*datapb.CompactionSegment)
-	//
-	//     iters, err := t.loadDelta(ctxTimeout, lo.Values(totalDeltalogs)...)
-	//     if err != nil {
-	//         return nil, err
-	//     }
-	//     log.Info("Batch L0 compaction load delta into memeory", zap.Duration("elapse", t.tr.RecordSpan()))
-	//
-	//     alteredSegments := make(map[int64]*storage.DeleteData)
-	//     err = t.splitDelta(iters, alteredSegments, targetSegIDs)
-	//     if err != nil {
-	//         return nil, err
-	//     }
-	//     log.Info("Batch L0 compaction split delta into segments", zap.Duration("elapse", t.tr.RecordSpan()))
-	//
-	//     err = t.uploadByCheck(ctxTimeout, false, alteredSegments, resultSegments)
-	//     log.Info("Batch L0 compaction upload all", zap.Duration("elapse", t.tr.RecordSpan()))
-	//
-	//     return lo.Values(resultSegments), nil
-	// }
-
-	linearProcess := func() ([]*datapb.CompactionSegment, error) {
-		var (
-			resultSegments  = make(map[int64]*datapb.CompactionSegment)
-			alteredSegments = make(map[int64]*storage.DeleteData)
-		)
-		for segID, deltaLogs := range totalDeltalogs {
-			log := log.With(zap.Int64("levelzero segment", segID))
-			log.Info("Linear L0 compaction processing segment", zap.Int("target segment count", len(targetSegIDs)))
-
-			allIters, err := t.loadDelta(ctxTimeout, deltaLogs)
-			if err != nil {
-				log.Warn("Linear L0 compaction loadDelta fail", zap.Error(err))
-				return nil, err
-			}
-
-			err = t.splitDelta(allIters, alteredSegments, targetSegIDs)
-			if err != nil {
-				log.Warn("Linear L0 compaction splitDelta fail", zap.Error(err))
-				return nil, err
-			}
-
-			err = t.uploadByCheck(ctxTimeout, true, alteredSegments, resultSegments)
-			if err != nil {
-				log.Warn("Linear L0 compaction upload buffer fail", zap.Error(err))
-				return nil, err
-			}
-		}
-
-		err := t.uploadByCheck(ctxTimeout, false, alteredSegments, resultSegments)
-		if err != nil {
-			log.Warn("Linear L0 compaction upload all buffer fail", zap.Error(err))
-			return nil, err
-		}
-		log.Info("Linear L0 compaction finished", zap.Duration("elapse", t.tr.RecordSpan()))
-		return lo.Values(resultSegments), nil
-	}
-
 	var resultSegments []*datapb.CompactionSegment
-	// if totalSize*3 < int64(hardware.GetFreeMemoryCount()) {
-	//     resultSegments, err = batchProcess()
-	// }
-	resultSegments, err = linearProcess()
+	// TODO
+	if hardware.GetFreeMemoryCount() < uint64(totalSize)*20 {
+		resultSegments, err = t.linearProcess(ctxTimeout, targetSegIDs, totalDeltalogs)
+	} else {
+		resultSegments, err = t.batchProcess(ctxTimeout, targetSegIDs, lo.Values(totalDeltalogs)...)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -244,29 +187,94 @@ func (t *levelZeroCompactionTask) compact() (*datapb.CompactionPlanResult, error
 	return result, nil
 }
 
+func (t *levelZeroCompactionTask) linearProcess(ctx context.Context, targetSegments []int64, totalDeltalogs map[int64][]string) ([]*datapb.CompactionSegment, error) {
+	log := log.Ctx(t.ctx).With(
+		zap.Int64("planID", t.plan.GetPlanID()),
+		zap.String("type", t.plan.GetType().String()),
+		zap.Int("target segment counts", len(targetSegments)),
+	)
+	var (
+		resultSegments  = make(map[int64]*datapb.CompactionSegment)
+		alteredSegments = make(map[int64]*storage.DeleteData)
+	)
+	for segID, deltaLogs := range totalDeltalogs {
+		log := log.With(zap.Int64("levelzero segment", segID))
+
+		log.Info("Linear L0 compaction start processing segment")
+		allIters, err := t.loadDelta(ctx, deltaLogs)
+		if err != nil {
+			log.Warn("Linear L0 compaction loadDelta fail", zap.Int64s("target segments", targetSegments), zap.Error(err))
+			return nil, err
+		}
+
+		t.splitDelta(ctx, allIters, alteredSegments, targetSegments)
+
+		err = t.uploadByCheck(ctx, true, alteredSegments, resultSegments)
+		if err != nil {
+			log.Warn("Linear L0 compaction upload buffer fail", zap.Int64s("target segments", targetSegments), zap.Error(err))
+			return nil, err
+		}
+	}
+
+	err := t.uploadByCheck(ctx, false, alteredSegments, resultSegments)
+	if err != nil {
+		log.Warn("Linear L0 compaction upload all buffer fail", zap.Int64s("target segment", targetSegments), zap.Error(err))
+		return nil, err
+	}
+	log.Info("Linear L0 compaction finished", zap.Duration("elapse", t.tr.RecordSpan()))
+	return lo.Values(resultSegments), nil
+}
+
+func (t *levelZeroCompactionTask) batchProcess(ctx context.Context, targetSegments []int64, deltaLogs ...[]string) ([]*datapb.CompactionSegment, error) {
+	log := log.Ctx(t.ctx).With(
+		zap.Int64("planID", t.plan.GetPlanID()),
+		zap.String("type", t.plan.GetType().String()),
+		zap.Int("target segment counts", len(targetSegments)),
+	)
+	log.Info("Batch L0 compaction start processing")
+	resultSegments := make(map[int64]*datapb.CompactionSegment)
+
+	iters, err := t.loadDelta(ctx, lo.Flatten(deltaLogs))
+	if err != nil {
+		log.Warn("Batch L0 compaction loadDelta fail", zap.Int64s("target segments", targetSegments), zap.Error(err))
+		return nil, err
+	}
+
+	alteredSegments := make(map[int64]*storage.DeleteData)
+	t.splitDelta(ctx, iters, alteredSegments, targetSegments)
+
+	err = t.uploadByCheck(ctx, false, alteredSegments, resultSegments)
+	if err != nil {
+		log.Warn("Batch L0 compaction upload fail", zap.Int64s("target segments", targetSegments), zap.Error(err))
+		return nil, err
+	}
+	log.Info("Batch L0 compaction finished", zap.Duration("elapse", t.tr.RecordSpan()))
+	return lo.Values(resultSegments), nil
+}
+
 func (t *levelZeroCompactionTask) loadDelta(ctx context.Context, deltaLogs ...[]string) ([]*iter.DeltalogIterator, error) {
 	allIters := make([]*iter.DeltalogIterator, 0)
+
 	for _, paths := range deltaLogs {
 		blobs, err := t.Download(ctx, paths)
 		if err != nil {
 			return nil, err
 		}
 
-		deltaIter, err := iter.NewDeltalogIterator(blobs, nil)
-		if err != nil {
-			return nil, err
-		}
-
-		allIters = append(allIters, deltaIter)
+		allIters = append(allIters, iter.NewDeltalogIterator(blobs, nil))
 	}
 	return allIters, nil
 }
 
 func (t *levelZeroCompactionTask) splitDelta(
+	ctx context.Context,
 	allIters []*iter.DeltalogIterator,
 	targetSegBuffer map[int64]*storage.DeleteData,
 	targetSegIDs []int64,
-) error {
+) {
+	_, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "L0Compact splitDelta")
+	defer span.End()
+
 	// segments shall be safe to read outside
 	segments := t.metacache.GetSegmentsBy(metacache.WithSegmentIDs(targetSegIDs...))
 	split := func(pk storage.PrimaryKey) []int64 {
@@ -278,10 +286,8 @@ func (t *levelZeroCompactionTask) splitDelta(
 	// spilt all delete data to segments
 	for _, deltaIter := range allIters {
 		for deltaIter.HasNext() {
-			labeled, err := deltaIter.Next()
-			if err != nil {
-				return err
-			}
+			// checked by HasNext, no error here
+			labeled, _ := deltaIter.Next()
 
 			predicted := split(labeled.GetPk())
 
@@ -296,7 +302,6 @@ func (t *levelZeroCompactionTask) splitDelta(
 			}
 		}
 	}
-	return nil
 }
 
 func (t *levelZeroCompactionTask) composeDeltalog(segmentID int64, dData *storage.DeleteData) (map[string][]byte, *datapb.Binlog, error) {
