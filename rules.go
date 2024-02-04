@@ -397,13 +397,3 @@ func writestring(m dsl.Matcher) {
 		Suggest("$w.Write($b)")
 }
 
-func badlock(m dsl.Matcher) {
-	// Shouldn't give many false positives without type filter
-	// as Lock+Unlock pairs in combination with defer gives us pretty
-	// a good chance to guess correctly. If we constrain the type to sync.Mutex
-	// then it'll be harder to match embedded locks and custom methods
-	// that may forward the call to the sync.Mutex (or other synchronization primitive).
-
-	m.Match(`$mu.Lock(); defer $mu.RUnlock()`).Report(`maybe $mu.RLock() was intended?`)
-	m.Match(`$mu.RLock(); defer $mu.Unlock()`).Report(`maybe $mu.Lock() was intended?`)
-}
