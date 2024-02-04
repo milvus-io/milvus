@@ -1345,7 +1345,9 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 		return float64(mem) / 1024 / 1024
 	}
 
-	memUsage := hardware.GetUsedMemoryCount() + loader.committedResource.MemorySize
+	warmupMemUsage := paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsUint64() * uint64(GetChunkCachePool().Cap())
+
+	memUsage := hardware.GetUsedMemoryCount() + loader.committedResource.MemorySize + warmupMemUsage
 	totalMem := hardware.GetMemoryCount()
 	if memUsage == 0 || totalMem == 0 {
 		return 0, 0, errors.New("get memory failed when checkSegmentSize")
