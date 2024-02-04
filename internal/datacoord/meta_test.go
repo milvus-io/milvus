@@ -878,76 +878,39 @@ func Test_meta_SetSegmentImporting(t *testing.T) {
 }
 
 func Test_meta_GetSegmentsOfCollection(t *testing.T) {
-	type fields struct {
-		segments *SegmentsInfo
-	}
-	type args struct {
-		collectionID UniqueID
-	}
-	tests := []struct {
-		name   string
-		fields fields
-		args   args
-		expect []*SegmentInfo
-	}{
-		{
-			"test get segments",
-			fields{
-				&SegmentsInfo{
-					map[int64]*SegmentInfo{
-						1: {
-							SegmentInfo: &datapb.SegmentInfo{
-								ID:           1,
-								CollectionID: 1,
-								State:        commonpb.SegmentState_Flushed,
-							},
-						},
-						2: {
-							SegmentInfo: &datapb.SegmentInfo{
-								ID:           2,
-								CollectionID: 1,
-								State:        commonpb.SegmentState_Growing,
-							},
-						},
-						3: {
-							SegmentInfo: &datapb.SegmentInfo{
-								ID:           3,
-								CollectionID: 2,
-								State:        commonpb.SegmentState_Flushed,
-							},
-						},
-					},
+	storedSegments := &SegmentsInfo{
+		map[int64]*SegmentInfo{
+			1: {
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:           1,
+					CollectionID: 1,
+					State:        commonpb.SegmentState_Flushed,
 				},
 			},
-			args{
-				collectionID: 1,
-			},
-			[]*SegmentInfo{
-				{
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:           1,
-						CollectionID: 1,
-						State:        commonpb.SegmentState_Flushed,
-					},
+			2: {
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:           2,
+					CollectionID: 1,
+					State:        commonpb.SegmentState_Growing,
 				},
-				{
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:           2,
-						CollectionID: 1,
-						State:        commonpb.SegmentState_Growing,
-					},
+			},
+			3: {
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:           3,
+					CollectionID: 2,
+					State:        commonpb.SegmentState_Flushed,
 				},
 			},
 		},
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			m := &meta{
-				segments: tt.fields.segments,
-			}
-			got := m.GetSegmentsOfCollection(tt.args.collectionID)
-			assert.ElementsMatch(t, tt.expect, got)
-		})
+	expectedSeg := map[int64]commonpb.SegmentState{1: commonpb.SegmentState_Flushed, 2: commonpb.SegmentState_Growing}
+	m := &meta{segments: storedSegments}
+	got := m.GetSegmentsOfCollection(1)
+	assert.Equal(t, len(expectedSeg), len(got))
+	for _, gotInfo := range got {
+		expected, ok := expectedSeg[gotInfo.ID]
+		assert.True(t, ok)
+		assert.Equal(t, expected, gotInfo.GetState())
 	}
 }
 

@@ -229,17 +229,20 @@ func (m *meta) GetSegmentsChanPart(selector SegmentInfoSelector) []*chanPartSegm
 		if !selector(segmentInfo) {
 			continue
 		}
-		dim := fmt.Sprintf("%d-%s", segmentInfo.PartitionID, segmentInfo.InsertChannel)
+
+		cloned := segmentInfo.Clone()
+
+		dim := fmt.Sprintf("%d-%s", cloned.PartitionID, cloned.InsertChannel)
 		entry, ok := mDimEntry[dim]
 		if !ok {
 			entry = &chanPartSegments{
-				collectionID: segmentInfo.CollectionID,
-				partitionID:  segmentInfo.PartitionID,
-				channelName:  segmentInfo.InsertChannel,
+				collectionID: cloned.CollectionID,
+				partitionID:  cloned.PartitionID,
+				channelName:  cloned.InsertChannel,
 			}
 			mDimEntry[dim] = entry
 		}
-		entry.segments = append(entry.segments, segmentInfo)
+		entry.segments = append(entry.segments, cloned)
 	}
 
 	result := make([]*chanPartSegments, 0, len(mDimEntry))
@@ -342,7 +345,7 @@ func (m *meta) GetHealthySegment(segID UniqueID) *SegmentInfo {
 	defer m.RUnlock()
 	segment := m.segments.GetSegment(segID)
 	if segment != nil && isSegmentHealthy(segment) {
-		return segment
+		return segment.Clone()
 	}
 	return nil
 }
@@ -480,10 +483,11 @@ func CreateL0Operator(collectionID, partitionID, segmentID int64, channel string
 					PartitionID:   partitionID,
 					InsertChannel: channel,
 					NumOfRows:     0,
-					State:         commonpb.SegmentState_Growing,
+					State:         commonpb.SegmentState_Flushed,
 					Level:         datapb.SegmentLevel_L0,
 				},
 			}
+			modPack.metricMutation.addNewSeg(commonpb.SegmentState_Flushed, datapb.SegmentLevel_L0, 0)
 		}
 		return true
 	}
@@ -906,7 +910,7 @@ func (m *meta) SelectSegments(selector SegmentInfoSelector) []*SegmentInfo {
 	segments := m.segments.GetSegments()
 	for _, info := range segments {
 		if selector(info) {
-			ret = append(ret, info)
+			ret = append(ret, info.Clone())
 		}
 	}
 	return ret
