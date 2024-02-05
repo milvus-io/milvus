@@ -99,6 +99,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+        if: ${{ ! startsWith(runner.name, 'self') }} # skip this step if it is self-hosted runner
+        with:
+          root-reserve-mb: 20480
+          swap-size-mb: 1024
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
       - name: Download code
         uses: actions/download-artifact@v3.0.1
         with:
@@ -136,6 +145,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+        if: ${{ ! startsWith(runner.name, 'self') }} # skip this step if it is self-hosted runner
+        with:
+          root-reserve-mb: 20480
+          swap-size-mb: 1024
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
       - name: Download code
         uses: actions/download-artifact@v3.0.1
         with:
@@ -172,6 +190,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+        if: ${{ ! startsWith(runner.name, 'self') }} # skip this step if it is self-hosted runner
+        with:
+          root-reserve-mb: 20480
+          swap-size-mb: 1024
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
       - name: Download code
         uses: actions/download-artifact@v3.0.1
         with:
