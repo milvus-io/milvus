@@ -1916,9 +1916,10 @@ func (c *Core) ListAliases(ctx context.Context, in *milvuspb.ListAliasesRequest)
 
 	log.Info("done to list aliases")
 	return &milvuspb.ListAliasesResponse{
-		Status:  merr.Status(nil),
-		DbName:  in.GetDbName(),
-		Aliases: aliases,
+		Status:         merr.Status(nil),
+		DbName:         in.GetDbName(),
+		CollectionName: in.GetCollectionName(),
+		Aliases:        aliases,
 	}, nil
 }
 
