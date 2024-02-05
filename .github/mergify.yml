@@ -114,7 +114,7 @@ pull_request_rules:
       - 'status-success=Code Checker AMD64 Ubuntu 20.04'
       - 'status-success=Code Checker MacOS 12'
       - 'status-success=Code Checker Amazonlinux 2023'
-      - 'status-success=UT for Go (20.04)'
+      - 'status-success=UT for Go'
       - or:
           - -files~=^(?!pkg\/.*_test\.go).*$
           - -files~=^(?!internal\/.*_test\.go).*$
