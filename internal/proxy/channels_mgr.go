@@ -249,7 +249,7 @@ func (mgr *singleTypeChannelsMgr) lockGetStream(collectionID UniqueID) (msgstrea
 	if ok {
 		return streamInfos.stream, nil
 	}
-	return nil, fmt.Errorf("collection not found: %d", collectionID)
+	return nil, fmt.Errorf("collection not found in channels manager: %d", collectionID)
 }
 
 // getOrCreateStream get message stream of specified collection.

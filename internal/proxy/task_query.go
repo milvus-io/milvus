@@ -326,7 +326,8 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	t.plan.Node.(*planpb.PlanNode_Query).Query.Limit = t.RetrieveRequest.Limit
 
 	if planparserv2.IsAlwaysTruePlan(t.plan) && t.RetrieveRequest.Limit == typeutil.Unlimited {
-		return fmt.Errorf("empty expression should be used with limit")
+		return fmt.Errorf("The query cannot proceed without a specified filter expression or limit. " +
+			"please add a limit constraint or consider using a query iterator")
 	}
 
 	// convert partition names only when requery is false

@@ -302,7 +302,7 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 func (dr *deleteRunner) Run(ctx context.Context) error {
 	plan, err := planparserv2.CreateRetrievePlan(dr.schema.CollectionSchema, dr.req.Expr)
 	if err != nil {
-		return fmt.Errorf("failed to create expr plan, expr = %s", dr.req.GetExpr())
+		return fmt.Errorf("failed to parse delete expression, expr = %s", dr.req.GetExpr())
 	}
 
 	isSimple, pk, numRow := getPrimaryKeysFromPlan(dr.schema.CollectionSchema, plan)

@@ -588,9 +588,9 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 		err := merr.Error(t.result.GetStatus())
 		if errors.Is(err, merr.ErrCollectionNotFound) {
 			// nolint
-			t.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+			t.result.Status.ErrorCode = commonpb.ErrorCode_CollectionNotExists
 			// nolint
-			t.result.Status.Reason = "can't find collection " + t.result.GetStatus().GetReason()
+			t.result.Status.Reason = "can't find collection " + "DB" + t.GetDbName() + "Collection " + t.GetCollectionName()
 		}
 	} else {
 		t.result.Schema.Name = result.Schema.Name
