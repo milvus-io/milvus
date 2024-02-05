@@ -290,6 +290,10 @@ func (cluster *MiniClusterV2) GetContext() context.Context {
 	return cluster.ctx
 }
 
+func (cluster *MiniClusterV2) GetFactory() dependency.Factory {
+	return cluster.factory
+}
+
 func GetAvailablePorts(n int) ([]int, error) {
 	ports := make([]int, n)
 	for i := range ports {

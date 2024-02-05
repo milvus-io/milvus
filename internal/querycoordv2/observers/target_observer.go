@@ -204,6 +204,8 @@ func (ob *TargetObserver) init(ctx context.Context, collectionID int64) {
 	if ob.shouldUpdateCurrentTarget(ctx, collectionID) {
 		ob.updateCurrentTarget(collectionID)
 	}
+	// refresh collection loading status upon restart
+	ob.check(ctx, collectionID)
 }
 
 // UpdateNextTarget updates the next target,
