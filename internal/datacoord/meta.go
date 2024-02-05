@@ -599,6 +599,12 @@ func UpdateStartPosition(startPositions []*datapb.SegmentStartPosition) UpdateOp
 
 func UpdateDmlPosition(segmentID int64, dmlPosition *msgpb.MsgPosition) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
+		if len(dmlPosition.GetMsgID()) == 0 {
+			log.Warn("meta update: update dml position failed - nil position msg id",
+				zap.Int64("segmentID", segmentID))
+			return false
+		}
+
 		segment := modPack.Get(segmentID)
 		if segment == nil {
 			log.Warn("meta update: update dml position failed - segment not found",
@@ -606,9 +612,6 @@ func UpdateDmlPosition(segmentID int64, dmlPosition *msgpb.MsgPosition) UpdateOp
 			return false
 		}
 
-		if len(dmlPosition.GetMsgID()) == 0 {
-			return false
-		}
 		segment.DmlPosition = dmlPosition
 		return true
 	}

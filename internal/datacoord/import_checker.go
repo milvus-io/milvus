@@ -237,7 +237,6 @@ func (c *importChecker) checkImportState(jobID int64) {
 }
 
 func (c *importChecker) checkTimeout(jobID int64) {
-	inactiveTimeout := Params.DataCoordCfg.ImportInactiveTimeout.GetAsDuration(time.Second)
 	tasks := c.imeta.GetBy(WithStates(internalpb.ImportState_InProgress), WithJob(jobID))
 	var isTimeout bool
 	for _, task := range tasks {
@@ -248,11 +247,8 @@ func (c *importChecker) checkTimeout(jobID int64) {
 				WrapLogFields(task, zap.Time("timeoutTime", timeoutTime))...)
 			break
 		}
-		if time.Since(task.GetLastActiveTime()) > inactiveTimeout {
-			isTimeout = true
-			log.Warn("Import task timeout, task progress is stagnant",
-				WrapLogFields(task, zap.Duration("inactiveTimeout", inactiveTimeout))...)
-			break
+		if time.Since(task.GetLastActiveTime()) > 10*time.Minute {
+			log.Warn("task progress is stagnant", WrapLogFields(task)...)
 		}
 	}
 	if !isTimeout {
@@ -264,7 +260,9 @@ func (c *importChecker) checkTimeout(jobID int64) {
 			UpdateReason(fmt.Sprintf("import timeout, jobID=%d, taskID=%d", task.GetJobID(), task.GetTaskID())))
 		if err != nil {
 			log.Warn("update task state failed", WrapLogFields(task, zap.Error(err))...)
+			continue
 		}
+		log.Warn("successfully update task state to `failed`", WrapLogFields(task)...)
 	}
 }
 
@@ -311,7 +309,7 @@ func (c *importChecker) checkGC(jobID int64) {
 			err := c.imeta.Remove(task.GetTaskID())
 			if err != nil {
 				log.Warn("remove task failed during GC", WrapLogFields(task, zap.Error(err))...)
-				return
+				continue
 			}
 			log.Info("reached GC retention, task removed", WrapLogFields(task)...)
 		}

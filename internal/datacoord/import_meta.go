@@ -21,10 +21,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/samber/lo"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 )
 
@@ -55,35 +56,50 @@ func NewImportMeta(broker broker.Broker, catalog metastore.DataCoordCatalog) (Im
 		})
 		return schema, err
 	}
-	restoredTasks, err := catalog.ListImportTasks()
+
+	restoredPreImportTasks, err := catalog.ListPreImportTasks()
 	if err != nil {
 		return nil, err
 	}
+	restoredImportTasks, err := catalog.ListImportTasks()
+	if err != nil {
+		return nil, err
+	}
+
 	tasks := make(map[int64]ImportTask)
-	for _, t := range restoredTasks {
-		switch task := t.(type) {
-		case *datapb.PreImportTask:
-			schema, err := getSchema(task.GetCollectionID())
-			if err != nil {
-				return nil, err
-			}
-			tasks[task.GetTaskID()] = &preImportTask{
-				PreImportTask:  task,
-				schema:         schema,
-				lastActiveTime: time.Now(),
-			}
-		case *datapb.ImportTaskV2:
-			schema, err := getSchema(task.GetCollectionID())
-			if err != nil {
-				return nil, err
-			}
-			tasks[task.GetTaskID()] = &importTask{
-				ImportTaskV2:   task,
-				schema:         schema,
-				lastActiveTime: time.Now(),
-			}
+	for _, task := range restoredPreImportTasks {
+		tasks[task.GetTaskID()] = &preImportTask{
+			PreImportTask:  task,
+			lastActiveTime: time.Now(),
 		}
 	}
+	for _, task := range restoredImportTasks {
+		tasks[task.GetTaskID()] = &importTask{
+			ImportTaskV2:   task,
+			lastActiveTime: time.Now(),
+		}
+	}
+
+	byColl := lo.GroupBy(lo.Values(tasks), func(t ImportTask) int64 {
+		return t.GetCollectionID()
+	})
+	collectionSchemas := make(map[int64]*schemapb.CollectionSchema)
+	for collectionID := range byColl {
+		schema, err := getSchema(collectionID)
+		if err != nil {
+			return nil, err
+		}
+		collectionSchemas[collectionID] = schema
+	}
+	for i := range tasks {
+		switch tasks[i].(type) {
+		case *preImportTask:
+			tasks[i].(*preImportTask).schema = collectionSchemas[tasks[i].GetCollectionID()]
+		case *importTask:
+			tasks[i].(*importTask).schema = collectionSchemas[tasks[i].GetCollectionID()]
+		}
+	}
+
 	return &importMeta{
 		tasks:   tasks,
 		catalog: catalog,
@@ -95,7 +111,7 @@ func (m *importMeta) Add(task ImportTask) error {
 	defer m.mu.Unlock()
 	switch task.GetType() {
 	case PreImportTaskType:
-		err := m.catalog.SaveImportTask(task.(*preImportTask).PreImportTask)
+		err := m.catalog.SavePreImportTask(task.(*preImportTask).PreImportTask)
 		if err != nil {
 			return err
 		}
@@ -120,7 +136,7 @@ func (m *importMeta) Update(taskID int64, actions ...UpdateAction) error {
 		}
 		switch updatedTask.GetType() {
 		case PreImportTaskType:
-			err := m.catalog.SaveImportTask(updatedTask.(*preImportTask).PreImportTask)
+			err := m.catalog.SavePreImportTask(updatedTask.(*preImportTask).PreImportTask)
 			if err != nil {
 				return err
 			}
@@ -164,10 +180,18 @@ OUTER:
 func (m *importMeta) Remove(taskID int64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, ok := m.tasks[taskID]; ok {
-		err := m.catalog.DropImportTask(taskID)
-		if err != nil {
-			return err
+	if task, ok := m.tasks[taskID]; ok {
+		switch task.GetType() {
+		case PreImportTaskType:
+			err := m.catalog.DropPreImportTask(taskID)
+			if err != nil {
+				return err
+			}
+		case ImportTaskType:
+			err := m.catalog.DropImportTask(taskID)
+			if err != nil {
+				return err
+			}
 		}
 		delete(m.tasks, taskID)
 	}

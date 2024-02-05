@@ -94,16 +94,18 @@ func (s *importScheduler) process() {
 	sort.Slice(jobs, func(i, j int) bool {
 		return jobs[i] < jobs[j]
 	})
+	nodeSlots := s.peekSlots()
 	for _, job := range jobs {
 		tasks := tasksByJob[job]
 		for _, task := range tasks {
+			nodeID := s.getNodeID(nodeSlots)
 			switch task.GetState() {
 			case internalpb.ImportState_Pending:
 				switch task.GetType() {
 				case PreImportTaskType:
-					s.processPendingPreImport(task)
+					s.processPendingPreImport(task, nodeID)
 				case ImportTaskType:
-					s.processPendingImport(task)
+					s.processPendingImport(task, nodeID)
 				}
 			case internalpb.ImportState_InProgress:
 				switch task.GetType() {
@@ -139,25 +141,41 @@ func (s *importScheduler) checkErr(task ImportTask, err error) {
 	}
 }
 
-func (s *importScheduler) getIdleNode() int64 {
-	nodeIDs := lo.Map(s.cluster.GetSessions(), func(s *Session, _ int) int64 {
-		return s.info.NodeID
-	})
-	for _, nodeID := range nodeIDs {
-		resp, err := s.cluster.QueryImport(nodeID, &datapb.QueryImportRequest{QuerySlot: true})
-		if err != nil {
-			log.Warn("query import failed", zap.Error(err))
-			continue
-		}
-		if resp.GetSlots() > 0 {
+func (s *importScheduler) getNodeID(nodeSlots map[int64]int64) int64 {
+	for nodeID, slots := range nodeSlots {
+		if slots > 0 {
+			nodeSlots[nodeID]--
 			return nodeID
 		}
 	}
 	return NullNodeID
 }
 
-func (s *importScheduler) processPendingPreImport(task ImportTask) {
-	nodeID := s.getIdleNode()
+func (s *importScheduler) peekSlots() map[int64]int64 {
+	nodeIDs := lo.Map(s.cluster.GetSessions(), func(s *Session, _ int) int64 {
+		return s.info.NodeID
+	})
+	nodeSlots := make(map[int64]int64)
+	mu := &sync.Mutex{}
+	wg := &sync.WaitGroup{}
+	for _, nodeID := range nodeIDs {
+		wg.Add(1)
+		go func(nodeID int64) {
+			defer wg.Done()
+			resp, err := s.cluster.QueryImport(nodeID, &datapb.QueryImportRequest{QuerySlot: true})
+			if err != nil {
+				log.Warn("query import failed", zap.Error(err))
+				return
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			nodeSlots[nodeID] = resp.GetSlots()
+		}(nodeID)
+	}
+	return nodeSlots
+}
+
+func (s *importScheduler) processPendingPreImport(task ImportTask, nodeID int64) {
 	if nodeID == NullNodeID {
 		return
 	}
@@ -177,8 +195,7 @@ func (s *importScheduler) processPendingPreImport(task ImportTask) {
 	log.Info("process pending preimport task done", WrapLogFields(task)...)
 }
 
-func (s *importScheduler) processPendingImport(task ImportTask) {
-	nodeID := s.getIdleNode()
+func (s *importScheduler) processPendingImport(task ImportTask, nodeID int64) {
 	if nodeID == NullNodeID {
 		return
 	}

@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -99,30 +100,27 @@ func NewImportSegmentInfo(syncTask syncmgr.Task, task *ImportTask) (*datapb.Impo
 	}, nil
 }
 
-func PickSegment(task *ImportTask, vchannel string, partitionID int64, rows int) int64 {
+func PickSegment(task *ImportTask, segmentImportedSizes map[int64]int, vchannel string, partitionID int64, sizeToImport int) int64 {
 	candidates := lo.Filter(task.req.GetRequestSegments(), func(info *datapb.ImportRequestSegment, _ int) bool {
 		return info.GetVchannel() == vchannel && info.GetPartitionID() == partitionID
 	})
 
-	importedSegments := lo.KeyBy(task.GetSegmentsInfo(), func(segment *datapb.ImportSegmentInfo) int64 {
-		return segment.GetSegmentID()
-	})
+	segmentMaxSize := paramtable.Get().DataCoordCfg.SegmentMaxSize.GetAsInt() * 1024 * 1024
 
 	for _, candidate := range candidates {
-		var importedRows int64 = 0
-		if segment, ok := importedSegments[candidate.GetSegmentID()]; ok {
-			importedRows = segment.GetImportedRows()
-		}
-		if importedRows+int64(rows) <= candidate.GetMaxRows() {
+		sizeImported := segmentImportedSizes[candidate.GetSegmentID()]
+		if sizeImported+sizeToImport <= segmentMaxSize {
 			return candidate.GetSegmentID()
 		}
 	}
 	segmentID := lo.MinBy(task.GetSegmentsInfo(), func(s1, s2 *datapb.ImportSegmentInfo) bool {
-		return s1.GetImportedRows() < s2.GetImportedRows()
+		return segmentImportedSizes[s1.GetSegmentID()] < segmentImportedSizes[s2.GetSegmentID()]
 	}).GetSegmentID()
 	log.Warn("failed to pick an appropriate segment, opt for the smallest one instead",
-		WrapLogFields(task, zap.Int64("segmentID", segmentID), zap.Int64("maxRows", candidates[0].GetMaxRows()),
-			zap.Int("rows", rows), zap.Int64("importedRows", importedSegments[segmentID].GetImportedRows()))...)
+		WrapLogFields(task, zap.Int64("segmentID", segmentID),
+			zap.Int("sizeToImport", sizeToImport),
+			zap.Int("sizeImported", segmentImportedSizes[segmentID]),
+			zap.Int("segmentMaxSize", segmentMaxSize))...)
 	return segmentID
 }
 

@@ -68,44 +68,41 @@ func AssemblePreImportRequest(task ImportTask) *datapb.PreImportRequest {
 }
 
 func AssignSegments(task ImportTask, manager Manager) ([]int64, error) {
-	// merge hashed rows
-	hashedRows := make(map[string]map[int64]int64) // vchannel->(partitionID->rows)
-	for _, file := range task.GetFileStats() {
-		for vchannel, partRows := range file.GetHashedRows() {
-			if hashedRows[vchannel] == nil {
-				hashedRows[vchannel] = make(map[int64]int64)
+	// merge hashed sizes
+	hashedDataSize := make(map[string]map[int64]int64) // vchannel->(partitionID->size)
+	for _, fileStats := range task.GetFileStats() {
+		for vchannel, partStats := range fileStats.GetHashedStats() {
+			if hashedDataSize[vchannel] == nil {
+				hashedDataSize[vchannel] = make(map[int64]int64)
 			}
-			for partitionID, rows := range partRows.GetPartitionRows() {
-				hashedRows[vchannel][partitionID] += rows
+			for partitionID, size := range partStats.GetPartitionDataSize() {
+				hashedDataSize[vchannel][partitionID] += size
 			}
 		}
 	}
 
-	maxRowsPerSegment, err := calBySchemaPolicy(task.GetSchema())
-	if err != nil {
-		return nil, err
-	}
+	segmentMaxSize := paramtable.Get().DataCoordCfg.SegmentMaxSize.GetAsInt64() * 1024 * 1024
 
 	// alloc new segments
 	segments := make([]int64, 0)
-	addSegment := func(vchannel string, partitionID int64, rows int64) error {
+	addSegment := func(vchannel string, partitionID int64, size int64) error {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		for rows > 0 {
-			segmentInfo, err := manager.AddImportSegment(ctx, task.GetCollectionID(),
-				partitionID, vchannel, maxRowsPerSegment)
+		for size > 0 {
+			segmentInfo, err := manager.AllocImportSegment(ctx, task.GetCollectionID(),
+				partitionID, vchannel)
 			if err != nil {
 				return err
 			}
 			segments = append(segments, segmentInfo.GetID())
-			rows -= segmentInfo.GetMaxRowNum()
+			size -= segmentMaxSize
 		}
 		return nil
 	}
 
-	for vchannel, partitionRows := range hashedRows {
-		for partitionID, rows := range partitionRows {
-			err = addSegment(vchannel, partitionID, rows)
+	for vchannel, partitionSizes := range hashedDataSize {
+		for partitionID, size := range partitionSizes {
+			err := addSegment(vchannel, partitionID, size)
 			if err != nil {
 				return nil, err
 			}
@@ -125,7 +122,6 @@ func AssembleImportRequest(task ImportTask, meta *meta, alloc allocator) (*datap
 			SegmentID:   segment.GetID(),
 			PartitionID: segment.GetPartitionID(),
 			Vchannel:    segment.GetInsertChannel(),
-			MaxRows:     segment.GetMaxRowNum(),
 		})
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -165,29 +161,31 @@ func RegroupImportFiles(tasks []ImportTask) ([][]*datapb.ImportFileStats, error)
 	files := lo.FlatMap(tasks, func(t ImportTask, _ int) []*datapb.ImportFileStats {
 		return t.(*preImportTask).GetFileStats()
 	})
-	maxRowsPerSegment, err := calBySchemaPolicy(pt.GetSchema())
-	if err != nil {
-		return nil, err
+
+	segmentMaxSize := paramtable.Get().DataCoordCfg.SegmentMaxSize.GetAsInt() * 1024 * 1024
+	maxSizePerFileGroup := segmentMaxSize * len(pt.GetPartitionIDs()) * len(pt.GetVchannels())
+	threshold := paramtable.Get().DataCoordCfg.MaxSizeInMBPerImportTask.GetAsInt() * 1024 * 1024
+	if maxSizePerFileGroup > threshold {
+		maxSizePerFileGroup = threshold
 	}
-	maxRowsPerFileGroup := maxRowsPerSegment * len(pt.GetPartitionIDs()) * len(pt.GetVchannels())
 
 	fileGroups := make([][]*datapb.ImportFileStats, 0)
 	currentGroup := make([]*datapb.ImportFileStats, 0)
 	currentSum := 0
 	sort.Slice(files, func(i, j int) bool {
-		return files[i].GetTotalRows() < files[j].GetTotalRows()
+		return files[i].GetTotalMemorySize() < files[j].GetTotalMemorySize()
 	})
 	for _, file := range files {
-		rows := int(file.GetTotalRows())
-		if rows > maxRowsPerFileGroup {
+		size := int(file.GetTotalMemorySize())
+		if size > maxSizePerFileGroup {
 			fileGroups = append(fileGroups, []*datapb.ImportFileStats{file})
-		} else if currentSum+rows <= maxRowsPerFileGroup {
+		} else if currentSum+size <= maxSizePerFileGroup {
 			currentGroup = append(currentGroup, file)
-			currentSum += rows
+			currentSum += size
 		} else {
 			fileGroups = append(fileGroups, currentGroup)
 			currentGroup = []*datapb.ImportFileStats{file}
-			currentSum = rows
+			currentSum = size
 		}
 	}
 	if len(currentGroup) > 0 {

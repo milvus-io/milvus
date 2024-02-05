@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -75,7 +76,7 @@ type Manager interface {
 	// allocSegmentForImport allocates one segment allocation for bulk insert.
 	// TODO: Remove this method and AllocSegment() above instead.
 	allocSegmentForImport(ctx context.Context, collectionID, partitionID UniqueID, channelName string, requestRows int64, taskID int64) (*Allocation, error)
-	AddImportSegment(ctx context.Context, collectionID UniqueID, partitionID UniqueID, channelName string, maxNumOfRows int) (*SegmentInfo, error)
+	AllocImportSegment(ctx context.Context, collectionID UniqueID, partitionID UniqueID, channelName string) (*SegmentInfo, error)
 	// DropSegment drops the segment from manager.
 	DropSegment(ctx context.Context, segmentID UniqueID)
 	// FlushImportSegments set importing segment state to Flushed.
@@ -383,8 +384,8 @@ func (s *SegmentManager) genExpireTs(ctx context.Context, isImported bool) (Time
 	return expireTs, nil
 }
 
-func (s *SegmentManager) AddImportSegment(ctx context.Context, collectionID UniqueID,
-	partitionID UniqueID, channelName string, maxNumOfRows int,
+func (s *SegmentManager) AllocImportSegment(ctx context.Context, collectionID UniqueID,
+	partitionID UniqueID, channelName string,
 ) (*SegmentInfo, error) {
 	log := log.Ctx(ctx)
 	ctx, sp := otel.Tracer(typeutil.DataCoordRole).Start(ctx, "open-Segment")
@@ -404,7 +405,7 @@ func (s *SegmentManager) AddImportSegment(ctx context.Context, collectionID Uniq
 		Timestamp:   ts,
 	}
 
-	expireTs, err := s.genExpireTs(ctx, true)
+	maxRowNum, err := s.estimateMaxNumOfRows(collectionID)
 	if err != nil {
 		return nil, err
 	}
@@ -416,9 +417,9 @@ func (s *SegmentManager) AddImportSegment(ctx context.Context, collectionID Uniq
 		InsertChannel:  channelName,
 		NumOfRows:      0,
 		State:          commonpb.SegmentState_Flushed,
-		MaxRowNum:      int64(maxNumOfRows),
+		MaxRowNum:      int64(maxRowNum),
 		Level:          datapb.SegmentLevel_L1,
-		LastExpireTime: expireTs,
+		LastExpireTime: math.MaxUint64,
 		StartPosition:  position,
 		DmlPosition:    position,
 	}
@@ -432,7 +433,7 @@ func (s *SegmentManager) AddImportSegment(ctx context.Context, collectionID Uniq
 	log.Info("add import segment done",
 		zap.Int64("CollectionID", segmentInfo.CollectionID),
 		zap.Int64("SegmentID", segmentInfo.ID),
-		zap.Int("MaxNumOfRows", maxNumOfRows),
+		zap.Int("MaxNumOfRows", maxRowNum),
 		zap.String("Channel", segmentInfo.InsertChannel))
 
 	return segment, nil

@@ -122,11 +122,20 @@ func (i *InsertData) GetRow(idx int) map[FieldID]interface{} {
 	return res
 }
 
+func (i *InsertData) GetRowSize(idx int) int {
+	size := 0
+	for _, data := range i.Data {
+		size += data.GetRowSize(idx)
+	}
+	return size
+}
+
 // FieldData defines field data interface
 type FieldData interface {
 	GetMemorySize() int
 	RowNum() int
 	GetRow(i int) any
+	GetRowSize(i int) int
 	GetRows() any
 	AppendRow(row interface{}) error
 	AppendRows(rows interface{}) error
@@ -688,4 +697,39 @@ func (data *JSONFieldData) GetMemorySize() int {
 		size += len(val) + 16
 	}
 	return size
+}
+
+func (data *BoolFieldData) GetRowSize(i int) int           { return 1 }
+func (data *Int8FieldData) GetRowSize(i int) int           { return 1 }
+func (data *Int16FieldData) GetRowSize(i int) int          { return 2 }
+func (data *Int32FieldData) GetRowSize(i int) int          { return 4 }
+func (data *Int64FieldData) GetRowSize(i int) int          { return 8 }
+func (data *FloatFieldData) GetRowSize(i int) int          { return 4 }
+func (data *DoubleFieldData) GetRowSize(i int) int         { return 8 }
+func (data *BinaryVectorFieldData) GetRowSize(i int) int   { return data.Dim / 8 }
+func (data *FloatVectorFieldData) GetRowSize(i int) int    { return data.Dim }
+func (data *Float16VectorFieldData) GetRowSize(i int) int  { return data.Dim / 2 }
+func (data *BFloat16VectorFieldData) GetRowSize(i int) int { return data.Dim / 2 }
+func (data *StringFieldData) GetRowSize(i int) int         { return len(data.Data[i]) + 16 }
+func (data *JSONFieldData) GetRowSize(i int) int           { return len(data.Data[i]) + 16 }
+func (data *ArrayFieldData) GetRowSize(i int) int {
+	switch data.ElementType {
+	case schemapb.DataType_Bool:
+		return binary.Size(data.Data[i].GetBoolData().GetData())
+	case schemapb.DataType_Int8:
+		return binary.Size(data.Data[i].GetIntData().GetData()) / 4
+	case schemapb.DataType_Int16:
+		return binary.Size(data.Data[i].GetIntData().GetData()) / 2
+	case schemapb.DataType_Int32:
+		return binary.Size(data.Data[i].GetIntData().GetData())
+	case schemapb.DataType_Int64:
+		return binary.Size(data.Data[i].GetLongData().GetData())
+	case schemapb.DataType_Float:
+		return binary.Size(data.Data[i].GetFloatData().GetData())
+	case schemapb.DataType_Double:
+		return binary.Size(data.Data[i].GetDoubleData().GetData())
+	case schemapb.DataType_String, schemapb.DataType_VarChar:
+		return (&StringFieldData{Data: data.Data[i].GetStringData().GetData()}).GetMemorySize()
+	}
+	return 0
 }

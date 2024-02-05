@@ -778,7 +778,6 @@ message ImportRequestSegment {
   int64 segmentID = 1;
   int64 partitionID = 2;
   string vchannel = 3;
-  int64 max_rows = 4;
 }
 
 message ImportRequest {
@@ -800,15 +799,17 @@ message QueryPreImportRequest {
   int64 taskID = 3;
 }
 
-message PartitionRows {
-  map<int64, int64> partition_rows = 1;
+message PartitionStats {
+  map<int64, int64> partition_rows = 1; // partitionID -> numRows
+  map<int64, int64> partition_data_size = 2; // partitionID -> dataSize
 }
 
 message ImportFileStats {
   internal.ImportFile import_file = 1;
   int64 file_size = 2;
   int64 total_rows = 3;
-  map<string, PartitionRows> hashed_rows = 4;
+  int64 total_memory_size = 4;
+  map<string, PartitionStats> hashed_stats = 5; // channel -> PartitionStats
 }
 
 message QueryPreImportResponse {

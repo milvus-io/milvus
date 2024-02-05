@@ -23,7 +23,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
@@ -691,29 +690,17 @@ func (kc *Catalog) DropSegmentIndex(ctx context.Context, collID, partID, segID, 
 	return nil
 }
 
-func (kc *Catalog) SaveImportTask(task any) error {
-	switch t := task.(type) {
-	case *datapb.PreImportTask:
-		key := buildPreImportTaskKey(t.GetTaskID())
-		value, err := proto.Marshal(t)
-		if err != nil {
-			return err
-		}
-		return kc.MetaKv.Save(key, string(value))
-	case *datapb.ImportTaskV2:
-		key := buildImportTaskKey(t.GetTaskID())
-		value, err := proto.Marshal(t)
-		if err != nil {
-			return err
-		}
-		return kc.MetaKv.Save(key, string(value))
-	default:
-		return errors.New(fmt.Sprintf("unrecognized task type %t", t))
+func (kc *Catalog) SavePreImportTask(task *datapb.PreImportTask) error {
+	key := buildPreImportTaskKey(task.GetTaskID())
+	value, err := proto.Marshal(task)
+	if err != nil {
+		return err
 	}
+	return kc.MetaKv.Save(key, string(value))
 }
 
-func (kc *Catalog) ListImportTasks() ([]any, error) {
-	tasks := make([]any, 0)
+func (kc *Catalog) ListPreImportTasks() ([]*datapb.PreImportTask, error) {
+	tasks := make([]*datapb.PreImportTask, 0)
 
 	_, values, err := kc.MetaKv.LoadWithPrefix(PreImportTaskPrefix)
 	if err != nil {
@@ -728,7 +715,27 @@ func (kc *Catalog) ListImportTasks() ([]any, error) {
 		tasks = append(tasks, task)
 	}
 
-	_, values, err = kc.MetaKv.LoadWithPrefix(ImportTaskPrefix)
+	return tasks, nil
+}
+
+func (kc *Catalog) DropPreImportTask(taskID int64) error {
+	key := buildPreImportTaskKey(taskID)
+	return kc.MetaKv.Remove(key)
+}
+
+func (kc *Catalog) SaveImportTask(task *datapb.ImportTaskV2) error {
+	key := buildImportTaskKey(task.GetTaskID())
+	value, err := proto.Marshal(task)
+	if err != nil {
+		return err
+	}
+	return kc.MetaKv.Save(key, string(value))
+}
+
+func (kc *Catalog) ListImportTasks() ([]*datapb.ImportTaskV2, error) {
+	tasks := make([]*datapb.ImportTaskV2, 0)
+
+	_, values, err := kc.MetaKv.LoadWithPrefix(ImportTaskPrefix)
 	if err != nil {
 		return nil, err
 	}
@@ -744,9 +751,8 @@ func (kc *Catalog) ListImportTasks() ([]any, error) {
 }
 
 func (kc *Catalog) DropImportTask(taskID int64) error {
-	key1 := buildPreImportTaskKey(taskID)
-	key2 := buildImportTaskKey(taskID)
-	return kc.MetaKv.MultiRemove([]string{key1, key2})
+	key := buildImportTaskKey(taskID)
+	return kc.MetaKv.Remove(key)
 }
 
 const allPartitionID = -1

@@ -2358,9 +2358,9 @@ type dataCoordConfig struct {
 	CheckAutoBalanceConfigInterval ParamItem `refreshable:"false"`
 
 	// import
-	FilesPerPreImportTask ParamItem `refreshable:"true"`
-	ImportTaskRetention   ParamItem `refreshable:"true"`
-	ImportInactiveTimeout ParamItem `refreshable:"true"`
+	FilesPerPreImportTask    ParamItem `refreshable:"true"`
+	ImportTaskRetention      ParamItem `refreshable:"true"`
+	MaxSizeInMBPerImportTask ParamItem `refreshable:"true"`
 }
 
 func (p *dataCoordConfig) init(base *BaseTable) {
@@ -2836,15 +2836,16 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	}
 	p.ImportTaskRetention.Init(base.mgr)
 
-	p.ImportInactiveTimeout = ParamItem{
-		Key:          "dataCoord.import.inactiveTimeout",
-		Version:      "2.4.0",
-		Doc:          "The timeout duration in seconds for a task in the 'InProgress' state if it remains inactive (with no progress updates).",
-		DefaultValue: "1800",
+	p.MaxSizeInMBPerImportTask = ParamItem{
+		Key:     "dataCoord.import.maxSizeInMBPerImportTask",
+		Version: "2.4.0",
+		Doc: "To prevent generating of small segments, we will re-group imported files. " +
+			"This parameter represents the sum of file sizes in each group (each ImportTask).",
+		DefaultValue: "6144",
 		PanicIfEmpty: false,
 		Export:       true,
 	}
-	p.ImportInactiveTimeout.Init(base.mgr)
+	p.MaxSizeInMBPerImportTask.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

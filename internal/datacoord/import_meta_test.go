@@ -30,14 +30,8 @@ import (
 
 func TestImportMeta_Restore(t *testing.T) {
 	catalog := mocks.NewDataCoordCatalog(t)
-	catalog.EXPECT().ListImportTasks().Return([]any{
-		&datapb.PreImportTask{
-			TaskID: 1,
-		},
-		&datapb.ImportTaskV2{
-			TaskID: 2,
-		},
-	}, nil)
+	catalog.EXPECT().ListPreImportTasks().Return([]*datapb.PreImportTask{{TaskID: 1}}, nil)
+	catalog.EXPECT().ListImportTasks().Return([]*datapb.ImportTaskV2{{TaskID: 2}}, nil)
 
 	meta, err := NewImportMeta(nil, catalog)
 	assert.NoError(t, err)

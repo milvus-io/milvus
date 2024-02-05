@@ -123,9 +123,12 @@ func (s *ImportSchedulerSuite) TestProcessImport() {
 			State:        internalpb.ImportState_Pending,
 			FileStats: []*datapb.ImportFileStats{
 				{
-					HashedRows: map[string]*datapb.PartitionRows{
+					HashedStats: map[string]*datapb.PartitionStats{
 						"channel1": {
 							PartitionRows: map[int64]int64{
+								int64(2): 100,
+							},
+							PartitionDataSize: map[int64]int64{
 								int64(2): 100,
 							},
 						},

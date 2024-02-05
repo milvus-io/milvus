@@ -182,7 +182,8 @@ func (e *executor) PreImport(task Task) {
 
 func (e *executor) readFileStat(reader importutilv2.Reader, task Task, fileIdx int) error {
 	totalRows := 0
-	hashedRows := make(map[string]*datapb.PartitionRows)
+	totalSize := 0
+	hashedStats := make(map[string]*datapb.PartitionStats)
 	for {
 		data, err := reader.Read()
 		if err != nil {
@@ -199,15 +200,18 @@ func (e *executor) readFileStat(reader importutilv2.Reader, task Task, fileIdx i
 		if err != nil {
 			return err
 		}
-		MergeHashedRowsCount(rowsCount, hashedRows)
+		MergeHashedStats(rowsCount, hashedStats)
 		rows := data.GetRowNum()
+		size := data.GetMemorySize()
 		totalRows += rows
-		log.Info("reading file stat...", WrapLogFields(task, zap.Int("readRows", rows))...)
+		totalSize += size
+		log.Info("reading file stat...", WrapLogFields(task, zap.Int("readRows", rows), zap.Int("readSize", size))...)
 	}
 
 	stat := &datapb.ImportFileStats{
-		TotalRows:  int64(totalRows),
-		HashedRows: hashedRows,
+		TotalRows:       int64(totalRows),
+		TotalMemorySize: int64(totalSize),
+		HashedStats:     hashedStats,
 	}
 	e.manager.Update(task.GetTaskID(), UpdateFileStat(fileIdx, stat))
 	return nil
@@ -304,15 +308,18 @@ func (e *executor) Sync(task *ImportTask, hashedData HashedData) ([]*conc.Future
 	log.Info("start to sync import data", WrapLogFields(task)...)
 	futures := make([]*conc.Future[error], 0)
 	syncTasks := make([]syncmgr.Task, 0)
+	segmentImportedSizes := make(map[int64]int)
 	for channelIdx, datas := range hashedData {
 		channel := task.vchannels[channelIdx]
 		for partitionIdx, data := range datas {
 			partitionID := task.partitions[partitionIdx]
-			segmentID := PickSegment(task, channel, partitionID, data.GetRowNum())
+			size := data.GetMemorySize()
+			segmentID := PickSegment(task, segmentImportedSizes, channel, partitionID, size)
 			syncTask, err := NewSyncTask(task.GetCtx(), task, segmentID, partitionID, channel, data)
 			if err != nil {
 				return nil, nil, err
 			}
+			segmentImportedSizes[segmentID] += size
 			future := e.syncMgr.SyncData(task.GetCtx(), syncTask)
 			futures = append(futures, future)
 			syncTasks = append(syncTasks, syncTask)
