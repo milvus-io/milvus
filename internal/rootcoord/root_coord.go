@@ -1185,7 +1185,7 @@ func (c *Core) describeCollectionImpl(ctx context.Context, in *milvuspb.Describe
 		Rsp:              &milvuspb.DescribeCollectionResponse{Status: merr.Success()},
 		allowUnavailable: allowUnavailable,
 	}
-
+	log.Info("received describe collection request")
 	if err := c.scheduler.AddTask(t); err != nil {
 		log.Info("failed to enqueue request to describe collection", zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues("DescribeCollection", metrics.FailLabel).Inc()
@@ -1193,7 +1193,7 @@ func (c *Core) describeCollectionImpl(ctx context.Context, in *milvuspb.Describe
 			Status: merr.Status(err),
 		}, nil
 	}
-
+	log.Info("enqueued describe collection request")
 	if err := t.WaitToFinish(); err != nil {
 		log.Warn("failed to describe collection", zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues("DescribeCollection", metrics.FailLabel).Inc()
@@ -1201,6 +1201,7 @@ func (c *Core) describeCollectionImpl(ctx context.Context, in *milvuspb.Describe
 			Status: merr.Status(err),
 		}, nil
 	}
+	log.Info("finished describe collection request")
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("DescribeCollection", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("DescribeCollection").Observe(float64(tr.ElapseSpan().Milliseconds()))

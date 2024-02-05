@@ -396,7 +396,7 @@ func (h *ServerHandler) GetCollection(ctx context.Context, collectionID UniqueID
 	}
 	err := h.s.loadCollectionFromRootCoord(ctx, collectionID)
 	if err != nil {
-		log.Warn("failed to load collection from rootcoord", zap.Int64("collectionID", collectionID), zap.Error(err))
+		log.Ctx(ctx).Warn("failed to load collection from rootcoord", zap.Int64("collectionID", collectionID), zap.Error(err))
 		return nil, err
 	}
 
