@@ -211,6 +211,7 @@ func TestMultiRateLimiter(t *testing.T) {
 
 func TestRateLimiter(t *testing.T) {
 	t.Run("test limit", func(t *testing.T) {
+		paramtable.Get().CleanEvent()
 		limiter := newRateLimiter(false)
 		for _, rt := range internalpb.RateType_value {
 			limiter.limiters.Insert(internalpb.RateType(rt), ratelimitutil.NewLimiter(ratelimitutil.Limit(1000), 1))
@@ -226,6 +227,7 @@ func TestRateLimiter(t *testing.T) {
 	})
 
 	t.Run("test setRates", func(t *testing.T) {
+		paramtable.Get().CleanEvent()
 		limiter := newRateLimiter(false)
 		for _, rt := range internalpb.RateType_value {
 			limiter.limiters.Insert(internalpb.RateType(rt), ratelimitutil.NewLimiter(ratelimitutil.Limit(1000), 1))
@@ -266,6 +268,7 @@ func TestRateLimiter(t *testing.T) {
 	})
 
 	t.Run("test get error code", func(t *testing.T) {
+		paramtable.Get().CleanEvent()
 		limiter := newRateLimiter(false)
 		for _, rt := range internalpb.RateType_value {
 			limiter.limiters.Insert(internalpb.RateType(rt), ratelimitutil.NewLimiter(ratelimitutil.Limit(1000), 1))
@@ -295,6 +298,7 @@ func TestRateLimiter(t *testing.T) {
 	})
 
 	t.Run("tests refresh rate by config", func(t *testing.T) {
+		paramtable.Get().CleanEvent()
 		limiter := newRateLimiter(false)
 
 		etcdCli, _ := etcd.GetEtcdClient(
