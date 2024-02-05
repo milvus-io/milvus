@@ -2932,6 +2932,9 @@ type dataNodeConfig struct {
 	UpdateChannelCheckpointRPCTimeout  ParamItem `refreshable:"true"`
 
 	MaxConcurrentImportTaskNum ParamItem `refreshable:"true"`
+
+	// Compaction
+	L0BatchMemoryRatio ParamItem `refreshable:"true"`
 }
 
 func (p *dataNodeConfig) init(base *BaseTable) {
@@ -3192,6 +3195,15 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.MaxConcurrentImportTaskNum.Init(base.mgr)
+
+	p.L0BatchMemoryRatio = ParamItem{
+		Key:          "datanode.compaction.levelZeroBatchMemoryRatio",
+		Version:      "2.4.0",
+		Doc:          "The maximum memory ratio for level zero compaction executing in batch mode",
+		DefaultValue: "0.8",
+		Export:       true,
+	}
+	p.L0BatchMemoryRatio.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
