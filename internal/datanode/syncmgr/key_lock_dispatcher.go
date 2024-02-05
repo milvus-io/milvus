@@ -8,6 +8,7 @@ import (
 
 type Task interface {
 	SegmentID() int64
+	CalcTargetSegment() (int64, error)
 	Checkpoint() *msgpb.MsgPosition
 	StartPosition() *msgpb.MsgPosition
 	ChannelName() string
