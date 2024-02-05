@@ -1,3 +1,7 @@
+shared:
+  - &source_code_files files~=^(?=.*((\.(go|h|cpp)|go.sum|go.mod|CMakeLists.txt|conanfile\.*))).*$
+  - &no_source_code_files -files~=^(?=.*((\.(go|h|cpp)|go.sum|go.mod|CMakeLists.txt|conanfile\.*))).*$
+
 pull_request_rules:
   - name: Add needs-dco label when DCO check failed
     conditions:
@@ -93,8 +97,8 @@ pull_request_rules:
           - base=master
           - base=sql_beta
           - base~=^2(\.\d+){1,2}$
-      - -files~=^(?=.*((\.(go|h|cpp)|CMakeLists.txt|conanfile\.*))).*$
       - 'status-success=cpu-e2e'
+      - *no_source_code_files
     actions:
       label:
         add:
@@ -152,7 +156,7 @@ pull_request_rules:
           - base~=^2(\.\d+){1,2}$
       - title~=\[skip e2e\]
       - label=kind/enhancement
-      - -files~=^(?=.*((\.(go|h|cpp)|CMakeLists.txt))).*$
+      - *no_source_code_files
     actions:
       label:
         add:
@@ -255,7 +259,7 @@ pull_request_rules:
       - 'status-success=Build and test AMD64 Ubuntu 20.04'
       - 'status-success=Code Checker MacOS 12'
       - 'status-success=Code Checker Amazonlinux 2023'
-      - files~=^(?=.*((\.(go|h|cpp)|CMakeLists.txt))).*$
+      - *source_code_files
     actions:
       label:
         add:
@@ -269,7 +273,7 @@ pull_request_rules:
       - 'status-success=Build and test AMD64 Ubuntu 20.04'
       - 'status-success=Code Checker MacOS 12'
       - 'status-success=Code Checker CentOS 7'
-      - files~=^(?=.*((\.(go|h|cpp)|CMakeLists.txt))).*$
+      - *source_code_files
     actions:
       label:
         add:
@@ -296,7 +300,7 @@ pull_request_rules:
           - base=master
           - base=sql_beta
           - base~=^2\.3(\.\d+){0,1}$
-      - files~=^(?=.*((\.(go|h|cpp)|CMakeLists.txt))).*$
+      - *no_source_code_files
       - or:
           - 'status-success!=Code Checker AMD64 Ubuntu 20.04'
           - 'status-success!=Build and test AMD64 Ubuntu 20.04'
@@ -311,7 +315,7 @@ pull_request_rules:
     conditions:
       - label!=manual-pass
       - base~=^2\.2\.\d+$
-      - files~=^(?=.*((\.(go|h|cpp)|CMakeLists.txt))).*$
+      - *no_source_code_files
       - or:
           - 'status-success!=Code Checker AMD64 Ubuntu 20.04'
           - 'status-success!=Build and test AMD64 Ubuntu 20.04'
