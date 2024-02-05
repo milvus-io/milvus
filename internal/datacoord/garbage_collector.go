@@ -169,6 +169,7 @@ func (gc *garbageCollector) work() {
 			case datapb.GcCommand_Resume:
 				// reset to zero value
 				gc.pauseUntil.Store(time.Time{})
+				log.Info("garbage collection resumed")
 			}
 			close(cmd.done)
 		case <-gc.closeCh:
