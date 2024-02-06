@@ -295,6 +295,26 @@ func (s *CoordinatorBrokerDataCoordSuite) TestDescribeIndex() {
 		s.Error(err)
 		s.resetMock()
 	})
+
+	s.Run("datacoord_return_unimplemented", func() {
+		// mock old version datacoord return unimplemented
+		s.datacoord.EXPECT().DescribeIndex(mock.Anything, mock.Anything).
+			Return(nil, merr.ErrServiceUnimplemented).Times(1)
+
+		// mock retry on new version datacoord return success
+		indexIDs := []int64{1, 2}
+		s.datacoord.EXPECT().DescribeIndex(mock.Anything, mock.Anything).
+			Return(&indexpb.DescribeIndexResponse{
+				Status: merr.Status(nil),
+				IndexInfos: lo.Map(indexIDs, func(id int64, _ int) *indexpb.IndexInfo {
+					return &indexpb.IndexInfo{IndexID: id}
+				}),
+			}, nil)
+
+		_, err := s.broker.DescribeIndex(ctx, collectionID)
+		s.NoError(err)
+		s.resetMock()
+	})
 }
 
 func (s *CoordinatorBrokerDataCoordSuite) TestSegmentInfo() {
@@ -384,6 +404,31 @@ func (s *CoordinatorBrokerDataCoordSuite) TestGetIndexInfo() {
 
 		_, err := s.broker.GetIndexInfo(ctx, collectionID, segmentID)
 		s.Error(err)
+		s.resetMock()
+	})
+
+	s.Run("datacoord_return_unimplemented", func() {
+		// mock old version datacoord return unimplemented
+		s.datacoord.EXPECT().GetIndexInfos(mock.Anything, mock.Anything).
+			Return(nil, merr.ErrServiceUnimplemented).Times(1)
+
+		// mock retry on new version datacoord return success
+		indexIDs := []int64{1, 2, 3}
+		s.datacoord.EXPECT().GetIndexInfos(mock.Anything, mock.Anything).
+			Return(&indexpb.GetIndexInfoResponse{
+				Status: merr.Status(nil),
+				SegmentInfo: map[int64]*indexpb.SegmentInfo{
+					segmentID: {
+						SegmentID: segmentID,
+						IndexInfos: lo.Map(indexIDs, func(id int64, _ int) *indexpb.IndexFilePathInfo {
+							return &indexpb.IndexFilePathInfo{IndexID: id}
+						}),
+					},
+				},
+			}, nil)
+
+		_, err := s.broker.GetIndexInfo(ctx, collectionID, segmentID)
+		s.NoError(err)
 		s.resetMock()
 	})
 }
