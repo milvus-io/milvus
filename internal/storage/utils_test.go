@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/util/testutils"
 )
 
 func TestCheckTsField(t *testing.T) {
@@ -900,6 +901,25 @@ func genColumnBasedInsertMsg(schema *schemapb.CollectionSchema, numRows, fVecDim
 			for nrows := 0; nrows < numRows; nrows++ {
 				columns[idx] = append(columns[idx], data[nrows*bf16VecDim*2:(nrows+1)*bf16VecDim*2])
 			}
+		case schemapb.DataType_SparseFloatVector:
+			data := testutils.GenerateSparseFloatVectors(numRows)
+			f := &schemapb.FieldData{
+				Type:      schemapb.DataType_SparseFloatVector,
+				FieldName: field.Name,
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Dim: data.Dim,
+						Data: &schemapb.VectorField_SparseFloatVector{
+							SparseFloatVector: data,
+						},
+					},
+				},
+				FieldId: field.FieldID,
+			}
+			msg.FieldsData = append(msg.FieldsData, f)
+			for nrows := 0; nrows < numRows; nrows++ {
+				columns[idx] = append(columns[idx], data.Contents[idx])
+			}
 
 		case schemapb.DataType_Array:
 			data := generateInt32ArrayList(numRows)
@@ -1246,6 +1266,15 @@ func TestMergeInsertData(t *testing.T) {
 				Data: []byte{0, 1},
 				Dim:  1,
 			},
+			SparseFloatVectorField: &SparseFloatVectorFieldData{
+				SparseFloatArray: schemapb.SparseFloatArray{
+					Dim: 600,
+					Contents: [][]byte{
+						testutils.CreateSparseFloatRow([]uint32{30, 41, 52}, []float32{1.1, 1.2, 1.3}),
+						testutils.CreateSparseFloatRow([]uint32{60, 80, 230}, []float32{2.1, 2.2, 2.3}),
+					},
+				},
+			},
 			ArrayField: &ArrayFieldData{
 				Data: []*schemapb.ScalarField{
 					{
@@ -1310,6 +1339,14 @@ func TestMergeInsertData(t *testing.T) {
 			BFloat16VectorField: &BFloat16VectorFieldData{
 				Data: []byte{2, 3},
 				Dim:  1,
+			},
+			SparseFloatVectorField: &SparseFloatVectorFieldData{
+				SparseFloatArray: schemapb.SparseFloatArray{
+					Dim: 600,
+					Contents: [][]byte{
+						testutils.CreateSparseFloatRow([]uint32{170, 300, 579}, []float32{3.1, 3.2, 3.3}),
+					},
+				},
 			},
 			ArrayField: &ArrayFieldData{
 				Data: []*schemapb.ScalarField{
@@ -1386,6 +1423,19 @@ func TestMergeInsertData(t *testing.T) {
 	f, ok = d1.Data[BFloat16VectorField]
 	assert.True(t, ok)
 	assert.Equal(t, []byte{0, 1, 2, 3}, f.(*BFloat16VectorFieldData).Data)
+
+	f, ok = d1.Data[SparseFloatVectorField]
+	assert.True(t, ok)
+	assert.Equal(t, &SparseFloatVectorFieldData{
+		SparseFloatArray: schemapb.SparseFloatArray{
+			Dim: 600,
+			Contents: [][]byte{
+				testutils.CreateSparseFloatRow([]uint32{30, 41, 52}, []float32{1.1, 1.2, 1.3}),
+				testutils.CreateSparseFloatRow([]uint32{60, 80, 230}, []float32{2.1, 2.2, 2.3}),
+				testutils.CreateSparseFloatRow([]uint32{170, 300, 579}, []float32{3.1, 3.2, 3.3}),
+			},
+		},
+	}, f.(*SparseFloatVectorFieldData))
 
 	f, ok = d1.Data[ArrayField]
 	assert.True(t, ok)

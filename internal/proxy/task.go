@@ -322,7 +322,7 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 		if err := validateFieldName(field.Name); err != nil {
 			return err
 		}
-		// validate vector field type parameters
+		// validate dense vector field type parameters
 		if isVectorType(field.DataType) {
 			err = validateDimension(field)
 			if err != nil {

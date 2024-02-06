@@ -9,6 +9,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/testutils"
 )
 
 func TestInsertDataSuite(t *testing.T) {
@@ -84,11 +85,11 @@ func (s *InsertDataSuite) TestInsertData() {
 
 		s.False(s.iDataOneRow.IsEmpty())
 		s.Equal(1, s.iDataOneRow.GetRowNum())
-		s.Equal(151, s.iDataOneRow.GetMemorySize())
+		s.Equal(179, s.iDataOneRow.GetMemorySize())
 
 		s.False(s.iDataTwoRows.IsEmpty())
 		s.Equal(2, s.iDataTwoRows.GetRowNum())
-		s.Equal(286, s.iDataTwoRows.GetMemorySize())
+		s.Equal(340, s.iDataTwoRows.GetMemorySize())
 
 		for _, field := range s.iDataTwoRows.Data {
 			s.Equal(2, field.RowNum())
@@ -187,20 +188,21 @@ func (s *InsertDataSuite) SetupTest() {
 	s.Equal(16, s.iDataEmpty.GetMemorySize())
 
 	row1 := map[FieldID]interface{}{
-		RowIDField:          int64(3),
-		TimestampField:      int64(3),
-		BoolField:           true,
-		Int8Field:           int8(3),
-		Int16Field:          int16(3),
-		Int32Field:          int32(3),
-		Int64Field:          int64(3),
-		FloatField:          float32(3),
-		DoubleField:         float64(3),
-		StringField:         "str",
-		BinaryVectorField:   []byte{0},
-		FloatVectorField:    []float32{4, 5, 6, 7},
-		Float16VectorField:  []byte{0, 0, 0, 0, 255, 255, 255, 255},
-		BFloat16VectorField: []byte{0, 0, 0, 0, 255, 255, 255, 255},
+		RowIDField:             int64(3),
+		TimestampField:         int64(3),
+		BoolField:              true,
+		Int8Field:              int8(3),
+		Int16Field:             int16(3),
+		Int32Field:             int32(3),
+		Int64Field:             int64(3),
+		FloatField:             float32(3),
+		DoubleField:            float64(3),
+		StringField:            "str",
+		BinaryVectorField:      []byte{0},
+		FloatVectorField:       []float32{4, 5, 6, 7},
+		Float16VectorField:     []byte{0, 0, 0, 0, 255, 255, 255, 255},
+		BFloat16VectorField:    []byte{0, 0, 0, 0, 255, 255, 255, 255},
+		SparseFloatVectorField: testutils.CreateSparseFloatRow([]uint32{0, 1, 2}, []float32{4, 5, 6}),
 		ArrayField: &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_IntData{
 				IntData: &schemapb.IntArray{Data: []int32{1, 2, 3}},
@@ -219,20 +221,21 @@ func (s *InsertDataSuite) SetupTest() {
 	}
 
 	row2 := map[FieldID]interface{}{
-		RowIDField:          int64(1),
-		TimestampField:      int64(1),
-		BoolField:           false,
-		Int8Field:           int8(1),
-		Int16Field:          int16(1),
-		Int32Field:          int32(1),
-		Int64Field:          int64(1),
-		FloatField:          float32(1),
-		DoubleField:         float64(1),
-		StringField:         string("str"),
-		BinaryVectorField:   []byte{0},
-		FloatVectorField:    []float32{4, 5, 6, 7},
-		Float16VectorField:  []byte{1, 2, 3, 4, 5, 6, 7, 8},
-		BFloat16VectorField: []byte{1, 2, 3, 4, 5, 6, 7, 8},
+		RowIDField:             int64(1),
+		TimestampField:         int64(1),
+		BoolField:              false,
+		Int8Field:              int8(1),
+		Int16Field:             int16(1),
+		Int32Field:             int32(1),
+		Int64Field:             int64(1),
+		FloatField:             float32(1),
+		DoubleField:            float64(1),
+		StringField:            string("str"),
+		BinaryVectorField:      []byte{0},
+		FloatVectorField:       []float32{4, 5, 6, 7},
+		Float16VectorField:     []byte{1, 2, 3, 4, 5, 6, 7, 8},
+		BFloat16VectorField:    []byte{1, 2, 3, 4, 5, 6, 7, 8},
+		SparseFloatVectorField: testutils.CreateSparseFloatRow([]uint32{2, 3, 4}, []float32{4, 5, 6}),
 		ArrayField: &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_IntData{
 				IntData: &schemapb.IntArray{Data: []int32{1, 2, 3}},

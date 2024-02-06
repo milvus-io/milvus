@@ -547,7 +547,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 	segments := t.getCandidateSegments(channel, partitionID)
 
 	if len(segments) == 0 {
-		log.Info("the length of segments is 0, skip to handle compaction")
+		log.Info("the number of candidate segments is 0, skip to handle compaction")
 		return
 	}
 

@@ -14,6 +14,7 @@ import (
 	"github.com/golang/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // PayloadReader reads data from payload
@@ -73,6 +74,8 @@ func (r *PayloadReader) GetDataFromPayload() (interface{}, int, error) {
 		return r.GetFloat16VectorFromPayload()
 	case schemapb.DataType_BFloat16Vector:
 		return r.GetBFloat16VectorFromPayload()
+	case schemapb.DataType_SparseFloatVector:
+		return r.GetSparseFloatVectorFromPayload()
 	case schemapb.DataType_String, schemapb.DataType_VarChar:
 		val, err := r.GetStringFromPayload()
 		return val, 0, err
@@ -427,6 +430,36 @@ func (r *PayloadReader) GetFloatVectorFromPayload() ([]float32, int, error) {
 		copy(arrow.Float32Traits.CastToBytes(ret[i*dim:(i+1)*dim]), values[i])
 	}
 	return ret, dim, nil
+}
+
+func (r *PayloadReader) GetSparseFloatVectorFromPayload() (*SparseFloatVectorFieldData, int, error) {
+	if !typeutil.IsSparseVectorType(r.colType) {
+		return nil, -1, fmt.Errorf("failed to get sparse float vector from datatype %v", r.colType.String())
+	}
+	values := make([]parquet.ByteArray, r.numRows)
+	valuesRead, err := ReadDataFromAllRowGroups[parquet.ByteArray, *file.ByteArrayColumnChunkReader](r.reader, values, 0, r.numRows)
+	if err != nil {
+		return nil, -1, err
+	}
+	if valuesRead != r.numRows {
+		return nil, -1, fmt.Errorf("expect %d binary, but got = %d", r.numRows, valuesRead)
+	}
+
+	fieldData := &SparseFloatVectorFieldData{}
+
+	for _, value := range values {
+		if len(value)%8 != 0 {
+			return nil, -1, fmt.Errorf("invalid bytesData length")
+		}
+
+		fieldData.Contents = append(fieldData.Contents, value)
+		rowDim := typeutil.SparseFloatRowDim(value)
+		if rowDim > fieldData.Dim {
+			fieldData.Dim = rowDim
+		}
+	}
+
+	return fieldData, int(fieldData.Dim), nil
 }
 
 func (r *PayloadReader) GetPayloadLengthFromReader() (int, error) {

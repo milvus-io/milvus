@@ -19,6 +19,8 @@ package indexnode
 import (
 	"unsafe"
 
+	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 )
 
@@ -36,6 +38,9 @@ func estimateFieldDataSize(dim int64, numRows int64, dataType schemapb.DataType)
 	}
 	if dataType == schemapb.DataType_BFloat16Vector {
 		return uint64(dim) * uint64(numRows) * 2, nil
+	}
+	if dataType == schemapb.DataType_SparseFloatVector {
+		return 0, errors.New("could not estimate field data size of SparseFloatVector")
 	}
 	return 0, nil
 }
