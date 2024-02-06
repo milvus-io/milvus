@@ -39,6 +39,15 @@ jobs:
     strategy:
       fail-fast: false
     steps:
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+        if: ${{ ! startsWith(runner.name, 'self') }} # skip this step if it is self-hosted runner
+        with:
+          root-reserve-mb: 20480
+          swap-size-mb: 1024
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
       - name: Checkout
         uses: actions/checkout@v2
       - name: Download Caches
@@ -50,12 +59,22 @@ jobs:
           OS_NAME: 'ubuntu20.04'
         run: |
           ./build/builder.sh /bin/bash -c "make check-proto-product && make verifiers"
+
   amazonlinux:
     name: Code Checker Amazonlinux 2023
     # Run in amazonlinux docker
     runs-on: ubuntu-latest
     timeout-minutes: 180
     steps:
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+        if: ${{ ! startsWith(runner.name, 'self') }} # skip this step if it is self-hosted runner
+        with:
+          root-reserve-mb: 20480
+          swap-size-mb: 1024
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
       - name: Checkout
         uses: actions/checkout@v2
       - name: Download Caches
