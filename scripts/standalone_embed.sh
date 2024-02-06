@@ -112,6 +112,23 @@ delete() {
     echo "Delete successfully."
 }
 
+check_docker() {
+    which docker 1> /dev/null
+    if [ $? -ne 0 ]
+    then
+        echo "The docker command cannot be found, please install it first."
+        exit 1
+    fi
+
+    sudo docker ps 1> /dev/null
+    if [ $? -ne 0 ]
+    then
+        echo "Please start docker daemon first."
+        exit 1
+    fi
+}
+
+check_docker
 
 case $1 in
     start)
