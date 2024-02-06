@@ -17,11 +17,9 @@
 package tikv
 
 import (
-	"context"
 	"os"
 	"testing"
 
-	"github.com/tikv/client-go/v2/rawkv"
 	"github.com/tikv/client-go/v2/testutils"
 	tilib "github.com/tikv/client-go/v2/tikv"
 	"github.com/tikv/client-go/v2/txnkv"
@@ -29,15 +27,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
-var (
-	txnClient *txnkv.Client
-	rawClient *rawkv.Client
-)
+var txnClient *txnkv.Client
 
 // creates a local TiKV Store for testing purpose.
 func setupLocalTiKV() {
 	setupLocalTxn()
-	setupLocalRaw()
 }
 
 func setupLocalTxn() {
@@ -53,28 +47,11 @@ func setupLocalTxn() {
 	txnClient = &txnkv.Client{KVStore: store}
 }
 
-func setupLocalRaw() {
-	client, cluster, pdClient, err := testutils.NewMockTiKV("", nil)
-	if err != nil {
-		panic(err)
-	}
-	testutils.BootstrapWithSingleStore(cluster)
-	rawClient = &rawkv.Client{}
-	p := rawkv.ClientProbe{Client: rawClient}
-	p.SetPDClient(pdClient)
-	p.SetRegionCache(tilib.NewRegionCache(pdClient))
-	p.SetRPCClient(client)
-}
-
 // Connects to a remote TiKV service for testing purpose. By default, it assumes the TiKV is from localhost.
 func setupRemoteTiKV() {
 	pdsn := "127.0.0.1:2379"
 	var err error
 	txnClient, err = txnkv.NewClient([]string{pdsn})
-	if err != nil {
-		panic(err)
-	}
-	rawClient, err = rawkv.NewClientWithOpts(context.Background(), []string{pdsn})
 	if err != nil {
 		panic(err)
 	}
