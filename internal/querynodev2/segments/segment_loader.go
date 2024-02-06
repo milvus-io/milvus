@@ -918,7 +918,7 @@ func GetIndexResourceUsage(indexInfo *querypb.FieldIndexInfo) (uint64, uint64, e
 		return uint64(neededMemSize), uint64(neededDiskSize), nil
 	}
 
-	factor := uint64(1)
+	factor := float64(1)
 
 	var isLoadWithDisk bool
 	GetDynamicPool().Submit(func() (any, error) {
@@ -930,10 +930,10 @@ func GetIndexResourceUsage(indexInfo *querypb.FieldIndexInfo) (uint64, uint64, e
 	}).Await()
 
 	if !isLoadWithDisk {
-		factor = 2
+		factor = paramtable.Get().QueryNodeCfg.MemoryIndexLoadPredictMemoryUsageFactor.GetAsFloat()
 	}
 
-	return uint64(indexInfo.IndexSize) * factor, 0, nil
+	return uint64(float64(indexInfo.IndexSize) * factor), 0, nil
 }
 
 // checkSegmentSize checks whether the memory & disk is sufficient to load the segments with given concurrency,
