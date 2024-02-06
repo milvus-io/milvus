@@ -163,7 +163,7 @@ func (t *levelZeroCompactionTask) compact() (*datapb.CompactionPlanResult, error
 
 	var resultSegments []*datapb.CompactionSegment
 
-	if float64(hardware.GetFreeMemoryCount())*paramtable.Get().DataNodeCfg.L0BatchMemoryRatio.GetAsFloat() > float64(totalSize) {
+	if float64(hardware.GetFreeMemoryCount())*paramtable.Get().DataNodeCfg.L0BatchMemoryRatio.GetAsFloat() < float64(totalSize) {
 		resultSegments, err = t.linearProcess(ctxTimeout, targetSegIDs, totalDeltalogs)
 	} else {
 		resultSegments, err = t.batchProcess(ctxTimeout, targetSegIDs, lo.Values(totalDeltalogs)...)
