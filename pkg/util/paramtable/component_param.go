@@ -2862,6 +2862,8 @@ type dataNodeConfig struct {
 	ChannelWorkPoolSize ParamItem `refreshable:"true"`
 
 	UpdateChannelCheckpointMaxParallel ParamItem `refreshable:"true"`
+	UpdateChannelCheckpointInterval    ParamItem `refreshable:"true"`
+	UpdateChannelCheckpointRPCTimeout  ParamItem `refreshable:"true"`
 
 	MaxConcurrentImportTaskNum ParamItem `refreshable:"true"`
 }
@@ -3098,6 +3100,22 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		DefaultValue: "1000",
 	}
 	p.UpdateChannelCheckpointMaxParallel.Init(base.mgr)
+
+	p.UpdateChannelCheckpointInterval = ParamItem{
+		Key:          "datanode.channel.updateChannelCheckpointInterval",
+		Version:      "2.4.0",
+		Doc:          "the interval duration(in seconds) for datanode to update channel checkpoint of each channel",
+		DefaultValue: "60",
+	}
+	p.UpdateChannelCheckpointInterval.Init(base.mgr)
+
+	p.UpdateChannelCheckpointRPCTimeout = ParamItem{
+		Key:          "datanode.channel.updateChannelCheckpointInterval",
+		Version:      "2.4.0",
+		Doc:          "timeout in seconds for UpdateChannelCheckpoint RPC call",
+		DefaultValue: "10",
+	}
+	p.UpdateChannelCheckpointRPCTimeout.Init(base.mgr)
 
 	p.MaxConcurrentImportTaskNum = ParamItem{
 		Key:          "datanode.import.maxConcurrentTaskNum",
