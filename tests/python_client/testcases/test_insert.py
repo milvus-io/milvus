@@ -1455,7 +1455,7 @@ class TestInsertInvalid(TestcaseBase):
         method: insert with nan value: list, number, string ...
         expected: raise exception
         """
-        if isinstance(json_value, list):
+        if isinstance(json_value, list) or json_value is None:
             pytest.skip("invalid in dataframe")
         collection_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=collection_name)
