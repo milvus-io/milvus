@@ -417,10 +417,17 @@ func canBeCompared(left, right *ExprWithType) bool {
 	return canBeComparedDataType(left.dataType, getArrayElementType(right))
 }
 
+func getDataType(expr *ExprWithType) string {
+	if typeutil.IsArrayType(expr.dataType) {
+		return fmt.Sprintf("%s[%s]", expr.dataType, getArrayElementType(expr))
+	}
+	return expr.dataType.String()
+}
+
 func HandleCompare(op int, left, right *ExprWithType) (*planpb.Expr, error) {
 	if !canBeCompared(left, right) {
-		return nil, fmt.Errorf("comparisons between %s, element_type: %s and %s elementType: %s are not supported",
-			left.dataType, getArrayElementType(left), right.dataType, getArrayElementType(right))
+		return nil, fmt.Errorf("comparisons between %s and %s are not supported",
+			getDataType(left), getDataType(right))
 	}
 
 	cmpOp := cmpOpMap[op]
