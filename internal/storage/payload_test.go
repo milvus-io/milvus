@@ -17,6 +17,7 @@
 package storage
 
 import (
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -1325,6 +1326,39 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 
 		r.numRows = 99
 		_, _, err = r.GetFloatVectorFromPayload()
+		assert.Error(t, err)
+	})
+
+	t.Run("TestByteArrayDatasetError", func(t *testing.T) {
+		w, err := NewPayloadWriter(schemapb.DataType_String)
+		require.Nil(t, err)
+		require.NotNil(t, w)
+
+		err = w.AddOneStringToPayload("hello0")
+		assert.NoError(t, err)
+
+		err = w.FinishPayloadWriter()
+		assert.NoError(t, err)
+
+		buffer, err := w.GetPayloadBufferFromWriter()
+		assert.NoError(t, err)
+
+		r, err := NewPayloadReader(schemapb.DataType_FloatVector, buffer)
+		assert.NoError(t, err)
+
+		r.colType = 99
+		_, err = r.GetByteArrayDataSet()
+		assert.Error(t, err)
+
+		r.colType = schemapb.DataType_String
+		dataset, err := r.GetByteArrayDataSet()
+		assert.NoError(t, err)
+
+		dataset.columnIdx = math.MaxInt
+		_, err = dataset.NextBatch(100)
+		assert.Error(t, err)
+
+		dataset.groupID = math.MaxInt
 		assert.Error(t, err)
 	})
 
