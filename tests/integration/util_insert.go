@@ -50,26 +50,6 @@ func (s *MiniClusterSuite) WaitForFlush(ctx context.Context, segIDs []int64, flu
 	}
 }
 
-func waitingForFlush(ctx context.Context, cluster *MiniCluster, segIDs []int64) {
-	flushed := func() bool {
-		resp, err := cluster.Proxy.GetFlushState(ctx, &milvuspb.GetFlushStateRequest{
-			SegmentIDs: segIDs,
-		})
-		if err != nil {
-			return false
-		}
-		return resp.GetFlushed()
-	}
-	for !flushed() {
-		select {
-		case <-ctx.Done():
-			panic("flush timeout")
-		default:
-			time.Sleep(500 * time.Millisecond)
-		}
-	}
-}
-
 func NewInt64FieldData(fieldName string, numRows int) *schemapb.FieldData {
 	return &schemapb.FieldData{
 		Type:      schemapb.DataType_Int64,
