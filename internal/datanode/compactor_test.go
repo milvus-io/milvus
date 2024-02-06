@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/testutils"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
@@ -105,6 +106,13 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			{false, schemapb.DataType_BinaryVector, []interface{}{nil, nil}, "invalid binaryvector"},
 			{false, schemapb.DataType_Float16Vector, []interface{}{nil, nil}, "invalid float16vector"},
 			{false, schemapb.DataType_BFloat16Vector, []interface{}{nil, nil}, "invalid bfloat16vector"},
+
+			{false, schemapb.DataType_SparseFloatVector, []interface{}{nil, nil}, "invalid sparsefloatvector"},
+			{false, schemapb.DataType_SparseFloatVector, []interface{}{[]byte{255}, []byte{15}}, "invalid sparsefloatvector"},
+			{true, schemapb.DataType_SparseFloatVector, []interface{}{
+				testutils.CreateSparseFloatRow([]uint32{1, 2}, []float32{1.0, 2.0}),
+				testutils.CreateSparseFloatRow([]uint32{3, 4}, []float32{1.0, 2.0}),
+			}, "valid sparsefloatvector"},
 		}
 
 		// make sure all new data types missed to handle would throw unexpected error

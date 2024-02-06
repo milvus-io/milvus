@@ -50,7 +50,8 @@ type NativePayloadWriter struct {
 
 func NewPayloadWriter(colType schemapb.DataType, dim ...int) (PayloadWriterInterface, error) {
 	var arrowType arrow.DataType
-	if typeutil.IsVectorType(colType) {
+	// writer for sparse float vector doesn't require dim
+	if typeutil.IsVectorType(colType) && !typeutil.IsSparseVectorType(colType) {
 		if len(dim) != 1 {
 			return nil, fmt.Errorf("incorrect input numbers")
 		}
@@ -164,6 +165,12 @@ func (w *NativePayloadWriter) AddDataToPayload(data interface{}, dim ...int) err
 				return errors.New("incorrect data type")
 			}
 			return w.AddBFloat16VectorToPayload(val, dim[0])
+		case schemapb.DataType_SparseFloatVector:
+			val, ok := data.(*SparseFloatVectorFieldData)
+			if !ok {
+				return errors.New("incorrect data type")
+			}
+			return w.AddSparseFloatVectorToPayload(val)
 		default:
 			return errors.New("incorrect datatype")
 		}
@@ -475,6 +482,23 @@ func (w *NativePayloadWriter) AddBFloat16VectorToPayload(data []byte, dim int) e
 	return nil
 }
 
+func (w *NativePayloadWriter) AddSparseFloatVectorToPayload(data *SparseFloatVectorFieldData) error {
+	if w.finished {
+		return errors.New("can't append data to finished writer")
+	}
+	builder, ok := w.builder.(*array.BinaryBuilder)
+	if !ok {
+		return errors.New("failed to cast BinaryBuilder")
+	}
+	length := len(data.SparseFloatArray.Contents)
+	builder.Reserve(length)
+	for i := 0; i < length; i++ {
+		builder.Append(data.SparseFloatArray.Contents[i])
+	}
+
+	return nil
+}
+
 func (w *NativePayloadWriter) FinishPayloadWriter() error {
 	if w.finished {
 		return errors.New("can't reuse a finished writer")
@@ -574,6 +598,8 @@ func milvusDataTypeToArrowType(dataType schemapb.DataType, dim int) arrow.DataTy
 		return &arrow.FixedSizeBinaryType{
 			ByteWidth: dim * 2,
 		}
+	case schemapb.DataType_SparseFloatVector:
+		return &arrow.BinaryType{}
 	default:
 		panic("unsupported data type")
 	}

@@ -792,6 +792,15 @@ func interface2FieldData(schemaDataType schemapb.DataType, content []interface{}
 		data.Dim = len(data.Data) * 8 / int(numRows)
 		rst = data
 
+	case schemapb.DataType_SparseFloatVector:
+		data := &storage.SparseFloatVectorFieldData{}
+		for _, c := range content {
+			if err := data.AppendRow(c); err != nil {
+				return nil, fmt.Errorf("failed to append row: %v, %w", err, errTransferType)
+			}
+		}
+		rst = data
+
 	default:
 		return nil, errUnknownDataType
 	}

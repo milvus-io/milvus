@@ -41,6 +41,16 @@ func GenBFloat16VecDataset(vectors []byte) *Dataset {
 	}
 }
 
+func GenSparseFloatVecDataset(data *storage.SparseFloatVectorFieldData) *Dataset {
+	// TODO(SPARSE): in search for the usage of this method, only the DType
+	// of the returned Dataset is used.
+	// If this is designed to generate a Dataset that will be sent to knowhere,
+	// we'll need to expose knowhere::sparse::SparseRow to Go.
+	return &Dataset{
+		DType: schemapb.DataType_SparseFloatVector,
+	}
+}
+
 func GenBinaryVecDataset(vectors []byte) *Dataset {
 	return &Dataset{
 		DType: schemapb.DataType_BinaryVector,
@@ -116,6 +126,8 @@ func GenDataset(data storage.FieldData) *Dataset {
 		return GenFloat16VecDataset(f.Data)
 	case *storage.BFloat16VectorFieldData:
 		return GenBFloat16VecDataset(f.Data)
+	case *storage.SparseFloatVectorFieldData:
+		return GenSparseFloatVecDataset(f)
 	default:
 		return &Dataset{
 			DType: schemapb.DataType_None,

@@ -114,6 +114,9 @@ func (ds *DataSorter) Swap(i, j int) {
 		case schemapb.DataType_JSON:
 			data := singleData.(*JSONFieldData).Data
 			data[i], data[j] = data[j], data[i]
+		case schemapb.DataType_SparseFloatVector:
+			field_data := singleData.(*SparseFloatVectorFieldData)
+			field_data.Contents[i], field_data.Contents[j] = field_data.Contents[j], field_data.Contents[i]
 		default:
 			errMsg := "undefined data type " + string(field.DataType)
 			panic(errMsg)
