@@ -30,7 +30,7 @@ import (
 // it maintains bloom filter generated from segment primary keys.
 // it may be updated with new insert FieldData when serving growing segments.
 type BloomFilterSet struct {
-	mut       sync.Mutex
+	mut       sync.RWMutex
 	batchSize uint
 	current   *storage.PkStatistics
 	history   []*storage.PkStatistics
@@ -56,8 +56,8 @@ func NewBloomFilterSetWithBatchSize(batchSize uint, historyEntries ...*storage.P
 }
 
 func (bfs *BloomFilterSet) PkExists(pk storage.PrimaryKey) bool {
-	bfs.mut.Lock()
-	defer bfs.mut.Unlock()
+	bfs.mut.RLock()
+	defer bfs.mut.RUnlock()
 	if bfs.current != nil && bfs.current.PkExist(pk) {
 		return true
 	}
@@ -101,8 +101,8 @@ func (bfs *BloomFilterSet) Roll(newStats ...*storage.PrimaryKeyStats) {
 }
 
 func (bfs *BloomFilterSet) GetHistory() []*storage.PkStatistics {
-	bfs.mut.Lock()
-	defer bfs.mut.Unlock()
+	bfs.mut.RLock()
+	defer bfs.mut.RUnlock()
 
 	return bfs.history
 }
