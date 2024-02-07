@@ -34,7 +34,10 @@ pipeline {
                 container('main') {
                     script {
                         sh './build/set_docker_mirror.sh'
-                        sh "./build/builder_gpu.sh /bin/bash -c \"make gpu-install\""
+                        sh """
+                        export IS_NETWORK_MODE_HOST="true"
+                        ./build/builder_gpu.sh /bin/bash -c \"make gpu-install\"
+                        """
 
                         def date = sh(returnStdout: true, script: 'date +%Y%m%d').trim()
                         def gitShortCommit = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
