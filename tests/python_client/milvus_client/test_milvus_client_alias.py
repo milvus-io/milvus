@@ -406,7 +406,8 @@ class TestMilvusClientAliasValid(TestcaseBase):
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. create alias
-        client_w.create_alias(collection_name, alias)
+        client_w.drop_alias(client, alias)
+        client_w.create_alias(client, collection_name, alias)
         collection_name = alias
         # 2. insert
         rng = np.random.default_rng(seed=19530)
@@ -431,7 +432,10 @@ class TestMilvusClientAliasValid(TestcaseBase):
                                     "with_vec": True,
                                     "primary_field": default_primary_key_field_name})
         client_w.release_collection(client, collection_name)
-        client_w.drop_collection(client, collection_name)
+        client_w.drop_collection(client, collection_name, check_task=CheckTasks.err_res,
+                                 check_items={ct.err_code: 65535,
+                                              ct.err_msg: "cannot drop the collection via alias = collection_alias"})
+        client_w.drop_alias(client, alias)
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.xfail(reason="pymilvus issue 1891, 1892")
@@ -491,7 +495,7 @@ class TestMilvusClientAliasValid(TestcaseBase):
         client_w.alter_alias(client, collection_name, another_alias)
         client_w.describe_alias(client, alias)
         # 3. list alias
-        aliases = client_w.list_aliases(client)[0]
+        aliases = client_w.list_aliases(client, collection_name)[0]
         # assert alias in aliases
         # assert another_alias in aliases
         # 4. assert collection is equal to alias according to partitions

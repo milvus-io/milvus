@@ -208,7 +208,7 @@ pipeline {
                                                 } else if("${MILVUS_SERVER_TYPE}" == "standalone-authentication") {
                                                     tag="RBAC"
                                                     parallel_num = 1
-                                                    e2e_timeout_seconds = 1 * 60 * 60
+                                                    e2e_timeout_seconds = 3 * 60 * 60
                                                 }
                                                 if ("${MILVUS_CLIENT}" == "pymilvus") {
                                                     sh """
