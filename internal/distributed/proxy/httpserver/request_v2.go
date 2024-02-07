@@ -128,6 +128,7 @@ type SearchReqV2 struct {
 	CollectionName string             `json:"collectionName" binding:"required"`
 	PartitionNames []string           `json:"partitionNames"`
 	Filter         string             `json:"filter"`
+	GroupByField   string             `json:"groupingField"`
 	Limit          int32              `json:"limit"`
 	Offset         int32              `json:"offset"`
 	OutputFields   []string           `json:"outputFields"`
@@ -136,6 +137,35 @@ type SearchReqV2 struct {
 }
 
 func (req *SearchReqV2) GetDbName() string { return req.DbName }
+
+type Rand struct {
+	Strategy string                 `json:"strategy"`
+	Params   map[string]interface{} `json:"params"`
+}
+
+type SubSearchReq struct {
+	Vector        []float32          `json:"vector"`
+	AnnsField     string             `json:"annsField"`
+	Filter        string             `json:"filter"`
+	GroupByField  string             `json:"groupingField"`
+	MetricType    string             `json:"metricType"`
+	Limit         int32              `json:"limit"`
+	Offset        int32              `json:"offset"`
+	IgnoreGrowing bool               `json:"ignoreGrowing"`
+	Params        map[string]float64 `json:"params"`
+}
+
+type HybridSearchReq struct {
+	DbName         string         `json:"dbName"`
+	CollectionName string         `json:"collectionName" binding:"required"`
+	PartitionNames []string       `json:"partitionNames"`
+	Search         []SubSearchReq `json:"search"`
+	Rerank         Rand           `json:"rerank"`
+	Limit          int32          `json:"limit"`
+	OutputFields   []string       `json:"outputFields"`
+}
+
+func (req *HybridSearchReq) GetDbName() string { return req.DbName }
 
 type ReturnErrMsg struct {
 	Code    int32  `json:"code"`
