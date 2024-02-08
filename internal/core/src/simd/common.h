@@ -23,9 +23,9 @@ constexpr size_t BITSET_BLOCK_SIZE = sizeof(unsigned long);
 
 /*
 * For term size less than TERM_EXPR_IN_SIZE_THREAD,
-* using simd search better for all numberic type.
+* using simd search better for all numeric type.
 * For term size bigger than TERM_EXPR_IN_SIZE_THREAD, 
-* using set search better for all numberic type.
+* using set search better for all numeric type.
 * 50 is experimental value, using dynamic plan to support modify it
 * in different situation.
 */
