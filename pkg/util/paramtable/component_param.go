@@ -3199,8 +3199,8 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	p.L0BatchMemoryRatio = ParamItem{
 		Key:          "datanode.compaction.levelZeroBatchMemoryRatio",
 		Version:      "2.4.0",
-		Doc:          "The maximum memory ratio for level zero compaction executing in batch mode",
-		DefaultValue: "0.2",
+		Doc:          "The minimal memory ratio of free memory for level zero compaction executing in batch mode",
+		DefaultValue: "0.05",
 		Export:       true,
 	}
 	p.L0BatchMemoryRatio.Init(base.mgr)
