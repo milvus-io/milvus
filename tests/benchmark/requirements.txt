@@ -2,7 +2,7 @@
 # --extra-index-url https://test.pypi.org/simple/
 # pymilvus==2.0.0rc3.dev8
 
-grpcio==1.53.0
+grpcio==1.53.2
 grpcio-testing==1.37.1
 grpcio-tools==1.37.1
 
