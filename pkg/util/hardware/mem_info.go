@@ -21,6 +21,7 @@ import (
 	"os"
 
 	"github.com/shirou/gopsutil/v3/process"
+	"github.com/sirupsen/logrus"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/log"
@@ -34,6 +35,9 @@ func init() {
 	if err != nil {
 		panic(err)
 	}
+
+	// avoid to output a lot of error logs from cgroups package
+	logrus.SetLevel(logrus.PanicLevel)
 }
 
 // GetUsedMemoryCount returns the memory usage in bytes.
