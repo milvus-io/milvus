@@ -311,6 +311,10 @@ func (a *DescribeAliasTask) OnEnqueue() error {
 func (a *DescribeAliasTask) PreExecute(ctx context.Context) error {
 	a.Base.MsgType = commonpb.MsgType_DescribeAlias
 	a.Base.SourceID = a.nodeID
+	// collection alias uses the same format as collection name
+	if err := ValidateCollectionAlias(a.GetAlias()); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -374,6 +378,12 @@ func (a *ListAliasesTask) OnEnqueue() error {
 func (a *ListAliasesTask) PreExecute(ctx context.Context) error {
 	a.Base.MsgType = commonpb.MsgType_ListAliases
 	a.Base.SourceID = a.nodeID
+
+	if len(a.GetCollectionName()) > 0 {
+		if err := validateCollectionName(a.GetCollectionName()); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

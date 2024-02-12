@@ -380,7 +380,7 @@ func (s *Server) ReleasePartitions(ctx context.Context, req *querypb.ReleasePart
 	}
 
 	if len(req.GetPartitionIDs()) == 0 {
-		err := merr.WrapErrParameterInvalid("any parttiion", "empty partition list")
+		err := merr.WrapErrParameterInvalid("any partition", "empty partition list")
 		log.Warn("no partition to release", zap.Error(err))
 		metrics.QueryCoordReleaseCount.WithLabelValues(metrics.FailLabel).Inc()
 		return merr.Status(err), nil
