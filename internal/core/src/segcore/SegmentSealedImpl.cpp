@@ -172,13 +172,16 @@ SegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
     // reverse pk from scalar index and set pks to offset
     if (schema_->get_primary_field_id() == field_id) {
         AssertInfo(field_id.get() != -1, "Primary key is -1");
-        AssertInfo(insert_record_.empty_pks(), "already exists");
         switch (field_meta.get_data_type()) {
             case DataType::INT64: {
                 auto int64_index = dynamic_cast<index::ScalarIndex<int64_t>*>(
                     scalar_indexings_[field_id].get());
-                for (int i = 0; i < row_count; ++i) {
-                    insert_record_.insert_pk(int64_index->Reverse_Lookup(i), i);
+                if (insert_record_.empty_pks()) {
+                    for (int i = 0; i < row_count; ++i) {
+                        insert_record_.insert_pk(int64_index->Reverse_Lookup(i),
+                                                 i);
+                    }
+                    insert_record_.seal_pks();
                 }
                 insert_record_.seal_pks();
                 break;
@@ -187,9 +190,12 @@ SegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
                 auto string_index =
                     dynamic_cast<index::ScalarIndex<std::string>*>(
                         scalar_indexings_[field_id].get());
-                for (int i = 0; i < row_count; ++i) {
-                    insert_record_.insert_pk(string_index->Reverse_Lookup(i),
-                                             i);
+                if (insert_record_.empty_pks()) {
+                    for (int i = 0; i < row_count; ++i) {
+                        insert_record_.insert_pk(
+                            string_index->Reverse_Lookup(i), i);
+                    }
+                    insert_record_.seal_pks();
                 }
                 insert_record_.seal_pks();
                 break;
@@ -850,8 +856,8 @@ SegmentSealedImpl::DropFieldData(const FieldId field_id) {
         auto& field_meta = schema_->operator[](field_id);
         std::unique_lock lck(mutex_);
         if (get_bit(field_data_ready_bitset_, field_id)) {
+            fields_.erase(field_id);
             set_bit(field_data_ready_bitset_, field_id, false);
-            insert_record_.drop_field_data(field_id);
         }
         if (get_bit(binlog_index_bitset_, field_id)) {
             set_bit(binlog_index_bitset_, field_id, false);
