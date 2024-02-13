@@ -28,18 +28,6 @@ namespace milvus {
 namespace exec {
 
 template <typename T>
-struct TermElementFuncFlat {
-    bool
-    operator()(const T* src, size_t n, T val) {
-        for (size_t i = 0; i < n; ++i) {
-            if (src[i] == val) {
-                return true;
-            }
-        }
-    }
-};
-
-template <typename T>
 struct TermElementFuncSet {
     bool
     operator()(const std::unordered_set<T>& srcs, T val) {
