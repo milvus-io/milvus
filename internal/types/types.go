@@ -283,6 +283,7 @@ type QueryNodeComponent interface {
 
 	SetAddress(address string)
 	GetAddress() string
+	GetNodeID() int64
 
 	// SetEtcdClient set etcd client for QueryNode
 	SetEtcdClient(etcdClient *clientv3.Client)

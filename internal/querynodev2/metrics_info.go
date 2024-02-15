@@ -114,7 +114,7 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 			return seg.MemSize()
 		})
 		totalGrowingSize += size
-		metrics.QueryNodeEntitiesSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+		metrics.QueryNodeEntitiesSize.WithLabelValues(fmt.Sprint(node.GetNodeID()),
 			fmt.Sprint(collection), segments.SegmentTypeGrowing.String()).Set(float64(size))
 	}
 
@@ -126,7 +126,7 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 		size := lo.SumBy(segs, func(seg segments.Segment) int64 {
 			return seg.MemSize()
 		})
-		metrics.QueryNodeEntitiesSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+		metrics.QueryNodeEntitiesSize.WithLabelValues(fmt.Sprint(node.GetNodeID()),
 			fmt.Sprint(collection), segments.SegmentTypeSealed.String()).Set(float64(size))
 	}
 
@@ -148,7 +148,7 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 		QueryQueue:          qqms,
 		GrowingSegmentsSize: totalGrowingSize,
 		Effect: metricsinfo.NodeEffect{
-			NodeID:        paramtable.GetNodeID(),
+			NodeID:        node.GetNodeID(),
 			CollectionIDs: collections.Collect(),
 		},
 	}, nil
@@ -163,7 +163,7 @@ func getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, 
 	if err != nil {
 		return &milvuspb.GetMetricsResponse{
 			Status:        merr.Status(err),
-			ComponentName: metricsinfo.ConstructComponentName(typeutil.DataNodeRole, paramtable.GetNodeID()),
+			ComponentName: metricsinfo.ConstructComponentName(typeutil.DataNodeRole, node.GetNodeID()),
 		}, nil
 	}
 	hardwareInfos := metricsinfo.HardwareMetrics{
@@ -179,7 +179,7 @@ func getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, 
 
 	nodeInfos := metricsinfo.QueryNodeInfos{
 		BaseComponentInfos: metricsinfo.BaseComponentInfos{
-			Name:          metricsinfo.ConstructComponentName(typeutil.QueryNodeRole, paramtable.GetNodeID()),
+			Name:          metricsinfo.ConstructComponentName(typeutil.QueryNodeRole, node.GetNodeID()),
 			HardwareInfos: hardwareInfos,
 			SystemInfo:    metricsinfo.DeployMetrics{},
 			CreatedTime:   paramtable.GetCreateTime().String(),
@@ -199,13 +199,13 @@ func getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, 
 		return &milvuspb.GetMetricsResponse{
 			Status:        merr.Status(err),
 			Response:      "",
-			ComponentName: metricsinfo.ConstructComponentName(typeutil.QueryNodeRole, paramtable.GetNodeID()),
+			ComponentName: metricsinfo.ConstructComponentName(typeutil.QueryNodeRole, node.GetNodeID()),
 		}, nil
 	}
 
 	return &milvuspb.GetMetricsResponse{
 		Status:        merr.Success(),
 		Response:      resp,
-		ComponentName: metricsinfo.ConstructComponentName(typeutil.QueryNodeRole, paramtable.GetNodeID()),
+		ComponentName: metricsinfo.ConstructComponentName(typeutil.QueryNodeRole, node.GetNodeID()),
 	}, nil
 }

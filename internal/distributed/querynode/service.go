@@ -132,6 +132,7 @@ func (s *Server) init() error {
 		log.Error("QueryNode init error: ", zap.Error(err))
 		return err
 	}
+	s.serverID.Store(s.querynode.GetNodeID())
 
 	return nil
 }
