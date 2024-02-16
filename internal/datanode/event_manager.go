@@ -33,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 const retryWatchInterval = 20 * time.Second
@@ -93,7 +92,7 @@ func (node *DataNode) StartWatchChannels(ctx context.Context) {
 // serves the corner case for etcd connection lost and missing some events
 func (node *DataNode) checkWatchedList() error {
 	// REF MEP#7 watch path should be [prefix]/channel/{node_id}/{channel_name}
-	prefix := path.Join(Params.CommonCfg.DataCoordWatchSubPath.GetValue(), fmt.Sprintf("%d", paramtable.GetNodeID()))
+	prefix := path.Join(Params.CommonCfg.DataCoordWatchSubPath.GetValue(), fmt.Sprintf("%d", node.serverID))
 	keys, values, err := node.watchKv.LoadWithPrefix(prefix)
 	if err != nil {
 		return err

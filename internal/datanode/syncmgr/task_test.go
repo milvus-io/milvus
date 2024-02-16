@@ -190,7 +190,7 @@ func (s *SyncTaskSuite) TestRunNormal() {
 
 	s.Run("without_data", func() {
 		task := s.getSuiteSyncTask()
-		task.WithMetaWriter(BrokerMetaWriter(s.broker))
+		task.WithMetaWriter(BrokerMetaWriter(s.broker, 1))
 		task.WithTimeRange(50, 100)
 		task.WithCheckpoint(&msgpb.MsgPosition{
 			ChannelName: s.channelName,
@@ -205,7 +205,7 @@ func (s *SyncTaskSuite) TestRunNormal() {
 	s.Run("with_insert_delete_cp", func() {
 		task := s.getSuiteSyncTask()
 		task.WithTimeRange(50, 100)
-		task.WithMetaWriter(BrokerMetaWriter(s.broker))
+		task.WithMetaWriter(BrokerMetaWriter(s.broker, 1))
 		task.WithCheckpoint(&msgpb.MsgPosition{
 			ChannelName: s.channelName,
 			MsgID:       []byte{1, 2, 3, 4},
@@ -223,7 +223,7 @@ func (s *SyncTaskSuite) TestRunNormal() {
 	s.Run("with_statslog", func() {
 		task := s.getSuiteSyncTask()
 		task.WithTimeRange(50, 100)
-		task.WithMetaWriter(BrokerMetaWriter(s.broker))
+		task.WithMetaWriter(BrokerMetaWriter(s.broker, 1))
 		task.WithCheckpoint(&msgpb.MsgPosition{
 			ChannelName: s.channelName,
 			MsgID:       []byte{1, 2, 3, 4},
@@ -246,7 +246,7 @@ func (s *SyncTaskSuite) TestRunNormal() {
 	s.Run("with_delta_data", func() {
 		task := s.getSuiteSyncTask()
 		task.WithTimeRange(50, 100)
-		task.WithMetaWriter(BrokerMetaWriter(s.broker))
+		task.WithMetaWriter(BrokerMetaWriter(s.broker, 1))
 		task.WithCheckpoint(&msgpb.MsgPosition{
 			ChannelName: s.channelName,
 			MsgID:       []byte{1, 2, 3, 4},
@@ -278,7 +278,7 @@ func (s *SyncTaskSuite) TestRunL0Segment() {
 			Value: []byte("test_data"),
 		}
 		task.WithTimeRange(50, 100)
-		task.WithMetaWriter(BrokerMetaWriter(s.broker))
+		task.WithMetaWriter(BrokerMetaWriter(s.broker, 1))
 		task.WithCheckpoint(&msgpb.MsgPosition{
 			ChannelName: s.channelName,
 			MsgID:       []byte{1, 2, 3, 4},
@@ -315,7 +315,7 @@ func (s *SyncTaskSuite) TestCompactToNull() {
 	s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
 
 	task := s.getSuiteSyncTask()
-	task.WithMetaWriter(BrokerMetaWriter(s.broker))
+	task.WithMetaWriter(BrokerMetaWriter(s.broker, 1))
 	task.WithTimeRange(50, 100)
 	task.WithCheckpoint(&msgpb.MsgPosition{
 		ChannelName: s.channelName,
@@ -379,7 +379,7 @@ func (s *SyncTaskSuite) TestRunError() {
 		s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(errors.New("mocked"))
 
 		task := s.getSuiteSyncTask()
-		task.WithMetaWriter(BrokerMetaWriter(s.broker, retry.Attempts(1)))
+		task.WithMetaWriter(BrokerMetaWriter(s.broker, 1, retry.Attempts(1)))
 		task.WithTimeRange(50, 100)
 		task.WithCheckpoint(&msgpb.MsgPosition{
 			ChannelName: s.channelName,

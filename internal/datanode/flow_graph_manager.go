@@ -62,6 +62,7 @@ func (fm *fgManagerImpl) AddFlowgraph(ds *dataSyncService) {
 
 func (fm *fgManagerImpl) AddandStartWithEtcdTickler(dn *DataNode, vchan *datapb.VchannelInfo, schema *schemapb.CollectionSchema, tickler *etcdTickler) error {
 	log := log.With(zap.String("channel", vchan.GetChannelName()))
+	log.Warn(fmt.Sprintf("debug AddandStartWithEtcdTickler %d", dn.GetNodeID()))
 	if fm.flowgraphs.Contain(vchan.GetChannelName()) {
 		log.Warn("try to add an existed DataSyncService")
 		return nil

@@ -1,752 +1,491 @@
-# Licensed to the LF AI & Data foundation under one
-# or more contributor license agreements. See the NOTICE file
-# distributed with this work for additional information
-# regarding copyright ownership. The ASF licenses this file
-# to you under the Apache License, Version 2.0 (the
-# "License"); you may not use this file except in compliance
-# with the License. You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
-# Related configuration of etcd, used to store Milvus metadata & service discovery.
-etcd:
-  endpoints: localhost:2379
-  rootPath: by-dev # The root path where data is stored in etcd
-  metaSubPath: meta # metaRootPath = rootPath + '/' + metaSubPath
-  kvSubPath: kv # kvRootPath = rootPath + '/' + kvSubPath
-  log:
-    level: info # Only supports debug, info, warn, error, panic, or fatal. Default 'info'.
-    # path is one of:
-    #  - "default" as os.Stderr,
-    #  - "stderr" as os.Stderr,
-    #  - "stdout" as os.Stdout,
-    #  - file path to append server logs to.
-    # please adjust in embedded Milvus: /tmp/milvus/logs/etcd.log
-    path: stdout
-  ssl:
-    enabled: false # Whether to support ETCD secure connection mode
-    tlsCert: /path/to/etcd-client.pem # path to your cert file
-    tlsKey: /path/to/etcd-client-key.pem # path to your key file
-    tlsCACert: /path/to/ca.pem # path to your CACert file
-    # TLS min version
-    # Optional values: 1.0, 1.1, 1.2, 1.3。
-    # We recommend using version 1.2 and above.
-    tlsMinVersion: 1.3
-  use:
-    embed: false # Whether to enable embedded Etcd (an in-process EtcdServer).
-  data:
-    dir: default.etcd # Embedded Etcd only. please adjust in embedded Milvus: /tmp/milvus/etcdData/
-
-metastore:
-  # Default value: etcd
-  # Valid values: [etcd, tikv]
-  type: etcd
-
-# Related configuration of tikv, used to store Milvus metadata.
-# Notice that when TiKV is enabled for metastore, you still need to have etcd for service discovery.
-# TiKV is a good option when the metadata size requires better horizontal scalability.
-tikv:
-  # Note that the default pd port of tikv is 2379, which conflicts with etcd.
-  endpoints: 127.0.0.1:2389
-  rootPath: by-dev # The root path where data is stored
-  metaSubPath: meta # metaRootPath = rootPath + '/' + metaSubPath
-  kvSubPath: kv # kvRootPath = rootPath + '/' + kvSubPath
-
-localStorage:
-  path: /var/lib/milvus/data/ # please adjust in embedded Milvus: /tmp/milvus/data/
-
-# Related configuration of MinIO/S3/GCS or any other service supports S3 API, which is responsible for data persistence for Milvus.
-# We refer to the storage service as MinIO/S3 in the following description for simplicity.
-minio:
-  address: localhost # Address of MinIO/S3
-  port: 9000 # Port of MinIO/S3
-  accessKeyID: minioadmin # accessKeyID of MinIO/S3
-  secretAccessKey: minioadmin # MinIO/S3 encryption string
-  useSSL: false # Access to MinIO/S3 with SSL
-  bucketName: a-bucket # Bucket name in MinIO/S3
-  rootPath: files # The root path where the message is stored in MinIO/S3
-  # Whether to useIAM role to access S3/GCS instead of access/secret keys
-  # For more information, refer to
-  # aws: https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_use.html
-  # gcp: https://cloud.google.com/storage/docs/access-control/iam
-  # aliyun (ack): https://www.alibabacloud.com/help/en/container-service-for-kubernetes/latest/use-rrsa-to-enforce-access-control
-  # aliyun (ecs): https://www.alibabacloud.com/help/en/elastic-compute-service/latest/attach-an-instance-ram-role
-  useIAM: false
-  # Cloud Provider of S3. Supports: "aws", "gcp", "aliyun".
-  # You can use "aws" for other cloud provider supports S3 API with signature v4, e.g.: minio
-  # You can use "gcp" for other cloud provider supports S3 API with signature v2
-  # You can use "aliyun" for other cloud provider uses virtual host style bucket
-  # When useIAM enabled, only "aws", "gcp", "aliyun" is supported for now
-  cloudProvider: aws
-  # Custom endpoint for fetch IAM role credentials. when useIAM is true & cloudProvider is "aws".
-  # Leave it empty if you want to use AWS default endpoint
-  iamEndpoint:
-  # Log level for aws sdk log.
-  # Supported level:  off, fatal, error, warn, info, debug, trace
-  logLevel: fatal
-  # Cloud data center region
-  region: ''
-  # Cloud whether use virtual host bucket mode
-  useVirtualHost: false
-  # timeout for request time in milliseconds
-  requestTimeoutMs: 10000
-
-# Milvus supports four MQ: rocksmq(based on RockDB), natsmq(embedded nats-server), Pulsar and Kafka.
-# You can change your mq by setting mq.type field.
-# If you don't set mq.type field as default, there is a note about enabling priority if we config multiple mq in this file.
-# 1. standalone(local) mode: rocksmq(default) > Pulsar > Kafka
-# 2. cluster mode:  Pulsar(default) > Kafka (rocksmq and natsmq is unsupported in cluster mode)
-mq:
-  # Default value: "default"
-  # Valid values: [default, pulsar, kafka, rocksmq, natsmq]
-  type: default
-
-# Related configuration of pulsar, used to manage Milvus logs of recent mutation operations, output streaming log, and provide log publish-subscribe services.
-pulsar:
-  address: localhost # Address of pulsar
-  port: 6650 # Port of Pulsar
-  webport: 80 # Web port of pulsar, if you connect directly without proxy, should use 8080
-  maxMessageSize: 5242880 # 5 * 1024 * 1024 Bytes, Maximum size of each message in pulsar.
-  tenant: public
-  namespace: default
-  requestTimeout: 60 # pulsar client global request timeout in seconds
-  enableClientMetrics: false # Whether to register pulsar client metrics into milvus metrics path.
-
-# If you want to enable kafka, needs to comment the pulsar configs
-# kafka:
-#   brokerList:
-#   saslUsername:
-#   saslPassword:
-#   saslMechanisms: PLAIN
-#   securityProtocol: SASL_SSL
-#   readTimeout: 10 # read message timeout in seconds
-
-rocksmq:
-  # The path where the message is stored in rocksmq
-  # please adjust in embedded Milvus: /tmp/milvus/rdb_data
-  path: /var/lib/milvus/rdb_data
-  lrucacheratio: 0.06 # rocksdb cache memory ratio
-  rocksmqPageSize: 67108864 # 64 MB, 64 * 1024 * 1024 bytes, The size of each page of messages in rocksmq
-  retentionTimeInMinutes: 4320 # 3 days, 3 * 24 * 60 minutes, The retention time of the message in rocksmq.
-  retentionSizeInMB: 8192 # 8 GB, 8 * 1024 MB, The retention size of the message in rocksmq.
-  compactionInterval: 86400 # 1 day, trigger rocksdb compaction every day to remove deleted data
-  # compaction compression type, only support use 0,7.
-  # 0 means not compress, 7 will use zstd
-  # len of types means num of rocksdb level.
-  compressionTypes: [0, 0, 7, 7, 7]
-
-# natsmq configuration.
-# more detail: https://docs.nats.io/running-a-nats-service/configuration
-natsmq:
-  server: # server side configuration for natsmq.
-    port: 4222 # 4222 by default, Port for nats server listening.
-    storeDir: /var/lib/milvus/nats # /var/lib/milvus/nats by default, directory to use for JetStream storage of nats.
-    maxFileStore: 17179869184 # (B) 16GB by default, Maximum size of the 'file' storage.
-    maxPayload: 8388608 # (B) 8MB by default, Maximum number of bytes in a message payload.
-    maxPending: 67108864 # (B) 64MB by default, Maximum number of bytes buffered for a connection Applies to client connections.
-    initializeTimeout: 4000 # (ms) 4s by default, waiting for initialization of natsmq finished.
-    monitor:
-      trace: false # false by default, If true enable protocol trace log messages.
-      debug: false # false by default, If true enable debug log messages.
-      logTime: true # true by default, If set to false, log without timestamps.
-      logFile: /tmp/milvus/logs/nats.log # /tmp/milvus/logs/nats.log by default, Log file path relative to .. of milvus binary if use relative path.
-      logSizeLimit: 536870912 # (B) 512MB by default, Size in bytes after the log file rolls over to a new one.
-    retention:
-      maxAge: 4320 # (min) 3 days by default, Maximum age of any message in the P-channel.
-      maxBytes: # (B) None by default, How many bytes the single P-channel may contain. Removing oldest messages if the P-channel exceeds this size.
-      maxMsgs: # None by default, How many message the single P-channel may contain. Removing oldest messages if the P-channel exceeds this limit.
-
-# Related configuration of rootCoord, used to handle data definition language (DDL) and data control language (DCL) requests
-rootCoord:
-  dmlChannelNum: 16 # The number of dml channels created at system startup
-  maxDatabaseNum: 64 # Maximum number of database
-  maxPartitionNum: 4096 # Maximum number of partitions in a collection
-  minSegmentSizeToEnableIndex: 1024 # It's a threshold. When the segment size is less than this value, the segment will not be indexed
-  importTaskExpiration: 900 # (in seconds) Duration after which an import task will expire (be killed). Default 900 seconds (15 minutes).
-  importTaskRetention: 86400 # (in seconds) Milvus will keep the record of import tasks for at least `importTaskRetention` seconds. Default 86400, seconds (24 hours).
-  enableActiveStandby: false
-  # can specify ip for example
-  # ip: 127.0.0.1
-  ip: # if not specify address, will use the first unicastable address as local ip
-  port: 53100
-  grpc:
-    serverMaxSendSize: 536870912
-    serverMaxRecvSize: 268435456
-    clientMaxSendSize: 268435456
-    clientMaxRecvSize: 536870912
-  maxGeneralCapacity: 65536
-
-# Related configuration of proxy, used to validate client requests and reduce the returned results.
-proxy:
-  timeTickInterval: 200 # ms, the interval that proxy synchronize the time tick
-  healthCheckTimeout: 3000 # ms, the interval that to do component healthy check
-  msgStream:
-    timeTick:
-      bufSize: 512
-  maxNameLength: 255 # Maximum length of name for a collection or alias
-  # Maximum number of fields in a collection.
-  # As of today (2.2.0 and after) it is strongly DISCOURAGED to set maxFieldNum >= 64.
-  # So adjust at your risk!
-  maxFieldNum: 64
-  maxVectorFieldNum: 4 # Maximum number of vector fields in a collection, (0, 10].
-  maxShardNum: 16 # Maximum number of shards in a collection
-  maxDimension: 32768 # Maximum dimension of a vector
-  # Whether to produce gin logs.\n
-  # please adjust in embedded Milvus: false
-  ginLogging: true
-  ginLogSkipPaths: "/" # skipped url path for gin log split by comma
-  maxTaskNum: 1024 # max task number of proxy task queue
-  accessLog:
-    enable: false
-    # Log filename, set as "" to use stdout.
-    # filename: "" 
-    # define formatters for access log by XXX:{format: XXX, method:[XXX,XXX]}
-    formatters:
-      # "base" formatter could not set methods
-      # all method will use "base" formatter default
-      base:
-        # will not print access log if set as ""
-        format: "[$time_now] [ACCESS] <$user_name: $user_addr> $method_name [status: $method_status] [code: $error_code] [sdk: $sdk_version] [msg: $error_msg] [traceID: $trace_id] [timeCost: $time_cost]"
-      query: 
-        format: "[$time_now] [ACCESS] <$user_name: $user_addr> $method_name [status: $method_status] [code: $error_code] [sdk: $sdk_version] [msg: $error_msg] [traceID: $trace_id] [timeCost: $time_cost] [database: $database_name] [collection: $collection_name] [partitions: $partition_name] [expr: $method_expr]"
-          # set formatter owners by method name(method was all milvus external interface)
-          # all method will use base formatter default
-          # one method only could use one formatter
-          # if set a method formatter mutiple times, will use random fomatter.
-        methods: ["Query", "Search", "Delete"]
-    # localPath: /tmp/milvus_accesslog // log file rootpath
-    # maxSize: 64 # max log file size(MB) of singal log file, mean close when time <= 0.
-    # rotatedTime: 0 # max time range of singal log file, mean close when time <= 0;
-    # maxBackups: 8 # num of reserved backups. will rotate and crate a new backup when access log file trigger maxSize or rotatedTime.
-    # cacheSize: 10240 # write cache of accesslog in Byte
-
-    # minioEnable: false # update backups to milvus minio when minioEnable is true.
-    # remotePath: "access_log/" # file path when update backups to minio
-    # remoteMaxTime: 0 # max time range(in Hour) of backups in minio, 0 means close time retention.
-  http:
-    enabled: true # Whether to enable the http server
-    debug_mode: false # Whether to enable http server debug mode
-  # can specify ip for example
-  # ip: 127.0.0.1
-  ip: # if not specify address, will use the first unicastable address as local ip
-  port: 19530
-  internalPort: 19529
-  grpc:
-    serverMaxSendSize: 268435456
-    serverMaxRecvSize: 67108864
-    clientMaxSendSize: 268435456
-    clientMaxRecvSize: 67108864
-
-# Related configuration of queryCoord, used to manage topology and load balancing for the query nodes, and handoff from growing segments to sealed segments.
-queryCoord:
-  autoHandoff: true # Enable auto handoff
-  autoBalance: true # Enable auto balance
-  balancer: ScoreBasedBalancer # Balancer to use
-  globalRowCountFactor: 0.1 # expert parameters, only used by scoreBasedBalancer
-  scoreUnbalanceTolerationFactor: 0.05 # expert parameters, only used by scoreBasedBalancer
-  reverseUnBalanceTolerationFactor: 1.3 #expert parameters, only used by scoreBasedBalancer
-  overloadedMemoryThresholdPercentage: 90 # The threshold percentage that memory overload
-  balanceIntervalSeconds: 60
-  memoryUsageMaxDifferencePercentage: 30
-  checkInterval: 1000
-  channelTaskTimeout: 60000 # 1 minute
-  segmentTaskTimeout: 120000 # 2 minute
-  distPullInterval: 500
-  heartbeatAvailableInterval: 10000 # 10s, Only QueryNodes which fetched heartbeats within the duration are available
-  loadTimeoutSeconds: 600
-  checkHandoffInterval: 5000
-  growingRowCountWeight: 4.0
-  # can specify ip for example
-  # ip: 127.0.0.1
-  ip: # if not specify address, will use the first unicastable address as local ip
-  port: 19531
-  grpc:
-    serverMaxSendSize: 536870912
-    serverMaxRecvSize: 268435456
-    clientMaxSendSize: 268435456
-    clientMaxRecvSize: 536870912
-  taskMergeCap: 1
-  taskExecutionCap: 256
-  enableActiveStandby: false # Enable active-standby
-  brokerTimeout: 5000 # broker rpc timeout in milliseconds
-
-# Related configuration of queryNode, used to run hybrid search between vector and scalar data.
-queryNode:
-  dataSync:
-    flowGraph:
-      maxQueueLength: 16 # Maximum length of task queue in flowgraph
-      maxParallelism: 1024 # Maximum number of tasks executed in parallel in the flowgraph
-  stats:
-    publishInterval: 1000 # Interval for querynode to report node information (milliseconds)
-  segcore:
-    cgoPoolSizeRatio: 2.0 # cgo pool size ratio to max read concurrency
-    knowhereThreadPoolNumRatio: 4
-    # Use more threads to make better use of SSD throughput in disk index.
-    # This parameter is only useful when enable-disk = true.
-    # And this value should be a number greater than 1 and less than 32.
-    chunkRows: 128 # The number of vectors in a chunk.
-    exprEvalBatchSize: 8192 # The batch size for executor get next
-    interimIndex: # build a vector temperate index for growing segment or binlog to accelerate search
-      enableIndex: true
-      nlist: 128 # segment index nlist
-      nprobe: 16 # nprobe to search segment, based on your accuracy requirement, must smaller than nlist
-      memExpansionRate: 1.15 # the ratio of building interim index memory usage to raw data
-  loadMemoryUsageFactor: 1 # The multiply factor of calculating the memory usage while loading segments
-  enableDisk: false # enable querynode load disk index, and search on disk index
-  maxDiskUsagePercentage: 95
-  cache:
-    enabled: true # deprecated, TODO: remove it
-    memoryLimit: 2147483648 # 2 GB, 2 * 1024 *1024 *1024 # deprecated, TODO: remove it
-    readAheadPolicy: willneed # The read ahead policy of chunk cache, options: `normal, random, sequential, willneed, dontneed`
-    # Specifies the necessity for warming up the chunk cache.
-    # 1. If set to "sync" or "async," the original vector data
-    # will be synchronously/asynchronously loaded into the
-    # chunk cache during the load process. This approach has
-    # the potential to substantially reduce query/search latency
-    # for a specific duration post-load, albeit accompanied
-    # by a concurrent increase in disk usage;
-    # 2. If set to "off," original vector data will only
-    # be loaded into the chunk cache during search/query.
-    warmup: async # options: `sync, async, off`
-  grouping:
-    enabled: true
-    maxNQ: 1000
-    topKMergeRatio: 20
-  scheduler:
-    receiveChanSize: 10240
-    unsolvedQueueSize: 10240
-    # maxReadConcurrentRatio is the concurrency ratio of read task (search task and query task).
-    # Max read concurrency would be the value of runtime.NumCPU * maxReadConcurrentRatio.
-    # It defaults to 2.0, which means max read concurrency would be the value of runtime.NumCPU * 2.
-    # Max read concurrency must greater than or equal to 1, and less than or equal to runtime.NumCPU * 100.
-    # (0, 100]
-    maxReadConcurrentRatio: 1
-    cpuRatio: 10 # ratio used to estimate read task cpu usage.
-    maxTimestampLag: 86400
-    # read task schedule policy: fifo(by default), user-task-polling.
-    scheduleReadPolicy:
-      # fifo: A FIFO queue support the schedule.
-      # user-task-polling:
-      #     The user's tasks will be polled one by one and scheduled.
-      #     Scheduling is fair on task granularity.
-      #     The policy is based on the username for authentication.
-      #     And an empty username is considered the same user.
-      #     When there are no multi-users, the policy decay into FIFO
-      name: fifo
-      maxPendingTask: 10240
-      # user-task-polling configure:
-      taskQueueExpire: 60 # 1 min by default, expire time of inner user task queue since queue is empty.
-      enableCrossUserGrouping: false # false by default Enable Cross user grouping when using user-task-polling policy. (close it if task of any user can not merge others).
-      maxPendingTaskPerUser: 1024 # 50 by default, max pending task in scheduler per user.
-
-  # can specify ip for example
-  # ip: 127.0.0.1
-  ip: # if not specify address, will use the first unicastable address as local ip
-  port: 21123
-  grpc:
-    serverMaxSendSize: 536870912
-    serverMaxRecvSize: 268435456
-    clientMaxSendSize: 268435456
-    clientMaxRecvSize: 536870912
-
-indexCoord:
-  bindIndexNodeMode:
-    enable: false
-    address: localhost:22930
-    withCred: false
-    nodeID: 0
-  segment:
-    minSegmentNumRowsToEnableIndex: 1024 # It's a threshold. When the segment num rows is less than this value, the segment will not be indexed
-
-indexNode:
-  scheduler:
-    buildParallel: 1
-  enableDisk: true # enable index node build disk vector index
-  maxDiskUsagePercentage: 95
-  # can specify ip for example
-  # ip: 127.0.0.1
-  ip: # if not specify address, will use the first unicastable address as local ip
-  port: 21121
-  grpc:
-    serverMaxSendSize: 536870912
-    serverMaxRecvSize: 268435456
-    clientMaxSendSize: 268435456
-    clientMaxRecvSize: 536870912
-
-dataCoord:
-  channel:
-    watchTimeoutInterval: 300 # Timeout on watching channels (in seconds). Datanode tickler update watch progress will reset timeout timer.
-    balanceSilentDuration: 300 # The duration before the channelBalancer on datacoord to run
-    balanceInterval: 360 #The interval for the channelBalancer on datacoord to check balance status
-  segment:
-    maxSize: 1024 # Maximum size of a segment in MB
-    diskSegmentMaxSize: 2048 # Maximum size of a segment in MB for collection which has Disk index
-    sealProportion: 0.12
-    # The time of the assignment expiration in ms
-    # Warning! this parameter is an expert variable and closely related to data integrity. Without specific
-    # target and solid understanding of the scenarios, it should not be changed. If it's necessary to alter
-    # this parameter, make sure that the newly changed value is larger than the previous value used before restart
-    # otherwise there could be a large possibility of data loss
-    assignmentExpiration: 2000
-    maxLife: 86400 # The max lifetime of segment in seconds, 24*60*60
-    # If a segment didn't accept dml records in maxIdleTime and the size of segment is greater than
-    # minSizeFromIdleToSealed, Milvus will automatically seal it.
-    # The max idle time of segment in seconds, 10*60.
-    maxIdleTime: 600
-    minSizeFromIdleToSealed: 16 # The min size in MB of segment which can be idle from sealed.
-    # The max number of binlog file for one segment, the segment will be sealed if
-    # the number of binlog file reaches to max value.
-    maxBinlogFileNumber: 32
-    smallProportion: 0.5 # The segment is considered as "small segment" when its # of rows is smaller than
-    # (smallProportion * segment max # of rows).
-    # A compaction will happen on small segments if the segment after compaction will have
-    compactableProportion: 0.85
-    # over (compactableProportion * segment max # of rows) rows.
-    # MUST BE GREATER THAN OR EQUAL TO <smallProportion>!!!
-    # During compaction, the size of segment # of rows is able to exceed segment max # of rows by (expansionRate-1) * 100%.
-    expansionRate: 1.25
-    # Whether to enable levelzero segment
-    enableLevelZero: false
-  enableCompaction: true # Enable data segment compaction
-  compaction:
-    enableAutoCompaction: true
-    rpcTimeout: 10 # compaction rpc request timeout in seconds
-    maxParallelTaskNum: 10 # max parallel compaction task number
-    indexBasedCompaction: true
-
-    levelzero:
-      forceTrigger:
-        minSize: 8388608 # The minmum size in bytes to force trigger a LevelZero Compaction, default as 8MB
-        deltalogMinNum: 10 # the minimum number of deltalog files to force trigger a LevelZero Compaction
-  import:
-    filesPerPreImportTask: 2 # The maximum number of files allowed per pre-import task.
-    taskRetention: 10800 # The retention period in seconds for tasks in the Completed or Failed state.
-    inactiveTimeout: 1800 # The timeout duration in seconds for a task in the "InProgress" state if it remains inactive (with no progress updates).
-
-  enableGarbageCollection: true
-  gc:
-    interval: 3600 # gc interval in seconds
-    missingTolerance: 3600 # file meta missing tolerance duration in seconds, 3600
-    dropTolerance: 10800 # file belongs to dropped entity tolerance duration in seconds. 10800
-  enableActiveStandby: false
-  # can specify ip for example
-  # ip: 127.0.0.1
-  ip: # if not specify address, will use the first unicastable address as local ip
-  port: 13333
-  grpc:
-    serverMaxSendSize: 536870912
-    serverMaxRecvSize: 268435456
-    clientMaxSendSize: 268435456
-    clientMaxRecvSize: 536870912
-
-dataNode:
-  dataSync:
-    flowGraph:
-      maxQueueLength: 16 # Maximum length of task queue in flowgraph
-      maxParallelism: 1024 # Maximum number of tasks executed in parallel in the flowgraph
-    maxParallelSyncMgrTasks: 256 #The max concurrent sync task number of datanode sync mgr globally 
-    skipMode:
-      # when there are only timetick msg in flowgraph for a while (longer than coldTime),
-      # flowGraph will turn on skip mode to skip most timeticks to reduce cost, especially there are a lot of channels
-      enable: true
-      skipNum: 4
-      coldTime: 60
-  segment:
-    insertBufSize: 16777216 # Max buffer size to flush for a single segment.
-    deleteBufBytes: 67108864 # Max buffer size to flush del for a single channel
-    syncPeriod: 600 # The period to sync segments if buffer is not empty.
-  # can specify ip for example
-  # ip: 127.0.0.1
-  ip: # if not specify address, will use the first unicastable address as local ip
-  port: 21124
-  grpc:
-    serverMaxSendSize: 536870912
-    serverMaxRecvSize: 268435456
-    clientMaxSendSize: 268435456
-    clientMaxRecvSize: 536870912
-  memory:
-    forceSyncEnable: true # `true` to force sync if memory usage is too high
-    forceSyncSegmentNum: 1 # number of segments to sync, segments with top largest buffer will be synced.
-    watermarkStandalone: 0.2 # memory watermark for standalone, upon reaching this watermark, segments will be synced.
-    watermarkCluster: 0.5 # memory watermark for cluster, upon reaching this watermark, segments will be synced.
-  timetick:
-    byRPC: true
-  channel:
-    # specify the size of global work pool of all channels
-    # if this parameter <= 0, will set it as the maximum number of CPUs that can be executing
-    # suggest to set it bigger on large collection numbers to avoid blocking
-    workPoolSize: -1
-    # specify the size of global work pool for channel checkpoint updating
-    # if this parameter <= 0, will set it as 1000
-    # suggest to set it bigger on large collection numbers to avoid blocking
-    updateChannelCheckpointMaxParallel: 1000
-  import:
-    maxConcurrentTaskNum: 16 # The maximum number of import/pre-import tasks allowed to run concurrently on a datanode.
-
-# Configures the system log output.
-log:
-  level: info # Only supports debug, info, warn, error, panic, or fatal. Default 'info'.
-  file:
-    rootPath: # root dir path to put logs, default "" means no log file will print. please adjust in embedded Milvus: /tmp/milvus/logs
-    maxSize: 300 # MB
-    maxAge: 10 # Maximum time for log retention in day.
-    maxBackups: 20
-  format: text # text or json
-  stdout: true # Stdout enable or not
-
-grpc:
-  log:
-    level: WARNING
-    serverMaxSendSize: 536870912
-    serverMaxRecvSize: 268435456
-    clientMaxSendSize: 268435456
-    clientMaxRecvSize: 536870912
-  client:
-    compressionEnabled: false
-    dialTimeout: 200
-    keepAliveTime: 10000
-    keepAliveTimeout: 20000
-    maxMaxAttempts: 10
-    initialBackOff: 0.2 # seconds
-    maxBackoff: 10 # seconds
-    backoffMultiplier: 2.0 # deprecated
-
-# Configure the proxy tls enable.
-tls:
-  serverPemPath: configs/cert/server.pem
-  serverKeyPath: configs/cert/server.key
-  caPemPath: configs/cert/ca.pem
-
+autoindex:
+  params:
+    build: '{"M": 18,"efConstruction": 240,"index_type": "HNSW", "metric_type": "IP"}'
+    search: ""
+    tuning: ""
 common:
-  chanNamePrefix:
+  bloomfiltersize: 100000
+  buildindexthreadpoolratio: 0.75
+  channameprefix:
     cluster: by-dev
-    rootCoordTimeTick: rootcoord-timetick
-    rootCoordStatistics: rootcoord-statistics
-    rootCoordDml: rootcoord-dml
-    replicateMsg: replicate-msg
-    rootCoordDelta: rootcoord-delta
+    datacoordsegmentinfo: segment-info-channel
+    datacoordstatistic: datacoord-statistics-channel
+    datacoordtimetick: datacoord-timetick-channel
+    querytimetick: queryTimeTick
+    replicatemsg: replicate-msg
+    rootcoorddelta: rootcoord-delta
+    rootcoorddml: rootcoord-dml
+    rootcoordstatistics: rootcoord-statistics
+    rootcoordtimetick: rootcoord-timetick
     search: search
-    searchResult: searchResult
-    queryTimeTick: queryTimeTick
-    dataCoordStatistic: datacoord-statistics-channel
-    dataCoordTimeTick: datacoord-timetick-channel
-    dataCoordSegmentInfo: segment-info-channel
-  subNamePrefix:
-    proxySubNamePrefix: proxy
-    rootCoordSubNamePrefix: rootCoord
-    queryNodeSubNamePrefix: queryNode
-    dataCoordSubNamePrefix: dataCoord
-    dataNodeSubNamePrefix: dataNode
-  defaultPartitionName: _default # default partition name for a collection
-  defaultIndexName: _default_idx # default index name
-  entityExpiration: -1 # Entity expiration in seconds, CAUTION -1 means never expire
-  indexSliceSize: 16 # MB
-  threadCoreCoefficient:
-    highPriority: 10 # This parameter specify how many times the number of threads is the number of cores in high priority thread pool
-    middlePriority: 5 # This parameter specify how many times the number of threads is the number of cores in middle priority thread pool
-    lowPriority: 1 # This parameter specify how many times the number of threads is the number of cores in low priority thread pool
-  buildIndexThreadPoolRatio: 0.75
-  DiskIndex:
-    MaxDegree: 56
-    SearchListSize: 100
-    PQCodeBudgetGBRatio: 0.125
-    BuildNumThreadsRatio: 1
-    SearchCacheBudgetGBRatio: 0.1
-    LoadNumThreadRatio: 8
-    BeamWidthRatio: 4
-  gracefulTime: 5000 # milliseconds. it represents the interval (in ms) by which the request arrival time needs to be subtracted in the case of Bounded Consistency.
-  gracefulStopTimeout: 1800 # seconds. it will force quit the server if the graceful stop process is not completed during this time.
-  storageType: remote # please adjust in embedded Milvus: local, available values are [local, remote, opendal], value minio is deprecated, use remote instead
-  # Default value: auto
-  # Valid values: [auto, avx512, avx2, avx, sse4_2]
-  # This configuration is only used by querynode and indexnode, it selects CPU instruction set for Searching and Index-building.
-  simdType: auto
-  security:
-    authorizationEnabled: false
-    # The superusers will ignore some system check processes,
-    # like the old password verification when updating the credential
-    # superUsers: root
-    tlsMode: 0
-  session:
-    ttl: 30 # ttl value when session granting a lease to register service
-    retryTimes: 30 # retry times when session sending etcd requests
-  storage:
-    scheme: "s3"
-    enablev2: false
-
-  # preCreatedTopic decides whether using existed topic
-  preCreatedTopic:
-    enabled: false
-    # support pre-created topics
-    # the name of pre-created topics
-    names: ['topic1', 'topic2']
-    # need to set a separated topic to stand for currently consumed timestamp for each channel
-    timeticker: 'timetick-channel'
-
-  ImportMaxFileSize: 17179869184 # 16 * 1024 * 1024 * 1024
-  # max file size to import for bulkInsert
-
+    searchresult: searchResult
+  defaultindexname: _default_idx
+  defaultpartitionname: _default
+  diskindex:
+    beamwidthratio: 4
+    buildnumthreadsratio: 1
+    loadnumthreadratio: 8
+    maxdegree: 56
+    pqcodebudgetgbratio: 0.125
+    searchcachebudgetgbratio: 0.1
+    searchlistsize: 100
+  entityexpiration: -1
+  gracefulstoptimeout: 1800
+  gracefultime: 5000
+  importmaxfilesize: 17179869184
+  indexslicesize: 16
   locks:
     metrics:
       enable: false
     threshold:
-      info: 500 # minimum milliseconds for printing durations in info level
-      warn: 1000 # minimum milliseconds for printing durations in warn level
-  ttMsgEnabled: true # Whether the instance disable sending ts messages
-  traceLogMode: 0 # trace request info, 0: none, 1: simple request info, like collection/partition/database name, 2: request detail
-  bloomFilterSize: 100000
-  maxBloomFalsePositive: 0.05
-
-# QuotaConfig, configurations of Milvus quota and limits.
-# By default, we enable:
-#   1. TT protection;
-#   2. Memory protection.
-#   3. Disk quota protection.
-# You can enable:
-#   1. DML throughput limitation;
-#   2. DDL, DQL qps/rps limitation;
-#   3. DQL Queue length/latency protection;
-#   4. DQL result rate protection;
-# If necessary, you can also manually force to deny RW requests.
-quotaAndLimits:
-  enabled: true # `true` to enable quota and limits, `false` to disable.
-  limits:
-    maxCollectionNum: 65536
-    maxCollectionNumPerDB: 65536
-  # quotaCenterCollectInterval is the time interval that quotaCenter
-  # collects metrics from Proxies, Query cluster and Data cluster.
-  # seconds, (0 ~ 65536)
-  quotaCenterCollectInterval: 3
-  ddl:
+      info: 500
+      warn: 1000
+  maxbloomfalsepositive: 0.05
+  precreatedtopic:
     enabled: false
-    collectionRate: -1 # qps, default no limit, rate for CreateCollection, DropCollection, LoadCollection, ReleaseCollection
-    partitionRate: -1 # qps, default no limit, rate for CreatePartition, DropPartition, LoadPartition, ReleasePartition
-  indexRate:
+    names:
+    - topic1
+    - topic2
+    timeticker: timetick-channel
+  security:
+    authorizationenabled: false
+    tlsmode: 0
+  session:
+    retrytimes: 30
+    ttl: 30
+  simdtype: auto
+  storage:
+    enablev2: false
+    scheme: s3
+  storagetype: remote
+  subnameprefix:
+    datacoordsubnameprefix: dataCoord
+    datanodesubnameprefix: dataNode
+    proxysubnameprefix: proxy
+    querynodesubnameprefix: queryNode
+    rootcoordsubnameprefix: rootCoord
+  threadcorecoefficient:
+    highpriority: 10
+    lowpriority: 1
+    middlepriority: 5
+  tracelogmode: 0
+  ttmsgenabled: true
+datacoord:
+  channel:
+    balanceinterval: 360
+    balancesilentduration: 300
+    watchtimeoutinterval: 300
+  compaction:
+    enableautocompaction: true
+    indexbasedcompaction: true
+    levelzero:
+      forcetrigger:
+        deltalogminnum: 10
+        minsize: 8388608
+    maxparalleltasknum: 10
+    rpctimeout: 10
+  enableactivestandby: false
+  enablecompaction: true
+  enablegarbagecollection: true
+  gc:
+    droptolerance: 10800
+    interval: 3600
+    missingtolerance: 3600
+  grpc:
+    clientmaxrecvsize: 536870912
+    clientmaxsendsize: 268435456
+    servermaxrecvsize: 268435456
+    servermaxsendsize: 536870912
+  import:
+    filesperpreimporttask: 2
+    inactivetimeout: 1800
+    taskretention: 10800
+  port: 13333
+  segment:
+    assignmentexpiration: 2000
+    compactableproportion: 0.85
+    disksegmentmaxsize: 2048
+    enablelevelzero: false
+    expansionrate: 1.25
+    maxbinlogfilenumber: 32
+    maxidletime: 600
+    maxlife: 86400
+    maxsize: 1024
+    minsizefromidletosealed: 16
+    sealproportion: 0.12
+    smallproportion: 0.5
+datanode:
+  channel:
+    updatechannelcheckpointmaxparallel: 1000
+    workpoolsize: -1
+  datasync:
+    flowgraph:
+      maxparallelism: 1024
+      maxqueuelength: 16
+    maxparallelsyncmgrtasks: 256
+    skipmode:
+      coldtime: 60
+      enable: true
+      skipnum: 4
+  grpc:
+    clientmaxrecvsize: 536870912
+    clientmaxsendsize: 268435456
+    servermaxrecvsize: 268435456
+    servermaxsendsize: 536870912
+  import:
+    maxconcurrenttasknum: 16
+  memory:
+    forcesyncenable: true
+    forcesyncsegmentnum: 1
+    watermarkcluster: 0.5
+    watermarkstandalone: 0.2
+  port: 21124
+  segment:
+    deletebufbytes: 67108864
+    insertbufsize: 16777216
+    syncperiod: 600
+  timetick:
+    byrpc: true
+etcd:
+  data:
+    dir: default.etcd
+  endpoints: localhost:2379
+  kvsubpath: kv
+  log:
+    level: info
+    path: stdout
+  metasubpath: meta
+  rootpath: by-dev
+  ssl:
     enabled: false
-    max: -1 # qps, default no limit, rate for CreateIndex, DropIndex
-  flushRate:
-    enabled: false
-    max: -1 # qps, default no limit, rate for flush
-  compactionRate:
-    enabled: false
-    max: -1 # qps, default no limit, rate for manualCompaction
-  dml:
-    # dml limit rates, default no limit.
-    # The maximum rate will not be greater than max.
-    enabled: false
-    insertRate:
-      collection:
-        max: -1 # MB/s, default no limit
-      max: -1 # MB/s, default no limit
-    upsertRate:
-      collection:
-        max: -1 # MB/s, default no limit
-      max: -1 # MB/s, default no limit
-    deleteRate:
-      collection:
-        max: -1 # MB/s, default no limit
-      max: -1 # MB/s, default no limit
-    bulkLoadRate:
-      collection:
-        max: -1 # MB/s, default no limit, not support yet. TODO: limit bulkLoad rate
-      max: -1 # MB/s, default no limit, not support yet. TODO: limit bulkLoad rate
-  dql:
-    # dql limit rates, default no limit.
-    # The maximum rate will not be greater than max.
-    enabled: false
-    searchRate:
-      collection:
-        max: -1 # vps (vectors per second), default no limit
-      max: -1 # vps (vectors per second), default no limit
-    queryRate:
-      collection:
-        max: -1 # qps, default no limit
-      max: -1 # qps, default no limit
-  limitWriting:
-    # forceDeny false means dml requests are allowed (except for some
-    # specific conditions, such as memory of nodes to water marker), true means always reject all dml requests.
-    forceDeny: false
-    ttProtection:
-      enabled: false
-      # maxTimeTickDelay indicates the backpressure for DML Operations.
-      # DML rates would be reduced according to the ratio of time tick delay to maxTimeTickDelay,
-      # if time tick delay is greater than maxTimeTickDelay, all DML requests would be rejected.
-      # seconds
-      maxTimeTickDelay: 300
-    memProtection:
-      # When memory usage > memoryHighWaterLevel, all dml requests would be rejected;
-      # When memoryLowWaterLevel < memory usage < memoryHighWaterLevel, reduce the dml rate;
-      # When memory usage < memoryLowWaterLevel, no action.
-      enabled: true
-      dataNodeMemoryLowWaterLevel: 0.85 # (0, 1], memoryLowWaterLevel in DataNodes
-      dataNodeMemoryHighWaterLevel: 0.95 # (0, 1], memoryHighWaterLevel in DataNodes
-      queryNodeMemoryLowWaterLevel: 0.85 # (0, 1], memoryLowWaterLevel in QueryNodes
-      queryNodeMemoryHighWaterLevel: 0.95 # (0, 1], memoryHighWaterLevel in QueryNodes
-    growingSegmentsSizeProtection:
-      # No action will be taken if the growing segments size is less than the low watermark.
-      # When the growing segments size exceeds the low watermark, the dml rate will be reduced,
-      # but the rate will not be lower than `minRateRatio * dmlRate`.
-      enabled: false
-      minRateRatio: 0.5
-      lowWaterLevel: 0.2
-      highWaterLevel: 0.4
-    diskProtection:
-      enabled: true # When the total file size of object storage is greater than `diskQuota`, all dml requests would be rejected;
-      diskQuota: -1 # MB, (0, +inf), default no limit
-      diskQuotaPerCollection: -1 # MB, (0, +inf), default no limit
-  limitReading:
-    # forceDeny false means dql requests are allowed (except for some
-    # specific conditions, such as collection has been dropped), true means always reject all dql requests.
-    forceDeny: false
-    queueProtection:
-      enabled: false
-      # nqInQueueThreshold indicated that the system was under backpressure for Search/Query path.
-      # If NQ in any QueryNode's queue is greater than nqInQueueThreshold, search&query rates would gradually cool off
-      # until the NQ in queue no longer exceeds nqInQueueThreshold. We think of the NQ of query request as 1.
-      # int, default no limit
-      nqInQueueThreshold: -1
-      # queueLatencyThreshold indicated that the system was under backpressure for Search/Query path.
-      # If dql latency of queuing is greater than queueLatencyThreshold, search&query rates would gradually cool off
-      # until the latency of queuing no longer exceeds queueLatencyThreshold.
-      # The latency here refers to the averaged latency over a period of time.
-      # milliseconds, default no limit
-      queueLatencyThreshold: -1
-    resultProtection:
-      enabled: false
-      # maxReadResultRate indicated that the system was under backpressure for Search/Query path.
-      # If dql result rate is greater than maxReadResultRate, search&query rates would gradually cool off
-      # until the read result rate no longer exceeds maxReadResultRate.
-      # MB/s, default no limit
-      maxReadResultRate: -1
-    # colOffSpeed is the speed of search&query rates cool off.
-    # (0, 1]
-    coolOffSpeed: 0.9
-
-trace:
-  # trace exporter type, default is stdout,
-  # optional values: ['stdout', 'jaeger', 'otlp']
-  exporter: stdout
-  # fraction of traceID based sampler,
-  # optional values: [0, 1]
-  # Fractions >= 1 will always sample. Fractions < 0 are treated as zero.
-  sampleFraction: 0
-  otlp:
-    endpoint: # "127.0.0.1:4318"
-    secure: true
-  jaeger:
-    url: # "http://127.0.0.1:14268/api/traces"
-    # when exporter is jaeger should set the jaeger's URL
-
-autoIndex:
-  params:
-    build: '{"M": 18,"efConstruction": 240,"index_type": "HNSW", "metric_type": "IP"}'
-
+    tlscacert: /path/to/ca.pem
+    tlscert: /path/to/etcd-client.pem
+    tlskey: /path/to/etcd-client-key.pem
+    tlsminversion: 1.3
+  use:
+    embed: false
 gpu:
-  initMemSize: 0
-  maxMemSize: 0
+  initmemsize: 0
+  maxmemsize: 0
+grpc:
+  client:
+    backoffmultiplier: 2
+    compressionenabled: false
+    dialtimeout: 200
+    initialbackoff: 0.2
+    keepalivetime: 10000
+    keepalivetimeout: 20000
+    maxbackoff: 10
+    maxmaxattempts: 10
+  log:
+    clientmaxrecvsize: 536870912
+    clientmaxsendsize: 268435456
+    level: WARNING
+    servermaxrecvsize: 268435456
+    servermaxsendsize: 536870912
+indexcoord:
+  bindindexnodemode:
+    address: localhost:22930
+    enable: false
+    nodeid: 0
+    withcred: false
+  segment:
+    minsegmentnumrowstoenableindex: 1024
+indexnode:
+  enabledisk: true
+  grpc:
+    clientmaxrecvsize: 536870912
+    clientmaxsendsize: 268435456
+    servermaxrecvsize: 268435456
+    servermaxsendsize: 536870912
+  maxdiskusagepercentage: 95
+  port: 21121
+  scheduler:
+    buildparallel: 1
+localstorage:
+  path: /var/lib/milvus/data/
+log:
+  file:
+    maxage: 10
+    maxbackups: 20
+    maxsize: 300
+  format: text
+  level: info
+  stdout: true
+metastore:
+  type: etcd
+minio:
+  accesskeyid: minioadmin
+  address: localhost
+  bucketname: a-bucket
+  cloudprovider: aws
+  loglevel: fatal
+  port: 9000
+  region: ""
+  requesttimeoutms: 10000
+  rootpath: files
+  secretaccesskey: minioadmin
+  useiam: false
+  usessl: false
+  usevirtualhost: false
+mq:
+  type: default
+natsmq:
+  server:
+    initializetimeout: 4000
+    maxfilestore: 17179869184
+    maxpayload: 8388608
+    maxpending: 67108864
+    monitor:
+      debug: false
+      logfile: /tmp/milvus/logs/nats.log
+      logsizelimit: 536870912
+      logtime: true
+      trace: false
+    port: 4222
+    retention:
+      maxage: 4320
+    storedir: /var/lib/milvus/nats
+proxy:
+  accesslog:
+    enable: false
+    formatters:
+      base:
+        format: '[$time_now] [ACCESS] <$user_name: $user_addr> $method_name [status:
+          $method_status] [code: $error_code] [sdk: $sdk_version] [msg: $error_msg]
+          [traceID: $trace_id] [timeCost: $time_cost]'
+      query:
+        format: '[$time_now] [ACCESS] <$user_name: $user_addr> $method_name [status:
+          $method_status] [code: $error_code] [sdk: $sdk_version] [msg: $error_msg]
+          [traceID: $trace_id] [timeCost: $time_cost] [database: $database_name] [collection:
+          $collection_name] [partitions: $partition_name] [expr: $method_expr]'
+        methods:
+        - Query
+        - Search
+        - Delete
+  ginlogging: true
+  ginlogskippaths: /
+  grpc:
+    clientmaxrecvsize: 67108864
+    clientmaxsendsize: 268435456
+    servermaxrecvsize: 67108864
+    servermaxsendsize: 268435456
+  healthchecktimeout: 3000
+  http:
+    debug_mode: false
+    enabled: true
+  internalport: 19529
+  maxdimension: 32768
+  maxfieldnum: 64
+  maxnamelength: 255
+  maxshardnum: 16
+  maxtasknum: 1024
+  maxvectorfieldnum: 4
+  msgstream:
+    timetick:
+      bufsize: 512
+  port: 19530
+  timetickinterval: 200
+pulsar:
+  address: localhost
+  enableclientmetrics: false
+  maxmessagesize: 5242880
+  namespace: default
+  port: 6650
+  requesttimeout: 60
+  tenant: public
+  webport: 80
+querycoord:
+  autobalance: true
+  autohandoff: true
+  balanceintervalseconds: 60
+  balancer: ScoreBasedBalancer
+  brokertimeout: 5000
+  channeltasktimeout: 60000
+  checkhandoffinterval: 5000
+  checkinterval: 1000
+  distpullinterval: 500
+  enableactivestandby: false
+  globalrowcountfactor: 0.1
+  growingrowcountweight: 4
+  grpc:
+    clientmaxrecvsize: 536870912
+    clientmaxsendsize: 268435456
+    servermaxrecvsize: 268435456
+    servermaxsendsize: 536870912
+  heartbeatavailableinterval: 10000
+  loadtimeoutseconds: 600
+  memoryusagemaxdifferencepercentage: 30
+  overloadedmemorythresholdpercentage: 90
+  port: 19531
+  reverseunbalancetolerationfactor: 1.3
+  scoreunbalancetolerationfactor: 0.05
+  segmenttasktimeout: 120000
+  taskexecutioncap: 256
+  taskmergecap: 1
+querynode:
+  cache:
+    enabled: true
+    memorylimit: 2147483648
+    readaheadpolicy: willneed
+    warmup: async
+  datasync:
+    flowgraph:
+      maxparallelism: 1024
+      maxqueuelength: 16
+  enabledisk: false
+  grouping:
+    enabled: true
+    maxnq: 1000
+    topkmergeratio: 20
+  grpc:
+    clientmaxrecvsize: 536870912
+    clientmaxsendsize: 268435456
+    servermaxrecvsize: 268435456
+    servermaxsendsize: 536870912
+  loadmemoryusagefactor: 1
+  maxdiskusagepercentage: 95
+  port: 21123
+  scheduler:
+    cpuratio: 10
+    maxreadconcurrentratio: 1
+    maxtimestamplag: 86400
+    receivechansize: 10240
+    schedulereadpolicy:
+      enablecrossusergrouping: false
+      maxpendingtask: 10240
+      maxpendingtaskperuser: 1024
+      name: fifo
+      taskqueueexpire: 60
+    unsolvedqueuesize: 10240
+  segcore:
+    cgopoolsizeratio: 2
+    chunkrows: 128
+    exprevalbatchsize: 8192
+    interimindex:
+      enableindex: true
+      memexpansionrate: 1.15
+      nlist: 128
+      nprobe: 16
+    knowherethreadpoolnumratio: 4
+  stats:
+    publishinterval: 1000
+quotaandlimits:
+  compactionrate:
+    enabled: false
+    max: -1
+  ddl:
+    collectionrate: -1
+    enabled: false
+    partitionrate: -1
+  dml:
+    bulkloadrate:
+      collection:
+        max: -1
+      max: -1
+    deleterate:
+      collection:
+        max: -1
+      max: -1
+    enabled: false
+    insertrate:
+      collection:
+        max: -1
+      max: -1
+    upsertrate:
+      collection:
+        max: -1
+      max: -1
+  dql:
+    enabled: false
+    queryrate:
+      collection:
+        max: -1
+      max: -1
+    searchrate:
+      collection:
+        max: -1
+      max: -1
+  enabled: true
+  flushrate:
+    enabled: false
+    max: -1
+  indexrate:
+    enabled: false
+    max: -1
+  limitreading:
+    cooloffspeed: 0.9
+    forcedeny: false
+    queueprotection:
+      enabled: false
+      nqinqueuethreshold: -1
+      queuelatencythreshold: -1
+    resultprotection:
+      enabled: false
+      maxreadresultrate: -1
+  limits:
+    maxcollectionnum: 65536
+    maxcollectionnumperdb: 65536
+  limitwriting:
+    diskprotection:
+      diskquota: -1
+      diskquotapercollection: -1
+      enabled: true
+    forcedeny: false
+    growingsegmentssizeprotection:
+      enabled: false
+      highwaterlevel: 0.4
+      lowwaterlevel: 0.2
+      minrateratio: 0.5
+    memprotection:
+      datanodememoryhighwaterlevel: 0.95
+      datanodememorylowwaterlevel: 0.85
+      enabled: true
+      querynodememoryhighwaterlevel: 0.95
+      querynodememorylowwaterlevel: 0.85
+    ttprotection:
+      enabled: false
+      maxtimetickdelay: 300
+  quotacentercollectinterval: 3
+rocksmq:
+  compactioninterval: 86400
+  compressiontypes:
+  - 0
+  - 0
+  - 7
+  - 7
+  - 7
+  lrucacheratio: 0.06
+  path: /var/lib/milvus/rdb_data
+  retentionsizeinmb: 8192
+  retentiontimeinminutes: 4320
+  rocksmqpagesize: 67108864
+rootcoord:
+  dmlchannelnum: 16
+  enableactivestandby: false
+  grpc:
+    clientmaxrecvsize: 536870912
+    clientmaxsendsize: 268435456
+    servermaxrecvsize: 268435456
+    servermaxsendsize: 536870912
+  importtaskexpiration: 900
+  importtaskretention: 86400
+  maxdatabasenum: 64
+  maxgeneralcapacity: 65536
+  maxpartitionnum: 4096
+  minsegmentsizetoenableindex: 1024
+  port: 53100
+tikv:
+  endpoints: 127.0.0.1:2389
+  kvsubpath: kv
+  metasubpath: meta
+  rootpath: by-dev
+tls:
+  capempath: configs/cert/ca.pem
+  serverkeypath: configs/cert/server.key
+  serverpempath: configs/cert/server.pem
+trace:
+  exporter: stdout
+  otlp:
+    secure: true
+  samplefraction: 0

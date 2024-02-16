@@ -22,13 +22,15 @@ type coordBroker struct {
 	*dataCoordBroker
 }
 
-func NewCoordBroker(rc types.RootCoordClient, dc types.DataCoordClient) Broker {
+func NewCoordBroker(rc types.RootCoordClient, dc types.DataCoordClient, serverID int64) Broker {
 	return &coordBroker{
 		rootCoordBroker: &rootCoordBroker{
 			client: rc,
+			serverID: serverID,
 		},
 		dataCoordBroker: &dataCoordBroker{
 			client: dc,
+			serverID: serverID,
 		},
 	}
 }

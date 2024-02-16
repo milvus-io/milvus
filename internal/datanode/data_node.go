@@ -26,12 +26,12 @@ import (
 	"math/rand"
 	"os"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/cockroachdb/errors"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -84,6 +84,7 @@ var Params *paramtable.ComponentParam = paramtable.Get()
 //	`segmentCache` stores all flushing and flushed segments.
 type DataNode struct {
 	ctx              context.Context
+	serverID         int64
 	cancel           context.CancelFunc
 	Role             string
 	stateCode        atomic.Value // commonpb.StateCode_Initializing
@@ -127,7 +128,7 @@ type DataNode struct {
 }
 
 // NewDataNode will return a DataNode with abnormal state.
-func NewDataNode(ctx context.Context, factory dependency.Factory) *DataNode {
+func NewDataNode(ctx context.Context, factory dependency.Factory, serverID int64) *DataNode {
 	rand.Seed(time.Now().UnixNano())
 	ctx2, cancel2 := context.WithCancel(ctx)
 	node := &DataNode{
@@ -138,6 +139,7 @@ func NewDataNode(ctx context.Context, factory dependency.Factory) *DataNode {
 		rootCoord:          nil,
 		dataCoord:          nil,
 		factory:            factory,
+		serverID:           serverID,
 		segmentCache:       newCache(),
 		compactionExecutor: newCompactionExecutor(),
 
@@ -189,9 +191,10 @@ func (node *DataNode) SetDataCoordClient(ds types.DataCoordClient) error {
 
 // Register register datanode to etcd
 func (node *DataNode) Register() error {
+	log.Debug("node begin to register to etcd", zap.String("serverName", node.session.ServerName), zap.Int64("ServerID", node.session.ServerID))
 	node.session.Register()
 
-	metrics.NumNodes.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), typeutil.DataNodeRole).Inc()
+	metrics.NumNodes.WithLabelValues(fmt.Sprint(node.GetNodeID()), typeutil.DataNodeRole).Inc()
 	log.Info("DataNode Register Finished")
 	// Start liveness check
 	node.session.LivenessCheck(node.ctx, func() {
@@ -199,7 +202,7 @@ func (node *DataNode) Register() error {
 		if err := node.Stop(); err != nil {
 			log.Fatal("failed to stop server", zap.Error(err))
 		}
-		metrics.NumNodes.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), typeutil.DataNodeRole).Dec()
+		metrics.NumNodes.WithLabelValues(fmt.Sprint(node.GetNodeID()), typeutil.DataNodeRole).Dec()
 		// manually send signal to starter goroutine
 		if node.session.TriggerKill {
 			if p, err := os.FindProcess(os.Getpid()); err == nil {
@@ -232,6 +235,10 @@ func (node *DataNode) initRateCollector() error {
 	return nil
 }
 
+func (node *DataNode) GetNodeID() int64 {
+	return node.serverID
+}
+
 func (node *DataNode) Init() error {
 	var initError error
 	node.initOnce.Do(func() {
@@ -244,24 +251,24 @@ func (node *DataNode) Init() error {
 			return
 		}
 
-		node.broker = broker.NewCoordBroker(node.rootCoord, node.dataCoord)
+		node.broker = broker.NewCoordBroker(node.rootCoord, node.dataCoord, node.GetNodeID())
 
 		err := node.initRateCollector()
 		if err != nil {
-			log.Error("DataNode server init rateCollector failed", zap.Int64("node ID", paramtable.GetNodeID()), zap.Error(err))
+			log.Error("DataNode server init rateCollector failed", zap.Int64("node ID", node.GetNodeID()), zap.Error(err))
 			initError = err
 			return
 		}
-		log.Info("DataNode server init rateCollector done", zap.Int64("node ID", paramtable.GetNodeID()))
+		log.Info("DataNode server init rateCollector done", zap.Int64("node ID", node.GetNodeID()))
 
-		node.dispClient = msgdispatcher.NewClient(node.factory, typeutil.DataNodeRole, paramtable.GetNodeID())
-		log.Info("DataNode server init dispatcher client done", zap.Int64("node ID", paramtable.GetNodeID()))
+		node.dispClient = msgdispatcher.NewClient(node.factory, typeutil.DataNodeRole, node.GetNodeID())
+		log.Info("DataNode server init dispatcher client done", zap.Int64("node ID", node.GetNodeID()))
 
-		alloc, err := allocator.New(context.Background(), node.rootCoord, paramtable.GetNodeID())
+		alloc, err := allocator.New(context.Background(), node.rootCoord, node.GetNodeID())
 		if err != nil {
 			log.Error("failed to create id allocator",
 				zap.Error(err),
-				zap.String("role", typeutil.DataNodeRole), zap.Int64("DataNode ID", paramtable.GetNodeID()))
+				zap.String("role", typeutil.DataNodeRole), zap.Int64("DataNode ID", node.GetNodeID()))
 			initError = err
 			return
 		}
@@ -292,7 +299,7 @@ func (node *DataNode) Init() error {
 
 		node.channelCheckpointUpdater = newChannelCheckpointUpdater(node)
 
-		log.Info("init datanode done", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("Address", node.address))
+		log.Info("init datanode done", zap.Int64("nodeID", node.GetNodeID()), zap.String("Address", node.address))
 	})
 	return initError
 }
@@ -354,7 +361,7 @@ func (node *DataNode) Start() error {
 				Base: commonpbutil.NewMsgBase(
 					commonpbutil.WithMsgType(commonpb.MsgType_RequestTSO),
 					commonpbutil.WithMsgID(0),
-					commonpbutil.WithSourceID(paramtable.GetNodeID()),
+					commonpbutil.WithSourceID(node.GetNodeID()),
 				),
 				Count: 1,
 			})

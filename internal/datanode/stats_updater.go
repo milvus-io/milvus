@@ -12,7 +12,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
@@ -63,7 +62,7 @@ func (u *mqStatsUpdater) send(ts Timestamp, segmentIDs []int64) error {
 			Base: commonpbutil.NewMsgBase(
 				commonpbutil.WithMsgType(commonpb.MsgType_DataNodeTt),
 				commonpbutil.WithTimeStamp(ts),
-				commonpbutil.WithSourceID(paramtable.GetNodeID()),
+				commonpbutil.WithSourceID(u.config.serverID),
 			),
 			ChannelName:   u.config.vChannelName,
 			Timestamp:     ts,

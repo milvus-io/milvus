@@ -26,6 +26,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -118,13 +119,21 @@ type MiniClusterV2 struct {
 	IndexNode *grpcindexnode.Server
 
 	MetaWatcher MetaWatcher
+	querynodes  []*grpcquerynode.Server
+	qnmu        sync.Mutex
+	qnid        atomic.Int64
+	datanodes   []*grpcdatanode.Server
+	dnmu        sync.Mutex
+	dnid        atomic.Int64
 }
 
 type OptionV2 func(cluster *MiniClusterV2)
 
 func StartMiniClusterV2(ctx context.Context, opts ...OptionV2) (*MiniClusterV2, error) {
 	cluster := &MiniClusterV2{
-		ctx: ctx,
+		ctx:  ctx,
+		qnid: *atomic.NewInt64(10000),
+		dnid: *atomic.NewInt64(20000),
 	}
 	paramtable.Init()
 	cluster.params = DefaultParams()
@@ -238,6 +247,62 @@ func StartMiniClusterV2(ctx context.Context, opts ...OptionV2) (*MiniClusterV2, 
 	return cluster, nil
 }
 
+func (cluster *MiniClusterV2) AddQueryNode() *grpcquerynode.Server {
+	cluster.qnmu.Lock()
+	defer cluster.qnmu.Unlock()
+	cluster.qnid.Inc()
+	id := cluster.qnid.Load()
+	oid := paramtable.GetNodeID()
+	log.Info(fmt.Sprintf("adding extra querynode with id:%d", id))
+	paramtable.SetNodeID(id)
+	node, err := grpcquerynode.NewServer(context.TODO(), cluster.factory)
+	if err != nil {
+		return nil
+	}
+	err = node.Run()
+	if err != nil {
+		return nil
+	}
+	paramtable.SetNodeID(oid)
+
+	req := &milvuspb.GetComponentStatesRequest{}
+	resp, err := node.GetComponentStates(context.TODO(), req)
+	if err != nil {
+		return nil
+	}
+	log.Info(fmt.Sprintf("querynode %d ComponentStates:%v", id, resp))
+	cluster.querynodes = append(cluster.querynodes, node)
+	return node
+}
+
+func (cluster *MiniClusterV2) AddDataNode() *grpcdatanode.Server {
+	cluster.qnmu.Lock()
+	defer cluster.qnmu.Unlock()
+	cluster.qnid.Inc()
+	id := cluster.qnid.Load()
+	oid := paramtable.GetNodeID()
+	log.Info(fmt.Sprintf("adding extra datanode with id:%d", id))
+	paramtable.SetNodeID(id)
+	node, err := grpcdatanode.NewServer(context.TODO(), cluster.factory)
+	if err != nil {
+		return nil
+	}
+	err = node.Run()
+	if err != nil {
+		return nil
+	}
+	paramtable.SetNodeID(oid)
+
+	req := &milvuspb.GetComponentStatesRequest{}
+	resp, err := node.GetComponentStates(context.TODO(), req)
+	if err != nil {
+		return nil
+	}
+	log.Info(fmt.Sprintf("datanode %d ComponentStates:%v", id, resp))
+	cluster.datanodes = append(cluster.datanodes, node)
+	return node
+}
+
 func (cluster *MiniClusterV2) Start() error {
 	log.Info("mini cluster start")
 	err := cluster.RootCoord.Run()
@@ -301,10 +366,8 @@ func (cluster *MiniClusterV2) Stop() error {
 	cluster.Proxy.Stop()
 	log.Info("mini cluster proxy stopped")
 
-	cluster.DataNode.Stop()
-	log.Info("mini cluster dataNode stopped")
-	cluster.QueryNode.Stop()
-	log.Info("mini cluster queryNode stopped")
+	cluster.StopAllDataNodes()
+	cluster.StopAllQueryNodes()
 	cluster.IndexNode.Stop()
 	log.Info("mini cluster indexNode stopped")
 
@@ -321,6 +384,26 @@ func (cluster *MiniClusterV2) Stop() error {
 	}
 	cluster.ChunkManager.RemoveWithPrefix(cluster.ctx, cluster.ChunkManager.RootPath())
 	return nil
+}
+
+func (cluster *MiniClusterV2) StopAllQueryNodes() {
+	cluster.QueryNode.Stop()
+	log.Info("mini cluster main queryNode stopped")
+	numExtraQN := len(cluster.querynodes)
+	for _, node := range cluster.querynodes {
+		node.Stop()
+	}
+	log.Info(fmt.Sprintf("mini cluster stoped %d extra querynode", numExtraQN))
+}
+
+func (cluster *MiniClusterV2) StopAllDataNodes() {
+	cluster.DataNode.Stop()
+	log.Info("mini cluster main dataNode stopped")
+	numExtraQN := len(cluster.datanodes)
+	for _, node := range cluster.datanodes {
+		node.Stop()
+	}
+	log.Info(fmt.Sprintf("mini cluster stoped %d extra datanode", numExtraQN))
 }
 
 func (cluster *MiniClusterV2) GetContext() context.Context {

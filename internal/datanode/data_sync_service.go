@@ -40,7 +40,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/conc"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -351,7 +350,7 @@ func getServiceWithChannel(initCtx context.Context, node *DataNode, info *datapb
 		resendTTCh = make(chan resendTTMsg, 100)
 	)
 
-	node.writeBufferManager.Register(channelName, metacache, storageV2Cache, writebuffer.WithMetaWriter(syncmgr.BrokerMetaWriter(node.broker)), writebuffer.WithIDAllocator(node.allocator))
+	node.writeBufferManager.Register(channelName, metacache, storageV2Cache, writebuffer.WithMetaWriter(syncmgr.BrokerMetaWriter(node.broker, config.serverID)), writebuffer.WithIDAllocator(node.allocator))
 	ctx, cancel := context.WithCancel(node.ctx)
 	ds := &dataSyncService{
 		ctx:        ctx,
@@ -410,7 +409,7 @@ func getServiceWithChannel(initCtx context.Context, node *DataNode, info *datapb
 		}
 
 		m.AsProducer([]string{Params.CommonCfg.DataCoordTimeTick.GetValue()})
-		metrics.DataNodeNumProducers.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Inc()
+		metrics.DataNodeNumProducers.WithLabelValues(fmt.Sprint(config.serverID)).Inc()
 		log.Info("datanode AsProducer", zap.String("TimeTickChannelName", Params.CommonCfg.DataCoordTimeTick.GetValue()))
 
 		m.EnableProduce(true)
