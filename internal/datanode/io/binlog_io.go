@@ -61,7 +61,9 @@ func (b *BinlogIoImpl) Download(ctx context.Context, paths []string) ([][]byte, 
 			log.Debug("BinlogIO download", zap.String("path", path))
 			err = retry.Do(ctx, func() error {
 				val, err = b.Read(ctx, path)
-				log.Warn("BinlogIO fail to download", zap.String("path", path), zap.Error(err))
+				if err != nil {
+					log.Warn("BinlogIO fail to download", zap.String("path", path), zap.Error(err))
+				}
 				return err
 			})
 
