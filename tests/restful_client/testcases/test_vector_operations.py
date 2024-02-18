@@ -213,7 +213,6 @@ class TestInsertVectorNegative(TestBase):
 class TestSearchVector(TestBase):
 
     @pytest.mark.parametrize("metric_type", ["IP", "L2"])
-    @pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/30102")
     def test_search_vector_with_simple_payload(self, metric_type):
         """
         Search a vector with a simple payload
