@@ -1252,6 +1252,14 @@ class TestIndexInvalid(TestcaseBase):
     Test create / describe / drop index interfaces with invalid collection names
     """
 
+    @pytest.fixture(scope="function", params=["Trie", "STL_SORT", "INVERTED"])
+    def scalar_index(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=["FLOAT_VECTOR", "FLOAT16_VECTOR", "BFLOAT16_VECTOR"])
+    def vector_data_type(self, request):
+        yield request.param
+
     @pytest.fixture(
         scope="function",
         params=gen_invalid_strs()
@@ -1345,6 +1353,107 @@ class TestIndexInvalid(TestcaseBase):
                                   check_task=CheckTasks.err_res,
                                   check_items={ct.err_code: 1100,
                                                ct.err_msg: "create index on JSON field is not supported"})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_scalar_index_on_vector_field(self, scalar_index, vector_data_type):
+        """
+        target: test create scalar index on vector field
+        method: 1.create collection, and create index
+        expected: Raise exception
+        """
+        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True,
+                                                                      dim=ct.default_dim, is_index=False,
+                                                                      vector_data_type=vector_data_type)[0:4]
+        scalar_index_params = {"index_type": scalar_index}
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=scalar_index_params,
+                                  check_task=CheckTasks.err_res,
+                                  check_items={ct.err_code: 65535,
+                                               ct.err_msg: f"invalid index type: {scalar_index}"})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_scalar_index_on_binary_vector_field(self, scalar_index):
+        """
+        target: test create scalar index on binary vector field
+        method: 1.create collection, and create index
+        expected: Raise exception
+        """
+        collection_w = self.init_collection_general(prefix, is_binary=True, is_index=False)[0]
+        scalar_index_params = {"index_type": scalar_index}
+        collection_w.create_index(ct.default_binary_vec_field_name, index_params=scalar_index_params,
+                                  check_task=CheckTasks.err_res,
+                                  check_items={ct.err_code: 65535,
+                                               ct.err_msg: f"invalid index type: {scalar_index}"})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_inverted_index_on_json_field(self, vector_data_type):
+        """
+        target: test create scalar index on json field
+        method: 1.create collection, and create index
+        expected: Raise exception
+        """
+        collection_w = self.init_collection_general(prefix, is_index=False, vector_data_type=vector_data_type)[0]
+        scalar_index_params = {"index_type": "INVERTED"}
+        collection_w.create_index(ct.default_json_field_name, index_params=scalar_index_params,
+                                  check_task=CheckTasks.err_res,
+                                  check_items={ct.err_code: 1100,
+                                               ct.err_msg: "create index on JSON field is not supported"})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_inverted_index_on_array_field(self):
+        """
+        target: test create scalar index on array field
+        method: 1.create collection, and create index
+        expected: Raise exception
+        """
+        # 1. create a collection
+        schema = cf.gen_array_collection_schema()
+        collection_w = self.init_collection_wrap(schema=schema)
+        # 2. create index
+        scalar_index_params = {"index_type": "INVERTED"}
+        collection_w.create_index(ct.default_int32_array_field_name, index_params=scalar_index_params,
+                                  check_task=CheckTasks.err_res,
+                                  check_items={ct.err_code: 1100,
+                                               ct.err_msg: "create index on Array field is not supported"})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_inverted_index_no_vector_index(self):
+        """
+        target: test create scalar index on array field
+        method: 1.create collection, and create index
+        expected: Raise exception
+        """
+        # 1. create a collection
+        collection_w = self.init_collection_general(prefix, is_index=False)[0]
+        # 2. create index
+        scalar_index_params = {"index_type": "INVERTED"}
+        collection_w.create_index(ct.default_float_field_name, index_params=scalar_index_params)
+        collection_w.load(check_task=CheckTasks.err_res,
+                          check_items={ct.err_code: 65535,
+                                       ct.err_msg: "there is no vector index on field: [float_vector], "
+                                                   "please create index firstly"})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("scalar_index", ["STL_SORT", "INVERTED"])
+    def test_create_inverted_index_no_all_vector_index(self, scalar_index):
+        """
+        target: test create scalar index on array field
+        method: 1.create collection, and create index
+        expected: Raise exception
+        """
+        # 1. create a collection
+        multiple_dim_array = [ct.default_dim, ct.default_dim]
+        collection_w = self.init_collection_general(prefix, is_index=False, multiple_dim_array=multiple_dim_array)[0]
+        # 2. create index
+        scalar_index_params = {"index_type": scalar_index}
+        collection_w.create_index(ct.default_float_field_name, index_params=scalar_index_params)
+        vector_name_list = cf.extract_vector_field_name_list(collection_w)
+        flat_index = {"index_type": "FLAT", "params": {}, "metric_type": "L2"}
+        collection_w.create_index(ct.default_float_vec_field_name, flat_index)
+        collection_w.load(check_task=CheckTasks.err_res,
+                          check_items={ct.err_code: 65535,
+                                       ct.err_msg: f"there is no vector index on field: "
+                                                   f"[{vector_name_list[0]} {vector_name_list[1]}], "
+                                                   f"please create index firstly"})
 
 
 @pytest.mark.tags(CaseLabel.GPU)
@@ -2024,3 +2133,100 @@ class TestScaNNIndex(TestcaseBase):
                  ct.err_msg: f"dimension must be able to be divided by 2, dimension: {dim}"}
         collection_w.create_index(default_field_name, index_params,
                                   check_task=CheckTasks.err_res, check_items=error)
+
+
+@pytest.mark.tags(CaseLabel.GPU)
+class TestInvertedIndexValid(TestcaseBase):
+    """
+    Test create / describe / drop index interfaces with inverted index
+    """
+
+    @pytest.fixture(scope="function", params=["Trie", "STL_SORT", "INVERTED"])
+    def scalar_index(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=["FLOAT_VECTOR", "FLOAT16_VECTOR", "BFLOAT16_VECTOR"])
+    def vector_data_type(self, request):
+        yield request.param
+
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("scalar_field_name", [ct.default_int8_field_name, ct.default_int16_field_name,
+                                                   ct.default_int32_field_name, ct.default_int64_field_name,
+                                                   ct.default_float_field_name, ct.default_double_field_name,
+                                                   ct.default_string_field_name, ct.default_bool_field_name])
+    def test_create_inverted_index_on_all_supported_scalar_field(self, scalar_field_name):
+        """
+        target: test create scalar index all supported scalar field
+        method: 1.create collection, and create index
+        expected: create index successfully
+        """
+        collection_w = self.init_collection_general(prefix, insert_data=True, is_index=False, is_all_data_type=True)[0]
+        scalar_index_params = {"index_type": "INVERTED"}
+        index_name = "scalar_index_name"
+        collection_w.create_index(scalar_field_name, index_params=scalar_index_params, index_name=index_name)
+        assert collection_w.has_index(index_name=index_name)[0] is True
+        index_list = self.utility_wrap.list_indexes(collection_w.name)[0]
+        assert index_name in index_list
+        collection_w.flush()
+        result = self.utility_wrap.index_building_progress(collection_w.name, index_name)[0]
+        # assert False
+        start = time.time()
+        while True:
+            time.sleep(1)
+            res, _ = self.utility_wrap.index_building_progress(collection_w.name, index_name)
+            if 0 < res['indexed_rows'] <= default_nb:
+                break
+            if time.time() - start > 5:
+                raise MilvusException(1, f"Index build completed in more than 5s")
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_create_multiple_inverted_index(self):
+        """
+        target: test create multiple scalar index
+        method: 1.create collection, and create index
+        expected: create index successfully
+        """
+        collection_w = self.init_collection_general(prefix, is_index=False, is_all_data_type=True)[0]
+        scalar_index_params = {"index_type": "INVERTED"}
+        index_name = "scalar_index_name_0"
+        collection_w.create_index(ct.default_int8_field_name, index_params=scalar_index_params, index_name=index_name)
+        assert collection_w.has_index(index_name=index_name)[0] is True
+        index_name = "scalar_index_name_1"
+        collection_w.create_index(ct.default_int32_field_name, index_params=scalar_index_params, index_name=index_name)
+        assert collection_w.has_index(index_name=index_name)[0] is True
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_create_all_inverted_index(self):
+        """
+        target: test create multiple scalar index
+        method: 1.create collection, and create index
+        expected: create index successfully
+        """
+        collection_w = self.init_collection_general(prefix, is_index=False, is_all_data_type=True)[0]
+        scalar_index_params = {"index_type": "INVERTED"}
+        scalar_fields = [ct.default_int8_field_name, ct.default_int16_field_name,
+                         ct.default_int32_field_name, ct.default_int64_field_name,
+                         ct.default_float_field_name, ct.default_double_field_name,
+                         ct.default_string_field_name, ct.default_bool_field_name]
+        for i in range(len(scalar_fields)):
+            index_name = f"scalar_index_name_{i}"
+            collection_w.create_index(scalar_fields[i], index_params=scalar_index_params, index_name=index_name)
+            assert collection_w.has_index(index_name=index_name)[0] is True
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_create_all_scalar_index(self):
+        """
+        target: test create multiple scalar index
+        method: 1.create collection, and create index
+        expected: create index successfully
+        """
+        collection_w = self.init_collection_general(prefix, is_index=False, is_all_data_type=True)[0]
+        scalar_index = ["Trie", "STL_SORT", "INVERTED"]
+        scalar_fields = [ct.default_string_field_name, ct.default_int16_field_name,
+                         ct.default_int32_field_name]
+        for i in range(len(scalar_fields)):
+            index_name = f"scalar_index_name_{i}"
+            scalar_index_params = {"index_type": f"{scalar_index[i]}"}
+            collection_w.create_index(scalar_fields[i], index_params=scalar_index_params, index_name=index_name)
+            assert collection_w.has_index(index_name=index_name)[0] is True
