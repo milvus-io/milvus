@@ -19,6 +19,7 @@ package datanode
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -81,8 +82,9 @@ type compactionTask struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	done chan struct{}
-	tr   *timerecord.TimeRecorder
+	injectDoneOnce sync.Once
+	done           chan struct{}
+	tr             *timerecord.TimeRecorder
 }
 
 func newCompactionTask(
@@ -567,9 +569,11 @@ func (t *compactionTask) compact() (*datapb.CompactionPlanResult, error) {
 }
 
 func (t *compactionTask) injectDone() {
-	for _, binlog := range t.plan.SegmentBinlogs {
-		t.syncMgr.Unblock(binlog.SegmentID)
-	}
+	t.injectDoneOnce.Do(func() {
+		for _, binlog := range t.plan.SegmentBinlogs {
+			t.syncMgr.Unblock(binlog.SegmentID)
+		}
+	})
 }
 
 // TODO copy maybe expensive, but this seems to be the only convinent way.
