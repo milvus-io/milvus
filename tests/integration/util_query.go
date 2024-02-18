@@ -128,6 +128,7 @@ func ConstructSearchRequest(
 		},
 		TravelTimestamp:    0,
 		GuaranteeTimestamp: 0,
+		Nq:                 int64(nq),
 	}
 }
 
@@ -243,6 +244,13 @@ func constructPlaceholderGroup(nq, dim int, vectorType schemapb.DataType) *commo
 	// 		}
 	// 		values = append(values, ret)
 	// 	}
+	case schemapb.DataType_SparseFloatVector:
+		// for sparse, all query rows are encoded in a single byte array
+		values = make([][]byte, 0, 1)
+		placeholderType = commonpb.PlaceholderType_SparseFloatVector
+		sparseVecs := GenerateSparseFloatArray(nq)
+		values = append(values, sparseVecs.Contents...)
+
 	default:
 		panic("invalid vector data type")
 	}
