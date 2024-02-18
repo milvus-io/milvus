@@ -77,6 +77,11 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 			Limit: 100,
 		}
 	}, wrapperTraceLog(h.wrapperCheckDatabase(h.search)))))
+	router.POST(EntityCategory+HybridSearchAction, timeoutMiddleware(wrapperPost(func() any {
+		return &HybridSearchReq{
+			Limit: 100,
+		}
+	}, wrapperTraceLog(h.wrapperCheckDatabase(h.hybridSearch)))))
 
 	router.POST(PartitionCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.listPartitions)))))
 	router.POST(PartitionCategory+HasAction, timeoutMiddleware(wrapperPost(func() any { return &PartitionReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.hasPartitions)))))
@@ -705,14 +710,13 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	return resp, err
 }
 
-func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
-	httpReq := anyReq.(*SearchReqV2)
+func generateSearchParams(ctx context.Context, c *gin.Context, reqParams map[string]float64) ([]*commonpb.KeyValuePair, error) {
 	params := map[string]interface{}{ // auto generated mapping
 		"level": int(commonpb.ConsistencyLevel_Bounded),
 	}
-	if httpReq.Params != nil {
-		radius, radiusOk := httpReq.Params[ParamRadius]
-		rangeFilter, rangeFilterOk := httpReq.Params[ParamRangeFilter]
+	if reqParams != nil {
+		radius, radiusOk := reqParams[ParamRadius]
+		rangeFilter, rangeFilterOk := reqParams[ParamRangeFilter]
 		if rangeFilterOk {
 			if !radiusOk {
 				log.Ctx(ctx).Warn("high level restful api, search params invalid, because only " + ParamRangeFilter)
@@ -730,19 +734,29 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 	}
 	bs, _ := json.Marshal(params)
 	searchParams := []*commonpb.KeyValuePair{
-		{Key: common.TopKKey, Value: strconv.FormatInt(int64(httpReq.Limit), 10)},
 		{Key: Params, Value: string(bs)},
 		{Key: ParamRoundDecimal, Value: "-1"},
-		{Key: ParamOffset, Value: strconv.FormatInt(int64(httpReq.Offset), 10)},
 	}
+	return searchParams, nil
+}
+
+func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*SearchReqV2)
+	searchParams, err := generateSearchParams(ctx, c, httpReq.Params)
+	if err != nil {
+		return nil, err
+	}
+	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: common.TopKKey, Value: strconv.FormatInt(int64(httpReq.Limit), 10)})
+	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamOffset, Value: strconv.FormatInt(int64(httpReq.Offset), 10)})
+	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamGroupByField, Value: httpReq.GroupByField})
 	req := &milvuspb.SearchRequest{
-		DbName:           dbName,
-		CollectionName:   httpReq.CollectionName,
-		Dsl:              httpReq.Filter,
-		PlaceholderGroup: vector2PlaceholderGroupBytes(httpReq.Vector),
-		DslType:          commonpb.DslType_BoolExprV1,
-		OutputFields:     httpReq.OutputFields,
-		// PartitionNames:     httpReq.PartitionNames,
+		DbName:             dbName,
+		CollectionName:     httpReq.CollectionName,
+		Dsl:                httpReq.Filter,
+		PlaceholderGroup:   vector2PlaceholderGroupBytes(httpReq.Vector),
+		DslType:            commonpb.DslType_BoolExprV1,
+		OutputFields:       httpReq.OutputFields,
+		PartitionNames:     httpReq.PartitionNames,
 		SearchParams:       searchParams,
 		GuaranteeTimestamp: BoundedTimestamp,
 		Nq:                 int64(1),
@@ -757,6 +771,67 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 		} else {
 			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
 			outputData, err := buildQueryResp(searchResp.Results.TopK, searchResp.Results.OutputFields, searchResp.Results.FieldsData, searchResp.Results.Ids, searchResp.Results.Scores, allowJS)
+			if err != nil {
+				log.Ctx(ctx).Warn("high level restful api, fail to deal with search result", zap.Any("result", searchResp.Results), zap.Error(err))
+				c.JSON(http.StatusOK, gin.H{
+					HTTPReturnCode:    merr.Code(merr.ErrInvalidSearchResult),
+					HTTPReturnMessage: merr.ErrInvalidSearchResult.Error() + ", error: " + err.Error(),
+				})
+			} else {
+				c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: outputData})
+			}
+		}
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) hybridSearch(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*HybridSearchReq)
+	req := &milvuspb.HybridSearchRequest{
+		DbName:         dbName,
+		CollectionName: httpReq.CollectionName,
+		Requests:       []*milvuspb.SearchRequest{},
+	}
+	for _, subReq := range httpReq.Search {
+		searchParams, err := generateSearchParams(ctx, c, subReq.Params)
+		if err != nil {
+			return nil, err
+		}
+		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: common.TopKKey, Value: strconv.FormatInt(int64(subReq.Limit), 10)})
+		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamOffset, Value: strconv.FormatInt(int64(subReq.Offset), 10)})
+		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamGroupByField, Value: subReq.GroupByField})
+		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: proxy.AnnsFieldKey, Value: subReq.AnnsField})
+		searchReq := &milvuspb.SearchRequest{
+			DbName:             dbName,
+			CollectionName:     httpReq.CollectionName,
+			Dsl:                subReq.Filter,
+			PlaceholderGroup:   vector2PlaceholderGroupBytes(subReq.Vector),
+			DslType:            commonpb.DslType_BoolExprV1,
+			OutputFields:       httpReq.OutputFields,
+			PartitionNames:     httpReq.PartitionNames,
+			SearchParams:       searchParams,
+			GuaranteeTimestamp: BoundedTimestamp,
+			Nq:                 int64(1),
+		}
+		req.Requests = append(req.Requests, searchReq)
+	}
+	bs, _ := json.Marshal(httpReq.Rerank.Params)
+	req.RankParams = []*commonpb.KeyValuePair{
+		{Key: proxy.RankTypeKey, Value: httpReq.Rerank.Strategy},
+		{Key: proxy.RankParamsKey, Value: string(bs)},
+		{Key: ParamLimit, Value: strconv.FormatInt(int64(httpReq.Limit), 10)},
+		{Key: "round_decimal", Value: strconv.FormatInt(int64(-1), 10)},
+	}
+	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.HybridSearch(reqCtx, req.(*milvuspb.HybridSearchRequest))
+	})
+	if err == nil {
+		searchResp := resp.(*milvuspb.SearchResults)
+		if searchResp.Results.TopK == int64(0) {
+			c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: []interface{}{}})
+		} else {
+			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
+			outputData, err := buildQueryResp(0, searchResp.Results.OutputFields, searchResp.Results.FieldsData, searchResp.Results.Ids, searchResp.Results.Scores, allowJS)
 			if err != nil {
 				log.Ctx(ctx).Warn("high level restful api, fail to deal with search result", zap.Any("result", searchResp.Results), zap.Error(err))
 				c.JSON(http.StatusOK, gin.H{

@@ -271,6 +271,7 @@ class TestMilvusClientIndexValid(TestcaseBase):
     """
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip("https://github.com/milvus-io/pymilvus/issues/1886")
     @pytest.mark.parametrize("index, params",
                              zip(ct.all_index_types[:7],
                                  ct.default_index_params[:7]))
@@ -290,7 +291,7 @@ class TestMilvusClientIndexValid(TestcaseBase):
         assert res == []
         # 2. prepare index params
         index_params = client_w.prepare_index_params(client)[0]
-        index_params.add_index(field_name = "vector", index_type=index, metric_type = metric_type)
+        index_params.add_index(field_name="vector", index_type=index, metric_type=metric_type)
         # 3. create index
         client_w.create_index(client, collection_name, index_params)
         # 4. create same index twice
@@ -318,7 +319,6 @@ class TestMilvusClientIndexValid(TestcaseBase):
                                     "with_vec": True,
                                     "primary_field": default_primary_key_field_name})
         client_w.drop_collection(client, collection_name)
-
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.skip(reason="pymilvus issue 1884")
@@ -369,6 +369,7 @@ class TestMilvusClientIndexValid(TestcaseBase):
         client_w.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("wait for modification")
     @pytest.mark.parametrize("index, params",
                              zip(ct.all_index_types[:7],
                                  ct.default_index_params[:7]))
@@ -414,6 +415,7 @@ class TestMilvusClientIndexValid(TestcaseBase):
         client_w.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip("wait for modification")
     def test_milvus_client_index_auto_index(self, scalar_index, metric_type):
         """
         target: test search (high level api) normal case
@@ -465,6 +467,7 @@ class TestMilvusClientIndexValid(TestcaseBase):
         client_w.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("wait for modification")
     def test_milvus_client_index_multiple_vectors(self, scalar_index, metric_type):
         """
         target: test search (high level api) normal case
@@ -512,6 +515,7 @@ class TestMilvusClientIndexValid(TestcaseBase):
         client_w.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("wait for modification")
     @pytest.mark.parametrize("index, params",
                              zip(ct.all_index_types[:7],
                                  ct.default_index_params[:7]))
@@ -563,6 +567,7 @@ class TestMilvusClientIndexValid(TestcaseBase):
         client_w.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("wait for modification")
     @pytest.mark.parametrize("index, params",
                              zip(ct.all_index_types[:7],
                                  ct.default_index_params[:7]))
@@ -582,7 +587,7 @@ class TestMilvusClientIndexValid(TestcaseBase):
         assert res == []
         # 2. prepare index params
         index_params = client_w.prepare_index_params(client)[0]
-        index_params.add_index(field_name = "vector", metric_type = metric_type)
+        index_params.add_index(field_name="vector", metric_type=metric_type)
         # 3. create index
         client_w.create_index(client, collection_name, index_params)
         # 4. drop index

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -25,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type ServerSuite struct {
@@ -166,7 +168,8 @@ func (s *ServerSuite) TestSaveBinlogPath_SaveUnhealthySegment() {
 	s.testServer.meta.AddCollection(&collectionInfo{ID: 0})
 
 	segments := map[int64]commonpb.SegmentState{
-		0: commonpb.SegmentState_NotExist,
+		1: commonpb.SegmentState_NotExist,
+		2: commonpb.SegmentState_Dropped,
 	}
 	for segID, state := range segments {
 		info := &datapb.SegmentInfo{
@@ -178,64 +181,94 @@ func (s *ServerSuite) TestSaveBinlogPath_SaveUnhealthySegment() {
 		s.Require().NoError(err)
 	}
 
-	ctx := context.Background()
-	resp, err := s.testServer.SaveBinlogPaths(ctx, &datapb.SaveBinlogPathsRequest{
-		Base: &commonpb.MsgBase{
-			Timestamp: uint64(time.Now().Unix()),
-		},
-		SegmentID: 1,
-		Channel:   "ch1",
-	})
-	s.NoError(err)
-	s.ErrorIs(merr.Error(resp), merr.ErrSegmentNotFound)
+	tests := []struct {
+		description string
+		inSeg       int64
 
-	resp, err = s.testServer.SaveBinlogPaths(ctx, &datapb.SaveBinlogPathsRequest{
-		Base: &commonpb.MsgBase{
-			Timestamp: uint64(time.Now().Unix()),
-		},
-		SegmentID: 2,
-		Channel:   "ch1",
-	})
-	s.NoError(err)
-	s.ErrorIs(merr.Error(resp), merr.ErrSegmentNotFound)
+		expectedError error
+	}{
+		{"segment not exist", 1, merr.ErrSegmentNotFound},
+		{"segment dropped", 2, nil},
+		{"segment not in meta", 3, merr.ErrSegmentNotFound},
+	}
+
+	for _, test := range tests {
+		s.Run(test.description, func() {
+			ctx := context.Background()
+			resp, err := s.testServer.SaveBinlogPaths(ctx, &datapb.SaveBinlogPathsRequest{
+				Base: &commonpb.MsgBase{
+					Timestamp: uint64(time.Now().Unix()),
+				},
+				SegmentID: test.inSeg,
+				Channel:   "ch1",
+			})
+			s.NoError(err)
+			s.ErrorIs(merr.Error(resp), test.expectedError)
+		})
+	}
 }
 
 func (s *ServerSuite) TestSaveBinlogPath_SaveDroppedSegment() {
 	s.mockChMgr.EXPECT().Match(int64(0), "ch1").Return(true)
 	s.testServer.meta.AddCollection(&collectionInfo{ID: 0})
 
-	segments := map[int64]int64{
-		0: 0,
-		1: 0,
+	segments := map[int64]commonpb.SegmentState{
+		0: commonpb.SegmentState_Flushed,
+		1: commonpb.SegmentState_Sealed,
 	}
-	for segID, collID := range segments {
+	for segID, state := range segments {
 		info := &datapb.SegmentInfo{
 			ID:            segID,
-			CollectionID:  collID,
 			InsertChannel: "ch1",
-			State:         commonpb.SegmentState_Dropped,
+			State:         state,
+			Level:         datapb.SegmentLevel_L1,
 		}
 		err := s.testServer.meta.AddSegment(context.TODO(), NewSegmentInfo(info))
 		s.Require().NoError(err)
 	}
 
-	ctx := context.Background()
-	resp, err := s.testServer.SaveBinlogPaths(ctx, &datapb.SaveBinlogPathsRequest{
-		Base: &commonpb.MsgBase{
-			Timestamp: uint64(time.Now().Unix()),
-		},
-		SegmentID:    1,
-		CollectionID: 0,
-		Channel:      "ch1",
-		Flushed:      false,
-	})
-	s.NoError(err)
-	s.EqualValues(resp.ErrorCode, commonpb.ErrorCode_Success)
+	tests := []struct {
+		description string
+		inSegID     int64
+		inDropped   bool
+		inFlushed   bool
 
-	segment := s.testServer.meta.GetSegment(1)
-	s.NotNil(segment)
-	s.EqualValues(0, len(segment.GetBinlogs()))
-	s.EqualValues(segment.NumOfRows, 0)
+		expectedState commonpb.SegmentState
+	}{
+		{"segID=0, flushed to dropped", 0, true, false, commonpb.SegmentState_Dropped},
+		{"segID=1, sealed to flushing", 1, false, true, commonpb.SegmentState_Flushing},
+	}
+
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableAutoCompaction.Key, "False")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableAutoCompaction.Key)
+	for _, test := range tests {
+		s.Run(test.description, func() {
+			ctx := context.Background()
+			resp, err := s.testServer.SaveBinlogPaths(ctx, &datapb.SaveBinlogPathsRequest{
+				Base: &commonpb.MsgBase{
+					Timestamp: uint64(time.Now().Unix()),
+				},
+				SegmentID: test.inSegID,
+				Channel:   "ch1",
+				Flushed:   test.inFlushed,
+				Dropped:   test.inDropped,
+			})
+			s.NoError(err)
+			s.EqualValues(resp.ErrorCode, commonpb.ErrorCode_Success)
+
+			segment := s.testServer.meta.GetSegment(test.inSegID)
+			s.NotNil(segment)
+			s.EqualValues(0, len(segment.GetBinlogs()))
+			s.EqualValues(segment.NumOfRows, 0)
+
+			flushing := []commonpb.SegmentState{commonpb.SegmentState_Flushed, commonpb.SegmentState_Flushing}
+			if lo.Contains(flushing, test.expectedState) {
+				s.True(lo.Contains(flushing, segment.GetState()))
+			} else {
+				s.Equal(test.expectedState, segment.GetState())
+			}
+		})
+	}
 }
 
 func (s *ServerSuite) TestSaveBinlogPath_L0Segment() {

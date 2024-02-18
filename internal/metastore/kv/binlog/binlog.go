@@ -98,9 +98,6 @@ func CompressFieldBinlogs(fieldBinlogs []*datapb.FieldBinlog) error {
 				binlog.LogID = logID
 				binlog.LogPath = ""
 			}
-			// remove timestamp since it's not necessary
-			binlog.TimestampFrom = 0
-			binlog.TimestampTo = 0
 		}
 	}
 	return nil

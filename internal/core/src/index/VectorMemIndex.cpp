@@ -540,6 +540,10 @@ VectorMemIndex<T>::Query(const DatasetPtr dataset,
     knowhere::Json search_conf = search_info.search_params_;
     if (search_info.group_by_field_id_.has_value()) {
         auto result = std::make_unique<SearchResult>();
+        if (search_conf.contains(knowhere::indexparam::EF)) {
+            search_conf[knowhere::indexparam::SEED_EF] =
+                search_conf[knowhere::indexparam::EF];
+        }
         try {
             knowhere::expected<
                 std::vector<std::shared_ptr<knowhere::IndexNode::iterator>>>

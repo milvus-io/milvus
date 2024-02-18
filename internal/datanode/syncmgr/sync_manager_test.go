@@ -308,6 +308,23 @@ func (s *SyncManagerSuite) TestNewSyncManager() {
 	s.Error(err)
 }
 
+func (s *SyncManagerSuite) TestTargetUpdated() {
+	manager, err := NewSyncManager(s.chunkManager, s.allocator)
+	s.NoError(err)
+
+	task := NewMockTask(s.T())
+	task.EXPECT().SegmentID().Return(1000)
+	task.EXPECT().Checkpoint().Return(&msgpb.MsgPosition{})
+	task.EXPECT().CalcTargetSegment().Return(1000, nil).Once()
+	task.EXPECT().CalcTargetSegment().Return(1001, nil).Once()
+	task.EXPECT().Run().Return(errTargetSegmentNotMatch).Once()
+	task.EXPECT().Run().Return(nil).Once()
+
+	f := manager.SyncData(context.Background(), task)
+	err, _ = f.Await()
+	s.NoError(err)
+}
+
 func TestSyncManager(t *testing.T) {
 	suite.Run(t, new(SyncManagerSuite))
 }

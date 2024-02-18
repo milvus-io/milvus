@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -111,14 +112,38 @@ func (mgr *syncManager) SyncData(ctx context.Context, task Task) *conc.Future[er
 		t.WithAllocator(mgr.allocator)
 	}
 
+	return mgr.safeSubmitTask(task)
+}
+
+// safeSubmitTask handles submitting task logic with optimistic target check logic
+// when task returns errTargetSegmentNotMatch error
+// perform refetch then retry logic
+func (mgr *syncManager) safeSubmitTask(task Task) *conc.Future[error] {
 	taskKey := fmt.Sprintf("%d-%d", task.SegmentID(), task.Checkpoint().GetTimestamp())
 	mgr.tasks.Insert(taskKey, task)
 
-	// make sync for same segment execute in sequence
-	// if previous sync task is not finished, block here
-	return mgr.Submit(task.SegmentID(), task, func(err error) {
-		// remove task from records
-		mgr.tasks.Remove(taskKey)
+	return conc.Go[error](func() (error, error) {
+		defer mgr.tasks.Remove(taskKey)
+		for {
+			targetID, err := task.CalcTargetSegment()
+			if err != nil {
+				return err, nil
+			}
+			log.Info("task calculated target segment id",
+				zap.Int64("targetID", targetID),
+				zap.Int64("segmentID", task.SegmentID()),
+			)
+
+			// make sync for same segment execute in sequence
+			// if previous sync task is not finished, block here
+			f := mgr.Submit(targetID, task)
+			err, _ = f.Await()
+			if errors.Is(err, errTargetSegmentNotMatch) {
+				log.Info("target updated during submitting", zap.Error(err))
+				continue
+			}
+			return err, nil
+		}
 	})
 }
 

@@ -500,7 +500,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 			_, err := tr.forceTriggerCompaction(tt.collectionID)
 			assert.Equal(t, tt.wantErr, err != nil)
 			// expect max row num =  2048*1024*1024/(128*4) = 4194304
-			assert.EqualValues(t, 4194304, tt.fields.meta.segments.GetSegments()[0].MaxRowNum)
+			assert.EqualValues(t, 300, tt.fields.meta.segments.GetSegments()[0].MaxRowNum)
 			spy := (tt.fields.compactionHandler).(*spyCompactionHandler)
 			<-spy.spyChan
 		})

@@ -1015,43 +1015,51 @@ func (deleteCodec *DeleteCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 			return InvalidUniqueID, InvalidUniqueID, nil, err
 		}
 
-		stringArray, err := eventReader.GetStringFromPayload()
+		dataset, err := eventReader.GetByteArrayDataSet()
 		if err != nil {
 			eventReader.Close()
 			binlogReader.Close()
 			return InvalidUniqueID, InvalidUniqueID, nil, err
 		}
-		for i := 0; i < len(stringArray); i++ {
-			deleteLog := &DeleteLog{}
-			if err = json.Unmarshal([]byte(stringArray[i]), deleteLog); err != nil {
-				// compatible with versions that only support int64 type primary keys
-				// compatible with fmt.Sprintf("%d,%d", pk, ts)
-				// compatible error info (unmarshal err invalid character ',' after top-level value)
-				splits := strings.Split(stringArray[i], ",")
-				if len(splits) != 2 {
-					eventReader.Close()
-					binlogReader.Close()
-					return InvalidUniqueID, InvalidUniqueID, nil, fmt.Errorf("the format of delta log is incorrect, %v can not be split", stringArray[i])
-				}
-				pk, err := strconv.ParseInt(splits[0], 10, 64)
-				if err != nil {
-					eventReader.Close()
-					binlogReader.Close()
-					return InvalidUniqueID, InvalidUniqueID, nil, err
-				}
-				deleteLog.Pk = &Int64PrimaryKey{
-					Value: pk,
-				}
-				deleteLog.PkType = int64(schemapb.DataType_Int64)
-				deleteLog.Ts, err = strconv.ParseUint(splits[1], 10, 64)
-				if err != nil {
-					eventReader.Close()
-					binlogReader.Close()
-					return InvalidUniqueID, InvalidUniqueID, nil, err
-				}
-			}
 
-			result.Append(deleteLog.Pk, deleteLog.Ts)
+		batchSize := int64(1024)
+		for dataset.HasNext() {
+			stringArray, err := dataset.NextBatch(batchSize)
+			if err != nil {
+				return InvalidUniqueID, InvalidUniqueID, nil, err
+			}
+			for i := 0; i < len(stringArray); i++ {
+				deleteLog := &DeleteLog{}
+				if err = json.Unmarshal(stringArray[i], deleteLog); err != nil {
+					// compatible with versions that only support int64 type primary keys
+					// compatible with fmt.Sprintf("%d,%d", pk, ts)
+					// compatible error info (unmarshal err invalid character ',' after top-level value)
+					splits := strings.Split(stringArray[i].String(), ",")
+					if len(splits) != 2 {
+						eventReader.Close()
+						binlogReader.Close()
+						return InvalidUniqueID, InvalidUniqueID, nil, fmt.Errorf("the format of delta log is incorrect, %v can not be split", stringArray[i])
+					}
+					pk, err := strconv.ParseInt(splits[0], 10, 64)
+					if err != nil {
+						eventReader.Close()
+						binlogReader.Close()
+						return InvalidUniqueID, InvalidUniqueID, nil, err
+					}
+					deleteLog.Pk = &Int64PrimaryKey{
+						Value: pk,
+					}
+					deleteLog.PkType = int64(schemapb.DataType_Int64)
+					deleteLog.Ts, err = strconv.ParseUint(splits[1], 10, 64)
+					if err != nil {
+						eventReader.Close()
+						binlogReader.Close()
+						return InvalidUniqueID, InvalidUniqueID, nil, err
+					}
+				}
+
+				result.Append(deleteLog.Pk, deleteLog.Ts)
+			}
 		}
 		eventReader.Close()
 		binlogReader.Close()

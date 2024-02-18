@@ -19,6 +19,7 @@ package importv2
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -168,7 +169,15 @@ func AppendSystemFieldsData(task *ImportTask, data *storage.InsertData) error {
 	}
 	idRange.Begin += int64(rowNum)
 	if pkField.GetAutoID() {
-		data.Data[pkField.GetFieldID()] = &storage.Int64FieldData{Data: ids}
+		switch pkField.GetDataType() {
+		case schemapb.DataType_Int64:
+			data.Data[pkField.GetFieldID()] = &storage.Int64FieldData{Data: ids}
+		case schemapb.DataType_VarChar:
+			strIDs := lo.Map(ids, func(id int64, _ int) string {
+				return strconv.FormatInt(id, 10)
+			})
+			data.Data[pkField.GetFieldID()] = &storage.StringFieldData{Data: strIDs}
+		}
 	}
 	data.Data[common.RowIDField] = &storage.Int64FieldData{Data: ids}
 	tss := make([]int64, rowNum)

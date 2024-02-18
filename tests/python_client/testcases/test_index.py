@@ -1788,7 +1788,7 @@ class TestIndexDiskann(TestcaseBase):
         assert len(collection_w.indexes) == 1
         collection_w.release()
         collection_w.drop_index(index_name=index_name1)
-        assert collection_w.has_index(index_name=index_name1)[0] == False
+        assert collection_w.has_index(index_name=index_name1)[0] is False
     
     @pytest.mark.tags(CaseLabel.L2)
     def test_drop_diskann_index_and_create_again(self):

@@ -26,8 +26,6 @@ import (
 )
 
 const (
-	updateChanCPInterval           = 1 * time.Minute
-	updateChanCPTimeout            = 10 * time.Second
 	defaultUpdateChanCPMaxParallel = 1000
 )
 
@@ -49,7 +47,7 @@ func newChannelCheckpointUpdater(dn *DataNode) *channelCheckpointUpdater {
 
 func (ccu *channelCheckpointUpdater) updateChannelCP(channelPos *msgpb.MsgPosition, callback func() error) error {
 	ccu.workerPool.Submit(func() (any, error) {
-		ctx, cancel := context.WithTimeout(context.Background(), updateChanCPTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), paramtable.Get().DataNodeCfg.UpdateChannelCheckpointRPCTimeout.GetAsDuration(time.Second))
 		defer cancel()
 		err := ccu.dn.broker.UpdateChannelCheckpoint(ctx, channelPos.GetChannelName(), channelPos)
 		if err != nil {

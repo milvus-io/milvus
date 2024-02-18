@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/writebuffer"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
@@ -105,7 +106,7 @@ func (ttn *ttNode) Operate(in []Msg) []Msg {
 		ttn.updateChannelCP(channelPos, curTs)
 	}
 
-	if needUpdate || curTs.Sub(ttn.lastUpdateTime.Load()) >= updateChanCPInterval {
+	if needUpdate || curTs.Sub(ttn.lastUpdateTime.Load()) >= paramtable.Get().DataNodeCfg.UpdateChannelCheckpointInterval.GetAsDuration(time.Second) {
 		nonBlockingNotify()
 		return []Msg{}
 	}
