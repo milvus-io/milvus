@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func init() {
@@ -194,21 +195,30 @@ func (g *basePlanGenerator) calClusterCost(replicaNodeSegments, globalNodeSegmen
 func (g *basePlanGenerator) mergePlans(curr []SegmentAssignPlan, inc []SegmentAssignPlan) []SegmentAssignPlan {
 	// merge plans with the same segment
 	// eg, plan1 is move segment1 from node1 to node2, plan2 is move segment1 from node2 to node3
-	// we should merge plan1 and plan2 to one plan, which is move segment1 from node1 to node3
-	for _, p := range inc {
-		has := false
-		for i := 0; i < len(curr); i++ {
-			if curr[i].Segment.GetID() == p.Segment.GetID() && curr[i].To == p.From {
-				curr[i].To = p.To
-				has = true
-				break
-			}
+	// we should merge plan1 and plan2 to one plan, which is move segment1 from node1 to node2
+	result := make([]SegmentAssignPlan, 0, len(curr)+len(inc))
+	processed := typeutil.NewSet[int]()
+	for _, p := range curr {
+		newPlan, idx, has := lo.FindIndexOf(inc, func(newPlan SegmentAssignPlan) bool {
+			return newPlan.Segment.GetID() == p.Segment.GetID() && newPlan.From == p.To
+		})
+
+		if has {
+			processed.Insert(idx)
+			p.To = newPlan.To
 		}
-		if !has {
-			curr = append(curr, p)
+		// in case of generator 1 move segment from node 1 to node 2 and generator 2 move segment back
+		if p.From != p.To {
+			result = append(result, p)
 		}
 	}
-	return curr
+
+	// add not merged inc plans
+	result = append(result, lo.Filter(inc, func(_ SegmentAssignPlan, idx int) bool {
+		return !processed.Contain(idx)
+	})...)
+
+	return result
 }
 
 type rowCountBasedPlanGenerator struct {
