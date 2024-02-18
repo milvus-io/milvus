@@ -90,7 +90,8 @@ func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error)
 		},
 	}
 
-	s.datanode = dn.NewDataNode(s.ctx, s.factory)
+	s.serverID.Store(paramtable.GetNodeID())
+	s.datanode = dn.NewDataNode(s.ctx, s.factory, s.serverID.Load())
 	return s, nil
 }
 
@@ -246,6 +247,7 @@ func (s *Server) init() error {
 	s.SetEtcdClient(s.etcdCli)
 	s.datanode.SetAddress(Params.GetAddress())
 	log.Info("DataNode address", zap.String("address", Params.IP+":"+strconv.Itoa(Params.Port.GetAsInt())))
+	log.Info("DataNode serverID", zap.Int64("serverID", s.serverID.Load()))
 
 	err = s.startGrpc()
 	if err != nil {

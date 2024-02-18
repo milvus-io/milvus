@@ -221,7 +221,7 @@ func (s *SyncTaskSuiteV2) TestRunNormal() {
 
 	s.Run("without_insert_delete", func() {
 		task := s.getSuiteSyncTask()
-		task.WithMetaWriter(BrokerMetaWriter(s.broker))
+		task.WithMetaWriter(BrokerMetaWriter(s.broker, 1))
 		task.WithTimeRange(50, 100)
 		task.WithCheckpoint(&msgpb.MsgPosition{
 			ChannelName: s.channelName,
@@ -236,7 +236,7 @@ func (s *SyncTaskSuiteV2) TestRunNormal() {
 	s.Run("with_insert_delete_cp", func() {
 		task := s.getSuiteSyncTask()
 		task.WithTimeRange(50, 100)
-		task.WithMetaWriter(BrokerMetaWriter(s.broker))
+		task.WithMetaWriter(BrokerMetaWriter(s.broker, 1))
 		task.WithCheckpoint(&msgpb.MsgPosition{
 			ChannelName: s.channelName,
 			MsgID:       []byte{1, 2, 3, 4},

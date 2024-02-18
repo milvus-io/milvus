@@ -291,6 +291,47 @@ func (_c *MockQueryNode_GetMetrics_Call) RunAndReturn(run func(context.Context, 
 	return _c
 }
 
+// GetNodeID provides a mock function with given fields:
+func (_m *MockQueryNode) GetNodeID() int64 {
+	ret := _m.Called()
+
+	var r0 int64
+	if rf, ok := ret.Get(0).(func() int64); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(int64)
+	}
+
+	return r0
+}
+
+// MockQueryNode_GetNodeID_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetNodeID'
+type MockQueryNode_GetNodeID_Call struct {
+	*mock.Call
+}
+
+// GetNodeID is a helper method to define mock.On call
+func (_e *MockQueryNode_Expecter) GetNodeID() *MockQueryNode_GetNodeID_Call {
+	return &MockQueryNode_GetNodeID_Call{Call: _e.mock.On("GetNodeID")}
+}
+
+func (_c *MockQueryNode_GetNodeID_Call) Run(run func()) *MockQueryNode_GetNodeID_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockQueryNode_GetNodeID_Call) Return(_a0 int64) *MockQueryNode_GetNodeID_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockQueryNode_GetNodeID_Call) RunAndReturn(run func() int64) *MockQueryNode_GetNodeID_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetSegmentInfo provides a mock function with given fields: _a0, _a1
 func (_m *MockQueryNode) GetSegmentInfo(_a0 context.Context, _a1 *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
 	ret := _m.Called(_a0, _a1)

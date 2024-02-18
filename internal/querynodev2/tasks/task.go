@@ -48,6 +48,7 @@ type SearchTask struct {
 	originNqs        []int64
 	others           []*SearchTask
 	notifier         chan error
+	serverID         int64
 
 	tr           *timerecord.TimeRecorder
 	scheduleSpan trace.Span
@@ -57,6 +58,7 @@ func NewSearchTask(ctx context.Context,
 	collection *segments.Collection,
 	manager *segments.Manager,
 	req *querypb.SearchRequest,
+	serverID int64,
 ) *SearchTask {
 	ctx, span := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "schedule")
 	return &SearchTask{
@@ -74,6 +76,7 @@ func NewSearchTask(ctx context.Context,
 		notifier:         make(chan error, 1),
 		tr:               timerecord.NewTimeRecorderWithTrace(ctx, "searchTask"),
 		scheduleSpan:     span,
+		serverID:         serverID,
 	}
 }
 
@@ -83,13 +86,17 @@ func (t *SearchTask) Username() string {
 	return t.req.Req.GetUsername()
 }
 
+func (t *SearchTask) GetNodeID() int64 {
+	return t.serverID
+}
+
 func (t *SearchTask) IsGpuIndex() bool {
 	return t.collection.IsGpuIndex()
 }
 
 func (t *SearchTask) PreExecute() error {
 	// Update task wait time metric before execute
-	nodeID := strconv.FormatInt(paramtable.GetNodeID(), 10)
+	nodeID := strconv.FormatInt(t.GetNodeID(), 10)
 	inQueueDuration := t.tr.ElapseSpan()
 
 	// Update in queue metric for prometheus.
@@ -180,7 +187,7 @@ func (t *SearchTask) Execute() error {
 
 			task.result = &internalpb.SearchResults{
 				Base: &commonpb.MsgBase{
-					SourceID: paramtable.GetNodeID(),
+					SourceID: t.GetNodeID(),
 				},
 				Status:         merr.Success(),
 				MetricType:     metricType,
@@ -211,7 +218,7 @@ func (t *SearchTask) Execute() error {
 	}
 	defer segments.DeleteSearchResultDataBlobs(blobs)
 	metrics.QueryNodeReduceLatency.WithLabelValues(
-		fmt.Sprint(paramtable.GetNodeID()),
+		fmt.Sprint(t.GetNodeID()),
 		metrics.SearchLabel,
 		metrics.ReduceSegments).
 		Observe(float64(tr.RecordSpan().Milliseconds()))
@@ -234,7 +241,7 @@ func (t *SearchTask) Execute() error {
 
 		task.result = &internalpb.SearchResults{
 			Base: &commonpb.MsgBase{
-				SourceID: paramtable.GetNodeID(),
+				SourceID: t.GetNodeID(),
 			},
 			Status:         merr.Success(),
 			MetricType:     metricType,
@@ -294,9 +301,9 @@ func (t *SearchTask) Merge(other *SearchTask) bool {
 
 func (t *SearchTask) Done(err error) {
 	if !t.merged {
-		metrics.QueryNodeSearchGroupSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(t.groupSize))
-		metrics.QueryNodeSearchGroupNQ.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(t.nq))
-		metrics.QueryNodeSearchGroupTopK.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(t.topk))
+		metrics.QueryNodeSearchGroupSize.WithLabelValues(fmt.Sprint(t.GetNodeID())).Observe(float64(t.groupSize))
+		metrics.QueryNodeSearchGroupNQ.WithLabelValues(fmt.Sprint(t.GetNodeID())).Observe(float64(t.nq))
+		metrics.QueryNodeSearchGroupTopK.WithLabelValues(fmt.Sprint(t.GetNodeID())).Observe(float64(t.topk))
 	}
 	t.notifier <- err
 	for _, other := range t.others {

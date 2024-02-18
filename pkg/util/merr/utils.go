@@ -293,9 +293,9 @@ func AnalyzeState(role string, nodeID int64, state *milvuspb.ComponentStates) er
 	return nil
 }
 
-func CheckTargetID(msg *commonpb.MsgBase) error {
-	if msg.GetTargetID() != paramtable.GetNodeID() {
-		return WrapErrNodeNotMatch(paramtable.GetNodeID(), msg.GetTargetID())
+func CheckTargetID(actualNodeID int64, msg *commonpb.MsgBase) error {
+	if msg.GetTargetID() != actualNodeID {
+		return WrapErrNodeNotMatch(actualNodeID, msg.GetTargetID())
 	}
 
 	return nil
