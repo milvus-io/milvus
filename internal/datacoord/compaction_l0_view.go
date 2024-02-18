@@ -74,28 +74,8 @@ func (v *LevelZeroSegmentsView) Trigger() (CompactionView, string) {
 		return view.dmlPos.GetTimestamp() < v.earliestGrowingSegmentPos.GetTimestamp()
 	})
 
-	var (
-		minDeltaSize  = paramtable.Get().DataCoordCfg.LevelZeroCompactionTriggerMinSize.GetAsFloat()
-		maxDeltaSize  = paramtable.Get().DataCoordCfg.LevelZeroCompactionTriggerMaxSize.GetAsFloat()
-		minDeltaCount = paramtable.Get().DataCoordCfg.LevelZeroCompactionTriggerDeltalogMinNum.GetAsInt()
-		maxDeltaCount = paramtable.Get().DataCoordCfg.LevelZeroCompactionTriggerDeltalogMaxNum.GetAsInt()
-	)
-
-	targetViews, targetSize := v.filterViewsBySizeRange(validSegments, minDeltaSize, maxDeltaSize)
-	if targetViews != nil {
-		reason := fmt.Sprintf("level zero segments size reaches compaction limit, curDeltaSize=%.2f, limitSizeRange=[%.2f, %.2f]",
-			targetSize, minDeltaSize, maxDeltaSize)
-		return &LevelZeroSegmentsView{
-			label:                     v.label,
-			segments:                  targetViews,
-			earliestGrowingSegmentPos: v.earliestGrowingSegmentPos,
-		}, reason
-	}
-
-	targetViews, targetCount := v.filterViewsByCountRange(validSegments, minDeltaCount, maxDeltaCount)
-	if targetViews != nil {
-		reason := fmt.Sprintf("level zero segments count reaches compaction limit, curDeltaCount=%d, limitCountRange=[%d, %d]",
-			targetCount, minDeltaCount, maxDeltaCount)
+	targetViews, reason := v.minCountSizeTrigger(validSegments)
+	if len(targetViews) > 0 {
 		return &LevelZeroSegmentsView{
 			label:                     v.label,
 			segments:                  targetViews,
@@ -106,44 +86,68 @@ func (v *LevelZeroSegmentsView) Trigger() (CompactionView, string) {
 	return nil, ""
 }
 
-// filterViewByCountRange picks segment views that total sizes in range [minCount, maxCount]
-func (v *LevelZeroSegmentsView) filterViewsByCountRange(segments []*SegmentView, minCount, maxCount int) ([]*SegmentView, int) {
-	curDeltaCount := 0
+// minCountSizeTrigger tries to trigger LevelZeroCompaction when segmentViews reaches minimum trigger conditions:
+// 1. count >= minDeltaCount, OR
+// 2. size >= minDeltaSize
+func (v *LevelZeroSegmentsView) minCountSizeTrigger(segments []*SegmentView) (picked []*SegmentView, reason string) {
+	var (
+		minDeltaSize  = paramtable.Get().DataCoordCfg.LevelZeroCompactionTriggerMinSize.GetAsFloat()
+		maxDeltaSize  = paramtable.Get().DataCoordCfg.LevelZeroCompactionTriggerMaxSize.GetAsFloat()
+		minDeltaCount = paramtable.Get().DataCoordCfg.LevelZeroCompactionTriggerDeltalogMinNum.GetAsInt()
+		maxDeltaCount = paramtable.Get().DataCoordCfg.LevelZeroCompactionTriggerDeltalogMaxNum.GetAsInt()
+	)
+
+	curSize := float64(0)
+
+	// count >= minDeltaCount
+	if lo.SumBy(segments, func(view *SegmentView) int { return view.DeltalogCount }) >= minDeltaCount {
+		picked, curSize = pickByMaxCountSize(segments, maxDeltaSize, maxDeltaCount)
+		reason = fmt.Sprintf("level zero segments count reaches minForceTriggerCountLimit=%d, curDeltaSize=%.2f, curDeltaCount=%d", minDeltaCount, curSize, len(segments))
+		return
+	}
+
+	// size >= minDeltaSize
+	if lo.SumBy(segments, func(view *SegmentView) float64 { return view.DeltaSize }) >= minDeltaSize {
+		picked, curSize = pickByMaxCountSize(segments, maxDeltaSize, maxDeltaCount)
+		reason = fmt.Sprintf("level zero segments size reaches minForceTriggerSizeLimit=%.2f, curDeltaSize=%.2f, curDeltaCount=%d", minDeltaSize, curSize, len(segments))
+		return
+	}
+
+	return
+}
+
+// forceTrigger tries to trigger LevelZeroCompaction even when segmentsViews don't meet the minimum condition,
+// the picked plan is still satisfied with the maximum condition
+func (v *LevelZeroSegmentsView) forceTrigger(segments []*SegmentView) (picked []*SegmentView, reason string) {
+	var (
+		maxDeltaSize  = paramtable.Get().DataCoordCfg.LevelZeroCompactionTriggerMaxSize.GetAsFloat()
+		maxDeltaCount = paramtable.Get().DataCoordCfg.LevelZeroCompactionTriggerDeltalogMaxNum.GetAsInt()
+	)
+
+	curSize := float64(0)
+	picked, curSize = pickByMaxCountSize(segments, maxDeltaSize, maxDeltaCount)
+	reason = fmt.Sprintf("level zero views force to trigger, curDeltaSize=%.2f, curDeltaCount=%d", curSize, len(segments))
+	return
+}
+
+// pickByMaxCountSize picks segments that count <= maxCount or size <= maxSize
+func pickByMaxCountSize(segments []*SegmentView, maxSize float64, maxCount int) ([]*SegmentView, float64) {
+	var (
+		curDeltaCount = 0
+		curDeltaSize  = float64(0)
+	)
 	idx := 0
 	for _, view := range segments {
 		targetCount := view.DeltalogCount + curDeltaCount
-		if idx != 0 && targetCount > maxCount {
-			break
-		}
-
-		idx += 1
-		curDeltaCount = targetCount
-	}
-
-	if curDeltaCount < minCount {
-		return nil, 0
-	}
-
-	return segments[:idx], curDeltaCount
-}
-
-// filterViewBySizeRange picks segment views that total count in range [minSize, maxSize]
-func (v *LevelZeroSegmentsView) filterViewsBySizeRange(segments []*SegmentView, minSize, maxSize float64) ([]*SegmentView, float64) {
-	var curDeltaSize float64
-	idx := 0
-	for _, view := range segments {
 		targetSize := view.DeltaSize + curDeltaSize
-		if idx != 0 && targetSize > maxSize {
+
+		if (curDeltaCount != 0 && curDeltaSize != float64(0)) && (targetSize > maxSize || targetCount > maxCount) {
 			break
 		}
 
-		idx += 1
+		curDeltaCount = targetCount
 		curDeltaSize = targetSize
+		idx += 1
 	}
-
-	if curDeltaSize < minSize {
-		return nil, 0
-	}
-
 	return segments[:idx], curDeltaSize
 }

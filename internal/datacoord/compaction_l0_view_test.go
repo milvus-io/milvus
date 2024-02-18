@@ -171,3 +171,86 @@ func (s *LevelZeroSegmentsViewSuite) TestTrigger() {
 		})
 	}
 }
+
+func (s *LevelZeroSegmentsViewSuite) TestMinCountSizeTrigger() {
+	label := s.v.GetGroupLabel()
+	tests := []struct {
+		description string
+		segIDs      []int64
+		segCounts   []int
+		segSize     []float64
+
+		expectedIDs []int64
+	}{
+		{"donot trigger", []int64{100, 101, 102}, []int{1, 1, 1}, []float64{1, 1, 1}, nil},
+		{"trigger by count=15", []int64{100, 101, 102}, []int{5, 5, 5}, []float64{1, 1, 1}, []int64{100, 101, 102}},
+		{"trigger by count=10", []int64{100, 101, 102}, []int{5, 3, 2}, []float64{1, 1, 1}, []int64{100, 101, 102}},
+		{"trigger by count=50", []int64{100, 101, 102}, []int{32, 10, 8}, []float64{1, 1, 1}, []int64{100}},
+		{"trigger by size=24MB", []int64{100, 101, 102}, []int{1, 1, 1}, []float64{8 * 1024 * 1024, 8 * 1024 * 1024, 8 * 1024 * 1024}, []int64{100, 101, 102}},
+		{"trigger by size=8MB", []int64{100, 101, 102}, []int{1, 1, 1}, []float64{3 * 1024 * 1024, 3 * 1024 * 1024, 2 * 1024 * 1024}, []int64{100, 101, 102}},
+		{"trigger by size=128MB", []int64{100, 101, 102}, []int{1, 1, 1}, []float64{100 * 1024 * 1024, 20 * 1024 * 1024, 8 * 1024 * 1024}, []int64{100}},
+	}
+
+	for _, test := range tests {
+		s.Run(test.description, func() {
+			views := []*SegmentView{}
+			for idx, ID := range test.segIDs {
+				seg := genTestL0SegmentView(ID, label, 10000)
+				seg.DeltaSize = test.segSize[idx]
+				seg.DeltalogCount = test.segCounts[idx]
+
+				views = append(views, seg)
+			}
+
+			picked, reason := s.v.minCountSizeTrigger(views)
+			s.ElementsMatch(lo.Map(picked, func(view *SegmentView, _ int) int64 {
+				return view.ID
+			}), test.expectedIDs)
+
+			if len(picked) > 0 {
+				s.NotEmpty(reason)
+			}
+
+			log.Info("test minCountSizeTrigger", zap.Any("trigger reason", reason))
+		})
+	}
+}
+
+func (s *LevelZeroSegmentsViewSuite) TestForceTrigger() {
+	label := s.v.GetGroupLabel()
+	tests := []struct {
+		description string
+		segIDs      []int64
+		segCounts   []int
+		segSize     []float64
+
+		expectedIDs []int64
+	}{
+		{"force trigger", []int64{100, 101, 102}, []int{1, 1, 1}, []float64{1, 1, 1}, []int64{100, 101, 102}},
+		{"trigger by count=15", []int64{100, 101, 102}, []int{5, 5, 5}, []float64{1, 1, 1}, []int64{100, 101, 102}},
+		{"trigger by count=10", []int64{100, 101, 102}, []int{5, 3, 2}, []float64{1, 1, 1}, []int64{100, 101, 102}},
+		{"trigger by count=50", []int64{100, 101, 102}, []int{32, 10, 8}, []float64{1, 1, 1}, []int64{100}},
+		{"trigger by size=24MB", []int64{100, 101, 102}, []int{1, 1, 1}, []float64{8 * 1024 * 1024, 8 * 1024 * 1024, 8 * 1024 * 1024}, []int64{100, 101, 102}},
+		{"trigger by size=8MB", []int64{100, 101, 102}, []int{1, 1, 1}, []float64{3 * 1024 * 1024, 3 * 1024 * 1024, 2 * 1024 * 1024}, []int64{100, 101, 102}},
+		{"trigger by size=128MB", []int64{100, 101, 102}, []int{1, 1, 1}, []float64{100 * 1024 * 1024, 20 * 1024 * 1024, 8 * 1024 * 1024}, []int64{100}},
+	}
+
+	for _, test := range tests {
+		s.Run(test.description, func() {
+			views := []*SegmentView{}
+			for idx, ID := range test.segIDs {
+				seg := genTestL0SegmentView(ID, label, 10000)
+				seg.DeltaSize = test.segSize[idx]
+				seg.DeltalogCount = test.segCounts[idx]
+
+				views = append(views, seg)
+			}
+
+			picked, reason := s.v.forceTrigger(views)
+			s.ElementsMatch(lo.Map(picked, func(view *SegmentView, _ int) int64 {
+				return view.ID
+			}), test.expectedIDs)
+			log.Info("test forceTrigger", zap.Any("trigger reason", reason))
+		})
+	}
+}
