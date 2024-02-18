@@ -300,7 +300,7 @@ pull_request_rules:
           - base=master
           - base=sql_beta
           - base~=^2\.3(\.\d+){0,1}$
-      - *no_source_code_files
+      - *source_code_files
       - or:
           - 'status-success!=Code Checker AMD64 Ubuntu 20.04'
           - 'status-success!=Build and test AMD64 Ubuntu 20.04'
@@ -315,7 +315,7 @@ pull_request_rules:
     conditions:
       - label!=manual-pass
       - base~=^2\.2\.\d+$
-      - *no_source_code_files
+      - *source_code_files
       - or:
           - 'status-success!=Code Checker AMD64 Ubuntu 20.04'
           - 'status-success!=Build and test AMD64 Ubuntu 20.04'
