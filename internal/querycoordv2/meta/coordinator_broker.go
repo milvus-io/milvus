@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -34,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/retry"
 	. "github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -184,9 +186,20 @@ func (broker *CoordinatorBroker) GetIndexInfo(ctx context.Context, collectionID 
 		zap.Int64("segmentID", segmentID),
 	)
 
-	resp, err := broker.dataCoord.GetIndexInfos(ctx, &indexpb.GetIndexInfoRequest{
-		CollectionID: collectionID,
-		SegmentIDs:   []int64{segmentID},
+	// during rolling upgrade, query coord may connect to datacoord with version 2.2, which will return merr.ErrServiceUnimplemented
+	// we add retry here to retry the request until context done, and if new data coord start up, it will success
+	var resp *indexpb.GetIndexInfoResponse
+	var err error
+	retry.Do(ctx, func() error {
+		resp, err = broker.dataCoord.GetIndexInfos(ctx, &indexpb.GetIndexInfoRequest{
+			CollectionID: collectionID,
+			SegmentIDs:   []int64{segmentID},
+		})
+
+		if errors.Is(err, merr.ErrServiceUnimplemented) {
+			return err
+		}
+		return nil
 	})
 
 	if err := merr.CheckRPCCall(resp, err); err != nil {
@@ -230,8 +243,18 @@ func (broker *CoordinatorBroker) DescribeIndex(ctx context.Context, collectionID
 	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
 
-	resp, err := broker.dataCoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{
-		CollectionID: collectionID,
+	// during rolling upgrade, query coord may connect to datacoord with version 2.2, which will return merr.ErrServiceUnimplemented
+	// we add retry here to retry the request until context done, and if new data coord start up, it will success
+	var resp *indexpb.DescribeIndexResponse
+	var err error
+	retry.Do(ctx, func() error {
+		resp, err = broker.dataCoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{
+			CollectionID: collectionID,
+		})
+		if errors.Is(err, merr.ErrServiceUnimplemented) {
+			return err
+		}
+		return nil
 	})
 
 	if err := merr.CheckRPCCall(resp, err); err != nil {
