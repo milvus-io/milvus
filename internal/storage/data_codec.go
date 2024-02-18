@@ -205,6 +205,9 @@ func (insertCodec *InsertCodec) SerializePkStatsByData(data *InsertData) (*Blob,
 func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID UniqueID, data *InsertData) ([]*Blob, error) {
 	blobs := make([]*Blob, 0)
 	var writer *InsertBinlogWriter
+	if insertCodec.Schema == nil {
+		return nil, fmt.Errorf("schema is not set")
+	}
 	timeFieldData, ok := data.Data[common.TimeStampField]
 	if !ok {
 		return nil, fmt.Errorf("data doesn't contains timestamp field")

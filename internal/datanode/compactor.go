@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
+	"github.com/milvus-io/milvus/internal/datanode/io"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
@@ -70,8 +71,7 @@ var _ compactor = (*compactionTask)(nil)
 
 // for MixCompaction only
 type compactionTask struct {
-	downloader
-	uploader
+	binlogIO io.BinlogIO
 	compactor
 	metaCache metacache.MetaCache
 	syncMgr   syncmgr.SyncManager
@@ -89,8 +89,7 @@ type compactionTask struct {
 
 func newCompactionTask(
 	ctx context.Context,
-	dl downloader,
-	ul uploader,
+	binlogIO io.BinlogIO,
 	metaCache metacache.MetaCache,
 	syncMgr syncmgr.SyncManager,
 	alloc allocator.Allocator,
@@ -98,17 +97,15 @@ func newCompactionTask(
 ) *compactionTask {
 	ctx1, cancel := context.WithCancel(ctx)
 	return &compactionTask{
-		ctx:    ctx1,
-		cancel: cancel,
-
-		downloader: dl,
-		uploader:   ul,
-		syncMgr:    syncMgr,
-		metaCache:  metaCache,
-		Allocator:  alloc,
-		plan:       plan,
-		tr:         timerecord.NewTimeRecorder("levelone compaction"),
-		done:       make(chan struct{}, 1),
+		ctx:       ctx1,
+		cancel:    cancel,
+		binlogIO:  binlogIO,
+		syncMgr:   syncMgr,
+		metaCache: metaCache,
+		Allocator: alloc,
+		plan:      plan,
+		tr:        timerecord.NewTimeRecorder("levelone compaction"),
+		done:      make(chan struct{}, 1),
 	}
 }
 
@@ -184,9 +181,18 @@ func (t *compactionTask) uploadRemainLog(
 	stats *storage.PrimaryKeyStats,
 	totRows int64,
 	writeBuffer *storage.InsertData,
-	fID2Type map[UniqueID]schemapb.DataType,
 ) (map[UniqueID]*datapb.FieldBinlog, map[UniqueID]*datapb.FieldBinlog, error) {
-	inPaths, statPaths, err := t.uploadStatsLog(ctxTimeout, targetSegID, partID, writeBuffer, stats, totRows, meta)
+	iCodec := storage.NewInsertCodecWithSchema(meta)
+	inPaths := make(map[int64]*datapb.FieldBinlog, 0)
+	var err error
+	if !writeBuffer.IsEmpty() {
+		inPaths, err = uploadInsertLog(ctxTimeout, t.binlogIO, t.Allocator, meta.GetID(), partID, targetSegID, writeBuffer, iCodec)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+
+	statPaths, err := uploadStatsLog(ctxTimeout, t.binlogIO, t.Allocator, meta.GetID(), partID, targetSegID, stats, totRows, iCodec)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -200,9 +206,10 @@ func (t *compactionTask) uploadSingleInsertLog(
 	partID UniqueID,
 	meta *etcdpb.CollectionMeta,
 	writeBuffer *storage.InsertData,
-	fID2Type map[UniqueID]schemapb.DataType,
 ) (map[UniqueID]*datapb.FieldBinlog, error) {
-	inPaths, err := t.uploadInsertLog(ctxTimeout, targetSegID, partID, writeBuffer, meta)
+	iCodec := storage.NewInsertCodecWithSchema(meta)
+
+	inPaths, err := uploadInsertLog(ctxTimeout, t.binlogIO, t.Allocator, meta.GetID(), partID, targetSegID, writeBuffer, iCodec)
 	if err != nil {
 		return nil, err
 	}
@@ -227,8 +234,6 @@ func (t *compactionTask) merge(
 		numBinlogs int   // binlog number
 		numRows    int64 // the number of rows uploaded
 		expired    int64 // the number of expired entity
-
-		fID2Type = make(map[UniqueID]schemapb.DataType)
 
 		insertField2Path = make(map[UniqueID]*datapb.FieldBinlog)
 		insertPaths      = make([]*datapb.FieldBinlog, 0)
@@ -283,7 +288,6 @@ func (t *compactionTask) merge(
 	// get pkID, pkType, dim
 	var pkField *schemapb.FieldSchema
 	for _, fs := range meta.GetSchema().GetFields() {
-		fID2Type[fs.GetFieldID()] = fs.GetDataType()
 		if fs.GetIsPrimaryKey() && fs.GetFieldID() >= 100 && typeutil.IsPrimaryFieldType(fs.GetDataType()) {
 			pkField = fs
 		}
@@ -322,7 +326,7 @@ func (t *compactionTask) merge(
 
 	for _, path := range unMergedInsertlogs {
 		downloadStart := time.Now()
-		data, err := t.download(ctx, path)
+		data, err := downloadBlobs(ctx, t.binlogIO, path)
 		if err != nil {
 			log.Warn("download insertlogs wrong", zap.Strings("path", path), zap.Error(err))
 			return nil, nil, 0, err
@@ -380,7 +384,7 @@ func (t *compactionTask) merge(
 			if (currentRows+1)%100 == 0 && writeBuffer.GetMemorySize() > paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsInt() {
 				numRows += int64(writeBuffer.GetRowNum())
 				uploadInsertStart := time.Now()
-				inPaths, err := t.uploadSingleInsertLog(ctx, targetSegID, partID, meta, writeBuffer, fID2Type)
+				inPaths, err := t.uploadSingleInsertLog(ctx, targetSegID, partID, meta, writeBuffer)
 				if err != nil {
 					log.Warn("failed to upload single insert log", zap.Error(err))
 					return nil, nil, 0, err
@@ -402,7 +406,7 @@ func (t *compactionTask) merge(
 		numRows += int64(writeBuffer.GetRowNum())
 		uploadStart := time.Now()
 		inPaths, statsPaths, err := t.uploadRemainLog(ctx, targetSegID, partID, meta,
-			stats, numRows+int64(currentRows), writeBuffer, fID2Type)
+			stats, numRows+int64(currentRows), writeBuffer)
 		if err != nil {
 			return nil, nil, 0, err
 		}
@@ -511,7 +515,7 @@ func (t *compactionTask) compact() (*datapb.CompactionPlanResult, error) {
 		}
 
 		if len(paths) != 0 {
-			bs, err := t.download(ctxTimeout, paths)
+			bs, err := downloadBlobs(ctxTimeout, t.binlogIO, paths)
 			if err != nil {
 				log.Warn("compact wrong, fail to download deltalogs", zap.Int64("segment", segID), zap.Strings("path", paths), zap.Error(err))
 				return nil, err

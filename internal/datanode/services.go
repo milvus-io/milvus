@@ -285,11 +285,10 @@ func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan
 			req,
 		)
 	case datapb.CompactionType_MixCompaction:
-		// TODO, replace this binlogIO with io.BinlogIO
-		binlogIO := &binlogIO{node.chunkManager, ds.idAllocator}
+		binlogIO := io.NewBinlogIO(node.chunkManager, getOrCreateIOPool())
 		task = newCompactionTask(
 			taskCtx,
-			binlogIO, binlogIO,
+			binlogIO,
 			ds.metacache,
 			node.syncMgr,
 			node.allocator,

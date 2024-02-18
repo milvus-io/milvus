@@ -31,6 +31,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
+	"github.com/milvus-io/milvus/internal/datanode/io"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -53,8 +54,7 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
 	t.Run("Test download", func(t *testing.T) {
-		alloc := allocator.NewMockAllocator(t)
-		b := &binlogIO{cm, alloc}
+		binlogIO := io.NewBinlogIO(cm, getOrCreateIOPool())
 		tests := []struct {
 			isvalid bool
 			ks      []string // for preparation
@@ -77,19 +77,19 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 						assert.NotEmpty(t, blob)
 						inkeys = append(inkeys, key)
 
-						loaded, err := b.download(test.inctx, []string{key})
+						loaded, err := downloadBlobs(test.inctx, binlogIO, []string{key})
 						assert.NoError(t, err)
 						assert.ElementsMatch(t, blob, loaded[0].GetValue())
 					}
 
-					loaded, err := b.download(test.inctx, inkeys)
+					loaded, err := downloadBlobs(test.inctx, binlogIO, inkeys)
 					assert.NoError(t, err)
 					assert.Equal(t, len(test.ks), len(loaded))
 				} else {
 					ctx, cancel := context.WithCancel(test.inctx)
 					cancel()
 
-					_, err := b.download(ctx, []string{"test"})
+					_, err := downloadBlobs(ctx, binlogIO, []string{"test"})
 					assert.EqualError(t, err, errDownloadFromBlobStorage.Error())
 				}
 			})
@@ -97,12 +97,10 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 	})
 
 	t.Run("Test download twice", func(t *testing.T) {
-		mkc := &mockCm{errRead: true}
-		alloc := allocator.NewMockAllocator(t)
-		b := &binlogIO{mkc, alloc}
+		binlogIO := io.NewBinlogIO(cm, getOrCreateIOPool())
 
 		ctx, cancel := context.WithTimeout(context.TODO(), time.Millisecond*20)
-		blobs, err := b.download(ctx, []string{"a"})
+		blobs, err := downloadBlobs(ctx, binlogIO, []string{"a"})
 		assert.Error(t, err)
 		assert.Empty(t, blobs)
 		cancel()
@@ -114,9 +112,10 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 
 		t.Run("gen insert blob failed", func(t *testing.T) {
 			alloc := allocator.NewMockAllocator(t)
-			alloc.EXPECT().GetGenerator(mock.Anything, mock.Anything).Call.Return(nil, fmt.Errorf("mock err"))
-			b := binlogIO{cm, alloc}
-			_, _, err := b.uploadStatsLog(context.Background(), 1, 10, genInsertData(2), genTestStat(meta), 10, meta)
+			alloc.EXPECT().AllocOne().Call.Return(int64(0), fmt.Errorf("mock AllocOne error"))
+			binlogIO := io.NewBinlogIO(cm, getOrCreateIOPool())
+			iCodec := storage.NewInsertCodecWithSchema(meta)
+			_, err := uploadStatsLog(context.Background(), binlogIO, alloc, meta.GetID(), 10, 1, genTestStat(meta), 10, iCodec)
 			assert.Error(t, err)
 		})
 	})
@@ -127,34 +126,34 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 
 		t.Run("empty insert", func(t *testing.T) {
 			alloc := allocator.NewMockAllocator(t)
-			b := binlogIO{cm, alloc}
-
-			paths, err := b.uploadInsertLog(context.Background(), 1, 10, genEmptyInsertData(), meta)
+			binlogIO := io.NewBinlogIO(cm, getOrCreateIOPool())
+			iCodec := storage.NewInsertCodecWithSchema(meta)
+			paths, err := uploadInsertLog(context.Background(), binlogIO, alloc, meta.GetID(), 10, 1, genEmptyInsertData(), iCodec)
 			assert.NoError(t, err)
 			assert.Nil(t, paths)
 		})
 
 		t.Run("gen insert blob failed", func(t *testing.T) {
 			alloc := allocator.NewMockAllocator(t)
-			b := binlogIO{cm, alloc}
-
+			binlogIO := io.NewBinlogIO(cm, getOrCreateIOPool())
+			iCodec := storage.NewInsertCodecWithSchema(meta)
 			alloc.EXPECT().GetGenerator(mock.Anything, mock.Anything).Call.Return(nil, fmt.Errorf("mock err"))
-
-			_, err := b.uploadInsertLog(context.Background(), 1, 10, genInsertData(2), meta)
+			_, err := uploadInsertLog(context.Background(), binlogIO, alloc, meta.GetID(), 10, 1, genInsertData(2), iCodec)
 			assert.Error(t, err)
 		})
 
 		t.Run("upload failed", func(t *testing.T) {
 			mkc := &mockCm{errRead: true, errSave: true}
 			alloc := allocator.NewMockAllocator(t)
-			b := binlogIO{mkc, alloc}
+			binlogIO := io.NewBinlogIO(mkc, getOrCreateIOPool())
+			iCodec := storage.NewInsertCodecWithSchema(meta)
 
 			alloc.EXPECT().GetGenerator(mock.Anything, mock.Anything).Call.Return(validGeneratorFn, nil)
 
 			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 			defer cancel()
 
-			_, err := b.uploadInsertLog(ctx, 1, 10, genInsertData(2), meta)
+			_, err := uploadInsertLog(ctx, binlogIO, alloc, meta.GetID(), 1, 10, genInsertData(2), iCodec)
 			assert.Error(t, err)
 		})
 	})
@@ -183,8 +182,7 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 	t.Run("Test genDeltaBlobs", func(t *testing.T) {
 		alloc := allocator.NewMockAllocator(t)
 		alloc.EXPECT().AllocOne().Call.Return(int64(11111), nil)
-
-		b := &binlogIO{cm, alloc}
+		binlogIO := io.NewBinlogIO(cm, getOrCreateIOPool())
 		f := &MetaFactory{}
 		meta := f.GetCollectionMeta(UniqueID(10002), "test_gen_blobs", schemapb.DataType_Int64)
 
@@ -201,7 +199,7 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
 				if test.isvalid {
-					k, v, err := b.genDeltaBlobs(&DeleteData{
+					k, v, err := genDeltaBlobs(binlogIO, alloc, &DeleteData{
 						Pks: []storage.PrimaryKey{test.deletepk},
 						Tss: []uint64{test.ts},
 					}, meta.GetID(), 10, 1)
@@ -221,8 +219,8 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 
 		t.Run("Test serialize error", func(t *testing.T) {
 			alloc := allocator.NewMockAllocator(t)
-			b := &binlogIO{cm, alloc}
-			k, v, err := b.genDeltaBlobs(&DeleteData{Pks: []storage.PrimaryKey{pk}, Tss: []uint64{}}, 1, 1, 1)
+			binlogIO := io.NewBinlogIO(cm, getOrCreateIOPool())
+			k, v, err := genDeltaBlobs(binlogIO, alloc, &DeleteData{Pks: []storage.PrimaryKey{pk}, Tss: []uint64{}}, 1, 1, 1)
 			assert.Error(t, err)
 			assert.Empty(t, k)
 			assert.Empty(t, v)
@@ -231,8 +229,8 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 		t.Run("Test AllocOne error", func(t *testing.T) {
 			alloc := allocator.NewMockAllocator(t)
 			alloc.EXPECT().AllocOne().Call.Return(int64(0), fmt.Errorf("mock AllocOne error"))
-			bin := binlogIO{cm, alloc}
-			k, v, err := bin.genDeltaBlobs(&DeleteData{Pks: []storage.PrimaryKey{pk}, Tss: []uint64{1}}, 1, 1, 1)
+			binlogIO := io.NewBinlogIO(cm, getOrCreateIOPool())
+			k, v, err := genDeltaBlobs(binlogIO, alloc, &DeleteData{Pks: []storage.PrimaryKey{pk}, Tss: []uint64{1}}, 1, 1, 1)
 			assert.Error(t, err)
 			assert.Empty(t, k)
 			assert.Empty(t, v)
@@ -243,7 +241,7 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 		f := &MetaFactory{}
 		alloc := allocator.NewMockAllocator(t)
 		alloc.EXPECT().GetGenerator(mock.Anything, mock.Anything).Call.Return(validGeneratorFn, nil)
-		b := binlogIO{cm, alloc}
+		binlogIO := io.NewBinlogIO(cm, getOrCreateIOPool())
 
 		tests := []struct {
 			pkType      schemapb.DataType
@@ -260,7 +258,7 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 				iCodec := storage.NewInsertCodecWithSchema(meta)
 
 				kvs := make(map[string][]byte)
-				pin, err := b.genInsertBlobs(genInsertData(2), 10, 1, iCodec, kvs)
+				pin, err := genInsertBlobs(binlogIO, alloc, genInsertData(2), meta.GetID(), 10, 1, iCodec, kvs)
 
 				assert.NoError(t, err)
 				assert.Equal(t, 12, len(pin))
@@ -282,9 +280,10 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 		t.Run("serialize error", func(t *testing.T) {
 			iCodec := storage.NewInsertCodecWithSchema(nil)
 
-			bin := &binlogIO{cm, allocator.NewMockAllocator(t)}
+			alloc := allocator.NewMockAllocator(t)
+			binlogIO := io.NewBinlogIO(cm, getOrCreateIOPool())
 			kvs := make(map[string][]byte)
-			pin, err := bin.genInsertBlobs(genEmptyInsertData(), 10, 1, iCodec, kvs)
+			pin, err := genInsertBlobs(binlogIO, alloc, genEmptyInsertData(), 0, 10, 1, iCodec, kvs)
 
 			assert.Error(t, err)
 			assert.Empty(t, kvs)
@@ -298,10 +297,10 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 
 			alloc := allocator.NewMockAllocator(t)
 			alloc.EXPECT().GetGenerator(mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock GetGenerator error"))
-			bin := &binlogIO{cm, alloc}
+			binlogIO := io.NewBinlogIO(cm, getOrCreateIOPool())
 			kvs := make(map[string][]byte)
 
-			pin, err := bin.genInsertBlobs(genInsertData(2), 10, 1, iCodec, kvs)
+			pin, err := genInsertBlobs(binlogIO, alloc, genInsertData(2), meta.GetID(), 10, 1, iCodec, kvs)
 
 			assert.Error(t, err)
 			assert.Empty(t, kvs)
@@ -314,7 +313,7 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 		alloc := allocator.NewMockAllocator(t)
 		alloc.EXPECT().AllocOne().Return(0, nil)
 
-		b := binlogIO{cm, alloc}
+		binlogIO := io.NewBinlogIO(cm, getOrCreateIOPool())
 
 		tests := []struct {
 			pkType      schemapb.DataType
@@ -331,7 +330,7 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 				iCodec := storage.NewInsertCodecWithSchema(meta)
 
 				kvs := make(map[string][]byte)
-				stat, err := b.genStatBlobs(genTestStat(meta), 10, 1, iCodec, kvs, 0)
+				stat, err := genStatBlobs(binlogIO, alloc, genTestStat(meta), meta.GetID(), 10, 1, iCodec, kvs, 0)
 
 				assert.NoError(t, err)
 				assert.Equal(t, 1, len(stat))
@@ -343,14 +342,14 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 	t.Run("Test genStatsBlob error", func(t *testing.T) {
 		f := &MetaFactory{}
 		alloc := allocator.NewMockAllocator(t)
-		b := binlogIO{cm, alloc}
+		binlogIO := io.NewBinlogIO(cm, getOrCreateIOPool())
 
 		t.Run("serialize error", func(t *testing.T) {
 			meta := f.GetCollectionMeta(UniqueID(10001), "test_gen_stat_blobs_error", schemapb.DataType_Int64)
 			iCodec := storage.NewInsertCodecWithSchema(meta)
 
 			kvs := make(map[string][]byte)
-			_, err := b.genStatBlobs(nil, 10, 1, iCodec, kvs, 0)
+			_, err := genStatBlobs(binlogIO, alloc, nil, meta.GetID(), 10, 1, iCodec, kvs, 0)
 			assert.Error(t, err)
 		})
 	})
@@ -378,6 +377,9 @@ func (mk *mockCm) Write(ctx context.Context, filePath string, content []byte) er
 }
 
 func (mk *mockCm) MultiWrite(ctx context.Context, contents map[string][]byte) error {
+	if mk.errSave {
+		return errors.New("mockKv save error")
+	}
 	return nil
 }
 
