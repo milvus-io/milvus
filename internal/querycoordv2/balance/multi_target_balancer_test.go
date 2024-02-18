@@ -329,7 +329,7 @@ func (suite *MultiTargetBalancerTestSuite) TestPlanNoConflict() {
 	totalCount := 0
 	// 10 nodes, at most 100 segments, at most 1000 rows
 	for i := 0; i < 10; i++ {
-		segNum := rand.Intn(100)
+		segNum := rand.Intn(99) + 1
 		for j := 0; j < segNum; j++ {
 			rowCount := rand.Intn(1000)
 			nodeSegments[int64(i)] = append(nodeSegments[int64(i)], &meta.Segment{
