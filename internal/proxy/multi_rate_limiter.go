@@ -69,7 +69,7 @@ func NewMultiRateLimiter() *MultiRateLimiter {
 }
 
 // Check checks if request would be limited or denied.
-func (m *MultiRateLimiter) Check(collectionID int64, rt internalpb.RateType, n int) error {
+func (m *MultiRateLimiter) Check(collectionIDs []int64, rt internalpb.RateType, n int) error {
 	if !Params.QuotaConfig.QuotaAndLimitsEnabled.GetAsBool() {
 		return nil
 	}
@@ -96,21 +96,31 @@ func (m *MultiRateLimiter) Check(collectionID int64, rt internalpb.RateType, n i
 	ret := checkFunc(m.globalDDLLimiter)
 
 	// second check collection level rate limits
-	if ret == nil && !IsDDLRequest(rt) {
-		// only dml and dql have collection level rate limits
-		ret = checkFunc(m.collectionLimiters[collectionID])
-		if ret != nil {
-			m.globalDDLLimiter.cancel(rt, n)
+	// only dml, dql and flush have collection level rate limits
+	if ret == nil && len(collectionIDs) > 0 && !isNotCollectionLevelLimitRequest(rt) {
+		// store done limiters to cancel them when error occurs.
+		doneLimiters := make([]*rateLimiter, 0, len(collectionIDs)+1)
+		doneLimiters = append(doneLimiters, m.globalDDLLimiter)
+
+		for _, collectionID := range collectionIDs {
+			ret = checkFunc(m.collectionLimiters[collectionID])
+			if ret != nil {
+				for _, limiter := range doneLimiters {
+					limiter.cancel(rt, n)
+				}
+				break
+			}
+			doneLimiters = append(doneLimiters, m.collectionLimiters[collectionID])
 		}
 	}
-
 	return ret
 }
 
-func IsDDLRequest(rt internalpb.RateType) bool {
+func isNotCollectionLevelLimitRequest(rt internalpb.RateType) bool {
+	// Most ddl is global level, only DDLFlush will be applied at collection
 	switch rt {
 	case internalpb.RateType_DDLCollection, internalpb.RateType_DDLPartition, internalpb.RateType_DDLIndex,
-		internalpb.RateType_DDLFlush, internalpb.RateType_DDLCompaction:
+		internalpb.RateType_DDLCompaction:
 		return true
 	default:
 		return false
@@ -291,7 +301,11 @@ func (rl *rateLimiter) registerLimiters(globalLevel bool) {
 		case internalpb.RateType_DDLIndex:
 			r = &quotaConfig.MaxIndexRate
 		case internalpb.RateType_DDLFlush:
-			r = &quotaConfig.MaxFlushRate
+			if globalLevel {
+				r = &quotaConfig.MaxFlushRate
+			} else {
+				r = &quotaConfig.MaxFlushRatePerCollection
+			}
 		case internalpb.RateType_DDLCompaction:
 			r = &quotaConfig.MaxCompactionRate
 		case internalpb.RateType_DMLInsert:

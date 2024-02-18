@@ -44,26 +44,26 @@ func TestMultiRateLimiter(t *testing.T) {
 		multiLimiter := NewMultiRateLimiter()
 		multiLimiter.collectionLimiters[collectionID] = newRateLimiter(false)
 		for _, rt := range internalpb.RateType_value {
-			if IsDDLRequest(internalpb.RateType(rt)) {
+			if isNotCollectionLevelLimitRequest(internalpb.RateType(rt)) {
 				multiLimiter.globalDDLLimiter.limiters.Insert(internalpb.RateType(rt), ratelimitutil.NewLimiter(ratelimitutil.Limit(5), 1))
 			} else {
 				multiLimiter.collectionLimiters[collectionID].limiters.Insert(internalpb.RateType(rt), ratelimitutil.NewLimiter(ratelimitutil.Limit(1000), 1))
 			}
 		}
 		for _, rt := range internalpb.RateType_value {
-			if IsDDLRequest(internalpb.RateType(rt)) {
-				err := multiLimiter.Check(collectionID, internalpb.RateType(rt), 1)
+			if isNotCollectionLevelLimitRequest(internalpb.RateType(rt)) {
+				err := multiLimiter.Check([]int64{collectionID}, internalpb.RateType(rt), 1)
 				assert.NoError(t, err)
-				err = multiLimiter.Check(collectionID, internalpb.RateType(rt), 5)
+				err = multiLimiter.Check([]int64{collectionID}, internalpb.RateType(rt), 5)
 				assert.NoError(t, err)
-				err = multiLimiter.Check(collectionID, internalpb.RateType(rt), 5)
+				err = multiLimiter.Check([]int64{collectionID}, internalpb.RateType(rt), 5)
 				assert.ErrorIs(t, err, merr.ErrServiceRateLimit)
 			} else {
-				err := multiLimiter.Check(collectionID, internalpb.RateType(rt), 1)
+				err := multiLimiter.Check([]int64{collectionID}, internalpb.RateType(rt), 1)
 				assert.NoError(t, err)
-				err = multiLimiter.Check(collectionID, internalpb.RateType(rt), math.MaxInt)
+				err = multiLimiter.Check([]int64{collectionID}, internalpb.RateType(rt), math.MaxInt)
 				assert.NoError(t, err)
-				err = multiLimiter.Check(collectionID, internalpb.RateType(rt), math.MaxInt)
+				err = multiLimiter.Check([]int64{collectionID}, internalpb.RateType(rt), math.MaxInt)
 				assert.ErrorIs(t, err, merr.ErrServiceRateLimit)
 			}
 		}
@@ -78,7 +78,7 @@ func TestMultiRateLimiter(t *testing.T) {
 		multiLimiter.collectionLimiters[2] = newRateLimiter(false)
 		multiLimiter.collectionLimiters[3] = newRateLimiter(false)
 		for _, rt := range internalpb.RateType_value {
-			if IsDDLRequest(internalpb.RateType(rt)) {
+			if isNotCollectionLevelLimitRequest(internalpb.RateType(rt)) {
 				multiLimiter.globalDDLLimiter.limiters.Insert(internalpb.RateType(rt), ratelimitutil.NewLimiter(ratelimitutil.Limit(5), 1))
 			} else {
 				multiLimiter.globalDDLLimiter.limiters.Insert(internalpb.RateType(rt), ratelimitutil.NewLimiter(ratelimitutil.Limit(2), 1))
@@ -88,19 +88,26 @@ func TestMultiRateLimiter(t *testing.T) {
 			}
 		}
 		for _, rt := range internalpb.RateType_value {
-			if IsDDLRequest(internalpb.RateType(rt)) {
-				err := multiLimiter.Check(1, internalpb.RateType(rt), 1)
+			if internalpb.RateType(rt) == internalpb.RateType_DDLFlush {
+				err := multiLimiter.Check([]int64{1, 2, 3}, internalpb.RateType(rt), 1)
 				assert.NoError(t, err)
-				err = multiLimiter.Check(1, internalpb.RateType(rt), 5)
+				err = multiLimiter.Check([]int64{1, 2, 3}, internalpb.RateType(rt), 5)
 				assert.NoError(t, err)
-				err = multiLimiter.Check(1, internalpb.RateType(rt), 5)
+				err = multiLimiter.Check([]int64{1, 2, 3}, internalpb.RateType(rt), 5)
+				assert.ErrorIs(t, err, merr.ErrServiceRateLimit)
+			} else if isNotCollectionLevelLimitRequest(internalpb.RateType(rt)) {
+				err := multiLimiter.Check([]int64{1}, internalpb.RateType(rt), 1)
+				assert.NoError(t, err)
+				err = multiLimiter.Check([]int64{1}, internalpb.RateType(rt), 5)
+				assert.NoError(t, err)
+				err = multiLimiter.Check([]int64{1}, internalpb.RateType(rt), 5)
 				assert.ErrorIs(t, err, merr.ErrServiceRateLimit)
 			} else {
-				err := multiLimiter.Check(1, internalpb.RateType(rt), 1)
+				err := multiLimiter.Check([]int64{1}, internalpb.RateType(rt), 1)
 				assert.NoError(t, err)
-				err = multiLimiter.Check(2, internalpb.RateType(rt), 1)
+				err = multiLimiter.Check([]int64{2}, internalpb.RateType(rt), 1)
 				assert.NoError(t, err)
-				err = multiLimiter.Check(3, internalpb.RateType(rt), 1)
+				err = multiLimiter.Check([]int64{3}, internalpb.RateType(rt), 1)
 				assert.ErrorIs(t, err, merr.ErrServiceRateLimit)
 			}
 		}
@@ -113,7 +120,7 @@ func TestMultiRateLimiter(t *testing.T) {
 		bak := Params.QuotaConfig.QuotaAndLimitsEnabled.GetValue()
 		paramtable.Get().Save(Params.QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
 		for _, rt := range internalpb.RateType_value {
-			err := multiLimiter.Check(collectionID, internalpb.RateType(rt), 1)
+			err := multiLimiter.Check([]int64{collectionID}, internalpb.RateType(rt), 1)
 			assert.NoError(t, err)
 		}
 		Params.Save(Params.QuotaConfig.QuotaAndLimitsEnabled.Key, bak)
@@ -126,7 +133,7 @@ func TestMultiRateLimiter(t *testing.T) {
 			multiLimiter := NewMultiRateLimiter()
 			bak := Params.QuotaConfig.QuotaAndLimitsEnabled.GetValue()
 			paramtable.Get().Save(Params.QuotaConfig.QuotaAndLimitsEnabled.Key, "true")
-			err := multiLimiter.Check(collectionID, internalpb.RateType_DMLInsert, 1*1024*1024)
+			err := multiLimiter.Check([]int64{collectionID}, internalpb.RateType_DMLInsert, 1*1024*1024)
 			assert.NoError(t, err)
 			Params.Save(Params.QuotaConfig.QuotaAndLimitsEnabled.Key, bak)
 			Params.Save(Params.QuotaConfig.DMLMaxInsertRate.Key, bakInsertRate)

@@ -1362,6 +1362,12 @@ type queryCoordConfig struct {
 	OverloadedMemoryThresholdPercentage ParamItem `refreshable:"true"`
 	BalanceIntervalSeconds              ParamItem `refreshable:"true"`
 	MemoryUsageMaxDifferencePercentage  ParamItem `refreshable:"true"`
+	RowCountFactor                      ParamItem `refreshable:"true"`
+	SegmentCountFactor                  ParamItem `refreshable:"true"`
+	GlobalSegmentCountFactor            ParamItem `refreshable:"true"`
+	SegmentCountMaxSteps                ParamItem `refreshable:"true"`
+	RowCountMaxSteps                    ParamItem `refreshable:"true"`
+	RandomMaxSteps                      ParamItem `refreshable:"true"`
 	GrowingRowCountWeight               ParamItem `refreshable:"true"`
 
 	SegmentCheckInterval       ParamItem `refreshable:"true"`
@@ -1480,6 +1486,66 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.GlobalRowCountFactor.Init(base.mgr)
+
+	p.RowCountFactor = ParamItem{
+		Key:          "queryCoord.rowCountFactor",
+		Version:      "2.3.0",
+		DefaultValue: "0.4",
+		PanicIfEmpty: true,
+		Doc:          "the row count weight used when balancing segments among queryNodes",
+		Export:       true,
+	}
+	p.RowCountFactor.Init(base.mgr)
+
+	p.SegmentCountFactor = ParamItem{
+		Key:          "queryCoord.segmentCountFactor",
+		Version:      "2.3.0",
+		DefaultValue: "0.4",
+		PanicIfEmpty: true,
+		Doc:          "the segment count weight used when balancing segments among queryNodes",
+		Export:       true,
+	}
+	p.SegmentCountFactor.Init(base.mgr)
+
+	p.GlobalSegmentCountFactor = ParamItem{
+		Key:          "queryCoord.globalSegmentCountFactor",
+		Version:      "2.3.0",
+		DefaultValue: "0.1",
+		PanicIfEmpty: true,
+		Doc:          "the segment count weight used when balancing segments among queryNodes",
+		Export:       true,
+	}
+	p.GlobalSegmentCountFactor.Init(base.mgr)
+
+	p.SegmentCountMaxSteps = ParamItem{
+		Key:          "queryCoord.segmentCountMaxSteps",
+		Version:      "2.3.0",
+		DefaultValue: "50",
+		PanicIfEmpty: true,
+		Doc:          "segment count based plan generator max steps",
+		Export:       true,
+	}
+	p.SegmentCountMaxSteps.Init(base.mgr)
+
+	p.RowCountMaxSteps = ParamItem{
+		Key:          "queryCoord.rowCountMaxSteps",
+		Version:      "2.3.0",
+		DefaultValue: "50",
+		PanicIfEmpty: true,
+		Doc:          "segment count based plan generator max steps",
+		Export:       true,
+	}
+	p.RowCountMaxSteps.Init(base.mgr)
+
+	p.RandomMaxSteps = ParamItem{
+		Key:          "queryCoord.randomMaxSteps",
+		Version:      "2.3.0",
+		DefaultValue: "10",
+		PanicIfEmpty: true,
+		Doc:          "segment count based plan generator max steps",
+		Export:       true,
+	}
+	p.RandomMaxSteps.Init(base.mgr)
 
 	p.ScoreUnbalanceTolerationFactor = ParamItem{
 		Key:          "queryCoord.scoreUnbalanceTolerationFactor",
@@ -2898,8 +2964,13 @@ type dataNodeConfig struct {
 	ChannelWorkPoolSize ParamItem `refreshable:"true"`
 
 	UpdateChannelCheckpointMaxParallel ParamItem `refreshable:"true"`
+	UpdateChannelCheckpointInterval    ParamItem `refreshable:"true"`
+	UpdateChannelCheckpointRPCTimeout  ParamItem `refreshable:"true"`
 
 	MaxConcurrentImportTaskNum ParamItem `refreshable:"true"`
+
+	// Compaction
+	L0BatchMemoryRatio ParamItem `refreshable:"true"`
 }
 
 func (p *dataNodeConfig) init(base *BaseTable) {
@@ -3135,6 +3206,22 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	}
 	p.UpdateChannelCheckpointMaxParallel.Init(base.mgr)
 
+	p.UpdateChannelCheckpointInterval = ParamItem{
+		Key:          "datanode.channel.updateChannelCheckpointInterval",
+		Version:      "2.4.0",
+		Doc:          "the interval duration(in seconds) for datanode to update channel checkpoint of each channel",
+		DefaultValue: "60",
+	}
+	p.UpdateChannelCheckpointInterval.Init(base.mgr)
+
+	p.UpdateChannelCheckpointRPCTimeout = ParamItem{
+		Key:          "datanode.channel.updateChannelCheckpointInterval",
+		Version:      "2.4.0",
+		Doc:          "timeout in seconds for UpdateChannelCheckpoint RPC call",
+		DefaultValue: "10",
+	}
+	p.UpdateChannelCheckpointRPCTimeout.Init(base.mgr)
+
 	p.MaxConcurrentImportTaskNum = ParamItem{
 		Key:          "datanode.import.maxConcurrentTaskNum",
 		Version:      "2.4.0",
@@ -3144,6 +3231,15 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.MaxConcurrentImportTaskNum.Init(base.mgr)
+
+	p.L0BatchMemoryRatio = ParamItem{
+		Key:          "datanode.compaction.levelZeroBatchMemoryRatio",
+		Version:      "2.4.0",
+		Doc:          "The minimal memory ratio of free memory for level zero compaction executing in batch mode",
+		DefaultValue: "0.05",
+		Export:       true,
+	}
+	p.L0BatchMemoryRatio.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

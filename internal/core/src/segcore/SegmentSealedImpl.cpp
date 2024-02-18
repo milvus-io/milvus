@@ -176,12 +176,11 @@ SegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
     // reverse pk from scalar index and set pks to offset
     if (schema_->get_primary_field_id() == field_id) {
         AssertInfo(field_id.get() != -1, "Primary key is -1");
-        AssertInfo(insert_record_.empty_pks(), "already exists");
         switch (field_meta.get_data_type()) {
             case DataType::INT64: {
                 auto int64_index = dynamic_cast<index::ScalarIndex<int64_t>*>(
                     scalar_indexings_[field_id].get());
-                if (int64_index->HasRawData()) {
+                if (insert_record_.empty_pks() && int64_index->HasRawData()) {
                     for (int i = 0; i < row_count; ++i) {
                         insert_record_.insert_pk(int64_index->Reverse_Lookup(i),
                                                  i);
@@ -194,7 +193,7 @@ SegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
                 auto string_index =
                     dynamic_cast<index::ScalarIndex<std::string>*>(
                         scalar_indexings_[field_id].get());
-                if (string_index->HasRawData()) {
+                if (insert_record_.empty_pks() && string_index->HasRawData()) {
                     for (int i = 0; i < row_count; ++i) {
                         insert_record_.insert_pk(
                             string_index->Reverse_Lookup(i), i);
@@ -931,8 +930,8 @@ SegmentSealedImpl::DropFieldData(const FieldId field_id) {
         auto& field_meta = schema_->operator[](field_id);
         std::unique_lock lck(mutex_);
         if (get_bit(field_data_ready_bitset_, field_id)) {
+            fields_.erase(field_id);
             set_bit(field_data_ready_bitset_, field_id, false);
-            insert_record_.drop_field_data(field_id);
         }
         if (get_bit(binlog_index_bitset_, field_id)) {
             set_bit(binlog_index_bitset_, field_id, false);
@@ -1545,14 +1544,12 @@ SegmentSealedImpl::generate_binlog_index(const FieldId field_id) {
     }
     try {
         // get binlog data and meta
-        auto row_count = num_rows_.value();
+        int64_t row_count;
+        {
+            std::shared_lock lck(mutex_);
+            row_count = num_rows_.value();
+        }
         auto dim = field_meta.get_dim();
-        std::shared_ptr<ColumnBase> vec_data{};
-
-        vec_data = fields_.at(field_id);
-        auto dataset =
-            knowhere::GenDataSet(row_count, dim, (void*)vec_data->Data());
-        dataset->SetIsOwner(false);
         // generate index params
         auto field_binlog_config = std::unique_ptr<VecIndexConfig>(
             new VecIndexConfig(row_count,
@@ -1566,6 +1563,15 @@ SegmentSealedImpl::generate_binlog_index(const FieldId field_id) {
         build_config[knowhere::meta::DIM] = std::to_string(dim);
         build_config[knowhere::meta::NUM_BUILD_THREAD] = std::to_string(1);
         auto index_metric = field_binlog_config->GetMetricType();
+
+        std::shared_ptr<ColumnBase> vec_data{};
+        {
+            std::shared_lock lck(mutex_);
+            vec_data = fields_.at(field_id);
+        }
+        auto dataset =
+            knowhere::GenDataSet(row_count, dim, (void*)vec_data->Data());
+        dataset->SetIsOwner(false);
 
         index::IndexBasePtr vec_index =
             std::make_unique<index::VectorMemIndex<float>>(

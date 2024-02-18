@@ -255,6 +255,14 @@ func (r *PayloadReader) GetStringFromPayload() ([]string, error) {
 	})
 }
 
+func (r *PayloadReader) GetByteArrayDataSet() (*DataSet[parquet.ByteArray, *file.ByteArrayColumnChunkReader], error) {
+	if r.colType != schemapb.DataType_String && r.colType != schemapb.DataType_VarChar {
+		return nil, fmt.Errorf("failed to get string from datatype %v", r.colType.String())
+	}
+
+	return NewDataSet[parquet.ByteArray, *file.ByteArrayColumnChunkReader](r.reader, 0, r.numRows), nil
+}
+
 func (r *PayloadReader) GetArrayFromPayload() ([]*schemapb.ScalarField, error) {
 	if r.colType != schemapb.DataType_Array {
 		return nil, fmt.Errorf("failed to get string from datatype %v", r.colType.String())
@@ -444,4 +452,70 @@ func ReadDataFromAllRowGroups[T any, E interface {
 	}
 
 	return offset, nil
+}
+
+type DataSet[T any, E interface {
+	ReadBatch(int64, []T, []int16, []int16) (int64, int, error)
+}] struct {
+	reader  *file.Reader
+	cReader E
+
+	cnt, numRows       int64
+	groupID, columnIdx int
+}
+
+func NewDataSet[T any, E interface {
+	ReadBatch(int64, []T, []int16, []int16) (int64, int, error)
+}](reader *file.Reader, columnIdx int, numRows int64) *DataSet[T, E] {
+	return &DataSet[T, E]{
+		reader:    reader,
+		columnIdx: columnIdx,
+		numRows:   numRows,
+	}
+}
+
+func (s *DataSet[T, E]) nextGroup() error {
+	s.cnt = 0
+	column, err := s.reader.RowGroup(s.groupID).Column(s.columnIdx)
+	if err != nil {
+		return err
+	}
+
+	cReader, ok := column.(E)
+	if !ok {
+		return fmt.Errorf("expect type %T, but got %T", *new(E), column)
+	}
+	s.groupID++
+	s.cReader = cReader
+	return nil
+}
+
+func (s *DataSet[T, E]) HasNext() bool {
+	if s.groupID > s.reader.NumRowGroups() || (s.groupID == s.reader.NumRowGroups() && s.cnt >= s.numRows) || s.numRows == 0 {
+		return false
+	}
+	return true
+}
+
+func (s *DataSet[T, E]) NextBatch(batch int64) ([]T, error) {
+	if s.groupID > s.reader.NumRowGroups() || (s.groupID == s.reader.NumRowGroups() && s.cnt >= s.numRows) || s.numRows == 0 {
+		return nil, fmt.Errorf("has no more data")
+	}
+
+	if s.groupID == 0 || s.cnt >= s.numRows {
+		err := s.nextGroup()
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	batch = Min(batch, s.numRows-s.cnt)
+	result := make([]T, batch)
+	_, _, err := s.cReader.ReadBatch(batch, result, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	s.cnt += batch
+	return result, nil
 }

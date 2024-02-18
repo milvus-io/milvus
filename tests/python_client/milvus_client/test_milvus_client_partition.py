@@ -533,7 +533,7 @@ class TestMilvusClientReleasePartitionInvalid(TestcaseBase):
         partition_names = []
         # 2. create partition
         client_w.create_collection(client, collection_name, default_dim)
-        error = {ct.err_code: 1100, ct.err_msg: f"invalid parameter[expected=any parttiion][actual=empty partition list"}
+        error = {ct.err_code: 1100, ct.err_msg: f"invalid parameter[expected=any partition][actual=empty partition list"}
         client_w.release_partitions(client, collection_name, partition_names,
                                    check_task=CheckTasks.err_res, check_items=error)
 

@@ -106,6 +106,10 @@ linters-settings:
             desc: not allowed, use github.com/cockroachdb/errors
           - pkg: "io/ioutil"
             desc: ioutil is deprecated after 1.16, 1.17, use os and io package instead
+          - pkg: "github.com/tikv/client-go/rawkv"
+            desc: not allowed, use github.com/tikv/client-go/v2/txnkv
+          - pkg: "github.com/tikv/client-go/v2/rawkv"
+            desc: not allowed, use github.com/tikv/client-go/v2/txnkv
   forbidigo:
     forbid:
       - '^time\.Tick$'

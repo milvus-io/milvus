@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -259,7 +260,13 @@ func (s *ServerSuite) TestSaveBinlogPath_SaveDroppedSegment() {
 			s.NotNil(segment)
 			s.EqualValues(0, len(segment.GetBinlogs()))
 			s.EqualValues(segment.NumOfRows, 0)
-			s.Equal(test.expectedState, segment.GetState())
+
+			flushing := []commonpb.SegmentState{commonpb.SegmentState_Flushed, commonpb.SegmentState_Flushing}
+			if lo.Contains(flushing, test.expectedState) {
+				s.True(lo.Contains(flushing, segment.GetState()))
+			} else {
+				s.Equal(test.expectedState, segment.GetState())
+			}
 		})
 	}
 }

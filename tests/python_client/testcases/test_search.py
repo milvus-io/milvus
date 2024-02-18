@@ -9838,7 +9838,8 @@ class TestSearchGroupBy(TestcaseBase):
             err_code = 999
             err_msg = "Unexpected index"
             if index in ["IVF_FLAT", "IVF_SQ8", "IVF_PQ", "SCANN"]:
-                err_msg = "not supported for current index type"
+                err_code = 65535
+                err_msg = "Returned knowhere iterator has non-ready iterators inside, terminate group_by operation"
             collection_w.search(data=search_vectors, anns_field=ct.default_float_vec_field_name,
                                 param=search_params, limit=limit,
                                 group_by_field=ct.default_int8_field_name,

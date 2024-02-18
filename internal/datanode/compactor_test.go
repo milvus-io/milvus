@@ -1095,3 +1095,24 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 		assert.NotEmpty(t, segment.Field2StatslogPaths)
 	})
 }
+
+func TestInjectDone(t *testing.T) {
+	syncMgr := syncmgr.NewMockSyncManager(t)
+
+	segmentIDs := []int64{100, 200, 300}
+	task := &compactionTask{
+		plan: &datapb.CompactionPlan{
+			SegmentBinlogs: lo.Map(segmentIDs, func(id int64, _ int) *datapb.CompactionSegmentBinlogs {
+				return &datapb.CompactionSegmentBinlogs{SegmentID: id}
+			}),
+		},
+		syncMgr: syncMgr,
+	}
+
+	for _, segmentID := range segmentIDs {
+		syncMgr.EXPECT().Unblock(segmentID).Return().Once()
+	}
+
+	task.injectDone()
+	task.injectDone()
+}
