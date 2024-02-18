@@ -101,6 +101,8 @@ const (
 	DimKey         = "dim"
 	MaxLengthKey   = "max_length"
 	MaxCapacityKey = "max_capacity"
+
+	DropRatioBuildKey = "drop_ratio_build"
 )
 
 //  Collection properties key
