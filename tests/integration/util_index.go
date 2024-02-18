@@ -30,17 +30,19 @@ import (
 )
 
 const (
-	IndexRaftIvfFlat     = indexparamcheck.IndexRaftIvfFlat
-	IndexRaftIvfPQ       = indexparamcheck.IndexRaftIvfPQ
-	IndexFaissIDMap      = indexparamcheck.IndexFaissIDMap
-	IndexFaissIvfFlat    = indexparamcheck.IndexFaissIvfFlat
-	IndexFaissIvfPQ      = indexparamcheck.IndexFaissIvfPQ
-	IndexScaNN           = indexparamcheck.IndexScaNN
-	IndexFaissIvfSQ8     = indexparamcheck.IndexFaissIvfSQ8
-	IndexFaissBinIDMap   = indexparamcheck.IndexFaissBinIDMap
-	IndexFaissBinIvfFlat = indexparamcheck.IndexFaissBinIvfFlat
-	IndexHNSW            = indexparamcheck.IndexHNSW
-	IndexDISKANN         = indexparamcheck.IndexDISKANN
+	IndexRaftIvfFlat         = indexparamcheck.IndexRaftIvfFlat
+	IndexRaftIvfPQ           = indexparamcheck.IndexRaftIvfPQ
+	IndexFaissIDMap          = indexparamcheck.IndexFaissIDMap
+	IndexFaissIvfFlat        = indexparamcheck.IndexFaissIvfFlat
+	IndexFaissIvfPQ          = indexparamcheck.IndexFaissIvfPQ
+	IndexScaNN               = indexparamcheck.IndexScaNN
+	IndexFaissIvfSQ8         = indexparamcheck.IndexFaissIvfSQ8
+	IndexFaissBinIDMap       = indexparamcheck.IndexFaissBinIDMap
+	IndexFaissBinIvfFlat     = indexparamcheck.IndexFaissBinIvfFlat
+	IndexHNSW                = indexparamcheck.IndexHNSW
+	IndexDISKANN             = indexparamcheck.IndexDISKANN
+	IndexSparseInvertedIndex = indexparamcheck.IndexSparseInverted
+	IndexSparseWand          = indexparamcheck.IndexSparseWand
 )
 
 func (s *MiniClusterSuite) WaitForIndexBuiltWithDB(ctx context.Context, dbName, collection, field string) {
@@ -166,6 +168,8 @@ func ConstructIndexParam(dim int, indexType string, metricType string) []*common
 			Key:   "efConstruction",
 			Value: "200",
 		})
+	case IndexSparseInvertedIndex:
+	case IndexSparseWand:
 	case IndexDISKANN:
 	default:
 		panic(fmt.Sprintf("unimplemented index param for %s, please help to improve it", indexType))
@@ -184,6 +188,9 @@ func GetSearchParams(indexType string, metricType string) map[string]any {
 		params["ef"] = 200
 	case IndexDISKANN:
 		params["search_list"] = 20
+	case IndexSparseInvertedIndex:
+	case IndexSparseWand:
+		params["drop_ratio_search"] = 0.1
 	default:
 		panic(fmt.Sprintf("unimplemented search param for %s, please help to improve it", indexType))
 	}
