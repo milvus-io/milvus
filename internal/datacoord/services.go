@@ -1767,60 +1767,51 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 		timeoutTs = tsoutil.ComposeTSByTime(time.Now().Add(dur), 0)
 	}
 
-	var fileGroups [][]*internalpb.ImportFile
+	files := in.GetFiles()
 	isBackup := importutilv2.IsBackup(in.GetOptions())
 	if isBackup {
-		fileGroups = make([][]*internalpb.ImportFile, 0)
+		files = make([]*internalpb.ImportFile, 0)
 		for _, importFile := range in.GetFiles() {
 			segmentPrefixes, err := ListBinlogsAndGroupBySegment(ctx, s.meta.chunkManager, importFile)
 			if err != nil {
 				resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprint("list binlogs and group by segment failed, err=%w", err)))
 				return resp, nil
 			}
-			for _, prefix := range segmentPrefixes {
-				fileGroups = append(fileGroups, []*internalpb.ImportFile{prefix})
-			}
+			files = append(files, segmentPrefixes...)
 		}
-	} else {
-		fileNum := Params.DataCoordCfg.FilesPerPreImportTask.GetAsInt()
-		fileGroups = lo.Chunk(in.GetFiles(), fileNum)
 	}
 
-	idStart, _, err := s.allocator.allocN(int64(len(fileGroups)) + 1)
+	idStart, _, err := s.allocator.allocN(int64(len(files)) + 1)
 	if err != nil {
 		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprint("alloc id failed, err=%w", err)))
 		return resp, nil
 	}
+	files = lo.Map(files, func(importFile *internalpb.ImportFile, i int) *internalpb.ImportFile {
+		importFile.Id = idStart + int64(i) + 1
+		return importFile
+	})
 
-	for i, files := range fileGroups {
-		fileStats := lo.Map(files, func(f *internalpb.ImportFile, _ int) *datapb.ImportFileStats {
-			return &datapb.ImportFileStats{
-				ImportFile: f,
-			}
-		})
-		task := &preImportTask{
-			PreImportTask: &datapb.PreImportTask{
-				JobID:        idStart,
-				TaskID:       idStart + int64(i) + 1,
-				CollectionID: in.GetCollectionID(),
-				PartitionIDs: in.GetPartitionIDs(),
-				Vchannels:    in.GetChannelNames(),
-				State:        internalpb.ImportState_Pending,
-				TimeoutTs:    timeoutTs,
-				FileStats:    fileStats,
-				Options:      in.GetOptions(),
-			},
-			schema:         in.GetSchema(),
-			lastActiveTime: time.Now(),
-		}
-		err = s.importMeta.Add(task)
-		if err != nil {
-			resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprint("add preimport task failed, err=%w", err)))
-			return resp, nil
-		}
+	ij := &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:        idStart,
+			CollectionID: in.GetCollectionID(),
+			PartitionIDs: in.GetPartitionIDs(),
+			Vchannels:    in.GetChannelNames(),
+			TimeoutTs:    timeoutTs,
+			Files:        files,
+			Options:      in.GetOptions(),
+			State:        internalpb.ImportState_Pending,
+		},
+		schema: in.GetSchema(),
 	}
-	resp.JobID = fmt.Sprint(idStart)
-	log.Info("import done")
+	err = s.importMeta.AddJob(ij)
+	if err != nil {
+		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprint("add import job failed, err=%w", err)))
+		return resp, nil
+	}
+
+	resp.JobID = fmt.Sprint(ij.GetJobID())
+	log.Info("add import job done", zap.Int64("jobID", ij.GetJobID()))
 	return resp, nil
 }
 
@@ -1858,7 +1849,7 @@ func (s *Server) ListImports(ctx context.Context, in *internalpb.ListImportsRequ
 	resp := &internalpb.ListImportsResponse{
 		Status: merr.Success(),
 	}
-	tasks := s.importMeta.GetBy()
+	tasks := s.importMeta.GetTaskBy()
 	res := lo.KeyBy(tasks, func(t ImportTask) int64 {
 		return t.GetJobID()
 	})

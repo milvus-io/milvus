@@ -21,7 +21,6 @@ import (
 
 	"github.com/golang/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 )
@@ -132,7 +131,6 @@ type ImportTask interface {
 	GetType() TaskType
 	GetState() internalpb.ImportState
 	GetReason() string
-	GetSchema() *schemapb.CollectionSchema
 	GetFileStats() []*datapb.ImportFileStats
 	GetLastActiveTime() time.Time
 	GetTimeoutTs() uint64
@@ -141,16 +139,11 @@ type ImportTask interface {
 
 type preImportTask struct {
 	*datapb.PreImportTask
-	schema         *schemapb.CollectionSchema
 	lastActiveTime time.Time
 }
 
 func (p *preImportTask) GetType() TaskType {
 	return PreImportTaskType
-}
-
-func (p *preImportTask) GetSchema() *schemapb.CollectionSchema {
-	return p.schema
 }
 
 func (p *preImportTask) GetLastActiveTime() time.Time {
@@ -160,14 +153,12 @@ func (p *preImportTask) GetLastActiveTime() time.Time {
 func (p *preImportTask) Clone() ImportTask {
 	return &preImportTask{
 		PreImportTask:  proto.Clone(p.PreImportTask).(*datapb.PreImportTask),
-		schema:         p.schema,
 		lastActiveTime: p.lastActiveTime,
 	}
 }
 
 type importTask struct {
 	*datapb.ImportTaskV2
-	schema         *schemapb.CollectionSchema
 	lastActiveTime time.Time
 }
 
@@ -179,14 +170,9 @@ func (t *importTask) GetLastActiveTime() time.Time {
 	return t.lastActiveTime
 }
 
-func (t *importTask) GetSchema() *schemapb.CollectionSchema {
-	return t.schema
-}
-
 func (t *importTask) Clone() ImportTask {
 	return &importTask{
 		ImportTaskV2:   proto.Clone(t.ImportTaskV2).(*datapb.ImportTaskV2),
-		schema:         t.schema,
 		lastActiveTime: t.lastActiveTime,
 	}
 }

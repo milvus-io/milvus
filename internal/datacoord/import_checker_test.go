@@ -52,6 +52,14 @@ func TestImportChecker(t *testing.T) {
 	imeta, err := NewImportMeta(nil, catalog)
 	assert.NoError(t, err)
 
+	job := &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID: 0,
+		},
+	}
+	err = imeta.AddJob(job)
+	assert.NoError(t, err)
+
 	pit1 := &preImportTask{
 		PreImportTask: &datapb.PreImportTask{
 			JobID:  0,
@@ -59,7 +67,7 @@ func TestImportChecker(t *testing.T) {
 			State:  internalpb.ImportState_Pending,
 		},
 	}
-	err = imeta.Add(pit1)
+	err = imeta.AddTask(pit1)
 	assert.NoError(t, err)
 
 	pit2 := &preImportTask{
@@ -69,7 +77,7 @@ func TestImportChecker(t *testing.T) {
 			State:  internalpb.ImportState_Completed,
 		},
 	}
-	err = imeta.Add(pit2)
+	err = imeta.AddTask(pit2)
 	assert.NoError(t, err)
 
 	pit3 := &preImportTask{
@@ -79,7 +87,7 @@ func TestImportChecker(t *testing.T) {
 			State:  internalpb.ImportState_Completed,
 		},
 	}
-	err = imeta.Add(pit3)
+	err = imeta.AddTask(pit3)
 	assert.NoError(t, err)
 
 	it1 := &importTask{
@@ -89,7 +97,7 @@ func TestImportChecker(t *testing.T) {
 			State:  internalpb.ImportState_Completed,
 		},
 	}
-	err = imeta.Add(it1)
+	err = imeta.AddTask(it1)
 	assert.NoError(t, err)
 
 	it2 := &importTask{
@@ -99,9 +107,9 @@ func TestImportChecker(t *testing.T) {
 			State:  internalpb.ImportState_Completed,
 		},
 	}
-	err = imeta.Add(it2)
+	err = imeta.AddTask(it2)
 	assert.NoError(t, err)
-	tasks := imeta.GetBy(WithJob(0))
+	tasks := imeta.GetTaskBy(WithJob(0))
 	assert.Equal(t, 5, len(tasks))
 
 	meta, err := newMeta(context.TODO(), catalog, nil)
@@ -109,35 +117,35 @@ func TestImportChecker(t *testing.T) {
 	checker := NewImportChecker(meta, nil, cluster, alloc, nil, imeta, make(chan UniqueID, 1024)).(*importChecker)
 
 	// preimport tasks are not fully completed
-	checker.checkPreImportState(0)
-	tasks = imeta.GetBy(WithJob(0))
+	checker.checkLackPreImport(job)
+	tasks = imeta.GetTaskBy(WithJob(0))
 	assert.Equal(t, 5, len(tasks))
 
 	// preimport tasks are all completed, should generate import tasks
-	err = imeta.Update(1, UpdateState(internalpb.ImportState_Completed))
+	err = imeta.UpdateTask(1, UpdateState(internalpb.ImportState_Completed))
 	assert.NoError(t, err)
-	checker.checkPreImportState(0)
-	tasks = imeta.GetBy(WithJob(0))
+	checker.checkLackPreImport(job)
+	tasks = imeta.GetTaskBy(WithJob(0))
 	assert.Equal(t, 6, len(tasks))
-	tasks = imeta.GetBy(WithJob(0), WithType(ImportTaskType))
+	tasks = imeta.GetTaskBy(WithJob(0), WithType(ImportTaskType))
 	assert.Equal(t, 3, len(tasks))
 	for _, task := range tasks {
 		assert.Equal(t, internalpb.ImportState_Pending, task.GetState())
 	}
 
 	// import tasks are not fully completed
-	tasks = imeta.GetBy(WithJob(0), WithType(ImportTaskType))
+	tasks = imeta.GetTaskBy(WithJob(0), WithType(ImportTaskType))
 	assert.Equal(t, 3, len(tasks))
-	checker.checkImportState(0)
+	checker.checkImportState(job)
 	for _, task := range tasks {
 		assert.Equal(t, 0, len(task.(*importTask).GetSegmentIDs()))
 	}
 
 	// import tasks are all completed
-	tasks = imeta.GetBy(WithJob(0), WithType(ImportTaskType))
+	tasks = imeta.GetTaskBy(WithJob(0), WithType(ImportTaskType))
 	assert.Equal(t, 3, len(tasks))
 	for _, task := range tasks {
-		err = imeta.Update(task.GetTaskID(), UpdateState(internalpb.ImportState_Completed))
+		err = imeta.UpdateTask(task.GetTaskID(), UpdateState(internalpb.ImportState_Completed))
 		assert.NoError(t, err)
 		segmentID := task.GetTaskID()
 		err = meta.AddSegment(context.TODO(), &SegmentInfo{
@@ -148,8 +156,8 @@ func TestImportChecker(t *testing.T) {
 		})
 		assert.NoError(t, err)
 	}
-	checker.checkImportState(0)
-	tasks = imeta.GetBy(WithJob(0), WithType(ImportTaskType))
+	checker.checkImportState(job)
+	tasks = imeta.GetTaskBy(WithJob(0), WithType(ImportTaskType))
 	assert.Equal(t, 3, len(tasks))
 	for _, task := range tasks {
 		for _, segmentID := range task.(*importTask).GetSegmentIDs() {

@@ -445,10 +445,6 @@ func GenerateParquetFile(filePath string, schema *schemapb.CollectionSchema, num
 
 func GenerateNumpyFiles(cm storage.ChunkManager, schema *schemapb.CollectionSchema, rowCount int) (*internalpb.ImportFile, error) {
 	paths := make([]string, 0)
-	err := os.Mkdir(cm.RootPath(), os.ModePerm)
-	if err != nil {
-		return nil, err
-	}
 	for _, field := range schema.GetFields() {
 		if field.GetAutoID() && field.GetIsPrimaryKey() {
 			continue

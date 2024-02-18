@@ -77,7 +77,7 @@ func (s *ImportSchedulerSuite) TestProcessPreImport() {
 			State:        internalpb.ImportState_Pending,
 		},
 	}
-	err := s.imeta.Add(task)
+	err := s.imeta.AddTask(task)
 	s.NoError(err)
 
 	// pending -> inProgress
@@ -94,7 +94,7 @@ func (s *ImportSchedulerSuite) TestProcessPreImport() {
 		},
 	})
 	s.scheduler.process()
-	task = s.imeta.Get(task.GetTaskID())
+	task = s.imeta.GetTask(task.GetTaskID())
 	s.Equal(internalpb.ImportState_InProgress, task.GetState())
 	s.Equal(int64(nodeID), task.GetNodeID())
 
@@ -103,13 +103,13 @@ func (s *ImportSchedulerSuite) TestProcessPreImport() {
 		State: internalpb.ImportState_Completed,
 	}, nil)
 	s.scheduler.process()
-	task = s.imeta.Get(task.GetTaskID())
+	task = s.imeta.GetTask(task.GetTaskID())
 	s.Equal(internalpb.ImportState_Completed, task.GetState())
 
 	// drop import task
 	s.cluster.EXPECT().DropImport(mock.Anything, mock.Anything).Return(nil)
 	s.scheduler.process()
-	task = s.imeta.Get(task.GetTaskID())
+	task = s.imeta.GetTask(task.GetTaskID())
 	s.Equal(int64(NullNodeID), task.GetNodeID())
 }
 
@@ -137,7 +137,7 @@ func (s *ImportSchedulerSuite) TestProcessImport() {
 			},
 		},
 	}
-	err := s.imeta.Add(task)
+	err := s.imeta.AddTask(task)
 	s.NoError(err)
 
 	// pending -> inProgress
@@ -160,7 +160,7 @@ func (s *ImportSchedulerSuite) TestProcessImport() {
 		},
 	})
 	s.scheduler.process()
-	task = s.imeta.Get(task.GetTaskID())
+	task = s.imeta.GetTask(task.GetTaskID())
 	s.Equal(internalpb.ImportState_InProgress, task.GetState())
 	s.Equal(int64(nodeID), task.GetNodeID())
 	s.Equal(1, len(task.(*importTask).GetSegmentIDs()))
@@ -181,13 +181,13 @@ func (s *ImportSchedulerSuite) TestProcessImport() {
 		},
 	}, nil)
 	s.scheduler.process()
-	task = s.imeta.Get(task.GetTaskID())
+	task = s.imeta.GetTask(task.GetTaskID())
 	s.Equal(internalpb.ImportState_Completed, task.GetState())
 
 	// drop import task
 	s.cluster.EXPECT().DropImport(mock.Anything, mock.Anything).Return(nil)
 	s.scheduler.process()
-	task = s.imeta.Get(task.GetTaskID())
+	task = s.imeta.GetTask(task.GetTaskID())
 	s.Equal(int64(NullNodeID), task.GetNodeID())
 }
 

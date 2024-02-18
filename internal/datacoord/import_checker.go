@@ -27,6 +27,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -74,7 +75,7 @@ func NewImportChecker(meta *meta,
 func (c *importChecker) Start() {
 	log.Info("start import checker")
 	var (
-		stateTicker   = time.NewTicker(5 * time.Second)
+		stateTicker   = time.NewTicker(2 * time.Second)
 		collTicker    = time.NewTicker(30 * time.Second)
 		timeoutTicker = time.NewTicker(10 * time.Minute)
 	)
@@ -87,16 +88,14 @@ func (c *importChecker) Start() {
 			log.Info("import checker exited")
 			return
 		case <-stateTicker.C:
-			tasks := c.imeta.GetBy()
-			tasksByJob := lo.GroupBy(tasks, func(t ImportTask) int64 {
-				return t.GetJobID()
-			})
-			for jobID := range tasksByJob {
-				c.checkPreImportState(jobID)
-				c.checkImportState(jobID)
+			jobs := c.imeta.GetJobBy()
+			for _, job := range jobs {
+				c.checkLackPreImport(job)
+				c.checkLackImports(job)
+				c.checkImportState(job)
 			}
 		case <-timeoutTicker.C:
-			tasks := c.imeta.GetBy()
+			tasks := c.imeta.GetTaskBy()
 			tasksByJob := lo.GroupBy(tasks, func(t ImportTask) int64 {
 				return t.GetJobID()
 			})
@@ -105,7 +104,7 @@ func (c *importChecker) Start() {
 				c.checkGC(jobID)
 			}
 		case <-collTicker.C:
-			tasks := c.imeta.GetBy()
+			tasks := c.imeta.GetTaskBy()
 			tasksByCollection := lo.GroupBy(tasks, func(t ImportTask) int64 {
 				return t.GetCollectionID()
 			})
@@ -140,115 +139,160 @@ func (c *importChecker) LogStats() {
 		metrics.ImportTasks.WithLabelValues(taskType.String(), internalpb.ImportState_Completed.String()).Set(float64(completed))
 		metrics.ImportTasks.WithLabelValues(taskType.String(), internalpb.ImportState_Failed.String()).Set(float64(failed))
 	}
-	tasks := c.imeta.GetBy(WithType(PreImportTaskType))
+	tasks := c.imeta.GetTaskBy(WithType(PreImportTaskType))
 	logFunc(tasks, PreImportTaskType)
-	tasks = c.imeta.GetBy(WithType(ImportTaskType))
+	tasks = c.imeta.GetTaskBy(WithType(ImportTaskType))
 	logFunc(tasks, ImportTaskType)
 }
 
-func (c *importChecker) checkPreImportState(jobID int64) {
-	tasks := c.imeta.GetBy(WithType(PreImportTaskType), WithJob(jobID))
-	if len(tasks) == 0 {
-		return
+func (c *importChecker) getLackFilesForPreImports(job ImportJob) []*internalpb.ImportFile {
+	lacks := lo.KeyBy(job.GetFiles(), func(file *internalpb.ImportFile) int64 {
+		return file.GetId()
+	})
+	exists := c.imeta.GetTaskBy(WithType(PreImportTaskType), WithJob(job.GetJobID()))
+	for _, task := range exists {
+		for _, file := range task.GetFileStats() {
+			delete(lacks, file.GetImportFile().GetId())
+		}
 	}
-	for _, t := range tasks {
+	return lo.Values(lacks)
+}
+
+func (c *importChecker) getLackFilesForImports(job ImportJob) []*datapb.ImportFileStats {
+	lackPreImports := c.getLackFilesForPreImports(job)
+	if len(lackPreImports) > 0 {
+		// Preimport tasks are not fully generated; thus, generating imports should not be triggered.
+		return nil
+	}
+	preimports := c.imeta.GetTaskBy(WithType(PreImportTaskType), WithJob(job.GetJobID()))
+	lacks := make(map[int64]*datapb.ImportFileStats, 0)
+	for _, t := range preimports {
 		if t.GetState() != internalpb.ImportState_Completed {
-			return
+			// Preimport tasks are not fully completed, thus generating imports should not be triggered.
+			return nil
+		}
+		for _, stat := range t.GetFileStats() {
+			lacks[stat.GetImportFile().GetId()] = stat
 		}
 	}
-	groups, err := RegroupImportFiles(tasks)
-	if err != nil {
-		log.Warn("regroup import files failed", zap.Int64("jobID", jobID), zap.Error(err))
+	exists := c.imeta.GetTaskBy(WithType(ImportTaskType), WithJob(job.GetJobID()))
+	for _, task := range exists {
+		for _, file := range task.GetFileStats() {
+			delete(lacks, file.GetImportFile().GetId())
+		}
+	}
+	return lo.Values(lacks)
+}
+
+func (c *importChecker) checkLackPreImport(job ImportJob) {
+	lacks := c.getLackFilesForPreImports(job)
+	if len(lacks) == 0 {
 		return
 	}
-	importTasks := c.imeta.GetBy(WithType(ImportTaskType), WithJob(jobID))
-	if len(importTasks) == len(groups) {
-		return // all imported are generated
-	}
-	for _, t := range importTasks { // happens only when txn of adding new import tasks failed
-		err = DropImportTask(t, c.cluster, c.imeta)
-		if err != nil {
-			log.Warn("drop import failed", WrapLogFields(t, zap.Error(err))...)
-			return
-		}
-		for _, segment := range t.(*importTask).GetSegmentIDs() {
-			err = c.meta.DropSegment(segment)
-			if err != nil {
-				log.Warn("drop segment failed", WrapLogFields(t, zap.Error(err))...)
-				return
-			}
-		}
-		err = c.imeta.Remove(t.GetTaskID())
-		if err != nil {
-			log.Warn("remove import task failed", WrapLogFields(t, zap.Error(err))...)
-			return
-		}
-	}
-	pt := tasks[0].(*preImportTask)
-	newTasks, err := NewImportTasks(groups, pt, c.sm, c.alloc)
+	fileGroups := lo.Chunk(lacks, Params.DataCoordCfg.FilesPerPreImportTask.GetAsInt())
+
+	newTasks, err := NewPreImportTasks(fileGroups, job, c.alloc)
 	if err != nil {
-		log.Warn("assemble import tasks failed", zap.Error(err))
+		log.Warn("new preimport tasks failed", zap.Error(err))
 		return
 	}
 	for _, t := range newTasks {
-		err = c.imeta.Add(t)
+		err = c.imeta.AddTask(t)
 		if err != nil {
-			log.Warn("add new import task failed", WrapLogFields(t, zap.Error(err))...)
+			log.Warn("add preimport task failed", WrapTaskLog(t, zap.Error(err))...)
 			return
 		}
-		log.Info("add new import task", WrapLogFields(t)...)
+		log.Info("add new preimport task", WrapTaskLog(t)...)
 	}
 }
 
-func (c *importChecker) checkImportState(jobID int64) {
-	tasks := c.imeta.GetBy(WithType(ImportTaskType), WithJob(jobID))
+func (c *importChecker) checkLackImports(job ImportJob) {
+	lacks := c.getLackFilesForImports(job)
+	if len(lacks) == 0 {
+		return
+	}
+
+	groups, err := RegroupImportFiles(job, lacks)
+	if err != nil {
+		log.Warn("regroup import files failed", zap.Int64("jobID", job.GetJobID()), zap.Error(err))
+		return
+	}
+	newTasks, err := NewImportTasks(groups, job, c.sm, c.alloc)
+	if err != nil {
+		log.Warn("new import tasks failed", zap.Error(err))
+		return
+	}
+	for _, t := range newTasks {
+		err = c.imeta.AddTask(t)
+		if err != nil {
+			log.Warn("add new import task failed", WrapTaskLog(t, zap.Error(err))...)
+			return
+		}
+		log.Info("add new import task", WrapTaskLog(t)...)
+	}
+}
+
+func (c *importChecker) checkImportState(job ImportJob) {
+	tasks := c.imeta.GetTaskBy(WithType(ImportTaskType), WithJob(job.GetJobID()))
 	for _, t := range tasks {
 		if t.GetState() != internalpb.ImportState_Completed {
 			return
 		}
 	}
-	if AreAllTasksFinished(tasks, c.meta, c.imeta) {
-		return
-	}
+	unfinished := make([]int64, 0)
 	for _, task := range tasks {
 		segmentIDs := task.(*importTask).GetSegmentIDs()
-		err := c.sm.FlushImportSegments(context.Background(), task.GetCollectionID(), segmentIDs)
+		for _, segmentID := range segmentIDs {
+			segment := c.meta.GetSegment(segmentID)
+			if segment == nil { // may be compacted
+				continue
+			}
+			if segment.GetIsImporting() {
+				unfinished = append(unfinished, segmentID)
+			}
+		}
+	}
+	if len(unfinished) == 0 {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	err := c.sm.FlushImportSegments(ctx, job.GetCollectionID(), unfinished)
+	if err != nil {
+		log.Warn("flush imported segments failed",
+			WrapJobLog(job, zap.Int64s("segments", unfinished), zap.Error(err))...)
+		return
+	}
+
+	for _, segmentID := range unfinished {
+		err = AddImportSegment(c.cluster, c.meta, segmentID)
 		if err != nil {
-			log.Warn("seal imported segments failed", WrapLogFields(task, zap.Error(err))...)
+			log.Warn("add import segment failed", WrapJobLog(job, zap.Error(err))...)
 			return
 		}
-		for _, segmentID := range segmentIDs {
-			err = AddImportSegment(c.cluster, c.meta, segmentID)
-			if err != nil {
-				log.Warn("add import segment failed", WrapLogFields(task, zap.Error(err))...)
-				return
-			}
-			err = c.meta.UnsetIsImporting(segmentID)
-			if err != nil {
-				log.Warn("unset importing flag failed", WrapLogFields(task, zap.Error(err))...)
-				return
-			}
-		}
-		// accelerate building index
-		for _, segmentID := range segmentIDs {
-			c.buildIndexCh <- segmentID
+		c.buildIndexCh <- segmentID // accelerate index building
+		err = c.meta.UnsetIsImporting(segmentID)
+		if err != nil {
+			log.Warn("unset importing flag failed", WrapJobLog(job, zap.Error(err))...)
+			return
 		}
 	}
 }
 
 func (c *importChecker) checkTimeout(jobID int64) {
-	tasks := c.imeta.GetBy(WithStates(internalpb.ImportState_InProgress), WithJob(jobID))
+	tasks := c.imeta.GetTaskBy(WithStates(internalpb.ImportState_InProgress), WithJob(jobID))
 	var isTimeout bool
 	for _, task := range tasks {
 		timeoutTime := tsoutil.PhysicalTime(task.GetTimeoutTs())
 		if time.Now().After(timeoutTime) {
 			isTimeout = true
 			log.Warn("Import task timeout, expired the specified time limit",
-				WrapLogFields(task, zap.Time("timeoutTime", timeoutTime))...)
+				WrapTaskLog(task, zap.Time("timeoutTime", timeoutTime))...)
 			break
 		}
 		if time.Since(task.GetLastActiveTime()) > 10*time.Minute {
-			log.Warn("task progress is stagnant", WrapLogFields(task)...)
+			log.Warn("task progress is stagnant", WrapTaskLog(task)...)
 		}
 	}
 	if !isTimeout {
@@ -256,18 +300,18 @@ func (c *importChecker) checkTimeout(jobID int64) {
 	}
 	// fail all tasks with same jobID
 	for _, task := range tasks {
-		err := c.imeta.Update(task.GetTaskID(), UpdateState(internalpb.ImportState_Failed),
+		err := c.imeta.UpdateTask(task.GetTaskID(), UpdateState(internalpb.ImportState_Failed),
 			UpdateReason(fmt.Sprintf("import timeout, jobID=%d, taskID=%d", task.GetJobID(), task.GetTaskID())))
 		if err != nil {
-			log.Warn("update task state failed", WrapLogFields(task, zap.Error(err))...)
+			log.Warn("update task state failed", WrapTaskLog(task, zap.Error(err))...)
 			continue
 		}
-		log.Warn("successfully update task state to `failed`", WrapLogFields(task)...)
+		log.Warn("successfully update task state to `failed`", WrapTaskLog(task)...)
 	}
 }
 
 func (c *importChecker) checkCollection(collectionID int64) {
-	tasks := c.imeta.GetBy(WithStates(internalpb.ImportState_Pending,
+	tasks := c.imeta.GetTaskBy(WithStates(internalpb.ImportState_Pending,
 		internalpb.ImportState_InProgress), WithCollection(collectionID))
 	if len(tasks) == 0 {
 		return
@@ -284,17 +328,17 @@ func (c *importChecker) checkCollection(collectionID int64) {
 		return
 	}
 	for _, task := range tasks {
-		err = c.imeta.Update(task.GetTaskID(), UpdateState(internalpb.ImportState_Failed),
+		err = c.imeta.UpdateTask(task.GetTaskID(), UpdateState(internalpb.ImportState_Failed),
 			UpdateReason(fmt.Sprintf("collection %d dropped", collectionID)))
 		if err != nil {
-			log.Warn("update task state failed", WrapLogFields(task, zap.Error(err))...)
+			log.Warn("update task state failed", WrapTaskLog(task, zap.Error(err))...)
 		}
 	}
 }
 
 func (c *importChecker) checkGC(jobID int64) {
 	GCRetention := Params.DataCoordCfg.ImportTaskRetention.GetAsDuration(time.Second)
-	tasks := c.imeta.GetBy(WithStates(internalpb.ImportState_Failed, internalpb.ImportState_Completed), WithJob(jobID))
+	tasks := c.imeta.GetTaskBy(WithStates(internalpb.ImportState_Failed, internalpb.ImportState_Completed), WithJob(jobID))
 	sort.Slice(tasks, func(i, j int) bool {
 		return tasks[i].GetLastActiveTime().After(tasks[j].GetLastActiveTime())
 	})
@@ -303,15 +347,15 @@ func (c *importChecker) checkGC(jobID int64) {
 	}
 	if time.Since(tasks[0].GetLastActiveTime()) >= GCRetention {
 		log.Info("tasks has reached the GC retention",
-			WrapLogFields(tasks[0], zap.Time("taskLastActiveTime", tasks[0].GetLastActiveTime()),
+			WrapTaskLog(tasks[0], zap.Time("taskLastActiveTime", tasks[0].GetLastActiveTime()),
 				zap.Duration("GCRetention", GCRetention))...)
 		for _, task := range tasks {
-			err := c.imeta.Remove(task.GetTaskID())
+			err := c.imeta.RemoveTask(task.GetTaskID())
 			if err != nil {
-				log.Warn("remove task failed during GC", WrapLogFields(task, zap.Error(err))...)
+				log.Warn("remove task failed during GC", WrapTaskLog(task, zap.Error(err))...)
 				continue
 			}
-			log.Info("reached GC retention, task removed", WrapLogFields(task)...)
+			log.Info("reached GC retention, task removed", WrapTaskLog(task)...)
 		}
 	}
 }

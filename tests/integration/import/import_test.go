@@ -83,6 +83,8 @@ func (s *BulkInsertSuite) run() {
 	s.Equal(commonpb.ErrorCode_Success, createCollectionStatus.GetErrorCode())
 
 	var files []*internalpb.ImportFile
+	err = os.MkdirAll(c.ChunkManager.RootPath(), os.ModePerm)
+	s.NoError(err)
 	if s.fileType == importutilv2.Numpy {
 		importFile, err := GenerateNumpyFiles(c.ChunkManager, schema, rowCount)
 		s.NoError(err)

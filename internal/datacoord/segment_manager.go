@@ -30,6 +30,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/retry"
@@ -76,7 +77,7 @@ type Manager interface {
 	// allocSegmentForImport allocates one segment allocation for bulk insert.
 	// TODO: Remove this method and AllocSegment() above instead.
 	allocSegmentForImport(ctx context.Context, collectionID, partitionID UniqueID, channelName string, requestRows int64, taskID int64) (*Allocation, error)
-	AllocImportSegment(ctx context.Context, collectionID UniqueID, partitionID UniqueID, channelName string) (*SegmentInfo, error)
+	AllocImportSegment(ctx context.Context, taskID int64, collectionID UniqueID, partitionID UniqueID, channelName string, schema *schemapb.CollectionSchema) (*SegmentInfo, error)
 	// DropSegment drops the segment from manager.
 	DropSegment(ctx context.Context, segmentID UniqueID)
 	// FlushImportSegments set importing segment state to Flushed.
@@ -384,8 +385,8 @@ func (s *SegmentManager) genExpireTs(ctx context.Context, isImported bool) (Time
 	return expireTs, nil
 }
 
-func (s *SegmentManager) AllocImportSegment(ctx context.Context, collectionID UniqueID,
-	partitionID UniqueID, channelName string,
+func (s *SegmentManager) AllocImportSegment(ctx context.Context, taskID int64, collectionID UniqueID,
+	partitionID UniqueID, channelName string, schema *schemapb.CollectionSchema,
 ) (*SegmentInfo, error) {
 	log := log.Ctx(ctx)
 	ctx, sp := otel.Tracer(typeutil.DataCoordRole).Start(ctx, "open-Segment")
@@ -405,7 +406,7 @@ func (s *SegmentManager) AllocImportSegment(ctx context.Context, collectionID Un
 		Timestamp:   ts,
 	}
 
-	maxRowNum, err := s.estimateMaxNumOfRows(collectionID)
+	maxRowNum, err := calBySchemaPolicy(schema)
 	if err != nil {
 		return nil, err
 	}
@@ -431,6 +432,7 @@ func (s *SegmentManager) AllocImportSegment(ctx context.Context, collectionID Un
 	}
 	s.segments = append(s.segments, id)
 	log.Info("add import segment done",
+		zap.Int64("taskID", taskID),
 		zap.Int64("CollectionID", segmentInfo.CollectionID),
 		zap.Int64("SegmentID", segmentInfo.ID),
 		zap.Int("MaxNumOfRows", maxRowNum),

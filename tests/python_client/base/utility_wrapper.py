@@ -28,11 +28,11 @@ def vector_bulkinsert(url, payload, check_items=None):
         assert check_items["err_msg"] in res['message']
     else:
         assert res['code'] == 200
-        return res['requestID']
+        return res['jobID']
 
 
-def vector_bulkinsert_describe(url, request_id):
-    url = f'http://{url}/v1/vector/bulkinsert/describe?requestID={request_id}'
+def vector_bulkinsert_describe(url, job_id):
+    url = f'http://{url}/v1/vector/bulkinsert/describe?jobID={job_id}'
     headers = {
         'Content-Type': 'application/json',
         'RequestId': str(uuid.uuid1())
@@ -164,7 +164,7 @@ class ApiUtilityWrapper:
         log.info(f"wait bulk load timeout is {task_timeout}")
         for task_id in task_ids:
             while True:
-                state, progress = vector_bulkinsert_describe("localhost:19530", request_id=task_id)
+                state, progress = vector_bulkinsert_describe("localhost:19530", job_id=task_id)
                 if state == "Completed" and progress == 100:
                     print(f"wait for bulk load tasks completed successfully")
                     break

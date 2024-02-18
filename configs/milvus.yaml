@@ -430,9 +430,9 @@ dataCoord:
 
   enableGarbageCollection: true
   gc:
-    interval: 3600 # gc interval in seconds
-    missingTolerance: 3600 # file meta missing tolerance duration in seconds, 3600
-    dropTolerance: 10800 # file belongs to dropped entity tolerance duration in seconds. 10800
+    interval: 60 # gc interval in seconds
+    missingTolerance: 120 # file meta missing tolerance duration in seconds, 3600
+    dropTolerance: 120 # file belongs to dropped entity tolerance duration in seconds. 10800
   enableActiveStandby: false
   # can specify ip for example
   # ip: 127.0.0.1

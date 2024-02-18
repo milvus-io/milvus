@@ -851,6 +851,18 @@ message DropImportRequest {
   int64 taskID = 3;
 }
 
+message ImportJob {
+  int64 jobID = 1;
+  int64 collectionID = 2;
+  repeated int64 partitionIDs = 3;
+  repeated string vchannels = 4;
+  uint64 timeout_ts = 5;
+  repeated internal.ImportFile files = 6;
+  repeated common.KeyValuePair options = 7;
+  internal.ImportState state = 8;
+  string reason = 9;
+}
+
 message PreImportTask {
   int64 jobID = 1;
   int64 taskID = 2;

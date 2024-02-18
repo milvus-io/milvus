@@ -36,12 +36,12 @@ func TestImportMeta_Restore(t *testing.T) {
 	meta, err := NewImportMeta(nil, catalog)
 	assert.NoError(t, err)
 
-	tasks := meta.GetBy()
+	tasks := meta.GetTaskBy()
 	assert.Equal(t, 2, len(tasks))
-	tasks = meta.GetBy(WithType(PreImportTaskType))
+	tasks = meta.GetTaskBy(WithType(PreImportTaskType))
 	assert.Equal(t, 1, len(tasks))
 	assert.Equal(t, int64(1), tasks[0].GetTaskID())
-	tasks = meta.GetBy(WithType(ImportTaskType))
+	tasks = meta.GetTaskBy(WithType(ImportTaskType))
 	assert.Equal(t, 1, len(tasks))
 	assert.Equal(t, int64(2), tasks[0].GetTaskID())
 }
@@ -52,7 +52,7 @@ func TestImportMeta_Normal(t *testing.T) {
 	catalog.EXPECT().SaveImportTask(mock.Anything).Return(nil)
 	catalog.EXPECT().DropImportTask(mock.Anything).Return(nil)
 
-	meta, err := NewImportMeta(nil, catalog)
+	im, err := NewImportMeta(nil, catalog)
 	assert.NoError(t, err)
 
 	task1 := &importTask{
@@ -65,42 +65,42 @@ func TestImportMeta_Normal(t *testing.T) {
 			State:        internalpb.ImportState_Pending,
 		},
 	}
-	err = meta.Add(task1)
+	err = im.AddTask(task1)
 	assert.NoError(t, err)
-	err = meta.Add(task1)
+	err = im.AddTask(task1)
 	assert.NoError(t, err)
-	res := meta.Get(task1.GetTaskID())
+	res := im.GetTask(task1.GetTaskID())
 	assert.Equal(t, task1, res)
 
 	task2 := task1.Clone()
 	task2.(*importTask).TaskID = 8
 	task2.(*importTask).State = internalpb.ImportState_Completed
-	err = meta.Add(task2)
+	err = im.AddTask(task2)
 	assert.NoError(t, err)
 
-	tasks := meta.GetBy(WithJob(task1.GetJobID()))
+	tasks := im.GetTaskBy(WithJob(task1.GetJobID()))
 	assert.Equal(t, 2, len(tasks))
-	tasks = meta.GetBy(WithType(ImportTaskType), WithStates(internalpb.ImportState_Completed))
+	tasks = im.GetTaskBy(WithType(ImportTaskType), WithStates(internalpb.ImportState_Completed))
 	assert.Equal(t, 1, len(tasks))
 	assert.Equal(t, task2.GetTaskID(), tasks[0].GetTaskID())
 
-	err = meta.Update(task1.GetTaskID(), UpdateNodeID(9),
+	err = im.UpdateTask(task1.GetTaskID(), UpdateNodeID(9),
 		UpdateState(internalpb.ImportState_Failed),
-		UpdateFileStats([]*datapb.ImportFileStats{{
+		UpdateFileStats([]*datapb.ImportFileStats{1: {
 			FileSize: 100,
 		}}))
 	assert.NoError(t, err)
-	task := meta.Get(task1.GetTaskID())
+	task := im.GetTask(task1.GetTaskID())
 	assert.Equal(t, int64(9), task.GetNodeID())
 	assert.Equal(t, internalpb.ImportState_Failed, task.GetState())
 
-	err = meta.Remove(task1.GetTaskID())
+	err = im.RemoveTask(task1.GetTaskID())
 	assert.NoError(t, err)
-	tasks = meta.GetBy()
+	tasks = im.GetTaskBy()
 	assert.Equal(t, 1, len(tasks))
-	err = meta.Remove(10)
+	err = im.RemoveTask(10)
 	assert.NoError(t, err)
-	tasks = meta.GetBy()
+	tasks = im.GetTaskBy()
 	assert.Equal(t, 1, len(tasks))
 }
 
@@ -124,11 +124,11 @@ func TestImportMeta_Failed(t *testing.T) {
 			State:        internalpb.ImportState_Pending,
 		},
 	}
-	err = meta.Add(task1)
+	err = meta.AddTask(task1)
 	assert.Error(t, err)
 	meta.(*importMeta).tasks[task1.GetTaskID()] = task1
-	err = meta.Update(task1.GetTaskID(), UpdateNodeID(9))
+	err = meta.UpdateTask(task1.GetTaskID(), UpdateNodeID(9))
 	assert.Error(t, err)
-	err = meta.Remove(task1.GetTaskID())
+	err = meta.RemoveTask(task1.GetTaskID())
 	assert.Error(t, err)
 }

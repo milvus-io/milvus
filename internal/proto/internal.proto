@@ -271,8 +271,9 @@ enum ImportState {
 }
 
 message ImportFile {
+  int64 id = 1;
   // A singular row-based file or multiple column-based files.
-  repeated string paths = 1;
+  repeated string paths = 2;
 }
 
 message ImportRequestInternal {
@@ -280,7 +281,7 @@ message ImportRequestInternal {
   repeated int64 partitionIDs = 2;
   repeated string channel_names = 3;
   schema.CollectionSchema schema = 4;
-  repeated internal.ImportFile files = 5;
+  repeated ImportFile files = 5;
   repeated common.KeyValuePair options = 6;
 }
 

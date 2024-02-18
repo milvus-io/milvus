@@ -30,15 +30,22 @@ import (
 )
 
 type ImportMeta interface {
-	Add(task ImportTask) error
-	Update(taskID int64, actions ...UpdateAction) error
-	Get(taskID int64) ImportTask
-	GetBy(filters ...ImportTaskFilter) []ImportTask
-	Remove(taskID int64) error
+	AddJob(job ImportJob) error
+	UpdateJob(jobID int64, actions ...UpdateJobAction) error
+	GetJob(jobID int64) ImportJob
+	GetJobBy(filters ...ImportJobFilter) []ImportJob
+	RemoveJob(jobID int64) error
+
+	AddTask(task ImportTask) error
+	UpdateTask(taskID int64, actions ...UpdateAction) error
+	GetTask(taskID int64) ImportTask
+	GetTaskBy(filters ...ImportTaskFilter) []ImportTask
+	RemoveTask(taskID int64) error
 }
 
 type importMeta struct {
-	mu    sync.RWMutex // guards tasks
+	mu    sync.RWMutex // guards jobs and tasks
+	jobs  map[int64]ImportJob
 	tasks map[int64]ImportTask
 
 	catalog metastore.DataCoordCatalog
@@ -65,6 +72,10 @@ func NewImportMeta(broker broker.Broker, catalog metastore.DataCoordCatalog) (Im
 	if err != nil {
 		return nil, err
 	}
+	restoredJobs, err := catalog.ListImportJobs()
+	if err != nil {
+		return nil, err
+	}
 
 	tasks := make(map[int64]ImportTask)
 	for _, task := range restoredPreImportTasks {
@@ -80,8 +91,15 @@ func NewImportMeta(broker broker.Broker, catalog metastore.DataCoordCatalog) (Im
 		}
 	}
 
-	byColl := lo.GroupBy(lo.Values(tasks), func(t ImportTask) int64 {
-		return t.GetCollectionID()
+	jobs := make(map[int64]ImportJob)
+	for _, job := range restoredJobs {
+		jobs[job.GetJobID()] = &importJob{
+			ImportJob: job,
+		}
+	}
+
+	byColl := lo.GroupBy(lo.Values(jobs), func(j ImportJob) int64 {
+		return j.GetCollectionID()
 	})
 	collectionSchemas := make(map[int64]*schemapb.CollectionSchema)
 	for collectionID := range byColl {
@@ -91,22 +109,81 @@ func NewImportMeta(broker broker.Broker, catalog metastore.DataCoordCatalog) (Im
 		}
 		collectionSchemas[collectionID] = schema
 	}
-	for i := range tasks {
-		switch tasks[i].(type) {
-		case *preImportTask:
-			tasks[i].(*preImportTask).schema = collectionSchemas[tasks[i].GetCollectionID()]
-		case *importTask:
-			tasks[i].(*importTask).schema = collectionSchemas[tasks[i].GetCollectionID()]
-		}
+	for i := range jobs {
+		jobs[i].(*importJob).schema = collectionSchemas[jobs[i].GetCollectionID()]
 	}
 
 	return &importMeta{
+		jobs:    jobs,
 		tasks:   tasks,
 		catalog: catalog,
 	}, nil
 }
 
-func (m *importMeta) Add(task ImportTask) error {
+func (m *importMeta) AddJob(job ImportJob) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	err := m.catalog.SaveImportJob(job.(*importJob).ImportJob)
+	if err != nil {
+		return err
+	}
+	m.jobs[job.GetJobID()] = job
+	return nil
+}
+
+func (m *importMeta) UpdateJob(jobID int64, actions ...UpdateJobAction) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if job, ok := m.jobs[jobID]; ok {
+		updatedJob := job.Clone()
+		for _, action := range actions {
+			action(updatedJob)
+		}
+		err := m.catalog.SaveImportJob(updatedJob.(*importJob).ImportJob)
+		if err != nil {
+			return err
+		}
+		m.jobs[updatedJob.GetJobID()] = updatedJob
+	}
+	return nil
+}
+
+func (m *importMeta) GetJob(jobID int64) ImportJob {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.jobs[jobID]
+}
+
+func (m *importMeta) GetJobBy(filters ...ImportJobFilter) []ImportJob {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	ret := make([]ImportJob, 0)
+OUTER:
+	for _, job := range m.jobs {
+		for _, f := range filters {
+			if !f(job) {
+				continue OUTER
+			}
+		}
+		ret = append(ret, job)
+	}
+	return ret
+}
+
+func (m *importMeta) RemoveJob(jobID int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.jobs[jobID]; ok {
+		err := m.catalog.DropImportJob(jobID)
+		if err != nil {
+			return err
+		}
+		delete(m.jobs, jobID)
+	}
+	return nil
+}
+
+func (m *importMeta) AddTask(task ImportTask) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	switch task.GetType() {
@@ -126,7 +203,7 @@ func (m *importMeta) Add(task ImportTask) error {
 	return nil
 }
 
-func (m *importMeta) Update(taskID int64, actions ...UpdateAction) error {
+func (m *importMeta) UpdateTask(taskID int64, actions ...UpdateAction) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if task, ok := m.tasks[taskID]; ok {
@@ -155,13 +232,13 @@ func (m *importMeta) Update(taskID int64, actions ...UpdateAction) error {
 	return nil
 }
 
-func (m *importMeta) Get(taskID int64) ImportTask {
+func (m *importMeta) GetTask(taskID int64) ImportTask {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.tasks[taskID]
 }
 
-func (m *importMeta) GetBy(filters ...ImportTaskFilter) []ImportTask {
+func (m *importMeta) GetTaskBy(filters ...ImportTaskFilter) []ImportTask {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	ret := make([]ImportTask, 0)
@@ -177,7 +254,7 @@ OUTER:
 	return ret
 }
 
-func (m *importMeta) Remove(taskID int64) error {
+func (m *importMeta) RemoveTask(taskID int64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if task, ok := m.tasks[taskID]; ok {

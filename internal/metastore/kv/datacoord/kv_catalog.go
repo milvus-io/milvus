@@ -690,6 +690,37 @@ func (kc *Catalog) DropSegmentIndex(ctx context.Context, collID, partID, segID, 
 	return nil
 }
 
+func (kc *Catalog) SaveImportJob(job *datapb.ImportJob) error {
+	key := buildImportJobKey(job.JobID)
+	value, err := proto.Marshal(job)
+	if err != nil {
+		return err
+	}
+	return kc.MetaKv.Save(key, string(value))
+}
+
+func (kc *Catalog) ListImportJobs() ([]*datapb.ImportJob, error) {
+	jobs := make([]*datapb.ImportJob, 0)
+	_, values, err := kc.MetaKv.LoadWithPrefix(ImportJobPrefix)
+	if err != nil {
+		return nil, err
+	}
+	for _, value := range values {
+		job := &datapb.ImportJob{}
+		err = proto.Unmarshal([]byte(value), job)
+		if err != nil {
+			return nil, err
+		}
+		jobs = append(jobs, job)
+	}
+	return jobs, nil
+}
+
+func (kc *Catalog) DropImportJob(jobID int64) error {
+	key := buildImportJobKey(jobID)
+	return kc.MetaKv.Remove(key)
+}
+
 func (kc *Catalog) SavePreImportTask(task *datapb.PreImportTask) error {
 	key := buildPreImportTaskKey(task.GetTaskID())
 	value, err := proto.Marshal(task)
