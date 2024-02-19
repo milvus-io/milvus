@@ -69,6 +69,7 @@ func putAllocation(a *Allocation) {
 }
 
 // Manager manages segment related operations.
+//go:generate mockery --name=Manager --structname=MockManager --output=./  --filename=mock_segment_manager.go --with-expecter --inpackage
 type Manager interface {
 	// CreateSegment create new segment when segment not exist
 

@@ -71,8 +71,8 @@ func (s *ImportSchedulerSuite) SetupTest() {
 }
 
 func (s *ImportSchedulerSuite) TestProcessPreImport() {
+	s.catalog.EXPECT().SaveImportJob(mock.Anything).Return(nil)
 	s.catalog.EXPECT().SavePreImportTask(mock.Anything).Return(nil)
-	s.catalog.EXPECT().SaveImportTask(mock.Anything).Return(nil)
 	var task ImportTask = &preImportTask{
 		PreImportTask: &datapb.PreImportTask{
 			JobID:        0,
@@ -169,13 +169,8 @@ func (s *ImportSchedulerSuite) TestProcessImport() {
 
 	// pending -> inProgress
 	const nodeID = 10
-	const segmentID = 20
-	s.alloc.EXPECT().allocID(mock.Anything).RunAndReturn(func(ctx context.Context) (int64, error) {
-		return segmentID, nil
-	})
 	s.alloc.EXPECT().allocN(mock.Anything).Return(100, 200, nil)
 	s.alloc.EXPECT().allocTimestamp(mock.Anything).Return(300, nil)
-	s.catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
 	s.cluster.EXPECT().QueryImport(mock.Anything, mock.Anything).Return(&datapb.QueryImportResponse{
 		Slots: 1,
 	}, nil)
@@ -191,22 +186,13 @@ func (s *ImportSchedulerSuite) TestProcessImport() {
 	task = s.imeta.GetTask(task.GetTaskID())
 	s.Equal(internalpb.ImportState_InProgress, task.GetState())
 	s.Equal(int64(nodeID), task.GetNodeID())
-	s.Equal(1, len(task.(*importTask).GetSegmentIDs()))
-	s.Equal(int64(segmentID), task.(*importTask).GetSegmentIDs()[0])
 
 	// inProgress -> completed
-	s.catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	s.cluster.ExpectedCalls = lo.Filter(s.cluster.ExpectedCalls, func(call *mock.Call, _ int) bool {
 		return call.Method != "QueryImport"
 	})
 	s.cluster.EXPECT().QueryImport(mock.Anything, mock.Anything).Return(&datapb.QueryImportResponse{
 		State: internalpb.ImportState_Completed,
-		ImportSegmentsInfo: []*datapb.ImportSegmentInfo{
-			{
-				SegmentID:    segmentID,
-				ImportedRows: 100,
-			},
-		},
 	}, nil)
 	s.scheduler.process()
 	task = s.imeta.GetTask(task.GetTaskID())

@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
+	broker2 "github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -30,24 +31,88 @@ import (
 
 func TestImportMeta_Restore(t *testing.T) {
 	catalog := mocks.NewDataCoordCatalog(t)
-	catalog.EXPECT().ListImportJobs().Return(nil, nil)
+	catalog.EXPECT().ListImportJobs().Return([]*datapb.ImportJob{{JobID: 0}}, nil)
 	catalog.EXPECT().ListPreImportTasks().Return([]*datapb.PreImportTask{{TaskID: 1}}, nil)
 	catalog.EXPECT().ListImportTasks().Return([]*datapb.ImportTaskV2{{TaskID: 2}}, nil)
 
-	meta, err := NewImportMeta(nil, catalog)
+	broker := broker2.NewMockBroker(t)
+	broker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(nil, nil)
+
+	im, err := NewImportMeta(broker, catalog)
 	assert.NoError(t, err)
 
-	tasks := meta.GetTaskBy()
+	jobs := im.GetJobBy()
+	assert.Equal(t, 1, len(jobs))
+	assert.Equal(t, int64(0), jobs[0].GetJobID())
+	tasks := im.GetTaskBy()
 	assert.Equal(t, 2, len(tasks))
-	tasks = meta.GetTaskBy(WithType(PreImportTaskType))
+	tasks = im.GetTaskBy(WithType(PreImportTaskType))
 	assert.Equal(t, 1, len(tasks))
 	assert.Equal(t, int64(1), tasks[0].GetTaskID())
-	tasks = meta.GetTaskBy(WithType(ImportTaskType))
+	tasks = im.GetTaskBy(WithType(ImportTaskType))
 	assert.Equal(t, 1, len(tasks))
 	assert.Equal(t, int64(2), tasks[0].GetTaskID())
 }
 
-func TestImportMeta_Normal(t *testing.T) {
+func TestImportMeta_ImportJob(t *testing.T) {
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListImportJobs().Return(nil, nil)
+	catalog.EXPECT().ListPreImportTasks().Return(nil, nil)
+	catalog.EXPECT().ListImportTasks().Return(nil, nil)
+	catalog.EXPECT().SaveImportJob(mock.Anything).Return(nil)
+	catalog.EXPECT().DropImportJob(mock.Anything).Return(nil)
+
+	im, err := NewImportMeta(nil, catalog)
+	assert.NoError(t, err)
+
+	var job ImportJob = &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:        0,
+			CollectionID: 1,
+			PartitionIDs: []int64{2},
+			Vchannels:    []string{"ch0"},
+		},
+	}
+
+	err = im.AddJob(job)
+	assert.NoError(t, err)
+	jobs := im.GetJobBy()
+	assert.Equal(t, 1, len(jobs))
+	err = im.AddJob(job)
+	assert.NoError(t, err)
+	jobs = im.GetJobBy()
+	assert.Equal(t, 1, len(jobs))
+
+	err = im.UpdateJob(job.GetJobID())
+	assert.NoError(t, err)
+	job2 := im.GetJob(job.GetJobID())
+	assert.Equal(t, job.GetJobID(), job2.GetJobID())
+	assert.Equal(t, job.GetCollectionID(), job2.GetCollectionID())
+	assert.Equal(t, job.GetPartitionIDs(), job2.GetPartitionIDs())
+	assert.Equal(t, job.GetVchannels(), job2.GetVchannels())
+
+	err = im.RemoveJob(job.GetJobID())
+	assert.NoError(t, err)
+	jobs = im.GetJobBy()
+	assert.Equal(t, 0, len(jobs))
+
+	// test failed
+	mockErr := errors.New("mock err")
+	catalog = mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().SaveImportJob(mock.Anything).Return(mockErr)
+	catalog.EXPECT().DropImportJob(mock.Anything).Return(mockErr)
+	im.(*importMeta).catalog = catalog
+
+	err = im.AddJob(job)
+	assert.Error(t, err)
+	im.(*importMeta).jobs[job.GetJobID()] = job
+	err = im.UpdateJob(job.GetJobID())
+	assert.Error(t, err)
+	err = im.RemoveJob(job.GetJobID())
+	assert.Error(t, err)
+}
+
+func TestImportMeta_ImportTask(t *testing.T) {
 	catalog := mocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().ListImportJobs().Return(nil, nil)
 	catalog.EXPECT().ListPreImportTasks().Return(nil, nil)
@@ -105,35 +170,19 @@ func TestImportMeta_Normal(t *testing.T) {
 	assert.NoError(t, err)
 	tasks = im.GetTaskBy()
 	assert.Equal(t, 1, len(tasks))
-}
 
-func TestImportMeta_Failed(t *testing.T) {
+	// test failed
 	mockErr := errors.New("mock err")
-	catalog := mocks.NewDataCoordCatalog(t)
-	catalog.EXPECT().ListImportJobs().Return(nil, nil)
-	catalog.EXPECT().ListPreImportTasks().Return(nil, nil)
-	catalog.EXPECT().ListImportTasks().Return(nil, nil)
+	catalog = mocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().SaveImportTask(mock.Anything).Return(mockErr)
 	catalog.EXPECT().DropImportTask(mock.Anything).Return(mockErr)
+	im.(*importMeta).catalog = catalog
 
-	meta, err := NewImportMeta(nil, catalog)
-	assert.NoError(t, err)
-
-	task1 := &importTask{
-		ImportTaskV2: &datapb.ImportTaskV2{
-			JobID:        1,
-			TaskID:       2,
-			CollectionID: 3,
-			SegmentIDs:   []int64{5, 6},
-			NodeID:       7,
-			State:        internalpb.ImportState_Pending,
-		},
-	}
-	err = meta.AddTask(task1)
+	err = im.AddTask(task1)
 	assert.Error(t, err)
-	meta.(*importMeta).tasks[task1.GetTaskID()] = task1
-	err = meta.UpdateTask(task1.GetTaskID(), UpdateNodeID(9))
+	im.(*importMeta).tasks[task1.GetTaskID()] = task1
+	err = im.UpdateTask(task1.GetTaskID(), UpdateNodeID(9))
 	assert.Error(t, err)
-	err = meta.RemoveTask(task1.GetTaskID())
+	err = im.RemoveTask(task1.GetTaskID())
 	assert.Error(t, err)
 }

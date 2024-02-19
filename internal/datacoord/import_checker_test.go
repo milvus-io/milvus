@@ -20,153 +20,244 @@ import (
 	"context"
 	"math/rand"
 	"testing"
+	"time"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/suite"
 
+	broker2 "github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 )
 
-func TestImportChecker(t *testing.T) {
-	catalog := mocks.NewDataCoordCatalog(t)
+type ImportCheckerSuite struct {
+	suite.Suite
+
+	jobID   int64
+	imeta   ImportMeta
+	checker *importChecker
+}
+
+func (s *ImportCheckerSuite) SetupTest() {
+	catalog := mocks.NewDataCoordCatalog(s.T())
 	catalog.EXPECT().ListImportJobs().Return(nil, nil)
 	catalog.EXPECT().ListPreImportTasks().Return(nil, nil)
 	catalog.EXPECT().ListImportTasks().Return(nil, nil)
-	catalog.EXPECT().SaveImportJob(mock.Anything).Return(nil)
-	catalog.EXPECT().SavePreImportTask(mock.Anything).Return(nil)
-	catalog.EXPECT().SaveImportTask(mock.Anything).Return(nil)
-	catalog.EXPECT().DropImportTask(mock.Anything).Return(nil)
 	catalog.EXPECT().ListSegments(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
 
-	cluster := NewMockCluster(t)
-	cluster.EXPECT().DropImport(mock.Anything, mock.Anything).Return(nil)
-	cluster.EXPECT().AddImportSegment(mock.Anything, mock.Anything).Return(nil, nil)
-
-	alloc := NewNMockAllocator(t)
-	alloc.EXPECT().allocID(mock.Anything).RunAndReturn(func(ctx context.Context) (int64, error) {
-		return rand.Int63(), nil
-	})
+	cluster := NewMockCluster(s.T())
+	alloc := NewNMockAllocator(s.T())
 
 	imeta, err := NewImportMeta(nil, catalog)
-	assert.NoError(t, err)
+	s.NoError(err)
+	s.imeta = imeta
+
+	meta, err := newMeta(context.TODO(), catalog, nil)
+	s.NoError(err)
+
+	broker := broker2.NewMockBroker(s.T())
+	sm := NewMockManager(s.T())
+	buildIndexCh := make(chan UniqueID, 1024)
+
+	checker := NewImportChecker(meta, broker, cluster, alloc, sm, imeta, buildIndexCh).(*importChecker)
+	s.checker = checker
 
 	job := &importJob{
 		ImportJob: &datapb.ImportJob{
-			JobID: 0,
+			JobID:        0,
+			CollectionID: 1,
+			PartitionIDs: []int64{2},
+			Vchannels:    []string{"ch0"},
+			TimeoutTs:    1000,
+			Files: []*internalpb.ImportFile{
+				{
+					Id:    1,
+					Paths: []string{"a.json"},
+				},
+				{
+					Id:    2,
+					Paths: []string{"b.json"},
+				},
+				{
+					Id:    3,
+					Paths: []string{"c.json"},
+				},
+			},
 		},
 	}
-	err = imeta.AddJob(job)
-	assert.NoError(t, err)
 
+	catalog.EXPECT().SaveImportJob(mock.Anything).Return(nil)
+	err = s.imeta.AddJob(job)
+	s.NoError(err)
+	s.jobID = job.GetJobID()
+}
+
+func (s *ImportCheckerSuite) TestCheckState() {
+	job := s.imeta.GetJob(s.jobID)
+
+	// test checkLackPreImport
+	alloc := s.checker.alloc.(*NMockAllocator)
+	alloc.EXPECT().allocN(mock.Anything).RunAndReturn(func(n int64) (int64, int64, error) {
+		id := rand.Int63()
+		return id, id + n, nil
+	})
+	catalog := s.imeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog.EXPECT().SavePreImportTask(mock.Anything).Return(nil)
+
+	s.checker.checkLackPreImport(job)
+	preimportTasks := s.imeta.GetTaskBy(WithJob(job.GetJobID()), WithType(PreImportTaskType))
+	s.Equal(2, len(preimportTasks))
+
+	// test checkLackImports
+	catalog.EXPECT().SaveImportTask(mock.Anything).Return(nil)
+	for _, t := range preimportTasks {
+		err := s.imeta.UpdateTask(t.GetTaskID(), UpdateState(internalpb.ImportState_Completed))
+		s.NoError(err)
+	}
+
+	s.checker.checkLackImports(job)
+	importTasks := s.imeta.GetTaskBy(WithJob(job.GetJobID()), WithType(ImportTaskType))
+	s.Equal(1, len(importTasks))
+
+	// test checkImportState
+	sm := s.checker.sm.(*MockManager)
+	sm.EXPECT().FlushImportSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	cluster := s.checker.cluster.(*MockCluster)
+	cluster.EXPECT().AddImportSegment(mock.Anything, mock.Anything).Return(nil, nil)
+	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
+	for _, t := range importTasks {
+		segment := &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{ID: rand.Int63(), IsImporting: true},
+		}
+		err := s.checker.meta.AddSegment(context.Background(), segment)
+		s.NoError(err)
+		err = s.imeta.UpdateTask(t.GetTaskID(), UpdateState(internalpb.ImportState_Completed),
+			UpdateSegmentIDs([]int64{segment.GetID()}))
+		s.NoError(err)
+	}
+	s.checker.checkImportState(job)
+	for _, t := range importTasks {
+		task := s.imeta.GetTask(t.GetTaskID())
+		for _, id := range task.(*importTask).GetSegmentIDs() {
+			segment := s.checker.meta.GetSegment(id)
+			s.Equal(false, segment.GetIsImporting())
+		}
+	}
+}
+
+func (s *ImportCheckerSuite) TestCheckTimeout() {
+	catalog := s.imeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog.EXPECT().SavePreImportTask(mock.Anything).Return(nil)
+	var task ImportTask = &preImportTask{
+		PreImportTask: &datapb.PreImportTask{
+			JobID:  s.jobID,
+			TaskID: 1,
+			State:  internalpb.ImportState_InProgress,
+		},
+	}
+	err := s.imeta.AddTask(task)
+	s.NoError(err)
+	s.checker.checkTimeout(s.jobID)
+
+	task = s.imeta.GetTask(task.GetTaskID())
+	s.Equal(internalpb.ImportState_Failed, task.GetState())
+	s.Equal("import timeout", task.GetReason())
+}
+
+func (s *ImportCheckerSuite) TestCheckFailure() {
+	catalog := s.imeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog.EXPECT().SavePreImportTask(mock.Anything).Return(nil)
 	pit1 := &preImportTask{
 		PreImportTask: &datapb.PreImportTask{
-			JobID:  0,
+			JobID:  s.jobID,
 			TaskID: 1,
 			State:  internalpb.ImportState_Pending,
 		},
 	}
-	err = imeta.AddTask(pit1)
-	assert.NoError(t, err)
+	err := s.imeta.AddTask(pit1)
+	s.NoError(err)
 
 	pit2 := &preImportTask{
 		PreImportTask: &datapb.PreImportTask{
-			JobID:  0,
+			JobID:  s.jobID,
 			TaskID: 2,
 			State:  internalpb.ImportState_Completed,
 		},
 	}
-	err = imeta.AddTask(pit2)
-	assert.NoError(t, err)
+	err = s.imeta.AddTask(pit2)
+	s.NoError(err)
 
-	pit3 := &preImportTask{
+	s.checker.checkFailure(s.jobID)
+	tasks := s.imeta.GetTaskBy(WithJob(s.jobID), WithStates(internalpb.ImportState_Failed))
+	s.Equal(0, len(tasks))
+
+	err = s.imeta.UpdateTask(pit1.GetTaskID(), UpdateState(internalpb.ImportState_Failed))
+	s.NoError(err)
+	s.checker.checkFailure(s.jobID)
+	tasks = s.imeta.GetTaskBy(WithJob(s.jobID), WithStates(internalpb.ImportState_Failed))
+	s.Equal(2, len(tasks))
+}
+
+func (s *ImportCheckerSuite) TestCheckGC() {
+	catalog := s.imeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog.EXPECT().SavePreImportTask(mock.Anything).Return(nil)
+	var task ImportTask = &preImportTask{
 		PreImportTask: &datapb.PreImportTask{
-			JobID:  0,
-			TaskID: 3,
+			JobID:  s.jobID,
+			TaskID: 1,
 			State:  internalpb.ImportState_Completed,
 		},
+		lastActiveTime: time.Now(),
 	}
-	err = imeta.AddTask(pit3)
-	assert.NoError(t, err)
+	err := s.imeta.AddTask(task)
+	s.NoError(err)
+	s.checker.checkGC(s.jobID)
+	tasks := s.imeta.GetTaskBy(WithJob(s.jobID))
+	s.Equal(1, len(tasks))
 
-	it1 := &importTask{
-		ImportTaskV2: &datapb.ImportTaskV2{
-			JobID:  0,
-			TaskID: 4,
-			State:  internalpb.ImportState_Completed,
+	catalog.EXPECT().DropImportJob(mock.Anything).Return(nil)
+	catalog.EXPECT().DropPreImportTask(mock.Anything).Return(nil)
+	GCRetention := Params.DataCoordCfg.ImportTaskRetention.GetAsDuration(time.Second)
+	task.(*preImportTask).lastActiveTime = time.Now().Add(GCRetention * -2)
+	err = s.imeta.AddTask(task)
+	s.NoError(err)
+	s.checker.checkGC(s.jobID)
+	tasks = s.imeta.GetTaskBy(WithJob(s.jobID))
+	s.Equal(0, len(tasks))
+}
+
+func (s *ImportCheckerSuite) TestCheckCollection() {
+	catalog := s.imeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog.EXPECT().SavePreImportTask(mock.Anything).Return(nil)
+	var task ImportTask = &preImportTask{
+		PreImportTask: &datapb.PreImportTask{
+			JobID:  s.jobID,
+			TaskID: 1,
+			State:  internalpb.ImportState_Pending,
 		},
+		lastActiveTime: time.Now(),
 	}
-	err = imeta.AddTask(it1)
-	assert.NoError(t, err)
+	err := s.imeta.AddTask(task)
+	s.NoError(err)
 
-	it2 := &importTask{
-		ImportTaskV2: &datapb.ImportTaskV2{
-			JobID:  0,
-			TaskID: 5,
-			State:  internalpb.ImportState_Completed,
-		},
-	}
-	err = imeta.AddTask(it2)
-	assert.NoError(t, err)
-	tasks := imeta.GetTaskBy(WithJob(0))
-	assert.Equal(t, 5, len(tasks))
+	broker := s.checker.broker.(*broker2.MockBroker)
+	broker.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(true, nil)
+	s.checker.checkCollection(s.jobID)
+	tasks := s.imeta.GetTaskBy(WithJob(s.jobID), WithStates(internalpb.ImportState_Failed))
+	s.Equal(0, len(tasks))
 
-	meta, err := newMeta(context.TODO(), catalog, nil)
-	assert.Nil(t, err)
-	checker := NewImportChecker(meta, nil, cluster, alloc, nil, imeta, make(chan UniqueID, 1024)).(*importChecker)
+	s.checker.broker = broker2.NewMockBroker(s.T())
+	broker = s.checker.broker.(*broker2.MockBroker)
+	broker.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(false, nil)
+	s.checker.checkCollection(s.jobID)
+	tasks = s.imeta.GetTaskBy(WithJob(s.jobID), WithStates(internalpb.ImportState_Failed))
+	s.Equal(1, len(tasks))
+}
 
-	// preimport tasks are not fully completed
-	checker.checkLackPreImport(job)
-	tasks = imeta.GetTaskBy(WithJob(0))
-	assert.Equal(t, 5, len(tasks))
-
-	// preimport tasks are all completed, should generate import tasks
-	err = imeta.UpdateTask(1, UpdateState(internalpb.ImportState_Completed))
-	assert.NoError(t, err)
-	checker.checkLackImports(job)
-	tasks = imeta.GetTaskBy(WithJob(0))
-	assert.Equal(t, 6, len(tasks))
-	tasks = imeta.GetTaskBy(WithJob(0), WithType(ImportTaskType))
-	assert.Equal(t, 3, len(tasks))
-	for _, task := range tasks {
-		assert.Equal(t, internalpb.ImportState_Pending, task.GetState())
-	}
-
-	// import tasks are not fully completed
-	tasks = imeta.GetTaskBy(WithJob(0), WithType(ImportTaskType))
-	assert.Equal(t, 3, len(tasks))
-	checker.checkImportState(job)
-	for _, task := range tasks {
-		assert.Equal(t, 0, len(task.(*importTask).GetSegmentIDs()))
-	}
-
-	// import tasks are all completed
-	tasks = imeta.GetTaskBy(WithJob(0), WithType(ImportTaskType))
-	assert.Equal(t, 3, len(tasks))
-	for _, task := range tasks {
-		err = imeta.UpdateTask(task.GetTaskID(), UpdateState(internalpb.ImportState_Completed))
-		assert.NoError(t, err)
-		segmentID := task.GetTaskID()
-		err = meta.AddSegment(context.TODO(), &SegmentInfo{
-			SegmentInfo: &datapb.SegmentInfo{
-				ID:          segmentID,
-				IsImporting: true,
-			},
-		})
-		assert.NoError(t, err)
-	}
-	checker.checkImportState(job)
-	tasks = imeta.GetTaskBy(WithJob(0), WithType(ImportTaskType))
-	assert.Equal(t, 3, len(tasks))
-	for _, task := range tasks {
-		for _, segmentID := range task.(*importTask).GetSegmentIDs() {
-			segment := meta.GetSegment(segmentID)
-			assert.False(t, segment.GetIsImporting())
-		}
-	}
+func TestImportChecker(t *testing.T) {
+	suite.Run(t, new(ImportCheckerSuite))
 }

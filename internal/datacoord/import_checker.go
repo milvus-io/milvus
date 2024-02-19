@@ -101,6 +101,7 @@ func (c *importChecker) Start() {
 			})
 			for jobID := range tasksByJob {
 				c.checkTimeout(jobID)
+				c.checkFailure(jobID)
 				c.checkGC(jobID)
 			}
 		case <-collTicker.C:
@@ -285,7 +286,7 @@ func (c *importChecker) checkImportState(job ImportJob) {
 }
 
 func (c *importChecker) checkFailure(jobID int64) {
-	tasks := c.imeta.GetTaskBy(WithStates(internalpb.ImportState_InProgress), WithJob(jobID))
+	tasks := c.imeta.GetTaskBy(WithJob(jobID))
 	var (
 		isFailed   bool
 		failedTask ImportTask
@@ -298,42 +299,41 @@ func (c *importChecker) checkFailure(jobID int64) {
 			break
 		}
 	}
-	if !isFailed {
-		return
-	}
-	for _, task := range tasks {
-		err := c.imeta.UpdateTask(task.GetTaskID(), UpdateState(internalpb.ImportState_Failed),
-			UpdateReason(failedTask.GetReason()))
-		if err != nil {
-			continue
+	if isFailed {
+		for _, task := range tasks {
+			if task.GetState() == internalpb.ImportState_Failed {
+				continue
+			}
+			err := c.imeta.UpdateTask(task.GetTaskID(), UpdateState(internalpb.ImportState_Failed),
+				UpdateReason(failedTask.GetReason()))
+			if err != nil {
+				continue
+			}
 		}
 	}
 }
 
 func (c *importChecker) checkTimeout(jobID int64) {
 	tasks := c.imeta.GetTaskBy(WithStates(internalpb.ImportState_InProgress), WithJob(jobID))
-	job := c.imeta.GetJob(jobID)
-	var isTimeout bool
+	if len(tasks) == 0 {
+		return
+	}
 	for _, task := range tasks {
-		timeoutTime := tsoutil.PhysicalTime(job.GetTimeoutTs())
-		if time.Now().After(timeoutTime) {
-			isTimeout = true
-			log.Warn("Import task timeout, expired the specified time limit",
-				WrapTaskLog(task, zap.Time("timeoutTime", timeoutTime))...)
-			break
-		}
 		if time.Since(task.GetLastActiveTime()) > 10*time.Minute {
 			log.Warn("task progress is stagnant", WrapTaskLog(task)...)
 		}
 	}
-	if !isTimeout {
-		return
-	}
-	for _, task := range tasks {
-		err := c.imeta.UpdateTask(task.GetTaskID(), UpdateState(internalpb.ImportState_Failed),
-			UpdateReason("import timeout"))
-		if err != nil {
-			log.Warn("update task state failed", WrapTaskLog(task, zap.Error(err))...)
+
+	timeoutTime := tsoutil.PhysicalTime(c.imeta.GetJob(jobID).GetTimeoutTs())
+	if time.Now().After(timeoutTime) {
+		log.Warn("Import timeout, expired the specified time limit",
+			zap.Int64("jobID", jobID), zap.Time("timeoutTime", timeoutTime))
+		for _, task := range tasks {
+			err := c.imeta.UpdateTask(task.GetTaskID(), UpdateState(internalpb.ImportState_Failed),
+				UpdateReason("import timeout"))
+			if err != nil {
+				log.Warn("update task state failed", WrapTaskLog(task, zap.Error(err))...)
+			}
 		}
 	}
 }
@@ -352,14 +352,13 @@ func (c *importChecker) checkCollection(collectionID int64) {
 		log.Warn("verify existence of collection failed", zap.Int64("collection", collectionID), zap.Error(err))
 		return
 	}
-	if has {
-		return
-	}
-	for _, task := range tasks {
-		err = c.imeta.UpdateTask(task.GetTaskID(), UpdateState(internalpb.ImportState_Failed),
-			UpdateReason(fmt.Sprintf("collection %d dropped", collectionID)))
-		if err != nil {
-			log.Warn("update task state failed", WrapTaskLog(task, zap.Error(err))...)
+	if !has {
+		for _, task := range tasks {
+			err = c.imeta.UpdateTask(task.GetTaskID(), UpdateState(internalpb.ImportState_Failed),
+				UpdateReason(fmt.Sprintf("collection %d dropped", collectionID)))
+			if err != nil {
+				log.Warn("update task state failed", WrapTaskLog(task, zap.Error(err))...)
+			}
 		}
 	}
 }

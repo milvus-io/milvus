@@ -47,21 +47,66 @@ func WrapTaskLog(task ImportTask, fields ...zap.Field) []zap.Field {
 	return res
 }
 
-func AssemblePreImportRequest(task ImportTask, job ImportJob) *datapb.PreImportRequest {
-	importFiles := lo.Map(task.(*preImportTask).GetFileStats(),
-		func(fileStats *datapb.ImportFileStats, _ int) *internalpb.ImportFile {
-			return fileStats.GetImportFile()
-		})
-	return &datapb.PreImportRequest{
-		JobID:        task.GetJobID(),
-		TaskID:       task.GetTaskID(),
-		CollectionID: task.GetCollectionID(),
-		PartitionIDs: job.GetPartitionIDs(),
-		Vchannels:    job.GetVchannels(),
-		Schema:       job.GetSchema(),
-		ImportFiles:  importFiles,
-		Options:      job.GetOptions(),
+func NewPreImportTasks(fileGroups [][]*internalpb.ImportFile,
+	job ImportJob,
+	alloc allocator,
+) ([]ImportTask, error) {
+	idStart, _, err := alloc.allocN(int64(len(fileGroups)))
+	if err != nil {
+		return nil, err
 	}
+	tasks := make([]ImportTask, 0, len(fileGroups))
+	for i, files := range fileGroups {
+		fileStats := lo.Map(files, func(f *internalpb.ImportFile, _ int) *datapb.ImportFileStats {
+			return &datapb.ImportFileStats{
+				ImportFile: f,
+			}
+		})
+		task := &preImportTask{
+			PreImportTask: &datapb.PreImportTask{
+				JobID:        job.GetJobID(),
+				TaskID:       idStart + int64(i),
+				CollectionID: job.GetCollectionID(),
+				State:        internalpb.ImportState_Pending,
+				FileStats:    fileStats,
+			},
+			lastActiveTime: time.Now(),
+		}
+		tasks = append(tasks, task)
+	}
+	return tasks, nil
+}
+
+func NewImportTasks(fileGroups [][]*datapb.ImportFileStats,
+	job ImportJob,
+	manager Manager,
+	alloc allocator,
+) ([]ImportTask, error) {
+	idBegin, _, err := alloc.allocN(int64(len(fileGroups)))
+	if err != nil {
+		return nil, err
+	}
+	tasks := make([]ImportTask, 0, len(fileGroups))
+	for i, group := range fileGroups {
+		task := &importTask{
+			ImportTaskV2: &datapb.ImportTaskV2{
+				JobID:        job.GetJobID(),
+				TaskID:       idBegin + int64(i),
+				CollectionID: job.GetCollectionID(),
+				NodeID:       NullNodeID,
+				State:        internalpb.ImportState_Pending,
+				FileStats:    group,
+			},
+			lastActiveTime: time.Now(),
+		}
+		segments, err := AssignSegments(task, manager, job.GetSchema())
+		if err != nil {
+			return nil, err
+		}
+		task.SegmentIDs = segments
+		tasks = append(tasks, task)
+	}
+	return tasks, nil
 }
 
 func AssignSegments(task ImportTask, manager Manager, schema *schemapb.CollectionSchema) ([]int64, error) {
@@ -106,6 +151,23 @@ func AssignSegments(task ImportTask, manager Manager, schema *schemapb.Collectio
 		}
 	}
 	return segments, nil
+}
+
+func AssemblePreImportRequest(task ImportTask, job ImportJob) *datapb.PreImportRequest {
+	importFiles := lo.Map(task.(*preImportTask).GetFileStats(),
+		func(fileStats *datapb.ImportFileStats, _ int) *internalpb.ImportFile {
+			return fileStats.GetImportFile()
+		})
+	return &datapb.PreImportRequest{
+		JobID:        task.GetJobID(),
+		TaskID:       task.GetTaskID(),
+		CollectionID: task.GetCollectionID(),
+		PartitionIDs: job.GetPartitionIDs(),
+		Vchannels:    job.GetVchannels(),
+		Schema:       job.GetSchema(),
+		ImportFiles:  importFiles,
+		Options:      job.GetOptions(),
+	}
 }
 
 func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc allocator) (*datapb.ImportRequest, error) {
@@ -189,68 +251,6 @@ func RegroupImportFiles(job ImportJob, files []*datapb.ImportFileStats) ([][]*da
 	return fileGroups, nil
 }
 
-func NewPreImportTasks(fileGroups [][]*internalpb.ImportFile,
-	job ImportJob,
-	alloc allocator,
-) ([]ImportTask, error) {
-	idStart, _, err := alloc.allocN(int64(len(fileGroups)))
-	if err != nil {
-		return nil, err
-	}
-	tasks := make([]ImportTask, 0, len(fileGroups))
-	for i, files := range fileGroups {
-		fileStats := lo.Map(files, func(f *internalpb.ImportFile, _ int) *datapb.ImportFileStats {
-			return &datapb.ImportFileStats{
-				ImportFile: f,
-			}
-		})
-		task := &preImportTask{
-			PreImportTask: &datapb.PreImportTask{
-				JobID:        job.GetJobID(),
-				TaskID:       idStart + int64(i),
-				CollectionID: job.GetCollectionID(),
-				State:        internalpb.ImportState_Pending,
-				FileStats:    fileStats,
-			},
-			lastActiveTime: time.Now(),
-		}
-		tasks = append(tasks, task)
-	}
-	return tasks, nil
-}
-
-func NewImportTasks(fileGroups [][]*datapb.ImportFileStats,
-	job ImportJob,
-	manager Manager,
-	alloc allocator,
-) ([]ImportTask, error) {
-	idBegin, _, err := alloc.allocN(int64(len(fileGroups)))
-	if err != nil {
-		return nil, err
-	}
-	tasks := make([]ImportTask, 0, len(fileGroups))
-	for i, group := range fileGroups {
-		task := &importTask{
-			ImportTaskV2: &datapb.ImportTaskV2{
-				JobID:        job.GetJobID(),
-				TaskID:       idBegin + int64(i),
-				CollectionID: job.GetCollectionID(),
-				NodeID:       NullNodeID,
-				State:        internalpb.ImportState_Pending,
-				FileStats:    group,
-			},
-			lastActiveTime: time.Now(),
-		}
-		segments, err := AssignSegments(task, manager, job.GetSchema())
-		if err != nil {
-			return nil, err
-		}
-		task.SegmentIDs = segments
-		tasks = append(tasks, task)
-	}
-	return tasks, nil
-}
-
 func AddImportSegment(cluster Cluster, meta *meta, segmentID int64) error {
 	segment := meta.GetSegment(segmentID)
 	req := &datapb.AddImportSegmentRequest{
@@ -301,7 +301,6 @@ func GetImportProgress(jobID int64, tm ImportMeta, meta *meta) (int64, internalp
 		case internalpb.ImportState_Pending:
 			preparingProgress -= 100 / float32(totalTaskNum)
 		case internalpb.ImportState_InProgress:
-			preparingProgress += 100 / float32(len(tasks))
 			segmentIDs := task.(*importTask).GetSegmentIDs()
 			var (
 				importedRows int64
@@ -335,9 +334,7 @@ func GetImportProgress(jobID int64, tm ImportMeta, meta *meta) (int64, internalp
 			importProgress += 100 / float32(len(tasks))
 		}
 	}
-	if totalSegments == 0 {
-		segStateProgress = 100
-	} else {
+	if totalSegments > 0 {
 		segStateProgress = 100 * float32(unsetImportStateSegments) / float32(totalSegments)
 	}
 	progress := preparingProgress*0.1 + preImportProgress*0.4 + importProgress*0.4 + segStateProgress*0.1
