@@ -362,8 +362,9 @@ func (s *CompactionPlanHandlerSuite) TestHandleMergeCompactionResult() {
 	s.Run("sync segment error", func() {
 		s.SetupTest()
 		s.mockMeta.EXPECT().GetHealthySegment(mock.Anything).Return(nil).Once()
+		segment := NewSegmentInfo(&datapb.SegmentInfo{ID: 100})
 		s.mockMeta.EXPECT().CompleteCompactionMutation(mock.Anything, mock.Anything).Return(
-			NewSegmentInfo(&datapb.SegmentInfo{ID: 100}),
+			[]*SegmentInfo{segment},
 			&segMetricMutation{}, nil).Once()
 		s.mockSessMgr.EXPECT().SyncSegments(mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
 
@@ -400,8 +401,9 @@ func (s *CompactionPlanHandlerSuite) TestCompleteCompaction() {
 		s.mockSessMgr.EXPECT().SyncSegments(mock.Anything, mock.Anything).Return(nil).Once()
 		// mock for handleMergeCompactionResult
 		s.mockMeta.EXPECT().GetHealthySegment(mock.Anything).Return(nil).Once()
+		segment := NewSegmentInfo(&datapb.SegmentInfo{ID: 100})
 		s.mockMeta.EXPECT().CompleteCompactionMutation(mock.Anything, mock.Anything).Return(
-			NewSegmentInfo(&datapb.SegmentInfo{ID: 100}),
+			[]*SegmentInfo{segment},
 			&segMetricMutation{}, nil).Once()
 		s.mockSch.EXPECT().Finish(mock.Anything, mock.Anything).Return()
 
