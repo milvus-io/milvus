@@ -47,16 +47,6 @@ func WrapTaskLog(task ImportTask, fields ...zap.Field) []zap.Field {
 	return res
 }
 
-func WrapJobLog(job ImportJob, fields ...zap.Field) []zap.Field {
-	res := []zap.Field{
-		zap.Int64("jobID", job.GetJobID()),
-		zap.Int64("collectionID", job.GetCollectionID()),
-		zap.String("state", job.GetState().String()),
-	}
-	res = append(res, fields...)
-	return res
-}
-
 func AssemblePreImportRequest(task ImportTask, schema *schemapb.CollectionSchema) *datapb.PreImportRequest {
 	importFiles := lo.Map(task.(*preImportTask).GetFileStats(),
 		func(fileStats *datapb.ImportFileStats, _ int) *internalpb.ImportFile {

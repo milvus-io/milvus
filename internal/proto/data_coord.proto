@@ -859,8 +859,6 @@ message ImportJob {
   uint64 timeout_ts = 5;
   repeated internal.ImportFile files = 6;
   repeated common.KeyValuePair options = 7;
-  internal.ImportState state = 8;
-  string reason = 9;
 }
 
 message PreImportTask {

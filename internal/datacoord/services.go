@@ -1800,7 +1800,6 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 			TimeoutTs:    timeoutTs,
 			Files:        files,
 			Options:      in.GetOptions(),
-			State:        internalpb.ImportState_Pending,
 		},
 		schema: in.GetSchema(),
 	}

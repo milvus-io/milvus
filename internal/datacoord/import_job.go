@@ -38,8 +38,6 @@ type ImportJob interface {
 	GetTimeoutTs() uint64
 	GetFiles() []*internalpb.ImportFile
 	GetOptions() []*commonpb.KeyValuePair
-	GetState() internalpb.ImportState
-	GetReason() string
 	Clone() ImportJob
 }
 

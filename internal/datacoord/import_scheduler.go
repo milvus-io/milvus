@@ -86,17 +86,13 @@ func (s *importScheduler) Close() {
 }
 
 func (s *importScheduler) process() {
-	all := s.imeta.GetTaskBy()
-	tasksByJob := lo.GroupBy(all, func(t ImportTask) int64 {
-		return t.GetJobID()
-	})
-	jobs := lo.Keys(tasksByJob)
+	jobs := s.imeta.GetJobBy()
 	sort.Slice(jobs, func(i, j int) bool {
-		return jobs[i] < jobs[j]
+		return jobs[i].GetJobID() < jobs[j].GetJobID()
 	})
 	nodeSlots := s.peekSlots()
 	for _, job := range jobs {
-		tasks := tasksByJob[job]
+		tasks := s.imeta.GetTaskBy(WithJob(job.GetJobID()))
 		for _, task := range tasks {
 			switch task.GetState() {
 			case internalpb.ImportState_Pending:

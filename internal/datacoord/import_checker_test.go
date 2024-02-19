@@ -31,7 +31,11 @@ import (
 
 func TestImportChecker(t *testing.T) {
 	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListImportJobs().Return(nil, nil)
+	catalog.EXPECT().ListPreImportTasks().Return(nil, nil)
 	catalog.EXPECT().ListImportTasks().Return(nil, nil)
+	catalog.EXPECT().SaveImportJob(mock.Anything).Return(nil)
+	catalog.EXPECT().SavePreImportTask(mock.Anything).Return(nil)
 	catalog.EXPECT().SaveImportTask(mock.Anything).Return(nil)
 	catalog.EXPECT().DropImportTask(mock.Anything).Return(nil)
 	catalog.EXPECT().ListSegments(mock.Anything).Return(nil, nil)
@@ -124,7 +128,7 @@ func TestImportChecker(t *testing.T) {
 	// preimport tasks are all completed, should generate import tasks
 	err = imeta.UpdateTask(1, UpdateState(internalpb.ImportState_Completed))
 	assert.NoError(t, err)
-	checker.checkLackPreImport(job)
+	checker.checkLackImports(job)
 	tasks = imeta.GetTaskBy(WithJob(0))
 	assert.Equal(t, 6, len(tasks))
 	tasks = imeta.GetTaskBy(WithJob(0), WithType(ImportTaskType))
