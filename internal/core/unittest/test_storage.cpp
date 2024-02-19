@@ -155,9 +155,9 @@ TEST_F(StorageTest, GetStorageMetrics) {
 }
 
 TEST_F(StorageTest, CachePath) {
-    auto rcm = RemoteChunkManagerSingleton::GetInstance().GetRemoteChunkManager();
-    auto cc_ = ChunkCache(
-                "tmp/mmap/chunk_cache", "willneed", rcm);
+    auto rcm =
+        RemoteChunkManagerSingleton::GetInstance().GetRemoteChunkManager();
+    auto cc_ = ChunkCache("tmp/mmap/chunk_cache", "willneed", rcm);
     auto relative_result = cc_.CachePath("abc");
     EXPECT_EQ("tmp/mmap/chunk_cache/abc", relative_result);
     auto absolute_result = cc_.CachePath("/var/lib/milvus/abc");
