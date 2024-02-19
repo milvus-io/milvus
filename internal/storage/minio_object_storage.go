@@ -24,14 +24,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/storage/tencent"
-
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/storage/aliyun"
 	"github.com/milvus-io/milvus/internal/storage/gcp"
+	"github.com/milvus-io/milvus/internal/storage/tencent"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 )
