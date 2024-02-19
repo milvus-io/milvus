@@ -119,9 +119,9 @@ func (v *validateUtil) Validate(data []*schemapb.FieldData, schema *schemapb.Col
 }
 
 func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil.SchemaHelper, numRows uint64) error {
-	errNumRowsMismatch := func(fieldName string, fieldNumRows, passedNumRows uint64) error {
-		msg := fmt.Sprintf("the num_rows (%d) of field (%s) is not equal to passed num_rows (%d)", fieldNumRows, fieldName, passedNumRows)
-		return merr.WrapErrParameterInvalid(passedNumRows, numRows, msg)
+	errNumRowsMismatch := func(fieldName string, fieldNumRows uint64) error {
+		msg := fmt.Sprintf("the num_rows (%d) of field (%s) is not equal to passed num_rows (%d)", fieldNumRows, fieldName, numRows)
+		return merr.WrapErrParameterInvalid(fieldNumRows, numRows, msg)
 	}
 
 	for _, field := range data {
@@ -143,7 +143,7 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 			}
 
 			if n != numRows {
-				return errNumRowsMismatch(field.GetFieldName(), n, numRows)
+				return errNumRowsMismatch(field.GetFieldName(), n)
 			}
 
 		case schemapb.DataType_BinaryVector:
@@ -163,7 +163,7 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 			}
 
 			if n != numRows {
-				return errNumRowsMismatch(field.GetFieldName(), n, numRows)
+				return errNumRowsMismatch(field.GetFieldName(), n)
 			}
 
 		case schemapb.DataType_Float16Vector:
@@ -183,7 +183,7 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 			}
 
 			if n != numRows {
-				return errNumRowsMismatch(field.GetFieldName(), n, numRows)
+				return errNumRowsMismatch(field.GetFieldName(), n)
 			}
 
 		case schemapb.DataType_BFloat16Vector:
@@ -203,7 +203,7 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 			}
 
 			if n != numRows {
-				return errNumRowsMismatch(field.GetFieldName(), n, numRows)
+				return errNumRowsMismatch(field.GetFieldName(), n)
 			}
 		default:
 			// error won't happen here.
@@ -213,7 +213,7 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 			}
 
 			if n != numRows {
-				return errNumRowsMismatch(field.GetFieldName(), n, numRows)
+				return errNumRowsMismatch(field.GetFieldName(), n)
 			}
 		}
 	}
