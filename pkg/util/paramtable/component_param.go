@@ -1602,7 +1602,7 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		Version:      "2.4.0",
 		DefaultValue: "0.001",
 		PanicIfEmpty: true,
-		Doc:          "the threshold of balance cost, if the cluster's cost after executing the balance plan is less than this value, the plan will not be executed",
+		Doc:          "the threshold of balance cost, if the difference of cluster's cost after executing the balance plan is less than this value, the plan will not be executed",
 		Export:       true,
 	}
 	p.BalanceCostThreshold.Init(base.mgr)
