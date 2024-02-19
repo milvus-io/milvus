@@ -366,7 +366,7 @@ func TestClientBase_CheckGrpcError(t *testing.T) {
 
 	retry, reset, _ = base.checkGrpcErr(ctx, status.Errorf(codes.Unimplemented, "fake context canceled"))
 	assert.False(t, retry)
-	assert.False(t, reset)
+	assert.True(t, reset)
 
 	// test serverId mismatch
 	retry, reset, _ = base.checkGrpcErr(ctx, status.Errorf(codes.Unknown, merr.ErrNodeNotMatch.Error()))

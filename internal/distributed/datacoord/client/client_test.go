@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -77,24 +78,24 @@ func Test_GetComponentStates(t *testing.T) {
 	assert.NotNil(t, client)
 	defer client.Close()
 
-	mockProxy := mocks.NewMockDataCoordClient(t)
+	mockDC := mocks.NewMockDataCoordClient(t)
 	mockGrpcClient := mocks.NewMockGrpcClient[datapb.DataCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
-		return f(mockProxy)
+		return f(mockDC)
 	})
 	client.grpcClient = mockGrpcClient
 
 	// test success
-	mockProxy.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
+	mockDC.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
 		Status: merr.Success(),
 	}, nil)
 	_, err = client.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
 	assert.Nil(t, err)
 
 	// test return error code
-	mockProxy.ExpectedCalls = nil
-	mockProxy.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
 		Status: merr.Status(merr.ErrServiceNotReady),
 	}, nil)
 
@@ -118,24 +119,24 @@ func Test_GetTimeTickChannel(t *testing.T) {
 	assert.NotNil(t, client)
 	defer client.Close()
 
-	mockProxy := mocks.NewMockDataCoordClient(t)
+	mockDC := mocks.NewMockDataCoordClient(t)
 	mockGrpcClient := mocks.NewMockGrpcClient[datapb.DataCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
-		return f(mockProxy)
+		return f(mockDC)
 	})
 	client.grpcClient = mockGrpcClient
 
 	// test success
-	mockProxy.EXPECT().GetTimeTickChannel(mock.Anything, mock.Anything).Return(&milvuspb.StringResponse{
+	mockDC.EXPECT().GetTimeTickChannel(mock.Anything, mock.Anything).Return(&milvuspb.StringResponse{
 		Status: merr.Success(),
 	}, nil)
 	_, err = client.GetTimeTickChannel(ctx, &internalpb.GetTimeTickChannelRequest{})
 	assert.Nil(t, err)
 
 	// test return error code
-	mockProxy.ExpectedCalls = nil
-	mockProxy.EXPECT().GetTimeTickChannel(mock.Anything, mock.Anything).Return(&milvuspb.StringResponse{
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().GetTimeTickChannel(mock.Anything, mock.Anything).Return(&milvuspb.StringResponse{
 		Status: merr.Status(merr.ErrServiceNotReady),
 	}, nil)
 
@@ -159,24 +160,24 @@ func Test_GetStatisticsChannel(t *testing.T) {
 	assert.NotNil(t, client)
 	defer client.Close()
 
-	mockProxy := mocks.NewMockDataCoordClient(t)
+	mockDC := mocks.NewMockDataCoordClient(t)
 	mockGrpcClient := mocks.NewMockGrpcClient[datapb.DataCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
-		return f(mockProxy)
+		return f(mockDC)
 	})
 	client.grpcClient = mockGrpcClient
 
 	// test success
-	mockProxy.EXPECT().GetStatisticsChannel(mock.Anything, mock.Anything).Return(&milvuspb.StringResponse{
+	mockDC.EXPECT().GetStatisticsChannel(mock.Anything, mock.Anything).Return(&milvuspb.StringResponse{
 		Status: merr.Success(),
 	}, nil)
 	_, err = client.GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
 	assert.Nil(t, err)
 
 	// test return error code
-	mockProxy.ExpectedCalls = nil
-	mockProxy.EXPECT().GetStatisticsChannel(mock.Anything, mock.Anything).Return(&milvuspb.StringResponse{
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().GetStatisticsChannel(mock.Anything, mock.Anything).Return(&milvuspb.StringResponse{
 		Status: merr.Status(merr.ErrServiceNotReady),
 	}, nil)
 
@@ -200,25 +201,25 @@ func Test_Flush(t *testing.T) {
 	assert.NotNil(t, client)
 	defer client.Close()
 
-	mockProxy := mocks.NewMockDataCoordClient(t)
+	mockDC := mocks.NewMockDataCoordClient(t)
 	mockGrpcClient := mocks.NewMockGrpcClient[datapb.DataCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
-		return f(mockProxy)
+		return f(mockDC)
 	})
 	client.grpcClient = mockGrpcClient
 
 	// test success
-	mockProxy.EXPECT().Flush(mock.Anything, mock.Anything).Return(&datapb.FlushResponse{
+	mockDC.EXPECT().Flush(mock.Anything, mock.Anything).Return(&datapb.FlushResponse{
 		Status: merr.Success(),
 	}, nil)
 	_, err = client.Flush(ctx, &datapb.FlushRequest{})
 	assert.Nil(t, err)
 
 	// test return error code
-	mockProxy.ExpectedCalls = nil
-	mockProxy.EXPECT().Flush(mock.Anything, mock.Anything).Return(&datapb.FlushResponse{
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().Flush(mock.Anything, mock.Anything).Return(&datapb.FlushResponse{
 		Status: merr.Status(merr.ErrServiceNotReady),
 	}, nil)
 
@@ -242,24 +243,24 @@ func Test_AssignSegmentID(t *testing.T) {
 	assert.NotNil(t, client)
 	defer client.Close()
 
-	mockProxy := mocks.NewMockDataCoordClient(t)
+	mockDC := mocks.NewMockDataCoordClient(t)
 	mockGrpcClient := mocks.NewMockGrpcClient[datapb.DataCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
-		return f(mockProxy)
+		return f(mockDC)
 	})
 	client.grpcClient = mockGrpcClient
 
 	// test success
-	mockProxy.EXPECT().AssignSegmentID(mock.Anything, mock.Anything).Return(&datapb.AssignSegmentIDResponse{
+	mockDC.EXPECT().AssignSegmentID(mock.Anything, mock.Anything).Return(&datapb.AssignSegmentIDResponse{
 		Status: merr.Success(),
 	}, nil)
 	_, err = client.AssignSegmentID(ctx, &datapb.AssignSegmentIDRequest{})
 	assert.Nil(t, err)
 
 	// test return error code
-	mockProxy.ExpectedCalls = nil
-	mockProxy.EXPECT().AssignSegmentID(mock.Anything, mock.Anything).Return(&datapb.AssignSegmentIDResponse{
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().AssignSegmentID(mock.Anything, mock.Anything).Return(&datapb.AssignSegmentIDResponse{
 		Status: merr.Status(merr.ErrServiceNotReady),
 	}, nil)
 
@@ -283,25 +284,25 @@ func Test_GetSegmentStates(t *testing.T) {
 	assert.NotNil(t, client)
 	defer client.Close()
 
-	mockProxy := mocks.NewMockDataCoordClient(t)
+	mockDC := mocks.NewMockDataCoordClient(t)
 	mockGrpcClient := mocks.NewMockGrpcClient[datapb.DataCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
-		return f(mockProxy)
+		return f(mockDC)
 	})
 	client.grpcClient = mockGrpcClient
 
 	// test success
-	mockProxy.EXPECT().GetSegmentStates(mock.Anything, mock.Anything).Return(&datapb.GetSegmentStatesResponse{
+	mockDC.EXPECT().GetSegmentStates(mock.Anything, mock.Anything).Return(&datapb.GetSegmentStatesResponse{
 		Status: merr.Success(),
 	}, nil)
 	_, err = client.GetSegmentStates(ctx, &datapb.GetSegmentStatesRequest{})
 	assert.Nil(t, err)
 
 	// test return error code
-	mockProxy.ExpectedCalls = nil
-	mockProxy.EXPECT().GetSegmentStates(mock.Anything, mock.Anything).Return(&datapb.GetSegmentStatesResponse{
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().GetSegmentStates(mock.Anything, mock.Anything).Return(&datapb.GetSegmentStatesResponse{
 		Status: merr.Status(merr.ErrServiceNotReady),
 	}, nil)
 
@@ -325,25 +326,25 @@ func Test_GetInsertBinlogPaths(t *testing.T) {
 	assert.NotNil(t, client)
 	defer client.Close()
 
-	mockProxy := mocks.NewMockDataCoordClient(t)
+	mockDC := mocks.NewMockDataCoordClient(t)
 	mockGrpcClient := mocks.NewMockGrpcClient[datapb.DataCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
-		return f(mockProxy)
+		return f(mockDC)
 	})
 	client.grpcClient = mockGrpcClient
 
 	// test success
-	mockProxy.EXPECT().GetInsertBinlogPaths(mock.Anything, mock.Anything).Return(&datapb.GetInsertBinlogPathsResponse{
+	mockDC.EXPECT().GetInsertBinlogPaths(mock.Anything, mock.Anything).Return(&datapb.GetInsertBinlogPathsResponse{
 		Status: merr.Success(),
 	}, nil)
 	_, err = client.GetInsertBinlogPaths(ctx, &datapb.GetInsertBinlogPathsRequest{})
 	assert.Nil(t, err)
 
 	// test return error code
-	mockProxy.ExpectedCalls = nil
-	mockProxy.EXPECT().GetInsertBinlogPaths(mock.Anything, mock.Anything).Return(&datapb.GetInsertBinlogPathsResponse{
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().GetInsertBinlogPaths(mock.Anything, mock.Anything).Return(&datapb.GetInsertBinlogPathsResponse{
 		Status: merr.Status(merr.ErrServiceNotReady),
 	}, nil)
 
@@ -367,25 +368,25 @@ func Test_GetCollectionStatistics(t *testing.T) {
 	assert.NotNil(t, client)
 	defer client.Close()
 
-	mockProxy := mocks.NewMockDataCoordClient(t)
+	mockDC := mocks.NewMockDataCoordClient(t)
 	mockGrpcClient := mocks.NewMockGrpcClient[datapb.DataCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
-		return f(mockProxy)
+		return f(mockDC)
 	})
 	client.grpcClient = mockGrpcClient
 
 	// test success
-	mockProxy.EXPECT().GetCollectionStatistics(mock.Anything, mock.Anything).Return(&datapb.GetCollectionStatisticsResponse{
+	mockDC.EXPECT().GetCollectionStatistics(mock.Anything, mock.Anything).Return(&datapb.GetCollectionStatisticsResponse{
 		Status: merr.Success(),
 	}, nil)
 	_, err = client.GetCollectionStatistics(ctx, &datapb.GetCollectionStatisticsRequest{})
 	assert.Nil(t, err)
 
 	// test return error code
-	mockProxy.ExpectedCalls = nil
-	mockProxy.EXPECT().GetCollectionStatistics(mock.Anything, mock.Anything).Return(&datapb.GetCollectionStatisticsResponse{
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().GetCollectionStatistics(mock.Anything, mock.Anything).Return(&datapb.GetCollectionStatisticsResponse{
 		Status: merr.Status(merr.ErrServiceNotReady),
 	}, nil)
 
@@ -409,25 +410,25 @@ func Test_GetPartitionStatistics(t *testing.T) {
 	assert.NotNil(t, client)
 	defer client.Close()
 
-	mockProxy := mocks.NewMockDataCoordClient(t)
+	mockDC := mocks.NewMockDataCoordClient(t)
 	mockGrpcClient := mocks.NewMockGrpcClient[datapb.DataCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
-		return f(mockProxy)
+		return f(mockDC)
 	})
 	client.grpcClient = mockGrpcClient
 
 	// test success
-	mockProxy.EXPECT().GetPartitionStatistics(mock.Anything, mock.Anything).Return(&datapb.GetPartitionStatisticsResponse{
+	mockDC.EXPECT().GetPartitionStatistics(mock.Anything, mock.Anything).Return(&datapb.GetPartitionStatisticsResponse{
 		Status: merr.Success(),
 	}, nil)
 	_, err = client.GetPartitionStatistics(ctx, &datapb.GetPartitionStatisticsRequest{})
 	assert.Nil(t, err)
 
 	// test return error code
-	mockProxy.ExpectedCalls = nil
-	mockProxy.EXPECT().GetPartitionStatistics(mock.Anything, mock.Anything).Return(&datapb.GetPartitionStatisticsResponse{
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().GetPartitionStatistics(mock.Anything, mock.Anything).Return(&datapb.GetPartitionStatisticsResponse{
 		Status: merr.Status(merr.ErrServiceNotReady),
 	}, nil)
 
@@ -451,24 +452,24 @@ func Test_GetSegmentInfoChannel(t *testing.T) {
 	assert.NotNil(t, client)
 	defer client.Close()
 
-	mockProxy := mocks.NewMockDataCoordClient(t)
+	mockDC := mocks.NewMockDataCoordClient(t)
 	mockGrpcClient := mocks.NewMockGrpcClient[datapb.DataCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
-		return f(mockProxy)
+		return f(mockDC)
 	})
 	client.grpcClient = mockGrpcClient
 
 	// test success
-	mockProxy.EXPECT().GetSegmentInfoChannel(mock.Anything, mock.Anything).Return(&milvuspb.StringResponse{
+	mockDC.EXPECT().GetSegmentInfoChannel(mock.Anything, mock.Anything).Return(&milvuspb.StringResponse{
 		Status: merr.Success(),
 	}, nil)
 	_, err = client.GetSegmentInfoChannel(ctx, &datapb.GetSegmentInfoChannelRequest{})
 	assert.Nil(t, err)
 
 	// test return error code
-	mockProxy.ExpectedCalls = nil
-	mockProxy.EXPECT().GetSegmentInfoChannel(mock.Anything, mock.Anything).Return(&milvuspb.StringResponse{
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().GetSegmentInfoChannel(mock.Anything, mock.Anything).Return(&milvuspb.StringResponse{
 		Status: merr.Status(merr.ErrServiceNotReady),
 	}, nil)
 
@@ -492,25 +493,25 @@ func Test_GetSegmentInfo(t *testing.T) {
 	assert.NotNil(t, client)
 	defer client.Close()
 
-	mockProxy := mocks.NewMockDataCoordClient(t)
+	mockDC := mocks.NewMockDataCoordClient(t)
 	mockGrpcClient := mocks.NewMockGrpcClient[datapb.DataCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
-		return f(mockProxy)
+		return f(mockDC)
 	})
 	client.grpcClient = mockGrpcClient
 
 	// test success
-	mockProxy.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).Return(&datapb.GetSegmentInfoResponse{
+	mockDC.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).Return(&datapb.GetSegmentInfoResponse{
 		Status: merr.Success(),
 	}, nil)
 	_, err = client.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{})
 	assert.Nil(t, err)
 
 	// test return error code
-	mockProxy.ExpectedCalls = nil
-	mockProxy.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).Return(&datapb.GetSegmentInfoResponse{
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).Return(&datapb.GetSegmentInfoResponse{
 		Status: merr.Status(merr.ErrServiceNotReady),
 	}, nil)
 
@@ -534,25 +535,25 @@ func Test_SaveBinlogPaths(t *testing.T) {
 	assert.NotNil(t, client)
 	defer client.Close()
 
-	mockProxy := mocks.NewMockDataCoordClient(t)
+	mockDC := mocks.NewMockDataCoordClient(t)
 	mockGrpcClient := mocks.NewMockGrpcClient[datapb.DataCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
-		return f(mockProxy)
+		return f(mockDC)
 	})
 	client.grpcClient = mockGrpcClient
 
 	// test success
-	mockProxy.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).Return(&datapb.GetSegmentInfoResponse{
+	mockDC.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).Return(&datapb.GetSegmentInfoResponse{
 		Status: merr.Success(),
 	}, nil)
 	_, err = client.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{})
 	assert.Nil(t, err)
 
 	// test return error code
-	mockProxy.ExpectedCalls = nil
-	mockProxy.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).Return(&datapb.GetSegmentInfoResponse{
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).Return(&datapb.GetSegmentInfoResponse{
 		Status: merr.Status(merr.ErrServiceNotReady),
 	}, nil)
 
@@ -576,25 +577,25 @@ func Test_GetRecoveryInfo(t *testing.T) {
 	assert.NotNil(t, client)
 	defer client.Close()
 
-	mockProxy := mocks.NewMockDataCoordClient(t)
+	mockDC := mocks.NewMockDataCoordClient(t)
 	mockGrpcClient := mocks.NewMockGrpcClient[datapb.DataCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
-		return f(mockProxy)
+		return f(mockDC)
 	})
 	client.grpcClient = mockGrpcClient
 
 	// test success
-	mockProxy.EXPECT().GetRecoveryInfo(mock.Anything, mock.Anything).Return(&datapb.GetRecoveryInfoResponse{
+	mockDC.EXPECT().GetRecoveryInfo(mock.Anything, mock.Anything).Return(&datapb.GetRecoveryInfoResponse{
 		Status: merr.Success(),
 	}, nil)
 	_, err = client.GetRecoveryInfo(ctx, &datapb.GetRecoveryInfoRequest{})
 	assert.Nil(t, err)
 
 	// test return error code
-	mockProxy.ExpectedCalls = nil
-	mockProxy.EXPECT().GetRecoveryInfo(mock.Anything, mock.Anything).Return(&datapb.GetRecoveryInfoResponse{
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().GetRecoveryInfo(mock.Anything, mock.Anything).Return(&datapb.GetRecoveryInfoResponse{
 		Status: merr.Status(merr.ErrServiceNotReady),
 	}, nil)
 
@@ -618,24 +619,24 @@ func Test_GetRecoveryInfoV2(t *testing.T) {
 	assert.NotNil(t, client)
 	defer client.Close()
 
-	mockProxy := mocks.NewMockDataCoordClient(t)
+	mockDC := mocks.NewMockDataCoordClient(t)
 	mockGrpcClient := mocks.NewMockGrpcClient[datapb.DataCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
-		return f(mockProxy)
+		return f(mockDC)
 	})
 	client.grpcClient = mockGrpcClient
 
 	// test success
-	mockProxy.EXPECT().GetRecoveryInfoV2(mock.Anything, mock.Anything).Return(&datapb.GetRecoveryInfoResponseV2{
+	mockDC.EXPECT().GetRecoveryInfoV2(mock.Anything, mock.Anything).Return(&datapb.GetRecoveryInfoResponseV2{
 		Status: merr.Success(),
 	}, nil)
 	_, err = client.GetRecoveryInfoV2(ctx, &datapb.GetRecoveryInfoRequestV2{})
 	assert.Nil(t, err)
 
 	// test return error code
-	mockProxy.ExpectedCalls = nil
-	mockProxy.EXPECT().GetRecoveryInfoV2(mock.Anything, mock.Anything).Return(&datapb.GetRecoveryInfoResponseV2{
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().GetRecoveryInfoV2(mock.Anything, mock.Anything).Return(&datapb.GetRecoveryInfoResponseV2{
 		Status: merr.Status(merr.ErrServiceNotReady),
 	}, nil)
 
@@ -659,25 +660,25 @@ func Test_GetFlushedSegments(t *testing.T) {
 	assert.NotNil(t, client)
 	defer client.Close()
 
-	mockProxy := mocks.NewMockDataCoordClient(t)
+	mockDC := mocks.NewMockDataCoordClient(t)
 	mockGrpcClient := mocks.NewMockGrpcClient[datapb.DataCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
-		return f(mockProxy)
+		return f(mockDC)
 	})
 	client.grpcClient = mockGrpcClient
 
 	// test success
-	mockProxy.EXPECT().GetFlushedSegments(mock.Anything, mock.Anything).Return(&datapb.GetFlushedSegmentsResponse{
+	mockDC.EXPECT().GetFlushedSegments(mock.Anything, mock.Anything).Return(&datapb.GetFlushedSegmentsResponse{
 		Status: merr.Success(),
 	}, nil)
 	_, err = client.GetFlushedSegments(ctx, &datapb.GetFlushedSegmentsRequest{})
 	assert.Nil(t, err)
 
 	// test return error code
-	mockProxy.ExpectedCalls = nil
-	mockProxy.EXPECT().GetFlushedSegments(mock.Anything, mock.Anything).Return(&datapb.GetFlushedSegmentsResponse{
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().GetFlushedSegments(mock.Anything, mock.Anything).Return(&datapb.GetFlushedSegmentsResponse{
 		Status: merr.Status(merr.ErrServiceNotReady),
 	}, nil)
 
@@ -701,25 +702,25 @@ func Test_GetSegmentsByStates(t *testing.T) {
 	assert.NotNil(t, client)
 	defer client.Close()
 
-	mockProxy := mocks.NewMockDataCoordClient(t)
+	mockDC := mocks.NewMockDataCoordClient(t)
 	mockGrpcClient := mocks.NewMockGrpcClient[datapb.DataCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
-		return f(mockProxy)
+		return f(mockDC)
 	})
 	client.grpcClient = mockGrpcClient
 
 	// test success
-	mockProxy.EXPECT().GetSegmentsByStates(mock.Anything, mock.Anything).Return(&datapb.GetSegmentsByStatesResponse{
+	mockDC.EXPECT().GetSegmentsByStates(mock.Anything, mock.Anything).Return(&datapb.GetSegmentsByStatesResponse{
 		Status: merr.Success(),
 	}, nil)
 	_, err = client.GetSegmentsByStates(ctx, &datapb.GetSegmentsByStatesRequest{})
 	assert.Nil(t, err)
 
 	// test return error code
-	mockProxy.ExpectedCalls = nil
-	mockProxy.EXPECT().GetSegmentsByStates(mock.Anything, mock.Anything).Return(&datapb.GetSegmentsByStatesResponse{
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().GetSegmentsByStates(mock.Anything, mock.Anything).Return(&datapb.GetSegmentsByStatesResponse{
 		Status: merr.Status(merr.ErrServiceNotReady),
 	}, nil)
 
@@ -743,25 +744,25 @@ func Test_ShowConfigurations(t *testing.T) {
 	assert.NotNil(t, client)
 	defer client.Close()
 
-	mockProxy := mocks.NewMockDataCoordClient(t)
+	mockDC := mocks.NewMockDataCoordClient(t)
 	mockGrpcClient := mocks.NewMockGrpcClient[datapb.DataCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
-		return f(mockProxy)
+		return f(mockDC)
 	})
 	client.grpcClient = mockGrpcClient
 
 	// test success
-	mockProxy.EXPECT().ShowConfigurations(mock.Anything, mock.Anything).Return(&internalpb.ShowConfigurationsResponse{
+	mockDC.EXPECT().ShowConfigurations(mock.Anything, mock.Anything).Return(&internalpb.ShowConfigurationsResponse{
 		Status: merr.Success(),
 	}, nil)
 	_, err = client.ShowConfigurations(ctx, &internalpb.ShowConfigurationsRequest{})
 	assert.Nil(t, err)
 
 	// test return error code
-	mockProxy.ExpectedCalls = nil
-	mockProxy.EXPECT().ShowConfigurations(mock.Anything, mock.Anything).Return(&internalpb.ShowConfigurationsResponse{
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().ShowConfigurations(mock.Anything, mock.Anything).Return(&internalpb.ShowConfigurationsResponse{
 		Status: merr.Status(merr.ErrServiceNotReady),
 	}, nil)
 
@@ -785,25 +786,25 @@ func Test_GetMetrics(t *testing.T) {
 	assert.NotNil(t, client)
 	defer client.Close()
 
-	mockProxy := mocks.NewMockDataCoordClient(t)
+	mockDC := mocks.NewMockDataCoordClient(t)
 	mockGrpcClient := mocks.NewMockGrpcClient[datapb.DataCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
-		return f(mockProxy)
+		return f(mockDC)
 	})
 	client.grpcClient = mockGrpcClient
 
 	// test success
-	mockProxy.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
+	mockDC.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
 		Status: merr.Success(),
 	}, nil)
 	_, err = client.GetMetrics(ctx, &milvuspb.GetMetricsRequest{})
 	assert.Nil(t, err)
 
 	// test return error code
-	mockProxy.ExpectedCalls = nil
-	mockProxy.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
 		Status: merr.Status(merr.ErrServiceNotReady),
 	}, nil)
 
@@ -827,24 +828,24 @@ func Test_ManualCompaction(t *testing.T) {
 	assert.NotNil(t, client)
 	defer client.Close()
 
-	mockProxy := mocks.NewMockDataCoordClient(t)
+	mockDC := mocks.NewMockDataCoordClient(t)
 	mockGrpcClient := mocks.NewMockGrpcClient[datapb.DataCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
-		return f(mockProxy)
+		return f(mockDC)
 	})
 	client.grpcClient = mockGrpcClient
 
 	// test success
-	mockProxy.EXPECT().ManualCompaction(mock.Anything, mock.Anything).Return(&milvuspb.ManualCompactionResponse{
+	mockDC.EXPECT().ManualCompaction(mock.Anything, mock.Anything).Return(&milvuspb.ManualCompactionResponse{
 		Status: merr.Success(),
 	}, nil)
 	_, err = client.ManualCompaction(ctx, &milvuspb.ManualCompactionRequest{})
 	assert.Nil(t, err)
 
 	// test return error code
-	mockProxy.ExpectedCalls = nil
-	mockProxy.EXPECT().ManualCompaction(mock.Anything, mock.Anything).Return(&milvuspb.ManualCompactionResponse{
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().ManualCompaction(mock.Anything, mock.Anything).Return(&milvuspb.ManualCompactionResponse{
 		Status: merr.Status(merr.ErrServiceNotReady),
 	}, nil)
 
@@ -868,24 +869,24 @@ func Test_GetCompactionState(t *testing.T) {
 	assert.NotNil(t, client)
 	defer client.Close()
 
-	mockProxy := mocks.NewMockDataCoordClient(t)
+	mockDC := mocks.NewMockDataCoordClient(t)
 	mockGrpcClient := mocks.NewMockGrpcClient[datapb.DataCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
-		return f(mockProxy)
+		return f(mockDC)
 	})
 	client.grpcClient = mockGrpcClient
 
 	// test success
-	mockProxy.EXPECT().GetCompactionState(mock.Anything, mock.Anything).Return(&milvuspb.GetCompactionStateResponse{
+	mockDC.EXPECT().GetCompactionState(mock.Anything, mock.Anything).Return(&milvuspb.GetCompactionStateResponse{
 		Status: merr.Success(),
 	}, nil)
 	_, err = client.GetCompactionState(ctx, &milvuspb.GetCompactionStateRequest{})
 	assert.Nil(t, err)
 
 	// test return error code
-	mockProxy.ExpectedCalls = nil
-	mockProxy.EXPECT().GetCompactionState(mock.Anything, mock.Anything).Return(&milvuspb.GetCompactionStateResponse{
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().GetCompactionState(mock.Anything, mock.Anything).Return(&milvuspb.GetCompactionStateResponse{
 		Status: merr.Status(merr.ErrServiceNotReady),
 	}, nil)
 
@@ -909,24 +910,24 @@ func Test_GetCompactionStateWithPlans(t *testing.T) {
 	assert.NotNil(t, client)
 	defer client.Close()
 
-	mockProxy := mocks.NewMockDataCoordClient(t)
+	mockDC := mocks.NewMockDataCoordClient(t)
 	mockGrpcClient := mocks.NewMockGrpcClient[datapb.DataCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
-		return f(mockProxy)
+		return f(mockDC)
 	})
 	client.grpcClient = mockGrpcClient
 
 	// test success
-	mockProxy.EXPECT().GetCompactionStateWithPlans(mock.Anything, mock.Anything).Return(&milvuspb.GetCompactionPlansResponse{
+	mockDC.EXPECT().GetCompactionStateWithPlans(mock.Anything, mock.Anything).Return(&milvuspb.GetCompactionPlansResponse{
 		Status: merr.Success(),
 	}, nil)
 	_, err = client.GetCompactionStateWithPlans(ctx, &milvuspb.GetCompactionPlansRequest{})
 	assert.Nil(t, err)
 
 	// test return error code
-	mockProxy.ExpectedCalls = nil
-	mockProxy.EXPECT().GetCompactionStateWithPlans(mock.Anything, mock.Anything).Return(&milvuspb.GetCompactionPlansResponse{
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().GetCompactionStateWithPlans(mock.Anything, mock.Anything).Return(&milvuspb.GetCompactionPlansResponse{
 		Status: merr.Status(merr.ErrServiceNotReady),
 	}, nil)
 
@@ -950,24 +951,24 @@ func Test_WatchChannels(t *testing.T) {
 	assert.NotNil(t, client)
 	defer client.Close()
 
-	mockProxy := mocks.NewMockDataCoordClient(t)
+	mockDC := mocks.NewMockDataCoordClient(t)
 	mockGrpcClient := mocks.NewMockGrpcClient[datapb.DataCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
-		return f(mockProxy)
+		return f(mockDC)
 	})
 	client.grpcClient = mockGrpcClient
 
 	// test success
-	mockProxy.EXPECT().WatchChannels(mock.Anything, mock.Anything).Return(&datapb.WatchChannelsResponse{
+	mockDC.EXPECT().WatchChannels(mock.Anything, mock.Anything).Return(&datapb.WatchChannelsResponse{
 		Status: merr.Success(),
 	}, nil)
 	_, err = client.WatchChannels(ctx, &datapb.WatchChannelsRequest{})
 	assert.Nil(t, err)
 
 	// test return error code
-	mockProxy.ExpectedCalls = nil
-	mockProxy.EXPECT().WatchChannels(mock.Anything, mock.Anything).Return(&datapb.WatchChannelsResponse{
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().WatchChannels(mock.Anything, mock.Anything).Return(&datapb.WatchChannelsResponse{
 		Status: merr.Status(merr.ErrServiceNotReady),
 	}, nil)
 
@@ -991,24 +992,24 @@ func Test_GetFlushState(t *testing.T) {
 	assert.NotNil(t, client)
 	defer client.Close()
 
-	mockProxy := mocks.NewMockDataCoordClient(t)
+	mockDC := mocks.NewMockDataCoordClient(t)
 	mockGrpcClient := mocks.NewMockGrpcClient[datapb.DataCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
-		return f(mockProxy)
+		return f(mockDC)
 	})
 	client.grpcClient = mockGrpcClient
 
 	// test success
-	mockProxy.EXPECT().GetFlushState(mock.Anything, mock.Anything).Return(&milvuspb.GetFlushStateResponse{
+	mockDC.EXPECT().GetFlushState(mock.Anything, mock.Anything).Return(&milvuspb.GetFlushStateResponse{
 		Status: merr.Success(),
 	}, nil)
 	_, err = client.GetFlushState(ctx, &datapb.GetFlushStateRequest{})
 	assert.Nil(t, err)
 
 	// test return error code
-	mockProxy.ExpectedCalls = nil
-	mockProxy.EXPECT().GetFlushState(mock.Anything, mock.Anything).Return(&milvuspb.GetFlushStateResponse{
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().GetFlushState(mock.Anything, mock.Anything).Return(&milvuspb.GetFlushStateResponse{
 		Status: merr.Status(merr.ErrServiceNotReady),
 	}, nil)
 
@@ -1032,24 +1033,24 @@ func Test_GetFlushAllState(t *testing.T) {
 	assert.NotNil(t, client)
 	defer client.Close()
 
-	mockProxy := mocks.NewMockDataCoordClient(t)
+	mockDC := mocks.NewMockDataCoordClient(t)
 	mockGrpcClient := mocks.NewMockGrpcClient[datapb.DataCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
-		return f(mockProxy)
+		return f(mockDC)
 	})
 	client.grpcClient = mockGrpcClient
 
 	// test success
-	mockProxy.EXPECT().GetFlushAllState(mock.Anything, mock.Anything).Return(&milvuspb.GetFlushAllStateResponse{
+	mockDC.EXPECT().GetFlushAllState(mock.Anything, mock.Anything).Return(&milvuspb.GetFlushAllStateResponse{
 		Status: merr.Success(),
 	}, nil)
 	_, err = client.GetFlushAllState(ctx, &milvuspb.GetFlushAllStateRequest{})
 	assert.Nil(t, err)
 
 	// test return error code
-	mockProxy.ExpectedCalls = nil
-	mockProxy.EXPECT().GetFlushAllState(mock.Anything, mock.Anything).Return(&milvuspb.GetFlushAllStateResponse{
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().GetFlushAllState(mock.Anything, mock.Anything).Return(&milvuspb.GetFlushAllStateResponse{
 		Status: merr.Status(merr.ErrServiceNotReady),
 	}, nil)
 
@@ -1073,25 +1074,25 @@ func Test_DropVirtualChannel(t *testing.T) {
 	assert.NotNil(t, client)
 	defer client.Close()
 
-	mockProxy := mocks.NewMockDataCoordClient(t)
+	mockDC := mocks.NewMockDataCoordClient(t)
 	mockGrpcClient := mocks.NewMockGrpcClient[datapb.DataCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
-		return f(mockProxy)
+		return f(mockDC)
 	})
 	client.grpcClient = mockGrpcClient
 
 	// test success
-	mockProxy.EXPECT().DropVirtualChannel(mock.Anything, mock.Anything).Return(&datapb.DropVirtualChannelResponse{
+	mockDC.EXPECT().DropVirtualChannel(mock.Anything, mock.Anything).Return(&datapb.DropVirtualChannelResponse{
 		Status: merr.Success(),
 	}, nil)
 	_, err = client.DropVirtualChannel(ctx, &datapb.DropVirtualChannelRequest{})
 	assert.Nil(t, err)
 
 	// test return error code
-	mockProxy.ExpectedCalls = nil
-	mockProxy.EXPECT().DropVirtualChannel(mock.Anything, mock.Anything).Return(&datapb.DropVirtualChannelResponse{
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().DropVirtualChannel(mock.Anything, mock.Anything).Return(&datapb.DropVirtualChannelResponse{
 		Status: merr.Status(merr.ErrServiceNotReady),
 	}, nil)
 
@@ -1115,25 +1116,25 @@ func Test_SetSegmentState(t *testing.T) {
 	assert.NotNil(t, client)
 	defer client.Close()
 
-	mockProxy := mocks.NewMockDataCoordClient(t)
+	mockDC := mocks.NewMockDataCoordClient(t)
 	mockGrpcClient := mocks.NewMockGrpcClient[datapb.DataCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
-		return f(mockProxy)
+		return f(mockDC)
 	})
 	client.grpcClient = mockGrpcClient
 
 	// test success
-	mockProxy.EXPECT().SetSegmentState(mock.Anything, mock.Anything).Return(&datapb.SetSegmentStateResponse{
+	mockDC.EXPECT().SetSegmentState(mock.Anything, mock.Anything).Return(&datapb.SetSegmentStateResponse{
 		Status: merr.Success(),
 	}, nil)
 	_, err = client.SetSegmentState(ctx, &datapb.SetSegmentStateRequest{})
 	assert.Nil(t, err)
 
 	// test return error code
-	mockProxy.ExpectedCalls = nil
-	mockProxy.EXPECT().SetSegmentState(mock.Anything, mock.Anything).Return(&datapb.SetSegmentStateResponse{
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().SetSegmentState(mock.Anything, mock.Anything).Return(&datapb.SetSegmentStateResponse{
 		Status: merr.Status(merr.ErrServiceNotReady),
 	}, nil)
 
@@ -1157,25 +1158,25 @@ func Test_Import(t *testing.T) {
 	assert.NotNil(t, client)
 	defer client.Close()
 
-	mockProxy := mocks.NewMockDataCoordClient(t)
+	mockDC := mocks.NewMockDataCoordClient(t)
 	mockGrpcClient := mocks.NewMockGrpcClient[datapb.DataCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
-		return f(mockProxy)
+		return f(mockDC)
 	})
 	client.grpcClient = mockGrpcClient
 
 	// test success
-	mockProxy.EXPECT().Import(mock.Anything, mock.Anything).Return(&datapb.ImportTaskResponse{
+	mockDC.EXPECT().Import(mock.Anything, mock.Anything).Return(&datapb.ImportTaskResponse{
 		Status: merr.Success(),
 	}, nil)
 	_, err = client.Import(ctx, &datapb.ImportTaskRequest{})
 	assert.Nil(t, err)
 
 	// test return error code
-	mockProxy.ExpectedCalls = nil
-	mockProxy.EXPECT().Import(mock.Anything, mock.Anything).Return(&datapb.ImportTaskResponse{
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().Import(mock.Anything, mock.Anything).Return(&datapb.ImportTaskResponse{
 		Status: merr.Status(merr.ErrServiceNotReady),
 	}, nil)
 
@@ -1199,23 +1200,23 @@ func Test_UpdateSegmentStatistics(t *testing.T) {
 	assert.NotNil(t, client)
 	defer client.Close()
 
-	mockProxy := mocks.NewMockDataCoordClient(t)
+	mockDC := mocks.NewMockDataCoordClient(t)
 	mockGrpcClient := mocks.NewMockGrpcClient[datapb.DataCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
-		return f(mockProxy)
+		return f(mockDC)
 	})
 	client.grpcClient = mockGrpcClient
 
 	// test success
-	mockProxy.EXPECT().UpdateSegmentStatistics(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+	mockDC.EXPECT().UpdateSegmentStatistics(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 	_, err = client.UpdateSegmentStatistics(ctx, &datapb.UpdateSegmentStatisticsRequest{})
 	assert.Nil(t, err)
 
 	// test return error code
-	mockProxy.ExpectedCalls = nil
-	mockProxy.EXPECT().UpdateSegmentStatistics(mock.Anything, mock.Anything).Return(merr.Status(merr.ErrServiceNotReady), nil)
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().UpdateSegmentStatistics(mock.Anything, mock.Anything).Return(merr.Status(merr.ErrServiceNotReady), nil)
 
 	_, err = client.UpdateSegmentStatistics(ctx, &datapb.UpdateSegmentStatisticsRequest{})
 	assert.Nil(t, err)
@@ -1237,23 +1238,23 @@ func Test_UpdateChannelCheckpoint(t *testing.T) {
 	assert.NotNil(t, client)
 	defer client.Close()
 
-	mockProxy := mocks.NewMockDataCoordClient(t)
+	mockDC := mocks.NewMockDataCoordClient(t)
 	mockGrpcClient := mocks.NewMockGrpcClient[datapb.DataCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
-		return f(mockProxy)
+		return f(mockDC)
 	})
 	client.grpcClient = mockGrpcClient
 
 	// test success
-	mockProxy.EXPECT().UpdateChannelCheckpoint(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+	mockDC.EXPECT().UpdateChannelCheckpoint(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 	_, err = client.UpdateChannelCheckpoint(ctx, &datapb.UpdateChannelCheckpointRequest{})
 	assert.Nil(t, err)
 
 	// test return error code
-	mockProxy.ExpectedCalls = nil
-	mockProxy.EXPECT().UpdateChannelCheckpoint(mock.Anything, mock.Anything).Return(merr.Status(merr.ErrServiceNotReady), nil)
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().UpdateChannelCheckpoint(mock.Anything, mock.Anything).Return(merr.Status(merr.ErrServiceNotReady), nil)
 
 	_, err = client.UpdateChannelCheckpoint(ctx, &datapb.UpdateChannelCheckpointRequest{})
 	assert.Nil(t, err)
@@ -1275,23 +1276,23 @@ func Test_SaveImportSegment(t *testing.T) {
 	assert.NotNil(t, client)
 	defer client.Close()
 
-	mockProxy := mocks.NewMockDataCoordClient(t)
+	mockDC := mocks.NewMockDataCoordClient(t)
 	mockGrpcClient := mocks.NewMockGrpcClient[datapb.DataCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
-		return f(mockProxy)
+		return f(mockDC)
 	})
 	client.grpcClient = mockGrpcClient
 
 	// test success
-	mockProxy.EXPECT().SaveImportSegment(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+	mockDC.EXPECT().SaveImportSegment(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 	_, err = client.SaveImportSegment(ctx, &datapb.SaveImportSegmentRequest{})
 	assert.Nil(t, err)
 
 	// test return error code
-	mockProxy.ExpectedCalls = nil
-	mockProxy.EXPECT().SaveImportSegment(mock.Anything, mock.Anything).Return(merr.Status(merr.ErrServiceNotReady), nil)
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().SaveImportSegment(mock.Anything, mock.Anything).Return(merr.Status(merr.ErrServiceNotReady), nil)
 
 	_, err = client.SaveImportSegment(ctx, &datapb.SaveImportSegmentRequest{})
 	assert.Nil(t, err)
@@ -1313,23 +1314,23 @@ func Test_UnsetIsImportingState(t *testing.T) {
 	assert.NotNil(t, client)
 	defer client.Close()
 
-	mockProxy := mocks.NewMockDataCoordClient(t)
+	mockDC := mocks.NewMockDataCoordClient(t)
 	mockGrpcClient := mocks.NewMockGrpcClient[datapb.DataCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
-		return f(mockProxy)
+		return f(mockDC)
 	})
 	client.grpcClient = mockGrpcClient
 
 	// test success
-	mockProxy.EXPECT().UnsetIsImportingState(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+	mockDC.EXPECT().UnsetIsImportingState(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 	_, err = client.UnsetIsImportingState(ctx, &datapb.UnsetIsImportingStateRequest{})
 	assert.Nil(t, err)
 
 	// test return error code
-	mockProxy.ExpectedCalls = nil
-	mockProxy.EXPECT().UnsetIsImportingState(mock.Anything, mock.Anything).Return(merr.Status(merr.ErrServiceNotReady), nil)
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().UnsetIsImportingState(mock.Anything, mock.Anything).Return(merr.Status(merr.ErrServiceNotReady), nil)
 
 	_, err = client.UnsetIsImportingState(ctx, &datapb.UnsetIsImportingStateRequest{})
 	assert.Nil(t, err)
@@ -1351,23 +1352,23 @@ func Test_MarkSegmentsDropped(t *testing.T) {
 	assert.NotNil(t, client)
 	defer client.Close()
 
-	mockProxy := mocks.NewMockDataCoordClient(t)
+	mockDC := mocks.NewMockDataCoordClient(t)
 	mockGrpcClient := mocks.NewMockGrpcClient[datapb.DataCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
-		return f(mockProxy)
+		return f(mockDC)
 	})
 	client.grpcClient = mockGrpcClient
 
 	// test success
-	mockProxy.EXPECT().MarkSegmentsDropped(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+	mockDC.EXPECT().MarkSegmentsDropped(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 	_, err = client.MarkSegmentsDropped(ctx, &datapb.MarkSegmentsDroppedRequest{})
 	assert.Nil(t, err)
 
 	// test return error code
-	mockProxy.ExpectedCalls = nil
-	mockProxy.EXPECT().MarkSegmentsDropped(mock.Anything, mock.Anything).Return(merr.Status(merr.ErrServiceNotReady), nil)
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().MarkSegmentsDropped(mock.Anything, mock.Anything).Return(merr.Status(merr.ErrServiceNotReady), nil)
 
 	_, err = client.MarkSegmentsDropped(ctx, &datapb.MarkSegmentsDroppedRequest{})
 	assert.Nil(t, err)
@@ -1389,22 +1390,22 @@ func Test_BroadcastAlteredCollection(t *testing.T) {
 	assert.NotNil(t, client)
 	defer client.Close()
 
-	mockProxy := mocks.NewMockDataCoordClient(t)
+	mockDC := mocks.NewMockDataCoordClient(t)
 	mockGrpcClient := mocks.NewMockGrpcClient[datapb.DataCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
-		return f(mockProxy)
+		return f(mockDC)
 	})
 	client.grpcClient = mockGrpcClient
 
 	// test success
-	mockProxy.EXPECT().BroadcastAlteredCollection(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+	mockDC.EXPECT().BroadcastAlteredCollection(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 	_, err = client.BroadcastAlteredCollection(ctx, &datapb.AlterCollectionRequest{})
 	assert.Nil(t, err)
 
 	// test return error code
-	mockProxy.ExpectedCalls = nil
-	mockProxy.EXPECT().BroadcastAlteredCollection(mock.Anything, mock.Anything).Return(merr.Status(merr.ErrServiceNotReady), nil)
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().BroadcastAlteredCollection(mock.Anything, mock.Anything).Return(merr.Status(merr.ErrServiceNotReady), nil)
 
 	_, err = client.BroadcastAlteredCollection(ctx, &datapb.AlterCollectionRequest{})
 	assert.Nil(t, err)
@@ -1426,22 +1427,22 @@ func Test_CheckHealth(t *testing.T) {
 	assert.NotNil(t, client)
 	defer client.Close()
 
-	mockProxy := mocks.NewMockDataCoordClient(t)
+	mockDC := mocks.NewMockDataCoordClient(t)
 	mockGrpcClient := mocks.NewMockGrpcClient[datapb.DataCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
-		return f(mockProxy)
+		return f(mockDC)
 	})
 	client.grpcClient = mockGrpcClient
 
 	// test success
-	mockProxy.EXPECT().CheckHealth(mock.Anything, mock.Anything).Return(&milvuspb.CheckHealthResponse{Status: merr.Success()}, nil)
+	mockDC.EXPECT().CheckHealth(mock.Anything, mock.Anything).Return(&milvuspb.CheckHealthResponse{Status: merr.Success()}, nil)
 	_, err = client.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
 	assert.Nil(t, err)
 
 	// test return error code
-	mockProxy.ExpectedCalls = nil
-	mockProxy.EXPECT().CheckHealth(mock.Anything, mock.Anything).Return(&milvuspb.CheckHealthResponse{Status: merr.Status(merr.ErrServiceNotReady)}, nil)
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().CheckHealth(mock.Anything, mock.Anything).Return(&milvuspb.CheckHealthResponse{Status: merr.Status(merr.ErrServiceNotReady)}, nil)
 
 	_, err = client.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
 	assert.Nil(t, err)
@@ -1463,22 +1464,22 @@ func Test_GcConfirm(t *testing.T) {
 	assert.NotNil(t, client)
 	defer client.Close()
 
-	mockProxy := mocks.NewMockDataCoordClient(t)
+	mockDC := mocks.NewMockDataCoordClient(t)
 	mockGrpcClient := mocks.NewMockGrpcClient[datapb.DataCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
-		return f(mockProxy)
+		return f(mockDC)
 	})
 	client.grpcClient = mockGrpcClient
 
 	// test success
-	mockProxy.EXPECT().GcConfirm(mock.Anything, mock.Anything).Return(&datapb.GcConfirmResponse{Status: merr.Success()}, nil)
+	mockDC.EXPECT().GcConfirm(mock.Anything, mock.Anything).Return(&datapb.GcConfirmResponse{Status: merr.Success()}, nil)
 	_, err = client.GcConfirm(ctx, &datapb.GcConfirmRequest{})
 	assert.Nil(t, err)
 
 	// test return error code
-	mockProxy.ExpectedCalls = nil
-	mockProxy.EXPECT().GcConfirm(mock.Anything, mock.Anything).Return(&datapb.GcConfirmResponse{Status: merr.Status(merr.ErrServiceNotReady)}, nil)
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().GcConfirm(mock.Anything, mock.Anything).Return(&datapb.GcConfirmResponse{Status: merr.Status(merr.ErrServiceNotReady)}, nil)
 
 	_, err = client.GcConfirm(ctx, &datapb.GcConfirmRequest{})
 	assert.Nil(t, err)
@@ -1500,22 +1501,29 @@ func Test_CreateIndex(t *testing.T) {
 	assert.NotNil(t, client)
 	defer client.Close()
 
-	mockProxy := mocks.NewMockDataCoordClient(t)
+	mockDC := mocks.NewMockDataCoordClient(t)
 	mockGrpcClient := mocks.NewMockGrpcClient[datapb.DataCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
-		return f(mockProxy)
+		return f(mockDC)
 	})
 	client.grpcClient = mockGrpcClient
 
 	// test success
-	mockProxy.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+	mockDC.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+	_, err = client.CreateIndex(ctx, &indexpb.CreateIndexRequest{})
+	assert.Nil(t, err)
+
+	// test compatible with 2.2.x
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(nil, merr.ErrServiceUnimplemented).Times(1)
+	mockDC.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 	_, err = client.CreateIndex(ctx, &indexpb.CreateIndexRequest{})
 	assert.Nil(t, err)
 
 	// test return error code
-	mockProxy.ExpectedCalls = nil
-	mockProxy.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(merr.Status(merr.ErrServiceNotReady), nil)
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(merr.Status(merr.ErrServiceNotReady), nil)
 
 	_, err = client.CreateIndex(ctx, &indexpb.CreateIndexRequest{})
 	assert.Nil(t, err)
@@ -1537,22 +1545,29 @@ func Test_GetSegmentIndexState(t *testing.T) {
 	assert.NotNil(t, client)
 	defer client.Close()
 
-	mockProxy := mocks.NewMockDataCoordClient(t)
+	mockDC := mocks.NewMockDataCoordClient(t)
 	mockGrpcClient := mocks.NewMockGrpcClient[datapb.DataCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
-		return f(mockProxy)
+		return f(mockDC)
 	})
 	client.grpcClient = mockGrpcClient
 
 	// test success
-	mockProxy.EXPECT().GetSegmentIndexState(mock.Anything, mock.Anything).Return(&indexpb.GetSegmentIndexStateResponse{Status: merr.Success()}, nil)
+	mockDC.EXPECT().GetSegmentIndexState(mock.Anything, mock.Anything).Return(&indexpb.GetSegmentIndexStateResponse{Status: merr.Success()}, nil)
+	_, err = client.GetSegmentIndexState(ctx, &indexpb.GetSegmentIndexStateRequest{})
+	assert.Nil(t, err)
+
+	// test compatible with 2.2.x
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().GetSegmentIndexState(mock.Anything, mock.Anything).Return(nil, merr.ErrServiceUnimplemented).Times(1)
+	mockDC.EXPECT().GetSegmentIndexState(mock.Anything, mock.Anything).Return(&indexpb.GetSegmentIndexStateResponse{}, nil)
 	_, err = client.GetSegmentIndexState(ctx, &indexpb.GetSegmentIndexStateRequest{})
 	assert.Nil(t, err)
 
 	// test return error code
-	mockProxy.ExpectedCalls = nil
-	mockProxy.EXPECT().GetSegmentIndexState(mock.Anything, mock.Anything).Return(&indexpb.GetSegmentIndexStateResponse{Status: merr.Status(err)}, nil)
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().GetSegmentIndexState(mock.Anything, mock.Anything).Return(&indexpb.GetSegmentIndexStateResponse{Status: merr.Status(err)}, nil)
 
 	_, err = client.GetSegmentIndexState(ctx, &indexpb.GetSegmentIndexStateRequest{})
 	assert.Nil(t, err)
@@ -1574,22 +1589,29 @@ func Test_GetIndexState(t *testing.T) {
 	assert.NotNil(t, client)
 	defer client.Close()
 
-	mockProxy := mocks.NewMockDataCoordClient(t)
+	mockDC := mocks.NewMockDataCoordClient(t)
 	mockGrpcClient := mocks.NewMockGrpcClient[datapb.DataCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
-		return f(mockProxy)
+		return f(mockDC)
 	})
 	client.grpcClient = mockGrpcClient
 
 	// test success
-	mockProxy.EXPECT().GetIndexState(mock.Anything, mock.Anything).Return(&indexpb.GetIndexStateResponse{Status: merr.Success()}, nil)
+	mockDC.EXPECT().GetIndexState(mock.Anything, mock.Anything).Return(&indexpb.GetIndexStateResponse{Status: merr.Success()}, nil)
+	_, err = client.GetIndexState(ctx, &indexpb.GetIndexStateRequest{})
+	assert.Nil(t, err)
+
+	// test compatible with 2.2.x
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().GetIndexState(mock.Anything, mock.Anything).Return(nil, merr.ErrServiceUnimplemented).Times(1)
+	mockDC.EXPECT().GetIndexState(mock.Anything, mock.Anything).Return(&indexpb.GetIndexStateResponse{}, nil)
 	_, err = client.GetIndexState(ctx, &indexpb.GetIndexStateRequest{})
 	assert.Nil(t, err)
 
 	// test return error code
-	mockProxy.ExpectedCalls = nil
-	mockProxy.EXPECT().GetIndexState(mock.Anything, mock.Anything).Return(&indexpb.GetIndexStateResponse{Status: merr.Status(err)}, nil)
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().GetIndexState(mock.Anything, mock.Anything).Return(&indexpb.GetIndexStateResponse{Status: merr.Status(err)}, nil)
 
 	_, err = client.GetIndexState(ctx, &indexpb.GetIndexStateRequest{})
 	assert.Nil(t, err)
@@ -1611,22 +1633,29 @@ func Test_GetIndexInfos(t *testing.T) {
 	assert.NotNil(t, client)
 	defer client.Close()
 
-	mockProxy := mocks.NewMockDataCoordClient(t)
+	mockDC := mocks.NewMockDataCoordClient(t)
 	mockGrpcClient := mocks.NewMockGrpcClient[datapb.DataCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
-		return f(mockProxy)
+		return f(mockDC)
 	})
 	client.grpcClient = mockGrpcClient
 
 	// test success
-	mockProxy.EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(&indexpb.GetIndexInfoResponse{Status: merr.Success()}, nil)
+	mockDC.EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(&indexpb.GetIndexInfoResponse{Status: merr.Success()}, nil)
+	_, err = client.GetIndexInfos(ctx, &indexpb.GetIndexInfoRequest{})
+	assert.Nil(t, err)
+
+	// test compatible with 2.2.x
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(nil, merr.ErrServiceUnimplemented).Times(1)
+	mockDC.EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(&indexpb.GetIndexInfoResponse{}, nil)
 	_, err = client.GetIndexInfos(ctx, &indexpb.GetIndexInfoRequest{})
 	assert.Nil(t, err)
 
 	// test return error code
-	mockProxy.ExpectedCalls = nil
-	mockProxy.EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(&indexpb.GetIndexInfoResponse{Status: merr.Status(err)}, nil)
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(&indexpb.GetIndexInfoResponse{Status: merr.Status(err)}, nil)
 
 	_, err = client.GetIndexInfos(ctx, &indexpb.GetIndexInfoRequest{})
 	assert.Nil(t, err)
@@ -1648,22 +1677,29 @@ func Test_DescribeIndex(t *testing.T) {
 	assert.NotNil(t, client)
 	defer client.Close()
 
-	mockProxy := mocks.NewMockDataCoordClient(t)
+	mockDC := mocks.NewMockDataCoordClient(t)
 	mockGrpcClient := mocks.NewMockGrpcClient[datapb.DataCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
-		return f(mockProxy)
+		return f(mockDC)
 	})
 	client.grpcClient = mockGrpcClient
 
 	// test success
-	mockProxy.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(&indexpb.DescribeIndexResponse{Status: merr.Success()}, nil)
+	mockDC.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(&indexpb.DescribeIndexResponse{Status: merr.Success()}, nil)
+	_, err = client.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{})
+	assert.Nil(t, err)
+
+	// test compatible with 2.2.x
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(nil, merr.ErrServiceUnimplemented).Times(1)
+	mockDC.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(&indexpb.DescribeIndexResponse{}, nil)
 	_, err = client.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{})
 	assert.Nil(t, err)
 
 	// test return error code
-	mockProxy.ExpectedCalls = nil
-	mockProxy.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(&indexpb.DescribeIndexResponse{Status: merr.Status(err)}, nil)
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(&indexpb.DescribeIndexResponse{Status: merr.Status(err)}, nil)
 
 	_, err = client.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{})
 	assert.Nil(t, err)
@@ -1685,22 +1721,29 @@ func Test_GetIndexStatistics(t *testing.T) {
 	assert.NotNil(t, client)
 	defer client.Close()
 
-	mockProxy := mocks.NewMockDataCoordClient(t)
+	mockDC := mocks.NewMockDataCoordClient(t)
 	mockGrpcClient := mocks.NewMockGrpcClient[datapb.DataCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
-		return f(mockProxy)
+		return f(mockDC)
 	})
 	client.grpcClient = mockGrpcClient
 
 	// test success
-	mockProxy.EXPECT().GetIndexStatistics(mock.Anything, mock.Anything).Return(&indexpb.GetIndexStatisticsResponse{Status: merr.Success()}, nil)
+	mockDC.EXPECT().GetIndexStatistics(mock.Anything, mock.Anything).Return(&indexpb.GetIndexStatisticsResponse{Status: merr.Success()}, nil)
+	_, err = client.GetIndexStatistics(ctx, &indexpb.GetIndexStatisticsRequest{})
+	assert.Nil(t, err)
+
+	// test compatible with 2.2.x
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().GetIndexStatistics(mock.Anything, mock.Anything).Return(nil, merr.ErrServiceUnimplemented).Times(1)
+	mockDC.EXPECT().GetIndexStatistics(mock.Anything, mock.Anything).Return(&indexpb.GetIndexStatisticsResponse{}, nil)
 	_, err = client.GetIndexStatistics(ctx, &indexpb.GetIndexStatisticsRequest{})
 	assert.Nil(t, err)
 
 	// test return error code
-	mockProxy.ExpectedCalls = nil
-	mockProxy.EXPECT().GetIndexStatistics(mock.Anything, mock.Anything).Return(&indexpb.GetIndexStatisticsResponse{Status: merr.Status(err)}, nil)
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().GetIndexStatistics(mock.Anything, mock.Anything).Return(&indexpb.GetIndexStatisticsResponse{Status: merr.Status(err)}, nil)
 
 	_, err = client.GetIndexStatistics(ctx, &indexpb.GetIndexStatisticsRequest{})
 	assert.Nil(t, err)
@@ -1722,22 +1765,29 @@ func Test_GetIndexBuildProgress(t *testing.T) {
 	assert.NotNil(t, client)
 	defer client.Close()
 
-	mockProxy := mocks.NewMockDataCoordClient(t)
+	mockDC := mocks.NewMockDataCoordClient(t)
 	mockGrpcClient := mocks.NewMockGrpcClient[datapb.DataCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
-		return f(mockProxy)
+		return f(mockDC)
 	})
 	client.grpcClient = mockGrpcClient
 
 	// test success
-	mockProxy.EXPECT().GetIndexBuildProgress(mock.Anything, mock.Anything).Return(&indexpb.GetIndexBuildProgressResponse{Status: merr.Success()}, nil)
+	mockDC.EXPECT().GetIndexBuildProgress(mock.Anything, mock.Anything).Return(&indexpb.GetIndexBuildProgressResponse{Status: merr.Success()}, nil)
+	_, err = client.GetIndexBuildProgress(ctx, &indexpb.GetIndexBuildProgressRequest{})
+	assert.Nil(t, err)
+
+	// test compatible with 2.2.x
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().GetIndexBuildProgress(mock.Anything, mock.Anything).Return(nil, merr.ErrServiceUnimplemented).Times(1)
+	mockDC.EXPECT().GetIndexBuildProgress(mock.Anything, mock.Anything).Return(&indexpb.GetIndexBuildProgressResponse{}, nil)
 	_, err = client.GetIndexBuildProgress(ctx, &indexpb.GetIndexBuildProgressRequest{})
 	assert.Nil(t, err)
 
 	// test return error code
-	mockProxy.ExpectedCalls = nil
-	mockProxy.EXPECT().GetIndexBuildProgress(mock.Anything, mock.Anything).Return(&indexpb.GetIndexBuildProgressResponse{Status: merr.Status(err)}, nil)
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().GetIndexBuildProgress(mock.Anything, mock.Anything).Return(&indexpb.GetIndexBuildProgressResponse{Status: merr.Status(err)}, nil)
 
 	_, err = client.GetIndexBuildProgress(ctx, &indexpb.GetIndexBuildProgressRequest{})
 	assert.Nil(t, err)
@@ -1759,22 +1809,29 @@ func Test_DropIndex(t *testing.T) {
 	assert.NotNil(t, client)
 	defer client.Close()
 
-	mockProxy := mocks.NewMockDataCoordClient(t)
+	mockDC := mocks.NewMockDataCoordClient(t)
 	mockGrpcClient := mocks.NewMockGrpcClient[datapb.DataCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
-		return f(mockProxy)
+		return f(mockDC)
 	})
 	client.grpcClient = mockGrpcClient
 
 	// test success
-	mockProxy.EXPECT().DropIndex(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+	mockDC.EXPECT().DropIndex(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+	_, err = client.DropIndex(ctx, &indexpb.DropIndexRequest{})
+	assert.Nil(t, err)
+
+	// test compatible with 2.2.x
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().DropIndex(mock.Anything, mock.Anything).Return(nil, merr.ErrServiceUnimplemented).Times(1)
+	mockDC.EXPECT().DropIndex(mock.Anything, mock.Anything).Return(&commonpb.Status{}, nil)
 	_, err = client.DropIndex(ctx, &indexpb.DropIndexRequest{})
 	assert.Nil(t, err)
 
 	// test return error code
-	mockProxy.ExpectedCalls = nil
-	mockProxy.EXPECT().DropIndex(mock.Anything, mock.Anything).Return(merr.Status(err), nil)
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().DropIndex(mock.Anything, mock.Anything).Return(merr.Status(err), nil)
 
 	_, err = client.DropIndex(ctx, &indexpb.DropIndexRequest{})
 	assert.Nil(t, err)
@@ -1796,22 +1853,22 @@ func Test_ReportDataNodeTtMsgs(t *testing.T) {
 	assert.NotNil(t, client)
 	defer client.Close()
 
-	mockProxy := mocks.NewMockDataCoordClient(t)
+	mockDC := mocks.NewMockDataCoordClient(t)
 	mockGrpcClient := mocks.NewMockGrpcClient[datapb.DataCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
-		return f(mockProxy)
+		return f(mockDC)
 	})
 	client.grpcClient = mockGrpcClient
 
 	// test success
-	mockProxy.EXPECT().ReportDataNodeTtMsgs(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+	mockDC.EXPECT().ReportDataNodeTtMsgs(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 	_, err = client.ReportDataNodeTtMsgs(ctx, &datapb.ReportDataNodeTtMsgsRequest{})
 	assert.Nil(t, err)
 
 	// test return error code
-	mockProxy.ExpectedCalls = nil
-	mockProxy.EXPECT().ReportDataNodeTtMsgs(mock.Anything, mock.Anything).Return(merr.Status(err), nil)
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().ReportDataNodeTtMsgs(mock.Anything, mock.Anything).Return(merr.Status(err), nil)
 
 	_, err = client.ReportDataNodeTtMsgs(ctx, &datapb.ReportDataNodeTtMsgsRequest{})
 	assert.Nil(t, err)
@@ -1833,22 +1890,22 @@ func Test_GcControl(t *testing.T) {
 	assert.NotNil(t, client)
 	defer client.Close()
 
-	mockProxy := mocks.NewMockDataCoordClient(t)
+	mockDC := mocks.NewMockDataCoordClient(t)
 	mockGrpcClient := mocks.NewMockGrpcClient[datapb.DataCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
-		return f(mockProxy)
+		return f(mockDC)
 	})
 	client.grpcClient = mockGrpcClient
 
 	// test success
-	mockProxy.EXPECT().GcControl(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+	mockDC.EXPECT().GcControl(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 	_, err = client.GcControl(ctx, &datapb.GcControlRequest{})
 	assert.Nil(t, err)
 
 	// test return error code
-	mockProxy.ExpectedCalls = nil
-	mockProxy.EXPECT().GcControl(mock.Anything, mock.Anything).Return(merr.Status(err), nil)
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().GcControl(mock.Anything, mock.Anything).Return(merr.Status(err), nil)
 
 	_, err = client.GcControl(ctx, &datapb.GcControlRequest{})
 	assert.Nil(t, err)

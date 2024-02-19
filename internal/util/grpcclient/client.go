@@ -410,7 +410,10 @@ func (c *ClientBase[T]) checkGrpcErr(ctx context.Context, err error) (needRetry,
 		// canceled or deadline exceeded
 		return true, c.needResetCancel(), err
 	case funcutil.IsGrpcErr(err, codes.Unimplemented):
-		return false, false, merr.WrapErrServiceUnimplemented(err)
+		// for unimplemented error, reset coord connection to avoid old coord's side effect.
+		// old coord's side effect: when coord changed, the connection in coord's client won't reset automatically.
+		// so if new interface appear in new coord, will got a unimplemented error
+		return false, true, merr.WrapErrServiceUnimplemented(err)
 	case IsServerIDMismatchErr(err):
 		if ok, err := c.checkNodeSessionExist(ctx); !ok {
 			// if session doesn't exist, no need to retry for datanode/indexnode/querynode/proxy
