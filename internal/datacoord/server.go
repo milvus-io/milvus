@@ -26,7 +26,7 @@ import (
 	"syscall"
 	"time"
 
-	semver "github.com/blang/semver/v4"
+	"github.com/blang/semver/v4"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/tikv/client-go/v2/txnkv"
@@ -1168,6 +1168,11 @@ func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID i
 		return err
 	}
 
+	dbID, err := s.broker.GetDatabaseID(ctx, resp.DbName)
+	if err != nil {
+		return err
+	}
+
 	properties := make(map[string]string)
 	for _, pair := range resp.Properties {
 		properties[pair.GetKey()] = pair.GetValue()
@@ -1180,6 +1185,7 @@ func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID i
 		StartPositions: resp.GetStartPositions(),
 		Properties:     properties,
 		CreatedAt:      resp.GetCreatedTimestamp(),
+		DatabaseID:     dbID,
 	}
 	s.meta.AddCollection(collInfo)
 	return nil

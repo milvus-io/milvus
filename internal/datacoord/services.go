@@ -1654,6 +1654,7 @@ func (s *Server) BroadcastAlteredCollection(ctx context.Context, req *datapb.Alt
 			Partitions:     req.GetPartitionIDs(),
 			StartPositions: req.GetStartPositions(),
 			Properties:     properties,
+			DatabaseID:     req.GetDbID(),
 		}
 		s.meta.AddCollection(collInfo)
 		return merr.Success(), nil
