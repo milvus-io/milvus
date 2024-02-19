@@ -48,6 +48,8 @@ pipeline {
 
                                 sh './build/set_docker_mirror.sh'
                                 sh """
+                                # disable dirty tag
+                                sed -i. 's/--dirty="-dev"//g' Makefile
                                 export IS_NETWORK_MODE_HOST="true"
                                 build/builder.sh /bin/bash -c \"make install\"
                                 """
