@@ -1599,10 +1599,10 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 
 	p.BalanceCostThreshold = ParamItem{
 		Key:          "queryCoord.balanceCostThreshold",
-		Version:      "2.3.5",
+		Version:      "2.4.0",
 		DefaultValue: "0.001",
 		PanicIfEmpty: true,
-		Doc:          "the threshold of balance cost",
+		Doc:          "the threshold of balance cost, if the cluster's cost after executing the balance plan is less than this value, the plan will not be executed",
 		Export:       true,
 	}
 	p.BalanceCostThreshold.Init(base.mgr)
