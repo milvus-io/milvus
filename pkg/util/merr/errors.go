@@ -154,6 +154,10 @@ var (
 
 	// import
 	ErrImportFailed = newMilvusError("importing data failed", 2100, false)
+
+	// parse expr
+	ErrParseExprFailed      = newMilvusError("parse expr failed", 2200, false)
+	ErrParseExprUnsupported = newMilvusError("no operator matches the given name and argument types.", 2201, false)
 )
 
 type milvusError struct {

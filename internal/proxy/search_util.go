@@ -14,7 +14,6 @@ import (
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -85,7 +84,7 @@ func initSearchRequest(ctx context.Context, t *searchTask) error {
 			log.Warn("failed to create query plan", zap.Error(err),
 				zap.String("dsl", t.request.Dsl), // may be very large if large term passed.
 				zap.String("anns field", annsField), zap.Any("query info", queryInfo))
-			return merr.WrapErrParameterInvalidMsg("failed to create query plan: %v", err)
+			return err
 		}
 		log.Debug("create query plan",
 			zap.String("dsl", t.request.Dsl), // may be very large if large term passed.

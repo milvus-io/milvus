@@ -491,12 +491,12 @@ class TestCollectionSearchInvalid(TestcaseBase):
         collection_w.load()
         expression = expression.replace("&&", "and").replace("||", "or")
         vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
-        collection_w.search(vectors[:default_nq], default_search_field,
-                            default_search_params, nb, expression,
-                            check_task=CheckTasks.err_res,
-                            check_items={"err_code": 1,
-                                         "err_msg": "failed to create query plan: "
-                                                    "cannot parse expression: %s" % expression})
+        res, check = collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, nb, expression, check_task=CheckTasks.check_nothing)
+        from utils.api_request import Error
+        assert isinstance(res, Error)
+        assert  (res.code == 2200 or res.code == 2201 or "parse expr failed: %s" % expression in res.message or
+                 "no operator matches the given name and argument types" in res.message)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_param_invalid_expr_value(self, get_invalid_expr_value):
@@ -515,8 +515,8 @@ class TestCollectionSearchInvalid(TestcaseBase):
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, default_limit, invalid_search_expr,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 65535,
-                                         "err_msg": "failed to create query plan: cannot parse expression: %s"
+                            check_items={"err_code": 2200,
+                                         "err_msg": "parse expr failed: %s"
                                                     % invalid_search_expr})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -575,9 +575,8 @@ class TestCollectionSearchInvalid(TestcaseBase):
         search_res, _ = collection_w.search(vectors[:default_nq], default_search_field,
                                             default_search_params, default_limit, expression,
                                             check_task=CheckTasks.err_res,
-                                            check_items={"err_code": 1,
-                                                         "err_msg": "failed to create query plan: cannot parse "
-                                                                    "expression: %s" % expression})
+                                            check_items={"err_code": 2200,
+                                                         "err_msg": "parse expr failed[expr={expression}]"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_with_expression_invalid_array_one(self):
@@ -9348,8 +9347,8 @@ class TestCollectionSearchJSON(TestcaseBase):
                             default_search_params, default_limit,
                             json_search_exp,
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1,
-                                         ct.err_msg: "can not comparisons jsonField directly"})
+                            check_items={ct.err_code: 2200,
+                                         ct.err_msg: "JSON field cannot be used for comparison directly"})
 
     """
     ******************************************************************

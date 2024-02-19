@@ -28,6 +28,20 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
+// IsMerr return whether this error is wrapped based on milvusError
+func IsMerr(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	cause := errors.Cause(err)
+	switch cause.(type) {
+	case milvusError:
+		return true
+	}
+	return false
+}
+
 // Code returns the error code of the given error,
 // WARN: DO NOT use this for now
 func Code(err error) int32 {
@@ -946,6 +960,34 @@ func (f boundField) String() string {
 
 func WrapErrImportFailed(msg ...string) error {
 	err := error(ErrImportFailed)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
+
+func WrapErrParseExprFailed(oldErr error, expr string, msg ...string) error {
+	if IsMerr(oldErr) {
+		return oldErr
+	}
+	err := wrapFields(ErrParseExprFailed, value("expr", expr))
+
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
+
+func WrapErrParseExprUnsupported(oldErr error, expr, left, right, op string, msg ...string) error {
+	if IsMerr(oldErr) {
+		return oldErr
+	}
+	err := wrapFields(ErrParseExprUnsupported,
+		value("expr", expr),
+		value("left", left),
+		value("right", right),
+		value("op", op))
+
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "->"))
 	}

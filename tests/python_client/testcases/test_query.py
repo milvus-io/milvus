@@ -2509,9 +2509,8 @@ class TestQueryString(TestcaseBase):
         expression = 'float like "0%"'
         collection_w.query(expression,
                            check_task=CheckTasks.err_res,
-                           check_items={ct.err_code: 65535,
-                                        ct.err_msg: f"cannot parse expression: {expression}, error: like "
-                                                    f"operation on non-string or no-json field is unsupported"})
+                           check_items={ct.err_code: 2201,
+                                        ct.err_msg: f"no operator matches the given name and argument types"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_query_compare_two_fields(self):
@@ -2539,9 +2538,8 @@ class TestQueryString(TestcaseBase):
                                                     primary_field=ct.default_string_field_name)[0]
         expression = 'varchar == int64'
         collection_w.query(expression, check_task=CheckTasks.err_res,
-                           check_items={ct.err_code: 1100, ct.err_msg:
-                                        f"failed to create query plan: cannot parse expression: {expression}, "
-                                        f"error: comparisons between VarChar and Int64 are not supported: invalid parameter"})
+                           check_items={ct.err_code: 2201, ct.err_msg:
+                                        f"no operator matches the given name and argument types"})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.xfail(reason="issue 24637")
