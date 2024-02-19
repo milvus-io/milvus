@@ -397,9 +397,12 @@ func (s *Server) startQueryCoord() error {
 		return err
 	}
 	for _, node := range sessions {
-		n := session.NewNodeInfo(node.ServerID, node.Address)
-		n.SetVersion(node.Version)
-		s.nodeMgr.Add(n)
+		s.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   node.ServerID,
+			Address:  node.Address,
+			Hostname: node.HostName,
+			Version:  node.Version,
+		}))
 		s.taskScheduler.AddExecutor(node.ServerID)
 
 		if node.Stopping {
@@ -617,7 +620,12 @@ func (s *Server) watchNodes(revision int64) {
 					zap.Int64("nodeID", nodeID),
 					zap.String("nodeAddr", addr),
 				)
-				s.nodeMgr.Add(session.NewNodeInfo(nodeID, addr))
+				s.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+					NodeID:   nodeID,
+					Address:  addr,
+					Hostname: event.Session.HostName,
+					Version:  event.Session.Version,
+				}))
 				s.nodeUpEventChan <- nodeID
 				select {
 				case s.notifyNodeUp <- struct{}{}:
