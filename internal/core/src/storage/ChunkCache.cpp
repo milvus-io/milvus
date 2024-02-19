@@ -20,7 +20,7 @@ namespace milvus::storage {
 
 std::shared_ptr<ColumnBase>
 ChunkCache::Read(const std::string& filepath) {
-    auto path = std::filesystem::path(path_prefix_) / filepath;
+    auto path = CachePath(filepath);
 
     {
         std::shared_lock lck(mutex_);
@@ -46,14 +46,14 @@ ChunkCache::Read(const std::string& filepath) {
 
 void
 ChunkCache::Remove(const std::string& filepath) {
-    auto path = std::filesystem::path(path_prefix_) / filepath;
+    auto path = CachePath(filepath);
     std::unique_lock lck(mutex_);
     columns_.erase(path);
 }
 
 void
 ChunkCache::Prefetch(const std::string& filepath) {
-    auto path = std::filesystem::path(path_prefix_) / filepath;
+    auto path = CachePath(filepath);
 
     std::shared_lock lck(mutex_);
     auto it = columns_.find(path);
@@ -68,7 +68,7 @@ ChunkCache::Prefetch(const std::string& filepath) {
                 read_ahead_policy_);
     AssertInfo(ok == 0,
                "failed to madvise to the data file {}, err: {}",
-               path.c_str(),
+               path,
                strerror(errno));
 }
 
@@ -113,6 +113,22 @@ ChunkCache::Mmap(const std::filesystem::path& path,
                strerror(errno));
 
     return column;
+}
+
+std::string
+ChunkCache::CachePath(const std::string& filepath) {
+    auto path = std::filesystem::path(filepath);
+    auto prefix = std::filesystem::path(path_prefix_);
+
+    // Cache path shall not use absolute filepath direct, it shall always under path_prefix_
+    if (path.is_absolute()) {
+        return (prefix /
+                filepath.substr(path.root_directory().string().length(),
+                                filepath.length()))
+            .string();
+    }
+
+    return (prefix / filepath).string();
 }
 
 }  // namespace milvus::storage
