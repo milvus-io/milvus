@@ -133,7 +133,6 @@ type ImportTask interface {
 	GetReason() string
 	GetFileStats() []*datapb.ImportFileStats
 	GetLastActiveTime() time.Time
-	GetTimeoutTs() uint64
 	Clone() ImportTask
 }
 

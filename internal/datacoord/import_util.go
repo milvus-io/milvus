@@ -47,21 +47,20 @@ func WrapTaskLog(task ImportTask, fields ...zap.Field) []zap.Field {
 	return res
 }
 
-func AssemblePreImportRequest(task ImportTask, schema *schemapb.CollectionSchema) *datapb.PreImportRequest {
+func AssemblePreImportRequest(task ImportTask, job ImportJob) *datapb.PreImportRequest {
 	importFiles := lo.Map(task.(*preImportTask).GetFileStats(),
 		func(fileStats *datapb.ImportFileStats, _ int) *internalpb.ImportFile {
 			return fileStats.GetImportFile()
 		})
-	pt := task.(*preImportTask)
 	return &datapb.PreImportRequest{
 		JobID:        task.GetJobID(),
 		TaskID:       task.GetTaskID(),
 		CollectionID: task.GetCollectionID(),
-		PartitionIDs: pt.GetPartitionIDs(),
-		Vchannels:    pt.GetVchannels(),
-		Schema:       schema,
+		PartitionIDs: job.GetPartitionIDs(),
+		Vchannels:    job.GetVchannels(),
+		Schema:       job.GetSchema(),
 		ImportFiles:  importFiles,
-		Options:      pt.GetOptions(),
+		Options:      job.GetOptions(),
 	}
 }
 
@@ -109,7 +108,7 @@ func AssignSegments(task ImportTask, manager Manager, schema *schemapb.Collectio
 	return segments, nil
 }
 
-func AssembleImportRequest(task ImportTask, schema *schemapb.CollectionSchema, meta *meta, alloc allocator) (*datapb.ImportRequest, error) {
+func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc allocator) (*datapb.ImportRequest, error) {
 	requestSegments := make([]*datapb.ImportRequestSegment, 0)
 	for _, segmentID := range task.(*importTask).GetSegmentIDs() {
 		segment := meta.GetSegment(segmentID)
@@ -142,9 +141,11 @@ func AssembleImportRequest(task ImportTask, schema *schemapb.CollectionSchema, m
 		JobID:           task.GetJobID(),
 		TaskID:          task.GetTaskID(),
 		CollectionID:    task.GetCollectionID(),
-		Schema:          schema,
+		PartitionIDs:    job.GetPartitionIDs(),
+		Vchannels:       job.GetVchannels(),
+		Schema:          job.GetSchema(),
 		Files:           importFiles,
-		Options:         task.(*importTask).GetOptions(),
+		Options:         job.GetOptions(),
 		Ts:              ts,
 		AutoIDRange:     &datapb.AutoIDRange{Begin: idBegin, End: idEnd},
 		RequestSegments: requestSegments,
@@ -208,12 +209,8 @@ func NewPreImportTasks(fileGroups [][]*internalpb.ImportFile,
 				JobID:        job.GetJobID(),
 				TaskID:       idStart + int64(i),
 				CollectionID: job.GetCollectionID(),
-				PartitionIDs: job.GetPartitionIDs(),
-				Vchannels:    job.GetVchannels(),
 				State:        internalpb.ImportState_Pending,
-				TimeoutTs:    job.GetTimeoutTs(),
 				FileStats:    fileStats,
-				Options:      job.GetOptions(),
 			},
 			lastActiveTime: time.Now(),
 		}
@@ -240,9 +237,7 @@ func NewImportTasks(fileGroups [][]*datapb.ImportFileStats,
 				CollectionID: job.GetCollectionID(),
 				NodeID:       NullNodeID,
 				State:        internalpb.ImportState_Pending,
-				TimeoutTs:    job.GetTimeoutTs(),
 				FileStats:    group,
-				Options:      job.GetOptions(),
 			},
 			lastActiveTime: time.Now(),
 		}

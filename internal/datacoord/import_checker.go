@@ -312,9 +312,10 @@ func (c *importChecker) checkFailure(jobID int64) {
 
 func (c *importChecker) checkTimeout(jobID int64) {
 	tasks := c.imeta.GetTaskBy(WithStates(internalpb.ImportState_InProgress), WithJob(jobID))
+	job := c.imeta.GetJob(jobID)
 	var isTimeout bool
 	for _, task := range tasks {
-		timeoutTime := tsoutil.PhysicalTime(task.GetTimeoutTs())
+		timeoutTime := tsoutil.PhysicalTime(job.GetTimeoutTs())
 		if time.Now().After(timeoutTime) {
 			isTimeout = true
 			log.Warn("Import task timeout, expired the specified time limit",

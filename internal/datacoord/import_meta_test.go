@@ -30,6 +30,7 @@ import (
 
 func TestImportMeta_Restore(t *testing.T) {
 	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListImportJobs().Return(nil, nil)
 	catalog.EXPECT().ListPreImportTasks().Return([]*datapb.PreImportTask{{TaskID: 1}}, nil)
 	catalog.EXPECT().ListImportTasks().Return([]*datapb.ImportTaskV2{{TaskID: 2}}, nil)
 
@@ -48,6 +49,8 @@ func TestImportMeta_Restore(t *testing.T) {
 
 func TestImportMeta_Normal(t *testing.T) {
 	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListImportJobs().Return(nil, nil)
+	catalog.EXPECT().ListPreImportTasks().Return(nil, nil)
 	catalog.EXPECT().ListImportTasks().Return(nil, nil)
 	catalog.EXPECT().SaveImportTask(mock.Anything).Return(nil)
 	catalog.EXPECT().DropImportTask(mock.Anything).Return(nil)
@@ -107,6 +110,8 @@ func TestImportMeta_Normal(t *testing.T) {
 func TestImportMeta_Failed(t *testing.T) {
 	mockErr := errors.New("mock err")
 	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListImportJobs().Return(nil, nil)
+	catalog.EXPECT().ListPreImportTasks().Return(nil, nil)
 	catalog.EXPECT().ListImportTasks().Return(nil, nil)
 	catalog.EXPECT().SaveImportTask(mock.Anything).Return(mockErr)
 	catalog.EXPECT().DropImportTask(mock.Anything).Return(mockErr)

@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"math"
 	"testing"
 
 	"github.com/samber/lo"
@@ -48,6 +49,8 @@ func (s *ImportSchedulerSuite) SetupTest() {
 	s.collectionID = 1
 
 	s.catalog = mocks.NewDataCoordCatalog(s.T())
+	s.catalog.EXPECT().ListImportJobs().Return(nil, nil)
+	s.catalog.EXPECT().ListPreImportTasks().Return(nil, nil)
 	s.catalog.EXPECT().ListImportTasks().Return(nil, nil)
 	s.catalog.EXPECT().ListSegments(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
@@ -68,6 +71,7 @@ func (s *ImportSchedulerSuite) SetupTest() {
 }
 
 func (s *ImportSchedulerSuite) TestProcessPreImport() {
+	s.catalog.EXPECT().SavePreImportTask(mock.Anything).Return(nil)
 	s.catalog.EXPECT().SaveImportTask(mock.Anything).Return(nil)
 	var task ImportTask = &preImportTask{
 		PreImportTask: &datapb.PreImportTask{
@@ -78,6 +82,16 @@ func (s *ImportSchedulerSuite) TestProcessPreImport() {
 		},
 	}
 	err := s.imeta.AddTask(task)
+	s.NoError(err)
+	var job ImportJob = &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:        0,
+			CollectionID: s.collectionID,
+			TimeoutTs:    math.MaxUint64,
+		},
+		schema: nil,
+	}
+	err = s.imeta.AddJob(job)
 	s.NoError(err)
 
 	// pending -> inProgress
@@ -114,6 +128,7 @@ func (s *ImportSchedulerSuite) TestProcessPreImport() {
 }
 
 func (s *ImportSchedulerSuite) TestProcessImport() {
+	s.catalog.EXPECT().SaveImportJob(mock.Anything).Return(nil)
 	s.catalog.EXPECT().SaveImportTask(mock.Anything).Return(nil)
 	var task ImportTask = &importTask{
 		ImportTaskV2: &datapb.ImportTaskV2{
@@ -139,6 +154,18 @@ func (s *ImportSchedulerSuite) TestProcessImport() {
 	}
 	err := s.imeta.AddTask(task)
 	s.NoError(err)
+	var job ImportJob = &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:        0,
+			CollectionID: s.collectionID,
+			PartitionIDs: []int64{2},
+			Vchannels:    []string{"channel1"},
+			TimeoutTs:    math.MaxUint64,
+		},
+		schema: nil,
+	}
+	err = s.imeta.AddJob(job)
+	s.NoError(err)
 
 	// pending -> inProgress
 	const nodeID = 10
@@ -147,6 +174,7 @@ func (s *ImportSchedulerSuite) TestProcessImport() {
 		return segmentID, nil
 	})
 	s.alloc.EXPECT().allocN(mock.Anything).Return(100, 200, nil)
+	s.alloc.EXPECT().allocTimestamp(mock.Anything).Return(300, nil)
 	s.catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
 	s.cluster.EXPECT().QueryImport(mock.Anything, mock.Anything).Return(&datapb.QueryImportResponse{
 		Slots: 1,

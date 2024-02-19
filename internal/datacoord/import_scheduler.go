@@ -178,8 +178,8 @@ func (s *importScheduler) processPendingPreImport(task ImportTask, nodeID int64)
 		return
 	}
 	log.Info("processing pending preimport task...", WrapTaskLog(task)...)
-	schema := s.imeta.GetJob(task.GetJobID()).GetSchema()
-	req := AssemblePreImportRequest(task, schema)
+	job := s.imeta.GetJob(task.GetJobID())
+	req := AssemblePreImportRequest(task, job)
 	err := s.cluster.PreImport(nodeID, req)
 	if err != nil {
 		log.Warn("preimport failed", WrapTaskLog(task, zap.Error(err))...)
@@ -199,8 +199,8 @@ func (s *importScheduler) processPendingImport(task ImportTask, nodeID int64) {
 		return
 	}
 	log.Info("processing pending import task...", WrapTaskLog(task)...)
-	schema := s.imeta.GetJob(task.GetJobID()).GetSchema()
-	req, err := AssembleImportRequest(task, schema, s.meta, s.alloc)
+	job := s.imeta.GetJob(task.GetJobID())
+	req, err := AssembleImportRequest(task, job, s.meta, s.alloc)
 	if err != nil {
 		log.Warn("assemble import request failed", WrapTaskLog(task, zap.Error(err))...)
 		return
