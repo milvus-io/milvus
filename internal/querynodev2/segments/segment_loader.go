@@ -735,8 +735,7 @@ func (loader *segmentLoader) requestResource(ctx context.Context, infos ...*quer
 	// we need to deal with empty infos case separately,
 	// because the following judgement for requested resources are based on current status and static config
 	// which may block empty-load operations by accident
-	if len(infos) == 0 ||
-		infos[0].GetLevel() == datapb.SegmentLevel_L0 {
+	if len(infos) == 0 {
 		return resource, 0, nil
 	}
 
