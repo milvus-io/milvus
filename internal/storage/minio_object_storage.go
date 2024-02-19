@@ -24,13 +24,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/storage/tencent"
+
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/storage/aliyun"
 	"github.com/milvus-io/milvus/internal/storage/gcp"
-	"github.com/milvus-io/milvus/internal/storage/tencent"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 )
@@ -65,9 +66,8 @@ func newMinioClient(ctx context.Context, c *config) (*minio.Client, error) {
 		}
 	case CloudProviderTencent:
 		bucketLookupType = minio.BucketLookupDNS
-		if c.useIAM {
-			newMinioFn = tencent.NewMinioClient
-		} else {
+		newMinioFn = tencent.NewMinioClient
+		if !c.useIAM {
 			creds = credentials.NewStaticV4(c.accessKeyID, c.secretAccessKeyID, "")
 		}
 
