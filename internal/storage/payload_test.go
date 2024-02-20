@@ -1240,6 +1240,30 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		_, err = r.GetStringFromPayload()
 		assert.Error(t, err)
 	})
+	t.Run("TestGetArrayError", func(t *testing.T) {
+		w, err := NewPayloadWriter(schemapb.DataType_Bool)
+		require.Nil(t, err)
+		require.NotNil(t, w)
+
+		err = w.AddBoolToPayload([]bool{false, true, true})
+		assert.NoError(t, err)
+
+		err = w.FinishPayloadWriter()
+		assert.NoError(t, err)
+
+		buffer, err := w.GetPayloadBufferFromWriter()
+		assert.NoError(t, err)
+
+		r, err := NewPayloadReader(schemapb.DataType_Array, buffer)
+		assert.NoError(t, err)
+
+		_, err = r.GetArrayFromPayload()
+		assert.Error(t, err)
+
+		r.colType = 999
+		_, err = r.GetArrayFromPayload()
+		assert.Error(t, err)
+	})
 	t.Run("TestGetBinaryVectorError", func(t *testing.T) {
 		w, err := NewPayloadWriter(schemapb.DataType_Bool)
 		require.Nil(t, err)
@@ -1385,6 +1409,47 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		assert.NoError(t, err)
 
 		w.ReleasePayloadWriter()
+	})
+}
+
+func TestArrowRecordReader(t *testing.T) {
+	t.Run("TestArrowRecordReader", func(t *testing.T) {
+		w, err := NewPayloadWriter(schemapb.DataType_String)
+		assert.NoError(t, err)
+		defer w.Close()
+
+		err = w.AddOneStringToPayload("hello0")
+		assert.NoError(t, err)
+		err = w.AddOneStringToPayload("hello1")
+		assert.NoError(t, err)
+		err = w.AddOneStringToPayload("hello2")
+		assert.NoError(t, err)
+		err = w.FinishPayloadWriter()
+		assert.NoError(t, err)
+		length, err := w.GetPayloadLengthFromWriter()
+		assert.NoError(t, err)
+		assert.Equal(t, 3, length)
+		buffer, err := w.GetPayloadBufferFromWriter()
+		assert.NoError(t, err)
+
+		r, err := NewPayloadReader(schemapb.DataType_String, buffer)
+		assert.NoError(t, err)
+		length, err = r.GetPayloadLengthFromReader()
+		assert.NoError(t, err)
+		assert.Equal(t, 3, length)
+
+		rr, err := r.GetArrowRecordReader()
+		assert.NoError(t, err)
+
+		for rr.Next() {
+			rec := rr.Record()
+			arr := rec.Column(0).(*array.String)
+			defer rec.Release()
+
+			assert.Equal(t, "hello0", arr.Value(0))
+			assert.Equal(t, "hello1", arr.Value(1))
+			assert.Equal(t, "hello2", arr.Value(2))
+		}
 	})
 }
 

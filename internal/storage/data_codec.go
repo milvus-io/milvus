@@ -1002,23 +1002,24 @@ func (deleteCodec *DeleteCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 
 	var pid, sid UniqueID
 	result := &DeleteData{}
-	for _, blob := range blobs {
+
+	deserializeBlob := func(blob *Blob) error {
 		binlogReader, err := NewBinlogReader(blob.Value)
 		if err != nil {
-			return InvalidUniqueID, InvalidUniqueID, nil, err
+			return err
 		}
 		defer binlogReader.Close()
 
 		pid, sid = binlogReader.PartitionID, binlogReader.SegmentID
 		eventReader, err := binlogReader.NextEventReader()
 		if err != nil {
-			return InvalidUniqueID, InvalidUniqueID, nil, err
+			return err
 		}
 		defer eventReader.Close()
 
 		rr, err := eventReader.GetArrowRecordReader()
 		if err != nil {
-			return InvalidUniqueID, InvalidUniqueID, nil, err
+			return err
 		}
 		defer rr.Release()
 
@@ -1035,11 +1036,11 @@ func (deleteCodec *DeleteCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 					// compatible error info (unmarshal err invalid character ',' after top-level value)
 					splits := strings.Split(strVal, ",")
 					if len(splits) != 2 {
-						return InvalidUniqueID, InvalidUniqueID, nil, fmt.Errorf("the format of delta log is incorrect, %v can not be split", strVal)
+						return fmt.Errorf("the format of delta log is incorrect, %v can not be split", strVal)
 					}
 					pk, err := strconv.ParseInt(splits[0], 10, 64)
 					if err != nil {
-						return InvalidUniqueID, InvalidUniqueID, nil, err
+						return err
 					}
 					deleteLog.Pk = &Int64PrimaryKey{
 						Value: pk,
@@ -1047,12 +1048,19 @@ func (deleteCodec *DeleteCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 					deleteLog.PkType = int64(schemapb.DataType_Int64)
 					deleteLog.Ts, err = strconv.ParseUint(splits[1], 10, 64)
 					if err != nil {
-						return InvalidUniqueID, InvalidUniqueID, nil, err
+						return err
 					}
 				}
 
 				result.Append(deleteLog.Pk, deleteLog.Ts)
 			}
+		}
+		return nil
+	}
+
+	for _, blob := range blobs {
+		if err := deserializeBlob(blob); err != nil {
+			return InvalidUniqueID, InvalidUniqueID, nil, err
 		}
 	}
 
