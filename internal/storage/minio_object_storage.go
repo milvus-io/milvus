@@ -64,6 +64,7 @@ func newMinioClient(ctx context.Context, c *config) (*minio.Client, error) {
 			creds = credentials.NewStaticV2(c.accessKeyID, c.secretAccessKeyID, "")
 		}
 	case CloudProviderTencent:
+		bucketLookupType = minio.BucketLookupDNS
 		newMinioFn = tencent.NewMinioClient
 		if !c.useIAM {
 			creds = credentials.NewStaticV4(c.accessKeyID, c.secretAccessKeyID, "")
