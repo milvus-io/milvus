@@ -55,6 +55,9 @@ class ChunkCache {
     std::shared_ptr<ColumnBase>
     Mmap(const std::filesystem::path& path, const FieldDataPtr& field_data);
 
+    std::string
+    CachePath(const std::string& filepath);
+
  private:
     using ColumnTable =
         std::unordered_map<std::string, std::shared_ptr<ColumnBase>>;
