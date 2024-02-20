@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"path"
 	"testing"
 
 	"github.com/samber/lo"
@@ -28,6 +29,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
+	mocks2 "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -205,11 +207,11 @@ func TestImportUtil_RegroupImportFiles(t *testing.T) {
 			return f.GetTotalMemorySize()
 		})
 		assert.True(t, sum <= threshold)
-		total += len(fs)
 		if i != len(groups)-1 {
 			assert.True(t, len(fs) >= int(threshold/dataSize))
 			assert.True(t, sum >= threshold-dataSize)
 		}
+		total += len(fs)
 	}
 	assert.Equal(t, fileNum, total)
 }
@@ -264,7 +266,62 @@ func TestImportUtil_DropImportTask(t *testing.T) {
 }
 
 func TestImportUtil_ListBinlogsAndGroupBySegment(t *testing.T) {
-	// TODO: dyh
+	const (
+		insertPrefix = "mock-insert-binlog-prefix"
+		deltaPrefix  = "mock-delta-binlog-prefix"
+	)
+
+	insertBinlogs := []string{
+		// segment 435978159261483008
+		"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/100/435978159903735821",
+		"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/100/435978159903735822",
+		"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/100/435978159903735823",
+		"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/101/435978159903735831",
+		"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/101/435978159903735832",
+		"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/101/435978159903735833",
+		"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/102/435978159903735841",
+		"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/102/435978159903735842",
+		"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/102/435978159903735843",
+		// segment 435978159261483009
+		"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483009/100/435978159903735851",
+		"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483009/100/435978159903735852",
+		"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483009/100/435978159903735853",
+		"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483009/101/435978159903735861",
+		"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483009/101/435978159903735862",
+		"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483009/101/435978159903735863",
+		"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483009/102/435978159903735871",
+		"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483009/102/435978159903735872",
+		"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483009/102/435978159903735873",
+	}
+
+	deltaLogs := []string{
+		"backup/bak1/data/delta_log/435978159196147009/435978159196147010/435978159261483008/434574382554415105",
+		"backup/bak1/data/delta_log/435978159196147009/435978159196147010/435978159261483008/434574382554415106",
+
+		"backup/bak1/data/delta_log/435978159196147009/435978159196147010/435978159261483009/434574382554415115",
+		"backup/bak1/data/delta_log/435978159196147009/435978159196147010/435978159261483009/434574382554415116",
+	}
+
+	ctx := context.Background()
+	cm := mocks2.NewChunkManager(t)
+	cm.EXPECT().ListWithPrefix(mock.Anything, insertPrefix, mock.Anything).Return(insertBinlogs, nil, nil)
+	cm.EXPECT().ListWithPrefix(mock.Anything, deltaPrefix, mock.Anything).Return(deltaLogs, nil, nil)
+
+	file := &internalpb.ImportFile{
+		Id:    1,
+		Paths: []string{insertPrefix, deltaPrefix},
+	}
+
+	files, err := ListBinlogsAndGroupBySegment(ctx, cm, file)
+	assert.NoError(t, err)
+	assert.Equal(t, 2, len(files))
+	for _, f := range files {
+		assert.Equal(t, 2, len(f.GetPaths()))
+		for _, p := range f.GetPaths() {
+			segmentID := path.Base(p)
+			assert.True(t, segmentID == "435978159261483008" || segmentID == "435978159261483009")
+		}
+	}
 }
 
 func TestImportUtil_GetImportProgress(t *testing.T) {
@@ -330,13 +387,16 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	err = imeta.AddTask(it1)
 	assert.NoError(t, err)
 	err = meta.AddSegment(ctx, &SegmentInfo{
-		SegmentInfo: &datapb.SegmentInfo{ID: 10, IsImporting: true, MaxRowNum: 100}, currRows: 50})
+		SegmentInfo: &datapb.SegmentInfo{ID: 10, IsImporting: true, MaxRowNum: 100}, currRows: 50,
+	})
 	assert.NoError(t, err)
 	err = meta.AddSegment(ctx, &SegmentInfo{
-		SegmentInfo: &datapb.SegmentInfo{ID: 11, IsImporting: true, MaxRowNum: 100}, currRows: 50})
+		SegmentInfo: &datapb.SegmentInfo{ID: 11, IsImporting: true, MaxRowNum: 100}, currRows: 50,
+	})
 	assert.NoError(t, err)
 	err = meta.AddSegment(ctx, &SegmentInfo{
-		SegmentInfo: &datapb.SegmentInfo{ID: 12, IsImporting: true, MaxRowNum: 100}, currRows: 50})
+		SegmentInfo: &datapb.SegmentInfo{ID: 12, IsImporting: true, MaxRowNum: 100}, currRows: 50,
+	})
 	assert.NoError(t, err)
 
 	it2 := &importTask{
@@ -350,13 +410,16 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	err = imeta.AddTask(it2)
 	assert.NoError(t, err)
 	err = meta.AddSegment(ctx, &SegmentInfo{
-		SegmentInfo: &datapb.SegmentInfo{ID: 20, IsImporting: true, MaxRowNum: 100}, currRows: 50})
+		SegmentInfo: &datapb.SegmentInfo{ID: 20, IsImporting: true, MaxRowNum: 100}, currRows: 50,
+	})
 	assert.NoError(t, err)
 	err = meta.AddSegment(ctx, &SegmentInfo{
-		SegmentInfo: &datapb.SegmentInfo{ID: 21, IsImporting: true, MaxRowNum: 100}, currRows: 50})
+		SegmentInfo: &datapb.SegmentInfo{ID: 21, IsImporting: true, MaxRowNum: 100}, currRows: 50,
+	})
 	assert.NoError(t, err)
 	err = meta.AddSegment(ctx, &SegmentInfo{
-		SegmentInfo: &datapb.SegmentInfo{ID: 22, IsImporting: true, MaxRowNum: 100}, currRows: 50})
+		SegmentInfo: &datapb.SegmentInfo{ID: 22, IsImporting: true, MaxRowNum: 100}, currRows: 50,
+	})
 	assert.NoError(t, err)
 
 	var (
@@ -378,6 +441,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	progress, state, reason = GetImportProgress(job.GetJobID(), imeta, meta)
 	assert.Equal(t, int64(0), progress)
 	assert.Equal(t, internalpb.ImportState_InProgress, state)
+	assert.Equal(t, "", reason)
 
 	// in progress
 	err = imeta.UpdateTask(pit1.GetTaskID(), UpdateState(internalpb.ImportState_InProgress))
@@ -395,6 +459,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	segStateProgress = 0
 	assert.Equal(t, preparingProgress+preImportProgress+importProgress+segStateProgress, progress)
 	assert.Equal(t, internalpb.ImportState_InProgress, state)
+	assert.Equal(t, "", reason)
 
 	// partial completed
 	err = imeta.UpdateTask(pit1.GetTaskID(), UpdateState(internalpb.ImportState_Completed))
@@ -408,6 +473,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	segStateProgress = 0
 	assert.Equal(t, preparingProgress+preImportProgress+importProgress+segStateProgress, progress)
 	assert.Equal(t, internalpb.ImportState_InProgress, state)
+	assert.Equal(t, "", reason)
 
 	// all completed, all segments is in importing state
 	err = imeta.UpdateTask(it1.GetTaskID(), UpdateState(internalpb.ImportState_Completed))
@@ -421,6 +487,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	segStateProgress = 0
 	assert.Equal(t, preparingProgress+preImportProgress+importProgress+segStateProgress, progress)
 	assert.Equal(t, internalpb.ImportState_InProgress, state)
+	assert.Equal(t, "", reason)
 
 	// all completed, partial segments is in importing state
 	err = meta.UnsetIsImporting(10)
@@ -434,6 +501,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	segStateProgress = 10 * 2 / 6
 	assert.Equal(t, preparingProgress+preImportProgress+importProgress+segStateProgress, progress)
 	assert.Equal(t, internalpb.ImportState_InProgress, state)
+	assert.Equal(t, "", reason)
 
 	// all completed, no segment is in importing state
 	err = meta.UnsetIsImporting(11)
@@ -451,4 +519,5 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	segStateProgress = 10
 	assert.Equal(t, preparingProgress+preImportProgress+importProgress+segStateProgress, progress)
 	assert.Equal(t, internalpb.ImportState_Completed, state)
+	assert.Equal(t, "", reason)
 }

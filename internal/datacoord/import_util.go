@@ -220,8 +220,8 @@ func RegroupImportFiles(job ImportJob, files []*datapb.ImportFileStats) ([][]*da
 	}
 
 	segmentMaxSize := paramtable.Get().DataCoordCfg.SegmentMaxSize.GetAsInt() * 1024 * 1024
-	maxSizePerFileGroup := segmentMaxSize * len(job.GetPartitionIDs()) * len(job.GetVchannels())
 	threshold := paramtable.Get().DataCoordCfg.MaxSizeInMBPerImportTask.GetAsInt() * 1024 * 1024
+	maxSizePerFileGroup := segmentMaxSize * len(job.GetPartitionIDs()) * len(job.GetVchannels())
 	if maxSizePerFileGroup > threshold {
 		maxSizePerFileGroup = threshold
 	}
@@ -314,9 +314,6 @@ func GetImportProgress(jobID int64, tm ImportMeta, meta *meta) (int64, internalp
 				importedRows += segment.currRows
 				totalRows += segment.GetMaxRowNum()
 				totalSegments++
-				if !segment.GetIsImporting() {
-					unsetImportStateSegments++
-				}
 			}
 			importProgress += (float32(importedRows) / float32(totalRows)) * 100 / float32(len(tasks))
 		case internalpb.ImportState_Completed:
@@ -334,7 +331,14 @@ func GetImportProgress(jobID int64, tm ImportMeta, meta *meta) (int64, internalp
 			importProgress += 100 / float32(len(tasks))
 		}
 	}
-	if totalSegments > 0 {
+	if totalSegments == 0 {
+		// If there is no data in the import files, the totalSegments will be 0.
+		// And, if all tasks are completed, we should set segStateProgress to 100.
+		completedTasks := tm.GetTaskBy(WithJob(jobID), WithType(ImportTaskType), WithStates(internalpb.ImportState_Completed))
+		if len(completedTasks) == len(tasks) {
+			segStateProgress = 100
+		}
+	} else {
 		segStateProgress = 100 * float32(unsetImportStateSegments) / float32(totalSegments)
 	}
 	progress := preparingProgress*0.1 + preImportProgress*0.4 + importProgress*0.4 + segStateProgress*0.1
