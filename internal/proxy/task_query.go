@@ -196,7 +196,7 @@ func createCntPlan(expr string, schema *schemapb.CollectionSchema) (*planpb.Plan
 
 	plan, err := planparserv2.CreateRetrievePlan(schema, expr)
 	if err != nil {
-		return nil, err
+		return nil, merr.WrapErrParameterInvalidMsg("failed to create query plan: %v", err)
 	}
 
 	plan.Node.(*planpb.PlanNode_Query).Query.IsCount = true
@@ -219,7 +219,7 @@ func (t *queryTask) createPlan(ctx context.Context) error {
 	if t.plan == nil {
 		t.plan, err = planparserv2.CreateRetrievePlan(schema.CollectionSchema, t.request.Expr)
 		if err != nil {
-			return err
+			return merr.WrapErrParameterInvalidMsg("failed to create query plan: %v", err)
 		}
 	}
 

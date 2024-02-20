@@ -2466,9 +2466,9 @@ class TestQueryString(TestcaseBase):
         """
         collection_w = self.init_collection_general(prefix, insert_data=True)[0]
         collection_w.query(expression, check_task=CheckTasks.err_res,
-                           check_items={ct.err_code: 65535,
-                                        ct.err_msg: f"cannot parse expression: {expression}, error: value "
-                                                    f"'0' in list cannot be casted to VarChar"})
+                           check_items={ct.err_code: 1100,
+                                        ct.err_msg: f"failed to create query plan: cannot parse expression: {expression}, "
+                                                    f"error: value '1' in list cannot be casted to VarChar: invalid parameter"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_query_string_expr_with_binary(self):
@@ -2541,9 +2541,9 @@ class TestQueryString(TestcaseBase):
                                                     primary_field=ct.default_string_field_name)[0]
         expression = 'varchar == int64'
         collection_w.query(expression, check_task=CheckTasks.err_res,
-                           check_items={ct.err_code: 65535, ct.err_msg:
-                               f"cannot parse expression: {expression}, error: comparisons between VarChar, "
-                               f"element_type: None and Int64 elementType: None are not supported"})
+                           check_items={ct.err_code: 1100, ct.err_msg:
+                                        f"failed to create query plan: cannot parse expression: {expression}, "
+                                        f"error: comparisons between VarChar and Int64 are not supported: invalid parameter"})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.xfail(reason="issue 24637")

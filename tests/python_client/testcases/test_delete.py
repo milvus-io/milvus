@@ -194,8 +194,9 @@ class TestDeleteParams(TestcaseBase):
         collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True,
                                                     is_all_data_type=True, is_index=True)[0]
         expr = f"{ct.default_float_vec_field_name} in [[0.1]]"
-        error = {ct.err_code: 1,
-                 ct.err_msg: f"failed to create expr plan, expr = {expr}"}
+        error = {ct.err_code: 1100,
+                 ct.err_msg: f"failed to create delete plan: cannot parse expression: {expr}, "
+                             f"error: value '[0.1]' in list cannot be casted to FloatVector: invalid parameter"}
 
         collection_w.delete(expr, check_task=CheckTasks.err_res, check_items=error)
 
@@ -1835,8 +1836,9 @@ class TestDeleteString(TestcaseBase):
         collection_w = \
             self.init_collection_general(prefix, nb=tmp_nb, insert_data=True, primary_field=ct.default_string_field_name)[0]
         collection_w.load()
-        error = {ct.err_code: 0,
-                 ct.err_msg: f"failed to create expr plan, expr = {default_invalid_string_exp}"}
+        error = {ct.err_code: 1100,
+                 ct.err_msg: f"failed to create delete plan: cannot parse expression: {default_invalid_string_exp}, "
+                             f"error: comparisons between VarChar and Int64 are not supported: invalid parameter"}
         collection_w.delete(expr=default_invalid_string_exp,
                             check_task=CheckTasks.err_res, check_items=error)
 
