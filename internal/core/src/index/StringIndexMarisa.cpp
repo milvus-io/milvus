@@ -74,11 +74,7 @@ StringIndexMarisa::BuildV2(const Config& config) {
         throw std::runtime_error("index has been built");
     }
     auto field_name = file_manager_->GetIndexMeta().field_name;
-    auto res = space_->ScanData();
-    if (!res.ok()) {
-        PanicInfo(S3Error, "failed to create scan iterator");
-    }
-    auto reader = res.value();
+    auto reader = space_->ScanData();
     std::vector<FieldDataPtr> field_datas;
     for (auto rec = reader->Next(); rec != nullptr; rec = reader->Next()) {
         if (!rec.ok()) {

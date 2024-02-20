@@ -422,14 +422,7 @@ VectorMemIndex<T>::BuildV2(const Config& config) {
     auto field_name = create_index_info_.field_name;
     auto field_type = create_index_info_.field_type;
     auto dim = create_index_info_.dim;
-    auto res = space_->ScanData();
-    if (!res.ok()) {
-        PanicInfo(IndexBuildError,
-                  "failed to create scan iterator: {}",
-                  res.status().ToString());
-    }
-
-    auto reader = res.value();
+    auto reader = space_->ScanData();
     std::vector<FieldDataPtr> field_datas;
     for (auto rec : *reader) {
         if (!rec.ok()) {

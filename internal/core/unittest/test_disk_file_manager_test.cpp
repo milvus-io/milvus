@@ -271,10 +271,8 @@ PrepareInsertDataSpace()
         arrow::field(kOptFieldName, arrow::int64()),
         arrow::field("vec", arrow::fixed_size_binary(1))};
     auto arrow_schema = std::make_shared<arrow::Schema>(arrow_fields);
-    auto schema_options = std::make_shared<milvus_storage::SchemaOptions>();
-    schema_options->primary_column = "pk";
-    schema_options->version_column = "ts";
-    schema_options->vector_column = "vec";
+    milvus_storage::SchemaOptions schema_options = {
+        .primary_column = "pk", .version_column = "ts", .vector_column = "vec"};
     auto schema =
         std::make_shared<milvus_storage::Schema>(arrow_schema, schema_options);
     boost::filesystem::remove_all(path);
@@ -311,11 +309,11 @@ PrepareInsertDataSpace()
         arrow::RecordBatch::Make(arrow_schema,
                                  kEntityCnt,
                                  {pk_array, ts_array, scalar_array, vec_array});
-    auto write_opt = milvus_storage::WriteOption{kEntityCnt};
-    space->Write(arrow::RecordBatchReader::Make({batch}, arrow_schema)
-                     .ValueOrDie()
-                     .get(),
-                 &write_opt);
+    milvus_storage::WriteOption write_opt = {kEntityCnt};
+    space->Write(*arrow::RecordBatchReader::Make({batch}, arrow_schema)
+                      .ValueOrDie()
+                      .get(),
+                 write_opt);
     return {path, std::move(space)};
 }
 
