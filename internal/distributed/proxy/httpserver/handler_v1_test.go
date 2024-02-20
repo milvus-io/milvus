@@ -1934,7 +1934,7 @@ func TestImport(t *testing.T) {
 		name:         "list imports success",
 		mp:           mp8,
 		exceptCode:   200,
-		expectedBody: "{\"code\":200,\"data\":[{\"progress\":100,\"jobID\":\"1000\",\"state\":\"Completed\"}]}",
+		expectedBody: "{\"code\":200,\"data\":[{\"jobID\":\"1000\",\"progress\":100,\"state\":\"Completed\"}]}",
 	})
 
 	for _, tt := range testCases {

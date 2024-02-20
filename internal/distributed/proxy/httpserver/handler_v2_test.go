@@ -44,6 +44,10 @@ type requestBodyTestCase struct {
 
 type DefaultReq struct{}
 
+func init() {
+	paramtable.Init()
+}
+
 func TestHTTPWrapper(t *testing.T) {
 	postTestCases := []requestBodyTestCase{}
 	postTestCasesTrace := []requestBodyTestCase{}
