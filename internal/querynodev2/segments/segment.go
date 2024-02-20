@@ -1044,6 +1044,12 @@ func (s *LocalSegment) Release() {
 		strconv.FormatInt(int64(len(s.Indexes())), 10),
 	).Sub(float64(s.InsertCount()))
 
+	localDiskUsage, err := GetLocalUsedSize(context.Background(), paramtable.Get().LocalStorageCfg.Path.GetValue())
+	// ignore error here, shall not block releasing
+	if err == nil {
+		metrics.QueryNodeDiskUsedSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(float64(localDiskUsage) / 1024 / 1024) // in MB
+	}
+
 	log.Info("delete segment from memory",
 		zap.Int64("collectionID", s.collectionID),
 		zap.Int64("partitionID", s.partitionID),
