@@ -229,7 +229,9 @@ class TestcaseBase(Base):
                                 partition_num=0, is_binary=False, is_all_data_type=False,
                                 auto_id=False, dim=ct.default_dim, is_index=True,
                                 primary_field=ct.default_int64_field_name, is_flush=True, name=None,
-                                enable_dynamic_field=False, with_json=True, random_primary_key=False, **kwargs):
+                                enable_dynamic_field=False, with_json=True, random_primary_key=False,
+                                multiple_dim_array=[], is_partition_key=None, vector_data_type="FLOAT_VECTOR",
+                                **kwargs):
         """
         target: create specified collections
         method: 1. create collections (binary/non-binary, default/all data type, auto_id or not)
@@ -251,7 +253,9 @@ class TestcaseBase(Base):
         # 1 create collection
         default_schema = cf.gen_default_collection_schema(auto_id=auto_id, dim=dim, primary_field=primary_field, 
                                                           enable_dynamic_field=enable_dynamic_field, 
-                                                          with_json=with_json)
+                                                          with_json=with_json, multiple_dim_array=multiple_dim_array,
+                                                          is_partition_key=is_partition_key,
+                                                          vector_data_type=vector_data_type)
         if is_binary:
             default_schema = cf.gen_default_binary_collection_schema(auto_id=auto_id, dim=dim,
                                                                      primary_field=primary_field)
@@ -262,6 +266,7 @@ class TestcaseBase(Base):
                                                                    with_json=with_json)
         log.info("init_collection_general: collection creation")
         collection_w = self.init_collection_wrap(name=collection_name, schema=default_schema, **kwargs)
+        vector_name_list = cf.extract_vector_field_name_list(collection_w)
         # 2 add extra partitions if specified (default is 1 partition named "_default")
         if partition_num > 0:
             cf.gen_partitions(collection_w, partition_num)
@@ -270,22 +275,22 @@ class TestcaseBase(Base):
             collection_w, vectors, binary_raw_vectors, insert_ids, time_stamp = \
                 cf.insert_data(collection_w, nb, is_binary, is_all_data_type, auto_id=auto_id, 
                                dim=dim, enable_dynamic_field=enable_dynamic_field, with_json=with_json, 
-                               random_primary_key=random_primary_key)
+                               random_primary_key=random_primary_key, multiple_dim_array=multiple_dim_array,
+                               primary_field=primary_field, vector_data_type=vector_data_type)
             if is_flush:
                 assert collection_w.is_empty is False
                 assert collection_w.num_entities == nb
+        # 4 create default index if specified
+        if is_index:
             # This condition will be removed after auto index feature
-            if is_index:
-                if is_binary:
-                    collection_w.create_index(ct.default_binary_vec_field_name, ct.default_bin_flat_index)
-                else:
-                    collection_w.create_index(ct.default_float_vec_field_name, ct.default_flat_index)
-                collection_w.load()
-        elif is_index:
             if is_binary:
                 collection_w.create_index(ct.default_binary_vec_field_name, ct.default_bin_flat_index)
             else:
                 collection_w.create_index(ct.default_float_vec_field_name, ct.default_flat_index)
+                if len(multiple_dim_array) != 0 or is_all_data_type:
+                    for vector_name in vector_name_list:
+                        collection_w.create_index(vector_name, ct.default_flat_index)
+            collection_w.load()
 
         return collection_w, vectors, binary_raw_vectors, insert_ids, time_stamp
 
