@@ -90,6 +90,12 @@ func (c *importChecker) Start() {
 		case <-stateTicker.C:
 			jobs := c.imeta.GetJobBy()
 			for _, job := range jobs {
+				if job.GetSchema() == nil {
+					err := UpdateSchema(job, c.broker, c.imeta)
+					if err != nil {
+						continue
+					}
+				}
 				c.checkLackPreImport(job)
 				c.checkLackImports(job)
 				c.checkImportState(job)
@@ -213,11 +219,7 @@ func (c *importChecker) checkLackImports(job ImportJob) {
 		return
 	}
 
-	groups, err := RegroupImportFiles(job, lacks)
-	if err != nil {
-		log.Warn("regroup import files failed", zap.Int64("jobID", job.GetJobID()), zap.Error(err))
-		return
-	}
+	groups := RegroupImportFiles(job, lacks)
 	newTasks, err := NewImportTasks(groups, job, c.sm, c.alloc)
 	if err != nil {
 		log.Warn("new import tasks failed", zap.Error(err))

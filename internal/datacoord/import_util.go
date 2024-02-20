@@ -27,6 +27,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -34,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/retry"
 )
 
 func WrapTaskLog(task ImportTask, fields ...zap.Field) []zap.Field {
@@ -214,9 +216,26 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 	}, nil
 }
 
-func RegroupImportFiles(job ImportJob, files []*datapb.ImportFileStats) ([][]*datapb.ImportFileStats, error) {
+func UpdateSchema(job ImportJob, broker broker.Broker, imeta ImportMeta) error {
+	var schema *schemapb.CollectionSchema
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	err := retry.Do(ctx, func() error {
+		resp, err := broker.DescribeCollectionInternal(ctx, job.GetCollectionID())
+		schema = resp.GetSchema()
+		return err
+	})
+	if err != nil {
+		log.Warn("import scheduler get collection schema failed", zap.Int64("jobID", job.GetJobID()),
+			zap.Int64("collectionID", job.GetCollectionID()), zap.Error(err))
+		return err
+	}
+	return imeta.UpdateJob(job.GetJobID(), UpdateJobSchema(schema))
+}
+
+func RegroupImportFiles(job ImportJob, files []*datapb.ImportFileStats) [][]*datapb.ImportFileStats {
 	if len(files) == 0 {
-		return nil, nil
+		return nil
 	}
 
 	segmentMaxSize := paramtable.Get().DataCoordCfg.SegmentMaxSize.GetAsInt() * 1024 * 1024
@@ -248,7 +267,7 @@ func RegroupImportFiles(job ImportJob, files []*datapb.ImportFileStats) ([][]*da
 	if len(currentGroup) > 0 {
 		fileGroups = append(fileGroups, currentGroup)
 	}
-	return fileGroups, nil
+	return fileGroups
 }
 
 func AddImportSegment(cluster Cluster, meta *meta, segmentID int64) error {

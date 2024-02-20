@@ -384,11 +384,11 @@ func (s *Server) initDataCoord() error {
 	s.initGarbageCollection(storageCli)
 	s.initIndexBuilder(storageCli)
 
-	s.importMeta, err = NewImportMeta(s.broker, s.meta.catalog)
+	s.importMeta, err = NewImportMeta(s.meta.catalog)
 	if err != nil {
 		return err
 	}
-	s.importScheduler = NewImportScheduler(s.meta, s.cluster, s.allocator, s.importMeta)
+	s.importScheduler = NewImportScheduler(s.meta, s.broker, s.cluster, s.allocator, s.importMeta)
 	s.importChecker = NewImportChecker(s.meta, s.broker, s.cluster, s.allocator, s.segmentManager, s.importMeta, s.buildIndexCh)
 
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)

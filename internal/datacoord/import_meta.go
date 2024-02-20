@@ -17,16 +17,10 @@
 package datacoord
 
 import (
-	"context"
 	"sync"
 	"time"
 
-	"github.com/samber/lo"
-
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore"
-	"github.com/milvus-io/milvus/pkg/util/retry"
 )
 
 type ImportMeta interface {
@@ -51,19 +45,7 @@ type importMeta struct {
 	catalog metastore.DataCoordCatalog
 }
 
-func NewImportMeta(broker broker.Broker, catalog metastore.DataCoordCatalog) (ImportMeta, error) {
-	getSchema := func(collectionID int64) (*schemapb.CollectionSchema, error) {
-		var schema *schemapb.CollectionSchema
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		err := retry.Do(ctx, func() error {
-			resp, err := broker.DescribeCollectionInternal(ctx, collectionID)
-			schema = resp.GetSchema()
-			return err
-		})
-		return schema, err
-	}
-
+func NewImportMeta(catalog metastore.DataCoordCatalog) (ImportMeta, error) {
 	restoredPreImportTasks, err := catalog.ListPreImportTasks()
 	if err != nil {
 		return nil, err
@@ -96,21 +78,6 @@ func NewImportMeta(broker broker.Broker, catalog metastore.DataCoordCatalog) (Im
 		jobs[job.GetJobID()] = &importJob{
 			ImportJob: job,
 		}
-	}
-
-	byColl := lo.GroupBy(lo.Values(jobs), func(j ImportJob) int64 {
-		return j.GetCollectionID()
-	})
-	collectionSchemas := make(map[int64]*schemapb.CollectionSchema)
-	for collectionID := range byColl {
-		schema, err := getSchema(collectionID)
-		if err != nil {
-			return nil, err
-		}
-		collectionSchemas[collectionID] = schema
-	}
-	for i := range jobs {
-		jobs[i].(*importJob).schema = collectionSchemas[jobs[i].GetCollectionID()]
 	}
 
 	return &importMeta{

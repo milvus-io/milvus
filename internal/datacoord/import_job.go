@@ -29,6 +29,12 @@ type ImportJobFilter func(job ImportJob) bool
 
 type UpdateJobAction func(job ImportJob)
 
+func UpdateJobSchema(schema *schemapb.CollectionSchema) UpdateJobAction {
+	return func(job ImportJob) {
+		job.(*importJob).schema = schema
+	}
+}
+
 type ImportJob interface {
 	GetJobID() int64
 	GetCollectionID() int64

@@ -23,7 +23,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
-	broker2 "github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -35,10 +34,7 @@ func TestImportMeta_Restore(t *testing.T) {
 	catalog.EXPECT().ListPreImportTasks().Return([]*datapb.PreImportTask{{TaskID: 1}}, nil)
 	catalog.EXPECT().ListImportTasks().Return([]*datapb.ImportTaskV2{{TaskID: 2}}, nil)
 
-	broker := broker2.NewMockBroker(t)
-	broker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(nil, nil)
-
-	im, err := NewImportMeta(broker, catalog)
+	im, err := NewImportMeta(catalog)
 	assert.NoError(t, err)
 
 	jobs := im.GetJobBy()
@@ -62,7 +58,7 @@ func TestImportMeta_ImportJob(t *testing.T) {
 	catalog.EXPECT().SaveImportJob(mock.Anything).Return(nil)
 	catalog.EXPECT().DropImportJob(mock.Anything).Return(nil)
 
-	im, err := NewImportMeta(nil, catalog)
+	im, err := NewImportMeta(catalog)
 	assert.NoError(t, err)
 
 	var job ImportJob = &importJob{
@@ -120,7 +116,7 @@ func TestImportMeta_ImportTask(t *testing.T) {
 	catalog.EXPECT().SaveImportTask(mock.Anything).Return(nil)
 	catalog.EXPECT().DropImportTask(mock.Anything).Return(nil)
 
-	im, err := NewImportMeta(nil, catalog)
+	im, err := NewImportMeta(catalog)
 	assert.NoError(t, err)
 
 	task1 := &importTask{

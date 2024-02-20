@@ -25,6 +25,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -42,6 +43,7 @@ type ImportScheduler interface {
 
 type importScheduler struct {
 	meta    *meta
+	broker  broker.Broker
 	cluster Cluster
 	alloc   allocator
 	imeta   ImportMeta
@@ -51,12 +53,14 @@ type importScheduler struct {
 }
 
 func NewImportScheduler(meta *meta,
+	broker broker.Broker,
 	cluster Cluster,
 	alloc allocator,
 	imeta ImportMeta,
 ) ImportScheduler {
 	return &importScheduler{
 		meta:      meta,
+		broker:    broker,
 		cluster:   cluster,
 		alloc:     alloc,
 		imeta:     imeta,
@@ -92,6 +96,12 @@ func (s *importScheduler) process() {
 	})
 	nodeSlots := s.peekSlots()
 	for _, job := range jobs {
+		if job.GetSchema() == nil {
+			err := UpdateSchema(job, s.broker, s.imeta)
+			if err != nil {
+				continue
+			}
+		}
 		tasks := s.imeta.GetTaskBy(WithJob(job.GetJobID()))
 		for _, task := range tasks {
 			switch task.GetState() {

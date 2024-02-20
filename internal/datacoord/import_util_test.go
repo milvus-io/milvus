@@ -199,8 +199,7 @@ func TestImportUtil_RegroupImportFiles(t *testing.T) {
 			Vchannels:    []string{"v0", "v1", "v2", "v3"},
 		},
 	}
-	groups, err := RegroupImportFiles(job, files)
-	assert.NoError(t, err)
+	groups := RegroupImportFiles(job, files)
 	total := 0
 	for i, fs := range groups {
 		sum := lo.SumBy(fs, func(f *datapb.ImportFileStats) int64 {
@@ -249,7 +248,7 @@ func TestImportUtil_DropImportTask(t *testing.T) {
 	catalog.EXPECT().ListImportTasks().Return(nil, nil)
 	catalog.EXPECT().SaveImportTask(mock.Anything).Return(nil)
 
-	imeta, err := NewImportMeta(nil, catalog)
+	imeta, err := NewImportMeta(catalog)
 	assert.NoError(t, err)
 
 	task := &importTask{
@@ -341,7 +340,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	catalog.EXPECT().SaveImportTask(mock.Anything).Return(nil)
 	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
 
-	imeta, err := NewImportMeta(nil, catalog)
+	imeta, err := NewImportMeta(catalog)
 	assert.NoError(t, err)
 
 	meta, err := newMeta(context.TODO(), catalog, nil)
