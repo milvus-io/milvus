@@ -103,3 +103,10 @@ func (ed *EventDispatcher) Unregister(key string, handler EventHandler) {
 	}
 	ed.registry[key] = newGroup
 }
+
+func (ed *EventDispatcher) Clean() {
+	ed.mut.Lock()
+	defer ed.mut.Unlock()
+
+	ed.registry = make(map[string][]EventHandler)
+}
