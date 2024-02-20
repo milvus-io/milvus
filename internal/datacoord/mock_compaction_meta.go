@@ -21,20 +21,20 @@ func (_m *MockCompactionMeta) EXPECT() *MockCompactionMeta_Expecter {
 }
 
 // CompleteCompactionMutation provides a mock function with given fields: plan, result
-func (_m *MockCompactionMeta) CompleteCompactionMutation(plan *datapb.CompactionPlan, result *datapb.CompactionPlanResult) (*SegmentInfo, *segMetricMutation, error) {
+func (_m *MockCompactionMeta) CompleteCompactionMutation(plan *datapb.CompactionPlan, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error) {
 	ret := _m.Called(plan, result)
 
-	var r0 *SegmentInfo
+	var r0 []*SegmentInfo
 	var r1 *segMetricMutation
 	var r2 error
-	if rf, ok := ret.Get(0).(func(*datapb.CompactionPlan, *datapb.CompactionPlanResult) (*SegmentInfo, *segMetricMutation, error)); ok {
+	if rf, ok := ret.Get(0).(func(*datapb.CompactionPlan, *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error)); ok {
 		return rf(plan, result)
 	}
-	if rf, ok := ret.Get(0).(func(*datapb.CompactionPlan, *datapb.CompactionPlanResult) *SegmentInfo); ok {
+	if rf, ok := ret.Get(0).(func(*datapb.CompactionPlan, *datapb.CompactionPlanResult) []*SegmentInfo); ok {
 		r0 = rf(plan, result)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*SegmentInfo)
+			r0 = ret.Get(0).([]*SegmentInfo)
 		}
 	}
 
@@ -74,12 +74,12 @@ func (_c *MockCompactionMeta_CompleteCompactionMutation_Call) Run(run func(plan 
 	return _c
 }
 
-func (_c *MockCompactionMeta_CompleteCompactionMutation_Call) Return(_a0 *SegmentInfo, _a1 *segMetricMutation, _a2 error) *MockCompactionMeta_CompleteCompactionMutation_Call {
+func (_c *MockCompactionMeta_CompleteCompactionMutation_Call) Return(_a0 []*SegmentInfo, _a1 *segMetricMutation, _a2 error) *MockCompactionMeta_CompleteCompactionMutation_Call {
 	_c.Call.Return(_a0, _a1, _a2)
 	return _c
 }
 
-func (_c *MockCompactionMeta_CompleteCompactionMutation_Call) RunAndReturn(run func(*datapb.CompactionPlan, *datapb.CompactionPlanResult) (*SegmentInfo, *segMetricMutation, error)) *MockCompactionMeta_CompleteCompactionMutation_Call {
+func (_c *MockCompactionMeta_CompleteCompactionMutation_Call) RunAndReturn(run func(*datapb.CompactionPlan, *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error)) *MockCompactionMeta_CompleteCompactionMutation_Call {
 	_c.Call.Return(run)
 	return _c
 }

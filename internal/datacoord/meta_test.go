@@ -272,17 +272,22 @@ func (suite *MetaBasicSuite) TestPrepareCompleteCompactionMutation() {
 	suite.NotZero(afterCompact[0].GetDroppedAt())
 	suite.NotZero(afterCompact[1].GetDroppedAt())
 
-	suite.Equal(inSegment.SegmentID, newSegment.GetID())
-	suite.Equal(UniqueID(100), newSegment.GetCollectionID())
-	suite.Equal(UniqueID(10), newSegment.GetPartitionID())
-	suite.Equal(inSegment.NumOfRows, newSegment.GetNumOfRows())
-	suite.Equal(commonpb.SegmentState_Flushed, newSegment.GetState())
+	suite.Equal(inSegment.SegmentID, newSegment[0].GetID())
+	suite.Equal(UniqueID(100), newSegment[0].GetCollectionID())
+	suite.Equal(UniqueID(10), newSegment[0].GetPartitionID())
+	suite.Equal(inSegment.NumOfRows, newSegment[0].GetNumOfRows())
+	suite.Equal(commonpb.SegmentState_Flushed, newSegment[0].GetState())
 
-	suite.EqualValues(inSegment.GetInsertLogs(), newSegment.GetBinlogs())
-	suite.EqualValues(inSegment.GetField2StatslogPaths(), newSegment.GetStatslogs())
-	suite.EqualValues(inSegment.GetDeltalogs(), newSegment.GetDeltalogs())
-	suite.NotZero(newSegment.lastFlushTime)
-	suite.Equal(uint64(15), newSegment.GetLastExpireTime())
+	suite.EqualValues(inSegment.GetInsertLogs(), newSegment[0].GetBinlogs())
+	suite.EqualValues(inSegment.GetField2StatslogPaths(), newSegment[0].GetStatslogs())
+	suite.EqualValues(inSegment.GetDeltalogs(), newSegment[0].GetDeltalogs())
+	suite.NotZero(newSegment[0].lastFlushTime)
+	suite.Equal(uint64(15), newSegment[0].GetLastExpireTime())
+
+	segmentsDone, metricMutationDone, err := m.CompleteCompactionMutation(plan, inCompactionResult)
+	suite.NoError(err)
+	suite.NotNil(segmentsDone)
+	suite.NotNil(metricMutationDone)
 }
 
 func TestMeta(t *testing.T) {
@@ -773,7 +778,7 @@ func TestMeta_alterMetaStore(t *testing.T) {
 		}},
 	}
 
-	err := m.alterMetaStoreAfterCompaction(&SegmentInfo{SegmentInfo: newSeg}, lo.Map(toAlter, func(t *datapb.SegmentInfo, _ int) *SegmentInfo {
+	err := m.alterMetaStoreAfterCompaction([]*SegmentInfo{{SegmentInfo: newSeg}}, lo.Map(toAlter, func(t *datapb.SegmentInfo, _ int) *SegmentInfo {
 		return &SegmentInfo{SegmentInfo: t}
 	}))
 	assert.NoError(t, err)

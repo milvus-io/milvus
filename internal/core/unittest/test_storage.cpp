@@ -21,6 +21,9 @@
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/storage_c.h"
 
+#define private public
+#include "storage/ChunkCache.h"
+
 using namespace std;
 using namespace milvus;
 using namespace milvus::storage;
@@ -149,4 +152,14 @@ TEST_F(StorageTest, GetStorageMetrics) {
         EXPECT_EQ(
             0, strncmp(currentLine, familyName.c_str(), familyName.length()));
     }
+}
+
+TEST_F(StorageTest, CachePath) {
+    auto rcm =
+        RemoteChunkManagerSingleton::GetInstance().GetRemoteChunkManager();
+    auto cc_ = ChunkCache("tmp/mmap/chunk_cache", "willneed", rcm);
+    auto relative_result = cc_.CachePath("abc");
+    EXPECT_EQ("tmp/mmap/chunk_cache/abc", relative_result);
+    auto absolute_result = cc_.CachePath("/var/lib/milvus/abc");
+    EXPECT_EQ("tmp/mmap/chunk_cache/var/lib/milvus/abc", absolute_result);
 }

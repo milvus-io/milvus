@@ -5,6 +5,10 @@ set -euo pipefail
 # Absolute path to the toplevel milvus directory.
 toplevel=$(dirname "$(cd "$(dirname "${0}")"; pwd)")
 
+if [[ "$IS_NETWORK_MODE_HOST" == "true" ]]; then
+  sed -i '/gpubuilder:/,/^\s*$/s/image: \${IMAGE_REPO}\/milvus-env:gpu-\${OS_NAME}-\${GPU_DATE_VERSION}/&\n    network_mode: "host"/'   $toplevel/docker-compose.yml
+fi
+
 export OS_NAME="${OS_NAME:-ubuntu20.04}"
 
 pushd "${toplevel}"
