@@ -121,7 +121,7 @@ func (v *validateUtil) Validate(data []*schemapb.FieldData, schema *schemapb.Col
 func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil.SchemaHelper, numRows uint64) error {
 	errNumRowsMismatch := func(fieldName string, fieldNumRows, passedNumRows uint64) error {
 		msg := fmt.Sprintf("the num_rows (%d) of field (%s) is not equal to passed num_rows (%d)", fieldNumRows, fieldName, passedNumRows)
-		return merr.WrapErrParameterInvalid(passedNumRows, numRows, msg)
+		return merr.WrapErrParameterInvalid(fieldNumRows, passedNumRows, msg)
 	}
 
 	for _, field := range data {
