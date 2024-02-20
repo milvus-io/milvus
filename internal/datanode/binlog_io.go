@@ -42,7 +42,7 @@ var (
 )
 
 func downloadBlobs(ctx context.Context, b io.BinlogIO, paths []string) ([]*Blob, error) {
-	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "download")
+	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "downloadBlobs")
 	defer span.End()
 	log.Debug("down load", zap.Strings("path", paths))
 	bytes, err := b.Download(ctx, paths)
