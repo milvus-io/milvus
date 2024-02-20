@@ -19,6 +19,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <future>
 
 #include "storage/FieldData.h"
 #include "storage/PayloadStream.h"
@@ -102,7 +103,7 @@ EncodeAndUploadFieldSlice(ChunkManager* chunk_manager,
                           const FieldMeta& field_meta,
                           std::string object_key);
 
-std::vector<FieldDataPtr>
+std::vector<std::future<std::unique_ptr<DataCodec>>>
 GetObjectData(ChunkManager* remote_chunk_manager,
               const std::vector<std::string>& remote_files);
 
