@@ -18,6 +18,7 @@ from base.schema_wrapper import ApiCollectionSchemaWrapper, ApiFieldSchemaWrappe
 from common import common_type as ct
 from utils.util_log import test_log as log
 from customize.milvus_operator import MilvusOperator
+import tensorflow as tf
 fake = Faker()
 """" Methods of processing data """
 
@@ -142,8 +143,14 @@ def gen_double_field(name=ct.default_double_field_name, is_primary=False, descri
 
 
 def gen_float_vec_field(name=ct.default_float_vec_field_name, is_primary=False, dim=ct.default_dim,
-                        description=ct.default_desc, **kwargs):
-    float_vec_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.FLOAT_VECTOR,
+                        description=ct.default_desc, vector_data_type="FLOAT_VECTOR", **kwargs):
+    if vector_data_type == "FLOAT_VECTOR":
+        dtype = DataType.FLOAT_VECTOR
+    elif vector_data_type == "FLOAT16_VECTOR":
+        dtype = DataType.FLOAT16_VECTOR
+    elif vector_data_type == "BFLOAT16_VECTOR":
+        dtype = DataType.BFLOAT16_VECTOR
+    float_vec_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=dtype,
                                                                    description=description, dim=dim,
                                                                    is_primary=is_primary, **kwargs)
     return float_vec_field
@@ -157,28 +164,60 @@ def gen_binary_vec_field(name=ct.default_binary_vec_field_name, is_primary=False
     return binary_vec_field
 
 
+def gen_float16_vec_field(name=ct.default_float_vec_field_name, is_primary=False, dim=ct.default_dim,
+                          description=ct.default_desc, **kwargs):
+    float_vec_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.FLOAT16_VECTOR,
+                                                                   description=description, dim=dim,
+                                                                   is_primary=is_primary, **kwargs)
+    return float_vec_field
+
+
+def gen_bfloat16_vec_field(name=ct.default_float_vec_field_name, is_primary=False, dim=ct.default_dim,
+                           description=ct.default_desc, **kwargs):
+    float_vec_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.BFLOAT16_VECTOR,
+                                                                   description=description, dim=dim,
+                                                                   is_primary=is_primary, **kwargs)
+    return float_vec_field
+
+
+
 def gen_default_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name,
                                   auto_id=False, dim=ct.default_dim, enable_dynamic_field=False, with_json=True,
-                                  multiple_dim_array=[], **kwargs):
+                                  multiple_dim_array=[], is_partition_key=None, vector_data_type="FLOAT_VECTOR",
+                                  **kwargs):
     if enable_dynamic_field:
         if primary_field is ct.default_int64_field_name:
-            fields = [gen_int64_field(), gen_float_vec_field(dim=dim)]
+            if is_partition_key is None:
+                fields = [gen_int64_field(), gen_float_vec_field(dim=dim, vector_data_type=vector_data_type)]
+            else:
+                fields = [gen_int64_field(is_partition_key=(is_partition_key == ct.default_int64_field_name)),
+                          gen_float_vec_field(dim=dim, vector_data_type=vector_data_type)]
         elif primary_field is ct.default_string_field_name:
-            fields = [gen_string_field(), gen_float_vec_field(dim=dim)]
+            if is_partition_key is None:
+                fields = [gen_string_field(), gen_float_vec_field(dim=dim, vector_data_type=vector_data_type)]
+            else:
+                fields = [gen_string_field(is_partition_key=(is_partition_key == ct.default_string_field_name)),
+                          gen_float_vec_field(dim=dim, vector_data_type=vector_data_type)]
         else:
             log.error("Primary key only support int or varchar")
             assert False
-        if len(multiple_dim_array) != 0:
-            for other_dim in multiple_dim_array:
-                fields.append(gen_float_vec_field(gen_unique_str("multiple_vector"), dim=other_dim))
     else:
-        fields = [gen_int64_field(), gen_float_field(), gen_string_field(), gen_json_field(),
-                  gen_float_vec_field(dim=dim)]
+        if is_partition_key is None:
+            int64_field = gen_int64_field()
+            vchar_field = gen_string_field()
+        else:
+            int64_field = gen_int64_field(is_partition_key=(is_partition_key == ct.default_int64_field_name))
+            vchar_field = gen_string_field(is_partition_key=(is_partition_key == ct.default_string_field_name))
+        fields = [int64_field, gen_float_field(), vchar_field, gen_json_field(),
+                  gen_float_vec_field(dim=dim, vector_data_type=vector_data_type)]
         if with_json is False:
             fields.remove(gen_json_field())
-        if len(multiple_dim_array) != 0:
-            for other_dim in multiple_dim_array:
-                fields.append(gen_float_vec_field(gen_unique_str("multiple_vector"), dim=other_dim))
+
+    if len(multiple_dim_array) != 0:
+        for other_dim in multiple_dim_array:
+            fields.append(gen_float_vec_field(gen_unique_str("multiple_vector"), dim=other_dim,
+                                              vector_data_type=vector_data_type))
+
 
     schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
                                                                     primary_field=primary_field, auto_id=auto_id,
@@ -278,11 +317,15 @@ def gen_collection_schema_all_datatype(description=ct.default_desc,
                                        auto_id=False, dim=ct.default_dim,
                                        enable_dynamic_field=False, with_json=True, **kwargs):
     if enable_dynamic_field:
-        fields = [gen_int64_field(), gen_float_vec_field(dim=dim)]
+        fields = [gen_int64_field(), gen_float_vec_field(dim=dim),
+                  gen_float_vec_field(name=ct.default_float16_vec_field_name, dim=dim, vector_data_type="FLOAT16_VECTOR"),
+                  gen_float_vec_field(name=ct.default_bfloat16_vec_field_name, dim=dim, vector_data_type="BFLOAT16_VECTOR")]
     else:
         fields = [gen_int64_field(), gen_int32_field(), gen_int16_field(), gen_int8_field(),
                   gen_bool_field(), gen_float_field(), gen_double_field(), gen_string_field(),
-                  gen_json_field(), gen_float_vec_field(dim=dim)]
+                  gen_json_field(), gen_float_vec_field(dim=dim),
+                  gen_float_vec_field(name=ct.default_float16_vec_field_name, dim=dim, vector_data_type="FLOAT16_VECTOR"),
+                  gen_float_vec_field(name=ct.default_bfloat16_vec_field_name, dim=dim, vector_data_type="BFLOAT16_VECTOR")]
         if with_json is False:
             fields.remove(gen_json_field())
     schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
@@ -324,11 +367,18 @@ def gen_schema_multi_string_fields(string_fields):
     return schema
 
 
-def gen_vectors(nb, dim):
-    vectors = [[random.random() for _ in range(dim)] for _ in range(nb)]
+def gen_vectors(nb, dim, vector_data_type="FLOAT_VECTOR"):
+    if vector_data_type == "FLOAT_VECTOR":
+        vectors = [[random.random() for _ in range(dim)] for _ in range(nb)]
+    elif vector_data_type == "FLOAT16_VECTOR":
+        vectors = gen_fp16_vectors(nb, dim)[1]
+    elif vector_data_type == "BFLOAT16_VECTOR":
+        vectors = gen_bf16_vectors(nb, dim)[1]
+
     if dim > 1:
-        vectors = preprocessing.normalize(vectors, axis=1, norm='l2')
-        vectors = vectors.tolist()
+        if vector_data_type=="FLOAT_VECTOR":
+            vectors = preprocessing.normalize(vectors, axis=1, norm='l2')
+            vectors = vectors.tolist()
     return vectors
 
 
@@ -349,7 +399,8 @@ def gen_binary_vectors(num, dim):
 
 
 def gen_default_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, start=0, with_json=True,
-                               random_primary_key=False):
+                               random_primary_key=False, multiple_dim_array=[], multiple_vector_field_name=[],
+                               vector_data_type="FLOAT_VECTOR"):
     if not random_primary_key:
         int_values = pd.Series(data=[i for i in range(start, start + nb)])
     else:
@@ -357,7 +408,7 @@ def gen_default_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, start=0, wi
     float_values = pd.Series(data=[np.float32(i) for i in range(start, start + nb)], dtype="float32")
     string_values = pd.Series(data=[str(i) for i in range(start, start + nb)], dtype="string")
     json_values = [{"number": i, "float": i*1.0} for i in range(start, start + nb)]
-    float_vec_values = gen_vectors(nb, dim)
+    float_vec_values = gen_vectors(nb, dim, vector_data_type=vector_data_type)
     df = pd.DataFrame({
         ct.default_int64_field_name: int_values,
         ct.default_float_field_name: float_values,
@@ -365,24 +416,38 @@ def gen_default_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, start=0, wi
         ct.default_json_field_name: json_values,
         ct.default_float_vec_field_name: float_vec_values
     })
+
     if with_json is False:
         df.drop(ct.default_json_field_name, axis=1, inplace=True)
+    if len(multiple_dim_array) != 0:
+        if len(multiple_vector_field_name) != len(multiple_dim_array):
+            log.error("multiple vector feature is enabled, please input the vector field name list "
+                      "not including the default vector field")
+            assert len(multiple_vector_field_name) == len(multiple_dim_array)
+        for i in range(len(multiple_dim_array)):
+            new_float_vec_values = gen_vectors(nb, multiple_dim_array[i], vector_data_type=vector_data_type)
+            df[multiple_vector_field_name[i]] = new_float_vec_values
 
     return df
 
 
-def gen_default_rows_data(nb=ct.default_nb, dim=ct.default_dim, start=0, with_json=True):
+def gen_default_rows_data(nb=ct.default_nb, dim=ct.default_dim, start=0, with_json=True, multiple_dim_array=[],
+                          multiple_vector_field_name=[], vector_data_type="FLOAT_VECTOR"):
     array = []
     for i in range(start, start + nb):
         dict = {ct.default_int64_field_name: i,
                 ct.default_float_field_name: i*1.0,
                 ct.default_string_field_name: str(i),
                 ct.default_json_field_name: {"number": i, "float": i*1.0},
-                ct.default_float_vec_field_name: gen_vectors(1, dim)[0]
+                ct.default_float_vec_field_name: gen_vectors(1, dim, vector_data_type=vector_data_type)[0]
                 }
         if with_json is False:
             dict.pop(ct.default_json_field_name, None)
         array.append(dict)
+        if len(multiple_dim_array) != 0:
+            for i in range(len(multiple_dim_array)):
+                dict[multiple_vector_field_name[i]] = gen_vectors(1, multiple_dim_array[i],
+                                                                  vector_data_type=vector_data_type)[0]
 
     return array
 
@@ -497,6 +562,8 @@ def gen_dataframe_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0, w
     json_values = [{"number": i, "string": str(i), "bool": bool(i),
                     "list": [j for j in range(i, i + ct.default_json_list_length)]} for i in range(start, start + nb)]
     float_vec_values = gen_vectors(nb, dim)
+    float16_vec_values = gen_vectors(nb, dim, "FLOAT16_VECTOR")
+    bfloat16_vec_values = gen_vectors(nb, dim, "BFLOAT16_VECTOR")
     df = pd.DataFrame({
         ct.default_int64_field_name: int64_values,
         ct.default_int32_field_name: int32_values,
@@ -507,8 +574,9 @@ def gen_dataframe_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0, w
         ct.default_double_field_name: double_values,
         ct.default_string_field_name: string_values,
         ct.default_json_field_name: json_values,
-        ct.default_float_vec_field_name: float_vec_values
-
+        ct.default_float_vec_field_name: float_vec_values,
+        ct.default_float16_vec_field_name: float16_vec_values,
+        ct.default_bfloat16_vec_field_name: bfloat16_vec_values
     })
     if with_json is False:
         df.drop(ct.default_json_field_name, axis=1, inplace=True)
@@ -531,7 +599,9 @@ def gen_default_rows_data_all_data_type(nb=ct.default_nb, dim=ct.default_dim, st
                 ct.default_string_field_name: str(i),
                 ct.default_json_field_name: {"number": i, "string": str(i), "bool": bool(i),
                                              "list": [j for j in range(i, i + ct.default_json_list_length)]},
-                ct.default_float_vec_field_name: gen_vectors(1, dim)[0]
+                ct.default_float_vec_field_name: gen_vectors(1, dim)[0],
+                ct.default_float16_vec_field_name: gen_vectors(1, dim, "FLOAT16_VECTOR")[0],
+                ct.default_bfloat16_vec_field_name: gen_vectors(1, dim, "BFLOAT16_VECTOR")[0]
                 }
         if with_json is False:
             dict.pop(ct.default_json_field_name, None)
@@ -1384,7 +1454,8 @@ def gen_partitions(collection_w, partition_num=1):
 
 def insert_data(collection_w, nb=ct.default_nb, is_binary=False, is_all_data_type=False,
                 auto_id=False, dim=ct.default_dim, insert_offset=0, enable_dynamic_field=False, with_json=True,
-                random_primary_key=False):
+                random_primary_key=False, multiple_dim_array=[], primary_field=ct.default_int64_field_name,
+                vector_data_type="FLOAT_VECTOR"):
     """
     target: insert non-binary/binary data
     method: insert non-binary/binary data into partitions if any
@@ -1396,13 +1467,23 @@ def insert_data(collection_w, nb=ct.default_nb, is_binary=False, is_all_data_typ
     binary_raw_vectors = []
     insert_ids = []
     start = insert_offset
-    log.info(f"inserted {nb} data into collection {collection_w.name}")
+    log.info(f"inserting {nb} data into collection {collection_w.name}")
+    # extract the vector field name list
+    vector_name_list = extract_vector_field_name_list(collection_w)
+    # prepare data
     for i in range(num):
         log.debug("Dynamic field is enabled: %s" % enable_dynamic_field)
-        default_data = gen_default_dataframe_data(nb // num, dim=dim, start=start, with_json=with_json,
-                                                  random_primary_key=random_primary_key)
-        if enable_dynamic_field:
-            default_data = gen_default_rows_data(nb // num, dim=dim, start=start, with_json=with_json)
+        if not enable_dynamic_field:
+            default_data = gen_default_dataframe_data(nb // num, dim=dim, start=start, with_json=with_json,
+                                                      random_primary_key=random_primary_key,
+                                                      multiple_dim_array=multiple_dim_array,
+                                                      multiple_vector_field_name=vector_name_list,
+                                                      vector_data_type=vector_data_type)
+        else:
+            default_data = gen_default_rows_data(nb // num, dim=dim, start=start, with_json=with_json,
+                                                 multiple_dim_array=multiple_dim_array,
+                                                 multiple_vector_field_name=vector_name_list,
+                                                 vector_data_type=vector_data_type)
         if is_binary:
             default_data, binary_raw_data = gen_default_binary_dataframe_data(nb // num, dim=dim, start=start)
             binary_raw_vectors.extend(binary_raw_data)
@@ -1414,10 +1495,18 @@ def insert_data(collection_w, nb=ct.default_nb, is_binary=False, is_all_data_typ
         if auto_id:
             if enable_dynamic_field:
                 for data in default_data:
-                    data.pop(ct.default_int64_field_name, None)
+                    if primary_field == ct.default_int64_field_name:
+                        data.pop(ct.default_int64_field_name, None)
+                    elif primary_field == ct.default_string_field_name:
+                        data.pop(ct.default_string_field_name, None)
             else:
-                default_data.drop(ct.default_int64_field_name, axis=1, inplace=True)
+                if primary_field == ct.default_int64_field_name:
+                    default_data.drop(ct.default_int64_field_name, axis=1, inplace=True)
+                elif primary_field == ct.default_string_field_name:
+                    default_data.drop(ct.default_string_field_name, axis=1, inplace=True)
+        # insert
         insert_res = collection_w.insert(default_data, par[i].name)[0]
+        log.info(f"inserted {nb} data into collection {collection_w.name}")
         time_stamp = insert_res.timestamp
         insert_ids.extend(insert_res.primary_keys)
         vectors.append(default_data)
@@ -1559,3 +1648,104 @@ def get_wildcard_output_field_names(collection_w, output_fields):
         output_fields.remove("*")
         output_fields.extend(all_fields)
     return output_fields
+
+
+def extract_vector_field_name_list(collection_w):
+    """
+    extract the vector field name list
+    collection_w : the collection object to be extracted thea name of all the vector fields
+    return: the vector field name list without the default float vector field name
+    """
+    schema_dict = collection_w.schema.to_dict()
+    fields = schema_dict.get('fields')
+    vector_name_list = []
+    for field in fields:
+        if str(field['type']) == 'DataType.FLOAT_VECTOR' \
+                or str(field['type']) == 'DataType.FLOAT16_VECTOR' \
+                or str(field['type']) == 'DataType.BFLOAT16_VECTOR':
+            if field['name'] != ct.default_float_vec_field_name:
+                vector_name_list.append(field['name'])
+
+    return vector_name_list
+
+
+def get_hybrid_search_base_results(search_res_dict_array):
+    """
+    merge the element in the dicts array
+    search_res_dict_array : the dict array in which the elements to be merged
+    return: the sorted id and score answer
+    """
+    # calculate hybrid search base line
+    search_res_dict_merge = {}
+    ids_answer = []
+    score_answer = []
+    for i in range(len(search_res_dict_array) - 1):
+        for key in search_res_dict_array[i]:
+            if search_res_dict_array[i + 1].get(key):
+                search_res_dict_merge[key] = search_res_dict_array[i][key] + search_res_dict_array[i + 1][key]
+            else:
+                search_res_dict_merge[key] = search_res_dict_array[i][key]
+        for key in search_res_dict_array[i + 1]:
+            if not search_res_dict_array[i].get(key):
+                search_res_dict_merge[key] = search_res_dict_array[i + 1][key]
+    sorted_list = sorted(search_res_dict_merge.items(), key=lambda x: x[1], reverse=True)
+
+    for sort in sorted_list:
+        ids_answer.append(int(sort[0]))
+        score_answer.append(float(sort[1]))
+
+    return ids_answer, score_answer
+
+
+def gen_bf16_vectors(num, dim):
+    """
+    generate brain float16 vector data
+    raw_vectors : the vectors
+    bf16_vectors: the bytes used for insert
+    return: raw_vectors and bf16_vectors
+    """
+    raw_vectors = []
+    bf16_vectors = []
+    for _ in range(num):
+        raw_vector = [random.random() for _ in range(dim)]
+        raw_vectors.append(raw_vector)
+        # bf16_vector = np.array(raw_vector, dtype=tf.bfloat16).view(np.uint8).tolist()
+        bf16_vector = tf.cast(raw_vector, dtype=tf.bfloat16).numpy().view(np.uint8).tolist()
+        bf16_vectors.append(bytes(bf16_vector))
+
+    return raw_vectors, bf16_vectors
+
+
+def gen_fp16_vectors(num, dim):
+    """
+    generate float16 vector data
+    raw_vectors : the vectors
+    fp16_vectors: the bytes used for insert
+    return: raw_vectors and fp16_vectors
+    """
+    raw_vectors = []
+    fp16_vectors = []
+    for _ in range(num):
+        raw_vector = [random.random() for _ in range(dim)]
+        raw_vectors.append(raw_vector)
+        fp16_vector = np.array(raw_vector, dtype=np.float16).view(np.uint8).tolist()
+        fp16_vectors.append(bytes(fp16_vector))
+
+    return raw_vectors, fp16_vectors
+
+
+def gen_vectors_based_on_vector_type(num, dim, vector_data_type):
+    """
+    generate float16 vector data
+    raw_vectors : the vectors
+    fp16_vectors: the bytes used for insert
+    return: raw_vectors and fp16_vectors
+    """
+    if vector_data_type == "FLOAT_VECTOR":
+        vectors = [[random.random() for _ in range(dim)] for _ in range(num)]
+    elif vector_data_type == "FLOAT16_VECTOR":
+        vectors = gen_fp16_vectors(num, dim)[1]
+    elif vector_data_type == "BFLOAT16_VECTOR":
+        vectors = gen_bf16_vectors(num, dim)[1]
+
+    return vectors

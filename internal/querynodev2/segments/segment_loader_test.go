@@ -774,6 +774,16 @@ func (suite *SegmentLoaderDetailSuite) TestWaitSegmentLoadDone() {
 	})
 }
 
+func (suite *SegmentLoaderDetailSuite) TestRequestResource() {
+	suite.Run("out_of_memory_zero_info", func() {
+		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.Key, "0")
+		defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.Key)
+
+		_, _, err := suite.loader.requestResource(context.Background())
+		suite.NoError(err)
+	})
+}
+
 func TestSegmentLoader(t *testing.T) {
 	suite.Run(t, &SegmentLoaderSuite{})
 	suite.Run(t, &SegmentLoaderDetailSuite{})
