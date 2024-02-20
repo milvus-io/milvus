@@ -25,6 +25,11 @@
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/LocalChunkManagerSingleton.h"
 
+bool
+IsLoadWithDisk(const char* index_type, int index_engine_version) {
+    return knowhere::UseDiskLoad(index_type, index_engine_version);
+}
+
 CStatus
 NewLoadIndexInfo(CLoadIndexInfo* c_load_index_info) {
     try {
