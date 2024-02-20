@@ -1437,6 +1437,7 @@ func BenchmarkDefaultReader(b *testing.B) {
 		}
 	}
 }
+
 func BenchmarkDataSetReader(b *testing.B) {
 	size := 1000000
 	buffer, err := dataGen(size)
@@ -1464,6 +1465,7 @@ func BenchmarkDataSetReader(b *testing.B) {
 		}
 	}
 }
+
 func BenchmarkArrowRecordReader(b *testing.B) {
 	size := 1000000
 	buffer, err := dataGen(size)
