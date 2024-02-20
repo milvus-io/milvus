@@ -99,9 +99,10 @@ EMBEDDED_MILVUS="OFF"
 BUILD_DISK_ANN="OFF"
 USE_ASAN="OFF"
 USE_DYNAMIC_SIMD="ON"
+USE_OPENDAL="OFF"
 INDEX_ENGINE="KNOWHERE"
 
-while getopts "p:d:t:s:f:n:i:y:a:x:ulrcghzmebZ" arg; do
+while getopts "p:d:t:s:f:n:i:y:a:x:o:ulrcghzmebZ" arg; do
   case $arg in
   p)
     INSTALL_PREFIX=$OPTARG
@@ -148,6 +149,9 @@ while getopts "p:d:t:s:f:n:i:y:a:x:ulrcghzmebZ" arg; do
   x)
     INDEX_ENGINE=$OPTARG
     ;;
+  o)
+    USE_OPENDAL=$OPTARG
+    ;;
   h) # help
     echo "
 
@@ -164,10 +168,11 @@ parameter:
 -b: build embedded milvus(default: OFF)
 -a: build milvus with AddressSanitizer(default: false)
 -Z: build milvus without azure-sdk-for-cpp, so cannot use azure blob
+-o: build milvus with opendal(default: false)
 -h: help
 
 usage:
-./core_build.sh -p \${INSTALL_PREFIX} -t \${BUILD_TYPE} -s \${CUDA_ARCH} [-u] [-l] [-r] [-c] [-z] [-g] [-m] [-e] [-h] [-b]
+./core_build.sh -p \${INSTALL_PREFIX} -t \${BUILD_TYPE} -s \${CUDA_ARCH} [-u] [-l] [-r] [-c] [-z] [-g] [-m] [-e] [-h] [-b] [-o]
                 "
     exit 0
     ;;
@@ -246,6 +251,7 @@ ${CMAKE_EXTRA_ARGS} \
 -DUSE_ASAN=${USE_ASAN} \
 -DUSE_DYNAMIC_SIMD=${USE_DYNAMIC_SIMD} \
 -DCPU_ARCH=${CPU_ARCH} \
+-DUSE_OPENDAL=${USE_OPENDAL} \
 -DINDEX_ENGINE=${INDEX_ENGINE} "
 if [ -z "$BUILD_WITHOUT_AZURE" ]; then
 CMAKE_CMD=${CMAKE_CMD}"-DAZURE_BUILD_DIR=${AZURE_BUILD_DIR} \

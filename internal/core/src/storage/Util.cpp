@@ -35,7 +35,9 @@
 #include "storage/LocalChunkManager.h"
 #include "storage/MemFileManagerImpl.h"
 #include "storage/MinioChunkManager.h"
+#ifdef USE_OPENDAL
 #include "storage/OpenDALChunkManager.h"
+#endif
 #include "storage/Types.h"
 #include "storage/ThreadPools.h"
 #include "storage/Util.h"
@@ -686,10 +688,11 @@ CreateChunkManager(const StorageConfig& storage_config) {
                 }
             }
         }
+#ifdef USE_OPENDAL
         case ChunkManagerType::OpenDAL: {
             return std::make_shared<OpenDALChunkManager>(storage_config);
         }
-
+#endif
         default: {
             PanicInfo(ConfigInvalid,
                       "unsupported storage_config.storage_type {}",

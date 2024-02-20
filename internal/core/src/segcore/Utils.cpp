@@ -719,12 +719,8 @@ void
 LoadFieldDatasFromRemote2(std::shared_ptr<milvus_storage::Space> space,
                           SchemaPtr schema,
                           FieldDataInfo& field_data_info) {
-    auto res = space->ScanData();
+    auto reader = space->ScanData();
 
-    if (!res.ok()) {
-        PanicInfo(S3Error, "failed to create scan iterator");
-    }
-    auto reader = res.value();
     for (auto rec = reader->Next(); rec != nullptr; rec = reader->Next()) {
         if (!rec.ok()) {
             PanicInfo(DataFormatBroken, "failed to read data");
