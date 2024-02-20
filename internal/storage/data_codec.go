@@ -1007,43 +1007,38 @@ func (deleteCodec *DeleteCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 		if err != nil {
 			return InvalidUniqueID, InvalidUniqueID, nil, err
 		}
+		defer binlogReader.Close()
 
 		pid, sid = binlogReader.PartitionID, binlogReader.SegmentID
 		eventReader, err := binlogReader.NextEventReader()
 		if err != nil {
-			binlogReader.Close()
 			return InvalidUniqueID, InvalidUniqueID, nil, err
 		}
+		defer eventReader.Close()
 
-		dataset, err := eventReader.GetByteArrayDataSet()
+		rr, err := eventReader.GetArrowRecordReader()
 		if err != nil {
-			eventReader.Close()
-			binlogReader.Close()
 			return InvalidUniqueID, InvalidUniqueID, nil, err
 		}
+		defer rr.Release()
 
-		batchSize := int64(1024)
-		for dataset.HasNext() {
-			stringArray, err := dataset.NextBatch(batchSize)
-			if err != nil {
-				return InvalidUniqueID, InvalidUniqueID, nil, err
-			}
-			for i := 0; i < len(stringArray); i++ {
+		for rr.Next() {
+			rec := rr.Record()
+			defer rec.Release()
+			column := rec.Column(0)
+			for i := 0; i < column.Len(); i++ {
 				deleteLog := &DeleteLog{}
-				if err = json.Unmarshal(stringArray[i], deleteLog); err != nil {
+				strVal := column.ValueStr(i)
+				if err = json.Unmarshal([]byte(strVal), deleteLog); err != nil {
 					// compatible with versions that only support int64 type primary keys
 					// compatible with fmt.Sprintf("%d,%d", pk, ts)
 					// compatible error info (unmarshal err invalid character ',' after top-level value)
-					splits := strings.Split(stringArray[i].String(), ",")
+					splits := strings.Split(strVal, ",")
 					if len(splits) != 2 {
-						eventReader.Close()
-						binlogReader.Close()
-						return InvalidUniqueID, InvalidUniqueID, nil, fmt.Errorf("the format of delta log is incorrect, %v can not be split", stringArray[i])
+						return InvalidUniqueID, InvalidUniqueID, nil, fmt.Errorf("the format of delta log is incorrect, %v can not be split", strVal)
 					}
 					pk, err := strconv.ParseInt(splits[0], 10, 64)
 					if err != nil {
-						eventReader.Close()
-						binlogReader.Close()
 						return InvalidUniqueID, InvalidUniqueID, nil, err
 					}
 					deleteLog.Pk = &Int64PrimaryKey{
@@ -1052,8 +1047,6 @@ func (deleteCodec *DeleteCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 					deleteLog.PkType = int64(schemapb.DataType_Int64)
 					deleteLog.Ts, err = strconv.ParseUint(splits[1], 10, 64)
 					if err != nil {
-						eventReader.Close()
-						binlogReader.Close()
 						return InvalidUniqueID, InvalidUniqueID, nil, err
 					}
 				}
@@ -1061,8 +1054,6 @@ func (deleteCodec *DeleteCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 				result.Append(deleteLog.Pk, deleteLog.Ts)
 			}
 		}
-		eventReader.Close()
-		binlogReader.Close()
 	}
 
 	return pid, sid, result, nil
