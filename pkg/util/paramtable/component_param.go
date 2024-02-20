@@ -1369,6 +1369,7 @@ type queryCoordConfig struct {
 	RowCountMaxSteps                    ParamItem `refreshable:"true"`
 	RandomMaxSteps                      ParamItem `refreshable:"true"`
 	GrowingRowCountWeight               ParamItem `refreshable:"true"`
+	BalanceCostThreshold                ParamItem `refreshable:"true"`
 
 	SegmentCheckInterval       ParamItem `refreshable:"true"`
 	ChannelCheckInterval       ParamItem `refreshable:"true"`
@@ -1595,6 +1596,16 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.GrowingRowCountWeight.Init(base.mgr)
+
+	p.BalanceCostThreshold = ParamItem{
+		Key:          "queryCoord.balanceCostThreshold",
+		Version:      "2.3.5",
+		DefaultValue: "0.001",
+		PanicIfEmpty: true,
+		Doc:          "the threshold of balance cost",
+		Export:       true,
+	}
+	p.BalanceCostThreshold.Init(base.mgr)
 
 	p.MemoryUsageMaxDifferencePercentage = ParamItem{
 		Key:          "queryCoord.memoryUsageMaxDifferencePercentage",
@@ -2736,8 +2747,8 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	p.LevelZeroCompactionTriggerDeltalogMaxNum = ParamItem{
 		Key:          "dataCoord.compaction.levelzero.forceTrigger.deltalogMaxNum",
 		Version:      "2.4.0",
-		Doc:          "The maxmum number of deltalog files to force trigger a LevelZero Compaction, default as 20",
-		DefaultValue: "20",
+		Doc:          "The maxmum number of deltalog files to force trigger a LevelZero Compaction, default as 30",
+		DefaultValue: "30",
 	}
 	p.LevelZeroCompactionTriggerDeltalogMaxNum.Init(base.mgr)
 

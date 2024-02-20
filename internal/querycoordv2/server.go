@@ -282,6 +282,8 @@ func (s *Server) initQueryCoord() error {
 		s.nodeMgr, s.dist, s.meta, s.targetMgr)
 	s.balancerMap[balance.ScoreBasedBalancerName] = balance.NewScoreBasedBalancer(s.taskScheduler,
 		s.nodeMgr, s.dist, s.meta, s.targetMgr)
+	s.balancerMap[balance.MultiTargetBalancerName] = balance.NewMultiTargetBalancer(s.taskScheduler, s.nodeMgr, s.dist, s.meta, s.targetMgr)
+
 	if balancer, ok := s.balancerMap[params.Params.QueryCoordCfg.Balancer.GetValue()]; ok {
 		s.balancer = balancer
 		log.Info("use config balancer", zap.String("balancer", params.Params.QueryCoordCfg.Balancer.GetValue()))
