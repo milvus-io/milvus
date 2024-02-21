@@ -34,6 +34,7 @@ const (
 type getStatisticsTask struct {
 	request *milvuspb.GetStatisticsRequest
 	result  *milvuspb.GetStatisticsResponse
+	baseTask
 	Condition
 	collectionName string
 	partitionNames []string
@@ -590,6 +591,7 @@ func reduceStatisticResponse(results []map[string]string) ([]*commonpb.KeyValueP
 // old version of get statistics
 // please remove it after getStatisticsTask below is stable
 type getCollectionStatisticsTask struct {
+	baseTask
 	Condition
 	*milvuspb.GetCollectionStatisticsRequest
 	ctx       context.Context
@@ -675,6 +677,7 @@ func (g *getCollectionStatisticsTask) PostExecute(ctx context.Context) error {
 }
 
 type getPartitionStatisticsTask struct {
+	baseTask
 	Condition
 	*milvuspb.GetPartitionStatisticsRequest
 	ctx       context.Context

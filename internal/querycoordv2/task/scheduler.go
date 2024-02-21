@@ -75,6 +75,14 @@ func NewReplicaSegmentIndex(task *SegmentTask) replicaSegmentIndex {
 	}
 }
 
+func NewReplicaLeaderIndex(task *LeaderTask) replicaSegmentIndex {
+	return replicaSegmentIndex{
+		ReplicaID: task.ReplicaID(),
+		SegmentID: task.SegmentID(),
+		IsGrowing: false,
+	}
+}
+
 type replicaChannelIndex struct {
 	ReplicaID int64
 	Channel   string
@@ -263,6 +271,10 @@ func (scheduler *taskScheduler) Add(task Task) error {
 	case *ChannelTask:
 		index := replicaChannelIndex{task.ReplicaID(), task.Channel()}
 		scheduler.channelTasks[index] = task
+
+	case *LeaderTask:
+		index := NewReplicaLeaderIndex(task)
+		scheduler.segmentTasks[index] = task
 	}
 
 	scheduler.updateTaskMetrics()
@@ -368,6 +380,23 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 			if !lo.Contains(channelDist, task.Actions()[1].Node()) {
 				return merr.WrapErrServiceInternal("source channel unsubscribed, stop balancing")
 			}
+		}
+	case *LeaderTask:
+		index := NewReplicaLeaderIndex(task)
+		if old, ok := scheduler.segmentTasks[index]; ok {
+			if task.Priority() > old.Priority() {
+				log.Info("replace old task, the new one with higher priority",
+					zap.Int64("oldID", old.ID()),
+					zap.String("oldPriority", old.Priority().String()),
+					zap.Int64("newID", task.ID()),
+					zap.String("newPriority", task.Priority().String()),
+				)
+				old.Cancel(merr.WrapErrServiceInternal("replaced with the other one with higher priority"))
+				scheduler.remove(old)
+				return nil
+			}
+
+			return merr.WrapErrServiceInternal("task with the same segment exists")
 		}
 	default:
 		panic(fmt.Sprintf("preAdd: forget to process task type: %+v", task))
@@ -755,6 +784,11 @@ func (scheduler *taskScheduler) remove(task Task) {
 		index := replicaChannelIndex{task.ReplicaID(), task.Channel()}
 		delete(scheduler.channelTasks, index)
 		log = log.With(zap.String("channel", task.Channel()))
+
+	case *LeaderTask:
+		index := NewReplicaLeaderIndex(task)
+		delete(scheduler.segmentTasks, index)
+		log = log.With(zap.Int64("segmentID", task.SegmentID()))
 	}
 
 	scheduler.updateTaskMetrics()
@@ -777,6 +811,11 @@ func (scheduler *taskScheduler) checkStale(task Task) error {
 
 	case *ChannelTask:
 		if err := scheduler.checkChannelTaskStale(task); err != nil {
+			return err
+		}
+
+	case *LeaderTask:
+		if err := scheduler.checkLeaderTaskStale(task); err != nil {
 			return err
 		}
 
@@ -861,6 +900,56 @@ func (scheduler *taskScheduler) checkChannelTaskStale(task *ChannelTask) error {
 
 		case ActionTypeReduce:
 			// do nothing here
+		}
+	}
+	return nil
+}
+
+func (scheduler *taskScheduler) checkLeaderTaskStale(task *LeaderTask) error {
+	log := log.With(
+		zap.Int64("taskID", task.ID()),
+		zap.Int64("collectionID", task.CollectionID()),
+		zap.Int64("replicaID", task.ReplicaID()),
+		zap.String("source", task.Source().String()),
+		zap.Int64("leaderID", task.leaderID),
+	)
+
+	for _, action := range task.Actions() {
+		switch action.Type() {
+		case ActionTypeGrow:
+			taskType := GetTaskType(task)
+			var segment *datapb.SegmentInfo
+			if taskType == TaskTypeMove || taskType == TaskTypeUpdate {
+				segment = scheduler.targetMgr.GetSealedSegment(task.CollectionID(), task.SegmentID(), meta.CurrentTarget)
+			} else {
+				segment = scheduler.targetMgr.GetSealedSegment(task.CollectionID(), task.SegmentID(), meta.NextTarget)
+			}
+			if segment == nil {
+				log.Warn("task stale due to the segment to load not exists in targets",
+					zap.Int64("segment", task.segmentID),
+					zap.String("taskType", taskType.String()),
+				)
+				return merr.WrapErrSegmentReduplicate(task.SegmentID(), "target doesn't contain this segment")
+			}
+
+			replica := scheduler.meta.ReplicaManager.GetByCollectionAndNode(task.CollectionID(), action.Node())
+			if replica == nil {
+				log.Warn("task stale due to replica not found")
+				return merr.WrapErrReplicaNotFound(task.CollectionID(), "by collectionID")
+			}
+
+			view := scheduler.distMgr.GetLeaderShardView(task.leaderID, task.Shard())
+			if view == nil {
+				log.Warn("task stale due to leader not found")
+				return merr.WrapErrChannelNotFound(task.Shard(), "failed to get shard delegator")
+			}
+
+		case ActionTypeReduce:
+			view := scheduler.distMgr.GetLeaderShardView(task.leaderID, task.Shard())
+			if view == nil {
+				log.Warn("task stale due to leader not found")
+				return merr.WrapErrChannelNotFound(task.Shard(), "failed to get shard delegator")
+			}
 		}
 	}
 	return nil

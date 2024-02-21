@@ -87,6 +87,8 @@ type Cache interface {
 
 	RemoveDatabase(ctx context.Context, database string)
 	HasDatabase(ctx context.Context, database string) bool
+	// AllocID is only using on requests that need to skip timestamp allocation, don't overuse it.
+	AllocID(ctx context.Context) (int64, error)
 }
 
 type collectionBasicInfo struct {
@@ -246,6 +248,11 @@ type MetaCache struct {
 	leaderMut      sync.RWMutex
 	shardMgr       shardClientMgr
 	sfGlobal       conc.Singleflight[*collectionInfo]
+
+	IDStart int64
+	IDCount int64
+	IDIndex int64
+	IDLock  sync.RWMutex
 }
 
 // globalMetaCache is singleton instance of Cache
@@ -986,4 +993,28 @@ func (m *MetaCache) HasDatabase(ctx context.Context, database string) bool {
 	defer m.mu.RUnlock()
 	_, ok := m.collInfo[database]
 	return ok
+}
+
+func (m *MetaCache) AllocID(ctx context.Context) (int64, error) {
+	m.IDLock.Lock()
+	defer m.IDLock.Unlock()
+
+	if m.IDIndex == m.IDCount {
+		resp, err := m.rootCoord.AllocID(ctx, &rootcoordpb.AllocIDRequest{
+			Count: 1000000,
+		})
+		if err != nil {
+			log.Warn("Refreshing ID cache from rootcoord failed", zap.Error(err))
+			return 0, err
+		}
+		if resp.GetStatus().GetCode() != 0 {
+			log.Warn("Refreshing ID cache from rootcoord failed", zap.String("failed detail", resp.GetStatus().GetDetail()))
+			return 0, merr.WrapErrServiceInternal(resp.GetStatus().GetDetail())
+		}
+		m.IDStart, m.IDCount = resp.GetID(), int64(resp.GetCount())
+		m.IDIndex = 0
+	}
+	id := m.IDStart + m.IDIndex
+	m.IDIndex++
+	return id, nil
 }

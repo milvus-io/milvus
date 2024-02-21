@@ -381,7 +381,7 @@ struct CompareValAVX512Impl<int64_t, type> {
                 target,
                 (CompareOperator<int64_t, type>::ComparePredicate));
             __m128i cmp_res = _mm_maskz_set1_epi8(mask, 0x01);
-            _mm_storeu_si64((__m128i*)(res + i), cmp_res);
+            _mm_storel_epi64((__m128i_u*)(res + i), cmp_res);
         }
 
         for (size_t i = middle; i < size; ++i) {
@@ -429,7 +429,7 @@ struct CompareValAVX512Impl<double, type> {
                 target,
                 (CompareOperator<double, type>::ComparePredicate));
             __m128i cmp_res = _mm_maskz_set1_epi8(cmp_res_mask, 0x01);
-            _mm_storeu_si64((res + i), cmp_res);
+            _mm_storel_epi64((__m128i_u*)(res + i), cmp_res);
         }
 
         for (size_t i = middle; i < size; ++i) {
@@ -611,7 +611,7 @@ struct CompareColumnAVX512Impl {
                     (CompareOperator<T, type>::ComparePredicate));
 
                 __m128i cmp_res = _mm_maskz_set1_epi8(mask, 0x01);
-                _mm_storeu_si64((__m128i*)(res + i), cmp_res);
+                _mm_storel_epi64((__m128i_u*)(res + i), cmp_res);
             }
         }
 
@@ -668,7 +668,7 @@ struct CompareColumnAVX512Impl<double, type> {
                 (CompareOperator<double, type>::ComparePredicate));
 
             __m128i cmp_res = _mm_maskz_set1_epi8(cmp_res_mask, 0x01);
-            _mm_storeu_si64((res + i), cmp_res);
+            _mm_storel_epi64((__m128i_u*)(res + i), cmp_res);
         }
 
         for (size_t i = middle; i < size; ++i) {

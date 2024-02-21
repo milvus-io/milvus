@@ -22,6 +22,7 @@ import (
 )
 
 type insertTask struct {
+	baseTask
 	// req *milvuspb.InsertRequest
 	Condition
 	insertMsg *BaseInsertTask

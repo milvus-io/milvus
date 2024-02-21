@@ -41,6 +41,7 @@ import (
 )
 
 type upsertTask struct {
+	baseTask
 	Condition
 
 	upsertMsg *msgstream.UpsertMsg

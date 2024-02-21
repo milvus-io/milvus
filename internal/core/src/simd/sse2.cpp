@@ -34,9 +34,9 @@ GetBitsetBlockSSE2(const bool* src) {
             tmp[i] = _mm_movemask_epi8(highbits);
         }
 
-        __m128i tmpvec = _mm_loadu_si64(tmp);
+        __m128i tmpvec = _mm_loadl_epi64((__m128i_u*)tmp);
         BitsetBlockType res;
-        _mm_storeu_si64(&res, tmpvec);
+        _mm_storel_epi64((__m128i_u*)&res, tmpvec);
         return res;
     } else {
         // Others has 32 bits

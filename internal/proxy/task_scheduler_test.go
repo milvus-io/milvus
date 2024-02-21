@@ -28,7 +28,9 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 )
@@ -601,4 +603,76 @@ func TestTaskScheduler_concurrentPushAndPop(t *testing.T) {
 		go run(wg)
 	}
 	wg.Wait()
+}
+
+func TestTaskScheduler_SkipAllocTimestamp(t *testing.T) {
+	dbName := "test_query"
+	collName := "test_skip_alloc_timestamp"
+	collID := UniqueID(111)
+	mockMetaCache := NewMockCache(t)
+	globalMetaCache = mockMetaCache
+
+	tsoAllocatorIns := newMockTsoAllocator()
+	queue := newBaseTaskQueue(tsoAllocatorIns)
+	assert.NotNil(t, queue)
+
+	assert.True(t, queue.utEmpty())
+	assert.False(t, queue.utFull())
+
+	mockMetaCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(collID, nil)
+	mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
+		&collectionBasicInfo{
+			collID:           collID,
+			consistencyLevel: commonpb.ConsistencyLevel_Eventually,
+		}, nil)
+	mockMetaCache.EXPECT().AllocID(mock.Anything).Return(1, nil).Twice()
+
+	t.Run("query", func(t *testing.T) {
+		qt := &queryTask{
+			RetrieveRequest: &internalpb.RetrieveRequest{
+				Base: &commonpb.MsgBase{},
+			},
+			request: &milvuspb.QueryRequest{
+				DbName:                dbName,
+				CollectionName:        collName,
+				UseDefaultConsistency: true,
+			},
+		}
+
+		err := queue.Enqueue(qt)
+		assert.NoError(t, err)
+	})
+
+	t.Run("search", func(t *testing.T) {
+		st := &searchTask{
+			SearchRequest: &internalpb.SearchRequest{
+				Base: &commonpb.MsgBase{},
+			},
+			request: &milvuspb.SearchRequest{
+				DbName:                dbName,
+				CollectionName:        collName,
+				UseDefaultConsistency: true,
+			},
+		}
+
+		err := queue.Enqueue(st)
+		assert.NoError(t, err)
+	})
+
+	mockMetaCache.EXPECT().AllocID(mock.Anything).Return(0, fmt.Errorf("mock error")).Once()
+	t.Run("failed", func(t *testing.T) {
+		st := &searchTask{
+			SearchRequest: &internalpb.SearchRequest{
+				Base: &commonpb.MsgBase{},
+			},
+			request: &milvuspb.SearchRequest{
+				DbName:                dbName,
+				CollectionName:        collName,
+				UseDefaultConsistency: true,
+			},
+		}
+
+		err := queue.Enqueue(st)
+		assert.Error(t, err)
+	})
 }

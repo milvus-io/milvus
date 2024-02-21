@@ -23,7 +23,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	. "github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type ActionType int32
@@ -51,12 +51,12 @@ type Action interface {
 }
 
 type BaseAction struct {
-	nodeID UniqueID
+	nodeID typeutil.UniqueID
 	typ    ActionType
 	shard  string
 }
 
-func NewBaseAction(nodeID UniqueID, typ ActionType, shard string) *BaseAction {
+func NewBaseAction(nodeID typeutil.UniqueID, typ ActionType, shard string) *BaseAction {
 	return &BaseAction{
 		nodeID: nodeID,
 		typ:    typ,
@@ -79,17 +79,17 @@ func (action *BaseAction) Shard() string {
 type SegmentAction struct {
 	*BaseAction
 
-	segmentID UniqueID
+	segmentID typeutil.UniqueID
 	scope     querypb.DataScope
 
 	rpcReturned atomic.Bool
 }
 
-func NewSegmentAction(nodeID UniqueID, typ ActionType, shard string, segmentID UniqueID) *SegmentAction {
+func NewSegmentAction(nodeID typeutil.UniqueID, typ ActionType, shard string, segmentID typeutil.UniqueID) *SegmentAction {
 	return NewSegmentActionWithScope(nodeID, typ, shard, segmentID, querypb.DataScope_All)
 }
 
-func NewSegmentActionWithScope(nodeID UniqueID, typ ActionType, shard string, segmentID UniqueID, scope querypb.DataScope) *SegmentAction {
+func NewSegmentActionWithScope(nodeID typeutil.UniqueID, typ ActionType, shard string, segmentID typeutil.UniqueID, scope querypb.DataScope) *SegmentAction {
 	base := NewBaseAction(nodeID, typ, shard)
 	return &SegmentAction{
 		BaseAction:  base,
@@ -99,7 +99,7 @@ func NewSegmentActionWithScope(nodeID UniqueID, typ ActionType, shard string, se
 	}
 }
 
-func (action *SegmentAction) SegmentID() UniqueID {
+func (action *SegmentAction) SegmentID() typeutil.UniqueID {
 	return action.segmentID
 }
 
@@ -143,7 +143,7 @@ type ChannelAction struct {
 	*BaseAction
 }
 
-func NewChannelAction(nodeID UniqueID, typ ActionType, channelName string) *ChannelAction {
+func NewChannelAction(nodeID typeutil.UniqueID, typ ActionType, channelName string) *ChannelAction {
 	return &ChannelAction{
 		BaseAction: NewBaseAction(nodeID, typ, channelName),
 	}
@@ -159,4 +159,44 @@ func (action *ChannelAction) IsFinished(distMgr *meta.DistributionManager) bool 
 	isGrow := action.Type() == ActionTypeGrow
 
 	return hasNode == isGrow
+}
+
+type LeaderAction struct {
+	*BaseAction
+
+	leaderID  typeutil.UniqueID
+	segmentID typeutil.UniqueID
+
+	rpcReturned atomic.Bool
+}
+
+func NewLeaderAction(leaderID, workerID typeutil.UniqueID, typ ActionType, shard string, segmentID typeutil.UniqueID) *LeaderAction {
+	action := &LeaderAction{
+		BaseAction: NewBaseAction(workerID, typ, shard),
+
+		leaderID:  leaderID,
+		segmentID: segmentID,
+	}
+	action.rpcReturned.Store(false)
+	return action
+}
+
+func (action *LeaderAction) SegmentID() typeutil.UniqueID {
+	return action.segmentID
+}
+
+func (action *LeaderAction) IsFinished(distMgr *meta.DistributionManager) bool {
+	views := distMgr.LeaderViewManager.GetLeaderView(action.leaderID)
+	view := views[action.Shard()]
+	if view == nil {
+		return false
+	}
+	dist := view.Segments[action.SegmentID()]
+	switch action.Type() {
+	case ActionTypeGrow:
+		return action.rpcReturned.Load() && dist != nil && dist.NodeID == action.Node()
+	case ActionTypeReduce:
+		return action.rpcReturned.Load() && (dist == nil || dist.NodeID != action.Node())
+	}
+	return false
 }
