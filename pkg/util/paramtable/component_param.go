@@ -1930,7 +1930,8 @@ type queryNodeConfig struct {
 	DeleteBufferBlockSize  ParamItem `refreshable:"false"`
 
 	// loader
-	IoPoolSize ParamItem `refreshable:"false"`
+	IoPoolSize             ParamItem `refreshable:"false"`
+	DeltaDataExpansionRate ParamItem `refreshable:"true"`
 
 	// schedule task policy.
 	SchedulePolicyName                    ParamItem `refreshable:"false"`
@@ -2313,6 +2314,14 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Doc:          "Control how many goroutines will the loader use to pull files, if the given value is non-positive, the value will be set to CpuNum * 8, at least 32, and at most 256",
 	}
 	p.IoPoolSize.Init(base.mgr)
+
+	p.DeltaDataExpansionRate = ParamItem{
+		Key:          "querynode.deltaDataExpansionRate",
+		Version:      "2.4.0",
+		DefaultValue: "50",
+		Doc:          "the expansion rate for deltalog physical size to actual memory usage",
+	}
+	p.DeltaDataExpansionRate.Init(base.mgr)
 
 	// schedule read task policy.
 	p.SchedulePolicyName = ParamItem{

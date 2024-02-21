@@ -1442,7 +1442,7 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 
 		// get size of delete data
 		for _, fieldBinlog := range loadInfo.Deltalogs {
-			predictMemUsage += uint64(getBinlogDataSize(fieldBinlog))
+			predictMemUsage += uint64(float64(getBinlogDataSize(fieldBinlog)) * paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.GetAsFloat())
 		}
 
 		if predictMemUsage-oldUsedMem > maxSegmentSize {
