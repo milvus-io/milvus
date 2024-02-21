@@ -43,7 +43,57 @@ func (s *CompactionTriggerManagerSuite) SetupTest() {
 	s.m = NewCompactionTriggerManager(s.mockAlloc, s.mockPlanContext)
 }
 
-func (s *CompactionTriggerManagerSuite) TestNotify() {
+func (s *CompactionTriggerManagerSuite) TestNotifyByViewIDLE() {
+	viewManager := NewCompactionViewManager(s.meta, s.m, s.m.allocator)
+	collSegs := s.meta.GetCompactableSegmentGroupByCollection()
+
+	segments, found := collSegs[1]
+	s.Require().True(found)
+
+	levelZeroSegments := lo.Filter(segments, func(info *SegmentInfo, _ int) bool {
+		return info.GetLevel() == datapb.SegmentLevel_L0
+	})
+
+	// Prepare only 1 l0 segment that doesn't meet the Trigger minimum condition
+	// buger ViewIDLE Trigger will still forceTrigger the plan
+	latestL0Segments := GetViewsByInfo(levelZeroSegments[0])
+	expectedSegID := latestL0Segments[0].ID
+
+	s.Require().Equal(1, len(latestL0Segments))
+	levelZeroView := viewManager.getChangedLevelZeroViews(1, latestL0Segments)
+	s.Require().Equal(1, len(levelZeroView))
+	cView, ok := levelZeroView[0].(*LevelZeroSegmentsView)
+	s.True(ok)
+	s.NotNil(cView)
+	log.Info("view", zap.Any("cView", cView))
+
+	s.mockAlloc.EXPECT().allocID(mock.Anything).Return(1, nil)
+	s.mockPlanContext.EXPECT().execCompactionPlan(mock.Anything, mock.Anything).
+		Run(func(signal *compactionSignal, plan *datapb.CompactionPlan) {
+			s.EqualValues(19530, signal.id)
+			s.True(signal.isGlobal)
+			s.False(signal.isForce)
+			s.EqualValues(30000, signal.pos.GetTimestamp())
+			s.Equal(s.testLabel.CollectionID, signal.collectionID)
+			s.Equal(s.testLabel.PartitionID, signal.partitionID)
+
+			s.NotNil(plan)
+			s.Equal(s.testLabel.Channel, plan.GetChannel())
+			s.Equal(datapb.CompactionType_Level0DeleteCompaction, plan.GetType())
+
+			expectedSegs := []int64{expectedSegID}
+			gotSegs := lo.Map(plan.GetSegmentBinlogs(), func(b *datapb.CompactionSegmentBinlogs, _ int) int64 {
+				return b.GetSegmentID()
+			})
+
+			s.ElementsMatch(expectedSegs, gotSegs)
+			log.Info("generated plan", zap.Any("plan", plan))
+		}).Return(nil).Once()
+
+	s.m.Notify(19530, TriggerTypeLevelZeroViewIDLE, levelZeroView)
+}
+
+func (s *CompactionTriggerManagerSuite) TestNotifyByViewChange() {
 	viewManager := NewCompactionViewManager(s.meta, s.m, s.m.allocator)
 	collSegs := s.meta.GetCompactableSegmentGroupByCollection()
 
