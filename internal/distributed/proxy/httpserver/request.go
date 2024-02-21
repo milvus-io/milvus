@@ -73,21 +73,3 @@ type SearchReq struct {
 	Vector         []float32          `json:"vector"`
 	Params         map[string]float64 `json:"params"`
 }
-
-type ImportReq struct {
-	DbName         string            `json:"dbName"`
-	CollectionName string            `json:"collectionName" validate:"required"`
-	PartitionName  string            `json:"partitionName"`
-	Files          [][]string        `json:"files"`
-	Options        map[string]string `json:"options"`
-}
-
-type GetImportProgressReq struct {
-	DbName string `json:"dbName"`
-	JobID  string `json:"jobID" validate:"required"`
-}
-
-type ListImportsReq struct {
-	DbName         string `json:"dbName"`
-	CollectionName string `json:"collectionName"`
-}

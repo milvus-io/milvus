@@ -10,7 +10,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
 	"github.com/golang/protobuf/proto"
-	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -18,12 +17,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/requestutil"
 )
@@ -172,9 +169,6 @@ func (h *HandlersV1) RegisterRoutesToV1(router gin.IRouter) {
 	router.POST(VectorInsertPath, h.insert)
 	router.POST(VectorUpsertPath, h.upsert)
 	router.POST(VectorSearchPath, h.search)
-	router.POST(VectorImportPath, h.import_)
-	router.GET(VectorImportDescribePath, h.getImportProgress)
-	router.GET(VectorImportListPath, h.listImports)
 }
 
 func (h *HandlersV1) executeRestRequestInterceptor(ctx context.Context,
@@ -954,137 +948,4 @@ func (h *HandlersV1) search(c *gin.Context) {
 			}
 		}
 	}
-}
-
-func (h *HandlersV1) import_(c *gin.Context) { //nolint:all
-	httpReq := ImportReq{
-		DbName: DefaultDbName,
-	}
-	if err := c.ShouldBindWith(&httpReq, binding.JSON); err != nil {
-		log.Warn("high level restful api, the parameter of ImportReq is incorrect", zap.Any("request", httpReq), zap.Error(err))
-		c.AbortWithStatusJSON(http.StatusOK, gin.H{
-			HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
-			HTTPReturnMessage: merr.ErrIncorrectParameterFormat.Error() + ", error: " + err.Error(),
-		})
-		return
-	}
-	if httpReq.CollectionName == "" || len(httpReq.Files) == 0 {
-		log.Warn("high level restful api, import require parameter: [collectionName, files], but miss")
-		c.AbortWithStatusJSON(http.StatusOK, gin.H{
-			HTTPReturnCode:    merr.Code(merr.ErrMissingRequiredParameters),
-			HTTPReturnMessage: merr.ErrMissingRequiredParameters.Error() + ", required parameters: [collectionName, files]",
-		})
-		return
-	}
-	req := &internalpb.ImportRequest{
-		DbName:         httpReq.DbName,
-		CollectionName: httpReq.CollectionName,
-		PartitionName:  httpReq.PartitionName,
-		Files: lo.Map(httpReq.Files, func(paths []string, _ int) *internalpb.ImportFile {
-			return &internalpb.ImportFile{Paths: paths}
-		}),
-		Options: funcutil.Map2KeyValuePair(httpReq.Options),
-	}
-	username, _ := c.Get(ContextUsername)
-	ctx := proxy.NewContextWithMetadata(c, username.(string), req.GetDbName())
-	response, err := h.executeRestRequestInterceptor(ctx, c, req, func(reqCtx context.Context, req any) (any, error) {
-		return h.proxy.ImportV2(reqCtx, req.(*internalpb.ImportRequest))
-	})
-	if err == RestRequestInterceptorErr {
-		return
-	}
-	if err == nil {
-		err = merr.Error(response.(*internalpb.ImportResponse).GetStatus())
-	}
-	if err != nil {
-		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
-	} else {
-		resp := response.(*internalpb.ImportResponse)
-		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnImportJobID: resp.GetJobID()})
-	}
-}
-
-func (h *HandlersV1) getImportProgress(c *gin.Context) {
-	jobID := c.Query(HTTPReturnImportJobID)
-	if jobID == "" {
-		log.Warn("high level restful api, describe bulkinsert require parameter: [jobID], but miss")
-		c.AbortWithStatusJSON(http.StatusOK, gin.H{
-			HTTPReturnCode:    merr.Code(merr.ErrMissingRequiredParameters),
-			HTTPReturnMessage: merr.ErrMissingRequiredParameters.Error() + ", required parameters: [jobID]",
-		})
-		return
-	}
-	dbName := c.DefaultQuery(HTTPDbName, DefaultDbName)
-	username, _ := c.Get(ContextUsername)
-	ctx := proxy.NewContextWithMetadata(c, username.(string), dbName)
-
-	req := &internalpb.GetImportProgressRequest{
-		DbName: dbName,
-		JobID:  jobID,
-	}
-
-	response, err := h.executeRestRequestInterceptor(ctx, c, req, func(reqCtx context.Context, req any) (any, error) {
-		return h.proxy.GetImportProgress(reqCtx, req.(*internalpb.GetImportProgressRequest))
-	})
-	if err == RestRequestInterceptorErr {
-		return
-	}
-
-	if err == nil {
-		err = merr.Error(response.(*internalpb.GetImportProgressResponse).GetStatus())
-	}
-	if err != nil {
-		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
-		return
-	}
-	resp := response.(*internalpb.GetImportProgressResponse)
-	objs := make(gin.H)
-	objs[HTTPReturnImportState] = resp.GetState().String()
-	objs[HTTPReturnImportProgress] = resp.GetProgress()
-	if resp.GetReason() != "" {
-		objs[HTTPReturnImportReason] = resp.GetReason()
-	}
-	c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: objs})
-}
-
-func (h *HandlersV1) listImports(c *gin.Context) {
-	collectionName := c.Query(HTTPCollectionName)
-	dbName := c.DefaultQuery(HTTPDbName, DefaultDbName)
-	username, _ := c.Get(ContextUsername)
-	ctx := proxy.NewContextWithMetadata(c, username.(string), dbName)
-
-	req := &internalpb.ListImportsRequest{
-		DbName:         dbName,
-		CollectionName: collectionName,
-	}
-
-	response, err := h.executeRestRequestInterceptor(ctx, c, req, func(reqCtx context.Context, req any) (any, error) {
-		return h.proxy.ListImports(reqCtx, req.(*internalpb.ListImportsRequest))
-	})
-	if err == RestRequestInterceptorErr {
-		return
-	}
-
-	if err == nil {
-		err = merr.Error(response.(*internalpb.ListImportsResponse).GetStatus())
-	}
-	if err != nil {
-		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
-		return
-	}
-
-	resp := response.(*internalpb.ListImportsResponse)
-	stats := make([]map[string]any, 0, len(resp.GetJobIDs()))
-	for i := 0; i < len(resp.GetJobIDs()); i++ {
-		stat := make(map[string]any)
-		stat[HTTPReturnImportJobID] = resp.GetJobIDs()[i]
-		stat[HTTPReturnImportState] = resp.GetStates()[i].String()
-		stat[HTTPReturnImportProgress] = resp.GetProgresses()[i]
-		reason := resp.GetReasons()[i]
-		if reason != "" {
-			stat[HTTPReturnImportReason] = reason
-		}
-		stats = append(stats, stat)
-	}
-	c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: stats})
 }

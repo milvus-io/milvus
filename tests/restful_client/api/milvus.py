@@ -185,33 +185,6 @@ class VectorClient(Requests):
         response = self.post(url, headers=self.update_headers(), data=payload)
         return response.json()
 
-    def vector_bulkinsert(self, payload, db_name="default"):
-        url = f'{self.protocol}://{self.url}/vector/bulkinsert'
-        if self.db_name is not None:
-            payload["dbName"] = self.db_name
-        if db_name != "default":
-            payload["dbName"] = db_name
-        response = self.post(url, headers=self.update_headers(), data=payload)
-        return response.json()
-
-    def vector_bulkinsert_describe(self, payload, db_name="default"):
-        url = f'{self.protocol}://{self.url}/vector/bulkinsert/describe'
-        if self.db_name is not None:
-            payload["dbName"] = self.db_name
-        if db_name != "default":
-            payload["dbName"] = db_name
-        response = self.get(url, headers=self.update_headers(), data=payload)
-        return response.json()
-
-    def vector_bulkinsert_list(self, payload, db_name="default"):
-        url = f'{self.protocol}://{self.url}/vector/bulkinsert/list'
-        if self.db_name is not None:
-            payload["dbName"] = self.db_name
-        if db_name != "default":
-            payload["dbName"] = db_name
-        response = self.get(url, headers=self.update_headers(), data=payload)
-        return response.json()
-
 
 class CollectionClient(Requests):
 

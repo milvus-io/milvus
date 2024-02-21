@@ -53,9 +53,6 @@ const (
 	VectorGetPath                 = "/vector/get"
 	VectorQueryPath               = "/vector/query"
 	VectorDeletePath              = "/vector/delete"
-	VectorImportPath              = "/vector/bulkinsert"
-	VectorImportDescribePath      = "/vector/bulkinsert/describe"
-	VectorImportListPath          = "/vector/bulkinsert/list"
 
 	ShardNumDefault = 1
 
@@ -119,11 +116,6 @@ const (
 	DefaultVectorFieldName  = "vector"
 
 	Dim = "dim"
-
-	HTTPReturnImportJobID    = "jobID"
-	HTTPReturnImportState    = "state"
-	HTTPReturnImportReason   = "reason"
-	HTTPReturnImportProgress = "progress"
 )
 
 const (
