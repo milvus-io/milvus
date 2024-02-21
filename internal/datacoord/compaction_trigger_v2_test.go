@@ -22,6 +22,7 @@ type CompactionTriggerManagerSuite struct {
 	mockAlloc       *NMockAllocator
 	mockPlanContext *MockCompactionPlanContext
 	testLabel       *CompactionGroupLabel
+	meta            *meta
 
 	m *CompactionTriggerManager
 }
@@ -35,16 +36,16 @@ func (s *CompactionTriggerManagerSuite) SetupTest() {
 		PartitionID:  10,
 		Channel:      "ch-1",
 	}
-	meta := &meta{segments: &SegmentsInfo{
+	s.meta = &meta{segments: &SegmentsInfo{
 		segments: genSegmentsForMeta(s.testLabel),
 	}}
 
-	s.m = NewCompactionTriggerManager(meta, s.mockAlloc, s.mockPlanContext)
+	s.m = NewCompactionTriggerManager(s.mockAlloc, s.mockPlanContext)
 }
 
 func (s *CompactionTriggerManagerSuite) TestNotify() {
-	viewManager := NewCompactionViewManager(s.m.meta, s.m, s.m.allocator)
-	collSegs := s.m.meta.GetCompactableSegmentGroupByCollection()
+	viewManager := NewCompactionViewManager(s.meta, s.m, s.m.allocator)
+	collSegs := s.meta.GetCompactableSegmentGroupByCollection()
 
 	segments, found := collSegs[1]
 	s.Require().True(found)
@@ -85,5 +86,5 @@ func (s *CompactionTriggerManagerSuite) TestNotify() {
 			log.Info("generated plan", zap.Any("plan", plan))
 		}).Return(nil).Once()
 
-	s.m.Notify(19530, TriggerTypeLevelZeroView, levelZeroView)
+	s.m.Notify(19530, TriggerTypeLevelZeroViewChange, levelZeroView)
 }

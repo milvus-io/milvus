@@ -199,6 +199,7 @@ func (s *CompactionPlanHandlerSuite) TestHandleL0CompactionResults() {
 
 func (s *CompactionPlanHandlerSuite) TestRefreshL0Plan() {
 	channel := "Ch-1"
+	deltalogs := []*datapb.FieldBinlog{getFieldBinlogIDs(101, 3)}
 	s.mockMeta.EXPECT().SelectSegments(mock.Anything).Return(
 		[]*SegmentInfo{
 			{SegmentInfo: &datapb.SegmentInfo{
@@ -218,21 +219,27 @@ func (s *CompactionPlanHandlerSuite) TestRefreshL0Plan() {
 			}},
 		},
 	)
+	s.mockMeta.EXPECT().GetHealthySegment(mock.Anything).RunAndReturn(func(segID int64) *SegmentInfo {
+		return &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID:            segID,
+			Level:         datapb.SegmentLevel_L0,
+			InsertChannel: channel,
+			State:         commonpb.SegmentState_Flushed,
+			Deltalogs:     deltalogs,
+		}}
+	})
 
-	deltalogs := []*datapb.FieldBinlog{getFieldBinlogIDs(101, 3)}
 	// 2 l0 segments
 	plan := &datapb.CompactionPlan{
 		PlanID: 1,
 		SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
 			{
 				SegmentID:     100,
-				Deltalogs:     deltalogs,
 				Level:         datapb.SegmentLevel_L0,
 				InsertChannel: channel,
 			},
 			{
 				SegmentID:     101,
-				Deltalogs:     deltalogs,
 				Level:         datapb.SegmentLevel_L0,
 				InsertChannel: channel,
 			},

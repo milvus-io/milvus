@@ -303,6 +303,17 @@ func (c *compactionPlanHandler) RefreshPlan(task *compactionTask) {
 	plan := task.plan
 	log := log.With(zap.Int64("taskID", task.triggerInfo.id), zap.Int64("planID", plan.GetPlanID()))
 	if plan.GetType() == datapb.CompactionType_Level0DeleteCompaction {
+		// Fill in deltalogs for L0 segments
+		lo.ForEach(plan.SegmentBinlogs, func(seg *datapb.CompactionSegmentBinlogs, _ int) {
+			if seg.GetLevel() == datapb.SegmentLevel_L0 {
+				segInfo := c.meta.GetHealthySegment(seg.GetSegmentID())
+				seg.Deltalogs = segInfo.GetDeltalogs()
+			}
+		})
+
+		// Select sealed L1 segments for LevelZero compaction that meets the condition:
+		// dmlPos < triggerInfo.pos
+		// TODO: select L2 segments too
 		sealedSegments := c.meta.SelectSegments(func(info *SegmentInfo) bool {
 			return info.GetCollectionID() == task.triggerInfo.collectionID &&
 				(task.triggerInfo.partitionID == -1 || info.GetPartitionID() == task.triggerInfo.partitionID) &&
@@ -324,7 +335,9 @@ func (c *compactionPlanHandler) RefreshPlan(task *compactionTask) {
 		})
 
 		plan.SegmentBinlogs = append(plan.SegmentBinlogs, sealedSegBinlogs...)
-		log.Info("Compaction handler refreshed level zero compaction plan", zap.Any("target segments count", len(sealedSegBinlogs)))
+		log.Info("Compaction handler refreshed level zero compaction plan",
+			zap.Any("target position", task.triggerInfo.pos),
+			zap.Any("target segments count", len(sealedSegBinlogs)))
 		return
 	}
 
