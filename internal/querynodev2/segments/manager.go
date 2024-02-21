@@ -274,7 +274,9 @@ func (mgr *segmentManager) Put(segmentType SegmentType, segments ...Segment) {
 					zap.Int64("newVersion", segment.Version()),
 				)
 				// delete redundant segment
-				segment.Release()
+				if segment != oldSegment {
+					segment.Release()
+				}
 				continue
 			}
 			replacedSegment = append(replacedSegment, oldSegment)
