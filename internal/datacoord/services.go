@@ -1838,7 +1838,7 @@ func (s *Server) GetImportProgress(ctx context.Context, in *internalpb.GetImport
 	return resp, nil
 }
 
-func (s *Server) ListImports(ctx context.Context, in *internalpb.ListImportsRequest) (*internalpb.ListImportsResponse, error) {
+func (s *Server) ListImports(_ context.Context, _ *internalpb.ListImportsRequest) (*internalpb.ListImportsResponse, error) {
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &internalpb.ListImportsResponse{
 			Status: merr.Status(err),
@@ -1846,15 +1846,20 @@ func (s *Server) ListImports(ctx context.Context, in *internalpb.ListImportsRequ
 	}
 
 	resp := &internalpb.ListImportsResponse{
-		Status: merr.Success(),
+		Status:     merr.Success(),
+		JobIDs:     make([]string, 0),
+		States:     make([]internalpb.ImportState, 0),
+		Reasons:    make([]string, 0),
+		Progresses: make([]int64, 0),
 	}
-	tasks := s.importMeta.GetTaskBy()
-	res := lo.KeyBy(tasks, func(t ImportTask) int64 {
-		return t.GetJobID()
-	})
-	jobs := lo.Map(lo.Keys(res), func(jobID int64, _ int) string {
-		return fmt.Sprintf("%d", jobID)
-	})
-	resp.JobIDs = jobs
+
+	jobs := s.importMeta.GetJobBy()
+	for _, job := range jobs {
+		progress, state, reason := GetImportProgress(job.GetJobID(), s.importMeta, s.meta)
+		resp.JobIDs = append(resp.JobIDs, fmt.Sprintf("%d", job.GetJobID()))
+		resp.States = append(resp.States, state)
+		resp.Reasons = append(resp.Reasons, reason)
+		resp.Progresses = append(resp.Progresses, progress)
+	}
 	return resp, nil
 }
