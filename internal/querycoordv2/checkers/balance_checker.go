@@ -43,13 +43,20 @@ type BalanceChecker struct {
 	nodeManager                          *session.NodeManager
 	normalBalanceCollectionsCurrentRound typeutil.UniqueSet
 	scheduler                            task.Scheduler
+	targetMgr                            *meta.TargetManager
 }
 
-func NewBalanceChecker(meta *meta.Meta, balancer balance.Balance, nodeMgr *session.NodeManager, scheduler task.Scheduler) *BalanceChecker {
+func NewBalanceChecker(meta *meta.Meta,
+	targetMgr *meta.TargetManager,
+	balancer balance.Balance,
+	nodeMgr *session.NodeManager,
+	scheduler task.Scheduler,
+) *BalanceChecker {
 	return &BalanceChecker{
 		checkerActivation:                    newCheckerActivation(),
 		Balance:                              balancer,
 		meta:                                 meta,
+		targetMgr:                            targetMgr,
 		nodeManager:                          nodeMgr,
 		normalBalanceCollectionsCurrentRound: typeutil.NewUniqueSet(),
 		scheduler:                            scheduler,
@@ -62,6 +69,13 @@ func (b *BalanceChecker) ID() utils.CheckerType {
 
 func (b *BalanceChecker) Description() string {
 	return "BalanceChecker checks the cluster distribution and generates balance tasks"
+}
+
+func (b *BalanceChecker) readyToCheck(collectionID int64) bool {
+	metaExist := (b.meta.GetCollection(collectionID) != nil)
+	targetExist := b.targetMgr.IsNextTargetExist(collectionID) || b.targetMgr.IsCurrentTargetExist(collectionID)
+
+	return metaExist && targetExist
 }
 
 func (b *BalanceChecker) replicasToBalance() []int64 {
@@ -79,6 +93,10 @@ func (b *BalanceChecker) replicasToBalance() []int64 {
 	// balance collections influenced by stopping nodes
 	stoppingReplicas := make([]int64, 0)
 	for _, cid := range loadedCollections {
+		// if target and meta isn't ready, skip balance this collection
+		if !b.readyToCheck(cid) {
+			continue
+		}
 		replicas := b.meta.ReplicaManager.GetByCollection(cid)
 		for _, replica := range replicas {
 			for _, nodeID := range replica.GetNodes() {
