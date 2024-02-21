@@ -72,6 +72,7 @@ type Task interface {
 	ID() typeutil.UniqueID
 	CollectionID() typeutil.UniqueID
 	ReplicaID() typeutil.UniqueID
+	Shard() string
 	SetID(id typeutil.UniqueID)
 	Status() Status
 	SetStatus(status Status)
@@ -160,6 +161,10 @@ func (task *baseTask) CollectionID() typeutil.UniqueID {
 
 func (task *baseTask) ReplicaID() typeutil.UniqueID {
 	return task.replicaID
+}
+
+func (task *baseTask) Shard() string {
+	return task.shard
 }
 
 func (task *baseTask) LoadType() querypb.LoadType {
@@ -318,10 +323,6 @@ func NewSegmentTask(ctx context.Context,
 	}, nil
 }
 
-func (task *SegmentTask) Shard() string {
-	return task.shard
-}
-
 func (task *SegmentTask) SegmentID() typeutil.UniqueID {
 	return task.segmentID
 }
@@ -382,4 +383,41 @@ func (task *ChannelTask) Index() string {
 
 func (task *ChannelTask) String() string {
 	return fmt.Sprintf("%s [channel=%s]", task.baseTask.String(), task.Channel())
+}
+
+type LeaderTask struct {
+	*baseTask
+
+	segmentID typeutil.UniqueID
+	leaderID  int64
+}
+
+func NewLeaderTask(ctx context.Context,
+	timeout time.Duration,
+	source Source,
+	collectionID,
+	replicaID typeutil.UniqueID,
+	leaderID int64,
+	action *LeaderAction,
+) *LeaderTask {
+	segmentID := action.SegmentID()
+	base := newBaseTask(ctx, source, collectionID, replicaID, action.Shard(), fmt.Sprintf("LeaderTask-%s-%d", action.Type().String(), segmentID))
+	base.actions = []Action{action}
+	return &LeaderTask{
+		baseTask:  base,
+		segmentID: segmentID,
+		leaderID:  leaderID,
+	}
+}
+
+func (task *LeaderTask) SegmentID() typeutil.UniqueID {
+	return task.segmentID
+}
+
+func (task *LeaderTask) Index() string {
+	return fmt.Sprintf("%s[segment=%d][growing=false]", task.baseTask.Index(), task.segmentID)
+}
+
+func (task *LeaderTask) String() string {
+	return fmt.Sprintf("%s [segmentID=%d][leader=%d]", task.baseTask.String(), task.segmentID, task.leaderID)
 }
