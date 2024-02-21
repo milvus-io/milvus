@@ -209,10 +209,13 @@ class ColumnBase {
         if (data_ != nullptr) {
             std::memcpy(data, data_, size_);
             if (munmap(data_, cap_size_ + padding_)) {
+                auto err = errno;
+                munmap(data, new_size + padding_);
+
                 AssertInfo(
                     false,
                     "failed to unmap while expanding: {}, old_map_size={}",
-                    strerror(errno),
+                    strerror(err),
                     cap_size_ + padding_);
             }
         }
@@ -307,10 +310,14 @@ class VariableColumn : public ColumnBase {
     }
 
     void
-    Append(const char* data, size_t size) {
-        indices_.emplace_back(size_);
-        size_ += size;
-        load_buf_.emplace(data, size);
+    Append(FieldDataPtr chunk) {
+        for (auto i = 0; i < chunk->get_num_rows(); i++) {
+            auto data = static_cast<const T*>(chunk->RawValue(i));
+
+            indices_.emplace_back(data->size());
+            size_ += data->size();
+        }
+        load_buf_.emplace(std::move(chunk));
     }
 
     void
@@ -328,11 +335,14 @@ class VariableColumn : public ColumnBase {
             Expand(total_size);
 
             while (!load_buf_.empty()) {
-                auto data = std::move(load_buf_.front());
+                auto chunk = std::move(load_buf_.front());
                 load_buf_.pop();
 
-                std::copy_n(data.data(), data.length(), data_ + size_);
-                size_ += data.length();
+                for (auto i = 0; i < chunk->get_num_rows(); i++) {
+                    auto data = static_cast<const T*>(chunk->RawValue(i));
+                    std::copy_n(data->c_str(), data->size(), data_ + size_);
+                    size_ += data->size();
+                }
             }
         }
 
@@ -352,7 +362,7 @@ class VariableColumn : public ColumnBase {
 
  private:
     // loading states
-    std::queue<std::string> load_buf_{};
+    std::queue<FieldDataPtr> load_buf_{};
 
     std::vector<uint64_t> indices_{};
 
