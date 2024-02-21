@@ -19,13 +19,11 @@ package cluster
 
 import (
 	"context"
-	"fmt"
 	"io"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
@@ -66,17 +64,12 @@ func (w *remoteWorker) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 		zap.Int64("workerID", req.GetDstNodeID()),
 	)
 	status, err := w.client.LoadSegments(ctx, req)
+	err = merr.CheckRPCCall(status, err)
 	if err != nil {
 		log.Warn("failed to call LoadSegments via grpc worker",
 			zap.Error(err),
 		)
 		return err
-	} else if status.GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("failed to call LoadSegments, worker return error",
-			zap.String("errorCode", status.GetErrorCode().String()),
-			zap.String("reason", status.GetReason()),
-		)
-		return fmt.Errorf(status.Reason)
 	}
 	return nil
 }
@@ -86,17 +79,12 @@ func (w *remoteWorker) ReleaseSegments(ctx context.Context, req *querypb.Release
 		zap.Int64("workerID", req.GetNodeID()),
 	)
 	status, err := w.client.ReleaseSegments(ctx, req)
+	err = merr.CheckRPCCall(status, err)
 	if err != nil {
 		log.Warn("failed to call ReleaseSegments via grpc worker",
 			zap.Error(err),
 		)
 		return err
-	} else if status.GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("failed to call ReleaseSegments, worker return error",
-			zap.String("errorCode", status.GetErrorCode().String()),
-			zap.String("reason", status.GetReason()),
-		)
-		return fmt.Errorf(status.Reason)
 	}
 	return nil
 }
