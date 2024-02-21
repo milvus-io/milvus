@@ -89,10 +89,11 @@ func NewCheckerController(
 ) *CheckerController {
 	// CheckerController runs checkers with the order,
 	// the former checker has higher priority
+
 	checkers := map[checkerType]Checker{
 		channelChecker: NewChannelChecker(meta, dist, targetMgr, balancer),
 		segmentChecker: NewSegmentChecker(meta, dist, targetMgr, balancer, nodeMgr),
-		balanceChecker: NewBalanceChecker(meta, balancer, nodeMgr, scheduler),
+		balanceChecker: NewBalanceChecker(meta, targetMgr, balancer, nodeMgr, scheduler),
 		indexChecker:   NewIndexChecker(meta, dist, broker, nodeMgr),
 	}
 
