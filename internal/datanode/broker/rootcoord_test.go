@@ -33,7 +33,7 @@ func (s *rootCoordSuite) SetupSuite() {
 
 func (s *rootCoordSuite) SetupTest() {
 	s.rc = mocks.NewMockRootCoordClient(s.T())
-	s.broker = NewCoordBroker(s.rc, nil)
+	s.broker = NewCoordBroker(s.rc, nil, 1)
 }
 
 func (s *rootCoordSuite) resetMock() {

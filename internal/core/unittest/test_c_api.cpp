@@ -2125,10 +2125,10 @@ TEST(CApiTest, Indexing_Without_Predicate) {
     auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
     SearchInfo search_info = search_plan->plan_node_->search_info_;
-    auto result_on_index =
-        vec_index->Query(query_dataset, search_info, nullptr);
-    auto ids = result_on_index->seg_offsets_.data();
-    auto dis = result_on_index->distances_.data();
+    SearchResult result_on_index;
+    vec_index->Query(query_dataset, search_info, nullptr, result_on_index);
+    auto ids = result_on_index.seg_offsets_.data();
+    auto dis = result_on_index.distances_.data();
     std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
     std::vector<float> vec_dis;
     for (int j = 0; j < TOPK * num_queries; ++j) {
@@ -2276,10 +2276,10 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
     auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
     SearchInfo search_info = search_plan->plan_node_->search_info_;
-    auto result_on_index =
-        vec_index->Query(query_dataset, search_info, nullptr);
-    auto ids = result_on_index->seg_offsets_.data();
-    auto dis = result_on_index->distances_.data();
+    SearchResult result_on_index;
+    vec_index->Query(query_dataset, search_info, nullptr, result_on_index);
+    auto ids = result_on_index.seg_offsets_.data();
+    auto dis = result_on_index.distances_.data();
     std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
     std::vector<float> vec_dis;
     for (int j = 0; j < TOPK * num_queries; ++j) {
@@ -2456,10 +2456,10 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
     auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
     SearchInfo search_info = search_plan->plan_node_->search_info_;
-    auto result_on_index =
-        vec_index->Query(query_dataset, search_info, nullptr);
-    auto ids = result_on_index->seg_offsets_.data();
-    auto dis = result_on_index->distances_.data();
+    SearchResult result_on_index;
+    vec_index->Query(query_dataset, search_info, nullptr, result_on_index);
+    auto ids = result_on_index.seg_offsets_.data();
+    auto dis = result_on_index.distances_.data();
     std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
     std::vector<float> vec_dis;
     for (int j = 0; j < TOPK * num_queries; ++j) {
@@ -2638,10 +2638,10 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
     auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
     SearchInfo search_info = search_plan->plan_node_->search_info_;
-    auto result_on_index =
-        vec_index->Query(query_dataset, search_info, nullptr);
-    auto ids = result_on_index->seg_offsets_.data();
-    auto dis = result_on_index->distances_.data();
+    SearchResult result_on_index;
+    vec_index->Query(query_dataset, search_info, nullptr, result_on_index);
+    auto ids = result_on_index.seg_offsets_.data();
+    auto dis = result_on_index.distances_.data();
     std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
     std::vector<float> vec_dis;
     for (int j = 0; j < TOPK * num_queries; ++j) {
@@ -2812,10 +2812,10 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
     auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
     SearchInfo search_info = search_plan->plan_node_->search_info_;
-    auto result_on_index =
-        vec_index->Query(query_dataset, search_info, nullptr);
-    auto ids = result_on_index->seg_offsets_.data();
-    auto dis = result_on_index->distances_.data();
+    SearchResult result_on_index;
+    vec_index->Query(query_dataset, search_info, nullptr, result_on_index);
+    auto ids = result_on_index.seg_offsets_.data();
+    auto dis = result_on_index.distances_.data();
     std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
     std::vector<float> vec_dis;
     for (int j = 0; j < TOPK * num_queries; ++j) {
@@ -2987,10 +2987,10 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
     auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
     SearchInfo search_info = search_plan->plan_node_->search_info_;
-    auto result_on_index =
-        vec_index->Query(query_dataset, search_info, nullptr);
-    auto ids = result_on_index->seg_offsets_.data();
-    auto dis = result_on_index->distances_.data();
+    SearchResult result_on_index;
+    vec_index->Query(query_dataset, search_info, nullptr, result_on_index);
+    auto ids = result_on_index.seg_offsets_.data();
+    auto dis = result_on_index.distances_.data();
     std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
     std::vector<float> vec_dis;
     for (int j = 0; j < TOPK * num_queries; ++j) {
@@ -3169,10 +3169,10 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
     auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
     SearchInfo search_info = search_plan->plan_node_->search_info_;
-    auto result_on_index =
-        vec_index->Query(query_dataset, search_info, nullptr);
-    auto ids = result_on_index->seg_offsets_.data();
-    auto dis = result_on_index->distances_.data();
+    SearchResult result_on_index;
+    vec_index->Query(query_dataset, search_info, nullptr, result_on_index);
+    auto ids = result_on_index.seg_offsets_.data();
+    auto dis = result_on_index.distances_.data();
     std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
     std::vector<float> vec_dis;
     for (int j = 0; j < TOPK * num_queries; ++j) {
@@ -3351,10 +3351,10 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
     auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
     SearchInfo search_info = search_plan->plan_node_->search_info_;
-    auto result_on_index =
-        vec_index->Query(query_dataset, search_info, nullptr);
-    auto ids = result_on_index->seg_offsets_.data();
-    auto dis = result_on_index->distances_.data();
+    SearchResult result_on_index;
+    vec_index->Query(query_dataset, search_info, nullptr, result_on_index);
+    auto ids = result_on_index.seg_offsets_.data();
+    auto dis = result_on_index.distances_.data();
     std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
     std::vector<float> vec_dis;
     for (int j = 0; j < TOPK * num_queries; ++j) {
@@ -3527,10 +3527,10 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
     auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
     SearchInfo search_info = search_plan->plan_node_->search_info_;
-    auto result_on_index =
-        vec_index->Query(query_dataset, search_info, nullptr);
-    auto ids = result_on_index->seg_offsets_.data();
-    auto dis = result_on_index->distances_.data();
+    SearchResult result_on_index;
+    vec_index->Query(query_dataset, search_info, nullptr, result_on_index);
+    auto ids = result_on_index.seg_offsets_.data();
+    auto dis = result_on_index.distances_.data();
     std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
     std::vector<float> vec_dis;
     for (int j = 0; j < TOPK * num_queries; ++j) {
@@ -3725,10 +3725,10 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
     auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
     SearchInfo search_info = search_plan->plan_node_->search_info_;
-    auto result_on_index =
-        vec_index->Query(query_dataset, search_info, nullptr);
-    auto ids = result_on_index->seg_offsets_.data();
-    auto dis = result_on_index->distances_.data();
+    SearchResult result_on_index;
+    vec_index->Query(query_dataset, search_info, nullptr, result_on_index);
+    auto ids = result_on_index.seg_offsets_.data();
+    auto dis = result_on_index.distances_.data();
     std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
     std::vector<float> vec_dis;
     for (int j = 0; j < TOPK * num_queries; ++j) {
@@ -3945,9 +3945,9 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     search_info.metric_type_ = knowhere::metric::L2;
     search_info.search_params_ = generate_search_conf(
         IndexEnum::INDEX_FAISS_IVFSQ8, knowhere::metric::L2);
-    auto result_on_index =
-        vec_index->Query(query_dataset, search_info, nullptr);
-    EXPECT_EQ(result_on_index->distances_.size(), num_queries * TOPK);
+    SearchResult result_on_index;
+    vec_index->Query(query_dataset, search_info, nullptr, result_on_index);
+    EXPECT_EQ(result_on_index.distances_.size(), num_queries * TOPK);
 
     status = LoadFieldRawData(segment, 101, counter_col.data(), N);
     ASSERT_EQ(status.error_code, Success);
@@ -4192,10 +4192,10 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
     SearchInfo search_info = search_plan->plan_node_->search_info_;
-    auto result_on_index =
-        vec_index->Query(query_dataset, search_info, nullptr);
-    auto ids = result_on_index->seg_offsets_.data();
-    auto dis = result_on_index->distances_.data();
+    SearchResult result_on_index;
+    vec_index->Query(query_dataset, search_info, nullptr, result_on_index);
+    auto ids = result_on_index.seg_offsets_.data();
+    auto dis = result_on_index.distances_.data();
     std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
     std::vector<float> vec_dis;
     for (int j = 0; j < TOPK * num_queries; ++j) {
@@ -4943,10 +4943,10 @@ TEST(CApiTest, Indexing_Without_Predicate_float16) {
     auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
     SearchInfo search_info = search_plan->plan_node_->search_info_;
-    auto result_on_index =
-        vec_index->Query(query_dataset, search_info, nullptr);
-    auto ids = result_on_index->seg_offsets_.data();
-    auto dis = result_on_index->distances_.data();
+    SearchResult result_on_index;
+    vec_index->Query(query_dataset, search_info, nullptr, result_on_index);
+    auto ids = result_on_index.seg_offsets_.data();
+    auto dis = result_on_index.distances_.data();
     std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
     std::vector<float> vec_dis;
     for (int j = 0; j < TOPK * num_queries; ++j) {
@@ -5095,10 +5095,10 @@ TEST(CApiTest, Indexing_Without_Predicate_bfloat16) {
     auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
     SearchInfo search_info = search_plan->plan_node_->search_info_;
-    auto result_on_index =
-        vec_index->Query(query_dataset, search_info, nullptr);
-    auto ids = result_on_index->seg_offsets_.data();
-    auto dis = result_on_index->distances_.data();
+    SearchResult result_on_index;
+    vec_index->Query(query_dataset, search_info, nullptr, result_on_index);
+    auto ids = result_on_index.seg_offsets_.data();
+    auto dis = result_on_index.distances_.data();
     std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
     std::vector<float> vec_dis;
     for (int j = 0; j < TOPK * num_queries; ++j) {

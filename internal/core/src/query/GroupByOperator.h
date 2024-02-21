@@ -19,19 +19,51 @@
 #include "common/QueryInfo.h"
 #include "knowhere/index_node.h"
 #include "segcore/SegmentInterface.h"
+#include "segcore/SegmentGrowingImpl.h"
+#include "segcore/SegmentSealedImpl.h"
+#include "segcore/ConcurrentVector.h"
 #include "common/Span.h"
 
 namespace milvus {
 namespace query {
 
 template <typename T>
-struct DataGetter {
+class DataGetter {
+ public:
+    virtual T
+    Get(int64_t idx) const = 0;
+};
+
+template <typename T>
+class GrowingDataGetter : public DataGetter<T> {
+ public:
+    const segcore::ConcurrentVector<T>* growing_raw_data_;
+    GrowingDataGetter(const segcore::SegmentGrowingImpl& segment,
+                      FieldId fieldId) {
+        growing_raw_data_ =
+            segment.get_insert_record().get_field_data<T>(fieldId);
+    }
+
+    GrowingDataGetter(const GrowingDataGetter<T>& other)
+        : growing_raw_data_(other.growing_raw_data_) {
+    }
+
+    T
+    Get(int64_t idx) const {
+        return growing_raw_data_->operator[](idx);
+    }
+};
+
+template <typename T>
+class SealedDataGetter : public DataGetter<T> {
+ private:
     std::shared_ptr<Span<T>> field_data_;
     std::shared_ptr<Span<std::string_view>> str_field_data_;
     const index::ScalarIndex<T>* field_index_;
 
-    DataGetter(const segcore::SegmentInternalInterface& segment,
-               FieldId& field_id) {
+ public:
+    SealedDataGetter(const segcore::SegmentSealedImpl& segment,
+                     FieldId& field_id) {
         if (segment.HasFieldData(field_id)) {
             if constexpr (std::is_same_v<T, std::string>) {
                 auto span = segment.chunk_data<std::string_view>(field_id, 0);
@@ -52,7 +84,12 @@ struct DataGetter {
         }
     }
 
- public:
+    SealedDataGetter(const SealedDataGetter<T>& other)
+        : field_data_(other.field_data_),
+          str_field_data_(other.str_field_data_),
+          field_index_(other.field_index_) {
+    }
+
     T
     Get(int64_t idx) const {
         if (field_data_ || str_field_data_) {
@@ -68,9 +105,65 @@ struct DataGetter {
     }
 };
 
+template <typename T>
+static const std::shared_ptr<DataGetter<T>>
+GetDataGetter(const segcore::SegmentInternalInterface& segment,
+              FieldId fieldId) {
+    if (const segcore::SegmentGrowingImpl* growing_segment =
+            dynamic_cast<const segcore::SegmentGrowingImpl*>(&segment)) {
+        return std::make_shared<GrowingDataGetter<T>>(*growing_segment,
+                                                      fieldId);
+    } else if (const segcore::SegmentSealedImpl* sealed_segment =
+                   dynamic_cast<const segcore::SegmentSealedImpl*>(&segment)) {
+        return std::make_shared<SealedDataGetter<T>>(*sealed_segment, fieldId);
+    } else {
+        PanicInfo(UnexpectedError,
+                  "The segment used to init data getter is neither growing or "
+                  "sealed, wrong state");
+    }
+}
+
+static bool
+PrepareVectorIteratorsFromIndex(const SearchInfo& search_info,
+                                int nq,
+                                const DatasetPtr dataset,
+                                SearchResult& search_result,
+                                const BitsetView& bitset,
+                                const index::VectorIndex& index) {
+    if (search_info.group_by_field_id_.has_value()) {
+        try {
+            knowhere::expected<
+                std::vector<std::shared_ptr<knowhere::IndexNode::iterator>>>
+                iterators_val =
+                    index.VectorIterators(dataset, search_info, bitset);
+            if (iterators_val.has_value()) {
+                search_result.AssembleChunkVectorIterators(
+                    nq, 1, -1, iterators_val.value());
+            } else {
+                LOG_ERROR(
+                    "Returned knowhere iterator has non-ready iterators "
+                    "inside, terminate group_by operation");
+                PanicInfo(ErrorCode::Unsupported,
+                          "Returned knowhere iterator has non-ready iterators "
+                          "inside, terminate group_by operation");
+            }
+            search_result.total_nq_ = dataset->GetRows();
+            search_result.unity_topK_ = search_info.topk_;
+        } catch (const std::runtime_error& e) {
+            LOG_ERROR(
+                "Caught error:{} when trying to initialize ann iterators for "
+                "group_by: "
+                "group_by operation will be terminated",
+                e.what());
+            throw e;
+        }
+        return true;
+    }
+    return false;
+}
+
 void
-GroupBy(const std::vector<std::shared_ptr<knowhere::IndexNode::iterator>>&
-            iterators,
+GroupBy(const std::vector<std::shared_ptr<VectorIterator>>& iterators,
         const SearchInfo& searchInfo,
         std::vector<GroupByValueType>& group_by_values,
         const segcore::SegmentInternalInterface& segment,
@@ -80,9 +173,7 @@ GroupBy(const std::vector<std::shared_ptr<knowhere::IndexNode::iterator>>&
 template <typename T>
 void
 GroupIteratorsByType(
-    const std::vector<std::shared_ptr<knowhere::IndexNode::iterator>>&
-        iterators,
-    FieldId field_id,
+    const std::vector<std::shared_ptr<VectorIterator>>& iterators,
     int64_t topK,
     const DataGetter<T>& data_getter,
     std::vector<GroupByValueType>& group_by_values,
@@ -92,15 +183,13 @@ GroupIteratorsByType(
 
 template <typename T>
 void
-GroupIteratorResult(
-    const std::shared_ptr<knowhere::IndexNode::iterator>& iterator,
-    FieldId field_id,
-    int64_t topK,
-    const DataGetter<T>& data_getter,
-    std::vector<GroupByValueType>& group_by_values,
-    std::vector<int64_t>& offsets,
-    std::vector<float>& distances,
-    const knowhere::MetricType& metrics_type);
+GroupIteratorResult(const std::shared_ptr<VectorIterator>& iterator,
+                    int64_t topK,
+                    const DataGetter<T>& data_getter,
+                    std::vector<GroupByValueType>& group_by_values,
+                    std::vector<int64_t>& offsets,
+                    std::vector<float>& distances,
+                    const knowhere::MetricType& metrics_type);
 
 }  // namespace query
 }  // namespace milvus

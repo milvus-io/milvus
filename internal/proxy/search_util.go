@@ -78,10 +78,6 @@ func initSearchRequest(ctx context.Context, t *searchTask) error {
 		if err != nil {
 			return err
 		}
-		if queryInfo.GroupByFieldId != 0 {
-			t.SearchRequest.IgnoreGrowing = true
-			// for group by operation, currently, we ignore growing segments
-		}
 		t.offset = offset
 
 		plan, err := planparserv2.CreateSearchPlan(t.schema.CollectionSchema, t.request.Dsl, annsField, queryInfo)

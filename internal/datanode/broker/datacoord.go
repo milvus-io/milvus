@@ -14,18 +14,18 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type dataCoordBroker struct {
-	client types.DataCoordClient
+	client   types.DataCoordClient
+	serverID int64
 }
 
 func (dc *dataCoordBroker) AssignSegmentID(ctx context.Context, reqs ...*datapb.SegmentIDRequest) ([]typeutil.UniqueID, error) {
 	req := &datapb.AssignSegmentIDRequest{
-		NodeID:            paramtable.GetNodeID(),
+		NodeID:            dc.serverID,
 		PeerRole:          typeutil.ProxyRole,
 		SegmentIDRequests: reqs,
 	}
@@ -48,7 +48,7 @@ func (dc *dataCoordBroker) ReportTimeTick(ctx context.Context, msgs []*msgpb.Dat
 	req := &datapb.ReportDataNodeTtMsgsRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_DataNodeTt),
-			commonpbutil.WithSourceID(paramtable.GetNodeID()),
+			commonpbutil.WithSourceID(dc.serverID),
 		),
 		Msgs: msgs,
 	}
@@ -69,7 +69,7 @@ func (dc *dataCoordBroker) GetSegmentInfo(ctx context.Context, segmentIDs []int6
 	infoResp, err := dc.client.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_SegmentInfo),
-			commonpbutil.WithSourceID(paramtable.GetNodeID()),
+			commonpbutil.WithSourceID(dc.serverID),
 		),
 		SegmentIDs:       segmentIDs,
 		IncludeUnHealthy: true,
@@ -96,7 +96,7 @@ func (dc *dataCoordBroker) UpdateChannelCheckpoint(ctx context.Context, channelN
 
 	req := &datapb.UpdateChannelCheckpointRequest{
 		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithSourceID(paramtable.GetNodeID()),
+			commonpbutil.WithSourceID(dc.serverID),
 		),
 		VChannel: channelName,
 		Position: cp,

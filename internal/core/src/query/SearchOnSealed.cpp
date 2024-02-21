@@ -17,6 +17,7 @@
 #include "query/SearchBruteForce.h"
 #include "query/SearchOnSealed.h"
 #include "query/helper.h"
+#include "query/GroupByOperator.h"
 
 namespace milvus::query {
 
@@ -27,8 +28,8 @@ SearchOnSealedIndex(const Schema& schema,
                     const void* query_data,
                     int64_t num_queries,
                     const BitsetView& bitset,
-                    SearchResult& result) {
-    auto topk = search_info.topk_;
+                    SearchResult& search_result) {
+    auto topK = search_info.topk_;
     auto round_decimal = search_info.round_decimal_;
 
     auto field_id = search_info.field_id_;
@@ -42,20 +43,19 @@ SearchOnSealedIndex(const Schema& schema,
     AssertInfo(field_indexing->metric_type_ == search_info.metric_type_,
                "Metric type of field index isn't the same with search info");
 
-    auto final = [&] {
-        auto ds = knowhere::GenDataSet(num_queries, dim, query_data);
-
-        auto vec_index =
-            dynamic_cast<index::VectorIndex*>(field_indexing->indexing_.get());
+    auto dataset = knowhere::GenDataSet(num_queries, dim, query_data);
+    auto vec_index =
+        dynamic_cast<index::VectorIndex*>(field_indexing->indexing_.get());
+    if (!PrepareVectorIteratorsFromIndex(search_info,
+                                         num_queries,
+                                         dataset,
+                                         search_result,
+                                         bitset,
+                                         *vec_index)) {
         auto index_type = vec_index->GetIndexType();
-        return vec_index->Query(ds, search_info, bitset);
-    }();
-    if (final->iterators.has_value()) {
-        result.iterators = std::move(final->iterators);
-    } else {
-        float* distances = final->distances_.data();
-
-        auto total_num = num_queries * topk;
+        vec_index->Query(dataset, search_info, bitset, search_result);
+        float* distances = search_result.distances_.data();
+        auto total_num = num_queries * topK;
         if (round_decimal != -1) {
             const float multiplier = pow(10.0, round_decimal);
             for (int i = 0; i < total_num; i++) {
@@ -63,11 +63,9 @@ SearchOnSealedIndex(const Schema& schema,
                     std::round(distances[i] * multiplier) / multiplier;
             }
         }
-        result.seg_offsets_ = std::move(final->seg_offsets_);
-        result.distances_ = std::move(final->distances_);
     }
-    result.total_nq_ = num_queries;
-    result.unity_topK_ = topk;
+    search_result.total_nq_ = num_queries;
+    search_result.unity_topK_ = topK;
 }
 
 void
@@ -91,15 +89,26 @@ SearchOnSealed(const Schema& schema,
 
     auto data_type = field.get_data_type();
     CheckBruteForceSearchParam(field, search_info);
-    auto sub_qr = BruteForceSearch(dataset,
-                                   vec_data,
-                                   row_count,
-                                   search_info.search_params_,
-                                   bitset,
-                                   data_type);
+    if (search_info.group_by_field_id_.has_value()) {
+        auto sub_qr = BruteForceSearchIterators(dataset,
+                                                vec_data,
+                                                row_count,
+                                                search_info.search_params_,
+                                                bitset,
+                                                data_type);
+        result.AssembleChunkVectorIterators(
+            num_queries, 1, -1, sub_qr.chunk_iterators());
+    } else {
+        auto sub_qr = BruteForceSearch(dataset,
+                                       vec_data,
+                                       row_count,
+                                       search_info.search_params_,
+                                       bitset,
+                                       data_type);
 
-    result.distances_ = std::move(sub_qr.mutable_distances());
-    result.seg_offsets_ = std::move(sub_qr.mutable_seg_offsets());
+        result.distances_ = std::move(sub_qr.mutable_distances());
+        result.seg_offsets_ = std::move(sub_qr.mutable_seg_offsets());
+    }
     result.unity_topK_ = dataset.topk;
     result.total_nq_ = dataset.num_queries;
 }

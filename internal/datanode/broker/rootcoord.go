@@ -13,12 +13,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type rootCoordBroker struct {
-	client types.RootCoordClient
+	client   types.RootCoordClient
+	serverID int64
 }
 
 func (rc *rootCoordBroker) DescribeCollection(ctx context.Context, collectionID typeutil.UniqueID, timestamp typeutil.Timestamp) (*milvuspb.DescribeCollectionResponse, error) {
@@ -29,7 +29,7 @@ func (rc *rootCoordBroker) DescribeCollection(ctx context.Context, collectionID 
 	req := &milvuspb.DescribeCollectionRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection),
-			commonpbutil.WithSourceID(paramtable.GetNodeID()),
+			commonpbutil.WithSourceID(rc.serverID),
 		),
 		// please do not specify the collection name alone after database feature.
 		CollectionID: collectionID,
@@ -89,7 +89,7 @@ func (rc *rootCoordBroker) AllocTimestamp(ctx context.Context, num uint32) (uint
 	req := &rootcoordpb.AllocTimestampRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_RequestTSO),
-			commonpbutil.WithSourceID(paramtable.GetNodeID()),
+			commonpbutil.WithSourceID(rc.serverID),
 		),
 		Count: num,
 	}

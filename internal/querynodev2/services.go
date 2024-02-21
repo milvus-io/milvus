@@ -66,7 +66,7 @@ func (node *QueryNode) GetComponentStates(ctx context.Context, req *milvuspb.Get
 	log.Debug("QueryNode current state", zap.Int64("NodeID", nodeID), zap.String("StateCode", code.String()))
 
 	if node.session != nil && node.session.Registered() {
-		nodeID = paramtable.GetNodeID()
+		nodeID = node.GetNodeID()
 	}
 	info := &milvuspb.ComponentInfo{
 		NodeID:    nodeID,
@@ -112,7 +112,7 @@ func (node *QueryNode) GetStatistics(ctx context.Context, req *querypb.GetStatis
 	}
 	defer node.lifetime.Done()
 
-	err := merr.CheckTargetID(req.GetReq().GetBase())
+	err := merr.CheckTargetID(node.GetNodeID(), req.GetReq().GetBase())
 	if err != nil {
 		log.Warn("target ID check failed", zap.Error(err))
 		return &internalpb.GetStatisticsResponse{
@@ -200,7 +200,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.String("channel", channel.GetChannelName()),
-		zap.Int64("currentNodeID", paramtable.GetNodeID()),
+		zap.Int64("currentNodeID", node.GetNodeID()),
 	)
 
 	log.Info("received watch channel request",
@@ -214,7 +214,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 	defer node.lifetime.Done()
 
 	// check target matches
-	if err := merr.CheckTargetID(req.GetBase()); err != nil {
+	if err := merr.CheckTargetID(node.GetNodeID(), req.GetBase()); err != nil {
 		return merr.Status(err), nil
 	}
 
@@ -347,7 +347,7 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.String("channel", req.GetChannelName()),
-		zap.Int64("currentNodeID", paramtable.GetNodeID()),
+		zap.Int64("currentNodeID", node.GetNodeID()),
 	)
 
 	log.Info("received unsubscribe channel request")
@@ -359,7 +359,7 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 	defer node.lifetime.Done()
 
 	// check target matches
-	if err := merr.CheckTargetID(req.GetBase()); err != nil {
+	if err := merr.CheckTargetID(node.GetNodeID(), req.GetBase()); err != nil {
 		return merr.Status(err), nil
 	}
 
@@ -412,7 +412,7 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 		zap.Int64("partitionID", segment.GetPartitionID()),
 		zap.String("shard", segment.GetInsertChannel()),
 		zap.Int64("segmentID", segment.GetSegmentID()),
-		zap.Int64("currentNodeID", paramtable.GetNodeID()),
+		zap.Int64("currentNodeID", node.GetNodeID()),
 	)
 
 	log.Info("received load segments request",
@@ -426,7 +426,7 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 	defer node.lifetime.Done()
 
 	// check target matches
-	if err := merr.CheckTargetID(req.GetBase()); err != nil {
+	if err := merr.CheckTargetID(node.GetNodeID(), req.GetBase()); err != nil {
 		return merr.Status(err), nil
 	}
 
@@ -529,7 +529,7 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, req *querypb.Release
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.String("shard", req.GetShard()),
 		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
-		zap.Int64("currentNodeID", paramtable.GetNodeID()),
+		zap.Int64("currentNodeID", node.GetNodeID()),
 	)
 
 	log.Info("received release segment request",
@@ -544,7 +544,7 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, req *querypb.Release
 	defer node.lifetime.Done()
 
 	// check target matches
-	if err := merr.CheckTargetID(req.GetBase()); err != nil {
+	if err := merr.CheckTargetID(node.GetNodeID(), req.GetBase()); err != nil {
 		return merr.Status(err), nil
 	}
 
@@ -630,8 +630,8 @@ func (node *QueryNode) GetSegmentInfo(ctx context.Context, in *querypb.GetSegmen
 			DmChannel:    segment.Shard(),
 			PartitionID:  segment.Partition(),
 			CollectionID: segment.Collection(),
-			NodeID:       paramtable.GetNodeID(),
-			NodeIds:      []int64{paramtable.GetNodeID()},
+			NodeID:       node.GetNodeID(),
+			NodeIds:      []int64{node.GetNodeID()},
 			MemSize:      segment.MemSize(),
 			NumRows:      segment.InsertCount(),
 			IndexName:    indexName,
@@ -669,10 +669,10 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 	}
 	defer node.lifetime.Done()
 
-	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.TotalLabel, metrics.FromLeader).Inc()
+	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.SearchLabel, metrics.TotalLabel, metrics.FromLeader).Inc()
 	defer func() {
 		if !merr.Ok(resp.GetStatus()) {
-			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.FailLabel, metrics.FromLeader).Inc()
+			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.SearchLabel, metrics.FailLabel, metrics.FromLeader).Inc()
 		}
 	}()
 
@@ -693,7 +693,7 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 		return resp, nil
 	}
 
-	task := tasks.NewSearchTask(searchCtx, collection, node.manager, req)
+	task := tasks.NewSearchTask(searchCtx, collection, node.manager, req, node.serverID)
 	if err := node.scheduler.Add(task); err != nil {
 		log.Warn("failed to search channel", zap.Error(err))
 		resp.Status = merr.Status(err)
@@ -713,8 +713,8 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 	))
 
 	latency := tr.ElapseSpan()
-	metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.FromLeader).Observe(float64(latency.Milliseconds()))
-	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.SuccessLabel, metrics.FromLeader).Inc()
+	metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.SearchLabel, metrics.FromLeader).Observe(float64(latency.Milliseconds()))
+	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.SearchLabel, metrics.SuccessLabel, metrics.FromLeader).Inc()
 
 	resp = task.Result()
 	resp.GetCostAggregation().ResponseTime = tr.ElapseSpan().Milliseconds()
@@ -750,7 +750,7 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 	}
 	defer node.lifetime.Done()
 
-	err := merr.CheckTargetID(req.GetReq().GetBase())
+	err := merr.CheckTargetID(node.GetNodeID(), req.GetReq().GetBase())
 	if err != nil {
 		log.Warn("target ID check failed", zap.Error(err))
 		return &internalpb.SearchResults{
@@ -807,12 +807,12 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 		return resp, nil
 	}
 	reduceLatency := tr.RecordSpan()
-	metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.ReduceShards).
+	metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.SearchLabel, metrics.ReduceShards).
 		Observe(float64(reduceLatency.Milliseconds()))
 
 	collector.Rate.Add(metricsinfo.NQPerSecond, float64(req.GetReq().GetNq()))
 	collector.Rate.Add(metricsinfo.SearchThroughput, float64(proto.Size(req)))
-	metrics.QueryNodeExecuteCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.SearchLabel).
+	metrics.QueryNodeExecuteCounter.WithLabelValues(strconv.FormatInt(node.GetNodeID(), 10), metrics.SearchLabel).
 		Add(float64(proto.Size(req)))
 
 	if result.GetCostAggregation() != nil {
@@ -836,19 +836,19 @@ func (node *QueryNode) HybridSearch(ctx context.Context, req *querypb.HybridSear
 	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
 		return &querypb.HybridSearchResult{
 			Base: &commonpb.MsgBase{
-				SourceID: paramtable.GetNodeID(),
+				SourceID: node.GetNodeID(),
 			},
 			Status: merr.Status(err),
 		}, nil
 	}
 	defer node.lifetime.Done()
 
-	err := merr.CheckTargetID(req.GetReq().GetBase())
+	err := merr.CheckTargetID(node.GetNodeID(), req.GetReq().GetBase())
 	if err != nil {
 		log.Warn("target ID check failed", zap.Error(err))
 		return &querypb.HybridSearchResult{
 			Base: &commonpb.MsgBase{
-				SourceID: paramtable.GetNodeID(),
+				SourceID: node.GetNodeID(),
 			},
 			Status: merr.Status(err),
 		}, nil
@@ -856,7 +856,7 @@ func (node *QueryNode) HybridSearch(ctx context.Context, req *querypb.HybridSear
 
 	resp := &querypb.HybridSearchResult{
 		Base: &commonpb.MsgBase{
-			SourceID: paramtable.GetNodeID(),
+			SourceID: node.GetNodeID(),
 		},
 		Status: merr.Success(),
 	}
@@ -916,11 +916,11 @@ func (node *QueryNode) HybridSearch(ctx context.Context, req *querypb.HybridSear
 	resp.ChannelsMvcc = channelsMvcc
 
 	reduceLatency := tr.RecordSpan()
-	metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.HybridSearchLabel, metrics.ReduceShards).
+	metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.HybridSearchLabel, metrics.ReduceShards).
 		Observe(float64(reduceLatency.Milliseconds()))
 
 	collector.Rate.Add(metricsinfo.SearchThroughput, float64(proto.Size(req)))
-	metrics.QueryNodeExecuteCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.HybridSearchLabel).
+	metrics.QueryNodeExecuteCounter.WithLabelValues(strconv.FormatInt(node.GetNodeID(), 10), metrics.HybridSearchLabel).
 		Add(float64(proto.Size(req)))
 
 	if resp.GetCostAggregation() != nil {
@@ -950,10 +950,10 @@ func (node *QueryNode) QuerySegments(ctx context.Context, req *querypb.QueryRequ
 	}
 	defer node.lifetime.Done()
 
-	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.TotalLabel, metrics.FromLeader).Inc()
+	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.QueryLabel, metrics.TotalLabel, metrics.FromLeader).Inc()
 	defer func() {
 		if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.FailLabel, metrics.FromLeader).Inc()
+			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.QueryLabel, metrics.FailLabel, metrics.FromLeader).Inc()
 		}
 	}()
 
@@ -995,8 +995,8 @@ func (node *QueryNode) QuerySegments(ctx context.Context, req *querypb.QueryRequ
 
 	// TODO QueryNodeSQLatencyInQueue QueryNodeReduceLatency
 	latency := tr.ElapseSpan()
-	metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.FromLeader).Observe(float64(latency.Milliseconds()))
-	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.SuccessLabel, metrics.FromLeader).Inc()
+	metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.QueryLabel, metrics.FromLeader).Observe(float64(latency.Milliseconds()))
+	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.QueryLabel, metrics.SuccessLabel, metrics.FromLeader).Inc()
 	result := task.Result()
 	result.GetCostAggregation().ResponseTime = latency.Milliseconds()
 	result.GetCostAggregation().TotalNQ = node.scheduler.GetWaitingTaskTotalNQ()
@@ -1031,7 +1031,7 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 	}
 	defer node.lifetime.Done()
 
-	err := merr.CheckTargetID(req.GetReq().GetBase())
+	err := merr.CheckTargetID(node.GetNodeID(), req.GetReq().GetBase())
 	if err != nil {
 		log.Warn("target ID check failed", zap.Error(err))
 		return &internalpb.RetrieveResults{
@@ -1080,12 +1080,12 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 		}, nil
 	}
 	reduceLatency := tr.RecordSpan()
-	metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.ReduceShards).
+	metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.QueryLabel, metrics.ReduceShards).
 		Observe(float64(reduceLatency.Milliseconds()))
 
 	if !req.FromShardLeader {
 		collector.Rate.Add(metricsinfo.NQPerSecond, 1)
-		metrics.QueryNodeExecuteCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.QueryLabel).Add(float64(proto.Size(req)))
+		metrics.QueryNodeExecuteCounter.WithLabelValues(strconv.FormatInt(node.GetNodeID(), 10), metrics.QueryLabel).Add(float64(proto.Size(req)))
 	}
 
 	if ret.GetCostAggregation() != nil {
@@ -1116,7 +1116,7 @@ func (node *QueryNode) QueryStream(req *querypb.QueryRequest, srv querypb.QueryN
 	}
 	defer node.lifetime.Done()
 
-	err := merr.CheckTargetID(req.GetReq().GetBase())
+	err := merr.CheckTargetID(node.GetNodeID(), req.GetReq().GetBase())
 	if err != nil {
 		log.Warn("target ID check failed", zap.Error(err))
 		return err
@@ -1151,7 +1151,7 @@ func (node *QueryNode) QueryStream(req *querypb.QueryRequest, srv querypb.QueryN
 	}
 
 	collector.Rate.Add(metricsinfo.NQPerSecond, 1)
-	metrics.QueryNodeExecuteCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.QueryLabel).Add(float64(proto.Size(req)))
+	metrics.QueryNodeExecuteCounter.WithLabelValues(strconv.FormatInt(node.GetNodeID(), 10), metrics.QueryLabel).Add(float64(proto.Size(req)))
 	return nil
 }
 
@@ -1170,10 +1170,10 @@ func (node *QueryNode) QueryStreamSegments(req *querypb.QueryRequest, srv queryp
 	)
 
 	resp := &internalpb.RetrieveResults{}
-	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.TotalLabel, metrics.FromLeader).Inc()
+	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.QueryLabel, metrics.TotalLabel, metrics.FromLeader).Inc()
 	defer func() {
 		if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.FailLabel, metrics.FromLeader).Inc()
+			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.QueryLabel, metrics.FailLabel, metrics.FromLeader).Inc()
 		}
 	}()
 
@@ -1207,8 +1207,8 @@ func (node *QueryNode) QueryStreamSegments(req *querypb.QueryRequest, srv queryp
 
 	// TODO QueryNodeSQLatencyInQueue QueryNodeReduceLatency
 	latency := tr.ElapseSpan()
-	metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.FromLeader).Observe(float64(latency.Milliseconds()))
-	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.SuccessLabel, metrics.FromLeader).Inc()
+	metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.QueryLabel, metrics.FromLeader).Observe(float64(latency.Milliseconds()))
+	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.QueryLabel, metrics.SuccessLabel, metrics.FromLeader).Inc()
 	return nil
 }
 
@@ -1221,7 +1221,7 @@ func (node *QueryNode) SyncReplicaSegments(ctx context.Context, req *querypb.Syn
 func (node *QueryNode) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
 	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
 		log.Warn("QueryNode.ShowConfigurations failed",
-			zap.Int64("nodeId", paramtable.GetNodeID()),
+			zap.Int64("nodeId", node.GetNodeID()),
 			zap.String("req", req.Pattern),
 			zap.Error(err))
 
@@ -1251,7 +1251,7 @@ func (node *QueryNode) ShowConfigurations(ctx context.Context, req *internalpb.S
 func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
 		log.Warn("QueryNode.GetMetrics failed",
-			zap.Int64("nodeId", paramtable.GetNodeID()),
+			zap.Int64("nodeId", node.GetNodeID()),
 			zap.String("req", req.Request),
 			zap.Error(err))
 
@@ -1265,7 +1265,7 @@ func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsR
 	metricType, err := metricsinfo.ParseMetricType(req.Request)
 	if err != nil {
 		log.Warn("QueryNode.GetMetrics failed to parse metric type",
-			zap.Int64("nodeId", paramtable.GetNodeID()),
+			zap.Int64("nodeId", node.GetNodeID()),
 			zap.String("req", req.Request),
 			zap.Error(err))
 
@@ -1278,7 +1278,7 @@ func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsR
 		queryNodeMetrics, err := getSystemInfoMetrics(ctx, req, node)
 		if err != nil {
 			log.Warn("QueryNode.GetMetrics failed",
-				zap.Int64("nodeId", paramtable.GetNodeID()),
+				zap.Int64("nodeId", node.GetNodeID()),
 				zap.String("req", req.Request),
 				zap.String("metricType", metricType),
 				zap.Error(err))
@@ -1287,7 +1287,7 @@ func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsR
 			}, nil
 		}
 		log.RatedDebug(50, "QueryNode.GetMetrics",
-			zap.Int64("nodeID", paramtable.GetNodeID()),
+			zap.Int64("nodeID", node.GetNodeID()),
 			zap.String("req", req.Request),
 			zap.String("metricType", metricType),
 			zap.Any("queryNodeMetrics", queryNodeMetrics))
@@ -1296,7 +1296,7 @@ func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsR
 	}
 
 	log.Debug("QueryNode.GetMetrics failed, request metric type is not implemented yet",
-		zap.Int64("nodeID", paramtable.GetNodeID()),
+		zap.Int64("nodeID", node.GetNodeID()),
 		zap.String("req", req.Request),
 		zap.String("metricType", metricType))
 
@@ -1308,7 +1308,7 @@ func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsR
 func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.GetDataDistributionRequest) (*querypb.GetDataDistributionResponse, error) {
 	log := log.Ctx(ctx).With(
 		zap.Int64("msgID", req.GetBase().GetMsgID()),
-		zap.Int64("nodeID", paramtable.GetNodeID()),
+		zap.Int64("nodeID", node.GetNodeID()),
 	)
 	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
 		log.Warn("QueryNode.GetDataDistribution failed",
@@ -1321,7 +1321,7 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 	defer node.lifetime.Done()
 
 	// check target matches
-	if err := merr.CheckTargetID(req.GetBase()); err != nil {
+	if err := merr.CheckTargetID(node.GetNodeID(), req.GetBase()); err != nil {
 		return &querypb.GetDataDistributionResponse{
 			Status: merr.Status(err),
 		}, nil
@@ -1393,7 +1393,7 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 
 	return &querypb.GetDataDistributionResponse{
 		Status:      merr.Success(),
-		NodeID:      paramtable.GetNodeID(),
+		NodeID:      node.GetNodeID(),
 		Segments:    segmentVersionInfos,
 		Channels:    channelVersionInfos,
 		LeaderViews: leaderViews,
@@ -1402,7 +1402,7 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 
 func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDistributionRequest) (*commonpb.Status, error) {
 	log := log.Ctx(ctx).With(zap.Int64("collectionID", req.GetCollectionID()),
-		zap.String("channel", req.GetChannel()), zap.Int64("currentNodeID", paramtable.GetNodeID()))
+		zap.String("channel", req.GetChannel()), zap.Int64("currentNodeID", node.GetNodeID()))
 	// check node healthy
 	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
 		return merr.Status(err), nil
@@ -1410,7 +1410,7 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 	defer node.lifetime.Done()
 
 	// check target matches
-	if err := merr.CheckTargetID(req.GetBase()); err != nil {
+	if err := merr.CheckTargetID(node.GetNodeID(), req.GetBase()); err != nil {
 		return merr.Status(err), nil
 	}
 
@@ -1510,7 +1510,7 @@ func (node *QueryNode) Delete(ctx context.Context, req *querypb.DeleteRequest) (
 	defer node.lifetime.Done()
 
 	// check target matches
-	if err := merr.CheckTargetID(req.GetBase()); err != nil {
+	if err := merr.CheckTargetID(node.GetNodeID(), req.GetBase()); err != nil {
 		return merr.Status(err), nil
 	}
 

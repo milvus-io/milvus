@@ -73,10 +73,11 @@ class VectorMemIndex : public VectorIndex {
         return index_.Count();
     }
 
-    std::unique_ptr<SearchResult>
+    void
     Query(const DatasetPtr dataset,
           const SearchInfo& search_info,
-          const BitsetView& bitset) override;
+          const BitsetView& bitset,
+          SearchResult& search_result) const override;
 
     const bool
     HasRawData() const override;
@@ -89,6 +90,12 @@ class VectorMemIndex : public VectorIndex {
 
     BinarySet
     UploadV2(const Config& config = {}) override;
+
+    knowhere::expected<
+        std::vector<std::shared_ptr<knowhere::IndexNode::iterator>>>
+    VectorIterators(const DatasetPtr dataset,
+                    const SearchInfo& search_info,
+                    const BitsetView& bitset) const override;
 
  protected:
     virtual void

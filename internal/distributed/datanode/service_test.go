@@ -91,6 +91,10 @@ func (m *MockDataNode) GetAddress() string {
 	return ""
 }
 
+func (m *MockDataNode) GetNodeID() int64 {
+	return 2
+}
+
 func (m *MockDataNode) SetRootCoordClient(rc types.RootCoordClient) error {
 	return m.err
 }
