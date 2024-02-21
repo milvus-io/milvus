@@ -25,7 +25,7 @@ SearchOnSealedIndex(const Schema& schema,
                     const void* query_data,
                     int64_t num_queries,
                     const BitsetView& view,
-                    SearchResult& result);
+                    SearchResult& search_result);
 
 void
 SearchOnSealed(const Schema& schema,

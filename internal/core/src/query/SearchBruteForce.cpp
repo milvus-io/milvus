@@ -21,6 +21,8 @@
 #include "SubSearchResult.h"
 #include "knowhere/comp/brute_force.h"
 #include "knowhere/comp/index_param.h"
+#include "knowhere/index_node.h"
+#include "log/Log.h"
 namespace milvus::query {
 
 void
@@ -145,4 +147,61 @@ BruteForceSearch(const dataset::SearchDataset& dataset,
     sub_result.round_values();
     return sub_result;
 }
+
+SubSearchResult
+BruteForceSearchIterators(const dataset::SearchDataset& dataset,
+                          const void* chunk_data_raw,
+                          int64_t chunk_rows,
+                          const knowhere::Json& conf,
+                          const BitsetView& bitset,
+                          DataType data_type) {
+    auto nq = dataset.num_queries;
+    auto dim = dataset.dim;
+    auto base_dataset = knowhere::GenDataSet(chunk_rows, dim, chunk_data_raw);
+    auto query_dataset = knowhere::GenDataSet(nq, dim, dataset.query_data);
+
+    knowhere::expected<
+        std::vector<std::shared_ptr<knowhere::IndexNode::iterator>>>
+        iterators_val;
+    switch (data_type) {
+        case DataType::VECTOR_FLOAT:
+            iterators_val = knowhere::BruteForce::AnnIterator<float>(
+                base_dataset, query_dataset, conf, bitset);
+            break;
+        case DataType::VECTOR_FLOAT16:
+            iterators_val = knowhere::BruteForce::AnnIterator<float16>(
+                base_dataset, query_dataset, conf, bitset);
+            break;
+        case DataType::VECTOR_BFLOAT16:
+            iterators_val = knowhere::BruteForce::AnnIterator<bfloat16>(
+                base_dataset, query_dataset, conf, bitset);
+            break;
+        default:
+            PanicInfo(ErrorCode::Unsupported,
+                      "Unsupported dataType for chunk brute force iterator:{}",
+                      data_type);
+    }
+    if (iterators_val.has_value()) {
+        AssertInfo(
+            iterators_val.value().size() == nq,
+            "Wrong state, initialized knowhere_iterators count:{} is not "
+            "equal to nq:{} for single chunk",
+            iterators_val.value().size(),
+            nq);
+        SubSearchResult subSearchResult(dataset.num_queries,
+                                        dataset.topk,
+                                        dataset.metric_type,
+                                        dataset.round_decimal,
+                                        iterators_val.value());
+        return std::move(subSearchResult);
+    } else {
+        LOG_ERROR(
+            "Failed to get valid knowhere brute-force-iterators from chunk, "
+            "terminate search_group_by operation");
+        PanicInfo(ErrorCode::Unsupported,
+                  "Returned knowhere brute-force-iterator has non-ready "
+                  "iterators inside, terminate search_group_by operation");
+    }
+}
+
 }  // namespace milvus::query

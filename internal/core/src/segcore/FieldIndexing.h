@@ -173,7 +173,7 @@ class VectorFieldIndexing : public FieldIndexing {
     void
     AppendSegmentIndex(int64_t reserved_offset,
                        int64_t size,
-                       const VectorBase* vec_base,
+                       const VectorBase* field_raw_data,
                        const void* data_source) override;
 
     void
@@ -289,11 +289,11 @@ class IndexingRecord {
                 indexing->get_field_meta().get_data_type() ==
                     DataType::VECTOR_FLOAT &&
                 reserved_offset + size >= indexing->get_build_threshold()) {
-                auto vec_base = record.get_field_data_base(fieldId);
+                auto field_raw_data = record.get_field_data_base(fieldId);
                 indexing->AppendSegmentIndex(
                     reserved_offset,
                     size,
-                    vec_base,
+                    field_raw_data,
                     stream_data->vectors().float_vector().data().data());
             }
         }

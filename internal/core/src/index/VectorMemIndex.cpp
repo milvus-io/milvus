@@ -129,6 +129,15 @@ VectorMemIndex<T>::UploadV2(const Config& config) {
 }
 
 template <typename T>
+knowhere::expected<std::vector<std::shared_ptr<knowhere::IndexNode::iterator>>>
+VectorMemIndex<T>::VectorIterators(const milvus::DatasetPtr dataset,
+                                   const milvus::SearchInfo& search_info,
+                                   const milvus::BitsetView& bitset) const {
+    return this->index_.AnnIterator(
+        *dataset, search_info.search_params_, bitset);
+}
+
+template <typename T>
 BinarySet
 VectorMemIndex<T>::Upload(const Config& config) {
     auto binary_set = Serialize(config);
@@ -522,48 +531,16 @@ VectorMemIndex<T>::AddWithDataset(const DatasetPtr& dataset,
 }
 
 template <typename T>
-std::unique_ptr<SearchResult>
+void
 VectorMemIndex<T>::Query(const DatasetPtr dataset,
                          const SearchInfo& search_info,
-                         const BitsetView& bitset) {
+                         const BitsetView& bitset,
+                         SearchResult& search_result) const {
     //    AssertInfo(GetMetricType() == search_info.metric_type_,
     //               "Metric type of field index isn't the same with search info");
 
     auto num_queries = dataset->GetRows();
     knowhere::Json search_conf = search_info.search_params_;
-    if (search_info.group_by_field_id_.has_value()) {
-        auto result = std::make_unique<SearchResult>();
-        if (search_conf.contains(knowhere::indexparam::EF)) {
-            search_conf[knowhere::indexparam::SEED_EF] =
-                search_conf[knowhere::indexparam::EF];
-        }
-        try {
-            knowhere::expected<
-                std::vector<std::shared_ptr<knowhere::IndexNode::iterator>>>
-                iterators_val =
-                    index_.AnnIterator(*dataset, search_conf, bitset);
-            if (iterators_val.has_value()) {
-                result->iterators = iterators_val.value();
-            } else {
-                LOG_ERROR(
-                    "Returned knowhere iterator has non-ready iterators "
-                    "inside, terminate group_by operation");
-                PanicInfo(ErrorCode::Unsupported,
-                          "Returned knowhere iterator has non-ready iterators "
-                          "inside, terminate group_by operation");
-            }
-        } catch (const std::runtime_error& e) {
-            LOG_ERROR(
-                "Caught error:{} when trying to initialize ann iterators for "
-                "group_by: "
-                "group_by operation will be terminated",
-                e.what());
-            throw e;
-        }
-        return result;
-        //if the target index doesn't support iterators, directly return empty search result
-        //and the reduce process to filter empty results
-    }
     auto topk = search_info.topk_;
     // TODO :: check dim of search data
     auto final = [&] {
@@ -615,16 +592,12 @@ VectorMemIndex<T>::Query(const DatasetPtr dataset,
             distances[i] = std::round(distances[i] * multiplier) / multiplier;
         }
     }
-    auto result = std::make_unique<SearchResult>();
-    result->seg_offsets_.resize(total_num);
-    result->distances_.resize(total_num);
-    result->total_nq_ = num_queries;
-    result->unity_topK_ = topk;
-
-    std::copy_n(ids, total_num, result->seg_offsets_.data());
-    std::copy_n(distances, total_num, result->distances_.data());
-
-    return result;
+    search_result.seg_offsets_.resize(total_num);
+    search_result.distances_.resize(total_num);
+    search_result.total_nq_ = num_queries;
+    search_result.unity_topK_ = topk;
+    std::copy_n(ids, total_num, search_result.seg_offsets_.data());
+    std::copy_n(distances, total_num, search_result.distances_.data());
 }
 
 template <typename T>

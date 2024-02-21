@@ -314,10 +314,11 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
 }
 
 template <typename T>
-std::unique_ptr<SearchResult>
+void
 VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
                              const SearchInfo& search_info,
-                             const BitsetView& bitset) {
+                             const BitsetView& bitset,
+                             SearchResult& search_result) const {
     AssertInfo(GetMetricType() == search_info.metric_type_,
                "Metric type of field index isn't the same with search info");
     auto num_queries = dataset->GetRows();
@@ -392,16 +393,21 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
             distances[i] = std::round(distances[i] * multiplier) / multiplier;
         }
     }
-    auto result = std::make_unique<SearchResult>();
-    result->seg_offsets_.resize(total_num);
-    result->distances_.resize(total_num);
-    result->total_nq_ = num_queries;
-    result->unity_topK_ = topk;
+    search_result.seg_offsets_.resize(total_num);
+    search_result.distances_.resize(total_num);
+    search_result.total_nq_ = num_queries;
+    search_result.unity_topK_ = topk;
+    std::copy_n(ids, total_num, search_result.seg_offsets_.data());
+    std::copy_n(distances, total_num, search_result.distances_.data());
+}
 
-    std::copy_n(ids, total_num, result->seg_offsets_.data());
-    std::copy_n(distances, total_num, result->distances_.data());
-
-    return result;
+template <typename T>
+knowhere::expected<std::vector<std::shared_ptr<knowhere::IndexNode::iterator>>>
+VectorDiskAnnIndex<T>::VectorIterators(const DatasetPtr dataset,
+                                       const SearchInfo& search_info,
+                                       const BitsetView& bitset) const {
+    return this->index_.AnnIterator(
+        *dataset, search_info.search_params_, bitset);
 }
 
 template <typename T>

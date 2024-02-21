@@ -115,8 +115,9 @@ TEST(Sealed, without_predicate) {
     searchInfo.topk_ = topK;
     searchInfo.metric_type_ = knowhere::metric::L2;
     searchInfo.search_params_ = search_conf;
-    auto result = vec_index->Query(query_dataset, searchInfo, nullptr);
-    auto ref_result = SearchResultToJson(*result);
+    SearchResult result;
+    vec_index->Query(query_dataset, searchInfo, nullptr, result);
+    auto ref_result = SearchResultToJson(result);
 
     LoadIndexInfo load_info;
     load_info.field_id = fake_id.get();
@@ -235,7 +236,8 @@ TEST(Sealed, with_predicate) {
     searchInfo.topk_ = topK;
     searchInfo.metric_type_ = knowhere::metric::L2;
     searchInfo.search_params_ = search_conf;
-    auto result = vec_index->Query(query_dataset, searchInfo, nullptr);
+    SearchResult result;
+    vec_index->Query(query_dataset, searchInfo, nullptr, result);
 
     LoadIndexInfo load_info;
     load_info.field_id = fake_id.get();
