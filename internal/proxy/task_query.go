@@ -242,6 +242,31 @@ func (t *queryTask) createPlan(ctx context.Context) error {
 	return nil
 }
 
+func (t *queryTask) CanSkipAllocTimestamp() bool {
+	var consistencyLevel commonpb.ConsistencyLevel
+	useDefaultConsistency := t.request.GetUseDefaultConsistency()
+	if !useDefaultConsistency {
+		consistencyLevel = t.request.GetConsistencyLevel()
+	} else {
+		collID, err := globalMetaCache.GetCollectionID(context.Background(), t.request.GetDbName(), t.request.GetCollectionName())
+		if err != nil { // err is not nil if collection not exists
+			log.Warn("query task get collectionID failed, can't skip alloc timestamp",
+				zap.String("collectionName", t.request.GetCollectionName()), zap.Error(err))
+			return false
+		}
+
+		collectionInfo, err2 := globalMetaCache.GetCollectionInfo(context.Background(), t.request.GetDbName(), t.request.GetCollectionName(), collID)
+		if err2 != nil {
+			log.Warn("query task get collection info failed, can't skip alloc timestamp",
+				zap.String("collectionName", t.request.GetCollectionName()), zap.Error(err))
+			return false
+		}
+		consistencyLevel = collectionInfo.consistencyLevel
+	}
+
+	return consistencyLevel != commonpb.ConsistencyLevel_Strong
+}
+
 func (t *queryTask) PreExecute(ctx context.Context) error {
 	t.Base.MsgType = commonpb.MsgType_Retrieve
 	t.Base.SourceID = paramtable.GetNodeID()
@@ -367,7 +392,6 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		t.RetrieveRequest.Username = username
 	}
 
-	t.MvccTimestamp = t.BeginTs()
 	collectionInfo, err2 := globalMetaCache.GetCollectionInfo(ctx, t.request.GetDbName(), collectionName, t.CollectionID)
 	if err2 != nil {
 		log.Warn("Proxy::queryTask::PreExecute failed to GetCollectionInfo from cache",
@@ -662,6 +686,9 @@ func (t *queryTask) EndTs() Timestamp {
 }
 
 func (t *queryTask) SetTs(ts Timestamp) {
+	if t.reQuery && t.Base.Timestamp != 0 {
+		return
+	}
 	t.Base.Timestamp = ts
 }
 

@@ -957,3 +957,120 @@ func TestQueryTask_IDs2Expr(t *testing.T) {
 	expectStrExpr := "pk in [ \"a\", \"b\", \"c\" ]"
 	assert.Equal(t, expectStrExpr, strExpr)
 }
+
+func TestQueryTask_CanSkipAllocTimestamp(t *testing.T) {
+	dbName := "test_query"
+	collName := "test_skip_alloc_timestamp"
+	collID := UniqueID(111)
+	mockMetaCache := NewMockCache(t)
+	globalMetaCache = mockMetaCache
+
+	t.Run("default consistency level", func(t *testing.T) {
+		qt := &queryTask{
+			request: &milvuspb.QueryRequest{
+				Base:                  nil,
+				DbName:                dbName,
+				CollectionName:        collName,
+				UseDefaultConsistency: true,
+			},
+		}
+		mockMetaCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(collID, nil)
+		mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
+			&collectionBasicInfo{
+				collID:           collID,
+				consistencyLevel: commonpb.ConsistencyLevel_Eventually,
+			}, nil).Once()
+
+		skip := qt.CanSkipAllocTimestamp()
+		assert.True(t, skip)
+
+		mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
+			&collectionBasicInfo{
+				collID:           collID,
+				consistencyLevel: commonpb.ConsistencyLevel_Bounded,
+			}, nil).Once()
+		skip = qt.CanSkipAllocTimestamp()
+		assert.True(t, skip)
+
+		mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
+			&collectionBasicInfo{
+				collID:           collID,
+				consistencyLevel: commonpb.ConsistencyLevel_Strong,
+			}, nil).Once()
+		skip = qt.CanSkipAllocTimestamp()
+		assert.False(t, skip)
+	})
+
+	t.Run("request consistency level", func(t *testing.T) {
+		mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
+			&collectionBasicInfo{
+				collID:           collID,
+				consistencyLevel: commonpb.ConsistencyLevel_Eventually,
+			}, nil).Times(3)
+
+		qt := &queryTask{
+			request: &milvuspb.QueryRequest{
+				Base:                  nil,
+				DbName:                dbName,
+				CollectionName:        collName,
+				UseDefaultConsistency: false,
+				ConsistencyLevel:      commonpb.ConsistencyLevel_Eventually,
+			},
+		}
+
+		skip := qt.CanSkipAllocTimestamp()
+		assert.True(t, skip)
+
+		qt.request.ConsistencyLevel = commonpb.ConsistencyLevel_Bounded
+		skip = qt.CanSkipAllocTimestamp()
+		assert.True(t, skip)
+
+		qt.request.ConsistencyLevel = commonpb.ConsistencyLevel_Strong
+		skip = qt.CanSkipAllocTimestamp()
+		assert.False(t, skip)
+	})
+
+	t.Run("failed", func(t *testing.T) {
+		mockMetaCache.ExpectedCalls = nil
+		mockMetaCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(collID, nil)
+		mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
+			nil, fmt.Errorf("mock error")).Once()
+
+		qt := &queryTask{
+			request: &milvuspb.QueryRequest{
+				Base:                  nil,
+				DbName:                dbName,
+				CollectionName:        collName,
+				UseDefaultConsistency: true,
+				ConsistencyLevel:      commonpb.ConsistencyLevel_Eventually,
+			},
+		}
+
+		skip := qt.CanSkipAllocTimestamp()
+		assert.False(t, skip)
+
+		mockMetaCache.ExpectedCalls = nil
+		mockMetaCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(collID, fmt.Errorf("mock error"))
+		mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
+			&collectionBasicInfo{
+				collID:           collID,
+				consistencyLevel: commonpb.ConsistencyLevel_Eventually,
+			}, nil)
+
+		skip = qt.CanSkipAllocTimestamp()
+		assert.False(t, skip)
+
+		qt2 := &queryTask{
+			request: &milvuspb.QueryRequest{
+				Base:                  nil,
+				DbName:                dbName,
+				CollectionName:        collName,
+				UseDefaultConsistency: false,
+				ConsistencyLevel:      commonpb.ConsistencyLevel_Eventually,
+			},
+		}
+
+		skip = qt2.CanSkipAllocTimestamp()
+		assert.True(t, skip)
+	})
+}

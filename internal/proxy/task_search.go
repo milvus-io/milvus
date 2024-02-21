@@ -236,6 +236,31 @@ func getNq(req *milvuspb.SearchRequest) (int64, error) {
 	return req.GetNq(), nil
 }
 
+func (t *searchTask) CanSkipAllocTimestamp() bool {
+	var consistencyLevel commonpb.ConsistencyLevel
+	useDefaultConsistency := t.request.GetUseDefaultConsistency()
+	if !useDefaultConsistency {
+		consistencyLevel = t.request.GetConsistencyLevel()
+	} else {
+		collID, err := globalMetaCache.GetCollectionID(context.Background(), t.request.GetDbName(), t.request.GetCollectionName())
+		if err != nil { // err is not nil if collection not exists
+			log.Warn("search task get collectionID failed, can't skip alloc timestamp",
+				zap.String("collectionName", t.request.GetCollectionName()), zap.Error(err))
+			return false
+		}
+
+		collectionInfo, err2 := globalMetaCache.GetCollectionInfo(context.Background(), t.request.GetDbName(), t.request.GetCollectionName(), collID)
+		if err2 != nil {
+			log.Warn("search task get collection info failed, can't skip alloc timestamp",
+				zap.String("collectionName", t.request.GetCollectionName()), zap.Error(err))
+			return false
+		}
+		consistencyLevel = collectionInfo.consistencyLevel
+	}
+
+	return consistencyLevel != commonpb.ConsistencyLevel_Strong
+}
+
 func (t *searchTask) PreExecute(ctx context.Context) error {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Search-PreExecute")
 	defer sp.End()
@@ -499,7 +524,8 @@ func (t *searchTask) estimateResultSize(nq int64, topK int64) (int64, error) {
 func (t *searchTask) Requery() error {
 	queryReq := &milvuspb.QueryRequest{
 		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_Retrieve,
+			MsgType:   commonpb.MsgType_Retrieve,
+			Timestamp: t.BeginTs(),
 		},
 		DbName:             t.request.GetDbName(),
 		CollectionName:     t.request.GetCollectionName(),

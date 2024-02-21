@@ -103,6 +103,10 @@ type mockTask struct {
 	ts    Timestamp
 }
 
+func (m *mockTask) CanSkipAllocTimestamp() bool {
+	return false
+}
+
 func (m *mockTask) TraceCtx() context.Context {
 	return m.TaskCondition.ctx
 }

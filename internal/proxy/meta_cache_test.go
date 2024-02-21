@@ -816,3 +816,68 @@ func TestMetaCache_Database(t *testing.T) {
 	assert.Equal(t, globalMetaCache.HasDatabase(ctx, dbName), true)
 	assert.Equal(t, CheckDatabase(ctx, dbName), true)
 }
+
+func TestMetaCache_AllocID(t *testing.T) {
+	ctx := context.Background()
+	queryCoord := &mocks.MockQueryCoordClient{}
+	shardMgr := newShardClientMgr()
+
+	t.Run("success", func(t *testing.T) {
+		rootCoord := mocks.NewMockRootCoordClient(t)
+		rootCoord.EXPECT().AllocID(mock.Anything, mock.Anything).Return(&rootcoordpb.AllocIDResponse{
+			Status: merr.Status(nil),
+			ID:     11198,
+			Count:  10,
+		}, nil)
+		rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
+			Status:      merr.Success(),
+			PolicyInfos: []string{"policy1", "policy2", "policy3"},
+		}, nil)
+
+		err := InitMetaCache(ctx, rootCoord, queryCoord, shardMgr)
+		assert.NoError(t, err)
+		assert.Equal(t, globalMetaCache.HasDatabase(ctx, dbName), false)
+
+		id, err := globalMetaCache.AllocID(ctx)
+		assert.NoError(t, err)
+		assert.Equal(t, id, int64(11198))
+	})
+
+	t.Run("error", func(t *testing.T) {
+		rootCoord := mocks.NewMockRootCoordClient(t)
+		rootCoord.EXPECT().AllocID(mock.Anything, mock.Anything).Return(&rootcoordpb.AllocIDResponse{
+			Status: merr.Status(nil),
+		}, fmt.Errorf("mock error"))
+		rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
+			Status:      merr.Success(),
+			PolicyInfos: []string{"policy1", "policy2", "policy3"},
+		}, nil)
+
+		err := InitMetaCache(ctx, rootCoord, queryCoord, shardMgr)
+		assert.NoError(t, err)
+		assert.Equal(t, globalMetaCache.HasDatabase(ctx, dbName), false)
+
+		id, err := globalMetaCache.AllocID(ctx)
+		assert.Error(t, err)
+		assert.Equal(t, id, int64(0))
+	})
+
+	t.Run("failed", func(t *testing.T) {
+		rootCoord := mocks.NewMockRootCoordClient(t)
+		rootCoord.EXPECT().AllocID(mock.Anything, mock.Anything).Return(&rootcoordpb.AllocIDResponse{
+			Status: merr.Status(fmt.Errorf("mock failed")),
+		}, nil)
+		rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
+			Status:      merr.Success(),
+			PolicyInfos: []string{"policy1", "policy2", "policy3"},
+		}, nil)
+
+		err := InitMetaCache(ctx, rootCoord, queryCoord, shardMgr)
+		assert.NoError(t, err)
+		assert.Equal(t, globalMetaCache.HasDatabase(ctx, dbName), false)
+
+		id, err := globalMetaCache.AllocID(ctx)
+		assert.Error(t, err)
+		assert.Equal(t, id, int64(0))
+	})
+}
