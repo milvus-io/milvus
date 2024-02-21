@@ -2,11 +2,14 @@ package storage
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 
 	"github.com/apache/arrow/go/v12/arrow"
+	"github.com/apache/arrow/go/v12/arrow/memory"
 	"github.com/apache/arrow/go/v12/parquet"
 	"github.com/apache/arrow/go/v12/parquet/file"
+	"github.com/apache/arrow/go/v12/parquet/pqarrow"
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
 
@@ -261,6 +264,19 @@ func (r *PayloadReader) GetByteArrayDataSet() (*DataSet[parquet.ByteArray, *file
 	}
 
 	return NewDataSet[parquet.ByteArray, *file.ByteArrayColumnChunkReader](r.reader, 0, r.numRows), nil
+}
+
+func (r *PayloadReader) GetArrowRecordReader() (pqarrow.RecordReader, error) {
+	arrowReader, err := pqarrow.NewFileReader(r.reader, pqarrow.ArrowReadProperties{BatchSize: 1024}, memory.DefaultAllocator)
+	if err != nil {
+		return nil, err
+	}
+
+	rr, err := arrowReader.GetRecordReader(context.Background(), nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	return rr, nil
 }
 
 func (r *PayloadReader) GetArrayFromPayload() ([]*schemapb.ScalarField, error) {

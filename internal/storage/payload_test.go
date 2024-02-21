@@ -18,8 +18,10 @@ package storage
 
 import (
 	"math"
+	"math/rand"
 	"testing"
 
+	"github.com/apache/arrow/go/v12/arrow/array"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -1238,6 +1240,30 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		_, err = r.GetStringFromPayload()
 		assert.Error(t, err)
 	})
+	t.Run("TestGetArrayError", func(t *testing.T) {
+		w, err := NewPayloadWriter(schemapb.DataType_Bool)
+		require.Nil(t, err)
+		require.NotNil(t, w)
+
+		err = w.AddBoolToPayload([]bool{false, true, true})
+		assert.NoError(t, err)
+
+		err = w.FinishPayloadWriter()
+		assert.NoError(t, err)
+
+		buffer, err := w.GetPayloadBufferFromWriter()
+		assert.NoError(t, err)
+
+		r, err := NewPayloadReader(schemapb.DataType_Array, buffer)
+		assert.NoError(t, err)
+
+		_, err = r.GetArrayFromPayload()
+		assert.Error(t, err)
+
+		r.colType = 999
+		_, err = r.GetArrayFromPayload()
+		assert.Error(t, err)
+	})
 	t.Run("TestGetBinaryVectorError", func(t *testing.T) {
 		w, err := NewPayloadWriter(schemapb.DataType_Bool)
 		require.Nil(t, err)
@@ -1384,4 +1410,153 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 
 		w.ReleasePayloadWriter()
 	})
+}
+
+func TestArrowRecordReader(t *testing.T) {
+	t.Run("TestArrowRecordReader", func(t *testing.T) {
+		w, err := NewPayloadWriter(schemapb.DataType_String)
+		assert.NoError(t, err)
+		defer w.Close()
+
+		err = w.AddOneStringToPayload("hello0")
+		assert.NoError(t, err)
+		err = w.AddOneStringToPayload("hello1")
+		assert.NoError(t, err)
+		err = w.AddOneStringToPayload("hello2")
+		assert.NoError(t, err)
+		err = w.FinishPayloadWriter()
+		assert.NoError(t, err)
+		length, err := w.GetPayloadLengthFromWriter()
+		assert.NoError(t, err)
+		assert.Equal(t, 3, length)
+		buffer, err := w.GetPayloadBufferFromWriter()
+		assert.NoError(t, err)
+
+		r, err := NewPayloadReader(schemapb.DataType_String, buffer)
+		assert.NoError(t, err)
+		length, err = r.GetPayloadLengthFromReader()
+		assert.NoError(t, err)
+		assert.Equal(t, 3, length)
+
+		rr, err := r.GetArrowRecordReader()
+		assert.NoError(t, err)
+
+		for rr.Next() {
+			rec := rr.Record()
+			arr := rec.Column(0).(*array.String)
+			defer rec.Release()
+
+			assert.Equal(t, "hello0", arr.Value(0))
+			assert.Equal(t, "hello1", arr.Value(1))
+			assert.Equal(t, "hello2", arr.Value(2))
+		}
+	})
+}
+
+func dataGen(size int) ([]byte, error) {
+	w, err := NewPayloadWriter(schemapb.DataType_String)
+	if err != nil {
+		return nil, err
+	}
+	defer w.Close()
+
+	letterRunes := []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+
+	for i := 0; i < size; i++ {
+		b := make([]rune, 20)
+		for i := range b {
+			b[i] = letterRunes[rand.Intn(len(letterRunes))]
+		}
+		w.AddOneStringToPayload(string(b))
+	}
+	err = w.FinishPayloadWriter()
+	if err != nil {
+		return nil, err
+	}
+	buffer, err := w.GetPayloadBufferFromWriter()
+	if err != nil {
+		return nil, err
+	}
+	return buffer, err
+}
+
+func BenchmarkDefaultReader(b *testing.B) {
+	size := 1000000
+	buffer, err := dataGen(size)
+	assert.NoError(b, err)
+
+	b.ResetTimer()
+	r, err := NewPayloadReader(schemapb.DataType_String, buffer)
+	require.Nil(b, err)
+	defer r.ReleasePayloadReader()
+
+	length, err := r.GetPayloadLengthFromReader()
+	assert.NoError(b, err)
+	assert.Equal(b, length, size)
+
+	d, err := r.GetStringFromPayload()
+	assert.NoError(b, err)
+	for i := 0; i < 100; i++ {
+		for _, de := range d {
+			assert.Equal(b, 20, len(de))
+		}
+	}
+}
+
+func BenchmarkDataSetReader(b *testing.B) {
+	size := 1000000
+	buffer, err := dataGen(size)
+	assert.NoError(b, err)
+
+	b.ResetTimer()
+	r, err := NewPayloadReader(schemapb.DataType_String, buffer)
+	require.Nil(b, err)
+	defer r.ReleasePayloadReader()
+
+	length, err := r.GetPayloadLengthFromReader()
+	assert.NoError(b, err)
+	assert.Equal(b, length, size)
+
+	ds, err := r.GetByteArrayDataSet()
+	assert.NoError(b, err)
+
+	for i := 0; i < 100; i++ {
+		for ds.HasNext() {
+			stringArray, err := ds.NextBatch(1024)
+			assert.NoError(b, err)
+			for _, de := range stringArray {
+				assert.Equal(b, 20, len(string(de)))
+			}
+		}
+	}
+}
+
+func BenchmarkArrowRecordReader(b *testing.B) {
+	size := 1000000
+	buffer, err := dataGen(size)
+	assert.NoError(b, err)
+
+	b.ResetTimer()
+	r, err := NewPayloadReader(schemapb.DataType_String, buffer)
+	require.Nil(b, err)
+	defer r.ReleasePayloadReader()
+
+	length, err := r.GetPayloadLengthFromReader()
+	assert.NoError(b, err)
+	assert.Equal(b, length, size)
+
+	rr, err := r.GetArrowRecordReader()
+	assert.NoError(b, err)
+	defer rr.Release()
+
+	for i := 0; i < 100; i++ {
+		for rr.Next() {
+			rec := rr.Record()
+			arr := rec.Column(0).(*array.String)
+			defer rec.Release()
+			for i := 0; i < arr.Len(); i++ {
+				assert.Equal(b, 20, len(arr.Value(i)))
+			}
+		}
+	}
 }
