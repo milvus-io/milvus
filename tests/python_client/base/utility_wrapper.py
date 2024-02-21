@@ -2,7 +2,6 @@ from datetime import datetime
 import time
 from pymilvus import utility
 import sys
-import requests, uuid
 
 sys.path.append("..")
 from check.func_check import ResponseChecker
@@ -14,48 +13,6 @@ from utils.util_log import test_log as log
 TIMEOUT = 20
 
 
-def vector_bulkinsert(url, payload, check_items=None):
-    url = f'http://{url}/v1/vector/bulkinsert'
-    headers = {
-        'Content-Type': 'application/json',
-        'RequestId': str(uuid.uuid1())
-    }
-    response = requests.post(url, headers=headers, json=payload, verify=False)
-    res = response.json()
-    log.info(f"vector_bulkinsert response: {res}")
-    if check_items is not None and check_items["err_msg"] is not None:
-        log.info(f"check_items: {check_items['err_msg']}, res_message: {res['message']}")
-        assert check_items["err_msg"] in res['message']
-    else:
-        assert res['code'] == 200
-        return res['jobID']
-
-
-def vector_bulkinsert_describe(url, job_id):
-    url = f'http://{url}/v1/vector/bulkinsert/describe?jobID={job_id}'
-    headers = {
-        'Content-Type': 'application/json',
-        'RequestId': str(uuid.uuid1())
-    }
-    response = requests.get(url, headers=headers, verify=False)
-    res = response.json()
-    log.info(f"vector_bulkinsert_describe response: {res}, code={res['code']}")
-    assert res['code'] == 200
-    return res['data']['state'], res['data']['progress']
-
-
-def vector_bulkinsert_list(url):
-    url = f'http://{url}/v1/vector/bulkinsert/list'
-    headers = {
-        'Content-Type': 'application/json',
-        'RequestId': str(uuid.uuid1())
-    }
-    response = requests.get(url, headers=headers, verify=False)
-    res = response.json()
-    assert res['code'] == 200
-    return res['data']
-
-
 class ApiUtilityWrapper:
     """ Method of encapsulating utility files """
 
@@ -64,36 +21,18 @@ class ApiUtilityWrapper:
 
     def do_bulk_insert(self, collection_name, files="", partition_name=None, timeout=None,
                        using="default", check_task=None, check_items=None, **kwargs):
+        working_tasks = self.get_bulk_insert_working_list()
+        log.info(f"before bulk load, there are {len(working_tasks)} working tasks")
         log.info(f"files to load: {files}")
-        # func_name = sys._getframe().f_code.co_name
-        payload = {
-            "dbName": None,
-            "collectionName": collection_name,
-            "partitionName": partition_name,
-            "files": [files],
-            "options": None,
-            "clusteringInfo": None,
-        }
-        res = vector_bulkinsert("localhost:19530", payload, check_items)
-        # check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ,
-        #                                collection_name=collection_name, using=using).run()
+        func_name = sys._getframe().f_code.co_name
+        res, is_succ = api_request([self.ut.do_bulk_insert, collection_name,
+                                    files, partition_name, timeout, using], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ,
+                                       collection_name=collection_name, using=using).run()
         time.sleep(1)
-        return res, None
-
-    # def do_bulk_insert(self, collection_name, files="", partition_name=None, timeout=None,
-    #                    using="default", check_task=None, check_items=None, **kwargs):
-    #     working_tasks = self.get_bulk_insert_working_list()
-    #     log.info(f"before bulk load, there are {len(working_tasks)} working tasks")
-    #     log.info(f"files to load: {files}")
-    #     func_name = sys._getframe().f_code.co_name
-    #     res, is_succ = api_request([self.ut.do_bulk_insert, collection_name,
-    #                                 files, partition_name, timeout, using], **kwargs)
-    #     check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ,
-    #                                    collection_name=collection_name, using=using).run()
-    #     time.sleep(1)
-    #     working_tasks = self.get_bulk_insert_working_list()
-    #     log.info(f"after bulk load, there are {len(working_tasks)} working tasks")
-    #     return res, check_result
+        working_tasks = self.get_bulk_insert_working_list()
+        log.info(f"after bulk load, there are {len(working_tasks)} working tasks")
+        return res, check_result
 
     def get_bulk_insert_state(self, task_id, timeout=None, using="default", check_task=None, check_items=None,
                               **kwargs):
@@ -155,88 +94,66 @@ class ApiUtilityWrapper:
                  "persisted,", completed, "completed,", failed, "failed", failed_and_cleaned, "failed_and_cleaned",
                  unknown, "unknown")
 
-    def wait_for_bulk_insert_tasks_completed(self, task_ids, target_state=4,
+    def wait_for_bulk_insert_tasks_completed(self, task_ids, target_state=BulkInsertState.ImportCompleted,
                                              timeout=None, using="default", **kwargs):
+        tasks_state_distribution = {
+            "success": set(),
+            "failed": set(),
+            "in_progress": set()
+        }
+        tasks_state = {}
         if timeout is not None:
             task_timeout = timeout
         else:
             task_timeout = TIMEOUT
+        start = time.time()
+        end = time.time()
         log.info(f"wait bulk load timeout is {task_timeout}")
-        for task_id in task_ids:
-            while True:
-                state, progress = vector_bulkinsert_describe("localhost:19530", job_id=task_id)
-                if state == "Completed" and progress == 100:
-                    print(f"wait for bulk load tasks completed successfully")
-                    break
-                if state == "Failed":
-                    raise Exception(str(state))
-                time.sleep(2)
-                timeout = timeout - 2
-                if timeout <= 0:
-                    raise Exception(str("timeout"))
-                log.warn(f"waiting for bulk load tasks... state={state}, progress={progress}")
-        return True, 4
+        pending_tasks = self.get_bulk_insert_pending_list()
+        log.info(f"before waiting, there are {len(pending_tasks)} pending tasks")
+        while len(tasks_state_distribution["success"]) + len(tasks_state_distribution["failed"]) < len(
+                task_ids) and end - start <= task_timeout:
+            time.sleep(2)
 
-    # def wait_for_bulk_insert_tasks_completed(self, task_ids, target_state=BulkInsertState.ImportCompleted,
-    #                                          timeout=None, using="default", **kwargs):
-    #     tasks_state_distribution = {
-    #         "success": set(),
-    #         "failed": set(),
-    #         "in_progress": set()
-    #     }
-    #     tasks_state = {}
-    #     if timeout is not None:
-    #         task_timeout = timeout
-    #     else:
-    #         task_timeout = TIMEOUT
-    #     start = time.time()
-    #     end = time.time()
-    #     log.info(f"wait bulk load timeout is {task_timeout}")
-    #     pending_tasks = self.get_bulk_insert_pending_list()
-    #     log.info(f"before waiting, there are {len(pending_tasks)} pending tasks")
-    #     while len(tasks_state_distribution["success"]) + len(tasks_state_distribution["failed"]) < len(
-    #             task_ids) and end - start <= task_timeout:
-    #         time.sleep(2)
-    #
-    #         for task_id in task_ids:
-    #             if task_id in tasks_state_distribution["success"] or task_id in tasks_state_distribution["failed"]:
-    #                 continue
-    #             else:
-    #                 state, _ = self.get_bulk_insert_state(task_id, task_timeout, using, **kwargs)
-    #                 tasks_state[task_id] = state
-    #
-    #                 if target_state == BulkInsertState.ImportPersisted:
-    #                     if state.state in [BulkInsertState.ImportPersisted, BulkInsertState.ImportCompleted]:
-    #                         if task_id in tasks_state_distribution["in_progress"]:
-    #                             tasks_state_distribution["in_progress"].remove(task_id)
-    #                         tasks_state_distribution["success"].add(task_id)
-    #                     elif state.state in [BulkInsertState.ImportPending, BulkInsertState.ImportStarted]:
-    #                         tasks_state_distribution["in_progress"].add(task_id)
-    #                     else:
-    #                         tasks_state_distribution["failed"].add(task_id)
-    #
-    #                 if target_state == BulkInsertState.ImportCompleted:
-    #                     if state.state in [BulkInsertState.ImportCompleted]:
-    #                         if task_id in tasks_state_distribution["in_progress"]:
-    #                             tasks_state_distribution["in_progress"].remove(task_id)
-    #                         tasks_state_distribution["success"].add(task_id)
-    #                     elif state.state in [BulkInsertState.ImportPending, BulkInsertState.ImportStarted,
-    #                                          BulkInsertState.ImportPersisted]:
-    #                         tasks_state_distribution["in_progress"].add(task_id)
-    #                     else:
-    #                         tasks_state_distribution["failed"].add(task_id)
-    #
-    #         end = time.time()
-    #     pending_tasks = self.get_bulk_insert_pending_list()
-    #     log.info(f"after waiting, there are {len(pending_tasks)} pending tasks")
-    #     log.info(f"task state distribution: {tasks_state_distribution}")
-    #     log.info(tasks_state)
-    #     if len(tasks_state_distribution["success"]) == len(task_ids):
-    #         log.info(f"wait for bulk load tasks completed successfully, cost time: {end - start}")
-    #         return True, tasks_state
-    #     else:
-    #         log.info(f"wait for bulk load tasks completed failed, cost time: {end - start}")
-    #         return False, tasks_state
+            for task_id in task_ids:
+                if task_id in tasks_state_distribution["success"] or task_id in tasks_state_distribution["failed"]:
+                    continue
+                else:
+                    state, _ = self.get_bulk_insert_state(task_id, task_timeout, using, **kwargs)
+                    tasks_state[task_id] = state
+
+                    if target_state == BulkInsertState.ImportPersisted:
+                        if state.state in [BulkInsertState.ImportPersisted, BulkInsertState.ImportCompleted]:
+                            if task_id in tasks_state_distribution["in_progress"]:
+                                tasks_state_distribution["in_progress"].remove(task_id)
+                            tasks_state_distribution["success"].add(task_id)
+                        elif state.state in [BulkInsertState.ImportPending, BulkInsertState.ImportStarted]:
+                            tasks_state_distribution["in_progress"].add(task_id)
+                        else:
+                            tasks_state_distribution["failed"].add(task_id)
+
+                    if target_state == BulkInsertState.ImportCompleted:
+                        if state.state in [BulkInsertState.ImportCompleted]:
+                            if task_id in tasks_state_distribution["in_progress"]:
+                                tasks_state_distribution["in_progress"].remove(task_id)
+                            tasks_state_distribution["success"].add(task_id)
+                        elif state.state in [BulkInsertState.ImportPending, BulkInsertState.ImportStarted,
+                                             BulkInsertState.ImportPersisted]:
+                            tasks_state_distribution["in_progress"].add(task_id)
+                        else:
+                            tasks_state_distribution["failed"].add(task_id)
+
+            end = time.time()
+        pending_tasks = self.get_bulk_insert_pending_list()
+        log.info(f"after waiting, there are {len(pending_tasks)} pending tasks")
+        log.info(f"task state distribution: {tasks_state_distribution}")
+        log.info(tasks_state)
+        if len(tasks_state_distribution["success"]) == len(task_ids):
+            log.info(f"wait for bulk load tasks completed successfully, cost time: {end - start}")
+            return True, tasks_state
+        else:
+            log.info(f"wait for bulk load tasks completed failed, cost time: {end - start}")
+            return False, tasks_state
 
     def wait_all_pending_tasks_finished(self):
         task_states_map = {}
