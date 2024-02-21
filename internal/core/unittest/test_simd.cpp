@@ -776,6 +776,294 @@ TEST(FindTermAVX512, double_type) {
     ASSERT_EQ(res, true);
 }
 
+TEST(EqualVal, perf_int8) {
+    if (!cpu_support_avx512()) {
+        PRINT_SKPI_TEST
+        return;
+    }
+    std::vector<int8_t> srcs(1000000);
+    for (int i = 0; i < 1000000; ++i) {
+        srcs[i] = i % 128;
+    }
+    FixedVector<bool> res(1000000);
+    auto start = std::chrono::steady_clock::now();
+    EqualValRef(srcs.data(), 1000000, (int8_t)10, res.data());
+    std::cout << std::chrono::duration_cast<std::chrono::microseconds>(
+                     std::chrono::steady_clock::now() - start)
+                     .count()
+              << std::endl;
+    start = std::chrono::steady_clock::now();
+    EqualValAVX512(srcs.data(), 1000000, (int8_t)10, res.data());
+    std::cout << std::chrono::duration_cast<std::chrono::microseconds>(
+                     std::chrono::steady_clock::now() - start)
+                     .count()
+              << std::endl;
+}
+
+template <typename T>
+void
+TestCompareValAVX512Perf() {
+    if (!cpu_support_avx512()) {
+        PRINT_SKPI_TEST
+        return;
+    }
+    std::vector<T> srcs(1000000);
+    for (int i = 0; i < 1000000; ++i) {
+        srcs[i] = i;
+    }
+    FixedVector<bool> res(1000000);
+    T target = 10;
+    auto start = std::chrono::steady_clock::now();
+    EqualValRef(srcs.data(), 1000000, target, res.data());
+    std::cout << std::chrono::duration_cast<std::chrono::microseconds>(
+                     std::chrono::steady_clock::now() - start)
+                     .count()
+              << std::endl;
+    start = std::chrono::steady_clock::now();
+    EqualValAVX512(srcs.data(), 1000000, target, res.data());
+    std::cout << std::chrono::duration_cast<std::chrono::microseconds>(
+                     std::chrono::steady_clock::now() - start)
+                     .count()
+              << std::endl;
+}
+
+TEST(EqualVal, perf_int16) {
+    TestCompareValAVX512Perf<int16_t>();
+}
+
+TEST(EqualVal, pref_int32) {
+    TestCompareValAVX512Perf<int32_t>();
+}
+
+TEST(EqualVal, perf_int64) {
+    TestCompareValAVX512Perf<int64_t>();
+}
+
+TEST(EqualVal, perf_float) {
+    TestCompareValAVX512Perf<float>();
+}
+
+TEST(EqualVal, perf_double) {
+    TestCompareValAVX512Perf<double>();
+}
+
+template <typename T>
+void
+TestCompareValAVX512(int size, T target) {
+    if (!cpu_support_avx512()) {
+        PRINT_SKPI_TEST
+        return;
+    }
+    std::vector<T> vecs;
+    for (int i = 0; i < size; ++i) {
+        if constexpr (std::is_same_v<T, int8_t>) {
+            vecs.push_back(i % 127);
+        } else if constexpr (std::is_floating_point_v<T>) {
+            vecs.push_back(i + 0.01);
+        } else {
+            vecs.push_back(i);
+        }
+    }
+    FixedVector<bool> res(size);
+
+    EqualValAVX512(vecs.data(), size, target, res.data());
+    for (int i = 0; i < size; i++) {
+        ASSERT_EQ(res[i], vecs[i] == target) << i;
+    }
+    LessValAVX512(vecs.data(), size, target, res.data());
+    for (int i = 0; i < size; i++) {
+        ASSERT_EQ(res[i], vecs[i] < target) << i;
+    }
+    LessEqualValAVX512(vecs.data(), size, target, res.data());
+    for (int i = 0; i < size; i++) {
+        ASSERT_EQ(res[i], vecs[i] <= target) << i;
+    }
+    GreaterEqualValAVX512(vecs.data(), size, target, res.data());
+    for (int i = 0; i < size; i++) {
+        ASSERT_EQ(res[i], vecs[i] >= target) << i;
+    }
+    GreaterValAVX512(vecs.data(), size, target, res.data());
+    for (int i = 0; i < size; i++) {
+        ASSERT_EQ(res[i], vecs[i] > target) << i;
+    }
+    NotEqualValAVX512(vecs.data(), size, target, res.data());
+    for (int i = 0; i < size; i++) {
+        ASSERT_EQ(res[i], vecs[i] != target) << i;
+    }
+}
+
+TEST(CompareVal, avx512_int8) {
+    TestCompareValAVX512<int8_t>(1000, 9);
+    TestCompareValAVX512<int8_t>(1000, 99);
+    TestCompareValAVX512<int8_t>(1001, 127);
+}
+
+TEST(CompareVal, avx512_int16) {
+    TestCompareValAVX512<int16_t>(1000, 99);
+    TestCompareValAVX512<int16_t>(1000, 999);
+    TestCompareValAVX512<int16_t>(1001, 1000);
+}
+
+TEST(CompareVal, avx512_int32) {
+    TestCompareValAVX512<int32_t>(1000, 99);
+    TestCompareValAVX512<int32_t>(1000, 999);
+    TestCompareValAVX512<int32_t>(1001, 1000);
+}
+
+TEST(CompareVal, avx512_int64) {
+    TestCompareValAVX512<int64_t>(1000, 99);
+    TestCompareValAVX512<int64_t>(1000, 999);
+    TestCompareValAVX512<int64_t>(1001, 1000);
+}
+
+TEST(CompareVal, avx512_float) {
+    TestCompareValAVX512<float>(1000, 99.01);
+    TestCompareValAVX512<float>(1000, 999.01);
+    TestCompareValAVX512<float>(1001, 1000.01);
+}
+
+TEST(CompareVal, avx512_double) {
+    TestCompareValAVX512<double>(1000, 99.01);
+    TestCompareValAVX512<double>(1000, 999.01);
+    TestCompareValAVX512<double>(1001, 1000.01);
+}
+
+template <typename T>
+void
+TestCompareColumnAVX512Perf() {
+    if (!cpu_support_avx512()) {
+        PRINT_SKPI_TEST
+        return;
+    }
+    std::vector<T> lefts(1000000);
+    for (int i = 0; i < 1000000; ++i) {
+        lefts[i] = i;
+    }
+    std::vector<T> rights(1000000);
+    for (int i = 0; i < 1000000; ++i) {
+        rights[i] = i;
+    }
+    FixedVector<bool> res(1000000);
+    auto start = std::chrono::steady_clock::now();
+    LessColumnRef(lefts.data(), rights.data(), 1000000, res.data());
+    std::cout << std::chrono::duration_cast<std::chrono::microseconds>(
+                     std::chrono::steady_clock::now() - start)
+                     .count()
+              << std::endl;
+    start = std::chrono::steady_clock::now();
+    LessColumnAVX512(lefts.data(), rights.data(), 1000000, res.data());
+    std::cout << std::chrono::duration_cast<std::chrono::microseconds>(
+                     std::chrono::steady_clock::now() - start)
+                     .count()
+              << std::endl;
+}
+
+TEST(LessColumn, pref_int32) {
+    TestCompareColumnAVX512Perf<int32_t>();
+}
+
+TEST(LessColumn, perf_int64) {
+    TestCompareColumnAVX512Perf<int64_t>();
+}
+
+TEST(LessColumn, perf_float) {
+    TestCompareColumnAVX512Perf<float>();
+}
+
+TEST(LessColumn, perf_double) {
+    TestCompareColumnAVX512Perf<double>();
+}
+
+template <typename T>
+void
+TestCompareColumnAVX512(int size, T min_val, T max_val) {
+    if (!cpu_support_avx512()) {
+        PRINT_SKPI_TEST
+        return;
+    }
+    std::random_device rd;
+    std::mt19937 gen(rd());
+
+    std::vector<T> left;
+    std::vector<T> right;
+    if constexpr (std::is_same_v<T, float>) {
+        std::uniform_real_distribution<float> dis(min_val, max_val);
+        for (int i = 0; i < size; ++i) {
+            left.push_back(dis(gen));
+            right.push_back(dis(gen));
+        }
+    } else if constexpr (std::is_same_v<T, double>) {
+        std::uniform_real_distribution<double> dis(min_val, max_val);
+        for (int i = 0; i < size; ++i) {
+            left.push_back(dis(gen));
+            right.push_back(dis(gen));
+        }
+    } else {
+        std::uniform_int_distribution<> dis(min_val, max_val);
+        for (int i = 0; i < size; ++i) {
+            left.push_back(dis(gen));
+            right.push_back(dis(gen));
+        }
+    }
+
+    FixedVector<bool> res(size);
+
+    EqualColumnAVX512(left.data(), right.data(), size, res.data());
+    for (int i = 0; i < size; i++) {
+        ASSERT_EQ(res[i], left[i] == right[i]) << i;
+    }
+    LessColumnAVX512(left.data(), right.data(), size, res.data());
+    for (int i = 0; i < size; i++) {
+        ASSERT_EQ(res[i], left[i] < right[i]) << i;
+    }
+    GreaterColumnAVX512(left.data(), right.data(), size, res.data());
+    for (int i = 0; i < size; i++) {
+        ASSERT_EQ(res[i], left[i] > right[i]) << i;
+    }
+    LessEqualColumnAVX512(left.data(), right.data(), size, res.data());
+    for (int i = 0; i < size; i++) {
+        ASSERT_EQ(res[i], left[i] <= right[i]) << i;
+    }
+    GreaterEqualColumnAVX512(left.data(), right.data(), size, res.data());
+    for (int i = 0; i < size; i++) {
+        ASSERT_EQ(res[i], left[i] >= right[i]) << i;
+    }
+    NotEqualColumnAVX512(left.data(), right.data(), size, res.data());
+    for (int i = 0; i < size; i++) {
+        ASSERT_EQ(res[i], left[i] != right[i]) << i;
+    }
+}
+
+TEST(CompareColumn, avx512_int8) {
+    TestCompareColumnAVX512<int8_t>(1000, -128, 127);
+    TestCompareColumnAVX512<int8_t>(1001, -128, 127);
+}
+
+TEST(CompareColumn, avx512_int16) {
+    TestCompareColumnAVX512<int16_t>(1000, -1000, 1000);
+    TestCompareColumnAVX512<int16_t>(1001, -1000, 1000);
+}
+
+TEST(CompareColumn, avx512_int32) {
+    TestCompareColumnAVX512<int32_t>(1000, -1000, 1000);
+    TestCompareColumnAVX512<int32_t>(1001, -1000, 1000);
+}
+
+TEST(CompareColumn, avx512_int64) {
+    TestCompareColumnAVX512<int64_t>(1000, -1000, 1000);
+    TestCompareColumnAVX512<int64_t>(1001, -1000, 1000);
+}
+
+TEST(CompareColumn, avx512_float) {
+    TestCompareColumnAVX512<float>(1000, -1.0, 1.0);
+    TestCompareColumnAVX512<float>(1001, -1.0, 1.0);
+}
+
+TEST(CompareColumn, avx512_double) {
+    TestCompareColumnAVX512<double>(1000, -1.0, 1.0);
+    TestCompareColumnAVX512<double>(1001, -1.0, 1.0);
+}
+
 TEST(AllBooleanSSE2, function) {
     FixedVector<bool> src;
     for (int i = 0; i < 8192; ++i) {
@@ -1237,294 +1525,6 @@ TEST(AllBooleanNeon, performance) {
                          .count()
                   << std::endl;
     }
-}
-
-TEST(EqualVal, perf_int8) {
-    if (!cpu_support_avx512()) {
-        PRINT_SKPI_TEST
-        return;
-    }
-    std::vector<int8_t> srcs(1000000);
-    for (int i = 0; i < 1000000; ++i) {
-        srcs[i] = i % 128;
-    }
-    FixedVector<bool> res(1000000);
-    auto start = std::chrono::steady_clock::now();
-    EqualValRef(srcs.data(), 1000000, (int8_t)10, res.data());
-    std::cout << std::chrono::duration_cast<std::chrono::microseconds>(
-                     std::chrono::steady_clock::now() - start)
-                     .count()
-              << std::endl;
-    start = std::chrono::steady_clock::now();
-    EqualValAVX512(srcs.data(), 1000000, (int8_t)10, res.data());
-    std::cout << std::chrono::duration_cast<std::chrono::microseconds>(
-                     std::chrono::steady_clock::now() - start)
-                     .count()
-              << std::endl;
-}
-
-template <typename T>
-void
-TestCompareValAVX512Perf() {
-    if (!cpu_support_avx512()) {
-        PRINT_SKPI_TEST
-        return;
-    }
-    std::vector<T> srcs(1000000);
-    for (int i = 0; i < 1000000; ++i) {
-        srcs[i] = i;
-    }
-    FixedVector<bool> res(1000000);
-    T target = 10;
-    auto start = std::chrono::steady_clock::now();
-    EqualValRef(srcs.data(), 1000000, target, res.data());
-    std::cout << std::chrono::duration_cast<std::chrono::microseconds>(
-                     std::chrono::steady_clock::now() - start)
-                     .count()
-              << std::endl;
-    start = std::chrono::steady_clock::now();
-    EqualValAVX512(srcs.data(), 1000000, target, res.data());
-    std::cout << std::chrono::duration_cast<std::chrono::microseconds>(
-                     std::chrono::steady_clock::now() - start)
-                     .count()
-              << std::endl;
-}
-
-TEST(EqualVal, perf_int16) {
-    TestCompareValAVX512Perf<int16_t>();
-}
-
-TEST(EqualVal, pref_int32) {
-    TestCompareValAVX512Perf<int32_t>();
-}
-
-TEST(EqualVal, perf_int64) {
-    TestCompareValAVX512Perf<int64_t>();
-}
-
-TEST(EqualVal, perf_float) {
-    TestCompareValAVX512Perf<float>();
-}
-
-TEST(EqualVal, perf_double) {
-    TestCompareValAVX512Perf<double>();
-}
-
-template <typename T>
-void
-TestCompareValAVX512(int size, T target) {
-    if (!cpu_support_avx512()) {
-        PRINT_SKPI_TEST
-        return;
-    }
-    std::vector<T> vecs;
-    for (int i = 0; i < size; ++i) {
-        if constexpr (std::is_same_v<T, int8_t>) {
-            vecs.push_back(i % 127);
-        } else if constexpr (std::is_floating_point_v<T>) {
-            vecs.push_back(i + 0.01);
-        } else {
-            vecs.push_back(i);
-        }
-    }
-    FixedVector<bool> res(size);
-
-    EqualValAVX512(vecs.data(), size, target, res.data());
-    for (int i = 0; i < size; i++) {
-        ASSERT_EQ(res[i], vecs[i] == target) << i;
-    }
-    LessValAVX512(vecs.data(), size, target, res.data());
-    for (int i = 0; i < size; i++) {
-        ASSERT_EQ(res[i], vecs[i] < target) << i;
-    }
-    LessEqualValAVX512(vecs.data(), size, target, res.data());
-    for (int i = 0; i < size; i++) {
-        ASSERT_EQ(res[i], vecs[i] <= target) << i;
-    }
-    GreaterEqualValAVX512(vecs.data(), size, target, res.data());
-    for (int i = 0; i < size; i++) {
-        ASSERT_EQ(res[i], vecs[i] >= target) << i;
-    }
-    GreaterValAVX512(vecs.data(), size, target, res.data());
-    for (int i = 0; i < size; i++) {
-        ASSERT_EQ(res[i], vecs[i] > target) << i;
-    }
-    NotEqualValAVX512(vecs.data(), size, target, res.data());
-    for (int i = 0; i < size; i++) {
-        ASSERT_EQ(res[i], vecs[i] != target) << i;
-    }
-}
-
-TEST(CompareVal, avx512_int8) {
-    TestCompareValAVX512<int8_t>(1000, 9);
-    TestCompareValAVX512<int8_t>(1000, 99);
-    TestCompareValAVX512<int8_t>(1001, 127);
-}
-
-TEST(CompareVal, avx512_int16) {
-    TestCompareValAVX512<int16_t>(1000, 99);
-    TestCompareValAVX512<int16_t>(1000, 999);
-    TestCompareValAVX512<int16_t>(1001, 1000);
-}
-
-TEST(CompareVal, avx512_int32) {
-    TestCompareValAVX512<int32_t>(1000, 99);
-    TestCompareValAVX512<int32_t>(1000, 999);
-    TestCompareValAVX512<int32_t>(1001, 1000);
-}
-
-TEST(CompareVal, avx512_int64) {
-    TestCompareValAVX512<int64_t>(1000, 99);
-    TestCompareValAVX512<int64_t>(1000, 999);
-    TestCompareValAVX512<int64_t>(1001, 1000);
-}
-
-TEST(CompareVal, avx512_float) {
-    TestCompareValAVX512<float>(1000, 99.01);
-    TestCompareValAVX512<float>(1000, 999.01);
-    TestCompareValAVX512<float>(1001, 1000.01);
-}
-
-TEST(CompareVal, avx512_double) {
-    TestCompareValAVX512<double>(1000, 99.01);
-    TestCompareValAVX512<double>(1000, 999.01);
-    TestCompareValAVX512<double>(1001, 1000.01);
-}
-
-template <typename T>
-void
-TestCompareColumnAVX512Perf() {
-    if (!cpu_support_avx512()) {
-        PRINT_SKPI_TEST
-        return;
-    }
-    std::vector<T> lefts(1000000);
-    for (int i = 0; i < 1000000; ++i) {
-        lefts[i] = i;
-    }
-    std::vector<T> rights(1000000);
-    for (int i = 0; i < 1000000; ++i) {
-        rights[i] = i;
-    }
-    FixedVector<bool> res(1000000);
-    auto start = std::chrono::steady_clock::now();
-    LessColumnRef(lefts.data(), rights.data(), 1000000, res.data());
-    std::cout << std::chrono::duration_cast<std::chrono::microseconds>(
-                     std::chrono::steady_clock::now() - start)
-                     .count()
-              << std::endl;
-    start = std::chrono::steady_clock::now();
-    LessColumnAVX512(lefts.data(), rights.data(), 1000000, res.data());
-    std::cout << std::chrono::duration_cast<std::chrono::microseconds>(
-                     std::chrono::steady_clock::now() - start)
-                     .count()
-              << std::endl;
-}
-
-TEST(LessColumn, pref_int32) {
-    TestCompareColumnAVX512Perf<int32_t>();
-}
-
-TEST(LessColumn, perf_int64) {
-    TestCompareColumnAVX512Perf<int64_t>();
-}
-
-TEST(LessColumn, perf_float) {
-    TestCompareColumnAVX512Perf<float>();
-}
-
-TEST(LessColumn, perf_double) {
-    TestCompareColumnAVX512Perf<double>();
-}
-
-template <typename T>
-void
-TestCompareColumnAVX512(int size, T min_val, T max_val) {
-    if (!cpu_support_avx512()) {
-        PRINT_SKPI_TEST
-        return;
-    }
-    std::random_device rd;
-    std::mt19937 gen(rd());
-
-    std::vector<T> left;
-    std::vector<T> right;
-    if constexpr (std::is_same_v<T, float>) {
-        std::uniform_real_distribution<float> dis(min_val, max_val);
-        for (int i = 0; i < size; ++i) {
-            left.push_back(dis(gen));
-            right.push_back(dis(gen));
-        }
-    } else if constexpr (std::is_same_v<T, double>) {
-        std::uniform_real_distribution<double> dis(min_val, max_val);
-        for (int i = 0; i < size; ++i) {
-            left.push_back(dis(gen));
-            right.push_back(dis(gen));
-        }
-    } else {
-        std::uniform_int_distribution<> dis(min_val, max_val);
-        for (int i = 0; i < size; ++i) {
-            left.push_back(dis(gen));
-            right.push_back(dis(gen));
-        }
-    }
-
-    FixedVector<bool> res(size);
-
-    EqualColumnAVX512(left.data(), right.data(), size, res.data());
-    for (int i = 0; i < size; i++) {
-        ASSERT_EQ(res[i], left[i] == right[i]) << i;
-    }
-    LessColumnAVX512(left.data(), right.data(), size, res.data());
-    for (int i = 0; i < size; i++) {
-        ASSERT_EQ(res[i], left[i] < right[i]) << i;
-    }
-    GreaterColumnAVX512(left.data(), right.data(), size, res.data());
-    for (int i = 0; i < size; i++) {
-        ASSERT_EQ(res[i], left[i] > right[i]) << i;
-    }
-    LessEqualColumnAVX512(left.data(), right.data(), size, res.data());
-    for (int i = 0; i < size; i++) {
-        ASSERT_EQ(res[i], left[i] <= right[i]) << i;
-    }
-    GreaterEqualColumnAVX512(left.data(), right.data(), size, res.data());
-    for (int i = 0; i < size; i++) {
-        ASSERT_EQ(res[i], left[i] >= right[i]) << i;
-    }
-    NotEqualColumnAVX512(left.data(), right.data(), size, res.data());
-    for (int i = 0; i < size; i++) {
-        ASSERT_EQ(res[i], left[i] != right[i]) << i;
-    }
-}
-
-TEST(CompareColumn, avx512_int8) {
-    TestCompareColumnAVX512<int8_t>(1000, -128, 127);
-    TestCompareColumnAVX512<int8_t>(1001, -128, 127);
-}
-
-TEST(CompareColumn, avx512_int16) {
-    TestCompareColumnAVX512<int16_t>(1000, -1000, 1000);
-    TestCompareColumnAVX512<int16_t>(1001, -1000, 1000);
-}
-
-TEST(CompareColumn, avx512_int32) {
-    TestCompareColumnAVX512<int32_t>(1000, -1000, 1000);
-    TestCompareColumnAVX512<int32_t>(1001, -1000, 1000);
-}
-
-TEST(CompareColumn, avx512_int64) {
-    TestCompareColumnAVX512<int64_t>(1000, -1000, 1000);
-    TestCompareColumnAVX512<int64_t>(1001, -1000, 1000);
-}
-
-TEST(CompareColumn, avx512_float) {
-    TestCompareColumnAVX512<float>(1000, -1.0, 1.0);
-    TestCompareColumnAVX512<float>(1001, -1.0, 1.0);
-}
-
-TEST(CompareColumn, avx512_double) {
-    TestCompareColumnAVX512<double>(1000, -1.0, 1.0);
-    TestCompareColumnAVX512<double>(1001, -1.0, 1.0);
 }
 
 #endif
