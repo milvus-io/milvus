@@ -43,10 +43,11 @@ type Client struct {
 	grpcClient grpcclient.GrpcClient[datapb.DataNodeClient]
 	sess       *sessionutil.Session
 	addr       string
+	serverID   int64
 }
 
 // NewClient creates a client for DataNode.
-func NewClient(ctx context.Context, addr string, nodeID int64) (*Client, error) {
+func NewClient(ctx context.Context, addr string, serverID int64) (*Client, error) {
 	if addr == "" {
 		return nil, fmt.Errorf("address is empty")
 	}
@@ -61,12 +62,13 @@ func NewClient(ctx context.Context, addr string, nodeID int64) (*Client, error) 
 		addr:       addr,
 		grpcClient: grpcclient.NewClientBase[datapb.DataNodeClient](config, "milvus.proto.data.DataNode"),
 		sess:       sess,
+		serverID:   serverID,
 	}
 	// node shall specify node id
-	client.grpcClient.SetRole(fmt.Sprintf("%s-%d", typeutil.DataNodeRole, nodeID))
+	client.grpcClient.SetRole(fmt.Sprintf("%s-%d", typeutil.DataNodeRole, serverID))
 	client.grpcClient.SetGetAddrFunc(client.getAddr)
 	client.grpcClient.SetNewGrpcClientFunc(client.newGrpcClient)
-	client.grpcClient.SetNodeID(nodeID)
+	client.grpcClient.SetNodeID(serverID)
 	client.grpcClient.SetSession(sess)
 
 	return client, nil
@@ -120,7 +122,7 @@ func (c *Client) WatchDmChannels(ctx context.Context, req *datapb.WatchDmChannel
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID()))
+		commonpbutil.FillMsgBaseFromClient(c.serverID))
 	return wrapGrpcCall(ctx, c, func(client datapb.DataNodeClient) (*commonpb.Status, error) {
 		return client.WatchDmChannels(ctx, req)
 	})
@@ -142,7 +144,7 @@ func (c *Client) FlushSegments(ctx context.Context, req *datapb.FlushSegmentsReq
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID()))
+		commonpbutil.FillMsgBaseFromClient(c.serverID))
 	return wrapGrpcCall(ctx, c, func(client datapb.DataNodeClient) (*commonpb.Status, error) {
 		return client.FlushSegments(ctx, req)
 	})
@@ -153,7 +155,7 @@ func (c *Client) ShowConfigurations(ctx context.Context, req *internalpb.ShowCon
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID()))
+		commonpbutil.FillMsgBaseFromClient(c.serverID))
 	return wrapGrpcCall(ctx, c, func(client datapb.DataNodeClient) (*internalpb.ShowConfigurationsResponse, error) {
 		return client.ShowConfigurations(ctx, req)
 	})
@@ -164,7 +166,7 @@ func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID()))
+		commonpbutil.FillMsgBaseFromClient(c.serverID))
 	return wrapGrpcCall(ctx, c, func(client datapb.DataNodeClient) (*milvuspb.GetMetricsResponse, error) {
 		return client.GetMetrics(ctx, req)
 	})
@@ -181,7 +183,7 @@ func (c *Client) GetCompactionState(ctx context.Context, req *datapb.CompactionS
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID()))
+		commonpbutil.FillMsgBaseFromClient(c.serverID))
 	return wrapGrpcCall(ctx, c, func(client datapb.DataNodeClient) (*datapb.CompactionStateResponse, error) {
 		return client.GetCompactionState(ctx, req)
 	})
@@ -192,7 +194,7 @@ func (c *Client) Import(ctx context.Context, req *datapb.ImportTaskRequest, opts
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID()))
+		commonpbutil.FillMsgBaseFromClient(c.serverID))
 	return wrapGrpcCall(ctx, c, func(client datapb.DataNodeClient) (*commonpb.Status, error) {
 		return client.Import(ctx, req)
 	})
@@ -202,7 +204,7 @@ func (c *Client) ResendSegmentStats(ctx context.Context, req *datapb.ResendSegme
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID()))
+		commonpbutil.FillMsgBaseFromClient(c.serverID))
 	return wrapGrpcCall(ctx, c, func(client datapb.DataNodeClient) (*datapb.ResendSegmentStatsResponse, error) {
 		return client.ResendSegmentStats(ctx, req)
 	})
@@ -213,7 +215,7 @@ func (c *Client) AddImportSegment(ctx context.Context, req *datapb.AddImportSegm
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID()))
+		commonpbutil.FillMsgBaseFromClient(c.serverID))
 	return wrapGrpcCall(ctx, c, func(client datapb.DataNodeClient) (*datapb.AddImportSegmentResponse, error) {
 		return client.AddImportSegment(ctx, req)
 	})

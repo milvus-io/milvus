@@ -105,6 +105,7 @@ type QueryNode struct {
 	subscribingChannels   *typeutil.ConcurrentSet[string]
 	unsubscribingChannels *typeutil.ConcurrentSet[string]
 	delegators            *typeutil.ConcurrentMap[string, delegator.ShardDelegator]
+	serverID              int64
 
 	// segment loader
 	loader segments.Loader
@@ -156,7 +157,8 @@ func (node *QueryNode) initSession() error {
 	node.session.Init(typeutil.QueryNodeRole, node.address, false, true)
 	sessionutil.SaveServerInfo(typeutil.QueryNodeRole, node.session.ServerID)
 	paramtable.SetNodeID(node.session.ServerID)
-	log.Info("QueryNode init session", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("node address", node.session.Address))
+	node.serverID = node.session.ServerID
+	log.Info("QueryNode init session", zap.Int64("nodeID", node.GetNodeID()), zap.String("node address", node.session.Address))
 	return nil
 }
 
@@ -164,13 +166,13 @@ func (node *QueryNode) initSession() error {
 func (node *QueryNode) Register() error {
 	node.session.Register()
 	// start liveness check
-	metrics.NumNodes.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), typeutil.QueryNodeRole).Inc()
+	metrics.NumNodes.WithLabelValues(fmt.Sprint(node.GetNodeID()), typeutil.QueryNodeRole).Inc()
 	node.session.LivenessCheck(node.ctx, func() {
-		log.Error("Query Node disconnected from etcd, process will exit", zap.Int64("Server Id", paramtable.GetNodeID()))
+		log.Error("Query Node disconnected from etcd, process will exit", zap.Int64("Server Id", node.GetNodeID()))
 		if err := node.Stop(); err != nil {
 			log.Fatal("failed to stop server", zap.Error(err))
 		}
-		metrics.NumNodes.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), typeutil.QueryNodeRole).Dec()
+		metrics.NumNodes.WithLabelValues(fmt.Sprint(node.GetNodeID()), typeutil.QueryNodeRole).Dec()
 		// manually send signal to starter goroutine
 		if node.session.TriggerKill {
 			if p, err := os.FindProcess(os.Getpid()); err == nil {
@@ -263,6 +265,10 @@ func getIndexEngineVersion() (minimal, current int32) {
 	return int32(cMinimal), int32(cCurrent)
 }
 
+func (node *QueryNode) GetNodeID() int64 {
+	return node.serverID
+}
+
 func (node *QueryNode) CloseSegcore() {
 	// safe stop
 	initcore.CleanRemoteChunkManager()
@@ -301,7 +307,7 @@ func (node *QueryNode) Init() error {
 			initError = err
 			return
 		}
-		metrics.QueryNodeDiskUsedSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(float64(localUsedSize / 1024 / 1024))
+		metrics.QueryNodeDiskUsedSize.WithLabelValues(fmt.Sprint(node.GetNodeID())).Set(float64(localUsedSize / 1024 / 1024))
 
 		node.chunkManager, err = node.factory.NewPersistentStorageChunkManager(node.ctx)
 		if err != nil {
@@ -317,7 +323,7 @@ func (node *QueryNode) Init() error {
 		log.Info("queryNode init scheduler", zap.String("policy", schedulePolicy))
 
 		node.clusterManager = cluster.NewWorkerManager(func(ctx context.Context, nodeID int64) (cluster.Worker, error) {
-			if nodeID == paramtable.GetNodeID() {
+			if nodeID == node.GetNodeID() {
 				return NewLocalWorker(node), nil
 			}
 
@@ -350,7 +356,7 @@ func (node *QueryNode) Init() error {
 		} else {
 			node.loader = segments.NewLoader(node.manager, node.chunkManager)
 		}
-		node.dispClient = msgdispatcher.NewClient(node.factory, typeutil.QueryNodeRole, paramtable.GetNodeID())
+		node.dispClient = msgdispatcher.NewClient(node.factory, typeutil.QueryNodeRole, node.GetNodeID())
 		// init pipeline manager
 		node.pipelineManager = pipeline.NewManager(node.manager, node.tSafeManager, node.dispClient, node.delegators)
 
@@ -373,7 +379,7 @@ func (node *QueryNode) Init() error {
 		}
 
 		log.Info("query node init successfully",
-			zap.Int64("queryNodeID", paramtable.GetNodeID()),
+			zap.Int64("queryNodeID", node.GetNodeID()),
 			zap.String("Address", node.address),
 		)
 	})
@@ -392,9 +398,9 @@ func (node *QueryNode) Start() error {
 		mmapEnabled := len(mmapDirPath) > 0
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
 
-		registry.GetInMemoryResolver().RegisterQueryNode(paramtable.GetNodeID(), node)
+		registry.GetInMemoryResolver().RegisterQueryNode(node.GetNodeID(), node)
 		log.Info("query node start successfully",
-			zap.Int64("queryNodeID", paramtable.GetNodeID()),
+			zap.Int64("queryNodeID", node.GetNodeID()),
 			zap.String("Address", node.address),
 			zap.Bool("mmapEnabled", mmapEnabled),
 		)
@@ -432,7 +438,7 @@ func (node *QueryNode) Stop() error {
 
 				select {
 				case <-timeoutCh:
-					log.Warn("migrate data timed out", zap.Int64("ServerID", paramtable.GetNodeID()),
+					log.Warn("migrate data timed out", zap.Int64("ServerID", node.GetNodeID()),
 						zap.Int64s("sealedSegments", lo.Map(sealedSegments, func(s segments.Segment, i int) int64 {
 							return s.ID()
 						})),
@@ -444,14 +450,14 @@ func (node *QueryNode) Stop() error {
 					break outer
 
 				case <-time.After(time.Second):
-					metrics.StoppingBalanceSegmentNum.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(float64(len(sealedSegments)))
-					metrics.StoppingBalanceChannelNum.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(float64(channelNum))
+					metrics.StoppingBalanceSegmentNum.WithLabelValues(fmt.Sprint(node.GetNodeID())).Set(float64(len(sealedSegments)))
+					metrics.StoppingBalanceChannelNum.WithLabelValues(fmt.Sprint(node.GetNodeID())).Set(float64(channelNum))
 				}
 			}
 
 			metrics.StoppingBalanceNodeNum.WithLabelValues().Set(0)
-			metrics.StoppingBalanceSegmentNum.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(0)
-			metrics.StoppingBalanceChannelNum.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(0)
+			metrics.StoppingBalanceSegmentNum.WithLabelValues(fmt.Sprint(node.GetNodeID())).Set(0)
+			metrics.StoppingBalanceChannelNum.WithLabelValues(fmt.Sprint(node.GetNodeID())).Set(0)
 		}
 
 		node.UpdateStateCode(commonpb.StateCode_Abnormal)

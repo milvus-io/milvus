@@ -30,7 +30,7 @@ func (s *MetaWriterSuite) SetupSuite() {
 func (s *MetaWriterSuite) SetupTest() {
 	s.broker = broker.NewMockBroker(s.T())
 	s.metacache = metacache.NewMockMetaCache(s.T())
-	s.writer = BrokerMetaWriter(s.broker, retry.Attempts(1))
+	s.writer = BrokerMetaWriter(s.broker, 1, retry.Attempts(1))
 }
 
 func (s *MetaWriterSuite) TestNormalSave() {

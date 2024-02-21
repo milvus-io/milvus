@@ -13,7 +13,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 )
 
@@ -25,14 +24,16 @@ type MetaWriter interface {
 }
 
 type brokerMetaWriter struct {
-	broker broker.Broker
-	opts   []retry.Option
+	broker   broker.Broker
+	opts     []retry.Option
+	serverID int64
 }
 
-func BrokerMetaWriter(broker broker.Broker, opts ...retry.Option) MetaWriter {
+func BrokerMetaWriter(broker broker.Broker, serverID int64, opts ...retry.Option) MetaWriter {
 	return &brokerMetaWriter{
-		broker: broker,
-		opts:   opts,
+		broker:   broker,
+		serverID: serverID,
+		opts:     opts,
 	}
 }
 
@@ -82,7 +83,7 @@ func (b *brokerMetaWriter) UpdateSync(pack *SyncTask) error {
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(0),
 			commonpbutil.WithMsgID(0),
-			commonpbutil.WithSourceID(paramtable.GetNodeID()),
+			commonpbutil.WithSourceID(b.serverID),
 		),
 		SegmentID:           pack.segmentID,
 		CollectionID:        pack.collectionID,
@@ -165,7 +166,7 @@ func (b *brokerMetaWriter) UpdateSyncV2(pack *SyncTaskV2) error {
 
 	req := &datapb.SaveBinlogPathsRequest{
 		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithSourceID(paramtable.GetNodeID()),
+			commonpbutil.WithSourceID(b.serverID),
 		),
 		SegmentID:    pack.segmentID,
 		CollectionID: pack.collectionID,
@@ -214,7 +215,7 @@ func (b *brokerMetaWriter) DropChannel(channelName string) error {
 	err := retry.Do(context.Background(), func() error {
 		status, err := b.broker.DropVirtualChannel(context.Background(), &datapb.DropVirtualChannelRequest{
 			Base: commonpbutil.NewMsgBase(
-				commonpbutil.WithSourceID(paramtable.GetNodeID()),
+				commonpbutil.WithSourceID(b.serverID),
 			),
 			ChannelName: channelName,
 		})
