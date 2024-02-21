@@ -324,6 +324,7 @@ func (suite *ServiceSuite) TestWatchDmChannelsVarchar() {
 
 	// data
 	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_VarChar)
+
 	req := &querypb.WatchDmChannelsRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:  commonpb.MsgType_WatchDmChannels,
@@ -375,6 +376,23 @@ func (suite *ServiceSuite) TestWatchDmChannels_Failed() {
 
 	// data
 	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64)
+
+	indexInfos := segments.GenTestIndexInfoList(suite.collectionID, schema)
+
+	infos := suite.genSegmentLoadInfos(schema, indexInfos)
+	segmentInfos := lo.SliceToMap(infos, func(info *querypb.SegmentLoadInfo) (int64, *datapb.SegmentInfo) {
+		return info.SegmentID, &datapb.SegmentInfo{
+			ID:            info.SegmentID,
+			CollectionID:  info.CollectionID,
+			PartitionID:   info.PartitionID,
+			InsertChannel: info.InsertChannel,
+			Binlogs:       info.BinlogPaths,
+			Statslogs:     info.Statslogs,
+			Deltalogs:     info.Deltalogs,
+			Level:         info.Level,
+		}
+	})
+
 	req := &querypb.WatchDmChannelsRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:  commonpb.MsgType_WatchDmChannels,
@@ -397,7 +415,8 @@ func (suite *ServiceSuite) TestWatchDmChannels_Failed() {
 		LoadMeta: &querypb.LoadMetaInfo{
 			MetricType: defaultMetricType,
 		},
-		IndexInfoList: segments.GenTestIndexInfoList(suite.collectionID, schema),
+		SegmentInfos:  segmentInfos,
+		IndexInfoList: indexInfos,
 	}
 
 	// test channel is unsubscribing
@@ -411,11 +430,27 @@ func (suite *ServiceSuite) TestWatchDmChannels_Failed() {
 	suite.factory.EXPECT().NewTtMsgStream(mock.Anything).Return(suite.msgStream, nil)
 	suite.msgStream.EXPECT().AsConsumer(mock.Anything, []string{suite.pchannel}, mock.Anything, mock.Anything).Return(nil)
 	suite.msgStream.EXPECT().Close().Return()
-	suite.msgStream.EXPECT().Seek(mock.Anything, mock.Anything).Return(errors.New("mock error"))
+	suite.msgStream.EXPECT().Seek(mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
 
 	status, err = suite.node.WatchDmChannels(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
+
+	// load growing failed
+	badSegmentReq := typeutil.Clone(req)
+	for _, info := range badSegmentReq.SegmentInfos {
+		for _, fbl := range info.Binlogs {
+			for _, binlog := range fbl.Binlogs {
+				binlog.LogPath += "bad_suffix"
+			}
+		}
+	}
+	for _, channel := range badSegmentReq.Infos {
+		channel.UnflushedSegmentIds = lo.Keys(badSegmentReq.SegmentInfos)
+	}
+	status, err = suite.node.WatchDmChannels(ctx, badSegmentReq)
+	err = merr.CheckRPCCall(status, err)
+	suite.Error(err)
 
 	// empty index
 	req.IndexInfoList = nil
