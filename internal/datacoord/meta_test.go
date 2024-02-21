@@ -673,6 +673,26 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 			UpdateCheckPointOperator(1, false, []*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 10}}),
 		)
 		assert.NoError(t, err)
+
+		err = meta.UpdateSegmentsInfo(
+			ReplaceBinlogsOperator(1, nil, nil, nil),
+		)
+		assert.NoError(t, err)
+
+		err = meta.UpdateSegmentsInfo(
+			UpdateDmlPosition(1, nil),
+		)
+		assert.NoError(t, err)
+
+		err = meta.UpdateSegmentsInfo(
+			UpdateDmlPosition(1, &msgpb.MsgPosition{MsgID: []byte{1}}),
+		)
+		assert.NoError(t, err)
+
+		err = meta.UpdateSegmentsInfo(
+			UpdateImportedRows(1, 0),
+		)
+		assert.NoError(t, err)
 	})
 
 	t.Run("update checkpoints and start position of non existed segment", func(t *testing.T) {

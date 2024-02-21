@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
@@ -1455,5 +1456,164 @@ func TestProxy_ReplicateMessage(t *testing.T) {
 			time.Sleep(2 * time.Second)
 			broadcastMock.Unset()
 		}
+	})
+}
+
+func TestProxy_ImportV2(t *testing.T) {
+	ctx := context.Background()
+	mockErr := errors.New("mock error")
+
+	cache := globalMetaCache
+	defer func() { globalMetaCache = cache }()
+
+	t.Run("ImportV2", func(t *testing.T) {
+		// server is not healthy
+		node := &Proxy{}
+		node.UpdateStateCode(commonpb.StateCode_Abnormal)
+		rsp, err := node.ImportV2(ctx, nil)
+		assert.NoError(t, err)
+		assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		// no such collection
+		mc := NewMockCache(t)
+		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, mockErr)
+		globalMetaCache = mc
+		rsp, err = node.ImportV2(ctx, &internalpb.ImportRequest{CollectionName: "aaa"})
+		assert.NoError(t, err)
+		assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
+
+		// get schema failed
+		mc = NewMockCache(t)
+		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
+		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(nil, mockErr)
+		globalMetaCache = mc
+		rsp, err = node.ImportV2(ctx, &internalpb.ImportRequest{CollectionName: "aaa"})
+		assert.NoError(t, err)
+		assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
+
+		// get channel failed
+		mc = NewMockCache(t)
+		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
+		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
+			CollectionSchema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+				{IsPartitionKey: true},
+			}},
+		}, nil)
+		globalMetaCache = mc
+		chMgr := NewMockChannelsMgr(t)
+		chMgr.EXPECT().getVChannels(mock.Anything).Return(nil, mockErr)
+		node.chMgr = chMgr
+		rsp, err = node.ImportV2(ctx, &internalpb.ImportRequest{CollectionName: "aaa"})
+		assert.NoError(t, err)
+		assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
+
+		// set partition name and with partition key
+		chMgr = NewMockChannelsMgr(t)
+		chMgr.EXPECT().getVChannels(mock.Anything).Return([]string{"ch0"}, nil)
+		node.chMgr = chMgr
+		rsp, err = node.ImportV2(ctx, &internalpb.ImportRequest{CollectionName: "aaa", PartitionName: "bbb"})
+		assert.NoError(t, err)
+		assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
+
+		// get partitions failed
+		mc = NewMockCache(t)
+		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
+		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
+			CollectionSchema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+				{IsPartitionKey: true},
+			}},
+		}, nil)
+		mc.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(nil, mockErr)
+		globalMetaCache = mc
+		rsp, err = node.ImportV2(ctx, &internalpb.ImportRequest{CollectionName: "aaa"})
+		assert.NoError(t, err)
+		assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
+
+		// get partitionID failed
+		mc = NewMockCache(t)
+		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
+		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
+			CollectionSchema: &schemapb.CollectionSchema{},
+		}, nil)
+		mc.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(0, mockErr)
+		globalMetaCache = mc
+		rsp, err = node.ImportV2(ctx, &internalpb.ImportRequest{CollectionName: "aaa", PartitionName: "bbb"})
+		assert.NoError(t, err)
+		assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
+
+		// no file
+		mc = NewMockCache(t)
+		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
+		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
+			CollectionSchema: &schemapb.CollectionSchema{},
+		}, nil)
+		mc.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
+		globalMetaCache = mc
+		rsp, err = node.ImportV2(ctx, &internalpb.ImportRequest{CollectionName: "aaa", PartitionName: "bbb"})
+		assert.NoError(t, err)
+		assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
+
+		// illegal file type
+		rsp, err = node.ImportV2(ctx, &internalpb.ImportRequest{
+			CollectionName: "aaa",
+			PartitionName:  "bbb",
+			Files: []*internalpb.ImportFile{{
+				Id:    1,
+				Paths: []string{"a.cpp"},
+			}},
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
+
+		// normal case
+		dataCoord := mocks.NewMockDataCoordClient(t)
+		dataCoord.EXPECT().ImportV2(mock.Anything, mock.Anything).Return(nil, nil)
+		node.dataCoord = dataCoord
+		rsp, err = node.ImportV2(ctx, &internalpb.ImportRequest{
+			CollectionName: "aaa",
+			Files: []*internalpb.ImportFile{{
+				Id:    1,
+				Paths: []string{"a.json"},
+			}},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, int32(0), rsp.GetStatus().GetCode())
+	})
+
+	t.Run("GetImportProgress", func(t *testing.T) {
+		// server is not healthy
+		node := &Proxy{}
+		node.UpdateStateCode(commonpb.StateCode_Abnormal)
+		rsp, err := node.GetImportProgress(ctx, nil)
+		assert.NoError(t, err)
+		assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		// normal case
+		dataCoord := mocks.NewMockDataCoordClient(t)
+		dataCoord.EXPECT().GetImportProgress(mock.Anything, mock.Anything).Return(nil, nil)
+		node.dataCoord = dataCoord
+		rsp, err = node.GetImportProgress(ctx, &internalpb.GetImportProgressRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, int32(0), rsp.GetStatus().GetCode())
+	})
+
+	t.Run("ListImports", func(t *testing.T) {
+		// server is not healthy
+		node := &Proxy{}
+		node.UpdateStateCode(commonpb.StateCode_Abnormal)
+		rsp, err := node.ListImports(ctx, nil)
+		assert.NoError(t, err)
+		assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		// normal case
+		dataCoord := mocks.NewMockDataCoordClient(t)
+		dataCoord.EXPECT().ListImports(mock.Anything, mock.Anything).Return(nil, nil)
+		node.dataCoord = dataCoord
+		rsp, err = node.ListImports(ctx, &internalpb.ListImportsRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, int32(0), rsp.GetStatus().GetCode())
 	})
 }

@@ -691,7 +691,7 @@ func (kc *Catalog) DropSegmentIndex(ctx context.Context, collID, partID, segID, 
 }
 
 func (kc *Catalog) SaveImportJob(job *datapb.ImportJob) error {
-	key := buildImportJobKey(job.JobID)
+	key := buildImportJobKey(job.GetJobID())
 	value, err := proto.Marshal(job)
 	if err != nil {
 		return err

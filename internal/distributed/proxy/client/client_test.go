@@ -433,3 +433,32 @@ func Test_GetDdChannel(t *testing.T) {
 	_, err = client.GetDdChannel(ctx, &internalpb.GetDdChannelRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
+
+func Test_ImportV2(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+
+	client, err := NewClient(ctx, "test", 1)
+	assert.NoError(t, err)
+	defer client.Close()
+
+	mockProxy := mocks.NewMockProxyClient(t)
+	mockGrpcClient := mocks.NewMockGrpcClient[proxypb.ProxyClient](t)
+	mockGrpcClient.EXPECT().Close().Return(nil)
+	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(proxypb.ProxyClient) (interface{}, error)) (interface{}, error) {
+		return f(mockProxy)
+	})
+	client.grpcClient = mockGrpcClient
+
+	mockProxy.EXPECT().ImportV2(mock.Anything, mock.Anything).Return(&internalpb.ImportResponse{Status: merr.Success()}, nil)
+	_, err = client.ImportV2(ctx, &internalpb.ImportRequest{})
+	assert.Nil(t, err)
+
+	mockProxy.EXPECT().GetImportProgress(mock.Anything, mock.Anything).Return(&internalpb.GetImportProgressResponse{Status: merr.Success()}, nil)
+	_, err = client.GetImportProgress(ctx, &internalpb.GetImportProgressRequest{})
+	assert.Nil(t, err)
+
+	mockProxy.EXPECT().ListImports(mock.Anything, mock.Anything).Return(&internalpb.ListImportsResponse{Status: merr.Success()}, nil)
+	_, err = client.ListImports(ctx, &internalpb.ListImportsRequest{})
+	assert.Nil(t, err)
+}

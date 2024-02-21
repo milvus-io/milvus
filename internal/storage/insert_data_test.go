@@ -349,4 +349,5 @@ func (s *ArrayFieldDataSuite) TestArrayFieldData() {
 	s.Equal(1, insertData.GetRowNum())
 	s.Equal(114, insertData.GetMemorySize())
 	s.False(insertData.IsEmpty())
+	s.Equal(114, insertData.GetRowSize(0))
 }

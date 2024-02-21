@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -48,6 +49,26 @@ func TestImportMeta_Restore(t *testing.T) {
 	tasks = im.GetTaskBy(WithType(ImportTaskType))
 	assert.Equal(t, 1, len(tasks))
 	assert.Equal(t, int64(2), tasks[0].GetTaskID())
+
+	// new meta failed
+	mockErr := errors.New("mock error")
+	catalog = mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListPreImportTasks().Return([]*datapb.PreImportTask{{TaskID: 1}}, mockErr)
+	_, err = NewImportMeta(catalog)
+	assert.Error(t, err)
+
+	catalog = mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListImportTasks().Return([]*datapb.ImportTaskV2{{TaskID: 2}}, mockErr)
+	catalog.EXPECT().ListPreImportTasks().Return([]*datapb.PreImportTask{{TaskID: 1}}, nil)
+	_, err = NewImportMeta(catalog)
+	assert.Error(t, err)
+
+	catalog = mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListImportJobs().Return([]*datapb.ImportJob{{JobID: 0}}, mockErr)
+	catalog.EXPECT().ListPreImportTasks().Return([]*datapb.PreImportTask{{TaskID: 1}}, nil)
+	catalog.EXPECT().ListImportTasks().Return([]*datapb.ImportTaskV2{{TaskID: 2}}, nil)
+	_, err = NewImportMeta(catalog)
+	assert.Error(t, err)
 }
 
 func TestImportMeta_ImportJob(t *testing.T) {
@@ -79,9 +100,11 @@ func TestImportMeta_ImportJob(t *testing.T) {
 	jobs = im.GetJobBy()
 	assert.Equal(t, 1, len(jobs))
 
-	err = im.UpdateJob(job.GetJobID())
+	assert.Nil(t, job.GetSchema())
+	err = im.UpdateJob(job.GetJobID(), UpdateJobSchema(&schemapb.CollectionSchema{}))
 	assert.NoError(t, err)
 	job2 := im.GetJob(job.GetJobID())
+	assert.NotNil(t, job2.GetSchema())
 	assert.Equal(t, job.GetJobID(), job2.GetJobID())
 	assert.Equal(t, job.GetCollectionID(), job2.GetCollectionID())
 	assert.Equal(t, job.GetPartitionIDs(), job2.GetPartitionIDs())

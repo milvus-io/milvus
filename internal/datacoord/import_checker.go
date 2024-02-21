@@ -263,10 +263,8 @@ func (c *importChecker) checkImportState(job ImportJob) {
 	defer cancel()
 	err := c.sm.FlushImportSegments(ctx, job.GetCollectionID(), unfinished)
 	if err != nil {
-		log.Warn("flush imported segments failed",
-			zap.Int64("jobID", job.GetJobID()),
-			zap.Int64("collectionID", job.GetCollectionID()),
-			zap.Int64s("segments", unfinished), zap.Error(err))
+		log.Warn("flush imported segments failed", zap.Int64("jobID", job.GetJobID()),
+			zap.Int64("collectionID", job.GetCollectionID()), zap.Int64s("segments", unfinished), zap.Error(err))
 		return
 	}
 
