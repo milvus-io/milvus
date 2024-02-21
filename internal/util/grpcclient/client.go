@@ -506,6 +506,9 @@ func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, er
 			status = res
 		case interface{ GetStatus() *commonpb.Status }:
 			status = res.GetStatus()
+		// streaming call
+		case grpc.ClientStream:
+			status = merr.Status(nil)
 		default:
 			// it will directly return the result
 			log.Warn("unknown return type", zap.Any("return", ret))
