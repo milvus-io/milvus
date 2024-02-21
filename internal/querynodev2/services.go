@@ -195,7 +195,7 @@ func (node *QueryNode) composeIndexMeta(indexInfos []*indexpb.IndexInfo, schema 
 }
 
 // WatchDmChannels create consumers on dmChannels to receive Incremental data，which is the important part of real-time query
-func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDmChannelsRequest) (*commonpb.Status, error) {
+func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDmChannelsRequest) (status *commonpb.Status, e error) {
 	channel := req.GetInfos()[0]
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
@@ -246,6 +246,11 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 
 	node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(),
 		node.composeIndexMeta(req.GetIndexInfoList(), req.Schema), req.GetLoadMeta())
+	defer func() {
+		if !merr.Ok(status) {
+			node.manager.Collection.Unref(req.GetCollectionID(), 1)
+		}
+	}()
 
 	delegator, err := delegator.NewShardDelegator(
 		ctx,
