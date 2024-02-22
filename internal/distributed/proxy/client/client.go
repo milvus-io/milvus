@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -46,7 +47,7 @@ type Client struct {
 }
 
 // NewClient creates a new client instance
-func NewClient(ctx context.Context, addr string, nodeID int64) (*Client, error) {
+func NewClient(ctx context.Context, addr string, nodeID int64) (types.ProxyClient, error) {
 	if addr == "" {
 		return nil, fmt.Errorf("address is empty")
 	}
