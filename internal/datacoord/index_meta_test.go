@@ -70,7 +70,7 @@ func TestMeta_CanCreateIndex(t *testing.T) {
 		catalog:              catalog,
 		collections:          nil,
 		segments:             nil,
-		channelCPs:           nil,
+		channelCPs:           newChannelCps(),
 		chunkManager:         nil,
 		indexes:              map[UniqueID]map[UniqueID]*model.Index{},
 		buildID2SegmentIndex: map[UniqueID]*model.SegmentIndex{},
@@ -186,7 +186,7 @@ func TestMeta_HasSameReq(t *testing.T) {
 		catalog:              catalogmocks.NewDataCoordCatalog(t),
 		collections:          nil,
 		segments:             nil,
-		channelCPs:           nil,
+		channelCPs:           newChannelCps(),
 		chunkManager:         nil,
 		indexes:              map[UniqueID]map[UniqueID]*model.Index{},
 		buildID2SegmentIndex: map[UniqueID]*model.SegmentIndex{},
@@ -602,7 +602,7 @@ func TestMeta_GetSegmentIndexStateOnField(t *testing.T) {
 				},
 			},
 		},
-		channelCPs:   nil,
+		channelCPs:   newChannelCps(),
 		chunkManager: nil,
 		indexes: map[UniqueID]map[UniqueID]*model.Index{
 			collID: {

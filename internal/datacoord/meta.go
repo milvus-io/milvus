@@ -55,9 +55,9 @@ type meta struct {
 	sync.RWMutex
 	ctx          context.Context
 	catalog      metastore.DataCoordCatalog
-	collections  map[UniqueID]*collectionInfo  // collection id to collection info
-	segments     *SegmentsInfo                 // segment id to segment info
-	channelCPs   map[string]*msgpb.MsgPosition // vChannel -> channel checkpoint/see position
+	collections  map[UniqueID]*collectionInfo // collection id to collection info
+	segments     *SegmentsInfo                // segment id to segment info
+	channelCPs   *channelCPs                  // vChannel -> channel checkpoint/see position
 	chunkManager storage.ChunkManager
 
 	// collectionIndexes records which indexes are on the collection
@@ -66,6 +66,17 @@ type meta struct {
 	// buildID2Meta records the meta information of the segment
 	// buildID -> segmentIndex
 	buildID2SegmentIndex map[UniqueID]*model.SegmentIndex
+}
+
+type channelCPs struct {
+	sync.RWMutex
+	checkpoints map[string]*msgpb.MsgPosition
+}
+
+func newChannelCps() *channelCPs {
+	return &channelCPs{
+		checkpoints: make(map[string]*msgpb.MsgPosition),
+	}
 }
 
 // A local cache of segment metric update. Must call commit() to take effect.
@@ -91,7 +102,7 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 		catalog:              catalog,
 		collections:          make(map[UniqueID]*collectionInfo),
 		segments:             NewSegmentsInfo(),
-		channelCPs:           make(map[string]*msgpb.MsgPosition),
+		channelCPs:           newChannelCps(),
 		chunkManager:         chunkManager,
 		indexes:              make(map[UniqueID]map[UniqueID]*model.Index),
 		buildID2SegmentIndex: make(map[UniqueID]*model.SegmentIndex),
@@ -151,7 +162,7 @@ func (m *meta) reloadFromKV() error {
 	for vChannel, pos := range channelCPs {
 		// for 2.2.2 issue https://github.com/milvus-io/milvus/issues/22181
 		pos.ChannelName = vChannel
-		m.channelCPs[vChannel] = pos
+		m.channelCPs.checkpoints[vChannel] = pos
 	}
 
 	// load field indexes
@@ -1327,16 +1338,16 @@ func (m *meta) UpdateChannelCheckpoint(vChannel string, pos *msgpb.MsgPosition) 
 		return fmt.Errorf("channelCP is nil, vChannel=%s", vChannel)
 	}
 
-	m.Lock()
-	defer m.Unlock()
+	m.channelCPs.Lock()
+	defer m.channelCPs.Unlock()
 
-	oldPosition, ok := m.channelCPs[vChannel]
+	oldPosition, ok := m.channelCPs.checkpoints[vChannel]
 	if !ok || oldPosition.Timestamp < pos.Timestamp {
 		err := m.catalog.SaveChannelCheckpoint(m.ctx, vChannel, pos)
 		if err != nil {
 			return err
 		}
-		m.channelCPs[vChannel] = pos
+		m.channelCPs.checkpoints[vChannel] = pos
 		ts, _ := tsoutil.ParseTS(pos.Timestamp)
 		log.Info("UpdateChannelCheckpoint done",
 			zap.String("vChannel", vChannel),
@@ -1350,22 +1361,23 @@ func (m *meta) UpdateChannelCheckpoint(vChannel string, pos *msgpb.MsgPosition) 
 }
 
 func (m *meta) GetChannelCheckpoint(vChannel string) *msgpb.MsgPosition {
-	m.RLock()
-	defer m.RUnlock()
-	if m.channelCPs[vChannel] == nil {
+	m.channelCPs.RLock()
+	defer m.channelCPs.RUnlock()
+	cp, ok := m.channelCPs.checkpoints[vChannel]
+	if !ok {
 		return nil
 	}
-	return proto.Clone(m.channelCPs[vChannel]).(*msgpb.MsgPosition)
+	return proto.Clone(cp).(*msgpb.MsgPosition)
 }
 
 func (m *meta) DropChannelCheckpoint(vChannel string) error {
-	m.Lock()
-	defer m.Unlock()
+	m.channelCPs.Lock()
+	defer m.channelCPs.Unlock()
 	err := m.catalog.DropChannelCheckpoint(m.ctx, vChannel)
 	if err != nil {
 		return err
 	}
-	delete(m.channelCPs, vChannel)
+	delete(m.channelCPs.checkpoints, vChannel)
 	log.Debug("DropChannelCheckpoint done", zap.String("vChannel", vChannel))
 	return nil
 }
