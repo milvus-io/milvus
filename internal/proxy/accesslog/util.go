@@ -86,3 +86,18 @@ func getCurUserFromContext(ctx context.Context) (string, error) {
 	username := secrets[0]
 	return username, nil
 }
+
+func getSdkTypeByUserAgent(userAgent string) (string, bool) {
+	switch {
+	case strings.HasPrefix(userAgent, "grpc-node-js"):
+		return "nodejs", true
+	case strings.HasPrefix(userAgent, "grpc-python"):
+		return "Python", true
+	case strings.HasPrefix(userAgent, "grpc-go"):
+		return "Golang", true
+	case strings.HasPrefix(userAgent, "grpc-java"):
+		return "Java", true
+	default:
+		return "", false
+	}
+}
