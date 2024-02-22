@@ -49,6 +49,7 @@ var metricFuncMap = map[string]getMetricFunc{
 	"$time_start":      getTimeStart,
 	"$time_end":        getTimeEnd,
 	"$method_expr":     getExpr,
+	"$output_fields":   getOutputFields,
 	"$sdk_version":     getSdkVersion,
 	"$cluster_prefix":  getClusterPrefix,
 }

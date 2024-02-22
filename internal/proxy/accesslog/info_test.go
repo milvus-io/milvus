@@ -174,6 +174,18 @@ func (s *GrpcAccessInfoSuite) TestExpression() {
 	s.Equal(testExpr, result[0])
 }
 
+func (s *GrpcAccessInfoSuite) TestOutputFields() {
+	result := s.info.Get("$output_fields")
+	s.Equal(unknownString, result[0])
+
+	fileds := []string{"pk"}
+	s.info.req = &milvuspb.QueryRequest{
+		OutputFields: fileds,
+	}
+	result = s.info.Get("$output_fields")
+	s.Equal(fmt.Sprint(fileds), result[0])
+}
+
 func (s *GrpcAccessInfoSuite) TestClusterPrefix() {
 	cluster := "instance-test"
 	paramtable.Init()
