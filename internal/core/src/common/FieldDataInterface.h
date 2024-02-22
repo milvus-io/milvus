@@ -293,7 +293,9 @@ class FieldDataJsonImpl : public FieldDataImpl<Json, true> {
     void
     FillFieldData(const std::shared_ptr<arrow::Array> array) override {
         AssertInfo(array->type()->id() == arrow::Type::type::BINARY,
-                   "inconsistent data type");
+                   "inconsistent data type, expected: {}, got: {}",
+                   "BINARY",
+                   array->type()->ToString());
         auto json_array = std::dynamic_pointer_cast<arrow::BinaryArray>(array);
         FillFieldData(json_array);
     }
