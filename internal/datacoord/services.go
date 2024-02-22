@@ -448,7 +448,6 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	log.Info("receive SaveBinlogPaths request",
 		zap.Bool("isFlush", req.GetFlushed()),
 		zap.Bool("isDropped", req.GetDropped()),
-		zap.Any("startPositions", req.GetStartPositions()),
 		zap.Any("checkpoints", req.GetCheckPoints()))
 
 	nodeID := req.GetBase().GetSourceID()

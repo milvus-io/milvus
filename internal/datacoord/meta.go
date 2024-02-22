@@ -463,7 +463,6 @@ func (m *meta) UpdateFlushSegmentsInfo(
 		zap.Bool("flushed", flushed),
 		zap.Bool("dropped", dropped),
 		zap.Any("check points", checkpoints),
-		zap.Any("start position", startPositions),
 		zap.Bool("importing", importing))
 	m.Lock()
 	defer m.Unlock()
