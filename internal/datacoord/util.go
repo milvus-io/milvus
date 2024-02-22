@@ -199,6 +199,10 @@ func isOptionalScalarFieldSupported(indexType string) bool {
 	return indexType == indexparamcheck.IndexHNSW
 }
 
+func isDiskANNIndex(indexType string) bool {
+	return indexType == indexparamcheck.IndexDISKANN
+}
+
 func parseBuildIDFromFilePath(key string) (UniqueID, error) {
 	ss := strings.Split(key, "/")
 	if strings.HasSuffix(key, "/") {
