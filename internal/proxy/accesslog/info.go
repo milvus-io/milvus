@@ -270,11 +270,11 @@ func getExpr(i *GrpcAccessInfo) string {
 func getSdkVersion(i *GrpcAccessInfo) string {
 	clientInfo := connection.GetManager().Get(i.ctx)
 	if clientInfo != nil {
-		return clientInfo.SdkType + "-" + clientInfo.SdkVersion
+		return clientInfo.GetSdkType() + "-" + clientInfo.GetSdkVersion()
 	}
 
 	if req, ok := i.req.(*milvuspb.ConnectRequest); ok {
-		return req.ClientInfo.SdkType + "-" + req.ClientInfo.SdkVersion
+		return req.GetClientInfo().GetSdkType() + "-" + req.GetClientInfo().GetSdkVersion()
 	}
 
 	return unknownString
