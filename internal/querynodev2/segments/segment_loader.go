@@ -32,7 +32,6 @@ import (
 	"strconv"
 	"sync"
 	"time"
-	"unsafe"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -56,7 +55,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
-	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
@@ -498,6 +496,7 @@ func NewLoader(
 	log.Info("SegmentLoader created", zap.Int("ioPoolSize", ioPoolSize))
 
 	loader := &segmentLoader{
+		IndexAttrCache:  NewIndexAttrCache(),
 		manager:         manager,
 		cm:              cm,
 		loadingSegments: typeutil.NewConcurrentMap[int64, *loadResult](),
@@ -533,6 +532,7 @@ func (r *loadResult) SetResult(status loadStatus) {
 
 // segmentLoader is only responsible for loading the field data from binlog
 type segmentLoader struct {
+	*IndexAttrCache
 	manager *Manager
 	cm      storage.ChunkManager
 
@@ -1322,35 +1322,6 @@ func JoinIDPath(ids ...int64) string {
 	return path.Join(idStr...)
 }
 
-func GetIndexResourceUsage(indexInfo *querypb.FieldIndexInfo) (uint64, uint64, error) {
-	indexType, err := funcutil.GetAttrByKeyFromRepeatedKV(common.IndexTypeKey, indexInfo.IndexParams)
-	if err != nil {
-		return 0, 0, fmt.Errorf("index type not exist in index params")
-	}
-	if indexType == indexparamcheck.IndexDISKANN {
-		neededMemSize := indexInfo.IndexSize / UsedDiskMemoryRatio
-		neededDiskSize := indexInfo.IndexSize - neededMemSize
-		return uint64(neededMemSize), uint64(neededDiskSize), nil
-	}
-
-	factor := uint64(1)
-
-	var isLoadWithDisk bool
-	GetDynamicPool().Submit(func() (any, error) {
-		cIndexType := C.CString(indexType)
-		defer C.free(unsafe.Pointer(cIndexType))
-		cEngineVersion := C.int32_t(indexInfo.GetCurrentIndexVersion())
-		isLoadWithDisk = bool(C.IsLoadWithDisk(cIndexType, cEngineVersion))
-		return nil, nil
-	}).Await()
-
-	if !isLoadWithDisk {
-		factor = 2
-	}
-
-	return uint64(indexInfo.IndexSize) * factor, 0, nil
-}
-
 // checkSegmentSize checks whether the memory & disk is sufficient to load the segments
 // returns the memory & disk usage while loading if possible to load,
 // otherwise, returns error
@@ -1401,7 +1372,7 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 			fieldID := fieldBinlog.FieldID
 			mmapEnabled := common.IsFieldMmapEnabled(collection.Schema(), fieldID)
 			if fieldIndexInfo, ok := vecFieldID2IndexInfo[fieldID]; ok {
-				neededMemSize, neededDiskSize, err := GetIndexResourceUsage(fieldIndexInfo)
+				neededMemSize, neededDiskSize, err := loader.GetIndexResourceUsage(fieldIndexInfo)
 				if err != nil {
 					log.Warn("failed to get index size",
 						zap.Int64("collectionID", loadInfo.CollectionID),
