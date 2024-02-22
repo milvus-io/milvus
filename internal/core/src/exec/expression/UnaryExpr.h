@@ -44,7 +44,7 @@ struct UnaryElementFuncForMatch {
             // translate the pattern match in advance, which avoid computing it every loop.
             std::regex reg(TranslatePatternMatchToRegex(val));
             for (int i = 0; i < size; ++i) {
-                res[i] = std::regex_match(src[i].data(), reg);
+                res[i] = std::regex_match(std::string(src[i]), reg);
             }
         } else if constexpr (std::is_same_v<T, std::string>) {
             // translate the pattern match in advance, which avoid computing it every loop.
