@@ -992,7 +992,10 @@ func (s *Server) postFlush(ctx context.Context, segmentID UniqueID) error {
 		log.Error("flush segment complete failed", zap.Error(err))
 		return err
 	}
-	s.buildIndexCh <- segmentID
+	select {
+	case s.buildIndexCh <- segmentID:
+	default:
+	}
 
 	insertFileNum := 0
 	for _, fieldBinlog := range segment.GetBinlogs() {
