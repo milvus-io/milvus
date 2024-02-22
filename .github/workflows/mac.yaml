@@ -90,6 +90,10 @@ jobs:
             ln -s /usr/local/opt/llvm@14 /usr/local/opt/llvm
           fi
           make milvus
+      - name: Setup tmate session
+        uses: mxschmitt/action-tmate@v3
+        timeout-minutes: 180
+        if: ${{ failure() }}
       - name: Upload Cmake log
         uses: actions/upload-artifact@v3
         if: ${{ failure() }}
