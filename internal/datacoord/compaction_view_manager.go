@@ -141,7 +141,7 @@ func (m *CompactionViewManager) notifyTrigger(ctx context.Context, events map[Co
 
 // Global check could take some time, we need to record the time.
 func (m *CompactionViewManager) Check(ctx context.Context) (events map[CompactionTriggerType][]CompactionView) {
-	ctx, span := otel.Tracer(typeutil.DataCoordRole).Start(ctx, "CompactionView-Check")
+	_, span := otel.Tracer(typeutil.DataCoordRole).Start(ctx, "CompactionView-Check")
 	defer span.End()
 
 	m.viewGuard.Lock()
