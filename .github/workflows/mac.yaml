@@ -34,6 +34,10 @@ jobs:
     runs-on: macos-12
     timeout-minutes: 300
     steps:
+      - run: sysctl -n hw.ncpu
+      - run: ulimit -a
+      - run: df -h
+      - run: ls -lrta /
       - name: Checkout
         uses: actions/checkout@v2
       - name: 'Generate CCache Hash'
@@ -92,3 +96,11 @@ jobs:
         with:
           name: cmake-log
           path: cmake_build/CMakeFiles/*.log
+      - run: sysctl -n hw.ncpu
+        if: ${{ always() }}
+      - run: ulimit -a
+        if: ${{ always() }}
+      - run: df -h
+        if: ${{ always() }}
+      - run: ls -lrta /
+        if: ${{ always() }}
