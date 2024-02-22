@@ -197,8 +197,8 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 	}
 
 	if it.partitionKeyMode {
-		pkFieldSchema, _ := it.schema.GetPkField()
-		it.partitionKeys, err = getPartitionKeyFieldData(pkFieldSchema, it.upsertMsg.InsertMsg)
+		fieldSchema, _ := typeutil.GetPartitionKeyFieldSchema(it.schema.CollectionSchema)
+		it.partitionKeys, err = getPartitionKeyFieldData(fieldSchema, it.upsertMsg.InsertMsg)
 		if err != nil {
 			log.Warn("get partition keys from insert request failed",
 				zap.String("collectionName", collectionName),
