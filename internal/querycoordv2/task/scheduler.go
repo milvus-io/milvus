@@ -892,8 +892,7 @@ func (scheduler *taskScheduler) checkChannelTaskStale(task *ChannelTask) error {
 	for _, action := range task.Actions() {
 		switch action.Type() {
 		case ActionTypeGrow:
-			if scheduler.targetMgr.GetDmChannel(task.collectionID, task.Channel(), meta.NextTarget) == nil &&
-				scheduler.targetMgr.GetDmChannel(task.collectionID, task.Channel(), meta.CurrentTarget) == nil {
+			if scheduler.targetMgr.GetDmChannel(task.collectionID, task.Channel(), meta.NextTargetFirst) == nil {
 				log.Warn("the task is stale, the channel to subscribe not exists in targets",
 					zap.String("channel", task.Channel()))
 				return merr.WrapErrChannelReduplicate(task.Channel(), "target doesn't contain this channel")
