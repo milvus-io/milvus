@@ -29,7 +29,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	minio "github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -347,7 +347,7 @@ func createMetaForRecycleUnusedIndexes(catalog metastore.DataCoordCatalog) *meta
 		catalog:      catalog,
 		collections:  nil,
 		segments:     nil,
-		channelCPs:   nil,
+		channelCPs:   newChannelCps(),
 		chunkManager: nil,
 		indexes: map[UniqueID]map[UniqueID]*model.Index{
 			collID: {
@@ -491,7 +491,7 @@ func createMetaForRecycleUnusedSegIndexes(catalog metastore.DataCoordCatalog) *m
 				},
 			},
 		},
-		channelCPs:   nil,
+		channelCPs:   newChannelCps(),
 		chunkManager: nil,
 		indexes:      map[UniqueID]map[UniqueID]*model.Index{},
 		buildID2SegmentIndex: map[UniqueID]*model.SegmentIndex{
@@ -778,12 +778,14 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 		mock.Anything,
 	).Return(nil)
 
-	channelCPs := typeutil.NewConcurrentMap[string, *msgpb.MsgPosition]()
-	channelCPs.Insert("dmlChannel", &msgpb.MsgPosition{Timestamp: 1000})
+	channelCPs := newChannelCps()
+	channelCPs.checkpoints["dmlChannel"] = &msgpb.MsgPosition{
+		Timestamp: 1000,
+	}
+
 	m := &meta{
-		catalog:        catalog,
-		channelCPLocks: lock.NewKeyLock[string](),
-		channelCPs:     channelCPs,
+		catalog:    catalog,
+		channelCPs: channelCPs,
 		segments: &SegmentsInfo{
 			map[UniqueID]*SegmentInfo{
 				segID: {

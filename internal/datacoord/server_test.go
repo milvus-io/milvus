@@ -58,7 +58,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
@@ -2856,14 +2855,13 @@ func TestGetFlushAllState(t *testing.T) {
 					}, nil).Maybe()
 			}
 
-			svr.meta.channelCPLocks = lock.NewKeyLock[string]()
-			svr.meta.channelCPs = typeutil.NewConcurrentMap[string, *msgpb.MsgPosition]()
+			svr.meta.channelCPs = newChannelCps()
 			for i, ts := range test.ChannelCPs {
 				channel := vchannels[i]
-				svr.meta.channelCPs.Insert(channel, &msgpb.MsgPosition{
+				svr.meta.channelCPs.checkpoints[channel] = &msgpb.MsgPosition{
 					ChannelName: channel,
 					Timestamp:   ts,
-				})
+				}
 			}
 
 			resp, err := svr.GetFlushAllState(context.TODO(), &milvuspb.GetFlushAllStateRequest{FlushAllTs: test.FlushAllTs})
@@ -2933,15 +2931,14 @@ func TestGetFlushAllStateWithDB(t *testing.T) {
 					CollectionName:      collectionName,
 				}, nil).Maybe()
 
-			svr.meta.channelCPLocks = lock.NewKeyLock[string]()
-			svr.meta.channelCPs = typeutil.NewConcurrentMap[string, *msgpb.MsgPosition]()
+			svr.meta.channelCPs = newChannelCps()
 			channelCPs := []Timestamp{100, 200}
 			for i, ts := range channelCPs {
 				channel := vchannels[i]
-				svr.meta.channelCPs.Insert(channel, &msgpb.MsgPosition{
+				svr.meta.channelCPs.checkpoints[channel] = &msgpb.MsgPosition{
 					ChannelName: channel,
 					Timestamp:   ts,
-				})
+				}
 			}
 
 			var resp *milvuspb.GetFlushAllStateResponse
