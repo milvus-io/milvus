@@ -71,13 +71,8 @@ func initDynamicPool() {
 
 func initLoadPool() {
 	loadOnce.Do(func() {
-		pt := paramtable.Get()
-		poolSize := hardware.GetCPUNum() * pt.CommonCfg.MiddlePriorityThreadCoreCoefficient.GetAsInt()
-		if poolSize > 16 {
-			poolSize = 16
-		}
 		pool := conc.NewPool[any](
-			poolSize,
+			hardware.GetCPUNum()*paramtable.Get().CommonCfg.MiddlePriorityThreadCoreCoefficient.GetAsInt(),
 			conc.WithPreAlloc(false),
 			conc.WithDisablePurge(false),
 			conc.WithPreHandler(runtime.LockOSThread), // lock os thread for cgo thread disposal
