@@ -48,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
@@ -65,13 +66,13 @@ type CrossClusterRoutingSuite struct {
 	client  *clientv3.Client
 
 	// clients
-	rootCoordClient  *grpcrootcoordclient.Client
-	proxyClient      *grpcproxyclient.Client
-	dataCoordClient  *grpcdatacoordclient.Client
-	queryCoordClient *grpcquerycoordclient.Client
-	dataNodeClient   *grpcdatanodeclient.Client
-	queryNodeClient  *grpcquerynodeclient.Client
-	indexNodeClient  *grpcindexnodeclient.Client
+	rootCoordClient  types.RootCoordClient
+	proxyClient      types.ProxyClient
+	dataCoordClient  types.DataCoordClient
+	queryCoordClient types.QueryCoordClient
+	dataNodeClient   types.DataNodeClient
+	queryNodeClient  types.QueryNodeClient
+	indexNodeClient  types.IndexNodeClient
 
 	// servers
 	rootCoord  *grpcrootcoord.Server
