@@ -50,14 +50,15 @@ func (s *CompactionTriggerManagerSuite) TestNotifyByViewIDLE() {
 	segments, found := collSegs[1]
 	s.Require().True(found)
 
-	levelZeroSegments := lo.Filter(segments, func(info *SegmentInfo, _ int) bool {
-		return info.GetLevel() == datapb.SegmentLevel_L0
+	seg1, found := lo.Find(segments, func(info *SegmentInfo) bool {
+		return info.ID == int64(100) && info.GetLevel() == datapb.SegmentLevel_L0
 	})
+	s.Require().True(found)
 
 	// Prepare only 1 l0 segment that doesn't meet the Trigger minimum condition
-	// buger ViewIDLE Trigger will still forceTrigger the plan
-	latestL0Segments := GetViewsByInfo(levelZeroSegments[0])
-	expectedSegID := latestL0Segments[0].ID
+	// but ViewIDLE Trigger will still forceTrigger the plan
+	latestL0Segments := GetViewsByInfo(seg1)
+	expectedSegID := seg1.ID
 
 	s.Require().Equal(1, len(latestL0Segments))
 	levelZeroView := viewManager.getChangedLevelZeroViews(1, latestL0Segments)
