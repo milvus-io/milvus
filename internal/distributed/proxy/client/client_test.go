@@ -448,7 +448,7 @@ func Test_ImportV2(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(proxypb.ProxyClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	mockProxy.EXPECT().ImportV2(mock.Anything, mock.Anything).Return(&internalpb.ImportResponse{Status: merr.Success()}, nil)
 	_, err = client.ImportV2(ctx, &internalpb.ImportRequest{})
