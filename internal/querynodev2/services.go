@@ -319,11 +319,15 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		log.Warn("failed to load l0 segments", zap.Error(err))
 		return merr.Status(err), nil
 	}
+	defer func() {
+		if err != nil {
+			// remove legacy growing
+			node.manager.Segment.RemoveBy(segments.WithChannel(channel.GetChannelName()),
+				segments.WithType(segments.SegmentTypeGrowing))
+		}
+	}()
 	err = loadGrowingSegments(ctx, delegator, req)
 	if err != nil {
-		// remove legacy growing
-		node.manager.Segment.RemoveBy(segments.WithChannel(channel.GetChannelName()),
-			segments.WithType(segments.SegmentTypeGrowing))
 		msg := "failed to load growing segments"
 		log.Warn(msg, zap.Error(err))
 		return merr.Status(err), nil
