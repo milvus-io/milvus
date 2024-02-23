@@ -250,18 +250,18 @@ func Test_NewClient(t *testing.T) {
 		}
 	}
 
-	client.grpcClient = &mock.GRPCClientBase[rootcoordpb.RootCoordClient]{
+	client.(*Client).grpcClient = &mock.GRPCClientBase[rootcoordpb.RootCoordClient]{
 		GetGrpcClientErr: errors.New("dummy"),
 	}
 
 	newFunc1 := func(cc *grpc.ClientConn) rootcoordpb.RootCoordClient {
 		return &mock.GrpcRootCoordClient{Err: nil}
 	}
-	client.grpcClient.SetNewGrpcClientFunc(newFunc1)
+	client.(*Client).grpcClient.SetNewGrpcClientFunc(newFunc1)
 
 	checkFunc(false)
 
-	client.grpcClient = &mock.GRPCClientBase[rootcoordpb.RootCoordClient]{
+	client.(*Client).grpcClient = &mock.GRPCClientBase[rootcoordpb.RootCoordClient]{
 		GetGrpcClientErr: nil,
 	}
 
@@ -269,18 +269,18 @@ func Test_NewClient(t *testing.T) {
 		return &mock.GrpcRootCoordClient{Err: errors.New("dummy")}
 	}
 
-	client.grpcClient.SetNewGrpcClientFunc(newFunc2)
+	client.(*Client).grpcClient.SetNewGrpcClientFunc(newFunc2)
 
 	checkFunc(false)
 
-	client.grpcClient = &mock.GRPCClientBase[rootcoordpb.RootCoordClient]{
+	client.(*Client).grpcClient = &mock.GRPCClientBase[rootcoordpb.RootCoordClient]{
 		GetGrpcClientErr: nil,
 	}
 
 	newFunc3 := func(cc *grpc.ClientConn) rootcoordpb.RootCoordClient {
 		return &mock.GrpcRootCoordClient{Err: nil}
 	}
-	client.grpcClient.SetNewGrpcClientFunc(newFunc3)
+	client.(*Client).grpcClient.SetNewGrpcClientFunc(newFunc3)
 
 	checkFunc(true)
 

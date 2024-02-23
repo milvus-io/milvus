@@ -64,7 +64,7 @@ func Test_GetComponentStates(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(proxypb.ProxyClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
@@ -105,7 +105,7 @@ func Test_GetStatisticsChannel(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(proxypb.ProxyClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().GetStatisticsChannel(mock.Anything, mock.Anything).Return(&milvuspb.StringResponse{
@@ -147,7 +147,7 @@ func Test_InvalidateCollectionMetaCache(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(proxypb.ProxyClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().InvalidateCollectionMetaCache(mock.Anything, mock.Anything).Return(merr.Success(), nil)
@@ -185,7 +185,7 @@ func Test_InvalidateCredentialCache(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(proxypb.ProxyClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().InvalidateCredentialCache(mock.Anything, mock.Anything).Return(merr.Success(), nil)
@@ -223,7 +223,7 @@ func Test_UpdateCredentialCache(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(proxypb.ProxyClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().UpdateCredentialCache(mock.Anything, mock.Anything).Return(merr.Success(), nil)
@@ -261,7 +261,7 @@ func Test_RefreshPolicyInfoCache(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(proxypb.ProxyClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().RefreshPolicyInfoCache(mock.Anything, mock.Anything).Return(merr.Success(), nil)
@@ -299,7 +299,7 @@ func Test_GetProxyMetrics(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(proxypb.ProxyClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().GetProxyMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{Status: merr.Success()}, nil)
@@ -337,7 +337,7 @@ func Test_SetRates(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(proxypb.ProxyClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().SetRates(mock.Anything, mock.Anything).Return(merr.Success(), nil)
@@ -375,7 +375,7 @@ func Test_ListClientInfos(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(proxypb.ProxyClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().ListClientInfos(mock.Anything, mock.Anything).Return(&proxypb.ListClientInfosResponse{Status: merr.Success()}, nil)
@@ -412,7 +412,7 @@ func Test_GetDdChannel(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(proxypb.ProxyClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().GetDdChannel(mock.Anything, mock.Anything).Return(&milvuspb.StringResponse{Status: merr.Success()}, nil)
