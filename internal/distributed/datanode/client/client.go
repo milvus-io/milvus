@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -47,7 +48,7 @@ type Client struct {
 }
 
 // NewClient creates a client for DataNode.
-func NewClient(ctx context.Context, addr string, serverID int64) (*Client, error) {
+func NewClient(ctx context.Context, addr string, serverID int64) (types.DataNodeClient, error) {
 	if addr == "" {
 		return nil, fmt.Errorf("address is empty")
 	}

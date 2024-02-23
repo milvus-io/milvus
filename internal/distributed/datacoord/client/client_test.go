@@ -83,7 +83,7 @@ func Test_GetComponentStates(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
@@ -124,7 +124,7 @@ func Test_GetTimeTickChannel(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().GetTimeTickChannel(mock.Anything, mock.Anything).Return(&milvuspb.StringResponse{
@@ -165,7 +165,7 @@ func Test_GetStatisticsChannel(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().GetStatisticsChannel(mock.Anything, mock.Anything).Return(&milvuspb.StringResponse{
@@ -207,7 +207,7 @@ func Test_Flush(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().Flush(mock.Anything, mock.Anything).Return(&datapb.FlushResponse{
@@ -248,7 +248,7 @@ func Test_AssignSegmentID(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().AssignSegmentID(mock.Anything, mock.Anything).Return(&datapb.AssignSegmentIDResponse{
@@ -290,7 +290,7 @@ func Test_GetSegmentStates(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().GetSegmentStates(mock.Anything, mock.Anything).Return(&datapb.GetSegmentStatesResponse{
@@ -332,7 +332,7 @@ func Test_GetInsertBinlogPaths(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().GetInsertBinlogPaths(mock.Anything, mock.Anything).Return(&datapb.GetInsertBinlogPathsResponse{
@@ -374,7 +374,7 @@ func Test_GetCollectionStatistics(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().GetCollectionStatistics(mock.Anything, mock.Anything).Return(&datapb.GetCollectionStatisticsResponse{
@@ -416,7 +416,7 @@ func Test_GetPartitionStatistics(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().GetPartitionStatistics(mock.Anything, mock.Anything).Return(&datapb.GetPartitionStatisticsResponse{
@@ -457,7 +457,7 @@ func Test_GetSegmentInfoChannel(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().GetSegmentInfoChannel(mock.Anything, mock.Anything).Return(&milvuspb.StringResponse{
@@ -499,7 +499,7 @@ func Test_GetSegmentInfo(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).Return(&datapb.GetSegmentInfoResponse{
@@ -541,7 +541,7 @@ func Test_SaveBinlogPaths(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).Return(&datapb.GetSegmentInfoResponse{
@@ -583,7 +583,7 @@ func Test_GetRecoveryInfo(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().GetRecoveryInfo(mock.Anything, mock.Anything).Return(&datapb.GetRecoveryInfoResponse{
@@ -624,7 +624,7 @@ func Test_GetRecoveryInfoV2(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().GetRecoveryInfoV2(mock.Anything, mock.Anything).Return(&datapb.GetRecoveryInfoResponseV2{
@@ -666,7 +666,7 @@ func Test_GetFlushedSegments(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().GetFlushedSegments(mock.Anything, mock.Anything).Return(&datapb.GetFlushedSegmentsResponse{
@@ -708,7 +708,7 @@ func Test_GetSegmentsByStates(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().GetSegmentsByStates(mock.Anything, mock.Anything).Return(&datapb.GetSegmentsByStatesResponse{
@@ -750,7 +750,7 @@ func Test_ShowConfigurations(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().ShowConfigurations(mock.Anything, mock.Anything).Return(&internalpb.ShowConfigurationsResponse{
@@ -792,7 +792,7 @@ func Test_GetMetrics(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
@@ -833,7 +833,7 @@ func Test_ManualCompaction(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().ManualCompaction(mock.Anything, mock.Anything).Return(&milvuspb.ManualCompactionResponse{
@@ -874,7 +874,7 @@ func Test_GetCompactionState(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().GetCompactionState(mock.Anything, mock.Anything).Return(&milvuspb.GetCompactionStateResponse{
@@ -915,7 +915,7 @@ func Test_GetCompactionStateWithPlans(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().GetCompactionStateWithPlans(mock.Anything, mock.Anything).Return(&milvuspb.GetCompactionPlansResponse{
@@ -956,7 +956,7 @@ func Test_WatchChannels(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().WatchChannels(mock.Anything, mock.Anything).Return(&datapb.WatchChannelsResponse{
@@ -997,7 +997,7 @@ func Test_GetFlushState(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().GetFlushState(mock.Anything, mock.Anything).Return(&milvuspb.GetFlushStateResponse{
@@ -1038,7 +1038,7 @@ func Test_GetFlushAllState(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().GetFlushAllState(mock.Anything, mock.Anything).Return(&milvuspb.GetFlushAllStateResponse{
@@ -1080,7 +1080,7 @@ func Test_DropVirtualChannel(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().DropVirtualChannel(mock.Anything, mock.Anything).Return(&datapb.DropVirtualChannelResponse{
@@ -1122,7 +1122,7 @@ func Test_SetSegmentState(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().SetSegmentState(mock.Anything, mock.Anything).Return(&datapb.SetSegmentStateResponse{
@@ -1164,7 +1164,7 @@ func Test_Import(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().Import(mock.Anything, mock.Anything).Return(&datapb.ImportTaskResponse{
@@ -1206,7 +1206,7 @@ func Test_UpdateSegmentStatistics(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().UpdateSegmentStatistics(mock.Anything, mock.Anything).Return(merr.Success(), nil)
@@ -1244,7 +1244,7 @@ func Test_UpdateChannelCheckpoint(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().UpdateChannelCheckpoint(mock.Anything, mock.Anything).Return(merr.Success(), nil)
@@ -1282,7 +1282,7 @@ func Test_SaveImportSegment(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().SaveImportSegment(mock.Anything, mock.Anything).Return(merr.Success(), nil)
@@ -1320,7 +1320,7 @@ func Test_UnsetIsImportingState(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().UnsetIsImportingState(mock.Anything, mock.Anything).Return(merr.Success(), nil)
@@ -1358,7 +1358,7 @@ func Test_MarkSegmentsDropped(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().MarkSegmentsDropped(mock.Anything, mock.Anything).Return(merr.Success(), nil)
@@ -1395,7 +1395,7 @@ func Test_BroadcastAlteredCollection(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().BroadcastAlteredCollection(mock.Anything, mock.Anything).Return(merr.Success(), nil)
@@ -1432,7 +1432,7 @@ func Test_CheckHealth(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().CheckHealth(mock.Anything, mock.Anything).Return(&milvuspb.CheckHealthResponse{Status: merr.Success()}, nil)
@@ -1469,7 +1469,7 @@ func Test_GcConfirm(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().GcConfirm(mock.Anything, mock.Anything).Return(&datapb.GcConfirmResponse{Status: merr.Success()}, nil)
@@ -1506,7 +1506,7 @@ func Test_CreateIndex(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(merr.Success(), nil)
@@ -1543,7 +1543,7 @@ func Test_GetSegmentIndexState(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().GetSegmentIndexState(mock.Anything, mock.Anything).Return(&indexpb.GetSegmentIndexStateResponse{Status: merr.Success()}, nil)
@@ -1580,7 +1580,7 @@ func Test_GetIndexState(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().GetIndexState(mock.Anything, mock.Anything).Return(&indexpb.GetIndexStateResponse{Status: merr.Success()}, nil)
@@ -1617,7 +1617,7 @@ func Test_GetIndexInfos(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(&indexpb.GetIndexInfoResponse{Status: merr.Success()}, nil)
@@ -1654,7 +1654,7 @@ func Test_DescribeIndex(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(&indexpb.DescribeIndexResponse{Status: merr.Success()}, nil)
@@ -1691,7 +1691,7 @@ func Test_GetIndexStatistics(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().GetIndexStatistics(mock.Anything, mock.Anything).Return(&indexpb.GetIndexStatisticsResponse{Status: merr.Success()}, nil)
@@ -1728,7 +1728,7 @@ func Test_GetIndexBuildProgress(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().GetIndexBuildProgress(mock.Anything, mock.Anything).Return(&indexpb.GetIndexBuildProgressResponse{Status: merr.Success()}, nil)
@@ -1765,7 +1765,7 @@ func Test_DropIndex(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().DropIndex(mock.Anything, mock.Anything).Return(merr.Success(), nil)
@@ -1802,7 +1802,7 @@ func Test_ReportDataNodeTtMsgs(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().ReportDataNodeTtMsgs(mock.Anything, mock.Anything).Return(merr.Success(), nil)
@@ -1839,7 +1839,7 @@ func Test_GcControl(t *testing.T) {
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
 		return f(mockProxy)
 	})
-	client.grpcClient = mockGrpcClient
+	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
 	mockProxy.EXPECT().GcControl(mock.Anything, mock.Anything).Return(merr.Success(), nil)
