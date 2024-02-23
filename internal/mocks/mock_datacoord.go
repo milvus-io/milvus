@@ -2113,15 +2113,15 @@ func (_c *MockDataCoord_Init_Call) RunAndReturn(run func() error) *MockDataCoord
 }
 
 // ListImports provides a mock function with given fields: _a0, _a1
-func (_m *MockDataCoord) ListImports(_a0 context.Context, _a1 *internalpb.ListImportsRequest) (*internalpb.ListImportsResponse, error) {
+func (_m *MockDataCoord) ListImports(_a0 context.Context, _a1 *internalpb.ListImportsRequestInternal) (*internalpb.ListImportsResponse, error) {
 	ret := _m.Called(_a0, _a1)
 
 	var r0 *internalpb.ListImportsResponse
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.ListImportsRequest) (*internalpb.ListImportsResponse, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.ListImportsRequestInternal) (*internalpb.ListImportsResponse, error)); ok {
 		return rf(_a0, _a1)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.ListImportsRequest) *internalpb.ListImportsResponse); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.ListImportsRequestInternal) *internalpb.ListImportsResponse); ok {
 		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
@@ -2129,7 +2129,7 @@ func (_m *MockDataCoord) ListImports(_a0 context.Context, _a1 *internalpb.ListIm
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *internalpb.ListImportsRequest) error); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, *internalpb.ListImportsRequestInternal) error); ok {
 		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
@@ -2145,14 +2145,14 @@ type MockDataCoord_ListImports_Call struct {
 
 // ListImports is a helper method to define mock.On call
 //  - _a0 context.Context
-//  - _a1 *internalpb.ListImportsRequest
+//  - _a1 *internalpb.ListImportsRequestInternal
 func (_e *MockDataCoord_Expecter) ListImports(_a0 interface{}, _a1 interface{}) *MockDataCoord_ListImports_Call {
 	return &MockDataCoord_ListImports_Call{Call: _e.mock.On("ListImports", _a0, _a1)}
 }
 
-func (_c *MockDataCoord_ListImports_Call) Run(run func(_a0 context.Context, _a1 *internalpb.ListImportsRequest)) *MockDataCoord_ListImports_Call {
+func (_c *MockDataCoord_ListImports_Call) Run(run func(_a0 context.Context, _a1 *internalpb.ListImportsRequestInternal)) *MockDataCoord_ListImports_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*internalpb.ListImportsRequest))
+		run(args[0].(context.Context), args[1].(*internalpb.ListImportsRequestInternal))
 	})
 	return _c
 }
@@ -2162,7 +2162,7 @@ func (_c *MockDataCoord_ListImports_Call) Return(_a0 *internalpb.ListImportsResp
 	return _c
 }
 
-func (_c *MockDataCoord_ListImports_Call) RunAndReturn(run func(context.Context, *internalpb.ListImportsRequest) (*internalpb.ListImportsResponse, error)) *MockDataCoord_ListImports_Call {
+func (_c *MockDataCoord_ListImports_Call) RunAndReturn(run func(context.Context, *internalpb.ListImportsRequestInternal) (*internalpb.ListImportsResponse, error)) *MockDataCoord_ListImports_Call {
 	_c.Call.Return(run)
 	return _c
 }

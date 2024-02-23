@@ -27,7 +27,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -65,21 +65,21 @@ func TestImportUtil_NewImportTasks(t *testing.T) {
 		{
 			{
 				ImportFile:  &internalpb.ImportFile{Id: 0, Paths: []string{"a.json"}},
-				HashedStats: map[string]*datapb.PartitionStats{"c0": {PartitionDataSize: map[int64]int64{100: dataSize}}},
+				HashedStats: map[string]*datapb.PartitionImportStats{"c0": {PartitionDataSize: map[int64]int64{100: dataSize}}},
 			},
 			{
 				ImportFile:  &internalpb.ImportFile{Id: 1, Paths: []string{"b.json"}},
-				HashedStats: map[string]*datapb.PartitionStats{"c0": {PartitionDataSize: map[int64]int64{100: dataSize * 2}}},
+				HashedStats: map[string]*datapb.PartitionImportStats{"c0": {PartitionDataSize: map[int64]int64{100: dataSize * 2}}},
 			},
 		},
 		{
 			{
 				ImportFile:  &internalpb.ImportFile{Id: 2, Paths: []string{"c.npy", "d.npy"}},
-				HashedStats: map[string]*datapb.PartitionStats{"c0": {PartitionDataSize: map[int64]int64{100: dataSize}}},
+				HashedStats: map[string]*datapb.PartitionImportStats{"c0": {PartitionDataSize: map[int64]int64{100: dataSize}}},
 			},
 			{
 				ImportFile:  &internalpb.ImportFile{Id: 3, Paths: []string{"e.npy", "f.npy"}},
-				HashedStats: map[string]*datapb.PartitionStats{"c0": {PartitionDataSize: map[int64]int64{100: dataSize * 2}}},
+				HashedStats: map[string]*datapb.PartitionImportStats{"c0": {PartitionDataSize: map[int64]int64{100: dataSize * 2}}},
 			},
 		},
 	}
@@ -92,8 +92,8 @@ func TestImportUtil_NewImportTasks(t *testing.T) {
 		return id, id + n, nil
 	})
 	manager := NewMockManager(t)
-	manager.EXPECT().AllocImportSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-		RunAndReturn(func(ctx context.Context, taskID int64, collectionID int64, partitionID int64, vchannel string, schema *schemapb.CollectionSchema) (*SegmentInfo, error) {
+	manager.EXPECT().AllocImportSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(ctx context.Context, taskID int64, collectionID int64, partitionID int64, vchannel string) (*SegmentInfo, error) {
 			return &SegmentInfo{
 				SegmentInfo: &datapb.SegmentInfo{
 					ID:            rand.Int63(),
@@ -123,7 +123,7 @@ func TestImportUtil_AssembleRequest(t *testing.T) {
 			JobID:        0,
 			TaskID:       3,
 			CollectionID: 1,
-			State:        internalpb.ImportState_Pending,
+			State:        datapb.ImportTaskStateV2_Pending,
 		},
 	}
 	preimportReq := AssemblePreImportRequest(pt, job)
@@ -270,41 +270,22 @@ func TestImportUtil_ListBinlogsAndGroupBySegment(t *testing.T) {
 		deltaPrefix  = "mock-delta-binlog-prefix"
 	)
 
-	insertBinlogs := []string{
+	segmentInsertPaths := []string{
 		// segment 435978159261483008
-		"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/100/435978159903735821",
-		"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/100/435978159903735822",
-		"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/100/435978159903735823",
-		"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/101/435978159903735831",
-		"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/101/435978159903735832",
-		"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/101/435978159903735833",
-		"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/102/435978159903735841",
-		"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/102/435978159903735842",
-		"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/102/435978159903735843",
+		"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008",
 		// segment 435978159261483009
-		"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483009/100/435978159903735851",
-		"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483009/100/435978159903735852",
-		"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483009/100/435978159903735853",
-		"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483009/101/435978159903735861",
-		"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483009/101/435978159903735862",
-		"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483009/101/435978159903735863",
-		"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483009/102/435978159903735871",
-		"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483009/102/435978159903735872",
-		"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483009/102/435978159903735873",
+		"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483009",
 	}
 
-	deltaLogs := []string{
-		"backup/bak1/data/delta_log/435978159196147009/435978159196147010/435978159261483008/434574382554415105",
-		"backup/bak1/data/delta_log/435978159196147009/435978159196147010/435978159261483008/434574382554415106",
-
-		"backup/bak1/data/delta_log/435978159196147009/435978159196147010/435978159261483009/434574382554415115",
-		"backup/bak1/data/delta_log/435978159196147009/435978159196147010/435978159261483009/434574382554415116",
+	segmentDeltaPaths := []string{
+		"backup/bak1/data/delta_log/435978159196147009/435978159196147010/435978159261483008",
+		"backup/bak1/data/delta_log/435978159196147009/435978159196147010/435978159261483009",
 	}
 
 	ctx := context.Background()
 	cm := mocks2.NewChunkManager(t)
-	cm.EXPECT().ListWithPrefix(mock.Anything, insertPrefix, mock.Anything).Return(insertBinlogs, nil, nil)
-	cm.EXPECT().ListWithPrefix(mock.Anything, deltaPrefix, mock.Anything).Return(deltaLogs, nil, nil)
+	cm.EXPECT().ListWithPrefix(mock.Anything, insertPrefix, mock.Anything).Return(segmentInsertPaths, nil, nil)
+	cm.EXPECT().ListWithPrefix(mock.Anything, deltaPrefix, mock.Anything).Return(segmentDeltaPaths, nil, nil)
 
 	file := &internalpb.ImportFile{
 		Id:    1,
@@ -339,6 +320,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	catalog.EXPECT().SavePreImportTask(mock.Anything).Return(nil)
 	catalog.EXPECT().SaveImportTask(mock.Anything).Return(nil)
 	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil)
 
 	imeta, err := NewImportMeta(catalog)
 	assert.NoError(t, err)
@@ -346,9 +328,22 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	meta, err := newMeta(context.TODO(), catalog, nil)
 	assert.NoError(t, err)
 
+	file1 := &internalpb.ImportFile{
+		Id:    1,
+		Paths: []string{"a.json"},
+	}
+	file2 := &internalpb.ImportFile{
+		Id:    2,
+		Paths: []string{"b.json"},
+	}
+	file3 := &internalpb.ImportFile{
+		Id:    3,
+		Paths: []string{"c.json"},
+	}
 	job := &importJob{
 		ImportJob: &datapb.ImportJob{
 			JobID: 0,
+			Files: []*internalpb.ImportFile{file1, file2, file3},
 		},
 	}
 	err = imeta.AddJob(job)
@@ -358,8 +353,16 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 		PreImportTask: &datapb.PreImportTask{
 			JobID:  job.GetJobID(),
 			TaskID: 1,
-			State:  internalpb.ImportState_Failed,
+			State:  datapb.ImportTaskStateV2_Completed,
 			Reason: mockErr,
+			FileStats: []*datapb.ImportFileStats{
+				{
+					ImportFile: file1,
+				},
+				{
+					ImportFile: file2,
+				},
+			},
 		},
 	}
 	err = imeta.AddTask(pit1)
@@ -369,7 +372,12 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 		PreImportTask: &datapb.PreImportTask{
 			JobID:  job.GetJobID(),
 			TaskID: 2,
-			State:  internalpb.ImportState_Pending,
+			State:  datapb.ImportTaskStateV2_Completed,
+			FileStats: []*datapb.ImportFileStats{
+				{
+					ImportFile: file3,
+				},
+			},
 		},
 	}
 	err = imeta.AddTask(pit2)
@@ -380,21 +388,31 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 			JobID:      job.GetJobID(),
 			TaskID:     3,
 			SegmentIDs: []int64{10, 11, 12},
-			State:      internalpb.ImportState_Pending,
+			State:      datapb.ImportTaskStateV2_Pending,
+			FileStats: []*datapb.ImportFileStats{
+				{
+					ImportFile: file1,
+					TotalRows:  100,
+				},
+				{
+					ImportFile: file2,
+					TotalRows:  200,
+				},
+			},
 		},
 	}
 	err = imeta.AddTask(it1)
 	assert.NoError(t, err)
 	err = meta.AddSegment(ctx, &SegmentInfo{
-		SegmentInfo: &datapb.SegmentInfo{ID: 10, IsImporting: true, MaxRowNum: 100}, currRows: 50,
+		SegmentInfo: &datapb.SegmentInfo{ID: 10, IsImporting: true, State: commonpb.SegmentState_Flushed}, currRows: 50,
 	})
 	assert.NoError(t, err)
 	err = meta.AddSegment(ctx, &SegmentInfo{
-		SegmentInfo: &datapb.SegmentInfo{ID: 11, IsImporting: true, MaxRowNum: 100}, currRows: 50,
+		SegmentInfo: &datapb.SegmentInfo{ID: 11, IsImporting: true, State: commonpb.SegmentState_Flushed}, currRows: 50,
 	})
 	assert.NoError(t, err)
 	err = meta.AddSegment(ctx, &SegmentInfo{
-		SegmentInfo: &datapb.SegmentInfo{ID: 12, IsImporting: true, MaxRowNum: 100}, currRows: 50,
+		SegmentInfo: &datapb.SegmentInfo{ID: 12, IsImporting: true, State: commonpb.SegmentState_Flushed}, currRows: 50,
 	})
 	assert.NoError(t, err)
 
@@ -403,120 +421,103 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 			JobID:      job.GetJobID(),
 			TaskID:     4,
 			SegmentIDs: []int64{20, 21, 22},
-			State:      internalpb.ImportState_Pending,
+			State:      datapb.ImportTaskStateV2_Pending,
+			FileStats: []*datapb.ImportFileStats{
+				{
+					ImportFile: file3,
+					TotalRows:  300,
+				},
+			},
 		},
 	}
 	err = imeta.AddTask(it2)
 	assert.NoError(t, err)
 	err = meta.AddSegment(ctx, &SegmentInfo{
-		SegmentInfo: &datapb.SegmentInfo{ID: 20, IsImporting: true, MaxRowNum: 100}, currRows: 50,
+		SegmentInfo: &datapb.SegmentInfo{ID: 20, IsImporting: true, State: commonpb.SegmentState_Flushed}, currRows: 50,
 	})
 	assert.NoError(t, err)
 	err = meta.AddSegment(ctx, &SegmentInfo{
-		SegmentInfo: &datapb.SegmentInfo{ID: 21, IsImporting: true, MaxRowNum: 100}, currRows: 50,
+		SegmentInfo: &datapb.SegmentInfo{ID: 21, IsImporting: true, State: commonpb.SegmentState_Flushed}, currRows: 50,
 	})
 	assert.NoError(t, err)
 	err = meta.AddSegment(ctx, &SegmentInfo{
-		SegmentInfo: &datapb.SegmentInfo{ID: 22, IsImporting: true, MaxRowNum: 100}, currRows: 50,
+		SegmentInfo: &datapb.SegmentInfo{ID: 22, IsImporting: true, State: commonpb.SegmentState_Flushed}, currRows: 50,
 	})
 	assert.NoError(t, err)
 
-	var (
-		preparingProgress int64
-		preImportProgress int64
-		importProgress    int64
-		segStateProgress  int64
-	)
-
-	// with failed
+	// failed state
+	err = imeta.UpdateJob(job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(mockErr))
+	assert.NoError(t, err)
 	progress, state, reason := GetImportProgress(job.GetJobID(), imeta, meta)
 	assert.Equal(t, int64(0), progress)
-	assert.Equal(t, internalpb.ImportState_Failed, state)
+	assert.Equal(t, internalpb.ImportJobState_Failed, state)
 	assert.Equal(t, mockErr, reason)
 
-	// all pending
-	err = imeta.UpdateTask(pit1.GetTaskID(), UpdateState(internalpb.ImportState_Pending))
+	// pending state
+	err = imeta.UpdateJob(job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Pending))
 	assert.NoError(t, err)
 	progress, state, reason = GetImportProgress(job.GetJobID(), imeta, meta)
-	assert.Equal(t, int64(0), progress)
-	assert.Equal(t, internalpb.ImportState_InProgress, state)
+	assert.Equal(t, int64(10), progress)
+	assert.Equal(t, internalpb.ImportJobState_Pending, state)
 	assert.Equal(t, "", reason)
 
-	// in progress
-	err = imeta.UpdateTask(pit1.GetTaskID(), UpdateState(internalpb.ImportState_InProgress))
-	assert.NoError(t, err)
-	err = imeta.UpdateTask(pit2.GetTaskID(), UpdateState(internalpb.ImportState_InProgress))
-	assert.NoError(t, err)
-	err = imeta.UpdateTask(it1.GetTaskID(), UpdateState(internalpb.ImportState_InProgress))
-	assert.NoError(t, err)
-	err = imeta.UpdateTask(it2.GetTaskID(), UpdateState(internalpb.ImportState_InProgress))
+	// preImporting state
+	err = imeta.UpdateJob(job.GetJobID(), UpdateJobState(internalpb.ImportJobState_PreImporting))
 	assert.NoError(t, err)
 	progress, state, reason = GetImportProgress(job.GetJobID(), imeta, meta)
-	preparingProgress = 10
-	preImportProgress = 40 * 0
-	importProgress = 40 * 0.5
-	segStateProgress = 0
-	assert.Equal(t, preparingProgress+preImportProgress+importProgress+segStateProgress, progress)
-	assert.Equal(t, internalpb.ImportState_InProgress, state)
+	assert.Equal(t, int64(10+40), progress)
+	assert.Equal(t, internalpb.ImportJobState_Importing, state)
 	assert.Equal(t, "", reason)
 
-	// partial completed
-	err = imeta.UpdateTask(pit1.GetTaskID(), UpdateState(internalpb.ImportState_Completed))
-	assert.NoError(t, err)
-	err = imeta.UpdateTask(pit2.GetTaskID(), UpdateState(internalpb.ImportState_Completed))
+	// importing state, segmentImportedRows/totalRows = 0.5
+	err = imeta.UpdateJob(job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Importing))
 	assert.NoError(t, err)
 	progress, state, reason = GetImportProgress(job.GetJobID(), imeta, meta)
-	preparingProgress = 10
-	preImportProgress = 40
-	importProgress = 40 * 0.5
-	segStateProgress = 0
-	assert.Equal(t, preparingProgress+preImportProgress+importProgress+segStateProgress, progress)
-	assert.Equal(t, internalpb.ImportState_InProgress, state)
+	assert.Equal(t, int64(10+40+40*0.5), progress)
+	assert.Equal(t, internalpb.ImportJobState_Importing, state)
 	assert.Equal(t, "", reason)
 
-	// all completed, all segments is in importing state
-	err = imeta.UpdateTask(it1.GetTaskID(), UpdateState(internalpb.ImportState_Completed))
+	// importing state, segmentImportedRows/totalRows = 1, partial segments is in importing state
+	op1 := UpdateIsImporting(10, false)
+	op2 := UpdateImportedRows(10, 100)
+	err = meta.UpdateSegmentsInfo(op1, op2)
 	assert.NoError(t, err)
-	err = imeta.UpdateTask(it2.GetTaskID(), UpdateState(internalpb.ImportState_Completed))
+	op1 = UpdateIsImporting(20, false)
+	op2 = UpdateImportedRows(20, 100)
+	err = meta.UpdateSegmentsInfo(op1, op2)
+	assert.NoError(t, err)
+	err = meta.UpdateSegmentsInfo(UpdateImportedRows(11, 100))
+	assert.NoError(t, err)
+	err = meta.UpdateSegmentsInfo(UpdateImportedRows(12, 100))
+	assert.NoError(t, err)
+	err = meta.UpdateSegmentsInfo(UpdateImportedRows(21, 100))
+	assert.NoError(t, err)
+	err = meta.UpdateSegmentsInfo(UpdateImportedRows(22, 100))
 	assert.NoError(t, err)
 	progress, state, reason = GetImportProgress(job.GetJobID(), imeta, meta)
-	preparingProgress = 10
-	preImportProgress = 40
-	importProgress = 40
-	segStateProgress = 0
-	assert.Equal(t, preparingProgress+preImportProgress+importProgress+segStateProgress, progress)
-	assert.Equal(t, internalpb.ImportState_InProgress, state)
+	assert.Equal(t, int64(float32(10+40+40+10*2/6)), progress)
+	assert.Equal(t, internalpb.ImportJobState_Importing, state)
 	assert.Equal(t, "", reason)
 
-	// all completed, partial segments is in importing state
-	err = meta.UnsetIsImporting(10)
+	// importing state, no segment is in importing state
+	err = meta.UpdateSegmentsInfo(UpdateIsImporting(11, false))
 	assert.NoError(t, err)
-	err = meta.UnsetIsImporting(20)
+	err = meta.UpdateSegmentsInfo(UpdateIsImporting(12, false))
+	assert.NoError(t, err)
+	err = meta.UpdateSegmentsInfo(UpdateIsImporting(21, false))
+	assert.NoError(t, err)
+	err = meta.UpdateSegmentsInfo(UpdateIsImporting(22, false))
 	assert.NoError(t, err)
 	progress, state, reason = GetImportProgress(job.GetJobID(), imeta, meta)
-	preparingProgress = 10
-	preImportProgress = 40
-	importProgress = 40
-	segStateProgress = 10 * 2 / 6
-	assert.Equal(t, preparingProgress+preImportProgress+importProgress+segStateProgress, progress)
-	assert.Equal(t, internalpb.ImportState_InProgress, state)
+	assert.Equal(t, int64(10+40+40+10), progress)
+	assert.Equal(t, internalpb.ImportJobState_Importing, state)
 	assert.Equal(t, "", reason)
 
-	// all completed, no segment is in importing state
-	err = meta.UnsetIsImporting(11)
-	assert.NoError(t, err)
-	err = meta.UnsetIsImporting(12)
-	assert.NoError(t, err)
-	err = meta.UnsetIsImporting(21)
-	assert.NoError(t, err)
-	err = meta.UnsetIsImporting(22)
+	// completed state
+	err = imeta.UpdateJob(job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Completed))
 	assert.NoError(t, err)
 	progress, state, reason = GetImportProgress(job.GetJobID(), imeta, meta)
-	preparingProgress = 10
-	preImportProgress = 40
-	importProgress = 40
-	segStateProgress = 10
-	assert.Equal(t, preparingProgress+preImportProgress+importProgress+segStateProgress, progress)
-	assert.Equal(t, internalpb.ImportState_Completed, state)
+	assert.Equal(t, int64(100), progress)
+	assert.Equal(t, internalpb.ImportJobState_Completed, state)
 	assert.Equal(t, "", reason)
 }

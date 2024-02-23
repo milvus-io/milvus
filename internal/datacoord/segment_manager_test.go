@@ -296,9 +296,8 @@ func TestSegmentManager_AllocImportSegment(t *testing.T) {
 		assert.NoError(t, err)
 		sm, err := newSegmentManager(meta, alloc)
 		assert.NoError(t, err)
-		schema := newTestSchema()
 
-		segment, err := sm.AllocImportSegment(ctx, 0, 1, 1, "ch1", schema)
+		segment, err := sm.AllocImportSegment(ctx, 0, 1, 1, "ch1")
 		assert.NoError(t, err)
 		segment2 := meta.GetSegment(segment.GetID())
 		assert.NotNil(t, segment2)
@@ -312,7 +311,7 @@ func TestSegmentManager_AllocImportSegment(t *testing.T) {
 		assert.NoError(t, err)
 		sm, err := newSegmentManager(meta, alloc)
 		assert.NoError(t, err)
-		_, err = sm.AllocImportSegment(ctx, 0, 1, 1, "ch1", nil)
+		_, err = sm.AllocImportSegment(ctx, 0, 1, 1, "ch1")
 		assert.Error(t, err)
 	})
 
@@ -324,19 +323,7 @@ func TestSegmentManager_AllocImportSegment(t *testing.T) {
 		assert.NoError(t, err)
 		sm, err := newSegmentManager(meta, alloc)
 		assert.NoError(t, err)
-		_, err = sm.AllocImportSegment(ctx, 0, 1, 1, "ch1", nil)
-		assert.Error(t, err)
-	})
-
-	t.Run("nil schema", func(t *testing.T) {
-		alloc := NewNMockAllocator(t)
-		alloc.EXPECT().allocID(mock.Anything).Return(0, nil)
-		alloc.EXPECT().allocTimestamp(mock.Anything).Return(0, nil)
-		meta, err := newMemoryMeta()
-		assert.NoError(t, err)
-		sm, err := newSegmentManager(meta, alloc)
-		assert.NoError(t, err)
-		_, err = sm.AllocImportSegment(ctx, 0, 1, 1, "ch1", nil)
+		_, err = sm.AllocImportSegment(ctx, 0, 1, 1, "ch1")
 		assert.Error(t, err)
 	})
 
@@ -347,11 +334,10 @@ func TestSegmentManager_AllocImportSegment(t *testing.T) {
 		meta, err := newMemoryMeta()
 		assert.NoError(t, err)
 		sm, _ := newSegmentManager(meta, alloc)
-		schema := newTestSchema()
 		catalog := mocks.NewDataCoordCatalog(t)
 		catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(mockErr)
 		meta.catalog = catalog
-		_, err = sm.AllocImportSegment(ctx, 0, 1, 1, "ch1", schema)
+		_, err = sm.AllocImportSegment(ctx, 0, 1, 1, "ch1")
 		assert.Error(t, err)
 	})
 }

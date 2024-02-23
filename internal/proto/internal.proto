@@ -262,12 +262,13 @@ message Rate {
   double r = 2;
 }
 
-enum ImportState {
+enum ImportJobState {
   None = 0;
   Pending = 1;
-  InProgress = 2;
-  Failed = 3;
-  Completed = 4;
+  PreImporting = 2;
+  Importing = 3;
+  Failed = 4;
+  Completed = 5;
 }
 
 message ImportFile {
@@ -277,12 +278,13 @@ message ImportFile {
 }
 
 message ImportRequestInternal {
-  int64 collectionID = 1;
-  repeated int64 partitionIDs = 2;
-  repeated string channel_names = 3;
-  schema.CollectionSchema schema = 4;
-  repeated ImportFile files = 5;
-  repeated common.KeyValuePair options = 6;
+  int64 dbID = 1;
+  int64 collectionID = 2;
+  repeated int64 partitionIDs = 3;
+  repeated string channel_names = 4;
+  schema.CollectionSchema schema = 5;
+  repeated ImportFile files = 6;
+  repeated common.KeyValuePair options = 7;
 }
 
 message ImportRequest {
@@ -305,9 +307,14 @@ message GetImportProgressRequest {
 
 message GetImportProgressResponse {
   common.Status status = 1;
-  ImportState state = 2;
+  ImportJobState state = 2;
   string reason = 3;
   int64 progress = 4;
+}
+
+message ListImportsRequestInternal {
+  int64 dbID = 1;
+  int64 collectionID = 2;
 }
 
 message ListImportsRequest {
@@ -318,7 +325,7 @@ message ListImportsRequest {
 message ListImportsResponse {
   common.Status status = 1;
   repeated string jobIDs = 2;
-  repeated ImportState states = 3;
+  repeated ImportJobState states = 3;
   repeated string reasons = 4;
   repeated int64 progresses = 5;
 }

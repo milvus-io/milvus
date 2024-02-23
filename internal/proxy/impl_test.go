@@ -1609,6 +1609,9 @@ func TestProxy_ImportV2(t *testing.T) {
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
 
 		// normal case
+		mc := NewMockCache(t)
+		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
+		globalMetaCache = mc
 		dataCoord := mocks.NewMockDataCoordClient(t)
 		dataCoord.EXPECT().ListImports(mock.Anything, mock.Anything).Return(nil, nil)
 		node.dataCoord = dataCoord

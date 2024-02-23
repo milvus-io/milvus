@@ -70,46 +70,58 @@ func (s *ImportSchedulerSuite) SetupTest() {
 	})
 	s.imeta, err = NewImportMeta(s.catalog)
 	s.NoError(err)
-	s.scheduler = NewImportScheduler(s.meta, nil, s.cluster, s.alloc, s.imeta).(*importScheduler)
+	s.scheduler = NewImportScheduler(s.meta, s.cluster, s.alloc, s.imeta).(*importScheduler)
 }
 
 func (s *ImportSchedulerSuite) TestCheckErr() {
+	s.catalog.EXPECT().SaveImportJob(mock.Anything).Return(nil)
 	s.catalog.EXPECT().SavePreImportTask(mock.Anything).Return(nil)
 
+	var job ImportJob = &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:        0,
+			CollectionID: s.collectionID,
+			TimeoutTs:    math.MaxUint64,
+			Schema:       &schemapb.CollectionSchema{},
+			State:        internalpb.ImportJobState_Pending,
+		},
+	}
+	err := s.imeta.AddJob(job)
+	s.NoError(err)
 	var task ImportTask = &preImportTask{
 		PreImportTask: &datapb.PreImportTask{
 			JobID:        0,
 			TaskID:       1,
 			CollectionID: s.collectionID,
-			State:        internalpb.ImportState_InProgress,
+			State:        datapb.ImportTaskStateV2_InProgress,
 		},
 	}
-	err := s.imeta.AddTask(task)
+	err = s.imeta.AddTask(task)
 	s.NoError(err)
 
 	// checkErr and update state
 	s.scheduler.checkErr(task, merr.ErrNodeNotFound)
 	task = s.imeta.GetTask(task.GetTaskID())
-	s.Equal(internalpb.ImportState_Pending, task.GetState())
+	s.Equal(datapb.ImportTaskStateV2_Pending, task.GetState())
 
 	s.scheduler.checkErr(task, errors.New("mock err"))
-	task = s.imeta.GetTask(task.GetTaskID())
-	s.Equal(internalpb.ImportState_Failed, task.GetState())
+	job = s.imeta.GetJob(job.GetJobID())
+	s.Equal(internalpb.ImportJobState_Failed, job.GetState())
 
-	err = s.imeta.UpdateTask(task.GetTaskID(), UpdateState(internalpb.ImportState_None))
+	// update state failed
+	err = s.imeta.UpdateJob(job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Pending))
 	s.NoError(err)
-
-	// checkErr but update state failed
+	err = s.imeta.UpdateTask(task.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_None))
+	s.NoError(err)
 	s.catalog.ExpectedCalls = nil
+	s.catalog.EXPECT().SaveImportJob(mock.Anything).Return(errors.New("mock err"))
 	s.catalog.EXPECT().SavePreImportTask(mock.Anything).Return(errors.New("mock err"))
 
 	s.scheduler.checkErr(task, merr.ErrNodeNotFound)
-	task = s.imeta.GetTask(task.GetTaskID())
-	s.Equal(internalpb.ImportState_None, task.GetState())
+	s.Equal(datapb.ImportTaskStateV2_None, s.imeta.GetTask(task.GetTaskID()).GetState())
 
 	s.scheduler.checkErr(task, errors.New("mock err"))
-	task = s.imeta.GetTask(task.GetTaskID())
-	s.Equal(internalpb.ImportState_None, task.GetState())
+	s.Equal(internalpb.ImportJobState_Pending, s.imeta.GetJob(job.GetJobID()).GetState())
 }
 
 func (s *ImportSchedulerSuite) TestProcessPreImport() {
@@ -120,7 +132,7 @@ func (s *ImportSchedulerSuite) TestProcessPreImport() {
 			JobID:        0,
 			TaskID:       1,
 			CollectionID: s.collectionID,
-			State:        internalpb.ImportState_Pending,
+			State:        datapb.ImportTaskStateV2_Pending,
 		},
 	}
 	err := s.imeta.AddTask(task)
@@ -130,8 +142,8 @@ func (s *ImportSchedulerSuite) TestProcessPreImport() {
 			JobID:        0,
 			CollectionID: s.collectionID,
 			TimeoutTs:    math.MaxUint64,
+			Schema:       &schemapb.CollectionSchema{},
 		},
-		schema: &schemapb.CollectionSchema{},
 	}
 	err = s.imeta.AddJob(job)
 	s.NoError(err)
@@ -151,16 +163,16 @@ func (s *ImportSchedulerSuite) TestProcessPreImport() {
 	})
 	s.scheduler.process()
 	task = s.imeta.GetTask(task.GetTaskID())
-	s.Equal(internalpb.ImportState_InProgress, task.GetState())
+	s.Equal(datapb.ImportTaskStateV2_InProgress, task.GetState())
 	s.Equal(int64(nodeID), task.GetNodeID())
 
 	// inProgress -> completed
 	s.cluster.EXPECT().QueryPreImport(mock.Anything, mock.Anything).Return(&datapb.QueryPreImportResponse{
-		State: internalpb.ImportState_Completed,
+		State: datapb.ImportTaskStateV2_Completed,
 	}, nil)
 	s.scheduler.process()
 	task = s.imeta.GetTask(task.GetTaskID())
-	s.Equal(internalpb.ImportState_Completed, task.GetState())
+	s.Equal(datapb.ImportTaskStateV2_Completed, task.GetState())
 
 	// drop import task
 	s.cluster.EXPECT().DropImport(mock.Anything, mock.Anything).Return(nil)
@@ -177,10 +189,10 @@ func (s *ImportSchedulerSuite) TestProcessImport() {
 			JobID:        0,
 			TaskID:       1,
 			CollectionID: s.collectionID,
-			State:        internalpb.ImportState_Pending,
+			State:        datapb.ImportTaskStateV2_Pending,
 			FileStats: []*datapb.ImportFileStats{
 				{
-					HashedStats: map[string]*datapb.PartitionStats{
+					HashedStats: map[string]*datapb.PartitionImportStats{
 						"channel1": {
 							PartitionRows: map[int64]int64{
 								int64(2): 100,
@@ -202,9 +214,9 @@ func (s *ImportSchedulerSuite) TestProcessImport() {
 			CollectionID: s.collectionID,
 			PartitionIDs: []int64{2},
 			Vchannels:    []string{"channel1"},
+			Schema:       &schemapb.CollectionSchema{},
 			TimeoutTs:    math.MaxUint64,
 		},
-		schema: &schemapb.CollectionSchema{},
 	}
 	err = s.imeta.AddJob(job)
 	s.NoError(err)
@@ -226,7 +238,7 @@ func (s *ImportSchedulerSuite) TestProcessImport() {
 	})
 	s.scheduler.process()
 	task = s.imeta.GetTask(task.GetTaskID())
-	s.Equal(internalpb.ImportState_InProgress, task.GetState())
+	s.Equal(datapb.ImportTaskStateV2_InProgress, task.GetState())
 	s.Equal(int64(nodeID), task.GetNodeID())
 
 	// inProgress -> completed
@@ -234,11 +246,11 @@ func (s *ImportSchedulerSuite) TestProcessImport() {
 		return call.Method != "QueryImport"
 	})
 	s.cluster.EXPECT().QueryImport(mock.Anything, mock.Anything).Return(&datapb.QueryImportResponse{
-		State: internalpb.ImportState_Completed,
+		State: datapb.ImportTaskStateV2_Completed,
 	}, nil)
 	s.scheduler.process()
 	task = s.imeta.GetTask(task.GetTaskID())
-	s.Equal(internalpb.ImportState_Completed, task.GetState())
+	s.Equal(datapb.ImportTaskStateV2_Completed, task.GetState())
 
 	// drop import task
 	s.cluster.EXPECT().DropImport(mock.Anything, mock.Anything).Return(nil)
@@ -255,8 +267,9 @@ func (s *ImportSchedulerSuite) TestProcessFailed() {
 			JobID:        0,
 			TaskID:       1,
 			CollectionID: s.collectionID,
+			NodeID:       6,
 			SegmentIDs:   []int64{2, 3},
-			State:        internalpb.ImportState_Failed,
+			State:        datapb.ImportTaskStateV2_Failed,
 		},
 	}
 	err := s.imeta.AddTask(task)
@@ -267,9 +280,9 @@ func (s *ImportSchedulerSuite) TestProcessFailed() {
 			CollectionID: s.collectionID,
 			PartitionIDs: []int64{2},
 			Vchannels:    []string{"channel1"},
+			Schema:       &schemapb.CollectionSchema{},
 			TimeoutTs:    math.MaxUint64,
 		},
-		schema: &schemapb.CollectionSchema{},
 	}
 	err = s.imeta.AddJob(job)
 	s.NoError(err)
@@ -305,8 +318,9 @@ func (s *ImportSchedulerSuite) TestProcessFailed() {
 		s.Nil(segment)
 	}
 	task = s.imeta.GetTask(task.GetTaskID())
-	s.Equal(internalpb.ImportState_Failed, task.GetState())
+	s.Equal(datapb.ImportTaskStateV2_Failed, task.GetState())
 	s.Equal(0, len(task.(*importTask).GetSegmentIDs()))
+	s.Equal(int64(NullNodeID), task.GetNodeID())
 }
 
 func TestImportScheduler(t *testing.T) {

@@ -644,7 +644,7 @@ func (c *Client) GetImportProgress(ctx context.Context, in *internalpb.GetImport
 	})
 }
 
-func (c *Client) ListImports(ctx context.Context, in *internalpb.ListImportsRequest, opts ...grpc.CallOption) (*internalpb.ListImportsResponse, error) {
+func (c *Client) ListImports(ctx context.Context, in *internalpb.ListImportsRequestInternal, opts ...grpc.CallOption) (*internalpb.ListImportsResponse, error) {
 	return wrapGrpcCall(ctx, c, func(client datapb.DataCoordClient) (*internalpb.ListImportsResponse, error) {
 		return client.ListImports(ctx, in)
 	})

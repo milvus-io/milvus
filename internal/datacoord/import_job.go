@@ -17,21 +17,41 @@
 package datacoord
 
 import (
+	"time"
+
 	"github.com/golang/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
 type ImportJobFilter func(job ImportJob) bool
 
+func WithCollectionID(collectionID int64) ImportJobFilter {
+	return func(job ImportJob) bool {
+		return job.GetCollectionID() == collectionID
+	}
+}
+
 type UpdateJobAction func(job ImportJob)
 
-func UpdateJobSchema(schema *schemapb.CollectionSchema) UpdateJobAction {
+func UpdateJobState(state internalpb.ImportJobState) UpdateJobAction {
 	return func(job ImportJob) {
-		job.(*importJob).schema = schema
+		job.(*importJob).ImportJob.State = state
+		if state == internalpb.ImportJobState_Completed || state == internalpb.ImportJobState_Failed {
+			dur := Params.DataCoordCfg.ImportTaskRetention.GetAsDuration(time.Second)
+			cleanupTs := tsoutil.ComposeTSByTime(time.Now().Add(dur), 0)
+			job.(*importJob).ImportJob.CleanupTs = cleanupTs
+		}
+	}
+}
+
+func UpdateJobReason(reason string) UpdateJobAction {
+	return func(job ImportJob) {
+		job.(*importJob).ImportJob.Reason = reason
 	}
 }
 
@@ -42,6 +62,9 @@ type ImportJob interface {
 	GetVchannels() []string
 	GetSchema() *schemapb.CollectionSchema
 	GetTimeoutTs() uint64
+	GetCleanupTs() uint64
+	GetState() internalpb.ImportJobState
+	GetReason() string
 	GetFiles() []*internalpb.ImportFile
 	GetOptions() []*commonpb.KeyValuePair
 	Clone() ImportJob
@@ -49,16 +72,10 @@ type ImportJob interface {
 
 type importJob struct {
 	*datapb.ImportJob
-	schema *schemapb.CollectionSchema
-}
-
-func (j *importJob) GetSchema() *schemapb.CollectionSchema {
-	return j.schema
 }
 
 func (j *importJob) Clone() ImportJob {
 	return &importJob{
 		ImportJob: proto.Clone(j.ImportJob).(*datapb.ImportJob),
-		schema:    j.schema,
 	}
 }

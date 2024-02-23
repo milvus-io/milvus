@@ -494,6 +494,6 @@ func (s *Server) GetImportProgress(ctx context.Context, in *internalpb.GetImport
 	return s.dataCoord.GetImportProgress(ctx, in)
 }
 
-func (s *Server) ListImports(ctx context.Context, in *internalpb.ListImportsRequest) (*internalpb.ListImportsResponse, error) {
+func (s *Server) ListImports(ctx context.Context, in *internalpb.ListImportsRequestInternal) (*internalpb.ListImportsResponse, error) {
 	return s.dataCoord.ListImports(ctx, in)
 }

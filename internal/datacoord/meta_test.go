@@ -693,6 +693,11 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 			UpdateImportedRows(1, 0),
 		)
 		assert.NoError(t, err)
+
+		err = meta.UpdateSegmentsInfo(
+			UpdateIsImporting(1, true),
+		)
+		assert.NoError(t, err)
 	})
 
 	t.Run("update checkpoints and start position of non existed segment", func(t *testing.T) {

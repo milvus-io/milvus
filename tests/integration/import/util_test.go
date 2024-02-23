@@ -668,9 +668,9 @@ func WaitForImportDone(ctx context.Context, c *integration.MiniClusterV2, jobID 
 			return err
 		}
 		switch resp.GetState() {
-		case internalpb.ImportState_Completed:
+		case internalpb.ImportJobState_Completed:
 			return nil
-		case internalpb.ImportState_Failed:
+		case internalpb.ImportJobState_Failed:
 			return merr.WrapErrImportFailed(resp.GetReason())
 		default:
 			log.Info("import progress", zap.String("jobID", jobID),

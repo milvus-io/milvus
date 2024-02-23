@@ -2665,7 +2665,7 @@ func (_c *MockDataCoordClient_ImportV2_Call) RunAndReturn(run func(context.Conte
 }
 
 // ListImports provides a mock function with given fields: ctx, in, opts
-func (_m *MockDataCoordClient) ListImports(ctx context.Context, in *internalpb.ListImportsRequest, opts ...grpc.CallOption) (*internalpb.ListImportsResponse, error) {
+func (_m *MockDataCoordClient) ListImports(ctx context.Context, in *internalpb.ListImportsRequestInternal, opts ...grpc.CallOption) (*internalpb.ListImportsResponse, error) {
 	_va := make([]interface{}, len(opts))
 	for _i := range opts {
 		_va[_i] = opts[_i]
@@ -2677,10 +2677,10 @@ func (_m *MockDataCoordClient) ListImports(ctx context.Context, in *internalpb.L
 
 	var r0 *internalpb.ListImportsResponse
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.ListImportsRequest, ...grpc.CallOption) (*internalpb.ListImportsResponse, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.ListImportsRequestInternal, ...grpc.CallOption) (*internalpb.ListImportsResponse, error)); ok {
 		return rf(ctx, in, opts...)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.ListImportsRequest, ...grpc.CallOption) *internalpb.ListImportsResponse); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.ListImportsRequestInternal, ...grpc.CallOption) *internalpb.ListImportsResponse); ok {
 		r0 = rf(ctx, in, opts...)
 	} else {
 		if ret.Get(0) != nil {
@@ -2688,7 +2688,7 @@ func (_m *MockDataCoordClient) ListImports(ctx context.Context, in *internalpb.L
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *internalpb.ListImportsRequest, ...grpc.CallOption) error); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, *internalpb.ListImportsRequestInternal, ...grpc.CallOption) error); ok {
 		r1 = rf(ctx, in, opts...)
 	} else {
 		r1 = ret.Error(1)
@@ -2704,14 +2704,14 @@ type MockDataCoordClient_ListImports_Call struct {
 
 // ListImports is a helper method to define mock.On call
 //  - ctx context.Context
-//  - in *internalpb.ListImportsRequest
+//  - in *internalpb.ListImportsRequestInternal
 //  - opts ...grpc.CallOption
 func (_e *MockDataCoordClient_Expecter) ListImports(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_ListImports_Call {
 	return &MockDataCoordClient_ListImports_Call{Call: _e.mock.On("ListImports",
 		append([]interface{}{ctx, in}, opts...)...)}
 }
 
-func (_c *MockDataCoordClient_ListImports_Call) Run(run func(ctx context.Context, in *internalpb.ListImportsRequest, opts ...grpc.CallOption)) *MockDataCoordClient_ListImports_Call {
+func (_c *MockDataCoordClient_ListImports_Call) Run(run func(ctx context.Context, in *internalpb.ListImportsRequestInternal, opts ...grpc.CallOption)) *MockDataCoordClient_ListImports_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		variadicArgs := make([]grpc.CallOption, len(args)-2)
 		for i, a := range args[2:] {
@@ -2719,7 +2719,7 @@ func (_c *MockDataCoordClient_ListImports_Call) Run(run func(ctx context.Context
 				variadicArgs[i] = a.(grpc.CallOption)
 			}
 		}
-		run(args[0].(context.Context), args[1].(*internalpb.ListImportsRequest), variadicArgs...)
+		run(args[0].(context.Context), args[1].(*internalpb.ListImportsRequestInternal), variadicArgs...)
 	})
 	return _c
 }
@@ -2729,7 +2729,7 @@ func (_c *MockDataCoordClient_ListImports_Call) Return(_a0 *internalpb.ListImpor
 	return _c
 }
 
-func (_c *MockDataCoordClient_ListImports_Call) RunAndReturn(run func(context.Context, *internalpb.ListImportsRequest, ...grpc.CallOption) (*internalpb.ListImportsResponse, error)) *MockDataCoordClient_ListImports_Call {
+func (_c *MockDataCoordClient_ListImports_Call) RunAndReturn(run func(context.Context, *internalpb.ListImportsRequestInternal, ...grpc.CallOption) (*internalpb.ListImportsResponse, error)) *MockDataCoordClient_ListImports_Call {
 	_c.Call.Return(run)
 	return _c
 }

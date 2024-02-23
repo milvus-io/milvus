@@ -1434,17 +1434,17 @@ func TestImportV2(t *testing.T) {
 		catalog.EXPECT().ListImportJobs().Return(nil, nil)
 		catalog.EXPECT().ListPreImportTasks().Return(nil, nil)
 		catalog.EXPECT().ListImportTasks().Return(nil, nil)
-		catalog.EXPECT().SavePreImportTask(mock.Anything).Return(nil)
+		catalog.EXPECT().SaveImportJob(mock.Anything).Return(nil)
 		s.importMeta, err = NewImportMeta(catalog)
 		assert.NoError(t, err)
-		var task ImportTask = &preImportTask{
-			PreImportTask: &datapb.PreImportTask{
+		var job ImportJob = &importJob{
+			ImportJob: &datapb.ImportJob{
 				JobID:  0,
-				TaskID: 1,
-				State:  internalpb.ImportState_Failed,
+				Schema: &schemapb.CollectionSchema{},
+				State:  internalpb.ImportJobState_Failed,
 			},
 		}
-		err = s.importMeta.AddTask(task)
+		err = s.importMeta.AddJob(job)
 		assert.NoError(t, err)
 		resp, err = s.GetImportProgress(ctx, &internalpb.GetImportProgressRequest{
 			JobID: "0",
@@ -1452,7 +1452,7 @@ func TestImportV2(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, int32(0), resp.GetStatus().GetCode())
 		assert.Equal(t, int64(0), resp.GetProgress())
-		assert.Equal(t, internalpb.ImportState_Failed, resp.GetState())
+		assert.Equal(t, internalpb.ImportJobState_Failed, resp.GetState())
 	})
 
 	t.Run("ListImports", func(t *testing.T) {
@@ -1475,9 +1475,10 @@ func TestImportV2(t *testing.T) {
 		assert.NoError(t, err)
 		var job ImportJob = &importJob{
 			ImportJob: &datapb.ImportJob{
-				JobID: 0,
+				JobID:        0,
+				CollectionID: 1,
+				Schema:       &schemapb.CollectionSchema{},
 			},
-			schema: &schemapb.CollectionSchema{},
 		}
 		err = s.importMeta.AddJob(job)
 		assert.NoError(t, err)
@@ -1485,12 +1486,14 @@ func TestImportV2(t *testing.T) {
 			PreImportTask: &datapb.PreImportTask{
 				JobID:  0,
 				TaskID: 1,
-				State:  internalpb.ImportState_Failed,
+				State:  datapb.ImportTaskStateV2_Failed,
 			},
 		}
 		err = s.importMeta.AddTask(task)
 		assert.NoError(t, err)
-		resp, err = s.ListImports(ctx, &internalpb.ListImportsRequest{})
+		resp, err = s.ListImports(ctx, &internalpb.ListImportsRequestInternal{
+			CollectionID: 1,
+		})
 		assert.NoError(t, err)
 		assert.Equal(t, int32(0), resp.GetStatus().GetCode())
 		assert.Equal(t, 1, len(resp.GetJobIDs()))

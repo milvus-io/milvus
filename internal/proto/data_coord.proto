@@ -99,7 +99,7 @@ service DataCoord {
   // importV2
   rpc ImportV2(internal.ImportRequestInternal) returns(internal.ImportResponse){}
   rpc GetImportProgress(internal.GetImportProgressRequest) returns(internal.GetImportProgressResponse){}
-  rpc ListImports(internal.ListImportsRequest) returns(internal.ListImportsResponse){}
+  rpc ListImports(internal.ListImportsRequestInternal) returns(internal.ListImportsResponse){}
 }
 
 service DataNode {
@@ -802,7 +802,7 @@ message QueryPreImportRequest {
   int64 taskID = 3;
 }
 
-message PartitionStats {
+message PartitionImportStats {
   map<int64, int64> partition_rows = 1; // partitionID -> numRows
   map<int64, int64> partition_data_size = 2; // partitionID -> dataSize
 }
@@ -812,13 +812,13 @@ message ImportFileStats {
   int64 file_size = 2;
   int64 total_rows = 3;
   int64 total_memory_size = 4;
-  map<string, PartitionStats> hashed_stats = 5; // channel -> PartitionStats
+  map<string, PartitionImportStats> hashed_stats = 5; // channel -> PartitionImportStats
 }
 
 message QueryPreImportResponse {
   common.Status status = 1;
   int64 taskID = 2;
-  internal.ImportState state = 3;
+  ImportTaskStateV2 state = 3;
   string reason = 4;
   int64 slots = 5;
   repeated ImportFileStats file_stats = 6;
@@ -841,7 +841,7 @@ message ImportSegmentInfo {
 message QueryImportResponse {
   common.Status status = 1;
   int64 taskID = 2;
-  internal.ImportState state = 3;
+  ImportTaskStateV2 state = 3;
   string reason = 4;
   int64 slots = 5;
   repeated ImportSegmentInfo import_segments_info = 6;
@@ -855,12 +855,25 @@ message DropImportRequest {
 
 message ImportJob {
   int64 jobID = 1;
-  int64 collectionID = 2;
-  repeated int64 partitionIDs = 3;
-  repeated string vchannels = 4;
-  uint64 timeout_ts = 5;
-  repeated internal.ImportFile files = 6;
-  repeated common.KeyValuePair options = 7;
+  int64 dbID = 2;
+  int64 collectionID = 3;
+  repeated int64 partitionIDs = 4;
+  repeated string vchannels = 5;
+  schema.CollectionSchema schema = 6;
+  uint64 timeout_ts = 7;
+  uint64 cleanup_ts = 8;
+  internal.ImportJobState state = 9;
+  string reason = 10;
+  repeated internal.ImportFile files = 11;
+  repeated common.KeyValuePair options = 12;
+}
+
+enum ImportTaskStateV2 {
+  None = 0;
+  Pending = 1;
+  InProgress = 2;
+  Failed = 3;
+  Completed = 4;
 }
 
 message PreImportTask {
@@ -868,7 +881,7 @@ message PreImportTask {
   int64 taskID = 2;
   int64 collectionID = 3;
   int64 nodeID = 6;
-  internal.ImportState state = 7;
+  ImportTaskStateV2 state = 7;
   string reason = 8;
   repeated ImportFileStats file_stats = 10;
 }
@@ -879,7 +892,7 @@ message ImportTaskV2 {
   int64 collectionID = 3;
   repeated int64 segmentIDs = 4;
   int64 nodeID = 5;
-  internal.ImportState state = 6;
+  ImportTaskStateV2 state = 6;
   string reason = 7;
   repeated ImportFileStats file_stats = 9;
 }

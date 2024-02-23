@@ -26,10 +26,13 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	broker2 "github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
 type ImportCheckerSuite struct {
@@ -73,7 +76,9 @@ func (s *ImportCheckerSuite) SetupTest() {
 			CollectionID: 1,
 			PartitionIDs: []int64{2},
 			Vchannels:    []string{"ch0"},
+			State:        internalpb.ImportJobState_Pending,
 			TimeoutTs:    1000,
+			CleanupTs:    tsoutil.GetCurrentTime(),
 			Files: []*internalpb.ImportFile{
 				{
 					Id:    1,
@@ -106,7 +111,7 @@ func (s *ImportCheckerSuite) TestLogStats() {
 		PreImportTask: &datapb.PreImportTask{
 			JobID:  s.jobID,
 			TaskID: 1,
-			State:  internalpb.ImportState_Failed,
+			State:  datapb.ImportTaskStateV2_Failed,
 		},
 	}
 	err := s.imeta.AddTask(pit1)
@@ -117,7 +122,7 @@ func (s *ImportCheckerSuite) TestLogStats() {
 			JobID:      s.jobID,
 			TaskID:     2,
 			SegmentIDs: []int64{10, 11, 12},
-			State:      internalpb.ImportState_Pending,
+			State:      datapb.ImportTaskStateV2_Pending,
 		},
 	}
 	err = s.imeta.AddTask(it1)
@@ -126,10 +131,10 @@ func (s *ImportCheckerSuite) TestLogStats() {
 	s.checker.LogStats()
 }
 
-func (s *ImportCheckerSuite) TestCheckState() {
+func (s *ImportCheckerSuite) TestCheckJob() {
 	job := s.imeta.GetJob(s.jobID)
 
-	// test checkLackPreImport
+	// test checkPendingJob
 	alloc := s.checker.alloc.(*NMockAllocator)
 	alloc.EXPECT().allocN(mock.Anything).RunAndReturn(func(n int64) (int64, int64, error) {
 		id := rand.Int63()
@@ -138,34 +143,34 @@ func (s *ImportCheckerSuite) TestCheckState() {
 	catalog := s.imeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
 	catalog.EXPECT().SavePreImportTask(mock.Anything).Return(nil)
 
-	s.checker.checkLackPreImport(job)
+	s.checker.checkPendingJob(job)
 	preimportTasks := s.imeta.GetTaskBy(WithJob(job.GetJobID()), WithType(PreImportTaskType))
 	s.Equal(2, len(preimportTasks))
-	s.checker.checkLackPreImport(job) // no lack
+	s.Equal(internalpb.ImportJobState_PreImporting, s.imeta.GetJob(job.GetJobID()).GetState())
+	s.checker.checkPendingJob(job) // no lack
 	preimportTasks = s.imeta.GetTaskBy(WithJob(job.GetJobID()), WithType(PreImportTaskType))
 	s.Equal(2, len(preimportTasks))
+	s.Equal(internalpb.ImportJobState_PreImporting, s.imeta.GetJob(job.GetJobID()).GetState())
 
-	// test checkLackImports
+	// test checkPreImportingJob
 	catalog.EXPECT().SaveImportTask(mock.Anything).Return(nil)
 	for _, t := range preimportTasks {
-		err := s.imeta.UpdateTask(t.GetTaskID(), UpdateState(internalpb.ImportState_Completed))
+		err := s.imeta.UpdateTask(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Completed))
 		s.NoError(err)
 	}
 
-	s.checker.checkLackImports(job)
+	s.checker.checkPreImportingJob(job)
 	importTasks := s.imeta.GetTaskBy(WithJob(job.GetJobID()), WithType(ImportTaskType))
 	s.Equal(1, len(importTasks))
-	s.checker.checkLackImports(job) // no lack
+	s.Equal(internalpb.ImportJobState_Importing, s.imeta.GetJob(job.GetJobID()).GetState())
+	s.checker.checkPreImportingJob(job) // no lack
 	importTasks = s.imeta.GetTaskBy(WithJob(job.GetJobID()), WithType(ImportTaskType))
 	s.Equal(1, len(importTasks))
+	s.Equal(internalpb.ImportJobState_Importing, s.imeta.GetJob(job.GetJobID()).GetState())
 
-	// test checkImportState
-	sm := s.checker.sm.(*MockManager)
-	sm.EXPECT().FlushImportSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-	cluster := s.checker.cluster.(*MockCluster)
-	cluster.EXPECT().AddImportSegment(mock.Anything, mock.Anything).Return(nil, nil)
-	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
-	s.checker.checkImportState(job) // not completed
+	// test checkImportingJob
+	s.checker.checkImportingJob(job) // not completed
+	s.Equal(internalpb.ImportJobState_Importing, s.imeta.GetJob(job.GetJobID()).GetState())
 	for _, t := range importTasks {
 		task := s.imeta.GetTask(t.GetTaskID())
 		for _, id := range task.(*importTask).GetSegmentIDs() {
@@ -173,17 +178,31 @@ func (s *ImportCheckerSuite) TestCheckState() {
 			s.Equal(true, segment.GetIsImporting())
 		}
 	}
+	sm := s.checker.sm.(*MockManager)
+	sm.EXPECT().FlushImportSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	cluster := s.checker.cluster.(*MockCluster)
+	cluster.EXPECT().AddImportSegment(mock.Anything, mock.Anything).Return(nil, nil)
+	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().SaveChannelCheckpoint(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	for _, t := range importTasks {
 		segment := &SegmentInfo{
-			SegmentInfo: &datapb.SegmentInfo{ID: rand.Int63(), IsImporting: true},
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            rand.Int63(),
+				State:         commonpb.SegmentState_Flushed,
+				IsImporting:   true,
+				InsertChannel: "ch0",
+			},
 		}
 		err := s.checker.meta.AddSegment(context.Background(), segment)
 		s.NoError(err)
-		err = s.imeta.UpdateTask(t.GetTaskID(), UpdateState(internalpb.ImportState_Completed),
+		err = s.imeta.UpdateTask(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Completed),
 			UpdateSegmentIDs([]int64{segment.GetID()}))
 		s.NoError(err)
+		err = s.checker.meta.UpdateChannelCheckpoint(segment.GetInsertChannel(), &msgpb.MsgPosition{MsgID: []byte{0}})
+		s.NoError(err)
 	}
-	s.checker.checkImportState(job)
+	s.checker.checkImportingJob(job)
 	for _, t := range importTasks {
 		task := s.imeta.GetTask(t.GetTaskID())
 		for _, id := range task.(*importTask).GetSegmentIDs() {
@@ -191,59 +210,68 @@ func (s *ImportCheckerSuite) TestCheckState() {
 			s.Equal(false, segment.GetIsImporting())
 		}
 	}
+	s.Equal(internalpb.ImportJobState_Completed, s.imeta.GetJob(job.GetJobID()).GetState())
 }
 
-func (s *ImportCheckerSuite) TestCheckState_Failed() {
+func (s *ImportCheckerSuite) TestCheckJob_Failed() {
 	mockErr := errors.New("mock err")
 	job := s.imeta.GetJob(s.jobID)
 
-	// test checkLackPreImport
+	// test checkPendingJob
 	alloc := s.checker.alloc.(*NMockAllocator)
 	alloc.EXPECT().allocN(mock.Anything).Return(0, 0, nil)
 	catalog := s.imeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
 	catalog.EXPECT().SavePreImportTask(mock.Anything).Return(mockErr)
-	s.checker.checkLackPreImport(job)
+	s.checker.checkPendingJob(job)
 	preimportTasks := s.imeta.GetTaskBy(WithJob(job.GetJobID()), WithType(PreImportTaskType))
 	s.Equal(0, len(preimportTasks))
+	s.Equal(internalpb.ImportJobState_Pending, s.imeta.GetJob(job.GetJobID()).GetState())
 
 	alloc.ExpectedCalls = nil
 	alloc.EXPECT().allocN(mock.Anything).Return(0, 0, mockErr)
-	s.checker.checkLackPreImport(job)
+	s.checker.checkPendingJob(job)
 	preimportTasks = s.imeta.GetTaskBy(WithJob(job.GetJobID()), WithType(PreImportTaskType))
 	s.Equal(0, len(preimportTasks))
+	s.Equal(internalpb.ImportJobState_Pending, s.imeta.GetJob(job.GetJobID()).GetState())
 
 	alloc.ExpectedCalls = nil
 	alloc.EXPECT().allocN(mock.Anything).Return(0, 0, nil)
 	catalog.ExpectedCalls = nil
+	catalog.EXPECT().SaveImportJob(mock.Anything).Return(nil)
 	catalog.EXPECT().SavePreImportTask(mock.Anything).Return(nil)
-	s.checker.checkLackPreImport(job)
+	s.checker.checkPendingJob(job)
 	preimportTasks = s.imeta.GetTaskBy(WithJob(job.GetJobID()), WithType(PreImportTaskType))
 	s.Equal(2, len(preimportTasks))
+	s.Equal(internalpb.ImportJobState_PreImporting, s.imeta.GetJob(job.GetJobID()).GetState())
 
-	// test checkLackImports
+	// test checkPreImportingJob
 	for _, t := range preimportTasks {
-		err := s.imeta.UpdateTask(t.GetTaskID(), UpdateState(internalpb.ImportState_Completed))
+		err := s.imeta.UpdateTask(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Completed))
 		s.NoError(err)
 	}
 
 	catalog.ExpectedCalls = nil
 	catalog.EXPECT().SaveImportTask(mock.Anything).Return(mockErr)
-	s.checker.checkLackImports(job)
+	s.checker.checkPreImportingJob(job)
 	importTasks := s.imeta.GetTaskBy(WithJob(job.GetJobID()), WithType(ImportTaskType))
 	s.Equal(0, len(importTasks))
+	s.Equal(internalpb.ImportJobState_PreImporting, s.imeta.GetJob(job.GetJobID()).GetState())
 
 	alloc.ExpectedCalls = nil
 	alloc.EXPECT().allocN(mock.Anything).Return(0, 0, mockErr)
 	importTasks = s.imeta.GetTaskBy(WithJob(job.GetJobID()), WithType(ImportTaskType))
 	s.Equal(0, len(importTasks))
+	s.Equal(internalpb.ImportJobState_PreImporting, s.imeta.GetJob(job.GetJobID()).GetState())
 
 	catalog.ExpectedCalls = nil
+	catalog.EXPECT().SaveImportJob(mock.Anything).Return(nil)
 	catalog.EXPECT().SaveImportTask(mock.Anything).Return(nil)
 	alloc.ExpectedCalls = nil
 	alloc.EXPECT().allocN(mock.Anything).Return(0, 0, nil)
-	s.checker.checkLackImports(job)
+	s.checker.checkPreImportingJob(job)
 	importTasks = s.imeta.GetTaskBy(WithJob(job.GetJobID()), WithType(ImportTaskType))
 	s.Equal(1, len(importTasks))
+	s.Equal(internalpb.ImportJobState_Importing, s.imeta.GetJob(job.GetJobID()).GetState())
 }
 
 func (s *ImportCheckerSuite) TestCheckTimeout() {
@@ -253,16 +281,16 @@ func (s *ImportCheckerSuite) TestCheckTimeout() {
 		PreImportTask: &datapb.PreImportTask{
 			JobID:  s.jobID,
 			TaskID: 1,
-			State:  internalpb.ImportState_InProgress,
+			State:  datapb.ImportTaskStateV2_InProgress,
 		},
 	}
 	err := s.imeta.AddTask(task)
 	s.NoError(err)
-	s.checker.checkTimeout(s.jobID)
+	s.checker.checkTimeout(s.imeta.GetJob(s.jobID))
 
-	task = s.imeta.GetTask(task.GetTaskID())
-	s.Equal(internalpb.ImportState_Failed, task.GetState())
-	s.Equal("import timeout", task.GetReason())
+	job := s.imeta.GetJob(s.jobID)
+	s.Equal(internalpb.ImportJobState_Failed, job.GetState())
+	s.Equal("import timeout", job.GetReason())
 }
 
 func (s *ImportCheckerSuite) TestCheckFailure() {
@@ -272,7 +300,7 @@ func (s *ImportCheckerSuite) TestCheckFailure() {
 		PreImportTask: &datapb.PreImportTask{
 			JobID:  s.jobID,
 			TaskID: 1,
-			State:  internalpb.ImportState_Pending,
+			State:  datapb.ImportTaskStateV2_Pending,
 		},
 	}
 	err := s.imeta.AddTask(pit1)
@@ -282,77 +310,144 @@ func (s *ImportCheckerSuite) TestCheckFailure() {
 		PreImportTask: &datapb.PreImportTask{
 			JobID:  s.jobID,
 			TaskID: 2,
-			State:  internalpb.ImportState_Completed,
+			State:  datapb.ImportTaskStateV2_Completed,
 		},
 	}
 	err = s.imeta.AddTask(pit2)
 	s.NoError(err)
 
-	s.checker.checkFailure(s.jobID)
-	tasks := s.imeta.GetTaskBy(WithJob(s.jobID), WithStates(internalpb.ImportState_Failed))
+	catalog.ExpectedCalls = nil
+	catalog.EXPECT().SavePreImportTask(mock.Anything).Return(errors.New("mock error"))
+	s.checker.checkFailedJob(s.imeta.GetJob(s.jobID))
+	tasks := s.imeta.GetTaskBy(WithJob(s.jobID), WithStates(datapb.ImportTaskStateV2_Failed))
 	s.Equal(0, len(tasks))
 
-	err = s.imeta.UpdateTask(pit1.GetTaskID(), UpdateState(internalpb.ImportState_Failed))
-	s.NoError(err)
-	s.checker.checkFailure(s.jobID)
-	tasks = s.imeta.GetTaskBy(WithJob(s.jobID), WithStates(internalpb.ImportState_Failed))
+	catalog.ExpectedCalls = nil
+	catalog.EXPECT().SavePreImportTask(mock.Anything).Return(nil)
+	s.checker.checkFailedJob(s.imeta.GetJob(s.jobID))
+	tasks = s.imeta.GetTaskBy(WithJob(s.jobID), WithStates(datapb.ImportTaskStateV2_Failed))
 	s.Equal(2, len(tasks))
 }
 
 func (s *ImportCheckerSuite) TestCheckGC() {
+	mockErr := errors.New("mock err")
+
 	catalog := s.imeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
-	catalog.EXPECT().SavePreImportTask(mock.Anything).Return(nil)
-	var task ImportTask = &preImportTask{
-		PreImportTask: &datapb.PreImportTask{
-			JobID:  s.jobID,
-			TaskID: 1,
-			State:  internalpb.ImportState_Completed,
+	catalog.EXPECT().SaveImportTask(mock.Anything).Return(nil)
+	var task ImportTask = &importTask{
+		ImportTaskV2: &datapb.ImportTaskV2{
+			JobID:      s.jobID,
+			TaskID:     1,
+			State:      datapb.ImportTaskStateV2_Failed,
+			SegmentIDs: []int64{2},
 		},
-		lastActiveTime: time.Now(),
 	}
 	err := s.imeta.AddTask(task)
 	s.NoError(err)
-	s.checker.checkGC(s.jobID)
-	tasks := s.imeta.GetTaskBy(WithJob(s.jobID))
-	s.Equal(1, len(tasks))
 
-	catalog.EXPECT().DropImportJob(mock.Anything).Return(nil)
-	catalog.EXPECT().DropPreImportTask(mock.Anything).Return(nil)
-	GCRetention := Params.DataCoordCfg.ImportTaskRetention.GetAsDuration(time.Second)
-	task.(*preImportTask).lastActiveTime = time.Now().Add(GCRetention * -2)
-	err = s.imeta.AddTask(task)
+	// not failed or completed
+	s.checker.checkGC(s.imeta.GetJob(s.jobID))
+	s.Equal(1, len(s.imeta.GetTaskBy(WithJob(s.jobID))))
+	s.Equal(1, len(s.imeta.GetJobBy()))
+	catalog.EXPECT().SaveImportJob(mock.Anything).Return(nil)
+	err = s.imeta.UpdateJob(s.jobID, UpdateJobState(internalpb.ImportJobState_Failed))
 	s.NoError(err)
-	s.checker.checkGC(s.jobID)
-	tasks = s.imeta.GetTaskBy(WithJob(s.jobID))
-	s.Equal(0, len(tasks))
+
+	// not reach cleanup ts
+	s.checker.checkGC(s.imeta.GetJob(s.jobID))
+	s.Equal(1, len(s.imeta.GetTaskBy(WithJob(s.jobID))))
+	s.Equal(1, len(s.imeta.GetJobBy()))
+	GCRetention := Params.DataCoordCfg.ImportTaskRetention.GetAsDuration(time.Second)
+	job := s.imeta.GetJob(s.jobID)
+	job.(*importJob).CleanupTs = tsoutil.AddPhysicalDurationOnTs(job.GetCleanupTs(), GCRetention*-2)
+	err = s.imeta.AddJob(job)
+	s.NoError(err)
+
+	// segment not dropped
+	s.checker.checkGC(s.imeta.GetJob(s.jobID))
+	s.Equal(1, len(s.imeta.GetTaskBy(WithJob(s.jobID))))
+	s.Equal(1, len(s.imeta.GetJobBy()))
+	err = s.imeta.UpdateTask(task.GetTaskID(), UpdateSegmentIDs([]int64{}))
+	s.NoError(err)
+
+	// task is not dropped
+	s.checker.checkGC(s.imeta.GetJob(s.jobID))
+	s.Equal(1, len(s.imeta.GetTaskBy(WithJob(s.jobID))))
+	s.Equal(1, len(s.imeta.GetJobBy()))
+	err = s.imeta.UpdateTask(task.GetTaskID(), UpdateNodeID(NullNodeID))
+	s.NoError(err)
+
+	// remove task failed
+	catalog.EXPECT().DropImportTask(mock.Anything).Return(mockErr)
+	s.checker.checkGC(s.imeta.GetJob(s.jobID))
+	s.Equal(1, len(s.imeta.GetTaskBy(WithJob(s.jobID))))
+	s.Equal(1, len(s.imeta.GetJobBy()))
+
+	// remove job failed
+	catalog.ExpectedCalls = nil
+	catalog.EXPECT().DropImportTask(mock.Anything).Return(nil)
+	catalog.EXPECT().DropImportJob(mock.Anything).Return(mockErr)
+	s.checker.checkGC(s.imeta.GetJob(s.jobID))
+	s.Equal(0, len(s.imeta.GetTaskBy(WithJob(s.jobID))))
+	s.Equal(1, len(s.imeta.GetJobBy()))
+
+	// normal case
+	catalog.ExpectedCalls = nil
+	catalog.EXPECT().DropImportJob(mock.Anything).Return(nil)
+	s.checker.checkGC(s.imeta.GetJob(s.jobID))
+	s.Equal(0, len(s.imeta.GetTaskBy(WithJob(s.jobID))))
+	s.Equal(0, len(s.imeta.GetJobBy()))
 }
 
 func (s *ImportCheckerSuite) TestCheckCollection() {
+	mockErr := errors.New("mock err")
+
 	catalog := s.imeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
 	catalog.EXPECT().SavePreImportTask(mock.Anything).Return(nil)
 	var task ImportTask = &preImportTask{
 		PreImportTask: &datapb.PreImportTask{
 			JobID:  s.jobID,
 			TaskID: 1,
-			State:  internalpb.ImportState_Pending,
+			State:  datapb.ImportTaskStateV2_Pending,
 		},
-		lastActiveTime: time.Now(),
 	}
 	err := s.imeta.AddTask(task)
 	s.NoError(err)
 
+	// no jobs
+	s.checker.checkCollection(1, []ImportJob{})
+	s.Equal(internalpb.ImportJobState_Pending, s.imeta.GetJob(s.jobID).GetState())
+
+	// collection exist
 	broker := s.checker.broker.(*broker2.MockBroker)
 	broker.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(true, nil)
-	s.checker.checkCollection(s.jobID)
-	tasks := s.imeta.GetTaskBy(WithJob(s.jobID), WithStates(internalpb.ImportState_Failed))
-	s.Equal(0, len(tasks))
+	s.checker.checkCollection(1, []ImportJob{s.imeta.GetJob(s.jobID)})
+	s.Equal(internalpb.ImportJobState_Pending, s.imeta.GetJob(s.jobID).GetState())
 
+	// HasCollection failed
+	s.checker.broker = broker2.NewMockBroker(s.T())
+	broker = s.checker.broker.(*broker2.MockBroker)
+	broker.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(true, mockErr)
+	s.checker.checkCollection(1, []ImportJob{s.imeta.GetJob(s.jobID)})
+	s.Equal(internalpb.ImportJobState_Pending, s.imeta.GetJob(s.jobID).GetState())
+
+	// SaveImportJob failed
 	s.checker.broker = broker2.NewMockBroker(s.T())
 	broker = s.checker.broker.(*broker2.MockBroker)
 	broker.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(false, nil)
-	s.checker.checkCollection(s.jobID)
-	tasks = s.imeta.GetTaskBy(WithJob(s.jobID), WithStates(internalpb.ImportState_Failed))
-	s.Equal(1, len(tasks))
+	catalog.ExpectedCalls = nil
+	catalog.EXPECT().SaveImportJob(mock.Anything).Return(mockErr)
+	s.checker.checkCollection(1, []ImportJob{s.imeta.GetJob(s.jobID)})
+	s.Equal(internalpb.ImportJobState_Pending, s.imeta.GetJob(s.jobID).GetState())
+
+	// collection dropped
+	s.checker.broker = broker2.NewMockBroker(s.T())
+	broker = s.checker.broker.(*broker2.MockBroker)
+	broker.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(false, nil)
+	catalog.ExpectedCalls = nil
+	catalog.EXPECT().SaveImportJob(mock.Anything).Return(nil)
+	s.checker.checkCollection(1, []ImportJob{s.imeta.GetJob(s.jobID)})
+	s.Equal(internalpb.ImportJobState_Failed, s.imeta.GetJob(s.jobID).GetState())
 }
 
 func TestImportChecker(t *testing.T) {

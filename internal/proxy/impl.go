@@ -5646,5 +5646,15 @@ func (node *Proxy) ListImports(ctx context.Context, req *internalpb.ListImportsR
 			Status: merr.Status(err),
 		}, nil
 	}
-	return node.dataCoord.ListImports(ctx, req)
+	resp := &internalpb.ListImportsResponse{
+		Status: merr.Success(),
+	}
+	collectionID, err := globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
+	if err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+	return node.dataCoord.ListImports(ctx, &internalpb.ListImportsRequestInternal{
+		CollectionID: collectionID,
+	})
 }

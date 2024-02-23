@@ -48,7 +48,7 @@ func (t TaskType) String() string {
 
 type TaskFilter func(task Task) bool
 
-func WithStates(states ...internalpb.ImportState) TaskFilter {
+func WithStates(states ...datapb.ImportTaskStateV2) TaskFilter {
 	return func(task Task) bool {
 		for _, state := range states {
 			if task.GetState() == state {
@@ -67,7 +67,7 @@ func WithType(taskType TaskType) TaskFilter {
 
 type UpdateAction func(task Task)
 
-func UpdateState(state internalpb.ImportState) UpdateAction {
+func UpdateState(state datapb.ImportTaskStateV2) UpdateAction {
 	return func(t Task) {
 		switch t.GetType() {
 		case PreImportTaskType:
@@ -133,7 +133,7 @@ type Task interface {
 	GetPartitionIDs() []int64
 	GetVchannels() []string
 	GetType() TaskType
-	GetState() internalpb.ImportState
+	GetState() datapb.ImportTaskStateV2
 	GetReason() string
 	GetSchema() *schemapb.CollectionSchema
 	GetCtx() context.Context
@@ -164,7 +164,7 @@ func NewPreImportTask(req *datapb.PreImportRequest) Task {
 			JobID:        req.GetJobID(),
 			TaskID:       req.GetTaskID(),
 			CollectionID: req.GetCollectionID(),
-			State:        internalpb.ImportState_Pending,
+			State:        datapb.ImportTaskStateV2_Pending,
 			FileStats:    fileStats,
 		},
 		ctx:          ctx,
@@ -233,7 +233,7 @@ func NewImportTask(req *datapb.ImportRequest) Task {
 			JobID:        req.GetJobID(),
 			TaskID:       req.GetTaskID(),
 			CollectionID: req.GetCollectionID(),
-			State:        internalpb.ImportState_Pending,
+			State:        datapb.ImportTaskStateV2_Pending,
 		},
 		ctx:          ctx,
 		cancel:       cancel,

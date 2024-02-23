@@ -2454,6 +2454,9 @@ type dataCoordConfig struct {
 	FilesPerPreImportTask    ParamItem `refreshable:"true"`
 	ImportTaskRetention      ParamItem `refreshable:"true"`
 	MaxSizeInMBPerImportTask ParamItem `refreshable:"true"`
+	ImportScheduleInterval   ParamItem `refreshable:"true"`
+	ImportCheckIntervalHigh  ParamItem `refreshable:"true"`
+	ImportCheckIntervalLow   ParamItem `refreshable:"true"`
 }
 
 func (p *dataCoordConfig) init(base *BaseTable) {
@@ -2939,6 +2942,36 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.MaxSizeInMBPerImportTask.Init(base.mgr)
+
+	p.ImportScheduleInterval = ParamItem{
+		Key:          "dataCoord.import.scheduleInterval",
+		Version:      "2.4.0",
+		Doc:          "The interval for scheduling import, measured in seconds.",
+		DefaultValue: "2",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.ImportScheduleInterval.Init(base.mgr)
+
+	p.ImportCheckIntervalHigh = ParamItem{
+		Key:          "dataCoord.import.checkIntervalHigh",
+		Version:      "2.4.0",
+		Doc:          "The interval for checking import, measured in seconds, is set to a high frequency for the import checker.",
+		DefaultValue: "2",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.ImportCheckIntervalHigh.Init(base.mgr)
+
+	p.ImportCheckIntervalLow = ParamItem{
+		Key:          "dataCoord.import.checkIntervalLow",
+		Version:      "2.4.0",
+		Doc:          "The interval for checking import, measured in seconds, is set to a low frequency for the import checker.",
+		DefaultValue: "120",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.ImportCheckIntervalLow.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

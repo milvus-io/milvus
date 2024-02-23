@@ -669,8 +669,22 @@ func UpdateImportedRows(segmentID int64, rows int64) UpdateOperator {
 				zap.Int64("segmentID", segmentID))
 			return false
 		}
-		segment.NumOfRows = rows
 		segment.currRows = rows
+		segment.NumOfRows = rows
+		segment.MaxRowNum = rows
+		return true
+	}
+}
+
+func UpdateIsImporting(segmentID int64, isImporting bool) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			log.Warn("meta update: update isImporting failed - segment not found",
+				zap.Int64("segmentID", segmentID))
+			return false
+		}
+		segment.IsImporting = isImporting
 		return true
 	}
 }

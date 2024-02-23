@@ -18,7 +18,6 @@ package datacoord
 
 import (
 	"sync"
-	"time"
 
 	"github.com/milvus-io/milvus/internal/metastore"
 )
@@ -62,14 +61,12 @@ func NewImportMeta(catalog metastore.DataCoordCatalog) (ImportMeta, error) {
 	tasks := make(map[int64]ImportTask)
 	for _, task := range restoredPreImportTasks {
 		tasks[task.GetTaskID()] = &preImportTask{
-			PreImportTask:  task,
-			lastActiveTime: time.Now(),
+			PreImportTask: task,
 		}
 	}
 	for _, task := range restoredImportTasks {
 		tasks[task.GetTaskID()] = &importTask{
-			ImportTaskV2:   task,
-			lastActiveTime: time.Now(),
+			ImportTaskV2: task,
 		}
 	}
 
@@ -184,14 +181,12 @@ func (m *importMeta) UpdateTask(taskID int64, actions ...UpdateAction) error {
 			if err != nil {
 				return err
 			}
-			updatedTask.(*preImportTask).lastActiveTime = time.Now()
 			m.tasks[updatedTask.GetTaskID()] = updatedTask
 		case ImportTaskType:
 			err := m.catalog.SaveImportTask(updatedTask.(*importTask).ImportTaskV2)
 			if err != nil {
 				return err
 			}
-			updatedTask.(*importTask).lastActiveTime = time.Now()
 			m.tasks[updatedTask.GetTaskID()] = updatedTask
 		}
 	}

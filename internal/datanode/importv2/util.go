@@ -29,7 +29,6 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -204,14 +203,14 @@ func GetInsertDataRowCount(data *storage.InsertData, schema *schemapb.Collection
 
 func LogStats(manager TaskManager) {
 	logFunc := func(tasks []Task, taskType TaskType) {
-		byState := lo.GroupBy(tasks, func(t Task) internalpb.ImportState {
+		byState := lo.GroupBy(tasks, func(t Task) datapb.ImportTaskStateV2 {
 			return t.GetState()
 		})
 		log.Info("import task stats", zap.String("type", taskType.String()),
-			zap.Int("pending", len(byState[internalpb.ImportState_Pending])),
-			zap.Int("inProgress", len(byState[internalpb.ImportState_InProgress])),
-			zap.Int("completed", len(byState[internalpb.ImportState_Completed])),
-			zap.Int("failed", len(byState[internalpb.ImportState_Failed])))
+			zap.Int("pending", len(byState[datapb.ImportTaskStateV2_Pending])),
+			zap.Int("inProgress", len(byState[datapb.ImportTaskStateV2_InProgress])),
+			zap.Int("completed", len(byState[datapb.ImportTaskStateV2_Completed])),
+			zap.Int("failed", len(byState[datapb.ImportTaskStateV2_Failed])))
 	}
 	tasks := manager.GetBy(WithType(PreImportTaskType))
 	logFunc(tasks, PreImportTaskType)

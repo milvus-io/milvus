@@ -17,12 +17,9 @@
 package datacoord
 
 import (
-	"time"
-
 	"github.com/golang/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 )
 
 type TaskType int
@@ -55,13 +52,7 @@ func WithJob(jobID int64) ImportTaskFilter {
 	}
 }
 
-func WithCollection(collectionID int64) ImportTaskFilter {
-	return func(task ImportTask) bool {
-		return task.GetCollectionID() == collectionID
-	}
-}
-
-func WithStates(states ...internalpb.ImportState) ImportTaskFilter {
+func WithStates(states ...datapb.ImportTaskStateV2) ImportTaskFilter {
 	return func(task ImportTask) bool {
 		for _, state := range states {
 			if task.GetState() == state {
@@ -74,7 +65,7 @@ func WithStates(states ...internalpb.ImportState) ImportTaskFilter {
 
 type UpdateAction func(task ImportTask)
 
-func UpdateState(state internalpb.ImportState) UpdateAction {
+func UpdateState(state datapb.ImportTaskStateV2) UpdateAction {
 	return func(t ImportTask) {
 		switch t.GetType() {
 		case PreImportTaskType:
@@ -129,49 +120,36 @@ type ImportTask interface {
 	GetCollectionID() int64
 	GetNodeID() int64
 	GetType() TaskType
-	GetState() internalpb.ImportState
+	GetState() datapb.ImportTaskStateV2
 	GetReason() string
 	GetFileStats() []*datapb.ImportFileStats
-	GetLastActiveTime() time.Time
 	Clone() ImportTask
 }
 
 type preImportTask struct {
 	*datapb.PreImportTask
-	lastActiveTime time.Time
 }
 
 func (p *preImportTask) GetType() TaskType {
 	return PreImportTaskType
 }
 
-func (p *preImportTask) GetLastActiveTime() time.Time {
-	return p.lastActiveTime
-}
-
 func (p *preImportTask) Clone() ImportTask {
 	return &preImportTask{
-		PreImportTask:  proto.Clone(p.PreImportTask).(*datapb.PreImportTask),
-		lastActiveTime: p.lastActiveTime,
+		PreImportTask: proto.Clone(p.PreImportTask).(*datapb.PreImportTask),
 	}
 }
 
 type importTask struct {
 	*datapb.ImportTaskV2
-	lastActiveTime time.Time
 }
 
 func (t *importTask) GetType() TaskType {
 	return ImportTaskType
 }
 
-func (t *importTask) GetLastActiveTime() time.Time {
-	return t.lastActiveTime
-}
-
 func (t *importTask) Clone() ImportTask {
 	return &importTask{
-		ImportTaskV2:   proto.Clone(t.ImportTaskV2).(*datapb.ImportTaskV2),
-		lastActiveTime: t.lastActiveTime,
+		ImportTaskV2: proto.Clone(t.ImportTaskV2).(*datapb.ImportTaskV2),
 	}
 }

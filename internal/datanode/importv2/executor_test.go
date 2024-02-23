@@ -278,7 +278,7 @@ func (s *ExecutorSuite) TestExecutor_Start_Preimport() {
 	go s.executor.Start()
 	defer s.executor.Close()
 	s.Eventually(func() bool {
-		return s.manager.Get(preimportTask.GetTaskID()).GetState() == internalpb.ImportState_Completed
+		return s.manager.Get(preimportTask.GetTaskID()).GetState() == datapb.ImportTaskStateV2_Completed
 	}, 10*time.Second, 100*time.Millisecond)
 }
 
@@ -331,7 +331,7 @@ func (s *ExecutorSuite) TestExecutor_Start_Preimport_Failed() {
 	go s.executor.Start()
 	defer s.executor.Close()
 	s.Eventually(func() bool {
-		return s.manager.Get(preimportTask.GetTaskID()).GetState() == internalpb.ImportState_Failed
+		return s.manager.Get(preimportTask.GetTaskID()).GetState() == datapb.ImportTaskStateV2_Failed
 	}, 10*time.Second, 100*time.Millisecond)
 }
 
@@ -392,7 +392,7 @@ func (s *ExecutorSuite) TestExecutor_Start_Import() {
 	go s.executor.Start()
 	defer s.executor.Close()
 	s.Eventually(func() bool {
-		return s.manager.Get(importTask.GetTaskID()).GetState() == internalpb.ImportState_Completed
+		return s.manager.Get(importTask.GetTaskID()).GetState() == datapb.ImportTaskStateV2_Completed
 	}, 10*time.Second, 100*time.Millisecond)
 }
 
@@ -453,7 +453,7 @@ func (s *ExecutorSuite) TestExecutor_Start_Import_Failed() {
 	go s.executor.Start()
 	defer s.executor.Close()
 	s.Eventually(func() bool {
-		return s.manager.Get(importTask.GetTaskID()).GetState() == internalpb.ImportState_Failed
+		return s.manager.Get(importTask.GetTaskID()).GetState() == datapb.ImportTaskStateV2_Failed
 	}, 10*time.Second, 100*time.Millisecond)
 }
 

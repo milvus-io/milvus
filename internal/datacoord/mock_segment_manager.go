@@ -5,7 +5,6 @@ package datacoord
 import (
 	context "context"
 
-	schemapb "github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -22,25 +21,25 @@ func (_m *MockManager) EXPECT() *MockManager_Expecter {
 	return &MockManager_Expecter{mock: &_m.Mock}
 }
 
-// AllocImportSegment provides a mock function with given fields: ctx, taskID, collectionID, partitionID, channelName, schema
-func (_m *MockManager) AllocImportSegment(ctx context.Context, taskID int64, collectionID int64, partitionID int64, channelName string, schema *schemapb.CollectionSchema) (*SegmentInfo, error) {
-	ret := _m.Called(ctx, taskID, collectionID, partitionID, channelName, schema)
+// AllocImportSegment provides a mock function with given fields: ctx, taskID, collectionID, partitionID, channelName
+func (_m *MockManager) AllocImportSegment(ctx context.Context, taskID int64, collectionID int64, partitionID int64, channelName string) (*SegmentInfo, error) {
+	ret := _m.Called(ctx, taskID, collectionID, partitionID, channelName)
 
 	var r0 *SegmentInfo
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, int64, int64, int64, string, *schemapb.CollectionSchema) (*SegmentInfo, error)); ok {
-		return rf(ctx, taskID, collectionID, partitionID, channelName, schema)
+	if rf, ok := ret.Get(0).(func(context.Context, int64, int64, int64, string) (*SegmentInfo, error)); ok {
+		return rf(ctx, taskID, collectionID, partitionID, channelName)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, int64, int64, int64, string, *schemapb.CollectionSchema) *SegmentInfo); ok {
-		r0 = rf(ctx, taskID, collectionID, partitionID, channelName, schema)
+	if rf, ok := ret.Get(0).(func(context.Context, int64, int64, int64, string) *SegmentInfo); ok {
+		r0 = rf(ctx, taskID, collectionID, partitionID, channelName)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*SegmentInfo)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, int64, int64, int64, string, *schemapb.CollectionSchema) error); ok {
-		r1 = rf(ctx, taskID, collectionID, partitionID, channelName, schema)
+	if rf, ok := ret.Get(1).(func(context.Context, int64, int64, int64, string) error); ok {
+		r1 = rf(ctx, taskID, collectionID, partitionID, channelName)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -59,14 +58,13 @@ type MockManager_AllocImportSegment_Call struct {
 //  - collectionID int64
 //  - partitionID int64
 //  - channelName string
-//  - schema *schemapb.CollectionSchema
-func (_e *MockManager_Expecter) AllocImportSegment(ctx interface{}, taskID interface{}, collectionID interface{}, partitionID interface{}, channelName interface{}, schema interface{}) *MockManager_AllocImportSegment_Call {
-	return &MockManager_AllocImportSegment_Call{Call: _e.mock.On("AllocImportSegment", ctx, taskID, collectionID, partitionID, channelName, schema)}
+func (_e *MockManager_Expecter) AllocImportSegment(ctx interface{}, taskID interface{}, collectionID interface{}, partitionID interface{}, channelName interface{}) *MockManager_AllocImportSegment_Call {
+	return &MockManager_AllocImportSegment_Call{Call: _e.mock.On("AllocImportSegment", ctx, taskID, collectionID, partitionID, channelName)}
 }
 
-func (_c *MockManager_AllocImportSegment_Call) Run(run func(ctx context.Context, taskID int64, collectionID int64, partitionID int64, channelName string, schema *schemapb.CollectionSchema)) *MockManager_AllocImportSegment_Call {
+func (_c *MockManager_AllocImportSegment_Call) Run(run func(ctx context.Context, taskID int64, collectionID int64, partitionID int64, channelName string)) *MockManager_AllocImportSegment_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(int64), args[2].(int64), args[3].(int64), args[4].(string), args[5].(*schemapb.CollectionSchema))
+		run(args[0].(context.Context), args[1].(int64), args[2].(int64), args[3].(int64), args[4].(string))
 	})
 	return _c
 }
@@ -76,7 +74,7 @@ func (_c *MockManager_AllocImportSegment_Call) Return(_a0 *SegmentInfo, _a1 erro
 	return _c
 }
 
-func (_c *MockManager_AllocImportSegment_Call) RunAndReturn(run func(context.Context, int64, int64, int64, string, *schemapb.CollectionSchema) (*SegmentInfo, error)) *MockManager_AllocImportSegment_Call {
+func (_c *MockManager_AllocImportSegment_Call) RunAndReturn(run func(context.Context, int64, int64, int64, string) (*SegmentInfo, error)) *MockManager_AllocImportSegment_Call {
 	_c.Call.Return(run)
 	return _c
 }

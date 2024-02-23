@@ -23,7 +23,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -88,6 +87,7 @@ func TestImportMeta_ImportJob(t *testing.T) {
 			CollectionID: 1,
 			PartitionIDs: []int64{2},
 			Vchannels:    []string{"ch0"},
+			State:        internalpb.ImportJobState_Pending,
 		},
 	}
 
@@ -101,10 +101,10 @@ func TestImportMeta_ImportJob(t *testing.T) {
 	assert.Equal(t, 1, len(jobs))
 
 	assert.Nil(t, job.GetSchema())
-	err = im.UpdateJob(job.GetJobID(), UpdateJobSchema(&schemapb.CollectionSchema{}))
+	err = im.UpdateJob(job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Completed))
 	assert.NoError(t, err)
 	job2 := im.GetJob(job.GetJobID())
-	assert.NotNil(t, job2.GetSchema())
+	assert.Equal(t, internalpb.ImportJobState_Completed, job2.GetState())
 	assert.Equal(t, job.GetJobID(), job2.GetJobID())
 	assert.Equal(t, job.GetCollectionID(), job2.GetCollectionID())
 	assert.Equal(t, job.GetPartitionIDs(), job2.GetPartitionIDs())
@@ -149,7 +149,7 @@ func TestImportMeta_ImportTask(t *testing.T) {
 			CollectionID: 3,
 			SegmentIDs:   []int64{5, 6},
 			NodeID:       7,
-			State:        internalpb.ImportState_Pending,
+			State:        datapb.ImportTaskStateV2_Pending,
 		},
 	}
 	err = im.AddTask(task1)
@@ -161,25 +161,25 @@ func TestImportMeta_ImportTask(t *testing.T) {
 
 	task2 := task1.Clone()
 	task2.(*importTask).TaskID = 8
-	task2.(*importTask).State = internalpb.ImportState_Completed
+	task2.(*importTask).State = datapb.ImportTaskStateV2_Completed
 	err = im.AddTask(task2)
 	assert.NoError(t, err)
 
 	tasks := im.GetTaskBy(WithJob(task1.GetJobID()))
 	assert.Equal(t, 2, len(tasks))
-	tasks = im.GetTaskBy(WithType(ImportTaskType), WithStates(internalpb.ImportState_Completed))
+	tasks = im.GetTaskBy(WithType(ImportTaskType), WithStates(datapb.ImportTaskStateV2_Completed))
 	assert.Equal(t, 1, len(tasks))
 	assert.Equal(t, task2.GetTaskID(), tasks[0].GetTaskID())
 
 	err = im.UpdateTask(task1.GetTaskID(), UpdateNodeID(9),
-		UpdateState(internalpb.ImportState_Failed),
+		UpdateState(datapb.ImportTaskStateV2_Failed),
 		UpdateFileStats([]*datapb.ImportFileStats{1: {
 			FileSize: 100,
 		}}))
 	assert.NoError(t, err)
 	task := im.GetTask(task1.GetTaskID())
 	assert.Equal(t, int64(9), task.GetNodeID())
-	assert.Equal(t, internalpb.ImportState_Failed, task.GetState())
+	assert.Equal(t, datapb.ImportTaskStateV2_Failed, task.GetState())
 
 	err = im.RemoveTask(task1.GetTaskID())
 	assert.NoError(t, err)

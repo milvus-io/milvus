@@ -74,7 +74,7 @@ func HashData(task Task, rows *storage.InsertData) (HashedData, error) {
 	return res, nil
 }
 
-func GetRowsStats(task Task, rows *storage.InsertData) (map[string]*datapb.PartitionStats, error) {
+func GetRowsStats(task Task, rows *storage.InsertData) (map[string]*datapb.PartitionImportStats, error) {
 	var (
 		schema       = task.GetSchema()
 		channelNum   = len(task.GetVchannels())
@@ -120,9 +120,9 @@ func GetRowsStats(task Task, rows *storage.InsertData) (map[string]*datapb.Parti
 		}
 	}
 
-	res := make(map[string]*datapb.PartitionStats)
+	res := make(map[string]*datapb.PartitionImportStats)
 	for _, channel := range task.GetVchannels() {
-		res[channel] = &datapb.PartitionStats{
+		res[channel] = &datapb.PartitionImportStats{
 			PartitionRows:     make(map[int64]int64),
 			PartitionDataSize: make(map[int64]int64),
 		}
@@ -193,11 +193,11 @@ func hashByID() func(id int64, shardNum int64) int64 {
 	}
 }
 
-func MergeHashedStats(src, dst map[string]*datapb.PartitionStats) {
+func MergeHashedStats(src, dst map[string]*datapb.PartitionImportStats) {
 	for channel, partitionStats := range src {
 		for partitionID := range partitionStats.GetPartitionRows() {
 			if dst[channel] == nil {
-				dst[channel] = &datapb.PartitionStats{
+				dst[channel] = &datapb.PartitionImportStats{
 					PartitionRows:     make(map[int64]int64),
 					PartitionDataSize: make(map[int64]int64),
 				}

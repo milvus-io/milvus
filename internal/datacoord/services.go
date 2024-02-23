@@ -1764,7 +1764,12 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 			resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprint("parse import timeout failed, err=%w", err)))
 			return resp, nil
 		}
-		timeoutTs = tsoutil.ComposeTSByTime(time.Now().Add(dur), 0)
+		ts, err := s.allocator.allocTimestamp(ctx)
+		if err != nil {
+			resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprint("alloc ts failed, err=%w", err)))
+			return resp, nil
+		}
+		timeoutTs = tsoutil.AddPhysicalDurationOnTs(ts, dur)
 	}
 
 	files := in.GetFiles()
@@ -1791,26 +1796,28 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 		return importFile
 	})
 
-	ij := &importJob{
+	job := &importJob{
 		ImportJob: &datapb.ImportJob{
 			JobID:        idStart,
 			CollectionID: in.GetCollectionID(),
 			PartitionIDs: in.GetPartitionIDs(),
 			Vchannels:    in.GetChannelNames(),
+			Schema:       in.GetSchema(),
 			TimeoutTs:    timeoutTs,
+			CleanupTs:    math.MaxUint64,
+			State:        internalpb.ImportJobState_Pending,
 			Files:        files,
 			Options:      in.GetOptions(),
 		},
-		schema: in.GetSchema(),
 	}
-	err = s.importMeta.AddJob(ij)
+	err = s.importMeta.AddJob(job)
 	if err != nil {
 		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprint("add import job failed, err=%w", err)))
 		return resp, nil
 	}
 
-	resp.JobID = fmt.Sprint(ij.GetJobID())
-	log.Info("add import job done", zap.Int64("jobID", ij.GetJobID()))
+	resp.JobID = fmt.Sprint(job.GetJobID())
+	log.Info("add import job done", zap.Int64("jobID", job.GetJobID()))
 	return resp, nil
 }
 
@@ -1838,7 +1845,7 @@ func (s *Server) GetImportProgress(ctx context.Context, in *internalpb.GetImport
 	return resp, nil
 }
 
-func (s *Server) ListImports(_ context.Context, _ *internalpb.ListImportsRequest) (*internalpb.ListImportsResponse, error) {
+func (s *Server) ListImports(ctx context.Context, req *internalpb.ListImportsRequestInternal) (*internalpb.ListImportsResponse, error) {
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &internalpb.ListImportsResponse{
 			Status: merr.Status(err),
@@ -1848,12 +1855,12 @@ func (s *Server) ListImports(_ context.Context, _ *internalpb.ListImportsRequest
 	resp := &internalpb.ListImportsResponse{
 		Status:     merr.Success(),
 		JobIDs:     make([]string, 0),
-		States:     make([]internalpb.ImportState, 0),
+		States:     make([]internalpb.ImportJobState, 0),
 		Reasons:    make([]string, 0),
 		Progresses: make([]int64, 0),
 	}
 
-	jobs := s.importMeta.GetJobBy()
+	jobs := s.importMeta.GetJobBy(WithCollectionID(req.GetCollectionID()))
 	for _, job := range jobs {
 		progress, state, reason := GetImportProgress(job.GetJobID(), s.importMeta, s.meta)
 		resp.JobIDs = append(resp.JobIDs, fmt.Sprintf("%d", job.GetJobID()))
