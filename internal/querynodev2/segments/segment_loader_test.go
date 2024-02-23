@@ -33,6 +33,7 @@ import (
 	milvus_storage "github.com/milvus-io/milvus-storage/go/storage"
 	"github.com/milvus-io/milvus-storage/go/storage/options"
 	"github.com/milvus-io/milvus-storage/go/storage/schema"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/initcore"
@@ -781,6 +782,28 @@ func (suite *SegmentLoaderDetailSuite) TestRequestResource() {
 
 		_, _, err := suite.loader.requestResource(context.Background())
 		suite.NoError(err)
+	})
+
+	suite.Run("l0_segment_deltalog", func() {
+		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.Key, "50")
+		defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.Key)
+
+		resource, _, err := suite.loader.requestResource(context.Background(), &querypb.SegmentLoadInfo{
+			SegmentID:    100,
+			CollectionID: suite.collectionID,
+			Level:        datapb.SegmentLevel_L0,
+			Deltalogs: []*datapb.FieldBinlog{
+				{
+					Binlogs: []*datapb.Binlog{
+						{LogSize: 10000},
+						{LogSize: 12000},
+					},
+				},
+			},
+		})
+
+		suite.NoError(err)
+		suite.EqualValues(1100000, resource.MemorySize)
 	})
 }
 
