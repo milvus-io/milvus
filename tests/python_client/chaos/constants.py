@@ -23,4 +23,6 @@ WAIT_PER_OP = 10  # time to wait in seconds between operations
 CHAOS_DURATION = 120  # chaos duration time in seconds
 DEFAULT_INDEX_PARAM = {"index_type": "HNSW", "metric_type": "L2", "params": {"M": 48, "efConstruction": 500}}
 DEFAULT_SEARCH_PARAM = {"metric_type": "L2", "params": {"ef": 64}}
+DEFAULT_BINARY_INDEX_PARAM = {"index_type": "BIN_IVF_FLAT", "metric_type": "JACCARD", "params": {"M": 48}}
+DEFAULT_BINARY_SEARCH_PARAM = {"metric_type": "JACCARD", "params": {"nprobe": 10}}
 CHAOS_INFO_SAVE_PATH = "/tmp/ci_logs/chaos_info.json"

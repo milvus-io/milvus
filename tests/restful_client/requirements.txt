@@ -1,9 +1,20 @@
 --extra-index-url https://test.pypi.org/simple/
 requests==2.31.0
 urllib3==1.26.18
-pytest~=7.2.0
-pyyaml~=6.0
-numpy~=1.24.3
+pytest==7.2.0
+pytest-assume==2.4.3
+pytest-timeout==1.3.3
+pytest-repeat==0.8.0
+allure-pytest==2.7.0
+pytest-print==0.2.1
+pytest-level==0.1.1
+pytest-xdist==2.5.0
+pytest-html==3.1.1
+pytest-sugar==0.9.5
+pytest-parallel
+pytest-random-order
+PyYAML==6.0
+numpy==1.24.3
 allure-pytest>=2.8.18
 Faker==19.2.0
 pymilvus==2.4.0rc19
