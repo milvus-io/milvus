@@ -8,6 +8,7 @@ import uuid
 from functools import singledispatch
 import numpy as np
 import pandas as pd
+import jax.numpy as jnp
 from sklearn import preprocessing
 from npy_append_array import NpyAppendArray
 from faker import Faker
@@ -219,6 +220,28 @@ def gen_default_collection_schema(description=ct.default_desc, primary_field=ct.
                                               vector_data_type=vector_data_type))
 
 
+    schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
+                                                                    primary_field=primary_field, auto_id=auto_id,
+                                                                    enable_dynamic_field=enable_dynamic_field, **kwargs)
+    return schema
+
+
+def gen_all_datatype_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name,
+                                       auto_id=False, dim=ct.default_dim, enable_dynamic_field=True, **kwargs):
+    fields = [
+        gen_int64_field(),
+        gen_float_field(),
+        gen_string_field(),
+        gen_json_field(),
+        gen_array_field(name="array_int", element_type=DataType.INT64),
+        gen_array_field(name="array_float", element_type=DataType.FLOAT),
+        gen_array_field(name="array_varchar", element_type=DataType.VARCHAR, max_length=200),
+        gen_array_field(name="array_bool", element_type=DataType.BOOL),
+        gen_float_vec_field(dim=dim),
+        gen_float_vec_field(name="image_emb", dim=dim),
+        gen_float_vec_field(name="text_emb", dim=dim),
+        gen_float_vec_field(name="voice_emb", dim=dim),
+    ]
     schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
                                                                     primary_field=primary_field, auto_id=auto_id,
                                                                     enable_dynamic_field=enable_dynamic_field, **kwargs)
@@ -764,6 +787,29 @@ def get_float_vec_field_name(schema=None):
     return None
 
 
+def get_float_vec_field_name_list(schema=None):
+    vec_fields = []
+    if schema is None:
+        schema = gen_default_collection_schema()
+    fields = schema.fields
+    for field in fields:
+        if field.dtype in [DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR]:
+            vec_fields.append(field.name)
+    return vec_fields
+
+
+def get_scalar_field_name_list(schema=None):
+    vec_fields = []
+    if schema is None:
+        schema = gen_default_collection_schema()
+    fields = schema.fields
+    for field in fields:
+        if field.dtype in [DataType.BOOL, DataType.INT8, DataType.INT16, DataType.INT32, DataType.INT64, DataType.FLOAT,
+                           DataType.DOUBLE, DataType.VARCHAR]:
+            vec_fields.append(field.name)
+    return vec_fields
+
+
 def get_binary_vec_field_name(schema=None):
     if schema is None:
         schema = gen_default_collection_schema()
@@ -772,6 +818,17 @@ def get_binary_vec_field_name(schema=None):
         if field.dtype == DataType.BINARY_VECTOR:
             return field.name
     return None
+
+
+def get_binary_vec_field_name_list(schema=None):
+    vec_fields = []
+    if schema is None:
+        schema = gen_default_collection_schema()
+    fields = schema.fields
+    for field in fields:
+        if field.dtype in [DataType.BINARY_VECTOR]:
+            vec_fields.append(field.name)
+    return vec_fields
 
 
 def get_dim_by_schema(schema=None):
@@ -835,6 +892,32 @@ def gen_data_by_type(field, nb=None, start=None):
         if nb is None:
             return [random.random() for i in range(dim)]
         return [[random.random() for i in range(dim)] for _ in range(nb)]
+    if data_type == DataType.BFLOAT16_VECTOR:
+        dim = field.params['dim']
+        if nb is None:
+            raw_vector = [random.random() for _ in range(dim)]
+            bf16_vector = jnp.array(raw_vector, dtype=jnp.bfloat16)
+            bf16_vector = np.array(bf16_vector).view(np.uint8).tolist()
+            return bytes(bf16_vector)
+        bf16_vectors = []
+        for i in range(nb):
+            raw_vector = [random.random() for _ in range(dim)]
+            bf16_vector = jnp.array(raw_vector, dtype=jnp.bfloat16)
+            bf16_vector = np.array(bf16_vector).view(np.uint8).tolist()
+            bf16_vectors.append(bytes(bf16_vector))
+        return bf16_vectors
+    if data_type == DataType.FLOAT16_VECTOR:
+        dim = field.params['dim']
+        if nb is None:
+            return [random.random() for i in range(dim)]
+        return [[random.random() for i in range(dim)] for _ in range(nb)]
+    if data_type == DataType.BINARY_VECTOR:
+        dim = field.params['dim']
+        if nb is None:
+            raw_vector = [random.randint(0, 1) for _ in range(dim)]
+            binary_byte = bytes(np.packbits(raw_vector, axis=-1).tolist())
+            return binary_byte
+        return [bytes(np.packbits([random.randint(0, 1) for _ in range(dim)], axis=-1).tolist()) for _ in range(nb)]
     if data_type == DataType.ARRAY:
         max_capacity = field.params['max_capacity']
         element_type = field.element_type
@@ -842,6 +925,16 @@ def gen_data_by_type(field, nb=None, start=None):
             if nb is None:
                 return [random.randint(-2147483648, 2147483647) for _ in range(max_capacity)]
             return [[random.randint(-2147483648, 2147483647) for _ in range(max_capacity)] for _ in range(nb)]
+        if element_type == DataType.INT64:
+            if nb is None:
+                return [random.randint(-9223372036854775808, 9223372036854775807) for _ in range(max_capacity)]
+            return [[random.randint(-9223372036854775808, 9223372036854775807) for _ in range(max_capacity)] for _ in range(nb)]
+
+        if element_type == DataType.BOOL:
+            if nb is None:
+                return [random.choice([True, False]) for _ in range(max_capacity)]
+            return [[random.choice([True, False]) for _ in range(max_capacity)] for _ in range(nb)]
+
         if element_type == DataType.FLOAT:
             if nb is None:
                 return [np.float32(random.random()) for _ in range(max_capacity)]

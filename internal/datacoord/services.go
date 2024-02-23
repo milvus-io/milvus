@@ -471,7 +471,6 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		zap.Bool("isFlush", req.GetFlushed()),
 		zap.Bool("isDropped", req.GetDropped()),
 		zap.Bool("isImport", req.GetImporting()),
-		zap.Any("startPositions", req.GetStartPositions()),
 		zap.Any("checkpoints", req.GetCheckPoints()))
 
 	// for compatibility issue , if len(channelName) not exist, skip the check

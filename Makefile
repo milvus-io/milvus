@@ -100,7 +100,8 @@ tools/bin/revive: tools/check/go.mod
 	$(GO) build -o ../bin/revive github.com/mgechev/revive
 
 cppcheck:
-	@(env bash ${PWD}/scripts/core_build.sh -l)
+	@#(env bash ${PWD}/scripts/core_build.sh -l)
+	@(env bash ${PWD}/scripts/check_cpp_fmt.sh)
 
 
 fmt:

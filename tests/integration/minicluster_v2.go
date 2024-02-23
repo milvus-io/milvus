@@ -45,6 +45,7 @@ import (
 	grpcrootcoord "github.com/milvus-io/milvus/internal/distributed/rootcoord"
 	grpcrootcoordclient "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
@@ -105,14 +106,14 @@ type MiniClusterV2 struct {
 	RootCoord  *grpcrootcoord.Server
 	QueryCoord *grpcquerycoord.Server
 
-	DataCoordClient  *grpcdatacoordclient.Client
-	RootCoordClient  *grpcrootcoordclient.Client
-	QueryCoordClient *grpcquerycoordclient.Client
+	DataCoordClient  types.DataCoordClient
+	RootCoordClient  types.RootCoordClient
+	QueryCoordClient types.QueryCoordClient
 
-	ProxyClient     *grpcproxyclient.Client
-	DataNodeClient  *grpcdatanodeclient.Client
-	QueryNodeClient *grpcquerynodeclient.Client
-	IndexNodeClient *grpcindexnodeclient.Client
+	ProxyClient     types.ProxyClient
+	DataNodeClient  types.DataNodeClient
+	QueryNodeClient types.QueryNodeClient
+	IndexNodeClient types.IndexNodeClient
 
 	DataNode  *grpcdatanode.Server
 	QueryNode *grpcquerynode.Server

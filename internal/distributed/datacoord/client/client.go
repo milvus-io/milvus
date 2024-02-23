@@ -50,7 +50,7 @@ type Client struct {
 }
 
 // NewClient creates a new client instance
-func NewClient(ctx context.Context) (*Client, error) {
+func NewClient(ctx context.Context) (types.DataCoordClient, error) {
 	sess := sessionutil.NewSession(ctx)
 	if sess == nil {
 		err := fmt.Errorf("new session error, maybe can not connect to etcd")

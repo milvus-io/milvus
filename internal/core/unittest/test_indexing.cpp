@@ -410,19 +410,19 @@ TEST(Indexing, Iterator) {
     create_index_info.metric_type = knowhere::metric::L2;
     create_index_info.index_type = knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC;
     create_index_info.index_engine_version =
-            knowhere::Version::GetCurrentVersion().VersionNumber();
+        knowhere::Version::GetCurrentVersion().VersionNumber();
     auto index = milvus::index::IndexFactory::GetInstance().CreateIndex(
-            create_index_info, milvus::storage::FileManagerContext());
+        create_index_info, milvus::storage::FileManagerContext());
 
     auto build_conf = knowhere::Json{
-            {knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
-            {knowhere::meta::DIM, std::to_string(dim)},
-            {knowhere::indexparam::NLIST, "128"},
+        {knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
+        {knowhere::meta::DIM, std::to_string(dim)},
+        {knowhere::indexparam::NLIST, "128"},
     };
 
     auto search_conf = knowhere::Json{
-            {knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
-            {knowhere::indexparam::NPROBE, 4},
+        {knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
+        {knowhere::indexparam::NPROBE, 4},
     };
 
     std::vector<knowhere::DataSetPtr> datasets;
@@ -452,13 +452,14 @@ TEST(Indexing, Iterator) {
     searchInfo.search_params_ = search_conf;
     auto vec_index = dynamic_cast<index::VectorIndex*>(index.get());
 
-    knowhere::expected<std::vector<std::shared_ptr<knowhere::IndexNode::iterator>>>
-            kw_iterators = vec_index->VectorIterators(query_ds, searchInfo, view);
+    knowhere::expected<
+        std::vector<std::shared_ptr<knowhere::IndexNode::iterator>>>
+        kw_iterators = vec_index->VectorIterators(query_ds, searchInfo, view);
     ASSERT_TRUE(kw_iterators.has_value());
     ASSERT_EQ(kw_iterators.value().size(), 1);
     auto iterator = kw_iterators.value()[0];
     ASSERT_TRUE(iterator->HasNext());
-    while(iterator->HasNext()){
+    while (iterator->HasNext()) {
         auto [off, dis] = iterator->Next();
         ASSERT_TRUE(off >= 0);
         ASSERT_TRUE(dis >= 0);

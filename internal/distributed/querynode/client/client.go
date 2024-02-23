@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -45,7 +46,7 @@ type Client struct {
 }
 
 // NewClient creates a new QueryNode client.
-func NewClient(ctx context.Context, addr string, nodeID int64) (*Client, error) {
+func NewClient(ctx context.Context, addr string, nodeID int64) (types.QueryNodeClient, error) {
 	if addr == "" {
 		return nil, fmt.Errorf("addr is empty")
 	}
