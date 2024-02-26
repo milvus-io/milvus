@@ -362,7 +362,7 @@ func (s *Server) initMeta() error {
 		LeaderViewManager:  meta.NewLeaderViewManager(),
 	}
 	s.targetMgr = meta.NewTargetManager(s.broker, s.meta)
-	s.targetMgr.SetTracker(s.tracker)
+	s.targetMgr.SetTracker(s.tracker.CreateChild("target-manager-mem-tracker"))
 	log.Info("QueryCoord server initMeta done", zap.Duration("duration", record.ElapseSpan()))
 	return nil
 }
