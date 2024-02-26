@@ -53,6 +53,18 @@ func Test_raftIvfFlatChecker_CheckTrain(t *testing.T) {
 		NLIST:  strconv.Itoa(1024),
 		Metric: metric.SUPERSTRUCTURE,
 	}
+	p8 := map[string]string{
+		DIM:                      strconv.Itoa(128),
+		Metric:                   metric.L2,
+		NLIST:                    strconv.Itoa(1024),
+		RaftCacheDatasetOnDevice: "false",
+	}
+	p9 := map[string]string{
+		DIM:                      strconv.Itoa(128),
+		Metric:                   metric.L2,
+		NLIST:                    strconv.Itoa(1024),
+		RaftCacheDatasetOnDevice: "False",
+	}
 
 	cases := []struct {
 		params   map[string]string
@@ -68,6 +80,8 @@ func Test_raftIvfFlatChecker_CheckTrain(t *testing.T) {
 		{p5, false},
 		{p6, false},
 		{p7, false},
+		{p8, true},
+		{p9, false},
 	}
 
 	c := newRaftIVFFlatChecker()

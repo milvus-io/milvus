@@ -374,7 +374,7 @@ func (v *validateUtil) checkJSONFieldData(field *schemapb.FieldData, fieldSchema
 	for _, data := range jsonArray {
 		err := json.Unmarshal(data, &jsonMap)
 		if err != nil {
-			log.Warn("insert invalid JSON data",
+			log.Warn("insert invalid JSON data, milvus only support json map without nesting",
 				zap.ByteString("data", data),
 				zap.Error(err),
 			)
