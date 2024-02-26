@@ -314,7 +314,7 @@ class VariableColumn : public ColumnBase {
         for (auto i = 0; i < chunk->get_num_rows(); i++) {
             auto data = static_cast<const T*>(chunk->RawValue(i));
 
-            indices_.emplace_back(data->size());
+            indices_.emplace_back(size_);
             size_ += data->size();
         }
         load_buf_.emplace(std::move(chunk));
