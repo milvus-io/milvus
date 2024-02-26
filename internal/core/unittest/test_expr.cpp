@@ -2679,10 +2679,9 @@ TEST(Expr, TestCompareWithScalarIndexMaris) {
 }
 
 TEST(Expr, TestBinaryArithOpEvalRange) {
-    std::vector<std::tuple<std::string, std::function<bool(int)>, DataType>>
-        testcases = {
-            // Add test cases for BinaryArithOpEvalRangeExpr EQ of various data types
-            {R"(binary_arith_op_eval_range_expr: <
+    std::vector<std::tuple<std::string, std::function<bool(int)>, DataType>> testcases = {
+        // Add test cases for BinaryArithOpEvalRangeExpr EQ of various data types
+        {R"(binary_arith_op_eval_range_expr: <
                   column_info: <
                     field_id: 101
                     data_type: Int8
@@ -2696,9 +2695,9 @@ TEST(Expr, TestBinaryArithOpEvalRange) {
                     int64_val: 8
                   >
              >)",
-             [](int8_t v) { return (v + 4) == 8; },
-             DataType::INT8},
-            {R"(binary_arith_op_eval_range_expr: <
+         [](int8_t v) { return (v + 4) == 8; },
+         DataType::INT8},
+        {R"(binary_arith_op_eval_range_expr: <
                   column_info: <
                     field_id: 102
                     data_type: Int16
@@ -2712,9 +2711,9 @@ TEST(Expr, TestBinaryArithOpEvalRange) {
                     int64_val: 1500
                   >
              >)",
-             [](int16_t v) { return (v - 500) == 1500; },
-             DataType::INT16},
-            {R"(binary_arith_op_eval_range_expr: <
+         [](int16_t v) { return (v - 500) == 1500; },
+         DataType::INT16},
+        {R"(binary_arith_op_eval_range_expr: <
                   column_info: <
                     field_id: 103
                     data_type: Int32
@@ -2728,9 +2727,9 @@ TEST(Expr, TestBinaryArithOpEvalRange) {
                     int64_val: 4000
                   >
              >)",
-             [](int32_t v) { return (v * 2) == 4000; },
-             DataType::INT32},
-            {R"(binary_arith_op_eval_range_expr: <
+         [](int32_t v) { return (v * 2) == 4000; },
+         DataType::INT32},
+        {R"(binary_arith_op_eval_range_expr: <
                   column_info: <
                     field_id: 104
                     data_type: Int64
@@ -2744,9 +2743,9 @@ TEST(Expr, TestBinaryArithOpEvalRange) {
                     int64_val: 1000
                   >
              >)",
-             [](int64_t v) { return (v / 2) == 1000; },
-             DataType::INT64},
-            {R"(binary_arith_op_eval_range_expr: <
+         [](int64_t v) { return (v / 2) == 1000; },
+         DataType::INT64},
+        {R"(binary_arith_op_eval_range_expr: <
                   column_info: <
                     field_id: 103
                     data_type: Int32
@@ -2760,9 +2759,9 @@ TEST(Expr, TestBinaryArithOpEvalRange) {
                     int64_val: 0
                   >
              >)",
-             [](int32_t v) { return (v % 100) == 0; },
-             DataType::INT32},
-            {R"(binary_arith_op_eval_range_expr: <
+         [](int32_t v) { return (v % 100) == 0; },
+         DataType::INT32},
+        {R"(binary_arith_op_eval_range_expr: <
                   column_info: <
                     field_id: 105
                     data_type: Float
@@ -2776,9 +2775,9 @@ TEST(Expr, TestBinaryArithOpEvalRange) {
                     float_val: 2500
                   >
              >)",
-             [](float v) { return (v + 500) == 2500; },
-             DataType::FLOAT},
-            {R"(binary_arith_op_eval_range_expr: <
+         [](float v) { return (v + 500) == 2500; },
+         DataType::FLOAT},
+        {R"(binary_arith_op_eval_range_expr: <
                   column_info: <
                     field_id: 106
                     data_type: Double
@@ -2792,10 +2791,10 @@ TEST(Expr, TestBinaryArithOpEvalRange) {
                     float_val: 2500
                   >
              >)",
-             [](double v) { return (v + 500) == 2500; },
-             DataType::DOUBLE},
-            // Add test cases for BinaryArithOpEvalRangeExpr NE of various data types
-            {R"(binary_arith_op_eval_range_expr: <
+         [](double v) { return (v + 500) == 2500; },
+         DataType::DOUBLE},
+        // Add test cases for BinaryArithOpEvalRangeExpr NE of various data types
+        {R"(binary_arith_op_eval_range_expr: <
                   column_info: <
                     field_id: 105
                     data_type: Float
@@ -2809,9 +2808,9 @@ TEST(Expr, TestBinaryArithOpEvalRange) {
                     float_val: 2500
                   >
              >)",
-             [](float v) { return (v + 500) != 2500; },
-             DataType::FLOAT},
-            {R"(binary_arith_op_eval_range_expr: <
+         [](float v) { return (v + 500) != 2500; },
+         DataType::FLOAT},
+        {R"(binary_arith_op_eval_range_expr: <
                   column_info: <
                     field_id: 106
                     data_type: Double
@@ -2825,9 +2824,9 @@ TEST(Expr, TestBinaryArithOpEvalRange) {
                     float_val: 2500
                   >
              >)",
-             [](double v) { return (v - 500) != 2500; },
-             DataType::DOUBLE},
-            {R"(binary_arith_op_eval_range_expr: <
+         [](double v) { return (v - 500) != 2500; },
+         DataType::DOUBLE},
+        {R"(binary_arith_op_eval_range_expr: <
                   column_info: <
                     field_id: 101
                     data_type: Int8
@@ -2841,9 +2840,9 @@ TEST(Expr, TestBinaryArithOpEvalRange) {
                     int64_val: 2
                   >
              >)",
-             [](int8_t v) { return (v * 2) != 2; },
-             DataType::INT8},
-            {R"(binary_arith_op_eval_range_expr: <
+         [](int8_t v) { return (v * 2) != 2; },
+         DataType::INT8},
+        {R"(binary_arith_op_eval_range_expr: <
                   column_info: <
                     field_id: 102
                     data_type: Int16
@@ -2857,9 +2856,9 @@ TEST(Expr, TestBinaryArithOpEvalRange) {
                     int64_val: 1000
                   >
              >)",
-             [](int16_t v) { return (v / 2) != 1000; },
-             DataType::INT16},
-            {R"(binary_arith_op_eval_range_expr: <
+         [](int16_t v) { return (v / 2) != 1000; },
+         DataType::INT16},
+        {R"(binary_arith_op_eval_range_expr: <
                   column_info: <
                     field_id: 103
                     data_type: Int32
@@ -2873,9 +2872,9 @@ TEST(Expr, TestBinaryArithOpEvalRange) {
                     int64_val: 0
                   >
              >)",
-             [](int32_t v) { return (v % 100) != 0; },
-             DataType::INT32},
-            {R"(binary_arith_op_eval_range_expr: <
+         [](int32_t v) { return (v % 100) != 0; },
+         DataType::INT32},
+        {R"(binary_arith_op_eval_range_expr: <
                   column_info: <
                     field_id: 104
                     data_type: Int64
@@ -2889,9 +2888,397 @@ TEST(Expr, TestBinaryArithOpEvalRange) {
                     int64_val: 2500
                   >
              >)",
-             [](int64_t v) { return (v + 500) != 2500; },
-             DataType::INT64},
-        };
+         [](int64_t v) { return (v + 500) != 2500; },
+         DataType::INT64},
+        // Add test cases for BinaryArithOpEvalRangeExpr GT of various data types
+        {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id: 105
+                    data_type: Float
+                  >
+                  arith_op: Add
+                  right_operand: <
+                    float_val: 500
+                  >
+                  op: GreaterThan
+                  value: <
+                    float_val: 2500
+                  >
+             >)",
+         [](float v) { return (v + 500) > 2500; },
+         DataType::FLOAT},
+        {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id: 106
+                    data_type: Double
+                  >
+                  arith_op: Sub
+                  right_operand: <
+                    float_val: 500
+                  >
+                  op: GreaterThan
+                  value: <
+                    float_val: 2500
+                  >
+             >)",
+         [](double v) { return (v - 500) > 2500; },
+         DataType::DOUBLE},
+        {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id: 101
+                    data_type: Int8
+                  >
+                  arith_op: Mul
+                  right_operand: <
+                    int64_val: 2
+                  >
+                  op: GreaterThan
+                  value: <
+                    int64_val: 2
+                  >
+             >)",
+         [](int8_t v) { return (v * 2) > 2; },
+         DataType::INT8},
+        {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id: 102
+                    data_type: Int16
+                  >
+                  arith_op: Div
+                  right_operand: <
+                    int64_val: 2
+                  >
+                  op: GreaterThan
+                  value: <
+                    int64_val: 1000
+                  >
+             >)",
+         [](int16_t v) { return (v / 2) > 1000; },
+         DataType::INT16},
+        {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id: 103
+                    data_type: Int32
+                  >
+                  arith_op: Mod
+                  right_operand: <
+                    int64_val: 100
+                  >
+                  op: GreaterThan
+                  value: <
+                    int64_val: 0
+                  >
+             >)",
+         [](int32_t v) { return (v % 100) > 0; },
+         DataType::INT32},
+        {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id: 104
+                    data_type: Int64
+                  >
+                  arith_op: Mod
+                  right_operand: <
+                    int64_val: 500
+                  >
+                  op: GreaterThan
+                  value: <
+                    int64_val: 2500
+                  >
+             >)",
+         [](int64_t v) { return (v + 500) > 2500; },
+         DataType::INT64},
+        // Add test cases for BinaryArithOpEvalRangeExpr GE of various data types
+        {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id: 105
+                    data_type: Float
+                  >
+                  arith_op: Add
+                  right_operand: <
+                    float_val: 500
+                  >
+                  op: GreaterEqual
+                  value: <
+                    float_val: 2500
+                  >
+             >)",
+         [](float v) { return (v + 500) >= 2500; },
+         DataType::FLOAT},
+        {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id: 106
+                    data_type: Double
+                  >
+                  arith_op: Sub
+                  right_operand: <
+                    float_val: 500
+                  >
+                  op: GreaterEqual
+                  value: <
+                    float_val: 2500
+                  >
+             >)",
+         [](double v) { return (v - 500) >= 2500; },
+         DataType::DOUBLE},
+        {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id: 101
+                    data_type: Int8
+                  >
+                  arith_op: Mul
+                  right_operand: <
+                    int64_val: 2
+                  >
+                  op: GreaterEqual
+                  value: <
+                    int64_val: 2
+                  >
+             >)",
+         [](int8_t v) { return (v * 2) >= 2; },
+         DataType::INT8},
+        {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id: 102
+                    data_type: Int16
+                  >
+                  arith_op: Div
+                  right_operand: <
+                    int64_val: 2
+                  >
+                  op: GreaterEqual
+                  value: <
+                    int64_val: 1000
+                  >
+             >)",
+         [](int16_t v) { return (v / 2) >= 1000; },
+         DataType::INT16},
+        {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id: 103
+                    data_type: Int32
+                  >
+                  arith_op: Mod
+                  right_operand: <
+                    int64_val: 100
+                  >
+                  op: GreaterEqual
+                  value: <
+                    int64_val: 0
+                  >
+             >)",
+         [](int32_t v) { return (v % 100) >= 0; },
+         DataType::INT32},
+        {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id: 104
+                    data_type: Int64
+                  >
+                  arith_op: Mod
+                  right_operand: <
+                    int64_val: 500
+                  >
+                  op: GreaterEqual
+                  value: <
+                    int64_val: 2500
+                  >
+             >)",
+         [](int64_t v) { return (v + 500) >= 2500; },
+         DataType::INT64},
+        // Add test cases for BinaryArithOpEvalRangeExpr LT of various data types
+        {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id: 105
+                    data_type: Float
+                  >
+                  arith_op: Add
+                  right_operand: <
+                    float_val: 500
+                  >
+                  op: LessThan
+                  value: <
+                    float_val: 2500
+                  >
+             >)",
+         [](float v) { return (v + 500) < 2500; },
+         DataType::FLOAT},
+        {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id: 106
+                    data_type: Double
+                  >
+                  arith_op: Sub
+                  right_operand: <
+                    float_val: 500
+                  >
+                  op: LessThan
+                  value: <
+                    float_val: 2500
+                  >
+             >)",
+         [](double v) { return (v - 500) < 2500; },
+         DataType::DOUBLE},
+        {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id: 101
+                    data_type: Int8
+                  >
+                  arith_op: Mul
+                  right_operand: <
+                    int64_val: 2
+                  >
+                  op: LessThan
+                  value: <
+                    int64_val: 2
+                  >
+             >)",
+         [](int8_t v) { return (v * 2) < 2; },
+         DataType::INT8},
+        {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id: 102
+                    data_type: Int16
+                  >
+                  arith_op: Div
+                  right_operand: <
+                    int64_val: 2
+                  >
+                  op: LessThan
+                  value: <
+                    int64_val: 1000
+                  >
+             >)",
+         [](int16_t v) { return (v / 2) < 1000; },
+         DataType::INT16},
+        {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id: 103
+                    data_type: Int32
+                  >
+                  arith_op: Mod
+                  right_operand: <
+                    int64_val: 100
+                  >
+                  op: LessThan
+                  value: <
+                    int64_val: 0
+                  >
+             >)",
+         [](int32_t v) { return (v % 100) < 0; },
+         DataType::INT32},
+        {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id: 104
+                    data_type: Int64
+                  >
+                  arith_op: Mod
+                  right_operand: <
+                    int64_val: 500
+                  >
+                  op: LessThan
+                  value: <
+                    int64_val: 2500
+                  >
+             >)",
+         [](int64_t v) { return (v + 500) < 2500; },
+         DataType::INT64},
+        // Add test cases for BinaryArithOpEvalRangeExpr LE of various data types
+        {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id: 105
+                    data_type: Float
+                  >
+                  arith_op: Add
+                  right_operand: <
+                    float_val: 500
+                  >
+                  op: LessEqual
+                  value: <
+                    float_val: 2500
+                  >
+             >)",
+         [](float v) { return (v + 500) <= 2500; },
+         DataType::FLOAT},
+        {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id: 106
+                    data_type: Double
+                  >
+                  arith_op: Sub
+                  right_operand: <
+                    float_val: 500
+                  >
+                  op: LessEqual
+                  value: <
+                    float_val: 2500
+                  >
+             >)",
+         [](double v) { return (v - 500) <= 2500; },
+         DataType::DOUBLE},
+        {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id: 101
+                    data_type: Int8
+                  >
+                  arith_op: Mul
+                  right_operand: <
+                    int64_val: 2
+                  >
+                  op: LessEqual
+                  value: <
+                    int64_val: 2
+                  >
+             >)",
+         [](int8_t v) { return (v * 2) <= 2; },
+         DataType::INT8},
+        {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id: 102
+                    data_type: Int16
+                  >
+                  arith_op: Div
+                  right_operand: <
+                    int64_val: 2
+                  >
+                  op: LessEqual
+                  value: <
+                    int64_val: 1000
+                  >
+             >)",
+         [](int16_t v) { return (v / 2) <= 1000; },
+         DataType::INT16},
+        {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id: 103
+                    data_type: Int32
+                  >
+                  arith_op: Mod
+                  right_operand: <
+                    int64_val: 100
+                  >
+                  op: LessEqual
+                  value: <
+                    int64_val: 0
+                  >
+             >)",
+         [](int32_t v) { return (v % 100) <= 0; },
+         DataType::INT32},
+        {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id: 104
+                    data_type: Int64
+                  >
+                  arith_op: Mod
+                  right_operand: <
+                    int64_val: 500
+                  >
+                  op: LessEqual
+                  value: <
+                    int64_val: 2500
+                  >
+             >)",
+         [](int64_t v) { return (v + 500) <= 2500; },
+         DataType::INT64},
+    };
 
     // std::string dsl_string_tmp = R"({
     //     "bool": {
@@ -3052,24 +3439,769 @@ TEST(Expr, TestBinaryArithOpEvalRange) {
 }
 
 TEST(Expr, TestBinaryArithOpEvalRangeJSON) {
-    struct Testcase {
-        int64_t right_operand;
-        int64_t value;
-        OpType op;
-        std::vector<std::string> nested_path;
-    };
-    std::vector<Testcase> testcases{
-        {10, 20, OpType::Equal, {"int"}},
-        {20, 30, OpType::Equal, {"int"}},
-        {30, 40, OpType::NotEqual, {"int"}},
-        {40, 50, OpType::NotEqual, {"int"}},
-        {10, 20, OpType::Equal, {"double"}},
-        {20, 30, OpType::Equal, {"double"}},
-        {30, 40, OpType::NotEqual, {"double"}},
-        {40, 50, OpType::NotEqual, {"double"}},
-    };
+    using namespace milvus;
+    using namespace milvus::query;
+    using namespace milvus::segcore;
 
+    std::vector<
+        std::tuple<std::string, std::function<bool(const milvus::Json& json)>>>
+        testcases = {
+            // Add test cases for BinaryArithOpEvalRangeExpr EQ of various data types
+            {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id:102
+                    data_type:JSON
+                    nested_path:"int"
+                  >
+                  arith_op: Add
+                  right_operand: <
+                    int64_val: 1
+                  >
+                  op: Equal
+                  value: <
+                    int64_val: 2
+                  >
+             >)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (val + 1) == 2;
+             }},
+            {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id:102
+                    data_type:JSON
+                    nested_path:"int"
+                  >
+                  arith_op: Sub
+                  right_operand: <
+                    int64_val: 1
+                  >
+                  op: Equal
+                  value: <
+                    int64_val: 2
+                  >
+             >)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (val - 1) == 2;
+             }},
+            {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id:102
+                    data_type:JSON
+                    nested_path:"int"
+                  >
+                  arith_op: Mul
+                  right_operand: <
+                    int64_val: 2
+                  >
+                  op: Equal
+                  value: <
+                    int64_val: 4
+                  >
+             >)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (val * 2) == 4;
+             }},
+            {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id:102
+                    data_type:JSON
+                    nested_path:"int"
+                  >
+                  arith_op: Div
+                  right_operand: <
+                    int64_val: 2
+                  >
+                  op: Equal
+                  value: <
+                    int64_val: 4
+                  >
+             >)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (val / 2) == 4;
+             }},
+            {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id:102
+                    data_type:JSON
+                    nested_path:"int"
+                  >
+                  arith_op: Mod
+                  right_operand: <
+                    int64_val: 2
+                  >
+                  op: Equal
+                  value:<int64_val:4>
+             >)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (val % 2) == 4;
+             }},
+            {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id:102
+                    data_type:JSON
+                    nested_path:"array"
+                  >
+                  arith_op: ArrayLength
+                  op: Equal
+                  value:<int64_val:4>
+             >)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"array"});
+                 int array_length = 0;
+                 auto doc = json.doc();
+                 auto array = doc.at_pointer(pointer).get_array();
+                 if (!array.error()) {
+                     array_length = array.count_elements();
+                 }
+                 return array_length == 4;
+             }},
+            // Add test cases for BinaryArithOpEvalRangeExpr NQ of various data types
+            {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id:102
+                    data_type:JSON
+                    nested_path:"int"
+                  >
+                  arith_op: Add
+                  right_operand: <
+                    int64_val: 1
+                  >
+                  op: NotEqual
+                  value: <
+                    int64_val: 2
+                  >
+             >)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (val + 1) != 2;
+             }},
+            {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id:102
+                    data_type:JSON
+                    nested_path:"int"
+                  >
+                  arith_op: Sub
+                  right_operand: <
+                    int64_val: 1
+                  >
+                  op: NotEqual
+                  value: <
+                    int64_val: 2
+                  >
+             >)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (val - 1) != 2;
+             }},
+            {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id:102
+                    data_type:JSON
+                    nested_path:"int"
+                  >
+                  arith_op: Mul
+                  right_operand: <
+                    int64_val: 2
+                  >
+                  op: NotEqual
+                  value: <
+                    int64_val: 4
+                  >
+             >)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (val * 2) != 4;
+             }},
+            {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id:102
+                    data_type:JSON
+                    nested_path:"int"
+                  >
+                  arith_op: Div
+                  right_operand: <
+                    int64_val: 2
+                  >
+                  op: NotEqual
+                  value: <
+                    int64_val: 4
+                  >
+             >)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (val / 2) != 4;
+             }},
+            {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id:102
+                    data_type:JSON
+                    nested_path:"int"
+                  >
+                  arith_op: Mod
+                  right_operand: <
+                    int64_val: 2
+                  >
+                  op: NotEqual
+                  value: <
+                    int64_val: 4
+                  >
+             >)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (val % 2) != 4;
+             }},
+            {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id:102
+                    data_type:JSON
+                    nested_path:"array"
+                  >
+                  arith_op: ArrayLength
+                  op: NotEqual
+                  value: <
+                    int64_val: 4
+                  >
+             >)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"array"});
+                 int array_length = 0;
+                 auto doc = json.doc();
+                 auto array = doc.at_pointer(pointer).get_array();
+                 if (!array.error()) {
+                     array_length = array.count_elements();
+                 }
+                 return array_length != 4;
+             }},
+
+            // Add test cases for BinaryArithOpEvalRangeExpr GT of various data types
+            {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id:102
+                    data_type:JSON
+                    nested_path:"int"
+                  >
+                  arith_op: Add
+                  right_operand: <
+                    int64_val: 1
+                  >
+                  op: GreaterThan
+                  value: <
+                    int64_val: 2
+                  >
+             >)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (val + 1) > 2;
+             }},
+            {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id:102
+                    data_type:JSON
+                    nested_path:"int"
+                  >
+                  arith_op: Sub
+                  right_operand: <
+                    int64_val: 1
+                  >
+                  op: GreaterThan
+                  value: <
+                    int64_val: 2
+                  >
+             >)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (val - 1) > 2;
+             }},
+            {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id:102
+                    data_type:JSON
+                    nested_path:"int"
+                  >
+                  arith_op: Mul
+                  right_operand: <
+                    int64_val: 2
+                  >
+                  op: GreaterThan
+                  value: <
+                    int64_val: 4
+                  >
+             >)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (val * 2) > 4;
+             }},
+            {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id:102
+                    data_type:JSON
+                    nested_path:"int"
+                  >
+                  arith_op: Div
+                  right_operand: <
+                    int64_val: 2
+                  >
+                  op: GreaterThan
+                  value: <
+                    int64_val: 4
+                  >
+             >)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (val / 2) > 4;
+             }},
+            {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id:102
+                    data_type:JSON
+                    nested_path:"int"
+                  >
+                  arith_op: Mod
+                  right_operand: <
+                    int64_val: 2
+                  >
+                  op: GreaterThan
+                  value: <
+                    int64_val: 4
+                  >
+             >)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (val % 2) > 4;
+             }},
+            {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id:102
+                    data_type:JSON
+                    nested_path:"array"
+                  >
+                  arith_op: ArrayLength
+                  op: GreaterThan
+                  value: <
+                    int64_val: 4
+                  >
+             >)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"array"});
+                 int array_length = 0;
+                 auto doc = json.doc();
+                 auto array = doc.at_pointer(pointer).get_array();
+                 if (!array.error()) {
+                     array_length = array.count_elements();
+                 }
+                 return array_length > 4;
+             }},
+
+            // Add test cases for BinaryArithOpEvalRangeExpr GE of various data types
+            {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id:102
+                    data_type:JSON
+                    nested_path:"int"
+                  >
+                  arith_op: Add
+                  right_operand: <
+                    int64_val: 1
+                  >
+                  op: GreaterEqual
+                  value: <
+                    int64_val: 2
+                  >
+             >)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (val + 1) >= 2;
+             }},
+            {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id:102
+                    data_type:JSON
+                    nested_path:"int"
+                  >
+                  arith_op: Sub
+                  right_operand: <
+                    int64_val: 1
+                  >
+                  op: GreaterEqual
+                  value: <
+                    int64_val: 2
+                  >
+             >)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (val - 1) >= 2;
+             }},
+            {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id:102
+                    data_type:JSON
+                    nested_path:"int"
+                  >
+                  arith_op: Mul
+                  right_operand: <
+                    int64_val: 2
+                  >
+                  op: GreaterEqual
+                  value: <
+                    int64_val: 4
+                  >
+             >)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (val * 2) >= 4;
+             }},
+            {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id:102
+                    data_type:JSON
+                    nested_path:"int"
+                  >
+                  arith_op: Div
+                  right_operand: <
+                    int64_val: 2
+                  >
+                  op: GreaterEqual
+                  value: <
+                    int64_val: 4
+                  >
+             >)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (val / 2) >= 4;
+             }},
+            {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id:102
+                    data_type:JSON
+                    nested_path:"int"
+                  >
+                  arith_op: Mod
+                  right_operand: <
+                    int64_val: 2
+                  >
+                  op: GreaterEqual
+                  value: <
+                    int64_val: 4
+                  >
+             >)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (val % 2) >= 4;
+             }},
+            {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id:102
+                    data_type:JSON
+                    nested_path:"array"
+                  >
+                  arith_op: ArrayLength
+                  op: GreaterEqual
+                  value: <
+                    int64_val: 4
+                  >
+             >)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"array"});
+                 int array_length = 0;
+                 auto doc = json.doc();
+                 auto array = doc.at_pointer(pointer).get_array();
+                 if (!array.error()) {
+                     array_length = array.count_elements();
+                 }
+                 return array_length >= 4;
+             }},
+
+            // Add test cases for BinaryArithOpEvalRangeExpr LT of various data types
+            {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id:102
+                    data_type:JSON
+                    nested_path:"int"
+                  >
+                  arith_op: Add
+                  right_operand: <
+                    int64_val: 1
+                  >
+                  op: LessThan
+                  value: <
+                    int64_val: 2
+                  >
+             >)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (val + 1) < 2;
+             }},
+            {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id:102
+                    data_type:JSON
+                    nested_path:"int"
+                  >
+                  arith_op: Sub
+                  right_operand: <
+                    int64_val: 1
+                  >
+                  op: LessThan
+                  value: <
+                    int64_val: 2
+                  >
+             >)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (val - 1) < 2;
+             }},
+            {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id:102
+                    data_type:JSON
+                    nested_path:"int"
+                  >
+                  arith_op: Mul
+                  right_operand: <
+                    int64_val: 2
+                  >
+                  op: LessThan
+                  value: <
+                    int64_val: 4
+                  >
+             >)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (val * 2) < 4;
+             }},
+            {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id:102
+                    data_type:JSON
+                    nested_path:"int"
+                  >
+                  arith_op: Div
+                  right_operand: <
+                    int64_val: 2
+                  >
+                  op: LessThan
+                  value: <
+                    int64_val: 4
+                  >
+             >)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (val / 2) < 4;
+             }},
+            {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id:102
+                    data_type:JSON
+                    nested_path:"int"
+                  >
+                  arith_op: Mod
+                  right_operand: <
+                    int64_val: 2
+                  >
+                  op: LessThan
+                  value: <
+                    int64_val: 4
+                  >
+             >)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (val % 2) < 4;
+             }},
+            {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id:102
+                    data_type:JSON
+                    nested_path:"array"
+                  >
+                  arith_op: ArrayLength
+                  op: LessThan
+                  value: <
+                    int64_val: 4
+                  >
+             >)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"array"});
+                 int array_length = 0;
+                 auto doc = json.doc();
+                 auto array = doc.at_pointer(pointer).get_array();
+                 if (!array.error()) {
+                     array_length = array.count_elements();
+                 }
+                 return array_length < 4;
+             }},
+
+            // Add test cases for BinaryArithOpEvalRangeExpr LE of various data types
+            {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id:102
+                    data_type:JSON
+                    nested_path:"int"
+                  >
+                  arith_op: Add
+                  right_operand: <
+                    int64_val: 1
+                  >
+                  op: LessEqual
+                  value: <
+                    int64_val: 2
+                  >
+             >)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (val + 1) <= 2;
+             }},
+            {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id:102
+                    data_type:JSON
+                    nested_path:"int"
+                  >
+                  arith_op: Sub
+                  right_operand: <
+                    int64_val: 1
+                  >
+                  op: LessEqual
+                  value: <
+                    int64_val: 2
+                  >
+             >)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (val - 1) <= 2;
+             }},
+            {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id:102
+                    data_type:JSON
+                    nested_path:"int"
+                  >
+                  arith_op: Mul
+                  right_operand: <
+                    int64_val: 2
+                  >
+                  op: LessEqual
+                  value: <
+                    int64_val: 4
+                  >
+             >)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (val * 2) <= 4;
+             }},
+            {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id:102
+                    data_type:JSON
+                    nested_path:"int"
+                  >
+                  arith_op: Div
+                  right_operand: <
+                    int64_val: 2
+                  >
+                  op: LessEqual
+                  value: <
+                    int64_val: 4
+                  >
+             >)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (val / 2) <= 4;
+             }},
+            {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id:102
+                    data_type:JSON
+                    nested_path:"int"
+                  >
+                  arith_op: Mod
+                  right_operand: <
+                    int64_val: 2
+                  >
+                  op: LessEqual
+                  value: <
+                    int64_val: 4
+                  >
+             >)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (val % 2) <= 4;
+             }},
+            {R"(binary_arith_op_eval_range_expr: <
+                  column_info: <
+                    field_id:102
+                    data_type:JSON
+                    nested_path:"array"
+                  >
+                  arith_op: ArrayLength
+                  op: LessEqual
+                  value: <
+                    int64_val: 4
+                  >
+             >)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"array"});
+                 int array_length = 0;
+                 auto doc = json.doc();
+                 auto array = doc.at_pointer(pointer).get_array();
+                 if (!array.error()) {
+                     array_length = array.count_elements();
+                 }
+                 return array_length <= 4;
+             }},
+        };
+
+    std::string raw_plan_tmp = R"(vector_anns: <
+                                    field_id: 100
+                                    predicates: <
+                                      @@@@@
+                                    >
+                                    query_info: <
+                                      topk: 10
+                                      round_decimal: 3
+                                      metric_type: "L2"
+                                      search_params: "{\"nprobe\": 10}"
+                                    >
+                                    placeholder_tag: "$0"
+     >)";
     auto schema = std::make_shared<Schema>();
+    auto vec_fid = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     auto i64_fid = schema->AddDebugField("id", DataType::INT64);
     auto json_fid = schema->AddDebugField("json", DataType::JSON);
     schema->set_primary_field_id(i64_fid);
@@ -3094,48 +4226,26 @@ TEST(Expr, TestBinaryArithOpEvalRangeJSON) {
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
     query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
-    for (auto testcase : testcases) {
-        auto check = [&](int64_t value) {
-            if (testcase.op == OpType::Equal) {
-                return value + testcase.right_operand == testcase.value;
-            }
-            return value + testcase.right_operand != testcase.value;
-        };
-        auto pointer = milvus::Json::pointer(testcase.nested_path);
-        proto::plan::GenericValue value;
-        value.set_int64_val(testcase.value);
-        proto::plan::GenericValue right_operand;
-        right_operand.set_int64_val(testcase.right_operand);
-        auto expr = std::make_shared<milvus::expr::BinaryArithOpEvalRangeExpr>(
-            milvus::expr::ColumnInfo(
-                json_fid, DataType::JSON, testcase.nested_path),
-            testcase.op,
-            ArithOpType::Add,
-            value,
-            right_operand);
-        BitsetType final;
+
+    for (auto [clause, ref_func] : testcases) {
+        auto loc = raw_plan_tmp.find("@@@@@");
+        auto raw_plan = raw_plan_tmp;
+        raw_plan.replace(loc, 5, clause);
+        auto plan_str = translate_text_plan_to_binary_plan(raw_plan.c_str());
         auto plan =
-            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
-        visitor.ExecuteExprNode(plan, seg_promote, N * num_iters, final);
+            CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        BitsetType final;
+        visitor.ExecuteExprNode(plan->plan_node_->filter_plannode_.value(),
+                                seg_promote,
+                                N * num_iters,
+                                final);
         EXPECT_EQ(final.size(), N * num_iters);
 
         for (int i = 0; i < N * num_iters; ++i) {
             auto ans = final[i];
-
-            if (testcase.nested_path[0] == "int") {
-                auto val = milvus::Json(simdjson::padded_string(json_col[i]))
-                               .template at<int64_t>(pointer)
-                               .value();
-                auto ref = check(val);
-                ASSERT_EQ(ans, ref) << testcase.value << " " << val;
-            } else {
-                auto val = milvus::Json(simdjson::padded_string(json_col[i]))
-                               .template at<double>(pointer)
-                               .value();
-                auto ref = check(val);
-                ASSERT_EQ(ans, ref) << testcase.value << " " << val << "  "
-                                    << testcase.op << " " << i;
-            }
+            auto ref =
+                ref_func(milvus::Json(simdjson::padded_string(json_col[i])));
+            ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << json_col[i];
         }
     }
 }
@@ -3400,6 +4510,214 @@ TEST(Expr, TestBinaryArithOpEvalRangeWithScalarSortIndex) {
             >)",
              [](int64_t v) { return (v + 500) != 2000; },
              DataType::INT64},
+
+            // Add test cases for BinaryArithOpEvalRangeExpr GT of various data types
+            {R"(arith_op: Add
+            right_operand: <
+                int64_val: 4
+            >
+            op: GreaterThan
+            value: <
+                int64_val: 8
+            >)",
+             [](int8_t v) { return (v + 4) > 8; },
+             DataType::INT8},
+            {R"(arith_op: Sub
+            right_operand: <
+                int64_val: 500
+            >
+            op: GreaterThan
+            value: <
+                int64_val: 1500
+            >)",
+             [](int16_t v) { return (v - 500) > 1500; },
+             DataType::INT16},
+            {R"(arith_op: Mul
+            right_operand: <
+                int64_val: 2
+            >
+            op: GreaterThan
+            value: <
+                int64_val: 4000
+            >)",
+             [](int32_t v) { return (v * 2) > 4000; },
+             DataType::INT32},
+            {R"(arith_op: Div
+            right_operand: <
+                int64_val: 2
+            >
+            op: GreaterThan
+            value: <
+                int64_val: 1000
+            >)",
+             [](int64_t v) { return (v / 2) > 1000; },
+             DataType::INT64},
+            {R"(arith_op: Mod
+            right_operand: <
+                int64_val: 100
+            >
+            op: GreaterThan
+            value: <
+                int64_val: 0
+            >)",
+             [](int32_t v) { return (v % 100) > 0; },
+             DataType::INT32},
+
+            // Add test cases for BinaryArithOpEvalRangeExpr GE of various data types
+            {R"(arith_op: Add
+            right_operand: <
+                int64_val: 4
+            >
+            op: GreaterEqual
+            value: <
+                int64_val: 8
+            >)",
+             [](int8_t v) { return (v + 4) >= 8; },
+             DataType::INT8},
+            {R"(arith_op: Sub
+            right_operand: <
+                int64_val: 500
+            >
+            op: GreaterEqual
+            value: <
+                int64_val: 1500
+            >)",
+             [](int16_t v) { return (v - 500) >= 1500; },
+             DataType::INT16},
+            {R"(arith_op: Mul
+            right_operand: <
+                int64_val: 2
+            >
+            op: GreaterEqual
+            value: <
+                int64_val: 4000
+            >)",
+             [](int32_t v) { return (v * 2) >= 4000; },
+             DataType::INT32},
+            {R"(arith_op: Div
+            right_operand: <
+                int64_val: 2
+            >
+            op: GreaterEqual
+            value: <
+                int64_val: 1000
+            >)",
+             [](int64_t v) { return (v / 2) >= 1000; },
+             DataType::INT64},
+            {R"(arith_op: Mod
+            right_operand: <
+                int64_val: 100
+            >
+            op: GreaterEqual
+            value: <
+                int64_val: 0
+            >)",
+             [](int32_t v) { return (v % 100) >= 0; },
+             DataType::INT32},
+
+            // Add test cases for BinaryArithOpEvalRangeExpr LT of various data types
+            {R"(arith_op: Add
+            right_operand: <
+                int64_val: 4
+            >
+            op: LessThan
+            value: <
+                int64_val: 8
+            >)",
+             [](int8_t v) { return (v + 4) < 8; },
+             DataType::INT8},
+            {R"(arith_op: Sub
+            right_operand: <
+                int64_val: 500
+            >
+            op: LessThan
+            value: <
+                int64_val: 1500
+            >)",
+             [](int16_t v) { return (v - 500) < 1500; },
+             DataType::INT16},
+            {R"(arith_op: Mul
+            right_operand: <
+                int64_val: 2
+            >
+            op: LessThan
+            value: <
+                int64_val: 4000
+            >)",
+             [](int32_t v) { return (v * 2) < 4000; },
+             DataType::INT32},
+            {R"(arith_op: Div
+            right_operand: <
+                int64_val: 2
+            >
+            op: LessThan
+            value: <
+                int64_val: 1000
+            >)",
+             [](int64_t v) { return (v / 2) < 1000; },
+             DataType::INT64},
+            {R"(arith_op: Mod
+            right_operand: <
+                int64_val: 100
+            >
+            op: LessThan
+            value: <
+                int64_val: 0
+            >)",
+             [](int32_t v) { return (v % 100) < 0; },
+             DataType::INT32},
+
+            // Add test cases for BinaryArithOpEvalRangeExpr LE of various data types
+            {R"(arith_op: Add
+            right_operand: <
+                int64_val: 4
+            >
+            op: LessEqual
+            value: <
+                int64_val: 8
+            >)",
+             [](int8_t v) { return (v + 4) <= 8; },
+             DataType::INT8},
+            {R"(arith_op: Sub
+            right_operand: <
+                int64_val: 500
+            >
+            op: LessEqual
+            value: <
+                int64_val: 1500
+            >)",
+             [](int16_t v) { return (v - 500) <= 1500; },
+             DataType::INT16},
+            {R"(arith_op: Mul
+            right_operand: <
+                int64_val: 2
+            >
+            op: LessEqual
+            value: <
+                int64_val: 4000
+            >)",
+             [](int32_t v) { return (v * 2) <= 4000; },
+             DataType::INT32},
+            {R"(arith_op: Div
+            right_operand: <
+                int64_val: 2
+            >
+            op: LessEqual
+            value: <
+                int64_val: 1000
+            >)",
+             [](int64_t v) { return (v / 2) <= 1000; },
+             DataType::INT64},
+            {R"(arith_op: Mod
+            right_operand: <
+                int64_val: 100
+            >
+            op: LessEqual
+            value: <
+                int64_val: 0
+            >)",
+             [](int32_t v) { return (v % 100) <= 0; },
+             DataType::INT32},
         };
 
     std::string serialized_expr_plan = R"(vector_anns: <

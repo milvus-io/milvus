@@ -627,12 +627,8 @@ class TestCollectionSearchInvalid(TestcaseBase):
 
         # 2. search
         expression = "int32_array[0] - 1 < 1"
-        error = {ct.err_code: 65535,
-                 ct.err_msg: f"failed to create query plan: cannot parse expression: {expression}, "
-                             f"error: LessThan is not supported in execution backend"}
         collection_w.search(vectors[:default_nq], default_search_field,
-                            default_search_params, nb, expression,
-                            check_task=CheckTasks.err_res, check_items=error)
+                            default_search_params, nb, expression)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_partition_invalid_type(self, get_invalid_partition):
