@@ -5,13 +5,14 @@ import (
 	"fmt"
 	"testing"
 
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/metadata"
 )
 
 type TestData struct {
@@ -20,7 +21,6 @@ type TestData struct {
 }
 
 func genTestData(clientInfo *commonpb.ClientInfo, identifier int64) []*TestData {
-
 	ret := []*TestData{}
 
 	ret = append(ret, &TestData{
