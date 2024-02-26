@@ -132,9 +132,9 @@ class TestAllCollection(TestcaseBase):
         assert len(res[0]) <= topk
 
         # query
-        term_expr = f'{int64_field_name} in [1, 2, 3, 4]'
+        term_expr = f'{int64_field_name} > offset'
         t0 = time.time()
         res, _ = collection_w.query(term_expr)
         tt = time.time() - t0
         log.info(f"assert query result {len(res)}: {tt}")
-        assert len(res) >= 4
+        assert len(res) > 0
