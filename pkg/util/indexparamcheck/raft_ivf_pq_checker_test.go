@@ -105,6 +105,22 @@ func Test_raftIVFPQChecker_CheckTrain(t *testing.T) {
 		NBITS:  strconv.Itoa(8),
 		Metric: metric.SUPERSTRUCTURE,
 	}
+	p8 := map[string]string{
+		DIM:                      strconv.Itoa(128),
+		NLIST:                    strconv.Itoa(1024),
+		IVFM:                     strconv.Itoa(4),
+		NBITS:                    strconv.Itoa(8),
+		Metric:                   metric.L2,
+		RaftCacheDatasetOnDevice: "false",
+	}
+	p9 := map[string]string{
+		DIM:                      strconv.Itoa(128),
+		NLIST:                    strconv.Itoa(1024),
+		IVFM:                     strconv.Itoa(4),
+		NBITS:                    strconv.Itoa(8),
+		Metric:                   metric.L2,
+		RaftCacheDatasetOnDevice: "False",
+	}
 
 	cases := []struct {
 		params   map[string]string
@@ -128,6 +144,8 @@ func Test_raftIVFPQChecker_CheckTrain(t *testing.T) {
 		{p5, false},
 		{p6, false},
 		{p7, false},
+		{p8, true},
+		{p9, false},
 	}
 
 	c := newRaftIVFPQChecker()
