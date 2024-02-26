@@ -52,6 +52,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/memory"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -123,6 +124,8 @@ type Server struct {
 
 	nodeUpEventChan chan int64
 	notifyNodeUp    chan struct{}
+
+	tracker memory.MemoryTracker
 }
 
 func NewQueryCoord(ctx context.Context) (*Server, error) {
@@ -241,6 +244,7 @@ func (s *Server) initQueryCoord() error {
 	// Init metrics cache manager
 	s.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
 
+	s.tracker = memory.NewGoMemoryTracker("querycoord-mem-tracker", nil)
 	// Init meta
 	s.nodeMgr = session.NewNodeManager()
 	err = s.initMeta()
@@ -358,6 +362,7 @@ func (s *Server) initMeta() error {
 		LeaderViewManager:  meta.NewLeaderViewManager(),
 	}
 	s.targetMgr = meta.NewTargetManager(s.broker, s.meta)
+	s.targetMgr.SetTracker(s.tracker)
 	log.Info("QueryCoord server initMeta done", zap.Duration("duration", record.ElapseSpan()))
 	return nil
 }

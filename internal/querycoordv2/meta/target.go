@@ -19,9 +19,11 @@ package meta
 import (
 	"time"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/util/memory"
 )
 
 // CollectionTarget collection target is immutable,
@@ -63,9 +65,21 @@ func (p *CollectionTarget) IsEmpty() bool {
 	return len(p.dmChannels)+len(p.segments) == 0
 }
 
+func (p *CollectionTarget) Size() int64 {
+	size := 0
+	for _, segment := range p.segments {
+		size += proto.Size(segment) + 8
+	}
+	for name, channel := range p.dmChannels {
+		size += int(channel.Size()) + len(name)
+	}
+	return int64(size) + 8
+}
+
 type target struct {
 	// just maintain target at collection level
 	collectionTargetMap map[int64]*CollectionTarget
+	tracker             memory.MemoryTracker
 }
 
 func newTarget() *target {
@@ -74,15 +88,30 @@ func newTarget() *target {
 	}
 }
 
+func (t *target) setTracker(tracker memory.MemoryTracker) {
+	t.tracker = tracker
+}
+
 func (t *target) updateCollectionTarget(collectionID int64, target *CollectionTarget) {
 	if t.collectionTargetMap[collectionID] != nil && target.GetTargetVersion() <= t.collectionTargetMap[collectionID].GetTargetVersion() {
 		return
 	}
 
+	if t.tracker != nil {
+		if _, ok := t.collectionTargetMap[collectionID]; ok {
+			t.tracker.Return(t.collectionTargetMap[collectionID].Size())
+		}
+		t.tracker.Consume(target.Size())
+	}
 	t.collectionTargetMap[collectionID] = target
 }
 
 func (t *target) removeCollectionTarget(collectionID int64) {
+	if t.tracker != nil {
+		if _, ok := t.collectionTargetMap[collectionID]; ok {
+			t.tracker.Return(t.collectionTargetMap[collectionID].Size())
+		}
+	}
 	delete(t.collectionTargetMap, collectionID)
 }
 

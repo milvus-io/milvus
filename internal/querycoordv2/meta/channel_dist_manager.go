@@ -45,6 +45,10 @@ func (channel *DmChannel) Clone() *DmChannel {
 	}
 }
 
+func (channel *DmChannel) Size() int64 {
+	return int64(proto.Size(channel.VchannelInfo)) + 16
+}
+
 type ChannelDistManager struct {
 	rwmutex sync.RWMutex
 

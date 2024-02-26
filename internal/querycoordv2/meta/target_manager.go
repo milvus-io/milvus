@@ -26,6 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/util/memory"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -61,6 +62,11 @@ func NewTargetManager(broker Broker, meta *Meta) *TargetManager {
 		current: newTarget(),
 		next:    newTarget(),
 	}
+}
+
+func (mgr *TargetManager) SetTracker(tracker memory.MemoryTracker) {
+	mgr.current.setTracker(tracker)
+	mgr.next.setTracker(tracker)
 }
 
 // UpdateCollectionCurrentTarget updates the current target to next target,
