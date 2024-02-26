@@ -914,6 +914,7 @@ func (s *QuotaCenterSuite) TestNodeOffline() {
 	meta := s.meta
 	core := s.core
 
+	metrics.RootCoordTtDelay.Reset()
 	Params.Save(Params.QuotaConfig.TtProtectionEnabled.Key, "true")
 	defer Params.Reset(Params.QuotaConfig.TtProtectionEnabled.Key)
 
