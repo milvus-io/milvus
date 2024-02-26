@@ -124,7 +124,7 @@ func TestClientBase_NodeSessionNotExist(t *testing.T) {
 	_, err = base.Call(ctx, func(client *mockClient) (any, error) {
 		return struct{}{}, status.Errorf(codes.Unknown, merr.ErrNodeNotMatch.Error())
 	})
-	assert.True(t, errors.Is(err, merr.ErrNodeNotFound))
+	assert.True(t, IsServerIDMismatchErr(err))
 
 	// test querynode/datanode/indexnode/proxy down, return unavailable error
 	base.grpcClientMtx.Lock()
