@@ -174,7 +174,7 @@ func NewRocksMQ(name string, idAllocator allocator.Interface) (*rocksmq, error) 
 			rocksDBLRUCacheCapacity = calculatedCapacity
 		}
 	}
-	log.Debug("Start rocksmq ", zap.Int("max proc", maxProcs),
+	log.Debug("Start rocksmq", zap.Int("max proc", maxProcs),
 		zap.Int("parallism", parallelism), zap.Uint64("lru cache", rocksDBLRUCacheCapacity))
 	bbto := gorocksdb.NewDefaultBlockBasedTableOptions()
 	bbto.SetBlockSize(64 << 10)
@@ -219,11 +219,11 @@ func NewRocksMQ(name string, idAllocator allocator.Interface) (*rocksmq, error) 
 	optsStore.IncreaseParallelism(parallelism)
 	// enable back ground flush
 	optsStore.SetMaxBackgroundFlushes(1)
-	// use properties as the column families to store trace id
+	// properties is not used anymore, keep it for upgrading successfully
 	optsStore.SetCreateIfMissingColumnFamilies(true)
 
 	// db, err := gorocksdb.OpenDb(opts, name)
-	// use properties as the column families to store trace id
+	// properties is not used anymore, keep it for upgrading successfully
 	giveColumnFamilies := []string{"default", "properties"}
 	db, cfHandles, err := gorocksdb.OpenDbColumnFamilies(optsStore, name, giveColumnFamilies, []*gorocksdb.Options{optsStore, optsStore})
 	if err != nil {

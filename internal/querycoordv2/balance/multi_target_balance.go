@@ -96,7 +96,7 @@ func (m *segmentCountCostModel) cost() float64 {
 	return (currCost - best) / (worst - best)
 }
 
-func cmpFloat(f1, f2 float64) int {
+func cmpCost(f1, f2 float64) int {
 	if math.Abs(f1-f2) < params.Params.QueryCoordCfg.BalanceCostThreshold.GetAsFloat() {
 		return 0
 	}
@@ -279,7 +279,7 @@ func (g *rowCountBasedPlanGenerator) generatePlans() []SegmentAssignPlan {
 		newCluster := g.applyPlans(g.replicaNodeSegments, []SegmentAssignPlan{plan})
 		newGlobalCluster := g.applyPlans(g.globalNodeSegments, []SegmentAssignPlan{plan})
 		newCost := g.calClusterCost(newCluster, newGlobalCluster)
-		if cmpFloat(newCost, g.currClusterCost) < 0 {
+		if cmpCost(newCost, g.currClusterCost) < 0 {
 			g.currClusterCost = newCost
 			g.replicaNodeSegments = newCluster
 			g.globalNodeSegments = newGlobalCluster
@@ -356,7 +356,7 @@ func (g *segmentCountBasedPlanGenerator) generatePlans() []SegmentAssignPlan {
 		newCluster := g.applyPlans(g.replicaNodeSegments, []SegmentAssignPlan{plan})
 		newGlobalCluster := g.applyPlans(g.globalNodeSegments, []SegmentAssignPlan{plan})
 		newCost := g.calClusterCost(newCluster, newGlobalCluster)
-		if cmpFloat(newCost, g.currClusterCost) < 0 {
+		if cmpCost(newCost, g.currClusterCost) < 0 {
 			g.currClusterCost = newCost
 			g.replicaNodeSegments = newCluster
 			g.globalNodeSegments = newGlobalCluster
@@ -440,7 +440,7 @@ func (g *randomPlanGenerator) generatePlans() []SegmentAssignPlan {
 		newCluster := g.applyPlans(g.replicaNodeSegments, plans)
 		newGlobalCluster := g.applyPlans(g.globalNodeSegments, plans)
 		newCost := g.calClusterCost(newCluster, newGlobalCluster)
-		if cmpFloat(newCost, g.currClusterCost) < 0 {
+		if cmpCost(newCost, g.currClusterCost) < 0 {
 			g.currClusterCost = newCost
 			g.replicaNodeSegments = newCluster
 			g.globalNodeSegments = newGlobalCluster
