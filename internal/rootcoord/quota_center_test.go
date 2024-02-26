@@ -942,7 +942,8 @@ func (s *QuotaCenterSuite) TestNodeOffline() {
 							NodeID: 2, CollectionIDs: []int64{100, 200},
 						},
 					},
-				}},
+				},
+			},
 		},
 	}
 	resp, err := metricsinfo.MarshalTopology(qcMetrics)
