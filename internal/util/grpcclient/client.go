@@ -371,6 +371,7 @@ func (c *ClientBase[T]) verifySession(ctx context.Context) error {
 		if getSessionErr != nil {
 			// Only log but not handle this error as it is an auxiliary logic
 			log.Warn("fail to get session", zap.Error(getSessionErr))
+			return getSessionErr
 		}
 		if coordSess, exist := sessions[c.GetRole()]; exist {
 			if c.GetNodeID() != coordSess.ServerID {
@@ -412,7 +413,7 @@ func (c *ClientBase[T]) checkGrpcErr(ctx context.Context, err error) (needRetry,
 	case funcutil.IsGrpcErr(err, codes.Unimplemented):
 		return false, false, merr.WrapErrServiceUnimplemented(err)
 	case IsServerIDMismatchErr(err):
-		if ok, err := c.checkNodeSessionExist(ctx); !ok {
+		if ok := c.checkNodeSessionExist(ctx); !ok {
 			// if session doesn't exist, no need to retry for datanode/indexnode/querynode/proxy
 			return false, false, err
 		}
@@ -424,16 +425,17 @@ func (c *ClientBase[T]) checkGrpcErr(ctx context.Context, err error) (needRetry,
 	}
 }
 
-func (c *ClientBase[T]) checkNodeSessionExist(ctx context.Context) (bool, error) {
+// checkNodeSessionExist checks if the session of the node exists.
+// If the session does not exist , it will return false, otherwise it will return true.
+func (c *ClientBase[T]) checkNodeSessionExist(ctx context.Context) bool {
 	if c.isNode {
 		err := c.verifySession(ctx)
-		if errors.Is(err, merr.ErrNodeNotFound) {
+		if err != nil {
 			log.Warn("failed to verify node session", zap.Error(err))
-			// stop retry
-			return false, err
 		}
+		return !errors.Is(err, merr.ErrNodeNotFound)
 	}
-	return true, nil
+	return true
 }
 
 func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, error)) (any, error) {
@@ -461,9 +463,9 @@ func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, er
 	defer cancel()
 	err := retry.Do(ctx, func() error {
 		if wrapper == nil {
-			if ok, err := c.checkNodeSessionExist(ctx); !ok {
+			if ok := c.checkNodeSessionExist(ctx); !ok {
 				// if session doesn't exist, no need to reset connection for datanode/indexnode/querynode
-				return retry.Unrecoverable(err)
+				return retry.Unrecoverable(merr.ErrNodeNotFound)
 			}
 
 			err := errors.Wrap(clientErr, "empty grpc client")

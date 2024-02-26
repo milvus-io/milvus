@@ -29,6 +29,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"go.uber.org/atomic"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/examples/helloworld/helloworld"
@@ -124,7 +125,7 @@ func TestClientBase_NodeSessionNotExist(t *testing.T) {
 	_, err = base.Call(ctx, func(client *mockClient) (any, error) {
 		return struct{}{}, status.Errorf(codes.Unknown, merr.ErrNodeNotMatch.Error())
 	})
-	assert.True(t, errors.Is(err, merr.ErrNodeNotFound))
+	assert.True(t, IsServerIDMismatchErr(err))
 
 	// test querynode/datanode/indexnode/proxy down, return unavailable error
 	base.grpcClientMtx.Lock()
@@ -525,4 +526,46 @@ func TestClientBase_Compression(t *testing.T) {
 	})
 	assert.NoError(t, err)
 	assert.Equal(t, res.(*milvuspb.ComponentStates).GetState().GetNodeID(), randID)
+}
+
+func TestVerifySession(t *testing.T) {
+	base := ClientBase[*mockClient]{}
+	mockSession := sessionutil.NewMockSession(t)
+	expectedErr := errors.New("mocked")
+	mockSession.EXPECT().GetSessions(mock.Anything).Return(nil, 0, expectedErr)
+	base.sess = mockSession
+
+	ctx := context.Background()
+	err := base.verifySession(ctx)
+	assert.ErrorIs(t, err, expectedErr)
+
+	base.lastSessionCheck.Store(time.Unix(0, 0))
+	base.NodeID = *atomic.NewInt64(1)
+	base.role = typeutil.RootCoordRole
+	mockSession2 := sessionutil.NewMockSession(t)
+	mockSession2.EXPECT().GetSessions(mock.Anything).Return(
+		map[string]*sessionutil.Session{
+			typeutil.RootCoordRole: {
+				SessionRaw: sessionutil.SessionRaw{
+					ServerID: 1,
+				},
+			},
+		},
+		0,
+		nil,
+	)
+	base.sess = mockSession2
+	err = base.verifySession(ctx)
+	assert.NoError(t, err)
+
+	base.lastSessionCheck.Store(time.Unix(0, 0))
+	base.NodeID = *atomic.NewInt64(2)
+	err = base.verifySession(ctx)
+	assert.ErrorIs(t, err, merr.ErrNodeNotMatch)
+
+	base.lastSessionCheck.Store(time.Unix(0, 0))
+	base.NodeID = *atomic.NewInt64(1)
+	base.role = typeutil.QueryNodeRole
+	err = base.verifySession(ctx)
+	assert.ErrorIs(t, err, merr.ErrNodeNotFound)
 }
