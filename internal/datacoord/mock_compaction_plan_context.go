@@ -151,6 +151,58 @@ func (_c *MockCompactionPlanContext_getCompactionTasksBySignalID_Call) RunAndRet
 	return _c
 }
 
+// isBusy provides a mock function with given fields: channel
+func (_m *MockCompactionPlanContext) isBusy(channel string) (bool, error) {
+	ret := _m.Called(channel)
+
+	var r0 bool
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) (bool, error)); ok {
+		return rf(channel)
+	}
+	if rf, ok := ret.Get(0).(func(string) bool); ok {
+		r0 = rf(channel)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(channel)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockCompactionPlanContext_isBusy_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'isBusy'
+type MockCompactionPlanContext_isBusy_Call struct {
+	*mock.Call
+}
+
+// isBusy is a helper method to define mock.On call
+//   - channel string
+func (_e *MockCompactionPlanContext_Expecter) isBusy(channel interface{}) *MockCompactionPlanContext_isBusy_Call {
+	return &MockCompactionPlanContext_isBusy_Call{Call: _e.mock.On("isBusy", channel)}
+}
+
+func (_c *MockCompactionPlanContext_isBusy_Call) Run(run func(channel string)) *MockCompactionPlanContext_isBusy_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *MockCompactionPlanContext_isBusy_Call) Return(_a0 bool, _a1 error) *MockCompactionPlanContext_isBusy_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockCompactionPlanContext_isBusy_Call) RunAndReturn(run func(string) (bool, error)) *MockCompactionPlanContext_isBusy_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // isFull provides a mock function with given fields:
 func (_m *MockCompactionPlanContext) isFull() bool {
 	ret := _m.Called()

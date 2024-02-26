@@ -72,6 +72,11 @@ func (h *spyCompactionHandler) isFull() bool {
 	return false
 }
 
+// isFull return true if the task pool is full
+func (h *spyCompactionHandler) isBusy(channel string) (bool, error) {
+	return false, nil
+}
+
 // get compaction tasks by signal id
 func (h *spyCompactionHandler) getCompactionTasksBySignalID(signalID int64) []*compactionTask {
 	panic("not implemented") // TODO: Implement
@@ -1722,7 +1727,7 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 		},
 	}
 
-	couldDo := trigger.ShouldDoSingleCompaction(info, false, &compactTime{})
+	couldDo := trigger.ShouldDoSingleCompaction(info, false, false, &compactTime{})
 	assert.True(t, couldDo)
 
 	// Test too many stats log
@@ -1740,22 +1745,22 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 		},
 	}
 
-	couldDo = trigger.ShouldDoSingleCompaction(info, false, &compactTime{})
+	couldDo = trigger.ShouldDoSingleCompaction(info, false, false, &compactTime{})
 	assert.True(t, couldDo)
 
-	couldDo = trigger.ShouldDoSingleCompaction(info, true, &compactTime{})
+	couldDo = trigger.ShouldDoSingleCompaction(info, true, false, &compactTime{})
 	assert.True(t, couldDo)
 
 	// if only 10 bin logs, then disk index won't trigger compaction
 	info.Statslogs = binlogs[0:40]
-	couldDo = trigger.ShouldDoSingleCompaction(info, false, &compactTime{})
+	couldDo = trigger.ShouldDoSingleCompaction(info, false, false, &compactTime{})
 	assert.True(t, couldDo)
 
-	couldDo = trigger.ShouldDoSingleCompaction(info, true, &compactTime{})
+	couldDo = trigger.ShouldDoSingleCompaction(info, true, false, &compactTime{})
 	assert.False(t, couldDo)
 	// Test too many stats log but compacted
 	info.CompactionFrom = []int64{0, 1}
-	couldDo = trigger.ShouldDoSingleCompaction(info, false, &compactTime{})
+	couldDo = trigger.ShouldDoSingleCompaction(info, false, false, &compactTime{})
 	assert.False(t, couldDo)
 
 	// Test expire triggered  compaction
@@ -1790,16 +1795,20 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 	}
 
 	// expire time < Timestamp To
-	couldDo = trigger.ShouldDoSingleCompaction(info2, false, &compactTime{expireTime: 300})
+	couldDo = trigger.ShouldDoSingleCompaction(info2, false, false, &compactTime{expireTime: 300})
 	assert.False(t, couldDo)
 
 	// didn't reach single compaction size 10 * 1024 * 1024
-	couldDo = trigger.ShouldDoSingleCompaction(info2, false, &compactTime{expireTime: 600})
+	couldDo = trigger.ShouldDoSingleCompaction(info2, false, false, &compactTime{expireTime: 600})
 	assert.False(t, couldDo)
 
 	// expire time < Timestamp False
-	couldDo = trigger.ShouldDoSingleCompaction(info2, false, &compactTime{expireTime: 1200})
+	couldDo = trigger.ShouldDoSingleCompaction(info2, false, false, &compactTime{expireTime: 1200})
 	assert.True(t, couldDo)
+
+	// we don't do single compaction for busy cluser
+	couldDo = trigger.ShouldDoSingleCompaction(info2, false, true, &compactTime{expireTime: 1200})
+	assert.False(t, couldDo)
 
 	// Test Delete triggered compaction
 	var binlogs3 []*datapb.FieldBinlog
@@ -1833,7 +1842,7 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 	}
 
 	// deltalog is large enough, should do compaction
-	couldDo = trigger.ShouldDoSingleCompaction(info3, false, &compactTime{})
+	couldDo = trigger.ShouldDoSingleCompaction(info3, false, false, &compactTime{})
 	assert.True(t, couldDo)
 
 	mockVersionManager := NewMockVersionManager(t)
@@ -1899,13 +1908,13 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 
 	// expire time < Timestamp To, but index engine version is 2 which is larger than CurrentIndexVersion in segmentIndex
 	Params.Save(Params.DataCoordCfg.AutoUpgradeSegmentIndex.Key, "true")
-	couldDo = trigger.ShouldDoSingleCompaction(info4, false, &compactTime{expireTime: 300})
+	couldDo = trigger.ShouldDoSingleCompaction(info4, false, false, &compactTime{expireTime: 300})
 	assert.True(t, couldDo)
 	// expire time < Timestamp To, and index engine version is 2 which is equal CurrentIndexVersion in segmentIndex
-	couldDo = trigger.ShouldDoSingleCompaction(info5, false, &compactTime{expireTime: 300})
+	couldDo = trigger.ShouldDoSingleCompaction(info5, false, false, &compactTime{expireTime: 300})
 	assert.False(t, couldDo)
 	// expire time < Timestamp To, and index engine version is 2 which is larger than CurrentIndexVersion in segmentIndex but indexFileKeys is nil
-	couldDo = trigger.ShouldDoSingleCompaction(info6, false, &compactTime{expireTime: 300})
+	couldDo = trigger.ShouldDoSingleCompaction(info6, false, false, &compactTime{expireTime: 300})
 	assert.False(t, couldDo)
 }
 

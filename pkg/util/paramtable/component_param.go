@@ -2407,6 +2407,7 @@ type dataCoordConfig struct {
 	IndexBasedCompaction ParamItem `refreshable:"true"`
 
 	CompactionRPCTimeout              ParamItem `refreshable:"true"`
+	CompactionWorkerBusyTasks         ParamItem `refreshable:"true"`
 	CompactionMaxParallelTasks        ParamItem `refreshable:"true"`
 	CompactionWorkerParalleTasks      ParamItem `refreshable:"true"`
 	MinSegmentToMerge                 ParamItem `refreshable:"true"`
@@ -2612,6 +2613,14 @@ the number of binlog file reaches to max value.`,
 		Export:       true,
 	}
 	p.CompactionRPCTimeout.Init(base.mgr)
+
+	p.CompactionWorkerBusyTasks = ParamItem{
+		Key:          "dataCoord.compaction.busyTaskNum",
+		Version:      "2.4",
+		DefaultValue: "2",
+		Export:       true,
+	}
+	p.CompactionWorkerBusyTasks.Init(base.mgr)
 
 	p.CompactionMaxParallelTasks = ParamItem{
 		Key:          "dataCoord.compaction.maxParallelTaskNum",
