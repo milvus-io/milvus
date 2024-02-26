@@ -433,7 +433,7 @@ func (ex *Executor) setDistribution(task *LeaderTask, step int) error {
 		return err
 	}
 
-	loadInfo, _, err := ex.getLoadInfo(ctx, task.CollectionID(), action.SegmentID(), channel)
+	loadInfo, indexInfo, err := ex.getLoadInfo(ctx, task.CollectionID(), action.SegmentID(), channel)
 	if err != nil {
 		return err
 	}
@@ -457,6 +457,7 @@ func (ex *Executor) setDistribution(task *LeaderTask, step int) error {
 				Info:        loadInfo,
 			},
 		},
+		IndexInfoList: indexInfo,
 	}
 
 	startTs := time.Now()
