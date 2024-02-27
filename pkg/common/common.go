@@ -123,6 +123,8 @@ const (
 	CollectionSearchRateMaxKey   = "collection.searchRate.max.vps"
 	CollectionSearchRateMinKey   = "collection.searchRate.min.vps"
 	CollectionDiskQuotaKey       = "collection.diskProtection.diskQuota.mb"
+
+	PartitionDiskQuotaKey = "partition.diskProtection.diskQuota.mb"
 )
 
 // common properties

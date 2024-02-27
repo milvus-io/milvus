@@ -83,6 +83,7 @@ type collectionInfo struct {
 	StartPositions []*commonpb.KeyDataPair
 	Properties     map[string]string
 	CreatedAt      Timestamp
+	DatabaseID     int64
 }
 
 // NewMeta creates meta from provided `kv.TxnKV`
@@ -214,6 +215,7 @@ func (m *meta) GetClonedCollectionInfo(collectionID UniqueID) *collectionInfo {
 		Partitions:     coll.Partitions,
 		StartPositions: common.CloneKeyDataPairs(coll.StartPositions),
 		Properties:     clonedProperties,
+		DatabaseID:     coll.DatabaseID,
 	}
 
 	return cloneColl
@@ -267,10 +269,11 @@ func (m *meta) GetNumRowsOfCollection(collectionID UniqueID) int64 {
 }
 
 // GetCollectionBinlogSize returns the total binlog size and binlog size of collections.
-func (m *meta) GetCollectionBinlogSize() (int64, map[UniqueID]int64) {
+func (m *meta) GetCollectionBinlogSize() (int64, map[UniqueID]int64, map[UniqueID]map[UniqueID]int64) {
 	m.RLock()
 	defer m.RUnlock()
 	collectionBinlogSize := make(map[UniqueID]int64)
+	partitionBinlogSize := make(map[UniqueID]map[UniqueID]int64)
 	collectionRowsNum := make(map[UniqueID]map[commonpb.SegmentState]int64)
 	segments := m.segments.GetSegments()
 	var total int64
@@ -279,6 +282,15 @@ func (m *meta) GetCollectionBinlogSize() (int64, map[UniqueID]int64) {
 		if isSegmentHealthy(segment) {
 			total += segmentSize
 			collectionBinlogSize[segment.GetCollectionID()] += segmentSize
+
+			partBinlogSize, ok := partitionBinlogSize[segment.GetCollectionID()]
+			if ok {
+				partBinlogSize[segment.GetPartitionID()] += segmentSize
+			} else {
+				partitionBinlogSize[segment.GetCollectionID()] = make(map[int64]int64)
+				partitionBinlogSize[segment.GetCollectionID()][segment.GetPartitionID()] = segmentSize
+			}
+
 			metrics.DataCoordStoredBinlogSize.WithLabelValues(
 				fmt.Sprint(segment.GetCollectionID()), fmt.Sprint(segment.GetID())).Set(float64(segmentSize))
 			if _, ok := collectionRowsNum[segment.GetCollectionID()]; !ok {
@@ -292,7 +304,7 @@ func (m *meta) GetCollectionBinlogSize() (int64, map[UniqueID]int64) {
 			metrics.DataCoordNumStoredRows.WithLabelValues(fmt.Sprint(collection), state.String()).Set(float64(rows))
 		}
 	}
-	return total, collectionBinlogSize
+	return total, collectionBinlogSize, partitionBinlogSize
 }
 
 // AddSegment records segment info, persisting info into kv store

@@ -55,6 +55,7 @@ type IMetaTable interface {
 	RemoveCollection(ctx context.Context, collectionID UniqueID, ts Timestamp) error
 	GetCollectionByName(ctx context.Context, dbName string, collectionName string, ts Timestamp) (*model.Collection, error)
 	GetCollectionByID(ctx context.Context, dbName string, collectionID UniqueID, ts Timestamp, allowUnavailable bool) (*model.Collection, error)
+	GetCollectionByIDWithMaxTs(ctx context.Context, collectionID UniqueID) (*model.Collection, error)
 	ListCollections(ctx context.Context, dbName string, ts Timestamp, onlyAvail bool) ([]*model.Collection, error)
 	ListAllAvailCollections(ctx context.Context) map[int64][]int64
 	ListCollectionPhysicalChannels() map[typeutil.UniqueID][]string
@@ -347,7 +348,7 @@ func (mt *MetaTable) getDatabaseByNameInternal(ctx context.Context, dbName strin
 
 	db, ok := mt.dbName2Meta[dbName]
 	if !ok {
-		return nil, fmt.Errorf("database:%s not found", dbName)
+		return nil, merr.WrapErrDatabaseNotFound(dbName)
 	}
 
 	return db, nil
@@ -499,12 +500,12 @@ func filterUnavailable(coll *model.Collection) *model.Collection {
 }
 
 // getLatestCollectionByIDInternal should be called with ts = typeutil.MaxTimestamp
-func (mt *MetaTable) getLatestCollectionByIDInternal(ctx context.Context, collectionID UniqueID, allowAvailable bool) (*model.Collection, error) {
+func (mt *MetaTable) getLatestCollectionByIDInternal(ctx context.Context, collectionID UniqueID, allowUnavailable bool) (*model.Collection, error) {
 	coll, ok := mt.collID2Meta[collectionID]
 	if !ok || coll == nil {
 		return nil, merr.WrapErrCollectionNotFound(collectionID)
 	}
-	if allowAvailable {
+	if allowUnavailable {
 		return coll.Clone(), nil
 	}
 	if !coll.Available() {
@@ -601,6 +602,11 @@ func (mt *MetaTable) GetCollectionByID(ctx context.Context, dbName string, colle
 	defer mt.ddLock.RUnlock()
 
 	return mt.getCollectionByIDInternal(ctx, dbName, collectionID, ts, allowUnavailable)
+}
+
+// GetCollectionByIDWithMaxTs get collection, dbName can be ignored if ts is max timestamps
+func (mt *MetaTable) GetCollectionByIDWithMaxTs(ctx context.Context, collectionID UniqueID) (*model.Collection, error) {
+	return mt.GetCollectionByID(ctx, "", collectionID, typeutil.MaxTimestamp, false)
 }
 
 func (mt *MetaTable) ListAllAvailCollections(ctx context.Context) map[int64][]int64 {

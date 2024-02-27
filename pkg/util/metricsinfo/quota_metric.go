@@ -87,6 +87,7 @@ type QueryNodeQuotaMetrics struct {
 type DataCoordQuotaMetrics struct {
 	TotalBinlogSize      int64
 	CollectionBinlogSize map[int64]int64
+	PartitionsBinlogSize map[int64]map[int64]int64
 }
 
 // DataNodeQuotaMetrics are metrics of DataNode.
