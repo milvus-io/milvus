@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -1526,9 +1527,13 @@ func TestTaskSearch_reduceSearchResultData(t *testing.T) {
 			results = append(results, r)
 		}
 
+		queryInfo := &planpb.QueryInfo{
+			GroupByFieldId: -1,
+		}
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
-				reduced, err := reduceSearchResultData(context.TODO(), results, nq, topk, metric.L2, schemapb.DataType_Int64, test.offset)
+				reduced, err := reduceSearchResult(context.TODO(),
+					NewReduceSearchResultInfo(results, nq, topk, metric.L2, schemapb.DataType_Int64, test.offset, queryInfo))
 				assert.NoError(t, err)
 				assert.Equal(t, test.outData, reduced.GetResults().GetIds().GetIntId().GetData())
 				assert.Equal(t, []int64{test.limit, test.limit}, reduced.GetResults().GetTopks())
@@ -1577,10 +1582,10 @@ func TestTaskSearch_reduceSearchResultData(t *testing.T) {
 				[]int64{},
 			},
 		}
-
 		for _, test := range lessThanLimitTests {
 			t.Run(test.description, func(t *testing.T) {
-				reduced, err := reduceSearchResultData(context.TODO(), results, nq, topk, metric.L2, schemapb.DataType_Int64, test.offset)
+				reduced, err := reduceSearchResult(context.TODO(), NewReduceSearchResultInfo(results, nq, topk,
+					metric.L2, schemapb.DataType_Int64, test.offset, queryInfo))
 				assert.NoError(t, err)
 				assert.Equal(t, test.outData, reduced.GetResults().GetIds().GetIntId().GetData())
 				assert.Equal(t, []int64{test.outLimit, test.outLimit}, reduced.GetResults().GetTopks())
@@ -1604,7 +1609,12 @@ func TestTaskSearch_reduceSearchResultData(t *testing.T) {
 			results = append(results, r)
 		}
 
-		reduced, err := reduceSearchResultData(context.TODO(), results, nq, topk, metric.L2, schemapb.DataType_Int64, 0)
+		queryInfo := &planpb.QueryInfo{
+			GroupByFieldId: -1,
+		}
+
+		reduced, err := reduceSearchResult(context.TODO(), NewReduceSearchResultInfo(
+			results, nq, topk, metric.L2, schemapb.DataType_Int64, 0, queryInfo))
 
 		assert.NoError(t, err)
 		assert.Equal(t, resultData, reduced.GetResults().GetIds().GetIntId().GetData())
@@ -1630,8 +1640,12 @@ func TestTaskSearch_reduceSearchResultData(t *testing.T) {
 
 			results = append(results, r)
 		}
+		queryInfo := &planpb.QueryInfo{
+			GroupByFieldId: -1,
+		}
 
-		reduced, err := reduceSearchResultData(context.TODO(), results, nq, topk, metric.L2, schemapb.DataType_VarChar, 0)
+		reduced, err := reduceSearchResult(context.TODO(), NewReduceSearchResultInfo(results,
+			nq, topk, metric.L2, schemapb.DataType_VarChar, 0, queryInfo))
 
 		assert.NoError(t, err)
 		assert.Equal(t, resultData, reduced.GetResults().GetIds().GetStrId().GetData())
@@ -1700,8 +1714,11 @@ func TestTaskSearch_reduceGroupBySearchResultData(t *testing.T) {
 				}
 				results = append(results, result)
 			}
-
-			reduced, err := reduceSearchResultData(context.TODO(), results, nq, topK, metric.L2, schemapb.DataType_Int64, 0)
+			queryInfo := &planpb.QueryInfo{
+				GroupByFieldId: 1,
+			}
+			reduced, err := reduceSearchResult(context.TODO(), NewReduceSearchResultInfo(results, nq, topK, metric.L2,
+				schemapb.DataType_Int64, 0, queryInfo))
 			resultIDs := reduced.GetResults().GetIds().GetIntId().Data
 			resultScores := reduced.GetResults().GetScores()
 			resultGroupByValues := reduced.GetResults().GetGroupByFieldValue().GetScalars().GetLongData().GetData()
@@ -1711,6 +1728,63 @@ func TestTaskSearch_reduceGroupBySearchResultData(t *testing.T) {
 			assert.NoError(t, err)
 		})
 	}
+}
+
+func TestTaskSearch_reduceGroupBySearchResultDataWithOffset(t *testing.T) {
+	var (
+		nq     int64 = 1
+		limit  int64 = 5
+		offset int64 = 5
+	)
+	ids := [][]int64{
+		{1, 3, 5, 7, 9},
+		{2, 4, 6, 8, 10},
+	}
+	scores := [][]float32{
+		{10, 8, 6, 4, 2},
+		{9, 7, 5, 3, 1},
+	}
+	groupByValuesArr := [][]int64{
+		{1, 3, 5, 7, 9},
+		{2, 4, 6, 8, 10},
+	}
+	expectedIDs := []int64{6, 7, 8, 9, 10}
+	expectedScores := []float32{-5, -4, -3, -2, -1}
+	expectedGroupByValues := []int64{6, 7, 8, 9, 10}
+
+	var results []*schemapb.SearchResultData
+	for j := range ids {
+		result := getSearchResultData(nq, limit+offset)
+		result.Ids.IdField = &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: ids[j]}}
+		result.Scores = scores[j]
+		result.Topks = []int64{limit}
+		result.GroupByFieldValue = &schemapb.FieldData{
+			Type: schemapb.DataType_Int64,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{
+							Data: groupByValuesArr[j],
+						},
+					},
+				},
+			},
+		}
+		results = append(results, result)
+	}
+
+	queryInfo := &planpb.QueryInfo{
+		GroupByFieldId: 1,
+	}
+	reduced, err := reduceSearchResult(context.TODO(), NewReduceSearchResultInfo(results, nq, limit+offset, metric.L2,
+		schemapb.DataType_Int64, offset, queryInfo))
+	resultIDs := reduced.GetResults().GetIds().GetIntId().Data
+	resultScores := reduced.GetResults().GetScores()
+	resultGroupByValues := reduced.GetResults().GetGroupByFieldValue().GetScalars().GetLongData().GetData()
+	assert.EqualValues(t, expectedIDs, resultIDs)
+	assert.EqualValues(t, expectedScores, resultScores)
+	assert.EqualValues(t, expectedGroupByValues, resultGroupByValues)
+	assert.NoError(t, err)
 }
 
 func TestSearchTask_ErrExecute(t *testing.T) {
@@ -2367,7 +2441,9 @@ func TestSearchTask_Requery(t *testing.T) {
 		qt.resultBuf.Insert(&internalpb.SearchResults{
 			SlicedBlob: bytes,
 		})
-
+		qt.queryInfo = &planpb.QueryInfo{
+			GroupByFieldId: -1,
+		}
 		err = qt.PostExecute(ctx)
 		t.Logf("err = %s", err)
 		assert.Error(t, err)

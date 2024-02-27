@@ -118,6 +118,7 @@ func initSearchRequest(ctx context.Context, t *searchTask) error {
 
 		t.SearchRequest.Topk = queryInfo.GetTopk()
 		t.SearchRequest.MetricType = queryInfo.GetMetricType()
+		t.queryInfo = queryInfo
 		t.SearchRequest.DslType = commonpb.DslType_BoolExprV1
 
 		estimateSize, err := t.estimateResultSize(nq, t.SearchRequest.Topk)
