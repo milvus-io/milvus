@@ -27,6 +27,7 @@ import (
 	"github.com/apache/arrow/go/v12/arrow/array"
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
 )
@@ -195,9 +196,8 @@ func newCompositeRecordReader(blobs []*Blob) (*compositeRecordReader, error) {
 
 		if iCol == jCol {
 			return iLog < jLog
-		} else {
-			return iCol < jCol
 		}
+		return iCol < jCol
 	})
 
 	blobm := make([][]*Blob, 0)

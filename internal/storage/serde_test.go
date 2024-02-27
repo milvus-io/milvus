@@ -20,8 +20,9 @@ import (
 	"io"
 	"testing"
 
-	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/pkg/common"
 )
 
 func TestBinlogDeserializeReader(t *testing.T) {
