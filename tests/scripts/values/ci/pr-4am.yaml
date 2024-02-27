@@ -30,7 +30,7 @@ queryNode:
       cpu: "0.5"
       memory: "500Mi"
     limits:
-      cpu: "2"
+      cpu: "4"
 indexCoordinator:
   resources:
     requests:
