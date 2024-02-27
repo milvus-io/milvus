@@ -512,6 +512,135 @@ TEST(Sealed, LoadFieldData) {
     ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get(), timestamp));
 }
 
+TEST(Sealed, ClearData) {
+    auto dim = 16;
+    auto topK = 5;
+    auto N = ROW_COUNT;
+    auto metric_type = knowhere::metric::L2;
+    auto schema = std::make_shared<Schema>();
+    auto fakevec_id = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
+    auto counter_id = schema->AddDebugField("counter", DataType::INT64);
+    auto double_id = schema->AddDebugField("double", DataType::DOUBLE);
+    auto nothing_id = schema->AddDebugField("nothing", DataType::INT32);
+    auto str_id = schema->AddDebugField("str", DataType::VARCHAR);
+    schema->AddDebugField("int8", DataType::INT8);
+    schema->AddDebugField("int16", DataType::INT16);
+    schema->AddDebugField("float", DataType::FLOAT);
+    schema->AddDebugField("json", DataType::JSON);
+    schema->AddDebugField("array", DataType::ARRAY, DataType::INT64);
+    schema->set_primary_field_id(counter_id);
+
+    auto dataset = DataGen(schema, N);
+
+    auto fakevec = dataset.get_col<float>(fakevec_id);
+
+    auto indexing = GenVecIndexing(
+        N, dim, fakevec.data(), knowhere::IndexEnum::INDEX_FAISS_IVFFLAT);
+
+    auto segment = CreateSealedSegment(schema);
+    // std::string dsl = R"({
+    //     "bool": {
+    //         "must": [
+    //         {
+    //             "range": {
+    //                 "double": {
+    //                     "GE": -1,
+    //                     "LT": 1
+    //                 }
+    //             }
+    //         },
+    //         {
+    //             "vector": {
+    //                 "fakevec": {
+    //                     "metric_type": "L2",
+    //                     "params": {
+    //                         "nprobe": 10
+    //                     },
+    //                     "query": "$0",
+    //                     "topk": 5,
+    //                     "round_decimal": 3
+    //                 }
+    //             }
+    //         }
+    //         ]
+    //     }
+    // })";
+    const char* raw_plan = R"(vector_anns: <
+                                    field_id: 100
+                                    predicates: <
+                                      binary_range_expr: <
+                                        column_info: <
+                                          field_id: 102
+                                          data_type: Double
+                                        >
+                                        lower_inclusive: true,
+                                        upper_inclusive: false,
+                                        lower_value: <
+                                          float_val: -1
+                                        >
+                                        upper_value: <
+                                          float_val: 1
+                                        >
+                                      >
+                                    >
+                                    query_info: <
+                                      topk: 5
+                                      round_decimal: 3
+                                      metric_type: "L2"
+                                      search_params: "{\"nprobe\": 10}"
+                                    >
+                                    placeholder_tag: "$0"
+     >)";
+    Timestamp timestamp = 1000000;
+    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    auto plan =
+        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+    auto num_queries = 5;
+    auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+
+    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get(), timestamp));
+
+    SealedLoadFieldData(dataset, *segment);
+    segment->Search(plan.get(), ph_group.get(), timestamp);
+
+    segment->DropFieldData(fakevec_id);
+    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get(), timestamp));
+
+    LoadIndexInfo vec_info;
+    vec_info.field_id = fakevec_id.get();
+    vec_info.index = std::move(indexing);
+    vec_info.index_params["metric_type"] = knowhere::metric::L2;
+    segment->LoadIndex(vec_info);
+
+    ASSERT_EQ(segment->num_chunk(), 1);
+    ASSERT_EQ(segment->num_chunk_index(double_id), 0);
+    ASSERT_EQ(segment->num_chunk_index(str_id), 0);
+    auto chunk_span1 = segment->chunk_data<int64_t>(counter_id, 0);
+    auto chunk_span2 = segment->chunk_data<double>(double_id, 0);
+    auto chunk_span3 = segment->chunk_data<std::string_view>(str_id, 0);
+    auto ref1 = dataset.get_col<int64_t>(counter_id);
+    auto ref2 = dataset.get_col<double>(double_id);
+    auto ref3 = dataset.get_col(str_id)->scalars().string_data().data();
+    for (int i = 0; i < N; ++i) {
+        ASSERT_EQ(chunk_span1[i], ref1[i]);
+        ASSERT_EQ(chunk_span2[i], ref2[i]);
+        ASSERT_EQ(chunk_span3[i], ref3[i]);
+    }
+
+    auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
+    auto json = SearchResultToJson(*sr);
+    std::cout << json.dump(1);
+
+    auto sealed_segment = (SegmentSealedImpl*)segment.get();
+    sealed_segment->ClearData();
+    ASSERT_EQ(sealed_segment->get_row_count(), 0);
+    ASSERT_EQ(sealed_segment->get_real_count(), 0);
+    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get(), timestamp));
+}
+
 TEST(Sealed, LoadFieldDataMmap) {
     auto dim = 16;
     auto topK = 5;

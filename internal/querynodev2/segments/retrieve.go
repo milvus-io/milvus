@@ -21,11 +21,14 @@ import (
 	"fmt"
 	"sync"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -34,7 +37,7 @@ import (
 
 // retrieveOnSegments performs retrieve on listed segments
 // all segment ids are validated before calling this function
-func retrieveOnSegments(ctx context.Context, segments []Segment, segType SegmentType, plan *RetrievePlan) ([]*segcorepb.RetrieveResults, error) {
+func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, segType SegmentType, plan *RetrievePlan) ([]*segcorepb.RetrieveResults, error) {
 	var (
 		resultCh = make(chan *segcorepb.RetrieveResults, len(segments))
 		errs     = make([]error, len(segments))
@@ -51,6 +54,15 @@ func retrieveOnSegments(ctx context.Context, segments []Segment, segType Segment
 		go func(seg Segment, i int) {
 			defer wg.Done()
 			tr := timerecord.NewTimeRecorder("retrieveOnSegments")
+			if seg.LoadStatus() == LoadStatusMeta {
+				item, ok := mgr.DiskCache.GetAndPin(seg.ID())
+				if !ok {
+					errs[i] = merr.WrapErrSegmentNotLoaded(seg.ID())
+					return
+				}
+				defer item.Unpin()
+			}
+
 			result, err := seg.Retrieve(ctx, plan)
 			if err != nil {
 				errs[i] = err
@@ -129,6 +141,7 @@ func Retrieve(ctx context.Context, manager *Manager, plan *RetrievePlan, req *qu
 
 	segIDs := req.GetSegmentIDs()
 	collID := req.Req.GetCollectionID()
+	log.Debug("retrieve on segments", zap.Int64s("segmentIDs", segIDs), zap.Int64("collectionID", collID))
 
 	if req.GetScope() == querypb.DataScope_Historical {
 		SegType = SegmentTypeSealed
@@ -142,7 +155,7 @@ func Retrieve(ctx context.Context, manager *Manager, plan *RetrievePlan, req *qu
 		return retrieveResults, retrieveSegments, err
 	}
 
-	retrieveResults, err = retrieveOnSegments(ctx, retrieveSegments, SegType, plan)
+	retrieveResults, err = retrieveOnSegments(ctx, manager, retrieveSegments, SegType, plan)
 	return retrieveResults, retrieveSegments, err
 }
 

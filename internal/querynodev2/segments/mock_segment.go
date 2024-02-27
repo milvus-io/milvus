@@ -13,6 +13,8 @@ import (
 
 	msgpb "github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 
+	querypb "github.com/milvus-io/milvus/internal/proto/querypb"
+
 	segcorepb "github.com/milvus-io/milvus/internal/proto/segcorepb"
 
 	storage "github.com/milvus-io/milvus/internal/storage"
@@ -457,6 +459,47 @@ func (_c *MockSegment_InsertCount_Call) RunAndReturn(run func() int64) *MockSegm
 	return _c
 }
 
+// IsLazyLoad provides a mock function with given fields:
+func (_m *MockSegment) IsLazyLoad() bool {
+	ret := _m.Called()
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func() bool); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// MockSegment_IsLazyLoad_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'IsLazyLoad'
+type MockSegment_IsLazyLoad_Call struct {
+	*mock.Call
+}
+
+// IsLazyLoad is a helper method to define mock.On call
+func (_e *MockSegment_Expecter) IsLazyLoad() *MockSegment_IsLazyLoad_Call {
+	return &MockSegment_IsLazyLoad_Call{Call: _e.mock.On("IsLazyLoad")}
+}
+
+func (_c *MockSegment_IsLazyLoad_Call) Run(run func()) *MockSegment_IsLazyLoad_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockSegment_IsLazyLoad_Call) Return(_a0 bool) *MockSegment_IsLazyLoad_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockSegment_IsLazyLoad_Call) RunAndReturn(run func() bool) *MockSegment_IsLazyLoad_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // LastDeltaTimestamp provides a mock function with given fields:
 func (_m *MockSegment) LastDeltaTimestamp() uint64 {
 	ret := _m.Called()
@@ -578,6 +621,90 @@ func (_c *MockSegment_LoadDeltaData_Call) Return(_a0 error) *MockSegment_LoadDel
 }
 
 func (_c *MockSegment_LoadDeltaData_Call) RunAndReturn(run func(context.Context, *storage.DeleteData) error) *MockSegment_LoadDeltaData_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// LoadInfo provides a mock function with given fields:
+func (_m *MockSegment) LoadInfo() *querypb.SegmentLoadInfo {
+	ret := _m.Called()
+
+	var r0 *querypb.SegmentLoadInfo
+	if rf, ok := ret.Get(0).(func() *querypb.SegmentLoadInfo); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*querypb.SegmentLoadInfo)
+		}
+	}
+
+	return r0
+}
+
+// MockSegment_LoadInfo_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'LoadInfo'
+type MockSegment_LoadInfo_Call struct {
+	*mock.Call
+}
+
+// LoadInfo is a helper method to define mock.On call
+func (_e *MockSegment_Expecter) LoadInfo() *MockSegment_LoadInfo_Call {
+	return &MockSegment_LoadInfo_Call{Call: _e.mock.On("LoadInfo")}
+}
+
+func (_c *MockSegment_LoadInfo_Call) Run(run func()) *MockSegment_LoadInfo_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockSegment_LoadInfo_Call) Return(_a0 *querypb.SegmentLoadInfo) *MockSegment_LoadInfo_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockSegment_LoadInfo_Call) RunAndReturn(run func() *querypb.SegmentLoadInfo) *MockSegment_LoadInfo_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// LoadStatus provides a mock function with given fields:
+func (_m *MockSegment) LoadStatus() LoadStatus {
+	ret := _m.Called()
+
+	var r0 LoadStatus
+	if rf, ok := ret.Get(0).(func() LoadStatus); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(LoadStatus)
+	}
+
+	return r0
+}
+
+// MockSegment_LoadStatus_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'LoadStatus'
+type MockSegment_LoadStatus_Call struct {
+	*mock.Call
+}
+
+// LoadStatus is a helper method to define mock.On call
+func (_e *MockSegment_Expecter) LoadStatus() *MockSegment_LoadStatus_Call {
+	return &MockSegment_LoadStatus_Call{Call: _e.mock.On("LoadStatus")}
+}
+
+func (_c *MockSegment_LoadStatus_Call) Run(run func()) *MockSegment_LoadStatus_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockSegment_LoadStatus_Call) Return(_a0 LoadStatus) *MockSegment_LoadStatus_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockSegment_LoadStatus_Call) RunAndReturn(run func() LoadStatus) *MockSegment_LoadStatus_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -779,9 +906,15 @@ func (_c *MockSegment_RUnlock_Call) RunAndReturn(run func()) *MockSegment_RUnloc
 	return _c
 }
 
-// Release provides a mock function with given fields:
-func (_m *MockSegment) Release() {
-	_m.Called()
+// Release provides a mock function with given fields: opts
+func (_m *MockSegment) Release(opts ...releaseOption) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, _va...)
+	_m.Called(_ca...)
 }
 
 // MockSegment_Release_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Release'
@@ -790,13 +923,21 @@ type MockSegment_Release_Call struct {
 }
 
 // Release is a helper method to define mock.On call
-func (_e *MockSegment_Expecter) Release() *MockSegment_Release_Call {
-	return &MockSegment_Release_Call{Call: _e.mock.On("Release")}
+//   - opts ...releaseOption
+func (_e *MockSegment_Expecter) Release(opts ...interface{}) *MockSegment_Release_Call {
+	return &MockSegment_Release_Call{Call: _e.mock.On("Release",
+		append([]interface{}{}, opts...)...)}
 }
 
-func (_c *MockSegment_Release_Call) Run(run func()) *MockSegment_Release_Call {
+func (_c *MockSegment_Release_Call) Run(run func(opts ...releaseOption)) *MockSegment_Release_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run()
+		variadicArgs := make([]releaseOption, len(args)-0)
+		for i, a := range args[0:] {
+			if a != nil {
+				variadicArgs[i] = a.(releaseOption)
+			}
+		}
+		run(variadicArgs...)
 	})
 	return _c
 }
@@ -806,7 +947,7 @@ func (_c *MockSegment_Release_Call) Return() *MockSegment_Release_Call {
 	return _c
 }
 
-func (_c *MockSegment_Release_Call) RunAndReturn(run func()) *MockSegment_Release_Call {
+func (_c *MockSegment_Release_Call) RunAndReturn(run func(...releaseOption)) *MockSegment_Release_Call {
 	_c.Call.Return(run)
 	return _c
 }

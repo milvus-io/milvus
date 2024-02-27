@@ -12,6 +12,7 @@ require (
 	github.com/expr-lang/expr v1.15.7
 	github.com/golang/protobuf v1.5.3
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
+	github.com/karlseguin/ccache/v3 v3.0.5
 	github.com/klauspost/compress v1.16.5
 	github.com/lingdor/stackerror v0.0.0-20191119040541-976d8885ed76
 	github.com/milvus-io/milvus-proto/go-api/v2 v2.3.4-0.20240109020841-d367b5a59df1
