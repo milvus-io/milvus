@@ -47,7 +47,7 @@ func newTimestampAllocator(tso timestampAllocatorInterface, peerID UniqueID) (*t
 
 func (ta *timestampAllocator) alloc(ctx context.Context, count uint32) ([]Timestamp, error) {
 	tr := timerecord.NewTimeRecorder("applyTimestamp")
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	req := &rootcoordpb.AllocTimestampRequest{
 		Base: commonpbutil.NewMsgBase(

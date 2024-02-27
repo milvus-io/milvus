@@ -198,7 +198,7 @@ func (c *ClientBase[T]) GetGrpcClient(ctx context.Context) (*clientConnWrapper[T
 	c.grpcClientMtx.RLock()
 
 	if !generic.IsZero(c.grpcClient) {
-		defer c.grpcClientMtx.RUnlock()
+		c.grpcClientMtx.RUnlock()
 		return c.grpcClient, nil
 	}
 	c.grpcClientMtx.RUnlock()
@@ -251,7 +251,8 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 	}
 
 	opts := tracer.GetInterceptorOpts()
-	dialContext, cancel := context.WithTimeout(ctx, c.DialTimeout)
+	// do not use request timeout when as parent when create connection
+	dialContext, cancel := context.WithTimeout(context.Background(), c.DialTimeout)
 
 	var conn *grpc.ClientConn
 	compress := None
