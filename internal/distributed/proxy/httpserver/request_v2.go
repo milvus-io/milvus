@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 
@@ -182,11 +183,14 @@ type PartitionsReq struct {
 func (req *PartitionsReq) GetDbName() string { return req.DbName }
 
 type UserReq struct {
-	UserName string `json:"userName"`
+	UserName string `json:"userName" binding:"required"`
 }
 
 func (req *UserReq) GetUserName() string { return req.UserName }
 
+type BaseGetter interface {
+	GetBase() *commonpb.MsgBase
+}
 type UserNameGetter interface {
 	GetUserName() string
 }
@@ -210,24 +214,23 @@ type TaskIDGetter interface {
 }
 
 type PasswordReq struct {
-	UserName string `json:"userName"`
+	UserName string `json:"userName" binding:"required"`
 	Password string `json:"password" binding:"required"`
 }
 
 type NewPasswordReq struct {
-	UserName    string `json:"userName"`
-	Password    string `json:"password"`
-	NewPassword string `json:"newPassword"`
+	UserName    string `json:"userName" binding:"required"`
+	Password    string `json:"password" binding:"required"`
+	NewPassword string `json:"newPassword" binding:"required"`
 }
 
 type UserRoleReq struct {
-	UserName string `json:"userName"`
-	RoleName string `json:"roleName"`
+	UserName string `json:"userName" binding:"required"`
+	RoleName string `json:"roleName" binding:"required"`
 }
 
 type RoleReq struct {
-	RoleName string `json:"roleName"`
-	Timeout  int32  `json:"timeout"`
+	RoleName string `json:"roleName" binding:"required"`
 }
 
 func (req *RoleReq) GetRoleName() string {
@@ -243,11 +246,10 @@ type GrantReq struct {
 }
 
 type IndexParam struct {
-	FieldName   string                 `json:"fieldName" binding:"required"`
-	IndexName   string                 `json:"indexName" binding:"required"`
-	MetricsType string                 `json:"metricsType" binding:"required"`
-	IndexType   string                 `json:"indexType"`
-	IndexConfig map[string]interface{} `json:"indexConfig"`
+	FieldName   string            `json:"fieldName" binding:"required"`
+	IndexName   string            `json:"indexName" binding:"required"`
+	MetricType  string            `json:"metricType" binding:"required"`
+	IndexConfig map[string]string `json:"indexConfig"`
 }
 
 type IndexParamReq struct {
@@ -261,8 +263,7 @@ func (req *IndexParamReq) GetDbName() string { return req.DbName }
 type IndexReq struct {
 	DbName         string `json:"dbName"`
 	CollectionName string `json:"collectionName" binding:"required"`
-	IndexName      string `json:"indexName"`
-	Timeout        int32  `json:"timeout"`
+	IndexName      string `json:"indexName" binding:"required"`
 }
 
 func (req *IndexReq) GetDbName() string { return req.DbName }
@@ -277,11 +278,9 @@ func (req *IndexReq) GetIndexName() string {
 type FieldSchema struct {
 	FieldName         string            `json:"fieldName" binding:"required"`
 	DataType          string            `json:"dataType" binding:"required"`
+	ElementDataType   string            `json:"elementDataType"`
 	IsPrimary         bool              `json:"isPrimary"`
 	IsPartitionKey    bool              `json:"isPartitionKey"`
-	Dim               int               `json:"dimension"`
-	MaxLength         int               `json:"maxLength"`
-	MaxCapacity       int               `json:"maxCapacity"`
 	ElementTypeParams map[string]string `json:"elementTypeParams" binding:"required"`
 }
 
@@ -295,7 +294,7 @@ type CollectionReq struct {
 	DbName         string           `json:"dbName"`
 	CollectionName string           `json:"collectionName" binding:"required"`
 	Dimension      int32            `json:"dimension"`
-	MetricsType    string           `json:"metricsType"`
+	MetricType     string           `json:"metricType"`
 	Schema         CollectionSchema `json:"schema"`
 	IndexParams    []IndexParam     `json:"indexParams"`
 }
@@ -339,11 +338,15 @@ func wrapperReturnList(names []string) gin.H {
 }
 
 func wrapperReturnRowCount(pairs []*commonpb.KeyValuePair) gin.H {
-	rowCount := "0"
+	rowCountValue := "0"
 	for _, keyValue := range pairs {
 		if keyValue.Key == "row_count" {
-			rowCount = keyValue.GetValue()
+			rowCountValue = keyValue.GetValue()
 		}
+	}
+	rowCount, err := strconv.ParseInt(rowCountValue, 10, 64)
+	if err != nil {
+		return gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: gin.H{HTTPReturnRowCount: rowCountValue}}
 	}
 	return gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: gin.H{HTTPReturnRowCount: rowCount}}
 }
