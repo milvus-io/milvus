@@ -17,6 +17,16 @@ This document will help to set up your Milvus development environment and to run
       - [Go](#go)
       - [Docker \& Docker Compose](#docker--docker-compose)
     - [Building Milvus](#building-milvus)
+  - [Building Milvus v2.3.4 arm image to support ky10 sp3](#building-milvus-v234-arm-image-to-support-ky10-sp3)
+    - [Software Requirements](#software-requirements)
+      - [Install cmake](#install-cmake)
+      - [Installing Dependencies](#installing-dependencies)
+      - [Install conan](#install-conan)
+      - [Install GO 1.80](#install-go-180)
+      - [Download source code](#download-source-code)
+      - [Check OS PAGESIZE](#check-os-pagesize)
+      - [Modify the MILVUS_JEMALLOC_LG_PAGE setting](#modify-the-milvus_jemalloc_lg_page-setting)
+    - [Build Image](#build-image)
   - [A Quick Start for Testing Milvus](#a-quick-start-for-testing-milvus)
     - [Pre-submission Verification](#pre-submission-verification)
     - [Unit Tests](#unit-tests)
@@ -158,6 +168,162 @@ $ make generated-proto-go
 ```
 
 If you want to know more, you can read Makefile.
+## Building Milvus v2.3.4 arm image to support ky10 sp3
+
+### Software Requirements
+The details below outline the software requirements for building on Ubuntu 20.04
+#### Install cmake
+
+```bash
+apt update
+wget https://github.com/Kitware/CMake/releases/download/v3.27.9/cmake-3.27.9-linux-aarch64.tar.gz
+tar zxf cmake-3.27.9-linux-aarch64.tar.gz 
+mv cmake-3.27.9-linux-aarch64 /usr/local/cmake
+vi /etc/profile
+export PATH=$PATH:/usr/local/cmake/bin
+source /etc/profile
+cmake --version
+```
+
+#### Installing Dependencies
+
+```bash
+sudo apt install -y clang-format clang-tidy ninja-build gcc g++ curl zip unzip tar
+```
+
+#### Install conan
+
+```bash
+# Verify python3 version, need python3 version > 3.8
+python3 --version
+# pip install conan 1.61.0
+pip3 install conan==1.61.0
+```
+
+#### Install GO 1.80
+
+```bash
+wget https://go.dev/dl/go1.18.10.linux-arm64.tar.gz
+tar zxf go1.18.10.linux-arm64.tar.gz
+mv ./go /usr/local
+vi /etc/profile
+export PATH=$PATH:/usr/local/go/bin
+source /etc/profile
+go version
+```
+
+#### Download source code
+
+```bash
+git clone https://github.com/milvus-io/milvus.git
+git checkout v2.3.4
+cd ./milvus
+```
+
+#### Check OS PAGESIZE 
+
+```bash
+getconf PAGESIZE
+```
+
+The PAGESIZE for the ky10 SP3 operating system is 65536, which is 64KB.
+
+#### Modify the MILVUS_JEMALLOC_LG_PAGE setting
+
+The `MILVUS_JEMALLOC_LG_PAGE` variable's primary function is to specify the size of large pages during the compilation of jemalloc. Jemalloc is a memory allocator designed to enhance the performance and efficiency of applications in a multi-threaded environment. By specifying the size of large pages, memory management and access can be optimized, thereby improving performance.
+
+Large page support allows the operating system to manage and allocate memory in larger blocks, reducing the number of page table entries, thereby decreasing the time for page table lookups and improving the efficiency of memory access. This is particularly important when processing large amounts of data, as it can significantly reduce page faults and Translation Lookaside Buffer (TLB) misses, enhancing application performance.
+
+On ARM64 architectures, different systems may support different page sizes, such as 4KB and 64KB. The `MILVUS_JEMALLOC_LG_PAGE` setting allows developers to customize the compilation of jemalloc for the target platform, ensuring it can efficiently operate on systems with varying page sizes. By specifying the `--with-lg-page` configuration option, jemalloc can utilize the optimal page size supported by the system when managing memory.
+
+For example, if a system supports a 64KB page size, by setting `MILVUS_JEMALLOC_LG_PAGE` to the corresponding value (the power of 2, 64KB is 2 to the 16th power, so the value is 16), jemalloc can allocate and manage memory in 64KB units, which can improve the performance of applications running on that system.
+
+Modify the make configuration file, located at: `./milvus/scripts/core_build.sh`, with the following changes:
+
+```diff
+arch=$(uname -m)
+CMAKE_CMD="cmake \
+${CMAKE_EXTRA_ARGS} \
+ -DBUILD_UNIT_TEST=${BUILD_UNITTEST} \
+ -DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX}
+ -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
+ -DCMAKE_CUDA_COMPILER=${CUDA_COMPILER} \
+ -DCMAKE_LIBRARY_ARCHITECTURE=${arch} \
+ -DBUILD_COVERAGE=${BUILD_COVERAGE} \
+ -DMILVUS_GPU_VERSION=${GPU_VERSION} \
+ -DMILVUS_CUDA_ARCH=${CUDA_ARCH} \
+ -DEMBEDDED_MILVUS=${EMBEDDED_MILVUS} \
+ -DBUILD_DISK_ANN=${BUILD_DISK_ANN} \
++ -DMILVUS_JEMALLOC_LG_PAGE=16 \
+ -DUSE_ASAN=${USE_ASAN} \
+ -DUSE_DYNAMIC_SIMD=${USE_DYNAMIC_SIMD} \
+ -DCPU_ARCH=${CPU_ARCH} \
+ -DINDEX_ENGINE=${INDEX_ENGINE} "
+if [ -z "$BUILD_WITHOUT_AZURE" ]; then
+CMAKE_CMD=${CMAKE_CMD}"-DAZURE_BUILD_DIR=${AZURE_BUILD_DIR} \
+ -DVCPKG_TARGET_TRIPLET=${VCPKG_TARGET_TRIPLET} "
+fi
+CMAKE_CMD=${CMAKE_CMD}"${CPP_SRC_DIR}"
+```
+
+Using `-DMILVUS_JEMALLOC_LG_PAGE=16` as a compilation option for jemalloc is because it specifies the size
+
+of "large pages" as 2 to the 16th power bytes, which equals 65536 bytes or 64KB. This value is set to optimize memory management and improve performance, especially on systems that support or prefer using large pages to reduce the overhead of page table management.
+
+Specifying `-DMILVUS_JEMALLOC_LG_PAGE=16` during the compilation of jemalloc informs jemalloc to assume the system's large page size is 64KB. This allows jemalloc to work more efficiently with the operating system's memory manager, using large pages to optimize performance. This is crucial for ensuring optimal performance on systems with different default page sizes, particularly in environments that might have different memory management needs due to varying hardware or system configurations.
+
+### Build Image
+
+```bash
+cd ./milvus
+cp build/docker/milvus/ubuntu20.04/Dockerfile .
+```
+
+Modify the Dockerfile as follows:
+
+```dockerfile
+# Copyright (C) 2019-2022 Zilliz. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+# with the License. You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software distributed under the License
+# is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+# or implied. See the License for the specific language governing permissions and limitations under the License.
+
+FROM ubuntu:focal-20220426
+
+ARG TARGETARCH
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends curl ca-certificates libaio-dev libgomp1 && \
+    apt-get remove --purge -y && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY ./bin/ /milvus/bin/
+
+COPY ./configs/ /milvus/configs/
+
+COPY ./internal/core/output/lib/ /milvus/lib/
+
+ENV PATH=/milvus/bin:$PATH
+ENV LD_LIBRARY_PATH=/milvus/lib:$LD_LIBRARY_PATH:/usr/lib
+ENV LD_PRELOAD=/milvus/lib/libjemalloc.so
+ENV MALLOC_CONF=background_thread:true
+
+# Add Tini
+ADD https://github.com/krallin/tini/releases/download/v0.19.0/tini-$TARGETARCH /tini
+RUN chmod +x /tini
+ENTRYPOINT ["/tini", "--"]
+
+WORKDIR /milvus/
+```
+
+Build command: `docker build -t ghostbaby/milvus:v2.3.4_arm64 . `
+
+Verify the image: `docker run ghostbaby/milvus:v2.3.4_arm64 milvus run proxy`
 
 ## A Quick Start for Testing Milvus
 

@@ -87,13 +87,14 @@ const (
 
 	HTTPReturnHas = "has"
 
-	HTTPReturnFieldName       = "name"
-	HTTPReturnFieldType       = "type"
-	HTTPReturnFieldPrimaryKey = "primaryKey"
-	HTTPReturnFieldAutoID     = "autoId"
-	HTTPReturnDescription     = "description"
+	HTTPReturnFieldName         = "name"
+	HTTPReturnFieldType         = "type"
+	HTTPReturnFieldPrimaryKey   = "primaryKey"
+	HTTPReturnFieldPartitionKey = "partitionKey"
+	HTTPReturnFieldAutoID       = "autoId"
+	HTTPReturnDescription       = "description"
 
-	HTTPReturnIndexMetricsType = "metricType"
+	HTTPReturnIndexMetricType  = "metricType"
 	HTTPReturnIndexType        = "indexType"
 	HTTPReturnIndexTotalRows   = "totalRows"
 	HTTPReturnIndexPendingRows = "pendingRows"
