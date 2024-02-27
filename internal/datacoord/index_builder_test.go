@@ -54,7 +54,7 @@ var (
 )
 
 func createMetaTable(catalog metastore.DataCoordCatalog) *meta {
-	return &meta{
+	segIndeMeta := &indexMeta{
 		catalog: catalog,
 		indexes: map[UniqueID]map[UniqueID]*model.Index{
 			collID: {
@@ -81,337 +81,203 @@ func createMetaTable(catalog metastore.DataCoordCatalog) *meta {
 				},
 			},
 		},
-		segments: &SegmentsInfo{
-			segments: map[UniqueID]*SegmentInfo{
-				segID: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:             segID,
-						CollectionID:   collID,
-						PartitionID:    partID,
-						InsertChannel:  "",
-						NumOfRows:      1025,
-						State:          commonpb.SegmentState_Flushed,
-						MaxRowNum:      65536,
-						LastExpireTime: 10,
-					},
-					segmentIndexes: map[UniqueID]*model.SegmentIndex{
-						indexID: {
-							SegmentID:     segID,
-							CollectionID:  collID,
-							PartitionID:   partID,
-							NumRows:       1025,
-							IndexID:       indexID,
-							BuildID:       buildID,
-							NodeID:        0,
-							IndexVersion:  0,
-							IndexState:    commonpb.IndexState_Unissued,
-							FailReason:    "",
-							IsDeleted:     false,
-							CreateTime:    0,
-							IndexFileKeys: nil,
-							IndexSize:     0,
-						},
-					},
+		segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
+			segID: {
+				indexID: {
+					SegmentID:     segID,
+					CollectionID:  collID,
+					PartitionID:   partID,
+					NumRows:       1025,
+					IndexID:       indexID,
+					BuildID:       buildID,
+					NodeID:        0,
+					IndexVersion:  0,
+					IndexState:    commonpb.IndexState_Unissued,
+					FailReason:    "",
+					IsDeleted:     false,
+					CreateTime:    0,
+					IndexFileKeys: nil,
+					IndexSize:     0,
 				},
-				segID + 1: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:             segID + 1,
-						CollectionID:   collID,
-						PartitionID:    partID,
-						InsertChannel:  "",
-						NumOfRows:      1026,
-						State:          commonpb.SegmentState_Flushed,
-						MaxRowNum:      65536,
-						LastExpireTime: 10,
-					},
-					segmentIndexes: map[UniqueID]*model.SegmentIndex{
-						indexID: {
-							SegmentID:     segID + 1,
-							CollectionID:  collID,
-							PartitionID:   partID,
-							NumRows:       1026,
-							IndexID:       indexID,
-							BuildID:       buildID + 1,
-							NodeID:        nodeID,
-							IndexVersion:  1,
-							IndexState:    commonpb.IndexState_InProgress,
-							FailReason:    "",
-							IsDeleted:     false,
-							CreateTime:    1111,
-							IndexFileKeys: nil,
-							IndexSize:     0,
-						},
-					},
+			},
+			segID + 1: {
+				indexID: {
+					SegmentID:     segID + 1,
+					CollectionID:  collID,
+					PartitionID:   partID,
+					NumRows:       1026,
+					IndexID:       indexID,
+					BuildID:       buildID + 1,
+					NodeID:        nodeID,
+					IndexVersion:  1,
+					IndexState:    commonpb.IndexState_InProgress,
+					FailReason:    "",
+					IsDeleted:     false,
+					CreateTime:    1111,
+					IndexFileKeys: nil,
+					IndexSize:     0,
 				},
-				segID + 2: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:             segID + 2,
-						CollectionID:   collID,
-						PartitionID:    partID,
-						InsertChannel:  "",
-						NumOfRows:      1026,
-						State:          commonpb.SegmentState_Flushed,
-						MaxRowNum:      65536,
-						LastExpireTime: 10,
-					},
-					segmentIndexes: map[UniqueID]*model.SegmentIndex{
-						indexID: {
-							SegmentID:     segID + 2,
-							CollectionID:  collID,
-							PartitionID:   partID,
-							NumRows:       1026,
-							IndexID:       indexID,
-							BuildID:       buildID + 2,
-							NodeID:        nodeID,
-							IndexVersion:  1,
-							IndexState:    commonpb.IndexState_InProgress,
-							FailReason:    "",
-							IsDeleted:     true,
-							CreateTime:    1111,
-							IndexFileKeys: nil,
-							IndexSize:     0,
-						},
-					},
+			},
+			segID + 2: {
+				indexID: {
+					SegmentID:     segID + 2,
+					CollectionID:  collID,
+					PartitionID:   partID,
+					NumRows:       1026,
+					IndexID:       indexID,
+					BuildID:       buildID + 2,
+					NodeID:        nodeID,
+					IndexVersion:  1,
+					IndexState:    commonpb.IndexState_InProgress,
+					FailReason:    "",
+					IsDeleted:     true,
+					CreateTime:    1111,
+					IndexFileKeys: nil,
+					IndexSize:     0,
 				},
-				segID + 3: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:             segID + 3,
-						CollectionID:   collID,
-						PartitionID:    partID,
-						InsertChannel:  "",
-						NumOfRows:      500,
-						State:          commonpb.SegmentState_Flushed,
-						MaxRowNum:      65536,
-						LastExpireTime: 10,
-					},
-					segmentIndexes: map[UniqueID]*model.SegmentIndex{
-						indexID: {
-							SegmentID:     segID + 3,
-							CollectionID:  collID,
-							PartitionID:   partID,
-							NumRows:       500,
-							IndexID:       indexID,
-							BuildID:       buildID + 3,
-							NodeID:        0,
-							IndexVersion:  0,
-							IndexState:    commonpb.IndexState_Unissued,
-							FailReason:    "",
-							IsDeleted:     false,
-							CreateTime:    1111,
-							IndexFileKeys: nil,
-							IndexSize:     0,
-						},
-					},
+			},
+			segID + 3: {
+				indexID: {
+					SegmentID:     segID + 3,
+					CollectionID:  collID,
+					PartitionID:   partID,
+					NumRows:       500,
+					IndexID:       indexID,
+					BuildID:       buildID + 3,
+					NodeID:        0,
+					IndexVersion:  0,
+					IndexState:    commonpb.IndexState_Unissued,
+					FailReason:    "",
+					IsDeleted:     false,
+					CreateTime:    1111,
+					IndexFileKeys: nil,
+					IndexSize:     0,
 				},
-				segID + 4: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:             segID + 4,
-						CollectionID:   collID,
-						PartitionID:    partID,
-						InsertChannel:  "",
-						NumOfRows:      1026,
-						State:          commonpb.SegmentState_Flushed,
-						MaxRowNum:      65536,
-						LastExpireTime: 10,
-					},
-					segmentIndexes: map[UniqueID]*model.SegmentIndex{
-						indexID: {
-							SegmentID:     segID + 4,
-							CollectionID:  collID,
-							PartitionID:   partID,
-							NumRows:       1026,
-							IndexID:       indexID,
-							BuildID:       buildID + 4,
-							NodeID:        nodeID,
-							IndexVersion:  1,
-							IndexState:    commonpb.IndexState_Finished,
-							FailReason:    "",
-							IsDeleted:     false,
-							CreateTime:    1111,
-							IndexFileKeys: nil,
-							IndexSize:     0,
-						},
-					},
+			},
+			segID + 4: {
+				indexID: {
+					SegmentID:     segID + 4,
+					CollectionID:  collID,
+					PartitionID:   partID,
+					NumRows:       1026,
+					IndexID:       indexID,
+					BuildID:       buildID + 4,
+					NodeID:        nodeID,
+					IndexVersion:  1,
+					IndexState:    commonpb.IndexState_Finished,
+					FailReason:    "",
+					IsDeleted:     false,
+					CreateTime:    1111,
+					IndexFileKeys: nil,
+					IndexSize:     0,
 				},
-				segID + 5: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:             segID + 5,
-						CollectionID:   collID,
-						PartitionID:    partID,
-						InsertChannel:  "",
-						NumOfRows:      1026,
-						State:          commonpb.SegmentState_Flushed,
-						MaxRowNum:      65536,
-						LastExpireTime: 10,
-					},
-					segmentIndexes: map[UniqueID]*model.SegmentIndex{
-						indexID: {
-							SegmentID:     segID + 5,
-							CollectionID:  collID,
-							PartitionID:   partID,
-							NumRows:       1026,
-							IndexID:       indexID,
-							BuildID:       buildID + 5,
-							NodeID:        0,
-							IndexVersion:  1,
-							IndexState:    commonpb.IndexState_Finished,
-							FailReason:    "",
-							IsDeleted:     false,
-							CreateTime:    1111,
-							IndexFileKeys: nil,
-							IndexSize:     0,
-						},
-					},
+			},
+			segID + 5: {
+				indexID: {
+					SegmentID:     segID + 5,
+					CollectionID:  collID,
+					PartitionID:   partID,
+					NumRows:       1026,
+					IndexID:       indexID,
+					BuildID:       buildID + 5,
+					NodeID:        0,
+					IndexVersion:  1,
+					IndexState:    commonpb.IndexState_Finished,
+					FailReason:    "",
+					IsDeleted:     false,
+					CreateTime:    1111,
+					IndexFileKeys: nil,
+					IndexSize:     0,
 				},
-				segID + 6: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:             segID + 6,
-						CollectionID:   collID,
-						PartitionID:    partID,
-						InsertChannel:  "",
-						NumOfRows:      1026,
-						State:          commonpb.SegmentState_Flushed,
-						MaxRowNum:      65536,
-						LastExpireTime: 10,
-					},
-					segmentIndexes: map[UniqueID]*model.SegmentIndex{
-						indexID: {
-							SegmentID:     segID + 6,
-							CollectionID:  collID,
-							PartitionID:   partID,
-							NumRows:       1026,
-							IndexID:       indexID,
-							BuildID:       buildID + 6,
-							NodeID:        0,
-							IndexVersion:  1,
-							IndexState:    commonpb.IndexState_Finished,
-							FailReason:    "",
-							IsDeleted:     false,
-							CreateTime:    1111,
-							IndexFileKeys: nil,
-							IndexSize:     0,
-						},
-					},
+			},
+			segID + 6: {
+				indexID: {
+					SegmentID:     segID + 6,
+					CollectionID:  collID,
+					PartitionID:   partID,
+					NumRows:       1026,
+					IndexID:       indexID,
+					BuildID:       buildID + 6,
+					NodeID:        0,
+					IndexVersion:  1,
+					IndexState:    commonpb.IndexState_Finished,
+					FailReason:    "",
+					IsDeleted:     false,
+					CreateTime:    1111,
+					IndexFileKeys: nil,
+					IndexSize:     0,
 				},
-				segID + 7: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:             segID + 7,
-						CollectionID:   collID,
-						PartitionID:    partID,
-						InsertChannel:  "",
-						NumOfRows:      1026,
-						State:          commonpb.SegmentState_Flushed,
-						MaxRowNum:      65536,
-						LastExpireTime: 10,
-					},
-					segmentIndexes: map[UniqueID]*model.SegmentIndex{
-						indexID: {
-							SegmentID:     segID + 7,
-							CollectionID:  collID,
-							PartitionID:   partID,
-							NumRows:       1026,
-							IndexID:       indexID,
-							BuildID:       buildID + 7,
-							NodeID:        0,
-							IndexVersion:  1,
-							IndexState:    commonpb.IndexState_Failed,
-							FailReason:    "error",
-							IsDeleted:     false,
-							CreateTime:    1111,
-							IndexFileKeys: nil,
-							IndexSize:     0,
-						},
-					},
+			},
+			segID + 7: {
+				indexID: {
+					SegmentID:     segID + 7,
+					CollectionID:  collID,
+					PartitionID:   partID,
+					NumRows:       1026,
+					IndexID:       indexID,
+					BuildID:       buildID + 7,
+					NodeID:        0,
+					IndexVersion:  1,
+					IndexState:    commonpb.IndexState_Failed,
+					FailReason:    "error",
+					IsDeleted:     false,
+					CreateTime:    1111,
+					IndexFileKeys: nil,
+					IndexSize:     0,
 				},
-				segID + 8: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:             segID + 8,
-						CollectionID:   collID,
-						PartitionID:    partID,
-						InsertChannel:  "",
-						NumOfRows:      1026,
-						State:          commonpb.SegmentState_Flushed,
-						MaxRowNum:      65536,
-						LastExpireTime: 10,
-					},
-					segmentIndexes: map[UniqueID]*model.SegmentIndex{
-						indexID: {
-							SegmentID:     segID + 8,
-							CollectionID:  collID,
-							PartitionID:   partID,
-							NumRows:       1026,
-							IndexID:       indexID,
-							BuildID:       buildID + 8,
-							NodeID:        nodeID + 1,
-							IndexVersion:  1,
-							IndexState:    commonpb.IndexState_InProgress,
-							FailReason:    "",
-							IsDeleted:     false,
-							CreateTime:    1111,
-							IndexFileKeys: nil,
-							IndexSize:     0,
-						},
-					},
+			},
+			segID + 8: {
+				indexID: {
+					SegmentID:     segID + 8,
+					CollectionID:  collID,
+					PartitionID:   partID,
+					NumRows:       1026,
+					IndexID:       indexID,
+					BuildID:       buildID + 8,
+					NodeID:        nodeID + 1,
+					IndexVersion:  1,
+					IndexState:    commonpb.IndexState_InProgress,
+					FailReason:    "",
+					IsDeleted:     false,
+					CreateTime:    1111,
+					IndexFileKeys: nil,
+					IndexSize:     0,
 				},
-				segID + 9: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:             segID + 9,
-						CollectionID:   collID,
-						PartitionID:    partID,
-						InsertChannel:  "",
-						NumOfRows:      500,
-						State:          commonpb.SegmentState_Flushed,
-						MaxRowNum:      65536,
-						LastExpireTime: 10,
-					},
-					segmentIndexes: map[UniqueID]*model.SegmentIndex{
-						indexID: {
-							SegmentID:     segID + 9,
-							CollectionID:  collID,
-							PartitionID:   partID,
-							NumRows:       500,
-							IndexID:       indexID,
-							BuildID:       buildID + 9,
-							NodeID:        0,
-							IndexVersion:  0,
-							IndexState:    commonpb.IndexState_Unissued,
-							FailReason:    "",
-							IsDeleted:     false,
-							CreateTime:    1111,
-							IndexFileKeys: nil,
-							IndexSize:     0,
-						},
-					},
+			},
+			segID + 9: {
+				indexID: {
+					SegmentID:     segID + 9,
+					CollectionID:  collID,
+					PartitionID:   partID,
+					NumRows:       500,
+					IndexID:       indexID,
+					BuildID:       buildID + 9,
+					NodeID:        0,
+					IndexVersion:  0,
+					IndexState:    commonpb.IndexState_Unissued,
+					FailReason:    "",
+					IsDeleted:     false,
+					CreateTime:    1111,
+					IndexFileKeys: nil,
+					IndexSize:     0,
 				},
-				segID + 10: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:             segID + 10,
-						CollectionID:   collID,
-						PartitionID:    partID,
-						InsertChannel:  "",
-						NumOfRows:      500,
-						State:          commonpb.SegmentState_Flushed,
-						MaxRowNum:      65536,
-						LastExpireTime: 10,
-					},
-					segmentIndexes: map[UniqueID]*model.SegmentIndex{
-						indexID: {
-							SegmentID:     segID + 10,
-							CollectionID:  collID,
-							PartitionID:   partID,
-							NumRows:       500,
-							IndexID:       indexID,
-							BuildID:       buildID + 10,
-							NodeID:        nodeID,
-							IndexVersion:  0,
-							IndexState:    commonpb.IndexState_Unissued,
-							FailReason:    "",
-							IsDeleted:     false,
-							CreateTime:    1111,
-							IndexFileKeys: nil,
-							IndexSize:     0,
-						},
-					},
+			},
+			segID + 10: {
+				indexID: {
+					SegmentID:     segID + 10,
+					CollectionID:  collID,
+					PartitionID:   partID,
+					NumRows:       500,
+					IndexID:       indexID,
+					BuildID:       buildID + 10,
+					NodeID:        nodeID,
+					IndexVersion:  0,
+					IndexState:    commonpb.IndexState_Unissued,
+					FailReason:    "",
+					IsDeleted:     false,
+					CreateTime:    1111,
+					IndexFileKeys: nil,
+					IndexSize:     0,
 				},
 			},
 		},
@@ -594,6 +460,147 @@ func createMetaTable(catalog metastore.DataCoordCatalog) *meta {
 			},
 		},
 	}
+
+	return &meta{
+		indexMeta: segIndeMeta,
+		catalog:   catalog,
+		segments: &SegmentsInfo{
+			segments: map[UniqueID]*SegmentInfo{
+				segID: {
+					SegmentInfo: &datapb.SegmentInfo{
+						ID:             segID,
+						CollectionID:   collID,
+						PartitionID:    partID,
+						InsertChannel:  "",
+						NumOfRows:      1025,
+						State:          commonpb.SegmentState_Flushed,
+						MaxRowNum:      65536,
+						LastExpireTime: 10,
+					},
+				},
+				segID + 1: {
+					SegmentInfo: &datapb.SegmentInfo{
+						ID:             segID + 1,
+						CollectionID:   collID,
+						PartitionID:    partID,
+						InsertChannel:  "",
+						NumOfRows:      1026,
+						State:          commonpb.SegmentState_Flushed,
+						MaxRowNum:      65536,
+						LastExpireTime: 10,
+					},
+				},
+				segID + 2: {
+					SegmentInfo: &datapb.SegmentInfo{
+						ID:             segID + 2,
+						CollectionID:   collID,
+						PartitionID:    partID,
+						InsertChannel:  "",
+						NumOfRows:      1026,
+						State:          commonpb.SegmentState_Flushed,
+						MaxRowNum:      65536,
+						LastExpireTime: 10,
+					},
+				},
+				segID + 3: {
+					SegmentInfo: &datapb.SegmentInfo{
+						ID:             segID + 3,
+						CollectionID:   collID,
+						PartitionID:    partID,
+						InsertChannel:  "",
+						NumOfRows:      500,
+						State:          commonpb.SegmentState_Flushed,
+						MaxRowNum:      65536,
+						LastExpireTime: 10,
+					},
+				},
+				segID + 4: {
+					SegmentInfo: &datapb.SegmentInfo{
+						ID:             segID + 4,
+						CollectionID:   collID,
+						PartitionID:    partID,
+						InsertChannel:  "",
+						NumOfRows:      1026,
+						State:          commonpb.SegmentState_Flushed,
+						MaxRowNum:      65536,
+						LastExpireTime: 10,
+					},
+				},
+				segID + 5: {
+					SegmentInfo: &datapb.SegmentInfo{
+						ID:             segID + 5,
+						CollectionID:   collID,
+						PartitionID:    partID,
+						InsertChannel:  "",
+						NumOfRows:      1026,
+						State:          commonpb.SegmentState_Flushed,
+						MaxRowNum:      65536,
+						LastExpireTime: 10,
+					},
+				},
+				segID + 6: {
+					SegmentInfo: &datapb.SegmentInfo{
+						ID:             segID + 6,
+						CollectionID:   collID,
+						PartitionID:    partID,
+						InsertChannel:  "",
+						NumOfRows:      1026,
+						State:          commonpb.SegmentState_Flushed,
+						MaxRowNum:      65536,
+						LastExpireTime: 10,
+					},
+				},
+				segID + 7: {
+					SegmentInfo: &datapb.SegmentInfo{
+						ID:             segID + 7,
+						CollectionID:   collID,
+						PartitionID:    partID,
+						InsertChannel:  "",
+						NumOfRows:      1026,
+						State:          commonpb.SegmentState_Flushed,
+						MaxRowNum:      65536,
+						LastExpireTime: 10,
+					},
+				},
+				segID + 8: {
+					SegmentInfo: &datapb.SegmentInfo{
+						ID:             segID + 8,
+						CollectionID:   collID,
+						PartitionID:    partID,
+						InsertChannel:  "",
+						NumOfRows:      1026,
+						State:          commonpb.SegmentState_Flushed,
+						MaxRowNum:      65536,
+						LastExpireTime: 10,
+					},
+				},
+				segID + 9: {
+					SegmentInfo: &datapb.SegmentInfo{
+						ID:             segID + 9,
+						CollectionID:   collID,
+						PartitionID:    partID,
+						InsertChannel:  "",
+						NumOfRows:      500,
+						State:          commonpb.SegmentState_Flushed,
+						MaxRowNum:      65536,
+						LastExpireTime: 10,
+					},
+				},
+				segID + 10: {
+					SegmentInfo: &datapb.SegmentInfo{
+						ID:             segID + 10,
+						CollectionID:   collID,
+						PartitionID:    partID,
+						InsertChannel:  "",
+						NumOfRows:      500,
+						State:          commonpb.SegmentState_Flushed,
+						MaxRowNum:      65536,
+						LastExpireTime: 10,
+					},
+				},
+			},
+		},
+	}
 }
 
 func TestIndexBuilder(t *testing.T) {
@@ -699,7 +706,7 @@ func TestIndexBuilder(t *testing.T) {
 			IndexFileKeys: nil,
 			IndexSize:     0,
 		}
-		err := ib.meta.AddSegmentIndex(segIdx)
+		err := ib.meta.indexMeta.AddSegmentIndex(segIdx)
 		assert.NoError(t, err)
 		ib.enqueue(buildID + 10)
 	})
@@ -785,7 +792,7 @@ func TestIndexBuilder_Error(t *testing.T) {
 
 	t.Run("no need to build index but update catalog failed", func(t *testing.T) {
 		ib.meta.catalog = ec
-		ib.meta.indexes[collID][indexID].IsDeleted = true
+		ib.meta.indexMeta.indexes[collID][indexID].IsDeleted = true
 		ib.tasks[buildID] = indexTaskInit
 		ok := ib.process(buildID)
 		assert.False(t, ok)
@@ -795,19 +802,22 @@ func TestIndexBuilder_Error(t *testing.T) {
 	})
 
 	t.Run("init no need to build index", func(t *testing.T) {
+		ib.meta.indexMeta.catalog = sc
 		ib.meta.catalog = sc
-		ib.meta.indexes[collID][indexID].IsDeleted = true
+
+		ib.meta.indexMeta.indexes[collID][indexID].IsDeleted = true
 		ib.tasks[buildID] = indexTaskInit
 		ib.process(buildID)
 
 		_, ok := ib.tasks[buildID]
 		assert.False(t, ok)
-		ib.meta.indexes[collID][indexID].IsDeleted = false
+		ib.meta.indexMeta.indexes[collID][indexID].IsDeleted = false
 	})
 
 	t.Run("assign task error", func(t *testing.T) {
 		paramtable.Get().Save(Params.CommonCfg.StorageType.Key, "local")
 		ib.tasks[buildID] = indexTaskInit
+		ib.meta.indexMeta.catalog = sc
 		ib.meta.catalog = sc
 
 		ic := mocks.NewMockIndexNodeClient(t)
@@ -831,7 +841,9 @@ func TestIndexBuilder_Error(t *testing.T) {
 	})
 	t.Run("assign task fail", func(t *testing.T) {
 		paramtable.Get().Save(Params.CommonCfg.StorageType.Key, "local")
+		ib.meta.indexMeta.catalog = sc
 		ib.meta.catalog = sc
+
 		ic := mocks.NewMockIndexNodeClient(t)
 		ic.EXPECT().CreateJob(mock.Anything, mock.Anything, mock.Anything).Return(&commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -857,7 +869,7 @@ func TestIndexBuilder_Error(t *testing.T) {
 	})
 
 	t.Run("drop job error", func(t *testing.T) {
-		ib.meta.buildID2SegmentIndex[buildID].NodeID = nodeID
+		ib.meta.indexMeta.buildID2SegmentIndex[buildID].NodeID = nodeID
 		ib.meta.catalog = sc
 		ic := mocks.NewMockIndexNodeClient(t)
 		ic.EXPECT().DropJobs(mock.Anything, mock.Anything, mock.Anything).Return(&commonpb.Status{
@@ -886,7 +898,7 @@ func TestIndexBuilder_Error(t *testing.T) {
 	})
 
 	t.Run("drop job fail", func(t *testing.T) {
-		ib.meta.buildID2SegmentIndex[buildID].NodeID = nodeID
+		ib.meta.indexMeta.buildID2SegmentIndex[buildID].NodeID = nodeID
 		ib.meta.catalog = sc
 		ic := mocks.NewMockIndexNodeClient(t)
 		ic.EXPECT().DropJobs(mock.Anything, mock.Anything, mock.Anything).Return(&commonpb.Status{
@@ -916,8 +928,10 @@ func TestIndexBuilder_Error(t *testing.T) {
 	})
 
 	t.Run("get state error", func(t *testing.T) {
-		ib.meta.buildID2SegmentIndex[buildID].NodeID = nodeID
+		ib.meta.indexMeta.buildID2SegmentIndex[buildID].NodeID = nodeID
 		ib.meta.catalog = sc
+		ib.meta.indexMeta.catalog = sc
+
 		ic := mocks.NewMockIndexNodeClient(t)
 		ic.EXPECT().QueryJobs(mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("error"))
 		ib.nodeManager = &IndexNodeManager{
@@ -936,8 +950,10 @@ func TestIndexBuilder_Error(t *testing.T) {
 	})
 
 	t.Run("get state fail", func(t *testing.T) {
-		ib.meta.buildID2SegmentIndex[buildID].NodeID = nodeID
+		ib.meta.indexMeta.buildID2SegmentIndex[buildID].NodeID = nodeID
 		ib.meta.catalog = sc
+		ib.meta.indexMeta.catalog = sc
+
 		ic := mocks.NewMockIndexNodeClient(t)
 		ic.EXPECT().QueryJobs(mock.Anything, mock.Anything, mock.Anything).Return(&indexpb.QueryJobsResponse{
 			Status: &commonpb.Status{
@@ -961,8 +977,10 @@ func TestIndexBuilder_Error(t *testing.T) {
 	})
 
 	t.Run("finish task fail", func(t *testing.T) {
-		ib.meta.buildID2SegmentIndex[buildID].NodeID = nodeID
+		ib.meta.indexMeta.buildID2SegmentIndex[buildID].NodeID = nodeID
 		ib.meta.catalog = ec
+		ib.meta.indexMeta.catalog = ec
+
 		ic := mocks.NewMockIndexNodeClient(t)
 		ic.EXPECT().QueryJobs(mock.Anything, mock.Anything, mock.Anything).Return(&indexpb.QueryJobsResponse{
 			Status: merr.Success(),
@@ -993,7 +1011,7 @@ func TestIndexBuilder_Error(t *testing.T) {
 	})
 
 	t.Run("task still in progress", func(t *testing.T) {
-		ib.meta.buildID2SegmentIndex[buildID].NodeID = nodeID
+		ib.meta.indexMeta.buildID2SegmentIndex[buildID].NodeID = nodeID
 		ib.meta.catalog = ec
 		ic := mocks.NewMockIndexNodeClient(t)
 		ic.EXPECT().QueryJobs(mock.Anything, mock.Anything, mock.Anything).Return(&indexpb.QueryJobsResponse{
@@ -1025,7 +1043,7 @@ func TestIndexBuilder_Error(t *testing.T) {
 	})
 
 	t.Run("indexNode has no task", func(t *testing.T) {
-		ib.meta.buildID2SegmentIndex[buildID].NodeID = nodeID
+		ib.meta.indexMeta.buildID2SegmentIndex[buildID].NodeID = nodeID
 		ib.meta.catalog = sc
 		ic := mocks.NewMockIndexNodeClient(t)
 		ic.EXPECT().QueryJobs(mock.Anything, mock.Anything, mock.Anything).Return(&indexpb.QueryJobsResponse{
@@ -1048,7 +1066,7 @@ func TestIndexBuilder_Error(t *testing.T) {
 	})
 
 	t.Run("node not exist", func(t *testing.T) {
-		ib.meta.buildID2SegmentIndex[buildID].NodeID = nodeID
+		ib.meta.indexMeta.buildID2SegmentIndex[buildID].NodeID = nodeID
 		ib.meta.catalog = sc
 		ib.nodeManager = &IndexNodeManager{
 			ctx:         context.Background(),
@@ -1179,7 +1197,7 @@ func TestIndexBuilderV2(t *testing.T) {
 			IndexFileKeys: nil,
 			IndexSize:     0,
 		}
-		err := ib.meta.AddSegmentIndex(segIdx)
+		err := ib.meta.indexMeta.AddSegmentIndex(segIdx)
 		assert.NoError(t, err)
 		ib.enqueue(buildID + 10)
 	})
@@ -1276,32 +1294,74 @@ func TestVecIndexWithOptionalScalarField(t *testing.T) {
 				CreatedAt: 0,
 			},
 		},
-		indexes: map[UniqueID]map[UniqueID]*model.Index{
-			collID: {
-				indexID: {
-					TenantID:     "",
-					CollectionID: collID,
-					FieldID:      fieldID,
-					IndexID:      indexID,
-					IndexName:    indexName,
-					IsDeleted:    false,
-					CreateTime:   1,
-					TypeParams: []*commonpb.KeyValuePair{
-						{
-							Key:   common.DimKey,
-							Value: "128",
+
+		indexMeta: &indexMeta{
+			catalog: catalog,
+			indexes: map[UniqueID]map[UniqueID]*model.Index{
+				collID: {
+					indexID: {
+						TenantID:     "",
+						CollectionID: collID,
+						FieldID:      fieldID,
+						IndexID:      indexID,
+						IndexName:    indexName,
+						IsDeleted:    false,
+						CreateTime:   1,
+						TypeParams: []*commonpb.KeyValuePair{
+							{
+								Key:   common.DimKey,
+								Value: "128",
+							},
+						},
+						IndexParams: []*commonpb.KeyValuePair{
+							{
+								Key:   common.MetricTypeKey,
+								Value: "L2",
+							},
+							{
+								Key:   common.IndexTypeKey,
+								Value: indexparamcheck.IndexHNSW,
+							},
 						},
 					},
-					IndexParams: []*commonpb.KeyValuePair{
-						{
-							Key:   common.MetricTypeKey,
-							Value: "L2",
-						},
-						{
-							Key:   common.IndexTypeKey,
-							Value: indexparamcheck.IndexHNSW,
-						},
+				},
+			},
+			segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
+				segID: {
+					indexID: {
+						SegmentID:     segID,
+						CollectionID:  collID,
+						PartitionID:   partID,
+						NumRows:       minNumberOfRowsToBuild,
+						IndexID:       indexID,
+						BuildID:       buildID,
+						NodeID:        0,
+						IndexVersion:  0,
+						IndexState:    commonpb.IndexState_Unissued,
+						FailReason:    "",
+						IsDeleted:     false,
+						CreateTime:    0,
+						IndexFileKeys: nil,
+						IndexSize:     0,
 					},
+				},
+			},
+			buildID2SegmentIndex: map[UniqueID]*model.SegmentIndex{
+				buildID: {
+					SegmentID:     segID,
+					CollectionID:  collID,
+					PartitionID:   partID,
+					NumRows:       minNumberOfRowsToBuild,
+					IndexID:       indexID,
+					BuildID:       buildID,
+					NodeID:        0,
+					IndexVersion:  0,
+					IndexState:    commonpb.IndexState_Unissued,
+					FailReason:    "",
+					IsDeleted:     false,
+					CreateTime:    0,
+					IndexFileKeys: nil,
+					IndexSize:     0,
 				},
 			},
 		},
@@ -1318,43 +1378,7 @@ func TestVecIndexWithOptionalScalarField(t *testing.T) {
 						MaxRowNum:      65536,
 						LastExpireTime: 10,
 					},
-					segmentIndexes: map[UniqueID]*model.SegmentIndex{
-						indexID: {
-							SegmentID:     segID,
-							CollectionID:  collID,
-							PartitionID:   partID,
-							NumRows:       minNumberOfRowsToBuild,
-							IndexID:       indexID,
-							BuildID:       buildID,
-							NodeID:        0,
-							IndexVersion:  0,
-							IndexState:    commonpb.IndexState_Unissued,
-							FailReason:    "",
-							IsDeleted:     false,
-							CreateTime:    0,
-							IndexFileKeys: nil,
-							IndexSize:     0,
-						},
-					},
 				},
-			},
-		},
-		buildID2SegmentIndex: map[UniqueID]*model.SegmentIndex{
-			buildID: {
-				SegmentID:     segID,
-				CollectionID:  collID,
-				PartitionID:   partID,
-				NumRows:       minNumberOfRowsToBuild,
-				IndexID:       indexID,
-				BuildID:       buildID,
-				NodeID:        0,
-				IndexVersion:  0,
-				IndexState:    commonpb.IndexState_Unissued,
-				FailReason:    "",
-				IsDeleted:     false,
-				CreateTime:    0,
-				IndexFileKeys: nil,
-				IndexSize:     0,
 			},
 		},
 	}
@@ -1383,9 +1407,9 @@ func TestVecIndexWithOptionalScalarField(t *testing.T) {
 	}
 
 	resetMetaFunc := func() {
-		mt.buildID2SegmentIndex[buildID].IndexState = commonpb.IndexState_Unissued
-		mt.segments.segments[segID].segmentIndexes[indexID].IndexState = commonpb.IndexState_Unissued
-		mt.indexes[collID][indexID].IndexParams[1].Value = indexparamcheck.IndexHNSW
+		mt.indexMeta.buildID2SegmentIndex[buildID].IndexState = commonpb.IndexState_Unissued
+		mt.indexMeta.segmentIndexes[segID][indexID].IndexState = commonpb.IndexState_Unissued
+		mt.indexMeta.indexes[collID][indexID].IndexParams[1].Value = indexparamcheck.IndexHNSW
 		mt.collections[collID].Schema.Fields[1].IsPartitionKey = true
 	}
 
@@ -1431,7 +1455,7 @@ func TestVecIndexWithOptionalScalarField(t *testing.T) {
 				assert.NotZero(t, len(in.OptionalScalarFields), "optional scalar field should be set")
 				return merr.Success(), nil
 			}).Once()
-		err := ib.meta.AddSegmentIndex(segIdx)
+		err := ib.meta.indexMeta.AddSegmentIndex(segIdx)
 		assert.NoError(t, err)
 		ib.enqueue(buildID)
 		waitTaskDoneFunc(ib)
@@ -1446,7 +1470,7 @@ func TestVecIndexWithOptionalScalarField(t *testing.T) {
 				assert.Zero(t, len(in.OptionalScalarFields), "optional scalar field should be set")
 				return merr.Success(), nil
 			}).Once()
-		err := ib.meta.AddSegmentIndex(segIdx)
+		err := ib.meta.indexMeta.AddSegmentIndex(segIdx)
 		assert.NoError(t, err)
 		ib.enqueue(buildID)
 		waitTaskDoneFunc(ib)
@@ -1455,13 +1479,13 @@ func TestVecIndexWithOptionalScalarField(t *testing.T) {
 
 	t.Run("enqueue returns empty optional field when index is not HNSW", func(t *testing.T) {
 		paramtable.Get().CommonCfg.EnableNodeFilteringOnPartitionKey.SwapTempValue("true")
-		mt.indexes[collID][indexID].IndexParams[1].Value = indexparamcheck.IndexDISKANN
+		mt.indexMeta.indexes[collID][indexID].IndexParams[1].Value = indexparamcheck.IndexDISKANN
 		ic.EXPECT().CreateJob(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
 			func(ctx context.Context, in *indexpb.CreateJobRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 				assert.Zero(t, len(in.OptionalScalarFields), "optional scalar field should be set")
 				return merr.Success(), nil
 			}).Once()
-		err := ib.meta.AddSegmentIndex(segIdx)
+		err := ib.meta.indexMeta.AddSegmentIndex(segIdx)
 		assert.NoError(t, err)
 		ib.enqueue(buildID)
 		waitTaskDoneFunc(ib)
@@ -1476,7 +1500,7 @@ func TestVecIndexWithOptionalScalarField(t *testing.T) {
 				assert.Zero(t, len(in.OptionalScalarFields), "optional scalar field should be set")
 				return merr.Success(), nil
 			}).Once()
-		err := ib.meta.AddSegmentIndex(segIdx)
+		err := ib.meta.indexMeta.AddSegmentIndex(segIdx)
 		assert.NoError(t, err)
 		ib.enqueue(buildID)
 		waitTaskDoneFunc(ib)
