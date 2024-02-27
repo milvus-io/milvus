@@ -58,7 +58,7 @@ type SessionManager interface {
 	Compaction(ctx context.Context, nodeID int64, plan *datapb.CompactionPlan) error
 	SyncSegments(nodeID int64, req *datapb.SyncSegmentsRequest) error
 	Import(ctx context.Context, nodeID int64, itr *datapb.ImportTaskRequest)
-	GetCompactionPlansResults() map[int64]*datapb.CompactionPlanResult
+	GetCompactionPlansResults() map[int64]*typeutil.Pair[int64, *datapb.CompactionPlanResult]
 	NotifyChannelOperation(ctx context.Context, nodeID int64, req *datapb.ChannelOperationsRequest) error
 	CheckChannelOperationProgress(ctx context.Context, nodeID int64, info *datapb.ChannelWatchInfo) (*datapb.ChannelOperationProgressResponse, error)
 	AddImportSegment(ctx context.Context, nodeID int64, req *datapb.AddImportSegmentRequest) (*datapb.AddImportSegmentResponse, error)
@@ -263,11 +263,12 @@ func (c *SessionManagerImpl) execImport(ctx context.Context, nodeID int64, itr *
 	log.Info("success to import", zap.Int64("node", nodeID), zap.Any("import task", itr))
 }
 
-func (c *SessionManagerImpl) GetCompactionPlansResults() map[int64]*datapb.CompactionPlanResult {
+// GetCompactionPlanResults returns map[planID]*pair[nodeID, *CompactionPlanResults]
+func (c *SessionManagerImpl) GetCompactionPlansResults() map[int64]*typeutil.Pair[int64, *datapb.CompactionPlanResult] {
 	wg := sync.WaitGroup{}
 	ctx := context.Background()
 
-	plans := typeutil.NewConcurrentMap[int64, *datapb.CompactionPlanResult]()
+	plans := typeutil.NewConcurrentMap[int64, *typeutil.Pair[int64, *datapb.CompactionPlanResult]]()
 	c.sessions.RLock()
 	for nodeID, s := range c.sessions.data {
 		wg.Add(1)
@@ -296,15 +297,16 @@ func (c *SessionManagerImpl) GetCompactionPlansResults() map[int64]*datapb.Compa
 				// for compatibility issue, before 2.3.4, resp has only logpath
 				// try to parse path and fill logid
 				binlog.CompressCompactionBinlogs(rst.GetSegments())
-				plans.Insert(rst.PlanID, rst)
+				nodeRst := typeutil.NewPair(nodeID, rst)
+				plans.Insert(rst.PlanID, &nodeRst)
 			}
 		}(nodeID, s)
 	}
 	c.sessions.RUnlock()
 	wg.Wait()
 
-	rst := make(map[int64]*datapb.CompactionPlanResult)
-	plans.Range(func(planID int64, result *datapb.CompactionPlanResult) bool {
+	rst := make(map[int64]*typeutil.Pair[int64, *datapb.CompactionPlanResult])
+	plans.Range(func(planID int64, result *typeutil.Pair[int64, *datapb.CompactionPlanResult]) bool {
 		rst[planID] = result
 		return true
 	})

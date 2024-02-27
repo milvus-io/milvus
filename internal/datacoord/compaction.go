@@ -488,73 +488,95 @@ func (c *compactionPlanHandler) getCompaction(planID int64) *compactionTask {
 	return c.plans[planID]
 }
 
-// expireCompaction set the compaction state to expired
 func (c *compactionPlanHandler) updateCompaction(ts Timestamp) error {
 	// Get executing executingTasks before GetCompactionState from DataNode to prevent false failure,
 	//  for DC might add new task while GetCompactionState.
 	executingTasks := c.getTasksByState(executing)
 	timeoutTasks := c.getTasksByState(timeout)
 	planStates := c.sessions.GetCompactionPlansResults()
+	cachedPlans := []int64{}
 
+	// TODO reduce the lock range
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	for _, task := range executingTasks {
-		planResult, ok := planStates[task.plan.PlanID]
-		state := planResult.GetState()
+		log := log.With(zap.Int64("planID", task.plan.PlanID), zap.Int64("nodeID", task.dataNodeID))
 		planID := task.plan.PlanID
-		// check whether the state of CompactionPlan is working
-		if ok {
-			if state == commonpb.CompactionState_Completed {
-				log.Info("complete compaction", zap.Int64("planID", planID), zap.Int64("nodeID", task.dataNodeID))
-				err := c.completeCompaction(planResult)
-				if err != nil {
-					log.Warn("fail to complete compaction", zap.Int64("planID", planID), zap.Int64("nodeID", task.dataNodeID), zap.Error(err))
+		cachedPlans = append(cachedPlans, planID)
+		if nodePlan, ok := planStates[planID]; ok {
+			planResult := nodePlan.B
+			switch planResult.GetState() {
+			case commonpb.CompactionState_Completed:
+				log.Info("start to complete compaction")
+				if err := c.completeCompaction(planResult); err != nil {
+					log.Warn("fail to complete compaction", zap.Error(err))
 				}
-				continue
+
+			case commonpb.CompactionState_Executing:
+				if c.isTimeout(ts, task.plan.GetStartTime(), task.plan.GetTimeoutInSeconds()) {
+					log.Warn("compaction timeout",
+						zap.Int32("timeout in seconds", task.plan.GetTimeoutInSeconds()),
+						zap.Uint64("startTime", task.plan.GetStartTime()),
+						zap.Uint64("now", ts),
+					)
+					c.plans[planID] = c.plans[planID].shadowClone(setState(timeout), endSpan())
+				}
 			}
-			// check wether the CompactionPlan is timeout
-			if state == commonpb.CompactionState_Executing && !c.isTimeout(ts, task.plan.GetStartTime(), task.plan.GetTimeoutInSeconds()) {
-				continue
-			}
-			log.Warn("compaction timeout",
-				zap.Int64("planID", task.plan.PlanID),
-				zap.Int64("nodeID", task.dataNodeID),
-				zap.Uint64("startTime", task.plan.GetStartTime()),
-				zap.Uint64("now", ts),
-			)
-			c.plans[planID] = c.plans[planID].shadowClone(setState(timeout), endSpan())
-			continue
-		}
-
-		log.Info("compaction failed", zap.Int64("planID", task.plan.PlanID), zap.Int64("nodeID", task.dataNodeID))
-		c.plans[planID] = c.plans[planID].shadowClone(setState(failed), endSpan())
-		c.setSegmentsCompacting(task.plan, false)
-		c.scheduler.Finish(task.dataNodeID, task.plan)
-	}
-
-	// Timeout tasks will be timeout and failed in DataNode
-	// need to wait for DataNode reporting failure and
-	// clean the status.
-	for _, task := range timeoutTasks {
-		stateResult, ok := planStates[task.plan.PlanID]
-		planID := task.plan.PlanID
-
-		if !ok {
-			log.Info("compaction failed for timeout", zap.Int64("planID", task.plan.PlanID), zap.Int64("nodeID", task.dataNodeID))
+		} else {
+			// compaction task in DC but not found in DN means the compaction plan has failed
+			log.Info("compaction failed")
 			c.plans[planID] = c.plans[planID].shadowClone(setState(failed), endSpan())
 			c.setSegmentsCompacting(task.plan, false)
 			c.scheduler.Finish(task.dataNodeID, task.plan)
 		}
+	}
 
-		// DataNode will check if plan's are timeout but not as sensitive as DataCoord,
-		// just wait another round.
-		if ok && stateResult.GetState() == commonpb.CompactionState_Executing {
-			log.Info("compaction timeout in DataCoord yet DataNode is still running",
-				zap.Int64("planID", planID),
-				zap.Int64("nodeID", task.dataNodeID))
-			continue
+	// Timeout tasks will be timeout and failed in DataNode
+	// need to wait for DataNode reporting failure and clean the status.
+	for _, task := range timeoutTasks {
+		log := log.With(zap.Int64("planID", task.plan.PlanID), zap.Int64("nodeID", task.dataNodeID))
+		planID := task.plan.PlanID
+		cachedPlans = append(cachedPlans, planID)
+		if nodePlan, ok := planStates[planID]; ok {
+			if nodePlan.B.GetState() == commonpb.CompactionState_Executing {
+				log.RatedInfo(1, "compaction timeout in DataCoord yet DataNode is still running")
+			}
+		} else {
+			// compaction task in DC but not found in DN means the compaction plan has failed
+			log.Info("compaction failed for timeout")
+			c.plans[planID] = c.plans[planID].shadowClone(setState(failed), endSpan())
+			c.setSegmentsCompacting(task.plan, false)
+			c.scheduler.Finish(task.dataNodeID, task.plan)
 		}
 	}
+	c.mu.Unlock()
+
+	// Compaction plans in DN but not in DC are unkonwn plans, need to notify DN to clear it.
+	// No locks needed, because no changes in DC memeory
+	completedPlans := lo.PickBy(planStates, func(planID int64, planState *typeutil.Pair[int64, *datapb.CompactionPlanResult]) bool {
+		return planState.B.GetState() == commonpb.CompactionState_Completed
+	})
+
+	unkonwnPlansInWorker, _ := lo.Difference(lo.Keys(completedPlans), cachedPlans)
+	for _, planID := range unkonwnPlansInWorker {
+		if nodeUnkonwnPlan, ok := completedPlans[planID]; ok {
+			nodeID, plan := nodeUnkonwnPlan.A, nodeUnkonwnPlan.B
+			log := log.With(zap.Int64("planID", planID), zap.Int64("nodeID", nodeID))
+
+			// Sync segments without CompactionFrom segmentsIDs to make sure DN clear the task
+			// without changing the meta
+			req := &datapb.SyncSegmentsRequest{
+				PlanID:      planID,
+				ChannelName: plan.GetChannel(),
+			}
+
+			log.Info("compaction syncing unknown plan with node")
+			if err := c.sessions.SyncSegments(nodeID, req); err != nil {
+				log.Warn("compaction failed to sync segments with node", zap.Error(err))
+				return err
+			}
+		}
+	}
+
 	return nil
 }
 
