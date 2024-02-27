@@ -291,7 +291,7 @@ func getSdkVersionByUserAgent(ctx context.Context) string {
 		return unknownString
 	}
 
-	SdkType, ok := getSdkTypeByUserAgent(UserAgent[0])
+	SdkType, ok := getSdkTypeByUserAgent(UserAgent)
 	if !ok {
 		return unknownString
 	}

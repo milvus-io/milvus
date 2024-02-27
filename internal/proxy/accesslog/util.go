@@ -87,7 +87,12 @@ func getCurUserFromContext(ctx context.Context) (string, error) {
 	return username, nil
 }
 
-func getSdkTypeByUserAgent(userAgent string) (string, bool) {
+func getSdkTypeByUserAgent(userAgents []string) (string, bool) {
+	if len(userAgents) == 0 {
+		return "", false
+	}
+
+	userAgent := userAgents[0]
 	switch {
 	case strings.HasPrefix(userAgent, "grpc-node-js"):
 		return "nodejs", true
