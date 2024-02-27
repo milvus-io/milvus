@@ -231,6 +231,7 @@ type deleteRunner struct {
 
 	idAllocator     allocator.Interface
 	tsoAllocatorIns tsoAllocator
+	limiter         types.Limiter
 
 	// delete info
 	schema           *schemaInfo
@@ -470,6 +471,15 @@ func (dr *deleteRunner) receiveQueryResult(ctx context.Context, client querypb.Q
 			dr.err = err
 			log.Warn("query stream for delete get error status", zap.Int64("msgID", dr.msgID), zap.Error(err))
 			return
+		}
+
+		if dr.limiter != nil {
+			err := dr.limiter.Alloc(ctx, []int64{dr.collectionID}, internalpb.RateType_DMLDelete, proto.Size(result.GetIds()))
+			if err != nil {
+				dr.err = err
+				log.Warn("query stream for delete failed because rate limiter", zap.Int64("msgID", dr.msgID), zap.Error(err))
+				return
+			}
 		}
 
 		task, err := dr.produce(ctx, result.GetIds())

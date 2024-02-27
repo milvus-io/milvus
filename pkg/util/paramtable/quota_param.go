@@ -45,6 +45,8 @@ const (
 type quotaConfig struct {
 	QuotaAndLimitsEnabled      ParamItem `refreshable:"false"`
 	QuotaCenterCollectInterval ParamItem `refreshable:"false"`
+	AllocRetryTimes            ParamItem `refreshable:"false"`
+	AllocWaitInterval          ParamItem `refreshable:"false"`
 
 	// ddl
 	DDLLimitEnabled   ParamItem `refreshable:"true"`
@@ -2021,6 +2023,24 @@ MB/s, default no limit`,
 		Export: true,
 	}
 	p.CoolOffSpeed.Init(base.mgr)
+
+	p.AllocRetryTimes = ParamItem{
+		Key:          "quotaAndLimits.limits.allocRetryTimes",
+		Version:      "2.4.0",
+		DefaultValue: "15",
+		Doc:          `retry times when delete check forward data rate failed`,
+		Export:       true,
+	}
+	p.AllocRetryTimes.Init(base.mgr)
+
+	p.AllocWaitInterval = ParamItem{
+		Key:          "quotaAndLimits.limits.allocWaitInterval",
+		Version:      "2.4.0",
+		DefaultValue: "1000",
+		Doc:          `retry wait duration when delete check forward data rate failed, in millisecond`,
+		Export:       true,
+	}
+	p.AllocWaitInterval.Init(base.mgr)
 }
 
 func megaBytes2Bytes(f float64) float64 {

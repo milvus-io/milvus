@@ -147,7 +147,7 @@ func NewProxy(ctx context.Context, factory dependency.Factory) (*Proxy, error) {
 		factory:                factory,
 		searchResultCh:         make(chan *internalpb.SearchResults, n),
 		shardMgr:               mgr,
-		simpleLimiter:          NewSimpleLimiter(),
+		simpleLimiter:          NewSimpleLimiter(Params.QuotaConfig.AllocWaitInterval.GetAsDuration(time.Second), Params.QuotaConfig.AllocRetryTimes.GetAsUint()),
 		lbPolicy:               lbPolicy,
 		resourceManager:        resourceManager,
 		replicateStreamManager: replicateStreamManager,

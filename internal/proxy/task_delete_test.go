@@ -656,6 +656,65 @@ func TestDeleteRunner_Run(t *testing.T) {
 		assert.Error(t, dr.Run(ctx))
 	})
 
+	t.Run("complex delete rate limit check failed", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		mockMgr := NewMockChannelsMgr(t)
+		qn := mocks.NewMockQueryNodeClient(t)
+		lb := NewMockLBPolicy(t)
+
+		dr := deleteRunner{
+			chMgr:           mockMgr,
+			queue:           queue.dmQueue,
+			schema:          schema,
+			collectionID:    collectionID,
+			partitionID:     partitionID,
+			vChannels:       channels,
+			idAllocator:     idAllocator,
+			tsoAllocatorIns: tsoAllocator,
+			lb:              lb,
+			limiter:         &limiterMock{},
+			result: &milvuspb.MutationResult{
+				Status: merr.Success(),
+				IDs: &schemapb.IDs{
+					IdField: nil,
+				},
+			},
+			req: &milvuspb.DeleteRequest{
+				CollectionName: collectionName,
+				PartitionName:  partitionName,
+				DbName:         dbName,
+				Expr:           "pk < 3",
+			},
+		}
+		lb.EXPECT().Execute(mock.Anything, mock.Anything).Call.Return(func(ctx context.Context, workload CollectionWorkLoad) error {
+			return workload.exec(ctx, 1, qn, "")
+		})
+
+		qn.EXPECT().QueryStream(mock.Anything, mock.Anything).Call.Return(
+			func(ctx context.Context, in *querypb.QueryRequest, opts ...grpc.CallOption) querypb.QueryNode_QueryStreamClient {
+				client := streamrpc.NewLocalQueryClient(ctx)
+				server := client.CreateServer()
+
+				server.Send(&internalpb.RetrieveResults{
+					Status: merr.Success(),
+					Ids: &schemapb.IDs{
+						IdField: &schemapb.IDs_IntId{
+							IntId: &schemapb.LongArray{
+								Data: []int64{0, 1, 2},
+							},
+						},
+					},
+				})
+				server.FinishSend(nil)
+				return client
+			}, nil)
+
+		assert.Error(t, dr.Run(ctx))
+		assert.Equal(t, int64(0), dr.result.DeleteCnt)
+	})
+
 	t.Run("complex delete produce failed", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()

@@ -40,7 +40,7 @@ func TestSimpleRateLimiter(t *testing.T) {
 		bak := Params.QuotaConfig.QuotaAndLimitsEnabled.GetValue()
 		paramtable.Get().Save(Params.QuotaConfig.QuotaAndLimitsEnabled.Key, "true")
 
-		simpleLimiter := NewSimpleLimiter()
+		simpleLimiter := NewSimpleLimiter(0, 0)
 		clusterRateLimiters := simpleLimiter.rateLimiter.GetRootLimiters()
 
 		simpleLimiter.rateLimiter.GetOrCreateCollectionLimiters(0, collectionID, newDatabaseLimiter,
@@ -83,7 +83,7 @@ func TestSimpleRateLimiter(t *testing.T) {
 	t.Run("test global static limit", func(t *testing.T) {
 		bak := Params.QuotaConfig.QuotaAndLimitsEnabled.GetValue()
 		paramtable.Get().Save(Params.QuotaConfig.QuotaAndLimitsEnabled.Key, "true")
-		simpleLimiter := NewSimpleLimiter()
+		simpleLimiter := NewSimpleLimiter(0, 0)
 		clusterRateLimiters := simpleLimiter.rateLimiter.GetRootLimiters()
 
 		collectionIDToPartIDs := map[int64][]int64{
@@ -134,7 +134,7 @@ func TestSimpleRateLimiter(t *testing.T) {
 	})
 
 	t.Run("not enable quotaAndLimit", func(t *testing.T) {
-		simpleLimiter := NewSimpleLimiter()
+		simpleLimiter := NewSimpleLimiter(0, 0)
 		bak := Params.QuotaConfig.QuotaAndLimitsEnabled.GetValue()
 		paramtable.Get().Save(Params.QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
 		for _, rt := range internalpb.RateType_value {
@@ -148,7 +148,7 @@ func TestSimpleRateLimiter(t *testing.T) {
 		run := func(insertRate float64) {
 			bakInsertRate := Params.QuotaConfig.DMLMaxInsertRate.GetValue()
 			paramtable.Get().Save(Params.QuotaConfig.DMLMaxInsertRate.Key, fmt.Sprintf("%f", insertRate))
-			simpleLimiter := NewSimpleLimiter()
+			simpleLimiter := NewSimpleLimiter(0, 0)
 			bak := Params.QuotaConfig.QuotaAndLimitsEnabled.GetValue()
 			paramtable.Get().Save(Params.QuotaConfig.QuotaAndLimitsEnabled.Key, "true")
 			err := simpleLimiter.Check(0, nil, internalpb.RateType_DMLInsert, 1*1024*1024)
@@ -164,7 +164,7 @@ func TestSimpleRateLimiter(t *testing.T) {
 	})
 
 	t.Run("test set rates", func(t *testing.T) {
-		simpleLimiter := NewSimpleLimiter()
+		simpleLimiter := NewSimpleLimiter(0, 0)
 		zeroRates := getZeroCollectionRates()
 
 		err := simpleLimiter.SetRates(newCollectionLimiterNode(map[int64]*proxypb.LimiterNode{
@@ -186,7 +186,7 @@ func TestSimpleRateLimiter(t *testing.T) {
 	})
 
 	t.Run("test quota states", func(t *testing.T) {
-		simpleLimiter := NewSimpleLimiter()
+		simpleLimiter := NewSimpleLimiter(0, 0)
 		err := simpleLimiter.SetRates(newCollectionLimiterNode(map[int64]*proxypb.LimiterNode{
 			1: {
 				// collection limiter
@@ -255,7 +255,7 @@ func newCollectionLimiterNode(collectionLimiterNodes map[int64]*proxypb.LimiterN
 
 func TestRateLimiter(t *testing.T) {
 	t.Run("test limit", func(t *testing.T) {
-		simpleLimiter := NewSimpleLimiter()
+		simpleLimiter := NewSimpleLimiter(0, 0)
 		rootLimiters := simpleLimiter.rateLimiter.GetRootLimiters()
 		for _, rt := range internalpb.RateType_value {
 			rootLimiters.GetLimiters().Insert(internalpb.RateType(rt), ratelimitutil.NewLimiter(ratelimitutil.Limit(1000), 1))
@@ -271,7 +271,7 @@ func TestRateLimiter(t *testing.T) {
 	})
 
 	t.Run("test setRates", func(t *testing.T) {
-		simpleLimiter := NewSimpleLimiter()
+		simpleLimiter := NewSimpleLimiter(0, 0)
 
 		collectionRateLimiters := simpleLimiter.rateLimiter.GetOrCreateCollectionLimiters(0, int64(1), newDatabaseLimiter,
 			func() *rlinternal.RateLimiterNode {
@@ -334,7 +334,7 @@ func TestRateLimiter(t *testing.T) {
 	})
 
 	t.Run("test get error code", func(t *testing.T) {
-		simpleLimiter := NewSimpleLimiter()
+		simpleLimiter := NewSimpleLimiter(0, 0)
 
 		collectionRateLimiters := simpleLimiter.rateLimiter.GetOrCreateCollectionLimiters(0, int64(1), newDatabaseLimiter,
 			func() *rlinternal.RateLimiterNode {
