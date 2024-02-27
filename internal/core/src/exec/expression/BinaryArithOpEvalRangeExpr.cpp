@@ -112,8 +112,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson() {
         return nullptr;
     }
     auto res_vec =
-        std::make_shared<ColumnVector>(DataType::BOOL, real_batch_size);
-    bool* res = (bool*)res_vec->GetRawData();
+        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size));
+    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
 
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     auto op_type = expr_->op_type_;
@@ -160,7 +160,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson() {
 
     auto execute_sub_batch = [op_type, arith_type](const milvus::Json* data,
                                                    const int size,
-                                                   bool* res,
+                                                   TargetBitmapView res,
                                                    ValueType val,
                                                    ValueType right_operand,
                                                    const std::string& pointer) {
@@ -491,8 +491,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray() {
         return nullptr;
     }
     auto res_vec =
-        std::make_shared<ColumnVector>(DataType::BOOL, real_batch_size);
-    bool* res = (bool*)res_vec->GetRawData();
+        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size));
+    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
 
     int index = -1;
     if (expr_->column_.nested_path_.size() > 0) {
@@ -520,7 +520,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray() {
 
     auto execute_sub_batch = [op_type, arith_type](const ArrayView* data,
                                                    const int size,
-                                                   bool* res,
+                                                   TargetBitmapView res,
                                                    ValueType val,
                                                    ValueType right_operand,
                                                    int index) {
@@ -836,7 +836,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForIndex() {
                                  Index* index_ptr,
                                  HighPrecisionType value,
                                  HighPrecisionType right_operand) {
-        FixedVector<bool> res;
+        TargetBitmap res;
         switch (op_type) {
             case proto::plan::OpType::Equal: {
                 switch (arith_type) {
@@ -1208,15 +1208,15 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData() {
     auto right_operand =
         GetValueFromProto<HighPrecisionType>(expr_->right_operand_);
     auto res_vec =
-        std::make_shared<ColumnVector>(DataType::BOOL, real_batch_size);
-    bool* res = (bool*)res_vec->GetRawData();
+        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size));
+    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
 
     auto op_type = expr_->op_type_;
     auto arith_type = expr_->arith_op_type_;
     auto execute_sub_batch = [op_type, arith_type](
                                  const T* data,
                                  const int size,
-                                 bool* res,
+                                 TargetBitmapView res,
                                  HighPrecisionType value,
                                  HighPrecisionType right_operand) {
         switch (op_type) {

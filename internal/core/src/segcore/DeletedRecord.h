@@ -137,8 +137,9 @@ DeletedRecord::TmpBitmap::clone(int64_t capacity)
     -> std::shared_ptr<TmpBitmap> {
     auto res = std::make_shared<TmpBitmap>();
     res->del_barrier = this->del_barrier;
-    res->bitmap_ptr = std::make_shared<BitsetType>();
-    *(res->bitmap_ptr) = *(this->bitmap_ptr);
+    //    res->bitmap_ptr = std::make_shared<BitsetType>();
+    //    *(res->bitmap_ptr) = *(this->bitmap_ptr);
+    res->bitmap_ptr = std::make_shared<BitsetType>(this->bitmap_ptr->clone());
     res->bitmap_ptr->resize(capacity, false);
     return res;
 }

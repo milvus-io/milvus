@@ -267,11 +267,15 @@ SegmentInternalInterface::timestamp_filter(BitsetType& bitset,
 
     auto pilot = upper_bound(timestamps, 0, cnt, timestamp);
     // offset bigger than pilot should be filtered out.
-    for (int offset = pilot; offset < cnt; offset = bitset.find_next(offset)) {
-        if (offset == BitsetType::npos) {
+    auto offset = pilot;
+    while (offset < cnt) {
+        bitset[offset] = false;
+
+        const auto next_offset = bitset.find_next(offset);
+        if (!next_offset.has_value()) {
             return;
         }
-        bitset[offset] = false;
+        offset = next_offset.value();
     }
 }
 
