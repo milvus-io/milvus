@@ -30,7 +30,7 @@ queryNode:
       cpu: "0.5"
       memory: "500Mi"
     limits:
-      cpu: "4"
+      cpu: "5"
 indexCoordinator:
   resources:
     requests:
@@ -184,3 +184,9 @@ standalone:
       memory: "3.5Gi"
     limits:
       cpu: "4"
+
+extraConfigFiles:
+  user.yaml: |+
+    queryNode
+      scheduler
+        maxReadConcurrentRatio: 2
