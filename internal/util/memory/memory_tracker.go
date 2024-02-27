@@ -27,6 +27,7 @@ func NewGoMemoryTracker(name string, parent MemoryTracker) MemoryTracker {
 		limit:    -1,
 	}
 }
+
 func NewGoMemoryTrackerWithLimit(name string, parent MemoryTracker, limit int64, onExceed func(tracker MemoryTracker)) MemoryTracker {
 	return &GoMemoryTracker{
 		name:     name,
