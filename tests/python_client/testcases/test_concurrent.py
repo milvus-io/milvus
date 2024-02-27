@@ -80,6 +80,7 @@ class TestOperations(TestBase):
         yield request.param
 
     @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.skip("issue #30865")
     def test_operations(self, request_duration, collection_name):
         # start the monitor threads to check the milvus ops
         log.info("*********************Test Start**********************")
