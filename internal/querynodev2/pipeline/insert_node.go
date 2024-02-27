@@ -77,7 +77,7 @@ func (iNode *insertNode) addInsertData(insertDatas map[UniqueID]*delegator.Inser
 	iData.PrimaryKeys = append(iData.PrimaryKeys, pks...)
 	iData.RowIDs = append(iData.RowIDs, msg.RowIDs...)
 	iData.Timestamps = append(iData.Timestamps, msg.Timestamps...)
-	log.Info("pipeline fetch insert msg",
+	log.Debug("pipeline fetch insert msg",
 		zap.Int64("collectionID", iNode.collectionID),
 		zap.Int64("segmentID", msg.SegmentID),
 		zap.Int("insertRowNum", len(pks)),
