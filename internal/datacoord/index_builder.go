@@ -33,6 +33,7 @@ import (
 	itypeutil "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -332,6 +333,14 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 
 		fieldID := ib.meta.GetFieldIDByIndexID(meta.CollectionID, meta.IndexID)
 		binlogIDs := getBinLogIds(segment, fieldID)
+		if isDiskANNIndex(getIndexType(indexParams)) {
+			var err error
+			indexParams, err = indexparams.UpdateDiskIndexBuildParams(Params, indexParams)
+			if err != nil {
+				log.Ctx(ib.ctx).Warn("failed to append index build params", zap.Int64("buildID", buildID),
+					zap.Int64("nodeID", nodeID), zap.Error(err))
+			}
+		}
 		var req *indexpb.CreateJobRequest
 		if Params.CommonCfg.EnableStorageV2.GetAsBool() {
 			collectionInfo, err := ib.handler.GetCollection(ib.ctx, segment.GetCollectionID())

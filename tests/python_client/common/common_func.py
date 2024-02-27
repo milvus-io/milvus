@@ -19,7 +19,6 @@ from base.schema_wrapper import ApiCollectionSchemaWrapper, ApiFieldSchemaWrappe
 from common import common_type as ct
 from utils.util_log import test_log as log
 from customize.milvus_operator import MilvusOperator
-import tensorflow as tf
 fake = Faker()
 """" Methods of processing data """
 
@@ -1802,8 +1801,7 @@ def gen_bf16_vectors(num, dim):
     for _ in range(num):
         raw_vector = [random.random() for _ in range(dim)]
         raw_vectors.append(raw_vector)
-        # bf16_vector = np.array(raw_vector, dtype=tf.bfloat16).view(np.uint8).tolist()
-        bf16_vector = tf.cast(raw_vector, dtype=tf.bfloat16).numpy().view(np.uint8).tolist()
+        bf16_vector = np.array(jnp.array(raw_vector, dtype=jnp.bfloat16)).view(np.uint8).tolist()
         bf16_vectors.append(bytes(bf16_vector))
 
     return raw_vectors, bf16_vectors

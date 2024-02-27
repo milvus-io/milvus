@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"unsafe"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
@@ -164,11 +165,11 @@ func NewBigDataExtraParamsFromMap(value map[string]string) (*BigDataIndexExtraPa
 // FillDiskIndexParams fill ratio params to index param on proxy node
 // Which will be used to calculate build and load params
 func FillDiskIndexParams(params *paramtable.ComponentParam, indexParams map[string]string) error {
-	maxDegree := params.CommonCfg.MaxDegree.GetValue()
-	searchListSize := params.CommonCfg.SearchListSize.GetValue()
-	pqCodeBudgetGBRatio := params.CommonCfg.PQCodeBudgetGBRatio.GetValue()
-	buildNumThreadsRatio := params.CommonCfg.BuildNumThreadsRatio.GetValue()
-	searchCacheBudgetGBRatio := params.CommonCfg.SearchCacheBudgetGBRatio.GetValue()
+	var maxDegree string
+	var searchListSize string
+	var pqCodeBudgetGBRatio string
+	var buildNumThreadsRatio string
+	var searchCacheBudgetGBRatio string
 
 	if params.AutoIndexConfig.Enable.GetAsBool() {
 		indexParams := params.AutoIndexConfig.IndexParams.GetAsJSONMap()
@@ -187,6 +188,13 @@ func FillDiskIndexParams(params *paramtable.ComponentParam, indexParams map[stri
 		}
 		pqCodeBudgetGBRatio = fmt.Sprintf("%f", extraParams.PQCodeBudgetGBRatio)
 		buildNumThreadsRatio = fmt.Sprintf("%f", extraParams.BuildNumThreadsRatio)
+		searchCacheBudgetGBRatio = fmt.Sprintf("%f", extraParams.SearchCacheBudgetGBRatio)
+	} else {
+		maxDegree = params.CommonCfg.MaxDegree.GetValue()
+		searchListSize = params.CommonCfg.SearchListSize.GetValue()
+		pqCodeBudgetGBRatio = params.CommonCfg.PQCodeBudgetGBRatio.GetValue()
+		buildNumThreadsRatio = params.CommonCfg.BuildNumThreadsRatio.GetValue()
+		searchCacheBudgetGBRatio = params.CommonCfg.SearchCacheBudgetGBRatio.GetValue()
 	}
 
 	indexParams[MaxDegreeKey] = maxDegree
@@ -196,6 +204,63 @@ func FillDiskIndexParams(params *paramtable.ComponentParam, indexParams map[stri
 	indexParams[SearchCacheBudgetRatioKey] = searchCacheBudgetGBRatio
 
 	return nil
+}
+
+func GetIndexParams(indexParams []*commonpb.KeyValuePair, key string) string {
+	for _, param := range indexParams {
+		if param.Key == key {
+			return param.Value
+		}
+	}
+	return ""
+}
+
+// UpdateDiskIndexBuildParams update index params for `buildIndex` (override search cache size in `CreateIndex`)
+func UpdateDiskIndexBuildParams(params *paramtable.ComponentParam, indexParams []*commonpb.KeyValuePair) ([]*commonpb.KeyValuePair, error) {
+	existedVal := GetIndexParams(indexParams, SearchCacheBudgetRatioKey)
+
+	var searchCacheBudgetGBRatio string
+	if params.AutoIndexConfig.Enable.GetAsBool() {
+		extraParams, err := NewBigDataExtraParamsFromJSON(params.AutoIndexConfig.ExtraParams.GetValue())
+		if err != nil {
+			return indexParams, fmt.Errorf("index param search_cache_budget_gb_ratio not exist in AutoIndex Config")
+		}
+		searchCacheBudgetGBRatio = fmt.Sprintf("%f", extraParams.SearchCacheBudgetGBRatio)
+	} else {
+		paramVal, err := strconv.ParseFloat(params.CommonCfg.SearchCacheBudgetGBRatio.GetValue(), 64)
+		if err != nil {
+			return indexParams, fmt.Errorf("index param search_cache_budget_gb_ratio not exist in Config")
+		}
+		searchCacheBudgetGBRatio = fmt.Sprintf("%f", paramVal)
+	}
+
+	// append when not exist
+	if len(existedVal) == 0 {
+		indexParams = append(indexParams,
+			&commonpb.KeyValuePair{
+				Key:   SearchCacheBudgetRatioKey,
+				Value: searchCacheBudgetGBRatio,
+			})
+		return indexParams, nil
+	}
+	// override when exist
+	updatedParams := make([]*commonpb.KeyValuePair, 0, len(indexParams))
+	for _, param := range indexParams {
+		if param.Key == SearchCacheBudgetRatioKey {
+			updatedParams = append(updatedParams,
+				&commonpb.KeyValuePair{
+					Key:   SearchCacheBudgetRatioKey,
+					Value: searchCacheBudgetGBRatio,
+				})
+		} else {
+			updatedParams = append(updatedParams,
+				&commonpb.KeyValuePair{
+					Key:   param.Key,
+					Value: param.Value,
+				})
+		}
+	}
+	return updatedParams, nil
 }
 
 // SetDiskIndexBuildParams set index build params with ratio params on indexNode
