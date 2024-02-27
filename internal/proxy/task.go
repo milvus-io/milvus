@@ -867,11 +867,20 @@ func hasMmapProp(props ...*commonpb.KeyValuePair) bool {
 	return false
 }
 
+func hasLazyLoadProp(props ...*commonpb.KeyValuePair) bool {
+	for _, p := range props {
+		if p.GetKey() == common.LazyLoadEnableKey {
+			return true
+		}
+	}
+	return false
+}
+
 func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 	t.Base.MsgType = commonpb.MsgType_AlterCollection
 	t.Base.SourceID = paramtable.GetNodeID()
 
-	if hasMmapProp(t.Properties...) {
+	if hasMmapProp(t.Properties...) || hasLazyLoadProp(t.Properties...) {
 		loaded, err := isCollectionLoaded(ctx, t.queryCoord, t.CollectionID)
 		if err != nil {
 			return err
