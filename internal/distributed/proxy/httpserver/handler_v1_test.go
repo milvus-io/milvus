@@ -56,7 +56,7 @@ var DefaultShowCollectionsResp = milvuspb.ShowCollectionsResponse{
 
 var DefaultDescCollectionResp = milvuspb.DescribeCollectionResponse{
 	CollectionName: DefaultCollectionName,
-	Schema:         generateCollectionSchema(schemapb.DataType_Int64, false),
+	Schema:         generateCollectionSchema(schemapb.DataType_Int64),
 	ShardsNum:      ShardNumDefault,
 	Status:         &StatusSuccess,
 }
@@ -272,7 +272,7 @@ func TestVectorCollectionsDescribe(t *testing.T) {
 		name:         "get load status fail",
 		mp:           mp2,
 		exceptCode:   http.StatusOK,
-		expectedBody: "{\"code\":200,\"data\":{\"collectionName\":\"" + DefaultCollectionName + "\",\"description\":\"\",\"enableDynamicField\":true,\"fields\":[{\"autoId\":false,\"description\":\"\",\"name\":\"book_id\",\"primaryKey\":true,\"type\":\"Int64\"},{\"autoId\":false,\"description\":\"\",\"name\":\"word_count\",\"primaryKey\":false,\"type\":\"Int64\"},{\"autoId\":false,\"description\":\"\",\"name\":\"book_intro\",\"primaryKey\":false,\"type\":\"FloatVector(2)\"}],\"indexes\":[{\"fieldName\":\"book_intro\",\"indexName\":\"" + DefaultIndexName + "\",\"metricType\":\"L2\"}],\"load\":\"\",\"shardsNum\":1}}",
+		expectedBody: "{\"code\":200,\"data\":{\"collectionName\":\"" + DefaultCollectionName + "\",\"description\":\"\",\"enableDynamicField\":true,\"fields\":[{\"autoId\":false,\"description\":\"\",\"name\":\"book_id\",\"partitionKey\":false,\"primaryKey\":true,\"type\":\"Int64\"},{\"autoId\":false,\"description\":\"\",\"name\":\"word_count\",\"partitionKey\":false,\"primaryKey\":false,\"type\":\"Int64\"},{\"autoId\":false,\"description\":\"\",\"name\":\"book_intro\",\"partitionKey\":false,\"primaryKey\":false,\"type\":\"FloatVector(2)\"}],\"indexes\":[{\"fieldName\":\"book_intro\",\"indexName\":\"" + DefaultIndexName + "\",\"metricType\":\"L2\"}],\"load\":\"\",\"shardsNum\":1}}",
 	})
 
 	mp3 := mocks.NewMockProxy(t)
@@ -283,7 +283,7 @@ func TestVectorCollectionsDescribe(t *testing.T) {
 		name:         "get indexes fail",
 		mp:           mp3,
 		exceptCode:   http.StatusOK,
-		expectedBody: "{\"code\":200,\"data\":{\"collectionName\":\"" + DefaultCollectionName + "\",\"description\":\"\",\"enableDynamicField\":true,\"fields\":[{\"autoId\":false,\"description\":\"\",\"name\":\"book_id\",\"primaryKey\":true,\"type\":\"Int64\"},{\"autoId\":false,\"description\":\"\",\"name\":\"word_count\",\"primaryKey\":false,\"type\":\"Int64\"},{\"autoId\":false,\"description\":\"\",\"name\":\"book_intro\",\"primaryKey\":false,\"type\":\"FloatVector(2)\"}],\"indexes\":[],\"load\":\"LoadStateLoaded\",\"shardsNum\":1}}",
+		expectedBody: "{\"code\":200,\"data\":{\"collectionName\":\"" + DefaultCollectionName + "\",\"description\":\"\",\"enableDynamicField\":true,\"fields\":[{\"autoId\":false,\"description\":\"\",\"name\":\"book_id\",\"partitionKey\":false,\"primaryKey\":true,\"type\":\"Int64\"},{\"autoId\":false,\"description\":\"\",\"name\":\"word_count\",\"partitionKey\":false,\"primaryKey\":false,\"type\":\"Int64\"},{\"autoId\":false,\"description\":\"\",\"name\":\"book_intro\",\"partitionKey\":false,\"primaryKey\":false,\"type\":\"FloatVector(2)\"}],\"indexes\":[],\"load\":\"LoadStateLoaded\",\"shardsNum\":1}}",
 	})
 
 	mp4 := mocks.NewMockProxy(t)
@@ -294,7 +294,7 @@ func TestVectorCollectionsDescribe(t *testing.T) {
 		name:         "show collection details success",
 		mp:           mp4,
 		exceptCode:   http.StatusOK,
-		expectedBody: "{\"code\":200,\"data\":{\"collectionName\":\"" + DefaultCollectionName + "\",\"description\":\"\",\"enableDynamicField\":true,\"fields\":[{\"autoId\":false,\"description\":\"\",\"name\":\"book_id\",\"primaryKey\":true,\"type\":\"Int64\"},{\"autoId\":false,\"description\":\"\",\"name\":\"word_count\",\"primaryKey\":false,\"type\":\"Int64\"},{\"autoId\":false,\"description\":\"\",\"name\":\"book_intro\",\"primaryKey\":false,\"type\":\"FloatVector(2)\"}],\"indexes\":[{\"fieldName\":\"book_intro\",\"indexName\":\"" + DefaultIndexName + "\",\"metricType\":\"L2\"}],\"load\":\"LoadStateLoaded\",\"shardsNum\":1}}",
+		expectedBody: "{\"code\":200,\"data\":{\"collectionName\":\"" + DefaultCollectionName + "\",\"description\":\"\",\"enableDynamicField\":true,\"fields\":[{\"autoId\":false,\"description\":\"\",\"name\":\"book_id\",\"partitionKey\":false,\"primaryKey\":true,\"type\":\"Int64\"},{\"autoId\":false,\"description\":\"\",\"name\":\"word_count\",\"partitionKey\":false,\"primaryKey\":false,\"type\":\"Int64\"},{\"autoId\":false,\"description\":\"\",\"name\":\"book_intro\",\"partitionKey\":false,\"primaryKey\":false,\"type\":\"FloatVector(2)\"}],\"indexes\":[{\"fieldName\":\"book_intro\",\"indexName\":\"" + DefaultIndexName + "\",\"metricType\":\"L2\"}],\"load\":\"LoadStateLoaded\",\"shardsNum\":1}}",
 	})
 
 	for _, tt := range testCases {
@@ -762,10 +762,9 @@ func TestInsertForDataType(t *testing.T) {
 	paramtable.Init()
 	paramtable.Get().Save(proxy.Params.HTTPCfg.AcceptTypeAllowInt64.Key, "true")
 	schemas := map[string]*schemapb.CollectionSchema{
-		"[success]kinds of data type": newCollectionSchema(generateCollectionSchema(schemapb.DataType_Int64, false)),
-		"[success]use binary vector":  newCollectionSchema(generateCollectionSchema(schemapb.DataType_Int64, true)),
-		"[success]with dynamic field": withDynamicField(newCollectionSchema(generateCollectionSchema(schemapb.DataType_Int64, false))),
-		"[success]with array fields":  withArrayField(newCollectionSchema(generateCollectionSchema(schemapb.DataType_Int64, false))),
+		"[success]kinds of data type": newCollectionSchema(generateCollectionSchema(schemapb.DataType_Int64)),
+		"[success]with dynamic field": withDynamicField(newCollectionSchema(generateCollectionSchema(schemapb.DataType_Int64))),
+		"[success]with array fields":  withArrayField(newCollectionSchema(generateCollectionSchema(schemapb.DataType_Int64))),
 	}
 	for name, schema := range schemas {
 		t.Run(name, func(t *testing.T) {
@@ -836,7 +835,7 @@ func TestReturnInt64(t *testing.T) {
 	}
 	for _, dataType := range schemas {
 		t.Run("[insert]httpCfg.allow: false", func(t *testing.T) {
-			schema := newCollectionSchema(generateCollectionSchema(dataType, false))
+			schema := newCollectionSchema(generateCollectionSchema(dataType))
 			mp := mocks.NewMockProxy(t)
 			mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 				CollectionName: DefaultCollectionName,
@@ -867,7 +866,7 @@ func TestReturnInt64(t *testing.T) {
 
 	for _, dataType := range schemas {
 		t.Run("[upsert]httpCfg.allow: false", func(t *testing.T) {
-			schema := newCollectionSchema(generateCollectionSchema(dataType, false))
+			schema := newCollectionSchema(generateCollectionSchema(dataType))
 			mp := mocks.NewMockProxy(t)
 			mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 				CollectionName: DefaultCollectionName,
@@ -898,7 +897,7 @@ func TestReturnInt64(t *testing.T) {
 
 	for _, dataType := range schemas {
 		t.Run("[insert]httpCfg.allow: false, Accept-Type-Allow-Int64: true", func(t *testing.T) {
-			schema := newCollectionSchema(generateCollectionSchema(dataType, false))
+			schema := newCollectionSchema(generateCollectionSchema(dataType))
 			mp := mocks.NewMockProxy(t)
 			mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 				CollectionName: DefaultCollectionName,
@@ -930,7 +929,7 @@ func TestReturnInt64(t *testing.T) {
 
 	for _, dataType := range schemas {
 		t.Run("[upsert]httpCfg.allow: false, Accept-Type-Allow-Int64: true", func(t *testing.T) {
-			schema := newCollectionSchema(generateCollectionSchema(dataType, false))
+			schema := newCollectionSchema(generateCollectionSchema(dataType))
 			mp := mocks.NewMockProxy(t)
 			mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 				CollectionName: DefaultCollectionName,
@@ -963,7 +962,7 @@ func TestReturnInt64(t *testing.T) {
 	paramtable.Get().Save(proxy.Params.HTTPCfg.AcceptTypeAllowInt64.Key, "true")
 	for _, dataType := range schemas {
 		t.Run("[insert]httpCfg.allow: true", func(t *testing.T) {
-			schema := newCollectionSchema(generateCollectionSchema(dataType, false))
+			schema := newCollectionSchema(generateCollectionSchema(dataType))
 			mp := mocks.NewMockProxy(t)
 			mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 				CollectionName: DefaultCollectionName,
@@ -994,7 +993,7 @@ func TestReturnInt64(t *testing.T) {
 
 	for _, dataType := range schemas {
 		t.Run("[upsert]httpCfg.allow: true", func(t *testing.T) {
-			schema := newCollectionSchema(generateCollectionSchema(dataType, false))
+			schema := newCollectionSchema(generateCollectionSchema(dataType))
 			mp := mocks.NewMockProxy(t)
 			mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 				CollectionName: DefaultCollectionName,
@@ -1025,7 +1024,7 @@ func TestReturnInt64(t *testing.T) {
 
 	for _, dataType := range schemas {
 		t.Run("[insert]httpCfg.allow: true, Accept-Type-Allow-Int64: false", func(t *testing.T) {
-			schema := newCollectionSchema(generateCollectionSchema(dataType, false))
+			schema := newCollectionSchema(generateCollectionSchema(dataType))
 			mp := mocks.NewMockProxy(t)
 			mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 				CollectionName: DefaultCollectionName,
@@ -1057,7 +1056,7 @@ func TestReturnInt64(t *testing.T) {
 
 	for _, dataType := range schemas {
 		t.Run("[upsert]httpCfg.allow: true, Accept-Type-Allow-Int64: false", func(t *testing.T) {
-			schema := newCollectionSchema(generateCollectionSchema(dataType, false))
+			schema := newCollectionSchema(generateCollectionSchema(dataType))
 			mp := mocks.NewMockProxy(t)
 			mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 				CollectionName: DefaultCollectionName,
