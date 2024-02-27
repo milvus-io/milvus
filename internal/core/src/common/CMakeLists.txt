@@ -29,6 +29,7 @@ set(COMMON_SRC
 add_library(milvus_common SHARED ${COMMON_SRC})
 
 target_link_libraries(milvus_common
+        milvus_bitset
         milvus_config
         milvus_log
         milvus_proto

@@ -28,6 +28,64 @@
 namespace milvus {
 namespace exec {
 
+namespace {
+
+template <proto::plan::OpType cmp_op>
+struct CmpOpHelper {
+    using op = void;
+};
+template <>
+struct CmpOpHelper<proto::plan::OpType::Equal> {
+    static constexpr auto op = milvus::bitset::CompareOpType::EQ;
+};
+template <>
+struct CmpOpHelper<proto::plan::OpType::GreaterEqual> {
+    static constexpr auto op = milvus::bitset::CompareOpType::GE;
+};
+template <>
+struct CmpOpHelper<proto::plan::OpType::GreaterThan> {
+    static constexpr auto op = milvus::bitset::CompareOpType::GT;
+};
+template <>
+struct CmpOpHelper<proto::plan::OpType::LessEqual> {
+    static constexpr auto op = milvus::bitset::CompareOpType::LE;
+};
+template <>
+struct CmpOpHelper<proto::plan::OpType::LessThan> {
+    static constexpr auto op = milvus::bitset::CompareOpType::LT;
+};
+template <>
+struct CmpOpHelper<proto::plan::OpType::NotEqual> {
+    static constexpr auto op = milvus::bitset::CompareOpType::NE;
+};
+
+template <proto::plan::ArithOpType arith_op>
+struct ArithOpHelper {
+    using op = void;
+};
+template <>
+struct ArithOpHelper<proto::plan::ArithOpType::Add> {
+    static constexpr auto op = milvus::bitset::ArithOpType::Add;
+};
+template <>
+struct ArithOpHelper<proto::plan::ArithOpType::Sub> {
+    static constexpr auto op = milvus::bitset::ArithOpType::Sub;
+};
+template <>
+struct ArithOpHelper<proto::plan::ArithOpType::Mul> {
+    static constexpr auto op = milvus::bitset::ArithOpType::Mul;
+};
+template <>
+struct ArithOpHelper<proto::plan::ArithOpType::Div> {
+    static constexpr auto op = milvus::bitset::ArithOpType::Div;
+};
+template <>
+struct ArithOpHelper<proto::plan::ArithOpType::Mod> {
+    static constexpr auto op = milvus::bitset::ArithOpType::Mod;
+};
+
+}  // namespace
+
 template <typename T,
           proto::plan::OpType cmp_op,
           proto::plan::ArithOpType arith_op>
@@ -42,7 +100,9 @@ struct ArithOpElementFunc {
                size_t size,
                HighPrecisonType val,
                HighPrecisonType right_operand,
-               bool* res) {
+               TargetBitmapView res) {
+        /*
+        // This is the original code, kept here for the documentation purposes
         for (int i = 0; i < size; ++i) {
             if constexpr (cmp_op == proto::plan::OpType::Equal) {
                 if constexpr (arith_op == proto::plan::ArithOpType::Add) {
@@ -178,6 +238,30 @@ struct ArithOpElementFunc {
                 }
             }
         }
+        */
+
+        if constexpr (!std::is_same_v<decltype(CmpOpHelper<cmp_op>::op),
+                                      void>) {
+            constexpr auto cmp_op_cvt = CmpOpHelper<cmp_op>::op;
+            if constexpr (!std::is_same_v<decltype(ArithOpHelper<arith_op>::op),
+                                          void>) {
+                constexpr auto arith_op_cvt = ArithOpHelper<arith_op>::op;
+
+                res.inplace_arith_compare<T, arith_op_cvt, cmp_op_cvt>(
+                    src, right_operand, val, size);
+            } else {
+                PanicInfo(
+                    OpTypeInvalid,
+                    fmt::format(
+                        "unsupported arith type:{} for ArithOpElementFunc",
+                        arith_op));
+            }
+        } else {
+            PanicInfo(
+                OpTypeInvalid,
+                fmt::format("unsupported cmp type:{} for ArithOpElementFunc",
+                            cmp_op));
+        }
     }
 };
 
@@ -191,13 +275,12 @@ struct ArithOpIndexFunc {
                                T>
         HighPrecisonType;
     using Index = index::ScalarIndex<T>;
-    FixedVector<bool>
+    TargetBitmap
     operator()(Index* index,
                size_t size,
                HighPrecisonType val,
                HighPrecisonType right_operand) {
-        FixedVector<bool> res_vec(size);
-        bool* res = res_vec.data();
+        TargetBitmap res(size);
         for (size_t i = 0; i < size; ++i) {
             if constexpr (cmp_op == proto::plan::OpType::Equal) {
                 if constexpr (arith_op == proto::plan::ArithOpType::Add) {
@@ -339,7 +422,7 @@ struct ArithOpIndexFunc {
                 }
             }
         }
-        return res_vec;
+        return res;
     }
 };
 
