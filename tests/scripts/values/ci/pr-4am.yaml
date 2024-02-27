@@ -187,6 +187,6 @@ standalone:
 
 extraConfigFiles:
   user.yaml: |+
-    queryNode
-      scheduler
+    queryNode:
+      scheduler:
         maxReadConcurrentRatio: 2
