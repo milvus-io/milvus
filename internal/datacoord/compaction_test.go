@@ -82,6 +82,8 @@ func (s *CompactionPlanHandlerSuite) TestCheckResult() {
 		3: {A: 100, B: &datapb.CompactionPlanResult{PlanID: 3, State: commonpb.CompactionState_Executing}},
 		4: {A: 100, B: &datapb.CompactionPlanResult{PlanID: 4, State: commonpb.CompactionState_Executing}},
 	})
+
+	s.mockSessMgr.EXPECT().SyncSegments(int64(100), mock.Anything).Return(nil).Once()
 	{
 		s.mockAlloc.EXPECT().allocTimestamp(mock.Anything).Return(0, errors.New("mock")).Once()
 		handler := newCompactionPlanHandler(s.mockSessMgr, nil, nil, s.mockAlloc)

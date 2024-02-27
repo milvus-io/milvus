@@ -550,7 +550,7 @@ func (c *compactionPlanHandler) updateCompaction(ts Timestamp) error {
 	}
 	c.mu.Unlock()
 
-	// Compaction plans in DN but not in DC are unkonwn plans, need to notify DN to clear it.
+	// Compaction plans in DN but not in DC are unknown plans, need to notify DN to clear it.
 	// No locks needed, because no changes in DC memeory
 	completedPlans := lo.PickBy(planStates, func(planID int64, planState *typeutil.Pair[int64, *datapb.CompactionPlanResult]) bool {
 		return planState.B.GetState() == commonpb.CompactionState_Completed
