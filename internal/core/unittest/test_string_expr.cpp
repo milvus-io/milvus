@@ -662,8 +662,8 @@ TEST(AlwaysTrueStringPlan, SearchWithOutputFields) {
     MetricType metric_type = knowhere::metric::L2;
     query::dataset::SearchDataset search_dataset{
         metric_type,  //
-        num_queries,           //
-        topk,                  //
+        num_queries,  //
+        topk,         //
         round_decimal,
         dim,       //
         query_ptr  //
