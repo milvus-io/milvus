@@ -1106,6 +1106,19 @@ SegmentSealedImpl::bulk_subscript_impl(int64_t element_sizeof,
     }
 }
 
+void
+SegmentSealedImpl::ClearData() {
+    field_data_ready_bitset_.clear();
+    index_ready_bitset_.clear();
+    binlog_index_bitset_.clear();
+    system_ready_count_ = 0;
+    num_rows_ = 0;
+    scalar_indexings_.clear();
+    vector_indexings_.clear();
+    insert_record_.clear();
+    fields_.clear();
+}
+
 std::unique_ptr<DataArray>
 SegmentSealedImpl::fill_with_empty(FieldId field_id, int64_t count) const {
     auto& field_meta = schema_->operator[](field_id);

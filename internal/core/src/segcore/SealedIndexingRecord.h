@@ -62,6 +62,12 @@ struct SealedIndexingRecord {
         return field_indexings_.count(field_id);
     }
 
+    void
+    clear() {
+        std::unique_lock lck(mutex_);
+        field_indexings_.clear();
+    }
+
  private:
     // field_offset -> SealedIndexingEntry
     std::unordered_map<FieldId, SealedIndexingEntryPtr> field_indexings_;

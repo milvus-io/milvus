@@ -30,12 +30,14 @@ import (
 	"sync"
 
 	"go.uber.org/zap"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/eventlog"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/cache"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	. "github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -109,12 +111,47 @@ const (
 type Manager struct {
 	Collection CollectionManager
 	Segment    SegmentManager
+	DiskCache  cache.Cache[int64, Segment]
 }
 
 func NewManager() *Manager {
+	diskCap := paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsInt64()
+	segmentMaxSIze := paramtable.Get().DataCoordCfg.SegmentMaxSize.GetAsInt64()
+	cacheMaxItemNum := diskCap / segmentMaxSIze
+
+	segMgr := NewSegmentManager()
+	sf := singleflight.Group{}
 	return &Manager{
 		Collection: NewCollectionManager(),
-		Segment:    NewSegmentManager(),
+		Segment:    segMgr,
+		DiskCache: cache.NewLRUCache[int64, Segment](
+			int32(cacheMaxItemNum),
+			func(key int64) (Segment, bool) {
+				log.Debug("cache missed segment", zap.Int64("segmentID", key))
+				segMgr.mu.RLock()
+				defer segMgr.mu.RUnlock()
+
+				segment, ok := segMgr.sealedSegments[key]
+				if !ok {
+					// the segment has been released, just ignore it
+					return nil, false
+				}
+
+				info := segment.LoadInfo()
+				_, err, _ := sf.Do(fmt.Sprint(segment.ID()), func() (interface{}, error) {
+					err := loadSealedSegmentFields(context.Background(), segment.(*LocalSegment), info.BinlogPaths, info.GetNumOfRows(), WithLoadStatus(LoadStatusMapped))
+					return nil, err
+				})
+				if err != nil {
+					log.Warn("cache sealed segment failed", zap.Error(err))
+					return nil, false
+				}
+				return segment, true
+			},
+			func(key int64, segment Segment) {
+				log.Debug("evict segment from cache", zap.Int64("segmentID", key))
+				segment.Release(WithReleaseScope(ReleaseScopeData))
+			}),
 	}
 }
 
@@ -155,10 +192,11 @@ type segmentManager struct {
 }
 
 func NewSegmentManager() *segmentManager {
-	return &segmentManager{
+	mgr := &segmentManager{
 		growingSegments: make(map[int64]Segment),
 		sealedSegments:  make(map[int64]Segment),
 	}
+	return mgr
 }
 
 func (mgr *segmentManager) Put(segmentType SegmentType, segments ...Segment) {
@@ -366,6 +404,7 @@ func (mgr *segmentManager) GetAndPin(segments []int64, filters ...SegmentFilter)
 			return nil, err
 		}
 	}
+
 	return lockedSegments, nil
 }
 

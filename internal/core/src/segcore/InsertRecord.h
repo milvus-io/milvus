@@ -64,6 +64,9 @@ class OffsetMap {
     find_first(int64_t limit,
                const BitsetType& bitset,
                bool false_filtered_out) const = 0;
+
+    virtual void
+    clear() = 0;
 };
 
 template <typename T>
@@ -119,6 +122,12 @@ class OffsetOrderedMap : public OffsetMap {
         // TODO: we can't retrieve pk by offset very conveniently.
         //      Selectivity should be done outside.
         return find_first_by_index(limit, bitset, false_filtered_out);
+    }
+
+    void
+    clear() override {
+        std::unique_lock<std::shared_mutex> lck(mtx_);
+        map_.clear();
     }
 
  private:
@@ -232,6 +241,11 @@ class OffsetOrderedArray : public OffsetMap {
         return find_first_by_index(limit, bitset, false_filtered_out);
     }
 
+    void
+    clear() override {
+        array_.clear();
+    }
+
  private:
     std::vector<OffsetType>
     find_first_by_index(int64_t limit,
@@ -275,19 +289,6 @@ class OffsetOrderedArray : public OffsetMap {
 
 template <bool is_sealed = false>
 struct InsertRecord {
-    ConcurrentVector<Timestamp> timestamps_;
-    ConcurrentVector<idx_t> row_ids_;
-
-    // used for preInsert of growing segment
-    std::atomic<int64_t> reserved = 0;
-    AckResponder ack_responder_;
-
-    // used for timestamps index of sealed segment
-    TimestampIndex timestamp_index_;
-
-    // pks to row offset
-    std::unique_ptr<OffsetMap> pk2offset_;
-
     InsertRecord(const Schema& schema, int64_t size_per_chunk)
         : row_ids_(size_per_chunk), timestamps_(size_per_chunk) {
         std::optional<FieldId> pk_field_id = schema.get_primary_field_id();
@@ -580,6 +581,31 @@ struct InsertRecord {
     size() const {
         return ack_responder_.GetAck();
     }
+
+    void
+    clear() {
+        timestamps_.clear();
+        row_ids_.clear();
+        reserved = 0;
+        ack_responder_.clear();
+        timestamp_index_ = TimestampIndex();
+        pk2offset_->clear();
+        fields_data_.clear();
+    }
+
+ public:
+    ConcurrentVector<Timestamp> timestamps_;
+    ConcurrentVector<idx_t> row_ids_;
+
+    // used for preInsert of growing segment
+    std::atomic<int64_t> reserved = 0;
+    AckResponder ack_responder_;
+
+    // used for timestamps index of sealed segment
+    TimestampIndex timestamp_index_;
+
+    // pks to row offset
+    std::unique_ptr<OffsetMap> pk2offset_;
 
  private:
     //    std::vector<std::unique_ptr<VectorBase>> fields_data_;

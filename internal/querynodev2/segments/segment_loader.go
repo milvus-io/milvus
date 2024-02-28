@@ -384,7 +384,7 @@ func (loader *segmentLoaderV2) loadSegment(ctx context.Context,
 
 	if segment.Type() == SegmentTypeSealed {
 		fieldsMap := typeutil.NewConcurrentMap[int64, *schemapb.FieldSchema]()
-		for _, field := range collection.Schema().Fields {
+		for _, field := range collection.Schema().GetFields() {
 			fieldsMap.Insert(field.FieldID, field)
 		}
 		// fieldID2IndexInfo := make(map[int64]*querypb.FieldIndexInfo)
@@ -406,6 +406,7 @@ func (loader *segmentLoaderV2) loadSegment(ctx context.Context,
 		}
 
 		log.Info("load fields...",
+			zap.Int("fieldNum", fieldsMap.Len()),
 			zap.Int64s("indexedFields", lo.Keys(indexedFieldInfos)),
 		)
 
@@ -416,13 +417,6 @@ func (loader *segmentLoaderV2) loadSegment(ctx context.Context,
 		if err := loader.loadFieldsIndex(ctx, schemaHelper, segment, loadInfo.GetNumOfRows(), indexedFieldInfos); err != nil {
 			return err
 		}
-
-		// REMOVEME
-		keys := make([]int64, 0)
-		fieldsMap.Range(func(key int64, value *schemapb.FieldSchema) bool {
-			keys = append(keys, key)
-			return true
-		})
 
 		if err := loader.loadSealedSegmentFields(ctx, segment, fieldsMap, loadInfo.GetNumOfRows()); err != nil {
 			return err
@@ -454,9 +448,9 @@ func (loader *segmentLoaderV2) loadSegment(ctx context.Context,
 
 func (loader *segmentLoaderV2) loadSealedSegmentFields(ctx context.Context, segment *LocalSegment, fields *typeutil.ConcurrentMap[int64, *schemapb.FieldSchema], rowCount int64) error {
 	runningGroup, _ := errgroup.WithContext(ctx)
-	fields.Range(func(fieldID int64, fieldSchema *schemapb.FieldSchema) bool {
+	fields.Range(func(fieldID int64, field *schemapb.FieldSchema) bool {
 		runningGroup.Go(func() error {
-			return segment.LoadFieldData(ctx, fieldID, rowCount, nil, common.IsMmapEnabled(fieldSchema.GetTypeParams()...))
+			return segment.LoadFieldData(ctx, fieldID, rowCount, nil)
 		})
 		return true
 	})
@@ -937,6 +931,11 @@ func (loader *segmentLoader) loadSegment(ctx context.Context,
 	defer debug.FreeOSMemory()
 
 	if segment.Type() == SegmentTypeSealed {
+		loadStatus := LoadStatusInMemory
+		if loadInfo.GetLazyLoad() {
+			loadStatus = LoadStatusMeta
+		}
+
 		fieldID2IndexInfo := make(map[int64]*querypb.FieldIndexInfo)
 		for _, indexInfo := range loadInfo.IndexInfos {
 			if len(indexInfo.GetIndexFilePaths()) > 0 {
@@ -980,14 +979,18 @@ func (loader *segmentLoader) loadSegment(ctx context.Context,
 				return err
 			}
 			if !typeutil.IsVectorType(field.GetDataType()) && !segment.HasRawData(fieldID) {
-				log.Info("field index doesn't include raw data, load binlog...", zap.Int64("fieldID", fieldID), zap.String("index", info.IndexInfo.GetIndexName()))
-				if err = segment.LoadFieldData(ctx, fieldID, loadInfo.GetNumOfRows(), info.FieldBinlog, true); err != nil {
+				log.Info("field index doesn't include raw data, load binlog...",
+					zap.Int64("fieldID", fieldID),
+					zap.String("index", info.IndexInfo.GetIndexName()),
+				)
+
+				if err = segment.LoadFieldData(ctx, fieldID, loadInfo.GetNumOfRows(), info.FieldBinlog); err != nil {
 					log.Warn("load raw data failed", zap.Int64("fieldID", fieldID), zap.Error(err))
 					return err
 				}
 			}
 		}
-		if err := loader.loadSealedSegmentFields(ctx, segment, fieldBinlogs, loadInfo.GetNumOfRows()); err != nil {
+		if err := loadSealedSegmentFields(ctx, segment, fieldBinlogs, loadInfo.GetNumOfRows(), WithLoadStatus(loadStatus)); err != nil {
 			return err
 		}
 		// https://github.com/milvus-io/milvus/23654
@@ -1043,12 +1046,7 @@ func (loader *segmentLoader) filterPKStatsBinlogs(fieldBinlogs []*datapb.FieldBi
 	return result, storage.DefaultStatsType
 }
 
-func (loader *segmentLoader) loadSealedSegmentFields(ctx context.Context, segment *LocalSegment, fields []*datapb.FieldBinlog, rowCount int64) error {
-	collection := loader.manager.Collection.Get(segment.Collection())
-	if collection == nil {
-		return merr.WrapErrCollectionNotLoaded(segment.Collection(), "failed to load segment fields")
-	}
-
+func loadSealedSegmentFields(ctx context.Context, segment *LocalSegment, fields []*datapb.FieldBinlog, rowCount int64, opts ...loadOption) error {
 	runningGroup, _ := errgroup.WithContext(ctx)
 	for _, field := range fields {
 		fieldBinLog := field
@@ -1058,7 +1056,7 @@ func (loader *segmentLoader) loadSealedSegmentFields(ctx context.Context, segmen
 				fieldID,
 				rowCount,
 				fieldBinLog,
-				common.IsFieldMmapEnabled(collection.Schema(), fieldID),
+				opts...,
 			)
 		})
 	}
