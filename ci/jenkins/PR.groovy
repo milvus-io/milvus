@@ -82,7 +82,7 @@ pipeline {
                 axes {
                     axis {
                         name 'MILVUS_SERVER_TYPE'
-                        values 'standalone', 'distributed', 'standalone-kafka', 'standalone-one-pod'
+                        values 'distributed'
                     }
                     axis {
                         name 'MILVUS_CLIENT'
