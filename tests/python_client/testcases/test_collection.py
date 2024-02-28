@@ -3315,6 +3315,7 @@ class TestReleaseAdvanced(TestcaseBase):
                                          "err_msg": "collection not loaded"})
 
     @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.xfail(reason="issue #30876")
     def test_release_indexed_collection_during_searching(self):
         """
         target: test release indexed collection during searching
