@@ -245,6 +245,10 @@ type SegmentManager interface {
 	Remove(segmentID typeutil.UniqueID, scope querypb.DataScope) (int, int)
 	RemoveBy(filters ...SegmentFilter) (int, int)
 	Clear()
+
+	// Deprecated: quick fix critical issue: #30857
+	// TODO: All Segment assigned to querynode should be managed by SegmentManager, including loading or releasing to perform a transaction.
+	Exist(segmentID typeutil.UniqueID, typ SegmentType) bool
 }
 
 var _ SegmentManager = (*segmentManager)(nil)
@@ -255,14 +259,18 @@ type segmentManager struct {
 
 	growingSegments map[typeutil.UniqueID]Segment
 	sealedSegments  map[typeutil.UniqueID]Segment
+
+	growingOnReleasingSegments map[typeutil.UniqueID]int
+	sealedOnReleasingSegments  map[typeutil.UniqueID]int
 }
 
 func NewSegmentManager() *segmentManager {
-	mgr := &segmentManager{
-		growingSegments: make(map[int64]Segment),
-		sealedSegments:  make(map[int64]Segment),
+	return &segmentManager{
+		growingSegments:            make(map[int64]Segment),
+		sealedSegments:             make(map[int64]Segment),
+		growingOnReleasingSegments: make(map[int64]int),
+		sealedOnReleasingSegments:  make(map[int64]int),
 	}
-	return mgr
 }
 
 func (mgr *segmentManager) Put(segmentType SegmentType, segments ...Segment) {
@@ -313,7 +321,7 @@ func (mgr *segmentManager) Put(segmentType SegmentType, segments ...Segment) {
 	if len(replacedSegment) > 0 {
 		go func() {
 			for _, segment := range replacedSegment {
-				remove(segment)
+				mgr.release(segment)
 			}
 		}()
 	}
@@ -331,6 +339,29 @@ func (mgr *segmentManager) UpdateBy(action SegmentAction, filters ...SegmentFilt
 		return true
 	}, filters...)
 	return updated
+}
+
+// Deprecated:
+// TODO: All Segment assigned to querynode should be managed by SegmentManager, including loading or releasing to perform a transaction.
+func (mgr *segmentManager) Exist(segmentID typeutil.UniqueID, typ SegmentType) bool {
+	mgr.mu.RLock()
+	defer mgr.mu.RUnlock()
+	switch typ {
+	case SegmentTypeGrowing:
+		if _, ok := mgr.growingSegments[segmentID]; ok {
+			return true
+		} else if cnt, ok := mgr.growingOnReleasingSegments[segmentID]; ok && cnt > 0 {
+			return true
+		}
+	case SegmentTypeSealed:
+		if _, ok := mgr.sealedSegments[segmentID]; ok {
+			return true
+		} else if cnt, ok := mgr.sealedOnReleasingSegments[segmentID]; ok && cnt > 0 {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (mgr *segmentManager) Get(segmentID typeutil.UniqueID) Segment {
@@ -596,11 +627,11 @@ func (mgr *segmentManager) Remove(segmentID typeutil.UniqueID, scope querypb.Dat
 	mgr.mu.Unlock()
 
 	if growing != nil {
-		remove(growing)
+		mgr.release(growing)
 	}
 
 	if sealed != nil {
-		remove(sealed)
+		mgr.release(sealed)
 	}
 
 	return removeGrowing, removeSealed
@@ -612,6 +643,7 @@ func (mgr *segmentManager) removeSegmentWithType(typ SegmentType, segmentID type
 		s, ok := mgr.growingSegments[segmentID]
 		if ok {
 			delete(mgr.growingSegments, segmentID)
+			mgr.growingOnReleasingSegments[segmentID] += 1
 			return s
 		}
 
@@ -619,6 +651,7 @@ func (mgr *segmentManager) removeSegmentWithType(typ SegmentType, segmentID type
 		s, ok := mgr.sealedSegments[segmentID]
 		if ok {
 			delete(mgr.sealedSegments, segmentID)
+			mgr.sealedOnReleasingSegments[segmentID] += 1
 			return s
 		}
 	default:
@@ -651,26 +684,35 @@ func (mgr *segmentManager) RemoveBy(filters ...SegmentFilter) (int, int) {
 	mgr.mu.Unlock()
 
 	for _, s := range removeSegments {
-		remove(s)
+		mgr.release(s)
 	}
-
 	return removeGrowing, removeSealed
 }
 
 func (mgr *segmentManager) Clear() {
 	mgr.mu.Lock()
-	defer mgr.mu.Unlock()
 
-	for id, segment := range mgr.growingSegments {
-		delete(mgr.growingSegments, id)
-		remove(segment)
+	for id := range mgr.growingSegments {
+		mgr.growingOnReleasingSegments[id] += 1
 	}
+	growingWaitForRelease := mgr.growingSegments
+	mgr.growingSegments = make(map[int64]Segment)
 
-	for id, segment := range mgr.sealedSegments {
-		delete(mgr.sealedSegments, id)
-		remove(segment)
+	for id := range mgr.sealedSegments {
+		mgr.sealedOnReleasingSegments[id] += 1
 	}
+	sealedWaitForRelease := mgr.sealedSegments
+	mgr.sealedSegments = make(map[int64]Segment)
 	mgr.updateMetric()
+
+	mgr.mu.Unlock()
+
+	for _, segment := range growingWaitForRelease {
+		mgr.release(segment)
+	}
+	for _, segment := range sealedWaitForRelease {
+		mgr.release(segment)
+	}
 }
 
 func (mgr *segmentManager) updateMetric() {
@@ -688,7 +730,7 @@ func (mgr *segmentManager) updateMetric() {
 	metrics.QueryNodeNumPartitions.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(float64(partiations.Len()))
 }
 
-func remove(segment Segment) bool {
+func (mgr *segmentManager) release(segment Segment) {
 	segment.Release()
 
 	metrics.QueryNodeNumSegments.WithLabelValues(
@@ -700,5 +742,19 @@ func remove(segment Segment) bool {
 		segment.Level().String(),
 	).Dec()
 
-	return true
+	mgr.mu.Lock()
+	defer mgr.mu.Unlock()
+
+	switch segment.Type() {
+	case SegmentTypeGrowing:
+		mgr.growingOnReleasingSegments[segment.ID()] -= 1
+		if mgr.growingOnReleasingSegments[segment.ID()] == 0 {
+			delete(mgr.growingOnReleasingSegments, segment.ID())
+		}
+	case SegmentTypeSealed:
+		mgr.sealedOnReleasingSegments[segment.ID()] -= 1
+		if mgr.sealedOnReleasingSegments[segment.ID()] == 0 {
+			delete(mgr.sealedOnReleasingSegments, segment.ID())
+		}
+	}
 }
