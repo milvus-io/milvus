@@ -209,7 +209,6 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		log.Warn("Search organizeSubTask failed", zap.Error(err))
 		return nil, err
 	}
-
 	results, err := executeSubTasks(ctx, tasks, func(ctx context.Context, req *querypb.SearchRequest, worker cluster.Worker) (*internalpb.SearchResults, error) {
 		return worker.SearchSegments(ctx, req)
 	}, "Search", log)
