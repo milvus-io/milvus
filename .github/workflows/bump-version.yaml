@@ -29,7 +29,6 @@ jobs:
           sed -i "s/milvusdb\/milvus:${{ inputs.oldImageTag }}/milvusdb\/milvus:${{ inputs.imageTag }}/g" deployments/binary/README.md
           sed -i "s/milvusdb\/milvus:${{ inputs.oldImageTag }}/milvusdb\/milvus:${{ inputs.imageTag }}/g" deployments/docker/gpu/standalone/docker-compose.yml
           sed -i "s/milvusdb\/milvus:${{ inputs.oldImageTag }}/milvusdb\/milvus:${{ inputs.imageTag }}/g" deployments/docker/cluster-distributed-deployment/inventory.ini
-          sed -i "s/milvusdb\/milvus:${{ inputs.oldImageTag }}/milvusdb\/milvus:${{ inputs.imageTag }}/g" scripts/standalone_embed.sh
           git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           git add deployments
