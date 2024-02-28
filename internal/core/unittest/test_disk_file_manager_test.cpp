@@ -19,7 +19,6 @@
 #include <gtest/gtest.h>
 #include <cstdint>
 #include <memory>
-#include <memory_resource>
 #include <string>
 #include <fstream>
 #include <vector>
