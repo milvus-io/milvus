@@ -558,9 +558,9 @@ func (s *CompactionPlanHandlerSuite) TestUpdateCompaction() {
 	s.Equal(failed, task.state)
 }
 
-func getFieldBinlogIDs(id int64, logIDs ...int64) *datapb.FieldBinlog {
+func getFieldBinlogIDs(fieldID int64, logIDs ...int64) *datapb.FieldBinlog {
 	l := &datapb.FieldBinlog{
-		FieldID: id,
+		FieldID: fieldID,
 		Binlogs: make([]*datapb.Binlog, 0, len(logIDs)),
 	}
 	for _, id := range logIDs {
@@ -569,9 +569,9 @@ func getFieldBinlogIDs(id int64, logIDs ...int64) *datapb.FieldBinlog {
 	return l
 }
 
-func getFieldBinlogPaths(id int64, paths ...string) *datapb.FieldBinlog {
+func getFieldBinlogPaths(fieldID int64, paths ...string) *datapb.FieldBinlog {
 	l := &datapb.FieldBinlog{
-		FieldID: id,
+		FieldID: fieldID,
 		Binlogs: make([]*datapb.Binlog, 0, len(paths)),
 	}
 	for _, path := range paths {
@@ -580,9 +580,9 @@ func getFieldBinlogPaths(id int64, paths ...string) *datapb.FieldBinlog {
 	return l
 }
 
-func getFieldBinlogIDsWithEntry(id int64, entry int64, logIDs ...int64) *datapb.FieldBinlog {
+func getFieldBinlogIDsWithEntry(fieldID int64, entry int64, logIDs ...int64) *datapb.FieldBinlog {
 	l := &datapb.FieldBinlog{
-		FieldID: id,
+		FieldID: fieldID,
 		Binlogs: make([]*datapb.Binlog, 0, len(logIDs)),
 	}
 	for _, id := range logIDs {
