@@ -11,18 +11,19 @@
 
 #include <gtest/gtest.h>
 #include "common/Schema.h"
-#include "segcore/SegmentSealedImpl.h"
-#include "test_utils/DataGen.h"
 #include "query/Plan.h"
-#include "segcore/segment_c.h"
+#include "segcore/SegmentSealedImpl.h"
 #include "segcore/reduce_c.h"
-#include "test_utils/c_api_test_utils.h"
 #include "segcore/plan_c.h"
+#include "segcore/segment_c.h"
+#include "test_utils/DataGen.h"
+#include "test_utils/c_api_test_utils.h"
 
 using namespace milvus;
-using namespace milvus::segcore;
 using namespace milvus::query;
+using namespace milvus::segcore;
 using namespace milvus::storage;
+using namespace milvus::tracer;
 
 const char* METRICS_TYPE = "metric_type";
 
@@ -604,10 +605,10 @@ TEST(GroupBY, Reduce) {
     CSearchResult c_search_res_1;
     CSearchResult c_search_res_2;
     auto status =
-        Search(c_segment_1, c_plan, c_ph_group, {}, 1L << 63, &c_search_res_1);
+        Search({}, c_segment_1, c_plan, c_ph_group, 1L << 63, &c_search_res_1);
     ASSERT_EQ(status.error_code, Success);
     status =
-        Search(c_segment_2, c_plan, c_ph_group, {}, 1L << 63, &c_search_res_2);
+        Search({}, c_segment_2, c_plan, c_ph_group, 1L << 63, &c_search_res_2);
     ASSERT_EQ(status.error_code, Success);
     std::vector<CSearchResult> results;
     results.push_back(c_search_res_1);

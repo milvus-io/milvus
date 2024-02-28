@@ -14,8 +14,9 @@
 #include <memory>
 #include <string>
 
-#include "opentelemetry/sdk/version/version.h"
 #include "opentelemetry/trace/provider.h"
+
+#define TRACE_SERVICE_SEGCORE "segcore"
 
 namespace milvus::tracer {
 
@@ -30,14 +31,14 @@ struct TraceConfig {
 };
 
 struct TraceContext {
-    const uint8_t* traceID;
-    const uint8_t* spanID;
-    uint8_t flag;
+    const uint8_t* traceID = nullptr;
+    const uint8_t* spanID = nullptr;
+    uint8_t traceFlags = 0;
 };
 namespace trace = opentelemetry::trace;
 
 void
-initTelementry(TraceConfig* config);
+initTelemetry(const TraceConfig& cfg);
 
 std::shared_ptr<trace::Tracer>
 GetTracer();
@@ -52,9 +53,18 @@ void
 CloseRootSpan();
 
 void
-AddEvent(std::string event_label);
+AddEvent(const std::string& event_label);
 
 bool
-isEmptyID(const uint8_t* id, const int length);
+EmptyTraceID(const TraceContext* ctx);
+
+bool
+EmptySpanID(const TraceContext* ctx);
+
+std::string
+GetTraceIDAsStr(const TraceContext* ctx);
+
+std::string
+GetSpanIDAsStr(const TraceContext* ctx);
 
 }  // namespace milvus::tracer

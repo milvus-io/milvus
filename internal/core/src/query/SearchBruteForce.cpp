@@ -12,17 +12,18 @@
 #include <string>
 #include <vector>
 
+#include "SearchBruteForce.h"
+#include "SubSearchResult.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/RangeSearchHelper.h"
 #include "common/Utils.h"
 #include "common/Tracer.h"
-#include "SearchBruteForce.h"
-#include "SubSearchResult.h"
 #include "knowhere/comp/brute_force.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/index_node.h"
 #include "log/Log.h"
+
 namespace milvus::query {
 
 void
@@ -41,11 +42,32 @@ CheckBruteForceSearchParam(const FieldMeta& field,
                "[BruteForceSearch] Data type and metric type miss-match");
 }
 
+knowhere::Json
+PrepareBFSearchParams(const SearchInfo& search_info) {
+    knowhere::Json search_cfg = search_info.search_params_;
+
+    search_cfg[knowhere::meta::METRIC_TYPE] = search_info.metric_type_;
+    search_cfg[knowhere::meta::TOPK] = search_info.topk_;
+
+    // save trace context into search conf
+    if (search_info.trace_ctx_.traceID != nullptr &&
+        search_info.trace_ctx_.spanID != nullptr) {
+        search_cfg[knowhere::meta::TRACE_ID] =
+            tracer::GetTraceIDAsStr(&search_info.trace_ctx_);
+        search_cfg[knowhere::meta::SPAN_ID] =
+            tracer::GetSpanIDAsStr(&search_info.trace_ctx_);
+        search_cfg[knowhere::meta::TRACE_FLAGS] =
+            search_info.trace_ctx_.traceFlags;
+    }
+
+    return search_cfg;
+}
+
 SubSearchResult
 BruteForceSearch(const dataset::SearchDataset& dataset,
                  const void* chunk_data_raw,
                  int64_t chunk_rows,
-                 const knowhere::Json& conf,
+                 const SearchInfo& search_info,
                  const BitsetView& bitset,
                  DataType data_type) {
     SubSearchResult sub_result(dataset.num_queries,
@@ -58,40 +80,35 @@ BruteForceSearch(const dataset::SearchDataset& dataset,
 
     auto base_dataset = knowhere::GenDataSet(chunk_rows, dim, chunk_data_raw);
     auto query_dataset = knowhere::GenDataSet(nq, dim, dataset.query_data);
-    auto config = knowhere::Json{
-        {knowhere::meta::METRIC_TYPE, dataset.metric_type},
-        {knowhere::meta::DIM, dim},
-        {knowhere::meta::TOPK, topk},
-    };
+    auto search_cfg = PrepareBFSearchParams(search_info);
 
     sub_result.mutable_seg_offsets().resize(nq * topk);
     sub_result.mutable_distances().resize(nq * topk);
 
-    if (conf.contains(RADIUS)) {
-        config[RADIUS] = conf[RADIUS].get<float>();
-        if (conf.contains(RANGE_FILTER)) {
-            config[RANGE_FILTER] = conf[RANGE_FILTER].get<float>();
-            CheckRangeSearchParam(
-                config[RADIUS], config[RANGE_FILTER], dataset.metric_type);
+    if (search_cfg.contains(RADIUS)) {
+        if (search_cfg.contains(RANGE_FILTER)) {
+            CheckRangeSearchParam(search_cfg[RADIUS],
+                                  search_cfg[RANGE_FILTER],
+                                  search_info.metric_type_);
         }
         knowhere::expected<knowhere::DataSetPtr> res;
         if (data_type == DataType::VECTOR_FLOAT) {
             res = knowhere::BruteForce::RangeSearch<float>(
-                base_dataset, query_dataset, config, bitset);
+                base_dataset, query_dataset, search_cfg, bitset);
         } else if (data_type == DataType::VECTOR_FLOAT16) {
             res = knowhere::BruteForce::RangeSearch<float16>(
-                base_dataset, query_dataset, config, bitset);
+                base_dataset, query_dataset, search_cfg, bitset);
         } else if (data_type == DataType::VECTOR_BFLOAT16) {
             res = knowhere::BruteForce::RangeSearch<bfloat16>(
-                base_dataset, query_dataset, config, bitset);
+                base_dataset, query_dataset, search_cfg, bitset);
         } else if (data_type == DataType::VECTOR_BINARY) {
             res = knowhere::BruteForce::RangeSearch<uint8_t>(
-                base_dataset, query_dataset, config, bitset);
+                base_dataset, query_dataset, search_cfg, bitset);
         }
         milvus::tracer::AddEvent("knowhere_finish_BruteForce_RangeSearch");
         if (!res.has_value()) {
             PanicInfo(KnowhereError,
-                      "failed to range search: {}: {}",
+                      "Brute force range search fail: {}, {}",
                       KnowhereStatusString(res.error()),
                       res.what());
         }
@@ -110,7 +127,7 @@ BruteForceSearch(const dataset::SearchDataset& dataset,
                 query_dataset,
                 sub_result.mutable_seg_offsets().data(),
                 sub_result.mutable_distances().data(),
-                config,
+                search_cfg,
                 bitset);
         } else if (data_type == DataType::VECTOR_FLOAT16) {
             stat = knowhere::BruteForce::SearchWithBuf<float16>(
@@ -118,7 +135,7 @@ BruteForceSearch(const dataset::SearchDataset& dataset,
                 query_dataset,
                 sub_result.mutable_seg_offsets().data(),
                 sub_result.mutable_distances().data(),
-                config,
+                search_cfg,
                 bitset);
         } else if (data_type == DataType::VECTOR_BFLOAT16) {
             stat = knowhere::BruteForce::SearchWithBuf<bfloat16>(
@@ -126,7 +143,7 @@ BruteForceSearch(const dataset::SearchDataset& dataset,
                 query_dataset,
                 sub_result.mutable_seg_offsets().data(),
                 sub_result.mutable_distances().data(),
-                config,
+                search_cfg,
                 bitset);
         } else if (data_type == DataType::VECTOR_BINARY) {
             stat = knowhere::BruteForce::SearchWithBuf<uint8_t>(
@@ -134,14 +151,14 @@ BruteForceSearch(const dataset::SearchDataset& dataset,
                 query_dataset,
                 sub_result.mutable_seg_offsets().data(),
                 sub_result.mutable_distances().data(),
-                config,
+                search_cfg,
                 bitset);
         }
         milvus::tracer::AddEvent("knowhere_finish_BruteForce_SearchWithBuf");
         if (stat != knowhere::Status::success) {
             throw SegcoreError(
                 KnowhereError,
-                "invalid metric type, " + KnowhereStatusString(stat));
+                "Brute force search fail: " + KnowhereStatusString(stat));
         }
     }
     sub_result.round_values();
@@ -152,13 +169,14 @@ SubSearchResult
 BruteForceSearchIterators(const dataset::SearchDataset& dataset,
                           const void* chunk_data_raw,
                           int64_t chunk_rows,
-                          const knowhere::Json& conf,
+                          const SearchInfo& search_info,
                           const BitsetView& bitset,
                           DataType data_type) {
     auto nq = dataset.num_queries;
     auto dim = dataset.dim;
     auto base_dataset = knowhere::GenDataSet(chunk_rows, dim, chunk_data_raw);
     auto query_dataset = knowhere::GenDataSet(nq, dim, dataset.query_data);
+    auto search_cfg = PrepareBFSearchParams(search_info);
 
     knowhere::expected<
         std::vector<std::shared_ptr<knowhere::IndexNode::iterator>>>
@@ -166,15 +184,15 @@ BruteForceSearchIterators(const dataset::SearchDataset& dataset,
     switch (data_type) {
         case DataType::VECTOR_FLOAT:
             iterators_val = knowhere::BruteForce::AnnIterator<float>(
-                base_dataset, query_dataset, conf, bitset);
+                base_dataset, query_dataset, search_cfg, bitset);
             break;
         case DataType::VECTOR_FLOAT16:
             iterators_val = knowhere::BruteForce::AnnIterator<float16>(
-                base_dataset, query_dataset, conf, bitset);
+                base_dataset, query_dataset, search_cfg, bitset);
             break;
         case DataType::VECTOR_BFLOAT16:
             iterators_val = knowhere::BruteForce::AnnIterator<bfloat16>(
-                base_dataset, query_dataset, conf, bitset);
+                base_dataset, query_dataset, search_cfg, bitset);
             break;
         default:
             PanicInfo(ErrorCode::Unsupported,

@@ -88,8 +88,8 @@ InitTrace(CTraceConfig* config) {
                                                    config->nodeID};
     std::call_once(
         traceFlag,
-        [](milvus::tracer::TraceConfig* c) {
-            milvus::tracer::initTelementry(c);
+        [](const milvus::tracer::TraceConfig& c) {
+            milvus::tracer::initTelemetry(c);
         },
-        &traceConfig);
+        traceConfig);
 }
