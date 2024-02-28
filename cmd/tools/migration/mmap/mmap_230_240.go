@@ -75,7 +75,7 @@ func (m *MmapMigration) MigrateIndexCoordCollection(ctx context.Context) {
 		panic(err)
 	}
 
-	var getIndexType = func(indexParams []*commonpb.KeyValuePair) string {
+	getIndexType := func(indexParams []*commonpb.KeyValuePair) string {
 		for _, param := range indexParams {
 			if param.Key == common.IndexTypeKey {
 				return param.Value
