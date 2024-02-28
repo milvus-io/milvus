@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/ratelimitutil"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -178,6 +179,8 @@ func (q *QuotaCenter) clearMetrics() {
 
 // syncMetrics sends GetMetrics requests to DataCoord and QueryCoord to sync the metrics in DataNodes and QueryNodes.
 func (q *QuotaCenter) syncMetrics() error {
+	oldDataNodes := typeutil.NewSet(lo.Keys(q.dataNodeMetrics)...)
+	oldQueryNodes := typeutil.NewSet(lo.Keys(q.queryNodeMetrics)...)
 	q.clearMetrics()
 	ctx, cancel := context.WithTimeout(context.Background(), GetMetricsTimeout)
 	defer cancel()
@@ -191,11 +194,8 @@ func (q *QuotaCenter) syncMetrics() error {
 	// get Query cluster metrics
 	group.Go(func() error {
 		rsp, err := q.queryCoord.GetMetrics(ctx, req)
-		if err != nil {
+		if err := merr.CheckRPCCall(rsp, err); err != nil {
 			return err
-		}
-		if rsp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-			return fmt.Errorf("quotaCenter get Query cluster failed, err = %s", rsp.GetStatus().GetReason())
 		}
 		queryCoordTopology := &metricsinfo.QueryCoordTopology{}
 		err = metricsinfo.UnmarshalTopology(rsp.GetResponse(), queryCoordTopology)
@@ -206,6 +206,7 @@ func (q *QuotaCenter) syncMetrics() error {
 		collections := typeutil.NewUniqueSet()
 		for _, queryNodeMetric := range queryCoordTopology.Cluster.ConnectedNodes {
 			if queryNodeMetric.QuotaMetrics != nil {
+				oldQueryNodes.Remove(queryNodeMetric.ID)
 				q.queryNodeMetrics[queryNodeMetric.ID] = queryNodeMetric.QuotaMetrics
 				collections.Insert(queryNodeMetric.QuotaMetrics.Effect.CollectionIDs...)
 			}
@@ -216,11 +217,8 @@ func (q *QuotaCenter) syncMetrics() error {
 	// get Data cluster metrics
 	group.Go(func() error {
 		rsp, err := q.dataCoord.GetMetrics(ctx, req)
-		if err != nil {
+		if err := merr.CheckRPCCall(rsp, err); err != nil {
 			return err
-		}
-		if rsp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-			return fmt.Errorf("quotaCenter get Data cluster failed, err = %s", rsp.GetStatus().GetReason())
 		}
 		dataCoordTopology := &metricsinfo.DataCoordTopology{}
 		err = metricsinfo.UnmarshalTopology(rsp.GetResponse(), dataCoordTopology)
@@ -231,6 +229,7 @@ func (q *QuotaCenter) syncMetrics() error {
 		collections := typeutil.NewUniqueSet()
 		for _, dataNodeMetric := range dataCoordTopology.Cluster.ConnectedDataNodes {
 			if dataNodeMetric.QuotaMetrics != nil {
+				oldDataNodes.Remove(dataNodeMetric.ID)
 				q.dataNodeMetrics[dataNodeMetric.ID] = dataNodeMetric.QuotaMetrics
 				collections.Insert(dataNodeMetric.QuotaMetrics.Effect.CollectionIDs...)
 			}
@@ -266,11 +265,13 @@ func (q *QuotaCenter) syncMetrics() error {
 	if err != nil {
 		return err
 	}
-	// log.Debug("QuotaCenter sync metrics done",
-	//	zap.Any("dataNodeMetrics", q.dataNodeMetrics),
-	//	zap.Any("queryNodeMetrics", q.queryNodeMetrics),
-	//	zap.Any("proxyMetrics", q.proxyMetrics),
-	//	zap.Any("dataCoordMetrics", q.dataCoordMetrics))
+
+	for oldDN := range oldDataNodes {
+		metrics.RootCoordTtDelay.DeleteLabelValues(typeutil.DataNodeRole, strconv.FormatInt(oldDN, 10))
+	}
+	for oldQN := range oldQueryNodes {
+		metrics.RootCoordTtDelay.DeleteLabelValues(typeutil.QueryNodeRole, strconv.FormatInt(oldQN, 10))
+	}
 	return nil
 }
 

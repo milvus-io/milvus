@@ -26,13 +26,14 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
 // searchOnSegments performs search on listed segments
 // all segment ids are validated before calling this function
-func searchSegments(ctx context.Context, segments []Segment, segType SegmentType, searchReq *SearchRequest) ([]*SearchResult, error) {
+func searchSegments(ctx context.Context, mgr *Manager, segments []Segment, segType SegmentType, searchReq *SearchRequest) ([]*SearchResult, error) {
 	var (
 		// results variables
 		resultCh = make(chan *SearchResult, len(segments))
@@ -61,6 +62,14 @@ func searchSegments(ctx context.Context, segments []Segment, segType SegmentType
 			}
 			// record search time
 			tr := timerecord.NewTimeRecorder("searchOnSegments")
+			if seg.LoadStatus() == LoadStatusMeta {
+				item, ok := mgr.DiskCache.GetAndPin(seg.ID())
+				if !ok {
+					errs[i] = merr.WrapErrSegmentNotLoaded(seg.ID())
+					return
+				}
+				defer item.Unpin()
+			}
 			searchResult, err := seg.Search(ctx, searchReq)
 			errs[i] = err
 			resultCh <- searchResult
@@ -103,7 +112,7 @@ func SearchHistorical(ctx context.Context, manager *Manager, searchReq *SearchRe
 	if err != nil {
 		return nil, nil, err
 	}
-	searchResults, err := searchSegments(ctx, segments, SegmentTypeSealed, searchReq)
+	searchResults, err := searchSegments(ctx, manager, segments, SegmentTypeSealed, searchReq)
 	return searchResults, segments, err
 }
 
@@ -114,6 +123,6 @@ func SearchStreaming(ctx context.Context, manager *Manager, searchReq *SearchReq
 	if err != nil {
 		return nil, nil, err
 	}
-	searchResults, err := searchSegments(ctx, segments, SegmentTypeGrowing, searchReq)
+	searchResults, err := searchSegments(ctx, manager, segments, SegmentTypeGrowing, searchReq)
 	return searchResults, segments, err
 }

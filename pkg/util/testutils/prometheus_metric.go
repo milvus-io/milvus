@@ -15,3 +15,8 @@ func (suite *PromMetricsSuite) MetricsEqual(c prometheus.Collector, expect float
 	value := testutil.ToFloat64(c)
 	return suite.Suite.Equal(expect, value, msgAndArgs...)
 }
+
+func (suite *PromMetricsSuite) CollectCntEqual(c prometheus.Collector, expect int, msgAndArgs ...any) bool {
+	cnt := testutil.CollectAndCount(c)
+	return suite.Suite.EqualValues(expect, cnt, msgAndArgs...)
+}
