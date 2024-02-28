@@ -66,6 +66,8 @@ func (node *QueryNode) GetComponentStates(ctx context.Context, req *milvuspb.Get
 	if node.session != nil && node.session.Registered() {
 		nodeID = paramtable.GetNodeID()
 	}
+	log.Debug("QueryNode current state", zap.Int64("NodeID", nodeID), zap.String("StateCode", code.String()))
+
 	info := &milvuspb.ComponentInfo{
 		NodeID:    nodeID,
 		Role:      typeutil.QueryNodeRole,
