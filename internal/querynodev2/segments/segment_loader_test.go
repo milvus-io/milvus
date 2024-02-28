@@ -951,6 +951,7 @@ func (suite *SegmentLoaderV2Suite) TestLoad() {
 	suite.NoError(err)
 
 	segment := segments[0]
+	suite.EqualValues(4, segment.InsertCount())
 	suite.Equal(int64(msgLength-2), segment.RowNum())
 }
 

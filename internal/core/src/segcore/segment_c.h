@@ -38,6 +38,9 @@ void
 DeleteSegment(CSegmentInterface c_segment);
 
 void
+ClearSegmentData(CSegmentInterface c_segment);
+
+void
 DeleteSearchResult(CSearchResult search_result);
 
 CStatus
