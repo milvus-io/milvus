@@ -126,6 +126,24 @@ func (s *GrpcAccessInfoSuite) TestSdkInfo() {
 	result := s.info.Get("$sdk_version")
 	s.Equal(unknownString, result[0])
 
+	md := metadata.MD{}
+	ctx = metadata.NewIncomingContext(ctx, md)
+	s.info.ctx = ctx
+	result = s.info.Get("$sdk_version")
+	s.Equal(unknownString, result[0])
+
+	md = metadata.MD{util.HeaderUserAgent: []string{"invalid"}}
+	ctx = metadata.NewIncomingContext(ctx, md)
+	s.info.ctx = ctx
+	result = s.info.Get("$sdk_version")
+	s.Equal(unknownString, result[0])
+
+	md = metadata.MD{util.HeaderUserAgent: []string{"grpc-go.test"}}
+	ctx = metadata.NewIncomingContext(ctx, md)
+	s.info.ctx = ctx
+	result = s.info.Get("$sdk_version")
+	s.Equal("Golang"+"-"+unknownString, result[0])
+
 	s.info.req = &milvuspb.ConnectRequest{
 		ClientInfo: clientInfo,
 	}
@@ -133,7 +151,7 @@ func (s *GrpcAccessInfoSuite) TestSdkInfo() {
 	s.Equal(clientInfo.SdkType+"-"+clientInfo.SdkVersion, result[0])
 
 	identifier := 11111
-	md := metadata.MD{util.IdentifierKey: []string{fmt.Sprint(identifier)}}
+	md = metadata.MD{util.IdentifierKey: []string{fmt.Sprint(identifier)}}
 	ctx = metadata.NewIncomingContext(ctx, md)
 	connection.GetManager().Register(ctx, int64(identifier), clientInfo)
 
