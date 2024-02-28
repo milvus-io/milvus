@@ -135,15 +135,9 @@ func TestSegmentAllocator2(t *testing.T) {
 	dataCoord.expireTime = Timestamp(500)
 	segAllocator, err := newSegIDAssigner(ctx, dataCoord, getLastTick2)
 	assert.NoError(t, err)
-	wg := &sync.WaitGroup{}
 	segAllocator.Start()
+	defer segAllocator.Close()
 
-	wg.Add(1)
-	go func(group *sync.WaitGroup) {
-		defer group.Done()
-		time.Sleep(100 * time.Millisecond)
-		segAllocator.Close()
-	}(wg)
 	total := uint32(0)
 	for i := 0; i < 10; i++ {
 		ret, err := segAllocator.GetSegmentID(1, 1, "abc", 1, 200)
@@ -154,7 +148,6 @@ func TestSegmentAllocator2(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	_, err = segAllocator.GetSegmentID(1, 1, "abc", segCountPerRPC-10, getLastTick2())
 	assert.Error(t, err)
-	wg.Wait()
 }
 
 func TestSegmentAllocator3(t *testing.T) {
