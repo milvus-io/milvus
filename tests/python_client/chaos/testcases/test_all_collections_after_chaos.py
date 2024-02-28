@@ -132,7 +132,7 @@ class TestAllCollection(TestcaseBase):
         assert len(res[0]) <= topk
 
         # query
-        term_expr = f'{int64_field_name} > offset'
+        term_expr = f'{int64_field_name} > {offset}'
         t0 = time.time()
         res, _ = collection_w.query(term_expr)
         tt = time.time() - t0
