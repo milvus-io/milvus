@@ -341,7 +341,9 @@ func deserializeCell(col arrow.Array, dataType schemapb.DataType, i int) (interf
 			return nil, false
 		}
 		v := &schemapb.ScalarField{}
-		proto.Unmarshal(arr.Value(i), v)
+		if err := proto.Unmarshal(arr.Value(i), v); err != nil {
+			return nil, false
+		}
 		return v, true
 
 	case schemapb.DataType_JSON:
