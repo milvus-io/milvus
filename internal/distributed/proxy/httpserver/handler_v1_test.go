@@ -91,8 +91,7 @@ func initHTTPServer(proxy types.ProxyComponent, needAuth bool) *gin.Engine {
 	ginHandler.Use(func(c *gin.Context) {
 		_, err := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
 		if err != nil {
-			httpParams := &paramtable.Get().HTTPCfg
-			if httpParams.AcceptTypeAllowInt64.GetAsBool() {
+			if paramtable.Get().HTTPCfg.AcceptTypeAllowInt64.GetAsBool() {
 				c.Request.Header.Set(HTTPHeaderAllowInt64, "true")
 			} else {
 				c.Request.Header.Set(HTTPHeaderAllowInt64, "false")

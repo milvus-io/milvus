@@ -4,7 +4,7 @@ type httpConfig struct {
 	Enabled              ParamItem `refreshable:"false"`
 	DebugMode            ParamItem `refreshable:"false"`
 	Port                 ParamItem `refreshable:"false"`
-	AcceptTypeAllowInt64 ParamItem `refreshable:"false"`
+	AcceptTypeAllowInt64 ParamItem `refreshable:"true"`
 	EnablePprof          ParamItem `refreshable:"false"`
 	RequestTimeoutMs     ParamItem `refreshable:"false"`
 }
@@ -39,7 +39,7 @@ func (p *httpConfig) init(base *BaseTable) {
 
 	p.AcceptTypeAllowInt64 = ParamItem{
 		Key:          "proxy.http.acceptTypeAllowInt64",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		Version:      "2.3.2",
 		Doc:          "high-level restful api, whether http client can deal with int64",
 		PanicIfEmpty: false,

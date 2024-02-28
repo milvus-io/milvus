@@ -193,15 +193,14 @@ func (s *Server) startHTTPServer(errChan chan error) {
 		},
 	})
 	ginHandler.Use(ginLogger, gin.Recovery())
-	httpHeaderAllowInt64 := "false"
-	httpParams := &paramtable.Get().HTTPCfg
-	if httpParams.AcceptTypeAllowInt64.GetAsBool() {
-		httpHeaderAllowInt64 = "true"
-	}
 	ginHandler.Use(func(c *gin.Context) {
 		_, err := strconv.ParseBool(c.Request.Header.Get(httpserver.HTTPHeaderAllowInt64))
 		if err != nil {
-			c.Request.Header.Set(httpserver.HTTPHeaderAllowInt64, httpHeaderAllowInt64)
+			if paramtable.Get().HTTPCfg.AcceptTypeAllowInt64.GetAsBool() {
+				c.Request.Header.Set(httpserver.HTTPHeaderAllowInt64, "true")
+			} else {
+				c.Request.Header.Set(httpserver.HTTPHeaderAllowInt64, "false")
+			}
 		}
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
