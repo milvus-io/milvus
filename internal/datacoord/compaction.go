@@ -329,12 +329,14 @@ func (c *compactionPlanHandler) RefreshPlan(task *compactionTask) {
 	}
 
 	if plan.GetType() == datapb.CompactionType_MixCompaction {
+		segIDMap := make(map[int64][]*datapb.FieldBinlog, len(plan.SegmentBinlogs))
 		for _, seg := range plan.GetSegmentBinlogs() {
 			if info := c.meta.GetHealthySegment(seg.GetSegmentID()); info != nil {
 				seg.Deltalogs = info.GetDeltalogs()
+				segIDMap[seg.SegmentID] = info.GetDeltalogs()
 			}
 		}
-		log.Info("Compaction handler refreshed mix compaction plan")
+		log.Info("Compaction handler refreshed mix compaction plan", zap.Any("segID2DeltaLogs", segIDMap))
 		return
 	}
 }
