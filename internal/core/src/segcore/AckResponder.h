@@ -60,6 +60,12 @@ class AckResponder {
         return minimum_;
     }
 
+    void
+    clear() {
+        acks_.clear();
+        minimum_ = 0;
+    }
+
  private:
     bool
     fetch_and_flip(int64_t endpoint) {

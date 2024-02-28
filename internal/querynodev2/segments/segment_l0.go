@@ -65,6 +65,9 @@ func NewL0Segment(collection *Collection,
 		baseSegment: newBaseSegment(segmentID, partitionID, collectionID, shard, segmentType, datapb.SegmentLevel_L0, version, startPosition),
 	}
 
+	// level 0 segments are always in memory
+	segment.loadStatus.Store(string(LoadStatusInMemory))
+
 	return segment, nil
 }
 
@@ -155,7 +158,7 @@ func (s *L0Segment) DeleteRecords() ([]storage.PrimaryKey, []uint64) {
 	return s.pks, s.tss
 }
 
-func (s *L0Segment) Release() {
+func (s *L0Segment) Release(opts ...releaseOption) {
 	s.dataGuard.Lock()
 	defer s.dataGuard.Unlock()
 

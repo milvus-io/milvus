@@ -70,6 +70,12 @@ DeleteSegment(CSegmentInterface c_segment) {
 }
 
 void
+ClearSegmentData(CSegmentInterface c_segment) {
+    auto s = static_cast<milvus::segcore::SegmentSealedImpl*>(c_segment);
+    s->ClearData();
+}
+
+void
 DeleteSearchResult(CSearchResult search_result) {
     auto res = static_cast<milvus::SearchResult*>(search_result);
     delete res;

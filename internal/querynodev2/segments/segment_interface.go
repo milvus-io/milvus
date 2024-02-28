@@ -21,9 +21,18 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	storage "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
+)
+
+type LoadStatus string
+
+const (
+	LoadStatusMeta     LoadStatus = "meta"
+	LoadStatusMapped   LoadStatus = "mapped"
+	LoadStatusInMemory LoadStatus = "in_memory"
 )
 
 type Segment interface {
@@ -37,6 +46,9 @@ type Segment interface {
 	StartPosition() *msgpb.MsgPosition
 	Type() SegmentType
 	Level() datapb.SegmentLevel
+	LoadStatus() LoadStatus
+	IsLazyLoad() bool
+	LoadInfo() *querypb.SegmentLoadInfo
 	RLock() error
 	RUnlock()
 
@@ -58,7 +70,7 @@ type Segment interface {
 	Delete(ctx context.Context, primaryKeys []storage.PrimaryKey, timestamps []typeutil.Timestamp) error
 	LoadDeltaData(ctx context.Context, deltaData *storage.DeleteData) error
 	LastDeltaTimestamp() uint64
-	Release()
+	Release(opts ...releaseOption)
 
 	// Bloom filter related
 	UpdateBloomFilter(pks []storage.PrimaryKey)
