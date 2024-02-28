@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -681,10 +682,11 @@ type QuotaCenterSuite struct {
 
 	core *Core
 
-	pcm  *proxyutil.MockProxyClientManager
-	dc   *mocks.MockDataCoordClient
-	qc   *mocks.MockQueryCoordClient
-	meta *mockrootcoord.IMetaTable
+	pcm   *proxyClientManager
+	dc    *mocks.MockDataCoordClient
+	qc    *mocks.MockQueryCoordClient
+	meta  *mockrootcoord.IMetaTable
+	proxy *mocks.MockProxyClient
 }
 
 func (s *QuotaCenterSuite) SetupSuite() {
@@ -697,7 +699,11 @@ func (s *QuotaCenterSuite) SetupSuite() {
 }
 
 func (s *QuotaCenterSuite) SetupTest() {
-	s.pcm = proxyutil.NewMockProxyClientManager(s.T())
+	s.proxy = mocks.NewMockProxyClient(s.T())
+	s.proxy.EXPECT().Close().Return(nil).Maybe()
+	s.pcm = newProxyClientManager(func(ctx context.Context, addr string, nodeID int64) (types.ProxyClient, error) {
+		return s.proxy, nil
+	})
 	s.dc = mocks.NewMockDataCoordClient(s.T())
 	s.qc = mocks.NewMockQueryCoordClient(s.T())
 	s.meta = mockrootcoord.NewIMetaTable(s.T())
@@ -731,7 +737,6 @@ func (s *QuotaCenterSuite) TestSyncMetricsSuccess() {
 	core := s.core
 
 	s.Run("querycoord_cluster", func() {
-		pcm.EXPECT().GetProxyMetrics(mock.Anything).Return(nil, nil).Once()
 		dc.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
 			Status:   merr.Status(nil),
 			Response: s.getEmptyDCMetricsRsp(),
@@ -765,7 +770,6 @@ func (s *QuotaCenterSuite) TestSyncMetricsSuccess() {
 	})
 
 	s.Run("datacoord_cluster", func() {
-		pcm.EXPECT().GetProxyMetrics(mock.Anything).Return(nil, nil).Once()
 		qc.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
 			Status:   merr.Status(nil),
 			Response: s.getEmptyQCMetricsRsp(),
@@ -807,7 +811,6 @@ func (s *QuotaCenterSuite) TestSyncMetricsFailure() {
 	core := s.core
 
 	s.Run("querycoord_failure", func() {
-		pcm.EXPECT().GetProxyMetrics(mock.Anything).Return(nil, nil).Once()
 		dc.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
 			Status:   merr.Status(nil),
 			Response: s.getEmptyDCMetricsRsp(),
@@ -821,7 +824,6 @@ func (s *QuotaCenterSuite) TestSyncMetricsFailure() {
 	})
 
 	s.Run("querycoord_bad_response", func() {
-		pcm.EXPECT().GetProxyMetrics(mock.Anything).Return(nil, nil).Once()
 		dc.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
 			Status:   merr.Status(nil),
 			Response: s.getEmptyDCMetricsRsp(),
@@ -839,7 +841,6 @@ func (s *QuotaCenterSuite) TestSyncMetricsFailure() {
 	})
 
 	s.Run("datacoord_failure", func() {
-		pcm.EXPECT().GetProxyMetrics(mock.Anything).Return(nil, nil).Once()
 		qc.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
 			Status:   merr.Status(nil),
 			Response: s.getEmptyQCMetricsRsp(),
@@ -853,7 +854,6 @@ func (s *QuotaCenterSuite) TestSyncMetricsFailure() {
 	})
 
 	s.Run("datacoord_bad_response", func() {
-		pcm.EXPECT().GetProxyMetrics(mock.Anything).Return(nil, nil).Once()
 		qc.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
 			Status:   merr.Status(nil),
 			Response: s.getEmptyQCMetricsRsp(),
@@ -879,7 +879,14 @@ func (s *QuotaCenterSuite) TestSyncMetricsFailure() {
 			Response: s.getEmptyDCMetricsRsp(),
 		}, nil).Once()
 
-		pcm.EXPECT().GetProxyMetrics(mock.Anything).Return(nil, errors.New("mocked")).Once()
+		session := &sessionutil.Session{
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID: 1,
+			},
+		}
+		pcm.AddProxyClient(session)
+		defer pcm.DelProxyClient(session)
+		s.proxy.EXPECT().GetProxyMetrics(mock.Anything, mock.Anything).Return(nil, errors.New("mocked")).Once()
 
 		quotaCenter := NewQuotaCenter(pcm, qc, dc, core.tsoAllocator, meta)
 		err := quotaCenter.syncMetrics()
@@ -896,11 +903,16 @@ func (s *QuotaCenterSuite) TestSyncMetricsFailure() {
 			Response: s.getEmptyDCMetricsRsp(),
 		}, nil).Once()
 
-		pcm.EXPECT().GetProxyMetrics(mock.Anything).Return([]*milvuspb.GetMetricsResponse{
-			{
-				Status:   merr.Status(nil),
-				Response: "abc",
+		session := &sessionutil.Session{
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID: 1,
 			},
+		}
+		pcm.AddProxyClient(session)
+		defer pcm.DelProxyClient(session)
+		s.proxy.EXPECT().GetProxyMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
+			Status:   merr.Status(nil),
+			Response: "abc",
 		}, nil).Once()
 
 		quotaCenter := NewQuotaCenter(pcm, qc, dc, core.tsoAllocator, meta)
@@ -919,9 +931,6 @@ func (s *QuotaCenterSuite) TestNodeOffline() {
 	metrics.RootCoordTtDelay.Reset()
 	Params.Save(Params.QuotaConfig.TtProtectionEnabled.Key, "true")
 	defer Params.Reset(Params.QuotaConfig.TtProtectionEnabled.Key)
-
-	// proxy
-	pcm.EXPECT().GetProxyMetrics(mock.Anything).Return(nil, nil)
 
 	// qc first time
 	qcMetrics := &metricsinfo.QueryCoordTopology{
