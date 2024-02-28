@@ -9,11 +9,11 @@ repos:
     hooks:
       - id: typos
   - repo: https://github.com/trufflesecurity/trufflehog
-    rev: v3.54.3
+    rev: v3.68.2
     hooks:
       - id: trufflehog
         name: TruffleHog
         description: Detect secrets in your data.
         entry: bash -c 'trufflehog git file://. --max-depth 1  --since-commit HEAD --only-verified --fail'
         language: system
-        stages: ["commit"]
+        stages: ["commit", "push"]
