@@ -38,6 +38,7 @@ GenTestSchema() {
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField("str", DataType::VARCHAR);
     schema->AddDebugField("another_str", DataType::VARCHAR);
+    schema->AddDebugField("json", DataType::JSON);
     schema->AddDebugField(
         "fvec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     auto pk = schema->AddDebugField("int64", DataType::INT64);
@@ -59,6 +60,13 @@ class GrowingSegmentRegexQueryTest : public ::testing::Test {
             "abbb",
             "abcabcabc",
         };
+        raw_json = {
+            R"({"int":1})",
+            R"({"float":1.0})",
+            R"({"str":"aaa"})",
+            R"({"str":"bbb"})",
+            R"({"str":"abcabcabc"})",
+        };
 
         N = 5;
         uint64_t seed = 19190504;
@@ -71,6 +79,16 @@ class GrowingSegmentRegexQueryTest : public ::testing::Test {
         for (int64_t i = 0; i < N; i++) {
             str_col->at(i) = raw_str[i];
         }
+
+        auto json_col = raw_data.raw_->mutable_fields_data()
+                            ->at(2)
+                            .mutable_scalars()
+                            ->mutable_json_data()
+                            ->mutable_data();
+        for (int64_t i = 0; i < N; i++) {
+            json_col->at(i) = raw_json[i];
+        }
+
         seg->PreInsert(N);
         seg->Insert(0,
                     N,
@@ -88,6 +106,7 @@ class GrowingSegmentRegexQueryTest : public ::testing::Test {
     SegmentGrowingPtr seg;
     int64_t N;
     std::vector<std::string> raw_str;
+    std::vector<std::string> raw_json;
 };
 
 TEST_F(GrowingSegmentRegexQueryTest, RegexQueryOnNonStringField) {
@@ -141,6 +160,33 @@ TEST_F(GrowingSegmentRegexQueryTest, RegexQueryOnStringField) {
     ASSERT_TRUE(final[4]);
 }
 
+TEST_F(GrowingSegmentRegexQueryTest, RegexQueryOnJsonField) {
+    std::string operand = "a%";
+    const auto& str_meta = schema->operator[](FieldName("json"));
+    auto column_info = test::GenColumnInfo(
+        str_meta.get_id().get(), proto::schema::DataType::JSON, false, false);
+    column_info->add_nested_path("str");
+    auto unary_range_expr = test::GenUnaryRangeExpr(OpType::Match, operand);
+    unary_range_expr->set_allocated_column_info(column_info);
+    auto expr = test::GenExpr();
+    expr->set_allocated_unary_range_expr(unary_range_expr);
+
+    auto parser = ProtoParser(*schema);
+    auto typed_expr = parser.ParseExprs(*expr);
+    auto parsed =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, typed_expr);
+
+    auto segpromote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
+    query::ExecPlanNodeVisitor visitor(*segpromote, MAX_TIMESTAMP);
+    BitsetType final;
+    visitor.ExecuteExprNode(parsed, segpromote, N, final);
+    ASSERT_FALSE(final[0]);
+    ASSERT_FALSE(final[1]);
+    ASSERT_TRUE(final[2]);
+    ASSERT_FALSE(final[3]);
+    ASSERT_TRUE(final[4]);
+}
+
 struct MockStringIndex : index::StringIndexSort {
     const bool
     HasRawData() const override {
@@ -166,6 +212,13 @@ class SealedSegmentRegexQueryTest : public ::testing::Test {
             "abbb",
             "abcabcabc",
         };
+        raw_json = {
+            R"({"int":1})",
+            R"({"float":1.0})",
+            R"({"str":"aaa"})",
+            R"({"str":"bbb"})",
+            R"({"str":"abcabcabc"})",
+        };
         N = 5;
         uint64_t seed = 19190504;
         auto raw_data = DataGen(schema, N, seed);
@@ -180,6 +233,16 @@ class SealedSegmentRegexQueryTest : public ::testing::Test {
         for (int64_t i = 0; i < N; i++) {
             str_col->at(i) = raw_str[i];
         }
+
+        auto json_col = raw_data.raw_->mutable_fields_data()
+                            ->at(2)
+                            .mutable_scalars()
+                            ->mutable_json_data()
+                            ->mutable_data();
+        for (int64_t i = 0; i < N; i++) {
+            json_col->at(i) = raw_json[i];
+        }
+
         SealedLoadFieldData(raw_data, *seg);
     }
 
@@ -251,6 +314,7 @@ class SealedSegmentRegexQueryTest : public ::testing::Test {
     int64_t N;
     std::vector<std::string> raw_str;
     std::vector<int64_t> raw_int;
+    std::vector<std::string> raw_json;
 };
 
 TEST_F(SealedSegmentRegexQueryTest, BFRegexQueryOnNonStringField) {
@@ -271,9 +335,7 @@ TEST_F(SealedSegmentRegexQueryTest, BFRegexQueryOnNonStringField) {
     auto segpromote = dynamic_cast<SegmentSealedImpl*>(seg.get());
     query::ExecPlanNodeVisitor visitor(*segpromote, MAX_TIMESTAMP);
     BitsetType final;
-    ASSERT_ANY_THROW(
-
-        visitor.ExecuteExprNode(parsed, segpromote, N, final));
+    ASSERT_ANY_THROW(visitor.ExecuteExprNode(parsed, segpromote, N, final));
 }
 
 TEST_F(SealedSegmentRegexQueryTest, BFRegexQueryOnStringField) {
@@ -301,6 +363,33 @@ TEST_F(SealedSegmentRegexQueryTest, BFRegexQueryOnStringField) {
     ASSERT_TRUE(final[1]);
     ASSERT_TRUE(final[2]);
     ASSERT_TRUE(final[3]);
+    ASSERT_TRUE(final[4]);
+}
+
+TEST_F(SealedSegmentRegexQueryTest, BFRegexQueryOnJsonField) {
+    std::string operand = "a%";
+    const auto& str_meta = schema->operator[](FieldName("json"));
+    auto column_info = test::GenColumnInfo(
+        str_meta.get_id().get(), proto::schema::DataType::JSON, false, false);
+    column_info->add_nested_path("str");
+    auto unary_range_expr = test::GenUnaryRangeExpr(OpType::Match, operand);
+    unary_range_expr->set_allocated_column_info(column_info);
+    auto expr = test::GenExpr();
+    expr->set_allocated_unary_range_expr(unary_range_expr);
+
+    auto parser = ProtoParser(*schema);
+    auto typed_expr = parser.ParseExprs(*expr);
+    auto parsed =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, typed_expr);
+
+    auto segpromote = dynamic_cast<SegmentSealedImpl*>(seg.get());
+    query::ExecPlanNodeVisitor visitor(*segpromote, MAX_TIMESTAMP);
+    BitsetType final;
+    visitor.ExecuteExprNode(parsed, segpromote, N, final);
+    ASSERT_FALSE(final[0]);
+    ASSERT_FALSE(final[1]);
+    ASSERT_TRUE(final[2]);
+    ASSERT_FALSE(final[3]);
     ASSERT_TRUE(final[4]);
 }
 
