@@ -141,6 +141,9 @@ class SegmentSealedImpl : public SegmentSealed {
                    const int64_t* seg_offsets,
                    int64_t count) const override;
 
+    void
+    ClearData();
+
  protected:
     // blob and row_count
     SpanBase
