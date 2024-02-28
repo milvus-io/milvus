@@ -407,33 +407,20 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 		var info *SegmentInfo
 		if req.IncludeUnHealthy {
 			info = s.meta.GetSegment(id)
-
-			if info == nil {
-				log.Warn("failed to get segment, this may have been cleaned", zap.Int64("segmentID", id))
-				err := merr.WrapErrSegmentNotFound(id)
-				resp.Status = merr.Status(err)
-				return resp, nil
-			}
-
-			child := s.meta.GetCompactionTo(id)
-			clonedInfo := info.Clone()
-			if child != nil {
-				clonedInfo.Deltalogs = append(clonedInfo.Deltalogs, child.GetDeltalogs()...)
-				clonedInfo.DmlPosition = child.GetDmlPosition()
-			}
-			segmentutil.ReCalcRowCount(info.SegmentInfo, clonedInfo.SegmentInfo)
-			infos = append(infos, clonedInfo.SegmentInfo)
 		} else {
 			info = s.meta.GetHealthySegment(id)
-			if info == nil {
-				err := merr.WrapErrSegmentNotFound(id)
-				resp.Status = merr.Status(err)
-				return resp, nil
-			}
-			clonedInfo := info.Clone()
-			segmentutil.ReCalcRowCount(info.SegmentInfo, clonedInfo.SegmentInfo)
-			infos = append(infos, clonedInfo.SegmentInfo)
 		}
+
+		if info == nil {
+			log.Warn("failed to get segment, this may have been cleaned", zap.Int64("segmentID", id), zap.Bool("IncludeUnhealthy", req.IncludeUnHealthy))
+			err := merr.WrapErrSegmentNotFound(id)
+			resp.Status = merr.Status(err)
+			return resp, nil
+		}
+
+		clonedInfo := info.Clone()
+		segmentutil.ReCalcRowCount(info.SegmentInfo, clonedInfo.SegmentInfo)
+		infos = append(infos, clonedInfo.SegmentInfo)
 		vchannel := info.InsertChannel
 		if _, ok := channelCPs[vchannel]; vchannel != "" && !ok {
 			channelCPs[vchannel] = s.meta.GetChannelCheckpoint(vchannel)

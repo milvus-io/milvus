@@ -121,8 +121,7 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 		zap.Int("indexed segment", len(indexedSegments)),
 	)
 	var (
-		indexedIDs   = make(typeutil.UniqueSet)
-		unIndexedIDs = make(typeutil.UniqueSet)
+		flushedIDs   = make(typeutil.UniqueSet)
 		droppedIDs   = make(typeutil.UniqueSet)
 		growingIDs   = make(typeutil.UniqueSet)
 		levelZeroIDs = make(typeutil.UniqueSet)
@@ -147,70 +146,16 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 			growingIDs.Insert(s.GetID())
 		case s.GetLevel() == datapb.SegmentLevel_L0:
 			levelZeroIDs.Insert(s.GetID())
-		case indexed.Contain(s.GetID()):
-			indexedIDs.Insert(s.GetID())
-		case s.GetNumOfRows() < Params.DataCoordCfg.MinSegmentNumRowsToEnableIndex.GetAsInt64(): // treat small flushed segment as indexed
-			indexedIDs.Insert(s.GetID())
 		default:
-			unIndexedIDs.Insert(s.GetID())
+			flushedIDs.Insert(s.GetID())
 		}
 	}
-	// ================================================
-	// Segments blood relationship:
-	//          a   b
-	//           \ /
-	//            c   d
-	//             \ /
-	//              e
-	//
-	// GC:        a, b
-	// Indexed:   c, d, e
-	//              ||
-	//              || (Index dropped and creating new index and not finished)
-	//              \/
-	// UnIndexed: c, d, e
-	//
-	// Retrieve unIndexed expected result:
-	// unIndexed: c, d
-	// ================================================
-	isValid := func(ids ...UniqueID) bool {
-		for _, id := range ids {
-			if seg, ok := segmentInfos[id]; !ok || seg == nil {
-				return false
-			}
-		}
-		return true
-	}
-	retrieveUnIndexed := func() bool {
-		continueRetrieve := false
-		for id := range unIndexedIDs {
-			compactionFrom := segmentInfos[id].GetCompactionFrom()
-			if len(compactionFrom) > 0 && isValid(compactionFrom...) {
-				for _, fromID := range compactionFrom {
-					if indexed.Contain(fromID) {
-						indexedIDs.Insert(fromID)
-					} else {
-						unIndexedIDs.Insert(fromID)
-						continueRetrieve = true
-					}
-				}
-				unIndexedIDs.Remove(id)
-				droppedIDs.Remove(compactionFrom...)
-			}
-		}
-		return continueRetrieve
-	}
-	for retrieveUnIndexed() {
-	}
-
-	// unindexed is flushed segments as well
-	indexedIDs.Insert(unIndexedIDs.Collect()...)
 
 	return &datapb.VchannelInfo{
 		CollectionID:        channel.GetCollectionID(),
 		ChannelName:         channel.GetName(),
 		SeekPosition:        h.GetChannelSeekPosition(channel, partitionIDs...),
-		FlushedSegmentIds:   indexedIDs.Collect(),
+		FlushedSegmentIds:   flushedIDs.Collect(),
 		UnflushedSegmentIds: growingIDs.Collect(),
 		DroppedSegmentIds:   droppedIDs.Collect(),
 		LevelZeroSegmentIds: levelZeroIDs.Collect(),

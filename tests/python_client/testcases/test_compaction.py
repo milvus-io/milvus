@@ -1154,6 +1154,12 @@ class TestCompactionOperation(TestcaseBase):
         log.debug(collection_w.index())
         df = cf.gen_default_dataframe_data(start=ct.default_nb*2)
 
+        def check_index(seg_infos) ->bool:
+            for seg_info in seg_infos:
+                if seg_info.index_name == "":
+                    return False
+            return True
+
         def do_flush():
             collection_w.insert(df)
             log.debug(collection_w.num_entities)
@@ -1174,7 +1180,7 @@ class TestCompactionOperation(TestcaseBase):
             collection_w.load()
             # new segment compacted
             seg_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
-            if len(seg_info) == 2:
+            if len(seg_info) == 2 and check_index(seg_info):
                 break
             end = time()
             collection_w.release()
