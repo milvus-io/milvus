@@ -225,6 +225,10 @@ func (node *QueryNode) InitSegcore() error {
 	cCPUNum := C.int(hardware.GetCPUNum())
 	C.InitCpuNum(cCPUNum)
 
+	knowhereBuildPoolSize := uint32(float32(paramtable.Get().QueryNodeCfg.InterimIndexBuildParallelRate.GetAsFloat()) * float32(hardware.GetCPUNum()))
+	cKnowhereBuildPoolSize := C.uint32_t(knowhereBuildPoolSize)
+	C.SegcoreSetKnowhereBuildThreadPoolNum(cKnowhereBuildPoolSize)
+
 	cExprBatchSize := C.int64_t(paramtable.Get().QueryNodeCfg.ExprEvalBatchSize.GetAsInt64())
 	C.InitDefaultExprEvalBatchSize(cExprBatchSize)
 
