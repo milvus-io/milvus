@@ -37,6 +37,7 @@ func (s *ManagerSuite) SetupSuite() {
 
 func (s *ManagerSuite) SetupTest() {
 	s.mgr = NewSegmentManager()
+	s.segments = nil
 
 	for i, id := range s.segmentIDs {
 		schema := GenTestCollectionSchema("manager-suite", schemapb.DataType_Int64)
@@ -57,6 +58,19 @@ func (s *ManagerSuite) SetupTest() {
 
 		s.mgr.Put(s.types[i], segment)
 	}
+}
+
+func (s *ManagerSuite) TestExist() {
+	for _, segment := range s.segments {
+		s.True(s.mgr.Exist(segment.ID(), segment.Type()))
+		s.mgr.removeSegmentWithType(segment.Type(), segment.ID())
+		s.True(s.mgr.Exist(segment.ID(), segment.Type()))
+		s.mgr.release(segment)
+		s.False(s.mgr.Exist(segment.ID(), segment.Type()))
+	}
+
+	s.False(s.mgr.Exist(10086, SegmentTypeGrowing))
+	s.False(s.mgr.Exist(10086, SegmentTypeSealed))
 }
 
 func (s *ManagerSuite) TestGetBy() {

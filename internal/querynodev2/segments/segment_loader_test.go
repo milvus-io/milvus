@@ -685,7 +685,7 @@ func (suite *SegmentLoaderDetailSuite) TestWaitSegmentLoadDone() {
 		idx := 0
 
 		var infos []*querypb.SegmentLoadInfo
-		suite.segmentManager.EXPECT().GetBy(mock.Anything, mock.Anything).Return(nil)
+		suite.segmentManager.EXPECT().Exist(mock.Anything, mock.Anything).Return(false)
 		suite.segmentManager.EXPECT().GetWithType(suite.segmentID, SegmentTypeSealed).RunAndReturn(func(segmentID int64, segmentType commonpb.SegmentState) Segment {
 			defer func() { idx++ }()
 			if idx == 0 {
@@ -713,7 +713,7 @@ func (suite *SegmentLoaderDetailSuite) TestWaitSegmentLoadDone() {
 
 		var idx int
 		var infos []*querypb.SegmentLoadInfo
-		suite.segmentManager.EXPECT().GetBy(mock.Anything, mock.Anything).Return(nil)
+		suite.segmentManager.EXPECT().Exist(mock.Anything, mock.Anything).Return(false)
 		suite.segmentManager.EXPECT().GetWithType(suite.segmentID, SegmentTypeSealed).RunAndReturn(func(segmentID int64, segmentType commonpb.SegmentState) Segment {
 			defer func() { idx++ }()
 			if idx == 0 {
@@ -740,7 +740,7 @@ func (suite *SegmentLoaderDetailSuite) TestWaitSegmentLoadDone() {
 	suite.Run("wait_timeout", func() {
 		suite.SetupTest()
 
-		suite.segmentManager.EXPECT().GetBy(mock.Anything, mock.Anything).Return(nil)
+		suite.segmentManager.EXPECT().Exist(mock.Anything, mock.Anything).Return(false)
 		suite.segmentManager.EXPECT().GetWithType(suite.segmentID, SegmentTypeSealed).RunAndReturn(func(segmentID int64, segmentType commonpb.SegmentState) Segment {
 			return nil
 		})
