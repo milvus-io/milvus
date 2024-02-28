@@ -11038,7 +11038,6 @@ class TestCollectionHybridSearchValid(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("primary_field", [ct.default_int64_field_name, ct.default_string_field_name])
-    @pytest.mark.xfail(reason="issue 29923")
     def test_hybrid_search_RRFRanker_default_parameter(self, primary_field):
         """
         target: test hybrid search with default value to RRFRanker

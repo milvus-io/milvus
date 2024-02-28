@@ -551,14 +551,30 @@ func rankSearchResultData(ctx context.Context,
 			continue
 		}
 
+		compareKeys := func(keyI, keyJ interface{}) bool {
+			switch keyI.(type) {
+			case int64:
+				return keyI.(int64) < keyJ.(int64)
+			case string:
+				return keyI.(string) < keyJ.(string)
+			}
+			return false
+		}
+
 		// sort id by score
 		var less func(i, j int) bool
 		if metric.PositivelyRelated(metricType) {
 			less = func(i, j int) bool {
+				if idSet[keys[i]] == idSet[keys[j]] {
+					return compareKeys(keys[i], keys[j])
+				}
 				return idSet[keys[i]] > idSet[keys[j]]
 			}
 		} else {
 			less = func(i, j int) bool {
+				if idSet[keys[i]] == idSet[keys[j]] {
+					return compareKeys(keys[i], keys[j])
+				}
 				return idSet[keys[i]] < idSet[keys[j]]
 			}
 		}
