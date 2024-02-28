@@ -181,17 +181,17 @@ func (v *JSONRowConsumer) Handle(rows []map[storage.FieldID]interface{}) error {
 		var shard uint32
 		var partitionID int64
 		if primaryValidator.isString {
+			var pk string
 			if primaryValidator.autoID {
-				log.Warn("JSON row consumer: string type primary key cannot be auto-generated")
-				return merr.WrapErrImportFailed("string type primary key cannot be auto-generated")
-			}
-
-			value := row[primaryKeyID]
-			pk, err := getKeyValue(value, primaryValidator.fieldName, primaryValidator.isString)
-			if err != nil {
-				log.Warn("JSON row consumer: failed to parse primary key at the row",
-					zap.Int64("rowNumber", rowNumber), zap.Error(err))
-				return merr.WrapErrImportFailed(fmt.Sprintf("failed to parse primary key at the row %d, error: %v", rowNumber, err))
+				pk = strconv.FormatInt(rowIDBegin+int64(i), 10)
+			} else {
+				value := row[primaryKeyID]
+				pk, err = getKeyValue(value, primaryValidator.fieldName, primaryValidator.isString)
+				if err != nil {
+					log.Warn("JSON row consumer: failed to parse primary key at the row",
+						zap.Int64("rowNumber", rowNumber), zap.Error(err))
+					return merr.WrapErrImportFailed(fmt.Sprintf("failed to parse primary key at the row %d, error: %v", rowNumber, err))
+				}
 			}
 
 			// hash to shard based on pk, hash to partition if partition key exist
