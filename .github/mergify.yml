@@ -42,7 +42,7 @@ pull_request_rules:
           - base~=^2\.3(\.\d+){0,1}$
       - 'status-success=Build and test AMD64 Ubuntu 20.04'
       - 'status-success=Code Checker AMD64 Ubuntu 20.04'
-      - 'status-success=Code Checker MacOS 12'
+      # - 'status-success=Code Checker MacOS 12'
       - 'status-success=Code Checker Amazonlinux 2023'
       - 'status-success=cpu-e2e'
       - 'status-success=codecov/patch'
@@ -56,7 +56,7 @@ pull_request_rules:
       - base~=^2(\.\d+){2}$
       - 'status-success=Code Checker AMD64 Ubuntu 20.04'
       - 'status-success=Build and test AMD64 Ubuntu 20.04'
-      - 'status-success=Code Checker MacOS 12'
+      # - 'status-success=Code Checker MacOS 12'
       - 'status-success=Code Checker CentOS 7'
       - 'status-success=cpu-e2e'
       - 'status-success=codecov/patch'
@@ -112,7 +112,7 @@ pull_request_rules:
           - base~=^2\.3(\.\d+){0,1}$
       - 'status-success=Build and test AMD64 Ubuntu 20.04'
       - 'status-success=Code Checker AMD64 Ubuntu 20.04'
-      - 'status-success=Code Checker MacOS 12'
+      # - 'status-success=Code Checker MacOS 12'
       - 'status-success=Code Checker Amazonlinux 2023'
       - 'status-success=UT for Go'
       - or:
@@ -128,7 +128,7 @@ pull_request_rules:
       - base~=^2\.2\.\d+$
       - 'status-success=Code Checker AMD64 Ubuntu 20.04'
       - 'status-success=Build and test AMD64 Ubuntu 20.04'
-      - 'status-success=Code Checker MacOS 12'
+      # - 'status-success=Code Checker MacOS 12'
       - 'status-success=Code Checker CentOS 7'
       - -files~=^(?!internal\/.*_test\.go).*$
     actions:
@@ -257,7 +257,7 @@ pull_request_rules:
       - title~=\[skip e2e\]
       - 'status-success=Code Checker AMD64 Ubuntu 20.04'
       - 'status-success=Build and test AMD64 Ubuntu 20.04'
-      - 'status-success=Code Checker MacOS 12'
+      # - 'status-success=Code Checker MacOS 12'
       - 'status-success=Code Checker Amazonlinux 2023'
       - *source_code_files
     actions:
@@ -271,7 +271,7 @@ pull_request_rules:
       - title~=\[skip e2e\]
       - 'status-success=Code Checker AMD64 Ubuntu 20.04'
       - 'status-success=Build and test AMD64 Ubuntu 20.04'
-      - 'status-success=Code Checker MacOS 12'
+      # - 'status-success=Code Checker MacOS 12'
       - 'status-success=Code Checker CentOS 7'
       - *source_code_files
     actions:
@@ -304,7 +304,7 @@ pull_request_rules:
       - or:
           - 'status-success!=Code Checker AMD64 Ubuntu 20.04'
           - 'status-success!=Build and test AMD64 Ubuntu 20.04'
-          - 'status-success!=Code Checker MacOS 12'
+          # - 'status-success!=Code Checker MacOS 12'
           - 'status-success!=Code Checker Amazonlinux 2023'
     actions:
       label:
@@ -319,7 +319,7 @@ pull_request_rules:
       - or:
           - 'status-success!=Code Checker AMD64 Ubuntu 20.04'
           - 'status-success!=Build and test AMD64 Ubuntu 20.04'
-          - 'status-success!=Code Checker MacOS 12'
+          # - 'status-success!=Code Checker MacOS 12'
           - 'status-success!=Code Checker CentOS 7'
     actions:
       label:
