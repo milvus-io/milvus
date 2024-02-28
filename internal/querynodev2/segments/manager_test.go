@@ -64,6 +64,19 @@ func (s *ManagerSuite) SetupTest() {
 	}
 }
 
+func (s *ManagerSuite) TestExist() {
+	for _, segment := range s.segments {
+		s.True(s.mgr.Exist(segment.ID(), segment.Type()))
+		s.mgr.removeSegmentWithType(segment.Type(), segment.ID())
+		s.True(s.mgr.Exist(segment.ID(), segment.Type()))
+		s.mgr.release(segment)
+		s.False(s.mgr.Exist(segment.ID(), segment.Type()))
+	}
+
+	s.False(s.mgr.Exist(10086, SegmentTypeGrowing))
+	s.False(s.mgr.Exist(10086, SegmentTypeSealed))
+}
+
 func (s *ManagerSuite) TestGetBy() {
 	for i, partitionID := range s.partitionIDs {
 		segments := s.mgr.GetBy(WithPartition(partitionID))
