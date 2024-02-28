@@ -416,6 +416,57 @@ func TestInsertWithDynamicFields(t *testing.T) {
 	assert.Equal(t, "{\"classified\":false,\"id\":0}", string(fieldsData[len(fieldsData)-1].GetScalars().GetJsonData().GetData()[0]))
 }
 
+func TestInsertWithoutVector(t *testing.T) {
+	body := "{\"data\": {}}"
+	var err error
+	primaryField := generatePrimaryField(schemapb.DataType_Int64)
+	primaryField.AutoID = true
+	floatVectorField := generateVectorFieldSchema(schemapb.DataType_FloatVector)
+	floatVectorField.Name = "floatVector"
+	binaryVectorField := generateVectorFieldSchema(schemapb.DataType_BinaryVector)
+	binaryVectorField.Name = "binaryVector"
+	float16VectorField := generateVectorFieldSchema(schemapb.DataType_Float16Vector)
+	float16VectorField.Name = "float16Vector"
+	bfloat16VectorField := generateVectorFieldSchema(schemapb.DataType_BFloat16Vector)
+	bfloat16VectorField.Name = "bfloat16Vector"
+	err, _ = checkAndSetData(body, &schemapb.CollectionSchema{
+		Name: DefaultCollectionName,
+		Fields: []*schemapb.FieldSchema{
+			&primaryField, &floatVectorField,
+		},
+		EnableDynamicField: true,
+	})
+	assert.Error(t, err)
+	assert.Equal(t, true, strings.HasPrefix(err.Error(), "missing vector field"))
+	err, _ = checkAndSetData(body, &schemapb.CollectionSchema{
+		Name: DefaultCollectionName,
+		Fields: []*schemapb.FieldSchema{
+			&primaryField, &binaryVectorField,
+		},
+		EnableDynamicField: true,
+	})
+	assert.Error(t, err)
+	assert.Equal(t, true, strings.HasPrefix(err.Error(), "missing vector field"))
+	err, _ = checkAndSetData(body, &schemapb.CollectionSchema{
+		Name: DefaultCollectionName,
+		Fields: []*schemapb.FieldSchema{
+			&primaryField, &float16VectorField,
+		},
+		EnableDynamicField: true,
+	})
+	assert.Error(t, err)
+	assert.Equal(t, true, strings.HasPrefix(err.Error(), "missing vector field"))
+	err, _ = checkAndSetData(body, &schemapb.CollectionSchema{
+		Name: DefaultCollectionName,
+		Fields: []*schemapb.FieldSchema{
+			&primaryField, &bfloat16VectorField,
+		},
+		EnableDynamicField: true,
+	})
+	assert.Error(t, err)
+	assert.Equal(t, true, strings.HasPrefix(err.Error(), "missing vector field"))
+}
+
 func TestInsertWithInt64(t *testing.T) {
 	arrayFieldName := "array-int64"
 	body := "{\"data\": {\"book_id\": 9999999999999999, \"book_intro\": [0.1, 0.2], \"word_count\": 2, \"" + arrayFieldName + "\": [9999999999999999]}}"

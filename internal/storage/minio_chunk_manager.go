@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
@@ -166,38 +167,46 @@ func (mcm *MinioChunkManager) Exist(ctx context.Context, filePath string) (bool,
 
 // Read reads the minio storage data if exists.
 func (mcm *MinioChunkManager) Read(ctx context.Context, filePath string) ([]byte, error) {
-	start := time.Now()
-	object, err := mcm.getMinioObject(ctx, mcm.bucketName, filePath, minio.GetObjectOptions{})
-	if err != nil {
-		log.Warn("failed to get object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
-		return nil, err
-	}
-	defer object.Close()
+	var data []byte
+	err := retry.Do(ctx, func() error {
+		start := time.Now()
+		object, err := mcm.getMinioObject(ctx, mcm.bucketName, filePath, minio.GetObjectOptions{})
+		if err != nil {
+			log.Warn("failed to get object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
+			return err
+		}
+		defer object.Close()
 
-	// Prefetch object data
-	var empty []byte
-	_, err = object.Read(empty)
-	err = checkObjectStorageError(filePath, err)
+		// Prefetch object data
+		var empty []byte
+		_, err = object.Read(empty)
+		err = checkObjectStorageError(filePath, err)
+		if err != nil {
+			log.Warn("failed to read object", zap.String("path", filePath), zap.Error(err))
+			return err
+		}
+
+		objectInfo, err := object.Stat()
+		err = checkObjectStorageError(filePath, err)
+		if err != nil {
+			log.Warn("failed to stat object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
+			return err
+		}
+
+		data, err = Read(object, objectInfo.Size)
+		err = checkObjectStorageError(filePath, err)
+		if err != nil {
+			log.Warn("failed to read object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
+			return err
+		}
+		metrics.PersistentDataKvSize.WithLabelValues(metrics.DataGetLabel).Observe(float64(objectInfo.Size))
+		metrics.PersistentDataRequestLatency.WithLabelValues(metrics.DataGetLabel).Observe(float64(time.Since(start).Milliseconds()))
+		return nil
+	}, retry.Attempts(3), retry.RetryErr(merr.IsRetryableErr))
 	if err != nil {
-		log.Warn("failed to read object", zap.String("path", filePath), zap.Error(err))
 		return nil, err
 	}
 
-	objectInfo, err := object.Stat()
-	err = checkObjectStorageError(filePath, err)
-	if err != nil {
-		log.Warn("failed to stat object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
-		return nil, err
-	}
-
-	data, err := Read(object, objectInfo.Size)
-	err = checkObjectStorageError(filePath, err)
-	if err != nil {
-		log.Warn("failed to read object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
-		return nil, err
-	}
-	metrics.PersistentDataKvSize.WithLabelValues(metrics.DataGetLabel).Observe(float64(objectInfo.Size))
-	metrics.PersistentDataRequestLatency.WithLabelValues(metrics.DataGetLabel).Observe(float64(time.Since(start).Milliseconds()))
 	return data, nil
 }
 

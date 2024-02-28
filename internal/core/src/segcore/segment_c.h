@@ -44,10 +44,10 @@ void
 DeleteSearchResult(CSearchResult search_result);
 
 CStatus
-Search(CSegmentInterface c_segment,
+Search(CTraceContext c_trace,
+       CSegmentInterface c_segment,
        CSearchPlan c_plan,
        CPlaceholderGroup c_placeholder_group,
-       CTraceContext c_trace,
        uint64_t timestamp,
        CSearchResult* result);
 
@@ -55,9 +55,9 @@ void
 DeleteRetrieveResult(CRetrieveResult* retrieve_result);
 
 CStatus
-Retrieve(CSegmentInterface c_segment,
+Retrieve(CTraceContext c_trace,
+         CSegmentInterface c_segment,
          CRetrievePlan c_plan,
-         CTraceContext c_trace,
          uint64_t timestamp,
          CRetrieveResult* result,
          int64_t limit_size);

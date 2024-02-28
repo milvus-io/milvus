@@ -173,10 +173,14 @@ TEST(Indexing, BinaryBruteForce) {
         query_data  //
     };
 
+    SearchInfo search_info;
+    search_info.topk_ = topk;
+    search_info.round_decimal_ = round_decimal;
+    search_info.metric_type_ = metric_type;
     auto sub_result = query::BruteForceSearch(search_dataset,
                                               bin_vec.data(),
                                               N,
-                                              knowhere::Json(),
+                                              search_info,
                                               nullptr,
                                               DataType::VECTOR_BINARY);
 

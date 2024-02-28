@@ -9,32 +9,32 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <gtest/gtest.h>
 #include <boost/format.hpp>
+#include <gtest/gtest.h>
 
 #include "common/Types.h"
-#include "segcore/SegmentSealedImpl.h"
-#include "test_utils/DataGen.h"
-#include "test_utils/storage_test_utils.h"
+#include "common/Tracer.h"
 #include "index/IndexFactory.h"
-#include "storage/Util.h"
 #include "knowhere/version.h"
+#include "segcore/SegmentSealedImpl.h"
 #include "storage/ChunkCacheSingleton.h"
-#include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/MinioChunkManager.h"
+#include "storage/RemoteChunkManagerSingleton.h"
+#include "storage/Util.h"
+#include "test_utils/DataGen.h"
 #include "test_utils/indexbuilder_test_utils.h"
+#include "test_utils/storage_test_utils.h"
 
 using namespace milvus;
 using namespace milvus::query;
 using namespace milvus::segcore;
+
 using milvus::segcore::LoadIndexInfo;
 
 const int64_t ROW_COUNT = 10 * 1000;
 const int64_t BIAS = 4200;
 
 TEST(Sealed, without_predicate) {
-    using namespace milvus::query;
-    using namespace milvus::segcore;
     auto schema = std::make_shared<Schema>();
     auto dim = 16;
     auto topK = 5;
@@ -143,8 +143,6 @@ TEST(Sealed, without_predicate) {
 }
 
 TEST(Sealed, with_predicate) {
-    using namespace milvus::query;
-    using namespace milvus::segcore;
     auto schema = std::make_shared<Schema>();
     auto dim = 16;
     auto topK = 5;
@@ -259,8 +257,6 @@ TEST(Sealed, with_predicate) {
 }
 
 TEST(Sealed, with_predicate_filter_all) {
-    using namespace milvus::query;
-    using namespace milvus::segcore;
     auto schema = std::make_shared<Schema>();
     auto dim = 16;
     auto topK = 5;

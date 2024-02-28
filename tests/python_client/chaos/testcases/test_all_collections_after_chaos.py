@@ -66,15 +66,21 @@ class TestAllCollection(TestcaseBase):
         entities = collection_w.num_entities
         log.info(f"assert flush: {tt}, entities: {entities}")
 
+        # show index infos
+        index_infos = [index.to_dict() for index in collection_w.indexes]
+        log.info(f"index info: {index_infos}")
+        fields_created_index = [index["field"] for index in index_infos]
+
         # create index if not have
         index_params = {"index_type": "HNSW", "metric_type": "L2", "params": {"M": 48, "efConstruction": 500}}
 
         for f in float_vector_field_name_list:
-            t0 = time.time()
-            index, _ = collection_w.create_index(field_name=float_vector_field_name,
-                                                 index_params=index_params)
-            tt = time.time() - t0
-            log.info(f"create index for field {f} cost: {tt} seconds")
+            if f not in fields_created_index:
+                t0 = time.time()
+                index, _ = collection_w.create_index(field_name=float_vector_field_name,
+                                                     index_params=index_params)
+                tt = time.time() - t0
+                log.info(f"create index for field {f} cost: {tt} seconds")
         # show index infos
         index_infos = [index.to_dict() for index in collection_w.indexes]
         log.info(f"index info: {index_infos}")

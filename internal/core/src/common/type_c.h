@@ -104,7 +104,7 @@ typedef struct CTraceConfig {
 typedef struct CTraceContext {
     const uint8_t* traceID;
     const uint8_t* spanID;
-    uint8_t flag;
+    uint8_t traceFlags;
 } CTraceContext;
 
 typedef struct CNewSegmentResult {

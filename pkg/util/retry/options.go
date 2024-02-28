@@ -17,6 +17,7 @@ type config struct {
 	attempts     uint
 	sleep        time.Duration
 	maxSleepTime time.Duration
+	isRetryErr   func(err error) bool
 }
 
 func newDefaultConfig() *config {
@@ -57,5 +58,11 @@ func MaxSleepTime(maxSleepTime time.Duration) Option {
 		} else {
 			c.maxSleepTime = maxSleepTime
 		}
+	}
+}
+
+func RetryErr(isRetryErr func(err error) bool) Option {
+	return func(c *config) {
+		c.isRetryErr = isRetryErr
 	}
 }
