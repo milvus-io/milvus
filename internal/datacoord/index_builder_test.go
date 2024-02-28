@@ -1413,8 +1413,8 @@ func TestVecIndexWithOptionalScalarField(t *testing.T) {
 		mt.collections[collID].Schema.Fields[1].IsPartitionKey = true
 	}
 
-	paramtable.Get().CommonCfg.EnableNodeFilteringOnPartitionKey.SwapTempValue("true")
-	defer paramtable.Get().CommonCfg.EnableNodeFilteringOnPartitionKey.SwapTempValue("false")
+	paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("true")
+	defer paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("false")
 	ib := newIndexBuilder(ctx, &mt, nodeManager, cm, newIndexEngineVersionManager(), nil)
 
 	t.Run("success to get opt field on startup", func(t *testing.T) {
@@ -1464,7 +1464,7 @@ func TestVecIndexWithOptionalScalarField(t *testing.T) {
 
 	// should still be able to build vec index when opt field is not set
 	t.Run("enqueue returns empty optional field when cfg disable", func(t *testing.T) {
-		paramtable.Get().CommonCfg.EnableNodeFilteringOnPartitionKey.SwapTempValue("false")
+		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("false")
 		ic.EXPECT().CreateJob(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
 			func(ctx context.Context, in *indexpb.CreateJobRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 				assert.Zero(t, len(in.OptionalScalarFields), "optional scalar field should be set")
@@ -1478,7 +1478,7 @@ func TestVecIndexWithOptionalScalarField(t *testing.T) {
 	})
 
 	t.Run("enqueue returns empty optional field when index is not HNSW", func(t *testing.T) {
-		paramtable.Get().CommonCfg.EnableNodeFilteringOnPartitionKey.SwapTempValue("true")
+		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("true")
 		mt.indexMeta.indexes[collID][indexID].IndexParams[1].Value = indexparamcheck.IndexDISKANN
 		ic.EXPECT().CreateJob(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
 			func(ctx context.Context, in *indexpb.CreateJobRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
@@ -1493,7 +1493,7 @@ func TestVecIndexWithOptionalScalarField(t *testing.T) {
 	})
 
 	t.Run("enqueue returns empty optional field when no partition key", func(t *testing.T) {
-		paramtable.Get().CommonCfg.EnableNodeFilteringOnPartitionKey.SwapTempValue("true")
+		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("true")
 		mt.collections[collID].Schema.Fields[1].IsPartitionKey = false
 		ic.EXPECT().CreateJob(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
 			func(ctx context.Context, in *indexpb.CreateJobRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {

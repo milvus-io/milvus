@@ -21,6 +21,7 @@
 #include <string>
 #include <vector>
 
+#include "common/Exception.h"
 #include "common/Schema.h"
 #include "common/Types.h"
 #include "common/Utils.h"
@@ -28,6 +29,86 @@
 
 namespace milvus {
 namespace expr {
+
+// Collect information from expressions
+struct ExprInfo {
+    struct GenericValueEqual {
+        using GenericValue = proto::plan::GenericValue;
+        bool
+        operator()(const GenericValue& lhs, const GenericValue& rhs) const {
+            if (lhs.val_case() != rhs.val_case())
+                return false;
+            switch (lhs.val_case()) {
+                case GenericValue::kBoolVal:
+                    return lhs.bool_val() == rhs.bool_val();
+                case GenericValue::kInt64Val:
+                    return lhs.int64_val() == rhs.int64_val();
+                case GenericValue::kFloatVal:
+                    return lhs.float_val() == rhs.float_val();
+                case GenericValue::kStringVal:
+                    return lhs.string_val() == rhs.string_val();
+                case GenericValue::VAL_NOT_SET:
+                    return true;
+                default:
+                    throw NotImplementedException(
+                        "Not supported GenericValue type");
+            }
+        }
+    };
+
+    struct GenericValueHasher {
+        using GenericValue = proto::plan::GenericValue;
+        std::size_t
+        operator()(const GenericValue& value) const {
+            std::size_t h = 0;
+            switch (value.val_case()) {
+                case GenericValue::kBoolVal:
+                    h = std::hash<bool>()(value.bool_val());
+                    break;
+                case GenericValue::kInt64Val:
+                    h = std::hash<int64_t>()(value.int64_val());
+                    break;
+                case GenericValue::kFloatVal:
+                    h = std::hash<float>()(value.float_val());
+                    break;
+                case GenericValue::kStringVal:
+                    h = std::hash<std::string>()(value.string_val());
+                    break;
+                case GenericValue::VAL_NOT_SET:
+                    break;
+                default:
+                    throw NotImplementedException(
+                        "Not supported GenericValue type");
+            }
+            return h;
+        }
+    };
+
+    /* For Materialized View (vectors and scalars), that is when performing filtered search. */
+    // The map describes which scalar field is involved during search,
+    // and the set of category values
+    // for example, if we have scalar field `color` with field id `111` and it has three categories: red, green, blue
+    // expression `color == "red"`, yields `111 -> (red)`
+    // expression `color == "red" && color == "green"`, yields `111 -> (red, green)`
+    std::unordered_map<int64_t,
+                       std::unordered_set<proto::plan::GenericValue,
+                                          GenericValueHasher,
+                                          GenericValueEqual>>
+        field_id_to_values;
+    // whether the search exression has AND (&&) logical operator only
+    bool is_pure_and = true;
+    // whether the search expression has NOT (!) logical unary operator
+    bool has_not = false;
+};
+
+inline bool
+IsMaterializedViewSupported(const DataType& data_type) {
+    return data_type == DataType::BOOL || data_type == DataType::INT8 ||
+           data_type == DataType::INT16 || data_type == DataType::INT32 ||
+           data_type == DataType::INT64 || data_type == DataType::FLOAT ||
+           data_type == DataType::DOUBLE || data_type == DataType::VARCHAR ||
+           data_type == DataType::STRING;
+}
 
 struct ColumnInfo {
     FieldId field_id_;
@@ -110,6 +191,9 @@ class ITypeExpr {
     inputs() {
         return inputs_;
     }
+
+    virtual void
+    GatherInfo(ExprInfo& info) const {};
 
  protected:
     DataType type_;
@@ -235,6 +319,31 @@ class UnaryRangeFilterExpr : public ITypeFilterExpr {
         return ss.str();
     }
 
+    void
+    GatherInfo(ExprInfo& info) const override {
+        if (IsMaterializedViewSupported(column_.data_type_)) {
+            info.field_id_to_values[column_.field_id_.get()].insert(val_);
+
+            // for expression `Field == Value`, we do nothing else
+            if (op_type_ == proto::plan::OpType::Equal) {
+                return;
+            }
+
+            // for expression `Field != Value`, we consider it equivalent
+            // as `not (Field == Value)`, so we set `has_not` to true
+            if (op_type_ == proto::plan::OpType::NotEqual) {
+                info.has_not = true;
+                return;
+            }
+
+            // for other unary range filter <, >, <=, >=
+            // we add a dummy value to indicate multiple values
+            // this double insertion is intentional and the default GenericValue
+            // will be considered as equal in the unordered_set
+            info.field_id_to_values[column_.field_id_.get()].emplace();
+        }
+    }
+
  public:
     const ColumnInfo column_;
     const proto::plan::OpType op_type_;
@@ -293,6 +402,15 @@ class LogicalUnaryExpr : public ITypeFilterExpr {
                            inputs_[0]->ToString());
     }
 
+    void
+    GatherInfo(ExprInfo& info) const override {
+        if (op_type_ == OpType::LogicalNot) {
+            info.has_not = true;
+        }
+        assert(inputs_.size() == 1);
+        inputs_[0]->GatherInfo(info);
+    }
+
     const OpType op_type_;
 };
 
@@ -321,6 +439,14 @@ class TermFilterExpr : public ITypeFilterExpr {
            << ", Is In Field: " << (is_in_field_ ? "true" : "false") << "]";
 
         return ss.str();
+    }
+
+    void
+    GatherInfo(ExprInfo& info) const override {
+        if (IsMaterializedViewSupported(column_.data_type_)) {
+            info.field_id_to_values[column_.field_id_.get()].insert(
+                vals_.begin(), vals_.end());
+        }
     }
 
  public:
@@ -368,6 +494,16 @@ class LogicalBinaryExpr : public ITypeFilterExpr {
         return GetOpTypeString();
     }
 
+    void
+    GatherInfo(ExprInfo& info) const override {
+        if (op_type_ == OpType::Or) {
+            info.is_pure_and = false;
+        }
+        assert(inputs_.size() == 2);
+        inputs_[0]->GatherInfo(info);
+        inputs_[1]->GatherInfo(info);
+    }
+
  public:
     const OpType op_type_;
 };
@@ -398,6 +534,14 @@ class BinaryRangeFilterExpr : public ITypeFilterExpr {
            << "]";
 
         return ss.str();
+    }
+
+    void
+    GatherInfo(ExprInfo& info) const override {
+        if (IsMaterializedViewSupported(column_.data_type_)) {
+            info.field_id_to_values[column_.field_id_.get()].insert(lower_val_);
+            info.field_id_to_values[column_.field_id_.get()].insert(upper_val_);
+        }
     }
 
     const ColumnInfo column_;

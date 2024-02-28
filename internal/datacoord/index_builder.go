@@ -287,7 +287,7 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 
 		// vector index build needs information of optional scalar fields data
 		optionalFields := make([]*indexpb.OptionalFieldInfo, 0)
-		if Params.CommonCfg.EnableNodeFilteringOnPartitionKey.GetAsBool() && isOptionalScalarFieldSupported(indexType) {
+		if Params.CommonCfg.EnableMaterializedView.GetAsBool() && isOptionalScalarFieldSupported(indexType) {
 			colSchema := ib.meta.GetCollection(meta.CollectionID).Schema
 			hasPartitionKey := typeutil.HasPartitionKey(colSchema)
 			if hasPartitionKey {

@@ -56,11 +56,12 @@ type searchTask struct {
 	result  *milvuspb.SearchResults
 	request *milvuspb.SearchRequest
 
-	tr               *timerecord.TimeRecorder
-	collectionName   string
-	schema           *schemaInfo
-	requery          bool
-	partitionKeyMode bool
+	tr                     *timerecord.TimeRecorder
+	collectionName         string
+	schema                 *schemaInfo
+	requery                bool
+	partitionKeyMode       bool
+	enableMaterializedView bool
 
 	userOutputFields []string
 
