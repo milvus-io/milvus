@@ -157,9 +157,19 @@ class Json {
         return dom_doc().at_pointer(pointer).get_array();
     }
 
+    size_t
+    size() const {
+        return data_.size();
+    }
+
     std::string_view
     data() const {
         return data_;
+    }
+
+    const char*
+    c_str() const {
+        return data_.data();
     }
 
  private:
