@@ -26,6 +26,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include "common/Tracer.h"
 #include "common/Types.h"
 #include "common/type_c.h"
 #include "fmt/format.h"
@@ -540,12 +541,10 @@ VectorMemIndex<T>::Query(const DatasetPtr dataset,
     //               "Metric type of field index isn't the same with search info");
 
     auto num_queries = dataset->GetRows();
-    knowhere::Json search_conf = search_info.search_params_;
+    knowhere::Json search_conf = PrepareSearchParams(search_info);
     auto topk = search_info.topk_;
     // TODO :: check dim of search data
     auto final = [&] {
-        search_conf[knowhere::meta::TOPK] = topk;
-        search_conf[knowhere::meta::METRIC_TYPE] = GetMetricType();
         auto index_type = GetIndexType();
         if (CheckKeyInConfig(search_conf, RADIUS)) {
             if (CheckKeyInConfig(search_conf, RANGE_FILTER)) {

@@ -63,11 +63,11 @@ func (node *QueryNode) GetComponentStates(ctx context.Context, req *milvuspb.Get
 	code := node.lifetime.GetState()
 	nodeID := common.NotRegisteredID
 
-	log.Debug("QueryNode current state", zap.Int64("NodeID", nodeID), zap.String("StateCode", code.String()))
-
 	if node.session != nil && node.session.Registered() {
 		nodeID = node.GetNodeID()
 	}
+	log.Debug("QueryNode current state", zap.Int64("NodeID", nodeID), zap.String("StateCode", code.String()))
+
 	info := &milvuspb.ComponentInfo{
 		NodeID:    nodeID,
 		Role:      typeutil.QueryNodeRole,
