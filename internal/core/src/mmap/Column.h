@@ -310,7 +310,7 @@ class VariableColumn : public ColumnBase {
     }
 
     void
-    Append(FieldDataPtr chunk) {
+    Append(storage::FieldDataPtr chunk) {
         for (auto i = 0; i < chunk->get_num_rows(); i++) {
             auto data = static_cast<const T*>(chunk->RawValue(i));
 
@@ -362,7 +362,7 @@ class VariableColumn : public ColumnBase {
 
  private:
     // loading states
-    std::queue<FieldDataPtr> load_buf_{};
+    std::queue<storage::FieldDataPtr> load_buf_{};
 
     std::vector<uint64_t> indices_{};
 
