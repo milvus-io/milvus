@@ -29,7 +29,6 @@ import (
 	"unsafe"
 
 	"github.com/pingcap/log"
-	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -209,16 +208,7 @@ func (li *LoadIndexInfo) appendIndexData(ctx context.Context, indexKeys []string
 		if paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool() {
 			status = C.AppendIndexV3(li.cLoadIndexInfo)
 		} else {
-			span := trace.SpanFromContext(ctx)
-
-			traceID := span.SpanContext().TraceID()
-			spanID := span.SpanContext().SpanID()
-			traceCtx := C.CTraceContext{
-				traceID:    (*C.uint8_t)(unsafe.Pointer(&traceID[0])),
-				spanID:     (*C.uint8_t)(unsafe.Pointer(&spanID[0])),
-				traceFlags: (C.uint8_t)(span.SpanContext().TraceFlags()),
-			}
-
+			traceCtx := ParseCTraceContext(ctx)
 			status = C.AppendIndexV2(traceCtx, li.cLoadIndexInfo)
 		}
 		return nil, nil

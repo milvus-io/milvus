@@ -38,7 +38,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
@@ -471,15 +470,7 @@ func (s *LocalSegment) Search(ctx context.Context, searchReq *SearchRequest) (*S
 		return nil, merr.WrapErrSegmentNotLoaded(s.segmentID, "segment released")
 	}
 
-	span := trace.SpanFromContext(ctx)
-
-	traceID := span.SpanContext().TraceID()
-	spanID := span.SpanContext().SpanID()
-	traceCtx := C.CTraceContext{
-		traceID:    (*C.uint8_t)(unsafe.Pointer(&traceID[0])),
-		spanID:     (*C.uint8_t)(unsafe.Pointer(&spanID[0])),
-		traceFlags: (C.uint8_t)(span.SpanContext().TraceFlags()),
-	}
+	traceCtx := ParseCTraceContext(ctx)
 
 	hasIndex := s.ExistIndex(searchReq.searchFieldID)
 	log = log.With(zap.Bool("withIndex", hasIndex))
@@ -525,15 +516,7 @@ func (s *LocalSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segco
 		zap.String("segmentType", s.typ.String()),
 	)
 
-	span := trace.SpanFromContext(ctx)
-
-	traceID := span.SpanContext().TraceID()
-	spanID := span.SpanContext().SpanID()
-	traceCtx := C.CTraceContext{
-		traceID:    (*C.uint8_t)(unsafe.Pointer(&traceID[0])),
-		spanID:     (*C.uint8_t)(unsafe.Pointer(&spanID[0])),
-		traceFlags: (C.uint8_t)(span.SpanContext().TraceFlags()),
-	}
+	traceCtx := ParseCTraceContext(ctx)
 
 	maxLimitSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
 	var retrieveResult RetrieveResult
