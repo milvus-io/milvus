@@ -41,6 +41,7 @@ func (s *ManagerSuite) SetupSuite() {
 
 func (s *ManagerSuite) SetupTest() {
 	s.mgr = NewSegmentManager()
+	s.segments = nil
 
 	for i, id := range s.segmentIDs {
 		schema := GenTestCollectionSchema("manager-suite", schemapb.DataType_Int64)
