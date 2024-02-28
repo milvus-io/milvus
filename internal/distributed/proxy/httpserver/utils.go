@@ -204,6 +204,9 @@ func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) (error,
 
 				switch fieldType {
 				case schemapb.DataType_FloatVector:
+					if dataString == "" {
+						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], "", "missing vector field: "+fieldName), reallyDataArray
+					}
 					var vectorArray []float32
 					err := json.Unmarshal([]byte(dataString), &vectorArray)
 					if err != nil {
@@ -211,6 +214,9 @@ func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) (error,
 					}
 					reallyData[fieldName] = vectorArray
 				case schemapb.DataType_BinaryVector:
+					if dataString == "" {
+						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], "", "missing vector field: "+fieldName), reallyDataArray
+					}
 					vectorStr := gjson.Get(data.Raw, fieldName).Raw
 					var vectorArray []byte
 					err := json.Unmarshal([]byte(vectorStr), &vectorArray)
@@ -219,6 +225,9 @@ func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) (error,
 					}
 					reallyData[fieldName] = vectorArray
 				case schemapb.DataType_Float16Vector:
+					if dataString == "" {
+						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], "", "missing vector field: "+fieldName), reallyDataArray
+					}
 					vectorStr := gjson.Get(data.Raw, fieldName).Raw
 					var vectorArray []byte
 					err := json.Unmarshal([]byte(vectorStr), &vectorArray)
@@ -227,6 +236,9 @@ func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) (error,
 					}
 					reallyData[fieldName] = vectorArray
 				case schemapb.DataType_BFloat16Vector:
+					if dataString == "" {
+						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], "", "missing vector field: "+fieldName), reallyDataArray
+					}
 					vectorStr := gjson.Get(data.Raw, fieldName).Raw
 					var vectorArray []byte
 					err := json.Unmarshal([]byte(vectorStr), &vectorArray)
