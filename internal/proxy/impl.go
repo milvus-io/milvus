@@ -1054,17 +1054,6 @@ func (node *Proxy) AlterCollection(ctx context.Context, request *milvuspb.AlterC
 	log.Info(
 		rpcReceived(method))
 
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, request.GetDbName(), request.CollectionName)
-	if err != nil {
-		log.Warn(
-			"failed to get collectionID",
-			zap.Error(err))
-
-		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.AbandonLabel).Inc()
-		return merr.Status(err), nil
-	}
-
-	request.CollectionID = collectionID
 	if err := node.sched.ddQueue.Enqueue(act); err != nil {
 		log.Warn(
 			rpcFailedToEnqueue(method),
