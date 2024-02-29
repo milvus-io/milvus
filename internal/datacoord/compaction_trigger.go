@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
@@ -34,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -335,6 +337,25 @@ func (t *compactionTrigger) updateSegmentMaxSize(segments []*SegmentInfo) (bool,
 		return false
 	})
 
+	updateSegments := func(segments []*SegmentInfo, newMaxRows int64, isDiskAnn bool) error {
+		for idx, segmentInfo := range segments {
+			if segmentInfo.GetMaxRowNum() != newMaxRows {
+				log.Info("segment max row recalculated",
+					zap.Int64("segmentID", segmentInfo.GetID()),
+					zap.Int64("old max rows", segmentInfo.GetMaxRowNum()),
+					zap.Int64("new max rows", int64(newMaxRows)),
+					zap.Bool("isDiskANN", isDiskAnn),
+				)
+				err := t.meta.UpdateSegment(segmentInfo.GetID(), SetMaxRowCount(newMaxRows))
+				if err != nil && !errors.Is(err, merr.ErrSegmentNotFound) {
+					return err
+				}
+				segments[idx] = t.meta.GetSegment(segmentInfo.GetID())
+			}
+		}
+		return nil
+	}
+
 	allDiskIndex := len(vectorFields) == len(vectorFieldsWithDiskIndex)
 	if allDiskIndex {
 		// Only if all vector fields index type are DiskANN, recalc segment max size here.
@@ -342,13 +363,9 @@ func (t *compactionTrigger) updateSegmentMaxSize(segments []*SegmentInfo) (bool,
 		if err != nil {
 			return false, err
 		}
-		if len(segments) > 0 && int64(newMaxRows) != segments[0].GetMaxRowNum() {
-			log.Info("segment max rows recalculated for DiskANN collection",
-				zap.Int64("old max rows", segments[0].GetMaxRowNum()),
-				zap.Int64("new max rows", int64(newMaxRows)))
-			for _, segment := range segments {
-				segment.MaxRowNum = int64(newMaxRows)
-			}
+		err = updateSegments(segments, int64(newMaxRows), true)
+		if err != nil {
+			return false, err
 		}
 	}
 	// If some vector fields index type are not DiskANN, recalc segment max size using default policy.
@@ -357,13 +374,9 @@ func (t *compactionTrigger) updateSegmentMaxSize(segments []*SegmentInfo) (bool,
 		if err != nil {
 			return allDiskIndex, err
 		}
-		if len(segments) > 0 && int64(newMaxRows) != segments[0].GetMaxRowNum() {
-			log.Info("segment max rows recalculated for non-DiskANN collection",
-				zap.Int64("old max rows", segments[0].GetMaxRowNum()),
-				zap.Int64("new max rows", int64(newMaxRows)))
-			for _, segment := range segments {
-				segment.MaxRowNum = int64(newMaxRows)
-			}
+		err = updateSegments(segments, int64(newMaxRows), true)
+		if err != nil {
+			return false, err
 		}
 	}
 	return allDiskIndex, nil

@@ -344,7 +344,7 @@ func (m *meta) GetHealthySegment(segID UniqueID) *SegmentInfo {
 	defer m.RUnlock()
 	segment := m.segments.GetSegment(segID)
 	if segment != nil && isSegmentHealthy(segment) {
-		return segment.Clone()
+		return segment
 	}
 	return nil
 }
@@ -406,6 +406,45 @@ func (m *meta) SetState(segmentID UniqueID, targetState commonpb.SegmentState) e
 	log.Info("meta update: setting segment state - complete",
 		zap.Int64("segmentID", segmentID),
 		zap.String("target state", targetState.String()))
+	return nil
+}
+
+func (m *meta) UpdateSegment(segmentID int64, operators ...SegmentOperator) error {
+	m.Lock()
+	defer m.Unlock()
+	info := m.segments.GetSegment(segmentID)
+	if info == nil {
+		log.Warn("meta update: UpdateSegment - segment not found",
+			zap.Int64("segmentID", segmentID))
+
+		return merr.WrapErrSegmentNotFound(segmentID)
+	}
+	// Persist segment updates first.
+	cloned := info.Clone()
+
+	var updated bool
+	for _, operator := range operators {
+		updated = updated || operator(cloned)
+	}
+
+	if !updated {
+		log.Warn("meta update:UpdateSegmnt skipped, no update",
+			zap.Int64("segmentID", segmentID),
+		)
+		return nil
+	}
+
+	if err := m.catalog.AlterSegments(m.ctx, []*datapb.SegmentInfo{cloned.SegmentInfo}); err != nil {
+		log.Warn("meta update: update segment - failed to alter segments",
+			zap.Int64("segmentID", segmentID),
+			zap.Error(err))
+		return err
+	}
+	// Update in-memory meta.
+	m.segments.SetSegment(segmentID, cloned)
+
+	log.Info("meta update: update segment - complete",
+		zap.Int64("segmentID", segmentID))
 	return nil
 }
 
@@ -909,7 +948,7 @@ func (m *meta) SelectSegments(selector SegmentInfoSelector) []*SegmentInfo {
 	segments := m.segments.GetSegments()
 	for _, info := range segments {
 		if selector(info) {
-			ret = append(ret, info.Clone())
+			ret = append(ret, info)
 		}
 	}
 	return ret
