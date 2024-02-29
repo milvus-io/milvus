@@ -411,6 +411,7 @@ func (node *QueryNode) Start() error {
 
 // Stop mainly stop QueryNode's query service, historical loop and streaming loop.
 func (node *QueryNode) Stop() error {
+	log := log.Ctx(node.ctx).WithRateGroup("qnv2.Stop", 1, 60)
 	node.stopOnce.Do(func() {
 		log.Info("Query node stop...")
 		err := node.session.GoingStop()
@@ -436,17 +437,18 @@ func (node *QueryNode) Stop() error {
 					channelNum = node.pipelineManager.Num()
 				}
 
+				log.RatedWarn(5, "migrate data timed out", zap.Int64("ServerID", node.GetNodeID()),
+					zap.Int64s("sealedSegments", lo.Map(sealedSegments, func(s segments.Segment, i int) int64 {
+						return s.ID()
+					})),
+					zap.Int64s("growingSegments", lo.Map(growingSegments, func(t segments.Segment, i int) int64 {
+						return t.ID()
+					})),
+					zap.Int("channelNum", channelNum),
+				)
+
 				select {
 				case <-timeoutCh:
-					log.Warn("migrate data timed out", zap.Int64("ServerID", node.GetNodeID()),
-						zap.Int64s("sealedSegments", lo.Map(sealedSegments, func(s segments.Segment, i int) int64 {
-							return s.ID()
-						})),
-						zap.Int64s("growingSegments", lo.Map(growingSegments, func(t segments.Segment, i int) int64 {
-							return t.ID()
-						})),
-						zap.Int("channelNum", channelNum),
-					)
 					break outer
 
 				case <-time.After(time.Second):
