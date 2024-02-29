@@ -18,20 +18,36 @@ package datanode
 
 import (
 	"context"
+	"go.uber.org/zap"
+	"sync"
 	"time"
 
+	"github.com/samber/lo"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 const (
-	defaultUpdateChanCPMaxParallel = 1000
+	defaultUpdateChanCPMaxParallel = 10
 )
+
+type channelCPUpdateTask struct {
+	pos      *msgpb.MsgPosition
+	callback func()
+}
 
 type channelCheckpointUpdater struct {
 	dn         *DataNode
 	workerPool *conc.Pool[any]
+
+	mu    sync.RWMutex
+	tasks map[string]*channelCPUpdateTask
+
+	closeCh   chan struct{}
+	closeOnce sync.Once
 }
 
 func newChannelCheckpointUpdater(dn *DataNode) *channelCheckpointUpdater {
@@ -42,23 +58,85 @@ func newChannelCheckpointUpdater(dn *DataNode) *channelCheckpointUpdater {
 	return &channelCheckpointUpdater{
 		dn:         dn,
 		workerPool: conc.NewPool[any](updateChanCPMaxParallel, conc.WithPreAlloc(true)),
+		tasks:      make(map[string]*channelCPUpdateTask),
+		closeCh:    make(chan struct{}),
 	}
 }
 
-func (ccu *channelCheckpointUpdater) updateChannelCP(channelPos *msgpb.MsgPosition, callback func() error) error {
-	ccu.workerPool.Submit(func() (any, error) {
-		ctx, cancel := context.WithTimeout(context.Background(), paramtable.Get().DataNodeCfg.UpdateChannelCheckpointRPCTimeout.GetAsDuration(time.Second))
-		defer cancel()
-		err := ccu.dn.broker.UpdateChannelCheckpoint(ctx, channelPos.GetChannelName(), channelPos)
-		if err != nil {
-			return nil, err
+func (ccu *channelCheckpointUpdater) start() {
+	log.Info("channel checkpoint updater start")
+	ticker := time.NewTicker(paramtable.Get().DataNodeCfg.ChannelCheckpointUpdaterTick.GetAsDuration(time.Second))
+	for {
+		select {
+		case <-ccu.closeCh:
+			log.Info("channel checkpoint updater exit")
+			return
+		case <-ticker.C:
+			ccu.execute()
 		}
-		err = callback()
-		return nil, err
-	})
-	return nil
+	}
+}
+
+func (ccu *channelCheckpointUpdater) execute() {
+	ccu.mu.RLock()
+	taskGroups := lo.Chunk(lo.Values(ccu.tasks), paramtable.Get().DataNodeCfg.MaxChannelCheckpointsPerRPC.GetAsInt())
+	ccu.mu.RUnlock()
+
+	futures := make([]*conc.Future[any], 0)
+	for _, tasks := range taskGroups {
+		future := ccu.workerPool.Submit(func() (any, error) {
+			timeout := paramtable.Get().DataNodeCfg.UpdateChannelCheckpointRPCTimeout.GetAsDuration(time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), timeout)
+			defer cancel()
+
+			channelCPs := lo.Map(tasks, func(t *channelCPUpdateTask, _ int) *msgpb.MsgPosition {
+				return t.pos
+			})
+			err := ccu.dn.broker.UpdateChannelCheckpoint(ctx, channelCPs)
+			if err != nil {
+				return nil, err
+			}
+			for _, task := range tasks {
+				task.callback()
+			}
+			ccu.mu.Lock()
+			defer ccu.mu.Unlock()
+			for _, task := range tasks {
+				channel := task.pos.GetChannelName()
+				if ccu.tasks[channel].pos.GetTimestamp() <= task.pos.GetTimestamp() {
+					delete(ccu.tasks, channel)
+				}
+			}
+			return nil, nil
+		})
+		futures = append(futures, future)
+	}
+	err := conc.AwaitAll(futures...)
+	if err != nil {
+		log.Warn("update channel checkpoint failed", zap.Error(err))
+	}
+}
+
+func (ccu *channelCheckpointUpdater) addTask(channelPos *msgpb.MsgPosition, callback func()) {
+	channel := channelPos.GetChannelName()
+	ccu.mu.RLock()
+	if channelPos.GetTimestamp() <= ccu.tasks[channel].pos.GetTimestamp() {
+		ccu.mu.RUnlock()
+		return
+	}
+	ccu.mu.RUnlock()
+
+	ccu.mu.Lock()
+	defer ccu.mu.Unlock()
+	ccu.tasks[channel] = &channelCPUpdateTask{
+		pos:      channelPos,
+		callback: callback,
+	}
 }
 
 func (ccu *channelCheckpointUpdater) close() {
-	ccu.workerPool.Release()
+	ccu.closeOnce.Do(func() {
+		close(ccu.closeCh)
+		ccu.workerPool.Release()
+	})
 }

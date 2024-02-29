@@ -2957,6 +2957,8 @@ type dataNodeConfig struct {
 	UpdateChannelCheckpointMaxParallel ParamItem `refreshable:"true"`
 	UpdateChannelCheckpointInterval    ParamItem `refreshable:"true"`
 	UpdateChannelCheckpointRPCTimeout  ParamItem `refreshable:"true"`
+	MaxChannelCheckpointsPerRPC        ParamItem `refreshable:"true"`
+	ChannelCheckpointUpdaterTick       ParamItem `refreshable:"true"`
 
 	MaxConcurrentImportTaskNum ParamItem `refreshable:"true"`
 
@@ -3193,7 +3195,7 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		Key:          "datanode.channel.updateChannelCheckpointMaxParallel",
 		Version:      "2.3.4",
 		PanicIfEmpty: false,
-		DefaultValue: "1000",
+		DefaultValue: "10",
 	}
 	p.UpdateChannelCheckpointMaxParallel.Init(base.mgr)
 
@@ -3212,6 +3214,22 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		DefaultValue: "10",
 	}
 	p.UpdateChannelCheckpointRPCTimeout.Init(base.mgr)
+
+	p.MaxChannelCheckpointsPerRPC = ParamItem{
+		Key:          "datanode.channel.maxChannelCheckpointsPerPRC",
+		Version:      "2.4.0",
+		Doc:          "The maximum number of channel checkpoints per UpdateChannelCheckpoint RPC.",
+		DefaultValue: "128",
+	}
+	p.MaxChannelCheckpointsPerRPC.Init(base.mgr)
+
+	p.ChannelCheckpointUpdaterTick = ParamItem{
+		Key:          "datanode.channel.channelCheckpointUpdaterTick",
+		Version:      "2.4.0",
+		Doc:          "The frequency, in seconds, at which the channel checkpoint updater executes updates.",
+		DefaultValue: "5",
+	}
+	p.ChannelCheckpointUpdaterTick.Init(base.mgr)
 
 	p.MaxConcurrentImportTaskNum = ParamItem{
 		Key:          "datanode.import.maxConcurrentTaskNum",

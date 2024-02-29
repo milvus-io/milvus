@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/kv"
 	mockkv "github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
+	mocks2 "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -44,12 +45,12 @@ import (
 type MetaReloadSuite struct {
 	testutils.PromMetricsSuite
 
-	catalog *mocks.DataCoordCatalog
+	catalog *mocks2.DataCoordCatalog
 	meta    *meta
 }
 
 func (suite *MetaReloadSuite) SetupTest() {
-	catalog := mocks.NewDataCoordCatalog(suite.T())
+	catalog := mocks2.NewDataCoordCatalog(suite.T())
 	suite.catalog = catalog
 }
 
@@ -1017,7 +1018,7 @@ func TestChannelCP(t *testing.T) {
 
 func Test_meta_GcConfirm(t *testing.T) {
 	m := &meta{}
-	catalog := mocks.NewDataCoordCatalog(t)
+	catalog := mocks2.NewDataCoordCatalog(t)
 	m.catalog = catalog
 
 	catalog.On("GcConfirm",

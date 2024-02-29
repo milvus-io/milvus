@@ -487,7 +487,7 @@ func (s *DataSyncServiceSuite) TestStartStop() {
 
 	ch := make(chan struct{})
 
-	s.broker.EXPECT().UpdateChannelCheckpoint(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, _ string, _ *msgpb.MsgPosition) error {
+	s.broker.EXPECT().UpdateChannelCheckpoint(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, _ []*msgpb.MsgPosition) error {
 		close(ch)
 		return nil
 	})
