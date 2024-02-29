@@ -330,15 +330,10 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                             num_rows, field_meta);
                     storage::FieldDataPtr field_data;
                     while (data.channel->pop(field_data)) {
-                        for (auto i = 0; i < field_data->get_num_rows(); i++) {
-                            auto str = static_cast<const std::string*>(
-                                field_data->RawValue(i));
-                            auto str_size = str->size();
-                            var_column->Append(str->data(), str_size);
-                            field_data_size += str_size;
-                        }
+                        var_column->Append(std::move(field_data));
                     }
                     var_column->Seal();
+                    field_data_size = var_column->ByteSize();
                     column = std::move(var_column);
                     break;
                 }
@@ -348,18 +343,10 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                             num_rows, field_meta);
                     storage::FieldDataPtr field_data;
                     while (data.channel->pop(field_data)) {
-                        for (auto i = 0; i < field_data->get_num_rows(); i++) {
-                            auto padded_string =
-                                static_cast<const milvus::Json*>(
-                                    field_data->RawValue(i))
-                                    ->data();
-                            auto padded_string_size = padded_string.size();
-                            var_column->Append(padded_string.data(),
-                                               padded_string_size);
-                            field_data_size += padded_string_size;
-                        }
+                        var_column->Append(std::move(field_data));
                     }
                     var_column->Seal();
+                    field_data_size = var_column->ByteSize();
                     column = std::move(var_column);
                     break;
                 }
@@ -373,6 +360,9 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                             auto array =
                                 static_cast<const milvus::Array*>(rawValue);
                             var_column->Append(*array);
+                            // we stores the offset for each array element, so there is a additional uint64_t for each array element
+                            field_data_size =
+                                array->byte_size() + sizeof(uint64_t);
                         }
                     }
                     var_column->Seal();
