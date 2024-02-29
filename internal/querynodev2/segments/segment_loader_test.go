@@ -693,7 +693,7 @@ func (suite *SegmentLoaderDetailSuite) SetupTest() {
 		PartitionIDs: []int64{suite.partitionID},
 	}
 
-	collection := NewCollection(suite.collectionID, schema, indexMeta, loadMeta.GetLoadType())
+	collection := NewCollection(suite.collectionID, schema, indexMeta, loadMeta)
 	suite.collectionManager.EXPECT().Get(suite.collectionID).Return(collection).Maybe()
 }
 
