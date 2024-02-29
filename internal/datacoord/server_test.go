@@ -3330,10 +3330,21 @@ func TestDataCoordServer_UpdateChannelCheckpoint(t *testing.T) {
 		assert.NoError(t, err)
 		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 
-		req.Position = nil
+		req = &datapb.UpdateChannelCheckpointRequest{
+			Base: &commonpb.MsgBase{
+				SourceID: paramtable.GetNodeID(),
+			},
+			VChannel: mockVChannel,
+			ChannelCheckpoints: []*msgpb.MsgPosition{{
+				ChannelName: mockPChannel,
+				Timestamp:   1000,
+				MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
+			}},
+		}
+
 		resp, err = svr.UpdateChannelCheckpoint(context.TODO(), req)
 		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_UnexpectedError, resp.ErrorCode)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 }
 

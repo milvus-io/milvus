@@ -44,7 +44,7 @@ func (s *ChannelCPUpdaterSuite) SetupTest() {
 
 func (s *ChannelCPUpdaterSuite) TestUpdate() {
 	paramtable.Get().Save(paramtable.Get().DataNodeCfg.ChannelCheckpointUpdaterTick.Key, "0.01")
-	defer paramtable.Get().Save(paramtable.Get().DataNodeCfg.ChannelCheckpointUpdaterTick.Key, "5")
+	defer paramtable.Get().Save(paramtable.Get().DataNodeCfg.ChannelCheckpointUpdaterTick.Key, "10")
 
 	b := broker.NewMockBroker(s.T())
 	b.EXPECT().UpdateChannelCheckpoint(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, positions []*msgpb.MsgPosition) error {

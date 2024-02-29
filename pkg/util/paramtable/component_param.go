@@ -3264,7 +3264,7 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	p.UpdateChannelCheckpointInterval.Init(base.mgr)
 
 	p.UpdateChannelCheckpointRPCTimeout = ParamItem{
-		Key:          "datanode.channel.updateChannelCheckpointInterval",
+		Key:          "datanode.channel.updateChannelCheckpointRPCTimeout",
 		Version:      "2.4.0",
 		Doc:          "timeout in seconds for UpdateChannelCheckpoint RPC call",
 		DefaultValue: "20",
@@ -3283,7 +3283,7 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		Key:          "datanode.channel.channelCheckpointUpdaterTick",
 		Version:      "2.4.0",
 		Doc:          "The frequency, in seconds, at which the channel checkpoint updater executes updates.",
-		DefaultValue: "5",
+		DefaultValue: "10",
 	}
 	p.ChannelCheckpointUpdaterTick.Init(base.mgr)
 
