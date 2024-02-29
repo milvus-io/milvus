@@ -44,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	mocks2 "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -389,7 +390,7 @@ func TestFlushForImport(t *testing.T) {
 	allocation, err = svr.segmentManager.allocSegmentForImport(
 		context.TODO(), 0, 1, "ch-1", 1, 1)
 	assert.NoError(t, err)
-	catalog := mocks.NewDataCoordCatalog(t)
+	catalog := mocks2.NewDataCoordCatalog(t)
 	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(errors.New("mock err"))
 	svr.meta.catalog = catalog
 	req.SegmentIDs = []UniqueID{allocation.SegmentID}
@@ -3714,10 +3715,10 @@ func TestGetFlushAllState(t *testing.T) {
 					}, nil).Maybe()
 			}
 
-			svr.meta.channelCPs = make(map[string]*msgpb.MsgPosition)
+			svr.meta.channelCPs = newChannelCps()
 			for i, ts := range test.ChannelCPs {
 				channel := vchannels[i]
-				svr.meta.channelCPs[channel] = &msgpb.MsgPosition{
+				svr.meta.channelCPs.checkpoints[channel] = &msgpb.MsgPosition{
 					ChannelName: channel,
 					Timestamp:   ts,
 				}
@@ -3790,11 +3791,11 @@ func TestGetFlushAllStateWithDB(t *testing.T) {
 					CollectionName:      collectionName,
 				}, nil).Maybe()
 
-			svr.meta.channelCPs = make(map[string]*msgpb.MsgPosition)
+			svr.meta.channelCPs = newChannelCps()
 			channelCPs := []Timestamp{100, 200}
 			for i, ts := range channelCPs {
 				channel := vchannels[i]
-				svr.meta.channelCPs[channel] = &msgpb.MsgPosition{
+				svr.meta.channelCPs.checkpoints[channel] = &msgpb.MsgPosition{
 					ChannelName: channel,
 					Timestamp:   ts,
 				}
@@ -4189,10 +4190,21 @@ func TestDataCoordServer_UpdateChannelCheckpoint(t *testing.T) {
 		assert.NoError(t, err)
 		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 
-		req.Position = nil
+		req = &datapb.UpdateChannelCheckpointRequest{
+			Base: &commonpb.MsgBase{
+				SourceID: paramtable.GetNodeID(),
+			},
+			VChannel: mockVChannel,
+			ChannelCheckpoints: []*msgpb.MsgPosition{{
+				ChannelName: mockPChannel,
+				Timestamp:   1000,
+				MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
+			}},
+		}
+
 		resp, err = svr.UpdateChannelCheckpoint(context.TODO(), req)
 		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_UnexpectedError, resp.ErrorCode)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 }
 

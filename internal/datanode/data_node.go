@@ -357,6 +357,8 @@ func (node *DataNode) Start() error {
 			node.timeTickSender.start()
 		}
 
+		go node.channelCheckpointUpdater.start()
+
 		// Start node watch node
 		node.startWatchChannelsAtBackground(node.ctx)
 

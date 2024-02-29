@@ -93,25 +93,21 @@ func (ttn *ttNode) Operate(in []Msg) []Msg {
 
 	// Do not block and async updateCheckPoint
 	channelPos := ttn.channel.getChannelCheckpoint(fgMsg.endPositions[0])
-	nonBlockingNotify := func() {
-		ttn.updateChannelCP(channelPos, curTs)
-	}
 
-	if curTs.Sub(ttn.lastUpdateTime.Load()) >= updateChanCPInterval {
-		nonBlockingNotify()
+	if curTs.Sub(ttn.lastUpdateTime.Load()) >= Params.DataNodeCfg.UpdateChannelCheckpointInterval.GetAsDuration(time.Second) {
+		ttn.updateChannelCP(channelPos, curTs)
 		return []Msg{}
 	}
 
 	if channelPos.GetTimestamp() >= ttn.channel.getFlushTs() {
-		nonBlockingNotify()
+		ttn.updateChannelCP(channelPos, curTs)
 	}
 	return []Msg{}
 }
 
-func (ttn *ttNode) updateChannelCP(channelPos *msgpb.MsgPosition, curTs time.Time) error {
-	callBack := func() error {
+func (ttn *ttNode) updateChannelCP(channelPos *msgpb.MsgPosition, curTs time.Time) {
+	callBack := func() {
 		channelCPTs, _ := tsoutil.ParseTS(channelPos.GetTimestamp())
-		ttn.lastUpdateTime.Store(curTs)
 		log.Debug("UpdateChannelCheckpoint success",
 			zap.String("channel", ttn.vChannelName),
 			zap.Uint64("cpTs", channelPos.GetTimestamp()),
@@ -120,11 +116,9 @@ func (ttn *ttNode) updateChannelCP(channelPos *msgpb.MsgPosition, curTs time.Tim
 		if channelPos.GetTimestamp() >= ttn.channel.getFlushTs() {
 			ttn.channel.setFlushTs(math.MaxUint64)
 		}
-		return nil
 	}
-
-	err := ttn.cpUpdater.updateChannelCP(channelPos, callBack)
-	return err
+	ttn.cpUpdater.addTask(channelPos, callBack)
+	ttn.lastUpdateTime.Store(curTs)
 }
 
 func newTTNode(config *nodeConfig, broker broker.Broker, cpUpdater *channelCheckpointUpdater) (*ttNode, error) {

@@ -632,8 +632,9 @@ message UpdateSegmentStatisticsRequest {
 
 message UpdateChannelCheckpointRequest {
   common.MsgBase base = 1;
-  string vChannel = 2;
-  msg.MsgPosition position = 3;
+  string vChannel = 2; // deprecated, keep it for compatibility
+  msg.MsgPosition position = 3; // deprecated, keep it for compatibility
+  repeated msg.MsgPosition channel_checkpoints = 4;
 }
 
 message ResendSegmentStatsRequest {
