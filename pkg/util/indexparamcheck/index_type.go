@@ -46,7 +46,8 @@ func IsMmapSupported(indexType IndexType) bool {
 		indexType == IndexFaissIvfSQ8 ||
 		indexType == IndexFaissBinIDMap ||
 		indexType == IndexFaissBinIvfFlat ||
-		indexType == IndexHNSW
+		indexType == IndexHNSW ||
+		indexType == IndexScaNN
 }
 
 func IsDiskIndex(indexType IndexType) bool {
