@@ -93,13 +93,16 @@ else
 fi
 
 # Run bulk insert test
-if [[ -n "${TEST_TIMEOUT:-}" ]]; then
+# if MILVUS_HELM_RELEASE_NAME contains "msop", then it is one pod mode, skip the bulk insert test
+if [[ "${MILVUS_HELM_RELEASE_NAME}" != *"msop"* ]]; then
+  if [[ -n "${TEST_TIMEOUT:-}" ]]; then
 
-  timeout  "${TEST_TIMEOUT}" pytest testcases/test_bulk_insert.py --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME} \
-                                     --html=${CI_LOG_PATH}/report_bulk_insert.html  --self-contained-html
-else
-  pytest testcases/test_bulk_insert.py --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME} \
-                                     --html=${CI_LOG_PATH}/report_bulk_insert.html --self-contained-html
+    timeout  "${TEST_TIMEOUT}" pytest testcases/test_bulk_insert.py --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME} \
+                                      --html=${CI_LOG_PATH}/report_bulk_insert.html  --self-contained-html
+  else
+    pytest testcases/test_bulk_insert.py --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME} \
+                                      --html=${CI_LOG_PATH}/report_bulk_insert.html --self-contained-html
+  fi
 fi
 
 # # Run concurrent test with 5 processes

@@ -199,9 +199,14 @@ func (s *Server) Run() error {
 }
 
 // Stop stops Datanode's grpc service.
-func (s *Server) Stop() error {
+func (s *Server) Stop() (err error) {
 	Params := &paramtable.Get().DataNodeGrpcServerCfg
-	log.Debug("Datanode stop", zap.String("Address", Params.GetAddress()))
+	logger := log.With(zap.String("address", Params.GetAddress()))
+	logger.Info("Datanode stopping")
+	defer func() {
+		logger.Info("Datanode stopped", zap.Error(err))
+	}()
+
 	s.cancel()
 	if s.etcdCli != nil {
 		defer s.etcdCli.Close()
@@ -210,7 +215,7 @@ func (s *Server) Stop() error {
 		utils.GracefulStopGRPCServer(s.grpcServer)
 	}
 
-	err := s.datanode.Stop()
+	err = s.datanode.Stop()
 	if err != nil {
 		return err
 	}
