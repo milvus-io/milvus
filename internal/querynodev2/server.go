@@ -37,7 +37,6 @@ import (
 	"runtime/debug"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 	"unsafe"
 
@@ -168,17 +167,8 @@ func (node *QueryNode) Register() error {
 	// start liveness check
 	metrics.NumNodes.WithLabelValues(fmt.Sprint(node.GetNodeID()), typeutil.QueryNodeRole).Inc()
 	node.session.LivenessCheck(node.ctx, func() {
-		log.Error("Query Node disconnected from etcd, process will exit", zap.Int64("Server Id", node.GetNodeID()))
-		if err := node.Stop(); err != nil {
-			log.Fatal("failed to stop server", zap.Error(err))
-		}
-		metrics.NumNodes.WithLabelValues(fmt.Sprint(node.GetNodeID()), typeutil.QueryNodeRole).Dec()
-		// manually send signal to starter goroutine
-		if node.session.TriggerKill {
-			if p, err := os.FindProcess(os.Getpid()); err == nil {
-				p.Signal(syscall.SIGINT)
-			}
-		}
+		log.Error("Query Node disconnected from etcd, process will exit", zap.Int64("Server Id", paramtable.GetNodeID()))
+		os.Exit(1)
 	})
 	return nil
 }
@@ -418,6 +408,8 @@ func (node *QueryNode) Stop() error {
 			log.Warn("session fail to go stopping state", zap.Error(err))
 		} else {
 			metrics.StoppingBalanceNodeNum.WithLabelValues().Set(1)
+			// TODO: Redundant timeout control, graceful stop timeout is controlled by outside by `component`.
+			// Integration test is still using it, Remove it in future.
 			timeoutCh := time.After(paramtable.Get().QueryNodeCfg.GracefulStopTimeout.GetAsDuration(time.Second))
 
 		outer:
@@ -438,7 +430,7 @@ func (node *QueryNode) Stop() error {
 
 				select {
 				case <-timeoutCh:
-					log.Warn("migrate data timed out", zap.Int64("ServerID", node.GetNodeID()),
+					log.Warn("migrate data timed out", zap.Int64("ServerID", paramtable.GetNodeID()),
 						zap.Int64s("sealedSegments", lo.Map(sealedSegments, func(s segments.Segment, i int) int64 {
 							return s.ID()
 						})),
@@ -448,10 +440,18 @@ func (node *QueryNode) Stop() error {
 						zap.Int("channelNum", channelNum),
 					)
 					break outer
-
 				case <-time.After(time.Second):
 					metrics.StoppingBalanceSegmentNum.WithLabelValues(fmt.Sprint(node.GetNodeID())).Set(float64(len(sealedSegments)))
 					metrics.StoppingBalanceChannelNum.WithLabelValues(fmt.Sprint(node.GetNodeID())).Set(float64(channelNum))
+					log.Info("migrate data...", zap.Int64("ServerID", paramtable.GetNodeID()),
+						zap.Int64s("sealedSegments", lo.Map(sealedSegments, func(s segments.Segment, i int) int64 {
+							return s.ID()
+						})),
+						zap.Int64s("growingSegments", lo.Map(growingSegments, func(t segments.Segment, i int) int64 {
+							return t.ID()
+						})),
+						zap.Int("channelNum", channelNum),
+					)
 				}
 			}
 

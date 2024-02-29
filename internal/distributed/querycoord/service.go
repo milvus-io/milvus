@@ -272,9 +272,14 @@ func (s *Server) start() error {
 }
 
 // Stop stops QueryCoord's grpc service.
-func (s *Server) Stop() error {
+func (s *Server) Stop() (err error) {
 	Params := &paramtable.Get().QueryCoordGrpcServerCfg
-	log.Debug("QueryCoord stop", zap.String("Address", Params.GetAddress()))
+	logger := log.With(zap.String("address", Params.GetAddress()))
+	logger.Info("QueryCoord stopping")
+	defer func() {
+		logger.Info("QueryCoord stopped", zap.Error(err))
+	}()
+
 	if s.etcdCli != nil {
 		defer s.etcdCli.Close()
 	}
@@ -282,9 +287,7 @@ func (s *Server) Stop() error {
 	if s.grpcServer != nil {
 		utils.GracefulStopGRPCServer(s.grpcServer)
 	}
-	err := s.queryCoord.Stop()
-
-	return err
+	return s.queryCoord.Stop()
 }
 
 // SetRootCoord sets root coordinator's client

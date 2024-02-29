@@ -695,9 +695,13 @@ func (s *Server) start() error {
 }
 
 // Stop stop the Proxy Server
-func (s *Server) Stop() error {
+func (s *Server) Stop() (err error) {
 	Params := &paramtable.Get().ProxyGrpcServerCfg
-	log.Debug("Proxy stop", zap.String("internal address", Params.GetInternalAddress()), zap.String("external address", Params.GetInternalAddress()))
+	logger := log.With(zap.String("internal address", Params.GetInternalAddress()), zap.String("external address", Params.GetInternalAddress()))
+	logger.Info("Proxy stopping")
+	defer func() {
+		logger.Info("Proxy stopped", zap.Error(err))
+	}()
 
 	if s.etcdCli != nil {
 		defer s.etcdCli.Close()
@@ -741,7 +745,7 @@ func (s *Server) Stop() error {
 
 	s.wg.Wait()
 
-	err := s.proxy.Stop()
+	err = s.proxy.Stop()
 	if err != nil {
 		return err
 	}
