@@ -65,7 +65,7 @@ require (
 	github.com/milvus-io/milvus/pkg v0.0.0-00010101000000-000000000000
 	github.com/pingcap/log v1.1.1-0.20221015072633-39906604fb81
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
-	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.0.841
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.0.865
 	golang.org/x/net v0.19.0
 )
 
