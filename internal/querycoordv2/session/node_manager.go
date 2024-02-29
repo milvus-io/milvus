@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/blang/semver/v4"
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -108,6 +109,7 @@ type NodeInfo struct {
 	addr          string
 	state         State
 	lastHeartbeat *atomic.Int64
+	version       semver.Version
 }
 
 func (n *NodeInfo) ID() int64 {
@@ -156,6 +158,14 @@ func (n *NodeInfo) UpdateStats(opts ...StatsOption) {
 		opt(n)
 	}
 	n.mu.Unlock()
+}
+
+func (n *NodeInfo) SetVersion(v semver.Version) {
+	n.version = v
+}
+
+func (n *NodeInfo) Version() semver.Version {
+	return n.version
 }
 
 func NewNodeInfo(id int64, addr string) *NodeInfo {
