@@ -18,69 +18,14 @@
 package grpcclient
 
 import (
-	"bytes"
-	"io"
+	_ "google.golang.org/grpc/encoding/gzip"
 
-	"github.com/klauspost/compress/zstd"
-	"google.golang.org/grpc/encoding"
+	_ "github.com/milvus-io/milvus/pkg/util/compressor/deflate"
+	_ "github.com/milvus-io/milvus/pkg/util/compressor/lz4"
+	_ "github.com/milvus-io/milvus/pkg/util/compressor/snappy"
+	_ "github.com/milvus-io/milvus/pkg/util/compressor/zstd"
 )
 
 const (
 	None = ""
-	Zstd = "zstd"
 )
-
-type grpcCompressor struct {
-	encoder *zstd.Encoder
-	decoder *zstd.Decoder
-}
-
-func init() {
-	enc, _ := zstd.NewWriter(nil)
-	dec, _ := zstd.NewReader(nil)
-	c := &grpcCompressor{
-		encoder: enc,
-		decoder: dec,
-	}
-	encoding.RegisterCompressor(c)
-}
-
-func (c *grpcCompressor) Compress(w io.Writer) (io.WriteCloser, error) {
-	return &zstdWriteCloser{
-		enc:    c.encoder,
-		writer: w,
-	}, nil
-}
-
-type zstdWriteCloser struct {
-	enc    *zstd.Encoder
-	writer io.Writer    // Compressed data will be written here.
-	buf    bytes.Buffer // Buffer uncompressed data here, compress on Close.
-}
-
-func (z *zstdWriteCloser) Write(p []byte) (int, error) {
-	return z.buf.Write(p)
-}
-
-func (z *zstdWriteCloser) Close() error {
-	compressed := z.enc.EncodeAll(z.buf.Bytes(), nil)
-	_, err := io.Copy(z.writer, bytes.NewReader(compressed))
-	return err
-}
-
-func (c *grpcCompressor) Decompress(r io.Reader) (io.Reader, error) {
-	compressed, err := io.ReadAll(r)
-	if err != nil {
-		return nil, err
-	}
-
-	uncompressed, err := c.decoder.DecodeAll(compressed, nil)
-	if err != nil {
-		return nil, err
-	}
-	return bytes.NewReader(uncompressed), nil
-}
-
-func (c *grpcCompressor) Name() string {
-	return Zstd
-}

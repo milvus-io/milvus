@@ -25,6 +25,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -36,9 +37,11 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/federpb"
@@ -46,7 +49,9 @@ import (
 	grpcproxyclient "github.com/milvus-io/milvus/internal/distributed/proxy/client"
 	"github.com/milvus-io/milvus/internal/distributed/proxy/httpserver"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proxy"
+	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	milvusmock "github.com/milvus-io/milvus/internal/util/mock"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -185,6 +190,43 @@ func runAndWaitForServerReady(server *Server) error {
 }
 
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+func callByGrpcClient(compressionName string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	conn, err := grpc.DialContext(ctx, "localhost:"+paramtable.Get().ProxyGrpcServerCfg.Port.GetValue(),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultCallOptions(
+			grpc.UseCompressor(compressionName),
+		))
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	client := milvuspb.NewMilvusServiceClient(conn)
+	_, err = client.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
+	return err
+}
+
+func callByOtherComponents(compressionName string) error {
+	clientBase := grpcclient.NewClientBase[proxypb.ProxyClient](&paramtable.Get().ProxyGrpcClientCfg, "milvus.proto.proxy.Proxy")
+	clientBase.CompressionEnabled = true
+	clientBase.CompressionType = compressionName
+	clientBase.SetGetAddrFunc(func() (string, error) {
+		return "localhost:" + paramtable.Get().ProxyGrpcServerCfg.InternalPort.GetValue(), nil
+	})
+	clientBase.SetNewGrpcClientFunc(func(cc *grpc.ClientConn) proxypb.ProxyClient {
+		return proxypb.NewProxyClient(cc)
+	})
+	defer clientBase.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, err := clientBase.Call(ctx, func(client proxypb.ProxyClient) (any, error) {
+		return client.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
+	})
+	return err
+}
+
 func Test_NewServer(t *testing.T) {
 	paramtable.Init()
 	ctx := context.Background()
@@ -215,6 +257,28 @@ func Test_NewServer(t *testing.T) {
 	t.Run("GetComponentStates", func(t *testing.T) {
 		_, err := server.GetComponentStates(ctx, nil)
 		assert.NoError(t, err)
+	})
+
+	t.Run("GetComponentStatesByClient", func(t *testing.T) {
+		mockProxy.EXPECT().GetStatisticsChannel(mock.Anything, mock.Anything).Return(nil, nil)
+		err := server.Run()
+		assert.NoError(t, err)
+		defer server.Stop()
+		for _, compressionName := range []string{"zstd", "snappy", "gzip", "deflate"} {
+			err = callByOtherComponents(compressionName)
+			assert.NoError(t, err)
+			err = callByGrpcClient(compressionName)
+			// because of grpc_auth.UnaryServerInterceptor(proxy.AuthenticationInterceptor)
+			assert.Equal(t, true, strings.HasSuffix(err.Error(),
+				"service unavailable: internal: Milvus Proxy is not ready yet. please wait"))
+		}
+		invalidCompression := "invalid"
+		err = callByOtherComponents(invalidCompression)
+		assert.Equal(t, true, strings.HasSuffix(err.Error(),
+			status.Errorf(codes.Internal, "grpc: Compressor is not installed for requested grpc-encoding \"%s\"", invalidCompression).Error()))
+		err = callByGrpcClient(invalidCompression)
+		assert.Equal(t, true, strings.HasSuffix(err.Error(),
+			status.Errorf(codes.Internal, "grpc: Compressor is not installed for requested grpc-encoding \"%s\"", invalidCompression).Error()))
 	})
 
 	t.Run("GetStatisticsChannel", func(t *testing.T) {
