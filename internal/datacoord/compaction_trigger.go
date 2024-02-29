@@ -343,7 +343,7 @@ func (t *compactionTrigger) updateSegmentMaxSize(segments []*SegmentInfo) (bool,
 				log.Info("segment max row recalculated",
 					zap.Int64("segmentID", segmentInfo.GetID()),
 					zap.Int64("old max rows", segmentInfo.GetMaxRowNum()),
-					zap.Int64("new max rows", int64(newMaxRows)),
+					zap.Int64("new max rows", newMaxRows),
 					zap.Bool("isDiskANN", isDiskAnn),
 				)
 				err := t.meta.UpdateSegment(segmentInfo.GetID(), SetMaxRowCount(newMaxRows))
