@@ -81,6 +81,7 @@ const (
 	functionLabelName        = "function_name"
 	queryTypeLabelName       = "query_type"
 	collectionName           = "collection_name"
+	databaseLabelName        = "db_name"
 	indexName                = "index_name"
 	isVectorIndex            = "is_vector_index"
 	segmentStateLabelName    = "segment_state"
