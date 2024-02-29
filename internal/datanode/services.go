@@ -111,7 +111,6 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 			zap.Int64("serverID", serverID),
 		)
 
-		log.Info(fmt.Sprintf("debug by FlushSegments:%v:%v", serverID, req.GetBase().GetTargetID()))
 		return merr.Status(merr.WrapErrNodeNotMatch(req.GetBase().GetTargetID(), serverID)), nil
 	}
 
