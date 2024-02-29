@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/milvus-io/milvus/cmd/tools/migration/mmap"
@@ -23,8 +25,16 @@ import (
 )
 
 func main() {
-	yamlFile := "milvus.yaml"
-	prepareParams(yamlFile)
+	configPtr := flag.String("config", "", "Path to the configuration file")
+	flag.Parse()
+
+	if *configPtr == "" {
+		log.Error("Config file path is required")
+		flag.Usage()
+		os.Exit(1)
+	}
+
+	prepareParams(*configPtr)
 	allocator := prepareTsoAllocator()
 	rootCoordMeta := prepareRootCoordMeta(context.Background(), allocator)
 	dataCoordCatalog := prepareDataCoordCatalog()
