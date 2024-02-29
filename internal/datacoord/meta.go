@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -913,6 +914,33 @@ func (m *meta) SelectSegments(selector SegmentInfoSelector) []*SegmentInfo {
 	for _, info := range segments {
 		if selector(info) {
 			ret = append(ret, info)
+		}
+	}
+	return ret
+}
+
+func (m *meta) SelectSegmentIndexes(selector SegmentInfoSelector) map[int64]*indexStats {
+	m.RLock()
+	defer m.RUnlock()
+	ret := make(map[int64]*indexStats)
+	for _, info := range m.segments.segments {
+		if selector(info) {
+			s := &indexStats{
+				ID:             info.GetID(),
+				numRows:        info.GetNumOfRows(),
+				compactionFrom: info.GetCompactionFrom(),
+				indexStates:    make(map[int64]*indexpb.SegmentIndexState),
+				state:          info.GetState(),
+				lastExpireTime: info.GetLastExpireTime(),
+			}
+			for indexID, segIndex := range info.segmentIndexes {
+				s.indexStates[indexID] = &indexpb.SegmentIndexState{
+					SegmentID:  segIndex.SegmentID,
+					State:      segIndex.IndexState,
+					FailReason: segIndex.FailReason,
+				}
+			}
+			ret[info.GetID()] = s
 		}
 	}
 	return ret
