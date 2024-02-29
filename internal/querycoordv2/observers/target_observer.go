@@ -351,7 +351,7 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 			if updateVersionAction != nil {
 				actions = append(actions, updateVersionAction)
 			}
-			if !ob.sync(ctx, replica.GetID(), leaderView, actions) {
+			if !ob.sync(ctx, replica, leaderView, actions) {
 				return false
 			}
 		}
@@ -360,10 +360,11 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 	return true
 }
 
-func (ob *TargetObserver) sync(ctx context.Context, replicaID int64, leaderView *meta.LeaderView, diffs []*querypb.SyncAction) bool {
+func (ob *TargetObserver) sync(ctx context.Context, replica *meta.Replica, leaderView *meta.LeaderView, diffs []*querypb.SyncAction) bool {
 	if len(diffs) == 0 {
 		return true
 	}
+	replicaID := replica.GetID()
 
 	log := log.With(
 		zap.Int64("leaderID", leaderView.ID),
@@ -399,9 +400,11 @@ func (ob *TargetObserver) sync(ctx context.Context, replicaID int64, leaderView 
 		Actions:      diffs,
 		Schema:       collectionInfo.GetSchema(),
 		LoadMeta: &querypb.LoadMetaInfo{
-			LoadType:     ob.meta.GetLoadType(leaderView.CollectionID),
-			CollectionID: leaderView.CollectionID,
-			PartitionIDs: partitions,
+			LoadType:      ob.meta.GetLoadType(leaderView.CollectionID),
+			CollectionID:  leaderView.CollectionID,
+			PartitionIDs:  partitions,
+			DbName:        collectionInfo.GetDbName(),
+			ResourceGroup: replica.GetResourceGroup(),
 		},
 		Version:       time.Now().UnixNano(),
 		IndexInfoList: indexInfo,

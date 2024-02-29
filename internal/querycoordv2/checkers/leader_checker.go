@@ -102,8 +102,8 @@ func (c *LeaderChecker) Check(ctx context.Context) []task.Task {
 				leaderViews := c.dist.LeaderViewManager.GetByCollectionAndNode(replica.GetCollectionID(), node)
 				for ch, leaderView := range leaderViews {
 					dist := c.dist.SegmentDistManager.GetByFilter(meta.WithChannel(ch), meta.WithReplica(replica))
-					tasks = append(tasks, c.findNeedLoadedSegments(ctx, replica.ID, leaderView, dist)...)
-					tasks = append(tasks, c.findNeedRemovedSegments(ctx, replica.ID, leaderView, dist)...)
+					tasks = append(tasks, c.findNeedLoadedSegments(ctx, replica, leaderView, dist)...)
+					tasks = append(tasks, c.findNeedRemovedSegments(ctx, replica, leaderView, dist)...)
 				}
 			}
 		}
@@ -112,10 +112,10 @@ func (c *LeaderChecker) Check(ctx context.Context) []task.Task {
 	return tasks
 }
 
-func (c *LeaderChecker) findNeedLoadedSegments(ctx context.Context, replica int64, leaderView *meta.LeaderView, dist []*meta.Segment) []task.Task {
+func (c *LeaderChecker) findNeedLoadedSegments(ctx context.Context, replica *meta.Replica, leaderView *meta.LeaderView, dist []*meta.Segment) []task.Task {
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", leaderView.CollectionID),
-		zap.Int64("replica", replica),
+		zap.Int64("replica", replica.GetID()),
 		zap.String("channel", leaderView.Channel),
 		zap.Int64("leaderViewID", leaderView.ID),
 	)
@@ -154,10 +154,10 @@ func (c *LeaderChecker) findNeedLoadedSegments(ctx context.Context, replica int6
 	return ret
 }
 
-func (c *LeaderChecker) findNeedRemovedSegments(ctx context.Context, replica int64, leaderView *meta.LeaderView, dists []*meta.Segment) []task.Task {
+func (c *LeaderChecker) findNeedRemovedSegments(ctx context.Context, replica *meta.Replica, leaderView *meta.LeaderView, dists []*meta.Segment) []task.Task {
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", leaderView.CollectionID),
-		zap.Int64("replica", replica),
+		zap.Int64("replica", replica.GetID()),
 		zap.String("channel", leaderView.Channel),
 		zap.Int64("leaderViewID", leaderView.ID),
 	)

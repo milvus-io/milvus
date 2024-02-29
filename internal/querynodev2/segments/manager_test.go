@@ -46,7 +46,9 @@ func (s *ManagerSuite) SetupTest() {
 		schema := GenTestCollectionSchema("manager-suite", schemapb.DataType_Int64, true)
 		segment, err := NewSegment(
 			context.Background(),
-			NewCollection(s.collectionIDs[i], schema, GenTestIndexMeta(s.collectionIDs[i], schema), querypb.LoadType_LoadCollection),
+			NewCollection(s.collectionIDs[i], schema, GenTestIndexMeta(s.collectionIDs[i], schema), &querypb.LoadMetaInfo{
+				LoadType: querypb.LoadType_LoadCollection,
+			}),
 			s.types[i],
 			0,
 			&querypb.SegmentLoadInfo{
