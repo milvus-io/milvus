@@ -19,13 +19,13 @@ package datanode
 import (
 	"context"
 	"fmt"
-	"go.uber.org/atomic"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/datanode/broker"

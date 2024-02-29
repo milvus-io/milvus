@@ -18,11 +18,11 @@ package datanode
 
 import (
 	"context"
-	"go.uber.org/zap"
 	"sync"
 	"time"
 
 	"github.com/samber/lo"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/pkg/log"
