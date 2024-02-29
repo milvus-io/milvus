@@ -17,7 +17,10 @@
 package datanode
 
 import (
+	"context"
 	"fmt"
+	"go.uber.org/atomic"
+	"sync"
 	"testing"
 	"time"
 
@@ -44,25 +47,38 @@ func (s *ChannelCPUpdaterSuite) TestUpdate() {
 	defer paramtable.Get().Save(paramtable.Get().DataNodeCfg.ChannelCheckpointUpdaterTick.Key, "5")
 
 	b := broker.NewMockBroker(s.T())
-	b.EXPECT().UpdateChannelCheckpoint(mock.Anything, mock.Anything).Return(nil)
+	b.EXPECT().UpdateChannelCheckpoint(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, positions []*msgpb.MsgPosition) error {
+		time.Sleep(10 * time.Millisecond)
+		return nil
+	})
 	s.updater.dn.broker = b
 
 	go s.updater.start()
 	defer s.updater.close()
 
 	tasksNum := 100000
-	counter := 0
-	for i := 0; i < tasksNum; i++ {
-		s.updater.addTask(&msgpb.MsgPosition{
-			ChannelName: fmt.Sprintf("ch-%d", i),
-		}, func() {
-			counter++
-			fmt.Println(counter)
-		})
-	}
+	counter := atomic.NewInt64(0)
+	wg := &sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < tasksNum; i++ {
+			// add duplicated task with same timestamp
+			for j := 0; j < 10; j++ {
+				s.updater.addTask(&msgpb.MsgPosition{
+					ChannelName: fmt.Sprintf("ch-%d", i),
+					MsgID:       []byte{0},
+					Timestamp:   100,
+				}, func() {
+					counter.Add(1)
+				})
+			}
+		}
+	}()
 	s.Eventually(func() bool {
-		return counter == tasksNum
+		return counter.Load() == int64(tasksNum)
 	}, time.Second*10, time.Millisecond*100)
+	wg.Wait()
 }
 
 func TestChannelCPUpdater(t *testing.T) {

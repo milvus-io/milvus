@@ -84,6 +84,7 @@ func (ccu *channelCheckpointUpdater) execute() {
 
 	futures := make([]*conc.Future[any], 0)
 	for _, tasks := range taskGroups {
+		tasks := tasks
 		future := ccu.workerPool.Submit(func() (any, error) {
 			timeout := paramtable.Get().DataNodeCfg.UpdateChannelCheckpointRPCTimeout.GetAsDuration(time.Second)
 			ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -118,9 +119,13 @@ func (ccu *channelCheckpointUpdater) execute() {
 }
 
 func (ccu *channelCheckpointUpdater) addTask(channelPos *msgpb.MsgPosition, callback func()) {
+	if channelPos == nil || channelPos.GetMsgID() == nil || channelPos.GetChannelName() == "" {
+		log.Warn("illegal checkpoint", zap.Any("pos", channelPos))
+		return
+	}
 	channel := channelPos.GetChannelName()
 	ccu.mu.RLock()
-	if channelPos.GetTimestamp() <= ccu.tasks[channel].pos.GetTimestamp() {
+	if ccu.tasks[channel] != nil && channelPos.GetTimestamp() <= ccu.tasks[channel].pos.GetTimestamp() {
 		ccu.mu.RUnlock()
 		return
 	}
@@ -132,6 +137,12 @@ func (ccu *channelCheckpointUpdater) addTask(channelPos *msgpb.MsgPosition, call
 		pos:      channelPos,
 		callback: callback,
 	}
+}
+
+func (ccu *channelCheckpointUpdater) taskNum() int {
+	ccu.mu.RLock()
+	defer ccu.mu.RUnlock()
+	return len(ccu.tasks)
 }
 
 func (ccu *channelCheckpointUpdater) close() {

@@ -987,6 +987,22 @@ func TestChannelCP(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("UpdateChannelCheckpoints", func(t *testing.T) {
+		meta, err := newMemoryMeta()
+		assert.NoError(t, err)
+		assert.Equal(t, 0, len(meta.channelCPs.checkpoints))
+
+		err = meta.UpdateChannelCheckpoints(nil)
+		assert.NoError(t, err)
+		assert.Equal(t, 0, len(meta.channelCPs.checkpoints))
+
+		err = meta.UpdateChannelCheckpoints([]*msgpb.MsgPosition{pos, {
+			ChannelName: "",
+		}})
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(meta.channelCPs.checkpoints))
+	})
+
 	t.Run("GetChannelCheckpoint", func(t *testing.T) {
 		meta, err := newMemoryMeta()
 		assert.NoError(t, err)

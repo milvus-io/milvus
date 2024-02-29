@@ -1219,6 +1219,35 @@ func (m *meta) UpdateChannelCheckpoint(vChannel string, pos *msgpb.MsgPosition) 
 	return nil
 }
 
+// UpdateChannelCheckpoints updates and saves channel checkpoints.
+func (m *meta) UpdateChannelCheckpoints(positions []*msgpb.MsgPosition) error {
+	m.channelCPs.Lock()
+	defer m.channelCPs.Unlock()
+	toUpdates := lo.Filter(positions, func(pos *msgpb.MsgPosition, _ int) bool {
+		if pos == nil || pos.GetMsgID() == nil || pos.GetChannelName() == "" {
+			log.Warn("illegal channel cp", zap.Any("pos", pos))
+			return false
+		}
+		vChannel := pos.GetChannelName()
+		oldPosition, ok := m.channelCPs.checkpoints[vChannel]
+		return !ok || oldPosition.Timestamp < pos.Timestamp
+	})
+	err := m.catalog.SaveChannelCheckpoints(m.ctx, toUpdates)
+	if err != nil {
+		return err
+	}
+	for _, pos := range toUpdates {
+		channel := pos.GetChannelName()
+		m.channelCPs.checkpoints[channel] = pos
+		log.Info("UpdateChannelCheckpoint done", zap.String("channel", channel),
+			zap.Uint64("ts", pos.GetTimestamp()),
+			zap.Time("time", tsoutil.PhysicalTime(pos.GetTimestamp())))
+		ts, _ := tsoutil.ParseTS(pos.Timestamp)
+		metrics.DataCoordCheckpointUnixSeconds.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), channel).Set(float64(ts.Unix()))
+	}
+	return nil
+}
+
 func (m *meta) GetChannelCheckpoint(vChannel string) *msgpb.MsgPosition {
 	m.channelCPs.RLock()
 	defer m.channelCPs.RUnlock()

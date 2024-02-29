@@ -18,8 +18,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	mocks2 "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/types"
@@ -438,7 +438,7 @@ func (s *ServerSuite) TestFlushForImport() {
 	allocation, err = s.testServer.segmentManager.allocSegmentForImport(
 		context.TODO(), 0, 1, "ch-1", 1, 1)
 	s.NoError(err)
-	catalog := mocks.NewDataCoordCatalog(s.T())
+	catalog := mocks2.NewDataCoordCatalog(s.T())
 	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(errors.New("mock err"))
 	s.testServer.meta.catalog = catalog
 	req.SegmentIDs = []UniqueID{allocation.SegmentID}
@@ -785,7 +785,7 @@ func TestServer_GcConfirm(t *testing.T) {
 		s.stateCode.Store(commonpb.StateCode_Healthy)
 
 		m := &meta{}
-		catalog := mocks.NewDataCoordCatalog(t)
+		catalog := mocks2.NewDataCoordCatalog(t)
 		m.catalog = catalog
 
 		catalog.On("GcConfirm",

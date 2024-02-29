@@ -1464,14 +1464,10 @@ func (s *Server) UpdateChannelCheckpoint(ctx context.Context, req *datapb.Update
 		return merr.Success(), nil
 	}
 
-	// TODO: batched save multiple checkpoints
-	for _, pos := range req.GetChannelCheckpoints() {
-		err := s.meta.UpdateChannelCheckpoint(pos.GetChannelName(), pos)
-		if err != nil {
-			log.Warn("failed to UpdateChannelCheckpoint",
-				zap.String("vChannel", pos.GetChannelName()), zap.Error(err))
-			return merr.Status(err), nil
-		}
+	err := s.meta.UpdateChannelCheckpoints(req.GetChannelCheckpoints())
+	if err != nil {
+		log.Warn("failed to update channel checkpoint", zap.Error(err))
+		return merr.Status(err), nil
 	}
 
 	return merr.Success(), nil
