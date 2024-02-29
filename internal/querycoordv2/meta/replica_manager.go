@@ -30,6 +30,36 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
+// Deprecated: only for test, remove in future.
+// NewReplicaForPlanAtDefaultRG creates a new ReplicaForPlan.
+func NewReplicaForPlanAtDefaultRG(replicaID int64) *ReplicaForPlan {
+	return &ReplicaForPlan{
+		replicaID:     replicaID,
+		resourceGroup: DefaultResourceGroupName,
+	}
+}
+
+// Deprecated: ReplicaForPlan is a replica for querycoord balance plan.
+// TODO: should be same with Replica, but it has lock now, remove this struct after resource group enhancement.
+type ReplicaForPlan struct {
+	replicaID     int64
+	resourceGroup string
+}
+
+func (r *ReplicaForPlan) GetID() int64 {
+	if r == nil {
+		return -1
+	}
+	return r.replicaID
+}
+
+func (r *ReplicaForPlan) GetResourceGroup() string {
+	if r == nil {
+		return ""
+	}
+	return r.resourceGroup
+}
+
 type Replica struct {
 	*querypb.Replica
 	nodes   typeutil.UniqueSet // a helper field for manipulating replica's Nodes slice field
@@ -92,6 +122,19 @@ func (replica *Replica) Clone() *Replica {
 	return &Replica{
 		Replica: proto.Clone(replica.Replica).(*querypb.Replica),
 		nodes:   typeutil.NewUniqueSet(replica.Replica.Nodes...),
+	}
+}
+
+func (replica *Replica) GetReplicaForPlan() *ReplicaForPlan {
+	// Plan can be nil if replica is nil
+	if replica == nil {
+		return nil
+	}
+	replica.rwmutex.RLock()
+	defer replica.rwmutex.RUnlock()
+	return &ReplicaForPlan{
+		replicaID:     replica.GetID(),
+		resourceGroup: replica.GetResourceGroup(),
 	}
 }
 

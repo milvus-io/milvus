@@ -252,7 +252,7 @@ func (b *ScoreBasedBalancer) genStoppingSegmentPlan(replica *meta.Replica, onlin
 		plans := b.AssignSegment(replica.CollectionID, segments, onlineNodes)
 		for i := range plans {
 			plans[i].From = nodeID
-			plans[i].ReplicaID = replica.ID
+			plans[i].Replica = replica.GetReplicaForPlan()
 		}
 		segmentPlans = append(segmentPlans, plans...)
 	}
@@ -316,7 +316,7 @@ func (b *ScoreBasedBalancer) genSegmentPlan(replica *meta.Replica, onlineNodes [
 	segmentPlans := b.AssignSegment(replica.CollectionID, segmentsToMove, onlineNodes)
 	for i := range segmentPlans {
 		segmentPlans[i].From = segmentPlans[i].Segment.Node
-		segmentPlans[i].ReplicaID = replica.ID
+		segmentPlans[i].Replica = replica.GetReplicaForPlan()
 	}
 
 	return segmentPlans

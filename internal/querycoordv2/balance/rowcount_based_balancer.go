@@ -218,7 +218,7 @@ func (b *RowCountBasedBalancer) genStoppingSegmentPlan(replica *meta.Replica, on
 		plans := b.AssignSegment(replica.CollectionID, segments, onlineNodes)
 		for i := range plans {
 			plans[i].From = nodeID
-			plans[i].ReplicaID = replica.ID
+			plans[i].Replica = replica.GetReplicaForPlan()
 		}
 		segmentPlans = append(segmentPlans, plans...)
 	}
@@ -286,7 +286,7 @@ func (b *RowCountBasedBalancer) genSegmentPlan(replica *meta.Replica, onlineNode
 	segmentPlans := b.AssignSegment(replica.CollectionID, segmentsToMove, nodesWithLessRow)
 	for i := range segmentPlans {
 		segmentPlans[i].From = segmentPlans[i].Segment.Node
-		segmentPlans[i].ReplicaID = replica.ID
+		segmentPlans[i].Replica = replica.GetReplicaForPlan()
 	}
 
 	return segmentPlans
@@ -299,7 +299,7 @@ func (b *RowCountBasedBalancer) genStoppingChannelPlan(replica *meta.Replica, on
 		plans := b.AssignChannel(dmChannels, onlineNodes)
 		for i := range plans {
 			plans[i].From = nodeID
-			plans[i].ReplicaID = replica.ID
+			plans[i].Replica = replica.GetReplicaForPlan()
 		}
 		channelPlans = append(channelPlans, plans...)
 	}
@@ -337,7 +337,7 @@ func (b *RowCountBasedBalancer) genChannelPlan(replica *meta.Replica, onlineNode
 		channelPlans := b.AssignChannel(channelsToMove, nodeWithLessChannel)
 		for i := range channelPlans {
 			channelPlans[i].From = channelPlans[i].Channel.Node
-			channelPlans[i].ReplicaID = replica.ID
+			channelPlans[i].Replica = replica.GetReplicaForPlan()
 		}
 
 		return channelPlans

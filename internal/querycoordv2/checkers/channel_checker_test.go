@@ -104,10 +104,10 @@ func (suite *ChannelCheckerTestSuite) createMockBalancer() balance.Balance {
 		plans := make([]balance.ChannelAssignPlan, 0, len(channels))
 		for i, c := range channels {
 			plan := balance.ChannelAssignPlan{
-				Channel:   c,
-				From:      -1,
-				To:        nodes[i%len(nodes)],
-				ReplicaID: -1,
+				Channel: c,
+				From:    -1,
+				To:      nodes[i%len(nodes)],
+				Replica: nil,
 			}
 			plans = append(plans, plan)
 		}

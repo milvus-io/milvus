@@ -296,6 +296,8 @@ message LoadMetaInfo {
     int64 collectionID = 2;
     repeated int64 partitionIDs = 3;
     string metric_type = 4 [deprecated = true];
+    string dbName = 5; // Only used for metrics label.
+    string resourceGroup = 6; // Only used for metrics label.
 }
 
 message WatchDmChannelsRequest {

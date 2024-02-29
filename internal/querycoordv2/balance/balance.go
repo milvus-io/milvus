@@ -26,27 +26,27 @@ import (
 )
 
 type SegmentAssignPlan struct {
-	Segment   *meta.Segment
-	ReplicaID int64
-	From      int64 // -1 if empty
-	To        int64
+	Segment *meta.Segment
+	Replica *meta.ReplicaForPlan // TODO: meta.Replica has lock now, struct is hard to use, fix it after resource group enhancement.
+	From    int64                // -1 if empty
+	To      int64
 }
 
 func (segPlan *SegmentAssignPlan) ToString() string {
 	return fmt.Sprintf("SegmentPlan:[collectionID: %d, replicaID: %d, segmentID: %d, from: %d, to: %d]\n",
-		segPlan.Segment.CollectionID, segPlan.ReplicaID, segPlan.Segment.ID, segPlan.From, segPlan.To)
+		segPlan.Segment.CollectionID, segPlan.Replica.GetID(), segPlan.Segment.ID, segPlan.From, segPlan.To)
 }
 
 type ChannelAssignPlan struct {
-	Channel   *meta.DmChannel
-	ReplicaID int64
-	From      int64
-	To        int64
+	Channel *meta.DmChannel
+	Replica *meta.ReplicaForPlan // TODO: meta.Replica has lock now, struct is hard to use, fix it after resource group enhancement.
+	From    int64
+	To      int64
 }
 
 func (chanPlan *ChannelAssignPlan) ToString() string {
 	return fmt.Sprintf("ChannelPlan:[collectionID: %d, channel: %s, replicaID: %d, from: %d, to: %d]\n",
-		chanPlan.Channel.CollectionID, chanPlan.Channel.ChannelName, chanPlan.ReplicaID, chanPlan.From, chanPlan.To)
+		chanPlan.Channel.CollectionID, chanPlan.Channel.ChannelName, chanPlan.Replica.GetID(), chanPlan.From, chanPlan.To)
 }
 
 var (

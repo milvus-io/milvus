@@ -317,11 +317,13 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 		log.Warn("fail to get index meta of collection")
 		return err
 	}
-	loadMeta := packLoadMeta(
-		ex.meta.GetLoadType(task.CollectionID()),
-		task.CollectionID(),
-		partitions...,
-	)
+	loadMeta := &querypb.LoadMetaInfo{
+		LoadType:      ex.meta.GetLoadType(task.CollectionID()),
+		CollectionID:  task.CollectionID(),
+		PartitionIDs:  partitions,
+		DbName:        collectionInfo.GetDbName(),
+		ResourceGroup: task.ResourceGroup(),
+	}
 
 	dmChannel := ex.targetMgr.GetDmChannel(task.CollectionID(), action.ChannelName(), meta.NextTarget)
 	if dmChannel == nil {
@@ -561,11 +563,14 @@ func (ex *Executor) getMetaInfo(ctx context.Context, task Task) (*milvuspb.Descr
 		return nil, nil, nil, err
 	}
 
-	loadMeta := packLoadMeta(
-		ex.meta.GetLoadType(collectionID),
-		collectionID,
-		partitions...,
-	)
+	loadMeta := &querypb.LoadMetaInfo{
+		LoadType:      ex.meta.GetLoadType(collectionID),
+		CollectionID:  collectionID,
+		PartitionIDs:  partitions,
+		DbName:        collectionInfo.GetDbName(),
+		ResourceGroup: task.ResourceGroup(),
+	}
+
 	// get channel first, in case of target updated after segment info fetched
 	channel := ex.targetMgr.GetDmChannel(collectionID, shard, meta.NextTargetFirst)
 	if channel == nil {

@@ -144,7 +144,7 @@ func (s *Server) balanceSegments(ctx context.Context, req *querypb.LoadBalanceRe
 			Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond),
 			task.WrapIDSource(req.GetBase().GetMsgID()),
 			req.GetCollectionID(),
-			replica.GetID(),
+			replica.GetReplicaForPlan(),
 			task.NewSegmentActionWithScope(plan.To, task.ActionTypeGrow, plan.Segment.GetInsertChannel(), plan.Segment.GetID(), querypb.DataScope_Historical),
 			task.NewSegmentActionWithScope(srcNode, task.ActionTypeReduce, plan.Segment.GetInsertChannel(), plan.Segment.GetID(), querypb.DataScope_Historical),
 		)

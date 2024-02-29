@@ -59,7 +59,7 @@ type TaskSuite struct {
 
 	// Data
 	collection      int64
-	replica         int64
+	replica         *meta.ReplicaForPlan
 	subChannels     []string
 	unsubChannels   []string
 	moveChannels    []string
@@ -86,7 +86,7 @@ type TaskSuite struct {
 func (suite *TaskSuite) SetupSuite() {
 	paramtable.Init()
 	suite.collection = 1000
-	suite.replica = 10
+	suite.replica = meta.NewReplicaForPlanAtDefaultRG(10)
 	suite.subChannels = []string{
 		"sub-0",
 		"sub-1",
@@ -191,8 +191,7 @@ func (suite *TaskSuite) BeforeTest(suiteName, testName string) {
 				PartitionID:  1,
 			},
 		})
-		suite.meta.ReplicaManager.Put(
-			utils.CreateTestReplica(suite.replica, suite.collection, []int64{1, 2, 3}))
+		suite.meta.ReplicaManager.Put(utils.CreateTestReplica(suite.replica.GetID(), suite.collection, []int64{1, 2, 3}))
 	}
 }
 
@@ -349,7 +348,7 @@ func (suite *TaskSuite) TestUnsubscribeChannelTask() {
 			timeout,
 			WrapIDSource(0),
 			suite.collection,
-			-1,
+			nil,
 			NewChannelAction(targetNode, ActionTypeReduce, channel),
 		)
 
@@ -1343,39 +1342,39 @@ func (suite *TaskSuite) TestLeaderTaskSet() {
 }
 
 func (suite *TaskSuite) TestCreateTaskBehavior() {
-	chanelTask, err := NewChannelTask(context.TODO(), 5*time.Second, WrapIDSource(0), 0, 0)
+	chanelTask, err := NewChannelTask(context.TODO(), 5*time.Second, WrapIDSource(0), 0, nil)
 	suite.ErrorIs(err, merr.ErrParameterInvalid)
 	suite.Nil(chanelTask)
 
 	action := NewSegmentAction(0, 0, "", 0)
-	chanelTask, err = NewChannelTask(context.TODO(), 5*time.Second, WrapIDSource(0), 0, 0, action)
+	chanelTask, err = NewChannelTask(context.TODO(), 5*time.Second, WrapIDSource(0), 0, nil, action)
 	suite.ErrorIs(err, merr.ErrParameterInvalid)
 	suite.Nil(chanelTask)
 
 	action1 := NewChannelAction(0, 0, "fake-channel1")
 	action2 := NewChannelAction(0, 0, "fake-channel2")
-	chanelTask, err = NewChannelTask(context.TODO(), 5*time.Second, WrapIDSource(0), 0, 0, action1, action2)
+	chanelTask, err = NewChannelTask(context.TODO(), 5*time.Second, WrapIDSource(0), 0, nil, action1, action2)
 	suite.ErrorIs(err, merr.ErrParameterInvalid)
 	suite.Nil(chanelTask)
 
-	segmentTask, err := NewSegmentTask(context.TODO(), 5*time.Second, WrapIDSource(0), 0, 0)
+	segmentTask, err := NewSegmentTask(context.TODO(), 5*time.Second, WrapIDSource(0), 0, nil)
 	suite.ErrorIs(err, merr.ErrParameterInvalid)
 	suite.Nil(segmentTask)
 
 	channelAction := NewChannelAction(0, 0, "fake-channel1")
-	segmentTask, err = NewSegmentTask(context.TODO(), 5*time.Second, WrapIDSource(0), 0, 0, channelAction)
+	segmentTask, err = NewSegmentTask(context.TODO(), 5*time.Second, WrapIDSource(0), 0, nil, channelAction)
 	suite.ErrorIs(err, merr.ErrParameterInvalid)
 	suite.Nil(segmentTask)
 
 	segmentAction1 := NewSegmentAction(0, 0, "", 0)
 	segmentAction2 := NewSegmentAction(0, 0, "", 1)
 
-	segmentTask, err = NewSegmentTask(context.TODO(), 5*time.Second, WrapIDSource(0), 0, 0, segmentAction1, segmentAction2)
+	segmentTask, err = NewSegmentTask(context.TODO(), 5*time.Second, WrapIDSource(0), 0, nil, segmentAction1, segmentAction2)
 	suite.ErrorIs(err, merr.ErrParameterInvalid)
 	suite.Nil(segmentTask)
 
 	leaderAction := NewLeaderAction(1, 2, ActionTypeGrow, "fake-channel1", 100, 0)
-	leaderTask := NewLeaderTask(context.TODO(), 5*time.Second, WrapIDSource(0), 0, 0, 1, leaderAction)
+	leaderTask := NewLeaderTask(context.TODO(), 5*time.Second, WrapIDSource(0), 0, nil, 1, leaderAction)
 	suite.NotNil(leaderTask)
 }
 
@@ -1447,8 +1446,7 @@ func (suite *TaskSuite) TestNoExecutor() {
 		ChannelName:  Params.CommonCfg.RootCoordDml.GetValue() + "-test",
 	}
 
-	suite.meta.ReplicaManager.Put(
-		utils.CreateTestReplica(suite.replica, suite.collection, []int64{1, 2, 3, -1}))
+	suite.meta.ReplicaManager.Put(utils.CreateTestReplica(suite.replica.GetID(), suite.collection, []int64{1, 2, 3, -1}))
 
 	// Test load segment task
 	suite.dist.ChannelDistManager.Update(targetNode, meta.DmChannelFromVChannel(&datapb.VchannelInfo{
@@ -1666,7 +1664,7 @@ func (suite *TaskSuite) TestBalanceChannelTask() {
 		10*time.Second,
 		WrapIDSource(2),
 		collectionID,
-		1,
+		nil,
 		NewChannelAction(1, ActionTypeGrow, channel),
 		NewChannelAction(2, ActionTypeReduce, channel),
 	)

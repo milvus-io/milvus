@@ -91,10 +91,10 @@ func (suite *SegmentCheckerTestSuite) createMockBalancer() balance.Balance {
 		plans := make([]balance.SegmentAssignPlan, 0, len(segments))
 		for i, s := range segments {
 			plan := balance.SegmentAssignPlan{
-				Segment:   s,
-				From:      -1,
-				To:        nodes[i%len(nodes)],
-				ReplicaID: -1,
+				Segment: s,
+				From:    -1,
+				To:      nodes[i%len(nodes)],
+				Replica: nil,
 			}
 			plans = append(plans, plan)
 		}
