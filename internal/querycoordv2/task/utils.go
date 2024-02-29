@@ -195,9 +195,13 @@ func fillSubChannelRequest(
 	ctx context.Context,
 	req *querypb.WatchDmChannelsRequest,
 	broker meta.Broker,
+	includeFlushed bool,
 ) error {
 	segmentIDs := typeutil.NewUniqueSet()
 	for _, vchannel := range req.GetInfos() {
+		if includeFlushed {
+			segmentIDs.Insert(vchannel.GetFlushedSegmentIds()...)
+		}
 		segmentIDs.Insert(vchannel.GetUnflushedSegmentIds()...)
 		segmentIDs.Insert(vchannel.GetLevelZeroSegmentIds()...)
 	}
