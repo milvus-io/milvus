@@ -166,8 +166,8 @@ func TestServiceParam(t *testing.T) {
 			base := &BaseTable{mgr: config.NewManager()}
 			kc.Init(base)
 			assert.Empty(t, kc.Address.GetValue())
-			assert.Equal(t, kc.SaslMechanisms.GetValue(), "PLAIN")
-			assert.Equal(t, kc.SecurityProtocol.GetValue(), "SASL_SSL")
+			assert.Empty(t, kc.SaslMechanisms.GetValue())
+			assert.Empty(t, kc.SecurityProtocol.GetValue())
 			assert.Equal(t, kc.ReadTimeout.GetAsDuration(time.Second), 10*time.Second)
 			assert.Equal(t, kc.KafkaUseSSL.GetAsBool(), false)
 			assert.Empty(t, kc.KafkaTLSCACert.GetValue())
