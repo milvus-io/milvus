@@ -1056,6 +1056,7 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context,
 	}
 
 	metrics.QueryNodeNumEntities.WithLabelValues(
+		segment.DatabaseName(),
 		fmt.Sprint(paramtable.GetNodeID()),
 		fmt.Sprint(segment.Collection()),
 		fmt.Sprint(segment.Partition()),
@@ -1293,6 +1294,14 @@ func (loader *segmentLoader) LoadDeltaLogs(ctx context.Context, segment Segment,
 		return err
 	}
 
+	metrics.QueryNodeNumEntities.WithLabelValues(
+		segment.DatabaseName(),
+		fmt.Sprint(paramtable.GetNodeID()),
+		fmt.Sprint(segment.Collection()),
+		fmt.Sprint(segment.Partition()),
+		segment.Type().String(),
+		strconv.FormatInt(int64(len(segment.Indexes())), 10),
+	).Sub(float64(deltaData.RowCount))
 	log.Info("load delta logs done", zap.Int64("deleteCount", deltaData.RowCount))
 	return nil
 }

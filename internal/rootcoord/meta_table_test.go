@@ -1334,6 +1334,26 @@ func TestMetaTable_ChangeCollectionState(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	t.Run("not found dbID", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("AlterCollection",
+			mock.Anything, // context.Context
+			mock.Anything, // *model.Collection
+			mock.Anything, // *model.Collection
+			mock.Anything, // metastore.AlterType
+			mock.AnythingOfType("uint64"),
+		).Return(nil)
+		meta := &MetaTable{
+			catalog:     catalog,
+			dbName2Meta: map[string]*model.Database{},
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				100: {Name: "test", CollectionID: 100, DBID: util.DefaultDBID},
+			},
+		}
+		err := meta.ChangeCollectionState(context.TODO(), 100, pb.CollectionState_CollectionCreated, 1000)
+		assert.Error(t, err)
+	})
+
 	t.Run("normal case", func(t *testing.T) {
 		catalog := mocks.NewRootCoordCatalog(t)
 		catalog.On("AlterCollection",
@@ -1345,8 +1365,11 @@ func TestMetaTable_ChangeCollectionState(t *testing.T) {
 		).Return(nil)
 		meta := &MetaTable{
 			catalog: catalog,
+			dbName2Meta: map[string]*model.Database{
+				util.DefaultDBName: {Name: util.DefaultDBName, ID: util.DefaultDBID},
+			},
 			collID2Meta: map[typeutil.UniqueID]*model.Collection{
-				100: {Name: "test", CollectionID: 100},
+				100: {Name: "test", CollectionID: 100, DBID: util.DefaultDBID},
 			},
 		}
 		err := meta.ChangeCollectionState(context.TODO(), 100, pb.CollectionState_CollectionCreated, 1000)
