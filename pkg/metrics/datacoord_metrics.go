@@ -82,6 +82,8 @@ var (
 			Help:      "stored l0 segment rate",
 		}, []string{})
 
+	// DataCoordNumStoredRows all metrics will be cleaned up after removing matched collectionID and
+	// segment state labels in CleanupDataCoordNumStoredRows method.
 	DataCoordNumStoredRows = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
@@ -89,6 +91,7 @@ var (
 			Name:      "stored_rows_num",
 			Help:      "number of stored rows of healthy segment",
 		}, []string{
+			dbName,
 			collectionIDLabelName,
 			segmentStateLabelName,
 		})
@@ -316,7 +319,7 @@ func CleanupDataCoordSegmentMetrics(collectionID int64, segmentID int64) {
 
 func CleanupDataCoordNumStoredRows(collectionID int64) {
 	for _, state := range commonpb.SegmentState_name {
-		DataCoordNumStoredRows.Delete(prometheus.Labels{
+		DataCoordNumStoredRows.DeletePartialMatch(prometheus.Labels{
 			collectionIDLabelName: fmt.Sprint(collectionID),
 			segmentStateLabelName: fmt.Sprint(state),
 		})

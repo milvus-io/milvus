@@ -116,6 +116,10 @@ func (s *baseSegment) ID() int64 {
 	return s.segmentID
 }
 
+func (s *baseSegment) DatabaseName() string {
+	return ""
+}
+
 func (s *baseSegment) Collection() int64 {
 	return s.collectionID
 }
@@ -1354,6 +1358,7 @@ func (s *LocalSegment) Release(opts ...releaseOption) {
 	C.DeleteSegment(ptr)
 
 	metrics.QueryNodeNumEntities.WithLabelValues(
+		s.DatabaseName(),
 		fmt.Sprint(paramtable.GetNodeID()),
 		fmt.Sprint(s.Collection()),
 		fmt.Sprint(s.Partition()),

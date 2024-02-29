@@ -122,6 +122,7 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 			panic(err)
 		}
 		metrics.QueryNodeNumEntities.WithLabelValues(
+			growing.DatabaseName(),
 			fmt.Sprint(paramtable.GetNodeID()),
 			fmt.Sprint(growing.Collection()),
 			fmt.Sprint(growing.Partition()),
