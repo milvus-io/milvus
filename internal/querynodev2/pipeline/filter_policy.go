@@ -93,14 +93,16 @@ func DeleteOutOfTarget(n *filterNode, c *Collection, msg *DeleteMsg) error {
 }
 
 type ExcludedSegments struct {
-	mu        sync.RWMutex
-	segments  map[int64]uint64 // segmentID -> Excluded TS
-	lastClean atomic.Time
+	mu            sync.RWMutex
+	segments      map[int64]uint64 // segmentID -> Excluded TS
+	lastClean     atomic.Time
+	cleanInterval time.Duration
 }
 
-func NewExcludedSegments() *ExcludedSegments {
+func NewExcludedSegments(cleanInterval time.Duration) *ExcludedSegments {
 	return &ExcludedSegments{
-		segments: make(map[int64]uint64),
+		segments:      make(map[int64]uint64),
+		cleanInterval: cleanInterval,
 	}
 }
 
@@ -144,5 +146,5 @@ func (s *ExcludedSegments) CleanInvalid(ts uint64) {
 }
 
 func (s *ExcludedSegments) ShouldClean() bool {
-	return time.Since(s.lastClean.Load()) > 60*time.Second
+	return time.Since(s.lastClean.Load()) > s.cleanInterval
 }

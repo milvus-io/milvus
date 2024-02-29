@@ -18,6 +18,7 @@ package pipeline
 
 import (
 	"testing"
+	"time"
 
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/suite"
@@ -61,7 +62,7 @@ func (suite *FilterNodeSuite) SetupSuite() {
 	suite.errSegmentID = 7
 
 	// init excludedSegment
-	suite.excludedSegments = NewExcludedSegments()
+	suite.excludedSegments = NewExcludedSegments(0 * time.Second)
 	excludeInfo := map[int64]uint64{}
 	for _, id := range suite.excludedSegmentIDs {
 		excludeInfo[id] = 1

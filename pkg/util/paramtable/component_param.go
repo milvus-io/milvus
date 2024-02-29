@@ -1876,9 +1876,6 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 type queryNodeConfig struct {
 	SoPath ParamItem `refreshable:"false"`
 
-	FlowGraphMaxQueueLength ParamItem `refreshable:"false"`
-	FlowGraphMaxParallelism ParamItem `refreshable:"false"`
-
 	// stats
 	// Deprecated: Never used
 	StatsPublishInterval ParamItem `refreshable:"true"`
@@ -1945,6 +1942,11 @@ type queryNodeConfig struct {
 	EnableWorkerSQCostMetrics ParamItem `refreshable:"true"`
 
 	ExprEvalBatchSize ParamItem `refreshable:"false"`
+
+	// pipeline
+	CleanExcludeSegInterval ParamItem `refreshable:"false"`
+	FlowGraphMaxQueueLength ParamItem `refreshable:"false"`
+	FlowGraphMaxParallelism ParamItem `refreshable:"false"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -2377,6 +2379,15 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 	}
 
 	p.ExprEvalBatchSize.Init(base.mgr)
+
+	p.CleanExcludeSegInterval = ParamItem{
+		Key:          "queryCoord.cleanExcludeSegmentInterval",
+		Version:      "2.4.0",
+		DefaultValue: "60",
+		Doc:          "the time duration of clean pipeline exclude segment which used for filter invalid data, in seconds",
+		Export:       true,
+	}
+	p.CleanExcludeSegInterval.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
