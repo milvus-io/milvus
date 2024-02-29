@@ -92,6 +92,8 @@ const apiPathPrefix = "/api/v1"
 
 // Server is the Proxy Server
 type Server struct {
+	milvuspb.UnimplementedMilvusServiceServer
+
 	ctx                context.Context
 	wg                 sync.WaitGroup
 	proxy              types.ProxyComponent
