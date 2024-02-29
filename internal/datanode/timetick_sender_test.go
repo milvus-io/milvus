@@ -55,10 +55,10 @@ func TestTimetickManagerNormal(t *testing.T) {
 	// update first time
 	manager.update(channelName1, ts, segmentStats)
 
-	channel1SegmentStates, channelSegmentStatesExist := manager.channelStatesCaches[channelName1]
+	channel1SegmentStates, channelSegmentStatesExist := manager.channelStatsCache[channelName1]
 	assert.Equal(t, true, channelSegmentStatesExist)
-	segmentState1, segmentState1Exist := channel1SegmentStates.data[ts]
-	assert.Equal(t, segmentStats[0], segmentState1[0])
+	segmentState1, segmentState1Exist := channel1SegmentStates.stats[segmentID1]
+	assert.Equal(t, segmentStats[0], segmentState1)
 	assert.Equal(t, true, segmentState1Exist)
 
 	// update second time
@@ -75,12 +75,11 @@ func TestTimetickManagerNormal(t *testing.T) {
 	ts2 := ts + 100
 	manager.update(channelName1, ts2, segmentStats2)
 
-	channelSegmentStates, channelSegmentStatesExist := manager.channelStatesCaches[channelName1]
+	channelSegmentStates, channelSegmentStatesExist := manager.channelStatsCache[channelName1]
 	assert.Equal(t, true, channelSegmentStatesExist)
 
-	segmentStates, segmentStatesExist := channelSegmentStates.data[ts2]
+	_, segmentStatesExist := channelSegmentStates.stats[segmentID2]
 	assert.Equal(t, true, segmentStatesExist)
-	assert.Equal(t, 2, len(segmentStates))
 
 	var segmentID3 int64 = 28259
 	var segmentID4 int64 = 28260
@@ -101,10 +100,10 @@ func TestTimetickManagerNormal(t *testing.T) {
 	err := manager.sendReport(ctx)
 	assert.NoError(t, err)
 
-	_, channelExistAfterSubmit := manager.channelStatesCaches[channelName1]
+	_, channelExistAfterSubmit := manager.channelStatsCache[channelName1]
 	assert.Equal(t, false, channelExistAfterSubmit)
 
-	_, channelSegmentStatesExistAfterSubmit := manager.channelStatesCaches[channelName1]
+	_, channelSegmentStatesExistAfterSubmit := manager.channelStatsCache[channelName1]
 	assert.Equal(t, false, channelSegmentStatesExistAfterSubmit)
 
 	var segmentID5 int64 = 28261
@@ -126,10 +125,10 @@ func TestTimetickManagerNormal(t *testing.T) {
 	err = manager.sendReport(ctx)
 	assert.NoError(t, err)
 
-	_, channelExistAfterSubmit2 := manager.channelStatesCaches[channelName1]
+	_, channelExistAfterSubmit2 := manager.channelStatsCache[channelName1]
 	assert.Equal(t, false, channelExistAfterSubmit2)
 
-	_, channelSegmentStatesExistAfterSubmit2 := manager.channelStatesCaches[channelName1]
+	_, channelSegmentStatesExistAfterSubmit2 := manager.channelStatsCache[channelName1]
 	assert.Equal(t, false, channelSegmentStatesExistAfterSubmit2)
 }
 

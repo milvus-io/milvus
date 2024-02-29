@@ -43,21 +43,22 @@ type timeTickSender struct {
 
 	options []retry.Option
 
-	mu                  sync.Mutex
-	channelStatesCaches map[string]*segmentStatesSequence // string -> *segmentStatesSequence
+	mu                sync.RWMutex
+	channelStatsCache map[string]*segmentStats // vchannel -> segmentStats
 }
 
 // data struct only used in timeTickSender
-type segmentStatesSequence struct {
-	data map[uint64][]*commonpb.SegmentStats // ts -> segmentStats
+type segmentStats struct {
+	ts    uint64
+	stats map[int64]*commonpb.SegmentStats
 }
 
 func newTimeTickSender(broker broker.Broker, nodeID int64, opts ...retry.Option) *timeTickSender {
 	return &timeTickSender{
-		nodeID:              nodeID,
-		broker:              broker,
-		channelStatesCaches: make(map[string]*segmentStatesSequence, 0),
-		options:             opts,
+		nodeID:            nodeID,
+		broker:            broker,
+		channelStatsCache: make(map[string]*segmentStats, 0),
+		options:           opts,
 	}
 }
 
@@ -92,50 +93,35 @@ func (m *timeTickSender) work(ctx context.Context) {
 	}
 }
 
-func (m *timeTickSender) update(channelName string, timestamp uint64, segmentStats []*commonpb.SegmentStats) {
+func (m *timeTickSender) update(channelName string, timestamp uint64, stats []*commonpb.SegmentStats) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	channelStates, ok := m.channelStatesCaches[channelName]
+	_, ok := m.channelStatsCache[channelName]
 	if !ok {
-		channelStates = &segmentStatesSequence{
-			data: make(map[uint64][]*commonpb.SegmentStats, 0),
+		m.channelStatsCache[channelName] = &segmentStats{
+			ts:    timestamp,
+			stats: make(map[int64]*commonpb.SegmentStats),
 		}
 	}
-	channelStates.data[timestamp] = segmentStats
-	m.channelStatesCaches[channelName] = channelStates
+	for _, stat := range stats {
+		m.channelStatsCache[channelName].stats[stat.GetSegmentID()] = stat
+	}
+	m.channelStatsCache[channelName].ts = timestamp
 }
 
-func (m *timeTickSender) mergeDatanodeTtMsg() ([]*msgpb.DataNodeTtMsg, map[string]uint64) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+func (m *timeTickSender) assembleDatanodeTtMsg() ([]*msgpb.DataNodeTtMsg, map[string]uint64) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 
 	var msgs []*msgpb.DataNodeTtMsg
 	sendedLastTss := make(map[string]uint64, 0)
 
-	for channelName, channelSegmentStates := range m.channelStatesCaches {
-		var lastTs uint64
-		segNumRows := make(map[int64]int64, 0)
-		for ts, segmentStates := range channelSegmentStates.data {
-			if ts > lastTs {
-				lastTs = ts
-			}
-			// merge the same segments into one
-			for _, segmentStat := range segmentStates {
-				if v, ok := segNumRows[segmentStat.GetSegmentID()]; ok {
-					// numRows is supposed to keep growing
-					if segmentStat.GetNumRows() > v {
-						segNumRows[segmentStat.GetSegmentID()] = segmentStat.GetNumRows()
-					}
-				} else {
-					segNumRows[segmentStat.GetSegmentID()] = segmentStat.GetNumRows()
-				}
-			}
-		}
+	for channelName, segStats := range m.channelStatsCache {
 		toSendSegmentStats := make([]*commonpb.SegmentStats, 0)
-		for id, numRows := range segNumRows {
+		for segmentID, stat := range segStats.stats {
 			toSendSegmentStats = append(toSendSegmentStats, &commonpb.SegmentStats{
-				SegmentID: id,
-				NumRows:   numRows,
+				SegmentID: segmentID,
+				NumRows:   stat.GetNumRows(),
 			})
 		}
 		msgs = append(msgs, &msgpb.DataNodeTtMsg{
@@ -144,10 +130,10 @@ func (m *timeTickSender) mergeDatanodeTtMsg() ([]*msgpb.DataNodeTtMsg, map[strin
 				commonpbutil.WithSourceID(m.nodeID),
 			),
 			ChannelName:   channelName,
-			Timestamp:     lastTs,
+			Timestamp:     segStats.ts,
 			SegmentsStats: toSendSegmentStats,
 		})
-		sendedLastTss[channelName] = lastTs
+		sendedLastTss[channelName] = segStats.ts
 	}
 
 	return msgs, sendedLastTss
@@ -156,27 +142,19 @@ func (m *timeTickSender) mergeDatanodeTtMsg() ([]*msgpb.DataNodeTtMsg, map[strin
 func (m *timeTickSender) cleanStatesCache(sendedLastTss map[string]uint64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	sizeBeforeClean := len(m.channelStatesCaches)
+	sizeBeforeClean := len(m.channelStatsCache)
 	log := log.With(zap.Any("sendedLastTss", sendedLastTss), zap.Int("sizeBeforeClean", sizeBeforeClean))
 	for channelName, sendedLastTs := range sendedLastTss {
-		channelCache, ok := m.channelStatesCaches[channelName]
-		if ok {
-			for ts := range channelCache.data {
-				if ts <= sendedLastTs {
-					delete(channelCache.data, ts)
-				}
-			}
-			m.channelStatesCaches[channelName] = channelCache
-		}
-		if len(channelCache.data) == 0 {
-			delete(m.channelStatesCaches, channelName)
+		segStats, ok := m.channelStatsCache[channelName]
+		if ok && segStats.ts <= sendedLastTs {
+			delete(m.channelStatsCache, channelName)
 		}
 	}
-	log.RatedDebug(30, "timeTickSender channelStatesCaches", zap.Int("sizeAfterClean", len(m.channelStatesCaches)))
+	log.RatedDebug(30, "timeTickSender channelStatsCache", zap.Int("sizeAfterClean", len(m.channelStatsCache)))
 }
 
 func (m *timeTickSender) sendReport(ctx context.Context) error {
-	toSendMsgs, sendLastTss := m.mergeDatanodeTtMsg()
+	toSendMsgs, sendLastTss := m.assembleDatanodeTtMsg()
 	log.RatedDebug(30, "timeTickSender send datanode timetick message", zap.Any("toSendMsgs", toSendMsgs), zap.Any("sendLastTss", sendLastTss))
 	err := retry.Do(ctx, func() error {
 		return m.broker.ReportTimeTick(ctx, toSendMsgs)
