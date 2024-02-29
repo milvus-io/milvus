@@ -20,8 +20,6 @@ import (
 	"fmt"
 	"io"
 	"sort"
-	"strconv"
-	"strings"
 
 	"github.com/apache/arrow/go/v12/arrow"
 	"github.com/apache/arrow/go/v12/arrow/array"
@@ -30,10 +28,11 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/metautil"
 )
 
 type Record interface {
-	Schema() *map[FieldID]schemapb.DataType
+	Schema() map[FieldID]schemapb.DataType
 	Column(i FieldID) arrow.Array
 	Len() int
 	Release()
@@ -68,8 +67,8 @@ func (r *compositeRecord) Release() {
 	}
 }
 
-func (r *compositeRecord) Schema() *map[FieldID]schemapb.DataType {
-	return &r.schema
+func (r *compositeRecord) Schema() map[FieldID]schemapb.DataType {
+	return r.schema
 }
 
 type compositeRecordReader struct {
@@ -176,23 +175,16 @@ func (crr *compositeRecordReader) Close() {
 	}
 }
 
-func getBlobColLog(blob *Blob) (FieldID, UniqueID) {
-	// Blob key format (ref: data_codec.go):
-	// ${tenant}/insert_log/${collection_id}/${partition_id}/${segment_id}/${field_id}/${log_idx}
-	parts := strings.Split(blob.Key, "/")
-
-	id, _ := strconv.ParseInt(parts[len(parts)-1], 0, 10)
-	if len(parts) >= 2 {
-		colId, _ := strconv.ParseInt(parts[len(parts)-2], 0, 10)
-		return colId, id
-	}
-	return id, 0
-}
-
 func newCompositeRecordReader(blobs []*Blob) (*compositeRecordReader, error) {
 	sort.Slice(blobs, func(i, j int) bool {
-		iCol, iLog := getBlobColLog(blobs[i])
-		jCol, jLog := getBlobColLog(blobs[j])
+		_, _, _, iCol, iLog, ok := metautil.ParseInsertLogPath(blobs[i].Key)
+		if !ok {
+			return false
+		}
+		_, _, _, jCol, jLog, ok := metautil.ParseInsertLogPath(blobs[j].Key)
+		if !ok {
+			return false
+		}
 
 		if iCol == jCol {
 			return iLog < jLog
@@ -205,7 +197,10 @@ func newCompositeRecordReader(blobs []*Blob) (*compositeRecordReader, error) {
 	var currentCol []*Blob
 
 	for _, blob := range blobs {
-		colId, _ := getBlobColLog(blob)
+		_, _, _, colId, _, ok := metautil.ParseInsertLogPath(blob.Key)
+		if !ok {
+			return nil, fmt.Errorf("invalid blob key: %s", blob.Key)
+		}
 		if colId != fieldId {
 			if currentCol != nil {
 				blobm = append(blobm, currentCol)
@@ -388,7 +383,7 @@ func NewBinlogDeserializeReader(blobs []*Blob, PKfieldID UniqueID) (*Deserialize
 			}
 
 			m := make(map[FieldID]interface{})
-			for j, dt := range *r.Schema() {
+			for j, dt := range r.Schema() {
 				d, ok := deserializeCell(r.Column(j), dt, i)
 				if ok {
 					m[j] = d
@@ -400,7 +395,7 @@ func NewBinlogDeserializeReader(blobs []*Blob, PKfieldID UniqueID) (*Deserialize
 			value.ID = m[common.RowIDField].(int64)
 			value.Timestamp = m[common.TimeStampField].(int64)
 
-			pk, err := GenPrimaryKeyByRawData(m[PKfieldID], (*r.Schema())[PKfieldID])
+			pk, err := GenPrimaryKeyByRawData(m[PKfieldID], r.Schema()[PKfieldID])
 			if err != nil {
 				return err
 			}
