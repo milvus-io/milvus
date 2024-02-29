@@ -2224,7 +2224,9 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Version: "2.2.0",
 		Formatter: func(v string) string {
 			if len(v) == 0 {
-				diskUsage, err := disk.Usage("/")
+				// use local storage path to check correct device
+				localStoragePath := base.Get("localStorage.path")
+				diskUsage, err := disk.Usage(localStoragePath)
 				if err != nil {
 					panic(err)
 				}
