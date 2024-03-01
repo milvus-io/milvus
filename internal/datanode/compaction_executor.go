@@ -68,6 +68,7 @@ func (c *compactionExecutor) injectDone(planID UniqueID) {
 	c.completed.GetAndRemove(planID)
 	task, loaded := c.completedCompactor.GetAndRemove(planID)
 	if loaded {
+		log.Info("Compaction task inject done", zap.Int64("planID", planID), zap.String("channel", task.getChannelName()))
 		task.injectDone()
 	}
 }

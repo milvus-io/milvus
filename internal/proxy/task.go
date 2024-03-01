@@ -601,45 +601,46 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 			// nolint
 			t.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 			// nolint
-			t.result.Status.Reason = "can't find collection " + t.result.GetStatus().GetReason()
+			t.result.Status.Reason = fmt.Sprintf("can't find collection[database=%s][collection=%s]", t.GetDbName(), t.GetCollectionName())
 		}
-	} else {
-		t.result.Schema.Name = result.Schema.Name
-		t.result.Schema.Description = result.Schema.Description
-		t.result.Schema.AutoID = result.Schema.AutoID
-		t.result.Schema.EnableDynamicField = result.Schema.EnableDynamicField
-		t.result.CollectionID = result.CollectionID
-		t.result.VirtualChannelNames = result.VirtualChannelNames
-		t.result.PhysicalChannelNames = result.PhysicalChannelNames
-		t.result.CreatedTimestamp = result.CreatedTimestamp
-		t.result.CreatedUtcTimestamp = result.CreatedUtcTimestamp
-		t.result.ShardsNum = result.ShardsNum
-		t.result.ConsistencyLevel = result.ConsistencyLevel
-		t.result.Aliases = result.Aliases
-		t.result.Properties = result.Properties
-		t.result.DbName = result.GetDbName()
-		t.result.NumPartitions = result.NumPartitions
-		for _, field := range result.Schema.Fields {
-			if field.IsDynamic {
-				continue
-			}
-			if field.FieldID >= common.StartOfUserFieldID {
-				t.result.Schema.Fields = append(t.result.Schema.Fields, &schemapb.FieldSchema{
-					FieldID:         field.FieldID,
-					Name:            field.Name,
-					IsPrimaryKey:    field.IsPrimaryKey,
-					AutoID:          field.AutoID,
-					Description:     field.Description,
-					DataType:        field.DataType,
-					TypeParams:      field.TypeParams,
-					IndexParams:     field.IndexParams,
-					IsDynamic:       field.IsDynamic,
-					IsPartitionKey:  field.IsPartitionKey,
-					IsClusteringKey: field.IsClusteringKey,
-					DefaultValue:    field.DefaultValue,
-					ElementType:     field.ElementType,
-				})
-			}
+		return nil
+	}
+
+	t.result.Schema.Name = result.Schema.Name
+	t.result.Schema.Description = result.Schema.Description
+	t.result.Schema.AutoID = result.Schema.AutoID
+	t.result.Schema.EnableDynamicField = result.Schema.EnableDynamicField
+	t.result.CollectionID = result.CollectionID
+	t.result.VirtualChannelNames = result.VirtualChannelNames
+	t.result.PhysicalChannelNames = result.PhysicalChannelNames
+	t.result.CreatedTimestamp = result.CreatedTimestamp
+	t.result.CreatedUtcTimestamp = result.CreatedUtcTimestamp
+	t.result.ShardsNum = result.ShardsNum
+	t.result.ConsistencyLevel = result.ConsistencyLevel
+	t.result.Aliases = result.Aliases
+	t.result.Properties = result.Properties
+	t.result.DbName = result.GetDbName()
+	t.result.NumPartitions = result.NumPartitions
+	for _, field := range result.Schema.Fields {
+		if field.IsDynamic {
+			continue
+		}
+		if field.FieldID >= common.StartOfUserFieldID {
+			t.result.Schema.Fields = append(t.result.Schema.Fields, &schemapb.FieldSchema{
+				FieldID:         field.FieldID,
+				Name:            field.Name,
+				IsPrimaryKey:    field.IsPrimaryKey,
+				AutoID:          field.AutoID,
+				Description:     field.Description,
+				DataType:        field.DataType,
+				TypeParams:      field.TypeParams,
+				IndexParams:     field.IndexParams,
+				IsDynamic:       field.IsDynamic,
+				IsPartitionKey:  field.IsPartitionKey,
+				IsClusteringKey: field.IsClusteringKey,
+				DefaultValue:    field.DefaultValue,
+				ElementType:     field.ElementType,
+			})
 		}
 	}
 	return nil

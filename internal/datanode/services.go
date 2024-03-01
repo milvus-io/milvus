@@ -321,21 +321,26 @@ func (node *DataNode) GetCompactionState(ctx context.Context, req *datapb.Compac
 
 // SyncSegments called by DataCoord, sync the compacted segments' meta between DC and DN
 func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegmentsRequest) (*commonpb.Status, error) {
-	log.Ctx(ctx).Info("DataNode receives SyncSegments",
+	log := log.Ctx(ctx).With(
 		zap.Int64("planID", req.GetPlanID()),
+		zap.Int64("nodeID", node.GetNodeID()),
 		zap.Int64("target segmentID", req.GetCompactedTo()),
 		zap.Int64s("compacted from", req.GetCompactedFrom()),
 		zap.Int64("numOfRows", req.GetNumOfRows()),
 		zap.String("channelName", req.GetChannelName()),
 	)
 
+	log.Info("DataNode receives SyncSegments")
+
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
-		log.Warn("DataNode.SyncSegments failed", zap.Int64("nodeId", node.GetNodeID()), zap.Error(err))
+		log.Warn("DataNode.SyncSegments failed", zap.Error(err))
 		return merr.Status(err), nil
 	}
 
 	if len(req.GetCompactedFrom()) <= 0 {
-		return merr.Status(merr.WrapErrParameterInvalid(">0", "0", "compacted from segments shouldn't be empty")), nil
+		log.Info("SyncSegments with empty compactedFrom, clearing the plan")
+		node.compactionExecutor.injectDone(req.GetPlanID())
+		return merr.Success(), nil
 	}
 
 	ds, ok := node.flowgraphManager.GetFlowgraphService(req.GetChannelName())

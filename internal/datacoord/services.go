@@ -304,6 +304,8 @@ func (s *Server) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsert
 		}, nil
 	}
 
+	segment = segment.Clone()
+
 	err := binlog.DecompressBinLog(storage.InsertBinlog, segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID(), segment.GetBinlogs())
 	if err != nil {
 		return &datapb.GetInsertBinlogPathsResponse{
@@ -418,6 +420,8 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 			child := s.meta.GetCompactionTo(id)
 			clonedInfo := info.Clone()
 			if child != nil {
+				// child segment should decompress binlog path
+				binlog.DecompressBinLog(storage.DeleteBinlog, child.GetCollectionID(), child.GetPartitionID(), child.GetID(), child.GetDeltalogs())
 				clonedInfo.Deltalogs = append(clonedInfo.Deltalogs, child.GetDeltalogs()...)
 				clonedInfo.DmlPosition = child.GetDmlPosition()
 			}
