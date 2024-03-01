@@ -123,8 +123,8 @@ pulsar:
 #   brokerList:
 #   saslUsername:
 #   saslPassword:
-#   saslMechanisms: PLAIN
-#   securityProtocol: SASL_SSL
+#   saslMechanisms:
+#   securityProtocol:
 #   readTimeout: 10 # read message timeout in seconds
 #   ssl:
 #     enabled: false # Whether to support kafka secure connection mode
