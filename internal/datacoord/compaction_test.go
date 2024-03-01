@@ -795,6 +795,7 @@ func Test_compactionPlanHandler_updateCompaction(t *testing.T) {
 										{PlanID: 3, State: commonpb.CompactionState_Completed, Result: &datapb.CompactionResult{PlanID: 3}},
 										{PlanID: 4, State: commonpb.CompactionState_Executing},
 										{PlanID: 6, State: commonpb.CompactionState_Executing},
+										{PlanID: 7, State: commonpb.CompactionState_Completed, Result: &datapb.CompactionResult{PlanID: 7}},
 									},
 								},
 							}},

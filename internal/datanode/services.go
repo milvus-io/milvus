@@ -341,20 +341,22 @@ func (node *DataNode) GetCompactionState(ctx context.Context, req *datapb.Compac
 func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegmentsRequest) (*commonpb.Status, error) {
 	log := log.Ctx(ctx).With(
 		zap.Int64("planID", req.GetPlanID()),
+		zap.Int64("nodeID", paramtable.GetNodeID()),
 		zap.Int64("targetSegmentID", req.GetCompactedTo()),
 		zap.Int64s("compactedFrom", req.GetCompactedFrom()),
-	)
-	log.Info("DataNode receives SyncSegments",
 		zap.Int64("numOfRows", req.GetNumOfRows()),
 	)
+	log.Info("DataNode receives SyncSegments")
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
-		log.Warn("DataNode.SyncSegments failed", zap.Int64("nodeId", paramtable.GetNodeID()), zap.Error(err))
+		log.Warn("DataNode.SyncSegments failed", zap.Error(err))
 		return merr.Status(err), nil
 	}
 
 	if len(req.GetCompactedFrom()) <= 0 {
-		return merr.Status(merr.WrapErrParameterInvalid(">0", "0", "compacted from segments shouldn't be empty")), nil
+		log.Info("SyncSegments with empty compactedFrom, clearing the plan")
+		node.compactionExecutor.injectDone(req.GetPlanID(), false)
+		return merr.Success(), nil
 	}
 
 	var (
