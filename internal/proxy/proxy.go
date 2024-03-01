@@ -23,7 +23,6 @@ import (
 	"os"
 	"strconv"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -32,6 +31,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
@@ -72,6 +72,8 @@ var rateCol *ratelimitutil.RateCollector
 
 // Proxy of milvus
 type Proxy struct {
+	milvuspb.UnimplementedMilvusServiceServer
+
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
@@ -166,15 +168,7 @@ func (node *Proxy) Register() error {
 	log.Info("Proxy Register Finished")
 	node.session.LivenessCheck(node.ctx, func() {
 		log.Error("Proxy disconnected from etcd, process will exit", zap.Int64("Server Id", node.session.ServerID))
-		if err := node.Stop(); err != nil {
-			log.Fatal("failed to stop server", zap.Error(err))
-		}
-		metrics.NumNodes.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), typeutil.ProxyRole).Dec()
-		if node.session.TriggerKill {
-			if p, err := os.FindProcess(os.Getpid()); err == nil {
-				p.Signal(syscall.SIGINT)
-			}
-		}
+		os.Exit(1)
 	})
 	// TODO Reset the logger
 	// Params.initLogCfg()

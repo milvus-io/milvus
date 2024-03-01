@@ -9,7 +9,12 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#pragma once
+
 #include <string>
+#include <regex>
+
+#include "common/EasyAssert.h"
 
 namespace milvus {
 std::string
@@ -19,4 +24,41 @@ ReplaceUnescapedChars(const std::string& input,
 
 std::string
 TranslatePatternMatchToRegex(const std::string& pattern);
+
+struct PatternMatchTranslator {
+    template <typename T>
+    inline std::string
+    operator()(const T& pattern) {
+        PanicInfo(OpTypeInvalid,
+                  "pattern matching is only supported on string type");
+    }
+};
+
+template <>
+inline std::string
+PatternMatchTranslator::operator()<std::string>(const std::string& pattern) {
+    return TranslatePatternMatchToRegex(pattern);
+}
+
+struct RegexMatcher {
+    template <typename T>
+    inline bool
+    operator()(const std::regex& reg, const T& operand) {
+        return false;
+    }
+};
+
+template <>
+inline bool
+RegexMatcher::operator()<std::string>(const std::regex& reg,
+                                      const std::string& operand) {
+    return std::regex_match(operand, reg);
+}
+
+template <>
+inline bool
+RegexMatcher::operator()<std::string_view>(const std::regex& reg,
+                                           const std::string_view& operand) {
+    return std::regex_match(operand.begin(), operand.end(), reg);
+}
 }  // namespace milvus

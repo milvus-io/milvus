@@ -606,6 +606,32 @@ func (s *ServerSuite) TestGetSegmentInfoChannel() {
 	s.EqualValues(Params.CommonCfg.DataCoordSegmentInfo.GetValue(), resp.Value)
 }
 
+func (s *ServerSuite) TestGetSegmentInfo() {
+	testSegmentID := int64(1)
+	s.testServer.meta.AddSegment(context.TODO(), &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:        1,
+			Deltalogs: []*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 100}}}},
+		},
+	})
+
+	s.testServer.meta.AddSegment(context.TODO(), &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             2,
+			Deltalogs:      []*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 101}}}},
+			CompactionFrom: []int64{1},
+		},
+	})
+
+	resp, err := s.testServer.GetSegmentInfo(context.TODO(), &datapb.GetSegmentInfoRequest{
+		SegmentIDs:       []int64{testSegmentID},
+		IncludeUnHealthy: true,
+	})
+	s.NoError(err)
+	log.Info("test--", zap.Any("resp", resp))
+	s.EqualValues(2, len(resp.Infos[0].Deltalogs))
+}
+
 func (s *ServerSuite) TestAssignSegmentID() {
 	s.TearDownTest()
 	const collID = 100

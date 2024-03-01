@@ -6,13 +6,15 @@ import (
 	"io"
 	"net/http"
 	"strconv"
-	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
 	"github.com/go-playground/validator/v10"
 	"github.com/golang/protobuf/proto"
 	"github.com/tidwall/gjson"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -23,8 +25,10 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/crypto"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/requestutil"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type HandlersV2 struct {
@@ -137,7 +141,8 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		req := newReq()
 		if err := c.ShouldBindBodyWith(req, binding.JSON); err != nil {
-			log.Warn("high level restful api, read parameters from request body fail", zap.Any("request", req), zap.Error(err))
+			log.Warn("high level restful api, read parameters from request body fail", zap.Error(err),
+				zap.Any("url", c.Request.URL.Path), zap.Any("request", req))
 			if _, ok := err.(validator.ValidationErrors); ok {
 				c.AbortWithStatusJSON(http.StatusOK, gin.H{
 					HTTPReturnCode:    merr.Code(merr.ErrMissingRequiredParameters),
@@ -156,7 +161,6 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 			}
 			return
 		}
-		log.Debug("high level restful api, read parameters from request body", zap.Any("request", req))
 		dbName := ""
 		if getter, ok := req.(requestutil.DBNameGetter); ok {
 			dbName = getter.GetDbName()
@@ -165,10 +169,14 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 			dbName = DefaultDbName
 		}
 		username, _ := c.Get(ContextUsername)
-		ctx := proxy.NewContextWithMetadata(c, username.(string), dbName)
-		traceID := strconv.FormatInt(time.Now().UnixNano(), 10)
+		ctx, span := otel.Tracer(typeutil.ProxyRole).Start(context.Background(), c.Request.URL.Path)
+		defer span.End()
+		ctx = proxy.NewContextWithMetadata(ctx, username.(string), dbName)
+		traceID := span.SpanContext().TraceID().String()
 		ctx = log.WithTraceID(ctx, traceID)
 		c.Keys["traceID"] = traceID
+		log.Ctx(ctx).Debug("high level restful api, read parameters from request body, then start to handle.",
+			zap.Any("url", c.Request.URL.Path), zap.Any("request", req))
 		v2(ctx, c, req, dbName)
 	}
 }
@@ -207,14 +215,17 @@ func wrapperTraceLog(v2 handlerFuncV2) handlerFuncV2 {
 }
 
 func wrapperProxy(ctx context.Context, c *gin.Context, req any, checkAuth bool, ignoreErr bool, handler func(reqCtx context.Context, req any) (any, error)) (interface{}, error) {
+	if baseGetter, ok := req.(BaseGetter); ok {
+		span := trace.SpanFromContext(ctx)
+		span.AddEvent(baseGetter.GetBase().GetMsgType().String())
+	}
 	if checkAuth {
 		err := checkAuthorization(ctx, c, req)
 		if err != nil {
 			return nil, err
 		}
 	}
-	// todo delete the message
-	log.Ctx(ctx).Debug("high level restful api, try to do a grpc call", zap.Any("request", req))
+	log.Ctx(ctx).Debug("high level restful api, try to do a grpc call", zap.Any("grpcRequest", req))
 	response, err := handler(ctx, req)
 	if err == nil {
 		status, ok := requestutil.GetStatusFromResponse(response)
@@ -223,7 +234,7 @@ func wrapperProxy(ctx context.Context, c *gin.Context, req any, checkAuth bool, 
 		}
 	}
 	if err != nil {
-		log.Ctx(ctx).Warn("high level restful api, grpc call failed", zap.Error(err), zap.Any("request", req))
+		log.Ctx(ctx).Warn("high level restful api, grpc call failed", zap.Error(err), zap.Any("grpcRequest", req))
 		if !ignoreErr {
 			c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 		}
@@ -308,7 +319,7 @@ func (h *HandlersV2) getCollectionDetails(ctx context.Context, c *gin.Context, a
 	primaryField, ok := getPrimaryField(coll.Schema)
 	autoID := false
 	if !ok {
-		log.Ctx(ctx).Warn("high level restful api, get primary field from collection schema fail", zap.Any("collection schema", coll.Schema))
+		log.Ctx(ctx).Warn("high level restful api, get primary field from collection schema fail", zap.Any("collection schema", coll.Schema), zap.Any("request", anyReq))
 	} else {
 		autoID = primaryField.AutoID
 	}
@@ -325,7 +336,8 @@ func (h *HandlersV2) getCollectionDetails(ctx context.Context, c *gin.Context, a
 	}
 	vectorField := ""
 	for _, field := range coll.Schema.Fields {
-		if field.DataType == schemapb.DataType_BinaryVector || field.DataType == schemapb.DataType_FloatVector {
+		if field.DataType == schemapb.DataType_BinaryVector || field.DataType == schemapb.DataType_FloatVector ||
+			field.DataType == schemapb.DataType_Float16Vector || field.DataType == schemapb.DataType_BFloat16Vector {
 			vectorField = field.Name
 			break
 		}
@@ -437,7 +449,10 @@ func (h *HandlersV2) renameCollection(ctx context.Context, c *gin.Context, anyRe
 		DbName:    dbName,
 		OldName:   httpReq.CollectionName,
 		NewName:   httpReq.NewCollectionName,
-		NewDBName: dbName,
+		NewDBName: httpReq.NewDbName,
+	}
+	if req.NewDBName == "" {
+		req.NewDBName = dbName
 	}
 	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.RenameCollection(reqCtx, req.(*milvuspb.RenameCollectionRequest))
@@ -600,7 +615,7 @@ func (h *HandlersV2) insert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	body, _ := c.Get(gin.BodyBytesKey)
 	err, httpReq.Data = checkAndSetData(string(body.([]byte)), collSchema)
 	if err != nil {
-		log.Ctx(ctx).Warn("high level restful api, fail to deal with insert data", zap.Any("body", body), zap.Error(err))
+		log.Ctx(ctx).Warn("high level restful api, fail to deal with insert data", zap.Error(err), zap.String("body", string(body.([]byte))))
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrInvalidInsertData),
 			HTTPReturnMessage: merr.ErrInvalidInsertData.Error() + ", error: " + err.Error(),
@@ -735,7 +750,6 @@ func generateSearchParams(ctx context.Context, c *gin.Context, reqParams map[str
 	bs, _ := json.Marshal(params)
 	searchParams := []*commonpb.KeyValuePair{
 		{Key: Params, Value: string(bs)},
-		{Key: ParamRoundDecimal, Value: "-1"},
 	}
 	return searchParams, nil
 }
@@ -749,11 +763,12 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: common.TopKKey, Value: strconv.FormatInt(int64(httpReq.Limit), 10)})
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamOffset, Value: strconv.FormatInt(int64(httpReq.Offset), 10)})
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamGroupByField, Value: httpReq.GroupByField})
+	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamRoundDecimal, Value: "-1"})
 	req := &milvuspb.SearchRequest{
 		DbName:             dbName,
 		CollectionName:     httpReq.CollectionName,
 		Dsl:                httpReq.Filter,
-		PlaceholderGroup:   vector2PlaceholderGroupBytes(httpReq.Vector),
+		PlaceholderGroup:   vectors2PlaceholderGroupBytes(httpReq.Vector),
 		DslType:            commonpb.DslType_BoolExprV1,
 		OutputFields:       httpReq.OutputFields,
 		PartitionNames:     httpReq.PartitionNames,
@@ -801,11 +816,12 @@ func (h *HandlersV2) hybridSearch(ctx context.Context, c *gin.Context, anyReq an
 		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamOffset, Value: strconv.FormatInt(int64(subReq.Offset), 10)})
 		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamGroupByField, Value: subReq.GroupByField})
 		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: proxy.AnnsFieldKey, Value: subReq.AnnsField})
+		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamRoundDecimal, Value: "-1"})
 		searchReq := &milvuspb.SearchRequest{
 			DbName:             dbName,
 			CollectionName:     httpReq.CollectionName,
 			Dsl:                subReq.Filter,
-			PlaceholderGroup:   vector2PlaceholderGroupBytes(subReq.Vector),
+			PlaceholderGroup:   vectors2PlaceholderGroupBytes(subReq.Vector),
 			DslType:            commonpb.DslType_BoolExprV1,
 			OutputFields:       httpReq.OutputFields,
 			PartitionNames:     httpReq.PartitionNames,
@@ -820,7 +836,7 @@ func (h *HandlersV2) hybridSearch(ctx context.Context, c *gin.Context, anyReq an
 		{Key: proxy.RankTypeKey, Value: httpReq.Rerank.Strategy},
 		{Key: proxy.RankParamsKey, Value: string(bs)},
 		{Key: ParamLimit, Value: strconv.FormatInt(int64(httpReq.Limit), 10)},
-		{Key: "round_decimal", Value: strconv.FormatInt(int64(-1), 10)},
+		{Key: ParamRoundDecimal, Value: "-1"},
 	}
 	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.HybridSearch(reqCtx, req.(*milvuspb.HybridSearchRequest))
@@ -849,9 +865,8 @@ func (h *HandlersV2) hybridSearch(ctx context.Context, c *gin.Context, anyReq an
 func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	httpReq := anyReq.(*CollectionReq)
 	var schema []byte
-	vectorFieldNum := 0
-	valid := true
 	var err error
+	fieldNames := map[string]bool{}
 	if httpReq.Schema.Fields == nil || len(httpReq.Schema.Fields) == 0 {
 		schema, err = proto.Marshal(&schemapb.CollectionSchema{
 			Name:   httpReq.CollectionName,
@@ -883,24 +898,38 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 	} else {
 		collSchema := schemapb.CollectionSchema{
 			Name:               httpReq.CollectionName,
-			AutoID:             EnableAutoID,
+			AutoID:             httpReq.Schema.AutoId,
 			Fields:             []*schemapb.FieldSchema{},
-			EnableDynamicField: EnableDynamic,
+			EnableDynamicField: httpReq.Schema.EnableDynamicField,
 		}
-		allFields := map[string]bool{}
 		for _, field := range httpReq.Schema.Fields {
-			dataType := schemapb.DataType(schemapb.DataType_value[field.DataType])
-			if dataType == schemapb.DataType_BinaryVector || dataType == schemapb.DataType_FloatVector || dataType == schemapb.DataType_Float16Vector {
-				allFields[field.FieldName] = true
-				vectorFieldNum++
-			} else {
-				allFields[field.FieldName] = false
+			fieldDataType, ok := schemapb.DataType_value[field.DataType]
+			if !ok {
+				log.Ctx(ctx).Warn("field's data type is invalid(case sensitive).", zap.Any("fieldDataType", field.DataType), zap.Any("field", field))
+				c.AbortWithStatusJSON(http.StatusOK, gin.H{
+					HTTPReturnCode:    merr.Code(merr.ErrParameterInvalid),
+					HTTPReturnMessage: merr.ErrParameterInvalid.Error() + ", data type " + field.DataType + " is invalid(case sensitive).",
+				})
+				return nil, merr.ErrParameterInvalid
 			}
+			dataType := schemapb.DataType(fieldDataType)
 			fieldSchema := schemapb.FieldSchema{
-				Name:         field.FieldName,
-				IsPrimaryKey: field.IsPrimary,
-				DataType:     dataType,
-				TypeParams:   []*commonpb.KeyValuePair{},
+				Name:           field.FieldName,
+				IsPrimaryKey:   field.IsPrimary,
+				IsPartitionKey: field.IsPartitionKey,
+				DataType:       dataType,
+				TypeParams:     []*commonpb.KeyValuePair{},
+			}
+			if dataType == schemapb.DataType_Array {
+				if _, ok := schemapb.DataType_value[field.ElementDataType]; !ok {
+					log.Ctx(ctx).Warn("element's data type is invalid(case sensitive).", zap.Any("elementDataType", field.ElementDataType), zap.Any("field", field))
+					c.AbortWithStatusJSON(http.StatusOK, gin.H{
+						HTTPReturnCode:    merr.Code(merr.ErrParameterInvalid),
+						HTTPReturnMessage: merr.ErrParameterInvalid.Error() + ", element data type " + field.ElementDataType + " is invalid(case sensitive).",
+					})
+					return nil, merr.ErrParameterInvalid
+				}
+				fieldSchema.ElementType = schemapb.DataType(schemapb.DataType_value[field.ElementDataType])
 			}
 			if field.IsPrimary {
 				fieldSchema.AutoID = httpReq.Schema.AutoId
@@ -908,29 +937,13 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			for key, fieldParam := range field.ElementTypeParams {
 				fieldSchema.TypeParams = append(fieldSchema.TypeParams, &commonpb.KeyValuePair{Key: key, Value: fieldParam})
 			}
-			allFields[field.FieldName] = true
 			collSchema.Fields = append(collSchema.Fields, &fieldSchema)
-		}
-		for _, indexParam := range httpReq.IndexParams {
-			vectorField, ok := allFields[indexParam.FieldName]
-			if ok {
-				if !vectorField {
-					valid = false // create index for scaler field is not supported
-				} else {
-					vectorFieldNum--
-				}
-			} else {
-				c.AbortWithStatusJSON(http.StatusOK, gin.H{
-					HTTPReturnCode:    merr.Code(merr.ErrMissingRequiredParameters),
-					HTTPReturnMessage: merr.ErrMissingRequiredParameters.Error() + ", error: `" + indexParam.FieldName + "` hasn't defined in schema",
-				})
-				return nil, merr.ErrMissingRequiredParameters
-			}
+			fieldNames[field.FieldName] = true
 		}
 		schema, err = proto.Marshal(&collSchema)
 	}
 	if err != nil {
-		log.Ctx(ctx).Warn("high level restful api, marshal collection schema fail", zap.Any("request", httpReq), zap.Error(err))
+		log.Ctx(ctx).Warn("high level restful api, marshal collection schema fail", zap.Error(err), zap.Any("request", anyReq))
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrMarshalCollectionSchema),
 			HTTPReturnMessage: merr.ErrMarshalCollectionSchema.Error() + ", error: " + err.Error(),
@@ -950,17 +963,13 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 	if err != nil {
 		return resp, err
 	}
-	if !valid || vectorFieldNum > 0 {
-		c.JSON(http.StatusOK, wrapperReturnDefault())
-		return resp, err
-	}
 	if httpReq.Schema.Fields == nil || len(httpReq.Schema.Fields) == 0 {
 		createIndexReq := &milvuspb.CreateIndexRequest{
 			DbName:         dbName,
 			CollectionName: httpReq.CollectionName,
 			FieldName:      VectorFieldName,
 			IndexName:      VectorFieldName,
-			ExtraParams:    []*commonpb.KeyValuePair{{Key: common.MetricTypeKey, Value: httpReq.MetricsType}},
+			ExtraParams:    []*commonpb.KeyValuePair{{Key: common.MetricTypeKey, Value: httpReq.MetricType}},
 		}
 		statusResponse, err := wrapperProxy(ctx, c, createIndexReq, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
 			return h.proxy.CreateIndex(ctx, req.(*milvuspb.CreateIndexRequest))
@@ -969,13 +978,24 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			return statusResponse, err
 		}
 	} else {
+		if len(httpReq.IndexParams) == 0 {
+			c.JSON(http.StatusOK, wrapperReturnDefault())
+			return nil, nil
+		}
 		for _, indexParam := range httpReq.IndexParams {
+			if _, ok := fieldNames[indexParam.FieldName]; !ok {
+				c.AbortWithStatusJSON(http.StatusOK, gin.H{
+					HTTPReturnCode:    merr.Code(merr.ErrMissingRequiredParameters),
+					HTTPReturnMessage: merr.ErrMissingRequiredParameters.Error() + ", error: `" + indexParam.FieldName + "` hasn't defined in schema",
+				})
+				return nil, merr.ErrMissingRequiredParameters
+			}
 			createIndexReq := &milvuspb.CreateIndexRequest{
 				DbName:         dbName,
 				CollectionName: httpReq.CollectionName,
 				FieldName:      indexParam.FieldName,
 				IndexName:      indexParam.IndexName,
-				ExtraParams:    []*commonpb.KeyValuePair{{Key: common.MetricTypeKey, Value: indexParam.MetricsType}},
+				ExtraParams:    []*commonpb.KeyValuePair{{Key: common.MetricTypeKey, Value: indexParam.MetricType}},
 			}
 			statusResponse, err := wrapperProxy(ctx, c, createIndexReq, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
 				return h.proxy.CreateIndex(ctx, req.(*milvuspb.CreateIndexRequest))
@@ -1156,7 +1176,7 @@ func (h *HandlersV2) createUser(ctx context.Context, c *gin.Context, anyReq any,
 	httpReq := anyReq.(*PasswordReq)
 	req := &milvuspb.CreateCredentialRequest{
 		Username: httpReq.UserName,
-		Password: httpReq.Password,
+		Password: crypto.Base64Encode(httpReq.Password),
 	}
 	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.CreateCredential(reqCtx, req.(*milvuspb.CreateCredentialRequest))
@@ -1171,8 +1191,8 @@ func (h *HandlersV2) updateUser(ctx context.Context, c *gin.Context, anyReq any,
 	httpReq := anyReq.(*NewPasswordReq)
 	req := &milvuspb.UpdateCredentialRequest{
 		Username:    httpReq.UserName,
-		OldPassword: httpReq.Password,
-		NewPassword: httpReq.NewPassword,
+		OldPassword: crypto.Base64Encode(httpReq.Password),
+		NewPassword: crypto.Base64Encode(httpReq.NewPassword),
 	}
 	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.UpdateCredential(reqCtx, req.(*milvuspb.UpdateCredentialRequest))
@@ -1326,7 +1346,18 @@ func (h *HandlersV2) listIndexes(ctx context.Context, c *gin.Context, anyReq any
 		CollectionName: collectionGetter.GetCollectionName(),
 	}
 	resp, err := wrapperProxy(ctx, c, req, false, false, func(reqCtx context.Context, req any) (any, error) {
-		return h.proxy.DescribeIndex(reqCtx, req.(*milvuspb.DescribeIndexRequest))
+		resp, err := h.proxy.DescribeIndex(reqCtx, req.(*milvuspb.DescribeIndexRequest))
+		if errors.Is(err, merr.ErrIndexNotFound) {
+			return &milvuspb.DescribeIndexResponse{
+				IndexDescriptions: []*milvuspb.IndexDescription{},
+			}, nil
+		}
+		if resp != nil && errors.Is(merr.Error(resp.Status), merr.ErrIndexNotFound) {
+			return &milvuspb.DescribeIndexResponse{
+				IndexDescriptions: []*milvuspb.IndexDescription{},
+			}, nil
+		}
+		return resp, err
 	})
 	if err != nil {
 		return resp, err
@@ -1352,11 +1383,11 @@ func (h *HandlersV2) describeIndex(ctx context.Context, c *gin.Context, anyReq a
 	if err == nil {
 		indexInfos := [](map[string]any){}
 		for _, indexDescription := range resp.(*milvuspb.DescribeIndexResponse).IndexDescriptions {
-			metricsType := ""
+			metricType := ""
 			indexType := ""
 			for _, pair := range indexDescription.Params {
 				if pair.Key == common.MetricTypeKey {
-					metricsType = pair.Value
+					metricType = pair.Value
 				} else if pair.Key == common.IndexTypeKey {
 					indexType = pair.Value
 				}
@@ -1365,7 +1396,7 @@ func (h *HandlersV2) describeIndex(ctx context.Context, c *gin.Context, anyReq a
 				HTTPIndexName:              indexDescription.IndexName,
 				HTTPIndexField:             indexDescription.FieldName,
 				HTTPReturnIndexType:        indexType,
-				HTTPReturnIndexMetricsType: metricsType,
+				HTTPReturnIndexMetricType:  metricType,
 				HTTPReturnIndexTotalRows:   indexDescription.TotalRows,
 				HTTPReturnIndexPendingRows: indexDescription.PendingIndexRows,
 				HTTPReturnIndexIndexedRows: indexDescription.IndexedRows,
@@ -1388,11 +1419,11 @@ func (h *HandlersV2) createIndex(ctx context.Context, c *gin.Context, anyReq any
 			FieldName:      indexParam.FieldName,
 			IndexName:      indexParam.IndexName,
 			ExtraParams: []*commonpb.KeyValuePair{
-				{Key: common.MetricTypeKey, Value: indexParam.MetricsType},
+				{Key: common.MetricTypeKey, Value: indexParam.MetricType},
 			},
 		}
-		if indexParam.IndexType != "" {
-			req.ExtraParams = append(req.ExtraParams, &commonpb.KeyValuePair{Key: common.IndexTypeKey, Value: indexParam.IndexType})
+		for key, value := range indexParam.IndexConfig {
+			req.ExtraParams = append(req.ExtraParams, &commonpb.KeyValuePair{Key: key, Value: value})
 		}
 		resp, err := wrapperProxy(ctx, c, req, false, false, func(reqCtx context.Context, req any) (interface{}, error) {
 			return h.proxy.CreateIndex(reqCtx, req.(*milvuspb.CreateIndexRequest))

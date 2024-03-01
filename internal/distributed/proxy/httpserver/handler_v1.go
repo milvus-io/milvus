@@ -382,7 +382,8 @@ func (h *HandlersV1) getCollectionDetails(c *gin.Context) {
 	}
 	vectorField := ""
 	for _, field := range coll.Schema.Fields {
-		if field.DataType == schemapb.DataType_BinaryVector || field.DataType == schemapb.DataType_FloatVector {
+		if field.DataType == schemapb.DataType_BinaryVector || field.DataType == schemapb.DataType_FloatVector ||
+			field.DataType == schemapb.DataType_Float16Vector || field.DataType == schemapb.DataType_BFloat16Vector {
 			vectorField = field.Name
 			break
 		}
@@ -910,7 +911,7 @@ func (h *HandlersV1) search(c *gin.Context) {
 		DbName:             httpReq.DbName,
 		CollectionName:     httpReq.CollectionName,
 		Dsl:                httpReq.Filter,
-		PlaceholderGroup:   vector2PlaceholderGroupBytes(httpReq.Vector),
+		PlaceholderGroup:   vectors2PlaceholderGroupBytes([][]float32{httpReq.Vector}),
 		DslType:            commonpb.DslType_BoolExprV1,
 		OutputFields:       httpReq.OutputFields,
 		SearchParams:       searchParams,

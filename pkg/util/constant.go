@@ -60,7 +60,9 @@ const (
 	AnyWord       = "*"
 
 	IdentifierKey = "identifier"
-	HeaderDBName  = "dbName"
+
+	HeaderUserAgent = "user-agent"
+	HeaderDBName    = "dbName"
 
 	RoleConfigPrivileges = "privileges"
 	RoleConfigObjectType = "object_type"

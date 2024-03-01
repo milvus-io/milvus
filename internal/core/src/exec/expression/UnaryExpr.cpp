@@ -333,6 +333,21 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson() {
                 }
                 break;
             }
+            case proto::plan::Match: {
+                PatternMatchTranslator translator;
+                RegexMatcher matcher;
+                auto regex_pattern = translator(val);
+                std::regex reg(regex_pattern);
+                for (size_t i = 0; i < size; ++i) {
+                    if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
+                        res[i] = false;
+                    } else {
+                        UnaryRangeJSONCompare(
+                            matcher(reg, ExprValueType(x.value())));
+                    }
+                }
+                break;
+            }
             default:
                 PanicInfo(
                     OpTypeInvalid,

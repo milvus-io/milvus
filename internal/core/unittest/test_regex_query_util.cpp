@@ -43,3 +43,67 @@ TEST(TranslatePatternMatchToRegexTest, PatternWithRegexChar) {
     std::string result = milvus::TranslatePatternMatchToRegex(pattern);
     EXPECT_EQ(result, "abc\\*def\\.ghi\\+");
 }
+
+TEST(PatternMatchTranslatorTest, InvalidTypeTest) {
+    using namespace milvus;
+    PatternMatchTranslator translator;
+
+    ASSERT_ANY_THROW(translator(123));
+    ASSERT_ANY_THROW(translator(3.14));
+    ASSERT_ANY_THROW(translator(true));
+}
+
+TEST(PatternMatchTranslatorTest, StringTypeTest) {
+    using namespace milvus;
+    PatternMatchTranslator translator;
+
+    std::string pattern1 = "abc";
+    std::string pattern2 = "xyz";
+    std::string pattern3 = "%a_b%";
+
+    EXPECT_EQ(translator(pattern1), "abc");
+    EXPECT_EQ(translator(pattern2), "xyz");
+    EXPECT_EQ(translator(pattern3), ".*a.b.*");
+}
+
+TEST(RegexMatcherTest, DefaultBehaviorTest) {
+    using namespace milvus;
+    RegexMatcher matcher;
+    std::regex pattern("Hello.*");
+
+    int operand1 = 123;
+    double operand2 = 3.14;
+    bool operand3 = true;
+
+    EXPECT_FALSE(matcher(pattern, operand1));
+    EXPECT_FALSE(matcher(pattern, operand2));
+    EXPECT_FALSE(matcher(pattern, operand3));
+}
+
+TEST(RegexMatcherTest, StringMatchTest) {
+    using namespace milvus;
+    RegexMatcher matcher;
+    std::regex pattern("Hello.*");
+
+    std::string str1 = "Hello, World!";
+    std::string str2 = "Hi there!";
+    std::string str3 = "Hello, OpenAI!";
+
+    EXPECT_TRUE(matcher(pattern, str1));
+    EXPECT_FALSE(matcher(pattern, str2));
+    EXPECT_TRUE(matcher(pattern, str3));
+}
+
+TEST(RegexMatcherTest, StringViewMatchTest) {
+    using namespace milvus;
+    RegexMatcher matcher;
+    std::regex pattern("Hello.*");
+
+    std::string_view str1 = "Hello, World!";
+    std::string_view str2 = "Hi there!";
+    std::string_view str3 = "Hello, OpenAI!";
+
+    EXPECT_TRUE(matcher(pattern, str1));
+    EXPECT_FALSE(matcher(pattern, str2));
+    EXPECT_TRUE(matcher(pattern, str3));
+}

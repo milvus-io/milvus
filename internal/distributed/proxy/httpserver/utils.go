@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
 	"github.com/golang/protobuf/proto"
 	"github.com/spf13/cast"
@@ -113,7 +112,7 @@ func convertRange(field *schemapb.FieldSchema, result gjson.Result) (string, err
 func checkGetPrimaryKey(coll *schemapb.CollectionSchema, idResult gjson.Result) (string, error) {
 	primaryField, ok := getPrimaryField(coll)
 	if !ok {
-		return "", errors.New("fail to find primary key from collection description")
+		return "", fmt.Errorf("collection: %s has no primary field", coll.Name)
 	}
 	resultStr, err := convertRange(primaryField, idResult)
 	if err != nil {
@@ -128,12 +127,14 @@ func printFields(fields []*schemapb.FieldSchema) []gin.H {
 	var res []gin.H
 	for _, field := range fields {
 		fieldDetail := gin.H{
-			HTTPReturnFieldName:       field.Name,
-			HTTPReturnFieldPrimaryKey: field.IsPrimaryKey,
-			HTTPReturnFieldAutoID:     field.AutoID,
-			HTTPReturnDescription:     field.Description,
+			HTTPReturnFieldName:         field.Name,
+			HTTPReturnFieldPrimaryKey:   field.IsPrimaryKey,
+			HTTPReturnFieldPartitionKey: field.IsPartitionKey,
+			HTTPReturnFieldAutoID:       field.AutoID,
+			HTTPReturnDescription:       field.Description,
 		}
-		if field.DataType == schemapb.DataType_BinaryVector || field.DataType == schemapb.DataType_FloatVector {
+		if field.DataType == schemapb.DataType_BinaryVector || field.DataType == schemapb.DataType_FloatVector ||
+			field.DataType == schemapb.DataType_Float16Vector || field.DataType == schemapb.DataType_BFloat16Vector {
 			dim, _ := getDim(field)
 			fieldDetail[HTTPReturnFieldType] = field.DataType.String() + "(" + strconv.FormatInt(dim, 10) + ")"
 		} else if field.DataType == schemapb.DataType_VarChar {
@@ -162,9 +163,9 @@ func printIndexes(indexes []*milvuspb.IndexDescription) []gin.H {
 	var res []gin.H
 	for _, index := range indexes {
 		res = append(res, gin.H{
-			HTTPIndexName:              index.IndexName,
-			HTTPIndexField:             index.FieldName,
-			HTTPReturnIndexMetricsType: getMetricType(index.Params),
+			HTTPIndexName:             index.IndexName,
+			HTTPIndexField:            index.FieldName,
+			HTTPReturnIndexMetricType: getMetricType(index.Params),
 		})
 	}
 	return res
@@ -187,8 +188,6 @@ func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) (error,
 
 	for _, data := range dataResultArray {
 		reallyData := map[string]interface{}{}
-		var vectorArray []float32
-		var binaryArray []byte
 		if data.Type == gjson.JSON {
 			for _, field := range collSchema.Fields {
 				fieldType := field.DataType
@@ -205,15 +204,48 @@ func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) (error,
 
 				switch fieldType {
 				case schemapb.DataType_FloatVector:
-					for _, vector := range gjson.Get(data.Raw, fieldName).Array() {
-						vectorArray = append(vectorArray, cast.ToFloat32(vector.Num))
+					if dataString == "" {
+						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], "", "missing vector field: "+fieldName), reallyDataArray
+					}
+					var vectorArray []float32
+					err := json.Unmarshal([]byte(dataString), &vectorArray)
+					if err != nil {
+						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray
 					}
 					reallyData[fieldName] = vectorArray
 				case schemapb.DataType_BinaryVector:
-					for _, vector := range gjson.Get(data.Raw, fieldName).Array() {
-						binaryArray = append(binaryArray, cast.ToUint8(vector.Num))
+					if dataString == "" {
+						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], "", "missing vector field: "+fieldName), reallyDataArray
 					}
-					reallyData[fieldName] = binaryArray
+					vectorStr := gjson.Get(data.Raw, fieldName).Raw
+					var vectorArray []byte
+					err := json.Unmarshal([]byte(vectorStr), &vectorArray)
+					if err != nil {
+						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray
+					}
+					reallyData[fieldName] = vectorArray
+				case schemapb.DataType_Float16Vector:
+					if dataString == "" {
+						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], "", "missing vector field: "+fieldName), reallyDataArray
+					}
+					vectorStr := gjson.Get(data.Raw, fieldName).Raw
+					var vectorArray []byte
+					err := json.Unmarshal([]byte(vectorStr), &vectorArray)
+					if err != nil {
+						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray
+					}
+					reallyData[fieldName] = vectorArray
+				case schemapb.DataType_BFloat16Vector:
+					if dataString == "" {
+						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], "", "missing vector field: "+fieldName), reallyDataArray
+					}
+					vectorStr := gjson.Get(data.Raw, fieldName).Raw
+					var vectorArray []byte
+					err := json.Unmarshal([]byte(vectorStr), &vectorArray)
+					if err != nil {
+						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray
+					}
+					reallyData[fieldName] = vectorArray
 				case schemapb.DataType_Bool:
 					result, err := cast.ToBoolE(dataString)
 					if err != nil {
@@ -239,7 +271,7 @@ func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) (error,
 					}
 					reallyData[fieldName] = result
 				case schemapb.DataType_Int64:
-					result, err := cast.ToInt64E(dataString)
+					result, err := json.Number(dataString).Int64()
 					if err != nil {
 						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray
 					}
@@ -250,7 +282,8 @@ func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) (error,
 						arr := make([]bool, 0)
 						err := json.Unmarshal([]byte(dataString), &arr)
 						if err != nil {
-							return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray
+							return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)]+
+								" of "+schemapb.DataType_name[int32(field.ElementType)], dataString, err.Error()), reallyDataArray
 						}
 						reallyData[fieldName] = &schemapb.ScalarField{
 							Data: &schemapb.ScalarField_BoolData{
@@ -263,7 +296,8 @@ func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) (error,
 						arr := make([]int32, 0)
 						err := json.Unmarshal([]byte(dataString), &arr)
 						if err != nil {
-							return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray
+							return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)]+
+								" of "+schemapb.DataType_name[int32(field.ElementType)], dataString, err.Error()), reallyDataArray
 						}
 						reallyData[fieldName] = &schemapb.ScalarField{
 							Data: &schemapb.ScalarField_IntData{
@@ -276,7 +310,8 @@ func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) (error,
 						arr := make([]int32, 0)
 						err := json.Unmarshal([]byte(dataString), &arr)
 						if err != nil {
-							return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray
+							return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)]+
+								" of "+schemapb.DataType_name[int32(field.ElementType)], dataString, err.Error()), reallyDataArray
 						}
 						reallyData[fieldName] = &schemapb.ScalarField{
 							Data: &schemapb.ScalarField_IntData{
@@ -289,7 +324,8 @@ func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) (error,
 						arr := make([]int32, 0)
 						err := json.Unmarshal([]byte(dataString), &arr)
 						if err != nil {
-							return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray
+							return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)]+
+								" of "+schemapb.DataType_name[int32(field.ElementType)], dataString, err.Error()), reallyDataArray
 						}
 						reallyData[fieldName] = &schemapb.ScalarField{
 							Data: &schemapb.ScalarField_IntData{
@@ -300,9 +336,18 @@ func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) (error,
 						}
 					case schemapb.DataType_Int64:
 						arr := make([]int64, 0)
-						err := json.Unmarshal([]byte(dataString), &arr)
+						numArr := make([]json.Number, 0)
+						err := json.Unmarshal([]byte(dataString), &numArr)
 						if err != nil {
-							return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray
+							return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)]+
+								" of "+schemapb.DataType_name[int32(field.ElementType)], dataString, err.Error()), reallyDataArray
+						}
+						for _, num := range numArr {
+							intVal, err := num.Int64()
+							if err != nil {
+								return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray
+							}
+							arr = append(arr, intVal)
 						}
 						reallyData[fieldName] = &schemapb.ScalarField{
 							Data: &schemapb.ScalarField_LongData{
@@ -315,7 +360,8 @@ func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) (error,
 						arr := make([]float32, 0)
 						err := json.Unmarshal([]byte(dataString), &arr)
 						if err != nil {
-							return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray
+							return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)]+
+								" of "+schemapb.DataType_name[int32(field.ElementType)], dataString, err.Error()), reallyDataArray
 						}
 						reallyData[fieldName] = &schemapb.ScalarField{
 							Data: &schemapb.ScalarField_FloatData{
@@ -328,7 +374,8 @@ func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) (error,
 						arr := make([]float64, 0)
 						err := json.Unmarshal([]byte(dataString), &arr)
 						if err != nil {
-							return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray
+							return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)]+
+								" of "+schemapb.DataType_name[int32(field.ElementType)], dataString, err.Error()), reallyDataArray
 						}
 						reallyData[fieldName] = &schemapb.ScalarField{
 							Data: &schemapb.ScalarField_DoubleData{
@@ -341,7 +388,8 @@ func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) (error,
 						arr := make([]string, 0)
 						err := json.Unmarshal([]byte(dataString), &arr)
 						if err != nil {
-							return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray
+							return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)]+
+								" of "+schemapb.DataType_name[int32(field.ElementType)], dataString, err.Error()), reallyDataArray
 						}
 						reallyData[fieldName] = &schemapb.ScalarField{
 							Data: &schemapb.ScalarField_StringData{
@@ -434,7 +482,8 @@ func convertFloatVectorToArray(vector [][]float32, dim int64) ([]float32, error)
 	floatArray := make([]float32, 0)
 	for _, arr := range vector {
 		if int64(len(arr)) != dim {
-			return nil, errors.New("vector length diff from dimension")
+			return nil, fmt.Errorf("[]float32 size %d doesn't equal to vector dimension %d of %s",
+				len(arr), dim, schemapb.DataType_name[int32(schemapb.DataType_FloatVector)])
 		}
 		for i := int64(0); i < dim; i++ {
 			floatArray = append(floatArray, arr[i])
@@ -443,12 +492,21 @@ func convertFloatVectorToArray(vector [][]float32, dim int64) ([]float32, error)
 	return floatArray, nil
 }
 
-func convertBinaryVectorToArray(vector [][]byte, dim int64) ([]byte, error) {
+func convertBinaryVectorToArray(vector [][]byte, dim int64, dataType schemapb.DataType) ([]byte, error) {
 	binaryArray := make([]byte, 0)
-	bytesLen := dim / 8
+	var bytesLen int64
+	switch dataType {
+	case schemapb.DataType_BinaryVector:
+		bytesLen = dim / 8
+	case schemapb.DataType_Float16Vector:
+		bytesLen = dim * 2
+	case schemapb.DataType_BFloat16Vector:
+		bytesLen = dim * 2
+	}
 	for _, arr := range vector {
 		if int64(len(arr)) != bytesLen {
-			return nil, errors.New("vector length diff from dimension")
+			return nil, fmt.Errorf("[]byte size %d doesn't equal to vector dimension %d of %s",
+				len(arr), dim, schemapb.DataType_name[int32(dataType)])
 		}
 		for i := int64(0); i < bytesLen; i++ {
 			binaryArray = append(binaryArray, arr[i])
@@ -503,13 +561,13 @@ func convertToIntArray(dataType schemapb.DataType, arr interface{}) []int32 {
 func anyToColumns(rows []map[string]interface{}, sch *schemapb.CollectionSchema) ([]*schemapb.FieldData, error) {
 	rowsLen := len(rows)
 	if rowsLen == 0 {
-		return []*schemapb.FieldData{}, errors.New("0 length column")
+		return []*schemapb.FieldData{}, fmt.Errorf("no row need to be convert to columns")
 	}
 
 	isDynamic := sch.EnableDynamicField
-	var dim int64
 
 	nameColumns := make(map[string]interface{})
+	nameDims := make(map[string]int64)
 	fieldData := make(map[string]*schemapb.FieldData)
 	for _, field := range sch.Fields {
 		// skip auto id pk field
@@ -542,10 +600,20 @@ func anyToColumns(rows []map[string]interface{}, sch *schemapb.CollectionSchema)
 			data = make([][]byte, 0, rowsLen)
 		case schemapb.DataType_FloatVector:
 			data = make([][]float32, 0, rowsLen)
-			dim, _ = getDim(field)
+			dim, _ := getDim(field)
+			nameDims[field.Name] = dim
 		case schemapb.DataType_BinaryVector:
 			data = make([][]byte, 0, rowsLen)
-			dim, _ = getDim(field)
+			dim, _ := getDim(field)
+			nameDims[field.Name] = dim
+		case schemapb.DataType_Float16Vector:
+			data = make([][]byte, 0, rowsLen)
+			dim, _ := getDim(field)
+			nameDims[field.Name] = dim
+		case schemapb.DataType_BFloat16Vector:
+			data = make([][]byte, 0, rowsLen)
+			dim, _ := getDim(field)
+			nameDims[field.Name] = dim
 		default:
 			return nil, fmt.Errorf("the type(%v) of field(%v) is not supported, use other sdk please", field.DataType, field.Name)
 		}
@@ -557,8 +625,8 @@ func anyToColumns(rows []map[string]interface{}, sch *schemapb.CollectionSchema)
 			IsDynamic: field.IsDynamic,
 		}
 	}
-	if dim == 0 {
-		return nil, errors.New("cannot find dimension")
+	if len(nameDims) == 0 {
+		return nil, fmt.Errorf("collection: %s has no vector field", sch.Name)
 	}
 
 	dynamicCol := make([][]byte, 0, rowsLen)
@@ -607,6 +675,10 @@ func anyToColumns(rows []map[string]interface{}, sch *schemapb.CollectionSchema)
 			case schemapb.DataType_FloatVector:
 				nameColumns[field.Name] = append(nameColumns[field.Name].([][]float32), candi.v.Interface().([]float32))
 			case schemapb.DataType_BinaryVector:
+				nameColumns[field.Name] = append(nameColumns[field.Name].([][]byte), candi.v.Interface().([]byte))
+			case schemapb.DataType_Float16Vector:
+				nameColumns[field.Name] = append(nameColumns[field.Name].([][]byte), candi.v.Interface().([]byte))
+			case schemapb.DataType_BFloat16Vector:
 				nameColumns[field.Name] = append(nameColumns[field.Name].([][]byte), candi.v.Interface().([]byte))
 			default:
 				return nil, fmt.Errorf("the type(%v) of field(%v) is not supported, use other sdk please", field.DataType, field.Name)
@@ -742,6 +814,7 @@ func anyToColumns(rows []map[string]interface{}, sch *schemapb.CollectionSchema)
 				},
 			}
 		case schemapb.DataType_FloatVector:
+			dim := nameDims[name]
 			arr, err := convertFloatVectorToArray(column.([][]float32), dim)
 			if err != nil {
 				return nil, err
@@ -757,7 +830,8 @@ func anyToColumns(rows []map[string]interface{}, sch *schemapb.CollectionSchema)
 				},
 			}
 		case schemapb.DataType_BinaryVector:
-			arr, err := convertBinaryVectorToArray(column.([][]byte), dim)
+			dim := nameDims[name]
+			arr, err := convertBinaryVectorToArray(column.([][]byte), dim, colData.Type)
 			if err != nil {
 				return nil, err
 			}
@@ -766,6 +840,34 @@ func anyToColumns(rows []map[string]interface{}, sch *schemapb.CollectionSchema)
 					Dim: dim,
 					Data: &schemapb.VectorField_BinaryVector{
 						BinaryVector: arr,
+					},
+				},
+			}
+		case schemapb.DataType_Float16Vector:
+			dim := nameDims[name]
+			arr, err := convertBinaryVectorToArray(column.([][]byte), dim, colData.Type)
+			if err != nil {
+				return nil, err
+			}
+			colData.Field = &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_Float16Vector{
+						Float16Vector: arr,
+					},
+				},
+			}
+		case schemapb.DataType_BFloat16Vector:
+			dim := nameDims[name]
+			arr, err := convertBinaryVectorToArray(column.([][]byte), dim, colData.Type)
+			if err != nil {
+				return nil, err
+			}
+			colData.Field = &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_Bfloat16Vector{
+						Bfloat16Vector: arr,
 					},
 				},
 			}
@@ -804,7 +906,8 @@ func serialize(fv []float32) []byte {
 	return data
 }
 
-func vector2PlaceholderGroupBytes(vectors []float32) []byte {
+// todo: support [][]byte for BinaryVector
+func vectors2PlaceholderGroupBytes(vectors [][]float32) []byte {
 	var placeHolderType commonpb.PlaceholderType
 	ph := &commonpb.PlaceholderValue{
 		Tag:    "$0",
@@ -814,7 +917,9 @@ func vector2PlaceholderGroupBytes(vectors []float32) []byte {
 		placeHolderType = commonpb.PlaceholderType_FloatVector
 
 		ph.Type = placeHolderType
-		ph.Values = append(ph.Values, serialize(vectors))
+		for _, vector := range vectors {
+			ph.Values = append(ph.Values, serialize(vector))
+		}
 	}
 	phg := &commonpb.PlaceholderGroup{
 		Placeholders: []*commonpb.PlaceholderValue{
@@ -876,6 +981,10 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 				rowsNum = int64(len(fieldDataList[0].GetVectors().GetBinaryVector())*8) / fieldDataList[0].GetVectors().GetDim()
 			case schemapb.DataType_FloatVector:
 				rowsNum = int64(len(fieldDataList[0].GetVectors().GetFloatVector().Data)) / fieldDataList[0].GetVectors().GetDim()
+			case schemapb.DataType_Float16Vector:
+				rowsNum = int64(len(fieldDataList[0].GetVectors().GetFloat16Vector())/2) / fieldDataList[0].GetVectors().GetDim()
+			case schemapb.DataType_BFloat16Vector:
+				rowsNum = int64(len(fieldDataList[0].GetVectors().GetBfloat16Vector())/2) / fieldDataList[0].GetVectors().GetDim()
 			default:
 				return nil, fmt.Errorf("the type(%v) of field(%v) is not supported, use other sdk please", fieldDataList[0].Type, fieldDataList[0].FieldName)
 			}
@@ -927,6 +1036,10 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 					row[fieldDataList[j].FieldName] = fieldDataList[j].GetVectors().GetBinaryVector()[i*(fieldDataList[j].GetVectors().GetDim()/8) : (i+1)*(fieldDataList[j].GetVectors().GetDim()/8)]
 				case schemapb.DataType_FloatVector:
 					row[fieldDataList[j].FieldName] = fieldDataList[j].GetVectors().GetFloatVector().Data[i*fieldDataList[j].GetVectors().GetDim() : (i+1)*fieldDataList[j].GetVectors().GetDim()]
+				case schemapb.DataType_Float16Vector:
+					row[fieldDataList[j].FieldName] = fieldDataList[j].GetVectors().GetBinaryVector()[i*(fieldDataList[j].GetVectors().GetDim()*2) : (i+1)*(fieldDataList[j].GetVectors().GetDim()*2)]
+				case schemapb.DataType_BFloat16Vector:
+					row[fieldDataList[j].FieldName] = fieldDataList[j].GetVectors().GetBinaryVector()[i*(fieldDataList[j].GetVectors().GetDim()*2) : (i+1)*(fieldDataList[j].GetVectors().GetDim()*2)]
 				case schemapb.DataType_Array:
 					row[fieldDataList[j].FieldName] = fieldDataList[j].GetScalars().GetArrayData().Data[i]
 				case schemapb.DataType_JSON:

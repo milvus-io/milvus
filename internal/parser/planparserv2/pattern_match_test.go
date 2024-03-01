@@ -121,6 +121,12 @@ func Test_translatePatternMatch(t *testing.T) {
 			wantOperand: "prefix%suffix",
 			wantErr:     false,
 		},
+		{
+			args:        args{pattern: "_0"},
+			wantOp:      planpb.OpType_Match,
+			wantOperand: "_0",
+			wantErr:     false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

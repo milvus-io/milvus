@@ -32,7 +32,6 @@ import (
 	"strconv"
 	"sync"
 	"time"
-	"unsafe"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -56,7 +55,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
-	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
@@ -135,7 +133,7 @@ func (loader *segmentLoaderV2) Load(ctx context.Context,
 		return nil, nil
 	}
 	// Filter out loaded & loading segments
-	infos := loader.prepare(segmentType, version, segments...)
+	infos := loader.prepare(segmentType, segments...)
 	defer loader.unregister(infos...)
 
 	log.With(
@@ -235,7 +233,8 @@ func (loader *segmentLoaderV2) Load(ctx context.Context,
 	}
 
 	// Wait for all segments loaded
-	if err := loader.waitSegmentLoadDone(ctx, segmentType, lo.Map(segments, func(info *querypb.SegmentLoadInfo, _ int) int64 { return info.GetSegmentID() })...); err != nil {
+	segmentIDs := lo.Map(segments, func(info *querypb.SegmentLoadInfo, _ int) int64 { return info.GetSegmentID() })
+	if err := loader.waitSegmentLoadDone(ctx, segmentType, segmentIDs, version); err != nil {
 		log.Warn("failed to wait the filtered out segments load done", zap.Error(err))
 		return nil, err
 	}
@@ -386,7 +385,7 @@ func (loader *segmentLoaderV2) loadSegment(ctx context.Context,
 
 	if segment.Type() == SegmentTypeSealed {
 		fieldsMap := typeutil.NewConcurrentMap[int64, *schemapb.FieldSchema]()
-		for _, field := range collection.Schema().Fields {
+		for _, field := range collection.Schema().GetFields() {
 			fieldsMap.Insert(field.FieldID, field)
 		}
 		// fieldID2IndexInfo := make(map[int64]*querypb.FieldIndexInfo)
@@ -408,6 +407,7 @@ func (loader *segmentLoaderV2) loadSegment(ctx context.Context,
 		}
 
 		log.Info("load fields...",
+			zap.Int("fieldNum", fieldsMap.Len()),
 			zap.Int64s("indexedFields", lo.Keys(indexedFieldInfos)),
 		)
 
@@ -418,13 +418,6 @@ func (loader *segmentLoaderV2) loadSegment(ctx context.Context,
 		if err := loader.loadFieldsIndex(ctx, schemaHelper, segment, loadInfo.GetNumOfRows(), indexedFieldInfos); err != nil {
 			return err
 		}
-
-		// REMOVEME
-		keys := make([]int64, 0)
-		fieldsMap.Range(func(key int64, value *schemapb.FieldSchema) bool {
-			keys = append(keys, key)
-			return true
-		})
 
 		if err := loader.loadSealedSegmentFields(ctx, segment, fieldsMap, loadInfo.GetNumOfRows()); err != nil {
 			return err
@@ -456,9 +449,9 @@ func (loader *segmentLoaderV2) loadSegment(ctx context.Context,
 
 func (loader *segmentLoaderV2) loadSealedSegmentFields(ctx context.Context, segment *LocalSegment, fields *typeutil.ConcurrentMap[int64, *schemapb.FieldSchema], rowCount int64) error {
 	runningGroup, _ := errgroup.WithContext(ctx)
-	fields.Range(func(fieldID int64, fieldSchema *schemapb.FieldSchema) bool {
+	fields.Range(func(fieldID int64, field *schemapb.FieldSchema) bool {
 		runningGroup.Go(func() error {
-			return segment.LoadFieldData(ctx, fieldID, rowCount, nil, common.IsMmapEnabled(fieldSchema.GetTypeParams()...))
+			return segment.LoadFieldData(ctx, fieldID, rowCount, nil)
 		})
 		return true
 	})
@@ -498,6 +491,7 @@ func NewLoader(
 	log.Info("SegmentLoader created", zap.Int("ioPoolSize", ioPoolSize))
 
 	loader := &segmentLoader{
+		IndexAttrCache:  NewIndexAttrCache(),
 		manager:         manager,
 		cm:              cm,
 		loadingSegments: typeutil.NewConcurrentMap[int64, *loadResult](),
@@ -533,6 +527,7 @@ func (r *loadResult) SetResult(status loadStatus) {
 
 // segmentLoader is only responsible for loading the field data from binlog
 type segmentLoader struct {
+	*IndexAttrCache
 	manager *Manager
 	cm      storage.ChunkManager
 
@@ -560,7 +555,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		return nil, nil
 	}
 	// Filter out loaded & loading segments
-	infos := loader.prepare(segmentType, version, segments...)
+	infos := loader.prepare(segmentType, segments...)
 	defer loader.unregister(infos...)
 
 	log.With(
@@ -676,7 +671,8 @@ func (loader *segmentLoader) Load(ctx context.Context,
 	}
 
 	// Wait for all segments loaded
-	if err := loader.waitSegmentLoadDone(ctx, segmentType, lo.Map(segments, func(info *querypb.SegmentLoadInfo, _ int) int64 { return info.GetSegmentID() })...); err != nil {
+	segmentIDs := lo.Map(segments, func(info *querypb.SegmentLoadInfo, _ int) int64 { return info.GetSegmentID() })
+	if err := loader.waitSegmentLoadDone(ctx, segmentType, segmentIDs, version); err != nil {
 		log.Warn("failed to wait the filtered out segments load done", zap.Error(err))
 		return nil, err
 	}
@@ -690,7 +686,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 	return result, nil
 }
 
-func (loader *segmentLoader) prepare(segmentType SegmentType, version int64, segments ...*querypb.SegmentLoadInfo) []*querypb.SegmentLoadInfo {
+func (loader *segmentLoader) prepare(segmentType SegmentType, segments ...*querypb.SegmentLoadInfo) []*querypb.SegmentLoadInfo {
 	loader.mut.Lock()
 	defer loader.mut.Unlock()
 
@@ -703,9 +699,6 @@ func (loader *segmentLoader) prepare(segmentType SegmentType, version int64, seg
 			infos = append(infos, segment)
 			loader.loadingSegments.Insert(segment.GetSegmentID(), newLoadResult())
 		} else {
-			// try to update segment version before skip load operation
-			loader.manager.Segment.UpdateBy(IncreaseVersion(version),
-				WithType(segmentType), WithID(segment.SegmentID))
 			log.Info("skip loaded/loading segment", zap.Int64("segmentID", segment.GetSegmentID()),
 				zap.Bool("isLoaded", len(loader.manager.Segment.GetBy(WithType(segmentType), WithID(segment.GetSegmentID()))) > 0),
 				zap.Bool("isLoading", loader.loadingSegments.Contain(segment.GetSegmentID())),
@@ -804,7 +797,7 @@ func (loader *segmentLoader) freeRequest(resource LoadResource) {
 	loader.committedResource.Sub(resource)
 }
 
-func (loader *segmentLoader) waitSegmentLoadDone(ctx context.Context, segmentType SegmentType, segmentIDs ...int64) error {
+func (loader *segmentLoader) waitSegmentLoadDone(ctx context.Context, segmentType SegmentType, segmentIDs []int64, version int64) error {
 	log := log.Ctx(ctx).With(
 		zap.String("segmentType", segmentType.String()),
 		zap.Int64s("segmentIDs", segmentIDs),
@@ -846,6 +839,9 @@ func (loader *segmentLoader) waitSegmentLoadDone(ctx context.Context, segmentTyp
 			log.Warn("failed to wait segment loaded", zap.Int64("segmentID", segmentID))
 			return merr.WrapErrSegmentLack(segmentID, "failed to wait segment loaded")
 		}
+
+		// try to update segment version after wait segment loaded
+		loader.manager.Segment.UpdateBy(IncreaseVersion(version), WithType(segmentType), WithID(segmentID))
 
 		log.Info("segment loaded...", zap.Int64("segmentID", segmentID))
 	}
@@ -937,6 +933,11 @@ func (loader *segmentLoader) loadSegment(ctx context.Context,
 	defer debug.FreeOSMemory()
 
 	if segment.Type() == SegmentTypeSealed {
+		loadStatus := LoadStatusInMemory
+		if loadInfo.GetLazyLoad() {
+			loadStatus = LoadStatusMeta
+		}
+
 		fieldID2IndexInfo := make(map[int64]*querypb.FieldIndexInfo)
 		for _, indexInfo := range loadInfo.IndexInfos {
 			if len(indexInfo.GetIndexFilePaths()) > 0 {
@@ -980,14 +981,18 @@ func (loader *segmentLoader) loadSegment(ctx context.Context,
 				return err
 			}
 			if !typeutil.IsVectorType(field.GetDataType()) && !segment.HasRawData(fieldID) {
-				log.Info("field index doesn't include raw data, load binlog...", zap.Int64("fieldID", fieldID), zap.String("index", info.IndexInfo.GetIndexName()))
-				if err = segment.LoadFieldData(ctx, fieldID, loadInfo.GetNumOfRows(), info.FieldBinlog, true); err != nil {
+				log.Info("field index doesn't include raw data, load binlog...",
+					zap.Int64("fieldID", fieldID),
+					zap.String("index", info.IndexInfo.GetIndexName()),
+				)
+
+				if err = segment.LoadFieldData(ctx, fieldID, loadInfo.GetNumOfRows(), info.FieldBinlog); err != nil {
 					log.Warn("load raw data failed", zap.Int64("fieldID", fieldID), zap.Error(err))
 					return err
 				}
 			}
 		}
-		if err := loader.loadSealedSegmentFields(ctx, segment, fieldBinlogs, loadInfo.GetNumOfRows()); err != nil {
+		if err := loadSealedSegmentFields(ctx, segment, fieldBinlogs, loadInfo.GetNumOfRows(), WithLoadStatus(loadStatus)); err != nil {
 			return err
 		}
 		// https://github.com/milvus-io/milvus/23654
@@ -1043,12 +1048,7 @@ func (loader *segmentLoader) filterPKStatsBinlogs(fieldBinlogs []*datapb.FieldBi
 	return result, storage.DefaultStatsType
 }
 
-func (loader *segmentLoader) loadSealedSegmentFields(ctx context.Context, segment *LocalSegment, fields []*datapb.FieldBinlog, rowCount int64) error {
-	collection := loader.manager.Collection.Get(segment.Collection())
-	if collection == nil {
-		return merr.WrapErrCollectionNotLoaded(segment.Collection(), "failed to load segment fields")
-	}
-
+func loadSealedSegmentFields(ctx context.Context, segment *LocalSegment, fields []*datapb.FieldBinlog, rowCount int64, opts ...loadOption) error {
 	runningGroup, _ := errgroup.WithContext(ctx)
 	for _, field := range fields {
 		fieldBinLog := field
@@ -1058,7 +1058,7 @@ func (loader *segmentLoader) loadSealedSegmentFields(ctx context.Context, segmen
 				fieldID,
 				rowCount,
 				fieldBinLog,
-				common.IsFieldMmapEnabled(collection.Schema(), fieldID),
+				opts...,
 			)
 		})
 	}
@@ -1322,35 +1322,6 @@ func JoinIDPath(ids ...int64) string {
 	return path.Join(idStr...)
 }
 
-func GetIndexResourceUsage(indexInfo *querypb.FieldIndexInfo) (uint64, uint64, error) {
-	indexType, err := funcutil.GetAttrByKeyFromRepeatedKV(common.IndexTypeKey, indexInfo.IndexParams)
-	if err != nil {
-		return 0, 0, fmt.Errorf("index type not exist in index params")
-	}
-	if indexType == indexparamcheck.IndexDISKANN {
-		neededMemSize := indexInfo.IndexSize / UsedDiskMemoryRatio
-		neededDiskSize := indexInfo.IndexSize - neededMemSize
-		return uint64(neededMemSize), uint64(neededDiskSize), nil
-	}
-
-	factor := uint64(1)
-
-	var isLoadWithDisk bool
-	GetDynamicPool().Submit(func() (any, error) {
-		cIndexType := C.CString(indexType)
-		defer C.free(unsafe.Pointer(cIndexType))
-		cEngineVersion := C.int32_t(indexInfo.GetCurrentIndexVersion())
-		isLoadWithDisk = bool(C.IsLoadWithDisk(cIndexType, cEngineVersion))
-		return nil, nil
-	}).Await()
-
-	if !isLoadWithDisk {
-		factor = 2
-	}
-
-	return uint64(indexInfo.IndexSize) * factor, 0, nil
-}
-
 // checkSegmentSize checks whether the memory & disk is sufficient to load the segments
 // returns the memory & disk usage while loading if possible to load,
 // otherwise, returns error
@@ -1401,7 +1372,7 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 			fieldID := fieldBinlog.FieldID
 			mmapEnabled := common.IsFieldMmapEnabled(collection.Schema(), fieldID)
 			if fieldIndexInfo, ok := vecFieldID2IndexInfo[fieldID]; ok {
-				neededMemSize, neededDiskSize, err := GetIndexResourceUsage(fieldIndexInfo)
+				neededMemSize, neededDiskSize, err := loader.GetIndexResourceUsage(fieldIndexInfo)
 				if err != nil {
 					log.Warn("failed to get index size",
 						zap.Int64("collectionID", loadInfo.CollectionID),
@@ -1504,7 +1475,7 @@ func (loader *segmentLoader) LoadIndex(ctx context.Context, segment *LocalSegmen
 
 	// Filter out LOADING segments only
 	// use None to avoid loaded check
-	infos := loader.prepare(commonpb.SegmentState_SegmentStateNone, version, loadInfo)
+	infos := loader.prepare(commonpb.SegmentState_SegmentStateNone, loadInfo)
 	defer loader.unregister(infos...)
 
 	indexInfo := lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *querypb.SegmentLoadInfo {
@@ -1546,7 +1517,7 @@ func (loader *segmentLoader) LoadIndex(ctx context.Context, segment *LocalSegmen
 		loader.notifyLoadFinish(loadInfo)
 	}
 
-	return loader.waitSegmentLoadDone(ctx, commonpb.SegmentState_SegmentStateNone, loadInfo.GetSegmentID())
+	return loader.waitSegmentLoadDone(ctx, commonpb.SegmentState_SegmentStateNone, []int64{loadInfo.GetSegmentID()}, version)
 }
 
 func getBinlogDataSize(fieldBinlog *datapb.FieldBinlog) int64 {

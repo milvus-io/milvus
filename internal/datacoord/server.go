@@ -274,16 +274,7 @@ func (s *Server) Register() error {
 
 	s.session.LivenessCheck(s.serverLoopCtx, func() {
 		logutil.Logger(s.ctx).Error("disconnected from etcd and exited", zap.Int64("serverID", s.session.GetServerID()))
-		if err := s.Stop(); err != nil {
-			logutil.Logger(s.ctx).Fatal("failed to stop server", zap.Error(err))
-		}
-		metrics.NumNodes.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), typeutil.DataCoordRole).Dec()
-		// manually send signal to starter goroutine
-		if s.session.IsTriggerKill() {
-			if p, err := os.FindProcess(os.Getpid()); err == nil {
-				p.Signal(syscall.SIGINT)
-			}
-		}
+		os.Exit(1)
 	})
 	return nil
 }
@@ -1114,10 +1105,12 @@ func (s *Server) Stop() error {
 	if !s.stateCode.CompareAndSwap(commonpb.StateCode_Healthy, commonpb.StateCode_Abnormal) {
 		return nil
 	}
-	logutil.Logger(s.ctx).Info("server shutdown")
-	s.cluster.Close()
+	logutil.Logger(s.ctx).Info("datacoord server shutdown")
 	s.garbageCollector.close()
+	logutil.Logger(s.ctx).Info("datacoord garbage collector stopped")
+
 	s.stopServerLoop()
+
 	s.importScheduler.Close()
 	s.importChecker.Close()
 
@@ -1125,7 +1118,16 @@ func (s *Server) Stop() error {
 		s.stopCompactionTrigger()
 		s.stopCompactionHandler()
 	}
+	logutil.Logger(s.ctx).Info("datacoord compaction stopped")
+
 	s.indexBuilder.Stop()
+	logutil.Logger(s.ctx).Info("datacoord index builder stopped")
+
+	s.cluster.Close()
+	logutil.Logger(s.ctx).Info("datacoord cluster stopped")
+
+	s.stopServerLoop()
+	logutil.Logger(s.ctx).Info("datacoord serverloop stopped")
 
 	if s.session != nil {
 		s.session.Stop()
@@ -1134,6 +1136,7 @@ func (s *Server) Stop() error {
 	if s.icSession != nil {
 		s.icSession.Stop()
 	}
+	logutil.Logger(s.ctx).Warn("datacoord stop successful")
 
 	return nil
 }

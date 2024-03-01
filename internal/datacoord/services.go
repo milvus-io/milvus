@@ -307,6 +307,8 @@ func (s *Server) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsert
 		}, nil
 	}
 
+	segment = segment.Clone()
+
 	err := binlog.DecompressBinLog(storage.InsertBinlog, segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID(), segment.GetBinlogs())
 	if err != nil {
 		return &datapb.GetInsertBinlogPathsResponse{
@@ -421,6 +423,8 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 			child := s.meta.GetCompactionTo(id)
 			clonedInfo := info.Clone()
 			if child != nil {
+				// child segment should decompress binlog path
+				binlog.DecompressBinLog(storage.DeleteBinlog, child.GetCollectionID(), child.GetPartitionID(), child.GetID(), child.GetDeltalogs())
 				clonedInfo.Deltalogs = append(clonedInfo.Deltalogs, child.GetDeltalogs()...)
 				clonedInfo.DmlPosition = child.GetDmlPosition()
 			}
@@ -543,6 +547,11 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		log.Error("save binlog and checkpoints failed", zap.Error(err))
 		return merr.Status(err), nil
 	}
+	log.Info("SaveBinlogPaths sync segment with meta",
+		zap.Any("binlogs", req.GetField2BinlogPaths()),
+		zap.Any("deltalogs", req.GetDeltalogs()),
+		zap.Any("statslogs", req.GetField2StatslogPaths()),
+	)
 
 	if req.GetSegLevel() == datapb.SegmentLevel_L0 {
 		metrics.DataCoordSizeStoredL0Segment.WithLabelValues(fmt.Sprint(req.GetCollectionID())).Observe(calculateL0SegmentSize(req.GetField2StatslogPaths()))

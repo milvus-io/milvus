@@ -324,10 +324,7 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
     auto num_queries = dataset->GetRows();
     auto topk = search_info.topk_;
 
-    knowhere::Json search_config = search_info.search_params_;
-
-    search_config[knowhere::meta::TOPK] = topk;
-    search_config[knowhere::meta::METRIC_TYPE] = GetMetricType();
+    knowhere::Json search_config = PrepareSearchParams(search_info);
 
     if (GetIndexType() == knowhere::IndexEnum::INDEX_DISKANN) {
         // set search list size

@@ -24,7 +24,7 @@ require (
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
 	github.com/klauspost/compress v1.16.7
 	github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d
-	github.com/milvus-io/milvus-proto/go-api/v2 v2.3.4-0.20240131042256-9e75d6135cbe
+	github.com/milvus-io/milvus-proto/go-api/v2 v2.3.4-0.20240228061649-a922b16f2a46
 	github.com/minio/minio-go/v7 v7.0.61
 	github.com/prometheus/client_golang v1.14.0
 	github.com/prometheus/client_model v0.3.0
@@ -65,7 +65,7 @@ require (
 	github.com/milvus-io/milvus/pkg v0.0.0-00010101000000-000000000000
 	github.com/pingcap/log v1.1.1-0.20221015072633-39906604fb81
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
-	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.0.841
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.0.865
 	golang.org/x/net v0.19.0
 )
 

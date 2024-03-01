@@ -43,19 +43,18 @@
 #include "test_utils/AssertUtils.h"
 #include "test_utils/DataGen.h"
 
-using namespace milvus::segcore;
 using namespace milvus;
 using namespace milvus::index;
+using namespace milvus::query;
+using namespace milvus::segcore;
 using namespace knowhere;
+
 using milvus::index::VectorIndex;
 using milvus::segcore::LoadIndexInfo;
 
 const int64_t ROW_COUNT = 100 * 1000;
 
 // TEST(Float16, Insert) {
-//     using namespace milvus;
-//     using namespace milvus::query;
-//     using namespace milvus::segcore;
 //     int64_t N = ROW_COUNT;
 //     constexpr int64_t size_per_chunk = 32 * 1024;
 //     auto schema = std::make_shared<Schema>();
@@ -93,9 +92,6 @@ const int64_t ROW_COUNT = 100 * 1000;
 // }
 
 TEST(Float16, ShowExecutor) {
-    using namespace milvus::query;
-    using namespace milvus::segcore;
-    using namespace milvus;
     auto metric_type = knowhere::metric::L2;
     auto node = std::make_unique<Float16VectorANNS>();
     auto schema = std::make_shared<Schema>();
@@ -116,9 +112,6 @@ TEST(Float16, ShowExecutor) {
 }
 
 TEST(Float16, ExecWithoutPredicateFlat) {
-    using namespace milvus::query;
-    using namespace milvus::segcore;
-    using namespace milvus;
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT16, 32, knowhere::metric::L2);
@@ -260,8 +253,6 @@ TEST(Float16, RetrieveEmpty) {
 }
 
 TEST(Float16, ExecWithPredicate) {
-    using namespace milvus::query;
-    using namespace milvus::segcore;
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT16, 16, knowhere::metric::L2);
@@ -320,9 +311,6 @@ TEST(Float16, ExecWithPredicate) {
 }
 
 // TEST(BFloat16, Insert) {
-//     using namespace milvus;
-//     using namespace milvus::query;
-//     using namespace milvus::segcore;
 //     int64_t N = ROW_COUNT;
 //     constexpr int64_t size_per_chunk = 32 * 1024;
 //     auto schema = std::make_shared<Schema>();
@@ -360,9 +348,6 @@ TEST(Float16, ExecWithPredicate) {
 // }
 
 TEST(BFloat16, ShowExecutor) {
-    using namespace milvus::query;
-    using namespace milvus::segcore;
-    using namespace milvus;
     auto metric_type = knowhere::metric::L2;
     auto node = std::make_unique<BFloat16VectorANNS>();
     auto schema = std::make_shared<Schema>();
@@ -383,9 +368,6 @@ TEST(BFloat16, ShowExecutor) {
 }
 
 TEST(BFloat16, ExecWithoutPredicateFlat) {
-    using namespace milvus::query;
-    using namespace milvus::segcore;
-    using namespace milvus;
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugField(
         "fakevec", DataType::VECTOR_BFLOAT16, 32, knowhere::metric::L2);
@@ -524,8 +506,6 @@ TEST(BFloat16, RetrieveEmpty) {
 }
 
 TEST(BFloat16, ExecWithPredicate) {
-    using namespace milvus::query;
-    using namespace milvus::segcore;
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField(
         "fakevec", DataType::VECTOR_BFLOAT16, 16, knowhere::metric::L2);

@@ -32,13 +32,14 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
+	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/requestutil"
 )
 
 type AccessInfo interface {
-	Get(keys ...string) []string
+	Get(keys ...string) []any
 }
 
 type GrpcAccessInfo struct {
@@ -88,8 +89,8 @@ func (i *GrpcAccessInfo) SetResult(resp interface{}, err error) {
 	}
 }
 
-func (i *GrpcAccessInfo) Get(keys ...string) []string {
-	result := []string{}
+func (i *GrpcAccessInfo) Get(keys ...string) []any {
+	result := []any{}
 	for _, key := range keys {
 		if getFunc, ok := metricFuncMap[key]; ok {
 			result = append(result, getFunc(i))
@@ -277,7 +278,25 @@ func getSdkVersion(i *GrpcAccessInfo) string {
 		return req.GetClientInfo().GetSdkType() + "-" + req.GetClientInfo().GetSdkVersion()
 	}
 
-	return unknownString
+	return getSdkVersionByUserAgent(i.ctx)
+}
+
+func getSdkVersionByUserAgent(ctx context.Context) string {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return unknownString
+	}
+	UserAgent, ok := md[util.HeaderUserAgent]
+	if !ok {
+		return unknownString
+	}
+
+	SdkType, ok := getSdkTypeByUserAgent(UserAgent)
+	if !ok {
+		return unknownString
+	}
+
+	return SdkType + "-" + unknownString
 }
 
 func getClusterPrefix(i *GrpcAccessInfo) string {

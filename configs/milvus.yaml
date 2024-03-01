@@ -126,6 +126,12 @@ pulsar:
 #   saslMechanisms: PLAIN
 #   securityProtocol: SASL_SSL
 #   readTimeout: 10 # read message timeout in seconds
+#   ssl:
+#     enabled: false # Whether to support kafka secure connection mode
+#     tlsCert: /path/to/client.pem # path to client's public key
+#     tlsKey: /path/to/client.key # path to client's private key
+#     tlsCACert: /path/to/ca-cert # file or directory path to CA certificate
+#     tlsKeyPassword: "" # private key passphrase for use with private key, if any
 
 rocksmq:
   # The path where the message is stored in rocksmq
@@ -297,6 +303,7 @@ queryNode:
       nlist: 128 # segment index nlist
       nprobe: 16 # nprobe to search segment, based on your accuracy requirement, must smaller than nlist
       memExpansionRate: 1.15 # the ratio of building interim index memory usage to raw data
+      buildParallelRate: 0.5 # the ratio of building interim index parallel matched with cpu num
   loadMemoryUsageFactor: 1 # The multiply factor of calculating the memory usage while loading segments
   enableDisk: false # enable querynode load disk index, and search on disk index
   maxDiskUsagePercentage: 95

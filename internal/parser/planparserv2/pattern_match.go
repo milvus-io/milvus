@@ -5,7 +5,7 @@ import (
 )
 
 var wildcards = map[byte]struct{}{
-	// '_': {}, // TODO
+	'_': {},
 	'%': {},
 }
 

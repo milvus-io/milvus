@@ -30,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // filterNode filter the invalid message of pipeline
@@ -38,7 +37,7 @@ type filterNode struct {
 	*BaseNode
 	collectionID     UniqueID
 	manager          *DataManager
-	excludedSegments *typeutil.ConcurrentMap[int64, uint64]
+	excludedSegments *ExcludedSegments
 	channel          string
 	InsertMsgPolicys []InsertMsgFilter
 	DeleteMsgPolicys []DeleteMsgFilter
@@ -96,7 +95,9 @@ func (fNode *filterNode) Operate(in Msg) Msg {
 			out.append(msg)
 		}
 	}
-
+	if fNode.excludedSegments.ShouldClean() {
+		fNode.excludedSegments.CleanInvalid(streamMsgPack.EndTs)
+	}
 	metrics.QueryNodeWaitProcessingMsgCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.InsertLabel).Inc()
 	return out
 }
@@ -133,7 +134,7 @@ func newFilterNode(
 	collectionID int64,
 	channel string,
 	manager *DataManager,
-	excludedSegments *typeutil.ConcurrentMap[int64, uint64],
+	excludedSegments *ExcludedSegments,
 	maxQueueLength int32,
 ) *filterNode {
 	return &filterNode{

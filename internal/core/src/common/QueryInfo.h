@@ -18,8 +18,10 @@
 
 #include <memory>
 
+#include "common/Tracer.h"
 #include "common/Types.h"
 #include "knowhere/config.h"
+
 namespace milvus {
 
 struct SearchInfo {
@@ -29,6 +31,7 @@ struct SearchInfo {
     MetricType metric_type_;
     knowhere::Json search_params_;
     std::optional<FieldId> group_by_field_id_;
+    tracer::TraceContext trace_ctx_;
 };
 
 using SearchInfoPtr = std::shared_ptr<SearchInfo>;

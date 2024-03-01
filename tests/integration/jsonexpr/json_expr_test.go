@@ -659,6 +659,26 @@ func (s *JSONExprSuite) checkSearch(collectionName, fieldName string, dim int) {
 	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
 	log.Info("like expression run successfully")
 
+	expr = `D like "%name-%"`
+	checkFunc = func(result *milvuspb.SearchResults) {
+		s.Equal(1, len(result.Results.FieldsData))
+		s.Equal(fieldName, result.Results.FieldsData[0].GetFieldName())
+		s.Equal(schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
+		s.Equal(10, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
+	}
+	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
+	log.Info("like expression run successfully")
+
+	expr = `D like "na%me"`
+	checkFunc = func(result *milvuspb.SearchResults) {
+		s.Equal(1, len(result.Results.FieldsData))
+		s.Equal(fieldName, result.Results.FieldsData[0].GetFieldName())
+		s.Equal(schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
+		s.Equal(0, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
+	}
+	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
+	log.Info("like expression run successfully")
+
 	expr = `A in []`
 	checkFunc = func(result *milvuspb.SearchResults) {
 		for _, topk := range result.GetResults().GetTopks() {
@@ -698,12 +718,6 @@ func (s *JSONExprSuite) checkSearch(collectionName, fieldName string, dim int) {
 	s.doSearchWithInvalidExpr(collectionName, []string{fieldName}, expr, dim)
 
 	expr = `A like abc`
-	s.doSearchWithInvalidExpr(collectionName, []string{fieldName}, expr, dim)
-
-	expr = `D like "%name-%"`
-	s.doSearchWithInvalidExpr(collectionName, []string{fieldName}, expr, dim)
-
-	expr = `D like "na%me"`
 	s.doSearchWithInvalidExpr(collectionName, []string{fieldName}, expr, dim)
 
 	expr = `1+5 <= A+1 < 5+10`

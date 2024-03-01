@@ -457,17 +457,19 @@ func Test_JSONRowConsumerHandleVarcharPK(t *testing.T) {
 		consumer := createConsumeFunc(shardNum, []int64{partitionID}, flushFunc)
 		consumer.shardsData = createShardsData(schema, nil, shardNum, []int64{partitionID})
 
-		// string type primary key cannot be auto-generated
 		input := make([]map[storage.FieldID]interface{}, 1)
 		input[0] = map[int64]interface{}{
 			101: true,
 			102: json.Number("1"),
 			103: json.Number("1.56"),
 		}
-		consumer.collectionInfo.PrimaryKey.AutoID = true
+		consumer.validators[101].autoID = true
 		err := consumer.Handle(input)
-		assert.Error(t, err)
-		consumer.collectionInfo.PrimaryKey.AutoID = false
+		assert.NoError(t, err)
+		callTime--
+		flushedRowCount--
+		consumer.rowCounter = 0
+		consumer.validators[101].autoID = false
 
 		// failed to parse primary key
 		err = consumer.Handle(input)
@@ -550,10 +552,9 @@ func Test_JSONRowConsumerHandleVarcharPK(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, intputRowCount, flushedRowCount)
 
-		// string type primary key cannot be auto-generated
 		consumer.validators[101].autoID = true
 		err = consumer.Handle(input)
-		assert.Error(t, err)
+		assert.NoError(t, err)
 	})
 }
 

@@ -90,22 +90,13 @@ SearchOnSealed(const Schema& schema,
     auto data_type = field.get_data_type();
     CheckBruteForceSearchParam(field, search_info);
     if (search_info.group_by_field_id_.has_value()) {
-        auto sub_qr = BruteForceSearchIterators(dataset,
-                                                vec_data,
-                                                row_count,
-                                                search_info.search_params_,
-                                                bitset,
-                                                data_type);
+        auto sub_qr = BruteForceSearchIterators(
+            dataset, vec_data, row_count, search_info, bitset, data_type);
         result.AssembleChunkVectorIterators(
             num_queries, 1, -1, sub_qr.chunk_iterators());
     } else {
-        auto sub_qr = BruteForceSearch(dataset,
-                                       vec_data,
-                                       row_count,
-                                       search_info.search_params_,
-                                       bitset,
-                                       data_type);
-
+        auto sub_qr = BruteForceSearch(
+            dataset, vec_data, row_count, search_info, bitset, data_type);
         result.distances_ = std::move(sub_qr.mutable_distances());
         result.seg_offsets_ = std::move(sub_qr.mutable_seg_offsets());
     }

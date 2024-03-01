@@ -8,20 +8,22 @@
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
-#include "log/Log.h"
+
 #include "Tracer.h"
+#include "log/Log.h"
 
 #include <utility>
 
-#include "opentelemetry/exporters/ostream/span_exporter_factory.h"
 #include "opentelemetry/exporters/jaeger/jaeger_exporter_factory.h"
+#include "opentelemetry/exporters/ostream/span_exporter_factory.h"
 #include "opentelemetry/exporters/otlp/otlp_grpc_exporter_factory.h"
-#include "opentelemetry/sdk/trace/samplers/always_on.h"
-#include "opentelemetry/sdk/trace/batch_span_processor_factory.h"
-#include "opentelemetry/sdk/trace/tracer_provider_factory.h"
-#include "opentelemetry/sdk/trace/sampler.h"
-#include "opentelemetry/sdk/trace/samplers/parent.h"
 #include "opentelemetry/sdk/resource/resource.h"
+#include "opentelemetry/sdk/trace/batch_span_processor_factory.h"
+#include "opentelemetry/sdk/trace/sampler.h"
+#include "opentelemetry/sdk/trace/samplers/always_on.h"
+#include "opentelemetry/sdk/trace/samplers/parent.h"
+#include "opentelemetry/sdk/trace/tracer_provider_factory.h"
+#include "opentelemetry/sdk/version/version.h"
 #include "opentelemetry/trace/span_context.h"
 #include "opentelemetry/trace/span_metadata.h"
 
@@ -41,20 +43,20 @@ static std::shared_ptr<trace::TracerProvider> noop_trace_provider =
     std::make_shared<opentelemetry::trace::NoopTracerProvider>();
 
 void
-initTelementry(TraceConfig* config) {
+initTelemetry(const TraceConfig& cfg) {
     std::unique_ptr<opentelemetry::sdk::trace::SpanExporter> exporter;
-    if (config->exporter == "stdout") {
+    if (cfg.exporter == "stdout") {
         exporter = ostream::OStreamSpanExporterFactory::Create();
-    } else if (config->exporter == "jaeger") {
+    } else if (cfg.exporter == "jaeger") {
         auto opts = jaeger::JaegerExporterOptions{};
         opts.transport_format = jaeger::TransportFormat::kThriftHttp;
-        opts.endpoint = config->jaegerURL;
+        opts.endpoint = cfg.jaegerURL;
         exporter = jaeger::JaegerExporterFactory::Create(opts);
         LOG_INFO("init jaeger exporter, endpoint:", opts.endpoint);
-    } else if (config->exporter == "otlp") {
+    } else if (cfg.exporter == "otlp") {
         auto opts = otlp::OtlpGrpcExporterOptions{};
-        opts.endpoint = config->otlpEndpoint;
-        opts.use_ssl_credentials = config->oltpSecure;
+        opts.endpoint = cfg.otlpEndpoint;
+        opts.use_ssl_credentials = cfg.oltpSecure;
         exporter = otlp::OtlpGrpcExporterFactory::Create(opts);
         LOG_INFO("init otlp exporter, endpoint:", opts.endpoint);
     } else {
@@ -64,8 +66,8 @@ initTelementry(TraceConfig* config) {
     if (enable_trace) {
         auto processor = trace_sdk::BatchSpanProcessorFactory::Create(
             std::move(exporter), {});
-        resource::ResourceAttributes attributes = {{"service.name", "segcore"},
-                                                   {"NodeID", config->nodeID}};
+        resource::ResourceAttributes attributes = {
+            {"service.name", TRACE_SERVICE_SEGCORE}, {"NodeID", cfg.nodeID}};
         auto resource = resource::Resource::Create(attributes);
         auto sampler = std::make_unique<trace_sdk::ParentBasedSampler>(
             std::make_shared<trace_sdk::AlwaysOnSampler>());
@@ -81,7 +83,8 @@ initTelementry(TraceConfig* config) {
 std::shared_ptr<trace::Tracer>
 GetTracer() {
     auto provider = trace::Provider::GetTracerProvider();
-    return provider->GetTracer("segcore", OPENTELEMETRY_SDK_VERSION);
+    return provider->GetTracer(TRACE_SERVICE_SEGCORE,
+                               OPENTELEMETRY_SDK_VERSION);
 }
 
 std::shared_ptr<trace::Span>
@@ -89,14 +92,13 @@ StartSpan(const std::string& name, TraceContext* parentCtx) {
     trace::StartSpanOptions opts;
     if (enable_trace && parentCtx != nullptr && parentCtx->traceID != nullptr &&
         parentCtx->spanID != nullptr) {
-        if (isEmptyID(parentCtx->traceID, trace::TraceId::kSize) ||
-            isEmptyID(parentCtx->spanID, trace::SpanId::kSize)) {
+        if (EmptyTraceID(parentCtx) || EmptySpanID(parentCtx)) {
             return noop_trace_provider->GetTracer("noop")->StartSpan("noop");
         }
         opts.parent = trace::SpanContext(
             trace::TraceId({parentCtx->traceID, trace::TraceId::kSize}),
             trace::SpanId({parentCtx->spanID, trace::SpanId::kSize}),
-            trace::TraceFlags(parentCtx->flag),
+            trace::TraceFlags(parentCtx->traceFlags),
             true);
     }
     return GetTracer()->StartSpan(name, opts);
@@ -118,7 +120,7 @@ CloseRootSpan() {
 }
 
 void
-AddEvent(std::string event_label) {
+AddEvent(const std::string& event_label) {
     if (enable_trace && local_span != nullptr) {
         local_span->AddEvent(event_label);
     }
@@ -126,12 +128,44 @@ AddEvent(std::string event_label) {
 
 bool
 isEmptyID(const uint8_t* id, int length) {
-    for (int i = 0; i < length; i++) {
-        if (id[i] != 0) {
-            return false;
+    if (id != nullptr) {
+        for (int i = 0; i < length; i++) {
+            if (id[i] != 0) {
+                return false;
+            }
         }
     }
     return true;
+}
+
+bool
+EmptyTraceID(const TraceContext* ctx) {
+    return isEmptyID(ctx->traceID, trace::TraceId::kSize);
+}
+
+bool
+EmptySpanID(const TraceContext* ctx) {
+    return isEmptyID(ctx->spanID, trace::SpanId::kSize);
+}
+
+std::string
+GetTraceIDAsStr(const TraceContext* ctx) {
+    if (ctx != nullptr && !EmptyTraceID(ctx)) {
+        return std::string((char*)ctx->traceID,
+                           opentelemetry::trace::TraceId::kSize);
+    } else {
+        return std::string();
+    }
+}
+
+std::string
+GetSpanIDAsStr(const TraceContext* ctx) {
+    if (ctx != nullptr && !EmptySpanID(ctx)) {
+        return std::string((char*)ctx->spanID,
+                           opentelemetry::trace::SpanId::kSize);
+    } else {
+        return std::string();
+    }
 }
 
 }  // namespace milvus::tracer

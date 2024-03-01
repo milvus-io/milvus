@@ -14,38 +14,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package cache
+package datacoord
 
-import (
-	"sync/atomic"
-	"testing"
-)
+// SegmentOperator is function type to update segment info.
+type SegmentOperator func(segment *SegmentInfo) bool
 
-func cacheSize(c *cache) int {
-	length := 0
-	c.walk(func(*entry) {
-		length++
-	})
-	return length
-}
-
-func BenchmarkCacheSegment(b *testing.B) {
-	c := cache{}
-	const count = 1 << 10
-	entries := make([]*entry, count)
-	for i := range entries {
-		entries[i] = newEntry(i, i, uint64(i))
-	}
-	var n int32
-	b.ReportAllocs()
-	b.ResetTimer()
-	b.RunParallel(func(pb *testing.PB) {
-		for pb.Next() {
-			i := atomic.AddInt32(&n, 1)
-			c.getOrSet(entries[i&(count-1)])
-			if i > 0 && i&0xf == 0 {
-				c.delete(entries[(i-1)&(count-1)])
-			}
+func SetMaxRowCount(maxRow int64) SegmentOperator {
+	return func(segment *SegmentInfo) bool {
+		if segment.MaxRowNum == maxRow {
+			return false
 		}
-	})
+		segment.MaxRowNum = maxRow
+		return true
+	}
 }

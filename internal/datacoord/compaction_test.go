@@ -76,12 +76,14 @@ func (s *CompactionPlanHandlerSuite) TestRemoveTasksByChannel() {
 }
 
 func (s *CompactionPlanHandlerSuite) TestCheckResult() {
-	s.mockSessMgr.EXPECT().GetCompactionPlansResults().Return(map[int64]*datapb.CompactionPlanResult{
-		1: {PlanID: 1, State: commonpb.CompactionState_Executing},
-		2: {PlanID: 2, State: commonpb.CompactionState_Completed, Segments: []*datapb.CompactionSegment{{PlanID: 2}}},
-		3: {PlanID: 3, State: commonpb.CompactionState_Executing},
-		4: {PlanID: 4, State: commonpb.CompactionState_Executing},
+	s.mockSessMgr.EXPECT().GetCompactionPlansResults().Return(map[int64]*typeutil.Pair[int64, *datapb.CompactionPlanResult]{
+		1: {A: 100, B: &datapb.CompactionPlanResult{PlanID: 1, State: commonpb.CompactionState_Executing}},
+		2: {A: 100, B: &datapb.CompactionPlanResult{PlanID: 2, State: commonpb.CompactionState_Completed, Segments: []*datapb.CompactionSegment{{PlanID: 2}}}},
+		3: {A: 100, B: &datapb.CompactionPlanResult{PlanID: 3, State: commonpb.CompactionState_Executing}},
+		4: {A: 100, B: &datapb.CompactionPlanResult{PlanID: 4, State: commonpb.CompactionState_Executing}},
 	})
+
+	s.mockSessMgr.EXPECT().SyncSegments(int64(100), mock.Anything).Return(nil).Once()
 	{
 		s.mockAlloc.EXPECT().allocTimestamp(mock.Anything).Return(0, errors.New("mock")).Once()
 		handler := newCompactionPlanHandler(s.mockSessMgr, nil, nil, s.mockAlloc)
@@ -510,10 +512,11 @@ func (s *CompactionPlanHandlerSuite) TestGetCompactionTask() {
 }
 
 func (s *CompactionPlanHandlerSuite) TestUpdateCompaction() {
-	s.mockSessMgr.EXPECT().GetCompactionPlansResults().Return(map[int64]*datapb.CompactionPlanResult{
-		1: {PlanID: 1, State: commonpb.CompactionState_Executing},
-		2: {PlanID: 2, State: commonpb.CompactionState_Completed, Segments: []*datapb.CompactionSegment{{PlanID: 2}}},
-		3: {PlanID: 3, State: commonpb.CompactionState_Executing},
+	s.mockSessMgr.EXPECT().GetCompactionPlansResults().Return(map[int64]*typeutil.Pair[int64, *datapb.CompactionPlanResult]{
+		1: {A: 111, B: &datapb.CompactionPlanResult{PlanID: 1, State: commonpb.CompactionState_Executing}},
+		2: {A: 111, B: &datapb.CompactionPlanResult{PlanID: 2, State: commonpb.CompactionState_Completed, Segments: []*datapb.CompactionSegment{{PlanID: 2}}}},
+		3: {A: 111, B: &datapb.CompactionPlanResult{PlanID: 3, State: commonpb.CompactionState_Executing}},
+		5: {A: 222, B: &datapb.CompactionPlanResult{PlanID: 5, State: commonpb.CompactionState_Completed, Segments: []*datapb.CompactionSegment{{PlanID: 5}}}},
 	})
 
 	inPlans := map[int64]*compactionTask{
@@ -521,26 +524,41 @@ func (s *CompactionPlanHandlerSuite) TestUpdateCompaction() {
 			triggerInfo: &compactionSignal{},
 			plan:        &datapb.CompactionPlan{PlanID: 1},
 			state:       executing,
+			dataNodeID:  111,
 		},
 		2: {
 			triggerInfo: &compactionSignal{},
 			plan:        &datapb.CompactionPlan{PlanID: 2},
 			state:       executing,
+			dataNodeID:  111,
 		},
 		3: {
 			triggerInfo: &compactionSignal{},
 			plan:        &datapb.CompactionPlan{PlanID: 3},
 			state:       timeout,
+			dataNodeID:  111,
 		},
 		4: {
 			triggerInfo: &compactionSignal{},
 			plan:        &datapb.CompactionPlan{PlanID: 4},
 			state:       timeout,
+			dataNodeID:  111,
 		},
 	}
 
+	s.mockSessMgr.EXPECT().SyncSegments(int64(222), mock.Anything).RunAndReturn(func(nodeID int64, req *datapb.SyncSegmentsRequest) error {
+		s.EqualValues(nodeID, 222)
+		s.NotNil(req)
+		s.Empty(req.GetCompactedFrom())
+		s.EqualValues(5, req.GetPlanID())
+		return nil
+	}).Once()
+
 	handler := newCompactionPlanHandler(s.mockSessMgr, s.mockCm, s.mockMeta, s.mockAlloc)
 	handler.plans = inPlans
+
+	_, ok := handler.plans[5]
+	s.Require().False(ok)
 
 	err := handler.updateCompaction(0)
 	s.NoError(err)
@@ -558,9 +576,9 @@ func (s *CompactionPlanHandlerSuite) TestUpdateCompaction() {
 	s.Equal(failed, task.state)
 }
 
-func getFieldBinlogIDs(id int64, logIDs ...int64) *datapb.FieldBinlog {
+func getFieldBinlogIDs(fieldID int64, logIDs ...int64) *datapb.FieldBinlog {
 	l := &datapb.FieldBinlog{
-		FieldID: id,
+		FieldID: fieldID,
 		Binlogs: make([]*datapb.Binlog, 0, len(logIDs)),
 	}
 	for _, id := range logIDs {
@@ -569,9 +587,9 @@ func getFieldBinlogIDs(id int64, logIDs ...int64) *datapb.FieldBinlog {
 	return l
 }
 
-func getFieldBinlogPaths(id int64, paths ...string) *datapb.FieldBinlog {
+func getFieldBinlogPaths(fieldID int64, paths ...string) *datapb.FieldBinlog {
 	l := &datapb.FieldBinlog{
-		FieldID: id,
+		FieldID: fieldID,
 		Binlogs: make([]*datapb.Binlog, 0, len(paths)),
 	}
 	for _, path := range paths {
@@ -580,9 +598,9 @@ func getFieldBinlogPaths(id int64, paths ...string) *datapb.FieldBinlog {
 	return l
 }
 
-func getFieldBinlogIDsWithEntry(id int64, entry int64, logIDs ...int64) *datapb.FieldBinlog {
+func getFieldBinlogIDsWithEntry(fieldID int64, entry int64, logIDs ...int64) *datapb.FieldBinlog {
 	l := &datapb.FieldBinlog{
-		FieldID: id,
+		FieldID: fieldID,
 		Binlogs: make([]*datapb.Binlog, 0, len(logIDs)),
 	}
 	for _, id := range logIDs {

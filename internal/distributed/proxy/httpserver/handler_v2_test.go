@@ -42,7 +42,15 @@ type requestBodyTestCase struct {
 	errCode     int32
 }
 
-type DefaultReq struct{}
+type DefaultReq struct {
+	DbName string `json:"dbName"`
+}
+
+func (DefaultReq) GetBase() *commonpb.MsgBase {
+	return &commonpb.MsgBase{}
+}
+
+func (req *DefaultReq) GetDbName() string { return req.DbName }
 
 func TestHTTPWrapper(t *testing.T) {
 	postTestCases := []requestBodyTestCase{}
@@ -84,7 +92,7 @@ func TestHTTPWrapper(t *testing.T) {
 		errCode:     1801, // ErrIncorrectParameterFormat
 	})
 	path = "/wrapper/post/trace"
-	app.POST(path, wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(func(ctx context.Context, c *gin.Context, req any, dbName string) (interface{}, error) {
+	app.POST(path, wrapperPost(func() any { return &DefaultReq{} }, wrapperTraceLog(func(ctx context.Context, c *gin.Context, req any, dbName string) (interface{}, error) {
 		return nil, nil
 	})))
 	postTestCasesTrace = append(postTestCasesTrace, requestBodyTestCase{
@@ -92,7 +100,7 @@ func TestHTTPWrapper(t *testing.T) {
 		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `"}`),
 	})
 	path = "/wrapper/post/trace/wrong"
-	app.POST(path, wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(func(ctx context.Context, c *gin.Context, req any, dbName string) (interface{}, error) {
+	app.POST(path, wrapperPost(func() any { return &DefaultReq{} }, wrapperTraceLog(func(ctx context.Context, c *gin.Context, req any, dbName string) (interface{}, error) {
 		return nil, merr.ErrCollectionNotFound
 	})))
 	postTestCasesTrace = append(postTestCasesTrace, requestBodyTestCase{
@@ -100,7 +108,7 @@ func TestHTTPWrapper(t *testing.T) {
 		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `"}`),
 	})
 	path = "/wrapper/post/trace/call"
-	app.POST(path, wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(func(ctx context.Context, c *gin.Context, req any, dbName string) (interface{}, error) {
+	app.POST(path, wrapperPost(func() any { return &DefaultReq{} }, wrapperTraceLog(func(ctx context.Context, c *gin.Context, req any, dbName string) (interface{}, error) {
 		return wrapperProxy(ctx, c, req, false, false, func(reqctx context.Context, req any) (any, error) {
 			return nil, nil
 		})
@@ -342,7 +350,7 @@ func TestDatabaseWrapper(t *testing.T) {
 	ginHandler := gin.Default()
 	app := ginHandler.Group("", genAuthMiddleWare(false))
 	path := "/wrapper/database"
-	app.POST(path, wrapperPost(func() any { return &DatabaseReq{} }, h.wrapperCheckDatabase(func(ctx context.Context, c *gin.Context, req any, dbName string) (interface{}, error) {
+	app.POST(path, wrapperPost(func() any { return &DefaultReq{} }, h.wrapperCheckDatabase(func(ctx context.Context, c *gin.Context, req any, dbName string) (interface{}, error) {
 		return nil, nil
 	})))
 	postTestCases = append(postTestCases, requestBodyTestCase{
@@ -387,7 +395,7 @@ func TestDatabaseWrapper(t *testing.T) {
 func TestCreateCollection(t *testing.T) {
 	postTestCases := []requestBodyTestCase{}
 	mp := mocks.NewMockProxy(t)
-	mp.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(5)
+	mp.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(7)
 	mp.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Twice()
 	mp.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Twice()
 	mp.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(commonErrorStatus, nil).Twice()
@@ -396,14 +404,14 @@ func TestCreateCollection(t *testing.T) {
 	path := versionalV2(CollectionCategory, CreateAction)
 	postTestCases = append(postTestCases, requestBodyTestCase{
 		path:        path,
-		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "dimension": 2, "metricsType": "L2"}`),
+		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "dimension": 2, "metricType": "L2"}`),
 	})
 	postTestCases = append(postTestCases, requestBodyTestCase{
 		path: path,
 		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "schema": {
             "fields": [
                 {"fieldName": "book_id", "dataType": "Int64", "isPrimary": true, "elementTypeParams": {}},
-                {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
+                {"fieldName": "word_count", "dataType": "Int64", "isPartitionKey": false, "elementTypeParams": {}},
                 {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": "2"}}
             ]
         }}`),
@@ -416,7 +424,41 @@ func TestCreateCollection(t *testing.T) {
                 {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
                 {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": "2"}}
             ]
-        }, "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricsType": "L2"}]}`),
+        }, "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]}`),
+	})
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path: path,
+		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "schema": {
+            "fields": [
+                {"fieldName": "book_id", "dataType": "int64", "isPrimary": true, "elementTypeParams": {}},
+                {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
+                {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": "2"}}
+            ]
+        }}`),
+		errMsg:  "invalid parameter, data type int64 is invalid(case sensitive).",
+		errCode: 1100, // ErrParameterInvalid
+	})
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path: path,
+		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "schema": {
+            "fields": [
+                {"fieldName": "book_id", "dataType": "Int64", "isPrimary": true, "elementTypeParams": {}},
+                {"fieldName": "word_count", "dataType": "Array", "elementDataType": "Int64", "elementTypeParams": {"max_capacity": "2"}},
+                {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": "2"}}
+            ]
+        }}`),
+	})
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path: path,
+		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "schema": {
+            "fields": [
+                {"fieldName": "book_id", "dataType": "Int64", "isPrimary": true, "elementTypeParams": {}},
+                {"fieldName": "word_count", "dataType": "Array", "elementDataType": "int64", "elementTypeParams": {}},
+                {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": "2"}}
+            ]
+        }}`),
+		errMsg:  "invalid parameter, element data type int64 is invalid(case sensitive).",
+		errCode: 1100, // ErrParameterInvalid
 	})
 	postTestCases = append(postTestCases, requestBodyTestCase{
 		path: path,
@@ -426,13 +468,13 @@ func TestCreateCollection(t *testing.T) {
                 {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
                 {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": "2"}}
             ]
-        }, "indexParams": [{"fieldName": "book_xxx", "indexName": "book_intro_vector", "metricsType": "L2"}]}`),
+        }, "indexParams": [{"fieldName": "book_xxx", "indexName": "book_intro_vector", "metricType": "L2"}]}`),
 		errMsg:  "missing required parameters, error: `book_xxx` hasn't defined in schema",
-		errCode: 1802, // ErrDatabaseNotFound
+		errCode: 1802,
 	})
 	postTestCases = append(postTestCases, requestBodyTestCase{
 		path:        path,
-		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "dimension": 2, "metricsType": "L2"}`),
+		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "dimension": 2, "metricType": "L2"}`),
 		errMsg:      "",
 		errCode:     65535,
 	})
@@ -444,13 +486,13 @@ func TestCreateCollection(t *testing.T) {
                 {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
                 {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": "2"}}
             ]
-        }, "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricsType": "L2"}]}`),
+        }, "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]}`),
 		errMsg:  "",
 		errCode: 65535,
 	})
 	postTestCases = append(postTestCases, requestBodyTestCase{
 		path:        path,
-		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "dimension": 2, "metricsType": "L2"}`),
+		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "dimension": 2, "metricType": "L2"}`),
 		errMsg:      "",
 		errCode:     65535,
 	})
@@ -554,17 +596,27 @@ func TestMethodGet(t *testing.T) {
 	mp.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(&milvuspb.BoolResponse{Status: commonErrorStatus}, nil).Once()
 	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 		CollectionName: DefaultCollectionName,
-		Schema:         generateCollectionSchema(schemapb.DataType_Int64, false),
+		Schema:         generateCollectionSchema(schemapb.DataType_Int64),
 		ShardsNum:      ShardNumDefault,
 		Status:         &StatusSuccess,
 	}, nil).Once()
 	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{Status: commonErrorStatus}, nil).Once()
 	mp.EXPECT().GetLoadState(mock.Anything, mock.Anything).Return(&DefaultLoadStateResp, nil).Twice()
 	mp.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(&DefaultDescIndexesReqp, nil).Times(3)
+	mp.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(nil, merr.WrapErrIndexNotFoundForCollection(DefaultCollectionName)).Once()
+	mp.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(&milvuspb.DescribeIndexResponse{
+		Status: merr.Status(merr.WrapErrIndexNotFoundForCollection(DefaultCollectionName)),
+	}, nil).Once()
 	mp.EXPECT().GetCollectionStatistics(mock.Anything, mock.Anything).Return(&milvuspb.GetCollectionStatisticsResponse{
 		Status: commonSuccessStatus,
 		Stats: []*commonpb.KeyValuePair{
 			{Key: "row_count", Value: "0"},
+		},
+	}, nil).Once()
+	mp.EXPECT().GetCollectionStatistics(mock.Anything, mock.Anything).Return(&milvuspb.GetCollectionStatisticsResponse{
+		Status: commonSuccessStatus,
+		Stats: []*commonpb.KeyValuePair{
+			{Key: "row_count", Value: "abc"},
 		},
 	}, nil).Once()
 	mp.EXPECT().GetLoadingProgress(mock.Anything, mock.Anything).Return(&milvuspb.GetLoadingProgressResponse{
@@ -695,6 +747,9 @@ func TestMethodGet(t *testing.T) {
 		path: versionalV2(CollectionCategory, StatsAction),
 	})
 	queryTestCases = append(queryTestCases, rawTestCase{
+		path: versionalV2(CollectionCategory, StatsAction),
+	})
+	queryTestCases = append(queryTestCases, rawTestCase{
 		path: versionalV2(CollectionCategory, LoadStateAction),
 	})
 	queryTestCases = append(queryTestCases, rawTestCase{
@@ -723,6 +778,12 @@ func TestMethodGet(t *testing.T) {
 	})
 	queryTestCases = append(queryTestCases, rawTestCase{
 		path: versionalV2(IndexCategory, DescribeAction),
+	})
+	queryTestCases = append(queryTestCases, rawTestCase{
+		path: versionalV2(IndexCategory, ListAction),
+	})
+	queryTestCases = append(queryTestCases, rawTestCase{
+		path: versionalV2(IndexCategory, ListAction),
 	})
 	queryTestCases = append(queryTestCases, rawTestCase{
 		path: versionalV2(AliasCategory, ListAction),
@@ -912,10 +973,10 @@ func TestMethodPost(t *testing.T) {
 	for _, testcase := range queryTestCases {
 		t.Run("query", func(t *testing.T) {
 			bodyReader := bytes.NewReader([]byte(`{` +
-				`"collectionName": "` + DefaultCollectionName + `", "newCollectionName": "test", "newDbName": "` + DefaultDbName + `",` +
+				`"collectionName": "` + DefaultCollectionName + `", "newCollectionName": "test", "newDbName": "",` +
 				`"partitionName": "` + DefaultPartitionName + `", "partitionNames": ["` + DefaultPartitionName + `"],` +
-				`"schema": {"fields": [{"fieldName": "book_id", "dataType": "int64", "elementTypeParams": {}}, {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": "2"}}]},` +
-				`"indexParams": [{"indexName": "` + DefaultIndexName + `", "fieldName": "book_intro", "metricsType": "L2", "indexType": "IVF_FLAT"}],` +
+				`"schema": {"fields": [{"fieldName": "book_id", "dataType": "Int64", "elementTypeParams": {}}, {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": "2"}}]},` +
+				`"indexParams": [{"indexName": "` + DefaultIndexName + `", "fieldName": "book_intro", "metricType": "L2", "indexConfig": {"nlist": "30", "index_type": "IVF_FLAT"}}],` +
 				`"userName": "` + util.UserRoot + `", "password": "Milvus", "newPassword": "milvus", "roleName": "` + util.RoleAdmin + `",` +
 				`"roleName": "` + util.RoleAdmin + `", "objectType": "Global", "objectName": "*", "privilege": "*",` +
 				`"aliasName": "` + DefaultAliasName + `",` +
@@ -944,7 +1005,7 @@ func TestDML(t *testing.T) {
 	mp := mocks.NewMockProxy(t)
 	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 		CollectionName: DefaultCollectionName,
-		Schema:         generateCollectionSchema(schemapb.DataType_Int64, false),
+		Schema:         generateCollectionSchema(schemapb.DataType_Int64),
 		ShardsNum:      ShardNumDefault,
 		Status:         &StatusSuccess,
 	}, nil).Times(6)
@@ -965,35 +1026,41 @@ func TestDML(t *testing.T) {
 	queryTestCases := []requestBodyTestCase{}
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        SearchAction,
-		requestBody: []byte(`{"collectionName": "book", "vector": [0.1, 0.2], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"]}`),
+		requestBody: []byte(`{"collectionName": "book", "vector": [[0.1, 0.2]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"]}`),
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        SearchAction,
-		requestBody: []byte(`{"collectionName": "book", "vector": [0.1, 0.2], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"], "params": {"radius":0.9}}`),
+		requestBody: []byte(`{"collectionName": "book", "vector": [[0.1, 0.2]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"], "params": {"radius":0.9}}`),
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        SearchAction,
-		requestBody: []byte(`{"collectionName": "book", "vector": [0.1, 0.2], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"], "params": {"range_filter": 0.1}}`),
+		requestBody: []byte(`{"collectionName": "book", "vector": [[0.1, 0.2]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"], "params": {"range_filter": 0.1}}`),
 		errMsg:      "can only accept json format request, error: invalid search params",
 		errCode:     1801, // ErrIncorrectParameterFormat
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        SearchAction,
-		requestBody: []byte(`{"collectionName": "book", "vector": [0.1, 0.2], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"], "params": {"radius":0.9, "range_filter": 0.1}, "groupingField": "word_count"}`),
+		requestBody: []byte(`{"collectionName": "book", "vector": [[0.1, 0.2]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"], "params": {"radius":0.9, "range_filter": 0.1}, "groupingField": "word_count"}`),
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        SearchAction,
-		requestBody: []byte(`{"collectionName": "book", "vector": [0.1, 0.2], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"], "params": {"radius":0.9, "range_filter": 0.1}, "groupingField": "test"}`),
+		requestBody: []byte(`{"collectionName": "book", "vector": [[0.1, 0.2]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"], "params": {"radius":0.9, "range_filter": 0.1}, "groupingField": "test"}`),
 		errMsg:      "groupBy field not found in schema: field not found[field=test]",
 		errCode:     65535,
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
-		path:        HybridSearchAction,
-		requestBody: []byte(`{"collectionName": "hello_milvus", "search": [{"vector": [0.1, 0.2], "annsField": "float_vector1", "metricType": "L2", "limit": 3}, {"vector": [0.1, 0.2], "annsField": "float_vector2", "metricType": "L2", "limit": 3}], "rerank": {"strategy": "rrf", "params": {"k":  1}}}`),
+		path:        SearchAction,
+		requestBody: []byte(`{"collectionName": "book", "vector": [["0.1", "0.2"]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"], "params": {"radius":0.9, "range_filter": 0.1}, "groupingField": "test"}`),
+		errMsg:      "can only accept json format request, error: json: cannot unmarshal string into Go struct field SearchReqV2.vector of type float32",
+		errCode:     1801,
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        HybridSearchAction,
-		requestBody: []byte(`{"collectionName": "hello_milvus", "search": [{"vector": [0.1, 0.2], "annsField": "float_vector1", "metricType": "L2", "limit": 3}, {"vector": [0.1, 0.2], "annsField": "float_vector2", "metricType": "L2", "limit": 3}], "rerank": {"strategy": "weighted", "params": {"weights":  [0.9, 0.8]}}}`),
+		requestBody: []byte(`{"collectionName": "hello_milvus", "search": [{"vector": [[0.1, 0.2]], "annsField": "float_vector1", "metricType": "L2", "limit": 3}, {"vector": [[0.1, 0.2]], "annsField": "float_vector2", "metricType": "L2", "limit": 3}], "rerank": {"strategy": "rrf", "params": {"k":  1}}}`),
+	})
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path:        HybridSearchAction,
+		requestBody: []byte(`{"collectionName": "hello_milvus", "search": [{"vector": [[0.1, 0.2]], "annsField": "float_vector1", "metricType": "L2", "limit": 3}, {"vector": [[0.1, 0.2]], "annsField": "float_vector2", "metricType": "L2", "limit": 3}], "rerank": {"strategy": "weighted", "params": {"weights":  [0.9, 0.8]}}}`),
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        QueryAction,

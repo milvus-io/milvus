@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
@@ -96,6 +97,10 @@ func Test_compactionTrigger_force(t *testing.T) {
 		globalTrigger     *time.Ticker
 	}
 
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().AlterSegment(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil).Maybe()
+
 	vecFieldID := int64(201)
 	indexID := int64(1001)
 	tests := []struct {
@@ -109,6 +114,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 			"test force compaction",
 			fields{
 				&meta{
+					catalog: catalog,
 					segments: &SegmentsInfo{
 						map[int64]*SegmentInfo{
 							1: {
@@ -500,7 +506,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 			_, err := tr.forceTriggerCompaction(tt.collectionID)
 			assert.Equal(t, tt.wantErr, err != nil)
 			// expect max row num =  2048*1024*1024/(128*4) = 4194304
-			assert.EqualValues(t, 300, tt.fields.meta.segments.GetSegments()[0].MaxRowNum)
+			assert.EqualValues(t, 4194304, tt.fields.meta.segments.GetSegments()[0].MaxRowNum)
 			spy := (tt.fields.compactionHandler).(*spyCompactionHandler)
 			<-spy.spyChan
 		})
@@ -2509,6 +2515,10 @@ func Test_compactionTrigger_updateSegmentMaxSize(t *testing.T) {
 		},
 	}
 
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().AlterSegment(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil).Maybe()
+
 	tests := []struct {
 		name      string
 		fields    fields
@@ -2519,6 +2529,7 @@ func Test_compactionTrigger_updateSegmentMaxSize(t *testing.T) {
 			"all mem index",
 			fields{
 				&meta{
+					catalog:  catalog,
 					segments: segmentsInfo,
 					collections: map[int64]*collectionInfo{
 						collectionID: info,
@@ -2579,6 +2590,7 @@ func Test_compactionTrigger_updateSegmentMaxSize(t *testing.T) {
 			"all disk index",
 			fields{
 				&meta{
+					catalog:  catalog,
 					segments: segmentsInfo,
 					collections: map[int64]*collectionInfo{
 						collectionID: info,
@@ -2639,6 +2651,7 @@ func Test_compactionTrigger_updateSegmentMaxSize(t *testing.T) {
 			"some mme index",
 			fields{
 				&meta{
+					catalog:  catalog,
 					segments: segmentsInfo,
 					collections: map[int64]*collectionInfo{
 						collectionID: info,

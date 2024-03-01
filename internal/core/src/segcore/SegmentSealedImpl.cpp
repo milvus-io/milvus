@@ -390,18 +390,11 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                             num_rows, field_meta);
                     FieldDataPtr field_data;
                     while (data.channel->pop(field_data)) {
-                        for (auto i = 0; i < field_data->get_num_rows(); i++) {
-                            auto str = static_cast<const std::string*>(
-                                field_data->RawValue(i));
-                            auto str_size = str->size();
-                            var_column->Append(str->data(), str_size);
-                            field_data_size += str_size;
-
-                            // we stores the offset for each string, so there is a additional uint64_t for each string
-                            stats_.mem_size += str_size + sizeof(uint64_t);
-                        }
+                        var_column->Append(std::move(field_data));
                     }
                     var_column->Seal();
+                    field_data_size = var_column->ByteSize();
+                    stats_.mem_size += var_column->ByteSize();
                     LoadStringSkipIndex(field_id, 0, *var_column);
                     column = std::move(var_column);
                     break;
@@ -412,22 +405,11 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                             num_rows, field_meta);
                     FieldDataPtr field_data;
                     while (data.channel->pop(field_data)) {
-                        for (auto i = 0; i < field_data->get_num_rows(); i++) {
-                            auto padded_string =
-                                static_cast<const milvus::Json*>(
-                                    field_data->RawValue(i))
-                                    ->data();
-                            auto padded_string_size = padded_string.size();
-                            var_column->Append(padded_string.data(),
-                                               padded_string_size);
-                            field_data_size += padded_string_size;
-
-                            // we stores the offset for each JSON, so there is a additional uint64_t for each JSON
-                            stats_.mem_size +=
-                                padded_string_size + sizeof(uint64_t);
-                        }
+                        var_column->Append(std::move(field_data));
                     }
                     var_column->Seal();
+                    stats_.mem_size += var_column->ByteSize();
+                    field_data_size = var_column->ByteSize();
                     column = std::move(var_column);
                     break;
                 }
@@ -443,6 +425,8 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                             var_column->Append(*array);
 
                             // we stores the offset for each array element, so there is a additional uint64_t for each array element
+                            field_data_size =
+                                array->byte_size() + sizeof(uint64_t);
                             stats_.mem_size +=
                                 array->byte_size() + sizeof(uint64_t);
                         }
@@ -1120,6 +1104,19 @@ SegmentSealedImpl::bulk_subscript_impl(int64_t element_sizeof,
         auto dst = dst_vec + i * element_sizeof;
         memcpy(dst, src, element_sizeof);
     }
+}
+
+void
+SegmentSealedImpl::ClearData() {
+    field_data_ready_bitset_.clear();
+    index_ready_bitset_.clear();
+    binlog_index_bitset_.clear();
+    system_ready_count_ = 0;
+    num_rows_ = 0;
+    scalar_indexings_.clear();
+    vector_indexings_.clear();
+    insert_record_.clear();
+    fields_.clear();
 }
 
 std::unique_ptr<DataArray>

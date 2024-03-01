@@ -15,6 +15,13 @@ func (c *raftIVFFlatChecker) CheckTrain(params map[string]string) error {
 	if !CheckStrByValues(params, Metric, RaftMetrics) {
 		return fmt.Errorf("metric type not found or not supported, supported: %v", RaftMetrics)
 	}
+
+	setDefaultIfNotExist(params, RaftCacheDatasetOnDevice, "false")
+
+	if !CheckStrByValues(params, RaftCacheDatasetOnDevice, []string{"true", "false"}) {
+		return fmt.Errorf("raft index cache_dataset_on_device param only support true false")
+	}
+
 	return nil
 }
 

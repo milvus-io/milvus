@@ -18,6 +18,7 @@ package components
 
 import (
 	"context"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -26,6 +27,7 @@ import (
 	grpcquerycoord "github.com/milvus-io/milvus/internal/distributed/querycoord"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -60,10 +62,8 @@ func (qs *QueryCoord) Run() error {
 
 // Stop terminates service
 func (qs *QueryCoord) Stop() error {
-	if err := qs.svr.Stop(); err != nil {
-		return err
-	}
-	return nil
+	timeout := paramtable.Get().QueryCoordCfg.GracefulStopTimeout.GetAsDuration(time.Second)
+	return exitWhenStopTimeout(qs.svr.Stop, timeout)
 }
 
 // GetComponentStates returns QueryCoord's states

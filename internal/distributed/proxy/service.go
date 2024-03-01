@@ -92,6 +92,8 @@ const apiPathPrefix = "/api/v1"
 
 // Server is the Proxy Server
 type Server struct {
+	milvuspb.UnimplementedMilvusServiceServer
+
 	ctx                context.Context
 	wg                 sync.WaitGroup
 	proxy              types.ProxyComponent
@@ -193,15 +195,14 @@ func (s *Server) startHTTPServer(errChan chan error) {
 		},
 	})
 	ginHandler.Use(ginLogger, gin.Recovery())
-	httpHeaderAllowInt64 := "false"
-	httpParams := &paramtable.Get().HTTPCfg
-	if httpParams.AcceptTypeAllowInt64.GetAsBool() {
-		httpHeaderAllowInt64 = "true"
-	}
 	ginHandler.Use(func(c *gin.Context) {
 		_, err := strconv.ParseBool(c.Request.Header.Get(httpserver.HTTPHeaderAllowInt64))
 		if err != nil {
-			c.Request.Header.Set(httpserver.HTTPHeaderAllowInt64, httpHeaderAllowInt64)
+			if paramtable.Get().HTTPCfg.AcceptTypeAllowInt64.GetAsBool() {
+				c.Request.Header.Set(httpserver.HTTPHeaderAllowInt64, "true")
+			} else {
+				c.Request.Header.Set(httpserver.HTTPHeaderAllowInt64, "false")
+			}
 		}
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
@@ -694,9 +695,13 @@ func (s *Server) start() error {
 }
 
 // Stop stop the Proxy Server
-func (s *Server) Stop() error {
+func (s *Server) Stop() (err error) {
 	Params := &paramtable.Get().ProxyGrpcServerCfg
-	log.Debug("Proxy stop", zap.String("internal address", Params.GetInternalAddress()), zap.String("external address", Params.GetInternalAddress()))
+	logger := log.With(zap.String("internal address", Params.GetInternalAddress()), zap.String("external address", Params.GetInternalAddress()))
+	logger.Info("Proxy stopping")
+	defer func() {
+		logger.Info("Proxy stopped", zap.Error(err))
+	}()
 
 	if s.etcdCli != nil {
 		defer s.etcdCli.Close()
@@ -740,7 +745,7 @@ func (s *Server) Stop() error {
 
 	s.wg.Wait()
 
-	err := s.proxy.Stop()
+	err = s.proxy.Stop()
 	if err != nil {
 		return err
 	}

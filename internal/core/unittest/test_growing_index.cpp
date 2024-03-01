@@ -12,14 +12,14 @@
 #include <gtest/gtest.h>
 
 #include "pb/plan.pb.h"
+#include "pb/schema.pb.h"
+#include "query/Plan.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
-#include "pb/schema.pb.h"
 #include "test_utils/DataGen.h"
-#include "query/Plan.h"
 
-using namespace milvus::segcore;
 using namespace milvus;
+using namespace milvus::segcore;
 namespace pb = milvus::proto;
 
 TEST(GrowingIndex, Correctness) {

@@ -291,6 +291,10 @@ func (s *Server) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest)
 	}
 
 	indexes := s.meta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName())
+	if req.GetIndexName() != "" && len(indexes) == 0 {
+		err := merr.WrapErrIndexNotFound(req.GetIndexName())
+		return merr.Status(err), nil
+	}
 	for _, index := range indexes {
 		// update user index params
 		newUserIndexParams, err := UpdateParams(index, index.UserIndexParams, req.GetParams())

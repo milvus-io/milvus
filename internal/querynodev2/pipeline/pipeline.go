@@ -17,15 +17,13 @@
 package pipeline
 
 import (
-	"go.uber.org/zap"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	base "github.com/milvus-io/milvus/internal/util/pipeline"
-	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // pipeline used for querynode
@@ -37,18 +35,12 @@ type Pipeline interface {
 type pipeline struct {
 	base.StreamPipeline
 
-	excludedSegments *typeutil.ConcurrentMap[int64, uint64]
+	excludedSegments *ExcludedSegments
 	collectionID     UniqueID
 }
 
 func (p *pipeline) ExcludedSegments(excludeInfo map[int64]uint64) { //(segInfos ...*datapb.SegmentInfo) {
-	for segmentID, ts := range excludeInfo {
-		log.Debug("pipeline add exclude info",
-			zap.Int64("segmentID", segmentID),
-			zap.Uint64("ts", ts),
-		)
-		p.excludedSegments.Insert(segmentID, ts)
-	}
+	p.excludedSegments.Insert(excludeInfo)
 }
 
 func (p *pipeline) Close() {
@@ -65,7 +57,7 @@ func NewPipeLine(
 	delegator delegator.ShardDelegator,
 ) (Pipeline, error) {
 	pipelineQueueLength := paramtable.Get().QueryNodeCfg.FlowGraphMaxQueueLength.GetAsInt32()
-	excludedSegments := typeutil.NewConcurrentMap[int64, uint64]()
+	excludedSegments := NewExcludedSegments(paramtable.Get().QueryNodeCfg.CleanExcludeSegInterval.GetAsDuration(time.Second))
 
 	p := &pipeline{
 		collectionID:     collectionID,
