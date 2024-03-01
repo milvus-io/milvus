@@ -54,8 +54,9 @@ type quotaConfig struct {
 	IndexLimitEnabled ParamItem `refreshable:"true"`
 	MaxIndexRate      ParamItem `refreshable:"true"`
 
-	FlushLimitEnabled ParamItem `refreshable:"true"`
-	MaxFlushRate      ParamItem `refreshable:"true"`
+	FlushLimitEnabled         ParamItem `refreshable:"true"`
+	MaxFlushRate              ParamItem `refreshable:"true"`
+	MaxFlushRatePerCollection ParamItem `refreshable:"true"`
 
 	CompactionLimitEnabled ParamItem `refreshable:"true"`
 	MaxCompactionRate      ParamItem `refreshable:"true"`
@@ -256,6 +257,25 @@ seconds, (0 ~ 65536)`,
 		Export: true,
 	}
 	p.MaxFlushRate.Init(base.mgr)
+
+	p.MaxFlushRatePerCollection = ParamItem{
+		Key:          "quotaAndLimits.flushRate.collection.max",
+		Version:      "2.3.9",
+		DefaultValue: "-1",
+		Formatter: func(v string) string {
+			if !p.FlushLimitEnabled.GetAsBool() {
+				return max
+			}
+			// [0 ~ Inf)
+			if getAsInt(v) < 0 {
+				return max
+			}
+			return v
+		},
+		Doc:    "qps, default no limit, rate for flush at collection level",
+		Export: true,
+	}
+	p.MaxFlushRatePerCollection.Init(base.mgr)
 
 	p.CompactionLimitEnabled = ParamItem{
 		Key:          "quotaAndLimits.compactionRate.enabled",
