@@ -131,6 +131,66 @@ func ConstructSearchRequest(
 	}
 }
 
+func ConstructSearchRequestWithConsistencyLevel(
+	dbName, collectionName string,
+	expr string,
+	vecField string,
+	vectorType schemapb.DataType,
+	outputFields []string,
+	metricType string,
+	params map[string]any,
+	nq, dim int, topk, roundDecimal int,
+	useDefaultConsistency bool,
+	consistencyLevel commonpb.ConsistencyLevel,
+) *milvuspb.SearchRequest {
+	b, err := json.Marshal(params)
+	if err != nil {
+		panic(err)
+	}
+	plg := constructPlaceholderGroup(nq, dim, vectorType)
+	plgBs, err := proto.Marshal(plg)
+	if err != nil {
+		panic(err)
+	}
+
+	return &milvuspb.SearchRequest{
+		Base:             nil,
+		DbName:           dbName,
+		CollectionName:   collectionName,
+		PartitionNames:   nil,
+		Dsl:              expr,
+		PlaceholderGroup: plgBs,
+		DslType:          commonpb.DslType_BoolExprV1,
+		OutputFields:     outputFields,
+		SearchParams: []*commonpb.KeyValuePair{
+			{
+				Key:   common.MetricTypeKey,
+				Value: metricType,
+			},
+			{
+				Key:   SearchParamsKey,
+				Value: string(b),
+			},
+			{
+				Key:   AnnsFieldKey,
+				Value: vecField,
+			},
+			{
+				Key:   common.TopKKey,
+				Value: strconv.Itoa(topk),
+			},
+			{
+				Key:   RoundDecimalKey,
+				Value: strconv.Itoa(roundDecimal),
+			},
+		},
+		TravelTimestamp:       0,
+		GuaranteeTimestamp:    0,
+		UseDefaultConsistency: useDefaultConsistency,
+		ConsistencyLevel:      consistencyLevel,
+	}
+}
+
 func constructPlaceholderGroup(nq, dim int, vectorType schemapb.DataType) *commonpb.PlaceholderGroup {
 	values := make([][]byte, 0, nq)
 	var placeholderType commonpb.PlaceholderType

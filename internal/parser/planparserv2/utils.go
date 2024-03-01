@@ -259,14 +259,6 @@ func combineArrayLengthExpr(op planpb.OpType, arithOp planpb.ArithOpType, column
 }
 
 func handleBinaryArithExpr(op planpb.OpType, arithExpr *planpb.BinaryArithExpr, valueExpr *planpb.ValueExpr) (*planpb.Expr, error) {
-	switch op {
-	case planpb.OpType_Equal, planpb.OpType_NotEqual:
-		break
-	default:
-		// TODO: enable this after execution is ready.
-		return nil, fmt.Errorf("%s is not supported in execution backend", op)
-	}
-
 	leftExpr, leftValue := arithExpr.Left.GetColumnExpr(), arithExpr.Left.GetValueExpr()
 	rightExpr, rightValue := arithExpr.Right.GetColumnExpr(), arithExpr.Right.GetValueExpr()
 	arithOp := arithExpr.GetOp()
