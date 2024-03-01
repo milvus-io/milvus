@@ -397,7 +397,9 @@ func (s *Server) startQueryCoord() error {
 		return err
 	}
 	for _, node := range sessions {
-		s.nodeMgr.Add(session.NewNodeInfo(node.ServerID, node.Address))
+		n := session.NewNodeInfo(node.ServerID, node.Address)
+		n.SetVersion(node.Version)
+		s.nodeMgr.Add(n)
 		s.taskScheduler.AddExecutor(node.ServerID)
 
 		if node.Stopping {

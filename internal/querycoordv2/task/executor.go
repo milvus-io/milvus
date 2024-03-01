@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/blang/semver/v4"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
@@ -42,6 +43,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
+
+// segmentsVersion is used for the flushed segments should not be included in the watch dm channel request
+var segmentsVersion = semver.Version{
+	Major: 2,
+	Minor: 3,
+	Patch: 4,
+}
 
 type Executor struct {
 	doneCh    chan struct{}
@@ -329,7 +337,7 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 		dmChannel,
 		indexInfo,
 	)
-	err = fillSubChannelRequest(ctx, req, ex.broker)
+	err = fillSubChannelRequest(ctx, req, ex.broker, ex.shouldIncludeFlushedSegmentInfo(action.Node()))
 	if err != nil {
 		log.Warn("failed to subscribe channel, failed to fill the request with segments",
 			zap.Error(err))
@@ -354,6 +362,14 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 	elapsed := time.Since(startTs)
 	log.Info("subscribe channel done", zap.Int64("taskID", task.ID()), zap.Duration("time taken", elapsed))
 	return nil
+}
+
+func (ex *Executor) shouldIncludeFlushedSegmentInfo(nodeID int64) bool {
+	node := ex.nodeMgr.Get(nodeID)
+	if node == nil {
+		return false
+	}
+	return node.Version().LT(segmentsVersion)
 }
 
 func (ex *Executor) unsubscribeChannel(task *ChannelTask, step int) error {
