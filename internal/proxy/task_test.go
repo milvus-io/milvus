@@ -1127,7 +1127,6 @@ func TestDescribeCollectionTask_ShardsNum1(t *testing.T) {
 	rc.CreateCollection(ctx, createColReq)
 	globalMetaCache.GetCollectionID(ctx, GetCurDBNameFromContextOrDefault(ctx), collectionName)
 
-	InitMetaCache(ctx, rc, qc, mgr)
 	// CreateCollection
 	task := &describeCollectionTask{
 		Condition: NewTaskCondition(ctx),
