@@ -411,14 +411,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 			writer.Close()
 			return nil, err
 		}
-		blobKey := metautil.BuildInsertLogPath(
-			"$ROOTPATH",
-			0,
-			partitionID,
-			segmentID,
-			field.FieldID,
-			0,
-		)
+		blobKey := fmt.Sprintf("%d", field.FieldID)
 		blobs = append(blobs, &Blob{
 			Key:    blobKey,
 			Value:  buffer,

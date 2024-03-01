@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strconv"
 
 	"github.com/apache/arrow/go/v12/arrow"
 	"github.com/apache/arrow/go/v12/arrow/array"
@@ -175,16 +176,21 @@ func (crr *compositeRecordReader) Close() {
 	}
 }
 
+func parseBlobKey(bolbKey string) (colId FieldID, logId UniqueID) {
+	if _, _, _, colId, logId, ok := metautil.ParseInsertLogPath(bolbKey); ok {
+		return colId, logId
+	}
+	if colId, err := strconv.ParseInt(bolbKey, 10, 64); err == nil {
+		// data_codec.go generate single field id as blob key.
+		return colId, 0
+	}
+	return -1, -1
+}
+
 func newCompositeRecordReader(blobs []*Blob) (*compositeRecordReader, error) {
 	sort.Slice(blobs, func(i, j int) bool {
-		_, _, _, iCol, iLog, ok := metautil.ParseInsertLogPath(blobs[i].Key)
-		if !ok {
-			return false
-		}
-		_, _, _, jCol, jLog, ok := metautil.ParseInsertLogPath(blobs[j].Key)
-		if !ok {
-			return false
-		}
+		iCol, iLog := parseBlobKey(blobs[i].Key)
+		jCol, jLog := parseBlobKey(blobs[j].Key)
 
 		if iCol == jCol {
 			return iLog < jLog
@@ -197,10 +203,7 @@ func newCompositeRecordReader(blobs []*Blob) (*compositeRecordReader, error) {
 	var currentCol []*Blob
 
 	for _, blob := range blobs {
-		_, _, _, colId, _, ok := metautil.ParseInsertLogPath(blob.Key)
-		if !ok {
-			return nil, fmt.Errorf("invalid blob key: %s", blob.Key)
-		}
+		colId, _ := parseBlobKey(blob.Key)
 		if colId != fieldId {
 			if currentCol != nil {
 				blobm = append(blobm, currentCol)
@@ -221,7 +224,7 @@ func newCompositeRecordReader(blobs []*Blob) (*compositeRecordReader, error) {
 
 type DeserializeReader[T any] struct {
 	rr           RecordReader
-	deserializer func(Record, *[]T) error
+	deserializer func(Record, []T) error
 	rec          Record
 	values       []T
 	pos          int
@@ -242,7 +245,7 @@ func (deser *DeserializeReader[T]) Next() error {
 		if deser.values == nil {
 			deser.values = make([]T, deser.rec.Len())
 		}
-		if err := deser.deserializer(deser.rec, &deser.values); err != nil {
+		if err := deser.deserializer(deser.rec, deser.values); err != nil {
 			return err
 		}
 	} else {
@@ -265,7 +268,7 @@ func (deser *DeserializeReader[T]) Close() {
 	}
 }
 
-func NewDeserializeReader[T any](rr RecordReader, deserializer func(Record, *[]T) error) *DeserializeReader[T] {
+func NewDeserializeReader[T any](rr RecordReader, deserializer func(Record, []T) error) *DeserializeReader[T] {
 	return &DeserializeReader[T]{
 		rr:           rr,
 		deserializer: deserializer,
@@ -373,13 +376,13 @@ func NewBinlogDeserializeReader(blobs []*Blob, PKfieldID UniqueID) (*Deserialize
 		return nil, err
 	}
 
-	return NewDeserializeReader(reader, func(r Record, v *[]*Value) error {
+	return NewDeserializeReader(reader, func(r Record, v []*Value) error {
 		// Note: the return value `Value` is reused.
 		for i := 0; i < r.Len(); i++ {
-			value := (*v)[i]
+			value := v[i]
 			if value == nil {
 				value = &Value{}
-				(*v)[i] = value
+				v[i] = value
 			}
 
 			m := make(map[FieldID]interface{})
