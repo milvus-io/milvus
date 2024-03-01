@@ -756,6 +756,13 @@ func WrapErrIoFailedReason(reason string, msg ...string) error {
 	return err
 }
 
+func WrapErrIoUnexpectEOF(key string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return wrapFieldsWithDesc(ErrIoUnexpectEOF, err.Error(), value("key", key))
+}
+
 // Parameter related
 func WrapErrParameterInvalid[T any](expected, actual T, msg ...string) error {
 	err := wrapFields(ErrParameterInvalid,

@@ -151,3 +151,33 @@ func TestWrap(t *testing.T) {
 	assert.True(t, errors.Is(err2, merr.ErrSegmentNotFound))
 	assert.False(t, IsRecoverable(err2))
 }
+
+func TestRetryErrorParam(t *testing.T) {
+	{
+		mockErr := errors.New("mock not retry error")
+		runTimes := 0
+		err := Do(context.Background(), func() error {
+			runTimes++
+			return mockErr
+		}, RetryErr(func(err error) bool {
+			return !errors.Is(err, mockErr)
+		}))
+
+		assert.Error(t, err)
+		assert.Equal(t, 1, runTimes)
+	}
+
+	{
+		mockErr := errors.New("mock retry error")
+		runTimes := 0
+		err := Do(context.Background(), func() error {
+			runTimes++
+			return mockErr
+		}, Attempts(3), RetryErr(func(err error) bool {
+			return errors.Is(err, mockErr)
+		}))
+
+		assert.Error(t, err)
+		assert.Equal(t, 3, runTimes)
+	}
+}
