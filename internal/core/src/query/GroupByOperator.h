@@ -142,7 +142,8 @@ PrepareVectorIteratorsFromIndex(const SearchInfo& search_info,
             } else {
                 LOG_ERROR(
                     "Returned knowhere iterator has non-ready iterators "
-                    "inside, terminate group_by operation");
+                    "inside, terminate group_by operation:{}",
+                    knowhere::Status2String(iterators_val.error()));
                 PanicInfo(ErrorCode::Unsupported,
                           "Returned knowhere iterator has non-ready iterators "
                           "inside, terminate group_by operation");
@@ -155,7 +156,10 @@ PrepareVectorIteratorsFromIndex(const SearchInfo& search_info,
                 "group_by: "
                 "group_by operation will be terminated",
                 e.what());
-            throw e;
+            throw std::runtime_error(
+                "Failed to groupBy, please check the index type, trying to "
+                "groupBy on unsupported index type will fail, currently only "
+                "support ivf-flat, ivf_cc and HNSW");
         }
         return true;
     }
