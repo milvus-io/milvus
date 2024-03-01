@@ -264,7 +264,7 @@ func (t *queryTask) CanSkipAllocTimestamp() bool {
 		consistencyLevel = collectionInfo.consistencyLevel
 	}
 
-	return consistencyLevel != commonpb.ConsistencyLevel_Strong
+	return consistencyLevel == commonpb.ConsistencyLevel_Eventually
 }
 
 func (t *queryTask) PreExecute(ctx context.Context) error {
