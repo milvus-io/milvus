@@ -798,7 +798,8 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 		channelCPLocks: lock.NewKeyLock[string](),
 		channelCPs:     channelCPs,
 		segments: &SegmentsInfo{
-			map[UniqueID]*SegmentInfo{
+			compactionTo: make(map[int64]int64),
+			segments: map[UniqueID]*SegmentInfo{
 				segID: {
 					SegmentInfo: &datapb.SegmentInfo{
 						ID:            segID,
@@ -1107,6 +1108,192 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 			},
 		},
 	}
+
+	for segID, segment := range map[UniqueID]*SegmentInfo{
+		segID: {
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            segID,
+				CollectionID:  collID,
+				PartitionID:   partID,
+				InsertChannel: "dmlChannel",
+				NumOfRows:     5000,
+				State:         commonpb.SegmentState_Dropped,
+				MaxRowNum:     65536,
+				DroppedAt:     0,
+				DmlPosition: &msgpb.MsgPosition{
+					Timestamp: 900,
+				},
+				Binlogs: []*datapb.FieldBinlog{
+					{
+						FieldID: 1,
+						Binlogs: []*datapb.Binlog{
+							{
+								LogPath: "log1",
+								LogSize: 1024,
+							},
+						},
+					},
+					{
+						FieldID: 2,
+						Binlogs: []*datapb.Binlog{
+							{
+								LogPath: "log2",
+								LogSize: 1024,
+							},
+						},
+					},
+				},
+				Deltalogs: []*datapb.FieldBinlog{
+					{
+						FieldID: 1,
+						Binlogs: []*datapb.Binlog{
+							{
+								LogPath: "del_log1",
+								LogSize: 1024,
+							},
+						},
+					},
+					{
+						FieldID: 2,
+						Binlogs: []*datapb.Binlog{
+							{
+								LogPath: "del_log2",
+								LogSize: 1024,
+							},
+						},
+					},
+				},
+				Statslogs: []*datapb.FieldBinlog{
+					{
+						FieldID: 1,
+						Binlogs: []*datapb.Binlog{
+							{
+								LogPath: "stats_log1",
+								LogSize: 1024,
+							},
+						},
+					},
+				},
+			},
+		},
+		segID + 1: {
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            segID + 1,
+				CollectionID:  collID,
+				PartitionID:   partID,
+				InsertChannel: "dmlChannel",
+				NumOfRows:     5000,
+				State:         commonpb.SegmentState_Dropped,
+				MaxRowNum:     65536,
+				DroppedAt:     0,
+				DmlPosition: &msgpb.MsgPosition{
+					Timestamp: 900,
+				},
+			},
+		},
+		segID + 2: {
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            segID + 2,
+				CollectionID:  collID,
+				PartitionID:   partID,
+				InsertChannel: "dmlChannel",
+				NumOfRows:     10000,
+				State:         commonpb.SegmentState_Dropped,
+				MaxRowNum:     65536,
+				DroppedAt:     10,
+				DmlPosition: &msgpb.MsgPosition{
+					Timestamp: 900,
+				},
+				CompactionFrom: []int64{segID, segID + 1},
+			},
+		},
+		segID + 3: {
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            segID + 3,
+				CollectionID:  collID,
+				PartitionID:   partID,
+				InsertChannel: "dmlChannel",
+				NumOfRows:     2000,
+				State:         commonpb.SegmentState_Dropped,
+				MaxRowNum:     65536,
+				DroppedAt:     10,
+				DmlPosition: &msgpb.MsgPosition{
+					Timestamp: 900,
+				},
+				CompactionFrom: nil,
+			},
+		},
+		segID + 4: {
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            segID + 4,
+				CollectionID:  collID,
+				PartitionID:   partID,
+				InsertChannel: "dmlChannel",
+				NumOfRows:     12000,
+				State:         commonpb.SegmentState_Flushed,
+				MaxRowNum:     65536,
+				DroppedAt:     10,
+				DmlPosition: &msgpb.MsgPosition{
+					Timestamp: 900,
+				},
+				CompactionFrom: []int64{segID + 2, segID + 3},
+			},
+		},
+		segID + 5: {
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:             segID + 5,
+				CollectionID:   collID,
+				PartitionID:    partID,
+				InsertChannel:  "dmlChannel",
+				NumOfRows:      2000,
+				State:          commonpb.SegmentState_Dropped,
+				MaxRowNum:      65535,
+				DroppedAt:      0,
+				CompactionFrom: nil,
+				DmlPosition: &msgpb.MsgPosition{
+					Timestamp: 1200,
+				},
+			},
+		},
+		segID + 6: {
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:             segID + 6,
+				CollectionID:   collID,
+				PartitionID:    partID,
+				InsertChannel:  "dmlChannel",
+				NumOfRows:      2000,
+				State:          commonpb.SegmentState_Dropped,
+				MaxRowNum:      65535,
+				DroppedAt:      uint64(time.Now().Add(time.Hour).UnixNano()),
+				CompactionFrom: nil,
+				DmlPosition: &msgpb.MsgPosition{
+					Timestamp: 900,
+				},
+				Compacted: true,
+			},
+		},
+		// compacted and child is GCed, dml pos is big than channel cp
+		segID + 7: {
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:             segID + 7,
+				CollectionID:   collID,
+				PartitionID:    partID,
+				InsertChannel:  "dmlChannel",
+				NumOfRows:      2000,
+				State:          commonpb.SegmentState_Dropped,
+				MaxRowNum:      65535,
+				DroppedAt:      0,
+				CompactionFrom: nil,
+				DmlPosition: &msgpb.MsgPosition{
+					Timestamp: 1200,
+				},
+				Compacted: true,
+			},
+		},
+	} {
+		m.segments.SetSegment(segID, segment)
+	}
+
 	cm := &mocks.ChunkManager{}
 	cm.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil)
 	gc := newGarbageCollector(
