@@ -218,6 +218,15 @@ func TestExpr_BinaryArith(t *testing.T) {
 		`Int64Field % 10 != 9`,
 		`Int64Field + 1.1 == 2.1`,
 		`A % 10 != 2`,
+		`Int8Field + 1 < 2`,
+		`Int16Field - 3 <= 4`,
+		`Int32Field * 5 > 6`,
+		`Int64Field / 7 >= 8`,
+		`FloatField + 11 < 12`,
+		`DoubleField - 13 <= 14`,
+		`A * 15 > 16`,
+		`JSONField['A'] / 17 >= 18`,
+		`ArrayField[0] % 19 >= 20`,
 	}
 	for _, exprStr := range exprStrs {
 		assertValidExpr(t, helper, exprStr)
@@ -225,13 +234,6 @@ func TestExpr_BinaryArith(t *testing.T) {
 
 	// TODO: enable these after execution backend is ready.
 	unsupported := []string{
-		`Int8Field + 1 < 2`,
-		`Int16Field - 3 <= 4`,
-		`Int32Field * 5 > 6`,
-		`Int64Field / 7 >= 8`,
-		`FloatField + 11 < 12`,
-		`DoubleField - 13 < 14`,
-		`A - 15 < 16`,
 		`JSONField + 15 == 16`,
 		`15 + JSONField == 16`,
 		`ArrayField + 15 == 16`,
@@ -1172,6 +1174,10 @@ func Test_ArrayLength(t *testing.T) {
 		`array_length(B) != 1`,
 		`not (array_length(C[0]) == 1)`,
 		`not (array_length(C["D"]) != 1)`,
+		`array_length(StringArrayField) < 1`,
+		`array_length(StringArrayField) <= 1`,
+		`array_length(StringArrayField) > 5`,
+		`array_length(StringArrayField) >= 5`,
 	}
 	for _, expr = range exprs {
 		_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
@@ -1193,7 +1199,6 @@ func Test_ArrayLength(t *testing.T) {
 		`0 < array_length(a-b) < 2`,
 		`0 < array_length(StringArrayField) < 1`,
 		`100 > array_length(ArrayField) > 10`,
-		`array_length(StringArrayField) < 1`,
 		`array_length(A) % 10 == 2`,
 		`array_length(A) / 10 == 2`,
 		`array_length(A) + 1  == 2`,
