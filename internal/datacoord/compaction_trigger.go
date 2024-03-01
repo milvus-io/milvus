@@ -437,7 +437,15 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) error {
 			return err
 		}
 
-		plans := t.generatePlans(group.segments, signal.isForce, isDiskIndex, ct)
+		isBusy, err := t.compactionHandler.isBusy(group.channelName)
+		if err != nil {
+			log.Warn("channel is not assigned, skip to handle compaction",
+				zap.Int64("collectionID", group.collectionID),
+				zap.Int64("partitionID", group.partitionID),
+				zap.String("channel", group.channelName), zap.Error(err))
+			return err
+		}
+		plans := t.generatePlans(group.segments, signal.isForce, isDiskIndex, ct, isBusy)
 		for _, plan := range plans {
 			segIDs := fetchSegIDs(plan.GetSegmentBinlogs())
 
@@ -548,7 +556,16 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 		return
 	}
 
-	plans := t.generatePlans(segments, signal.isForce, isDiskIndex, ct)
+	isBusy, err := t.compactionHandler.isBusy(channel)
+	if err != nil {
+		log.Warn("channel is not assigned, skip to handle compaction",
+			zap.Int64("collectionID", collectionID),
+			zap.Int64("partitionID", partitionID),
+			zap.String("channel", channel), zap.Error(err))
+		return
+	}
+
+	plans := t.generatePlans(segments, signal.isForce, isDiskIndex, ct, isBusy)
 	for _, plan := range plans {
 		if t.compactionHandler.isFull() {
 			log.Warn("compaction plan skipped due to handler full", zap.Int64("collection", signal.collectionID), zap.Int64("planID", plan.PlanID))
@@ -577,7 +594,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 	}
 }
 
-func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, force bool, isDiskIndex bool, compactTime *compactTime) []*datapb.CompactionPlan {
+func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, force bool, isDiskIndex bool, compactTime *compactTime, isBusy bool) []*datapb.CompactionPlan {
 	// find segments need internal compaction
 	// TODO add low priority candidates, for example if the segment is smaller than full 0.9 * max segment size but larger than small segment boundary, we only execute compaction when there are no compaction running actively
 	var prioritizedCandidates []*SegmentInfo
@@ -588,7 +605,7 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, force bool, i
 	for _, segment := range segments {
 		segment := segment.ShadowClone()
 		// TODO should we trigger compaction periodically even if the segment has no obvious reason to be compacted?
-		if force || t.ShouldDoSingleCompaction(segment, isDiskIndex, compactTime) {
+		if force || t.ShouldDoSingleCompaction(segment, isDiskIndex, isBusy, compactTime) {
 			prioritizedCandidates = append(prioritizedCandidates, segment)
 		} else if t.isSmallSegment(segment) {
 			smallCandidates = append(smallCandidates, segment)
@@ -647,7 +664,7 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, force bool, i
 				bucket = append(bucket, result...)
 			}
 		}
-		// since this is priority compaction, we will execute even if there is only segment
+		// since this is priority compaction, we will execute even if there is only one segment
 		plan := segmentsToPlan(bucket, compactTime)
 		var size int64
 		var row int64
@@ -735,25 +752,28 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, force bool, i
 		}
 	}
 	// If there are still remaining small segments, try adding them to non-planned segments.
-	for _, npSeg := range nonPlannedSegments {
-		bucket := []*SegmentInfo{npSeg}
-		targetRow := npSeg.GetNumOfRows()
-		for i := len(remainingSmallSegs) - 1; i >= 0; i-- {
-			// Note: could also simply use MaxRowNum as limit.
-			if targetRow+remainingSmallSegs[i].GetNumOfRows() <=
-				int64(Params.DataCoordCfg.SegmentExpansionRate.GetAsFloat()*float64(npSeg.GetMaxRowNum())) {
-				bucket = append(bucket, remainingSmallSegs[i])
-				targetRow += remainingSmallSegs[i].GetNumOfRows()
-				remainingSmallSegs = append(remainingSmallSegs[:i], remainingSmallSegs[i+1:]...)
+	// only squeeze if there are plans
+	if len(plans) == 0 && !isBusy {
+		for _, npSeg := range nonPlannedSegments {
+			bucket := []*SegmentInfo{npSeg}
+			targetRow := npSeg.GetNumOfRows()
+			for i := len(remainingSmallSegs) - 1; i >= 0; i-- {
+				// Note: could also simply use MaxRowNum as limit.
+				if targetRow+remainingSmallSegs[i].GetNumOfRows() <=
+					int64(Params.DataCoordCfg.SegmentExpansionRate.GetAsFloat()*float64(npSeg.GetMaxRowNum())) {
+					bucket = append(bucket, remainingSmallSegs[i])
+					targetRow += remainingSmallSegs[i].GetNumOfRows()
+					remainingSmallSegs = append(remainingSmallSegs[:i], remainingSmallSegs[i+1:]...)
+				}
 			}
-		}
-		if len(bucket) > 1 {
-			plan := segmentsToPlan(bucket, compactTime)
-			plans = append(plans, plan)
-			log.Info("generate a plan for to squeeze small candidates into non-planned segment",
-				zap.Int64s("plan segmentIDs", lo.Map(bucket, getSegmentIDs)),
-				zap.Int64("target segment row", targetRow),
-			)
+			if len(bucket) > 1 {
+				plan := segmentsToPlan(bucket, compactTime)
+				plans = append(plans, plan)
+				log.Info("generate a plan for to squeeze small candidates into non-planned segment",
+					zap.Int64s("plan segmentIDs", lo.Map(bucket, getSegmentIDs)),
+					zap.Int64("target segment row", targetRow),
+				)
+			}
 		}
 	}
 	return plans
@@ -860,7 +880,7 @@ func (t *compactionTrigger) isStaleSegment(segment *SegmentInfo) bool {
 	return time.Since(segment.lastFlushTime).Minutes() >= segmentTimedFlushDuration
 }
 
-func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, isDiskIndex bool, compactTime *compactTime) bool {
+func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, isDiskIndex bool, isBusy bool, compactTime *compactTime) bool {
 	// no longer restricted binlog numbers because this is now related to field numbers
 
 	binlogCount := GetBinlogCount(segment.GetBinlogs())
@@ -892,31 +912,33 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, isDis
 	}
 
 	// if expire time is enabled, put segment into compaction candidate
-	totalExpiredSize := int64(0)
-	totalExpiredRows := 0
-	for _, binlogs := range segment.GetBinlogs() {
-		for _, l := range binlogs.GetBinlogs() {
-			// TODO, we should probably estimate expired log entries by total rows in binlog and the ralationship of timeTo, timeFrom and expire time
-			if l.TimestampTo < compactTime.expireTime {
-				log.RatedDebug(10, "mark binlog as expired",
-					zap.Int64("segmentID", segment.ID),
-					zap.Int64("binlogID", l.GetLogID()),
-					zap.Uint64("binlogTimestampTo", l.TimestampTo),
-					zap.Uint64("compactExpireTime", compactTime.expireTime))
-				totalExpiredRows += int(l.GetEntriesNum())
-				totalExpiredSize += l.GetLogSize()
+	// this only happens if compaction is not busy
+	if !isBusy {
+		totalExpiredSize := int64(0)
+		totalExpiredRows := 0
+		for _, binlogs := range segment.GetBinlogs() {
+			for _, l := range binlogs.GetBinlogs() {
+				// TODO, we should probably estimate expired log entries by total rows in binlog and the ralationship of timeTo, timeFrom and expire time
+				if l.TimestampTo < compactTime.expireTime {
+					log.RatedDebug(10, "mark binlog as expired",
+						zap.Int64("segmentID", segment.ID),
+						zap.Int64("binlogID", l.GetLogID()),
+						zap.Uint64("binlogTimestampTo", l.TimestampTo),
+						zap.Uint64("compactExpireTime", compactTime.expireTime))
+					totalExpiredRows += int(l.GetEntriesNum())
+					totalExpiredSize += l.GetLogSize()
+				}
 			}
 		}
-	}
 
-	if float64(totalExpiredRows)/float64(segment.GetNumOfRows()) >= Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat() ||
-		totalExpiredSize > Params.DataCoordCfg.SingleCompactionExpiredLogMaxSize.GetAsInt64() {
-		log.Info("total expired entities is too much, trigger compaction", zap.Int64("segmentID", segment.ID),
-			zap.Int("expiredRows", totalExpiredRows), zap.Int64("expiredLogSize", totalExpiredSize),
-			zap.Bool("createdByCompaction", segment.CreatedByCompaction), zap.Int64s("compactionFrom", segment.CompactionFrom))
-		return true
+		if float64(totalExpiredRows)/float64(segment.GetNumOfRows()) >= Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat() ||
+			totalExpiredSize > Params.DataCoordCfg.SingleCompactionExpiredLogMaxSize.GetAsInt64() {
+			log.Info("total expired entities is too much, trigger compaction", zap.Int64("segmentID", segment.ID),
+				zap.Int("expiredRows", totalExpiredRows), zap.Int64("expiredLogSize", totalExpiredSize),
+				zap.Bool("createdByCompaction", segment.CreatedByCompaction), zap.Int64s("compactionFrom", segment.CompactionFrom))
+			return true
+		}
 	}
-
 	totalDeletedRows := 0
 	totalDeleteLogSize := int64(0)
 	for _, deltaLogs := range segment.GetDeltalogs() {
@@ -936,7 +958,8 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, isDis
 		return true
 	}
 
-	if Params.DataCoordCfg.AutoUpgradeSegmentIndex.GetAsBool() {
+	// only auto upgrade segment index if not busy
+	if Params.DataCoordCfg.AutoUpgradeSegmentIndex.GetAsBool() && !isBusy {
 		// index version of segment lower than current version and IndexFileKeys should have value, trigger compaction
 		for _, index := range segment.segmentIndexes {
 			if index.CurrentIndexVersion < t.indexEngineVersionManager.GetCurrentIndexEngineVersion() &&

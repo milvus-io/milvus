@@ -54,6 +54,8 @@ type compactionPlanContext interface {
 	updateCompaction(ts Timestamp) error
 	// isFull return true if the task pool is full
 	isFull() bool
+	// isBusy return true if the task pool is busy
+	isBusy(channel string) (bool, error)
 	// get compaction tasks by signal id
 	getCompactionTasksBySignalID(signalID int64) []*compactionTask
 	removeTasksByChannel(channel string)
@@ -235,6 +237,7 @@ func (c *compactionPlanHandler) Clean() {
 		}
 		// after timeout + 1h, the plan will be cleaned
 		if c.isTimeout(current, task.plan.GetStartTime(), task.plan.GetTimeoutInSeconds()+60*60) {
+			log.Info("clean up plans ", zap.Int64("planID", id), zap.Any("state", task.state))
 			delete(c.plans, id)
 		}
 	}
@@ -512,7 +515,9 @@ func (c *compactionPlanHandler) updateCompaction(ts Timestamp) error {
 				}
 				continue
 			}
-			// check wether the CompactionPlan is timeout
+			// check whether the CompactionPlan is timeout
+			// TODO do we really need compaction to get timeout? as long as the datanode is alive, when should the task failed should be decided by datanode and there is
+			// no reason to abort a task from datacoord side.
 			if state == commonpb.CompactionState_Executing && !c.isTimeout(ts, task.plan.GetStartTime(), task.plan.GetTimeoutInSeconds()) {
 				continue
 			}
@@ -526,7 +531,7 @@ func (c *compactionPlanHandler) updateCompaction(ts Timestamp) error {
 			continue
 		}
 
-		log.Info("compaction failed", zap.Int64("planID", task.plan.PlanID), zap.Int64("nodeID", task.dataNodeID))
+		log.Info("compaction failed due to can not get plan results", zap.Int64("planID", task.plan.PlanID), zap.Int64("nodeID", task.dataNodeID))
 		c.plans[planID] = c.plans[planID].shadowClone(setState(failed), endSpan())
 		c.setSegmentsCompacting(task.plan, false)
 		c.scheduler.Finish(task.dataNodeID, task.plan)
@@ -567,6 +572,25 @@ func (c *compactionPlanHandler) isTimeout(now Timestamp, start Timestamp, timeou
 // isFull return true if the task pool is full
 func (c *compactionPlanHandler) isFull() bool {
 	return c.scheduler.GetTaskCount() >= Params.DataCoordCfg.CompactionMaxParallelTasks.GetAsInt()
+}
+
+func (c *compactionPlanHandler) isBusy(channel string) (bool, error) {
+	nodeID, err := c.chManager.FindWatcher(channel)
+	if err != nil {
+		return false, err
+	}
+
+	var nodeTask int
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	for _, t := range c.plans {
+		if t.dataNodeID == nodeID {
+			nodeTask++
+		}
+	}
+
+	return nodeTask >= Params.DataCoordCfg.CompactionWorkerBusyTasks.GetAsInt(), nil
 }
 
 func (c *compactionPlanHandler) getTasksByState(state compactionTaskState) []*compactionTask {
