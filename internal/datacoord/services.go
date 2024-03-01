@@ -304,6 +304,8 @@ func (s *Server) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsert
 		}, nil
 	}
 
+	segment = segment.Clone()
+
 	err := binlog.DecompressBinLog(storage.InsertBinlog, segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID(), segment.GetBinlogs())
 	if err != nil {
 		return &datapb.GetInsertBinlogPathsResponse{
