@@ -45,6 +45,8 @@ const (
 	flushTimeout = 15 * time.Second
 	// TODO: evaluate and update import timeout.
 	importTimeout = 3 * time.Hour
+
+	importTaskTimeout = 10 * time.Second
 )
 
 type SessionManager interface {
@@ -58,10 +60,15 @@ type SessionManager interface {
 	Compaction(ctx context.Context, nodeID int64, plan *datapb.CompactionPlan) error
 	SyncSegments(nodeID int64, req *datapb.SyncSegmentsRequest) error
 	Import(ctx context.Context, nodeID int64, itr *datapb.ImportTaskRequest)
-	GetCompactionPlansResults() map[int64]*datapb.CompactionPlanResult
+	GetCompactionPlansResults() map[int64]*typeutil.Pair[int64, *datapb.CompactionPlanResult]
 	NotifyChannelOperation(ctx context.Context, nodeID int64, req *datapb.ChannelOperationsRequest) error
 	CheckChannelOperationProgress(ctx context.Context, nodeID int64, info *datapb.ChannelWatchInfo) (*datapb.ChannelOperationProgressResponse, error)
 	AddImportSegment(ctx context.Context, nodeID int64, req *datapb.AddImportSegmentRequest) (*datapb.AddImportSegmentResponse, error)
+	PreImport(nodeID int64, in *datapb.PreImportRequest) error
+	ImportV2(nodeID int64, in *datapb.ImportRequest) error
+	QueryPreImport(nodeID int64, in *datapb.QueryPreImportRequest) (*datapb.QueryPreImportResponse, error)
+	QueryImport(nodeID int64, in *datapb.QueryImportRequest) (*datapb.QueryImportResponse, error)
+	DropImport(nodeID int64, in *datapb.DropImportRequest) error
 	CheckHealth(ctx context.Context) error
 	Close()
 }
@@ -157,7 +164,7 @@ func (c *SessionManagerImpl) getClient(ctx context.Context, nodeID int64) (types
 	c.sessions.RUnlock()
 
 	if !ok {
-		return nil, fmt.Errorf("can not find session of node %d", nodeID)
+		return nil, merr.WrapErrNodeNotFound(nodeID, "can not find session")
 	}
 
 	return session.GetOrCreateClient(ctx)
@@ -263,11 +270,12 @@ func (c *SessionManagerImpl) execImport(ctx context.Context, nodeID int64, itr *
 	log.Info("success to import", zap.Int64("node", nodeID), zap.Any("import task", itr))
 }
 
-func (c *SessionManagerImpl) GetCompactionPlansResults() map[int64]*datapb.CompactionPlanResult {
+// GetCompactionPlanResults returns map[planID]*pair[nodeID, *CompactionPlanResults]
+func (c *SessionManagerImpl) GetCompactionPlansResults() map[int64]*typeutil.Pair[int64, *datapb.CompactionPlanResult] {
 	wg := sync.WaitGroup{}
 	ctx := context.Background()
 
-	plans := typeutil.NewConcurrentMap[int64, *datapb.CompactionPlanResult]()
+	plans := typeutil.NewConcurrentMap[int64, *typeutil.Pair[int64, *datapb.CompactionPlanResult]]()
 	c.sessions.RLock()
 	for nodeID, s := range c.sessions.data {
 		wg.Add(1)
@@ -296,15 +304,16 @@ func (c *SessionManagerImpl) GetCompactionPlansResults() map[int64]*datapb.Compa
 				// for compatibility issue, before 2.3.4, resp has only logpath
 				// try to parse path and fill logid
 				binlog.CompressCompactionBinlogs(rst.GetSegments())
-				plans.Insert(rst.PlanID, rst)
+				nodeRst := typeutil.NewPair(nodeID, rst)
+				plans.Insert(rst.PlanID, &nodeRst)
 			}
 		}(nodeID, s)
 	}
 	c.sessions.RUnlock()
 	wg.Wait()
 
-	rst := make(map[int64]*datapb.CompactionPlanResult)
-	plans.Range(func(planID int64, result *datapb.CompactionPlanResult) bool {
+	rst := make(map[int64]*typeutil.Pair[int64, *datapb.CompactionPlanResult])
+	plans.Range(func(planID int64, result *typeutil.Pair[int64, *datapb.CompactionPlanResult]) bool {
 		rst[planID] = result
 		return true
 	})
@@ -390,6 +399,100 @@ func (c *SessionManagerImpl) AddImportSegment(ctx context.Context, nodeID int64,
 	}
 	log.Info("succeed to add segment", zap.Int64("nodeID", nodeID), zap.Any("add segment req", req))
 	return resp, err
+}
+
+func (c *SessionManagerImpl) PreImport(nodeID int64, in *datapb.PreImportRequest) error {
+	log := log.With(
+		zap.Int64("nodeID", nodeID),
+		zap.Int64("jobID", in.GetJobID()),
+		zap.Int64("taskID", in.GetTaskID()),
+		zap.Int64("collectionID", in.GetCollectionID()),
+		zap.Int64s("partitionIDs", in.GetPartitionIDs()),
+	)
+	ctx, cancel := context.WithTimeout(context.Background(), importTaskTimeout)
+	defer cancel()
+	cli, err := c.getClient(ctx, nodeID)
+	if err != nil {
+		log.Info("failed to get client", zap.Error(err))
+		return err
+	}
+	status, err := cli.PreImport(ctx, in)
+	return VerifyResponse(status, err)
+}
+
+func (c *SessionManagerImpl) ImportV2(nodeID int64, in *datapb.ImportRequest) error {
+	log := log.With(
+		zap.Int64("nodeID", nodeID),
+		zap.Int64("jobID", in.GetJobID()),
+		zap.Int64("taskID", in.GetTaskID()),
+		zap.Int64("collectionID", in.GetCollectionID()),
+	)
+	ctx, cancel := context.WithTimeout(context.Background(), importTaskTimeout)
+	defer cancel()
+	cli, err := c.getClient(ctx, nodeID)
+	if err != nil {
+		log.Info("failed to get client", zap.Error(err))
+		return err
+	}
+	status, err := cli.ImportV2(ctx, in)
+	return VerifyResponse(status, err)
+}
+
+func (c *SessionManagerImpl) QueryPreImport(nodeID int64, in *datapb.QueryPreImportRequest) (*datapb.QueryPreImportResponse, error) {
+	log := log.With(
+		zap.Int64("nodeID", nodeID),
+		zap.Int64("jobID", in.GetJobID()),
+		zap.Int64("taskID", in.GetTaskID()),
+	)
+	ctx, cancel := context.WithTimeout(context.Background(), importTaskTimeout)
+	defer cancel()
+	cli, err := c.getClient(ctx, nodeID)
+	if err != nil {
+		log.Info("failed to get client", zap.Error(err))
+		return nil, err
+	}
+	resp, err := cli.QueryPreImport(ctx, in)
+	if err = VerifyResponse(resp.GetStatus(), err); err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+func (c *SessionManagerImpl) QueryImport(nodeID int64, in *datapb.QueryImportRequest) (*datapb.QueryImportResponse, error) {
+	log := log.With(
+		zap.Int64("nodeID", nodeID),
+		zap.Int64("jobID", in.GetJobID()),
+		zap.Int64("taskID", in.GetTaskID()),
+	)
+	ctx, cancel := context.WithTimeout(context.Background(), importTaskTimeout)
+	defer cancel()
+	cli, err := c.getClient(ctx, nodeID)
+	if err != nil {
+		log.Info("failed to get client", zap.Error(err))
+		return nil, err
+	}
+	resp, err := cli.QueryImport(ctx, in)
+	if err = VerifyResponse(resp.GetStatus(), err); err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+func (c *SessionManagerImpl) DropImport(nodeID int64, in *datapb.DropImportRequest) error {
+	log := log.With(
+		zap.Int64("nodeID", nodeID),
+		zap.Int64("jobID", in.GetJobID()),
+		zap.Int64("taskID", in.GetTaskID()),
+	)
+	ctx, cancel := context.WithTimeout(context.Background(), importTaskTimeout)
+	defer cancel()
+	cli, err := c.getClient(ctx, nodeID)
+	if err != nil {
+		log.Info("failed to get client", zap.Error(err))
+		return err
+	}
+	status, err := cli.DropImport(ctx, in)
+	return VerifyResponse(status, err)
 }
 
 func (c *SessionManagerImpl) CheckHealth(ctx context.Context) error {

@@ -352,7 +352,7 @@ func (m *meta) GetHealthySegment(segID UniqueID) *SegmentInfo {
 	defer m.RUnlock()
 	segment := m.segments.GetSegment(segID)
 	if segment != nil && isSegmentHealthy(segment) {
-		return segment.Clone()
+		return segment
 	}
 	return nil
 }
@@ -371,6 +371,35 @@ func (m *meta) GetAllSegmentsUnsafe() []*SegmentInfo {
 	m.RLock()
 	defer m.RUnlock()
 	return m.segments.GetSegments()
+}
+
+func (m *meta) GetSegmentsTotalCurrentRows(segmentIDs []UniqueID) int64 {
+	m.RLock()
+	defer m.RUnlock()
+	var sum int64 = 0
+	for _, segmentID := range segmentIDs {
+		segment := m.segments.GetSegment(segmentID)
+		if segment == nil {
+			log.Warn("cannot find segment", zap.Int64("segmentID", segmentID))
+			continue
+		}
+		sum += segment.currRows
+	}
+	return sum
+}
+
+func (m *meta) GetSegmentsChannels(segmentIDs []UniqueID) (map[int64]string, error) {
+	m.RLock()
+	defer m.RUnlock()
+	segChannels := make(map[int64]string)
+	for _, segmentID := range segmentIDs {
+		segment := m.segments.GetSegment(segmentID)
+		if segment == nil {
+			return nil, errors.New(fmt.Sprintf("cannot find segment %d", segmentID))
+		}
+		segChannels[segmentID] = segment.GetInsertChannel()
+	}
+	return segChannels, nil
 }
 
 // SetState setting segment with provided ID state
@@ -414,6 +443,45 @@ func (m *meta) SetState(segmentID UniqueID, targetState commonpb.SegmentState) e
 	log.Info("meta update: setting segment state - complete",
 		zap.Int64("segmentID", segmentID),
 		zap.String("target state", targetState.String()))
+	return nil
+}
+
+func (m *meta) UpdateSegment(segmentID int64, operators ...SegmentOperator) error {
+	m.Lock()
+	defer m.Unlock()
+	info := m.segments.GetSegment(segmentID)
+	if info == nil {
+		log.Warn("meta update: UpdateSegment - segment not found",
+			zap.Int64("segmentID", segmentID))
+
+		return merr.WrapErrSegmentNotFound(segmentID)
+	}
+	// Persist segment updates first.
+	cloned := info.Clone()
+
+	var updated bool
+	for _, operator := range operators {
+		updated = updated || operator(cloned)
+	}
+
+	if !updated {
+		log.Warn("meta update:UpdateSegmnt skipped, no update",
+			zap.Int64("segmentID", segmentID),
+		)
+		return nil
+	}
+
+	if err := m.catalog.AlterSegments(m.ctx, []*datapb.SegmentInfo{cloned.SegmentInfo}); err != nil {
+		log.Warn("meta update: update segment - failed to alter segments",
+			zap.Int64("segmentID", segmentID),
+			zap.Error(err))
+		return err
+	}
+	// Update in-memory meta.
+	m.segments.SetSegment(segmentID, cloned)
+
+	log.Info("meta update: update segment - complete",
+		zap.Int64("segmentID", segmentID))
 	return nil
 }
 
@@ -567,6 +635,25 @@ func UpdateBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs []*dat
 	}
 }
 
+func ReplaceBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs []*datapb.FieldBinlog) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			log.Warn("meta update: replace binlog failed - segment not found",
+				zap.Int64("segmentID", segmentID))
+			return false
+		}
+
+		segment.Binlogs = binlogs
+		segment.Statslogs = statslogs
+		segment.Deltalogs = deltalogs
+		modPack.increments[segmentID] = metastore.BinlogsIncrement{
+			Segment: segment.SegmentInfo,
+		}
+		return true
+	}
+}
+
 // update startPosition
 func UpdateStartPosition(startPositions []*datapb.SegmentStartPosition) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
@@ -581,6 +668,26 @@ func UpdateStartPosition(startPositions []*datapb.SegmentStartPosition) UpdateOp
 
 			s.StartPosition = pos.GetStartPosition()
 		}
+		return true
+	}
+}
+
+func UpdateDmlPosition(segmentID int64, dmlPosition *msgpb.MsgPosition) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		if len(dmlPosition.GetMsgID()) == 0 {
+			log.Warn("meta update: update dml position failed - nil position msg id",
+				zap.Int64("segmentID", segmentID))
+			return false
+		}
+
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			log.Warn("meta update: update dml position failed - segment not found",
+				zap.Int64("segmentID", segmentID))
+			return false
+		}
+
+		segment.DmlPosition = dmlPosition
 		return true
 	}
 }
@@ -625,6 +732,34 @@ func UpdateCheckPointOperator(segmentID int64, importing bool, checkpoints []*da
 				zap.Int64("segment bin log row count (correct)", count))
 			segment.NumOfRows = count
 		}
+		return true
+	}
+}
+
+func UpdateImportedRows(segmentID int64, rows int64) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			log.Warn("meta update: update NumOfRows failed - segment not found",
+				zap.Int64("segmentID", segmentID))
+			return false
+		}
+		segment.currRows = rows
+		segment.NumOfRows = rows
+		segment.MaxRowNum = rows
+		return true
+	}
+}
+
+func UpdateIsImporting(segmentID int64, isImporting bool) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			log.Warn("meta update: update isImporting failed - segment not found",
+				zap.Int64("segmentID", segmentID))
+			return false
+		}
+		segment.IsImporting = isImporting
 		return true
 	}
 }
@@ -917,7 +1052,7 @@ func (m *meta) SelectSegments(selector SegmentInfoSelector) []*SegmentInfo {
 	segments := m.segments.GetSegments()
 	for _, info := range segments {
 		if selector(info) {
-			ret = append(ret, info.Clone())
+			ret = append(ret, info)
 		}
 	}
 	return ret

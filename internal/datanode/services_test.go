@@ -802,7 +802,7 @@ func (s *DataNodeServicesSuite) TestSyncSegments() {
 	fg.metacache.AddSegment(&datapb.SegmentInfo{ID: 201, CollectionID: 1, State: commonpb.SegmentState_Flushed}, EmptyBfsFactory)
 	fg.metacache.AddSegment(&datapb.SegmentInfo{ID: 300, CollectionID: 1, State: commonpb.SegmentState_Flushed}, EmptyBfsFactory)
 
-	s.Run("invalid compacted from", func() {
+	s.Run("empty compactedFrom", func() {
 		req := &datapb.SyncSegmentsRequest{
 			CompactedTo: 400,
 			NumOfRows:   100,
@@ -811,10 +811,18 @@ func (s *DataNodeServicesSuite) TestSyncSegments() {
 		req.CompactedFrom = []UniqueID{}
 		status, err := s.node.SyncSegments(s.ctx, req)
 		s.Assert().NoError(err)
-		s.Assert().False(merr.Ok(status))
+		s.Assert().True(merr.Ok(status))
+	})
+
+	s.Run("invalid compacted from", func() {
+		req := &datapb.SyncSegmentsRequest{
+			CompactedTo:   400,
+			NumOfRows:     100,
+			CompactedFrom: []UniqueID{101, 201},
+		}
 
 		req.CompactedFrom = []UniqueID{101, 201}
-		status, err = s.node.SyncSegments(s.ctx, req)
+		status, err := s.node.SyncSegments(s.ctx, req)
 		s.Assert().NoError(err)
 		s.Assert().False(merr.Ok(status))
 	})

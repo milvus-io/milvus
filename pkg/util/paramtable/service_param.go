@@ -722,7 +722,7 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 
 	k.SaslMechanisms = ParamItem{
 		Key:          "kafka.saslMechanisms",
-		DefaultValue: "PLAIN",
+		DefaultValue: "",
 		Version:      "2.1.0",
 		Export:       true,
 	}
@@ -730,7 +730,7 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 
 	k.SecurityProtocol = ParamItem{
 		Key:          "kafka.securityProtocol",
-		DefaultValue: "SASL_SSL",
+		DefaultValue: "",
 		Version:      "2.1.0",
 		Export:       true,
 	}
@@ -739,7 +739,7 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 	k.KafkaUseSSL = ParamItem{
 		Key:          "kafka.ssl.enabled",
 		DefaultValue: "false",
-		Version:      "2.3.8",
+		Version:      "2.3.11",
 		Doc:          "whether to enable ssl mode",
 		Export:       true,
 	}
@@ -747,7 +747,7 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 
 	k.KafkaTLSCert = ParamItem{
 		Key:     "kafka.ssl.tlsCert",
-		Version: "2.3.8",
+		Version: "2.3.11",
 		Doc:     "path to client's public key (PEM) used for authentication",
 		Export:  true,
 	}
@@ -755,7 +755,7 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 
 	k.KafkaTLSKey = ParamItem{
 		Key:     "kafka.ssl.tlsKey",
-		Version: "2.3.8",
+		Version: "2.3.11",
 		Doc:     "path to client's private key (PEM) used for authentication",
 		Export:  true,
 	}
@@ -763,7 +763,7 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 
 	k.KafkaTLSCACert = ParamItem{
 		Key:     "kafka.ssl.tlsCaCert",
-		Version: "2.3.8",
+		Version: "2.3.11",
 		Doc:     "file or directory path to CA certificate(s) for verifying the broker's key",
 		Export:  true,
 	}
@@ -771,7 +771,7 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 
 	k.KafkaTLSKeyPassword = ParamItem{
 		Key:     "kafka.ssl.tlsKeyPassword",
-		Version: "2.3.8",
+		Version: "2.3.11",
 		Doc:     "private key passphrase for use with ssl.key.location and set_ssl_cert(), if any",
 		Export:  true,
 	}

@@ -32,6 +32,7 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	mockkv "github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
+	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
@@ -149,6 +150,10 @@ func TestLastExpireReset(t *testing.T) {
 	paramtable.Init()
 	Params.Save(Params.DataCoordCfg.AllocLatestExpireAttempt.Key, "1")
 	Params.Save(Params.DataCoordCfg.SegmentMaxSize.Key, "1")
+	defer func() {
+		Params.Save(Params.DataCoordCfg.AllocLatestExpireAttempt.Key, "200")
+		Params.Save(Params.DataCoordCfg.SegmentMaxSize.Key, "1024")
+	}()
 	mockAllocator := newRootCoordAllocator(newMockRootCoordClient())
 	etcdCli, _ := etcd.GetEtcdClient(
 		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
@@ -275,6 +280,64 @@ func TestAllocSegmentForImport(t *testing.T) {
 		}
 		segmentManager, _ := newSegmentManager(meta, failsAllocator)
 		_, err := segmentManager.allocSegmentForImport(ctx, collID, 100, "c1", 100, 0)
+		assert.Error(t, err)
+	})
+}
+
+func TestSegmentManager_AllocImportSegment(t *testing.T) {
+	ctx := context.Background()
+	mockErr := errors.New("mock error")
+
+	t.Run("normal case", func(t *testing.T) {
+		alloc := NewNMockAllocator(t)
+		alloc.EXPECT().allocID(mock.Anything).Return(0, nil)
+		alloc.EXPECT().allocTimestamp(mock.Anything).Return(0, nil)
+		meta, err := newMemoryMeta()
+		assert.NoError(t, err)
+		sm, err := newSegmentManager(meta, alloc)
+		assert.NoError(t, err)
+
+		segment, err := sm.AllocImportSegment(ctx, 0, 1, 1, "ch1")
+		assert.NoError(t, err)
+		segment2 := meta.GetSegment(segment.GetID())
+		assert.NotNil(t, segment2)
+		assert.Equal(t, true, segment2.GetIsImporting())
+	})
+
+	t.Run("alloc id failed", func(t *testing.T) {
+		alloc := NewNMockAllocator(t)
+		alloc.EXPECT().allocID(mock.Anything).Return(0, mockErr)
+		meta, err := newMemoryMeta()
+		assert.NoError(t, err)
+		sm, err := newSegmentManager(meta, alloc)
+		assert.NoError(t, err)
+		_, err = sm.AllocImportSegment(ctx, 0, 1, 1, "ch1")
+		assert.Error(t, err)
+	})
+
+	t.Run("alloc ts failed", func(t *testing.T) {
+		alloc := NewNMockAllocator(t)
+		alloc.EXPECT().allocID(mock.Anything).Return(0, nil)
+		alloc.EXPECT().allocTimestamp(mock.Anything).Return(0, mockErr)
+		meta, err := newMemoryMeta()
+		assert.NoError(t, err)
+		sm, err := newSegmentManager(meta, alloc)
+		assert.NoError(t, err)
+		_, err = sm.AllocImportSegment(ctx, 0, 1, 1, "ch1")
+		assert.Error(t, err)
+	})
+
+	t.Run("add segment failed", func(t *testing.T) {
+		alloc := NewNMockAllocator(t)
+		alloc.EXPECT().allocID(mock.Anything).Return(0, nil)
+		alloc.EXPECT().allocTimestamp(mock.Anything).Return(0, nil)
+		meta, err := newMemoryMeta()
+		assert.NoError(t, err)
+		sm, _ := newSegmentManager(meta, alloc)
+		catalog := mocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(mockErr)
+		meta.catalog = catalog
+		_, err = sm.AllocImportSegment(ctx, 0, 1, 1, "ch1")
 		assert.Error(t, err)
 	})
 }

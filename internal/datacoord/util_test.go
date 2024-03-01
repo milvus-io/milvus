@@ -134,6 +134,10 @@ func (f *fixedTSOAllocator) allocID(_ context.Context) (UniqueID, error) {
 	panic("not implemented") // TODO: Implement
 }
 
+func (f *fixedTSOAllocator) allocN(_ context.Context, _ int64) (UniqueID, UniqueID, error) {
+	panic("not implemented") // TODO: Implement
+}
+
 func (suite *UtilSuite) TestGetZeroTime() {
 	n := 10
 	for i := 0; i < n; i++ {

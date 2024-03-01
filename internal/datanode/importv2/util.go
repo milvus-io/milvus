@@ -29,12 +29,12 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -99,30 +99,27 @@ func NewImportSegmentInfo(syncTask syncmgr.Task, task *ImportTask) (*datapb.Impo
 	}, nil
 }
 
-func PickSegment(task *ImportTask, vchannel string, partitionID int64, rows int) int64 {
+func PickSegment(task *ImportTask, segmentImportedSizes map[int64]int, vchannel string, partitionID int64, sizeToImport int) int64 {
 	candidates := lo.Filter(task.req.GetRequestSegments(), func(info *datapb.ImportRequestSegment, _ int) bool {
 		return info.GetVchannel() == vchannel && info.GetPartitionID() == partitionID
 	})
 
-	importedSegments := lo.KeyBy(task.GetSegmentsInfo(), func(segment *datapb.ImportSegmentInfo) int64 {
-		return segment.GetSegmentID()
-	})
+	segmentMaxSize := paramtable.Get().DataCoordCfg.SegmentMaxSize.GetAsInt() * 1024 * 1024
 
 	for _, candidate := range candidates {
-		var importedRows int64 = 0
-		if segment, ok := importedSegments[candidate.GetSegmentID()]; ok {
-			importedRows = segment.GetImportedRows()
-		}
-		if importedRows+int64(rows) <= candidate.GetMaxRows() {
+		sizeImported := segmentImportedSizes[candidate.GetSegmentID()]
+		if sizeImported+sizeToImport <= segmentMaxSize {
 			return candidate.GetSegmentID()
 		}
 	}
 	segmentID := lo.MinBy(task.GetSegmentsInfo(), func(s1, s2 *datapb.ImportSegmentInfo) bool {
-		return s1.GetImportedRows() < s2.GetImportedRows()
+		return segmentImportedSizes[s1.GetSegmentID()] < segmentImportedSizes[s2.GetSegmentID()]
 	}).GetSegmentID()
 	log.Warn("failed to pick an appropriate segment, opt for the smallest one instead",
-		WrapLogFields(task, zap.Int64("segmentID", segmentID), zap.Int64("maxRows", candidates[0].GetMaxRows()),
-			zap.Int("rows", rows), zap.Int64("importedRows", importedSegments[segmentID].GetImportedRows()))...)
+		WrapLogFields(task, zap.Int64("segmentID", segmentID),
+			zap.Int("sizeToImport", sizeToImport),
+			zap.Int("sizeImported", segmentImportedSizes[segmentID]),
+			zap.Int("segmentMaxSize", segmentMaxSize))...)
 	return segmentID
 }
 
@@ -206,14 +203,14 @@ func GetInsertDataRowCount(data *storage.InsertData, schema *schemapb.Collection
 
 func LogStats(manager TaskManager) {
 	logFunc := func(tasks []Task, taskType TaskType) {
-		byState := lo.GroupBy(tasks, func(t Task) internalpb.ImportState {
+		byState := lo.GroupBy(tasks, func(t Task) datapb.ImportTaskStateV2 {
 			return t.GetState()
 		})
 		log.Info("import task stats", zap.String("type", taskType.String()),
-			zap.Int("pending", len(byState[internalpb.ImportState_Pending])),
-			zap.Int("inProgress", len(byState[internalpb.ImportState_InProgress])),
-			zap.Int("completed", len(byState[internalpb.ImportState_Completed])),
-			zap.Int("failed", len(byState[internalpb.ImportState_Failed])))
+			zap.Int("pending", len(byState[datapb.ImportTaskStateV2_Pending])),
+			zap.Int("inProgress", len(byState[datapb.ImportTaskStateV2_InProgress])),
+			zap.Int("completed", len(byState[datapb.ImportTaskStateV2_Completed])),
+			zap.Int("failed", len(byState[datapb.ImportTaskStateV2_Failed])))
 	}
 	tasks := manager.GetBy(WithType(PreImportTaskType))
 	logFunc(tasks, PreImportTaskType)

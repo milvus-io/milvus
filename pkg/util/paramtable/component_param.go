@@ -1909,9 +1909,6 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 type queryNodeConfig struct {
 	SoPath ParamItem `refreshable:"false"`
 
-	FlowGraphMaxQueueLength ParamItem `refreshable:"false"`
-	FlowGraphMaxParallelism ParamItem `refreshable:"false"`
-
 	// stats
 	// Deprecated: Never used
 	StatsPublishInterval ParamItem `refreshable:"true"`
@@ -1979,6 +1976,13 @@ type queryNodeConfig struct {
 	EnableWorkerSQCostMetrics ParamItem `refreshable:"true"`
 
 	ExprEvalBatchSize ParamItem `refreshable:"false"`
+
+	// pipeline
+	CleanExcludeSegInterval ParamItem `refreshable:"false"`
+	FlowGraphMaxQueueLength ParamItem `refreshable:"false"`
+	FlowGraphMaxParallelism ParamItem `refreshable:"false"`
+
+	MemoryIndexLoadPredictMemoryUsageFactor ParamItem `refreshable:"true"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -2424,8 +2428,24 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		DefaultValue: "8192",
 		Doc:          "expr eval batch size for getnext interface",
 	}
-
 	p.ExprEvalBatchSize.Init(base.mgr)
+
+	p.CleanExcludeSegInterval = ParamItem{
+		Key:          "queryCoord.cleanExcludeSegmentInterval",
+		Version:      "2.4.0",
+		DefaultValue: "60",
+		Doc:          "the time duration of clean pipeline exclude segment which used for filter invalid data, in seconds",
+		Export:       true,
+	}
+	p.CleanExcludeSegInterval.Init(base.mgr)
+
+	p.MemoryIndexLoadPredictMemoryUsageFactor = ParamItem{
+		Key:          "queryNode.memoryIndexLoadPredictMemoryUsageFactor",
+		Version:      "2.3.8",
+		DefaultValue: "2.5", // HNSW index needs more memory to load.
+		Doc:          "memory usage prediction factor for memory index loaded",
+	}
+	p.MemoryIndexLoadPredictMemoryUsageFactor.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -2498,6 +2518,14 @@ type dataCoordConfig struct {
 	// auto balance channel on datanode
 	AutoBalance                    ParamItem `refreshable:"true"`
 	CheckAutoBalanceConfigInterval ParamItem `refreshable:"false"`
+
+	// import
+	FilesPerPreImportTask    ParamItem `refreshable:"true"`
+	ImportTaskRetention      ParamItem `refreshable:"true"`
+	MaxSizeInMBPerImportTask ParamItem `refreshable:"true"`
+	ImportScheduleInterval   ParamItem `refreshable:"true"`
+	ImportCheckIntervalHigh  ParamItem `refreshable:"true"`
+	ImportCheckIntervalLow   ParamItem `refreshable:"true"`
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 }
@@ -2954,6 +2982,67 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.AutoUpgradeSegmentIndex.Init(base.mgr)
+
+	p.FilesPerPreImportTask = ParamItem{
+		Key:          "dataCoord.import.filesPerPreImportTask",
+		Version:      "2.4.0",
+		Doc:          "The maximum number of files allowed per pre-import task.",
+		DefaultValue: "2",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.FilesPerPreImportTask.Init(base.mgr)
+
+	p.ImportTaskRetention = ParamItem{
+		Key:          "dataCoord.import.taskRetention",
+		Version:      "2.4.0",
+		Doc:          "The retention period in seconds for tasks in the Completed or Failed state.",
+		DefaultValue: "10800",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.ImportTaskRetention.Init(base.mgr)
+
+	p.MaxSizeInMBPerImportTask = ParamItem{
+		Key:     "dataCoord.import.maxSizeInMBPerImportTask",
+		Version: "2.4.0",
+		Doc: "To prevent generating of small segments, we will re-group imported files. " +
+			"This parameter represents the sum of file sizes in each group (each ImportTask).",
+		DefaultValue: "6144",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.MaxSizeInMBPerImportTask.Init(base.mgr)
+
+	p.ImportScheduleInterval = ParamItem{
+		Key:          "dataCoord.import.scheduleInterval",
+		Version:      "2.4.0",
+		Doc:          "The interval for scheduling import, measured in seconds.",
+		DefaultValue: "2",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.ImportScheduleInterval.Init(base.mgr)
+
+	p.ImportCheckIntervalHigh = ParamItem{
+		Key:          "dataCoord.import.checkIntervalHigh",
+		Version:      "2.4.0",
+		Doc:          "The interval for checking import, measured in seconds, is set to a high frequency for the import checker.",
+		DefaultValue: "2",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.ImportCheckIntervalHigh.Init(base.mgr)
+
+	p.ImportCheckIntervalLow = ParamItem{
+		Key:          "dataCoord.import.checkIntervalLow",
+		Version:      "2.4.0",
+		Doc:          "The interval for checking import, measured in seconds, is set to a low frequency for the import checker.",
+		DefaultValue: "120",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.ImportCheckIntervalLow.Init(base.mgr)
 
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "dataCoord.gracefulStopTimeout",

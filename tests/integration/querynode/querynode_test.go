@@ -27,6 +27,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -182,6 +183,7 @@ func (s *QueryNodeSuite) search(collectionName string, dim int) {
 	}
 	queryResult, err := c.Proxy.Query(context.TODO(), queryReq)
 	s.NoError(err)
+	s.Equal(queryResult.Status.ErrorCode, commonpb.ErrorCode_Success)
 	s.Equal(len(queryResult.FieldsData), 1)
 	numEntities := queryResult.FieldsData[0].GetScalars().GetLongData().Data[0]
 	s.Equal(numEntities, int64(s.rowsPerCollection))

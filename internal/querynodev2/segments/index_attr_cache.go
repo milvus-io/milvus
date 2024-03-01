@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -59,7 +60,7 @@ func (c *IndexAttrCache) GetIndexResourceUsage(indexInfo *querypb.FieldIndexInfo
 	}
 
 	engineVersion := indexInfo.GetCurrentIndexVersion()
-	isLoadWithDisk, has := c.loadWithDisk.Get(typeutil.NewPair[string, int32](indexType, engineVersion))
+	isLoadWithDisk, has := c.loadWithDisk.Get(typeutil.NewPair(indexType, engineVersion))
 	if !has {
 		isLoadWithDisk, _, _ = c.sf.Do(fmt.Sprintf("%s_%d", indexType, engineVersion), func() (bool, error) {
 			var result bool
@@ -67,21 +68,21 @@ func (c *IndexAttrCache) GetIndexResourceUsage(indexInfo *querypb.FieldIndexInfo
 				cIndexType := C.CString(indexType)
 				defer C.free(unsafe.Pointer(cIndexType))
 				cEngineVersion := C.int32_t(indexInfo.GetCurrentIndexVersion())
-				isLoadWithDisk = bool(C.IsLoadWithDisk(cIndexType, cEngineVersion))
+				result = bool(C.IsLoadWithDisk(cIndexType, cEngineVersion))
 				return nil, nil
 			}).Await()
-			c.loadWithDisk.Insert(typeutil.NewPair[string, int32](indexType, engineVersion), result)
+			c.loadWithDisk.Insert(typeutil.NewPair(indexType, engineVersion), result)
 			return result, nil
 		})
 	}
 
-	factor := uint64(1)
+	factor := float64(1)
 	diskUsage := uint64(0)
 	if !isLoadWithDisk {
-		factor = 2
+		factor = paramtable.Get().QueryNodeCfg.MemoryIndexLoadPredictMemoryUsageFactor.GetAsFloat()
 	} else {
 		diskUsage = uint64(indexInfo.IndexSize)
 	}
 
-	return uint64(indexInfo.IndexSize) * factor, diskUsage, nil
+	return uint64(float64(indexInfo.IndexSize) * factor), diskUsage, nil
 }

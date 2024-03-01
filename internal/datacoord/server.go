@@ -122,6 +122,9 @@ type Server struct {
 	garbageCollector *garbageCollector
 	gcOpt            GcOption
 	handler          Handler
+	importMeta       ImportMeta
+	importScheduler  ImportScheduler
+	importChecker    ImportChecker
 
 	compactionTrigger     trigger
 	compactionHandler     compactionPlanContext
@@ -371,6 +374,13 @@ func (s *Server) initDataCoord() error {
 
 	s.initGarbageCollection(storageCli)
 	s.initIndexBuilder(storageCli)
+
+	s.importMeta, err = NewImportMeta(s.meta.catalog)
+	if err != nil {
+		return err
+	}
+	s.importScheduler = NewImportScheduler(s.meta, s.cluster, s.allocator, s.importMeta)
+	s.importChecker = NewImportChecker(s.meta, s.broker, s.cluster, s.allocator, s.segmentManager, s.importMeta, s.buildIndexCh)
 
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
 
@@ -654,6 +664,8 @@ func (s *Server) startServerLoop() {
 	s.startWatchService(s.serverLoopCtx)
 	s.startFlushLoop(s.serverLoopCtx)
 	s.startIndexService(s.serverLoopCtx)
+	go s.importScheduler.Start()
+	go s.importChecker.Start()
 	s.garbageCollector.start()
 }
 
@@ -1096,6 +1108,11 @@ func (s *Server) Stop() error {
 	logutil.Logger(s.ctx).Info("datacoord server shutdown")
 	s.garbageCollector.close()
 	logutil.Logger(s.ctx).Info("datacoord garbage collector stopped")
+
+	s.stopServerLoop()
+
+	s.importScheduler.Close()
+	s.importChecker.Close()
 
 	if Params.DataCoordCfg.EnableCompaction.GetAsBool() {
 		s.stopCompactionTrigger()

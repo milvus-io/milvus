@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/internal/util/importutil"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -5549,4 +5550,111 @@ func (node *Proxy) GetVersion(ctx context.Context, request *milvuspb.GetVersionR
 	return &milvuspb.GetVersionResponse{
 		Status: merr.Success(),
 	}, nil
+}
+
+func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) (*internalpb.ImportResponse, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &internalpb.ImportResponse{Status: merr.Status(err)}, nil
+	}
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.ProxyRole),
+	)
+	method := "ImportV2"
+	log.Info(rpcReceived(method))
+	resp := &internalpb.ImportResponse{
+		Status: merr.Success(),
+	}
+	collectionID, err := globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
+	if err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+	schema, err := globalMetaCache.GetCollectionSchema(ctx, req.GetDbName(), req.GetCollectionName())
+	if err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+	channels, err := node.chMgr.getVChannels(collectionID)
+	if err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+
+	hasPartitionKey := typeutil.HasPartitionKey(schema.CollectionSchema)
+	if req.GetPartitionName() != "" && hasPartitionKey {
+		resp.Status = merr.Status(merr.WrapErrImportFailed("not allow to set partition name for collection with partition key"))
+		return resp, nil
+	}
+
+	var partitionIDs []int64
+	if req.GetPartitionName() == "" && hasPartitionKey {
+		partitions, err := globalMetaCache.GetPartitions(ctx, req.GetDbName(), req.GetCollectionName())
+		if err != nil {
+			resp.Status = merr.Status(err)
+			return resp, nil
+		}
+		partitionIDs = lo.Values(partitions)
+	} else {
+		partitionName := req.GetPartitionName()
+		if req.GetPartitionName() == "" {
+			partitionName = Params.CommonCfg.DefaultPartitionName.GetValue()
+		}
+		partitionID, err := globalMetaCache.GetPartitionID(ctx, req.GetDbName(), req.GetCollectionName(), partitionName)
+		if err != nil {
+			resp.Status = merr.Status(err)
+			return resp, nil
+		}
+		partitionIDs = []UniqueID{partitionID}
+	}
+	req.Files = lo.Filter(req.GetFiles(), func(file *internalpb.ImportFile, _ int) bool {
+		return len(file.GetPaths()) > 0
+	})
+	if len(req.Files) == 0 {
+		resp.Status = merr.Status(merr.WrapErrParameterInvalidMsg("import request is empty"))
+		return resp, nil
+	}
+	for _, file := range req.GetFiles() {
+		_, err = importutilv2.GetFileType(file)
+		if err != nil {
+			resp.Status = merr.Status(err)
+			return resp, nil
+		}
+	}
+	importRequest := &internalpb.ImportRequestInternal{
+		CollectionID: collectionID,
+		PartitionIDs: partitionIDs,
+		ChannelNames: channels,
+		Schema:       schema.CollectionSchema,
+		Files:        req.GetFiles(),
+		Options:      req.GetOptions(),
+	}
+	return node.dataCoord.ImportV2(ctx, importRequest)
+}
+
+func (node *Proxy) GetImportProgress(ctx context.Context, req *internalpb.GetImportProgressRequest) (*internalpb.GetImportProgressResponse, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &internalpb.GetImportProgressResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+	return node.dataCoord.GetImportProgress(ctx, req)
+}
+
+func (node *Proxy) ListImports(ctx context.Context, req *internalpb.ListImportsRequest) (*internalpb.ListImportsResponse, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &internalpb.ListImportsResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+	resp := &internalpb.ListImportsResponse{
+		Status: merr.Success(),
+	}
+	collectionID, err := globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
+	if err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+	return node.dataCoord.ListImports(ctx, &internalpb.ListImportsRequestInternal{
+		CollectionID: collectionID,
+	})
 }

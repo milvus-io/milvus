@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
+//go:generate mockery --name=Broker --structname=MockBroker --output=./  --filename=mock_coordinator_broker.go --with-expecter --inpackage
 type Broker interface {
 	DescribeCollectionInternal(ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error)
 	ShowPartitionsInternal(ctx context.Context, collectionID int64) ([]int64, error)

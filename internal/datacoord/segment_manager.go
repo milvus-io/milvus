@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -28,6 +29,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/retry"
@@ -66,6 +68,8 @@ func putAllocation(a *Allocation) {
 }
 
 // Manager manages segment related operations.
+//
+//go:generate mockery --name=Manager --structname=MockManager --output=./  --filename=mock_segment_manager.go --with-expecter --inpackage
 type Manager interface {
 	// CreateSegment create new segment when segment not exist
 
@@ -74,6 +78,7 @@ type Manager interface {
 	// allocSegmentForImport allocates one segment allocation for bulk insert.
 	// TODO: Remove this method and AllocSegment() above instead.
 	allocSegmentForImport(ctx context.Context, collectionID, partitionID UniqueID, channelName string, requestRows int64, taskID int64) (*Allocation, error)
+	AllocImportSegment(ctx context.Context, taskID int64, collectionID UniqueID, partitionID UniqueID, channelName string) (*SegmentInfo, error)
 	// DropSegment drops the segment from manager.
 	DropSegment(ctx context.Context, segmentID UniqueID)
 	// FlushImportSegments set importing segment state to Flushed.
@@ -379,6 +384,56 @@ func (s *SegmentManager) genExpireTs(ctx context.Context, isImported bool) (Time
 	}
 	expireTs := tsoutil.ComposeTS(expirePhysicalTs.UnixNano()/int64(time.Millisecond), int64(logicalTs))
 	return expireTs, nil
+}
+
+func (s *SegmentManager) AllocImportSegment(ctx context.Context, taskID int64, collectionID UniqueID,
+	partitionID UniqueID, channelName string,
+) (*SegmentInfo, error) {
+	log := log.Ctx(ctx)
+	ctx, sp := otel.Tracer(typeutil.DataCoordRole).Start(ctx, "open-Segment")
+	defer sp.End()
+	id, err := s.allocator.allocID(ctx)
+	if err != nil {
+		log.Error("failed to open new segment while allocID", zap.Error(err))
+		return nil, err
+	}
+	ts, err := s.allocator.allocTimestamp(ctx)
+	if err != nil {
+		return nil, err
+	}
+	position := &msgpb.MsgPosition{
+		ChannelName: channelName,
+		MsgID:       nil,
+		Timestamp:   ts,
+	}
+
+	segmentInfo := &datapb.SegmentInfo{
+		ID:             id,
+		CollectionID:   collectionID,
+		PartitionID:    partitionID,
+		InsertChannel:  channelName,
+		NumOfRows:      0,
+		State:          commonpb.SegmentState_Flushed,
+		MaxRowNum:      0,
+		Level:          datapb.SegmentLevel_L1,
+		LastExpireTime: math.MaxUint64,
+		StartPosition:  position,
+		DmlPosition:    position,
+	}
+	segmentInfo.IsImporting = true
+	segment := NewSegmentInfo(segmentInfo)
+	if err := s.meta.AddSegment(ctx, segment); err != nil {
+		log.Error("failed to add import segment", zap.Error(err))
+		return nil, err
+	}
+	s.segments = append(s.segments, id)
+	log.Info("add import segment done",
+		zap.Int64("taskID", taskID),
+		zap.Int64("CollectionID", segmentInfo.CollectionID),
+		zap.Int64("SegmentID", segmentInfo.ID),
+		zap.String("Channel", segmentInfo.InsertChannel))
+
+	return segment, nil
 }
 
 func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID UniqueID, partitionID UniqueID,

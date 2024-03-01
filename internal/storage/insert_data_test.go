@@ -151,6 +151,25 @@ func (s *InsertDataSuite) TestMemorySize() {
 	s.Equal(s.iDataTwoRows.Data[BFloat16VectorField].GetMemorySize(), 20)
 }
 
+func (s *InsertDataSuite) TestGetRowSize() {
+	s.Equal(s.iDataOneRow.Data[RowIDField].GetRowSize(0), 8)
+	s.Equal(s.iDataOneRow.Data[TimestampField].GetRowSize(0), 8)
+	s.Equal(s.iDataOneRow.Data[BoolField].GetRowSize(0), 1)
+	s.Equal(s.iDataOneRow.Data[Int8Field].GetRowSize(0), 1)
+	s.Equal(s.iDataOneRow.Data[Int16Field].GetRowSize(0), 2)
+	s.Equal(s.iDataOneRow.Data[Int32Field].GetRowSize(0), 4)
+	s.Equal(s.iDataOneRow.Data[Int64Field].GetRowSize(0), 8)
+	s.Equal(s.iDataOneRow.Data[FloatField].GetRowSize(0), 4)
+	s.Equal(s.iDataOneRow.Data[DoubleField].GetRowSize(0), 8)
+	s.Equal(s.iDataOneRow.Data[StringField].GetRowSize(0), 19)
+	s.Equal(s.iDataOneRow.Data[JSONField].GetRowSize(0), len([]byte(`{"batch":1}`))+16)
+	s.Equal(s.iDataOneRow.Data[ArrayField].GetRowSize(0), 3*4)
+	s.Equal(s.iDataOneRow.Data[BinaryVectorField].GetRowSize(0), 1)
+	s.Equal(s.iDataOneRow.Data[FloatVectorField].GetRowSize(0), 4)
+	s.Equal(s.iDataOneRow.Data[Float16VectorField].GetRowSize(0), 2)
+	s.Equal(s.iDataOneRow.Data[BFloat16VectorField].GetRowSize(0), 2)
+}
+
 func (s *InsertDataSuite) TestGetDataType() {
 	for _, field := range s.schema.GetFields() {
 		fieldData, ok := s.iDataOneRow.Data[field.GetFieldID()]
@@ -330,4 +349,5 @@ func (s *ArrayFieldDataSuite) TestArrayFieldData() {
 	s.Equal(1, insertData.GetRowNum())
 	s.Equal(114, insertData.GetMemorySize())
 	s.False(insertData.IsEmpty())
+	s.Equal(114, insertData.GetRowSize(0))
 }

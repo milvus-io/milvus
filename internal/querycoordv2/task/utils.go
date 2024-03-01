@@ -96,6 +96,25 @@ func GetTaskType(task Task) Type {
 	return 0
 }
 
+func mergeCollectonProps(schemaProps []*commonpb.KeyValuePair, collectionProps []*commonpb.KeyValuePair) []*commonpb.KeyValuePair {
+	// Merge the collectionProps and schemaProps maps, giving priority to the values in schemaProps if there are duplicate keys.
+	props := make(map[string]string)
+	for _, p := range collectionProps {
+		props[p.GetKey()] = p.GetValue()
+	}
+	for _, p := range schemaProps {
+		props[p.GetKey()] = p.GetValue()
+	}
+	var ret []*commonpb.KeyValuePair
+	for k, v := range props {
+		ret = append(ret, &commonpb.KeyValuePair{
+			Key:   k,
+			Value: v,
+		})
+	}
+	return ret
+}
+
 func packLoadSegmentRequest(
 	task *SegmentTask,
 	action Action,
@@ -123,6 +142,8 @@ func packLoadSegmentRequest(
 			})
 		}
 	}
+
+	schema.Properties = mergeCollectonProps(schema.Properties, collectionProperties)
 
 	return &querypb.LoadSegmentsRequest{
 		Base: commonpbutil.NewMsgBase(
@@ -195,9 +216,13 @@ func fillSubChannelRequest(
 	ctx context.Context,
 	req *querypb.WatchDmChannelsRequest,
 	broker meta.Broker,
+	includeFlushed bool,
 ) error {
 	segmentIDs := typeutil.NewUniqueSet()
 	for _, vchannel := range req.GetInfos() {
+		if includeFlushed {
+			segmentIDs.Insert(vchannel.GetFlushedSegmentIds()...)
+		}
 		segmentIDs.Insert(vchannel.GetUnflushedSegmentIds()...)
 		segmentIDs.Insert(vchannel.GetLevelZeroSegmentIds()...)
 	}

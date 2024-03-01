@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/testutils"
 )
@@ -320,6 +321,93 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 	suite.Equal(2, len(mutation.stateChange[datapb.SegmentLevel_L1.String()]))
 	suite.EqualValues(-2, mutation.rowCountChange)
 	suite.EqualValues(2, mutation.rowCountAccChange)
+}
+
+func (suite *MetaBasicSuite) TestSetSegment() {
+	meta := suite.meta
+	catalog := mocks2.NewDataCoordCatalog(suite.T())
+	meta.catalog = catalog
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	suite.Run("normal", func() {
+		segmentID := int64(1000)
+		catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil).Once()
+		segment := NewSegmentInfo(&datapb.SegmentInfo{
+			ID:            segmentID,
+			MaxRowNum:     30000,
+			CollectionID:  suite.collID,
+			InsertChannel: suite.channelName,
+			State:         commonpb.SegmentState_Flushed,
+		})
+		err := meta.AddSegment(ctx, segment)
+		suite.Require().NoError(err)
+
+		noOp := func(segment *SegmentInfo) bool {
+			return true
+		}
+
+		catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil).Once()
+
+		err = meta.UpdateSegment(segmentID, noOp)
+		suite.NoError(err)
+	})
+
+	suite.Run("not_updated", func() {
+		segmentID := int64(1001)
+		catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil).Once()
+		segment := NewSegmentInfo(&datapb.SegmentInfo{
+			ID:            segmentID,
+			MaxRowNum:     30000,
+			CollectionID:  suite.collID,
+			InsertChannel: suite.channelName,
+			State:         commonpb.SegmentState_Flushed,
+		})
+		err := meta.AddSegment(ctx, segment)
+		suite.Require().NoError(err)
+
+		noOp := func(segment *SegmentInfo) bool {
+			return false
+		}
+
+		err = meta.UpdateSegment(segmentID, noOp)
+		suite.NoError(err)
+	})
+
+	suite.Run("catalog_error", func() {
+		segmentID := int64(1002)
+		catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil).Once()
+		segment := NewSegmentInfo(&datapb.SegmentInfo{
+			ID:            segmentID,
+			MaxRowNum:     30000,
+			CollectionID:  suite.collID,
+			InsertChannel: suite.channelName,
+			State:         commonpb.SegmentState_Flushed,
+		})
+		err := meta.AddSegment(ctx, segment)
+		suite.Require().NoError(err)
+
+		noOp := func(segment *SegmentInfo) bool {
+			return true
+		}
+
+		catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(errors.New("mocked")).Once()
+
+		err = meta.UpdateSegment(segmentID, noOp)
+		suite.Error(err)
+	})
+
+	suite.Run("segment_not_found", func() {
+		segmentID := int64(1003)
+
+		noOp := func(segment *SegmentInfo) bool {
+			return true
+		}
+
+		err := meta.UpdateSegment(segmentID, noOp)
+		suite.Error(err)
+		suite.ErrorIs(err, merr.ErrSegmentNotFound)
+	})
 }
 
 func TestMeta(t *testing.T) {
@@ -703,6 +791,31 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 
 		err = meta.UpdateSegmentsInfo(
 			UpdateCheckPointOperator(1, false, []*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 10}}),
+		)
+		assert.NoError(t, err)
+
+		err = meta.UpdateSegmentsInfo(
+			ReplaceBinlogsOperator(1, nil, nil, nil),
+		)
+		assert.NoError(t, err)
+
+		err = meta.UpdateSegmentsInfo(
+			UpdateDmlPosition(1, nil),
+		)
+		assert.NoError(t, err)
+
+		err = meta.UpdateSegmentsInfo(
+			UpdateDmlPosition(1, &msgpb.MsgPosition{MsgID: []byte{1}}),
+		)
+		assert.NoError(t, err)
+
+		err = meta.UpdateSegmentsInfo(
+			UpdateImportedRows(1, 0),
+		)
+		assert.NoError(t, err)
+
+		err = meta.UpdateSegmentsInfo(
+			UpdateIsImporting(1, true),
 		)
 		assert.NoError(t, err)
 	})

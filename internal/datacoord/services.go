@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"math"
 	"math/rand"
 	"strconv"
 	"time"
@@ -35,11 +36,13 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -304,6 +307,8 @@ func (s *Server) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsert
 		}, nil
 	}
 
+	segment = segment.Clone()
+
 	err := binlog.DecompressBinLog(storage.InsertBinlog, segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID(), segment.GetBinlogs())
 	if err != nil {
 		return &datapb.GetInsertBinlogPathsResponse{
@@ -418,6 +423,8 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 			child := s.meta.GetCompactionTo(id)
 			clonedInfo := info.Clone()
 			if child != nil {
+				// child segment should decompress binlog path
+				binlog.DecompressBinLog(storage.DeleteBinlog, child.GetCollectionID(), child.GetPartitionID(), child.GetID(), child.GetDeltalogs())
 				clonedInfo.Deltalogs = append(clonedInfo.Deltalogs, child.GetDeltalogs()...)
 				clonedInfo.DmlPosition = child.GetDmlPosition()
 			}
@@ -1748,4 +1755,136 @@ func (s *Server) GcControl(ctx context.Context, request *datapb.GcControlRequest
 	}
 
 	return status, nil
+}
+
+func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInternal) (*internalpb.ImportResponse, error) {
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return &internalpb.ImportResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	resp := &internalpb.ImportResponse{
+		Status: merr.Success(),
+	}
+
+	log := log.With(zap.Int64("collection", in.GetCollectionID()),
+		zap.Int64s("partitions", in.GetPartitionIDs()),
+		zap.Strings("channels", in.GetChannelNames()),
+		zap.Any("files", in.GetFiles()))
+	log.Info("receive import request")
+
+	var timeoutTs uint64 = math.MaxUint64
+	timeoutStr, err := funcutil.GetAttrByKeyFromRepeatedKV("timeout", in.GetOptions())
+	if err == nil {
+		dur, err := time.ParseDuration(timeoutStr)
+		if err != nil {
+			resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprint("parse import timeout failed, err=%w", err)))
+			return resp, nil
+		}
+		ts, err := s.allocator.allocTimestamp(ctx)
+		if err != nil {
+			resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprint("alloc ts failed, err=%w", err)))
+			return resp, nil
+		}
+		timeoutTs = tsoutil.AddPhysicalDurationOnTs(ts, dur)
+	}
+
+	files := in.GetFiles()
+	isBackup := importutilv2.IsBackup(in.GetOptions())
+	if isBackup {
+		files = make([]*internalpb.ImportFile, 0)
+		for _, importFile := range in.GetFiles() {
+			segmentPrefixes, err := ListBinlogsAndGroupBySegment(ctx, s.meta.chunkManager, importFile)
+			if err != nil {
+				resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprint("list binlogs and group by segment failed, err=%w", err)))
+				return resp, nil
+			}
+			files = append(files, segmentPrefixes...)
+		}
+	}
+
+	idStart, _, err := s.allocator.allocN(int64(len(files)) + 1)
+	if err != nil {
+		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprint("alloc id failed, err=%w", err)))
+		return resp, nil
+	}
+	files = lo.Map(files, func(importFile *internalpb.ImportFile, i int) *internalpb.ImportFile {
+		importFile.Id = idStart + int64(i) + 1
+		return importFile
+	})
+
+	job := &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:        idStart,
+			CollectionID: in.GetCollectionID(),
+			PartitionIDs: in.GetPartitionIDs(),
+			Vchannels:    in.GetChannelNames(),
+			Schema:       in.GetSchema(),
+			TimeoutTs:    timeoutTs,
+			CleanupTs:    math.MaxUint64,
+			State:        internalpb.ImportJobState_Pending,
+			Files:        files,
+			Options:      in.GetOptions(),
+		},
+	}
+	err = s.importMeta.AddJob(job)
+	if err != nil {
+		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprint("add import job failed, err=%w", err)))
+		return resp, nil
+	}
+
+	resp.JobID = fmt.Sprint(job.GetJobID())
+	log.Info("add import job done", zap.Int64("jobID", job.GetJobID()))
+	return resp, nil
+}
+
+func (s *Server) GetImportProgress(ctx context.Context, in *internalpb.GetImportProgressRequest) (*internalpb.GetImportProgressResponse, error) {
+	log := log.With(zap.String("jobID", in.GetJobID()))
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return &internalpb.GetImportProgressResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	resp := &internalpb.GetImportProgressResponse{
+		Status: merr.Success(),
+	}
+	jobID, err := strconv.ParseInt(in.GetJobID(), 10, 64)
+	if err != nil {
+		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprint("parse job id failed, err=%w", err)))
+		return resp, nil
+	}
+	progress, state, reason := GetImportProgress(jobID, s.importMeta, s.meta)
+	resp.State = state
+	resp.Reason = reason
+	resp.Progress = progress
+	log.Info("GetImportProgress done", zap.Any("resp", resp))
+	return resp, nil
+}
+
+func (s *Server) ListImports(ctx context.Context, req *internalpb.ListImportsRequestInternal) (*internalpb.ListImportsResponse, error) {
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return &internalpb.ListImportsResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	resp := &internalpb.ListImportsResponse{
+		Status:     merr.Success(),
+		JobIDs:     make([]string, 0),
+		States:     make([]internalpb.ImportJobState, 0),
+		Reasons:    make([]string, 0),
+		Progresses: make([]int64, 0),
+	}
+
+	jobs := s.importMeta.GetJobBy(WithCollectionID(req.GetCollectionID()))
+	for _, job := range jobs {
+		progress, state, reason := GetImportProgress(job.GetJobID(), s.importMeta, s.meta)
+		resp.JobIDs = append(resp.JobIDs, fmt.Sprintf("%d", job.GetJobID()))
+		resp.States = append(resp.States, state)
+		resp.Reasons = append(resp.Reasons, reason)
+		resp.Progresses = append(resp.Progresses, progress)
+	}
+	return resp, nil
 }

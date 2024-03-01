@@ -41,6 +41,11 @@ type Cluster interface {
 	FlushChannels(ctx context.Context, nodeID int64, flushTs Timestamp, channels []string) error
 	Import(ctx context.Context, nodeID int64, it *datapb.ImportTaskRequest)
 	AddImportSegment(ctx context.Context, req *datapb.AddImportSegmentRequest) (*datapb.AddImportSegmentResponse, error)
+	PreImport(nodeID int64, in *datapb.PreImportRequest) error
+	ImportV2(nodeID int64, in *datapb.ImportRequest) error
+	QueryPreImport(nodeID int64, in *datapb.QueryPreImportRequest) (*datapb.QueryPreImportResponse, error)
+	QueryImport(nodeID int64, in *datapb.QueryImportRequest) (*datapb.QueryImportResponse, error)
+	DropImport(nodeID int64, in *datapb.DropImportRequest) error
 	GetSessions() []*Session
 	Close()
 }
@@ -159,6 +164,26 @@ func (c *ClusterImpl) AddImportSegment(ctx context.Context, req *datapb.AddImpor
 		return nil, err
 	}
 	return c.sessionManager.AddImportSegment(ctx, nodeID, req)
+}
+
+func (c *ClusterImpl) PreImport(nodeID int64, in *datapb.PreImportRequest) error {
+	return c.sessionManager.PreImport(nodeID, in)
+}
+
+func (c *ClusterImpl) ImportV2(nodeID int64, in *datapb.ImportRequest) error {
+	return c.sessionManager.ImportV2(nodeID, in)
+}
+
+func (c *ClusterImpl) QueryPreImport(nodeID int64, in *datapb.QueryPreImportRequest) (*datapb.QueryPreImportResponse, error) {
+	return c.sessionManager.QueryPreImport(nodeID, in)
+}
+
+func (c *ClusterImpl) QueryImport(nodeID int64, in *datapb.QueryImportRequest) (*datapb.QueryImportResponse, error) {
+	return c.sessionManager.QueryImport(nodeID, in)
+}
+
+func (c *ClusterImpl) DropImport(nodeID int64, in *datapb.DropImportRequest) error {
+	return c.sessionManager.DropImport(nodeID, in)
 }
 
 // GetSessions returns all sessions

@@ -39,7 +39,7 @@ import (
 )
 
 type AccessInfo interface {
-	Get(keys ...string) []string
+	Get(keys ...string) []any
 }
 
 type GrpcAccessInfo struct {
@@ -89,8 +89,8 @@ func (i *GrpcAccessInfo) SetResult(resp interface{}, err error) {
 	}
 }
 
-func (i *GrpcAccessInfo) Get(keys ...string) []string {
-	result := []string{}
+func (i *GrpcAccessInfo) Get(keys ...string) []any {
+	result := []any{}
 	for _, key := range keys {
 		if getFunc, ok := metricFuncMap[key]; ok {
 			result = append(result, getFunc(i))

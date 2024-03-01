@@ -18,10 +18,13 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	mocks2 "github.com/milvus-io/milvus/internal/metastore/mocks"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	mocks2 "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -438,7 +441,7 @@ func (s *ServerSuite) TestFlushForImport() {
 	allocation, err = s.testServer.segmentManager.allocSegmentForImport(
 		context.TODO(), 0, 1, "ch-1", 1, 1)
 	s.NoError(err)
-	catalog := mocks2.NewDataCoordCatalog(s.T())
+	catalog := mocks.NewDataCoordCatalog(s.T())
 	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(errors.New("mock err"))
 	s.testServer.meta.catalog = catalog
 	req.SegmentIDs = []UniqueID{allocation.SegmentID}
@@ -601,6 +604,32 @@ func (s *ServerSuite) TestGetSegmentInfoChannel() {
 	s.NoError(err)
 	s.EqualValues(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	s.EqualValues(Params.CommonCfg.DataCoordSegmentInfo.GetValue(), resp.Value)
+}
+
+func (s *ServerSuite) TestGetSegmentInfo() {
+	testSegmentID := int64(1)
+	s.testServer.meta.AddSegment(context.TODO(), &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:        1,
+			Deltalogs: []*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 100}}}},
+		},
+	})
+
+	s.testServer.meta.AddSegment(context.TODO(), &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             2,
+			Deltalogs:      []*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 101}}}},
+			CompactionFrom: []int64{1},
+		},
+	})
+
+	resp, err := s.testServer.GetSegmentInfo(context.TODO(), &datapb.GetSegmentInfoRequest{
+		SegmentIDs:       []int64{testSegmentID},
+		IncludeUnHealthy: true,
+	})
+	s.NoError(err)
+	log.Info("test--", zap.Any("resp", resp))
+	s.EqualValues(2, len(resp.Infos[0].Deltalogs))
 }
 
 func (s *ServerSuite) TestAssignSegmentID() {
@@ -785,7 +814,7 @@ func TestServer_GcConfirm(t *testing.T) {
 		s.stateCode.Store(commonpb.StateCode_Healthy)
 
 		m := &meta{}
-		catalog := mocks2.NewDataCoordCatalog(t)
+		catalog := mocks.NewDataCoordCatalog(t)
 		m.catalog = catalog
 
 		catalog.On("GcConfirm",
@@ -1310,6 +1339,193 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		assert.NoError(t, err)
 		err = merr.Error(resp.GetStatus())
 		assert.ErrorIs(t, err, merr.ErrServiceNotReady)
+	})
+}
+
+func TestImportV2(t *testing.T) {
+	ctx := context.Background()
+	mockErr := errors.New("mock err")
+
+	t.Run("ImportV2", func(t *testing.T) {
+		// server not healthy
+		s := &Server{}
+		s.stateCode.Store(commonpb.StateCode_Initializing)
+		resp, err := s.ImportV2(ctx, nil)
+		assert.NoError(t, err)
+		assert.NotEqual(t, int32(0), resp.GetStatus().GetCode())
+		s.stateCode.Store(commonpb.StateCode_Healthy)
+
+		// parse timeout failed
+		resp, err = s.ImportV2(ctx, &internalpb.ImportRequestInternal{
+			Options: []*commonpb.KeyValuePair{
+				{
+					Key:   "timeout",
+					Value: "@$#$%#%$",
+				},
+			},
+		})
+		assert.NoError(t, err)
+		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
+
+		// list binlog failed
+		cm := mocks2.NewChunkManager(t)
+		cm.EXPECT().ListWithPrefix(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil, mockErr)
+		s.meta = &meta{chunkManager: cm}
+		resp, err = s.ImportV2(ctx, &internalpb.ImportRequestInternal{
+			Files: []*internalpb.ImportFile{
+				{
+					Id:    1,
+					Paths: []string{"mock_insert_prefix"},
+				},
+			},
+			Options: []*commonpb.KeyValuePair{
+				{
+					Key:   "backup",
+					Value: "true",
+				},
+			},
+		})
+		assert.NoError(t, err)
+		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
+
+		// alloc failed
+		alloc := NewNMockAllocator(t)
+		alloc.EXPECT().allocN(mock.Anything).Return(0, 0, mockErr)
+		s.allocator = alloc
+		resp, err = s.ImportV2(ctx, &internalpb.ImportRequestInternal{})
+		assert.NoError(t, err)
+		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
+		alloc = NewNMockAllocator(t)
+		alloc.EXPECT().allocN(mock.Anything).Return(0, 0, nil)
+		s.allocator = alloc
+
+		// add job failed
+		catalog := mocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().ListImportJobs().Return(nil, nil)
+		catalog.EXPECT().ListPreImportTasks().Return(nil, nil)
+		catalog.EXPECT().ListImportTasks().Return(nil, nil)
+		catalog.EXPECT().SaveImportJob(mock.Anything).Return(mockErr)
+		s.importMeta, err = NewImportMeta(catalog)
+		assert.NoError(t, err)
+		resp, err = s.ImportV2(ctx, &internalpb.ImportRequestInternal{
+			Files: []*internalpb.ImportFile{
+				{
+					Id:    1,
+					Paths: []string{"a.json"},
+				},
+			},
+		})
+		assert.NoError(t, err)
+		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
+		jobs := s.importMeta.GetJobBy()
+		assert.Equal(t, 0, len(jobs))
+		catalog.ExpectedCalls = lo.Filter(catalog.ExpectedCalls, func(call *mock.Call, _ int) bool {
+			return call.Method != "SaveImportJob"
+		})
+		catalog.EXPECT().SaveImportJob(mock.Anything).Return(nil)
+
+		// normal case
+		resp, err = s.ImportV2(ctx, &internalpb.ImportRequestInternal{
+			Files: []*internalpb.ImportFile{
+				{
+					Id:    1,
+					Paths: []string{"a.json"},
+				},
+			},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, int32(0), resp.GetStatus().GetCode())
+		jobs = s.importMeta.GetJobBy()
+		assert.Equal(t, 1, len(jobs))
+	})
+
+	t.Run("GetImportProgress", func(t *testing.T) {
+		// server not healthy
+		s := &Server{}
+		s.stateCode.Store(commonpb.StateCode_Initializing)
+		resp, err := s.GetImportProgress(ctx, nil)
+		assert.NoError(t, err)
+		assert.NotEqual(t, int32(0), resp.GetStatus().GetCode())
+		s.stateCode.Store(commonpb.StateCode_Healthy)
+
+		// illegal jobID
+		resp, err = s.GetImportProgress(ctx, &internalpb.GetImportProgressRequest{
+			JobID: "@%$%$#%",
+		})
+		assert.NoError(t, err)
+		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
+
+		// normal case
+		catalog := mocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().ListImportJobs().Return(nil, nil)
+		catalog.EXPECT().ListPreImportTasks().Return(nil, nil)
+		catalog.EXPECT().ListImportTasks().Return(nil, nil)
+		catalog.EXPECT().SaveImportJob(mock.Anything).Return(nil)
+		s.importMeta, err = NewImportMeta(catalog)
+		assert.NoError(t, err)
+		var job ImportJob = &importJob{
+			ImportJob: &datapb.ImportJob{
+				JobID:  0,
+				Schema: &schemapb.CollectionSchema{},
+				State:  internalpb.ImportJobState_Failed,
+			},
+		}
+		err = s.importMeta.AddJob(job)
+		assert.NoError(t, err)
+		resp, err = s.GetImportProgress(ctx, &internalpb.GetImportProgressRequest{
+			JobID: "0",
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, int32(0), resp.GetStatus().GetCode())
+		assert.Equal(t, int64(0), resp.GetProgress())
+		assert.Equal(t, internalpb.ImportJobState_Failed, resp.GetState())
+	})
+
+	t.Run("ListImports", func(t *testing.T) {
+		// server not healthy
+		s := &Server{}
+		s.stateCode.Store(commonpb.StateCode_Initializing)
+		resp, err := s.ListImports(ctx, nil)
+		assert.NoError(t, err)
+		assert.NotEqual(t, int32(0), resp.GetStatus().GetCode())
+		s.stateCode.Store(commonpb.StateCode_Healthy)
+
+		// normal case
+		catalog := mocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().ListImportJobs().Return(nil, nil)
+		catalog.EXPECT().ListPreImportTasks().Return(nil, nil)
+		catalog.EXPECT().ListImportTasks().Return(nil, nil)
+		catalog.EXPECT().SaveImportJob(mock.Anything).Return(nil)
+		catalog.EXPECT().SavePreImportTask(mock.Anything).Return(nil)
+		s.importMeta, err = NewImportMeta(catalog)
+		assert.NoError(t, err)
+		var job ImportJob = &importJob{
+			ImportJob: &datapb.ImportJob{
+				JobID:        0,
+				CollectionID: 1,
+				Schema:       &schemapb.CollectionSchema{},
+			},
+		}
+		err = s.importMeta.AddJob(job)
+		assert.NoError(t, err)
+		var task ImportTask = &preImportTask{
+			PreImportTask: &datapb.PreImportTask{
+				JobID:  0,
+				TaskID: 1,
+				State:  datapb.ImportTaskStateV2_Failed,
+			},
+		}
+		err = s.importMeta.AddTask(task)
+		assert.NoError(t, err)
+		resp, err = s.ListImports(ctx, &internalpb.ListImportsRequestInternal{
+			CollectionID: 1,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, int32(0), resp.GetStatus().GetCode())
+		assert.Equal(t, 1, len(resp.GetJobIDs()))
+		assert.Equal(t, 1, len(resp.GetStates()))
+		assert.Equal(t, 1, len(resp.GetReasons()))
+		assert.Equal(t, 1, len(resp.GetProgresses()))
 	})
 }
 

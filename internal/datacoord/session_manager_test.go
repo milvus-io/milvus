@@ -118,3 +118,61 @@ func (s *SessionManagerSuite) TestCheckCHannelOperationProgress() {
 		s.EqualValues(100, resp.Progress)
 	})
 }
+
+func (s *SessionManagerSuite) TestImportV2() {
+	mockErr := errors.New("mock error")
+
+	s.Run("PreImport", func() {
+		err := s.m.PreImport(0, &datapb.PreImportRequest{})
+		s.Error(err)
+
+		s.SetupTest()
+		s.dn.EXPECT().PreImport(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+		err = s.m.PreImport(1000, &datapb.PreImportRequest{})
+		s.NoError(err)
+	})
+
+	s.Run("ImportV2", func() {
+		err := s.m.ImportV2(0, &datapb.ImportRequest{})
+		s.Error(err)
+
+		s.SetupTest()
+		s.dn.EXPECT().ImportV2(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+		err = s.m.ImportV2(1000, &datapb.ImportRequest{})
+		s.NoError(err)
+	})
+
+	s.Run("QueryPreImport", func() {
+		_, err := s.m.QueryPreImport(0, &datapb.QueryPreImportRequest{})
+		s.Error(err)
+
+		s.SetupTest()
+		s.dn.EXPECT().QueryPreImport(mock.Anything, mock.Anything).Return(&datapb.QueryPreImportResponse{
+			Status: merr.Status(mockErr),
+		}, nil)
+		_, err = s.m.QueryPreImport(1000, &datapb.QueryPreImportRequest{})
+		s.Error(err)
+	})
+
+	s.Run("QueryImport", func() {
+		_, err := s.m.QueryImport(0, &datapb.QueryImportRequest{})
+		s.Error(err)
+
+		s.SetupTest()
+		s.dn.EXPECT().QueryImport(mock.Anything, mock.Anything).Return(&datapb.QueryImportResponse{
+			Status: merr.Status(mockErr),
+		}, nil)
+		_, err = s.m.QueryImport(1000, &datapb.QueryImportRequest{})
+		s.Error(err)
+	})
+
+	s.Run("DropImport", func() {
+		err := s.m.DropImport(0, &datapb.DropImportRequest{})
+		s.Error(err)
+
+		s.SetupTest()
+		s.dn.EXPECT().DropImport(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+		err = s.m.DropImport(1000, &datapb.DropImportRequest{})
+		s.NoError(err)
+	})
+}
