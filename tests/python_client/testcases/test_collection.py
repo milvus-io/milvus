@@ -1400,7 +1400,8 @@ class TestCollectionDataframe(TestcaseBase):
         # one field different type df
         mix_data = [(1, 2., [0.1, 0.2]), (2, 3., 4)]
         df = pd.DataFrame(data=mix_data, columns=list("ABC"))
-        error = {ct.err_code: 0, ct.err_msg: "The data in the same column must be of the same type"}
+        error = {ct.err_code: 1,
+                 ct.err_msg: "The Input data type is inconsistent with defined schema, please check it."}
         self.collection_wrap.construct_from_dataframe(c_name, df, primary_field='A', check_task=CheckTasks.err_res,
                                                       check_items=error)
 
@@ -3556,13 +3557,13 @@ class TestLoadPartition(TestcaseBase):
                 4. load collection
         expected: No exception
         """
-        collection_w = self.init_collection_general(prefix)[0]
+        collection_w = self.init_collection_general(prefix, is_index=False)[0]
+        collection_w.create_index(default_search_field)
         partition_w1 = self.init_partition_wrap(collection_w, partition1)
         partition_w2 = self.init_partition_wrap(collection_w, partition2)
         partition_w1.load()
         partition_w1.load()
-        error = {ct.err_code: 65538,
-                 ct.err_msg: 'partition not loaded'}
+        error = {ct.err_code: 65538, ct.err_msg: 'partition not loaded'}
         collection_w.query(default_term_expr, partition_names=[partition2],
                            check_task=CheckTasks.err_res, check_items=error)
         collection_w.load()
@@ -3577,7 +3578,8 @@ class TestLoadPartition(TestcaseBase):
                 4. load collection
         expected: No exception
         """
-        collection_w = self.init_collection_general(prefix)[0]
+        collection_w = self.init_collection_general(prefix, is_index=False)[0]
+        collection_w.create_index(default_search_field)
         partition_w1 = self.init_partition_wrap(collection_w, partition1)
         partition_w2 = self.init_partition_wrap(collection_w, partition2)
         partition_w1.load()
@@ -3594,7 +3596,8 @@ class TestLoadPartition(TestcaseBase):
                 3. query on the partitions
         expected: No exception
         """
-        collection_w = self.init_collection_general(prefix)[0]
+        collection_w = self.init_collection_general(prefix, is_index=False)[0]
+        collection_w.create_index(default_search_field)
         partition_w1 = self.init_partition_wrap(collection_w, partition1)
         partition_w2 = self.init_partition_wrap(collection_w, partition2)
         partition_w1.load()
@@ -3612,7 +3615,8 @@ class TestLoadPartition(TestcaseBase):
                 5. query on the collection
         expected: no exception
         """
-        collection_w = self.init_collection_general(prefix)[0]
+        collection_w = self.init_collection_general(prefix, is_index=False)[0]
+        collection_w.create_index(default_search_field)
         partition_w1 = self.init_partition_wrap(collection_w, partition1)
         partition_w2 = self.init_partition_wrap(collection_w, partition2)
         partition_w1.load()
@@ -3633,7 +3637,8 @@ class TestLoadPartition(TestcaseBase):
                 3. load collection
         expected: no exception
         """
-        collection_w = self.init_collection_general(prefix)[0]
+        collection_w = self.init_collection_general(prefix, is_index=False)[0]
+        collection_w.create_index(default_search_field)
         partition_w1 = self.init_partition_wrap(collection_w, partition1)
         partition_w2 = self.init_partition_wrap(collection_w, partition2)
         partition_w1.load()
@@ -3651,7 +3656,8 @@ class TestLoadPartition(TestcaseBase):
                 5. query on the collection
         expected: no exception
         """
-        collection_w = self.init_collection_general(prefix)[0]
+        collection_w = self.init_collection_general(prefix, is_index=False)[0]
+        collection_w.create_index(default_search_field)
         partition_w1 = self.init_partition_wrap(collection_w, partition1)
         partition_w2 = self.init_partition_wrap(collection_w, partition2)
         partition_w1.load()
@@ -3674,7 +3680,8 @@ class TestLoadPartition(TestcaseBase):
                 4. search on the collection
         expected: no exception
         """
-        collection_w = self.init_collection_general(prefix)[0]
+        collection_w = self.init_collection_general(prefix, is_index=False)[0]
+        collection_w.create_index(default_search_field)
         partition_w1 = self.init_partition_wrap(collection_w, partition1)
         partition_w2 = self.init_partition_wrap(collection_w, partition2)
         partition_w1.load()
@@ -3693,7 +3700,8 @@ class TestLoadPartition(TestcaseBase):
                 4. query on the partitions
         expected: no exception
         """
-        collection_w = self.init_collection_general(prefix)[0]
+        collection_w = self.init_collection_general(prefix, is_index=False)[0]
+        collection_w.create_index(default_search_field)
         partition_w1 = self.init_partition_wrap(collection_w, partition1)
         partition_w2 = self.init_partition_wrap(collection_w, partition2)
         partition_w1.load()
@@ -3714,14 +3722,14 @@ class TestLoadPartition(TestcaseBase):
                 5. query on the partitions
         expected: no exception
         """
-        collection_w = self.init_collection_general(prefix)[0]
+        collection_w = self.init_collection_general(prefix, is_index=False)[0]
+        collection_w.create_index(default_search_field)
         partition_w1 = self.init_partition_wrap(collection_w, partition1)
         partition_w2 = self.init_partition_wrap(collection_w, partition2)
         partition_w1.load()
         partition_w1.release()
         partition_w2.release()
-        error = {ct.err_code: 65535,
-                 ct.err_msg: 'collection not loaded'}
+        error = {ct.err_code: 65535, ct.err_msg: 'collection not loaded'}
         collection_w.query(default_term_expr, partition_names=[partition1, partition2],
                            check_task=CheckTasks.err_res, check_items=error)
         collection_w.load()
@@ -3737,7 +3745,8 @@ class TestLoadPartition(TestcaseBase):
                 4. query on the partition
         expected: no exception
         """
-        collection_w = self.init_collection_general(prefix)[0]
+        collection_w = self.init_collection_general(prefix, is_index=False)[0]
+        collection_w.create_index(default_search_field)
         partition_w1 = self.init_partition_wrap(collection_w, partition1)
         partition_w2 = self.init_partition_wrap(collection_w, partition2)
         partition_w1.load()
@@ -3758,7 +3767,8 @@ class TestLoadPartition(TestcaseBase):
                 6. query on the collection
         expected: no exception
         """
-        collection_w = self.init_collection_general(prefix)[0]
+        collection_w = self.init_collection_general(prefix, is_index=False)[0]
+        collection_w.create_index(default_search_field)
         partition_w1 = self.init_partition_wrap(collection_w, partition1)
         partition_w2 = self.init_partition_wrap(collection_w, partition2)
         partition_w1.load()
@@ -3781,7 +3791,8 @@ class TestLoadPartition(TestcaseBase):
                 4. load the partition
         expected: no exception
         """
-        collection_w = self.init_collection_general(prefix)[0]
+        collection_w = self.init_collection_general(prefix, is_index=False)[0]
+        collection_w.create_index(default_search_field)
         partition_w1 = self.init_partition_wrap(collection_w, partition1)
         partition_w2 = self.init_partition_wrap(collection_w, partition2)
         partition_w1.load()
@@ -3801,7 +3812,8 @@ class TestLoadPartition(TestcaseBase):
                 4. load collection
         expected: no exception
         """
-        collection_w = self.init_collection_general(prefix)[0]
+        collection_w = self.init_collection_general(prefix, is_index=False)[0]
+        collection_w.create_index(default_search_field)
         partition_w1 = self.init_partition_wrap(collection_w, partition1)
         partition_w2 = self.init_partition_wrap(collection_w, partition2)
         partition_w1.load()
@@ -3821,7 +3833,8 @@ class TestLoadPartition(TestcaseBase):
                 4. query on the partition
         expected: no exception
         """
-        collection_w = self.init_collection_general(prefix)[0]
+        collection_w = self.init_collection_general(prefix, is_index=False)[0]
+        collection_w.create_index(default_search_field)
         partition_w1 = self.init_partition_wrap(collection_w, partition1)
         partition_w2 = self.init_partition_wrap(collection_w, partition2)
         partition_w1.load()
@@ -3841,7 +3854,8 @@ class TestLoadPartition(TestcaseBase):
                 6. query on the partition
         expected: no exception
         """
-        collection_w = self.init_collection_general(prefix)[0]
+        collection_w = self.init_collection_general(prefix, is_index=False)[0]
+        collection_w.create_index(default_search_field)
         partition_w1 = self.init_partition_wrap(collection_w, partition1)
         partition_w2 = self.init_partition_wrap(collection_w, partition2)
         partition_w1.load()
@@ -3865,7 +3879,8 @@ class TestLoadPartition(TestcaseBase):
                 5. query on the collection
         expected: no exception
         """
-        collection_w = self.init_collection_general(prefix)[0]
+        collection_w = self.init_collection_general(prefix, is_index=False)[0]
+        collection_w.create_index(default_search_field)
         partition_w1 = self.init_partition_wrap(collection_w, partition1)
         partition_w2 = self.init_partition_wrap(collection_w, partition2)
         partition_w1.load()
@@ -3883,7 +3898,8 @@ class TestLoadPartition(TestcaseBase):
                 3. query on the first partition
         expected: no exception
         """
-        collection_w = self.init_collection_general(prefix)[0]
+        collection_w = self.init_collection_general(prefix, is_index=False)[0]
+        collection_w.create_index(default_search_field)
         partition_w1 = self.init_partition_wrap(collection_w, partition1)
         partition_w2 = self.init_partition_wrap(collection_w, partition2)
         partition_w1.load()

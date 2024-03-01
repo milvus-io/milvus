@@ -1752,6 +1752,11 @@ def extract_vector_field_name_list(collection_w):
     fields = schema_dict.get('fields')
     vector_name_list = []
     for field in fields:
+        if str(field['type']) in ["101", "102", "103"]:
+            if field['name'] != ct.default_float_vec_field_name:
+                vector_name_list.append(field['name'])
+
+    for field in fields:
         if str(field['type']) == 'DataType.FLOAT_VECTOR' \
                 or str(field['type']) == 'DataType.FLOAT16_VECTOR' \
                 or str(field['type']) == 'DataType.BFLOAT16_VECTOR':
