@@ -465,13 +465,7 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) error {
 				continue
 			}
 
-			segIDMap := make(map[int64][]*datapb.FieldBinlog, len(plan.SegmentBinlogs))
-			for _, seg := range plan.SegmentBinlogs {
-				segIDMap[seg.SegmentID] = seg.Deltalogs
-			}
-
 			log.Info("time cost of generating global compaction",
-				zap.Any("segID2DeltaLogs", segIDMap),
 				zap.Int64("planID", plan.PlanID),
 				zap.Int64("time cost", time.Since(start).Milliseconds()),
 				zap.Int64("collectionID", signal.collectionID),
