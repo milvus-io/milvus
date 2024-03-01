@@ -750,7 +750,6 @@ func generateSearchParams(ctx context.Context, c *gin.Context, reqParams map[str
 	bs, _ := json.Marshal(params)
 	searchParams := []*commonpb.KeyValuePair{
 		{Key: Params, Value: string(bs)},
-		{Key: ParamRoundDecimal, Value: "-1"},
 	}
 	return searchParams, nil
 }
@@ -764,11 +763,12 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: common.TopKKey, Value: strconv.FormatInt(int64(httpReq.Limit), 10)})
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamOffset, Value: strconv.FormatInt(int64(httpReq.Offset), 10)})
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamGroupByField, Value: httpReq.GroupByField})
+	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamRoundDecimal, Value: "-1"})
 	req := &milvuspb.SearchRequest{
 		DbName:             dbName,
 		CollectionName:     httpReq.CollectionName,
 		Dsl:                httpReq.Filter,
-		PlaceholderGroup:   vector2PlaceholderGroupBytes(httpReq.Vector),
+		PlaceholderGroup:   vectors2PlaceholderGroupBytes(httpReq.Vector),
 		DslType:            commonpb.DslType_BoolExprV1,
 		OutputFields:       httpReq.OutputFields,
 		PartitionNames:     httpReq.PartitionNames,
@@ -816,11 +816,12 @@ func (h *HandlersV2) hybridSearch(ctx context.Context, c *gin.Context, anyReq an
 		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamOffset, Value: strconv.FormatInt(int64(subReq.Offset), 10)})
 		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamGroupByField, Value: subReq.GroupByField})
 		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: proxy.AnnsFieldKey, Value: subReq.AnnsField})
+		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamRoundDecimal, Value: "-1"})
 		searchReq := &milvuspb.SearchRequest{
 			DbName:             dbName,
 			CollectionName:     httpReq.CollectionName,
 			Dsl:                subReq.Filter,
-			PlaceholderGroup:   vector2PlaceholderGroupBytes(subReq.Vector),
+			PlaceholderGroup:   vectors2PlaceholderGroupBytes(subReq.Vector),
 			DslType:            commonpb.DslType_BoolExprV1,
 			OutputFields:       httpReq.OutputFields,
 			PartitionNames:     httpReq.PartitionNames,
@@ -835,7 +836,7 @@ func (h *HandlersV2) hybridSearch(ctx context.Context, c *gin.Context, anyReq an
 		{Key: proxy.RankTypeKey, Value: httpReq.Rerank.Strategy},
 		{Key: proxy.RankParamsKey, Value: string(bs)},
 		{Key: ParamLimit, Value: strconv.FormatInt(int64(httpReq.Limit), 10)},
-		{Key: "round_decimal", Value: strconv.FormatInt(int64(-1), 10)},
+		{Key: ParamRoundDecimal, Value: "-1"},
 	}
 	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.HybridSearch(reqCtx, req.(*milvuspb.HybridSearchRequest))
@@ -1347,6 +1348,11 @@ func (h *HandlersV2) listIndexes(ctx context.Context, c *gin.Context, anyReq any
 	resp, err := wrapperProxy(ctx, c, req, false, false, func(reqCtx context.Context, req any) (any, error) {
 		resp, err := h.proxy.DescribeIndex(reqCtx, req.(*milvuspb.DescribeIndexRequest))
 		if errors.Is(err, merr.ErrIndexNotFound) {
+			return &milvuspb.DescribeIndexResponse{
+				IndexDescriptions: []*milvuspb.IndexDescription{},
+			}, nil
+		}
+		if resp != nil && errors.Is(merr.Error(resp.Status), merr.ErrIndexNotFound) {
 			return &milvuspb.DescribeIndexResponse{
 				IndexDescriptions: []*milvuspb.IndexDescription{},
 			}, nil

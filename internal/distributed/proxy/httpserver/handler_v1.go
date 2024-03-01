@@ -911,7 +911,7 @@ func (h *HandlersV1) search(c *gin.Context) {
 		DbName:             httpReq.DbName,
 		CollectionName:     httpReq.CollectionName,
 		Dsl:                httpReq.Filter,
-		PlaceholderGroup:   vector2PlaceholderGroupBytes(httpReq.Vector),
+		PlaceholderGroup:   vectors2PlaceholderGroupBytes([][]float32{httpReq.Vector}),
 		DslType:            commonpb.DslType_BoolExprV1,
 		OutputFields:       httpReq.OutputFields,
 		SearchParams:       searchParams,

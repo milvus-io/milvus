@@ -906,7 +906,8 @@ func serialize(fv []float32) []byte {
 	return data
 }
 
-func vector2PlaceholderGroupBytes(vectors []float32) []byte {
+// todo: support [][]byte for BinaryVector
+func vectors2PlaceholderGroupBytes(vectors [][]float32) []byte {
 	var placeHolderType commonpb.PlaceholderType
 	ph := &commonpb.PlaceholderValue{
 		Tag:    "$0",
@@ -916,7 +917,9 @@ func vector2PlaceholderGroupBytes(vectors []float32) []byte {
 		placeHolderType = commonpb.PlaceholderType_FloatVector
 
 		ph.Type = placeHolderType
-		ph.Values = append(ph.Values, serialize(vectors))
+		for _, vector := range vectors {
+			ph.Values = append(ph.Values, serialize(vector))
+		}
 	}
 	phg := &commonpb.PlaceholderGroup{
 		Placeholders: []*commonpb.PlaceholderValue{

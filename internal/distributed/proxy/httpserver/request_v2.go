@@ -127,13 +127,13 @@ func (req *CollectionDataReq) GetDbName() string { return req.DbName }
 type SearchReqV2 struct {
 	DbName         string             `json:"dbName"`
 	CollectionName string             `json:"collectionName" binding:"required"`
+	Vector         [][]float32        `json:"vector"`
 	PartitionNames []string           `json:"partitionNames"`
 	Filter         string             `json:"filter"`
 	GroupByField   string             `json:"groupingField"`
 	Limit          int32              `json:"limit"`
 	Offset         int32              `json:"offset"`
 	OutputFields   []string           `json:"outputFields"`
-	Vector         []float32          `json:"vector"`
 	Params         map[string]float64 `json:"params"`
 }
 
@@ -145,7 +145,7 @@ type Rand struct {
 }
 
 type SubSearchReq struct {
-	Vector        []float32          `json:"vector"`
+	Vector        [][]float32        `json:"vector"`
 	AnnsField     string             `json:"annsField"`
 	Filter        string             `json:"filter"`
 	GroupByField  string             `json:"groupingField"`

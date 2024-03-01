@@ -490,10 +490,8 @@ func TestInsertWithInt64(t *testing.T) {
 
 func TestSerialize(t *testing.T) {
 	parameters := []float32{0.11111, 0.22222}
-	// assert.Equal(t, "\ufffd\ufffd\ufffd=\ufffd\ufffdc\u003e", string(serialize(parameters)))
-	// assert.Equal(t, "vector2PlaceholderGroupBytes", string(vector2PlaceholderGroupBytes(parameters))) // todo
 	assert.Equal(t, "\xa4\x8d\xe3=\xa4\x8dc>", string(serialize(parameters)))
-	assert.Equal(t, "\n\x10\n\x02$0\x10e\x1a\b\xa4\x8d\xe3=\xa4\x8dc>", string(vector2PlaceholderGroupBytes(parameters))) // todo
+	assert.Equal(t, "\n\x10\n\x02$0\x10e\x1a\b\xa4\x8d\xe3=\xa4\x8dc>", string(vectors2PlaceholderGroupBytes([][]float32{parameters}))) // todo
 }
 
 func compareRow64(m1 map[string]interface{}, m2 map[string]interface{}) bool {
