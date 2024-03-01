@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -32,6 +33,10 @@ type IndexAttrCacheSuite struct {
 	suite.Suite
 
 	c *IndexAttrCache
+}
+
+func (s *IndexAttrCacheSuite) SetupSuite() {
+	paramtable.Init()
 }
 
 func (s *IndexAttrCacheSuite) SetupTest() {
@@ -95,8 +100,8 @@ func (s *IndexAttrCacheSuite) TestLoadWithDisk() {
 		memory, disk, err := s.c.GetIndexResourceUsage(info)
 		s.Require().NoError(err)
 
-		s.EqualValues(200, memory)
-		s.EqualValues(0, disk)
+		s.Equal(uint64(250), memory)
+		s.Equal(uint64(0), disk)
 	})
 
 	s.Run("corrupted_index_info", func() {
