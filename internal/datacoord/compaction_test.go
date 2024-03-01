@@ -352,20 +352,22 @@ func TestCompactionPlanHandler_handleMergeCompactionResult(t *testing.T) {
 	errMeta := &meta{
 		catalog: &datacoord.Catalog{MetaKv: metakv},
 		segments: &SegmentsInfo{
-			map[int64]*SegmentInfo{
+			segments: map[int64]*SegmentInfo{
 				seg1.ID: {SegmentInfo: seg1},
 				seg2.ID: {SegmentInfo: seg2},
 			},
+			compactionTo: make(map[int64]int64),
 		},
 	}
 
 	meta := &meta{
 		catalog: &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
 		segments: &SegmentsInfo{
-			map[int64]*SegmentInfo{
+			segments: map[int64]*SegmentInfo{
 				seg1.ID: {SegmentInfo: seg1},
 				seg2.ID: {SegmentInfo: seg2},
 			},
+			compactionTo: make(map[int64]int64),
 		},
 	}
 
@@ -507,10 +509,11 @@ func TestCompactionPlanHandler_completeCompaction(t *testing.T) {
 		meta := &meta{
 			catalog: &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
 			segments: &SegmentsInfo{
-				map[int64]*SegmentInfo{
+				segments: map[int64]*SegmentInfo{
 					seg1.ID: {SegmentInfo: seg1},
 					seg2.ID: {SegmentInfo: seg2},
 				},
+				compactionTo: make(map[int64]int64),
 			},
 		}
 		compactionResult := datapb.CompactionResult{
@@ -602,10 +605,11 @@ func TestCompactionPlanHandler_completeCompaction(t *testing.T) {
 		meta := &meta{
 			catalog: &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
 			segments: &SegmentsInfo{
-				map[int64]*SegmentInfo{
+				segments: map[int64]*SegmentInfo{
 					seg1.ID: {SegmentInfo: seg1},
 					seg2.ID: {SegmentInfo: seg2},
 				},
+				compactionTo: make(map[int64]int64),
 			},
 		}
 
@@ -777,9 +781,10 @@ func Test_compactionPlanHandler_updateCompaction(t *testing.T) {
 				},
 				meta: &meta{
 					segments: &SegmentsInfo{
-						map[int64]*SegmentInfo{
+						segments: map[int64]*SegmentInfo{
 							1: {SegmentInfo: &datapb.SegmentInfo{ID: 1}},
 						},
+						compactionTo: make(map[int64]int64),
 					},
 				},
 				sessions: &SessionManagerImpl{

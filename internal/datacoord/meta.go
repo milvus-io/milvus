@@ -48,7 +48,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type meta struct {
@@ -1306,18 +1305,12 @@ func (m *meta) HasSegments(segIDs []UniqueID) (bool, error) {
 	return true, nil
 }
 
-func (m *meta) GetCompactionTo(segmentID int64) *SegmentInfo {
+// GetCompactionTo returns the segment info of the segment to be compacted to.
+func (m *meta) GetCompactionTo(segmentID int64) (*SegmentInfo, bool) {
 	m.RLock()
 	defer m.RUnlock()
 
-	segments := m.segments.GetSegments()
-	for _, segment := range segments {
-		parents := typeutil.NewUniqueSet(segment.GetCompactionFrom()...)
-		if parents.Contain(segmentID) {
-			return segment
-		}
-	}
-	return nil
+	return m.segments.GetCompactionTo(segmentID)
 }
 
 // UpdateChannelCheckpoint updates and saves channel checkpoint.
