@@ -24,7 +24,6 @@ type MmapMigration struct {
 }
 
 func (m *MmapMigration) Migrate(ctx context.Context) {
-
 	m.MigrateRootCoordCollection(ctx)
 	m.MigrateIndexCoordCollection(ctx)
 }
