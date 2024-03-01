@@ -53,8 +53,6 @@ func (dc *dataCoordBroker) ReportTimeTick(ctx context.Context, msgs []*msgpb.Dat
 		Msgs: msgs,
 	}
 
-	log.Info("ddddddddd", zap.Any("msgs", msgs))
-
 	resp, err := dc.client.ReportDataNodeTtMsgs(ctx, req)
 	if err := merr.CheckRPCCall(resp, err); err != nil {
 		log.Warn("failed to report datanodeTtMsgs", zap.Error(err))
