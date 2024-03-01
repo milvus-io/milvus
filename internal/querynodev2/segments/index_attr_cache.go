@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -75,13 +76,13 @@ func (c *IndexAttrCache) GetIndexResourceUsage(indexInfo *querypb.FieldIndexInfo
 		})
 	}
 
-	factor := uint64(1)
+	factor := float64(1)
 	diskUsage := uint64(0)
 	if !isLoadWithDisk {
-		factor = 2
+		factor = paramtable.Get().QueryNodeCfg.MemoryIndexLoadPredictMemoryUsageFactor.GetAsFloat()
 	} else {
 		diskUsage = uint64(indexInfo.IndexSize)
 	}
 
-	return uint64(indexInfo.IndexSize) * factor, diskUsage, nil
+	return uint64(float64(indexInfo.IndexSize) * factor), diskUsage, nil
 }

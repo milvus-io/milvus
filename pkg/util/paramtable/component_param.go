@@ -1981,6 +1981,8 @@ type queryNodeConfig struct {
 	CleanExcludeSegInterval ParamItem `refreshable:"false"`
 	FlowGraphMaxQueueLength ParamItem `refreshable:"false"`
 	FlowGraphMaxParallelism ParamItem `refreshable:"false"`
+
+	MemoryIndexLoadPredictMemoryUsageFactor ParamItem `refreshable:"true"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -2426,7 +2428,6 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		DefaultValue: "8192",
 		Doc:          "expr eval batch size for getnext interface",
 	}
-
 	p.ExprEvalBatchSize.Init(base.mgr)
 
 	p.CleanExcludeSegInterval = ParamItem{
@@ -2437,6 +2438,14 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Export:       true,
 	}
 	p.CleanExcludeSegInterval.Init(base.mgr)
+
+	p.MemoryIndexLoadPredictMemoryUsageFactor = ParamItem{
+		Key:          "queryNode.memoryIndexLoadPredictMemoryUsageFactor",
+		Version:      "2.3.8",
+		DefaultValue: "2.5", // HNSW index needs more memory to load.
+		Doc:          "memory usage prediction factor for memory index loaded",
+	}
+	p.MemoryIndexLoadPredictMemoryUsageFactor.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

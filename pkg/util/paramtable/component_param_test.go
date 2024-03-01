@@ -361,6 +361,10 @@ func TestComponentParam(t *testing.T) {
 
 		params.Save("querynode.gracefulStopTimeout", "100")
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
+
+		assert.Equal(t, 2.5, Params.MemoryIndexLoadPredictMemoryUsageFactor.GetAsFloat())
+		params.Save("queryNode.memoryIndexLoadPredictMemoryUsageFactor", "2.0")
+		assert.Equal(t, 2.0, Params.MemoryIndexLoadPredictMemoryUsageFactor.GetAsFloat())
 	})
 
 	t.Run("test dataCoordConfig", func(t *testing.T) {
