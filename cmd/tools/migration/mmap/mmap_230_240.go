@@ -2,6 +2,7 @@ package mmap
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -10,7 +11,6 @@ import (
 	"github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 // In Milvus 2.3.x, querynode.MmapDirPath is used to enable mmap and save mmap files.
@@ -24,9 +24,6 @@ type MmapMigration struct {
 }
 
 func (m *MmapMigration) Migrate(ctx context.Context) {
-	if paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue() == "" {
-		return
-	}
 
 	m.MigrateRootCoordCollection(ctx)
 	m.MigrateIndexCoordCollection(ctx)
@@ -61,6 +58,8 @@ func (m *MmapMigration) MigrateRootCoordCollection(ctx context.Context) {
 			newColl := collection.Clone()
 
 			newColl.Properties = updateOrAddMmapKey(newColl.Properties, common.MmapEnabledKey, "true")
+			fmt.Printf("migrate collection %v, %s\n", collection.CollectionID, collection.Name)
+
 			if err := m.rootcoordMeta.AlterCollection(ctx, collection, newColl, ts); err != nil {
 				panic(err)
 			}
@@ -89,6 +88,7 @@ func (m *MmapMigration) MigrateIndexCoordCollection(ctx context.Context) {
 		if !indexparamcheck.IsMmapSupported(getIndexType(index.IndexParams)) {
 			continue
 		}
+		fmt.Printf("migrate index, collection:%v, indexId: %v, indexName: %s\n", index.CollectionID, index.IndexID, index.IndexName)
 		newIndex := model.CloneIndex(index)
 
 		newIndex.UserIndexParams = updateOrAddMmapKey(newIndex.UserIndexParams, common.MmapEnabledKey, "true")

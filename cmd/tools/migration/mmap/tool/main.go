@@ -34,7 +34,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	fmt.Printf("Using config file: %s\n", *configPtr)
 	prepareParams(*configPtr)
+	if paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue() == "" {
+		fmt.Println("mmap is not enabled")
+		return
+	}
+	fmt.Printf("MmapDirPath: %s\n", paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue())
 	allocator := prepareTsoAllocator()
 	rootCoordMeta := prepareRootCoordMeta(context.Background(), allocator)
 	dataCoordCatalog := prepareDataCoordCatalog()
@@ -77,6 +83,9 @@ func prepareTsoAllocator() tso.Allocator {
 		tsoKV = tsoutil.NewTSOKVBase(etcdCli, kvPath, "gid")
 	}
 	tsoAllocator := tso.NewGlobalTSOAllocator("idTimestamp", tsoKV)
+	if err := tsoAllocator.Initialize(); err != nil {
+		panic(err)
+	}
 	return tsoAllocator
 }
 
