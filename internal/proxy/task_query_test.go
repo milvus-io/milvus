@@ -840,7 +840,9 @@ func Test_createCntPlan(t *testing.T) {
 				},
 			},
 		}
-		plan, err := createCntPlan("a > 4", schema)
+		schemaHelper, err := typeutil.CreateSchemaHelper(schema)
+		require.NoError(t, err)
+		plan, err := createCntPlan("a > 4", schemaHelper)
 		assert.NoError(t, err)
 		assert.True(t, plan.GetQuery().GetIsCount())
 		assert.NotNil(t, plan.GetQuery().GetPredicates())
