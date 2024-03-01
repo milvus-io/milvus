@@ -18,6 +18,7 @@ package pipeline
 
 import (
 	"testing"
+	"time"
 
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/suite"
@@ -26,7 +27,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // test of filter node
@@ -38,7 +38,7 @@ type FilterNodeSuite struct {
 	channel      string
 
 	validSegmentIDs    []int64
-	excludedSegments   *typeutil.ConcurrentMap[int64, uint64]
+	excludedSegments   *ExcludedSegments
 	excludedSegmentIDs []int64
 	insertSegmentIDs   []int64
 	deleteSegmentSum   int
@@ -62,10 +62,12 @@ func (suite *FilterNodeSuite) SetupSuite() {
 	suite.errSegmentID = 7
 
 	// init excludedSegment
-	suite.excludedSegments = typeutil.NewConcurrentMap[int64, uint64]()
+	suite.excludedSegments = NewExcludedSegments(0 * time.Second)
+	excludeInfo := map[int64]uint64{}
 	for _, id := range suite.excludedSegmentIDs {
-		suite.excludedSegments.Insert(id, 1)
+		excludeInfo[id] = 1
 	}
+	suite.excludedSegments.Insert(excludeInfo)
 }
 
 // test filter node with collection load collection
