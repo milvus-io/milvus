@@ -1506,6 +1506,8 @@ func (s *Server) handleRPCTimetickMessage(ctx context.Context, ttMsg *msgpb.Data
 		return nil
 	}
 
+	log.Info("dyh debug 3 handleRPCTimetickMessage", zap.Any("ttMsg", ttMsg))
+
 	s.updateSegmentStatistics(ttMsg.GetSegmentsStats())
 
 	if err := s.segmentManager.ExpireAllocations(ch, ts); err != nil {
