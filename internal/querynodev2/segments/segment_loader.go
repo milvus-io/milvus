@@ -119,6 +119,7 @@ func NewLoader(
 	log.Info("SegmentLoader created", zap.Int("ioPoolSize", ioPoolSize))
 
 	loader := &segmentLoader{
+		IndexAttrCache:  NewIndexAttrCache(),
 		manager:         manager,
 		cm:              cm,
 		loadingSegments: typeutil.NewConcurrentMap[int64, *loadResult](),
@@ -154,6 +155,7 @@ func (r *loadResult) SetResult(status loadStatus) {
 
 // segmentLoader is only responsible for loading the field data from binlog
 type segmentLoader struct {
+	*IndexAttrCache
 	manager *Manager
 	cm      storage.ChunkManager
 
@@ -983,7 +985,7 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 		for _, fieldBinlog := range loadInfo.BinlogPaths {
 			fieldID := fieldBinlog.FieldID
 			if fieldIndexInfo, ok := vecFieldID2IndexInfo[fieldID]; ok {
-				neededMemSize, neededDiskSize, err := GetIndexResourceUsage(fieldIndexInfo)
+				neededMemSize, neededDiskSize, err := loader.GetIndexResourceUsage(fieldIndexInfo)
 				if err != nil {
 					log.Warn("failed to get index size",
 						zap.Int64("collectionID", loadInfo.CollectionID),
