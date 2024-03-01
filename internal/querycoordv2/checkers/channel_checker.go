@@ -191,7 +191,7 @@ func (c *ChannelChecker) findRepeatedChannels(replicaID int64) []*meta.DmChannel
 			continue
 		}
 
-		if err := CheckLeaderAvaliable(c.nodeMgr, leaderView, targets); err != nil {
+		if err := utils.CheckLeaderAvailable(c.nodeMgr, leaderView, targets); err != nil {
 			log.Info("replica has unavailable shard leader",
 				zap.Int64("collectionID", replica.GetCollectionID()),
 				zap.Int64("replicaID", replicaID),

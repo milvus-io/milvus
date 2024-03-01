@@ -1457,3 +1457,30 @@ func TestProxy_ReplicateMessage(t *testing.T) {
 		}
 	})
 }
+
+func TestProxy_InvalidateShardLeaderCache(t *testing.T) {
+	t.Run("proxy unhealthy", func(t *testing.T) {
+		node := &Proxy{}
+		node.UpdateStateCode(commonpb.StateCode_Abnormal)
+
+		resp, err := node.InvalidateShardLeaderCache(context.TODO(), nil)
+		assert.NoError(t, err)
+		assert.False(t, merr.Ok(resp))
+	})
+
+	t.Run("success", func(t *testing.T) {
+		node := &Proxy{}
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		cacheBak := globalMetaCache
+		defer func() { globalMetaCache = cacheBak }()
+		// set expectations
+		cache := NewMockCache(t)
+		cache.EXPECT().InvalidateShardLeaderCache(mock.Anything)
+		globalMetaCache = cache
+
+		resp, err := node.InvalidateShardLeaderCache(context.TODO(), &proxypb.InvalidateShardLeaderCacheRequest{})
+		assert.NoError(t, err)
+		assert.True(t, merr.Ok(resp))
+	})
+}

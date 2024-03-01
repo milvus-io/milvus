@@ -313,6 +313,14 @@ func TestProxyClientManager_RefreshPolicyInfoCache(t *testing.T) {
 	})
 }
 
+func TestProxyClientManager_TestGetProxyCount(t *testing.T) {
+	p1 := mocks.NewMockProxyClient(t)
+	pcm := NewProxyClientManager(DefaultProxyCreator)
+	pcm.proxyClient.Insert(TestProxyID, p1)
+
+	assert.Equal(t, pcm.GetProxyCount(), 1)
+}
+
 func TestProxyClientManager_GetProxyMetrics(t *testing.T) {
 	TestProxyID := int64(1001)
 	t.Run("empty proxy list", func(t *testing.T) {
@@ -421,6 +429,37 @@ func TestProxyClientManager_GetComponentStates(t *testing.T) {
 		pcm := NewProxyClientManager(DefaultProxyCreator)
 		pcm.proxyClient.Insert(TestProxyID, p1)
 		_, err := pcm.GetComponentStates(ctx)
+		assert.NoError(t, err)
+	})
+}
+
+func TestProxyClientManager_InvalidateShardLeaderCache(t *testing.T) {
+	TestProxyID := int64(1001)
+	t.Run("empty proxy list", func(t *testing.T) {
+		ctx := context.Background()
+		pcm := NewProxyClientManager(DefaultProxyCreator)
+
+		err := pcm.InvalidateShardLeaderCache(ctx, &proxypb.InvalidateShardLeaderCacheRequest{})
+		assert.NoError(t, err)
+	})
+
+	t.Run("mock rpc error", func(t *testing.T) {
+		ctx := context.Background()
+		p1 := mocks.NewMockProxyClient(t)
+		p1.EXPECT().InvalidateShardLeaderCache(mock.Anything, mock.Anything).Return(nil, errors.New("error mock InvalidateCredentialCache"))
+		pcm := NewProxyClientManager(DefaultProxyCreator)
+		pcm.proxyClient.Insert(TestProxyID, p1)
+		err := pcm.InvalidateShardLeaderCache(ctx, &proxypb.InvalidateShardLeaderCacheRequest{})
+		assert.Error(t, err)
+	})
+
+	t.Run("normal case", func(t *testing.T) {
+		ctx := context.Background()
+		p1 := mocks.NewMockProxyClient(t)
+		p1.EXPECT().InvalidateShardLeaderCache(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+		pcm := NewProxyClientManager(DefaultProxyCreator)
+		pcm.proxyClient.Insert(TestProxyID, p1)
+		err := pcm.InvalidateShardLeaderCache(ctx, &proxypb.InvalidateShardLeaderCacheRequest{})
 		assert.NoError(t, err)
 	})
 }
