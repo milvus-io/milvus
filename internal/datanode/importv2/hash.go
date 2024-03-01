@@ -74,7 +74,7 @@ func HashData(task Task, rows *storage.InsertData) (HashedData, error) {
 	return res, nil
 }
 
-func GetRowsStats(task Task, rows *storage.InsertData) (map[string]*datapb.PartitionRows, error) {
+func GetRowsStats(task Task, rows *storage.InsertData) (map[string]*datapb.PartitionImportStats, error) {
 	var (
 		schema       = task.GetSchema()
 		channelNum   = len(task.GetVchannels())
@@ -88,8 +88,10 @@ func GetRowsStats(task Task, rows *storage.InsertData) (map[string]*datapb.Parti
 	partKeyField, _ := typeutil.GetPartitionKeyFieldSchema(schema)
 
 	hashRowsCount := make([][]int, channelNum)
+	hashDataSize := make([][]int, channelNum)
 	for i := 0; i < channelNum; i++ {
 		hashRowsCount[i] = make([]int, partitionNum)
+		hashDataSize[i] = make([]int, partitionNum)
 	}
 
 	rowNum := GetInsertDataRowCount(rows, schema)
@@ -104,6 +106,7 @@ func GetRowsStats(task Task, rows *storage.InsertData) (map[string]*datapb.Parti
 		for i := 0; i < rowNum; i++ {
 			p1, p2 := fn1(id, num), fn2(rows.GetRow(i))
 			hashRowsCount[p1][p2]++
+			hashDataSize[p1][p2] += rows.GetRowSize(i)
 			id++
 		}
 	} else {
@@ -113,20 +116,23 @@ func GetRowsStats(task Task, rows *storage.InsertData) (map[string]*datapb.Parti
 			row := rows.GetRow(i)
 			p1, p2 := f1(row), f2(row)
 			hashRowsCount[p1][p2]++
+			hashDataSize[p1][p2] += rows.GetRowSize(i)
 		}
 	}
 
-	res := make(map[string]*datapb.PartitionRows)
+	res := make(map[string]*datapb.PartitionImportStats)
 	for _, channel := range task.GetVchannels() {
-		res[channel] = &datapb.PartitionRows{
-			PartitionRows: make(map[int64]int64),
+		res[channel] = &datapb.PartitionImportStats{
+			PartitionRows:     make(map[int64]int64),
+			PartitionDataSize: make(map[int64]int64),
 		}
 	}
-	for i, partitionRows := range hashRowsCount {
+	for i := range hashRowsCount {
 		channel := task.GetVchannels()[i]
-		for j, n := range partitionRows {
+		for j := range hashRowsCount[i] {
 			partition := task.GetPartitionIDs()[j]
-			res[channel].PartitionRows[partition] = int64(n)
+			res[channel].PartitionRows[partition] = int64(hashRowsCount[i][j])
+			res[channel].PartitionDataSize[partition] = int64(hashDataSize[i][j])
 		}
 	}
 	return res, nil
@@ -187,15 +193,17 @@ func hashByID() func(id int64, shardNum int64) int64 {
 	}
 }
 
-func MergeHashedRowsCount(src, dst map[string]*datapb.PartitionRows) {
-	for channel, partitionRows := range src {
-		for partitionID, rowCount := range partitionRows.GetPartitionRows() {
+func MergeHashedStats(src, dst map[string]*datapb.PartitionImportStats) {
+	for channel, partitionStats := range src {
+		for partitionID := range partitionStats.GetPartitionRows() {
 			if dst[channel] == nil {
-				dst[channel] = &datapb.PartitionRows{
-					PartitionRows: make(map[int64]int64),
+				dst[channel] = &datapb.PartitionImportStats{
+					PartitionRows:     make(map[int64]int64),
+					PartitionDataSize: make(map[int64]int64),
 				}
 			}
-			dst[channel].PartitionRows[partitionID] += rowCount
+			dst[channel].PartitionRows[partitionID] += partitionStats.GetPartitionRows()[partitionID]
+			dst[channel].PartitionDataSize[partitionID] += partitionStats.GetPartitionDataSize()[partitionID]
 		}
 	}
 }

@@ -48,7 +48,7 @@ func (t TaskType) String() string {
 
 type TaskFilter func(task Task) bool
 
-func WithStates(states ...internalpb.ImportState) TaskFilter {
+func WithStates(states ...datapb.ImportTaskStateV2) TaskFilter {
 	return func(task Task) bool {
 		for _, state := range states {
 			if task.GetState() == state {
@@ -67,7 +67,7 @@ func WithType(taskType TaskType) TaskFilter {
 
 type UpdateAction func(task Task)
 
-func UpdateState(state internalpb.ImportState) UpdateAction {
+func UpdateState(state datapb.ImportTaskStateV2) UpdateAction {
 	return func(t Task) {
 		switch t.GetType() {
 		case PreImportTaskType:
@@ -93,7 +93,7 @@ func UpdateFileStat(idx int, fileStat *datapb.ImportFileStats) UpdateAction {
 	return func(task Task) {
 		if it, ok := task.(*PreImportTask); ok {
 			it.PreImportTask.FileStats[idx].TotalRows = fileStat.GetTotalRows()
-			it.PreImportTask.FileStats[idx].HashedRows = fileStat.GetHashedRows()
+			it.PreImportTask.FileStats[idx].HashedStats = fileStat.GetHashedStats()
 		}
 	}
 }
@@ -133,7 +133,7 @@ type Task interface {
 	GetPartitionIDs() []int64
 	GetVchannels() []string
 	GetType() TaskType
-	GetState() internalpb.ImportState
+	GetState() datapb.ImportTaskStateV2
 	GetReason() string
 	GetSchema() *schemapb.CollectionSchema
 	GetCtx() context.Context
@@ -144,9 +144,12 @@ type Task interface {
 
 type PreImportTask struct {
 	*datapb.PreImportTask
-	ctx    context.Context
-	cancel context.CancelFunc
-	schema *schemapb.CollectionSchema
+	ctx          context.Context
+	cancel       context.CancelFunc
+	partitionIDs []int64
+	vchannels    []string
+	schema       *schemapb.CollectionSchema
+	options      []*commonpb.KeyValuePair
 }
 
 func NewPreImportTask(req *datapb.PreImportRequest) Task {
@@ -161,16 +164,24 @@ func NewPreImportTask(req *datapb.PreImportRequest) Task {
 			JobID:        req.GetJobID(),
 			TaskID:       req.GetTaskID(),
 			CollectionID: req.GetCollectionID(),
-			PartitionIDs: req.GetPartitionIDs(),
-			Vchannels:    req.GetVchannels(),
-			State:        internalpb.ImportState_Pending,
+			State:        datapb.ImportTaskStateV2_Pending,
 			FileStats:    fileStats,
-			Options:      req.GetOptions(),
 		},
-		ctx:    ctx,
-		cancel: cancel,
-		schema: req.GetSchema(),
+		ctx:          ctx,
+		cancel:       cancel,
+		partitionIDs: req.GetPartitionIDs(),
+		vchannels:    req.GetVchannels(),
+		schema:       req.GetSchema(),
+		options:      req.GetOptions(),
 	}
+}
+
+func (p *PreImportTask) GetPartitionIDs() []int64 {
+	return p.partitionIDs
+}
+
+func (p *PreImportTask) GetVchannels() []string {
+	return p.vchannels
 }
 
 func (p *PreImportTask) GetType() TaskType {
@@ -179,6 +190,10 @@ func (p *PreImportTask) GetType() TaskType {
 
 func (p *PreImportTask) GetSchema() *schemapb.CollectionSchema {
 	return p.schema
+}
+
+func (p *PreImportTask) GetOptions() []*commonpb.KeyValuePair {
+	return p.options
 }
 
 func (p *PreImportTask) GetCtx() context.Context {
@@ -195,7 +210,10 @@ func (p *PreImportTask) Clone() Task {
 		PreImportTask: proto.Clone(p.PreImportTask).(*datapb.PreImportTask),
 		ctx:           ctx,
 		cancel:        cancel,
+		partitionIDs:  p.GetPartitionIDs(),
+		vchannels:     p.GetVchannels(),
 		schema:        p.GetSchema(),
+		options:       p.GetOptions(),
 	}
 }
 
@@ -203,11 +221,8 @@ type ImportTask struct {
 	*datapb.ImportTaskV2
 	ctx          context.Context
 	cancel       context.CancelFunc
-	schema       *schemapb.CollectionSchema
 	segmentsInfo map[int64]*datapb.ImportSegmentInfo
 	req          *datapb.ImportRequest
-	vchannels    []string
-	partitions   []int64
 	metaCaches   map[string]metacache.MetaCache
 }
 
@@ -218,29 +233,21 @@ func NewImportTask(req *datapb.ImportRequest) Task {
 			JobID:        req.GetJobID(),
 			TaskID:       req.GetTaskID(),
 			CollectionID: req.GetCollectionID(),
-			State:        internalpb.ImportState_Pending,
-			Options:      req.GetOptions(),
+			State:        datapb.ImportTaskStateV2_Pending,
 		},
 		ctx:          ctx,
 		cancel:       cancel,
-		schema:       req.GetSchema(),
 		segmentsInfo: make(map[int64]*datapb.ImportSegmentInfo),
 		req:          req,
 	}
-	task.Init(req)
+	task.initMetaCaches(req)
 	return task
 }
 
-func (t *ImportTask) Init(req *datapb.ImportRequest) {
+func (t *ImportTask) initMetaCaches(req *datapb.ImportRequest) {
 	metaCaches := make(map[string]metacache.MetaCache)
-	channels := make(map[string]struct{})
-	partitions := make(map[int64]struct{})
-	for _, info := range req.GetRequestSegments() {
-		channels[info.GetVchannel()] = struct{}{}
-		partitions[info.GetPartitionID()] = struct{}{}
-	}
 	schema := typeutil.AppendSystemFields(req.GetSchema())
-	for _, channel := range lo.Keys(channels) {
+	for _, channel := range req.GetVchannels() {
 		info := &datapb.ChannelWatchInfo{
 			Vchan: &datapb.VchannelInfo{
 				CollectionID: req.GetCollectionID(),
@@ -253,8 +260,6 @@ func (t *ImportTask) Init(req *datapb.ImportRequest) {
 		})
 		metaCaches[channel] = metaCache
 	}
-	t.vchannels = lo.Keys(channels)
-	t.partitions = lo.Keys(partitions)
 	t.metaCaches = metaCaches
 }
 
@@ -263,15 +268,19 @@ func (t *ImportTask) GetType() TaskType {
 }
 
 func (t *ImportTask) GetPartitionIDs() []int64 {
-	return t.partitions
+	return t.req.GetPartitionIDs()
 }
 
 func (t *ImportTask) GetVchannels() []string {
-	return t.vchannels
+	return t.req.GetVchannels()
 }
 
 func (t *ImportTask) GetSchema() *schemapb.CollectionSchema {
-	return t.schema
+	return t.req.GetSchema()
+}
+
+func (t *ImportTask) GetOptions() []*commonpb.KeyValuePair {
+	return t.req.GetOptions()
 }
 
 func (t *ImportTask) GetCtx() context.Context {
@@ -292,11 +301,8 @@ func (t *ImportTask) Clone() Task {
 		ImportTaskV2: proto.Clone(t.ImportTaskV2).(*datapb.ImportTaskV2),
 		ctx:          ctx,
 		cancel:       cancel,
-		schema:       t.GetSchema(),
 		segmentsInfo: t.segmentsInfo,
 		req:          t.req,
-		vchannels:    t.GetVchannels(),
-		partitions:   t.GetPartitionIDs(),
 		metaCaches:   t.metaCaches,
 	}
 }

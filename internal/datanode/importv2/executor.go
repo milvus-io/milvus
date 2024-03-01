@@ -83,7 +83,7 @@ func (e *executor) Start() {
 			log.Info("import executor exited")
 			return
 		case <-exeTicker.C:
-			tasks := e.manager.GetBy(WithStates(internalpb.ImportState_Pending))
+			tasks := e.manager.GetBy(WithStates(datapb.ImportTaskStateV2_Pending))
 			wg := &sync.WaitGroup{}
 			for _, task := range tasks {
 				wg.Add(1)
@@ -105,7 +105,7 @@ func (e *executor) Start() {
 }
 
 func (e *executor) Slots() int64 {
-	tasks := e.manager.GetBy(WithStates(internalpb.ImportState_Pending, internalpb.ImportState_InProgress))
+	tasks := e.manager.GetBy(WithStates(datapb.ImportTaskStateV2_Pending, datapb.ImportTaskStateV2_InProgress))
 	return paramtable.Get().DataNodeCfg.MaxConcurrentImportTaskNum.GetAsInt64() - int64(len(tasks))
 }
 
@@ -128,7 +128,7 @@ func WrapLogFields(task Task, fields ...zap.Field) []zap.Field {
 
 func (e *executor) handleErr(task Task, err error, msg string) {
 	log.Warn(msg, WrapLogFields(task, zap.Error(err))...)
-	e.manager.Update(task.GetTaskID(), UpdateState(internalpb.ImportState_Failed), UpdateReason(err.Error()))
+	e.manager.Update(task.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(err.Error()))
 }
 
 func (e *executor) PreImport(task Task) {
@@ -136,7 +136,7 @@ func (e *executor) PreImport(task Task) {
 	log.Info("start to preimport", WrapLogFields(task,
 		zap.Int("bufferSize", bufferSize),
 		zap.Any("schema", task.GetSchema()))...)
-	e.manager.Update(task.GetTaskID(), UpdateState(internalpb.ImportState_InProgress))
+	e.manager.Update(task.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_InProgress))
 	files := lo.Map(task.(*PreImportTask).GetFileStats(),
 		func(fileStat *datapb.ImportFileStats, _ int) *internalpb.ImportFile {
 			return fileStat.GetImportFile()
@@ -175,14 +175,15 @@ func (e *executor) PreImport(task Task) {
 		return
 	}
 
-	e.manager.Update(task.GetTaskID(), UpdateState(internalpb.ImportState_Completed))
+	e.manager.Update(task.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Completed))
 	log.Info("executor preimport done",
 		WrapLogFields(task, zap.Any("fileStats", task.(*PreImportTask).GetFileStats()))...)
 }
 
 func (e *executor) readFileStat(reader importutilv2.Reader, task Task, fileIdx int) error {
 	totalRows := 0
-	hashedRows := make(map[string]*datapb.PartitionRows)
+	totalSize := 0
+	hashedStats := make(map[string]*datapb.PartitionImportStats)
 	for {
 		data, err := reader.Read()
 		if err != nil {
@@ -199,15 +200,18 @@ func (e *executor) readFileStat(reader importutilv2.Reader, task Task, fileIdx i
 		if err != nil {
 			return err
 		}
-		MergeHashedRowsCount(rowsCount, hashedRows)
+		MergeHashedStats(rowsCount, hashedStats)
 		rows := data.GetRowNum()
+		size := data.GetMemorySize()
 		totalRows += rows
-		log.Info("reading file stat...", WrapLogFields(task, zap.Int("readRows", rows))...)
+		totalSize += size
+		log.Info("reading file stat...", WrapLogFields(task, zap.Int("readRows", rows), zap.Int("readSize", size))...)
 	}
 
 	stat := &datapb.ImportFileStats{
-		TotalRows:  int64(totalRows),
-		HashedRows: hashedRows,
+		TotalRows:       int64(totalRows),
+		TotalMemorySize: int64(totalSize),
+		HashedStats:     hashedStats,
 	}
 	e.manager.Update(task.GetTaskID(), UpdateFileStat(fileIdx, stat))
 	return nil
@@ -218,7 +222,7 @@ func (e *executor) Import(task Task) {
 	log.Info("start to import", WrapLogFields(task,
 		zap.Int("bufferSize", bufferSize),
 		zap.Any("schema", task.GetSchema()))...)
-	e.manager.Update(task.GetTaskID(), UpdateState(internalpb.ImportState_InProgress))
+	e.manager.Update(task.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_InProgress))
 
 	req := task.(*ImportTask).req
 
@@ -254,7 +258,7 @@ func (e *executor) Import(task Task) {
 		return
 	}
 
-	e.manager.Update(task.GetTaskID(), UpdateState(internalpb.ImportState_Completed))
+	e.manager.Update(task.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Completed))
 	log.Info("import done", WrapLogFields(task)...)
 }
 
@@ -304,15 +308,18 @@ func (e *executor) Sync(task *ImportTask, hashedData HashedData) ([]*conc.Future
 	log.Info("start to sync import data", WrapLogFields(task)...)
 	futures := make([]*conc.Future[error], 0)
 	syncTasks := make([]syncmgr.Task, 0)
+	segmentImportedSizes := make(map[int64]int)
 	for channelIdx, datas := range hashedData {
-		channel := task.vchannels[channelIdx]
+		channel := task.GetVchannels()[channelIdx]
 		for partitionIdx, data := range datas {
-			partitionID := task.partitions[partitionIdx]
-			segmentID := PickSegment(task, channel, partitionID, data.GetRowNum())
+			partitionID := task.GetPartitionIDs()[partitionIdx]
+			size := data.GetMemorySize()
+			segmentID := PickSegment(task, segmentImportedSizes, channel, partitionID, size)
 			syncTask, err := NewSyncTask(task.GetCtx(), task, segmentID, partitionID, channel, data)
 			if err != nil {
 				return nil, nil, err
 			}
+			segmentImportedSizes[segmentID] += size
 			future := e.syncMgr.SyncData(task.GetCtx(), syncTask)
 			futures = append(futures, future)
 			syncTasks = append(syncTasks, syncTask)

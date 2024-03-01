@@ -104,6 +104,11 @@ func (m *MockAllocator) allocID(ctx context.Context) (UniqueID, error) {
 	return val, nil
 }
 
+func (m *MockAllocator) allocN(n int64) (UniqueID, UniqueID, error) {
+	val := atomic.AddInt64(&m.cnt, n)
+	return val, val + n, nil
+}
+
 type MockAllocator0 struct{}
 
 func (m *MockAllocator0) allocTimestamp(ctx context.Context) (Timestamp, error) {
@@ -112,6 +117,10 @@ func (m *MockAllocator0) allocTimestamp(ctx context.Context) (Timestamp, error) 
 
 func (m *MockAllocator0) allocID(ctx context.Context) (UniqueID, error) {
 	return 0, nil
+}
+
+func (m *MockAllocator0) allocN(n int64) (UniqueID, UniqueID, error) {
+	return 0, n, nil
 }
 
 var _ allocator = (*FailsAllocator)(nil)
@@ -134,6 +143,13 @@ func (a *FailsAllocator) allocID(_ context.Context) (UniqueID, error) {
 		return 0, nil
 	}
 	return 0, errors.New("always fail")
+}
+
+func (a *FailsAllocator) allocN(_ int64) (UniqueID, UniqueID, error) {
+	if a.allocIDSucceed {
+		return 0, 0, nil
+	}
+	return 0, 0, errors.New("always fail")
 }
 
 func newMockAllocator() *MockAllocator {

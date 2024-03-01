@@ -31,8 +31,9 @@ import (
 	"github.com/milvus-io/milvus/internal/kv"
 	mockkv "github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
+	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/internal/mocks"
+	mocks2 "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -227,7 +228,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 		},
 	}
 
-	mockChMgr := mocks.NewChunkManager(suite.T())
+	mockChMgr := mocks2.NewChunkManager(suite.T())
 	mockChMgr.EXPECT().RootPath().Return("mockroot").Times(4)
 	mockChMgr.EXPECT().Read(mock.Anything, mock.Anything).Return(nil, nil).Twice()
 	mockChMgr.EXPECT().Write(mock.Anything, mock.Anything, mock.Anything).Return(nil).Twice()
@@ -790,6 +791,31 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 
 		err = meta.UpdateSegmentsInfo(
 			UpdateCheckPointOperator(1, false, []*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 10}}),
+		)
+		assert.NoError(t, err)
+
+		err = meta.UpdateSegmentsInfo(
+			ReplaceBinlogsOperator(1, nil, nil, nil),
+		)
+		assert.NoError(t, err)
+
+		err = meta.UpdateSegmentsInfo(
+			UpdateDmlPosition(1, nil),
+		)
+		assert.NoError(t, err)
+
+		err = meta.UpdateSegmentsInfo(
+			UpdateDmlPosition(1, &msgpb.MsgPosition{MsgID: []byte{1}}),
+		)
+		assert.NoError(t, err)
+
+		err = meta.UpdateSegmentsInfo(
+			UpdateImportedRows(1, 0),
+		)
+		assert.NoError(t, err)
+
+		err = meta.UpdateSegmentsInfo(
+			UpdateIsImporting(1, true),
 		)
 		assert.NoError(t, err)
 	})

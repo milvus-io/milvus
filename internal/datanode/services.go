@@ -1007,7 +1007,7 @@ func (node *DataNode) QueryPreImport(ctx context.Context, req *datapb.QueryPreIm
 	if task == nil || task.GetType() != importv2.PreImportTaskType {
 		status = merr.Status(importv2.WrapNoTaskError(req.GetTaskID(), importv2.PreImportTaskType))
 	}
-	log.RatedInfo(10, "datanode query preimport done", zap.String("state", task.GetState().String()),
+	log.RatedInfo(10, "datanode query preimport", zap.String("state", task.GetState().String()),
 		zap.String("reason", task.GetReason()))
 	return &datapb.QueryPreImportResponse{
 		Status:    status,
@@ -1041,7 +1041,7 @@ func (node *DataNode) QueryImport(ctx context.Context, req *datapb.QueryImportRe
 	if task == nil || task.GetType() != importv2.ImportTaskType {
 		status = merr.Status(importv2.WrapNoTaskError(req.GetTaskID(), importv2.ImportTaskType))
 	}
-	log.RatedInfo(10, "datanode query import done", zap.String("state", task.GetState().String()),
+	log.RatedInfo(10, "datanode query import", zap.String("state", task.GetState().String()),
 		zap.String("reason", task.GetReason()))
 	return &datapb.QueryImportResponse{
 		Status:             status,

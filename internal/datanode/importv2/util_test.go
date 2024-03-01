@@ -61,8 +61,8 @@ func Test_AppendSystemFieldsData(t *testing.T) {
 				Begin: 0,
 				End:   count,
 			},
+			Schema: schema,
 		},
-		schema: schema,
 	}
 
 	pkField.DataType = schemapb.DataType_Int64

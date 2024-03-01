@@ -365,6 +365,35 @@ func (m *meta) GetAllSegmentsUnsafe() []*SegmentInfo {
 	return m.segments.GetSegments()
 }
 
+func (m *meta) GetSegmentsTotalCurrentRows(segmentIDs []UniqueID) int64 {
+	m.RLock()
+	defer m.RUnlock()
+	var sum int64 = 0
+	for _, segmentID := range segmentIDs {
+		segment := m.segments.GetSegment(segmentID)
+		if segment == nil {
+			log.Warn("cannot find segment", zap.Int64("segmentID", segmentID))
+			continue
+		}
+		sum += segment.currRows
+	}
+	return sum
+}
+
+func (m *meta) GetSegmentsChannels(segmentIDs []UniqueID) (map[int64]string, error) {
+	m.RLock()
+	defer m.RUnlock()
+	segChannels := make(map[int64]string)
+	for _, segmentID := range segmentIDs {
+		segment := m.segments.GetSegment(segmentID)
+		if segment == nil {
+			return nil, errors.New(fmt.Sprintf("cannot find segment %d", segmentID))
+		}
+		segChannels[segmentID] = segment.GetInsertChannel()
+	}
+	return segChannels, nil
+}
+
 // SetState setting segment with provided ID state
 func (m *meta) SetState(segmentID UniqueID, targetState commonpb.SegmentState) error {
 	log.Debug("meta update: setting segment state",
@@ -598,6 +627,25 @@ func UpdateBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs []*dat
 	}
 }
 
+func ReplaceBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs []*datapb.FieldBinlog) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			log.Warn("meta update: replace binlog failed - segment not found",
+				zap.Int64("segmentID", segmentID))
+			return false
+		}
+
+		segment.Binlogs = binlogs
+		segment.Statslogs = statslogs
+		segment.Deltalogs = deltalogs
+		modPack.increments[segmentID] = metastore.BinlogsIncrement{
+			Segment: segment.SegmentInfo,
+		}
+		return true
+	}
+}
+
 // update startPosition
 func UpdateStartPosition(startPositions []*datapb.SegmentStartPosition) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
@@ -612,6 +660,26 @@ func UpdateStartPosition(startPositions []*datapb.SegmentStartPosition) UpdateOp
 
 			s.StartPosition = pos.GetStartPosition()
 		}
+		return true
+	}
+}
+
+func UpdateDmlPosition(segmentID int64, dmlPosition *msgpb.MsgPosition) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		if len(dmlPosition.GetMsgID()) == 0 {
+			log.Warn("meta update: update dml position failed - nil position msg id",
+				zap.Int64("segmentID", segmentID))
+			return false
+		}
+
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			log.Warn("meta update: update dml position failed - segment not found",
+				zap.Int64("segmentID", segmentID))
+			return false
+		}
+
+		segment.DmlPosition = dmlPosition
 		return true
 	}
 }
@@ -656,6 +724,34 @@ func UpdateCheckPointOperator(segmentID int64, importing bool, checkpoints []*da
 				zap.Int64("segment bin log row count (correct)", count))
 			segment.NumOfRows = count
 		}
+		return true
+	}
+}
+
+func UpdateImportedRows(segmentID int64, rows int64) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			log.Warn("meta update: update NumOfRows failed - segment not found",
+				zap.Int64("segmentID", segmentID))
+			return false
+		}
+		segment.currRows = rows
+		segment.NumOfRows = rows
+		segment.MaxRowNum = rows
+		return true
+	}
+}
+
+func UpdateIsImporting(segmentID int64, isImporting bool) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			log.Warn("meta update: update isImporting failed - segment not found",
+				zap.Int64("segmentID", segmentID))
+			return false
+		}
+		segment.IsImporting = isImporting
 		return true
 	}
 }

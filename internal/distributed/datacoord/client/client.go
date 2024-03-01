@@ -631,3 +631,21 @@ func (c *Client) GcControl(ctx context.Context, req *datapb.GcControlRequest, op
 		return client.GcControl(ctx, req)
 	})
 }
+
+func (c *Client) ImportV2(ctx context.Context, in *internalpb.ImportRequestInternal, opts ...grpc.CallOption) (*internalpb.ImportResponse, error) {
+	return wrapGrpcCall(ctx, c, func(client datapb.DataCoordClient) (*internalpb.ImportResponse, error) {
+		return client.ImportV2(ctx, in)
+	})
+}
+
+func (c *Client) GetImportProgress(ctx context.Context, in *internalpb.GetImportProgressRequest, opts ...grpc.CallOption) (*internalpb.GetImportProgressResponse, error) {
+	return wrapGrpcCall(ctx, c, func(client datapb.DataCoordClient) (*internalpb.GetImportProgressResponse, error) {
+		return client.GetImportProgress(ctx, in)
+	})
+}
+
+func (c *Client) ListImports(ctx context.Context, in *internalpb.ListImportsRequestInternal, opts ...grpc.CallOption) (*internalpb.ListImportsResponse, error) {
+	return wrapGrpcCall(ctx, c, func(client datapb.DataCoordClient) (*internalpb.ListImportsResponse, error) {
+		return client.ListImports(ctx, in)
+	})
+}

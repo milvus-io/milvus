@@ -434,7 +434,6 @@ dataCoord:
   import:
     filesPerPreImportTask: 2 # The maximum number of files allowed per pre-import task.
     taskRetention: 10800 # The retention period in seconds for tasks in the Completed or Failed state.
-    inactiveTimeout: 1800 # The timeout duration in seconds for a task in the "InProgress" state if it remains inactive (with no progress updates).
 
   enableGarbageCollection: true
   gc:

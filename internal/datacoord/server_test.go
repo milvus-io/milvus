@@ -1004,6 +1004,10 @@ func (s *spySegmentManager) allocSegmentForImport(ctx context.Context, collectio
 	panic("not implemented") // TODO: Implement
 }
 
+func (s *spySegmentManager) AllocImportSegment(ctx context.Context, taskID int64, collectionID UniqueID, partitionID UniqueID, channelName string) (*SegmentInfo, error) {
+	panic("not implemented")
+}
+
 // DropSegment drops the segment from manager.
 func (s *spySegmentManager) DropSegment(ctx context.Context, segmentID UniqueID) {
 }

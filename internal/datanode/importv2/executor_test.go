@@ -278,7 +278,7 @@ func (s *ExecutorSuite) TestExecutor_Start_Preimport() {
 	go s.executor.Start()
 	defer s.executor.Close()
 	s.Eventually(func() bool {
-		return s.manager.Get(preimportTask.GetTaskID()).GetState() == internalpb.ImportState_Completed
+		return s.manager.Get(preimportTask.GetTaskID()).GetState() == datapb.ImportTaskStateV2_Completed
 	}, 10*time.Second, 100*time.Millisecond)
 }
 
@@ -331,7 +331,7 @@ func (s *ExecutorSuite) TestExecutor_Start_Preimport_Failed() {
 	go s.executor.Start()
 	defer s.executor.Close()
 	s.Eventually(func() bool {
-		return s.manager.Get(preimportTask.GetTaskID()).GetState() == internalpb.ImportState_Failed
+		return s.manager.Get(preimportTask.GetTaskID()).GetState() == datapb.ImportTaskStateV2_Failed
 	}, 10*time.Second, 100*time.Millisecond)
 }
 
@@ -365,6 +365,8 @@ func (s *ExecutorSuite) TestExecutor_Start_Import() {
 		JobID:        10,
 		TaskID:       11,
 		CollectionID: 12,
+		PartitionIDs: []int64{13},
+		Vchannels:    []string{"v0"},
 		Schema:       s.schema,
 		Files: []*internalpb.ImportFile{
 			{
@@ -378,8 +380,8 @@ func (s *ExecutorSuite) TestExecutor_Start_Import() {
 		},
 		RequestSegments: []*datapb.ImportRequestSegment{
 			{
-				SegmentID:   13,
-				PartitionID: 14,
+				SegmentID:   14,
+				PartitionID: 13,
 				Vchannel:    "v0",
 			},
 		},
@@ -390,7 +392,7 @@ func (s *ExecutorSuite) TestExecutor_Start_Import() {
 	go s.executor.Start()
 	defer s.executor.Close()
 	s.Eventually(func() bool {
-		return s.manager.Get(importTask.GetTaskID()).GetState() == internalpb.ImportState_Completed
+		return s.manager.Get(importTask.GetTaskID()).GetState() == datapb.ImportTaskStateV2_Completed
 	}, 10*time.Second, 100*time.Millisecond)
 }
 
@@ -424,6 +426,8 @@ func (s *ExecutorSuite) TestExecutor_Start_Import_Failed() {
 		JobID:        10,
 		TaskID:       11,
 		CollectionID: 12,
+		PartitionIDs: []int64{13},
+		Vchannels:    []string{"v0"},
 		Schema:       s.schema,
 		Files: []*internalpb.ImportFile{
 			{
@@ -437,8 +441,8 @@ func (s *ExecutorSuite) TestExecutor_Start_Import_Failed() {
 		},
 		RequestSegments: []*datapb.ImportRequestSegment{
 			{
-				SegmentID:   13,
-				PartitionID: 14,
+				SegmentID:   14,
+				PartitionID: 13,
 				Vchannel:    "v0",
 			},
 		},
@@ -449,7 +453,7 @@ func (s *ExecutorSuite) TestExecutor_Start_Import_Failed() {
 	go s.executor.Start()
 	defer s.executor.Close()
 	s.Eventually(func() bool {
-		return s.manager.Get(importTask.GetTaskID()).GetState() == internalpb.ImportState_Failed
+		return s.manager.Get(importTask.GetTaskID()).GetState() == datapb.ImportTaskStateV2_Failed
 	}, 10*time.Second, 100*time.Millisecond)
 }
 
@@ -509,6 +513,8 @@ func (s *ExecutorSuite) TestExecutor_ImportFile() {
 		JobID:        10,
 		TaskID:       11,
 		CollectionID: 12,
+		PartitionIDs: []int64{13},
+		Vchannels:    []string{"v0"},
 		Schema:       s.schema,
 		Files: []*internalpb.ImportFile{
 			{
@@ -522,8 +528,8 @@ func (s *ExecutorSuite) TestExecutor_ImportFile() {
 		},
 		RequestSegments: []*datapb.ImportRequestSegment{
 			{
-				SegmentID:   13,
-				PartitionID: 14,
+				SegmentID:   14,
+				PartitionID: 13,
 				Vchannel:    "v0",
 			},
 		},
