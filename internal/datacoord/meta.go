@@ -365,6 +365,35 @@ func (m *meta) GetAllSegmentsUnsafe() []*SegmentInfo {
 	return m.segments.GetSegments()
 }
 
+func (m *meta) GetSegmentsTotalCurrentRows(segmentIDs []UniqueID) int64 {
+	m.RLock()
+	defer m.RUnlock()
+	var sum int64 = 0
+	for _, segmentID := range segmentIDs {
+		segment := m.segments.GetSegment(segmentID)
+		if segment == nil {
+			log.Warn("cannot find segment", zap.Int64("segmentID", segmentID))
+			continue
+		}
+		sum += segment.currRows
+	}
+	return sum
+}
+
+func (m *meta) GetSegmentsChannels(segmentIDs []UniqueID) (map[int64]string, error) {
+	m.RLock()
+	defer m.RUnlock()
+	segChannels := make(map[int64]string)
+	for _, segmentID := range segmentIDs {
+		segment := m.segments.GetSegment(segmentID)
+		if segment == nil {
+			return nil, errors.New(fmt.Sprintf("cannot find segment %d", segmentID))
+		}
+		segChannels[segmentID] = segment.GetInsertChannel()
+	}
+	return segChannels, nil
+}
+
 // SetState setting segment with provided ID state
 func (m *meta) SetState(segmentID UniqueID, targetState commonpb.SegmentState) error {
 	log.Debug("meta update: setting segment state",

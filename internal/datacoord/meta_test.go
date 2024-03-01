@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	mocks2 "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -227,7 +228,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 		},
 	}
 
-	mockChMgr := mocks.NewChunkManager(suite.T())
+	mockChMgr := mocks2.NewChunkManager(suite.T())
 	mockChMgr.EXPECT().RootPath().Return("mockroot").Times(4)
 	mockChMgr.EXPECT().Read(mock.Anything, mock.Anything).Return(nil, nil).Twice()
 	mockChMgr.EXPECT().Write(mock.Anything, mock.Anything, mock.Anything).Return(nil).Twice()

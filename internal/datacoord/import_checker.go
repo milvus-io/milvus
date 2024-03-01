@@ -95,13 +95,13 @@ func (c *importChecker) Start() {
 				case internalpb.ImportJobState_Importing:
 					c.checkImportingJob(job)
 				case internalpb.ImportJobState_Failed:
-					c.checkFailedJob(job)
+					c.tryFailingTasks(job)
 				}
 			}
 		case <-ticker2.C:
 			jobs := c.imeta.GetJobBy()
 			for _, job := range jobs {
-				c.checkTimeout(job)
+				c.tryTimeoutJob(job)
 				c.checkGC(job)
 			}
 			jobsByColl := lo.GroupBy(jobs, func(job ImportJob) int64 {
@@ -262,6 +262,11 @@ func (c *importChecker) checkImportingJob(job ImportJob) {
 		return
 	}
 
+	channels, err := c.meta.GetSegmentsChannels(unfinished)
+	if err != nil {
+		log.Warn("get segments channels failed", zap.Int64("jobID", job.GetJobID()), zap.Error(err))
+		return
+	}
 	for _, segmentID := range unfinished {
 		err = AddImportSegment(c.cluster, c.meta, segmentID)
 		if err != nil {
@@ -270,8 +275,7 @@ func (c *importChecker) checkImportingJob(job ImportJob) {
 			return
 		}
 		c.buildIndexCh <- segmentID // accelerate index building
-		segment := c.meta.GetSegment(segmentID)
-		channelCP := c.meta.GetChannelCheckpoint(segment.GetInsertChannel())
+		channelCP := c.meta.GetChannelCheckpoint(channels[segmentID])
 		if channelCP == nil {
 			log.Warn("nil channel checkpoint", zap.Int64("jobID", job.GetJobID()))
 			return
@@ -292,7 +296,7 @@ func (c *importChecker) checkImportingJob(job ImportJob) {
 	}
 }
 
-func (c *importChecker) checkFailedJob(job ImportJob) {
+func (c *importChecker) tryFailingTasks(job ImportJob) {
 	tasks := c.imeta.GetTaskBy(WithJob(job.GetJobID()), WithStates(datapb.ImportTaskStateV2_Pending,
 		datapb.ImportTaskStateV2_InProgress, datapb.ImportTaskStateV2_Completed))
 	if len(tasks) == 0 {
@@ -310,7 +314,7 @@ func (c *importChecker) checkFailedJob(job ImportJob) {
 	}
 }
 
-func (c *importChecker) checkTimeout(job ImportJob) {
+func (c *importChecker) tryTimeoutJob(job ImportJob) {
 	timeoutTime := tsoutil.PhysicalTime(job.GetTimeoutTs())
 	if time.Now().After(timeoutTime) {
 		log.Warn("Import timeout, expired the specified time limit",
@@ -357,21 +361,28 @@ func (c *importChecker) checkGC(job ImportJob) {
 		log.Info("job has reached the GC retention", zap.Int64("jobID", job.GetJobID()),
 			zap.Time("cleanupTime", cleanupTime), zap.Duration("GCRetention", GCRetention))
 		tasks := c.imeta.GetTaskBy(WithJob(job.GetJobID()))
+		shouldRemoveJob := true
 		for _, task := range tasks {
 			if job.GetState() == internalpb.ImportJobState_Failed && task.GetType() == ImportTaskType {
 				if len(task.(*importTask).GetSegmentIDs()) != 0 {
-					return
+					shouldRemoveJob = false
+					continue
 				}
 			}
 			if task.GetNodeID() != NullNodeID {
-				return
+				shouldRemoveJob = false
+				continue
 			}
 			err := c.imeta.RemoveTask(task.GetTaskID())
 			if err != nil {
 				log.Warn("remove task failed during GC", WrapTaskLog(task, zap.Error(err))...)
-				return
+				shouldRemoveJob = false
+				continue
 			}
 			log.Info("reached GC retention, task removed", WrapTaskLog(task)...)
+		}
+		if !shouldRemoveJob {
+			return
 		}
 		err := c.imeta.RemoveJob(job.GetJobID())
 		if err != nil {

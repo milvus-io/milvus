@@ -289,20 +289,14 @@ func getImportingProgress(jobID int64, imeta ImportMeta, meta *meta) float32 {
 		totalRows    int64
 	)
 	tasks := imeta.GetTaskBy(WithJob(jobID), WithType(ImportTaskType))
+	segmentIDs := make([]int64, 0)
 	for _, task := range tasks {
 		totalRows += lo.SumBy(task.GetFileStats(), func(file *datapb.ImportFileStats) int64 {
 			return file.GetTotalRows()
 		})
-		segmentIDs := task.(*importTask).GetSegmentIDs()
-		for _, segmentID := range segmentIDs {
-			segment := meta.GetSegment(segmentID)
-			if segment == nil {
-				log.Warn("cannot find segment, may be compacted", WrapTaskLog(task, zap.Int64("segmentID", segmentID))...)
-				continue
-			}
-			importedRows += segment.currRows
-		}
+		segmentIDs = append(segmentIDs, task.(*importTask).GetSegmentIDs()...)
 	}
+	importedRows = meta.GetSegmentsTotalCurrentRows(segmentIDs)
 	importingProgress := float32(importedRows) / float32(totalRows)
 
 	var (
@@ -348,7 +342,7 @@ func GetImportProgress(jobID int64, imeta ImportMeta, meta *meta) (int64, intern
 	case internalpb.ImportJobState_Failed:
 		return 0, internalpb.ImportJobState_Failed, job.GetReason()
 	}
-	return 0, internalpb.ImportJobState_Failed, "unknown import job state"
+	return 0, internalpb.ImportJobState_None, "unknown import job state"
 }
 
 func DropImportTask(task ImportTask, cluster Cluster, tm ImportMeta) error {

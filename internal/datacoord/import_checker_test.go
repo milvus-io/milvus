@@ -286,7 +286,7 @@ func (s *ImportCheckerSuite) TestCheckTimeout() {
 	}
 	err := s.imeta.AddTask(task)
 	s.NoError(err)
-	s.checker.checkTimeout(s.imeta.GetJob(s.jobID))
+	s.checker.tryTimeoutJob(s.imeta.GetJob(s.jobID))
 
 	job := s.imeta.GetJob(s.jobID)
 	s.Equal(internalpb.ImportJobState_Failed, job.GetState())
@@ -318,13 +318,13 @@ func (s *ImportCheckerSuite) TestCheckFailure() {
 
 	catalog.ExpectedCalls = nil
 	catalog.EXPECT().SavePreImportTask(mock.Anything).Return(errors.New("mock error"))
-	s.checker.checkFailedJob(s.imeta.GetJob(s.jobID))
+	s.checker.tryFailingTasks(s.imeta.GetJob(s.jobID))
 	tasks := s.imeta.GetTaskBy(WithJob(s.jobID), WithStates(datapb.ImportTaskStateV2_Failed))
 	s.Equal(0, len(tasks))
 
 	catalog.ExpectedCalls = nil
 	catalog.EXPECT().SavePreImportTask(mock.Anything).Return(nil)
-	s.checker.checkFailedJob(s.imeta.GetJob(s.jobID))
+	s.checker.tryFailingTasks(s.imeta.GetJob(s.jobID))
 	tasks = s.imeta.GetTaskBy(WithJob(s.jobID), WithStates(datapb.ImportTaskStateV2_Failed))
 	s.Equal(2, len(tasks))
 }
