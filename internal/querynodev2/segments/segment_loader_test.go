@@ -696,14 +696,15 @@ func (suite *SegmentLoaderDetailSuite) TestWaitSegmentLoadDone() {
 			}
 			return nil
 		})
-		infos = suite.loader.prepare(SegmentTypeSealed, 0, &querypb.SegmentLoadInfo{
+		suite.segmentManager.EXPECT().UpdateSegmentBy(mock.Anything, mock.Anything, mock.Anything).Return(0)
+		infos = suite.loader.prepare(SegmentTypeSealed, &querypb.SegmentLoadInfo{
 			SegmentID:    suite.segmentID,
 			PartitionID:  suite.partitionID,
 			CollectionID: suite.collectionID,
 			NumOfRows:    100,
 		})
 
-		err := suite.loader.waitSegmentLoadDone(context.Background(), SegmentTypeSealed, suite.segmentID)
+		err := suite.loader.waitSegmentLoadDone(context.Background(), SegmentTypeSealed, []int64{suite.segmentID}, 0)
 		suite.NoError(err)
 	})
 
@@ -724,14 +725,15 @@ func (suite *SegmentLoaderDetailSuite) TestWaitSegmentLoadDone() {
 
 			return nil
 		})
-		infos = suite.loader.prepare(SegmentTypeSealed, 0, &querypb.SegmentLoadInfo{
+
+		infos = suite.loader.prepare(SegmentTypeSealed, &querypb.SegmentLoadInfo{
 			SegmentID:    suite.segmentID,
 			PartitionID:  suite.partitionID,
 			CollectionID: suite.collectionID,
 			NumOfRows:    100,
 		})
 
-		err := suite.loader.waitSegmentLoadDone(context.Background(), SegmentTypeSealed, suite.segmentID)
+		err := suite.loader.waitSegmentLoadDone(context.Background(), SegmentTypeSealed, []int64{suite.segmentID}, 0)
 		suite.Error(err)
 	})
 
@@ -742,7 +744,7 @@ func (suite *SegmentLoaderDetailSuite) TestWaitSegmentLoadDone() {
 		suite.segmentManager.EXPECT().GetWithType(suite.segmentID, SegmentTypeSealed).RunAndReturn(func(segmentID int64, segmentType commonpb.SegmentState) Segment {
 			return nil
 		})
-		suite.loader.prepare(SegmentTypeSealed, 0, &querypb.SegmentLoadInfo{
+		suite.loader.prepare(SegmentTypeSealed, &querypb.SegmentLoadInfo{
 			SegmentID:    suite.segmentID,
 			PartitionID:  suite.partitionID,
 			CollectionID: suite.collectionID,
@@ -752,7 +754,7 @@ func (suite *SegmentLoaderDetailSuite) TestWaitSegmentLoadDone() {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 
-		err := suite.loader.waitSegmentLoadDone(ctx, SegmentTypeSealed, suite.segmentID)
+		err := suite.loader.waitSegmentLoadDone(ctx, SegmentTypeSealed, []int64{suite.segmentID}, 0)
 		suite.Error(err)
 		suite.True(merr.IsCanceledOrTimeout(err))
 	})
