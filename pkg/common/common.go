@@ -127,7 +127,8 @@ const (
 
 // common properties
 const (
-	MmapEnabledKey = "mmap.enabled"
+	MmapEnabledKey    = "mmap.enabled"
+	LazyLoadEnableKey = "lazyload.enabled"
 )
 
 const (
@@ -152,6 +153,15 @@ func IsFieldMmapEnabled(schema *schemapb.CollectionSchema, fieldID int64) bool {
 	for _, field := range schema.GetFields() {
 		if field.GetFieldID() == fieldID {
 			return IsMmapEnabled(field.GetTypeParams()...)
+		}
+	}
+	return false
+}
+
+func IsCollectionLazyLoadEnabled(kvs ...*commonpb.KeyValuePair) bool {
+	for _, kv := range kvs {
+		if kv.Key == LazyLoadEnableKey && kv.Value == "true" {
+			return true
 		}
 	}
 	return false
