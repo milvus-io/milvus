@@ -108,7 +108,7 @@ class TestDeleteParams(TestcaseBase):
         """
         # init collection with tmp_nb default data
         collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
-        error = {ct.err_code: 0, ct.err_msg: "expr cannot be None"}
+        error = {ct.err_code: 1, ct.err_msg: "expr cannot be None"}
         collection_w.delete(expr=None, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -121,7 +121,7 @@ class TestDeleteParams(TestcaseBase):
         """
         # init collection with tmp_nb default data
         collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
-        error = {ct.err_code: 0, ct.err_msg: f"expr value {expr} is illegal"}
+        error = {ct.err_code: 1, ct.err_msg: f"expr value {expr} is illegal"}
         collection_w.delete(expr, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -134,8 +134,8 @@ class TestDeleteParams(TestcaseBase):
         """
         # init collection with tmp_nb default data
         collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
-        error = {ct.err_code: 1,
-                 ct.err_msg: f"failed to create expr plan, expr = {expr}"}
+        error = {ct.err_code: 1100,
+                 ct.err_msg: f"failed to create delete plan: cannot parse expression: {expr}"}
         collection_w.delete(expr, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -241,7 +241,7 @@ class TestDeleteParams(TestcaseBase):
         expr = f'{ct.default_int64_field_name} in {[0.0, 1.0]}'
 
         # Bad exception message
-        error = {ct.err_code: 1, ct.err_msg: "failed to create expr plan,"}
+        error = {ct.err_code: 1100, ct.err_msg: "failed to create delete plan: cannot parse expression"}
         collection_w.delete(expr=expr, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -256,7 +256,7 @@ class TestDeleteParams(TestcaseBase):
         expr = f'{ct.default_int64_field_name} in {[0, 1.0]}'
 
         # Bad exception message
-        error = {ct.err_code: 1, ct.err_msg: "failed to create expr plan"}
+        error = {ct.err_code: 1100, ct.err_msg: "failed to create delete plan: cannot parse expression"}
         collection_w.delete(expr=expr, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -2081,6 +2081,7 @@ class TestDeleteComplexExpr(TestcaseBase):
         """
         # init collection with nb default data
         collection_w = self.init_collection_general(prefix, False)[0]
+        collection_w.release()
 
         # delete
         error = {ct.err_code: 101, ct.err_msg: "collection not loaded"}
@@ -2201,7 +2202,7 @@ class TestDeleteComplexExpr(TestcaseBase):
         collection_w.load()
 
         # delete with expressions
-        error = {ct.err_code: 1, ct.err_msg: f"failed to create expr plan, expr = {expressions}"}
+        error = {ct.err_code: 1100, ct.err_msg: f"failed to create delete plan: cannot parse expression: {expressions}"}
         collection_w.delete(expressions, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)

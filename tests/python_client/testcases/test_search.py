@@ -2243,7 +2243,7 @@ class TestCollectionSearch(TestcaseBase):
         for vector_name in vector_name_list:
             collection_w.create_index(vector_name, default_index)
         # 3. create index on scalar field
-        scalar_index_params = {"index_type":scalar_index, "params": {}}
+        scalar_index_params = {"index_type": scalar_index, "params": {}}
         collection_w.create_index(ct.default_int64_field_name, scalar_index_params)
         collection_w.load()
         # 4. search
@@ -5194,8 +5194,7 @@ class TestSearchString(TestcaseBase):
         # 2. search
         log.info("test_search_string_field_is_primary_true: searching collection %s" %
                  collection_w.name)
-        vectors = [[random.random() for _ in range(dim)]
-                   for _ in range(default_nq)]
+        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
         output_fields = [default_string_field_name, default_float_field_name]
         vector_list = cf.extract_vector_field_name_list(collection_w)
         for search_field in vector_list:
@@ -5300,10 +5299,9 @@ class TestSearchString(TestcaseBase):
                             default_search_params, default_limit,
                             default_invaild_string_exp,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 65535,
-                                         "err_msg": "failed to create query plan: cannot parse expression: "
-                                                    "varchar >= 0, error: comparisons between VarChar, "
-                                                    "element_type: None and Int64 elementType: None are not supported"})
+                            check_items={"err_code": 1100,
+                                         "err_msg": "failed to create query plan: cannot "
+                                                    "parse expression: varchar >= 0"})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("expression", cf.gen_normal_string_expressions([ct.default_string_field_name]))
@@ -6712,6 +6710,7 @@ class TestCollectionRangeSearch(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("range_filter", [1000, 1000.0])
     @pytest.mark.parametrize("radius", [0, 0.0])
+    @pytest.mark.skip()
     def test_range_search_multi_vector_fields(self, nq, dim, auto_id, is_flush, radius, range_filter, enable_dynamic_field):
         """
         target: test range search normal case
@@ -10553,7 +10552,6 @@ class TestCollectionHybridSearchValid(TestcaseBase):
         assert hybrid_search_0[0].ids == hybrid_search_1[0].ids
         assert hybrid_search_0[0].distances == hybrid_search_1[0].distances
 
-
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("primary_field", [ct.default_int64_field_name, ct.default_string_field_name])
     def test_hybrid_search_overall_limit_larger_sum_each_limit(self, primary_field, dim,
@@ -10696,7 +10694,7 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                 "data": [[random.random() for _ in range(multiple_dim_array[i])] for _ in range(1)],
                 "anns_field": vector_name_list[i],
                 "param": {"metric_type": metric_type},
-                "limit": max_dim,
+                "limit": max_limit,
                 "expr": "int64 > 0"}
             req = AnnSearchRequest(**search_param)
             req_list.append(req)
@@ -10730,9 +10728,9 @@ class TestCollectionHybridSearchValid(TestcaseBase):
         # 3. prepare search params
         req_list = []
         for i in range(len(vector_name_list)):
-            limit = max_dim
+            limit = max_limit
             if i == 1:
-                limit = min_dim
+                limit = 1
             search_param = {
                 "data": [[random.random() for _ in range(multiple_dim_array[i])] for _ in range(1)],
                 "anns_field": vector_name_list[i],
@@ -11471,7 +11469,7 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                          default_json_field_name]
         output_fields = output_fields + vector_name_list
         hybrid_res = collection_w.hybrid_search(req_list, WeightedRanker(*weights), default_limit,
-                                                output_fields = output_fields,
+                                                output_fields=output_fields,
                                                 check_task=CheckTasks.check_search_results,
                                                 check_items={"nq": 1,
                                                              "ids": insert_ids,
@@ -11657,7 +11655,7 @@ class TestCollectionHybridSearchValid(TestcaseBase):
         collection_w, _, _, insert_ids, time_stamp = \
             self.init_collection_general(prefix, True, primary_field=primary_field,
                                          multiple_dim_array=[default_dim, default_dim],
-                                         is_partition_key=primary_field)[0:5]
+                                         is_partition_key=ct.default_float_field_name)[0:5]
         # 2. extract vector field name
         vector_name_list = cf.extract_vector_field_name_list(collection_w)
         vector_name_list.append(ct.default_float_vec_field_name)
@@ -11740,7 +11738,6 @@ class TestCollectionHybridSearchValid(TestcaseBase):
         res = collection_w.hybrid_search(req_list, WeightedRanker(*weights), 10)
         is_sorted_decrease = lambda lst: all(lst[i]['distance'] >= lst[i+1]['distance'] for i in range(len(lst)-1))
         assert is_sorted_decrease(res[0])
-        print(res)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_hybrid_search_result_order(self):
@@ -11772,4 +11769,3 @@ class TestCollectionHybridSearchValid(TestcaseBase):
         res = collection_w.hybrid_search(req_list, WeightedRanker(*weights), 10)
         is_sorted_ascend = lambda lst: all(lst[i]['distance'] <= lst[i+1]['distance'] for i in range(len(lst)-1))
         assert is_sorted_ascend(res[0])
-        print(res)

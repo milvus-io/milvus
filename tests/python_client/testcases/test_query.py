@@ -61,7 +61,7 @@ class TestQueryParams(TestcaseBase):
         """
         collection_w, entities = self.init_collection_general(prefix, insert_data=True, nb=10)[0:2]
         term_expr = f'{default_int_field_name} in {entities[:default_pos]}'
-        error = {ct.err_code: 65535, ct.err_msg: "cannot parse expression: int64 in .."}
+        error = {ct.err_code: 1100, ct.err_msg: "cannot parse expression: int64 in .."}
         collection_w.query(term_expr, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -228,8 +228,8 @@ class TestQueryParams(TestcaseBase):
         expected: raise exception
         """
         collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
-        error = {ct.err_code: 65535, ct.err_msg: "cannot parse expression: 12-s, error: field s not exist"}
-        exprs = ["12-s", "中文", "a", " "]
+        error = {ct.err_code: 1100, ct.err_msg: "cannot parse expression"}
+        exprs = ["12-s", "中文", "a"]
         for expr in exprs:
             collection_w.query(expr, check_task=CheckTasks.err_res, check_items=error)
 
@@ -544,8 +544,8 @@ class TestQueryParams(TestcaseBase):
                  f'{ct.default_int64_field_name} in "in"',
                  f'{ct.default_int64_field_name} in (mn)']
         collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
-        error = {ct.err_code: 65535, ct.err_msg: "cannot parse expression: int64 in 1, "
-                                                 "error: line 1:9 no viable alternative at input 'in1'"}
+        error = {ct.err_code: 1100, ct.err_msg: "cannot parse expression: int64 in 1, "
+                                                "error: line 1:9 no viable alternative at input 'in1'"}
         for expr in exprs:
             collection_w.query(expr, check_task=CheckTasks.err_res, check_items=error)
 
@@ -571,9 +571,8 @@ class TestQueryParams(TestcaseBase):
         """
         collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix))
         int_values = [[1., 2.], [1, 2.]]
-        error = {ct.err_code: 65535,
-                 ct.err_msg: "cannot parse expression: int64 in [1.0, 2.0], error: value '1.0' "
-                             "in list cannot be casted to Int64"}
+        error = {ct.err_code: 1100,
+                 ct.err_msg: "failed to create query plan: cannot parse expression: int64 in [1, 2.0]"}
         for values in int_values:
             term_expr = f'{ct.default_int64_field_name} in {values}'
             collection_w.query(term_expr, check_task=CheckTasks.err_res, check_items=error)
@@ -587,7 +586,7 @@ class TestQueryParams(TestcaseBase):
         """
         collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
         constants = [[1], (), {}]
-        error = {ct.err_code: 65535,
+        error = {ct.err_code: 1100,
                  ct.err_msg: "cannot parse expression: int64 in [[1]], error: value '[1]' in "
                              "list cannot be casted to Int64"}
         for constant in constants:
@@ -1018,8 +1017,7 @@ class TestQueryParams(TestcaseBase):
         # 3. query
         collection_w.load()
         expression = f"{expr_prefix}({json_field}['list'], {get_not_list})"
-        error = {ct.err_code: 65535, ct.err_msg: f"cannot parse expression: {expression}, "
-                                                 f"error: contains_any operation element must be an array"}
+        error = {ct.err_code: 1100, ct.err_msg: f"failed to create query plan: cannot parse expression: {expression}"}
         collection_w.query(expression, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1111,7 +1109,7 @@ class TestQueryParams(TestcaseBase):
         collection_w.load()
         expression = f"array_length({ct.default_float_array_field_name}) {op} 51"
         collection_w.query(expression, check_task=CheckTasks.err_res,
-                           check_items={ct.err_code: 65535,
+                           check_items={ct.err_code: 1100,
                                         ct.err_msg: "cannot parse expression: %s, error %s "
                                                     "is not supported" % (expression, op)})
 

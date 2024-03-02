@@ -429,10 +429,9 @@ class TestInsertParams(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         data = cf.gen_default_list_data(nb=100)
         data[0][1] = 1.0
-        error = {ct.err_code: 0,
-                 ct.err_msg: "The data in the same column must be of the same type"}
-        collection_w.insert(
-            data, check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 1,
+                 ct.err_msg: "The Input data type is inconsistent with defined schema, please check it."}
+        collection_w.insert(data, check_task=CheckTasks.err_res, check_items=error)
 
 
 class TestInsertOperation(TestcaseBase):
@@ -1325,14 +1324,12 @@ class TestInsertInvalid(TestcaseBase):
         method: insert int8 out of range
         expected: raise exception
         """
-        collection_w = self.init_collection_general(
-            prefix, is_all_data_type=True)[0]
+        collection_w = self.init_collection_general(prefix, is_all_data_type=True)[0]
         data = cf.gen_dataframe_all_data_type(nb=1)
         data[ct.default_int8_field_name] = [invalid_int8]
         error = {ct.err_code: 1100, 'err_msg': "The data type of field int8 doesn't match, "
-                                            "expected: INT8, got INT64"}
-        collection_w.insert(
-            data, check_task=CheckTasks.err_res, check_items=error)
+                                               "expected: INT8, got INT64"}
+        collection_w.insert(data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("invalid_int16", [-32769, 32768])
@@ -1342,14 +1339,12 @@ class TestInsertInvalid(TestcaseBase):
         method: insert int16 out of range
         expected: raise exception
         """
-        collection_w = self.init_collection_general(
-            prefix, is_all_data_type=True)[0]
+        collection_w = self.init_collection_general(prefix, is_all_data_type=True)[0]
         data = cf.gen_dataframe_all_data_type(nb=1)
         data[ct.default_int16_field_name] = [invalid_int16]
         error = {ct.err_code: 1100, 'err_msg': "The data type of field int16 doesn't match, "
-                                            "expected: INT16, got INT64"}
-        collection_w.insert(
-            data, check_task=CheckTasks.err_res, check_items=error)
+                                               "expected: INT16, got INT64"}
+        collection_w.insert(data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("invalid_int32", [-2147483649, 2147483648])
@@ -1359,14 +1354,12 @@ class TestInsertInvalid(TestcaseBase):
         method: insert int32 out of range
         expected: raise exception
         """
-        collection_w = self.init_collection_general(
-            prefix, is_all_data_type=True)[0]
+        collection_w = self.init_collection_general(prefix, is_all_data_type=True)[0]
         data = cf.gen_dataframe_all_data_type(nb=1)
         data[ct.default_int32_field_name] = [invalid_int32]
-        error = {ct.err_code: 1, 'err_msg': "The data type of field int16 doesn't match, "
+        error = {ct.err_code: 1, 'err_msg': "The data type of field int32 doesn't match, "
                                             "expected: INT32, got INT64"}
-        collection_w.insert(
-            data, check_task=CheckTasks.err_res, check_items=error)
+        collection_w.insert(data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.skip("no error code provided now")
