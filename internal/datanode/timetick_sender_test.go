@@ -55,11 +55,14 @@ func TestTimetickManagerNormal(t *testing.T) {
 	// update first time
 	manager.update(channelName1, ts, segmentStats)
 
-	channel1SegmentStates, channelSegmentStatesExist := manager.channelStatesCaches[channelName1]
-	assert.Equal(t, true, channelSegmentStatesExist)
-	segmentState1, segmentState1Exist := channel1SegmentStates.data[ts]
-	assert.Equal(t, segmentStats[0], segmentState1[0])
-	assert.Equal(t, true, segmentState1Exist)
+	chanStats, exist := manager.statsCache[channelName1]
+	assert.Equal(t, true, exist)
+	assert.Equal(t, 1, len(chanStats.segStats))
+	seg1, exist := manager.statsCache[channelName1].segStats[segmentID1]
+	assert.Equal(t, true, exist)
+	assert.Equal(t, segmentID1, seg1.GetSegmentID())
+	assert.Equal(t, int64(100), seg1.GetNumRows())
+	assert.Equal(t, ts, seg1.ts)
 
 	// update second time
 	segmentStats2 := []*commonpb.SegmentStats{
@@ -75,12 +78,19 @@ func TestTimetickManagerNormal(t *testing.T) {
 	ts2 := ts + 100
 	manager.update(channelName1, ts2, segmentStats2)
 
-	channelSegmentStates, channelSegmentStatesExist := manager.channelStatesCaches[channelName1]
-	assert.Equal(t, true, channelSegmentStatesExist)
-
-	segmentStates, segmentStatesExist := channelSegmentStates.data[ts2]
-	assert.Equal(t, true, segmentStatesExist)
-	assert.Equal(t, 2, len(segmentStates))
+	chanStats, exist = manager.statsCache[channelName1]
+	assert.Equal(t, true, exist)
+	assert.Equal(t, 2, len(chanStats.segStats))
+	seg1, exist = manager.statsCache[channelName1].segStats[segmentID1]
+	assert.Equal(t, true, exist)
+	assert.Equal(t, segmentID1, seg1.GetSegmentID())
+	assert.Equal(t, int64(10000), seg1.GetNumRows())
+	assert.Equal(t, ts2, seg1.ts)
+	seg2, exist := manager.statsCache[channelName1].segStats[segmentID2]
+	assert.Equal(t, true, exist)
+	assert.Equal(t, segmentID2, seg2.GetSegmentID())
+	assert.Equal(t, int64(33333), seg2.GetNumRows())
+	assert.Equal(t, ts2, seg2.ts)
 
 	var segmentID3 int64 = 28259
 	var segmentID4 int64 = 28260
@@ -101,11 +111,10 @@ func TestTimetickManagerNormal(t *testing.T) {
 	err := manager.sendReport(ctx)
 	assert.NoError(t, err)
 
-	_, channelExistAfterSubmit := manager.channelStatesCaches[channelName1]
-	assert.Equal(t, false, channelExistAfterSubmit)
-
-	_, channelSegmentStatesExistAfterSubmit := manager.channelStatesCaches[channelName1]
-	assert.Equal(t, false, channelSegmentStatesExistAfterSubmit)
+	_, exist = manager.statsCache[channelName1]
+	assert.Equal(t, false, exist)
+	_, exist = manager.statsCache[channelName2]
+	assert.Equal(t, false, exist)
 
 	var segmentID5 int64 = 28261
 	var segmentID6 int64 = 28262
@@ -126,11 +135,8 @@ func TestTimetickManagerNormal(t *testing.T) {
 	err = manager.sendReport(ctx)
 	assert.NoError(t, err)
 
-	_, channelExistAfterSubmit2 := manager.channelStatesCaches[channelName1]
-	assert.Equal(t, false, channelExistAfterSubmit2)
-
-	_, channelSegmentStatesExistAfterSubmit2 := manager.channelStatesCaches[channelName1]
-	assert.Equal(t, false, channelSegmentStatesExistAfterSubmit2)
+	_, exist = manager.statsCache[channelName3]
+	assert.Equal(t, false, exist)
 }
 
 func TestTimetickManagerSendErr(t *testing.T) {
