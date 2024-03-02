@@ -25,7 +25,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 )
@@ -40,11 +39,10 @@ type SegmentsInfo struct {
 // SegmentInfo wraps datapb.SegmentInfo and patches some extra info on it
 type SegmentInfo struct {
 	*datapb.SegmentInfo
-	segmentIndexes map[UniqueID]*model.SegmentIndex
-	currRows       int64
-	allocations    []*Allocation
-	lastFlushTime  time.Time
-	isCompacting   bool
+	currRows      int64
+	allocations   []*Allocation
+	lastFlushTime time.Time
+	isCompacting  bool
 	// a cache to avoid calculate twice
 	size            atomic.Int64
 	lastWrittenTime time.Time
@@ -56,11 +54,10 @@ type SegmentInfo struct {
 // the worst case scenario is to have a segment with twice size we expects
 func NewSegmentInfo(info *datapb.SegmentInfo) *SegmentInfo {
 	return &SegmentInfo{
-		SegmentInfo:    info,
-		segmentIndexes: make(map[UniqueID]*model.SegmentIndex),
-		currRows:       info.GetNumOfRows(),
-		allocations:    make([]*Allocation, 0, 16),
-		lastFlushTime:  time.Now().Add(-1 * flushInterval),
+		SegmentInfo:   info,
+		currRows:      info.GetNumOfRows(),
+		allocations:   make([]*Allocation, 0, 16),
+		lastFlushTime: time.Now().Add(-1 * flushInterval),
 		// A growing segment from recovery can be also considered idle.
 		lastWrittenTime: getZeroTime(),
 	}
@@ -128,30 +125,6 @@ func (s *SegmentsInfo) SetSegment(segmentID UniqueID, segment *SegmentInfo) {
 	}
 	s.segments[segmentID] = segment
 	s.addCompactTo(segment)
-}
-
-// SetSegmentIndex sets SegmentIndex with segmentID, perform overwrite if already exists
-func (s *SegmentsInfo) SetSegmentIndex(segmentID UniqueID, segIndex *model.SegmentIndex) {
-	segment, ok := s.segments[segmentID]
-	if !ok {
-		log.Warn("segment missing for set segment index",
-			zap.Int64("segmentID", segmentID),
-			zap.Int64("indexID", segIndex.IndexID),
-		)
-		return
-	}
-	segment = segment.Clone()
-	if segment.segmentIndexes == nil {
-		segment.segmentIndexes = make(map[UniqueID]*model.SegmentIndex)
-	}
-	segment.segmentIndexes[segIndex.IndexID] = segIndex
-	s.segments[segmentID] = segment
-}
-
-func (s *SegmentsInfo) DropSegmentIndex(segmentID UniqueID, indexID UniqueID) {
-	if _, ok := s.segments[segmentID]; ok {
-		delete(s.segments[segmentID].segmentIndexes, indexID)
-	}
 }
 
 // SetRowCount sets rowCount info for SegmentInfo with provided segmentID
@@ -257,17 +230,12 @@ func (s *SegmentsInfo) SetIsCompacting(segmentID UniqueID, isCompacting bool) {
 // Clone deep clone the segment info and return a new instance
 func (s *SegmentInfo) Clone(opts ...SegmentInfoOption) *SegmentInfo {
 	info := proto.Clone(s.SegmentInfo).(*datapb.SegmentInfo)
-	segmentIndexes := make(map[UniqueID]*model.SegmentIndex, len(s.segmentIndexes))
-	for indexID, segIdx := range s.segmentIndexes {
-		segmentIndexes[indexID] = model.CloneSegmentIndex(segIdx)
-	}
 	cloned := &SegmentInfo{
-		SegmentInfo:    info,
-		segmentIndexes: segmentIndexes,
-		currRows:       s.currRows,
-		allocations:    s.allocations,
-		lastFlushTime:  s.lastFlushTime,
-		isCompacting:   s.isCompacting,
+		SegmentInfo:   info,
+		currRows:      s.currRows,
+		allocations:   s.allocations,
+		lastFlushTime: s.lastFlushTime,
+		isCompacting:  s.isCompacting,
 		// cannot copy size, since binlog may be changed
 		lastWrittenTime: s.lastWrittenTime,
 	}
@@ -279,13 +247,8 @@ func (s *SegmentInfo) Clone(opts ...SegmentInfoOption) *SegmentInfo {
 
 // ShadowClone shadow clone the segment and return a new instance
 func (s *SegmentInfo) ShadowClone(opts ...SegmentInfoOption) *SegmentInfo {
-	segmentIndexes := make(map[UniqueID]*model.SegmentIndex, len(s.segmentIndexes))
-	for indexID, segIdx := range s.segmentIndexes {
-		segmentIndexes[indexID] = model.CloneSegmentIndex(segIdx)
-	}
 	cloned := &SegmentInfo{
 		SegmentInfo:     s.SegmentInfo,
-		segmentIndexes:  segmentIndexes,
 		currRows:        s.currRows,
 		allocations:     s.allocations,
 		lastFlushTime:   s.lastFlushTime,

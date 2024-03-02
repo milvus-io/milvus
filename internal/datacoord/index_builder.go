@@ -121,7 +121,7 @@ func (ib *indexBuilder) Stop() {
 func (ib *indexBuilder) reloadFromKV() {
 	segments := ib.meta.GetAllSegmentsUnsafe()
 	for _, segment := range segments {
-		for _, segIndex := range segment.segmentIndexes {
+		for _, segIndex := range ib.meta.indexMeta.getSegmentIndexes(segment.ID) {
 			if segIndex.IsDeleted {
 				continue
 			}
@@ -215,7 +215,7 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 		delete(ib.tasks, buildID)
 	}
 
-	meta, exist := ib.meta.GetIndexJob(buildID)
+	meta, exist := ib.meta.indexMeta.GetIndexJob(buildID)
 	if !exist {
 		log.Ctx(ib.ctx).Debug("index task has not exist in meta table, remove task", zap.Int64("buildID", buildID))
 		deleteFunc(buildID)
@@ -225,20 +225,20 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 	switch state {
 	case indexTaskInit:
 		segment := ib.meta.GetSegment(meta.SegmentID)
-		if !isSegmentHealthy(segment) || !ib.meta.IsIndexExist(meta.CollectionID, meta.IndexID) {
+		if !isSegmentHealthy(segment) || !ib.meta.indexMeta.IsIndexExist(meta.CollectionID, meta.IndexID) {
 			log.Ctx(ib.ctx).Info("task is no need to build index, remove it", zap.Int64("buildID", buildID))
-			if err := ib.meta.DeleteTask(buildID); err != nil {
+			if err := ib.meta.indexMeta.DeleteTask(buildID); err != nil {
 				log.Ctx(ib.ctx).Warn("IndexCoord delete index failed", zap.Int64("buildID", buildID), zap.Error(err))
 				return false
 			}
 			deleteFunc(buildID)
 			return true
 		}
-		indexParams := ib.meta.GetIndexParams(meta.CollectionID, meta.IndexID)
+		indexParams := ib.meta.indexMeta.GetIndexParams(meta.CollectionID, meta.IndexID)
 		if isFlatIndex(getIndexType(indexParams)) || meta.NumRows < Params.DataCoordCfg.MinSegmentNumRowsToEnableIndex.GetAsInt64() {
 			log.Ctx(ib.ctx).Info("segment does not need index really", zap.Int64("buildID", buildID),
 				zap.Int64("segmentID", meta.SegmentID), zap.Int64("num rows", meta.NumRows))
-			if err := ib.meta.FinishTask(&indexpb.IndexTaskInfo{
+			if err := ib.meta.indexMeta.FinishTask(&indexpb.IndexTaskInfo{
 				BuildID:        buildID,
 				State:          commonpb.IndexState_Finished,
 				IndexFileKeys:  nil,
@@ -259,13 +259,13 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 			return false
 		}
 		// update version and set nodeID
-		if err := ib.meta.UpdateVersion(buildID, nodeID); err != nil {
+		if err := ib.meta.indexMeta.UpdateVersion(buildID, nodeID); err != nil {
 			log.Ctx(ib.ctx).Warn("index builder update index version failed", zap.Int64("build", buildID), zap.Error(err))
 			return false
 		}
 
 		binLogs := make([]string, 0)
-		fieldID := ib.meta.GetFieldIDByIndexID(meta.CollectionID, meta.IndexID)
+		fieldID := ib.meta.indexMeta.GetFieldIDByIndexID(meta.CollectionID, meta.IndexID)
 		for _, fieldBinLog := range segment.GetBinlogs() {
 			if fieldBinLog.GetFieldID() == fieldID {
 				for _, binLog := range fieldBinLog.GetBinlogs() {
@@ -275,7 +275,7 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 			}
 		}
 
-		typeParams := ib.meta.GetTypeParams(meta.CollectionID, meta.IndexID)
+		typeParams := ib.meta.indexMeta.GetTypeParams(meta.CollectionID, meta.IndexID)
 
 		var storageConfig *indexpb.StorageConfig
 		if Params.CommonCfg.StorageType.GetValue() == "local" {
@@ -330,7 +330,7 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 		log.Ctx(ib.ctx).Info("index task assigned successfully", zap.Int64("buildID", buildID),
 			zap.Int64("segmentID", meta.SegmentID), zap.Int64("nodeID", nodeID))
 		// update index meta state to InProgress
-		if err := ib.meta.BuildIndex(buildID); err != nil {
+		if err := ib.meta.indexMeta.BuildIndex(buildID); err != nil {
 			// need to release lock then reassign, so set task state to retry
 			log.Ctx(ib.ctx).Warn("index builder update index meta to InProgress failed", zap.Int64("buildID", buildID),
 				zap.Int64("nodeID", nodeID), zap.Error(err))
@@ -383,7 +383,7 @@ func (ib *indexBuilder) getTaskState(buildID, nodeID UniqueID) indexTaskState {
 				if info.GetState() == commonpb.IndexState_Failed || info.GetState() == commonpb.IndexState_Finished {
 					log.Ctx(ib.ctx).Info("this task has been finished", zap.Int64("buildID", info.GetBuildID()),
 						zap.String("index state", info.GetState().String()))
-					if err := ib.meta.FinishTask(info); err != nil {
+					if err := ib.meta.indexMeta.FinishTask(info); err != nil {
 						log.Ctx(ib.ctx).Warn("IndexCoord update index state fail", zap.Int64("buildID", info.GetBuildID()),
 							zap.String("index state", info.GetState().String()), zap.Error(err))
 						return indexTaskInProgress
@@ -454,7 +454,7 @@ func (ib *indexBuilder) assignTask(builderClient types.IndexNodeClient, req *ind
 func (ib *indexBuilder) nodeDown(nodeID UniqueID) {
 	defer ib.notify()
 
-	metas := ib.meta.GetMetasByNodeID(nodeID)
+	metas := ib.meta.indexMeta.GetMetasByNodeID(nodeID)
 
 	ib.taskMutex.Lock()
 	defer ib.taskMutex.Unlock()
