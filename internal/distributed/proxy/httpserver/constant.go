@@ -29,15 +29,16 @@ const (
 	HTTPReturnMessage    = "message"
 	HTTPReturnData       = "data"
 
-	HTTPReturnFieldName       = "name"
-	HTTPReturnFieldType       = "type"
-	HTTPReturnFieldPrimaryKey = "primaryKey"
-	HTTPReturnFieldAutoID     = "autoId"
-	HTTPReturnDescription     = "description"
+	HTTPReturnFieldName         = "name"
+	HTTPReturnFieldType         = "type"
+	HTTPReturnFieldPrimaryKey   = "primaryKey"
+	HTTPReturnFieldPartitionKey = "partitionKey"
+	HTTPReturnFieldAutoID       = "autoId"
+	HTTPReturnDescription       = "description"
 
-	HTTPReturnIndexName        = "indexName"
-	HTTPReturnIndexField       = "fieldName"
-	HTTPReturnIndexMetricsType = "metricType"
+	HTTPIndexName             = "indexName"
+	HTTPIndexField            = "fieldName"
+	HTTPReturnIndexMetricType = "metricType"
 
 	HTTPReturnDistance = "distance"
 
