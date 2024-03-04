@@ -123,6 +123,15 @@ func checkGetPrimaryKey(coll *schemapb.CollectionSchema, idResult gjson.Result) 
 }
 
 // --------------------- collection details --------------------- //
+
+func IsVectorField(field *schemapb.FieldSchema) bool {
+	switch field.DataType {
+	case schemapb.DataType_BinaryVector, schemapb.DataType_FloatVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
+		return true
+	}
+	return false
+}
+
 func printFields(fields []*schemapb.FieldSchema) []gin.H {
 	var res []gin.H
 	for _, field := range fields {
@@ -133,8 +142,7 @@ func printFields(fields []*schemapb.FieldSchema) []gin.H {
 			HTTPReturnFieldAutoID:       field.AutoID,
 			HTTPReturnDescription:       field.Description,
 		}
-		if field.DataType == schemapb.DataType_BinaryVector || field.DataType == schemapb.DataType_FloatVector ||
-			field.DataType == schemapb.DataType_Float16Vector || field.DataType == schemapb.DataType_BFloat16Vector {
+		if IsVectorField(field) {
 			dim, _ := getDim(field)
 			fieldDetail[HTTPReturnFieldType] = field.DataType.String() + "(" + strconv.FormatInt(dim, 10) + ")"
 		} else if field.DataType == schemapb.DataType_VarChar {
@@ -1037,9 +1045,9 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 				case schemapb.DataType_FloatVector:
 					row[fieldDataList[j].FieldName] = fieldDataList[j].GetVectors().GetFloatVector().Data[i*fieldDataList[j].GetVectors().GetDim() : (i+1)*fieldDataList[j].GetVectors().GetDim()]
 				case schemapb.DataType_Float16Vector:
-					row[fieldDataList[j].FieldName] = fieldDataList[j].GetVectors().GetBinaryVector()[i*(fieldDataList[j].GetVectors().GetDim()*2) : (i+1)*(fieldDataList[j].GetVectors().GetDim()*2)]
+					row[fieldDataList[j].FieldName] = fieldDataList[j].GetVectors().GetFloat16Vector()[i*(fieldDataList[j].GetVectors().GetDim()*2) : (i+1)*(fieldDataList[j].GetVectors().GetDim()*2)]
 				case schemapb.DataType_BFloat16Vector:
-					row[fieldDataList[j].FieldName] = fieldDataList[j].GetVectors().GetBinaryVector()[i*(fieldDataList[j].GetVectors().GetDim()*2) : (i+1)*(fieldDataList[j].GetVectors().GetDim()*2)]
+					row[fieldDataList[j].FieldName] = fieldDataList[j].GetVectors().GetBfloat16Vector()[i*(fieldDataList[j].GetVectors().GetDim()*2) : (i+1)*(fieldDataList[j].GetVectors().GetDim()*2)]
 				case schemapb.DataType_Array:
 					row[fieldDataList[j].FieldName] = fieldDataList[j].GetScalars().GetArrayData().Data[i]
 				case schemapb.DataType_JSON:
