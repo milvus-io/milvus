@@ -137,12 +137,28 @@ func (m *Manager) GetConfigs() map[string]string {
 func (m *Manager) GetBy(filters ...Filter) map[string]string {
 	matchedConfig := make(map[string]string)
 
-	for key, value := range m.GetConfigs() {
+	m.keySourceMap.Range(func(key, value string) bool {
 		newkey, ok := filterate(key, filters...)
-		if ok {
-			matchedConfig[newkey] = value
+		if !ok {
+			return true
 		}
-	}
+		sValue, err := m.GetConfig(key)
+		if err != nil {
+			return true
+		}
+
+		matchedConfig[newkey] = sValue
+		return true
+	})
+
+	m.overlays.Range(func(key, value string) bool {
+		newkey, ok := filterate(key, filters...)
+		if !ok {
+			return true
+		}
+		matchedConfig[newkey] = value
+		return true
+	})
 
 	return matchedConfig
 }

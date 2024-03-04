@@ -91,6 +91,8 @@ type ComponentParam struct {
 	IndexNodeGrpcClientCfg  GrpcClientConfig
 
 	IntegrationTestCfg integrationTestConfig
+
+	RuntimeConfig runtimeConfig
 }
 
 // Init initialize once
@@ -3502,6 +3504,13 @@ func (p *indexNodeConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.GracefulStopTimeout.Init(base.mgr)
+}
+
+type runtimeConfig struct {
+	CreateTime RuntimeParamItem
+	UpdateTime RuntimeParamItem
+	Role       RuntimeParamItem
+	NodeID     RuntimeParamItem
 }
 
 type integrationTestConfig struct {
