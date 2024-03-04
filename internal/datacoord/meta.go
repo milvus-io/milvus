@@ -34,9 +34,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore"
-	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -59,12 +57,7 @@ type meta struct {
 	channelCPs   *channelCPs                  // vChannel -> channel checkpoint/see position
 	chunkManager storage.ChunkManager
 
-	// collectionIndexes records which indexes are on the collection
-	// collID -> indexID -> index
-	indexes map[UniqueID]map[UniqueID]*model.Index
-	// buildID2Meta records the meta information of the segment
-	// buildID -> segmentIndex
-	buildID2SegmentIndex map[UniqueID]*model.SegmentIndex
+	indexMeta *indexMeta
 }
 
 type channelCPs struct {
@@ -96,17 +89,21 @@ type collectionInfo struct {
 
 // NewMeta creates meta from provided `kv.TxnKV`
 func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManager storage.ChunkManager) (*meta, error) {
-	mt := &meta{
-		ctx:                  ctx,
-		catalog:              catalog,
-		collections:          make(map[UniqueID]*collectionInfo),
-		segments:             NewSegmentsInfo(),
-		channelCPs:           newChannelCps(),
-		chunkManager:         chunkManager,
-		indexes:              make(map[UniqueID]map[UniqueID]*model.Index),
-		buildID2SegmentIndex: make(map[UniqueID]*model.SegmentIndex),
+	indexMeta, err := newIndexMeta(ctx, catalog)
+	if err != nil {
+		return nil, err
 	}
-	err := mt.reloadFromKV()
+
+	mt := &meta{
+		ctx:          ctx,
+		catalog:      catalog,
+		collections:  make(map[UniqueID]*collectionInfo),
+		segments:     NewSegmentsInfo(),
+		channelCPs:   newChannelCps(),
+		indexMeta:    indexMeta,
+		chunkManager: chunkManager,
+	}
+	err = mt.reloadFromKV()
 	if err != nil {
 		return nil, err
 	}
@@ -159,25 +156,6 @@ func (m *meta) reloadFromKV() error {
 		// for 2.2.2 issue https://github.com/milvus-io/milvus/issues/22181
 		pos.ChannelName = vChannel
 		m.channelCPs.checkpoints[vChannel] = pos
-	}
-
-	// load field indexes
-	fieldIndexes, err := m.catalog.ListIndexes(m.ctx)
-	if err != nil {
-		log.Error("DataCoord meta reloadFromKV load field indexes fail", zap.Error(err))
-		return err
-	}
-	for _, fieldIndex := range fieldIndexes {
-		m.updateCollectionIndex(fieldIndex)
-	}
-	segmentIndexes, err := m.catalog.ListSegmentIndexes(m.ctx)
-	if err != nil {
-		log.Error("DataCoord meta reloadFromKV load segment indexes fail", zap.Error(err))
-		return err
-	}
-	for _, segIdx := range segmentIndexes {
-		m.updateSegmentIndex(segIdx)
-		metrics.FlushedSegmentFileNum.WithLabelValues(metrics.IndexFileLabel).Observe(float64(len(segIdx.IndexFileKeys)))
 	}
 	log.Info("DataCoord meta reloadFromKV done", zap.Duration("duration", record.ElapseSpan()))
 	return nil
@@ -1054,33 +1032,6 @@ func (m *meta) SelectSegments(selector SegmentInfoSelector) []*SegmentInfo {
 	for _, info := range segments {
 		if selector(info) {
 			ret = append(ret, info)
-		}
-	}
-	return ret
-}
-
-func (m *meta) SelectSegmentIndexes(selector SegmentInfoSelector) map[int64]*indexStats {
-	m.RLock()
-	defer m.RUnlock()
-	ret := make(map[int64]*indexStats)
-	for _, info := range m.segments.segments {
-		if selector(info) {
-			s := &indexStats{
-				ID:             info.GetID(),
-				numRows:        info.GetNumOfRows(),
-				compactionFrom: info.GetCompactionFrom(),
-				indexStates:    make(map[int64]*indexpb.SegmentIndexState),
-				state:          info.GetState(),
-				lastExpireTime: info.GetLastExpireTime(),
-			}
-			for indexID, segIndex := range info.segmentIndexes {
-				s.indexStates[indexID] = &indexpb.SegmentIndexState{
-					SegmentID:  segIndex.SegmentID,
-					State:      segIndex.IndexState,
-					FailReason: segIndex.FailReason,
-				}
-			}
-			ret[info.GetID()] = s
 		}
 	}
 	return ret

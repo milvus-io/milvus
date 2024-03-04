@@ -460,9 +460,9 @@ func (gc *garbageCollector) removeLogs(logs []*datapb.Binlog) bool {
 
 func (gc *garbageCollector) recycleUnusedIndexes() {
 	log.Info("start recycleUnusedIndexes")
-	deletedIndexes := gc.meta.GetDeletedIndexes()
+	deletedIndexes := gc.meta.indexMeta.GetDeletedIndexes()
 	for _, index := range deletedIndexes {
-		if err := gc.meta.RemoveIndex(index.CollectionID, index.IndexID); err != nil {
+		if err := gc.meta.indexMeta.RemoveIndex(index.CollectionID, index.IndexID); err != nil {
 			log.Warn("remove index on collection fail", zap.Int64("collectionID", index.CollectionID),
 				zap.Int64("indexID", index.IndexID), zap.Error(err))
 			continue
@@ -471,10 +471,10 @@ func (gc *garbageCollector) recycleUnusedIndexes() {
 }
 
 func (gc *garbageCollector) recycleUnusedSegIndexes() {
-	segIndexes := gc.meta.GetAllSegIndexes()
+	segIndexes := gc.meta.indexMeta.GetAllSegIndexes()
 	for _, segIdx := range segIndexes {
-		if gc.meta.GetSegment(segIdx.SegmentID) == nil || !gc.meta.IsIndexExist(segIdx.CollectionID, segIdx.IndexID) {
-			if err := gc.meta.RemoveSegmentIndex(segIdx.CollectionID, segIdx.PartitionID, segIdx.SegmentID, segIdx.IndexID, segIdx.BuildID); err != nil {
+		if gc.meta.GetSegment(segIdx.SegmentID) == nil || !gc.meta.indexMeta.IsIndexExist(segIdx.CollectionID, segIdx.IndexID) {
+			if err := gc.meta.indexMeta.RemoveSegmentIndex(segIdx.CollectionID, segIdx.PartitionID, segIdx.SegmentID, segIdx.IndexID, segIdx.BuildID); err != nil {
 				log.Warn("delete index meta from etcd failed, wait to retry", zap.Int64("buildID", segIdx.BuildID),
 					zap.Int64("segmentID", segIdx.SegmentID), zap.Int64("nodeID", segIdx.NodeID), zap.Error(err))
 				continue
@@ -507,7 +507,7 @@ func (gc *garbageCollector) recycleUnusedIndexFiles() {
 			continue
 		}
 		log.Info("garbageCollector will recycle index files", zap.Int64("buildID", buildID))
-		canRecycle, segIdx := gc.meta.CleanSegmentIndex(buildID)
+		canRecycle, segIdx := gc.meta.indexMeta.CleanSegmentIndex(buildID)
 		if !canRecycle {
 			// Even if the index is marked as deleted, the index file will not be recycled, wait for the next gc,
 			// and delete all index files about the buildID at one time.
