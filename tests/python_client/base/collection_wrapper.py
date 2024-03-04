@@ -397,3 +397,19 @@ class ApiCollectionWrapper:
         res, check = api_request([self.collection.describe, timeout])
         check_result = ResponseChecker(res, func_name, check_task, check_items, check).run()
         return res, check_result
+
+    @trace()
+    def alter_index(self, index_name, extra_params={}, timeout=None,  check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.collection.alter_index, index_name, extra_params, timeout], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def set_properties(self, extra_params={}, timeout=None,  check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.collection.set_properties, extra_params, timeout], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
