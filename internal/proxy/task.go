@@ -881,6 +881,18 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 	t.Base.MsgType = commonpb.MsgType_AlterCollection
 	t.Base.SourceID = paramtable.GetNodeID()
 
+	// The proto definition of AlterCollectionRequest accepts a collection name or a collection id.
+	// Usually, the client input a collection name, we use the collection name
+	// to get collection id to call isCollectionLoaded().
+	collName := t.GetCollectionName()
+	if collName != "" {
+		collectionID, err := globalMetaCache.GetCollectionID(ctx, t.GetDbName(), collName)
+		if err != nil {
+			return err
+		}
+		t.CollectionID = collectionID
+	}
+
 	if hasMmapProp(t.Properties...) || hasLazyLoadProp(t.Properties...) {
 		loaded, err := isCollectionLoaded(ctx, t.queryCoord, t.CollectionID)
 		if err != nil {

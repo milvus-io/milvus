@@ -3605,14 +3605,54 @@ func TestAlterCollectionCheckLoaded(t *testing.T) {
 		CollectionIDs:       []int64{1},
 		InMemoryPercentages: []int64{100},
 	}, nil)
+
+	t.Run("collection id not loaded", func(t *testing.T) {
+		task := &alterCollectionTask{
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+				Base:         &commonpb.MsgBase{},
+				CollectionID: 1,
+				Properties:   []*commonpb.KeyValuePair{{Key: common.MmapEnabledKey, Value: "true"}},
+			},
+			queryCoord: qc,
+		}
+		err := task.PreExecute(context.Background())
+		assert.Equal(t, merr.Code(merr.ErrCollectionLoaded), merr.Code(err))
+	})
+
 	task := &alterCollectionTask{
 		AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
-			Base:         &commonpb.MsgBase{},
-			CollectionID: 1,
-			Properties:   []*commonpb.KeyValuePair{{Key: common.MmapEnabledKey, Value: "true"}},
+			Base:           &commonpb.MsgBase{},
+			CollectionName: "dummy",
+			Properties:     []*commonpb.KeyValuePair{{Key: common.MmapEnabledKey, Value: "true"}},
 		},
 		queryCoord: qc,
 	}
-	err := task.PreExecute(context.Background())
-	assert.Equal(t, merr.Code(merr.ErrCollectionLoaded), merr.Code(err))
+
+	t.Run("get collection id error", func(t *testing.T) {
+		cache := NewMockCache(t)
+		globalMetaCache = cache
+
+		cache.On("GetCollectionID",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+		).Return(UniqueID(1), errors.New("error mock GetCollectionID"))
+
+		err := task.PreExecute(context.Background())
+		assert.Error(t, err)
+	})
+
+	t.Run("collection name not loaded", func(t *testing.T) {
+		cache := NewMockCache(t)
+		globalMetaCache = cache
+
+		cache.On("GetCollectionID",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+		).Return(UniqueID(1), nil)
+
+		err := task.PreExecute(context.Background())
+		assert.Equal(t, merr.Code(merr.ErrCollectionLoaded), merr.Code(err))
+	})
 }
