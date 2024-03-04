@@ -58,7 +58,7 @@ type SessionManager interface {
 	SyncSegments(nodeID int64, req *datapb.SyncSegmentsRequest) error
 	Import(ctx context.Context, nodeID int64, itr *datapb.ImportTaskRequest)
 	AddImportSegment(ctx context.Context, nodeID int64, req *datapb.AddImportSegmentRequest) (*datapb.AddImportSegmentResponse, error)
-	GetCompactionState() map[int64]*datapb.CompactionStateResult
+	GetCompactionPlanResults() map[int64]*typeutil.Pair[int64, *datapb.CompactionStateResult]
 	CheckHealth(ctx context.Context) error
 	Close()
 }
@@ -260,11 +260,11 @@ func (c *SessionManagerImpl) execImport(ctx context.Context, nodeID int64, itr *
 	log.Info("success to import", zap.Int64("node", nodeID), zap.Any("import task", itr))
 }
 
-func (c *SessionManagerImpl) GetCompactionState() map[int64]*datapb.CompactionStateResult {
+func (c *SessionManagerImpl) GetCompactionPlanResults() map[int64]*typeutil.Pair[int64, *datapb.CompactionStateResult] {
 	wg := sync.WaitGroup{}
 	ctx := context.Background()
 
-	plans := typeutil.NewConcurrentMap[int64, *datapb.CompactionStateResult]()
+	plans := typeutil.NewConcurrentMap[int64, *typeutil.Pair[int64, *datapb.CompactionStateResult]]()
 	c.sessions.RLock()
 	for nodeID, s := range c.sessions.data {
 		wg.Add(1)
@@ -293,15 +293,16 @@ func (c *SessionManagerImpl) GetCompactionState() map[int64]*datapb.CompactionSt
 				return
 			}
 			for _, rst := range resp.GetResults() {
-				plans.Insert(rst.PlanID, rst)
+				nodeRst := typeutil.NewPair(nodeID, rst)
+				plans.Insert(rst.PlanID, &nodeRst)
 			}
 		}(nodeID, s)
 	}
 	c.sessions.RUnlock()
 	wg.Wait()
 
-	rst := make(map[int64]*datapb.CompactionStateResult)
-	plans.Range(func(planID int64, result *datapb.CompactionStateResult) bool {
+	rst := make(map[int64]*typeutil.Pair[int64, *datapb.CompactionStateResult])
+	plans.Range(func(planID int64, result *typeutil.Pair[int64, *datapb.CompactionStateResult]) bool {
 		rst[planID] = result
 		return true
 	})

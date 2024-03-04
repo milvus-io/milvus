@@ -760,19 +760,24 @@ func (s *DataNodeServicesSuite) TestSyncSegments() {
 		s3.segmentID: &s3,
 	}
 
-	s.Run("invalid compacted from", func() {
+	s.Run("empty compactedFrom", func() {
 		req := &datapb.SyncSegmentsRequest{
 			CompactedTo: 400,
 			NumOfRows:   100,
 		}
-
-		req.CompactedFrom = []UniqueID{}
 		status, err := s.node.SyncSegments(s.ctx, req)
-		s.Assert().NoError(err)
-		s.Assert().False(merr.Ok(status))
+		s.NoError(err)
+		s.True(merr.Ok(status))
+	})
 
-		req.CompactedFrom = []UniqueID{101, 201}
-		status, err = s.node.SyncSegments(s.ctx, req)
+	s.Run("invalid compacted from", func() {
+		req := &datapb.SyncSegmentsRequest{
+			CompactedTo:   400,
+			NumOfRows:     100,
+			CompactedFrom: []UniqueID{101, 201},
+		}
+
+		status, err := s.node.SyncSegments(s.ctx, req)
 		s.Assert().NoError(err)
 		s.Assert().True(merr.Ok(status))
 	})
