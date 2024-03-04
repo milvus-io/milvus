@@ -342,7 +342,6 @@ message SegmentLoadInfo {
     int64 readableVersion = 16;
     data.SegmentLevel level = 17;
     int64 storageVersion = 18;
-    bool lazy_load = 19;
 }
 
 message FieldIndexInfo {
