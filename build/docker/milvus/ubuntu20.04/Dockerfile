@@ -24,6 +24,9 @@ COPY ./configs/ /milvus/configs/
 
 COPY ./lib/ /milvus/lib/
 
+RUN chgrp -R root /milvus && \
+    chmod -R g+rwx /milvus
+
 ENV PATH=/milvus/bin:$PATH
 ENV LD_LIBRARY_PATH=/milvus/lib:$LD_LIBRARY_PATH:/usr/lib
 ENV LD_PRELOAD=/milvus/lib/libjemalloc.so
