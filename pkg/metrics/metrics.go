@@ -96,6 +96,7 @@ const (
 	lockSource               = "lock_source"
 	lockType                 = "lock_type"
 	lockOp                   = "lock_op"
+	loadTypeName             = "load_type"
 )
 
 var (
