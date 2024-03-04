@@ -60,6 +60,7 @@ func TestAccessLogger_InitFailed(t *testing.T) {
 }
 
 func TestAccessLogger_Basic(t *testing.T) {
+	paramtable.Init()
 	var Params paramtable.ComponentParam
 
 	Params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))

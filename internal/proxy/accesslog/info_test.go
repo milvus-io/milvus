@@ -46,6 +46,10 @@ type GrpcAccessInfoSuite struct {
 	info     *GrpcAccessInfo
 }
 
+func (s *GrpcAccessInfoSuite) SetupSuite() {
+	paramtable.Init()
+}
+
 func (s *GrpcAccessInfoSuite) SetupTest() {
 	s.username = "test-user"
 	s.traceID = "test-trace"
