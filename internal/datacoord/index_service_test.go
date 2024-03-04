@@ -996,7 +996,7 @@ func TestServer_DescribeIndex(t *testing.T) {
 				},
 				segID - 1: {
 					SegmentInfo: &datapb.SegmentInfo{
-						ID:             segID,
+						ID:             segID - 1,
 						CollectionID:   collID,
 						PartitionID:    partID,
 						NumOfRows:      10000,
