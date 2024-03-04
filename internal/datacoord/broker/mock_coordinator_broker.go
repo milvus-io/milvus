@@ -54,8 +54,8 @@ type MockBroker_DescribeCollectionInternal_Call struct {
 }
 
 // DescribeCollectionInternal is a helper method to define mock.On call
-//  - ctx context.Context
-//  - collectionID int64
+//   - ctx context.Context
+//   - collectionID int64
 func (_e *MockBroker_Expecter) DescribeCollectionInternal(ctx interface{}, collectionID interface{}) *MockBroker_DescribeCollectionInternal_Call {
 	return &MockBroker_DescribeCollectionInternal_Call{Call: _e.mock.On("DescribeCollectionInternal", ctx, collectionID)}
 }
@@ -107,8 +107,8 @@ type MockBroker_HasCollection_Call struct {
 }
 
 // HasCollection is a helper method to define mock.On call
-//  - ctx context.Context
-//  - collectionID int64
+//   - ctx context.Context
+//   - collectionID int64
 func (_e *MockBroker_Expecter) HasCollection(ctx interface{}, collectionID interface{}) *MockBroker_HasCollection_Call {
 	return &MockBroker_HasCollection_Call{Call: _e.mock.On("HasCollection", ctx, collectionID)}
 }
@@ -162,7 +162,7 @@ type MockBroker_ListDatabases_Call struct {
 }
 
 // ListDatabases is a helper method to define mock.On call
-//  - ctx context.Context
+//   - ctx context.Context
 func (_e *MockBroker_Expecter) ListDatabases(ctx interface{}) *MockBroker_ListDatabases_Call {
 	return &MockBroker_ListDatabases_Call{Call: _e.mock.On("ListDatabases", ctx)}
 }
@@ -216,8 +216,8 @@ type MockBroker_ShowCollections_Call struct {
 }
 
 // ShowCollections is a helper method to define mock.On call
-//  - ctx context.Context
-//  - dbName string
+//   - ctx context.Context
+//   - dbName string
 func (_e *MockBroker_Expecter) ShowCollections(ctx interface{}, dbName interface{}) *MockBroker_ShowCollections_Call {
 	return &MockBroker_ShowCollections_Call{Call: _e.mock.On("ShowCollections", ctx, dbName)}
 }
@@ -271,8 +271,8 @@ type MockBroker_ShowPartitionsInternal_Call struct {
 }
 
 // ShowPartitionsInternal is a helper method to define mock.On call
-//  - ctx context.Context
-//  - collectionID int64
+//   - ctx context.Context
+//   - collectionID int64
 func (_e *MockBroker_Expecter) ShowPartitionsInternal(ctx interface{}, collectionID interface{}) *MockBroker_ShowPartitionsInternal_Call {
 	return &MockBroker_ShowPartitionsInternal_Call{Call: _e.mock.On("ShowPartitionsInternal", ctx, collectionID)}
 }
