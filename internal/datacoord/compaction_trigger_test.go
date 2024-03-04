@@ -1157,7 +1157,7 @@ func Test_compactionTrigger_PrioritizedCandi(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tt.fields.meta.channelCPs.Insert("", &msgpb.MsgPosition{
+			tt.fields.meta.channelCPs.Insert("ch1", &msgpb.MsgPosition{
 				Timestamp: tsoutil.ComposeTSByTime(time.Now(), 0),
 				MsgID:     []byte{1, 2, 3, 4},
 			})
@@ -1347,7 +1347,7 @@ func Test_compactionTrigger_SmallCandi(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tt.fields.meta.channelCPs.Insert("", &msgpb.MsgPosition{
+			tt.fields.meta.channelCPs.Insert("ch1", &msgpb.MsgPosition{
 				Timestamp: tsoutil.ComposeTSByTime(time.Now(), 0),
 				MsgID:     []byte{1, 2, 3, 4},
 			})
@@ -1536,7 +1536,7 @@ func Test_compactionTrigger_SqueezeNonPlannedSegs(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tt.fields.meta.channelCPs.Insert("", &msgpb.MsgPosition{
+			tt.fields.meta.channelCPs.Insert("ch1", &msgpb.MsgPosition{
 				Timestamp: tsoutil.ComposeTSByTime(time.Now(), 0),
 				MsgID:     []byte{1, 2, 3, 4},
 			})
@@ -1712,7 +1712,7 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tt.fields.meta.channelCPs.Insert("", &msgpb.MsgPosition{
+			tt.fields.meta.channelCPs.Insert("ch1", &msgpb.MsgPosition{
 				Timestamp: tsoutil.ComposeTSByTime(time.Now(), 0),
 				MsgID:     []byte{1, 2, 3, 4},
 			})
@@ -2562,6 +2562,10 @@ func (s *CompactionTriggerSuite) TestHandleGlobalSignal() {
 		ptKey := paramtable.Get().DataCoordCfg.ChannelCheckpointMaxLag.Key
 		paramtable.Get().Save(ptKey, "900")
 		defer paramtable.Get().Reset(ptKey)
+
+		s.compactionHandler.EXPECT().isFull().Return(false)
+		s.allocator.EXPECT().allocTimestamp(mock.Anything).Return(10000, nil)
+		s.allocator.EXPECT().allocID(mock.Anything).Return(20000, nil)
 
 		s.meta.channelCPs.Insert(s.channel, &msgpb.MsgPosition{
 			ChannelName: s.channel,

@@ -419,11 +419,6 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) error {
 		return nil
 	}
 
-	if !t.isChannelCheckpointHealthy(signal.channel) && !signal.isForce {
-		log.Warn("compaction plan skipped due to channel checkpoint lag", zap.String("channel", signal.channel))
-		return merr.WrapErrServiceInternal("channel checkpoint lag", signal.channel)
-	}
-
 	ts, err := t.allocTs()
 	if err != nil {
 		log.Warn("allocate ts failed, skip to handle compaction")
@@ -438,6 +433,11 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) error {
 			log.Warn("compaction plan skipped due to handler full")
 			break
 		}
+		if !t.isChannelCheckpointHealthy(group.channelName) && !signal.isForce {
+			log.Warn("compaction plan skipped due to channel checkpoint lag", zap.String("channel", signal.channel))
+			return merr.WrapErrServiceInternal("channel checkpoint lag", signal.channel)
+		}
+
 		if Params.DataCoordCfg.IndexBasedCompaction.GetAsBool() {
 			group.segments = FilterInIndexedSegments(t.handler, t.meta, group.segments...)
 		}
