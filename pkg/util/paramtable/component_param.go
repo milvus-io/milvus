@@ -1049,8 +1049,8 @@ type proxyConfig struct {
 	AccessLog AccessLogConfig
 
 	// connection manager
-	ConnectionCheckInterval ParamItem `refreshable:"true"`
-	ConnectionClientInfoTTL ParamItem `refreshable:"true"`
+	ConnectionCheckIntervalSeconds ParamItem `refreshable:"true"`
+	ConnectionClientInfoTTLSeconds ParamItem `refreshable:"true"`
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 }
@@ -1369,23 +1369,23 @@ please adjust in embedded Milvus: false`,
 	}
 	p.GracefulStopTimeout.Init(base.mgr)
 
-	p.ConnectionCheckInterval = ParamItem{
+	p.ConnectionCheckIntervalSeconds = ParamItem{
 		Key:          "proxy.connectionMgrCheckInterval",
 		Version:      "2.3.11",
 		Doc:          "the interval time(in seconds) for connection manager to scan inactive client info",
 		DefaultValue: "120",
 		Export:       true,
 	}
-	p.ConnectionCheckInterval.Init(base.mgr)
+	p.ConnectionCheckIntervalSeconds.Init(base.mgr)
 
-	p.ConnectionClientInfoTTL = ParamItem{
+	p.ConnectionClientInfoTTLSeconds = ParamItem{
 		Key:          "proxy.connectionClientInfoTTL",
 		Version:      "2.3.11",
 		Doc:          "inactive client info TTL duration, in seconds",
 		DefaultValue: "86400",
 		Export:       true,
 	}
-	p.ConnectionClientInfoTTL.Init(base.mgr)
+	p.ConnectionClientInfoTTLSeconds.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

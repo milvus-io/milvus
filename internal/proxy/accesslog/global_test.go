@@ -33,6 +33,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
+func TestMain(m *testing.M) {
+	paramtable.Init()
+	os.Exit(m.Run())
+}
+
 func TestAccessLogger_NotEnable(t *testing.T) {
 	var Params paramtable.ComponentParam
 
@@ -60,7 +65,6 @@ func TestAccessLogger_InitFailed(t *testing.T) {
 }
 
 func TestAccessLogger_Basic(t *testing.T) {
-	paramtable.Init()
 	var Params paramtable.ComponentParam
 
 	Params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))

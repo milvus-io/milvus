@@ -15,10 +15,10 @@ func TestConnectionManager(t *testing.T) {
 	paramtable.Init()
 
 	pt := paramtable.Get()
-	pt.Save(pt.ProxyCfg.ConnectionCheckInterval.Key, "2")
-	pt.Save(pt.ProxyCfg.ConnectionClientInfoTTL.Key, "1")
-	defer pt.Reset(pt.ProxyCfg.ConnectionCheckInterval.Key)
-	defer pt.Reset(pt.ProxyCfg.ConnectionClientInfoTTL.Key)
+	pt.Save(pt.ProxyCfg.ConnectionCheckIntervalSeconds.Key, "2")
+	pt.Save(pt.ProxyCfg.ConnectionClientInfoTTLSeconds.Key, "1")
+	defer pt.Reset(pt.ProxyCfg.ConnectionCheckIntervalSeconds.Key)
+	defer pt.Reset(pt.ProxyCfg.ConnectionClientInfoTTLSeconds.Key)
 	s := newConnectionManager()
 	defer s.Stop()
 
