@@ -15,11 +15,6 @@ const (
 	// MaxNList is the upper limit of nlist that used in Index IVFxxx
 	MaxNList = 65536
 
-	// DefaultMinDim is the smallest dimension supported in Milvus
-	DefaultMinDim = 1
-	// DefaultMaxDim is the largest dimension supported in Milvus
-	DefaultMaxDim = 32768
-
 	HNSWMinEfConstruction = 1
 	HNSWMaxEfConstruction = 2147483647
 	HNSWMinM              = 1

@@ -473,7 +473,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         """
         # 1. create a collection
         nb = 1
-        dim = 1
+        dim = 2
         fields = [cf.gen_int64_field("int64_1"), cf.gen_int64_field("int64_2"),
                   cf.gen_float_vec_field(dim=dim)]
         schema = cf.gen_collection_schema(fields=fields, primary_field="int64_1")
@@ -3402,7 +3402,7 @@ class TestCollectionSearch(TestcaseBase):
         """
         # 1. create a collection
         nb = 10
-        dim = 1
+        dim = 2
         fields = [cf.gen_int64_field("int64_1"), cf.gen_int64_field("int64_2"),
                   cf.gen_float_vec_field(dim=dim)]
         schema = cf.gen_collection_schema(fields=fields, primary_field="int64_1")

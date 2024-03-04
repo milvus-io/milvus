@@ -190,6 +190,16 @@ func TestValidateDimension(t *testing.T) {
 			},
 		},
 	}
+	assert.NotNil(t, validateDimension(fieldSchema))
+	fieldSchema = &schemapb.FieldSchema{
+		DataType: schemapb.DataType_FloatVector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{
+				Key:   common.DimKey,
+				Value: "2",
+			},
+		},
+	}
 	assert.Nil(t, validateDimension(fieldSchema))
 	fieldSchema.TypeParams = []*commonpb.KeyValuePair{
 		{
@@ -234,6 +244,14 @@ func TestValidateDimension(t *testing.T) {
 		{
 			Key:   common.DimKey,
 			Value: "9",
+		},
+	}
+	assert.NotNil(t, validateDimension(fieldSchema))
+
+	fieldSchema.TypeParams = []*commonpb.KeyValuePair{
+		{
+			Key:   common.DimKey,
+			Value: "262145",
 		},
 	}
 	assert.NotNil(t, validateDimension(fieldSchema))

@@ -1677,7 +1677,7 @@ class TestCollectionCountBinary(TestcaseBase):
     @pytest.fixture(
         scope="function",
         params=[
-            1,
+            8,
             1000,
             2001
         ],
@@ -1710,12 +1710,12 @@ class TestCollectionCountBinary(TestcaseBase):
         expected: check error message successfully
         """
         self._connect()
-        dim = 1
+        dim = 2
         c_schema = cf.gen_default_binary_collection_schema(auto_id=auto_id, dim=dim)
         collection_w = self.init_collection_wrap(schema=c_schema,
                                                  check_task=CheckTasks.err_res,
                                                  check_items={"err_code": 1,
-                                                              "err_msg": f"invalid dimension: {dim}. should be multiple of 8."})
+                                                              "err_msg": f"invalid dimension: {dim}. binary vector dimension should be multiple of 8."})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_collection_count_no_entities(self):
@@ -4320,7 +4320,7 @@ class TestCollectionMultipleVectorValid(TestcaseBase):
         """
         self._connect()
         c_name = cf.gen_unique_str(prefix)
-        another_dim = 1
+        another_dim = 2
         schema = cf.gen_default_collection_schema(primary_field=primary_key, auto_id=auto_id, dim=ct.max_dim,
                                                   enable_dynamic_field=enable_dynamic_field,
                                                   multiple_dim_array=[another_dim])
