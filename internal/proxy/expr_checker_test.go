@@ -4,12 +4,14 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func TestParsePartitionKeys(t *testing.T) {
@@ -27,6 +29,9 @@ func TestParsePartitionKeys(t *testing.T) {
 		IsPartitionKey: true,
 	}
 	schema.Fields = append(schema.Fields, partitionKeyField)
+
+	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
 	fieldID := common.StartOfUserFieldID
 	for _, field := range schema.Fields {
 		field.FieldID = int64(fieldID)
@@ -109,7 +114,7 @@ func TestParsePartitionKeys(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// test search plan
-			searchPlan, err := planparserv2.CreateSearchPlan(schema, tc.expr, "fvec_field", queryInfo)
+			searchPlan, err := planparserv2.CreateSearchPlan(schemaHelper, tc.expr, "fvec_field", queryInfo)
 			assert.NoError(t, err)
 			expr, err := ParseExprFromPlan(searchPlan)
 			assert.NoError(t, err)
@@ -122,7 +127,7 @@ func TestParsePartitionKeys(t *testing.T) {
 			}
 
 			// test query plan
-			queryPlan, err := planparserv2.CreateRetrievePlan(schema, tc.expr)
+			queryPlan, err := planparserv2.CreateRetrievePlan(schemaHelper, tc.expr)
 			assert.NoError(t, err)
 			expr, err = ParseExprFromPlan(queryPlan)
 			assert.NoError(t, err)

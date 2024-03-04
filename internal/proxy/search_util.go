@@ -80,7 +80,7 @@ func initSearchRequest(ctx context.Context, t *searchTask) error {
 		}
 		t.offset = offset
 
-		plan, err := planparserv2.CreateSearchPlan(t.schema.CollectionSchema, t.request.Dsl, annsField, queryInfo)
+		plan, err := planparserv2.CreateSearchPlan(t.schema.schemaHelper, t.request.Dsl, annsField, queryInfo)
 		if err != nil {
 			log.Warn("failed to create query plan", zap.Error(err),
 				zap.String("dsl", t.request.Dsl), // may be very large if large term passed.

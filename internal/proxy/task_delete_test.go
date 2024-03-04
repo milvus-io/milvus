@@ -8,6 +8,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -24,10 +25,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func Test_getPrimaryKeysFromPlan(t *testing.T) {
-	schema := &schemapb.CollectionSchema{
+	collSchema := &schemapb.CollectionSchema{
 		Name:        "test_delete",
 		Description: "",
 		AutoID:      false,
@@ -46,11 +48,14 @@ func Test_getPrimaryKeysFromPlan(t *testing.T) {
 			},
 		},
 	}
-	t.Run("delelte with complex pk expr", func(t *testing.T) {
+	schema, err := typeutil.CreateSchemaHelper(collSchema)
+	require.NoError(t, err)
+
+	t.Run("delete with complex pk expr", func(t *testing.T) {
 		expr := "pk < 4"
 		plan, err := planparserv2.CreateRetrievePlan(schema, expr)
 		assert.NoError(t, err)
-		isSimple, _, _ := getPrimaryKeysFromPlan(schema, plan)
+		isSimple, _, _ := getPrimaryKeysFromPlan(collSchema, plan)
 		assert.False(t, isSimple)
 	})
 
@@ -58,7 +63,7 @@ func Test_getPrimaryKeysFromPlan(t *testing.T) {
 		expr := "non_pk == 1"
 		plan, err := planparserv2.CreateRetrievePlan(schema, expr)
 		assert.NoError(t, err)
-		isSimple, _, _ := getPrimaryKeysFromPlan(schema, plan)
+		isSimple, _, _ := getPrimaryKeysFromPlan(collSchema, plan)
 		assert.False(t, isSimple)
 	})
 
@@ -66,7 +71,7 @@ func Test_getPrimaryKeysFromPlan(t *testing.T) {
 		expr := "pk in [1, 2, 3]"
 		plan, err := planparserv2.CreateRetrievePlan(schema, expr)
 		assert.NoError(t, err)
-		isSimple, _, rowNum := getPrimaryKeysFromPlan(schema, plan)
+		isSimple, _, rowNum := getPrimaryKeysFromPlan(collSchema, plan)
 		assert.True(t, isSimple)
 		assert.Equal(t, int64(3), rowNum)
 	})
@@ -78,7 +83,7 @@ func Test_getPrimaryKeysFromPlan(t *testing.T) {
 		termExpr := plan.Node.(*planpb.PlanNode_Query).Query.Predicates.Expr.(*planpb.Expr_TermExpr)
 		termExpr.TermExpr.ColumnInfo.DataType = -1
 
-		isSimple, _, _ := getPrimaryKeysFromPlan(schema, plan)
+		isSimple, _, _ := getPrimaryKeysFromPlan(collSchema, plan)
 		assert.False(t, isSimple)
 	})
 
@@ -86,7 +91,7 @@ func Test_getPrimaryKeysFromPlan(t *testing.T) {
 		expr := "pk == 1"
 		plan, err := planparserv2.CreateRetrievePlan(schema, expr)
 		assert.NoError(t, err)
-		isSimple, _, rowNum := getPrimaryKeysFromPlan(schema, plan)
+		isSimple, _, rowNum := getPrimaryKeysFromPlan(collSchema, plan)
 		assert.True(t, isSimple)
 		assert.Equal(t, int64(1), rowNum)
 	})
@@ -98,7 +103,7 @@ func Test_getPrimaryKeysFromPlan(t *testing.T) {
 		unaryRangeExpr := plan.Node.(*planpb.PlanNode_Query).Query.Predicates.Expr.(*planpb.Expr_UnaryRangeExpr)
 		unaryRangeExpr.UnaryRangeExpr.ColumnInfo.DataType = -1
 
-		isSimple, _, _ := getPrimaryKeysFromPlan(schema, plan)
+		isSimple, _, _ := getPrimaryKeysFromPlan(collSchema, plan)
 		assert.False(t, isSimple)
 	})
 }
@@ -935,7 +940,9 @@ func TestDeleteRunner_StreamingQueryAndDelteFunc(t *testing.T) {
 		globalMetaCache = mockCache
 		defer func() { globalMetaCache = nil }()
 
-		plan, err := planparserv2.CreateRetrievePlan(dr.schema.CollectionSchema, dr.req.Expr)
+		schemaHelper, err := typeutil.CreateSchemaHelper(dr.schema.CollectionSchema)
+		require.NoError(t, err)
+		plan, err := planparserv2.CreateRetrievePlan(schemaHelper, dr.req.Expr)
 		assert.NoError(t, err)
 		queryFunc := dr.getStreamingQueryAndDelteFunc(plan)
 		assert.Error(t, queryFunc(ctx, 1, qn, ""))
@@ -978,7 +985,9 @@ func TestDeleteRunner_StreamingQueryAndDelteFunc(t *testing.T) {
 		globalMetaCache = mockCache
 		defer func() { globalMetaCache = nil }()
 
-		plan, err := planparserv2.CreateRetrievePlan(dr.schema.CollectionSchema, dr.req.Expr)
+		schemaHelper, err := typeutil.CreateSchemaHelper(dr.schema.CollectionSchema)
+		require.NoError(t, err)
+		plan, err := planparserv2.CreateRetrievePlan(schemaHelper, dr.req.Expr)
 		assert.NoError(t, err)
 		queryFunc := dr.getStreamingQueryAndDelteFunc(plan)
 		assert.Error(t, queryFunc(ctx, 1, qn, ""))
