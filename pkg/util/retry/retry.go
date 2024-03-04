@@ -53,6 +53,10 @@ func Do(ctx context.Context, fn func() error, opts ...Option) error {
 				return el
 			}
 
+			if c.isRetryErr != nil && !c.isRetryErr(err) {
+				return err
+			}
+
 			deadline, ok := ctx.Deadline()
 			if ok && time.Until(deadline) < c.sleep {
 				// to avoid sleep until ctx done

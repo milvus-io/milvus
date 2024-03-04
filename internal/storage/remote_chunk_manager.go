@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
@@ -161,45 +162,56 @@ func (mcm *RemoteChunkManager) Exist(ctx context.Context, filePath string) (bool
 
 // Read reads the minio storage data if exists.
 func (mcm *RemoteChunkManager) Read(ctx context.Context, filePath string) ([]byte, error) {
-	object, err := mcm.getObject(ctx, mcm.bucketName, filePath, int64(0), int64(0))
-	if err != nil {
-		log.Warn("failed to get object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
-		return nil, err
-	}
-	defer object.Close()
+	var data []byte
+	err := retry.Do(ctx, func() error {
+		object, err := mcm.getObject(ctx, mcm.bucketName, filePath, int64(0), int64(0))
+		if err != nil {
+			log.Warn("failed to get object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
+			return err
+		}
+		defer object.Close()
 
-	// Prefetch object data
-	var empty []byte
-	_, err = object.Read(empty)
-	if err != nil {
-		switch err := err.(type) {
-		case *azcore.ResponseError:
-			if err.ErrorCode == string(bloberror.BlobNotFound) {
-				return nil, WrapErrNoSuchKey(filePath)
+		// Prefetch object data
+		var empty []byte
+		_, err = object.Read(empty)
+		if err != nil {
+			switch err := err.(type) {
+			case *azcore.ResponseError:
+				if err.ErrorCode == string(bloberror.BlobNotFound) {
+					return WrapErrNoSuchKey(filePath)
+				}
+			case minio.ErrorResponse:
+				if err.Code == "NoSuchKey" {
+					return WrapErrNoSuchKey(filePath)
+				}
 			}
-		case minio.ErrorResponse:
-			if err.Code == "NoSuchKey" {
-				return nil, WrapErrNoSuchKey(filePath)
-			}
+			log.Warn("failed to read object", zap.String("path", filePath), zap.Error(err))
+			return checkObjectStorageError(filePath, err)
 		}
-		log.Warn("failed to read object", zap.String("path", filePath), zap.Error(err))
-		return nil, checkObjectStorageError(filePath, err)
-	}
-	size, err := mcm.getObjectSize(ctx, mcm.bucketName, filePath)
+		size, err := mcm.getObjectSize(ctx, mcm.bucketName, filePath)
+		if err != nil {
+			log.Warn("failed to stat object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
+			return err
+		}
+		data, err = Read(object, size)
+		if err != nil {
+			if err == io.ErrUnexpectedEOF {
+				return merr.WrapErrIoUnexpectEOF(filePath, err)
+			}
+			errResponse := minio.ToErrorResponse(err)
+			if errResponse.Code == "NoSuchKey" {
+				return WrapErrNoSuchKey(filePath)
+			}
+			log.Warn("failed to read object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
+			return err
+		}
+		metrics.PersistentDataKvSize.WithLabelValues(metrics.DataGetLabel).Observe(float64(size))
+		return nil
+	}, retry.Attempts(3), retry.RetryErr(merr.IsRetryableErr))
 	if err != nil {
-		log.Warn("failed to stat object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
 		return nil, err
 	}
-	data, err := Read(object, size)
-	if err != nil {
-		errResponse := minio.ToErrorResponse(err)
-		if errResponse.Code == "NoSuchKey" {
-			return nil, WrapErrNoSuchKey(filePath)
-		}
-		log.Warn("failed to read object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
-		return nil, err
-	}
-	metrics.PersistentDataKvSize.WithLabelValues(metrics.DataGetLabel).Observe(float64(size))
+
 	return data, nil
 }
 
@@ -445,6 +457,9 @@ func checkObjectStorageError(fileName string, err error) error {
 			return merr.WrapErrIoKeyNotFound(fileName, err.Error())
 		}
 		return merr.WrapErrIoFailed(fileName, err)
+	}
+	if err == io.ErrUnexpectedEOF {
+		return merr.WrapErrIoUnexpectEOF(fileName, err)
 	}
 	return merr.WrapErrIoFailed(fileName, err)
 }
