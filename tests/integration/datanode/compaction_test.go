@@ -82,10 +82,32 @@ func (s *DataNodeSuite) compactAndReboot(collection string) {
 		CollectionName: collection,
 		FieldName:      integration.FloatVecField,
 		IndexName:      "_default",
-		ExtraParams:    integration.ConstructIndexParam(s.dim, "FLAT", metric.IP),
+		ExtraParams:    integration.ConstructIndexParam(s.dim, integration.IndexHNSW, metric.IP),
 	})
 	s.Require().NoError(err)
 	s.Require().True(merr.Ok(createIndexStatus))
+
+	for stay, timeout := true, time.After(time.Second*10); stay; {
+		select {
+		case <-timeout:
+			stay = false
+		default:
+			describeIndexResp, err := s.Cluster.Proxy.DescribeIndex(ctx, &milvuspb.DescribeIndexRequest{
+				CollectionName: collection,
+				FieldName:      integration.FloatVecField,
+				IndexName:      "_default",
+			})
+			s.Require().NoError(err)
+
+			for _, d := range describeIndexResp.GetIndexDescriptions() {
+				if d.GetFieldName() == integration.FloatVecField && d.GetState() == commonpb.IndexState_Finished {
+					log.Info("build index finished", zap.Any("index_desc", d))
+					stay = false
+				}
+			}
+			time.Sleep(1 * time.Second)
+		}
+	}
 
 	coll, err := s.Cluster.Proxy.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
 		CollectionName: collection,
@@ -112,7 +134,7 @@ func (s *DataNodeSuite) compactAndReboot(collection string) {
 	s.Require().True(merr.Ok(stateResp.GetStatus()))
 
 	// sleep to ensure compaction tasks are submitted to DN
-	time.Sleep(time.Second)
+	time.Sleep(3 * time.Second)
 
 	planResp, err := s.Cluster.Proxy.GetCompactionStateWithPlans(ctx, &milvuspb.GetCompactionPlansRequest{
 		CompactionID: compactID,

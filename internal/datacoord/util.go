@@ -102,7 +102,7 @@ func FilterInIndexedSegments(handler Handler, mt *meta, segments ...*SegmentInfo
 
 		hasUnindexedVecField := false
 		for _, fieldID := range vecFieldIDs[segment.GetCollectionID()] {
-			segmentIndexState := mt.GetSegmentIndexStateOnField(segment.GetCollectionID(), segment.GetID(), fieldID)
+			segmentIndexState := mt.indexMeta.GetSegmentIndexStateOnField(segment.GetCollectionID(), segment.GetID(), fieldID)
 			if segmentIndexState.State != commonpb.IndexState_Finished {
 				hasUnindexedVecField = true
 			}

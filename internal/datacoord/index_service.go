@@ -70,7 +70,7 @@ func (s *Server) createIndexForSegment(segment *SegmentInfo, indexID UniqueID) e
 		CreateTime:   uint64(segment.ID),
 		WriteHandoff: false,
 	}
-	if err = s.meta.AddSegmentIndex(segIndex); err != nil {
+	if err = s.meta.indexMeta.AddSegmentIndex(segIndex); err != nil {
 		return err
 	}
 	s.indexBuilder.enqueue(buildID)
@@ -78,9 +78,10 @@ func (s *Server) createIndexForSegment(segment *SegmentInfo, indexID UniqueID) e
 }
 
 func (s *Server) createIndexesForSegment(segment *SegmentInfo) error {
-	indexes := s.meta.GetIndexesForCollection(segment.CollectionID, "")
+	indexes := s.meta.indexMeta.GetIndexesForCollection(segment.CollectionID, "")
+	indexIDToSegIndexes := s.meta.indexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID)
 	for _, index := range indexes {
-		if _, ok := segment.segmentIndexes[index.IndexID]; !ok {
+		if _, ok := indexIDToSegIndexes[index.IndexID]; !ok {
 			if err := s.createIndexForSegment(segment, index.IndexID); err != nil {
 				log.Warn("create index for segment fail", zap.Int64("segmentID", segment.ID),
 					zap.Int64("indexID", index.IndexID))
@@ -89,6 +90,20 @@ func (s *Server) createIndexesForSegment(segment *SegmentInfo) error {
 		}
 	}
 	return nil
+}
+
+func (s *Server) getUnIndexTaskSegments() []*SegmentInfo {
+	flushedSegments := s.meta.SelectSegments(func(seg *SegmentInfo) bool {
+		return isFlush(seg)
+	})
+
+	unindexedSegments := make([]*SegmentInfo, 0)
+	for _, segment := range flushedSegments {
+		if s.meta.indexMeta.IsUnIndexedSegment(segment.CollectionID, segment.GetID()) {
+			unindexedSegments = append(unindexedSegments, segment)
+		}
+	}
+	return unindexedSegments
 }
 
 func (s *Server) createIndexForSegmentLoop(ctx context.Context) {
@@ -103,7 +118,7 @@ func (s *Server) createIndexForSegmentLoop(ctx context.Context) {
 			log.Warn("DataCoord context done, exit...")
 			return
 		case <-ticker.C:
-			segments := s.meta.GetHasUnindexTaskSegments()
+			segments := s.getUnIndexTaskSegments()
 			for _, segment := range segments {
 				if err := s.createIndexesForSegment(segment); err != nil {
 					log.Warn("create index for segment fail, wait for retry", zap.Int64("segmentID", segment.ID))
@@ -171,7 +186,7 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 	metrics.IndexRequestCounter.WithLabelValues(metrics.TotalLabel).Inc()
 
 	if req.GetIndexName() == "" {
-		indexes := s.meta.GetFieldIndexes(req.GetCollectionID(), req.GetFieldID(), req.GetIndexName())
+		indexes := s.meta.indexMeta.GetFieldIndexes(req.GetCollectionID(), req.GetFieldID(), req.GetIndexName())
 		if len(indexes) == 0 {
 			fieldName, err := s.getFieldNameByID(ctx, req.GetCollectionID(), req.GetFieldID())
 			if err != nil {
@@ -184,7 +199,7 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		}
 	}
 
-	indexID, err := s.meta.CanCreateIndex(req)
+	indexID, err := s.meta.indexMeta.CanCreateIndex(req)
 	if err != nil {
 		metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
 		return merr.Status(err), nil
@@ -219,8 +234,7 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 	}
 
 	// Get flushed segments and create index
-
-	err = s.meta.CreateIndex(index)
+	err = s.meta.indexMeta.CreateIndex(index)
 	if err != nil {
 		log.Error("CreateIndex fail",
 			zap.Int64("fieldID", req.GetFieldID()), zap.String("indexName", req.GetIndexName()), zap.Error(err))
@@ -290,11 +304,12 @@ func (s *Server) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest)
 		return merr.Status(err), nil
 	}
 
-	indexes := s.meta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName())
+	indexes := s.meta.indexMeta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName())
 	if req.GetIndexName() != "" && len(indexes) == 0 {
 		err := merr.WrapErrIndexNotFound(req.GetIndexName())
 		return merr.Status(err), nil
 	}
+
 	for _, index := range indexes {
 		// update user index params
 		newUserIndexParams, err := UpdateParams(index, index.UserIndexParams, req.GetParams())
@@ -319,7 +334,7 @@ func (s *Server) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest)
 		index.IndexParams = newIndexParams
 	}
 
-	err := s.meta.AlterIndex(ctx, indexes...)
+	err := s.meta.indexMeta.AlterIndex(ctx, indexes...)
 	if err != nil {
 		log.Warn("failed to alter index", zap.Error(err))
 		return merr.Status(err), nil
@@ -344,7 +359,7 @@ func (s *Server) GetIndexState(ctx context.Context, req *indexpb.GetIndexStateRe
 		}, nil
 	}
 
-	indexes := s.meta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName())
+	indexes := s.meta.indexMeta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName())
 	if len(indexes) == 0 {
 		err := merr.WrapErrIndexNotFound(req.GetIndexName())
 		log.Warn("GetIndexState fail", zap.Error(err))
@@ -366,7 +381,7 @@ func (s *Server) GetIndexState(ctx context.Context, req *indexpb.GetIndexStateRe
 
 	indexInfo := &indexpb.IndexInfo{}
 	// The total rows of all indexes should be based on the current perspective
-	segments := s.meta.SelectSegmentIndexes(func(info *SegmentInfo) bool {
+	segments := s.selectSegmentIndexes(func(info *SegmentInfo) bool {
 		return info.GetCollectionID() == req.GetCollectionID() && (isFlush(info) || info.GetState() == commonpb.SegmentState_Dropped)
 	})
 
@@ -400,7 +415,7 @@ func (s *Server) GetSegmentIndexState(ctx context.Context, req *indexpb.GetSegme
 		Status: merr.Success(),
 		States: make([]*indexpb.SegmentIndexState, 0),
 	}
-	indexID2CreateTs := s.meta.GetIndexIDByName(req.GetCollectionID(), req.GetIndexName())
+	indexID2CreateTs := s.meta.indexMeta.GetIndexIDByName(req.GetCollectionID(), req.GetIndexName())
 	if len(indexID2CreateTs) == 0 {
 		err := merr.WrapErrIndexNotFound(req.GetIndexName())
 		log.Warn("GetSegmentIndexState fail", zap.String("indexName", req.GetIndexName()), zap.Error(err))
@@ -410,12 +425,38 @@ func (s *Server) GetSegmentIndexState(ctx context.Context, req *indexpb.GetSegme
 	}
 	for _, segID := range req.GetSegmentIDs() {
 		for indexID := range indexID2CreateTs {
-			state := s.meta.GetSegmentIndexState(req.GetCollectionID(), segID, indexID)
+			state := s.meta.indexMeta.GetSegmentIndexState(req.GetCollectionID(), segID, indexID)
 			ret.States = append(ret.States, state)
 		}
 	}
 	log.Info("GetSegmentIndexState successfully", zap.String("indexName", req.GetIndexName()))
 	return ret, nil
+}
+
+func (s *Server) selectSegmentIndexes(selector SegmentInfoSelector) map[int64]*indexStats {
+	ret := make(map[int64]*indexStats)
+
+	for _, info := range s.meta.SelectSegments(selector) {
+		is := &indexStats{
+			ID:             info.GetID(),
+			numRows:        info.GetNumOfRows(),
+			compactionFrom: info.GetCompactionFrom(),
+			indexStates:    make(map[int64]*indexpb.SegmentIndexState),
+			state:          info.GetState(),
+			lastExpireTime: info.GetLastExpireTime(),
+		}
+
+		indexIDToSegIdxes := s.meta.indexMeta.GetSegmentIndexes(info.GetCollectionID(), info.GetID())
+		for indexID, segIndex := range indexIDToSegIdxes {
+			is.indexStates[indexID] = &indexpb.SegmentIndexState{
+				SegmentID:  segIndex.SegmentID,
+				State:      segIndex.IndexState,
+				FailReason: segIndex.FailReason,
+			}
+		}
+		ret[info.GetID()] = is
+	}
+	return ret
 }
 
 func (s *Server) countIndexedRows(indexInfo *indexpb.IndexInfo, segments map[int64]*indexStats) int64 {
@@ -566,7 +607,7 @@ func (s *Server) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetInde
 		}, nil
 	}
 
-	indexes := s.meta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName())
+	indexes := s.meta.indexMeta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName())
 	if len(indexes) == 0 {
 		err := merr.WrapErrIndexNotFound(req.GetIndexName())
 		log.Warn("GetIndexBuildProgress fail", zap.String("indexName", req.IndexName), zap.Error(err))
@@ -592,7 +633,7 @@ func (s *Server) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetInde
 	}
 
 	// The total rows of all indexes should be based on the current perspective
-	segments := s.meta.SelectSegmentIndexes(func(info *SegmentInfo) bool {
+	segments := s.selectSegmentIndexes(func(info *SegmentInfo) bool {
 		return info.GetCollectionID() == req.GetCollectionID() && (isFlush(info) || info.GetState() == commonpb.SegmentState_Dropped)
 	})
 
@@ -635,7 +676,7 @@ func (s *Server) DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRe
 		}, nil
 	}
 
-	indexes := s.meta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName())
+	indexes := s.meta.indexMeta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName())
 	if len(indexes) == 0 {
 		err := merr.WrapErrIndexNotFound(req.GetIndexName())
 		log.Warn("DescribeIndex fail", zap.Error(err))
@@ -645,7 +686,7 @@ func (s *Server) DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRe
 	}
 
 	// The total rows of all indexes should be based on the current perspective
-	segments := s.meta.SelectSegmentIndexes(func(info *SegmentInfo) bool {
+	segments := s.selectSegmentIndexes(func(info *SegmentInfo) bool {
 		return info.GetCollectionID() == req.GetCollectionID() && (isFlush(info) || info.GetState() == commonpb.SegmentState_Dropped)
 	})
 
@@ -692,7 +733,7 @@ func (s *Server) GetIndexStatistics(ctx context.Context, req *indexpb.GetIndexSt
 		}, nil
 	}
 
-	indexes := s.meta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName())
+	indexes := s.meta.indexMeta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName())
 	if len(indexes) == 0 {
 		err := merr.WrapErrIndexNotFound(req.GetIndexName())
 		log.Warn("GetIndexStatistics fail",
@@ -704,7 +745,7 @@ func (s *Server) GetIndexStatistics(ctx context.Context, req *indexpb.GetIndexSt
 	}
 
 	// The total rows of all indexes should be based on the current perspective
-	segments := s.meta.SelectSegmentIndexes(func(info *SegmentInfo) bool {
+	segments := s.selectSegmentIndexes(func(info *SegmentInfo) bool {
 		return info.GetCollectionID() == req.GetCollectionID() && (isFlush(info) || info.GetState() == commonpb.SegmentState_Dropped)
 	})
 
@@ -751,7 +792,7 @@ func (s *Server) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (
 		return merr.Status(err), nil
 	}
 
-	indexes := s.meta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName())
+	indexes := s.meta.indexMeta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName())
 	if len(indexes) == 0 {
 		log.Info(fmt.Sprintf("there is no index on collection: %d with the index name: %s", req.CollectionID, req.IndexName))
 		return merr.Success(), nil
@@ -770,7 +811,7 @@ func (s *Server) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (
 	// from being dropped at the same time when dropping_partition in version 2.1
 	if len(req.GetPartitionIDs()) == 0 {
 		// drop collection index
-		err := s.meta.MarkIndexAsDeleted(req.GetCollectionID(), indexIDs)
+		err := s.meta.indexMeta.MarkIndexAsDeleted(req.GetCollectionID(), indexIDs)
 		if err != nil {
 			log.Warn("DropIndex fail", zap.String("indexName", req.IndexName), zap.Error(err))
 			return merr.Status(err), nil
@@ -800,7 +841,7 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 	}
 
 	for _, segID := range req.GetSegmentIDs() {
-		segIdxes := s.meta.GetSegmentIndexes(segID)
+		segIdxes := s.meta.indexMeta.GetSegmentIndexes(req.GetCollectionID(), segID)
 		ret.SegmentInfo[segID] = &indexpb.SegmentInfo{
 			CollectionID: req.GetCollectionID(),
 			SegmentID:    segID,
@@ -813,15 +854,15 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 				if segIdx.IndexState == commonpb.IndexState_Finished {
 					indexFilePaths := metautil.BuildSegmentIndexFilePaths(s.meta.chunkManager.RootPath(), segIdx.BuildID, segIdx.IndexVersion,
 						segIdx.PartitionID, segIdx.SegmentID, segIdx.IndexFileKeys)
-					indexParams := s.meta.GetIndexParams(segIdx.CollectionID, segIdx.IndexID)
-					indexParams = append(indexParams, s.meta.GetTypeParams(segIdx.CollectionID, segIdx.IndexID)...)
+					indexParams := s.meta.indexMeta.GetIndexParams(segIdx.CollectionID, segIdx.IndexID)
+					indexParams = append(indexParams, s.meta.indexMeta.GetTypeParams(segIdx.CollectionID, segIdx.IndexID)...)
 					ret.SegmentInfo[segID].IndexInfos = append(ret.SegmentInfo[segID].IndexInfos,
 						&indexpb.IndexFilePathInfo{
 							SegmentID:           segID,
-							FieldID:             s.meta.GetFieldIDByIndexID(segIdx.CollectionID, segIdx.IndexID),
+							FieldID:             s.meta.indexMeta.GetFieldIDByIndexID(segIdx.CollectionID, segIdx.IndexID),
 							IndexID:             segIdx.IndexID,
 							BuildID:             segIdx.BuildID,
-							IndexName:           s.meta.GetIndexNameByID(segIdx.CollectionID, segIdx.IndexID),
+							IndexName:           s.meta.indexMeta.GetIndexNameByID(segIdx.CollectionID, segIdx.IndexID),
 							IndexParams:         indexParams,
 							IndexFilePaths:      indexFilePaths,
 							SerializedSize:      segIdx.IndexSize,

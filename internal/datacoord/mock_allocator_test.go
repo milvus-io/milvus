@@ -51,7 +51,7 @@ type NMockAllocator_allocID_Call struct {
 }
 
 // allocID is a helper method to define mock.On call
-//  - _a0 context.Context
+//   - _a0 context.Context
 func (_e *NMockAllocator_Expecter) allocID(_a0 interface{}) *NMockAllocator_allocID_Call {
 	return &NMockAllocator_allocID_Call{Call: _e.mock.On("allocID", _a0)}
 }
@@ -110,7 +110,7 @@ type NMockAllocator_allocN_Call struct {
 }
 
 // allocN is a helper method to define mock.On call
-//  - n int64
+//   - n int64
 func (_e *NMockAllocator_Expecter) allocN(n interface{}) *NMockAllocator_allocN_Call {
 	return &NMockAllocator_allocN_Call{Call: _e.mock.On("allocN", n)}
 }
@@ -162,7 +162,7 @@ type NMockAllocator_allocTimestamp_Call struct {
 }
 
 // allocTimestamp is a helper method to define mock.On call
-//  - _a0 context.Context
+//   - _a0 context.Context
 func (_e *NMockAllocator_Expecter) allocTimestamp(_a0 interface{}) *NMockAllocator_allocTimestamp_Call {
 	return &NMockAllocator_allocTimestamp_Call{Call: _e.mock.On("allocTimestamp", _a0)}
 }
