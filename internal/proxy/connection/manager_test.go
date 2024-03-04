@@ -8,39 +8,19 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
-func Test_withDuration(t *testing.T) {
-	s := &connectionManager{}
-	s.apply(withDuration(defaultConnCheckDuration))
-	assert.Equal(t, defaultConnCheckDuration, s.duration)
-}
-
-func Test_withTTL(t *testing.T) {
-	s := &connectionManager{}
-	s.apply(withTTL(defaultTTLForInactiveConn))
-	assert.Equal(t, defaultTTLForInactiveConn, s.ttl)
-}
-
-func Test_connectionManager_apply(t *testing.T) {
-	s := &connectionManager{}
-	s.apply(
-		withDuration(defaultConnCheckDuration),
-		withTTL(defaultTTLForInactiveConn))
-	assert.Equal(t, defaultConnCheckDuration, s.duration)
-	assert.Equal(t, defaultTTLForInactiveConn, s.ttl)
-}
-
-func TestGetConnectionManager(t *testing.T) {
-	s := GetManager()
-	assert.Equal(t, defaultConnCheckDuration, s.duration)
-	assert.Equal(t, defaultTTLForInactiveConn, s.ttl)
-}
-
 func TestConnectionManager(t *testing.T) {
-	s := newConnectionManager(
-		withDuration(time.Millisecond*5),
-		withTTL(time.Millisecond*100))
+	paramtable.Init()
+
+	pt := paramtable.Get()
+	pt.Save(pt.ProxyCfg.ConnectionCheckInterval.Key, "2")
+	pt.Save(pt.ProxyCfg.ConnectionClientInfoTTL.Key, "1")
+	defer pt.Reset(pt.ProxyCfg.ConnectionCheckInterval.Key)
+	defer pt.Reset(pt.ProxyCfg.ConnectionClientInfoTTL.Key)
+	s := newConnectionManager()
+	defer s.Stop()
 
 	s.Register(context.TODO(), 1, &commonpb.ClientInfo{
 		Reserved: map[string]string{"for_test": "for_test"},
@@ -60,10 +40,7 @@ func TestConnectionManager(t *testing.T) {
 	time.Sleep(time.Millisecond * 5)
 	assert.Equal(t, 2, len(s.List()))
 
-	time.Sleep(time.Millisecond * 100)
-	assert.Equal(t, 0, len(s.List()))
-
-	s.Stop()
-
-	time.Sleep(time.Millisecond * 5)
+	assert.Eventually(t, func() bool {
+		return len(s.List()) == 0
+	}, time.Second*5, time.Second)
 }
