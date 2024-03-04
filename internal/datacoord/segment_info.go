@@ -32,7 +32,9 @@ import (
 
 // SegmentsInfo wraps a map, which maintains ID to SegmentInfo relation
 type SegmentsInfo struct {
-	segments map[UniqueID]*SegmentInfo
+	segments     map[UniqueID]*SegmentInfo
+	compactionTo map[UniqueID]UniqueID // map the compact relation, value is the segment which `CompactFrom` contains key.
+	// A segment can be compacted to only one segment finally in meta.
 }
 
 // SegmentInfo wraps datapb.SegmentInfo and patches some extra info on it
@@ -67,7 +69,10 @@ func NewSegmentInfo(info *datapb.SegmentInfo) *SegmentInfo {
 // NewSegmentsInfo creates a `SegmentsInfo` instance, which makes sure internal map is initialized
 // note that no mutex is wrapped so external concurrent control is needed
 func NewSegmentsInfo() *SegmentsInfo {
-	return &SegmentsInfo{segments: make(map[UniqueID]*SegmentInfo)}
+	return &SegmentsInfo{
+		segments:     make(map[UniqueID]*SegmentInfo),
+		compactionTo: make(map[UniqueID]UniqueID),
+	}
 }
 
 // GetSegment returns SegmentInfo
@@ -89,15 +94,40 @@ func (s *SegmentsInfo) GetSegments() []*SegmentInfo {
 	return segments
 }
 
+// GetCompactionTo returns the segment that the provided segment is compacted to.
+// Return (nil, false) if given segmentID can not found in the meta.
+// Return (nil, true) if given segmentID can be found not no compaction to.
+// Return (notnil, true) if given segmentID can be found and has compaction to.
+func (s *SegmentsInfo) GetCompactionTo(fromSegmentID int64) (*SegmentInfo, bool) {
+	if _, ok := s.segments[fromSegmentID]; !ok {
+		return nil, false
+	}
+	if toID, ok := s.compactionTo[fromSegmentID]; ok {
+		if to, ok := s.segments[toID]; ok {
+			return to, true
+		}
+		log.Warn("unreachable code: compactionTo relation is broken", zap.Int64("from", fromSegmentID), zap.Int64("to", toID))
+	}
+	return nil, true
+}
+
 // DropSegment deletes provided segmentID
 // no extra method is taken when segmentID not exists
 func (s *SegmentsInfo) DropSegment(segmentID UniqueID) {
-	delete(s.segments, segmentID)
+	if segment, ok := s.segments[segmentID]; ok {
+		s.deleteCompactTo(segment)
+		delete(s.segments, segmentID)
+	}
 }
 
 // SetSegment sets SegmentInfo with segmentID, perform overwrite if already exists
 func (s *SegmentsInfo) SetSegment(segmentID UniqueID, segment *SegmentInfo) {
+	if segment, ok := s.segments[segmentID]; ok {
+		// Remove old segment compact to relation first.
+		s.deleteCompactTo(segment)
+	}
 	s.segments[segmentID] = segment
+	s.addCompactTo(segment)
 }
 
 // SetSegmentIndex sets SegmentIndex with segmentID, perform overwrite if already exists
@@ -268,6 +298,20 @@ func (s *SegmentInfo) ShadowClone(opts ...SegmentInfoOption) *SegmentInfo {
 		opt(cloned)
 	}
 	return cloned
+}
+
+// addCompactTo adds the compact relation to the segment
+func (s *SegmentsInfo) addCompactTo(segment *SegmentInfo) {
+	for _, from := range segment.GetCompactionFrom() {
+		s.compactionTo[from] = segment.GetID()
+	}
+}
+
+// deleteCompactTo deletes the compact relation to the segment
+func (s *SegmentsInfo) deleteCompactTo(segment *SegmentInfo) {
+	for _, from := range segment.GetCompactionFrom() {
+		delete(s.compactionTo, from)
+	}
 }
 
 // SegmentInfoOption is the option to set fields in segment info

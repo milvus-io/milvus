@@ -614,7 +614,7 @@ func TestMeta_alterMetaStore(t *testing.T) {
 
 	m := &meta{
 		catalog: &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
-		segments: &SegmentsInfo{map[int64]*SegmentInfo{
+		segments: &SegmentsInfo{segments: map[int64]*SegmentInfo{
 			1: {SegmentInfo: &datapb.SegmentInfo{
 				ID:        1,
 				Binlogs:   []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log1", "log2")},
@@ -632,7 +632,7 @@ func TestMeta_alterMetaStore(t *testing.T) {
 
 func TestMeta_prepareCompactionMutation(t *testing.T) {
 	prepareSegments := &SegmentsInfo{
-		map[UniqueID]*SegmentInfo{
+		segments: map[UniqueID]*SegmentInfo{
 			1: {SegmentInfo: &datapb.SegmentInfo{
 				ID:           1,
 				CollectionID: 100,
@@ -742,7 +742,7 @@ func Test_meta_SetSegmentCompacting(t *testing.T) {
 			fields{
 				NewMetaMemoryKV(),
 				&SegmentsInfo{
-					map[int64]*SegmentInfo{
+					segments: map[int64]*SegmentInfo{
 						1: {
 							SegmentInfo: &datapb.SegmentInfo{
 								ID:    1,
@@ -751,6 +751,7 @@ func Test_meta_SetSegmentCompacting(t *testing.T) {
 							isCompacting: false,
 						},
 					},
+					compactionTo: make(map[int64]UniqueID),
 				},
 			},
 			args{
@@ -791,7 +792,7 @@ func Test_meta_SetSegmentImporting(t *testing.T) {
 			fields{
 				NewMetaMemoryKV(),
 				&SegmentsInfo{
-					map[int64]*SegmentInfo{
+					segments: map[int64]*SegmentInfo{
 						1: {
 							SegmentInfo: &datapb.SegmentInfo{
 								ID:          1,
@@ -838,7 +839,7 @@ func Test_meta_GetSegmentsOfCollection(t *testing.T) {
 			"test get segments",
 			fields{
 				&SegmentsInfo{
-					map[int64]*SegmentInfo{
+					segments: map[int64]*SegmentInfo{
 						1: {
 							SegmentInfo: &datapb.SegmentInfo{
 								ID:           1,
@@ -884,6 +885,7 @@ func Test_meta_GetSegmentsOfCollection(t *testing.T) {
 			},
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := &meta{

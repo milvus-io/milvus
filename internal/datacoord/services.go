@@ -395,15 +395,18 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 		var info *SegmentInfo
 		if req.IncludeUnHealthy {
 			info = s.meta.GetSegment(id)
+			// TODO: GetCompactionTo should be removed and add into GetSegment method and protected by lock.
+			// Too much modification need to be applied to SegmentInfo, a refactor is needed.
+			child, ok := s.meta.GetCompactionTo(id)
 
-			if info == nil {
+			// info may be not-nil, but ok is false when the segment is being dropped concurrently.
+			if info == nil || !ok {
 				log.Warn("failed to get segment, this may have been cleaned", zap.Int64("segmentID", id))
 				err := merr.WrapErrSegmentNotFound(id)
 				resp.Status = merr.Status(err)
 				return resp, nil
 			}
 
-			child := s.meta.GetCompactionTo(id)
 			clonedInfo := info.Clone()
 			if child != nil {
 				clonedInfo.Deltalogs = append(clonedInfo.Deltalogs, child.GetDeltalogs()...)
