@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -201,6 +202,20 @@ func (t *compactionTrigger) isCollectionAutoCompactionEnabled(coll *collectionIn
 		return false
 	}
 	return enabled
+}
+
+func (t *compactionTrigger) isChannelCheckpointHealthy(vchanName string) bool {
+	if paramtable.Get().DataCoordCfg.ChannelCheckpointMaxLag.GetAsInt64() <= 0 {
+		return true
+	}
+	checkpoint := t.meta.GetChannelCheckpoint(vchanName)
+	if checkpoint == nil {
+		log.Warn("channel checkpoint not found", zap.String("channel", vchanName))
+		return false
+	}
+
+	cpTime := tsoutil.PhysicalTime(checkpoint.GetTimestamp())
+	return time.Since(cpTime) < paramtable.Get().DataCoordCfg.ChannelCheckpointMaxLag.GetAsDuration(time.Second)
 }
 
 func (t *compactionTrigger) getCompactTime(ts Timestamp, coll *collectionInfo) (*compactTime, error) {
@@ -404,6 +419,11 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) error {
 		return nil
 	}
 
+	if !t.isChannelCheckpointHealthy(signal.channel) && !signal.isForce {
+		log.Warn("compaction plan skipped due to channel checkpoint lag", zap.String("channel", signal.channel))
+		return merr.WrapErrServiceInternal("channel checkpoint lag", signal.channel)
+	}
+
 	ts, err := t.allocTs()
 	if err != nil {
 		log.Warn("allocate ts failed, skip to handle compaction")
@@ -498,6 +518,11 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 	// 1. check whether segment's binlogs should be compacted or not
 	if t.compactionHandler.isFull() {
 		log.Warn("compaction plan skipped due to handler full")
+		return
+	}
+
+	if !t.isChannelCheckpointHealthy(signal.channel) {
+		log.Warn("compaction plan skipped due to channel checkpoint lag", zap.String("channel", signal.channel))
 		return
 	}
 
