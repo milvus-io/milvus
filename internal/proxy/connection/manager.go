@@ -42,19 +42,17 @@ func (s *connectionManager) Stop() {
 func (s *connectionManager) checkLoop() {
 	defer s.wg.Done()
 
-	t := time.NewTimer(paramtable.Get().ProxyCfg.ConnectionCheckInterval.GetAsDuration(time.Second))
+	t := time.NewTicker(paramtable.Get().ProxyCfg.ConnectionCheckIntervalSeconds.GetAsDuration(time.Second))
+	defer t.Stop()
 
 	for {
 		select {
 		case <-s.closeSignal:
-			if !t.Stop() {
-				<-t.C
-			}
 			log.Info("connection manager closed")
 			return
 		case <-t.C:
 			s.removeLongInactiveClients()
-			t = time.NewTimer(paramtable.Get().ProxyCfg.ConnectionCheckInterval.GetAsDuration(time.Second))
+			t.Reset(paramtable.Get().ProxyCfg.ConnectionCheckIntervalSeconds.GetAsDuration(time.Second))
 		}
 	}
 }
@@ -117,7 +115,7 @@ func (s *connectionManager) Update(identifier int64) {
 }
 
 func (s *connectionManager) removeLongInactiveClients() {
-	ttl := paramtable.Get().ProxyCfg.ConnectionClientInfoTTL.GetAsDuration(time.Second)
+	ttl := paramtable.Get().ProxyCfg.ConnectionClientInfoTTLSeconds.GetAsDuration(time.Second)
 	s.clientInfos.Range(func(candidate int64, info clientInfo) bool {
 		if time.Since(info.lastActiveTime) > ttl {
 			log.Info("client deregister", info.GetLogger()...)
