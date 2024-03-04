@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/util"
@@ -51,6 +52,10 @@ func (DefaultReq) GetBase() *commonpb.MsgBase {
 }
 
 func (req *DefaultReq) GetDbName() string { return req.DbName }
+
+func init() {
+	paramtable.Init()
+}
 
 func TestHTTPWrapper(t *testing.T) {
 	postTestCases := []requestBodyTestCase{}
@@ -678,46 +683,6 @@ func TestMethodGet(t *testing.T) {
 		Status: &StatusSuccess,
 		Alias:  DefaultAliasName,
 	}, nil).Once()
-	mp.EXPECT().ListImportTasks(mock.Anything, mock.Anything).Return(&milvuspb.ListImportTasksResponse{
-		Status: &StatusSuccess,
-		Tasks: []*milvuspb.GetImportStateResponse{
-			{
-				Status: &StatusSuccess,
-				State:  6,
-				Infos: []*commonpb.KeyValuePair{
-					{Key: "collection", Value: DefaultCollectionName},
-					{Key: "partition", Value: DefaultPartitionName},
-					{Key: "persist_cost", Value: "0.23"},
-					{Key: "progress_percent", Value: "100"},
-					{Key: "failed_reason"},
-				},
-				Id: 1234567890,
-			},
-			{
-				Status: &StatusSuccess,
-				State:  0,
-				Infos: []*commonpb.KeyValuePair{
-					{Key: "collection", Value: DefaultCollectionName},
-					{Key: "partition", Value: DefaultPartitionName},
-					{Key: "progress_percent", Value: "0"},
-					{Key: "failed_reason", Value: "failed to get file size of "},
-				},
-				Id: 123456789,
-			},
-		},
-	}, nil).Once()
-	mp.EXPECT().GetImportState(mock.Anything, mock.Anything).Return(&milvuspb.GetImportStateResponse{
-		Status: &StatusSuccess,
-		State:  6,
-		Infos: []*commonpb.KeyValuePair{
-			{Key: "collection", Value: DefaultCollectionName},
-			{Key: "partition", Value: DefaultPartitionName},
-			{Key: "persist_cost", Value: "0.23"},
-			{Key: "progress_percent", Value: "100"},
-			{Key: "failed_reason"},
-		},
-		Id: 1234567890,
-	}, nil).Once()
 
 	testEngine := initHTTPServerV2(mp, false)
 	queryTestCases := []rawTestCase{}
@@ -791,12 +756,6 @@ func TestMethodGet(t *testing.T) {
 	queryTestCases = append(queryTestCases, rawTestCase{
 		path: versionalV2(AliasCategory, DescribeAction),
 	})
-	queryTestCases = append(queryTestCases, rawTestCase{
-		path: versionalV2(ImportJobCategory, ListAction),
-	})
-	queryTestCases = append(queryTestCases, rawTestCase{
-		path: versionalV2(ImportJobCategory, GetProgressAction),
-	})
 
 	for _, testcase := range queryTestCases {
 		t.Run("query", func(t *testing.T) {
@@ -806,8 +765,7 @@ func TestMethodGet(t *testing.T) {
 				`"indexName": "` + DefaultIndexName + `",` +
 				`"userName": "` + util.UserRoot + `",` +
 				`"roleName": "` + util.RoleAdmin + `",` +
-				`"aliasName": "` + DefaultAliasName + `",` +
-				`"taskID": 1234567890` +
+				`"aliasName": "` + DefaultAliasName + `"` +
 				`}`))
 			req := httptest.NewRequest(http.MethodPost, testcase.path, bodyReader)
 			w := httptest.NewRecorder()
@@ -907,7 +865,27 @@ func TestMethodPost(t *testing.T) {
 	mp.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(commonErrorStatus, nil).Once()
 	mp.EXPECT().CreateAlias(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
 	mp.EXPECT().AlterAlias(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
-	mp.EXPECT().Import(mock.Anything, mock.Anything).Return(&milvuspb.ImportResponse{Status: commonSuccessStatus, Tasks: []int64{int64(1234567890)}}, nil).Once()
+	mp.EXPECT().ImportV2(mock.Anything, mock.Anything).Return(&internalpb.ImportResponse{
+		Status: commonSuccessStatus, JobID: "1234567890",
+	}, nil).Once()
+	mp.EXPECT().ListImports(mock.Anything, mock.Anything).Return(&internalpb.ListImportsResponse{
+		Status: &StatusSuccess,
+		JobIDs: []string{"1", "2", "3", "4"},
+		States: []internalpb.ImportJobState{
+			internalpb.ImportJobState_Pending,
+			internalpb.ImportJobState_Importing,
+			internalpb.ImportJobState_Failed,
+			internalpb.ImportJobState_Completed,
+		},
+		Reasons:    []string{"", "", "mock reason", ""},
+		Progresses: []int64{0, 30, 0, 100},
+	}, nil).Once()
+	mp.EXPECT().GetImportProgress(mock.Anything, mock.Anything).Return(&internalpb.GetImportProgressResponse{
+		Status:   &StatusSuccess,
+		State:    internalpb.ImportJobState_Completed,
+		Reason:   "",
+		Progress: 100,
+	}, nil).Once()
 	testEngine := initHTTPServerV2(mp, false)
 	queryTestCases := []rawTestCase{}
 	queryTestCases = append(queryTestCases, rawTestCase{
@@ -969,6 +947,12 @@ func TestMethodPost(t *testing.T) {
 	queryTestCases = append(queryTestCases, rawTestCase{
 		path: versionalV2(ImportJobCategory, CreateAction),
 	})
+	queryTestCases = append(queryTestCases, rawTestCase{
+		path: versionalV2(ImportJobCategory, ListAction),
+	})
+	queryTestCases = append(queryTestCases, rawTestCase{
+		path: versionalV2(ImportJobCategory, GetProgressAction),
+	})
 
 	for _, testcase := range queryTestCases {
 		t.Run("query", func(t *testing.T) {
@@ -980,7 +964,8 @@ func TestMethodPost(t *testing.T) {
 				`"userName": "` + util.UserRoot + `", "password": "Milvus", "newPassword": "milvus", "roleName": "` + util.RoleAdmin + `",` +
 				`"roleName": "` + util.RoleAdmin + `", "objectType": "Global", "objectName": "*", "privilege": "*",` +
 				`"aliasName": "` + DefaultAliasName + `",` +
-				`"files": ["book.json"]` +
+				`"jobID": "1234567890",` +
+				`"files": [["book.json"]]` +
 				`}`))
 			req := httptest.NewRequest(http.MethodPost, testcase.path, bodyReader)
 			w := httptest.NewRecorder()

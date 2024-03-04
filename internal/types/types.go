@@ -220,6 +220,10 @@ type Proxy interface {
 	Component
 	proxypb.ProxyServer
 	milvuspb.MilvusServiceServer
+
+	ImportV2(context.Context, *internalpb.ImportRequest) (*internalpb.ImportResponse, error)
+	GetImportProgress(context.Context, *internalpb.GetImportProgressRequest) (*internalpb.GetImportProgressResponse, error)
+	ListImports(context.Context, *internalpb.ListImportsRequest) (*internalpb.ListImportsResponse, error)
 }
 
 // ProxyComponent defines the interface of proxy component.

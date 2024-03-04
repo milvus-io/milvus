@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin/binding"
 	"github.com/go-playground/validator/v10"
 	"github.com/golang/protobuf/proto"
+	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
@@ -21,10 +22,12 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/requestutil"
@@ -128,8 +131,8 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 	router.POST(AliasCategory+AlterAction, timeoutMiddleware(wrapperPost(func() any { return &AliasCollectionReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.alterAlias)))))
 
 	router.POST(ImportJobCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.listImportJob)))))
-	router.POST(ImportJobCategory+CreateAction, timeoutMiddleware(wrapperPost(func() any { return &DataFilesReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.createImportJob)))))
-	router.POST(ImportJobCategory+GetProgressAction, timeoutMiddleware(wrapperPost(func() any { return &TaskIDReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.getImportJobProcess)))))
+	router.POST(ImportJobCategory+CreateAction, timeoutMiddleware(wrapperPost(func() any { return &ImportReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.createImportJob)))))
+	router.POST(ImportJobCategory+GetProgressAction, timeoutMiddleware(wrapperPost(func() any { return &JobIDReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.getImportJobProcess)))))
 }
 
 type (
@@ -1536,43 +1539,27 @@ func (h *HandlersV2) alterAlias(ctx context.Context, c *gin.Context, anyReq any,
 }
 
 func (h *HandlersV2) listImportJob(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
-	collectionGetter, _ := anyReq.(requestutil.CollectionNameGetter)
-	limitGetter, _ := anyReq.(LimitGetter)
-	req := &milvuspb.ListImportTasksRequest{
-		CollectionName: collectionGetter.GetCollectionName(),
-		Limit:          int64(limitGetter.GetLimit()),
+	collectionGetter := anyReq.(requestutil.CollectionNameGetter)
+	req := &internalpb.ListImportsRequest{
 		DbName:         dbName,
+		CollectionName: collectionGetter.GetCollectionName(),
 	}
 	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
-		return h.proxy.ListImportTasks(reqCtx, req.(*milvuspb.ListImportTasksRequest))
+		return h.proxy.ListImports(reqCtx, req.(*internalpb.ListImportsRequest))
 	})
 	if err == nil {
-		returnData := []map[string]interface{}{}
-		for _, job := range resp.(*milvuspb.ListImportTasksResponse).Tasks {
-			taskDetail := map[string]interface{}{
-				"taskID":          job.Id,
-				"state":           job.State.String(),
-				"dbName":          dbName,
-				"collectionName":  collectionGetter.GetCollectionName(),
-				"createTimestamp": strconv.FormatInt(job.CreateTs, 10),
+		returnData := make([]map[string]interface{}, 0)
+		response := resp.(*internalpb.ListImportsResponse)
+		for i, jobID := range response.GetJobIDs() {
+			jobDetail := make(map[string]interface{})
+			jobDetail["jobID"] = jobID
+			jobDetail["state"] = response.GetStates()[i].String()
+			jobDetail["progress"] = response.GetProgresses()[i]
+			reason := response.GetReasons()[i]
+			if reason != "" {
+				jobDetail["reason"] = reason
 			}
-			for _, info := range job.Infos {
-				switch info.Key {
-				case "collection":
-					taskDetail["collectionName"] = info.Value
-				case "partition":
-					taskDetail["partitionName"] = info.Value
-				case "persist_cost":
-					taskDetail["persistCost"] = info.Value
-				case "progress_percent":
-					taskDetail["progressPercent"] = info.Value
-				case "failed_reason":
-					if info.Value != "" {
-						taskDetail[HTTPReturnIndexFailReason] = info.Value
-					}
-				}
-			}
-			returnData = append(returnData, taskDetail)
+			returnData = append(returnData, jobDetail)
 		}
 		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: returnData})
 	}
@@ -1580,53 +1567,48 @@ func (h *HandlersV2) listImportJob(ctx context.Context, c *gin.Context, anyReq a
 }
 
 func (h *HandlersV2) createImportJob(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
-	collectionGetter, _ := anyReq.(requestutil.CollectionNameGetter)
-	fileNamesGetter, _ := anyReq.(FileNamesGetter)
-	req := &milvuspb.ImportRequest{
-		CollectionName: collectionGetter.GetCollectionName(),
+	var (
+		collectionGetter = anyReq.(requestutil.CollectionNameGetter)
+		partitionGetter  = anyReq.(requestutil.PartitionNameGetter)
+		filesGetter      = anyReq.(FilesGetter)
+		optionsGetter    = anyReq.(OptionsGetter)
+	)
+	req := &internalpb.ImportRequest{
 		DbName:         dbName,
-		Files:          fileNamesGetter.GetFileNames(),
+		CollectionName: collectionGetter.GetCollectionName(),
+		PartitionName:  partitionGetter.GetPartitionName(),
+		Files: lo.Map(filesGetter.GetFiles(), func(paths []string, _ int) *internalpb.ImportFile {
+			return &internalpb.ImportFile{Paths: paths}
+		}),
+		Options: funcutil.Map2KeyValuePair(optionsGetter.GetOptions()),
 	}
 	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
-		return h.proxy.Import(reqCtx, req.(*milvuspb.ImportRequest))
+		return h.proxy.ImportV2(reqCtx, req.(*internalpb.ImportRequest))
 	})
 	if err == nil {
-		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: resp.(*milvuspb.ImportResponse).Tasks})
+		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, "jobID": resp.(*internalpb.ImportResponse).GetJobID()})
 	}
 	return resp, err
 }
 
 func (h *HandlersV2) getImportJobProcess(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
-	taskIDGetter, _ := anyReq.(TaskIDGetter)
-	req := &milvuspb.GetImportStateRequest{
-		Task: taskIDGetter.GetTaskID(),
+	jobIDGetter := anyReq.(JobIDGetter)
+	req := &internalpb.GetImportProgressRequest{
+		DbName: dbName,
+		JobID:  jobIDGetter.GetJobID(),
 	}
 	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
-		return h.proxy.GetImportState(reqCtx, req.(*milvuspb.GetImportStateRequest))
+		return h.proxy.GetImportProgress(reqCtx, req.(*internalpb.GetImportProgressRequest))
 	})
 	if err == nil {
-		response := resp.(*milvuspb.GetImportStateResponse)
-		returnData := map[string]interface{}{
-			"taskID":          response.Id,
-			"state":           response.State.String(),
-			"dbName":          dbName,
-			"createTimestamp": strconv.FormatInt(response.CreateTs, 10),
-		}
-		for _, info := range response.Infos {
-			switch info.Key {
-			case "collection":
-				returnData["collectionName"] = info.Value
-			case "partition":
-				returnData["partitionName"] = info.Value
-			case "persist_cost":
-				returnData["persistCost"] = info.Value
-			case "progress_percent":
-				returnData["progressPercent"] = info.Value
-			case "failed_reason":
-				if info.Value != "" {
-					returnData[HTTPReturnIndexFailReason] = info.Value
-				}
-			}
+		response := resp.(*internalpb.GetImportProgressResponse)
+		returnData := make(map[string]interface{})
+		returnData["jobID"] = jobIDGetter.GetJobID()
+		returnData["state"] = response.GetState().String()
+		returnData["progress"] = response.GetProgress()
+		reason := response.GetReason()
+		if reason != "" {
+			returnData["reason"] = reason
 		}
 		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: returnData})
 	}
