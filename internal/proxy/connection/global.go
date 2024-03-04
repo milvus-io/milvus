@@ -8,9 +8,7 @@ var getConnectionManagerInstanceOnce sync.Once
 
 func GetManager() *connectionManager {
 	getConnectionManagerInstanceOnce.Do(func() {
-		connectionManagerInstance = newConnectionManager(
-			withDuration(defaultConnCheckDuration),
-			withTTL(defaultTTLForInactiveConn))
+		connectionManagerInstance = newConnectionManager()
 	})
 	return connectionManagerInstance
 }
