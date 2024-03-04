@@ -182,7 +182,7 @@ func matchCountRule(outputs []string) bool {
 	return len(outputs) == 1 && strings.ToLower(strings.TrimSpace(outputs[0])) == "count(*)"
 }
 
-func createCntPlan(expr string, schema *schemapb.CollectionSchema) (*planpb.PlanNode, error) {
+func createCntPlan(expr string, schemaHelper *typeutil.SchemaHelper) (*planpb.PlanNode, error) {
 	if expr == "" {
 		return &planpb.PlanNode{
 			Node: &planpb.PlanNode_Query{
@@ -194,7 +194,7 @@ func createCntPlan(expr string, schema *schemapb.CollectionSchema) (*planpb.Plan
 		}, nil
 	}
 
-	plan, err := planparserv2.CreateRetrievePlan(schema, expr)
+	plan, err := planparserv2.CreateRetrievePlan(schemaHelper, expr)
 	if err != nil {
 		return nil, merr.WrapErrParameterInvalidMsg("failed to create query plan: %v", err)
 	}
@@ -210,14 +210,14 @@ func (t *queryTask) createPlan(ctx context.Context) error {
 	cntMatch := matchCountRule(t.request.GetOutputFields())
 	if cntMatch {
 		var err error
-		t.plan, err = createCntPlan(t.request.GetExpr(), schema.CollectionSchema)
+		t.plan, err = createCntPlan(t.request.GetExpr(), schema.schemaHelper)
 		t.userOutputFields = []string{"count(*)"}
 		return err
 	}
 
 	var err error
 	if t.plan == nil {
-		t.plan, err = planparserv2.CreateRetrievePlan(schema.CollectionSchema, t.request.Expr)
+		t.plan, err = planparserv2.CreateRetrievePlan(schema.schemaHelper, t.request.Expr)
 		if err != nil {
 			return merr.WrapErrParameterInvalidMsg("failed to create query plan: %v", err)
 		}

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
@@ -45,6 +46,13 @@ func newTestSchema() *schemapb.CollectionSchema {
 		Fields:             fields,
 		EnableDynamicField: true,
 	}
+}
+
+func newTestSchemaHelper(t *testing.T) *typeutil.SchemaHelper {
+	schema := newTestSchema()
+	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+	return schemaHelper
 }
 
 func assertValidExpr(t *testing.T, helper *typeutil.SchemaHelper, exprStr string) {
@@ -382,13 +390,13 @@ func TestExpr_Combinations(t *testing.T) {
 }
 
 func TestCreateRetrievePlan(t *testing.T) {
-	schema := newTestSchema()
+	schema := newTestSchemaHelper(t)
 	_, err := CreateRetrievePlan(schema, "Int64Field > 0")
 	assert.NoError(t, err)
 }
 
 func TestCreateSearchPlan(t *testing.T) {
-	schema := newTestSchema()
+	schema := newTestSchemaHelper(t)
 	_, err := CreateSearchPlan(schema, `$meta["A"] != 10`, "FloatVectorField", &planpb.QueryInfo{
 		Topk:         0,
 		MetricType:   "",
@@ -399,7 +407,7 @@ func TestCreateSearchPlan(t *testing.T) {
 }
 
 func TestCreateFloat16SearchPlan(t *testing.T) {
-	schema := newTestSchema()
+	schema := newTestSchemaHelper(t)
 	_, err := CreateSearchPlan(schema, `$meta["A"] != 10`, "Float16VectorField", &planpb.QueryInfo{
 		Topk:         0,
 		MetricType:   "",
@@ -410,7 +418,7 @@ func TestCreateFloat16SearchPlan(t *testing.T) {
 }
 
 func TestCreateBFloat16earchPlan(t *testing.T) {
-	schema := newTestSchema()
+	schema := newTestSchemaHelper(t)
 	_, err := CreateSearchPlan(schema, `$meta["A"] != 10`, "BFloat16VectorField", &planpb.QueryInfo{
 		Topk:         0,
 		MetricType:   "",
@@ -557,42 +565,28 @@ func TestExpr_Invalid(t *testing.T) {
 }
 
 func TestCreateRetrievePlan_Invalid(t *testing.T) {
-	t.Run("invalid schema", func(t *testing.T) {
-		schema := newTestSchema()
-		schema.Fields = append(schema.Fields, schema.Fields[0])
-		_, err := CreateRetrievePlan(schema, "")
-		assert.Error(t, err)
-	})
-
 	t.Run("invalid expr", func(t *testing.T) {
-		schema := newTestSchema()
+		schema := newTestSchemaHelper(t)
 		_, err := CreateRetrievePlan(schema, "invalid expression")
 		assert.Error(t, err)
 	})
 }
 
 func TestCreateSearchPlan_Invalid(t *testing.T) {
-	t.Run("invalid schema", func(t *testing.T) {
-		schema := newTestSchema()
-		schema.Fields = append(schema.Fields, schema.Fields[0])
-		_, err := CreateSearchPlan(schema, "", "", nil)
-		assert.Error(t, err)
-	})
-
 	t.Run("invalid expr", func(t *testing.T) {
-		schema := newTestSchema()
+		schema := newTestSchemaHelper(t)
 		_, err := CreateSearchPlan(schema, "invalid expression", "", nil)
 		assert.Error(t, err)
 	})
 
 	t.Run("invalid vector field", func(t *testing.T) {
-		schema := newTestSchema()
+		schema := newTestSchemaHelper(t)
 		_, err := CreateSearchPlan(schema, "Int64Field > 0", "not_exist", nil)
 		assert.Error(t, err)
 	})
 
 	t.Run("not vector type", func(t *testing.T) {
-		schema := newTestSchema()
+		schema := newTestSchemaHelper(t)
 		_, err := CreateSearchPlan(schema, "Int64Field > 0", "VarCharField", nil)
 		assert.Error(t, err)
 	})
@@ -641,7 +635,7 @@ func Test_handleExpr_17126_26662(t *testing.T) {
 }
 
 func Test_JSONExpr(t *testing.T) {
-	schema := newTestSchema()
+	schema := newTestSchemaHelper(t)
 	expr := ""
 	var err error
 	// search
@@ -700,7 +694,7 @@ func Test_JSONExpr(t *testing.T) {
 }
 
 func Test_InvalidExprOnJSONField(t *testing.T) {
-	schema := newTestSchema()
+	schema := newTestSchemaHelper(t)
 	expr := ""
 	var err error
 	// search
@@ -747,8 +741,9 @@ func Test_InvalidExprWithoutJSONField(t *testing.T) {
 		AutoID:      true,
 		Fields:      fields,
 	}
+	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
 	expr := ""
-	var err error
 
 	exprs := []string{
 		`A == 0`,
@@ -761,7 +756,7 @@ func Test_InvalidExprWithoutJSONField(t *testing.T) {
 	}
 
 	for _, expr = range exprs {
-		_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		_, err = CreateSearchPlan(schemaHelper, expr, "FloatVectorField", &planpb.QueryInfo{
 			Topk:         0,
 			MetricType:   "",
 			SearchParams: "",
@@ -785,9 +780,10 @@ func Test_InvalidExprWithMultipleJSONField(t *testing.T) {
 		AutoID:      true,
 		Fields:      fields,
 	}
+	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
 
 	expr := ""
-	var err error
 	exprs := []string{
 		`A == 0`,
 		`A in [1, 2, 3]`,
@@ -797,7 +793,7 @@ func Test_InvalidExprWithMultipleJSONField(t *testing.T) {
 	}
 
 	for _, expr = range exprs {
-		_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		_, err = CreateSearchPlan(schemaHelper, expr, "FloatVectorField", &planpb.QueryInfo{
 			Topk:         0,
 			MetricType:   "",
 			SearchParams: "",
@@ -808,7 +804,7 @@ func Test_InvalidExprWithMultipleJSONField(t *testing.T) {
 }
 
 func Test_exprWithSingleQuotes(t *testing.T) {
-	schema := newTestSchema()
+	schema := newTestSchemaHelper(t)
 	expr := ""
 	var err error
 	exprs := []string{
@@ -844,7 +840,7 @@ func Test_exprWithSingleQuotes(t *testing.T) {
 }
 
 func Test_JSONContains(t *testing.T) {
-	schema := newTestSchema()
+	schema := newTestSchemaHelper(t)
 	expr := ""
 	var err error
 	exprs := []string{
@@ -876,7 +872,7 @@ func Test_JSONContains(t *testing.T) {
 }
 
 func Test_InvalidJSONContains(t *testing.T) {
-	schema := newTestSchema()
+	schema := newTestSchemaHelper(t)
 	expr := ""
 	var err error
 	exprs := []string{
@@ -938,7 +934,7 @@ func Test_isEmptyExpression(t *testing.T) {
 }
 
 func Test_EscapeString(t *testing.T) {
-	schema := newTestSchema()
+	schema := newTestSchemaHelper(t)
 	expr := ""
 	var err error
 	exprs := []string{
@@ -989,7 +985,7 @@ c'`,
 }
 
 func Test_JSONContainsAll(t *testing.T) {
-	schema := newTestSchema()
+	schema := newTestSchemaHelper(t)
 	expr := ""
 	var err error
 	var plan *planpb.PlanNode
@@ -1035,7 +1031,7 @@ func Test_JSONContainsAll(t *testing.T) {
 }
 
 func Test_JSONContainsAny(t *testing.T) {
-	schema := newTestSchema()
+	schema := newTestSchemaHelper(t)
 	expr := ""
 	var err error
 	var plan *planpb.PlanNode
@@ -1081,7 +1077,7 @@ func Test_JSONContainsAny(t *testing.T) {
 }
 
 func Test_ArrayExpr(t *testing.T) {
-	schema := newTestSchema()
+	schema := newTestSchemaHelper(t)
 	expr := ""
 	var err error
 
@@ -1163,7 +1159,7 @@ func Test_ArrayExpr(t *testing.T) {
 }
 
 func Test_ArrayLength(t *testing.T) {
-	schema := newTestSchema()
+	schema := newTestSchemaHelper(t)
 	expr := ""
 	var err error
 

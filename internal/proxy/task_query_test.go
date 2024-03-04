@@ -825,11 +825,6 @@ func Test_createCntPlan(t *testing.T) {
 	})
 
 	t.Run("invalid schema", func(t *testing.T) {
-		_, err := createCntPlan("a > b", nil)
-		assert.Error(t, err)
-	})
-
-	t.Run("invalid schema", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{
@@ -840,7 +835,9 @@ func Test_createCntPlan(t *testing.T) {
 				},
 			},
 		}
-		plan, err := createCntPlan("a > 4", schema)
+		schemaHelper, err := typeutil.CreateSchemaHelper(schema)
+		require.NoError(t, err)
+		plan, err := createCntPlan("a > 4", schemaHelper)
 		assert.NoError(t, err)
 		assert.True(t, plan.GetQuery().GetIsCount())
 		assert.NotNil(t, plan.GetQuery().GetPredicates())
@@ -848,17 +845,8 @@ func Test_createCntPlan(t *testing.T) {
 }
 
 func Test_queryTask_createPlan(t *testing.T) {
+	collSchema := newTestSchema()
 	t.Run("match count rule", func(t *testing.T) {
-		collSchema := &schemapb.CollectionSchema{
-			Fields: []*schemapb.FieldSchema{
-				{
-					FieldID:      100,
-					Name:         "a",
-					IsPrimaryKey: true,
-					DataType:     schemapb.DataType_Int64,
-				},
-			},
-		}
 		schema := newSchemaInfo(collSchema)
 		tsk := &queryTask{
 			request: &milvuspb.QueryRequest{
@@ -874,27 +862,18 @@ func Test_queryTask_createPlan(t *testing.T) {
 	})
 
 	t.Run("query without expression", func(t *testing.T) {
+		schema := newSchemaInfo(collSchema)
 		tsk := &queryTask{
 			request: &milvuspb.QueryRequest{
-				OutputFields: []string{"a"},
+				OutputFields: []string{"Int64"},
 			},
-			schema: &schemaInfo{},
+			schema: schema,
 		}
 		err := tsk.createPlan(context.TODO())
 		assert.Error(t, err)
 	})
 
 	t.Run("invalid expression", func(t *testing.T) {
-		collSchema := &schemapb.CollectionSchema{
-			Fields: []*schemapb.FieldSchema{
-				{
-					FieldID:      100,
-					Name:         "a",
-					IsPrimaryKey: true,
-					DataType:     schemapb.DataType_Int64,
-				},
-			},
-		}
 		schema := newSchemaInfo(collSchema)
 
 		tsk := &queryTask{
@@ -909,16 +888,6 @@ func Test_queryTask_createPlan(t *testing.T) {
 	})
 
 	t.Run("invalid output fields", func(t *testing.T) {
-		collSchema := &schemapb.CollectionSchema{
-			Fields: []*schemapb.FieldSchema{
-				{
-					FieldID:      100,
-					Name:         "a",
-					IsPrimaryKey: true,
-					DataType:     schemapb.DataType_Int64,
-				},
-			},
-		}
 		schema := newSchemaInfo(collSchema)
 
 		tsk := &queryTask{

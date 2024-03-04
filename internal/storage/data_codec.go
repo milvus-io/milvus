@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -83,11 +84,15 @@ func (s BlobList) Len() int {
 
 // Less implements Less in sort.Interface
 func (s BlobList) Less(i, j int) bool {
-	leftValues := strings.Split(s[i].Key, "/")
-	rightValues := strings.Split(s[j].Key, "/")
-	left, _ := strconv.ParseInt(leftValues[len(leftValues)-1], 0, 10)
-	right, _ := strconv.ParseInt(rightValues[len(rightValues)-1], 0, 10)
-	return left < right
+	_, _, _, _, iLog, ok := metautil.ParseInsertLogPath(s[i].Key)
+	if !ok {
+		return false
+	}
+	_, _, _, _, jLog, ok := metautil.ParseInsertLogPath(s[j].Key)
+	if !ok {
+		return false
+	}
+	return iLog < jLog
 }
 
 // Swap implements Swap in sort.Interface
@@ -1115,7 +1120,6 @@ func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequ
 	writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", binary.Size(int64Ts)))
 
 	err = writer.Finish()
-
 	if err != nil {
 		return nil, err
 	}

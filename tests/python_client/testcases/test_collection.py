@@ -4512,3 +4512,132 @@ class TestCollectionMultipleVectorInvalid(TestcaseBase):
         error = {ct.err_code: 65535, ct.err_msg: "Invalid dim"}
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
 
+
+class TestCollectionMmap(TestcaseBase):
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_describe_collection_mmap(self):
+        """
+        target: enable or disable mmap in the collection
+        method: enable or disable mmap in the collection
+        expected: description information contains mmap
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        collection_w, _ = self.collection_wrap.init_collection(c_name, schema=default_schema)
+        collection_w.set_properties({'mmap.enabled': True})
+        pro = collection_w.describe().get("properties")
+        assert "mmap.enabled" in pro.keys()
+        assert pro["mmap.enabled"] == 'True'
+        collection_w.set_properties({'mmap.enabled': False})
+        pro = collection_w.describe().get("properties")
+        assert pro["mmap.enabled"] == 'False'
+        collection_w.set_properties({'mmap.enabled': True})
+        pro = collection_w.describe().get("properties")
+        assert pro["mmap.enabled"] == 'True'
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue: #30800")
+    def test_load_mmap_collection(self):
+        """
+        target: after loading, enable mmap for the collection
+        method: 1. data preparation and create index
+        2. load collection
+        3. enable mmap on collection
+        expected: raise exception
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        collection_w, _ = self.collection_wrap.init_collection(c_name, schema=default_schema)
+        collection_w.insert(cf.gen_default_list_data())
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index,
+                                  index_name=ct.default_index_name)
+        collection_w.set_properties({'mmap.enabled': True})
+        pro = collection_w.describe().get("properties")
+        assert pro["mmap.enabled"] == 'True'
+        collection_w.load()
+        collection_w.set_properties({'mmap.enabled': True},
+                                    check_items={ct.err_code: 104,
+                                    ct.err_msg: f"collection already loaded"})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_drop_mmap_collection(self):
+        """
+        target: set mmap on collection
+        method: 1. set mmap on collection
+        2. drop collection
+        3. describe collection
+        expected: description information contains mmap
+        """
+        self._connect()
+        c_name = "coll_rand"
+        collection_w, _ = self.collection_wrap.init_collection(c_name, schema=default_schema)
+        collection_w.set_properties({'mmap.enabled': True})
+        collection_w.drop()
+        collection_w, _ = self.collection_wrap.init_collection(c_name, schema=default_schema)
+        pro = collection_w.describe().get("properties")
+        assert "mmap.enabled" not in pro.keys()
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_multiple_collections_enable_mmap(self):
+        """
+        target: enabling mmap for multiple collections in a single instance
+        method: enabling mmap for multiple collections in a single instance
+        expected: the collection description message for mmap is normal
+        """
+        self._connect()
+        c_name = "coll_1"
+        c_name2 = "coll_2"
+        c_name3 = "coll_3"
+        collection_w, _ = self.collection_wrap.init_collection(c_name, schema=default_schema)
+        collection_w2, _ = self.collection_wrap.init_collection(c_name2, schema=default_schema)
+        collection_w3, _ = self.collection_wrap.init_collection(c_name3, schema=default_schema)
+        collection_w.set_properties({'mmap.enabled': True})
+        collection_w2.set_properties({'mmap.enabled': True})
+        pro = collection_w.describe().get("properties")
+        pro2 = collection_w2.describe().get("properties")
+        assert pro["mmap.enabled"] == 'True'
+        assert pro2["mmap.enabled"] == 'True'
+        collection_w3.set_properties({'mmap.enabled': True})
+        pro3 = collection_w3.describe().get("properties")
+        assert pro3["mmap.enabled"] == 'True'
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_flush_collection_mmap(self):
+        """
+        target: after flush, collection enables mmap
+        method: after flush, collection enables mmap
+        expected: the collection description message for mmap is normal
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        collection_w, _ = self.collection_wrap.init_collection(c_name, schema=default_schema)
+        collection_w.insert(cf.gen_default_list_data())
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index,
+                                  index_name=ct.default_index_name)
+        collection_w.alter_index(ct.default_index_name, {'mmap.enabled': False})
+        collection_w.flush()
+        collection_w.set_properties({'mmap.enabled': True})
+        pro = collection_w.describe().get("properties")
+        assert pro["mmap.enabled"] == 'True'
+        collection_w.alter_index(ct.default_index_name, {'mmap.enabled': True})
+        collection_w.load()
+        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, default_limit,
+                            default_search_exp,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "limit": default_limit})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_enable_mmap_after_drop_collection(self):
+        """
+        target: enable mmap after deleting a collection
+        method: enable mmap after deleting a collection
+        expected: raise exception
+        """
+        collection_w = self.init_collection_general(prefix, True, is_binary=True, is_index=False)[0]
+        collection_w.drop()
+        collection_w.set_properties({'mmap.enabled': True}, check_task=CheckTasks.err_res,
+                                    check_items={ct.err_code: 100,
+                                              ct.err_msg: f"collection not found"})

@@ -16,6 +16,33 @@ func BuildInsertLogPath(rootPath string, collectionID, partitionID, segmentID, f
 	return path.Join(rootPath, common.SegmentInsertLogPath, k)
 }
 
+func ParseInsertLogPath(path string) (collectionID, partitionID, segmentID, fieldID, logID typeutil.UniqueID, ok bool) {
+	infos := strings.Split(path, pathSep)
+	l := len(infos)
+	if l < 6 {
+		ok = false
+		return
+	}
+	var err error
+	if collectionID, err = strconv.ParseInt(infos[l-5], 10, 64); err != nil {
+		return 0, 0, 0, 0, 0, false
+	}
+	if partitionID, err = strconv.ParseInt(infos[l-4], 10, 64); err != nil {
+		return 0, 0, 0, 0, 0, false
+	}
+	if segmentID, err = strconv.ParseInt(infos[l-3], 10, 64); err != nil {
+		return 0, 0, 0, 0, 0, false
+	}
+	if fieldID, err = strconv.ParseInt(infos[l-2], 10, 64); err != nil {
+		return 0, 0, 0, 0, 0, false
+	}
+	if logID, err = strconv.ParseInt(infos[l-1], 10, 64); err != nil {
+		return 0, 0, 0, 0, 0, false
+	}
+	ok = true
+	return
+}
+
 func GetSegmentIDFromInsertLogPath(logPath string) typeutil.UniqueID {
 	return getSegmentIDFromPath(logPath, 3)
 }
