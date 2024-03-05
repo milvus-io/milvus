@@ -76,15 +76,15 @@ func (suite *SearchSuite) SetupTest() {
 
 	suite.sealed, err = NewSegment(ctx,
 		suite.collection,
-		suite.segmentID,
-		suite.partitionID,
-		suite.collectionID,
-		"dml",
 		SegmentTypeSealed,
 		0,
-		nil,
-		nil,
-		datapb.SegmentLevel_Legacy,
+		&querypb.SegmentLoadInfo{
+			SegmentID:     suite.segmentID,
+			CollectionID:  suite.collectionID,
+			PartitionID:   suite.partitionID,
+			InsertChannel: "dml",
+			Level:         datapb.SegmentLevel_Legacy,
+		},
 	)
 	suite.Require().NoError(err)
 
@@ -104,15 +104,15 @@ func (suite *SearchSuite) SetupTest() {
 
 	suite.growing, err = NewSegment(ctx,
 		suite.collection,
-		suite.segmentID+1,
-		suite.partitionID,
-		suite.collectionID,
-		"dml",
 		SegmentTypeGrowing,
 		0,
-		nil,
-		nil,
-		datapb.SegmentLevel_Legacy,
+		&querypb.SegmentLoadInfo{
+			SegmentID:     suite.segmentID + 1,
+			CollectionID:  suite.collectionID,
+			PartitionID:   suite.partitionID,
+			InsertChannel: "dml",
+			Level:         datapb.SegmentLevel_Legacy,
+		},
 	)
 	suite.Require().NoError(err)
 
