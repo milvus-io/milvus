@@ -13,8 +13,9 @@ import (
 type CompactionTriggerType int8
 
 const (
-	TriggerTypeLevelZeroView CompactionTriggerType = iota + 1
-	TriggerTypeSegmentSizeView
+	TriggerTypeLevelZeroViewChange CompactionTriggerType = iota + 1
+	TriggerTypeLevelZeroViewIDLE
+	TriggerTypeSegmentSizeViewChange
 )
 
 type TriggerManager interface {
@@ -32,16 +33,14 @@ type TriggerManager interface {
 // 2. SystemIDLE & schedulerIDLE
 // 3. Manual Compaction
 type CompactionTriggerManager struct {
-	meta      *meta
 	scheduler Scheduler
 	handler   compactionPlanContext // TODO replace with scheduler
 
 	allocator allocator
 }
 
-func NewCompactionTriggerManager(meta *meta, alloc allocator, handler compactionPlanContext) *CompactionTriggerManager {
+func NewCompactionTriggerManager(alloc allocator, handler compactionPlanContext) *CompactionTriggerManager {
 	m := &CompactionTriggerManager{
-		meta:      meta,
 		allocator: alloc,
 		handler:   handler,
 	}
@@ -53,50 +52,69 @@ func (m *CompactionTriggerManager) Notify(taskID UniqueID, eventType CompactionT
 	log := log.With(zap.Int64("taskID", taskID))
 	for _, view := range views {
 		switch eventType {
-		case TriggerTypeLevelZeroView:
-			log.Debug("Start to trigger a level zero compaction")
+		case TriggerTypeLevelZeroViewChange:
+			log.Debug("Start to trigger a level zero compaction by TriggerTypeLevelZeroViewChange")
+			outView, reason := view.Trigger()
+			if outView != nil {
+				log.Info("Success to trigger a LevelZeroCompaction output view, try to sumit",
+					zap.String("reason", reason),
+					zap.String("output view", outView.String()))
+				m.SubmitL0ViewToScheduler(taskID, outView)
+			}
+
+		case TriggerTypeLevelZeroViewIDLE:
+			log.Debug("Start to trigger a level zero compaction by TriggerTypLevelZeroViewIDLE")
 			outView, reason := view.Trigger()
 			if outView == nil {
-				continue
+				log.Info("Start to force trigger a level zero compaction by TriggerTypLevelZeroViewIDLE")
+				outView, reason = view.ForceTrigger()
 			}
 
-			plan := m.BuildLevelZeroCompactionPlan(outView)
-			if plan == nil {
-				continue
+			if outView != nil {
+				log.Info("Success to trigger a LevelZeroCompaction output view, try to submit",
+					zap.String("reason", reason),
+					zap.String("output view", outView.String()))
+				m.SubmitL0ViewToScheduler(taskID, outView)
 			}
-
-			label := outView.GetGroupLabel()
-			signal := &compactionSignal{
-				id:           taskID,
-				isForce:      false,
-				isGlobal:     true,
-				collectionID: label.CollectionID,
-				partitionID:  label.PartitionID,
-				pos:          outView.(*LevelZeroSegmentsView).earliestGrowingSegmentPos,
-			}
-
-			// TODO, remove handler, use scheduler
-			// m.scheduler.Submit(plan)
-			m.handler.execCompactionPlan(signal, plan)
-			log.Info("Finish to trigger a LevelZeroCompaction plan",
-				zap.Int64("planID", plan.GetPlanID()),
-				zap.String("type", plan.GetType().String()),
-				zap.String("reason", reason),
-				zap.String("output view", outView.String()))
 		}
 	}
 }
 
-func (m *CompactionTriggerManager) BuildLevelZeroCompactionPlan(view CompactionView) *datapb.CompactionPlan {
+func (m *CompactionTriggerManager) SubmitL0ViewToScheduler(taskID int64, outView CompactionView) {
+	plan := m.buildL0CompactionPlan(outView)
+	if plan == nil {
+		return
+	}
+
+	label := outView.GetGroupLabel()
+	signal := &compactionSignal{
+		id:           taskID,
+		isForce:      false,
+		isGlobal:     true,
+		collectionID: label.CollectionID,
+		partitionID:  label.PartitionID,
+		pos:          outView.(*LevelZeroSegmentsView).earliestGrowingSegmentPos,
+	}
+
+	// TODO, remove handler, use scheduler
+	// m.scheduler.Submit(plan)
+	m.handler.execCompactionPlan(signal, plan)
+	log.Info("Finish to submit a LevelZeroCompaction plan",
+		zap.Int64("taskID", taskID),
+		zap.Int64("planID", plan.GetPlanID()),
+		zap.String("type", plan.GetType().String()),
+	)
+}
+
+func (m *CompactionTriggerManager) buildL0CompactionPlan(view CompactionView) *datapb.CompactionPlan {
 	var segmentBinlogs []*datapb.CompactionSegmentBinlogs
 	levelZeroSegs := lo.Map(view.GetSegmentsView(), func(segView *SegmentView, _ int) *datapb.CompactionSegmentBinlogs {
-		s := m.meta.GetSegment(segView.ID)
 		return &datapb.CompactionSegmentBinlogs{
 			SegmentID:    segView.ID,
-			Deltalogs:    s.GetDeltalogs(),
 			Level:        datapb.SegmentLevel_L0,
 			CollectionID: view.GetGroupLabel().CollectionID,
 			PartitionID:  view.GetGroupLabel().PartitionID,
+			// Deltalogs:   deltalogs are filled before executing the plan
 		}
 	})
 	segmentBinlogs = append(segmentBinlogs, levelZeroSegs...)
