@@ -365,9 +365,6 @@ func (s *JSONExprSuite) TestJSON_DynamicSchemaWithJSON() {
 	}
 	s.doSearch(collectionName, []string{integration.JSONField}, expr, dim, checkFunc)
 	log.Info("nested path expression run successfully")
-
-	expr = `jsonField == ""`
-	s.doSearchWithInvalidExpr(collectionName, []string{integration.JSONField}, expr, dim)
 }
 
 func (s *JSONExprSuite) checkSearch(collectionName, fieldName string, dim int) {
@@ -721,9 +718,6 @@ func (s *JSONExprSuite) checkSearch(collectionName, fieldName string, dim int) {
 	s.doSearchWithInvalidExpr(collectionName, []string{fieldName}, expr, dim)
 
 	expr = `1+5 <= A+1 < 5+10`
-	s.doSearchWithInvalidExpr(collectionName, []string{fieldName}, expr, dim)
-
-	expr = `$meta == ""`
 	s.doSearchWithInvalidExpr(collectionName, []string{fieldName}, expr, dim)
 }
 

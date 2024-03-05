@@ -133,6 +133,9 @@ class Json {
     // construct JSON pointer with provided path
     static std::string
     pointer(std::vector<std::string> nested_path) {
+        if (nested_path.empty()) {
+            return "";
+        }
         std::for_each(
             nested_path.begin(), nested_path.end(), [](std::string& key) {
                 boost::replace_all(key, "~", "~0");
@@ -145,6 +148,19 @@ class Json {
     template <typename T>
     value_result<T>
     at(std::string_view pointer) const {
+        if (pointer == "") {
+            if constexpr (std::is_same_v<std::string_view, T> ||
+                          std::is_same_v<std::string, T>) {
+                return doc().get_string(false);
+            } else if constexpr (std::is_same_v<bool, T>) {
+                return doc().get_bool();
+            } else if constexpr (std::is_same_v<int64_t, T>) {
+                return doc().get_int64();
+            } else if constexpr (std::is_same_v<double, T>) {
+                return doc().get_double();
+            }
+        }
+
         return doc().at_pointer(pointer).get<T>();
     }
 
