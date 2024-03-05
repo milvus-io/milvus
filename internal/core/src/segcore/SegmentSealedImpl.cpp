@@ -1117,6 +1117,16 @@ SegmentSealedImpl::ClearData() {
     vector_indexings_.clear();
     insert_record_.clear();
     fields_.clear();
+    auto cc = storage::ChunkCacheSingleton::GetInstance().GetChunkCache();
+    if (cc == nullptr) {
+        return;
+    }
+    // munmap and remove binlog from chunk cache
+    for (const auto& iter : field_data_info_.field_infos) {
+        for (const auto& binlog : iter.second.insert_files) {
+            cc->Remove(binlog);
+        }
+    }
 }
 
 std::unique_ptr<DataArray>
