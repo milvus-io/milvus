@@ -118,7 +118,6 @@ func NewManager() *Manager {
 	diskCap := paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsInt64()
 	segmentMaxSIze := paramtable.Get().DataCoordCfg.SegmentMaxSize.GetAsInt64()
 	cacheMaxItemNum := diskCap / segmentMaxSIze
-	cacheMaxItemNum = 1
 
 	segMgr := NewSegmentManager()
 	sf := singleflight.Group{}
