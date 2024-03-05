@@ -62,6 +62,6 @@ func TestConnectionManager_Purge(t *testing.T) {
 	}
 
 	assert.Eventually(t, func() bool {
-		return s.count.Load() <= 2
+		return s.clientInfos.Len() <= 2
 	}, time.Second*5, time.Second)
 }

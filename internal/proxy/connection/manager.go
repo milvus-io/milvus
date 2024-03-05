@@ -1,12 +1,12 @@
 package connection
 
 import (
+	"container/heap"
 	"context"
 	"strconv"
 	"sync"
 	"time"
 
-	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -23,7 +23,6 @@ type connectionManager struct {
 	wg          sync.WaitGroup
 
 	clientInfos *typeutil.ConcurrentMap[int64, clientInfo]
-	count       atomic.Int64
 }
 
 func (s *connectionManager) init() {
@@ -61,16 +60,31 @@ func (s *connectionManager) checkLoop() {
 }
 
 func (s *connectionManager) purgeIfNumOfClientsExceed() {
-	if s.count.Load() >= paramtable.Get().ProxyCfg.MaxConnectionNum.GetAsInt64() {
-		log.Info("number of client infos exceed limit, clear them",
-			zap.Int64("num", s.count.Load()),
-			zap.Int64("limit", paramtable.Get().ProxyCfg.MaxConnectionNum.GetAsInt64()))
+	if int64(s.clientInfos.Len()) < paramtable.Get().ProxyCfg.MaxConnectionNum.GetAsInt64() {
+		return
+	}
 
-		s.clientInfos.Range(func(candidate int64, info clientInfo) bool {
-			s.clientInfos.Remove(candidate)
-			s.count.Dec()
-			return true
-		})
+	log.Info("number of client infos exceed limit, purge the oldest",
+		zap.Int64("num", int64(s.clientInfos.Len())),
+		zap.Int64("limit", paramtable.Get().ProxyCfg.MaxConnectionNum.GetAsInt64()))
+
+	diffNum := int64(s.clientInfos.Len()) - paramtable.Get().ProxyCfg.MaxConnectionNum.GetAsInt64()
+	q := newPriorityQueueWithCap(int(diffNum + 1))
+	s.clientInfos.Range(func(identifier int64, info clientInfo) bool {
+		heap.Push(&q, newQueryItem(info.identifier, info.lastActiveTime))
+		if int64(q.Len()) > diffNum {
+			// pop the newest.
+			heap.Pop(&q)
+		}
+		return true
+	})
+
+	// time order doesn't matter here.
+	for _, item := range q {
+		info, exist := s.clientInfos.GetAndRemove(item.identifier)
+		if exist {
+			log.Info("remove client info", info.GetLogger()...)
+		}
 	}
 }
 
@@ -81,7 +95,6 @@ func (s *connectionManager) Register(ctx context.Context, identifier int64, info
 		lastActiveTime: time.Now(),
 	}
 
-	s.count.Inc()
 	s.clientInfos.Insert(identifier, cli)
 	log.Ctx(ctx).Info("client register", cli.GetLogger()...)
 }
@@ -91,7 +104,7 @@ func (s *connectionManager) KeepActive(identifier int64) {
 }
 
 func (s *connectionManager) List() []*commonpb.ClientInfo {
-	clients := make([]*commonpb.ClientInfo, 0, s.count.Load())
+	clients := make([]*commonpb.ClientInfo, 0, s.clientInfos.Len())
 
 	s.clientInfos.Range(func(identifier int64, info clientInfo) bool {
 		if info.ClientInfo != nil {
@@ -137,7 +150,6 @@ func (s *connectionManager) removeLongInactiveClients() {
 		if time.Since(info.lastActiveTime) > ttl {
 			log.Info("client deregister", info.GetLogger()...)
 			s.clientInfos.Remove(candidate)
-			s.count.Dec()
 		}
 		return true
 	})

@@ -1392,7 +1392,7 @@ please adjust in embedded Milvus: false`,
 		Key:          "proxy.maxConnectionNum",
 		Version:      "2.3.11",
 		Doc:          "the max client info numbers that proxy should manage, avoid too many client infos",
-		DefaultValue: "100",
+		DefaultValue: "10000",
 		Export:       true,
 	}
 	p.MaxConnectionNum.Init(base.mgr)
