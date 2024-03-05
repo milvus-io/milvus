@@ -33,6 +33,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
+func TestMain(m *testing.M) {
+	paramtable.Init()
+	os.Exit(m.Run())
+}
+
 func TestAccessLogger_NotEnable(t *testing.T) {
 	var Params paramtable.ComponentParam
 
