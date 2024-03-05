@@ -67,6 +67,25 @@ func (v *LevelZeroSegmentsView) Equal(others []*SegmentView) bool {
 	return diffCount == 0
 }
 
+// ForceTrigger triggers all qualified LevelZeroSegments according to views
+func (v *LevelZeroSegmentsView) ForceTrigger() (CompactionView, string) {
+	// Only choose segments with position less than the earliest growing segment position
+	validSegments := lo.Filter(v.segments, func(view *SegmentView, _ int) bool {
+		return view.dmlPos.GetTimestamp() < v.earliestGrowingSegmentPos.GetTimestamp()
+	})
+
+	targetViews, reason := v.forceTrigger(validSegments)
+	if len(targetViews) > 0 {
+		return &LevelZeroSegmentsView{
+			label:                     v.label,
+			segments:                  targetViews,
+			earliestGrowingSegmentPos: v.earliestGrowingSegmentPos,
+		}, reason
+	}
+
+	return nil, ""
+}
+
 // Trigger triggers all qualified LevelZeroSegments according to views
 func (v *LevelZeroSegmentsView) Trigger() (CompactionView, string) {
 	// Only choose segments with position less than the earliest growing segment position

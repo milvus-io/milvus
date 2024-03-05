@@ -18,6 +18,7 @@ type CompactionView interface {
 	Append(segments ...*SegmentView)
 	String() string
 	Trigger() (CompactionView, string)
+	ForceTrigger() (CompactionView, string)
 }
 
 type FullViews struct {

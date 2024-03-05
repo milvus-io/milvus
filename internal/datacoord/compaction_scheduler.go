@@ -28,10 +28,11 @@ type Scheduler interface {
 }
 
 type CompactionScheduler struct {
-	taskNumber    *atomic.Int32
+	taskNumber *atomic.Int32
+
 	queuingTasks  []*compactionTask
 	parallelTasks map[int64][]*compactionTask // parallel by nodeID
-	mu            sync.RWMutex
+	taskGuard     sync.RWMutex
 
 	planHandler *compactionPlanHandler
 }
@@ -47,9 +48,9 @@ func NewCompactionScheduler() *CompactionScheduler {
 }
 
 func (s *CompactionScheduler) Submit(tasks ...*compactionTask) {
-	s.mu.Lock()
+	s.taskGuard.Lock()
 	s.queuingTasks = append(s.queuingTasks, tasks...)
-	s.mu.Unlock()
+	s.taskGuard.Unlock()
 
 	s.taskNumber.Add(int32(len(tasks)))
 	lo.ForEach(tasks, func(t *compactionTask, _ int) {
@@ -63,8 +64,8 @@ func (s *CompactionScheduler) Submit(tasks ...*compactionTask) {
 func (s *CompactionScheduler) Schedule() []*compactionTask {
 	nodeTasks := make(map[int64][]*compactionTask) // nodeID
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.taskGuard.Lock()
+	defer s.taskGuard.Unlock()
 	for _, task := range s.queuingTasks {
 		if _, ok := nodeTasks[task.dataNodeID]; !ok {
 			nodeTasks[task.dataNodeID] = make([]*compactionTask, 0)
@@ -156,7 +157,7 @@ func (s *CompactionScheduler) Finish(nodeID UniqueID, plan *datapb.CompactionPla
 	planID := plan.GetPlanID()
 	log := log.With(zap.Int64("planID", planID), zap.Int64("nodeID", nodeID))
 
-	s.mu.Lock()
+	s.taskGuard.Lock()
 	if parallel, ok := s.parallelTasks[nodeID]; ok {
 		tasks := lo.Filter(parallel, func(t *compactionTask, _ int) bool {
 			return t.plan.PlanID != planID
@@ -183,25 +184,26 @@ func (s *CompactionScheduler) Finish(nodeID UniqueID, plan *datapb.CompactionPla
 		log.Info("Compaction scheduler remove task from queue")
 	}
 
-	s.mu.Unlock()
+	s.taskGuard.Unlock()
 	s.LogStatus()
 }
 
 func (s *CompactionScheduler) LogStatus() {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	waiting := lo.Map(s.queuingTasks, func(t *compactionTask, _ int) int64 {
-		return t.plan.PlanID
-	})
+	s.taskGuard.RLock()
+	defer s.taskGuard.RUnlock()
 
-	var executing []int64
-	for _, tasks := range s.parallelTasks {
-		executing = append(executing, lo.Map(tasks, func(t *compactionTask, _ int) int64 {
+	if s.GetTaskCount() > 0 {
+		waiting := lo.Map(s.queuingTasks, func(t *compactionTask, _ int) int64 {
 			return t.plan.PlanID
-		})...)
-	}
+		})
 
-	if len(waiting) > 0 || len(executing) > 0 {
+		var executing []int64
+		for _, tasks := range s.parallelTasks {
+			executing = append(executing, lo.Map(tasks, func(t *compactionTask, _ int) int64 {
+				return t.plan.PlanID
+			})...)
+		}
+
 		log.Info("Compaction scheduler status", zap.Int64s("waiting", waiting), zap.Int64s("executing", executing))
 	}
 }
