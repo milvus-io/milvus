@@ -337,3 +337,17 @@ func TestFieldValueSize(t *testing.T) {
 	doublef := NewDoubleFieldValue(float64(10.7))
 	assert.Equal(t, int64(16), doublef.Size())
 }
+
+func TestFloatVectorFieldValue(t *testing.T) {
+	pk := NewFloatVectorFieldValue([]float32{1.0, 2.0, 3.0, 4.0})
+
+	t.Run("unmarshal", func(t *testing.T) {
+		blob, err := json.Marshal(pk)
+		assert.NoError(t, err)
+
+		unmarshalledPk := &FloatVectorFieldValue{}
+		err = json.Unmarshal(blob, unmarshalledPk)
+		assert.NoError(t, err)
+		assert.Equal(t, pk.Value, unmarshalledPk.Value)
+	})
+}

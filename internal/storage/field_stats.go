@@ -31,12 +31,12 @@ import (
 // FieldStats contains statistics data for any column
 // todo: compatible to PrimaryKeyStats
 type FieldStats struct {
-	FieldID   int64                  `json:"fieldID"`
-	Type      schemapb.DataType      `json:"type"`
-	Max       ScalarFieldValue       `json:"max"`      // for scalar field
-	Min       ScalarFieldValue       `json:"min"`      // for scalar field
-	BF        *bloom.BloomFilter     `json:"bf"`       // for scalar field
-	Centroids []schemapb.VectorField `json:"centroid"` // for vector field
+	FieldID   int64              `json:"fieldID"`
+	Type      schemapb.DataType  `json:"type"`
+	Max       ScalarFieldValue   `json:"max"`       // for scalar field
+	Min       ScalarFieldValue   `json:"min"`       // for scalar field
+	BF        *bloom.BloomFilter `json:"bf"`        // for scalar field
+	Centroids []VectorFieldValue `json:"centroids"` // for vector field
 }
 
 // UnmarshalJSON unmarshal bytes to FieldStats
@@ -106,8 +106,11 @@ func (stats *FieldStats) UnmarshalJSON(data []byte) error {
 		stats.Max = &VarCharFieldValue{}
 		stats.Min = &VarCharFieldValue{}
 		isScalarField = true
+	case schemapb.DataType_FloatVector:
+		stats.Centroids = []VectorFieldValue{}
+		isScalarField = false
 	default:
-		// todo support vector field
+		// unsupported data type
 	}
 
 	if isScalarField {
@@ -123,7 +126,6 @@ func (stats *FieldStats) UnmarshalJSON(data []byte) error {
 				return err
 			}
 		}
-
 		// compatible with primaryKeyStats
 		if maxPkMessage, ok := messageMap["maxPk"]; ok && maxPkMessage != nil {
 			err = json.Unmarshal(*maxPkMessage, stats.Max)
@@ -146,9 +148,39 @@ func (stats *FieldStats) UnmarshalJSON(data []byte) error {
 				return err
 			}
 		}
+	} else {
+		stats.initCentroids(data, stats.Type)
+		err = json.Unmarshal(*messageMap["centroids"], &stats.Centroids)
+		if err != nil {
+			return err
+		}
 	}
 
 	return nil
+}
+
+func (stats *FieldStats) initCentroids(data []byte, dataType schemapb.DataType) {
+	type FieldStatsAux struct {
+		FieldID   int64              `json:"fieldID"`
+		Type      schemapb.DataType  `json:"type"`
+		Max       json.RawMessage    `json:"max"`
+		Min       json.RawMessage    `json:"min"`
+		BF        *bloom.BloomFilter `json:"bf"`
+		Centroids []json.RawMessage  `json:"centroids"`
+	}
+	// Unmarshal JSON into the auxiliary struct
+	var aux FieldStatsAux
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return
+	}
+	for i := 0; i < len(aux.Centroids); i++ {
+		switch dataType {
+		case schemapb.DataType_FloatVector:
+			stats.Centroids = append(stats.Centroids, &FloatVectorFieldValue{})
+		default:
+			// other vector datatype
+		}
+	}
 }
 
 func (stats *FieldStats) UpdateByMsgs(msgs FieldData) {
@@ -317,7 +349,18 @@ func (stats *FieldStats) UpdateMinMax(pk ScalarFieldValue) {
 	}
 }
 
+// SetVectorCentroids update centroids value
+func (stats *FieldStats) SetVectorCentroids(centroids ...VectorFieldValue) {
+	stats.Centroids = centroids
+}
+
 func NewFieldStats(fieldID int64, pkType schemapb.DataType, rowNum int64) (*FieldStats, error) {
+	if pkType == schemapb.DataType_FloatVector {
+		return &FieldStats{
+			FieldID: fieldID,
+			Type:    pkType,
+		}, nil
+	}
 	return &FieldStats{
 		FieldID: fieldID,
 		Type:    pkType,

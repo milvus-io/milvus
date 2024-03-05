@@ -951,3 +951,65 @@ func (vcfv *VarCharFieldValue) UnmarshalJSON(data []byte) error {
 
 	return nil
 }
+
+type VectorFieldValue interface {
+	MarshalJSON() ([]byte, error)
+	UnmarshalJSON(data []byte) error
+	SetValue(interface{}) error
+	GetValue() interface{}
+	Type() schemapb.DataType
+	Size() int64
+}
+
+var _ VectorFieldValue = (*FloatVectorFieldValue)(nil)
+
+type FloatVectorFieldValue struct {
+	Value []float32 `json:"value"`
+}
+
+func NewFloatVectorFieldValue(v []float32) *FloatVectorFieldValue {
+	return &FloatVectorFieldValue{
+		Value: v,
+	}
+}
+
+func (ifv *FloatVectorFieldValue) MarshalJSON() ([]byte, error) {
+	ret, err := json.Marshal(ifv.Value)
+	if err != nil {
+		return nil, err
+	}
+
+	return ret, nil
+}
+
+func (ifv *FloatVectorFieldValue) UnmarshalJSON(data []byte) error {
+	err := json.Unmarshal(data, &ifv.Value)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (ifv *FloatVectorFieldValue) SetValue(data interface{}) error {
+	value, ok := data.([]float32)
+	if !ok {
+		log.Warn("wrong type value when setValue for FloatVectorFieldValue")
+		return fmt.Errorf("wrong type value when setValue for FloatVectorFieldValue")
+	}
+
+	ifv.Value = value
+	return nil
+}
+
+func (ifv *FloatVectorFieldValue) Type() schemapb.DataType {
+	return schemapb.DataType_FloatVector
+}
+
+func (ifv *FloatVectorFieldValue) GetValue() interface{} {
+	return ifv.Value
+}
+
+func (ifv *FloatVectorFieldValue) Size() int64 {
+	return int64(len(ifv.Value) * 8)
+}

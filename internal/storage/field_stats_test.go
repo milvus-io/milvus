@@ -677,3 +677,33 @@ func TestMultiFieldStats(t *testing.T) {
 	assert.Equal(t, true, partitionKeyStats.Max.EQ(maxPk2))
 	assert.Equal(t, true, partitionKeyStats.Min.EQ(minPk2))
 }
+
+func TestVectorFieldStatsMarshal(t *testing.T) {
+	stats, err := NewFieldStats(1, schemapb.DataType_FloatVector, 1)
+	assert.NoError(t, err)
+	centroid := NewFloatVectorFieldValue([]float32{1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0})
+	stats.SetVectorCentroids(centroid)
+
+	bytes, err := json.Marshal(stats)
+	assert.NoError(t, err)
+
+	stats2, err := NewFieldStats(1, schemapb.DataType_FloatVector, 1)
+	assert.NoError(t, err)
+	stats2.UnmarshalJSON(bytes)
+	assert.Equal(t, 1, len(stats2.Centroids))
+	assert.ElementsMatch(t, []VectorFieldValue{centroid}, stats2.Centroids)
+
+	stats3, err := NewFieldStats(1, schemapb.DataType_FloatVector, 2)
+	assert.NoError(t, err)
+	centroid2 := NewFloatVectorFieldValue([]float32{9.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0})
+	stats3.SetVectorCentroids(centroid, centroid2)
+
+	bytes2, err := json.Marshal(stats3)
+	assert.NoError(t, err)
+
+	stats4, err := NewFieldStats(1, schemapb.DataType_FloatVector, 2)
+	assert.NoError(t, err)
+	stats4.UnmarshalJSON(bytes2)
+	assert.Equal(t, 2, len(stats4.Centroids))
+	assert.ElementsMatch(t, []VectorFieldValue{centroid, centroid2}, stats4.Centroids)
+}
