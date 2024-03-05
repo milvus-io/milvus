@@ -1290,7 +1290,7 @@ func (suite *TaskSuite) TestLeaderTaskSet() {
 			suite.collection,
 			suite.replica,
 			targetNode,
-			NewLeaderAction(targetNode, targetNode, ActionTypeGrow, channel.GetChannelName(), segment),
+			NewLeaderAction(targetNode, targetNode, ActionTypeGrow, channel.GetChannelName(), segment, 0),
 		)
 		tasks = append(tasks, task)
 		err := suite.scheduler.Add(task)
@@ -1370,7 +1370,7 @@ func (suite *TaskSuite) TestCreateTaskBehavior() {
 	suite.ErrorIs(err, merr.ErrParameterInvalid)
 	suite.Nil(segmentTask)
 
-	leaderAction := NewLeaderAction(1, 2, ActionTypeGrow, "fake-channel1", 100)
+	leaderAction := NewLeaderAction(1, 2, ActionTypeGrow, "fake-channel1", 100, 0)
 	leaderTask := NewLeaderTask(context.TODO(), 5*time.Second, WrapIDSource(0), 0, 0, 1, leaderAction)
 	suite.NotNil(leaderTask)
 }
@@ -1555,7 +1555,7 @@ func (suite *TaskSuite) TestLeaderTaskRemove() {
 			suite.collection,
 			suite.replica,
 			targetNode,
-			NewLeaderAction(targetNode, targetNode, ActionTypeReduce, channel.GetChannelName(), segment),
+			NewLeaderAction(targetNode, targetNode, ActionTypeReduce, channel.GetChannelName(), segment, 0),
 		)
 		tasks = append(tasks, task)
 		err := suite.scheduler.Add(task)
