@@ -526,6 +526,19 @@ func (kc *Catalog) SaveChannelCheckpoint(ctx context.Context, vChannel string, p
 	return kc.MetaKv.Save(k, string(v))
 }
 
+func (kc *Catalog) SaveChannelCheckpoints(ctx context.Context, positions []*msgpb.MsgPosition) error {
+	kvs := make(map[string]string)
+	for _, position := range positions {
+		k := buildChannelCPKey(position.GetChannelName())
+		v, err := proto.Marshal(position)
+		if err != nil {
+			return err
+		}
+		kvs[k] = string(v)
+	}
+	return kc.SaveByBatch(kvs)
+}
+
 func (kc *Catalog) DropChannelCheckpoint(ctx context.Context, vChannel string) error {
 	k := buildChannelCPKey(vChannel)
 	return kc.MetaKv.Remove(k)

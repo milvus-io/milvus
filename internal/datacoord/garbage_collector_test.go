@@ -343,7 +343,7 @@ func createMetaForRecycleUnusedIndexes(catalog metastore.DataCoordCatalog) *meta
 		catalog:      catalog,
 		collections:  nil,
 		segments:     nil,
-		channelCPs:   nil,
+		channelCPs:   newChannelCps(),
 		chunkManager: nil,
 		indexMeta: &indexMeta{
 			catalog: catalog,
@@ -787,13 +787,14 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 		mock.Anything,
 	).Return(nil)
 
+	channelCPs := newChannelCps()
+	channelCPs.checkpoints["dmlChannel"] = &msgpb.MsgPosition{
+		Timestamp: 1000,
+	}
+
 	m := &meta{
-		catalog: catalog,
-		channelCPs: map[string]*msgpb.MsgPosition{
-			"dmlChannel": {
-				Timestamp: 1000,
-			},
-		},
+		catalog:    catalog,
+		channelCPs: channelCPs,
 		segments: &SegmentsInfo{
 			segments: map[UniqueID]*SegmentInfo{
 				segID: {

@@ -478,9 +478,8 @@ dataNode:
     # suggest to set it bigger on large collection numbers to avoid blocking
     workPoolSize: -1
     # specify the size of global work pool for channel checkpoint updating
-    # if this parameter <= 0, will set it as 1000
-    # suggest to set it bigger on large collection numbers to avoid blocking
-    updateChannelCheckpointMaxParallel: 1000
+    # if this parameter <= 0, will set it as 10
+    updateChannelCheckpointMaxParallel: 10
 
 # Configures the system log output.
 log:

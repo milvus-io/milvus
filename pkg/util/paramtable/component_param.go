@@ -2768,7 +2768,11 @@ type dataNodeConfig struct {
 	// channel
 	ChannelWorkPoolSize ParamItem `refreshable:"true"`
 
-	UpdateChannelCheckpointMaxParallel ParamItem `refreshable:"true"`
+	UpdateChannelCheckpointMaxParallel   ParamItem `refreshable:"true"`
+	UpdateChannelCheckpointInterval      ParamItem `refreshable:"true"`
+	UpdateChannelCheckpointRPCTimeout    ParamItem `refreshable:"true"`
+	MaxChannelCheckpointsPerRPC          ParamItem `refreshable:"true"`
+	ChannelCheckpointUpdateTickInSeconds ParamItem `refreshable:"true"`
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 }
@@ -2984,9 +2988,41 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		Key:          "datanode.channel.updateChannelCheckpointMaxParallel",
 		Version:      "2.3.4",
 		PanicIfEmpty: false,
-		DefaultValue: "1000",
+		DefaultValue: "10",
 	}
 	p.UpdateChannelCheckpointMaxParallel.Init(base.mgr)
+
+	p.UpdateChannelCheckpointInterval = ParamItem{
+		Key:          "datanode.channel.updateChannelCheckpointInterval",
+		Version:      "2.4.0",
+		Doc:          "the interval duration(in seconds) for datanode to update channel checkpoint of each channel",
+		DefaultValue: "60",
+	}
+	p.UpdateChannelCheckpointInterval.Init(base.mgr)
+
+	p.UpdateChannelCheckpointRPCTimeout = ParamItem{
+		Key:          "datanode.channel.updateChannelCheckpointRPCTimeout",
+		Version:      "2.4.0",
+		Doc:          "timeout in seconds for UpdateChannelCheckpoint RPC call",
+		DefaultValue: "20",
+	}
+	p.UpdateChannelCheckpointRPCTimeout.Init(base.mgr)
+
+	p.MaxChannelCheckpointsPerRPC = ParamItem{
+		Key:          "datanode.channel.maxChannelCheckpointsPerPRC",
+		Version:      "2.4.0",
+		Doc:          "The maximum number of channel checkpoints per UpdateChannelCheckpoint RPC.",
+		DefaultValue: "128",
+	}
+	p.MaxChannelCheckpointsPerRPC.Init(base.mgr)
+
+	p.ChannelCheckpointUpdateTickInSeconds = ParamItem{
+		Key:          "datanode.channel.channelCheckpointUpdateTickInSeconds",
+		Version:      "2.4.0",
+		Doc:          "The frequency, in seconds, at which the channel checkpoint updater executes updates.",
+		DefaultValue: "10",
+	}
+	p.ChannelCheckpointUpdateTickInSeconds.Init(base.mgr)
 
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "datanode.gracefulStopTimeout",

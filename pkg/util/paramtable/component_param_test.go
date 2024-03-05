@@ -426,7 +426,9 @@ func TestComponentParam(t *testing.T) {
 
 		updateChannelCheckpointMaxParallel := Params.UpdateChannelCheckpointMaxParallel.GetAsInt()
 		t.Logf("updateChannelCheckpointMaxParallel: %d", updateChannelCheckpointMaxParallel)
-		assert.Equal(t, 1000, Params.UpdateChannelCheckpointMaxParallel.GetAsInt())
+		assert.Equal(t, 10, Params.UpdateChannelCheckpointMaxParallel.GetAsInt())
+		assert.Equal(t, 128, Params.MaxChannelCheckpointsPerRPC.GetAsInt())
+		assert.Equal(t, 10*time.Second, Params.ChannelCheckpointUpdateTickInSeconds.GetAsDuration(time.Second))
 
 		params.Save("datanode.gracefulStopTimeout", "100")
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
