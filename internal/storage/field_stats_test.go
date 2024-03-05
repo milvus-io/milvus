@@ -29,19 +29,154 @@ import (
 )
 
 func TestFieldStatsUpdate(t *testing.T) {
-	fieldStat1, err := NewFieldStats(1, schemapb.DataType_Int64, 2)
+	fieldStat1, err := NewFieldStats(1, schemapb.DataType_Int8, 2)
 	assert.NoError(t, err)
-	fieldStat1.Update(NewInt64FieldValue(99))
-	fieldStat1.Update(NewInt64FieldValue(201))
-	assert.Equal(t, int64(201), fieldStat1.Max.GetValue())
-	assert.Equal(t, int64(99), fieldStat1.Min.GetValue())
+	fieldStat1.Update(NewInt8FieldValue(1))
+	fieldStat1.Update(NewInt8FieldValue(3))
+	assert.Equal(t, int8(3), fieldStat1.Max.GetValue())
+	assert.Equal(t, int8(1), fieldStat1.Min.GetValue())
 
-	fieldStat2, err := NewFieldStats(2, schemapb.DataType_VarChar, 2)
+	fieldStat2, err := NewFieldStats(1, schemapb.DataType_Int16, 2)
 	assert.NoError(t, err)
-	fieldStat2.Update(NewVarCharFieldValue("a"))
-	fieldStat2.Update(NewVarCharFieldValue("z"))
-	assert.Equal(t, "z", fieldStat2.Max.GetValue())
-	assert.Equal(t, "a", fieldStat2.Min.GetValue())
+	fieldStat2.Update(NewInt16FieldValue(99))
+	fieldStat2.Update(NewInt16FieldValue(201))
+	assert.Equal(t, int16(201), fieldStat2.Max.GetValue())
+	assert.Equal(t, int16(99), fieldStat2.Min.GetValue())
+
+	fieldStat3, err := NewFieldStats(1, schemapb.DataType_Int32, 2)
+	assert.NoError(t, err)
+	fieldStat3.Update(NewInt32FieldValue(99))
+	fieldStat3.Update(NewInt32FieldValue(201))
+	assert.Equal(t, int32(201), fieldStat3.Max.GetValue())
+	assert.Equal(t, int32(99), fieldStat3.Min.GetValue())
+
+	fieldStat4, err := NewFieldStats(1, schemapb.DataType_Int64, 2)
+	assert.NoError(t, err)
+	fieldStat4.Update(NewInt64FieldValue(99))
+	fieldStat4.Update(NewInt64FieldValue(201))
+	assert.Equal(t, int64(201), fieldStat4.Max.GetValue())
+	assert.Equal(t, int64(99), fieldStat4.Min.GetValue())
+
+	fieldStat5, err := NewFieldStats(1, schemapb.DataType_Float, 2)
+	assert.NoError(t, err)
+	fieldStat5.Update(NewFloatFieldValue(99.0))
+	fieldStat5.Update(NewFloatFieldValue(201.0))
+	assert.Equal(t, float32(201.0), fieldStat5.Max.GetValue())
+	assert.Equal(t, float32(99.0), fieldStat5.Min.GetValue())
+
+	fieldStat6, err := NewFieldStats(1, schemapb.DataType_Double, 2)
+	assert.NoError(t, err)
+	fieldStat6.Update(NewDoubleFieldValue(9.9))
+	fieldStat6.Update(NewDoubleFieldValue(20.1))
+	assert.Equal(t, float64(20.1), fieldStat6.Max.GetValue())
+	assert.Equal(t, float64(9.9), fieldStat6.Min.GetValue())
+
+	fieldStat7, err := NewFieldStats(2, schemapb.DataType_String, 2)
+	assert.NoError(t, err)
+	fieldStat7.Update(NewStringFieldValue("a"))
+	fieldStat7.Update(NewStringFieldValue("z"))
+	assert.Equal(t, "z", fieldStat7.Max.GetValue())
+	assert.Equal(t, "a", fieldStat7.Min.GetValue())
+
+	fieldStat8, err := NewFieldStats(2, schemapb.DataType_VarChar, 2)
+	assert.NoError(t, err)
+	fieldStat8.Update(NewVarCharFieldValue("a"))
+	fieldStat8.Update(NewVarCharFieldValue("z"))
+	assert.Equal(t, "z", fieldStat8.Max.GetValue())
+	assert.Equal(t, "a", fieldStat8.Min.GetValue())
+}
+
+func TestFieldStatsWriter_Int8FieldValue(t *testing.T) {
+	data := &Int8FieldData{
+		Data: []int8{1, 2, 3, 4, 5, 6, 7, 8, 9},
+	}
+	sw := &FieldStatsWriter{}
+	err := sw.GenerateByData(common.RowIDField, schemapb.DataType_Int8, data)
+	assert.NoError(t, err)
+	b := sw.GetBuffer()
+
+	sr := &FieldStatsReader{}
+	sr.SetBuffer(b)
+	statsList, err := sr.GetFieldStatsList()
+	assert.NoError(t, err)
+	stats := statsList[0]
+	maxPk := NewInt8FieldValue(9)
+	minPk := NewInt8FieldValue(1)
+	assert.Equal(t, true, stats.Max.EQ(maxPk))
+	assert.Equal(t, true, stats.Min.EQ(minPk))
+	buffer := make([]byte, 8)
+	for _, id := range data.Data {
+		common.Endian.PutUint64(buffer, uint64(id))
+		assert.True(t, stats.BF.Test(buffer))
+	}
+
+	msgs := &Int8FieldData{
+		Data: []int8{},
+	}
+	err = sw.GenerateByData(common.RowIDField, schemapb.DataType_Int8, msgs)
+	assert.NoError(t, err)
+}
+
+func TestFieldStatsWriter_Int16FieldValue(t *testing.T) {
+	data := &Int16FieldData{
+		Data: []int16{1, 2, 3, 4, 5, 6, 7, 8, 9},
+	}
+	sw := &FieldStatsWriter{}
+	err := sw.GenerateByData(common.RowIDField, schemapb.DataType_Int16, data)
+	assert.NoError(t, err)
+	b := sw.GetBuffer()
+
+	sr := &FieldStatsReader{}
+	sr.SetBuffer(b)
+	statsList, err := sr.GetFieldStatsList()
+	assert.NoError(t, err)
+	stats := statsList[0]
+	maxPk := NewInt16FieldValue(9)
+	minPk := NewInt16FieldValue(1)
+	assert.Equal(t, true, stats.Max.EQ(maxPk))
+	assert.Equal(t, true, stats.Min.EQ(minPk))
+	buffer := make([]byte, 8)
+	for _, id := range data.Data {
+		common.Endian.PutUint64(buffer, uint64(id))
+		assert.True(t, stats.BF.Test(buffer))
+	}
+
+	msgs := &Int16FieldData{
+		Data: []int16{},
+	}
+	err = sw.GenerateByData(common.RowIDField, schemapb.DataType_Int16, msgs)
+	assert.NoError(t, err)
+}
+
+func TestFieldStatsWriter_Int32FieldValue(t *testing.T) {
+	data := &Int32FieldData{
+		Data: []int32{1, 2, 3, 4, 5, 6, 7, 8, 9},
+	}
+	sw := &FieldStatsWriter{}
+	err := sw.GenerateByData(common.RowIDField, schemapb.DataType_Int32, data)
+	assert.NoError(t, err)
+	b := sw.GetBuffer()
+
+	sr := &FieldStatsReader{}
+	sr.SetBuffer(b)
+	statsList, err := sr.GetFieldStatsList()
+	assert.NoError(t, err)
+	stats := statsList[0]
+	maxPk := NewInt32FieldValue(9)
+	minPk := NewInt32FieldValue(1)
+	assert.Equal(t, true, stats.Max.EQ(maxPk))
+	assert.Equal(t, true, stats.Min.EQ(minPk))
+	buffer := make([]byte, 8)
+	for _, id := range data.Data {
+		common.Endian.PutUint64(buffer, uint64(id))
+		assert.True(t, stats.BF.Test(buffer))
+	}
+
+	msgs := &Int32FieldData{
+		Data: []int32{},
+	}
+	err = sw.GenerateByData(common.RowIDField, schemapb.DataType_Int32, msgs)
+	assert.NoError(t, err)
 }
 
 func TestFieldStatsWriter_Int64FieldValue(t *testing.T) {
@@ -66,6 +201,98 @@ func TestFieldStatsWriter_Int64FieldValue(t *testing.T) {
 	for _, id := range data.Data {
 		common.Endian.PutUint64(buffer, uint64(id))
 		assert.True(t, stats.BF.Test(buffer))
+	}
+
+	msgs := &Int64FieldData{
+		Data: []int64{},
+	}
+	err = sw.GenerateByData(common.RowIDField, schemapb.DataType_Int64, msgs)
+	assert.NoError(t, err)
+}
+
+func TestFieldStatsWriter_FloatFieldValue(t *testing.T) {
+	data := &FloatFieldData{
+		Data: []float32{1, 2, 3, 4, 5, 6, 7, 8, 9},
+	}
+	sw := &FieldStatsWriter{}
+	err := sw.GenerateByData(common.RowIDField, schemapb.DataType_Float, data)
+	assert.NoError(t, err)
+	b := sw.GetBuffer()
+
+	sr := &FieldStatsReader{}
+	sr.SetBuffer(b)
+	statsList, err := sr.GetFieldStatsList()
+	assert.NoError(t, err)
+	stats := statsList[0]
+	maxPk := NewFloatFieldValue(9)
+	minPk := NewFloatFieldValue(1)
+	assert.Equal(t, true, stats.Max.EQ(maxPk))
+	assert.Equal(t, true, stats.Min.EQ(minPk))
+	buffer := make([]byte, 8)
+	for _, id := range data.Data {
+		common.Endian.PutUint64(buffer, uint64(id))
+		assert.True(t, stats.BF.Test(buffer))
+	}
+
+	msgs := &FloatFieldData{
+		Data: []float32{},
+	}
+	err = sw.GenerateByData(common.RowIDField, schemapb.DataType_Float, msgs)
+	assert.NoError(t, err)
+}
+
+func TestFieldStatsWriter_DoubleFieldValue(t *testing.T) {
+	data := &DoubleFieldData{
+		Data: []float64{1, 2, 3, 4, 5, 6, 7, 8, 9},
+	}
+	sw := &FieldStatsWriter{}
+	err := sw.GenerateByData(common.RowIDField, schemapb.DataType_Double, data)
+	assert.NoError(t, err)
+	b := sw.GetBuffer()
+
+	sr := &FieldStatsReader{}
+	sr.SetBuffer(b)
+	statsList, err := sr.GetFieldStatsList()
+	assert.NoError(t, err)
+	stats := statsList[0]
+	maxPk := NewDoubleFieldValue(9)
+	minPk := NewDoubleFieldValue(1)
+	assert.Equal(t, true, stats.Max.EQ(maxPk))
+	assert.Equal(t, true, stats.Min.EQ(minPk))
+	buffer := make([]byte, 8)
+	for _, id := range data.Data {
+		common.Endian.PutUint64(buffer, uint64(id))
+		assert.True(t, stats.BF.Test(buffer))
+	}
+
+	msgs := &DoubleFieldData{
+		Data: []float64{},
+	}
+	err = sw.GenerateByData(common.RowIDField, schemapb.DataType_Double, msgs)
+	assert.NoError(t, err)
+}
+
+func TestFieldStatsWriter_StringFieldValue(t *testing.T) {
+	data := &StringFieldData{
+		Data: []string{"bc", "ac", "abd", "cd", "milvus"},
+	}
+	sw := &FieldStatsWriter{}
+	err := sw.GenerateByData(common.RowIDField, schemapb.DataType_String, data)
+	assert.NoError(t, err)
+	b := sw.GetBuffer()
+	t.Log(string(b))
+
+	sr := &FieldStatsReader{}
+	sr.SetBuffer(b)
+	statsList, err := sr.GetFieldStatsList()
+	assert.NoError(t, err)
+	stats := statsList[0]
+	maxPk := NewStringFieldValue("milvus")
+	minPk := NewStringFieldValue("abd")
+	assert.Equal(t, true, stats.Max.EQ(maxPk))
+	assert.Equal(t, true, stats.Min.EQ(minPk))
+	for _, id := range data.Data {
+		assert.True(t, stats.BF.TestString(id))
 	}
 
 	msgs := &Int64FieldData{
@@ -337,17 +564,51 @@ func TestCompatible_ReadPrimaryKeyStatsWithFieldStatsReader(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestFieldStatsMarshal(t *testing.T) {
-	stats, err := NewFieldStats(1, schemapb.DataType_Int64, 1)
-	assert.NoError(t, err)
-	err = stats.UnmarshalJSON([]byte("{\"fieldID\":1,\"max\":10, }"))
-	assert.Error(t, err)
-	err = stats.UnmarshalJSON([]byte("{\"fieldID\":1,\"max\":10, \"maxPk\":\"A\"}"))
-	assert.Error(t, err)
-	err = stats.UnmarshalJSON([]byte("{\"fieldID\":1,\"max\":10, \"maxPk\":10, \"minPk\": \"b\"}"))
-	assert.Error(t, err)
-	err = stats.UnmarshalJSON([]byte("{\"fieldID\":1,\"max\":10, \"maxPk\":10, \"minPk\": 1, \"bf\": \"2\"}"))
-	assert.Error(t, err)
+func TestFieldStatsUnMarshal(t *testing.T) {
+	t.Run("fail", func(t *testing.T) {
+		stats, err := NewFieldStats(1, schemapb.DataType_Int64, 1)
+		assert.NoError(t, err)
+		err = stats.UnmarshalJSON([]byte("{\"fieldID\":1,\"max\":10, }"))
+		assert.Error(t, err)
+		err = stats.UnmarshalJSON([]byte("{\"fieldID\":1,\"max\":10, \"maxPk\":\"A\"}"))
+		assert.Error(t, err)
+		err = stats.UnmarshalJSON([]byte("{\"fieldID\":1,\"max\":10, \"maxPk\":10, \"minPk\": \"b\"}"))
+		assert.Error(t, err)
+		err = stats.UnmarshalJSON([]byte("{\"fieldID\":1,\"max\":10, \"maxPk\":10, \"minPk\": 1, \"bf\": \"2\"}"))
+		assert.Error(t, err)
+	})
+
+	t.Run("succeed", func(t *testing.T) {
+		int8stats, err := NewFieldStats(1, schemapb.DataType_Int8, 1)
+		assert.NoError(t, err)
+		err = int8stats.UnmarshalJSON([]byte("{\"type\":2, \"fieldID\":1,\"max\":10, \"min\": 1}"))
+		assert.NoError(t, err)
+
+		int16stats, err := NewFieldStats(1, schemapb.DataType_Int16, 1)
+		assert.NoError(t, err)
+		err = int16stats.UnmarshalJSON([]byte("{\"type\":3, \"fieldID\":1,\"max\":10, \"min\": 1}"))
+		assert.NoError(t, err)
+
+		int32stats, err := NewFieldStats(1, schemapb.DataType_Int32, 1)
+		assert.NoError(t, err)
+		err = int32stats.UnmarshalJSON([]byte("{\"type\":4, \"fieldID\":1,\"max\":10, \"min\": 1}"))
+		assert.NoError(t, err)
+
+		int64stats, err := NewFieldStats(1, schemapb.DataType_Int64, 1)
+		assert.NoError(t, err)
+		err = int64stats.UnmarshalJSON([]byte("{\"type\":5, \"fieldID\":1,\"max\":10, \"min\": 1}"))
+		assert.NoError(t, err)
+
+		floatstats, err := NewFieldStats(1, schemapb.DataType_Float, 1)
+		assert.NoError(t, err)
+		err = floatstats.UnmarshalJSON([]byte("{\"type\":10, \"fieldID\":1,\"max\":10.0, \"min\": 1.2}"))
+		assert.NoError(t, err)
+
+		doublestats, err := NewFieldStats(1, schemapb.DataType_Double, 1)
+		assert.NoError(t, err)
+		err = doublestats.UnmarshalJSON([]byte("{\"type\":11, \"fieldID\":1,\"max\":10.0, \"min\": 1.2}"))
+		assert.NoError(t, err)
+	})
 }
 
 func TestCompatible_ReadFieldStatsWithPrimaryKeyStatsReader(t *testing.T) {

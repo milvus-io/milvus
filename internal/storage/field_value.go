@@ -39,6 +39,367 @@ type ScalarFieldValue interface {
 	Size() int64
 }
 
+// DataType_Int8
+type Int8FieldValue struct {
+	Value int8 `json:"value"`
+}
+
+func NewInt8FieldValue(v int8) *Int8FieldValue {
+	return &Int8FieldValue{
+		Value: v,
+	}
+}
+
+func (ifv *Int8FieldValue) GT(obj ScalarFieldValue) bool {
+	v, ok := obj.(*Int8FieldValue)
+	if !ok {
+		log.Warn("type of compared pk is not int64")
+		return false
+	}
+	if ifv.Value > v.Value {
+		return true
+	}
+
+	return false
+}
+
+func (ifv *Int8FieldValue) GE(obj ScalarFieldValue) bool {
+	v, ok := obj.(*Int8FieldValue)
+	if !ok {
+		log.Warn("type of compared pk is not int64")
+		return false
+	}
+	if ifv.Value >= v.Value {
+		return true
+	}
+
+	return false
+}
+
+func (ifv *Int8FieldValue) LT(obj ScalarFieldValue) bool {
+	v, ok := obj.(*Int8FieldValue)
+	if !ok {
+		log.Warn("type of compared pk is not int64")
+		return false
+	}
+
+	if ifv.Value < v.Value {
+		return true
+	}
+
+	return false
+}
+
+func (ifv *Int8FieldValue) LE(obj ScalarFieldValue) bool {
+	v, ok := obj.(*Int8FieldValue)
+	if !ok {
+		log.Warn("type of compared obj is not int64")
+		return false
+	}
+
+	if ifv.Value <= v.Value {
+		return true
+	}
+
+	return false
+}
+
+func (ifv *Int8FieldValue) EQ(obj ScalarFieldValue) bool {
+	v, ok := obj.(*Int8FieldValue)
+	if !ok {
+		log.Warn("type of compared obj is not int64")
+		return false
+	}
+
+	if ifv.Value == v.Value {
+		return true
+	}
+
+	return false
+}
+
+func (ifv *Int8FieldValue) MarshalJSON() ([]byte, error) {
+	ret, err := json.Marshal(ifv.Value)
+	if err != nil {
+		return nil, err
+	}
+
+	return ret, nil
+}
+
+func (ifv *Int8FieldValue) UnmarshalJSON(data []byte) error {
+	err := json.Unmarshal(data, &ifv.Value)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (ifv *Int8FieldValue) SetValue(data interface{}) error {
+	value, ok := data.(int8)
+	if !ok {
+		log.Warn("wrong type value when setValue for Int64FieldValue")
+		return fmt.Errorf("wrong type value when setValue for Int64FieldValue")
+	}
+
+	ifv.Value = value
+	return nil
+}
+
+func (ifv *Int8FieldValue) Type() schemapb.DataType {
+	return schemapb.DataType_Int8
+}
+
+func (ifv *Int8FieldValue) GetValue() interface{} {
+	return ifv.Value
+}
+
+func (ifv *Int8FieldValue) Size() int64 {
+	return 2
+}
+
+// DataType_Int16
+type Int16FieldValue struct {
+	Value int16 `json:"value"`
+}
+
+func NewInt16FieldValue(v int16) *Int16FieldValue {
+	return &Int16FieldValue{
+		Value: v,
+	}
+}
+
+func (ifv *Int16FieldValue) GT(obj ScalarFieldValue) bool {
+	v, ok := obj.(*Int16FieldValue)
+	if !ok {
+		log.Warn("type of compared pk is not int64")
+		return false
+	}
+	if ifv.Value > v.Value {
+		return true
+	}
+
+	return false
+}
+
+func (ifv *Int16FieldValue) GE(obj ScalarFieldValue) bool {
+	v, ok := obj.(*Int16FieldValue)
+	if !ok {
+		log.Warn("type of compared pk is not int64")
+		return false
+	}
+	if ifv.Value >= v.Value {
+		return true
+	}
+
+	return false
+}
+
+func (ifv *Int16FieldValue) LT(obj ScalarFieldValue) bool {
+	v, ok := obj.(*Int16FieldValue)
+	if !ok {
+		log.Warn("type of compared pk is not int64")
+		return false
+	}
+
+	if ifv.Value < v.Value {
+		return true
+	}
+
+	return false
+}
+
+func (ifv *Int16FieldValue) LE(obj ScalarFieldValue) bool {
+	v, ok := obj.(*Int16FieldValue)
+	if !ok {
+		log.Warn("type of compared obj is not int64")
+		return false
+	}
+
+	if ifv.Value <= v.Value {
+		return true
+	}
+
+	return false
+}
+
+func (ifv *Int16FieldValue) EQ(obj ScalarFieldValue) bool {
+	v, ok := obj.(*Int16FieldValue)
+	if !ok {
+		log.Warn("type of compared obj is not int64")
+		return false
+	}
+
+	if ifv.Value == v.Value {
+		return true
+	}
+
+	return false
+}
+
+func (ifv *Int16FieldValue) MarshalJSON() ([]byte, error) {
+	ret, err := json.Marshal(ifv.Value)
+	if err != nil {
+		return nil, err
+	}
+
+	return ret, nil
+}
+
+func (ifv *Int16FieldValue) UnmarshalJSON(data []byte) error {
+	err := json.Unmarshal(data, &ifv.Value)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (ifv *Int16FieldValue) SetValue(data interface{}) error {
+	value, ok := data.(int16)
+	if !ok {
+		log.Warn("wrong type value when setValue for Int64FieldValue")
+		return fmt.Errorf("wrong type value when setValue for Int64FieldValue")
+	}
+
+	ifv.Value = value
+	return nil
+}
+
+func (ifv *Int16FieldValue) Type() schemapb.DataType {
+	return schemapb.DataType_Int16
+}
+
+func (ifv *Int16FieldValue) GetValue() interface{} {
+	return ifv.Value
+}
+
+func (ifv *Int16FieldValue) Size() int64 {
+	return 4
+}
+
+// DataType_Int32
+type Int32FieldValue struct {
+	Value int32 `json:"value"`
+}
+
+func NewInt32FieldValue(v int32) *Int32FieldValue {
+	return &Int32FieldValue{
+		Value: v,
+	}
+}
+
+func (ifv *Int32FieldValue) GT(obj ScalarFieldValue) bool {
+	v, ok := obj.(*Int32FieldValue)
+	if !ok {
+		log.Warn("type of compared pk is not int64")
+		return false
+	}
+	if ifv.Value > v.Value {
+		return true
+	}
+
+	return false
+}
+
+func (ifv *Int32FieldValue) GE(obj ScalarFieldValue) bool {
+	v, ok := obj.(*Int32FieldValue)
+	if !ok {
+		log.Warn("type of compared pk is not int64")
+		return false
+	}
+	if ifv.Value >= v.Value {
+		return true
+	}
+
+	return false
+}
+
+func (ifv *Int32FieldValue) LT(obj ScalarFieldValue) bool {
+	v, ok := obj.(*Int32FieldValue)
+	if !ok {
+		log.Warn("type of compared pk is not int64")
+		return false
+	}
+
+	if ifv.Value < v.Value {
+		return true
+	}
+
+	return false
+}
+
+func (ifv *Int32FieldValue) LE(obj ScalarFieldValue) bool {
+	v, ok := obj.(*Int32FieldValue)
+	if !ok {
+		log.Warn("type of compared obj is not int64")
+		return false
+	}
+
+	if ifv.Value <= v.Value {
+		return true
+	}
+
+	return false
+}
+
+func (ifv *Int32FieldValue) EQ(obj ScalarFieldValue) bool {
+	v, ok := obj.(*Int32FieldValue)
+	if !ok {
+		log.Warn("type of compared obj is not int64")
+		return false
+	}
+
+	if ifv.Value == v.Value {
+		return true
+	}
+
+	return false
+}
+
+func (ifv *Int32FieldValue) MarshalJSON() ([]byte, error) {
+	ret, err := json.Marshal(ifv.Value)
+	if err != nil {
+		return nil, err
+	}
+
+	return ret, nil
+}
+
+func (ifv *Int32FieldValue) UnmarshalJSON(data []byte) error {
+	err := json.Unmarshal(data, &ifv.Value)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (ifv *Int32FieldValue) SetValue(data interface{}) error {
+	value, ok := data.(int32)
+	if !ok {
+		log.Warn("wrong type value when setValue for Int64FieldValue")
+		return fmt.Errorf("wrong type value when setValue for Int64FieldValue")
+	}
+
+	ifv.Value = value
+	return nil
+}
+
+func (ifv *Int32FieldValue) Type() schemapb.DataType {
+	return schemapb.DataType_Int32
+}
+
+func (ifv *Int32FieldValue) GetValue() interface{} {
+	return ifv.Value
+}
+
+func (ifv *Int32FieldValue) Size() int64 {
+	return 8
+}
+
+// DataType_Int64
 type Int64FieldValue struct {
 	Value int64 `json:"value"`
 }
@@ -159,31 +520,303 @@ func (ifv *Int64FieldValue) Size() int64 {
 	return 16
 }
 
-type BaseStringFieldValue struct {
-	Value string
+// DataType_Float
+type FloatFieldValue struct {
+	Value float32 `json:"value"`
 }
 
-func (sfv *BaseStringFieldValue) GT(obj BaseStringFieldValue) bool {
-	return strings.Compare(sfv.Value, obj.Value) > 0
+func NewFloatFieldValue(v float32) *FloatFieldValue {
+	return &FloatFieldValue{
+		Value: v,
+	}
 }
 
-func (sfv *BaseStringFieldValue) GE(obj BaseStringFieldValue) bool {
-	return strings.Compare(sfv.Value, obj.Value) >= 0
+func (ifv *FloatFieldValue) GT(obj ScalarFieldValue) bool {
+	v, ok := obj.(*FloatFieldValue)
+	if !ok {
+		log.Warn("type of compared pk is not int64")
+		return false
+	}
+	if ifv.Value > v.Value {
+		return true
+	}
+
+	return false
 }
 
-func (sfv *BaseStringFieldValue) LT(obj BaseStringFieldValue) bool {
-	return strings.Compare(sfv.Value, obj.Value) < 0
+func (ifv *FloatFieldValue) GE(obj ScalarFieldValue) bool {
+	v, ok := obj.(*FloatFieldValue)
+	if !ok {
+		log.Warn("type of compared pk is not int64")
+		return false
+	}
+	if ifv.Value >= v.Value {
+		return true
+	}
+
+	return false
 }
 
-func (sfv *BaseStringFieldValue) LE(obj BaseStringFieldValue) bool {
-	return strings.Compare(sfv.Value, obj.Value) <= 0
+func (ifv *FloatFieldValue) LT(obj ScalarFieldValue) bool {
+	v, ok := obj.(*FloatFieldValue)
+	if !ok {
+		log.Warn("type of compared pk is not int64")
+		return false
+	}
+
+	if ifv.Value < v.Value {
+		return true
+	}
+
+	return false
 }
 
-func (sfv *BaseStringFieldValue) EQ(obj BaseStringFieldValue) bool {
-	return strings.Compare(sfv.Value, obj.Value) == 0
+func (ifv *FloatFieldValue) LE(obj ScalarFieldValue) bool {
+	v, ok := obj.(*FloatFieldValue)
+	if !ok {
+		log.Warn("type of compared obj is not int64")
+		return false
+	}
+
+	if ifv.Value <= v.Value {
+		return true
+	}
+
+	return false
 }
 
-func (sfv *BaseStringFieldValue) MarshalJSON() ([]byte, error) {
+func (ifv *FloatFieldValue) EQ(obj ScalarFieldValue) bool {
+	v, ok := obj.(*FloatFieldValue)
+	if !ok {
+		log.Warn("type of compared obj is not int64")
+		return false
+	}
+
+	if ifv.Value == v.Value {
+		return true
+	}
+
+	return false
+}
+
+func (ifv *FloatFieldValue) MarshalJSON() ([]byte, error) {
+	ret, err := json.Marshal(ifv.Value)
+	if err != nil {
+		return nil, err
+	}
+
+	return ret, nil
+}
+
+func (ifv *FloatFieldValue) UnmarshalJSON(data []byte) error {
+	err := json.Unmarshal(data, &ifv.Value)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (ifv *FloatFieldValue) SetValue(data interface{}) error {
+	value, ok := data.(float32)
+	if !ok {
+		log.Warn("wrong type value when setValue for FloatFieldValue")
+		return fmt.Errorf("wrong type value when setValue for FloatFieldValue")
+	}
+
+	ifv.Value = value
+	return nil
+}
+
+func (ifv *FloatFieldValue) Type() schemapb.DataType {
+	return schemapb.DataType_Float
+}
+
+func (ifv *FloatFieldValue) GetValue() interface{} {
+	return ifv.Value
+}
+
+func (ifv *FloatFieldValue) Size() int64 {
+	return 8
+}
+
+// DataType_Double
+type DoubleFieldValue struct {
+	Value float64 `json:"value"`
+}
+
+func NewDoubleFieldValue(v float64) *DoubleFieldValue {
+	return &DoubleFieldValue{
+		Value: v,
+	}
+}
+
+func (ifv *DoubleFieldValue) GT(obj ScalarFieldValue) bool {
+	v, ok := obj.(*DoubleFieldValue)
+	if !ok {
+		log.Warn("type of compared pk is not int64")
+		return false
+	}
+	if ifv.Value > v.Value {
+		return true
+	}
+
+	return false
+}
+
+func (ifv *DoubleFieldValue) GE(obj ScalarFieldValue) bool {
+	v, ok := obj.(*DoubleFieldValue)
+	if !ok {
+		log.Warn("type of compared pk is not int64")
+		return false
+	}
+	if ifv.Value >= v.Value {
+		return true
+	}
+
+	return false
+}
+
+func (ifv *DoubleFieldValue) LT(obj ScalarFieldValue) bool {
+	v, ok := obj.(*DoubleFieldValue)
+	if !ok {
+		log.Warn("type of compared pk is not int64")
+		return false
+	}
+
+	if ifv.Value < v.Value {
+		return true
+	}
+
+	return false
+}
+
+func (ifv *DoubleFieldValue) LE(obj ScalarFieldValue) bool {
+	v, ok := obj.(*DoubleFieldValue)
+	if !ok {
+		log.Warn("type of compared obj is not int64")
+		return false
+	}
+
+	if ifv.Value <= v.Value {
+		return true
+	}
+
+	return false
+}
+
+func (ifv *DoubleFieldValue) EQ(obj ScalarFieldValue) bool {
+	v, ok := obj.(*DoubleFieldValue)
+	if !ok {
+		log.Warn("type of compared obj is not int64")
+		return false
+	}
+
+	if ifv.Value == v.Value {
+		return true
+	}
+
+	return false
+}
+
+func (ifv *DoubleFieldValue) MarshalJSON() ([]byte, error) {
+	ret, err := json.Marshal(ifv.Value)
+	if err != nil {
+		return nil, err
+	}
+
+	return ret, nil
+}
+
+func (ifv *DoubleFieldValue) UnmarshalJSON(data []byte) error {
+	err := json.Unmarshal(data, &ifv.Value)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (ifv *DoubleFieldValue) SetValue(data interface{}) error {
+	value, ok := data.(float64)
+	if !ok {
+		log.Warn("wrong type value when setValue for DoubleFieldValue")
+		return fmt.Errorf("wrong type value when setValue for DoubleFieldValue")
+	}
+
+	ifv.Value = value
+	return nil
+}
+
+func (ifv *DoubleFieldValue) Type() schemapb.DataType {
+	return schemapb.DataType_Double
+}
+
+func (ifv *DoubleFieldValue) GetValue() interface{} {
+	return ifv.Value
+}
+
+func (ifv *DoubleFieldValue) Size() int64 {
+	return 16
+}
+
+type StringFieldValue struct {
+	Value string `json:"value"`
+}
+
+func NewStringFieldValue(v string) *StringFieldValue {
+	return &StringFieldValue{
+		Value: v,
+	}
+}
+
+func (sfv *StringFieldValue) GT(obj ScalarFieldValue) bool {
+	v, ok := obj.(*StringFieldValue)
+	if !ok {
+		log.Warn("type of compared obj is not varchar")
+		return false
+	}
+
+	return strings.Compare(sfv.Value, v.Value) > 0
+}
+
+func (sfv *StringFieldValue) GE(obj ScalarFieldValue) bool {
+	v, ok := obj.(*StringFieldValue)
+	if !ok {
+		log.Warn("type of compared obj is not varchar")
+		return false
+	}
+	return strings.Compare(sfv.Value, v.Value) >= 0
+}
+
+func (sfv *StringFieldValue) LT(obj ScalarFieldValue) bool {
+	v, ok := obj.(*StringFieldValue)
+	if !ok {
+		log.Warn("type of compared obj is not varchar")
+		return false
+	}
+	return strings.Compare(sfv.Value, v.Value) < 0
+}
+
+func (sfv *StringFieldValue) LE(obj ScalarFieldValue) bool {
+	v, ok := obj.(*StringFieldValue)
+	if !ok {
+		log.Warn("type of compared obj is not varchar")
+		return false
+	}
+	return strings.Compare(sfv.Value, v.Value) <= 0
+}
+
+func (sfv *StringFieldValue) EQ(obj ScalarFieldValue) bool {
+	v, ok := obj.(*StringFieldValue)
+	if !ok {
+		log.Warn("type of compared obj is not varchar")
+		return false
+	}
+	return strings.Compare(sfv.Value, v.Value) == 0
+}
+
+func (sfv *StringFieldValue) MarshalJSON() ([]byte, error) {
 	ret, err := json.Marshal(sfv.Value)
 	if err != nil {
 		return nil, err
@@ -192,7 +825,7 @@ func (sfv *BaseStringFieldValue) MarshalJSON() ([]byte, error) {
 	return ret, nil
 }
 
-func (sfv *BaseStringFieldValue) UnmarshalJSON(data []byte) error {
+func (sfv *StringFieldValue) UnmarshalJSON(data []byte) error {
 	err := json.Unmarshal(data, &sfv.Value)
 	if err != nil {
 		return err
@@ -201,7 +834,7 @@ func (sfv *BaseStringFieldValue) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func (sfv *BaseStringFieldValue) SetValue(data interface{}) error {
+func (sfv *StringFieldValue) SetValue(data interface{}) error {
 	value, ok := data.(string)
 	if !ok {
 		return fmt.Errorf("wrong type value when setValue for StringFieldValue")
@@ -211,70 +844,86 @@ func (sfv *BaseStringFieldValue) SetValue(data interface{}) error {
 	return nil
 }
 
-func (sfv *BaseStringFieldValue) GetValue() interface{} {
+func (sfv *StringFieldValue) GetValue() interface{} {
 	return sfv.Value
 }
 
+func (sfv *StringFieldValue) Type() schemapb.DataType {
+	return schemapb.DataType_String
+}
+
+func (sfv *StringFieldValue) Size() int64 {
+	return int64(8*len(sfv.Value) + 8)
+}
+
 type VarCharFieldValue struct {
-	BaseStringFieldValue
+	Value string `json:"value"`
 }
 
 func NewVarCharFieldValue(v string) *VarCharFieldValue {
 	return &VarCharFieldValue{
-		BaseStringFieldValue: BaseStringFieldValue{
-			Value: v,
-		},
+		Value: v,
 	}
 }
 
 func (vcfv *VarCharFieldValue) GT(obj ScalarFieldValue) bool {
 	v, ok := obj.(*VarCharFieldValue)
 	if !ok {
-		log.Warn("type of compared obj is not varChar")
+		log.Warn("type of compared obj is not varchar")
 		return false
 	}
 
-	return vcfv.BaseStringFieldValue.GT(v.BaseStringFieldValue)
+	return strings.Compare(vcfv.Value, v.Value) > 0
 }
 
 func (vcfv *VarCharFieldValue) GE(obj ScalarFieldValue) bool {
 	v, ok := obj.(*VarCharFieldValue)
 	if !ok {
-		log.Warn("type of compared obj is not varChar")
+		log.Warn("type of compared obj is not varchar")
 		return false
 	}
-
-	return vcfv.BaseStringFieldValue.GE(v.BaseStringFieldValue)
+	return strings.Compare(vcfv.Value, v.Value) >= 0
 }
 
 func (vcfv *VarCharFieldValue) LT(obj ScalarFieldValue) bool {
 	v, ok := obj.(*VarCharFieldValue)
 	if !ok {
-		log.Warn("type of compared pk is not varChar")
+		log.Warn("type of compared obj is not varchar")
 		return false
 	}
-
-	return vcfv.BaseStringFieldValue.LT(v.BaseStringFieldValue)
+	return strings.Compare(vcfv.Value, v.Value) < 0
 }
 
 func (vcfv *VarCharFieldValue) LE(obj ScalarFieldValue) bool {
 	v, ok := obj.(*VarCharFieldValue)
 	if !ok {
-		log.Warn("type of compared pk is not varChar")
+		log.Warn("type of compared obj is not varchar")
 		return false
 	}
-
-	return vcfv.BaseStringFieldValue.LE(v.BaseStringFieldValue)
+	return strings.Compare(vcfv.Value, v.Value) <= 0
 }
 
 func (vcfv *VarCharFieldValue) EQ(obj ScalarFieldValue) bool {
 	v, ok := obj.(*VarCharFieldValue)
 	if !ok {
-		log.Warn("type of compared obj is not varChar")
+		log.Warn("type of compared obj is not varchar")
 		return false
 	}
+	return strings.Compare(vcfv.Value, v.Value) == 0
+}
 
-	return vcfv.BaseStringFieldValue.EQ(v.BaseStringFieldValue)
+func (vcfv *VarCharFieldValue) SetValue(data interface{}) error {
+	value, ok := data.(string)
+	if !ok {
+		return fmt.Errorf("wrong type value when setValue for StringFieldValue")
+	}
+
+	vcfv.Value = value
+	return nil
+}
+
+func (vcfv *VarCharFieldValue) GetValue() interface{} {
+	return vcfv.Value
 }
 
 func (vcfv *VarCharFieldValue) Type() schemapb.DataType {
@@ -285,6 +934,15 @@ func (vcfv *VarCharFieldValue) Size() int64 {
 	return int64(8*len(vcfv.Value) + 8)
 }
 
+func (vcfv *VarCharFieldValue) MarshalJSON() ([]byte, error) {
+	ret, err := json.Marshal(vcfv.Value)
+	if err != nil {
+		return nil, err
+	}
+
+	return ret, nil
+}
+
 func (vcfv *VarCharFieldValue) UnmarshalJSON(data []byte) error {
 	err := json.Unmarshal(data, &vcfv.Value)
 	if err != nil {
@@ -292,131 +950,4 @@ func (vcfv *VarCharFieldValue) UnmarshalJSON(data []byte) error {
 	}
 
 	return nil
-}
-
-func GenFieldValueByRawData(data interface{}, dtype schemapb.DataType) (ScalarFieldValue, error) {
-	var result ScalarFieldValue
-	switch dtype {
-	case schemapb.DataType_Int64:
-		result = &Int64FieldValue{
-			Value: data.(int64),
-		}
-	case schemapb.DataType_VarChar:
-		result = &VarCharFieldValue{
-			BaseStringFieldValue: BaseStringFieldValue{
-				Value: data.(string),
-			},
-		}
-	default:
-		return nil, fmt.Errorf("not supported data type")
-	}
-
-	return result, nil
-}
-
-func GenInt64FieldValues(data ...int64) ([]ScalarFieldValue, error) {
-	values := make([]ScalarFieldValue, len(data))
-	var err error
-	for i := range data {
-		values[i], err = GenFieldValueByRawData(data[i], schemapb.DataType_Int64)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return values, nil
-}
-
-func GenVarcharFieldValues(data ...string) ([]ScalarFieldValue, error) {
-	values := make([]ScalarFieldValue, len(data))
-	var err error
-	for i := range data {
-		values[i], err = GenFieldValueByRawData(data[i], schemapb.DataType_VarChar)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return values, nil
-}
-
-func ParseFieldData2FieldValues(data *schemapb.FieldData) ([]ScalarFieldValue, error) {
-	ret := make([]ScalarFieldValue, 0)
-	if data == nil {
-		return ret, fmt.Errorf("failed to parse pks from nil field data")
-	}
-	scalarData := data.GetScalars()
-	if scalarData == nil {
-		return ret, fmt.Errorf("failed to parse pks from nil scalar data")
-	}
-
-	switch data.Type {
-	case schemapb.DataType_Int64:
-		for _, value := range scalarData.GetLongData().GetData() {
-			fv := NewInt64FieldValue(value)
-			ret = append(ret, fv)
-		}
-	case schemapb.DataType_VarChar:
-		for _, value := range scalarData.GetStringData().GetData() {
-			fv := NewVarCharFieldValue(value)
-			ret = append(ret, fv)
-		}
-	default:
-		return ret, fmt.Errorf("not supported data type")
-	}
-
-	return ret, nil
-}
-
-func ParseIDs2FieldValues(ids *schemapb.IDs) []ScalarFieldValue {
-	ret := make([]ScalarFieldValue, 0)
-	switch ids.IdField.(type) {
-	case *schemapb.IDs_IntId:
-		int64Values := ids.GetIntId().GetData()
-		for _, v := range int64Values {
-			pk := NewInt64FieldValue(v)
-			ret = append(ret, pk)
-		}
-	case *schemapb.IDs_StrId:
-		stringValues := ids.GetStrId().GetData()
-		for _, v := range stringValues {
-			pk := NewVarCharFieldValue(v)
-			ret = append(ret, pk)
-		}
-	default:
-		// TODO::
-	}
-
-	return ret
-}
-
-func ParseFieldValues2IDs(pks []ScalarFieldValue) *schemapb.IDs {
-	ret := &schemapb.IDs{}
-	if len(pks) == 0 {
-		return ret
-	}
-	switch pks[0].Type() {
-	case schemapb.DataType_Int64:
-		int64Values := make([]int64, 0)
-		for _, pk := range pks {
-			int64Values = append(int64Values, pk.(*Int64FieldValue).Value)
-		}
-		ret.IdField = &schemapb.IDs_IntId{
-			IntId: &schemapb.LongArray{
-				Data: int64Values,
-			},
-		}
-	case schemapb.DataType_VarChar:
-		stringValues := make([]string, 0)
-		for _, pk := range pks {
-			stringValues = append(stringValues, pk.(*VarCharFieldValue).Value)
-		}
-		ret.IdField = &schemapb.IDs_StrId{
-			StrId: &schemapb.StringArray{
-				Data: stringValues,
-			},
-		}
-	default:
-		// TODO::
-	}
-
-	return ret
 }

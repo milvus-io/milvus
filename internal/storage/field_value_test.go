@@ -21,9 +21,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 )
 
 func TestVarCharFieldValue(t *testing.T) {
@@ -107,122 +104,236 @@ func TestInt64FieldValue(t *testing.T) {
 	})
 }
 
-func TestParseFieldData2FieldValues(t *testing.T) {
-	t.Run("int64 pk", func(t *testing.T) {
-		pkValues := []int64{1, 2}
-		var fieldData *schemapb.FieldData
+func TestInt8FieldValue(t *testing.T) {
+	pk := NewInt8FieldValue(20)
 
-		// test nil fieldData
-		_, err := ParseFieldData2FieldValues(fieldData)
-		assert.Error(t, err)
+	testPk := NewInt8FieldValue(20)
+	// test GE
+	assert.Equal(t, true, pk.GE(testPk))
+	assert.Equal(t, true, testPk.GE(pk))
+	// test LE
+	assert.Equal(t, true, pk.LE(testPk))
+	assert.Equal(t, true, testPk.LE(pk))
+	// test EQ
+	assert.Equal(t, true, pk.EQ(testPk))
 
-		// test nil scalar data
-		fieldData = &schemapb.FieldData{
-			FieldName: "int64Field",
-		}
-		_, err = ParseFieldData2FieldValues(fieldData)
-		assert.Error(t, err)
+	err := testPk.SetValue(1.0)
+	assert.Error(t, err)
 
-		// test invalid pk type
-		fieldData.Field = &schemapb.FieldData_Scalars{
-			Scalars: &schemapb.ScalarField{
-				Data: &schemapb.ScalarField_LongData{
-					LongData: &schemapb.LongArray{
-						Data: pkValues,
-					},
-				},
-			},
-		}
-		_, err = ParseFieldData2FieldValues(fieldData)
-		assert.Error(t, err)
+	// test GT
+	err = testPk.SetValue(int8(10))
+	assert.NoError(t, err)
+	assert.Equal(t, true, pk.GT(testPk))
+	assert.Equal(t, false, testPk.GT(pk))
+	assert.Equal(t, true, pk.GE(testPk))
+	assert.Equal(t, false, testPk.GE(pk))
 
-		// test parse success
-		fieldData.Type = schemapb.DataType_Int64
-		testPks := make([]ScalarFieldValue, len(pkValues))
-		for index, v := range pkValues {
-			testPks[index] = NewInt64FieldValue(v)
-		}
+	// test LT
+	err = testPk.SetValue(int8(30))
+	assert.NoError(t, err)
+	assert.Equal(t, true, pk.LT(testPk))
+	assert.Equal(t, false, testPk.LT(pk))
+	assert.Equal(t, true, pk.LE(testPk))
+	assert.Equal(t, false, testPk.LE(pk))
 
-		pks, err := ParseFieldData2FieldValues(fieldData)
+	t.Run("unmarshal", func(t *testing.T) {
+		blob, err := json.Marshal(pk)
 		assert.NoError(t, err)
 
-		assert.ElementsMatch(t, pks, testPks)
-	})
-
-	t.Run("varChar pk", func(t *testing.T) {
-		pkValues := []string{"test1", "test2"}
-		var fieldData *schemapb.FieldData
-
-		// test nil fieldData
-		_, err := ParseFieldData2FieldValues(fieldData)
-		assert.Error(t, err)
-
-		// test nil scalar data
-		fieldData = &schemapb.FieldData{
-			FieldName: "VarCharField",
-		}
-		_, err = ParseFieldData2FieldValues(fieldData)
-		assert.Error(t, err)
-
-		// test invalid pk type
-		fieldData.Field = &schemapb.FieldData_Scalars{
-			Scalars: &schemapb.ScalarField{
-				Data: &schemapb.ScalarField_StringData{
-					StringData: &schemapb.StringArray{
-						Data: pkValues,
-					},
-				},
-			},
-		}
-		_, err = ParseFieldData2FieldValues(fieldData)
-		assert.Error(t, err)
-
-		// test parse success
-		fieldData.Type = schemapb.DataType_VarChar
-		testPks := make([]ScalarFieldValue, len(pkValues))
-		for index, v := range pkValues {
-			testPks[index] = NewVarCharFieldValue(v)
-		}
-
-		pks, err := ParseFieldData2FieldValues(fieldData)
+		unmarshalledPk := &Int8FieldValue{}
+		err = json.Unmarshal(blob, unmarshalledPk)
 		assert.NoError(t, err)
-
-		assert.ElementsMatch(t, pks, testPks)
+		assert.Equal(t, pk.Value, unmarshalledPk.Value)
 	})
 }
 
-func TestParseFieldValuesAndIDs(t *testing.T) {
-	type testCase struct {
-		pks []ScalarFieldValue
-	}
-	testCases := []testCase{
-		{
-			pks: []ScalarFieldValue{NewInt64FieldValue(1), NewInt64FieldValue(2)},
-		},
-		{
-			pks: []ScalarFieldValue{NewVarCharFieldValue("test1"), NewVarCharFieldValue("test2")},
-		},
-	}
+func TestInt16FieldValue(t *testing.T) {
+	pk := NewInt16FieldValue(100)
 
-	for _, c := range testCases {
-		ids := ParseFieldValues2IDs(c.pks)
-		testPks := ParseIDs2FieldValues(ids)
-		assert.ElementsMatch(t, c.pks, testPks)
-	}
+	testPk := NewInt16FieldValue(100)
+	// test GE
+	assert.Equal(t, true, pk.GE(testPk))
+	assert.Equal(t, true, testPk.GE(pk))
+	// test LE
+	assert.Equal(t, true, pk.LE(testPk))
+	assert.Equal(t, true, testPk.LE(pk))
+	// test EQ
+	assert.Equal(t, true, pk.EQ(testPk))
+
+	err := testPk.SetValue(1.0)
+	assert.Error(t, err)
+
+	// test GT
+	err = testPk.SetValue(int16(10))
+	assert.NoError(t, err)
+	assert.Equal(t, true, pk.GT(testPk))
+	assert.Equal(t, false, testPk.GT(pk))
+	assert.Equal(t, true, pk.GE(testPk))
+	assert.Equal(t, false, testPk.GE(pk))
+
+	// test LT
+	err = testPk.SetValue(int16(200))
+	assert.NoError(t, err)
+	assert.Equal(t, true, pk.LT(testPk))
+	assert.Equal(t, false, testPk.LT(pk))
+	assert.Equal(t, true, pk.LE(testPk))
+	assert.Equal(t, false, testPk.LE(pk))
+
+	t.Run("unmarshal", func(t *testing.T) {
+		blob, err := json.Marshal(pk)
+		assert.NoError(t, err)
+
+		unmarshalledPk := &Int16FieldValue{}
+		err = json.Unmarshal(blob, unmarshalledPk)
+		assert.NoError(t, err)
+		assert.Equal(t, pk.Value, unmarshalledPk.Value)
+	})
 }
 
-func TestGenFieldValue(t *testing.T) {
-	_, err := GenInt64FieldValues(1, 2, 3)
-	require.NoError(t, err)
+func TestInt32FieldValue(t *testing.T) {
+	pk := NewInt32FieldValue(100)
 
-	_, err2 := GenVarcharFieldValues("a", "b", "c")
-	require.NoError(t, err2)
+	testPk := NewInt32FieldValue(100)
+	// test GE
+	assert.Equal(t, true, pk.GE(testPk))
+	assert.Equal(t, true, testPk.GE(pk))
+	// test LE
+	assert.Equal(t, true, pk.LE(testPk))
+	assert.Equal(t, true, testPk.LE(pk))
+	// test EQ
+	assert.Equal(t, true, pk.EQ(testPk))
+
+	err := testPk.SetValue(1.0)
+	assert.Error(t, err)
+
+	// test GT
+	err = testPk.SetValue(int32(10))
+	assert.NoError(t, err)
+	assert.Equal(t, true, pk.GT(testPk))
+	assert.Equal(t, false, testPk.GT(pk))
+	assert.Equal(t, true, pk.GE(testPk))
+	assert.Equal(t, false, testPk.GE(pk))
+
+	// test LT
+	err = testPk.SetValue(int32(200))
+	assert.NoError(t, err)
+	assert.Equal(t, true, pk.LT(testPk))
+	assert.Equal(t, false, testPk.LT(pk))
+	assert.Equal(t, true, pk.LE(testPk))
+	assert.Equal(t, false, testPk.LE(pk))
+
+	t.Run("unmarshal", func(t *testing.T) {
+		blob, err := json.Marshal(pk)
+		assert.NoError(t, err)
+
+		unmarshalledPk := &Int32FieldValue{}
+		err = json.Unmarshal(blob, unmarshalledPk)
+		assert.NoError(t, err)
+		assert.Equal(t, pk.Value, unmarshalledPk.Value)
+	})
+}
+
+func TestFloatFieldValue(t *testing.T) {
+	pk := NewFloatFieldValue(100)
+
+	testPk := NewFloatFieldValue(100)
+	// test GE
+	assert.Equal(t, true, pk.GE(testPk))
+	assert.Equal(t, true, testPk.GE(pk))
+	// test LE
+	assert.Equal(t, true, pk.LE(testPk))
+	assert.Equal(t, true, testPk.LE(pk))
+	// test EQ
+	assert.Equal(t, true, pk.EQ(testPk))
+
+	err := testPk.SetValue(float32(1.0))
+	assert.NoError(t, err)
+	// test GT
+	err = testPk.SetValue(float32(10))
+	assert.NoError(t, err)
+	assert.Equal(t, true, pk.GT(testPk))
+	assert.Equal(t, false, testPk.GT(pk))
+	assert.Equal(t, true, pk.GE(testPk))
+	assert.Equal(t, false, testPk.GE(pk))
+	// test LT
+	err = testPk.SetValue(float32(200))
+	assert.NoError(t, err)
+	assert.Equal(t, true, pk.LT(testPk))
+	assert.Equal(t, false, testPk.LT(pk))
+	assert.Equal(t, true, pk.LE(testPk))
+	assert.Equal(t, false, testPk.LE(pk))
+
+	t.Run("unmarshal", func(t *testing.T) {
+		blob, err := json.Marshal(pk)
+		assert.NoError(t, err)
+
+		unmarshalledPk := &FloatFieldValue{}
+		err = json.Unmarshal(blob, unmarshalledPk)
+		assert.NoError(t, err)
+		assert.Equal(t, pk.Value, unmarshalledPk.Value)
+	})
+}
+
+func TestDoubleFieldValue(t *testing.T) {
+	pk := NewDoubleFieldValue(100)
+
+	testPk := NewDoubleFieldValue(100)
+	// test GE
+	assert.Equal(t, true, pk.GE(testPk))
+	assert.Equal(t, true, testPk.GE(pk))
+	// test LE
+	assert.Equal(t, true, pk.LE(testPk))
+	assert.Equal(t, true, testPk.LE(pk))
+	// test EQ
+	assert.Equal(t, true, pk.EQ(testPk))
+	// test GT
+	err := testPk.SetValue(float64(10))
+	assert.NoError(t, err)
+	assert.Equal(t, true, pk.GT(testPk))
+	assert.Equal(t, false, testPk.GT(pk))
+	assert.Equal(t, true, pk.GE(testPk))
+	assert.Equal(t, false, testPk.GE(pk))
+	// test LT
+	err = testPk.SetValue(float64(200))
+	assert.NoError(t, err)
+	assert.Equal(t, true, pk.LT(testPk))
+	assert.Equal(t, false, testPk.LT(pk))
+	assert.Equal(t, true, pk.LE(testPk))
+	assert.Equal(t, false, testPk.LE(pk))
+
+	t.Run("unmarshal", func(t *testing.T) {
+		blob, err := json.Marshal(pk)
+		assert.NoError(t, err)
+
+		unmarshalledPk := &DoubleFieldValue{}
+		err = json.Unmarshal(blob, unmarshalledPk)
+		assert.NoError(t, err)
+		assert.Equal(t, pk.Value, unmarshalledPk.Value)
+	})
 }
 
 func TestFieldValueSize(t *testing.T) {
-	pk := NewVarCharFieldValue("milvus")
-	assert.Equal(t, int64(56), pk.Size())
+	vcf := NewVarCharFieldValue("milvus")
+	assert.Equal(t, int64(56), vcf.Size())
 
-	pk2 := NewInt64FieldValue(100)
-	assert.Equal(t, int64(16), pk2.Size())
+	stf := NewStringFieldValue("milvus")
+	assert.Equal(t, int64(56), stf.Size())
+
+	int8f := NewInt8FieldValue(100)
+	assert.Equal(t, int64(2), int8f.Size())
+
+	int16f := NewInt16FieldValue(100)
+	assert.Equal(t, int64(4), int16f.Size())
+
+	int32f := NewInt32FieldValue(100)
+	assert.Equal(t, int64(8), int32f.Size())
+
+	int64f := NewInt64FieldValue(100)
+	assert.Equal(t, int64(16), int64f.Size())
+
+	floatf := NewFloatFieldValue(float32(10.7))
+	assert.Equal(t, int64(8), floatf.Size())
+
+	doublef := NewDoubleFieldValue(float64(10.7))
+	assert.Equal(t, int64(16), doublef.Size())
 }

@@ -72,61 +72,79 @@ func (stats *FieldStats) UnmarshalJSON(data []byte) error {
 		}
 	}
 
+	isScalarField := false
 	switch stats.Type {
+	case schemapb.DataType_Int8:
+		stats.Max = &Int8FieldValue{}
+		stats.Min = &Int8FieldValue{}
+		isScalarField = true
+	case schemapb.DataType_Int16:
+		stats.Max = &Int16FieldValue{}
+		stats.Min = &Int16FieldValue{}
+		isScalarField = true
+	case schemapb.DataType_Int32:
+		stats.Max = &Int32FieldValue{}
+		stats.Min = &Int32FieldValue{}
+		isScalarField = true
 	case schemapb.DataType_Int64:
 		stats.Max = &Int64FieldValue{}
 		stats.Min = &Int64FieldValue{}
-		if value, ok := messageMap["max"]; ok && value != nil {
-			err = json.Unmarshal(*messageMap["max"], &stats.Max)
-			if err != nil {
-				return err
-			}
-		}
-		if value, ok := messageMap["min"]; ok && value != nil {
-			err = json.Unmarshal(*messageMap["min"], &stats.Min)
-			if err != nil {
-				return err
-			}
-		}
+		isScalarField = true
+	case schemapb.DataType_Float:
+		stats.Max = &FloatFieldValue{}
+		stats.Min = &FloatFieldValue{}
+		isScalarField = true
+	case schemapb.DataType_Double:
+		stats.Max = &DoubleFieldValue{}
+		stats.Min = &DoubleFieldValue{}
+		isScalarField = true
+	case schemapb.DataType_String:
+		stats.Max = &StringFieldValue{}
+		stats.Min = &StringFieldValue{}
+		isScalarField = true
 	case schemapb.DataType_VarChar:
 		stats.Max = &VarCharFieldValue{}
 		stats.Min = &VarCharFieldValue{}
-		if value, ok := messageMap["max"]; ok && value != nil {
-			err = json.Unmarshal(*messageMap["max"], &stats.Max)
-			if err != nil {
-				return err
-			}
-		}
-		if value, ok := messageMap["min"]; ok && value != nil {
-			err = json.Unmarshal(*messageMap["min"], &stats.Min)
-			if err != nil {
-				return err
-			}
-		}
+		isScalarField = true
 	default:
 		// todo support vector field
 	}
 
-	// compatible with primaryKeyStats
-	if maxPkMessage, ok := messageMap["maxPk"]; ok && maxPkMessage != nil {
-		err = json.Unmarshal(*maxPkMessage, stats.Max)
-		if err != nil {
-			return err
+	if isScalarField {
+		if value, ok := messageMap["max"]; ok && value != nil {
+			err = json.Unmarshal(*messageMap["max"], &stats.Max)
+			if err != nil {
+				return err
+			}
 		}
-	}
-
-	if minPkMessage, ok := messageMap["minPk"]; ok && minPkMessage != nil {
-		err = json.Unmarshal(*minPkMessage, stats.Min)
-		if err != nil {
-			return err
+		if value, ok := messageMap["min"]; ok && value != nil {
+			err = json.Unmarshal(*messageMap["min"], &stats.Min)
+			if err != nil {
+				return err
+			}
 		}
-	}
 
-	if bfMessage, ok := messageMap["bf"]; ok && bfMessage != nil {
-		stats.BF = &bloom.BloomFilter{}
-		err = stats.BF.UnmarshalJSON(*bfMessage)
-		if err != nil {
-			return err
+		// compatible with primaryKeyStats
+		if maxPkMessage, ok := messageMap["maxPk"]; ok && maxPkMessage != nil {
+			err = json.Unmarshal(*maxPkMessage, stats.Max)
+			if err != nil {
+				return err
+			}
+		}
+
+		if minPkMessage, ok := messageMap["minPk"]; ok && minPkMessage != nil {
+			err = json.Unmarshal(*minPkMessage, stats.Min)
+			if err != nil {
+				return err
+			}
+		}
+
+		if bfMessage, ok := messageMap["bf"]; ok && bfMessage != nil {
+			stats.BF = &bloom.BloomFilter{}
+			err = stats.BF.UnmarshalJSON(*bfMessage)
+			if err != nil {
+				return err
+			}
 		}
 	}
 
@@ -135,14 +153,51 @@ func (stats *FieldStats) UnmarshalJSON(data []byte) error {
 
 func (stats *FieldStats) UpdateByMsgs(msgs FieldData) {
 	switch stats.Type {
-	case schemapb.DataType_Int64:
-		data := msgs.(*Int64FieldData).Data
-
+	case schemapb.DataType_Int8:
+		data := msgs.(*Int8FieldData).Data
 		// return error: msgs must has one element at least
 		if len(data) < 1 {
 			return
 		}
-
+		b := make([]byte, 8)
+		for _, int8Value := range data {
+			pk := NewInt8FieldValue(int8Value)
+			stats.UpdateMinMax(pk)
+			common.Endian.PutUint64(b, uint64(int8Value))
+			stats.BF.Add(b)
+		}
+	case schemapb.DataType_Int16:
+		data := msgs.(*Int16FieldData).Data
+		// return error: msgs must has one element at least
+		if len(data) < 1 {
+			return
+		}
+		b := make([]byte, 8)
+		for _, int16Value := range data {
+			pk := NewInt16FieldValue(int16Value)
+			stats.UpdateMinMax(pk)
+			common.Endian.PutUint64(b, uint64(int16Value))
+			stats.BF.Add(b)
+		}
+	case schemapb.DataType_Int32:
+		data := msgs.(*Int32FieldData).Data
+		// return error: msgs must has one element at least
+		if len(data) < 1 {
+			return
+		}
+		b := make([]byte, 8)
+		for _, int32Value := range data {
+			pk := NewInt32FieldValue(int32Value)
+			stats.UpdateMinMax(pk)
+			common.Endian.PutUint64(b, uint64(int32Value))
+			stats.BF.Add(b)
+		}
+	case schemapb.DataType_Int64:
+		data := msgs.(*Int64FieldData).Data
+		// return error: msgs must has one element at least
+		if len(data) < 1 {
+			return
+		}
 		b := make([]byte, 8)
 		for _, int64Value := range data {
 			pk := NewInt64FieldValue(int64Value)
@@ -150,14 +205,49 @@ func (stats *FieldStats) UpdateByMsgs(msgs FieldData) {
 			common.Endian.PutUint64(b, uint64(int64Value))
 			stats.BF.Add(b)
 		}
-	case schemapb.DataType_VarChar:
-		data := msgs.(*StringFieldData).Data
-
+	case schemapb.DataType_Float:
+		data := msgs.(*FloatFieldData).Data
 		// return error: msgs must has one element at least
 		if len(data) < 1 {
 			return
 		}
-
+		b := make([]byte, 8)
+		for _, floatValue := range data {
+			pk := NewFloatFieldValue(floatValue)
+			stats.UpdateMinMax(pk)
+			common.Endian.PutUint64(b, uint64(floatValue))
+			stats.BF.Add(b)
+		}
+	case schemapb.DataType_Double:
+		data := msgs.(*DoubleFieldData).Data
+		// return error: msgs must has one element at least
+		if len(data) < 1 {
+			return
+		}
+		b := make([]byte, 8)
+		for _, doubleValue := range data {
+			pk := NewDoubleFieldValue(doubleValue)
+			stats.UpdateMinMax(pk)
+			common.Endian.PutUint64(b, uint64(doubleValue))
+			stats.BF.Add(b)
+		}
+	case schemapb.DataType_String:
+		data := msgs.(*StringFieldData).Data
+		// return error: msgs must has one element at least
+		if len(data) < 1 {
+			return
+		}
+		for _, str := range data {
+			pk := NewStringFieldValue(str)
+			stats.UpdateMinMax(pk)
+			stats.BF.AddString(str)
+		}
+	case schemapb.DataType_VarChar:
+		data := msgs.(*StringFieldData).Data
+		// return error: msgs must has one element at least
+		if len(data) < 1 {
+			return
+		}
 		for _, str := range data {
 			pk := NewVarCharFieldValue(str)
 			stats.UpdateMinMax(pk)
@@ -171,11 +261,39 @@ func (stats *FieldStats) UpdateByMsgs(msgs FieldData) {
 func (stats *FieldStats) Update(pk ScalarFieldValue) {
 	stats.UpdateMinMax(pk)
 	switch stats.Type {
+	case schemapb.DataType_Int8:
+		data := pk.GetValue().(int8)
+		b := make([]byte, 8)
+		common.Endian.PutUint64(b, uint64(data))
+		stats.BF.Add(b)
+	case schemapb.DataType_Int16:
+		data := pk.GetValue().(int16)
+		b := make([]byte, 8)
+		common.Endian.PutUint64(b, uint64(data))
+		stats.BF.Add(b)
+	case schemapb.DataType_Int32:
+		data := pk.GetValue().(int32)
+		b := make([]byte, 8)
+		common.Endian.PutUint64(b, uint64(data))
+		stats.BF.Add(b)
 	case schemapb.DataType_Int64:
 		data := pk.GetValue().(int64)
 		b := make([]byte, 8)
 		common.Endian.PutUint64(b, uint64(data))
 		stats.BF.Add(b)
+	case schemapb.DataType_Float:
+		data := pk.GetValue().(float32)
+		b := make([]byte, 8)
+		common.Endian.PutUint64(b, uint64(data))
+		stats.BF.Add(b)
+	case schemapb.DataType_Double:
+		data := pk.GetValue().(float64)
+		b := make([]byte, 8)
+		common.Endian.PutUint64(b, uint64(data))
+		stats.BF.Add(b)
+	case schemapb.DataType_String:
+		data := pk.GetValue().(string)
+		stats.BF.AddString(data)
 	case schemapb.DataType_VarChar:
 		data := pk.GetValue().(string)
 		stats.BF.AddString(data)
@@ -227,7 +345,7 @@ func (sw *FieldStatsWriter) GenerateList(stats []*FieldStats) error {
 	return nil
 }
 
-// GenerateByData writes Int64Stats or StringStats from @msgs with @fieldID to @buffer
+// GenerateByData writes data from @msgs with @fieldID to @buffer
 func (sw *FieldStatsWriter) GenerateByData(fieldID int64, pkType schemapb.DataType, msgs ...FieldData) error {
 	statsList := make([]*FieldStats, 0)
 	for _, msg := range msgs {
