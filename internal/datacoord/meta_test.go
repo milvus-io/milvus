@@ -65,6 +65,8 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 	suite.Run("ListSegments_fail", func() {
 		defer suite.resetMock()
 		suite.catalog.EXPECT().ListSegments(mock.Anything).Return(nil, errors.New("mock"))
+		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
+		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return([]*model.SegmentIndex{}, nil)
 
 		_, err := newMeta(ctx, suite.catalog, nil)
 		suite.Error(err)
@@ -75,29 +77,8 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 
 		suite.catalog.EXPECT().ListSegments(mock.Anything).Return([]*datapb.SegmentInfo{}, nil)
 		suite.catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, errors.New("mock"))
-
-		_, err := newMeta(ctx, suite.catalog, nil)
-		suite.Error(err)
-	})
-
-	suite.Run("ListIndexes_fail", func() {
-		defer suite.resetMock()
-
-		suite.catalog.EXPECT().ListSegments(mock.Anything).Return([]*datapb.SegmentInfo{}, nil)
-		suite.catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(map[string]*msgpb.MsgPosition{}, nil)
-		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, errors.New("mock"))
-
-		_, err := newMeta(ctx, suite.catalog, nil)
-		suite.Error(err)
-	})
-
-	suite.Run("ListSegmentIndexes_fails", func() {
-		defer suite.resetMock()
-
-		suite.catalog.EXPECT().ListSegments(mock.Anything).Return([]*datapb.SegmentInfo{}, nil)
-		suite.catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(map[string]*msgpb.MsgPosition{}, nil)
 		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
-		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, errors.New("mock"))
+		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return([]*model.SegmentIndex{}, nil)
 
 		_, err := newMeta(ctx, suite.catalog, nil)
 		suite.Error(err)
@@ -105,7 +86,8 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 
 	suite.Run("ok", func() {
 		defer suite.resetMock()
-
+		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
+		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return([]*model.SegmentIndex{}, nil)
 		suite.catalog.EXPECT().ListSegments(mock.Anything).Return([]*datapb.SegmentInfo{
 			{
 				ID:           1,
@@ -121,25 +103,9 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 				Timestamp:   1000,
 			},
 		}, nil)
-		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{
-			{
-				CollectionID: 1,
-				IndexID:      1,
-				IndexName:    "dix",
-				CreateTime:   1,
-			},
-		}, nil)
 
-		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return([]*model.SegmentIndex{
-			{
-				SegmentID: 1,
-				IndexID:   1,
-			},
-		}, nil)
-
-		meta, err := newMeta(ctx, suite.catalog, nil)
+		_, err := newMeta(ctx, suite.catalog, nil)
 		suite.NoError(err)
-		suite.NotNil(meta)
 
 		suite.MetricsEqual(metrics.DataCoordNumSegments.WithLabelValues(metrics.FlushedSegmentLabel), 1)
 	})

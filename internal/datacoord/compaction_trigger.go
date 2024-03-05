@@ -298,7 +298,7 @@ func (t *compactionTrigger) updateSegmentMaxSize(segments []*SegmentInfo) (bool,
 	}
 
 	collectionID := segments[0].GetCollectionID()
-	indexInfos := t.meta.GetIndexesForCollection(segments[0].GetCollectionID(), "")
+	indexInfos := t.meta.indexMeta.GetIndexesForCollection(segments[0].GetCollectionID(), "")
 
 	isDiskANN := false
 	for _, indexInfo := range indexInfos {
@@ -917,7 +917,8 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, isDis
 
 	if Params.DataCoordCfg.AutoUpgradeSegmentIndex.GetAsBool() {
 		// index version of segment lower than current version and IndexFileKeys should have value, trigger compaction
-		for _, index := range segment.segmentIndexes {
+		indexIDToSegIdxes := t.meta.indexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID)
+		for _, index := range indexIDToSegIdxes {
 			if index.CurrentIndexVersion < t.indexEngineVersionManager.GetCurrentIndexEngineVersion() &&
 				len(index.IndexFileKeys) > 0 {
 				log.Info("index version is too old, trigger compaction",

@@ -159,7 +159,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		})
 		assert.NoError(t, err)
 
-		err = svr.meta.CreateIndex(&model.Index{
+		err = svr.meta.indexMeta.CreateIndex(&model.Index{
 			TenantID:     "",
 			CollectionID: 0,
 			FieldID:      2,
@@ -208,22 +208,22 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		assert.NoError(t, err)
 		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg2))
 		assert.NoError(t, err)
-		err = svr.meta.AddSegmentIndex(&model.SegmentIndex{
+		err = svr.meta.indexMeta.AddSegmentIndex(&model.SegmentIndex{
 			SegmentID: seg1.ID,
 			BuildID:   seg1.ID,
 		})
 		assert.NoError(t, err)
-		err = svr.meta.FinishTask(&indexpb.IndexTaskInfo{
+		err = svr.meta.indexMeta.FinishTask(&indexpb.IndexTaskInfo{
 			BuildID: seg1.ID,
 			State:   commonpb.IndexState_Finished,
 		})
 		assert.NoError(t, err)
-		err = svr.meta.AddSegmentIndex(&model.SegmentIndex{
+		err = svr.meta.indexMeta.AddSegmentIndex(&model.SegmentIndex{
 			SegmentID: seg2.ID,
 			BuildID:   seg2.ID,
 		})
 		assert.NoError(t, err)
-		err = svr.meta.FinishTask(&indexpb.IndexTaskInfo{
+		err = svr.meta.indexMeta.FinishTask(&indexpb.IndexTaskInfo{
 			BuildID: seg2.ID,
 			State:   commonpb.IndexState_Finished,
 		})
@@ -383,7 +383,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		err := svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segment))
 		assert.NoError(t, err)
 
-		err = svr.meta.CreateIndex(&model.Index{
+		err = svr.meta.indexMeta.CreateIndex(&model.Index{
 			TenantID:     "",
 			CollectionID: 0,
 			FieldID:      2,
@@ -391,12 +391,12 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 			IndexName:    "",
 		})
 		assert.NoError(t, err)
-		err = svr.meta.AddSegmentIndex(&model.SegmentIndex{
+		err = svr.meta.indexMeta.AddSegmentIndex(&model.SegmentIndex{
 			SegmentID: segment.ID,
 			BuildID:   segment.ID,
 		})
 		assert.NoError(t, err)
-		err = svr.meta.FinishTask(&indexpb.IndexTaskInfo{
+		err = svr.meta.indexMeta.FinishTask(&indexpb.IndexTaskInfo{
 			BuildID: segment.ID,
 			State:   commonpb.IndexState_Finished,
 		})
@@ -608,7 +608,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		assert.NoError(t, err)
 
 		// make sure collection is indexed
-		err = svr.meta.CreateIndex(&model.Index{
+		err = svr.meta.indexMeta.CreateIndex(&model.Index{
 			TenantID:        "",
 			CollectionID:    0,
 			FieldID:         2,
@@ -623,7 +623,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		})
 		assert.NoError(t, err)
 
-		svr.meta.segments.SetSegmentIndex(seg.ID, &model.SegmentIndex{
+		svr.meta.indexMeta.updateSegmentIndex(&model.SegmentIndex{
 			SegmentID:     seg.ID,
 			CollectionID:  0,
 			PartitionID:   0,
@@ -663,7 +663,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		assert.NoError(t, err)
 
 		// make sure collection is indexed
-		err = svr.meta.CreateIndex(&model.Index{
+		err = svr.meta.indexMeta.CreateIndex(&model.Index{
 			TenantID:        "",
 			CollectionID:    1,
 			FieldID:         2,
@@ -678,7 +678,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		})
 		assert.NoError(t, err)
 
-		svr.meta.segments.SetSegmentIndex(seg2.ID, &model.SegmentIndex{
+		svr.meta.indexMeta.updateSegmentIndex(&model.SegmentIndex{
 			SegmentID:     seg2.ID,
 			CollectionID:  1,
 			PartitionID:   0,
@@ -738,7 +738,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		assert.NoError(t, err)
 		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg5))
 		assert.NoError(t, err)
-		err = svr.meta.CreateIndex(&model.Index{
+		err = svr.meta.indexMeta.CreateIndex(&model.Index{
 			TenantID:        "",
 			CollectionID:    0,
 			FieldID:         2,
@@ -752,7 +752,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 			UserIndexParams: nil,
 		})
 		assert.NoError(t, err)
-		svr.meta.segments.SetSegmentIndex(seg4.ID, &model.SegmentIndex{
+		svr.meta.indexMeta.updateSegmentIndex(&model.SegmentIndex{
 			SegmentID:     seg4.ID,
 			CollectionID:  0,
 			PartitionID:   0,
