@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -201,6 +202,20 @@ func (t *compactionTrigger) isCollectionAutoCompactionEnabled(coll *collectionIn
 		return false
 	}
 	return enabled
+}
+
+func (t *compactionTrigger) isChannelCheckpointHealthy(vchanName string) bool {
+	if paramtable.Get().DataCoordCfg.ChannelCheckpointMaxLag.GetAsInt64() <= 0 {
+		return true
+	}
+	checkpoint := t.meta.GetChannelCheckpoint(vchanName)
+	if checkpoint == nil {
+		log.Warn("channel checkpoint not found", zap.String("channel", vchanName))
+		return false
+	}
+
+	cpTime := tsoutil.PhysicalTime(checkpoint.GetTimestamp())
+	return time.Since(cpTime) < paramtable.Get().DataCoordCfg.ChannelCheckpointMaxLag.GetAsDuration(time.Second)
 }
 
 func (t *compactionTrigger) getCompactTime(ts Timestamp, coll *collectionInfo) (*compactTime, error) {
@@ -410,6 +425,15 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) error {
 		return err
 	}
 
+	channelCheckpointOK := make(map[string]bool)
+	isChannelCPOK := func(channelName string) bool {
+		cached, ok := channelCheckpointOK[channelName]
+		if ok {
+			return cached
+		}
+		return t.isChannelCheckpointHealthy(channelName)
+	}
+
 	for _, group := range m {
 		log := log.With(zap.Int64("collectionID", group.collectionID),
 			zap.Int64("partitionID", group.partitionID),
@@ -418,6 +442,11 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) error {
 			log.Warn("compaction plan skipped due to handler full")
 			break
 		}
+		if !isChannelCPOK(group.channelName) && !signal.isForce {
+			log.Warn("compaction plan skipped due to channel checkpoint lag", zap.String("channel", signal.channel))
+			continue
+		}
+
 		if Params.DataCoordCfg.IndexBasedCompaction.GetAsBool() {
 			group.segments = FilterInIndexedSegments(t.handler, t.meta, group.segments...)
 		}
@@ -498,6 +527,11 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 	// 1. check whether segment's binlogs should be compacted or not
 	if t.compactionHandler.isFull() {
 		log.Warn("compaction plan skipped due to handler full")
+		return
+	}
+
+	if !t.isChannelCheckpointHealthy(signal.channel) {
+		log.Warn("compaction plan skipped due to channel checkpoint lag", zap.String("channel", signal.channel))
 		return
 	}
 
