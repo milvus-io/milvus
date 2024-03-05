@@ -873,7 +873,7 @@ func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCoun
 
 	var status C.CStatus
 	GetLoadPool().Submit(func() (any, error) {
-		log.Info("submitted loadFieldData task to dy pool")
+		log.Info("submitted loadFieldData task to load pool")
 		if paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool() {
 			uri, err := typeutil_internal.GetStorageURI(paramtable.Get().CommonCfg.StorageScheme.GetValue(), paramtable.Get().CommonCfg.StoragePathPrefix.GetValue(), s.segmentID)
 			if err != nil {
@@ -1007,10 +1007,10 @@ func (s *LocalSegment) AddFieldDataInfo(ctx context.Context, rowCount int64, fie
 	)
 
 	loadFieldDataInfo, err := newLoadFieldDataInfo(ctx)
-	defer deleteFieldDataInfo(loadFieldDataInfo)
 	if err != nil {
 		return err
 	}
+	defer deleteFieldDataInfo(loadFieldDataInfo)
 
 	for _, field := range fields {
 		fieldID := field.FieldID
@@ -1332,9 +1332,9 @@ func (s *LocalSegment) Release(opts ...releaseOption) {
 		void
 		deleteSegment(CSegmentInterface segment);
 	*/
-	// wait all read ops finished
 	var ptr C.CSegmentInterface
 
+	// wait all read ops finished
 	s.ptrLock.Lock()
 	ptr = s.ptr
 	s.ptr = nil
