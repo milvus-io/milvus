@@ -253,47 +253,24 @@ func (sr *FieldStatsReader) SetBuffer(buffer []byte) {
 	sr.buffer = buffer
 }
 
-// GetFieldStats returns buffer as FieldStats
-func (sr *FieldStatsReader) GetFieldStats() (*FieldStats, error) {
-	stats := &FieldStats{}
-	err := json.Unmarshal(sr.buffer, &stats)
-	if err != nil {
-		return nil, merr.WrapErrParameterInvalid("valid JSON", string(sr.buffer), err.Error())
-	}
-
-	return stats, nil
-}
-
 // GetFieldStatsList returns buffer as FieldStats
 func (sr *FieldStatsReader) GetFieldStatsList() ([]*FieldStats, error) {
-	var stats []*FieldStats
-	err := json.Unmarshal(sr.buffer, &stats)
+	var statsList []*FieldStats
+	err := json.Unmarshal(sr.buffer, &statsList)
 	if err != nil {
-		return nil, merr.WrapErrParameterInvalid("valid JSON", string(sr.buffer), err.Error())
+		// Compatible to PrimaryKey Stats
+		stats := &FieldStats{}
+		errNew := json.Unmarshal(sr.buffer, &stats)
+		if errNew != nil {
+			return nil, merr.WrapErrParameterInvalid("valid JSON", string(sr.buffer), err.Error())
+		}
+		return []*FieldStats{stats}, nil
 	}
 
-	return stats, nil
+	return statsList, nil
 }
 
-// DeserializeFieldStats deserialize @blobs as []*FieldStats
-func DeserializeFieldStats(blobs []*Blob) ([]*FieldStats, error) {
-	results := make([]*FieldStats, 0, len(blobs))
-	for _, blob := range blobs {
-		if len(blob.Value) == 0 {
-			continue
-		}
-		sr := &FieldStatsReader{}
-		sr.SetBuffer(blob.Value)
-		stats, err := sr.GetFieldStats()
-		if err != nil {
-			return nil, err
-		}
-		results = append(results, stats)
-	}
-	return results, nil
-}
-
-func DeserializeFieldStatsList(blob *Blob) ([]*FieldStats, error) {
+func DeserializeFieldStats(blob *Blob) ([]*FieldStats, error) {
 	if len(blob.Value) == 0 {
 		return []*FieldStats{}, nil
 	}

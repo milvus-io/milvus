@@ -158,7 +158,7 @@ func TestFieldStatsWriter_UpgradePrimaryKey(t *testing.T) {
 	assert.NoError(t, err)
 	sr := &FieldStatsReader{}
 	sr.SetBuffer(blob)
-	unmarshalledStats, err := sr.GetFieldStats()
+	unmarshalledStats, err := sr.GetFieldStatsList()
 	assert.NoError(t, err)
 	maxPk := &Int64FieldValue{
 		Value: 9,
@@ -166,12 +166,12 @@ func TestFieldStatsWriter_UpgradePrimaryKey(t *testing.T) {
 	minPk := &Int64FieldValue{
 		Value: 1,
 	}
-	assert.Equal(t, true, unmarshalledStats.Max.EQ(maxPk))
-	assert.Equal(t, true, unmarshalledStats.Min.EQ(minPk))
+	assert.Equal(t, true, unmarshalledStats[0].Max.EQ(maxPk))
+	assert.Equal(t, true, unmarshalledStats[0].Min.EQ(minPk))
 	buffer := make([]byte, 8)
 	for _, id := range data.Data {
 		common.Endian.PutUint64(buffer, uint64(id))
-		assert.True(t, unmarshalledStats.BF.Test(buffer))
+		assert.True(t, unmarshalledStats[0].BF.Test(buffer))
 	}
 }
 
@@ -181,7 +181,7 @@ func TestDeserializeFieldStatsFailed(t *testing.T) {
 			Value: []byte{},
 		}
 
-		_, err := DeserializeFieldStatsList(blob)
+		_, err := DeserializeFieldStats(blob)
 		assert.NoError(t, err)
 	})
 
@@ -190,7 +190,7 @@ func TestDeserializeFieldStatsFailed(t *testing.T) {
 			Value: []byte("abc"),
 		}
 
-		_, err := DeserializeFieldStatsList(blob)
+		_, err := DeserializeFieldStats(blob)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	})
 
@@ -198,7 +198,7 @@ func TestDeserializeFieldStatsFailed(t *testing.T) {
 		blob := &Blob{
 			Value: []byte("[{\"fieldID\":1,\"max\":10, \"min\":1}]"),
 		}
-		_, err := DeserializeFieldStatsList(blob)
+		_, err := DeserializeFieldStats(blob)
 		assert.NoError(t, err)
 	})
 }
@@ -209,7 +209,7 @@ func TestDeserializeFieldStats(t *testing.T) {
 			Value: []byte{},
 		}
 
-		_, err := DeserializeFieldStats([]*Blob{blob})
+		_, err := DeserializeFieldStats(blob)
 		assert.NoError(t, err)
 	})
 
@@ -217,7 +217,7 @@ func TestDeserializeFieldStats(t *testing.T) {
 		blob := &Blob{
 			Value: []byte("abc"),
 		}
-		_, err := DeserializeFieldStats([]*Blob{blob})
+		_, err := DeserializeFieldStats(blob)
 		assert.Error(t, err)
 	})
 
@@ -225,7 +225,7 @@ func TestDeserializeFieldStats(t *testing.T) {
 		blob := &Blob{
 			Value: []byte("{\"field\":\"a\"}"),
 		}
-		_, err := DeserializeFieldStats([]*Blob{blob})
+		_, err := DeserializeFieldStats(blob)
 		assert.Error(t, err)
 	})
 
@@ -233,7 +233,7 @@ func TestDeserializeFieldStats(t *testing.T) {
 		blob := &Blob{
 			Value: []byte("{\"fieldID\":\"a\"}"),
 		}
-		_, err := DeserializeFieldStats([]*Blob{blob})
+		_, err := DeserializeFieldStats(blob)
 		assert.Error(t, err)
 	})
 
@@ -241,7 +241,7 @@ func TestDeserializeFieldStats(t *testing.T) {
 		blob := &Blob{
 			Value: []byte("{\"fieldID\":1,\"type\":\"a\"}"),
 		}
-		_, err := DeserializeFieldStats([]*Blob{blob})
+		_, err := DeserializeFieldStats(blob)
 		assert.Error(t, err)
 	})
 
@@ -249,7 +249,7 @@ func TestDeserializeFieldStats(t *testing.T) {
 		blob := &Blob{
 			Value: []byte("{\"fieldID\":1,\"type\":\"a\"}"),
 		}
-		_, err := DeserializeFieldStats([]*Blob{blob})
+		_, err := DeserializeFieldStats(blob)
 		assert.Error(t, err)
 	})
 
@@ -257,7 +257,7 @@ func TestDeserializeFieldStats(t *testing.T) {
 		blob := &Blob{
 			Value: []byte("{\"fieldID\":1,\"max\":\"a\"}"),
 		}
-		_, err := DeserializeFieldStats([]*Blob{blob})
+		_, err := DeserializeFieldStats(blob)
 		assert.Error(t, err)
 	})
 
@@ -265,7 +265,7 @@ func TestDeserializeFieldStats(t *testing.T) {
 		blob := &Blob{
 			Value: []byte("{\"fieldID\":1,\"min\":\"a\"}"),
 		}
-		_, err := DeserializeFieldStats([]*Blob{blob})
+		_, err := DeserializeFieldStats(blob)
 		assert.Error(t, err)
 	})
 
@@ -273,7 +273,7 @@ func TestDeserializeFieldStats(t *testing.T) {
 		blob := &Blob{
 			Value: []byte("{\"fieldID\":1,\"type\":21,\"max\":2}"),
 		}
-		_, err := DeserializeFieldStats([]*Blob{blob})
+		_, err := DeserializeFieldStats(blob)
 		assert.Error(t, err)
 	})
 
@@ -281,7 +281,7 @@ func TestDeserializeFieldStats(t *testing.T) {
 		blob := &Blob{
 			Value: []byte("{\"fieldID\":1,\"type\":21,\"min\":1}"),
 		}
-		_, err := DeserializeFieldStats([]*Blob{blob})
+		_, err := DeserializeFieldStats(blob)
 		assert.Error(t, err)
 	})
 
@@ -289,7 +289,7 @@ func TestDeserializeFieldStats(t *testing.T) {
 		blob := &Blob{
 			Value: []byte("{\"fieldID\":1,\"max\":10, \"min\":1}"),
 		}
-		_, err := DeserializeFieldStats([]*Blob{blob})
+		_, err := DeserializeFieldStats(blob)
 		assert.NoError(t, err)
 	})
 
@@ -297,7 +297,7 @@ func TestDeserializeFieldStats(t *testing.T) {
 		blob := &Blob{
 			Value: []byte("{\"fieldID\":1,\"type\":21,\"max\":\"z\", \"min\":\"a\"}"),
 		}
-		_, err := DeserializeFieldStats([]*Blob{blob})
+		_, err := DeserializeFieldStats(blob)
 		assert.NoError(t, err)
 	})
 }
@@ -313,7 +313,7 @@ func TestCompatible_ReadPrimaryKeyStatsWithFieldStatsReader(t *testing.T) {
 
 	sr := &FieldStatsReader{}
 	sr.SetBuffer(b)
-	stats, err := sr.GetFieldStats()
+	stats, err := sr.GetFieldStatsList()
 	assert.NoError(t, err)
 	maxPk := &Int64FieldValue{
 		Value: 9,
@@ -321,13 +321,13 @@ func TestCompatible_ReadPrimaryKeyStatsWithFieldStatsReader(t *testing.T) {
 	minPk := &Int64FieldValue{
 		Value: 1,
 	}
-	assert.Equal(t, true, stats.Max.EQ(maxPk))
-	assert.Equal(t, true, stats.Min.EQ(minPk))
-	assert.Equal(t, schemapb.DataType_Int64.String(), stats.Type.String())
+	assert.Equal(t, true, stats[0].Max.EQ(maxPk))
+	assert.Equal(t, true, stats[0].Min.EQ(minPk))
+	assert.Equal(t, schemapb.DataType_Int64.String(), stats[0].Type.String())
 	buffer := make([]byte, 8)
 	for _, id := range data.Data {
 		common.Endian.PutUint64(buffer, uint64(id))
-		assert.True(t, stats.BF.Test(buffer))
+		assert.True(t, stats[0].BF.Test(buffer))
 	}
 
 	msgs := &Int64FieldData{
