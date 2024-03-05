@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"go.uber.org/atomic"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -52,8 +53,24 @@ func (s *connectionManager) checkLoop() {
 			return
 		case <-t.C:
 			s.removeLongInactiveClients()
+			// not sure if we should purge them periodically.
+			s.purgeIfNumOfClientsExceed()
 			t.Reset(paramtable.Get().ProxyCfg.ConnectionCheckIntervalSeconds.GetAsDuration(time.Second))
 		}
+	}
+}
+
+func (s *connectionManager) purgeIfNumOfClientsExceed() {
+	if s.count.Load() >= paramtable.Get().ProxyCfg.MaxConnectionNum.GetAsInt64() {
+		log.Info("number of client infos exceed limit, clear them",
+			zap.Int64("num", s.count.Load()),
+			zap.Int64("limit", paramtable.Get().ProxyCfg.MaxConnectionNum.GetAsInt64()))
+
+		s.clientInfos.Range(func(candidate int64, info clientInfo) bool {
+			s.clientInfos.Remove(candidate)
+			s.count.Dec()
+			return true
+		})
 	}
 }
 
