@@ -115,7 +115,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 				&meta{
 					catalog: catalog,
 					segments: &SegmentsInfo{
-						map[int64]*SegmentInfo{
+						segments: map[int64]*SegmentInfo{
 							1: {
 								SegmentInfo: &datapb.SegmentInfo{
 									ID:             1,
@@ -871,7 +871,7 @@ func Test_compactionTrigger_noplan(t *testing.T) {
 					indexMeta: newSegmentIndexMeta(nil),
 					// 4 segment
 					segments: &SegmentsInfo{
-						map[int64]*SegmentInfo{
+						segments: map[int64]*SegmentInfo{
 							1: {
 								SegmentInfo: &datapb.SegmentInfo{
 									ID:             1,
@@ -1052,7 +1052,7 @@ func Test_compactionTrigger_PrioritizedCandi(t *testing.T) {
 				&meta{
 					// 8 small segments
 					segments: &SegmentsInfo{
-						map[int64]*SegmentInfo{
+						segments: map[int64]*SegmentInfo{
 							1: {
 								SegmentInfo:   genSeg(1, 20),
 								lastFlushTime: time.Now().Add(-100 * time.Minute),
@@ -1232,7 +1232,7 @@ func Test_compactionTrigger_SmallCandi(t *testing.T) {
 				&meta{
 					// 4 small segments
 					segments: &SegmentsInfo{
-						map[int64]*SegmentInfo{
+						segments: map[int64]*SegmentInfo{
 							1: {
 								SegmentInfo:   genSeg(1, 20),
 								lastFlushTime: time.Now().Add(-100 * time.Minute),
@@ -1419,7 +1419,7 @@ func Test_compactionTrigger_SqueezeNonPlannedSegs(t *testing.T) {
 				&meta{
 					// 4 small segments
 					segments: &SegmentsInfo{
-						map[int64]*SegmentInfo{
+						segments: map[int64]*SegmentInfo{
 							1: {
 								SegmentInfo:   genSeg(1, 60),
 								lastFlushTime: time.Now().Add(-100 * time.Minute),
@@ -2183,7 +2183,7 @@ func (s *CompactionTriggerSuite) SetupTest() {
 	s.channel = "dml_0_100v0"
 	s.meta = &meta{
 		segments: &SegmentsInfo{
-			map[int64]*SegmentInfo{
+			segments: map[int64]*SegmentInfo{
 				1: {
 					SegmentInfo:   s.genSeg(1, 60),
 					lastFlushTime: time.Now().Add(-100 * time.Minute),
