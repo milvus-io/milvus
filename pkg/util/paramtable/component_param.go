@@ -1370,7 +1370,7 @@ please adjust in embedded Milvus: false`,
 	p.GracefulStopTimeout.Init(base.mgr)
 
 	p.ConnectionCheckIntervalSeconds = ParamItem{
-		Key:          "proxy.connectionMgrCheckInterval",
+		Key:          "proxy.connectionCheckIntervalSeconds",
 		Version:      "2.3.11",
 		Doc:          "the interval time(in seconds) for connection manager to scan inactive client info",
 		DefaultValue: "120",
@@ -1379,7 +1379,7 @@ please adjust in embedded Milvus: false`,
 	p.ConnectionCheckIntervalSeconds.Init(base.mgr)
 
 	p.ConnectionClientInfoTTLSeconds = ParamItem{
-		Key:          "proxy.connectionClientInfoTTL",
+		Key:          "proxy.connectionClientInfoTTLSeconds",
 		Version:      "2.3.11",
 		Doc:          "inactive client info TTL duration, in seconds",
 		DefaultValue: "86400",
