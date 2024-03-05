@@ -952,6 +952,47 @@ func (_c *MockSegment_Release_Call) RunAndReturn(run func(...releaseOption)) *Mo
 	return _c
 }
 
+// ResourceUsageEstimate provides a mock function with given fields:
+func (_m *MockSegment) ResourceUsageEstimate() ResourceUsage {
+	ret := _m.Called()
+
+	var r0 ResourceUsage
+	if rf, ok := ret.Get(0).(func() ResourceUsage); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(ResourceUsage)
+	}
+
+	return r0
+}
+
+// MockSegment_ResourceUsageEstimate_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ResourceUsageEstimate'
+type MockSegment_ResourceUsageEstimate_Call struct {
+	*mock.Call
+}
+
+// ResourceUsageEstimate is a helper method to define mock.On call
+func (_e *MockSegment_Expecter) ResourceUsageEstimate() *MockSegment_ResourceUsageEstimate_Call {
+	return &MockSegment_ResourceUsageEstimate_Call{Call: _e.mock.On("ResourceUsageEstimate")}
+}
+
+func (_c *MockSegment_ResourceUsageEstimate_Call) Run(run func()) *MockSegment_ResourceUsageEstimate_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockSegment_ResourceUsageEstimate_Call) Return(_a0 ResourceUsage) *MockSegment_ResourceUsageEstimate_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockSegment_ResourceUsageEstimate_Call) RunAndReturn(run func() ResourceUsage) *MockSegment_ResourceUsageEstimate_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Retrieve provides a mock function with given fields: ctx, plan
 func (_m *MockSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segcorepb.RetrieveResults, error) {
 	ret := _m.Called(ctx, plan)
