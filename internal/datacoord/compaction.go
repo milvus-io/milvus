@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/milvus-io/milvus/pkg/util/conc"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -299,17 +300,20 @@ func (c *compactionPlanHandler) enqueuePlan(signal *compactionSignal, plan *data
 	return nil
 }
 
-func (c *compactionPlanHandler) RefreshPlan(task *compactionTask) {
+func (c *compactionPlanHandler) RefreshPlan(task *compactionTask) error {
 	plan := task.plan
 	log := log.With(zap.Int64("taskID", task.triggerInfo.id), zap.Int64("planID", plan.GetPlanID()))
 	if plan.GetType() == datapb.CompactionType_Level0DeleteCompaction {
 		// Fill in deltalogs for L0 segments
-		lo.ForEach(plan.SegmentBinlogs, func(seg *datapb.CompactionSegmentBinlogs, _ int) {
+		for _, seg := range plan.GetSegmentBinlogs() {
 			if seg.GetLevel() == datapb.SegmentLevel_L0 {
 				segInfo := c.meta.GetHealthySegment(seg.GetSegmentID())
+				if segInfo == nil {
+					return merr.WrapErrSegmentNotFound(seg.GetSegmentID())
+				}
 				seg.Deltalogs = segInfo.GetDeltalogs()
 			}
-		})
+		}
 
 		// Select sealed L1 segments for LevelZero compaction that meets the condition:
 		// dmlPos < triggerInfo.pos
@@ -338,7 +342,7 @@ func (c *compactionPlanHandler) RefreshPlan(task *compactionTask) {
 		log.Info("Compaction handler refreshed level zero compaction plan",
 			zap.Any("target position", task.triggerInfo.pos),
 			zap.Any("target segments count", len(sealedSegBinlogs)))
-		return
+		return nil
 	}
 
 	if plan.GetType() == datapb.CompactionType_MixCompaction {
@@ -350,15 +354,21 @@ func (c *compactionPlanHandler) RefreshPlan(task *compactionTask) {
 			}
 		}
 		log.Info("Compaction handler refreshed mix compaction plan", zap.Any("segID2DeltaLogs", segIDMap))
-		return
 	}
+	return nil
 }
 
 func (c *compactionPlanHandler) notifyTasks(tasks []*compactionTask) {
 	for _, task := range tasks {
 		// avoid closure capture iteration variable
 		innerTask := task
-		c.RefreshPlan(innerTask)
+		err := c.RefreshPlan(innerTask)
+		if err != nil {
+			log.Warn("failed to refresh task",
+				zap.Int64("plan", task.plan.PlanID),
+				zap.Error(err))
+			continue
+		}
 		getOrCreateIOPool().Submit(func() (any, error) {
 			ctx := tracer.SetupSpan(context.Background(), innerTask.span)
 			plan := innerTask.plan
