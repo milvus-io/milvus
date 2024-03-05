@@ -497,24 +497,16 @@ func (s *SegmentManager) SealAllSegments(ctx context.Context, collectionID Uniqu
 	if len(segIDs) != 0 {
 		segCandidates = segIDs
 	}
-	for _, id := range segCandidates {
-		info := s.meta.GetHealthySegment(id)
-		if info == nil {
-			log.Warn("failed to get seg info from meta", zap.Int64("segmentID", id))
-			continue
-		}
-		if info.CollectionID != collectionID {
-			continue
-		}
-		// idempotent sealed
-		if info.State == commonpb.SegmentState_Sealed {
-			ret = append(ret, id)
-			continue
-		}
-		// segment can be sealed only if it is growing.
-		if info.State != commonpb.SegmentState_Growing {
-			continue
-		}
+
+	sealedSegments := s.meta.GetSegments(segCandidates, func(segment *SegmentInfo) bool {
+		return segment.CollectionID == collectionID && isSegmentHealthy(segment) && segment.State == commonpb.SegmentState_Sealed
+	})
+	growingSegments := s.meta.GetSegments(segCandidates, func(segment *SegmentInfo) bool {
+		return segment.CollectionID == collectionID && isSegmentHealthy(segment) && segment.State == commonpb.SegmentState_Growing
+	})
+	ret = append(ret, sealedSegments...)
+
+	for _, id := range growingSegments {
 		if err := s.meta.SetState(id, commonpb.SegmentState_Sealed); err != nil {
 			return nil, err
 		}

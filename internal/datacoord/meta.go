@@ -333,6 +333,20 @@ func (m *meta) GetHealthySegment(segID UniqueID) *SegmentInfo {
 	return nil
 }
 
+// Get segments By filter function
+func (m *meta) GetSegments(segIDs []UniqueID, filterFunc SegmentInfoSelector) []UniqueID {
+	m.RLock()
+	defer m.RUnlock()
+	var result []UniqueID
+	for _, id := range segIDs {
+		segment := m.segments.GetSegment(id)
+		if segment != nil && filterFunc(segment) {
+			result = append(result, id)
+		}
+	}
+	return result
+}
+
 // GetSegment returns segment info with provided id
 // include the unhealthy segment
 // if not segment is found, nil will be returned
