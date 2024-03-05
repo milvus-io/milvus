@@ -60,7 +60,8 @@ func (s *connectionManager) checkLoop() {
 }
 
 func (s *connectionManager) purgeIfNumOfClientsExceed() {
-	if int64(s.clientInfos.Len()) < paramtable.Get().ProxyCfg.MaxConnectionNum.GetAsInt64() {
+	diffNum := int64(s.clientInfos.Len()) - paramtable.Get().ProxyCfg.MaxConnectionNum.GetAsInt64()
+	if diffNum <= 0 {
 		return
 	}
 
@@ -71,8 +72,6 @@ func (s *connectionManager) purgeIfNumOfClientsExceed() {
 		zap.Int64("limit", paramtable.Get().ProxyCfg.MaxConnectionNum.GetAsInt64()))
 
 	log.Info("number of client infos exceed limit, ready to purge the oldest")
-
-	diffNum := int64(s.clientInfos.Len()) - paramtable.Get().ProxyCfg.MaxConnectionNum.GetAsInt64()
 	q := newPriorityQueueWithCap(int(diffNum + 1))
 	s.clientInfos.Range(func(identifier int64, info clientInfo) bool {
 		heap.Push(&q, newQueryItem(info.identifier, info.lastActiveTime))
