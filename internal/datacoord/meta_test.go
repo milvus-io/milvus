@@ -65,6 +65,8 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 	suite.Run("ListSegments_fail", func() {
 		defer suite.resetMock()
 		suite.catalog.EXPECT().ListSegments(mock.Anything).Return(nil, errors.New("mock"))
+		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
+		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return([]*model.SegmentIndex{}, nil)
 
 		_, err := newMeta(ctx, suite.catalog, nil)
 		suite.Error(err)
@@ -75,29 +77,8 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 
 		suite.catalog.EXPECT().ListSegments(mock.Anything).Return([]*datapb.SegmentInfo{}, nil)
 		suite.catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, errors.New("mock"))
-
-		_, err := newMeta(ctx, suite.catalog, nil)
-		suite.Error(err)
-	})
-
-	suite.Run("ListIndexes_fail", func() {
-		defer suite.resetMock()
-
-		suite.catalog.EXPECT().ListSegments(mock.Anything).Return([]*datapb.SegmentInfo{}, nil)
-		suite.catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(map[string]*msgpb.MsgPosition{}, nil)
-		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, errors.New("mock"))
-
-		_, err := newMeta(ctx, suite.catalog, nil)
-		suite.Error(err)
-	})
-
-	suite.Run("ListSegmentIndexes_fails", func() {
-		defer suite.resetMock()
-
-		suite.catalog.EXPECT().ListSegments(mock.Anything).Return([]*datapb.SegmentInfo{}, nil)
-		suite.catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(map[string]*msgpb.MsgPosition{}, nil)
 		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
-		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, errors.New("mock"))
+		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return([]*model.SegmentIndex{}, nil)
 
 		_, err := newMeta(ctx, suite.catalog, nil)
 		suite.Error(err)
@@ -105,7 +86,8 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 
 	suite.Run("ok", func() {
 		defer suite.resetMock()
-
+		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
+		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return([]*model.SegmentIndex{}, nil)
 		suite.catalog.EXPECT().ListSegments(mock.Anything).Return([]*datapb.SegmentInfo{
 			{
 				ID:           1,
@@ -121,25 +103,9 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 				Timestamp:   1000,
 			},
 		}, nil)
-		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{
-			{
-				CollectionID: 1,
-				IndexID:      1,
-				IndexName:    "dix",
-				CreateTime:   1,
-			},
-		}, nil)
 
-		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return([]*model.SegmentIndex{
-			{
-				SegmentID: 1,
-				IndexID:   1,
-			},
-		}, nil)
-
-		meta, err := newMeta(ctx, suite.catalog, nil)
+		_, err := newMeta(ctx, suite.catalog, nil)
 		suite.NoError(err)
-		suite.NotNil(meta)
 
 		suite.MetricsEqual(metrics.DataCoordNumSegments.WithLabelValues(metrics.FlushedSegmentLabel, datapb.SegmentLevel_Legacy.String()), 1)
 	})
@@ -199,33 +165,34 @@ func (suite *MetaBasicSuite) TestCollection() {
 }
 
 func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
-	latestSegments := &SegmentsInfo{
-		map[UniqueID]*SegmentInfo{
-			1: {SegmentInfo: &datapb.SegmentInfo{
-				ID:           1,
-				CollectionID: 100,
-				PartitionID:  10,
-				State:        commonpb.SegmentState_Flushed,
-				Level:        datapb.SegmentLevel_L1,
-				Binlogs:      []*datapb.FieldBinlog{getFieldBinlogIDs(0, 10000, 10001)},
-				Statslogs:    []*datapb.FieldBinlog{getFieldBinlogIDs(0, 20000, 20001)},
-				// latest segment has 2 deltalogs, one submit for compaction, one is appended before compaction done
-				Deltalogs: []*datapb.FieldBinlog{getFieldBinlogIDs(0, 30000), getFieldBinlogIDs(0, 30001)},
-				NumOfRows: 2,
-			}},
-			2: {SegmentInfo: &datapb.SegmentInfo{
-				ID:           2,
-				CollectionID: 100,
-				PartitionID:  10,
-				State:        commonpb.SegmentState_Flushed,
-				Level:        datapb.SegmentLevel_L1,
-				Binlogs:      []*datapb.FieldBinlog{getFieldBinlogIDs(0, 11000)},
-				Statslogs:    []*datapb.FieldBinlog{getFieldBinlogIDs(0, 21000)},
-				// latest segment has 2 deltalogs, one submit for compaction, one is appended before compaction done
-				Deltalogs: []*datapb.FieldBinlog{getFieldBinlogIDs(0, 31000), getFieldBinlogIDs(0, 31001)},
-				NumOfRows: 2,
-			}},
-		},
+	latestSegments := NewSegmentsInfo()
+	for segID, segment := range map[UniqueID]*SegmentInfo{
+		1: {SegmentInfo: &datapb.SegmentInfo{
+			ID:           1,
+			CollectionID: 100,
+			PartitionID:  10,
+			State:        commonpb.SegmentState_Flushed,
+			Level:        datapb.SegmentLevel_L1,
+			Binlogs:      []*datapb.FieldBinlog{getFieldBinlogIDs(0, 10000, 10001)},
+			Statslogs:    []*datapb.FieldBinlog{getFieldBinlogIDs(0, 20000, 20001)},
+			// latest segment has 2 deltalogs, one submit for compaction, one is appended before compaction done
+			Deltalogs: []*datapb.FieldBinlog{getFieldBinlogIDs(0, 30000), getFieldBinlogIDs(0, 30001)},
+			NumOfRows: 2,
+		}},
+		2: {SegmentInfo: &datapb.SegmentInfo{
+			ID:           2,
+			CollectionID: 100,
+			PartitionID:  10,
+			State:        commonpb.SegmentState_Flushed,
+			Level:        datapb.SegmentLevel_L1,
+			Binlogs:      []*datapb.FieldBinlog{getFieldBinlogIDs(0, 11000)},
+			Statslogs:    []*datapb.FieldBinlog{getFieldBinlogIDs(0, 21000)},
+			// latest segment has 2 deltalogs, one submit for compaction, one is appended before compaction done
+			Deltalogs: []*datapb.FieldBinlog{getFieldBinlogIDs(0, 31000), getFieldBinlogIDs(0, 31001)},
+			NumOfRows: 2,
+		}},
+	} {
+		latestSegments.SetSegment(segID, segment)
 	}
 
 	mockChMgr := mocks2.NewChunkManager(suite.T())
@@ -895,7 +862,7 @@ func Test_meta_SetSegmentCompacting(t *testing.T) {
 			fields{
 				NewMetaMemoryKV(),
 				&SegmentsInfo{
-					map[int64]*SegmentInfo{
+					segments: map[int64]*SegmentInfo{
 						1: {
 							SegmentInfo: &datapb.SegmentInfo{
 								ID:    1,
@@ -904,6 +871,7 @@ func Test_meta_SetSegmentCompacting(t *testing.T) {
 							isCompacting: false,
 						},
 					},
+					compactionTo: make(map[int64]UniqueID),
 				},
 			},
 			args{
@@ -944,7 +912,7 @@ func Test_meta_SetSegmentImporting(t *testing.T) {
 			fields{
 				NewMetaMemoryKV(),
 				&SegmentsInfo{
-					map[int64]*SegmentInfo{
+					segments: map[int64]*SegmentInfo{
 						1: {
 							SegmentInfo: &datapb.SegmentInfo{
 								ID:          1,
@@ -975,30 +943,32 @@ func Test_meta_SetSegmentImporting(t *testing.T) {
 }
 
 func Test_meta_GetSegmentsOfCollection(t *testing.T) {
-	storedSegments := &SegmentsInfo{
-		map[int64]*SegmentInfo{
-			1: {
-				SegmentInfo: &datapb.SegmentInfo{
-					ID:           1,
-					CollectionID: 1,
-					State:        commonpb.SegmentState_Flushed,
-				},
-			},
-			2: {
-				SegmentInfo: &datapb.SegmentInfo{
-					ID:           2,
-					CollectionID: 1,
-					State:        commonpb.SegmentState_Growing,
-				},
-			},
-			3: {
-				SegmentInfo: &datapb.SegmentInfo{
-					ID:           3,
-					CollectionID: 2,
-					State:        commonpb.SegmentState_Flushed,
-				},
+	storedSegments := NewSegmentsInfo()
+
+	for segID, segment := range map[int64]*SegmentInfo{
+		1: {
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:           1,
+				CollectionID: 1,
+				State:        commonpb.SegmentState_Flushed,
 			},
 		},
+		2: {
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:           2,
+				CollectionID: 1,
+				State:        commonpb.SegmentState_Growing,
+			},
+		},
+		3: {
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:           3,
+				CollectionID: 2,
+				State:        commonpb.SegmentState_Flushed,
+			},
+		},
+	} {
+		storedSegments.SetSegment(segID, segment)
 	}
 	expectedSeg := map[int64]commonpb.SegmentState{1: commonpb.SegmentState_Flushed, 2: commonpb.SegmentState_Growing}
 	m := &meta{segments: storedSegments}

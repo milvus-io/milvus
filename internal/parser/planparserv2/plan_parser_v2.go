@@ -88,12 +88,7 @@ func ParseIdentifier(schema *typeutil.SchemaHelper, identifier string, checkFunc
 	return checkFunc(predicate.expr)
 }
 
-func CreateRetrievePlan(schemaPb *schemapb.CollectionSchema, exprStr string) (*planpb.PlanNode, error) {
-	schema, err := typeutil.CreateSchemaHelper(schemaPb)
-	if err != nil {
-		return nil, err
-	}
-
+func CreateRetrievePlan(schema *typeutil.SchemaHelper, exprStr string) (*planpb.PlanNode, error) {
 	expr, err := ParseExpr(schema, exprStr)
 	if err != nil {
 		return nil, err
@@ -109,12 +104,7 @@ func CreateRetrievePlan(schemaPb *schemapb.CollectionSchema, exprStr string) (*p
 	return planNode, nil
 }
 
-func CreateSearchPlan(schemaPb *schemapb.CollectionSchema, exprStr string, vectorFieldName string, queryInfo *planpb.QueryInfo) (*planpb.PlanNode, error) {
-	schema, err := typeutil.CreateSchemaHelper(schemaPb)
-	if err != nil {
-		return nil, err
-	}
-
+func CreateSearchPlan(schema *typeutil.SchemaHelper, exprStr string, vectorFieldName string, queryInfo *planpb.QueryInfo) (*planpb.PlanNode, error) {
 	parse := func() (*planpb.Expr, error) {
 		if len(exprStr) <= 0 {
 			return nil, nil

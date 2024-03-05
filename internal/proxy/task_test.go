@@ -184,11 +184,14 @@ func ConstructCollectionSchemaWithPartitionKey(collectionName string, fieldName2
 func constructCollectionSchemaByDataType(collectionName string, fieldName2DataType map[string]schemapb.DataType, primaryFieldName string, autoID bool) *schemapb.CollectionSchema {
 	fieldsSchema := make([]*schemapb.FieldSchema, 0)
 
+	idx := int64(100)
 	for fieldName, dataType := range fieldName2DataType {
 		fieldSchema := &schemapb.FieldSchema{
+			FieldID:  idx,
 			Name:     fieldName,
 			DataType: dataType,
 		}
+		idx++
 		if isVectorType(dataType) {
 			fieldSchema.TypeParams = []*commonpb.KeyValuePair{
 				{

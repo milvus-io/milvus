@@ -34,9 +34,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore"
-	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -61,12 +59,7 @@ type meta struct {
 	channelCPs     *typeutil.ConcurrentMap[string, *msgpb.MsgPosition] // vChannel -> channel checkpoint/see position
 	chunkManager   storage.ChunkManager
 
-	// collectionIndexes records which indexes are on the collection
-	// collID -> indexID -> index
-	indexes map[UniqueID]map[UniqueID]*model.Index
-	// buildID2Meta records the meta information of the segment
-	// buildID -> segmentIndex
-	buildID2SegmentIndex map[UniqueID]*model.SegmentIndex
+	indexMeta *indexMeta
 }
 
 // A local cache of segment metric update. Must call commit() to take effect.
@@ -87,18 +80,22 @@ type collectionInfo struct {
 
 // NewMeta creates meta from provided `kv.TxnKV`
 func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManager storage.ChunkManager) (*meta, error) {
-	mt := &meta{
-		ctx:                  ctx,
-		catalog:              catalog,
-		collections:          make(map[UniqueID]*collectionInfo),
-		segments:             NewSegmentsInfo(),
-		channelCPLocks:       lock.NewKeyLock[string](),
-		channelCPs:           typeutil.NewConcurrentMap[string, *msgpb.MsgPosition](),
-		chunkManager:         chunkManager,
-		indexes:              make(map[UniqueID]map[UniqueID]*model.Index),
-		buildID2SegmentIndex: make(map[UniqueID]*model.SegmentIndex),
+	indexMeta, err := newIndexMeta(ctx, catalog)
+	if err != nil {
+		return nil, err
 	}
-	err := mt.reloadFromKV()
+
+	mt := &meta{
+		ctx:            ctx,
+		catalog:        catalog,
+		collections:    make(map[UniqueID]*collectionInfo),
+		segments:       NewSegmentsInfo(),
+		channelCPLocks: lock.NewKeyLock[string](),
+		channelCPs:     typeutil.NewConcurrentMap[string, *msgpb.MsgPosition](),
+		indexMeta:      indexMeta,
+		chunkManager:   chunkManager,
+	}
+	err = mt.reloadFromKV()
 	if err != nil {
 		return nil, err
 	}
@@ -151,25 +148,6 @@ func (m *meta) reloadFromKV() error {
 		// for 2.2.2 issue https://github.com/milvus-io/milvus/issues/22181
 		pos.ChannelName = vChannel
 		m.channelCPs.Insert(vChannel, pos)
-	}
-
-	// load field indexes
-	fieldIndexes, err := m.catalog.ListIndexes(m.ctx)
-	if err != nil {
-		log.Error("DataCoord meta reloadFromKV load field indexes fail", zap.Error(err))
-		return err
-	}
-	for _, fieldIndex := range fieldIndexes {
-		m.updateCollectionIndex(fieldIndex)
-	}
-	segmentIndexes, err := m.catalog.ListSegmentIndexes(m.ctx)
-	if err != nil {
-		log.Error("DataCoord meta reloadFromKV load segment indexes fail", zap.Error(err))
-		return err
-	}
-	for _, segIdx := range segmentIndexes {
-		m.updateSegmentIndex(segIdx)
-		metrics.FlushedSegmentFileNum.WithLabelValues(metrics.IndexFileLabel).Observe(float64(len(segIdx.IndexFileKeys)))
 	}
 	log.Info("DataCoord meta reloadFromKV done", zap.Duration("duration", record.ElapseSpan()))
 	return nil
@@ -1051,33 +1029,6 @@ func (m *meta) SelectSegments(selector SegmentInfoSelector) []*SegmentInfo {
 	return ret
 }
 
-func (m *meta) SelectSegmentIndexes(selector SegmentInfoSelector) map[int64]*indexStats {
-	m.RLock()
-	defer m.RUnlock()
-	ret := make(map[int64]*indexStats)
-	for _, info := range m.segments.segments {
-		if selector(info) {
-			s := &indexStats{
-				ID:             info.GetID(),
-				numRows:        info.GetNumOfRows(),
-				compactionFrom: info.GetCompactionFrom(),
-				indexStates:    make(map[int64]*indexpb.SegmentIndexState),
-				state:          info.GetState(),
-				lastExpireTime: info.GetLastExpireTime(),
-			}
-			for indexID, segIndex := range info.segmentIndexes {
-				s.indexStates[indexID] = &indexpb.SegmentIndexState{
-					SegmentID:  segIndex.SegmentID,
-					State:      segIndex.IndexState,
-					FailReason: segIndex.FailReason,
-				}
-			}
-			ret[info.GetID()] = s
-		}
-	}
-	return ret
-}
-
 // AddAllocation add allocation in segment
 func (m *meta) AddAllocation(segmentID UniqueID, allocation *Allocation) error {
 	log.Debug("meta update: add allocation",
@@ -1332,18 +1283,12 @@ func (m *meta) HasSegments(segIDs []UniqueID) (bool, error) {
 	return true, nil
 }
 
-func (m *meta) GetCompactionTo(segmentID int64) *SegmentInfo {
+// GetCompactionTo returns the segment info of the segment to be compacted to.
+func (m *meta) GetCompactionTo(segmentID int64) (*SegmentInfo, bool) {
 	m.RLock()
 	defer m.RUnlock()
 
-	segments := m.segments.GetSegments()
-	for _, segment := range segments {
-		parents := typeutil.NewUniqueSet(segment.GetCompactionFrom()...)
-		if parents.Contain(segmentID) {
-			return segment
-		}
-	}
-	return nil
+	return m.segments.GetCompactionTo(segmentID)
 }
 
 // UpdateChannelCheckpoint updates and saves channel checkpoint.
