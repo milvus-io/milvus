@@ -200,14 +200,16 @@ func (suite *TaskSuite) TestSubscribeChannelTask() {
 
 	// Expect
 	suite.broker.EXPECT().DescribeCollection(mock.Anything, suite.collection).
-		Return(&milvuspb.DescribeCollectionResponse{
-			Schema: &schemapb.CollectionSchema{
-				Name: "TestSubscribeChannelTask",
-				Fields: []*schemapb.FieldSchema{
-					{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+		RunAndReturn(func(ctx context.Context, i int64) (*milvuspb.DescribeCollectionResponse, error) {
+			return &milvuspb.DescribeCollectionResponse{
+				Schema: &schemapb.CollectionSchema{
+					Name: "TestSubscribeChannelTask",
+					Fields: []*schemapb.FieldSchema{
+						{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+					},
 				},
-			},
-		}, nil)
+			}, nil
+		})
 	for channel, segment := range suite.growingSegments {
 		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).
 			Return(&datapb.GetSegmentInfoResponse{
@@ -389,14 +391,16 @@ func (suite *TaskSuite) TestLoadSegmentTask() {
 	}
 
 	// Expect
-	suite.broker.EXPECT().DescribeCollection(mock.Anything, suite.collection).Return(&milvuspb.DescribeCollectionResponse{
-		Schema: &schemapb.CollectionSchema{
-			Name: "TestLoadSegmentTask",
-			Fields: []*schemapb.FieldSchema{
-				{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+	suite.broker.EXPECT().DescribeCollection(mock.Anything, suite.collection).RunAndReturn(func(ctx context.Context, i int64) (*milvuspb.DescribeCollectionResponse, error) {
+		return &milvuspb.DescribeCollectionResponse{
+			Schema: &schemapb.CollectionSchema{
+				Name: "TestLoadSegmentTask",
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+				},
 			},
-		},
-	}, nil)
+		}, nil
+	})
 	suite.broker.EXPECT().DescribeIndex(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
 		{
 			CollectionID: suite.collection,
@@ -487,14 +491,16 @@ func (suite *TaskSuite) TestLoadSegmentTaskNotIndex() {
 	}
 
 	// Expect
-	suite.broker.EXPECT().DescribeCollection(mock.Anything, suite.collection).Return(&milvuspb.DescribeCollectionResponse{
-		Schema: &schemapb.CollectionSchema{
-			Name: "TestLoadSegmentTaskNotIndex",
-			Fields: []*schemapb.FieldSchema{
-				{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+	suite.broker.EXPECT().DescribeCollection(mock.Anything, suite.collection).RunAndReturn(func(ctx context.Context, i int64) (*milvuspb.DescribeCollectionResponse, error) {
+		return &milvuspb.DescribeCollectionResponse{
+			Schema: &schemapb.CollectionSchema{
+				Name: "TestLoadSegmentTaskNotIndex",
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+				},
 			},
-		},
-	}, nil)
+		}, nil
+	})
 	suite.broker.EXPECT().DescribeIndex(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
 		{
 			CollectionID: suite.collection,
@@ -585,14 +591,16 @@ func (suite *TaskSuite) TestLoadSegmentTaskFailed() {
 	}
 
 	// Expect
-	suite.broker.EXPECT().DescribeCollection(mock.Anything, suite.collection).Return(&milvuspb.DescribeCollectionResponse{
-		Schema: &schemapb.CollectionSchema{
-			Name: "TestLoadSegmentTaskNotIndex",
-			Fields: []*schemapb.FieldSchema{
-				{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+	suite.broker.EXPECT().DescribeCollection(mock.Anything, suite.collection).RunAndReturn(func(ctx context.Context, i int64) (*milvuspb.DescribeCollectionResponse, error) {
+		return &milvuspb.DescribeCollectionResponse{
+			Schema: &schemapb.CollectionSchema{
+				Name: "TestLoadSegmentTaskNotIndex",
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+				},
 			},
-		},
-	}, nil)
+		}, nil
+	})
 	for _, segment := range suite.loadSegments {
 		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).Return(&datapb.GetSegmentInfoResponse{
 			Infos: []*datapb.SegmentInfo{
@@ -785,14 +793,16 @@ func (suite *TaskSuite) TestMoveSegmentTask() {
 	}
 
 	// Expect
-	suite.broker.EXPECT().DescribeCollection(mock.Anything, suite.collection).Return(&milvuspb.DescribeCollectionResponse{
-		Schema: &schemapb.CollectionSchema{
-			Name: "TestMoveSegmentTask",
-			Fields: []*schemapb.FieldSchema{
-				{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+	suite.broker.EXPECT().DescribeCollection(mock.Anything, suite.collection).RunAndReturn(func(ctx context.Context, i int64) (*milvuspb.DescribeCollectionResponse, error) {
+		return &milvuspb.DescribeCollectionResponse{
+			Schema: &schemapb.CollectionSchema{
+				Name: "TestMoveSegmentTask",
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+				},
 			},
-		},
-	}, nil)
+		}, nil
+	})
 	suite.broker.EXPECT().DescribeIndex(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
 		{
 			CollectionID: suite.collection,
@@ -957,14 +967,16 @@ func (suite *TaskSuite) TestTaskCanceled() {
 	}
 
 	// Expect
-	suite.broker.EXPECT().DescribeCollection(mock.Anything, suite.collection).Return(&milvuspb.DescribeCollectionResponse{
-		Schema: &schemapb.CollectionSchema{
-			Name: "TestSubscribeChannelTask",
-			Fields: []*schemapb.FieldSchema{
-				{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+	suite.broker.EXPECT().DescribeCollection(mock.Anything, suite.collection).RunAndReturn(func(ctx context.Context, i int64) (*milvuspb.DescribeCollectionResponse, error) {
+		return &milvuspb.DescribeCollectionResponse{
+			Schema: &schemapb.CollectionSchema{
+				Name: "TestSubscribeChannelTask",
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+				},
 			},
-		},
-	}, nil)
+		}, nil
+	})
 	suite.broker.EXPECT().DescribeIndex(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
 		{
 			CollectionID: suite.collection,
@@ -1046,14 +1058,16 @@ func (suite *TaskSuite) TestSegmentTaskStale() {
 	}
 
 	// Expect
-	suite.broker.EXPECT().DescribeCollection(mock.Anything, suite.collection).Return(&milvuspb.DescribeCollectionResponse{
-		Schema: &schemapb.CollectionSchema{
-			Name: "TestSegmentTaskStale",
-			Fields: []*schemapb.FieldSchema{
-				{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+	suite.broker.EXPECT().DescribeCollection(mock.Anything, suite.collection).RunAndReturn(func(ctx context.Context, i int64) (*milvuspb.DescribeCollectionResponse, error) {
+		return &milvuspb.DescribeCollectionResponse{
+			Schema: &schemapb.CollectionSchema{
+				Name: "TestSegmentTaskStale",
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+				},
 			},
-		},
-	}, nil)
+		}, nil
+	})
 	suite.broker.EXPECT().DescribeIndex(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
 		{
 			CollectionID: suite.collection,
@@ -1226,14 +1240,16 @@ func (suite *TaskSuite) TestLeaderTaskSet() {
 	}
 
 	// Expect
-	suite.broker.EXPECT().DescribeCollection(mock.Anything, suite.collection).Return(&milvuspb.DescribeCollectionResponse{
-		Schema: &schemapb.CollectionSchema{
-			Name: "TestLoadSegmentTask",
-			Fields: []*schemapb.FieldSchema{
-				{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+	suite.broker.EXPECT().DescribeCollection(mock.Anything, suite.collection).RunAndReturn(func(ctx context.Context, i int64) (*milvuspb.DescribeCollectionResponse, error) {
+		return &milvuspb.DescribeCollectionResponse{
+			Schema: &schemapb.CollectionSchema{
+				Name: "TestLoadSegmentTask",
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+				},
 			},
-		},
-	}, nil)
+		}, nil
+	})
 	suite.broker.EXPECT().DescribeIndex(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
 		{
 			CollectionID: suite.collection,
