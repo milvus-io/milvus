@@ -5560,6 +5560,7 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 	defer func() {
 		metrics.ProxyFunctionCall.WithLabelValues(nodeID, method, metrics.TotalLabel).Inc()
 		if resp.GetStatus().GetCode() != 0 {
+			log.Warn("import failed", zap.String("err", resp.GetStatus().GetReason()))
 			metrics.ProxyFunctionCall.WithLabelValues(nodeID, method, metrics.FailLabel).Inc()
 		} else {
 			metrics.ProxyFunctionCall.WithLabelValues(nodeID, method, metrics.SuccessLabel).Inc()
@@ -5632,6 +5633,7 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 	}
 	resp, err = node.dataCoord.ImportV2(ctx, importRequest)
 	if err != nil {
+		log.Warn("import failed", zap.Error(err))
 		metrics.ProxyFunctionCall.WithLabelValues(nodeID, method, metrics.FailLabel).Inc()
 	}
 	metrics.ProxyReqLatency.WithLabelValues(nodeID, method).Observe(float64(tr.ElapseSpan().Milliseconds()))
@@ -5654,6 +5656,7 @@ func (node *Proxy) GetImportProgress(ctx context.Context, req *internalpb.GetImp
 	nodeID := fmt.Sprint(paramtable.GetNodeID())
 	resp, err := node.dataCoord.GetImportProgress(ctx, req)
 	if resp.GetStatus().GetCode() != 0 || err != nil {
+		log.Warn("get import progress failed", zap.String("reason", resp.GetStatus().GetReason()), zap.Error(err))
 		metrics.ProxyFunctionCall.WithLabelValues(nodeID, method, metrics.FailLabel).Inc()
 	} else {
 		metrics.ProxyFunctionCall.WithLabelValues(nodeID, method, metrics.SuccessLabel).Inc()
@@ -5684,16 +5687,23 @@ func (node *Proxy) ListImports(ctx context.Context, req *internalpb.ListImportsR
 	nodeID := fmt.Sprint(paramtable.GetNodeID())
 	metrics.ProxyFunctionCall.WithLabelValues(nodeID, method, metrics.TotalLabel).Inc()
 
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
-	if err != nil {
-		resp.Status = merr.Status(err)
-		metrics.ProxyFunctionCall.WithLabelValues(nodeID, method, metrics.FailLabel).Inc()
-		return resp, nil
+	var (
+		err          error
+		collectionID UniqueID
+	)
+	if req.GetCollectionName() != "" {
+		collectionID, err = globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
+		if err != nil {
+			resp.Status = merr.Status(err)
+			metrics.ProxyFunctionCall.WithLabelValues(nodeID, method, metrics.FailLabel).Inc()
+			return resp, nil
+		}
 	}
 	resp, err = node.dataCoord.ListImports(ctx, &internalpb.ListImportsRequestInternal{
 		CollectionID: collectionID,
 	})
 	if resp.GetStatus().GetCode() != 0 || err != nil {
+		log.Warn("list imports", zap.String("reason", resp.GetStatus().GetReason()), zap.Error(err))
 		metrics.ProxyFunctionCall.WithLabelValues(nodeID, method, metrics.FailLabel).Inc()
 	} else {
 		metrics.ProxyFunctionCall.WithLabelValues(nodeID, method, metrics.SuccessLabel).Inc()

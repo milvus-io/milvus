@@ -1871,7 +1871,13 @@ func (s *Server) ListImports(ctx context.Context, req *internalpb.ListImportsReq
 		Progresses: make([]int64, 0),
 	}
 
-	jobs := s.importMeta.GetJobBy(WithCollectionID(req.GetCollectionID()))
+	var jobs []ImportJob
+	if req.GetCollectionID() != 0 {
+		jobs = s.importMeta.GetJobBy(WithCollectionID(req.GetCollectionID()))
+	} else {
+		jobs = s.importMeta.GetJobBy()
+	}
+
 	for _, job := range jobs {
 		progress, state, reason := GetImportProgress(job.GetJobID(), s.importMeta, s.meta)
 		resp.JobIDs = append(resp.JobIDs, fmt.Sprintf("%d", job.GetJobID()))
