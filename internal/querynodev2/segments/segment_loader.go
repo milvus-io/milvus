@@ -970,11 +970,13 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 	diskUsage := uint64(localDiskUsage) + loader.committedResource.DiskSize
 
 	mmapEnabled := len(paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue()) > 0
+	memoryUsageFactor := paramtable.Get().QueryNodeCfg.LoadMemoryUsageFactor.GetAsFloat()
 	maxSegmentSize := uint64(0)
 	predictMemUsage := memUsage
 	predictDiskUsage := diskUsage
 	for _, loadInfo := range segmentLoadInfos {
-		oldUsedMem := predictMemUsage
+		var segmentMemorySize, segmentDiskSize uint64
+
 		vecFieldID2IndexInfo := make(map[int64]*querypb.FieldIndexInfo)
 		for _, fieldIndexInfo := range loadInfo.IndexInfos {
 			if fieldIndexInfo.EnableIndex {
@@ -997,20 +999,21 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 					return 0, 0, err
 				}
 				if mmapEnabled {
-					predictDiskUsage += neededMemSize + neededDiskSize
+					segmentDiskSize += neededMemSize + neededDiskSize
 				} else {
-					predictMemUsage += neededMemSize
-					predictDiskUsage += neededDiskSize
+					segmentMemorySize += neededMemSize
+					segmentDiskSize += neededDiskSize
 				}
 			} else {
+				binlogSize := uint64(getBinlogDataSize(fieldBinlog))
 				if mmapEnabled {
-					predictDiskUsage += uint64(getBinlogDataSize(fieldBinlog))
+					segmentDiskSize += binlogSize
 				} else {
-					predictMemUsage += uint64(getBinlogDataSize(fieldBinlog))
+					segmentMemorySize += binlogSize
 					enableBinlogIndex := paramtable.Get().QueryNodeCfg.EnableInterimSegmentIndex.GetAsBool()
 					if enableBinlogIndex {
 						buildBinlogIndexRate := paramtable.Get().QueryNodeCfg.InterimIndexMemExpandRate.GetAsFloat()
-						predictMemUsage += uint64(float32(getBinlogDataSize(fieldBinlog)) * float32(buildBinlogIndexRate))
+						segmentMemorySize += uint64(float64(binlogSize) * buildBinlogIndexRate)
 					}
 				}
 			}
@@ -1018,7 +1021,7 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 
 		// get size of stats data
 		for _, fieldBinlog := range loadInfo.Statslogs {
-			predictMemUsage += uint64(getBinlogDataSize(fieldBinlog))
+			segmentMemorySize += uint64(getBinlogDataSize(fieldBinlog))
 		}
 
 		// get size of delete data
@@ -1026,9 +1029,21 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 			predictMemUsage += uint64(getBinlogDataSize(fieldBinlog))
 		}
 
-		if predictMemUsage-oldUsedMem > maxSegmentSize {
-			maxSegmentSize = predictMemUsage - oldUsedMem
+		segmentMemorySize = uint64(float64(segmentMemorySize) * memoryUsageFactor)
+
+		if segmentMemorySize > maxSegmentSize {
+			maxSegmentSize = segmentMemorySize
 		}
+
+		predictMemUsage += segmentMemorySize
+		predictDiskUsage += segmentDiskSize
+
+		log.Debug("segment resource for loading",
+			zap.Int64("segmentID", loadInfo.GetSegmentID()),
+			zap.Float64("memoryUsage(MB)", toMB(segmentMemorySize)),
+			zap.Float64("diskUsage(MB)", toMB(segmentDiskSize)),
+			zap.Float64("memoryLoadFactor", memoryUsageFactor),
+		)
 	}
 
 	log.Info("predict memory and disk usage while loading (in MiB)",
