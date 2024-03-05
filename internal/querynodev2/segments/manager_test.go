@@ -47,15 +47,15 @@ func (s *ManagerSuite) SetupTest() {
 		segment, err := NewSegment(
 			context.Background(),
 			NewCollection(s.collectionIDs[i], schema, GenTestIndexMeta(s.collectionIDs[i], schema), querypb.LoadType_LoadCollection),
-			id,
-			s.partitionIDs[i],
-			s.collectionIDs[i],
-			s.channels[i],
 			s.types[i],
 			0,
-			nil,
-			nil,
-			s.levels[i],
+			&querypb.SegmentLoadInfo{
+				SegmentID:     id,
+				PartitionID:   s.partitionIDs[i],
+				CollectionID:  s.collectionIDs[i],
+				InsertChannel: s.channels[i],
+				Level:         s.levels[i],
+			},
 		)
 		s.Require().NoError(err)
 		s.segments = append(s.segments, segment)
