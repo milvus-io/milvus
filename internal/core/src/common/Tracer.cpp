@@ -12,6 +12,8 @@
 #include "Tracer.h"
 #include "log/Log.h"
 
+#include <iomanip>
+#include <iostream>
 #include <utility>
 
 #include "opentelemetry/exporters/jaeger/jaeger_exporter_factory.h"
@@ -149,20 +151,40 @@ EmptySpanID(const TraceContext* ctx) {
 }
 
 std::string
-GetTraceIDAsStr(const TraceContext* ctx) {
+BytesToHex(const uint8_t* input, const size_t len) {
+    std::stringstream ss;
+    ss << std::hex << std::setfill('0');
+    for (size_t i = 0; i < len; i++) {
+        ss << std::setw(2) << static_cast<int>(input[i]);
+    }
+    return ss.str();
+}
+
+std::string
+HexToString(const std::string& input) {
+    std::string output;
+    std::stringstream ss;
+    for (size_t i = 0; i < input.length(); i += 2) {
+        std::string byteString = input.substr(i, 2);
+        char byte = static_cast<char>(std::stoi(byteString, nullptr, 16));
+        output += byte;
+    }
+    return output;
+}
+
+std::string
+GetTraceIDAsHex(const TraceContext* ctx) {
     if (ctx != nullptr && !EmptyTraceID(ctx)) {
-        return std::string((char*)ctx->traceID,
-                           opentelemetry::trace::TraceId::kSize);
+        return BytesToHex(ctx->traceID, opentelemetry::trace::TraceId::kSize);
     } else {
         return std::string();
     }
 }
 
 std::string
-GetSpanIDAsStr(const TraceContext* ctx) {
+GetSpanIDAsHex(const TraceContext* ctx) {
     if (ctx != nullptr && !EmptySpanID(ctx)) {
-        return std::string((char*)ctx->spanID,
-                           opentelemetry::trace::SpanId::kSize);
+        return BytesToHex(ctx->spanID, opentelemetry::trace::SpanId::kSize);
     } else {
         return std::string();
     }

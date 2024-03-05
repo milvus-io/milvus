@@ -54,9 +54,9 @@ PrepareBFSearchParams(const SearchInfo& search_info) {
     // if (search_info.trace_ctx_.traceID != nullptr &&
     //     search_info.trace_ctx_.spanID != nullptr) {
     //     search_cfg[knowhere::meta::TRACE_ID] =
-    //         tracer::GetTraceIDAsStr(&search_info.trace_ctx_);
+    //         tracer::GetTraceIDAsHex(&search_info.trace_ctx_);
     //     search_cfg[knowhere::meta::SPAN_ID] =
-    //         tracer::GetSpanIDAsStr(&search_info.trace_ctx_);
+    //         tracer::GetSpanIDAsHex(&search_info.trace_ctx_);
     //     search_cfg[knowhere::meta::TRACE_FLAGS] =
     //         search_info.trace_ctx_.traceFlags;
     // }
