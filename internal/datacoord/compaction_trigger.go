@@ -425,6 +425,15 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) error {
 		return err
 	}
 
+	channelCheckpointOK := make(map[string]bool)
+	isChannelCPOK := func(channelName string) bool {
+		cached, ok := channelCheckpointOK[channelName]
+		if ok {
+			return cached
+		}
+		return t.isChannelCheckpointHealthy(channelName)
+	}
+
 	for _, group := range m {
 		log := log.With(zap.Int64("collectionID", group.collectionID),
 			zap.Int64("partitionID", group.partitionID),
@@ -433,9 +442,9 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) error {
 			log.Warn("compaction plan skipped due to handler full")
 			break
 		}
-		if !t.isChannelCheckpointHealthy(group.channelName) && !signal.isForce {
+		if !isChannelCPOK(group.channelName) && !signal.isForce {
 			log.Warn("compaction plan skipped due to channel checkpoint lag", zap.String("channel", signal.channel))
-			return merr.WrapErrServiceInternal("channel checkpoint lag", signal.channel)
+			continue
 		}
 
 		if Params.DataCoordCfg.IndexBasedCompaction.GetAsBool() {
