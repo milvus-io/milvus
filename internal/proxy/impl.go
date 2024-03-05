@@ -4200,127 +4200,112 @@ func (node *Proxy) checkHealthy() bool {
 	return code == commonpb.StateCode_Healthy
 }
 
+func convertToV2ImportRequest(req *milvuspb.ImportRequest) *internalpb.ImportRequest {
+	return &internalpb.ImportRequest{
+		DbName:         req.GetDbName(),
+		CollectionName: req.GetCollectionName(),
+		PartitionName:  req.GetPartitionName(),
+		Files: []*internalpb.ImportFile{{
+			Paths: req.GetFiles(),
+		}},
+		Options: req.GetOptions(),
+	}
+}
+
+func convertToV1ImportResponse(rsp *internalpb.ImportResponse) *milvuspb.ImportResponse {
+	jobID, err := strconv.ParseInt(rsp.GetJobID(), 10, 64)
+	if err != nil {
+		return &milvuspb.ImportResponse{
+			Status: merr.Status(merr.WrapErrImportFailed(err.Error())),
+		}
+	}
+	return &milvuspb.ImportResponse{
+		Status: rsp.GetStatus(),
+		Tasks:  []int64{jobID},
+	}
+}
+
+func convertToV2GetImportRequest(req *milvuspb.GetImportStateRequest) *internalpb.GetImportProgressRequest {
+	return &internalpb.GetImportProgressRequest{
+		JobID: strconv.FormatInt(req.GetTask(), 10),
+	}
+}
+
+func convertToV1GetImportResponse(rsp *internalpb.GetImportProgressResponse) *milvuspb.GetImportStateResponse {
+	convertState := func(state internalpb.ImportJobState) commonpb.ImportState {
+		switch state {
+		case internalpb.ImportJobState_Pending:
+			return commonpb.ImportState_ImportPending
+		case internalpb.ImportJobState_Importing:
+			return commonpb.ImportState_ImportStarted
+		case internalpb.ImportJobState_Completed:
+			return commonpb.ImportState_ImportCompleted
+		case internalpb.ImportJobState_Failed:
+			return commonpb.ImportState_ImportFailed
+		}
+		return commonpb.ImportState_ImportFailed
+	}
+	infos := make([]*commonpb.KeyValuePair, 0)
+	infos = append(infos, &commonpb.KeyValuePair{
+		Key:   importutil.FailedReason,
+		Value: rsp.GetReason(),
+	})
+	infos = append(infos, &commonpb.KeyValuePair{
+		Key:   importutil.ProgressPercent,
+		Value: strconv.FormatInt(rsp.GetProgress(), 10),
+	})
+	return &milvuspb.GetImportStateResponse{
+		Status:       rsp.GetStatus(),
+		State:        convertState(rsp.GetState()),
+		RowCount:     0,
+		IdList:       nil,
+		Infos:        infos,
+		Id:           0,
+		CollectionId: 0,
+		SegmentIds:   nil,
+		CreateTs:     0,
+	}
+}
+
+func convertToV2ListImportRequest(req *milvuspb.ListImportTasksRequest) *internalpb.ListImportsRequest {
+	return &internalpb.ListImportsRequest{
+		DbName:         req.GetDbName(),
+		CollectionName: req.GetCollectionName(),
+	}
+}
+
+func convertToV1ListImportResponse(rsp *internalpb.ListImportsResponse) *milvuspb.ListImportTasksResponse {
+	responses := make([]*milvuspb.GetImportStateResponse, 0, len(rsp.GetStates()))
+	for i := 0; i < len(rsp.GetStates()); i++ {
+		responses = append(responses, convertToV1GetImportResponse(&internalpb.GetImportProgressResponse{
+			Status:   rsp.GetStatus(),
+			State:    rsp.GetStates()[i],
+			Reason:   rsp.GetReasons()[i],
+			Progress: rsp.GetProgresses()[i],
+		}))
+	}
+	return &milvuspb.ListImportTasksResponse{
+		Status: rsp.GetStatus(),
+		Tasks:  responses,
+	}
+}
+
 // Import data files(json, numpy, etc.) on MinIO/S3 storage, read and parse them into sealed segments
 func (node *Proxy) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
-	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Import")
-	defer sp.End()
-
-	log := log.Ctx(ctx)
-
-	log.Info("received import request",
-		zap.String("collectionName", req.GetCollectionName()),
-		zap.String("partition name", req.GetPartitionName()),
-		zap.Strings("files", req.GetFiles()))
-	resp := &milvuspb.ImportResponse{
-		Status: merr.Success(),
-	}
-	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
-		resp.Status = merr.Status(err)
-		return resp, nil
-	}
-
-	err := importutil.ValidateOptions(req.GetOptions())
-	if err != nil {
-		log.Error("failed to execute import request",
-			zap.Error(err))
-		resp.Status = merr.Status(err)
-		return resp, nil
-	}
-
-	method := "Import"
-	tr := timerecord.NewTimeRecorder(method)
-	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
-		metrics.TotalLabel).Inc()
-
-	// Call rootCoord to finish import.
-	respFromRC, err := node.rootCoord.Import(ctx, req)
-	if err != nil {
-		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel).Inc()
-		log.Error("failed to execute bulk insert request",
-			zap.Error(err))
-		resp.Status = merr.Status(err)
-		return resp, nil
-	}
-
-	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.SuccessLabel).Inc()
-	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return respFromRC, nil
+	rsp, err := node.ImportV2(ctx, convertToV2ImportRequest(req))
+	return convertToV1ImportResponse(rsp), err
 }
 
 // GetImportState checks import task state from RootCoord.
 func (node *Proxy) GetImportState(ctx context.Context, req *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error) {
-	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetImportState")
-	defer sp.End()
-
-	log := log.Ctx(ctx)
-
-	log.Debug("received get import state request",
-		zap.Int64("taskID", req.GetTask()))
-	resp := &milvuspb.GetImportStateResponse{
-		Status: merr.Success(),
-	}
-	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
-		resp.Status = merr.Status(err)
-		return resp, nil
-	}
-	method := "GetImportState"
-	tr := timerecord.NewTimeRecorder(method)
-	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
-		metrics.TotalLabel).Inc()
-
-	resp, err := node.rootCoord.GetImportState(ctx, req)
-	if err != nil {
-		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel).Inc()
-		log.Error("failed to execute get import state",
-			zap.Error(err))
-		resp.Status = merr.Status(err)
-		return resp, nil
-	}
-
-	log.Debug("successfully received get import state response",
-		zap.Int64("taskID", req.GetTask()),
-		zap.Any("resp", resp), zap.Error(err))
-	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.SuccessLabel).Inc()
-	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return resp, nil
+	rsp, err := node.GetImportProgress(ctx, convertToV2GetImportRequest(req))
+	return convertToV1GetImportResponse(rsp), err
 }
 
 // ListImportTasks get id array of all import tasks from rootcoord
 func (node *Proxy) ListImportTasks(ctx context.Context, req *milvuspb.ListImportTasksRequest) (*milvuspb.ListImportTasksResponse, error) {
-	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-ListImportTasks")
-	defer sp.End()
-
-	log := log.Ctx(ctx)
-
-	log.Debug("received list import tasks request")
-	resp := &milvuspb.ListImportTasksResponse{
-		Status: merr.Success(),
-	}
-	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
-		resp.Status = merr.Status(err)
-		return resp, nil
-	}
-	method := "ListImportTasks"
-	tr := timerecord.NewTimeRecorder(method)
-	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
-		metrics.TotalLabel).Inc()
-	resp, err := node.rootCoord.ListImportTasks(ctx, req)
-	if err != nil {
-		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel).Inc()
-		log.Error("failed to execute list import tasks",
-			zap.Error(err))
-		resp.Status = merr.Status(err)
-		return resp, nil
-	}
-
-	log.Debug("successfully received list import tasks response",
-		zap.String("collection", req.CollectionName),
-		zap.Any("tasks", lo.SliceToMap(resp.GetTasks(), func(state *milvuspb.GetImportStateResponse) (int64, commonpb.ImportState) {
-			return state.GetId(), state.GetState()
-		})))
-	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.SuccessLabel).Inc()
-	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return resp, err
+	rsp, err := node.ListImports(ctx, convertToV2ListImportRequest(req))
+	return convertToV1ListImportResponse(rsp), err
 }
 
 // InvalidateCredentialCache invalidate the credential cache of specified username.
@@ -5557,13 +5542,30 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 		return &internalpb.ImportResponse{Status: merr.Status(err)}, nil
 	}
 	log := log.Ctx(ctx).With(
+		zap.String("collectionName", req.GetCollectionName()),
+		zap.String("partition name", req.GetPartitionName()),
+		zap.Any("files", req.GetFiles()),
 		zap.String("role", typeutil.ProxyRole),
 	)
-	method := "ImportV2"
-	log.Info(rpcReceived(method))
+
 	resp := &internalpb.ImportResponse{
 		Status: merr.Success(),
 	}
+
+	method := "ImportV2"
+	tr := timerecord.NewTimeRecorder(method)
+	log.Info(rpcReceived(method))
+
+	nodeID := fmt.Sprint(paramtable.GetNodeID())
+	defer func() {
+		metrics.ProxyFunctionCall.WithLabelValues(nodeID, method, metrics.TotalLabel).Inc()
+		if resp.GetStatus().GetCode() != 0 {
+			metrics.ProxyFunctionCall.WithLabelValues(nodeID, method, metrics.FailLabel).Inc()
+		} else {
+			metrics.ProxyFunctionCall.WithLabelValues(nodeID, method, metrics.SuccessLabel).Inc()
+		}
+	}()
+
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		resp.Status = merr.Status(err)
@@ -5628,7 +5630,12 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 		Files:        req.GetFiles(),
 		Options:      req.GetOptions(),
 	}
-	return node.dataCoord.ImportV2(ctx, importRequest)
+	resp, err = node.dataCoord.ImportV2(ctx, importRequest)
+	if err != nil {
+		metrics.ProxyFunctionCall.WithLabelValues(nodeID, method, metrics.FailLabel).Inc()
+	}
+	metrics.ProxyReqLatency.WithLabelValues(nodeID, method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return resp, err
 }
 
 func (node *Proxy) GetImportProgress(ctx context.Context, req *internalpb.GetImportProgressRequest) (*internalpb.GetImportProgressResponse, error) {
@@ -5637,7 +5644,23 @@ func (node *Proxy) GetImportProgress(ctx context.Context, req *internalpb.GetImp
 			Status: merr.Status(err),
 		}, nil
 	}
-	return node.dataCoord.GetImportProgress(ctx, req)
+	log := log.Ctx(ctx).With(
+		zap.String("jobID", req.GetJobID()),
+	)
+	method := "GetImportProgress"
+	tr := timerecord.NewTimeRecorder(method)
+	log.Info(rpcReceived(method))
+
+	nodeID := fmt.Sprint(paramtable.GetNodeID())
+	resp, err := node.dataCoord.GetImportProgress(ctx, req)
+	if resp.GetStatus().GetCode() != 0 || err != nil {
+		metrics.ProxyFunctionCall.WithLabelValues(nodeID, method, metrics.FailLabel).Inc()
+	} else {
+		metrics.ProxyFunctionCall.WithLabelValues(nodeID, method, metrics.SuccessLabel).Inc()
+	}
+	metrics.ProxyFunctionCall.WithLabelValues(nodeID, method, metrics.TotalLabel).Inc()
+	metrics.ProxyReqLatency.WithLabelValues(nodeID, method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return resp, err
 }
 
 func (node *Proxy) ListImports(ctx context.Context, req *internalpb.ListImportsRequest) (*internalpb.ListImportsResponse, error) {
@@ -5649,12 +5672,32 @@ func (node *Proxy) ListImports(ctx context.Context, req *internalpb.ListImportsR
 	resp := &internalpb.ListImportsResponse{
 		Status: merr.Success(),
 	}
+
+	log := log.Ctx(ctx).With(
+		zap.String("dbName", req.GetDbName()),
+		zap.String("collectionName", req.GetCollectionName()),
+	)
+	method := "ListImports"
+	tr := timerecord.NewTimeRecorder(method)
+	log.Info(rpcReceived(method))
+
+	nodeID := fmt.Sprint(paramtable.GetNodeID())
+	metrics.ProxyFunctionCall.WithLabelValues(nodeID, method, metrics.TotalLabel).Inc()
+
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		resp.Status = merr.Status(err)
+		metrics.ProxyFunctionCall.WithLabelValues(nodeID, method, metrics.FailLabel).Inc()
 		return resp, nil
 	}
-	return node.dataCoord.ListImports(ctx, &internalpb.ListImportsRequestInternal{
+	resp, err = node.dataCoord.ListImports(ctx, &internalpb.ListImportsRequestInternal{
 		CollectionID: collectionID,
 	})
+	if resp.GetStatus().GetCode() != 0 || err != nil {
+		metrics.ProxyFunctionCall.WithLabelValues(nodeID, method, metrics.FailLabel).Inc()
+	} else {
+		metrics.ProxyFunctionCall.WithLabelValues(nodeID, method, metrics.SuccessLabel).Inc()
+	}
+	metrics.ProxyReqLatency.WithLabelValues(nodeID, method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return resp, nil
 }
