@@ -397,6 +397,29 @@ class TestAliasOperation(TestcaseBase):
 
         assert res is True
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_enable_mmap_by_alias(self):
+        """
+        target: enable or disable mmap by alias
+        method: enable or disable mmap by alias
+        expected: successfully enable mmap
+        """
+        self._connect()
+        c_name = cf.gen_unique_str("collection")
+        collection_w, _ = self.collection_wrap.init_collection(c_name, schema=default_schema)
+        alias_name = cf.gen_unique_str(prefix)
+        self.utility_wrap.create_alias(collection_w.name, alias_name)
+        collection_alias, _ = self.collection_wrap.init_collection(name=alias_name,
+                                                                   check_task=CheckTasks.check_collection_property,
+                                                                   check_items={exp_name: alias_name,
+                                                                                exp_schema: default_schema})
+        collection_alias.set_properties({'mmap.enabled': True})
+        pro = collection_w.describe().get("properties")
+        assert pro["mmap.enabled"] == 'True'
+        collection_w.set_properties({'mmap.enabled': False})
+        pro = collection_alias.describe().get("properties")
+        assert pro["mmap.enabled"] == 'False'
+
 
 class TestAliasOperationInvalid(TestcaseBase):
     """ Negative test cases of alias interface operations"""

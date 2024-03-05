@@ -114,6 +114,7 @@ type schemaInfo struct {
 	fieldMap             *typeutil.ConcurrentMap[string, int64] // field name to id mapping
 	hasPartitionKeyField bool
 	pkField              *schemapb.FieldSchema
+	schemaHelper         *typeutil.SchemaHelper
 }
 
 func newSchemaInfo(schema *schemapb.CollectionSchema) *schemaInfo {
@@ -129,11 +130,14 @@ func newSchemaInfo(schema *schemapb.CollectionSchema) *schemaInfo {
 			pkField = field
 		}
 	}
+	// schema shall be verified before
+	schemaHelper, _ := typeutil.CreateSchemaHelper(schema)
 	return &schemaInfo{
 		CollectionSchema:     schema,
 		fieldMap:             fieldMap,
 		hasPartitionKeyField: hasPartitionkey,
 		pkField:              pkField,
+		schemaHelper:         schemaHelper,
 	}
 }
 

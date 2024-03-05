@@ -527,53 +527,56 @@ func TestServer_AlterIndex(t *testing.T) {
 		meta: &meta{
 			catalog:   catalog,
 			indexMeta: indexMeta,
-			segments: &SegmentsInfo{map[UniqueID]*SegmentInfo{
-				invalidSegID: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:             invalidSegID,
-						CollectionID:   collID,
-						PartitionID:    partID,
-						NumOfRows:      10000,
-						State:          commonpb.SegmentState_Flushed,
-						MaxRowNum:      65536,
-						LastExpireTime: createTS,
-						StartPosition: &msgpb.MsgPosition{
-							// timesamp > index start time, will be filtered out
-							Timestamp: createTS + 1,
+			segments: &SegmentsInfo{
+				compactionTo: make(map[int64]int64),
+				segments: map[UniqueID]*SegmentInfo{
+					invalidSegID: {
+						SegmentInfo: &datapb.SegmentInfo{
+							ID:             invalidSegID,
+							CollectionID:   collID,
+							PartitionID:    partID,
+							NumOfRows:      10000,
+							State:          commonpb.SegmentState_Flushed,
+							MaxRowNum:      65536,
+							LastExpireTime: createTS,
+							StartPosition: &msgpb.MsgPosition{
+								// timesamp > index start time, will be filtered out
+								Timestamp: createTS + 1,
+							},
+						},
+					},
+					segID: {
+						SegmentInfo: &datapb.SegmentInfo{
+							ID:             segID,
+							CollectionID:   collID,
+							PartitionID:    partID,
+							NumOfRows:      10000,
+							State:          commonpb.SegmentState_Flushed,
+							MaxRowNum:      65536,
+							LastExpireTime: createTS,
+							StartPosition: &msgpb.MsgPosition{
+								Timestamp: createTS,
+							},
+							CreatedByCompaction: true,
+							CompactionFrom:      []int64{segID - 1},
+						},
+					},
+					segID - 1: {
+						SegmentInfo: &datapb.SegmentInfo{
+							ID:             segID,
+							CollectionID:   collID,
+							PartitionID:    partID,
+							NumOfRows:      10000,
+							State:          commonpb.SegmentState_Dropped,
+							MaxRowNum:      65536,
+							LastExpireTime: createTS,
+							StartPosition: &msgpb.MsgPosition{
+								Timestamp: createTS,
+							},
 						},
 					},
 				},
-				segID: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:             segID,
-						CollectionID:   collID,
-						PartitionID:    partID,
-						NumOfRows:      10000,
-						State:          commonpb.SegmentState_Flushed,
-						MaxRowNum:      65536,
-						LastExpireTime: createTS,
-						StartPosition: &msgpb.MsgPosition{
-							Timestamp: createTS,
-						},
-						CreatedByCompaction: true,
-						CompactionFrom:      []int64{segID - 1},
-					},
-				},
-				segID - 1: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:             segID,
-						CollectionID:   collID,
-						PartitionID:    partID,
-						NumOfRows:      10000,
-						State:          commonpb.SegmentState_Dropped,
-						MaxRowNum:      65536,
-						LastExpireTime: createTS,
-						StartPosition: &msgpb.MsgPosition{
-							Timestamp: createTS,
-						},
-					},
-				},
-			}},
+			},
 		},
 		allocator:       newMockAllocator(),
 		notifyIndexChan: make(chan UniqueID, 1),
@@ -694,28 +697,31 @@ func TestServer_GetIndexState(t *testing.T) {
 			segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{},
 		},
 
-		segments: &SegmentsInfo{map[UniqueID]*SegmentInfo{
-			segID: {
-				SegmentInfo: &datapb.SegmentInfo{
-					ID:             segID,
-					CollectionID:   collID,
-					PartitionID:    partID,
-					InsertChannel:  "",
-					NumOfRows:      10250,
-					State:          commonpb.SegmentState_Flushed,
-					MaxRowNum:      65536,
-					LastExpireTime: createTS - 1,
-					StartPosition: &msgpb.MsgPosition{
-						Timestamp: createTS - 1,
+		segments: &SegmentsInfo{
+			compactionTo: make(map[int64]int64),
+			segments: map[UniqueID]*SegmentInfo{
+				segID: {
+					SegmentInfo: &datapb.SegmentInfo{
+						ID:             segID,
+						CollectionID:   collID,
+						PartitionID:    partID,
+						InsertChannel:  "",
+						NumOfRows:      10250,
+						State:          commonpb.SegmentState_Flushed,
+						MaxRowNum:      65536,
+						LastExpireTime: createTS - 1,
+						StartPosition: &msgpb.MsgPosition{
+							Timestamp: createTS - 1,
+						},
 					},
+					currRows:        0,
+					allocations:     nil,
+					lastFlushTime:   time.Time{},
+					isCompacting:    false,
+					lastWrittenTime: time.Time{},
 				},
-				currRows:        0,
-				allocations:     nil,
-				lastFlushTime:   time.Time{},
-				isCompacting:    false,
-				lastWrittenTime: time.Time{},
 			},
-		}},
+		},
 	}
 
 	t.Run("index state is unissued", func(t *testing.T) {
@@ -768,28 +774,31 @@ func TestServer_GetIndexState(t *testing.T) {
 			},
 		},
 
-		segments: &SegmentsInfo{map[UniqueID]*SegmentInfo{
-			segID: {
-				SegmentInfo: &datapb.SegmentInfo{
-					ID:             segID,
-					CollectionID:   collID,
-					PartitionID:    partID,
-					InsertChannel:  "",
-					NumOfRows:      10250,
-					State:          commonpb.SegmentState_Flushed,
-					MaxRowNum:      65536,
-					LastExpireTime: createTS - 1,
-					StartPosition: &msgpb.MsgPosition{
-						Timestamp: createTS - 1,
+		segments: &SegmentsInfo{
+			compactionTo: make(map[int64]int64),
+			segments: map[UniqueID]*SegmentInfo{
+				segID: {
+					SegmentInfo: &datapb.SegmentInfo{
+						ID:             segID,
+						CollectionID:   collID,
+						PartitionID:    partID,
+						InsertChannel:  "",
+						NumOfRows:      10250,
+						State:          commonpb.SegmentState_Flushed,
+						MaxRowNum:      65536,
+						LastExpireTime: createTS - 1,
+						StartPosition: &msgpb.MsgPosition{
+							Timestamp: createTS - 1,
+						},
 					},
+					currRows:        0,
+					allocations:     nil,
+					lastFlushTime:   time.Time{},
+					isCompacting:    false,
+					lastWrittenTime: time.Time{},
 				},
-				currRows:        0,
-				allocations:     nil,
-				lastFlushTime:   time.Time{},
-				isCompacting:    false,
-				lastWrittenTime: time.Time{},
 			},
-		}},
+		},
 	}
 
 	t.Run("index state is none", func(t *testing.T) {
@@ -853,7 +862,7 @@ func TestServer_GetSegmentIndexState(t *testing.T) {
 		meta: &meta{
 			catalog:   indexMeta.catalog,
 			indexMeta: indexMeta,
-			segments:  &SegmentsInfo{map[UniqueID]*SegmentInfo{}},
+			segments:  NewSegmentsInfo(),
 		},
 		allocator:       newMockAllocator(),
 		notifyIndexChan: make(chan UniqueID, 1),
@@ -976,7 +985,7 @@ func TestServer_GetIndexBuildProgress(t *testing.T) {
 		meta: &meta{
 			catalog:   &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)},
 			indexMeta: newSegmentIndexMeta(&datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)}),
-			segments:  &SegmentsInfo{map[UniqueID]*SegmentInfo{}},
+			segments:  NewSegmentsInfo(),
 		},
 		allocator:       newMockAllocator(),
 		notifyIndexChan: make(chan UniqueID, 1),
@@ -1412,53 +1421,56 @@ func TestServer_DescribeIndex(t *testing.T) {
 				},
 			},
 
-			segments: &SegmentsInfo{map[UniqueID]*SegmentInfo{
-				invalidSegID: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:             invalidSegID,
-						CollectionID:   collID,
-						PartitionID:    partID,
-						NumOfRows:      10000,
-						State:          commonpb.SegmentState_Flushed,
-						MaxRowNum:      65536,
-						LastExpireTime: createTS,
-						StartPosition: &msgpb.MsgPosition{
-							// timesamp > index start time, will be filtered out
-							Timestamp: createTS + 1,
+			segments: &SegmentsInfo{
+				compactionTo: make(map[int64]int64),
+				segments: map[UniqueID]*SegmentInfo{
+					invalidSegID: {
+						SegmentInfo: &datapb.SegmentInfo{
+							ID:             invalidSegID,
+							CollectionID:   collID,
+							PartitionID:    partID,
+							NumOfRows:      10000,
+							State:          commonpb.SegmentState_Flushed,
+							MaxRowNum:      65536,
+							LastExpireTime: createTS,
+							StartPosition: &msgpb.MsgPosition{
+								// timesamp > index start time, will be filtered out
+								Timestamp: createTS + 1,
+							},
+						},
+					},
+					segID: {
+						SegmentInfo: &datapb.SegmentInfo{
+							ID:             segID,
+							CollectionID:   collID,
+							PartitionID:    partID,
+							NumOfRows:      10000,
+							State:          commonpb.SegmentState_Flushed,
+							MaxRowNum:      65536,
+							LastExpireTime: createTS,
+							StartPosition: &msgpb.MsgPosition{
+								Timestamp: createTS,
+							},
+							CreatedByCompaction: true,
+							CompactionFrom:      []int64{segID - 1},
+						},
+					},
+					segID - 1: {
+						SegmentInfo: &datapb.SegmentInfo{
+							ID:             segID - 1,
+							CollectionID:   collID,
+							PartitionID:    partID,
+							NumOfRows:      10000,
+							State:          commonpb.SegmentState_Dropped,
+							MaxRowNum:      65536,
+							LastExpireTime: createTS,
+							StartPosition: &msgpb.MsgPosition{
+								Timestamp: createTS,
+							},
 						},
 					},
 				},
-				segID: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:             segID,
-						CollectionID:   collID,
-						PartitionID:    partID,
-						NumOfRows:      10000,
-						State:          commonpb.SegmentState_Flushed,
-						MaxRowNum:      65536,
-						LastExpireTime: createTS,
-						StartPosition: &msgpb.MsgPosition{
-							Timestamp: createTS,
-						},
-						CreatedByCompaction: true,
-						CompactionFrom:      []int64{segID - 1},
-					},
-				},
-				segID - 1: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:             segID - 1,
-						CollectionID:   collID,
-						PartitionID:    partID,
-						NumOfRows:      10000,
-						State:          commonpb.SegmentState_Dropped,
-						MaxRowNum:      65536,
-						LastExpireTime: createTS,
-						StartPosition: &msgpb.MsgPosition{
-							Timestamp: createTS,
-						},
-					},
-				},
-			}},
+			},
 		},
 		allocator:       newMockAllocator(),
 		notifyIndexChan: make(chan UniqueID, 1),
@@ -1716,37 +1728,40 @@ func TestServer_GetIndexStatistics(t *testing.T) {
 				},
 			},
 
-			segments: &SegmentsInfo{map[UniqueID]*SegmentInfo{
-				invalidSegID: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:             segID,
-						CollectionID:   collID,
-						PartitionID:    partID,
-						NumOfRows:      10000,
-						State:          commonpb.SegmentState_Flushed,
-						MaxRowNum:      65536,
-						LastExpireTime: createTS,
-						StartPosition: &msgpb.MsgPosition{
-							// timesamp > index start time, will be filtered out
-							Timestamp: createTS + 1,
+			segments: &SegmentsInfo{
+				compactionTo: make(map[int64]int64),
+				segments: map[UniqueID]*SegmentInfo{
+					invalidSegID: {
+						SegmentInfo: &datapb.SegmentInfo{
+							ID:             segID,
+							CollectionID:   collID,
+							PartitionID:    partID,
+							NumOfRows:      10000,
+							State:          commonpb.SegmentState_Flushed,
+							MaxRowNum:      65536,
+							LastExpireTime: createTS,
+							StartPosition: &msgpb.MsgPosition{
+								// timesamp > index start time, will be filtered out
+								Timestamp: createTS + 1,
+							},
+						},
+					},
+					segID: {
+						SegmentInfo: &datapb.SegmentInfo{
+							ID:             segID,
+							CollectionID:   collID,
+							PartitionID:    partID,
+							NumOfRows:      10000,
+							State:          commonpb.SegmentState_Flushed,
+							MaxRowNum:      65536,
+							LastExpireTime: createTS,
+							StartPosition: &msgpb.MsgPosition{
+								Timestamp: createTS,
+							},
 						},
 					},
 				},
-				segID: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:             segID,
-						CollectionID:   collID,
-						PartitionID:    partID,
-						NumOfRows:      10000,
-						State:          commonpb.SegmentState_Flushed,
-						MaxRowNum:      65536,
-						LastExpireTime: createTS,
-						StartPosition: &msgpb.MsgPosition{
-							Timestamp: createTS,
-						},
-					},
-				},
-			}},
+			},
 		},
 		allocator:       newMockAllocator(),
 		notifyIndexChan: make(chan UniqueID, 1),
@@ -1900,19 +1915,22 @@ func TestServer_DropIndex(t *testing.T) {
 				segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{},
 			},
 
-			segments: &SegmentsInfo{map[UniqueID]*SegmentInfo{
-				segID: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:             segID,
-						CollectionID:   collID,
-						PartitionID:    partID,
-						NumOfRows:      10000,
-						State:          commonpb.SegmentState_Flushed,
-						MaxRowNum:      65536,
-						LastExpireTime: createTS,
+			segments: &SegmentsInfo{
+				compactionTo: make(map[int64]int64),
+				segments: map[UniqueID]*SegmentInfo{
+					segID: {
+						SegmentInfo: &datapb.SegmentInfo{
+							ID:             segID,
+							CollectionID:   collID,
+							PartitionID:    partID,
+							NumOfRows:      10000,
+							State:          commonpb.SegmentState_Flushed,
+							MaxRowNum:      65536,
+							LastExpireTime: createTS,
+						},
 					},
 				},
-			}},
+			},
 		},
 		allocator:       newMockAllocator(),
 		notifyIndexChan: make(chan UniqueID, 1),
@@ -2064,7 +2082,8 @@ func TestServer_GetIndexInfos(t *testing.T) {
 			},
 
 			segments: &SegmentsInfo{
-				map[UniqueID]*SegmentInfo{
+				compactionTo: make(map[int64]int64),
+				segments: map[UniqueID]*SegmentInfo{
 					segID: {
 						SegmentInfo: &datapb.SegmentInfo{
 							ID:             segID,

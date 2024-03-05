@@ -165,33 +165,34 @@ func (suite *MetaBasicSuite) TestCollection() {
 }
 
 func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
-	latestSegments := &SegmentsInfo{
-		map[UniqueID]*SegmentInfo{
-			1: {SegmentInfo: &datapb.SegmentInfo{
-				ID:           1,
-				CollectionID: 100,
-				PartitionID:  10,
-				State:        commonpb.SegmentState_Flushed,
-				Level:        datapb.SegmentLevel_L1,
-				Binlogs:      []*datapb.FieldBinlog{getFieldBinlogIDs(0, 10000, 10001)},
-				Statslogs:    []*datapb.FieldBinlog{getFieldBinlogIDs(0, 20000, 20001)},
-				// latest segment has 2 deltalogs, one submit for compaction, one is appended before compaction done
-				Deltalogs: []*datapb.FieldBinlog{getFieldBinlogIDs(0, 30000), getFieldBinlogIDs(0, 30001)},
-				NumOfRows: 2,
-			}},
-			2: {SegmentInfo: &datapb.SegmentInfo{
-				ID:           2,
-				CollectionID: 100,
-				PartitionID:  10,
-				State:        commonpb.SegmentState_Flushed,
-				Level:        datapb.SegmentLevel_L1,
-				Binlogs:      []*datapb.FieldBinlog{getFieldBinlogIDs(0, 11000)},
-				Statslogs:    []*datapb.FieldBinlog{getFieldBinlogIDs(0, 21000)},
-				// latest segment has 2 deltalogs, one submit for compaction, one is appended before compaction done
-				Deltalogs: []*datapb.FieldBinlog{getFieldBinlogIDs(0, 31000), getFieldBinlogIDs(0, 31001)},
-				NumOfRows: 2,
-			}},
-		},
+	latestSegments := NewSegmentsInfo()
+	for segID, segment := range map[UniqueID]*SegmentInfo{
+		1: {SegmentInfo: &datapb.SegmentInfo{
+			ID:           1,
+			CollectionID: 100,
+			PartitionID:  10,
+			State:        commonpb.SegmentState_Flushed,
+			Level:        datapb.SegmentLevel_L1,
+			Binlogs:      []*datapb.FieldBinlog{getFieldBinlogIDs(0, 10000, 10001)},
+			Statslogs:    []*datapb.FieldBinlog{getFieldBinlogIDs(0, 20000, 20001)},
+			// latest segment has 2 deltalogs, one submit for compaction, one is appended before compaction done
+			Deltalogs: []*datapb.FieldBinlog{getFieldBinlogIDs(0, 30000), getFieldBinlogIDs(0, 30001)},
+			NumOfRows: 2,
+		}},
+		2: {SegmentInfo: &datapb.SegmentInfo{
+			ID:           2,
+			CollectionID: 100,
+			PartitionID:  10,
+			State:        commonpb.SegmentState_Flushed,
+			Level:        datapb.SegmentLevel_L1,
+			Binlogs:      []*datapb.FieldBinlog{getFieldBinlogIDs(0, 11000)},
+			Statslogs:    []*datapb.FieldBinlog{getFieldBinlogIDs(0, 21000)},
+			// latest segment has 2 deltalogs, one submit for compaction, one is appended before compaction done
+			Deltalogs: []*datapb.FieldBinlog{getFieldBinlogIDs(0, 31000), getFieldBinlogIDs(0, 31001)},
+			NumOfRows: 2,
+		}},
+	} {
+		latestSegments.SetSegment(segID, segment)
 	}
 
 	mockChMgr := mocks2.NewChunkManager(suite.T())
@@ -861,7 +862,7 @@ func Test_meta_SetSegmentCompacting(t *testing.T) {
 			fields{
 				NewMetaMemoryKV(),
 				&SegmentsInfo{
-					map[int64]*SegmentInfo{
+					segments: map[int64]*SegmentInfo{
 						1: {
 							SegmentInfo: &datapb.SegmentInfo{
 								ID:    1,
@@ -870,6 +871,7 @@ func Test_meta_SetSegmentCompacting(t *testing.T) {
 							isCompacting: false,
 						},
 					},
+					compactionTo: make(map[int64]UniqueID),
 				},
 			},
 			args{
@@ -910,7 +912,7 @@ func Test_meta_SetSegmentImporting(t *testing.T) {
 			fields{
 				NewMetaMemoryKV(),
 				&SegmentsInfo{
-					map[int64]*SegmentInfo{
+					segments: map[int64]*SegmentInfo{
 						1: {
 							SegmentInfo: &datapb.SegmentInfo{
 								ID:          1,
@@ -941,30 +943,32 @@ func Test_meta_SetSegmentImporting(t *testing.T) {
 }
 
 func Test_meta_GetSegmentsOfCollection(t *testing.T) {
-	storedSegments := &SegmentsInfo{
-		map[int64]*SegmentInfo{
-			1: {
-				SegmentInfo: &datapb.SegmentInfo{
-					ID:           1,
-					CollectionID: 1,
-					State:        commonpb.SegmentState_Flushed,
-				},
-			},
-			2: {
-				SegmentInfo: &datapb.SegmentInfo{
-					ID:           2,
-					CollectionID: 1,
-					State:        commonpb.SegmentState_Growing,
-				},
-			},
-			3: {
-				SegmentInfo: &datapb.SegmentInfo{
-					ID:           3,
-					CollectionID: 2,
-					State:        commonpb.SegmentState_Flushed,
-				},
+	storedSegments := NewSegmentsInfo()
+
+	for segID, segment := range map[int64]*SegmentInfo{
+		1: {
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:           1,
+				CollectionID: 1,
+				State:        commonpb.SegmentState_Flushed,
 			},
 		},
+		2: {
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:           2,
+				CollectionID: 1,
+				State:        commonpb.SegmentState_Growing,
+			},
+		},
+		3: {
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:           3,
+				CollectionID: 2,
+				State:        commonpb.SegmentState_Flushed,
+			},
+		},
+	} {
+		storedSegments.SetSegment(segID, segment)
 	}
 	expectedSeg := map[int64]commonpb.SegmentState{1: commonpb.SegmentState_Flushed, 2: commonpb.SegmentState_Growing}
 	m := &meta{segments: storedSegments}
