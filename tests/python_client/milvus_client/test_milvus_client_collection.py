@@ -120,7 +120,7 @@ class TestMilvusClientCollectionInvalid(TestcaseBase):
         client = self._connect(enable_milvus_client_api=True)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
-        error = {ct.err_code: 65535, ct.err_msg: f"invalid dimension: {dim}. should be in range 1 ~ 32768"}
+        error = {ct.err_code: 65535, ct.err_msg: f"invalid dimension: {dim}. should be in range 2 ~ 32768"}
         client_w.create_collection(client, collection_name, dim,
                                    check_task=CheckTasks.err_res, check_items=error)
         client_w.drop_collection(client, collection_name)

@@ -311,11 +311,21 @@ func validateDimension(field *schemapb.FieldSchema) error {
 		return errors.New("dimension is not defined in field type params, check type param `dim` for vector field")
 	}
 
-	if dim <= 0 || dim > Params.ProxyCfg.MaxDimension.GetAsInt64() {
-		return fmt.Errorf("invalid dimension: %d. should be in range 1 ~ %d", dim, Params.ProxyCfg.MaxDimension.GetAsInt())
+	if dim <= 1 {
+		return fmt.Errorf("invalid dimension: %d. should be in range 2 ~ %d", dim, Params.ProxyCfg.MaxDimension.GetAsInt())
 	}
-	if field.DataType == schemapb.DataType_BinaryVector && dim%8 != 0 {
-		return fmt.Errorf("invalid dimension: %d. should be multiple of 8. ", dim)
+
+	if field.DataType != schemapb.DataType_BinaryVector {
+		if dim > Params.ProxyCfg.MaxDimension.GetAsInt64() {
+			return fmt.Errorf("invalid dimension: %d. float vector dimension should be in range 2 ~ %d", dim, Params.ProxyCfg.MaxDimension.GetAsInt())
+		}
+	} else {
+		if dim%8 != 0 {
+			return fmt.Errorf("invalid dimension: %d. binary vector dimension should be multiple of 8. ", dim)
+		}
+		if dim > Params.ProxyCfg.MaxDimension.GetAsInt64()*8 {
+			return fmt.Errorf("invalid dimension: %d. binary vector dimension should be in range 2 ~ %d", dim, Params.ProxyCfg.MaxDimension.GetAsInt()*8)
+		}
 	}
 	return nil
 }

@@ -49,9 +49,6 @@ func Test_raftIVFPQChecker_CheckTrain(t *testing.T) {
 	invalidParamsIVF := copyParams(validParams)
 	invalidParamsIVF[IVFM] = "NAN"
 
-	invalidParamsM := copyParams(validParams)
-	invalidParamsM[DIM] = strconv.Itoa(65536)
-
 	validParamsMzero := copyParams(validParams)
 	validParamsMzero[IVFM] = "0"
 
@@ -135,7 +132,6 @@ func Test_raftIVFPQChecker_CheckTrain(t *testing.T) {
 		{invalidParamsNbits, false},
 		{invalidParamsWithoutIVF, false},
 		{invalidParamsIVF, false},
-		{invalidParamsM, false},
 		{validParamsMzero, true},
 		{p1, true},
 		{p2, true},
