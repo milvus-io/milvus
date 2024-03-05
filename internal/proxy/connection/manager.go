@@ -64,9 +64,13 @@ func (s *connectionManager) purgeIfNumOfClientsExceed() {
 		return
 	}
 
-	log.Info("number of client infos exceed limit, purge the oldest",
+	begin := time.Now()
+
+	log := log.With(
 		zap.Int64("num", int64(s.clientInfos.Len())),
 		zap.Int64("limit", paramtable.Get().ProxyCfg.MaxConnectionNum.GetAsInt64()))
+
+	log.Info("number of client infos exceed limit, ready to purge the oldest")
 
 	diffNum := int64(s.clientInfos.Len()) - paramtable.Get().ProxyCfg.MaxConnectionNum.GetAsInt64()
 	q := newPriorityQueueWithCap(int(diffNum + 1))
@@ -86,6 +90,10 @@ func (s *connectionManager) purgeIfNumOfClientsExceed() {
 			log.Info("remove client info", info.GetLogger()...)
 		}
 	}
+
+	log.Info("purge client infos done",
+		zap.Duration("cost", time.Since(begin)),
+		zap.Int64("num after purge", int64(s.clientInfos.Len())))
 }
 
 func (s *connectionManager) Register(ctx context.Context, identifier int64, info *commonpb.ClientInfo) {
