@@ -100,7 +100,7 @@ func (ttn *ttNode) Operate(in []Msg) []Msg {
 	}
 
 	if channelPos.GetTimestamp() >= ttn.channel.getFlushTs() {
-		ttn.updateChannelCP(channelPos, curTs, false)
+		ttn.updateChannelCP(channelPos, curTs, true)
 	}
 	return []Msg{}
 }

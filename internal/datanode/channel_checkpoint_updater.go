@@ -42,9 +42,9 @@ type channelCPUpdateTask struct {
 type channelCheckpointUpdater struct {
 	dn *DataNode
 
-	mu           sync.RWMutex
-	tasks        map[string]*channelCPUpdateTask
-	manualSignal chan string
+	mu         sync.RWMutex
+	tasks      map[string]*channelCPUpdateTask
+	notifyChan chan string
 
 	closeCh   chan struct{}
 	closeOnce sync.Once
@@ -52,10 +52,10 @@ type channelCheckpointUpdater struct {
 
 func newChannelCheckpointUpdater(dn *DataNode) *channelCheckpointUpdater {
 	return &channelCheckpointUpdater{
-		dn:           dn,
-		tasks:        make(map[string]*channelCPUpdateTask),
-		closeCh:      make(chan struct{}),
-		manualSignal: make(chan string, paramtable.Get().DataNodeCfg.UpdateChannelCheckpointFlushMaxSignalNum.GetAsInt()),
+		dn:         dn,
+		tasks:      make(map[string]*channelCPUpdateTask),
+		closeCh:    make(chan struct{}),
+		notifyChan: make(chan string, paramtable.Get().DataNodeCfg.UpdateChannelCheckpointFlushMaxSignalNum.GetAsInt()),
 	}
 }
 
@@ -68,7 +68,7 @@ func (ccu *channelCheckpointUpdater) start() {
 		case <-ccu.closeCh:
 			log.Info("channel checkpoint updater exit")
 			return
-		case channelName := <-ccu.manualSignal:
+		case channelName := <-ccu.notifyChan:
 			task, ok := ccu.getTask(channelName)
 			if ok {
 				ccu.updateCheckpoints([]*channelCPUpdateTask{task})
@@ -88,7 +88,7 @@ func (ccu *channelCheckpointUpdater) getTask(channel string) (*channelCPUpdateTa
 
 func (ccu *channelCheckpointUpdater) Trigger(channel string) {
 	select {
-	case ccu.manualSignal <- channel:
+	case ccu.notifyChan <- channel:
 	default:
 	}
 }
