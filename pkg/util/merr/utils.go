@@ -293,14 +293,6 @@ func AnalyzeState(role string, nodeID int64, state *milvuspb.ComponentStates) er
 	return nil
 }
 
-func CheckTargetID(actualNodeID int64, msg *commonpb.MsgBase) error {
-	if msg.GetTargetID() != actualNodeID {
-		return WrapErrNodeNotMatch(actualNodeID, msg.GetTargetID())
-	}
-
-	return nil
-}
-
 // Service related
 func WrapErrServiceNotReady(role string, sessionID int64, state string, msg ...string) error {
 	err := wrapFieldsWithDesc(ErrServiceNotReady,
