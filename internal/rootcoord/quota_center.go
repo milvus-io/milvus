@@ -67,13 +67,15 @@ const Inf = ratelimitutil.Inf
 
 type Limit = ratelimitutil.Limit
 
-var (
+func GetInfLimiter() *ratelimitutil.Limiter {
 	// It indicates an infinite limiter with burst is 0
-	infLimiter = ratelimitutil.NewLimiter(Inf, 0)
+	return ratelimitutil.NewLimiter(Inf, 0)
+}
 
+func GetEarliestLimiter() *ratelimitutil.Limiter {
 	// It indicates an earliest limiter with burst is 0
-	earliestLimiter = ratelimitutil.NewLimiter(0, 0)
-)
+	return ratelimitutil.NewLimiter(0, 0)
+}
 
 type opType int
 
@@ -173,27 +175,34 @@ func NewQuotaCenter(proxies proxyutil.ProxyClientManagerInterface, queryCoord ty
 }
 
 func initEarliestLimiter(rateScope internalpb.RateScope, opType opType) *rlinternal.RateLimiterNode {
-	return initLimiter(earliestLimiter, rateScope, opType)
+	return initLimiter(GetEarliestLimiter, rateScope, opType)
 }
 
 func initInfLimiter(rateScope internalpb.RateScope, opType opType) *rlinternal.RateLimiterNode {
-	return initLimiter(infLimiter, rateScope, opType)
+	return initLimiter(GetInfLimiter, rateScope, opType)
 }
 
-func initLimiter(limiter *ratelimitutil.Limiter, rateScope internalpb.RateScope, opType opType) *rlinternal.RateLimiterNode {
+func initLimiter(limiterFunc func() *ratelimitutil.Limiter, rateScope internalpb.RateScope, opType opType) *rlinternal.RateLimiterNode {
 	rateLimiters := rlinternal.NewRateLimiterNode()
 	getRateTypes(rateScope, opType).Range(func(rt internalpb.RateType) bool {
-		rateLimiters.GetLimiters().GetOrInsert(rt, limiter)
+		rateLimiters.GetLimiters().GetOrInsert(rt, limiterFunc())
 		return true
 	})
 	return rateLimiters
+}
+
+func updateLimiter(node *rlinternal.RateLimiterNode, limiter *ratelimitutil.Limiter, rateScope internalpb.RateScope, opType opType) {
+	getRateTypes(rateScope, opType).Range(func(rt internalpb.RateType) bool {
+		node.GetLimiters().Insert(rt, limiter)
+		return true
+	})
 }
 
 func getRateTypes(scope internalpb.RateScope, opType opType) typeutil.Set[internalpb.RateType] {
 	var allRateTypes typeutil.Set[internalpb.RateType]
 	switch scope {
 	case internalpb.RateScope_Cluster:
-		// TODO add database ddl
+		// TODO fubang add database ddl
 		fallthrough
 	case internalpb.RateScope_Database:
 		allRateTypes = ddlRateTypes.Union(dmlRateTypes).Union(dqlRateTypes)
@@ -281,7 +290,7 @@ func (q *QuotaCenter) collectMetrics() error {
 	// get Query cluster metrics
 	group.Go(func() error {
 		rsp, err := q.queryCoord.GetMetrics(ctx, req)
-		if err := merr.CheckRPCCall(rsp, err); err != nil {
+		if err = merr.CheckRPCCall(rsp, err); err != nil {
 			return err
 		}
 		queryCoordTopology := &metricsinfo.QueryCoordTopology{}
@@ -308,11 +317,10 @@ func (q *QuotaCenter) collectMetrics() error {
 			}
 			collIDToPartIDs, ok := q.readableCollections[coll.DBID]
 			if !ok {
-				collIDToPartIDs = map[int64][]int64{collectionID: {}}
+				collIDToPartIDs = make(map[int64][]int64)
 				q.readableCollections[coll.DBID] = collIDToPartIDs
-			} else {
-				collIDToPartIDs[collectionID] = []int64{}
 			}
+			collIDToPartIDs[collectionID] = []int64{}
 			q.collectionIDToDBID.Insert(collectionID, coll.DBID)
 			return true
 		})
@@ -322,7 +330,7 @@ func (q *QuotaCenter) collectMetrics() error {
 	// get Data cluster metrics
 	group.Go(func() error {
 		rsp, err := q.dataCoord.GetMetrics(ctx, req)
-		if err := merr.CheckRPCCall(rsp, err); err != nil {
+		if err = merr.CheckRPCCall(rsp, err); err != nil {
 			return err
 		}
 		dataCoordTopology := &metricsinfo.DataCoordTopology{}
@@ -356,11 +364,10 @@ func (q *QuotaCenter) collectMetrics() error {
 
 			collIDToPartIDs, ok := q.writableCollections[coll.DBID]
 			if !ok {
-				collIDToPartIDs = map[int64][]int64{collectionID: {}}
+				collIDToPartIDs = make(map[int64][]int64)
 				q.writableCollections[coll.DBID] = collIDToPartIDs
-			} else {
-				collIDToPartIDs[collectionID] = []int64{}
 			}
+			collIDToPartIDs[collectionID] = []int64{}
 			q.collectionIDToDBID.Insert(collectionID, coll.DBID)
 
 			return true
@@ -426,6 +433,7 @@ func (q *QuotaCenter) forceDenyWritingCollection(errorCode commonpb.ErrorCode, c
 			},
 		)
 
+		updateLimiter(collectionLimiter, GetEarliestLimiter(), internalpb.RateScope_Collection, dml)
 		collectionLimiter.GetQuotaStates().Insert(milvuspb.QuotaState_DenyToWrite, errorCode)
 	}
 
@@ -450,6 +458,7 @@ func (q *QuotaCenter) forceDenyReading(errorCode commonpb.ErrorCode) {
 				},
 			)
 
+			updateLimiter(collectionLimiter, GetEarliestLimiter(), internalpb.RateScope_Collection, dql)
 			collectionLimiter.GetQuotaStates().Insert(milvuspb.QuotaState_DenyToRead, errorCode)
 			collectionIDs = append(collectionIDs, collectionID)
 		}
@@ -490,7 +499,6 @@ func (q *QuotaCenter) calculateReadRates() error {
 	}
 
 	limitCollectionSet := typeutil.NewUniqueSet()
-	enableQueueProtection := Params.QuotaConfig.QueueProtectionEnabled.GetAsBool()
 	// query latency
 	queueLatencyThreshold := Params.QuotaConfig.QueueLatencyThreshold.GetAsDuration(time.Second)
 	// enableQueueProtection && queueLatencyThreshold >= 0 means enable queue latency protection
@@ -505,6 +513,7 @@ func (q *QuotaCenter) calculateReadRates() error {
 	}
 
 	// queue length
+	enableQueueProtection := Params.QuotaConfig.QueueProtectionEnabled.GetAsBool()
 	nqInQueueThreshold := Params.QuotaConfig.NQInQueueThreshold.GetAsInt64()
 	if enableQueueProtection && nqInQueueThreshold >= 0 {
 		// >= 0 means enable queue length protection
@@ -647,7 +656,8 @@ func (q *QuotaCenter) calculateWriteRates() error {
 		limiter := collectionLimiter.GetLimiters()
 		for _, rt := range []internalpb.RateType{
 			internalpb.RateType_DMLInsert,
-			internalpb.RateType_DMLUpsert, internalpb.RateType_DMLDelete,
+			internalpb.RateType_DMLUpsert,
+			internalpb.RateType_DMLDelete,
 		} {
 			v, ok := limiter.Get(rt)
 			if ok {
@@ -866,12 +876,21 @@ func (q *QuotaCenter) getGrowingSegmentsSizeFactor() map[int64]float64 {
 // calculateRates calculates target rates by different strategies.
 func (q *QuotaCenter) calculateRates() error {
 	err := q.resetAllCurrentRates()
+	if err != nil {
+		log.Warn("QuotaCenter resetAllCurrentRates failed", zap.Error(err))
+		return err
+	}
 
 	err = q.calculateWriteRates()
 	if err != nil {
+		log.Warn("QuotaCenter calculateWriteRates failed", zap.Error(err))
 		return err
 	}
-	q.calculateReadRates()
+	err = q.calculateReadRates()
+	if err != nil {
+		log.Warn("QuotaCenter calculateReadRates failed", zap.Error(err))
+		return err
+	}
 
 	// log.Debug("QuotaCenter calculates rate done", zap.Any("rates", q.currentRates))
 	return nil
@@ -888,10 +907,7 @@ func (q *QuotaCenter) resetAllCurrentRates() error {
 				}
 				rtSet.Range(func(rt internalpb.RateType) bool {
 					err = q.updateLimitWithCollectionMaxLimit(collectionLimiter, rt)
-					if err != nil {
-						return false
-					}
-					return true
+					return err == nil
 				})
 				if err != nil {
 					return err
@@ -996,7 +1012,6 @@ func (q *QuotaCenter) checkDiskQuota() error {
 		return nil
 	}
 	collections := typeutil.NewUniqueSet()
-	totalDiskQuota := Params.QuotaConfig.DiskQuota.GetAsFloat()
 	for collection, binlogSize := range q.dataCoordMetrics.CollectionBinlogSize {
 		collectionProps := q.getCollectionLimitProperties(collection)
 		colDiskQuota := getCollectionRateLimitConfig(collectionProps, common.CollectionDiskQuotaKey)
@@ -1013,6 +1028,7 @@ func (q *QuotaCenter) checkDiskQuota() error {
 			return err
 		}
 	}
+	totalDiskQuota := Params.QuotaConfig.DiskQuota.GetAsFloat()
 	total := q.dataCoordMetrics.TotalBinlogSize
 	if float64(total) >= totalDiskQuota {
 		log.RatedWarn(10, "total disk quota exceeded",

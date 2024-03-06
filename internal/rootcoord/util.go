@@ -138,7 +138,6 @@ func getCollectionRateLimitConfigDefaultValue(configKey string) float64 {
 		return Params.QuotaConfig.DQLMinSearchRatePerCollection.GetAsFloat()
 	case common.CollectionDiskQuotaKey:
 		return Params.QuotaConfig.DiskQuotaPerCollection.GetAsFloat()
-
 	default:
 		return float64(0)
 	}

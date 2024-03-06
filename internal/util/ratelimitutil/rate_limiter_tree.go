@@ -180,6 +180,7 @@ func (m *RateLimiterTree) GetOrCreateDatabaseLimiters(dbID int64, newDBRateLimit
 		return dbRateLimiters
 	}
 	dbRateLimiters = newDBRateLimiter()
+	dbRateLimiters.id = dbID
 	m.root.AddChild(dbID, dbRateLimiters)
 	return dbRateLimiters
 }
@@ -205,6 +206,7 @@ func (m *RateLimiterTree) GetOrCreateCollectionLimiters(dbID, collectionID int64
 	}
 
 	collectionRateLimiters = newCollectionRateLimiter()
+	collectionRateLimiters.id = collectionID
 
 	dbRateLimiters := m.GetOrCreateDatabaseLimiters(dbID, newDBRateLimiter)
 	dbRateLimiters.AddChild(collectionID, collectionRateLimiters)
@@ -244,6 +246,7 @@ func (m *RateLimiterTree) GetOrCreatePartitionLimiters(dbID int64, collectionID 
 	}
 
 	partRateLimiters = newPartRateLimiter()
+	partRateLimiters.id = partitionID
 	collectionRateLimiters := m.GetOrCreateCollectionLimiters(dbID, collectionID, newDBRateLimiter, newCollectionRateLimiter)
 	collectionRateLimiters.AddChild(partitionID, partRateLimiters)
 	return partRateLimiters

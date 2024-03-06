@@ -63,18 +63,27 @@ func (m *SimpleLimiter) Check(dbID int64, collectionIDToPartIDs map[int64][]int6
 	clusterRateLimiters := m.rateLimiter.GetRootLimiters()
 	ret := clusterRateLimiters.Check(rt, n)
 
+	if ret != nil {
+		clusterRateLimiters.Cancel(rt, n)
+		return ret
+	}
+
 	// store done limiters to cancel them when error occurs.
 	doneLimiters := make([]*rlinternal.RateLimiterNode, 0)
 	doneLimiters = append(doneLimiters, clusterRateLimiters)
+
+	cancelAllLimiters := func() {
+		for _, limiter := range doneLimiters {
+			limiter.Cancel(rt, n)
+		}
+	}
 
 	// 2. check database level rate limits
 	if ret == nil {
 		dbRateLimiters := m.rateLimiter.GetOrCreateDatabaseLimiters(dbID, newDatabaseLimiter)
 		ret = dbRateLimiters.Check(rt, n)
 		if ret != nil {
-			for _, limiter := range doneLimiters {
-				limiter.Cancel(rt, n)
-			}
+			cancelAllLimiters()
 			return ret
 		}
 		doneLimiters = append(doneLimiters, dbRateLimiters)
@@ -88,9 +97,7 @@ func (m *SimpleLimiter) Check(dbID int64, collectionIDToPartIDs map[int64][]int6
 				newDatabaseLimiter, newCollectionLimiters)
 			ret = collectionRateLimiters.Check(rt, n)
 			if ret != nil {
-				for _, limiter := range doneLimiters {
-					limiter.Cancel(rt, n)
-				}
+				cancelAllLimiters()
 				return ret
 			}
 			doneLimiters = append(doneLimiters, collectionRateLimiters)
@@ -105,9 +112,7 @@ func (m *SimpleLimiter) Check(dbID int64, collectionIDToPartIDs map[int64][]int6
 					newDatabaseLimiter, newCollectionLimiters, newPartitionLimiters)
 				ret = partitionRateLimiters.Check(rt, n)
 				if ret != nil {
-					for _, limiter := range doneLimiters {
-						limiter.Cancel(rt, n)
-					}
+					cancelAllLimiters()
 					return ret
 				}
 				doneLimiters = append(doneLimiters, partitionRateLimiters)
@@ -164,7 +169,7 @@ func (m *SimpleLimiter) SetRates(rootLimiter *proxypb.LimiterNode) error {
 		return err
 	}
 
-	// TODO: remove dropped database/collection/partition rate limiters
+	// TODO fubang: remove dropped database/collection/partition rate limiters
 	return nil
 }
 
@@ -174,9 +179,9 @@ func initLimiter(rln *rlinternal.RateLimiterNode, rateLimiterConfigs map[interna
 		limit := ratelimitutil.Limit(p.GetAsFloat())
 		burst := p.GetAsFloat() // use rate as burst, because SimpleLimiter is with punishment mechanism, burst is insignificant.
 		rln.GetLimiters().GetOrInsert(rt, ratelimitutil.NewLimiter(limit, burst))
-		onEvent := func(rateType internalpb.RateType) func(*config.Event) {
+		onEvent := func(rateType internalpb.RateType, formatFunc func(originValue string) string) func(*config.Event) {
 			return func(event *config.Event) {
-				f, err := strconv.ParseFloat(p.Formatter(event.Value), 64)
+				f, err := strconv.ParseFloat(formatFunc(event.Value), 64)
 				if err != nil {
 					log.Info("Error format for rateLimit",
 						zap.String("rateType", rateType.String()),
@@ -185,13 +190,14 @@ func initLimiter(rln *rlinternal.RateLimiterNode, rateLimiterConfigs map[interna
 						zap.Error(err))
 					return
 				}
-				limit, ok := rln.GetLimiters().Get(rateType)
+				l, ok := rln.GetLimiters().Get(rateType)
 				if !ok {
+					log.Info("rateLimiter not found for rateType", zap.String("rateType", rateType.String()))
 					return
 				}
-				limit.SetLimit(ratelimitutil.Limit(f))
+				l.SetLimit(ratelimitutil.Limit(f))
 			}
-		}(rt)
+		}(rt, p.Formatter)
 		paramtable.Get().Watch(p.Key, config.NewHandler(fmt.Sprintf("rateLimiter-%d", rt), onEvent))
 		log.RatedDebug(30, "RateLimiter register for rateType",
 			zap.String("rateType", internalpb.RateType_name[(int32(rt))]),
@@ -231,51 +237,60 @@ func newPartitionLimiters() *rlinternal.RateLimiterNode {
 	return partRateLimiters
 }
 
-func (m *SimpleLimiter) updateRateLimiter(rootLimiterNode *proxypb.LimiterNode) error {
+func (m *SimpleLimiter) updateRateLimiter(reqRootLimiterNode *proxypb.LimiterNode) error {
 	// skip to update cluster rate limiters
 
-	for dbID, dbRateLimiters := range rootLimiterNode.GetChildren() {
+	for dbID, reqDBRateLimiters := range reqRootLimiterNode.GetChildren() {
 		// update database rate limiters
 
 		// update collection rate limiters
-		for collectionID, collectionRateLimiters := range dbRateLimiters.GetChildren() {
+		for collectionID, reqCollectionRateLimiter := range reqDBRateLimiters.GetChildren() {
 			collectionRateLimiter := m.rateLimiter.GetOrCreateCollectionLimiters(dbID, collectionID,
 				newDatabaseLimiter, newCollectionLimiters)
 			collectionQuotaStates := typeutil.NewConcurrentMap[milvuspb.QuotaState, commonpb.ErrorCode]()
-			for i, r := range collectionRateLimiters.GetLimiter().GetRates() {
-				if limit, ok := collectionRateLimiter.GetLimiters().Get(r.GetRt()); ok {
-					limit.SetLimit(ratelimitutil.Limit(r.GetR()))
-					setRateGaugeByRateType(r.GetRt(), paramtable.GetNodeID(), collectionID, r.GetR())
-				} else {
+
+			reqLimiter := reqCollectionRateLimiter.GetLimiter()
+			states := reqLimiter.GetStates()
+			codes := reqLimiter.GetCodes()
+
+			for _, r := range reqLimiter.GetRates() {
+				limit, ok := collectionRateLimiter.GetLimiters().Get(r.GetRt())
+				if !ok {
 					return fmt.Errorf("unregister rateLimiter for rateType %s", r.GetRt().String())
 				}
-
-				states := collectionRateLimiters.GetLimiter().GetStates()
-				codes := collectionRateLimiters.GetLimiter().GetCodes()
-				collectionQuotaStates.Insert(states[i], codes[i])
+				limit.SetLimit(ratelimitutil.Limit(r.GetR()))
+				setRateGaugeByRateType(r.GetRt(), paramtable.GetNodeID(), collectionID, r.GetR())
 			}
 
 			// reset collection quota states
+			for i, state := range states {
+				collectionQuotaStates.Insert(state, codes[i])
+			}
 			collectionRateLimiter.SetQuotaStates(collectionQuotaStates)
 
 			// update partition rate limiters
-			for partitionID, partitionRateLimiters := range collectionRateLimiters.GetChildren() {
+			for partitionID, reqPartitionRateLimiters := range reqCollectionRateLimiter.GetChildren() {
 				partitionQuotaStates := typeutil.NewConcurrentMap[milvuspb.QuotaState, commonpb.ErrorCode]()
 				partitionRateLimiter := m.rateLimiter.GetOrCreatePartitionLimiters(dbID, collectionID, partitionID,
 					newDatabaseLimiter, newCollectionLimiters, newPartitionLimiters)
 
-				for i, r := range partitionRateLimiters.GetLimiter().GetRates() {
-					if limit, ok := partitionRateLimiter.GetLimiters().Get(r.GetRt()); ok {
-						limit.SetLimit(ratelimitutil.Limit(r.GetR()))
-						setRateGaugeByRateType(r.GetRt(), paramtable.GetNodeID(), collectionID, r.GetR())
-					} else {
+				reqLimiter := reqPartitionRateLimiters.GetLimiter()
+				states := reqLimiter.GetStates()
+				codes := reqLimiter.GetCodes()
+
+				for _, r := range reqLimiter.GetRates() {
+					limit, ok := partitionRateLimiter.GetLimiters().Get(r.GetRt())
+					if !ok {
 						return fmt.Errorf("rateType %s not found within partition:%d rate limiter",
 							r.GetRt().String(), partitionRateLimiter.GetID())
 					}
 
-					states := partitionRateLimiters.GetLimiter().GetStates()
-					codes := partitionRateLimiters.GetLimiter().GetCodes()
-					collectionQuotaStates.Insert(states[i], codes[i])
+					limit.SetLimit(ratelimitutil.Limit(r.GetR()))
+					setRateGaugeByRateType(r.GetRt(), paramtable.GetNodeID(), collectionID, r.GetR())
+				}
+
+				for i, state := range states {
+					partitionQuotaStates.Insert(state, codes[i])
 				}
 				partitionRateLimiter.SetQuotaStates(partitionQuotaStates)
 			}

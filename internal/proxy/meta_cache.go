@@ -261,6 +261,7 @@ type MetaCache struct {
 	leaderMut      sync.RWMutex
 	shardMgr       shardClientMgr
 	sfGlobal       conc.Singleflight[*collectionInfo]
+	sfDB           conc.Singleflight[*databaseInfo]
 
 	IDStart int64
 	IDCount int64
@@ -752,11 +753,7 @@ func (m *MetaCache) describeDatabase(ctx context.Context, dbName string) (*rootc
 	}
 
 	resp, err := m.rootCoord.DescribeDatabase(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := merr.Error(resp.GetStatus()); err != nil {
+	if err = merr.CheckRPCCall(resp, err); err != nil {
 		return nil, err
 	}
 
@@ -1119,27 +1116,38 @@ func (m *MetaCache) HasDatabase(ctx context.Context, database string) bool {
 }
 
 func (m *MetaCache) GetDatabaseInfo(ctx context.Context, database string) (*databaseInfo, error) {
+	dbInfo := m.safeGetDBInfo(database)
+	if dbInfo != nil {
+		return dbInfo, nil
+	}
+
+	dbInfo, err, _ := m.sfDB.Do(database, func() (*databaseInfo, error) {
+		resp, err := m.describeDatabase(ctx, database)
+		if err != nil {
+			return nil, err
+		}
+
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		dbInfo := &databaseInfo{
+			dbID:             resp.GetDbID(),
+			createdTimestamp: resp.GetCreatedTimestamp(),
+		}
+		m.dbInfo[database] = dbInfo
+		return dbInfo, nil
+	})
+
+	return dbInfo, err
+}
+
+func (m *MetaCache) safeGetDBInfo(database string) *databaseInfo {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-
 	db, ok := m.dbInfo[database]
-	if ok {
-		return db, nil
+	if !ok {
+		return nil
 	}
-
-	resp, err := m.describeDatabase(ctx, database)
-	if err != nil {
-		return nil, err
-	}
-
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	dbInfo := &databaseInfo{
-		dbID:             resp.GetDbID(),
-		createdTimestamp: resp.GetCreatedTimestamp(),
-	}
-	m.dbInfo[database] = dbInfo
-	return dbInfo, nil
+	return db
 }
 
 func (m *MetaCache) AllocID(ctx context.Context) (int64, error) {

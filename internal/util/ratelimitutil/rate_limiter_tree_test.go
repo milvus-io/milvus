@@ -29,8 +29,8 @@ import (
 )
 
 func TestRateLimiterNode_AddAndGetChild(t *testing.T) {
-	rln := &RateLimiterNode{}
-	child := &RateLimiterNode{}
+	rln := NewRateLimiterNode()
+	child := NewRateLimiterNode()
 
 	// Positive test case
 	rln.AddChild(1, child)
