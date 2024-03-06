@@ -60,7 +60,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/dependency"
-	"github.com/milvus-io/milvus/internal/util/importutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -4493,102 +4492,14 @@ func TestProxy_GetComponentStates(t *testing.T) {
 	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 }
 
-func TestProxy_Import(t *testing.T) {
-	var wg sync.WaitGroup
-
-	wg.Add(1)
-	t.Run("test import with unhealthy", func(t *testing.T) {
-		defer wg.Done()
-		req := &milvuspb.ImportRequest{
-			CollectionName: "dummy",
-		}
-		proxy := &Proxy{}
-		proxy.UpdateStateCode(commonpb.StateCode_Abnormal)
-		resp, err := proxy.Import(context.TODO(), req)
-		assert.NoError(t, err)
-		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
-	})
-
-	wg.Add(1)
-	t.Run("rootcoord fail", func(t *testing.T) {
-		defer wg.Done()
-		proxy := &Proxy{}
-		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
-		chMgr := NewMockChannelsMgr(t)
-		proxy.chMgr = chMgr
-		rc := newMockRootCoord()
-		rc.ImportFunc = func(ctx context.Context, req *milvuspb.ImportRequest, opts ...grpc.CallOption) (*milvuspb.ImportResponse, error) {
-			return nil, errors.New("mock")
-		}
-		proxy.rootCoord = rc
-		req := &milvuspb.ImportRequest{
-			CollectionName: "dummy",
-		}
-		resp, err := proxy.Import(context.TODO(), req)
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-	})
-
-	wg.Add(1)
-	t.Run("normal case", func(t *testing.T) {
-		defer wg.Done()
-		proxy := &Proxy{}
-		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
-		chMgr := NewMockChannelsMgr(t)
-		proxy.chMgr = chMgr
-		rc := newMockRootCoord()
-		rc.ImportFunc = func(ctx context.Context, req *milvuspb.ImportRequest, opts ...grpc.CallOption) (*milvuspb.ImportResponse, error) {
-			return &milvuspb.ImportResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}}, nil
-		}
-		proxy.rootCoord = rc
-		req := &milvuspb.ImportRequest{
-			CollectionName: "dummy",
-		}
-		resp, err := proxy.Import(context.TODO(), req)
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-	})
-
-	wg.Add(1)
-	t.Run("illegal import options", func(t *testing.T) {
-		defer wg.Done()
-		proxy := &Proxy{}
-		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
-		chMgr := NewMockChannelsMgr(t)
-		proxy.chMgr = chMgr
-		rc := newMockRootCoord()
-		rc.ImportFunc = func(ctx context.Context, req *milvuspb.ImportRequest, opts ...grpc.CallOption) (*milvuspb.ImportResponse, error) {
-			return &milvuspb.ImportResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}}, nil
-		}
-		proxy.rootCoord = rc
-		req := &milvuspb.ImportRequest{
-			CollectionName: "dummy",
-			Options: []*commonpb.KeyValuePair{
-				{
-					Key:   importutil.StartTs,
-					Value: "0",
-				},
-				{
-					Key:   importutil.EndTs,
-					Value: "not a number",
-				},
-			},
-		}
-		resp, err := proxy.Import(context.TODO(), req)
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-	})
-	wg.Wait()
-}
-
 func TestProxy_GetImportState(t *testing.T) {
 	req := &milvuspb.GetImportStateRequest{
 		Task: 1,
 	}
-	rootCoord := &RootCoordMock{}
-	rootCoord.state.Store(commonpb.StateCode_Healthy)
+	dataCoord := &DataCoordMock{}
+	dataCoord.state.Store(commonpb.StateCode_Healthy)
 	t.Run("test get import state", func(t *testing.T) {
-		proxy := &Proxy{rootCoord: rootCoord}
+		proxy := &Proxy{dataCoord: dataCoord}
 		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 
 		resp, err := proxy.GetImportState(context.TODO(), req)
@@ -4596,7 +4507,7 @@ func TestProxy_GetImportState(t *testing.T) {
 		assert.NoError(t, err)
 	})
 	t.Run("test get import state with unhealthy", func(t *testing.T) {
-		proxy := &Proxy{rootCoord: rootCoord}
+		proxy := &Proxy{dataCoord: dataCoord}
 		proxy.UpdateStateCode(commonpb.StateCode_Abnormal)
 		resp, err := proxy.GetImportState(context.TODO(), req)
 		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
@@ -4606,10 +4517,10 @@ func TestProxy_GetImportState(t *testing.T) {
 
 func TestProxy_ListImportTasks(t *testing.T) {
 	req := &milvuspb.ListImportTasksRequest{}
-	rootCoord := &RootCoordMock{}
-	rootCoord.state.Store(commonpb.StateCode_Healthy)
+	dataCoord := &DataCoordMock{}
+	dataCoord.state.Store(commonpb.StateCode_Healthy)
 	t.Run("test list import tasks", func(t *testing.T) {
-		proxy := &Proxy{rootCoord: rootCoord}
+		proxy := &Proxy{dataCoord: dataCoord}
 		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 
 		resp, err := proxy.ListImportTasks(context.TODO(), req)
@@ -4617,7 +4528,7 @@ func TestProxy_ListImportTasks(t *testing.T) {
 		assert.NoError(t, err)
 	})
 	t.Run("test list import tasks with unhealthy", func(t *testing.T) {
-		proxy := &Proxy{rootCoord: rootCoord}
+		proxy := &Proxy{dataCoord: dataCoord}
 		proxy.UpdateStateCode(commonpb.StateCode_Abnormal)
 		resp, err := proxy.ListImportTasks(context.TODO(), req)
 		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)

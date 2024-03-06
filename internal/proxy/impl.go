@@ -4213,6 +4213,11 @@ func convertToV2ImportRequest(req *milvuspb.ImportRequest) *internalpb.ImportReq
 }
 
 func convertToV1ImportResponse(rsp *internalpb.ImportResponse) *milvuspb.ImportResponse {
+	if rsp.GetStatus().GetCode() != 0 {
+		return &milvuspb.ImportResponse{
+			Status: rsp.GetStatus(),
+		}
+	}
 	jobID, err := strconv.ParseInt(rsp.GetJobID(), 10, 64)
 	if err != nil {
 		return &milvuspb.ImportResponse{
@@ -4232,6 +4237,11 @@ func convertToV2GetImportRequest(req *milvuspb.GetImportStateRequest) *internalp
 }
 
 func convertToV1GetImportResponse(rsp *internalpb.GetImportProgressResponse) *milvuspb.GetImportStateResponse {
+	if rsp.GetStatus().GetCode() != 0 {
+		return &milvuspb.GetImportStateResponse{
+			Status: rsp.GetStatus(),
+		}
+	}
 	convertState := func(state internalpb.ImportJobState) commonpb.ImportState {
 		switch state {
 		case internalpb.ImportJobState_Pending:
@@ -4275,6 +4285,11 @@ func convertToV2ListImportRequest(req *milvuspb.ListImportTasksRequest) *interna
 }
 
 func convertToV1ListImportResponse(rsp *internalpb.ListImportsResponse) *milvuspb.ListImportTasksResponse {
+	if rsp.GetStatus().GetCode() != 0 {
+		return &milvuspb.ListImportTasksResponse{
+			Status: rsp.GetStatus(),
+		}
+	}
 	responses := make([]*milvuspb.GetImportStateResponse, 0, len(rsp.GetStates()))
 	for i := 0; i < len(rsp.GetStates()); i++ {
 		responses = append(responses, convertToV1GetImportResponse(&internalpb.GetImportProgressResponse{

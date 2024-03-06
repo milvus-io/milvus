@@ -1615,7 +1615,9 @@ func TestProxy_ImportV2(t *testing.T) {
 		dataCoord := mocks.NewMockDataCoordClient(t)
 		dataCoord.EXPECT().ListImports(mock.Anything, mock.Anything).Return(nil, nil)
 		node.dataCoord = dataCoord
-		rsp, err = node.ListImports(ctx, &internalpb.ListImportsRequest{})
+		rsp, err = node.ListImports(ctx, &internalpb.ListImportsRequest{
+			CollectionName: "col",
+		})
 		assert.NoError(t, err)
 		assert.Equal(t, int32(0), rsp.GetStatus().GetCode())
 	})
