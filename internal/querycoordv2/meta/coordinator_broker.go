@@ -190,7 +190,7 @@ func (broker *CoordinatorBroker) GetIndexInfo(ctx context.Context, collectionID 
 	// we add retry here to retry the request until context done, and if new data coord start up, it will success
 	var resp *indexpb.GetIndexInfoResponse
 	var err error
-	retry.Do(ctx, func() error {
+	retryErr := retry.Do(ctx, func() error {
 		resp, err = broker.dataCoord.GetIndexInfos(ctx, &indexpb.GetIndexInfoRequest{
 			CollectionID: collectionID,
 			SegmentIDs:   []int64{segmentID},
@@ -201,6 +201,10 @@ func (broker *CoordinatorBroker) GetIndexInfo(ctx context.Context, collectionID 
 		}
 		return nil
 	})
+	if retryErr != nil {
+		log.Warn("failed to get segment index info", zap.Error(err))
+		return nil, retryErr
+	}
 
 	if err := merr.CheckRPCCall(resp, err); err != nil {
 		log.Warn("failed to get segment index info", zap.Error(err))
@@ -247,7 +251,7 @@ func (broker *CoordinatorBroker) DescribeIndex(ctx context.Context, collectionID
 	// we add retry here to retry the request until context done, and if new data coord start up, it will success
 	var resp *indexpb.DescribeIndexResponse
 	var err error
-	retry.Do(ctx, func() error {
+	retryErr := retry.Do(ctx, func() error {
 		resp, err = broker.dataCoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{
 			CollectionID: collectionID,
 		})
@@ -256,6 +260,10 @@ func (broker *CoordinatorBroker) DescribeIndex(ctx context.Context, collectionID
 		}
 		return nil
 	})
+	if retryErr != nil {
+		log.Warn("failed to fetch index meta", zap.Int64("collection", collectionID), zap.Error(err))
+		return nil, retryErr
+	}
 
 	if err := merr.CheckRPCCall(resp, err); err != nil {
 		log.Error("failed to fetch index meta",
