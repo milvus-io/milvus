@@ -37,6 +37,7 @@ const (
 type channelCPUpdateTask struct {
 	pos      *msgpb.MsgPosition
 	callback func()
+	flush    bool
 }
 
 type channelCheckpointUpdater struct {
@@ -44,7 +45,7 @@ type channelCheckpointUpdater struct {
 
 	mu         sync.RWMutex
 	tasks      map[string]*channelCPUpdateTask
-	notifyChan chan string
+	notifyChan chan struct{}
 
 	closeCh   chan struct{}
 	closeOnce sync.Once
@@ -55,7 +56,7 @@ func newChannelCheckpointUpdater(dn *DataNode) *channelCheckpointUpdater {
 		dn:         dn,
 		tasks:      make(map[string]*channelCPUpdateTask),
 		closeCh:    make(chan struct{}),
-		notifyChan: make(chan string, paramtable.Get().DataNodeCfg.UpdateChannelCheckpointFlushMaxSignalNum.GetAsInt()),
+		notifyChan: make(chan struct{}, 1),
 	}
 }
 
@@ -68,21 +69,15 @@ func (ccu *channelCheckpointUpdater) start() {
 		case <-ccu.closeCh:
 			log.Info("channel checkpoint updater exit")
 			return
-		case channelName := <-ccu.notifyChan:
-			channels := typeutil.NewSet[string]()
-			channels.Insert(channelName)
-			hasMore := true
-			for hasMore {
-				select {
-				case channelName = <-ccu.notifyChan:
-					channels.Insert(channelName)
-				default:
-					hasMore = false
+		case <-ccu.notifyChan:
+			var tasks []*channelCPUpdateTask
+			ccu.mu.RLock()
+			for _, task := range ccu.tasks {
+				if task.flush {
+					tasks = append(tasks, task)
 				}
 			}
-			tasks := lo.FilterMap(channels.Collect(), func(channelName string, _ int) (*channelCPUpdateTask, bool) {
-				return ccu.getTask(channelName)
-			})
+			ccu.mu.RUnlock()
 			if len(tasks) > 0 {
 				ccu.updateCheckpoints(tasks)
 			}
@@ -99,9 +94,9 @@ func (ccu *channelCheckpointUpdater) getTask(channel string) (*channelCPUpdateTa
 	return task, ok
 }
 
-func (ccu *channelCheckpointUpdater) Trigger(channel string) {
+func (ccu *channelCheckpointUpdater) trigger() {
 	select {
-	case ccu.notifyChan <- channel:
+	case ccu.notifyChan <- struct{}{}:
 	default:
 	}
 }
@@ -161,24 +156,35 @@ func (ccu *channelCheckpointUpdater) execute() {
 	ccu.updateCheckpoints(tasks)
 }
 
-func (ccu *channelCheckpointUpdater) addTask(channelPos *msgpb.MsgPosition, callback func()) {
+func (ccu *channelCheckpointUpdater) AddTask(channelPos *msgpb.MsgPosition, flush bool, callback func()) {
 	if channelPos == nil || channelPos.GetMsgID() == nil || channelPos.GetChannelName() == "" {
 		log.Warn("illegal checkpoint", zap.Any("pos", channelPos))
 		return
 	}
+	if flush {
+		defer ccu.trigger()
+	}
 	channel := channelPos.GetChannelName()
-	ccu.mu.RLock()
-	if ccu.tasks[channel] != nil && channelPos.GetTimestamp() <= ccu.tasks[channel].pos.GetTimestamp() {
-		ccu.mu.RUnlock()
+	task, ok := ccu.getTask(channelPos.GetChannelName())
+	if !ok {
+		ccu.mu.Lock()
+		defer ccu.mu.Unlock()
+		ccu.tasks[channel] = &channelCPUpdateTask{
+			pos:      channelPos,
+			callback: callback,
+			flush:    flush,
+		}
 		return
 	}
-	ccu.mu.RUnlock()
 
-	ccu.mu.Lock()
-	defer ccu.mu.Unlock()
-	ccu.tasks[channel] = &channelCPUpdateTask{
-		pos:      channelPos,
-		callback: callback,
+	if task.pos.GetTimestamp() < channelPos.GetTimestamp() || (flush && !task.flush) {
+		ccu.mu.Lock()
+		defer ccu.mu.Unlock()
+		ccu.tasks[channel] = &channelCPUpdateTask{
+			pos:      channelPos,
+			callback: callback,
+			flush:    flush || task.flush,
+		}
 	}
 }
 

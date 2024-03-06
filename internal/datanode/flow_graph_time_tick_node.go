@@ -117,10 +117,7 @@ func (ttn *ttNode) updateChannelCP(channelPos *msgpb.MsgPosition, curTs time.Tim
 			ttn.channel.setFlushTs(math.MaxUint64)
 		}
 	}
-	ttn.cpUpdater.addTask(channelPos, callBack)
-	if flush {
-		ttn.cpUpdater.Trigger(channelPos.GetChannelName())
-	}
+	ttn.cpUpdater.AddTask(channelPos, flush, callBack)
 	ttn.lastUpdateTime.Store(curTs)
 }
 

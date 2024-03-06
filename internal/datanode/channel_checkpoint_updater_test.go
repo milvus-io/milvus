@@ -65,11 +65,11 @@ func (s *ChannelCPUpdaterSuite) TestUpdate() {
 		for i := 0; i < tasksNum; i++ {
 			// add duplicated task with same timestamp
 			for j := 0; j < 10; j++ {
-				s.updater.addTask(&msgpb.MsgPosition{
+				s.updater.AddTask(&msgpb.MsgPosition{
 					ChannelName: fmt.Sprintf("ch-%d", i),
 					MsgID:       []byte{0},
 					Timestamp:   100,
-				}, func() {
+				}, false, func() {
 					counter.Add(1)
 				})
 			}
