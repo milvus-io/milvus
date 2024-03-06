@@ -975,6 +975,7 @@ type proxyConfig struct {
 	// connection manager
 	ConnectionCheckIntervalSeconds ParamItem `refreshable:"true"`
 	ConnectionClientInfoTTLSeconds ParamItem `refreshable:"true"`
+	MaxConnectionNum               ParamItem `refreshable:"true"`
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 }
@@ -1296,6 +1297,15 @@ please adjust in embedded Milvus: false`,
 		Export:       true,
 	}
 	p.ConnectionClientInfoTTLSeconds.Init(base.mgr)
+
+	p.MaxConnectionNum = ParamItem{
+		Key:          "proxy.maxConnectionNum",
+		Version:      "2.3.11",
+		Doc:          "the max client info numbers that proxy should manage, avoid too many client infos",
+		DefaultValue: "10000",
+		Export:       true,
+	}
+	p.MaxConnectionNum.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
