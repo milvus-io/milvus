@@ -711,7 +711,7 @@ func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCoun
 
 	var status C.CStatus
 	GetLoadPool().Submit(func() (any, error) {
-		log.Info("submitted loadFieldData task to dy pool")
+		log.Info("submitted loadFieldData task to load pool")
 		status = C.LoadFieldData(s.ptr, loadFieldDataInfo.cLoadFieldDataInfo)
 		return nil, nil
 	}).Await()
@@ -745,10 +745,10 @@ func (s *LocalSegment) AddFieldDataInfo(ctx context.Context, rowCount int64, fie
 	)
 
 	loadFieldDataInfo, err := newLoadFieldDataInfo(ctx)
-	defer deleteFieldDataInfo(loadFieldDataInfo)
 	if err != nil {
 		return err
 	}
+	defer deleteFieldDataInfo(loadFieldDataInfo)
 
 	for _, field := range fields {
 		fieldID := field.FieldID
@@ -1022,9 +1022,9 @@ func (s *LocalSegment) Release() {
 		void
 		deleteSegment(CSegmentInterface segment);
 	*/
-	// wait all read ops finished
 	var ptr C.CSegmentInterface
 
+	// wait all read ops finished
 	s.ptrLock.Lock()
 	ptr = s.ptr
 	s.ptr = nil
