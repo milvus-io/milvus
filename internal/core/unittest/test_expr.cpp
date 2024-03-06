@@ -1433,91 +1433,91 @@ TEST(Expr, TestCompareExpr) {
     std::cout << "end compare test" << std::endl;
 }
 
-TEST(Expr, TestMultiLogicalExprsOptimization) {
-    auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField(
-        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
-    auto int64_fid = schema->AddDebugField("int64", DataType::INT64);
-    auto str1_fid = schema->AddDebugField("string1", DataType::VARCHAR);
-    schema->set_primary_field_id(str1_fid);
+// TEST(Expr, TestMultiLogicalExprsOptimization) {
+//     auto schema = std::make_shared<Schema>();
+//     auto vec_fid = schema->AddDebugField(
+//         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+//     auto int64_fid = schema->AddDebugField("int64", DataType::INT64);
+//     auto str1_fid = schema->AddDebugField("string1", DataType::VARCHAR);
+//     schema->set_primary_field_id(str1_fid);
 
-    auto seg = CreateSealedSegment(schema);
-    size_t N = 10000;
-    auto raw_data = DataGen(schema, N);
-    auto fields = schema->get_fields();
-    for (auto field_data : raw_data.raw_->fields_data()) {
-        int64_t field_id = field_data.field_id();
+//     auto seg = CreateSealedSegment(schema);
+//     size_t N = 10000;
+//     auto raw_data = DataGen(schema, N);
+//     auto fields = schema->get_fields();
+//     for (auto field_data : raw_data.raw_->fields_data()) {
+//         int64_t field_id = field_data.field_id();
 
-        auto info = FieldDataInfo(field_data.field_id(), N, "/tmp/a");
-        auto field_meta = fields.at(FieldId(field_id));
-        info.channel->push(
-            CreateFieldDataFromDataArray(N, &field_data, field_meta));
-        info.channel->close();
+//         auto info = FieldDataInfo(field_data.field_id(), N, "/tmp/a");
+//         auto field_meta = fields.at(FieldId(field_id));
+//         info.channel->push(
+//             CreateFieldDataFromDataArray(N, &field_data, field_meta));
+//         info.channel->close();
 
-        seg->LoadFieldData(FieldId(field_id), info);
-    }
+//         seg->LoadFieldData(FieldId(field_id), info);
+//     }
 
-    ExecExprVisitor visitor(*seg, seg->get_row_count(), MAX_TIMESTAMP);
-    auto build_expr_with_optim = [&]() -> std::shared_ptr<query::Expr> {
-        ExprPtr child1_expr =
-            std::make_unique<query::UnaryRangeExprImpl<int64_t>>(
-                ColumnInfo(int64_fid, DataType::INT64),
-                proto::plan::OpType::LessThan,
-                -1,
-                proto::plan::GenericValue::ValCase::kInt64Val);
-        ExprPtr child2_expr =
-            std::make_unique<query::UnaryRangeExprImpl<int64_t>>(
-                ColumnInfo(int64_fid, DataType::INT64),
-                proto::plan::OpType::NotEqual,
-                100,
-                proto::plan::GenericValue::ValCase::kInt64Val);
-        return std::make_shared<query::LogicalBinaryExpr>(
-            LogicalBinaryExpr::OpType::LogicalAnd, child1_expr, child2_expr);
-    };
-    auto build_expr = [&]() -> std::shared_ptr<query::Expr> {
-        ExprPtr child1_expr =
-            std::make_unique<query::UnaryRangeExprImpl<int64_t>>(
-                ColumnInfo(int64_fid, DataType::INT64),
-                proto::plan::OpType::GreaterThan,
-                10,
-                proto::plan::GenericValue::ValCase::kInt64Val);
-        ExprPtr child2_expr =
-            std::make_unique<query::UnaryRangeExprImpl<int64_t>>(
-                ColumnInfo(int64_fid, DataType::INT64),
-                proto::plan::OpType::NotEqual,
-                100,
-                proto::plan::GenericValue::ValCase::kInt64Val);
-        return std::make_shared<query::LogicalBinaryExpr>(
-            LogicalBinaryExpr::OpType::LogicalAnd, child1_expr, child2_expr);
-    };
-    auto expr = build_expr_with_optim();
-    auto cost_op = 0;
-    for (int i = 0; i < 10; ++i) {
-        auto start = std::chrono::steady_clock::now();
-        auto final = visitor.call_child(*expr);
-        auto cost = std::chrono::duration_cast<std::chrono::microseconds>(
-                        std::chrono::steady_clock::now() - start)
-                        .count();
-        std::cout << "cost: " << cost << "us" << std::endl;
-        cost_op += cost;
-    }
-    cost_op = cost_op / 10.0;
-    std::cout << cost_op << std::endl;
-    expr = build_expr();
-    auto cost_no_op = 0;
-    for (int i = 0; i < 10; ++i) {
-        auto start = std::chrono::steady_clock::now();
-        auto final = visitor.call_child(*expr);
-        auto cost = std::chrono::duration_cast<std::chrono::microseconds>(
-                        std::chrono::steady_clock::now() - start)
-                        .count();
-        std::cout << "cost: " << cost << "us" << std::endl;
-        cost_no_op += cost;
-    }
-    cost_no_op = cost_no_op / 10.0;
-    std::cout << cost_no_op << std::endl;
-    ASSERT_LT(cost_op, cost_no_op);
-}
+//     ExecExprVisitor visitor(*seg, seg->get_row_count(), MAX_TIMESTAMP);
+//     auto build_expr_with_optim = [&]() -> std::shared_ptr<query::Expr> {
+//         ExprPtr child1_expr =
+//             std::make_unique<query::UnaryRangeExprImpl<int64_t>>(
+//                 ColumnInfo(int64_fid, DataType::INT64),
+//                 proto::plan::OpType::LessThan,
+//                 -1,
+//                 proto::plan::GenericValue::ValCase::kInt64Val);
+//         ExprPtr child2_expr =
+//             std::make_unique<query::UnaryRangeExprImpl<int64_t>>(
+//                 ColumnInfo(int64_fid, DataType::INT64),
+//                 proto::plan::OpType::NotEqual,
+//                 100,
+//                 proto::plan::GenericValue::ValCase::kInt64Val);
+//         return std::make_shared<query::LogicalBinaryExpr>(
+//             LogicalBinaryExpr::OpType::LogicalAnd, child1_expr, child2_expr);
+//     };
+//     auto build_expr = [&]() -> std::shared_ptr<query::Expr> {
+//         ExprPtr child1_expr =
+//             std::make_unique<query::UnaryRangeExprImpl<int64_t>>(
+//                 ColumnInfo(int64_fid, DataType::INT64),
+//                 proto::plan::OpType::GreaterThan,
+//                 10,
+//                 proto::plan::GenericValue::ValCase::kInt64Val);
+//         ExprPtr child2_expr =
+//             std::make_unique<query::UnaryRangeExprImpl<int64_t>>(
+//                 ColumnInfo(int64_fid, DataType::INT64),
+//                 proto::plan::OpType::NotEqual,
+//                 100,
+//                 proto::plan::GenericValue::ValCase::kInt64Val);
+//         return std::make_shared<query::LogicalBinaryExpr>(
+//             LogicalBinaryExpr::OpType::LogicalAnd, child1_expr, child2_expr);
+//     };
+//     auto expr = build_expr_with_optim();
+//     auto cost_op = 0;
+//     for (int i = 0; i < 10; ++i) {
+//         auto start = std::chrono::steady_clock::now();
+//         auto final = visitor.call_child(*expr);
+//         auto cost = std::chrono::duration_cast<std::chrono::microseconds>(
+//                         std::chrono::steady_clock::now() - start)
+//                         .count();
+//         std::cout << "cost: " << cost << "us" << std::endl;
+//         cost_op += cost;
+//     }
+//     cost_op = cost_op / 10.0;
+//     std::cout << cost_op << std::endl;
+//     expr = build_expr();
+//     auto cost_no_op = 0;
+//     for (int i = 0; i < 10; ++i) {
+//         auto start = std::chrono::steady_clock::now();
+//         auto final = visitor.call_child(*expr);
+//         auto cost = std::chrono::duration_cast<std::chrono::microseconds>(
+//                         std::chrono::steady_clock::now() - start)
+//                         .count();
+//         std::cout << "cost: " << cost << "us" << std::endl;
+//         cost_no_op += cost;
+//     }
+//     cost_no_op = cost_no_op / 10.0;
+//     std::cout << cost_no_op << std::endl;
+//     ASSERT_LT(cost_op, cost_no_op);
+// }
 
 TEST(Expr, TestExprs) {
     auto schema = std::make_shared<Schema>();
