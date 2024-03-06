@@ -61,7 +61,7 @@ func (s *Server) checkAnyReplicaAvailable(collectionID int64) bool {
 }
 
 func (s *Server) getCollectionSegmentInfo(collection int64) []*querypb.SegmentInfo {
-	segments := s.dist.SegmentDistManager.GetByCollection(collection)
+	segments := s.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(collection))
 	currentTargetSegmentsMap := s.targetMgr.GetSealedSegmentsByCollection(collection, meta.CurrentTarget)
 	infos := make(map[int64]*querypb.SegmentInfo)
 	for _, segment := range segments {
@@ -107,7 +107,7 @@ func (s *Server) balanceSegments(ctx context.Context, req *querypb.LoadBalanceRe
 
 	toBalance := typeutil.NewSet[*meta.Segment]()
 	// Only balance segments in targets
-	segments := s.dist.SegmentDistManager.GetByCollectionAndNode(req.GetCollectionID(), srcNode)
+	segments := s.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithNodeID(srcNode))
 	segments = lo.Filter(segments, func(segment *meta.Segment, _ int) bool {
 		return s.targetMgr.GetSealedSegment(segment.GetCollectionID(), segment.GetID(), meta.CurrentTarget) != nil
 	})
@@ -321,7 +321,7 @@ func (s *Server) fillReplicaInfo(replica *meta.Replica, withShardNodes bool) (*m
 	}
 	var segments []*meta.Segment
 	if withShardNodes {
-		segments = s.dist.SegmentDistManager.GetByCollection(replica.GetCollectionID())
+		segments = s.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()))
 	}
 
 	for _, channel := range channels {

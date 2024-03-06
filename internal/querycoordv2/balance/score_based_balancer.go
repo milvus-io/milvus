@@ -141,7 +141,7 @@ func (b *ScoreBasedBalancer) convertToNodeItems(collectionID int64, nodeIDs []in
 func (b *ScoreBasedBalancer) calculateScore(collectionID, nodeID int64) int {
 	rowCount := 0
 	// calculate global sealed segment row count
-	globalSegments := b.dist.SegmentDistManager.GetByNode(nodeID)
+	globalSegments := b.dist.SegmentDistManager.GetByFilter(meta.WithNodeID(nodeID))
 	for _, s := range globalSegments {
 		rowCount += int(s.GetNumOfRows())
 	}
@@ -154,7 +154,7 @@ func (b *ScoreBasedBalancer) calculateScore(collectionID, nodeID int64) int {
 
 	collectionRowCount := 0
 	// calculate collection sealed segment row count
-	collectionSegments := b.dist.SegmentDistManager.GetByCollectionAndNode(collectionID, nodeID)
+	collectionSegments := b.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(collectionID), meta.WithNodeID(nodeID))
 	for _, s := range collectionSegments {
 		collectionRowCount += int(s.GetNumOfRows())
 	}
@@ -235,7 +235,7 @@ func (b *ScoreBasedBalancer) BalanceReplica(replica *meta.Replica) ([]SegmentAss
 func (b *ScoreBasedBalancer) genStoppingSegmentPlan(replica *meta.Replica, onlineNodes []int64, offlineNodes []int64) []SegmentAssignPlan {
 	segmentPlans := make([]SegmentAssignPlan, 0)
 	for _, nodeID := range offlineNodes {
-		dist := b.dist.SegmentDistManager.GetByCollectionAndNode(replica.GetCollectionID(), nodeID)
+		dist := b.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithNodeID(nodeID))
 		segments := lo.Filter(dist, func(segment *meta.Segment, _ int) bool {
 			return b.targetMgr.GetSealedSegment(segment.GetCollectionID(), segment.GetID(), meta.CurrentTarget) != nil &&
 				b.targetMgr.GetSealedSegment(segment.GetCollectionID(), segment.GetID(), meta.NextTarget) != nil &&
@@ -258,7 +258,7 @@ func (b *ScoreBasedBalancer) genSegmentPlan(replica *meta.Replica, onlineNodes [
 
 	// list all segment which could be balanced, and calculate node's score
 	for _, node := range onlineNodes {
-		dist := b.dist.SegmentDistManager.GetByCollectionAndNode(replica.GetCollectionID(), node)
+		dist := b.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithNodeID(node))
 		segments := lo.Filter(dist, func(segment *meta.Segment, _ int) bool {
 			return b.targetMgr.GetSealedSegment(segment.GetCollectionID(), segment.GetID(), meta.CurrentTarget) != nil &&
 				b.targetMgr.GetSealedSegment(segment.GetCollectionID(), segment.GetID(), meta.NextTarget) != nil &&
@@ -298,7 +298,7 @@ func (b *ScoreBasedBalancer) genSegmentPlan(replica *meta.Replica, onlineNodes [
 
 	// if the segment are redundant, skip it's balance for now
 	segmentsToMove = lo.Filter(segmentsToMove, func(s *meta.Segment, _ int) bool {
-		return len(b.dist.SegmentDistManager.Get(s.GetID())) == 1
+		return len(b.dist.SegmentDistManager.GetByFilter(meta.WithSegmentID(s.GetID()))) == 1
 	})
 
 	if len(segmentsToMove) == 0 {
