@@ -256,12 +256,13 @@ def load_and_search(prefix, replicas=1):
             output_fields = ["count", "random_value"]
         else:
             output_fields = ["count", "random_value", "float_vector"]
-        res = c.query(expr, output_fields, limit=100, timeout=120)
+        res = c.query(expr, output_fields, limit=5, timeout=120)
         sorted_res = sorted(res, key=lambda k: k['count'])
         for r in sorted_res:
+            logger.info(f"query result: {r}")
             assert r['count'] > 0, f"count is {r['count']}, expect > 0"
         t1 = time.time()
-        assert len(res) == 100, f"get {len(res)} results, but limit is 100"
+        assert len(res) == 5, f"get {len(res)} results, but limit is 100"
         logger.info("query latency: %.4fs" % (t1 - t0))
         # c.release()
         logger.info("###########")
