@@ -69,10 +69,24 @@ func (ccu *channelCheckpointUpdater) start() {
 			log.Info("channel checkpoint updater exit")
 			return
 		case channelName := <-ccu.notifyChan:
+			var tasks []*channelCPUpdateTask
 			task, ok := ccu.getTask(channelName)
 			if ok {
-				ccu.updateCheckpoints([]*channelCPUpdateTask{task})
+				tasks = append(tasks, task)
 			}
+			hasMore := true
+			for hasMore {
+				select {
+				case channelName = <-ccu.notifyChan:
+					task, ok = ccu.getTask(channelName)
+					if ok {
+						tasks = append(tasks, task)
+					}
+				default:
+					hasMore = false
+				}
+			}
+			ccu.updateCheckpoints(tasks)
 		case <-ticker.C:
 			ccu.execute()
 		}
