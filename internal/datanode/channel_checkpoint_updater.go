@@ -69,24 +69,23 @@ func (ccu *channelCheckpointUpdater) start() {
 			log.Info("channel checkpoint updater exit")
 			return
 		case channelName := <-ccu.notifyChan:
-			var tasks []*channelCPUpdateTask
-			task, ok := ccu.getTask(channelName)
-			if ok {
-				tasks = append(tasks, task)
-			}
+			channels := typeutil.NewSet[string]()
+			channels.Insert(channelName)
 			hasMore := true
 			for hasMore {
 				select {
 				case channelName = <-ccu.notifyChan:
-					task, ok = ccu.getTask(channelName)
-					if ok {
-						tasks = append(tasks, task)
-					}
+					channels.Insert(channelName)
 				default:
 					hasMore = false
 				}
 			}
-			ccu.updateCheckpoints(tasks)
+			tasks := lo.FilterMap(channels.Collect(), func(channelName string, _ int) (*channelCPUpdateTask, bool) {
+				return ccu.getTask(channelName)
+			})
+			if len(tasks) > 0 {
+				ccu.updateCheckpoints(tasks)
+			}
 		case <-ticker.C:
 			ccu.execute()
 		}
