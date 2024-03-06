@@ -169,7 +169,7 @@ func TestSimpleRateLimiter(t *testing.T) {
 
 	t.Run("test set rates", func(t *testing.T) {
 		simpleLimiter := NewSimpleLimiter()
-		zeroRates := getZeroRates()
+		zeroRates := getZeroCollectionRates()
 
 		err := simpleLimiter.SetRates(newCollectionLimiterNode(map[int64]*proxypb.LimiterNode{
 			1: {
@@ -195,7 +195,9 @@ func TestSimpleRateLimiter(t *testing.T) {
 			1: {
 				// collection limiter
 				Limiter: &proxypb.Limiter{
-					Rates: getZeroRates(),
+					Rates:  getZeroCollectionRates(),
+					States: []milvuspb.QuotaState{milvuspb.QuotaState_DenyToWrite, milvuspb.QuotaState_DenyToRead},
+					Codes:  []commonpb.ErrorCode{commonpb.ErrorCode_DiskQuotaExhausted, commonpb.ErrorCode_ForceDeny},
 				},
 				Children: make(map[int64]*proxypb.LimiterNode),
 			},
@@ -216,6 +218,24 @@ func getZeroRates() []*internalpb.Rate {
 	for _, rt := range internalpb.RateType_value {
 		zeroRates = append(zeroRates, &internalpb.Rate{
 			Rt: internalpb.RateType(rt), R: 0,
+		})
+	}
+	return zeroRates
+}
+
+func getZeroCollectionRates() []*internalpb.Rate {
+	collectionRate := []internalpb.RateType{
+		internalpb.RateType_DMLInsert,
+		internalpb.RateType_DMLDelete,
+		internalpb.RateType_DMLBulkLoad,
+		internalpb.RateType_DQLSearch,
+		internalpb.RateType_DQLQuery,
+		internalpb.RateType_DDLFlush,
+	}
+	zeroRates := make([]*internalpb.Rate, 0, len(collectionRate))
+	for _, rt := range collectionRate {
+		zeroRates = append(zeroRates, &internalpb.Rate{
+			Rt: rt, R: 0,
 		})
 	}
 	return zeroRates
@@ -372,23 +392,24 @@ func TestRateLimiter(t *testing.T) {
 		defer Params.Reset(Params.QuotaConfig.DMLLimitEnabled.Key)
 		ctx := context.Background()
 		// avoid production precision issues when comparing 0-terminated numbers
-		newRate := fmt.Sprintf("%.2f1", rand.Float64())
+		r := rand.Float64()
+		newRate := fmt.Sprintf("%.2f", r)
 		etcdCli.KV.Put(ctx, "by-dev/config/quotaAndLimits/ddl/collectionRate", newRate)
 		defer etcdCli.KV.Delete(ctx, "by-dev/config/quotaAndLimits/ddl/collectionRate")
 		etcdCli.KV.Put(ctx, "by-dev/config/quotaAndLimits/ddl/partitionRate", "invalid")
 		defer etcdCli.KV.Delete(ctx, "by-dev/config/quotaAndLimits/ddl/partitionRate")
-		etcdCli.KV.Put(ctx, "by-dev/config/quotaAndLimits/dml/insertRate/collection/max", "8")
-		defer etcdCli.KV.Delete(ctx, "by-dev/config/quotaAndLimits/dml/insertRate/collection/max")
+		etcdCli.KV.Put(ctx, "by-dev/config/quotaAndLimits/dml/insertRate/max", "8")
+		defer etcdCli.KV.Delete(ctx, "by-dev/config/quotaAndLimits/dml/insertRate/max")
 
 		assert.Eventually(t, func() bool {
 			limit, _ := clusterRateLimiter.GetLimiters().Get(internalpb.RateType_DDLCollection)
-			return newRate == limit.Limit().String()
-		}, 20*time.Second, time.Second)
+			return math.Abs(r-float64(limit.Limit())) < 0.01
+		}, 10*time.Second, 1*time.Second)
 
 		limit, _ := clusterRateLimiter.GetLimiters().Get(internalpb.RateType_DDLPartition)
 		assert.Equal(t, "+inf", limit.Limit().String())
 
 		limit, _ = clusterRateLimiter.GetLimiters().Get(internalpb.RateType_DMLInsert)
-		assert.Equal(t, "8.388608e+06", limit.Limit().String())
+		assert.True(t, math.Abs(8*1024*1024-float64(limit.Limit())) < 0.01)
 	})
 }

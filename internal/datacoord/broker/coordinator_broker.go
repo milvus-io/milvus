@@ -163,12 +163,11 @@ func (b *coordinatorBroker) GetDatabaseID(ctx context.Context, dbName string) (i
 		),
 		DbName: dbName,
 	})
-	if err != nil {
+	if err = merr.CheckRPCCall(resp, err); err != nil && !errors.Is(err, merr.ErrDatabaseNotFound) {
 		return 0, err
-	}
-	err = merr.Error(resp.GetStatus())
-	if errors.Is(err, merr.ErrCollectionNotFound) {
+	} else if errors.Is(err, merr.ErrDatabaseNotFound) {
 		return 0, nil
 	}
-	return resp.GetDbID(), err
+
+	return resp.GetDbID(), nil
 }

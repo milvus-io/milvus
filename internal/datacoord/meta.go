@@ -274,12 +274,11 @@ func (m *meta) GetCollectionBinlogSize() (int64, map[UniqueID]int64, map[UniqueI
 			collectionBinlogSize[segment.GetCollectionID()] += segmentSize
 
 			partBinlogSize, ok := partitionBinlogSize[segment.GetCollectionID()]
-			if ok {
-				partBinlogSize[segment.GetPartitionID()] += segmentSize
-			} else {
-				partitionBinlogSize[segment.GetCollectionID()] = make(map[int64]int64)
-				partitionBinlogSize[segment.GetCollectionID()][segment.GetPartitionID()] = segmentSize
+			if !ok {
+				partBinlogSize = make(map[int64]int64)
+				partitionBinlogSize[segment.GetCollectionID()] = partBinlogSize
 			}
+			partBinlogSize[segment.GetPartitionID()] += segmentSize
 
 			coll, ok := m.collections[segment.GetCollectionID()]
 			if ok {
