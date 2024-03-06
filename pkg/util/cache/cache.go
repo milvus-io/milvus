@@ -7,16 +7,26 @@ import (
 	"go.uber.org/atomic"
 )
 
+type valueWrapper[V any] struct {
+	value V
+}
 type cacheItem[K comparable, V any] struct {
 	key      K
-	value    V
+	value    *valueWrapper[V]
 	pinCount atomic.Int32
 }
 
 func newCacheItem[K comparable, V any](key K, value V) *cacheItem[K, V] {
 	return &cacheItem[K, V]{
 		key:   key,
-		value: value,
+		value: &valueWrapper[V]{value: value},
+	}
+}
+
+func newCacheItemWithKey[K comparable, V any](key K) *cacheItem[K, V] {
+	return &cacheItem[K, V]{
+		key:   key,
+		value: nil,
 	}
 }
 
@@ -25,7 +35,7 @@ func (item *cacheItem[K, V]) Unpin() {
 }
 
 func (i *cacheItem[K, V]) Value() V {
-	return i.value
+	return i.value.value
 }
 
 type (
@@ -38,6 +48,8 @@ type Cache[K comparable, V any] interface {
 	Contain(key K) bool
 	Set(key K, value V)
 	Remove(key K)
+	TryPin(keys ...K) ([]*cacheItem[K, V], bool)
+	Get(key K) (*cacheItem[K, V], bool)
 }
 
 // lruCache extends the ccache library to provide pinning and unpinning of items.
@@ -66,6 +78,94 @@ func NewLRUCache[K comparable, V any](
 		onCacheMiss: onCacheMiss,
 		onEvict:     onEvict,
 	}
+}
+
+func (c *lruCache[K, V]) TryPin(keys ...K) ([]*cacheItem[K, V], bool) {
+	if c.size < int32(len(keys)) {
+		return nil, false
+	}
+	c.rwlock.Lock()
+	if c.size+int32(len(keys)) > c.cap {
+		if ok := c.tryEvict(int32(len(keys))); !ok {
+			return nil, false
+		}
+	}
+
+	ret := make([]*cacheItem[K, V], 0, len(keys))
+	for _, key := range keys {
+		item := newCacheItemWithKey[K, V](key)
+		ret = append(ret, item)
+		c.add(item)
+	}
+	return ret, false
+}
+
+func (c *lruCache[K, V]) tryEvict(count int32) bool {
+	item := c.accessList.Back()
+	var n int32
+	evictItemsKey := make([]K, 0, count)
+	for item != nil && n < count {
+		cItem := item.Value.(*cacheItem[K, V])
+		if cItem.pinCount.Load() == 0 {
+			n++
+			evictItemsKey = append(evictItemsKey, cItem.key)
+		}
+		item = item.Prev()
+	}
+
+	if n < count {
+		return false
+	}
+
+	for _, key := range evictItemsKey {
+		iter := c.items[key]
+		c.accessList.Remove(iter)
+		delete(c.items, key)
+		c.size--
+		item := iter.Value.(*cacheItem[K, V])
+		if c.onEvict != nil {
+			c.onEvict(item.key, item.value.value)
+		}
+	}
+
+	return true
+}
+
+func (c *lruCache[K, V]) Get(key K) (*cacheItem[K, V], bool) {
+	c.rwlock.Lock()
+
+	iter, ok := c.items[key]
+	if !ok {
+		c.rwlock.Unlock()
+		return nil, false
+	}
+
+	item := iter.Value.(*cacheItem[K, V])
+	if item.value != nil || c.onCacheMiss == nil {
+		c.accessList.Remove(iter)
+		c.accessList.PushFront(item)
+		item.pinCount.Inc()
+
+		c.rwlock.Unlock()
+		return item, true
+	}
+
+	c.rwlock.Unlock()
+	if c.onCacheMiss != nil {
+		value, ok := c.onCacheMiss(key)
+		if !ok {
+			return nil, false
+		}
+
+		c.rwlock.Lock()
+		defer c.rwlock.Unlock()
+		item.value.value = value
+		c.accessList.Remove(iter)
+		c.accessList.PushFront(item)
+		item.pinCount.Inc()
+		return item, true
+	}
+	return nil, false
 }
 
 // GetAndPin gets and pins the given key if it exists,
@@ -162,7 +262,7 @@ func (c *lruCache[K, V]) evict(n int32) {
 
 		// TODO(yah01): this could be optimized as it doesn't need to acquire the lock
 		if c.onEvict != nil {
-			c.onEvict(item.key, item.value)
+			c.onEvict(item.key, item.value.value)
 		}
 	}
 }
