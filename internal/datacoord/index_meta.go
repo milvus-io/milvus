@@ -184,10 +184,19 @@ func checkParams(fieldIndex *model.Index, req *indexpb.CreateIndexRequest) bool 
 	if notEq {
 		return false
 	}
-	if len(fieldIndex.UserIndexParams) != len(req.GetUserIndexParams()) {
+
+	userIndexParamsWithoutMmapKey := make([]*commonpb.KeyValuePair, 0)
+	for _, param := range fieldIndex.UserIndexParams {
+		if param.Key == common.MmapEnabledKey {
+			continue
+		}
+		userIndexParamsWithoutMmapKey = append(userIndexParamsWithoutMmapKey, param)
+	}
+
+	if len(userIndexParamsWithoutMmapKey) != len(req.GetUserIndexParams()) {
 		return false
 	}
-	for _, param1 := range fieldIndex.UserIndexParams {
+	for _, param1 := range userIndexParamsWithoutMmapKey {
 		exist := false
 		for _, param2 := range req.GetUserIndexParams() {
 			if param2.Key == param1.Key && param2.Value == param1.Value {
