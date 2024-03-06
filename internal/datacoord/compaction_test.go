@@ -27,6 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -221,50 +222,169 @@ func (s *CompactionPlanHandlerSuite) TestRefreshL0Plan() {
 			}},
 		},
 	)
-	s.mockMeta.EXPECT().GetHealthySegment(mock.Anything).RunAndReturn(func(segID int64) *SegmentInfo {
-		return &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
-			ID:            segID,
-			Level:         datapb.SegmentLevel_L0,
-			InsertChannel: channel,
-			State:         commonpb.SegmentState_Flushed,
-			Deltalogs:     deltalogs,
-		}}
-	})
 
-	// 2 l0 segments
-	plan := &datapb.CompactionPlan{
-		PlanID: 1,
-		SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
-			{
-				SegmentID:     100,
+	s.Run("normal_refresh", func() {
+		s.mockMeta.EXPECT().GetHealthySegment(mock.Anything).RunAndReturn(func(segID int64) *SegmentInfo {
+			return &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+				ID:            segID,
 				Level:         datapb.SegmentLevel_L0,
 				InsertChannel: channel,
+				State:         commonpb.SegmentState_Flushed,
+				Deltalogs:     deltalogs,
+			}}
+		}).Times(2)
+		// 2 l0 segments
+		plan := &datapb.CompactionPlan{
+			PlanID: 1,
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+				{
+					SegmentID:     100,
+					Level:         datapb.SegmentLevel_L0,
+					InsertChannel: channel,
+				},
+				{
+					SegmentID:     101,
+					Level:         datapb.SegmentLevel_L0,
+					InsertChannel: channel,
+				},
 			},
-			{
-				SegmentID:     101,
-				Level:         datapb.SegmentLevel_L0,
-				InsertChannel: channel,
-			},
-		},
-		Type: datapb.CompactionType_Level0DeleteCompaction,
-	}
+			Type: datapb.CompactionType_Level0DeleteCompaction,
+		}
 
-	task := &compactionTask{
-		triggerInfo: &compactionSignal{id: 19530, collectionID: 1, partitionID: 10},
-		state:       executing,
-		plan:        plan,
-		dataNodeID:  1,
-	}
+		task := &compactionTask{
+			triggerInfo: &compactionSignal{id: 19530, collectionID: 1, partitionID: 10},
+			state:       executing,
+			plan:        plan,
+			dataNodeID:  1,
+		}
 
-	handler := newCompactionPlanHandler(nil, nil, s.mockMeta, s.mockAlloc)
-	handler.RefreshPlan(task)
+		handler := newCompactionPlanHandler(nil, nil, s.mockMeta, s.mockAlloc)
+		err := handler.RefreshPlan(task)
+		s.Require().NoError(err)
 
-	s.Equal(5, len(task.plan.GetSegmentBinlogs()))
-	segIDs := lo.Map(task.plan.GetSegmentBinlogs(), func(b *datapb.CompactionSegmentBinlogs, _ int) int64 {
-		return b.GetSegmentID()
+		s.Equal(5, len(task.plan.GetSegmentBinlogs()))
+		segIDs := lo.Map(task.plan.GetSegmentBinlogs(), func(b *datapb.CompactionSegmentBinlogs, _ int) int64 {
+			return b.GetSegmentID()
+		})
+
+		s.ElementsMatch([]int64{200, 201, 202, 100, 101}, segIDs)
 	})
 
-	s.ElementsMatch([]int64{200, 201, 202, 100, 101}, segIDs)
+	s.Run("segment_not_found", func() {
+		s.mockMeta.EXPECT().GetHealthySegment(mock.Anything).RunAndReturn(func(segID int64) *SegmentInfo {
+			return nil
+		}).Once()
+		plan := &datapb.CompactionPlan{
+			PlanID: 1,
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+				{
+					SegmentID:     102,
+					Level:         datapb.SegmentLevel_L0,
+					InsertChannel: channel,
+				},
+			},
+			Type: datapb.CompactionType_Level0DeleteCompaction,
+		}
+
+		task := &compactionTask{
+			triggerInfo: &compactionSignal{id: 19531, collectionID: 1, partitionID: 10},
+			state:       executing,
+			plan:        plan,
+			dataNodeID:  1,
+		}
+
+		handler := newCompactionPlanHandler(nil, nil, s.mockMeta, s.mockAlloc)
+		err := handler.RefreshPlan(task)
+		s.Error(err)
+		s.ErrorIs(err, merr.ErrSegmentNotFound)
+	})
+}
+
+func (s *CompactionPlanHandlerSuite) TestRefreshPlanMixCompaction() {
+	channel := "Ch-1"
+	binlogs := []*datapb.FieldBinlog{getFieldBinlogIDs(101, 3)}
+
+	s.Run("normal_refresh", func() {
+		s.mockMeta.EXPECT().GetHealthySegment(mock.Anything).RunAndReturn(func(segID int64) *SegmentInfo {
+			return &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+				ID:            segID,
+				Level:         datapb.SegmentLevel_L1,
+				InsertChannel: channel,
+				State:         commonpb.SegmentState_Flushed,
+				Binlogs:       binlogs,
+			}}
+		}).Times(2)
+		// 2 l0 segments
+		plan := &datapb.CompactionPlan{
+			PlanID: 1,
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+				{
+					SegmentID:     200,
+					Level:         datapb.SegmentLevel_L1,
+					InsertChannel: channel,
+				},
+				{
+					SegmentID:     201,
+					Level:         datapb.SegmentLevel_L1,
+					InsertChannel: channel,
+				},
+			},
+			Type: datapb.CompactionType_MixCompaction,
+		}
+
+		task := &compactionTask{
+			triggerInfo: &compactionSignal{id: 19530, collectionID: 1, partitionID: 10},
+			state:       executing,
+			plan:        plan,
+			dataNodeID:  1,
+		}
+
+		handler := newCompactionPlanHandler(nil, nil, s.mockMeta, s.mockAlloc)
+		err := handler.RefreshPlan(task)
+		s.Require().NoError(err)
+
+		s.Equal(2, len(task.plan.GetSegmentBinlogs()))
+		segIDs := lo.Map(task.plan.GetSegmentBinlogs(), func(b *datapb.CompactionSegmentBinlogs, _ int) int64 {
+			return b.GetSegmentID()
+		})
+
+		s.ElementsMatch([]int64{200, 201}, segIDs)
+	})
+
+	s.Run("segment_not_found", func() {
+		s.mockMeta.EXPECT().GetHealthySegment(mock.Anything).RunAndReturn(func(segID int64) *SegmentInfo {
+			return nil
+		}).Once()
+		// 2 l0 segments
+		plan := &datapb.CompactionPlan{
+			PlanID: 1,
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+				{
+					SegmentID:     200,
+					Level:         datapb.SegmentLevel_L1,
+					InsertChannel: channel,
+				},
+				{
+					SegmentID:     201,
+					Level:         datapb.SegmentLevel_L1,
+					InsertChannel: channel,
+				},
+			},
+			Type: datapb.CompactionType_MixCompaction,
+		}
+
+		task := &compactionTask{
+			triggerInfo: &compactionSignal{id: 19530, collectionID: 1, partitionID: 10},
+			state:       executing,
+			plan:        plan,
+			dataNodeID:  1,
+		}
+
+		handler := newCompactionPlanHandler(nil, nil, s.mockMeta, s.mockAlloc)
+		err := handler.RefreshPlan(task)
+		s.Error(err)
+		s.ErrorIs(err, merr.ErrSegmentNotFound)
+	})
 }
 
 func (s *CompactionPlanHandlerSuite) TestExecCompactionPlan() {

@@ -348,10 +348,12 @@ func (c *compactionPlanHandler) RefreshPlan(task *compactionTask) error {
 	if plan.GetType() == datapb.CompactionType_MixCompaction {
 		segIDMap := make(map[int64][]*datapb.FieldBinlog, len(plan.SegmentBinlogs))
 		for _, seg := range plan.GetSegmentBinlogs() {
-			if info := c.meta.GetHealthySegment(seg.GetSegmentID()); info != nil {
-				seg.Deltalogs = info.GetDeltalogs()
-				segIDMap[seg.SegmentID] = info.GetDeltalogs()
+			info := c.meta.GetHealthySegment(seg.GetSegmentID())
+			if info == nil {
+				return merr.WrapErrSegmentNotFound(seg.GetSegmentID())
 			}
+			seg.Deltalogs = info.GetDeltalogs()
+			segIDMap[seg.SegmentID] = info.GetDeltalogs()
 		}
 		log.Info("Compaction handler refreshed mix compaction plan", zap.Any("segID2DeltaLogs", segIDMap))
 	}
@@ -364,6 +366,8 @@ func (c *compactionPlanHandler) notifyTasks(tasks []*compactionTask) {
 		innerTask := task
 		err := c.RefreshPlan(innerTask)
 		if err != nil {
+			c.updateTask(innerTask.plan.GetPlanID(), setState(failed))
+			c.scheduler.Finish(innerTask.dataNodeID, innerTask.plan)
 			log.Warn("failed to refresh task",
 				zap.Int64("plan", task.plan.PlanID),
 				zap.Error(err))
