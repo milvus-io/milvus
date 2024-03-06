@@ -71,13 +71,14 @@ func (ccu *channelCheckpointUpdater) start() {
 			return
 		case <-ccu.notifyChan:
 			var tasks []*channelCPUpdateTask
-			ccu.mu.RLock()
+			ccu.mu.Lock()
 			for _, task := range ccu.tasks {
 				if task.flush {
+					task.flush = false
 					tasks = append(tasks, task)
 				}
 			}
-			ccu.mu.RUnlock()
+			ccu.mu.Unlock()
 			if len(tasks) > 0 {
 				ccu.updateCheckpoints(tasks)
 			}
