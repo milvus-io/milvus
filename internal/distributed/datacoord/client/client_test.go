@@ -1777,7 +1777,8 @@ func Test_CheckHealth(t *testing.T) {
 	// test return error
 	mockDC.ExpectedCalls = nil
 	mockDC.EXPECT().CheckHealth(mock.Anything, mock.Anything).Return(&milvuspb.CheckHealthResponse{
-		Status: merr.Success()}, mockErr)
+		Status: merr.Success(),
+	}, mockErr)
 
 	_, err = client.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
 	assert.NotNil(t, err)
@@ -1823,7 +1824,8 @@ func Test_GcConfirm(t *testing.T) {
 	// test return error
 	mockDC.ExpectedCalls = nil
 	mockDC.EXPECT().GcConfirm(mock.Anything, mock.Anything).Return(&datapb.GcConfirmResponse{
-		Status: merr.Success()}, mockErr)
+		Status: merr.Success(),
+	}, mockErr)
 
 	_, err = client.GcConfirm(ctx, &datapb.GcConfirmRequest{})
 	assert.NotNil(t, err)
@@ -1920,7 +1922,8 @@ func Test_GetSegmentIndexState(t *testing.T) {
 	// test return error status
 	mockDC.ExpectedCalls = nil
 	mockDC.EXPECT().GetSegmentIndexState(mock.Anything, mock.Anything).Return(&indexpb.GetSegmentIndexStateResponse{
-		Status: merr.Status(merr.ErrServiceNotReady)}, nil)
+		Status: merr.Status(merr.ErrServiceNotReady),
+	}, nil)
 
 	rsp, err := client.GetSegmentIndexState(ctx, &indexpb.GetSegmentIndexStateRequest{})
 	assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
@@ -1929,7 +1932,8 @@ func Test_GetSegmentIndexState(t *testing.T) {
 	// test return error
 	mockDC.ExpectedCalls = nil
 	mockDC.EXPECT().GetSegmentIndexState(mock.Anything, mock.Anything).Return(&indexpb.GetSegmentIndexStateResponse{
-		Status: merr.Success()}, mockErr)
+		Status: merr.Success(),
+	}, mockErr)
 
 	_, err = client.GetSegmentIndexState(ctx, &indexpb.GetSegmentIndexStateRequest{})
 	assert.NotNil(t, err)
@@ -1974,7 +1978,8 @@ func Test_GetIndexState(t *testing.T) {
 	// test return error status
 	mockDC.ExpectedCalls = nil
 	mockDC.EXPECT().GetIndexState(mock.Anything, mock.Anything).Return(&indexpb.GetIndexStateResponse{
-		Status: merr.Status(merr.ErrServiceNotReady)}, nil)
+		Status: merr.Status(merr.ErrServiceNotReady),
+	}, nil)
 
 	rsp, err := client.GetIndexState(ctx, &indexpb.GetIndexStateRequest{})
 	assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
@@ -1983,7 +1988,8 @@ func Test_GetIndexState(t *testing.T) {
 	// test return error
 	mockDC.ExpectedCalls = nil
 	mockDC.EXPECT().GetIndexState(mock.Anything, mock.Anything).Return(&indexpb.GetIndexStateResponse{
-		Status: merr.Success()}, mockErr)
+		Status: merr.Success(),
+	}, mockErr)
 	_, err = client.GetIndexState(ctx, &indexpb.GetIndexStateRequest{})
 	assert.NotNil(t, err)
 
@@ -2027,7 +2033,8 @@ func Test_GetIndexInfos(t *testing.T) {
 	// test return error status
 	mockDC.ExpectedCalls = nil
 	mockDC.EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(&indexpb.GetIndexInfoResponse{
-		Status: merr.Status(merr.ErrServiceNotReady)}, nil)
+		Status: merr.Status(merr.ErrServiceNotReady),
+	}, nil)
 
 	rsp, err := client.GetIndexInfos(ctx, &indexpb.GetIndexInfoRequest{})
 	assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
@@ -2036,7 +2043,8 @@ func Test_GetIndexInfos(t *testing.T) {
 	// test return error
 	mockDC.ExpectedCalls = nil
 	mockDC.EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(&indexpb.GetIndexInfoResponse{
-		Status: merr.Success()}, mockErr)
+		Status: merr.Success(),
+	}, mockErr)
 
 	_, err = client.GetIndexInfos(ctx, &indexpb.GetIndexInfoRequest{})
 	assert.NotNil(t, err)
@@ -2081,7 +2089,8 @@ func Test_DescribeIndex(t *testing.T) {
 	// test return error status
 	mockDC.ExpectedCalls = nil
 	mockDC.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(&indexpb.DescribeIndexResponse{
-		Status: merr.Status(merr.ErrServiceNotReady)}, nil)
+		Status: merr.Status(merr.ErrServiceNotReady),
+	}, nil)
 
 	rsp, err := client.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{})
 	assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
@@ -2090,7 +2099,8 @@ func Test_DescribeIndex(t *testing.T) {
 	// test return error
 	mockDC.ExpectedCalls = nil
 	mockDC.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(&indexpb.DescribeIndexResponse{
-		Status: merr.Success()}, mockErr)
+		Status: merr.Success(),
+	}, mockErr)
 
 	_, err = client.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{})
 	assert.NotNil(t, err)
@@ -2135,7 +2145,8 @@ func Test_GetIndexStatistics(t *testing.T) {
 	// test return error status
 	mockDC.ExpectedCalls = nil
 	mockDC.EXPECT().GetIndexStatistics(mock.Anything, mock.Anything).Return(&indexpb.GetIndexStatisticsResponse{
-		Status: merr.Status(merr.ErrServiceNotReady)}, nil)
+		Status: merr.Status(merr.ErrServiceNotReady),
+	}, nil)
 
 	rsp, err := client.GetIndexStatistics(ctx, &indexpb.GetIndexStatisticsRequest{})
 	assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
@@ -2144,7 +2155,8 @@ func Test_GetIndexStatistics(t *testing.T) {
 	// test return error
 	mockDC.ExpectedCalls = nil
 	mockDC.EXPECT().GetIndexStatistics(mock.Anything, mock.Anything).Return(&indexpb.GetIndexStatisticsResponse{
-		Status: merr.Success()}, mockErr)
+		Status: merr.Success(),
+	}, mockErr)
 
 	_, err = client.GetIndexStatistics(ctx, &indexpb.GetIndexStatisticsRequest{})
 	assert.NotNil(t, err)
@@ -2189,7 +2201,8 @@ func Test_GetIndexBuildProgress(t *testing.T) {
 	// test return error status
 	mockDC.ExpectedCalls = nil
 	mockDC.EXPECT().GetIndexBuildProgress(mock.Anything, mock.Anything).Return(&indexpb.GetIndexBuildProgressResponse{
-		Status: merr.Status(merr.ErrServiceNotReady)}, nil)
+		Status: merr.Status(merr.ErrServiceNotReady),
+	}, nil)
 
 	rsp, err := client.GetIndexBuildProgress(ctx, &indexpb.GetIndexBuildProgressRequest{})
 	assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
@@ -2198,7 +2211,8 @@ func Test_GetIndexBuildProgress(t *testing.T) {
 	// test return error
 	mockDC.ExpectedCalls = nil
 	mockDC.EXPECT().GetIndexBuildProgress(mock.Anything, mock.Anything).Return(&indexpb.GetIndexBuildProgressResponse{
-		Status: merr.Success()}, mockErr)
+		Status: merr.Success(),
+	}, mockErr)
 
 	_, err = client.GetIndexBuildProgress(ctx, &indexpb.GetIndexBuildProgressRequest{})
 	assert.NotNil(t, err)
