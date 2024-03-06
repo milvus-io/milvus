@@ -576,6 +576,9 @@ func (c *Client) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 			return retryErr
 		}
 		err = retryErr
+		if err != nil {
+			return retry.Unrecoverable(err)
+		}
 		return nil
 	})
 
@@ -605,6 +608,9 @@ func (c *Client) GetIndexState(ctx context.Context, req *indexpb.GetIndexStateRe
 			return retryErr
 		}
 		err = retryErr
+		if err != nil {
+			return retry.Unrecoverable(err)
+		}
 		return nil
 	})
 
@@ -627,6 +633,9 @@ func (c *Client) GetSegmentIndexState(ctx context.Context, req *indexpb.GetSegme
 			return retryErr
 		}
 		err = retryErr
+		if err != nil {
+			return retry.Unrecoverable(err)
+		}
 		return nil
 	})
 
@@ -649,6 +658,9 @@ func (c *Client) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 			return retryErr
 		}
 		err = retryErr
+		if err != nil {
+			return retry.Unrecoverable(err)
+		}
 		return nil
 	})
 
@@ -671,6 +683,9 @@ func (c *Client) DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRe
 			return retryErr
 		}
 		err = retryErr
+		if err != nil {
+			return retry.Unrecoverable(err)
+		}
 		return nil
 	})
 
@@ -693,6 +708,9 @@ func (c *Client) GetIndexStatistics(ctx context.Context, req *indexpb.GetIndexSt
 			return retryErr
 		}
 		err = retryErr
+		if err != nil {
+			return retry.Unrecoverable(err)
+		}
 		return nil
 	})
 
@@ -714,6 +732,9 @@ func (c *Client) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetInde
 			return retryErr
 		}
 		err = retryErr
+		if err != nil {
+			return retry.Unrecoverable(err)
+		}
 		return nil
 	})
 
@@ -736,6 +757,9 @@ func (c *Client) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest, o
 			return retryErr
 		}
 		err = retryErr
+		if err != nil {
+			return retry.Unrecoverable(err)
+		}
 		return nil
 	})
 
