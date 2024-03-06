@@ -573,7 +573,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 			err := s.compactionTrigger.triggerSingleCompaction(req.GetCollectionID(), req.GetPartitionID(),
 				req.GetSegmentID(), req.GetChannel(), false)
 			if err != nil {
-				log.Warn("failed to trigger single compaction")
+				log.Warn("failed to trigger single compaction", zap.Error(err))
 			}
 		}
 	}

@@ -494,7 +494,7 @@ func (s *CompactionPlanHandlerSuite) TestHandleMergeCompactionResult() {
 		segment := NewSegmentInfo(&datapb.SegmentInfo{ID: 100})
 		s.mockMeta.EXPECT().CompleteCompactionMutation(mock.Anything, mock.Anything).Return(
 			[]*SegmentInfo{segment},
-			&segMetricMutation{}, nil).Once()
+			&SegMetricMutation{}, nil).Once()
 		s.mockSessMgr.EXPECT().SyncSegments(mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
 
 		handler := newCompactionPlanHandler(s.mockSessMgr, s.mockCm, s.mockMeta, s.mockAlloc)
@@ -533,7 +533,7 @@ func (s *CompactionPlanHandlerSuite) TestCompleteCompaction() {
 		segment := NewSegmentInfo(&datapb.SegmentInfo{ID: 100})
 		s.mockMeta.EXPECT().CompleteCompactionMutation(mock.Anything, mock.Anything).Return(
 			[]*SegmentInfo{segment},
-			&segMetricMutation{}, nil).Once()
+			&SegMetricMutation{}, nil).Once()
 		s.mockSch.EXPECT().Finish(mock.Anything, mock.Anything).Return()
 
 		dataNodeID := UniqueID(111)
