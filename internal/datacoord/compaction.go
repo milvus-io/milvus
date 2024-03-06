@@ -366,7 +366,7 @@ func (c *compactionPlanHandler) notifyTasks(tasks []*compactionTask) {
 		innerTask := task
 		err := c.RefreshPlan(innerTask)
 		if err != nil {
-			c.updateTask(innerTask.plan.GetPlanID(), setState(failed))
+			c.updateTask(innerTask.plan.GetPlanID(), setState(failed), endSpan())
 			c.scheduler.Finish(innerTask.dataNodeID, innerTask.plan)
 			log.Warn("failed to refresh task",
 				zap.Int64("plan", task.plan.PlanID),
