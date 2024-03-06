@@ -67,6 +67,11 @@ func (h *spyCompactionHandler) getCompaction(planID int64) *compactionTask {
 	panic("not implemented") // TODO: Implement
 }
 
+func (h *spyCompactionHandler) analyzeCompactionPlan(plan *datapb.CompactionPlan) (*datapb.AnalyzeStatsResult, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
 // expireCompaction set the compaction state to expired
 func (h *spyCompactionHandler) updateCompaction(ts Timestamp) error {
 	panic("not implemented") // TODO: Implement

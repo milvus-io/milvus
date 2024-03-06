@@ -232,6 +232,78 @@ func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 	}, nil
 }
 
+func (node *DataNode) AnalyzeStats(ctx context.Context, req *datapb.CompactionPlan) (*commonpb.Status, error) {
+	log := log.Ctx(ctx).With(zap.Int64("planID", req.GetPlanID()))
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		log.Warn("DataNode.AnalyzeStats failed", zap.Int64("nodeId", paramtable.GetNodeID()), zap.Error(err))
+		return merr.Status(err), nil
+	}
+
+	ds, ok := node.flowgraphManager.GetFlowgraphService(req.GetChannel())
+	if !ok {
+		log.Warn("illegal compaction plan, channel not in this DataNode", zap.String("channelName", req.GetChannel()))
+		return merr.Status(merr.WrapErrChannelNotFound(req.GetChannel(), "illegal compaction plan")), nil
+	}
+
+	if !node.compactionExecutor.isValidChannel(req.GetChannel()) {
+		log.Warn("channel of compaction is marked invalid in compaction executor", zap.String("channelName", req.GetChannel()))
+		return merr.Status(merr.WrapErrChannelNotFound(req.GetChannel(), "channel is dropping")), nil
+	}
+
+	meta := ds.metacache
+	for _, segment := range req.GetSegmentBinlogs() {
+		if segment.GetLevel() == datapb.SegmentLevel_L0 {
+			continue
+		}
+		_, ok := meta.GetSegmentByID(segment.GetSegmentID(), metacache.WithSegmentState(commonpb.SegmentState_Flushed))
+		if !ok {
+			log.Warn("compaction plan contains segment which is not flushed",
+				zap.Int64("segmentID", segment.GetSegmentID()),
+			)
+			return merr.Status(merr.WrapErrSegmentNotFound(segment.GetSegmentID(), "segment with flushed state not found")), nil
+		}
+	}
+
+	taskCtx := tracer.Propagate(ctx, node.ctx)
+	var task analyzer
+	switch req.GetType() {
+	case datapb.CompactionType_MajorCompaction:
+		binlogIO := io.NewBinlogIO(node.chunkManager, getOrCreateIOPool())
+		task = newAnalyzeTask(
+			taskCtx,
+			binlogIO,
+			node.allocator,
+			ds.metacache,
+			req,
+		)
+	default:
+		log.Warn("Not support compaction type", zap.String("type", req.GetType().String()))
+		return merr.Status(merr.WrapErrParameterInvalidMsg("Unknown compaction type: %v", req.GetType().String())), nil
+	}
+
+	node.analyzeExecutor.execute(task)
+	return merr.Success(), nil
+}
+
+func (node *DataNode) GetAnalyzeStatsResult(ctx context.Context, plan *datapb.CompactionPlan) (*datapb.AnalyzeStatsResultResponse, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		log.Warn("DataNode.GetAnalyzeStatsResult failed", zap.Int64("nodeId", paramtable.GetNodeID()), zap.Error(err))
+		return &datapb.AnalyzeStatsResultResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+	result, err := node.analyzeExecutor.getTaskState(plan.GetPlanID())
+	if err != nil {
+		return &datapb.AnalyzeStatsResultResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+	return &datapb.AnalyzeStatsResultResponse{
+		Status: merr.Success(),
+		Result: result,
+	}, nil
+}
+
 // Compaction handles compaction request from DataCoord
 // returns status as long as compaction task enqueued or invalid
 func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan) (*commonpb.Status, error) {
@@ -243,8 +315,8 @@ func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan
 
 	ds, ok := node.flowgraphManager.GetFlowgraphService(req.GetChannel())
 	if !ok {
-		log.Warn("illegel compaction plan, channel not in this DataNode", zap.String("channelName", req.GetChannel()))
-		return merr.Status(merr.WrapErrChannelNotFound(req.GetChannel(), "illegel compaction plan")), nil
+		log.Warn("illegal compaction plan, channel not in this DataNode", zap.String("channelName", req.GetChannel()))
+		return merr.Status(merr.WrapErrChannelNotFound(req.GetChannel(), "illegal compaction plan")), nil
 	}
 
 	if !node.compactionExecutor.isValidChannel(req.GetChannel()) {

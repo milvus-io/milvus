@@ -98,6 +98,7 @@ type DataNode struct {
 	clearSignal              chan string // vchannel name
 	segmentCache             *Cache
 	compactionExecutor       *compactionExecutor
+	analyzeExecutor          *analyzeExecutor
 	timeTickSender           *timeTickSender
 	channelCheckpointUpdater *channelCheckpointUpdater
 
@@ -141,10 +142,10 @@ func NewDataNode(ctx context.Context, factory dependency.Factory, serverID int64
 		serverID:           serverID,
 		segmentCache:       newCache(),
 		compactionExecutor: newCompactionExecutor(),
-
-		eventManagerMap:  typeutil.NewConcurrentMap[string, *channelEventManager](),
-		flowgraphManager: newFlowgraphManager(),
-		clearSignal:      make(chan string, 100),
+		analyzeExecutor:    newAnalyzeExecutor(),
+		eventManagerMap:    typeutil.NewConcurrentMap[string, *channelEventManager](),
+		flowgraphManager:   newFlowgraphManager(),
+		clearSignal:        make(chan string, 100),
 
 		reportImportRetryTimes: 10,
 	}
@@ -379,6 +380,7 @@ func (node *DataNode) Start() error {
 		go node.BackGroundGC(node.clearSignal)
 
 		go node.compactionExecutor.start(node.ctx)
+		go node.analyzeExecutor.start(node.ctx)
 
 		go node.importManager.Start()
 

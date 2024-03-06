@@ -46,6 +46,9 @@ const (
 type compactionPlanContext interface {
 	start()
 	stop()
+
+	// analyzeCompactionPlan start to analyze compaction plan and waiting for the result
+	//analyzeCompactionPlan(plan *datapb.CompactionPlan) (*datapb.AnalyzeStatsResult, error)
 	// execCompactionPlan start to execute plan and return immediately
 	execCompactionPlan(signal *compactionSignal, plan *datapb.CompactionPlan) error
 	// getCompaction return compaction task. If planId does not exist, return nil.
@@ -384,6 +387,44 @@ func (c *compactionPlanHandler) notifyTasks(tasks []*compactionTask) {
 			return nil, nil
 		})
 	}
+}
+
+// analyzeCompactionPlan start to analyze compaction plan and waiting for the result
+func (c *compactionPlanHandler) analyzeCompactionPlan(plan *datapb.CompactionPlan) (*datapb.AnalyzeStatsResult, error) {
+	nodeID, err := c.chManager.FindWatcher(plan.GetChannel())
+	if err != nil {
+		log.Error("failed to find watcher", zap.Int64("planID", plan.GetPlanID()), zap.Error(err))
+		return nil, err
+	}
+
+	ctx := context.Background()
+	err = c.sessions.AnalyzeStats(ctx, nodeID, plan)
+	if err != nil {
+		log.Warn("Failed to analyze stats", zap.Error(err))
+		return nil, err
+	}
+
+	var analyzeStatsResult *datapb.AnalyzeStatsResult
+	for {
+		resp, err := c.sessions.GetAnalyzeStatsResult(ctx, nodeID, plan)
+		if err != nil {
+			log.Warn("Failed to get analyze stats result", zap.Error(err))
+			return nil, err
+		}
+		if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+			log.Warn("Failed to get analyze stats result", zap.String("reason", resp.GetStatus().GetReason()))
+			return nil, errors.New(resp.GetStatus().GetReason())
+		}
+		if resp.GetResult().GetFinished() {
+			analyzeStatsResult = resp.GetResult()
+			break
+		} else {
+			time.Sleep(5 * time.Second)
+		}
+	}
+
+	log.Info("Analyze Compaction plan done")
+	return analyzeStatsResult, nil
 }
 
 // execCompactionPlan start to execute plan and return immediately

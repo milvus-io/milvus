@@ -113,6 +113,8 @@ service DataNode {
   // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
   rpc GetMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}
 
+  rpc AnalyzeStats(CompactionPlan) returns (common.Status) {}
+  rpc GetAnalyzeStatsResult(CompactionPlan) returns (AnalyzeStatsResultResponse) {}
   rpc Compaction(CompactionPlan) returns (common.Status) {}
   rpc GetCompactionState(CompactionStateRequest) returns (CompactionStateResponse) {}
   rpc SyncSegments(SyncSegmentsRequest) returns (common.Status) {}
@@ -552,6 +554,18 @@ message CompactionPlanResult {
 message CompactionStateResponse {
   common.Status status = 1;
   repeated CompactionPlanResult results = 2;
+}
+
+message AnalyzeStatsResult {
+  int64 planID = 1;
+  bool finished  = 2;
+  string resultPath = 3;
+  string error_message = 4;
+}
+
+message AnalyzeStatsResultResponse {
+  common.Status status = 1;
+  AnalyzeStatsResult result = 2;
 }
 
 // Deprecated
