@@ -80,7 +80,7 @@ type CompactionMeta interface {
 	UpdateSegmentsInfo(operators ...UpdateOperator) error
 	SetSegmentCompacting(segmentID int64, compacting bool)
 
-	CompleteCompactionMutation(plan *datapb.CompactionPlan, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error)
+	CompleteCompactionMutation(plan *datapb.CompactionPlan, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *SegMetricMutation, error)
 }
 
 var _ CompactionMeta = (*meta)(nil)
