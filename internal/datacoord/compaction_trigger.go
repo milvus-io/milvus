@@ -53,14 +53,15 @@ type trigger interface {
 	triggerCompaction() error
 	// triggerSingleCompaction triggers a compaction bundled with collection-partition-channel-segment
 	triggerSingleCompaction(collectionID, partitionID, segmentID int64, channel string, blockToSendSignal bool) error
-	// forceTriggerCompaction force to start a compaction
-	forceTriggerCompaction(collectionID int64) (UniqueID, error)
+	// triggerManualCompaction force to start a compaction
+	triggerManualCompaction(collectionID int64, majorCompaction bool) (UniqueID, error)
 }
 
 type compactionSignal struct {
 	id           UniqueID
 	isForce      bool
 	isGlobal     bool
+	isMajor      bool
 	collectionID UniqueID
 	partitionID  UniqueID
 	channel      string
@@ -284,9 +285,9 @@ func (t *compactionTrigger) triggerSingleCompaction(collectionID, partitionID, s
 	return nil
 }
 
-// forceTriggerCompaction force to start a compaction
+// triggerManualCompaction force to start a compaction
 // invoked by user `ManualCompaction` operation
-func (t *compactionTrigger) forceTriggerCompaction(collectionID int64) (UniqueID, error) {
+func (t *compactionTrigger) triggerManualCompaction(collectionID int64, majorCompaction bool) (UniqueID, error) {
 	id, err := t.allocSignalID()
 	if err != nil {
 		return -1, err
@@ -295,6 +296,7 @@ func (t *compactionTrigger) forceTriggerCompaction(collectionID int64) (UniqueID
 		id:           id,
 		isForce:      true,
 		isGlobal:     true,
+		isMajor:      majorCompaction,
 		collectionID: collectionID,
 	}
 
