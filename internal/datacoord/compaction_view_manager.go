@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -53,16 +54,12 @@ func (m *CompactionViewManager) checkLoop() {
 	defer logutil.LogPanic()
 	defer m.closeWg.Done()
 
-	if !Params.DataCoordCfg.EnableAutoCompaction.GetAsBool() {
-		return
+	// TODO: Only process L0 compaction now
+	L0SegmentEnabled := func() bool {
+		return autoCompactionEnabled() && paramtable.Get().DataCoordCfg.EnableLevelZeroSegment.GetAsBool()
 	}
 
-	// TODO: Only process L0 compaction now, so just return if its not enabled
-	if !Params.DataCoordCfg.EnableLevelZeroSegment.GetAsBool() {
-		return
-	}
-
-	interval := Params.DataCoordCfg.GlobalCompactionInterval.GetAsDuration(time.Second)
+	interval := paramtable.Get().DataCoordCfg.GlobalCompactionInterval.GetAsDuration(time.Second)
 	checkTicker := time.NewTicker(interval)
 	defer checkTicker.Stop()
 
@@ -88,16 +85,19 @@ func (m *CompactionViewManager) checkLoop() {
 			log.Info("Compaction View checkLoop quit")
 			return
 		case <-checkTicker.C:
-			refreshViewsAndTrigger(context.Background())
+			if L0SegmentEnabled() {
+				refreshViewsAndTrigger(context.Background())
+			}
 
 		case <-idleTicker.C:
-			// idelTicker will be reset everytime when Check's able to
-			// generates compaction events
-
-			// if no views are freshed, try to get cached views and trigger a
-			// TriggerTypeViewIDLE event
-			if !refreshViewsAndTrigger(context.Background()) {
-				m.triggerEventForIDLEView()
+			if L0SegmentEnabled() {
+				// idelTicker will be reset everytime when Check valid generates compaction events
+				//
+				// if no views are freshed, try to get cached views and trigger a
+				// TriggerTypeViewIDLE event
+				if !refreshViewsAndTrigger(context.Background()) {
+					m.triggerEventForIDLEView()
+				}
 			}
 		}
 	}

@@ -71,6 +71,10 @@ func genSegmentsForMeta(label *CompactionGroupLabel) map[int64]*SegmentInfo {
 }
 
 func (s *CompactionViewManagerSuite) SetupTest() {
+	s.SetupSubTest()
+}
+
+func (s *CompactionViewManagerSuite) SetupSubTest() {
 	s.mockAlloc = NewNMockAllocator(s.T())
 	s.mockTriggerManager = NewMockTriggerManager(s.T())
 
@@ -95,20 +99,36 @@ func (s *CompactionViewManagerSuite) TestCheckLoop() {
 		s.m.Close()
 	})
 
-	s.Run("Test not enable auto compaction", func() {
-		paramtable.Get().Save(Params.DataCoordCfg.EnableAutoCompaction.Key, "false")
-		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableAutoCompaction.Key)
+	s.Run("Test not enable compaction", func() {
+		var (
+			globalIntervalK = paramtable.Get().DataCoordCfg.GlobalCompactionInterval.Key
+			enableCompK     = paramtable.Get().DataCoordCfg.EnableCompaction.Key
+			enableAutoCompK = paramtable.Get().DataCoordCfg.EnableAutoCompaction.Key
+			enableL0K       = paramtable.Get().DataCoordCfg.EnableLevelZeroSegment.Key
+		)
+		defer paramtable.Get().Reset(globalIntervalK)
+		defer paramtable.Get().Reset(enableCompK)
+		defer paramtable.Get().Reset(enableAutoCompK)
+		defer paramtable.Get().Reset(enableL0K)
 
+		paramtable.Get().Save(globalIntervalK, "0.01")
+		paramtable.Get().Save(enableCompK, "false")
+		paramtable.Get().Save(enableAutoCompK, "true")
+
+		// no mocks needed for no events will be triggerred
 		s.m.Start()
-		s.m.closeWg.Wait()
-	})
 
-	s.Run("Test not enable levelZero segment", func() {
-		paramtable.Get().Save(Params.DataCoordCfg.EnableLevelZeroSegment.Key, "false")
-		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableLevelZeroSegment.Key)
+		waitDur := 100 * time.Millisecond
+		<-time.After(waitDur)
+		paramtable.Get().Save(enableAutoCompK, "false")
+		paramtable.Get().Save(enableCompK, "true")
 
-		s.m.Start()
-		s.m.closeWg.Wait()
+		<-time.After(waitDur)
+		paramtable.Get().Save(enableL0K, "false")
+		paramtable.Get().Save(enableAutoCompK, "true")
+
+		<-time.After(waitDur)
+		s.m.Close()
 	})
 }
 

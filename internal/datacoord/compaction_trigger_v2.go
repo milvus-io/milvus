@@ -68,10 +68,10 @@ func (m *CompactionTriggerManager) Notify(taskID UniqueID, eventType CompactionT
 			}
 
 		case TriggerTypeLevelZeroViewIDLE:
-			log.Debug("Start to trigger a level zero compaction by TriggerTypLevelZeroViewIDLE")
+			log.Debug("Start to trigger a level zero compaction by TriggerTypeLevelZeroViewIDLE")
 			outView, reason := view.Trigger()
 			if outView == nil {
-				log.Info("Start to force trigger a level zero compaction by TriggerTypLevelZeroViewIDLE")
+				log.Info("Start to force trigger a level zero compaction by TriggerTypeLevelZeroViewIDLE")
 				outView, reason = view.ForceTrigger()
 			}
 

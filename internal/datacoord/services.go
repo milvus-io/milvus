@@ -547,12 +547,12 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		// notify building index
 		s.flushCh <- req.SegmentID
 
-		// notify compaction
-		if paramtable.Get().DataCoordCfg.EnableCompaction.GetAsBool() {
+		if !req.Importing {
+			// notify compaction
 			err := s.compactionTrigger.triggerSingleCompaction(req.GetCollectionID(), req.GetPartitionID(),
 				req.GetSegmentID(), req.GetChannel(), false)
 			if err != nil {
-				log.Warn("failed to trigger single compaction")
+				log.Warn("failed to trigger single compaction", zap.Error(err))
 			}
 		}
 	}
@@ -618,6 +618,7 @@ func (s *Server) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtual
 		log.Warn("DropVChannel failed to ReleaseAndRemove", zap.String("channel", channel), zap.Error(err))
 	}
 	s.segmentManager.DropSegmentsOfChannel(ctx, channel)
+
 	s.compactionHandler.removeTasksByChannel(channel)
 
 	metrics.CleanupDataCoordNumStoredRows(collectionID)
@@ -1084,11 +1085,6 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 		}, nil
 	}
 
-	if !Params.DataCoordCfg.EnableCompaction.GetAsBool() {
-		resp.Status = merr.Status(merr.WrapErrServiceUnavailable("compaction disabled"))
-		return resp, nil
-	}
-
 	id, err := s.compactionTrigger.forceTriggerCompaction(req.CollectionID)
 	if err != nil {
 		log.Error("failed to trigger manual compaction", zap.Error(err))
@@ -1125,7 +1121,7 @@ func (s *Server) GetCompactionState(ctx context.Context, req *milvuspb.GetCompac
 		}, nil
 	}
 
-	if !Params.DataCoordCfg.EnableCompaction.GetAsBool() {
+	if !compactionEnabled() {
 		resp.Status = merr.Status(merr.WrapErrServiceUnavailable("compaction disabled"))
 		return resp, nil
 	}
@@ -1165,7 +1161,8 @@ func (s *Server) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.
 	resp := &milvuspb.GetCompactionPlansResponse{
 		Status: merr.Success(),
 	}
-	if !Params.DataCoordCfg.EnableCompaction.GetAsBool() {
+
+	if !compactionEnabled() {
 		resp.Status = merr.Status(merr.WrapErrServiceUnavailable("compaction disabled"))
 		return resp, nil
 	}

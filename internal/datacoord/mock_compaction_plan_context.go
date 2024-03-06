@@ -289,48 +289,6 @@ func (_c *MockCompactionPlanContext_stop_Call) RunAndReturn(run func()) *MockCom
 	return _c
 }
 
-// updateCompaction provides a mock function with given fields: ts
-func (_m *MockCompactionPlanContext) updateCompaction(ts uint64) error {
-	ret := _m.Called(ts)
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(uint64) error); ok {
-		r0 = rf(ts)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// MockCompactionPlanContext_updateCompaction_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'updateCompaction'
-type MockCompactionPlanContext_updateCompaction_Call struct {
-	*mock.Call
-}
-
-// updateCompaction is a helper method to define mock.On call
-//   - ts uint64
-func (_e *MockCompactionPlanContext_Expecter) updateCompaction(ts interface{}) *MockCompactionPlanContext_updateCompaction_Call {
-	return &MockCompactionPlanContext_updateCompaction_Call{Call: _e.mock.On("updateCompaction", ts)}
-}
-
-func (_c *MockCompactionPlanContext_updateCompaction_Call) Run(run func(ts uint64)) *MockCompactionPlanContext_updateCompaction_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(uint64))
-	})
-	return _c
-}
-
-func (_c *MockCompactionPlanContext_updateCompaction_Call) Return(_a0 error) *MockCompactionPlanContext_updateCompaction_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockCompactionPlanContext_updateCompaction_Call) RunAndReturn(run func(uint64) error) *MockCompactionPlanContext_updateCompaction_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // NewMockCompactionPlanContext creates a new instance of MockCompactionPlanContext. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewMockCompactionPlanContext(t interface {

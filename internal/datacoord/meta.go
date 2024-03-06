@@ -230,19 +230,17 @@ func (m *meta) GetSegmentsChanPart(selector SegmentInfoSelector) []*chanPartSegm
 			continue
 		}
 
-		cloned := segmentInfo.Clone()
-
-		dim := fmt.Sprintf("%d-%s", cloned.PartitionID, cloned.InsertChannel)
+		dim := fmt.Sprintf("%d-%s", segmentInfo.PartitionID, segmentInfo.InsertChannel)
 		entry, ok := mDimEntry[dim]
 		if !ok {
 			entry = &chanPartSegments{
-				collectionID: cloned.CollectionID,
-				partitionID:  cloned.PartitionID,
-				channelName:  cloned.InsertChannel,
+				collectionID: segmentInfo.CollectionID,
+				partitionID:  segmentInfo.PartitionID,
+				channelName:  segmentInfo.InsertChannel,
 			}
 			mDimEntry[dim] = entry
 		}
-		entry.segments = append(entry.segments, cloned)
+		entry.segments = append(entry.segments, segmentInfo)
 	}
 
 	result := make([]*chanPartSegments, 0, len(mDimEntry))

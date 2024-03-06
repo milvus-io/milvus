@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -74,6 +75,13 @@ func (s *CompactionPlanHandlerSuite) TestRemoveTasksByChannel() {
 	handler.mu.Lock()
 	s.Equal(0, len(handler.plans))
 	handler.mu.Unlock()
+
+	s.Run("disable compaction", func() {
+		paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableCompaction.Key, "false")
+		defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableCompaction.Key)
+
+		handler.removeTasksByChannel(ch)
+	})
 }
 
 func (s *CompactionPlanHandlerSuite) TestCheckResult() {
@@ -88,13 +96,13 @@ func (s *CompactionPlanHandlerSuite) TestCheckResult() {
 	{
 		s.mockAlloc.EXPECT().allocTimestamp(mock.Anything).Return(0, errors.New("mock")).Once()
 		handler := newCompactionPlanHandler(s.mockSessMgr, nil, nil, s.mockAlloc)
-		handler.checkResult()
+		handler.CheckResult()
 	}
 
 	{
 		s.mockAlloc.EXPECT().allocTimestamp(mock.Anything).Return(19530, nil).Once()
 		handler := newCompactionPlanHandler(s.mockSessMgr, nil, nil, s.mockAlloc)
-		handler.checkResult()
+		handler.CheckResult()
 	}
 }
 
@@ -468,6 +476,14 @@ func (s *CompactionPlanHandlerSuite) TestExecCompactionPlan() {
 			}
 		})
 	}
+
+	s.Run("disable compaction", func() {
+		paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableCompaction.Key, "false")
+		defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableCompaction.Key)
+
+		err := handler.execCompactionPlan(&compactionSignal{id: 333}, &datapb.CompactionPlan{PlanID: 333, Channel: "ch-2"})
+		s.NoError(err)
+	})
 }
 
 func (s *CompactionPlanHandlerSuite) TestHandleMergeCompactionResult() {
@@ -679,6 +695,17 @@ func (s *CompactionPlanHandlerSuite) TestGetCompactionTask() {
 
 	task = handler.getCompaction(19530)
 	s.Nil(task)
+
+	s.Run("disable compaction", func() {
+		paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableCompaction.Key, "false")
+		defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableCompaction.Key)
+
+		got := handler.getCompactionTasksBySignalID(1)
+		s.Nil(got)
+
+		task := handler.getCompaction(1)
+		s.Nil(task)
+	})
 }
 
 func (s *CompactionPlanHandlerSuite) TestUpdateCompaction() {
