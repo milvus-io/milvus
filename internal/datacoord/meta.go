@@ -336,6 +336,20 @@ func (m *meta) GetHealthySegment(segID UniqueID) *SegmentInfo {
 	return nil
 }
 
+// Get segments By filter function
+func (m *meta) GetSegments(segIDs []UniqueID, filterFunc SegmentInfoSelector) []UniqueID {
+	m.RLock()
+	defer m.RUnlock()
+	var result []UniqueID
+	for _, id := range segIDs {
+		segment := m.segments.GetSegment(id)
+		if segment != nil && filterFunc(segment) {
+			result = append(result, id)
+		}
+	}
+	return result
+}
+
 // GetSegment returns segment info with provided id
 // include the unhealthy segment
 // if not segment is found, nil will be returned
@@ -1291,18 +1305,12 @@ func (m *meta) HasSegments(segIDs []UniqueID) (bool, error) {
 	return true, nil
 }
 
-func (m *meta) GetCompactionTo(segmentID int64) *SegmentInfo {
+// GetCompactionTo returns the segment info of the segment to be compacted to.
+func (m *meta) GetCompactionTo(segmentID int64) (*SegmentInfo, bool) {
 	m.RLock()
 	defer m.RUnlock()
 
-	segments := m.segments.GetSegments()
-	for _, segment := range segments {
-		parents := typeutil.NewUniqueSet(segment.GetCompactionFrom()...)
-		if parents.Contain(segmentID) {
-			return segment
-		}
-	}
-	return nil
+	return m.segments.GetCompactionTo(segmentID)
 }
 
 // UpdateChannelCheckpoint updates and saves channel checkpoint.

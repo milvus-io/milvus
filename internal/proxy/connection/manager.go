@@ -6,52 +6,23 @@ import (
 	"sync"
 	"time"
 
-	"github.com/golang/protobuf/proto"
+	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/log"
-)
-
-const (
-	// we shouldn't check this too frequently.
-	defaultConnCheckDuration  = 2 * time.Minute
-	defaultTTLForInactiveConn = 24 * time.Hour
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type connectionManager struct {
-	mu sync.RWMutex
-
 	initOnce sync.Once
 	stopOnce sync.Once
 
 	closeSignal chan struct{}
 	wg          sync.WaitGroup
 
-	buffer   chan int64
-	duration time.Duration
-	ttl      time.Duration
-
-	clientInfos map[int64]clientInfo
-}
-
-type connectionManagerOption func(s *connectionManager)
-
-func withDuration(duration time.Duration) connectionManagerOption {
-	return func(s *connectionManager) {
-		s.duration = duration
-	}
-}
-
-func withTTL(ttl time.Duration) connectionManagerOption {
-	return func(s *connectionManager) {
-		s.ttl = ttl
-	}
-}
-
-func (s *connectionManager) apply(opts ...connectionManagerOption) {
-	for _, opt := range opts {
-		opt(s)
-	}
+	clientInfos *typeutil.ConcurrentMap[int64, clientInfo]
+	count       atomic.Int64
 }
 
 func (s *connectionManager) init() {
@@ -71,7 +42,7 @@ func (s *connectionManager) Stop() {
 func (s *connectionManager) checkLoop() {
 	defer s.wg.Done()
 
-	t := time.NewTicker(s.duration)
+	t := time.NewTicker(paramtable.Get().ProxyCfg.ConnectionCheckIntervalSeconds.GetAsDuration(time.Second))
 	defer t.Stop()
 
 	for {
@@ -79,10 +50,9 @@ func (s *connectionManager) checkLoop() {
 		case <-s.closeSignal:
 			log.Info("connection manager closed")
 			return
-		case identifier := <-s.buffer:
-			s.Update(identifier)
 		case <-t.C:
 			s.removeLongInactiveClients()
+			t.Reset(paramtable.Get().ProxyCfg.ConnectionCheckIntervalSeconds.GetAsDuration(time.Second))
 		}
 	}
 }
@@ -94,49 +64,42 @@ func (s *connectionManager) Register(ctx context.Context, identifier int64, info
 		lastActiveTime: time.Now(),
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.clientInfos[identifier] = cli
+	s.count.Inc()
+	s.clientInfos.Insert(identifier, cli)
 	log.Ctx(ctx).Info("client register", cli.GetLogger()...)
 }
 
 func (s *connectionManager) KeepActive(identifier int64) {
-	// make this asynchronous and then the rpc won't be blocked too long.
-	s.buffer <- identifier
+	s.Update(identifier)
 }
 
 func (s *connectionManager) List() []*commonpb.ClientInfo {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	clients := make([]*commonpb.ClientInfo, 0, s.count.Load())
 
-	clients := make([]*commonpb.ClientInfo, 0, len(s.clientInfos))
-
-	for identifier, cli := range s.clientInfos {
-		if cli.ClientInfo != nil {
-			client := proto.Clone(cli.ClientInfo).(*commonpb.ClientInfo)
+	s.clientInfos.Range(func(identifier int64, info clientInfo) bool {
+		if info.ClientInfo != nil {
+			client := typeutil.Clone(info.ClientInfo)
 			if client.Reserved == nil {
 				client.Reserved = make(map[string]string)
 			}
 			client.Reserved["identifier"] = string(strconv.AppendInt(nil, identifier, 10))
-			client.Reserved["last_active_time"] = cli.lastActiveTime.String()
+			client.Reserved["last_active_time"] = info.lastActiveTime.String()
 
 			clients = append(clients, client)
 		}
-	}
+		return true
+	})
 
 	return clients
 }
 
 func (s *connectionManager) Get(ctx context.Context) *commonpb.ClientInfo {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
 	identifier, err := GetIdentifierFromContext(ctx)
 	if err != nil {
 		return nil
 	}
 
-	cli, ok := s.clientInfos[identifier]
+	cli, ok := s.clientInfos.Get(identifier)
 	if !ok {
 		return nil
 	}
@@ -144,37 +107,30 @@ func (s *connectionManager) Get(ctx context.Context) *commonpb.ClientInfo {
 }
 
 func (s *connectionManager) Update(identifier int64) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	cli, ok := s.clientInfos[identifier]
+	info, ok := s.clientInfos.Get(identifier)
 	if ok {
-		cli.lastActiveTime = time.Now()
-		s.clientInfos[identifier] = cli
+		info.lastActiveTime = time.Now()
+		s.clientInfos.Insert(identifier, info)
 	}
 }
 
 func (s *connectionManager) removeLongInactiveClients() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	for candidate, cli := range s.clientInfos {
-		if time.Since(cli.lastActiveTime) > s.ttl {
-			log.Info("client deregister", cli.GetLogger()...)
-			delete(s.clientInfos, candidate)
+	ttl := paramtable.Get().ProxyCfg.ConnectionClientInfoTTLSeconds.GetAsDuration(time.Second)
+	s.clientInfos.Range(func(candidate int64, info clientInfo) bool {
+		if time.Since(info.lastActiveTime) > ttl {
+			log.Info("client deregister", info.GetLogger()...)
+			s.clientInfos.Remove(candidate)
+			s.count.Dec()
 		}
-	}
+		return true
+	})
 }
 
-func newConnectionManager(opts ...connectionManagerOption) *connectionManager {
+func newConnectionManager() *connectionManager {
 	s := &connectionManager{
 		closeSignal: make(chan struct{}, 1),
-		buffer:      make(chan int64, 64),
-		duration:    defaultConnCheckDuration,
-		ttl:         defaultTTLForInactiveConn,
-		clientInfos: make(map[int64]clientInfo),
+		clientInfos: typeutil.NewConcurrentMap[int64, clientInfo](),
 	}
-	s.apply(opts...)
 	s.init()
 
 	return s

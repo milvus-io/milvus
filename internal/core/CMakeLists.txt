@@ -127,6 +127,7 @@ if (LINUX OR MSYS)
                   "-DELPP_THREAD_SAFE"
                   "-fopenmp"
                   "-Wno-error"
+                  "-Wno-all"
                   )
     if (CMAKE_BUILD_TYPE STREQUAL "Release")
         append_flags( CMAKE_CXX_FLAGS
@@ -141,17 +142,9 @@ if ( APPLE )
             "-fPIC"
             "-DELPP_THREAD_SAFE"
             "-fopenmp"
-            "-Wno-error"
-            "-Wsign-compare"
-            "-Wall"
             "-pedantic"
-            "-Wno-unused-command-line-argument"
-            "-Wextra"
-            "-Wno-unused-parameter"
-            "-Wno-deprecated"
+            "-Wno-all"
             "-DBOOST_STACKTRACE_GNU_SOURCE_NOT_REQUIRED=1"
-            #"-fvisibility=hidden"
-            #"-fvisibility-inlines-hidden"
             )
 endif ()
 

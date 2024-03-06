@@ -46,6 +46,10 @@ type GrpcAccessInfoSuite struct {
 	info     *GrpcAccessInfo
 }
 
+func (s *GrpcAccessInfoSuite) SetupSuite() {
+	paramtable.Init()
+}
+
 func (s *GrpcAccessInfoSuite) SetupTest() {
 	s.username = "test-user"
 	s.traceID = "test-trace"
@@ -172,6 +176,18 @@ func (s *GrpcAccessInfoSuite) TestExpression() {
 	}
 	result = s.info.Get("$method_expr")
 	s.Equal(testExpr, result[0])
+}
+
+func (s *GrpcAccessInfoSuite) TestOutputFields() {
+	result := s.info.Get("$output_fields")
+	s.Equal(unknownString, result[0])
+
+	fileds := []string{"pk"}
+	s.info.req = &milvuspb.QueryRequest{
+		OutputFields: fileds,
+	}
+	result = s.info.Get("$output_fields")
+	s.Equal(fmt.Sprint(fileds), result[0])
 }
 
 func (s *GrpcAccessInfoSuite) TestClusterPrefix() {

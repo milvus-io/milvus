@@ -302,3 +302,11 @@ func getSdkVersionByUserAgent(ctx context.Context) string {
 func getClusterPrefix(i *GrpcAccessInfo) string {
 	return paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
 }
+
+func getOutputFields(i *GrpcAccessInfo) string {
+	fields, ok := requestutil.GetOutputFieldsFromRequest(i.req)
+	if ok {
+		return fmt.Sprint(fields.([]string))
+	}
+	return unknownString
+}

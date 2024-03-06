@@ -1,7 +1,9 @@
 package datacoord
 
 import (
+	"context"
 	"testing"
+	"time"
 
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
@@ -98,17 +100,91 @@ func (s *CompactionViewManagerSuite) TestCheckLoop() {
 		s.m.Start()
 		s.m.closeWg.Wait()
 	})
+
+	s.Run("Test not enable levelZero segment", func() {
+		paramtable.Get().Save(Params.DataCoordCfg.EnableLevelZeroSegment.Key, "false")
+		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableLevelZeroSegment.Key)
+
+		s.m.Start()
+		s.m.closeWg.Wait()
+	})
 }
 
-func (s *CompactionViewManagerSuite) TestCheck() {
+func (s *CompactionViewManagerSuite) TestCheckLoopIDLETicker() {
+	paramtable.Get().Save(Params.DataCoordCfg.GlobalCompactionInterval.Key, "0.1")
+	defer paramtable.Get().Reset(Params.DataCoordCfg.GlobalCompactionInterval.Key)
 	paramtable.Get().Save(Params.DataCoordCfg.EnableLevelZeroSegment.Key, "true")
 	defer paramtable.Get().Reset(Params.DataCoordCfg.EnableLevelZeroSegment.Key)
 
-	s.mockAlloc.EXPECT().allocID(mock.Anything).Return(1, nil).Times(2)
+	events := s.m.Check(context.Background())
+	s.NotEmpty(events)
+	s.Require().NotEmpty(s.m.view.collections)
+
+	notified := make(chan struct{})
+	s.mockAlloc.EXPECT().allocID(mock.Anything).Return(1, nil).Once()
+	s.mockTriggerManager.EXPECT().Notify(mock.Anything, mock.Anything, mock.Anything).
+		Run(func(taskID UniqueID, tType CompactionTriggerType, views []CompactionView) {
+			s.Equal(TriggerTypeLevelZeroViewIDLE, tType)
+			v, ok := views[0].(*LevelZeroSegmentsView)
+			s.True(ok)
+			s.NotNil(v)
+			log.Info("All views", zap.String("l0 view", v.String()))
+
+			notified <- struct{}{}
+		}).Once()
+
+	s.m.Start()
+	<-notified
+	s.m.Close()
+}
+
+func (s *CompactionViewManagerSuite) TestCheckLoopRefreshViews() {
+	paramtable.Get().Save(Params.DataCoordCfg.GlobalCompactionInterval.Key, "0.1")
+	defer paramtable.Get().Reset(Params.DataCoordCfg.GlobalCompactionInterval.Key)
+	paramtable.Get().Save(Params.DataCoordCfg.EnableLevelZeroSegment.Key, "true")
+	defer paramtable.Get().Reset(Params.DataCoordCfg.EnableLevelZeroSegment.Key)
+
+	s.Require().Empty(s.m.view.collections)
+
+	notified := make(chan struct{})
+	s.mockAlloc.EXPECT().allocID(mock.Anything).Return(1, nil).Once()
+	s.mockTriggerManager.EXPECT().Notify(mock.Anything, mock.Anything, mock.Anything).
+		Run(func(taskID UniqueID, tType CompactionTriggerType, views []CompactionView) {
+			s.Equal(TriggerTypeLevelZeroViewChange, tType)
+			v, ok := views[0].(*LevelZeroSegmentsView)
+			s.True(ok)
+			s.NotNil(v)
+			log.Info("All views", zap.String("l0 view", v.String()))
+
+			notified <- struct{}{}
+		}).Once()
+
+	s.m.Start()
+	<-notified
+
+	// clear view
+	s.m.viewGuard.Lock()
+	s.m.view.collections = make(map[int64][]*SegmentView)
+	s.m.viewGuard.Unlock()
+
+	// clear meta
+	s.m.meta.Lock()
+	s.m.meta.segments.segments = make(map[int64]*SegmentInfo)
+	s.m.meta.Unlock()
+
+	<-time.After(time.Second)
+	s.m.Close()
+}
+
+func (s *CompactionViewManagerSuite) TestTriggerEventForIDLEView() {
+	s.Require().Empty(s.m.view.collections)
+	s.m.triggerEventForIDLEView()
+
+	s.mockAlloc.EXPECT().allocID(mock.Anything).Return(1, nil).Once()
 	s.mockTriggerManager.EXPECT().Notify(mock.Anything, mock.Anything, mock.Anything).
 		Run(func(taskID UniqueID, tType CompactionTriggerType, views []CompactionView) {
 			s.EqualValues(1, taskID)
-			s.Equal(TriggerTypeLevelZeroView, tType)
+			s.Equal(TriggerTypeLevelZeroViewIDLE, tType)
 			s.Equal(1, len(views))
 			v, ok := views[0].(*LevelZeroSegmentsView)
 			s.True(ok)
@@ -122,9 +198,43 @@ func (s *CompactionViewManagerSuite) TestCheck() {
 			log.Info("All views", zap.String("l0 view", v.String()))
 		}).Once()
 
+	events := s.m.Check(context.Background())
+	s.NotEmpty(events)
+	s.Require().NotEmpty(s.m.view.collections)
+	s.m.triggerEventForIDLEView()
+}
+
+func (s *CompactionViewManagerSuite) TestNotifyTrigger() {
+	s.mockAlloc.EXPECT().allocID(mock.Anything).Return(1, nil).Once()
+	s.mockTriggerManager.EXPECT().Notify(mock.Anything, mock.Anything, mock.Anything).
+		Run(func(taskID UniqueID, tType CompactionTriggerType, views []CompactionView) {
+			s.EqualValues(1, taskID)
+			s.Equal(TriggerTypeLevelZeroViewChange, tType)
+			s.Equal(1, len(views))
+			v, ok := views[0].(*LevelZeroSegmentsView)
+			s.True(ok)
+			s.NotNil(v)
+
+			expectedSegs := []int64{100, 101, 102, 103}
+			gotSegs := lo.Map(v.segments, func(s *SegmentView, _ int) int64 { return s.ID })
+			s.ElementsMatch(expectedSegs, gotSegs)
+
+			s.EqualValues(30000, v.earliestGrowingSegmentPos.GetTimestamp())
+			log.Info("All views", zap.String("l0 view", v.String()))
+		}).Once()
+
+	ctx := context.Background()
+	s.Require().Empty(s.m.view.collections)
+	events := s.m.Check(ctx)
+
+	s.m.notifyTrigger(ctx, events)
+}
+
+func (s *CompactionViewManagerSuite) TestCheck() {
 	// nothing in the view before the test
+	ctx := context.Background()
 	s.Empty(s.m.view.collections)
-	s.m.Check()
+	events := s.m.Check(ctx)
 
 	s.m.viewGuard.Lock()
 	views := s.m.view.GetSegmentViewBy(s.testLabel.CollectionID, nil)
@@ -138,11 +248,22 @@ func (s *CompactionViewManagerSuite) TestCheck() {
 		log.Info("LevelZeroString", zap.String("segment", view.LevelZeroString()))
 	}
 
+	s.NotEmpty(events)
+	s.Equal(1, len(events))
+	refreshed, ok := events[TriggerTypeLevelZeroViewChange]
+	s.Require().True(ok)
+	s.Equal(1, len(refreshed))
+
+	// same meta
+	emptyEvents := s.m.Check(ctx)
+	s.Empty(emptyEvents)
+
 	// clear meta
 	s.m.meta.Lock()
 	s.m.meta.segments.segments = make(map[int64]*SegmentInfo)
 	s.m.meta.Unlock()
-	s.m.Check()
+	emptyEvents = s.m.Check(ctx)
+	s.Empty(emptyEvents)
 	s.Empty(s.m.view.collections)
 }
 
