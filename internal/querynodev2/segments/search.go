@@ -112,19 +112,25 @@ func SearchHistorical(ctx context.Context, manager *Manager, searchReq *SearchRe
 	if err != nil {
 		return nil, nil, err
 	}
-	segmentIDs := make([]int64, 0, len(segments))
-	for _, segment := range segments {
-		segmentIDs = append(segmentIDs, segment.ID())
+	if len(segments) == 0 {
+		return nil, nil, nil
 	}
-	cacheItems, ok := manager.DiskCache.TryPin(segmentIDs...)
-	if !ok {
-		return nil, nil, merr.WrapErrServiceInternal("unable to pin segments in cache")
-	}
-	defer func() {
-		for _, item := range cacheItems {
-			item.Unpin()
+
+	if segments[0].LoadStatus() == LoadStatusMeta {
+		segmentIDs := make([]int64, 0, len(segments))
+		for _, segment := range segments {
+			segmentIDs = append(segmentIDs, segment.ID())
 		}
-	}()
+		cacheItems, ok := manager.DiskCache.TryPin(segmentIDs...)
+		if !ok {
+			return nil, nil, merr.WrapErrServiceInternal("unable to pin segments in cache")
+		}
+		defer func() {
+			for _, item := range cacheItems {
+				item.Unpin()
+			}
+		}()
+	}
 	searchResults, err := searchSegments(ctx, manager, segments, SegmentTypeSealed, searchReq)
 	return searchResults, segments, err
 }
