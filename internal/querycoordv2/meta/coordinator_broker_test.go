@@ -19,6 +19,7 @@ package meta
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -275,6 +276,18 @@ func (s *CoordinatorBrokerDataCoordSuite) TestDescribeIndex() {
 		s.resetMock()
 	})
 
+	s.Run("datacoord_context_exceeded", func() {
+		s.datacoord.EXPECT().DescribeIndex(mock.Anything, mock.Anything).
+			Return(&indexpb.DescribeIndexResponse{Status: merr.Success()}, nil)
+
+		ctx2, cancel2 := context.WithTimeout(ctx, time.Millisecond*1)
+		defer cancel2()
+		time.Sleep(time.Millisecond * 2)
+		_, err := s.broker.DescribeIndex(ctx2, collectionID)
+		s.Error(err)
+		s.resetMock()
+	})
+
 	s.Run("datacoord_return_error", func() {
 		s.datacoord.EXPECT().DescribeIndex(mock.Anything, mock.Anything).
 			Return(nil, errors.New("mock"))
@@ -385,6 +398,18 @@ func (s *CoordinatorBrokerDataCoordSuite) TestGetIndexInfo() {
 		s.ElementsMatch(indexIDs, lo.Map(infos, func(info *querypb.FieldIndexInfo, _ int) int64 {
 			return info.GetIndexID()
 		}))
+		s.resetMock()
+	})
+
+	s.Run("datacoord_context_exceeded", func() {
+		s.datacoord.EXPECT().GetIndexInfos(mock.Anything, mock.Anything).
+			Return(&indexpb.GetIndexInfoResponse{Status: merr.Success()}, nil)
+
+		ctx2, cancel2 := context.WithTimeout(ctx, time.Millisecond*1)
+		defer cancel2()
+		time.Sleep(time.Millisecond * 2)
+		_, err := s.broker.GetIndexInfo(ctx2, collectionID, segmentID)
+		s.Error(err)
 		s.resetMock()
 	})
 
