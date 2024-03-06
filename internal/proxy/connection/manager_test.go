@@ -44,3 +44,24 @@ func TestConnectionManager(t *testing.T) {
 		return len(s.List()) == 0
 	}, time.Second*5, time.Second)
 }
+
+func TestConnectionManager_Purge(t *testing.T) {
+	paramtable.Init()
+
+	pt := paramtable.Get()
+	pt.Save(pt.ProxyCfg.ConnectionCheckIntervalSeconds.Key, "2")
+	pt.Save(pt.ProxyCfg.MaxConnectionNum.Key, "2")
+	defer pt.Reset(pt.ProxyCfg.ConnectionCheckIntervalSeconds.Key)
+	defer pt.Reset(pt.ProxyCfg.MaxConnectionNum.Key)
+	s := newConnectionManager()
+	defer s.Stop()
+
+	repeat := 10
+	for i := 0; i < repeat; i++ {
+		s.Register(context.TODO(), int64(i), &commonpb.ClientInfo{})
+	}
+
+	assert.Eventually(t, func() bool {
+		return s.clientInfos.Len() <= 2
+	}, time.Second*5, time.Second)
+}
