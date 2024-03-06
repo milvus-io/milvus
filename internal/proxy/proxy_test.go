@@ -4492,47 +4492,102 @@ func TestProxy_GetComponentStates(t *testing.T) {
 	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 }
 
-func TestProxy_GetImportState(t *testing.T) {
-	req := &milvuspb.GetImportStateRequest{
-		Task: 1,
-	}
-	dataCoord := &DataCoordMock{}
-	dataCoord.state.Store(commonpb.StateCode_Healthy)
-	t.Run("test get import state", func(t *testing.T) {
-		proxy := &Proxy{dataCoord: dataCoord}
+func TestProxy_Import(t *testing.T) {
+	cache := globalMetaCache
+	defer func() { globalMetaCache = cache }()
+
+	t.Run("Import failed", func(t *testing.T) {
+		proxy := &Proxy{}
+		proxy.UpdateStateCode(commonpb.StateCode_Abnormal)
+
+		req := &milvuspb.ImportRequest{}
+		resp, err := proxy.Import(context.TODO(), req)
+		assert.NoError(t, err)
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
+	})
+
+	t.Run("Import", func(t *testing.T) {
+		proxy := &Proxy{}
 		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 
-		resp, err := proxy.GetImportState(context.TODO(), req)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		mc := NewMockCache(t)
+		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
+		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
+			CollectionSchema: &schemapb.CollectionSchema{},
+		}, nil)
+		mc.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
+		globalMetaCache = mc
+
+		chMgr := NewMockChannelsMgr(t)
+		chMgr.EXPECT().getVChannels(mock.Anything).Return(nil, nil)
+		proxy.chMgr = chMgr
+
+		dataCoord := mocks.NewMockDataCoordClient(t)
+		dataCoord.EXPECT().ImportV2(mock.Anything, mock.Anything).Return(&internalpb.ImportResponse{
+			Status: merr.Success(),
+			JobID:  "100",
+		}, nil)
+		proxy.dataCoord = dataCoord
+
+		req := &milvuspb.ImportRequest{
+			CollectionName: "dummy",
+			Files:          []string{"a.json"},
+		}
+		resp, err := proxy.Import(context.TODO(), req)
 		assert.NoError(t, err)
+		assert.Equal(t, int32(0), resp.GetStatus().GetCode())
 	})
-	t.Run("test get import state with unhealthy", func(t *testing.T) {
-		proxy := &Proxy{dataCoord: dataCoord}
+
+	t.Run("GetImportState failed", func(t *testing.T) {
+		proxy := &Proxy{}
 		proxy.UpdateStateCode(commonpb.StateCode_Abnormal)
+
+		req := &milvuspb.GetImportStateRequest{}
 		resp, err := proxy.GetImportState(context.TODO(), req)
+		assert.NoError(t, err)
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
+	})
+
+	t.Run("GetImportState", func(t *testing.T) {
+		proxy := &Proxy{}
+		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		dataCoord := mocks.NewMockDataCoordClient(t)
+		dataCoord.EXPECT().GetImportProgress(mock.Anything, mock.Anything).Return(&internalpb.GetImportProgressResponse{
+			Status: merr.Success(),
+		}, nil)
+		proxy.dataCoord = dataCoord
+
+		req := &milvuspb.GetImportStateRequest{}
+		resp, err := proxy.GetImportState(context.TODO(), req)
+		assert.NoError(t, err)
+		assert.Equal(t, int32(0), resp.GetStatus().GetCode())
+	})
+
+	t.Run("ListImportTasks failed", func(t *testing.T) {
+		proxy := &Proxy{}
+		proxy.UpdateStateCode(commonpb.StateCode_Abnormal)
+
+		req := &milvuspb.ListImportTasksRequest{}
+		resp, err := proxy.ListImportTasks(context.TODO(), req)
 		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
 		assert.NoError(t, err)
 	})
-}
 
-func TestProxy_ListImportTasks(t *testing.T) {
-	req := &milvuspb.ListImportTasksRequest{}
-	dataCoord := &DataCoordMock{}
-	dataCoord.state.Store(commonpb.StateCode_Healthy)
-	t.Run("test list import tasks", func(t *testing.T) {
-		proxy := &Proxy{dataCoord: dataCoord}
+	t.Run("ListImportTasks", func(t *testing.T) {
+		proxy := &Proxy{}
 		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 
+		dataCoord := mocks.NewMockDataCoordClient(t)
+		dataCoord.EXPECT().ListImports(mock.Anything, mock.Anything).Return(&internalpb.ListImportsResponse{
+			Status: merr.Success(),
+		}, nil)
+		proxy.dataCoord = dataCoord
+
+		req := &milvuspb.ListImportTasksRequest{}
 		resp, err := proxy.ListImportTasks(context.TODO(), req)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.NoError(t, err)
-	})
-	t.Run("test list import tasks with unhealthy", func(t *testing.T) {
-		proxy := &Proxy{dataCoord: dataCoord}
-		proxy.UpdateStateCode(commonpb.StateCode_Abnormal)
-		resp, err := proxy.ListImportTasks(context.TODO(), req)
-		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
-		assert.NoError(t, err)
+		assert.Equal(t, int32(0), resp.GetStatus().GetCode())
 	})
 }
 
