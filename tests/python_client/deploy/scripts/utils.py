@@ -105,7 +105,7 @@ def create_collections_and_insert_data(prefix, flush=True, count=3000, collectio
             start_time = time.time()
             collection.insert(
                 [
-                    [i for i in range(nb * j, nb * j + nb)],
+                    [int(time.time()*1000) for i in range(nb * j, nb * j + nb)],
                     [float(random.randrange(-20, -10)) for _ in range(nb)],
                     vectors[nb*j:nb*j+nb]
                 ]
@@ -238,7 +238,7 @@ def load_and_search(prefix, replicas=1):
         v_search = vectors[:1]
         res = c.search(
             v_search, "float_vector", search_params, topK,
-            "count > 500", output_fields=["count", "random_value"], timeout=120
+            "count > 0", output_fields=["count", "random_value"], timeout=120
         )
         end_time = time.time()
         # show result
@@ -251,17 +251,17 @@ def load_and_search(prefix, replicas=1):
         assert len(res) == len(v_search), f"get {len(res)} results, but search num is {len(v_search)}"
         logger.info("search latency: %.4fs" % (end_time - start_time))
         t0 = time.time()
-        expr = "count in [2,4,6,8]"
+        expr = "count > 0"
         if "SQ" in col_name or "PQ" in col_name:
             output_fields = ["count", "random_value"]
         else:
             output_fields = ["count", "random_value", "float_vector"]
-        res = c.query(expr, output_fields, timeout=120)
+        res = c.query(expr, output_fields, limit=100, timeout=120)
         sorted_res = sorted(res, key=lambda k: k['count'])
         for r in sorted_res:
-            logger.info(r)
+            assert r['count'] > 0, f"count is {r['count']}, expect > 0"
         t1 = time.time()
-        assert len(res) == 4
+        assert len(res) == 100, f"get {len(res)} results, but limit is 100"
         logger.info("query latency: %.4fs" % (t1 - t0))
         # c.release()
         logger.info("###########")
