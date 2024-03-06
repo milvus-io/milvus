@@ -480,6 +480,8 @@ dataNode:
     # specify the size of global work pool for channel checkpoint updating
     # if this parameter <= 0, will set it as 10
     updateChannelCheckpointMaxParallel: 10
+    # max flush channel signal number to notify checkpoint updater 
+    channelCheckpointMaxFlushSignalNum: 32
 
 # Configures the system log output.
 log:

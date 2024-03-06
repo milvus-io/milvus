@@ -42,8 +42,9 @@ type channelCPUpdateTask struct {
 type channelCheckpointUpdater struct {
 	dn *DataNode
 
-	mu    sync.RWMutex
-	tasks map[string]*channelCPUpdateTask
+	mu           sync.RWMutex
+	tasks        map[string]*channelCPUpdateTask
+	manualSignal chan string
 
 	closeCh   chan struct{}
 	closeOnce sync.Once
@@ -51,9 +52,10 @@ type channelCheckpointUpdater struct {
 
 func newChannelCheckpointUpdater(dn *DataNode) *channelCheckpointUpdater {
 	return &channelCheckpointUpdater{
-		dn:      dn,
-		tasks:   make(map[string]*channelCPUpdateTask),
-		closeCh: make(chan struct{}),
+		dn:           dn,
+		tasks:        make(map[string]*channelCPUpdateTask),
+		closeCh:      make(chan struct{}),
+		manualSignal: make(chan string, paramtable.Get().DataNodeCfg.UpdateChannelCheckpointFlushMaxSignalNum.GetAsInt()),
 	}
 }
 
@@ -66,17 +68,33 @@ func (ccu *channelCheckpointUpdater) start() {
 		case <-ccu.closeCh:
 			log.Info("channel checkpoint updater exit")
 			return
+		case channelName := <-ccu.manualSignal:
+			task, ok := ccu.getTask(channelName)
+			if ok {
+				ccu.updateCheckpoints([]*channelCPUpdateTask{task})
+			}
 		case <-ticker.C:
 			ccu.execute()
 		}
 	}
 }
 
-func (ccu *channelCheckpointUpdater) execute() {
+func (ccu *channelCheckpointUpdater) getTask(channel string) (*channelCPUpdateTask, bool) {
 	ccu.mu.RLock()
-	taskGroups := lo.Chunk(lo.Values(ccu.tasks), paramtable.Get().DataNodeCfg.MaxChannelCheckpointsPerRPC.GetAsInt())
-	ccu.mu.RUnlock()
+	defer ccu.mu.RUnlock()
+	task, ok := ccu.tasks[channel]
+	return task, ok
+}
 
+func (ccu *channelCheckpointUpdater) Trigger(channel string) {
+	select {
+	case ccu.manualSignal <- channel:
+	default:
+	}
+}
+
+func (ccu *channelCheckpointUpdater) updateCheckpoints(tasks []*channelCPUpdateTask) {
+	taskGroups := lo.Chunk(tasks, paramtable.Get().DataNodeCfg.MaxChannelCheckpointsPerRPC.GetAsInt())
 	updateChanCPMaxParallel := paramtable.Get().DataNodeCfg.UpdateChannelCheckpointMaxParallel.GetAsInt()
 	if updateChanCPMaxParallel <= 0 {
 		updateChanCPMaxParallel = defaultUpdateChanCPMaxParallel
@@ -120,6 +138,14 @@ func (ccu *channelCheckpointUpdater) execute() {
 		}
 		return true
 	})
+}
+
+func (ccu *channelCheckpointUpdater) execute() {
+	ccu.mu.RLock()
+	tasks := lo.Values(ccu.tasks)
+	ccu.mu.RUnlock()
+
+	ccu.updateCheckpoints(tasks)
 }
 
 func (ccu *channelCheckpointUpdater) addTask(channelPos *msgpb.MsgPosition, callback func()) {
