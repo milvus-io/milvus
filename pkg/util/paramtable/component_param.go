@@ -2519,7 +2519,7 @@ type dataCoordConfig struct {
 	AutoUpgradeSegmentIndex        ParamItem `refreshable:"true"`
 
 	// compaction
-	EnableCompaction     ParamItem `refreshable:"false"`
+	EnableCompaction     ParamItem `refreshable:"true"`
 	EnableAutoCompaction ParamItem `refreshable:"true"`
 	IndexBasedCompaction ParamItem `refreshable:"true"`
 
