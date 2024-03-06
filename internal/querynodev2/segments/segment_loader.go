@@ -934,7 +934,8 @@ func (loader *segmentLoader) loadSegment(ctx context.Context,
 
 	if segment.Type() == SegmentTypeSealed {
 		loadStatus := LoadStatusInMemory
-		if loadInfo.GetLazyLoad() {
+		if common.IsCollectionLazyLoadEnabled(collection.Schema().GetProperties()...) {
+			segment.baseSegment.loadInfo = loadInfo
 			loadStatus = LoadStatusMeta
 		}
 

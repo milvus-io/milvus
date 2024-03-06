@@ -93,6 +93,7 @@ type baseSegment struct {
 	isLazyLoad     bool
 	startPosition  *msgpb.MsgPosition // for growing segment release
 	bloomFilterSet *pkoracle.BloomFilterSet
+	loadInfo       *querypb.SegmentLoadInfo
 }
 
 func newBaseSegment(id, partitionID, collectionID int64, shard string, typ SegmentType, level datapb.SegmentLevel, version int64, startPosition *msgpb.MsgPosition) baseSegment {
@@ -156,8 +157,7 @@ func (s *baseSegment) IsLazyLoad() bool {
 }
 
 func (s *baseSegment) LoadInfo() *querypb.SegmentLoadInfo {
-	// TODO
-	return nil
+	return s.loadInfo
 }
 
 func (s *baseSegment) UpdateBloomFilter(pks []storage.PrimaryKey) {
