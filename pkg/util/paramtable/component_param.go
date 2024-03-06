@@ -2768,12 +2768,11 @@ type dataNodeConfig struct {
 	// channel
 	ChannelWorkPoolSize ParamItem `refreshable:"true"`
 
-	UpdateChannelCheckpointMaxParallel       ParamItem `refreshable:"true"`
-	UpdateChannelCheckpointInterval          ParamItem `refreshable:"true"`
-	UpdateChannelCheckpointRPCTimeout        ParamItem `refreshable:"true"`
-	MaxChannelCheckpointsPerRPC              ParamItem `refreshable:"true"`
-	ChannelCheckpointUpdateTickInSeconds     ParamItem `refreshable:"true"`
-	UpdateChannelCheckpointFlushMaxSignalNum ParamItem `refreshable:"false"`
+	UpdateChannelCheckpointMaxParallel   ParamItem `refreshable:"true"`
+	UpdateChannelCheckpointInterval      ParamItem `refreshable:"true"`
+	UpdateChannelCheckpointRPCTimeout    ParamItem `refreshable:"true"`
+	MaxChannelCheckpointsPerRPC          ParamItem `refreshable:"true"`
+	ChannelCheckpointUpdateTickInSeconds ParamItem `refreshable:"true"`
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 }
@@ -3024,14 +3023,6 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		DefaultValue: "10",
 	}
 	p.ChannelCheckpointUpdateTickInSeconds.Init(base.mgr)
-
-	p.UpdateChannelCheckpointFlushMaxSignalNum = ParamItem{
-		Key:          "datanode.channel.channelCheckpointMaxFlushSignalNum",
-		Version:      "2.4.0",
-		Doc:          "max flush channel signal number to notify checkpoint updater",
-		DefaultValue: "32",
-	}
-	p.UpdateChannelCheckpointFlushMaxSignalNum.Init(base.mgr)
 
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "datanode.gracefulStopTimeout",
