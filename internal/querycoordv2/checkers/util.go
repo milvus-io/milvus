@@ -17,6 +17,7 @@
 package checkers
 
 import (
+	"context"
 	"fmt"
 
 	"go.uber.org/zap"
@@ -40,8 +41,10 @@ func CheckNodeAvailable(nodeID int64, info *session.NodeInfo) error {
 // 2. All QueryNodes in the distribution are online
 // 3. The last heartbeat response time is within HeartbeatAvailableInterval for all QueryNodes(include leader) in the distribution
 // 4. All segments of the shard in target should be in the distribution
-func CheckLeaderAvaliable(nodeMgr *session.NodeManager, leader *meta.LeaderView, currentTargets map[int64]*datapb.SegmentInfo) error {
-	log := log.With(zap.Int64("leaderID", leader.ID))
+func CheckLeaderAvailable(nodeMgr *session.NodeManager, leader *meta.LeaderView, currentTargets map[int64]*datapb.SegmentInfo) error {
+	log := log.Ctx(context.TODO()).
+		WithRateGroup("checkers.CheckLeaderAvailable", 1, 60).
+		With(zap.Int64("leaderID", leader.ID))
 	info := nodeMgr.Get(leader.ID)
 
 	// Check whether leader is online
@@ -70,7 +73,8 @@ func CheckLeaderAvaliable(nodeMgr *session.NodeManager, leader *meta.LeaderView,
 
 		_, exist := leader.Segments[segmentID]
 		if !exist {
-			log.Info("leader is not available due to lack of segment", zap.Int64("segmentID", segmentID))
+
+			log.RatedInfo(10, "leader is not available due to lack of segment", zap.Int64("segmentID", segmentID))
 			return merr.WrapErrSegmentLack(segmentID)
 		}
 	}
