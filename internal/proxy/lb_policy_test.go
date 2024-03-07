@@ -356,6 +356,27 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 		retryTimes: 2,
 	})
 	s.True(merr.IsCanceledOrTimeout(err))
+
+	// test get client failed, then SelectNode failed, expected to see latest error
+	s.mgr.ExpectedCalls = nil
+	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(nil, errors.New("fake error"))
+	s.mgr.EXPECT().UpdateShardLeaders(mock.Anything, mock.Anything).Return(nil).Maybe()
+	s.lbBalancer.ExpectedCalls = nil
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(-1, merr.ErrChannelNotAvailable)
+	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
+	err = s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
+		db:             dbName,
+		collectionName: s.collectionName,
+		collectionID:   s.collectionID,
+		channel:        s.channels[0],
+		shardLeaders:   s.nodes,
+		nq:             1,
+		exec: func(ctx context.Context, ui UniqueID, qn types.QueryNodeClient, channel string) error {
+			return nil
+		},
+		retryTimes: 2,
+	})
+	s.ErrorIs(err, merr.ErrChannelNotAvailable)
 }
 
 func (s *LBPolicySuite) TestExecute() {

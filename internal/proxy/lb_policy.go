@@ -150,7 +150,6 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 		zap.String("channelName", workload.channel),
 	)
 
-	var lastErr error
 	err := retry.Do(ctx, func() error {
 		targetNode, err := lb.selectNode(ctx, workload, excludeNodes)
 		if err != nil {
@@ -158,10 +157,8 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 				zap.Int64("nodeID", targetNode),
 				zap.Error(err),
 			)
-			if lastErr != nil {
-				return lastErr
-			}
-			return err
+
+			return errors.Wrapf(err, "failed to get delegator %d for channel %s", targetNode, workload.channel)
 		}
 
 		client, err := lb.clientMgr.GetClient(ctx, targetNode)
@@ -173,8 +170,7 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 
 			// cancel work load which assign to the target node
 			lb.balancer.CancelWorkload(targetNode, workload.nq)
-			lastErr = errors.Wrapf(err, "failed to get delegator %d for channel %s", targetNode, workload.channel)
-			return lastErr
+			return errors.Wrapf(err, "failed to get delegator %d for channel %s", targetNode, workload.channel)
 		}
 
 		err = workload.exec(ctx, targetNode, client, workload.channel)
@@ -185,8 +181,7 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 			excludeNodes.Insert(targetNode)
 			lb.balancer.CancelWorkload(targetNode, workload.nq)
 
-			lastErr = errors.Wrapf(err, "failed to search/query delegator %d for channel %s", targetNode, workload.channel)
-			return lastErr
+			return errors.Wrapf(err, "failed to search/query delegator %d for channel %s", targetNode, workload.channel)
 		}
 
 		lb.balancer.CancelWorkload(targetNode, workload.nq)
