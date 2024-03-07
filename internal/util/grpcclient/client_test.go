@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -167,6 +168,14 @@ func testCall(t *testing.T, compressed bool) {
 		initClient()
 		_, err := base.Call(context.Background(), func(client *mockClient) (any, error) {
 			return struct{}{}, nil
+		})
+		assert.NoError(t, err)
+	})
+
+	t.Run("Call with stream method", func(t *testing.T) {
+		initClient()
+		_, err := base.Call(context.Background(), func(client *mockClient) (any, error) {
+			return streamrpc.NewMockClientStream(t), nil
 		})
 		assert.NoError(t, err)
 	})
