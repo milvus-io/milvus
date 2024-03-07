@@ -383,7 +383,7 @@ func (ob *TargetObserver) sync(ctx context.Context, replicaID int64, leaderView 
 	}
 
 	// Get collection index info
-	indexInfo, err := ob.broker.DescribeIndex(ctx, collectionInfo.GetCollectionID())
+	indexInfo, err := ob.broker.ListIndexes(ctx, collectionInfo.GetCollectionID())
 	if err != nil {
 		log.Warn("fail to get index info of collection", zap.Error(err))
 		return false
