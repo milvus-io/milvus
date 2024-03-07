@@ -1104,35 +1104,39 @@ func (q *QuotaCenter) toRatesRequest() *proxypb.SetRatesRequest {
 	clusterRateLimiter := q.rateLimiter.GetRootLimiters()
 
 	// collect db rate limit if clusterRateLimiter has database limiter children
-	dbLimiters := make(map[int64]*proxypb.LimiterNode, len(clusterRateLimiter.GetChildren()))
-	for dbID, dbRateLimiters := range clusterRateLimiter.GetChildren() {
+	dbLimiters := make(map[int64]*proxypb.LimiterNode, clusterRateLimiter.GetChildren().Len())
+	clusterRateLimiter.GetChildren().Range(func(dbID int64, dbRateLimiters *rlinternal.RateLimiterNode) bool {
 		dbLimiter := q.toRequestLimiter(dbRateLimiters)
 
 		// collect collection rate limit if dbRateLimiters has collection limiter children
-		collectionLimiters := make(map[int64]*proxypb.LimiterNode, len(dbRateLimiters.GetChildren()))
-		for collectionID, collectionRateLimiters := range dbRateLimiters.GetChildren() {
+		collectionLimiters := make(map[int64]*proxypb.LimiterNode, dbRateLimiters.GetChildren().Len())
+		dbRateLimiters.GetChildren().Range(func(collectionID int64, collectionRateLimiters *rlinternal.RateLimiterNode) bool {
 			collectionLimiter := q.toRequestLimiter(collectionRateLimiters)
 
 			// collect partitions rate limit if collectionRateLimiters has partition limiter children
-			partitionLimiters := make(map[int64]*proxypb.LimiterNode, len(collectionRateLimiters.GetChildren()))
-			for partitionID, partitionRateLimiters := range collectionRateLimiters.GetChildren() {
+			partitionLimiters := make(map[int64]*proxypb.LimiterNode, collectionRateLimiters.GetChildren().Len())
+			collectionRateLimiters.GetChildren().Range(func(partitionID int64, partitionRateLimiters *rlinternal.RateLimiterNode) bool {
 				partitionLimiters[partitionID] = &proxypb.LimiterNode{
 					Limiter:  q.toRequestLimiter(partitionRateLimiters),
 					Children: make(map[int64]*proxypb.LimiterNode, 0),
 				}
-			}
+				return true
+			})
 
 			collectionLimiters[collectionID] = &proxypb.LimiterNode{
 				Limiter:  collectionLimiter,
 				Children: partitionLimiters,
 			}
-		}
+			return true
+		})
 
 		dbLimiters[dbID] = &proxypb.LimiterNode{
 			Limiter:  dbLimiter,
 			Children: collectionLimiters,
 		}
-	}
+
+		return true
+	})
 
 	clusterLimiter := &proxypb.LimiterNode{
 		Limiter:  q.toRequestLimiter(clusterRateLimiter),

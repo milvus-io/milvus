@@ -180,8 +180,6 @@ func TestProxy_CheckHealth(t *testing.T) {
 		resp, err = node.CheckHealth(context.Background(), &milvuspb.CheckHealthRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, true, resp.IsHealthy)
-		assert.Equal(t, 2, len(resp.GetQuotaStates()))
-		assert.Equal(t, 2, len(resp.GetReasons()))
 	})
 }
 

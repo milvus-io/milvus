@@ -238,6 +238,7 @@ func newPartitionLimiters() *rlinternal.RateLimiterNode {
 }
 
 func (m *SimpleLimiter) updateRateLimiter(reqRootLimiterNode *proxypb.LimiterNode) error {
+	// TODO should update cluster and db?
 	// skip to update cluster rate limiters
 
 	for dbID, reqDBRateLimiters := range reqRootLimiterNode.GetChildren() {
