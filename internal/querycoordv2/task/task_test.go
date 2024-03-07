@@ -223,7 +223,7 @@ func (suite *TaskSuite) TestSubscribeChannelTask() {
 				},
 			}, nil)
 	}
-	suite.broker.EXPECT().DescribeIndex(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
+	suite.broker.EXPECT().ListIndexes(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
 		{
 			CollectionID: suite.collection,
 			FieldID:      100,
@@ -401,7 +401,7 @@ func (suite *TaskSuite) TestLoadSegmentTask() {
 			},
 		}, nil
 	})
-	suite.broker.EXPECT().DescribeIndex(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
+	suite.broker.EXPECT().ListIndexes(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
 		{
 			CollectionID: suite.collection,
 		},
@@ -501,7 +501,7 @@ func (suite *TaskSuite) TestLoadSegmentTaskNotIndex() {
 			},
 		}, nil
 	})
-	suite.broker.EXPECT().DescribeIndex(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
+	suite.broker.EXPECT().ListIndexes(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
 		{
 			CollectionID: suite.collection,
 		},
@@ -803,7 +803,7 @@ func (suite *TaskSuite) TestMoveSegmentTask() {
 			},
 		}, nil
 	})
-	suite.broker.EXPECT().DescribeIndex(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
+	suite.broker.EXPECT().ListIndexes(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
 		{
 			CollectionID: suite.collection,
 		},
@@ -977,7 +977,7 @@ func (suite *TaskSuite) TestTaskCanceled() {
 			},
 		}, nil
 	})
-	suite.broker.EXPECT().DescribeIndex(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
+	suite.broker.EXPECT().ListIndexes(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
 		{
 			CollectionID: suite.collection,
 		},
@@ -1068,7 +1068,7 @@ func (suite *TaskSuite) TestSegmentTaskStale() {
 			},
 		}, nil
 	})
-	suite.broker.EXPECT().DescribeIndex(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
+	suite.broker.EXPECT().ListIndexes(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
 		{
 			CollectionID: suite.collection,
 		},
@@ -1250,7 +1250,7 @@ func (suite *TaskSuite) TestLeaderTaskSet() {
 			},
 		}, nil
 	})
-	suite.broker.EXPECT().DescribeIndex(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
+	suite.broker.EXPECT().ListIndexes(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
 		{
 			CollectionID: suite.collection,
 		},

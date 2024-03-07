@@ -128,7 +128,7 @@ func (suite *JobSuite) SetupSuite() {
 
 	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
 		Return(nil, nil)
-	suite.broker.EXPECT().DescribeIndex(mock.Anything, mock.Anything).
+	suite.broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).
 		Return(nil, nil)
 
 	suite.cluster = session.NewMockCluster(suite.T())
@@ -1195,7 +1195,7 @@ func (suite *JobSuite) TestCallLoadPartitionFailed() {
 		return call.Method != "DescribeIndex"
 	})
 	for _, collection := range suite.collections {
-		suite.broker.EXPECT().DescribeIndex(mock.Anything, collection).Return(nil, getIndexErr)
+		suite.broker.EXPECT().ListIndexes(mock.Anything, collection).Return(nil, getIndexErr)
 		loadCollectionReq := &querypb.LoadCollectionRequest{
 			CollectionID: collection,
 		}
@@ -1284,7 +1284,7 @@ func (suite *JobSuite) TestCallLoadPartitionFailed() {
 		return call.Method != "DescribeIndex" && call.Method != "DescribeCollection"
 	})
 	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(nil, nil)
-	suite.broker.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(nil, nil)
+	suite.broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).Return(nil, nil)
 }
 
 func (suite *JobSuite) TestCallReleasePartitionFailed() {
