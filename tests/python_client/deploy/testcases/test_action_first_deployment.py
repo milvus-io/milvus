@@ -69,7 +69,7 @@ class TestActionFirstDeployment(TestDeployBase):
     @pytest.mark.parametrize("is_deleted", ["is_deleted"])
     @pytest.mark.parametrize("is_string_indexed", ["is_string_indexed", "not_string_indexed"])
     @pytest.mark.parametrize("segment_status", ["only_growing", "all"])
-    @pytest.mark.parametrize("index_type", ["HNSW", "BIN_IVF_FLAT"])
+    @pytest.mark.parametrize("index_type", ["HNSW", "BIN_IVF_FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ"])
     def test_task_all(self, index_type, is_compacted,
                       segment_status, is_string_indexed, replica_number, is_deleted, data_size):
         """
