@@ -343,9 +343,9 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 		taskType := GetTaskType(task)
 
 		if taskType == TaskTypeMove {
-			leaderSegmentDist := scheduler.distMgr.LeaderViewManager.GetSealedSegmentDist(task.SegmentID())
+			views := scheduler.distMgr.LeaderViewManager.GetByFilter(meta.WithSegment2LeaderView(task.SegmentID(), false))
 			nodeSegmentDist := scheduler.distMgr.SegmentDistManager.GetSegmentDist(task.SegmentID())
-			if !lo.Contains(leaderSegmentDist, task.Actions()[1].Node()) ||
+			if len(views) == 0 ||
 				!lo.Contains(nodeSegmentDist, task.Actions()[1].Node()) {
 				return merr.WrapErrServiceInternal("source segment released, stop balancing")
 			}
@@ -371,14 +371,16 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 
 		taskType := GetTaskType(task)
 		if taskType == TaskTypeGrow {
-			nodesWithChannel := scheduler.distMgr.LeaderViewManager.GetChannelDist(task.Channel())
+			views := scheduler.distMgr.LeaderViewManager.GetByFilter(meta.WithChannelName2LeaderView(task.Channel()))
+			nodesWithChannel := lo.Map(views, func(v *meta.LeaderView, _ int) UniqueID { return v.ID })
 			replicaNodeMap := utils.GroupNodesByReplica(scheduler.meta.ReplicaManager, task.CollectionID(), nodesWithChannel)
 			if _, ok := replicaNodeMap[task.ReplicaID()]; ok {
 				return merr.WrapErrServiceInternal("channel subscribed, it can be only balanced")
 			}
 		} else if taskType == TaskTypeMove {
-			channelDist := scheduler.distMgr.LeaderViewManager.GetChannelDist(task.Channel())
-			if !lo.Contains(channelDist, task.Actions()[1].Node()) {
+			views := scheduler.distMgr.LeaderViewManager.GetByFilter(meta.WithChannelName2LeaderView(task.Channel()))
+			_, ok := lo.Find(views, func(v *meta.LeaderView) bool { return v.ID == task.Actions()[1].Node() })
+			if !ok {
 				return merr.WrapErrServiceInternal("source channel unsubscribed, stop balancing")
 			}
 		}

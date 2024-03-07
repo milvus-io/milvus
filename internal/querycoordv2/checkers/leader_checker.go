@@ -100,9 +100,9 @@ func (c *LeaderChecker) Check(ctx context.Context) []task.Task {
 					continue
 				}
 
-				leaderViews := c.dist.LeaderViewManager.GetByCollectionAndNode(replica.GetCollectionID(), node)
-				for ch, leaderView := range leaderViews {
-					dist := c.dist.SegmentDistManager.GetByFilter(meta.WithChannel(ch), meta.WithReplica(replica))
+				leaderViews := c.dist.LeaderViewManager.GetByFilter(meta.WithCollectionID2LeaderView(replica.GetCollectionID()), meta.WithNodeID2LeaderView(node))
+				for _, leaderView := range leaderViews {
+					dist := c.dist.SegmentDistManager.GetByFilter(meta.WithChannel(leaderView.Channel), meta.WithReplica(replica))
 					tasks = append(tasks, c.findNeedLoadedSegments(ctx, replica, leaderView, dist)...)
 					tasks = append(tasks, c.findNeedRemovedSegments(ctx, replica, leaderView, dist)...)
 				}
@@ -132,7 +132,7 @@ func (c *LeaderChecker) findNeedLoadedSegments(ctx context.Context, replica *met
 		segment := c.target.GetSealedSegment(leaderView.CollectionID, s.GetID(), meta.CurrentTargetFirst)
 		existInTarget := segment != nil
 		isL0Segment := existInTarget && segment.GetLevel() == datapb.SegmentLevel_L0
-		// should set l0 segment location to delegator. l0 segment should be reload in delegator
+		// shouldn't set l0 segment location to delegator. l0 segment should be reload in delegator
 		if !existInTarget || isL0Segment {
 			continue
 		}
