@@ -84,11 +84,11 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 			Limit: 100,
 		}
 	}, wrapperTraceLog(h.wrapperCheckDatabase(h.search)))))
-	router.POST(EntityCategory+HybridSearchAction, timeoutMiddleware(wrapperPost(func() any {
+	router.POST(EntityCategory+AdvancedSearchAction, timeoutMiddleware(wrapperPost(func() any {
 		return &HybridSearchReq{
 			Limit: 100,
 		}
-	}, wrapperTraceLog(h.wrapperCheckDatabase(h.hybridSearch)))))
+	}, wrapperTraceLog(h.wrapperCheckDatabase(h.advancedSearch)))))
 
 	router.POST(PartitionCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.listPartitions)))))
 	router.POST(PartitionCategory+HasAction, timeoutMiddleware(wrapperPost(func() any { return &PartitionReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.hasPartitions)))))
@@ -728,6 +728,43 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	return resp, err
 }
 
+func generatePlaceholderGroup(ctx context.Context, body string, collSchema *schemapb.CollectionSchema, fieldName string) ([]byte, error) {
+	var err error
+	var vectorField *schemapb.FieldSchema
+	if len(fieldName) == 0 {
+		for _, field := range collSchema.Fields {
+			if IsVectorField(field) {
+				if len(fieldName) == 0 {
+					fieldName = field.Name
+					vectorField = field
+				} else {
+					return nil, errors.New("search without annsFields, but already found multiple vector fields: [" + fieldName + ", " + field.Name + "]")
+				}
+			}
+		}
+	} else {
+		for _, field := range collSchema.Fields {
+			if field.Name == fieldName && IsVectorField(field) {
+				vectorField = field
+				break
+			}
+		}
+	}
+	if vectorField == nil {
+		return nil, errors.New("cannot find a vector field named: " + fieldName)
+	}
+	dim, _ := getDim(vectorField)
+	phv, err := convertVectors2Placeholder(body, vectorField.DataType, dim)
+	if err != nil {
+		return nil, err
+	}
+	return proto.Marshal(&commonpb.PlaceholderGroup{
+		Placeholders: []*commonpb.PlaceholderValue{
+			phv,
+		},
+	})
+}
+
 func generateSearchParams(ctx context.Context, c *gin.Context, reqParams map[string]float64) ([]*commonpb.KeyValuePair, error) {
 	params := map[string]interface{}{ // auto generated mapping
 		"level": int(commonpb.ConsistencyLevel_Bounded),
@@ -759,6 +796,10 @@ func generateSearchParams(ctx context.Context, c *gin.Context, reqParams map[str
 
 func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	httpReq := anyReq.(*SearchReqV2)
+	collSchema, err := h.GetCollectionSchema(ctx, c, dbName, httpReq.CollectionName)
+	if err != nil {
+		return nil, err
+	}
 	searchParams, err := generateSearchParams(ctx, c, httpReq.Params)
 	if err != nil {
 		return nil, err
@@ -766,12 +807,23 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: common.TopKKey, Value: strconv.FormatInt(int64(httpReq.Limit), 10)})
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamOffset, Value: strconv.FormatInt(int64(httpReq.Offset), 10)})
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamGroupByField, Value: httpReq.GroupByField})
+	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: proxy.AnnsFieldKey, Value: httpReq.AnnsField})
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamRoundDecimal, Value: "-1"})
+	body, _ := c.Get(gin.BodyBytesKey)
+	placeholderGroup, err := generatePlaceholderGroup(ctx, string(body.([]byte)), collSchema, httpReq.AnnsField)
+	if err != nil {
+		log.Ctx(ctx).Warn("high level restful api, search with vector invalid", zap.Error(err))
+		c.AbortWithStatusJSON(http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
+			HTTPReturnMessage: merr.ErrIncorrectParameterFormat.Error() + ", error: " + err.Error(),
+		})
+		return nil, err
+	}
 	req := &milvuspb.SearchRequest{
 		DbName:             dbName,
 		CollectionName:     httpReq.CollectionName,
 		Dsl:                httpReq.Filter,
-		PlaceholderGroup:   vectors2PlaceholderGroupBytes(httpReq.Vector),
+		PlaceholderGroup:   placeholderGroup,
 		DslType:            commonpb.DslType_BoolExprV1,
 		OutputFields:       httpReq.OutputFields,
 		PartitionNames:     httpReq.PartitionNames,
@@ -803,14 +855,20 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 	return resp, err
 }
 
-func (h *HandlersV2) hybridSearch(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	httpReq := anyReq.(*HybridSearchReq)
 	req := &milvuspb.HybridSearchRequest{
 		DbName:         dbName,
 		CollectionName: httpReq.CollectionName,
 		Requests:       []*milvuspb.SearchRequest{},
 	}
-	for _, subReq := range httpReq.Search {
+	collSchema, err := h.GetCollectionSchema(ctx, c, dbName, httpReq.CollectionName)
+	if err != nil {
+		return nil, err
+	}
+	body, _ := c.Get(gin.BodyBytesKey)
+	searchArray := gjson.Get(string(body.([]byte)), "search").Array()
+	for i, subReq := range httpReq.Search {
 		searchParams, err := generateSearchParams(ctx, c, subReq.Params)
 		if err != nil {
 			return nil, err
@@ -820,11 +878,20 @@ func (h *HandlersV2) hybridSearch(ctx context.Context, c *gin.Context, anyReq an
 		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamGroupByField, Value: subReq.GroupByField})
 		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: proxy.AnnsFieldKey, Value: subReq.AnnsField})
 		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamRoundDecimal, Value: "-1"})
+		placeholderGroup, err := generatePlaceholderGroup(ctx, searchArray[i].Raw, collSchema, subReq.AnnsField)
+		if err != nil {
+			log.Ctx(ctx).Warn("high level restful api, search with vector invalid", zap.Error(err))
+			c.AbortWithStatusJSON(http.StatusOK, gin.H{
+				HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
+				HTTPReturnMessage: merr.ErrIncorrectParameterFormat.Error() + ", error: " + err.Error(),
+			})
+			return nil, err
+		}
 		searchReq := &milvuspb.SearchRequest{
 			DbName:             dbName,
 			CollectionName:     httpReq.CollectionName,
 			Dsl:                subReq.Filter,
-			PlaceholderGroup:   vectors2PlaceholderGroupBytes(subReq.Vector),
+			PlaceholderGroup:   placeholderGroup,
 			DslType:            commonpb.DslType_BoolExprV1,
 			OutputFields:       httpReq.OutputFields,
 			PartitionNames:     httpReq.PartitionNames,
