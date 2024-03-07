@@ -98,9 +98,9 @@ func (c *LeaderChecker) Check(ctx context.Context) []task.Task {
 					continue
 				}
 
-				leaderViews := c.dist.LeaderViewManager.GetByCollectionAndNode(replica.GetCollectionID(), node)
-				for ch, leaderView := range leaderViews {
-					dist := c.dist.SegmentDistManager.GetByShardWithReplica(ch, replica)
+				leaderViews := c.dist.LeaderViewManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithNodeID(node))
+				for _, leaderView := range leaderViews {
+					dist := c.dist.SegmentDistManager.GetByShardWithReplica(leaderView.Channel, replica)
 					tasks = append(tasks, c.findNeedLoadedSegments(ctx, replica.ID, leaderView, dist)...)
 					tasks = append(tasks, c.findNeedRemovedSegments(ctx, replica.ID, leaderView, dist)...)
 				}

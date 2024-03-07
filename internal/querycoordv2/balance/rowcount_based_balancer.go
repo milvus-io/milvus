@@ -117,7 +117,7 @@ func (b *RowCountBasedBalancer) convertToNodeItemsBySegment(nodeIDs []int64) []*
 		}
 
 		// calculate growing segment row count on node
-		views := b.dist.GetLeaderView(node)
+		views := b.dist.GetByFilter(meta.WithNodeID(node))
 		for _, view := range views {
 			rowcnt += int(view.NumOfGrowingRows)
 		}
