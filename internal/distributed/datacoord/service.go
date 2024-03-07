@@ -482,3 +482,7 @@ func (s *Server) ReportDataNodeTtMsgs(ctx context.Context, req *datapb.ReportDat
 func (s *Server) GcControl(ctx context.Context, req *datapb.GcControlRequest) (*commonpb.Status, error) {
 	return s.dataCoord.GcControl(ctx, req)
 }
+
+func (s *Server) ListIndexes(ctx context.Context, in *indexpb.ListIndexesRequest) (*indexpb.ListIndexesResponse, error) {
+	return s.dataCoord.ListIndexes(ctx, in)
+}

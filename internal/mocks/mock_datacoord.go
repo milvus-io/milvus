@@ -1947,6 +1947,61 @@ func (_c *MockDataCoord_Init_Call) RunAndReturn(run func() error) *MockDataCoord
 	return _c
 }
 
+// ListIndexes provides a mock function with given fields: _a0, _a1
+func (_m *MockDataCoord) ListIndexes(_a0 context.Context, _a1 *indexpb.ListIndexesRequest) (*indexpb.ListIndexesResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *indexpb.ListIndexesResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *indexpb.ListIndexesRequest) (*indexpb.ListIndexesResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *indexpb.ListIndexesRequest) *indexpb.ListIndexesResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*indexpb.ListIndexesResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *indexpb.ListIndexesRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockDataCoord_ListIndexes_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListIndexes'
+type MockDataCoord_ListIndexes_Call struct {
+	*mock.Call
+}
+
+// ListIndexes is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *indexpb.ListIndexesRequest
+func (_e *MockDataCoord_Expecter) ListIndexes(_a0 interface{}, _a1 interface{}) *MockDataCoord_ListIndexes_Call {
+	return &MockDataCoord_ListIndexes_Call{Call: _e.mock.On("ListIndexes", _a0, _a1)}
+}
+
+func (_c *MockDataCoord_ListIndexes_Call) Run(run func(_a0 context.Context, _a1 *indexpb.ListIndexesRequest)) *MockDataCoord_ListIndexes_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*indexpb.ListIndexesRequest))
+	})
+	return _c
+}
+
+func (_c *MockDataCoord_ListIndexes_Call) Return(_a0 *indexpb.ListIndexesResponse, _a1 error) *MockDataCoord_ListIndexes_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDataCoord_ListIndexes_Call) RunAndReturn(run func(context.Context, *indexpb.ListIndexesRequest) (*indexpb.ListIndexesResponse, error)) *MockDataCoord_ListIndexes_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ManualCompaction provides a mock function with given fields: _a0, _a1
 func (_m *MockDataCoord) ManualCompaction(_a0 context.Context, _a1 *milvuspb.ManualCompactionRequest) (*milvuspb.ManualCompactionResponse, error) {
 	ret := _m.Called(_a0, _a1)
