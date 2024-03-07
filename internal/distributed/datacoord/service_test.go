@@ -331,6 +331,15 @@ func Test_NewServer(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, ret)
 	})
+
+	t.Run("ListIndex", func(t *testing.T) {
+		mockDataCoord.EXPECT().ListIndexes(mock.Anything, mock.Anything).Return(&indexpb.ListIndexesResponse{
+			Status: merr.Success(),
+		}, nil)
+		ret, err := server.ListIndexes(ctx, &indexpb.ListIndexesRequest{})
+		assert.NoError(t, err)
+		assert.True(t, merr.Ok(ret.GetStatus()))
+	})
 }
 
 func Test_Run(t *testing.T) {

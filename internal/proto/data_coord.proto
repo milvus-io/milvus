@@ -89,6 +89,7 @@ service DataCoord {
   rpc GetIndexStatistics(index.GetIndexStatisticsRequest) returns (index.GetIndexStatisticsResponse) {}
   // Deprecated: use DescribeIndex instead
   rpc GetIndexBuildProgress(index.GetIndexBuildProgressRequest) returns (index.GetIndexBuildProgressResponse) {}
+  rpc ListIndexes(index.ListIndexesRequest) returns (index.ListIndexesResponse) {}
 
   rpc GcConfirm(GcConfirmRequest) returns (GcConfirmResponse) {}
 

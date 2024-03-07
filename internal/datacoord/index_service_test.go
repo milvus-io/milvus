@@ -1508,6 +1508,155 @@ func TestServer_DescribeIndex(t *testing.T) {
 	})
 }
 
+func TestServer_ListIndexes(t *testing.T) {
+	var (
+		collID     = UniqueID(1)
+		fieldID    = UniqueID(10)
+		indexID    = UniqueID(100)
+		indexName  = "default_idx"
+		typeParams = []*commonpb.KeyValuePair{
+			{
+				Key:   common.DimKey,
+				Value: "128",
+			},
+		}
+		indexParams = []*commonpb.KeyValuePair{
+			{
+				Key:   common.IndexTypeKey,
+				Value: "IVF_FLAT",
+			},
+		}
+		createTS = uint64(1000)
+		ctx      = context.Background()
+		req      = &indexpb.ListIndexesRequest{
+			CollectionID: collID,
+		}
+	)
+
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	s := &Server{
+		meta: &meta{
+			catalog: catalog,
+			indexMeta: &indexMeta{
+				catalog: catalog,
+				indexes: map[UniqueID]map[UniqueID]*model.Index{
+					collID: {
+						// finished
+						indexID: {
+							TenantID:        "",
+							CollectionID:    collID,
+							FieldID:         fieldID,
+							IndexID:         indexID,
+							IndexName:       indexName,
+							IsDeleted:       false,
+							CreateTime:      createTS,
+							TypeParams:      typeParams,
+							IndexParams:     indexParams,
+							IsAutoIndex:     false,
+							UserIndexParams: nil,
+						},
+						// deleted
+						indexID + 1: {
+							TenantID:        "",
+							CollectionID:    collID,
+							FieldID:         fieldID + 1,
+							IndexID:         indexID + 1,
+							IndexName:       indexName + "_1",
+							IsDeleted:       true,
+							CreateTime:      createTS,
+							TypeParams:      typeParams,
+							IndexParams:     indexParams,
+							IsAutoIndex:     false,
+							UserIndexParams: nil,
+						},
+						// unissued
+						indexID + 2: {
+							TenantID:        "",
+							CollectionID:    collID,
+							FieldID:         fieldID + 2,
+							IndexID:         indexID + 2,
+							IndexName:       indexName + "_2",
+							IsDeleted:       false,
+							CreateTime:      createTS,
+							TypeParams:      typeParams,
+							IndexParams:     indexParams,
+							IsAutoIndex:     false,
+							UserIndexParams: nil,
+						},
+						// inProgress
+						indexID + 3: {
+							TenantID:        "",
+							CollectionID:    collID,
+							FieldID:         fieldID + 3,
+							IndexID:         indexID + 3,
+							IndexName:       indexName + "_3",
+							IsDeleted:       false,
+							CreateTime:      createTS,
+							TypeParams:      typeParams,
+							IndexParams:     indexParams,
+							IsAutoIndex:     false,
+							UserIndexParams: nil,
+						},
+						// failed
+						indexID + 4: {
+							TenantID:        "",
+							CollectionID:    collID,
+							FieldID:         fieldID + 4,
+							IndexID:         indexID + 4,
+							IndexName:       indexName + "_4",
+							IsDeleted:       false,
+							CreateTime:      createTS,
+							TypeParams:      typeParams,
+							IndexParams:     indexParams,
+							IsAutoIndex:     false,
+							UserIndexParams: nil,
+						},
+						// unissued
+						indexID + 5: {
+							TenantID:        "",
+							CollectionID:    collID,
+							FieldID:         fieldID + 5,
+							IndexID:         indexID + 5,
+							IndexName:       indexName + "_5",
+							IsDeleted:       false,
+							CreateTime:      createTS,
+							TypeParams:      typeParams,
+							IndexParams:     indexParams,
+							IsAutoIndex:     false,
+							UserIndexParams: nil,
+						},
+					},
+				},
+				segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{},
+			},
+
+			segments: &SegmentsInfo{
+				compactionTo: make(map[int64]int64),
+				segments:     map[UniqueID]*SegmentInfo{},
+			},
+		},
+		allocator:       newMockAllocator(),
+		notifyIndexChan: make(chan UniqueID, 1),
+	}
+
+	t.Run("server not available", func(t *testing.T) {
+		s.stateCode.Store(commonpb.StateCode_Initializing)
+		resp, err := s.ListIndexes(ctx, req)
+		assert.NoError(t, err)
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
+	})
+
+	s.stateCode.Store(commonpb.StateCode_Healthy)
+
+	t.Run("success", func(t *testing.T) {
+		resp, err := s.ListIndexes(ctx, req)
+		assert.NoError(t, err)
+
+		// assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, 5, len(resp.GetIndexInfos()))
+	})
+}
+
 func TestServer_GetIndexStatistics(t *testing.T) {
 	var (
 		collID       = UniqueID(1)
