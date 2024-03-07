@@ -411,6 +411,20 @@ func (m *meta) SetState(segmentID UniqueID, targetState commonpb.SegmentState) e
 		stateChange: make(map[string]map[string]int),
 	}
 	if clonedSegment != nil && isSegmentHealthy(clonedSegment) {
+		droppedStatslogNum := 0
+		droppedBinlogNum := 0
+		droppedDeltalogNum := 0
+		if targetState == commonpb.SegmentState_Dropped {
+			for _, fieldBinlog := range clonedSegment.GetDeltalogs() {
+				droppedDeltalogNum += len(fieldBinlog.GetBinlogs())
+			}
+			for _, fieldBinlog := range clonedSegment.GetBinlogs() {
+				droppedBinlogNum += len(fieldBinlog.GetBinlogs())
+			}
+			for _, fieldBinlog := range clonedSegment.GetStatslogs() {
+				droppedStatslogNum += len(fieldBinlog.GetBinlogs())
+			}
+		}
 		// Update segment state and prepare segment metric update.
 		updateSegStateAndPrepareMetrics(clonedSegment, targetState, metricMutation)
 		if err := m.catalog.AlterSegments(m.ctx, []*datapb.SegmentInfo{clonedSegment.SegmentInfo}); err != nil {
@@ -424,6 +438,9 @@ func (m *meta) SetState(segmentID UniqueID, targetState commonpb.SegmentState) e
 		metricMutation.commit()
 		// Update in-memory meta.
 		m.segments.SetState(segmentID, targetState)
+		metrics.FlushedSegmentFileNum.WithLabelValues(metrics.StatFileLabel).Observe(float64(droppedStatslogNum * -1))
+		metrics.FlushedSegmentFileNum.WithLabelValues(metrics.InsertFileLabel).Observe(float64(droppedBinlogNum * -1))
+		metrics.FlushedSegmentFileNum.WithLabelValues(metrics.DeleteFileLabel).Observe(float64(droppedDeltalogNum * -1))
 	}
 	log.Info("meta update: setting segment state - complete",
 		zap.Int64("segmentID", segmentID),
@@ -1132,11 +1149,22 @@ func (m *meta) CompleteCompactionMutation(plan *datapb.CompactionPlan, result *d
 	}
 
 	logIDsFromPlan := make(map[int64]struct{})
+	droppedBinlogNum := 0
+	droppedDeltalogNum := 0
+	droppedStatslogNum := 0
+
 	for _, segBinlogs := range plan.GetSegmentBinlogs() {
 		for _, fieldBinlog := range segBinlogs.GetDeltalogs() {
+			droppedDeltalogNum += len(fieldBinlog.GetBinlogs())
 			for _, binlog := range fieldBinlog.GetBinlogs() {
 				logIDsFromPlan[binlog.GetLogID()] = struct{}{}
 			}
+		}
+		for _, fieldBinlog := range segBinlogs.GetFieldBinlogs() {
+			droppedBinlogNum += len(fieldBinlog.GetBinlogs())
+		}
+		for _, fieldBinlog := range segBinlogs.GetField2StatslogPaths() {
+			droppedStatslogNum += len(fieldBinlog.GetBinlogs())
 		}
 	}
 
@@ -1228,6 +1256,9 @@ func (m *meta) CompleteCompactionMutation(plan *datapb.CompactionPlan, result *d
 	})
 	m.segments.SetSegment(compactToSegmentInfo.GetID(), compactToSegmentInfo)
 
+	metrics.FlushedSegmentFileNum.WithLabelValues(metrics.StatFileLabel).Observe(float64(droppedStatslogNum * -1))
+	metrics.FlushedSegmentFileNum.WithLabelValues(metrics.InsertFileLabel).Observe(float64(droppedBinlogNum * -1))
+	metrics.FlushedSegmentFileNum.WithLabelValues(metrics.DeleteFileLabel).Observe(float64(droppedDeltalogNum * -1))
 	log.Info("meta update: alter in memory meta after compaction - complete")
 	return []*SegmentInfo{compactToSegmentInfo}, metricMutation, nil
 }
