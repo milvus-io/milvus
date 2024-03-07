@@ -178,15 +178,14 @@ func (s *dataCoordSuite) TestUpdateChannelCheckpoint() {
 	s.Run("normal_case", func() {
 		s.dc.EXPECT().UpdateChannelCheckpoint(mock.Anything, mock.Anything).
 			Run(func(_ context.Context, req *datapb.UpdateChannelCheckpointRequest, _ ...grpc.CallOption) {
-				s.Equal(channelName, req.GetVChannel())
-				cp := req.GetPosition()
+				cp := req.GetChannelCheckpoints()[0]
 				s.Equal(checkpoint.MsgID, cp.GetMsgID())
 				s.Equal(checkpoint.ChannelName, cp.GetChannelName())
 				s.Equal(checkpoint.Timestamp, cp.GetTimestamp())
 			}).
 			Return(merr.Status(nil), nil)
 
-		err := s.broker.UpdateChannelCheckpoint(ctx, channelName, checkpoint)
+		err := s.broker.UpdateChannelCheckpoint(ctx, []*msgpb.MsgPosition{checkpoint})
 		s.NoError(err)
 		s.resetMock()
 	})
@@ -195,7 +194,7 @@ func (s *dataCoordSuite) TestUpdateChannelCheckpoint() {
 		s.dc.EXPECT().UpdateChannelCheckpoint(mock.Anything, mock.Anything).
 			Return(nil, errors.New("mock"))
 
-		err := s.broker.UpdateChannelCheckpoint(ctx, channelName, checkpoint)
+		err := s.broker.UpdateChannelCheckpoint(ctx, []*msgpb.MsgPosition{checkpoint})
 		s.Error(err)
 		s.resetMock()
 	})
@@ -204,7 +203,7 @@ func (s *dataCoordSuite) TestUpdateChannelCheckpoint() {
 		s.dc.EXPECT().UpdateChannelCheckpoint(mock.Anything, mock.Anything).
 			Return(merr.Status(errors.New("mock")), nil)
 
-		err := s.broker.UpdateChannelCheckpoint(ctx, channelName, checkpoint)
+		err := s.broker.UpdateChannelCheckpoint(ctx, []*msgpb.MsgPosition{checkpoint})
 		s.Error(err)
 		s.resetMock()
 	})

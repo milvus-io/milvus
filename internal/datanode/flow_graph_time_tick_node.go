@@ -91,7 +91,7 @@ func (ttn *ttNode) Operate(in []Msg) []Msg {
 			log.Info("flowgraph is closing, force update channel CP",
 				zap.Time("cpTs", tsoutil.PhysicalTime(channelPos.GetTimestamp())),
 				zap.String("channel", channelPos.GetChannelName()))
-			ttn.updateChannelCP(channelPos, curTs)
+			ttn.updateChannelCP(channelPos, curTs, false)
 		}
 		return in
 	}
@@ -102,32 +102,29 @@ func (ttn *ttNode) Operate(in []Msg) []Msg {
 		log.Warn("channel removed", zap.String("channel", ttn.vChannelName), zap.Error(err))
 		return []Msg{}
 	}
-	nonBlockingNotify := func() {
-		ttn.updateChannelCP(channelPos, curTs)
-	}
 
-	if needUpdate || curTs.Sub(ttn.lastUpdateTime.Load()) >= paramtable.Get().DataNodeCfg.UpdateChannelCheckpointInterval.GetAsDuration(time.Second) {
-		nonBlockingNotify()
+	if curTs.Sub(ttn.lastUpdateTime.Load()) >= paramtable.Get().DataNodeCfg.UpdateChannelCheckpointInterval.GetAsDuration(time.Second) {
+		ttn.updateChannelCP(channelPos, curTs, false)
 		return []Msg{}
+	}
+	if needUpdate {
+		ttn.updateChannelCP(channelPos, curTs, true)
 	}
 
 	return []Msg{}
 }
 
-func (ttn *ttNode) updateChannelCP(channelPos *msgpb.MsgPosition, curTs time.Time) error {
-	callBack := func() error {
+func (ttn *ttNode) updateChannelCP(channelPos *msgpb.MsgPosition, curTs time.Time, flush bool) {
+	callBack := func() {
 		channelCPTs, _ := tsoutil.ParseTS(channelPos.GetTimestamp())
-		ttn.lastUpdateTime.Store(curTs)
 		ttn.writeBufferManager.NotifyCheckpointUpdated(ttn.vChannelName, channelPos.GetTimestamp())
 		log.Debug("UpdateChannelCheckpoint success",
 			zap.String("channel", ttn.vChannelName),
 			zap.Uint64("cpTs", channelPos.GetTimestamp()),
 			zap.Time("cpTime", channelCPTs))
-		return nil
 	}
-
-	err := ttn.cpUpdater.updateChannelCP(channelPos, callBack)
-	return err
+	ttn.cpUpdater.AddTask(channelPos, flush, callBack)
+	ttn.lastUpdateTime.Store(curTs)
 }
 
 func newTTNode(config *nodeConfig, wbManager writebuffer.BufferManager, cpUpdater *channelCheckpointUpdater) (*ttNode, error) {

@@ -31,9 +31,9 @@ import (
 	"github.com/milvus-io/milvus/internal/kv"
 	mockkv "github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
-	"github.com/milvus-io/milvus/internal/metastore/mocks"
+	mocks2 "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	mocks2 "github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -46,12 +46,12 @@ import (
 type MetaReloadSuite struct {
 	testutils.PromMetricsSuite
 
-	catalog *mocks.DataCoordCatalog
+	catalog *mocks2.DataCoordCatalog
 	meta    *meta
 }
 
 func (suite *MetaReloadSuite) SetupTest() {
-	catalog := mocks.NewDataCoordCatalog(suite.T())
+	catalog := mocks2.NewDataCoordCatalog(suite.T())
 	suite.catalog = catalog
 }
 
@@ -195,7 +195,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 		latestSegments.SetSegment(segID, segment)
 	}
 
-	mockChMgr := mocks2.NewChunkManager(suite.T())
+	mockChMgr := mocks.NewChunkManager(suite.T())
 	mockChMgr.EXPECT().RootPath().Return("mockroot").Times(4)
 	mockChMgr.EXPECT().Read(mock.Anything, mock.Anything).Return(nil, nil).Twice()
 	mockChMgr.EXPECT().Write(mock.Anything, mock.Anything, mock.Anything).Return(nil).Twice()
@@ -292,7 +292,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 
 func (suite *MetaBasicSuite) TestSetSegment() {
 	meta := suite.meta
-	catalog := mocks.NewDataCoordCatalog(suite.T())
+	catalog := mocks2.NewDataCoordCatalog(suite.T())
 	meta.catalog = catalog
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1070,6 +1070,22 @@ func TestChannelCP(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("UpdateChannelCheckpoints", func(t *testing.T) {
+		meta, err := newMemoryMeta()
+		assert.NoError(t, err)
+		assert.Equal(t, 0, len(meta.channelCPs.checkpoints))
+
+		err = meta.UpdateChannelCheckpoints(nil)
+		assert.NoError(t, err)
+		assert.Equal(t, 0, len(meta.channelCPs.checkpoints))
+
+		err = meta.UpdateChannelCheckpoints([]*msgpb.MsgPosition{pos, {
+			ChannelName: "",
+		}})
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(meta.channelCPs.checkpoints))
+	})
+
 	t.Run("GetChannelCheckpoint", func(t *testing.T) {
 		meta, err := newMemoryMeta()
 		assert.NoError(t, err)
@@ -1101,7 +1117,7 @@ func TestChannelCP(t *testing.T) {
 
 func Test_meta_GcConfirm(t *testing.T) {
 	m := &meta{}
-	catalog := mocks.NewDataCoordCatalog(t)
+	catalog := mocks2.NewDataCoordCatalog(t)
 	m.catalog = catalog
 
 	catalog.On("GcConfirm",

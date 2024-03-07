@@ -1238,6 +1238,49 @@ func (_c *DataCoordCatalog_SaveChannelCheckpoint_Call) RunAndReturn(run func(con
 	return _c
 }
 
+// SaveChannelCheckpoints provides a mock function with given fields: ctx, positions
+func (_m *DataCoordCatalog) SaveChannelCheckpoints(ctx context.Context, positions []*msgpb.MsgPosition) error {
+	ret := _m.Called(ctx, positions)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, []*msgpb.MsgPosition) error); ok {
+		r0 = rf(ctx, positions)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// DataCoordCatalog_SaveChannelCheckpoints_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveChannelCheckpoints'
+type DataCoordCatalog_SaveChannelCheckpoints_Call struct {
+	*mock.Call
+}
+
+// SaveChannelCheckpoints is a helper method to define mock.On call
+//  - ctx context.Context
+//  - positions []*msgpb.MsgPosition
+func (_e *DataCoordCatalog_Expecter) SaveChannelCheckpoints(ctx interface{}, positions interface{}) *DataCoordCatalog_SaveChannelCheckpoints_Call {
+	return &DataCoordCatalog_SaveChannelCheckpoints_Call{Call: _e.mock.On("SaveChannelCheckpoints", ctx, positions)}
+}
+
+func (_c *DataCoordCatalog_SaveChannelCheckpoints_Call) Run(run func(ctx context.Context, positions []*msgpb.MsgPosition)) *DataCoordCatalog_SaveChannelCheckpoints_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].([]*msgpb.MsgPosition))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_SaveChannelCheckpoints_Call) Return(_a0 error) *DataCoordCatalog_SaveChannelCheckpoints_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *DataCoordCatalog_SaveChannelCheckpoints_Call) RunAndReturn(run func(context.Context, []*msgpb.MsgPosition) error) *DataCoordCatalog_SaveChannelCheckpoints_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // SaveDroppedSegmentsInBatch provides a mock function with given fields: ctx, segments
 func (_m *DataCoordCatalog) SaveDroppedSegmentsInBatch(ctx context.Context, segments []*datapb.SegmentInfo) error {
 	ret := _m.Called(ctx, segments)

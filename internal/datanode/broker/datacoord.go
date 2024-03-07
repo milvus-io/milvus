@@ -2,6 +2,7 @@ package broker
 
 import (
 	"context"
+	"time"
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -87,24 +88,24 @@ func (dc *dataCoordBroker) GetSegmentInfo(ctx context.Context, segmentIDs []int6
 	return infoResp.Infos, nil
 }
 
-func (dc *dataCoordBroker) UpdateChannelCheckpoint(ctx context.Context, channelName string, cp *msgpb.MsgPosition) error {
-	channelCPTs, _ := tsoutil.ParseTS(cp.GetTimestamp())
-	log := log.Ctx(ctx).With(
-		zap.String("channelName", channelName),
-		zap.Time("channelCheckpointTime", channelCPTs),
-	)
-
+func (dc *dataCoordBroker) UpdateChannelCheckpoint(ctx context.Context, channelCPs []*msgpb.MsgPosition) error {
 	req := &datapb.UpdateChannelCheckpointRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithSourceID(dc.serverID),
 		),
-		VChannel: channelName,
-		Position: cp,
+		ChannelCheckpoints: channelCPs,
 	}
 
 	resp, err := dc.client.UpdateChannelCheckpoint(ctx, req)
-	if err := merr.CheckRPCCall(resp, err); err != nil {
-		log.Warn("failed to update channel checkpoint", zap.Error(err))
+	if err = merr.CheckRPCCall(resp, err); err != nil {
+		channels := lo.Map(channelCPs, func(pos *msgpb.MsgPosition, _ int) string {
+			return pos.GetChannelName()
+		})
+		channelTimes := lo.Map(channelCPs, func(pos *msgpb.MsgPosition, _ int) time.Time {
+			return tsoutil.PhysicalTime(pos.GetTimestamp())
+		})
+		log.Warn("failed to update channel checkpoint", zap.Strings("channelNames", channels),
+			zap.Times("channelCheckpointTimes", channelTimes), zap.Error(err))
 		return err
 	}
 	return nil

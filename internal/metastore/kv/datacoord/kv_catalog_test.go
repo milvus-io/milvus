@@ -583,6 +583,22 @@ func TestChannelCP(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	t.Run("SaveChannelCheckpoints", func(t *testing.T) {
+		txn := mocks.NewMetaKv(t)
+		txn.EXPECT().MultiSave(mock.Anything).Return(nil)
+		catalog := NewCatalog(txn, rootPath, "")
+		err := catalog.SaveChannelCheckpoints(context.TODO(), []*msgpb.MsgPosition{pos})
+		assert.NoError(t, err)
+	})
+
+	t.Run("SaveChannelCheckpoints failed", func(t *testing.T) {
+		txn := mocks.NewMetaKv(t)
+		catalog := NewCatalog(txn, rootPath, "")
+		txn.EXPECT().MultiSave(mock.Anything).Return(errors.New("mock error"))
+		err = catalog.SaveChannelCheckpoints(context.TODO(), []*msgpb.MsgPosition{pos})
+		assert.Error(t, err)
+	})
+
 	t.Run("DropChannelCheckpoint", func(t *testing.T) {
 		txn := mocks.NewMetaKv(t)
 		txn.EXPECT().Save(mock.Anything, mock.Anything).Return(nil)

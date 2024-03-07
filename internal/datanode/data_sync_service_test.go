@@ -343,6 +343,9 @@ func (s *DataSyncServiceSuite) SetupTest() {
 	}
 	s.node.ctx = context.Background()
 	s.node.channelCheckpointUpdater = newChannelCheckpointUpdater(s.node)
+	paramtable.Get().Save(paramtable.Get().DataNodeCfg.ChannelCheckpointUpdateTickInSeconds.Key, "0.01")
+	defer paramtable.Get().Save(paramtable.Get().DataNodeCfg.ChannelCheckpointUpdateTickInSeconds.Key, "10")
+	go s.node.channelCheckpointUpdater.start()
 	s.msChan = make(chan *msgstream.MsgPack)
 
 	s.factory = dependency.NewMockFactory(s.T())
@@ -482,12 +485,12 @@ func (s *DataSyncServiceSuite) TestStartStop() {
 	timeTickMsgPack.Msgs = append(timeTickMsgPack.Msgs, timeTickMsg)
 
 	s.wbManager.EXPECT().BufferData(insertChannelName, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
-	s.wbManager.EXPECT().GetCheckpoint(insertChannelName).Return(&msgpb.MsgPosition{Timestamp: msgTs}, true, nil)
+	s.wbManager.EXPECT().GetCheckpoint(insertChannelName).Return(&msgpb.MsgPosition{Timestamp: msgTs, ChannelName: insertChannelName, MsgID: []byte{0}}, true, nil)
 	s.wbManager.EXPECT().NotifyCheckpointUpdated(insertChannelName, msgTs).Return().Maybe()
 
 	ch := make(chan struct{})
 
-	s.broker.EXPECT().UpdateChannelCheckpoint(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, _ string, _ *msgpb.MsgPosition) error {
+	s.broker.EXPECT().UpdateChannelCheckpoint(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, _ []*msgpb.MsgPosition) error {
 		close(ch)
 		return nil
 	})

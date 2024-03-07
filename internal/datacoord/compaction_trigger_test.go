@@ -37,10 +37,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
-	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type spyCompactionHandler struct {
@@ -118,9 +116,8 @@ func Test_compactionTrigger_force(t *testing.T) {
 			"test force compaction",
 			fields{
 				&meta{
-					catalog:        catalog,
-					channelCPLocks: lock.NewKeyLock[string](),
-					channelCPs:     typeutil.NewConcurrentMap[string, *msgpb.MsgPosition](),
+					catalog:    catalog,
+					channelCPs: newChannelCps(),
 					segments: &SegmentsInfo{
 						segments: map[int64]*SegmentInfo{
 							1: {
@@ -735,9 +732,8 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 			"test many segments",
 			fields{
 				&meta{
-					segments:       segmentInfos,
-					channelCPLocks: lock.NewKeyLock[string](),
-					channelCPs:     typeutil.NewConcurrentMap[string, *msgpb.MsgPosition](),
+					segments:   segmentInfos,
+					channelCPs: newChannelCps(),
 					collections: map[int64]*collectionInfo{
 						2: {
 							ID: 2,
@@ -879,8 +875,7 @@ func Test_compactionTrigger_noplan(t *testing.T) {
 				&meta{
 					indexMeta: newSegmentIndexMeta(nil),
 					// 4 segment
-					channelCPLocks: lock.NewKeyLock[string](),
-					channelCPs:     typeutil.NewConcurrentMap[string, *msgpb.MsgPosition](),
+					channelCPs: newChannelCps(),
 
 					segments: &SegmentsInfo{
 						segments: map[int64]*SegmentInfo{
@@ -1063,8 +1058,7 @@ func Test_compactionTrigger_PrioritizedCandi(t *testing.T) {
 			fields{
 				&meta{
 					// 8 small segments
-					channelCPLocks: lock.NewKeyLock[string](),
-					channelCPs:     typeutil.NewConcurrentMap[string, *msgpb.MsgPosition](),
+					channelCPs: newChannelCps(),
 
 					segments: &SegmentsInfo{
 						segments: map[int64]*SegmentInfo{
@@ -1157,10 +1151,10 @@ func Test_compactionTrigger_PrioritizedCandi(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tt.fields.meta.channelCPs.Insert("ch1", &msgpb.MsgPosition{
+			tt.fields.meta.channelCPs.checkpoints["ch1"] = &msgpb.MsgPosition{
 				Timestamp: tsoutil.ComposeTSByTime(time.Now(), 0),
 				MsgID:     []byte{1, 2, 3, 4},
-			})
+			}
 			tr := &compactionTrigger{
 				meta:              tt.fields.meta,
 				handler:           newMockHandlerWithMeta(tt.fields.meta),
@@ -1250,8 +1244,7 @@ func Test_compactionTrigger_SmallCandi(t *testing.T) {
 			fields{
 				&meta{
 					// 4 small segments
-					channelCPLocks: lock.NewKeyLock[string](),
-					channelCPs:     typeutil.NewConcurrentMap[string, *msgpb.MsgPosition](),
+					channelCPs: newChannelCps(),
 
 					segments: &SegmentsInfo{
 						segments: map[int64]*SegmentInfo{
@@ -1347,10 +1340,10 @@ func Test_compactionTrigger_SmallCandi(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tt.fields.meta.channelCPs.Insert("ch1", &msgpb.MsgPosition{
+			tt.fields.meta.channelCPs.checkpoints["ch1"] = &msgpb.MsgPosition{
 				Timestamp: tsoutil.ComposeTSByTime(time.Now(), 0),
 				MsgID:     []byte{1, 2, 3, 4},
-			})
+			}
 			tr := &compactionTrigger{
 				meta:                         tt.fields.meta,
 				handler:                      newMockHandlerWithMeta(tt.fields.meta),
@@ -1443,8 +1436,7 @@ func Test_compactionTrigger_SqueezeNonPlannedSegs(t *testing.T) {
 			"test small segment",
 			fields{
 				&meta{
-					channelCPLocks: lock.NewKeyLock[string](),
-					channelCPs:     typeutil.NewConcurrentMap[string, *msgpb.MsgPosition](),
+					channelCPs: newChannelCps(),
 
 					// 4 small segments
 					segments: &SegmentsInfo{
@@ -1536,10 +1528,10 @@ func Test_compactionTrigger_SqueezeNonPlannedSegs(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tt.fields.meta.channelCPs.Insert("ch1", &msgpb.MsgPosition{
+			tt.fields.meta.channelCPs.checkpoints["ch1"] = &msgpb.MsgPosition{
 				Timestamp: tsoutil.ComposeTSByTime(time.Now(), 0),
 				MsgID:     []byte{1, 2, 3, 4},
-			})
+			}
 			tr := &compactionTrigger{
 				meta:                         tt.fields.meta,
 				handler:                      newMockHandlerWithMeta(tt.fields.meta),
@@ -1672,8 +1664,7 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 			"test rand size segment",
 			fields{
 				&meta{
-					channelCPLocks: lock.NewKeyLock[string](),
-					channelCPs:     typeutil.NewConcurrentMap[string, *msgpb.MsgPosition](),
+					channelCPs: newChannelCps(),
 
 					segments: segmentInfos,
 					collections: map[int64]*collectionInfo{
@@ -1712,10 +1703,10 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tt.fields.meta.channelCPs.Insert("ch1", &msgpb.MsgPosition{
+			tt.fields.meta.channelCPs.checkpoints["ch1"] = &msgpb.MsgPosition{
 				Timestamp: tsoutil.ComposeTSByTime(time.Now(), 0),
 				MsgID:     []byte{1, 2, 3, 4},
-			})
+			}
 			tr := &compactionTrigger{
 				meta:                      tt.fields.meta,
 				handler:                   newMockHandlerWithMeta(tt.fields.meta),
@@ -1769,9 +1760,8 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 	indexMeta := newSegmentIndexMeta(nil)
 	trigger := newCompactionTrigger(&meta{
-		indexMeta:      indexMeta,
-		channelCPLocks: lock.NewKeyLock[string](),
-		channelCPs:     typeutil.NewConcurrentMap[string, *msgpb.MsgPosition](),
+		indexMeta:  indexMeta,
+		channelCPs: newChannelCps(),
 	}, &compactionPlanHandler{}, newMockAllocator(), newMockHandler(), newIndexEngineVersionManager())
 
 	// Test too many deltalogs.
@@ -2087,9 +2077,8 @@ func Test_triggerSingleCompaction(t *testing.T) {
 		Params.Save(Params.DataCoordCfg.EnableAutoCompaction.Key, originValue)
 	}()
 	m := &meta{
-		channelCPLocks: lock.NewKeyLock[string](),
-		channelCPs:     typeutil.NewConcurrentMap[string, *msgpb.MsgPosition](),
-		segments:       NewSegmentsInfo(), collections: make(map[UniqueID]*collectionInfo),
+		channelCPs: newChannelCps(),
+		segments:   NewSegmentsInfo(), collections: make(map[UniqueID]*collectionInfo),
 	}
 	got := newCompactionTrigger(m, &compactionPlanHandler{}, newMockAllocator(),
 		&ServerHandler{
@@ -2224,9 +2213,8 @@ func (s *CompactionTriggerSuite) SetupTest() {
 	catalog.EXPECT().SaveChannelCheckpoint(mock.Anything, s.channel, mock.Anything).Return(nil)
 
 	s.meta = &meta{
-		channelCPLocks: lock.NewKeyLock[string](),
-		channelCPs:     typeutil.NewConcurrentMap[string, *msgpb.MsgPosition](),
-		catalog:        catalog,
+		channelCPs: newChannelCps(),
+		catalog:    catalog,
 		segments: &SegmentsInfo{
 			segments: map[int64]*SegmentInfo{
 				1: {
@@ -2433,11 +2421,11 @@ func (s *CompactionTriggerSuite) TestHandleSignal() {
 		defer paramtable.Get().Reset(ptKey)
 		s.compactionHandler.EXPECT().isFull().Return(false)
 
-		s.meta.channelCPs.Insert(s.channel, &msgpb.MsgPosition{
+		s.meta.channelCPs.checkpoints[s.channel] = &msgpb.MsgPosition{
 			ChannelName: s.channel,
 			Timestamp:   tsoutil.ComposeTSByTime(time.Now().Add(time.Second*-901), 0),
 			MsgID:       []byte{1, 2, 3, 4},
-		})
+		}
 
 		s.tr.handleSignal(&compactionSignal{
 			segmentID:    1,
@@ -2567,11 +2555,11 @@ func (s *CompactionTriggerSuite) TestHandleGlobalSignal() {
 		s.allocator.EXPECT().allocTimestamp(mock.Anything).Return(10000, nil)
 		s.allocator.EXPECT().allocID(mock.Anything).Return(20000, nil)
 
-		s.meta.channelCPs.Insert(s.channel, &msgpb.MsgPosition{
+		s.meta.channelCPs.checkpoints[s.channel] = &msgpb.MsgPosition{
 			ChannelName: s.channel,
 			Timestamp:   tsoutil.ComposeTSByTime(time.Now().Add(time.Second*-901), 0),
 			MsgID:       []byte{1, 2, 3, 4},
-		})
+		}
 		tr := s.tr
 
 		tr.handleGlobalSignal(&compactionSignal{
@@ -2590,11 +2578,11 @@ func (s *CompactionTriggerSuite) TestIsChannelCheckpointHealthy() {
 		paramtable.Get().Save(ptKey, "900")
 		defer paramtable.Get().Reset(ptKey)
 
-		s.meta.channelCPs.Insert(s.channel, &msgpb.MsgPosition{
+		s.meta.channelCPs.checkpoints[s.channel] = &msgpb.MsgPosition{
 			ChannelName: s.channel,
 			Timestamp:   tsoutil.ComposeTSByTime(time.Now(), 0),
 			MsgID:       []byte{1, 2, 3, 4},
-		})
+		}
 
 		result := s.tr.isChannelCheckpointHealthy(s.channel)
 		s.True(result, "ok case, check shall return true")
@@ -2612,7 +2600,7 @@ func (s *CompactionTriggerSuite) TestIsChannelCheckpointHealthy() {
 		paramtable.Get().Save(ptKey, "900")
 		defer paramtable.Get().Reset(ptKey)
 
-		s.meta.channelCPs.Remove(s.channel)
+		delete(s.meta.channelCPs.checkpoints, s.channel)
 
 		result := s.tr.isChannelCheckpointHealthy(s.channel)
 		s.False(result, "check shall fail when checkpoint not exist in meta")
@@ -2622,11 +2610,11 @@ func (s *CompactionTriggerSuite) TestIsChannelCheckpointHealthy() {
 		paramtable.Get().Save(ptKey, "900")
 		defer paramtable.Get().Reset(ptKey)
 
-		s.meta.channelCPs.Insert(s.channel, &msgpb.MsgPosition{
+		s.meta.channelCPs.checkpoints[s.channel] = &msgpb.MsgPosition{
 			ChannelName: s.channel,
 			Timestamp:   tsoutil.ComposeTSByTime(time.Now().Add(time.Second*-901), 0),
 			MsgID:       []byte{1, 2, 3, 4},
-		})
+		}
 
 		result := s.tr.isChannelCheckpointHealthy(s.channel)
 		s.False(result, "check shall fail when checkpoint lag larger than config")
@@ -2706,10 +2694,9 @@ func Test_compactionTrigger_updateSegmentMaxSize(t *testing.T) {
 			"all mem index",
 			fields{
 				&meta{
-					channelCPLocks: lock.NewKeyLock[string](),
-					channelCPs:     typeutil.NewConcurrentMap[string, *msgpb.MsgPosition](),
-					catalog:        catalog,
-					segments:       segmentsInfo,
+					channelCPs: newChannelCps(),
+					catalog:    catalog,
+					segments:   segmentsInfo,
 					collections: map[int64]*collectionInfo{
 						collectionID: info,
 					},
@@ -2771,10 +2758,9 @@ func Test_compactionTrigger_updateSegmentMaxSize(t *testing.T) {
 			"all disk index",
 			fields{
 				&meta{
-					channelCPLocks: lock.NewKeyLock[string](),
-					channelCPs:     typeutil.NewConcurrentMap[string, *msgpb.MsgPosition](),
-					catalog:        catalog,
-					segments:       segmentsInfo,
+					channelCPs: newChannelCps(),
+					catalog:    catalog,
+					segments:   segmentsInfo,
 					collections: map[int64]*collectionInfo{
 						collectionID: info,
 					},
@@ -2836,10 +2822,9 @@ func Test_compactionTrigger_updateSegmentMaxSize(t *testing.T) {
 			"some mme index",
 			fields{
 				&meta{
-					channelCPLocks: lock.NewKeyLock[string](),
-					channelCPs:     typeutil.NewConcurrentMap[string, *msgpb.MsgPosition](),
-					catalog:        catalog,
-					segments:       segmentsInfo,
+					channelCPs: newChannelCps(),
+					catalog:    catalog,
+					segments:   segmentsInfo,
 					collections: map[int64]*collectionInfo{
 						collectionID: info,
 					},

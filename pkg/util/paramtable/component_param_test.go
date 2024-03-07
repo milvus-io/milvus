@@ -431,7 +431,9 @@ func TestComponentParam(t *testing.T) {
 
 		updateChannelCheckpointMaxParallel := Params.UpdateChannelCheckpointMaxParallel.GetAsInt()
 		t.Logf("updateChannelCheckpointMaxParallel: %d", updateChannelCheckpointMaxParallel)
-		assert.Equal(t, 1000, Params.UpdateChannelCheckpointMaxParallel.GetAsInt())
+		assert.Equal(t, 10, Params.UpdateChannelCheckpointMaxParallel.GetAsInt())
+		assert.Equal(t, 128, Params.MaxChannelCheckpointsPerRPC.GetAsInt())
+		assert.Equal(t, 10*time.Second, Params.ChannelCheckpointUpdateTickInSeconds.GetAsDuration(time.Second))
 
 		maxConcurrentImportTaskNum := Params.MaxConcurrentImportTaskNum.GetAsInt()
 		t.Logf("maxConcurrentImportTaskNum: %d", maxConcurrentImportTaskNum)
