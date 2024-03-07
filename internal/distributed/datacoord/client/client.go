@@ -33,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -139,11 +138,6 @@ func (c *Client) GetStatisticsChannel(ctx context.Context, _ *internalpb.GetStat
 
 // Flush flushes a collection's data
 func (c *Client) Flush(ctx context.Context, req *datapb.FlushRequest, opts ...grpc.CallOption) (*datapb.FlushResponse, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
-	)
 	return wrapGrpcCall(ctx, c, func(client datapb.DataCoordClient) (*datapb.FlushResponse, error) {
 		return client.Flush(ctx, req)
 	})
@@ -180,11 +174,6 @@ func (c *Client) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 //
 // error is returned only when some communication issue occurs
 func (c *Client) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentStatesRequest, opts ...grpc.CallOption) (*datapb.GetSegmentStatesResponse, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
-	)
 	return wrapGrpcCall(ctx, c, func(client datapb.DataCoordClient) (*datapb.GetSegmentStatesResponse, error) {
 		return client.GetSegmentStates(ctx, req)
 	})
@@ -201,11 +190,6 @@ func (c *Client) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentSta
 //
 // error is returned only when some communication issue occurs
 func (c *Client) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsertBinlogPathsRequest, opts ...grpc.CallOption) (*datapb.GetInsertBinlogPathsResponse, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
-	)
 	return wrapGrpcCall(ctx, c, func(client datapb.DataCoordClient) (*datapb.GetInsertBinlogPathsResponse, error) {
 		return client.GetInsertBinlogPaths(ctx, req)
 	})
@@ -222,11 +206,6 @@ func (c *Client) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsert
 //
 // error is returned only when some communication issue occurs
 func (c *Client) GetCollectionStatistics(ctx context.Context, req *datapb.GetCollectionStatisticsRequest, opts ...grpc.CallOption) (*datapb.GetCollectionStatisticsResponse, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
-	)
 	return wrapGrpcCall(ctx, c, func(client datapb.DataCoordClient) (*datapb.GetCollectionStatisticsResponse, error) {
 		return client.GetCollectionStatistics(ctx, req)
 	})
@@ -243,11 +222,6 @@ func (c *Client) GetCollectionStatistics(ctx context.Context, req *datapb.GetCol
 //
 // error is returned only when some communication issue occurs
 func (c *Client) GetPartitionStatistics(ctx context.Context, req *datapb.GetPartitionStatisticsRequest, opts ...grpc.CallOption) (*datapb.GetPartitionStatisticsResponse, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
-	)
 	return wrapGrpcCall(ctx, c, func(client datapb.DataCoordClient) (*datapb.GetPartitionStatisticsResponse, error) {
 		return client.GetPartitionStatistics(ctx, req)
 	})
@@ -269,11 +243,6 @@ func (c *Client) GetSegmentInfoChannel(ctx context.Context, _ *datapb.GetSegment
 // response struct `GetSegmentInfoResponse` contains the list of segment info
 // error is returned only when some communication issue occurs
 func (c *Client) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoRequest, opts ...grpc.CallOption) (*datapb.GetSegmentInfoResponse, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
-	)
 	return wrapGrpcCall(ctx, c, func(client datapb.DataCoordClient) (*datapb.GetSegmentInfoResponse, error) {
 		return client.GetSegmentInfo(ctx, req)
 	})
@@ -295,11 +264,7 @@ func (c *Client) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 //	 if the constraint is broken, the checkpoint position will not be monotonically increasing and the integrity will be compromised
 func (c *Client) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	// use Call here on purpose
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
-	)
+
 	return wrapGrpcCall(ctx, c, func(client datapb.DataCoordClient) (*commonpb.Status, error) {
 		return client.SaveBinlogPaths(ctx, req)
 	})
@@ -313,11 +278,6 @@ func (c *Client) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 // response struct `GetRecoveryInfoResponse` contains the list of segments info and corresponding vchannel info
 // error is returned only when some communication issue occurs
 func (c *Client) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInfoRequest, opts ...grpc.CallOption) (*datapb.GetRecoveryInfoResponse, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
-	)
 	return wrapGrpcCall(ctx, c, func(client datapb.DataCoordClient) (*datapb.GetRecoveryInfoResponse, error) {
 		return client.GetRecoveryInfo(ctx, req)
 	})
@@ -331,11 +291,6 @@ func (c *Client) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 // response struct `GetRecoveryInfoResponseV2` contains the list of segments info and corresponding vchannel info
 // error is returned only when some communication issue occurs
 func (c *Client) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryInfoRequestV2, opts ...grpc.CallOption) (*datapb.GetRecoveryInfoResponseV2, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.sess.ServerID)),
-	)
 	return wrapGrpcCall(ctx, c, func(client datapb.DataCoordClient) (*datapb.GetRecoveryInfoResponseV2, error) {
 		return client.GetRecoveryInfoV2(ctx, req)
 	})
@@ -351,11 +306,6 @@ func (c *Client) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 // response struct `GetFlushedSegmentsResponse` contains flushed segment id list
 // error is returned only when some communication issue occurs
 func (c *Client) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedSegmentsRequest, opts ...grpc.CallOption) (*datapb.GetFlushedSegmentsResponse, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
-	)
 	return wrapGrpcCall(ctx, c, func(client datapb.DataCoordClient) (*datapb.GetFlushedSegmentsResponse, error) {
 		return client.GetFlushedSegments(ctx, req)
 	})
@@ -370,11 +320,6 @@ func (c *Client) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedS
 // response struct `GetSegmentsByStatesResponse` contains segment id list
 // error is returned only when some communication issue occurs
 func (c *Client) GetSegmentsByStates(ctx context.Context, req *datapb.GetSegmentsByStatesRequest, opts ...grpc.CallOption) (*datapb.GetSegmentsByStatesResponse, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
-	)
 	return wrapGrpcCall(ctx, c, func(client datapb.DataCoordClient) (*datapb.GetSegmentsByStatesResponse, error) {
 		return client.GetSegmentsByStates(ctx, req)
 	})
@@ -382,11 +327,6 @@ func (c *Client) GetSegmentsByStates(ctx context.Context, req *datapb.GetSegment
 
 // ShowConfigurations gets specified configurations para of DataCoord
 func (c *Client) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest, opts ...grpc.CallOption) (*internalpb.ShowConfigurationsResponse, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
-	)
 	return wrapGrpcCall(ctx, c, func(client datapb.DataCoordClient) (*internalpb.ShowConfigurationsResponse, error) {
 		return client.ShowConfigurations(ctx, req)
 	})
@@ -394,11 +334,6 @@ func (c *Client) ShowConfigurations(ctx context.Context, req *internalpb.ShowCon
 
 // GetMetrics gets all metrics of datacoord
 func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, opts ...grpc.CallOption) (*milvuspb.GetMetricsResponse, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
-	)
 	return wrapGrpcCall(ctx, c, func(client datapb.DataCoordClient) (*milvuspb.GetMetricsResponse, error) {
 		return client.GetMetrics(ctx, req)
 	})
@@ -448,11 +383,6 @@ func (c *Client) GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushAll
 
 // DropVirtualChannel drops virtual channel in datacoord.
 func (c *Client) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtualChannelRequest, opts ...grpc.CallOption) (*datapb.DropVirtualChannelResponse, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
-	)
 	return wrapGrpcCall(ctx, c, func(client datapb.DataCoordClient) (*datapb.DropVirtualChannelResponse, error) {
 		return client.DropVirtualChannel(ctx, req)
 	})
@@ -460,11 +390,6 @@ func (c *Client) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtual
 
 // SetSegmentState sets the state of a given segment.
 func (c *Client) SetSegmentState(ctx context.Context, req *datapb.SetSegmentStateRequest, opts ...grpc.CallOption) (*datapb.SetSegmentStateResponse, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
-	)
 	return wrapGrpcCall(ctx, c, func(client datapb.DataCoordClient) (*datapb.SetSegmentStateResponse, error) {
 		return client.SetSegmentState(ctx, req)
 	})
@@ -472,11 +397,6 @@ func (c *Client) SetSegmentState(ctx context.Context, req *datapb.SetSegmentStat
 
 // Import data files(json, numpy, etc.) on MinIO/S3 storage, read and parse them into sealed segments
 func (c *Client) Import(ctx context.Context, req *datapb.ImportTaskRequest, opts ...grpc.CallOption) (*datapb.ImportTaskResponse, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
-	)
 	return wrapGrpcCall(ctx, c, func(client datapb.DataCoordClient) (*datapb.ImportTaskResponse, error) {
 		return client.Import(ctx, req)
 	})
@@ -484,11 +404,6 @@ func (c *Client) Import(ctx context.Context, req *datapb.ImportTaskRequest, opts
 
 // UpdateSegmentStatistics is the client side caller of UpdateSegmentStatistics.
 func (c *Client) UpdateSegmentStatistics(ctx context.Context, req *datapb.UpdateSegmentStatisticsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
-	)
 	return wrapGrpcCall(ctx, c, func(client datapb.DataCoordClient) (*commonpb.Status, error) {
 		return client.UpdateSegmentStatistics(ctx, req)
 	})
@@ -496,11 +411,6 @@ func (c *Client) UpdateSegmentStatistics(ctx context.Context, req *datapb.Update
 
 // UpdateChannelCheckpoint updates channel checkpoint in dataCoord.
 func (c *Client) UpdateChannelCheckpoint(ctx context.Context, req *datapb.UpdateChannelCheckpointRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
-	)
 	return wrapGrpcCall(ctx, c, func(client datapb.DataCoordClient) (*commonpb.Status, error) {
 		return client.UpdateChannelCheckpoint(ctx, req)
 	})
@@ -508,33 +418,18 @@ func (c *Client) UpdateChannelCheckpoint(ctx context.Context, req *datapb.Update
 
 // SaveImportSegment is the DataCoord client side code for SaveImportSegment call.
 func (c *Client) SaveImportSegment(ctx context.Context, req *datapb.SaveImportSegmentRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
-	)
 	return wrapGrpcCall(ctx, c, func(client datapb.DataCoordClient) (*commonpb.Status, error) {
 		return client.SaveImportSegment(ctx, req)
 	})
 }
 
 func (c *Client) UnsetIsImportingState(ctx context.Context, req *datapb.UnsetIsImportingStateRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
-	)
 	return wrapGrpcCall(ctx, c, func(client datapb.DataCoordClient) (*commonpb.Status, error) {
 		return client.UnsetIsImportingState(ctx, req)
 	})
 }
 
 func (c *Client) MarkSegmentsDropped(ctx context.Context, req *datapb.MarkSegmentsDroppedRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
-	)
 	return wrapGrpcCall(ctx, c, func(client datapb.DataCoordClient) (*commonpb.Status, error) {
 		return client.MarkSegmentsDropped(ctx, req)
 	})

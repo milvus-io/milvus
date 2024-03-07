@@ -31,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -144,10 +143,6 @@ func (c *Client) GetJobStats(ctx context.Context, req *indexpb.GetJobStatsReques
 
 // ShowConfigurations gets specified configurations para of IndexNode
 func (c *Client) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest, opts ...grpc.CallOption) (*internalpb.ShowConfigurationsResponse, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID()))
 	return wrapGrpcCall(ctx, c, func(client indexpb.IndexNodeClient) (*internalpb.ShowConfigurationsResponse, error) {
 		return client.ShowConfigurations(ctx, req)
 	})
@@ -155,10 +150,6 @@ func (c *Client) ShowConfigurations(ctx context.Context, req *internalpb.ShowCon
 
 // GetMetrics gets the metrics info of IndexNode.
 func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, opts ...grpc.CallOption) (*milvuspb.GetMetricsResponse, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID()))
 	return wrapGrpcCall(ctx, c, func(client indexpb.IndexNodeClient) (*milvuspb.GetMetricsResponse, error) {
 		return client.GetMetrics(ctx, req)
 	})

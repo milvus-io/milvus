@@ -264,6 +264,7 @@ func getIndexEngineVersion() (minimal, current int32) {
 }
 
 func (node *QueryNode) GetNodeID() int64 {
+	log.Info("check server id", zap.Int64("serverID", node.serverID))
 	return node.serverID
 }
 

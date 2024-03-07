@@ -224,13 +224,11 @@ func (t *hybridSearchTask) PreExecute(ctx context.Context) error {
 }
 
 func (t *hybridSearchTask) hybridSearchShard(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string) error {
-	hybridSearchReq := typeutil.Clone(t.HybridSearchRequest)
-	hybridSearchReq.GetBase().TargetID = nodeID
 	if t.partitionKeyMode {
 		t.PartitionIDs = t.partitionIDsSet.Collect()
 	}
 	req := &querypb.HybridSearchRequest{
-		Req:             hybridSearchReq,
+		Req:             t.HybridSearchRequest,
 		DmlChannels:     []string{channel},
 		TotalChannelNum: int32(1),
 	}

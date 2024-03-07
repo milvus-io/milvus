@@ -168,7 +168,6 @@ func (sd *shardDelegator) SyncDistribution(ctx context.Context, entries ...Segme
 func (sd *shardDelegator) modifySearchRequest(req *querypb.SearchRequest, scope querypb.DataScope, segmentIDs []int64, targetID int64) *querypb.SearchRequest {
 	nodeReq := proto.Clone(req).(*querypb.SearchRequest)
 	nodeReq.Scope = scope
-	nodeReq.Req.Base.TargetID = targetID
 	nodeReq.SegmentIDs = segmentIDs
 	nodeReq.FromShardLeader = true
 	nodeReq.DmlChannels = []string{sd.vchannelName}
@@ -178,7 +177,6 @@ func (sd *shardDelegator) modifySearchRequest(req *querypb.SearchRequest, scope 
 func (sd *shardDelegator) modifyQueryRequest(req *querypb.QueryRequest, scope querypb.DataScope, segmentIDs []int64, targetID int64) *querypb.QueryRequest {
 	nodeReq := proto.Clone(req).(*querypb.QueryRequest)
 	nodeReq.Scope = scope
-	nodeReq.Req.Base.TargetID = targetID
 	nodeReq.SegmentIDs = segmentIDs
 	nodeReq.FromShardLeader = true
 	nodeReq.DmlChannels = []string{sd.vchannelName}
@@ -548,7 +546,6 @@ func (sd *shardDelegator) GetStatistics(ctx context.Context, req *querypb.GetSta
 
 	tasks, err := organizeSubTask(ctx, req, sealed, growing, sd, func(req *querypb.GetStatisticsRequest, scope querypb.DataScope, segmentIDs []int64, targetID int64) *querypb.GetStatisticsRequest {
 		nodeReq := proto.Clone(req).(*querypb.GetStatisticsRequest)
-		nodeReq.GetReq().GetBase().TargetID = targetID
 		nodeReq.Scope = scope
 		nodeReq.SegmentIDs = segmentIDs
 		nodeReq.FromShardLeader = true

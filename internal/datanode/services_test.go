@@ -372,9 +372,7 @@ func (s *DataNodeServicesSuite) TestFlushSegments() {
 		node := &DataNode{}
 		node.UpdateStateCode(commonpb.StateCode_Abnormal)
 		req := &datapb.FlushSegmentsRequest{
-			Base: &commonpb.MsgBase{
-				TargetID: s.node.GetSession().ServerID,
-			},
+			Base:         &commonpb.MsgBase{},
 			DbID:         0,
 			CollectionID: 1,
 			SegmentIDs:   []int64{0},
@@ -391,9 +389,7 @@ func (s *DataNodeServicesSuite) TestFlushSegments() {
 		defer cancel()
 
 		req := &datapb.FlushSegmentsRequest{
-			Base: &commonpb.MsgBase{
-				TargetID: s.node.GetSession().ServerID + 1,
-			},
+			Base:         &commonpb.MsgBase{},
 			DbID:         0,
 			CollectionID: 1,
 			SegmentIDs:   []int64{0},
@@ -410,9 +406,7 @@ func (s *DataNodeServicesSuite) TestFlushSegments() {
 		defer cancel()
 
 		req := &datapb.FlushSegmentsRequest{
-			Base: &commonpb.MsgBase{
-				TargetID: s.node.GetSession().ServerID,
-			},
+			Base:         &commonpb.MsgBase{},
 			DbID:         0,
 			CollectionID: 1,
 			SegmentIDs:   []int64{segmentID},
@@ -429,9 +423,7 @@ func (s *DataNodeServicesSuite) TestFlushSegments() {
 		defer cancel()
 
 		req := &datapb.FlushSegmentsRequest{
-			Base: &commonpb.MsgBase{
-				TargetID: s.node.GetSession().ServerID,
-			},
+			Base:         &commonpb.MsgBase{},
 			DbID:         0,
 			CollectionID: 1,
 			SegmentIDs:   []int64{segmentID},
@@ -922,9 +914,7 @@ func (s *DataNodeServicesSuite) TestFlushChannels() {
 	flushTs := Timestamp(100)
 
 	req := &datapb.FlushChannelsRequest{
-		Base: &commonpb.MsgBase{
-			TargetID: s.node.GetSession().ServerID,
-		},
+		Base: &commonpb.MsgBase{},
 		FlushTs:  flushTs,
 		Channels: []string{dmChannelName},
 	}

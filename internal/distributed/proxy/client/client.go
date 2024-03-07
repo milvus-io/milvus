@@ -31,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -114,44 +113,24 @@ func (c *Client) GetStatisticsChannel(ctx context.Context, req *internalpb.GetSt
 
 // InvalidateCollectionMetaCache invalidate collection meta cache
 func (c *Client) InvalidateCollectionMetaCache(ctx context.Context, req *proxypb.InvalidateCollMetaCacheRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
-	)
 	return wrapGrpcCall(ctx, c, func(client proxypb.ProxyClient) (*commonpb.Status, error) {
 		return client.InvalidateCollectionMetaCache(ctx, req)
 	})
 }
 
 func (c *Client) InvalidateCredentialCache(ctx context.Context, req *proxypb.InvalidateCredCacheRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
-	)
 	return wrapGrpcCall(ctx, c, func(client proxypb.ProxyClient) (*commonpb.Status, error) {
 		return client.InvalidateCredentialCache(ctx, req)
 	})
 }
 
 func (c *Client) UpdateCredentialCache(ctx context.Context, req *proxypb.UpdateCredCacheRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
-	)
 	return wrapGrpcCall(ctx, c, func(client proxypb.ProxyClient) (*commonpb.Status, error) {
 		return client.UpdateCredentialCache(ctx, req)
 	})
 }
 
 func (c *Client) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.RefreshPolicyInfoCacheRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
-	)
 	return wrapGrpcCall(ctx, c, func(client proxypb.ProxyClient) (*commonpb.Status, error) {
 		return client.RefreshPolicyInfoCache(ctx, req)
 	})
@@ -160,11 +139,6 @@ func (c *Client) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.Refres
 // GetProxyMetrics gets the metrics of proxy, it's an internal interface which is different from GetMetrics interface,
 // because it only obtains the metrics of Proxy, not including the topological metrics of Query cluster and Data cluster.
 func (c *Client) GetProxyMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, opts ...grpc.CallOption) (*milvuspb.GetMetricsResponse, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
-	)
 	return wrapGrpcCall(ctx, c, func(client proxypb.ProxyClient) (*milvuspb.GetMetricsResponse, error) {
 		return client.GetProxyMetrics(ctx, req)
 	})
@@ -172,22 +146,12 @@ func (c *Client) GetProxyMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 
 // SetRates notifies Proxy to limit rates of requests.
 func (c *Client) SetRates(ctx context.Context, req *proxypb.SetRatesRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
-	)
 	return wrapGrpcCall(ctx, c, func(client proxypb.ProxyClient) (*commonpb.Status, error) {
 		return client.SetRates(ctx, req)
 	})
 }
 
 func (c *Client) ListClientInfos(ctx context.Context, req *proxypb.ListClientInfosRequest, opts ...grpc.CallOption) (*proxypb.ListClientInfosResponse, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
-	)
 	return wrapGrpcCall(ctx, c, func(client proxypb.ProxyClient) (*proxypb.ListClientInfosResponse, error) {
 		return client.ListClientInfos(ctx, req)
 	})

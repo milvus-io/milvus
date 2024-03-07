@@ -104,16 +104,6 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 		return merr.Status(err), nil
 	}
 
-	serverID := node.GetSession().ServerID
-	if req.GetBase().GetTargetID() != serverID {
-		log.Warn("flush segment target id not matched",
-			zap.Int64("targetID", req.GetBase().GetTargetID()),
-			zap.Int64("serverID", serverID),
-		)
-
-		return merr.Status(merr.WrapErrNodeNotMatch(req.GetBase().GetTargetID(), serverID)), nil
-	}
-
 	segmentIDs := req.GetSegmentIDs()
 	log = log.With(
 		zap.Int64("collectionID", req.GetCollectionID()),

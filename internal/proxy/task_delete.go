@@ -395,7 +395,6 @@ func (dr *deleteRunner) getStreamingQueryAndDelteFunc(plan *planpb.PlanNode) exe
 					commonpbutil.WithMsgType(commonpb.MsgType_Retrieve),
 					commonpbutil.WithMsgID(dr.msgID),
 					commonpbutil.WithSourceID(paramtable.GetNodeID()),
-					commonpbutil.WithTargetID(nodeID),
 				),
 				MvccTimestamp:      dr.ts,
 				ReqID:              paramtable.GetNodeID(),

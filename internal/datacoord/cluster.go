@@ -116,7 +116,6 @@ func (c *ClusterImpl) Flush(ctx context.Context, nodeID int64, channel string, s
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_Flush),
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
-			commonpbutil.WithTargetID(nodeID),
 		),
 		CollectionID: collID,
 		SegmentIDs:   lo.Map(segments, getSegmentID),
@@ -141,7 +140,6 @@ func (c *ClusterImpl) FlushChannels(ctx context.Context, nodeID int64, flushTs T
 	req := &datapb.FlushChannelsRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
-			commonpbutil.WithTargetID(nodeID),
 		),
 		FlushTs:  flushTs,
 		Channels: channels,

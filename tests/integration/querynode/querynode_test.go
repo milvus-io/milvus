@@ -26,10 +26,12 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -291,10 +293,21 @@ func (s *QueryNodeSuite) TestSwapQN() {
 	time.Sleep(s.waitTimeInSec)
 	s.checkAllCollectionsReady()
 	// Test case with new Query nodes added
-	s.Cluster.AddQueryNode()
-	s.Cluster.AddQueryNode()
+	qn1 := s.Cluster.AddQueryNode()
+	qn2 := s.Cluster.AddQueryNode()
 	time.Sleep(s.waitTimeInSec)
 	s.checkAllCollectionsReady()
+
+	resp, err := qn1.GetDataDistribution(context.TODO(), &querypb.GetDataDistributionRequest{})
+	s.NoError(err)
+	if !merr.Ok(resp.Status) {
+		log.Info("unexpected resp", zap.Any("resp", resp.GetStatus()))
+	}
+	s.True(merr.Ok(resp.Status))
+
+	resp, err = qn2.GetDataDistribution(context.TODO(), &querypb.GetDataDistributionRequest{})
+	s.NoError(err)
+	s.True(merr.Ok(resp.Status))
 
 	// Test case with all query nodes replaced
 	for idx := 0; idx < 2; idx++ {

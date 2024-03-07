@@ -274,7 +274,7 @@ func (sd *shardDelegator) applyDelete(ctx context.Context, nodeID int64, worker 
 				}
 
 				err := worker.Delete(ctx, &querypb.DeleteRequest{
-					Base:         commonpbutil.NewMsgBase(commonpbutil.WithTargetID(nodeID)),
+					Base:         commonpbutil.NewMsgBase(),
 					CollectionId: sd.collectionID,
 					PartitionId:  segmentEntry.PartitionID,
 					VchannelName: sd.vchannelName,
@@ -405,7 +405,6 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		return err
 	}
 
-	req.Base.TargetID = req.GetDstNodeID()
 	log.Debug("worker loads segments...")
 
 	sLoad := func(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
@@ -611,7 +610,7 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 				zap.Int64("deleteRowNum", deleteData.RowCount),
 			)
 			err := worker.Delete(ctx, &querypb.DeleteRequest{
-				Base:         commonpbutil.NewMsgBase(commonpbutil.WithTargetID(targetNodeID)),
+				Base:         commonpbutil.NewMsgBase(),
 				CollectionId: info.GetCollectionID(),
 				PartitionId:  info.GetPartitionID(),
 				SegmentId:    info.GetSegmentID(),
@@ -658,7 +657,7 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 		if deleteData.RowCount > 0 {
 			log.Info("forward delete to worker...", zap.Int64("deleteRowNum", deleteData.RowCount))
 			err := worker.Delete(ctx, &querypb.DeleteRequest{
-				Base:         commonpbutil.NewMsgBase(commonpbutil.WithTargetID(targetNodeID)),
+				Base:         commonpbutil.NewMsgBase(),
 				CollectionId: info.GetCollectionID(),
 				PartitionId:  info.GetPartitionID(),
 				SegmentId:    info.GetSegmentID(),
@@ -833,7 +832,6 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 			)
 			return err
 		}
-		req.Base.TargetID = targetNodeID
 		err = worker.ReleaseSegments(ctx, req)
 		if err != nil {
 			log.Warn("worker failed to release segments",

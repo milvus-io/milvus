@@ -510,7 +510,6 @@ func (t *queryTask) queryShard(ctx context.Context, nodeID int64, qn types.Query
 	}
 
 	retrieveReq := typeutil.Clone(t.RetrieveRequest)
-	retrieveReq.GetBase().TargetID = nodeID
 	if needOverrideMvcc && mvccTs > 0 {
 		retrieveReq.MvccTimestamp = mvccTs
 	}

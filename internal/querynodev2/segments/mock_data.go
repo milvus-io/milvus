@@ -1204,9 +1204,8 @@ func genSearchRequest(nq int64, indexType string, collection *Collection) (*inte
 
 func genCommonMsgBase(msgType commonpb.MsgType, targetID int64) *commonpb.MsgBase {
 	return &commonpb.MsgBase{
-		MsgType:  msgType,
-		MsgID:    rand.Int63(),
-		TargetID: targetID,
+		MsgType: msgType,
+		MsgID:   rand.Int63(),
 	}
 }
 

@@ -2445,7 +2445,6 @@ func Test_loadCollectionTask_Execute(t *testing.T) {
 				MsgID:     1,
 				Timestamp: 1,
 				SourceID:  1,
-				TargetID:  1,
 			},
 			DbName:         dbName,
 			CollectionName: collectionName,
@@ -2582,7 +2581,6 @@ func Test_loadPartitionTask_Execute(t *testing.T) {
 				MsgID:     1,
 				Timestamp: 1,
 				SourceID:  1,
-				TargetID:  1,
 			},
 			DbName:         dbName,
 			CollectionName: collectionName,
@@ -2657,7 +2655,6 @@ func TestCreateResourceGroupTask(t *testing.T) {
 		Base: &commonpb.MsgBase{
 			MsgID:     1,
 			Timestamp: 2,
-			TargetID:  3,
 		},
 		ResourceGroup: "rg",
 	}
@@ -2674,7 +2671,6 @@ func TestCreateResourceGroupTask(t *testing.T) {
 	assert.Equal(t, Timestamp(2), task.BeginTs())
 	assert.Equal(t, Timestamp(2), task.EndTs())
 	assert.Equal(t, paramtable.GetNodeID(), task.Base.GetSourceID())
-	assert.Equal(t, UniqueID(3), task.Base.GetTargetID())
 
 	err := task.Execute(ctx)
 	assert.NoError(t, err)
@@ -2696,7 +2692,6 @@ func TestDropResourceGroupTask(t *testing.T) {
 		Base: &commonpb.MsgBase{
 			MsgID:     1,
 			Timestamp: 2,
-			TargetID:  3,
 		},
 		ResourceGroup: "rg",
 	}
@@ -2713,7 +2708,6 @@ func TestDropResourceGroupTask(t *testing.T) {
 	assert.Equal(t, Timestamp(2), task.BeginTs())
 	assert.Equal(t, Timestamp(2), task.EndTs())
 	assert.Equal(t, paramtable.GetNodeID(), task.Base.GetSourceID())
-	assert.Equal(t, UniqueID(3), task.Base.GetTargetID())
 
 	err := task.Execute(ctx)
 	assert.NoError(t, err)
@@ -2735,7 +2729,6 @@ func TestTransferNodeTask(t *testing.T) {
 		Base: &commonpb.MsgBase{
 			MsgID:     1,
 			Timestamp: 2,
-			TargetID:  3,
 		},
 		SourceResourceGroup: "rg1",
 		TargetResourceGroup: "rg2",
@@ -2754,7 +2747,6 @@ func TestTransferNodeTask(t *testing.T) {
 	assert.Equal(t, Timestamp(2), task.BeginTs())
 	assert.Equal(t, Timestamp(2), task.EndTs())
 	assert.Equal(t, paramtable.GetNodeID(), task.Base.GetSourceID())
-	assert.Equal(t, UniqueID(3), task.Base.GetTargetID())
 
 	err := task.Execute(ctx)
 	assert.NoError(t, err)
@@ -2776,7 +2768,6 @@ func TestTransferReplicaTask(t *testing.T) {
 		Base: &commonpb.MsgBase{
 			MsgID:     1,
 			Timestamp: 2,
-			TargetID:  3,
 		},
 		CollectionName:      "collection1",
 		SourceResourceGroup: "rg1",
@@ -2796,7 +2787,6 @@ func TestTransferReplicaTask(t *testing.T) {
 	assert.Equal(t, Timestamp(2), task.BeginTs())
 	assert.Equal(t, Timestamp(2), task.EndTs())
 	assert.Equal(t, paramtable.GetNodeID(), task.Base.GetSourceID())
-	assert.Equal(t, UniqueID(3), task.Base.GetTargetID())
 
 	err := task.Execute(ctx)
 	assert.NoError(t, err)
@@ -2819,7 +2809,6 @@ func TestListResourceGroupsTask(t *testing.T) {
 		Base: &commonpb.MsgBase{
 			MsgID:     1,
 			Timestamp: 2,
-			TargetID:  3,
 		},
 	}
 
@@ -2835,7 +2824,6 @@ func TestListResourceGroupsTask(t *testing.T) {
 	assert.Equal(t, Timestamp(2), task.BeginTs())
 	assert.Equal(t, Timestamp(2), task.EndTs())
 	assert.Equal(t, paramtable.GetNodeID(), task.Base.GetSourceID())
-	assert.Equal(t, UniqueID(3), task.Base.GetTargetID())
 
 	err := task.Execute(ctx)
 	assert.NoError(t, err)
@@ -2870,7 +2858,6 @@ func TestDescribeResourceGroupTask(t *testing.T) {
 		Base: &commonpb.MsgBase{
 			MsgID:     1,
 			Timestamp: 2,
-			TargetID:  3,
 		},
 		ResourceGroup: "rg",
 	}
@@ -2887,7 +2874,6 @@ func TestDescribeResourceGroupTask(t *testing.T) {
 	assert.Equal(t, Timestamp(2), task.BeginTs())
 	assert.Equal(t, Timestamp(2), task.EndTs())
 	assert.Equal(t, paramtable.GetNodeID(), task.Base.GetSourceID())
-	assert.Equal(t, UniqueID(3), task.Base.GetTargetID())
 
 	err := task.Execute(ctx)
 	assert.NoError(t, err)
@@ -2916,7 +2902,6 @@ func TestDescribeResourceGroupTaskFailed(t *testing.T) {
 		Base: &commonpb.MsgBase{
 			MsgID:     1,
 			Timestamp: 2,
-			TargetID:  3,
 		},
 		ResourceGroup: "rgggg",
 	}
@@ -2933,7 +2918,6 @@ func TestDescribeResourceGroupTaskFailed(t *testing.T) {
 	assert.Equal(t, Timestamp(2), task.BeginTs())
 	assert.Equal(t, Timestamp(2), task.EndTs())
 	assert.Equal(t, paramtable.GetNodeID(), task.Base.GetSourceID())
-	assert.Equal(t, UniqueID(3), task.Base.GetTargetID())
 
 	err := task.Execute(ctx)
 	assert.NoError(t, err)

@@ -50,12 +50,6 @@ func WithSourceID(sourceID int64) MsgBaseOptions {
 	}
 }
 
-func WithTargetID(targetID int64) MsgBaseOptions {
-	return func(msgBase *commonpb.MsgBase) {
-		msgBase.TargetID = targetID
-	}
-}
-
 func GetNowTimestamp() uint64 {
 	return uint64(time.Now().Unix())
 }

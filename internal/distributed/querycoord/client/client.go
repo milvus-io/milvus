@@ -31,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -132,11 +131,6 @@ func (c *Client) GetStatisticsChannel(ctx context.Context, req *internalpb.GetSt
 
 // ShowCollections shows the collections in the QueryCoord.
 func (c *Client) ShowCollections(ctx context.Context, req *querypb.ShowCollectionsRequest, opts ...grpc.CallOption) (*querypb.ShowCollectionsResponse, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
-	)
 	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*querypb.ShowCollectionsResponse, error) {
 		return client.ShowCollections(ctx, req)
 	})
@@ -144,11 +138,6 @@ func (c *Client) ShowCollections(ctx context.Context, req *querypb.ShowCollectio
 
 // LoadCollection loads the data of the specified collections in the QueryCoord.
 func (c *Client) LoadCollection(ctx context.Context, req *querypb.LoadCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
-	)
 	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*commonpb.Status, error) {
 		return client.LoadCollection(ctx, req)
 	})
@@ -156,11 +145,6 @@ func (c *Client) LoadCollection(ctx context.Context, req *querypb.LoadCollection
 
 // ReleaseCollection release the data of the specified collections in the QueryCoord.
 func (c *Client) ReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
-	)
 	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*commonpb.Status, error) {
 		return client.ReleaseCollection(ctx, req)
 	})
@@ -168,11 +152,6 @@ func (c *Client) ReleaseCollection(ctx context.Context, req *querypb.ReleaseColl
 
 // ShowPartitions shows the partitions in the QueryCoord.
 func (c *Client) ShowPartitions(ctx context.Context, req *querypb.ShowPartitionsRequest, opts ...grpc.CallOption) (*querypb.ShowPartitionsResponse, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
-	)
 	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*querypb.ShowPartitionsResponse, error) {
 		return client.ShowPartitions(ctx, req)
 	})
@@ -180,11 +159,6 @@ func (c *Client) ShowPartitions(ctx context.Context, req *querypb.ShowPartitions
 
 // LoadPartitions loads the data of the specified partitions in the QueryCoord.
 func (c *Client) LoadPartitions(ctx context.Context, req *querypb.LoadPartitionsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
-	)
 	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*commonpb.Status, error) {
 		return client.LoadPartitions(ctx, req)
 	})
@@ -192,11 +166,6 @@ func (c *Client) LoadPartitions(ctx context.Context, req *querypb.LoadPartitions
 
 // ReleasePartitions release the data of the specified partitions in the QueryCoord.
 func (c *Client) ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
-	)
 	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*commonpb.Status, error) {
 		return client.ReleasePartitions(ctx, req)
 	})
@@ -204,11 +173,6 @@ func (c *Client) ReleasePartitions(ctx context.Context, req *querypb.ReleasePart
 
 // SyncNewCreatedPartition notifies QueryCoord to sync new created partition if collection is loaded.
 func (c *Client) SyncNewCreatedPartition(ctx context.Context, req *querypb.SyncNewCreatedPartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.sess.ServerID)),
-	)
 	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*commonpb.Status, error) {
 		return client.SyncNewCreatedPartition(ctx, req)
 	})
@@ -216,11 +180,6 @@ func (c *Client) SyncNewCreatedPartition(ctx context.Context, req *querypb.SyncN
 
 // GetPartitionStates gets the states of the specified partition.
 func (c *Client) GetPartitionStates(ctx context.Context, req *querypb.GetPartitionStatesRequest, opts ...grpc.CallOption) (*querypb.GetPartitionStatesResponse, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
-	)
 	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*querypb.GetPartitionStatesResponse, error) {
 		return client.GetPartitionStates(ctx, req)
 	})
@@ -228,11 +187,6 @@ func (c *Client) GetPartitionStates(ctx context.Context, req *querypb.GetPartiti
 
 // GetSegmentInfo gets the information of the specified segment from QueryCoord.
 func (c *Client) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest, opts ...grpc.CallOption) (*querypb.GetSegmentInfoResponse, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
-	)
 	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*querypb.GetSegmentInfoResponse, error) {
 		return client.GetSegmentInfo(ctx, req)
 	})
@@ -240,11 +194,6 @@ func (c *Client) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfo
 
 // LoadBalance migrate the sealed segments on the source node to the dst nodes.
 func (c *Client) LoadBalance(ctx context.Context, req *querypb.LoadBalanceRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
-	)
 	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*commonpb.Status, error) {
 		return client.LoadBalance(ctx, req)
 	})
@@ -252,11 +201,6 @@ func (c *Client) LoadBalance(ctx context.Context, req *querypb.LoadBalanceReques
 
 // ShowConfigurations gets specified configurations para of QueryCoord
 func (c *Client) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest, opts ...grpc.CallOption) (*internalpb.ShowConfigurationsResponse, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
-	)
 	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*internalpb.ShowConfigurationsResponse, error) {
 		return client.ShowConfigurations(ctx, req)
 	})
@@ -264,11 +208,6 @@ func (c *Client) ShowConfigurations(ctx context.Context, req *internalpb.ShowCon
 
 // GetMetrics gets the metrics information of QueryCoord.
 func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, opts ...grpc.CallOption) (*milvuspb.GetMetricsResponse, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
-	)
 	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*milvuspb.GetMetricsResponse, error) {
 		return client.GetMetrics(ctx, req)
 	})
@@ -276,11 +215,6 @@ func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 
 // GetReplicas gets the replicas of a certain collection.
 func (c *Client) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasRequest, opts ...grpc.CallOption) (*milvuspb.GetReplicasResponse, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
-	)
 	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*milvuspb.GetReplicasResponse, error) {
 		return client.GetReplicas(ctx, req)
 	})
@@ -288,11 +222,6 @@ func (c *Client) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasReque
 
 // GetShardLeaders gets the shard leaders of a certain collection.
 func (c *Client) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeadersRequest, opts ...grpc.CallOption) (*querypb.GetShardLeadersResponse, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
-	)
 	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*querypb.GetShardLeadersResponse, error) {
 		return client.GetShardLeaders(ctx, req)
 	})
@@ -305,99 +234,54 @@ func (c *Client) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthReque
 }
 
 func (c *Client) CreateResourceGroup(ctx context.Context, req *milvuspb.CreateResourceGroupRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
-	)
 	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*commonpb.Status, error) {
 		return client.CreateResourceGroup(ctx, req)
 	})
 }
 
 func (c *Client) DropResourceGroup(ctx context.Context, req *milvuspb.DropResourceGroupRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
-	)
 	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*commonpb.Status, error) {
 		return client.DropResourceGroup(ctx, req)
 	})
 }
 
 func (c *Client) DescribeResourceGroup(ctx context.Context, req *querypb.DescribeResourceGroupRequest, opts ...grpc.CallOption) (*querypb.DescribeResourceGroupResponse, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
-	)
 	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*querypb.DescribeResourceGroupResponse, error) {
 		return client.DescribeResourceGroup(ctx, req)
 	})
 }
 
 func (c *Client) TransferNode(ctx context.Context, req *milvuspb.TransferNodeRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
-	)
 	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*commonpb.Status, error) {
 		return client.TransferNode(ctx, req)
 	})
 }
 
 func (c *Client) TransferReplica(ctx context.Context, req *querypb.TransferReplicaRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
-	)
 	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*commonpb.Status, error) {
 		return client.TransferReplica(ctx, req)
 	})
 }
 
 func (c *Client) ListResourceGroups(ctx context.Context, req *milvuspb.ListResourceGroupsRequest, opts ...grpc.CallOption) (*milvuspb.ListResourceGroupsResponse, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
-	)
 	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*milvuspb.ListResourceGroupsResponse, error) {
 		return client.ListResourceGroups(ctx, req)
 	})
 }
 
 func (c *Client) ListCheckers(ctx context.Context, req *querypb.ListCheckersRequest, opts ...grpc.CallOption) (*querypb.ListCheckersResponse, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
-	)
 	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*querypb.ListCheckersResponse, error) {
 		return client.ListCheckers(ctx, req)
 	})
 }
 
 func (c *Client) ActivateChecker(ctx context.Context, req *querypb.ActivateCheckerRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
-	)
 	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*commonpb.Status, error) {
 		return client.ActivateChecker(ctx, req)
 	})
 }
 
 func (c *Client) DeactivateChecker(ctx context.Context, req *querypb.DeactivateCheckerRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
-	)
 	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*commonpb.Status, error) {
 		return client.DeactivateChecker(ctx, req)
 	})

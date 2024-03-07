@@ -141,7 +141,6 @@ func TestDropIndexTask_PreExecute(t *testing.T) {
 				MsgID:     0,
 				Timestamp: 0,
 				SourceID:  0,
-				TargetID:  0,
 			},
 			CollectionName: collectionName,
 			FieldName:      fieldName,
