@@ -344,7 +344,7 @@ func (suite *SegmentCheckerTestSuite) TestSkipReleaseSealedSegments() {
 	checker.targetMgr.UpdateCollectionCurrentTarget(collectionID)
 	readableVersion := checker.targetMgr.GetCollectionTargetVersion(collectionID, meta.CurrentTarget)
 
-	// set dist
+	// test less target version exist on leader,meet segment doesn't exit in target, segment should be released
 	nodeID := int64(2)
 	segmentID := int64(1)
 	checker.dist.ChannelDistManager.Update(nodeID, utils.CreateTestChannel(collectionID, nodeID, segmentID, "test-insert-channel"))
@@ -352,11 +352,10 @@ func (suite *SegmentCheckerTestSuite) TestSkipReleaseSealedSegments() {
 	view.TargetVersion = readableVersion - 1
 	checker.dist.LeaderViewManager.Update(nodeID, view)
 	checker.dist.SegmentDistManager.Update(nodeID, utils.CreateTestSegment(collectionID, partitionID, segmentID, nodeID, 2, "test-insert-channel"))
-
 	tasks := checker.Check(context.TODO())
 	suite.Len(tasks, 0)
 
-	// test less version exist on leader
+	// test leader's target version update to latest,meet segment doesn't exit in target, segment should be released
 	view = utils.CreateTestLeaderView(nodeID, collectionID, "test-insert-channel", map[int64]int64{1: 3}, map[int64]*meta.Segment{})
 	view.TargetVersion = readableVersion
 	checker.dist.LeaderViewManager.Update(2, view)
@@ -364,6 +363,21 @@ func (suite *SegmentCheckerTestSuite) TestSkipReleaseSealedSegments() {
 	suite.Len(tasks, 1)
 	suite.Len(tasks[0].Actions(), 1)
 	action, ok := tasks[0].Actions()[0].(*task.SegmentAction)
+	suite.True(ok)
+	suite.EqualValues(1, tasks[0].ReplicaID())
+	suite.Equal(task.ActionTypeReduce, action.Type())
+	suite.EqualValues(segmentID, action.SegmentID())
+	suite.EqualValues(nodeID, action.Node())
+	suite.Equal(tasks[0].Priority(), task.TaskPriorityNormal)
+
+	// test leader with initialTargetVersion, meet segment doesn't exit in target, segment should be released
+	view = utils.CreateTestLeaderView(nodeID, collectionID, "test-insert-channel", map[int64]int64{1: 3}, map[int64]*meta.Segment{})
+	view.TargetVersion = initialTargetVersion
+	checker.dist.LeaderViewManager.Update(2, view)
+	tasks = checker.Check(context.TODO())
+	suite.Len(tasks, 1)
+	suite.Len(tasks[0].Actions(), 1)
+	action, ok = tasks[0].Actions()[0].(*task.SegmentAction)
 	suite.True(ok)
 	suite.EqualValues(1, tasks[0].ReplicaID())
 	suite.Equal(task.ActionTypeReduce, action.Type())
