@@ -247,6 +247,33 @@ func RegroupImportFiles(job ImportJob, files []*datapb.ImportFileStats) [][]*dat
 	return fileGroups
 }
 
+func CheckDiskQuota(job ImportJob, meta *meta, imeta ImportMeta) error {
+	if !Params.QuotaConfig.DiskProtectionEnabled.GetAsBool() {
+		return nil
+	}
+	tasks := imeta.GetTaskBy(WithJob(job.GetJobID()), WithType(PreImportTaskType))
+	files := make([]*datapb.ImportFileStats, 0)
+	for _, task := range tasks {
+		files = append(files, task.GetFileStats()...)
+	}
+	toImport := lo.SumBy(files, func(file *datapb.ImportFileStats) int64 {
+		return file.GetTotalMemorySize()
+	})
+
+	err := merr.WrapErrServiceQuotaExceeded("disk quota exceeded, please allocate more resources")
+	totalUsage, collectionsUsage := meta.GetCollectionBinlogSize()
+
+	totalDiskQuota := Params.QuotaConfig.DiskQuota.GetAsFloat()
+	if float64(totalUsage+toImport) > totalDiskQuota {
+		return err
+	}
+	collectionDiskQuota := Params.QuotaConfig.DiskQuotaPerCollection.GetAsFloat()
+	if float64(collectionsUsage[job.GetCollectionID()]+toImport) > collectionDiskQuota {
+		return err
+	}
+	return nil
+}
+
 func AddImportSegment(cluster Cluster, meta *meta, segmentID int64) error {
 	segment := meta.GetSegment(segmentID)
 	req := &datapb.AddImportSegmentRequest{
