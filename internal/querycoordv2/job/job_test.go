@@ -1192,7 +1192,7 @@ func (suite *JobSuite) TestCallLoadPartitionFailed() {
 	// call LoadPartitions failed at get index info
 	getIndexErr := fmt.Errorf("mock get index error")
 	suite.broker.ExpectedCalls = lo.Filter(suite.broker.ExpectedCalls, func(call *mock.Call, _ int) bool {
-		return call.Method != "DescribeIndex"
+		return call.Method != "ListIndexes"
 	})
 	for _, collection := range suite.collections {
 		suite.broker.EXPECT().ListIndexes(mock.Anything, collection).Return(nil, getIndexErr)
@@ -1281,7 +1281,7 @@ func (suite *JobSuite) TestCallLoadPartitionFailed() {
 	}
 
 	suite.broker.ExpectedCalls = lo.Filter(suite.broker.ExpectedCalls, func(call *mock.Call, _ int) bool {
-		return call.Method != "DescribeIndex" && call.Method != "DescribeCollection"
+		return call.Method != "ListIndexes" && call.Method != "DescribeCollection"
 	})
 	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(nil, nil)
 	suite.broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).Return(nil, nil)
