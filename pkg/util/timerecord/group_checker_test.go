@@ -27,7 +27,7 @@ func TestGroupChecker(t *testing.T) {
 	groupName := `test_group`
 	signal := make(chan []string, 1)
 	// 10ms period which set before is too short
-	// change 10ms to 500ms to ensure the the group checker schedule after the second value stored
+	// change 10ms to 500ms to ensure the group checker schedule after the second value stored
 	duration := 500 * time.Millisecond
 	gc1 := GetGroupChecker(groupName, duration, func(list []string) {
 		signal <- list
