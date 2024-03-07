@@ -501,3 +501,7 @@ func (s *Server) GetImportProgress(ctx context.Context, in *internalpb.GetImport
 func (s *Server) ListImports(ctx context.Context, in *internalpb.ListImportsRequestInternal) (*internalpb.ListImportsResponse, error) {
 	return s.dataCoord.ListImports(ctx, in)
 }
+
+func (s *Server) ListIndexes(ctx context.Context, in *indexpb.ListIndexesRequest) (*indexpb.ListIndexesResponse, error) {
+	return s.dataCoord.ListIndexes(ctx, in)
+}

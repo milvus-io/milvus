@@ -2369,3 +2369,51 @@ func Test_GcControl(t *testing.T) {
 	_, err = client.GcControl(ctx, &datapb.GcControlRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
+
+func Test_ListIndexes(t *testing.T) {
+	paramtable.Init()
+
+	ctx := context.Background()
+	client, err := NewClient(ctx)
+	assert.NoError(t, err)
+	assert.NotNil(t, client)
+	defer client.Close()
+
+	mockDC := mocks.NewMockDataCoordClient(t)
+	mockGrpcClient := mocks.NewMockGrpcClient[datapb.DataCoordClient](t)
+	mockGrpcClient.EXPECT().Close().Return(nil)
+	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
+		return f(mockDC)
+	})
+	client.(*Client).grpcClient = mockGrpcClient
+
+	// test success
+	mockDC.EXPECT().ListIndexes(mock.Anything, mock.Anything).Return(&indexpb.ListIndexesResponse{
+		Status: merr.Success(),
+	}, nil).Once()
+	_, err = client.ListIndexes(ctx, &indexpb.ListIndexesRequest{})
+	assert.Nil(t, err)
+
+	// test return error status
+	mockDC.EXPECT().ListIndexes(mock.Anything, mock.Anything).Return(
+		&indexpb.ListIndexesResponse{
+			Status: merr.Status(merr.ErrServiceNotReady),
+		}, nil).Once()
+
+	rsp, err := client.ListIndexes(ctx, &indexpb.ListIndexesRequest{})
+
+	assert.Nil(t, err)
+	assert.False(t, merr.Ok(rsp.GetStatus()))
+
+	// test return error
+	mockDC.EXPECT().ListIndexes(mock.Anything, mock.Anything).Return(nil, mockErr).Once()
+
+	_, err = client.ListIndexes(ctx, &indexpb.ListIndexesRequest{})
+	assert.Error(t, err)
+
+	// test ctx done
+	ctx, cancel := context.WithCancel(ctx)
+	cancel()
+	_, err = client.ListIndexes(ctx, &indexpb.ListIndexesRequest{})
+	assert.ErrorIs(t, err, context.Canceled)
+}
