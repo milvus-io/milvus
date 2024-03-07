@@ -1137,6 +1137,9 @@ func (s *LocalSegment) LoadIndex(ctx context.Context, indexInfo *querypb.FieldIn
 		opt(options)
 	}
 
+	if options.LoadStatus == LoadStatusMeta {
+		return nil
+	}
 	old := s.GetIndex(indexInfo.GetFieldID())
 	// the index loaded
 	if old != nil && old.IndexInfo.GetIndexID() == indexInfo.GetIndexID() {
