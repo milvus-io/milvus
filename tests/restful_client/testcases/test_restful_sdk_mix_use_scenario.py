@@ -138,6 +138,9 @@ class TestRestfulSdkCompatibility(TestBase):
             FieldSchema(name="int64", dtype=DataType.INT64, is_primary=True),
             FieldSchema(name="float", dtype=DataType.FLOAT),
             FieldSchema(name="varchar", dtype=DataType.VARCHAR, max_length=65535),
+            FieldSchema(name="json", dtype=DataType.JSON),
+            FieldSchema(name="int_array", dtype=DataType.ARRAY, element_type=DataType.INT64, max_capacity=1024),
+            FieldSchema(name="varchar_array", dtype=DataType.ARRAY, element_type=DataType.VARCHAR, max_capacity=1024, max_length=65535),
             FieldSchema(name="float_vector", dtype=DataType.FLOAT_VECTOR, dim=128)
         ]
         default_schema = CollectionSchema(fields=default_fields, description="test collection",
@@ -149,7 +152,14 @@ class TestRestfulSdkCompatibility(TestBase):
         collection.load()
         # insert data by restful
         data = [
-            {"int64": i, "float": i, "varchar": str(i), "float_vector": [random.random() for _ in range(dim)], "age": i}
+            {"int64": i,
+             "float": i,
+             "varchar": str(i),
+             "json": {"name": "name", "age": i},
+             "int_array": [i for i in range(10)],
+             "varchar_array": [str(i) for i in range(10)],
+             "float_vector": [random.random() for _ in range(dim)],
+             "age": i}
             for i in range(nb)
         ]
         client = self.vector_client

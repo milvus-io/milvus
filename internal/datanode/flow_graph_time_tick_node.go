@@ -86,7 +86,7 @@ func (ttn *ttNode) Operate(in []Msg) []Msg {
 			log.Info("flowgraph is closing, force update channel CP",
 				zap.Time("cpTs", tsoutil.PhysicalTime(channelPos.GetTimestamp())),
 				zap.String("channel", channelPos.GetChannelName()))
-			ttn.updateChannelCP(channelPos, curTs)
+			ttn.updateChannelCP(channelPos, curTs, false)
 		}
 		return in
 	}
@@ -95,17 +95,17 @@ func (ttn *ttNode) Operate(in []Msg) []Msg {
 	channelPos := ttn.channel.getChannelCheckpoint(fgMsg.endPositions[0])
 
 	if curTs.Sub(ttn.lastUpdateTime.Load()) >= Params.DataNodeCfg.UpdateChannelCheckpointInterval.GetAsDuration(time.Second) {
-		ttn.updateChannelCP(channelPos, curTs)
+		ttn.updateChannelCP(channelPos, curTs, false)
 		return []Msg{}
 	}
 
 	if channelPos.GetTimestamp() >= ttn.channel.getFlushTs() {
-		ttn.updateChannelCP(channelPos, curTs)
+		ttn.updateChannelCP(channelPos, curTs, true)
 	}
 	return []Msg{}
 }
 
-func (ttn *ttNode) updateChannelCP(channelPos *msgpb.MsgPosition, curTs time.Time) {
+func (ttn *ttNode) updateChannelCP(channelPos *msgpb.MsgPosition, curTs time.Time, flush bool) {
 	callBack := func() {
 		channelCPTs, _ := tsoutil.ParseTS(channelPos.GetTimestamp())
 		log.Debug("UpdateChannelCheckpoint success",
@@ -117,7 +117,7 @@ func (ttn *ttNode) updateChannelCP(channelPos *msgpb.MsgPosition, curTs time.Tim
 			ttn.channel.setFlushTs(math.MaxUint64)
 		}
 	}
-	ttn.cpUpdater.addTask(channelPos, callBack)
+	ttn.cpUpdater.AddTask(channelPos, flush, callBack)
 	ttn.lastUpdateTime.Store(curTs)
 }
 

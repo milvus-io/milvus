@@ -37,13 +37,15 @@ const (
 type channelCPUpdateTask struct {
 	pos      *msgpb.MsgPosition
 	callback func()
+	flush    bool
 }
 
 type channelCheckpointUpdater struct {
 	dn *DataNode
 
-	mu    sync.RWMutex
-	tasks map[string]*channelCPUpdateTask
+	mu         sync.RWMutex
+	tasks      map[string]*channelCPUpdateTask
+	notifyChan chan struct{}
 
 	closeCh   chan struct{}
 	closeOnce sync.Once
@@ -51,9 +53,10 @@ type channelCheckpointUpdater struct {
 
 func newChannelCheckpointUpdater(dn *DataNode) *channelCheckpointUpdater {
 	return &channelCheckpointUpdater{
-		dn:      dn,
-		tasks:   make(map[string]*channelCPUpdateTask),
-		closeCh: make(chan struct{}),
+		dn:         dn,
+		tasks:      make(map[string]*channelCPUpdateTask),
+		closeCh:    make(chan struct{}),
+		notifyChan: make(chan struct{}, 1),
 	}
 }
 
@@ -66,17 +69,41 @@ func (ccu *channelCheckpointUpdater) start() {
 		case <-ccu.closeCh:
 			log.Info("channel checkpoint updater exit")
 			return
+		case <-ccu.notifyChan:
+			var tasks []*channelCPUpdateTask
+			ccu.mu.Lock()
+			for _, task := range ccu.tasks {
+				if task.flush {
+					task.flush = false
+					tasks = append(tasks, task)
+				}
+			}
+			ccu.mu.Unlock()
+			if len(tasks) > 0 {
+				ccu.updateCheckpoints(tasks)
+			}
 		case <-ticker.C:
 			ccu.execute()
 		}
 	}
 }
 
-func (ccu *channelCheckpointUpdater) execute() {
+func (ccu *channelCheckpointUpdater) getTask(channel string) (*channelCPUpdateTask, bool) {
 	ccu.mu.RLock()
-	taskGroups := lo.Chunk(lo.Values(ccu.tasks), paramtable.Get().DataNodeCfg.MaxChannelCheckpointsPerRPC.GetAsInt())
-	ccu.mu.RUnlock()
+	defer ccu.mu.RUnlock()
+	task, ok := ccu.tasks[channel]
+	return task, ok
+}
 
+func (ccu *channelCheckpointUpdater) trigger() {
+	select {
+	case ccu.notifyChan <- struct{}{}:
+	default:
+	}
+}
+
+func (ccu *channelCheckpointUpdater) updateCheckpoints(tasks []*channelCPUpdateTask) {
+	taskGroups := lo.Chunk(tasks, paramtable.Get().DataNodeCfg.MaxChannelCheckpointsPerRPC.GetAsInt())
 	updateChanCPMaxParallel := paramtable.Get().DataNodeCfg.UpdateChannelCheckpointMaxParallel.GetAsInt()
 	if updateChanCPMaxParallel <= 0 {
 		updateChanCPMaxParallel = defaultUpdateChanCPMaxParallel
@@ -122,24 +149,49 @@ func (ccu *channelCheckpointUpdater) execute() {
 	})
 }
 
-func (ccu *channelCheckpointUpdater) addTask(channelPos *msgpb.MsgPosition, callback func()) {
+func (ccu *channelCheckpointUpdater) execute() {
+	ccu.mu.RLock()
+	tasks := lo.Values(ccu.tasks)
+	ccu.mu.RUnlock()
+
+	ccu.updateCheckpoints(tasks)
+}
+
+func (ccu *channelCheckpointUpdater) AddTask(channelPos *msgpb.MsgPosition, flush bool, callback func()) {
 	if channelPos == nil || channelPos.GetMsgID() == nil || channelPos.GetChannelName() == "" {
 		log.Warn("illegal checkpoint", zap.Any("pos", channelPos))
 		return
 	}
+	if flush {
+		defer ccu.trigger()
+	}
 	channel := channelPos.GetChannelName()
-	ccu.mu.RLock()
-	if ccu.tasks[channel] != nil && channelPos.GetTimestamp() <= ccu.tasks[channel].pos.GetTimestamp() {
-		ccu.mu.RUnlock()
+	task, ok := ccu.getTask(channelPos.GetChannelName())
+	if !ok {
+		ccu.mu.Lock()
+		defer ccu.mu.Unlock()
+		ccu.tasks[channel] = &channelCPUpdateTask{
+			pos:      channelPos,
+			callback: callback,
+			flush:    flush,
+		}
 		return
 	}
-	ccu.mu.RUnlock()
 
-	ccu.mu.Lock()
-	defer ccu.mu.Unlock()
-	ccu.tasks[channel] = &channelCPUpdateTask{
-		pos:      channelPos,
-		callback: callback,
+	max := func(a, b *msgpb.MsgPosition) *msgpb.MsgPosition {
+		if a.GetTimestamp() > b.GetTimestamp() {
+			return a
+		}
+		return b
+	}
+	if task.pos.GetTimestamp() < channelPos.GetTimestamp() || (flush && !task.flush) {
+		ccu.mu.Lock()
+		defer ccu.mu.Unlock()
+		ccu.tasks[channel] = &channelCPUpdateTask{
+			pos:      max(channelPos, task.pos),
+			callback: callback,
+			flush:    flush || task.flush,
+		}
 	}
 }
 
