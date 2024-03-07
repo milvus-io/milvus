@@ -683,7 +683,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 
 		err = meta.UpdateSegmentsInfo(
 			UpdateStatusOperator(1, commonpb.SegmentState_Flushing),
-			UpdateBinlogsOperator(1,
+			AddBinlogsOperator(1,
 				[]*datapb.FieldBinlog{getFieldBinlogIDsWithEntry(1, 10, 1)},
 				[]*datapb.FieldBinlog{getFieldBinlogIDs(1, 1)},
 				[]*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{EntriesNum: 1, TimestampFrom: 100, TimestampTo: 200, LogSize: 1000, LogPath: getDeltaLogPath("deltalog1", 1)}}}},
@@ -747,7 +747,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		assert.NoError(t, err)
 
 		err = meta.UpdateSegmentsInfo(
-			UpdateBinlogsOperator(1, nil, nil, nil),
+			AddBinlogsOperator(1, nil, nil, nil),
 		)
 		assert.NoError(t, err)
 
@@ -762,7 +762,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		assert.NoError(t, err)
 
 		err = meta.UpdateSegmentsInfo(
-			ReplaceBinlogsOperator(1, nil, nil, nil),
+			UpdateBinlogsOperator(1, nil, nil, nil),
 		)
 		assert.NoError(t, err)
 
@@ -824,7 +824,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 
 		err = meta.UpdateSegmentsInfo(
 			UpdateStatusOperator(1, commonpb.SegmentState_Flushing),
-			UpdateBinlogsOperator(1,
+			AddBinlogsOperator(1,
 				[]*datapb.FieldBinlog{getFieldBinlogIDs(1, 0)},
 				[]*datapb.FieldBinlog{getFieldBinlogIDs(1, 0)},
 				[]*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{EntriesNum: 1, TimestampFrom: 100, TimestampTo: 200, LogSize: 1000, LogPath: getDeltaLogPath("deltalog", 1)}}}},

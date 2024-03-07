@@ -628,7 +628,6 @@ func (s *ServerSuite) TestGetSegmentInfo() {
 		IncludeUnHealthy: true,
 	})
 	s.NoError(err)
-	log.Info("test--", zap.Any("resp", resp))
 	s.EqualValues(2, len(resp.Infos[0].Deltalogs))
 }
 

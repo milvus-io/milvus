@@ -182,12 +182,12 @@ func (s *GrpcAccessInfoSuite) TestOutputFields() {
 	result := s.info.Get("$output_fields")
 	s.Equal(unknownString, result[0])
 
-	fileds := []string{"pk"}
+	fields := []string{"pk"}
 	s.info.req = &milvuspb.QueryRequest{
-		OutputFields: fileds,
+		OutputFields: fields,
 	}
 	result = s.info.Get("$output_fields")
-	s.Equal(fmt.Sprint(fileds), result[0])
+	s.Equal(fmt.Sprint(fields), result[0])
 }
 
 func (s *GrpcAccessInfoSuite) TestClusterPrefix() {
