@@ -96,6 +96,8 @@ def get_random_json_data(uid=None):
         uid = 0
     data = {"uid": uid,  "name": fake.name(), "address": fake.address(), "text": fake.text(), "email": fake.email(),
             "phone_number": fake.phone_number(),
+            "array_int_dynamic": [random.randint(1, 100_000) for i in range(random.randint(1, 10))],
+            "array_varchar_dynamic": [fake.name() for i in range(random.randint(1, 10))],
             "json": {
                 "name": fake.name(),
                 "address": fake.address()
