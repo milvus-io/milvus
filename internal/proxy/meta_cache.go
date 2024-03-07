@@ -370,10 +370,11 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		m.collInfo[database] = make(map[string]*collectionInfo)
 	}
 
+	schemaInfo := newSchemaInfo(collection.Schema)
 	m.collInfo[database][collectionName] = &collectionInfo{
 		collID:              collection.CollectionID,
-		schema:              newSchemaInfo(collection.Schema),
-		partInfo:            parsePartitionsInfo(infos),
+		schema:              schemaInfo,
+		partInfo:            parsePartitionsInfo(infos, schemaInfo.hasPartitionKeyField),
 		createdTimestamp:    collection.CreatedTimestamp,
 		createdUtcTimestamp: collection.CreatedUtcTimestamp,
 		consistencyLevel:    collection.ConsistencyLevel,
@@ -653,7 +654,7 @@ func (m *MetaCache) showPartitions(ctx context.Context, dbName string, collectio
 // parsePartitionsInfo parse partitionInfo list to partitionInfos struct.
 // prepare all name to id & info map
 // try parse partition names to partitionKey index.
-func parsePartitionsInfo(infos []*partitionInfo) *partitionInfos {
+func parsePartitionsInfo(infos []*partitionInfo, hasPartitionKey bool) *partitionInfos {
 	name2ID := lo.SliceToMap(infos, func(info *partitionInfo) (string, int64) {
 		return info.name, info.partitionID
 	})
@@ -665,6 +666,10 @@ func parsePartitionsInfo(infos []*partitionInfo) *partitionInfos {
 		partitionInfos: infos,
 		name2ID:        name2ID,
 		name2Info:      name2Info,
+	}
+
+	if !hasPartitionKey {
+		return result
 	}
 
 	// Make sure the order of the partition names got every time is the same
@@ -717,10 +722,11 @@ func (m *MetaCache) RemovePartition(ctx context.Context, database, collectionNam
 	defer m.mu.Unlock()
 
 	var ok bool
+	var collInfo *collectionInfo
 
 	db, dbOk := m.collInfo[database]
 	if dbOk {
-		_, ok = db[collectionName]
+		collInfo, ok = db[collectionName]
 	}
 
 	if !ok {
@@ -735,7 +741,7 @@ func (m *MetaCache) RemovePartition(ctx context.Context, database, collectionNam
 		return info.name != partitionName
 	})
 
-	m.collInfo[database][collectionName].partInfo = parsePartitionsInfo(filteredInfos)
+	m.collInfo[database][collectionName].partInfo = parsePartitionsInfo(filteredInfos, collInfo.schema.hasPartitionKeyField)
 }
 
 // GetCredentialInfo returns the credential related to provided username

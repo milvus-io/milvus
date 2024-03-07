@@ -18,6 +18,7 @@ package common
 
 import (
 	"encoding/binary"
+	"strings"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -142,7 +143,7 @@ func IsSystemField(fieldID int64) bool {
 
 func IsMmapEnabled(kvs ...*commonpb.KeyValuePair) bool {
 	for _, kv := range kvs {
-		if kv.Key == MmapEnabledKey && kv.Value == "true" {
+		if kv.Key == MmapEnabledKey && strings.ToLower(kv.Value) == "true" {
 			return true
 		}
 	}
@@ -160,7 +161,7 @@ func IsFieldMmapEnabled(schema *schemapb.CollectionSchema, fieldID int64) bool {
 
 func IsCollectionLazyLoadEnabled(kvs ...*commonpb.KeyValuePair) bool {
 	for _, kv := range kvs {
-		if kv.Key == LazyLoadEnableKey && kv.Value == "true" {
+		if kv.Key == LazyLoadEnableKey && strings.ToLower(kv.Value) == "true" {
 			return true
 		}
 	}

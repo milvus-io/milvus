@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metric"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
@@ -279,6 +280,9 @@ func (s *CoordDownSearch) searchAfterCoordDown() float64 {
 	var err error
 	c := s.Cluster
 
+	params := paramtable.Get()
+	paramtable.Init()
+
 	start := time.Now()
 	log.Info("=========================Data Coordinators stopped=========================")
 	c.DataCoord.Stop()
@@ -294,8 +298,10 @@ func (s *CoordDownSearch) searchAfterCoordDown() float64 {
 
 	log.Info("=========================Root Coordinators stopped=========================")
 	c.RootCoord.Stop()
+	params.Save(params.CommonCfg.GracefulTime.Key, "60000")
 	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Bounded)
 	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Eventually)
+	params.Reset(params.CommonCfg.GracefulTime.Key)
 	failedStart := time.Now()
 	s.searchFailed(searchCollectionName, Dim, commonpb.ConsistencyLevel_Strong)
 	log.Info(fmt.Sprintf("=========================Failed search cost: %fs=========================", time.Since(failedStart).Seconds()))

@@ -70,6 +70,7 @@ type searchTask struct {
 	node            types.ProxyComponent
 	lb              LBPolicy
 	queryChannelsTs map[string]Timestamp
+	queryInfo       *planpb.QueryInfo
 }
 
 func getPartitionIDs(ctx context.Context, dbName string, collectionName string, partitionNames []string) (partitionIDs []UniqueID, err error) {
@@ -443,7 +444,8 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 		return err
 	}
 
-	t.result, err = reduceSearchResultData(ctx, validSearchResults, Nq, Topk, MetricType, primaryFieldSchema.DataType, t.offset)
+	t.result, err = reduceSearchResult(ctx, NewReduceSearchResultInfo(validSearchResults, Nq, Topk,
+		MetricType, primaryFieldSchema.DataType, t.offset, t.queryInfo))
 	if err != nil {
 		log.Warn("failed to reduce search results", zap.Error(err))
 		return err
@@ -749,173 +751,6 @@ func selectHighestScoreIndex(subSearchResultData []*schemapb.SearchResultData, s
 		}
 	}
 	return subSearchIdx, resultDataIdx
-}
-
-func reduceSearchResultData(ctx context.Context, subSearchResultData []*schemapb.SearchResultData, nq int64, topk int64, metricType string, pkType schemapb.DataType, offset int64) (*milvuspb.SearchResults, error) {
-	tr := timerecord.NewTimeRecorder("reduceSearchResultData")
-	defer func() {
-		tr.CtxElapse(ctx, "done")
-	}()
-
-	limit := topk - offset
-	log.Ctx(ctx).Debug("reduceSearchResultData",
-		zap.Int("len(subSearchResultData)", len(subSearchResultData)),
-		zap.Int64("nq", nq),
-		zap.Int64("offset", offset),
-		zap.Int64("limit", limit),
-		zap.String("metricType", metricType))
-
-	ret := &milvuspb.SearchResults{
-		Status: merr.Success(),
-		Results: &schemapb.SearchResultData{
-			NumQueries: nq,
-			TopK:       topk,
-			FieldsData: typeutil.PrepareResultFieldData(subSearchResultData[0].GetFieldsData(), limit),
-			Scores:     []float32{},
-			Ids:        &schemapb.IDs{},
-			Topks:      []int64{},
-		},
-	}
-
-	switch pkType {
-	case schemapb.DataType_Int64:
-		ret.GetResults().Ids.IdField = &schemapb.IDs_IntId{
-			IntId: &schemapb.LongArray{
-				Data: make([]int64, 0, limit),
-			},
-		}
-	case schemapb.DataType_VarChar:
-		ret.GetResults().Ids.IdField = &schemapb.IDs_StrId{
-			StrId: &schemapb.StringArray{
-				Data: make([]string, 0, limit),
-			},
-		}
-	default:
-		return nil, errors.New("unsupported pk type")
-	}
-	for i, sData := range subSearchResultData {
-		pkLength := typeutil.GetSizeOfIDs(sData.GetIds())
-		log.Ctx(ctx).Debug("subSearchResultData",
-			zap.Int("result No.", i),
-			zap.Int64("nq", sData.NumQueries),
-			zap.Int64("topk", sData.TopK),
-			zap.Int("length of pks", pkLength),
-			zap.Int("length of FieldsData", len(sData.FieldsData)))
-		if err := checkSearchResultData(sData, nq, topk); err != nil {
-			log.Ctx(ctx).Warn("invalid search results", zap.Error(err))
-			return ret, err
-		}
-		// printSearchResultData(sData, strconv.FormatInt(int64(i), 10))
-	}
-
-	var (
-		subSearchNum = len(subSearchResultData)
-		// for results of each subSearchResultData, storing the start offset of each query of nq queries
-		subSearchNqOffset = make([][]int64, subSearchNum)
-	)
-	for i := 0; i < subSearchNum; i++ {
-		subSearchNqOffset[i] = make([]int64, subSearchResultData[i].GetNumQueries())
-		for j := int64(1); j < nq; j++ {
-			subSearchNqOffset[i][j] = subSearchNqOffset[i][j-1] + subSearchResultData[i].Topks[j-1]
-		}
-	}
-
-	var (
-		skipDupCnt int64
-		realTopK   int64 = -1
-	)
-
-	var retSize int64
-	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
-
-	// reducing nq * topk results
-	for i := int64(0); i < nq; i++ {
-		var (
-			// cursor of current data of each subSearch for merging the j-th data of TopK.
-			// sum(cursors) == j
-			cursors = make([]int64, subSearchNum)
-
-			j             int64
-			idSet         = make(map[interface{}]struct{})
-			groupByValSet = make(map[interface{}]struct{})
-		)
-
-		// skip offset results
-		for k := int64(0); k < offset; k++ {
-			subSearchIdx, _ := selectHighestScoreIndex(subSearchResultData, subSearchNqOffset, cursors, i)
-			if subSearchIdx == -1 {
-				break
-			}
-
-			cursors[subSearchIdx]++
-		}
-
-		// keep limit results
-		for j = 0; j < limit; {
-			// From all the sub-query result sets of the i-th query vector,
-			//   find the sub-query result set index of the score j-th data,
-			//   and the index of the data in schemapb.SearchResultData
-			subSearchIdx, resultDataIdx := selectHighestScoreIndex(subSearchResultData, subSearchNqOffset, cursors, i)
-			if subSearchIdx == -1 {
-				break
-			}
-			subSearchRes := subSearchResultData[subSearchIdx]
-
-			id := typeutil.GetPK(subSearchRes.GetIds(), resultDataIdx)
-			score := subSearchRes.Scores[resultDataIdx]
-			groupByVal := typeutil.GetData(subSearchRes.GetGroupByFieldValue(), int(resultDataIdx))
-
-			// remove duplicates
-			if _, ok := idSet[id]; !ok {
-				groupByValExist := false
-				if groupByVal != nil {
-					_, groupByValExist = groupByValSet[groupByVal]
-				}
-				if !groupByValExist {
-					retSize += typeutil.AppendFieldData(ret.Results.FieldsData, subSearchResultData[subSearchIdx].FieldsData, resultDataIdx)
-					typeutil.AppendPKs(ret.Results.Ids, id)
-					ret.Results.Scores = append(ret.Results.Scores, score)
-					idSet[id] = struct{}{}
-					if groupByVal != nil {
-						groupByValSet[groupByVal] = struct{}{}
-						if err := typeutil.AppendGroupByValue(ret.Results, groupByVal, subSearchRes.GetGroupByFieldValue().GetType()); err != nil {
-							log.Ctx(ctx).Error("failed to append groupByValues", zap.Error(err))
-							return ret, err
-						}
-					}
-					j++
-				}
-			} else {
-				// skip entity with same id
-				skipDupCnt++
-			}
-			cursors[subSearchIdx]++
-		}
-		if realTopK != -1 && realTopK != j {
-			log.Ctx(ctx).Warn("Proxy Reduce Search Result", zap.Error(errors.New("the length (topk) between all result of query is different")))
-			// return nil, errors.New("the length (topk) between all result of query is different")
-		}
-		realTopK = j
-		ret.Results.Topks = append(ret.Results.Topks, realTopK)
-
-		// limit search result to avoid oom
-		if retSize > maxOutputSize {
-			return nil, fmt.Errorf("search results exceed the maxOutputSize Limit %d", maxOutputSize)
-		}
-	}
-	log.Ctx(ctx).Debug("skip duplicated search result", zap.Int64("count", skipDupCnt))
-
-	if skipDupCnt > 0 {
-		log.Info("skip duplicated search result", zap.Int64("count", skipDupCnt))
-	}
-
-	ret.Results.TopK = realTopK // realTopK is the topK of the nq-th query
-	if !metric.PositivelyRelated(metricType) {
-		for k := range ret.Results.Scores {
-			ret.Results.Scores[k] *= -1
-		}
-	}
-	return ret, nil
 }
 
 type rangeSearchParams struct {
