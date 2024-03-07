@@ -496,8 +496,8 @@ var (
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
 			Name:      "load_index_latency",
-			Help:      "latency of load per segment's index",
-			Buckets:   []float64{0.1, 0.5, 1, 5, 10, 20, 50, 100, 300, 600, 1200}, // unit seconds
+			Help:      "latency of load per segment's index, in milliseconds",
+			Buckets:   buckets, // unit milliseconds
 		}, []string{
 			nodeIDLabelName,
 		})
