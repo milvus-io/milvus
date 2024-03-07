@@ -299,13 +299,17 @@ func (s *Server) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest)
 	)
 	log.Info("received AlterIndex request", zap.Any("params", req.GetParams()))
 
+	if req.IndexName == "" {
+		return merr.Status(merr.WrapErrServiceInternal("index name is empty")), nil
+	}
+
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		log.Warn(msgDataCoordIsUnhealthy(paramtable.GetNodeID()), zap.Error(err))
 		return merr.Status(err), nil
 	}
 
 	indexes := s.meta.indexMeta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName())
-	if req.GetIndexName() != "" && len(indexes) == 0 {
+	if len(indexes) == 0 {
 		err := merr.WrapErrIndexNotFound(req.GetIndexName())
 		return merr.Status(err), nil
 	}
