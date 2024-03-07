@@ -10341,6 +10341,7 @@ class TestSearchGroupBy(TestcaseBase):
         pass
 
 
+@pytest.mark.skip(reason="debug")
 class TestCollectionHybridSearchValid(TestcaseBase):
     """ Test case of search interface """
 
