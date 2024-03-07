@@ -43,7 +43,7 @@ type Broker interface {
 	GetCollectionSchema(ctx context.Context, collectionID UniqueID) (*schemapb.CollectionSchema, error)
 	GetPartitions(ctx context.Context, collectionID UniqueID) ([]UniqueID, error)
 	GetRecoveryInfo(ctx context.Context, collectionID UniqueID, partitionID UniqueID) ([]*datapb.VchannelInfo, []*datapb.SegmentBinlogs, error)
-	DescribeIndex(ctx context.Context, collectionID UniqueID) ([]*indexpb.IndexInfo, error)
+	ListIndexes(ctx context.Context, collectionID UniqueID) ([]*indexpb.IndexInfo, error)
 	GetSegmentInfo(ctx context.Context, segmentID ...UniqueID) (*datapb.GetSegmentInfoResponse, error)
 	GetIndexInfo(ctx context.Context, collectionID UniqueID, segmentID UniqueID) ([]*querypb.FieldIndexInfo, error)
 	GetRecoveryInfoV2(ctx context.Context, collectionID UniqueID, partitionIDs ...UniqueID) ([]*datapb.VchannelInfo, []*datapb.SegmentInfo, error)
@@ -243,7 +243,7 @@ func (broker *CoordinatorBroker) GetIndexInfo(ctx context.Context, collectionID 
 	return indexes, nil
 }
 
-func (broker *CoordinatorBroker) DescribeIndex(ctx context.Context, collectionID UniqueID) ([]*indexpb.IndexInfo, error) {
+func (broker *CoordinatorBroker) describeIndex(ctx context.Context, collectionID UniqueID) ([]*indexpb.IndexInfo, error) {
 	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
 
@@ -271,5 +271,27 @@ func (broker *CoordinatorBroker) DescribeIndex(ctx context.Context, collectionID
 			zap.Error(err))
 		return nil, err
 	}
+	return resp.GetIndexInfos(), nil
+}
+
+func (broker *CoordinatorBroker) ListIndexes(ctx context.Context, collectionID UniqueID) ([]*indexpb.IndexInfo, error) {
+	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID))
+	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
+	defer cancel()
+
+	resp, err := broker.dataCoord.ListIndexes(ctx, &indexpb.ListIndexesRequest{
+		CollectionID: collectionID,
+	})
+
+	err = merr.CheckRPCCall(resp, err)
+	if err != nil {
+		if errors.Is(err, merr.ErrServiceUnimplemented) {
+			log.Warn("datacoord does not implement ListIndex API fallback to DescribeIndex")
+			return broker.describeIndex(ctx, collectionID)
+		}
+		log.Warn("failed to fetch index meta", zap.Error(err))
+		return nil, err
+	}
+
 	return resp.GetIndexInfos(), nil
 }

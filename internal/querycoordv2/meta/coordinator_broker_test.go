@@ -270,7 +270,7 @@ func (s *CoordinatorBrokerDataCoordSuite) TestDescribeIndex() {
 					return &indexpb.IndexInfo{IndexID: id}
 				}),
 			}, nil)
-		infos, err := s.broker.DescribeIndex(ctx, collectionID)
+		infos, err := s.broker.describeIndex(ctx, collectionID)
 		s.NoError(err)
 		s.ElementsMatch(indexIDs, lo.Map(infos, func(info *indexpb.IndexInfo, _ int) int64 { return info.GetIndexID() }))
 		s.resetMock()
@@ -283,7 +283,7 @@ func (s *CoordinatorBrokerDataCoordSuite) TestDescribeIndex() {
 		ctx2, cancel2 := context.WithTimeout(ctx, time.Millisecond*1)
 		defer cancel2()
 		time.Sleep(time.Millisecond * 2)
-		_, err := s.broker.DescribeIndex(ctx2, collectionID)
+		_, err := s.broker.describeIndex(ctx2, collectionID)
 		s.Error(err)
 		s.resetMock()
 	})
@@ -292,7 +292,7 @@ func (s *CoordinatorBrokerDataCoordSuite) TestDescribeIndex() {
 		s.datacoord.EXPECT().DescribeIndex(mock.Anything, mock.Anything).
 			Return(nil, errors.New("mock"))
 
-		_, err := s.broker.DescribeIndex(ctx, collectionID)
+		_, err := s.broker.describeIndex(ctx, collectionID)
 		s.Error(err)
 		s.resetMock()
 	})
@@ -303,7 +303,7 @@ func (s *CoordinatorBrokerDataCoordSuite) TestDescribeIndex() {
 				Status: merr.Status(errors.New("mocked")),
 			}, nil)
 
-		_, err := s.broker.DescribeIndex(ctx, collectionID)
+		_, err := s.broker.describeIndex(ctx, collectionID)
 		s.Error(err)
 		s.resetMock()
 	})
@@ -323,9 +323,66 @@ func (s *CoordinatorBrokerDataCoordSuite) TestDescribeIndex() {
 				}),
 			}, nil)
 
-		_, err := s.broker.DescribeIndex(ctx, collectionID)
+		_, err := s.broker.describeIndex(ctx, collectionID)
 		s.NoError(err)
 		s.resetMock()
+	})
+}
+
+func (s *CoordinatorBrokerDataCoordSuite) TestListIndexes() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	collectionID := int64(100)
+
+	s.Run("normal_case", func() {
+		indexIDs := []int64{1, 2}
+		s.datacoord.EXPECT().ListIndexes(mock.Anything, mock.Anything).
+			Return(&indexpb.ListIndexesResponse{
+				Status: merr.Status(nil),
+				IndexInfos: lo.Map(indexIDs, func(id int64, _ int) *indexpb.IndexInfo {
+					return &indexpb.IndexInfo{IndexID: id}
+				}),
+			}, nil).Once()
+		infos, err := s.broker.ListIndexes(ctx, collectionID)
+		s.NoError(err)
+		s.ElementsMatch(indexIDs, lo.Map(infos, func(info *indexpb.IndexInfo, _ int) int64 { return info.GetIndexID() }))
+	})
+
+	s.Run("datacoord_return_error", func() {
+		s.datacoord.EXPECT().ListIndexes(mock.Anything, mock.Anything).
+			Return(nil, errors.New("mocked")).Once()
+
+		_, err := s.broker.ListIndexes(ctx, collectionID)
+		s.Error(err)
+	})
+
+	s.Run("datacoord_return_failure_status", func() {
+		s.datacoord.EXPECT().ListIndexes(mock.Anything, mock.Anything).
+			Return(&indexpb.ListIndexesResponse{
+				Status: merr.Status(errors.New("mocked")),
+			}, nil).Once()
+
+		_, err := s.broker.ListIndexes(ctx, collectionID)
+		s.Error(err)
+	})
+
+	s.Run("datacoord_return_unimplemented", func() {
+		// mock old version datacoord return unimplemented
+		s.datacoord.EXPECT().ListIndexes(mock.Anything, mock.Anything).
+			Return(nil, merr.ErrServiceUnimplemented).Once()
+
+		// mock retry on old version datacoord descibe index
+		indexIDs := []int64{1, 2}
+		s.datacoord.EXPECT().DescribeIndex(mock.Anything, mock.Anything).
+			Return(&indexpb.DescribeIndexResponse{
+				Status: merr.Status(nil),
+				IndexInfos: lo.Map(indexIDs, func(id int64, _ int) *indexpb.IndexInfo {
+					return &indexpb.IndexInfo{IndexID: id}
+				}),
+			}, nil).Once()
+
+		_, err := s.broker.ListIndexes(ctx, collectionID)
+		s.NoError(err)
 	})
 }
 

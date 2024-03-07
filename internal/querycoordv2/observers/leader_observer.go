@@ -221,7 +221,7 @@ func (o *LeaderObserver) sync(ctx context.Context, replicaID int64, leaderView *
 	}
 
 	// Get collection index info
-	indexInfo, err := o.broker.DescribeIndex(ctx, leaderView.CollectionID)
+	indexInfo, err := o.broker.ListIndexes(ctx, leaderView.CollectionID)
 	if err != nil {
 		log.Warn("fail to get index info of collection", zap.Error(err))
 		return false

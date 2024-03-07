@@ -1732,7 +1732,7 @@ func (suite *ServiceSuite) expectGetRecoverInfo(collection int64) {
 func (suite *ServiceSuite) expectLoadPartitions() {
 	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything).
 		Return(nil, nil)
-	suite.broker.EXPECT().DescribeIndex(mock.Anything, mock.Anything).
+	suite.broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).
 		Return(nil, nil)
 	suite.cluster.EXPECT().LoadPartitions(mock.Anything, mock.Anything, mock.Anything).
 		Return(merr.Success(), nil)

@@ -128,7 +128,7 @@ func (suite *JobSuite) SetupSuite() {
 
 	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything).
 		Return(nil, nil)
-	suite.broker.EXPECT().DescribeIndex(mock.Anything, mock.Anything).
+	suite.broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).
 		Return(nil, nil)
 
 	suite.cluster = session.NewMockCluster(suite.T())
@@ -1192,10 +1192,10 @@ func (suite *JobSuite) TestCallLoadPartitionFailed() {
 	// call LoadPartitions failed at get index info
 	getIndexErr := fmt.Errorf("mock get index error")
 	suite.broker.ExpectedCalls = lo.Filter(suite.broker.ExpectedCalls, func(call *mock.Call, _ int) bool {
-		return call.Method != "DescribeIndex"
+		return call.Method != "ListIndexes"
 	})
 	for _, collection := range suite.collections {
-		suite.broker.EXPECT().DescribeIndex(mock.Anything, collection).Return(nil, getIndexErr)
+		suite.broker.EXPECT().ListIndexes(mock.Anything, collection).Return(nil, getIndexErr)
 		loadCollectionReq := &querypb.LoadCollectionRequest{
 			CollectionID: collection,
 		}
@@ -1281,10 +1281,10 @@ func (suite *JobSuite) TestCallLoadPartitionFailed() {
 	}
 
 	suite.broker.ExpectedCalls = lo.Filter(suite.broker.ExpectedCalls, func(call *mock.Call, _ int) bool {
-		return call.Method != "DescribeIndex" && call.Method != "GetCollectionSchema"
+		return call.Method != "ListIndexes" && call.Method != "GetCollectionSchema"
 	})
 	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything).Return(nil, nil)
-	suite.broker.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(nil, nil)
+	suite.broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).Return(nil, nil)
 }
 
 func (suite *JobSuite) TestCallReleasePartitionFailed() {
