@@ -5002,12 +5002,9 @@ func (node *Proxy) CheckHealth(ctx context.Context, request *milvuspb.CheckHealt
 		}, nil
 	}
 
-	states, reasons := node.simpleLimiter.GetQuotaStates()
 	return &milvuspb.CheckHealthResponse{
-		Status:      merr.Success(),
-		QuotaStates: states,
-		Reasons:     reasons,
-		IsHealthy:   true,
+		Status:    merr.Success(),
+		IsHealthy: true,
 	}, nil
 }
 

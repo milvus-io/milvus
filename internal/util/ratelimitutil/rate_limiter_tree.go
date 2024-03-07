@@ -17,6 +17,7 @@
 package ratelimitutil
 
 import (
+	"sync"
 	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -38,14 +39,14 @@ type RateLimiterNode struct {
 	// children will be databases if current level is cluster
 	// children will be collections if current level is database
 	// children will be partitions if current level is collection
-	children map[int64]*RateLimiterNode
+	children *typeutil.ConcurrentMap[int64, *RateLimiterNode]
 }
 
 func NewRateLimiterNode() *RateLimiterNode {
 	rln := &RateLimiterNode{
 		limiters:    typeutil.NewConcurrentMap[internalpb.RateType, *ratelimitutil.Limiter](),
 		quotaStates: typeutil.NewConcurrentMap[milvuspb.QuotaState, commonpb.ErrorCode](),
-		children:    make(map[int64]*RateLimiterNode),
+		children:    typeutil.NewConcurrentMap[int64, *RateLimiterNode](),
 	}
 	return rln
 }
@@ -107,22 +108,22 @@ func TraverseRateLimiterTree(root *RateLimiterNode, fn1 func(internalpb.RateType
 	if fn2 != nil {
 		root.quotaStates.Range(fn2)
 	}
-	if len(root.children) != 0 {
-		for _, child := range root.children {
-			TraverseRateLimiterTree(child, fn1, fn2)
-		}
-	}
+	root.GetChildren().Range(func(key int64, child *RateLimiterNode) bool {
+		TraverseRateLimiterTree(child, fn1, fn2)
+		return true
+	})
 }
 
 func (rln *RateLimiterNode) AddChild(key int64, child *RateLimiterNode) {
-	rln.children[key] = child
+	rln.children.Insert(key, child)
 }
 
 func (rln *RateLimiterNode) GetChild(key int64) *RateLimiterNode {
-	return rln.children[key]
+	n, _ := rln.children.Get(key)
+	return n
 }
 
-func (rln *RateLimiterNode) GetChildren() map[int64]*RateLimiterNode {
+func (rln *RateLimiterNode) GetChildren() *typeutil.ConcurrentMap[int64, *RateLimiterNode] {
 	return rln.children
 }
 
@@ -156,6 +157,7 @@ func (rln *RateLimiterNode) GetID() int64 {
 //				-> partition levelearl
 type RateLimiterTree struct {
 	root *RateLimiterNode
+	mu   sync.RWMutex
 }
 
 // NewRateLimiterTree returns a new RateLimiterTree.
@@ -168,16 +170,22 @@ func (m *RateLimiterTree) GetRootLimiters() *RateLimiterNode {
 	return m.root
 }
 
-// SetLimitersAsRoot set limiter as a root of the limiter tree
-func (m *RateLimiterTree) SetLimitersAsRoot(newRateLimiter func() *RateLimiterNode) {
-	m.root = newRateLimiter()
+func (m *RateLimiterTree) GetDatabaseLimiters(dbID int64) *RateLimiterNode {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.root.GetChild(dbID)
 }
 
 // GetOrCreateDatabaseLimiters get limiter of database level, or create a database limiter if it doesn't exist.
 func (m *RateLimiterTree) GetOrCreateDatabaseLimiters(dbID int64, newDBRateLimiter func() *RateLimiterNode) *RateLimiterNode {
-	dbRateLimiters := m.root.GetChild(dbID)
+	dbRateLimiters := m.GetDatabaseLimiters(dbID)
 	if dbRateLimiters != nil {
 		return dbRateLimiters
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if cur := m.root.GetChild(dbID); cur != nil {
+		return cur
 	}
 	dbRateLimiters = newDBRateLimiter()
 	dbRateLimiters.id = dbID
@@ -186,6 +194,8 @@ func (m *RateLimiterTree) GetOrCreateDatabaseLimiters(dbID int64, newDBRateLimit
 }
 
 func (m *RateLimiterTree) GetCollectionLimiters(dbID, collectionID int64) *RateLimiterNode {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	dbRateLimiters := m.root.GetChild(dbID)
 
 	// database rate limiter not found
@@ -205,17 +215,25 @@ func (m *RateLimiterTree) GetOrCreateCollectionLimiters(dbID, collectionID int64
 		return collectionRateLimiters
 	}
 
+	dbRateLimiters := m.GetOrCreateDatabaseLimiters(dbID, newDBRateLimiter)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if cur := dbRateLimiters.GetChild(collectionID); cur != nil {
+		return cur
+	}
+
 	collectionRateLimiters = newCollectionRateLimiter()
 	collectionRateLimiters.id = collectionID
-
-	dbRateLimiters := m.GetOrCreateDatabaseLimiters(dbID, newDBRateLimiter)
 	dbRateLimiters.AddChild(collectionID, collectionRateLimiters)
 	return collectionRateLimiters
 }
 
 // It checks if the rate limiters exist for the database, collection, and partition,
 // returns the corresponding rate limiter tree.
-func (m *RateLimiterTree) getPartitionLimiters(dbID, collectionID, partitionID int64) *RateLimiterNode {
+func (m *RateLimiterTree) GetPartitionLimiters(dbID, collectionID, partitionID int64) *RateLimiterNode {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
 	dbRateLimiters := m.root.GetChild(dbID)
 
 	// database rate limiter not found
@@ -240,14 +258,20 @@ func (m *RateLimiterTree) GetOrCreatePartitionLimiters(dbID int64, collectionID 
 	newDBRateLimiter func() *RateLimiterNode, newCollectionRateLimiter func() *RateLimiterNode,
 	newPartRateLimiter func() *RateLimiterNode,
 ) *RateLimiterNode {
-	partRateLimiters := m.getPartitionLimiters(dbID, collectionID, partitionID)
+	partRateLimiters := m.GetPartitionLimiters(dbID, collectionID, partitionID)
 	if partRateLimiters != nil {
 		return partRateLimiters
 	}
 
+	collectionRateLimiters := m.GetOrCreateCollectionLimiters(dbID, collectionID, newDBRateLimiter, newCollectionRateLimiter)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if cur := collectionRateLimiters.GetChild(partitionID); cur != nil {
+		return cur
+	}
+
 	partRateLimiters = newPartRateLimiter()
 	partRateLimiters.id = partitionID
-	collectionRateLimiters := m.GetOrCreateCollectionLimiters(dbID, collectionID, newDBRateLimiter, newCollectionRateLimiter)
 	collectionRateLimiters.AddChild(partitionID, partRateLimiters)
 	return partRateLimiters
 }

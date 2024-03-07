@@ -45,7 +45,7 @@ const Inf = Limit(math.MaxFloat64)
 // in bucket may be negative, and the latter events would be "punished",
 // any event should wait for the tokens to be filled to greater or equal to 0.
 type Limiter struct {
-	mu     sync.Mutex
+	mu     sync.RWMutex
 	limit  Limit
 	burst  float64
 	tokens float64
@@ -70,6 +70,13 @@ func (lim *Limiter) Limit() Limit {
 
 // AllowN reports whether n events may happen at time now.
 func (lim *Limiter) AllowN(now time.Time, n int) bool {
+	lim.mu.RLock()
+	if lim.limit == Inf {
+		lim.mu.RUnlock()
+		return true
+	}
+	lim.mu.RUnlock()
+
 	lim.mu.Lock()
 	defer lim.mu.Unlock()
 

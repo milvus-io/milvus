@@ -200,7 +200,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
 		assert.Equal(t, internalpb.RateType_DDLCompaction, rt)
-		assert.Equal(t, database, int64(0))
+		assert.Equal(t, database, int64(100))
 	})
 
 	t.Run("test getFailedResponse", func(t *testing.T) {
