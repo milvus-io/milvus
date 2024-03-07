@@ -178,11 +178,17 @@ func (ccu *channelCheckpointUpdater) AddTask(channelPos *msgpb.MsgPosition, flus
 		return
 	}
 
+	max := func(a, b *msgpb.MsgPosition) *msgpb.MsgPosition {
+		if a.GetTimestamp() > b.GetTimestamp() {
+			return a
+		}
+		return b
+	}
 	if task.pos.GetTimestamp() < channelPos.GetTimestamp() || (flush && !task.flush) {
 		ccu.mu.Lock()
 		defer ccu.mu.Unlock()
 		ccu.tasks[channel] = &channelCPUpdateTask{
-			pos:      channelPos,
+			pos:      max(channelPos, task.pos),
 			callback: callback,
 			flush:    flush || task.flush,
 		}
