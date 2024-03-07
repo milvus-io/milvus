@@ -118,6 +118,14 @@ func (s *baseSegment) Partition() int64 {
 	return s.loadInfo.GetPartitionID()
 }
 
+func (s *baseSegment) DatabaseName() string {
+	return s.collection.GetDBName()
+}
+
+func (s *baseSegment) ResourceGroup() string {
+	return s.collection.GetResourceGroup()
+}
+
 func (s *baseSegment) Shard() string {
 	return s.loadInfo.GetInsertChannel()
 }
@@ -144,10 +152,6 @@ func (s *baseSegment) CASVersion(old, newVersion int64) bool {
 
 func (s *baseSegment) LoadStatus() LoadStatus {
 	return LoadStatus(s.loadStatus.Load())
-}
-
-func (s *baseSegment) IsLazyLoad() bool {
-	return s.loadInfo.GetLazyLoad()
 }
 
 func (s *baseSegment) LoadInfo() *querypb.SegmentLoadInfo {
@@ -332,7 +336,6 @@ func NewSegmentV2(
 	if err != nil {
 		return nil, err
 	}
-
 	segment := &LocalSegment{
 		baseSegment:        newBaseSegment(collection, segmentType, version, loadInfo),
 		ptr:                segmentPtr,
@@ -1390,4 +1393,6 @@ func (s *LocalSegment) Release(opts ...releaseOption) {
 		zap.String("segmentType", s.segmentType.String()),
 		zap.Int64("insertCount", s.InsertCount()),
 	)
+	// set segment resource estimate to zero.
+	clearResourceEstimate(s)
 }

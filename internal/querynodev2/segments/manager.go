@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments/metricsutil"
 	"github.com/milvus-io/milvus/pkg/eventlog"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -184,6 +185,9 @@ func NewManager() *Manager {
 				return nil, false
 			}
 
+			cacheLoadRecord := metricsutil.NewCacheLoadRecord(getSegmentMetricLabel(segment))
+			defer cacheLoadRecord.Finish(nil)
+
 			info := segment.LoadInfo()
 			_, err, _ := sf.Do(fmt.Sprint(segment.ID()), func() (interface{}, error) {
 				collection := manager.Collection.Get(segment.Collection())
@@ -197,11 +201,18 @@ func NewManager() *Manager {
 				log.Warn("cache sealed segment failed", zap.Error(err))
 				return nil, false
 			}
+
+			cacheLoadRecord.WithBytes(segment.ResourceUsageEstimate().DiskSize)
+			observeResourceEstimate(segment)
 			return segment, true
 		},
 		func(key int64, segment Segment) {
 			log.Debug("evict segment from cache", zap.Int64("segmentID", key))
+			cacheEvictRecord := metricsutil.NewCacheEvictRecord(getSegmentMetricLabel(segment))
+			defer cacheEvictRecord.Finish(nil)
+
 			segment.Release(WithReleaseScope(ReleaseScopeData))
+			clearResourceEstimate(segment)
 		})
 	return manager
 }

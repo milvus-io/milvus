@@ -2027,6 +2027,10 @@ type queryNodeConfig struct {
 	FlowGraphMaxParallelism ParamItem `refreshable:"false"`
 
 	MemoryIndexLoadPredictMemoryUsageFactor ParamItem `refreshable:"true"`
+
+	// Metric Collector
+	MetricScrapeInterval       ParamItem `refreshable:"true"`
+	ActiveSegmentPredicateExpr ParamItem `refreshable:"true"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -2490,6 +2494,22 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Doc:          "memory usage prediction factor for memory index loaded",
 	}
 	p.MemoryIndexLoadPredictMemoryUsageFactor.Init(base.mgr)
+
+	p.MetricScrapeInterval = ParamItem{
+		Key:          "queryNode.metricScrapeInterval",
+		Version:      "2.4.0",
+		DefaultValue: "15", // every xx seconds.
+		Doc:          "the interval of scrape metric in seconds",
+	}
+	p.MetricScrapeInterval.Init(base.mgr)
+
+	p.ActiveSegmentPredicateExpr = ParamItem{
+		Key:          "queryNode.activeSegmentPredicateExpr",
+		Version:      "2.4.0",
+		DefaultValue: `len(Snapshots) >= 4 && (((Snapshots[-1].AccessCount() - Snapshots[-4].AccessCount()) / (Snapshots[-1].Time.Sub(Snapshots[-4].Time).Seconds())) > 0.1)`,
+		Doc:          "the predicate expression to filter hot segment, if the segment match the predicate, it will be treated as hot segment",
+	}
+	p.ActiveSegmentPredicateExpr.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

@@ -81,6 +81,8 @@ const (
 	functionLabelName        = "function_name"
 	queryTypeLabelName       = "query_type"
 	collectionName           = "collection_name"
+	databaseLabelName        = "db"
+	resourceGroupLabelName   = "rg"
 	segmentStateLabelName    = "segment_state"
 	segmentIDLabelName       = "segment_id"
 	segmentLevelLabelName    = "segment_level"

@@ -24,6 +24,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments/metricsutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -60,13 +61,19 @@ func searchSegments(ctx context.Context, mgr *Manager, segments []Segment, segTy
 				segmentsWithoutIndex = append(segmentsWithoutIndex, seg.ID())
 				mu.Unlock()
 			}
-			// record search time
+			accessRecord := metricsutil.NewSearchSegmentAccessRecord(getSegmentMetricLabel(seg))
+			defer accessRecord.Finish(nil)
+
+			// record search time and cache miss
 			tr := timerecord.NewTimeRecorder("searchOnSegments")
 			if seg.LoadStatus() == LoadStatusMeta {
-				item, ok := mgr.DiskCache.GetAndPin(seg.ID())
+				item, missing, ok := mgr.DiskCache.GetAndPin(seg.ID())
 				if !ok {
 					errs[i] = merr.WrapErrSegmentNotLoaded(seg.ID())
 					return
+				}
+				if missing {
+					accessRecord.CacheMissing()
 				}
 				defer item.Unpin()
 			}

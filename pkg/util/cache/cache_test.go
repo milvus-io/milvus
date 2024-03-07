@@ -17,16 +17,26 @@ func (s *CacheSuite) TestLRUCache() {
 	}, nil)
 
 	for i := 1; i <= size; i++ {
-		item, ok := cache.GetAndPin(i)
+		item, missing, ok := cache.GetAndPin(i)
 		s.True(ok)
+		s.True(missing)
+		s.Equal(i, item.Value())
+		item.Unpin()
+	}
+
+	for i := 1; i <= size; i++ {
+		item, missing, ok := cache.GetAndPin(i)
+		s.True(ok)
+		s.False(missing)
 		s.Equal(i, item.Value())
 		item.Unpin()
 	}
 
 	s.False(cache.Contain(size + 1))
 	for i := 1; i <= size; i++ {
-		item, ok := cache.GetAndPin(size + i)
+		item, missing, ok := cache.GetAndPin(size + i)
 		s.True(ok)
+		s.True(missing)
 		s.Equal(size+i, item.Value())
 		s.False(cache.Contain(i))
 		item.Unpin()

@@ -34,7 +34,7 @@ type (
 )
 
 type Cache[K comparable, V any] interface {
-	GetAndPin(key K) (*cacheItem[K, V], bool)
+	GetAndPin(key K) (item *cacheItem[K, V], missing bool, ok bool)
 	Contain(key K) bool
 	Set(key K, value V)
 	Remove(key K)
@@ -70,7 +70,7 @@ func NewLRUCache[K comparable, V any](
 
 // GetAndPin gets and pins the given key if it exists,
 // NOTE: remember to unpin this key or it will never be evicted
-func (c *lruCache[K, V]) GetAndPin(key K) (*cacheItem[K, V], bool) {
+func (c *lruCache[K, V]) GetAndPin(key K) (*cacheItem[K, V], bool, bool) {
 	c.rwlock.Lock()
 
 	iter, ok := c.items[key]
@@ -81,21 +81,23 @@ func (c *lruCache[K, V]) GetAndPin(key K) (*cacheItem[K, V], bool) {
 		item.pinCount.Inc()
 
 		c.rwlock.Unlock()
-		return item, true
+		return item, false, true
 	}
 
 	c.rwlock.Unlock()
+
+	// cache missing.
 	if c.onCacheMiss != nil {
 		value, ok := c.onCacheMiss(key)
 		if ok {
 			c.rwlock.Lock()
 			defer c.rwlock.Unlock()
 			item := c.setAndPin(key, value)
-			return item, true
+			return item, true, true
 		}
 	}
 
-	return nil, false
+	return nil, true, false
 }
 
 func (c *lruCache[K, V]) Contain(key K) bool {

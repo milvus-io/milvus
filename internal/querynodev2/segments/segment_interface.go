@@ -50,6 +50,8 @@ type Segment interface {
 
 	// Properties
 	ID() int64
+	DatabaseName() string
+	ResourceGroup() string
 	Collection() int64
 	Partition() int64
 	Shard() string
@@ -59,7 +61,6 @@ type Segment interface {
 	Type() SegmentType
 	Level() datapb.SegmentLevel
 	LoadStatus() LoadStatus
-	IsLazyLoad() bool
 	LoadInfo() *querypb.SegmentLoadInfo
 	RLock() error
 	RUnlock()

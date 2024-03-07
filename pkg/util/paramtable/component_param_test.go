@@ -367,6 +367,14 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 2.5, Params.MemoryIndexLoadPredictMemoryUsageFactor.GetAsFloat())
 		params.Save("queryNode.memoryIndexLoadPredictMemoryUsageFactor", "2.0")
 		assert.Equal(t, 2.0, Params.MemoryIndexLoadPredictMemoryUsageFactor.GetAsFloat())
+
+		assert.Equal(t, 15, Params.MetricScrapeInterval.GetAsInt())
+		params.Save("queryNode.metricScrapeInterval", "10")
+		assert.Equal(t, 10, Params.MetricScrapeInterval.GetAsInt())
+
+		assert.Equal(t, "0 == 0", Params.ActiveSegmentPredicateExpr.GetValue())
+		params.Save("queryNode.activeSegmentPredicateExpr", "0 == 0")
+		assert.Equal(t, "0 == 0", Params.ActiveSegmentPredicateExpr.GetValue())
 	})
 
 	t.Run("test dataCoordConfig", func(t *testing.T) {
