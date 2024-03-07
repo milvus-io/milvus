@@ -97,25 +97,24 @@ func metaKVCreator() (kv.MetaKv, error) {
 		}
 		return kv_tikv.NewTiKV(tikvCli, paramtable.Get().TiKVCfg.MetaRootPath.GetValue(),
 			kv_tikv.WithRequestTimeout(paramtable.Get().ServiceParam.TiKVCfg.RequestTimeout.GetAsDuration(time.Millisecond))), nil
-	} else {
-		etcdConfig := &paramtable.Get().EtcdCfg
-		etcdCli, err := etcd.CreateEtcdClient(
-			etcdConfig.UseEmbedEtcd.GetAsBool(),
-			etcdConfig.EtcdEnableAuth.GetAsBool(),
-			etcdConfig.EtcdAuthUserName.GetValue(),
-			etcdConfig.EtcdAuthPassword.GetValue(),
-			etcdConfig.EtcdUseSSL.GetAsBool(),
-			etcdConfig.Endpoints.GetAsStrings(),
-			etcdConfig.EtcdTLSCert.GetValue(),
-			etcdConfig.EtcdTLSKey.GetValue(),
-			etcdConfig.EtcdTLSCACert.GetValue(),
-			etcdConfig.EtcdTLSMinVersion.GetValue())
-		if err != nil {
-			panic(err)
-		}
-		return etcdkv.NewEtcdKV(etcdCli, paramtable.Get().EtcdCfg.MetaRootPath.GetValue(),
-			etcdkv.WithRequestTimeout(paramtable.Get().ServiceParam.EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond))), nil
 	}
+	etcdConfig := &paramtable.Get().EtcdCfg
+	etcdCli, err := etcd.CreateEtcdClient(
+		etcdConfig.UseEmbedEtcd.GetAsBool(),
+		etcdConfig.EtcdEnableAuth.GetAsBool(),
+		etcdConfig.EtcdAuthUserName.GetValue(),
+		etcdConfig.EtcdAuthPassword.GetValue(),
+		etcdConfig.EtcdUseSSL.GetAsBool(),
+		etcdConfig.Endpoints.GetAsStrings(),
+		etcdConfig.EtcdTLSCert.GetValue(),
+		etcdConfig.EtcdTLSKey.GetValue(),
+		etcdConfig.EtcdTLSCACert.GetValue(),
+		etcdConfig.EtcdTLSMinVersion.GetValue())
+	if err != nil {
+		panic(err)
+	}
+	return etcdkv.NewEtcdKV(etcdCli, paramtable.Get().EtcdCfg.MetaRootPath.GetValue(),
+		etcdkv.WithRequestTimeout(paramtable.Get().ServiceParam.EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond))), nil
 }
 
 func prepareRootCoordMeta(ctx context.Context, allocator tso.Allocator) rootcoord.IMetaTable {
