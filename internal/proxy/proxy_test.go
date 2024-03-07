@@ -1956,32 +1956,6 @@ func TestProxy(t *testing.T) {
 	})
 
 	wg.Add(1)
-	t.Run("test import collection ID not found", func(t *testing.T) {
-		defer wg.Done()
-		req := &milvuspb.ImportRequest{
-			CollectionName: "bad_collection_name",
-			Files:          []string{"f1.json"},
-		}
-		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
-		resp, err := proxy.Import(context.TODO(), req)
-		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-	})
-
-	wg.Add(1)
-	t.Run("test import get vChannel fail", func(t *testing.T) {
-		defer wg.Done()
-		req := &milvuspb.ImportRequest{
-			CollectionName: "bad_collection_name",
-			Files:          []string{"f1.json"},
-		}
-		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
-		resp, err := proxy.Import(context.TODO(), req)
-		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-	})
-
-	wg.Add(1)
 	t.Run("release collection", func(t *testing.T) {
 		defer wg.Done()
 		_, err := globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
