@@ -3602,20 +3602,39 @@ func TestClusteringKey(t *testing.T) {
 }
 
 func TestAlterCollectionCheckLoaded(t *testing.T) {
+	rc := NewRootCoordMock()
+	rc.state.Store(commonpb.StateCode_Healthy)
 	qc := &mocks.MockQueryCoordClient{}
+	InitMetaCache(context.Background(), rc, qc, nil)
+	collectionName := "test_alter_collection_check_loaded"
+	createColReq := &milvuspb.CreateCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_DropCollection,
+			MsgID:     100,
+			Timestamp: 100,
+		},
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Schema:         nil,
+		ShardsNum:      1,
+	}
+	rc.CreateCollection(context.Background(), createColReq)
+	resp, err := rc.DescribeCollection(context.Background(), &milvuspb.DescribeCollectionRequest{CollectionName: collectionName})
+	assert.NoError(t, err)
+
 	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
 		Status:              &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
-		CollectionIDs:       []int64{1},
+		CollectionIDs:       []int64{resp.CollectionID},
 		InMemoryPercentages: []int64{100},
 	}, nil)
 	task := &alterCollectionTask{
 		AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
-			Base:         &commonpb.MsgBase{},
-			CollectionID: 1,
-			Properties:   []*commonpb.KeyValuePair{{Key: common.MmapEnabledKey, Value: "true"}},
+			Base:           &commonpb.MsgBase{},
+			CollectionName: collectionName,
+			Properties:     []*commonpb.KeyValuePair{{Key: common.MmapEnabledKey, Value: "true"}},
 		},
 		queryCoord: qc,
 	}
-	err := task.PreExecute(context.Background())
+	err = task.PreExecute(context.Background())
 	assert.Equal(t, merr.Code(merr.ErrCollectionLoaded), merr.Code(err))
 }

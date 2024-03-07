@@ -881,6 +881,12 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 	t.Base.MsgType = commonpb.MsgType_AlterCollection
 	t.Base.SourceID = paramtable.GetNodeID()
 
+	collectionID, err := globalMetaCache.GetCollectionID(ctx, t.GetDbName(), t.CollectionName)
+	if err != nil {
+		return err
+	}
+
+	t.CollectionID = collectionID
 	if hasMmapProp(t.Properties...) || hasLazyLoadProp(t.Properties...) {
 		loaded, err := isCollectionLoaded(ctx, t.queryCoord, t.CollectionID)
 		if err != nil {
