@@ -312,7 +312,7 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 		log.Warn("failed to get partitions of collection")
 		return err
 	}
-	indexInfo, err := ex.broker.DescribeIndex(ctx, task.CollectionID())
+	indexInfo, err := ex.broker.ListIndexes(ctx, task.CollectionID())
 	if err != nil {
 		log.Warn("fail to get index meta of collection")
 		return err
@@ -594,7 +594,7 @@ func (ex *Executor) getLoadInfo(ctx context.Context, collectionID, segmentID int
 	}
 
 	// Get collection index info
-	indexInfos, err := ex.broker.DescribeIndex(ctx, collectionID)
+	indexInfos, err := ex.broker.ListIndexes(ctx, collectionID)
 	if err != nil {
 		log.Warn("fail to get index meta of collection", zap.Error(err))
 		return nil, nil, err
