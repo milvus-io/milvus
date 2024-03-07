@@ -238,15 +238,9 @@ func (suite *ServiceSuite) TestGetStatistics_Failed() {
 		SegmentIDs:  suite.validSegmentIDs,
 	}
 
-	// target not match
-	req.Req.Base.TargetID = -1
-	resp, err := suite.node.GetStatistics(ctx, req)
-	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_NodeIDNotMatch, resp.Status.GetErrorCode())
-
 	// node not healthy
 	suite.node.UpdateStateCode(commonpb.StateCode_Abnormal)
-	resp, err = suite.node.GetStatistics(ctx, req)
+	resp, err := suite.node.GetStatistics(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_NotReadyServe, resp.Status.GetErrorCode())
 }
@@ -458,12 +452,6 @@ func (suite *ServiceSuite) TestWatchDmChannels_Failed() {
 	err = merr.CheckRPCCall(status, err)
 	suite.ErrorIs(err, merr.ErrIndexNotFound)
 
-	// target not match
-	req.Base.TargetID = -1
-	status, err = suite.node.WatchDmChannels(ctx, req)
-	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_NodeIDNotMatch, status.GetErrorCode())
-
 	// node not healthy
 	suite.node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	status, err = suite.node.WatchDmChannels(ctx, req)
@@ -511,15 +499,9 @@ func (suite *ServiceSuite) TestUnsubDmChannels_Failed() {
 		ChannelName:  suite.vchannel,
 	}
 
-	// target not match
-	req.Base.TargetID = -1
-	status, err := suite.node.UnsubDmChannel(ctx, req)
-	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_NodeIDNotMatch, status.GetErrorCode())
-
 	// node not healthy
 	suite.node.UpdateStateCode(commonpb.StateCode_Abnormal)
-	status, err = suite.node.UnsubDmChannel(ctx, req)
+	status, err := suite.node.UnsubDmChannel(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_NotReadyServe, status.GetErrorCode())
 }
@@ -871,13 +853,6 @@ func (suite *ServiceSuite) TestLoadSegments_Failed() {
 	suite.NoError(err)
 	suite.ErrorIs(merr.Error(status), merr.ErrIndexNotFound)
 
-	// target not match
-	req.Base.TargetID = -1
-	status, err = suite.node.LoadSegments(ctx, req)
-	suite.NoError(err)
-	suite.T().Log(merr.Error(status))
-	suite.ErrorIs(merr.Error(status), merr.ErrNodeNotMatch)
-
 	// node not healthy
 	suite.node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	status, err = suite.node.LoadSegments(ctx, req)
@@ -1043,15 +1018,9 @@ func (suite *ServiceSuite) TestReleaseSegments_Failed() {
 		SegmentIDs:   suite.validSegmentIDs,
 	}
 
-	// target not match
-	req.Base.TargetID = -1
-	status, err := suite.node.ReleaseSegments(ctx, req)
-	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_NodeIDNotMatch, status.GetErrorCode())
-
 	// node not healthy
 	suite.node.UpdateStateCode(commonpb.StateCode_Abnormal)
-	status, err = suite.node.ReleaseSegments(ctx, req)
+	status, err := suite.node.ReleaseSegments(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_NotReadyServe, status.GetErrorCode())
 }
@@ -1299,12 +1268,6 @@ func (suite *ServiceSuite) TestSearch_Failed() {
 	suite.Contains(resp.GetStatus().GetReason(), "metric type not match")
 	req.GetReq().MetricType = "L2"
 
-	// target not match
-	req.Req.Base.TargetID = -1
-	resp, err = suite.node.Search(ctx, req)
-	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_NodeIDNotMatch, resp.Status.GetErrorCode())
-
 	// node not healthy
 	suite.node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	resp, err = suite.node.Search(ctx, req)
@@ -1483,12 +1446,6 @@ func (suite *ServiceSuite) TestQuery_Failed() {
 	suite.TestWatchDmChannelsInt64()
 	suite.TestLoadSegments_Int64()
 
-	// target not match
-	req.Req.Base.TargetID = -1
-	resp, err = suite.node.Query(ctx, req)
-	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_NodeIDNotMatch, resp.Status.GetErrorCode())
-
 	// node not healthy
 	suite.node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	resp, err = suite.node.Query(ctx, req)
@@ -1613,28 +1570,6 @@ func (suite *ServiceSuite) TestQueryStream_Failed() {
 	// prepare
 	suite.TestWatchDmChannelsInt64()
 	suite.TestLoadSegments_Int64()
-
-	// target not match
-	suite.Run("target not match", func() {
-		client := streamrpc.NewLocalQueryClient(ctx)
-		wg := &sync.WaitGroup{}
-		wg.Add(1)
-		go queryFunc(wg, req, client)
-
-		for {
-			result, err := client.Recv()
-			if err == io.EOF {
-				break
-			}
-			suite.NoError(err)
-
-			err = merr.Error(result.GetStatus())
-			if err != nil {
-				suite.Equal(commonpb.ErrorCode_NodeIDNotMatch, result.GetStatus().GetErrorCode())
-			}
-		}
-		wg.Wait()
-	})
 
 	// node not healthy
 	suite.Run("node not healthy", func() {
@@ -1847,15 +1782,9 @@ func (suite *ServiceSuite) TestGetDataDistribution_Failed() {
 		},
 	}
 
-	// target not match
-	req.Base.TargetID = -1
-	resp, err := suite.node.GetDataDistribution(ctx, req)
-	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_NodeIDNotMatch, resp.Status.GetErrorCode())
-
 	// node not healthy
 	suite.node.UpdateStateCode(commonpb.StateCode_Abnormal)
-	resp, err = suite.node.GetDataDistribution(ctx, req)
+	resp, err := suite.node.GetDataDistribution(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_NotReadyServe, resp.Status.GetErrorCode())
 }
@@ -2009,15 +1938,9 @@ func (suite *ServiceSuite) TestSyncDistribution_Failed() {
 		Channel:      suite.vchannel,
 	}
 
-	// target not match
-	req.Base.TargetID = -1
-	status, err := suite.node.SyncDistribution(ctx, req)
-	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_NodeIDNotMatch, status.GetErrorCode())
-
 	// node not healthy
 	suite.node.UpdateStateCode(commonpb.StateCode_Abnormal)
-	status, err = suite.node.SyncDistribution(ctx, req)
+	status, err := suite.node.SyncDistribution(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_NotReadyServe, status.GetErrorCode())
 }
@@ -2117,12 +2040,6 @@ func (suite *ServiceSuite) TestDelete_Failed() {
 	status, err := suite.node.Delete(ctx, req)
 	suite.NoError(err)
 	suite.False(merr.Ok(status))
-
-	// target not match
-	req.Base.TargetID = -1
-	status, err = suite.node.Delete(ctx, req)
-	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_NodeIDNotMatch, status.GetErrorCode())
 
 	// node not healthy
 	suite.node.UpdateStateCode(commonpb.StateCode_Abnormal)
