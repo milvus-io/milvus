@@ -61,6 +61,8 @@ type InsertBinlogIterator struct {
 }
 
 // NewInsertBinlogIterator creates a new iterator
+//
+// Deprecated: use storage.NewBinlogDeserializeReader instead
 func NewInsertBinlogIterator(blobs []*Blob, PKfieldID UniqueID, pkType schemapb.DataType) (*InsertBinlogIterator, error) {
 	// TODO: load part of file to read records other than loading all content
 	reader := NewInsertCodecWithSchema(nil)

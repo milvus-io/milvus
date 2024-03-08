@@ -237,9 +237,6 @@ func (deser *DeserializeReader[T]) Next() error {
 			return err
 		}
 		deser.pos = 0
-		if deser.rec != nil {
-			deser.rec.Release()
-		}
 		deser.rec = deser.rr.Record()
 
 		if deser.values == nil {
@@ -382,19 +379,24 @@ func NewBinlogDeserializeReader(blobs []*Blob, PKfieldID UniqueID) (*Deserialize
 			value := v[i]
 			if value == nil {
 				value = &Value{}
+				m := make(map[FieldID]interface{}, len(r.Schema()))
+				value.Value = m
 				v[i] = value
 			}
 
-			m := make(map[FieldID]interface{})
+			m := value.Value.(map[FieldID]interface{})
 			for j, dt := range r.Schema() {
 				d, ok := deserializeCell(r.Column(j), dt, i)
 				if ok {
-					m[j] = d
+					m[j] = d // TODO: avoid memory copy here.
 				} else {
 					return errors.New(fmt.Sprintf("unexpected type %s", dt))
 				}
 			}
 
+			if _, ok := m[common.RowIDField]; !ok {
+				panic("no row id column found")
+			}
 			value.ID = m[common.RowIDField].(int64)
 			value.Timestamp = m[common.TimeStampField].(int64)
 
