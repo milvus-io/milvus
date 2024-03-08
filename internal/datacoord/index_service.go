@@ -300,7 +300,7 @@ func (s *Server) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest)
 	log.Info("received AlterIndex request", zap.Any("params", req.GetParams()))
 
 	if req.IndexName == "" {
-		return merr.Status(merr.WrapErrServiceInternal("index name is empty")), nil
+		return merr.Status(merr.WrapErrParameterInvalidMsg("index name is empty")), nil
 	}
 
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
