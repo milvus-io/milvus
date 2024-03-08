@@ -81,9 +81,6 @@ func NewLRUCache[K comparable, V any](
 }
 
 func (c *lruCache[K, V]) TryPin(keys ...K) ([]*cacheItem[K, V], bool) {
-	if c.size < int32(len(keys)) {
-		return nil, false
-	}
 	c.rwlock.Lock()
 	if c.size+int32(len(keys)) > c.cap {
 		if ok := c.tryEvict(int32(len(keys))); !ok {
@@ -94,6 +91,7 @@ func (c *lruCache[K, V]) TryPin(keys ...K) ([]*cacheItem[K, V], bool) {
 	ret := make([]*cacheItem[K, V], 0, len(keys))
 	for _, key := range keys {
 		item := newCacheItemWithKey[K, V](key)
+		item.pinCount.Inc()
 		ret = append(ret, item)
 		c.add(item)
 	}
@@ -144,7 +142,6 @@ func (c *lruCache[K, V]) Get(key K) (*cacheItem[K, V], bool) {
 	if item.value != nil || c.onCacheMiss == nil {
 		c.accessList.Remove(iter)
 		c.accessList.PushFront(item)
-		item.pinCount.Inc()
 
 		c.rwlock.Unlock()
 		return item, true
@@ -162,7 +159,6 @@ func (c *lruCache[K, V]) Get(key K) (*cacheItem[K, V], bool) {
 		item.value.value = value
 		c.accessList.Remove(iter)
 		c.accessList.PushFront(item)
-		item.pinCount.Inc()
 		return item, true
 	}
 	return nil, false

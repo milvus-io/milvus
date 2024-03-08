@@ -63,12 +63,11 @@ func searchSegments(ctx context.Context, mgr *Manager, segments []Segment, segTy
 			// record search time
 			tr := timerecord.NewTimeRecorder("searchOnSegments")
 			if seg.LoadStatus() == LoadStatusMeta {
-				item, ok := mgr.DiskCache.Get(seg.ID())
+				_, ok := mgr.DiskCache.Get(seg.ID())
 				if !ok {
 					errs[i] = merr.WrapErrSegmentNotLoaded(seg.ID())
 					return
 				}
-				defer item.Unpin()
 			}
 			searchResult, err := seg.Search(ctx, searchReq)
 			errs[i] = err
@@ -111,25 +110,6 @@ func SearchHistorical(ctx context.Context, manager *Manager, searchReq *SearchRe
 	segments, err := validateOnHistorical(ctx, manager, collID, partIDs, segIDs)
 	if err != nil {
 		return nil, nil, err
-	}
-	if len(segments) == 0 {
-		return nil, nil, nil
-	}
-
-	if segments[0].LoadStatus() == LoadStatusMeta {
-		segmentIDs := make([]int64, 0, len(segments))
-		for _, segment := range segments {
-			segmentIDs = append(segmentIDs, segment.ID())
-		}
-		cacheItems, ok := manager.DiskCache.TryPin(segmentIDs...)
-		if !ok {
-			return nil, nil, merr.WrapErrServiceInternal("unable to pin segments in cache")
-		}
-		defer func() {
-			for _, item := range cacheItems {
-				item.Unpin()
-			}
-		}()
 	}
 	searchResults, err := searchSegments(ctx, manager, segments, SegmentTypeSealed, searchReq)
 	return searchResults, segments, err
