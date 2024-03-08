@@ -154,8 +154,11 @@ type Server struct {
 
 	// segReferManager  *SegmentReferenceManager
 	indexBuilder              *indexBuilder
-	indexNodeManager          *IndexNodeManager
+	indexNodeManager          WorkerManager
 	indexEngineVersionManager IndexEngineVersionManager
+
+	analysisMeta      *analysisMeta
+	analysisScheduler *analysisTaskScheduler
 
 	// manage ways that data coord access other coord
 	broker broker.Broker
@@ -374,6 +377,7 @@ func (s *Server) initDataCoord() error {
 
 	s.initGarbageCollection(storageCli)
 	s.initIndexBuilder(storageCli)
+	s.initAnalysisScheduler()
 
 	s.importMeta, err = NewImportMeta(s.meta.catalog)
 	if err != nil {
@@ -638,6 +642,10 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 		if err != nil {
 			return err
 		}
+		s.analysisMeta, err = newAnalysisMeta(s.ctx, catalog)
+		if err != nil {
+			return err
+		}
 		return nil
 	}
 	return retry.Do(s.ctx, reloadEtcdFn, retry.Attempts(connMetaMaxRetryTime))
@@ -646,6 +654,12 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 func (s *Server) initIndexBuilder(manager storage.ChunkManager) {
 	if s.indexBuilder == nil {
 		s.indexBuilder = newIndexBuilder(s.ctx, s.meta, s.indexNodeManager, manager, s.indexEngineVersionManager, s.handler)
+	}
+}
+
+func (s *Server) initAnalysisScheduler() {
+	if s.analysisScheduler == nil {
+		s.analysisScheduler = newAnalysisTaskScheduler(s.ctx, s.meta, s.analysisMeta, s.indexNodeManager)
 	}
 }
 
@@ -667,6 +681,7 @@ func (s *Server) startServerLoop() {
 	go s.importScheduler.Start()
 	go s.importChecker.Start()
 	s.garbageCollector.start()
+	s.analysisScheduler.Start()
 }
 
 // startDataNodeTtLoop start a goroutine to recv data node tt msg from msgstream

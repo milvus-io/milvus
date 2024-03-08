@@ -302,3 +302,33 @@ func (i *IndexNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequ
 		Status: merr.Status(merr.WrapErrMetricNotFound(metricType)),
 	}, nil
 }
+
+func (i *IndexNode) Analysis(ctx context.Context, req *indexpb.AnalysisRequest) (*commonpb.Status, error) {
+	return merr.Success(), nil
+}
+
+func (i *IndexNode) QueryAnalysisResult(ctx context.Context, req *indexpb.QueryAnalysisResultRequest) (*indexpb.QueryAnalysisResultResponse, error) {
+	results := make(map[int64]*indexpb.AnalysisResult)
+	for _, taskID := range req.GetTaskIDs() {
+		results[taskID] = &indexpb.AnalysisResult{
+			TaskID:             taskID,
+			State:              commonpb.IndexState_Finished,
+			PartitionStatsFile: fmt.Sprintf("%d/a", taskID),
+			SegmentOffsetMappingFiles: map[int64]string{
+				1: "1/a",
+				2: "2/a",
+				3: "3/a",
+			},
+			FailReason: "",
+		}
+	}
+	return &indexpb.QueryAnalysisResultResponse{
+		Status:    merr.Success(),
+		ClusterID: req.GetClusterID(),
+		Results:   results,
+	}, nil
+}
+
+func (i *IndexNode) DropAnalysisTasks(ctx context.Context, req *indexpb.DropAnalysisTasksRequest) (*commonpb.Status, error) {
+	return merr.Success(), nil
+}

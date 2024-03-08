@@ -163,3 +163,21 @@ func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 		return client.GetMetrics(ctx, req)
 	})
 }
+
+func (c *Client) Analysis(ctx context.Context, req *indexpb.AnalysisRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return wrapGrpcCall(ctx, c, func(client indexpb.IndexNodeClient) (*commonpb.Status, error) {
+		return client.Analysis(ctx, req)
+	})
+}
+
+func (c *Client) QueryAnalysisResult(ctx context.Context, req *indexpb.QueryAnalysisResultRequest, opts ...grpc.CallOption) (*indexpb.QueryAnalysisResultResponse, error) {
+	return wrapGrpcCall(ctx, c, func(client indexpb.IndexNodeClient) (*indexpb.QueryAnalysisResultResponse, error) {
+		return client.QueryAnalysisResult(ctx, req)
+	})
+}
+
+func (c *Client) DropAnalysisTasks(ctx context.Context, req *indexpb.DropAnalysisTasksRequest, opt ...grpc.CallOption) (*commonpb.Status, error) {
+	return wrapGrpcCall(ctx, c, func(client indexpb.IndexNodeClient) (*commonpb.Status, error) {
+		return client.DropAnalysisTasks(ctx, req)
+	})
+}

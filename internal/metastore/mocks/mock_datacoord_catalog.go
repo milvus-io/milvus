@@ -344,6 +344,49 @@ func (_c *DataCoordCatalog_CreateSegmentIndex_Call) RunAndReturn(run func(contex
 	return _c
 }
 
+// DropAnalysisTask provides a mock function with given fields: ctx, taskID
+func (_m *DataCoordCatalog) DropAnalysisTask(ctx context.Context, taskID int64) error {
+	ret := _m.Called(ctx, taskID)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64) error); ok {
+		r0 = rf(ctx, taskID)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// DataCoordCatalog_DropAnalysisTask_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropAnalysisTask'
+type DataCoordCatalog_DropAnalysisTask_Call struct {
+	*mock.Call
+}
+
+// DropAnalysisTask is a helper method to define mock.On call
+//   - ctx context.Context
+//   - taskID int64
+func (_e *DataCoordCatalog_Expecter) DropAnalysisTask(ctx interface{}, taskID interface{}) *DataCoordCatalog_DropAnalysisTask_Call {
+	return &DataCoordCatalog_DropAnalysisTask_Call{Call: _e.mock.On("DropAnalysisTask", ctx, taskID)}
+}
+
+func (_c *DataCoordCatalog_DropAnalysisTask_Call) Run(run func(ctx context.Context, taskID int64)) *DataCoordCatalog_DropAnalysisTask_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_DropAnalysisTask_Call) Return(_a0 error) *DataCoordCatalog_DropAnalysisTask_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *DataCoordCatalog_DropAnalysisTask_Call) RunAndReturn(run func(context.Context, int64) error) *DataCoordCatalog_DropAnalysisTask_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DropChannel provides a mock function with given fields: ctx, channel
 func (_m *DataCoordCatalog) DropChannel(ctx context.Context, channel string) error {
 	ret := _m.Called(ctx, channel)
@@ -729,6 +772,60 @@ func (_c *DataCoordCatalog_GcConfirm_Call) Return(_a0 bool) *DataCoordCatalog_Gc
 }
 
 func (_c *DataCoordCatalog_GcConfirm_Call) RunAndReturn(run func(context.Context, int64, int64) bool) *DataCoordCatalog_GcConfirm_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListAnalysisTasks provides a mock function with given fields: ctx
+func (_m *DataCoordCatalog) ListAnalysisTasks(ctx context.Context) ([]*model.AnalysisTask, error) {
+	ret := _m.Called(ctx)
+
+	var r0 []*model.AnalysisTask
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context) ([]*model.AnalysisTask, error)); ok {
+		return rf(ctx)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context) []*model.AnalysisTask); ok {
+		r0 = rf(ctx)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*model.AnalysisTask)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = rf(ctx)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// DataCoordCatalog_ListAnalysisTasks_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListAnalysisTasks'
+type DataCoordCatalog_ListAnalysisTasks_Call struct {
+	*mock.Call
+}
+
+// ListAnalysisTasks is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *DataCoordCatalog_Expecter) ListAnalysisTasks(ctx interface{}) *DataCoordCatalog_ListAnalysisTasks_Call {
+	return &DataCoordCatalog_ListAnalysisTasks_Call{Call: _e.mock.On("ListAnalysisTasks", ctx)}
+}
+
+func (_c *DataCoordCatalog_ListAnalysisTasks_Call) Run(run func(ctx context.Context)) *DataCoordCatalog_ListAnalysisTasks_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_ListAnalysisTasks_Call) Return(_a0 []*model.AnalysisTask, _a1 error) *DataCoordCatalog_ListAnalysisTasks_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *DataCoordCatalog_ListAnalysisTasks_Call) RunAndReturn(run func(context.Context) ([]*model.AnalysisTask, error)) *DataCoordCatalog_ListAnalysisTasks_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1194,6 +1291,49 @@ func (_c *DataCoordCatalog_MarkChannelDeleted_Call) RunAndReturn(run func(contex
 	return _c
 }
 
+// SaveAnalysisTask provides a mock function with given fields: ctx, task
+func (_m *DataCoordCatalog) SaveAnalysisTask(ctx context.Context, task *model.AnalysisTask) error {
+	ret := _m.Called(ctx, task)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *model.AnalysisTask) error); ok {
+		r0 = rf(ctx, task)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// DataCoordCatalog_SaveAnalysisTask_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveAnalysisTask'
+type DataCoordCatalog_SaveAnalysisTask_Call struct {
+	*mock.Call
+}
+
+// SaveAnalysisTask is a helper method to define mock.On call
+//   - ctx context.Context
+//   - task *model.AnalysisTask
+func (_e *DataCoordCatalog_Expecter) SaveAnalysisTask(ctx interface{}, task interface{}) *DataCoordCatalog_SaveAnalysisTask_Call {
+	return &DataCoordCatalog_SaveAnalysisTask_Call{Call: _e.mock.On("SaveAnalysisTask", ctx, task)}
+}
+
+func (_c *DataCoordCatalog_SaveAnalysisTask_Call) Run(run func(ctx context.Context, task *model.AnalysisTask)) *DataCoordCatalog_SaveAnalysisTask_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*model.AnalysisTask))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_SaveAnalysisTask_Call) Return(_a0 error) *DataCoordCatalog_SaveAnalysisTask_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *DataCoordCatalog_SaveAnalysisTask_Call) RunAndReturn(run func(context.Context, *model.AnalysisTask) error) *DataCoordCatalog_SaveAnalysisTask_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // SaveChannelCheckpoint provides a mock function with given fields: ctx, vChannel, pos
 func (_m *DataCoordCatalog) SaveChannelCheckpoint(ctx context.Context, vChannel string, pos *msgpb.MsgPosition) error {
 	ret := _m.Called(ctx, vChannel, pos)
@@ -1258,8 +1398,8 @@ type DataCoordCatalog_SaveChannelCheckpoints_Call struct {
 }
 
 // SaveChannelCheckpoints is a helper method to define mock.On call
-//  - ctx context.Context
-//  - positions []*msgpb.MsgPosition
+//   - ctx context.Context
+//   - positions []*msgpb.MsgPosition
 func (_e *DataCoordCatalog_Expecter) SaveChannelCheckpoints(ctx interface{}, positions interface{}) *DataCoordCatalog_SaveChannelCheckpoints_Call {
 	return &DataCoordCatalog_SaveChannelCheckpoints_Call{Call: _e.mock.On("SaveChannelCheckpoints", ctx, positions)}
 }
