@@ -471,6 +471,7 @@ func (ex *Executor) setDistribution(task *LeaderTask, step int) error {
 				SegmentID:   action.SegmentID(),
 				NodeID:      action.Node(),
 				Info:        loadInfo,
+				Version:     action.Version(),
 			},
 		},
 		IndexInfoList: indexInfo,

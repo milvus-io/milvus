@@ -166,16 +166,18 @@ type LeaderAction struct {
 
 	leaderID  typeutil.UniqueID
 	segmentID typeutil.UniqueID
+	version   typeutil.UniqueID // segment load ts, 0 means not set
 
 	rpcReturned atomic.Bool
 }
 
-func NewLeaderAction(leaderID, workerID typeutil.UniqueID, typ ActionType, shard string, segmentID typeutil.UniqueID) *LeaderAction {
+func NewLeaderAction(leaderID, workerID typeutil.UniqueID, typ ActionType, shard string, segmentID typeutil.UniqueID, version typeutil.UniqueID) *LeaderAction {
 	action := &LeaderAction{
 		BaseAction: NewBaseAction(workerID, typ, shard),
 
 		leaderID:  leaderID,
 		segmentID: segmentID,
+		version:   version,
 	}
 	action.rpcReturned.Store(false)
 	return action
@@ -183,6 +185,10 @@ func NewLeaderAction(leaderID, workerID typeutil.UniqueID, typ ActionType, shard
 
 func (action *LeaderAction) SegmentID() typeutil.UniqueID {
 	return action.segmentID
+}
+
+func (action *LeaderAction) Version() typeutil.UniqueID {
+	return action.version
 }
 
 func (action *LeaderAction) IsFinished(distMgr *meta.DistributionManager) bool {

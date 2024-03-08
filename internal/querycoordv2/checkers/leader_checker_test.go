@@ -19,6 +19,7 @@ package checkers
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -27,7 +28,6 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
@@ -107,7 +107,8 @@ func (suite *LeaderCheckerTestSuite) TestSyncLoadedSegments() {
 	suite.Len(tasks, 0)
 	observer.target.UpdateCollectionNextTarget(int64(1))
 	observer.target.UpdateCollectionCurrentTarget(1)
-	observer.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 1, 2, 1, "test-insert-channel"))
+	loadVersion := time.Now().UnixMilli()
+	observer.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 1, 2, loadVersion, "test-insert-channel"))
 	observer.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
 	view := utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, map[int64]*meta.Segment{})
 	view.TargetVersion = observer.target.GetCollectionTargetVersion(1, meta.CurrentTarget)
@@ -120,6 +121,7 @@ func (suite *LeaderCheckerTestSuite) TestSyncLoadedSegments() {
 	suite.Equal(tasks[0].Actions()[0].Type(), task.ActionTypeGrow)
 	suite.Equal(tasks[0].Actions()[0].Node(), int64(1))
 	suite.Equal(tasks[0].Actions()[0].(*task.LeaderAction).SegmentID(), int64(1))
+	suite.Equal(tasks[0].Actions()[0].(*task.LeaderAction).Version(), loadVersion)
 	suite.Equal(tasks[0].Priority(), task.TaskPriorityHigh)
 }
 
@@ -240,59 +242,6 @@ func (suite *LeaderCheckerTestSuite) TestIgnoreSyncLoadedSegments() {
 	suite.Equal(tasks[0].Priority(), task.TaskPriorityHigh)
 }
 
-func (suite *LeaderCheckerTestSuite) TestIgnoreBalancedSegment() {
-	observer := suite.checker
-	observer.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
-	observer.meta.CollectionManager.PutPartition(utils.CreateTestPartition(1, 1))
-	observer.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
-	segments := []*datapb.SegmentInfo{
-		{
-			ID:            1,
-			PartitionID:   1,
-			InsertChannel: "test-insert-channel",
-		},
-	}
-	channels := []*datapb.VchannelInfo{
-		{
-			CollectionID: 1,
-			ChannelName:  "test-insert-channel",
-		},
-	}
-
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		channels, segments, nil)
-	observer.target.UpdateCollectionNextTarget(int64(1))
-	observer.target.UpdateCollectionCurrentTarget(1)
-	observer.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 1, 1, 1, "test-insert-channel"))
-	observer.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
-
-	// dist with older version and leader view with newer version
-	leaderView := utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, map[int64]*meta.Segment{})
-	leaderView.Segments[1] = &querypb.SegmentDist{
-		NodeID:  2,
-		Version: 2,
-	}
-	leaderView.TargetVersion = observer.target.GetCollectionTargetVersion(1, meta.CurrentTarget)
-	observer.dist.LeaderViewManager.Update(2, leaderView)
-
-	// test querynode-1 and querynode-2 exist
-	suite.nodeMgr.Add(session.NewNodeInfo(1, "localhost"))
-	suite.nodeMgr.Add(session.NewNodeInfo(2, "localhost"))
-	tasks := suite.checker.Check(context.TODO())
-	suite.Len(tasks, 0)
-
-	// test querynode-2 crash
-	suite.nodeMgr.Remove(2)
-	tasks = suite.checker.Check(context.TODO())
-	suite.Len(tasks, 1)
-	suite.Equal(tasks[0].Source(), utils.LeaderChecker)
-	suite.Len(tasks[0].Actions(), 1)
-	suite.Equal(tasks[0].Actions()[0].Type(), task.ActionTypeGrow)
-	suite.Equal(tasks[0].Actions()[0].Node(), int64(1))
-	suite.Equal(tasks[0].Actions()[0].(*task.LeaderAction).SegmentID(), int64(1))
-	suite.Equal(tasks[0].Priority(), task.TaskPriorityHigh)
-}
-
 func (suite *LeaderCheckerTestSuite) TestSyncLoadedSegmentsWithReplicas() {
 	observer := suite.checker
 	observer.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 2))
@@ -369,6 +318,7 @@ func (suite *LeaderCheckerTestSuite) TestSyncRemovedSegments() {
 	suite.Equal(tasks[0].Actions()[0].Type(), task.ActionTypeReduce)
 	suite.Equal(tasks[0].Actions()[0].Node(), int64(1))
 	suite.Equal(tasks[0].Actions()[0].(*task.LeaderAction).SegmentID(), int64(3))
+	suite.Equal(tasks[0].Actions()[0].(*task.LeaderAction).Version(), int64(0))
 	suite.Equal(tasks[0].Priority(), task.TaskPriorityHigh)
 }
 
