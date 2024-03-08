@@ -7,6 +7,7 @@ import (
 	"math"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
@@ -192,9 +193,8 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 	if err != nil {
 		groupByFieldName = ""
 	}
-	var groupByFieldId int64
+	var groupByFieldId int64 = -1
 	if groupByFieldName != "" {
-		groupByFieldId = -1
 		fields := schema.GetFields()
 		for _, field := range fields {
 			if field.Name == groupByFieldName {
@@ -205,6 +205,17 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 		if groupByFieldId == -1 {
 			return nil, 0, merr.WrapErrFieldNotFound(groupByFieldName, "groupBy field not found in schema")
 		}
+	}
+
+	// 6. parse iterator tag, prevent trying to groupBy when doing iteration or doing range-search
+	isIterator, _ := funcutil.GetAttrByKeyFromRepeatedKV(IteratorField, searchParamsPair)
+	if isIterator == "True" && groupByFieldId > 0 {
+		return nil, 0, merr.WrapErrParameterInvalid("", "",
+			"Not allowed to do groupBy when doing iteration")
+	}
+	if strings.Contains(searchParamStr, radiusKey) && groupByFieldId > 0 {
+		return nil, 0, merr.WrapErrParameterInvalid("", "",
+			"Not allowed to do range-search when doing search-group-by")
 	}
 
 	return &planpb.QueryInfo{
