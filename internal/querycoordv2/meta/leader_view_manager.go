@@ -53,10 +53,9 @@ func WithSegment(segmentID int64, isGrowing bool) LeaderViewFilter {
 		if isGrowing {
 			_, ok := view.GrowingSegments[segmentID]
 			return ok
-		} else {
-			_, ok := view.Segments[segmentID]
-			return ok
 		}
+		_, ok := view.Segments[segmentID]
+		return ok
 	}
 }
 
