@@ -150,7 +150,6 @@ func (c *SegmentChecker) getGrowingSegmentDiff(collectionID int64,
 		zap.Int64("replicaID", replica.ID))
 
 	leaders := c.dist.ChannelDistManager.GetShardLeadersByReplica(replica)
-	//	distMgr.LeaderViewManager.
 	for channelName, node := range leaders {
 		view := c.dist.LeaderViewManager.GetLeaderShardView(node, channelName)
 		if view == nil {
