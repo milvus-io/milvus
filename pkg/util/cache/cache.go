@@ -49,7 +49,7 @@ type Cache[K comparable, V any] interface {
 	Set(key K, value V)
 	Remove(key K)
 	TryPin(keys ...K) ([]*cacheItem[K, V], bool)
-	Get(key K) (*cacheItem[K, V], bool)
+	Get(key K) bool
 }
 
 // lruCache extends the ccache library to provide pinning and unpinning of items.
@@ -129,13 +129,13 @@ func (c *lruCache[K, V]) tryEvict(count int32) bool {
 	return true
 }
 
-func (c *lruCache[K, V]) Get(key K) (*cacheItem[K, V], bool) {
+func (c *lruCache[K, V]) Get(key K) bool {
 	c.rwlock.Lock()
 
 	iter, ok := c.items[key]
 	if !ok {
 		c.rwlock.Unlock()
-		return nil, false
+		return false
 	}
 
 	item := iter.Value.(*cacheItem[K, V])
@@ -144,14 +144,14 @@ func (c *lruCache[K, V]) Get(key K) (*cacheItem[K, V], bool) {
 		c.accessList.PushFront(item)
 
 		c.rwlock.Unlock()
-		return item, true
+		return true
 	}
 
 	c.rwlock.Unlock()
 	if c.onCacheMiss != nil {
 		value, ok := c.onCacheMiss(key)
 		if !ok {
-			return nil, false
+			return false
 		}
 
 		c.rwlock.Lock()
@@ -159,9 +159,9 @@ func (c *lruCache[K, V]) Get(key K) (*cacheItem[K, V], bool) {
 		item.value.value = value
 		c.accessList.Remove(iter)
 		c.accessList.PushFront(item)
-		return item, true
+		return true
 	}
-	return nil, false
+	return false
 }
 
 // GetAndPin gets and pins the given key if it exists,

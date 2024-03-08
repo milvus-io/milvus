@@ -63,8 +63,7 @@ func searchSegments(ctx context.Context, mgr *Manager, segments []Segment, segTy
 			// record search time
 			tr := timerecord.NewTimeRecorder("searchOnSegments")
 			if seg.LoadStatus() == LoadStatusMeta {
-				_, ok := mgr.DiskCache.Get(seg.ID())
-				if !ok {
+				if ok := mgr.DiskCache.Get(seg.ID()); !ok {
 					errs[i] = merr.WrapErrSegmentNotLoaded(seg.ID())
 					return
 				}
