@@ -201,6 +201,11 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 
 	indexID, err := s.meta.indexMeta.CanCreateIndex(req)
 
+	if err != nil {
+		metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
+		return merr.Status(err), nil
+	}
+
 	// merge with previous params because create index would not pass mmap params
 	indexes := s.meta.indexMeta.GetFieldIndexes(req.GetCollectionID(), req.GetFieldID(), req.GetIndexName())
 	if len(indexes) == 1 {
@@ -212,11 +217,6 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		if err != nil {
 			return merr.Status(err), nil
 		}
-	}
-
-	if err != nil {
-		metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
-		return merr.Status(err), nil
 	}
 
 	if indexID == 0 {
