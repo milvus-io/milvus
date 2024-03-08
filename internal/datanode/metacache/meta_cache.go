@@ -157,30 +157,23 @@ func (c *metaCacheImpl) RemoveSegments(filters ...SegmentFilter) []int64 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	filter := c.mergeFilters(filters...)
-
-	var ids []int64
-	for segID, info := range c.segmentInfos {
-		if filter(info) {
-			ids = append(ids, segID)
-			delete(c.segmentInfos, segID)
-		}
+	var result []int64
+	process := func(id int64, info *SegmentInfo) {
+		delete(c.segmentInfos, id)
+		result = append(result, id)
 	}
-	return ids
+	c.rangeWithFilter(process, filters...)
+	return result
 }
 
 func (c *metaCacheImpl) GetSegmentsBy(filters ...SegmentFilter) []*SegmentInfo {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	filter := c.mergeFilters(filters...)
-
 	var segments []*SegmentInfo
-	for _, info := range c.segmentInfos {
-		if filter(info) {
-			segments = append(segments, info)
-		}
-	}
+	c.rangeWithFilter(func(_ int64, info *SegmentInfo) {
+		segments = append(segments, info)
+	}, filters...)
 	return segments
 }
 
@@ -193,8 +186,10 @@ func (c *metaCacheImpl) GetSegmentByID(id int64, filters ...SegmentFilter) (*Seg
 	if !ok {
 		return nil, false
 	}
-	if !c.mergeFilters(filters...)(segment) {
-		return nil, false
+	for _, filter := range filters {
+		if !filter.Filter(segment) {
+			return nil, false
+		}
 	}
 	return segment, ok
 }
@@ -208,16 +203,11 @@ func (c *metaCacheImpl) UpdateSegments(action SegmentAction, filters ...SegmentF
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	filter := c.mergeFilters(filters...)
-
-	for id, info := range c.segmentInfos {
-		if !filter(info) {
-			continue
-		}
+	c.rangeWithFilter(func(id int64, info *SegmentInfo) {
 		nInfo := info.Clone()
 		action(nInfo)
 		c.segmentInfos[id] = nInfo
-	}
+	}, filters...)
 }
 
 func (c *metaCacheImpl) PredictSegments(pk storage.PrimaryKey, filters ...SegmentFilter) ([]int64, bool) {
@@ -231,13 +221,40 @@ func (c *metaCacheImpl) PredictSegments(pk storage.PrimaryKey, filters ...Segmen
 	return predicts, len(predicts) > 0
 }
 
-func (c *metaCacheImpl) mergeFilters(filters ...SegmentFilter) SegmentFilter {
-	return func(info *SegmentInfo) bool {
-		for _, filter := range filters {
-			if !filter(info) {
+func (c *metaCacheImpl) rangeWithFilter(fn func(id int64, info *SegmentInfo), filters ...SegmentFilter) {
+	var hasIDs bool
+	set := typeutil.NewSet[int64]()
+	filtered := make([]SegmentFilter, 0, len(filters))
+	for _, filter := range filters {
+		ids, ok := filter.SegmentIDs()
+		if ok {
+			set.Insert(ids...)
+			hasIDs = true
+		} else {
+			filtered = append(filtered, filter)
+		}
+	}
+	mergedFilter := func(info *SegmentInfo) bool {
+		for _, filter := range filtered {
+			if !filter.Filter(info) {
 				return false
 			}
 		}
 		return true
+	}
+
+	if hasIDs {
+		for id := range set {
+			info, has := c.segmentInfos[id]
+			if has && mergedFilter(info) {
+				fn(id, info)
+			}
+		}
+	} else {
+		for id, info := range c.segmentInfos {
+			if mergedFilter(info) {
+				fn(id, info)
+			}
+		}
 	}
 }

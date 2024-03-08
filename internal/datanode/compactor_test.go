@@ -533,7 +533,6 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 				Schema: meta.GetSchema(),
 			}, dm)
 			assert.Error(t, err)
-			t.Log(err)
 		})
 
 		t.Run("Merge with meta error", func(t *testing.T) {

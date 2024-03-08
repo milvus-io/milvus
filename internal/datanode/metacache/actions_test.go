@@ -35,29 +35,29 @@ func (s *SegmentFilterSuite) TestFilters() {
 	partitionID := int64(1001)
 	filter := WithPartitionID(partitionID)
 	info.partitionID = partitionID + 1
-	s.False(filter(info))
+	s.False(filter.Filter(info))
 	info.partitionID = partitionID
-	s.True(filter(info))
+	s.True(filter.Filter(info))
 
 	segmentID := int64(10001)
 	filter = WithSegmentIDs(segmentID)
 	info.segmentID = segmentID + 1
-	s.False(filter(info))
+	s.False(filter.Filter(info))
 	info.segmentID = segmentID
-	s.True(filter(info))
+	s.True(filter.Filter(info))
 
 	state := commonpb.SegmentState_Growing
 	filter = WithSegmentState(state)
 	info.state = commonpb.SegmentState_Flushed
-	s.False(filter(info))
+	s.False(filter.Filter(info))
 	info.state = state
-	s.True(filter(info))
+	s.True(filter.Filter(info))
 
 	filter = WithStartPosNotRecorded()
 	info.startPosRecorded = true
-	s.False(filter(info))
+	s.False(filter.Filter(info))
 	info.startPosRecorded = false
-	s.True(filter(info))
+	s.True(filter.Filter(info))
 }
 
 func TestFilters(t *testing.T) {
