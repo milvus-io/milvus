@@ -891,7 +891,7 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 		}
 
 		for _, leader := range leaders {
-			if err := checkers.CheckLeaderAvaliable(s.nodeMgr, leader, currentTargets); err != nil {
+			if err := checkers.CheckLeaderAvailable(s.nodeMgr, leader, currentTargets); err != nil {
 				multierr.AppendInto(&channelErr, err)
 				continue
 			}

@@ -111,7 +111,7 @@ func (c *ChannelChecker) checkReplica(ctx context.Context, replica *meta.Replica
 	task.SetReason("collection released", tasks...)
 	ret = append(ret, tasks...)
 
-	repeated := c.findRepeatedChannels(replica.GetID())
+	repeated := c.findRepeatedChannels(ctx, replica.GetID())
 	tasks = c.createChannelReduceTasks(c.getTraceCtx(ctx, replica.CollectionID), repeated, replica.GetID())
 	task.SetReason("redundancies of channel", tasks...)
 	ret = append(ret, tasks...)
@@ -168,7 +168,8 @@ func (c *ChannelChecker) getChannelDist(replica *meta.Replica) []*meta.DmChannel
 	return dist
 }
 
-func (c *ChannelChecker) findRepeatedChannels(replicaID int64) []*meta.DmChannel {
+func (c *ChannelChecker) findRepeatedChannels(ctx context.Context, replicaID int64) []*meta.DmChannel {
+	log := log.Ctx(ctx).WithRateGroup("ChannelChecker.findRepeatedChannels", 1, 60)
 	replica := c.meta.Get(replicaID)
 	ret := make([]*meta.DmChannel, 0)
 
@@ -191,8 +192,8 @@ func (c *ChannelChecker) findRepeatedChannels(replicaID int64) []*meta.DmChannel
 			continue
 		}
 
-		if err := CheckLeaderAvaliable(c.nodeMgr, leaderView, targets); err != nil {
-			log.Info("replica has unavailable shard leader",
+		if err := CheckLeaderAvailable(c.nodeMgr, leaderView, targets); err != nil {
+			log.RatedInfo(10, "replica has unavailable shard leader",
 				zap.Int64("collectionID", replica.GetCollectionID()),
 				zap.Int64("replicaID", replicaID),
 				zap.Int64("leaderID", ch.Node),
