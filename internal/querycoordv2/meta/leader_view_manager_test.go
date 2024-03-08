@@ -176,7 +176,7 @@ func (suite *LeaderViewManagerSuite) TestGetLatestShardLeader() {
 	channel := suite.channels[collectionID][0]
 	// add duplicate shard leader
 	view := &LeaderView{
-		ID:              int64(nodeID),
+		ID:              nodeID,
 		CollectionID:    collectionID,
 		Channel:         channel,
 		GrowingSegments: map[int64]*Segment{suite.growingSegments[collectionID][channel]: nil},
@@ -185,20 +185,20 @@ func (suite *LeaderViewManagerSuite) TestGetLatestShardLeader() {
 
 	for _, segment := range suite.segments[collectionID][channel] {
 		view.Segments[segment] = &querypb.SegmentDist{
-			NodeID:  int64(nodeID),
+			NodeID:  nodeID,
 			Version: 1000,
 		}
 	}
 	view.Version = 1000
 
-	suite.mgr.Update(int64(nodeID), view)
+	suite.mgr.Update(nodeID, view)
 
 	leader := suite.mgr.GetLatestShardLeaderByFilter(WithChannelName2LeaderView(channel))
 	suite.Equal(nodeID, leader.ID)
 
 	// test replica is nil
 	leader = suite.mgr.GetLatestShardLeaderByFilter(WithReplica2LeaderView(nil))
-	suite.Nil(nil)
+	suite.Nil(leader)
 }
 
 func (suite *LeaderViewManagerSuite) TestClone() {
