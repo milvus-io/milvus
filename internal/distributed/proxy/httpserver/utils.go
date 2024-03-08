@@ -183,7 +183,7 @@ func printIndexes(indexes []*milvuspb.IndexDescription) []gin.H {
 
 func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) (error, []map[string]interface{}) {
 	var reallyDataArray []map[string]interface{}
-	dataResult := gjson.Get(body, "data")
+	dataResult := gjson.Get(body, HTTPRequestData)
 	dataResultArray := dataResult.Array()
 	if len(dataResultArray) == 0 {
 		return merr.ErrMissingRequiredParameters, reallyDataArray
@@ -954,16 +954,16 @@ func convertVectors2Placeholder(body string, dataType schemapb.DataType, dimensi
 	switch dataType {
 	case schemapb.DataType_FloatVector:
 		valueType = commonpb.PlaceholderType_FloatVector
-		values, err = serializeFloatVectors(gjson.Get(body, "vector").Array(), dataType, dimension, dimension*4)
+		values, err = serializeFloatVectors(gjson.Get(body, HTTPRequestData).Array(), dataType, dimension, dimension*4)
 	case schemapb.DataType_BinaryVector:
 		valueType = commonpb.PlaceholderType_BinaryVector
-		values, err = serializeByteVectors(gjson.Get(body, "vector").Raw, dataType, dimension, dimension/8)
+		values, err = serializeByteVectors(gjson.Get(body, HTTPRequestData).Raw, dataType, dimension, dimension/8)
 	case schemapb.DataType_Float16Vector:
 		valueType = commonpb.PlaceholderType_Float16Vector
-		values, err = serializeByteVectors(gjson.Get(body, "vector").Raw, dataType, dimension, dimension*2)
+		values, err = serializeByteVectors(gjson.Get(body, HTTPRequestData).Raw, dataType, dimension, dimension*2)
 	case schemapb.DataType_BFloat16Vector:
 		valueType = commonpb.PlaceholderType_BFloat16Vector
-		values, err = serializeByteVectors(gjson.Get(body, "vector").Raw, dataType, dimension, dimension*2)
+		values, err = serializeByteVectors(gjson.Get(body, HTTPRequestData).Raw, dataType, dimension, dimension*2)
 	}
 	if err != nil {
 		return nil, err

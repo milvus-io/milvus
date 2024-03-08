@@ -493,8 +493,8 @@ func TestSerialize(t *testing.T) {
 	parameters := []float32{0.11111, 0.22222}
 	assert.Equal(t, "\xa4\x8d\xe3=\xa4\x8dc>", string(serialize(parameters)))
 	assert.Equal(t, "\n\x10\n\x02$0\x10e\x1a\b\xa4\x8d\xe3=\xa4\x8dc>", string(vectors2PlaceholderGroupBytes([][]float32{parameters}))) // todo
-	requestBody := "{\"vector\": [[0.11111, 0.22222]]}"
-	vectors := gjson.Get(requestBody, "vector")
+	requestBody := "{\"data\": [[0.11111, 0.22222]]}"
+	vectors := gjson.Get(requestBody, HTTPRequestData)
 	values, err := serializeFloatVectors(vectors.Array(), schemapb.DataType_FloatVector, 2, -1)
 	assert.Nil(t, err)
 	placeholderValue := &commonpb.PlaceholderValue{
@@ -511,12 +511,12 @@ func TestSerialize(t *testing.T) {
 	assert.Equal(t, "\n\x10\n\x02$0\x10e\x1a\b\xa4\x8d\xe3=\xa4\x8dc>", string(bytes)) // todo
 	for _, dataType := range []schemapb.DataType{schemapb.DataType_BinaryVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector} {
 		request := map[string]interface{}{
-			"vector": []interface{}{
+			HTTPRequestData: []interface{}{
 				[]byte{1, 2},
 			},
 		}
 		requestBody, _ := json.Marshal(request)
-		values, err = serializeByteVectors(gjson.Get(string(requestBody), "vector").Raw, dataType, -1, 2)
+		values, err = serializeByteVectors(gjson.Get(string(requestBody), HTTPRequestData).Raw, dataType, -1, 2)
 		assert.Nil(t, err)
 		placeholderValue = &commonpb.PlaceholderValue{
 			Tag:    "$0",

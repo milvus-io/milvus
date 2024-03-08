@@ -1113,88 +1113,88 @@ func TestSearchV2(t *testing.T) {
 	queryTestCases := []requestBodyTestCase{}
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        SearchAction,
-		requestBody: []byte(`{"collectionName": "book", "vector": [[0.1, 0.2]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"]}`),
+		requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"]}`),
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        SearchAction,
-		requestBody: []byte(`{"collectionName": "book", "vector": [[0.1, 0.2]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"], "params": {"radius":0.9}}`),
+		requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"], "params": {"radius":0.9}}`),
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        SearchAction,
-		requestBody: []byte(`{"collectionName": "book", "vector": [[0.1, 0.2]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"], "params": {"range_filter": 0.1}}`),
+		requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"], "params": {"range_filter": 0.1}}`),
 		errMsg:      "can only accept json format request, error: invalid search params",
 		errCode:     1801, // ErrIncorrectParameterFormat
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        SearchAction,
-		requestBody: []byte(`{"collectionName": "book", "vector": [[0.1, 0.2]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"], "params": {"radius":0.9, "range_filter": 0.1}, "groupingField": "word_count"}`),
+		requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"], "params": {"radius":0.9, "range_filter": 0.1}, "groupingField": "word_count"}`),
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        SearchAction,
-		requestBody: []byte(`{"collectionName": "book", "vector": [[0.1, 0.2]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"], "params": {"radius":0.9, "range_filter": 0.1}, "groupingField": "test"}`),
+		requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"], "params": {"radius":0.9, "range_filter": 0.1}, "groupingField": "test"}`),
 		errMsg:      "groupBy field not found in schema: field not found[field=test]",
 		errCode:     65535,
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        SearchAction,
-		requestBody: []byte(`{"collectionName": "book", "vector": [["0.1", "0.2"]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"], "params": {"radius":0.9, "range_filter": 0.1}, "groupingField": "test"}`),
+		requestBody: []byte(`{"collectionName": "book", "data": [["0.1", "0.2"]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"], "params": {"radius":0.9, "range_filter": 0.1}, "groupingField": "test"}`),
 		errMsg:      "can only accept json format request, error: json: cannot unmarshal string into Go value of type float32: invalid parameter[expected=FloatVector][actual=[\"0.1\", \"0.2\"]]",
 		errCode:     1801,
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        AdvancedSearchAction,
-		requestBody: []byte(`{"collectionName": "hello_milvus", "search": [{"vector": [[0.1, 0.2]], "annsField": "book_intro", "metricType": "L2", "limit": 3}, {"vector": [[0.1, 0.2]], "annsField": "book_intro", "metricType": "L2", "limit": 3}], "rerank": {"strategy": "weighted", "params": {"weights":  [0.9, 0.8]}}}`),
+		requestBody: []byte(`{"collectionName": "hello_milvus", "search": [{"data": [[0.1, 0.2]], "annsField": "book_intro", "metricType": "L2", "limit": 3}, {"data": [[0.1, 0.2]], "annsField": "book_intro", "metricType": "L2", "limit": 3}], "rerank": {"strategy": "weighted", "params": {"weights":  [0.9, 0.8]}}}`),
 	})
 	// annsField
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        SearchAction,
-		requestBody: []byte(`{"collectionName": "book", "vector": [[0.1, 0.2]], "annsField": "word_count", "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"], "params": {"radius":0.9, "range_filter": 0.1}, "groupingField": "test"}`),
+		requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "annsField": "word_count", "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"], "params": {"radius":0.9, "range_filter": 0.1}, "groupingField": "test"}`),
 		errMsg:      "can only accept json format request, error: cannot find a vector field named: word_count",
 		errCode:     1801,
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        AdvancedSearchAction,
-		requestBody: []byte(`{"collectionName": "hello_milvus", "search": [{"vector": [[0.1, 0.2]], "annsField": "float_vector1", "metricType": "L2", "limit": 3}, {"vector": [[0.1, 0.2]], "annsField": "float_vector2", "metricType": "L2", "limit": 3}], "rerank": {"strategy": "rrf", "params": {"k":  1}}}`),
+		requestBody: []byte(`{"collectionName": "hello_milvus", "search": [{"data": [[0.1, 0.2]], "annsField": "float_vector1", "metricType": "L2", "limit": 3}, {"data": [[0.1, 0.2]], "annsField": "float_vector2", "metricType": "L2", "limit": 3}], "rerank": {"strategy": "rrf", "params": {"k":  1}}}`),
 		errMsg:      "can only accept json format request, error: cannot find a vector field named: float_vector1",
 		errCode:     1801,
 	})
 	// multiple annsFields
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        SearchAction,
-		requestBody: []byte(`{"collectionName": "book", "vector": [[0.1, 0.2]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"]}`),
+		requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"]}`),
 		errMsg:      "can only accept json format request, error: search without annsFields, but already found multiple vector fields: [book_intro, binaryVector]",
 		errCode:     1801,
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        SearchAction,
-		requestBody: []byte(`{"collectionName": "book", "vector": [[0.1, 0.2]], "annsField": "book_intro", "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"]}`),
+		requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "annsField": "book_intro", "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"]}`),
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        SearchAction,
-		requestBody: []byte(`{"collectionName": "book", "vector": [[0.1, 0.2]], "annsField": "binaryVector", "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"]}`),
+		requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "annsField": "binaryVector", "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"]}`),
 		errMsg:      "can only accept json format request, error: json: cannot unmarshal number 0.1 into Go value of type uint8: invalid parameter[expected=BinaryVector][actual=[[0.1, 0.2]]]",
 		errCode:     1801,
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        SearchAction,
-		requestBody: []byte(`{"collectionName": "book", "vector": ["AQ=="], "annsField": "binaryVector", "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"]}`),
+		requestBody: []byte(`{"collectionName": "book", "data": ["AQ=="], "annsField": "binaryVector", "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"]}`),
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path: AdvancedSearchAction,
 		requestBody: []byte(`{"collectionName": "hello_milvus", "search": [` +
-			`{"vector": [[0.1, 0.2]], "annsField": "book_intro", "metricType": "L2", "limit": 3},` +
-			`{"vector": ["AQ=="], "annsField": "binaryVector", "metricType": "L2", "limit": 3},` +
-			`{"vector": ["AQIDBA=="], "annsField": "float16Vector", "metricType": "L2", "limit": 3},` +
-			`{"vector": ["AQIDBA=="], "annsField": "bfloat16Vector", "metricType": "L2", "limit": 3}` +
+			`{"data": [[0.1, 0.2]], "annsField": "book_intro", "metricType": "L2", "limit": 3},` +
+			`{"data": ["AQ=="], "annsField": "binaryVector", "metricType": "L2", "limit": 3},` +
+			`{"data": ["AQIDBA=="], "annsField": "float16Vector", "metricType": "L2", "limit": 3},` +
+			`{"data": ["AQIDBA=="], "annsField": "bfloat16Vector", "metricType": "L2", "limit": 3}` +
 			`], "rerank": {"strategy": "weighted", "params": {"weights":  [0.9, 0.8]}}}`),
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path: AdvancedSearchAction,
 		requestBody: []byte(`{"collectionName": "hello_milvus", "search": [` +
-			`{"vector": [[0.1, 0.2, 0.3]], "annsField": "book_intro", "metricType": "L2", "limit": 3},` +
-			`{"vector": ["AQ=="], "annsField": "binaryVector", "metricType": "L2", "limit": 3},` +
-			`{"vector": ["AQIDBA=="], "annsField": "float16Vector", "metricType": "L2", "limit": 3},` +
-			`{"vector": ["AQIDBA=="], "annsField": "bfloat16Vector", "metricType": "L2", "limit": 3}` +
+			`{"data": [[0.1, 0.2, 0.3]], "annsField": "book_intro", "metricType": "L2", "limit": 3},` +
+			`{"data": ["AQ=="], "annsField": "binaryVector", "metricType": "L2", "limit": 3},` +
+			`{"data": ["AQIDBA=="], "annsField": "float16Vector", "metricType": "L2", "limit": 3},` +
+			`{"data": ["AQIDBA=="], "annsField": "bfloat16Vector", "metricType": "L2", "limit": 3}` +
 			`], "rerank": {"strategy": "weighted", "params": {"weights":  [0.9, 0.8]}}}`),
 		errMsg:  "can only accept json format request, error: dimension: 2, but length of []float: 3: invalid parameter[expected=FloatVector][actual=[0.1, 0.2, 0.3]]",
 		errCode: 1801,
@@ -1202,10 +1202,10 @@ func TestSearchV2(t *testing.T) {
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path: AdvancedSearchAction,
 		requestBody: []byte(`{"collectionName": "hello_milvus", "search": [` +
-			`{"vector": [[0.1, 0.2]], "annsField": "book_intro", "metricType": "L2", "limit": 3},` +
-			`{"vector": ["AQID"], "annsField": "binaryVector", "metricType": "L2", "limit": 3},` +
-			`{"vector": ["AQIDBA=="], "annsField": "float16Vector", "metricType": "L2", "limit": 3},` +
-			`{"vector": ["AQIDBA=="], "annsField": "bfloat16Vector", "metricType": "L2", "limit": 3}` +
+			`{"data": [[0.1, 0.2]], "annsField": "book_intro", "metricType": "L2", "limit": 3},` +
+			`{"data": ["AQID"], "annsField": "binaryVector", "metricType": "L2", "limit": 3},` +
+			`{"data": ["AQIDBA=="], "annsField": "float16Vector", "metricType": "L2", "limit": 3},` +
+			`{"data": ["AQIDBA=="], "annsField": "bfloat16Vector", "metricType": "L2", "limit": 3}` +
 			`], "rerank": {"strategy": "weighted", "params": {"weights":  [0.9, 0.8]}}}`),
 		errMsg:  "can only accept json format request, error: dimension: 8, bytesLen: 1, but length of []byte: 3: invalid parameter[expected=BinaryVector][actual=\x01\x02\x03]",
 		errCode: 1801,
@@ -1213,10 +1213,10 @@ func TestSearchV2(t *testing.T) {
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path: AdvancedSearchAction,
 		requestBody: []byte(`{"collectionName": "hello_milvus", "search": [` +
-			`{"vector": [[0.1, 0.2]], "annsField": "book_intro", "metricType": "L2", "limit": 3},` +
-			`{"vector": ["AQ=="], "annsField": "binaryVector", "metricType": "L2", "limit": 3},` +
-			`{"vector": ["AQID"], "annsField": "float16Vector", "metricType": "L2", "limit": 3},` +
-			`{"vector": ["AQIDBA=="], "annsField": "bfloat16Vector", "metricType": "L2", "limit": 3}` +
+			`{"data": [[0.1, 0.2]], "annsField": "book_intro", "metricType": "L2", "limit": 3},` +
+			`{"data": ["AQ=="], "annsField": "binaryVector", "metricType": "L2", "limit": 3},` +
+			`{"data": ["AQID"], "annsField": "float16Vector", "metricType": "L2", "limit": 3},` +
+			`{"data": ["AQIDBA=="], "annsField": "bfloat16Vector", "metricType": "L2", "limit": 3}` +
 			`], "rerank": {"strategy": "weighted", "params": {"weights":  [0.9, 0.8]}}}`),
 		errMsg:  "can only accept json format request, error: dimension: 2, bytesLen: 4, but length of []byte: 3: invalid parameter[expected=Float16Vector][actual=\x01\x02\x03]",
 		errCode: 1801,
@@ -1224,10 +1224,10 @@ func TestSearchV2(t *testing.T) {
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path: AdvancedSearchAction,
 		requestBody: []byte(`{"collectionName": "hello_milvus", "search": [` +
-			`{"vector": [[0.1, 0.2]], "annsField": "book_intro", "metricType": "L2", "limit": 3},` +
-			`{"vector": ["AQ=="], "annsField": "binaryVector", "metricType": "L2", "limit": 3},` +
-			`{"vector": ["AQIDBA=="], "annsField": "float16Vector", "metricType": "L2", "limit": 3},` +
-			`{"vector": ["AQID"], "annsField": "bfloat16Vector", "metricType": "L2", "limit": 3}` +
+			`{"data": [[0.1, 0.2]], "annsField": "book_intro", "metricType": "L2", "limit": 3},` +
+			`{"data": ["AQ=="], "annsField": "binaryVector", "metricType": "L2", "limit": 3},` +
+			`{"data": ["AQIDBA=="], "annsField": "float16Vector", "metricType": "L2", "limit": 3},` +
+			`{"data": ["AQID"], "annsField": "bfloat16Vector", "metricType": "L2", "limit": 3}` +
 			`], "rerank": {"strategy": "weighted", "params": {"weights":  [0.9, 0.8]}}}`),
 		errMsg:  "can only accept json format request, error: dimension: 2, bytesLen: 4, but length of []byte: 3: invalid parameter[expected=BFloat16Vector][actual=\x01\x02\x03]",
 		errCode: 1801,
