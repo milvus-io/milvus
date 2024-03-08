@@ -232,9 +232,10 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 
 	// Segment which exist on next target, but not on dist
 	for segmentID, segment := range nextTargetMap {
-		leader := c.dist.LeaderViewManager.GetLatestLeadersByReplicaShard(replica,
-			segment.GetInsertChannel(),
-		)
+		views := c.dist.LeaderViewManager.GetByFilter(meta.WithReplica(replica), meta.WithChannelName(segment.GetInsertChannel()))
+		leader := lo.MaxBy(views, func(v1 *meta.LeaderView, v2 *meta.LeaderView) bool {
+			return v1.Version > v2.Version
+		})
 		node, ok := distMap[segmentID]
 		if !ok ||
 			// the L0 segments have to been in the same node as the channel watched
@@ -372,13 +373,16 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 	plans := make([]balance.SegmentAssignPlan, 0)
 	for shard, segments := range shardSegments {
 		// if channel is not subscribed yet, skip load segments
-		if len(c.dist.LeaderViewManager.GetLeadersByShard(shard)) == 0 {
+		if len(c.dist.LeaderViewManager.GetByFilter(meta.WithChannelName(shard))) == 0 {
 			continue
 		}
 
 		// L0 segment can only be assign to shard leader's node
 		if isLevel0 {
-			leader := c.dist.LeaderViewManager.GetLatestLeadersByReplicaShard(replica, shard)
+			views := c.dist.LeaderViewManager.GetByFilter(meta.WithReplica(replica), meta.WithChannelName(shard))
+			leader := lo.MaxBy(views, func(v1 *meta.LeaderView, v2 *meta.LeaderView) bool {
+				return v1.Version > v2.Version
+			})
 			availableNodes = []int64{leader.ID}
 		}
 
