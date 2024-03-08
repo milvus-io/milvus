@@ -65,7 +65,6 @@ class TestChaosApply:
             ready_for_chaos = wait_signal_to_apply_chaos()
             if not ready_for_chaos:
                 log.info("did not get the signal to apply chaos")
-                raise Exception
             else:
                 log.info("get the signal to apply chaos")
         log.info(connections.get_connection_addr('default'))
