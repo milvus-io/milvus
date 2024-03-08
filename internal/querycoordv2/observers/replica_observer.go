@@ -99,7 +99,7 @@ func (ob *ReplicaObserver) checkNodesInReplica() {
 
 				for node := range outboundNodes {
 					channels := ob.distMgr.ChannelDistManager.GetByCollectionAndNode(collectionID, node)
-					segments := ob.distMgr.SegmentDistManager.GetByCollectionAndNode(collectionID, node)
+					segments := ob.distMgr.SegmentDistManager.GetByFilter(meta.WithCollectionID(collectionID), meta.WithNodeID(node))
 
 					if len(channels) == 0 && len(segments) == 0 {
 						replica.RemoveNode(node)

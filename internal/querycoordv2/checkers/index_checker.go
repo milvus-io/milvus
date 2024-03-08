@@ -147,7 +147,7 @@ func (c *IndexChecker) checkSegment(ctx context.Context, segment *meta.Segment, 
 func (c *IndexChecker) getSealedSegmentsDist(replica *meta.Replica) []*meta.Segment {
 	var ret []*meta.Segment
 	for _, node := range replica.GetNodes() {
-		ret = append(ret, c.dist.SegmentDistManager.GetByCollectionAndNode(replica.CollectionID, node)...)
+		ret = append(ret, c.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithNodeID(node))...)
 	}
 	return ret
 }

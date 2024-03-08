@@ -122,7 +122,7 @@ func (o *LeaderObserver) observeCollection(ctx context.Context, collection int64
 			if leaderView == nil {
 				continue
 			}
-			dists := o.dist.SegmentDistManager.GetByShardWithReplica(ch, replica)
+			dists := o.dist.SegmentDistManager.GetByFilter(meta.WithChannel(ch), meta.WithReplica(replica))
 
 			actions := o.findNeedLoadedSegments(leaderView, dists)
 			actions = append(actions, o.findNeedRemovedSegments(leaderView, dists)...)

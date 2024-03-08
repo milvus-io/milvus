@@ -109,7 +109,7 @@ func (b *RowCountBasedBalancer) convertToNodeItemsBySegment(nodeIDs []int64) []*
 		node := nodeInfo.ID()
 
 		// calculate sealed segment row count on node
-		segments := b.dist.SegmentDistManager.GetByNode(node)
+		segments := b.dist.SegmentDistManager.GetByFilter(meta.WithNodeID(node))
 		rowcnt := 0
 		for _, s := range segments {
 			rowcnt += int(s.GetNumOfRows())
@@ -203,7 +203,7 @@ func (b *RowCountBasedBalancer) BalanceReplica(replica *meta.Replica) ([]Segment
 func (b *RowCountBasedBalancer) genStoppingSegmentPlan(replica *meta.Replica, onlineNodes []int64, offlineNodes []int64) []SegmentAssignPlan {
 	segmentPlans := make([]SegmentAssignPlan, 0)
 	for _, nodeID := range offlineNodes {
-		dist := b.dist.SegmentDistManager.GetByCollectionAndNode(replica.GetCollectionID(), nodeID)
+		dist := b.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithNodeID(nodeID))
 		segments := lo.Filter(dist, func(segment *meta.Segment, _ int) bool {
 			return b.targetMgr.GetSealedSegment(segment.GetCollectionID(), segment.GetID(), meta.CurrentTarget) != nil &&
 				b.targetMgr.GetSealedSegment(segment.GetCollectionID(), segment.GetID(), meta.NextTarget) != nil
@@ -225,7 +225,7 @@ func (b *RowCountBasedBalancer) genSegmentPlan(replica *meta.Replica, onlineNode
 	segmentDist := make(map[int64][]*meta.Segment)
 	totalRowCount := 0
 	for _, node := range onlineNodes {
-		dist := b.dist.SegmentDistManager.GetByCollectionAndNode(replica.GetCollectionID(), node)
+		dist := b.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithNodeID(node))
 		segments := lo.Filter(dist, func(segment *meta.Segment, _ int) bool {
 			return b.targetMgr.GetSealedSegment(segment.GetCollectionID(), segment.GetID(), meta.CurrentTarget) != nil &&
 				b.targetMgr.GetSealedSegment(segment.GetCollectionID(), segment.GetID(), meta.NextTarget) != nil
@@ -268,7 +268,7 @@ func (b *RowCountBasedBalancer) genSegmentPlan(replica *meta.Replica, onlineNode
 
 	segmentsToMove = lo.Filter(segmentsToMove, func(s *meta.Segment, _ int) bool {
 		// if the segment are redundant, skip it's balance for now
-		return len(b.dist.SegmentDistManager.Get(s.GetID())) == 1
+		return len(b.dist.SegmentDistManager.GetByFilter(meta.WithSegmentID(s.GetID()))) == 1
 	})
 
 	if len(nodesWithLessRow) == 0 || len(segmentsToMove) == 0 {

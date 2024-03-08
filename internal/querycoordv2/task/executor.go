@@ -278,7 +278,7 @@ func (ex *Executor) releaseSegment(task *SegmentTask, step int) {
 		req.NeedTransfer = true
 	} else {
 		var targetSegment *meta.Segment
-		segments := ex.dist.SegmentDistManager.GetByNode(action.Node())
+		segments := ex.dist.SegmentDistManager.GetByFilter(meta.WithNodeID(action.Node()))
 		for _, segment := range segments {
 			if segment.GetID() == task.SegmentID() {
 				targetSegment = segment

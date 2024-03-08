@@ -22,6 +22,8 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type SegmentDistManagerSuite struct {
@@ -89,38 +91,62 @@ func (suite *SegmentDistManagerSuite) TestGetBy() {
 	dist := suite.dist
 	// Test GetByNode
 	for _, node := range suite.nodes {
-		segments := dist.GetByNode(node)
+		segments := dist.GetByFilter(WithNodeID(node))
 		suite.AssertNode(segments, node)
 	}
 
 	// Test GetByShard
 	for _, shard := range []string{"dmc0", "dmc1"} {
-		segments := dist.GetByShard(shard)
+		segments := dist.GetByFilter(WithChannel(shard))
 		suite.AssertShard(segments, shard)
 	}
 
 	// Test GetByCollection
-	segments := dist.GetByCollection(suite.collection)
+	segments := dist.GetByFilter(WithCollectionID(suite.collection))
 	suite.Len(segments, 8)
 	suite.AssertCollection(segments, suite.collection)
-	segments = dist.GetByCollection(-1)
+	segments = dist.GetByFilter(WithCollectionID(-1))
 	suite.Len(segments, 0)
 
 	// Test GetByNodeAndCollection
 	// 1. Valid node and valid collection
 	for _, node := range suite.nodes {
-		segments := dist.GetByCollectionAndNode(suite.collection, node)
+		segments := dist.GetByFilter(WithCollectionID(suite.collection), WithNodeID(node))
 		suite.AssertNode(segments, node)
 		suite.AssertCollection(segments, suite.collection)
 	}
 
 	// 2. Valid node and invalid collection
-	segments = dist.GetByCollectionAndNode(-1, suite.nodes[1])
+	segments = dist.GetByFilter(WithCollectionID(-1), WithNodeID(suite.nodes[1]))
 	suite.Len(segments, 0)
 
 	// 3. Invalid node and valid collection
-	segments = dist.GetByCollectionAndNode(suite.collection, -1)
+	segments = dist.GetByFilter(WithCollectionID(suite.collection), WithNodeID(-1))
 	suite.Len(segments, 0)
+
+	// Test GetBy With Wrong Replica
+	replica := &Replica{
+		Replica: &querypb.Replica{
+			ID:           1,
+			CollectionID: suite.collection + 1,
+			Nodes:        []int64{suite.nodes[0]},
+		},
+		nodes: typeutil.NewUniqueSet(suite.nodes[0]),
+	}
+	segments = dist.GetByFilter(WithReplica(replica))
+	suite.Len(segments, 0)
+
+	// Test GetBy With Correct Replica
+	replica = &Replica{
+		Replica: &querypb.Replica{
+			ID:           1,
+			CollectionID: suite.collection,
+			Nodes:        []int64{suite.nodes[0]},
+		},
+		nodes: typeutil.NewUniqueSet(suite.nodes[0]),
+	}
+	segments = dist.GetByFilter(WithReplica(replica))
+	suite.Len(segments, 2)
 }
 
 func (suite *SegmentDistManagerSuite) AssertIDs(segments []*Segment, ids ...int64) bool {
