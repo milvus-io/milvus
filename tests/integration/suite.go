@@ -25,7 +25,9 @@ import (
 
 	"github.com/stretchr/testify/suite"
 	"go.etcd.io/etcd/server/v3/embed"
+	"go.uber.org/zap/zapcore"
 
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -80,6 +82,7 @@ func (s *MiniClusterSuite) TearDownSuite() {
 }
 
 func (s *MiniClusterSuite) SetupTest() {
+	log.SetLevel(zapcore.InfoLevel)
 	s.T().Log("Setup test...")
 	// setup mini cluster to use embed etcd
 	endpoints := etcd.GetEmbedEtcdEndpoints(s.EtcdServer)

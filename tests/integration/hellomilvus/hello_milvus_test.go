@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/tests/integration"
 )
@@ -146,11 +147,20 @@ func (s *HelloMilvusSuite) TestHelloMilvus() {
 
 	searchResult, err := c.Proxy.Search(ctx, searchReq)
 
-	if searchResult.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("searchResult fail reason", zap.String("reason", searchResult.GetStatus().GetReason()))
-	}
+	err = merr.CheckRPCCall(searchResult, err)
 	s.NoError(err)
-	s.Equal(commonpb.ErrorCode_Success, searchResult.GetStatus().GetErrorCode())
+
+	status, err := c.Proxy.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{
+		CollectionName: collectionName,
+	})
+	err = merr.CheckRPCCall(status, err)
+	s.NoError(err)
+
+	status, err = c.Proxy.DropCollection(ctx, &milvuspb.DropCollectionRequest{
+		CollectionName: collectionName,
+	})
+	err = merr.CheckRPCCall(status, err)
+	s.NoError(err)
 
 	log.Info("TestHelloMilvus succeed")
 }
