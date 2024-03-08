@@ -315,7 +315,7 @@ func (b *ScoreBasedBalancer) genSegmentPlan(replica *meta.Replica, onlineNodes [
 
 	// if the segment are redundant, skip it's balance for now
 	segmentsToMove = lo.Filter(segmentsToMove, func(s *meta.Segment, _ int) bool {
-		return len(b.dist.GetByFilter(meta.WithReplica(replica), meta.WithSegmentID(s.GetID()))) == 1
+		return len(b.dist.SegmentDistManager.GetByFilter(meta.WithReplica(replica), meta.WithSegmentID(s.GetID()))) == 1
 	})
 
 	if len(segmentsToMove) == 0 {
