@@ -209,6 +209,7 @@ proxy:
   maxTaskNum: 1024 # max task number of proxy task queue
   connectionCheckIntervalSeconds: 120 # the interval time(in seconds) for connection manager to scan inactive client info
   connectionClientInfoTTLSeconds: 86400 # inactive client info TTL duration, in seconds
+  maxConnectionNum: 10000 # the max client info numbers that proxy should manage, avoid too many client infos.
   accessLog:
     enable: false
     # Log filename, set as "" to use stdout.
