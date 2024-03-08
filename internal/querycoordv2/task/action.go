@@ -121,7 +121,7 @@ func (action *SegmentAction) IsFinished(distMgr *meta.DistributionManager) bool 
 		// the leader should return a map of segment ID to list of nodes,
 		// now, we just always commit the release task to executor once.
 		// NOTE: DO NOT create a task containing release action and the action is not the last action
-		sealed := distMgr.SegmentDistManager.GetByNode(action.Node())
+		sealed := distMgr.SegmentDistManager.GetByFilter(meta.WithNodeID(action.Node()))
 		growing := distMgr.LeaderViewManager.GetSegmentByNode(action.Node())
 		segments := make([]int64, 0, len(sealed)+len(growing))
 		for _, segment := range sealed {

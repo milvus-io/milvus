@@ -42,7 +42,7 @@ func waitCollectionReleased(dist *meta.DistributionManager, checkerController *c
 	for {
 		var (
 			channels []*meta.DmChannel
-			segments []*meta.Segment = dist.SegmentDistManager.GetByCollection(collection)
+			segments []*meta.Segment = dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(collection))
 		)
 		if partitionSet.Len() > 0 {
 			segments = lo.Filter(segments, func(segment *meta.Segment, _ int) bool {

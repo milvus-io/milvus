@@ -159,7 +159,7 @@ func PrintCurrentReplicaDist(replica *meta.Replica,
 		distInfo += fmt.Sprintf("[nodeID:%d, ", normalNodeID)
 		distInfo += "loaded-segments:["
 		nodeRowSum := int64(0)
-		normalNodeSegments := segmentDistMgr.GetByNode(normalNodeID)
+		normalNodeSegments := segmentDistMgr.GetByFilter(meta.WithNodeID(normalNodeID))
 		for _, normalNodeSegment := range normalNodeSegments {
 			nodeRowSum += normalNodeSegment.GetNumOfRows()
 		}
