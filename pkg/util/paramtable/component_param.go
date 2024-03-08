@@ -1540,7 +1540,7 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 	p.ChannelCheckInterval.Init(base.mgr)
 
 	p.BalanceCheckInterval = ParamItem{
-		Key:          "queryCoord.checkChannelInterval",
+		Key:          "queryCoord.checkBalanceInterval",
 		Version:      "2.3.0",
 		DefaultValue: "10000",
 		PanicIfEmpty: true,
