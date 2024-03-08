@@ -235,7 +235,7 @@ var (
 			Subsystem: typeutil.QueryNodeRole,
 			Name:      "load_segment_latency",
 			Help:      "latency of load per segment",
-			Buckets:   []float64{0.1, 0.5, 1, 5, 10, 20, 50, 100, 300, 600, 1200}, // unit seconds
+			Buckets:   longTaskBuckets, // unit milliseconds
 		}, []string{
 			nodeIDLabelName,
 		})
@@ -479,6 +479,28 @@ var (
 			Name:      "stopping_balance_segment_num",
 			Help:      "the number of segment which executing stopping balance",
 		}, []string{nodeIDLabelName})
+
+	QueryNodeLoadSegmentConcurrency = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "load_segment_concurrency",
+			Help:      "number of concurrent loading segments in QueryNode",
+		}, []string{
+			nodeIDLabelName,
+			loadTypeName,
+		})
+
+	QueryNodeLoadIndexLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "load_index_latency",
+			Help:      "latency of load per segment's index, in milliseconds",
+			Buckets:   longTaskBuckets, // unit milliseconds
+		}, []string{
+			nodeIDLabelName,
+		})
 )
 
 // RegisterQueryNode registers QueryNode metrics
@@ -524,6 +546,8 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(StoppingBalanceNodeNum)
 	registry.MustRegister(StoppingBalanceChannelNum)
 	registry.MustRegister(StoppingBalanceSegmentNum)
+	registry.MustRegister(QueryNodeLoadSegmentConcurrency)
+	registry.MustRegister(QueryNodeLoadIndexLatency)
 }
 
 func CleanupQueryNodeCollectionMetrics(nodeID int64, collectionID int64) {
