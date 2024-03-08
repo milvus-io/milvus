@@ -993,7 +993,7 @@ func (loader *segmentLoader) loadSegment(ctx context.Context,
 				}
 			}
 		}
-		if err := loadSealedSegmentFields(ctx, segment, fieldBinlogs, loadInfo.GetNumOfRows(), WithLoadStatus(loadStatus)); err != nil {
+		if err := loadSealedSegmentFields(ctx, collection, segment, fieldBinlogs, loadInfo.GetNumOfRows(), WithLoadStatus(loadStatus)); err != nil {
 			return err
 		}
 		// https://github.com/milvus-io/milvus/23654
@@ -1049,11 +1049,19 @@ func (loader *segmentLoader) filterPKStatsBinlogs(fieldBinlogs []*datapb.FieldBi
 	return result, storage.DefaultStatsType
 }
 
-func loadSealedSegmentFields(ctx context.Context, segment *LocalSegment, fields []*datapb.FieldBinlog, rowCount int64, opts ...loadOption) error {
+func loadSealedSegmentFields(ctx context.Context, collection *Collection, segment *LocalSegment, fields []*datapb.FieldBinlog, rowCount int64, opts ...loadOption) error {
+	options := newLoadOptions()
+	for _, opt := range opts {
+		opt(options)
+	}
 	runningGroup, _ := errgroup.WithContext(ctx)
 	for _, field := range fields {
 		fieldBinLog := field
 		fieldID := field.FieldID
+		mmapEnabled := common.IsFieldMmapEnabled(collection.Schema(), fieldID)
+		if mmapEnabled && options.LoadStatus == LoadStatusInMemory {
+			opts = append(opts, WithLoadStatus(LoadStatusMapped))
+		}
 		runningGroup.Go(func() error {
 			return segment.LoadFieldData(ctx,
 				fieldID,

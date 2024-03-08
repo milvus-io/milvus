@@ -114,13 +114,14 @@ type Manager struct {
 	DiskCache  cache.Cache[int64, Segment]
 }
 
-func NewManager() *Manager {
+func NewManager(loader Loader) *Manager {
 	diskCap := paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsInt64()
 	segmentMaxSIze := paramtable.Get().DataCoordCfg.SegmentMaxSize.GetAsInt64()
 	cacheMaxItemNum := diskCap / segmentMaxSIze
 
 	segMgr := NewSegmentManager()
 	sf := singleflight.Group{}
+	segLoader := loader.(*segmentLoader)
 	return &Manager{
 		Collection: NewCollectionManager(),
 		Segment:    segMgr,
@@ -139,7 +140,11 @@ func NewManager() *Manager {
 
 				info := segment.LoadInfo()
 				_, err, _ := sf.Do(fmt.Sprint(segment.ID()), func() (interface{}, error) {
-					err := loadSealedSegmentFields(context.Background(), segment.(*LocalSegment), info.BinlogPaths, info.GetNumOfRows(), WithLoadStatus(LoadStatusMapped))
+					collection := segLoader.manager.Collection.Get(segment.Collection())
+					if collection == nil {
+						return nil, merr.WrapErrCollectionNotLoaded(segment.Collection(), "failed to load segment fields")
+					}
+					err := loadSealedSegmentFields(context.Background(), collection, segment.(*LocalSegment), info.BinlogPaths, info.GetNumOfRows(), WithLoadStatus(LoadStatusMapped))
 					return nil, err
 				})
 				if err != nil {
