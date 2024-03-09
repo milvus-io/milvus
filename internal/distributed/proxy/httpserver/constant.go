@@ -1,6 +1,10 @@
 package httpserver
 
-import "time"
+import (
+	"time"
+
+	"github.com/milvus-io/milvus/pkg/util/metric"
+)
 
 // v2
 const (
@@ -113,7 +117,7 @@ const (
 	HTTPReturnGrantor    = "grantor"
 	HTTPReturnDbName     = "dbName"
 
-	DefaultMetricType       = "L2"
+	DefaultMetricType       = metric.COSINE
 	DefaultPrimaryFieldName = "id"
 	DefaultVectorFieldName  = "vector"
 

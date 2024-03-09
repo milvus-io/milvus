@@ -66,12 +66,12 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 		}
 	}, wrapperTraceLog(h.wrapperCheckDatabase(h.query)))))
 	router.POST(EntityCategory+GetAction, timeoutMiddleware(wrapperPost(func() any {
-		return &CollectionIDOutputReq{
+		return &CollectionIDReq{
 			OutputFields: []string{DefaultOutputFields},
 		}
 	}, wrapperTraceLog(h.wrapperCheckDatabase(h.get)))))
 	router.POST(EntityCategory+DeleteAction, timeoutMiddleware(wrapperPost(func() any {
-		return &CollectionIDFilterReq{}
+		return &CollectionFilterReq{}
 	}, wrapperTraceLog(h.wrapperCheckDatabase(h.delete)))))
 	router.POST(EntityCategory+InsertAction, timeoutMiddleware(wrapperPost(func() any {
 		return &CollectionDataReq{}
@@ -534,7 +534,7 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 }
 
 func (h *HandlersV2) get(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
-	httpReq := anyReq.(*CollectionIDOutputReq)
+	httpReq := anyReq.(*CollectionIDReq)
 	collSchema, err := h.GetCollectionSchema(ctx, c, dbName, httpReq.CollectionName)
 	if err != nil {
 		return nil, err
@@ -577,7 +577,7 @@ func (h *HandlersV2) get(ctx context.Context, c *gin.Context, anyReq any, dbName
 }
 
 func (h *HandlersV2) delete(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
-	httpReq := anyReq.(*CollectionIDFilterReq)
+	httpReq := anyReq.(*CollectionFilterReq)
 	collSchema, err := h.GetCollectionSchema(ctx, c, dbName, httpReq.CollectionName)
 	if err != nil {
 		return nil, err
@@ -938,20 +938,53 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 	var err error
 	fieldNames := map[string]bool{}
 	if httpReq.Schema.Fields == nil || len(httpReq.Schema.Fields) == 0 {
+		if httpReq.Dimension == 0 {
+			err := merr.WrapErrParameterInvalid("collectionName & dimension", "collectionName",
+				"dimension is required for quickly create collection(default metric type: "+DefaultMetricType+")")
+			log.Ctx(ctx).Warn("high level restful api, quickly create collection fail", zap.Error(err), zap.Any("request", anyReq))
+			c.AbortWithStatusJSON(http.StatusOK, gin.H{
+				HTTPReturnCode:    merr.Code(err),
+				HTTPReturnMessage: err.Error(),
+			})
+			return nil, err
+		}
+		idDataType := schemapb.DataType_Int64
+		switch httpReq.IDType {
+		case "Varchar":
+			idDataType = schemapb.DataType_VarChar
+		case "":
+			httpReq.IDType = "Int64"
+		case "Int64":
+		default:
+			err := merr.WrapErrParameterInvalid("Int64, Varchar", httpReq.IDType,
+				"idType can only be [Int64, Varchar](case sensitive), default: Int64")
+			log.Ctx(ctx).Warn("high level restful api, quickly create collection fail", zap.Error(err), zap.Any("request", anyReq))
+			c.AbortWithStatusJSON(http.StatusOK, gin.H{
+				HTTPReturnCode:    merr.Code(err),
+				HTTPReturnMessage: err.Error(),
+			})
+			return nil, err
+		}
+		if len(httpReq.PrimaryFieldName) == 0 {
+			httpReq.PrimaryFieldName = PrimaryFieldName
+		}
+		if len(httpReq.VectorFieldName) == 0 {
+			httpReq.VectorFieldName = VectorFieldName
+		}
 		schema, err = proto.Marshal(&schemapb.CollectionSchema{
 			Name:   httpReq.CollectionName,
 			AutoID: EnableAutoID,
 			Fields: []*schemapb.FieldSchema{
 				{
 					FieldID:      common.StartOfUserFieldID,
-					Name:         PrimaryFieldName,
+					Name:         httpReq.PrimaryFieldName,
 					IsPrimaryKey: true,
-					DataType:     schemapb.DataType_Int64,
+					DataType:     idDataType,
 					AutoID:       EnableAutoID,
 				},
 				{
 					FieldID:      common.StartOfUserFieldID + 1,
-					Name:         VectorFieldName,
+					Name:         httpReq.VectorFieldName,
 					IsPrimaryKey: false,
 					DataType:     schemapb.DataType_FloatVector,
 					TypeParams: []*commonpb.KeyValuePair{
@@ -1034,6 +1067,9 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 		return resp, err
 	}
 	if httpReq.Schema.Fields == nil || len(httpReq.Schema.Fields) == 0 {
+		if len(httpReq.MetricType) == 0 {
+			httpReq.MetricType = DefaultMetricType
+		}
 		createIndexReq := &milvuspb.CreateIndexRequest{
 			DbName:         dbName,
 			CollectionName: httpReq.CollectionName,

@@ -99,7 +99,7 @@ type QueryReqV2 struct {
 
 func (req *QueryReqV2) GetDbName() string { return req.DbName }
 
-type CollectionIDOutputReq struct {
+type CollectionIDReq struct {
 	DbName         string      `json:"dbName"`
 	CollectionName string      `json:"collectionName" binding:"required"`
 	PartitionName  string      `json:"partitionName"`
@@ -108,17 +108,16 @@ type CollectionIDOutputReq struct {
 	ID             interface{} `json:"id" binding:"required"`
 }
 
-func (req *CollectionIDOutputReq) GetDbName() string { return req.DbName }
+func (req *CollectionIDReq) GetDbName() string { return req.DbName }
 
-type CollectionIDFilterReq struct {
-	DbName         string      `json:"dbName"`
-	CollectionName string      `json:"collectionName" binding:"required"`
-	PartitionName  string      `json:"partitionName"`
-	ID             interface{} `json:"id"`
-	Filter         string      `json:"filter"`
+type CollectionFilterReq struct {
+	DbName         string `json:"dbName"`
+	CollectionName string `json:"collectionName" binding:"required"`
+	PartitionName  string `json:"partitionName"`
+	Filter         string `json:"filter" binding:"required"`
 }
 
-func (req *CollectionIDFilterReq) GetDbName() string { return req.DbName }
+func (req *CollectionFilterReq) GetDbName() string { return req.DbName }
 
 type CollectionDataReq struct {
 	DbName         string                   `json:"dbName"`
@@ -297,12 +296,15 @@ type CollectionSchema struct {
 }
 
 type CollectionReq struct {
-	DbName         string           `json:"dbName"`
-	CollectionName string           `json:"collectionName" binding:"required"`
-	Dimension      int32            `json:"dimension"`
-	MetricType     string           `json:"metricType"`
-	Schema         CollectionSchema `json:"schema"`
-	IndexParams    []IndexParam     `json:"indexParams"`
+	DbName           string           `json:"dbName"`
+	CollectionName   string           `json:"collectionName" binding:"required"`
+	Dimension        int32            `json:"dimension"`
+	IDType           string           `json:"idType"`
+	MetricType       string           `json:"metricType"`
+	PrimaryFieldName string           `json:"primaryFieldName"`
+	VectorFieldName  string           `json:"vectorFieldName"`
+	Schema           CollectionSchema `json:"schema"`
+	IndexParams      []IndexParam     `json:"indexParams"`
 }
 
 func (req *CollectionReq) GetDbName() string { return req.DbName }
