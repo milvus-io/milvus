@@ -180,7 +180,7 @@ func (kv *etcdKV) LoadBytesWithPrefix(key string) ([]string, [][]byte, error) {
 	return keys, values, nil
 }
 
-// LoadBytesWithPrefix2 returns all the the keys,values and key versions with the given key prefix.
+// LoadBytesWithPrefix2 returns all the keys,values and key versions with the given key prefix.
 func (kv *etcdKV) LoadBytesWithPrefix2(key string) ([]string, [][]byte, []int64, error) {
 	start := time.Now()
 	key = path.Join(kv.rootPath, key)
