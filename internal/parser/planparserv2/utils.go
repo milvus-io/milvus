@@ -7,6 +7,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -86,6 +87,25 @@ func NewString(value string) *planpb.GenericValue {
 	}
 }
 
+func GetGenericValueType(n *planpb.GenericValue) string {
+	if IsBool(n) {
+		return "Bool"
+	}
+	if IsInteger(n) {
+		return "Int64"
+	}
+	if IsFloating(n) {
+		return "Double"
+	}
+	if IsArray(n) {
+		return "Array"
+	}
+	if IsString(n) {
+		return "Varchar"
+	}
+	return ""
+}
+
 func toValueExpr(n *planpb.GenericValue) *ExprWithType {
 	expr := &planpb.Expr{
 		Expr: &planpb.Expr_ValueExpr{
@@ -126,7 +146,7 @@ func toValueExpr(n *planpb.GenericValue) *ExprWithType {
 	}
 }
 
-func getSameType(left, right *ExprWithType) (schemapb.DataType, error) {
+func getSameType(left, right *ExprWithType) (schemapb.DataType, bool) {
 	lDataType, rDataType := left.dataType, right.dataType
 	if typeutil.IsArrayType(lDataType) {
 		lDataType = toColumnInfo(left).GetElementType()
@@ -136,33 +156,33 @@ func getSameType(left, right *ExprWithType) (schemapb.DataType, error) {
 	}
 	if typeutil.IsJSONType(lDataType) {
 		if typeutil.IsJSONType(rDataType) {
-			return schemapb.DataType_JSON, nil
+			return schemapb.DataType_JSON, true
 		}
 		if typeutil.IsFloatingType(rDataType) {
-			return schemapb.DataType_Double, nil
+			return schemapb.DataType_Double, true
 		}
 		if typeutil.IsIntegerType(rDataType) {
-			return schemapb.DataType_Int64, nil
+			return schemapb.DataType_Int64, true
 		}
 	}
 	if typeutil.IsFloatingType(lDataType) {
 		if typeutil.IsJSONType(rDataType) || typeutil.IsArithmetic(rDataType) {
-			return schemapb.DataType_Double, nil
+			return schemapb.DataType_Double, true
 		}
 	}
 	if typeutil.IsIntegerType(lDataType) {
 		if typeutil.IsFloatingType(rDataType) {
-			return schemapb.DataType_Double, nil
+			return schemapb.DataType_Double, true
 		}
 		if typeutil.IsIntegerType(rDataType) || typeutil.IsJSONType(rDataType) {
-			return schemapb.DataType_Int64, nil
+			return schemapb.DataType_Int64, true
 		}
 	}
 
-	return schemapb.DataType_None, fmt.Errorf("incompatible data type, %s, %s", lDataType.String(), rDataType.String())
+	return schemapb.DataType_None, false
 }
 
-func calcDataType(left, right *ExprWithType, reverse bool) (schemapb.DataType, error) {
+func calcDataType(left, right *ExprWithType, reverse bool) (schemapb.DataType, bool) {
 	if reverse {
 		return getSameType(right, left)
 	}
@@ -294,7 +314,7 @@ func handleBinaryArithExpr(op planpb.OpType, arithExpr *planpb.BinaryArithExpr, 
 		case planpb.ArithOpType_Add, planpb.ArithOpType_Mul:
 			return combineBinaryArithExpr(op, arithOp, rightExpr.GetInfo(), leftValue.GetValue(), valueExpr.GetValue()), nil
 		default:
-			return nil, fmt.Errorf("module field is not yet supported")
+			return nil, fmt.Errorf("%s field is not yet supported", arithOp.String())
 		}
 	} else {
 		// (a + b) / 2 == 3
@@ -418,8 +438,7 @@ func getDataType(expr *ExprWithType) string {
 
 func HandleCompare(op int, left, right *ExprWithType) (*planpb.Expr, error) {
 	if !canBeCompared(left, right) {
-		return nil, fmt.Errorf("comparisons between %s and %s are not supported",
-			getDataType(left), getDataType(right))
+		return nil, merr.WrapErrParseExprUnsupported(nil, "", getSpecificDataType(left), getSpecificDataType(right), cmpOpMap[op].String())
 	}
 
 	cmpOp := cmpOpMap[op]
@@ -428,9 +447,17 @@ func HandleCompare(op int, left, right *ExprWithType) (*planpb.Expr, error) {
 		if err != nil {
 			return nil, err
 		}
-		return handleCompareRightValue(op, right, valueExpr)
+		res, err := handleCompareRightValue(op, right, valueExpr)
+		if err != nil {
+			return nil, merr.WrapErrParseExprUnsupported(err, "", GetGenericValueType(valueExpr.GetValue()), right.dataType.String(), cmpOp.String(), err.Error())
+		}
+		return res, nil
 	} else if valueExpr := right.expr.GetValueExpr(); valueExpr != nil {
-		return handleCompareRightValue(cmpOp, left, valueExpr)
+		res, err := handleCompareRightValue(cmpOp, left, valueExpr)
+		if err != nil {
+			return nil, merr.WrapErrParseExprUnsupported(err, "", left.dataType.String(), GetGenericValueType(valueExpr.GetValue()), cmpOp.String(), err.Error())
+		}
+		return res, nil
 	}
 	return handleCompare(cmpOp, left, right)
 }
@@ -538,4 +565,11 @@ func isIntegerColumn(col *planpb.ColumnInfo) bool {
 	return typeutil.IsIntegerType(col.GetDataType()) ||
 		(typeutil.IsArrayType(col.GetDataType()) && typeutil.IsIntegerType(col.GetElementType())) ||
 		typeutil.IsJSONType(col.GetDataType())
+}
+
+func getSpecificDataType(expr *ExprWithType) string {
+	if typeutil.IsArrayType(expr.dataType) {
+		return fmt.Sprintf("%s Array", getArrayElementType(expr))
+	}
+	return expr.dataType.String()
 }

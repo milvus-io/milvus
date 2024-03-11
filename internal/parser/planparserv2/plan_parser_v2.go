@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -41,7 +42,7 @@ func handleExpr(schema *typeutil.SchemaHelper, exprStr string) interface{} {
 
 	if parser.GetCurrentToken().GetTokenType() != antlr.TokenEOF {
 		log.Info("invalid expression", zap.String("expr", exprStr))
-		return fmt.Errorf("invalid expression: %s", exprStr)
+		return merr.WrapErrParseExprFailed(nil, exprStr, "invalid expression")
 	}
 
 	// lexer & parser won't be used by this thread, can be put into pool.
@@ -56,15 +57,19 @@ func ParseExpr(schema *typeutil.SchemaHelper, exprStr string) (*planpb.Expr, err
 	ret := handleExpr(schema, exprStr)
 
 	if err := getError(ret); err != nil {
-		return nil, fmt.Errorf("cannot parse expression: %s, error: %s", exprStr, err)
+		log.Warn("cannot parse expression", zap.String("expr", exprStr), zap.Error(err))
+		return nil, merr.WrapErrParseExprFailed(err, exprStr, err.Error())
 	}
 
 	predicate := getExpr(ret)
 	if predicate == nil {
-		return nil, fmt.Errorf("cannot parse expression: %s", exprStr)
+		log.Warn("cannot parse expression", zap.String("expr", exprStr))
+		return nil, merr.WrapErrParseExprFailed(nil, exprStr)
 	}
 	if !canBeExecuted(predicate) {
-		return nil, fmt.Errorf("predicate is not a boolean expression: %s, data type: %s", exprStr, predicate.dataType)
+		log.Warn("predicate is not a boolean expression", zap.String("expr", exprStr),
+			zap.String("predicate type", predicate.dataType.String()))
+		return nil, merr.WrapErrParseExprFailed(nil, exprStr, fmt.Sprintf("predicate is not a boolean expression, data type: %s", predicate.dataType.String()))
 	}
 
 	return predicate.expr, nil
