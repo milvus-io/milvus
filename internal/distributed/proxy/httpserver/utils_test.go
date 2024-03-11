@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/tidwall/gjson"
 
@@ -492,6 +493,42 @@ func TestSerialize(t *testing.T) {
 	parameters := []float32{0.11111, 0.22222}
 	assert.Equal(t, "\xa4\x8d\xe3=\xa4\x8dc>", string(serialize(parameters)))
 	assert.Equal(t, "\n\x10\n\x02$0\x10e\x1a\b\xa4\x8d\xe3=\xa4\x8dc>", string(vectors2PlaceholderGroupBytes([][]float32{parameters}))) // todo
+	requestBody := "{\"data\": [[0.11111, 0.22222]]}"
+	vectors := gjson.Get(requestBody, HTTPRequestData)
+	values, err := serializeFloatVectors(vectors.Array(), schemapb.DataType_FloatVector, 2, -1)
+	assert.Nil(t, err)
+	placeholderValue := &commonpb.PlaceholderValue{
+		Tag:    "$0",
+		Type:   commonpb.PlaceholderType_FloatVector,
+		Values: values,
+	}
+	bytes, err := proto.Marshal(&commonpb.PlaceholderGroup{
+		Placeholders: []*commonpb.PlaceholderValue{
+			placeholderValue,
+		},
+	})
+	assert.Nil(t, err)
+	assert.Equal(t, "\n\x10\n\x02$0\x10e\x1a\b\xa4\x8d\xe3=\xa4\x8dc>", string(bytes)) // todo
+	for _, dataType := range []schemapb.DataType{schemapb.DataType_BinaryVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector} {
+		request := map[string]interface{}{
+			HTTPRequestData: []interface{}{
+				[]byte{1, 2},
+			},
+		}
+		requestBody, _ := json.Marshal(request)
+		values, err = serializeByteVectors(gjson.Get(string(requestBody), HTTPRequestData).Raw, dataType, -1, 2)
+		assert.Nil(t, err)
+		placeholderValue = &commonpb.PlaceholderValue{
+			Tag:    "$0",
+			Values: values,
+		}
+		_, err = proto.Marshal(&commonpb.PlaceholderGroup{
+			Placeholders: []*commonpb.PlaceholderValue{
+				placeholderValue,
+			},
+		})
+		assert.Nil(t, err)
+	}
 }
 
 func compareRow64(m1 map[string]interface{}, m2 map[string]interface{}) bool {

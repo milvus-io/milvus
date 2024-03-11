@@ -400,13 +400,34 @@ func TestDatabaseWrapper(t *testing.T) {
 func TestCreateCollection(t *testing.T) {
 	postTestCases := []requestBodyTestCase{}
 	mp := mocks.NewMockProxy(t)
-	mp.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(7)
-	mp.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Twice()
-	mp.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Twice()
+	mp.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(9)
+	mp.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(4)
+	mp.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(4)
 	mp.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(commonErrorStatus, nil).Twice()
 	mp.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(commonErrorStatus, nil).Once()
 	testEngine := initHTTPServerV2(mp, false)
 	path := versionalV2(CollectionCategory, CreateAction)
+	// quickly create collection
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `"}`),
+		errMsg:      "dimension is required for quickly create collection(default metric type: COSINE): invalid parameter[expected=collectionName & dimension][actual=collectionName]",
+		errCode:     1100, // ErrParameterInvalid
+	})
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "dimension": 2, "idType": "Varchar"}`),
+	})
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "dimension": 2, "idType": "unknown"}`),
+		errMsg:      "idType can only be [Int64, Varchar](case sensitive), default: Int64: invalid parameter[expected=Int64, Varchar][actual=unknown]",
+		errCode:     1100, // ErrParameterInvalid
+	})
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "dimension": 2}`),
+	})
 	postTestCases = append(postTestCases, requestBodyTestCase{
 		path:        path,
 		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "dimension": 2, "metricType": "L2"}`),
@@ -995,13 +1016,7 @@ func TestDML(t *testing.T) {
 		Status:         &StatusSuccess,
 	}, nil).Times(6)
 	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{Status: commonErrorStatus}, nil).Times(4)
-	mp.EXPECT().Search(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{TopK: int64(0)}}, nil).Times(3)
-	mp.EXPECT().Search(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{Status: &commonpb.Status{
-		ErrorCode: 1700, // ErrFieldNotFound
-		Reason:    "groupBy field not found in schema: field not found[field=test]",
-	}}, nil).Once()
-	mp.EXPECT().HybridSearch(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{TopK: int64(0)}}, nil).Twice()
-	mp.EXPECT().Query(mock.Anything, mock.Anything).Return(&milvuspb.QueryResults{Status: commonSuccessStatus, OutputFields: []string{}, FieldsData: []*schemapb.FieldData{}}, nil).Twice()
+	mp.EXPECT().Query(mock.Anything, mock.Anything).Return(&milvuspb.QueryResults{Status: commonSuccessStatus, OutputFields: []string{}, FieldsData: []*schemapb.FieldData{}}, nil).Times(3)
 	mp.EXPECT().Insert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{Status: commonSuccessStatus, InsertCnt: int64(0), IDs: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{}}}}}, nil).Once()
 	mp.EXPECT().Insert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{Status: commonSuccessStatus, InsertCnt: int64(0), IDs: &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{}}}}}, nil).Once()
 	mp.EXPECT().Upsert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{Status: commonSuccessStatus, UpsertCnt: int64(0), IDs: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{}}}}}, nil).Once()
@@ -1010,50 +1025,18 @@ func TestDML(t *testing.T) {
 	testEngine := initHTTPServerV2(mp, false)
 	queryTestCases := []requestBodyTestCase{}
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
-		path:        SearchAction,
-		requestBody: []byte(`{"collectionName": "book", "vector": [[0.1, 0.2]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"]}`),
-	})
-	queryTestCases = append(queryTestCases, requestBodyTestCase{
-		path:        SearchAction,
-		requestBody: []byte(`{"collectionName": "book", "vector": [[0.1, 0.2]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"], "params": {"radius":0.9}}`),
-	})
-	queryTestCases = append(queryTestCases, requestBodyTestCase{
-		path:        SearchAction,
-		requestBody: []byte(`{"collectionName": "book", "vector": [[0.1, 0.2]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"], "params": {"range_filter": 0.1}}`),
-		errMsg:      "can only accept json format request, error: invalid search params",
-		errCode:     1801, // ErrIncorrectParameterFormat
-	})
-	queryTestCases = append(queryTestCases, requestBodyTestCase{
-		path:        SearchAction,
-		requestBody: []byte(`{"collectionName": "book", "vector": [[0.1, 0.2]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"], "params": {"radius":0.9, "range_filter": 0.1}, "groupingField": "word_count"}`),
-	})
-	queryTestCases = append(queryTestCases, requestBodyTestCase{
-		path:        SearchAction,
-		requestBody: []byte(`{"collectionName": "book", "vector": [[0.1, 0.2]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"], "params": {"radius":0.9, "range_filter": 0.1}, "groupingField": "test"}`),
-		errMsg:      "groupBy field not found in schema: field not found[field=test]",
-		errCode:     65535,
-	})
-	queryTestCases = append(queryTestCases, requestBodyTestCase{
-		path:        SearchAction,
-		requestBody: []byte(`{"collectionName": "book", "vector": [["0.1", "0.2"]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"], "params": {"radius":0.9, "range_filter": 0.1}, "groupingField": "test"}`),
-		errMsg:      "can only accept json format request, error: json: cannot unmarshal string into Go struct field SearchReqV2.vector of type float32",
-		errCode:     1801,
-	})
-	queryTestCases = append(queryTestCases, requestBodyTestCase{
-		path:        HybridSearchAction,
-		requestBody: []byte(`{"collectionName": "hello_milvus", "search": [{"vector": [[0.1, 0.2]], "annsField": "float_vector1", "metricType": "L2", "limit": 3}, {"vector": [[0.1, 0.2]], "annsField": "float_vector2", "metricType": "L2", "limit": 3}], "rerank": {"strategy": "rrf", "params": {"k":  1}}}`),
-	})
-	queryTestCases = append(queryTestCases, requestBodyTestCase{
-		path:        HybridSearchAction,
-		requestBody: []byte(`{"collectionName": "hello_milvus", "search": [{"vector": [[0.1, 0.2]], "annsField": "float_vector1", "metricType": "L2", "limit": 3}, {"vector": [[0.1, 0.2]], "annsField": "float_vector2", "metricType": "L2", "limit": 3}], "rerank": {"strategy": "weighted", "params": {"weights":  [0.9, 0.8]}}}`),
-	})
-	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        QueryAction,
 		requestBody: []byte(`{"collectionName": "book", "filter": "book_id in [2, 4, 6, 8]", "outputFields": ["book_id",  "word_count", "book_intro"], "offset": 1}`),
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        GetAction,
-		requestBody: []byte(`{"collectionName": "book", "id" : [2, 4, 6, 8, 0], "outputFields": ["book_id",  "word_count", "book_intro"]}`),
+		requestBody: []byte(`{"collectionName": "book", "outputFields": ["book_id",  "word_count", "book_intro"]}`),
+		errMsg:      "missing required parameters, error: Key: 'CollectionIDReq.ID' Error:Field validation for 'ID' failed on the 'required' tag",
+		errCode:     1802, // ErrMissingRequiredParameters
+	})
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path:        QueryAction,
+		requestBody: []byte(`{"collectionName": "book", "filter": "book_id in [2, 4, 6, 8]"}`),
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        InsertAction,
@@ -1073,7 +1056,17 @@ func TestDML(t *testing.T) {
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        DeleteAction,
+		requestBody: []byte(`{"collectionName": "book", "filter": "book_id in [0]"}`),
+	})
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path:        DeleteAction,
 		requestBody: []byte(`{"collectionName": "book", "id" : [0]}`),
+		errMsg:      "missing required parameters, error: Key: 'CollectionFilterReq.Filter' Error:Field validation for 'Filter' failed on the 'required' tag",
+		errCode:     1802, // ErrMissingRequiredParameters
+	})
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path:        GetAction,
+		requestBody: []byte(`{"collectionName": "book", "id" : [2, 4, 6, 8, 0], "outputFields": ["book_id",  "word_count", "book_intro"]}`),
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        GetAction,
@@ -1095,13 +1088,190 @@ func TestDML(t *testing.T) {
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        DeleteAction,
-		requestBody: []byte(`{"collectionName": "book", "id" : [0]}`),
+		requestBody: []byte(`{"collectionName": "book", "filter": "book_id in [0]"}`),
 		errMsg:      "",
 		errCode:     65535,
 	})
 
 	for _, testcase := range queryTestCases {
 		t.Run("query", func(t *testing.T) {
+			bodyReader := bytes.NewReader(testcase.requestBody)
+			req := httptest.NewRequest(http.MethodPost, versionalV2(EntityCategory, testcase.path), bodyReader)
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code)
+			returnBody := &ReturnErrMsg{}
+			err := json.Unmarshal(w.Body.Bytes(), returnBody)
+			assert.Nil(t, err)
+			if testcase.errCode != 0 {
+				assert.Equal(t, testcase.errCode, returnBody.Code)
+				assert.Equal(t, testcase.errMsg, returnBody.Message)
+			} else {
+				assert.Equal(t, int32(http.StatusOK), returnBody.Code)
+			}
+			fmt.Println(w.Body.String())
+		})
+	}
+}
+
+func TestSearchV2(t *testing.T) {
+	paramtable.Init()
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         generateCollectionSchema(schemapb.DataType_Int64),
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Times(9)
+	mp.EXPECT().Search(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{TopK: int64(0)}}, nil).Times(3)
+	mp.EXPECT().Search(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{Status: &commonpb.Status{
+		ErrorCode: 1700, // ErrFieldNotFound
+		Reason:    "groupBy field not found in schema: field not found[field=test]",
+	}}, nil).Once()
+	mp.EXPECT().HybridSearch(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{TopK: int64(0)}}, nil).Twice()
+	collSchema := generateCollectionSchema(schemapb.DataType_Int64)
+	binaryVectorField := generateVectorFieldSchema(schemapb.DataType_BinaryVector)
+	binaryVectorField.Name = "binaryVector"
+	float16VectorField := generateVectorFieldSchema(schemapb.DataType_Float16Vector)
+	float16VectorField.Name = "float16Vector"
+	bfloat16VectorField := generateVectorFieldSchema(schemapb.DataType_BFloat16Vector)
+	bfloat16VectorField.Name = "bfloat16Vector"
+	collSchema.Fields = append(collSchema.Fields, &binaryVectorField)
+	collSchema.Fields = append(collSchema.Fields, &float16VectorField)
+	collSchema.Fields = append(collSchema.Fields, &bfloat16VectorField)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         collSchema,
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Times(9)
+	mp.EXPECT().Search(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{TopK: int64(0)}}, nil).Twice()
+	testEngine := initHTTPServerV2(mp, false)
+	queryTestCases := []requestBodyTestCase{}
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path:        SearchAction,
+		requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"]}`),
+	})
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path:        SearchAction,
+		requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"], "params": {"radius":0.9}}`),
+	})
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path:        SearchAction,
+		requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"], "params": {"range_filter": 0.1}}`),
+		errMsg:      "can only accept json format request, error: invalid search params",
+		errCode:     1801, // ErrIncorrectParameterFormat
+	})
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path:        SearchAction,
+		requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"], "params": {"radius":0.9, "range_filter": 0.1}, "groupingField": "word_count"}`),
+	})
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path:        SearchAction,
+		requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"], "params": {"radius":0.9, "range_filter": 0.1}, "groupingField": "test"}`),
+		errMsg:      "groupBy field not found in schema: field not found[field=test]",
+		errCode:     65535,
+	})
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path:        SearchAction,
+		requestBody: []byte(`{"collectionName": "book", "data": [["0.1", "0.2"]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"], "params": {"radius":0.9, "range_filter": 0.1}, "groupingField": "test"}`),
+		errMsg:      "can only accept json format request, error: json: cannot unmarshal string into Go value of type float32: invalid parameter[expected=FloatVector][actual=[\"0.1\", \"0.2\"]]",
+		errCode:     1801,
+	})
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path:        AdvancedSearchAction,
+		requestBody: []byte(`{"collectionName": "hello_milvus", "search": [{"data": [[0.1, 0.2]], "annsField": "book_intro", "metricType": "L2", "limit": 3}, {"data": [[0.1, 0.2]], "annsField": "book_intro", "metricType": "L2", "limit": 3}], "rerank": {"strategy": "weighted", "params": {"weights":  [0.9, 0.8]}}}`),
+	})
+	// annsField
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path:        SearchAction,
+		requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "annsField": "word_count", "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"], "params": {"radius":0.9, "range_filter": 0.1}, "groupingField": "test"}`),
+		errMsg:      "can only accept json format request, error: cannot find a vector field named: word_count",
+		errCode:     1801,
+	})
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path:        AdvancedSearchAction,
+		requestBody: []byte(`{"collectionName": "hello_milvus", "search": [{"data": [[0.1, 0.2]], "annsField": "float_vector1", "metricType": "L2", "limit": 3}, {"data": [[0.1, 0.2]], "annsField": "float_vector2", "metricType": "L2", "limit": 3}], "rerank": {"strategy": "rrf", "params": {"k":  1}}}`),
+		errMsg:      "can only accept json format request, error: cannot find a vector field named: float_vector1",
+		errCode:     1801,
+	})
+	// multiple annsFields
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path:        SearchAction,
+		requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"]}`),
+		errMsg:      "can only accept json format request, error: search without annsFields, but already found multiple vector fields: [book_intro, binaryVector]",
+		errCode:     1801,
+	})
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path:        SearchAction,
+		requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "annsField": "book_intro", "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"]}`),
+	})
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path:        SearchAction,
+		requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "annsField": "binaryVector", "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"]}`),
+		errMsg:      "can only accept json format request, error: json: cannot unmarshal number 0.1 into Go value of type uint8: invalid parameter[expected=BinaryVector][actual=[[0.1, 0.2]]]",
+		errCode:     1801,
+	})
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path:        SearchAction,
+		requestBody: []byte(`{"collectionName": "book", "data": ["AQ=="], "annsField": "binaryVector", "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"]}`),
+	})
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path: AdvancedSearchAction,
+		requestBody: []byte(`{"collectionName": "hello_milvus", "search": [` +
+			`{"data": [[0.1, 0.2]], "annsField": "book_intro", "metricType": "L2", "limit": 3},` +
+			`{"data": ["AQ=="], "annsField": "binaryVector", "metricType": "L2", "limit": 3},` +
+			`{"data": ["AQIDBA=="], "annsField": "float16Vector", "metricType": "L2", "limit": 3},` +
+			`{"data": ["AQIDBA=="], "annsField": "bfloat16Vector", "metricType": "L2", "limit": 3}` +
+			`], "rerank": {"strategy": "weighted", "params": {"weights":  [0.9, 0.8]}}}`),
+	})
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path: AdvancedSearchAction,
+		requestBody: []byte(`{"collectionName": "hello_milvus", "search": [` +
+			`{"data": [[0.1, 0.2, 0.3]], "annsField": "book_intro", "metricType": "L2", "limit": 3},` +
+			`{"data": ["AQ=="], "annsField": "binaryVector", "metricType": "L2", "limit": 3},` +
+			`{"data": ["AQIDBA=="], "annsField": "float16Vector", "metricType": "L2", "limit": 3},` +
+			`{"data": ["AQIDBA=="], "annsField": "bfloat16Vector", "metricType": "L2", "limit": 3}` +
+			`], "rerank": {"strategy": "weighted", "params": {"weights":  [0.9, 0.8]}}}`),
+		errMsg:  "can only accept json format request, error: dimension: 2, but length of []float: 3: invalid parameter[expected=FloatVector][actual=[0.1, 0.2, 0.3]]",
+		errCode: 1801,
+	})
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path: AdvancedSearchAction,
+		requestBody: []byte(`{"collectionName": "hello_milvus", "search": [` +
+			`{"data": [[0.1, 0.2]], "annsField": "book_intro", "metricType": "L2", "limit": 3},` +
+			`{"data": ["AQID"], "annsField": "binaryVector", "metricType": "L2", "limit": 3},` +
+			`{"data": ["AQIDBA=="], "annsField": "float16Vector", "metricType": "L2", "limit": 3},` +
+			`{"data": ["AQIDBA=="], "annsField": "bfloat16Vector", "metricType": "L2", "limit": 3}` +
+			`], "rerank": {"strategy": "weighted", "params": {"weights":  [0.9, 0.8]}}}`),
+		errMsg:  "can only accept json format request, error: dimension: 8, bytesLen: 1, but length of []byte: 3: invalid parameter[expected=BinaryVector][actual=\x01\x02\x03]",
+		errCode: 1801,
+	})
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path: AdvancedSearchAction,
+		requestBody: []byte(`{"collectionName": "hello_milvus", "search": [` +
+			`{"data": [[0.1, 0.2]], "annsField": "book_intro", "metricType": "L2", "limit": 3},` +
+			`{"data": ["AQ=="], "annsField": "binaryVector", "metricType": "L2", "limit": 3},` +
+			`{"data": ["AQID"], "annsField": "float16Vector", "metricType": "L2", "limit": 3},` +
+			`{"data": ["AQIDBA=="], "annsField": "bfloat16Vector", "metricType": "L2", "limit": 3}` +
+			`], "rerank": {"strategy": "weighted", "params": {"weights":  [0.9, 0.8]}}}`),
+		errMsg:  "can only accept json format request, error: dimension: 2, bytesLen: 4, but length of []byte: 3: invalid parameter[expected=Float16Vector][actual=\x01\x02\x03]",
+		errCode: 1801,
+	})
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path: AdvancedSearchAction,
+		requestBody: []byte(`{"collectionName": "hello_milvus", "search": [` +
+			`{"data": [[0.1, 0.2]], "annsField": "book_intro", "metricType": "L2", "limit": 3},` +
+			`{"data": ["AQ=="], "annsField": "binaryVector", "metricType": "L2", "limit": 3},` +
+			`{"data": ["AQIDBA=="], "annsField": "float16Vector", "metricType": "L2", "limit": 3},` +
+			`{"data": ["AQID"], "annsField": "bfloat16Vector", "metricType": "L2", "limit": 3}` +
+			`], "rerank": {"strategy": "weighted", "params": {"weights":  [0.9, 0.8]}}}`),
+		errMsg:  "can only accept json format request, error: dimension: 2, bytesLen: 4, but length of []byte: 3: invalid parameter[expected=BFloat16Vector][actual=\x01\x02\x03]",
+		errCode: 1801,
+	})
+
+	for _, testcase := range queryTestCases {
+		t.Run("search", func(t *testing.T) {
 			bodyReader := bytes.NewReader(testcase.requestBody)
 			req := httptest.NewRequest(http.MethodPost, versionalV2(EntityCategory, testcase.path), bodyReader)
 			w := httptest.NewRecorder()
