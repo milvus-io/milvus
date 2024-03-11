@@ -112,13 +112,6 @@ func (node *QueryNode) GetStatistics(ctx context.Context, req *querypb.GetStatis
 	}
 	defer node.lifetime.Done()
 
-	err := merr.CheckTargetID(node.GetNodeID(), req.GetReq().GetBase())
-	if err != nil {
-		log.Warn("target ID check failed", zap.Error(err))
-		return &internalpb.GetStatisticsResponse{
-			Status: merr.Status(err),
-		}, nil
-	}
 	failRet := &internalpb.GetStatisticsResponse{
 		Status: merr.Success(),
 	}
@@ -212,11 +205,6 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		return merr.Status(err), nil
 	}
 	defer node.lifetime.Done()
-
-	// check target matches
-	if err := merr.CheckTargetID(node.GetNodeID(), req.GetBase()); err != nil {
-		return merr.Status(err), nil
-	}
 
 	// check index
 	if len(req.GetIndexInfoList()) == 0 {
@@ -370,11 +358,6 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 	}
 	defer node.lifetime.Done()
 
-	// check target matches
-	if err := merr.CheckTargetID(node.GetNodeID(), req.GetBase()); err != nil {
-		return merr.Status(err), nil
-	}
-
 	node.unsubscribingChannels.Insert(req.GetChannelName())
 	defer node.unsubscribingChannels.Remove(req.GetChannelName())
 	delegator, ok := node.delegators.GetAndRemove(req.GetChannelName())
@@ -436,11 +419,6 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 		return merr.Status(err), nil
 	}
 	defer node.lifetime.Done()
-
-	// check target matches
-	if err := merr.CheckTargetID(node.GetNodeID(), req.GetBase()); err != nil {
-		return merr.Status(err), nil
-	}
 
 	// check index
 	if len(req.GetIndexInfoList()) == 0 {
@@ -554,11 +532,6 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, req *querypb.Release
 		return merr.Status(err), nil
 	}
 	defer node.lifetime.Done()
-
-	// check target matches
-	if err := merr.CheckTargetID(node.GetNodeID(), req.GetBase()); err != nil {
-		return merr.Status(err), nil
-	}
 
 	if req.GetNeedTransfer() {
 		delegator, ok := node.delegators.Get(req.GetShard())
@@ -762,14 +735,6 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 	}
 	defer node.lifetime.Done()
 
-	err := merr.CheckTargetID(node.GetNodeID(), req.GetReq().GetBase())
-	if err != nil {
-		log.Warn("target ID check failed", zap.Error(err))
-		return &internalpb.SearchResults{
-			Status: merr.Status(err),
-		}, nil
-	}
-
 	resp := &internalpb.SearchResults{
 		Status: merr.Success(),
 	}
@@ -854,17 +819,6 @@ func (node *QueryNode) HybridSearch(ctx context.Context, req *querypb.HybridSear
 		}, nil
 	}
 	defer node.lifetime.Done()
-
-	err := merr.CheckTargetID(node.GetNodeID(), req.GetReq().GetBase())
-	if err != nil {
-		log.Warn("target ID check failed", zap.Error(err))
-		return &querypb.HybridSearchResult{
-			Base: &commonpb.MsgBase{
-				SourceID: node.GetNodeID(),
-			},
-			Status: merr.Status(err),
-		}, nil
-	}
 
 	resp := &querypb.HybridSearchResult{
 		Base: &commonpb.MsgBase{
@@ -1043,14 +997,6 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 	}
 	defer node.lifetime.Done()
 
-	err := merr.CheckTargetID(node.GetNodeID(), req.GetReq().GetBase())
-	if err != nil {
-		log.Warn("target ID check failed", zap.Error(err))
-		return &internalpb.RetrieveResults{
-			Status: merr.Status(err),
-		}, nil
-	}
-
 	toMergeResults := make([]*internalpb.RetrieveResults, len(req.GetDmlChannels()))
 	runningGp, runningCtx := errgroup.WithContext(ctx)
 
@@ -1127,12 +1073,6 @@ func (node *QueryNode) QueryStream(req *querypb.QueryRequest, srv querypb.QueryN
 		return nil
 	}
 	defer node.lifetime.Done()
-
-	err := merr.CheckTargetID(node.GetNodeID(), req.GetReq().GetBase())
-	if err != nil {
-		log.Warn("target ID check failed", zap.Error(err))
-		return err
-	}
 
 	runningGp, runningCtx := errgroup.WithContext(ctx)
 
@@ -1332,13 +1272,6 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 	}
 	defer node.lifetime.Done()
 
-	// check target matches
-	if err := merr.CheckTargetID(node.GetNodeID(), req.GetBase()); err != nil {
-		return &querypb.GetDataDistributionResponse{
-			Status: merr.Status(err),
-		}, nil
-	}
-
 	sealedSegments := node.manager.Segment.GetBy(segments.WithType(commonpb.SegmentState_Sealed))
 	segmentVersionInfos := make([]*querypb.SegmentVersionInfo, 0, len(sealedSegments))
 	for _, s := range sealedSegments {
@@ -1420,11 +1353,6 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 		return merr.Status(err), nil
 	}
 	defer node.lifetime.Done()
-
-	// check target matches
-	if err := merr.CheckTargetID(node.GetNodeID(), req.GetBase()); err != nil {
-		return merr.Status(err), nil
-	}
 
 	// get shard delegator
 	shardDelegator, ok := node.delegators.Get(req.GetChannel())
@@ -1520,11 +1448,6 @@ func (node *QueryNode) Delete(ctx context.Context, req *querypb.DeleteRequest) (
 		return merr.Status(err), nil
 	}
 	defer node.lifetime.Done()
-
-	// check target matches
-	if err := merr.CheckTargetID(node.GetNodeID(), req.GetBase()); err != nil {
-		return merr.Status(err), nil
-	}
 
 	log.Info("QueryNode received worker delete request")
 	log.Debug("Worker delete detail", zap.Stringer("info", &deleteRequestStringer{DeleteRequest: req}))
