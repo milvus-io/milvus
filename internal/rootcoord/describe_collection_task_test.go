@@ -101,10 +101,15 @@ func Test_describeCollectionTask_Execute(t *testing.T) {
 		).Return(&model.Collection{
 			CollectionID: 1,
 			Name:         "test coll",
+			DBID:         1,
 		}, nil)
 		meta.On("ListAliasesByID",
 			mock.Anything,
 		).Return([]string{alias1, alias2})
+		meta.EXPECT().GetDatabaseByID(mock.Anything, mock.Anything, mock.Anything).Return(&model.Database{
+			ID:   1,
+			Name: "test db",
+		}, nil)
 
 		core := newTestCore(withMeta(meta))
 		task := &describeCollectionTask{
@@ -120,6 +125,7 @@ func Test_describeCollectionTask_Execute(t *testing.T) {
 		err := task.Execute(context.Background())
 		assert.NoError(t, err)
 		assert.Equal(t, task.Rsp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
+		assert.Equal(t, "test db", task.Rsp.GetDbName())
 		assert.ElementsMatch(t, []string{alias1, alias2}, task.Rsp.GetAliases())
 	})
 }
