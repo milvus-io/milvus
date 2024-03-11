@@ -36,6 +36,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 )
 
+const initialTargetVersion = int64(0)
+
 type SegmentChecker struct {
 	meta      *meta.Meta
 	dist      *meta.DistributionManager
@@ -325,7 +327,11 @@ func (c *SegmentChecker) filterSegmentInUse(replica *meta.Replica, segments []*m
 		view := c.dist.LeaderViewManager.GetLeaderShardView(leaderID, s.GetInsertChannel())
 		currentTargetVersion := c.targetMgr.GetCollectionTargetVersion(s.CollectionID, meta.CurrentTarget)
 		partition := c.meta.CollectionManager.GetPartition(s.PartitionID)
-		if partition != nil && view.TargetVersion != currentTargetVersion {
+
+		// if delegator has valid target version, and before it update to latest readable version, skip release it's sealed segment
+		// Notice: if syncTargetVersion stuck, segment on delegator won't be released
+		readableVersionNotUpdate := view.TargetVersion != initialTargetVersion && view.TargetVersion < currentTargetVersion
+		if partition != nil && readableVersionNotUpdate {
 			// leader view version hasn't been updated, segment maybe still in use
 			continue
 		}
