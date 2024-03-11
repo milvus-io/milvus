@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type insertBufferNode struct {
@@ -382,25 +383,19 @@ func (ibNode *insertBufferNode) FillInSyncTasks(fgMsg *flowGraphMsg, seg2Upload 
 	// every time we make sure that the N biggest delDataBuf can be flushed
 	// when memsize usage reaches a certain level
 	// the aim for taking all these actions is to guarantee that the memory consumed by delBuf will not exceed a limit
-	segmentsToFlush := ibNode.delBufferManager.ShouldFlushSegments()
-	for _, segID := range segmentsToFlush {
-		syncTasks[segID] = &syncTask{
-			buffer:    nil, // nil is valid
-			segmentID: segID,
-		}
-	}
+	segmentsToFlush := typeutil.NewUniqueSet(ibNode.delBufferManager.ShouldFlushSegments()...)
+	segmentsToFlush.Insert(ibNode.channel.listSegmentIDsToSync(fgMsg.endPositions[0].Timestamp)...)
 
-	syncSegmentIDs := ibNode.channel.listSegmentIDsToSync(fgMsg.endPositions[0].Timestamp)
-	for _, segID := range syncSegmentIDs {
+	for segID := range segmentsToFlush {
 		buf := ibNode.GetBuffer(segID)
 		syncTasks[segID] = &syncTask{
 			buffer:    buf, // nil is valid
 			segmentID: segID,
 		}
 	}
-	if len(syncSegmentIDs) > 0 {
+	if len(segmentsToFlush) > 0 {
 		log.Info("sync segments", zap.String("vChannel", ibNode.channelName),
-			zap.Int64s("segIDs", syncSegmentIDs)) // TODO: maybe too many prints here
+			zap.Int64s("segIDs", segmentsToFlush.Collect())) // TODO: maybe too many prints here
 	}
 
 	mergeSyncTask := func(segmentIDs []UniqueID, syncTasks map[UniqueID]*syncTask, setupTask func(task *syncTask)) {
@@ -430,7 +425,6 @@ func (ibNode *insertBufferNode) FillInSyncTasks(fgMsg *flowGraphMsg, seg2Upload 
 	mergeSyncTask(flushedSegments, syncTasks, func(task *syncTask) {
 		task.flushed = true
 	})
-	mergeSyncTask(syncSegmentIDs, syncTasks, func(task *syncTask) {})
 
 	// process drop partition
 	for _, partitionDrop := range fgMsg.dropPartitions {

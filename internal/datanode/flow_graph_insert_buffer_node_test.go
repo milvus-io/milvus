@@ -935,6 +935,32 @@ func (s *InsertBufferNodeSuite) TestFillInSyncTasks() {
 		}
 	})
 
+	s.Run("manual sync by delete buffer bytes limit", func() {
+		paramtable.Init()
+		paramtable.Get().Save(paramtable.Get().DataNodeCfg.FlushDeleteBufferBytes.Key, "1")
+		flushCh := make(chan flushMsg, 100)
+		node := &insertBufferNode{
+			channelName:      s.channel.channelName,
+			channel:          s.channel,
+			delBufferManager: s.delBufManager,
+			flushChan:        flushCh,
+		}
+
+		s.channel.setCurInsertBuffer(1, &BufferData{size: 1, limit: 1000})
+		s.delBufManager.StoreNewDeletes(1, []primaryKey{&storage.Int64PrimaryKey{Value: 1}}, []Timestamp{100}, TimeRange{timestampMin: 100, timestampMax: 100}, &msgpb.MsgPosition{}, &msgpb.MsgPosition{})
+
+		syncTasks := node.FillInSyncTasks(&flowGraphMsg{endPositions: []*msgpb.MsgPosition{{Timestamp: 100}}}, nil)
+		s.Assert().NotEmpty(syncTasks)
+		s.Assert().Equal(1, len(syncTasks))
+
+		for _, task := range syncTasks {
+			s.Assert().NotNil(task.buffer)
+			s.Assert().False(task.flushed)
+			s.Assert().False(task.auto)
+			s.Assert().False(task.dropped)
+		}
+	})
+
 	s.Run("test close", func() {
 		fgMsg := &flowGraphMsg{BaseMsg: flowgraph.NewBaseMsg(true)}
 
