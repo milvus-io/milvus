@@ -81,7 +81,7 @@ func (s *DelegatorSuite) SetupTest() {
 	s.vchannelName = "rootcoord-dml_1000_v0"
 	s.version = 2000
 	s.workerManager = &cluster.MockManager{}
-	s.manager = segments.NewManager(nil)
+	s.manager = segments.NewManager()
 	s.tsafeManager = tsafe.NewTSafeReplica()
 	s.loader = &segments.MockLoader{}
 	s.loader.EXPECT().

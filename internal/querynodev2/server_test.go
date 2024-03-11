@@ -216,7 +216,7 @@ func (suite *QueryNodeSuite) TestInit_QueryHook() {
 func (suite *QueryNodeSuite) TestStop() {
 	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.GracefulStopTimeout.Key, "2")
 
-	suite.node.manager = segments.NewManager(nil)
+	suite.node.manager = segments.NewManager()
 
 	schema := segments.GenTestCollectionSchema("test_stop", schemapb.DataType_Int64)
 	collection := segments.NewCollection(1, schema, nil, querypb.LoadType_LoadCollection)
