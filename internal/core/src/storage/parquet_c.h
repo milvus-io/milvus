@@ -31,6 +31,8 @@ typedef struct CBuffer {
 } CBuffer;
 
 //============= payload writer ======================
+// TODO(SPARSE): CPayloadWriter is no longer used as we switch to the payload
+// writer in golang. Thus not implementing sparse float vector support here.
 typedef void* CPayloadWriter;
 CPayloadWriter
 NewPayloadWriter(int columnType);

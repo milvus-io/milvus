@@ -37,6 +37,7 @@
 #include "common/FieldData.h"
 #include "common/Types.h"
 #include "log/Log.h"
+#include "mmap/Utils.h"
 #include "pb/schema.pb.h"
 #include "mmap/Types.h"
 #include "query/ScalarIndex.h"
@@ -252,7 +253,7 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info) {
         field_data_info.channel->set_capacity(parallel_degree * 2);
         auto& pool =
             ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
-        auto load_future = pool.Submit(
+        pool.Submit(
             LoadFieldDatasFromRemote, insert_files, field_data_info.channel);
 
         LOG_INFO("segment {} submits load field {} task to thread pool",
@@ -272,6 +273,7 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info) {
 
 void
 SegmentSealedImpl::LoadFieldDataV2(const LoadFieldDataInfo& load_info) {
+    // TODO(SPARSE): support storage v2
     // NOTE: lock only when data is ready to avoid starvation
     // only one field for now, parallel load field data in golang
     size_t num_rows = storage::GetNumRowsForLoadInfo(load_info);
@@ -435,6 +437,16 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                     column = std::move(var_column);
                     break;
                 }
+                case milvus::DataType::VECTOR_SPARSE_FLOAT: {
+                    auto col = std::make_shared<SparseFloatColumn>(field_meta);
+                    FieldDataPtr field_data;
+                    while (data.channel->pop(field_data)) {
+                        stats_.mem_size += field_data->Size();
+                        col->AppendBatch(field_data);
+                    }
+                    column = std::move(col);
+                    break;
+                }
                 default: {
                     PanicInfo(DataTypeInvalid,
                               fmt::format("unsupported data type", data_type));
@@ -566,6 +578,7 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
                 column = std::move(arr_column);
                 break;
             }
+            // TODO(SPARSE) support mmap
             default: {
                 PanicInfo(DataTypeInvalid,
                           fmt::format("unsupported data type {}", data_type));
@@ -1514,14 +1527,17 @@ SegmentSealedImpl::generate_binlog_index(const FieldId field_id) {
     auto& field_index_meta = col_index_meta_->GetFieldIndexMeta(field_id);
     auto& index_params = field_index_meta.GetIndexParams();
 
+    bool is_sparse =
+        field_meta.get_data_type() == DataType::VECTOR_SPARSE_FLOAT;
+
     auto enable_binlog_index = [&]() {
         // checkout config
         if (!segcore_config_.get_enable_interim_segment_index()) {
             return false;
         }
         // check data type
-        if (!field_meta.is_vector() ||
-            field_meta.get_data_type() != DataType::VECTOR_FLOAT) {
+        if (field_meta.get_data_type() != DataType::VECTOR_FLOAT &&
+            !is_sparse) {
             return false;
         }
         // check index type
@@ -1546,7 +1562,7 @@ SegmentSealedImpl::generate_binlog_index(const FieldId field_id) {
             std::shared_lock lck(mutex_);
             row_count = num_rows_.value();
         }
-        auto dim = field_meta.get_dim();
+
         // generate index params
         auto field_binlog_config = std::unique_ptr<VecIndexConfig>(
             new VecIndexConfig(row_count,
@@ -1556,19 +1572,24 @@ SegmentSealedImpl::generate_binlog_index(const FieldId field_id) {
         if (row_count < field_binlog_config->GetBuildThreshold()) {
             return false;
         }
-        auto build_config = field_binlog_config->GetBuildBaseParams();
-        build_config[knowhere::meta::DIM] = std::to_string(dim);
-        build_config[knowhere::meta::NUM_BUILD_THREAD] = std::to_string(1);
-        auto index_metric = field_binlog_config->GetMetricType();
-
         std::shared_ptr<ColumnBase> vec_data{};
         {
             std::shared_lock lck(mutex_);
             vec_data = fields_.at(field_id);
         }
+        auto dim = is_sparse
+                       ? dynamic_cast<SparseFloatColumn*>(vec_data.get())->Dim()
+                       : field_meta.get_dim();
+
+        auto build_config = field_binlog_config->GetBuildBaseParams();
+        build_config[knowhere::meta::DIM] = std::to_string(dim);
+        build_config[knowhere::meta::NUM_BUILD_THREAD] = std::to_string(1);
+        auto index_metric = field_binlog_config->GetMetricType();
+
         auto dataset =
             knowhere::GenDataSet(row_count, dim, (void*)vec_data->Data());
         dataset->SetIsOwner(false);
+        dataset->SetIsSparse(is_sparse);
 
         index::IndexBasePtr vec_index =
             std::make_unique<index::VectorMemIndex<float>>(

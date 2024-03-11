@@ -32,6 +32,7 @@
 #include "common/VectorTrait.h"
 #include "common/EasyAssert.h"
 #include "common/Array.h"
+#include "knowhere/dataset.h"
 
 namespace milvus {
 
@@ -43,24 +44,33 @@ class FieldDataBase {
     }
     virtual ~FieldDataBase() = default;
 
+    // For all FieldDataImpl subclasses, source is a pointer to element_count of
+    // Type
     virtual void
     FillFieldData(const void* source, ssize_t element_count) = 0;
 
     virtual void
     FillFieldData(const std::shared_ptr<arrow::Array> array) = 0;
 
+    // For all FieldDataImpl subclasses, this method returns Type* that points
+    // at all rows in this field data.
     virtual void*
     Data() = 0;
 
+    // For all FieldDataImpl subclasses, this method returns a Type* that points
+    // at the offset-th row of this field data.
     virtual const void*
     RawValue(ssize_t offset) const = 0;
 
+    // Returns the serialized bytes size of all rows.
     virtual int64_t
     Size() const = 0;
 
+    // Returns the serialized bytes size of the index-th row.
     virtual int64_t
     Size(ssize_t index) const = 0;
 
+    // Number of filled rows
     virtual size_t
     Length() const = 0;
 
@@ -71,9 +81,11 @@ class FieldDataBase {
     Reserve(size_t cap) = 0;
 
  public:
+    // row capacity
     virtual int64_t
     get_num_rows() const = 0;
 
+    // each row is represented as how many Type elements
     virtual int64_t
     get_dim() const = 0;
 
@@ -86,11 +98,9 @@ class FieldDataBase {
     const DataType data_type_;
 };
 
-template <typename Type, bool is_scalar = false>
+template <typename Type, bool is_type_entire_row = false>
 class FieldDataImpl : public FieldDataBase {
  public:
-    // constants
-    using Chunk = FixedVector<Type>;
     FieldDataImpl(FieldDataImpl&&) = delete;
     FieldDataImpl(const FieldDataImpl&) = delete;
 
@@ -105,13 +115,16 @@ class FieldDataImpl : public FieldDataBase {
                            int64_t buffered_num_rows = 0)
         : FieldDataBase(data_type),
           num_rows_(buffered_num_rows),
-          dim_(is_scalar ? 1 : dim) {
+          dim_(is_type_entire_row ? 1 : dim) {
         field_data_.resize(num_rows_ * dim_);
     }
 
-    explicit FieldDataImpl(size_t dim, DataType type, Chunk&& field_data)
-        : FieldDataBase(type), dim_(is_scalar ? 1 : dim) {
+    explicit FieldDataImpl(size_t dim,
+                           DataType type,
+                           FixedVector<Type>&& field_data)
+        : FieldDataBase(type), dim_(is_type_entire_row ? 1 : dim) {
         field_data_ = std::move(field_data);
+        Assert(field_data.size() % dim == 0);
         num_rows_ = field_data.size() / dim;
     }
 
@@ -122,10 +135,18 @@ class FieldDataImpl : public FieldDataBase {
     FillFieldData(const std::shared_ptr<arrow::Array> array) override;
 
     virtual void
-    FillFieldData(const std::shared_ptr<arrow::StringArray>& array){};
+    FillFieldData(const std::shared_ptr<arrow::StringArray>& array) {
+        PanicInfo(NotImplemented,
+                  "FillFieldData(const std::shared_ptr<arrow::StringArray>& "
+                  "array) not implemented by default");
+    }
 
     virtual void
-    FillFieldData(const std::shared_ptr<arrow::BinaryArray>& array){};
+    FillFieldData(const std::shared_ptr<arrow::BinaryArray>& array) {
+        PanicInfo(NotImplemented,
+                  "FillFieldData(const std::shared_ptr<arrow::BinaryArray>& "
+                  "array) not implemented by default");
+    }
 
     std::string
     GetName() const {
@@ -209,9 +230,11 @@ class FieldDataImpl : public FieldDataBase {
     }
 
  protected:
-    Chunk field_data_;
+    FixedVector<Type> field_data_;
+    // number of elements field_data_ can hold
     int64_t num_rows_;
     mutable std::shared_mutex num_rows_mutex_;
+    // number of actual elements in field_data_
     size_t length_{};
     mutable std::shared_mutex tell_mutex_;
 
@@ -320,6 +343,89 @@ class FieldDataJsonImpl : public FieldDataImpl<Json, true> {
         }
         length_ += n;
     }
+};
+
+class FieldDataSparseVectorImpl
+    : public FieldDataImpl<knowhere::sparse::SparseRow<float>, true> {
+ public:
+    explicit FieldDataSparseVectorImpl(DataType data_type,
+                                       int64_t total_num_rows = 0)
+        : FieldDataImpl<knowhere::sparse::SparseRow<float>, true>(
+              /*dim=*/1, data_type, total_num_rows),
+          vec_dim_(0) {
+        AssertInfo(data_type == DataType::VECTOR_SPARSE_FLOAT,
+                   "invalid data type for sparse vector");
+    }
+
+    int64_t
+    Size() const override {
+        int64_t data_size = 0;
+        for (size_t i = 0; i < length(); ++i) {
+            data_size += field_data_[i].data_byte_size();
+        }
+        return data_size;
+    }
+
+    int64_t
+    Size(ssize_t offset) const override {
+        AssertInfo(offset < get_num_rows(),
+                   "field data subscript out of range");
+        AssertInfo(offset < length(),
+                   "subscript position don't has valid value");
+        return field_data_[offset].data_byte_size();
+    }
+
+    // source is a pointer to element_count of
+    // knowhere::sparse::SparseRow<float>
+    void
+    FillFieldData(const void* source, ssize_t element_count) override {
+        if (element_count == 0) {
+            return;
+        }
+
+        std::lock_guard lck(tell_mutex_);
+        if (length_ + element_count > get_num_rows()) {
+            resize_field_data(length_ + element_count);
+        }
+        auto ptr =
+            static_cast<const knowhere::sparse::SparseRow<float>*>(source);
+        for (int64_t i = 0; i < element_count; ++i) {
+            auto& row = ptr[i];
+            vec_dim_ = std::max(vec_dim_, row.dim());
+        }
+        std::copy_n(ptr, element_count, field_data_.data() + length_);
+        length_ += element_count;
+    }
+
+    // each binary in array is a knowhere::sparse::SparseRow<float>
+    void
+    FillFieldData(const std::shared_ptr<arrow::BinaryArray>& array) override {
+        auto n = array->length();
+        if (n == 0) {
+            return;
+        }
+
+        std::lock_guard lck(tell_mutex_);
+        if (length_ + n > get_num_rows()) {
+            resize_field_data(length_ + n);
+        }
+
+        for (int64_t i = 0; i < array->length(); ++i) {
+            auto view = array->GetView(i);
+            auto& row = field_data_[length_ + i];
+            row = CopyAndWrapSparseRow(view.data(), view.size());
+            vec_dim_ = std::max(vec_dim_, row.dim());
+        }
+        length_ += n;
+    }
+
+    int64_t
+    Dim() const {
+        return vec_dim_;
+    }
+
+ private:
+    int64_t vec_dim_;
 };
 
 class FieldDataArrayImpl : public FieldDataImpl<Array, true> {

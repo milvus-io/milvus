@@ -351,6 +351,32 @@ BuildBinaryVecIndex(CIndex index, int64_t data_size, const uint8_t* vectors) {
     return status;
 }
 
+CStatus
+BuildSparseFloatVecIndex(CIndex index,
+                         int64_t row_num,
+                         int64_t dim,
+                         const uint8_t* vectors) {
+    auto status = CStatus();
+    try {
+        AssertInfo(
+            index,
+            "failed to build sparse float vector index, passed index was null");
+        auto real_index =
+            reinterpret_cast<milvus::indexbuilder::IndexCreatorBase*>(index);
+        auto cIndex =
+            dynamic_cast<milvus::indexbuilder::VecIndexCreator*>(real_index);
+        auto ds = knowhere::GenDataSet(row_num, dim, vectors);
+        ds->SetIsSparse(true);
+        cIndex->Build(ds);
+        status.error_code = Success;
+        status.error_msg = "";
+    } catch (std::exception& e) {
+        status.error_code = UnexpectedError;
+        status.error_msg = strdup(e.what());
+    }
+    return status;
+}
+
 // field_data:
 //  1, serialized proto::schema::BoolArray, if type is bool;
 //  2, serialized proto::schema::StringArray, if type is string;

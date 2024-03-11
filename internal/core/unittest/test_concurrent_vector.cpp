@@ -34,8 +34,7 @@ TEST(ConcurrentVector, TestSingle) {
         for (auto& x : vec) {
             x = data++;
         }
-        c_vec.grow_to_at_least(total_count + insert_size);
-        c_vec.set_data(total_count, vec.data(), insert_size);
+        c_vec.set_data_raw(total_count, vec.data(), insert_size);
         total_count += insert_size;
     }
     ASSERT_EQ(c_vec.num_chunk(), (total_count + 31) / 32);
@@ -66,8 +65,7 @@ TEST(ConcurrentVector, TestMultithreads) {
                 x = data++ * threads + thread_id;
             }
             auto offset = ack_counter.fetch_add(insert_size);
-            c_vec.grow_to_at_least(offset + insert_size);
-            c_vec.set_data(offset, vec.data(), insert_size);
+            c_vec.set_data_raw(offset, vec.data(), insert_size);
             total_count += insert_size;
         }
         assert(data == total_count * dim);

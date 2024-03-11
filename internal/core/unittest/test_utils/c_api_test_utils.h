@@ -37,31 +37,6 @@ using namespace milvus;
 using namespace milvus::segcore;
 
 namespace {
-const char*
-get_default_schema_config() {
-    static std::string conf = R"(name: "default-collection"
-                                fields: <
-                                  fieldID: 100
-                                  name: "fakevec"
-                                  data_type: FloatVector
-                                  type_params: <
-                                    key: "dim"
-                                    value: "16"
-                                  >
-                                  index_params: <
-                                    key: "metric_type"
-                                    value: "L2"
-                                  >
-                                >
-                                fields: <
-                                  fieldID: 101
-                                  name: "age"
-                                  data_type: Int64
-                                  is_primary_key: true
-                                >)";
-    static std::string fake_conf = "";
-    return conf.c_str();
-}
 
 std::string
 generate_max_float_query_data(int all_nq, int max_float_nq) {

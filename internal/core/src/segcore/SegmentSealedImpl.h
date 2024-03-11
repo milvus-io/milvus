@@ -24,7 +24,6 @@
 
 #include "ConcurrentVector.h"
 #include "DeletedRecord.h"
-#include "ScalarIndex.h"
 #include "SealedIndexingRecord.h"
 #include "SegmentSealed.h"
 #include "TimestampIndex.h"

@@ -60,9 +60,9 @@ class Span;
 
 // TODO: refine Span to support T=FloatVector
 template <typename T>
-class Span<
-    T,
-    typename std::enable_if_t<IsScalar<T> || std::is_same_v<T, PkType>>> {
+class Span<T,
+           typename std::enable_if_t<IsSparse<T> || IsScalar<T> ||
+                                     std::is_same_v<T, PkType>>> {
  public:
     using embedded_type = T;
     explicit Span(const T* data, int64_t row_count)

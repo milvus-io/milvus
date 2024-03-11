@@ -58,7 +58,7 @@ class ChunkManager {
     Read(const std::string& filepath, void* buf, uint64_t len) = 0;
 
     /**
-     * @brief Write buffer to file with offset
+     * @brief Write buffer to file without offset
      * @param filepath
      * @param buf
      * @param len

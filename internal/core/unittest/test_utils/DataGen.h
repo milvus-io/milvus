@@ -16,7 +16,9 @@
 #include <memory>
 #include <random>
 #include <string>
+#include <cmath>
 #include <google/protobuf/text_format.h>
+#include <gtest/gtest.h>
 
 #include "Constants.h"
 #include "common/EasyAssert.h"
@@ -42,7 +44,7 @@ namespace milvus::segcore {
 struct GeneratedData {
     std::vector<idx_t> row_ids_;
     std::vector<Timestamp> timestamps_;
-    InsertData* raw_;
+    InsertRecordProto* raw_;
     std::vector<FieldId> field_ids;
     SchemaPtr schema_;
 
@@ -92,7 +94,8 @@ struct GeneratedData {
             }
 
             auto& field_meta = schema_->operator[](field_id);
-            if (field_meta.is_vector()) {
+            if (field_meta.is_vector() &&
+                field_meta.get_data_type() != DataType::VECTOR_SPARSE_FLOAT) {
                 if (field_meta.get_data_type() == DataType::VECTOR_FLOAT) {
                     int len = raw_->num_rows() * field_meta.get_dim();
                     ret.resize(len);
@@ -111,7 +114,6 @@ struct GeneratedData {
                     std::copy_n(src_data, len, ret.data());
                 } else if (field_meta.get_data_type() ==
                            DataType::VECTOR_FLOAT16) {
-                    // int len = raw_->num_rows() * field_meta.get_dim() * sizeof(float16);
                     int len = raw_->num_rows() * field_meta.get_dim();
                     ret.resize(len);
                     auto src_data = reinterpret_cast<const T*>(
@@ -119,7 +121,6 @@ struct GeneratedData {
                     std::copy_n(src_data, len, ret.data());
                 } else if (field_meta.get_data_type() ==
                            DataType::VECTOR_BFLOAT16) {
-                    // int len = raw_->num_rows() * field_meta.get_dim() * sizeof(bfloat16);
                     int len = raw_->num_rows() * field_meta.get_dim();
                     ret.resize(len);
                     auto src_data = reinterpret_cast<const T*>(
@@ -131,7 +132,13 @@ struct GeneratedData {
 
                 return std::move(ret);
             }
-            if constexpr (std::is_same_v<T, ScalarArray>) {
+            if constexpr (std::is_same_v<T,
+                                         knowhere::sparse::SparseRow<float>>) {
+                auto sparse_float_array =
+                    target_field_data.vectors().sparse_float_vector();
+                auto rows = SparseBytesToRows(sparse_float_array.contents());
+                std::copy_n(rows.get(), raw_->num_rows(), ret.data());
+            } else if constexpr (std::is_same_v<T, ScalarArray>) {
                 auto ret_data = reinterpret_cast<ScalarArray*>(ret.data());
                 auto src_data = target_field_data.scalars().array_data().data();
                 std::copy(src_data.begin(), src_data.end(), ret_data);
@@ -238,19 +245,61 @@ struct GeneratedData {
                         int array_len);
 };
 
-inline GeneratedData
-DataGen(SchemaPtr schema,
-        int64_t N,
-        uint64_t seed = 42,
-        uint64_t ts_offset = 0,
-        int repeat_count = 1,
-        int array_len = 10) {
+inline std::unique_ptr<knowhere::sparse::SparseRow<float>[]>
+GenerateRandomSparseFloatVector(size_t rows,
+                                size_t cols,
+                                float density,
+                                int seed = 42) {
+    int32_t num_elements = static_cast<int32_t>(rows * cols * density);
+
+    std::mt19937 rng(seed);
+    auto real_distrib = std::uniform_real_distribution<float>(0, 1);
+    auto row_distrib = std::uniform_int_distribution<int32_t>(0, rows - 1);
+    auto col_distrib = std::uniform_int_distribution<int32_t>(0, cols - 1);
+
+    std::vector<std::map<int32_t, float>> data(rows);
+
+    for (int32_t i = 0; i < num_elements; ++i) {
+        auto row = row_distrib(rng);
+        while (data[row].size() == (size_t)cols) {
+            row = row_distrib(rng);
+        }
+        auto col = col_distrib(rng);
+        while (data[row].find(col) != data[row].end()) {
+            col = col_distrib(rng);
+        }
+        auto val = real_distrib(rng);
+        data[row][col] = val;
+    }
+
+    auto tensor = std::make_unique<knowhere::sparse::SparseRow<float>[]>(rows);
+
+    for (int32_t i = 0; i < rows; ++i) {
+        if (data[i].size() == 0) {
+            continue;
+        }
+        knowhere::sparse::SparseRow<float> row(data[i].size());
+        size_t j = 0;
+        for (auto& [idx, val] : data[i]) {
+            row.set_at(j++, idx, val);
+        }
+        tensor[i] = std::move(row);
+    }
+    return tensor;
+}
+
+inline GeneratedData DataGen(SchemaPtr schema,
+                             int64_t N,
+                             uint64_t seed = 42,
+                             uint64_t ts_offset = 0,
+                             int repeat_count = 1,
+                             int array_len = 10) {
     using std::vector;
     std::default_random_engine er(seed);
     std::normal_distribution<> distr(0, 1);
     int offset = 0;
 
-    auto insert_data = std::make_unique<InsertData>();
+    auto insert_data = std::make_unique<InsertRecordProto>();
     auto insert_cols = [&insert_data](
                            auto& data, int64_t count, auto& field_meta) {
         auto array = milvus::segcore::CreateDataArrayFrom(
@@ -307,6 +356,15 @@ DataGen(SchemaPtr schema,
                     x = float16(distr(er) + offset);
                 }
                 insert_cols(final, N, field_meta);
+                break;
+            }
+            case DataType::VECTOR_SPARSE_FLOAT: {
+                auto res = GenerateRandomSparseFloatVector(
+                    N, kTestSparseDim, kTestSparseVectorDensity, seed);
+                auto array = milvus::segcore::CreateDataArrayFrom(
+                    res.get(), N, field_meta);
+                insert_data->mutable_fields_data()->AddAllocated(
+                    array.release());
                 break;
             }
 
@@ -526,7 +584,7 @@ DataGenForJsonArray(SchemaPtr schema,
     std::default_random_engine er(seed);
     std::normal_distribution<> distr(0, 1);
 
-    auto insert_data = std::make_unique<InsertData>();
+    auto insert_data = std::make_unique<InsertRecordProto>();
     auto insert_cols = [&insert_data](
                            auto& data, int64_t count, auto& field_meta) {
         auto array = milvus::segcore::CreateDataArrayFrom(
@@ -778,6 +836,23 @@ CreateBFloat16PlaceholderGroupFromBlob(int64_t num_queries,
 }
 
 inline auto
+CreateSparseFloatPlaceholderGroup(int64_t num_queries, int64_t seed = 42) {
+    namespace ser = milvus::proto::common;
+    ser::PlaceholderGroup raw_group;
+    auto value = raw_group.add_placeholders();
+
+    value->set_tag("$0");
+    value->set_type(ser::PlaceholderType::SparseFloatVector);
+    auto sparse_vecs = GenerateRandomSparseFloatVector(
+        num_queries, kTestSparseDim, kTestSparseVectorDensity, seed);
+    for (int i = 0; i < num_queries; ++i) {
+        value->add_values(sparse_vecs[i].data(),
+                          sparse_vecs[i].data_byte_size());
+    }
+    return raw_group;
+}
+
+inline auto
 SearchResultToVector(const SearchResult& sr) {
     int64_t num_queries = sr.total_nq_;
     int64_t topk = sr.unity_topK_;
@@ -848,6 +923,12 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                 auto raw_data = data->vectors().bfloat16_vector().data();
                 dim = field_meta.get_dim();
                 createFieldData(raw_data, DataType::VECTOR_BFLOAT16, dim);
+                break;
+            }
+            case DataType::VECTOR_SPARSE_FLOAT: {
+                auto sparse_float_array = data->vectors().sparse_float_vector();
+                auto rows = SparseBytesToRows(sparse_float_array.contents());
+                createFieldData(rows.get(), DataType::VECTOR_SPARSE_FLOAT, 0);
                 break;
             }
             default: {

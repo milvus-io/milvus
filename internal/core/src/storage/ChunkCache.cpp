@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include "ChunkCache.h"
+#include "mmap/Utils.h"
 
 namespace milvus::storage {
 

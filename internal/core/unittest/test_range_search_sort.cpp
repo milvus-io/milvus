@@ -157,12 +157,12 @@ class RangeSearchSortTest
     float dist_min = 0.0, dist_max = 100.0;
 };
 
-INSTANTIATE_TEST_CASE_P(RangeSearchSortParameters,
-                        RangeSearchSortTest,
-                        ::testing::Values(knowhere::metric::L2,
-                                          knowhere::metric::IP,
-                                          knowhere::metric::JACCARD,
-                                          knowhere::metric::HAMMING));
+INSTANTIATE_TEST_SUITE_P(RangeSearchSortParameters,
+                         RangeSearchSortTest,
+                         ::testing::Values(knowhere::metric::L2,
+                                           knowhere::metric::IP,
+                                           knowhere::metric::JACCARD,
+                                           knowhere::metric::HAMMING));
 
 TEST_P(RangeSearchSortTest, CheckRangeSearchSort) {
     auto res = milvus::ReGenRangeSearchResult(dataset, TOPK, N, metric_type);

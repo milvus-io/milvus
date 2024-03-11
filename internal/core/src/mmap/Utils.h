@@ -32,52 +32,6 @@
 namespace milvus {
 
 inline size_t
-GetDataSize(const std::vector<FieldDataPtr>& datas) {
-    size_t total_size{0};
-    for (const auto& data : datas) {
-        total_size += data->Size();
-    }
-
-    return total_size;
-}
-
-inline void*
-FillField(DataType data_type, const FieldDataPtr& data, void* dst) {
-    char* dest = reinterpret_cast<char*>(dst);
-    if (datatype_is_variable(data_type)) {
-        switch (data_type) {
-            case DataType::STRING:
-            case DataType::VARCHAR: {
-                for (ssize_t i = 0; i < data->get_num_rows(); ++i) {
-                    auto str =
-                        static_cast<const std::string*>(data->RawValue(i));
-                    memcpy(dest, str->data(), str->size());
-                    dest += str->size();
-                }
-                break;
-            }
-            case DataType::JSON: {
-                for (ssize_t i = 0; i < data->get_num_rows(); ++i) {
-                    auto padded_string =
-                        static_cast<const Json*>(data->RawValue(i))->data();
-                    memcpy(dest, padded_string.data(), padded_string.size());
-                    dest += padded_string.size();
-                }
-                break;
-            }
-            default:
-                PanicInfo(
-                    DataTypeInvalid, "not supported data type {}", data_type);
-        }
-    } else {
-        memcpy(dst, data->Data(), data->Size());
-        dest += data->Size();
-    }
-
-    return dest;
-}
-
-inline size_t
 WriteFieldData(File& file,
                DataType data_type,
                const FieldDataPtr& data,
@@ -123,6 +77,12 @@ WriteFieldData(File& file,
                     total_written += written;
                 }
                 break;
+            }
+            case DataType::VECTOR_SPARSE_FLOAT: {
+                // TODO(SPARSE): this is for mmap to write data to disk so that
+                // the file can be mmaped into memory.
+                throw std::runtime_error(
+                    "WriteFieldData for VECTOR_SPARSE_FLOAT not implemented");
             }
             default:
                 PanicInfo(DataTypeInvalid,

@@ -21,8 +21,9 @@
 #include "index/ScalarIndex.h"
 #include "log/Log.h"
 #include "mmap/Utils.h"
-#include "storage/ThreadPool.h"
+#include "common/FieldData.h"
 #include "storage/RemoteChunkManagerSingleton.h"
+#include "common/Common.h"
 #include "storage/ThreadPools.h"
 #include "storage/Util.h"
 
@@ -205,6 +206,11 @@ GetRawDataSizeOfDataArray(const DataArray* data,
 
                 break;
             }
+            case DataType::VECTOR_SPARSE_FLOAT: {
+                // TODO(SPARSE, size)
+                result += data->vectors().sparse_float_vector().ByteSizeLong();
+                break;
+            }
             default: {
                 PanicInfo(
                     DataTypeInvalid,
@@ -338,6 +344,10 @@ CreateVectorDataArray(int64_t count, const FieldMeta& field_meta) {
             obj->resize(length * sizeof(bfloat16));
             break;
         }
+        case DataType::VECTOR_SPARSE_FLOAT: {
+            // does nothing here
+            break;
+        }
         default: {
             PanicInfo(DataTypeInvalid,
                       fmt::format("unsupported datatype {}", data_type));
@@ -446,8 +456,11 @@ CreateVectorDataArrayFrom(const void* data_raw,
         field_meta.get_data_type()));
 
     auto vector_array = data_array->mutable_vectors();
-    auto dim = field_meta.get_dim();
-    vector_array->set_dim(dim);
+    auto dim = 0;
+    if (!datatype_is_sparse_vector(data_type)) {
+        dim = field_meta.get_dim();
+        vector_array->set_dim(dim);
+    }
     switch (data_type) {
         case DataType::VECTOR_FLOAT: {
             auto length = count * dim;
@@ -477,6 +490,15 @@ CreateVectorDataArrayFrom(const void* data_raw,
             auto data = reinterpret_cast<const char*>(data_raw);
             auto obj = vector_array->mutable_bfloat16_vector();
             obj->assign(data, length * sizeof(bfloat16));
+            break;
+        }
+        case DataType::VECTOR_SPARSE_FLOAT: {
+            SparseRowsToProto(
+                reinterpret_cast<const knowhere::sparse::SparseRow<float>*>(
+                    data_raw),
+                count,
+                vector_array->mutable_sparse_float_vector());
+            vector_array->set_dim(vector_array->sparse_float_vector().dim());
             break;
         }
         default: {
@@ -534,6 +556,15 @@ MergeDataArray(
                 auto data = VEC_FIELD_DATA(src_field_data, binary);
                 auto obj = vector_array->mutable_binary_vector();
                 obj->assign(data + src_offset * num_bytes, num_bytes);
+            } else if (field_meta.get_data_type() ==
+                       DataType::VECTOR_SPARSE_FLOAT) {
+                auto src = src_field_data->vectors().sparse_float_vector();
+                auto dst = vector_array->mutable_sparse_float_vector();
+                if (src.dim() > dst->dim()) {
+                    dst->set_dim(src.dim());
+                }
+                vector_array->set_dim(dst->dim());
+                *dst->mutable_contents() = src.contents();
             } else {
                 PanicInfo(DataTypeInvalid,
                           fmt::format("unsupported datatype {}", data_type));

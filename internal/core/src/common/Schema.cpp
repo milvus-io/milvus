@@ -54,8 +54,11 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
             auto type_map = RepeatedKeyValToMap(child.type_params());
             auto index_map = RepeatedKeyValToMap(child.index_params());
 
-            AssertInfo(type_map.count("dim"), "dim not found");
-            auto dim = boost::lexical_cast<int64_t>(type_map.at("dim"));
+            int64_t dim = 0;
+            if (!datatype_is_sparse_vector(data_type)) {
+                AssertInfo(type_map.count("dim"), "dim not found");
+                dim = boost::lexical_cast<int64_t>(type_map.at("dim"));
+            }
             if (!index_map.count("metric_type")) {
                 schema->AddField(name, field_id, data_type, dim, std::nullopt);
             } else {
