@@ -72,7 +72,8 @@ func TestCatalog_ListCollections(t *testing.T) {
 	}
 
 	coll2 := &pb.CollectionInfo{
-		ID: 2,
+		ID:   2,
+		DbId: testDb,
 		Schema: &schemapb.CollectionSchema{
 			Name: "c1",
 			Fields: []*schemapb.FieldSchema{
@@ -172,6 +173,7 @@ func TestCatalog_ListCollections(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(ret))
 		assert.Equal(t, coll1.ID, ret[0].CollectionID)
+		assert.Equal(t, util.DefaultDBID, ret[0].DBID)
 	})
 
 	t.Run("list collection with db", func(t *testing.T) {
@@ -208,6 +210,7 @@ func TestCatalog_ListCollections(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, ret)
 		assert.Equal(t, 1, len(ret))
+		assert.Equal(t, int64(testDb), ret[0].DBID)
 	})
 
 	t.Run("list collection ok for the newest version", func(t *testing.T) {
@@ -376,6 +379,7 @@ func TestCatalog_GetCollectionByID(t *testing.T) {
 	coll, err = c.GetCollectionByID(ctx, 0, 10000, 1)
 	assert.NoError(t, err)
 	assert.NotNil(t, coll)
+	assert.Equal(t, util.DefaultDBID, coll.DBID)
 }
 
 func TestCatalog_CreatePartitionV2(t *testing.T) {
