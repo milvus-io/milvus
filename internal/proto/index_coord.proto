@@ -285,3 +285,12 @@ message GetIndexStatisticsResponse {
   common.Status status = 1;
   repeated IndexInfo index_infos = 2;
 }
+
+message ListIndexesRequest {
+    int64 collectionID = 1;
+}
+
+message ListIndexesResponse {
+    common.Status status = 1;
+    repeated IndexInfo index_infos = 2;
+}

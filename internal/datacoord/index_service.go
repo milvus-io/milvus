@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -788,4 +789,38 @@ func (s *Server) selectSegmentIndexes(selector SegmentInfoSelector) map[int64]*i
 		ret[info.GetID()] = is
 	}
 	return ret
+}
+
+// ListIndexes returns all indexes created on provided collection.
+func (s *Server) ListIndexes(ctx context.Context, req *indexpb.ListIndexesRequest) (*indexpb.ListIndexesResponse, error) {
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", req.GetCollectionID()),
+	)
+
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		log.Warn(msgDataCoordIsUnhealthy(paramtable.GetNodeID()), zap.Error(err))
+		return &indexpb.ListIndexesResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	indexes := s.meta.indexMeta.GetIndexesForCollection(req.GetCollectionID(), "")
+
+	indexInfos := lo.Map(indexes, func(index *model.Index, _ int) *indexpb.IndexInfo {
+		return &indexpb.IndexInfo{
+			CollectionID:    index.CollectionID,
+			FieldID:         index.FieldID,
+			IndexName:       index.IndexName,
+			IndexID:         index.IndexID,
+			TypeParams:      index.TypeParams,
+			IndexParams:     index.IndexParams,
+			IsAutoIndex:     index.IsAutoIndex,
+			UserIndexParams: index.UserIndexParams,
+		}
+	})
+	log.Info("List index success")
+	return &indexpb.ListIndexesResponse{
+		Status:     merr.Success(),
+		IndexInfos: indexInfos,
+	}, nil
 }

@@ -751,3 +751,9 @@ func (c *Client) GcControl(ctx context.Context, req *datapb.GcControlRequest, op
 		return client.GcControl(ctx, req)
 	})
 }
+
+func (c *Client) ListIndexes(ctx context.Context, in *indexpb.ListIndexesRequest, opts ...grpc.CallOption) (*indexpb.ListIndexesResponse, error) {
+	return wrapGrpcCall(ctx, c, func(client datapb.DataCoordClient) (*indexpb.ListIndexesResponse, error) {
+		return client.ListIndexes(ctx, in)
+	})
+}
