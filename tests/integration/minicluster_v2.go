@@ -386,6 +386,13 @@ func (cluster *MiniClusterV2) Stop() error {
 	return nil
 }
 
+func (cluster *MiniClusterV2) GetAllQueryNodes() []*grpcquerynode.Server {
+	ret := make([]*grpcquerynode.Server, 0)
+	ret = append(ret, cluster.QueryNode)
+	ret = append(ret, cluster.querynodes...)
+	return ret
+}
+
 func (cluster *MiniClusterV2) StopAllQueryNodes() {
 	cluster.QueryNode.Stop()
 	log.Info("mini cluster main queryNode stopped")

@@ -99,6 +99,9 @@ func (b *ScoreBasedBalancer) AssignSegment(collectionID int64, segments []*meta.
 			plans = append(plans, plan)
 
 			// update the targetNode's score
+			if sourceNode != nil {
+				sourceNode.setPriority(sourceNode.getPriority() - priorityChange)
+			}
 			targetNode.setPriority(targetNode.getPriority() + priorityChange)
 		}(s)
 	}
@@ -298,7 +301,7 @@ func (b *ScoreBasedBalancer) genSegmentPlan(replica *meta.Replica, onlineNodes [
 
 	// if the segment are redundant, skip it's balance for now
 	segmentsToMove = lo.Filter(segmentsToMove, func(s *meta.Segment, _ int) bool {
-		return len(b.dist.SegmentDistManager.GetByFilter(meta.WithSegmentID(s.GetID()))) == 1
+		return len(b.dist.GetByFilter(meta.WithReplica(replica), meta.WithSegmentID(s.GetID()))) == 1
 	})
 
 	if len(segmentsToMove) == 0 {
