@@ -200,7 +200,6 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 	}
 
 	indexID, err := s.meta.indexMeta.CanCreateIndex(req)
-
 	if err != nil {
 		metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
 		return merr.Status(err), nil
