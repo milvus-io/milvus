@@ -32,6 +32,7 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/singleflight"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/eventlog"
@@ -40,45 +41,91 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/cache"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	. "github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-type SegmentFilter func(segment Segment) bool
+// SegmentFilter is the interface for segment selection criteria.
+type SegmentFilter interface {
+	Filter(segment Segment) bool
+	SegmentType() (SegmentType, bool)
+	SegmentIDs() ([]int64, bool)
+}
+
+// SegmentFilterFunc is a type wrapper for `func(Segment) bool` to SegmentFilter.
+type SegmentFilterFunc func(segment Segment) bool
+
+func (f SegmentFilterFunc) Filter(segment Segment) bool {
+	return f(segment)
+}
+
+func (f SegmentFilterFunc) SegmentType() (SegmentType, bool) {
+	return commonpb.SegmentState_SegmentStateNone, false
+}
+
+func (s SegmentFilterFunc) SegmentIDs() ([]int64, bool) {
+	return nil, false
+}
+
+// SegmentIDFilter is the specific segment filter for SegmentID only.
+type SegmentIDFilter int64
+
+func (f SegmentIDFilter) Filter(segment Segment) bool {
+	return segment.ID() == int64(f)
+}
+
+func (f SegmentIDFilter) SegmentType() (SegmentType, bool) {
+	return commonpb.SegmentState_SegmentStateNone, false
+}
+
+func (f SegmentIDFilter) SegmentIDs() ([]int64, bool) {
+	return []int64{int64(f)}, true
+}
+
+type SegmentTypeFilter SegmentType
+
+func (f SegmentTypeFilter) Filter(segment Segment) bool {
+	return segment.Type() == SegmentType(f)
+}
+
+func (f SegmentTypeFilter) SegmentType() (SegmentType, bool) {
+	return SegmentType(f), true
+}
+
+func (f SegmentTypeFilter) SegmentIDs() ([]int64, bool) {
+	return nil, false
+}
 
 func WithSkipEmpty() SegmentFilter {
-	return func(segment Segment) bool {
+	return SegmentFilterFunc(func(segment Segment) bool {
 		return segment.InsertCount() > 0
-	}
+	})
 }
 
 func WithPartition(partitionID UniqueID) SegmentFilter {
-	return func(segment Segment) bool {
+	return SegmentFilterFunc(func(segment Segment) bool {
 		return segment.Partition() == partitionID
-	}
+	})
 }
 
 func WithChannel(channel string) SegmentFilter {
-	return func(segment Segment) bool {
+	return SegmentFilterFunc(func(segment Segment) bool {
 		return segment.Shard() == channel
-	}
+	})
 }
 
 func WithType(typ SegmentType) SegmentFilter {
-	return func(segment Segment) bool {
-		return segment.Type() == typ
-	}
+	return SegmentTypeFilter(typ)
 }
 
 func WithID(id int64) SegmentFilter {
-	return func(segment Segment) bool {
-		return segment.ID() == id
-	}
+	return SegmentIDFilter(id)
 }
 
 func WithLevel(level datapb.SegmentLevel) SegmentFilter {
-	return func(segment Segment) bool {
+	return SegmentFilterFunc(func(segment Segment) bool {
 		return segment.Level() == level
-	}
+	})
 }
 
 type SegmentAction func(segment Segment) bool
@@ -116,8 +163,8 @@ type Manager struct {
 
 func NewManager() *Manager {
 	diskCap := paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsInt64()
-	segmentMaxSIze := paramtable.Get().DataCoordCfg.SegmentMaxSize.GetAsInt64()
-	cacheMaxItemNum := diskCap / segmentMaxSIze
+	segmentMaxSize := paramtable.Get().DataCoordCfg.SegmentMaxSize.GetAsInt64()
+	cacheMaxItemNum := diskCap / segmentMaxSize
 
 	segMgr := NewSegmentManager()
 	sf := singleflight.Group{}
@@ -263,21 +310,12 @@ func (mgr *segmentManager) UpdateBy(action SegmentAction, filters ...SegmentFilt
 	defer mgr.mu.RUnlock()
 
 	updated := 0
-	for _, segment := range mgr.growingSegments {
-		if filter(segment, filters...) {
-			if action(segment) {
-				updated++
-			}
+	mgr.rangeWithFilter(func(_ int64, _ SegmentType, segment Segment) bool {
+		if action(segment) {
+			updated++
 		}
-	}
-
-	for _, segment := range mgr.sealedSegments {
-		if filter(segment, filters...) {
-			if action(segment) {
-				updated++
-			}
-		}
-	}
+		return true
+	}, filters...)
 	return updated
 }
 
@@ -312,18 +350,11 @@ func (mgr *segmentManager) GetBy(filters ...SegmentFilter) []Segment {
 	mgr.mu.RLock()
 	defer mgr.mu.RUnlock()
 
-	ret := make([]Segment, 0)
-	for _, segment := range mgr.growingSegments {
-		if filter(segment, filters...) {
-			ret = append(ret, segment)
-		}
-	}
-
-	for _, segment := range mgr.sealedSegments {
-		if filter(segment, filters...) {
-			ret = append(ret, segment)
-		}
-	}
+	var ret []Segment
+	mgr.rangeWithFilter(func(id int64, _ SegmentType, segment Segment) bool {
+		ret = append(ret, segment)
+		return true
+	}, filters...)
 	return ret
 }
 
@@ -331,7 +362,7 @@ func (mgr *segmentManager) GetAndPinBy(filters ...SegmentFilter) ([]Segment, err
 	mgr.mu.RLock()
 	defer mgr.mu.RUnlock()
 
-	ret := make([]Segment, 0)
+	var ret []Segment
 	var err error
 	defer func() {
 		if err != nil {
@@ -341,25 +372,18 @@ func (mgr *segmentManager) GetAndPinBy(filters ...SegmentFilter) ([]Segment, err
 		}
 	}()
 
-	for _, segment := range mgr.growingSegments {
-		if filter(segment, filters...) {
-			err = segment.RLock()
-			if err != nil {
-				return nil, err
-			}
-			ret = append(ret, segment)
+	mgr.rangeWithFilter(func(id int64, _ SegmentType, segment Segment) bool {
+		if segment.Level() == datapb.SegmentLevel_L0 {
+			return true
 		}
-	}
+		err = segment.RLock()
+		if err != nil {
+			return false
+		}
+		ret = append(ret, segment)
+		return true
+	}, filters...)
 
-	for _, segment := range mgr.sealedSegments {
-		if segment.Level() != datapb.SegmentLevel_L0 && filter(segment, filters...) {
-			err = segment.RLock()
-			if err != nil {
-				return nil, err
-			}
-			ret = append(ret, segment)
-		}
-	}
 	return ret, nil
 }
 
@@ -419,9 +443,70 @@ func (mgr *segmentManager) Unpin(segments []Segment) {
 	}
 }
 
+func (mgr *segmentManager) rangeWithFilter(process func(id int64, segType SegmentType, segment Segment) bool, filters ...SegmentFilter) {
+	var segType SegmentType
+	var hasSegIDs bool
+	segmentIDs := typeutil.NewSet[int64]()
+
+	otherFilters := make([]SegmentFilter, 0, len(filters))
+	for _, filter := range filters {
+		var ok bool
+		if segType, ok = filter.SegmentType(); ok {
+			continue
+		}
+		if segIDs, ok := filter.SegmentIDs(); ok {
+			hasSegIDs = true
+			segmentIDs.Insert(segIDs...)
+		}
+	}
+
+	mergedFilter := func(info Segment) bool {
+		for _, filter := range otherFilters {
+			if !filter.Filter(info) {
+				return false
+			}
+		}
+		return true
+	}
+
+	var candidates map[SegmentType]map[int64]Segment
+	switch segType {
+	case SegmentTypeSealed:
+		candidates = map[SegmentType]map[int64]Segment{SegmentTypeSealed: mgr.sealedSegments}
+	case SegmentTypeGrowing:
+		candidates = map[SegmentType]map[int64]Segment{SegmentTypeGrowing: mgr.growingSegments}
+	default:
+		candidates = map[SegmentType]map[int64]Segment{
+			SegmentTypeSealed:  mgr.sealedSegments,
+			SegmentTypeGrowing: mgr.growingSegments,
+		}
+	}
+
+	for segType, candidate := range candidates {
+		if hasSegIDs {
+			for id := range segmentIDs {
+				segment, has := candidate[id]
+				if has && mergedFilter(segment) {
+					if !process(id, segType, segment) {
+						break
+					}
+				}
+			}
+		} else {
+			for id, segment := range candidate {
+				if mergedFilter(segment) {
+					if !process(id, segType, segment) {
+						break
+					}
+				}
+			}
+		}
+	}
+}
+
 func filter(segment Segment, filters ...SegmentFilter) bool {
 	for _, filter := range filters {
-		if !filter(segment) {
+		if !filter.Filter(segment) {
 			return false
 		}
 	}
@@ -527,36 +612,30 @@ func (mgr *segmentManager) removeSegmentWithType(typ SegmentType, segmentID Uniq
 func (mgr *segmentManager) RemoveBy(filters ...SegmentFilter) (int, int) {
 	mgr.mu.Lock()
 
-	var removeGrowing, removeSealed []Segment
-	for id, segment := range mgr.growingSegments {
-		if filter(segment, filters...) {
-			s := mgr.removeSegmentWithType(SegmentTypeGrowing, id)
-			if s != nil {
-				removeGrowing = append(removeGrowing, s)
-			}
-		}
-	}
+	var removeSegments []Segment
+	var removeGrowing, removeSealed int
 
-	for id, segment := range mgr.sealedSegments {
-		if filter(segment, filters...) {
-			s := mgr.removeSegmentWithType(SegmentTypeSealed, id)
-			if s != nil {
-				removeSealed = append(removeSealed, s)
+	mgr.rangeWithFilter(func(id int64, segType SegmentType, segment Segment) bool {
+		s := mgr.removeSegmentWithType(segType, id)
+		if s != nil {
+			removeSegments = append(removeSegments, s)
+			switch segType {
+			case SegmentTypeGrowing:
+				removeGrowing++
+			case SegmentTypeSealed:
+				removeSealed++
 			}
 		}
-	}
+		return true
+	}, filters...)
 	mgr.updateMetric()
 	mgr.mu.Unlock()
 
-	for _, s := range removeGrowing {
+	for _, s := range removeSegments {
 		remove(s)
 	}
 
-	for _, s := range removeSealed {
-		remove(s)
-	}
-
-	return len(removeGrowing), len(removeSealed)
+	return removeGrowing, removeSealed
 }
 
 func (mgr *segmentManager) Clear() {
