@@ -193,17 +193,17 @@ func (s *MetaCacheSuite) TestPredictSegments() {
 	err := info.GetBloomFilterSet().UpdatePKRange(pkFieldData)
 	s.Require().NoError(err)
 
-	predict, ok = s.cache.PredictSegments(pk, func(s *SegmentInfo) bool {
+	predict, ok = s.cache.PredictSegments(pk, SegmentFilterFunc(func(s *SegmentInfo) bool {
 		return s.segmentID == 1
-	})
+	}))
 	s.False(ok)
 	s.Empty(predict)
 
 	predict, ok = s.cache.PredictSegments(
 		storage.NewInt64PrimaryKey(5),
-		func(s *SegmentInfo) bool {
+		SegmentFilterFunc(func(s *SegmentInfo) bool {
 			return s.segmentID == 1
-		})
+		}))
 	s.True(ok)
 	s.NotEmpty(predict)
 	s.Equal(1, len(predict))
@@ -212,4 +212,71 @@ func (s *MetaCacheSuite) TestPredictSegments() {
 
 func TestMetaCacheSuite(t *testing.T) {
 	suite.Run(t, new(MetaCacheSuite))
+}
+
+func BenchmarkGetSegmentsBy(b *testing.B) {
+	paramtable.Init()
+	schema := &schemapb.CollectionSchema{
+		Name: "test_collection",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true, Name: "pk"},
+			{FieldID: 101, DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "128"},
+			}},
+		},
+	}
+	flushSegmentInfos := lo.RepeatBy(10000, func(i int) *datapb.SegmentInfo {
+		return &datapb.SegmentInfo{
+			ID:    int64(i),
+			State: commonpb.SegmentState_Flushed,
+		}
+	})
+	cache := NewMetaCache(&datapb.ChannelWatchInfo{
+		Schema: schema,
+		Vchan: &datapb.VchannelInfo{
+			FlushedSegments: flushSegmentInfos,
+		},
+	}, func(*datapb.SegmentInfo) *BloomFilterSet {
+		return NewBloomFilterSet()
+	})
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		filter := WithSegmentIDs(0)
+		cache.GetSegmentsBy(filter)
+	}
+}
+
+func BenchmarkGetSegmentsByWithoutIDs(b *testing.B) {
+	paramtable.Init()
+	schema := &schemapb.CollectionSchema{
+		Name: "test_collection",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true, Name: "pk"},
+			{FieldID: 101, DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "128"},
+			}},
+		},
+	}
+	flushSegmentInfos := lo.RepeatBy(10000, func(i int) *datapb.SegmentInfo {
+		return &datapb.SegmentInfo{
+			ID:    int64(i),
+			State: commonpb.SegmentState_Flushed,
+		}
+	})
+	cache := NewMetaCache(&datapb.ChannelWatchInfo{
+		Schema: schema,
+		Vchan: &datapb.VchannelInfo{
+			FlushedSegments: flushSegmentInfos,
+		},
+	}, func(*datapb.SegmentInfo) *BloomFilterSet {
+		return NewBloomFilterSet()
+	})
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		// use old func filter
+		filter := SegmentFilterFunc(func(info *SegmentInfo) bool {
+			return info.segmentID == 0
+		})
+		cache.GetSegmentsBy(filter)
+	}
 }
