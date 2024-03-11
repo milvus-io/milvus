@@ -209,7 +209,7 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 	loadInfo := utils.PackSegmentLoadInfo(resp, channel.GetSeekPosition(), indexes)
 
 	// Get collection index info
-	indexInfo, err := ex.broker.DescribeIndex(ctx, task.CollectionID())
+	indexInfo, err := ex.broker.ListIndexes(ctx, task.CollectionID())
 	if err != nil {
 		log.Warn("fail to get index meta of collection")
 		return err
@@ -359,7 +359,7 @@ func (ex *Executor) subDmChannel(task *ChannelTask, step int) error {
 		log.Warn("failed to get partitions of collection")
 		return err
 	}
-	indexInfo, err := ex.broker.DescribeIndex(ctx, task.CollectionID())
+	indexInfo, err := ex.broker.ListIndexes(ctx, task.CollectionID())
 	if err != nil {
 		log.Warn("fail to get index meta of collection")
 		return err

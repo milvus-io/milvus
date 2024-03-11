@@ -216,7 +216,7 @@ func (suite *TaskSuite) TestSubscribeChannelTask() {
 				},
 			}, nil)
 	}
-	suite.broker.EXPECT().DescribeIndex(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
+	suite.broker.EXPECT().ListIndexes(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
 		{
 			CollectionID: suite.collection,
 			FieldID:      100,
@@ -390,7 +390,7 @@ func (suite *TaskSuite) TestLoadSegmentTask() {
 			{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
 		},
 	}, nil)
-	suite.broker.EXPECT().DescribeIndex(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
+	suite.broker.EXPECT().ListIndexes(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
 		{
 			CollectionID: suite.collection,
 		},
@@ -486,7 +486,7 @@ func (suite *TaskSuite) TestLoadSegmentTaskNotIndex() {
 			{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
 		},
 	}, nil)
-	suite.broker.EXPECT().DescribeIndex(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
+	suite.broker.EXPECT().ListIndexes(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
 		{
 			CollectionID: suite.collection,
 		},
@@ -780,7 +780,7 @@ func (suite *TaskSuite) TestMoveSegmentTask() {
 			{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
 		},
 	}, nil)
-	suite.broker.EXPECT().DescribeIndex(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
+	suite.broker.EXPECT().ListIndexes(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
 		{
 			CollectionID: suite.collection,
 		},
@@ -950,7 +950,7 @@ func (suite *TaskSuite) TestTaskCanceled() {
 			{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
 		},
 	}, nil)
-	suite.broker.EXPECT().DescribeIndex(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
+	suite.broker.EXPECT().ListIndexes(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
 		{
 			CollectionID: suite.collection,
 		},
@@ -1037,7 +1037,7 @@ func (suite *TaskSuite) TestSegmentTaskStale() {
 			{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
 		},
 	}, nil)
-	suite.broker.EXPECT().DescribeIndex(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
+	suite.broker.EXPECT().ListIndexes(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
 		{
 			CollectionID: suite.collection,
 		},
