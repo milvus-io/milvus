@@ -80,22 +80,53 @@ func NewLRUCache[K comparable, V any](
 	}
 }
 
-func (c *lruCache[K, V]) TryPin(keys ...K) ([]*cacheItem[K, V], bool) {
+func (c *lruCache[K, V]) TryPin(keys ...K) (items []*cacheItem[K, V], ok bool) {
 	c.rwlock.Lock()
-	if c.size+int32(len(keys)) > c.cap {
-		if ok := c.tryEvict(int32(len(keys))); !ok {
+	defer c.rwlock.Unlock()
+
+	var notExisted int32
+	for _, k := range keys {
+		iter, ok := c.items[k]
+		if ok {
+			item := iter.Value.(*cacheItem[K, V])
+			item.pinCount.Inc()
+		} else {
+			notExisted++
+		}
+	}
+	defer func() {
+		if !ok {
+			for _, k := range keys {
+				iter, ok2 := c.items[k]
+				if ok2 {
+					item := iter.Value.(*cacheItem[K, V])
+					item.pinCount.Dec()
+				}
+			}
+		}
+	}()
+
+	if c.size+notExisted > c.cap {
+		if ok = c.tryEvict(notExisted); !ok {
 			return nil, false
 		}
 	}
 
 	ret := make([]*cacheItem[K, V], 0, len(keys))
 	for _, key := range keys {
-		item := newCacheItemWithKey[K, V](key)
-		item.pinCount.Inc()
-		ret = append(ret, item)
-		c.add(item)
+		if iter, ok := c.items[key]; ok {
+			item := iter.Value.(*cacheItem[K, V])
+			c.accessList.Remove(iter)
+			c.accessList.PushFront(item)
+			ret = append(ret, item)
+		} else {
+			item := newCacheItemWithKey[K, V](key)
+			item.pinCount.Inc()
+			ret = append(ret, item)
+			c.add(item)
+		}
 	}
-	return ret, false
+	return ret, true
 }
 
 func (c *lruCache[K, V]) tryEvict(count int32) bool {
@@ -122,7 +153,9 @@ func (c *lruCache[K, V]) tryEvict(count int32) bool {
 		c.size--
 		item := iter.Value.(*cacheItem[K, V])
 		if c.onEvict != nil {
-			c.onEvict(item.key, item.value.value)
+			if item.value != nil {
+				c.onEvict(item.key, item.value.value)
+			}
 		}
 	}
 
@@ -156,7 +189,7 @@ func (c *lruCache[K, V]) Get(key K) bool {
 
 		c.rwlock.Lock()
 		defer c.rwlock.Unlock()
-		item.value.value = value
+		item.value = &valueWrapper[V]{value: value}
 		c.accessList.Remove(iter)
 		c.accessList.PushFront(item)
 		return true
