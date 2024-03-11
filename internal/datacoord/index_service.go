@@ -225,7 +225,7 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 			metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
 			return merr.Status(err), nil
 		}
-		if getIndexType(req.GetIndexParams()) == indexparamcheck.IndexDISKANN && !s.indexNodeManager.ClientSupportDisk() {
+		if GetIndexType(req.GetIndexParams()) == indexparamcheck.IndexDISKANN && !s.indexNodeManager.ClientSupportDisk() {
 			errMsg := "all IndexNodes do not support disk indexes, please verify"
 			log.Warn(errMsg)
 			err = merr.WrapErrIndexNotSupported(indexparamcheck.IndexDISKANN)
@@ -270,7 +270,7 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 func ValidateIndexParams(index *model.Index, key, value string) error {
 	switch key {
 	case common.MmapEnabledKey:
-		indexType := getIndexType(index.IndexParams)
+		indexType := GetIndexType(index.IndexParams)
 		if !indexparamcheck.IsMmapSupported(indexType) {
 			return merr.WrapErrParameterInvalidMsg("index type %s does not support mmap", indexType)
 		}

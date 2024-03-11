@@ -343,7 +343,7 @@ func (t *compactionTrigger) updateSegmentMaxSize(segments []*SegmentInfo) (bool,
 	}
 	vectorFields := typeutil.GetVectorFieldSchemas(collMeta.Schema)
 	fieldIndexTypes := lo.SliceToMap(indexInfos, func(t *model.Index) (int64, indexparamcheck.IndexType) {
-		return t.FieldID, getIndexType(t.IndexParams)
+		return t.FieldID, GetIndexType(t.IndexParams)
 	})
 	vectorFieldsWithDiskIndex := lo.Filter(vectorFields, func(field *schemapb.FieldSchema, _ int) bool {
 		if indexType, ok := fieldIndexTypes[field.FieldID]; ok {
