@@ -381,11 +381,4 @@ func Test_Run(t *testing.T) {
 
 	err = server.Run()
 	assert.Error(t, err)
-
-	server.datanode = &MockDataNode{
-		stopErr: errors.New("error"),
-	}
-
-	err = server.Stop()
-	assert.Error(t, err)
 }

@@ -58,7 +58,7 @@ type UniqueID = typeutil.UniqueID
 // Server is the grpc server of QueryNode.
 type Server struct {
 	querynode   types.QueryNodeComponent
-	wg          sync.WaitGroup
+	grpcWG      sync.WaitGroup
 	ctx         context.Context
 	cancel      context.CancelFunc
 	grpcErrChan chan error
@@ -115,7 +115,7 @@ func (s *Server) init() error {
 	s.SetEtcdClient(etcdCli)
 	s.querynode.SetAddress(Params.GetAddress())
 	log.Debug("QueryNode connect to etcd successfully")
-	s.wg.Add(1)
+	s.grpcWG.Add(1)
 	go s.startGrpcLoop(Params.Port.GetAsInt())
 	// wait for grpc server loop start
 	err = <-s.grpcErrChan
@@ -148,7 +148,7 @@ func (s *Server) start() error {
 
 // startGrpcLoop starts the grpc loop of QueryNode component.
 func (s *Server) startGrpcLoop(grpcPort int) {
-	defer s.wg.Done()
+	defer s.grpcWG.Done()
 	Params := &paramtable.Get().QueryNodeGrpcServerCfg
 	kaep := keepalive.EnforcementPolicy{
 		MinTime:             5 * time.Second, // If a client pings more than once every 5 seconds, terminate the connection
@@ -241,19 +241,22 @@ func (s *Server) Stop() (err error) {
 		logger.Info("QueryNode stopped", zap.Error(err))
 	}()
 
+	logger.Info("internal server[querynode] start to stop")
 	err = s.querynode.Stop()
 	if err != nil {
+		log.Error("failed to close querynode", zap.Error(err))
 		return err
 	}
 	if s.etcdCli != nil {
 		defer s.etcdCli.Close()
 	}
 
-	s.cancel()
 	if s.grpcServer != nil {
 		utils.GracefulStopGRPCServer(s.grpcServer)
 	}
-	s.wg.Wait()
+	s.grpcWG.Wait()
+
+	s.cancel()
 	return nil
 }
 

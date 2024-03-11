@@ -61,7 +61,7 @@ type Server struct {
 
 	serverID atomic.Int64
 
-	wg        sync.WaitGroup
+	grpcWG    sync.WaitGroup
 	dataCoord types.DataCoordComponent
 
 	etcdCli *clientv3.Client
@@ -132,7 +132,7 @@ func (s *Server) init() error {
 
 func (s *Server) startGrpc() error {
 	Params := &paramtable.Get().DataCoordGrpcServerCfg
-	s.wg.Add(1)
+	s.grpcWG.Add(1)
 	go s.startGrpcLoop(Params.Port.GetAsInt())
 	// wait for grpc server loop start
 	err := <-s.grpcErrChan
@@ -141,7 +141,7 @@ func (s *Server) startGrpc() error {
 
 func (s *Server) startGrpcLoop(grpcPort int) {
 	defer logutil.LogPanic()
-	defer s.wg.Done()
+	defer s.grpcWG.Done()
 
 	Params := &paramtable.Get().DataCoordGrpcServerCfg
 	log.Debug("network port", zap.Int("port", grpcPort))
@@ -226,8 +226,6 @@ func (s *Server) Stop() (err error) {
 		logger.Info("Datacoord stopped", zap.Error(err))
 	}()
 
-	s.cancel()
-
 	if s.etcdCli != nil {
 		defer s.etcdCli.Close()
 	}
@@ -237,14 +235,16 @@ func (s *Server) Stop() (err error) {
 	if s.grpcServer != nil {
 		utils.GracefulStopGRPCServer(s.grpcServer)
 	}
+	s.grpcWG.Wait()
 
+	logger.Info("internal server[dataCoord] start to stop")
 	err = s.dataCoord.Stop()
 	if err != nil {
+		log.Error("failed to close dataCoord", zap.Error(err))
 		return err
 	}
 
-	s.wg.Wait()
-
+	s.cancel()
 	return nil
 }
 

@@ -1066,18 +1066,15 @@ func (s *Server) Stop() error {
 	s.cluster.Close()
 	logutil.Logger(s.ctx).Info("index builder stopped")
 
-	s.stopServerLoop()
-	logutil.Logger(s.ctx).Info("serverloop stopped")
-
 	if s.session != nil {
 		s.session.Stop()
 	}
-
 	if s.icSession != nil {
 		s.icSession.Stop()
 	}
+	s.stopServerLoop()
+	logutil.Logger(s.ctx).Info("serverloop stopped")
 	logutil.Logger(s.ctx).Warn("datacoord stop successful")
-
 	return nil
 }
 
