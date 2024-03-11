@@ -1121,8 +1121,11 @@ func (c *Core) describeCollection(ctx context.Context, in *milvuspb.DescribeColl
 	return c.meta.GetCollectionByID(ctx, in.GetDbName(), in.GetCollectionID(), ts, allowUnavailable)
 }
 
-func convertModelToDesc(collInfo *model.Collection, aliases []string) *milvuspb.DescribeCollectionResponse {
-	resp := &milvuspb.DescribeCollectionResponse{Status: merr.Success()}
+func convertModelToDesc(collInfo *model.Collection, aliases []string, dbName string) *milvuspb.DescribeCollectionResponse {
+	resp := &milvuspb.DescribeCollectionResponse{
+		Status: merr.Success(),
+		DbName: dbName,
+	}
 
 	resp.Schema = &schemapb.CollectionSchema{
 		Name:               collInfo.Name,
