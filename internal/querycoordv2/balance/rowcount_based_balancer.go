@@ -271,7 +271,7 @@ func (b *RowCountBasedBalancer) genSegmentPlan(replica *meta.Replica, onlineNode
 
 	segmentsToMove = lo.Filter(segmentsToMove, func(s *meta.Segment, _ int) bool {
 		// if the segment are redundant, skip it's balance for now
-		return len(b.dist.SegmentDistManager.GetByFilter(meta.WithSegmentID(s.GetID()))) == 1
+		return len(b.dist.GetByFilter(meta.WithReplica(replica), meta.WithSegmentID(s.GetID()))) == 1
 	})
 
 	if len(nodesWithLessRow) == 0 || len(segmentsToMove) == 0 {
@@ -305,7 +305,7 @@ func (b *RowCountBasedBalancer) genChannelPlan(replica *meta.Replica, onlineNode
 	channelPlans := make([]ChannelAssignPlan, 0)
 	if len(onlineNodes) > 1 {
 		// start to balance channels on all available nodes
-		channelDist := b.dist.ChannelDistManager.GetByCollection(replica.CollectionID)
+		channelDist := b.dist.ChannelDistManager.GetChannelDistByReplica(replica)
 		if len(channelDist) == 0 {
 			return nil
 		}

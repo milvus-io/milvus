@@ -637,6 +637,130 @@ func (suite *ScoreBasedBalancerTestSuite) TestStoppedBalance() {
 	}
 }
 
+func (suite *ScoreBasedBalancerTestSuite) TestMultiReplicaBalance() {
+	cases := []struct {
+		name               string
+		collectionID       int64
+		replicaWithNodes   map[int64][]int64
+		segments           []*datapb.SegmentInfo
+		channels           []*datapb.VchannelInfo
+		states             []session.State
+		shouldMock         bool
+		segmentDist        map[int64][]*meta.Segment
+		channelDist        map[int64][]*meta.DmChannel
+		expectPlans        []SegmentAssignPlan
+		expectChannelPlans []ChannelAssignPlan
+	}{
+		{
+			name:             "normal balance for one collection only",
+			collectionID:     1,
+			replicaWithNodes: map[int64][]int64{1: {1, 2}, 2: {3, 4}},
+			segments: []*datapb.SegmentInfo{
+				{ID: 1, CollectionID: 1, PartitionID: 1},
+				{ID: 2, CollectionID: 1, PartitionID: 1},
+				{ID: 3, CollectionID: 1, PartitionID: 1},
+				{ID: 4, CollectionID: 1, PartitionID: 1},
+			},
+			channels: []*datapb.VchannelInfo{
+				{
+					CollectionID: 1, ChannelName: "channel1", FlushedSegmentIds: []int64{1},
+				},
+				{
+					CollectionID: 1, ChannelName: "channel2", FlushedSegmentIds: []int64{2},
+				},
+				{
+					CollectionID: 1, ChannelName: "channel3", FlushedSegmentIds: []int64{3},
+				},
+				{
+					CollectionID: 1, ChannelName: "channel4", FlushedSegmentIds: []int64{4},
+				},
+			},
+			states: []session.State{session.NodeStateNormal, session.NodeStateNormal},
+			segmentDist: map[int64][]*meta.Segment{
+				1: {
+					{SegmentInfo: &datapb.SegmentInfo{ID: 1, CollectionID: 1, NumOfRows: 30}, Node: 1},
+					{SegmentInfo: &datapb.SegmentInfo{ID: 2, CollectionID: 1, NumOfRows: 30}, Node: 1},
+				},
+				3: {
+					{SegmentInfo: &datapb.SegmentInfo{ID: 3, CollectionID: 1, NumOfRows: 30}, Node: 3},
+					{SegmentInfo: &datapb.SegmentInfo{ID: 4, CollectionID: 1, NumOfRows: 30}, Node: 3},
+				},
+			},
+			channelDist: map[int64][]*meta.DmChannel{
+				1: {
+					{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "channel1"}, Node: 1},
+					{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "channel2"}, Node: 1},
+				},
+				3: {
+					{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "channel3"}, Node: 3},
+					{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "channel4"}, Node: 3},
+				},
+			},
+			expectPlans:        []SegmentAssignPlan{},
+			expectChannelPlans: []ChannelAssignPlan{},
+		},
+	}
+
+	for _, c := range cases {
+		suite.Run(c.name, func() {
+			suite.SetupSuite()
+			defer suite.TearDownTest()
+			balancer := suite.balancer
+
+			// 1. set up target for multi collections
+			collection := utils.CreateTestCollection(c.collectionID, int32(len(c.replicaWithNodes)))
+			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, c.collectionID).Return(
+				c.channels, c.segments, nil)
+			suite.broker.EXPECT().GetPartitions(mock.Anything, c.collectionID).Return([]int64{c.collectionID}, nil).Maybe()
+			collection.LoadPercentage = 100
+			collection.Status = querypb.LoadStatus_Loaded
+			balancer.meta.CollectionManager.PutCollection(collection)
+			balancer.meta.CollectionManager.PutPartition(utils.CreateTestPartition(c.collectionID, c.collectionID))
+			for replicaID, nodes := range c.replicaWithNodes {
+				balancer.meta.ReplicaManager.Put(utils.CreateTestReplica(replicaID, c.collectionID, nodes))
+			}
+			balancer.targetMgr.UpdateCollectionNextTarget(c.collectionID)
+			balancer.targetMgr.UpdateCollectionCurrentTarget(c.collectionID)
+			balancer.targetMgr.UpdateCollectionNextTarget(c.collectionID)
+
+			// 2. set up target for distribution for multi collections
+			for node, s := range c.segmentDist {
+				balancer.dist.SegmentDistManager.Update(node, s...)
+			}
+			for node, v := range c.channelDist {
+				balancer.dist.ChannelDistManager.Update(node, v...)
+			}
+
+			// 3. set up nodes info and resourceManager for balancer
+			for _, nodes := range c.replicaWithNodes {
+				for i := range nodes {
+					nodeInfo := session.NewNodeInfo(nodes[i], "127.0.0.1:0")
+					nodeInfo.UpdateStats(session.WithChannelCnt(len(c.channelDist[nodes[i]])))
+					nodeInfo.SetState(c.states[i])
+					suite.balancer.nodeManager.Add(nodeInfo)
+					suite.balancer.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, nodes[i])
+				}
+			}
+
+			// expected to balance channel first
+			segmentPlans, channelPlans := suite.getCollectionBalancePlans(balancer, c.collectionID)
+			suite.Len(segmentPlans, 0)
+			suite.Len(channelPlans, 2)
+
+			// mock new distribution after channel balance
+			balancer.dist.ChannelDistManager.Update(1, &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "channel1"}, Node: 1})
+			balancer.dist.ChannelDistManager.Update(2, &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "channel2"}, Node: 2})
+			balancer.dist.ChannelDistManager.Update(3, &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "channel3"}, Node: 3})
+			balancer.dist.ChannelDistManager.Update(4, &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "channel4"}, Node: 4})
+
+			// expected to balance segment
+			segmentPlans, channelPlans = suite.getCollectionBalancePlans(balancer, c.collectionID)
+			suite.Len(segmentPlans, 2)
+			suite.Len(channelPlans, 0)
+		})
+	}
+}
+
 func TestScoreBasedBalancerSuite(t *testing.T) {
 	suite.Run(t, new(ScoreBasedBalancerTestSuite))
 }
