@@ -353,6 +353,12 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 					if err != nil {
 						return merr.WrapErrImportFailed(fmt.Sprintf("failed to parse value '%v' for JSON field '%s', error: %v", value, schema.GetName(), err))
 					}
+					if schema.GetIsDynamic() {
+						var dummy2 map[string]interface{}
+						if err := json.Unmarshal([]byte(value), &dummy2); err != nil {
+							return merr.WrapErrImportFailed(fmt.Sprintf("failed to parse value '%v' for dynamic JSON field '%s', error: %v", value, schema.GetName(), err))
+						}
+					}
 					field.(*storage.JSONFieldData).Data = append(field.(*storage.JSONFieldData).Data, []byte(value))
 				} else if mp, ok := obj.(map[string]interface{}); ok {
 					bs, err := json.Marshal(mp)

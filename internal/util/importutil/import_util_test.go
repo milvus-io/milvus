@@ -1280,3 +1280,37 @@ func Test_UpdateKVInfo(t *testing.T) {
 	assert.Equal(t, 2, len(infos))
 	assert.Equal(t, "5", infos[1].Value)
 }
+
+func Test_DynamicField(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Name:        "dynamic_field",
+		Description: "",
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:   999,
+				Name:      "$meta",
+				DataType:  schemapb.DataType_JSON,
+				IsDynamic: true,
+			},
+		},
+		EnableDynamicField: true,
+	}
+	validators := make(map[storage.FieldID]*Validator)
+	// success case
+	err := initValidators(schema, validators)
+	assert.NoError(t, err)
+
+	v, ok := validators[999]
+	assert.True(t, ok)
+
+	fields := initBlockData(schema)
+	assert.NotNil(t, fields)
+
+	fieldData := fields[999]
+
+	err = v.convertFunc("{\"x\": 123}", fieldData)
+	assert.NoError(t, err)
+
+	err = v.convertFunc("123", fieldData)
+	assert.Error(t, err)
+}

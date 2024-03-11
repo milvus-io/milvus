@@ -36,9 +36,7 @@ func (v *ParserVisitor) translateIdentifier(identifier string) (*ExprWithType, e
 	if identifier != field.Name {
 		nestedPath = append(nestedPath, identifier)
 	}
-	//if typeutil.IsJSONType(field.DataType) && len(nestedPath) == 0 {
-	//	return nil, fmt.Errorf("can not comparisons jsonField directly")
-	//}
+
 	return &ExprWithType{
 		expr: &planpb.Expr{
 			Expr: &planpb.Expr_ColumnExpr{

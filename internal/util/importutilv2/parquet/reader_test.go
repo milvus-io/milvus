@@ -18,6 +18,7 @@ package parquet
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"math/rand"
@@ -237,7 +238,19 @@ func buildArrayData(dataType, elementType schemapb.DataType, dim, rows int, isBi
 	case schemapb.DataType_JSON:
 		builder := array.NewStringBuilder(mem)
 		for i := 0; i < rows; i++ {
-			builder.Append(fmt.Sprintf("{\"a\": \"%s\", \"b\": %d}", randomString(3), i))
+			if i%4 == 0 {
+				v, _ := json.Marshal(fmt.Sprintf("{\"a\": \"%s\", \"b\": %d}", randomString(3), i))
+				builder.Append(string(v))
+			} else if i%4 == 1 {
+				v, _ := json.Marshal(i)
+				builder.Append(string(v))
+			} else if i%4 == 2 {
+				v, _ := json.Marshal(float32(i) * 0.1)
+				builder.Append(string(v))
+			} else if i%4 == 3 {
+				v, _ := json.Marshal(randomString(10))
+				builder.Append(string(v))
+			}
 		}
 		return builder.NewStringArray()
 	case schemapb.DataType_Array:
@@ -428,6 +441,68 @@ func (s *ReaderSuite) run(dt schemapb.DataType) {
 	checkFn(res, 0, s.numRows)
 }
 
+func (s *ReaderSuite) failRun(dt schemapb.DataType, isDynamic bool) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      100,
+				Name:         "pk",
+				IsPrimaryKey: true,
+				DataType:     s.pkDataType,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   "max_length",
+						Value: "256",
+					},
+				},
+			},
+			{
+				FieldID:  101,
+				Name:     "vec",
+				DataType: s.vecDataType,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.DimKey,
+						Value: "8",
+					},
+				},
+			},
+			{
+				FieldID:     102,
+				Name:        dt.String(),
+				DataType:    dt,
+				ElementType: schemapb.DataType_Int32,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   "max_length",
+						Value: "256",
+					},
+				},
+				IsDynamic: isDynamic,
+			},
+		},
+	}
+
+	filePath := fmt.Sprintf("/tmp/test_%d_reader.parquet", rand.Int())
+	defer os.Remove(filePath)
+	wf, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE, 0o666)
+	assert.NoError(s.T(), err)
+	err = writeParquet(wf, schema, s.numRows)
+	assert.NoError(s.T(), err)
+
+	ctx := context.Background()
+	f := storage.NewChunkManagerFactory("local", storage.RootPath("/tmp/milvus_test/test_parquet_reader/"))
+	cm, err := f.NewPersistentStorageChunkManager(ctx)
+	assert.NoError(s.T(), err)
+	cmReader, err := cm.Reader(ctx, filePath)
+	assert.NoError(s.T(), err)
+	reader, err := NewReader(ctx, schema, cmReader, 64*1024*1024)
+	s.NoError(err)
+
+	_, err = reader.Read()
+	s.Error(err)
+}
+
 func (s *ReaderSuite) TestReadScalarFields() {
 	s.run(schemapb.DataType_Bool)
 	s.run(schemapb.DataType_Int8)
@@ -439,6 +514,7 @@ func (s *ReaderSuite) TestReadScalarFields() {
 	s.run(schemapb.DataType_VarChar)
 	s.run(schemapb.DataType_Array)
 	s.run(schemapb.DataType_JSON)
+	s.failRun(schemapb.DataType_JSON, true)
 }
 
 func (s *ReaderSuite) TestStringPK() {

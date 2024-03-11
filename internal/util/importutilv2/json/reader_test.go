@@ -140,7 +140,19 @@ func createInsertData(t *testing.T, schema *schemapb.CollectionSchema, rowCount 
 		case schemapb.DataType_JSON:
 			jsonData := make([][]byte, 0)
 			for i := 0; i < rowCount; i++ {
-				jsonData = append(jsonData, []byte(fmt.Sprintf("{\"y\": %d}", i)))
+				if i%4 == 0 {
+					v, _ := json.Marshal("{\"a\": \"%s\", \"b\": %d}")
+					jsonData = append(jsonData, v)
+				} else if i%4 == 1 {
+					v, _ := json.Marshal(i)
+					jsonData = append(jsonData, v)
+				} else if i%4 == 2 {
+					v, _ := json.Marshal(float32(i) * 0.1)
+					jsonData = append(jsonData, v)
+				} else if i%4 == 3 {
+					v, _ := json.Marshal(strconv.Itoa(i))
+					jsonData = append(jsonData, v)
+				}
 			}
 			insertData.Data[field.GetFieldID()] = &storage.JSONFieldData{Data: jsonData}
 		case schemapb.DataType_Array:
