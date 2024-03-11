@@ -652,7 +652,7 @@ func GenerateJSONFile(t *testing.T, filePath string, schema *schemapb.Collection
 	jsonBytes, err := json.Marshal(rows)
 	assert.NoError(t, err)
 
-	err = os.WriteFile(filePath, jsonBytes, 0644) // nolint
+	err = os.WriteFile(filePath, jsonBytes, 0o644) // nolint
 	assert.NoError(t, err)
 }
 
