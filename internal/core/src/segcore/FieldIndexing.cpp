@@ -36,6 +36,11 @@ VectorFieldIndexing::VectorFieldIndexing(const FieldMeta& field_meta,
                                                field_index_meta,
                                                segcore_config,
                                                SegmentType::Growing)) {
+    recreate_index();
+}
+
+void
+VectorFieldIndexing::recreate_index() {
     index_ = std::make_unique<index::VectorMemIndex<float>>(
         config_->GetIndexType(),
         config_->GetMetricType(),
@@ -128,6 +133,8 @@ VectorFieldIndexing::AppendSegmentIndexSparse(int64_t reserved_offset,
                 }
             } catch (SegcoreError& error) {
                 LOG_ERROR("growing sparse index build error: {}", error.what());
+                recreate_index();
+                index_cur_ = 0;
                 return;
             }
             index_cur_.fetch_add(rows);
@@ -204,6 +211,7 @@ VectorFieldIndexing::AppendSegmentIndexDense(int64_t reserved_offset,
             index_->BuildWithDataset(dataset, conf);
         } catch (SegcoreError& error) {
             LOG_ERROR("growing index build error: {}", error.what());
+            recreate_index();
             return;
         }
         index_cur_.fetch_add(vec_num);

@@ -232,6 +232,8 @@ class VectorFieldIndexing : public FieldIndexing {
     get_search_params(const SearchInfo& searchInfo) const;
 
  private:
+    void
+    recreate_index();
     // current number of rows in index.
     std::atomic<idx_t> index_cur_ = 0;
     // whether the growing index has been built.
