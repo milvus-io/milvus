@@ -9326,6 +9326,7 @@ class TestCollectionSearchJSON(TestcaseBase):
     #  The followings are invalid base cases
     ******************************************************************
     """
+    @pytest.mark.skip("Supported json like: 1, \"abc\", [1,2,3,4]")
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_json_expression_object(self):
         """

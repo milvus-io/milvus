@@ -36,9 +36,9 @@ func (v *ParserVisitor) translateIdentifier(identifier string) (*ExprWithType, e
 	if identifier != field.Name {
 		nestedPath = append(nestedPath, identifier)
 	}
-	if typeutil.IsJSONType(field.DataType) && len(nestedPath) == 0 {
-		return nil, fmt.Errorf("can not comparisons jsonField directly")
-	}
+	//if typeutil.IsJSONType(field.DataType) && len(nestedPath) == 0 {
+	//	return nil, fmt.Errorf("can not comparisons jsonField directly")
+	//}
 	return &ExprWithType{
 		expr: &planpb.Expr{
 			Expr: &planpb.Expr_ColumnExpr{
@@ -1071,7 +1071,12 @@ func (v *ParserVisitor) VisitExists(ctx *parser.ExistsContext) interface{} {
 
 	if columnInfo.GetDataType() != schemapb.DataType_JSON {
 		return fmt.Errorf(
-			"exists oerations are only supportted on json field, got:%s", columnInfo.GetDataType())
+			"exists operations are only supportted on json field, got:%s", columnInfo.GetDataType())
+	}
+
+	if len(columnInfo.GetNestedPath()) == 0 {
+		return fmt.Errorf(
+			"exists operations are only supportted on json key")
 	}
 
 	return &ExprWithType{
