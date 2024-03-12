@@ -178,6 +178,15 @@ func (c *FieldReader) Next(count int64) (any, error) {
 				return nil, merr.WrapErrImportFailed(
 					fmt.Sprintf("failed to parse value '%v' for JSON field '%s', error: %v", str, c.field.GetName(), err))
 			}
+			if c.field.GetIsDynamic() {
+				var dummy2 map[string]interface{}
+				err = json.Unmarshal([]byte(str), &dummy2)
+				if err != nil {
+					return nil, merr.WrapErrImportFailed(
+						fmt.Sprintf("failed to parse value '%v' for dynamic JSON field '%s', error: %v",
+							str, c.field.GetName(), err))
+				}
+			}
 			byteArr = append(byteArr, []byte(str))
 		}
 		data = byteArr

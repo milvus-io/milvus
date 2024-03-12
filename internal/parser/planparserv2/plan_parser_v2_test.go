@@ -682,6 +682,16 @@ func Test_JSONExpr(t *testing.T) {
 		`A == [1,2,3]`,
 		`A + 1.2 == 3.3`,
 		`A + 1 == 2`,
+		`JSONField > 0`,
+		`JSONField == 0`,
+		`JSONField < 100`,
+		`0 < JSONField < 100`,
+		`20 > JSONField > 0`,
+		`JSONField + 5 > 0`,
+		`JSONField > 2 + 5`,
+		`JSONField * 2 > 5`,
+		`JSONField / 2 > 5`,
+		`JSONField % 10 > 5`,
 	}
 	for _, expr = range exprs {
 		_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
@@ -703,13 +713,6 @@ func Test_InvalidExprOnJSONField(t *testing.T) {
 		`exists $meta`,
 		`exists JSONField`,
 		`exists ArrayField`,
-		//`$meta > 0`,
-		//`JSONField == 0`,
-		//`$meta < 100`,
-		//`0 < $meta < 100`,
-		//`20 > $meta > 0`,
-		//`$meta + 5 > 0`,
-		//`$meta > 2 + 5`,
 		`exists $meta["A"] > 10 `,
 		`exists Int64Field`,
 		`A[[""B""]] > 10`,
@@ -860,6 +863,8 @@ func Test_JSONContains(t *testing.T) {
 		`array_contains(A, [1,2,3])`,
 		`array_contains(ArrayField, [1,2,3])`,
 		`array_contains(ArrayField, 1)`,
+		`json_contains(JSONField, 5)`,
+		`json_contains($meta, 1)`,
 	}
 	for _, expr = range exprs {
 		_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
@@ -882,7 +887,6 @@ func Test_InvalidJSONContains(t *testing.T) {
 		`json_contains([1,2,3], 1)`,
 		`json_contains([1,2,3], [1,2,3])`,
 		`json_contains([1,2,3], [1,2])`,
-		//`json_contains($meta, 1)`,
 		`json_contains(A, B)`,
 		`not json_contains(A, B)`,
 		`json_contains(A, B > 5)`,
@@ -890,9 +894,8 @@ func Test_InvalidJSONContains(t *testing.T) {
 		`json_contains(A, StringField > 5)`,
 		`json_contains(A)`,
 		`json_contains(A, 5, C)`,
-		//`json_contains(JSONField, 5)`,
-		//`json_Contains(JSONField, 5)`,
-		//`JSON_contains(JSONField, 5)`,
+		`json_Contains(JSONField, 5)`,
+		`JSON_contains(JSONField, 5)`,
 	}
 	for _, expr = range exprs {
 		_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
