@@ -42,7 +42,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-	. "github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // SegmentFilter is the interface for segment selection criteria.
@@ -102,7 +101,7 @@ func WithSkipEmpty() SegmentFilter {
 	})
 }
 
-func WithPartition(partitionID UniqueID) SegmentFilter {
+func WithPartition(partitionID typeutil.UniqueID) SegmentFilter {
 	return SegmentFilterFunc(func(segment Segment) bool {
 		return segment.Partition() == partitionID
 	})
@@ -213,22 +212,22 @@ type SegmentManager interface {
 	// dup segments will not increase the ref count
 	Put(segmentType SegmentType, segments ...Segment)
 	UpdateBy(action SegmentAction, filters ...SegmentFilter) int
-	Get(segmentID UniqueID) Segment
-	GetWithType(segmentID UniqueID, typ SegmentType) Segment
+	Get(segmentID typeutil.UniqueID) Segment
+	GetWithType(segmentID typeutil.UniqueID, typ SegmentType) Segment
 	GetBy(filters ...SegmentFilter) []Segment
 	// Get segments and acquire the read locks
 	GetAndPinBy(filters ...SegmentFilter) ([]Segment, error)
 	GetAndPin(segments []int64, filters ...SegmentFilter) ([]Segment, error)
 	Unpin(segments []Segment)
 
-	GetSealed(segmentID UniqueID) Segment
-	GetGrowing(segmentID UniqueID) Segment
+	GetSealed(segmentID typeutil.UniqueID) Segment
+	GetGrowing(segmentID typeutil.UniqueID) Segment
 	Empty() bool
 
 	// Remove removes the given segment,
 	// and decreases the ref count of the corresponding collection,
 	// will not decrease the ref count if the given segment not exists
-	Remove(segmentID UniqueID, scope querypb.DataScope) (int, int)
+	Remove(segmentID typeutil.UniqueID, scope querypb.DataScope) (int, int)
 	RemoveBy(filters ...SegmentFilter) (int, int)
 	Clear()
 }
@@ -239,8 +238,8 @@ var _ SegmentManager = (*segmentManager)(nil)
 type segmentManager struct {
 	mu sync.RWMutex // guards all
 
-	growingSegments map[UniqueID]Segment
-	sealedSegments  map[UniqueID]Segment
+	growingSegments map[typeutil.UniqueID]Segment
+	sealedSegments  map[typeutil.UniqueID]Segment
 }
 
 func NewSegmentManager() *segmentManager {
@@ -319,7 +318,7 @@ func (mgr *segmentManager) UpdateBy(action SegmentAction, filters ...SegmentFilt
 	return updated
 }
 
-func (mgr *segmentManager) Get(segmentID UniqueID) Segment {
+func (mgr *segmentManager) Get(segmentID typeutil.UniqueID) Segment {
 	mgr.mu.RLock()
 	defer mgr.mu.RUnlock()
 
@@ -332,7 +331,7 @@ func (mgr *segmentManager) Get(segmentID UniqueID) Segment {
 	return nil
 }
 
-func (mgr *segmentManager) GetWithType(segmentID UniqueID, typ SegmentType) Segment {
+func (mgr *segmentManager) GetWithType(segmentID typeutil.UniqueID, typ SegmentType) Segment {
 	mgr.mu.RLock()
 	defer mgr.mu.RUnlock()
 
@@ -458,6 +457,7 @@ func (mgr *segmentManager) rangeWithFilter(process func(id int64, segType Segmen
 			hasSegIDs = true
 			segmentIDs.Insert(segIDs...)
 		}
+		otherFilters = append(otherFilters, filter)
 	}
 
 	mergedFilter := func(info Segment) bool {
@@ -513,7 +513,7 @@ func filter(segment Segment, filters ...SegmentFilter) bool {
 	return true
 }
 
-func (mgr *segmentManager) GetSealed(segmentID UniqueID) Segment {
+func (mgr *segmentManager) GetSealed(segmentID typeutil.UniqueID) Segment {
 	mgr.mu.RLock()
 	defer mgr.mu.RUnlock()
 
@@ -524,7 +524,7 @@ func (mgr *segmentManager) GetSealed(segmentID UniqueID) Segment {
 	return nil
 }
 
-func (mgr *segmentManager) GetGrowing(segmentID UniqueID) Segment {
+func (mgr *segmentManager) GetGrowing(segmentID typeutil.UniqueID) Segment {
 	mgr.mu.RLock()
 	defer mgr.mu.RUnlock()
 
@@ -544,7 +544,7 @@ func (mgr *segmentManager) Empty() bool {
 
 // returns true if the segment exists,
 // false otherwise
-func (mgr *segmentManager) Remove(segmentID UniqueID, scope querypb.DataScope) (int, int) {
+func (mgr *segmentManager) Remove(segmentID typeutil.UniqueID, scope querypb.DataScope) (int, int) {
 	mgr.mu.Lock()
 
 	var removeGrowing, removeSealed int
@@ -587,7 +587,7 @@ func (mgr *segmentManager) Remove(segmentID UniqueID, scope querypb.DataScope) (
 	return removeGrowing, removeSealed
 }
 
-func (mgr *segmentManager) removeSegmentWithType(typ SegmentType, segmentID UniqueID) Segment {
+func (mgr *segmentManager) removeSegmentWithType(typ SegmentType, segmentID typeutil.UniqueID) Segment {
 	switch typ {
 	case SegmentTypeGrowing:
 		s, ok := mgr.growingSegments[segmentID]
@@ -656,7 +656,7 @@ func (mgr *segmentManager) Clear() {
 
 func (mgr *segmentManager) updateMetric() {
 	// update collection and partiation metric
-	collections, partiations := make(Set[int64]), make(Set[int64])
+	collections, partiations := make(typeutil.Set[int64]), make(typeutil.Set[int64])
 	for _, seg := range mgr.growingSegments {
 		collections.Insert(seg.Collection())
 		partiations.Insert(seg.Partition())
