@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	rand2 "crypto/rand"
+	"encoding/json"
 	"fmt"
 	"io"
 	"math"
@@ -145,7 +146,19 @@ func createInsertData(t *testing.T, schema *schemapb.CollectionSchema, rowCount 
 		case schemapb.DataType_JSON:
 			jsonData := make([][]byte, 0)
 			for i := 0; i < rowCount; i++ {
-				jsonData = append(jsonData, []byte(fmt.Sprintf("{\"y\": %d}", i)))
+				if i%4 == 0 {
+					v, _ := json.Marshal("{\"a\": \"%s\", \"b\": %d}")
+					jsonData = append(jsonData, v)
+				} else if i%4 == 1 {
+					v, _ := json.Marshal(i)
+					jsonData = append(jsonData, v)
+				} else if i%4 == 2 {
+					v, _ := json.Marshal(float32(i) * 0.1)
+					jsonData = append(jsonData, v)
+				} else if i%4 == 3 {
+					v, _ := json.Marshal(strconv.Itoa(i))
+					jsonData = append(jsonData, v)
+				}
 			}
 			insertData.Data[field.GetFieldID()] = &storage.JSONFieldData{Data: jsonData}
 		case schemapb.DataType_Array:
@@ -302,6 +315,115 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 	checkFn(res, 0, suite.numRows)
 }
 
+func (suite *ReaderSuite) failRun(dt schemapb.DataType, isDynamic bool) {
+	const dim = 8
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      100,
+				Name:         "pk",
+				IsPrimaryKey: true,
+				DataType:     suite.pkDataType,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   "max_length",
+						Value: "256",
+					},
+				},
+			},
+			{
+				FieldID:  101,
+				Name:     "vec",
+				DataType: suite.vecDataType,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.DimKey,
+						Value: fmt.Sprintf("%d", dim),
+					},
+				},
+			},
+			{
+				FieldID:     102,
+				Name:        dt.String(),
+				DataType:    dt,
+				ElementType: schemapb.DataType_Int32,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   "max_length",
+						Value: "256",
+					},
+				},
+				IsDynamic: isDynamic,
+			},
+		},
+	}
+	insertData := createInsertData(suite.T(), schema, suite.numRows)
+	fieldIDToField := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) int64 {
+		return field.GetFieldID()
+	})
+	files := make(map[int64]string)
+	for _, field := range schema.GetFields() {
+		files[field.GetFieldID()] = fmt.Sprintf("%s.npy", field.GetName())
+	}
+
+	cm := mocks.NewChunkManager(suite.T())
+	type mockReader struct {
+		io.Reader
+		io.Closer
+		io.ReaderAt
+		io.Seeker
+	}
+	for fieldID, fieldData := range insertData.Data {
+		dataType := fieldIDToField[fieldID].GetDataType()
+		if dataType == schemapb.DataType_JSON {
+			jsonStrs := make([]string, 0, fieldData.RowNum())
+			for i := 0; i < fieldData.RowNum(); i++ {
+				row := fieldData.GetRow(i)
+				jsonStrs = append(jsonStrs, string(row.([]byte)))
+			}
+			reader, err := CreateReader(jsonStrs)
+			suite.NoError(err)
+			cm.EXPECT().Reader(mock.Anything, files[fieldID]).Return(&mockReader{
+				Reader: reader,
+			}, nil)
+		} else if dataType == schemapb.DataType_FloatVector {
+			chunked := lo.Chunk(insertData.Data[fieldID].GetRows().([]float32), dim)
+			chunkedRows := make([][dim]float32, len(chunked))
+			for i, innerSlice := range chunked {
+				copy(chunkedRows[i][:], innerSlice[:])
+			}
+			reader, err := CreateReader(chunkedRows)
+			suite.NoError(err)
+			cm.EXPECT().Reader(mock.Anything, files[fieldID]).Return(&mockReader{
+				Reader: reader,
+			}, nil)
+		} else if dataType == schemapb.DataType_BinaryVector {
+			chunked := lo.Chunk(insertData.Data[fieldID].GetRows().([]byte), dim/8)
+			chunkedRows := make([][dim / 8]byte, len(chunked))
+			for i, innerSlice := range chunked {
+				copy(chunkedRows[i][:], innerSlice[:])
+			}
+			reader, err := CreateReader(chunkedRows)
+			suite.NoError(err)
+			cm.EXPECT().Reader(mock.Anything, files[fieldID]).Return(&mockReader{
+				Reader: reader,
+			}, nil)
+		} else {
+			reader, err := CreateReader(insertData.Data[fieldID].GetRows())
+			suite.NoError(err)
+			cm.EXPECT().Reader(mock.Anything, files[fieldID]).Return(&mockReader{
+				Reader: reader,
+			}, nil)
+		}
+	}
+
+	reader, err := NewReader(context.Background(), schema, lo.Values(files), cm, math.MaxInt)
+	suite.NoError(err)
+
+	_, err = reader.Read()
+	suite.Error(err)
+}
+
 func (suite *ReaderSuite) TestReadScalarFields() {
 	suite.run(schemapb.DataType_Bool)
 	suite.run(schemapb.DataType_Int8)
@@ -312,6 +434,7 @@ func (suite *ReaderSuite) TestReadScalarFields() {
 	suite.run(schemapb.DataType_Double)
 	suite.run(schemapb.DataType_VarChar)
 	suite.run(schemapb.DataType_JSON)
+	suite.failRun(schemapb.DataType_JSON, true)
 }
 
 func (suite *ReaderSuite) TestStringPK() {

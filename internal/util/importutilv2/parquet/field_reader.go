@@ -111,6 +111,13 @@ func (c *FieldReader) Next(count int64) (any, error) {
 			if err != nil {
 				return nil, err
 			}
+			if c.field.GetIsDynamic() {
+				var dummy2 map[string]interface{}
+				err = json.Unmarshal([]byte(str), &dummy2)
+				if err != nil {
+					return nil, err
+				}
+			}
 			byteArr = append(byteArr, []byte(str))
 		}
 		return byteArr, nil
