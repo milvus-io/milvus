@@ -65,7 +65,7 @@ CheckGroupBySearchResult(const SearchResult& search_result,
                          int nq,
                          bool strict) {
     int total = topK * nq;
-    ASSERT_EQ(search_result.group_by_values_.size(), total);
+    ASSERT_EQ(search_result.group_by_values_.value().size(), total);
     ASSERT_EQ(search_result.seg_offsets_.size(), total);
     ASSERT_EQ(search_result.distances_.size(), total);
     ASSERT_TRUE(search_result.seg_offsets_[0] != INVALID_SEG_OFFSET);
@@ -152,7 +152,7 @@ TEST(GroupBY, SealedIndex) {
             segment->Search(plan.get(), ph_group.get(), 1L << 63);
         CheckGroupBySearchResult(*search_result, topK, num_queries, false);
 
-        auto& group_by_values = search_result->group_by_values_;
+        auto& group_by_values = search_result->group_by_values_.value();
         int size = group_by_values.size();
         std::unordered_set<int8_t> i8_set;
         float lastDistance = 0.0;
@@ -201,7 +201,7 @@ TEST(GroupBY, SealedIndex) {
             segment->Search(plan.get(), ph_group.get(), 1L << 63);
         CheckGroupBySearchResult(*search_result, topK, num_queries, false);
 
-        auto& group_by_values = search_result->group_by_values_;
+        auto& group_by_values = search_result->group_by_values_.value();
         int size = group_by_values.size();
         std::unordered_set<int16_t> i16_set;
         float lastDistance = 0.0;
@@ -249,7 +249,7 @@ TEST(GroupBY, SealedIndex) {
         auto search_result =
             segment->Search(plan.get(), ph_group.get(), 1L << 63);
         CheckGroupBySearchResult(*search_result, topK, num_queries, false);
-        auto& group_by_values = search_result->group_by_values_;
+        auto& group_by_values = search_result->group_by_values_.value();
         int size = group_by_values.size();
 
         std::unordered_set<int32_t> i32_set;
@@ -298,7 +298,7 @@ TEST(GroupBY, SealedIndex) {
         auto search_result =
             segment->Search(plan.get(), ph_group.get(), 1L << 63);
         CheckGroupBySearchResult(*search_result, topK, num_queries, false);
-        auto& group_by_values = search_result->group_by_values_;
+        auto& group_by_values = search_result->group_by_values_.value();
 
         int size = group_by_values.size();
         std::unordered_set<int64_t> i64_set;
@@ -347,7 +347,7 @@ TEST(GroupBY, SealedIndex) {
         auto search_result =
             segment->Search(plan.get(), ph_group.get(), 1L << 63);
         CheckGroupBySearchResult(*search_result, topK, num_queries, false);
-        auto& group_by_values = search_result->group_by_values_;
+        auto& group_by_values = search_result->group_by_values_.value();
         int size = group_by_values.size();
         std::unordered_set<std::string> strs_set;
         float lastDistance = 0.0;
@@ -396,7 +396,7 @@ TEST(GroupBY, SealedIndex) {
         auto search_result =
             segment->Search(plan.get(), ph_group.get(), 1L << 63);
         CheckGroupBySearchResult(*search_result, topK, num_queries, false);
-        auto& group_by_values = search_result->group_by_values_;
+        auto& group_by_values = search_result->group_by_values_.value();
         int size = group_by_values.size();
         std::unordered_set<bool> bools_set;
         int boolValCount = 0;
@@ -485,7 +485,7 @@ TEST(GroupBY, SealedData) {
             segment->Search(plan.get(), ph_group.get(), 1L << 63);
         CheckGroupBySearchResult(*search_result, topK, num_queries, false);
 
-        auto& group_by_values = search_result->group_by_values_;
+        auto& group_by_values = search_result->group_by_values_.value();
         int size = group_by_values.size();
         std::unordered_set<int8_t> i8_set;
         float lastDistance = 0.0;
@@ -692,7 +692,7 @@ TEST(GroupBY, GrowingRawData) {
         segment_growing_impl->Search(plan.get(), ph_group.get(), 1L << 63);
     CheckGroupBySearchResult(*search_result, topK, num_queries, true);
 
-    auto& group_by_values = search_result->group_by_values_;
+    auto& group_by_values = search_result->group_by_values_.value();
     int idx = 0;
     for (int i = 0; i < num_queries; i++) {
         std::unordered_set<int32_t> i32_set;
@@ -788,7 +788,7 @@ TEST(GroupBY, GrowingIndex) {
         segment_growing_impl->Search(plan.get(), ph_group.get(), 1L << 63);
     CheckGroupBySearchResult(*search_result, topK, num_queries, true);
 
-    auto& group_by_values = search_result->group_by_values_;
+    auto& group_by_values = search_result->group_by_values_.value();
     int idx = 0;
     for (int i = 0; i < num_queries; i++) {
         std::unordered_set<int32_t> i32_set;

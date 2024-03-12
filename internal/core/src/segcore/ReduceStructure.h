@@ -69,8 +69,10 @@ struct SearchResultPair {
         if (offset_ < offset_rb_) {
             primary_key_ = search_result_->primary_keys_.at(offset_);
             distance_ = search_result_->distances_.at(offset_);
-            if (offset_ < search_result_->group_by_values_.size()) {
-                group_by_value_ = search_result_->group_by_values_.at(offset_);
+            if (search_result_->group_by_values_.has_value() &&
+                offset_ < search_result_->group_by_values_.value().size()) {
+                group_by_value_ =
+                    search_result_->group_by_values_.value().at(offset_);
             }
         } else {
             primary_key_ = INVALID_PK;
