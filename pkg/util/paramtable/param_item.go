@@ -85,6 +85,7 @@ func (pi *ParamItem) SwapTempValue(s string) *string {
 	if s == "" {
 		return pi.tempValue.Swap(nil)
 	}
+	pi.manager.EvictCachedValue(pi.Key)
 	return pi.tempValue.Swap(&s)
 }
 
@@ -94,47 +95,124 @@ func (pi *ParamItem) GetValue() string {
 }
 
 func (pi *ParamItem) GetAsStrings() []string {
-	return getAsStrings(pi.GetValue())
+	if val, exist := pi.manager.GetCachedValue(pi.Key); exist {
+		if strings, ok := val.([]string); ok {
+			return strings
+		}
+	}
+	realStrs := getAsStrings(pi.GetValue())
+	pi.manager.SetCachedValue(pi.Key, realStrs)
+	return realStrs
 }
 
 func (pi *ParamItem) GetAsBool() bool {
-	return getAsBool(pi.GetValue())
+	if val, exist := pi.manager.GetCachedValue(pi.Key); exist {
+		if boolVal, ok := val.(bool); ok {
+			return boolVal
+		}
+	}
+	boolVal := getAsBool(pi.GetValue())
+	pi.manager.SetCachedValue(pi.Key, boolVal)
+	return boolVal
 }
 
 func (pi *ParamItem) GetAsInt() int {
-	return getAsInt(pi.GetValue())
+	if val, exist := pi.manager.GetCachedValue(pi.Key); exist {
+		if intVal, ok := val.(int); ok {
+			return intVal
+		}
+	}
+	intVal := getAsInt(pi.GetValue())
+	pi.manager.SetCachedValue(pi.Key, intVal)
+	return intVal
 }
 
 func (pi *ParamItem) GetAsInt32() int32 {
-	return int32(getAsInt64(pi.GetValue()))
+	if val, exist := pi.manager.GetCachedValue(pi.Key); exist {
+		if int32Val, ok := val.(int32); ok {
+			return int32Val
+		}
+	}
+	int32Val := int32(getAsInt64(pi.GetValue()))
+	pi.manager.SetCachedValue(pi.Key, int32Val)
+	return int32Val
 }
 
 func (pi *ParamItem) GetAsUint() uint {
-	return uint(getAsUint64(pi.GetValue()))
+	if val, exist := pi.manager.GetCachedValue(pi.Key); exist {
+		if uintVal, ok := val.(uint); ok {
+			return uintVal
+		}
+	}
+	uintVal := uint(getAsUint64(pi.GetValue()))
+	pi.manager.SetCachedValue(pi.Key, uintVal)
+	return uintVal
 }
 
 func (pi *ParamItem) GetAsUint32() uint32 {
-	return uint32(getAsUint64(pi.GetValue()))
+	if val, exist := pi.manager.GetCachedValue(pi.Key); exist {
+		if uint32Val, ok := val.(uint32); ok {
+			return uint32Val
+		}
+	}
+	uint32Val := uint32(getAsUint64(pi.GetValue()))
+	pi.manager.SetCachedValue(pi.Key, uint32Val)
+	return uint32Val
 }
 
 func (pi *ParamItem) GetAsUint64() uint64 {
-	return getAsUint64(pi.GetValue())
+	if val, exist := pi.manager.GetCachedValue(pi.Key); exist {
+		if uint64Val, ok := val.(uint64); ok {
+			return uint64Val
+		}
+	}
+	uint64Val := getAsUint64(pi.GetValue())
+	pi.manager.SetCachedValue(pi.Key, uint64Val)
+	return uint64Val
 }
 
 func (pi *ParamItem) GetAsUint16() uint16 {
-	return uint16(getAsUint64(pi.GetValue()))
+	if val, exist := pi.manager.GetCachedValue(pi.Key); exist {
+		if uint16Val, ok := val.(uint16); ok {
+			return uint16Val
+		}
+	}
+	uint16Val := uint16(getAsUint64(pi.GetValue()))
+	pi.manager.SetCachedValue(pi.Key, uint16Val)
+	return uint16Val
 }
 
 func (pi *ParamItem) GetAsInt64() int64 {
-	return getAsInt64(pi.GetValue())
+	if val, exist := pi.manager.GetCachedValue(pi.Key); exist {
+		if int64Val, ok := val.(int64); ok {
+			return int64Val
+		}
+	}
+	int64Val := getAsInt64(pi.GetValue())
+	pi.manager.SetCachedValue(pi.Key, int64Val)
+	return int64Val
 }
 
 func (pi *ParamItem) GetAsFloat() float64 {
-	return getAsFloat(pi.GetValue())
+	if val, exist := pi.manager.GetCachedValue(pi.Key); exist {
+		if floatVal, ok := val.(float64); ok {
+			return floatVal
+		}
+	}
+	floatVal := getAsFloat(pi.GetValue())
+	pi.manager.SetCachedValue(pi.Key, floatVal)
+	return floatVal
 }
 
 func (pi *ParamItem) GetAsDuration(unit time.Duration) time.Duration {
-	return getAsDuration(pi.GetValue(), unit)
+	if val, exist := pi.manager.GetCachedValue(pi.Key); exist {
+		if durationVal, ok := val.(time.Duration); ok {
+			return durationVal
+		}
+	}
+	durationVal := getAsDuration(pi.GetValue(), unit)
+	pi.manager.SetCachedValue(pi.Key, durationVal)
+	return durationVal
 }
 
 func (pi *ParamItem) GetAsJSONMap() map[string]string {

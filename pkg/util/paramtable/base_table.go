@@ -253,12 +253,14 @@ func (bt *BaseTable) GetWithDefault(key, defaultValue string) string {
 // Remove Config by key
 func (bt *BaseTable) Remove(key string) error {
 	bt.mgr.DeleteConfig(key)
+	bt.mgr.EvictCachedValue(key)
 	return nil
 }
 
 // Update Config
 func (bt *BaseTable) Save(key, value string) error {
 	bt.mgr.SetConfig(key, value)
+	bt.mgr.EvictCachedValue(key)
 	return nil
 }
 
@@ -272,5 +274,6 @@ func (bt *BaseTable) SaveGroup(group map[string]string) error {
 // Reset Config to default value
 func (bt *BaseTable) Reset(key string) error {
 	bt.mgr.ResetConfig(key)
+	bt.mgr.EvictCachedValue(key)
 	return nil
 }

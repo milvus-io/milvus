@@ -1952,7 +1952,7 @@ type queryNodeConfig struct {
 	InterimIndexNlist             ParamItem `refreshable:"false"`
 	InterimIndexNProbe            ParamItem `refreshable:"false"`
 	InterimIndexMemExpandRate     ParamItem `refreshable:"false"`
-	InterimIndexBuildParallelRate ParamItem `refreshable:"true"`
+	InterimIndexBuildParallelRate ParamItem `refreshable:"false"`
 
 	// memory limit
 	LoadMemoryUsageFactor               ParamItem `refreshable:"true"`

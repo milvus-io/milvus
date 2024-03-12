@@ -284,6 +284,7 @@ func TestComponentParam(t *testing.T) {
 
 		assert.Equal(t, 1000, Params.SegmentCheckInterval.GetAsInt())
 		assert.Equal(t, 1000, Params.ChannelCheckInterval.GetAsInt())
+		params.Save(Params.BalanceCheckInterval.Key, "10000")
 		assert.Equal(t, 10000, Params.BalanceCheckInterval.GetAsInt())
 		assert.Equal(t, 10000, Params.IndexCheckInterval.GetAsInt())
 		assert.Equal(t, 3, Params.CollectionRecoverTimesLimit.GetAsInt())
@@ -469,4 +470,33 @@ func TestForbiddenItem(t *testing.T) {
 		Value: "new-cluster",
 	})
 	assert.Equal(t, "by-dev", params.CommonCfg.ClusterPrefix.GetValue())
+}
+
+func TestCachedParam(t *testing.T) {
+	Init()
+	params := Get()
+
+	assert.True(t, params.IndexNodeCfg.EnableDisk.GetAsBool())
+	assert.True(t, params.IndexNodeCfg.EnableDisk.GetAsBool())
+
+	assert.Equal(t, 256*1024*1024, params.QueryCoordGrpcServerCfg.ServerMaxRecvSize.GetAsInt())
+	assert.Equal(t, 256*1024*1024, params.QueryCoordGrpcServerCfg.ServerMaxRecvSize.GetAsInt())
+
+	assert.Equal(t, int32(16), params.DataNodeCfg.FlowGraphMaxQueueLength.GetAsInt32())
+	assert.Equal(t, int32(16), params.DataNodeCfg.FlowGraphMaxQueueLength.GetAsInt32())
+
+	assert.Equal(t, uint(100000), params.CommonCfg.BloomFilterSize.GetAsUint())
+	assert.Equal(t, uint(100000), params.CommonCfg.BloomFilterSize.GetAsUint())
+
+	assert.Equal(t, uint64(8388608), params.ServiceParam.MQCfg.PursuitBufferSize.GetAsUint64())
+	assert.Equal(t, uint64(8388608), params.ServiceParam.MQCfg.PursuitBufferSize.GetAsUint64())
+
+	assert.Equal(t, int64(1024), params.DataCoordCfg.SegmentMaxSize.GetAsInt64())
+	assert.Equal(t, int64(1024), params.DataCoordCfg.SegmentMaxSize.GetAsInt64())
+
+	assert.Equal(t, 0.85, params.QuotaConfig.DataNodeMemoryLowWaterLevel.GetAsFloat())
+	assert.Equal(t, 0.85, params.QuotaConfig.DataNodeMemoryLowWaterLevel.GetAsFloat())
+
+	assert.Equal(t, 1*time.Hour, params.DataCoordCfg.GCInterval.GetAsDuration(time.Second))
+	assert.Equal(t, 1*time.Hour, params.DataCoordCfg.GCInterval.GetAsDuration(time.Second))
 }
