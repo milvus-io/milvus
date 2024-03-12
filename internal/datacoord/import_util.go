@@ -247,31 +247,43 @@ func RegroupImportFiles(job ImportJob, files []*datapb.ImportFileStats) [][]*dat
 	return fileGroups
 }
 
-func CheckDiskQuota(job ImportJob, meta *meta, imeta ImportMeta) error {
+func CheckDiskQuota(job ImportJob, meta *meta, imeta ImportMeta) (int64, error) {
 	if !Params.QuotaConfig.DiskProtectionEnabled.GetAsBool() {
-		return nil
+		return 0, nil
 	}
+
+	var (
+		requestedTotal       int64
+		requestedCollections = make(map[int64]int64)
+	)
+	for _, j := range imeta.GetJobBy() {
+		requested := j.GetRequestedDiskSize()
+		requestedTotal += requested
+		requestedCollections[j.GetCollectionID()] += requested
+	}
+
+	err := merr.WrapErrServiceQuotaExceeded("disk quota exceeded, please allocate more resources")
+	totalUsage, collectionsUsage := meta.GetCollectionBinlogSize()
+
 	tasks := imeta.GetTaskBy(WithJob(job.GetJobID()), WithType(PreImportTaskType))
 	files := make([]*datapb.ImportFileStats, 0)
 	for _, task := range tasks {
 		files = append(files, task.GetFileStats()...)
 	}
-	toImport := lo.SumBy(files, func(file *datapb.ImportFileStats) int64 {
+	requestSize := lo.SumBy(files, func(file *datapb.ImportFileStats) int64 {
 		return file.GetTotalMemorySize()
 	})
 
-	err := merr.WrapErrServiceQuotaExceeded("disk quota exceeded, please allocate more resources")
-	totalUsage, collectionsUsage := meta.GetCollectionBinlogSize()
-
 	totalDiskQuota := Params.QuotaConfig.DiskQuota.GetAsFloat()
-	if float64(totalUsage+toImport) > totalDiskQuota {
-		return err
+	if float64(totalUsage+requestedTotal+requestSize) > totalDiskQuota {
+		return 0, err
 	}
 	collectionDiskQuota := Params.QuotaConfig.DiskQuotaPerCollection.GetAsFloat()
-	if float64(collectionsUsage[job.GetCollectionID()]+toImport) > collectionDiskQuota {
-		return err
+	colID := job.GetCollectionID()
+	if float64(collectionsUsage[colID]+requestedCollections[colID]+requestSize) > collectionDiskQuota {
+		return 0, err
 	}
-	return nil
+	return requestSize, nil
 }
 
 func AddImportSegment(cluster Cluster, meta *meta, segmentID int64) error {

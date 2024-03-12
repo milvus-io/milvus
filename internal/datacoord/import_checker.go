@@ -210,7 +210,7 @@ func (c *importChecker) checkPreImportingJob(job ImportJob) {
 		return
 	}
 
-	err := CheckDiskQuota(job, c.meta, c.imeta)
+	requestSize, err := CheckDiskQuota(job, c.meta, c.imeta)
 	if err != nil {
 		log.Warn("import failed, disk quota exceeded", zap.Int64("jobID", job.GetJobID()), zap.Error(err))
 		err = c.imeta.UpdateJob(job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(err.Error()))
@@ -234,7 +234,7 @@ func (c *importChecker) checkPreImportingJob(job ImportJob) {
 		}
 		log.Info("add new import task", WrapTaskLog(t)...)
 	}
-	err = c.imeta.UpdateJob(job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Importing))
+	err = c.imeta.UpdateJob(job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Importing), UpdateRequestedDiskSize(requestSize))
 	if err != nil {
 		log.Warn("failed to update job state to Importing", zap.Int64("jobID", job.GetJobID()), zap.Error(err))
 	}

@@ -261,7 +261,7 @@ func TestImportUtil_CheckDiskQuota(t *testing.T) {
 
 	Params.Save(Params.QuotaConfig.DiskProtectionEnabled.Key, "false")
 	defer Params.Reset(Params.QuotaConfig.DiskProtectionEnabled.Key)
-	err = CheckDiskQuota(job, meta, imeta)
+	_, err = CheckDiskQuota(job, meta, imeta)
 	assert.NoError(t, err)
 
 	segment := &SegmentInfo{
@@ -276,16 +276,17 @@ func TestImportUtil_CheckDiskQuota(t *testing.T) {
 	Params.Save(Params.QuotaConfig.DiskQuotaPerCollection.Key, "10000")
 	defer Params.Reset(Params.QuotaConfig.DiskQuota.Key)
 	defer Params.Reset(Params.QuotaConfig.DiskQuotaPerCollection.Key)
-	err = CheckDiskQuota(job, meta, imeta)
+	requestSize, err := CheckDiskQuota(job, meta, imeta)
 	assert.NoError(t, err)
+	assert.Equal(t, int64(3000*1024*1024), requestSize)
 
 	Params.Save(Params.QuotaConfig.DiskQuota.Key, "5000")
-	err = CheckDiskQuota(job, meta, imeta)
+	_, err = CheckDiskQuota(job, meta, imeta)
 	assert.True(t, errors.Is(err, merr.ErrServiceQuotaExceeded))
 
 	Params.Save(Params.QuotaConfig.DiskQuota.Key, "10000")
 	Params.Save(Params.QuotaConfig.DiskQuotaPerCollection.Key, "5000")
-	err = CheckDiskQuota(job, meta, imeta)
+	_, err = CheckDiskQuota(job, meta, imeta)
 	assert.True(t, errors.Is(err, merr.ErrServiceQuotaExceeded))
 }
 
