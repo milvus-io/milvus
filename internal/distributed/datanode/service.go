@@ -361,6 +361,14 @@ func (s *Server) GetCompactionState(ctx context.Context, request *datapb.Compact
 	return s.datanode.GetCompactionState(ctx, request)
 }
 
+func (s *Server) AnalyzeStats(ctx context.Context, plan *datapb.CompactionPlan) (*commonpb.Status, error) {
+	return s.datanode.AnalyzeStats(ctx, plan)
+}
+
+func (s *Server) GetAnalyzeStatsResult(ctx context.Context, plan *datapb.CompactionPlan) (*datapb.AnalyzeStatsResultResponse, error) {
+	return s.datanode.GetAnalyzeStatsResult(ctx, plan)
+}
+
 func (s *Server) Import(ctx context.Context, request *datapb.ImportTaskRequest) (*commonpb.Status, error) {
 	return s.datanode.Import(ctx, request)
 }

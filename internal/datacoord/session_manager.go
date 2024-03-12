@@ -57,6 +57,8 @@ type SessionManager interface {
 
 	Flush(ctx context.Context, nodeID int64, req *datapb.FlushSegmentsRequest)
 	FlushChannels(ctx context.Context, nodeID int64, req *datapb.FlushChannelsRequest) error
+	AnalyzeStats(ctx context.Context, nodeID int64, plan *datapb.CompactionPlan) error
+	GetAnalyzeStatsResult(ctx context.Context, nodeID int64, plan *datapb.CompactionPlan) (*datapb.AnalyzeStatsResultResponse, error)
 	Compaction(ctx context.Context, nodeID int64, plan *datapb.CompactionPlan) error
 	SyncSegments(nodeID int64, req *datapb.SyncSegmentsRequest) error
 	Import(ctx context.Context, nodeID int64, itr *datapb.ImportTaskRequest)
@@ -190,6 +192,45 @@ func (c *SessionManagerImpl) execFlush(ctx context.Context, nodeID int64, req *d
 	} else {
 		log.Info("flush call succeeded", zap.Int64("dataNode ID", nodeID))
 	}
+}
+
+// AnalyzeStats is a grpc interface. It will send request to DataNode with provided `nodeID` synchronously.
+func (c *SessionManagerImpl) AnalyzeStats(ctx context.Context, nodeID int64, plan *datapb.CompactionPlan) error {
+	ctx, cancel := context.WithTimeout(ctx, Params.DataCoordCfg.CompactionRPCTimeout.GetAsDuration(time.Second))
+	defer cancel()
+	cli, err := c.getClient(ctx, nodeID)
+	if err != nil {
+		log.Warn("failed to get client", zap.Int64("nodeID", nodeID), zap.Error(err))
+		return err
+	}
+
+	resp, err := cli.AnalyzeStats(ctx, plan)
+	if err := VerifyResponse(resp, err); err != nil {
+		log.Warn("failed to analyze stats", zap.Int64("node", nodeID), zap.Error(err), zap.Int64("planID", plan.GetPlanID()))
+		return err
+	}
+
+	log.Info("success to analyze stats", zap.Int64("node", nodeID), zap.Int64("planID", plan.GetPlanID()))
+	return nil
+}
+
+func (c *SessionManagerImpl) GetAnalyzeStatsResult(ctx context.Context, nodeID int64, plan *datapb.CompactionPlan) (*datapb.AnalyzeStatsResultResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, Params.DataCoordCfg.CompactionRPCTimeout.GetAsDuration(time.Second))
+	defer cancel()
+	cli, err := c.getClient(ctx, nodeID)
+	if err != nil {
+		log.Warn("failed to get client", zap.Int64("nodeID", nodeID), zap.Error(err))
+		return nil, err
+	}
+
+	resp, err := cli.GetAnalyzeStatsResult(ctx, plan)
+	if err := VerifyResponse(resp, err); err != nil {
+		log.Warn("failed to get analyze stats", zap.Int64("node", nodeID), zap.Error(err), zap.Int64("planID", plan.GetPlanID()))
+		return nil, err
+	}
+
+	log.Info("success to get analyze stats", zap.Int64("node", nodeID), zap.Int64("planID", plan.GetPlanID()))
+	return resp, nil
 }
 
 // Compaction is a grpc interface. It will send request to DataNode with provided `nodeID` synchronously.

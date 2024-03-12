@@ -190,6 +190,18 @@ func (c *Client) GetCompactionState(ctx context.Context, req *datapb.CompactionS
 	})
 }
 
+func (c *Client) AnalyzeStats(ctx context.Context, req *datapb.CompactionPlan, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return wrapGrpcCall(ctx, c, func(client datapb.DataNodeClient) (*commonpb.Status, error) {
+		return client.AnalyzeStats(ctx, req)
+	})
+}
+
+func (c *Client) GetAnalyzeStatsResult(ctx context.Context, req *datapb.CompactionPlan, opts ...grpc.CallOption) (*datapb.AnalyzeStatsResultResponse, error) {
+	return wrapGrpcCall(ctx, c, func(client datapb.DataNodeClient) (*datapb.AnalyzeStatsResultResponse, error) {
+		return client.GetAnalyzeStatsResult(ctx, req)
+	})
+}
+
 // Import data files(json, numpy, etc.) on MinIO/S3 storage, read and parse them into sealed segments
 func (c *Client) Import(ctx context.Context, req *datapb.ImportTaskRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	req = typeutil.Clone(req)

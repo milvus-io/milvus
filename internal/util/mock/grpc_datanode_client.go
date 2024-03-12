@@ -65,6 +65,14 @@ func (m *GrpcDataNodeClient) GetCompactionState(ctx context.Context, in *datapb.
 	return &datapb.CompactionStateResponse{}, m.Err
 }
 
+func (m *GrpcDataNodeClient) AnalyzeStats(ctx context.Context, in *datapb.CompactionPlan, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
+func (m *GrpcDataNodeClient) GetAnalyzeStatsResult(ctx context.Context, in *datapb.CompactionPlan, opts ...grpc.CallOption) (*datapb.AnalyzeStatsResultResponse, error) {
+	return &datapb.AnalyzeStatsResultResponse{}, m.Err
+}
+
 func (m *GrpcDataNodeClient) Import(ctx context.Context, req *datapb.ImportTaskRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }
