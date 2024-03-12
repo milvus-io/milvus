@@ -25,6 +25,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -288,6 +289,13 @@ func (s *importScheduler) processInProgressImport(task ImportTask) {
 	}
 	if resp.GetState() == datapb.ImportTaskStateV2_Completed {
 		for _, info := range resp.GetImportSegmentsInfo() {
+			// try to parse path and fill logID
+			err = binlog.CompressFieldBinlogs(info.GetBinlogs())
+			if err != nil {
+				log.Warn("fail to CompressFieldBinlogs for import binlogs",
+					WrapTaskLog(task, zap.Int64("segmentID", info.GetSegmentID()), zap.Error(err))...)
+				return
+			}
 			op := ReplaceBinlogsOperator(info.GetSegmentID(), info.GetBinlogs(), info.GetStatslogs(), nil)
 			err = s.meta.UpdateSegmentsInfo(op)
 			if err != nil {
