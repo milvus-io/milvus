@@ -31,6 +31,9 @@ class ExtractInfoPlanNodeVisitor : public PlanNodeVisitor {
     visit(BFloat16VectorANNS& node) override;
 
     void
+    visit(SparseFloatVectorANNS& node) override;
+
+    void
     visit(RetrievePlanNode& node) override;
 
  public:

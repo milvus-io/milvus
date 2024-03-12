@@ -96,11 +96,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
         return chunk_mutex_;
     }
 
-    const SealedIndexingRecord&
-    get_sealed_indexing_record() const {
-        return sealed_indexing_record_;
-    }
-
     const Schema&
     get_schema() const override {
         return *schema_;
@@ -179,6 +174,14 @@ class SegmentGrowingImpl : public SegmentGrowing {
                         const int64_t* seg_offsets,
                         int64_t count,
                         void* output_raw) const;
+
+    void
+    bulk_subscript_sparse_float_vector_impl(
+        FieldId field_id,
+        const ConcurrentVector<SparseFloatVector>* vec_raw,
+        const int64_t* seg_offsets,
+        int64_t count,
+        milvus::proto::schema::SparseFloatArray* output) const;
 
     void
     bulk_subscript(SystemFieldType system_type,
@@ -292,7 +295,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     // small indexes for every chunk
     IndexingRecord indexing_record_;
-    SealedIndexingRecord sealed_indexing_record_;  // not used
 
     // inserted fields data and row_ids, timestamps
     InsertRecord<false> insert_record_;

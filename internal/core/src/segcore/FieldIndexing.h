@@ -86,9 +86,6 @@ class FieldIndexing {
         return field_meta_;
     }
 
-    virtual idx_t
-    get_index_cursor() = 0;
-
     int64_t
     get_size_per_chunk() const {
         return segcore_config_.get_chunk_rows();
@@ -142,10 +139,6 @@ class ScalarFieldIndexing : public FieldIndexing {
                      void* output) override {
         PanicInfo(Unsupported,
                   "scalar index don't support get data from index");
-    }
-    idx_t
-    get_index_cursor() override {
-        return 0;
     }
 
     int64_t
@@ -201,6 +194,9 @@ class VectorFieldIndexing : public FieldIndexing {
                              const VectorBase* field_raw_data,
                              const void* data_source) override;
 
+    // for sparse float vector:
+    //   * element_size is not used
+    //   * output_raw pooints at a milvus::schema::proto::SparseFloatArray.
     void
     GetDataFromIndex(const int64_t* seg_offsets,
                      int64_t count,
@@ -228,9 +224,6 @@ class VectorFieldIndexing : public FieldIndexing {
 
     bool
     has_raw_data() const override;
-
-    idx_t
-    get_index_cursor() override;
 
     knowhere::Json
     get_build_params() const;
@@ -370,6 +363,9 @@ class IndexingRecord {
         }
     }
 
+    // for sparse float vector:
+    //   * element_size is not used
+    //   * output_raw pooints at a milvus::schema::proto::SparseFloatArray.
     void
     GetDataFromIndex(FieldId fieldId,
                      const int64_t* seg_offsets,
@@ -378,9 +374,10 @@ class IndexingRecord {
                      void* output_raw) const {
         if (is_in(fieldId)) {
             auto& indexing = field_indexings_.at(fieldId);
-            if (indexing->get_field_meta().is_vector() &&
+            if (indexing->get_field_meta().get_data_type() ==
+                    DataType::VECTOR_FLOAT ||
                 indexing->get_field_meta().get_data_type() ==
-                    DataType::VECTOR_FLOAT) {
+                    DataType::VECTOR_SPARSE_FLOAT) {
                 indexing->GetDataFromIndex(
                     seg_offsets, count, element_size, output_raw);
             }

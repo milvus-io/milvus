@@ -179,6 +179,12 @@ using IndexVersion = knowhere::IndexVersion;
 // TODO :: type define milvus index type(vector index type and scalar index type)
 using IndexType = knowhere::IndexType;
 
+inline bool
+IndexIsSparse(const IndexType& index_type) {
+    return index_type == knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX ||
+           index_type == knowhere::IndexEnum::INDEX_SPARSE_WAND;
+}
+
 // Plus 1 because we can't use greater(>) symbol
 constexpr size_t REF_SIZE_THRESHOLD = 16 + 1;
 

@@ -129,6 +129,9 @@ class VectorBase {
     virtual bool
     empty() = 0;
 
+    virtual void
+    clear() = 0;
+
  protected:
     const int64_t size_per_chunk_;
 };
@@ -282,7 +285,7 @@ class ConcurrentVectorImpl : public VectorBase {
     }
 
     void
-    clear() {
+    clear() override {
         chunks_.clear();
     }
 

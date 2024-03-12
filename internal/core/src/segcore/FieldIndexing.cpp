@@ -70,6 +70,9 @@ VectorFieldIndexing::BuildIndexRange(int64_t ack_beg,
     }
 }
 
+// for sparse float vector:
+//   * element_size is not used
+//   * output_raw pooints at a milvus::schema::proto::SparseFloatArray.
 void
 VectorFieldIndexing::GetDataFromIndex(const int64_t* seg_offsets,
                                       int64_t count,
@@ -80,10 +83,16 @@ VectorFieldIndexing::GetDataFromIndex(const int64_t* seg_offsets,
     ids_ds->SetDim(1);
     ids_ds->SetIds(seg_offsets);
     ids_ds->SetIsOwner(false);
-
-    auto vector = index_->GetVector(ids_ds);
-
-    std::memcpy(output, vector.data(), count * element_size);
+    if (field_meta_.get_data_type() == DataType::VECTOR_SPARSE_FLOAT) {
+        auto vector = index_->GetSparseVector(ids_ds);
+        SparseRowsToProto(
+            [vec_ptr = vector.get()](size_t i) { return vec_ptr + i; },
+            count,
+            reinterpret_cast<milvus::proto::schema::SparseFloatArray*>(output));
+    } else {
+        auto vector = index_->GetVector(ids_ds);
+        std::memcpy(output, vector.data(), count * element_size);
+    }
 }
 
 void
@@ -242,7 +251,9 @@ VectorFieldIndexing::AppendSegmentIndexDense(int64_t reserved_offset,
 knowhere::Json
 VectorFieldIndexing::get_build_params() const {
     auto config = config_->GetBuildBaseParams();
-    config[knowhere::meta::DIM] = std::to_string(field_meta_.get_dim());
+    if (!datatype_is_sparse_vector(field_meta_.get_data_type())) {
+        config[knowhere::meta::DIM] = std::to_string(field_meta_.get_dim());
+    }
     config[knowhere::meta::NUM_BUILD_THREAD] = std::to_string(1);
     // for sparse float vector: drop_ratio_build config is not allowed to be set
     // on growing segment index.
@@ -255,10 +266,6 @@ VectorFieldIndexing::get_search_params(const SearchInfo& searchInfo) const {
     return conf;
 }
 
-idx_t
-VectorFieldIndexing::get_index_cursor() {
-    return index_cur_.load();
-}
 bool
 VectorFieldIndexing::sync_data_with_index() const {
     return sync_with_index_.load();
