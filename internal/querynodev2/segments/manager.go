@@ -449,13 +449,14 @@ func (mgr *segmentManager) rangeWithFilter(process func(id int64, segType Segmen
 
 	otherFilters := make([]SegmentFilter, 0, len(filters))
 	for _, filter := range filters {
-		var ok bool
-		if segType, ok = filter.SegmentType(); ok {
+		if sType, ok := filter.SegmentType(); ok {
+			segType = sType
 			continue
 		}
 		if segIDs, ok := filter.SegmentIDs(); ok {
 			hasSegIDs = true
 			segmentIDs.Insert(segIDs...)
+			continue
 		}
 		otherFilters = append(otherFilters, filter)
 	}
