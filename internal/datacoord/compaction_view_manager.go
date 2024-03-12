@@ -190,7 +190,6 @@ func (m *CompactionViewManager) RefreshLevelZeroViews(latestCollSegs map[int64][
 		if len(collRefreshedViews) > 0 {
 			allRefreshedL0Veiws = append(allRefreshedL0Veiws, collRefreshedViews...)
 		}
-
 	}
 
 	return allRefreshedL0Veiws
