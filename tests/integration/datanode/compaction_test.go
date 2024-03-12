@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"testing"
 	"time"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
+	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -22,10 +24,9 @@ import (
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
-// This is an unstable it, need to be fixed later
-// func TestCompactionSuite(t *testing.T) {
-//     suite.Run(t, new(CompactionSuite))
-// }
+func TestCompactionSuite(t *testing.T) {
+	suite.Run(t, new(CompactionSuite))
+}
 
 type CompactionSuite struct {
 	integration.MiniClusterSuite
@@ -33,7 +34,6 @@ type CompactionSuite struct {
 	dim int
 }
 
-// issue: https://github.com/milvus-io/milvus/issues/30137
 func (s *CompactionSuite) TestClearCompactionTask() {
 	s.dim = 128
 	collName := "test_compaction"
@@ -53,9 +53,7 @@ func (s *CompactionSuite) deleteAndFlush(pks []int64, collection string) {
 	ctx := context.Background()
 
 	expr := fmt.Sprintf("%s in [%s]", integration.Int64Field, strings.Join(lo.Map(pks, func(pk int64, _ int) string { return strconv.FormatInt(pk, 10) }), ","))
-	log.Info("========================delete expr==================",
-		zap.String("expr", expr),
-	)
+	log.Info("======================== delete ==================")
 	deleteResp, err := s.Cluster.Proxy.Delete(ctx, &milvuspb.DeleteRequest{
 		CollectionName: collection,
 		Expr:           expr,
@@ -151,23 +149,21 @@ func (s *CompactionSuite) compactAndReboot(collection string) {
 	s.Require().Equal(1, len(planResp.GetMergeInfos()))
 
 	// Reboot
-	if planResp.GetMergeInfos()[0].GetTarget() == int64(-1) {
-		s.Cluster.DataCoord.Stop()
-		s.Cluster.DataCoord = grpcdatacoord.NewServer(ctx, s.Cluster.GetFactory())
-		err = s.Cluster.DataCoord.Run()
-		s.Require().NoError(err)
+	s.Cluster.DataCoord.Stop()
+	s.Cluster.DataCoord = grpcdatacoord.NewServer(ctx, s.Cluster.GetFactory())
+	err = s.Cluster.DataCoord.Run()
+	s.Require().NoError(err)
 
-		stateResp, err = s.Cluster.Proxy.GetCompactionState(ctx, &milvuspb.GetCompactionStateRequest{
-			CompactionID: compactID,
-		})
+	stateResp, err = s.Cluster.Proxy.GetCompactionState(ctx, &milvuspb.GetCompactionStateRequest{
+		CompactionID: compactID,
+	})
 
-		s.Require().NoError(err)
-		s.Require().True(merr.Ok(stateResp.GetStatus()))
-		s.Require().EqualValues(0, stateResp.GetTimeoutPlanNo())
-		s.Require().EqualValues(0, stateResp.GetExecutingPlanNo())
-		s.Require().EqualValues(0, stateResp.GetCompletedPlanNo())
-		s.Require().EqualValues(0, stateResp.GetFailedPlanNo())
-	}
+	s.Require().NoError(err)
+	s.Require().True(merr.Ok(stateResp.GetStatus()))
+	s.Require().EqualValues(0, stateResp.GetTimeoutPlanNo())
+	s.Require().EqualValues(0, stateResp.GetExecutingPlanNo())
+	s.Require().EqualValues(0, stateResp.GetCompletedPlanNo())
+	s.Require().EqualValues(0, stateResp.GetFailedPlanNo())
 }
 
 func (s *CompactionSuite) generateSegment(collection string, segmentCount int) []int64 {
