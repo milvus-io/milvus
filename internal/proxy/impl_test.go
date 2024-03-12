@@ -1524,7 +1524,7 @@ func TestProxy_ImportV2(t *testing.T) {
 				{IsPartitionKey: true},
 			}},
 		}, nil)
-		mc.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(nil, mockErr)
+		mc.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything).Return(nil, mockErr)
 		globalMetaCache = mc
 		rsp, err = node.ImportV2(ctx, &internalpb.ImportRequest{CollectionName: "aaa"})
 		assert.NoError(t, err)

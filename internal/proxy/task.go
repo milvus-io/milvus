@@ -780,23 +780,16 @@ func (t *showCollectionsTask) Execute(ctx context.Context) error {
 		}
 
 		for offset, id := range resp.CollectionIDs {
-			collectionName, ok := IDs2Names[id]
-			if !ok {
-				log.Debug("Failed to get collection info. This collection may be not released",
-					zap.Int64("collectionID", id),
-					zap.Int64("requestID", t.Base.MsgID), zap.String("requestType", "showCollections"))
-				continue
-			}
-			collectionInfo, err := globalMetaCache.GetCollectionInfo(ctx, t.GetDbName(), collectionName, id)
+			collInfo, err := globalMetaCache.GetCollectionByID(ctx, id)
 			if err != nil {
-				log.Debug("Failed to get collection info.", zap.String("collectionName", collectionName),
+				log.Debug("Failed to get collection info.", zap.String("collectionName", collInfo.GetCollectionName()),
 					zap.Int64("requestID", t.Base.MsgID), zap.String("requestType", "showCollections"))
 				return err
 			}
 			t.result.CollectionIds = append(t.result.CollectionIds, id)
-			t.result.CollectionNames = append(t.result.CollectionNames, collectionName)
-			t.result.CreatedTimestamps = append(t.result.CreatedTimestamps, collectionInfo.createdTimestamp)
-			t.result.CreatedUtcTimestamps = append(t.result.CreatedUtcTimestamps, collectionInfo.createdUtcTimestamp)
+			t.result.CollectionNames = append(t.result.CollectionNames, collInfo.GetCollectionName())
+			t.result.CreatedTimestamps = append(t.result.CreatedTimestamps, collInfo.createdTimestamp)
+			t.result.CreatedUtcTimestamps = append(t.result.CreatedUtcTimestamps, collInfo.createdUtcTimestamp)
 			t.result.InMemoryPercentages = append(t.result.InMemoryPercentages, resp.InMemoryPercentages[offset])
 			t.result.QueryServiceAvailable = append(t.result.QueryServiceAvailable, resp.QueryServiceAvailable[offset])
 		}
@@ -1331,10 +1324,27 @@ func (t *showPartitionsTask) Execute(ctx context.Context) error {
 					zap.Int64("requestID", t.Base.MsgID), zap.String("requestType", "showPartitions"))
 				return errors.New("failed to show partitions")
 			}
-			partitionInfo, err := globalMetaCache.GetPartitionInfo(ctx, t.GetDbName(), collectionName, partitionName)
+			collInfo, err := globalMetaCache.GetCollectionByName(ctx, t.GetDbName(), collectionName)
 			if err != nil {
-				log.Debug("Failed to get partition id.", zap.String("partitionName", partitionName),
-					zap.Int64("requestID", t.Base.MsgID), zap.String("requestType", "showPartitions"))
+				log.Debug("Failed to get collection info",
+					zap.String("dbName", t.GetDbName()),
+					zap.String("collectionName", collectionName),
+					zap.Int64("requestID", t.Base.MsgID),
+					zap.String("requestType", "showPartitions"),
+					zap.Error(err),
+				)
+				return err
+			}
+			partitionInfo, err := collInfo.GetPartitionByName(partitionName)
+			if err != nil {
+				log.Debug("Failed to get partition info",
+					zap.String("dbName", t.GetDbName()),
+					zap.String("collectionName", collectionName),
+					zap.String("partitionName", partitionName),
+					zap.Int64("requestID", t.Base.MsgID),
+					zap.String("requestType", "showPartitions"),
+					zap.Error(err),
+				)
 				return err
 			}
 			t.result.PartitionIDs = append(t.result.PartitionIDs, id)
@@ -2160,7 +2170,7 @@ func (t *DescribeResourceGroupTask) Execute(ctx context.Context) error {
 	getCollectionName := func(collections map[int64]int32) (map[string]int32, error) {
 		ret := make(map[string]int32)
 		for key, value := range collections {
-			name, err := globalMetaCache.GetCollectionName(ctx, "", key)
+			collInfo, err := globalMetaCache.GetCollectionByID(ctx, key)
 			if err != nil {
 				log.Warn("failed to get collection name",
 					zap.Int64("collectionID", key),
@@ -2172,7 +2182,7 @@ func (t *DescribeResourceGroupTask) Execute(ctx context.Context) error {
 				}
 				return nil, err
 			}
-			ret[name] = value
+			ret[collInfo.GetCollectionName()] = value
 		}
 		return ret, nil
 	}

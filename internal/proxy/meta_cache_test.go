@@ -253,7 +253,7 @@ func TestMetaCache_GetBasicCollectionInfo(t *testing.T) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		info, err := globalMetaCache.GetCollectionInfo(ctx, dbName, "collection1", 1)
+		info, err := globalMetaCache.GetCollectionByID(ctx, 1)
 		assert.NoError(t, err)
 		assert.Equal(t, info.collID, int64(1))
 		_ = info.consistencyLevel
@@ -262,7 +262,7 @@ func TestMetaCache_GetBasicCollectionInfo(t *testing.T) {
 	}()
 	go func() {
 		defer wg.Done()
-		info, err := globalMetaCache.GetCollectionInfo(ctx, dbName, "collection1", 1)
+		info, err := globalMetaCache.GetCollectionByID(ctx, 1)
 		assert.NoError(t, err)
 		assert.Equal(t, info.collID, int64(1))
 		_ = info.consistencyLevel
@@ -280,9 +280,9 @@ func TestMetaCache_GetCollectionName(t *testing.T) {
 	err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
 	assert.NoError(t, err)
 
-	collection, err := globalMetaCache.GetCollectionName(ctx, GetCurDBNameFromContextOrDefault(ctx), 1)
+	collection, err := globalMetaCache.GetCollectionByID(ctx, 1)
 	assert.NoError(t, err)
-	assert.Equal(t, collection, "collection1")
+	assert.Equal(t, collection.GetCollectionName(), "collection1")
 	assert.Equal(t, rootCoord.GetAccessCount(), 1)
 
 	// should'nt be accessed to remote root coord.
@@ -294,10 +294,10 @@ func TestMetaCache_GetCollectionName(t *testing.T) {
 		Fields: []*schemapb.FieldSchema{},
 		Name:   "collection1",
 	})
-	collection, err = globalMetaCache.GetCollectionName(ctx, GetCurDBNameFromContextOrDefault(ctx), 1)
+	collection, err = globalMetaCache.GetCollectionByID(ctx, 1)
 	assert.Equal(t, rootCoord.GetAccessCount(), 1)
 	assert.NoError(t, err)
-	assert.Equal(t, collection, "collection1")
+	assert.Equal(t, collection.GetCollectionName(), "collection1")
 	schema, err = globalMetaCache.GetCollectionSchema(ctx, dbName, "collection2")
 	assert.Equal(t, rootCoord.GetAccessCount(), 2)
 	assert.NoError(t, err)
@@ -308,10 +308,10 @@ func TestMetaCache_GetCollectionName(t *testing.T) {
 	})
 
 	// test to get from cache, this should trigger root request
-	collection, err = globalMetaCache.GetCollectionName(ctx, GetCurDBNameFromContextOrDefault(ctx), 1)
+	collection, err = globalMetaCache.GetCollectionByID(ctx, 1)
 	assert.Equal(t, rootCoord.GetAccessCount(), 2)
 	assert.NoError(t, err)
-	assert.Equal(t, collection, "collection1")
+	assert.Equal(t, collection.GetCollectionName(), "collection1")
 	schema, err = globalMetaCache.GetCollectionSchema(ctx, dbName, "collection1")
 	assert.Equal(t, rootCoord.GetAccessCount(), 2)
 	assert.NoError(t, err)
@@ -422,7 +422,10 @@ func TestMetaCache_ConcurrentTest1(t *testing.T) {
 		defer wg.Done()
 		for i := 0; i < cnt; i++ {
 			// GetPartitions may fail
-			globalMetaCache.GetPartitions(ctx, dbName, "collection1")
+			collInfo, err := globalMetaCache.GetCollectionByName(ctx, dbName, "collection1")
+			if err == nil {
+				collInfo.GetPartitionNameMap()
+			}
 			time.Sleep(10 * time.Millisecond)
 		}
 	}
@@ -460,9 +463,9 @@ func TestMetaCache_GetPartitionError(t *testing.T) {
 	assert.Error(t, err)
 	assert.Equal(t, id, typeutil.UniqueID(0))
 
-	partitions, err2 := globalMetaCache.GetPartitions(ctx, dbName, "errorCollection")
+	collInfo, err2 := globalMetaCache.GetCollectionByName(ctx, dbName, "errorCollection")
 	assert.NotNil(t, err2)
-	assert.Equal(t, len(partitions), 0)
+	assert.Nil(t, collInfo)
 
 	// Test non existed tables
 	id, err = globalMetaCache.GetPartitionID(ctx, dbName, "nonExisted", "par1")
@@ -729,33 +732,33 @@ func TestMetaCache_RemoveCollection(t *testing.T) {
 		InMemoryPercentages: []int64{100, 50},
 	}, nil)
 
-	_, err = globalMetaCache.GetCollectionInfo(ctx, dbName, "collection1", 1)
+	_, err = globalMetaCache.GetCollectionByID(ctx, 1)
 	assert.NoError(t, err)
 	// no collectionInfo of collection1, should access RootCoord
 	assert.Equal(t, rootCoord.GetAccessCount(), 1)
 
-	_, err = globalMetaCache.GetCollectionInfo(ctx, dbName, "collection1", 1)
+	_, err = globalMetaCache.GetCollectionByID(ctx, 1)
 	assert.NoError(t, err)
 	// shouldn't access RootCoord again
 	assert.Equal(t, rootCoord.GetAccessCount(), 1)
 
 	globalMetaCache.RemoveCollection(ctx, dbName, "collection1")
 	// no collectionInfo of collection2, should access RootCoord
-	_, err = globalMetaCache.GetCollectionInfo(ctx, dbName, "collection1", 1)
+	_, err = globalMetaCache.GetCollectionByID(ctx, 1)
 	assert.NoError(t, err)
 	// shouldn't access RootCoord again
 	assert.Equal(t, rootCoord.GetAccessCount(), 2)
 
 	globalMetaCache.RemoveCollectionsByID(ctx, UniqueID(1))
 	// no collectionInfo of collection2, should access RootCoord
-	_, err = globalMetaCache.GetCollectionInfo(ctx, dbName, "collection1", 1)
+	_, err = globalMetaCache.GetCollectionByID(ctx, 1)
 	assert.NoError(t, err)
 	// shouldn't access RootCoord again
 	assert.Equal(t, rootCoord.GetAccessCount(), 3)
 
 	globalMetaCache.RemoveCollectionsByID(ctx, UniqueID(1))
 	// no collectionInfo of collection2, should access RootCoord
-	_, err = globalMetaCache.GetCollectionInfo(ctx, dbName, "collection1", 1)
+	_, err = globalMetaCache.GetCollectionByID(ctx, 1)
 	assert.NoError(t, err)
 	// no collectionInfo of collection1, should access RootCoord
 	assert.Equal(t, rootCoord.GetAccessCount(), 4)
@@ -809,7 +812,7 @@ func TestMetaCache_Database(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, globalMetaCache.HasDatabase(ctx, dbName), false)
 
-	_, err = globalMetaCache.GetCollectionInfo(ctx, dbName, "collection1", 1)
+	_, err = globalMetaCache.GetCollectionByID(ctx, 1)
 	assert.NoError(t, err)
 	_, err = GetCachedCollectionSchema(ctx, dbName, "collection1")
 	assert.NoError(t, err)

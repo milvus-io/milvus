@@ -5629,11 +5629,12 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 
 	var partitionIDs []int64
 	if req.GetPartitionName() == "" && hasPartitionKey {
-		partitions, err := globalMetaCache.GetPartitions(ctx, req.GetDbName(), req.GetCollectionName())
+		collInfo, err := globalMetaCache.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName())
 		if err != nil {
 			resp.Status = merr.Status(err)
 			return resp, nil
 		}
+		partitions := collInfo.GetPartitionNameMap()
 		partitionIDs = lo.Values(partitions)
 	} else {
 		partitionName := req.GetPartitionName()
