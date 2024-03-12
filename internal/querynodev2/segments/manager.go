@@ -444,13 +444,14 @@ func (mgr *segmentManager) Unpin(segments []Segment) {
 
 func (mgr *segmentManager) rangeWithFilter(process func(id int64, segType SegmentType, segment Segment) bool, filters ...SegmentFilter) {
 	var segType SegmentType
-	var hasSegIDs bool
+	var hasSegType, hasSegIDs bool
 	segmentIDs := typeutil.NewSet[int64]()
 
 	otherFilters := make([]SegmentFilter, 0, len(filters))
 	for _, filter := range filters {
 		if sType, ok := filter.SegmentType(); ok {
 			segType = sType
+			hasSegType = true
 			continue
 		}
 		if segIDs, ok := filter.SegmentIDs(); ok {
@@ -477,9 +478,11 @@ func (mgr *segmentManager) rangeWithFilter(process func(id int64, segType Segmen
 	case SegmentTypeGrowing:
 		candidates = map[SegmentType]map[int64]Segment{SegmentTypeGrowing: mgr.growingSegments}
 	default:
-		candidates = map[SegmentType]map[int64]Segment{
-			SegmentTypeSealed:  mgr.sealedSegments,
-			SegmentTypeGrowing: mgr.growingSegments,
+		if !hasSegType {
+			candidates = map[SegmentType]map[int64]Segment{
+				SegmentTypeSealed:  mgr.sealedSegments,
+				SegmentTypeGrowing: mgr.growingSegments,
+			}
 		}
 	}
 
