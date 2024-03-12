@@ -130,21 +130,15 @@ func (node *DataNode) handleWatchInfo(e *event, key string, data []byte) {
 		log.Info("DataNode is handling watchInfo DELETE event", zap.String("key", key))
 	}
 
-	actualManager, loaded := node.eventManagerMap.GetOrInsert(e.vChanName, newChannelEventManager(
+	actualManager := node.eventManager.GetOrInsert(e.vChanName, newChannelEventManager(
 		node.handlePutEvent, node.handleDeleteEvent, retryWatchInterval,
 	))
-
-	if !loaded {
-		actualManager.Run()
-	}
 
 	actualManager.handleEvent(*e)
 
 	// Whenever a delete event comes, this eventManager will be removed from map
 	if e.eventType == deleteEventType {
-		if m, loaded := node.eventManagerMap.GetAndRemove(e.vChanName); loaded {
-			m.Close()
-		}
+		node.eventManager.Remove(e.vChanName)
 	}
 }
 
@@ -400,5 +394,50 @@ func GetLiteChannelWatchInfo(watchInfo *datapb.ChannelWatchInfo) *datapb.Channel
 		TimeoutTs: watchInfo.GetTimeoutTs(),
 		Schema:    watchInfo.GetSchema(),
 		Progress:  watchInfo.GetProgress(),
+	}
+}
+
+type EventManager struct {
+	channelGurad    sync.Mutex
+	channelManagers map[string]*channelEventManager
+}
+
+func NewEventManager() *EventManager {
+	return &EventManager{
+		channelManagers: make(map[string]*channelEventManager),
+	}
+}
+
+func (m *EventManager) GetOrInsert(channel string, newManager *channelEventManager) *channelEventManager {
+	m.channelGurad.Lock()
+	defer m.channelGurad.Unlock()
+
+	eManager, got := m.channelManagers[channel]
+	if !got {
+		newManager.Run()
+		m.channelManagers[channel] = newManager
+		return newManager
+	}
+
+	return eManager
+}
+
+func (m *EventManager) Remove(channel string) {
+	m.channelGurad.Lock()
+	defer m.channelGurad.Unlock()
+
+	if eManager, got := m.channelManagers[channel]; got {
+		eManager.Close()
+	}
+
+	delete(m.channelManagers, channel)
+}
+
+func (m *EventManager) CloseAll() {
+	m.channelGurad.Lock()
+	defer m.channelGurad.Unlock()
+
+	for _, eManager := range m.channelManagers {
+		eManager.Close()
 	}
 }

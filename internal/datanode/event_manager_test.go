@@ -218,9 +218,9 @@ func TestWatchChannel(t *testing.T) {
 				chDel <- struct{}{}
 			}, time.Millisecond*100,
 		)
-		node.eventManagerMap.Insert(ch, m)
-		m.Run()
-		defer m.Close()
+
+		node.eventManager.GetOrInsert(ch, m)
+		defer node.eventManager.Remove(ch)
 
 		info = datapb.ChannelWatchInfo{
 			Vchan: &datapb.VchannelInfo{ChannelName: ch},
@@ -258,9 +258,8 @@ func TestWatchChannel(t *testing.T) {
 				chDel <- struct{}{}
 			}, time.Millisecond*100,
 		)
-		node.eventManagerMap.Insert(ch, m)
-		m.Run()
-		defer m.Close()
+		node.eventManager.GetOrInsert(ch, m)
+		defer node.eventManager.Remove(ch)
 		e := &event{
 			eventType: putEventType,
 			version:   10000,
