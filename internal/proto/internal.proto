@@ -280,11 +280,12 @@ message ImportFile {
 message ImportRequestInternal {
   int64 dbID = 1;
   int64 collectionID = 2;
-  repeated int64 partitionIDs = 3;
-  repeated string channel_names = 4;
-  schema.CollectionSchema schema = 5;
-  repeated ImportFile files = 6;
-  repeated common.KeyValuePair options = 7;
+  string collectionName = 3;
+  repeated int64 partitionIDs = 4;
+  repeated string channel_names = 5;
+  schema.CollectionSchema schema = 6;
+  repeated ImportFile files = 7;
+  repeated common.KeyValuePair options = 8;
 }
 
 message ImportRequest {

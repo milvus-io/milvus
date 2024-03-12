@@ -5639,12 +5639,13 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 		}
 	}
 	importRequest := &internalpb.ImportRequestInternal{
-		CollectionID: collectionID,
-		PartitionIDs: partitionIDs,
-		ChannelNames: channels,
-		Schema:       schema.CollectionSchema,
-		Files:        req.GetFiles(),
-		Options:      req.GetOptions(),
+		CollectionID:   collectionID,
+		CollectionName: req.GetCollectionName(),
+		PartitionIDs:   partitionIDs,
+		ChannelNames:   channels,
+		Schema:         schema.CollectionSchema,
+		Files:          req.GetFiles(),
+		Options:        req.GetOptions(),
 	}
 	resp, err = node.dataCoord.ImportV2(ctx, importRequest)
 	if err != nil {

@@ -859,16 +859,17 @@ message ImportJob {
   int64 jobID = 1;
   int64 dbID = 2;
   int64 collectionID = 3;
-  repeated int64 partitionIDs = 4;
-  repeated string vchannels = 5;
-  schema.CollectionSchema schema = 6;
-  uint64 timeout_ts = 7;
-  uint64 cleanup_ts = 8;
-  internal.ImportJobState state = 9;
-  string reason = 10;
-  string complete_time = 11;
-  repeated internal.ImportFile files = 12;
-  repeated common.KeyValuePair options = 13;
+  string collectionName = 4;
+  repeated int64 partitionIDs = 5;
+  repeated string vchannels = 6;
+  schema.CollectionSchema schema = 7;
+  uint64 timeout_ts = 8;
+  uint64 cleanup_ts = 9;
+  internal.ImportJobState state = 10;
+  string reason = 11;
+  string complete_time = 12;
+  repeated internal.ImportFile files = 13;
+  repeated common.KeyValuePair options = 14;
 }
 
 enum ImportTaskStateV2 {

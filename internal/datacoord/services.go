@@ -1819,16 +1819,17 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 
 	job := &importJob{
 		ImportJob: &datapb.ImportJob{
-			JobID:        idStart,
-			CollectionID: in.GetCollectionID(),
-			PartitionIDs: in.GetPartitionIDs(),
-			Vchannels:    in.GetChannelNames(),
-			Schema:       in.GetSchema(),
-			TimeoutTs:    timeoutTs,
-			CleanupTs:    math.MaxUint64,
-			State:        internalpb.ImportJobState_Pending,
-			Files:        files,
-			Options:      in.GetOptions(),
+			JobID:          idStart,
+			CollectionID:   in.GetCollectionID(),
+			CollectionName: in.GetCollectionName(),
+			PartitionIDs:   in.GetPartitionIDs(),
+			Vchannels:      in.GetChannelNames(),
+			Schema:         in.GetSchema(),
+			TimeoutTs:      timeoutTs,
+			CleanupTs:      math.MaxUint64,
+			State:          internalpb.ImportJobState_Pending,
+			Files:          files,
+			Options:        in.GetOptions(),
 		},
 	}
 	err = s.importMeta.AddJob(job)
@@ -1859,12 +1860,11 @@ func (s *Server) GetImportProgress(ctx context.Context, in *internalpb.GetImport
 		return resp, nil
 	}
 	job := s.importMeta.GetJob(jobID)
-	collection := s.meta.GetCollection(job.GetCollectionID())
 	progress, state, reason := GetJobProgress(jobID, s.importMeta, s.meta)
 	resp.State = state
 	resp.Reason = reason
 	resp.Progress = progress
-	resp.CollectionName = collection.Schema.GetName()
+	resp.CollectionName = job.GetCollectionName()
 	resp.CompleteTime = job.GetCompleteTime()
 	resp.TaskProgresses = GetTaskProgresses(jobID, s.importMeta, s.meta)
 	log.Info("GetImportProgress done", zap.Any("resp", resp))
@@ -1895,12 +1895,11 @@ func (s *Server) ListImports(ctx context.Context, req *internalpb.ListImportsReq
 
 	for _, job := range jobs {
 		progress, state, reason := GetJobProgress(job.GetJobID(), s.importMeta, s.meta)
-		collection := s.meta.GetCollection(job.GetCollectionID())
 		resp.JobIDs = append(resp.JobIDs, fmt.Sprintf("%d", job.GetJobID()))
 		resp.States = append(resp.States, state)
 		resp.Reasons = append(resp.Reasons, reason)
 		resp.Progresses = append(resp.Progresses, progress)
-		resp.CollectionNames = append(resp.CollectionNames, collection.Schema.GetName())
+		resp.CollectionNames = append(resp.CollectionNames, job.GetCollectionName())
 	}
 	return resp, nil
 }
