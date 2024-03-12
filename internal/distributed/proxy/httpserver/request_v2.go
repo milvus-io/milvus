@@ -33,6 +33,19 @@ func (req *CollectionNameReq) GetPartitionNames() []string {
 	return req.PartitionNames
 }
 
+type OptionalCollectionNameReq struct {
+	DbName         string `json:"dbName"`
+	CollectionName string `json:"collectionName"`
+}
+
+func (req *OptionalCollectionNameReq) GetDbName() string {
+	return req.DbName
+}
+
+func (req *OptionalCollectionNameReq) GetCollectionName() string {
+	return req.CollectionName
+}
+
 type RenameCollectionReq struct {
 	DbName            string `json:"dbName"`
 	CollectionName    string `json:"collectionName" binding:"required"`
