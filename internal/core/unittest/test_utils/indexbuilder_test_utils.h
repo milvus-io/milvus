@@ -98,6 +98,11 @@ generate_build_conf(const milvus::IndexType& index_type,
             {milvus::index::DISK_ANN_BUILD_DRAM_BUDGET, std::to_string(32)},
             {milvus::index::DISK_ANN_BUILD_THREAD_NUM, std::to_string(2)},
         };
+    } else if (index_type == knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX ||
+               index_type == knowhere::IndexEnum::INDEX_SPARSE_WAND) {
+        return knowhere::Json{
+            {knowhere::meta::METRIC_TYPE, metric_type},
+        };
     }
     return knowhere::Json();
 }
@@ -234,6 +239,10 @@ GenDatasetWithDataType(int64_t N,
     } else if (data_type == milvus::DataType::VECTOR_FLOAT) {
         schema->AddDebugField(
             "fakevec", milvus::DataType::VECTOR_FLOAT, dim, metric_type);
+        return milvus::segcore::DataGen(schema, N);
+    } else if (data_type == milvus::DataType::VECTOR_SPARSE_FLOAT) {
+        schema->AddDebugField(
+            "fakevec", milvus::DataType::VECTOR_SPARSE_FLOAT, 0, metric_type);
         return milvus::segcore::DataGen(schema, N);
     } else {
         schema->AddDebugField(

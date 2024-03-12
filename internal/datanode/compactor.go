@@ -19,6 +19,7 @@ package datanode
 import (
 	"context"
 	"fmt"
+	sio "io"
 	"sync"
 	"time"
 
@@ -333,20 +334,23 @@ func (t *compactionTask) merge(
 		}
 		downloadTimeCost += time.Since(downloadStart)
 
-		iter, err := storage.NewInsertBinlogIterator(data, pkID, pkType)
+		iter, err := storage.NewBinlogDeserializeReader(data, pkID)
 		if err != nil {
-			log.Warn("new insert binlogs Itr wrong", zap.Strings("path", path), zap.Error(err))
+			log.Warn("new insert binlogs reader wrong", zap.Strings("path", path), zap.Error(err))
 			return nil, nil, 0, err
 		}
 
-		for iter.HasNext() {
-			vInter, _ := iter.Next()
-			v, ok := vInter.(*storage.Value)
-			if !ok {
-				log.Warn("transfer interface to Value wrong", zap.Strings("path", path))
-				return nil, nil, 0, errors.New("unexpected error")
+		for {
+			err := iter.Next()
+			if err != nil {
+				if err == sio.EOF {
+					break
+				} else {
+					log.Warn("transfer interface to Value wrong", zap.Strings("path", path))
+					return nil, nil, 0, errors.New("unexpected error")
+				}
 			}
-
+			v := iter.Value()
 			if isDeletedValue(v) {
 				continue
 			}

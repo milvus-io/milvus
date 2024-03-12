@@ -1,6 +1,10 @@
 package httpserver
 
-import "time"
+import (
+	"time"
+
+	"github.com/milvus-io/milvus/pkg/util/metric"
+)
 
 // v2
 const (
@@ -14,23 +18,23 @@ const (
 	AliasCategory      = "/aliases/"
 	ImportJobCategory  = "/jobs/import/"
 
-	ListAction         = "list"
-	HasAction          = "has"
-	DescribeAction     = "describe"
-	CreateAction       = "create"
-	DropAction         = "drop"
-	StatsAction        = "get_stats"
-	LoadStateAction    = "get_load_state"
-	RenameAction       = "rename"
-	LoadAction         = "load"
-	ReleaseAction      = "release"
-	QueryAction        = "query"
-	GetAction          = "get"
-	DeleteAction       = "delete"
-	InsertAction       = "insert"
-	UpsertAction       = "upsert"
-	SearchAction       = "search"
-	HybridSearchAction = "hybrid_search"
+	ListAction           = "list"
+	HasAction            = "has"
+	DescribeAction       = "describe"
+	CreateAction         = "create"
+	DropAction           = "drop"
+	StatsAction          = "get_stats"
+	LoadStateAction      = "get_load_state"
+	RenameAction         = "rename"
+	LoadAction           = "load"
+	ReleaseAction        = "release"
+	QueryAction          = "query"
+	GetAction            = "get"
+	DeleteAction         = "delete"
+	InsertAction         = "insert"
+	UpsertAction         = "upsert"
+	SearchAction         = "search"
+	AdvancedSearchAction = "advanced_search"
 
 	UpdatePasswordAction  = "update_password"
 	GrantRoleAction       = "grant_role"
@@ -72,6 +76,7 @@ const (
 	HTTPIndexName            = "indexName"
 	HTTPIndexField           = "fieldName"
 	HTTPAliasName            = "aliasName"
+	HTTPRequestData          = "data"
 	DefaultDbName            = "default"
 	DefaultIndexName         = "vector_idx"
 	DefaultAliasName         = "the_alias"
@@ -112,7 +117,7 @@ const (
 	HTTPReturnGrantor    = "grantor"
 	HTTPReturnDbName     = "dbName"
 
-	DefaultMetricType       = "L2"
+	DefaultMetricType       = metric.COSINE
 	DefaultPrimaryFieldName = "id"
 	DefaultVectorFieldName  = "vector"
 

@@ -205,6 +205,19 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		return merr.Status(err), nil
 	}
 
+	// merge with previous params because create index would not pass mmap params
+	indexes := s.meta.indexMeta.GetFieldIndexes(req.GetCollectionID(), req.GetFieldID(), req.GetIndexName())
+	if len(indexes) == 1 {
+		req.UserIndexParams, err = UpdateParams(indexes[0], indexes[0].UserIndexParams, req.GetUserIndexParams())
+		if err != nil {
+			return merr.Status(err), nil
+		}
+		req.IndexParams, err = UpdateParams(indexes[0], indexes[0].IndexParams, req.GetIndexParams())
+		if err != nil {
+			return merr.Status(err), nil
+		}
+	}
+
 	if indexID == 0 {
 		indexID, err = s.allocator.allocID(ctx)
 		if err != nil {
@@ -299,13 +312,17 @@ func (s *Server) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest)
 	)
 	log.Info("received AlterIndex request", zap.Any("params", req.GetParams()))
 
+	if req.IndexName == "" {
+		return merr.Status(merr.WrapErrParameterInvalidMsg("index name is empty")), nil
+	}
+
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		log.Warn(msgDataCoordIsUnhealthy(paramtable.GetNodeID()), zap.Error(err))
 		return merr.Status(err), nil
 	}
 
 	indexes := s.meta.indexMeta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName())
-	if req.GetIndexName() != "" && len(indexes) == 0 {
+	if len(indexes) == 0 {
 		err := merr.WrapErrIndexNotFound(req.GetIndexName())
 		return merr.Status(err), nil
 	}

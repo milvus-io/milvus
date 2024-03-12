@@ -24,7 +24,6 @@ set(SEGCORE_FILES
         SegmentGrowingImpl.cpp
         SegmentSealedImpl.cpp
         FieldIndexing.cpp
-        InsertRecord.cpp
         Reduce.cpp
         metrics_c.cpp
         plan_c.cpp
@@ -35,7 +34,6 @@ set(SEGCORE_FILES
         SegcoreConfig.cpp
         IndexConfigGenerator.cpp
         segcore_init_c.cpp
-        ScalarIndex.cpp
         TimestampIndex.cpp
         Utils.cpp
         ConcurrentVector.cpp)

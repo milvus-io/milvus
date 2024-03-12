@@ -62,9 +62,15 @@ bool
 EmptySpanID(const TraceContext* ctx);
 
 std::string
-GetTraceIDAsStr(const TraceContext* ctx);
+BytesToHex(const uint8_t* input, const size_t len);
 
 std::string
-GetSpanIDAsStr(const TraceContext* ctx);
+HexToString(const std::string& input);
+
+std::string
+GetTraceIDAsHex(const TraceContext* ctx);
+
+std::string
+GetSpanIDAsHex(const TraceContext* ctx);
 
 }  // namespace milvus::tracer

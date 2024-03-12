@@ -22,6 +22,8 @@
 #include "storage/Util.h"
 #include "common/Consts.h"
 #include "common/Json.h"
+#include "test_utils/Constants.h"
+#include "test_utils/DataGen.h"
 
 using namespace milvus;
 
@@ -272,6 +274,45 @@ TEST(storage, InsertDataFloatVector) {
            new_payload->Data(),
            new_payload->get_num_rows() * sizeof(float) * DIM);
     ASSERT_EQ(data, new_data);
+}
+
+TEST(storage, InsertDataSparseFloat) {
+    auto n_rows = 100;
+    auto vecs = milvus::segcore::GenerateRandomSparseFloatVector(
+        n_rows, kTestSparseDim, kTestSparseVectorDensity);
+    auto field_data = milvus::storage::CreateFieldData(
+        storage::DataType::VECTOR_SPARSE_FLOAT, kTestSparseDim, n_rows);
+    field_data->FillFieldData(vecs.get(), n_rows);
+
+    storage::InsertData insert_data(field_data);
+    storage::FieldDataMeta field_data_meta{100, 101, 102, 103};
+    insert_data.SetFieldDataMeta(field_data_meta);
+    insert_data.SetTimestamps(0, 100);
+
+    auto serialized_bytes = insert_data.Serialize(storage::StorageType::Remote);
+    std::shared_ptr<uint8_t[]> serialized_data_ptr(serialized_bytes.data(),
+                                                   [&](uint8_t*) {});
+    auto new_insert_data = storage::DeserializeFileData(
+        serialized_data_ptr, serialized_bytes.size());
+    ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
+    ASSERT_EQ(new_insert_data->GetTimeRage(),
+              std::make_pair(Timestamp(0), Timestamp(100)));
+    auto new_payload = new_insert_data->GetFieldData();
+    ASSERT_TRUE(new_payload->get_data_type() ==
+                storage::DataType::VECTOR_SPARSE_FLOAT);
+    ASSERT_EQ(new_payload->get_num_rows(), n_rows);
+    auto new_data = static_cast<const knowhere::sparse::SparseRow<float>*>(
+        new_payload->Data());
+
+    for (auto i = 0; i < n_rows; ++i) {
+        auto& original = vecs[i];
+        auto& new_vec = new_data[i];
+        ASSERT_EQ(original.size(), new_vec.size());
+        for (auto j = 0; j < original.size(); ++j) {
+            ASSERT_EQ(original[j].id, new_vec[j].id);
+            ASSERT_EQ(original[j].val, new_vec[j].val);
+        }
+    }
 }
 
 TEST(storage, InsertDataBinaryVector) {

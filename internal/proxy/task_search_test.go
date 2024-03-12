@@ -192,6 +192,14 @@ func getValidSearchParams() []*commonpb.KeyValuePair {
 	}
 }
 
+func resetSearchParamsValue(kvs []*commonpb.KeyValuePair, keyName string, newVal string) {
+	for _, kv := range kvs {
+		if kv.GetKey() == keyName {
+			kv.Value = newVal
+		}
+	}
+}
+
 func getInvalidSearchParams(invalidName string) []*commonpb.KeyValuePair {
 	kvs := getValidSearchParams()
 	for _, kv := range kvs {
@@ -2172,6 +2180,47 @@ func TestTaskSearch_parseQueryInfo(t *testing.T) {
 				assert.Nil(t, info)
 			})
 		}
+	})
+	t.Run("check iterator and groupBy", func(t *testing.T) {
+		normalParam := getValidSearchParams()
+		normalParam = append(normalParam, &commonpb.KeyValuePair{
+			Key:   IteratorField,
+			Value: "True",
+		})
+		normalParam = append(normalParam, &commonpb.KeyValuePair{
+			Key:   GroupByFieldKey,
+			Value: "string_field",
+		})
+		fields := make([]*schemapb.FieldSchema, 0)
+		fields = append(fields, &schemapb.FieldSchema{
+			FieldID: int64(101),
+			Name:    "string_field",
+		})
+		schema := &schemapb.CollectionSchema{
+			Fields: fields,
+		}
+		info, _, err := parseSearchInfo(normalParam, schema)
+		assert.Nil(t, info)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+	t.Run("check range-search and groupBy", func(t *testing.T) {
+		normalParam := getValidSearchParams()
+		resetSearchParamsValue(normalParam, SearchParamsKey, `{"nprobe": 10, "radius":0.2}`)
+		normalParam = append(normalParam, &commonpb.KeyValuePair{
+			Key:   GroupByFieldKey,
+			Value: "string_field",
+		})
+		fields := make([]*schemapb.FieldSchema, 0)
+		fields = append(fields, &schemapb.FieldSchema{
+			FieldID: int64(101),
+			Name:    "string_field",
+		})
+		schema := &schemapb.CollectionSchema{
+			Fields: fields,
+		}
+		info, _, err := parseSearchInfo(normalParam, schema)
+		assert.Nil(t, info)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	})
 }
 

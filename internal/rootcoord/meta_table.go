@@ -338,7 +338,7 @@ func (mt *MetaTable) GetDatabaseByName(ctx context.Context, dbName string, ts Ti
 	return mt.getDatabaseByNameInternal(ctx, dbName, ts)
 }
 
-func (mt *MetaTable) getDatabaseByNameInternal(ctx context.Context, dbName string, ts Timestamp) (*model.Database, error) {
+func (mt *MetaTable) getDatabaseByNameInternal(_ context.Context, dbName string, _ Timestamp) (*model.Database, error) {
 	// backward compatibility for rolling  upgrade
 	if dbName == "" {
 		log.Warn("db name is empty")

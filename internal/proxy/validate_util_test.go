@@ -3427,7 +3427,8 @@ func Test_validateUtil_checkJSONData(t *testing.T) {
 		v := newValidateUtil(withOverflowCheck(), withMaxLenCheck())
 		jsonData := "hello"
 		f := &schemapb.FieldSchema{
-			DataType: schemapb.DataType_JSON,
+			DataType:  schemapb.DataType_JSON,
+			IsDynamic: true,
 		}
 		data := &schemapb.FieldData{
 			FieldName: "json",

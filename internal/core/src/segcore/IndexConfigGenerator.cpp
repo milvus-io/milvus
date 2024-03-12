@@ -20,8 +20,23 @@ VecIndexConfig::VecIndexConfig(const int64_t max_index_row_cout,
     : max_index_row_count_(max_index_row_cout), config_(config) {
     origin_index_type_ = index_meta_.GetIndexType();
     metric_type_ = index_meta_.GeMetricType();
+    // Currently for dense vector index, if the segment is growing, we use IVFCC
+    // as the index type; if the segment is sealed but its index has not been
+    // built by the index node, we use IVFFLAT as the temp index type and
+    // release it once the index node has finished building the index and query
+    // node has loaded it.
 
-    index_type_ = support_index_types.at(segment_type);
+    // But for sparse vector index(INDEX_SPARSE_INVERTED_INDEX and
+    // INDEX_SPARSE_WAND), those index themselves can be used as the temp index
+    // type, so we can avoid the extra step of "releast temp and load".
+
+    if (origin_index_type_ ==
+            knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX ||
+        origin_index_type_ == knowhere::IndexEnum::INDEX_SPARSE_WAND) {
+        index_type_ = origin_index_type_;
+    } else {
+        index_type_ = support_index_types.at(segment_type);
+    }
     build_params_[knowhere::meta::METRIC_TYPE] = metric_type_;
     build_params_[knowhere::indexparam::NLIST] =
         std::to_string(config_.get_nlist());
@@ -29,6 +44,8 @@ VecIndexConfig::VecIndexConfig(const int64_t max_index_row_cout,
         std::max((int)(config_.get_chunk_rows() / config_.get_nlist()), 48));
     search_params_[knowhere::indexparam::NPROBE] =
         std::to_string(config_.get_nprobe());
+    // note for sparse vector index: drop_ratio_build is not allowed for growing
+    // segment index.
     LOG_INFO(
         "VecIndexConfig: origin_index_type={}, index_type={}, metric_type={}",
         origin_index_type_,
@@ -38,6 +55,14 @@ VecIndexConfig::VecIndexConfig(const int64_t max_index_row_cout,
 
 int64_t
 VecIndexConfig::GetBuildThreshold() const noexcept {
+    // For sparse, do not impose a threshold and start using index with any
+    // number of rows. Unlike dense vector index, growing sparse vector index
+    // does not require a minimum number of rows to train.
+    if (origin_index_type_ ==
+            knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX ||
+        origin_index_type_ == knowhere::IndexEnum::INDEX_SPARSE_WAND) {
+        return 0;
+    }
     assert(VecIndexConfig::index_build_ratio.count(index_type_));
     auto ratio = VecIndexConfig::index_build_ratio.at(index_type_);
     assert(ratio >= 0.0 && ratio < 1.0);

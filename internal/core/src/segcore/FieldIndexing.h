@@ -51,10 +51,18 @@ class FieldIndexing {
                     const VectorBase* vec_base) = 0;
 
     virtual void
-    AppendSegmentIndex(int64_t reserved_offset,
-                       int64_t size,
-                       const VectorBase* vec_base,
-                       const void* data_source) = 0;
+    AppendSegmentIndexDense(int64_t reserved_offset,
+                            int64_t size,
+                            const VectorBase* vec_base,
+                            const void* data_source) = 0;
+
+    // new_data_dim is the dimension of the new data being appended(data_source)
+    virtual void
+    AppendSegmentIndexSparse(int64_t reserved_offset,
+                             int64_t size,
+                             int64_t new_data_dim,
+                             const VectorBase* vec_base,
+                             const void* data_source) = 0;
 
     virtual void
     GetDataFromIndex(const int64_t* seg_offsets,
@@ -109,12 +117,22 @@ class ScalarFieldIndexing : public FieldIndexing {
                     const VectorBase* vec_base) override;
 
     void
-    AppendSegmentIndex(int64_t reserved_offset,
-                       int64_t size,
-                       const VectorBase* vec_base,
-                       const void* data_source) override {
+    AppendSegmentIndexDense(int64_t reserved_offset,
+                            int64_t size,
+                            const VectorBase* vec_base,
+                            const void* data_source) override {
         PanicInfo(Unsupported,
-                  "scalar index don't support append segment index");
+                  "scalar index doesn't support append vector segment index");
+    }
+
+    void
+    AppendSegmentIndexSparse(int64_t reserved_offset,
+                             int64_t size,
+                             int64_t new_data_dim,
+                             const VectorBase* vec_base,
+                             const void* data_source) override {
+        PanicInfo(Unsupported,
+                  "scalar index doesn't support append vector segment index");
     }
 
     void
@@ -171,10 +189,17 @@ class VectorFieldIndexing : public FieldIndexing {
                     const VectorBase* vec_base) override;
 
     void
-    AppendSegmentIndex(int64_t reserved_offset,
-                       int64_t size,
-                       const VectorBase* field_raw_data,
-                       const void* data_source) override;
+    AppendSegmentIndexDense(int64_t reserved_offset,
+                            int64_t size,
+                            const VectorBase* field_raw_data,
+                            const void* data_source) override;
+
+    void
+    AppendSegmentIndexSparse(int64_t reserved_offset,
+                             int64_t size,
+                             int64_t new_data_dim,
+                             const VectorBase* field_raw_data,
+                             const void* data_source) override;
 
     void
     GetDataFromIndex(const int64_t* seg_offsets,
@@ -214,9 +239,13 @@ class VectorFieldIndexing : public FieldIndexing {
     get_search_params(const SearchInfo& searchInfo) const;
 
  private:
+    // current number of rows in index.
     std::atomic<idx_t> index_cur_ = 0;
-    std::atomic<bool> build;
-    std::atomic<bool> sync_with_index;
+    // whether the growing index has been built.
+    std::atomic<bool> built_;
+    // whether all insertd data has been added to growing index and can be
+    // searched.
+    std::atomic<bool> sync_with_index_;
     std::unique_ptr<VecIndexConfig> config_;
     std::unique_ptr<index::VectorIndex> index_;
     tbb::concurrent_vector<std::unique_ptr<index::VectorIndex>> data_;
@@ -283,19 +312,28 @@ class IndexingRecord {
                    FieldId fieldId,
                    const DataArray* stream_data,
                    const InsertRecord<is_sealed>& record) {
-        if (is_in(fieldId)) {
-            auto& indexing = field_indexings_.at(fieldId);
-            if (indexing->get_field_meta().is_vector() &&
-                indexing->get_field_meta().get_data_type() ==
-                    DataType::VECTOR_FLOAT &&
-                reserved_offset + size >= indexing->get_build_threshold()) {
-                auto field_raw_data = record.get_field_data_base(fieldId);
-                indexing->AppendSegmentIndex(
-                    reserved_offset,
-                    size,
-                    field_raw_data,
-                    stream_data->vectors().float_vector().data().data());
-            }
+        if (!is_in(fieldId)) {
+            return;
+        }
+        auto& indexing = field_indexings_.at(fieldId);
+        auto type = indexing->get_field_meta().get_data_type();
+        auto field_raw_data = record.get_field_data_base(fieldId);
+        if (type == DataType::VECTOR_FLOAT &&
+            reserved_offset + size >= indexing->get_build_threshold()) {
+            indexing->AppendSegmentIndexDense(
+                reserved_offset,
+                size,
+                field_raw_data,
+                stream_data->vectors().float_vector().data().data());
+        } else if (type == DataType::VECTOR_SPARSE_FLOAT) {
+            auto data = SparseBytesToRows(
+                stream_data->vectors().sparse_float_vector().contents());
+            indexing->AppendSegmentIndexSparse(
+                reserved_offset,
+                size,
+                stream_data->vectors().sparse_float_vector().dim(),
+                field_raw_data,
+                data.get());
         }
     }
 
@@ -307,16 +345,28 @@ class IndexingRecord {
                    FieldId fieldId,
                    const FieldDataPtr data,
                    const InsertRecord<is_sealed>& record) {
-        if (is_in(fieldId)) {
-            auto& indexing = field_indexings_.at(fieldId);
-            if (indexing->get_field_meta().is_vector() &&
-                indexing->get_field_meta().get_data_type() ==
-                    DataType::VECTOR_FLOAT &&
-                reserved_offset + size >= indexing->get_build_threshold()) {
-                auto vec_base = record.get_field_data_base(fieldId);
-                indexing->AppendSegmentIndex(
-                    reserved_offset, size, vec_base, data->Data());
-            }
+        if (!is_in(fieldId)) {
+            return;
+        }
+        auto& indexing = field_indexings_.at(fieldId);
+        auto type = indexing->get_field_meta().get_data_type();
+        const void* p = data->Data();
+
+        if (type == DataType::VECTOR_FLOAT &&
+            reserved_offset + size >= indexing->get_build_threshold()) {
+            auto vec_base = record.get_field_data_base(fieldId);
+            indexing->AppendSegmentIndexDense(
+                reserved_offset, size, vec_base, data->Data());
+        } else if (type == DataType::VECTOR_SPARSE_FLOAT) {
+            auto vec_base = record.get_field_data_base(fieldId);
+            indexing->AppendSegmentIndexSparse(
+                reserved_offset,
+                size,
+                std::dynamic_pointer_cast<const FieldData<SparseFloatVector>>(
+                    data)
+                    ->Dim(),
+                vec_base,
+                p);
         }
     }
 
@@ -396,14 +446,12 @@ class IndexingRecord {
     IndexMetaPtr index_meta_;
     const SegcoreConfig& segcore_config_;
 
- private:
     // control info
     std::atomic<int64_t> resource_ack_ = 0;
     //    std::atomic<int64_t> finished_ack_ = 0;
     AckResponder finished_ack_;
     std::mutex mutex_;
 
- private:
     // field_offset => indexing
     std::map<FieldId, std::unique_ptr<FieldIndexing>> field_indexings_;
 };

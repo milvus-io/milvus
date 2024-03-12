@@ -520,14 +520,14 @@ func (b *MultiTargetBalancer) genSegmentPlan(replica *meta.Replica) []SegmentAss
 	nodeSegments := make(map[int64][]*meta.Segment)
 	globalNodeSegments := make(map[int64][]*meta.Segment)
 	for _, node := range replica.Nodes {
-		dist := b.dist.SegmentDistManager.GetByCollectionAndNode(replica.GetCollectionID(), node)
+		dist := b.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.CollectionID), meta.WithNodeID(node))
 		segments := lo.Filter(dist, func(segment *meta.Segment, _ int) bool {
 			return b.targetMgr.GetSealedSegment(segment.GetCollectionID(), segment.GetID(), meta.CurrentTarget) != nil &&
 				b.targetMgr.GetSealedSegment(segment.GetCollectionID(), segment.GetID(), meta.NextTarget) != nil &&
 				segment.GetLevel() != datapb.SegmentLevel_L0
 		})
 		nodeSegments[node] = segments
-		globalNodeSegments[node] = b.dist.SegmentDistManager.GetByNode(node)
+		globalNodeSegments[node] = b.dist.SegmentDistManager.GetByFilter(meta.WithNodeID(node))
 	}
 
 	return b.genPlanByDistributions(nodeSegments, globalNodeSegments)

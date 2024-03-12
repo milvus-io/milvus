@@ -66,12 +66,12 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 		}
 	}, wrapperTraceLog(h.wrapperCheckDatabase(h.query)))))
 	router.POST(EntityCategory+GetAction, timeoutMiddleware(wrapperPost(func() any {
-		return &CollectionIDOutputReq{
+		return &CollectionIDReq{
 			OutputFields: []string{DefaultOutputFields},
 		}
 	}, wrapperTraceLog(h.wrapperCheckDatabase(h.get)))))
 	router.POST(EntityCategory+DeleteAction, timeoutMiddleware(wrapperPost(func() any {
-		return &CollectionIDFilterReq{}
+		return &CollectionFilterReq{}
 	}, wrapperTraceLog(h.wrapperCheckDatabase(h.delete)))))
 	router.POST(EntityCategory+InsertAction, timeoutMiddleware(wrapperPost(func() any {
 		return &CollectionDataReq{}
@@ -84,11 +84,11 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 			Limit: 100,
 		}
 	}, wrapperTraceLog(h.wrapperCheckDatabase(h.search)))))
-	router.POST(EntityCategory+HybridSearchAction, timeoutMiddleware(wrapperPost(func() any {
+	router.POST(EntityCategory+AdvancedSearchAction, timeoutMiddleware(wrapperPost(func() any {
 		return &HybridSearchReq{
 			Limit: 100,
 		}
-	}, wrapperTraceLog(h.wrapperCheckDatabase(h.hybridSearch)))))
+	}, wrapperTraceLog(h.wrapperCheckDatabase(h.advancedSearch)))))
 
 	router.POST(PartitionCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.listPartitions)))))
 	router.POST(PartitionCategory+HasAction, timeoutMiddleware(wrapperPost(func() any { return &PartitionReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.hasPartitions)))))
@@ -534,7 +534,7 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 }
 
 func (h *HandlersV2) get(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
-	httpReq := anyReq.(*CollectionIDOutputReq)
+	httpReq := anyReq.(*CollectionIDReq)
 	collSchema, err := h.GetCollectionSchema(ctx, c, dbName, httpReq.CollectionName)
 	if err != nil {
 		return nil, err
@@ -577,7 +577,7 @@ func (h *HandlersV2) get(ctx context.Context, c *gin.Context, anyReq any, dbName
 }
 
 func (h *HandlersV2) delete(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
-	httpReq := anyReq.(*CollectionIDFilterReq)
+	httpReq := anyReq.(*CollectionFilterReq)
 	collSchema, err := h.GetCollectionSchema(ctx, c, dbName, httpReq.CollectionName)
 	if err != nil {
 		return nil, err
@@ -728,6 +728,43 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	return resp, err
 }
 
+func generatePlaceholderGroup(ctx context.Context, body string, collSchema *schemapb.CollectionSchema, fieldName string) ([]byte, error) {
+	var err error
+	var vectorField *schemapb.FieldSchema
+	if len(fieldName) == 0 {
+		for _, field := range collSchema.Fields {
+			if IsVectorField(field) {
+				if len(fieldName) == 0 {
+					fieldName = field.Name
+					vectorField = field
+				} else {
+					return nil, errors.New("search without annsFields, but already found multiple vector fields: [" + fieldName + ", " + field.Name + "]")
+				}
+			}
+		}
+	} else {
+		for _, field := range collSchema.Fields {
+			if field.Name == fieldName && IsVectorField(field) {
+				vectorField = field
+				break
+			}
+		}
+	}
+	if vectorField == nil {
+		return nil, errors.New("cannot find a vector field named: " + fieldName)
+	}
+	dim, _ := getDim(vectorField)
+	phv, err := convertVectors2Placeholder(body, vectorField.DataType, dim)
+	if err != nil {
+		return nil, err
+	}
+	return proto.Marshal(&commonpb.PlaceholderGroup{
+		Placeholders: []*commonpb.PlaceholderValue{
+			phv,
+		},
+	})
+}
+
 func generateSearchParams(ctx context.Context, c *gin.Context, reqParams map[string]float64) ([]*commonpb.KeyValuePair, error) {
 	params := map[string]interface{}{ // auto generated mapping
 		"level": int(commonpb.ConsistencyLevel_Bounded),
@@ -759,6 +796,10 @@ func generateSearchParams(ctx context.Context, c *gin.Context, reqParams map[str
 
 func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	httpReq := anyReq.(*SearchReqV2)
+	collSchema, err := h.GetCollectionSchema(ctx, c, dbName, httpReq.CollectionName)
+	if err != nil {
+		return nil, err
+	}
 	searchParams, err := generateSearchParams(ctx, c, httpReq.Params)
 	if err != nil {
 		return nil, err
@@ -766,12 +807,23 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: common.TopKKey, Value: strconv.FormatInt(int64(httpReq.Limit), 10)})
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamOffset, Value: strconv.FormatInt(int64(httpReq.Offset), 10)})
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamGroupByField, Value: httpReq.GroupByField})
+	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: proxy.AnnsFieldKey, Value: httpReq.AnnsField})
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamRoundDecimal, Value: "-1"})
+	body, _ := c.Get(gin.BodyBytesKey)
+	placeholderGroup, err := generatePlaceholderGroup(ctx, string(body.([]byte)), collSchema, httpReq.AnnsField)
+	if err != nil {
+		log.Ctx(ctx).Warn("high level restful api, search with vector invalid", zap.Error(err))
+		c.AbortWithStatusJSON(http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
+			HTTPReturnMessage: merr.ErrIncorrectParameterFormat.Error() + ", error: " + err.Error(),
+		})
+		return nil, err
+	}
 	req := &milvuspb.SearchRequest{
 		DbName:             dbName,
 		CollectionName:     httpReq.CollectionName,
 		Dsl:                httpReq.Filter,
-		PlaceholderGroup:   vectors2PlaceholderGroupBytes(httpReq.Vector),
+		PlaceholderGroup:   placeholderGroup,
 		DslType:            commonpb.DslType_BoolExprV1,
 		OutputFields:       httpReq.OutputFields,
 		PartitionNames:     httpReq.PartitionNames,
@@ -803,14 +855,20 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 	return resp, err
 }
 
-func (h *HandlersV2) hybridSearch(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	httpReq := anyReq.(*HybridSearchReq)
 	req := &milvuspb.HybridSearchRequest{
 		DbName:         dbName,
 		CollectionName: httpReq.CollectionName,
 		Requests:       []*milvuspb.SearchRequest{},
 	}
-	for _, subReq := range httpReq.Search {
+	collSchema, err := h.GetCollectionSchema(ctx, c, dbName, httpReq.CollectionName)
+	if err != nil {
+		return nil, err
+	}
+	body, _ := c.Get(gin.BodyBytesKey)
+	searchArray := gjson.Get(string(body.([]byte)), "search").Array()
+	for i, subReq := range httpReq.Search {
 		searchParams, err := generateSearchParams(ctx, c, subReq.Params)
 		if err != nil {
 			return nil, err
@@ -820,11 +878,20 @@ func (h *HandlersV2) hybridSearch(ctx context.Context, c *gin.Context, anyReq an
 		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamGroupByField, Value: subReq.GroupByField})
 		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: proxy.AnnsFieldKey, Value: subReq.AnnsField})
 		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamRoundDecimal, Value: "-1"})
+		placeholderGroup, err := generatePlaceholderGroup(ctx, searchArray[i].Raw, collSchema, subReq.AnnsField)
+		if err != nil {
+			log.Ctx(ctx).Warn("high level restful api, search with vector invalid", zap.Error(err))
+			c.AbortWithStatusJSON(http.StatusOK, gin.H{
+				HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
+				HTTPReturnMessage: merr.ErrIncorrectParameterFormat.Error() + ", error: " + err.Error(),
+			})
+			return nil, err
+		}
 		searchReq := &milvuspb.SearchRequest{
 			DbName:             dbName,
 			CollectionName:     httpReq.CollectionName,
 			Dsl:                subReq.Filter,
-			PlaceholderGroup:   vectors2PlaceholderGroupBytes(subReq.Vector),
+			PlaceholderGroup:   placeholderGroup,
 			DslType:            commonpb.DslType_BoolExprV1,
 			OutputFields:       httpReq.OutputFields,
 			PartitionNames:     httpReq.PartitionNames,
@@ -871,20 +938,53 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 	var err error
 	fieldNames := map[string]bool{}
 	if httpReq.Schema.Fields == nil || len(httpReq.Schema.Fields) == 0 {
+		if httpReq.Dimension == 0 {
+			err := merr.WrapErrParameterInvalid("collectionName & dimension", "collectionName",
+				"dimension is required for quickly create collection(default metric type: "+DefaultMetricType+")")
+			log.Ctx(ctx).Warn("high level restful api, quickly create collection fail", zap.Error(err), zap.Any("request", anyReq))
+			c.AbortWithStatusJSON(http.StatusOK, gin.H{
+				HTTPReturnCode:    merr.Code(err),
+				HTTPReturnMessage: err.Error(),
+			})
+			return nil, err
+		}
+		idDataType := schemapb.DataType_Int64
+		switch httpReq.IDType {
+		case "Varchar":
+			idDataType = schemapb.DataType_VarChar
+		case "":
+			httpReq.IDType = "Int64"
+		case "Int64":
+		default:
+			err := merr.WrapErrParameterInvalid("Int64, Varchar", httpReq.IDType,
+				"idType can only be [Int64, Varchar](case sensitive), default: Int64")
+			log.Ctx(ctx).Warn("high level restful api, quickly create collection fail", zap.Error(err), zap.Any("request", anyReq))
+			c.AbortWithStatusJSON(http.StatusOK, gin.H{
+				HTTPReturnCode:    merr.Code(err),
+				HTTPReturnMessage: err.Error(),
+			})
+			return nil, err
+		}
+		if len(httpReq.PrimaryFieldName) == 0 {
+			httpReq.PrimaryFieldName = PrimaryFieldName
+		}
+		if len(httpReq.VectorFieldName) == 0 {
+			httpReq.VectorFieldName = VectorFieldName
+		}
 		schema, err = proto.Marshal(&schemapb.CollectionSchema{
 			Name:   httpReq.CollectionName,
 			AutoID: EnableAutoID,
 			Fields: []*schemapb.FieldSchema{
 				{
 					FieldID:      common.StartOfUserFieldID,
-					Name:         PrimaryFieldName,
+					Name:         httpReq.PrimaryFieldName,
 					IsPrimaryKey: true,
-					DataType:     schemapb.DataType_Int64,
+					DataType:     idDataType,
 					AutoID:       EnableAutoID,
 				},
 				{
 					FieldID:      common.StartOfUserFieldID + 1,
-					Name:         VectorFieldName,
+					Name:         httpReq.VectorFieldName,
 					IsPrimaryKey: false,
 					DataType:     schemapb.DataType_FloatVector,
 					TypeParams: []*commonpb.KeyValuePair{
@@ -967,6 +1067,9 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 		return resp, err
 	}
 	if httpReq.Schema.Fields == nil || len(httpReq.Schema.Fields) == 0 {
+		if len(httpReq.MetricType) == 0 {
+			httpReq.MetricType = DefaultMetricType
+		}
 		createIndexReq := &milvuspb.CreateIndexRequest{
 			DbName:         dbName,
 			CollectionName: httpReq.CollectionName,

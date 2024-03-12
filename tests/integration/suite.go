@@ -25,7 +25,10 @@ import (
 
 	"github.com/stretchr/testify/suite"
 	"go.etcd.io/etcd/server/v3/embed"
+	"go.uber.org/zap/zapcore"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -80,6 +83,7 @@ func (s *MiniClusterSuite) TearDownSuite() {
 }
 
 func (s *MiniClusterSuite) SetupTest() {
+	log.SetLevel(zapcore.InfoLevel)
 	s.T().Log("Setup test...")
 	// setup mini cluster to use embed etcd
 	endpoints := etcd.GetEmbedEtcdEndpoints(s.EtcdServer)
@@ -104,6 +108,18 @@ func (s *MiniClusterSuite) SetupTest() {
 }
 
 func (s *MiniClusterSuite) TearDownTest() {
+	resp, err := s.Cluster.Proxy.ShowCollections(context.Background(), &milvuspb.ShowCollectionsRequest{
+		Type: milvuspb.ShowType_InMemory,
+	})
+	if err == nil {
+		for idx, collectionName := range resp.GetCollectionNames() {
+			if resp.GetInMemoryPercentages()[idx] == 100 || resp.GetQueryServiceAvailable()[idx] {
+				s.Cluster.Proxy.ReleaseCollection(context.Background(), &milvuspb.ReleaseCollectionRequest{
+					CollectionName: collectionName,
+				})
+			}
+		}
+	}
 	s.T().Log("Tear Down test...")
 	defer s.cancelFunc()
 	if s.Cluster != nil {

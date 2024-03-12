@@ -123,6 +123,7 @@ type DataCoordCatalog interface {
 
 	ListChannelCheckpoint(ctx context.Context) (map[string]*msgpb.MsgPosition, error)
 	SaveChannelCheckpoint(ctx context.Context, vChannel string, pos *msgpb.MsgPosition) error
+	SaveChannelCheckpoints(ctx context.Context, positions []*msgpb.MsgPosition) error
 	DropChannelCheckpoint(ctx context.Context, vChannel string) error
 
 	CreateIndex(ctx context.Context, index *model.Index) error

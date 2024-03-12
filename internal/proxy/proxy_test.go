@@ -60,7 +60,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/dependency"
-	"github.com/milvus-io/milvus/internal/util/importutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -1954,32 +1953,6 @@ func TestProxy(t *testing.T) {
 		assert.NoError(t, err)
 		// Wait a bit for complete import to start.
 		time.Sleep(2 * time.Second)
-	})
-
-	wg.Add(1)
-	t.Run("test import collection ID not found", func(t *testing.T) {
-		defer wg.Done()
-		req := &milvuspb.ImportRequest{
-			CollectionName: "bad_collection_name",
-			Files:          []string{"f1.json"},
-		}
-		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
-		resp, err := proxy.Import(context.TODO(), req)
-		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-	})
-
-	wg.Add(1)
-	t.Run("test import get vChannel fail", func(t *testing.T) {
-		defer wg.Done()
-		req := &milvuspb.ImportRequest{
-			CollectionName: "bad_collection_name",
-			Files:          []string{"f1.json"},
-		}
-		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
-		resp, err := proxy.Import(context.TODO(), req)
-		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
 	})
 
 	wg.Add(1)
@@ -4494,134 +4467,101 @@ func TestProxy_GetComponentStates(t *testing.T) {
 }
 
 func TestProxy_Import(t *testing.T) {
-	var wg sync.WaitGroup
+	cache := globalMetaCache
+	defer func() { globalMetaCache = cache }()
 
-	wg.Add(1)
-	t.Run("test import with unhealthy", func(t *testing.T) {
-		defer wg.Done()
-		req := &milvuspb.ImportRequest{
-			CollectionName: "dummy",
-		}
+	t.Run("Import failed", func(t *testing.T) {
 		proxy := &Proxy{}
 		proxy.UpdateStateCode(commonpb.StateCode_Abnormal)
+
+		req := &milvuspb.ImportRequest{}
 		resp, err := proxy.Import(context.TODO(), req)
 		assert.NoError(t, err)
 		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
 	})
 
-	wg.Add(1)
-	t.Run("rootcoord fail", func(t *testing.T) {
-		defer wg.Done()
+	t.Run("Import", func(t *testing.T) {
 		proxy := &Proxy{}
 		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		mc := NewMockCache(t)
+		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
+		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
+			CollectionSchema: &schemapb.CollectionSchema{},
+		}, nil)
+		mc.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
+		globalMetaCache = mc
+
 		chMgr := NewMockChannelsMgr(t)
+		chMgr.EXPECT().getVChannels(mock.Anything).Return(nil, nil)
 		proxy.chMgr = chMgr
-		rc := newMockRootCoord()
-		rc.ImportFunc = func(ctx context.Context, req *milvuspb.ImportRequest, opts ...grpc.CallOption) (*milvuspb.ImportResponse, error) {
-			return nil, errors.New("mock")
-		}
-		proxy.rootCoord = rc
+
+		dataCoord := mocks.NewMockDataCoordClient(t)
+		dataCoord.EXPECT().ImportV2(mock.Anything, mock.Anything).Return(&internalpb.ImportResponse{
+			Status: merr.Success(),
+			JobID:  "100",
+		}, nil)
+		proxy.dataCoord = dataCoord
+
 		req := &milvuspb.ImportRequest{
 			CollectionName: "dummy",
+			Files:          []string{"a.json"},
 		}
 		resp, err := proxy.Import(context.TODO(), req)
 		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, int32(0), resp.GetStatus().GetCode())
 	})
 
-	wg.Add(1)
-	t.Run("normal case", func(t *testing.T) {
-		defer wg.Done()
+	t.Run("GetImportState failed", func(t *testing.T) {
 		proxy := &Proxy{}
-		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
-		chMgr := NewMockChannelsMgr(t)
-		proxy.chMgr = chMgr
-		rc := newMockRootCoord()
-		rc.ImportFunc = func(ctx context.Context, req *milvuspb.ImportRequest, opts ...grpc.CallOption) (*milvuspb.ImportResponse, error) {
-			return &milvuspb.ImportResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}}, nil
-		}
-		proxy.rootCoord = rc
-		req := &milvuspb.ImportRequest{
-			CollectionName: "dummy",
-		}
-		resp, err := proxy.Import(context.TODO(), req)
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-	})
-
-	wg.Add(1)
-	t.Run("illegal import options", func(t *testing.T) {
-		defer wg.Done()
-		proxy := &Proxy{}
-		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
-		chMgr := NewMockChannelsMgr(t)
-		proxy.chMgr = chMgr
-		rc := newMockRootCoord()
-		rc.ImportFunc = func(ctx context.Context, req *milvuspb.ImportRequest, opts ...grpc.CallOption) (*milvuspb.ImportResponse, error) {
-			return &milvuspb.ImportResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}}, nil
-		}
-		proxy.rootCoord = rc
-		req := &milvuspb.ImportRequest{
-			CollectionName: "dummy",
-			Options: []*commonpb.KeyValuePair{
-				{
-					Key:   importutil.StartTs,
-					Value: "0",
-				},
-				{
-					Key:   importutil.EndTs,
-					Value: "not a number",
-				},
-			},
-		}
-		resp, err := proxy.Import(context.TODO(), req)
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-	})
-	wg.Wait()
-}
-
-func TestProxy_GetImportState(t *testing.T) {
-	req := &milvuspb.GetImportStateRequest{
-		Task: 1,
-	}
-	rootCoord := &RootCoordMock{}
-	rootCoord.state.Store(commonpb.StateCode_Healthy)
-	t.Run("test get import state", func(t *testing.T) {
-		proxy := &Proxy{rootCoord: rootCoord}
-		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
-
-		resp, err := proxy.GetImportState(context.TODO(), req)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-		assert.NoError(t, err)
-	})
-	t.Run("test get import state with unhealthy", func(t *testing.T) {
-		proxy := &Proxy{rootCoord: rootCoord}
 		proxy.UpdateStateCode(commonpb.StateCode_Abnormal)
+
+		req := &milvuspb.GetImportStateRequest{}
 		resp, err := proxy.GetImportState(context.TODO(), req)
+		assert.NoError(t, err)
 		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
-		assert.NoError(t, err)
 	})
-}
 
-func TestProxy_ListImportTasks(t *testing.T) {
-	req := &milvuspb.ListImportTasksRequest{}
-	rootCoord := &RootCoordMock{}
-	rootCoord.state.Store(commonpb.StateCode_Healthy)
-	t.Run("test list import tasks", func(t *testing.T) {
-		proxy := &Proxy{rootCoord: rootCoord}
+	t.Run("GetImportState", func(t *testing.T) {
+		proxy := &Proxy{}
 		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 
-		resp, err := proxy.ListImportTasks(context.TODO(), req)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		dataCoord := mocks.NewMockDataCoordClient(t)
+		dataCoord.EXPECT().GetImportProgress(mock.Anything, mock.Anything).Return(&internalpb.GetImportProgressResponse{
+			Status: merr.Success(),
+		}, nil)
+		proxy.dataCoord = dataCoord
+
+		req := &milvuspb.GetImportStateRequest{}
+		resp, err := proxy.GetImportState(context.TODO(), req)
 		assert.NoError(t, err)
+		assert.Equal(t, int32(0), resp.GetStatus().GetCode())
 	})
-	t.Run("test list import tasks with unhealthy", func(t *testing.T) {
-		proxy := &Proxy{rootCoord: rootCoord}
+
+	t.Run("ListImportTasks failed", func(t *testing.T) {
+		proxy := &Proxy{}
 		proxy.UpdateStateCode(commonpb.StateCode_Abnormal)
+
+		req := &milvuspb.ListImportTasksRequest{}
 		resp, err := proxy.ListImportTasks(context.TODO(), req)
 		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
 		assert.NoError(t, err)
+	})
+
+	t.Run("ListImportTasks", func(t *testing.T) {
+		proxy := &Proxy{}
+		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		dataCoord := mocks.NewMockDataCoordClient(t)
+		dataCoord.EXPECT().ListImports(mock.Anything, mock.Anything).Return(&internalpb.ListImportsResponse{
+			Status: merr.Success(),
+		}, nil)
+		proxy.dataCoord = dataCoord
+
+		req := &milvuspb.ListImportTasksRequest{}
+		resp, err := proxy.ListImportTasks(context.TODO(), req)
+		assert.NoError(t, err)
+		assert.Equal(t, int32(0), resp.GetStatus().GetCode())
 	})
 }
 

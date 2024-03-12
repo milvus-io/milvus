@@ -333,6 +333,9 @@ class SegmentExpr : public Expr {
     FixedVector<bool> cached_index_chunk_res_{};
 };
 
+void
+OptimizeCompiledExprs(ExecContext* context, const std::vector<ExprPtr>& exprs);
+
 std::vector<ExprPtr>
 CompileExpressions(const std::vector<expr::TypedExprPtr>& logical_exprs,
                    ExecContext* context,

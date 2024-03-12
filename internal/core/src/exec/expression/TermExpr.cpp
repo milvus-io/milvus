@@ -205,8 +205,12 @@ PhyTermFilterExpr::ExecPkTermImpl() {
         res[i] = cached_bits_[current_data_chunk_pos_++];
     }
 
-    std::vector<VectorPtr> vecs{res_vec, cached_offsets_};
-    return std::make_shared<RowVector>(vecs);
+    if (use_cache_offsets_) {
+        std::vector<VectorPtr> vecs{res_vec, cached_offsets_};
+        return std::make_shared<RowVector>(vecs);
+    } else {
+        return res_vec;
+    }
 }
 
 template <typename ValueType>

@@ -92,7 +92,7 @@ def wait_signal_to_apply_chaos():
     all_db_file = glob.glob("/tmp/ci_logs/event_records*.parquet")
     log.info(f"all files {all_db_file}")
     ready_apply_chaos = True
-    timeout = 10*60
+    timeout = 15*60
     t0 = time.time()
     for f in all_db_file:
         while True and (time.time() - t0 < timeout):

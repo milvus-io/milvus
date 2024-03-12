@@ -214,7 +214,9 @@ func (s *SyncManagerSuite) TestBlock() {
 	counter := atomic.NewInt32(0)
 	s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(nil)
 	bfs := metacache.NewBloomFilterSet()
-	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs)
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{
+		ID: s.segmentID,
+	}, bfs)
 	metacache.UpdateNumOfRows(1000)(seg)
 	s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
 	s.metacache.EXPECT().GetSegmentsBy(mock.Anything).
@@ -233,22 +235,20 @@ func (s *SyncManagerSuite) TestBlock() {
 	// block
 	manager.Block(s.segmentID)
 
-	go func() {
-		task := s.getSuiteSyncTask()
-		task.WithMetaWriter(BrokerMetaWriter(s.broker, 1))
-		task.WithTimeRange(50, 100)
-		task.WithCheckpoint(&msgpb.MsgPosition{
-			ChannelName: s.channelName,
-			MsgID:       []byte{1, 2, 3, 4},
-			Timestamp:   100,
-		})
-		manager.SyncData(context.Background(), task)
-	}()
+	task := s.getSuiteSyncTask()
+	task.WithMetaWriter(BrokerMetaWriter(s.broker, 1))
+	task.WithTimeRange(50, 100)
+	task.WithCheckpoint(&msgpb.MsgPosition{
+		ChannelName: s.channelName,
+		MsgID:       []byte{1, 2, 3, 4},
+		Timestamp:   100,
+	})
+	manager.SyncData(context.Background(), task)
 
 	select {
 	case <-sig:
 		s.FailNow("sync task done during block")
-	default:
+	case <-time.After(time.Second):
 	}
 
 	manager.Unblock(s.segmentID)

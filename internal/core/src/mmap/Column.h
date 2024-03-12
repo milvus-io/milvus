@@ -34,6 +34,10 @@
 #include "fmt/format.h"
 #include "log/Log.h"
 #include "mmap/Utils.h"
+#include "common/FieldData.h"
+#include "common/FieldDataInterface.h"
+#include "common/Array.h"
+#include "knowhere/dataset.h"
 
 namespace milvus {
 
@@ -134,7 +138,7 @@ class ColumnBase {
         column.size_ = 0;
     }
 
-    const char*
+    virtual const char*
     Data() const {
         return data_;
     }
@@ -144,14 +148,14 @@ class ColumnBase {
         return num_rows_;
     };
 
-    const size_t
+    virtual size_t
     ByteSize() const {
         return cap_size_ + padding_;
     }
 
     // The capacity of the column,
-    // DO NOT call this for variable length column.
-    size_t
+    // DO NOT call this for variable length column(including SparseFloatColumn).
+    virtual size_t
     Capacity() const {
         return cap_size_ / type_size_;
     }
@@ -159,8 +163,8 @@ class ColumnBase {
     virtual SpanBase
     Span() const = 0;
 
-    void
-    AppendBatch(const FieldDataPtr& data) {
+    virtual void
+    AppendBatch(const FieldDataPtr data) {
         size_t required_size = size_ + data->Size();
         if (required_size > cap_size_) {
             Expand(required_size * 2 + padding_);
@@ -174,7 +178,7 @@ class ColumnBase {
     }
 
     // Append one row
-    void
+    virtual void
     Append(const char* data, size_t size) {
         size_t required_size = size_ + size;
         if (required_size > cap_size_) {
@@ -261,6 +265,80 @@ class Column : public ColumnBase {
     Span() const override {
         return SpanBase(data_, num_rows_, cap_size_ / num_rows_);
     }
+};
+
+// mmap not yet supported, thus SparseFloatColumn is not using fields in super
+// class such as ColumnBase::data.
+class SparseFloatColumn : public ColumnBase {
+ public:
+    // memory mode ctor
+    SparseFloatColumn(const FieldMeta& field_meta) : ColumnBase(0, field_meta) {
+    }
+    // mmap mode ctor
+    SparseFloatColumn(const File& file,
+                      size_t size,
+                      const FieldMeta& field_meta)
+        : ColumnBase(file, size, field_meta) {
+        AssertInfo(false, "SparseFloatColumn mmap mode not supported");
+    }
+
+    SparseFloatColumn(SparseFloatColumn&& column) noexcept
+        : ColumnBase(std::move(column)),
+          dim_(column.dim_),
+          vec_(std::move(column.vec_)) {
+    }
+
+    ~SparseFloatColumn() override = default;
+
+    const char*
+    Data() const override {
+        return static_cast<const char*>(static_cast<const void*>(vec_.data()));
+    }
+
+    // This is used to advice mmap prefetch, we don't currently support mmap for
+    // sparse float vector thus not implemented for now.
+    size_t
+    ByteSize() const override {
+        throw std::runtime_error(
+            "ByteSize not supported for sparse float column");
+    }
+
+    size_t
+    Capacity() const override {
+        throw std::runtime_error(
+            "Capacity not supported for sparse float column");
+    }
+
+    SpanBase
+    Span() const override {
+        throw std::runtime_error("Span not supported for sparse float column");
+    }
+
+    void
+    AppendBatch(const FieldDataPtr data) override {
+        auto ptr = static_cast<const knowhere::sparse::SparseRow<float>*>(
+            data->Data());
+        vec_.insert(vec_.end(), ptr, ptr + data->Length());
+        for (size_t i = 0; i < data->Length(); ++i) {
+            dim_ = std::max(dim_, ptr[i].dim());
+        }
+        num_rows_ += data->Length();
+    }
+
+    void
+    Append(const char* data, size_t size) override {
+        throw std::runtime_error(
+            "Append not supported for sparse float column");
+    }
+
+    int64_t
+    Dim() const {
+        return dim_;
+    }
+
+ private:
+    int64_t dim_ = 0;
+    std::vector<knowhere::sparse::SparseRow<float>> vec_;
 };
 
 template <typename T>

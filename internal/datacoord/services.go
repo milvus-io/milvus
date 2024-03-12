@@ -1464,9 +1464,19 @@ func (s *Server) UpdateChannelCheckpoint(ctx context.Context, req *datapb.Update
 		return merr.Status(err), nil
 	}
 
-	err := s.meta.UpdateChannelCheckpoint(req.GetVChannel(), req.GetPosition())
+	// For compatibility with old client
+	if req.GetVChannel() != "" && req.GetPosition() != nil {
+		err := s.meta.UpdateChannelCheckpoint(req.GetVChannel(), req.GetPosition())
+		if err != nil {
+			log.Warn("failed to UpdateChannelCheckpoint", zap.String("vChannel", req.GetVChannel()), zap.Error(err))
+			return merr.Status(err), nil
+		}
+		return merr.Success(), nil
+	}
+
+	err := s.meta.UpdateChannelCheckpoints(req.GetChannelCheckpoints())
 	if err != nil {
-		log.Warn("failed to UpdateChannelCheckpoint", zap.String("vChannel", req.GetVChannel()), zap.Error(err))
+		log.Warn("failed to update channel checkpoint", zap.Error(err))
 		return merr.Status(err), nil
 	}
 
@@ -1871,7 +1881,13 @@ func (s *Server) ListImports(ctx context.Context, req *internalpb.ListImportsReq
 		Progresses: make([]int64, 0),
 	}
 
-	jobs := s.importMeta.GetJobBy(WithCollectionID(req.GetCollectionID()))
+	var jobs []ImportJob
+	if req.GetCollectionID() != 0 {
+		jobs = s.importMeta.GetJobBy(WithCollectionID(req.GetCollectionID()))
+	} else {
+		jobs = s.importMeta.GetJobBy()
+	}
+
 	for _, job := range jobs {
 		progress, state, reason := GetImportProgress(job.GetJobID(), s.importMeta, s.meta)
 		resp.JobIDs = append(resp.JobIDs, fmt.Sprintf("%d", job.GetJobID()))

@@ -210,7 +210,12 @@ func (kc *Catalog) loadCollectionFromDefaultDb(ctx context.Context, collectionID
 
 func (kc *Catalog) loadCollection(ctx context.Context, dbID int64, collectionID typeutil.UniqueID, ts typeutil.Timestamp) (*pb.CollectionInfo, error) {
 	if isDefaultDB(dbID) {
-		return kc.loadCollectionFromDefaultDb(ctx, collectionID, ts)
+		info, err := kc.loadCollectionFromDefaultDb(ctx, collectionID, ts)
+		if err != nil {
+			return nil, err
+		}
+		fixDefaultDBIDConsistency(info)
+		return info, nil
 	}
 	return kc.loadCollectionFromDb(ctx, dbID, collectionID, ts)
 }
@@ -625,6 +630,7 @@ func (kc *Catalog) ListCollections(ctx context.Context, dbID int64, ts typeutil.
 			log.Warn("unmarshal collection info failed", zap.Error(err))
 			continue
 		}
+		fixDefaultDBIDConsistency(&collMeta)
 		collection, err := kc.appendPartitionAndFieldsInfo(ctx, &collMeta, ts)
 		if err != nil {
 			return nil, err
@@ -1187,4 +1193,13 @@ func isDefaultDB(dbID int64) bool {
 		return true
 	}
 	return false
+}
+
+// fixDefaultDBIDConsistency fix dbID consistency for collectionInfo.
+// We have two versions of default databaseID (0 at legacy path, 1 at new path), we should keep consistent view when user use default database.
+// all collections in default database should be marked with dbID 1.
+func fixDefaultDBIDConsistency(coll *pb.CollectionInfo) {
+	if isDefaultDB(coll.DbId) {
+		coll.DbId = util.DefaultDBID
+	}
 }

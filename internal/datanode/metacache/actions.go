@@ -25,50 +25,77 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-type SegmentFilter func(info *SegmentInfo) bool
+type SegmentFilter interface {
+	Filter(info *SegmentInfo) bool
+	SegmentIDs() ([]int64, bool)
+}
 
-func WithPartitionID(partitionID int64) SegmentFilter {
-	return func(info *SegmentInfo) bool {
-		return partitionID == common.InvalidPartitionID || info.partitionID == partitionID
-	}
+type SegmentIDFilter struct {
+	segmentIDs []int64
+	ids        typeutil.Set[int64]
 }
 
 func WithSegmentIDs(segmentIDs ...int64) SegmentFilter {
-	set := typeutil.NewSet[int64](segmentIDs...)
-	return func(info *SegmentInfo) bool {
-		return set.Contain(info.segmentID)
+	set := typeutil.NewSet(segmentIDs...)
+	return &SegmentIDFilter{
+		segmentIDs: segmentIDs,
+		ids:        set,
 	}
+}
+
+func (f *SegmentIDFilter) Filter(info *SegmentInfo) bool {
+	return f.ids.Contain(info.segmentID)
+}
+
+func (f *SegmentIDFilter) SegmentIDs() ([]int64, bool) {
+	return f.segmentIDs, true
+}
+
+type SegmentFilterFunc func(info *SegmentInfo) bool
+
+func (f SegmentFilterFunc) Filter(info *SegmentInfo) bool {
+	return f(info)
+}
+
+func (f SegmentFilterFunc) SegmentIDs() ([]int64, bool) {
+	return nil, false
+}
+
+func WithPartitionID(partitionID int64) SegmentFilter {
+	return SegmentFilterFunc(func(info *SegmentInfo) bool {
+		return partitionID == common.InvalidPartitionID || info.partitionID == partitionID
+	})
 }
 
 func WithSegmentState(states ...commonpb.SegmentState) SegmentFilter {
 	set := typeutil.NewSet(states...)
-	return func(info *SegmentInfo) bool {
+	return SegmentFilterFunc(func(info *SegmentInfo) bool {
 		return set.Len() > 0 && set.Contain(info.state)
-	}
+	})
 }
 
 func WithStartPosNotRecorded() SegmentFilter {
-	return func(info *SegmentInfo) bool {
+	return SegmentFilterFunc(func(info *SegmentInfo) bool {
 		return !info.startPosRecorded
-	}
+	})
 }
 
 func WithLevel(level datapb.SegmentLevel) SegmentFilter {
-	return func(info *SegmentInfo) bool {
+	return SegmentFilterFunc(func(info *SegmentInfo) bool {
 		return info.level == level
-	}
+	})
 }
 
 func WithCompacted() SegmentFilter {
-	return func(info *SegmentInfo) bool {
+	return SegmentFilterFunc(func(info *SegmentInfo) bool {
 		return info.compactTo != 0
-	}
+	})
 }
 
 func WithNoSyncingTask() SegmentFilter {
-	return func(info *SegmentInfo) bool {
+	return SegmentFilterFunc(func(info *SegmentInfo) bool {
 		return info.syncingTasks == 0
-	}
+	})
 }
 
 type SegmentAction func(info *SegmentInfo)

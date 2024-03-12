@@ -520,7 +520,7 @@ func (sd *shardDelegator) GetLevel0Deletions(partitionID int64) ([]storage.Prima
 }
 
 func (sd *shardDelegator) GenerateLevel0DeletionCache() {
-	level0Segments := sd.segmentManager.GetBy(segments.WithLevel(datapb.SegmentLevel_L0))
+	level0Segments := sd.segmentManager.GetBy(segments.WithLevel(datapb.SegmentLevel_L0), segments.WithChannel(sd.vchannelName))
 	deletions := make(map[int64]*storage.DeleteData)
 	for _, segment := range level0Segments {
 		segment := segment.(*segments.L0Segment)
@@ -766,7 +766,7 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 	log := sd.getLogger(ctx)
 
 	targetNodeID := req.GetNodeID()
-	level0Segments := typeutil.NewSet(lo.Map(sd.segmentManager.GetBy(segments.WithLevel(datapb.SegmentLevel_L0)), func(segment segments.Segment, _ int) int64 {
+	level0Segments := typeutil.NewSet(lo.Map(sd.segmentManager.GetBy(segments.WithLevel(datapb.SegmentLevel_L0), segments.WithChannel(sd.vchannelName)), func(segment segments.Segment, _ int) int64 {
 		return segment.ID()
 	})...)
 	hasLevel0 := false

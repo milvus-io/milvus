@@ -59,35 +59,23 @@ class IndexWrapperTest : public ::testing::TestWithParam<Param> {
 
         search_conf = generate_search_conf(index_type, metric_type);
 
-        std::map<knowhere::MetricType, bool> is_binary_map = {
-            {knowhere::IndexEnum::INDEX_FAISS_IDMAP, false},
-            {knowhere::IndexEnum::INDEX_FAISS_IVFPQ, false},
-            {knowhere::IndexEnum::INDEX_FAISS_IVFFLAT, false},
-            {knowhere::IndexEnum::INDEX_FAISS_IVFSQ8, false},
-            {knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT, true},
-            {knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP, true},
-            {knowhere::IndexEnum::INDEX_HNSW, false},
+        std::map<knowhere::MetricType, DataType> index_to_vec_type = {
+            {knowhere::IndexEnum::INDEX_FAISS_IDMAP, DataType::VECTOR_FLOAT},
+            {knowhere::IndexEnum::INDEX_FAISS_IVFPQ, DataType::VECTOR_FLOAT},
+            {knowhere::IndexEnum::INDEX_FAISS_IVFFLAT, DataType::VECTOR_FLOAT},
+            {knowhere::IndexEnum::INDEX_FAISS_IVFSQ8, DataType::VECTOR_FLOAT},
+            {knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT,
+             DataType::VECTOR_BINARY},
+            {knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP,
+             DataType::VECTOR_BINARY},
+            {knowhere::IndexEnum::INDEX_HNSW, DataType::VECTOR_FLOAT},
+            {knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX,
+             DataType::VECTOR_SPARSE_FLOAT},
+            {knowhere::IndexEnum::INDEX_SPARSE_WAND,
+             DataType::VECTOR_SPARSE_FLOAT},
         };
 
-        is_binary = is_binary_map[index_type];
-        if (is_binary) {
-            vec_field_data_type = DataType::VECTOR_BINARY;
-        } else {
-            vec_field_data_type = DataType::VECTOR_FLOAT;
-        }
-
-        auto dataset = GenDataset(NB, metric_type, is_binary);
-        if (!is_binary) {
-            xb_data = dataset.get_col<float>(milvus::FieldId(100));
-            xb_dataset = knowhere::GenDataSet(NB, DIM, xb_data.data());
-            xq_dataset = knowhere::GenDataSet(
-                NQ, DIM, xb_data.data() + DIM * query_offset);
-        } else {
-            xb_bin_data = dataset.get_col<uint8_t>(milvus::FieldId(100));
-            xb_dataset = knowhere::GenDataSet(NB, DIM, xb_bin_data.data());
-            xq_dataset = knowhere::GenDataSet(
-                NQ, DIM, xb_bin_data.data() + DIM * query_offset);
-        }
+        vec_field_data_type = index_to_vec_type[index_type];
     }
 
     void
@@ -101,18 +89,13 @@ class IndexWrapperTest : public ::testing::TestWithParam<Param> {
     std::string type_params_str, index_params_str;
     Config config;
     milvus::Config search_conf;
-    bool is_binary;
     DataType vec_field_data_type;
-    knowhere::DataSetPtr xb_dataset;
-    FixedVector<float> xb_data;
-    FixedVector<uint8_t> xb_bin_data;
-    knowhere::DataSetPtr xq_dataset;
-    int64_t query_offset = 100;
-    int64_t NB = 10000;
+    int64_t query_offset = 1;
+    int64_t NB = 10;
     StorageConfig storage_config_;
 };
 
-INSTANTIATE_TEST_CASE_P(
+INSTANTIATE_TEST_SUITE_P(
     IndexTypeParameters,
     IndexWrapperTest,
     ::testing::Values(
@@ -126,7 +109,11 @@ INSTANTIATE_TEST_CASE_P(
                   knowhere::metric::JACCARD),
         std::pair(knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP,
                   knowhere::metric::JACCARD),
-        std::pair(knowhere::IndexEnum::INDEX_HNSW, knowhere::metric::L2)));
+        std::pair(knowhere::IndexEnum::INDEX_HNSW, knowhere::metric::L2),
+        std::pair(knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX,
+                  knowhere::metric::IP),
+        std::pair(knowhere::IndexEnum::INDEX_SPARSE_WAND,
+                  knowhere::metric::IP)));
 
 TEST_P(IndexWrapperTest, BuildAndQuery) {
     milvus::storage::FieldDataMeta field_data_meta{1, 2, 3, 100};
@@ -139,20 +126,29 @@ TEST_P(IndexWrapperTest, BuildAndQuery) {
         std::to_string(knowhere::Version::GetCurrentVersion().VersionNumber());
     auto index = milvus::indexbuilder::IndexFactory::GetInstance().CreateIndex(
         vec_field_data_type, config, file_manager_context);
-
-    auto dataset = GenDataset(NB, metric_type, is_binary);
     knowhere::DataSetPtr xb_dataset;
-    FixedVector<uint8_t> bin_vecs;
-    FixedVector<float> f_vecs;
-    if (is_binary) {
-        bin_vecs = dataset.get_col<uint8_t>(milvus::FieldId(100));
+    if (vec_field_data_type == DataType::VECTOR_BINARY) {
+        auto dataset = GenDataset(NB, metric_type, true);
+        auto bin_vecs = dataset.get_col<uint8_t>(milvus::FieldId(100));
         xb_dataset = knowhere::GenDataSet(NB, DIM, bin_vecs.data());
+        ASSERT_NO_THROW(index->Build(xb_dataset));
+    } else if (vec_field_data_type == DataType::VECTOR_SPARSE_FLOAT) {
+        auto dataset = GenDatasetWithDataType(
+            NB, metric_type, milvus::DataType::VECTOR_SPARSE_FLOAT);
+        auto sparse_vecs = dataset.get_col<knowhere::sparse::SparseRow<float>>(
+            milvus::FieldId(100));
+        xb_dataset =
+            knowhere::GenDataSet(NB, kTestSparseDim, sparse_vecs.data());
+        xb_dataset->SetIsSparse(true);
+        ASSERT_NO_THROW(index->Build(xb_dataset));
     } else {
-        f_vecs = dataset.get_col<float>(milvus::FieldId(100));
+        // VECTOR_FLOAT
+        auto dataset = GenDataset(NB, metric_type, false);
+        auto f_vecs = dataset.get_col<float>(milvus::FieldId(100));
         xb_dataset = knowhere::GenDataSet(NB, DIM, f_vecs.data());
+        ASSERT_NO_THROW(index->Build(xb_dataset));
     }
 
-    ASSERT_NO_THROW(index->Build(xb_dataset));
     auto binary_set = index->Serialize();
     FixedVector<std::string> index_files;
     for (auto& binary : binary_set.binary_map_) {
@@ -164,21 +160,53 @@ TEST_P(IndexWrapperTest, BuildAndQuery) {
             vec_field_data_type, config, file_manager_context);
     auto vec_index =
         static_cast<milvus::indexbuilder::VecIndexCreator*>(copy_index.get());
-    ASSERT_EQ(vec_index->dim(), DIM);
+    if (vec_field_data_type != DataType::VECTOR_SPARSE_FLOAT) {
+        ASSERT_EQ(vec_index->dim(), DIM);
+    }
 
     ASSERT_NO_THROW(vec_index->Load(binary_set));
+
+    if (vec_field_data_type == DataType::VECTOR_SPARSE_FLOAT) {
+        // TODO(SPARSE): complete test in PR adding search/query to sparse
+        // float vector.
+        return;
+    }
 
     milvus::SearchInfo search_info;
     search_info.topk_ = K;
     search_info.metric_type_ = metric_type;
     search_info.search_params_ = search_conf;
-    auto result = vec_index->Query(xq_dataset, search_info, nullptr);
+    std::unique_ptr<SearchResult> result;
+    if (vec_field_data_type == DataType::VECTOR_FLOAT) {
+        auto dataset = GenDataset(NB, metric_type, false);
+        auto xb_data = dataset.get_col<float>(milvus::FieldId(100));
+        auto xb_dataset = knowhere::GenDataSet(NB, DIM, xb_data.data());
+        auto xq_dataset =
+            knowhere::GenDataSet(NQ, DIM, xb_data.data() + DIM * query_offset);
+        result = vec_index->Query(xq_dataset, search_info, nullptr);
+    } else if (vec_field_data_type == DataType::VECTOR_SPARSE_FLOAT) {
+        auto dataset = GenDatasetWithDataType(
+            NQ, metric_type, milvus::DataType::VECTOR_SPARSE_FLOAT);
+        auto xb_data = dataset.get_col<knowhere::sparse::SparseRow<float>>(
+            milvus::FieldId(100));
+        auto xq_dataset =
+            knowhere::GenDataSet(NQ, kTestSparseDim, xb_data.data());
+        xq_dataset->SetIsSparse(true);
+        result = vec_index->Query(xq_dataset, search_info, nullptr);
+    } else {
+        auto dataset = GenDataset(NB, metric_type, true);
+        auto xb_bin_data = dataset.get_col<uint8_t>(milvus::FieldId(100));
+        auto xb_dataset = knowhere::GenDataSet(NB, DIM, xb_bin_data.data());
+        auto xq_dataset = knowhere::GenDataSet(
+            NQ, DIM, xb_bin_data.data() + DIM * query_offset);
+        result = vec_index->Query(xq_dataset, search_info, nullptr);
+    }
 
     EXPECT_EQ(result->total_nq_, NQ);
     EXPECT_EQ(result->unity_topK_, K);
     EXPECT_EQ(result->distances_.size(), NQ * K);
     EXPECT_EQ(result->seg_offsets_.size(), NQ * K);
-    if (!is_binary) {
+    if (vec_field_data_type == DataType::VECTOR_FLOAT) {
         EXPECT_EQ(result->seg_offsets_[0], query_offset);
     }
 }

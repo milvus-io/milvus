@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/requestutil"
 )
 
@@ -220,7 +221,7 @@ func (h *HandlersV1) listCollections(c *gin.Context) {
 func (h *HandlersV1) createCollection(c *gin.Context) {
 	httpReq := CreateCollectionReq{
 		DbName:             DefaultDbName,
-		MetricType:         DefaultMetricType,
+		MetricType:         metric.L2,
 		PrimaryField:       DefaultPrimaryFieldName,
 		VectorField:        DefaultVectorFieldName,
 		EnableDynamicField: EnableDynamic,

@@ -1707,7 +1707,7 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 	p.ChannelCheckInterval.Init(base.mgr)
 
 	p.BalanceCheckInterval = ParamItem{
-		Key:          "queryCoord.checkChannelInterval",
+		Key:          "queryCoord.checkBalanceInterval",
 		Version:      "2.3.0",
 		DefaultValue: "10000",
 		PanicIfEmpty: true,
@@ -1952,7 +1952,7 @@ type queryNodeConfig struct {
 	InterimIndexNlist             ParamItem `refreshable:"false"`
 	InterimIndexNProbe            ParamItem `refreshable:"false"`
 	InterimIndexMemExpandRate     ParamItem `refreshable:"false"`
-	InterimIndexBuildParallelRate ParamItem `refreshable:"true"`
+	InterimIndexBuildParallelRate ParamItem `refreshable:"false"`
 
 	// memory limit
 	LoadMemoryUsageFactor               ParamItem `refreshable:"true"`
@@ -2847,7 +2847,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Key:          "dataCoord.segment.enableLevelZero",
 		Version:      "2.4.0",
 		Doc:          "Whether to enable LevelZeroCompaction",
-		DefaultValue: "false",
+		DefaultValue: "true",
 	}
 	p.EnableLevelZeroSegment.Init(base.mgr)
 
@@ -3144,9 +3144,11 @@ type dataNodeConfig struct {
 	// channel
 	ChannelWorkPoolSize ParamItem `refreshable:"true"`
 
-	UpdateChannelCheckpointMaxParallel ParamItem `refreshable:"true"`
-	UpdateChannelCheckpointInterval    ParamItem `refreshable:"true"`
-	UpdateChannelCheckpointRPCTimeout  ParamItem `refreshable:"true"`
+	UpdateChannelCheckpointMaxParallel   ParamItem `refreshable:"true"`
+	UpdateChannelCheckpointInterval      ParamItem `refreshable:"true"`
+	UpdateChannelCheckpointRPCTimeout    ParamItem `refreshable:"true"`
+	MaxChannelCheckpointsPerRPC          ParamItem `refreshable:"true"`
+	ChannelCheckpointUpdateTickInSeconds ParamItem `refreshable:"true"`
 
 	MaxConcurrentImportTaskNum ParamItem `refreshable:"true"`
 
@@ -3385,7 +3387,7 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		Key:          "datanode.channel.updateChannelCheckpointMaxParallel",
 		Version:      "2.3.4",
 		PanicIfEmpty: false,
-		DefaultValue: "1000",
+		DefaultValue: "10",
 	}
 	p.UpdateChannelCheckpointMaxParallel.Init(base.mgr)
 
@@ -3398,12 +3400,28 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	p.UpdateChannelCheckpointInterval.Init(base.mgr)
 
 	p.UpdateChannelCheckpointRPCTimeout = ParamItem{
-		Key:          "datanode.channel.updateChannelCheckpointInterval",
+		Key:          "datanode.channel.updateChannelCheckpointRPCTimeout",
 		Version:      "2.4.0",
 		Doc:          "timeout in seconds for UpdateChannelCheckpoint RPC call",
-		DefaultValue: "10",
+		DefaultValue: "20",
 	}
 	p.UpdateChannelCheckpointRPCTimeout.Init(base.mgr)
+
+	p.MaxChannelCheckpointsPerRPC = ParamItem{
+		Key:          "datanode.channel.maxChannelCheckpointsPerPRC",
+		Version:      "2.4.0",
+		Doc:          "The maximum number of channel checkpoints per UpdateChannelCheckpoint RPC.",
+		DefaultValue: "128",
+	}
+	p.MaxChannelCheckpointsPerRPC.Init(base.mgr)
+
+	p.ChannelCheckpointUpdateTickInSeconds = ParamItem{
+		Key:          "datanode.channel.channelCheckpointUpdateTickInSeconds",
+		Version:      "2.4.0",
+		Doc:          "The frequency, in seconds, at which the channel checkpoint updater executes updates.",
+		DefaultValue: "10",
+	}
+	p.ChannelCheckpointUpdateTickInSeconds.Init(base.mgr)
 
 	p.MaxConcurrentImportTaskNum = ParamItem{
 		Key:          "datanode.import.maxConcurrentTaskNum",

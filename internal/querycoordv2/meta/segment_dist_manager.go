@@ -26,6 +26,38 @@ import (
 	. "github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
+type SegmentDistFilter func(s *Segment) bool
+
+func WithSegmentID(segmentID int64) SegmentDistFilter {
+	return func(s *Segment) bool {
+		return s.GetID() == segmentID
+	}
+}
+
+func WithReplica(replica *Replica) SegmentDistFilter {
+	return func(s *Segment) bool {
+		return replica.GetCollectionID() == s.GetCollectionID() && replica.Contains(s.Node)
+	}
+}
+
+func WithNodeID(nodeID int64) SegmentDistFilter {
+	return func(s *Segment) bool {
+		return s.Node == nodeID
+	}
+}
+
+func WithCollectionID(collectionID UniqueID) SegmentDistFilter {
+	return func(s *Segment) bool {
+		return s.CollectionID == collectionID
+	}
+}
+
+func WithChannel(channelName string) SegmentDistFilter {
+	return func(s *Segment) bool {
+		return s.GetInsertChannel() == channelName
+	}
+}
+
 type Segment struct {
 	*datapb.SegmentInfo
 	Node               int64                             // Node the segment is in
@@ -71,14 +103,21 @@ func (m *SegmentDistManager) Update(nodeID UniqueID, segments ...*Segment) {
 	m.segments[nodeID] = segments
 }
 
-func (m *SegmentDistManager) Get(id UniqueID) []*Segment {
+// GetByFilter return segment list which match all given filters
+func (m *SegmentDistManager) GetByFilter(filters ...SegmentDistFilter) []*Segment {
 	m.rwmutex.RLock()
 	defer m.rwmutex.RUnlock()
 
 	ret := make([]*Segment, 0)
 	for _, segments := range m.segments {
 		for _, segment := range segments {
-			if segment.GetID() == id {
+			allMatch := true
+			for _, f := range filters {
+				if f != nil && !f(segment) {
+					allMatch = false
+				}
+			}
+			if allMatch {
 				ret = append(ret, segment)
 			}
 		}
@@ -86,100 +125,7 @@ func (m *SegmentDistManager) Get(id UniqueID) []*Segment {
 	return ret
 }
 
-// GetAll returns all segments
-func (m *SegmentDistManager) GetAll() []*Segment {
-	m.rwmutex.RLock()
-	defer m.rwmutex.RUnlock()
-
-	ret := make([]*Segment, 0)
-	for _, segments := range m.segments {
-		ret = append(ret, segments...)
-	}
-	return ret
-}
-
-// func (m *SegmentDistManager) Remove(ids ...UniqueID) {
-// 	m.rwmutex.Lock()
-// 	defer m.rwmutex.Unlock()
-
-// 	for _, id := range ids {
-// 		delete(m.segments, id)
-// 	}
-// }
-
-// GetByNode returns all segments of the given node.
-func (m *SegmentDistManager) GetByNode(nodeID UniqueID) []*Segment {
-	m.rwmutex.RLock()
-	defer m.rwmutex.RUnlock()
-
-	return m.segments[nodeID]
-}
-
-// GetByCollection returns all segments of the given collection.
-func (m *SegmentDistManager) GetByCollection(collectionID UniqueID) []*Segment {
-	m.rwmutex.RLock()
-	defer m.rwmutex.RUnlock()
-
-	ret := make([]*Segment, 0)
-	for _, segments := range m.segments {
-		for _, segment := range segments {
-			if segment.CollectionID == collectionID {
-				ret = append(ret, segment)
-			}
-		}
-	}
-	return ret
-}
-
-// GetByShard returns all segments of the given collection.
-func (m *SegmentDistManager) GetByShard(shard string) []*Segment {
-	m.rwmutex.RLock()
-	defer m.rwmutex.RUnlock()
-
-	ret := make([]*Segment, 0)
-	for _, segments := range m.segments {
-		for _, segment := range segments {
-			if segment.GetInsertChannel() == shard {
-				ret = append(ret, segment)
-			}
-		}
-	}
-	return ret
-}
-
-// GetByShard returns all segments of the given collection.
-func (m *SegmentDistManager) GetByShardWithReplica(shard string, replica *Replica) []*Segment {
-	m.rwmutex.RLock()
-	defer m.rwmutex.RUnlock()
-
-	ret := make([]*Segment, 0)
-	for nodeID, segments := range m.segments {
-		if !replica.Contains(nodeID) {
-			continue
-		}
-		for _, segment := range segments {
-			if segment.GetInsertChannel() == shard {
-				ret = append(ret, segment)
-			}
-		}
-	}
-	return ret
-}
-
-// GetByCollectionAndNode returns all segments of the given collection and node.
-func (m *SegmentDistManager) GetByCollectionAndNode(collectionID, nodeID UniqueID) []*Segment {
-	m.rwmutex.RLock()
-	defer m.rwmutex.RUnlock()
-
-	ret := make([]*Segment, 0)
-	for _, segment := range m.segments[nodeID] {
-		if segment.CollectionID == collectionID {
-			ret = append(ret, segment)
-		}
-	}
-	return ret
-}
-
+// return node list which contains the given segmentID
 func (m *SegmentDistManager) GetSegmentDist(segmentID int64) []int64 {
 	m.rwmutex.RLock()
 	defer m.rwmutex.RUnlock()

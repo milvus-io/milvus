@@ -95,7 +95,7 @@ func (c *SegmentChecker) Check(ctx context.Context) []task.Task {
 	}
 
 	// find already released segments which are not contained in target
-	segments := c.dist.SegmentDistManager.GetAll()
+	segments := c.dist.SegmentDistManager.GetByFilter(nil)
 	released := utils.FilterReleased(segments, collectionIDs)
 	reduceTasks := c.createSegmentReduceTasks(ctx, released, -1, querypb.DataScope_Historical)
 	task.SetReason("collection released", reduceTasks...)
@@ -271,7 +271,7 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 func (c *SegmentChecker) getSealedSegmentsDist(replica *meta.Replica) []*meta.Segment {
 	ret := make([]*meta.Segment, 0)
 	for _, node := range replica.GetNodes() {
-		ret = append(ret, c.dist.SegmentDistManager.GetByCollectionAndNode(replica.CollectionID, node)...)
+		ret = append(ret, c.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithNodeID(node))...)
 	}
 	return ret
 }

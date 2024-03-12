@@ -501,7 +501,7 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfo
 		infos = s.getCollectionSegmentInfo(req.GetCollectionID())
 	} else {
 		for _, segmentID := range req.GetSegmentIDs() {
-			segments := s.dist.SegmentDistManager.Get(segmentID)
+			segments := s.dist.SegmentDistManager.GetByFilter(meta.WithSegmentID(segmentID))
 			if len(segments) == 0 {
 				err := merr.WrapErrSegmentNotLoaded(segmentID)
 				msg := fmt.Sprintf("segment %v not found in any node", segmentID)
@@ -891,7 +891,7 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 		}
 
 		for _, leader := range leaders {
-			if err := checkers.CheckLeaderAvaliable(s.nodeMgr, leader, currentTargets); err != nil {
+			if err := checkers.CheckLeaderAvailable(s.nodeMgr, leader, currentTargets); err != nil {
 				multierr.AppendInto(&channelErr, err)
 				continue
 			}

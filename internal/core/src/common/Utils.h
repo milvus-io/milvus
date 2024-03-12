@@ -31,6 +31,7 @@
 #include "common/EasyAssert.h"
 #include "knowhere/dataset.h"
 #include "knowhere/expected.h"
+#include "knowhere/sparse_utils.h"
 #include "simdjson.h"
 
 namespace milvus {
@@ -211,6 +212,53 @@ GetCommonPrefix(const std::string& str1, const std::string& str2) {
     size_t i = 0;
     while (i < len && str1[i] == str2[i]) ++i;
     return str1.substr(0, i);
+}
+
+inline knowhere::sparse::SparseRow<float>
+CopyAndWrapSparseRow(const void* data, size_t size) {
+    size_t num_elements =
+        size / knowhere::sparse::SparseRow<float>::element_size();
+    knowhere::sparse::SparseRow<float> row(num_elements);
+    std::memcpy(row.data(), data, size);
+    // TODO(SPARSE): validate
+    return row;
+}
+
+// Iterable is a list of bytes, each is a byte array representation of a single
+// sparse float row. This helper function converts such byte arrays into a list
+// of knowhere::sparse::SparseRow<float>. The resulting list is a deep copy of
+// the source data.
+template <typename Iterable>
+std::unique_ptr<knowhere::sparse::SparseRow<float>[]>
+SparseBytesToRows(const Iterable& rows) {
+    AssertInfo(rows.size() > 0, "at least 1 sparse row should be provided");
+    auto res =
+        std::make_unique<knowhere::sparse::SparseRow<float>[]>(rows.size());
+    for (size_t i = 0; i < rows.size(); ++i) {
+        res[i] =
+            std::move(CopyAndWrapSparseRow(rows[i].data(), rows[i].size()));
+    }
+    return res;
+}
+
+// SparseRowsToProto converts a vector of knowhere::sparse::SparseRow<float> to
+// a milvus::proto::schema::SparseFloatArray. The resulting proto is a deep copy
+// of the source data.
+inline void SparseRowsToProto(const knowhere::sparse::SparseRow<float>* source,
+                              int64_t rows,
+                              milvus::proto::schema::SparseFloatArray* proto) {
+    int64_t max_dim = 0;
+    for (size_t i = 0; i < rows; ++i) {
+        if (source + i == nullptr) {
+            // empty row
+            proto->add_contents();
+            continue;
+        }
+        auto& row = source[i];
+        max_dim = std::max(max_dim, row.dim());
+        proto->add_contents(row.data(), row.data_byte_size());
+    }
+    proto->set_dim(max_dim);
 }
 
 }  // namespace milvus

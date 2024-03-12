@@ -47,7 +47,8 @@ func TestBinlogDeserializeReader(t *testing.T) {
 
 	t.Run("test deserialize", func(t *testing.T) {
 		len := 3
-		blobs := generateTestData(t, len)
+		blobs, err := generateTestData(len)
+		assert.NoError(t, err)
 		reader, err := NewBinlogDeserializeReader(blobs, common.RowIDField)
 		assert.NoError(t, err)
 		defer reader.Close()
@@ -171,5 +172,44 @@ func Test_deserializeCell(t *testing.T) {
 				t.Errorf("deserializeCell() got1 = %v, want %v", got1, tt.want1)
 			}
 		})
+	}
+}
+
+func BenchmarkDeserializeReader(b *testing.B) {
+	len := 1000000
+	blobs, err := generateTestData(len)
+	assert.NoError(b, err)
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		reader, err := NewBinlogDeserializeReader(blobs, common.RowIDField)
+		assert.NoError(b, err)
+		defer reader.Close()
+		for i := 0; i < len; i++ {
+			err = reader.Next()
+			_ = reader.Value()
+			assert.NoError(b, err)
+		}
+		err = reader.Next()
+		assert.Equal(b, io.EOF, err)
+	}
+}
+
+func BenchmarkBinlogIterator(b *testing.B) {
+	len := 1000000
+	blobs, err := generateTestData(len)
+	assert.NoError(b, err)
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		itr, err := NewInsertBinlogIterator(blobs, common.RowIDField, schemapb.DataType_Int64)
+		assert.NoError(b, err)
+		defer itr.Dispose()
+		for i := 0; i < len; i++ {
+			assert.True(b, itr.HasNext())
+			_, err = itr.Next()
+			assert.NoError(b, err)
+		}
+		assert.False(b, itr.HasNext())
 	}
 }

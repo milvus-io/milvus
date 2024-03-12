@@ -66,6 +66,7 @@ class IndexFactory {
             case DataType::VECTOR_FLOAT16:
             case DataType::VECTOR_BFLOAT16:
             case DataType::VECTOR_BINARY:
+            case DataType::VECTOR_SPARSE_FLOAT:
                 return std::make_unique<VecIndexCreator>(type, config, context);
             default:
                 throw SegcoreError(
@@ -101,6 +102,7 @@ class IndexFactory {
             case DataType::VECTOR_BINARY:
             case DataType::VECTOR_FLOAT16:
             case DataType::VECTOR_BFLOAT16:
+            case DataType::VECTOR_SPARSE_FLOAT:
                 return std::make_unique<VecIndexCreator>(
                     type, field_name, dim, config, file_manager_context, space);
             default:

@@ -9,6 +9,10 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <vector>
+#include <memory>
+#include <cstring>
+
 #include <gtest/gtest.h>
 #include <string.h>
 #include <boost/uuid/uuid.hpp>
@@ -19,6 +23,8 @@
 #include "common/Types.h"
 #include "common/Utils.h"
 #include "common/Exception.h"
+#include "knowhere/sparse_utils.h"
+#include "pb/schema.pb.h"
 #include "query/Utils.h"
 #include "test_utils/DataGen.h"
 
@@ -131,8 +137,7 @@ TEST(Util, upper_bound) {
 
     std::vector<Timestamp> data{0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
     ConcurrentVector<Timestamp> timestamps(1);
-    timestamps.grow_to_at_least(data.size());
-    timestamps.set_data(0, data.data(), data.size());
+    timestamps.set_data_raw(0, data.data(), data.size());
 
     ASSERT_EQ(1, upper_bound(timestamps, 0, data.size(), 0));
     ASSERT_EQ(5, upper_bound(timestamps, 0, data.size(), 4));

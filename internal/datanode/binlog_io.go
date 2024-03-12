@@ -55,7 +55,7 @@ func downloadBlobs(ctx context.Context, b io.BinlogIO, paths []string) ([]*Blob,
 		return resp, nil
 	}
 	for i := range bytes {
-		resp[i] = &Blob{Value: bytes[i]}
+		resp[i] = &Blob{Key: paths[i], Value: bytes[i]}
 	}
 	return resp, nil
 }

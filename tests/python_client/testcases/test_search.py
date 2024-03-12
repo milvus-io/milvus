@@ -2223,6 +2223,8 @@ class TestCollectionSearch(TestcaseBase):
         method: test search after different index and corresponding search params
         expected: search successfully with limit(topK)
         """
+        if index == "DISKANN":
+            pytest.skip("https://github.com/milvus-io/milvus/issues/30793")
         # 1. initialize with data
         collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, 5000,
                                                                                   partition_num=1,
@@ -9326,6 +9328,7 @@ class TestCollectionSearchJSON(TestcaseBase):
     #  The followings are invalid base cases
     ******************************************************************
     """
+    @pytest.mark.skip("Supported json like: 1, \"abc\", [1,2,3,4]")
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_json_expression_object(self):
         """

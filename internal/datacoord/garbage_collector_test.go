@@ -50,9 +50,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func Test_garbageCollector_basic(t *testing.T) {
@@ -347,7 +345,7 @@ func createMetaForRecycleUnusedIndexes(catalog metastore.DataCoordCatalog) *meta
 		catalog:      catalog,
 		collections:  nil,
 		segments:     nil,
-		channelCPs:   nil,
+		channelCPs:   newChannelCps(),
 		chunkManager: nil,
 		indexMeta: &indexMeta{
 			catalog: catalog,
@@ -791,12 +789,14 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 		mock.Anything,
 	).Return(nil)
 
-	channelCPs := typeutil.NewConcurrentMap[string, *msgpb.MsgPosition]()
-	channelCPs.Insert("dmlChannel", &msgpb.MsgPosition{Timestamp: 1000})
+	channelCPs := newChannelCps()
+	channelCPs.checkpoints["dmlChannel"] = &msgpb.MsgPosition{
+		Timestamp: 1000,
+	}
+
 	m := &meta{
-		catalog:        catalog,
-		channelCPLocks: lock.NewKeyLock[string](),
-		channelCPs:     channelCPs,
+		catalog:    catalog,
+		channelCPs: channelCPs,
 		segments: &SegmentsInfo{
 			compactionTo: make(map[int64]int64),
 			segments: map[UniqueID]*SegmentInfo{

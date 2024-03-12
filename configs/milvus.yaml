@@ -422,7 +422,7 @@ dataCoord:
     # During compaction, the size of segment # of rows is able to exceed segment max # of rows by (expansionRate-1) * 100%.
     expansionRate: 1.25
     # Whether to enable levelzero segment
-    enableLevelZero: false
+    enableLevelZero: true
   enableCompaction: true # Enable data segment compaction
   compaction:
     enableAutoCompaction: true
@@ -492,9 +492,8 @@ dataNode:
     # suggest to set it bigger on large collection numbers to avoid blocking
     workPoolSize: -1
     # specify the size of global work pool for channel checkpoint updating
-    # if this parameter <= 0, will set it as 1000
-    # suggest to set it bigger on large collection numbers to avoid blocking
-    updateChannelCheckpointMaxParallel: 1000
+    # if this parameter <= 0, will set it as 10
+    updateChannelCheckpointMaxParallel: 10
   import:
     maxConcurrentTaskNum: 16 # The maximum number of import/pre-import tasks allowed to run concurrently on a datanode.
 

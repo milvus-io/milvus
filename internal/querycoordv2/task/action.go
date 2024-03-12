@@ -121,7 +121,7 @@ func (action *SegmentAction) IsFinished(distMgr *meta.DistributionManager) bool 
 		// the leader should return a map of segment ID to list of nodes,
 		// now, we just always commit the release task to executor once.
 		// NOTE: DO NOT create a task containing release action and the action is not the last action
-		sealed := distMgr.SegmentDistManager.GetByNode(action.Node())
+		sealed := distMgr.SegmentDistManager.GetByFilter(meta.WithNodeID(action.Node()))
 		growing := distMgr.LeaderViewManager.GetSegmentByNode(action.Node())
 		segments := make([]int64, 0, len(sealed)+len(growing))
 		for _, segment := range sealed {
@@ -166,16 +166,18 @@ type LeaderAction struct {
 
 	leaderID  typeutil.UniqueID
 	segmentID typeutil.UniqueID
+	version   typeutil.UniqueID // segment load ts, 0 means not set
 
 	rpcReturned atomic.Bool
 }
 
-func NewLeaderAction(leaderID, workerID typeutil.UniqueID, typ ActionType, shard string, segmentID typeutil.UniqueID) *LeaderAction {
+func NewLeaderAction(leaderID, workerID typeutil.UniqueID, typ ActionType, shard string, segmentID typeutil.UniqueID, version typeutil.UniqueID) *LeaderAction {
 	action := &LeaderAction{
 		BaseAction: NewBaseAction(workerID, typ, shard),
 
 		leaderID:  leaderID,
 		segmentID: segmentID,
+		version:   version,
 	}
 	action.rpcReturned.Store(false)
 	return action
@@ -183,6 +185,10 @@ func NewLeaderAction(leaderID, workerID typeutil.UniqueID, typ ActionType, shard
 
 func (action *LeaderAction) SegmentID() typeutil.UniqueID {
 	return action.segmentID
+}
+
+func (action *LeaderAction) Version() typeutil.UniqueID {
+	return action.version
 }
 
 func (action *LeaderAction) IsFinished(distMgr *meta.DistributionManager) bool {

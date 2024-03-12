@@ -200,13 +200,13 @@ func TestExpr_BinaryRange(t *testing.T) {
 		`"str16" > VarCharField > "str15"`,
 		`18 > DoubleField > 17`,
 		`100 > B > 14`,
+		`1 < JSONField < 3`,
 	}
 	for _, exprStr := range exprStrs {
 		assertValidExpr(t, helper, exprStr)
 	}
 
 	invalidExprs := []string{
-		`1 < JSONField < 3`,
 		`1 < ArrayField < 3`,
 		`1 < A+B < 3`,
 	}
@@ -235,6 +235,8 @@ func TestExpr_BinaryArith(t *testing.T) {
 		`A * 15 > 16`,
 		`JSONField['A'] / 17 >= 18`,
 		`ArrayField[0] % 19 >= 20`,
+		`JSONField + 15 == 16`,
+		`15 + JSONField == 16`,
 	}
 	for _, exprStr := range exprStrs {
 		assertValidExpr(t, helper, exprStr)
@@ -242,8 +244,6 @@ func TestExpr_BinaryArith(t *testing.T) {
 
 	// TODO: enable these after execution backend is ready.
 	unsupported := []string{
-		`JSONField + 15 == 16`,
-		`15 + JSONField == 16`,
 		`ArrayField + 15 == 16`,
 		`15 + ArrayField == 16`,
 	}
@@ -465,8 +465,9 @@ func TestExpr_Invalid(t *testing.T) {
 		`StringField % VarCharField`,
 		`StringField * 2`,
 		`2 / StringField`,
-		`JSONField / 2 == 1`,
+		//`JSONField / 2 == 1`,
 		`2 % JSONField == 1`,
+		`2 % Int64Field == 1`,
 		`ArrayField / 2 == 1`,
 		`2 / ArrayField == 1`,
 		// ----------------------- ==/!= -------------------------
@@ -483,8 +484,8 @@ func TestExpr_Invalid(t *testing.T) {
 		`"str" >= false`,
 		`VarCharField < FloatField`,
 		`FloatField > VarCharField`,
-		`JSONField > 1`,
-		`1 < JSONField`,
+		//`JSONField > 1`,
+		//`1 < JSONField`,
 		`ArrayField > 2`,
 		`2 < ArrayField`,
 		// ------------------------ like ------------------------
@@ -681,6 +682,16 @@ func Test_JSONExpr(t *testing.T) {
 		`A == [1,2,3]`,
 		`A + 1.2 == 3.3`,
 		`A + 1 == 2`,
+		`JSONField > 0`,
+		`JSONField == 0`,
+		`JSONField < 100`,
+		`0 < JSONField < 100`,
+		`20 > JSONField > 0`,
+		`JSONField + 5 > 0`,
+		`JSONField > 2 + 5`,
+		`JSONField * 2 > 5`,
+		`JSONField / 2 > 5`,
+		`JSONField % 10 > 5`,
 	}
 	for _, expr = range exprs {
 		_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
@@ -702,15 +713,8 @@ func Test_InvalidExprOnJSONField(t *testing.T) {
 		`exists $meta`,
 		`exists JSONField`,
 		`exists ArrayField`,
-		`$meta > 0`,
-		`JSONField == 0`,
-		`$meta < 100`,
-		`0 < $meta < 100`,
-		`20 > $meta > 0`,
-		`$meta + 5 > 0`,
-		`$meta > 2 + 5`,
 		`exists $meta["A"] > 10 `,
-		`exists Int64Field `,
+		`exists Int64Field`,
 		`A[[""B""]] > 10`,
 		`A["[""B""]"] > 10`,
 		`A[[""B""]] > 10`,
@@ -859,6 +863,8 @@ func Test_JSONContains(t *testing.T) {
 		`array_contains(A, [1,2,3])`,
 		`array_contains(ArrayField, [1,2,3])`,
 		`array_contains(ArrayField, 1)`,
+		`json_contains(JSONField, 5)`,
+		`json_contains($meta, 1)`,
 	}
 	for _, expr = range exprs {
 		_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
@@ -881,7 +887,6 @@ func Test_InvalidJSONContains(t *testing.T) {
 		`json_contains([1,2,3], 1)`,
 		`json_contains([1,2,3], [1,2,3])`,
 		`json_contains([1,2,3], [1,2])`,
-		`json_contains($meta, 1)`,
 		`json_contains(A, B)`,
 		`not json_contains(A, B)`,
 		`json_contains(A, B > 5)`,
@@ -889,7 +894,6 @@ func Test_InvalidJSONContains(t *testing.T) {
 		`json_contains(A, StringField > 5)`,
 		`json_contains(A)`,
 		`json_contains(A, 5, C)`,
-		`json_contains(JSONField, 5)`,
 		`json_Contains(JSONField, 5)`,
 		`JSON_contains(JSONField, 5)`,
 	}

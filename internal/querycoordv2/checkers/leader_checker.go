@@ -100,7 +100,7 @@ func (c *LeaderChecker) Check(ctx context.Context) []task.Task {
 
 				leaderViews := c.dist.LeaderViewManager.GetByCollectionAndNode(replica.GetCollectionID(), node)
 				for ch, leaderView := range leaderViews {
-					dist := c.dist.SegmentDistManager.GetByShardWithReplica(ch, replica)
+					dist := c.dist.SegmentDistManager.GetByFilter(meta.WithChannel(ch), meta.WithReplica(replica))
 					tasks = append(tasks, c.findNeedLoadedSegments(ctx, replica.ID, leaderView, dist)...)
 					tasks = append(tasks, c.findNeedRemovedSegments(ctx, replica.ID, leaderView, dist)...)
 				}
@@ -121,24 +121,17 @@ func (c *LeaderChecker) findNeedLoadedSegments(ctx context.Context, replica int6
 	ret := make([]task.Task, 0)
 	dist = utils.FindMaxVersionSegments(dist)
 	for _, s := range dist {
-		version, ok := leaderView.Segments[s.GetID()]
-		currentTarget := c.target.GetSealedSegment(s.CollectionID, s.GetID(), meta.CurrentTarget)
-		existInCurrentTarget := currentTarget != nil
-		existInNextTarget := c.target.GetSealedSegment(s.CollectionID, s.GetID(), meta.NextTarget) != nil
-
-		if !existInCurrentTarget && !existInNextTarget {
+		existInTarget := c.target.GetSealedSegment(leaderView.CollectionID, s.GetID(), meta.CurrentTargetFirst) != nil
+		if !existInTarget {
 			continue
 		}
 
-		leaderWithOldVersion := version.GetVersion() < s.Version
-		// leader has newer version, but the query node which loaded the newer version has been shutdown
-		leaderWithDirtyVersion := version.GetVersion() > s.Version && c.nodeMgr.Get(version.GetNodeID()) == nil
-
-		if !ok || leaderWithOldVersion || leaderWithDirtyVersion {
+		version, ok := leaderView.Segments[s.GetID()]
+		if !ok || version.GetVersion() < s.Version {
 			log.RatedDebug(10, "leader checker append a segment to set",
 				zap.Int64("segmentID", s.GetID()),
 				zap.Int64("nodeID", s.Node))
-			action := task.NewLeaderAction(leaderView.ID, s.Node, task.ActionTypeGrow, s.GetInsertChannel(), s.GetID())
+			action := task.NewLeaderAction(leaderView.ID, s.Node, task.ActionTypeGrow, s.GetInsertChannel(), s.GetID(), s.Version)
 			t := task.NewLeaderTask(
 				ctx,
 				params.Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond),
@@ -173,15 +166,14 @@ func (c *LeaderChecker) findNeedRemovedSegments(ctx context.Context, replica int
 
 	for sid, s := range leaderView.Segments {
 		_, ok := distMap[sid]
-		existInCurrentTarget := c.target.GetSealedSegment(leaderView.CollectionID, sid, meta.CurrentTarget) != nil
-		existInNextTarget := c.target.GetSealedSegment(leaderView.CollectionID, sid, meta.NextTarget) != nil
-		if ok || existInCurrentTarget || existInNextTarget {
+		existInTarget := c.target.GetSealedSegment(leaderView.CollectionID, sid, meta.CurrentTargetFirst) != nil
+		if ok || existInTarget {
 			continue
 		}
 		log.Debug("leader checker append a segment to remove",
 			zap.Int64("segmentID", sid),
 			zap.Int64("nodeID", s.NodeID))
-		action := task.NewLeaderAction(leaderView.ID, s.NodeID, task.ActionTypeReduce, leaderView.Channel, sid)
+		action := task.NewLeaderAction(leaderView.ID, s.NodeID, task.ActionTypeReduce, leaderView.Channel, sid, 0)
 		t := task.NewLeaderTask(
 			ctx,
 			paramtable.Get().QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond),
