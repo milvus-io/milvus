@@ -293,6 +293,7 @@ func TestComponentParam(t *testing.T) {
 
 		params.Save("queryCoord.gracefulStopTimeout", "100")
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
+		assert.Equal(t, true, Params.EnableStoppingBalance.GetAsBool())
 	})
 
 	t.Run("test queryNodeConfig", func(t *testing.T) {
