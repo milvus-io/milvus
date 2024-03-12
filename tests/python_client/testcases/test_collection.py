@@ -1711,7 +1711,7 @@ class TestCollectionCountBinary(TestcaseBase):
         expected: check error message successfully
         """
         self._connect()
-        dim = 2
+        dim = ct.min_dim
         c_schema = cf.gen_default_binary_collection_schema(auto_id=auto_id, dim=dim)
         collection_w = self.init_collection_wrap(schema=c_schema,
                                                  check_task=CheckTasks.err_res,
@@ -4336,7 +4336,7 @@ class TestCollectionMultipleVectorValid(TestcaseBase):
         """
         self._connect()
         c_name = cf.gen_unique_str(prefix)
-        another_dim = 2
+        another_dim = ct.min_dim
         schema = cf.gen_default_collection_schema(primary_field=primary_key, auto_id=auto_id, dim=ct.max_dim,
                                                   enable_dynamic_field=enable_dynamic_field,
                                                   multiple_dim_array=[another_dim])
