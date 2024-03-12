@@ -48,7 +48,7 @@ type Cache[K comparable, V any] interface {
 	Contain(key K) bool
 	Set(key K, value V)
 	Remove(key K)
-	TryPin(keys ...K) ([]*cacheItem[K, V], bool)
+	Pin(keys ...K) ([]*cacheItem[K, V], bool)
 	Get(key K) bool
 }
 
@@ -80,7 +80,7 @@ func NewLRUCache[K comparable, V any](
 	}
 }
 
-func (c *lruCache[K, V]) TryPin(keys ...K) (items []*cacheItem[K, V], ok bool) {
+func (c *lruCache[K, V]) Pin(keys ...K) (items []*cacheItem[K, V], ok bool) {
 	c.rwlock.Lock()
 	defer c.rwlock.Unlock()
 
@@ -107,7 +107,7 @@ func (c *lruCache[K, V]) TryPin(keys ...K) (items []*cacheItem[K, V], ok bool) {
 	}()
 
 	if c.size+notExisted > c.cap {
-		if ok = c.tryEvict(notExisted); !ok {
+		if ok = c.tryEvict(notExisted + c.size - c.cap); !ok {
 			return nil, false
 		}
 	}

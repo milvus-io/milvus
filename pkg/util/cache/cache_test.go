@@ -39,12 +39,12 @@ func (s *CacheSuite) TestTryPin() {
 		return key, true
 	}, nil)
 
-	_, ok := cache.TryPin([]int{1, 2, 3, 4}...)
+	_, ok := cache.Pin([]int{1, 2, 3, 4}...)
 	s.False(ok)
 
-	_, ok = cache.TryPin([]int{1, 2, 3}...)
+	_, ok = cache.Pin([]int{1, 2, 3}...)
 	s.True(ok)
-	items, ok := cache.TryPin([]int{1, 2, 3}...)
+	items, ok := cache.Pin([]int{1, 2, 3}...)
 	s.True(ok)
 	for _, item := range items {
 		s.EqualValues(2, item.pinCount.Load())
@@ -60,7 +60,7 @@ func (s *CacheSuite) TestTryPin() {
 		item.Unpin()
 	}
 
-	_, ok = cache.TryPin([]int{1, 2, 4}...)
+	_, ok = cache.Pin([]int{1, 2, 4}...)
 	s.True(ok)
 	ok = cache.Get(4)
 	s.True(ok)
