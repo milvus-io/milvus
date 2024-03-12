@@ -169,48 +169,55 @@ func (m *CompactionViewManager) Check(ctx context.Context) (events map[Compactio
 }
 
 func (m *CompactionViewManager) RefreshLevelZeroViews(latestCollSegs map[int64][]*SegmentInfo) []CompactionView {
-	var refreshedL0Views []CompactionView
+	var allRefreshedL0Veiws []CompactionView
 	for collID, segments := range latestCollSegs {
 		levelZeroSegments := lo.Filter(segments, func(info *SegmentInfo, _ int) bool {
 			return info.GetLevel() == datapb.SegmentLevel_L0
 		})
 
 		latestL0Segments := GetViewsByInfo(levelZeroSegments...)
-		changedL0Views := m.getChangedLevelZeroViews(collID, latestL0Segments)
-		if len(changedL0Views) == 0 {
-			continue
+		needRefresh, collRefreshedViews := m.getChangedLevelZeroViews(collID, latestL0Segments)
+		if needRefresh {
+			log.Info("Refresh compaction level zero views",
+				zap.Int64("collectionID", collID),
+				zap.Strings("views", lo.Map(collRefreshedViews, func(view CompactionView, _ int) string {
+					return view.String()
+				})))
+
+			m.view.collections[collID] = latestL0Segments
 		}
 
-		log.Info("Refresh compaction level zero views",
-			zap.Int64("collectionID", collID),
-			zap.Strings("views", lo.Map(changedL0Views, func(view CompactionView, _ int) string {
-				return view.String()
-			})))
+		if len(collRefreshedViews) > 0 {
+			allRefreshedL0Veiws = append(allRefreshedL0Veiws, collRefreshedViews...)
+		}
 
-		m.view.collections[collID] = latestL0Segments
-		refreshedL0Views = append(refreshedL0Views, changedL0Views...)
 	}
 
-	return refreshedL0Views
+	return allRefreshedL0Veiws
 }
 
-func (m *CompactionViewManager) getChangedLevelZeroViews(collID UniqueID, LevelZeroViews []*SegmentView) []CompactionView {
-	latestViews := m.groupL0ViewsByPartChan(collID, LevelZeroViews)
+func (m *CompactionViewManager) getChangedLevelZeroViews(collID UniqueID, LevelZeroViews []*SegmentView) (needRefresh bool, refreshed []CompactionView) {
 	cachedViews := m.view.GetSegmentViewBy(collID, func(v *SegmentView) bool {
 		return v.Level == datapb.SegmentLevel_L0
 	})
 
-	var signals []CompactionView
+	if len(LevelZeroViews) == 0 && len(cachedViews) != 0 {
+		needRefresh = true
+		return
+	}
+
+	latestViews := m.groupL0ViewsByPartChan(collID, LevelZeroViews)
 	for _, latestView := range latestViews {
 		views := lo.Filter(cachedViews, func(v *SegmentView, _ int) bool {
 			return v.label.Equal(latestView.GetGroupLabel())
 		})
 
 		if !latestView.Equal(views) {
-			signals = append(signals, latestView)
+			refreshed = append(refreshed, latestView)
+			needRefresh = true
 		}
 	}
-	return signals
+	return
 }
 
 func (m *CompactionViewManager) groupL0ViewsByPartChan(collectionID UniqueID, levelZeroSegments []*SegmentView) map[string]*LevelZeroSegmentsView {
