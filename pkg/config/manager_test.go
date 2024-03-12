@@ -146,32 +146,27 @@ func TestOnEvent(t *testing.T) {
 			KeyPrefix:       "test",
 			RefreshInterval: 10 * time.Millisecond,
 		}))
-
 	os.WriteFile(yamlFile, []byte("a.b: aaa"), 0o600)
 	time.Sleep(time.Second)
 	value, err := mgr.GetConfig("a.b")
 	assert.NoError(t, err)
 	assert.Equal(t, value, "aaa")
-
 	ctx := context.Background()
 	client.KV.Put(ctx, "test/config/a/b", "bbb")
 	time.Sleep(time.Second)
 	value, err = mgr.GetConfig("a.b")
 	assert.NoError(t, err)
 	assert.Equal(t, value, "bbb")
-
 	client.KV.Put(ctx, "test/config/a/b", "ccc")
 	time.Sleep(time.Second)
 	value, err = mgr.GetConfig("a.b")
 	assert.NoError(t, err)
 	assert.Equal(t, value, "ccc")
-
 	os.WriteFile(yamlFile, []byte("a.b: ddd"), 0o600)
 	time.Sleep(time.Second)
 	value, err = mgr.GetConfig("a.b")
 	assert.NoError(t, err)
 	assert.Equal(t, value, "ccc")
-
 	client.KV.Delete(ctx, "test/config/a/b")
 	time.Sleep(time.Second)
 	value, err = mgr.GetConfig("a.b")
@@ -199,6 +194,61 @@ func TestDeadlock(t *testing.T) {
 	})
 
 	wg.Wait()
+}
+
+func TestCachedConfig(t *testing.T) {
+	cfg, _ := embed.ConfigFromFile("../../configs/advanced/etcd.yaml")
+	cfg.Dir = "/tmp/milvus/test"
+	e, err := embed.StartEtcd(cfg)
+	assert.NoError(t, err)
+	defer e.Close()
+	defer os.RemoveAll(cfg.Dir)
+
+	dir, _ := os.MkdirTemp("", "milvus")
+	yamlFile := path.Join(dir, "milvus.yaml")
+	mgr, _ := Init(WithEnvSource(formatKey),
+		WithFilesSource(&FileInfo{
+			Files:           []string{yamlFile},
+			RefreshInterval: 10 * time.Millisecond,
+		}),
+		WithEtcdSource(&EtcdInfo{
+			Endpoints:       []string{cfg.ACUrls[0].Host},
+			KeyPrefix:       "test",
+			RefreshInterval: 10 * time.Millisecond,
+		}))
+	// test get cached value from file
+	{
+		os.WriteFile(yamlFile, []byte("a.b: aaa"), 0o600)
+		time.Sleep(time.Second)
+		_, exist := mgr.GetCachedValue("a.b")
+		assert.False(t, exist)
+		mgr.SetCachedValue("a.b", "aaa")
+		val, exist := mgr.GetCachedValue("a.b")
+		assert.True(t, exist)
+		assert.Equal(t, "aaa", val.(string))
+
+		// after refresh, the cached value should be reset
+		os.WriteFile(yamlFile, []byte("a.b: xxx"), 0o600)
+		time.Sleep(time.Second)
+		_, exist = mgr.GetCachedValue("a.b")
+		assert.False(t, exist)
+	}
+	client := v3client.New(e.Server)
+	{
+		_, exist := mgr.GetCachedValue("c.d")
+		assert.False(t, exist)
+		mgr.SetCachedValue("cd", "xxx")
+		val, exist := mgr.GetCachedValue("cd")
+		assert.True(t, exist)
+		assert.Equal(t, "xxx", val.(string))
+
+		// after refresh, the cached value should be reset
+		ctx := context.Background()
+		client.KV.Put(ctx, "test/config/c/d", "www")
+		time.Sleep(time.Second)
+		_, exist = mgr.GetCachedValue("cd")
+		assert.False(t, exist)
+	}
 }
 
 type ErrSource struct{}
