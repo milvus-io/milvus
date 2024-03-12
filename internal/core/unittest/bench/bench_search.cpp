@@ -76,10 +76,10 @@ Search_GrowingIndex(benchmark::State& state) {
                                   std::move(index_params),
                                   std::move(type_params));
     segconf.set_enable_interim_segment_index(true);
-    std::map<FieldId, FieldIndexMeta> filedMap = {
+    std::map<FieldId, FieldIndexMeta> fieldMap = {
         {schema->get_field_id(FieldName("fakevec")), fieldIndexMeta}};
     IndexMetaPtr metaPtr =
-        std::make_shared<CollectionIndexMeta>(226985, std::move(filedMap));
+        std::make_shared<CollectionIndexMeta>(226985, std::move(fieldMap));
 
     auto segment = CreateGrowingSegment(schema, metaPtr, -1, segconf);
 

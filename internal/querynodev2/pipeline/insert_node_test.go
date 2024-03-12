@@ -136,7 +136,7 @@ func (suite *InsertNodeSuite) buildInsertNodeMsg(schema *schemapb.CollectionSche
 
 	for _, segmentID := range suite.insertSegmentIDs {
 		insertMsg := buildInsertMsg(suite.collectionID, suite.partitionID, segmentID, suite.channel, 1)
-		insertMsg.FieldsData = genFiledDataWithSchema(schema, 1)
+		insertMsg.FieldsData = genFieldDataWithSchema(schema, 1)
 		nodeMsg.insertMsgs = append(nodeMsg.insertMsgs, insertMsg)
 		nodeMsg.insertMsgs = append(nodeMsg.insertMsgs, insertMsg)
 	}

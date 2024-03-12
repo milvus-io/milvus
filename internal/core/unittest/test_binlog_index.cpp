@@ -96,10 +96,10 @@ class BinlogIndexTest : public ::testing::TestWithParam<Param> {
         auto& config = SegcoreConfig::default_config();
         config.set_chunk_rows(1024);
         config.set_enable_interim_segment_index(true);
-        std::map<FieldId, FieldIndexMeta> filedMap = {
+        std::map<FieldId, FieldIndexMeta> fieldMap = {
             {vec_field_id, fieldIndexMeta}};
         IndexMetaPtr metaPtr =
-            std::make_shared<CollectionIndexMeta>(226985, std::move(filedMap));
+            std::make_shared<CollectionIndexMeta>(226985, std::move(fieldMap));
         return std::move(metaPtr);
     }
 

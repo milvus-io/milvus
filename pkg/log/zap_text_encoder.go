@@ -326,14 +326,14 @@ func (enc *textEncoder) AppendTime(val time.Time) {
 	}
 }
 
-func (enc *textEncoder) beginQuoteFiled() {
+func (enc *textEncoder) beginQuoteField() {
 	if enc.buf.Len() > 0 {
 		enc.buf.AppendByte(' ')
 	}
 	enc.buf.AppendByte('[')
 }
 
-func (enc *textEncoder) endQuoteFiled() {
+func (enc *textEncoder) endQuoteField() {
 	enc.buf.AppendByte(']')
 }
 
@@ -407,13 +407,13 @@ func (enc *textEncoder) cloned() *textEncoder {
 func (enc *textEncoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field) (*buffer.Buffer, error) {
 	final := enc.cloned()
 	if final.TimeKey != "" {
-		final.beginQuoteFiled()
+		final.beginQuoteField()
 		final.AppendTime(ent.Time)
-		final.endQuoteFiled()
+		final.endQuoteField()
 	}
 
 	if final.LevelKey != "" {
-		final.beginQuoteFiled()
+		final.beginQuoteField()
 		cur := final.buf.Len()
 		final.EncodeLevel(ent.Level, final)
 		if cur == final.buf.Len() {
@@ -421,11 +421,11 @@ func (enc *textEncoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field) (
 			// output JSON valid.
 			final.AppendString(ent.Level.String())
 		}
-		final.endQuoteFiled()
+		final.endQuoteField()
 	}
 
 	if ent.LoggerName != "" && final.NameKey != "" {
-		final.beginQuoteFiled()
+		final.beginQuoteField()
 		cur := final.buf.Len()
 		nameEncoder := final.EncodeName
 
@@ -441,10 +441,10 @@ func (enc *textEncoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field) (
 			// keep output JSON valid.
 			final.AppendString(ent.LoggerName)
 		}
-		final.endQuoteFiled()
+		final.endQuoteField()
 	}
 	if ent.Caller.Defined && final.CallerKey != "" {
-		final.beginQuoteFiled()
+		final.beginQuoteField()
 		cur := final.buf.Len()
 		final.EncodeCaller(ent.Caller, final)
 		if cur == final.buf.Len() {
@@ -452,13 +452,13 @@ func (enc *textEncoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field) (
 			// keep output JSON valid.
 			final.AppendString(ent.Caller.String())
 		}
-		final.endQuoteFiled()
+		final.endQuoteField()
 	}
 	// add Message
 	if len(ent.Message) > 0 {
-		final.beginQuoteFiled()
+		final.beginQuoteField()
 		final.AppendString(ent.Message)
-		final.endQuoteFiled()
+		final.endQuoteField()
 	}
 	if enc.buf.Len() > 0 {
 		final.buf.AppendByte(' ')
@@ -467,9 +467,9 @@ func (enc *textEncoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field) (
 	final.addFields(fields)
 	final.closeOpenNamespaces()
 	if ent.Stack != "" && final.StacktraceKey != "" {
-		final.beginQuoteFiled()
+		final.beginQuoteField()
 		final.AddString(final.StacktraceKey, ent.Stack)
-		final.endQuoteFiled()
+		final.endQuoteField()
 	}
 
 	if final.LineEnding != "" {
@@ -573,7 +573,7 @@ func (enc *textEncoder) safeAddByteString(s []byte) {
 	}
 }
 
-// See [log-fileds](https://github.com/tikv/rfcs/blob/master/text/2018-12-19-unified-log-format.md#log-fields-section).
+// See [log-fields](https://github.com/tikv/rfcs/blob/master/text/2018-12-19-unified-log-format.md#log-fields-section).
 func (enc *textEncoder) needDoubleQuotes(s string) bool {
 	for i := 0; i < len(s); {
 		b := s[i]
@@ -637,18 +637,18 @@ func (enc *textEncoder) addFields(fields []zapcore.Field) {
 			enc.encodeError(f)
 			continue
 		}
-		enc.beginQuoteFiled()
+		enc.beginQuoteField()
 		f.AddTo(enc)
-		enc.endQuoteFiled()
+		enc.endQuoteField()
 	}
 }
 
 func (enc *textEncoder) encodeError(f zapcore.Field) {
 	err := f.Interface.(error)
 	basic := err.Error()
-	enc.beginQuoteFiled()
+	enc.beginQuoteField()
 	enc.AddString(f.Key, basic)
-	enc.endQuoteFiled()
+	enc.endQuoteField()
 	if enc.disableErrorVerbose {
 		return
 	}
@@ -657,9 +657,9 @@ func (enc *textEncoder) encodeError(f zapcore.Field) {
 		if verbose != basic {
 			// This is a rich error type, like those produced by
 			// errors.
-			enc.beginQuoteFiled()
+			enc.beginQuoteField()
 			enc.AddString(f.Key+"Verbose", verbose)
-			enc.endQuoteFiled()
+			enc.endQuoteField()
 		}
 	}
 }

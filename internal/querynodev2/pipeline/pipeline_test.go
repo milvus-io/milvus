@@ -76,7 +76,7 @@ func (suite *PipelineTestSuite) buildMsgPack(schema *schemapb.CollectionSchema) 
 
 	for id, segmentID := range suite.insertSegmentIDs {
 		insertMsg := buildInsertMsg(suite.collectionID, suite.partitionIDs[id%len(suite.partitionIDs)], segmentID, suite.channel, 1)
-		insertMsg.FieldsData = genFiledDataWithSchema(schema, 1)
+		insertMsg.FieldsData = genFieldDataWithSchema(schema, 1)
 		msgPack.Msgs = append(msgPack.Msgs, insertMsg)
 	}
 

@@ -10,7 +10,7 @@ import (
 )
 
 var (
-	filedSchemaPb = &schemapb.FieldSchema{
+	fieldSchemaPb = &schemapb.FieldSchema{
 		FieldID:      fieldID,
 		Name:         fieldName,
 		IsPrimaryKey: false,
@@ -35,24 +35,24 @@ var (
 
 func TestMarshalFieldModel(t *testing.T) {
 	ret := MarshalFieldModel(fieldModel)
-	assert.Equal(t, filedSchemaPb, ret)
+	assert.Equal(t, fieldSchemaPb, ret)
 	assert.Nil(t, MarshalFieldModel(nil))
 }
 
 func TestMarshalFieldModels(t *testing.T) {
 	ret := MarshalFieldModels([]*Field{fieldModel})
-	assert.Equal(t, []*schemapb.FieldSchema{filedSchemaPb}, ret)
+	assert.Equal(t, []*schemapb.FieldSchema{fieldSchemaPb}, ret)
 	assert.Nil(t, MarshalFieldModels(nil))
 }
 
 func TestUnmarshalFieldModel(t *testing.T) {
-	ret := UnmarshalFieldModel(filedSchemaPb)
+	ret := UnmarshalFieldModel(fieldSchemaPb)
 	assert.Equal(t, fieldModel, ret)
 	assert.Nil(t, UnmarshalFieldModel(nil))
 }
 
 func TestUnmarshalFieldModels(t *testing.T) {
-	ret := UnmarshalFieldModels([]*schemapb.FieldSchema{filedSchemaPb})
+	ret := UnmarshalFieldModels([]*schemapb.FieldSchema{fieldSchemaPb})
 	assert.Equal(t, []*Field{fieldModel}, ret)
 	assert.Nil(t, UnmarshalFieldModels(nil))
 }

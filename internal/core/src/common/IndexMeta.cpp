@@ -49,9 +49,9 @@ CollectionIndexMeta::CollectionIndexMeta(
 CollectionIndexMeta::CollectionIndexMeta(
     const milvus::proto::segcore::CollectionIndexMeta& collectionIndexMeta) {
     max_index_row_cnt_ = collectionIndexMeta.maxindexrowcount();
-    for (auto& filed_index_meta : collectionIndexMeta.index_metas()) {
-        FieldIndexMeta fieldIndexMeta(filed_index_meta);
-        fieldMetas_.emplace(FieldId(filed_index_meta.fieldid()),
+    for (auto& field_index_meta : collectionIndexMeta.index_metas()) {
+        FieldIndexMeta fieldIndexMeta(field_index_meta);
+        fieldMetas_.emplace(FieldId(field_index_meta.fieldid()),
                             fieldIndexMeta);
     }
 }
@@ -62,7 +62,7 @@ CollectionIndexMeta::GetIndexMaxRowCount() const {
 }
 
 bool
-CollectionIndexMeta::HasFiled(FieldId fieldId) const {
+CollectionIndexMeta::HasField(FieldId fieldId) const {
     return fieldMetas_.count(fieldId);
 }
 
@@ -76,15 +76,15 @@ std::string
 CollectionIndexMeta::ToString() {
     std::stringstream ss;
     ss << "maxRowCount : {" << max_index_row_cnt_ << "} ";
-    for (auto& filed_meta : fieldMetas_) {
-        ss << "FieldId : {" << abs(filed_meta.first.get()) << " ";
+    for (auto& field_meta : fieldMetas_) {
+        ss << "FieldId : {" << abs(field_meta.first.get()) << " ";
         ss << "IndexParams : { ";
-        for (auto& kv : filed_meta.second.GetIndexParams()) {
+        for (auto& kv : field_meta.second.GetIndexParams()) {
             ss << kv.first << " : " << kv.second << ", ";
         }
         ss << " }";
         ss << "TypeParams : {";
-        for (auto& kv : filed_meta.second.GetTypeParams()) {
+        for (auto& kv : field_meta.second.GetTypeParams()) {
             ss << kv.first << " : " << kv.second << ", ";
         }
         ss << "}";

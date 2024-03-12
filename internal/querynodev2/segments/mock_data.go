@@ -622,7 +622,7 @@ func GenTestScalarFieldData(dType schemapb.DataType, fieldName string, fieldID i
 	return ret
 }
 
-func GenTestVectorFiledData(dType schemapb.DataType, fieldName string, fieldID int64, numRows int, dim int) *schemapb.FieldData {
+func GenTestVectorFieldData(dType schemapb.DataType, fieldName string, fieldID int64, numRows int, dim int) *schemapb.FieldData {
 	ret := &schemapb.FieldData{
 		Type:      dType,
 		FieldName: fieldName,
@@ -1356,16 +1356,16 @@ func genInsertMsg(collection *Collection, partitionID, segment int64, numRows in
 			fieldsData = append(fieldsData, GenTestScalarFieldData(f.DataType, simpleJSONField.fieldName, f.GetFieldID(), numRows))
 		case schemapb.DataType_FloatVector:
 			dim := simpleFloatVecField.dim // if no dim specified, use simpleFloatVecField's dim
-			fieldsData = append(fieldsData, GenTestVectorFiledData(f.DataType, f.Name, f.FieldID, numRows, dim))
+			fieldsData = append(fieldsData, GenTestVectorFieldData(f.DataType, f.Name, f.FieldID, numRows, dim))
 		case schemapb.DataType_BinaryVector:
 			dim := simpleBinVecField.dim // if no dim specified, use simpleFloatVecField's dim
-			fieldsData = append(fieldsData, GenTestVectorFiledData(f.DataType, f.Name, f.FieldID, numRows, dim))
+			fieldsData = append(fieldsData, GenTestVectorFieldData(f.DataType, f.Name, f.FieldID, numRows, dim))
 		case schemapb.DataType_Float16Vector:
 			dim := simpleFloat16VecField.dim // if no dim specified, use simpleFloatVecField's dim
-			fieldsData = append(fieldsData, GenTestVectorFiledData(f.DataType, f.Name, f.FieldID, numRows, dim))
+			fieldsData = append(fieldsData, GenTestVectorFieldData(f.DataType, f.Name, f.FieldID, numRows, dim))
 		case schemapb.DataType_BFloat16Vector:
 			dim := simpleBFloat16VecField.dim // if no dim specified, use simpleFloatVecField's dim
-			fieldsData = append(fieldsData, GenTestVectorFiledData(f.DataType, f.Name, f.FieldID, numRows, dim))
+			fieldsData = append(fieldsData, GenTestVectorFieldData(f.DataType, f.Name, f.FieldID, numRows, dim))
 		default:
 			err := errors.New("data type not supported")
 			return nil, err

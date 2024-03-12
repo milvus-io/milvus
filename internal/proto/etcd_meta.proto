@@ -16,7 +16,7 @@ message IndexInfo {
 }
 
 message FieldIndexInfo{
-  int64 filedID = 1;
+  int64 fieldID = 1;
   int64 indexID = 2;
 }
 

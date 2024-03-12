@@ -83,8 +83,8 @@ func TestLog(t *testing.T) {
 
 	logger.With(zap.String("connID", "1"), zap.String("traceID", "dse1121")).Info("new connection")
 	logger.Info("Testing typs",
-		zap.String("filed1", "noquote"),
-		zap.String("filed2", "in quote"),
+		zap.String("field1", "noquote"),
+		zap.String("field2", "in quote"),
 		zap.Strings("urls", []string{"http://mock1.com:2347", "http://mock2.com:2432"}),
 		zap.Strings("urls-peer", []string{"t1", "t2 fine"}),
 		zap.Uint64s("store ids", []uint64{1, 4, 5}),
@@ -120,8 +120,8 @@ func TestLog(t *testing.T) {
 		`[INFO] [log/zap_log_test.go:78] [欢迎]`,
 		`[WARN] [log/zap_log_test.go:79] [Type] [Counter=NaN] [Score=+Inf]`,
 		`[INFO] [log/zap_log_test.go:84] ["new connection"] [connID=1] [traceID=dse1121]`,
-		`[INFO] [log/zap_log_test.go:85] ["Testing typs"] [filed1=noquote] `+
-			`[filed2="in quote"] [urls="[http://mock1.com:2347,http://mock2.com:2432]"] `+
+		`[INFO] [log/zap_log_test.go:85] ["Testing typs"] [field1=noquote] `+
+			`[field2="in quote"] [urls="[http://mock1.com:2347,http://mock2.com:2432]"] `+
 			`[urls-peer="[t1,\"t2 fine\"]"] ["store ids"="[1,4,5]"] [object="{username=user1}"] `+
 			`[object2="{username=\"user 2\"}"] [binary="YWIxMjM="] ["is processed"=true] `+
 			`[bytestring=noquote] [bytestring="in quote"] [int8=1] [ptr=10] [reflect="[1,2]"] [stringer=127.0.0.1] `+
