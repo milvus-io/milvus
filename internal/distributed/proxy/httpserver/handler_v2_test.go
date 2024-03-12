@@ -985,7 +985,7 @@ func TestMethodPost(t *testing.T) {
 				`"userName": "` + util.UserRoot + `", "password": "Milvus", "newPassword": "milvus", "roleName": "` + util.RoleAdmin + `",` +
 				`"roleName": "` + util.RoleAdmin + `", "objectType": "Global", "objectName": "*", "privilege": "*",` +
 				`"aliasName": "` + DefaultAliasName + `",` +
-				`"jobID": "1234567890",` +
+				`"jobId": "1234567890",` +
 				`"files": [["book.json"]]` +
 				`}`))
 			req := httptest.NewRequest(http.MethodPost, testcase.path, bodyReader)

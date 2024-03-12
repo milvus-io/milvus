@@ -290,7 +290,8 @@ func (c *importChecker) checkImportingJob(job ImportJob) {
 		}
 	}
 
-	err = c.imeta.UpdateJob(job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Completed))
+	completeTime := time.Now().String()
+	err = c.imeta.UpdateJob(job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Completed), UpdateJobCompleteTime(completeTime))
 	if err != nil {
 		log.Warn("failed to update job state to Completed", zap.Int64("jobID", job.GetJobID()), zap.Error(err))
 	}

@@ -87,6 +87,14 @@ func UpdateReason(reason string) UpdateAction {
 	}
 }
 
+func UpdateCompleteTime(completeTime string) UpdateAction {
+	return func(t ImportTask) {
+		if task, ok := t.(*importTask); ok {
+			task.ImportTaskV2.CompleteTime = completeTime
+		}
+	}
+}
+
 func UpdateNodeID(nodeID int64) UpdateAction {
 	return func(t ImportTask) {
 		switch t.GetType() {

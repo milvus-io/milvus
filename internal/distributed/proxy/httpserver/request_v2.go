@@ -82,7 +82,7 @@ func (req *ImportReq) GetOptions() map[string]string {
 }
 
 type JobIDReq struct {
-	JobID string `json:"jobID" binding:"required"`
+	JobID string `json:"jobId" binding:"required"`
 }
 
 func (req *JobIDReq) GetJobID() string { return req.JobID }

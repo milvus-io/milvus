@@ -1858,10 +1858,15 @@ func (s *Server) GetImportProgress(ctx context.Context, in *internalpb.GetImport
 		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprint("parse job id failed, err=%w", err)))
 		return resp, nil
 	}
-	progress, state, reason := GetImportProgress(jobID, s.importMeta, s.meta)
+	job := s.importMeta.GetJob(jobID)
+	collection := s.meta.GetCollection(job.GetCollectionID())
+	progress, state, reason := GetJobProgress(jobID, s.importMeta, s.meta)
 	resp.State = state
 	resp.Reason = reason
 	resp.Progress = progress
+	resp.CollectionName = collection.Schema.GetName()
+	resp.CompleteTime = job.GetCompleteTime()
+	resp.TaskProgresses = GetTaskProgresses(jobID, s.importMeta, s.meta)
 	log.Info("GetImportProgress done", zap.Any("resp", resp))
 	return resp, nil
 }
@@ -1889,11 +1894,13 @@ func (s *Server) ListImports(ctx context.Context, req *internalpb.ListImportsReq
 	}
 
 	for _, job := range jobs {
-		progress, state, reason := GetImportProgress(job.GetJobID(), s.importMeta, s.meta)
+		progress, state, reason := GetJobProgress(job.GetJobID(), s.importMeta, s.meta)
+		collection := s.meta.GetCollection(job.GetCollectionID())
 		resp.JobIDs = append(resp.JobIDs, fmt.Sprintf("%d", job.GetJobID()))
 		resp.States = append(resp.States, state)
 		resp.Reasons = append(resp.Reasons, reason)
 		resp.Progresses = append(resp.Progresses, progress)
+		resp.CollectionNames = append(resp.CollectionNames, collection.Schema.GetName())
 	}
 	return resp, nil
 }

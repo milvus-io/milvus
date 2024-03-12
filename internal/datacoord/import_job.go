@@ -55,6 +55,12 @@ func UpdateJobReason(reason string) UpdateJobAction {
 	}
 }
 
+func UpdateJobCompleteTime(completeTime string) UpdateJobAction {
+	return func(job ImportJob) {
+		job.(*importJob).ImportJob.CompleteTime = completeTime
+	}
+}
+
 type ImportJob interface {
 	GetJobID() int64
 	GetCollectionID() int64
@@ -65,6 +71,7 @@ type ImportJob interface {
 	GetCleanupTs() uint64
 	GetState() internalpb.ImportJobState
 	GetReason() string
+	GetCompleteTime() string
 	GetFiles() []*internalpb.ImportFile
 	GetOptions() []*commonpb.KeyValuePair
 	Clone() ImportJob

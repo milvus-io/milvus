@@ -305,11 +305,22 @@ message GetImportProgressRequest {
   string jobID = 2;
 }
 
+message ImportTaskProgress {
+  string file_name = 1;
+  int64 memory_size = 2;
+  string reason = 3;
+  int64 progress = 4;
+  string complete_time = 5;
+}
+
 message GetImportProgressResponse {
   common.Status status = 1;
   ImportJobState state = 2;
   string reason = 3;
   int64 progress = 4;
+  string collection_name = 5;
+  string complete_time = 6;
+  repeated ImportTaskProgress task_progresses = 7;
 }
 
 message ListImportsRequestInternal {
@@ -328,4 +339,5 @@ message ListImportsResponse {
   repeated ImportJobState states = 3;
   repeated string reasons = 4;
   repeated int64 progresses = 5;
+  repeated string collection_names = 6;
 }

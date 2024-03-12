@@ -866,8 +866,9 @@ message ImportJob {
   uint64 cleanup_ts = 8;
   internal.ImportJobState state = 9;
   string reason = 10;
-  repeated internal.ImportFile files = 11;
-  repeated common.KeyValuePair options = 12;
+  string complete_time = 11;
+  repeated internal.ImportFile files = 12;
+  repeated common.KeyValuePair options = 13;
 }
 
 enum ImportTaskStateV2 {
@@ -896,6 +897,7 @@ message ImportTaskV2 {
   int64 nodeID = 5;
   ImportTaskStateV2 state = 6;
   string reason = 7;
+  string complete_time = 8;
   repeated ImportFileStats file_stats = 9;
 }
 

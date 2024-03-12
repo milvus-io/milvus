@@ -1651,19 +1651,22 @@ func (h *HandlersV2) listImportJob(ctx context.Context, c *gin.Context, anyReq a
 		return h.proxy.ListImports(reqCtx, req.(*internalpb.ListImportsRequest))
 	})
 	if err == nil {
-		returnData := make([]map[string]interface{}, 0)
+		returnData := make(map[string]interface{})
+		records := make([]map[string]interface{}, 0)
 		response := resp.(*internalpb.ListImportsResponse)
 		for i, jobID := range response.GetJobIDs() {
 			jobDetail := make(map[string]interface{})
-			jobDetail["jobID"] = jobID
+			jobDetail["jobId"] = jobID
+			jobDetail["collectionName"] = response.GetCollectionNames()[i]
 			jobDetail["state"] = response.GetStates()[i].String()
 			jobDetail["progress"] = response.GetProgresses()[i]
 			reason := response.GetReasons()[i]
 			if reason != "" {
 				jobDetail["reason"] = reason
 			}
-			returnData = append(returnData, jobDetail)
+			records = append(records, jobDetail)
 		}
+		returnData["records"] = records
 		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: returnData})
 	}
 	return resp, err
@@ -1690,7 +1693,7 @@ func (h *HandlersV2) createImportJob(ctx context.Context, c *gin.Context, anyReq
 	})
 	if err == nil {
 		returnData := make(map[string]interface{})
-		returnData["jobID"] = resp.(*internalpb.ImportResponse).GetJobID()
+		returnData["jobId"] = resp.(*internalpb.ImportResponse).GetJobID()
 		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: returnData})
 	}
 	return resp, err
@@ -1708,13 +1711,28 @@ func (h *HandlersV2) getImportJobProcess(ctx context.Context, c *gin.Context, an
 	if err == nil {
 		response := resp.(*internalpb.GetImportProgressResponse)
 		returnData := make(map[string]interface{})
-		returnData["jobID"] = jobIDGetter.GetJobID()
+		returnData["jobId"] = jobIDGetter.GetJobID()
+		returnData["collectionName"] = response.GetCollectionName()
 		returnData["state"] = response.GetState().String()
 		returnData["progress"] = response.GetProgress()
 		reason := response.GetReason()
 		if reason != "" {
 			returnData["reason"] = reason
 		}
+		details := make([]map[string]interface{}, 0)
+		for _, taskProgress := range response.GetTaskProgresses() {
+			detail := make(map[string]interface{})
+			detail["fileName"] = taskProgress.GetFileName()
+			detail["fileSize"] = taskProgress.GetMemorySize()
+			detail["progress"] = taskProgress.GetProgress()
+			detail["completeTime"] = taskProgress.GetCompleteTime()
+			reason = taskProgress.GetReason()
+			if reason != "" {
+				detail["reason"] = reason
+			}
+			details = append(details, detail)
+		}
+		returnData["details"] = details
 		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: returnData})
 	}
 	return resp, err
