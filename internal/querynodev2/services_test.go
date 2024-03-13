@@ -160,7 +160,6 @@ func (suite *ServiceSuite) TearDownTest() {
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, resp.ErrorCode)
 	suite.node.chunkManager.RemoveWithPrefix(ctx, suite.rootPath)
-
 	suite.node.Stop()
 	suite.etcdClient.Close()
 }
@@ -1356,6 +1355,48 @@ func (suite *ServiceSuite) TestSearchSegments_Normal() {
 
 		DmlChannels:     []string{suite.vchannel},
 		TotalChannelNum: 2,
+	}
+	suite.NoError(err)
+
+	rsp, err := suite.node.SearchSegments(ctx, req)
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_Success, rsp.GetStatus().GetErrorCode())
+}
+
+func (suite *ServiceSuite) TestStreamingSearch() {
+	ctx := context.Background()
+	// pre
+	suite.TestWatchDmChannelsInt64()
+	suite.TestLoadSegments_Int64()
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.UseStreamReduce.Key, "true")
+	creq, err := suite.genCSearchRequest(10, schemapb.DataType_FloatVector, 107, defaultMetricType)
+	req := &querypb.SearchRequest{
+		Req:             creq,
+		FromShardLeader: true,
+		DmlChannels:     []string{suite.vchannel},
+		TotalChannelNum: 2,
+		SegmentIDs:      suite.validSegmentIDs,
+		Scope:           querypb.DataScope_Historical,
+	}
+	suite.NoError(err)
+
+	rsp, err := suite.node.SearchSegments(ctx, req)
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_Success, rsp.GetStatus().GetErrorCode())
+}
+
+func (suite *ServiceSuite) TestStreamingSearchGrowing() {
+	ctx := context.Background()
+	// pre
+	suite.TestWatchDmChannelsInt64()
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.UseStreamReduce.Key, "true")
+	creq, err := suite.genCSearchRequest(10, schemapb.DataType_FloatVector, 107, defaultMetricType)
+	req := &querypb.SearchRequest{
+		Req:             creq,
+		FromShardLeader: true,
+		DmlChannels:     []string{suite.vchannel},
+		TotalChannelNum: 2,
+		Scope:           querypb.DataScope_Streaming,
 	}
 	suite.NoError(err)
 

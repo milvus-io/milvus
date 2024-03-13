@@ -20,8 +20,11 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/metricsutil"
@@ -118,6 +121,77 @@ func searchSegments(ctx context.Context, mgr *Manager, segments []Segment, segTy
 	return searchResults, nil
 }
 
+// searchSegmentsStreamly performs search on listed segments in a stream mode instead of a batch mode
+// all segment ids are validated before calling this function
+func searchSegmentsStreamly(ctx context.Context,
+	mgr *Manager,
+	segments []Segment,
+	searchReq *SearchRequest,
+	streamReduce func(result *SearchResult) error,
+) error {
+	searchLabel := metrics.SealedSegmentLabel
+	var sumReduceDuration atomic.Duration
+	eg, egCtx := errgroup.WithContext(ctx)
+	searcher := func(seg Segment) error {
+		var searchResult *SearchResult
+		defer func() {
+			select {
+			case <-egCtx.Done():
+				DeleteSearchResults([]*SearchResult{searchResult})
+			default:
+			}
+		}()
+
+		// record search time
+		tr := timerecord.NewTimeRecorder("searchOnSegments")
+		searchResult, searchErr := seg.Search(ctx, searchReq)
+		searchDuration := tr.RecordSpan()
+		if searchErr != nil {
+			return searchErr
+		}
+		reducedErr := streamReduce(searchResult)
+		reduceDuration := tr.RecordSpan()
+		if reducedErr != nil {
+			return reducedErr
+		}
+		sumReduceDuration.Add(reduceDuration)
+		// update metrics
+		metrics.QueryNodeSQSegmentLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+			metrics.SearchLabel, searchLabel).Observe(float64(searchDuration))
+		metrics.QueryNodeSegmentSearchLatencyPerVector.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+			metrics.SearchLabel, searchLabel).Observe(float64(searchDuration) / float64(searchReq.getNumOfQuery()))
+		return nil
+	}
+
+	for _, seg := range segments {
+		segCopy := seg
+		eg.Go(func() error {
+			var err error
+			if segCopy.IsLazyLoad() {
+				var timeout time.Duration
+				_, err := mgr.DiskCache.DoWait(segCopy.ID(), timeout, searcher)
+				if err != nil {
+					log.Error("failed to do search for disk cache", zap.Int64("seg_id", segCopy.ID()), zap.Error(err))
+					return err
+				}
+			} else {
+				err = searcher(segCopy)
+			}
+			return err
+		})
+	}
+	err := eg.Wait()
+	if err != nil {
+		return err
+	}
+	metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+		metrics.SearchLabel,
+		metrics.ReduceSegments,
+		metrics.StreamReduce).Observe(float64(sumReduceDuration.Load().Milliseconds()))
+	log.Debug("stream reduce sum duration:", zap.Duration("duration", sumReduceDuration.Load()))
+	return nil
+}
+
 // search will search on the historical segments the target segments in historical.
 // if segIDs is not specified, it will search on all the historical segments speficied by partIDs.
 // if segIDs is specified, it will only search on the segments specified by the segIDs.
@@ -140,4 +214,18 @@ func SearchStreaming(ctx context.Context, manager *Manager, searchReq *SearchReq
 	}
 	searchResults, err := searchSegments(ctx, manager, segments, SegmentTypeGrowing, searchReq)
 	return searchResults, segments, err
+}
+
+func SearchHistoricalStreamly(ctx context.Context, manager *Manager, searchReq *SearchRequest,
+	collID int64, partIDs []int64, segIDs []int64, streamReduce func(result *SearchResult) error,
+) ([]Segment, error) {
+	segments, err := validateOnHistorical(ctx, manager, collID, partIDs, segIDs)
+	if err != nil {
+		return segments, err
+	}
+	err = searchSegmentsStreamly(ctx, manager, segments, searchReq, streamReduce)
+	if err != nil {
+		return segments, err
+	}
+	return segments, nil
 }

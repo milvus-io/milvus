@@ -660,7 +660,13 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 		return resp, nil
 	}
 
-	task := tasks.NewSearchTask(searchCtx, collection, node.manager, req, node.serverID)
+	var task tasks.Task
+	if paramtable.Get().QueryNodeCfg.UseStreamReduce.GetAsBool() {
+		task = tasks.NewStreamingSearchTask(searchCtx, collection, node.manager, req, node.serverID)
+	} else {
+		task = tasks.NewSearchTask(searchCtx, collection, node.manager, req, node.serverID)
+	}
+
 	if err := node.scheduler.Add(task); err != nil {
 		log.Warn("failed to search channel", zap.Error(err))
 		resp.Status = merr.Status(err)
@@ -683,7 +689,7 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 	metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.SearchLabel, metrics.FromLeader).Observe(float64(latency.Milliseconds()))
 	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.SearchLabel, metrics.SuccessLabel, metrics.FromLeader).Inc()
 
-	resp = task.Result()
+	resp = task.SearchResult()
 	resp.GetCostAggregation().ResponseTime = tr.ElapseSpan().Milliseconds()
 	resp.GetCostAggregation().TotalNQ = node.scheduler.GetWaitingTaskTotalNQ()
 	return resp, nil
@@ -767,7 +773,8 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 	}
 
 	reduceLatency := tr.RecordSpan()
-	metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.SearchLabel, metrics.ReduceShards).
+	metrics.QueryNodeReduceLatency.
+		WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.SearchLabel, metrics.ReduceShards, metrics.BatchReduce).
 		Observe(float64(reduceLatency.Milliseconds()))
 
 	collector.Rate.Add(metricsinfo.NQPerSecond, float64(req.GetReq().GetNq()))
@@ -914,7 +921,8 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 		}, nil
 	}
 	reduceLatency := tr.RecordSpan()
-	metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.QueryLabel, metrics.ReduceShards).
+	metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(node.GetNodeID()),
+		metrics.QueryLabel, metrics.ReduceShards, metrics.BatchReduce).
 		Observe(float64(reduceLatency.Milliseconds()))
 
 	collector.Rate.Add(metricsinfo.NQPerSecond, 1)

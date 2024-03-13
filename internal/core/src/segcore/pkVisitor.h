@@ -24,7 +24,7 @@ struct Int64PKVisitor {
 };
 
 template <>
-int64_t
+inline int64_t
 Int64PKVisitor::operator()<int64_t>(int64_t t) const {
     return t;
 }
@@ -38,7 +38,7 @@ struct StrPKVisitor {
 };
 
 template <>
-std::string
+inline std::string
 StrPKVisitor::operator()<std::string>(std::string t) const {
     return t;
 }

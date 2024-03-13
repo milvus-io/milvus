@@ -2,6 +2,8 @@ package tasks
 
 // TODO: rename this file into search_task.go
 
+import "C"
+
 import (
 	"bytes"
 	"context"
@@ -233,7 +235,8 @@ func (t *SearchTask) Execute() error {
 	metrics.QueryNodeReduceLatency.WithLabelValues(
 		fmt.Sprint(t.GetNodeID()),
 		metrics.SearchLabel,
-		metrics.ReduceSegments).
+		metrics.ReduceSegments,
+		metrics.BatchReduce).
 		Observe(float64(tr.RecordSpan().Milliseconds()))
 	for i := range t.originNqs {
 		blob, err := segments.GetSearchResultDataBlob(t.ctx, blobs, i)
@@ -333,7 +336,7 @@ func (t *SearchTask) Wait() error {
 	return <-t.notifier
 }
 
-func (t *SearchTask) Result() *internalpb.SearchResults {
+func (t *SearchTask) SearchResult() *internalpb.SearchResults {
 	if t.result != nil {
 		channelsMvcc := make(map[string]uint64)
 		for _, ch := range t.req.GetDmlChannels() {
