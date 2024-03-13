@@ -714,7 +714,7 @@ func (suite *SegmentLoaderDetailSuite) TestWaitSegmentLoadDone() {
 			return nil
 		})
 		suite.segmentManager.EXPECT().UpdateBy(mock.Anything, mock.Anything, mock.Anything).Return(0)
-		infos = suite.loader.prepare(SegmentTypeSealed, &querypb.SegmentLoadInfo{
+		infos = suite.loader.prepare(context.Background(), SegmentTypeSealed, &querypb.SegmentLoadInfo{
 			SegmentID:    suite.segmentID,
 			PartitionID:  suite.partitionID,
 			CollectionID: suite.collectionID,
@@ -742,7 +742,7 @@ func (suite *SegmentLoaderDetailSuite) TestWaitSegmentLoadDone() {
 
 			return nil
 		})
-		infos = suite.loader.prepare(SegmentTypeSealed, &querypb.SegmentLoadInfo{
+		infos = suite.loader.prepare(context.Background(), SegmentTypeSealed, &querypb.SegmentLoadInfo{
 			SegmentID:    suite.segmentID,
 			PartitionID:  suite.partitionID,
 			CollectionID: suite.collectionID,
@@ -760,7 +760,7 @@ func (suite *SegmentLoaderDetailSuite) TestWaitSegmentLoadDone() {
 		suite.segmentManager.EXPECT().GetWithType(suite.segmentID, SegmentTypeSealed).RunAndReturn(func(segmentID int64, segmentType commonpb.SegmentState) Segment {
 			return nil
 		})
-		suite.loader.prepare(SegmentTypeSealed, &querypb.SegmentLoadInfo{
+		suite.loader.prepare(context.Background(), SegmentTypeSealed, &querypb.SegmentLoadInfo{
 			SegmentID:    suite.segmentID,
 			PartitionID:  suite.partitionID,
 			CollectionID: suite.collectionID,

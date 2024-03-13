@@ -133,10 +133,10 @@ func (loader *segmentLoaderV2) Load(ctx context.Context,
 		return nil, nil
 	}
 	// Filter out loaded & loading segments
-	infos := loader.prepare(segmentType, segments...)
+	infos := loader.prepare(ctx, segmentType, segments...)
 	defer loader.unregister(infos...)
 
-	log.With(
+	log = log.With(
 		zap.Int64s("requestSegments", lo.Map(segments, func(s *querypb.SegmentLoadInfo, _ int) int64 { return s.GetSegmentID() })),
 		zap.Int64s("preparedSegments", lo.Map(infos, func(s *querypb.SegmentLoadInfo, _ int) int64 { return s.GetSegmentID() })),
 	)
@@ -559,10 +559,10 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		return nil, nil
 	}
 	// Filter out loaded & loading segments
-	infos := loader.prepare(segmentType, segments...)
+	infos := loader.prepare(ctx, segmentType, segments...)
 	defer loader.unregister(infos...)
 
-	log.With(
+	log = log.With(
 		zap.Int64s("requestSegments", lo.Map(segments, func(s *querypb.SegmentLoadInfo, _ int) int64 { return s.GetSegmentID() })),
 		zap.Int64s("preparedSegments", lo.Map(infos, func(s *querypb.SegmentLoadInfo, _ int) int64 { return s.GetSegmentID() })),
 	)
@@ -694,7 +694,10 @@ func (loader *segmentLoader) Load(ctx context.Context,
 	return result, nil
 }
 
-func (loader *segmentLoader) prepare(segmentType SegmentType, segments ...*querypb.SegmentLoadInfo) []*querypb.SegmentLoadInfo {
+func (loader *segmentLoader) prepare(ctx context.Context, segmentType SegmentType, segments ...*querypb.SegmentLoadInfo) []*querypb.SegmentLoadInfo {
+	log := log.Ctx(ctx).With(
+		zap.Stringer("segmentType", segmentType),
+	)
 	loader.mut.Lock()
 	defer loader.mut.Unlock()
 
@@ -707,7 +710,8 @@ func (loader *segmentLoader) prepare(segmentType SegmentType, segments ...*query
 			infos = append(infos, segment)
 			loader.loadingSegments.Insert(segment.GetSegmentID(), newLoadResult())
 		} else {
-			log.Info("skip loaded/loading segment", zap.Int64("segmentID", segment.GetSegmentID()),
+			log.Info("skip loaded/loading segment",
+				zap.Int64("segmentID", segment.GetSegmentID()),
 				zap.Bool("isLoaded", len(loader.manager.Segment.GetBy(WithType(segmentType), WithID(segment.GetSegmentID()))) > 0),
 				zap.Bool("isLoading", loader.loadingSegments.Contain(segment.GetSegmentID())),
 			)
@@ -1502,7 +1506,7 @@ func (loader *segmentLoader) LoadIndex(ctx context.Context, segment *LocalSegmen
 
 	// Filter out LOADING segments only
 	// use None to avoid loaded check
-	infos := loader.prepare(commonpb.SegmentState_SegmentStateNone, loadInfo)
+	infos := loader.prepare(ctx, commonpb.SegmentState_SegmentStateNone, loadInfo)
 	defer loader.unregister(infos...)
 
 	indexInfo := lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *querypb.SegmentLoadInfo {
