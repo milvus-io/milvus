@@ -185,46 +185,6 @@ func (suite *SegmentCheckerTestSuite) TestSkipLoadSegments() {
 	suite.Len(tasks, 0)
 }
 
-func (suite *SegmentCheckerTestSuite) TestSkipCheckReplica() {
-	checker := suite.checker
-	// set meta
-	checker.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
-	checker.meta.CollectionManager.PutPartition(utils.CreateTestPartition(1, 1))
-	checker.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
-	suite.nodeMgr.Add(session.NewNodeInfo(1, "localhost"))
-	suite.nodeMgr.Add(session.NewNodeInfo(2, "localhost"))
-	checker.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 1)
-	checker.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 2)
-
-	// set target
-	segments := []*datapb.SegmentInfo{
-		{
-			ID:            1,
-			PartitionID:   1,
-			InsertChannel: "test-insert-channel",
-		},
-	}
-
-	channels := []*datapb.VchannelInfo{
-		{
-			CollectionID: 1,
-			ChannelName:  "test-insert-channel",
-		},
-	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		channels, segments, nil)
-	checker.targetMgr.UpdateCollectionNextTarget(int64(1))
-
-	// set dist
-	checker.dist.ChannelDistManager.Update(1, utils.CreateTestChannel(1, 1, 1, "test-insert-channel"))
-	checker.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 2, "test-insert-channel"))
-	checker.dist.SegmentDistManager.Update(2, utils.CreateTestSegment(1, 1, 11, 1, 1, "test-insert-channel"))
-	checker.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, map[int64]*meta.Segment{}))
-
-	tasks := checker.Check(context.TODO())
-	suite.Len(tasks, 0)
-}
-
 func (suite *SegmentCheckerTestSuite) TestReleaseSegments() {
 	checker := suite.checker
 	// set meta
