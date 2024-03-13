@@ -164,7 +164,7 @@ func StartMiniClusterV2(ctx context.Context, opts ...OptionV2) (*MiniClusterV2, 
 		etcdCli:  cluster.EtcdCli,
 	}
 
-	ports, err := GetAvailablePorts(7)
+	ports, err := cluster.GetAvailablePorts(7)
 	if err != nil {
 		return nil, err
 	}
@@ -421,10 +421,10 @@ func (cluster *MiniClusterV2) GetFactory() dependency.Factory {
 	return cluster.factory
 }
 
-func GetAvailablePorts(n int) ([]int, error) {
+func (cluster *MiniClusterV2) GetAvailablePorts(n int) ([]int, error) {
 	ports := make([]int, n)
 	for i := range ports {
-		port, err := GetAvailablePort()
+		port, err := cluster.GetAvailablePort()
 		if err != nil {
 			return nil, err
 		}
@@ -433,7 +433,7 @@ func GetAvailablePorts(n int) ([]int, error) {
 	return ports, nil
 }
 
-func GetAvailablePort() (int, error) {
+func (cluster *MiniClusterV2) GetAvailablePort() (int, error) {
 	address, err := net.ResolveTCPAddr("tcp", fmt.Sprintf("%s:0", "0.0.0.0"))
 	if err != nil {
 		return 0, err

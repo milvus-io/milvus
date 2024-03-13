@@ -349,6 +349,11 @@ func (s *Server) initMeta() error {
 		LeaderViewManager:  meta.NewLeaderViewManager(),
 	}
 	s.targetMgr = meta.NewTargetManager(s.broker, s.meta)
+	err = s.targetMgr.Recover(s.store)
+	if err != nil {
+		log.Warn("failed to recover collection targets", zap.Error(err))
+	}
+
 	log.Info("QueryCoord server initMeta done", zap.Duration("duration", record.ElapseSpan()))
 	return nil
 }
@@ -451,6 +456,11 @@ func (s *Server) startServerLoop() {
 }
 
 func (s *Server) Stop() error {
+	// save target to meta store, after querycoord restart, make it fast to recover current target
+	if s.targetMgr != nil {
+		s.targetMgr.SaveCurrentTarget(s.store)
+	}
+
 	// FOLLOW the dependence graph:
 	// job scheduler -> checker controller -> task scheduler -> dist controller -> cluster -> session
 	// observers -> dist controller

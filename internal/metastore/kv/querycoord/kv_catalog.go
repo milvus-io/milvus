@@ -1,15 +1,19 @@
 package querycoord
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
+	"github.com/klauspost/compress/zstd"
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/util/compressor"
 )
 
 var ErrInvalidKey = errors.New("invalid load info key")
@@ -22,7 +26,8 @@ const (
 	ReplicaMetaPrefixV1      = "queryCoord-ReplicaMeta"
 	ResourceGroupPrefix      = "queryCoord-ResourceGroup"
 
-	MetaOpsBatchSize = 128
+	MetaOpsBatchSize       = 128
+	CollectionTargetPrefix = "queryCoord-Collection-Target"
 )
 
 type Catalog struct {
@@ -234,6 +239,46 @@ func (s Catalog) ReleaseReplica(collection, replica int64) error {
 	return s.cli.Remove(key)
 }
 
+func (s Catalog) SaveCollectionTarget(target *querypb.CollectionTarget) error {
+	k := encodeCollectionTargetKey(target.GetCollectionID())
+	v, err := proto.Marshal(target)
+	if err != nil {
+		return err
+	}
+	// to reduce the target size, we do compress before write to etcd
+	var compressed bytes.Buffer
+	compressor.ZstdCompress(bytes.NewReader(v), io.Writer(&compressed), zstd.WithEncoderLevel(zstd.SpeedBetterCompression))
+	err = s.cli.Save(k, compressed.String())
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s Catalog) RemoveCollectionTarget(collectionID int64) error {
+	k := encodeCollectionTargetKey(collectionID)
+	return s.cli.Remove(k)
+}
+
+func (s Catalog) GetCollectionTargets() (map[int64]*querypb.CollectionTarget, error) {
+	_, values, err := s.cli.LoadWithPrefix(CollectionTargetPrefix)
+	if err != nil {
+		return nil, err
+	}
+	ret := make(map[int64]*querypb.CollectionTarget)
+	for _, v := range values {
+		var decompressed bytes.Buffer
+		compressor.ZstdDecompress(bytes.NewReader([]byte(v)), io.Writer(&decompressed))
+		target := &querypb.CollectionTarget{}
+		if err := proto.Unmarshal(decompressed.Bytes(), target); err != nil {
+			return nil, err
+		}
+		ret[target.GetCollectionID()] = target
+	}
+
+	return ret, nil
+}
+
 func EncodeCollectionLoadInfoKey(collection int64) string {
 	return fmt.Sprintf("%s/%d", CollectionLoadInfoPrefix, collection)
 }
@@ -252,4 +297,8 @@ func encodeCollectionReplicaKey(collection int64) string {
 
 func encodeResourceGroupKey(rgName string) string {
 	return fmt.Sprintf("%s/%s", ResourceGroupPrefix, rgName)
+}
+
+func encodeCollectionTargetKey(collection int64) string {
+	return fmt.Sprintf("%s/%d", CollectionTargetPrefix, collection)
 }
