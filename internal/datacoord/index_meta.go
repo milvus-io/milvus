@@ -854,3 +854,35 @@ func (m *indexMeta) GetMetasByNodeID(nodeID UniqueID) []*model.SegmentIndex {
 	}
 	return metas
 }
+
+func (m *indexMeta) getSegmentsIndexStates(collectionID UniqueID, segmentIDs []UniqueID) map[int64]map[int64]*indexpb.SegmentIndexState {
+	m.RLock()
+	defer m.RUnlock()
+
+	ret := make(map[int64]map[int64]*indexpb.SegmentIndexState, 0)
+	fieldIndexes, ok := m.indexes[collectionID]
+	if !ok {
+		return ret
+	}
+
+	for _, segID := range segmentIDs {
+		ret[segID] = make(map[int64]*indexpb.SegmentIndexState)
+		segIndexInfos, ok := m.segmentIndexes[segID]
+		if !ok || len(segIndexInfos) == 0 {
+			return ret
+		}
+
+		for _, segIdx := range segIndexInfos {
+			if index, ok := fieldIndexes[segIdx.IndexID]; ok && !index.IsDeleted {
+				ret[segID][segIdx.IndexID] = &indexpb.SegmentIndexState{
+					SegmentID:  segID,
+					State:      segIdx.IndexState,
+					FailReason: segIdx.FailReason,
+					IndexName:  index.IndexName,
+				}
+			}
+		}
+	}
+
+	return ret
+}
