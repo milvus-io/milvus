@@ -475,7 +475,7 @@ func (s *LocalSegment) Search(ctx context.Context, searchReq *SearchRequest) (*S
 	hasIndex := s.ExistIndex(searchReq.searchFieldID)
 	log = log.With(zap.Bool("withIndex", hasIndex))
 	log.Debug("search segment...")
-
+	tr := timerecord.NewTimeRecorder("xxxx local searchSegments")
 	var searchResult SearchResult
 	var status C.CStatus
 	GetSQPool().Submit(func() (any, error) {
@@ -496,6 +496,8 @@ func (s *LocalSegment) Search(ctx context.Context, searchReq *SearchRequest) (*S
 		zap.String("segmentType", s.typ.String())); err != nil {
 		return nil, err
 	}
+	elapsed := tr.ElapseSpan().Milliseconds()
+	log.Debug("xxx", zap.Any("search cost:ms", float64(elapsed)))
 	log.Debug("search segment done")
 	return &searchResult, nil
 }
@@ -517,7 +519,7 @@ func (s *LocalSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segco
 	)
 
 	traceCtx := ParseCTraceContext(ctx)
-
+	tr := timerecord.NewTimeRecorder("xxxx local retrieveSegments")
 	maxLimitSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
 	var retrieveResult RetrieveResult
 	var status C.CStatus
@@ -537,6 +539,8 @@ func (s *LocalSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segco
 		return nil, nil
 	}).Await()
 
+	elapsed := tr.ElapseSpan().Milliseconds()
+	log.Debug("xxx", zap.Any("retrieve cost:ms", float64(elapsed)))
 	if err := HandleCStatus(ctx, &status, "Retrieve failed",
 		zap.Int64("collectionID", s.Collection()),
 		zap.Int64("partitionID", s.Partition()),
