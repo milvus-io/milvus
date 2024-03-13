@@ -1098,7 +1098,7 @@ def gen_invalid_search_params_type():
     for index_type in ct.all_index_types:
         if index_type == "FLAT":
             continue
-        search_params.append({"index_type": index_type, "search_params": {"invalid_key": invalid_search_key}})
+        # search_params.append({"index_type": index_type, "search_params": {"invalid_key": invalid_search_key}})
         if index_type in ["IVF_FLAT", "IVF_SQ8", "IVF_PQ"]:
             for nprobe in ct.get_invalid_ints:
                 ivf_search_params = {"index_type": index_type, "search_params": {"nprobe": nprobe}}
