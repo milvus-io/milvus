@@ -496,8 +496,8 @@ func (s *LocalSegment) Search(ctx context.Context, searchReq *SearchRequest) (*S
 		zap.String("segmentType", s.typ.String())); err != nil {
 		return nil, err
 	}
-	elapsed := tr.ElapseSpan().Milliseconds()
-	log.Debug("xxx", zap.Any("search cost:ms", float64(elapsed)))
+	elapsed := tr.ElapseSpan().Microseconds()
+	log.Info("xxx", zap.Any("search cost:us", float64(elapsed)))
 	log.Debug("search segment done")
 	return &searchResult, nil
 }
@@ -539,8 +539,8 @@ func (s *LocalSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segco
 		return nil, nil
 	}).Await()
 
-	elapsed := tr.ElapseSpan().Milliseconds()
-	log.Debug("xxx", zap.Any("retrieve cost:ms", float64(elapsed)))
+	elapsed := tr.ElapseSpan().Microseconds()
+	log.Info("xxx", zap.Any("retrieve cost:us", float64(elapsed)))
 	if err := HandleCStatus(ctx, &status, "Retrieve failed",
 		zap.Int64("collectionID", s.Collection()),
 		zap.Int64("partitionID", s.Partition()),

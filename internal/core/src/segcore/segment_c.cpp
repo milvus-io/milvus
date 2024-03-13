@@ -89,6 +89,8 @@ Search(CTraceContext c_trace,
        uint64_t timestamp,
        CSearchResult* result) {
     try {
+        auto start = std::chrono::high_resolution_clock::now();
+
         auto segment = (milvus::segcore::SegmentInterface*)c_segment;
         auto plan = (milvus::query::Plan*)c_plan;
         auto phg_ptr = reinterpret_cast<const milvus::query::PlaceholderGroup*>(
@@ -112,6 +114,11 @@ Search(CTraceContext c_trace,
         }
         *result = search_result.release();
         span->End();
+        auto end = std::chrono::high_resolution_clock::now();
+        auto duration =
+            std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+        std::cout << "yyyyy search Time taken: " << duration.count()
+                  << " microseconds" << std::endl;
         milvus::tracer::CloseRootSpan();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
@@ -136,6 +143,7 @@ Retrieve(CTraceContext c_trace,
             static_cast<milvus::segcore::SegmentInterface*>(c_segment);
         auto plan = static_cast<const milvus::query::RetrievePlan*>(c_plan);
 
+        auto start = std::chrono::high_resolution_clock::now();
         auto trace_ctx = milvus::tracer::TraceContext{
             c_trace.traceID, c_trace.spanID, c_trace.traceFlags};
         auto span = milvus::tracer::StartSpan("SegCoreRetrieve", &trace_ctx);
@@ -149,7 +157,11 @@ Retrieve(CTraceContext c_trace,
 
         result->proto_blob = buffer;
         result->proto_size = size;
-
+        auto end = std::chrono::high_resolution_clock::now();
+        auto duration =
+            std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+        std::cout << "yyyyy retrieve Time taken: " << duration.count()
+                  << " microseconds" << std::endl;
         span->End();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {

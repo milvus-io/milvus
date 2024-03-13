@@ -53,7 +53,7 @@ func initSQPool() {
 		pool := conc.NewPool[any](
 			initPoolSize,
 			conc.WithPreAlloc(false), // pre alloc must be false to resize pool dynamically, use warmup to alloc worker here
-			conc.WithDisablePurge(true),
+			conc.WithDisablePurge(false),
 		)
 		conc.WarmupPool(pool, runtime.LockOSThread)
 		sqp.Store(pool)
