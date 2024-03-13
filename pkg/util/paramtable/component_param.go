@@ -962,7 +962,7 @@ func (p *rootCoordConfig) init(base *BaseTable) {
 // /////////////////////////////////////////////////////////////////////////////
 // --- proxy ---
 type AccessLogConfig struct {
-	Enable        ParamItem  `refreshable:"false"`
+	Enable        ParamItem  `refreshable:"true"`
 	MinioEnable   ParamItem  `refreshable:"false"`
 	LocalPath     ParamItem  `refreshable:"false"`
 	Filename      ParamItem  `refreshable:"false"`

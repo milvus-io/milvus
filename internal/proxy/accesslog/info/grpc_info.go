@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package accesslog
+package info
 
 import (
 	"context"
@@ -32,15 +32,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
-	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/requestutil"
 )
-
-type AccessInfo interface {
-	Get(keys ...string) []any
-}
 
 type GrpcAccessInfo struct {
 	ctx    context.Context
@@ -89,61 +84,37 @@ func (i *GrpcAccessInfo) SetResult(resp interface{}, err error) {
 	}
 }
 
-func (i *GrpcAccessInfo) Get(keys ...string) []any {
-	result := []any{}
-	for _, key := range keys {
-		if getFunc, ok := metricFuncMap[key]; ok {
-			result = append(result, getFunc(i))
-		}
-	}
-	return result
-}
-
-func (i *GrpcAccessInfo) Write() bool {
-	if _globalW == nil {
-		return false
-	}
-
-	formatter, ok := _globalF.GetByMethod(getMethodName(i))
-	if !ok {
-		return false
-	}
-
-	_, err := _globalW.Write([]byte(formatter.Format(i)))
-	return err == nil
-}
-
-func getTimeCost(i *GrpcAccessInfo) string {
+func (i *GrpcAccessInfo) TimeCost() string {
 	if i.end.IsZero() {
-		return unknownString
+		return Unknown
 	}
 	return fmt.Sprint(i.end.Sub(i.start))
 }
 
-func getTimeNow(i *GrpcAccessInfo) string {
-	return time.Now().Format(timePrintFormat)
+func (i *GrpcAccessInfo) TimeNow() string {
+	return time.Now().Format(timeFormat)
 }
 
-func getTimeStart(i *GrpcAccessInfo) string {
+func (i *GrpcAccessInfo) TimeStart() string {
 	if i.start.IsZero() {
-		return unknownString
+		return Unknown
 	}
-	return i.start.Format(timePrintFormat)
+	return i.start.Format(timeFormat)
 }
 
-func getTimeEnd(i *GrpcAccessInfo) string {
+func (i *GrpcAccessInfo) TimeEnd() string {
 	if i.end.IsZero() {
-		return unknownString
+		return Unknown
 	}
-	return i.end.Format(timePrintFormat)
+	return i.end.Format(timeFormat)
 }
 
-func getMethodName(i *GrpcAccessInfo) string {
+func (i *GrpcAccessInfo) MethodName() string {
 	_, methodName := path.Split(i.grpcInfo.FullMethod)
 	return methodName
 }
 
-func getAddr(i *GrpcAccessInfo) string {
+func (i *GrpcAccessInfo) Address() string {
 	ip, ok := peer.FromContext(i.ctx)
 	if !ok {
 		return "Unknown"
@@ -151,17 +122,17 @@ func getAddr(i *GrpcAccessInfo) string {
 	return fmt.Sprintf("%s-%s", ip.Addr.Network(), ip.Addr.String())
 }
 
-func getTraceID(i *GrpcAccessInfo) string {
+func (i *GrpcAccessInfo) TraceID() string {
 	meta, ok := metadata.FromOutgoingContext(i.ctx)
 	if ok {
-		return meta.Get(clientRequestIDKey)[0]
+		return meta.Get(ClientRequestIDKey)[0]
 	}
 
 	traceID := trace.SpanFromContext(i.ctx).SpanContext().TraceID()
 	return traceID.String()
 }
 
-func getMethodStatus(i *GrpcAccessInfo) string {
+func (i *GrpcAccessInfo) MethodStatus() string {
 	code := status.Code(i.err)
 	if code != codes.OK && code != codes.Unknown {
 		return fmt.Sprintf("Grpc%s", code.String())
@@ -174,10 +145,10 @@ func getMethodStatus(i *GrpcAccessInfo) string {
 	return "Successful"
 }
 
-func getUserName(i *GrpcAccessInfo) string {
+func (i *GrpcAccessInfo) UserName() string {
 	username, err := getCurUserFromContext(i.ctx)
 	if err != nil {
-		return unknownString
+		return Unknown
 	}
 	return username
 }
@@ -186,10 +157,10 @@ type SizeResponse interface {
 	XXX_Size() int
 }
 
-func getResponseSize(i *GrpcAccessInfo) string {
+func (i *GrpcAccessInfo) ResponseSize() string {
 	message, ok := i.resp.(SizeResponse)
 	if !ok {
-		return unknownString
+		return Unknown
 	}
 
 	return fmt.Sprint(message.XXX_Size())
@@ -199,7 +170,7 @@ type BaseResponse interface {
 	GetStatus() *commonpb.Status
 }
 
-func getErrorCode(i *GrpcAccessInfo) string {
+func (i *GrpcAccessInfo) ErrorCode() string {
 	if i.status != nil {
 		return fmt.Sprint(i.status.GetCode())
 	}
@@ -207,7 +178,7 @@ func getErrorCode(i *GrpcAccessInfo) string {
 	return fmt.Sprint(merr.Code(i.err))
 }
 
-func getErrorMsg(i *GrpcAccessInfo) string {
+func (i *GrpcAccessInfo) ErrorMsg() string {
 	if i.err != nil {
 		return i.err.Error()
 	}
@@ -222,26 +193,26 @@ func getErrorMsg(i *GrpcAccessInfo) string {
 	if ok {
 		return status.GetReason()
 	}
-	return unknownString
+	return Unknown
 }
 
-func getDbName(i *GrpcAccessInfo) string {
+func (i *GrpcAccessInfo) DbName() string {
 	name, ok := requestutil.GetDbNameFromRequest(i.req)
 	if !ok {
-		return unknownString
+		return Unknown
 	}
 	return name.(string)
 }
 
-func getCollectionName(i *GrpcAccessInfo) string {
+func (i *GrpcAccessInfo) CollectionName() string {
 	name, ok := requestutil.GetCollectionNameFromRequest(i.req)
 	if !ok {
-		return unknownString
+		return Unknown
 	}
 	return name.(string)
 }
 
-func getPartitionName(i *GrpcAccessInfo) string {
+func (i *GrpcAccessInfo) PartitionName() string {
 	name, ok := requestutil.GetPartitionNameFromRequest(i.req)
 	if ok {
 		return name.(string)
@@ -252,10 +223,10 @@ func getPartitionName(i *GrpcAccessInfo) string {
 		return fmt.Sprint(names.([]string))
 	}
 
-	return unknownString
+	return Unknown
 }
 
-func getExpr(i *GrpcAccessInfo) string {
+func (i *GrpcAccessInfo) Expression() string {
 	expr, ok := requestutil.GetExprFromRequest(i.req)
 	if ok {
 		return expr.(string)
@@ -265,10 +236,10 @@ func getExpr(i *GrpcAccessInfo) string {
 	if ok {
 		return dsl.(string)
 	}
-	return unknownString
+	return Unknown
 }
 
-func getSdkVersion(i *GrpcAccessInfo) string {
+func (i *GrpcAccessInfo) SdkVersion() string {
 	clientInfo := connection.GetManager().Get(i.ctx)
 	if clientInfo != nil {
 		return clientInfo.GetSdkType() + "-" + clientInfo.GetSdkVersion()
@@ -281,32 +252,14 @@ func getSdkVersion(i *GrpcAccessInfo) string {
 	return getSdkVersionByUserAgent(i.ctx)
 }
 
-func getSdkVersionByUserAgent(ctx context.Context) string {
-	md, ok := metadata.FromIncomingContext(ctx)
-	if !ok {
-		return unknownString
-	}
-	UserAgent, ok := md[util.HeaderUserAgent]
-	if !ok {
-		return unknownString
-	}
-
-	SdkType, ok := getSdkTypeByUserAgent(UserAgent)
-	if !ok {
-		return unknownString
-	}
-
-	return SdkType + "-" + unknownString
-}
-
-func getClusterPrefix(i *GrpcAccessInfo) string {
+func (i *GrpcAccessInfo) ClusterPrefix() string {
 	return paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
 }
 
-func getOutputFields(i *GrpcAccessInfo) string {
+func (i *GrpcAccessInfo) OutputFields() string {
 	fields, ok := requestutil.GetOutputFieldsFromRequest(i.req)
 	if ok {
 		return fmt.Sprint(fields.([]string))
 	}
-	return unknownString
+	return Unknown
 }
