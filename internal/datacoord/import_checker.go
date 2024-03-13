@@ -268,12 +268,6 @@ func (c *importChecker) checkImportingJob(job ImportJob) {
 		return
 	}
 	for _, segmentID := range unfinished {
-		err = AddImportSegment(c.cluster, c.meta, segmentID)
-		if err != nil {
-			log.Warn("add import segment failed", zap.Int64("jobID", job.GetJobID()),
-				zap.Int64("collectionID", job.GetCollectionID()), zap.Error(err))
-			return
-		}
 		c.buildIndexCh <- segmentID // accelerate index building
 		channelCP := c.meta.GetChannelCheckpoint(channels[segmentID])
 		if channelCP == nil {

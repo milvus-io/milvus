@@ -30,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -245,25 +244,6 @@ func RegroupImportFiles(job ImportJob, files []*datapb.ImportFileStats) [][]*dat
 		fileGroups = append(fileGroups, currentGroup)
 	}
 	return fileGroups
-}
-
-func AddImportSegment(cluster Cluster, meta *meta, segmentID int64) error {
-	segment := meta.GetSegment(segmentID)
-	req := &datapb.AddImportSegmentRequest{
-		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithSourceID(paramtable.GetNodeID()),
-		),
-		SegmentId:    segment.GetID(),
-		ChannelName:  segment.GetInsertChannel(),
-		CollectionId: segment.GetCollectionID(),
-		PartitionId:  segment.GetPartitionID(),
-		RowNum:       segment.GetNumOfRows(),
-		StatsLog:     segment.GetStatslogs(),
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	_, err := cluster.AddImportSegment(ctx, req)
-	return err
 }
 
 func getPendingProgress(jobID int64, imeta ImportMeta) float32 {
