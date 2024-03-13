@@ -48,7 +48,7 @@ require (
 	golang.org/x/sync v0.1.0
 	golang.org/x/sys v0.15.0
 	google.golang.org/grpc v1.54.0
-	google.golang.org/protobuf v1.31.0
+	google.golang.org/protobuf v1.33.0
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 	k8s.io/apimachinery v0.28.6
 )
