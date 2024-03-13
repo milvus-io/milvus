@@ -79,7 +79,9 @@ type RotateWriter struct {
 	file *os.File
 	mu   sync.Mutex
 
-	millCh    chan bool
+	millCh chan bool
+
+	closed    bool
 	closeCh   chan struct{}
 	closeWg   sync.WaitGroup
 	closeOnce sync.Once
@@ -119,6 +121,10 @@ func (l *RotateWriter) Write(p []byte) (n int, err error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
+	if l.closed {
+		return 0, fmt.Errorf("write to closed writer")
+	}
+
 	writeLen := int64(len(p))
 	if writeLen > l.max() {
 		return 0, fmt.Errorf(
@@ -153,6 +159,7 @@ func (l *RotateWriter) Close() error {
 		}
 
 		l.closeWg.Wait()
+		l.closed = true
 	})
 
 	return l.closeFile()

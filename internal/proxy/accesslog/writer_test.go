@@ -183,7 +183,7 @@ func TestRotateWriter_BasicError(t *testing.T) {
 func TestRotateWriter_InitError(t *testing.T) {
 	var params paramtable.ComponentParam
 	params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
-	testPath := ""
+	testPath := "/tmp/test"
 	params.Save(params.ProxyCfg.AccessLog.Enable.Key, "true")
 	params.Save(params.ProxyCfg.AccessLog.Filename.Key, "test_access")
 	params.Save(params.ProxyCfg.AccessLog.LocalPath.Key, testPath)
@@ -191,5 +191,28 @@ func TestRotateWriter_InitError(t *testing.T) {
 	params.Save(params.MinioCfg.Address.Key, "")
 	// init err with invalid minio address
 	_, err := NewRotateWriter(&params.ProxyCfg.AccessLog, &params.MinioCfg)
+	assert.Error(t, err)
+}
+
+func TestRotateWriter_Close(t *testing.T) {
+	var Params paramtable.ComponentParam
+
+	Params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+	testPath := "/tmp/accesstest"
+	Params.Save(Params.ProxyCfg.AccessLog.Enable.Key, "true")
+	Params.Save(Params.ProxyCfg.AccessLog.Filename.Key, "test_access")
+	Params.Save(Params.ProxyCfg.AccessLog.LocalPath.Key, testPath)
+	Params.Save(Params.ProxyCfg.AccessLog.CacheSize.Key, "0")
+
+	logger, err := NewRotateWriter(&Params.ProxyCfg.AccessLog, &Params.MinioCfg)
+	assert.NoError(t, err)
+	defer os.RemoveAll(logger.dir())
+
+	_, err = logger.Write([]byte("test"))
+	assert.NoError(t, err)
+
+	logger.Close()
+
+	_, err = logger.Write([]byte("test"))
 	assert.Error(t, err)
 }

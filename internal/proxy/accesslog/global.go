@@ -133,7 +133,7 @@ func InitAccessLogger(params *paramtable.ComponentParam) {
 				log.Warn("Failed to parse bool value", zap.String("v", event.Value), zap.Error(err))
 				return
 			}
-			go logger.SetEnable(value)
+			logger.SetEnable(value)
 		}))
 
 		err := logger.Init(params)
