@@ -25,6 +25,7 @@ set(SEGCORE_FILES
         SegmentSealedImpl.cpp
         FieldIndexing.cpp
         Reduce.cpp
+        StreamReduce.cpp
         metrics_c.cpp
         plan_c.cpp
         reduce_c.cpp
@@ -36,7 +37,8 @@ set(SEGCORE_FILES
         segcore_init_c.cpp
         TimestampIndex.cpp
         Utils.cpp
-        ConcurrentVector.cpp)
+        ConcurrentVector.cpp
+        ReduceUtils.cpp)
 add_library(milvus_segcore SHARED ${SEGCORE_FILES})
 
 target_link_libraries(milvus_segcore milvus_query milvus_bitset milvus_exec ${OpenMP_CXX_FLAGS} milvus-storage)

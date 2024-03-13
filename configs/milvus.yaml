@@ -359,6 +359,7 @@ queryNode:
   mmap:
     mmapEnabled: false # enable mmap global, if set true, will use mmap to load segment data
   lazyloadEnabled: false
+  useStreamComputing: false
 
   # can specify ip for example
   # ip: 127.0.0.1

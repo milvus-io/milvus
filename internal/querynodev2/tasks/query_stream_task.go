@@ -3,6 +3,7 @@ package tasks
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
@@ -85,4 +86,8 @@ func (t *QueryStreamTask) Wait() error {
 
 func (t *QueryStreamTask) NQ() int64 {
 	return 1
+}
+
+func (t *QueryStreamTask) SearchResult() *internalpb.SearchResults {
+	return nil
 }

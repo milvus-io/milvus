@@ -1,5 +1,7 @@
 package tasks
 
+import "github.com/milvus-io/milvus/internal/proto/internalpb"
+
 const (
 	schedulePolicyNameFIFO            = "fifo"
 	schedulePolicyNameUserTaskPolling = "user-task-polling"
@@ -104,4 +106,6 @@ type Task interface {
 
 	// Return the NQ of task.
 	NQ() int64
+
+	SearchResult() *internalpb.SearchResults
 }
