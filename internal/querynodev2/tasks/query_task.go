@@ -86,6 +86,10 @@ func (t *QueryTask) PreExecute() error {
 	return nil
 }
 
+func (t *QueryTask) SearchResult() *internalpb.SearchResults {
+	return nil
+}
+
 // Execute the task, only call once.
 func (t *QueryTask) Execute() error {
 	if t.scheduleSpan != nil {
