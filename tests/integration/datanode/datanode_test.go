@@ -265,21 +265,21 @@ func (s *DataNodeSuite) checkAllCollectionsReady() {
 	}
 }
 
-func (s *DataNodeSuite) checkQNRestarts(idx int) {
+func (s *DataNodeSuite) checkDnRestarts(idx int) {
 	// Stop all data nodes
 	s.Cluster.StopAllDataNodes()
 	// Add new data nodes.
-	qn1 := s.Cluster.AddDataNode()
-	qn2 := s.Cluster.AddDataNode()
+	dn1 := s.Cluster.AddDataNode()
+	dn2 := s.Cluster.AddDataNode()
 	time.Sleep(s.waitTimeInSec)
 	cn := fmt.Sprintf("new_collection_r_%d", idx)
 	s.loadCollection(cn)
 	s.search(cn)
 	// Randomly stop one data node.
 	if rand.Intn(2) == 0 {
-		qn1.Stop()
+		dn1.Stop()
 	} else {
-		qn2.Stop()
+		dn2.Stop()
 	}
 	time.Sleep(s.waitTimeInSec)
 	cn = fmt.Sprintf("new_collection_x_%d", idx)
@@ -287,7 +287,7 @@ func (s *DataNodeSuite) checkQNRestarts(idx int) {
 	s.search(cn)
 }
 
-func (s *DataNodeSuite) TestSwapQN() {
+func (s *DataNodeSuite) TestSwapDN() {
 	s.setupParam()
 	s.setupData()
 	// Test case with new data nodes added
@@ -300,7 +300,7 @@ func (s *DataNodeSuite) TestSwapQN() {
 
 	// Test case with all data nodes replaced
 	for idx := 0; idx < 5; idx++ {
-		s.checkQNRestarts(idx)
+		s.checkDnRestarts(idx)
 	}
 }
 
