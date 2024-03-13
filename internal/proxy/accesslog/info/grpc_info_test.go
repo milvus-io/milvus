@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package accesslog
+package info
 
 import (
 	"context"
@@ -79,11 +79,11 @@ func (s *GrpcAccessInfoSuite) TestErrorCode() {
 	s.info.resp = &milvuspb.QueryResults{
 		Status: merr.Status(nil),
 	}
-	result := s.info.Get("$error_code")
+	result := Get(s.info, "$error_code")
 	s.Equal(fmt.Sprint(0), result[0])
 
 	s.info.resp = merr.Status(nil)
-	result = s.info.Get("$error_code")
+	result = Get(s.info, "$error_code")
 	s.Equal(fmt.Sprint(0), result[0])
 }
 
@@ -91,27 +91,27 @@ func (s *GrpcAccessInfoSuite) TestErrorMsg() {
 	s.info.resp = &milvuspb.QueryResults{
 		Status: merr.Status(merr.ErrChannelLack),
 	}
-	result := s.info.Get("$error_msg")
+	result := Get(s.info, "$error_msg")
 	s.Equal(merr.ErrChannelLack.Error(), result[0])
 
 	s.info.resp = merr.Status(merr.ErrChannelLack)
-	result = s.info.Get("$error_msg")
+	result = Get(s.info, "$error_msg")
 	s.Equal(merr.ErrChannelLack.Error(), result[0])
 
 	s.info.err = status.Errorf(codes.Unavailable, "mock")
-	result = s.info.Get("$error_msg")
+	result = Get(s.info, "$error_msg")
 	s.Equal("rpc error: code = Unavailable desc = mock", result[0])
 }
 
 func (s *GrpcAccessInfoSuite) TestDbName() {
 	s.info.req = nil
-	result := s.info.Get("$database_name")
-	s.Equal(unknownString, result[0])
+	result := Get(s.info, "$database_name")
+	s.Equal(Unknown, result[0])
 
 	s.info.req = &milvuspb.QueryRequest{
 		DbName: "test",
 	}
-	result = s.info.Get("$database_name")
+	result = Get(s.info, "$database_name")
 	s.Equal("test", result[0])
 }
 
@@ -123,31 +123,31 @@ func (s *GrpcAccessInfoSuite) TestSdkInfo() {
 	}
 
 	s.info.ctx = ctx
-	result := s.info.Get("$sdk_version")
-	s.Equal(unknownString, result[0])
+	result := Get(s.info, "$sdk_version")
+	s.Equal(Unknown, result[0])
 
 	md := metadata.MD{}
 	ctx = metadata.NewIncomingContext(ctx, md)
 	s.info.ctx = ctx
-	result = s.info.Get("$sdk_version")
-	s.Equal(unknownString, result[0])
+	result = Get(s.info, "$sdk_version")
+	s.Equal(Unknown, result[0])
 
 	md = metadata.MD{util.HeaderUserAgent: []string{"invalid"}}
 	ctx = metadata.NewIncomingContext(ctx, md)
 	s.info.ctx = ctx
-	result = s.info.Get("$sdk_version")
-	s.Equal(unknownString, result[0])
+	result = Get(s.info, "$sdk_version")
+	s.Equal(Unknown, result[0])
 
 	md = metadata.MD{util.HeaderUserAgent: []string{"grpc-go.test"}}
 	ctx = metadata.NewIncomingContext(ctx, md)
 	s.info.ctx = ctx
-	result = s.info.Get("$sdk_version")
-	s.Equal("Golang"+"-"+unknownString, result[0])
+	result = Get(s.info, "$sdk_version")
+	s.Equal("Golang"+"-"+Unknown, result[0])
 
 	s.info.req = &milvuspb.ConnectRequest{
 		ClientInfo: clientInfo,
 	}
-	result = s.info.Get("$sdk_version")
+	result = Get(s.info, "$sdk_version")
 	s.Equal(clientInfo.SdkType+"-"+clientInfo.SdkVersion, result[0])
 
 	identifier := 11111
@@ -156,45 +156,46 @@ func (s *GrpcAccessInfoSuite) TestSdkInfo() {
 	connection.GetManager().Register(ctx, int64(identifier), clientInfo)
 
 	s.info.ctx = ctx
-	result = s.info.Get("$sdk_version")
+	result = Get(s.info, "$sdk_version")
 	s.Equal(clientInfo.SdkType+"-"+clientInfo.SdkVersion, result[0])
 }
 
 func (s *GrpcAccessInfoSuite) TestExpression() {
-	result := s.info.Get("$method_expr")
-	s.Equal(unknownString, result[0])
+	result := Get(s.info, "$method_expr")
+	s.Equal(Unknown, result[0])
 
 	testExpr := "test"
 	s.info.req = &milvuspb.QueryRequest{
 		Expr: testExpr,
 	}
-	result = s.info.Get("$method_expr")
+	result = Get(s.info, "$method_expr")
 	s.Equal(testExpr, result[0])
 
 	s.info.req = &milvuspb.SearchRequest{
 		Dsl: testExpr,
 	}
-	result = s.info.Get("$method_expr")
+	result = Get(s.info, "$method_expr")
 	s.Equal(testExpr, result[0])
 }
 
 func (s *GrpcAccessInfoSuite) TestOutputFields() {
-	result := s.info.Get("$output_fields")
-	s.Equal(unknownString, result[0])
+	result := Get(s.info, "$output_fields")
+	s.Equal(Unknown, result[0])
 
 	fields := []string{"pk"}
 	s.info.req = &milvuspb.QueryRequest{
 		OutputFields: fields,
 	}
-	result = s.info.Get("$output_fields")
+	result = Get(s.info, "$output_fields")
 	s.Equal(fmt.Sprint(fields), result[0])
 }
 
 func (s *GrpcAccessInfoSuite) TestClusterPrefix() {
 	cluster := "instance-test"
 	paramtable.Init()
-	paramtable.Get().Save(paramtable.Get().CommonCfg.ClusterPrefix.Key, cluster)
-	result := s.info.Get("$cluster_prefix")
+	ClusterPrefix.Store(cluster)
+
+	result := Get(s.info, "$cluster_prefix")
 	s.Equal(cluster, result[0])
 }
 
