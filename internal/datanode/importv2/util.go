@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -29,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -199,6 +201,23 @@ func GetInsertDataRowCount(data *storage.InsertData, schema *schemapb.Collection
 		}
 	}
 	return 0
+}
+
+func GetFileSize(file *internalpb.ImportFile, cm storage.ChunkManager) (int64, error) {
+	fn := func(path string) (int64, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		return cm.Size(ctx, path)
+	}
+	var totalSize int64 = 0
+	for _, path := range file.GetPaths() {
+		size, err := fn(path)
+		if err != nil {
+			return 0, err
+		}
+		totalSize += size
+	}
+	return totalSize, nil
 }
 
 func LogStats(manager TaskManager) {

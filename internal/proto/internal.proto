@@ -280,11 +280,12 @@ message ImportFile {
 message ImportRequestInternal {
   int64 dbID = 1;
   int64 collectionID = 2;
-  repeated int64 partitionIDs = 3;
-  repeated string channel_names = 4;
-  schema.CollectionSchema schema = 5;
-  repeated ImportFile files = 6;
-  repeated common.KeyValuePair options = 7;
+  string collection_name = 3;
+  repeated int64 partitionIDs = 4;
+  repeated string channel_names = 5;
+  schema.CollectionSchema schema = 6;
+  repeated ImportFile files = 7;
+  repeated common.KeyValuePair options = 8;
 }
 
 message ImportRequest {
@@ -305,11 +306,22 @@ message GetImportProgressRequest {
   string jobID = 2;
 }
 
+message ImportTaskProgress {
+  string file_name = 1;
+  int64 file_size = 2;
+  string reason = 3;
+  int64 progress = 4;
+  string complete_time = 5;
+}
+
 message GetImportProgressResponse {
   common.Status status = 1;
   ImportJobState state = 2;
   string reason = 3;
   int64 progress = 4;
+  string collection_name = 5;
+  string complete_time = 6;
+  repeated ImportTaskProgress task_progresses = 7;
 }
 
 message ListImportsRequestInternal {
@@ -328,4 +340,5 @@ message ListImportsResponse {
   repeated ImportJobState states = 3;
   repeated string reasons = 4;
   repeated int64 progresses = 5;
+  repeated string collection_names = 6;
 }

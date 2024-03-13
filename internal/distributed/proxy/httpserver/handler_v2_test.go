@@ -898,8 +898,9 @@ func TestMethodPost(t *testing.T) {
 			internalpb.ImportJobState_Failed,
 			internalpb.ImportJobState_Completed,
 		},
-		Reasons:    []string{"", "", "mock reason", ""},
-		Progresses: []int64{0, 30, 0, 100},
+		Reasons:         []string{"", "", "mock reason", ""},
+		Progresses:      []int64{0, 30, 0, 100},
+		CollectionNames: []string{"AAA", "BBB", "CCC", "DDD"},
 	}, nil).Once()
 	mp.EXPECT().GetImportProgress(mock.Anything, mock.Anything).Return(&internalpb.GetImportProgressResponse{
 		Status:   &StatusSuccess,
@@ -985,7 +986,7 @@ func TestMethodPost(t *testing.T) {
 				`"userName": "` + util.UserRoot + `", "password": "Milvus", "newPassword": "milvus", "roleName": "` + util.RoleAdmin + `",` +
 				`"roleName": "` + util.RoleAdmin + `", "objectType": "Global", "objectName": "*", "privilege": "*",` +
 				`"aliasName": "` + DefaultAliasName + `",` +
-				`"jobID": "1234567890",` +
+				`"jobId": "1234567890",` +
 				`"files": [["book.json"]]` +
 				`}`))
 			req := httptest.NewRequest(http.MethodPost, testcase.path, bodyReader)

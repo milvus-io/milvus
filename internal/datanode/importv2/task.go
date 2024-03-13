@@ -92,7 +92,9 @@ func UpdateReason(reason string) UpdateAction {
 func UpdateFileStat(idx int, fileStat *datapb.ImportFileStats) UpdateAction {
 	return func(task Task) {
 		if it, ok := task.(*PreImportTask); ok {
+			it.PreImportTask.FileStats[idx].FileSize = fileStat.GetFileSize()
 			it.PreImportTask.FileStats[idx].TotalRows = fileStat.GetTotalRows()
+			it.PreImportTask.FileStats[idx].TotalMemorySize = fileStat.GetTotalMemorySize()
 			it.PreImportTask.FileStats[idx].HashedStats = fileStat.GetHashedStats()
 		}
 	}
