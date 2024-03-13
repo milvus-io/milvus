@@ -859,7 +859,7 @@ message ImportJob {
   int64 jobID = 1;
   int64 dbID = 2;
   int64 collectionID = 3;
-  string collectionName = 4;
+  string collection_name = 4;
   repeated int64 partitionIDs = 5;
   repeated string vchannels = 6;
   schema.CollectionSchema schema = 7;

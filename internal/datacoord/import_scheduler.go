@@ -303,7 +303,7 @@ func (s *importScheduler) processInProgressImport(task ImportTask) {
 				return
 			}
 		}
-		completeTime := time.Now().String()
+		completeTime := time.Now().Format("2006-01-02T15:04:05Z07:00")
 		err = s.imeta.UpdateTask(task.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Completed), UpdateCompleteTime(completeTime))
 		if err != nil {
 			log.Warn("update import task failed", WrapTaskLog(task, zap.Error(err))...)

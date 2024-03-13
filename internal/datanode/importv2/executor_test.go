@@ -260,6 +260,7 @@ func (s *ExecutorSuite) TestExecutor_Start_Preimport() {
 
 	cm := mocks.NewChunkManager(s.T())
 	ioReader := strings.NewReader(string(bytes))
+	cm.EXPECT().Size(mock.Anything, mock.Anything).Return(1024, nil)
 	cm.EXPECT().Reader(mock.Anything, mock.Anything).Return(&mockReader{Reader: ioReader}, nil)
 	s.executor.cm = cm
 
@@ -313,6 +314,7 @@ func (s *ExecutorSuite) TestExecutor_Start_Preimport_Failed() {
 		io.Seeker
 	}
 	ioReader := strings.NewReader(string(bytes))
+	cm.EXPECT().Size(mock.Anything, mock.Anything).Return(1024, nil)
 	cm.EXPECT().Reader(mock.Anything, mock.Anything).Return(&mockReader{Reader: ioReader}, nil)
 	s.executor.cm = cm
 
@@ -461,6 +463,11 @@ func (s *ExecutorSuite) TestExecutor_ReadFileStat() {
 	importFile := &internalpb.ImportFile{
 		Paths: []string{"dummy.json"},
 	}
+
+	cm := mocks.NewChunkManager(s.T())
+	cm.EXPECT().Size(mock.Anything, mock.Anything).Return(1024, nil)
+	s.executor.cm = cm
+
 	var once sync.Once
 	data := createInsertData(s.T(), s.schema, s.numRows)
 	s.reader = importutilv2.NewMockReader(s.T())
@@ -485,7 +492,7 @@ func (s *ExecutorSuite) TestExecutor_ReadFileStat() {
 	}
 	preimportTask := NewPreImportTask(preimportReq)
 	s.manager.Add(preimportTask)
-	err := s.executor.readFileStat(s.reader, preimportTask, 0)
+	err := s.executor.readFileStat(s.reader, preimportTask, 0, importFile)
 	s.NoError(err)
 }
 

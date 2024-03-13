@@ -1726,7 +1726,7 @@ func (h *HandlersV2) getImportJobProcess(ctx context.Context, c *gin.Context, an
 		for _, taskProgress := range response.GetTaskProgresses() {
 			detail := make(map[string]interface{})
 			detail["fileName"] = taskProgress.GetFileName()
-			detail["fileSize"] = taskProgress.GetMemorySize()
+			detail["fileSize"] = taskProgress.GetFileSize()
 			detail["progress"] = taskProgress.GetProgress()
 			detail["completeTime"] = taskProgress.GetCompleteTime()
 			reason = taskProgress.GetReason()

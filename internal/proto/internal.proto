@@ -280,7 +280,7 @@ message ImportFile {
 message ImportRequestInternal {
   int64 dbID = 1;
   int64 collectionID = 2;
-  string collectionName = 3;
+  string collection_name = 3;
   repeated int64 partitionIDs = 4;
   repeated string channel_names = 5;
   schema.CollectionSchema schema = 6;
@@ -308,7 +308,7 @@ message GetImportProgressRequest {
 
 message ImportTaskProgress {
   string file_name = 1;
-  int64 memory_size = 2;
+  int64 file_size = 2;
   string reason = 3;
   int64 progress = 4;
   string complete_time = 5;

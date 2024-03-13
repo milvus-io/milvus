@@ -353,11 +353,14 @@ func GetTaskProgresses(jobID int64, imeta ImportMeta, meta *meta) []*internalpb.
 			return file.GetTotalRows()
 		})
 		importedRows := meta.GetSegmentsTotalCurrentRows(task.(*importTask).GetSegmentIDs())
-		progress := int64(float32(importedRows) / float32(totalRows) * 100)
+		progress := int64(100)
+		if totalRows != 0 {
+			progress = int64(float32(importedRows) / float32(totalRows) * 100)
+		}
 		for _, fileStat := range task.GetFileStats() {
 			progresses = append(progresses, &internalpb.ImportTaskProgress{
 				FileName:     fileStat.GetImportFile().String(),
-				MemorySize:   fileStat.GetTotalMemorySize(),
+				FileSize:     fileStat.GetFileSize(),
 				Reason:       task.GetReason(),
 				Progress:     progress,
 				CompleteTime: task.(*importTask).GetCompleteTime(),
