@@ -167,20 +167,19 @@ class TestHighLevelApi(TestcaseBase):
         client = self._connect(enable_high_level_api=True)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
-        client_w.create_collection(client, collection_name, default_dim)
+        client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         collections = client_w.list_collections(client)[0]
         assert collection_name in collections
         client_w.describe_collection(client, collection_name,
                                      check_task=CheckTasks.check_describe_collection_property,
                                      check_items={"collection_name": collection_name,
-                                                  "dim": default_dim})
+                                                  "dim": default_dim, "consistency_level": 0})
         # 2. insert
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
         client_w.insert(client, collection_name, rows)
-        client_w.flush(client, collection_name)
-        assert client_w.num_entities(client, collection_name)[0] == default_nb
+
         # 3. search
         vectors_to_search = rng.random((1, default_dim))
         insert_ids = [i for i in range(default_nb)]
@@ -208,7 +207,7 @@ class TestHighLevelApi(TestcaseBase):
         client = self._connect(enable_high_level_api=True)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
-        client_w.create_collection(client, collection_name, default_dim)
+        client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         collections = client_w.list_collections(client)[0]
         assert collection_name in collections
         # 2. insert
@@ -221,8 +220,6 @@ class TestHighLevelApi(TestcaseBase):
             default_string_array_field_name: [str(i), str(i + 1), str(i + 2)]
         } for i in range(default_nb)]
         client_w.insert(client, collection_name, rows)
-        client_w.flush(client, collection_name)
-        assert client_w.num_entities(client, collection_name)[0] == default_nb
         # 3. search
         vectors_to_search = rng.random((1, default_dim))
         insert_ids = [i for i in range(default_nb)]
@@ -244,7 +241,8 @@ class TestHighLevelApi(TestcaseBase):
         client = self._connect(enable_high_level_api=True)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
-        client_w.create_collection(client, collection_name, default_dim, id_type="string", max_length=ct.default_length)
+        client_w.create_collection(client, collection_name, default_dim, id_type="string",
+                                   max_length=ct.default_length, consistency_level="Strong")
         client_w.describe_collection(client, collection_name,
                                      check_task=CheckTasks.check_describe_collection_property,
                                      check_items={"collection_name": collection_name,
@@ -255,8 +253,6 @@ class TestHighLevelApi(TestcaseBase):
         rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
         client_w.insert(client, collection_name, rows)
-        client_w.flush(client, collection_name)
-        assert client_w.num_entities(client, collection_name)[0] == default_nb
         # 3. search
         vectors_to_search = rng.random((1, default_dim))
         client_w.search(client, collection_name, vectors_to_search,
@@ -282,7 +278,8 @@ class TestHighLevelApi(TestcaseBase):
         client = self._connect(enable_high_level_api=True)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
-        client_w.create_collection(client, collection_name, default_dim, metric_type=metric_type, auto_id=auto_id)
+        client_w.create_collection(client, collection_name, default_dim, metric_type=metric_type,
+                                   auto_id=auto_id, consistency_level="Strong")
         # 2. insert
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
@@ -291,8 +288,6 @@ class TestHighLevelApi(TestcaseBase):
             for row in rows:
                 row.pop(default_primary_key_field_name)
         client_w.insert(client, collection_name, rows)
-        client_w.flush(client, collection_name)
-        assert client_w.num_entities(client, collection_name)[0] == default_nb
         # 3. search
         vectors_to_search = rng.random((1, default_dim))
         search_params = {"metric_type": metric_type}
@@ -321,18 +316,16 @@ class TestHighLevelApi(TestcaseBase):
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        pks = client_w.insert(client, collection_name, rows)[0]
-        client_w.flush(client, collection_name)
-        assert client_w.num_entities(client, collection_name)[0] == default_nb
+        client_w.insert(client, collection_name, rows)[0]
+        insert_ids = [i for i in range(default_nb)]
         # 3. get first primary key
-        first_pk_data = client_w.get(client, collection_name, pks[0:1])
+        first_pk_data = client_w.get(client, collection_name, insert_ids[0:1])
         # 4. delete
         delete_num = 3
-        client_w.delete(client, collection_name, pks[0:delete_num])
+        client_w.delete(client, collection_name, insert_ids[0:delete_num])
         # 5. search
         vectors_to_search = rng.random((1, default_dim))
-        insert_ids = [i for i in range(default_nb)]
-        for insert_id in pks[0:delete_num]:
+        for insert_id in insert_ids[0:delete_num]:
             if insert_id in insert_ids:
                 insert_ids.remove(insert_id)
         limit = default_nb - delete_num
