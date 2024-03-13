@@ -249,7 +249,7 @@ func (suite *ServiceSuite) TestWatchDmChannelsInt64() {
 	ctx := context.Background()
 
 	// data
-	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64)
+	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
 	deltaLogs, err := segments.SaveDeltaLog(suite.collectionID,
 		suite.partitionIDs[0],
 		suite.flushedSegmentIDs[0],
@@ -317,7 +317,7 @@ func (suite *ServiceSuite) TestWatchDmChannelsVarchar() {
 	ctx := context.Background()
 
 	// data
-	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_VarChar)
+	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_VarChar, false)
 
 	req := &querypb.WatchDmChannelsRequest{
 		Base: &commonpb.MsgBase{
@@ -369,7 +369,7 @@ func (suite *ServiceSuite) TestWatchDmChannels_Failed() {
 	ctx := context.Background()
 
 	// data
-	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64)
+	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
 
 	indexInfos := segments.GenTestIndexInfoList(suite.collectionID, schema)
 
@@ -566,7 +566,7 @@ func (suite *ServiceSuite) TestLoadSegments_Int64() {
 	ctx := context.Background()
 	suite.TestWatchDmChannelsInt64()
 	// data
-	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64)
+	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
 	indexInfos := segments.GenTestIndexInfoList(suite.collectionID, schema)
 	infos := suite.genSegmentLoadInfos(schema, indexInfos)
 	for _, info := range infos {
@@ -595,7 +595,7 @@ func (suite *ServiceSuite) TestLoadSegments_VarChar() {
 	ctx := context.Background()
 	suite.TestWatchDmChannelsVarchar()
 	// data
-	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_VarChar)
+	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_VarChar, false)
 	loadMeta := &querypb.LoadMetaInfo{
 		LoadType:     querypb.LoadType_LoadCollection,
 		CollectionID: suite.collectionID,
@@ -632,7 +632,7 @@ func (suite *ServiceSuite) TestLoadDeltaInt64() {
 	ctx := context.Background()
 	suite.TestLoadSegments_Int64()
 	// data
-	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64)
+	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
 	req := &querypb.LoadSegmentsRequest{
 		Base: &commonpb.MsgBase{
 			MsgID:    rand.Int63(),
@@ -657,7 +657,7 @@ func (suite *ServiceSuite) TestLoadDeltaVarchar() {
 	ctx := context.Background()
 	suite.TestLoadSegments_VarChar()
 	// data
-	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64)
+	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
 	req := &querypb.LoadSegmentsRequest{
 		Base: &commonpb.MsgBase{
 			MsgID:    rand.Int63(),
@@ -682,7 +682,7 @@ func (suite *ServiceSuite) TestLoadIndex_Success() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64)
+	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
 
 	indexInfos := segments.GenTestIndexInfoList(suite.collectionID, schema)
 	infos := suite.genSegmentLoadInfos(schema, indexInfos)
@@ -753,7 +753,7 @@ func (suite *ServiceSuite) TestLoadIndex_Failed() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64)
+	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
 
 	suite.Run("load_non_exist_segment", func() {
 		indexInfos := segments.GenTestIndexInfoList(suite.collectionID, schema)
@@ -825,7 +825,7 @@ func (suite *ServiceSuite) TestLoadIndex_Failed() {
 func (suite *ServiceSuite) TestLoadSegments_Failed() {
 	ctx := context.Background()
 	// data
-	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64)
+	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
 	req := &querypb.LoadSegmentsRequest{
 		Base: &commonpb.MsgBase{
 			MsgID:    rand.Int63(),
@@ -870,7 +870,7 @@ func (suite *ServiceSuite) TestLoadSegments_Transfer() {
 		delegator.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).
 			Return(nil)
 		// data
-		schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64)
+		schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
 		req := &querypb.LoadSegmentsRequest{
 			Base: &commonpb.MsgBase{
 				MsgID:    rand.Int63(),
@@ -892,7 +892,7 @@ func (suite *ServiceSuite) TestLoadSegments_Transfer() {
 
 	suite.Run("delegator_not_found", func() {
 		// data
-		schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64)
+		schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
 		req := &querypb.LoadSegmentsRequest{
 			Base: &commonpb.MsgBase{
 				MsgID:    rand.Int63(),
@@ -919,7 +919,7 @@ func (suite *ServiceSuite) TestLoadSegments_Transfer() {
 		delegator.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).
 			Return(errors.New("mocked error"))
 		// data
-		schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64)
+		schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
 		req := &querypb.LoadSegmentsRequest{
 			Base: &commonpb.MsgBase{
 				MsgID:    rand.Int63(),
@@ -1207,7 +1207,7 @@ func (suite *ServiceSuite) TestSearch_Failed() {
 	ctx := context.Background()
 
 	// data
-	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64)
+	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
 	creq, err := suite.genCSearchRequest(10, schemapb.DataType_FloatVector, 107, "invalidMetricType")
 	req := &querypb.SearchRequest{
 		Req:             creq,
@@ -1410,7 +1410,7 @@ func (suite *ServiceSuite) TestQuery_Normal() {
 	suite.TestLoadSegments_Int64()
 
 	// data
-	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64)
+	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
 	creq, err := suite.genCQueryRequest(10, IndexFaissIDMap, schema)
 	suite.NoError(err)
 	req := &querypb.QueryRequest{
@@ -1429,7 +1429,7 @@ func (suite *ServiceSuite) TestQuery_Failed() {
 	defer cancel()
 
 	// data
-	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64)
+	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
 	creq, err := suite.genCQueryRequest(10, IndexFaissIDMap, schema)
 	suite.NoError(err)
 	req := &querypb.QueryRequest{
@@ -1491,7 +1491,7 @@ func (suite *ServiceSuite) TestQueryStream_Normal() {
 	suite.TestLoadSegments_Int64()
 
 	// data
-	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64)
+	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
 	creq, err := suite.genCQueryRequest(10, IndexFaissIDMap, schema)
 	suite.NoError(err)
 	req := &querypb.QueryRequest{
@@ -1526,7 +1526,7 @@ func (suite *ServiceSuite) TestQueryStream_Failed() {
 	defer cancel()
 
 	// data
-	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64)
+	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
 	creq, err := suite.genCQueryRequest(10, IndexFaissIDMap, schema)
 	suite.NoError(err)
 	req := &querypb.QueryRequest{
@@ -1604,7 +1604,7 @@ func (suite *ServiceSuite) TestQuerySegments_Normal() {
 	suite.TestLoadSegments_Int64()
 
 	// data
-	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64)
+	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
 	creq, err := suite.genCQueryRequest(10, IndexFaissIDMap, schema)
 	suite.NoError(err)
 	req := &querypb.QueryRequest{
@@ -1626,7 +1626,7 @@ func (suite *ServiceSuite) TestQueryStreamSegments_Normal() {
 	suite.TestLoadSegments_Int64()
 
 	// data
-	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64)
+	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
 	creq, err := suite.genCQueryRequest(10, IndexFaissIDMap, schema)
 	suite.NoError(err)
 	req := &querypb.QueryRequest{

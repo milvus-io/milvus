@@ -331,7 +331,7 @@ func TestReadBinary(t *testing.T) {
 	}
 }
 
-func genAllFieldsSchema(fVecDim, bVecDim, f16VecDim, bf16VecDim int) (schema *schemapb.CollectionSchema, pkFieldID UniqueID, fieldIDs []UniqueID) {
+func genAllFieldsSchema(fVecDim, bVecDim, f16VecDim, bf16VecDim int, withSparse bool) (schema *schemapb.CollectionSchema, pkFieldID UniqueID, fieldIDs []UniqueID) {
 	schema = &schemapb.CollectionSchema{
 		Name:        "all_fields_schema",
 		Description: "all_fields_schema",
@@ -402,6 +402,11 @@ func genAllFieldsSchema(fVecDim, bVecDim, f16VecDim, bf16VecDim int) (schema *sc
 				DataType: schemapb.DataType_JSON,
 			},
 		},
+	}
+	if withSparse {
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			DataType: schemapb.DataType_SparseFloatVector,
+		})
 	}
 	fieldIDs = make([]UniqueID, 0)
 	for idx := range schema.Fields {
@@ -531,7 +536,7 @@ func generateInt32ArrayList(numRows int) []*schemapb.ScalarField {
 }
 
 func genRowWithAllFields(fVecDim, bVecDim, f16VecDim, bf16VecDim int) (blob *commonpb.Blob, pk int64, row []interface{}) {
-	schema, _, _ := genAllFieldsSchema(fVecDim, bVecDim, f16VecDim, bf16VecDim)
+	schema, _, _ := genAllFieldsSchema(fVecDim, bVecDim, f16VecDim, bf16VecDim, true)
 	ret := &commonpb.Blob{
 		Value: nil,
 	}
@@ -918,7 +923,7 @@ func genColumnBasedInsertMsg(schema *schemapb.CollectionSchema, numRows, fVecDim
 			}
 			msg.FieldsData = append(msg.FieldsData, f)
 			for nrows := 0; nrows < numRows; nrows++ {
-				columns[idx] = append(columns[idx], data.Contents[idx])
+				columns[idx] = append(columns[idx], data.Contents[nrows])
 			}
 
 		case schemapb.DataType_Array:
@@ -971,7 +976,7 @@ func genColumnBasedInsertMsg(schema *schemapb.CollectionSchema, numRows, fVecDim
 
 func TestRowBasedInsertMsgToInsertData(t *testing.T) {
 	numRows, fVecDim, bVecDim, f16VecDim, bf16VecDim := 10, 8, 8, 8, 8
-	schema, _, fieldIDs := genAllFieldsSchema(fVecDim, bVecDim, f16VecDim, bf16VecDim)
+	schema, _, fieldIDs := genAllFieldsSchema(fVecDim, bVecDim, f16VecDim, bf16VecDim, false)
 	fieldIDs = fieldIDs[:len(fieldIDs)-2]
 	msg, _, columns := genRowBasedInsertMsg(numRows, fVecDim, bVecDim, f16VecDim, bf16VecDim)
 
@@ -1076,7 +1081,7 @@ func TestRowBasedInsertMsgToInsertBFloat16VectorDataError(t *testing.T) {
 
 func TestColumnBasedInsertMsgToInsertData(t *testing.T) {
 	numRows, fVecDim, bVecDim, f16VecDim, bf16VecDim := 2, 2, 8, 2, 2
-	schema, _, fieldIDs := genAllFieldsSchema(fVecDim, bVecDim, f16VecDim, bf16VecDim)
+	schema, _, fieldIDs := genAllFieldsSchema(fVecDim, bVecDim, f16VecDim, bf16VecDim, true)
 	msg, _, columns := genColumnBasedInsertMsg(schema, numRows, fVecDim, bVecDim, f16VecDim, bf16VecDim)
 
 	idata, err := ColumnBasedInsertMsgToInsertData(msg, schema)
@@ -1182,7 +1187,7 @@ func TestColumnBasedInsertMsgToInsertBFloat16VectorDataError(t *testing.T) {
 
 func TestInsertMsgToInsertData(t *testing.T) {
 	numRows, fVecDim, bVecDim, f16VecDim, bf16VecDim := 10, 8, 8, 8, 8
-	schema, _, fieldIDs := genAllFieldsSchema(fVecDim, bVecDim, f16VecDim, bf16VecDim)
+	schema, _, fieldIDs := genAllFieldsSchema(fVecDim, bVecDim, f16VecDim, bf16VecDim, false)
 	fieldIDs = fieldIDs[:len(fieldIDs)-2]
 	msg, _, columns := genRowBasedInsertMsg(numRows, fVecDim, bVecDim, f16VecDim, bf16VecDim)
 
@@ -1201,7 +1206,7 @@ func TestInsertMsgToInsertData(t *testing.T) {
 
 func TestInsertMsgToInsertData2(t *testing.T) {
 	numRows, fVecDim, bVecDim, f16VecDim, bf16VecDim := 2, 2, 8, 2, 2
-	schema, _, fieldIDs := genAllFieldsSchema(fVecDim, bVecDim, f16VecDim, bf16VecDim)
+	schema, _, fieldIDs := genAllFieldsSchema(fVecDim, bVecDim, f16VecDim, bf16VecDim, true)
 	msg, _, columns := genColumnBasedInsertMsg(schema, numRows, fVecDim, bVecDim, f16VecDim, bf16VecDim)
 
 	idata, err := InsertMsgToInsertData(msg, schema)
