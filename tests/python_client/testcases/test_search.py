@@ -5121,7 +5121,9 @@ class TestSearchBase(TestcaseBase):
         output_fields = [default_string_field_name]
         collection_w.search(binary_vectors[:default_nq], "binary_vector", search_params,
                             default_limit, default_search_string_exp, output_fields=output_fields,
-                            check_task=CheckTasks.check_search_results)
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": nq,
+                                         "limit": ct.default_top_k})
 
 
 class TestSearchDSL(TestcaseBase):

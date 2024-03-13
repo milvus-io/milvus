@@ -1147,6 +1147,50 @@ class TestNewIndexBase(TestcaseBase):
                             check_items={"nq": default_nq,
                                          "limit": default_limit})
 
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_rebuild_mmap_index(self):
+        """
+        target: reconstructing an index after an alter index
+        method: reconstructing an index after an alter index
+        expected: build indexes normally , index contains mmap information
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        collection_w, _ = self.collection_wrap.init_collection(c_name, schema=default_schema)
+        collection_w.create_index(ct.default_float_vec_field_name, default_index_params,
+                                  index_name=ct.default_index_name)
+        collection_w.set_properties({'mmap.enabled': True})
+        pro = collection_w.describe().get("properties")
+        assert pro["mmap.enabled"] == 'True'
+        collection_w.alter_index(ct.default_index_name, {'mmap.enabled': True})
+        assert collection_w.index().params["mmap.enabled"] == 'True'
+        collection_w.insert(cf.gen_default_list_data())
+        collection_w.flush()
+
+        # check if mmap works after rebuild index
+        collection_w.create_index(ct.default_float_vec_field_name, default_index_params,
+                                  index_name=ct.default_index_name)
+        assert collection_w.index().params["mmap.enabled"] == 'True'
+
+        collection_w.load()
+        collection_w.release()
+
+        # check if mmap works after reloading and rebuilding index.
+        collection_w.create_index(ct.default_float_vec_field_name, default_index_params,
+                                  index_name=ct.default_index_name)
+        assert collection_w.index().params["mmap.enabled"] == 'True'
+        pro = collection_w.describe().get("properties")
+        assert pro["mmap.enabled"] == 'True'
+
+        collection_w.load()
+        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, default_limit,
+                            default_search_exp,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "limit": default_limit})
+
 
 @pytest.mark.tags(CaseLabel.GPU)
 class TestNewIndexBinary(TestcaseBase):
@@ -1572,6 +1616,39 @@ class TestIndexInvalid(TestcaseBase):
                                      check_items={ct.err_code: 65535,
                                                   ct.err_msg: f"index type {scalar_index[i]} does not support mmap"})
             collection_w.drop_index(index_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_alter_index_invalid(self):
+        """
+        target: the alter index of the error parameter
+        method: the alter index of the error parameter
+        expected: raise exception
+        """
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(c_name, schema=default_schema)
+        collection_w.insert(cf.gen_default_list_data())
+        collection_w.create_index(ct.default_float_vec_field_name, default_index_params,
+                                  index_name=ct.default_index_name)
+        collection_w.alter_index(ct.default_index_name, {'mmap.enabled': "error_value"},
+                                 check_task=CheckTasks.err_res,
+                                 check_items={ct.err_code: 65535,
+                                              ct.err_msg: f"invalid mmap.enabled value"})
+        collection_w.alter_index(ct.default_index_name, {"error_param_key": 123},
+                                 check_task=CheckTasks.err_res,
+                                 check_items={ct.err_code: 1100,
+                                              ct.err_msg: f"error_param is not configable index param"})
+        collection_w.alter_index(ct.default_index_name, ["error_param_type"],
+                                 check_task=CheckTasks.err_res,
+                                 check_items={ct.err_code: 1,
+                                              ct.err_msg: f"Unexpected error"})
+        collection_w.alter_index(ct.default_index_name, None,
+                                 check_task=CheckTasks.err_res,
+                                 check_items={ct.err_code: 1,
+                                              ct.err_msg: f"extra_params should not be None"})
+        collection_w.alter_index(ct.default_index_name, 1000,
+                                 check_task=CheckTasks.err_res,
+                                 check_items={ct.err_code: 1,
+                                              ct.err_msg: f"<'int' object has no attribute 'items'"})
 
 
 @pytest.mark.tags(CaseLabel.GPU)
