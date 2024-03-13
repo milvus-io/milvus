@@ -340,7 +340,6 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                                     "[expected=COSINE][actual=L2]"})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip("issue #29020")
     @pytest.mark.parametrize("index, params",
                              zip(ct.all_index_types[:7],
                                  ct.default_index_params[:7]))
@@ -10391,7 +10390,6 @@ class TestSearchGroupBy(TestcaseBase):
         pass
 
 
-@pytest.mark.skip(reason="debug")
 class TestCollectionHybridSearchValid(TestcaseBase):
     """ Test case of search interface """
 
