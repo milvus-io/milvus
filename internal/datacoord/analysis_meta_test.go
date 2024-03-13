@@ -21,17 +21,13 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
-
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/internal/metastore/model"
-
-	"github.com/stretchr/testify/mock"
-
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
-
-	"github.com/stretchr/testify/suite"
+	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 )
 
 type AnalysisMetaSuite struct {
