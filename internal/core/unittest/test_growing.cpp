@@ -97,9 +97,50 @@ TEST(Growing, RealCount) {
     ASSERT_EQ(0, segment->get_real_count());
 }
 
-TEST(Growing, FillData) {
+class GrowingTest
+    : public ::testing::TestWithParam<
+          std::tuple</*index type*/ std::string, knowhere::MetricType>> {
+ public:
+    void
+    SetUp() override {
+        auto index_type = std::get<0>(GetParam());
+        auto metric_type = std::get<1>(GetParam());
+        if (index_type == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT ||
+            index_type == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC) {
+            data_type = DataType::VECTOR_FLOAT;
+        } else if (index_type ==
+                       knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX ||
+                   index_type == knowhere::IndexEnum::INDEX_SPARSE_WAND) {
+            data_type = DataType::VECTOR_SPARSE_FLOAT;
+        } else {
+            ASSERT_TRUE(false);
+        }
+    }
+    knowhere::MetricType metric_type;
+    std::string index_type;
+    DataType data_type;
+};
+
+INSTANTIATE_TEST_SUITE_P(
+    FloatGrowingTest,
+    GrowingTest,
+    ::testing::Combine(
+        ::testing::Values(knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+                          knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC),
+        ::testing::Values(knowhere::metric::L2,
+                          knowhere::metric::IP,
+                          knowhere::metric::COSINE)));
+
+INSTANTIATE_TEST_SUITE_P(
+    SparseFloatGrowingTest,
+    GrowingTest,
+    ::testing::Combine(
+        ::testing::Values(knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX,
+                          knowhere::IndexEnum::INDEX_SPARSE_WAND),
+        ::testing::Values(knowhere::metric::IP)));
+
+TEST_P(GrowingTest, FillData) {
     auto schema = std::make_shared<Schema>();
-    auto metric_type = knowhere::metric::L2;
     auto bool_field = schema->AddDebugField("bool", DataType::BOOL);
     auto int8_field = schema->AddDebugField("int8", DataType::INT8);
     auto int16_field = schema->AddDebugField("int16", DataType::INT16);
@@ -121,12 +162,11 @@ TEST(Growing, FillData) {
         "double_array", DataType::ARRAY, DataType::DOUBLE);
     auto float_array_field =
         schema->AddDebugField("float_array", DataType::ARRAY, DataType::FLOAT);
-    auto vec = schema->AddDebugField(
-        "embeddings", DataType::VECTOR_FLOAT, 128, metric_type);
+    auto vec = schema->AddDebugField("embeddings", data_type, 128, metric_type);
     schema->set_primary_field_id(int64_field);
 
     std::map<std::string, std::string> index_params = {
-        {"index_type", "IVF_FLAT"},
+        {"index_type", index_type},
         {"metric_type", metric_type},
         {"nlist", "128"}};
     std::map<std::string, std::string> type_params = {{"dim", "128"}};
@@ -146,25 +186,6 @@ TEST(Growing, FillData) {
     int64_t dim = 128;
     for (int64_t i = 0; i < n_batch; i++) {
         auto dataset = DataGen(schema, per_batch);
-        auto bool_values = dataset.get_col<bool>(bool_field);
-        auto int8_values = dataset.get_col<int8_t>(int8_field);
-        auto int16_values = dataset.get_col<int16_t>(int16_field);
-        auto int32_values = dataset.get_col<int32_t>(int32_field);
-        auto int64_values = dataset.get_col<int64_t>(int64_field);
-        auto float_values = dataset.get_col<float>(float_field);
-        auto double_values = dataset.get_col<double>(double_field);
-        auto varchar_values = dataset.get_col<std::string>(varchar_field);
-        auto json_values = dataset.get_col<std::string>(json_field);
-        auto int_array_values = dataset.get_col<ScalarArray>(int_array_field);
-        auto long_array_values = dataset.get_col<ScalarArray>(long_array_field);
-        auto bool_array_values = dataset.get_col<ScalarArray>(bool_array_field);
-        auto string_array_values =
-            dataset.get_col<ScalarArray>(string_array_field);
-        auto double_array_values =
-            dataset.get_col<ScalarArray>(double_array_field);
-        auto float_array_values =
-            dataset.get_col<ScalarArray>(float_array_field);
-        auto vector_values = dataset.get_col<float>(vec);
 
         auto offset = segment->PreInsert(per_batch);
         segment->Insert(offset,
@@ -220,8 +241,16 @@ TEST(Growing, FillData) {
         EXPECT_EQ(varchar_result->scalars().string_data().data_size(),
                   num_inserted);
         EXPECT_EQ(json_result->scalars().json_data().data_size(), num_inserted);
-        EXPECT_EQ(vec_result->vectors().float_vector().data_size(),
-                  num_inserted * dim);
+        if (data_type == DataType::VECTOR_FLOAT) {
+            EXPECT_EQ(vec_result->vectors().float_vector().data_size(),
+                      num_inserted * dim);
+        } else if (data_type == DataType::VECTOR_SPARSE_FLOAT) {
+            EXPECT_EQ(
+                vec_result->vectors().sparse_float_vector().contents_size(),
+                num_inserted);
+        } else {
+            ASSERT_TRUE(false);
+        }
         EXPECT_EQ(int_array_result->scalars().array_data().data_size(),
                   num_inserted);
         EXPECT_EQ(long_array_result->scalars().array_data().data_size(),

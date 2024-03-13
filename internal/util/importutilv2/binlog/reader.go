@@ -48,6 +48,7 @@ func NewReader(ctx context.Context,
 	tsStart,
 	tsEnd uint64,
 ) (*reader, error) {
+	schema = typeutil.AppendSystemFields(schema)
 	r := &reader{
 		ctx:    ctx,
 		cm:     cm,

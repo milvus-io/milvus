@@ -166,12 +166,6 @@ TEST_P(IndexWrapperTest, BuildAndQuery) {
 
     ASSERT_NO_THROW(vec_index->Load(binary_set));
 
-    if (vec_field_data_type == DataType::VECTOR_SPARSE_FLOAT) {
-        // TODO(SPARSE): complete test in PR adding search/query to sparse
-        // float vector.
-        return;
-    }
-
     milvus::SearchInfo search_info;
     search_info.topk_ = K;
     search_info.metric_type_ = metric_type;

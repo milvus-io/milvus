@@ -1467,6 +1467,7 @@ type queryCoordConfig struct {
 	CheckAutoBalanceConfigInterval ParamItem `refreshable:"false"`
 	CheckNodeSessionInterval       ParamItem `refreshable:"false"`
 	GracefulStopTimeout            ParamItem `refreshable:"true"`
+	EnableStoppingBalance          ParamItem `refreshable:"true"`
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -1934,6 +1935,15 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.GracefulStopTimeout.Init(base.mgr)
+
+	p.EnableStoppingBalance = ParamItem{
+		Key:          "queryCoord.enableStoppingBalance",
+		Version:      "2.3.13",
+		DefaultValue: "true",
+		Doc:          "whether enable stopping balance",
+		Export:       true,
+	}
+	p.EnableStoppingBalance.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

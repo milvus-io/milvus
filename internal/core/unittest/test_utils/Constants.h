@@ -14,5 +14,5 @@ constexpr int64_t TestChunkSize = 32 * 1024;
 constexpr char TestLocalPath[] = "/tmp/milvus/local_data/";
 constexpr char TestRemotePath[] = "/tmp/milvus/remote_data";
 
-constexpr int64_t kTestSparseDim = 10000;
-constexpr float kTestSparseVectorDensity = 0.0003;
+constexpr int64_t kTestSparseDim = 1000;
+constexpr float kTestSparseVectorDensity = 0.003;

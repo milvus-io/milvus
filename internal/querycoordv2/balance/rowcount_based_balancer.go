@@ -179,6 +179,11 @@ func (b *RowCountBasedBalancer) BalanceReplica(replica *meta.Replica) ([]Segment
 
 	segmentPlans, channelPlans := make([]SegmentAssignPlan, 0), make([]ChannelAssignPlan, 0)
 	if len(offlineNodes) != 0 {
+		if !paramtable.Get().QueryCoordCfg.EnableStoppingBalance.GetAsBool() {
+			log.RatedInfo(10, "stopping balance is disabled!", zap.Int64s("stoppingNode", offlineNodes))
+			return nil, nil
+		}
+
 		log.Info("Handle stopping nodes",
 			zap.Any("stopping nodes", offlineNodes),
 			zap.Any("available nodes", onlineNodes),
