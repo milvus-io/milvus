@@ -64,9 +64,16 @@ func UpdateRequestedDiskSize(requestSize int64) UpdateJobAction {
 	}
 }
 
+func UpdateJobCompleteTime(completeTime string) UpdateJobAction {
+	return func(job ImportJob) {
+		job.(*importJob).ImportJob.CompleteTime = completeTime
+	}
+}
+
 type ImportJob interface {
 	GetJobID() int64
 	GetCollectionID() int64
+	GetCollectionName() string
 	GetPartitionIDs() []int64
 	GetVchannels() []string
 	GetSchema() *schemapb.CollectionSchema
@@ -75,6 +82,7 @@ type ImportJob interface {
 	GetState() internalpb.ImportJobState
 	GetReason() string
 	GetRequestedDiskSize() int64
+	GetCompleteTime() string
 	GetFiles() []*internalpb.ImportFile
 	GetOptions() []*commonpb.KeyValuePair
 	Clone() ImportJob

@@ -241,22 +241,24 @@ SparseBytesToRows(const Iterable& rows) {
     return res;
 }
 
-// SparseRowsToProto converts a vector of knowhere::sparse::SparseRow<float> to
+// SparseRowsToProto converts a list of knowhere::sparse::SparseRow<float> to
 // a milvus::proto::schema::SparseFloatArray. The resulting proto is a deep copy
-// of the source data.
-inline void SparseRowsToProto(const knowhere::sparse::SparseRow<float>* source,
-                              int64_t rows,
-                              milvus::proto::schema::SparseFloatArray* proto) {
+// of the source data. source(i) returns the i-th row to be copied.
+inline void SparseRowsToProto(
+    const std::function<const knowhere::sparse::SparseRow<float>*(size_t)>&
+        source,
+    int64_t rows,
+    milvus::proto::schema::SparseFloatArray* proto) {
     int64_t max_dim = 0;
     for (size_t i = 0; i < rows; ++i) {
-        if (source + i == nullptr) {
+        const auto* row = source(i);
+        if (row == nullptr) {
             // empty row
             proto->add_contents();
             continue;
         }
-        auto& row = source[i];
-        max_dim = std::max(max_dim, row.dim());
-        proto->add_contents(row.data(), row.data_byte_size());
+        max_dim = std::max(max_dim, row->dim());
+        proto->add_contents(row->data(), row->data_byte_size());
     }
     proto->set_dim(max_dim);
 }

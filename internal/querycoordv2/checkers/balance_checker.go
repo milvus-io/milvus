@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -90,27 +91,29 @@ func (b *BalanceChecker) replicasToBalance() []int64 {
 		return loadedCollections[i] < loadedCollections[j]
 	})
 
-	// balance collections influenced by stopping nodes
-	stoppingReplicas := make([]int64, 0)
-	for _, cid := range loadedCollections {
-		// if target and meta isn't ready, skip balance this collection
-		if !b.readyToCheck(cid) {
-			continue
-		}
-		replicas := b.meta.ReplicaManager.GetByCollection(cid)
-		for _, replica := range replicas {
-			for _, nodeID := range replica.GetNodes() {
-				isStopping, _ := b.nodeManager.IsStoppingNode(nodeID)
-				if isStopping {
-					stoppingReplicas = append(stoppingReplicas, replica.GetID())
-					break
+	if paramtable.Get().QueryCoordCfg.EnableStoppingBalance.GetAsBool() {
+		// balance collections influenced by stopping nodes
+		stoppingReplicas := make([]int64, 0)
+		for _, cid := range loadedCollections {
+			// if target and meta isn't ready, skip balance this collection
+			if !b.readyToCheck(cid) {
+				continue
+			}
+			replicas := b.meta.ReplicaManager.GetByCollection(cid)
+			for _, replica := range replicas {
+				for _, nodeID := range replica.GetNodes() {
+					isStopping, _ := b.nodeManager.IsStoppingNode(nodeID)
+					if isStopping {
+						stoppingReplicas = append(stoppingReplicas, replica.GetID())
+						break
+					}
 				}
 			}
 		}
-	}
-	// do stopping balance only in this round
-	if len(stoppingReplicas) > 0 {
-		return stoppingReplicas
+		// do stopping balance only in this round
+		if len(stoppingReplicas) > 0 {
+			return stoppingReplicas
+		}
 	}
 
 	// no stopping balance and auto balance is disabled, return empty collections for balance

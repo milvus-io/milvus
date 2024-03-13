@@ -360,7 +360,7 @@ func getImportingProgress(jobID int64, imeta ImportMeta, meta *meta) float32 {
 	return importingProgress*0.8 + completedProgress*0.2
 }
 
-func GetImportProgress(jobID int64, imeta ImportMeta, meta *meta) (int64, internalpb.ImportJobState, string) {
+func GetJobProgress(jobID int64, imeta ImportMeta, meta *meta) (int64, internalpb.ImportJobState, string) {
 	job := imeta.GetJob(jobID)
 	switch job.GetState() {
 	case internalpb.ImportJobState_Pending:
@@ -382,6 +382,31 @@ func GetImportProgress(jobID int64, imeta ImportMeta, meta *meta) (int64, intern
 		return 0, internalpb.ImportJobState_Failed, job.GetReason()
 	}
 	return 0, internalpb.ImportJobState_None, "unknown import job state"
+}
+
+func GetTaskProgresses(jobID int64, imeta ImportMeta, meta *meta) []*internalpb.ImportTaskProgress {
+	progresses := make([]*internalpb.ImportTaskProgress, 0)
+	tasks := imeta.GetTaskBy(WithJob(jobID), WithType(ImportTaskType))
+	for _, task := range tasks {
+		totalRows := lo.SumBy(task.GetFileStats(), func(file *datapb.ImportFileStats) int64 {
+			return file.GetTotalRows()
+		})
+		importedRows := meta.GetSegmentsTotalCurrentRows(task.(*importTask).GetSegmentIDs())
+		progress := int64(100)
+		if totalRows != 0 {
+			progress = int64(float32(importedRows) / float32(totalRows) * 100)
+		}
+		for _, fileStat := range task.GetFileStats() {
+			progresses = append(progresses, &internalpb.ImportTaskProgress{
+				FileName:     fileStat.GetImportFile().String(),
+				FileSize:     fileStat.GetFileSize(),
+				Reason:       task.GetReason(),
+				Progress:     progress,
+				CompleteTime: task.(*importTask).GetCompleteTime(),
+			})
+		}
+	}
+	return progresses
 }
 
 func DropImportTask(task ImportTask, cluster Cluster, tm ImportMeta) error {

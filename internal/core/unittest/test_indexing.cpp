@@ -296,11 +296,7 @@ TEST(Indexing, Naive) {
     vec_index->Query(query_ds, searchInfo, view, result);
 
     for (int i = 0; i < TOPK; ++i) {
-        if (result.seg_offsets_[i] < N / 2) {
-            std::cout << "WRONG: ";
-        }
-        std::cout << result.seg_offsets_[i] << "->" << result.distances_[i]
-                  << std::endl;
+        ASSERT_FALSE(result.seg_offsets_[i] < N / 2);
     }
 }
 
@@ -315,7 +311,6 @@ class IndexTest : public ::testing::TestWithParam<Param> {
         auto param = GetParam();
         index_type = param.first;
         metric_type = param.second;
-        NB = 3000;
 
         // try to reduce the test time,
         // but the large dataset is needed for the case below.
@@ -330,35 +325,43 @@ class IndexTest : public ::testing::TestWithParam<Param> {
         search_conf = generate_search_conf(index_type, metric_type);
         range_search_conf = generate_range_search_conf(index_type, metric_type);
 
-        std::map<knowhere::MetricType, bool> is_binary_map = {
-            {knowhere::IndexEnum::INDEX_FAISS_IDMAP, false},
-            {knowhere::IndexEnum::INDEX_FAISS_IVFPQ, false},
-            {knowhere::IndexEnum::INDEX_FAISS_IVFFLAT, false},
-            {knowhere::IndexEnum::INDEX_FAISS_IVFSQ8, false},
-            {knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT, true},
-            {knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP, true},
-            {knowhere::IndexEnum::INDEX_HNSW, false},
-            {knowhere::IndexEnum::INDEX_DISKANN, false},
-        };
-
-        is_binary = is_binary_map[index_type];
-        if (is_binary) {
+        if (index_type == knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX ||
+            index_type == knowhere::IndexEnum::INDEX_SPARSE_WAND) {
+            is_sparse = true;
+            vec_field_data_type = milvus::DataType::VECTOR_SPARSE_FLOAT;
+        } else if (index_type == knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT ||
+                   index_type == knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP) {
+            is_binary = true;
             vec_field_data_type = milvus::DataType::VECTOR_BINARY;
         } else {
             vec_field_data_type = milvus::DataType::VECTOR_FLOAT;
         }
 
-        auto dataset = GenDataset(NB, metric_type, is_binary);
-        if (!is_binary) {
-            xb_data = dataset.get_col<float>(milvus::FieldId(100));
-            xb_dataset = knowhere::GenDataSet(NB, DIM, xb_data.data());
-            xq_dataset = knowhere::GenDataSet(
-                NQ, DIM, xb_data.data() + DIM * query_offset);
-        } else {
+        auto dataset =
+            GenDatasetWithDataType(NB, metric_type, vec_field_data_type);
+        if (is_binary) {
+            // binary vector
             xb_bin_data = dataset.get_col<uint8_t>(milvus::FieldId(100));
             xb_dataset = knowhere::GenDataSet(NB, DIM, xb_bin_data.data());
             xq_dataset = knowhere::GenDataSet(
                 NQ, DIM, xb_bin_data.data() + DIM * query_offset);
+        } else if (is_sparse) {
+            // sparse vector
+            xb_sparse_data =
+                dataset.get_col<knowhere::sparse::SparseRow<float>>(
+                    milvus::FieldId(100));
+            xb_dataset =
+                knowhere::GenDataSet(NB, kTestSparseDim, xb_sparse_data.data());
+            xb_dataset->SetIsSparse(true);
+            xq_dataset = knowhere::GenDataSet(
+                NQ, kTestSparseDim, xb_sparse_data.data() + query_offset);
+            xq_dataset->SetIsSparse(true);
+        } else {
+            // float vector
+            xb_data = dataset.get_col<float>(milvus::FieldId(100));
+            xb_dataset = knowhere::GenDataSet(NB, DIM, xb_data.data());
+            xq_dataset = knowhere::GenDataSet(
+                NQ, DIM, xb_data.data() + DIM * query_offset);
         }
     }
 
@@ -368,7 +371,8 @@ class IndexTest : public ::testing::TestWithParam<Param> {
 
  protected:
     std::string index_type, metric_type;
-    bool is_binary;
+    bool is_binary = false;
+    bool is_sparse = false;
     milvus::Config build_conf;
     milvus::Config load_conf;
     milvus::Config search_conf;
@@ -377,9 +381,10 @@ class IndexTest : public ::testing::TestWithParam<Param> {
     knowhere::DataSetPtr xb_dataset;
     FixedVector<float> xb_data;
     FixedVector<uint8_t> xb_bin_data;
+    FixedVector<knowhere::sparse::SparseRow<float>> xb_sparse_data;
     knowhere::DataSetPtr xq_dataset;
     int64_t query_offset = 100;
-    int64_t NB = 3000;
+    int64_t NB = 3000;  // will be updated to 27000 for mmap+hnsw
     StorageConfig storage_config_;
 };
 
@@ -397,6 +402,9 @@ INSTANTIATE_TEST_SUITE_P(
                   knowhere::metric::JACCARD),
         std::pair(knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP,
                   knowhere::metric::JACCARD),
+        std::pair(knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX,
+                  knowhere::metric::IP),
+        std::pair(knowhere::IndexEnum::INDEX_SPARSE_WAND, knowhere::metric::IP),
 #ifdef BUILD_DISK_ANN
         std::pair(knowhere::IndexEnum::INDEX_DISKANN, knowhere::metric::L2),
 #endif
@@ -506,7 +514,9 @@ TEST_P(IndexTest, BuildAndQuery) {
     load_conf["index_files"] = index_files;
     ASSERT_NO_THROW(vec_index->Load(milvus::tracer::TraceContext{}, load_conf));
     EXPECT_EQ(vec_index->Count(), NB);
-    EXPECT_EQ(vec_index->GetDim(), DIM);
+    if (!is_sparse) {
+        EXPECT_EQ(vec_index->GetDim(), DIM);
+    }
 
     milvus::SearchInfo search_info;
     search_info.topk_ = K;
@@ -518,11 +528,19 @@ TEST_P(IndexTest, BuildAndQuery) {
     EXPECT_EQ(result.unity_topK_, K);
     EXPECT_EQ(result.distances_.size(), NQ * K);
     EXPECT_EQ(result.seg_offsets_.size(), NQ * K);
-    if (!is_binary) {
-        EXPECT_EQ(result.seg_offsets_[0], query_offset);
+    if (metric_type == knowhere::metric::L2) {
+        // for L2 metric each vector is closest to itself
+        for (int i = 0; i < NQ; i++) {
+            EXPECT_EQ(result.seg_offsets_[i * K], query_offset + i);
+        }
+        // for other metrics we can't verify the correctness unless we perform
+        // brute force search to get the ground truth.
     }
-    search_info.search_params_ = range_search_conf;
-    vec_index->Query(xq_dataset, search_info, nullptr, result);
+    if (!is_sparse) {
+        // sparse doesn't support range search yet
+        search_info.search_params_ = range_search_conf;
+        vec_index->Query(xq_dataset, search_info, nullptr, result);
+    }
 }
 
 TEST_P(IndexTest, Mmap) {
@@ -623,7 +641,9 @@ TEST_P(IndexTest, GetVector) {
     } else {
         vec_index->Load(milvus::tracer::TraceContext{}, load_conf);
     }
-    EXPECT_EQ(vec_index->GetDim(), DIM);
+    if (!is_sparse) {
+        EXPECT_EQ(vec_index->GetDim(), DIM);
+    }
     EXPECT_EQ(vec_index->Count(), NB);
 
     if (!vec_index->HasRawData()) {
@@ -631,27 +651,37 @@ TEST_P(IndexTest, GetVector) {
     }
 
     auto ids_ds = GenRandomIds(NB);
-    auto results = vec_index->GetVector(ids_ds);
-    EXPECT_TRUE(results.size() > 0);
-    if (!is_binary) {
-        std::vector<float> result_vectors(results.size() / (sizeof(float)));
-        memcpy(result_vectors.data(), results.data(), results.size());
-        EXPECT_TRUE(result_vectors.size() == xb_data.size());
-        for (size_t i = 0; i < NB; ++i) {
-            auto id = ids_ds->GetIds()[i];
-            for (size_t j = 0; j < DIM; ++j) {
-                EXPECT_TRUE(result_vectors[i * DIM + j] ==
-                            xb_data[id * DIM + j]);
-            }
-        }
-    } else {
-        EXPECT_TRUE(results.size() == xb_bin_data.size());
+    if (is_binary) {
+        auto results = vec_index->GetVector(ids_ds);
+        EXPECT_EQ(results.size(), xb_bin_data.size());
         const auto data_bytes = DIM / 8;
         for (size_t i = 0; i < NB; ++i) {
             auto id = ids_ds->GetIds()[i];
             for (size_t j = 0; j < data_bytes; ++j) {
-                EXPECT_TRUE(results[i * data_bytes + j] ==
-                            xb_bin_data[id * data_bytes + j]);
+                ASSERT_EQ(results[i * data_bytes + j],
+                          xb_bin_data[id * data_bytes + j]);
+            }
+        }
+    } else if (is_sparse) {
+        auto sparse_rows = vec_index->GetSparseVector(ids_ds);
+        for (size_t i = 0; i < NB; ++i) {
+            auto id = ids_ds->GetIds()[i];
+            auto& row = sparse_rows[i];
+            ASSERT_EQ(row.size(), xb_sparse_data[id].size());
+            for (size_t j = 0; j < row.size(); ++j) {
+                ASSERT_EQ(row[j].id, xb_sparse_data[id][j].id);
+                ASSERT_EQ(row[j].val, xb_sparse_data[id][j].val);
+            }
+        }
+    } else {
+        auto results = vec_index->GetVector(ids_ds);
+        std::vector<float> result_vectors(results.size() / (sizeof(float)));
+        memcpy(result_vectors.data(), results.data(), results.size());
+        ASSERT_EQ(result_vectors.size(), xb_data.size());
+        for (size_t i = 0; i < NB; ++i) {
+            auto id = ids_ds->GetIds()[i];
+            for (size_t j = 0; j < DIM; ++j) {
+                ASSERT_EQ(result_vectors[i * DIM + j], xb_data[id * DIM + j]);
             }
         }
     }

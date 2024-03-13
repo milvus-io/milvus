@@ -5631,20 +5631,25 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 		resp.Status = merr.Status(merr.WrapErrParameterInvalidMsg("import request is empty"))
 		return resp, nil
 	}
-	for _, file := range req.GetFiles() {
-		_, err = importutilv2.GetFileType(file)
-		if err != nil {
-			resp.Status = merr.Status(err)
-			return resp, nil
+	isBackup := importutilv2.IsBackup(req.GetOptions())
+	if !isBackup {
+		// check file type
+		for _, file := range req.GetFiles() {
+			_, err = importutilv2.GetFileType(file)
+			if err != nil {
+				resp.Status = merr.Status(err)
+				return resp, nil
+			}
 		}
 	}
 	importRequest := &internalpb.ImportRequestInternal{
-		CollectionID: collectionID,
-		PartitionIDs: partitionIDs,
-		ChannelNames: channels,
-		Schema:       schema.CollectionSchema,
-		Files:        req.GetFiles(),
-		Options:      req.GetOptions(),
+		CollectionID:   collectionID,
+		CollectionName: req.GetCollectionName(),
+		PartitionIDs:   partitionIDs,
+		ChannelNames:   channels,
+		Schema:         schema.CollectionSchema,
+		Files:          req.GetFiles(),
+		Options:        req.GetOptions(),
 	}
 	resp, err = node.dataCoord.ImportV2(ctx, importRequest)
 	if err != nil {

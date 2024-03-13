@@ -68,33 +68,6 @@ template <typename T>
 constexpr bool IsSparse = std::is_same_v<T, SparseFloatVector> ||
                           std::is_same_v<T, knowhere::sparse::SparseRow<float>>;
 
-template <typename T, typename Enabled = void>
-struct EmbeddedTypeImpl;
-
-template <typename T>
-struct EmbeddedTypeImpl<T, std::enable_if_t<IsScalar<T>>> {
-    using type = T;
-};
-
-template <typename T>
-struct EmbeddedTypeImpl<T, std::enable_if_t<IsVector<T>>> {
-    using type = std::conditional_t<
-        std::is_same_v<T, FloatVector>,
-        float,
-        std::conditional_t<
-            std::is_same_v<T, Float16Vector>,
-            float16,
-            std::conditional_t<
-                std::is_same_v<T, BFloat16Vector>,
-                bfloat16,
-                std::conditional_t<std::is_same_v<T, SparseFloatVector>,
-                                   void,
-                                   uint8_t>>>>;
-};
-
-template <typename T>
-using EmbeddedType = typename EmbeddedTypeImpl<T>::type;
-
 struct FundamentalTag {};
 struct StringTag {};
 
