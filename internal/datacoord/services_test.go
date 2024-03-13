@@ -1369,6 +1369,7 @@ func TestImportV2(t *testing.T) {
 
 		// list binlog failed
 		cm := mocks2.NewChunkManager(t)
+		cm.EXPECT().Exist(mock.Anything, mock.Anything).Return(true, nil)
 		cm.EXPECT().ListWithPrefix(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil, mockErr)
 		s.meta = &meta{chunkManager: cm}
 		resp, err = s.ImportV2(ctx, &internalpb.ImportRequestInternal{
