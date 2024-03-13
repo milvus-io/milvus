@@ -183,7 +183,7 @@ func TestRotateWriter_BasicError(t *testing.T) {
 func TestRotateWriter_InitError(t *testing.T) {
 	var params paramtable.ComponentParam
 	params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
-	testPath := ""
+	testPath := "/tmp/test"
 	params.Save(params.ProxyCfg.AccessLog.Enable.Key, "true")
 	params.Save(params.ProxyCfg.AccessLog.Filename.Key, "test_access")
 	params.Save(params.ProxyCfg.AccessLog.LocalPath.Key, testPath)
