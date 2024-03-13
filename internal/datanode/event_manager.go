@@ -398,7 +398,7 @@ func GetLiteChannelWatchInfo(watchInfo *datapb.ChannelWatchInfo) *datapb.Channel
 }
 
 type EventManager struct {
-	channelGurad    sync.Mutex
+	channelGuard    sync.Mutex
 	channelManagers map[string]*channelEventManager
 }
 
@@ -409,8 +409,8 @@ func NewEventManager() *EventManager {
 }
 
 func (m *EventManager) GetOrInsert(channel string, newManager *channelEventManager) *channelEventManager {
-	m.channelGurad.Lock()
-	defer m.channelGurad.Unlock()
+	m.channelGuard.Lock()
+	defer m.channelGuard.Unlock()
 
 	eManager, got := m.channelManagers[channel]
 	if !got {
@@ -423,21 +423,22 @@ func (m *EventManager) GetOrInsert(channel string, newManager *channelEventManag
 }
 
 func (m *EventManager) Remove(channel string) {
-	m.channelGurad.Lock()
-	defer m.channelGurad.Unlock()
+	m.channelGuard.Lock()
+	eManager, got := m.channelManagers[channel]
+	delete(m.channelManagers, channel)
+	m.channelGuard.Unlock()
 
-	if eManager, got := m.channelManagers[channel]; got {
+	if got {
 		eManager.Close()
 	}
-
-	delete(m.channelManagers, channel)
 }
 
 func (m *EventManager) CloseAll() {
-	m.channelGurad.Lock()
-	defer m.channelGurad.Unlock()
+	m.channelGuard.Lock()
+	defer m.channelGuard.Unlock()
 
-	for _, eManager := range m.channelManagers {
+	for channel, eManager := range m.channelManagers {
+		delete(m.channelManagers, channel)
 		eManager.Close()
 	}
 }
