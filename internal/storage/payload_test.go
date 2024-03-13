@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/util/testutils"
 )
 
 func TestPayload_ReaderAndWriter(t *testing.T) {
@@ -619,6 +620,170 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		defer r.ReleasePayloadReader()
 	})
 
+	t.Run("TestSparseFloatVector", func(t *testing.T) {
+		w, err := NewPayloadWriter(schemapb.DataType_SparseFloatVector)
+		require.Nil(t, err)
+		require.NotNil(t, w)
+
+		err = w.AddSparseFloatVectorToPayload(&SparseFloatVectorFieldData{
+			SparseFloatArray: schemapb.SparseFloatArray{
+				Dim: 600,
+				Contents: [][]byte{
+					testutils.CreateSparseFloatRow([]uint32{0, 1, 2}, []float32{1.1, 1.2, 1.3}),
+					testutils.CreateSparseFloatRow([]uint32{10, 20, 30}, []float32{2.1, 2.2, 2.3}),
+					testutils.CreateSparseFloatRow([]uint32{100, 200, 599}, []float32{3.1, 3.2, 3.3}),
+				},
+			},
+		})
+		assert.NoError(t, err)
+		err = w.AddSparseFloatVectorToPayload(&SparseFloatVectorFieldData{
+			SparseFloatArray: schemapb.SparseFloatArray{
+				Dim: 600,
+				Contents: [][]byte{
+					testutils.CreateSparseFloatRow([]uint32{30, 41, 52}, []float32{1.1, 1.2, 1.3}),
+					testutils.CreateSparseFloatRow([]uint32{60, 80, 230}, []float32{2.1, 2.2, 2.3}),
+					testutils.CreateSparseFloatRow([]uint32{170, 300, 579}, []float32{3.1, 3.2, 3.3}),
+				},
+			},
+		})
+		assert.NoError(t, err)
+		err = w.FinishPayloadWriter()
+		assert.NoError(t, err)
+
+		length, err := w.GetPayloadLengthFromWriter()
+		assert.NoError(t, err)
+		assert.Equal(t, 6, length)
+		defer w.ReleasePayloadWriter()
+
+		buffer, err := w.GetPayloadBufferFromWriter()
+		assert.NoError(t, err)
+
+		r, err := NewPayloadReader(schemapb.DataType_SparseFloatVector, buffer)
+		require.Nil(t, err)
+		length, err = r.GetPayloadLengthFromReader()
+		assert.NoError(t, err)
+		assert.Equal(t, length, 6)
+
+		floatVecs, dim, err := r.GetSparseFloatVectorFromPayload()
+		assert.NoError(t, err)
+		assert.Equal(t, 600, dim)
+		assert.Equal(t, 6, len(floatVecs.Contents))
+		assert.Equal(t, schemapb.SparseFloatArray{
+			// merged dim should be max of all dims
+			Dim: 600,
+			Contents: [][]byte{
+				testutils.CreateSparseFloatRow([]uint32{0, 1, 2}, []float32{1.1, 1.2, 1.3}),
+				testutils.CreateSparseFloatRow([]uint32{10, 20, 30}, []float32{2.1, 2.2, 2.3}),
+				testutils.CreateSparseFloatRow([]uint32{100, 200, 599}, []float32{3.1, 3.2, 3.3}),
+				testutils.CreateSparseFloatRow([]uint32{30, 41, 52}, []float32{1.1, 1.2, 1.3}),
+				testutils.CreateSparseFloatRow([]uint32{60, 80, 230}, []float32{2.1, 2.2, 2.3}),
+				testutils.CreateSparseFloatRow([]uint32{170, 300, 579}, []float32{3.1, 3.2, 3.3}),
+			},
+		}, floatVecs.SparseFloatArray)
+
+		ifloatVecs, dim, err := r.GetDataFromPayload()
+		assert.NoError(t, err)
+		assert.Equal(t, floatVecs, ifloatVecs.(*SparseFloatVectorFieldData))
+		assert.Equal(t, 600, dim)
+		defer r.ReleasePayloadReader()
+	})
+
+	testSparseOneBatch := func(t *testing.T, rows [][]byte, actualDim int) {
+		w, err := NewPayloadWriter(schemapb.DataType_SparseFloatVector)
+		require.Nil(t, err)
+		require.NotNil(t, w)
+
+		err = w.AddSparseFloatVectorToPayload(&SparseFloatVectorFieldData{
+			SparseFloatArray: schemapb.SparseFloatArray{
+				Dim:      int64(actualDim),
+				Contents: rows,
+			},
+		})
+		assert.NoError(t, err)
+		err = w.FinishPayloadWriter()
+		assert.NoError(t, err)
+
+		length, err := w.GetPayloadLengthFromWriter()
+		assert.NoError(t, err)
+		assert.Equal(t, 3, length)
+		defer w.ReleasePayloadWriter()
+
+		buffer, err := w.GetPayloadBufferFromWriter()
+		assert.NoError(t, err)
+
+		r, err := NewPayloadReader(schemapb.DataType_SparseFloatVector, buffer)
+		require.Nil(t, err)
+		length, err = r.GetPayloadLengthFromReader()
+		assert.NoError(t, err)
+		assert.Equal(t, length, 3)
+
+		floatVecs, dim, err := r.GetSparseFloatVectorFromPayload()
+		assert.NoError(t, err)
+		assert.Equal(t, actualDim, dim)
+		assert.Equal(t, 3, len(floatVecs.Contents))
+		assert.Equal(t, schemapb.SparseFloatArray{
+			Dim:      int64(dim),
+			Contents: rows,
+		}, floatVecs.SparseFloatArray)
+
+		ifloatVecs, dim, err := r.GetDataFromPayload()
+		assert.NoError(t, err)
+		assert.Equal(t, floatVecs, ifloatVecs.(*SparseFloatVectorFieldData))
+		assert.Equal(t, actualDim, dim)
+		defer r.ReleasePayloadReader()
+	}
+
+	t.Run("TestSparseFloatVector_emptyRow", func(t *testing.T) {
+		testSparseOneBatch(t, [][]byte{
+			testutils.CreateSparseFloatRow([]uint32{}, []float32{}),
+			testutils.CreateSparseFloatRow([]uint32{10, 20, 30}, []float32{2.1, 2.2, 2.3}),
+			testutils.CreateSparseFloatRow([]uint32{100, 200, 599}, []float32{3.1, 3.2, 3.3}),
+		}, 600)
+		testSparseOneBatch(t, [][]byte{
+			testutils.CreateSparseFloatRow([]uint32{}, []float32{}),
+			testutils.CreateSparseFloatRow([]uint32{}, []float32{}),
+			testutils.CreateSparseFloatRow([]uint32{}, []float32{}),
+		}, 0)
+	})
+
+	t.Run("TestSparseFloatVector_largeRow", func(t *testing.T) {
+		nnz := 100000
+		// generate an int slice with nnz random sorted elements
+		indices := make([]uint32, nnz)
+		values := make([]float32, nnz)
+		for i := 0; i < nnz; i++ {
+			indices[i] = uint32(i * 6)
+			values[i] = float32(i)
+		}
+		dim := int(indices[nnz-1]) + 1
+		testSparseOneBatch(t, [][]byte{
+			testutils.CreateSparseFloatRow([]uint32{}, []float32{}),
+			testutils.CreateSparseFloatRow([]uint32{10, 20, 30}, []float32{2.1, 2.2, 2.3}),
+			testutils.CreateSparseFloatRow(indices, values),
+		}, dim)
+	})
+
+	t.Run("TestSparseFloatVector_negativeValues", func(t *testing.T) {
+		testSparseOneBatch(t, [][]byte{
+			testutils.CreateSparseFloatRow([]uint32{}, []float32{}),
+			testutils.CreateSparseFloatRow([]uint32{10, 20, 30}, []float32{-2.1, 2.2, -2.3}),
+			testutils.CreateSparseFloatRow([]uint32{100, 200, 599}, []float32{3.1, -3.2, 3.3}),
+		}, 600)
+	})
+
+	// even though SPARSE_INVERTED_INDEX and SPARSE_WAND index do not support
+	// arbitrarily large dimensions, HNSW does, so we still need to test it.
+	// Dimension range we support is 0 to positive int32 max - 1(to leave room
+	// for dim).
+	t.Run("TestSparseFloatVector_largeIndex", func(t *testing.T) {
+		int32Max := uint32(math.MaxInt32)
+		testSparseOneBatch(t, [][]byte{
+			testutils.CreateSparseFloatRow([]uint32{}, []float32{}),
+			testutils.CreateSparseFloatRow([]uint32{10, 20, 30}, []float32{-2.1, 2.2, -2.3}),
+			testutils.CreateSparseFloatRow([]uint32{100, int32Max / 2, int32Max - 1}, []float32{3.1, -3.2, 3.3}),
+		}, int(int32Max))
+	})
+
 	// t.Run("TestAddDataToPayload", func(t *testing.T) {
 	// 	w, err := NewPayloadWriter(schemapb.DataType_Bool)
 	// 	w.colType = 999
@@ -861,6 +1026,37 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		err = w.FinishPayloadWriter()
 		assert.Error(t, err)
 		err = w.AddBFloat16VectorToPayload([]byte{1, 0, 0, 0, 0, 0, 0, 0}, 8)
+		assert.Error(t, err)
+	})
+	t.Run("TestAddSparseFloatVectorAfterFinish", func(t *testing.T) {
+		w, err := NewPayloadWriter(schemapb.DataType_SparseFloatVector)
+		require.Nil(t, err)
+		require.NotNil(t, w)
+		defer w.Close()
+
+		err = w.FinishPayloadWriter()
+		assert.NoError(t, err)
+
+		err = w.AddSparseFloatVectorToPayload(&SparseFloatVectorFieldData{
+			SparseFloatArray: schemapb.SparseFloatArray{
+				Dim: 53,
+				Contents: [][]byte{
+					testutils.CreateSparseFloatRow([]uint32{30, 41, 52}, []float32{1.1, 1.2, 1.3}),
+				},
+			},
+		})
+		assert.Error(t, err)
+		err = w.AddSparseFloatVectorToPayload(&SparseFloatVectorFieldData{
+			SparseFloatArray: schemapb.SparseFloatArray{
+				Dim: 600,
+				Contents: [][]byte{
+					testutils.CreateSparseFloatRow([]uint32{30, 41, 52}, []float32{1.1, 1.2, 1.3}),
+				},
+			},
+		})
+		assert.Error(t, err)
+
+		err = w.FinishPayloadWriter()
 		assert.Error(t, err)
 	})
 	t.Run("TestNewReadError", func(t *testing.T) {
@@ -1385,6 +1581,60 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		assert.Error(t, err)
 
 		dataset.groupID = math.MaxInt
+		assert.Error(t, err)
+	})
+
+	t.Run("TestGetSparseFloatVectorError", func(t *testing.T) {
+		w, err := NewPayloadWriter(schemapb.DataType_Bool)
+		require.Nil(t, err)
+		require.NotNil(t, w)
+
+		err = w.AddBoolToPayload([]bool{false, true, true})
+		assert.NoError(t, err)
+
+		err = w.FinishPayloadWriter()
+		assert.NoError(t, err)
+
+		buffer, err := w.GetPayloadBufferFromWriter()
+		assert.NoError(t, err)
+
+		r, err := NewPayloadReader(schemapb.DataType_SparseFloatVector, buffer)
+		assert.NoError(t, err)
+
+		_, _, err = r.GetSparseFloatVectorFromPayload()
+		assert.Error(t, err)
+
+		r.colType = 999
+		_, _, err = r.GetSparseFloatVectorFromPayload()
+		assert.Error(t, err)
+	})
+
+	t.Run("TestGetSparseFloatVectorError2", func(t *testing.T) {
+		w, err := NewPayloadWriter(schemapb.DataType_SparseFloatVector)
+		require.Nil(t, err)
+		require.NotNil(t, w)
+
+		err = w.AddSparseFloatVectorToPayload(&SparseFloatVectorFieldData{
+			SparseFloatArray: schemapb.SparseFloatArray{
+				Dim: 53,
+				Contents: [][]byte{
+					testutils.CreateSparseFloatRow([]uint32{30, 41, 52}, []float32{1.1, 1.2, 1.3}),
+				},
+			},
+		})
+		assert.NoError(t, err)
+
+		err = w.FinishPayloadWriter()
+		assert.NoError(t, err)
+
+		buffer, err := w.GetPayloadBufferFromWriter()
+		assert.NoError(t, err)
+
+		r, err := NewPayloadReader(schemapb.DataType_SparseFloatVector, buffer)
+		assert.NoError(t, err)
+
+		r.numRows = 99
+		_, _, err = r.GetSparseFloatVectorFromPayload()
 		assert.Error(t, err)
 	})
 

@@ -20,9 +20,12 @@ import (
 	"encoding/binary"
 	"fmt"
 
+	"github.com/gogo/protobuf/proto"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // TODO: fill it
@@ -181,7 +184,8 @@ func NewFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema)
 			Data: make([]byte, 0),
 			Dim:  dim,
 		}, nil
-
+	case schemapb.DataType_SparseFloatVector:
+		return &SparseFloatVectorFieldData{}, nil
 	case schemapb.DataType_Bool:
 		return &BoolFieldData{
 			Data: make([]bool, 0),
@@ -283,6 +287,20 @@ type BFloat16VectorFieldData struct {
 	Dim  int
 }
 
+type SparseFloatVectorFieldData struct {
+	schemapb.SparseFloatArray
+}
+
+func (dst *SparseFloatVectorFieldData) AppendAllRows(src *SparseFloatVectorFieldData) {
+	if len(src.Contents) == 0 {
+		return
+	}
+	if dst.Dim < src.Dim {
+		dst.Dim = src.Dim
+	}
+	dst.Contents = append(dst.Contents, src.Contents...)
+}
+
 // RowNum implements FieldData.RowNum
 func (data *BoolFieldData) RowNum() int          { return len(data.Data) }
 func (data *Int8FieldData) RowNum() int          { return len(data.Data) }
@@ -300,6 +318,7 @@ func (data *Float16VectorFieldData) RowNum() int { return len(data.Data) / 2 / d
 func (data *BFloat16VectorFieldData) RowNum() int {
 	return len(data.Data) / 2 / data.Dim
 }
+func (data *SparseFloatVectorFieldData) RowNum() int { return len(data.Contents) }
 
 // GetRow implements FieldData.GetRow
 func (data *BoolFieldData) GetRow(i int) any   { return data.Data[i] }
@@ -312,8 +331,12 @@ func (data *DoubleFieldData) GetRow(i int) any { return data.Data[i] }
 func (data *StringFieldData) GetRow(i int) any { return data.Data[i] }
 func (data *ArrayFieldData) GetRow(i int) any  { return data.Data[i] }
 func (data *JSONFieldData) GetRow(i int) any   { return data.Data[i] }
-func (data *BinaryVectorFieldData) GetRow(i int) interface{} {
+func (data *BinaryVectorFieldData) GetRow(i int) any {
 	return data.Data[i*data.Dim/8 : (i+1)*data.Dim/8]
+}
+
+func (data *SparseFloatVectorFieldData) GetRow(i int) interface{} {
+	return data.Contents[i]
 }
 
 func (data *FloatVectorFieldData) GetRow(i int) interface{} {
@@ -328,20 +351,21 @@ func (data *BFloat16VectorFieldData) GetRow(i int) interface{} {
 	return data.Data[i*data.Dim*2 : (i+1)*data.Dim*2]
 }
 
-func (data *BoolFieldData) GetRows() any           { return data.Data }
-func (data *Int8FieldData) GetRows() any           { return data.Data }
-func (data *Int16FieldData) GetRows() any          { return data.Data }
-func (data *Int32FieldData) GetRows() any          { return data.Data }
-func (data *Int64FieldData) GetRows() any          { return data.Data }
-func (data *FloatFieldData) GetRows() any          { return data.Data }
-func (data *DoubleFieldData) GetRows() any         { return data.Data }
-func (data *StringFieldData) GetRows() any         { return data.Data }
-func (data *ArrayFieldData) GetRows() any          { return data.Data }
-func (data *JSONFieldData) GetRows() any           { return data.Data }
-func (data *BinaryVectorFieldData) GetRows() any   { return data.Data }
-func (data *FloatVectorFieldData) GetRows() any    { return data.Data }
-func (data *Float16VectorFieldData) GetRows() any  { return data.Data }
-func (data *BFloat16VectorFieldData) GetRows() any { return data.Data }
+func (data *BoolFieldData) GetRows() any              { return data.Data }
+func (data *Int8FieldData) GetRows() any              { return data.Data }
+func (data *Int16FieldData) GetRows() any             { return data.Data }
+func (data *Int32FieldData) GetRows() any             { return data.Data }
+func (data *Int64FieldData) GetRows() any             { return data.Data }
+func (data *FloatFieldData) GetRows() any             { return data.Data }
+func (data *DoubleFieldData) GetRows() any            { return data.Data }
+func (data *StringFieldData) GetRows() any            { return data.Data }
+func (data *ArrayFieldData) GetRows() any             { return data.Data }
+func (data *JSONFieldData) GetRows() any              { return data.Data }
+func (data *BinaryVectorFieldData) GetRows() any      { return data.Data }
+func (data *FloatVectorFieldData) GetRows() any       { return data.Data }
+func (data *Float16VectorFieldData) GetRows() any     { return data.Data }
+func (data *BFloat16VectorFieldData) GetRows() any    { return data.Data }
+func (data *SparseFloatVectorFieldData) GetRows() any { return data.Contents }
 
 // AppendRow implements FieldData.AppendRow
 func (data *BoolFieldData) AppendRow(row interface{}) error {
@@ -467,6 +491,22 @@ func (data *BFloat16VectorFieldData) AppendRow(row interface{}) error {
 		return merr.WrapErrParameterInvalid("[]byte", row, "Wrong row type")
 	}
 	data.Data = append(data.Data, v...)
+	return nil
+}
+
+func (data *SparseFloatVectorFieldData) AppendRow(row interface{}) error {
+	v, ok := row.([]byte)
+	if !ok {
+		return merr.WrapErrParameterInvalid("SparseFloatVectorRowData", row, "Wrong row type")
+	}
+	if err := typeutil.ValidateSparseFloatRows(v); err != nil {
+		return err
+	}
+	rowDim := typeutil.SparseFloatRowDim(v)
+	if data.Dim < rowDim {
+		data.Dim = rowDim
+	}
+	data.Contents = append(data.Contents, v)
 	return nil
 }
 
@@ -612,6 +652,18 @@ func (data *BFloat16VectorFieldData) AppendRows(rows interface{}) error {
 	return nil
 }
 
+func (data *SparseFloatVectorFieldData) AppendRows(rows interface{}) error {
+	v, ok := rows.(SparseFloatVectorFieldData)
+	if !ok {
+		return merr.WrapErrParameterInvalid("SparseFloatVectorFieldData", rows, "Wrong rows type")
+	}
+	data.Contents = append(data.SparseFloatArray.Contents, v.Contents...)
+	if data.Dim < v.Dim {
+		data.Dim = v.Dim
+	}
+	return nil
+}
+
 // GetMemorySize implements FieldData.GetMemorySize
 func (data *BoolFieldData) GetMemorySize() int          { return binary.Size(data.Data) }
 func (data *Int8FieldData) GetMemorySize() int          { return binary.Size(data.Data) }
@@ -625,6 +677,11 @@ func (data *FloatVectorFieldData) GetMemorySize() int   { return binary.Size(dat
 func (data *Float16VectorFieldData) GetMemorySize() int { return binary.Size(data.Data) + 4 }
 func (data *BFloat16VectorFieldData) GetMemorySize() int {
 	return binary.Size(data.Data) + 4
+}
+
+func (data *SparseFloatVectorFieldData) GetMemorySize() int {
+	// TODO(SPARSE): should this be the memory size of serialzied size?
+	return proto.Size(&data.SparseFloatArray)
 }
 
 // GetDataType implements FieldData.GetDataType
@@ -652,6 +709,10 @@ func (data *Float16VectorFieldData) GetDataType() schemapb.DataType {
 
 func (data *BFloat16VectorFieldData) GetDataType() schemapb.DataType {
 	return schemapb.DataType_BFloat16Vector
+}
+
+func (data *SparseFloatVectorFieldData) GetDataType() schemapb.DataType {
+	return schemapb.DataType_SparseFloatVector
 }
 
 // why not binary.Size(data) directly? binary.Size(data) return -1
@@ -732,4 +793,8 @@ func (data *ArrayFieldData) GetRowSize(i int) int {
 		return (&StringFieldData{Data: data.Data[i].GetStringData().GetData()}).GetMemorySize()
 	}
 	return 0
+}
+
+func (data *SparseFloatVectorFieldData) GetRowSize(i int) int {
+	return len(data.Contents[i])
 }

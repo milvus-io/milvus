@@ -13,6 +13,9 @@ func GetDim(field *schemapb.FieldSchema) (int64, error) {
 	if !IsVectorType(field.GetDataType()) {
 		return 0, fmt.Errorf("%s is not of vector type", field.GetDataType())
 	}
+	if IsSparseVectorType(field.GetDataType()) {
+		return 0, fmt.Errorf("typeutil.GetDim should not invoke on sparse vector type")
+	}
 	h := NewKvPairs(append(field.GetIndexParams(), field.GetTypeParams()...))
 	dimStr, err := h.Get(common.DimKey)
 	if err != nil {

@@ -48,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/testutils"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -60,6 +61,7 @@ const (
 	IndexFaissBinIDMap   = "BIN_FLAT"
 	IndexFaissBinIVFFlat = "BIN_IVF_FLAT"
 	IndexHNSW            = "HNSW"
+	IndexSparseWand      = "SPARSE_WAND"
 
 	nlist               = 100
 	m                   = 4
@@ -128,6 +130,13 @@ var simpleBFloat16VecField = vecFieldParam{
 	metricType: defaultMetricType,
 	vecType:    schemapb.DataType_BFloat16Vector,
 	fieldName:  "bfloat16VectorField",
+}
+
+var simpleSparseFloatVectorField = vecFieldParam{
+	id:         114,
+	metricType: metric.IP,
+	vecType:    schemapb.DataType_SparseFloatVector,
+	fieldName:  "sparseFloatVectorField",
 }
 
 var simpleBoolField = constFieldParam{
@@ -235,12 +244,6 @@ func genVectorFieldSchema(param vecFieldParam) *schemapb.FieldSchema {
 		Name:         param.fieldName,
 		IsPrimaryKey: false,
 		DataType:     param.vecType,
-		TypeParams: []*commonpb.KeyValuePair{
-			{
-				Key:   dimKey,
-				Value: strconv.Itoa(param.dim),
-			},
-		},
 		IndexParams: []*commonpb.KeyValuePair{
 			{
 				Key:   metricTypeKey,
@@ -248,10 +251,20 @@ func genVectorFieldSchema(param vecFieldParam) *schemapb.FieldSchema {
 			},
 		},
 	}
+	if fieldVec.DataType != schemapb.DataType_SparseFloatVector {
+		fieldVec.TypeParams = []*commonpb.KeyValuePair{
+			{
+				Key:   dimKey,
+				Value: strconv.Itoa(param.dim),
+			},
+		}
+	}
 	return fieldVec
 }
 
-func GenTestCollectionSchema(collectionName string, pkType schemapb.DataType) *schemapb.CollectionSchema {
+// some tests do not yet support sparse float vector, see comments of
+// GenSparseFloatVecDataset in indexcgowrapper/dataset.go
+func GenTestCollectionSchema(collectionName string, pkType schemapb.DataType, withSparse bool) *schemapb.CollectionSchema {
 	fieldRowID := genConstantFieldSchema(rowIDField)
 	fieldTimestamp := genConstantFieldSchema(timestampField)
 	fieldBool := genConstantFieldSchema(simpleBoolField)
@@ -292,6 +305,10 @@ func GenTestCollectionSchema(collectionName string, pkType schemapb.DataType) *s
 		},
 	}
 
+	if withSparse {
+		schema.Fields = append(schema.Fields, genVectorFieldSchema(simpleSparseFloatVectorField))
+	}
+
 	for i, field := range schema.GetFields() {
 		field.FieldID = 100 + int64(i)
 	}
@@ -327,6 +344,14 @@ func GenTestIndexInfoList(collectionID int64, schema *schemapb.CollectionSchema)
 					{Key: common.MetricTypeKey, Value: metric.JACCARD},
 					{Key: common.IndexTypeKey, Value: IndexFaissBinIVFFlat},
 					{Key: "nlist", Value: "128"},
+				}
+			}
+		case schemapb.DataType_SparseFloatVector:
+			{
+				index.IndexParams = []*commonpb.KeyValuePair{
+					{Key: common.MetricTypeKey, Value: metric.IP},
+					{Key: common.IndexTypeKey, Value: IndexSparseWand},
+					{Key: "M", Value: "16"},
 				}
 			}
 		}
@@ -622,6 +647,7 @@ func GenTestScalarFieldData(dType schemapb.DataType, fieldName string, fieldID i
 	return ret
 }
 
+// dim is ignored for sparse
 func GenTestVectorFiledData(dType schemapb.DataType, fieldName string, fieldID int64, numRows int, dim int) *schemapb.FieldData {
 	ret := &schemapb.FieldData{
 		Type:      dType,
@@ -668,6 +694,20 @@ func GenTestVectorFiledData(dType schemapb.DataType, fieldName string, fieldID i
 				Dim: int64(dim),
 				Data: &schemapb.VectorField_Bfloat16Vector{
 					Bfloat16Vector: generateBFloat16Vectors(numRows, dim),
+				},
+			},
+		}
+	case schemapb.DataType_SparseFloatVector:
+		ret.FieldId = fieldID
+		sparseData := testutils.GenerateSparseFloatVectors(numRows)
+		ret.Field = &schemapb.FieldData_Vectors{
+			Vectors: &schemapb.VectorField{
+				Dim: sparseData.Dim,
+				Data: &schemapb.VectorField_SparseFloatVector{
+					SparseFloatVector: &schemapb.SparseFloatArray{
+						Dim:      sparseData.Dim,
+						Contents: sparseData.Contents,
+					},
 				},
 			},
 		}
@@ -864,6 +904,11 @@ func genInsertData(msgLength int, schema *schemapb.CollectionSchema) (*storage.I
 				Data: generateBinaryVectors(msgLength, dim),
 				Dim:  dim,
 			}
+		case schemapb.DataType_SparseFloatVector:
+			sparseData := testutils.GenerateSparseFloatVectors(msgLength)
+			insertData.Data[f.FieldID] = &storage.SparseFloatVectorFieldData{
+				SparseFloatArray: *sparseData,
+			}
 		default:
 			err := errors.New("data type not supported")
 			return nil, err
@@ -963,6 +1008,11 @@ func GenAndSaveIndexV2(collectionID, partitionID, segmentID, buildID int64,
 		dataset = indexcgowrapper.GenBinaryVecDataset(generateBinaryVectors(msgLength, defaultDim))
 	case schemapb.DataType_FloatVector:
 		dataset = indexcgowrapper.GenFloatVecDataset(generateFloatVectors(msgLength, defaultDim))
+	case schemapb.DataType_SparseFloatVector:
+		data := testutils.GenerateSparseFloatVectors(msgLength)
+		dataset = indexcgowrapper.GenSparseFloatVecDataset(&storage.SparseFloatVectorFieldData{
+			SparseFloatArray: *data,
+		})
 	}
 
 	err = index.Build(dataset)
@@ -1366,6 +1416,8 @@ func genInsertMsg(collection *Collection, partitionID, segment int64, numRows in
 		case schemapb.DataType_BFloat16Vector:
 			dim := simpleBFloat16VecField.dim // if no dim specified, use simpleFloatVecField's dim
 			fieldsData = append(fieldsData, GenTestVectorFiledData(f.DataType, f.Name, f.FieldID, numRows, dim))
+		case schemapb.DataType_SparseFloatVector:
+			fieldsData = append(fieldsData, GenTestVectorFiledData(f.DataType, f.Name, f.FieldID, numRows, 0))
 		default:
 			err := errors.New("data type not supported")
 			return nil, err
