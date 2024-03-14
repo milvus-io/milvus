@@ -22,9 +22,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -33,7 +30,9 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 const (
