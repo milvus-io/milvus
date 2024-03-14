@@ -41,6 +41,9 @@ const (
 
 	CargaBuildAlgoIVFPQ     = "IVF_PQ"
 	CargaBuildAlgoNNDESCENT = "NN_DESCENT"
+
+	// Sparse Index Param
+	SparseDropRatioBuild = "drop_ratio_build"
 )
 
 // METRICS is a set of all metrics types supported for float vector.
@@ -55,9 +58,11 @@ var (
 	CagraBuildAlgoTypes       = []string{CargaBuildAlgoIVFPQ, CargaBuildAlgoNNDESCENT}
 	supportDimPerSubQuantizer = []int{32, 28, 24, 20, 16, 12, 10, 8, 6, 4, 3, 2, 1}              // const
 	supportSubQuantizer       = []int{96, 64, 56, 48, 40, 32, 28, 24, 20, 16, 12, 8, 4, 3, 2, 1} // const
+	SparseMetrics             = []string{metric.IP}                                              // const
 )
 
 const (
-	FloatVectorDefaultMetricType  = metric.IP
-	BinaryVectorDefaultMetricType = metric.JACCARD
+	FloatVectorDefaultMetricType       = metric.IP
+	SparseFloatVectorDefaultMetricType = metric.IP
+	BinaryVectorDefaultMetricType      = metric.JACCARD
 )

@@ -42,7 +42,7 @@ func (suite *PlanSuite) SetupTest() {
 	suite.collectionID = 100
 	suite.partitionID = 10
 	suite.segmentID = 1
-	schema := GenTestCollectionSchema("plan-suite", schemapb.DataType_Int64)
+	schema := GenTestCollectionSchema("plan-suite", schemapb.DataType_Int64, true)
 	suite.collection = NewCollection(suite.collectionID, schema, GenTestIndexMeta(suite.collectionID, schema), querypb.LoadType_LoadCollection)
 	suite.collection.AddPartition(suite.partitionID)
 }

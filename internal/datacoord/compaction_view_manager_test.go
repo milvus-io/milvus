@@ -233,7 +233,7 @@ func (s *CompactionViewManagerSuite) TestNotifyTrigger() {
 func (s *CompactionViewManagerSuite) TestCheck() {
 	// nothing in the view before the test
 	ctx := context.Background()
-	s.Empty(s.m.view.collections)
+	s.Require().Empty(s.m.view.collections)
 	events := s.m.Check(ctx)
 
 	s.m.viewGuard.Lock()
@@ -265,6 +265,48 @@ func (s *CompactionViewManagerSuite) TestCheck() {
 	emptyEvents = s.m.Check(ctx)
 	s.Empty(emptyEvents)
 	s.Empty(s.m.view.collections)
+
+	s.Run("check collection for zero l0 segments", func() {
+		s.SetupTest()
+		ctx := context.Background()
+		s.Require().Empty(s.m.view.collections)
+		events := s.m.Check(ctx)
+
+		s.m.viewGuard.Lock()
+		views := s.m.view.GetSegmentViewBy(s.testLabel.CollectionID, nil)
+		s.m.viewGuard.Unlock()
+		s.Require().Equal(4, len(views))
+		for _, view := range views {
+			s.EqualValues(s.testLabel, view.label)
+			s.Equal(datapb.SegmentLevel_L0, view.Level)
+			s.Equal(commonpb.SegmentState_Flushed, view.State)
+			log.Info("String", zap.String("segment", view.String()))
+			log.Info("LevelZeroString", zap.String("segment", view.LevelZeroString()))
+		}
+
+		s.NotEmpty(events)
+		s.Equal(1, len(events))
+		refreshed, ok := events[TriggerTypeLevelZeroViewChange]
+		s.Require().True(ok)
+		s.Equal(1, len(refreshed))
+
+		// All l0 segments are dropped in the collection
+		// and there're still some L1 segments
+		s.m.meta.Lock()
+		s.m.meta.segments.segments = map[int64]*SegmentInfo{
+			2000: genTestSegmentInfo(s.testLabel, 2000, datapb.SegmentLevel_L0, commonpb.SegmentState_Dropped),
+			2001: genTestSegmentInfo(s.testLabel, 2001, datapb.SegmentLevel_L0, commonpb.SegmentState_Dropped),
+			2003: genTestSegmentInfo(s.testLabel, 2003, datapb.SegmentLevel_L0, commonpb.SegmentState_Dropped),
+			3000: genTestSegmentInfo(s.testLabel, 2003, datapb.SegmentLevel_L1, commonpb.SegmentState_Flushed),
+		}
+		s.m.meta.Unlock()
+		events = s.m.Check(ctx)
+		s.Empty(events)
+		s.m.viewGuard.Lock()
+		views = s.m.view.GetSegmentViewBy(s.testLabel.CollectionID, nil)
+		s.m.viewGuard.Unlock()
+		s.Equal(0, len(views))
+	})
 }
 
 func genTestSegmentInfo(label *CompactionGroupLabel, ID UniqueID, level datapb.SegmentLevel, state commonpb.SegmentState) *SegmentInfo {

@@ -85,6 +85,10 @@ func (v *validateUtil) Validate(data []*schemapb.FieldData, schema *schemapb.Col
 			if err := v.checkBinaryVectorFieldData(field, fieldSchema); err != nil {
 				return err
 			}
+		case schemapb.DataType_SparseFloatVector:
+			if err := v.checkSparseFloatFieldData(field, fieldSchema); err != nil {
+				return err
+			}
 		case schemapb.DataType_VarChar:
 			if err := v.checkVarCharFieldData(field, fieldSchema); err != nil {
 				return err
@@ -205,6 +209,13 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 			if n != numRows {
 				return errNumRowsMismatch(field.GetFieldName(), n)
 			}
+
+		case schemapb.DataType_SparseFloatVector:
+			n := uint64(len(field.GetVectors().GetSparseFloatVector().Contents))
+			if n != numRows {
+				return errNumRowsMismatch(field.GetFieldName(), n)
+			}
+
 		default:
 			// error won't happen here.
 			n, err := funcutil.GetNumRowOfFieldData(field)
@@ -324,6 +335,19 @@ func (v *validateUtil) checkBFloat16VectorFieldData(field *schemapb.FieldData, f
 func (v *validateUtil) checkBinaryVectorFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
 	// TODO
 	return nil
+}
+
+func (v *validateUtil) checkSparseFloatFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
+	if field.GetVectors() == nil || field.GetVectors().GetSparseFloatVector() == nil {
+		msg := fmt.Sprintf("sparse float field '%v' is illegal, nil SparseFloatVector", field.GetFieldName())
+		return merr.WrapErrParameterInvalid("need sparse float array", "got nil", msg)
+	}
+	sparseRows := field.GetVectors().GetSparseFloatVector().GetContents()
+	if sparseRows == nil {
+		msg := fmt.Sprintf("sparse float field '%v' is illegal, array type mismatch", field.GetFieldName())
+		return merr.WrapErrParameterInvalid("need sparse float array", "got nil", msg)
+	}
+	return typeutil.ValidateSparseFloatRows(sparseRows...)
 }
 
 func (v *validateUtil) checkVarCharFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
