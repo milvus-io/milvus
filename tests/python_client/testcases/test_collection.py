@@ -3072,7 +3072,7 @@ class TestDescribeCollection(TestcaseBase):
                          'element_type': 0},
                         {'field_id': 104, 'name': 'float_vector', 'description': '', 'type': 101,
                          'params': {'dim': 128}, 'element_type': 0}],
-             'aliases': [], 'consistency_level': 0, 'properties': {}, 'num_partitions': 1}
+             'aliases': [], 'consistency_level': 0, 'properties': {}, 'num_partitions': 1, 'enable_dynamic_field': False}
         res = collection_w.describe()[0]
         del res['collection_id']
         log.info(res)
@@ -4040,21 +4040,21 @@ class TestCollectionARRAY(TestcaseBase):
             {"field_id": 101, "name": "float_vector", "description": "", "type": 101,
              "params": {"dim": ct.default_dim}, "element_type": 0},
             {"field_id": 102, "name": "int8_array", "description": "", "type": 22,
-             "params": {"max_capacity": "2000"}, "element_type": 2},
+             "params": {"max_capacity": 2000}, "element_type": 2},
             {"field_id": 103, "name": "int16_array", "description": "", "type": 22,
-             "params": {"max_capacity": "2000"}, "element_type": 3},
+             "params": {"max_capacity": 2000}, "element_type": 3},
             {"field_id": 104, "name": "int32_array", "description": "", "type": 22,
-             "params": {"max_capacity": "2000"}, "element_type": 4},
+             "params": {"max_capacity": 2000}, "element_type": 4},
             {"field_id": 105, "name": "int64_array", "description": "", "type": 22,
-             "params": {"max_capacity": "2000"}, "element_type": 5},
+             "params": {"max_capacity": 2000}, "element_type": 5},
             {"field_id": 106, "name": "bool_array", "description": "", "type": 22,
-             "params": {"max_capacity": "2000"}, "element_type": 1},
+             "params": {"max_capacity": 2000}, "element_type": 1},
             {"field_id": 107, "name": "float_array", "description": "", "type": 22,
-             "params": {"max_capacity": "2000"}, "element_type": 10},
+             "params": {"max_capacity": 2000}, "element_type": 10},
             {"field_id": 108, "name": "double_array", "description": "", "type": 22,
-             "params": {"max_capacity": "2000"}, "element_type": 11},
+             "params": {"max_capacity": 2000}, "element_type": 11},
             {"field_id": 109, "name": "string_array", "description": "", "type": 22,
-             "params": {"max_length": "100", "max_capacity": "2000"}, "element_type": 21}
+             "params": {"max_length": 100, "max_capacity": 2000}, "element_type": 21}
         ]
         assert res["fields"] == fields
 
