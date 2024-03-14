@@ -526,6 +526,7 @@ func (ex *Executor) removeDistribution(task *LeaderTask, step int) error {
 			{
 				Type:      querypb.SyncType_Remove,
 				SegmentID: action.SegmentID(),
+				NodeID:    action.Node(),
 			},
 		},
 	}
