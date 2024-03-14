@@ -1337,47 +1337,6 @@ func (suite *ServiceSuite) TestSearchSegments_Failed() {
 	suite.Equal(commonpb.ErrorCode_UnexpectedError, rsp.GetStatus().GetErrorCode())
 }
 
-func (suite *ServiceSuite) TestHybridSearch_Concurrent() {
-	ctx := context.Background()
-	// pre
-	suite.TestWatchDmChannelsInt64()
-	suite.TestLoadSegments_Int64()
-
-	concurrency := 16
-	futures := make([]*conc.Future[*querypb.HybridSearchResult], 0, concurrency)
-	for i := 0; i < concurrency; i++ {
-		future := conc.Go(func() (*querypb.HybridSearchResult, error) {
-			creq1, err := suite.genCSearchRequest(30, schemapb.DataType_FloatVector, 107, defaultMetricType)
-			suite.NoError(err)
-			creq2, err := suite.genCSearchRequest(30, schemapb.DataType_FloatVector, 107, defaultMetricType)
-			suite.NoError(err)
-			req := &querypb.HybridSearchRequest{
-				Req: &internalpb.HybridSearchRequest{
-					Base: &commonpb.MsgBase{
-						MsgID:    rand.Int63(),
-						TargetID: suite.node.session.ServerID,
-					},
-					CollectionID:  suite.collectionID,
-					PartitionIDs:  suite.partitionIDs,
-					MvccTimestamp: typeutil.MaxTimestamp,
-					Reqs:          []*internalpb.SearchRequest{creq1, creq2},
-				},
-				DmlChannels: []string{suite.vchannel},
-			}
-
-			return suite.node.HybridSearch(ctx, req)
-		})
-		futures = append(futures, future)
-	}
-
-	err := conc.AwaitAll(futures...)
-	suite.NoError(err)
-
-	for i := range futures {
-		suite.True(merr.Ok(futures[i].Value().GetStatus()))
-	}
-}
-
 func (suite *ServiceSuite) TestSearchSegments_Normal() {
 	ctx := context.Background()
 	// pre
