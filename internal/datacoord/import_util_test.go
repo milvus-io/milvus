@@ -329,7 +329,7 @@ func TestImportUtil_ListBinlogsAndGroupBySegment(t *testing.T) {
 	cm.EXPECT().ListWithPrefix(mock.Anything, insertPrefix, mock.Anything).Return(segmentInsertPaths, nil, nil)
 	cm.EXPECT().Exist(mock.Anything, deltaPrefix).Return(false, nil)
 	_, err = ListBinlogsAndGroupBySegment(ctx, cm, file)
-	assert.Error(t, err)
+	assert.NoError(t, err)
 }
 
 func TestImportUtil_GetImportProgress(t *testing.T) {

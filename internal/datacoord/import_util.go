@@ -429,7 +429,8 @@ func ListBinlogsAndGroupBySegment(ctx context.Context, cm storage.ChunkManager, 
 		return nil, err
 	}
 	if !ok {
-		return nil, fmt.Errorf("delta binlog prefix does not exist, path=%s", deltaPrefix)
+		log.Warn("delta binlog prefix does not exist", zap.String("path", deltaPrefix))
+		return segmentImportFiles, nil
 	}
 	segmentDeltaPaths, _, err := cm.ListWithPrefix(context.Background(), deltaPrefix, false)
 	if err != nil {
