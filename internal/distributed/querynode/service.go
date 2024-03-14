@@ -387,8 +387,3 @@ func (s *Server) SyncDistribution(ctx context.Context, req *querypb.SyncDistribu
 func (s *Server) Delete(ctx context.Context, req *querypb.DeleteRequest) (*commonpb.Status, error) {
 	return s.querynode.Delete(ctx, req)
 }
-
-// HybridSearch performs hybrid search of streaming/historical replica on QueryNode.
-func (s *Server) HybridSearch(ctx context.Context, req *querypb.HybridSearchRequest) (*querypb.HybridSearchResult, error) {
-	return s.querynode.HybridSearch(ctx, req)
-}

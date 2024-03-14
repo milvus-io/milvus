@@ -62,7 +62,6 @@ type ShardDelegator interface {
 	GetSegmentInfo(readable bool) (sealed []SnapshotItem, growing []SegmentEntry)
 	SyncDistribution(ctx context.Context, entries ...SegmentEntry)
 	Search(ctx context.Context, req *querypb.SearchRequest) ([]*internalpb.SearchResults, error)
-	HybridSearch(ctx context.Context, req *querypb.HybridSearchRequest) (*querypb.HybridSearchResult, error)
 	Query(ctx context.Context, req *querypb.QueryRequest) ([]*internalpb.RetrieveResults, error)
 	QueryStream(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error
 	GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest) ([]*internalpb.GetStatisticsResponse, error)
@@ -267,113 +266,79 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 		return funcutil.SliceContain(existPartitions, segment.PartitionID)
 	})
 
+	if req.GetReq().GetIsAdvanced() {
+		futures := make([]*conc.Future[*internalpb.SearchResults], len(req.GetReq().GetSubReqs()))
+		for index, subReq := range req.GetReq().GetSubReqs() {
+			newRequest := &internalpb.SearchRequest{
+				Base:               req.GetReq().GetBase(),
+				ReqID:              req.GetReq().GetReqID(),
+				DbID:               req.GetReq().GetDbID(),
+				CollectionID:       req.GetReq().GetCollectionID(),
+				PartitionIDs:       subReq.GetPartitionIDs(),
+				Dsl:                subReq.GetDsl(),
+				PlaceholderGroup:   subReq.GetPlaceholderGroup(),
+				DslType:            subReq.GetDslType(),
+				SerializedExprPlan: subReq.GetSerializedExprPlan(),
+				OutputFieldsId:     req.GetReq().GetOutputFieldsId(),
+				MvccTimestamp:      req.GetReq().GetMvccTimestamp(),
+				GuaranteeTimestamp: req.GetReq().GetGuaranteeTimestamp(),
+				TimeoutTimestamp:   req.GetReq().GetTimeoutTimestamp(),
+				Nq:                 subReq.GetNq(),
+				Topk:               subReq.GetTopk(),
+				MetricType:         subReq.GetMetricType(),
+				IgnoreGrowing:      req.GetReq().GetIgnoreGrowing(),
+				Username:           req.GetReq().GetUsername(),
+				IsAdvanced:         false,
+			}
+			future := conc.Go(func() (*internalpb.SearchResults, error) {
+				searchReq := &querypb.SearchRequest{
+					Req:             newRequest,
+					DmlChannels:     req.GetDmlChannels(),
+					TotalChannelNum: req.GetTotalChannelNum(),
+					FromShardLeader: true,
+				}
+				searchReq.Req.GuaranteeTimestamp = req.GetReq().GetGuaranteeTimestamp()
+				searchReq.Req.TimeoutTimestamp = req.GetReq().GetTimeoutTimestamp()
+				if searchReq.GetReq().GetMvccTimestamp() == 0 {
+					searchReq.GetReq().MvccTimestamp = tSafe
+				}
+
+				results, err := sd.search(ctx, searchReq, sealed, growing)
+				if err != nil {
+					return nil, err
+				}
+
+				return segments.ReduceSearchResults(ctx,
+					results,
+					searchReq.Req.GetNq(),
+					searchReq.Req.GetTopk(),
+					searchReq.Req.GetMetricType())
+			})
+			futures[index] = future
+		}
+
+		err = conc.AwaitAll(futures...)
+		if err != nil {
+			return nil, err
+		}
+		results := make([]*internalpb.SearchResults, len(futures))
+		for i, future := range futures {
+			result := future.Value()
+			if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+				log.Debug("delegator hybrid search failed",
+					zap.String("reason", result.GetStatus().GetReason()))
+				return nil, merr.Error(result.GetStatus())
+			}
+			results[i] = result
+		}
+		var ret *internalpb.SearchResults
+		ret, err = segments.MergeToAdvancedResults(ctx, results)
+		if err != nil {
+			return nil, err
+		}
+		return []*internalpb.SearchResults{ret}, nil
+	}
 	return sd.search(ctx, req, sealed, growing)
-}
-
-// HybridSearch preforms hybrid search operation on shard.
-func (sd *shardDelegator) HybridSearch(ctx context.Context, req *querypb.HybridSearchRequest) (*querypb.HybridSearchResult, error) {
-	log := sd.getLogger(ctx)
-	if err := sd.lifetime.Add(lifetime.IsWorking); err != nil {
-		return nil, err
-	}
-	defer sd.lifetime.Done()
-
-	if !funcutil.SliceContain(req.GetDmlChannels(), sd.vchannelName) {
-		log.Warn("deletgator received hybrid search request not belongs to it",
-			zap.Strings("reqChannels", req.GetDmlChannels()),
-		)
-		return nil, fmt.Errorf("dml channel not match, delegator channel %s, search channels %v", sd.vchannelName, req.GetDmlChannels())
-	}
-
-	partitions := req.GetReq().GetPartitionIDs()
-	if !sd.collection.ExistPartition(partitions...) {
-		return nil, merr.WrapErrPartitionNotLoaded(partitions)
-	}
-
-	// wait tsafe
-	waitTr := timerecord.NewTimeRecorder("wait tSafe")
-	tSafe, err := sd.waitTSafe(ctx, req.Req.GuaranteeTimestamp)
-	if err != nil {
-		log.Warn("delegator hybrid search failed to wait tsafe", zap.Error(err))
-		return nil, err
-	}
-	if req.GetReq().GetMvccTimestamp() == 0 {
-		req.Req.MvccTimestamp = tSafe
-	}
-	metrics.QueryNodeSQLatencyWaitTSafe.WithLabelValues(
-		fmt.Sprint(paramtable.GetNodeID()), metrics.HybridSearchLabel).
-		Observe(float64(waitTr.ElapseSpan().Milliseconds()))
-
-	sealed, growing, version, err := sd.distribution.PinReadableSegments(req.GetReq().GetPartitionIDs()...)
-	if err != nil {
-		log.Warn("delegator failed to hybrid search, current distribution is not serviceable")
-		return nil, merr.WrapErrChannelNotAvailable(sd.vchannelName, "distribution is not servcieable")
-	}
-	defer sd.distribution.Unpin(version)
-	existPartitions := sd.collection.GetPartitions()
-	growing = lo.Filter(growing, func(segment SegmentEntry, _ int) bool {
-		return funcutil.SliceContain(existPartitions, segment.PartitionID)
-	})
-
-	futures := make([]*conc.Future[*internalpb.SearchResults], len(req.GetReq().GetReqs()))
-	for index := range req.GetReq().GetReqs() {
-		request := req.GetReq().Reqs[index]
-		future := conc.Go(func() (*internalpb.SearchResults, error) {
-			searchReq := &querypb.SearchRequest{
-				Req:             request,
-				DmlChannels:     req.GetDmlChannels(),
-				TotalChannelNum: req.GetTotalChannelNum(),
-				FromShardLeader: true,
-			}
-			searchReq.Req.GuaranteeTimestamp = req.GetReq().GetGuaranteeTimestamp()
-			searchReq.Req.TimeoutTimestamp = req.GetReq().GetTimeoutTimestamp()
-			if searchReq.GetReq().GetMvccTimestamp() == 0 {
-				searchReq.GetReq().MvccTimestamp = tSafe
-			}
-
-			results, err := sd.search(ctx, searchReq, sealed, growing)
-			if err != nil {
-				return nil, err
-			}
-
-			return segments.ReduceSearchResults(ctx,
-				results,
-				searchReq.Req.GetNq(),
-				searchReq.Req.GetTopk(),
-				searchReq.Req.GetMetricType())
-		})
-		futures[index] = future
-	}
-
-	err = conc.AwaitAll(futures...)
-	if err != nil {
-		return nil, err
-	}
-
-	ret := &querypb.HybridSearchResult{
-		Status:  merr.Success(),
-		Results: make([]*internalpb.SearchResults, len(futures)),
-	}
-
-	channelsMvcc := make(map[string]uint64)
-	for i, future := range futures {
-		result := future.Value()
-		if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-			log.Debug("delegator hybrid search failed",
-				zap.String("reason", result.GetStatus().GetReason()))
-			return nil, merr.Error(result.GetStatus())
-		}
-
-		ret.Results[i] = result
-		for ch, ts := range result.GetChannelsMvcc() {
-			channelsMvcc[ch] = ts
-		}
-	}
-	ret.ChannelsMvcc = channelsMvcc
-
-	log.Debug("Delegator hybrid search done")
-
-	return ret, nil
 }
 
 func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error {
