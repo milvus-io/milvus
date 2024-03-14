@@ -102,8 +102,9 @@ CheckSearchResultDuplicate(const std::vector<CSearchResult>& results) {
                 auto ret = pk_set.insert(search_result->primary_keys_[ki]);
                 ASSERT_TRUE(ret.second);
 
-                if (search_result->group_by_values_.size() > ki) {
-                    auto group_by_val = search_result->group_by_values_[ki];
+                if (search_result->group_by_values_.value().size() > ki) {
+                    auto group_by_val =
+                        search_result->group_by_values_.value()[ki];
                     ASSERT_TRUE(group_by_val_set.count(group_by_val) == 0);
                     group_by_val_set.insert(group_by_val);
                 }
