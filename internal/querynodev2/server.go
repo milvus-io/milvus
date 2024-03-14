@@ -453,8 +453,7 @@ func (node *QueryNode) Stop() error {
 		if node.pipelineManager != nil {
 			node.pipelineManager.Close()
 		}
-		// Delay the cancellation of ctx to ensure that the session is automatically recycled after closed the pipeline
-		node.cancel()
+
 		if node.session != nil {
 			node.session.Stop()
 		}
@@ -466,6 +465,9 @@ func (node *QueryNode) Stop() error {
 		}
 
 		node.CloseSegcore()
+
+		// Delay the cancellation of ctx to ensure that the session is automatically recycled after closed the pipeline
+		node.cancel()
 	})
 	return nil
 }

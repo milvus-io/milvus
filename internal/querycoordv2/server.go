@@ -460,11 +460,6 @@ func (s *Server) startServerLoop() {
 }
 
 func (s *Server) Stop() error {
-	// stop the components from outside to inside,
-	// to make the dependencies stopped working properly,
-	// cancel the server context first to stop receiving requests
-	s.cancel()
-
 	// FOLLOW the dependence graph:
 	// job scheduler -> checker controller -> task scheduler -> dist controller -> cluster -> session
 	// observers -> dist controller
@@ -515,6 +510,7 @@ func (s *Server) Stop() error {
 		s.session.Stop()
 	}
 
+	s.cancel()
 	s.wg.Wait()
 	log.Info("QueryCoord stop successfully")
 	return nil

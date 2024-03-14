@@ -247,7 +247,6 @@ func (i *IndexNode) Stop() error {
 				task.cancel()
 			}
 		}
-		i.loopCancel()
 		if i.sched != nil {
 			i.sched.Close()
 		}
@@ -256,6 +255,7 @@ func (i *IndexNode) Stop() error {
 		}
 
 		i.CloseSegcore()
+		i.loopCancel()
 		log.Info("Index node stopped.")
 	})
 	return nil

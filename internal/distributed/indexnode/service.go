@@ -61,7 +61,7 @@ type Server struct {
 
 	loopCtx    context.Context
 	loopCancel func()
-	loopWg     sync.WaitGroup
+	grpcWG     sync.WaitGroup
 
 	etcdCli *clientv3.Client
 }
@@ -81,7 +81,7 @@ func (s *Server) Run() error {
 
 // startGrpcLoop starts the grep loop of IndexNode component.
 func (s *Server) startGrpcLoop(grpcPort int) {
-	defer s.loopWg.Done()
+	defer s.grpcWG.Done()
 
 	Params := &paramtable.Get().IndexNodeGrpcServerCfg
 	log.Debug("IndexNode", zap.String("network address", Params.GetAddress()), zap.Int("network port: ", grpcPort))
@@ -159,7 +159,7 @@ func (s *Server) init() error {
 		}
 	}()
 
-	s.loopWg.Add(1)
+	s.grpcWG.Add(1)
 	go s.startGrpcLoop(Params.Port.GetAsInt())
 	// wait for grpc server loop start
 	err = <-s.grpcErrChan
@@ -217,17 +217,21 @@ func (s *Server) Stop() (err error) {
 	}()
 
 	if s.indexnode != nil {
-		s.indexnode.Stop()
+		err := s.indexnode.Stop()
+		if err != nil {
+			log.Error("failed to close indexnode", zap.Error(err))
+			return err
+		}
 	}
-	s.loopCancel()
 	if s.etcdCli != nil {
 		defer s.etcdCli.Close()
 	}
 	if s.grpcServer != nil {
 		utils.GracefulStopGRPCServer(s.grpcServer)
 	}
-	s.loopWg.Wait()
+	s.grpcWG.Wait()
 
+	s.loopCancel()
 	return nil
 }
 

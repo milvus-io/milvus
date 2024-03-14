@@ -398,8 +398,6 @@ func (node *DataNode) Stop() error {
 		// https://github.com/milvus-io/milvus/issues/12282
 		node.UpdateStateCode(commonpb.StateCode_Abnormal)
 		node.flowgraphManager.close()
-		// Delay the cancellation of ctx to ensure that the session is automatically recycled after closed the flow graph
-		node.cancel()
 
 		node.eventManagerMap.Range(func(_ string, m *channelEventManager) bool {
 			m.Close()
@@ -427,6 +425,8 @@ func (node *DataNode) Stop() error {
 			node.channelCheckpointUpdater.close()
 		}
 
+		// Delay the cancellation of ctx to ensure that the session is automatically recycled after closed the flow graph
+		node.cancel()
 		node.stopWaiter.Wait()
 	})
 	return nil
