@@ -328,6 +328,9 @@ func (c *compactionPlanHandler) RefreshPlan(task *compactionTask) error {
 				info.GetLevel() != datapb.SegmentLevel_L0 &&
 				info.GetDmlPosition().GetTimestamp() < task.triggerInfo.pos.GetTimestamp()
 		})
+		if len(sealedSegments) == 0 {
+			return errors.Errorf("Selected zero L1/L2 segments for the position=%v", task.triggerInfo.pos)
+		}
 
 		sealedSegBinlogs := lo.Map(sealedSegments, func(info *SegmentInfo, _ int) *datapb.CompactionSegmentBinlogs {
 			return &datapb.CompactionSegmentBinlogs{
