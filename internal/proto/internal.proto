@@ -309,9 +309,10 @@ message GetImportProgressRequest {
 message ImportTaskProgress {
   string file_name = 1;
   int64 file_size = 2;
-  string reason = 3;
-  int64 progress = 4;
-  string complete_time = 5;
+  string state = 3;
+  string reason = 4;
+  int64 progress = 5;
+  string complete_time = 6;
 }
 
 message GetImportProgressResponse {

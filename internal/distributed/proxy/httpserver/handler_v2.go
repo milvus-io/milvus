@@ -1821,6 +1821,7 @@ func (h *HandlersV2) getImportJobProcess(ctx context.Context, c *gin.Context, an
 		returnData := make(map[string]interface{})
 		returnData["jobId"] = jobIDGetter.GetJobID()
 		returnData["collectionName"] = response.GetCollectionName()
+		returnData["completeTime"] = response.GetCompleteTime()
 		returnData["state"] = response.GetState().String()
 		returnData["progress"] = response.GetProgress()
 		reason := response.GetReason()
@@ -1834,6 +1835,7 @@ func (h *HandlersV2) getImportJobProcess(ctx context.Context, c *gin.Context, an
 			detail["fileSize"] = taskProgress.GetFileSize()
 			detail["progress"] = taskProgress.GetProgress()
 			detail["completeTime"] = taskProgress.GetCompleteTime()
+			detail["state"] = taskProgress.GetState()
 			reason = taskProgress.GetReason()
 			if reason != "" {
 				detail["reason"] = reason
