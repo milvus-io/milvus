@@ -51,6 +51,11 @@ func NewCompactionTriggerManager(alloc allocator, handler compactionPlanContext)
 func (m *CompactionTriggerManager) Notify(taskID UniqueID, eventType CompactionTriggerType, views []CompactionView) {
 	log := log.With(zap.Int64("taskID", taskID))
 	for _, view := range views {
+		if m.handler.isFull() {
+			log.RatedInfo(1.0, "Skip trigger compaction for scheduler is full")
+			return
+		}
+
 		switch eventType {
 		case TriggerTypeLevelZeroViewChange:
 			log.Debug("Start to trigger a level zero compaction by TriggerTypeLevelZeroViewChange")
