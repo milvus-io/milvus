@@ -698,7 +698,6 @@ func (h *HandlersV1) insert(c *gin.Context) {
 	req := &milvuspb.InsertRequest{
 		DbName:         httpReq.DbName,
 		CollectionName: httpReq.CollectionName,
-		PartitionName:  "_default",
 		NumRows:        uint32(len(httpReq.Data)),
 	}
 	username, _ := c.Get(ContextUsername)
@@ -790,7 +789,6 @@ func (h *HandlersV1) upsert(c *gin.Context) {
 	req := &milvuspb.UpsertRequest{
 		DbName:         httpReq.DbName,
 		CollectionName: httpReq.CollectionName,
-		PartitionName:  "_default",
 		NumRows:        uint32(len(httpReq.Data)),
 	}
 	username, _ := c.Get(ContextUsername)
