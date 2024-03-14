@@ -128,15 +128,6 @@ func (s *importScheduler) process() {
 	}
 }
 
-func (s *importScheduler) resetTask(task ImportTask, err error) {
-	err2 := s.imeta.UpdateTask(task.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Pending))
-	if err2 != nil {
-		log.Warn("failed to update import task state to pending", WrapTaskLog(task, zap.Error(err2))...)
-		return
-	}
-	log.Info("reset task state to pending due to error occurs", WrapTaskLog(task, zap.Error(err))...)
-}
-
 func (s *importScheduler) peekSlots() map[int64]int64 {
 	nodeIDs := lo.Map(s.cluster.GetSessions(), func(s *Session, _ int) int64 {
 		return s.info.NodeID
