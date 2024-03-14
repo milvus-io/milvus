@@ -26,7 +26,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
@@ -63,22 +62,25 @@ func searchSegments(ctx context.Context, mgr *Manager, segments []Segment, segTy
 			// record search time
 			tr := timerecord.NewTimeRecorder("searchOnSegments")
 			if seg.LoadStatus() == LoadStatusMeta {
-				item, ok := mgr.DiskCache.GetAndPin(seg.ID())
-				if !ok {
-					errs[i] = merr.WrapErrSegmentNotLoaded(seg.ID())
+				err := mgr.DiskCache.Do(seg.ID(), func(s Segment) error {
+					searchResult, err := seg.Search(ctx, searchReq)
+					if err != nil {
+						return err
+					}
+					resultCh <- searchResult
+					// update metrics
+					elapsed := tr.ElapseSpan().Milliseconds()
+					metrics.QueryNodeSQSegmentLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+						metrics.SearchLabel, searchLabel).Observe(float64(elapsed))
+					metrics.QueryNodeSegmentSearchLatencyPerVector.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+						metrics.SearchLabel, searchLabel).Observe(float64(elapsed) / float64(searchReq.getNumOfQuery()))
+					return nil
+				})
+				if err != nil {
+					errs[i] = err
 					return
 				}
-				defer item.Unpin()
 			}
-			searchResult, err := seg.Search(ctx, searchReq)
-			errs[i] = err
-			resultCh <- searchResult
-			// update metrics
-			elapsed := tr.ElapseSpan().Milliseconds()
-			metrics.QueryNodeSQSegmentLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
-				metrics.SearchLabel, searchLabel).Observe(float64(elapsed))
-			metrics.QueryNodeSegmentSearchLatencyPerVector.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
-				metrics.SearchLabel, searchLabel).Observe(float64(elapsed) / float64(searchReq.getNumOfQuery()))
 		}(segment, i)
 	}
 	wg.Wait()

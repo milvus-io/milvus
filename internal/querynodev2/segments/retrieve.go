@@ -55,23 +55,20 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 			defer wg.Done()
 			tr := timerecord.NewTimeRecorder("retrieveOnSegments")
 			if seg.LoadStatus() == LoadStatusMeta {
-				item, ok := mgr.DiskCache.GetAndPin(seg.ID())
-				if !ok {
-					errs[i] = merr.WrapErrSegmentNotLoaded(seg.ID())
-					return
+				err := mgr.DiskCache.Do(seg.ID(), func(s Segment) error {
+					result, err := seg.Retrieve(ctx, plan)
+					if err != nil {
+						return err
+					}
+					resultCh <- result
+					metrics.QueryNodeSQSegmentLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+						metrics.QueryLabel, label).Observe(float64(tr.ElapseSpan().Milliseconds()))
+					return nil
+				})
+				if err != nil {
+					errs[i] = err
 				}
-				defer item.Unpin()
 			}
-
-			result, err := seg.Retrieve(ctx, plan)
-			if err != nil {
-				errs[i] = err
-				return
-			}
-			errs[i] = nil
-			resultCh <- result
-			metrics.QueryNodeSQSegmentLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
-				metrics.QueryLabel, label).Observe(float64(tr.ElapseSpan().Milliseconds()))
 		}(segment, i)
 	}
 	wg.Wait()
