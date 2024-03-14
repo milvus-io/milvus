@@ -61,7 +61,7 @@ func (suite *SearchSuite) SetupTest() {
 	suite.segmentID = 1
 
 	suite.manager = NewManager()
-	schema := GenTestCollectionSchema("test-reduce", schemapb.DataType_Int64)
+	schema := GenTestCollectionSchema("test-reduce", schemapb.DataType_Int64, true)
 	indexMeta := GenTestIndexMeta(suite.collectionID, schema)
 	suite.manager.Collection.PutOrRef(suite.collectionID,
 		schema,

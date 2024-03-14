@@ -58,7 +58,7 @@ func (suite *InsertNodeSuite) SetupSuite() {
 
 func (suite *InsertNodeSuite) TestBasic() {
 	// data
-	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64)
+	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, true)
 	in := suite.buildInsertNodeMsg(schema)
 
 	collection := segments.NewCollection(suite.collectionID, schema, segments.GenTestIndexMeta(suite.collectionID, schema), querypb.LoadType_LoadCollection)
@@ -92,7 +92,7 @@ func (suite *InsertNodeSuite) TestBasic() {
 }
 
 func (suite *InsertNodeSuite) TestDataTypeNotSupported() {
-	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64)
+	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, true)
 	in := suite.buildInsertNodeMsg(schema)
 
 	collection := segments.NewCollection(suite.collectionID, schema, segments.GenTestIndexMeta(suite.collectionID, schema), querypb.LoadType_LoadCollection)

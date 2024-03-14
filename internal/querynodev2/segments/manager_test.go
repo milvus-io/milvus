@@ -43,7 +43,7 @@ func (s *ManagerSuite) SetupTest() {
 	s.mgr = NewSegmentManager()
 
 	for i, id := range s.segmentIDs {
-		schema := GenTestCollectionSchema("manager-suite", schemapb.DataType_Int64)
+		schema := GenTestCollectionSchema("manager-suite", schemapb.DataType_Int64, true)
 		segment, err := NewSegment(
 			context.Background(),
 			NewCollection(s.collectionIDs[i], schema, GenTestIndexMeta(s.collectionIDs[i], schema), querypb.LoadType_LoadCollection),

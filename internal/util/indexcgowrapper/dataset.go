@@ -41,6 +41,16 @@ func GenBFloat16VecDataset(vectors []byte) *Dataset {
 	}
 }
 
+func GenSparseFloatVecDataset(data *storage.SparseFloatVectorFieldData) *Dataset {
+	// TODO(SPARSE): This is used only for testing. In order to make any golang
+	// tests that uses this method work, we'll need to expose
+	// knowhere::sparse::SparseRow to Go, which is the accepted format in cgo
+	// wrapper. Such tests are skipping sparse vector for now.
+	return &Dataset{
+		DType: schemapb.DataType_SparseFloatVector,
+	}
+}
+
 func GenBinaryVecDataset(vectors []byte) *Dataset {
 	return &Dataset{
 		DType: schemapb.DataType_BinaryVector,
@@ -116,6 +126,8 @@ func GenDataset(data storage.FieldData) *Dataset {
 		return GenFloat16VecDataset(f.Data)
 	case *storage.BFloat16VectorFieldData:
 		return GenBFloat16VecDataset(f.Data)
+	case *storage.SparseFloatVectorFieldData:
+		return GenSparseFloatVecDataset(f)
 	default:
 		return &Dataset{
 			DType: schemapb.DataType_None,

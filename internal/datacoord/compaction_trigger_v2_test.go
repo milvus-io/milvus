@@ -61,7 +61,8 @@ func (s *CompactionTriggerManagerSuite) TestNotifyByViewIDLE() {
 	expectedSegID := seg1.ID
 
 	s.Require().Equal(1, len(latestL0Segments))
-	levelZeroView := viewManager.getChangedLevelZeroViews(1, latestL0Segments)
+	needRefresh, levelZeroView := viewManager.getChangedLevelZeroViews(1, latestL0Segments)
+	s.True(needRefresh)
 	s.Require().Equal(1, len(levelZeroView))
 	cView, ok := levelZeroView[0].(*LevelZeroSegmentsView)
 	s.True(ok)
@@ -107,7 +108,8 @@ func (s *CompactionTriggerManagerSuite) TestNotifyByViewChange() {
 
 	latestL0Segments := GetViewsByInfo(levelZeroSegments...)
 	s.Require().NotEmpty(latestL0Segments)
-	levelZeroView := viewManager.getChangedLevelZeroViews(1, latestL0Segments)
+	needRefresh, levelZeroView := viewManager.getChangedLevelZeroViews(1, latestL0Segments)
+	s.Require().True(needRefresh)
 	s.Require().Equal(1, len(levelZeroView))
 	cView, ok := levelZeroView[0].(*LevelZeroSegmentsView)
 	s.True(ok)
