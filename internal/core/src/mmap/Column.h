@@ -326,10 +326,9 @@ class VariableColumn : public ColumnBase {
             indices_ = std::move(indices);
         }
 
+        num_rows_ = indices_.size();
         // for variable length memory mode only
         if (data_ == nullptr) {
-            num_rows_ = indices_.size();
-
             size_t total_size = size_;
             size_ = 0;
             Expand(total_size);
