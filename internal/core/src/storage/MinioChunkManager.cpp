@@ -323,11 +323,14 @@ MinioChunkManager::MinioChunkManager(const StorageConfig& storage_config)
 
     if (storage_config.useSSL) {
         config.scheme = Aws::Http::Scheme::HTTPS;
-        config.verifySSL = true;
     } else {
         config.scheme = Aws::Http::Scheme::HTTP;
-        config.verifySSL = false;
     }
+
+    if (!storage_config.sslCACert.empty()) {
+        config.caPath = ConvertToAwsString(storage_config.sslCACert);
+    }
+    config.verifySSL = false;
 
     config.requestTimeoutMs = storage_config.requestTimeoutMs == 0
                                   ? DEFAULT_CHUNK_MANAGER_REQUEST_TIMEOUT_MS

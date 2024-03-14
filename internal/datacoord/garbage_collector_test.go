@@ -19,6 +19,7 @@ package datacoord
 import (
 	"bytes"
 	"context"
+	"os"
 	"path"
 	"strconv"
 	"strings"
@@ -246,6 +247,14 @@ func Test_garbageCollector_scan(t *testing.T) {
 // initialize unit test sso env
 func initUtOSSEnv(bucket, root string, n int) (mcm *storage.MinioChunkManager, inserts []string, stats []string, delta []string, other []string, err error) {
 	paramtable.Init()
+
+	if Params.MinioCfg.UseSSL.GetAsBool() && len(Params.MinioCfg.SslCACert.GetValue()) > 0 {
+		err := os.Setenv("SSL_CERT_FILE", Params.MinioCfg.SslCACert.GetValue())
+		if err != nil {
+			return nil, nil, nil, nil, nil, err
+		}
+	}
+
 	cli, err := minio.New(Params.MinioCfg.Address.GetValue(), &minio.Options{
 		Creds:  credentials.NewStaticV4(Params.MinioCfg.AccessKeyID.GetValue(), Params.MinioCfg.SecretAccessKey.GetValue(), ""),
 		Secure: Params.MinioCfg.UseSSL.GetAsBool(),
