@@ -18,8 +18,12 @@ package datacoord
 
 import (
 	"sort"
+	"strconv"
 	"sync"
 	"time"
+
+	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -286,6 +290,11 @@ func (s *importScheduler) processInProgressImport(task ImportTask) {
 			log.Warn("update import segment rows failed", WrapTaskLog(task, zap.Error(err))...)
 			return
 		}
+		metrics.DataCoordBulkVectors.WithLabelValues(
+			strconv.FormatInt(paramtable.GetNodeID(), 10),
+			strconv.FormatInt(task.GetCollectionID(), 10),
+			strconv.FormatInt(task.GetJobID(), 10),
+		).Add(info.GetImportedRows() - segment.GetNumOfRows())
 	}
 	if resp.GetState() == datapb.ImportTaskStateV2_Completed {
 		for _, info := range resp.GetImportSegmentsInfo() {

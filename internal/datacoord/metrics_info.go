@@ -19,6 +19,8 @@ package datacoord
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
+
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
@@ -43,6 +45,42 @@ func (s *Server) getQuotaMetrics() *metricsinfo.DataCoordQuotaMetrics {
 	}
 }
 
+func (s *Server) getCollectionMetrics(ctx context.Context) *metricsinfo.DataCoordCollectionMetrics {
+	totalNumRows := s.meta.GetAllCollectionNumRows()
+	ret := &metricsinfo.DataCoordCollectionMetrics{
+		Collections: make(map[int64]*metricsinfo.DataCoordCollectionInfo, len(totalNumRows)),
+	}
+	for collectionID, total := range totalNumRows {
+		if _, ok := ret.Collections[collectionID]; !ok {
+			ret.Collections[collectionID] = &metricsinfo.DataCoordCollectionInfo{
+				NumEntitiesTotal: 0,
+				IndexInfo:        make([]*metricsinfo.DataCoordIndexInfo, 0),
+			}
+		}
+		ret.Collections[collectionID].NumEntitiesTotal = total
+		indexInfo, err := s.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{
+			CollectionID: collectionID,
+			IndexName:    "",
+			Timestamp:    0,
+		})
+		if err := merr.CheckRPCCall(indexInfo, err); err != nil {
+			log.Ctx(ctx).Warn("failed to describe index, ignore to report index metrics",
+				zap.Int64("collection", collectionID),
+				zap.Error(err),
+			)
+			continue
+		}
+		for _, info := range indexInfo.GetIndexInfos() {
+			ret.Collections[collectionID].IndexInfo = append(ret.Collections[collectionID].IndexInfo, &metricsinfo.DataCoordIndexInfo{
+				NumEntitiesIndexed: info.GetIndexedRows(),
+				IndexName:          info.GetIndexName(),
+				FieldID:            info.GetIndexID(),
+			})
+		}
+	}
+	return ret
+}
+
 // getSystemInfoMetrics composes data cluster metrics
 func (s *Server) getSystemInfoMetrics(
 	ctx context.Context,
@@ -53,7 +91,7 @@ func (s *Server) getSystemInfoMetrics(
 	// get datacoord info
 	nodes := s.cluster.GetSessions()
 	clusterTopology := metricsinfo.DataClusterTopology{
-		Self:                s.getDataCoordMetrics(),
+		Self:                s.getDataCoordMetrics(ctx),
 		ConnectedDataNodes:  make([]metricsinfo.DataNodeInfos, 0, len(nodes)),
 		ConnectedIndexNodes: make([]metricsinfo.IndexNodeInfos, 0),
 	}
@@ -103,7 +141,7 @@ func (s *Server) getSystemInfoMetrics(
 }
 
 // getDataCoordMetrics composes datacoord infos
-func (s *Server) getDataCoordMetrics() metricsinfo.DataCoordInfos {
+func (s *Server) getDataCoordMetrics(ctx context.Context) metricsinfo.DataCoordInfos {
 	ret := metricsinfo.DataCoordInfos{
 		BaseComponentInfos: metricsinfo.BaseComponentInfos{
 			Name: metricsinfo.ConstructComponentName(typeutil.DataCoordRole, paramtable.GetNodeID()),
@@ -125,7 +163,8 @@ func (s *Server) getDataCoordMetrics() metricsinfo.DataCoordInfos {
 		SystemConfigurations: metricsinfo.DataCoordConfiguration{
 			SegmentMaxSize: Params.DataCoordCfg.SegmentMaxSize.GetAsFloat(),
 		},
-		QuotaMetrics: s.getQuotaMetrics(),
+		QuotaMetrics:      s.getQuotaMetrics(),
+		CollectionMetrics: s.getCollectionMetrics(ctx),
 	}
 
 	metricsinfo.FillDeployMetricsWithEnv(&ret.BaseComponentInfos.SystemInfo)
