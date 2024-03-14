@@ -20,7 +20,7 @@ LIBRARY_PATH := $(PWD)/lib
 OS := $(shell uname -s)
 mode = Release
 
-use_disk_index = OFF
+use_disk_index = ON
 ifdef disk_index
 	use_disk_index = ${disk_index}
 endif
