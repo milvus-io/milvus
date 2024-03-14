@@ -20,6 +20,9 @@ run_embed() {
     cat << EOF > embedEtcd.yaml
 listen-client-urls: http://0.0.0.0:2379
 advertise-client-urls: http://0.0.0.0:2379
+quota-backend-bytes: 4294967296
+auto-compaction-mode: revision
+auto-compaction-retention: '1000'
 EOF
 
     sudo docker run -d \
@@ -39,7 +42,7 @@ EOF
         --health-start-period=90s \
         --health-timeout=20s \
         --health-retries=3 \
-        milvusdb/milvus:v2.3.9 \
+        milvusdb/milvus:v2.3.11 \
         milvus run standalone  1> /dev/null
 }
 
