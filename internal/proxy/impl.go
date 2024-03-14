@@ -1049,7 +1049,8 @@ func (node *Proxy) AlterCollection(ctx context.Context, request *milvuspb.AlterC
 	log := log.Ctx(ctx).With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
-		zap.String("collection", request.CollectionName))
+		zap.String("collection", request.CollectionName),
+		zap.Any("props", request.Properties))
 
 	log.Info(
 		rpcReceived(method))

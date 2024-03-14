@@ -1271,7 +1271,8 @@ func (c *Core) AlterCollection(ctx context.Context, in *milvuspb.AlterCollection
 
 	log.Ctx(ctx).Info("received request to alter collection",
 		zap.String("role", typeutil.RootCoordRole),
-		zap.String("name", in.GetCollectionName()))
+		zap.String("name", in.GetCollectionName()),
+		zap.Any("props", in.Properties))
 
 	t := &alterCollectionTask{
 		baseTask: newBaseTask(ctx, c),
