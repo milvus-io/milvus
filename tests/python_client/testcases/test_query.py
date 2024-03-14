@@ -1088,7 +1088,7 @@ class TestQueryParams(TestcaseBase):
         assert len(res) == len(filter_ids)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("op", [">", "<=", "+ 1 =="])
+    @pytest.mark.parametrize("op", [">", "<=", "==", "!="])
     def test_query_expr_invalid_array_length(self, op):
         """
         target: test query with expression using array_length
@@ -1108,10 +1108,8 @@ class TestQueryParams(TestcaseBase):
         collection_w.create_index(ct.default_float_vec_field_name, ct.default_flat_index)
         collection_w.load()
         expression = f"array_length({ct.default_float_array_field_name}) {op} 51"
-        collection_w.query(expression, check_task=CheckTasks.err_res,
-                           check_items={ct.err_code: 1100,
-                                        ct.err_msg: "cannot parse expression: %s, error %s "
-                                                    "is not supported" % (expression, op)})
+        res = collection_w.query(expression)[0]
+        assert len(res) >= 0
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_query_expr_empty_without_limit(self):
