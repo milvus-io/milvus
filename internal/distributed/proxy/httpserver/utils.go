@@ -133,6 +133,14 @@ func IsVectorField(field *schemapb.FieldSchema) bool {
 }
 
 func printFields(fields []*schemapb.FieldSchema) []gin.H {
+	return printFieldDetails(fields, true)
+}
+
+func printFieldsV2(fields []*schemapb.FieldSchema) []gin.H {
+	return printFieldDetails(fields, false)
+}
+
+func printFieldDetails(fields []*schemapb.FieldSchema, oldVersion bool) []gin.H {
 	var res []gin.H
 	for _, field := range fields {
 		fieldDetail := gin.H{
@@ -143,13 +151,28 @@ func printFields(fields []*schemapb.FieldSchema) []gin.H {
 			HTTPReturnDescription:       field.Description,
 		}
 		if IsVectorField(field) {
-			dim, _ := getDim(field)
-			fieldDetail[HTTPReturnFieldType] = field.DataType.String() + "(" + strconv.FormatInt(dim, 10) + ")"
+			fieldDetail[HTTPReturnFieldType] = field.DataType.String()
+			if oldVersion {
+				dim, _ := getDim(field)
+				fieldDetail[HTTPReturnFieldType] = field.DataType.String() + "(" + strconv.FormatInt(dim, 10) + ")"
+			}
 		} else if field.DataType == schemapb.DataType_VarChar {
-			maxLength, _ := parameterutil.GetMaxLength(field)
-			fieldDetail[HTTPReturnFieldType] = field.DataType.String() + "(" + strconv.FormatInt(maxLength, 10) + ")"
+			fieldDetail[HTTPReturnFieldType] = field.DataType.String()
+			if oldVersion {
+				maxLength, _ := parameterutil.GetMaxLength(field)
+				fieldDetail[HTTPReturnFieldType] = field.DataType.String() + "(" + strconv.FormatInt(maxLength, 10) + ")"
+			}
 		} else {
 			fieldDetail[HTTPReturnFieldType] = field.DataType.String()
+		}
+		if !oldVersion {
+			fieldDetail[HTTPReturnFieldID] = field.FieldID
+			if field.TypeParams != nil {
+				fieldDetail[Params] = field.TypeParams
+			}
+			if field.DataType == schemapb.DataType_Array {
+				fieldDetail[HTTPReturnFieldElementType] = field.GetElementType().String()
+			}
 		}
 		res = append(res, fieldDetail)
 	}
