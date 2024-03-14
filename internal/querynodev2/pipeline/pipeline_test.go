@@ -108,7 +108,7 @@ func (suite *PipelineTestSuite) SetupTest() {
 func (suite *PipelineTestSuite) TestBasic() {
 	// init mock
 	//	mock collection manager
-	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64)
+	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, true)
 	collection := segments.NewCollection(suite.collectionID, schema, segments.GenTestIndexMeta(suite.collectionID, schema), querypb.LoadType_LoadCollection)
 	suite.collectionManager.EXPECT().Get(suite.collectionID).Return(collection)
 

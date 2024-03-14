@@ -194,7 +194,7 @@ struct SearchResult {
     // first fill data during search, and then update data after reducing search results
     std::vector<float> distances_;
     std::vector<int64_t> seg_offsets_;
-    std::vector<GroupByValueType> group_by_values_;
+    std::optional<std::vector<GroupByValueType>> group_by_values_;
 
     // first fill data during fillPrimaryKey, and then update data after reducing search results
     std::vector<PkType> primary_keys_;

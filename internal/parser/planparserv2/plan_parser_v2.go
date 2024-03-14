@@ -137,6 +137,8 @@ func CreateSearchPlan(schema *typeutil.SchemaHelper, exprStr string, vectorField
 		vectorType = planpb.VectorType_Float16Vector
 	} else if dataType == schemapb.DataType_BFloat16Vector {
 		vectorType = planpb.VectorType_BFloat16Vector
+	} else if dataType == schemapb.DataType_SparseFloatVector {
+		vectorType = planpb.VectorType_SparseFloatVector
 	}
 	planNode := &planpb.PlanNode{
 		Node: &planpb.PlanNode_VectorAnns{

@@ -2,6 +2,7 @@ package funcutil
 
 import (
 	"encoding/binary"
+	"fmt"
 	"math"
 
 	"github.com/cockroachdb/errors"
@@ -74,6 +75,22 @@ func fieldDataToPlaceholderValue(fieldData *schemapb.FieldData) (*commonpb.Place
 			Tag:    "$0",
 			Type:   commonpb.PlaceholderType_BFloat16Vector,
 			Values: flattenedFloat16VectorsToByteVectors(x.Bfloat16Vector, int(vectors.Dim)),
+		}
+		return placeholderValue, nil
+	case schemapb.DataType_SparseFloatVector:
+		vectors, ok := fieldData.GetVectors().GetData().(*schemapb.VectorField_SparseFloatVector)
+		if !ok {
+			return nil, errors.New("vector data is not schemapb.VectorField_SparseFloatVector")
+		}
+		vec := vectors.SparseFloatVector
+		bytes, err := proto.Marshal(vec)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal schemapb.SparseFloatArray to bytes: %w", err)
+		}
+		placeholderValue := &commonpb.PlaceholderValue{
+			Tag:    "$0",
+			Type:   commonpb.PlaceholderType_SparseFloatVector,
+			Values: [][]byte{bytes},
 		}
 		return placeholderValue, nil
 	default:

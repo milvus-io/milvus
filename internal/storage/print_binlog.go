@@ -334,6 +334,18 @@ func printPayloadValues(colType schemapb.DataType, reader PayloadReaderInterface
 		for i := 0; i < rows; i++ {
 			fmt.Printf("\t\t%d : %s\n", i, val[i])
 		}
+	case schemapb.DataType_SparseFloatVector:
+		sparseData, _, err := reader.GetSparseFloatVectorFromPayload()
+		if err != nil {
+			return err
+		}
+		fmt.Println("======= SparseFloatVectorFieldData =======")
+		fmt.Println("row num:", len(sparseData.Contents))
+		fmt.Println("dim:", sparseData.Dim)
+		for _, v := range sparseData.Contents {
+			fmt.Println(v)
+		}
+		fmt.Println("===== SparseFloatVectorFieldData end =====")
 	default:
 		return errors.New("undefined data type")
 	}

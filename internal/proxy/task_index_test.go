@@ -272,6 +272,76 @@ func TestCreateIndexTask_PreExecute(t *testing.T) {
 	})
 }
 
+func Test_sparse_parseIndexParams(t *testing.T) {
+	cit := &createIndexTask{
+		Condition: nil,
+		req: &milvuspb.CreateIndexRequest{
+			Base:           nil,
+			DbName:         "",
+			CollectionName: "",
+			FieldName:      "",
+			ExtraParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.IndexTypeKey,
+					Value: "SPARSE_INVERTED_INDEX",
+				},
+				{
+					Key:   MetricTypeKey,
+					Value: "IP",
+				},
+				{
+					Key:   common.IndexParamsKey,
+					Value: "{\"drop_ratio_build\": 0.3}",
+				},
+			},
+			IndexName: "",
+		},
+		ctx:            nil,
+		rootCoord:      nil,
+		result:         nil,
+		isAutoIndex:    false,
+		newIndexParams: nil,
+		newTypeParams:  nil,
+		collectionID:   0,
+		fieldSchema: &schemapb.FieldSchema{
+			FieldID:      101,
+			Name:         "FieldID",
+			IsPrimaryKey: false,
+			Description:  "field no.1",
+			DataType:     schemapb.DataType_SparseFloatVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   MetricTypeKey,
+					Value: "IP",
+				},
+			},
+		},
+	}
+
+	t.Run("parse index params", func(t *testing.T) {
+		err := cit.parseIndexParams()
+		assert.NoError(t, err)
+
+		assert.ElementsMatch(t,
+			[]*commonpb.KeyValuePair{
+				{
+					Key:   common.IndexTypeKey,
+					Value: "SPARSE_INVERTED_INDEX",
+				},
+				{
+					Key:   MetricTypeKey,
+					Value: "IP",
+				},
+				{
+					Key:   "drop_ratio_build",
+					Value: "0.3",
+				},
+			}, cit.newIndexParams)
+		assert.ElementsMatch(t,
+			[]*commonpb.KeyValuePair{}, cit.newTypeParams)
+	})
+}
+
 func Test_parseIndexParams(t *testing.T) {
 	cit := &createIndexTask{
 		Condition: nil,
