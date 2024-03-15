@@ -318,6 +318,9 @@ func (e *executor) Sync(task *ImportTask, hashedData HashedData) ([]*conc.Future
 	for channelIdx, datas := range hashedData {
 		channel := task.GetVchannels()[channelIdx]
 		for partitionIdx, data := range datas {
+			if data.GetRowNum() == 0 {
+				continue
+			}
 			partitionID := task.GetPartitionIDs()[partitionIdx]
 			size := data.GetMemorySize()
 			segmentID := PickSegment(task, segmentImportedSizes, channel, partitionID, size)

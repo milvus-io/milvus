@@ -23,6 +23,7 @@ import (
 	"path"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -261,6 +262,7 @@ func TestImportUtil_ListBinlogsAndGroupBySegment(t *testing.T) {
 
 	ctx := context.Background()
 	cm := mocks2.NewChunkManager(t)
+	cm.EXPECT().Exist(mock.Anything, mock.Anything).Return(true, nil)
 	cm.EXPECT().ListWithPrefix(mock.Anything, insertPrefix, mock.Anything).Return(segmentInsertPaths, nil, nil)
 	cm.EXPECT().ListWithPrefix(mock.Anything, deltaPrefix, mock.Anything).Return(segmentDeltaPaths, nil, nil)
 
@@ -279,6 +281,32 @@ func TestImportUtil_ListBinlogsAndGroupBySegment(t *testing.T) {
 			assert.True(t, segmentID == "435978159261483008" || segmentID == "435978159261483009")
 		}
 	}
+
+	// test failure
+	mockErr := errors.New("mock err")
+	cm = mocks2.NewChunkManager(t)
+	cm.EXPECT().Exist(mock.Anything, insertPrefix).Return(true, mockErr)
+	_, err = ListBinlogsAndGroupBySegment(ctx, cm, file)
+	assert.Error(t, err)
+
+	cm = mocks2.NewChunkManager(t)
+	cm.EXPECT().Exist(mock.Anything, insertPrefix).Return(false, nil)
+	_, err = ListBinlogsAndGroupBySegment(ctx, cm, file)
+	assert.Error(t, err)
+
+	cm = mocks2.NewChunkManager(t)
+	cm.EXPECT().Exist(mock.Anything, insertPrefix).Return(true, nil)
+	cm.EXPECT().ListWithPrefix(mock.Anything, insertPrefix, mock.Anything).Return(segmentInsertPaths, nil, nil)
+	cm.EXPECT().Exist(mock.Anything, deltaPrefix).Return(true, mockErr)
+	_, err = ListBinlogsAndGroupBySegment(ctx, cm, file)
+	assert.Error(t, err)
+
+	cm = mocks2.NewChunkManager(t)
+	cm.EXPECT().Exist(mock.Anything, insertPrefix).Return(true, nil)
+	cm.EXPECT().ListWithPrefix(mock.Anything, insertPrefix, mock.Anything).Return(segmentInsertPaths, nil, nil)
+	cm.EXPECT().Exist(mock.Anything, deltaPrefix).Return(false, nil)
+	_, err = ListBinlogsAndGroupBySegment(ctx, cm, file)
+	assert.NoError(t, err)
 }
 
 func TestImportUtil_GetImportProgress(t *testing.T) {

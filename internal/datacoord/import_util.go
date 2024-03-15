@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"path"
 	"sort"
 	"time"
@@ -252,6 +253,9 @@ func getPendingProgress(jobID int64, imeta ImportMeta) float32 {
 		return len(task.GetFileStats())
 	})
 	totalFiles := len(imeta.GetJob(jobID).GetFiles())
+	if totalFiles == 0 {
+		return 1
+	}
 	return float32(preImportingFiles) / float32(totalFiles)
 }
 
@@ -260,6 +264,9 @@ func getPreImportingProgress(jobID int64, imeta ImportMeta) float32 {
 	completedTasks := lo.Filter(tasks, func(task ImportTask, _ int) bool {
 		return task.GetState() == datapb.ImportTaskStateV2_Completed
 	})
+	if len(tasks) == 0 {
+		return 1
+	}
 	return float32(len(completedTasks)) / float32(len(tasks))
 }
 
@@ -277,7 +284,10 @@ func getImportingProgress(jobID int64, imeta ImportMeta, meta *meta) float32 {
 		segmentIDs = append(segmentIDs, task.(*importTask).GetSegmentIDs()...)
 	}
 	importedRows = meta.GetSegmentsTotalCurrentRows(segmentIDs)
-	importingProgress := float32(importedRows) / float32(totalRows)
+	var importingProgress float32 = 1
+	if totalRows != 0 {
+		importingProgress = float32(importedRows) / float32(totalRows)
+	}
 
 	var (
 		unsetIsImportingSegment int64
@@ -297,7 +307,10 @@ func getImportingProgress(jobID int64, imeta ImportMeta, meta *meta) float32 {
 			}
 		}
 	}
-	completedProgress := float32(unsetIsImportingSegment) / float32(totalSegment)
+	var completedProgress float32 = 1
+	if totalSegment != 0 {
+		completedProgress = float32(unsetIsImportingSegment) / float32(totalSegment)
+	}
 	return importingProgress*0.8 + completedProgress*0.2
 }
 
@@ -371,7 +384,15 @@ func ListBinlogsAndGroupBySegment(ctx context.Context, cm storage.ChunkManager, 
 		return nil, merr.WrapErrImportFailed("no insert binlogs to import")
 	}
 
-	segmentInsertPaths, _, err := cm.ListWithPrefix(ctx, importFile.GetPaths()[0], false)
+	insertPrefix := importFile.GetPaths()[0]
+	ok, err := cm.Exist(ctx, insertPrefix)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, fmt.Errorf("insert binlog prefix does not exist, path=%s", insertPrefix)
+	}
+	segmentInsertPaths, _, err := cm.ListWithPrefix(ctx, insertPrefix, false)
 	if err != nil {
 		return nil, err
 	}
@@ -382,7 +403,16 @@ func ListBinlogsAndGroupBySegment(ctx context.Context, cm storage.ChunkManager, 
 	if len(importFile.GetPaths()) < 2 {
 		return segmentImportFiles, nil
 	}
-	segmentDeltaPaths, _, err := cm.ListWithPrefix(context.Background(), importFile.GetPaths()[1], false)
+	deltaPrefix := importFile.GetPaths()[1]
+	ok, err = cm.Exist(ctx, deltaPrefix)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		log.Warn("delta binlog prefix does not exist", zap.String("path", deltaPrefix))
+		return segmentImportFiles, nil
+	}
+	segmentDeltaPaths, _, err := cm.ListWithPrefix(context.Background(), deltaPrefix, false)
 	if err != nil {
 		return nil, err
 	}
