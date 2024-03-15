@@ -865,11 +865,12 @@ message ImportJob {
   schema.CollectionSchema schema = 7;
   uint64 timeout_ts = 8;
   uint64 cleanup_ts = 9;
-  internal.ImportJobState state = 10;
-  string reason = 11;
-  string complete_time = 12;
-  repeated internal.ImportFile files = 13;
-  repeated common.KeyValuePair options = 14;
+  int64 requestedDiskSize = 10;
+  internal.ImportJobState state = 11;
+  string reason = 12;
+  string complete_time = 13;
+  repeated internal.ImportFile files = 14;
+  repeated common.KeyValuePair options = 15;
 }
 
 enum ImportTaskStateV2 {

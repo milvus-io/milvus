@@ -344,6 +344,38 @@ func TestPrintCollectionDetails(t *testing.T) {
 	}, printFields(coll.Fields))
 	assert.Equal(t, []gin.H{
 		{
+			HTTPReturnFieldName:         FieldBookID,
+			HTTPReturnFieldType:         "Int64",
+			HTTPReturnFieldPartitionKey: false,
+			HTTPReturnFieldPrimaryKey:   true,
+			HTTPReturnFieldAutoID:       false,
+			HTTPReturnDescription:       "",
+			HTTPReturnFieldID:           int64(100),
+		},
+		{
+			HTTPReturnFieldName:         FieldWordCount,
+			HTTPReturnFieldType:         "Int64",
+			HTTPReturnFieldPartitionKey: false,
+			HTTPReturnFieldPrimaryKey:   false,
+			HTTPReturnFieldAutoID:       false,
+			HTTPReturnDescription:       "",
+			HTTPReturnFieldID:           int64(101),
+		},
+		{
+			HTTPReturnFieldName:         FieldBookIntro,
+			HTTPReturnFieldType:         "FloatVector",
+			HTTPReturnFieldPartitionKey: false,
+			HTTPReturnFieldPrimaryKey:   false,
+			HTTPReturnFieldAutoID:       false,
+			HTTPReturnDescription:       "",
+			HTTPReturnFieldID:           int64(201),
+			Params: []*commonpb.KeyValuePair{
+				{Key: Dim, Value: "2"},
+			},
+		},
+	}, printFieldsV2(coll.Fields))
+	assert.Equal(t, []gin.H{
+		{
 			HTTPIndexName:             DefaultIndexName,
 			HTTPIndexField:            FieldBookIntro,
 			HTTPReturnIndexMetricType: DefaultMetricType,
@@ -354,6 +386,8 @@ func TestPrintCollectionDetails(t *testing.T) {
 	fields := []*schemapb.FieldSchema{}
 	for _, field := range newCollectionSchema(coll).Fields {
 		if field.DataType == schemapb.DataType_VarChar {
+			fields = append(fields, field)
+		} else if field.DataType == schemapb.DataType_Array {
 			fields = append(fields, field)
 		}
 	}
@@ -366,7 +400,39 @@ func TestPrintCollectionDetails(t *testing.T) {
 			HTTPReturnFieldAutoID:       false,
 			HTTPReturnDescription:       "",
 		},
+		{
+			HTTPReturnFieldName:         "field-array",
+			HTTPReturnFieldType:         "Array",
+			HTTPReturnFieldPartitionKey: false,
+			HTTPReturnFieldPrimaryKey:   false,
+			HTTPReturnFieldAutoID:       false,
+			HTTPReturnDescription:       "",
+		},
 	}, printFields(fields))
+	assert.Equal(t, []gin.H{
+		{
+			HTTPReturnFieldName:         "field-varchar",
+			HTTPReturnFieldType:         "VarChar",
+			HTTPReturnFieldPartitionKey: false,
+			HTTPReturnFieldPrimaryKey:   false,
+			HTTPReturnFieldAutoID:       false,
+			HTTPReturnDescription:       "",
+			HTTPReturnFieldID:           int64(0),
+			Params: []*commonpb.KeyValuePair{
+				{Key: common.MaxLengthKey, Value: "10"},
+			},
+		},
+		{
+			HTTPReturnFieldName:         "field-array",
+			HTTPReturnFieldType:         "Array",
+			HTTPReturnFieldPartitionKey: false,
+			HTTPReturnFieldPrimaryKey:   false,
+			HTTPReturnFieldAutoID:       false,
+			HTTPReturnDescription:       "",
+			HTTPReturnFieldID:           int64(0),
+			HTTPReturnFieldElementType:  "Bool",
+		},
+	}, printFieldsV2(fields))
 }
 
 func TestPrimaryField(t *testing.T) {

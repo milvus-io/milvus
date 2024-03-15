@@ -94,7 +94,11 @@ func (suite *ClusterTestSuite) setupServers() {
 func (suite *ClusterTestSuite) setupCluster() {
 	suite.nodeManager = NewNodeManager()
 	for i, lis := range suite.listeners {
-		node := NewNodeInfo(int64(i), lis.Addr().String())
+		node := NewNodeInfo(ImmutableNodeInfo{
+			NodeID:   int64(i),
+			Address:  lis.Addr().String(),
+			Hostname: "localhost",
+		})
 		suite.nodeManager.Add(node)
 	}
 	suite.cluster = NewCluster(suite.nodeManager, DefaultQueryNodeCreator)

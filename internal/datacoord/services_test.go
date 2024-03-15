@@ -1369,6 +1369,7 @@ func TestImportV2(t *testing.T) {
 
 		// list binlog failed
 		cm := mocks2.NewChunkManager(t)
+		cm.EXPECT().Exist(mock.Anything, mock.Anything).Return(true, nil)
 		cm.EXPECT().ListWithPrefix(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil, mockErr)
 		s.meta = &meta{chunkManager: cm}
 		resp, err = s.ImportV2(ctx, &internalpb.ImportRequestInternal{
@@ -1387,6 +1388,28 @@ func TestImportV2(t *testing.T) {
 		})
 		assert.NoError(t, err)
 		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
+
+		// list no binlog
+		cm = mocks2.NewChunkManager(t)
+		cm.EXPECT().Exist(mock.Anything, mock.Anything).Return(true, nil)
+		cm.EXPECT().ListWithPrefix(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil, nil)
+		s.meta = &meta{chunkManager: cm}
+		resp, err = s.ImportV2(ctx, &internalpb.ImportRequestInternal{
+			Files: []*internalpb.ImportFile{
+				{
+					Id:    1,
+					Paths: []string{"mock_insert_prefix"},
+				},
+			},
+			Options: []*commonpb.KeyValuePair{
+				{
+					Key:   "backup",
+					Value: "true",
+				},
+			},
+		})
+		assert.NoError(t, err)
+		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrParameterInvalid))
 
 		// alloc failed
 		alloc := NewNMockAllocator(t)

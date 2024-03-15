@@ -153,7 +153,11 @@ func (suite *ServiceSuite) SetupTest() {
 	)
 	suite.targetObserver.Start()
 	for _, node := range suite.nodes {
-		suite.nodeMgr.Add(session.NewNodeInfo(node, "localhost"))
+		suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   node,
+			Address:  "localhost",
+			Hostname: "localhost",
+		}))
 		err := suite.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, node)
 		suite.NoError(err)
 	}
@@ -377,10 +381,26 @@ func (suite *ServiceSuite) TestResourceGroup() {
 	suite.Equal(commonpb.ErrorCode_Success, resp1.GetStatus().GetErrorCode())
 	suite.Len(resp1.ResourceGroups, 2)
 
-	server.nodeMgr.Add(session.NewNodeInfo(1011, "localhost"))
-	server.nodeMgr.Add(session.NewNodeInfo(1012, "localhost"))
-	server.nodeMgr.Add(session.NewNodeInfo(1013, "localhost"))
-	server.nodeMgr.Add(session.NewNodeInfo(1014, "localhost"))
+	server.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1011,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	server.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1012,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	server.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1013,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	server.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1014,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
 	server.meta.ResourceManager.AddResourceGroup("rg11")
 	server.meta.ResourceManager.AssignNode("rg11", 1011)
 	server.meta.ResourceManager.AssignNode("rg11", 1012)
@@ -549,10 +569,26 @@ func (suite *ServiceSuite) TestTransferNode() {
 	suite.NoError(err)
 	err = server.meta.ResourceManager.AddResourceGroup("rg4")
 	suite.NoError(err)
-	suite.nodeMgr.Add(session.NewNodeInfo(11, "localhost"))
-	suite.nodeMgr.Add(session.NewNodeInfo(12, "localhost"))
-	suite.nodeMgr.Add(session.NewNodeInfo(13, "localhost"))
-	suite.nodeMgr.Add(session.NewNodeInfo(14, "localhost"))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   11,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   12,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   13,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   14,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
 	suite.meta.ResourceManager.AssignNode("rg3", 11)
 	suite.meta.ResourceManager.AssignNode("rg3", 12)
 	suite.meta.ResourceManager.AssignNode("rg3", 13)
@@ -661,11 +697,31 @@ func (suite *ServiceSuite) TestTransferReplica() {
 		ResourceGroup: meta.DefaultResourceGroupName,
 	}, typeutil.NewUniqueSet(3)))
 
-	suite.server.nodeMgr.Add(session.NewNodeInfo(1001, "localhost"))
-	suite.server.nodeMgr.Add(session.NewNodeInfo(1002, "localhost"))
-	suite.server.nodeMgr.Add(session.NewNodeInfo(1003, "localhost"))
-	suite.server.nodeMgr.Add(session.NewNodeInfo(1004, "localhost"))
-	suite.server.nodeMgr.Add(session.NewNodeInfo(1005, "localhost"))
+	suite.server.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1001,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.server.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1002,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.server.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1003,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.server.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1004,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.server.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1005,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
 	suite.server.meta.AssignNode("rg1", 1001)
 	suite.server.meta.AssignNode("rg2", 1002)
 	suite.server.meta.AssignNode("rg3", 1003)
@@ -1144,8 +1200,16 @@ func (suite *ServiceSuite) TestLoadBalanceWithEmptySegmentList() {
 			}
 		}
 	}
-	suite.nodeMgr.Add(session.NewNodeInfo(1001, "localhost"))
-	suite.nodeMgr.Add(session.NewNodeInfo(1002, "localhost"))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1001,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1002,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
 	defer func() {
 		for _, collection := range suite.collections {
 			replicas := suite.meta.ReplicaManager.GetByCollection(collection)
@@ -1280,7 +1344,11 @@ func (suite *ServiceSuite) TestLoadBalanceFailed() {
 		suite.NoError(err)
 		suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.ErrorCode)
 
-		suite.nodeMgr.Add(session.NewNodeInfo(10, "localhost"))
+		suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   10,
+			Address:  "localhost",
+			Hostname: "localhost",
+		}))
 		suite.nodeMgr.Stopping(10)
 		resp, err = server.LoadBalance(ctx, req)
 		suite.NoError(err)
@@ -1518,7 +1586,11 @@ func (suite *ServiceSuite) TestGetShardLeadersFailed() {
 		suite.NoError(err)
 		suite.Equal(commonpb.ErrorCode_NoReplicaAvailable, resp.GetStatus().GetErrorCode())
 		for _, node := range suite.nodes {
-			suite.nodeMgr.Add(session.NewNodeInfo(node, "localhost"))
+			suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+				NodeID:   node,
+				Address:  "localhost",
+				Hostname: "localhost",
+			}))
 		}
 
 		// Segment not fully loaded
@@ -1573,7 +1645,11 @@ func (suite *ServiceSuite) TestHandleNodeUp() {
 	suite.taskScheduler.EXPECT().AddExecutor(mock.Anything)
 	suite.distController.EXPECT().StartDistInstance(mock.Anything, mock.Anything)
 
-	suite.nodeMgr.Add(session.NewNodeInfo(111, "localhost"))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   111,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
 	server.handleNodeUp(111)
 	nodes := suite.server.meta.ReplicaManager.Get(1).GetNodes()
 	suite.Len(nodes, 1)
@@ -1582,7 +1658,11 @@ func (suite *ServiceSuite) TestHandleNodeUp() {
 
 	// when more rg exist, new node shouldn't be assign to replica in default rg in handleNodeUp
 	suite.server.meta.ResourceManager.AddResourceGroup("rg")
-	suite.nodeMgr.Add(session.NewNodeInfo(222, "localhost"))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   222,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
 	server.handleNodeUp(222)
 	nodes = suite.server.meta.ReplicaManager.Get(1).GetNodes()
 	suite.Len(nodes, 2)

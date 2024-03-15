@@ -86,7 +86,11 @@ func (suite *ResourceManagerSuite) TestManipulateResourceGroup() {
 }
 
 func (suite *ResourceManagerSuite) TestManipulateNode() {
-	suite.manager.nodeMgr.Add(session.NewNodeInfo(1, "localhost"))
+	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "127.0.0.1:0",
+		Hostname: "localhost",
+	}))
 	err := suite.manager.AddResourceGroup("rg1")
 	suite.NoError(err)
 	// test add node to rg
@@ -132,10 +136,26 @@ func (suite *ResourceManagerSuite) TestManipulateNode() {
 	_, err = suite.manager.TransferNode("rg1", "rg2", 5)
 	suite.ErrorIs(err, ErrNodeNotEnough)
 
-	suite.manager.nodeMgr.Add(session.NewNodeInfo(11, "localhost"))
-	suite.manager.nodeMgr.Add(session.NewNodeInfo(12, "localhost"))
-	suite.manager.nodeMgr.Add(session.NewNodeInfo(13, "localhost"))
-	suite.manager.nodeMgr.Add(session.NewNodeInfo(14, "localhost"))
+	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   11,
+		Address:  "127.0.0.1:0",
+		Hostname: "localhost",
+	}))
+	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   12,
+		Address:  "127.0.0.1:0",
+		Hostname: "localhost",
+	}))
+	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   13,
+		Address:  "127.0.0.1:0",
+		Hostname: "localhost",
+	}))
+	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   14,
+		Address:  "127.0.0.1:0",
+		Hostname: "localhost",
+	}))
 	suite.manager.AssignNode("rg1", 11)
 	suite.manager.AssignNode("rg1", 12)
 	suite.manager.AssignNode("rg1", 13)
@@ -153,11 +173,31 @@ func (suite *ResourceManagerSuite) TestManipulateNode() {
 }
 
 func (suite *ResourceManagerSuite) TestHandleNodeUp() {
-	suite.manager.nodeMgr.Add(session.NewNodeInfo(1, "localhost"))
-	suite.manager.nodeMgr.Add(session.NewNodeInfo(2, "localhost"))
-	suite.manager.nodeMgr.Add(session.NewNodeInfo(3, "localhost"))
-	suite.manager.nodeMgr.Add(session.NewNodeInfo(100, "localhost"))
-	suite.manager.nodeMgr.Add(session.NewNodeInfo(101, "localhost"))
+	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "127.0.0.1:0",
+		Hostname: "localhost",
+	}))
+	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   2,
+		Address:  "127.0.0.1:0",
+		Hostname: "localhost",
+	}))
+	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   3,
+		Address:  "127.0.0.1:0",
+		Hostname: "localhost",
+	}))
+	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   100,
+		Address:  "127.0.0.1:0",
+		Hostname: "localhost",
+	}))
+	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   101,
+		Address:  "127.0.0.1:0",
+		Hostname: "localhost",
+	}))
 	err := suite.manager.AddResourceGroup("rg1")
 	suite.NoError(err)
 
@@ -193,10 +233,26 @@ func (suite *ResourceManagerSuite) TestHandleNodeUp() {
 }
 
 func (suite *ResourceManagerSuite) TestRecover() {
-	suite.manager.nodeMgr.Add(session.NewNodeInfo(1, "localhost"))
-	suite.manager.nodeMgr.Add(session.NewNodeInfo(2, "localhost"))
-	suite.manager.nodeMgr.Add(session.NewNodeInfo(3, "localhost"))
-	suite.manager.nodeMgr.Add(session.NewNodeInfo(4, "localhost"))
+	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "127.0.0.1:0",
+		Hostname: "localhost",
+	}))
+	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   2,
+		Address:  "127.0.0.1:0",
+		Hostname: "localhost",
+	}))
+	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   3,
+		Address:  "127.0.0.1:0",
+		Hostname: "localhost",
+	}))
+	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   4,
+		Address:  "127.0.0.1:0",
+		Hostname: "localhost",
+	}))
 	err := suite.manager.AddResourceGroup("rg1")
 	suite.NoError(err)
 	err = suite.manager.AddResourceGroup("rg2")
@@ -236,9 +292,21 @@ func (suite *ResourceManagerSuite) TestRecover() {
 }
 
 func (suite *ResourceManagerSuite) TestCheckOutboundNodes() {
-	suite.manager.nodeMgr.Add(session.NewNodeInfo(1, "localhost"))
-	suite.manager.nodeMgr.Add(session.NewNodeInfo(2, "localhost"))
-	suite.manager.nodeMgr.Add(session.NewNodeInfo(3, "localhost"))
+	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "127.0.0.1:0",
+		Hostname: "localhost",
+	}))
+	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   2,
+		Address:  "127.0.0.1:0",
+		Hostname: "localhost",
+	}))
+	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   3,
+		Address:  "127.0.0.1:0",
+		Hostname: "localhost",
+	}))
 	err := suite.manager.AddResourceGroup("rg")
 	suite.NoError(err)
 	suite.manager.AssignNode("rg", 1)
@@ -261,9 +329,21 @@ func (suite *ResourceManagerSuite) TestCheckOutboundNodes() {
 }
 
 func (suite *ResourceManagerSuite) TestCheckResourceGroup() {
-	suite.manager.nodeMgr.Add(session.NewNodeInfo(1, "localhost"))
-	suite.manager.nodeMgr.Add(session.NewNodeInfo(2, "localhost"))
-	suite.manager.nodeMgr.Add(session.NewNodeInfo(3, "localhost"))
+	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "127.0.0.1:0",
+		Hostname: "localhost",
+	}))
+	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   2,
+		Address:  "127.0.0.1:0",
+		Hostname: "localhost",
+	}))
+	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   3,
+		Address:  "127.0.0.1:0",
+		Hostname: "localhost",
+	}))
 	err := suite.manager.AddResourceGroup("rg")
 	suite.NoError(err)
 	suite.manager.AssignNode("rg", 1)
@@ -285,9 +365,21 @@ func (suite *ResourceManagerSuite) TestCheckResourceGroup() {
 }
 
 func (suite *ResourceManagerSuite) TestGetOutboundNode() {
-	suite.manager.nodeMgr.Add(session.NewNodeInfo(1, "localhost"))
-	suite.manager.nodeMgr.Add(session.NewNodeInfo(2, "localhost"))
-	suite.manager.nodeMgr.Add(session.NewNodeInfo(3, "localhost"))
+	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "127.0.0.1:0",
+		Hostname: "localhost",
+	}))
+	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   2,
+		Address:  "127.0.0.1:0",
+		Hostname: "localhost",
+	}))
+	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   3,
+		Address:  "127.0.0.1:0",
+		Hostname: "localhost",
+	}))
 	suite.manager.AddResourceGroup("rg")
 	suite.manager.AddResourceGroup("rg1")
 	suite.manager.AssignNode("rg", 1)
@@ -312,9 +404,21 @@ func (suite *ResourceManagerSuite) TestGetOutboundNode() {
 }
 
 func (suite *ResourceManagerSuite) TestAutoRecover() {
-	suite.manager.nodeMgr.Add(session.NewNodeInfo(1, "localhost"))
-	suite.manager.nodeMgr.Add(session.NewNodeInfo(2, "localhost"))
-	suite.manager.nodeMgr.Add(session.NewNodeInfo(3, "localhost"))
+	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "127.0.0.1:0",
+		Hostname: "localhost",
+	}))
+	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   2,
+		Address:  "127.0.0.1:0",
+		Hostname: "localhost",
+	}))
+	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   3,
+		Address:  "127.0.0.1:0",
+		Hostname: "localhost",
+	}))
 	err := suite.manager.AddResourceGroup("rg")
 	suite.NoError(err)
 	suite.manager.AssignNode(DefaultResourceGroupName, 1)
@@ -337,7 +441,11 @@ func (suite *ResourceManagerSuite) TestAutoRecover() {
 	nodes, _ = suite.manager.GetNodes(DefaultResourceGroupName)
 	suite.Len(nodes, 0)
 
-	suite.manager.nodeMgr.Add(session.NewNodeInfo(1, "localhost"))
+	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "127.0.0.1:0",
+		Hostname: "localhost",
+	}))
 	suite.manager.HandleNodeUp(1)
 	suite.manager.AutoRecoverResourceGroup("rg")
 	nodes, _ = suite.manager.GetNodes("rg")
@@ -348,7 +456,11 @@ func (suite *ResourceManagerSuite) TestAutoRecover() {
 
 func (suite *ResourceManagerSuite) TestDefaultResourceGroup() {
 	for i := 0; i < 10; i++ {
-		suite.manager.nodeMgr.Add(session.NewNodeInfo(int64(i), "localhost"))
+		suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   int64(i),
+			Address:  "127.0.0.1:0",
+			Hostname: "localhost",
+		}))
 	}
 	defaultRG, err := suite.manager.GetResourceGroup(DefaultResourceGroupName)
 	suite.NoError(err)
@@ -387,9 +499,21 @@ func (suite *ResourceManagerSuite) TestStoreFailed() {
 	nodeMgr := session.NewNodeManager()
 	manager := NewResourceManager(store, nodeMgr)
 
-	nodeMgr.Add(session.NewNodeInfo(1, "localhost"))
-	nodeMgr.Add(session.NewNodeInfo(2, "localhost"))
-	nodeMgr.Add(session.NewNodeInfo(3, "localhost"))
+	nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "127.0.0.1:0",
+		Hostname: "localhost",
+	}))
+	nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   2,
+		Address:  "127.0.0.1:0",
+		Hostname: "localhost",
+	}))
+	nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   3,
+		Address:  "127.0.0.1:0",
+		Hostname: "localhost",
+	}))
 	storeErr := errors.New("store error")
 	store.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything).Return(storeErr)
 	store.EXPECT().RemoveResourceGroup(mock.Anything).Return(storeErr)

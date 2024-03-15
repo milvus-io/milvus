@@ -151,6 +151,8 @@ type Session struct {
 	sessionTTL        int64
 	sessionRetryTimes int64
 	reuseNodeID       bool
+
+	isStopped atomic.Bool // set to true if stop method is invoked
 }
 
 type SessionOption func(session *Session)
@@ -239,6 +241,7 @@ func NewSessionWithEtcd(ctx context.Context, metaRoot string, client *clientv3.C
 		sessionTTL:        paramtable.Get().CommonCfg.SessionTTL.GetAsInt64(),
 		sessionRetryTimes: paramtable.Get().CommonCfg.SessionRetryTimes.GetAsInt64(),
 		reuseNodeID:       true,
+		isStopped:         *atomic.NewBool(false),
 	}
 
 	// integration test create cluster with different nodeId in one process
@@ -861,7 +864,8 @@ func (s *Session) LivenessCheck(ctx context.Context, callback func()) {
 		if callback != nil {
 			// before exit liveness check, callback to exit the session owner
 			defer func() {
-				if ctx.Err() == nil {
+				// the callback method will not be invoked if session is stopped.
+				if ctx.Err() == nil && !s.isStopped.Load() {
 					go callback()
 				}
 			}()
@@ -940,6 +944,7 @@ func (s *Session) deleteSession() bool {
 }
 
 func (s *Session) Stop() {
+	s.isStopped.Store(true)
 	s.Revoke(time.Second)
 	s.cancelKeepAlive()
 	s.deleteSession()
@@ -951,17 +956,28 @@ func (s *Session) Revoke(timeout time.Duration) {
 	if s == nil {
 		return
 	}
+	log.Info("start to revoke session", zap.String("sessionKey", s.activeKey))
 	if s.etcdCli == nil || s.LeaseID == nil {
+		log.Warn("skip remove session",
+			zap.String("sessionKey", s.activeKey),
+			zap.Bool("etcdCliIsNil", s.etcdCli == nil),
+			zap.Bool("LeaseIDIsNil", s.LeaseID == nil),
+		)
 		return
 	}
 	if s.Disconnected() {
+		log.Warn("skip remove session, connection is disconnected", zap.String("sessionKey", s.activeKey))
 		return
 	}
 	// can NOT use s.ctx, it may be Done here
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	// ignores resp & error, just do best effort to revoke
-	_, _ = s.etcdCli.Revoke(ctx, *s.LeaseID)
+	_, err := s.etcdCli.Revoke(ctx, *s.LeaseID)
+	if err != nil {
+		log.Warn("failed to revoke session", zap.String("sessionKey", s.activeKey), zap.Error(err))
+	}
+	log.Info("revoke session successfully", zap.String("sessionKey", s.activeKey))
 }
 
 // UpdateRegistered update the state of registered.

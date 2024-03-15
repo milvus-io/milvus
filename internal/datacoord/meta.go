@@ -261,7 +261,7 @@ func (m *meta) GetCollectionBinlogSize() (int64, map[UniqueID]int64) {
 	var total int64
 	for _, segment := range segments {
 		segmentSize := segment.getSegmentSize()
-		if isSegmentHealthy(segment) {
+		if isSegmentHealthy(segment) && !segment.GetIsImporting() {
 			total += segmentSize
 			collectionBinlogSize[segment.GetCollectionID()] += segmentSize
 			metrics.DataCoordStoredBinlogSize.WithLabelValues(

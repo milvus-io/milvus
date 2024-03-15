@@ -43,6 +43,33 @@ func (s *CompactionTriggerManagerSuite) SetupTest() {
 	s.m = NewCompactionTriggerManager(s.mockAlloc, s.mockPlanContext)
 }
 
+func (s *CompactionTriggerManagerSuite) TestNotifyToFullScheduler() {
+	s.mockPlanContext.EXPECT().isFull().Return(true)
+	viewManager := NewCompactionViewManager(s.meta, s.m, s.m.allocator)
+	collSegs := s.meta.GetCompactableSegmentGroupByCollection()
+
+	segments, found := collSegs[1]
+	s.Require().True(found)
+
+	levelZeroSegments := lo.Filter(segments, func(info *SegmentInfo, _ int) bool {
+		return info.GetLevel() == datapb.SegmentLevel_L0
+	})
+
+	latestL0Segments := GetViewsByInfo(levelZeroSegments...)
+	s.Require().NotEmpty(latestL0Segments)
+	needRefresh, levelZeroView := viewManager.getChangedLevelZeroViews(1, latestL0Segments)
+	s.Require().True(needRefresh)
+	s.Require().Equal(1, len(levelZeroView))
+	cView, ok := levelZeroView[0].(*LevelZeroSegmentsView)
+	s.True(ok)
+	s.NotNil(cView)
+	log.Info("view", zap.Any("cView", cView))
+
+	// s.mockAlloc.EXPECT().allocID(mock.Anything).Return(1, nil)
+	s.mockPlanContext.EXPECT().isFull().Return(false)
+	s.m.Notify(19530, TriggerTypeLevelZeroViewChange, levelZeroView)
+}
+
 func (s *CompactionTriggerManagerSuite) TestNotifyByViewIDLE() {
 	viewManager := NewCompactionViewManager(s.meta, s.m, s.m.allocator)
 	collSegs := s.meta.GetCompactableSegmentGroupByCollection()
@@ -70,6 +97,7 @@ func (s *CompactionTriggerManagerSuite) TestNotifyByViewIDLE() {
 	log.Info("view", zap.Any("cView", cView))
 
 	s.mockAlloc.EXPECT().allocID(mock.Anything).Return(1, nil)
+	s.mockPlanContext.EXPECT().isFull().Return(false)
 	s.mockPlanContext.EXPECT().execCompactionPlan(mock.Anything, mock.Anything).
 		Run(func(signal *compactionSignal, plan *datapb.CompactionPlan) {
 			s.EqualValues(19530, signal.id)
@@ -117,6 +145,7 @@ func (s *CompactionTriggerManagerSuite) TestNotifyByViewChange() {
 	log.Info("view", zap.Any("cView", cView))
 
 	s.mockAlloc.EXPECT().allocID(mock.Anything).Return(1, nil)
+	s.mockPlanContext.EXPECT().isFull().Return(false)
 	s.mockPlanContext.EXPECT().execCompactionPlan(mock.Anything, mock.Anything).
 		Run(func(signal *compactionSignal, plan *datapb.CompactionPlan) {
 			s.EqualValues(19530, signal.id)

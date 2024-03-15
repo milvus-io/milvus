@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"path"
 	"sort"
 	"time"
@@ -30,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -247,23 +247,43 @@ func RegroupImportFiles(job ImportJob, files []*datapb.ImportFileStats) [][]*dat
 	return fileGroups
 }
 
-func AddImportSegment(cluster Cluster, meta *meta, segmentID int64) error {
-	segment := meta.GetSegment(segmentID)
-	req := &datapb.AddImportSegmentRequest{
-		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithSourceID(paramtable.GetNodeID()),
-		),
-		SegmentId:    segment.GetID(),
-		ChannelName:  segment.GetInsertChannel(),
-		CollectionId: segment.GetCollectionID(),
-		PartitionId:  segment.GetPartitionID(),
-		RowNum:       segment.GetNumOfRows(),
-		StatsLog:     segment.GetStatslogs(),
+func CheckDiskQuota(job ImportJob, meta *meta, imeta ImportMeta) (int64, error) {
+	if !Params.QuotaConfig.DiskProtectionEnabled.GetAsBool() {
+		return 0, nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	_, err := cluster.AddImportSegment(ctx, req)
-	return err
+
+	var (
+		requestedTotal       int64
+		requestedCollections = make(map[int64]int64)
+	)
+	for _, j := range imeta.GetJobBy() {
+		requested := j.GetRequestedDiskSize()
+		requestedTotal += requested
+		requestedCollections[j.GetCollectionID()] += requested
+	}
+
+	err := merr.WrapErrServiceQuotaExceeded("disk quota exceeded, please allocate more resources")
+	totalUsage, collectionsUsage := meta.GetCollectionBinlogSize()
+
+	tasks := imeta.GetTaskBy(WithJob(job.GetJobID()), WithType(PreImportTaskType))
+	files := make([]*datapb.ImportFileStats, 0)
+	for _, task := range tasks {
+		files = append(files, task.GetFileStats()...)
+	}
+	requestSize := lo.SumBy(files, func(file *datapb.ImportFileStats) int64 {
+		return file.GetTotalMemorySize()
+	})
+
+	totalDiskQuota := Params.QuotaConfig.DiskQuota.GetAsFloat()
+	if float64(totalUsage+requestedTotal+requestSize) > totalDiskQuota {
+		return 0, err
+	}
+	collectionDiskQuota := Params.QuotaConfig.DiskQuotaPerCollection.GetAsFloat()
+	colID := job.GetCollectionID()
+	if float64(collectionsUsage[colID]+requestedCollections[colID]+requestSize) > collectionDiskQuota {
+		return 0, err
+	}
+	return requestSize, nil
 }
 
 func getPendingProgress(jobID int64, imeta ImportMeta) float32 {
@@ -272,6 +292,9 @@ func getPendingProgress(jobID int64, imeta ImportMeta) float32 {
 		return len(task.GetFileStats())
 	})
 	totalFiles := len(imeta.GetJob(jobID).GetFiles())
+	if totalFiles == 0 {
+		return 1
+	}
 	return float32(preImportingFiles) / float32(totalFiles)
 }
 
@@ -280,6 +303,9 @@ func getPreImportingProgress(jobID int64, imeta ImportMeta) float32 {
 	completedTasks := lo.Filter(tasks, func(task ImportTask, _ int) bool {
 		return task.GetState() == datapb.ImportTaskStateV2_Completed
 	})
+	if len(tasks) == 0 {
+		return 1
+	}
 	return float32(len(completedTasks)) / float32(len(tasks))
 }
 
@@ -297,7 +323,10 @@ func getImportingProgress(jobID int64, imeta ImportMeta, meta *meta) float32 {
 		segmentIDs = append(segmentIDs, task.(*importTask).GetSegmentIDs()...)
 	}
 	importedRows = meta.GetSegmentsTotalCurrentRows(segmentIDs)
-	importingProgress := float32(importedRows) / float32(totalRows)
+	var importingProgress float32 = 1
+	if totalRows != 0 {
+		importingProgress = float32(importedRows) / float32(totalRows)
+	}
 
 	var (
 		unsetIsImportingSegment int64
@@ -317,7 +346,10 @@ func getImportingProgress(jobID int64, imeta ImportMeta, meta *meta) float32 {
 			}
 		}
 	}
-	completedProgress := float32(unsetIsImportingSegment) / float32(totalSegment)
+	var completedProgress float32 = 1
+	if totalSegment != 0 {
+		completedProgress = float32(unsetIsImportingSegment) / float32(totalSegment)
+	}
 	return importingProgress*0.8 + completedProgress*0.2
 }
 
@@ -391,7 +423,15 @@ func ListBinlogsAndGroupBySegment(ctx context.Context, cm storage.ChunkManager, 
 		return nil, merr.WrapErrImportFailed("no insert binlogs to import")
 	}
 
-	segmentInsertPaths, _, err := cm.ListWithPrefix(ctx, importFile.GetPaths()[0], false)
+	insertPrefix := importFile.GetPaths()[0]
+	ok, err := cm.Exist(ctx, insertPrefix)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, fmt.Errorf("insert binlog prefix does not exist, path=%s", insertPrefix)
+	}
+	segmentInsertPaths, _, err := cm.ListWithPrefix(ctx, insertPrefix, false)
 	if err != nil {
 		return nil, err
 	}
@@ -402,7 +442,16 @@ func ListBinlogsAndGroupBySegment(ctx context.Context, cm storage.ChunkManager, 
 	if len(importFile.GetPaths()) < 2 {
 		return segmentImportFiles, nil
 	}
-	segmentDeltaPaths, _, err := cm.ListWithPrefix(context.Background(), importFile.GetPaths()[1], false)
+	deltaPrefix := importFile.GetPaths()[1]
+	ok, err = cm.Exist(ctx, deltaPrefix)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		log.Warn("delta binlog prefix does not exist", zap.String("path", deltaPrefix))
+		return segmentImportFiles, nil
+	}
+	segmentDeltaPaths, _, err := cm.ListWithPrefix(context.Background(), deltaPrefix, false)
 	if err != nil {
 		return nil, err
 	}

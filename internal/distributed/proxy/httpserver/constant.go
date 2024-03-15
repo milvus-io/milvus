@@ -60,14 +60,12 @@ const (
 
 	ShardNumDefault = 1
 
-	PrimaryFieldName = "id"
-	VectorFieldName  = "vector"
-
 	EnableDynamic = true
 	EnableAutoID  = true
 	DisableAutoID = false
 
 	HTTPCollectionName       = "collectionName"
+	HTTPCollectionID         = "collectionID"
 	HTTPDbName               = "dbName"
 	HTTPPartitionName        = "partitionName"
 	HTTPPartitionNames       = "partitionNames"
@@ -93,10 +91,12 @@ const (
 	HTTPReturnHas = "has"
 
 	HTTPReturnFieldName         = "name"
+	HTTPReturnFieldID           = "id"
 	HTTPReturnFieldType         = "type"
 	HTTPReturnFieldPrimaryKey   = "primaryKey"
 	HTTPReturnFieldPartitionKey = "partitionKey"
 	HTTPReturnFieldAutoID       = "autoId"
+	HTTPReturnFieldElementType  = "elementType"
 	HTTPReturnDescription       = "description"
 
 	HTTPReturnIndexMetricType  = "metricType"

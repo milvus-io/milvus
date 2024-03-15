@@ -23,15 +23,18 @@ import (
 	"path"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -215,27 +218,76 @@ func TestImportUtil_RegroupImportFiles(t *testing.T) {
 	assert.Equal(t, fileNum, total)
 }
 
-func TestImportUtil_AddImportSegment(t *testing.T) {
-	cluster := NewMockCluster(t)
-	cluster.EXPECT().AddImportSegment(mock.Anything, mock.Anything).Return(nil, nil)
-
+func TestImportUtil_CheckDiskQuota(t *testing.T) {
 	catalog := mocks.NewDataCoordCatalog(t)
-	catalog.EXPECT().ListSegments(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListImportJobs().Return(nil, nil)
+	catalog.EXPECT().ListImportTasks().Return(nil, nil)
+	catalog.EXPECT().ListPreImportTasks().Return(nil, nil)
+	catalog.EXPECT().SaveImportJob(mock.Anything).Return(nil)
+	catalog.EXPECT().SavePreImportTask(mock.Anything).Return(nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListSegments(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
+
+	imeta, err := NewImportMeta(catalog)
+	assert.NoError(t, err)
 
 	meta, err := newMeta(context.TODO(), catalog, nil)
 	assert.NoError(t, err)
+
+	job := &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:        0,
+			CollectionID: 100,
+		},
+	}
+	err = imeta.AddJob(job)
+	assert.NoError(t, err)
+
+	pit := &preImportTask{
+		PreImportTask: &datapb.PreImportTask{
+			JobID:  job.GetJobID(),
+			TaskID: 1,
+			FileStats: []*datapb.ImportFileStats{
+				{TotalMemorySize: 1000 * 1024 * 1024},
+				{TotalMemorySize: 2000 * 1024 * 1024},
+			},
+		},
+	}
+	err = imeta.AddTask(pit)
+	assert.NoError(t, err)
+
+	Params.Save(Params.QuotaConfig.DiskProtectionEnabled.Key, "false")
+	defer Params.Reset(Params.QuotaConfig.DiskProtectionEnabled.Key)
+	_, err = CheckDiskQuota(job, meta, imeta)
+	assert.NoError(t, err)
+
 	segment := &SegmentInfo{
-		SegmentInfo: &datapb.SegmentInfo{ID: 1, IsImporting: true},
+		SegmentInfo: &datapb.SegmentInfo{ID: 5, CollectionID: 100, State: commonpb.SegmentState_Flushed},
+		size:        *atomic.NewInt64(3000 * 1024 * 1024),
 	}
 	err = meta.AddSegment(context.Background(), segment)
 	assert.NoError(t, err)
 
-	err = AddImportSegment(cluster, meta, segment.GetID())
+	Params.Save(Params.QuotaConfig.DiskProtectionEnabled.Key, "true")
+	Params.Save(Params.QuotaConfig.DiskQuota.Key, "10000")
+	Params.Save(Params.QuotaConfig.DiskQuotaPerCollection.Key, "10000")
+	defer Params.Reset(Params.QuotaConfig.DiskQuota.Key)
+	defer Params.Reset(Params.QuotaConfig.DiskQuotaPerCollection.Key)
+	requestSize, err := CheckDiskQuota(job, meta, imeta)
 	assert.NoError(t, err)
+	assert.Equal(t, int64(3000*1024*1024), requestSize)
+
+	Params.Save(Params.QuotaConfig.DiskQuota.Key, "5000")
+	_, err = CheckDiskQuota(job, meta, imeta)
+	assert.True(t, errors.Is(err, merr.ErrServiceQuotaExceeded))
+
+	Params.Save(Params.QuotaConfig.DiskQuota.Key, "10000")
+	Params.Save(Params.QuotaConfig.DiskQuotaPerCollection.Key, "5000")
+	_, err = CheckDiskQuota(job, meta, imeta)
+	assert.True(t, errors.Is(err, merr.ErrServiceQuotaExceeded))
 }
 
 func TestImportUtil_DropImportTask(t *testing.T) {
@@ -284,6 +336,7 @@ func TestImportUtil_ListBinlogsAndGroupBySegment(t *testing.T) {
 
 	ctx := context.Background()
 	cm := mocks2.NewChunkManager(t)
+	cm.EXPECT().Exist(mock.Anything, mock.Anything).Return(true, nil)
 	cm.EXPECT().ListWithPrefix(mock.Anything, insertPrefix, mock.Anything).Return(segmentInsertPaths, nil, nil)
 	cm.EXPECT().ListWithPrefix(mock.Anything, deltaPrefix, mock.Anything).Return(segmentDeltaPaths, nil, nil)
 
@@ -302,6 +355,32 @@ func TestImportUtil_ListBinlogsAndGroupBySegment(t *testing.T) {
 			assert.True(t, segmentID == "435978159261483008" || segmentID == "435978159261483009")
 		}
 	}
+
+	// test failure
+	mockErr := errors.New("mock err")
+	cm = mocks2.NewChunkManager(t)
+	cm.EXPECT().Exist(mock.Anything, insertPrefix).Return(true, mockErr)
+	_, err = ListBinlogsAndGroupBySegment(ctx, cm, file)
+	assert.Error(t, err)
+
+	cm = mocks2.NewChunkManager(t)
+	cm.EXPECT().Exist(mock.Anything, insertPrefix).Return(false, nil)
+	_, err = ListBinlogsAndGroupBySegment(ctx, cm, file)
+	assert.Error(t, err)
+
+	cm = mocks2.NewChunkManager(t)
+	cm.EXPECT().Exist(mock.Anything, insertPrefix).Return(true, nil)
+	cm.EXPECT().ListWithPrefix(mock.Anything, insertPrefix, mock.Anything).Return(segmentInsertPaths, nil, nil)
+	cm.EXPECT().Exist(mock.Anything, deltaPrefix).Return(true, mockErr)
+	_, err = ListBinlogsAndGroupBySegment(ctx, cm, file)
+	assert.Error(t, err)
+
+	cm = mocks2.NewChunkManager(t)
+	cm.EXPECT().Exist(mock.Anything, insertPrefix).Return(true, nil)
+	cm.EXPECT().ListWithPrefix(mock.Anything, insertPrefix, mock.Anything).Return(segmentInsertPaths, nil, nil)
+	cm.EXPECT().Exist(mock.Anything, deltaPrefix).Return(false, nil)
+	_, err = ListBinlogsAndGroupBySegment(ctx, cm, file)
+	assert.NoError(t, err)
 }
 
 func TestImportUtil_GetImportProgress(t *testing.T) {

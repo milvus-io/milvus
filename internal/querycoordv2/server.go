@@ -349,6 +349,11 @@ func (s *Server) initMeta() error {
 		LeaderViewManager:  meta.NewLeaderViewManager(),
 	}
 	s.targetMgr = meta.NewTargetManager(s.broker, s.meta)
+	err = s.targetMgr.Recover(s.store)
+	if err != nil {
+		log.Warn("failed to recover collection targets", zap.Error(err))
+	}
+
 	log.Info("QueryCoord server initMeta done", zap.Duration("duration", record.ElapseSpan()))
 	return nil
 }
@@ -397,9 +402,12 @@ func (s *Server) startQueryCoord() error {
 		return err
 	}
 	for _, node := range sessions {
-		n := session.NewNodeInfo(node.ServerID, node.Address)
-		n.SetVersion(node.Version)
-		s.nodeMgr.Add(n)
+		s.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   node.ServerID,
+			Address:  node.Address,
+			Hostname: node.HostName,
+			Version:  node.Version,
+		}))
 		s.taskScheduler.AddExecutor(node.ServerID)
 
 		if node.Stopping {
@@ -451,10 +459,10 @@ func (s *Server) startServerLoop() {
 }
 
 func (s *Server) Stop() error {
-	// stop the components from outside to inside,
-	// to make the dependencies stopped working properly,
-	// cancel the server context first to stop receiving requests
-	s.cancel()
+	// save target to meta store, after querycoord restart, make it fast to recover current target
+	if s.targetMgr != nil {
+		s.targetMgr.SaveCurrentTarget(s.store)
+	}
 
 	// FOLLOW the dependence graph:
 	// job scheduler -> checker controller -> task scheduler -> dist controller -> cluster -> session
@@ -503,6 +511,7 @@ func (s *Server) Stop() error {
 		s.session.Stop()
 	}
 
+	s.cancel()
 	s.wg.Wait()
 	log.Info("QueryCoord stop successfully")
 	return nil
@@ -617,7 +626,12 @@ func (s *Server) watchNodes(revision int64) {
 					zap.Int64("nodeID", nodeID),
 					zap.String("nodeAddr", addr),
 				)
-				s.nodeMgr.Add(session.NewNodeInfo(nodeID, addr))
+				s.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+					NodeID:   nodeID,
+					Address:  addr,
+					Hostname: event.Session.HostName,
+					Version:  event.Session.Version,
+				}))
 				s.nodeUpEventChan <- nodeID
 				select {
 				case s.notifyNodeUp <- struct{}{}:

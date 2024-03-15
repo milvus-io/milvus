@@ -191,17 +191,19 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
                            final_view,
                            search_result);
     if (search_result.vector_iterators_.has_value()) {
+        std::vector<GroupByValueType> group_by_values;
         GroupBy(search_result.vector_iterators_.value(),
                 node.search_info_,
-                search_result.group_by_values_,
+                group_by_values,
                 *segment,
                 search_result.seg_offsets_,
                 search_result.distances_);
+        search_result.group_by_values_ = std::move(group_by_values);
         AssertInfo(search_result.seg_offsets_.size() ==
-                       search_result.group_by_values_.size(),
+                       search_result.group_by_values_.value().size(),
                    "Wrong state! search_result group_by_values_ size:{} is not "
                    "equal to search_result.seg_offsets.size:{}",
-                   search_result.group_by_values_.size(),
+                   search_result.group_by_values_.value().size(),
                    search_result.seg_offsets_.size());
     }
     search_result_opt_ = std::move(search_result);

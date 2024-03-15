@@ -426,6 +426,8 @@ func (s *SegmentManager) AllocImportSegment(ctx context.Context, taskID int64, c
 		log.Error("failed to add import segment", zap.Error(err))
 		return nil, err
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.segments = append(s.segments, id)
 	log.Info("add import segment done",
 		zap.Int64("taskID", taskID),

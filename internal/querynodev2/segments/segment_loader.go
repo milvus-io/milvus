@@ -1071,6 +1071,7 @@ func loadSealedSegmentFields(ctx context.Context, collection *Collection, segmen
 	}
 	runningGroup, _ := errgroup.WithContext(ctx)
 	for _, field := range fields {
+		opts := opts
 		fieldBinLog := field
 		fieldID := field.FieldID
 		mmapEnabled := common.IsFieldMmapEnabled(collection.Schema(), fieldID)
