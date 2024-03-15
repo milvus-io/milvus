@@ -49,6 +49,23 @@ func searchSegments(ctx context.Context, mgr *Manager, segments []Segment, segTy
 		searchLabel = metrics.GrowingSegmentLabel
 	}
 
+	searcher := func(s Segment) error {
+		// record search time
+		tr := timerecord.NewTimeRecorder("searchOnSegments")
+		searchResult, err := s.Search(ctx, searchReq)
+		if err != nil {
+			return err
+		}
+		resultCh <- searchResult
+		// update metrics
+		elapsed := tr.ElapseSpan().Milliseconds()
+		metrics.QueryNodeSQSegmentLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+			metrics.SearchLabel, searchLabel).Observe(float64(elapsed))
+		metrics.QueryNodeSegmentSearchLatencyPerVector.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+			metrics.SearchLabel, searchLabel).Observe(float64(elapsed) / float64(searchReq.getNumOfQuery()))
+		return nil
+	}
+
 	// calling segment search in goroutines
 	for i, segment := range segments {
 		wg.Add(1)
@@ -59,27 +76,14 @@ func searchSegments(ctx context.Context, mgr *Manager, segments []Segment, segTy
 				segmentsWithoutIndex = append(segmentsWithoutIndex, seg.ID())
 				mu.Unlock()
 			}
-			// record search time
-			tr := timerecord.NewTimeRecorder("searchOnSegments")
+			var err error
 			if seg.LoadStatus() == LoadStatusMeta {
-				err := mgr.DiskCache.Do(seg.ID(), func(s Segment) error {
-					searchResult, err := seg.Search(ctx, searchReq)
-					if err != nil {
-						return err
-					}
-					resultCh <- searchResult
-					// update metrics
-					elapsed := tr.ElapseSpan().Milliseconds()
-					metrics.QueryNodeSQSegmentLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
-						metrics.SearchLabel, searchLabel).Observe(float64(elapsed))
-					metrics.QueryNodeSegmentSearchLatencyPerVector.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
-						metrics.SearchLabel, searchLabel).Observe(float64(elapsed) / float64(searchReq.getNumOfQuery()))
-					return nil
-				})
-				if err != nil {
-					errs[i] = err
-					return
-				}
+				err = mgr.DiskCache.Do(seg.ID(), searcher)
+			} else {
+				err = searcher(seg)
+			}
+			if err != nil {
+				errs[i] = err
 			}
 		}(segment, i)
 	}

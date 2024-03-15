@@ -39,30 +39,38 @@ type (
 	Finalizer[K comparable, V any] func(key K, value V) error
 )
 
-type Scavenger[K comparable, V any] interface {
-	Collect(key K, value V) (bool, func(K, V) bool)
-	Throw(key K, value V)
+// Scavenger records occupation of cache and decide whether to evict if necessary.
+//
+//	The scavenger makes decision based on keys only, and it is called before value loading,
+//	because value loading could be very expensive.
+type Scavenger[K comparable] interface {
+	// Collect records entry additions, if there is room, return true, or else return false and a collector.
+	//	The collector is a function which can be invoked repetedly, each invocation will test if there is enough
+	//	room provided that all entries in the collector is evicted.
+	Collect(key K) (bool, func(K) bool)
+	// Throw records entry removals.
+	Throw(key K)
 }
 
-type LazyScavenger[K comparable, V any] struct {
+type LazyScavenger[K comparable] struct {
 	capacity int64
 	size     int64
-	weight   func(K, V) int64
+	weight   func(K) int64
 }
 
-func NewLazyScavenger[K comparable, V any](weight func(K, V) int64, capacity int64) *LazyScavenger[K, V] {
-	return &LazyScavenger[K, V]{
+func NewLazyScavenger[K comparable](weight func(K) int64, capacity int64) *LazyScavenger[K] {
+	return &LazyScavenger[K]{
 		capacity: capacity,
 		weight:   weight,
 	}
 }
 
-func (s *LazyScavenger[K, V]) Collect(key K, value V) (bool, func(K, V) bool) {
-	w := s.weight(key, value)
+func (s *LazyScavenger[K]) Collect(key K) (bool, func(K) bool) {
+	w := s.weight(key)
 	if s.size+w > s.capacity {
 		needCollect := s.size + w - s.capacity
-		return false, func(key K, value V) bool {
-			needCollect -= s.weight(key, value)
+		return false, func(key K) bool {
+			needCollect -= s.weight(key)
 			return needCollect <= 0
 		}
 	}
@@ -70,8 +78,8 @@ func (s *LazyScavenger[K, V]) Collect(key K, value V) (bool, func(K, V) bool) {
 	return true, nil
 }
 
-func (s *LazyScavenger[K, V]) Throw(key K, value V) {
-	s.size -= s.weight(key, value)
+func (s *LazyScavenger[K]) Throw(key K) {
+	s.size -= s.weight(key)
 }
 
 type Cache[K comparable, V any] interface {
@@ -87,13 +95,13 @@ type lruCache[K comparable, V any] struct {
 
 	loader    Loader[K, V]
 	finalizer Finalizer[K, V]
-	scavenger Scavenger[K, V]
+	scavenger Scavenger[K]
 }
 
 type CacheBuilder[K comparable, V any] struct {
 	loader    Loader[K, V]
 	finalizer Finalizer[K, V]
-	scavenger Scavenger[K, V]
+	scavenger Scavenger[K]
 }
 
 func NewCacheBuilder[K comparable, V any]() *CacheBuilder[K, V] {
@@ -101,7 +109,7 @@ func NewCacheBuilder[K comparable, V any]() *CacheBuilder[K, V] {
 		loader:    nil,
 		finalizer: nil,
 		scavenger: NewLazyScavenger(
-			func(key K, value V) int64 {
+			func(key K) int64 {
 				return 1
 			},
 			64,
@@ -119,14 +127,14 @@ func (b *CacheBuilder[K, V]) WithFinalizer(finalizer Finalizer[K, V]) *CacheBuil
 	return b
 }
 
-func (b *CacheBuilder[K, V]) WithLazyScavenger(weight func(K, V) int64, capacity int64) *CacheBuilder[K, V] {
+func (b *CacheBuilder[K, V]) WithLazyScavenger(weight func(K) int64, capacity int64) *CacheBuilder[K, V] {
 	b.scavenger = NewLazyScavenger(weight, capacity)
 	return b
 }
 
 func (b *CacheBuilder[K, V]) WithCapacityScavenger(capacity int64) *CacheBuilder[K, V] {
 	b.scavenger = NewLazyScavenger(
-		func(key K, value V) int64 {
+		func(key K) int64 {
 			return 1
 		},
 		capacity,
@@ -141,7 +149,7 @@ func (b *CacheBuilder[K, V]) Build() Cache[K, V] {
 func newLRUCache[K comparable, V any](
 	loader Loader[K, V],
 	finalizer Finalizer[K, V],
-	scavenger Scavenger[K, V],
+	scavenger Scavenger[K],
 ) Cache[K, V] {
 	return &lruCache[K, V]{
 		items:      make(map[K]*list.Element),
@@ -184,6 +192,11 @@ func (c *lruCache[K, V]) getAndPin(key K) (*cacheItem[K, V], error) {
 
 	c.rwlock.Unlock()
 	if c.loader != nil {
+		// Try scavenge if there is room. If not, fail fast.
+		//	Note that the test is not accurate since we are not holding the lock here.
+		if _, ok := c.tryScavenge(key); !ok {
+			return nil, ErrNotEnoughSpace
+		}
 		value, ok := c.loader(key)
 		if ok {
 			if item, err := c.setAndPin(key, value); err != nil {
@@ -197,6 +210,29 @@ func (c *lruCache[K, V]) getAndPin(key K) (*cacheItem[K, V], error) {
 	return nil, ErrNoSuchItem
 }
 
+func (c *lruCache[K, V]) tryScavenge(key K) ([]K, bool) {
+	ok, collector := c.scavenger.Collect(key)
+	toEvict := make([]K, 0)
+	if !ok {
+		// Try evict to make room
+		done := false
+		for p := c.accessList.Back(); p != nil && !done; p = p.Prev() {
+			evictItem := p.Value.(*cacheItem[K, V])
+			if evictItem.pinCount.Load() > 0 {
+				continue
+			}
+			toEvict = append(toEvict, evictItem.key)
+			done = collector(evictItem.key)
+		}
+		if !done {
+			return nil, false
+		}
+	} else {
+		c.scavenger.Throw(key)
+	}
+	return toEvict, true
+}
+
 // for cache miss
 func (c *lruCache[K, V]) setAndPin(key K, value V) (*cacheItem[K, V], error) {
 	c.rwlock.Lock()
@@ -205,35 +241,16 @@ func (c *lruCache[K, V]) setAndPin(key K, value V) (*cacheItem[K, V], error) {
 	item := newCacheItem[K, V](key, value)
 	item.pinCount.Inc()
 
-	ok, collector := c.scavenger.Collect(key, value)
-	// Try evict to make room
+	// tryScavenge is done again since the previous call is not protected by lock,
+	//	thus the result is not accurate.
+	toEvict, ok := c.tryScavenge(key)
 	if !ok {
-		toEvict := make([]*list.Element, 0)
-		done := false
-		for p := c.accessList.Back(); p != nil && !done; p = p.Prev() {
-			evictItem := p.Value.(*cacheItem[K, V])
-			if evictItem.pinCount.Load() > 0 {
-				continue
-			}
-			toEvict = append(toEvict, p)
-			done = collector(evictItem.key, evictItem.value)
-		}
-		if !done {
-			return nil, ErrNotEnoughSpace
-		} else {
-			for _, p := range toEvict {
-				c.accessList.Remove(p)
-				evictItem := p.Value.(*cacheItem[K, V])
-				delete(c.items, evictItem.key)
-				c.scavenger.Throw(evictItem.key, evictItem.value)
+		item.pinCount.Dec()
+		return nil, ErrNotEnoughSpace
+	}
 
-				if c.finalizer != nil {
-					c.finalizer(evictItem.key, evictItem.value)
-				}
-			}
-			// Now we have enough space
-			c.scavenger.Collect(item.key, item.value)
-		}
+	for _, key := range toEvict {
+		c.remove(key)
 	}
 
 	c.add(item)
@@ -241,6 +258,23 @@ func (c *lruCache[K, V]) setAndPin(key K, value V) (*cacheItem[K, V], error) {
 }
 
 func (c *lruCache[K, V]) add(item *cacheItem[K, V]) {
+	c.scavenger.Collect(item.key)
 	iter := c.accessList.PushFront(item)
 	c.items[item.key] = iter
+}
+
+func (c *lruCache[K, V]) remove(key K) {
+	iter, ok := c.items[key]
+	if !ok {
+		return
+	}
+
+	delete(c.items, key)
+	c.accessList.Remove(iter)
+	c.scavenger.Throw(key)
+
+	if c.finalizer != nil {
+		item := iter.Value.(*cacheItem[K, V])
+		c.finalizer(key, item.value)
+	}
 }

@@ -56,7 +56,7 @@ func TestLRUCache(t *testing.T) {
 	t.Run("test scavenger", func(t *testing.T) {
 		finalizeSeq := make([]int, 0)
 		sumCapacity := 20 // inserting 1 to 19, capacity is set to sum of 20, expecting (19) at last.
-		cache := cacheBuilder.WithLazyScavenger(func(key int, value int) int64 {
+		cache := cacheBuilder.WithLazyScavenger(func(key int) int64 {
 			return int64(key)
 		}, int64(sumCapacity)).WithFinalizer(func(key, value int) error {
 			finalizeSeq = append(finalizeSeq, key)
@@ -85,7 +85,7 @@ func TestLRUCache(t *testing.T) {
 	t.Run("test scavenge negative", func(t *testing.T) {
 		finalizeSeq := make([]int, 0)
 		sumCapacity := 20 // inserting 1 to 19, capacity is set to sum of 20, expecting (19) at last.
-		cache := cacheBuilder.WithLazyScavenger(func(key int, value int) int64 {
+		cache := cacheBuilder.WithLazyScavenger(func(key int) int64 {
 			return int64(key)
 		}, int64(sumCapacity)).WithFinalizer(func(key, value int) error {
 			finalizeSeq = append(finalizeSeq, key)
