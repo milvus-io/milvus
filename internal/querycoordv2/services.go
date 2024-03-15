@@ -1041,30 +1041,15 @@ func (s *Server) TransferNode(ctx context.Context, req *milvuspb.TransferNodeReq
 		return merr.Status(err), nil
 	}
 
-	replicasInSource := s.meta.ReplicaManager.GetByResourceGroup(req.GetSourceResourceGroup())
-	replicasInTarget := s.meta.ReplicaManager.GetByResourceGroup(req.GetTargetResourceGroup())
-	loadSameCollection := false
-	sameCollectionID := int64(0)
-	for _, r1 := range replicasInSource {
-		for _, r2 := range replicasInTarget {
-			if r1.GetCollectionID() == r2.GetCollectionID() {
-				loadSameCollection = true
-				sameCollectionID = r1.GetCollectionID()
-			}
-		}
-	}
-	if loadSameCollection {
-		err := merr.WrapErrParameterInvalid("resource groups load not the same collection", fmt.Sprintf("collection %d loaded for both", sameCollectionID))
-		return merr.Status(err), nil
-	}
-
-	nodes, err := s.meta.ResourceManager.TransferNode(req.GetSourceResourceGroup(), req.GetTargetResourceGroup(), int(req.GetNumNode()))
+	// Move node from source resource group to target resource group.
+	_, err := s.meta.ResourceManager.TransferNode(req.GetSourceResourceGroup(), req.GetTargetResourceGroup(), int(req.GetNumNode()))
 	if err != nil {
 		log.Warn("failed to transfer node", zap.Error(err))
 		return merr.Status(err), nil
 	}
-
-	utils.AddNodesToCollectionsInRG(s.meta, req.GetTargetResourceGroup(), nodes...)
+	// Recover all replica on the source and target resource group.
+	utils.RecoverAllCollectionInRG(s.meta, req.GetSourceResourceGroup())
+	utils.RecoverAllCollectionInRG(s.meta, req.GetTargetResourceGroup())
 
 	return merr.Success(), nil
 }
@@ -1082,6 +1067,7 @@ func (s *Server) TransferReplica(ctx context.Context, req *querypb.TransferRepli
 		return merr.Status(err), nil
 	}
 
+	// TODO: !!!WARNING, replica manager and resource manager doesn't protected with each other by lock.
 	if ok := s.meta.ResourceManager.ContainResourceGroup(req.GetSourceResourceGroup()); !ok {
 		err := merr.WrapErrResourceGroupNotFound(req.GetSourceResourceGroup())
 		return merr.Status(errors.Wrap(err,
@@ -1099,50 +1085,9 @@ func (s *Server) TransferReplica(ctx context.Context, req *querypb.TransferRepli
 		return merr.Status(err), nil
 	}
 
-	replicas := s.meta.ReplicaManager.GetByCollectionAndRG(req.GetCollectionID(), req.GetSourceResourceGroup())
-	if len(replicas) < int(req.GetNumReplica()) {
-		err := merr.WrapErrParameterInvalid("NumReplica not greater than the number of replica in source resource group", fmt.Sprintf("only found [%d] replicas in source resource group[%s]",
-			len(replicas), req.GetSourceResourceGroup()))
-		return merr.Status(err), nil
-	}
-
-	replicas = s.meta.ReplicaManager.GetByCollectionAndRG(req.GetCollectionID(), req.GetTargetResourceGroup())
-	if len(replicas) > 0 {
-		err := merr.WrapErrParameterInvalid("no same collection in target resource group", fmt.Sprintf("found [%d] replicas of same collection in target resource group[%s], dynamically increase replica num is unsupported",
-			len(replicas), req.GetTargetResourceGroup()))
-		return merr.Status(err), nil
-	}
-
-	replicas = s.meta.ReplicaManager.GetByCollection(req.GetCollectionID())
-	if (req.GetSourceResourceGroup() == meta.DefaultResourceGroupName || req.GetTargetResourceGroup() == meta.DefaultResourceGroupName) &&
-		len(replicas) != int(req.GetNumReplica()) {
-		err := merr.WrapErrParameterInvalid("tranfer all replicas from/to default resource group",
-			fmt.Sprintf("try to transfer %d replicas from/to but %d replicas exist", req.GetNumReplica(), len(replicas)))
-		return merr.Status(err), nil
-	}
-
-	err := s.transferReplica(req.GetTargetResourceGroup(), replicas[:req.GetNumReplica()])
-	if err != nil {
-		return merr.Status(err), nil
-	}
-
-	return merr.Success(), nil
-}
-
-func (s *Server) transferReplica(targetRG string, replicas []*meta.Replica) error {
-	ret := make([]*meta.Replica, 0)
-	for _, replica := range replicas {
-		newReplica := replica.Clone()
-		newReplica.ResourceGroup = targetRG
-
-		ret = append(ret, newReplica)
-	}
-	err := utils.AssignNodesToReplicas(s.meta, targetRG, ret...)
-	if err != nil {
-		return err
-	}
-
-	return s.meta.ReplicaManager.Put(ret...)
+	// Apply change into replica manager.
+	err := s.meta.TransferReplica(req.GetCollectionID(), req.GetSourceResourceGroup(), req.GetTargetResourceGroup(), int(req.GetNumReplica()))
+	return merr.Status(err), nil
 }
 
 func (s *Server) ListResourceGroups(ctx context.Context, req *milvuspb.ListResourceGroupsRequest) (*milvuspb.ListResourceGroupsResponse, error) {

@@ -106,7 +106,7 @@ func (ob *ResourceObserver) checkResourceGroup() {
 					)
 				}
 
-				utils.AddNodesToCollectionsInRG(ob.meta, rgName, nodes...)
+				utils.RecoverAllCollectionInRG(ob.meta, rgName)
 			}
 		}
 	}

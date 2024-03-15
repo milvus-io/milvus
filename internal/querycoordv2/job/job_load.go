@@ -149,6 +149,8 @@ func (job *LoadCollectionJob) Execute() error {
 	// 2. create replica if not exist
 	replicas := job.meta.ReplicaManager.GetByCollection(req.GetCollectionID())
 	if len(replicas) == 0 {
+		// API of LoadCollection is wired, we should use map[resourceGroupNames]replicaNumber as input, to keep consistency with `TransferReplica` API.
+		// Then we can implement dynamic replica changed in different resource group independently.
 		replicas, err = utils.SpawnReplicasWithRG(job.meta, req.GetCollectionID(), req.GetResourceGroups(), req.GetReplicaNumber())
 		if err != nil {
 			msg := "failed to spawn replica for collection"

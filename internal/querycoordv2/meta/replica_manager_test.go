@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -30,26 +31,46 @@ import (
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
+
+type collectionLoadConfig struct {
+	spawnConfig map[string]int
+}
 
 type ReplicaManagerSuite struct {
 	suite.Suite
 
-	nodes          []int64
-	collections    []int64
-	replicaNumbers []int32
-	idAllocator    func() (int64, error)
-	kv             kv.MetaKv
-	catalog        metastore.QueryCoordCatalog
-	mgr            *ReplicaManager
+	rgs         map[string]typeutil.UniqueSet
+	collections map[int64]collectionLoadConfig
+	idAllocator func() (int64, error)
+	kv          kv.MetaKv
+	catalog     metastore.QueryCoordCatalog
+	mgr         *ReplicaManager
 }
 
 func (suite *ReplicaManagerSuite) SetupSuite() {
 	paramtable.Init()
 
-	suite.nodes = []int64{1, 2, 3}
-	suite.collections = []int64{100, 101, 102}
-	suite.replicaNumbers = []int32{1, 2, 3}
+	suite.rgs = map[string]typeutil.UniqueSet{
+		"RG1": typeutil.NewUniqueSet(1),
+		"RG2": typeutil.NewUniqueSet(2, 3),
+		"RG3": typeutil.NewUniqueSet(4, 5, 6),
+	}
+	suite.collections = map[int64]collectionLoadConfig{
+		100: {
+			spawnConfig: map[string]int{"RG1": 1},
+		},
+		101: {
+			spawnConfig: map[string]int{"RG2": 2},
+		},
+		102: {
+			spawnConfig: map[string]int{"RG3": 2},
+		},
+		103: {
+			spawnConfig: map[string]int{"RG1": 1, "RG2": 1, "RG3": 1},
+		},
+	}
 }
 
 func (suite *ReplicaManagerSuite) SetupTest() {
@@ -69,7 +90,7 @@ func (suite *ReplicaManagerSuite) SetupTest() {
 
 	suite.idAllocator = RandomIncrementIDAllocator()
 	suite.mgr = NewReplicaManager(suite.idAllocator, suite.catalog)
-	suite.spawnAndPutAll()
+	suite.spawnAll()
 }
 
 func (suite *ReplicaManagerSuite) TearDownTest() {
@@ -79,38 +100,38 @@ func (suite *ReplicaManagerSuite) TearDownTest() {
 func (suite *ReplicaManagerSuite) TestSpawn() {
 	mgr := suite.mgr
 
-	for i, collection := range suite.collections {
-		replicas, err := mgr.Spawn(collection, suite.replicaNumbers[i], DefaultResourceGroupName)
-		suite.NoError(err)
-		suite.Len(replicas, int(suite.replicaNumbers[i]))
-	}
-
 	mgr.idAllocator = ErrorIDAllocator()
-	for i, collection := range suite.collections {
-		_, err := mgr.Spawn(collection, suite.replicaNumbers[i], DefaultResourceGroupName)
-		suite.Error(err)
-	}
+	_, err := mgr.Spawn(1, map[string]int{DefaultResourceGroupName: 1})
+	suite.Error(err)
+
+	replicas := mgr.GetByCollection(1)
+	suite.Len(replicas, 0)
 }
 
 func (suite *ReplicaManagerSuite) TestGet() {
 	mgr := suite.mgr
 
-	for i, collection := range suite.collections {
-		replicas := mgr.GetByCollection(collection)
+	for collectionID, collectionCfg := range suite.collections {
+		replicas := mgr.GetByCollection(collectionID)
 		replicaNodes := make(map[int64][]int64)
 		nodes := make([]int64, 0)
 		for _, replica := range replicas {
-			suite.Equal(collection, replica.GetCollectionID())
+			suite.Equal(collectionID, replica.GetCollectionID())
 			suite.Equal(replica, mgr.Get(replica.GetID()))
-			suite.Equal(replica.Replica.GetNodes(), replica.GetNodes())
-			replicaNodes[replica.GetID()] = replica.Replica.GetNodes()
-			nodes = append(nodes, replica.Replica.Nodes...)
+			suite.ElementsMatch(replica.GetNodes(), replica.GetNodes())
+			replicaNodes[replica.GetID()] = replica.GetNodes()
+			nodes = append(nodes, replica.GetNodes()...)
 		}
-		suite.Len(nodes, int(suite.replicaNumbers[i]))
+
+		expectedNodes := make([]int64, 0)
+		for rg := range collectionCfg.spawnConfig {
+			expectedNodes = append(expectedNodes, suite.rgs[rg].Collect()...)
+		}
+		suite.ElementsMatch(nodes, expectedNodes)
 
 		for replicaID, nodes := range replicaNodes {
 			for _, node := range nodes {
-				replica := mgr.GetByCollectionAndNode(collection, node)
+				replica := mgr.GetByCollectionAndNode(collectionID, node)
 				suite.Equal(replicaID, replica.GetID())
 			}
 		}
@@ -122,7 +143,7 @@ func (suite *ReplicaManagerSuite) TestRecover() {
 
 	// Clear data in memory, and then recover from meta store
 	suite.clearMemory()
-	mgr.Recover(suite.collections)
+	mgr.Recover(lo.Keys(suite.collections))
 	suite.TestGet()
 
 	// Test recover from 2.1 meta store
@@ -136,13 +157,13 @@ func (suite *ReplicaManagerSuite) TestRecover() {
 	suite.kv.Save(querycoord.ReplicaMetaPrefixV1+"/2100", string(value))
 
 	suite.clearMemory()
-	mgr.Recover(append(suite.collections, 1000))
+	mgr.Recover(append(lo.Keys(suite.collections), 1000))
 	replica := mgr.Get(2100)
 	suite.NotNil(replica)
-	suite.EqualValues(1000, replica.CollectionID)
-	suite.EqualValues([]int64{1, 2, 3}, replica.Replica.Nodes)
-	suite.Len(replica.GetNodes(), len(replica.Replica.GetNodes()))
-	for _, node := range replica.Replica.GetNodes() {
+	suite.EqualValues(1000, replica.GetCollectionID())
+	suite.EqualValues([]int64{1, 2, 3}, replica.GetNodes())
+	suite.Len(replica.GetNodes(), len(replica.GetNodes()))
+	for _, node := range replica.GetNodes() {
 		suite.True(replica.Contains(node))
 	}
 }
@@ -150,7 +171,7 @@ func (suite *ReplicaManagerSuite) TestRecover() {
 func (suite *ReplicaManagerSuite) TestRemove() {
 	mgr := suite.mgr
 
-	for _, collection := range suite.collections {
+	for collection := range suite.collections {
 		err := mgr.RemoveCollection(collection)
 		suite.NoError(err)
 
@@ -159,8 +180,8 @@ func (suite *ReplicaManagerSuite) TestRemove() {
 	}
 
 	// Check whether the replicas are also removed from meta store
-	mgr.Recover(suite.collections)
-	for _, collection := range suite.collections {
+	mgr.Recover(lo.Keys(suite.collections))
+	for collection := range suite.collections {
 		replicas := mgr.GetByCollection(collection)
 		suite.Empty(replicas)
 	}
@@ -169,69 +190,67 @@ func (suite *ReplicaManagerSuite) TestRemove() {
 func (suite *ReplicaManagerSuite) TestNodeManipulate() {
 	mgr := suite.mgr
 
-	firstNode := suite.nodes[0]
-	newNode := suite.nodes[len(suite.nodes)-1] + 1
-	// Add a new node for the replica with node 1 of all collections,
-	// then remove the node 1
-	for _, collection := range suite.collections {
-		replica := mgr.GetByCollectionAndNode(collection, firstNode)
-		err := mgr.AddNode(replica.GetID(), newNode)
-		suite.NoError(err)
+	// add node into rg.
+	rgs := map[string]typeutil.UniqueSet{
+		"RG1": typeutil.NewUniqueSet(1, 7),
+		"RG2": typeutil.NewUniqueSet(2, 3, 8),
+		"RG3": typeutil.NewUniqueSet(4, 5, 6, 9),
+	}
 
-		replica = mgr.GetByCollectionAndNode(collection, newNode)
-		suite.Contains(replica.GetNodes(), newNode)
-		suite.Contains(replica.Replica.GetNodes(), newNode)
+	// Add node into rg.
+	for collectionID, cfg := range suite.collections {
+		for rg := range cfg.spawnConfig {
+			mgr.SetAvailableNodesInSameCollectionAndRG(collectionID, rg, rgs[rg])
 
-		err = mgr.RemoveNode(replica.GetID(), firstNode)
-		suite.NoError(err)
-		replica = mgr.GetByCollectionAndNode(collection, firstNode)
-		suite.Nil(replica)
+			for _, node := range rgs[rg].Collect() {
+				replica := mgr.GetByCollectionAndNode(collectionID, node)
+				suite.Contains(replica.GetNodes(), node)
+			}
+		}
 	}
 
 	// Check these modifications are applied to meta store
 	suite.clearMemory()
-	mgr.Recover(suite.collections)
-	for _, collection := range suite.collections {
-		replica := mgr.GetByCollectionAndNode(collection, firstNode)
-		suite.Nil(replica)
-
-		replica = mgr.GetByCollectionAndNode(collection, newNode)
-		suite.Contains(replica.GetNodes(), newNode)
-		suite.Contains(replica.Replica.GetNodes(), newNode)
+	mgr.Recover(lo.Keys(suite.collections))
+	for collectionID, cfg := range suite.collections {
+		for rg := range cfg.spawnConfig {
+			for _, node := range rgs[rg].Collect() {
+				replica := mgr.GetByCollectionAndNode(collectionID, node)
+				suite.Contains(replica.GetNodes(), node)
+			}
+		}
 	}
 }
 
-func (suite *ReplicaManagerSuite) spawnAndPutAll() {
+func (suite *ReplicaManagerSuite) spawnAll() {
 	mgr := suite.mgr
 
-	for i, collection := range suite.collections {
-		replicas, err := mgr.Spawn(collection, suite.replicaNumbers[i], DefaultResourceGroupName)
+	for id, cfg := range suite.collections {
+		replicas, err := mgr.Spawn(id, cfg.spawnConfig)
 		suite.NoError(err)
-		suite.Len(replicas, int(suite.replicaNumbers[i]))
-		for j, replica := range replicas {
-			replica.AddNode(suite.nodes[j])
+		totalSpawn := 0
+		for rg, spawnNum := range cfg.spawnConfig {
+			totalSpawn += spawnNum
+			mgr.SetAvailableNodesInSameCollectionAndRG(id, rg, suite.rgs[rg])
 		}
-		err = mgr.Put(replicas...)
-		suite.NoError(err)
+		suite.Len(replicas, totalSpawn)
 	}
 }
 
 func (suite *ReplicaManagerSuite) TestResourceGroup() {
 	mgr := NewReplicaManager(suite.idAllocator, suite.catalog)
-	replica1, err := mgr.spawn(int64(1000), DefaultResourceGroupName)
-	replica1.AddNode(1)
+	replicas1, err := mgr.Spawn(int64(1000), map[string]int{DefaultResourceGroupName: 1})
 	suite.NoError(err)
-	mgr.Put(replica1)
+	suite.NotNil(replicas1)
+	suite.Len(replicas1, 1)
 
-	replica2, err := mgr.spawn(int64(2000), DefaultResourceGroupName)
-	replica2.AddNode(1)
+	replica2, err := mgr.Spawn(int64(2000), map[string]int{DefaultResourceGroupName: 1})
 	suite.NoError(err)
-	mgr.Put(replica2)
+	suite.NotNil(replica2)
+	suite.Len(replica2, 1)
 
 	replicas := mgr.GetByResourceGroup(DefaultResourceGroupName)
 	suite.Len(replicas, 2)
-	replicas = mgr.GetByCollectionAndRG(int64(1000), DefaultResourceGroupName)
-	suite.Len(replicas, 1)
 	rgNames := mgr.GetResourceGroupByCollection(int64(1000))
 	suite.Len(rgNames, 1)
 	suite.True(rgNames.Contain(DefaultResourceGroupName))
@@ -243,4 +262,8 @@ func (suite *ReplicaManagerSuite) clearMemory() {
 
 func TestReplicaManager(t *testing.T) {
 	suite.Run(t, new(ReplicaManagerSuite))
+}
+
+type ReplicaManagerWithResourceManagerSuite struct {
+	suite.Suite
 }

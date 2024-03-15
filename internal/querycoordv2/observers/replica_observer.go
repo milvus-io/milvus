@@ -85,46 +85,48 @@ func (ob *ReplicaObserver) checkNodesInReplica() {
 	log := log.Ctx(context.Background()).WithRateGroup("qcv2.replicaObserver", 1, 60)
 	collections := ob.meta.GetAll()
 	for _, collectionID := range collections {
-		removedNodes := make([]int64, 0)
-		// remove nodes from replica which has been transferred to other rg
+		rgNames := ob.meta.GetResourceGroupByCollection(collectionID)
+		for rgName := range rgNames {
+			utils.RecoverReplicaOfCollectionAndRG(ob.meta, collectionID, rgName)
+		}
+	}
+
+	// check all outbound nodes, remove it from replica if all segment/channel has been moved
+	for _, collectionID := range collections {
 		replicas := ob.meta.ReplicaManager.GetByCollection(collectionID)
 		for _, replica := range replicas {
-			outboundNodes := ob.meta.ResourceManager.CheckOutboundNodes(replica)
-			if len(outboundNodes) > 0 {
-				log.RatedInfo(10, "found outbound nodes in replica",
-					zap.Int64("collectionID", replica.GetCollectionID()),
-					zap.Int64("replicaID", replica.GetID()),
-					zap.Int64s("allOutboundNodes", outboundNodes.Collect()),
-				)
-
-				for node := range outboundNodes {
-					channels := ob.distMgr.ChannelDistManager.GetByCollectionAndNode(collectionID, node)
-					segments := ob.distMgr.SegmentDistManager.GetByFilter(meta.WithCollectionID(collectionID), meta.WithNodeID(node))
-
-					if len(channels) == 0 && len(segments) == 0 {
-						replica.RemoveNode(node)
-						removedNodes = append(removedNodes, node)
-						log.Info("all segment/channel has been removed from outbound node, remove it from replica",
-							zap.Int64("collectionID", replica.GetCollectionID()),
-							zap.Int64("replicaID", replica.GetID()),
-							zap.Int64("removedNodes", node),
-							zap.Int64s("availableNodes", replica.GetNodes()),
-						)
-					}
-				}
-			}
-		}
-
-		// assign removed nodes to other replicas in current rg
-		for _, node := range removedNodes {
-			rg, err := ob.meta.ResourceManager.FindResourceGroupByNode(node)
-			if err != nil {
-				// unreachable logic path
-				log.Warn("found node which does not belong to any resource group", zap.Int64("nodeID", node))
+			outboundNodes := replica.GetOutboundNodes()
+			if len(outboundNodes) == 0 {
 				continue
 			}
-			replicas := ob.meta.ReplicaManager.GetByCollectionAndRG(collectionID, rg)
-			utils.AddNodesToReplicas(ob.meta, replicas, node)
+			log.RatedInfo(10, "found outbound nodes in replica",
+				zap.Int64("collectionID", replica.GetCollectionID()),
+				zap.Int64("replicaID", replica.GetID()),
+				zap.Int64s("allOutboundNodes", outboundNodes),
+			)
+			removeNodes := make([]int64, 0, len(outboundNodes))
+			for _, node := range outboundNodes {
+				channels := ob.distMgr.ChannelDistManager.GetByCollectionAndNode(collectionID, node)
+				segments := ob.distMgr.SegmentDistManager.GetByFilter(meta.WithCollectionID(collectionID), meta.WithNodeID(node))
+				if len(channels) == 0 && len(segments) == 0 {
+					removeNodes = append(removeNodes, node)
+				}
+			}
+			if len(removeNodes) == 0 {
+				continue
+			}
+			logger := log.With(
+				zap.Int64("collectionID", replica.GetCollectionID()),
+				zap.Int64("replicaID", replica.GetID()),
+				zap.Int64s("removedNodes", removeNodes),
+				zap.Int64s("outboundNodes", outboundNodes),
+				zap.Int64s("availableNodes", replica.GetNodes()),
+			)
+			if err := ob.meta.ReplicaManager.RemoveNode(replica.GetID(), removeNodes...); err != nil {
+				logger.Warn("fail to remove node from replica", zap.Error(err))
+				continue
+			}
+			logger.Info("all segment/channel has been removed from outbound node, try to remove it from replica")
 		}
 	}
 }

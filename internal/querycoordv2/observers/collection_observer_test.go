@@ -390,7 +390,7 @@ func (suite *CollectionObserverSuite) loadAll() {
 
 func (suite *CollectionObserverSuite) load(collection int64) {
 	// Mock meta data
-	replicas, err := suite.meta.ReplicaManager.Spawn(collection, suite.replicaNumber[collection], meta.DefaultResourceGroupName)
+	replicas, err := suite.meta.ReplicaManager.Spawn(collection, map[string]int{meta.DefaultResourceGroupName: int(suite.replicaNumber[collection])})
 	suite.NoError(err)
 	for _, replica := range replicas {
 		replica.AddNode(suite.nodes...)

@@ -722,7 +722,7 @@ func (s *Server) handleNodeUp(node int64) {
 		zap.String("resourceGroup", rgName),
 	)
 
-	utils.AddNodesToCollectionsInRG(s.meta, meta.DefaultResourceGroupName, node)
+	utils.RecoverAllCollectionInRG(s.meta, meta.DefaultResourceGroupName)
 }
 
 func (s *Server) handleNodeDown(node int64) {
@@ -776,7 +776,6 @@ func (s *Server) checkReplicas() {
 		log := log.With(zap.Int64("collectionID", collection))
 		replicas := s.meta.ReplicaManager.GetByCollection(collection)
 		for _, replica := range replicas {
-			replica := replica.Clone()
 			toRemove := make([]int64, 0)
 			for _, node := range replica.GetNodes() {
 				if s.nodeMgr.Get(node) == nil {
@@ -790,9 +789,7 @@ func (s *Server) checkReplicas() {
 					zap.Int64s("offlineNodes", toRemove),
 				)
 				log.Info("some nodes are offline, remove them from replica", zap.Any("toRemove", toRemove))
-				replica.RemoveNode(toRemove...)
-				err := s.meta.ReplicaManager.Put(replica)
-				if err != nil {
+				if err := s.meta.ReplicaManager.RemoveNode(replica.GetID(), toRemove...); err != nil {
 					log.Warn("failed to remove offline nodes from replica")
 				}
 			}

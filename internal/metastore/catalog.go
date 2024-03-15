@@ -152,7 +152,7 @@ type DataCoordCatalog interface {
 type QueryCoordCatalog interface {
 	SaveCollection(collection *querypb.CollectionLoadInfo, partitions ...*querypb.PartitionLoadInfo) error
 	SavePartition(info ...*querypb.PartitionLoadInfo) error
-	SaveReplica(replica *querypb.Replica) error
+	SaveReplica(replicas ...*querypb.Replica) error
 	GetCollections() ([]*querypb.CollectionLoadInfo, error)
 	GetPartitions() (map[int64][]*querypb.PartitionLoadInfo, error)
 	GetReplicas() ([]*querypb.Replica, error)

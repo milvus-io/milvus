@@ -659,8 +659,9 @@ message PartitionLoadInfo {
 message Replica {
     int64 ID = 1;
     int64 collectionID = 2;
-    repeated int64 nodes = 3;
+    repeated int64 nodes = 3; // all available nodes. mutual exclusive with outbound_nodes.
     string resource_group = 4;
+    repeated int64 outbound_nodes = 5; // the in-using node but not in resource group.
 }
 
 enum SyncType {

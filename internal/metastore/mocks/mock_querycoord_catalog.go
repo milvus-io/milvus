@@ -707,13 +707,19 @@ func (_c *QueryCoordCatalog_SavePartition_Call) RunAndReturn(run func(...*queryp
 	return _c
 }
 
-// SaveReplica provides a mock function with given fields: replica
-func (_m *QueryCoordCatalog) SaveReplica(replica *querypb.Replica) error {
-	ret := _m.Called(replica)
+// SaveReplica provides a mock function with given fields: replicas
+func (_m *QueryCoordCatalog) SaveReplica(replicas ...*querypb.Replica) error {
+	_va := make([]interface{}, len(replicas))
+	for _i := range replicas {
+		_va[_i] = replicas[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(*querypb.Replica) error); ok {
-		r0 = rf(replica)
+	if rf, ok := ret.Get(0).(func(...*querypb.Replica) error); ok {
+		r0 = rf(replicas...)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -727,14 +733,21 @@ type QueryCoordCatalog_SaveReplica_Call struct {
 }
 
 // SaveReplica is a helper method to define mock.On call
-//   - replica *querypb.Replica
-func (_e *QueryCoordCatalog_Expecter) SaveReplica(replica interface{}) *QueryCoordCatalog_SaveReplica_Call {
-	return &QueryCoordCatalog_SaveReplica_Call{Call: _e.mock.On("SaveReplica", replica)}
+//   - replicas ...*querypb.Replica
+func (_e *QueryCoordCatalog_Expecter) SaveReplica(replicas ...interface{}) *QueryCoordCatalog_SaveReplica_Call {
+	return &QueryCoordCatalog_SaveReplica_Call{Call: _e.mock.On("SaveReplica",
+		append([]interface{}{}, replicas...)...)}
 }
 
-func (_c *QueryCoordCatalog_SaveReplica_Call) Run(run func(replica *querypb.Replica)) *QueryCoordCatalog_SaveReplica_Call {
+func (_c *QueryCoordCatalog_SaveReplica_Call) Run(run func(replicas ...*querypb.Replica)) *QueryCoordCatalog_SaveReplica_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(*querypb.Replica))
+		variadicArgs := make([]*querypb.Replica, len(args)-0)
+		for i, a := range args[0:] {
+			if a != nil {
+				variadicArgs[i] = a.(*querypb.Replica)
+			}
+		}
+		run(variadicArgs...)
 	})
 	return _c
 }
@@ -744,7 +757,7 @@ func (_c *QueryCoordCatalog_SaveReplica_Call) Return(_a0 error) *QueryCoordCatal
 	return _c
 }
 
-func (_c *QueryCoordCatalog_SaveReplica_Call) RunAndReturn(run func(*querypb.Replica) error) *QueryCoordCatalog_SaveReplica_Call {
+func (_c *QueryCoordCatalog_SaveReplica_Call) RunAndReturn(run func(...*querypb.Replica) error) *QueryCoordCatalog_SaveReplica_Call {
 	_c.Call.Return(run)
 	return _c
 }

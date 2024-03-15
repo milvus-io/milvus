@@ -648,6 +648,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestStoppedBalance() {
 			for i := range c.outBoundNodes {
 				suite.balancer.meta.ResourceManager.UnassignNode(meta.DefaultResourceGroupName, c.outBoundNodes[i])
 			}
+			utils.RecoverAllCollectionInRG(balancer.meta, meta.DefaultResourceGroupName)
 
 			// 4. balance and verify result
 			segmentPlans, channelPlans := suite.getCollectionBalancePlans(suite.balancer, c.collectionID)

@@ -93,13 +93,12 @@ func (s *Server) balanceSegments(ctx context.Context, req *querypb.LoadBalanceRe
 	srcNode := req.GetSourceNodeIDs()[0]
 	dstNodeSet := typeutil.NewUniqueSet(req.GetDstNodeIDs()...)
 	if dstNodeSet.Len() == 0 {
-		outboundNodes := s.meta.ResourceManager.CheckOutboundNodes(replica)
-		availableNodes := lo.Filter(replica.Replica.GetNodes(), func(node int64, _ int) bool {
+		availableNodes := lo.Filter(replica.GetNodes(), func(node int64, _ int) bool {
 			stop, err := s.nodeMgr.IsStoppingNode(node)
 			if err != nil {
 				return false
 			}
-			return !outboundNodes.Contain(node) && !stop
+			return !stop
 		})
 		dstNodeSet.Insert(availableNodes...)
 	}

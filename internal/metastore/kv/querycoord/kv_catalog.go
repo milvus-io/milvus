@@ -70,13 +70,17 @@ func (s Catalog) SavePartition(info ...*querypb.PartitionLoadInfo) error {
 	return nil
 }
 
-func (s Catalog) SaveReplica(replica *querypb.Replica) error {
-	key := encodeReplicaKey(replica.GetCollectionID(), replica.GetID())
-	value, err := proto.Marshal(replica)
-	if err != nil {
-		return err
+func (s Catalog) SaveReplica(replicas ...*querypb.Replica) error {
+	kvs := make(map[string]string)
+	for _, replica := range replicas {
+		key := encodeReplicaKey(replica.GetCollectionID(), replica.GetID())
+		value, err := proto.Marshal(replica)
+		if err != nil {
+			return err
+		}
+		kvs[key] = string(value)
 	}
-	return s.cli.Save(key, string(value))
+	return s.cli.MultiSave(kvs)
 }
 
 func (s Catalog) SaveResourceGroup(rgs ...*querypb.ResourceGroup) error {
