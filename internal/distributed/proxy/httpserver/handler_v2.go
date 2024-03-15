@@ -1650,7 +1650,17 @@ func (h *HandlersV2) listImportJob(ctx context.Context, c *gin.Context, anyReq a
 		DbName:         dbName,
 		CollectionName: collectionName,
 	}
-	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
+	if h.checkAuth {
+		// construct old version ListImportTasksRequest only for authentication
+		err := checkAuthorization(ctx, c, &milvuspb.ListImportTasksRequest{
+			DbName:         dbName,
+			CollectionName: collectionName,
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+	resp, err := wrapperProxy(ctx, c, req, false, false, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.ListImports(reqCtx, req.(*internalpb.ListImportsRequest))
 	})
 	if err == nil {
@@ -1691,7 +1701,18 @@ func (h *HandlersV2) createImportJob(ctx context.Context, c *gin.Context, anyReq
 		}),
 		Options: funcutil.Map2KeyValuePair(optionsGetter.GetOptions()),
 	}
-	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
+	if h.checkAuth {
+		// construct old version ImportRequest only for authentication
+		err := checkAuthorization(ctx, c, &milvuspb.ImportRequest{
+			DbName:         dbName,
+			CollectionName: collectionGetter.GetCollectionName(),
+			PartitionName:  partitionGetter.GetPartitionName(),
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+	resp, err := wrapperProxy(ctx, c, req, false, false, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.ImportV2(reqCtx, req.(*internalpb.ImportRequest))
 	})
 	if err == nil {
