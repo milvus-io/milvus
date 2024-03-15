@@ -84,6 +84,63 @@ func Do(ctx context.Context, fn func() error, opts ...Option) error {
 	return lastErr
 }
 
+// Do will run function with retry mechanism.
+// fn is the func to run, return err and shouldRetry flag.
+// Option can control the retry times and timeout.
+func Handle(ctx context.Context, fn func() (bool, error), opts ...Option) error {
+	if !funcutil.CheckCtxValid(ctx) {
+		return ctx.Err()
+	}
+
+	log := log.Ctx(ctx)
+	c := newDefaultConfig()
+
+	for _, opt := range opts {
+		opt(c)
+	}
+
+	var lastErr error
+	for i := uint(0); i < c.attempts; i++ {
+		if shouldRetry, err := fn(); err != nil {
+			if i%4 == 0 {
+				log.Warn("retry func failed", zap.Uint("retried", i), zap.Error(err))
+			}
+
+			if !shouldRetry {
+				if errors.IsAny(err, context.Canceled, context.DeadlineExceeded) && lastErr != nil {
+					return lastErr
+				}
+				return err
+			}
+
+			deadline, ok := ctx.Deadline()
+			if ok && time.Until(deadline) < c.sleep {
+				// to avoid sleep until ctx done
+				if errors.IsAny(err, context.Canceled, context.DeadlineExceeded) && lastErr != nil {
+					return lastErr
+				}
+				return err
+			}
+
+			lastErr = err
+
+			select {
+			case <-time.After(c.sleep):
+			case <-ctx.Done():
+				return lastErr
+			}
+
+			c.sleep *= 2
+			if c.sleep > c.maxSleepTime {
+				c.sleep = c.maxSleepTime
+			}
+		} else {
+			return nil
+		}
+	}
+	return lastErr
+}
+
 // errUnrecoverable is error instance for unrecoverable.
 var errUnrecoverable = errors.New("unrecoverable error")
 
