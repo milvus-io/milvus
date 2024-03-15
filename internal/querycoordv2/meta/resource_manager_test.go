@@ -312,20 +312,6 @@ func (suite *ResourceManagerSuite) TestCheckOutboundNodes() {
 	suite.manager.AssignNode("rg", 1)
 	suite.manager.AssignNode("rg", 2)
 	suite.manager.AssignNode("rg", 3)
-
-	replica := NewReplica(
-		&querypb.Replica{
-			ID:            1,
-			CollectionID:  1,
-			Nodes:         []int64{1, 2, 3, 4},
-			ResourceGroup: "rg",
-		},
-		typeutil.NewUniqueSet(1, 2, 3, 4),
-	)
-
-	outboundNodes := suite.manager.CheckOutboundNodes(replica)
-	suite.Len(outboundNodes, 1)
-	suite.True(outboundNodes.Contain(4))
 }
 
 func (suite *ResourceManagerSuite) TestCheckResourceGroup() {
@@ -391,9 +377,10 @@ func (suite *ResourceManagerSuite) TestGetOutboundNode() {
 			ID:            1,
 			CollectionID:  100,
 			ResourceGroup: "rg",
-			Nodes:         []int64{1, 2, 3},
+			Nodes:         []int64{1, 2},
+			OutboundNodes: []int64{3},
 		},
-		typeutil.NewUniqueSet(1, 2, 3),
+		typeutil.NewUniqueSet(1, 2),
 	)
 
 	outgoingNodes := suite.manager.GetOutgoingNodeNumByReplica(replica)

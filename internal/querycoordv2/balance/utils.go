@@ -141,7 +141,7 @@ func PrintCurrentReplicaDist(replica *meta.Replica,
 	stoppingNodesSegments map[int64][]*meta.Segment, nodeSegments map[int64][]*meta.Segment,
 	channelManager *meta.ChannelDistManager, segmentDistMgr *meta.SegmentDistManager,
 ) {
-	distInfo := fmt.Sprintf("%s {collectionID:%d, replicaID:%d, ", DistInfoPrefix, replica.CollectionID, replica.GetID())
+	distInfo := fmt.Sprintf("%s {collectionID:%d, replicaID:%d, ", DistInfoPrefix, replica.GetCollectionID(), replica.GetID())
 	// 1. print stopping nodes segment distribution
 	distInfo += "[stoppingNodesSegmentDist:"
 	for stoppingNodeID, stoppedSegments := range stoppingNodesSegments {
